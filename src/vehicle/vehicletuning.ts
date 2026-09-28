@@ -919,7 +919,7 @@ export const DIG_FIRM_MU = 1.6;
  * 4.5 kN of capacity per rear wheel — more than twice what the grade asks for — the
  * car still would not move, because the driven axle was already delivering everything
  * the ENGINE had: 5924 N of thrust, measured at zero wheel slip against the 6738 N
- * needed to hold 18.7 degrees at sand's own rolling resistance of 0.16. Raising the
+ * needed to hold 18.7 degrees at sand's then rolling resistance of 0.16. Raising the
  * friction floor from 1.2 to 2.1 changed the outcome by exactly nothing, which is the
  * signature of a limit that is not where it looks: 2163 N of that 6738 was rolling
  * resistance, and no amount of grip moves a number the engine cannot reach.
@@ -932,7 +932,7 @@ export const DIG_FIRM_MU = 1.6;
  * have to switch together.
  *
  * 0.012 is the bottom of a wheel rut, which is as firm as loose ground gets in this
- * world: just under asphalt's own 0.013, and a thirteenth of the loose sand it replaces.
+ * world: just under asphalt's own 0.013, and a sixth of the loose sand it replaces.
  * It is set from the far end of the fleet rather than the middle, and the car that
  * decides it is the VAZ-1111 Oka — front-driven, so on an 18.7-degree climb it is
  * standing on 32 per cent of its own weight, and it crosses that slope at 2185 N of
@@ -1360,18 +1360,19 @@ export const OIL_STARVE_SECONDS = 30;
 export const BODY_CONDITION_EMIT_INTERVAL = 0.5;
 /**
  * Tyre-track metres over sand (`dust = 1`) to full dirt. Four rolling tyres cover
- * 24 km of track over 6 km of desert, so the first clearly visible crust (a quarter)
- * arrives within about a kilometre and a half of sand or two and a half of graded
- * gravel, and one ordinary off-road leg leaves the car the colour of the desert. The
- * former 100 km took 25 km of sand, which no drive in the game ever reached. The
- * bounded slip multiplier below still makes a digging wheel throw more.
+ * 120 km of track over 30 km of desert, so the first clearly visible crust (a quarter)
+ * arrives after about seven and a half kilometres of sand or twelve of graded gravel:
+ * a long off-road leg browns the car, it takes a day of desert to make it the colour
+ * of the sand. 24 km (six of sand to full) caked the car within minutes of leaving
+ * the road, which read as paint rather than wear. The bounded slip multiplier below
+ * still makes a digging wheel throw more.
  */
-export const BODY_DIRT_TYRE_METRES_TO_FULL = 24_000;
+export const BODY_DIRT_TYRE_METRES_TO_FULL = 120_000;
 /**
  * Floor on how dusty any surface is FOR THE BODY. Sealed road reports `dust = 0`,
  * which is right for the spray effect (a tyre on tarmac throws no plume) and wrong
  * for paint: road film, sand blown across the carriageway and the spray of passing
- * traffic still settle. At 0.05 a car picks up a light film over some tens of
+ * traffic still settle. At 0.05 a car picks up a light film over a hundred-odd
  * kilometres of asphalt, an order of magnitude slower than off it.
  */
 export const BODY_DIRT_ROAD_FILM = 0.05;

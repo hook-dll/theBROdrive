@@ -444,8 +444,6 @@ interface Track {
 const tracks = new Map<string, Track>();
 /** How each frantic driver first went past the asphalt by a body width, under `--trace`. */
 const franticExit = new Map<string, string>();
-/** Car-seconds asked to make room for a frantic driver, easing over, and actually over. */
-const yieldSeconds = { asked: 0, moved: 0, there: 0 };
 const speedByCarSecond: number[] = [];
 const liveSamples: number[] = [];
 let measuredSeconds = 0;
@@ -695,14 +693,6 @@ function sampleCar(
   // and stays visible; it is simply not a traffic-AI defect.
   // The ego is exempt from the speed test: a racer on a descent can genuinely pass it.
   const offAsphalt = Math.abs(baseLateral) - road.halfWidthAt(s);
-  {
-    const inner = autopilot as unknown as { yieldTarget: number; yieldValue: number };
-    if (inner.yieldTarget > 0) yieldSeconds.asked += FIXED_DT;
-    if (inner.yieldValue > 0.3) {
-      yieldSeconds.moved += FIXED_DT;
-      if (Math.abs(localLateral) > Math.abs(road.laneCentreAt(s, 0)) + 0.3) yieldSeconds.there += FIXED_DT;
-    }
-  }
   if (
     !track.ejected &&
     ((offAsphalt > EJECTED_LATERAL_M && speedKmh > EJECTED_SPEED_KMH) ||
@@ -883,10 +873,6 @@ function sampleCar(
 let ticks = 0;
 async function tick(): Promise<void> {
   egoFieldSeat.forwardS = egoS;
-  // The game hands the stream the player's hurry the same way; see `setPlayerInAHurry`.
-  traffic.setPlayerInAHurry(
-    EGO_MODE === 'frantic' && (egoAutopilot.passUrge || egoAutopilot.middlePassing),
-  );
   if (!SOLO) traffic.fixedUpdate(FIXED_DT, egoS, egoLateral, 0, 0);
   // The game feeds the player's own autopilot the stream's nearest approaching car
   // every step (`main.ts`), and the crown-crossing gate reads it. A bench that skips
@@ -1179,9 +1165,6 @@ for (const track of tracks.values()) {
   if (exit) console.log(`      left the road: ${exit}`);
 }
 console.log(`  spawns:    ${earlyContacts} contacts in a car's first ${EARLY_CONTACT_S} s`);
-console.log(
-  `  yielding:  asked ${yieldSeconds.asked.toFixed(0)} car-s, line out ${yieldSeconds.moved.toFixed(0)}, body out ${yieldSeconds.there.toFixed(0)}`,
-);
 console.log(`  warm-up left ${afterWarmup.live} live of ${afterWarmup.target} target`);
 
 if (TRACE) {

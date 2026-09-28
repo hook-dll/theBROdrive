@@ -30,6 +30,7 @@ import {
   type PropForm,
 } from './forms';
 import { buildContactShadows, type ContactShadowSpot } from './contactshadow';
+import type { GroundCoverField, GroundCoverHandle, GroundCoverSpot } from './groundcover';
 
 // ---------------------------------------------------------------------------
 // Scratch objects reused across the per-chunk build loops (never per-frame).
@@ -104,18 +105,25 @@ const ROCK_DENSITY = 0.045;
 const CACTUS_DENSITY = 0.009;
 const ROCK_COLLIDER_MIN = 0.55; // pebbles under this radius (m) get no collider
 /**
- * Ground cover (dry tufts and low bushes), a decoration stream of its own: its own tag,
- * so no existing cell's roll moves. Densest near the road, where runoff off the asphalt
- * waters the verge, thinning out by `GROUND_COVER_LAT`. Only built inside the physics
- * radius: a tuft is a few pixels by then, and a chunk rebuilds when it crosses it.
+ * Ground cover (dry tufts, shrubs, rosettes), a decoration stream of its own:
+ * its own tag, so no existing cell's roll moves. A little thicker near the road, where
+ * runoff off the asphalt waters the verge, but spread well out over the open desert
+ * to `GROUND_COVER_LAT`: the first cut fell off with the cube of the distance over
+ * 160 m and read as a hedge along the verge. Only built inside the physics radius: a
+ * tuft is a few pixels by then, and a chunk rebuilds when it crosses it.
  */
 const TAG_GROUND_COVER = 0x7f6c0e;
 const GROUND_COVER_CELL = 3;
-const GROUND_COVER_NEAR = 0.16;
-const GROUND_COVER_FAR = 0.035;
-const GROUND_COVER_LAT = 160;
+const GROUND_COVER_NEAR = 0.085;
+const GROUND_COVER_FAR = 0.04;
+const GROUND_COVER_LAT = 320;
 /** Nearest a tuft grows to the asphalt edge, metres: past the shoulder strip. */
 const GROUND_COVER_SETBACK_M = 2.2;
+/**
+ * Hit radius as a share of the form's placed radius: a tuft's blades splay past the
+ * part a bumper would actually flatten.
+ */
+const GROUND_COVER_HIT_SHARE = 0.7;
 
 /**
  * Identity of a scatter cell, packed into one integer so it can live in a save's
@@ -234,6 +242,7 @@ export class ScatterProvider implements ChunkProvider {
   constructor(
     private readonly breakables?: BreakableSink,
     private readonly hazards?: HazardIndex,
+    private readonly groundCover?: GroundCoverField,
   ) {
     const forms = [...sandForms(), ...rockForms()];
     for (const form of forms) propPieces(form.id);
@@ -255,6 +264,7 @@ export class ScatterProvider implements ChunkProvider {
     const hazardChunkKey = `scatter:${ctx.chunkIndex}`;
     const placements: ScatterPlacement[] = [];
     const registered: number[] = [];
+    let coverHandle: GroundCoverHandle | null = null;
 
     try {
     const seed = ctx.world.seed;
@@ -435,8 +445,9 @@ export class ScatterProvider implements ChunkProvider {
       yield;
     }
 
-    // Ground cover: decoration only, never in `placements` (no collider, no hazard,
-    // nothing to break), so the physics pass below never walks it.
+    // Ground cover: never in `placements` (no collider, no hazard, no debris pieces),
+    // so the physics pass below never walks it. The car bursts it through
+    // `GroundCoverField` instead.
     const cover: ScatterPlacement[] = [];
     if (ctx.hasPhysics) {
       const covers = groundCoverForms();
@@ -447,14 +458,16 @@ export class ScatterProvider implements ChunkProvider {
         for (let cl = -coverLMax; cl < coverLMax; cl++) {
           const roll = hash01(seed, TAG_GROUND_COVER, cs, cl);
           if (roll >= GROUND_COVER_NEAR) continue;
+          const id = propCellId(cs, cl);
+          if (this.groundCover?.isBroken(id)) continue;
           const s = (cs + hash01(seed, TAG_GROUND_COVER, cs, cl, 1)) * GROUND_COVER_CELL;
           if (s < ctx.sStart || s >= ctx.sEnd) continue;
           const lateral = (cl + hash01(seed, TAG_GROUND_COVER, cs, cl, 2)) * GROUND_COVER_CELL;
           const past = Math.abs(lateral) - ctx.road.halfWidthAt(s);
           if (past < GROUND_COVER_SETBACK_M) continue;
-          // Thick along the verge, thin over the open desert.
+          // A little thicker along the verge, then an even spread over the open desert.
           const near = 1 - Math.min(1, past / GROUND_COVER_LAT);
-          const density = GROUND_COVER_FAR + (GROUND_COVER_NEAR - GROUND_COVER_FAR) * near * near * near;
+          const density = GROUND_COVER_FAR + (GROUND_COVER_NEAR - GROUND_COVER_FAR) * near * near;
           if (roll >= density) continue;
           const p = ctx.road.offsetPoint(s, lateral);
           if (ctx.terrain.surfaceFromFrame(p.x, p.z, lateral, s) === SurfaceType.Rock) continue;
@@ -464,7 +477,7 @@ export class ScatterProvider implements ChunkProvider {
           const groundY = ctx.terrain.explorationHeightFromFrame(p.x, p.z, lateral, s);
           cover.push({
             form,
-            id: 0,
+            id,
             x: p.x,
             y: groundY - radius * form.sink,
             z: p.z,
@@ -528,15 +541,40 @@ export class ScatterProvider implements ChunkProvider {
       if (pl.roadHazard) continue;
       spots.push({ x: pl.x - ox, groundY: pl.groundY, z: pl.z - oz, radius: pl.radius, height: pl.form.height * pl.scale });
     }
-    // Bushes too; a grass tuft is too thin to shade the sand under it.
-    for (const pl of cover) {
+    // Shrubs too; a grass tuft or a rosette is too thin to shade the sand under it.
+    // Each cover prop remembers its shadow so a burst blanks both.
+    const coverShadow = new Int32Array(cover.length).fill(-1);
+    for (let i = 0; i < cover.length; i++) {
+      const pl = cover[i]!;
       if (pl.form.id !== 'bush') continue;
+      coverShadow[i] = spots.length;
       spots.push({ x: pl.x - ox, groundY: pl.groundY, z: pl.z - oz, radius: pl.radius * 0.6, height: pl.form.height * pl.scale });
     }
     const shadows = buildContactShadows(spots);
     if (shadows) {
       group.add(shadows);
       meshes.push(shadows);
+    }
+
+    if (this.groundCover && cover.length > 0) {
+      const coverSpots: GroundCoverSpot[] = [];
+      for (let i = 0; i < cover.length; i++) {
+        const pl = cover[i]!;
+        if (!pl.mesh) continue;
+        const shadowIndex = coverShadow[i];
+        coverSpots.push({
+          id: pl.id,
+          x: pl.x,
+          groundY: pl.groundY,
+          z: pl.z,
+          radius: pl.radius * GROUND_COVER_HIT_SHARE,
+          mesh: pl.mesh,
+          instance: pl.instance,
+          shadow: shadows && shadowIndex >= 0 ? shadows : null,
+          shadowInstance: shadowIndex,
+        });
+      }
+      coverHandle = this.groundCover.add(coverSpots);
     }
 
     if (ctx.hasPhysics) {
@@ -634,6 +672,7 @@ export class ScatterProvider implements ChunkProvider {
       dispose: () => {
         for (const m of meshes) m.dispose();
         if (registered.length > 0) this.breakables?.forget(registered);
+        this.groundCover?.forget(coverHandle);
         this.hazards?.forget(hazardChunkKey);
       },
     };
@@ -642,6 +681,7 @@ export class ScatterProvider implements ChunkProvider {
       for (const body of bodies) ctx.physics.removeBody(body);
       for (const m of meshes) m.dispose();
       if (registered.length > 0) this.breakables?.forget(registered);
+      this.groundCover?.forget(coverHandle);
       this.hazards?.forget(hazardChunkKey);
       group.clear();
     }

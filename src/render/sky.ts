@@ -194,11 +194,13 @@ const DAY_SKY_FILL_BOOST = 1.5;
  * or the direct key light — carries an authored floor: a cool moonlit sky bounce
  * over a dim warm sand bounce, at about a hundredth of daylight. Enough that a
  * dune keeps an edge and the road keeps its verges; far too little to compete with
- * the lamps or to wash out a magnitude-8 star.
+ * the lamps or to wash out a magnitude-8 star. A real desert night is pitch black;
+ * this is the eye that has been out in it for a while, and it was raised a third
+ * (0.09 to 0.12) so the shapes of the ground just read beyond the beams.
  */
 const C_NIGHT_FILL_SKY = new THREE.Color().setStyle('#41567f');
 const C_NIGHT_FILL_GROUND = new THREE.Color().setStyle('#241f19');
-const NIGHT_FILL_INTENSITY = 0.09;
+const NIGHT_FILL_INTENSITY = 0.12;
 
 // ---------------------------------------------------------------------------
 // Weather palettes (world/weather.ts)

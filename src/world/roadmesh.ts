@@ -10,7 +10,7 @@ import { tileGroundSampler, type DrawnGroundSample } from './deserttiledata';
 import { desertPaletteAt, roadConditionAt } from './gradient';
 import { ROAD_HALF_WIDTH, type Road } from './road';
 import type { RoadDistance } from './roaddistance';
-import { LANE_WIDTH, laneHalfWidthFor, laneOffsetFor } from './roadprofile';
+import { LANE_WIDTH, laneHalfWidthFor, laneOffsetFor, shoulderWidthM } from './roadprofile';
 import { SUB_DIVISIONS, SURFACE_STEP, SurfaceField, roadSurfaceY } from './roadsurface';
 import { terminusWeight } from './terminus';
 import { DESERT_SHOULDER_MATERIAL } from './terrainmesh';
@@ -98,8 +98,6 @@ const MARKING_MIN = 0.03;
  * without one a wheel off the edge sinks through the strip onto the sand under it.
  */
 interface ShoulderStyle {
-  /** Mean width past the asphalt edge, metres. */
-  readonly width: number;
   /** How far the colour moves from the sand towards its own grey: compacted dust. */
   readonly grey: number;
   /** How much of the road's stone (the palette gravel) is in it near the edge. */
@@ -112,15 +110,20 @@ interface ShoulderStyle {
   readonly grit: number;
 }
 
+/**
+ * Colour, and nothing else: the strip's WIDTH is part of the road's cross-section and
+ * lives in `roadprofile.shoulderWidthM`, because the verge is drivable ground and the
+ * autopilot sizes a pass on the same number this draws.
+ */
 const SHOULDER_STYLE: Partial<Record<SurfaceType, ShoulderStyle>> = {
   // A highway's graded crushed-stone shoulder, dusty and pale.
-  [SurfaceType.Asphalt]: { width: 1.35, grey: 0.26, stone: 0.3, edgeTone: 0.94, bright: 1.05, grit: 0.75 },
+  [SurfaceType.Asphalt]: { grey: 0.26, stone: 0.3, edgeTone: 0.94, bright: 1.05, grit: 0.75 },
   // Older and narrower; the desert has had longer to blow back over it.
-  [SurfaceType.CrackedAsphalt]: { width: 1.05, grey: 0.18, stone: 0.3, edgeTone: 0.9, bright: 1.03, grit: 0.7 },
+  [SurfaceType.CrackedAsphalt]: { grey: 0.18, stone: 0.3, edgeTone: 0.9, bright: 1.03, grit: 0.7 },
   // Concrete roads were built wide and pale, with cement dust in the verge.
-  [SurfaceType.Concrete]: { width: 1.6, grey: 0.28, stone: 0.16, edgeTone: 1, bright: 1.05, grit: 0.5 },
+  [SurfaceType.Concrete]: { grey: 0.28, stone: 0.16, edgeTone: 1, bright: 1.05, grit: 0.5 },
   // The grader's spoil: the road's own gravel pushed off to the sides.
-  [SurfaceType.Gravel]: { width: 1.1, grey: 0.08, stone: 0.7, edgeTone: 0.68, bright: 1, grit: 1 },
+  [SurfaceType.Gravel]: { grey: 0.08, stone: 0.7, edgeTone: 0.68, bright: 1, grit: 1 },
 };
 const DEFAULT_SHOULDER_STYLE = SHOULDER_STYLE[SurfaceType.Asphalt]!;
 /** Across-strip positions of the columns, 0 at the asphalt edge, 1 at the sand. */
@@ -691,13 +694,15 @@ export class RoadMeshProvider implements ChunkProvider {
       const stone = style.stone * (1 - 0.6 * wear);
       const gritLevel = style.grit * (1 - 0.5 * wear);
       const edgeTone = 1 - (1 - style.edgeTone) * (1 - 0.5 * wear);
+      // The strip's own width, from the road's cross-section rather than this table.
+      const stripWidth = shoulderWidthM(cond.surface) * (1 - 0.25 * wear);
 
       for (let side = 0; side < 2; side++) {
         const sign = side === 0 ? -1 : 1;
         // Each side wanders on its own, slow and a little faster on top.
         const k = side === 0 ? 1.7 : 4.3;
         const wander = 1 + 0.14 * Math.sin(s / 23 + k) + 0.08 * Math.sin(s / 7.3 + 2.1 * k);
-        const width = style.width * (1 - 0.25 * wear) * wander;
+        const width = stripWidth * wander;
         const ragged = (hash01(this.seed, 0x5d, rowBase + si, side) - 0.5) * SHOULDER_RAGGED;
         const edge = (si * latCount + (side === 0 ? 0 : latCount - 1)) * 3;
         const ex = positions[edge]!;

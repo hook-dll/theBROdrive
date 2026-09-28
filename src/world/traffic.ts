@@ -10,7 +10,7 @@ import { Autopilot, AUTOPILOT_MODES, type AutopilotMode } from '../vehicle/autop
 import type { TrafficField, TrafficNeighbour } from '../vehicle/trafficfield';
 import type { Settings } from '../game/settings';
 import { CAR_MODELS } from '../vehicle/carmodels';
-import { variant } from '../parts/registry';
+import { variantsOfKind, variant, type BodyClass } from '../parts/registry';
 import { Vehicle } from '../vehicle/vehicle';
 import { ReversedHazardIndex, type HazardField } from './hazards';
 import type { WorldOrigin } from './origin';
@@ -134,22 +134,22 @@ const PLATOON_CHANCE = 0.32;
 const FRANTIC_SAME_DIRECTION_SHARE = 0.14;
 const FRANTIC_ONCOMING_SHARE = 0.03;
 /**
- * WHAT A FRANTIC DRIVER DRIVES. Drawn from the whole catalogue it was as often in a
- * 70 hp Volga or an Oka as anything else, and a racer in a car that needs nine seconds
- * to get past a lorry is a racer that sits in the queue with everybody else — measured
- * on the real road as a frantic median pace level with the hurried drivers'. So it
- * gets a car with the power for its habits: a car body at least this many watts a
- * kilogram, and the rally Five a good share of the time, which is also a car the
- * player can recognise coming up in the mirror.
+ * WHAT A FRANTIC DRIVER DRIVES, AND WHAT IS UNDER ITS BONNET. Any car the stream can
+ * spawn, exactly as it is drawn for every other driver — a man in a hurry is a man in
+ * a hurry in whatever he owns — with the power dealt with by fitting one: the BMW M30,
+ * the catalogue's strongest engine a car takes, into bonnet cell 0.
+ *
+ * The power matters and the chassis does not. Drawn from the catalogue as it comes, a
+ * racer was as often in a 70 hp Volga or an Oka as in anything else, and a car that
+ * needs nine seconds to get past a lorry is a racer that sits in the queue with
+ * everybody else — measured on the real road as a frantic median pace level with the
+ * hurried drivers'.
+ *
+ * A body the M30 does not physically fit (`fits: ['car']`) gets the strongest engine
+ * that does instead — the 5.7 Chevrolet 350 V8 for a truck — so a lorry or a van can
+ * still be the one in a hurry. Those are the only two body classes in the pool.
  */
-const FRANTIC_MIN_WATTS_PER_KG = 51;
-const FRANTIC_RALLY_MODEL = 'sv_vaz2105r';
-const FRANTIC_RALLY_SHARE = 0.4;
-const FRANTIC_MODELS = CAR_MODELS.filter(
-  (model) =>
-    model.bodyClass === 'car' &&
-    ((variant(model.engineId).engine?.peakPowerKw ?? 0) * 1000) / model.mass >= FRANTIC_MIN_WATTS_PER_KG,
-);
+const FRANTIC_ENGINE_ID = 'engine_bmw_m30';
 /** Longest chain one roll may build, so a bad streak of rolls cannot eat a whole queue. */
 const PLATOON_MAX_CHAIN = 4;
 /** Floor under the headway-derived follow gap: body clearance, not a target distance. */
@@ -241,18 +241,6 @@ const OPPOSING_PASS_EXCLUSION_M = 260;
  */
 const LEADER_PASS_EXCLUSION_M = 120;
 const DEADLOCK_STOP_SPEED_MPS = 1.5;
-/**
- * MAKING ROOM FOR A FRANTIC DRIVER, the other half of its pass through the middle
- * (`MIDDLE_PASS_*` in the autopilot). A driver with one on its tail — held up behind it,
- * within `BEHIND_M` — moves `BEHIND_OFFSET_M` over toward its verge; a driver with one
- * coming at it, within `ONCOMING_M`, moves `ONCOMING_OFFSET_M`. Both are what people
- * on these roads do, and neither is a pass of its own: the frantic driver still
- * measures every metre of the room it takes.
- */
-const YIELD_BEHIND_M = 120;
-const YIELD_BEHIND_OFFSET_M = 1;
-const YIELD_ONCOMING_M = 450;
-const YIELD_ONCOMING_OFFSET_M = 0.6;
 /**
  * Metres up the outgoing lane before a turning car is handed back to the ordinary road.
  *
@@ -364,11 +352,28 @@ const FORWARD_QUEUE_ORDER = (a: TrafficCar, b: TrafficCar): number =>
 const REVERSE_QUEUE_ORDER = (a: TrafficCar, b: TrafficCar): number =>
   a.forwardS - b.forwardS;
 
+/** The engine a frantic car of this body class leaves the factory with; see FRANTIC_ENGINE_ID. */
+function franticEngine(bodyClass: BodyClass): string {
+  if (variant(FRANTIC_ENGINE_ID).fits.includes(bodyClass)) return FRANTIC_ENGINE_ID;
+  let strongest: string = FRANTIC_ENGINE_ID;
+  let bestPowerKw = -1;
+  for (const candidate of variantsOfKind('engine', bodyClass)) {
+    const powerKw = candidate.engine?.peakPowerKw ?? 0;
+    if (powerKw > bestPowerKw) {
+      bestPowerKw = powerKw;
+      strongest = candidate.id;
+    }
+  }
+  return strongest;
+}
+
 interface PendingSpawn {
   readonly generation: number;
   readonly direction: TrafficDirection;
   readonly forwardS: number;
   readonly modelId: string;
+  /** Bonnet-cell-0 engine this spawn is fitted with, or the model's own; see `franticEngine`. */
+  readonly engineId?: string;
   readonly id: string;
   readonly style: TrafficDriverStyle;
   readonly headwayS: number;
@@ -478,8 +483,6 @@ export class RoadTraffic {
    */
   private playerLateral = 0;
   private playerDriving = false;
-  /** See `setPlayerInAHurry`. */
-  private playerHurry = false;
   private readonly spawnPoint = { x: 0, y: 0, z: 0 };
   private readonly position = { x: 0, y: 0, z: 0 };
   private pedestrianActive = false;
@@ -826,40 +829,6 @@ export class RoadTraffic {
   }
 
   /**
-   * The player's own car on its frantic autopilot, held up or going through the middle.
-   * Ambient drivers make room for it exactly as they do for one of their own.
-   */
-  setPlayerInAHurry(hurry: boolean): void {
-    this.playerHurry = hurry;
-  }
-
-  /** Who moves over for a frantic driver; see `YIELD_BEHIND_M`. */
-  private assignYields(): void {
-    const playerHurry = this.playerDriving && this.playerHurry;
-    for (const car of this.carList) {
-      let offset = 0;
-      if (car.style !== 'frantic' && car.turnS < 0) {
-        for (const other of this.carList) {
-          if (other.style !== 'frantic' || other.turnS >= 0) continue;
-          if (!other.autopilot.passUrge && !other.autopilot.middlePassing) continue;
-          offset = Math.max(offset, this.yieldFor(car, other.forwardS, other.direction));
-        }
-        if (playerHurry) offset = Math.max(offset, this.yieldFor(car, this.playerS, 1));
-      }
-      car.autopilot.setYieldOffset(offset);
-    }
-  }
-
-  private yieldFor(car: TrafficCar, hurryS: number, hurryDirection: TrafficDirection): number {
-    if (hurryDirection === car.direction) {
-      const behind = (car.forwardS - hurryS) * car.direction;
-      return behind > 0 && behind < YIELD_BEHIND_M ? YIELD_BEHIND_OFFSET_M : 0;
-    }
-    const coming = (hurryS - car.forwardS) * car.direction;
-    return coming > 0 && coming < YIELD_ONCOMING_M ? YIELD_ONCOMING_OFFSET_M : 0;
-  }
-
-  /**
    * `Road.laneCentreAt` is signed in the caller's travel frame. Spawning uses the
    * forward road's frame even for oncoming traffic, so mirror that signed answer
    * before passing it to the forward `offsetPoint` geometry.
@@ -1016,7 +985,6 @@ export class RoadTraffic {
       this.assignDeadlockPermissions();
       this.assignReverseRoom();
       this.assignPassPermissions();
-      this.assignYields();
     }
     for (let i = this.carList.length - 1; i >= 0; i--) {
       const car = this.carList[i]!;
@@ -1171,12 +1139,13 @@ export class RoadTraffic {
       direction === 1 && driver.speedCap > this.playerSpeed + REAR_SPAWN_CLOSING_MPS;
     const spawn = this.findSpawnS(direction, fromBehind, driver.style);
     if (spawn === null) return;
-    const model = this.drawModel(driver.style);
+    const model = CAR_MODELS[Math.floor(this.random() * CAR_MODELS.length)]!;
     const request: PendingSpawn = {
       generation: this.generation,
       direction,
       forwardS: spawn.s,
       modelId: model.id,
+      engineId: driver.style === 'frantic' ? franticEngine(model.bodyClass) : undefined,
       id: `${TRAFFIC_ID_PREFIX}${(this.serial++).toString(36)}`,
       style: driver.style,
       headwayS: driver.headwayS,
@@ -1279,6 +1248,7 @@ export class RoadTraffic {
       y,
       z,
       heading,
+      request.engineId,
     );
     // Nobody meets a traffic car at the start of its journey: it has already driven
     // the desert road to get here, so it arrives carrying that road's film and the
@@ -1671,12 +1641,6 @@ export class RoadTraffic {
     return speed;
   }
 
-  private drawModel(style: TrafficDriverStyle): (typeof CAR_MODELS)[number] {
-    if (style !== 'frantic') return CAR_MODELS[Math.floor(this.random() * CAR_MODELS.length)]!;
-    const rally = CAR_MODELS.find((model) => model.id === FRANTIC_RALLY_MODEL);
-    if (rally && this.random() < FRANTIC_RALLY_SHARE) return rally;
-    return FRANTIC_MODELS[Math.floor(this.random() * FRANTIC_MODELS.length)]!;
-  }
   /**
    * The player sees the live spawn band, not a point sample under the car. Averaging
    * five deterministic profile samples prevents a cell edge from pumping the stream

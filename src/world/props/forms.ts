@@ -506,10 +506,17 @@ export function rockForms(): PropForm[] {
 }
 
 /**
- * GROUND COVER: dry grass tufts and low creosote-like bushes, the thing a real desert
- * has thousands of and this one had none of. Decoration only (no collider, nothing
- * breaks): a wheel rolls through a tuft. Every blade and lump is one vertex-coloured
- * mesh on the trees' material, so each form is one instanced draw per chunk.
+ * GROUND COVER: dry grass tufts, twiggy shrubs and spiky rosettes, the thing a real
+ * desert has thousands of. None of it has a Rapier collider: the car bursts through
+ * it into dust (`world/props/groundcover.ts`), the way it bursts a tumbleweed. Every
+ * blade, twig and leaf is one vertex-coloured mesh on the trees' material, so each form
+ * is one instanced draw per chunk.
+ *
+ * RECOGNISABLE AS PLANTS FIRST. The first shrub was four dark olive lumps on a stem,
+ * and from the driver's seat it read as a heap of stones. What says "plant" at twenty
+ * metres is structure the eye knows — a crown of bare twigs, ragged leafy tips paler
+ * than their shadowed undersides, pointed leaves radiating from a centre — and green
+ * clearly apart from the sand, so each form below is built from exactly that.
  */
 function buildGrassTuft(seed: number, blades: number, straw: number, tip: number): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
@@ -539,23 +546,97 @@ function buildGrassTuft(seed: number, blades: number, straw: number, tip: number
   return mergeGeometries(parts);
 }
 
+/**
+ * A smooth, WELDED unit icosphere: 42 shared vertices, where the unwelded one has 240.
+ * The shrub is merged from indexed parts for that reason: thousands of them stand
+ * inside the physics radius.
+ */
+function weldedIcosphere(): THREE.BufferGeometry {
+  const source = new THREE.IcosahedronGeometry(1, 1);
+  source.deleteAttribute('normal');
+  source.deleteAttribute('uv');
+  return mergeVertices(source);
+}
+
+/**
+ * Vertex colours from `low` at `y0` to `high` at `y1`, each vertex nudged by a hash so
+ * a clump is dappled rather than flat: sunlit leaf tops over a shadowed underside.
+ */
+function shade(geometry: THREE.BufferGeometry, low: number, high: number, y0: number, y1: number, seed: number): THREE.BufferGeometry {
+  const a = new THREE.Color().setHex(low, THREE.LinearSRGBColorSpace);
+  const b = new THREE.Color().setHex(high, THREE.LinearSRGBColorSpace);
+  const c = new THREE.Color();
+  const pos = geometry.getAttribute('position');
+  const colours = new Float32Array(pos.count * 3);
+  for (let v = 0; v < pos.count; v++) {
+    const t = Math.min(1, Math.max(0, (pos.getY(v) - y0) / (y1 - y0)));
+    c.copy(a).lerp(b, Math.min(1, t * 0.8 + hash01(seed, v, 7) * 0.35));
+    colours[v * 3] = c.r;
+    colours[v * 3 + 1] = c.g;
+    colours[v * 3 + 2] = c.b;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colours, 3));
+  return geometry;
+}
+
+/**
+ * A low desert shrub, creosote-like: a fan of bare dark twigs from one crown, each
+ * ending in a ragged clump of sage-green leaves, pale on top and dark beneath. The
+ * clumps are jittered hard so their outline is leafy, never a pebble's smooth curve.
+ */
 function buildBush(seed: number): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
-  for (let i = 0; i < 4; i++) {
-    const r = 0.22 + hash01(seed, i, 1) * 0.16;
-    const lump = new THREE.IcosahedronGeometry(r, 0);
-    lump.deleteAttribute('uv');
-    lump.scale(1, 0.8, 1);
-    const a = (i / 4) * Math.PI * 2 + hash01(seed, i, 2);
-    const out = i === 0 ? 0 : 0.26;
-    lump.translate(Math.cos(a) * out, r * 0.75 + (i === 0 ? 0.12 : 0), Math.sin(a) * out);
-    parts.push(paint(lump, i % 2 === 0 ? 0x57512f : 0x46412a));
+  const twigs = 11;
+  for (let i = 0; i < twigs; i++) {
+    const len = 0.3 + hash01(seed, i, 1) * 0.32;
+    const tilt = 0.25 + hash01(seed, i, 2) * 0.75;
+    const az = (i / twigs) * Math.PI * 2 + hash01(seed, i, 3) * 0.5;
+    const twig = new THREE.CylinderGeometry(0.008, 0.016, len, 3, 1, true);
+    twig.deleteAttribute('uv');
+    twig.translate(0, len / 2, 0);
+    twig.rotateZ(tilt);
+    twig.rotateY(az);
+    parts.push(paint(twig, 0x4a3524));
+    // The clump sits on the twig's tip: rotateZ tips +Y towards -X, rotateY turns it.
+    const tipOut = Math.sin(tilt) * len;
+    const tipX = -tipOut * Math.cos(az);
+    const tipZ = tipOut * Math.sin(az);
+    const tipY = Math.cos(tilt) * len;
+    const r = 0.08 + hash01(seed, i, 4) * 0.06;
+    const clump = weldedIcosphere();
+    const pos = clump.getAttribute('position') as THREE.BufferAttribute;
+    for (let v = 0; v < pos.count; v++) {
+      const k = 0.6 + hash01(seed, i, v + 32) * 0.75;
+      pos.setXYZ(v, pos.getX(v) * k * 1.25, pos.getY(v) * k * 0.85, pos.getZ(v) * k * 1.25);
+    }
+    clump.scale(r, r, r);
+    clump.computeVertexNormals();
+    clump.translate(tipX, tipY, tipZ);
+    parts.push(shade(clump, 0x3f4a26, i % 2 === 0 ? 0x8e9e58 : 0x7d9150, tipY - r, tipY + r, seed + i));
   }
-  // Bare stems under the foliage, so the bush stands rather than sits.
-  const stem = new THREE.CylinderGeometry(0.015, 0.03, 0.3, 4, 1).toNonIndexed();
-  stem.deleteAttribute('uv');
-  stem.translate(0, 0.15, 0);
-  parts.push(paint(stem, 0x5a4632));
+  return mergeGeometries(parts);
+}
+
+/**
+ * A yucca-like rosette: long pointed blue-green leaves radiating from the ground, the
+ * inner ones upright, the outer ones splayed. Nothing else in the desert has that
+ * shape, which is why it is here.
+ */
+function buildRosette(seed: number): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const leaves = 16;
+  for (let i = 0; i < leaves; i++) {
+    const outer = i / leaves;
+    const h = 0.34 + hash01(seed, i, 1) * 0.2 - outer * 0.08;
+    const leaf = new THREE.ConeGeometry(0.03, h, 3, 1, true);
+    leaf.deleteAttribute('uv');
+    leaf.scale(1.6, 1, 0.45);
+    leaf.translate(0, h / 2, 0);
+    shade(leaf, 0x3e5234, 0x9fb07a, 0, h, seed + i);
+    leaf.rotateZ(0.15 + outer * 1.05 + hash01(seed, i, 2) * 0.15);
+    leaf.rotateY(i * 2.399963 + hash01(seed, i, 3) * 0.3);
+    parts.push(leaf);
+  }
   return mergeGeometries(parts);
 }
 
@@ -570,7 +651,8 @@ export function groundCoverForms(): PropForm[] {
     _groundCoverForms = [
       tuft('tuft-straw', buildGrassTuft(0x7f01, 11, 0xa88d58, 0xd6c28d), 1),
       tuft('tuft-grey', buildGrassTuft(0x7f02, 8, 0x8f8467, 0xbdb392), 0.7),
-      { id: 'bush', geometry: buildBush(0x7f03), material: matPlant, baseRadius: 0.45, height: 0.7, collider: 'none', sink: 0.08, rotate3d: false, minScale: 0.6, maxScale: 1.25, weight: 0.45 },
+      { id: 'bush', geometry: buildBush(0x7f03), material: matPlant, baseRadius: 0.5, height: 0.6, collider: 'none', sink: 0.04, rotate3d: false, minScale: 0.7, maxScale: 1.3, weight: 0.45 },
+      { id: 'rosette', geometry: buildRosette(0x7f04), material: matPlant, baseRadius: 0.4, height: 0.5, collider: 'none', sink: 0.02, rotate3d: false, minScale: 0.7, maxScale: 1.3, weight: 0.3 },
     ];
   }
   return _groundCoverForms;

@@ -32,11 +32,17 @@ export function createServiceableCarState(
   y: number,
   z: number,
   heading: number,
+  /**
+   * A non-stock engine to leave the factory with, in bonnet cell 0, or the model's own.
+   * Frantic traffic fits one (`engine_bmw_m30`); see `RoadTraffic`.
+   */
+  engineVariantId?: string,
 ): CarState {
   const def = carModel(modelId);
-  const engine = variant(def.engineId).engine;
+  const engineId = engineVariantId ?? def.engineId;
+  const engine = variant(engineId).engine;
   const half = heading / 2;
-  const bonnet = createBonnetStorage(id, def.engineId, def.bodyClass, def.tankLitres);
+  const bonnet = createBonnetStorage(id, engineId, def.bodyClass, def.tankLitres);
   return {
     id,
     modelId,

@@ -5,8 +5,23 @@ import { DEFAULT_POI_SPACING_METRES } from '../game/settings';
 import { SurfaceType } from '../core/surfaces';
 import { ROAD_LENGTH, type Road } from './road';
 import type { CarState, GameWorld } from '../game/state';
-import { IMPORT_ENGINE_IDS, oilCapacity, variant, type PartInstance } from '../parts/registry';
-import type { FluidCanItem, FluidKind, SprayCanItem, ToolItem, ToolKind } from '../items/items';
+import {
+  IMPORT_ENGINE_IDS,
+  oilCapacity,
+  variant,
+  variantsOfKind,
+  type BodyClass,
+  type PartInstance,
+} from '../parts/registry';
+import type {
+  FluidCanItem,
+  FluidKind,
+  Item,
+  PartItem,
+  SprayCanItem,
+  ToolItem,
+  ToolKind,
+} from '../items/items';
 import { CAR_PAINTS } from '../vehicle/carpaint';
 import { makeFlatMaterial } from '../render/materials';
 import {
@@ -20,7 +35,13 @@ import {
 import { CAR_MODELS, type CarModelDef } from '../vehicle/carmodels';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 import type { LoosePartField } from '../parts/loose';
-import { bonnetWaterCapacity, createBonnetStorage } from '../vehicle/bonnet';
+import {
+  bonnetWaterCapacity,
+  createBonnetStorage,
+  BONNET_SLOT_COUNT,
+  BONNET_SLOT_KINDS,
+} from '../vehicle/bonnet';
+import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
 import { COLD_SOAK_C } from '../vehicle/cooling';
 import type { TrailerField } from '../vehicle/trailer';
 import type { WreckTrunkField } from './wrecktrunks';
@@ -673,7 +694,9 @@ const YARD_FINDS: readonly (ToolKind | 'spray_can')[] = ['brush', 'sponge', 'spr
 // whole road littered the world with things that had to be picked up one by one and
 // fitted nowhere. What a stop gives is tools, cans, and the few service parts worth a
 // detour (`stockSalvageParts`): an air filter now and then, and at a breaker's yard a
-// turbocharger or an imported engine on a pallet. Wrecks remain static scenery.
+// turbocharger or an imported engine on a pallet. The buried shells carry their own
+// salvage instead — worn parts under the bonnet, cans and tools in the boot — laid out
+// by `stockWreckLoot` where the field is built.
 // ---------------------------------------------------------------------------
 
 /**
@@ -1035,7 +1058,18 @@ function buildStructurePoi(
   // anchor, which is exactly where this building stands, so it is handed the footprint
   // to lay out around.
   if (poi.stock === 'salvage') {
-    buildWrecks(ctx, poi, group, bodies, colliders, wreckTrunks, registeredWrecks, deferredVisuals, salvageKeepOut(poi, ctx.road, instance));
+    buildWrecks(
+      ctx,
+      poi,
+      group,
+      bodies,
+      colliders,
+      wreckTrunks,
+      registeredWrecks,
+      deferredVisuals,
+      salvageKeepOut(poi, ctx.road, instance),
+      shouldLoot,
+    );
   }
 
   if (shouldLoot) {
@@ -1405,6 +1439,181 @@ export function layOutWreckField(poi: Poi, road: Road, keepOut?: WreckKeepOut): 
 }
 
 /**
+ * A half-buried shell still carries salvage.
+ *
+ * The bonnet keeps its five service cells, but not necessarily filled: an engine is
+ * the likeliest find, the radiator, tank and air filter each take their own roll, and
+ * the factory-optional turbocharger is the rarest. Engines are usually the Soviet units
+ * a body of that class was built around, but an import a breaker pulled turns up
+ * occasionally. Parts come out WORN — dust, rust, a clogged element — because the car
+ * has stood in the sand long enough to be a wreck, not because the find is worthless.
+ *
+ * The boot holds what a driver leaves in a car: cans, a tool, a spray can, medicine,
+ * gum. Never a sticker or a courier envelope — those belong to the delivery economy and
+ * to the cars the player actually drives.
+ *
+ * Every roll is seeded from the POI and the slot, so a given wreck yields the same
+ * contents on every pass; the guard that keeps an emptied POI empty (`poi_looted`) is
+ * what stops the world restocking it.
+ */
+/** Chance each bonnet cell (in `BONNET_SLOT_KINDS` order) still holds its part. */
+const WRECK_BONNET_FILL: readonly number[] = [0.55, 0.15, 0.45, 0.4, 0.5];
+/** Of the wrecks that kept an engine, this share kept an import instead. */
+const WRECK_IMPORT_ENGINE_CHANCE = 0.18;
+/** Chance each of a wreck's sixteen boot cells holds a find. */
+const WRECK_TRUNK_FILL_CHANCE = 0.24;
+
+type WreckFind =
+  | 'petrol_can'
+  | 'water_can'
+  | 'oil_can'
+  | 'brush'
+  | 'sponge'
+  | 'medicine'
+  | 'gum'
+  | 'spray_can';
+
+/**
+ * What a wreck's boot yields, by weight: the fluids a stranded driver needed, the two
+ * cleaning tools, and the small odds and ends a glovebox holds.
+ */
+const WRECK_TRUNK_FINDS: readonly { readonly find: WreckFind; readonly weight: number }[] = [
+  { find: 'petrol_can', weight: 0.3 },
+  { find: 'water_can', weight: 0.1 },
+  { find: 'oil_can', weight: 0.1 },
+  { find: 'brush', weight: 0.1 },
+  { find: 'sponge', weight: 0.1 },
+  { find: 'medicine', weight: 0.08 },
+  { find: 'gum', weight: 0.1 },
+  { find: 'spray_can', weight: 0.12 },
+];
+
+/** A part pulled from a shell, worn the way a find in the sand is. */
+function wreckPartItem(
+  world: GameWorld,
+  poi: Poi,
+  wreckIndex: number,
+  slot: number,
+  variantId: string,
+): PartItem {
+  const id = world.generatedPartId('wreck-part', poi.index, wreckIndex * 32 + slot);
+  const part: PartInstance = {
+    id,
+    variantId,
+    dirt: 0.35 + hash01(poi.variantSeed, wreckIndex, 220 + slot) * 0.45,
+    rust: 0.15 + hash01(poi.variantSeed, wreckIndex, 230 + slot) * 0.4,
+  };
+  if (variant(variantId).kind === 'air_filter') {
+    // Filtered a lot of desert before the car stopped: worn past the point it would
+    // run well, which is why a wreck's filter is worth taking and cleaning, not using.
+    part.clog = 0.5 + hash01(poi.variantSeed, wreckIndex, 240 + slot) * 0.7;
+  }
+  return { type: 'part', id, part };
+}
+
+/** An engine the wreck's body class could have carried; imports are the rare draw. */
+function wreckEngineVariant(
+  poi: Poi,
+  wreckIndex: number,
+  bodyClass: BodyClass,
+): string | null {
+  const fitted = variantsOfKind('engine', bodyClass);
+  if (fitted.length === 0) return null;
+  const imports = fitted.filter((candidate) => IMPORT_ENGINE_IDS.includes(candidate.id));
+  if (imports.length > 0 && hash01(poi.variantSeed, wreckIndex, 216) < WRECK_IMPORT_ENGINE_CHANCE) {
+    return pick(imports, poi.variantSeed, wreckIndex, 217).id;
+  }
+  const domestic = fitted.filter((candidate) => !IMPORT_ENGINE_IDS.includes(candidate.id));
+  return pick(domestic.length > 0 ? domestic : fitted, poi.variantSeed, wreckIndex, 218).id;
+}
+
+/** One boot find, with its own stable id. */
+function makeWreckItem(
+  ctx: ChunkContext,
+  poi: Poi,
+  wreckIndex: number,
+  cell: number,
+): Item {
+  const id = ctx.world.generatedPartId('wreck-item', poi.index, wreckIndex * 32 + 16 + cell);
+  const roll = hash01(poi.variantSeed, wreckIndex, 260 + cell);
+  let find = WRECK_TRUNK_FINDS[WRECK_TRUNK_FINDS.length - 1]!.find;
+  let acc = 0;
+  for (const entry of WRECK_TRUNK_FINDS) {
+    acc += entry.weight;
+    if (roll < acc) {
+      find = entry.find;
+      break;
+    }
+  }
+  switch (find) {
+    case 'petrol_can':
+    case 'water_can':
+    case 'oil_can': {
+      const fluid: FluidKind = find === 'petrol_can' ? 'petrol' : find === 'water_can' ? 'water' : 'oil';
+      // A stranded car's can is part-used, never sealed: 3-5 L of the small fluids,
+      // 6-20 L of petrol.
+      const capacity = fluid === 'petrol' ? 20 : 5;
+      const litres =
+        Math.round(capacity * (0.3 + hash01(poi.variantSeed, wreckIndex, 270 + cell) * 0.65) * 10) / 10;
+      return { type: 'fluid_can', id, fluid, capacity, litres };
+    }
+    case 'brush':
+    case 'sponge':
+      return {
+        type: 'tool',
+        id,
+        tool: find,
+        integrity: 0.4 + hash01(poi.variantSeed, wreckIndex, 280 + cell) * 0.5,
+      };
+    case 'medicine':
+      return { type: 'medicine', id };
+    case 'gum':
+      return {
+        type: 'bubble_gum',
+        id,
+        charges: 1 + Math.floor(hash01(poi.variantSeed, wreckIndex, 290 + cell) * 4),
+      };
+    case 'spray_can':
+      return {
+        type: 'spray_can',
+        id,
+        paint: pick(CAR_PAINTS, poi.variantSeed, wreckIndex, 300 + cell).hex,
+        charge: 0.25 + hash01(poi.variantSeed, wreckIndex, 310 + cell) * 0.6,
+      };
+  }
+}
+
+/** Writes one shell's bonnet and boot contents into the world state, in one delta. */
+function stockWreckLoot(
+  ctx: ChunkContext,
+  poi: Poi,
+  wreckId: string,
+  wreckIndex: number,
+  bodyClass: BodyClass,
+): void {
+  const bonnet = new Array<Item | null>(BONNET_SLOT_COUNT).fill(null);
+  for (let cell = 0; cell < BONNET_SLOT_KINDS.length; cell++) {
+    if (hash01(poi.variantSeed, wreckIndex, 120 + cell) >= WRECK_BONNET_FILL[cell]!) continue;
+    const kind = BONNET_SLOT_KINDS[cell]!;
+    let variantId: string | null;
+    if (kind === 'engine') {
+      variantId = wreckEngineVariant(poi, wreckIndex, bodyClass);
+    } else {
+      const fitted = variantsOfKind(kind, bodyClass);
+      variantId = fitted.length === 0 ? null : pick(fitted, poi.variantSeed, wreckIndex, 250 + cell).id;
+    }
+    if (variantId === null) continue;
+    bonnet[cell] = wreckPartItem(ctx.world, poi, wreckIndex, cell, variantId);
+  }
+  const trunk = new Array<Item | null>(TRUNK_CELL_COUNT).fill(null);
+  for (let cell = 0; cell < TRUNK_CELL_COUNT; cell++) {
+    if (hash01(poi.variantSeed, wreckIndex, 200 + cell) >= WRECK_TRUNK_FILL_CHANCE) continue;
+    trunk[cell] = makeWreckItem(ctx, poi, wreckIndex, cell);
+  }
+  ctx.world.apply({ t: 'wreck_loot', wreckId, bonnet, trunk });
+}
+
+/**
  * One to three complete models scattered through a roadside wreck field, and rarely
  * one upright slot that is a working car instead of a shell. Both draw from the
  * whole catalogue: a wreck is a state a body is found in, not a class of body, so
@@ -1420,6 +1629,8 @@ function buildWrecks(
   registeredWrecks: string[],
   deferredVisuals: Array<() => void>,
   keepOut: WreckKeepOut,
+  /** Whether this POI's loot is being materialised for the first time. */
+  shouldLoot: boolean,
 ): void {
   const anchor = anchorXZ(ctx, poi);
   const ox = ctx.originX;
@@ -1523,6 +1734,9 @@ function buildWrecks(
         halfExtents: half,
       });
       registeredWrecks.push(carId);
+      // The shell only takes loot the first time it is built: `poi_looted` is what
+      // keeps an emptied wreck empty across every later chunk rebuild.
+      if (shouldLoot) stockWreckLoot(ctx, poi, carId, w, def.bodyClass);
     }
   }
 }

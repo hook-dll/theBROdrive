@@ -28,6 +28,7 @@ import {
   variant,
   type CarStats,
   type EngineSpec,
+  type GearboxSpec,
 } from '../parts/registry';
 import { itemMass } from '../items/items';
 import {
@@ -57,7 +58,7 @@ import {
   type CoolingState,
   type EngineTempReadout,
 } from './cooling';
-import { Drivetrain } from './drivetrain';
+import { Drivetrain, matchGearbox } from './drivetrain';
 import {
   STEERING_WHEEL_NODE,
   carModelMeasure,
@@ -1961,7 +1962,7 @@ export class Vehicle implements Rebasable {
     // The crank turns with the DRIVEN wheels (their mean, which is what an open
     // differential gives it), so a tyre breaking loose revs the engine towards its
     // cut, loses torque there and is bounded by it, and the driver hears it. The
-    // gearbox still decides on road speed: see `Drivetrain.update`. Until the tyre
+    // gearbox decides on the faster of the two speeds: see `Drivetrain.update`. Until the tyre
     // model owned the thrust this could not be done — with Rapier's engine force
     // pushing the car, a slipping wheel pinned the engine at its redline and full
     // throttle in first settled at 26 km/h.
@@ -2497,7 +2498,7 @@ export class Vehicle implements Rebasable {
         // `digWeightCar` is zero on every surface but sand, so every other surface costs
         // nothing here. And it is zero the moment the driver lifts off, which is what
         // keeps sand what it is: power through it and the car is on firm ground, coast in
-        // it and the honest 0.16 eats your speed.
+        // it and the honest loose figure eats your speed.
         rollingResistanceSum +=
           surface.rollingResistance -
           (surface.rollingResistance - DIG_FIRM_RR) * this.digWeightCar;
@@ -3041,6 +3042,11 @@ export class Vehicle implements Rebasable {
    */
   syncProjectedLights(rig: VehicleLightRig, gain: number): void {
     this.lamps.syncProjectedLights(rig, gain);
+  }
+
+  /** Offers the lit headlamps to the wet road's reflection streaks (vehiclelamps.ts). */
+  offerWetGlare(): void {
+    this.lamps.offerWetGlare();
   }
 
   /**
@@ -3672,9 +3678,8 @@ export class Vehicle implements Rebasable {
    */
   private computeStats(): CarStats {
     const installedEngine = bonnetPart(this.car.bonnet, 0);
-    const engine = installedEngine
-      ? variant(installedEngine.variantId).engine ?? modelEngine(this.model)
-      : modelEngine(this.model);
+    const installedSpec = installedEngine ? variant(installedEngine.variantId).engine : undefined;
+    const engine = installedSpec ?? modelEngine(this.model);
 
     const stock = stockBonnetVariants(
       this.model.engineId,
@@ -3704,13 +3709,34 @@ export class Vehicle implements Rebasable {
     return {
       mass: Math.max(1, mass),
       engine,
-      gearbox: modelGearbox(this.model),
+      gearbox: this.gearboxFor(engine),
       tankCapacity: this.model.tankLitres,
       wheelCount: this.measure.wheels.length,
       wheelGrip: this.model.wheelGrip,
       hasHeadlights: true,
     };
   }
+
+  /**
+   * The gearbox that came with the engine in cell 0 (`matchGearbox`), re-derived only
+   * when that engine changes so a fuel-level `refreshLoad` neither allocates nor hands
+   * the drivetrain a new object.
+   */
+  private gearboxFor(engine: EngineSpec): GearboxSpec {
+    if (this.matchedGearboxEngine !== engine || this.matchedGearboxSpec === null) {
+      this.matchedGearboxEngine = engine;
+      this.matchedGearboxSpec = matchGearbox(
+        modelGearbox(this.model),
+        modelEngine(this.model),
+        engine,
+        SURFACES[SurfaceType.Asphalt].rollingResistance * this.model.mass * GRAVITY,
+        this.dragCoeff,
+      );
+    }
+    return this.matchedGearboxSpec;
+  }
+  private matchedGearboxEngine: EngineSpec | null = null;
+  private matchedGearboxSpec: GearboxSpec | null = null;
 
   /**
    * Mass the driver is carrying, kg, pushed in by the composition root.

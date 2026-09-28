@@ -139,6 +139,14 @@ const WOT_SHIFT_THROTTLE = 0.95;
  * the tall top gears on a heavy truck.
  */
 const UP_SHIFT_IDLE_MARGIN = 1.25;
+/**
+ * An upshift must also land the taller gear this far above the downshift point, on
+ * ROAD speed. The shift itself costs speed: the clutch is open for `shiftTime`, and on
+ * sand the rolling resistance takes most of a metre per second off the car in that
+ * time. Landing exactly on the downshift point, the box took second at the top of
+ * first and dropped straight back into it the moment the shift completed, for good.
+ */
+const UP_SHIFT_HOLD_MARGIN = 1.15;
 /** Throttle at which an automatic in neutral or reverse engages first gear. */
 const AUTO_ENGAGE_THROTTLE = 0.12;
 /** Road speed below which neutral may engage drive while the car is still rolling. */
@@ -321,6 +329,60 @@ export function fullThrottleUpshiftDue(
     engineTorqueNm(engine, nextRpm, cutRpm) * nextRatio >=
     engineTorqueNm(engine, rpm, cutRpm) * ratio
   );
+}
+
+/**
+ * How far `matchGearbox` may re-gear a body's final drive, as a multiple of it. Wide
+ * enough for a 5.7 V8 in a Zhiguli; narrow enough that a pairing the road-load model
+ * places badly still leaves a first gear that pulls away.
+ */
+const MATCH_FINAL_DRIVE_MIN = 0.55;
+const MATCH_FINAL_DRIVE_MAX = 1.6;
+
+/** Road speed, m/s, at which `powerW` holds a car against its rolling and air drag. */
+function roadLoadTopSpeed(powerW: number, rollingForceN: number, dragCoeff: number): number {
+  // (F_roll + c·v²)·v rises monotonically with v, so a bisection cannot miss.
+  let lo = 0;
+  let hi = 150;
+  for (let i = 0; i < 40; i++) {
+    const v = 0.5 * (lo + hi);
+    if ((rollingForceN + dragCoeff * v * v) * v < powerW) lo = v;
+    else hi = v;
+  }
+  return lo;
+}
+
+/**
+ * The gearbox a body runs once `engine` replaces its factory `stockEngine`: the
+ * swap brings a box geared for the new engine, silently, because a player choosing
+ * ratios by hand is a spreadsheet, not a game.
+ *
+ * The ratios, reverse, shift time, efficiency and automatic flag stay the body's:
+ * they belong to its driveline (a rear axle, a transaxle, a transfer case), not to
+ * the engine. What moves is the final drive, so that top gear meets the new engine's
+ * power peak at the road speed its power can actually hold against this body's
+ * rolling resistance and drag. It is scaled against the factory pairing rather than
+ * set from first principles, so a stock car is returned unchanged and every swap
+ * keeps the character the factory geared the car with: a car geared a little short
+ * for acceleration stays a little short with any engine.
+ */
+export function matchGearbox(
+  box: GearboxSpec,
+  stockEngine: EngineSpec,
+  engine: EngineSpec,
+  rollingForceN: number,
+  dragCoeff: number,
+): GearboxSpec {
+  if (engine === stockEngine) return box;
+  const stockTop = roadLoadTopSpeed(stockEngine.peakPowerKw * 1000 * box.efficiency, rollingForceN, dragCoeff);
+  const top = roadLoadTopSpeed(engine.peakPowerKw * 1000 * box.efficiency, rollingForceN, dragCoeff);
+  if (!(stockTop > 0) || !(top > 0)) return box;
+  const scale = clamp(
+    (engine.powerPeakRpm / stockEngine.powerPeakRpm) * (stockTop / top),
+    MATCH_FINAL_DRIVE_MIN,
+    MATCH_FINAL_DRIVE_MAX,
+  );
+  return { ...box, finalDrive: box.finalDrive * scale };
 }
 
 export class Drivetrain {
@@ -808,15 +870,16 @@ export class Drivetrain {
     // The engine runs at the DRIVEN wheels' speed, which a tyre working at 2% slip at
     // the top of third already puts into the fuel cut while road speed says there is
     // room: judged on road speed alone, the rally 2105 sat on its limiter in third at
-    // 141 km/h. So the upshift is judged on whichever is faster — the crank's own
-    // speed while a wheel flares, road speed while one is locked — and the downshift
-    // on road speed alone, because a locked wheel is not a reason to drop to first.
+    // 141 km/h. So both decisions are judged on whichever is faster — the crank's own
+    // speed while a wheel flares, road speed while one is locked. A locked wheel is
+    // then still no reason to drop to first, and a spinning one is no reason to drop
+    // into a gear that would only spin it harder.
     const crankAbs = Math.max(
       roadAbs,
       Math.abs(drivenWheelAngularSpeed) * gearbox.finalDrive * RPM_PER_RAD_PER_SEC,
     );
     const ratio = Math.abs(this.ratioOfGear(this.gear));
-    const current = roadAbs * ratio;
+    const current = crankAbs * ratio;
 
     if (this.gear < n) {
       const nextRatio = Math.abs(this.ratioOfGear(this.gear + 1));
@@ -831,13 +894,14 @@ export class Drivetrain {
             )
           : crankAbs * ratio > engine.redlineRpm * UP_SHIFT_RPM_FRACTION;
       // Never upshift into a gear that cannot pull or that the downshift rule would
-      // take straight back at this ROAD speed: a wheel spinning up in first must not
-      // make the box hunt between first and second.
+      // take straight back at this ROAD speed once the shift has cost its share of it:
+      // a wheel spinning up in first must not make the box hunt between first and
+      // second. See UP_SHIFT_HOLD_MARGIN.
       const nextRoadRpm = roadAbs * nextRatio;
       if (
         due &&
         nextRoadRpm > engine.idleRpm * UP_SHIFT_IDLE_MARGIN &&
-        nextRoadRpm >= engine.redlineRpm * DOWN_SHIFT_RPM_FRACTION
+        nextRoadRpm >= engine.redlineRpm * DOWN_SHIFT_RPM_FRACTION * UP_SHIFT_HOLD_MARGIN
       ) {
         this.setGear(this.gear + 1);
         return;

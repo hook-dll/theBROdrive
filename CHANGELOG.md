@@ -4,6 +4,16 @@
 
 ### Added
 
+- ROTTING CARS CAN BE LOOTED. Every shell in a salvage field (`buildWrecks`,
+  `world/poi.ts`) now carries salvage of its own, laid out once per POI and kept in
+  `WorldState.wreckBonnet` / `wreckStorage`. A random subset of the five bonnet cells
+  holds parts that fit the body class — an engine (rarely an import), a radiator, a
+  different tank, an air filter, occasionally a turbocharger — all worn dusty/rusty
+  (and the filter clogged) like every other salvage find. The boot holds cans, tools,
+  a spray can, medicine and gum, and never a sticker or a courier envelope. Both ends
+  open through the same F-mount interaction driven cars use, with the bonnet's cells
+  validated by `bonnetAccepts`.
+
 - THE DESERT IS NO LONGER ONE FLAT COLOUR. Every desert ground material (tiles, vista,
   its overlap ring, the shoulder) shares `applyDesertGround` in `world/terrainmesh.ts`:
   broad 288/96 m patches between a redder and a paler sand, pale dry crusts, crests of
@@ -15,9 +25,27 @@
 - CONTACT SHADOWS UNDER EVERY PROP (`world/props/contactshadow.ts`): a soft warm-dark
   disc under cacti, rocks, trees and bushes, one instanced draw per chunk or tile, fading
   with the tile props.
-- GROUND COVER: dry grass tufts and low olive bushes (`groundCoverForms`) along the
-  road, thick on the verge and thinning out by 160 m, a decoration stream of its own
-  (no existing prop moves), no colliders, built only inside the physics radius.
+- GROUND COVER: dry grass tufts, twiggy sage-green shrubs and spiky yucca-like
+  rosettes (`groundCoverForms`), a decoration stream of its own (no existing
+  prop moves), spread over the desert to 320 m from the road — a little thicker on the
+  verge, not a hedge along it — and built only inside the physics radius. The car
+  bursts through any of it in a puff of dust, like a tumbleweed, with a 12 N·s brush
+  against its travel and no Rapier collider at all: `GroundCoverField`
+  (`world/props/groundcover.ts`) keeps each chunk's props in a flat grid over its
+  bounds and tests the car's footprint against the few cells under it once per fixed
+  step. A burst prop stays gone for the session.
+- THE SAND GLITTERS AT NIGHT. When the mirages are gone, a few grains in every square
+  metre of desert near the eye wink cool white, pale gold or faint violet, each on its
+  own slow beat and shifting as the camera moves, like mica (`GROUND_GLITTER_HOOK`,
+  `advanceDesertGlitter` in `world/terrainmesh.ts`). It rises as the day goes, is gone
+  by 45 m, and dims on wet sand, in dust and under cloud.
+- ONCOMING HEADLAMPS SHINE IN THE WET ROAD FROM AFAR. Each lit headlamp of another car
+  (up to six, nearest first) lays a band of light on the wet deck, from the ground under
+  the lamp towards the eye, narrow at the lamp and widening in the road's own
+  perspective (`addWetGlare`, `render/cloudshadow.ts`), seen as far as the lamp is. The
+  glint used to be only the spotlights' own gloss, which fades out 60-130 m away for
+  every car but the driven one and sat round the mirror point like a blob under the
+  surface.
 
 - THE ROAD HAS SHOULDERS, SO IT LIES IN THE DESERT RATHER THAN ON IT. A strip of verge
   either side (`RoadMeshProvider.buildShoulderSteps`, `SHOULDER_STYLE` in
@@ -32,8 +60,76 @@
   has a LooseShoulder collider, so a wheel off the edge rolls onto the verge instead of
   sinking through it. About 3.4 ms more per 200 m chunk build, spread over its yields.
 
+### Changed
+
+- FRANTIC DRIVERS FIND THEIR OWN WAY, AND EVERYBODY ELSE DRIVES AS USUAL. Ambient
+  traffic no longer moves over toward its verge for a frantic driver behind it or coming
+  at it: that rule, its offsets and the autopilot's `setYieldOffset`/`yieldOverhang`
+  plumbing are gone, and the stream holds its lane and its pace whatever is approaching.
+  The frantic driver's way through the traffic is now the room it MEASURES from the
+  traffic field — the near flank of every car of the queue and the real lateral of every
+  car coming the other way — re-taken every step, and whether the line is legal is the
+  corridor's own question: a line that only reaches over the crown is priced against the
+  oncoming cars it could meet, and one that crosses it is the ordinary crossing, allowed
+  only with the measured oncoming gap behind it and never taken deeper than the middle of
+  the borrowed lane.
+- A FRANTIC DRIVER'S WAY PAST A QUEUE IS NOW THREE LINES, NOT ONE. The pass on the verge
+  is sized on the road's own graded shoulder instead of a flat 2.1 m (`shoulderWidthM` in
+  `world/roadprofile.ts`, the same number the mesh draws the strip from): a highway's
+  1.35 m crush grants 2.25 m of body edge where it granted 2.1, cracked asphalt's 1.05 m
+  exactly the 1.95 m the pass needs, a concrete road's 1.6 m grants 2.5, and a gravel
+  road's own spoil lets the pass happen there at all — with the prop-free verge, the
+  straight stretch and the corridor's own price (which keeps the crown cheaper whenever
+  it is open) unchanged.
+- A FRANTIC DRIVER GIVES THE BORROWED LANE BACK IN THE GAP. A measured pass is sized
+  "past this car and into the slot in front of it", but the search kept pricing the
+  crossing cheaper than the queue for as long as the opposing lane stayed clear, so one
+  borrow carried a racer past car after car. Now, once the car it was taken for is no
+  longer in the way, the lane home is admissible and the gap in front leaves
+  `WEAVE_HOME_HOLD_S` seconds of closing to the next car of the queue — and that car a
+  further `WEAVE_HOME_HOLD_M` past the distance this driver goes out again, so the gap
+  has to be a gap and not a hair — the racer takes its lane back and measures the next
+  car from inside it: in and out of the gaps, instead of a second lane.
+- A FRANTIC DRIVER SPOTS THE QUEUE BY CLOSING TIME AS WELL AS BY HEADWAY. The distance
+  at which a held-up driver starts looking for its line is the longer of two following
+  distances and `PASS_APPROACH_CLOSING_S` seconds of closing speed, so a car arriving on
+  something twenty metres a second slower starts planning 127 m out (6 s of closing)
+  instead of 86 — while a leader it closes on at four metres a second still starts at
+  86, where there is no rush. It decides when the line is LOOKED for; when the wheel is
+  turned is still timed on the move's own length.
+- A FRANTIC DRIVER CAN BE DRIVING ANYTHING. Its car is drawn from the same model pool as
+  every other driver's — a man in a hurry is a man in a hurry in whatever he owns — with
+  a BMW M30 (`engine_bmw_m30`) fitted in bonnet cell 0 to give it the pace for its
+  habits, and the strongest engine that physically fits when the body cannot take the M30
+  (a lorry or a van). The rally Five's special place in the draw is gone; it is still in
+  the pool like any other car.
+- A SWAPPED ENGINE COMES WITH ITS OWN GEARING, SILENTLY. `matchGearbox`
+  (`vehicle/drivetrain.ts`) keeps the body's ratios, shift time, efficiency and
+  automatic flag — those are its driveline — and re-gears the final drive so top gear
+  meets the new engine's power peak at the speed its power can hold against this body's
+  rolling and air drag, scaled against the factory pairing so a stock car is unchanged
+  (a 2105: 4.3 stock, 3.2 with the BMW M30, 2.37 with the Chevrolet 350).
+- THE CAR GETS DIRTY FIVE TIMES MORE SLOWLY: `BODY_DIRT_TYRE_METRES_TO_FULL` is 120 km
+  of tyre track, so the first visible crust takes about 7.5 km of sand.
+- NIGHT IS A SHADE LESS BLACK, as if the eye had been out in it a while: the moonlit
+  fill floor (`NIGHT_FILL_INTENSITY`, `render/sky.ts`) is 0.12, from 0.09. The dome,
+  the stars and the lamps are unchanged.
+- STORM CELLS ON THE HORIZON ARE THE STORM'S WARNING AND ITS DEPARTURE ONLY. They used
+  to stay on the skyline through the whole downpour, sunlit white under a black deck;
+  they now fade out as the rain sets in and come back as it moves off.
+- The tumbleweed's brush on the car is against its travel; it used to push it forward.
+
 ### Fixed
 
+- A TWO-WHEEL-DRIVE CAR CAN LEAVE FIRST GEAR ON SAND. At sand's rolling resistance of
+  0.16 the driven axle of a rear-drive saloon on period tyres (about 0.12 of the car's
+  weight on sand's mu) could not out-push it once the dig had faded, so every such car
+  hit a wall at about 29 km/h in first on the cut — just under the speed where the
+  automatic may take second — whatever engine it had. Sand is now 0.07, and the
+  automatic judges its downshift on the faster of road and driven-wheel speed (a
+  spinning wheel is no reason to drop a gear) and upshifts only 15% clear of the
+  downshift point (`UP_SHIFT_HOLD_MARGIN`), so the speed a shift costs on sand cannot
+  hand it straight back to first.
 - LOOSE GROUND NO LONGER SOUNDS LIKE A CONCERT HALL. The recorded gravel roll was 12 dB
   over everything else a tyre makes (-18.5 LUFS against -30.4 on asphalt at 80 km/h,
   offline render): a dense, wide low-mid wash heard as a big room. It is now high-passed

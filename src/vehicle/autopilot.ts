@@ -6,6 +6,7 @@ import { SurfaceType } from '../core/surfaces';
 import type { RoadConditionBuffer } from '../world/gradient';
 import { type DriveRoad } from '../world/road';
 import { type HazardField, type RoadHazard } from '../world/hazards';
+import { shoulderWidthM } from '../world/roadprofile';
 import type { Vehicle } from './vehicle';
 import { evaluateCorridorLine, planCorridor, type CorridorObstacle } from './corridor';
 import type { TrafficField, TrafficNeighbour } from './trafficfield';
@@ -715,19 +716,37 @@ const PASSING_VERGE_M = 1.2;
  *
  * It is not a licence the corridor gives by default. The sand is for things that are
  * not going anywhere (`SHOULDER_BYPASS_MAX_SPEED` in the corridor), and only a racer on
- * a paved, nearly straight, one-lane-each-way stretch with the verge clear of props is
- * granted it, one step at a time (`shoulderPassAllowed`). The crossing stays cheaper, so
- * with the opposing lane free the pass is still taken there.
+ * a nearly straight, one-lane-each-way stretch with the verge clear of props is granted
+ * it, one step at a time (`shoulderPassAllowed`). The crossing stays cheaper, so with
+ * the opposing lane free the pass is still taken there.
  *
- * `OVERHANG` is how far the body's outer edge may pass the asphalt edge, in the
- * planner's generous body width. 2.1 m puts the centre of a Zhiguli a metre out and its
- * left wheels a hand's width past the edge: the least that clears a car holding its lane
- * centre on this road, measured at 1.9-2.5 m — the old 1.8 never granted one at all.
+ * THE VERGE IS THE ROAD'S OWN SHOULDER, and it is the road that says how much of it
+ * there is: `EDGE_MARGIN` is what the body's outer edge may reach PAST the graded strip
+ * (`roadprofile.shoulderWidthM` for the surface here). The strip exists to carry the
+ * WHEELS, and the budget is the two gaps between the planner's body edge and the ground
+ * it is allowed to put a wheel on: about 0.4 m, because `CAR_HALF_WIDTH_M` is a
+ * generous body half-width and the outer wheel sits that much further in, and half a
+ * metre of that wheel in the sand beyond the strip — which is drivable ground, flush
+ * with the verge (`PASSING_VERGE_M`), just slower to be on, and the pass gives itself
+ * up if it stops gaining (`SHOULDER_PASS_MIN_GAIN_MPS`).
+ *
+ * On a highway's 1.35 m of crush that is 2.25 m of body edge, on cracked asphalt's
+ * 1.05 m 1.95 — exactly the line the pass needs past a car holding its lane centre to
+ * the centimetre, so a worn road is the boundary case and the measurement decides it:
+ * a car sitting a little further out in its lane is passed and one sitting in is not —
+ * a concrete road's wider verge grants 2.5, and the grader's spoil on a gravel road
+ * 2.0, which lets the pass happen there at all. The point of measuring it is that a
+ * pass is sized on the verge the road actually has, instead of a highway's on every
+ * road.
+ *
  * `GAP` is the room kept to the passed car's real flank, on top of the planner's own
  * body margin. The speed is the leader's plus `ADVANTAGE`, never above `MAX`: a pass
- * on the verge is a squeeze, not a sprint.
+ * on the verge is a squeeze, not a sprint. The wheels end up on the shoulder, whose own
+ * grip the speed profile already carries (`SURFACE_SPEED_FACTOR[LooseShoulder]`): the
+ * surface under the car is what the plan is built from, and it changes to the shoulder
+ * the moment a wheel is on it.
  */
-const SHOULDER_PASS_OVERHANG_M = 2.1;
+const SHOULDER_PASS_EDGE_MARGIN_M = 0.9;
 const SHOULDER_PASS_GAP_M = 0.25;
 const SHOULDER_PASS_ADVANTAGE_MPS = 6;
 const SHOULDER_PASS_MAX_MPS = 100 / 3.6;
@@ -745,13 +764,19 @@ const SHOULDER_PASS_STALL_S = 3;
 const SHOULDER_PASS_YIELD_MPS = 3;
 const SHOULDER_PASS_RETRY_M = 200;
 /**
- * THROUGH THE MIDDLE, the frantic driver's answer to a queue with traffic coming the
- * other way — and the way it is done on a two-lane road in this part of the world: the
- * car being passed moves over onto its verge, the car coming the other way moves over
- * onto its own, and the one in a hurry goes between them along the centre line. The
- * others make the room (`setYieldOffset`, asked for by the traffic coordinator); this
- * driver only ever takes a line whose room it has MEASURED, from the field's own
- * laterals, against every car it will meet on the way.
+ * THROUGH THE MIDDLE, the frantic driver's answer to a queue the opposing lane is not
+ * free enough to go round. There is no such lane as "the middle" and nobody gives it
+ * one: it MEASURES the room out of the traffic field — where the cars of the queue
+ * really are and where the cars coming the other way really are — and threads the body
+ * down the gap their flanks leave, re-measuring it every step as the stream moves. On a
+ * road one lane each way that gap is between the near flank of the queue and the middle
+ * of the lane beyond it.
+ *
+ * And the room is all it takes from the stream: whether the line is legal is the
+ * corridor's question, not this one. A line that only reaches over the crown is priced
+ * against the cars coming the other way by `straddleAllowed`; one that crosses is the
+ * ordinary crossing, granted or refused by `mayCrossCrown` and the measured oncoming
+ * gap behind it. Nothing here grants either.
  *
  * `BODY_HALF` is the half width assumed of each car met or passed (the field reports a
  * pessimistic 1.0 for all of them, the widest saloon being 0.9), `GAP` the air kept to
@@ -768,12 +793,6 @@ const MIDDLE_PASS_ADVANTAGE_MPS = 10;
 /** The line must reach at least this far toward the crown from the lane to be one. */
 const MIDDLE_PASS_MIN_SHIFT_M = 0.3;
 /**
- * MAKING ROOM: how far a yielding driver's line moves toward its own verge, and how far
- * past the asphalt its body may go doing it. Slewed, so the move reads as a driver
- * easing over rather than a lane change. See `setYieldOffset`.
- */
-const YIELD_OVERHANG_M = 0.6;
-/**
  * A line whose body reaches over the crown is allowed only clear of every car coming
  * the other way that it could meet within this many seconds, by `STRADDLE_GAP_M` of
  * air between the two real flanks. See `straddleAllowed` in the corridor.
@@ -781,7 +800,6 @@ const YIELD_OVERHANG_M = 0.6;
 const STRADDLE_LOOK_S = 4;
 const STRADDLE_LOOK_MIN_M = 30;
 const STRADDLE_GAP_M = 0.3;
-const YIELD_SLEW_MPS = 0.7;
 /** Verge proven clear of props ahead: this many seconds of travel, within bounds. */
 const SHOULDER_PASS_SIGHT_S = 5;
 const SHOULDER_PASS_SIGHT_MIN_M = 60;
@@ -1057,6 +1075,33 @@ const PASS_KICKDOWN_SHARE = 0.25;
  */
 const PASS_APPROACH_HEADWAY_SHARE = 0.3;
 const PASS_APPROACH_REACH = 2;
+/**
+ * SECONDS OF CLOSING the reach is also measured in, whichever answer is longer.
+ *
+ * A following distance is a headway at a matched pace and a countdown at a closing
+ * one: two of them are 86 m behind a leader at 30 m/s, which is 2.9 s when the
+ * difference is nothing and 1.4 s when it is twenty metres a second. Six seconds of
+ * closing is the same number for every differential — at 4 m/s it is 31 m, less than
+ * the headway reach, so the headway answer stands; at 20 m/s it is 127 m, and the
+ * driver starts reading the queue while it is still seven seconds away from the
+ * follower envelope rather than inside it. Planning only, never the lateral move
+ * (`passReach` in `commitLane` still times that on the move's own length): it decides
+ * when the line is looked for, not when the wheel is turned.
+ */
+const PASS_APPROACH_CLOSING_S = 6;
+/**
+ * Seconds of closing a racer wants between itself and the next car of a queue before
+ * it brings a crossing back into its own lane, and the road a gap must offer beyond
+ * that to be worth the manoeuvre at all; see the weave in `drive`.
+ *
+ * `HOLD_S` is the room to hold the lane rather than to brake in it — the follower
+ * settles at a headway, and this is a headway of closing. `HOLD_M` is the hysteresis
+ * against the distance the driver goes OUT at (`passReachM`): a gap a metre longer than
+ * the out-trigger is two lane changes inside a second, which is the shuttling this file
+ * has already been measured into, so the gap has to be a gap and not a hair.
+ */
+const WEAVE_HOME_HOLD_S = 2;
+const WEAVE_HOME_HOLD_M = 60;
 /**
  * Headway, in seconds of travel, a car must still have to its lead before a pass
  * may START.
@@ -1583,6 +1628,11 @@ export class Autopilot {
   private passShopping = false;
   /** This step's grant of the verge for passing a moving car; see SHOULDER_PASS_*. */
   private shoulderPassAllowed = false;
+  /**
+   * The verge this road has for that pass, metres of body edge past the asphalt; 0 when
+   * there is no grant. See SHOULDER_PASS_EDGE_MARGIN_M.
+   */
+  private shoulderPassOverhang = 0;
   /** The chosen line is that pass, on the verge beside a moving car. */
   private shoulderPassing = false;
   /** Road-frame lateral and half width of the car being passed, from the field. */
@@ -1614,9 +1664,7 @@ export class Autopilot {
     if (Math.abs(neighbour.lateral - this.shoulderLaneOffset) > neighbour.halfWidth + CAR_HALF_WIDTH_M) return;
     this.middleQueueEdge = Math.min(this.middleQueueEdge, neighbour.lateral * this.shoulderSideSign);
   };
-  /** How far toward its verge this driver has been asked to move, and has moved. */
-  private yieldTarget = 0;
-  private yieldValue = 0;
+  /** Obstacles the thread line has to clear, and the band each is given. See MIDDLE_PASS_*. */
   private middleObstacles: CorridorObstacle[] | null = null;
   private middleObstacleHalf = 0;
   private readonly visitMiddleOncoming = (neighbour: TrafficNeighbour): void => {
@@ -1680,7 +1728,7 @@ export class Autopilot {
     const outward = hazard.lateral * this.shoulderSideSign;
     const edge = this.asphaltHalfWidth;
     if (outward + hazard.radius < edge - CAR_HALF_WIDTH_M) return;
-    if (outward - hazard.radius > edge + SHOULDER_PASS_OVERHANG_M + AVOID_HYSTERESIS_M) return;
+    if (outward - hazard.radius > edge + this.shoulderPassOverhang + AVOID_HYSTERESIS_M) return;
     this.shoulderVergeBlocked = true;
   };
   /**
@@ -2144,18 +2192,7 @@ export class Autopilot {
   setPassingEnabled(enabled: boolean): void {
     this.passingEnabled = enabled;
   }
-  /**
-   * MAKE ROOM FOR SOMEBODY IN A HURRY: hold a line this many metres toward this
-   * driver's own verge, the body allowed `YIELD_OVERHANG_M` past the asphalt, until
-   * asked for 0 again. That is a road one lane each way; a wider one has a lane for it,
-   * and the driver takes the outer one.
-   * The coordinator asks it of the car a frantic driver is held up behind and of the
-   * cars coming the other way; see MIDDLE_PASS_*.
-   */
-  setYieldOffset(metres: number): void {
-    this.yieldTarget = Math.max(0, metres);
-  }
-  /** True while a racer is going through the middle, between two cars that made room. */
+  /** True while a racer is threading the middle, between the cars on either side. */
   get middlePassing(): boolean {
     return this.middlePassingValue;
   }
@@ -2577,31 +2614,10 @@ export class Autopilot {
     const widePaceStep = ((WIDE_ROAD_PACE - 1) / WIDE_PACE_RAMP_S) * Math.max(dt, 0);
     this.widePaceValue += clamp(widePaceTarget - this.widePaceValue, -widePaceStep, widePaceStep);
     const desiredSpeed = ownPace * this.widePaceValue;
-    // A driver making room for somebody in a hurry on a road with a lane for it moves
-    // over into that lane; see `setYieldOffset`.
     const homeLane =
-      ownPace >= INNER_LANE_PACE_MPS && this.yieldTarget === 0 ? 0 : Math.min(lanesPerSide, lanesAhead) - 1;
+      ownPace >= INNER_LANE_PACE_MPS ? 0 : Math.min(lanesPerSide, lanesAhead) - 1;
     this.homeLaneValue = homeLane;
     const ownLaneOffset = this.road.laneCentreAt(this.hintS, homeLane);
-    const yieldStep = YIELD_SLEW_MPS * Math.max(dt, 0);
-    this.yieldValue += clamp(
-      (lanesPerSide === 1 ? this.yieldTarget : 0) - this.yieldValue,
-      -yieldStep,
-      yieldStep,
-    );
-    // Where this driver means to be in its lane: the centre, or toward the verge while
-    // it is making room. The lane itself, and every probe cast down it, stay put.
-    const laneHome =
-      this.yieldValue > 0
-        ? Math.sign(ownLaneOffset || -1) *
-          Math.max(
-            Math.abs(ownLaneOffset),
-            Math.min(
-              Math.abs(ownLaneOffset) + this.yieldValue,
-              this.road.halfWidthAt(this.hintS) + YIELD_OVERHANG_M - CAR_HALF_WIDTH_M,
-            ),
-          )
-        : ownLaneOffset;
     const passingEdge = this.asphaltHalfWidth + PASSING_VERGE_M;
     const staticAvoidEdge = this.asphaltHalfWidth + STATIC_AVOID_VERGE_M;
     const staticAvoidLine = staticAvoidEdge - CAR_HALF_WIDTH_M;
@@ -3047,12 +3063,29 @@ export class Autopilot {
     // as the former closed the gaps a blocked queue needs to unwind through: measured
     // on the real road at seed 1337, which is a seed with a blockage on it, 56% of
     // car-time under 8 km/h and an 81 s standstill against 23% and 14 s.
+    //
+    // THE DISTANCE IT HAS TO BE CAUGHT BY IS TWO ANSWERS, WHICHEVER IS LONGER. Two
+    // following distances is a headway, which is the right trigger for a leader closing
+    // slowly — there is no rush at four metres a second. It is the wrong one for a car
+    // arriving on something twenty metres a second slower, where the same two following
+    // distances are a second and a half: by the time the driver has seen it, the
+    // following envelope has arrived, the line is planned inside the braking zone, and
+    // the "pass" begins with a brake. So the reach is also asked for in CLOSING time,
+    // and the longer of the two wins — a reach that only ever grows, and only for the
+    // arrivals that need it.
+    const passClosing = Math.max(
+      0,
+      speed - Math.max(0, this.corridorLaneBlockSpeed),
+    );
+    const passReachM = Math.max(
+      PASS_APPROACH_REACH * (FOLLOW_STANDOFF_M + speed * comfortHeadwayS),
+      FOLLOW_STANDOFF_M + passClosing * PASS_APPROACH_CLOSING_S,
+    );
     const passUrge =
       (config.overtakes || config.lanePasses) &&
       this.corridorLaneBlockSpeed > PASS_MIN_SPEED_MPS &&
       this.corridorLaneBlockSpeed < desiredSpeed - PASS_ADVANTAGE_MPS &&
-      this.corridorLaneBlockDistance <=
-        PASS_APPROACH_REACH * (FOLLOW_STANDOFF_M + speed * comfortHeadwayS);
+      this.corridorLaneBlockDistance <= passReachM;
     /**
      * AND IT HAS TO BE A DRIVER THAT ACTUALLY WANTS THE OTHER LANE, which is what
      * `passShopping` records: last step's plan either asked for the crossing and was
@@ -3067,8 +3100,9 @@ export class Autopilot {
      */
     const passAttempt = passUrge && this.passShopping;
     this.passUrgeValue = passUrge;
-    // MAY THIS DRIVER PASS ON THE RIGHT THIS STEP? See SHOULDER_PASS_OVERHANG_M.
+    // MAY THIS DRIVER PASS ON THE RIGHT THIS STEP? See SHOULDER_PASS_EDGE_MARGIN_M.
     this.shoulderPassAllowed = false;
+    this.shoulderPassOverhang = 0;
     if (
       config.racer &&
       lanesPerSide === 1 &&
@@ -3078,7 +3112,9 @@ export class Autopilot {
       (passUrge || this.shoulderPassing) &&
       // A given-up pass keeps the verge only until it is out from alongside.
       (this.shoulderYielding ? this.shoulderAlongside : this.travelled >= this.shoulderBarredUntil) &&
-      currentSurface !== SurfaceType.Gravel &&
+      // The sand is not a lane and rock is not a verge; the grader's spoil on a gravel
+      // road IS the road's own material, and the room test below sizes the pass on its
+      // 1.1 m strip anyway, so only the two surfaces that are genuinely unfit are barred.
       currentSurface !== SurfaceType.Sand &&
       currentSurface !== SurfaceType.Rock &&
       this.trafficField
@@ -3092,7 +3128,9 @@ export class Autopilot {
         SHOULDER_PASS_SIGHT_MIN_M,
         SHOULDER_PASS_SIGHT_MAX_M,
       );
-      // The line that clears the leader's real flank must fit inside the overhang.
+      // The line that clears the leader's real flank, and the verge this road has to
+      // fit it on.
+      const overhangLimit = shoulderWidthM(currentSurface) + SHOULDER_PASS_EDGE_MARGIN_M;
       const passLine =
         this.shoulderLeaderLateral +
         this.shoulderSideSign *
@@ -3100,10 +3138,11 @@ export class Autopilot {
       const overhang = Math.abs(passLine) + CAR_HALF_WIDTH_M - this.asphaltHalfWidth;
       if (
         this.shoulderLeaderGap < Infinity &&
-        overhang <= SHOULDER_PASS_OVERHANG_M &&
+        overhang <= overhangLimit &&
         this.straightAhead(this.hintS, sightM, config.passCurvature)
       ) {
         this.shoulderVergeBlocked = false;
+        this.shoulderPassOverhang = overhangLimit;
         this.hazards.forEachAhead(this.hintS, sightM, this.visitShoulderHazard);
         this.shoulderPassAllowed = !this.shoulderVergeBlocked;
         // The exact line, as a candidate of its own: the search's quarter-metre lattice
@@ -3147,18 +3186,25 @@ export class Autopilot {
       if (this.shoulderLeaderGap < Infinity && this.straightAhead(this.hintS, sightM, config.passCurvature)) {
         this.middleOwnHalf = vehicle.modelMeasure.halfExtents[0];
         // The line clears the whole queue it goes past, not only the car at its head:
-        // each of them has moved over as far as its own verge let it.
+        // the near flank of every one of them, measured, and the widest band this car
+        // needs to be past it.
         this.middleQueueLimit = this.shoulderLeaderGap + MIDDLE_PASS_QUEUE_M;
         this.middleQueueEdge = this.shoulderLeaderLateral * middleSide;
         this.trafficField.forEachNear(this.middleQueueLimit, 0, this.visitMiddleQueue);
         this.middleLine =
           middleSide * this.middleQueueEdge -
           middleSide * (MIDDLE_PASS_BODY_HALF_M + MIDDLE_PASS_GAP_M + this.middleOwnHalf);
-        // A line past the crown is a crossing, priced by the crossing's own gate; one
-        // that hardly leaves the lane is no way past at all.
+        // A REAL SHIFT TOWARD THE CROWN, AND NEVER DEEPER THAN THE BORROWED LANE'S
+        // MIDDLE. Everything else about the line is the corridor's to admit: one that
+        // only reaches over the crown is priced against the cars coming the other way
+        // (`straddleAllowed`), one that crosses it is the ordinary crossing
+        // (`mayCrossCrown`, and the measured oncoming gap behind it), and both are
+        // measured against the real bodies here. A line that hardly leaves the lane is
+        // no way past anything, and one past the middle of the opposing lane is not a
+        // gap between two cars — it is a second car parked in the oncoming lane.
         if (
           (this.middleLine - ownLaneOffset) * middleSide <= -MIDDLE_PASS_MIN_SHIFT_M &&
-          this.middleLine * middleSide >= -CAR_HALF_WIDTH_M * 0.5 + 0.05
+          this.middleLine * middleSide >= -Math.abs(ownLaneOffset)
         ) {
           this.middleClear = true;
           this.trafficField.forEachNear(MIDDLE_PASS_LOOK_M, 0, this.visitMiddleNeighbour);
@@ -3178,10 +3224,12 @@ export class Autopilot {
       }
     }
     // WHAT IS COMING THE OTHER WAY IS AN OBSTACLE LIKE ANY OTHER, AT ITS REAL LATERAL.
-    // The middle line never crosses the crown, so nothing else puts an oncoming car in
-    // front of the planner — and a probe down the opposing lane would give it that
-    // lane's whole width, which is the room the oncoming driver has just made. A car
-    // that stops making room is braked for, not driven into.
+    // Everything the planner is otherwise given is a band on a LANE or on the one car
+    // it is passing, and a line through the middle is exactly the case where a car
+    // coming the other way is not in any of them: priced only by the crossing gate's
+    // single measured gap, it would be a head-on the moment that gap closed. At its
+    // real lateral it is a body to be steered clear of, like every other, and a gap
+    // that closes is braked for, not driven into.
     if ((this.middlePassAllowed || this.middlePassingValue) && this.trafficField) {
       this.middleObstacles = obstacles;
       this.middleObstacleHalf = middleBandHalf;
@@ -3561,7 +3609,7 @@ export class Autopilot {
     const corridorRequest = {
       ownLateral: projection.lateral,
       previousLine: this.planLine,
-      laneOffset: laneHome,
+      laneOffset: ownLaneOffset,
       speed,
       desiredSpeed,
       halfWidth: CAR_HALF_WIDTH_M,
@@ -3580,8 +3628,7 @@ export class Autopilot {
       edgeLimit: staticAvoidLine,
       lateralFreedom,
       mayCrossCrown,
-      shoulderPassOverhang: this.shoulderPassAllowed ? SHOULDER_PASS_OVERHANG_M : 0,
-      yieldOverhang: laneHome !== ownLaneOffset ? YIELD_OVERHANG_M : 0,
+      shoulderPassOverhang: this.shoulderPassAllowed ? this.shoulderPassOverhang : 0,
       straddleAllowed: this.trafficField && lanesPerSide === 1 ? this.straddleAllowed : undefined,
       lineAllowed: this.lineEntryAllowed,
       // The mode's whole appetite for the opposing lane, in one number — and a
@@ -3621,6 +3668,46 @@ export class Autopilot {
       const middle = evaluateCorridorLine(corridorRequest, this.middleLine);
       if (middle.admissible && middle.feasible && middle.blockDistance > proposal.blockDistance) {
         proposal = middle;
+      }
+    }
+    // A CROSSING IS BORROWED FOR ONE CAR AT A TIME, AND GIVEN BACK IN THE GAP.
+    //
+    // The measured pass is sized to the first slot past the car at the head of the
+    // queue (`sizePass`), so one borrow is already meant to be "past this car and into
+    // the gap in front of it" rather than "past everything to the horizon". What it
+    // never asks is for the lane BACK afterwards: while the opposing lane stays clear
+    // a crossing keeps pricing cheaper than the queue, so a racer in a traffic stream
+    // rides the wrong side past car after car on one borrow, up to `PASS_MAX_METRES`.
+    // A driver threading a queue goes in and out of it instead, and that is also the
+    // safer reading of "any available way past": the borrow is a manoeuvre, not a
+    // second lane.
+    //
+    // Two things have to be true for the lane to be worth taking back, and the first
+    // is the safety one. The lane home must be admissible — and the corridor's own
+    // gates already say the car this crossing was taken for is no longer in the way:
+    // the abeam veto refuses to steer into it and the swept test to drive through it,
+    // so the admissible line home has its space. It must also leave `HOLD_S` seconds
+    // of CLOSING to the next car of the queue, which is the room to be in the lane
+    // rather than to brake in it — the follower settles at a headway, and this is a
+    // headway of closing — and a car still being passed fails that on its own: the gap
+    // to it is metres and closing fast.
+    //
+    // The second is that there is nothing to gain by staying out. A gap only just
+    // longer than the distance at which this driver goes out again is a lane change for
+    // its own sake — two of those inside a second is the "cars shuttling between lanes"
+    // this file has already been measured into — so the next car of the queue has to be
+    // `HOLD_M` past that out-trigger as well. Coming home into a real break in the
+    // traffic, staying out through a queue that offers none, and taking the next line
+    // from inside the lane every time.
+    if (this.planUsesOncomingLane && proposal.usesOncomingLane) {
+      const home = evaluateCorridorLine(corridorRequest, ownLaneOffset);
+      const homeClosing = Math.max(MIN_CLOSING_MPS, speed - Math.max(0, home.blockSpeed));
+      if (
+        home.admissible &&
+        (home.blockDistance - FOLLOW_STANDOFF_M) / homeClosing >= WEAVE_HOME_HOLD_S &&
+        home.blockDistance > passReachM + WEAVE_HOME_HOLD_M
+      ) {
+        proposal = home;
       }
     }
     this.lastCrossingRefused = proposal.crossingRefused;
@@ -3682,7 +3769,7 @@ export class Autopilot {
     const committedLine = this.commitLane(
       proposal.line,
       projection.lateral,
-      laneHome,
+      ownLaneOffset,
       this.hintS,
       proposal.laneBlockDistance,
       proposal.laneBlockSpeed,

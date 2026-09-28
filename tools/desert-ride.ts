@@ -57,7 +57,7 @@ const SEEDS = [1, 7, 42, 1337];
 // A STOPPED CAR ON SAND IS ALWAYS DIGGING, which is what makes this statics simple.
 // The dig's gate is speed (see DIG_FIRM_MU in vehicle.ts), and a car in this census is
 // stopped by definition, so the dig is fully in: the effective driven-axle μ is
-// DIG_FIRM_MU and the rolling resistance is DIG_FIRM_RR, not the loose sand's own 0.16.
+// DIG_FIRM_MU and the rolling resistance is DIG_FIRM_RR, not the loose sand's own figure.
 // Both halves matter and neither may be left out — with the honest μ of 0.44 and the
 // loose rolling resistance, essentially every slope in this desert would strand a
 // two-wheel-drive car, which is exactly the report the concession exists to prevent.

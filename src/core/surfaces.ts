@@ -273,11 +273,16 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     // it and sinks, not because the surface is smooth.
     mu: 0.51,
     optimalSlip: 0.3,
-    // Rolling resistance is where sand's cost really lives, and this used to be 0.095 —
-    // less than an eighth of what a car tyre actually sees on loose sand, measured at
-    // 0.2 to 0.4 with sinkage. It is now well above the road figures, which is what
-    // makes crossing a dune slow and thirsty rather than merely slippery.
-    rollingResistance: 0.16,
+    // Rolling resistance is where sand's cost lives: five times a road's, which is what
+    // makes crossing a dune slow and thirsty rather than merely slippery. It is capped
+    // by what a two-wheel-drive car can PUSH here, not by the loose-sand literature's
+    // 0.2-0.4. The driven axle of a rear-drive saloon on period tyres makes about 0.12
+    // of the car's weight on this mu, and at the former 0.16 every such car hit a wall
+    // at 29 km/h, the speed where the dig (DIG_FULL_MPS) has faded: flat sand, full
+    // throttle, any engine, first gear on the cut for good, because no amount of power
+    // raises a traction limit. 0.07 leaves the weakest of the fleet a margin to go on
+    // accelerating in, and a coasting car still bleeds speed fast.
+    rollingResistance: 0.07,
     // The ploughing drag: a tyre travelling sideways through sand builds a bank against
     // its sidewall. This is what makes a broadside skid in sand shed speed and trip the
     // car instead of holding a clean line forever.

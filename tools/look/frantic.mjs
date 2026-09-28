@@ -58,10 +58,8 @@ try {
       const a = b.autopilot;
       const v = a.controlledVehicle;
       const cars = b.traffic.carList;
-      let yielding = 0;
       let frantic = null;
       for (const car of cars) {
-        if (car.autopilot.yieldValue > 0.3) yielding++;
         if (car.style !== 'frantic' || car.direction !== 1) continue;
         const rel = car.forwardS - a.hintS;
         if (!frantic || Math.abs(rel) < Math.abs(frantic.rel)) {
@@ -83,7 +81,6 @@ try {
         middle: a.middlePassing,
         urge: a.passUrge,
         line: +a.planLine.toFixed(2),
-        yielding,
         cars: cars.length,
         frantic,
       };
@@ -91,7 +88,7 @@ try {
     const f = state.frantic;
     console.log(
       `s${state.s} ${state.kmh}>${state.target} km/h ${state.activity}${state.middle ? ' MIDDLE' : ''}` +
-        `${state.urge ? ' urge' : ''} line ${state.line} yielding ${state.yielding}/${state.cars}` +
+        `${state.urge ? ' urge' : ''} line ${state.line} cars ${state.cars}` +
         (f ? ` | frantic ${f.model} ${f.rel} m lat ${f.lat} ${f.kmh} km/h ${f.activity}${f.middle ? ' MIDDLE' : ''}` : ''),
     );
     const passing =

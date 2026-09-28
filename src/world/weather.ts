@@ -92,6 +92,12 @@ type Key = readonly [t: number, values: Partial<WeatherChannels>];
  * the rain; a haboob's wind and blowing sand before its wall, the wall visible for
  * minutes before it arrives, the dust thinning slowly afterwards; and after both, the
  * clearest air of the day.
+ *
+ * The horizon cells are the storm's WARNING and its departure, nothing else: the towers
+ * of a front still forty kilometres off, and the back of it retreating. Under the
+ * closed deck in the rain they are gone — the car is inside the storm, there is
+ * nothing on the horizon to see, and sunlit crowns under a black sky read as a
+ * rendering fault, not as weather.
  */
 const EPISODES: Record<Exclude<WeatherKind, 'clear'>, readonly Key[]> = {
   storm: [
@@ -100,10 +106,10 @@ const EPISODES: Record<Exclude<WeatherKind, 'clear'>, readonly Key[]> = {
     [0.2, { halo: 0.45, cloud: 0.2, cells: 0.45, wind: 0.15 }],
     [0.3, { halo: 0.1, cloud: 0.45, cells: 1, wind: 0.35 }],
     [0.38, { cloud: 0.8, cells: 1, wind: 0.55, rain: 0.1 }],
-    [0.44, { cloud: 1, cells: 0.6, wind: 0.5, rain: 0.85, wet: 0.7 }],
-    [0.5, { cloud: 1, cells: 0.4, wind: 0.45, rain: 1, wet: 1 }],
-    [0.62, { cloud: 1, cells: 0.4, wind: 0.4, rain: 0.9, wet: 1 }],
-    [0.69, { cloud: 0.6, cells: 0.6, wind: 0.25, rain: 0.15, wet: 1, clarity: 0.4 }],
+    [0.44, { cloud: 1, wind: 0.5, rain: 0.85, wet: 0.7 }],
+    [0.5, { cloud: 1, wind: 0.45, rain: 1, wet: 1 }],
+    [0.62, { cloud: 1, wind: 0.4, rain: 0.9, wet: 1 }],
+    [0.69, { cloud: 0.6, cells: 0.3, wind: 0.25, rain: 0.15, wet: 1, clarity: 0.4 }],
     [0.76, { cloud: 0.3, cells: 0.5, wind: 0.12, wet: 0.85, clarity: 1 }],
     [0.88, { cloud: 0.12, cells: 0.2, wet: 0.35, clarity: 0.8 }],
     [1, {}],

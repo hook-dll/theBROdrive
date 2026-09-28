@@ -359,6 +359,23 @@ export function cloudShadowFactorFromPan(
 // ---------------------------------------------------------------------------
 
 /**
+ * Lamps whose reflection a wet road draws, at most: three cars' headlamp pairs.
+ *
+ * WHY NOT THE SPOTLIGHTS. A spotlight's glint is the GGX lobe of its own pool of light,
+ * and two things about that pool make it the wrong carrier for the reflection. It is
+ * faded out between 60 and 130 m for every car but the driven one (`ambientBeamGain`),
+ * so an oncoming car's reflection only arrived when it was nearly alongside; and a
+ * rough lobe round the mirror point reads as a blob sunk under the surface. So each
+ * lamp is drawn here directly, visible from as far as the lamp is, as a band LYING ON
+ * THE ROAD: from the ground under the lamp towards the ground under the eye, measured
+ * in metres on the fragment's own plane, narrow at the lamp and widening as it comes
+ * over. A screen-space mirror streak was tried first; being one screen width top to
+ * bottom, it read as a pillar of light standing down into the ground. Road deck only
+ * (`WET_SHEEN`), only while wet, a uniform-bounded loop.
+ */
+const WET_GLARE_MAX = 6;
+
+/**
  * Written once and shared by every ground material. The literals come from the
  * constants above rather than being retyped, because the CPU twin and the shader
  * disagreeing about a lattice spacing is a bug nobody would find by looking.
@@ -436,6 +453,11 @@ varying float vCloudShade;
 varying float vWetMask;
 uniform float uCloudStrength;
 uniform float uWet;
+#ifdef WET_SHEEN
+uniform int uGlareCount;
+uniform vec4 uGlarePos[ ${WET_GLARE_MAX} ];
+uniform vec3 uGlareDir[ ${WET_GLARE_MAX} ];
+#endif
 `;
 
 /**
@@ -510,6 +532,41 @@ const CLOUD_FRAGMENT_HOOK = /* glsl */ `
 		float wetNdv = clamp( dot( normal, normalize( vViewPosition ) ), 0.0, 1.0 );
 		float wetFresnel = 0.03 + 0.97 * pow( 1.0 - wetNdv, 5.0 );
 		outgoingLight = mix( outgoingLight, fogColor * 1.08, wetFresnel * vWetMask * 0.9 );
+		// Other cars' headlamps in the water: a band of light LYING ON THE ROAD, from
+		// the ground under each lamp towards the ground under the eye. See
+		// WET_GLARE_MAX for why this is not left to the spotlights' own specular.
+		vec3 glare = vec3( 0.0 );
+		if ( uGlareCount > 0 ) {
+			vec3 gP = - vViewPosition;
+			vec3 gN = nonPerturbedNormal;
+			// The eye dropped onto this fragment's plane.
+			vec3 eyeGround = gN * dot( gP, gN );
+			for ( int i = 0; i < ${WET_GLARE_MAX}; i ++ ) {
+				if ( i >= uGlareCount ) break;
+				vec3 lamp = ( viewMatrix * vec4( uGlarePos[ i ].xyz, 1.0 ) ).xyz;
+				vec3 lampGround = lamp - gN * dot( lamp - gP, gN );
+				vec3 path = eyeGround - lampGround;
+				float pathLen = length( path );
+				if ( pathLen < 1.0 ) continue;
+				vec3 pathDir = path / pathLen;
+				// Metres along the band from the lamp, and metres across it, both
+				// measured on the road: the band keeps the asphalt's perspective.
+				vec3 fromLamp = gP - lampGround;
+				float along = dot( fromLamp, pathDir );
+				float across = length( fromLamp - along * pathDir );
+				// Narrow at the lamp, spreading as it comes towards the eye.
+				float halfWidth = 0.16 + 0.012 * max( along, 0.0 );
+				float band = exp( - across * across / ( halfWidth * halfWidth ) );
+				// Starts at the lamp, brightest there, and fades out on the way over.
+				band *= smoothstep( - 0.6, 0.8, along ) * exp( - max( along, 0.0 ) / ( 8.0 + pathLen * 0.35 ) );
+				band *= 1.0 - smoothstep( pathLen * 0.85, pathLen, along );
+				// A headlamp throws its light forward: nothing off the back of the car.
+				vec3 lampFwd = ( viewMatrix * vec4( uGlareDir[ i ], 0.0 ) ).xyz;
+				float aim = smoothstep( 0.0, 0.6, dot( normalize( lampFwd - gN * dot( lampFwd, gN ) ), pathDir ) );
+				glare += band * aim * uGlarePos[ i ].w / ( 1.0 + pathLen / 80.0 );
+			}
+		}
+		outgoingLight += vec3( 1.0, 0.93, 0.8 ) * glare * wetFresnel * vWetMask;
 		#endif
 	}
 #include <opaque_fragment>`;
@@ -537,6 +594,10 @@ const uniforms = {
   uWet: { value: 0 },
   /** The rebase origin reduced into one wet-patch period: puddles stay put on a rebase. */
   uGroundPan: { value: new THREE.Vector2() },
+  /** Wet-road glare lamps: scene-space position and strength, and forward (see WET_GLARE_MAX). */
+  uGlareCount: { value: 0 },
+  uGlarePos: { value: Array.from({ length: WET_GLARE_MAX }, () => new THREE.Vector4()) },
+  uGlareDir: { value: Array.from({ length: WET_GLARE_MAX }, () => new THREE.Vector3(0, 0, 1)) },
 };
 
 /** Materials already carrying the injection, so a second call cannot double it. */
@@ -661,3 +722,24 @@ export function cloudShadowFrame(): {
     detail: uniforms.uCloudDetail.value,
   };
 }
+
+/** Starts the frame's wet-road glare list (see WET_GLARE_MAX). */
+export function beginWetGlare(): void {
+  uniforms.uGlareCount.value = 0;
+}
+
+/**
+ * Adds one lit headlamp: its scene-space position, the way it points, and a strength
+ * (1 for a dipped beam). Refused silently once the list is full, so the caller offers
+ * nearest first.
+ */
+export function addWetGlare(position: THREE.Vector3, forward: THREE.Vector3, strength: number): void {
+  const n = uniforms.uGlareCount.value;
+  if (n >= WET_GLARE_MAX || !(strength > 0)) return;
+  uniforms.uGlarePos.value[n].set(position.x, position.y, position.z, strength * WET_GLARE_GAIN);
+  uniforms.uGlareDir.value[n].copy(forward);
+  uniforms.uGlareCount.value = n + 1;
+}
+
+/** Peak linear radiance a streak adds before Fresnel, per unit lamp strength. */
+const WET_GLARE_GAIN = 2.5;

@@ -206,6 +206,12 @@ export interface WorldState {
   cars: Record<string, CarState>;
   /** Persistent contents of deterministic static wreck trunks, keyed by wreck id. */
   wreckStorage: Record<string, (Item | null)[]>;
+  /**
+   * Persistent service cells of deterministic static wreck bonnets, keyed by wreck id.
+   * The cells are fixed by `BONNET_SLOT_KINDS` (engine, turbine, radiator, tank, air
+   * filter); a wreck's bonnet gives up worn parts, its trunk gives up cans and tools.
+   */
+  wreckBonnet: Record<string, (Item | null)[]>;
   /** Trailers standing in the world or coupled to a car, keyed by trailer id. */
   trailers: Record<string, TrailerState>;
   /** Parts lying loose in the world, keyed by part id. */
@@ -261,6 +267,18 @@ export type WorldDelta =
   | { t: 'car_engine_temp'; carId: string; celsius: number }
   | { t: 'car_storage'; carId: string; cell: number; item: Item | null }
   | { t: 'wreck_storage'; wreckId: string; cell: number; item: Item | null }
+  | { t: 'wreck_bonnet'; wreckId: string; cell: number; item: Item | null }
+  /**
+   * A generated shell's first contents. Bulk rather than one delta per cell because
+   * this is world generation, not a player edit: the per-cell deltas are what the
+   * autosave listens for, and materialising a POI must not queue a save per find.
+   */
+  | {
+      t: 'wreck_loot';
+      wreckId: string;
+      bonnet: readonly (Item | null)[];
+      trunk: readonly (Item | null)[];
+    }
   | {
       t: 'courier_storage';
       courierId: string;
@@ -326,6 +344,7 @@ export function newWorldState(seed: number): WorldState {
     },
     cars: {},
     wreckStorage: {},
+    wreckBonnet: {},
     courierStorage: {},
     completedContractIds: [],
     trailers: {},
@@ -434,6 +453,11 @@ export class GameWorld {
       }
     }
     for (const storage of Object.values(state.wreckStorage)) {
+      for (const item of storage) {
+        if (item) bump(item.id);
+      }
+    }
+    for (const storage of Object.values(state.wreckBonnet)) {
       for (const item of storage) {
         if (item) bump(item.id);
       }
@@ -612,6 +636,18 @@ export class GameWorld {
         storage[delta.cell] = delta.item;
         break;
       }
+      case 'wreck_bonnet': {
+        if (delta.cell < 0 || delta.cell >= BONNET_SLOT_COUNT) break;
+        const storage =
+          s.wreckBonnet[delta.wreckId] ??
+          (s.wreckBonnet[delta.wreckId] = new Array<Item | null>(BONNET_SLOT_COUNT).fill(null));
+        storage[delta.cell] = delta.item;
+        break;
+      }
+      case 'wreck_loot':
+        s.wreckBonnet[delta.wreckId] = delta.bonnet.slice();
+        s.wreckStorage[delta.wreckId] = delta.trunk.slice();
+        break;
       case 'trailer_add':
         s.trailers[delta.trailer.id] = delta.trailer;
         break;

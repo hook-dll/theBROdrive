@@ -93,6 +93,7 @@ export function installVehicleAutosave(
       case 'car_bonnet':
       case 'car_lights':
       case 'wreck_storage':
+      case 'wreck_bonnet':
       case 'trailer_hitch':
       case 'trailer_cargo':
       case 'sticker_place':
@@ -385,6 +386,7 @@ export function migrateState(raw: unknown): WorldState {
   const looseItemsRaw = recordField(obj.looseItems, 'looseItems');
   const trailersRaw = recordField(obj.trailers, 'trailers');
   const wreckStorageRaw = recordField(obj.wreckStorage, 'wreckStorage');
+  const wreckBonnetRaw = recordField(obj.wreckBonnet, 'wreckBonnet');
   const courierStorageRaw = recordField(obj.courierStorage, 'courierStorage');
 
   const seed = seedRaw >>> 0;
@@ -437,6 +439,11 @@ export function migrateState(raw: unknown): WorldState {
   const wreckStorage: Record<string, (Item | null)[]> = {};
   for (const [id, value] of Object.entries(wreckStorageRaw)) {
     wreckStorage[id] = migrateStorage(value, TRUNK_CELL_COUNT, `wreck "${id}" trunk`);
+  }
+
+  const wreckBonnet: Record<string, (Item | null)[]> = {};
+  for (const [id, value] of Object.entries(wreckBonnetRaw)) {
+    wreckBonnet[id] = migrateStorage(value, BONNET_SLOT_COUNT, `wreck "${id}" bonnet`);
   }
 
   const courierStorage: Record<string, (Item | null)[]> = {};
@@ -502,6 +509,7 @@ export function migrateState(raw: unknown): WorldState {
     player,
     cars,
     wreckStorage,
+    wreckBonnet,
     courierStorage,
     completedContractIds: migrateStringArray(obj.completedContractIds),
     trailers,

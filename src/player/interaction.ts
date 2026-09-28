@@ -45,6 +45,7 @@ import {
   bonnetPart,
   bonnetSlotKind,
   bonnetWaterCapacity,
+  BONNET_SLOT_COUNT,
   partContainer,
 } from '../vehicle/bonnet';
 import { setPartCondition } from '../render/materials';
@@ -247,6 +248,8 @@ const STICKER_HINT = 'sticker in hand · aim at a car to try it on';
 
 const EMPTY_WRECK_TRUNK: readonly (Item | null)[] =
   new Array<Item | null>(TRUNK_CELL_COUNT).fill(null);
+const EMPTY_WRECK_BONNET: readonly (Item | null)[] =
+  new Array<Item | null>(BONNET_SLOT_COUNT).fill(null);
 
 /**
  * A serviceable reservoir, resolved from the bonnet slot the crosshair is on.
@@ -693,7 +696,11 @@ export class Interaction {
   private storageCells(
     target: { readonly owner: StorageOwnerKind; readonly side: StorageSide; readonly id: string },
   ): readonly (Item | null)[] | null {
-    if (target.owner === 'wreck') return this.world.state.wreckStorage[target.id] ?? EMPTY_WRECK_TRUNK;
+    if (target.owner === 'wreck') {
+      return target.side === 'bonnet'
+        ? this.world.state.wreckBonnet[target.id] ?? EMPTY_WRECK_BONNET
+        : this.world.state.wreckStorage[target.id] ?? EMPTY_WRECK_TRUNK;
+    }
     if (target.owner === 'courier') {
       const courier = this.couriers.get(target.id);
       return this.world.state.courierStorage[target.id] ?? courier?.defaultStorage ?? null;
@@ -974,27 +981,32 @@ export class Interaction {
     for (const wreck of this.wreckTrunks.values()) {
       this.trunkPosition.set(wreck.x - this.origin.x, wreck.y, wreck.z - this.origin.z);
       this.trunkQuaternion.set(wreck.qx, wreck.qy, wreck.qz, wreck.qw);
-      if (
-        this.pickStorage(
-          eyeX,
-          eyeY,
-          eyeZ,
-          dx,
-          dy,
-          dz,
-          this.trunkPosition,
-          this.trunkQuaternion,
-          wreck.halfExtents,
-          'trunk',
-        )
-      ) {
-        keep(this.trunkPickedDistance, {
-          kind: 'storage',
-          owner: 'wreck',
-          side: 'trunk',
-          id: wreck.id,
-          cell: this.trunkPickedCell,
-        });
+      // Both ends of a shell are openable, exactly as a driven car's are: the rear
+      // gives up the trunk's cans and tools, the service cells under the bonnet give
+      // up the worn parts. The nearer plane wins, so a buried nose exposes its boot.
+      for (const side of ['trunk', 'bonnet'] as const) {
+        if (
+          this.pickStorage(
+            eyeX,
+            eyeY,
+            eyeZ,
+            dx,
+            dy,
+            dz,
+            this.trunkPosition,
+            this.trunkQuaternion,
+            wreck.halfExtents,
+            side,
+          )
+        ) {
+          keep(this.trunkPickedDistance, {
+            kind: 'storage',
+            owner: 'wreck',
+            side,
+            id: wreck.id,
+            cell: this.trunkPickedCell,
+          });
+        }
       }
     }
 
@@ -1654,7 +1666,11 @@ export class Interaction {
       }
       if (result.action === 'none') return;
       if (t.owner === 'wreck') {
-        this.world.apply({ t: 'wreck_storage', wreckId: t.id, cell: t.cell, item: result.item });
+        this.world.apply(
+          t.side === 'bonnet'
+            ? { t: 'wreck_bonnet', wreckId: t.id, cell: t.cell, item: result.item }
+            : { t: 'wreck_storage', wreckId: t.id, cell: t.cell, item: result.item },
+        );
       } else if (t.owner === 'courier') {
         const nextCells = cells.slice();
         nextCells[t.cell] = result.item;

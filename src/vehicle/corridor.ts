@@ -155,18 +155,12 @@ export interface CorridorRequest {
   /**
    * How far past the asphalt the body's edge may go on THIS driver's side to pass a
    * MOVING car on the right, metres; 0 (the default) is no such pass. The caller grants
-   * it only where the verge is fit for it — see `SHOULDER_PASS_OVERHANG_M` in the
+   * it only where the verge is fit for it, and only as far as the road's own graded
+   * shoulder reaches — see `SHOULDER_PASS_EDGE_MARGIN_M` and `shoulderWidthM` in the
    * autopilot. It is priced at `SHOULDER_PASS_COST_PER_M`, so a crossing that is open
    * stays the cheaper way past.
    */
   readonly shoulderPassOverhang?: number;
-  /**
-   * How far past the asphalt the body's edge may go on this driver's side while it
-   * MAKES ROOM for a frantic driver to come through (`Autopilot.setYieldOffset`),
-   * metres; 0 is none. The caller moves `laneOffset` out there, so the line is free and
-   * the verge it uses is not priced as a detour.
-   */
-  readonly yieldOverhang?: number;
   /**
    * May the body reach over the crown on this line without crossing it? A line up to
    * half a body past the centre is not a crossing (`crossesCentre`), so the oncoming
@@ -475,7 +469,6 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
     obstacles,
     mayCrossCrown,
     shoulderPassOverhang = 0,
-    yieldOverhang = 0,
     straddleAllowed,
     lineAllowed,
     passSeconds,
@@ -821,21 +814,14 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
       shoulderPassOverhang > 0 &&
       (line - oncomingBoundary) * ownSide > 0 &&
       bodyEdge - asphaltLimit <= shoulderPassOverhang;
-    const yieldVerge =
-      leavesAsphalt &&
-      yieldOverhang > 0 &&
-      (line - oncomingBoundary) * ownSide > 0 &&
-      bodyEdge - asphaltLimit <= yieldOverhang;
-    if (leavesAsphalt && !laneBlockIsStill && !shoulderPass && !yieldVerge) admissible = false;
+    if (leavesAsphalt && !laneBlockIsStill && !shoulderPass) admissible = false;
     if (!admissible && !captureRejected) return;
     let cost = Number.POSITIVE_INFINITY;
     if (admissible) {
       cost =
         Math.abs(line - laneOffset) * LANE_COST_PER_M +
-        (yieldVerge
-          ? 0
-          : Math.max(0, bodyEdge - asphaltLimit) *
-            (shoulderPass ? SHOULDER_PASS_COST_PER_M : SHOULDER_COST_PER_M)) +
+        Math.max(0, bodyEdge - asphaltLimit) *
+          (shoulderPass ? SHOULDER_PASS_COST_PER_M : SHOULDER_COST_PER_M) +
         (crossesCentre ? oncomingLaneCost : 0);
       // Immovable things are passed on the right, so that two opposing streams go
       // round the same one and still clear each other.

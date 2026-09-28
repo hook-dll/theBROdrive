@@ -1,4 +1,5 @@
 import { hash01 } from '../core/rng';
+import { SurfaceType } from '../core/surfaces';
 
 /**
  * How wide the road is at an arclength, and how many lanes that buys each direction.
@@ -171,4 +172,31 @@ export function laneHalfWidthFor(halfWidth: number, lane: number): number {
 export function laneOffsetFor(halfWidth: number, lane: number): number {
   if (lane <= 0) return LANE_WIDTH * 0.5;
   return LANE_WIDTH + (halfWidth - LANE_WIDTH) * 0.5;
+}
+
+/**
+ * Mean width of the graded shoulder past the asphalt edge, metres.
+ *
+ * The shoulder is the strip `world/roadmesh.ts` hangs off the ribbon's own edge
+ * (`SHOULDER_STYLE`, which reads its width from here): some of the road's own material
+ * pushed out and settled, drawn with its own collider (`SurfaceType.LooseShoulder`),
+ * so it is the first thing a wheel off the edge rolls onto before the sand. It belongs
+ * to the road's cross-section rather than to its decoration — the mesh that draws the
+ * verge and the controller that decides how far out a pass may put a body have to
+ * agree on how much of it there is, and a surface with no strip of its own gets the
+ * asphalt's, exactly as the mesh's own default does.
+ */
+const SHOULDER_WIDTH_M: Partial<Record<SurfaceType, number>> = {
+  // A highway's graded crushed-stone shoulder, dusty and pale.
+  [SurfaceType.Asphalt]: 1.35,
+  // Older and narrower; the desert has had longer to blow back over it.
+  [SurfaceType.CrackedAsphalt]: 1.05,
+  // Concrete roads were built wide and pale, with cement dust in the verge.
+  [SurfaceType.Concrete]: 1.6,
+  // The grader's spoil: the road's own gravel pushed off to the sides.
+  [SurfaceType.Gravel]: 1.1,
+};
+
+export function shoulderWidthM(surface: SurfaceType): number {
+  return SHOULDER_WIDTH_M[surface] ?? SHOULDER_WIDTH_M[SurfaceType.Asphalt]!;
 }

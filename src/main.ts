@@ -68,6 +68,7 @@ import {
 import { TerminusPadProvider } from './world/terminuspad';
 import { PoiProvider } from './world/poi';
 import { DebrisField, type Impactor } from './world/debris';
+import { GroundCoverField } from './world/props/groundcover';
 import { hasEscapedWorld } from './world/landscape';
 import { DelineatorProvider } from './world/props/delineators';
 import { MonumentProvider } from './world/props/monuments';
@@ -80,7 +81,8 @@ import { WorldOrigin } from './world/origin';
 import { HazardIndex } from './world/hazards';
 import { PLAYER_FIELD_ID, RoadTraffic } from './world/traffic';
 import { Autopilot } from './vehicle/autopilot';
-import { advanceCloudShadows } from './render/cloudshadow';
+import { advanceCloudShadows, beginWetGlare } from './render/cloudshadow';
+import { advanceDesertGlitter } from './world/terrainmesh';
 import { HeatHaze } from './render/heathaze';
 import { WeatherParticles } from './render/weatherparticles';
 import { setDesertDustArclength } from './render/desertdust';
@@ -406,6 +408,8 @@ async function boot(): Promise<void> {
   // Tumbleweeds share the spray ring so a hit can become dust without a second particle
   // budget. Their own cap is four fixed instances; they never enter road hazards.
   const tumbleweeds = new TumbleweedField(renderer.scene, road, terrain, world.seed, origin, wheelSpray);
+  // Tufts, shrubs and rosettes burst into the same spray ring; no Rapier colliders.
+  const groundCover = new GroundCoverField(wheelSpray, origin);
 
   // Shared exact nearest-road field: the tile streamer uses it to grade the open
   // lattice into the road corridor without searching the full spine per vertex.
@@ -475,7 +479,7 @@ async function boot(): Promise<void> {
   // Hazards are indexed in the ROAD FRAME as the scatter provider builds them, which
   // is what lets the autopilot know a dirt pile from a rock without a physics query:
   // the generator already knew, and this is the only place that knowledge survives.
-  streamer.register(new ScatterProvider(debris, hazards));
+  streamer.register(new ScatterProvider(debris, hazards, groundCover));
   streamer.register(new PoleProvider());
   // The verge furniture the director schedules: reflector posts, and the graded
   // tracks that leave the road for the desert. Both sit outside the asphalt edge at
@@ -1315,12 +1319,6 @@ async function boot(): Promise<void> {
     }
     traffic.setDaylightFactor(sky.seeingLight);
     playerFieldSeat.forwardS = activeS;
-    traffic.setPlayerInAHurry(
-      driving !== null &&
-        autopilot.engaged &&
-        autopilot.mode === 'frantic' &&
-        (autopilot.passUrge || autopilot.middlePassing),
-    );
     frameProfiler?.begin('traffic');
     traffic.fixedUpdate(dt, activeS, activeLateral, origin.x, origin.z);
     frameProfiler?.end('traffic');
@@ -1748,11 +1746,17 @@ async function boot(): Promise<void> {
       impactor.vz = v.z;
       debris.update(impactor, dt, desertX, desertZ);
       const tumbleweedHit = tumbleweeds.update(dt, activeS, impactor);
-      if (tumbleweedHit.count > 0) {
-        // 45 N·s on a roughly 1.5 t chassis is a 0.03 m/s brush: comparable to a
-        // cactus slice's lightest debris contact, below the collision damage floor.
-        driving.chassis.applyImpulse({ x: impactor.fx * 45, y: 0, z: impactor.fz * 45 }, true);
-        audio.foley('drop');
+      const coverHits = groundCover.update(impactor);
+      if (tumbleweedHit.count > 0 || coverHits > 0) {
+        // Against the direction of travel. 45 N·s on a roughly 1.5 t chassis is a
+        // 0.03 m/s brush: comparable to a cactus slice's lightest debris contact, below
+        // the collision damage floor. A tuft or a shrub is a quarter of that.
+        const speed = Math.hypot(impactor.vx, impactor.vz);
+        if (speed > 0.1) {
+          const impulse = (tumbleweedHit.count * 45 + coverHits * 12) / speed;
+          driving.chassis.applyImpulse({ x: -impactor.vx * impulse, y: 0, z: -impactor.vz * impulse }, true);
+        }
+        if (tumbleweedHit.count > 0) audio.foley('drop');
       }
     } else {
       // Do not sweep from the last driven car position across a period spent on foot
@@ -1926,6 +1930,13 @@ async function boot(): Promise<void> {
     }
     vehicleLights.endFrame();
 
+    // Their headlamps in the wet road, nearest first. Not the driven car's own: from
+    // behind it, its lamps' mirror image lies under its own bonnet.
+    beginWetGlare();
+    for (const vehicle of litVehicles) {
+      if (vehicle !== driving) vehicle.offerWetGlare();
+    }
+
     // Tyres are offered to the patch pool in the same order and for the same reason:
     // the driven car first, then the traffic by range, so a full pool refuses the
     // patches nobody can see rather than the ones under the player's own car.
@@ -1989,6 +2000,7 @@ async function boot(): Promise<void> {
       s.settings.graphicsQuality,
       mobilePresentation,
     );
+    advanceDesertGlitter(frameDt, sky.dayFactor);
     // Heat haze, after the cloud field has advanced: the shade over the ground ahead
     // is one of its inputs (render/heathaze.ts).
     renderer.setHeatHaze(

@@ -11,6 +11,7 @@
 import * as THREE from 'three';
 import type { CarState, GameWorld } from '../game/state';
 import type { VehicleLightRig } from '../render/vehiclelights';
+import { addWetGlare } from '../render/cloudshadow';
 import { makeCarGrimeMaterial, setCarGrime } from '../render/materials';
 import type { CarModelDef } from './carmodels';
 import { clamp } from './vehicletuning';
@@ -380,6 +381,30 @@ export class VehicleLamps {
         this.reverseLightBeamIntensity * gain * this.beamThroughGrime,
         REVERSE_LIGHT_BEAM,
       );
+    }
+  }
+
+  /**
+   * Offers the lit headlamps to the wet road's reflection streaks
+   * (`render/cloudshadow.ts`). Not range-faded like the projected beams: the streak
+   * of a lamp in the water is seen as far as the lamp itself is.
+   */
+  offerWetGlare(): void {
+    if (this.headlightMode === 'off') return;
+    const strength =
+      (this.headlightMode === 'high' ? 1.4 : 1) * this.headlightEnvironmentFactor * this.beamThroughGrime;
+    if (!(strength > 0)) return;
+    const q = this.ctx.rootGroup.quaternion;
+    for (let i = 0; i < 2; i++) {
+      const mount = this.headlightMounts[i];
+      if (!mount) continue;
+      const source = this.projectedLightSource.copy(mount.sourceLocal).applyQuaternion(q).add(this.ctx.rootGroup.position);
+      const forward = this.projectedLightTarget
+        .copy(mount.aimLocal)
+        .sub(mount.sourceLocal)
+        .applyQuaternion(q)
+        .normalize();
+      addWetGlare(source, forward, strength);
     }
   }
 

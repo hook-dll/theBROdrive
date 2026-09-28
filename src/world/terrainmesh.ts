@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { SurfaceType } from '../core/surfaces';
 import { applyComicShading } from '../render/comic';
 import { applyCloudShadow } from '../render/cloudshadow';
+import { weather } from './weather';
 import { type Road } from './road';
 import { RoadDistance } from './roaddistance';
 import {
@@ -349,6 +350,8 @@ const GROUND_FRAGMENT_PARS = /* glsl */ `
 varying vec3 vGroundTint;
 varying vec2 vGroundWorld;
 varying vec3 vGroundSurface;
+uniform float uGlitter;
+uniform float uGlitterTime;
 float groundStipple( vec2 world, float footprint, float keepBelow ) {
   vec2 cell = floor( world );
   vec2 local = fract( world ) - 0.5;
@@ -359,6 +362,58 @@ float groundStipple( vec2 world, float footprint, float keepBelow ) {
   float edge = max( footprint, 0.015 );
   return 1.0 - smoothstep( radius - edge, radius + edge, d );
 }`;
+
+/**
+ * NIGHT GLITTER: the one piece of magic the desert keeps for the dark, when the
+ * mirages are gone. A few grains in every square metre catch the starlight and wink,
+ * cool white, pale gold and a faint violet, each on its own slow beat and each
+ * shifting as the eye moves, the way mica in sand does. Added after lighting, so it
+ * shows where no lamp reaches, and faint enough that it never reads as a light source.
+ *
+ * Only near the eye and only while `uGlitter` is up: a uniform branch, then one
+ * distance test, then one hash for the nine cells in ten that hold no grain. Past
+ * 45 m a grain is under a pixel and would only shimmer, so it fades out by then.
+ */
+const GROUND_GLITTER_HOOK = /* glsl */ `
+if ( uGlitter > 0.0 ) {
+  float glitterDist = length( vViewPosition );
+  if ( glitterDist < 45.0 ) {
+    vec2 grainAt = vGroundWorld * 8.0;
+    vec2 grainCell = floor( grainAt );
+    float grainRoll = comicHash( grainCell );
+    if ( grainRoll > 0.9 ) {
+      vec2 grainOffset = vec2( comicHash( grainCell + 5.1 ), comicHash( grainCell + 9.7 ) ) - 0.5;
+      float grain = 1.0 - smoothstep( 0.04, 0.14, length( fract( grainAt ) - 0.5 - grainOffset * 0.5 ) );
+      float beat = sin( uGlitterTime * ( 0.7 + grainRoll * 2.6 ) + grainRoll * 91.0
+        + dot( cameraPosition.xz, vec2( 0.9, 1.3 ) ) * ( 0.6 + comicHash( grainCell + 2.3 ) ) );
+      float wink = pow( max( beat, 0.0 ), 10.0 );
+      float hue = comicHash( grainCell + 4.4 );
+      vec3 grainColour = hue < 0.45 ? vec3( 0.8, 0.88, 1.0 ) : hue < 0.85 ? vec3( 1.0, 0.88, 0.66 ) : vec3( 0.85, 0.74, 1.0 );
+      float alias = 1.0 - smoothstep( 0.35, 0.9, fwidth( grainAt.x ) );
+      outgoingLight += grainColour * grain * wink * alias * uGlitter * ( 1.0 - smoothstep( 20.0, 45.0, glitterDist ) );
+    }
+  }
+}
+#include <opaque_fragment>`;
+
+/** Night glitter's two uniforms, shared by every desert ground material. */
+const glitterUniforms = {
+  uGlitter: { value: 0 },
+  uGlitterTime: { value: 0 },
+};
+/** Peak added radiance of one winking grain at full night (linear, before tone mapping). */
+const GLITTER_PEAK = 0.22;
+
+/**
+ * Per rendered frame: the glitter comes up as the day goes (`dayFactor` from the sky),
+ * and dims on wet sand and in blowing dust, which have no dry grains to catch light.
+ */
+export function advanceDesertGlitter(dt: number, dayFactor: number): void {
+  glitterUniforms.uGlitterTime.value = (glitterUniforms.uGlitterTime.value + dt) % 3600;
+  const night = 1 - Math.min(1, Math.max(0, dayFactor / 0.35));
+  glitterUniforms.uGlitter.value =
+    GLITTER_PEAK * night * night * (1 - 0.8 * weather.wet) * (1 - weather.dust) * (1 - 0.6 * weather.cloud);
+}
 
 const GROUND_COLOR_HOOK = (grit: boolean): string => /* glsl */ `#include <color_fragment>
 diffuseColor.rgb *= vGroundTint;
@@ -396,6 +451,8 @@ export function applyDesertGround(
   const previous = material.onBeforeCompile;
   material.onBeforeCompile = (shader, renderer) => {
     previous.call(material, shader, renderer);
+    shader.uniforms.uGlitter = glitterUniforms.uGlitter;
+    shader.uniforms.uGlitterTime = glitterUniforms.uGlitterTime;
     let vertex = shader.vertexShader
       .replace(
         '#include <common>',
@@ -420,13 +477,14 @@ transformed.y -= aTerrainDetail * detailFade;${grit ? '\nvShoulderGrit = aShould
         `#include <common>\n${grit ? 'varying float vShoulderGrit;\n' : ''}${GROUND_FRAGMENT_PARS}`,
       )
       .replace('#include <color_fragment>', GROUND_COLOR_HOOK(grit))
-      .replace('comicStipple( stippleUv, footprint )', 'groundStipple( stippleUv, footprint, vGroundSurface.x )');
+      .replace('comicStipple( stippleUv, footprint )', 'groundStipple( stippleUv, footprint, vGroundSurface.x )')
+      .replace('#include <opaque_fragment>', GROUND_GLITTER_HOOK);
     if (grit) fragment = fragment.replace('#include <tonemapping_fragment>', SHOULDER_GRIT_FRAGMENT);
     shader.fragmentShader = fragment;
   };
   const previousKey = material.customProgramCacheKey;
   material.customProgramCacheKey = () =>
-    `${previousKey.call(material)}:desert-ground-v1${detail ? ':detail-fade-v1' : ''}${grit ? ':shoulder-grit-v1' : ''}`;
+    `${previousKey.call(material)}:desert-ground-v2${detail ? ':detail-fade-v1' : ''}${grit ? ':shoulder-grit-v1' : ''}`;
   return material;
 }
 
