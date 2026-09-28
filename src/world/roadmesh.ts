@@ -6,16 +6,21 @@ import { ROAD_TILE_METRES, roadTextures } from '../render/roadtexture';
 import { applyGroundSpotlightNormals } from '../render/comic';
 import { applyCloudShadow } from '../render/cloudshadow';
 import { varietyEventOfKindAt, varietyWeightAt, type VarietyEvent } from './director';
+import { tileGroundSampler, type DrawnGroundSample } from './deserttiledata';
 import { desertPaletteAt, roadConditionAt } from './gradient';
 import { ROAD_HALF_WIDTH, type Road } from './road';
+import type { RoadDistance } from './roaddistance';
 import { LANE_WIDTH, laneHalfWidthFor, laneOffsetFor } from './roadprofile';
 import { SUB_DIVISIONS, SURFACE_STEP, SurfaceField, roadSurfaceY } from './roadsurface';
+import { terminusWeight } from './terminus';
+import { DESERT_SHOULDER_MATERIAL } from './terrainmesh';
 import type { ChunkContent, ChunkContext, ChunkProvider } from './chunks';
 
 /**
  * The asphalt ribbon, banked into corners and displaced by a layered surface field —
  * broad undulation, wheel-scale bumps, broken edges and discrete potholes. The desert
- * terrain begins directly beneath each asphalt edge. Surface type owns ordinary bump
+ * terrain begins directly beneath each asphalt edge, and a shoulder strip (SHOULDER_STYLE)
+ * brings the edge down onto it. Surface type owns ordinary bump
  * amplitude; decay increases undulation, edge breakup and pothole occurrence. The
  * same vertices feed the visible mesh and trimesh collider, so the car feels the
  * shape the driver sees.
@@ -70,6 +75,74 @@ const ROAD_BED_DEPTH = 0.35;
 const MARKING_LIFT = 0.002;
 const MARKING_HALF_WIDTH = 0.12;
 const MARKING_MIN = 0.03;
+
+/**
+ * THE SHOULDER: a strip of compacted verge either side, from the asphalt's edge down
+ * onto the desert, so the road lies IN the ground instead of on it like a mat.
+ *
+ * It is drawn in the desert's own material and ends in the desert's own colour, so
+ * the outer edge has no seam to show: it is laid on the tiles' drawn triangles
+ * (`tileGroundSampler`), carries their normals and their far-field detail fade, and
+ * its last column tucks under the sand so the ground itself cuts its ragged edge. Its
+ * only texture is grit in the ground's own ink (DESERT_SHOULDER_MATERIAL), thinning out
+ * into the plain sand.
+ *
+ * NOT A DARK BAND. A darker verge painted into the terrain once read as shadow patches
+ * in play (terrainmesh.ts), so past the first half of the strip a shoulder has the
+ * sand's luminance and changes only its character: paler and greyer where it is
+ * compacted fines and dust. Only the road's own spill near the edge may be darker
+ * (`edgeTone`), which is what makes a gravel road's verge read as the grader's
+ * windrow rather than a pale kerb laid beside a dark road.
+ *
+ * It has a collider (LooseShoulder, the verge surface the handling already models):
+ * without one a wheel off the edge sinks through the strip onto the sand under it.
+ */
+interface ShoulderStyle {
+  /** Mean width past the asphalt edge, metres. */
+  readonly width: number;
+  /** How far the colour moves from the sand towards its own grey: compacted dust. */
+  readonly grey: number;
+  /** How much of the road's stone (the palette gravel) is in it near the edge. */
+  readonly stone: number;
+  /** Luminance against the sand at the asphalt edge, where the road's spill lies. */
+  readonly edgeTone: number;
+  /** Luminance against the sand, where the luminance is the sand's. */
+  readonly bright: number;
+  /** Grit stipple strength near the edge, 0..1. */
+  readonly grit: number;
+}
+
+const SHOULDER_STYLE: Partial<Record<SurfaceType, ShoulderStyle>> = {
+  // A highway's graded crushed-stone shoulder, dusty and pale.
+  [SurfaceType.Asphalt]: { width: 1.35, grey: 0.26, stone: 0.3, edgeTone: 0.94, bright: 1.05, grit: 0.75 },
+  // Older and narrower; the desert has had longer to blow back over it.
+  [SurfaceType.CrackedAsphalt]: { width: 1.05, grey: 0.18, stone: 0.3, edgeTone: 0.9, bright: 1.03, grit: 0.7 },
+  // Concrete roads were built wide and pale, with cement dust in the verge.
+  [SurfaceType.Concrete]: { width: 1.6, grey: 0.28, stone: 0.16, edgeTone: 1, bright: 1.05, grit: 0.5 },
+  // The grader's spoil: the road's own gravel pushed off to the sides.
+  [SurfaceType.Gravel]: { width: 1.1, grey: 0.08, stone: 0.7, edgeTone: 0.68, bright: 1, grit: 1 },
+};
+const DEFAULT_SHOULDER_STYLE = SHOULDER_STYLE[SurfaceType.Asphalt]!;
+/** Across-strip positions of the columns, 0 at the asphalt edge, 1 at the sand. */
+const SHOULDER_ACROSS: readonly number[] = [0, 0.1, 0.4, 0.75, 1];
+/** Part of the strip over which it comes down from the asphalt's lip to the ground. */
+const SHOULDER_RAMP = 0.55;
+/** Height of the settled strip over the drawn ground, and its tuck under it, metres. */
+const SHOULDER_LIFT = 0.02;
+const SHOULDER_TUCK = 0.04;
+/** Row jitter of the outer edge, metres: ragged where the sand takes over. */
+const SHOULDER_RAGGED = 0.3;
+/**
+ * Asphalt-to-ground drops beyond which a row has no shoulder: the ground is not where
+ * a verge could meet it (a cut, a pad, a streaming disagreement), and a strip hung
+ * down to it would be a curtain. Normally the drop is the tiles' 0.1 m under-road.
+ */
+const SHOULDER_MAX_DROP = 0.6;
+const SHOULDER_MAX_RISE = 0.25;
+/** Brightness swing of the strip's own mottling, fading out to the sand. */
+const SHOULDER_MOTTLE = 0.05;
+/** Darkening of the crumbs right at the asphalt edge (column 0 only). */
+const SHOULDER_CRUMB = 0.12;
 
 /**
  * Weathering of the driving surface, as three things a photograph of an old road
@@ -312,6 +385,32 @@ const PAINT_LINEAR = new THREE.Color(PAINT_COLOR);
  * `SURFACE_LINEAR` entry: gravel, whose colour comes from the regional palette.
  */
 const paintBase = new THREE.Color();
+/** Shoulder scratch: the row's sand and stone, and one vertex's colour. */
+const shoulderSand = new THREE.Color();
+const shoulderStone = new THREE.Color();
+const shoulderColour = new THREE.Color();
+const shoulderGrey = new THREE.Color();
+const shoulderGround: DrawnGroundSample = { height: 0, detail: 0, nx: 0, ny: 1, nz: 0 };
+
+function luminance(c: THREE.Color): number {
+  return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+}
+
+function smoothstep(lo: number, hi: number, v: number): number {
+  const t = Math.min(1, Math.max(0, (v - lo) / (hi - lo)));
+  return t * t * (3 - 2 * t);
+}
+
+/** The shoulder's drawn strip and its collider source, both origin-relative. */
+interface ShoulderBuild {
+  readonly geometry: THREE.BufferGeometry;
+  readonly vertices: Float32Array;
+  readonly indices: Uint32Array;
+  /** Vertices per arclength row (both sides). */
+  readonly rowVertices: number;
+  /** Indices per quad row (both sides). */
+  readonly rowIndices: number;
+}
 
 // Shared across every chunk; never disposed by the streamer. The maps are built on
 // the first chunk build (they need a canvas, so not at module load) and the vertex
@@ -525,9 +624,16 @@ export class RoadMeshProvider implements ChunkProvider {
   private readonly patchNoise: Noise2D;
   /** The world seed. The director is asked per row and per marking quad. */
   private readonly seed: number;
+  /**
+   * Lets the shoulder find the ground as the desert tiles draw it. Absent in the labs
+   * and benches that build the ribbon without the tile ground: there is then nothing
+   * for a shoulder to lie on, and none is built.
+   */
+  private readonly roadDistance: RoadDistance | null;
 
-  constructor(seed: number) {
+  constructor(seed: number, roadDistance: RoadDistance | null = null) {
     this.seed = seed;
+    this.roadDistance = roadDistance;
     this.field = new SurfaceField(seed);
     this.mottleNoise = new Noise2D(seed ^ 0x5bf03635);
     this.paintNoise = new Noise1D(seed ^ 0x2545f491);
@@ -539,6 +645,155 @@ export class RoadMeshProvider implements ChunkProvider {
     let result = iterator.next();
     while (!result.done) result = iterator.next();
     return result.value;
+  }
+
+  /**
+   * Both shoulders of one chunk (see SHOULDER_STYLE), hung off the ribbon's own edge
+   * vertices so the strip starts exactly where the asphalt ends. Rows are the ribbon's
+   * rows, so the seam row is shared with the neighbouring chunk bit for bit.
+   */
+  private *buildShoulderSteps(
+    ctx: ChunkContext,
+    positions: Float32Array,
+    sCount: number,
+    latCount: number,
+  ): Generator<void, ShoulderBuild | null> {
+    if (!this.roadDistance) return null;
+    const { sStart, sEnd, road } = ctx;
+    const ox = ctx.originX;
+    const oz = ctx.originZ;
+    const cols = SHOULDER_ACROSS.length;
+    const rowVertices = 2 * cols;
+    const verts = sCount * rowVertices;
+    const pos = new Float32Array(verts * 3);
+    const nor = new Float32Array(verts * 3);
+    const col = new Float32Array(verts * 3);
+    const detail = new Float32Array(verts);
+    const grit = new Float32Array(verts);
+    const ground = tileGroundSampler({ seed: this.seed, road, terrain: ctx.terrain, roadDistance: this.roadDistance });
+    const g = shoulderGround;
+    const point = { x: 0, y: 0, z: 0 };
+    // Arclength row index, so the ragged edge is a function of the road, not the chunk.
+    const rowBase = Math.round(sStart / SURFACE_STEP);
+
+    for (let si = 0; si < sCount; si++) {
+      const s = sStart + (si * (sEnd - sStart)) / (sCount - 1);
+      const halfWidth = road.halfWidthAt(s);
+      const cond = roadConditionAt(s);
+      const style = SHOULDER_STYLE[cond.surface] ?? DEFAULT_SHOULDER_STYLE;
+      const palette = desertPaletteAt(s);
+      shoulderSand.setHex(palette.sand);
+      shoulderStone.setHex(palette.gravel);
+      const sandLum = luminance(shoulderSand);
+      // A worn road's verge is half sand already: the same wedge the lanes get.
+      const wear = Math.max(cond.decay, cond.sandCover);
+      const grey = style.grey * (1 - 0.5 * wear);
+      const stone = style.stone * (1 - 0.6 * wear);
+      const gritLevel = style.grit * (1 - 0.5 * wear);
+      const edgeTone = 1 - (1 - style.edgeTone) * (1 - 0.5 * wear);
+
+      for (let side = 0; side < 2; side++) {
+        const sign = side === 0 ? -1 : 1;
+        // Each side wanders on its own, slow and a little faster on top.
+        const k = side === 0 ? 1.7 : 4.3;
+        const wander = 1 + 0.14 * Math.sin(s / 23 + k) + 0.08 * Math.sin(s / 7.3 + 2.1 * k);
+        const width = style.width * (1 - 0.25 * wear) * wander;
+        const ragged = (hash01(this.seed, 0x5d, rowBase + si, side) - 0.5) * SHOULDER_RAGGED;
+        const edge = (si * latCount + (side === 0 ? 0 : latCount - 1)) * 3;
+        const ex = positions[edge]!;
+        const ey = positions[edge + 1]!;
+        const ez = positions[edge + 2]!;
+        ground(ex + ox, ez + oz, g);
+        const edgeGround = g.height;
+        const drop = ey - edgeGround;
+        const collapsed =
+          drop > SHOULDER_MAX_DROP || drop < -SHOULDER_MAX_RISE || terminusWeight(ex + ox, ez + oz) > 0;
+
+        for (let c = 0; c < cols; c++) {
+          const t = SHOULDER_ACROSS[c]!;
+          const vi = (si * 2 + side) * cols + c;
+          let ramp = 1;
+          if (c === 0 || collapsed) {
+            // On the asphalt's edge, just under its lip; a collapsed row folds the
+            // whole strip under it, so its neighbours taper into nothing.
+            pos[vi * 3] = ex;
+            pos[vi * 3 + 1] = ey - (c === 0 ? 0.004 : SHOULDER_TUCK * 2);
+            pos[vi * 3 + 2] = ez;
+            nor[vi * 3 + 1] = 1;
+            detail[vi] = 0;
+          } else {
+            road.offsetPoint(s, sign * (halfWidth + t * (width + ragged * t)), point);
+            ground(point.x, point.z, g);
+            ramp = Math.max(0, 1 - t / SHOULDER_RAMP);
+            const settle = ramp * ramp;
+            pos[vi * 3] = point.x - ox;
+            pos[vi * 3 + 1] =
+              c === cols - 1
+                ? g.height - SHOULDER_TUCK
+                : g.height + SHOULDER_LIFT + (drop - SHOULDER_LIFT) * settle;
+            pos[vi * 3 + 2] = point.z - oz;
+            // Lit like the road at its lip and like the ground where it lies on it.
+            const nx = g.nx * (1 - settle);
+            const ny = g.ny * (1 - settle) + settle;
+            const nz = g.nz * (1 - settle);
+            const nl = Math.hypot(nx, ny, nz);
+            nor[vi * 3] = nx / nl;
+            nor[vi * 3 + 1] = ny / nl;
+            nor[vi * 3 + 2] = nz / nl;
+            // The tiles drop their fine relief into the vista far off; so does this.
+            detail[vi] = g.detail * (1 - settle);
+          }
+
+          // Colour: the road's stone near the edge, then compacted grey dust, then the
+          // sand itself at the last column — exactly the tile's colour there.
+          const stoneMix = stone * (1 - smoothstep(0.1, 0.75, t));
+          shoulderColour.copy(shoulderSand).lerp(shoulderStone, stoneMix);
+          const mixedLum = luminance(shoulderColour);
+          const greyMix = grey * (1 - smoothstep(0.5, 1, t));
+          // Dust is a warm grey, not a neutral one: a neutral grey beside a green
+          // palette's ground read as a cold concrete kerb.
+          shoulderColour.lerp(shoulderGrey.setRGB(mixedLum * 1.06, mixedLum, mixedLum * 0.86), greyMix);
+          const outer = smoothstep(0.6, 1, t);
+          const mottle =
+            1 + SHOULDER_MOTTLE * (1 - outer) * this.mottleNoise.fbm(s / 3.1 + sign * 17, t * 1.3, 2, 2, 0.5);
+          const sandTone = sandLum * (1 + (style.bright - 1) * (1 - outer));
+          const spill = 1 - smoothstep(0.1, 0.6, t);
+          const target =
+            sandTone * (1 + (edgeTone - 1) * spill) * mottle * (c === 0 ? 1 - SHOULDER_CRUMB : 1);
+          shoulderColour.multiplyScalar(target / Math.max(1e-4, luminance(shoulderColour)));
+          col[vi * 3] = shoulderColour.r;
+          col[vi * 3 + 1] = shoulderColour.g;
+          col[vi * 3 + 2] = shoulderColour.b;
+          grit[vi] = gritLevel * (1 - smoothstep(0.35, 1, t));
+        }
+      }
+      if ((si & 7) === 7) yield;
+    }
+
+    const rowIndices = 2 * (cols - 1) * 6;
+    const index = new Uint32Array((sCount - 1) * rowIndices);
+    let w = 0;
+    for (let si = 0; si < sCount - 1; si++) {
+      for (let side = 0; side < 2; side++) {
+        for (let c = 0; c < cols - 1; c++) {
+          const a = (si * 2 + side) * cols + c;
+          const b = a + rowVertices;
+          // Up-facing on both sides: which way a quad runs depends on the side.
+          if (side === 0) index.set([a, a + 1, b, a + 1, b + 1, b], w);
+          else index.set([a, b, a + 1, a + 1, b, b + 1], w);
+          w += 6;
+        }
+      }
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geometry.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    geometry.setAttribute('aTerrainDetail', new THREE.BufferAttribute(detail, 1));
+    geometry.setAttribute('aShoulderGrit', new THREE.BufferAttribute(grit, 1));
+    geometry.setIndex(new THREE.BufferAttribute(index, 1));
+    return { geometry, vertices: pos, indices: index, rowVertices, rowIndices };
   }
 
   *buildSteps(ctx: ChunkContext): Iterator<void, ChunkContent | null> {
@@ -765,6 +1020,33 @@ export class RoadMeshProvider implements ChunkProvider {
       bedMesh.receiveShadow = true;
       group.add(bedMesh);
       yield;
+
+      const shoulder = yield* this.buildShoulderSteps(ctx, positions, sCount, latCount);
+      if (shoulder) {
+        disposables.push(shoulder.geometry);
+        const shoulderMesh = new THREE.Mesh(shoulder.geometry, DESERT_SHOULDER_MATERIAL);
+        shoulderMesh.receiveShadow = true;
+        group.add(shoulderMesh);
+        if (hasPhysics) {
+          // Slabs, as the ribbon's: rows of the same vertices, sharing boundary rows.
+          for (let q0 = 0; q0 < sCount - 1; q0 += COLLIDER_SLAB_QUADS) {
+            const q1 = Math.min(q0 + COLLIDER_SLAB_QUADS, sCount - 1);
+            const slabVertices = shoulder.vertices.subarray(
+              q0 * shoulder.rowVertices * 3,
+              (q1 + 1) * shoulder.rowVertices * 3,
+            );
+            const slabIndices = shoulder.indices.slice(q0 * shoulder.rowIndices, q1 * shoulder.rowIndices);
+            const rebase = q0 * shoulder.rowVertices;
+            for (let i = 0; i < slabIndices.length; i++) slabIndices[i] = slabIndices[i]! - rebase;
+            const collider = physics.addStaticTrimesh(slabVertices, slabIndices, SurfaceType.LooseShoulder);
+            collider.setEnabled(false);
+            colliders.push(collider);
+            const body = collider.parent();
+            if (body) bodies.push(body);
+            yield;
+          }
+        }
+      }
 
       if (hasPhysics) {
         // ONE TRIMESH PER SLAB, not one per chunk. Rapier builds a BVH inside

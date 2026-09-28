@@ -469,7 +469,7 @@ async function boot(): Promise<void> {
     origin,
     worldWork,
   );
-  streamer.register(new RoadMeshProvider(world.seed));
+  streamer.register(new RoadMeshProvider(world.seed, roadDistance));
   streamer.register(new HomesteadProvider(switches));
   streamer.register(new TerminusPadProvider());
   // Hazards are indexed in the ROAD FRAME as the scatter provider builds them, which

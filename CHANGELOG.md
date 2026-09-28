@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- THE ROAD HAS SHOULDERS, SO IT LIES IN THE DESERT RATHER THAN ON IT. A strip of verge
+  either side (`RoadMeshProvider.buildShoulderSteps`, `SHOULDER_STYLE` in
+  `world/roadmesh.ts`) runs from the asphalt's edge down onto the sand, laid on the
+  tiles' own triangles (`tileGroundSampler`, `world/deserttiledata.ts`) and drawn in the
+  desert's material, ending in the sand's exact colour with its last column tucked under
+  it, so there is no seam. Its only texture is grit in the ground's ink
+  (`DESERT_SHOULDER_MATERIAL`), thinning out into the plain sand. Each road type has its
+  own: a pale dusty 1.35 m verge on asphalt, a narrower sandier one on cracked asphalt, a
+  wide pale one on concrete, the grader's darker spoil on gravel; worn and sanded roads
+  get less of it. It is never a dark band (the old painted verge read as shadow), and it
+  has a LooseShoulder collider, so a wheel off the edge rolls onto the verge instead of
+  sinking through it. About 3.4 ms more per 200 m chunk build, spread over its yields.
+
+### Fixed
+
+- LOOSE GROUND NO LONGER SOUNDS LIKE A CONCERT HALL. The recorded gravel roll was 12 dB
+  over everything else a tyre makes (-18.5 LUFS against -30.4 on asphalt at 80 km/h,
+  offline render): a dense, wide low-mid wash heard as a big room. It is now high-passed
+  at 650 Hz, nearly centred on the car, and plays only on loose stone (`stones` in
+  `SURFACE_VOICES`): gravel is +3.7 dB over asphalt coasting and 0.1 dB with the engine
+  running. Sand, which has no stones, no longer plays it at all.
+- SAND NO LONGER DRUMS ON THE FLOOR PAN. A slide on loose ground used the recorded
+  squeal's gain for a synthetic scrabble and measured -7.3 LUFS on sand, louder than the
+  engine at 80% throttle. It has its own level now (`SCRABBLE_GAIN`), a smaller low roar,
+  and a per-surface band: sand is a fine high hiss 3 dB over its rolling sound, gravel a
+  crunch of stones.
+
 ## 0.19.0 — 2026-09-28
 
 ### Added

@@ -242,6 +242,95 @@ export function generateDesertTileData(
   return { heights, positions, detailOffsets, normals, colors, indices, propSurfaces };
 }
 
+/** The ground as the tiles draw it at one point: see `tileGroundSampler`. */
+export interface DrawnGroundSample {
+  height: number;
+  /** The fine relief the tile shader lowers the ground by as the vista takes over. */
+  detail: number;
+  /** The tile's own interpolated vertex normal. */
+  nx: number;
+  ny: number;
+  nz: number;
+}
+
+/**
+ * The ground AS THE TILES DRAW IT, anywhere near the road: their lattice nodes sampled
+ * exactly as `generateDesertTileData` samples them, the same two triangles per cell
+ * (split on the b-c diagonal, as its index buffer writes them), and the same central-
+ * difference node normals, interpolated the way the GPU interpolates them. Between
+ * nodes the drawn ground is a plane, centimetres to decimetres off the terrain
+ * function, so anything laid ON the ground (the road shoulder) must ask this rather
+ * than the function. Nodes are memoised for the sampler's life: make one per build.
+ */
+export function tileGroundSampler(
+  context: DesertTileGenerationContext,
+): (x: number, z: number, out: DrawnGroundSample) => void {
+  const heights = new Map<number, number>();
+  const details = new Map<number, number>();
+  const sample: GroundHeightSample = { height: 0, detail: 0 };
+  const key = (i: number, j: number): number => i * 1_000_003 + j;
+  const height = (i: number, j: number): number => {
+    const k = key(i, j);
+    let h = heights.get(k);
+    if (h === undefined) {
+      sampleGroundHeight(context, i * DESERT_TILE_STEP, j * DESERT_TILE_STEP, false, sample);
+      h = sample.height;
+      heights.set(k, h);
+      details.set(k, sample.detail);
+    }
+    return h;
+  };
+  const detail = (i: number, j: number): number => {
+    height(i, j);
+    return details.get(key(i, j))!;
+  };
+  // One node's normal, as generateDesertTileData writes it (a tile's own border nodes
+  // use a one-sided difference there; interior nodes, which the road almost always
+  // meets, are central).
+  const normal = { x: 0, y: 0, z: 0 };
+  const nodeNormal = (i: number, j: number): void => {
+    const dhx = (height(i + 1, j) - height(i - 1, j)) / (2 * DESERT_TILE_STEP);
+    const dhz = (height(i, j + 1) - height(i, j - 1)) / (2 * DESERT_TILE_STEP);
+    const length = Math.hypot(dhx, 1, dhz);
+    normal.x = -dhx / length;
+    normal.y = 1 / length;
+    normal.z = -dhz / length;
+  };
+  return (x, z, out) => {
+    const fx = x / DESERT_TILE_STEP;
+    const fz = z / DESERT_TILE_STEP;
+    const i = Math.floor(fx);
+    const j = Math.floor(fz);
+    const u = fx - i;
+    const v = fz - j;
+    // Barycentric weights over the cell's triangle: (a, b, c) or (d, c, b).
+    const lower = u + v <= 1;
+    const i0 = lower ? i : i + 1;
+    const j0 = lower ? j : j + 1;
+    const w0 = lower ? 1 - u - v : u + v - 1;
+    const wb = lower ? u : 1 - v;
+    const wc = lower ? v : 1 - u;
+    out.height = height(i0, j0) * w0 + height(i + 1, j) * wb + height(i, j + 1) * wc;
+    out.detail = detail(i0, j0) * w0 + detail(i + 1, j) * wb + detail(i, j + 1) * wc;
+    nodeNormal(i0, j0);
+    let nx = normal.x * w0;
+    let ny = normal.y * w0;
+    let nz = normal.z * w0;
+    nodeNormal(i + 1, j);
+    nx += normal.x * wb;
+    ny += normal.y * wb;
+    nz += normal.z * wb;
+    nodeNormal(i, j + 1);
+    nx += normal.x * wc;
+    ny += normal.y * wc;
+    nz += normal.z * wc;
+    const length = Math.hypot(nx, ny, nz);
+    out.nx = nx / length;
+    out.ny = ny / length;
+    out.nz = nz / length;
+  };
+}
+
 /** Buffers are moved from the worker; the main thread builds BufferAttributes over them. */
 export function desertTileDataTransfers(data: DesertTileData): Transferable[] {
   return [

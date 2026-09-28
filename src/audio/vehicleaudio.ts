@@ -83,13 +83,32 @@ const BUMP_GAIN = AUDIO_CONFIG.bumpGain;
 const IMPACT_GAIN = AUDIO_CONFIG.impactGain;
 /**
  * Recorded layers, against files built to -20 LUFS (loops) and -14 LUFS momentary
- * (one-shots); the car bus then loses 10 dB to the game trim (mixer.ts). Gravel at speed
- * sits under the engine like the rest of the rolling noise (tyres and surfaces were
- * halved against everything else on 2026-09-28: the player wants them in the
- * background), a squeal a little over the engine, a hard crash well over everything.
+ * (one-shots); the car bus then loses 10 dB to the game trim (mixer.ts).
+ *
+ * THE STONES ARE A RUSTLE UNDER THE ROAD NOISE, NOT A BED OVER IT. At 1.2 the recorded
+ * roll alone measured -18.5 LUFS against -30.4 for everything a tyre makes on asphalt
+ * at 80 km/h (offline render, engine off): a gravel road came in 12 dB louder than
+ * tarmac, a dense low-mid wash of a trailer wheel heard as a big hall, and sand, which
+ * has no stones, got a quarter of it. Now its low half is cut (the tyre's own roar
+ * already carries it), it sits nearly at the car rather than spread across the stereo
+ * field, and only loose stone plays it: gravel measures -26.7 against asphalt's -30.4,
+ * and 0.1 dB over asphalt once the engine is running. A squeal a little over the
+ * engine, a hard crash well over everything.
  */
-const GRAVEL_GAIN = 1.2;
+const GRAVEL_GAIN = 0.22;
+const GRAVEL_HIGHPASS_HZ = 650;
+const GRAVEL_WIDTH = 0.12;
 const CRASH_GAIN = 6;
+/**
+ * A tyre sliding on loose ground, against SKID_GAIN (which is levelled for the
+ * recorded squeal). The synthetic scrabble is not a -20 LUFS file: at the squeal's
+ * gain a slide on sand measured -7.3 LUFS, louder than the engine at 80% throttle
+ * (-9.5) — sand drumming on the floor pan. The brown under-roar is the drum, so it
+ * is the smaller share; a slide on sand now adds 3 dB to its rolling hiss (-38.1
+ * against -41.3 at 43 km/h), a slide on gravel 1 dB over its stones.
+ */
+const SCRABBLE_GAIN = 0.34;
+const SCRABBLE_ROAR = 0.3;
 
 /** Surface roughness (metres of micro-bump) treated as fully rough. */
 const ROUGHNESS_FULL = 0.05;
@@ -98,8 +117,11 @@ const ROUGHNESS_FULL = 0.05;
  * What each surface sounds like under a rolling tyre, relative to smooth asphalt.
  *  roar     low road roar
  *  hiss     tread hiss level, and its band centre
- *  grit     sparse grains (stones, grit) level, and their band centre
+ *  grit     sparse synthetic grains (grit) level, and their band centre
+ *  stones   the recorded roll of stones under the tyre: loose stone only, never sand
  *  squeal   whether a sliding tyre sings here (hard, dry surfaces) or scrabbles
+ *  scrabble a slide's level on loose ground, and the band of what it throws: stones
+ *           mid-band, sand a fine high hiss
  *  joints   slab joints (concrete) or random cracks (broken asphalt)
  */
 interface SurfaceVoice {
@@ -108,18 +130,21 @@ interface SurfaceVoice {
   hissHz: number;
   grit: number;
   gritHz: number;
+  stones: number;
   squeal: boolean;
+  scrabble: number;
+  scrabbleHz: number;
   joints: 'slab' | 'crack' | null;
 }
 
 const SURFACE_VOICES: Record<SurfaceType, SurfaceVoice> = {
-  [SurfaceType.Asphalt]: { roar: 1, hiss: 1, hissHz: 1000, grit: 0, gritHz: 2500, squeal: true, joints: null },
-  [SurfaceType.CrackedAsphalt]: { roar: 1.25, hiss: 0.9, hissHz: 850, grit: 0.12, gritHz: 2200, squeal: true, joints: 'crack' },
-  [SurfaceType.Gravel]: { roar: 1.2, hiss: 0.55, hissHz: 420, grit: 0.8, gritHz: 1050, squeal: false, joints: null },
-  [SurfaceType.Sand]: { roar: 0.55, hiss: 0.8, hissHz: 420, grit: 0.25, gritHz: 1300, squeal: false, joints: null },
-  [SurfaceType.Rock]: { roar: 1.5, hiss: 0.5, hissHz: 700, grit: 0.55, gritHz: 1700, squeal: true, joints: null },
-  [SurfaceType.Concrete]: { roar: 1.1, hiss: 1.15, hissHz: 1250, grit: 0, gritHz: 2500, squeal: true, joints: 'slab' },
-  [SurfaceType.LooseShoulder]: { roar: 1.25, hiss: 0.5, hissHz: 400, grit: 1, gritHz: 950, squeal: false, joints: null },
+  [SurfaceType.Asphalt]: { roar: 1, hiss: 1, hissHz: 1000, grit: 0, gritHz: 2500, stones: 0, squeal: true, scrabble: 0, scrabbleHz: 1700, joints: null },
+  [SurfaceType.CrackedAsphalt]: { roar: 1.1, hiss: 0.9, hissHz: 850, grit: 0.12, gritHz: 2200, stones: 0, squeal: true, scrabble: 0, scrabbleHz: 1700, joints: 'crack' },
+  [SurfaceType.Gravel]: { roar: 1.1, hiss: 0.55, hissHz: 420, grit: 0.5, gritHz: 1050, stones: 0.8, squeal: false, scrabble: 1, scrabbleHz: 1700, joints: null },
+  [SurfaceType.Sand]: { roar: 0.55, hiss: 0.8, hissHz: 420, grit: 0.12, gritHz: 1300, stones: 0, squeal: false, scrabble: 1, scrabbleHz: 3200, joints: null },
+  [SurfaceType.Rock]: { roar: 1.3, hiss: 0.5, hissHz: 700, grit: 0.4, gritHz: 1700, stones: 0.35, squeal: true, scrabble: 0, scrabbleHz: 1700, joints: null },
+  [SurfaceType.Concrete]: { roar: 1.1, hiss: 1.15, hissHz: 1250, grit: 0, gritHz: 2500, stones: 0, squeal: true, scrabble: 0, scrabbleHz: 1700, joints: 'slab' },
+  [SurfaceType.LooseShoulder]: { roar: 1.15, hiss: 0.5, hissHz: 400, grit: 0.6, gritHz: 950, stones: 1, squeal: false, scrabble: 1, scrabbleHz: 1500, joints: null },
 };
 
 /** Concrete slab length, metres: the ta-dum, ta-dum period. */
@@ -246,6 +271,7 @@ export class VehicleAudio {
   private readonly skid: Bed;
   private readonly scrabbleGain: GainNode;
   private readonly scrabbleSource: AudioBufferSourceNode;
+  private readonly scrabbleFilter: BiquadFilterNode;
 
   private readonly rubFilter: BiquadFilterNode;
   private readonly rubGain: GainNode;
@@ -476,24 +502,34 @@ export class VehicleAudio {
     // --- skid -------------------------------------------------------------------
     // A real tyre squealing on tarmac; its pitch follows how hard it slides.
     this.skid = new Bed(mixer, mixer.samples, 'skid', this.body, 0.2);
-    // Stones under the tyres: a recorded roll over gravel, faster as the car is.
-    this.gravel = new Bed(mixer, mixer.samples, 'gravel-roll', this.body, 0.35);
+    // Stones under the tyres: a recorded roll over gravel, faster as the car is. Only
+    // its top half and nearly at one point: the low half of a trailer wheel on gravel,
+    // spread wide, is a room, not a road (see GRAVEL_GAIN).
+    const gravelHighpass = ctx.createBiquadFilter();
+    gravelHighpass.type = 'highpass';
+    gravelHighpass.frequency.value = GRAVEL_HIGHPASS_HZ;
+    gravelHighpass.Q.value = 0.6;
+    gravelHighpass.connect(this.body);
+    this.gravel = new Bed(mixer, mixer.samples, 'gravel-roll', gravelHighpass, GRAVEL_WIDTH);
 
-    // Loose ground: stones thrown and a low roar, no tone.
+    // Loose ground: what the tyre throws (stones mid-band, sand a fine hiss) over a
+    // little low roar, no tone.
     this.scrabbleSource = mixer.crackleSource();
     this.sources.push(this.scrabbleSource);
-    const scrabbleFilter = ctx.createBiquadFilter();
-    scrabbleFilter.type = 'bandpass';
-    scrabbleFilter.frequency.value = 1700;
-    scrabbleFilter.Q.value = 0.6;
+    this.scrabbleFilter = ctx.createBiquadFilter();
+    this.scrabbleFilter.type = 'bandpass';
+    this.scrabbleFilter.frequency.value = 1700;
+    this.scrabbleFilter.Q.value = 0.6;
     const scrabbleRoar = ctx.createBiquadFilter();
     scrabbleRoar.type = 'lowpass';
     scrabbleRoar.frequency.value = 260;
+    const scrabbleRoarGain = ctx.createGain();
+    scrabbleRoarGain.gain.value = SCRABBLE_ROAR;
     this.addNoise('brown', scrabbleRoar);
     this.scrabbleGain = ctx.createGain();
     this.scrabbleGain.gain.value = 0;
-    this.scrabbleSource.connect(scrabbleFilter).connect(this.scrabbleGain);
-    scrabbleRoar.connect(this.scrabbleGain);
+    this.scrabbleSource.connect(this.scrabbleFilter).connect(this.scrabbleGain);
+    scrabbleRoar.connect(scrabbleRoarGain).connect(this.scrabbleGain);
     this.scrabbleGain.connect(this.body);
 
     // --- brakes -----------------------------------------------------------------
@@ -690,9 +726,9 @@ export class VehicleAudio {
     this.gritSource.playbackRate.setTargetAtTime(0.3 + speed / 16, now, 0.1);
     this.gritFilter.frequency.setTargetAtTime(voice.gritHz * (0.85 + 0.25 * rollT), now, 0.1);
     ramp(this.gritGain.gain, TYRE_GAIN * 0.35 * voice.grit * clamp01(speed / 12) * contact, now, 0.08);
-    // The recorded roll carries loose ground; the synthetic grains above only add bite.
+    // The recorded roll carries loose stone; the synthetic grains above only add bite.
     this.gravel.setRate(Math.min(1.5, 0.6 + speed / 22), now);
-    this.gravel.set(GRAVEL_GAIN * voice.grit * clamp01(speed / 8) * contact * (cabin ? 1.2 : 1), now, 0.12);
+    this.gravel.set(GRAVEL_GAIN * voice.stones * clamp01(speed / 8) * contact * (cabin ? 1.2 : 1), now, 0.12);
     // Spray: a wet road is a hiss that swamps everything else the tyre does.
     const wetRoad = voice.squeal ? pose.wet : pose.wet * 0.4;
     ramp(this.sprayGain.gain, TYRE_GAIN * 1.1 * wetRoad * rollT ** 1.5 * contact, now, 0.15);
@@ -708,7 +744,8 @@ export class VehicleAudio {
     this.skid.setRate(0.88 + 0.22 * slipT, now, 0.05);
     this.skid.set(SKID_GAIN * squeal, now, 0.04);
     this.scrabbleSource.playbackRate.setTargetAtTime(0.6 + speed / 6, now, 0.05);
-    ramp(this.scrabbleGain.gain, voice.squeal ? 0 : SKID_GAIN * 0.9 * skidT, now, 0.05);
+    this.scrabbleFilter.frequency.setTargetAtTime(voice.scrabbleHz, now, 0.1);
+    ramp(this.scrabbleGain.gain, voice.squeal ? 0 : SCRABBLE_GAIN * voice.scrabble * skidT, now, 0.05);
 
     // --- brakes -----------------------------------------------------------------
     const brake = clamp01(state.brake + (state.handbrake ? 0.7 : 0));
@@ -850,9 +887,9 @@ export class VehicleAudio {
       colour: 'brown',
     });
     // Loose ground adds a spatter of stones.
-    if (voice.grit > 0.5) {
+    if (voice.stones > 0.5) {
       this.mixer.burst(this.impacts, {
-        gain: BUMP_GAIN * 0.25 * s * voice.grit,
+        gain: BUMP_GAIN * 0.25 * s * voice.stones,
         frequency: voice.gritHz,
         q: 0.9,
         decay: 0.06,

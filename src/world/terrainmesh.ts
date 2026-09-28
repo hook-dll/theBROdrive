@@ -255,7 +255,25 @@ function bilinear(
  */
 export const DESERT_TILE_FADE_FULL = 300;
 export const DESERT_TILE_FADE_GONE = DESERT_TILE_SIZE * 2;
-function createTerrainMaterial(detailFade: boolean): THREE.MeshStandardMaterial {
+/**
+ * Grit on the road shoulder, in the ground's own ink: a finer, denser stipple than the
+ * desert's, weighted per vertex (`aShoulderGrit`, 0 where the strip meets the sand) so
+ * it thins out into the plain ground. Two sizes, the small ones darker: crushed stone
+ * reads as grains, not as a photograph laid on a drawing.
+ */
+const SHOULDER_GRIT_FRAGMENT = /* glsl */ `
+if ( vShoulderGrit > 0.001 ) {
+  vec2 fineUv = vComicWorld.xz / 0.16;
+  float fineFoot = max( fwidth( fineUv.x ), fwidth( fineUv.y ) );
+  float fine = comicStipple( fineUv, fineFoot ) * ( 1.0 - smoothstep( 0.3, 0.8, fineFoot ) );
+  vec2 coarseUv = vComicWorld.xz / 0.42 + 7.3;
+  float coarseFoot = max( fwidth( coarseUv.x ), fwidth( coarseUv.y ) );
+  float coarse = comicStipple( coarseUv, coarseFoot ) * ( 1.0 - smoothstep( 0.3, 0.8, coarseFoot ) );
+  gl_FragColor.rgb *= 1.0 - vShoulderGrit * ( fine * 0.3 + coarse * 0.2 );
+}
+#include <tonemapping_fragment>`;
+
+function createTerrainMaterial(detailFade: boolean, shoulderGrit = false): THREE.MeshStandardMaterial {
   // Cloud shadow is the OUTERMOST wrap, so it also finds the detail-fade patch installed
   // below: it chains onto whatever `onBeforeCompile` already exists, and the order here
   // decides only which patch runs first, never whether one is lost.
@@ -282,23 +300,33 @@ function createTerrainMaterial(detailFade: boolean): THREE.MeshStandardMaterial 
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
-        '#include <common>\nattribute float aTerrainDetail;\n',
+        `#include <common>\nattribute float aTerrainDetail;\n${
+          shoulderGrit ? 'attribute float aShoulderGrit;\nvarying float vShoulderGrit;\n' : ''
+        }`,
       )
       .replace(
         '#include <begin_vertex>',
         `vec3 transformed = vec3( position );
 float tileDistance = length( ( modelMatrix * vec4( position, 1.0 ) ).xz - cameraPosition.xz );
 float detailFade = smoothstep( ${DESERT_TILE_FADE_FULL.toFixed(1)}, ${DESERT_TILE_FADE_GONE.toFixed(1)}, tileDistance );
-transformed.y -= aTerrainDetail * detailFade;`,
+transformed.y -= aTerrainDetail * detailFade;${shoulderGrit ? '\nvShoulderGrit = aShoulderGrit;' : ''}`,
       );
+    if (shoulderGrit) {
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying float vShoulderGrit;\n')
+        .replace('#include <tonemapping_fragment>', SHOULDER_GRIT_FRAGMENT);
+    }
   };
   const comicProgramKey = material.customProgramCacheKey;
-  material.customProgramCacheKey = () => `${comicProgramKey.call(material)}:detail-fade-v1`;
+  material.customProgramCacheKey = () =>
+    `${comicProgramKey.call(material)}:detail-fade-v1${shoulderGrit ? ':shoulder-grit-v1' : ''}`;
   return material;
 }
 export const TERRAIN_MATERIAL = createTerrainMaterial(false);
 /** Fine player-centred tiles whose small-scale height relaxes into the vista base. */
 export const DESERT_TILE_MATERIAL = createTerrainMaterial(true);
+/** The road shoulder (world/roadmesh.ts): the tile material plus its grit. */
+export const DESERT_SHOULDER_MATERIAL = createTerrainMaterial(true, true);
 
 /**
  * One chunk's terrain, as two grids sharing one vertex buffer: the sparse FIELD
