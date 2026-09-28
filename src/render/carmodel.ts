@@ -21,6 +21,7 @@ import {
   makeUnifiedAtlasMaterial,
   makeUnifiedSurfaceMaterial,
   makeCarGrimeMaterial,
+  carPaintGrimeFrame,
   setCarBodyCondition,
   setCarBodyPalettePaint,
   setCarGrime,
@@ -336,9 +337,9 @@ function cloneCarBodyPaintMaterials(
 }
 
 /**
- * Stamps every paint vertex of a freshly fitted template with its chassis-local
- * position (`CAR_BODY_POSITION_ATTRIBUTE`), which is what the paint's dirt and
- * scratch placement is computed in.
+ * Stamps every paint and window-glass vertex of a freshly fitted template with its
+ * chassis-local position (`CAR_BODY_POSITION_ATTRIBUTE`), which is what the paint's
+ * dirt and scratch placement, and the dust on the glass, are computed in.
  *
  * Runs once per model at load, after the fit, the ride drop and the rest of
  * `buildTemplate` have placed the body, so the stamp is exactly where the metal is.
@@ -350,8 +351,11 @@ function stampCarBodyPositions(scene: THREE.Group, def: CarModelDef): void {
   scene.updateMatrixWorld(true);
   const stamped = new Map<THREE.BufferGeometry, THREE.Matrix4>();
   scene.traverse((mesh) => {
-    if (!(mesh instanceof THREE.Mesh) || !isRandomPaintMesh(mesh, def)) return;
-    if (!materialsOf(mesh).some((material) => isPaintSlot(material, def))) return;
+    if (!(mesh instanceof THREE.Mesh)) return;
+    // Window glass takes the stamp too: its dust is the paint's, laid in the same frame.
+    const glass = materialsOf(mesh).includes(carGlassMaterial());
+    if (!glass && !isRandomPaintMesh(mesh, def)) return;
+    if (!glass && !materialsOf(mesh).some((material) => isPaintSlot(material, def))) return;
     const owner = stamped.get(mesh.geometry);
     if (owner) {
       if (owner.equals(mesh.matrixWorld)) return;
@@ -675,12 +679,15 @@ let glassMaterial: THREE.MeshStandardMaterial | null = null;
  * dust of their own (`makeCarGrimeMaterial`). One copy per car, not per pane: every
  * window of a car is as dirty as the rest. Returns the copies (none if no glass).
  */
-function cloneCarGlass(root: THREE.Object3D): THREE.Material[] {
+function cloneCarGlass(root: THREE.Object3D, paint: readonly THREE.Material[]): THREE.Material[] {
   const shared = carGlassMaterial();
+  // The panes lay the paint's dust in the paint's chassis frame (materials.ts
+  // GLASS_GRIME_BODY); a car with no condition paint gets the lens's even film.
+  const frame = paint.length > 0 ? carPaintGrimeFrame(paint[0]!) : null;
   let own: THREE.MeshStandardMaterial | null = null;
   const swap = (material: THREE.Material): THREE.Material => {
     if (material !== shared) return material;
-    own ??= makeCarGrimeMaterial(shared.clone());
+    own ??= makeCarGrimeMaterial(shared.clone(), frame);
     return own;
   };
   root.traverse((mesh) => {
@@ -1490,7 +1497,7 @@ function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInsta
   const wheels = cloneWheels(t, appearanceKey);
   const body = t.body.clone(true);
   const paint = cloneCarBodyPaintMaterials(body, t, appearanceKey);
-  const glass = cloneCarGlass(body);
+  const glass = cloneCarGlass(body, paint);
   prepareSovietShellFaces(body, t.def);
   applyRandomPaint(body, t.def, appearanceKey);
   markStickerSurfaces(body, t.def);
@@ -1523,7 +1530,7 @@ function cloneStaticModel(id: string, appearanceKey = id): StaticCarInstance {
   group.name = id;
   const body = t.body.clone(true);
   const paint = cloneCarBodyPaintMaterials(body, t, appearanceKey);
-  const glass = cloneCarGlass(body);
+  const glass = cloneCarGlass(body, paint);
   applyRandomPaint(body, t.def, appearanceKey);
   group.add(body);
   const wheels = cloneWheels(t, appearanceKey);

@@ -12,11 +12,12 @@ import type * as THREE from 'three';
 import { setCarBodyCondition, setCarGrime } from './materials';
 
 /**
- * Share of the body's dirt the windows carry. Glass is smooth, steep and — the
- * windscreen at least — wiped, so it holds less than the paint around it; but a car
- * that has been through the desert is not looked out of through clean glass.
+ * Share of the body's dirt the windows carry. One: the glass evaluates the paint's own
+ * crust in the chassis frame (materials.ts GLASS_GRIME_BODY), so the dust line has to be
+ * the same number or it would step down where it crosses from a door onto its window.
+ * What makes glass hold less is in the shader (a thinner film above the crust).
  */
-export const GLASS_DIRT_SHARE = 0.7;
+export const GLASS_DIRT_SHARE = 1;
 
 export class CarBodySurface {
   private appliedDirt = -1;

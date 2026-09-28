@@ -960,63 +960,102 @@ export function setCarBodyCondition(
  *
  * One program for every car's glass and one per lamp material kind, shared through
  * `customProgramCacheKey`: what differs between a showroom pane and a desert one is a
- * uniform. The mottle is sampled in the mesh's own frame, rotated into the car's, so
- * it stays on the glass while the car moves.
+ * uniform. Nothing is sampled in world space, so nothing slides over the glass as the
+ * car turns: windows follow the paint's crust in the chassis frame (GLASS_GRIME_BODY),
+ * lenses carry an even film (GRIME_COLOR).
  */
-const CAR_GRIME_PROGRAM_KEY = 'car-grime-v1';
+const CAR_GRIME_PROGRAM_KEY = 'car-grime-v3';
+const CAR_GLASS_GRIME_PROGRAM_KEY = 'car-glass-grime-v1';
 const carGrimeUniforms = new WeakMap<THREE.Material, { value: number }>();
-
-const GRIME_VERTEX_PARS = `#include <common>
-varying vec3 vGrimeP;`;
-
-const GRIME_VERTEX = `#include <begin_vertex>
-vGrimeP = mat3( modelMatrix ) * transformed;`;
 
 const GRIME_FRAGMENT_PARS = `#include <common>
 uniform float uGrime;
 uniform float uGrimeSkyScale;
 uniform vec3 uDustLight;
 uniform vec3 uDustCrust;
-uniform vec3 uDustFilm;
-varying vec3 vGrimeP;
-float grimeHash( vec3 p ) {
-  p = fract( p * 0.3183099 + vec3( 0.1, 0.2, 0.3 ) );
-  p *= 17.0;
-  return fract( p.x * p.y * p.z * ( p.x + p.y + p.z ) );
-}
-float grimeNoise( vec3 x ) {
-  vec3 i = floor( x );
-  vec3 f = fract( x );
-  f = f * f * ( 3.0 - 2.0 * f );
-  return mix(
-    mix(
-      mix( grimeHash( i ), grimeHash( i + vec3( 1.0, 0.0, 0.0 ) ), f.x ),
-      mix( grimeHash( i + vec3( 0.0, 1.0, 0.0 ) ), grimeHash( i + vec3( 1.0, 1.0, 0.0 ) ), f.x ),
-      f.y ),
-    mix(
-      mix( grimeHash( i + vec3( 0.0, 0.0, 1.0 ) ), grimeHash( i + vec3( 1.0, 0.0, 1.0 ) ), f.x ),
-      mix( grimeHash( i + vec3( 0.0, 1.0, 1.0 ) ), grimeHash( i + vec3( 1.0, 1.0, 1.0 ) ), f.x ),
-      f.y ),
-    f.z );
-}`;
+`;
 
-// Patchy and streaked: a broad mottle, plus run-off that is long vertically and short
-// across, so a wet-then-dried pane shows drip lines rather than an even fog.
+// LENSES: an even film, the same dust the paint's upper panels carry. The first version
+// had a mottle, a fine grain and drip runs sampled in WORLD orientation: the pattern slid
+// across the lens whenever the car turned, and the fine grain read as pixels. A lens is
+// small and has no chassis-frame stamp; a uniform matt layer is what it shows.
 const GRIME_COLOR = `#include <color_fragment>
 float grimeFilm = 0.0;
 if ( uGrime > 0.0005 ) {
-  float grimeMottle = grimeNoise( vGrimeP * 2.2 );
-  float grimeFine = grimeNoise( vGrimeP * 16.0 );
-  float grimeRun = grimeNoise( vec3( vGrimeP.x * 18.0, vGrimeP.y * 1.4, vGrimeP.z * 18.0 ) );
-  // Mostly an even haze: the mottle only thins or thickens it, it does not make holes.
-  grimeFilm = uGrime * ( 0.8 + 0.3 * ( grimeMottle - 0.5 ) + 0.12 * ( grimeFine - 0.5 ) + 0.22 * ( grimeRun - 0.5 ) );
-  // A little dust already takes most of a pane's shine: the film builds fast, then
+  // A little dust already takes most of a lens's shine: the film builds fast, then
   // saturates, rather than growing in step with the paint's crust.
-  grimeFilm = saturate( 1.35 * grimeFilm );
-  // The paint's settled dust, a little crust in it and lifted toward the pale film.
-  // The pale film alone read as a grey-blue fog on a pane in shade, not as sand.
-  vec3 grimeDust = mix( mix( uDustLight, uDustCrust, 0.3 ), uDustFilm, 0.12 + 0.22 * grimeMottle );
-  diffuseColor.rgb = mix( diffuseColor.rgb, grimeDust, grimeFilm * 0.92 );
+  grimeFilm = saturate( 1.1 * uGrime );
+  vec3 grimeDust = mix( uDustLight, uDustCrust, 0.15 );
+  diffuseColor.rgb = mix( diffuseColor.rgb, grimeDust, grimeFilm * 0.85 );
+}`;
+
+/**
+ * WINDOWS: the paint's own dust, continued over the glass.
+ *
+ * The panes carry the chassis-frame stamp the paint does (carmodel.ts
+ * `stampCarBodyPositions`) and share the car's field origin, half extents and axles, so
+ * this is the paint's crust term evaluated on glass: it climbs from the sills, fans
+ * behind the wheels and sits in the tail's wake, with the same uneven edge, and where it
+ * reaches a window it crosses it on the same line it crosses the door. Above it only a
+ * thin film, thinner than on paint (glass is smooth, steep and wiped). Nothing is sampled
+ * in world space, so nothing slides as the car turns.
+ */
+const GLASS_GRIME_VERTEX_PARS = `#include <common>
+attribute vec3 ${CAR_BODY_POSITION_ATTRIBUTE};
+varying vec3 vCarBodyPos;`;
+const GLASS_GRIME_VERTEX_HOOK = `#include <worldpos_vertex>
+vCarBodyPos = ${CAR_BODY_POSITION_ATTRIBUTE};`;
+
+const GLASS_GRIME_FRAGMENT_PARS = `#include <common>
+uniform float uGrime;
+uniform float uGrimeSkyScale;
+uniform vec3 uDustLight;
+uniform vec3 uDustCrust;
+uniform vec3 uCarFieldOrigin;
+uniform vec3 uCarBodyHalf;
+uniform vec4 uCarAxles;
+varying vec3 vCarBodyPos;
+${CONDITION_NOISE}
+float glassArch( vec3 p, float axleZ, float forward ) {
+  float ahead = ( p.z - axleZ ) * forward;
+  vec2 d = vec2( p.y - uCarAxles.z, ahead * ( ahead < 0.0 ? 0.55 : 1.25 ) );
+  return 1.0 - smoothstep( uCarAxles.w * 0.95, uCarAxles.w * 2.1, length( d ) );
+}`;
+
+const GLASS_GRIME_DECLARE = `#include <color_fragment>
+float grimeFilm = 0.0;`;
+
+// Mirrors CAR_BODY_CONDITION's dirt block term for term; keep the two in step.
+const GLASS_GRIME_BODY = `#include <normal_fragment_maps>
+if ( uGrime > 0.0005 ) {
+  vec3 carP = vCarBodyPos;
+  vec3 carH = uCarBodyHalf;
+  vec3 carQ = abs( carP ) / carH;
+  float carHeight = clamp( ( carP.y + carH.y ) / ( 2.0 * carH.y ), 0.0, 1.0 );
+  float carForward = uCarAxles.x >= uCarAxles.y ? 1.0 : -1.0;
+  float carAlong = carP.z * carForward / carH.z;
+  vec3 carN = carP + uCarFieldOrigin;
+  float low = 1.0 - smoothstep( 0.04, 0.6, carHeight );
+  float flank = smoothstep( 0.45, 0.9, carQ.x );
+  float arch = max(
+    glassArch( carP, uCarAxles.x, carForward ),
+    glassArch( carP, uCarAxles.y, carForward )
+  ) * ( 0.35 + 0.65 * flank );
+  float tail = smoothstep( 0.6, 0.97, -carAlong ) * ( 1.0 - 0.5 * carHeight );
+  float exposure = max( max( low, arch ), tail );
+  float mottle = condNoise( carN * 2.4 );
+  float drip = condNoise( vec3( carN.x * 6.0, carN.y * 0.8, carN.z * 6.0 ) );
+  float crust = uGrime * ( 0.15 + 1.5 * exposure )
+    + ( mottle - 0.5 ) * 0.55 * uGrime
+    + ( drip - 0.5 ) * 0.35 * uGrime * low;
+  crust = smoothstep( 0.1, 0.9, crust );
+  float carUp = saturate( ( vec4( normal, 0.0 ) * viewMatrix ).y );
+  float film = 0.6 * uGrime * ( 0.22 + 0.33 * carUp ) * ( 0.65 + 0.7 * mottle );
+  grimeFilm = saturate( max( crust, film ) );
+  vec3 dust = mix( uDustLight, uDustCrust, crust );
+  diffuseColor.rgb = mix( diffuseColor.rgb, dust, grimeFilm * ( 0.6 + 0.35 * crust ) );
+  roughnessFactor = mix( roughnessFactor, 0.96, grimeFilm );
+  metalnessFactor = mix( metalnessFactor, 0.0, saturate( grimeFilm * 1.7 ) );
 }`;
 
 const GRIME_ROUGHNESS = `#include <roughnessmap_fragment>
@@ -1046,25 +1085,52 @@ specularStrength *= 1.0 - 0.85 * grimeFilm;`;
 const GRIME_EMISSIVE = `#include <emissivemap_fragment>
 totalEmissiveRadiance *= ( 1.0 - 0.8 * grimeFilm ) * mix( vec3( 1.0 ), vec3( 1.0, 0.8, 0.55 ), grimeFilm );`;
 
+/** The part of one car's paint uniforms its glass needs to lay the same dust. */
+export interface CarGrimeFrame {
+  readonly fieldOrigin: { value: THREE.Vector3 };
+  readonly bodyHalf: { value: THREE.Vector3 };
+  readonly axles: { value: THREE.Vector4 };
+}
+
+/** The chassis frame of a paint material made by `makeCarBodyConditionMaterial`. */
+export function carPaintGrimeFrame(paint: THREE.Material): CarGrimeFrame | null {
+  return carBodyUniforms.get(paint) ?? null;
+}
+
 /**
- * Gives a glass or lamp material the grime film, in place, and returns it. The
- * material must be this car's own (a clone): the uniform is per material.
+ * Gives a glass or lamp material the grime, in place, and returns it. The material
+ * must be this car's own (a clone): the uniform is per material. With `frame` (window
+ * glass stamped with chassis positions) the dust is the paint's crust continued over
+ * the pane; without it (lamp lenses) an even film.
  */
 export function makeCarGrimeMaterial<T extends THREE.MeshStandardMaterial | THREE.MeshPhongMaterial>(
   material: T,
+  frame: CarGrimeFrame | null = null,
 ): T {
   const grime = { value: 0 };
   carGrimeUniforms.set(material, grime);
   const standard = material instanceof THREE.MeshStandardMaterial;
+  const glass = standard && frame !== null;
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uGrime = grime;
     shader.uniforms.uGrimeSkyScale = {
       value: standard ? 1 / Math.max(1, (material as THREE.MeshStandardMaterial).envMapIntensity) : 1,
     };
     bindDesertDust(shader);
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', GRIME_VERTEX_PARS)
-      .replace('#include <begin_vertex>', GRIME_VERTEX);
+    if (glass) {
+      shader.uniforms.uCarFieldOrigin = frame.fieldOrigin;
+      shader.uniforms.uCarBodyHalf = frame.bodyHalf;
+      shader.uniforms.uCarAxles = frame.axles;
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', GLASS_GRIME_VERTEX_PARS)
+        .replace('#include <worldpos_vertex>', GLASS_GRIME_VERTEX_HOOK);
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', GLASS_GRIME_FRAGMENT_PARS)
+        .replace('#include <color_fragment>', GLASS_GRIME_DECLARE)
+        .replace('#include <normal_fragment_maps>', GLASS_GRIME_BODY)
+        .replace('#include <lights_fragment_maps>', GRIME_SKY);
+      return;
+    }
     let fragment = shader.fragmentShader
       .replace('#include <common>', GRIME_FRAGMENT_PARS)
       .replace('#include <color_fragment>', GRIME_COLOR)
@@ -1077,7 +1143,7 @@ export function makeCarGrimeMaterial<T extends THREE.MeshStandardMaterial | THRE
       : fragment.replace('#include <specularmap_fragment>', GRIME_SPECULAR);
     shader.fragmentShader = fragment;
   };
-  material.customProgramCacheKey = () => CAR_GRIME_PROGRAM_KEY;
+  material.customProgramCacheKey = () => (glass ? CAR_GLASS_GRIME_PROGRAM_KEY : CAR_GRIME_PROGRAM_KEY);
   return material;
 }
 
