@@ -121,10 +121,12 @@ const DENSE_SPAWN_ROAD_GAP_M = 32;
  */
 const PLATOON_CHANCE = 0.32;
 /**
- * Share of ambient drivers drawn FRANTIC (`drawDriver`). One in twenty-five: on a road
- * holding a dozen cars that is a frantic driver every few minutes, not a pack of them.
+ * Share of ambient drivers drawn FRANTIC (`drawDriver`). About one in fourteen: the
+ * first car of each direction is always cautious and the second always hurried, and a
+ * frantic car is gone fast — ahead it pulls away, oncoming it is past in a second — so
+ * at one in twenty-five it was barely ever met. Still an event, not a pack of them.
  */
-const FRANTIC_TRAFFIC_SHARE = 0.04;
+const FRANTIC_TRAFFIC_SHARE = 0.07;
 /** Longest chain one roll may build, so a bad streak of rolls cannot eat a whole queue. */
 const PLATOON_MAX_CHAIN = 4;
 /** Floor under the headway-derived follow gap: body clearance, not a target distance. */
