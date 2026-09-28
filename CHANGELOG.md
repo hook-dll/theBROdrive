@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.20.0 — 2026-09-29
+
+Two-wheel drive cars finally leave first gear on sand, a swapped engine brings its own gearing, rotting cars give up parts and cans, frantic drivers thread the traffic instead of parting it, and the desert night gets a little light, a little glitter and headlamps in the wet road.
 
 ### Added
 
@@ -62,6 +64,8 @@
 
 ### Changed
 
+- THE RADIO IS ONE KEY. R steps station 1 → station 2 → off (`Radio.cycle`); the
+  separate on/off and station keys (R and T) are gone.
 - FRANTIC DRIVERS FIND THEIR OWN WAY, AND EVERYBODY ELSE DRIVES AS USUAL. Ambient
   traffic no longer moves over toward its verge for a frantic driver behind it or coming
   at it: that rule, its offsets and the autopilot's `setYieldOffset`/`yieldOverhang`
