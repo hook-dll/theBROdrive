@@ -104,7 +104,6 @@ import {
   ELLIPSE_LATERAL_FLOOR,
   FLUID_DENSITY_OIL,
   FOOT_BRAKE_GRIP_RATIO,
-  FOOT_BRAKE_MAX_DECEL,
   FOOT_BRAKE_REAR_BIAS,
   FUEL_EMIT_INTERVAL,
   GRAVITY,
@@ -121,6 +120,7 @@ import {
   LOAD_SENSITIVITY_MIN,
   LOCKED_SIDE_GRIP,
   LOCK_SLIP_RATIO,
+  LONGITUDINAL_PEAK_U,
   LOW_RANGE_FULL_MPS,
   LOW_RANGE_GONE_MPS,
   LOW_RANGE_MU,
@@ -455,8 +455,12 @@ export interface WheelSprayState {
   surface: SurfaceType;
   /** Longitudinal slip ratio this tick. */
   slipRatio: number;
-  /** Friction-circle saturation, 0..1. */
-  slideT: number;
+  /**
+   * Longitudinal slip ratio PAST the peak of this surface's force curve, 0 while the
+   * tyre is still working (`LONGITUDINAL_PEAK_U`). What spray and dark tracks show:
+   * a hard launch at the tyre's best is not a wheelspin and throws nothing.
+   */
+  slideSlip: number;
   /** Chassis forward speed, m/s (signed). */
   forwardSpeed: number;
 }
@@ -1054,18 +1058,15 @@ export class Vehicle implements Rebasable {
    * own car cannot take — which is exactly the state a long, hard drive puts it in.
    */
   estimatedLateralAccel(surfaceType: SurfaceType, _speedMps: number): number {
-    let worstTyreGrip = 1;
-    for (const w of this.wheels) worstTyreGrip = Math.min(worstTyreGrip, w.tyreGrip);
     const compound = TYRE_COMPOUNDS[this.tyreCompoundIndex];
     return (
       GRAVITY *
-      SURFACES[surfaceType].lateralMu *
+      SURFACES[surfaceType].mu *
       weatherGrip(surfaceType) *
       this.handling.tyreLateralScale *
-      this.statsValue.wheelGrip *
-      Math.pow(GRIP_REFERENCE_MASS / this.statsValue.mass, GRIP_MASS_EXPONENT) *
+      this.tyreCarGrip(this.statsValue.mass) *
       compound.side *
-      worstTyreGrip *
+      this.worstTyreTemperatureGrip() *
       this.handling.rearAxleSideGrip
     );
   }
@@ -1079,20 +1080,43 @@ export class Vehicle implements Rebasable {
     return this.measuredBrakeDecelValue;
   }
 
-  /** Stable straight-line braking capacity on a named surface, in m/s². */
+  /**
+   * Stable straight-line braking capacity on a named surface, in m/s²: the car's own
+   * brakes, or the tyres where the tyres give out first.
+   */
   estimatedBrakeDecel(surfaceType: SurfaceType): number {
     const compound = TYRE_COMPOUNDS[this.tyreCompoundIndex];
-    const longitudinalGrip =
-      this.statsValue.wheelGrip * (this.model.longitudinalGripScale ?? 1);
     return Math.min(
-      FOOT_BRAKE_MAX_DECEL,
+      this.model.brakeDecelG * GRAVITY,
       FOOT_BRAKE_GRIP_RATIO *
-        SURFACES[surfaceType].longitudinalMu *
+        SURFACES[surfaceType].mu *
         weatherGrip(surfaceType) *
-        longitudinalGrip *
+        this.tyreCarGrip(this.statsValue.mass) *
         compound.grip *
+        this.worstTyreTemperatureGrip() *
         GRAVITY,
     );
+  }
+
+  /**
+   * What this car's tyres bring to every contact patch before the ground, the compound
+   * and the temperature do, in every direction alike: the catalogue `wheelGrip`, scaled
+   * down for mass because road tyres are sized to the chassis rather than with it, so a
+   * laden truck grips worse per kilogram than a hatchback.
+   */
+  private tyreCarGrip(mass: number): number {
+    return this.statsValue.wheelGrip * Math.pow(GRIP_REFERENCE_MASS / mass, GRIP_MASS_EXPONENT);
+  }
+
+  /**
+   * The worst wheel's temperature factor. A planner that believes in grip the tyres
+   * have already lost is planning corners and stops its own car cannot make — which is
+   * exactly the state a long, hard drive puts it in.
+   */
+  private worstTyreTemperatureGrip(): number {
+    let worst = 1;
+    for (const w of this.wheels) worst = Math.min(worst, w.tyreGrip);
+    return worst;
   }
 
   /**
@@ -1441,7 +1465,7 @@ export class Vehicle implements Rebasable {
         inContact: false,
         surface: SurfaceType.Asphalt,
         slipRatio: 0,
-        slideT: 0,
+        slideSlip: 0,
         forwardSpeed: 0,
       });
     }
@@ -1925,17 +1949,26 @@ export class Vehicle implements Rebasable {
         ? 0
         : input.throttle;
     const throttle = this.engineRunning ? throttleInput : 0;
-    // Crank speed comes from ROAD speed, not the wheel's own rotation. Gearing it to
-    // the wheel is the physically complete answer, and it was measured: it bounds
-    // wheelspin properly (a slipping tyre revs the engine out), but with thrust still
-    // coming from Rapier's engine force a slipping wheel then pinned the engine at its
-    // redline, where torque is cut — full throttle in 1st settled at 26 km/h and 50%
-    // slip. That coupling belongs with the tyre force model, not before it; until then
-    // wheelspin is bounded by the gear's own redline ceiling (maxDrivenWheelSpinRadS).
+    // The crank turns with the DRIVEN wheels (their mean, which is what an open
+    // differential gives it), so a tyre breaking loose revs the engine towards its
+    // cut, loses torque there and is bounded by it, and the driver hears it. The
+    // gearbox still decides on road speed: see `Drivetrain.update`. Until the tyre
+    // model owned the thrust this could not be done — with Rapier's engine force
+    // pushing the car, a slipping wheel pinned the engine at its redline and full
+    // throttle in first settled at 26 km/h.
+    let drivenSpinSum = 0;
+    let drivenWheels = 0;
+    for (const w of this.wheels) {
+      if (w.isFront ? this.frontDrivenCount === 0 : this.rearDrivenCount === 0) continue;
+      drivenSpinSum += w.spinRadS;
+      drivenWheels++;
+    }
+    const roadWheelSpeed = fwd / this.drivenRadius;
     const drive = this.drivetrain.update(
       dt,
       throttle,
-      fwd / this.drivenRadius,
+      roadWheelSpeed,
+      drivenWheels > 0 ? drivenSpinSum / drivenWheels : roadWheelSpeed,
       this.drivenRadius,
       automatic,
       input.reverse,
@@ -2165,7 +2198,9 @@ export class Vehicle implements Rebasable {
     // Compound first: the pedal's demand is sized against the grip the tyres have,
     // so it has to know which tyres are fitted before it can ask for anything.
     const compound = TYRE_COMPOUNDS[this.tyreCompoundIndex];
-    const tyreGrip = compound.grip;
+    // The tyre's own coefficient, shared by drive, braking and cornering: see
+    // `tyreCarGrip`, and the note on `SurfaceProps.mu` for why there is one.
+    const tyreCarGrip = this.tyreCarGrip(mass);
 
     // Total longitudinal capacity the vehicle is standing on, in newtons: the same
     // per-wheel capacity the tyre model uses in updateWheelDynamics, summed.
@@ -2177,20 +2212,24 @@ export class Vehicle implements Rebasable {
     // whole vehicle, which is what preserves the brake bias as the thing that decides
     // which axle lets go. Airborne wheels contribute nothing, so a car with its wheels
     // off the ground has no brakes to over-ask with.
-    const longitudinalGrip =
-      stats.wheelGrip * (this.model.longitudinalGripScale ?? 1);
     let brakeCapacityN = 0;
     for (const w of this.wheels) {
       if (!w.grounded) continue;
       brakeCapacityN +=
-        SURFACES[w.groundSurface].longitudinalMu *
+        SURFACES[w.groundSurface].mu *
         weatherGrip(w.groundSurface) *
-        longitudinalGrip *
-        tyreGrip *
+        tyreCarGrip *
+        compound.grip *
+        w.tyreGrip *
         w.loadN;
     }
+    // The pedal asks for what the BRAKES can do (`brakeDecelG`, the car's own drums and
+    // discs at full pedal), or for what the tyres can take where they give out first.
+    // On dry asphalt it is the brakes, as it was on the real cars; on loose ground, in
+    // the wet or on bald tyres it is the tyres, and the rear bias decides which axle
+    // lets go.
     const footBrakeDemandN = Math.min(
-      FOOT_BRAKE_MAX_DECEL * mass,
+      this.model.brakeDecelG * GRAVITY * mass,
       FOOT_BRAKE_GRIP_RATIO * brakeCapacityN,
     );
     const footBrakeForce = brakeDenom > 0 ? footBrakeDemandN / brakeDenom : 0;
@@ -2216,24 +2255,15 @@ export class Vehicle implements Rebasable {
     let contactCount = 0;
     this.surfaceVotes.fill(0);
     let drivenContactCount = 0;
-    // Same for every wheel. `gripBudgetFactor` sizes Rapier's own cone, which now
-    // bounds nothing it applies — its lateral and longitudinal channels are both
-    // switched off — but the number is still what the spray and audio read as this
-    // tyre's budget, so it keeps its meaning.
-    const gripBudgetFactor =
-      longitudinalGrip *
-      tyreGrip *
-      this.handling.lateralGripFraction *
-      Math.pow(GRIP_REFERENCE_MASS / mass, GRIP_MASS_EXPONENT);
-    // What the car brings to every contact patch, before the ground does: its own
-    // tyre quality, its handling profile, and the mass scaling — road tyres are sized
-    // to the chassis rather than with it, so a laden truck corners worse per kilogram
-    // than a hatchback. The SURFACE's own coefficient is applied per wheel below,
-    // because with four wheels on as many surfaces it is no longer one number.
-    const lateralCarFactor =
-      this.handling.tyreLateralScale *
-      stats.wheelGrip *
-      Math.pow(GRIP_REFERENCE_MASS / mass, GRIP_MASS_EXPONENT);
+    // Same for every wheel. `gripBudgetFactor` sizes Rapier's own cone, which bounds
+    // nothing the tyre model applies — its lateral and longitudinal channels are both
+    // switched off — and is left for the parked hold, which brakes through it.
+    const gripBudgetFactor = tyreCarGrip * compound.grip * this.handling.lateralGripFraction;
+    // What the car brings to every contact patch sideways, before the ground does: the
+    // tyre's own coefficient and the handling profile's cornering scale. The SURFACE's
+    // own coefficient is applied per wheel below, because with four wheels on as many
+    // surfaces it is no longer one number.
+    const lateralCarFactor = this.handling.tyreLateralScale * tyreCarGrip;
     // The load μ(Fz) is measured against THIS WHEEL parked: `w.staticLoadN`, from the
     // weight distribution and the axle geometry (see AxleGeometry). It is per-wheel
     // now, which is the point — referencing a front tyre against a quarter of the
@@ -2341,7 +2371,7 @@ export class Vehicle implements Rebasable {
       );
 
       const frictionSlip =
-        surface.longitudinalMu * weatherGrip(surfaceType) * gripBudgetFactor * loadFactor;
+        surface.mu * weatherGrip(surfaceType) * gripBudgetFactor * loadFactor;
       controller.setWheelFrictionSlip(w.index, frictionSlip);
       // ZERO. Rapier's lateral channel is a velocity-cancelling constraint scaled by
       // this gain, and a constraint is a ceiling with no curve under it: side force
@@ -2351,7 +2381,7 @@ export class Vehicle implements Rebasable {
       controller.setWheelSideFrictionStiffness(w.index, 0);
       w.tyreGrip = tyreTemperatureGrip(w.tyreTempC);
       w.lateralCapacityN =
-        surface.lateralMu *
+        surface.mu *
         weatherGrip(surfaceType) *
         lateralCarFactor *
         compound.side *
@@ -2483,7 +2513,7 @@ export class Vehicle implements Rebasable {
       // apply the previous tick's yaw damping to a step that had no tyre forces at all.
       this.alignTorqueImpulse = 0;
     } else {
-      this.updateWheelDynamics(dt, longitudinalGrip, tyreGrip, fwd, ambientC);
+      this.updateWheelDynamics(dt, tyreCarGrip * compound.grip, fwd, ambientC);
     }
     this.refreshWheelSpray(fwd);
 
@@ -3022,7 +3052,7 @@ export class Vehicle implements Rebasable {
    */
   private updateWheelDynamics(
     dt: number,
-    wheelGrip: number,
+    /** The car's tyre coefficient with the compound's longitudinal grip applied. */
     tyreGrip: number,
     vehicleForwardSpeed: number,
     airC: number,
@@ -3125,8 +3155,10 @@ export class Vehicle implements Rebasable {
           LOAD_SENSITIVITY_MIN,
           LOAD_SENSITIVITY_MAX,
         );
+        // The same coefficient the side force is sized from (see `SurfaceProps.mu`),
+        // warmed or cooled by this tyre's own temperature.
         let longitudinalMu =
-          surface.longitudinalMu * weatherGrip(surfaceType) * wheelGrip * tyreGrip * loadFactor;
+          surface.mu * weatherGrip(surfaceType) * tyreGrip * w.tyreGrip * loadFactor;
         // THE DIG — see the block comment on `DIG_FIRM_MU`. Sand only, and driven wheels
         // only: on a car with a driven front axle the dig firms both, which is the same
         // concession applied to the wheels doing the work.
@@ -3534,7 +3566,10 @@ export class Vehicle implements Rebasable {
       s.inContact = w.grounded;
       s.surface = w.groundSurface;
       s.slipRatio = w.slipRatio;
-      s.slideT = w.slideT;
+      s.slideSlip = Math.max(
+        0,
+        Math.abs(w.slipRatio) - SURFACES[w.groundSurface].optimalSlip * LONGITUDINAL_PEAK_U,
+      );
       s.forwardSpeed = forwardSpeed;
 
       const r = this.wheelRideStates[i];

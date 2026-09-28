@@ -64,8 +64,8 @@ const SEEDS = [1, 7, 42, 1337];
 //
 // Duplicated from vehicle.ts on purpose: importing it would mean exporting private
 // tuning constants for a tool. Each value below names the constant it copies.
-/** SurfaceProps.longitudinalMu for sand: the honest coefficient, for reference. */
-const SAND_LONGITUDINAL_MU = 0.44;
+/** SurfaceProps.mu for sand: the honest coefficient, for reference. */
+const SAND_LONGITUDINAL_MU = 0.51;
 /** DIG_FIRM_MU: driven-axle μ the dig grants at full bite. */
 const DIG_FIRM_MU = 1.6;
 /** DIG_FIRM_RR: rolling resistance of firm sand while the dig is in. */

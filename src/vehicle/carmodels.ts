@@ -509,14 +509,15 @@ export interface CarModelDef {
   readonly engineId: string;
   readonly gearboxId: string;
   readonly tankLitres: number;
-  /** Tyre grip multiplier on the surface's friction. */
+  /** Tyre grip multiplier on the surface's friction, in every direction alike. */
   readonly wheelGrip: number;
   /**
-   * Longitudinal-only tyre-compound multiplier. Defaults to 1; a value above one
-   * gives a competition tyre more drive/brake authority without pretending its
-   * period lateral construction can pull the same coefficient.
+   * What the car's own brakes deliver at full pedal on a surface that does not limit
+   * them, in g: the drums and discs, not the tyres. Sized to the period 100-0 stops
+   * `tools/reality.ts` holds each car to. Where the tyres give out first — loose
+   * ground, the wet, bald tyres — they are the limit instead.
    */
-  readonly longitudinalGripScale?: number;
+  readonly brakeDecelG: number;
   readonly suspension: SuspensionTuning;
   /** Steering lock at the front axle, radians. */
   readonly steerLock: number;
@@ -652,7 +653,7 @@ interface SovietSpec {
   readonly gearboxId: string;
   readonly tankLitres: number;
   readonly wheelGrip: number;
-  readonly longitudinalGripScale?: number;
+  readonly brakeDecelG: number;
   readonly steerLock: number;
   readonly rearDriveBias: number;
   readonly handlingProfile?: HandlingProfile;
@@ -668,8 +669,8 @@ interface SovietSpec {
 /*
  * ---- the grip ladder, and why it sits so far below 1.0 ----
  *
- * `wheelGrip` multiplies the profile's lateral coefficient and the longitudinal
- * one together, so it is the tyre — and these are period Soviet tyres. What the
+ * `wheelGrip` multiplies the surface's one coefficient for drive, braking and
+ * cornering alike, so it is the tyre — and these are period Soviet tyres. What the
  * real cars pull on dry asphalt, and what each figure below is calibrated to:
  *
  *   GAZ-21, 6.70-15 cross-ply          0.62 g   a tall, soft, hot-running carcass
@@ -681,9 +682,10 @@ interface SovietSpec {
  *   rally 2105                         0.85 g   the only one built to corner
  *
  * The old ladder ran 0.88-1.04, which measured 0.89-1.04 g on the bench: a 1956
- * Volga cornering like a modern hatchback, and — because the same number sets the
- * brake capacity — stopping from 100 km/h in 51 m on drums. The figures below put
- * the Volga's stop back around 60 m, which is what a period test recorded.
+ * Volga cornering like a modern hatchback. The stopping distance is NOT set here: it
+ * is `brakeDecelG`, the car's own brakes, sized to the period 100-0 test. Sizing it
+ * through the tyre is what used to leave every classic spinning its rear wheels in
+ * first gear on dry asphalt.
  *
  * The ORDER is unchanged and it still runs backwards from every other pack: these
  * are the oldest cars in the catalogue, and the Samaras are the only ones with a
@@ -717,6 +719,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_gaz_3',
     tankLitres: 60,
     wheelGrip: 0.522,
+    brakeDecelG: 0.42,
     steerLock: 0.519,
     rearDriveBias: 1,
     frontWeightShare: 0.48,
@@ -739,6 +742,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_gaz_4',
     tankLitres: 55,
     wheelGrip: 0.6,
+    brakeDecelG: 0.47,
     steerLock: 0.598,
     rearDriveBias: 1,
     frontWeightShare: 0.49,
@@ -759,6 +763,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_lada_4',
     tankLitres: 39,
     wheelGrip: 0.558,
+    brakeDecelG: 0.5,
     steerLock: 0.52,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
@@ -778,6 +783,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_lada_4_2102',
     tankLitres: 39,
     wheelGrip: 0.551,
+    brakeDecelG: 0.49,
     steerLock: 0.522,
     rearDriveBias: 1,
     frontWeightShare: 0.5,
@@ -797,6 +803,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_lada_4_tall',
     tankLitres: 39,
     wheelGrip: 0.574,
+    brakeDecelG: 0.5,
     steerLock: 0.525,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
@@ -815,6 +822,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_lada_4_2105',
     tankLitres: 39,
     wheelGrip: 0.56,
+    brakeDecelG: 0.49,
     steerLock: 0.521,
     rearDriveBias: 1,
     frontWeightShare: 0.5,
@@ -835,6 +843,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_lada_4_2105',
     tankLitres: 39,
     wheelGrip: 0.57,
+    brakeDecelG: 0.5,
     steerLock: 0.522,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
@@ -856,9 +865,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_lada_5',
     tankLitres: 39,
     wheelGrip: 0.615,
-    // Homologation/rally compound: markedly better drive and braking than the
-    // cross-ply road tyre, without giving it modern steady-state lateral g.
-    longitudinalGripScale: 1.27,
+    // Rally brakes: pads, harder linings and a servo the road car never had.
+    brakeDecelG: 0.75,
     steerLock: 0.508,
     rearDriveBias: 1,
     handlingProfile: 'sport',
@@ -879,6 +887,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_lada_4_1600',
     tankLitres: 39,
     wheelGrip: 0.58,
+    brakeDecelG: 0.5,
     steerLock: 0.52,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
@@ -897,6 +906,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_lada_5',
     tankLitres: 39,
     wheelGrip: 0.582,
+    brakeDecelG: 0.5,
     steerLock: 0.521,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
@@ -918,6 +928,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
     wheelGrip: 0.65,
+    brakeDecelG: 0.57,
     steerLock: 0.56,
     rearDriveBias: 0,
     handlingProfile: 'road',
@@ -937,6 +948,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
     wheelGrip: 0.65,
+    brakeDecelG: 0.57,
     steerLock: 0.56,
     rearDriveBias: 0,
     handlingProfile: 'road',
@@ -958,6 +970,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
     wheelGrip: 0.65,
+    brakeDecelG: 0.57,
     steerLock: 0.56,
     rearDriveBias: 0,
     handlingProfile: 'road',
@@ -981,6 +994,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_niva_4',
     tankLitres: 42,
     wheelGrip: 0.576,
+    brakeDecelG: 0.48,
     steerLock: 0.496,
     rearDriveBias: 0.5,
     handlingProfile: 'utility',
@@ -999,6 +1013,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_niva_5',
     tankLitres: 42,
     wheelGrip: 0.574,
+    brakeDecelG: 0.47,
     steerLock: 0.498,
     rearDriveBias: 0.5,
     handlingProfile: 'utility',
@@ -1119,7 +1134,7 @@ const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
   gearboxId: spec.gearboxId,
   tankLitres: spec.tankLitres,
   wheelGrip: spec.wheelGrip,
-  longitudinalGripScale: spec.longitudinalGripScale,
+  brakeDecelG: spec.brakeDecelG,
   // FBXLoader reports this pack in centimetres, and each body's factor makes that
   // body life-size against the real car's wheelbase (see the pack note above).
   scale: spec.scale,
@@ -1153,6 +1168,7 @@ const SAAS_SPECS: readonly Entry[] = [
     gearboxId: 'gearbox_manual5',
     tankLitres: 55,
     wheelGrip: 0.65,
+    brakeDecelG: 0.59,
     suspension: SUSP_SAMARA,
     steerLock: 0.617,
     rearDriveBias: 0,
@@ -1175,6 +1191,7 @@ const SAAS_SPECS: readonly Entry[] = [
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
     wheelGrip: 0.65,
+    brakeDecelG: 0.57,
     steerLock: 0.56,
     rearDriveBias: 0,
     handlingProfile: 'road',
@@ -1216,6 +1233,7 @@ const SAAS_SPECS: readonly Entry[] = [
     gearboxId: 'gearbox_oka_4',
     tankLitres: 30,
     wheelGrip: 0.61,
+    brakeDecelG: 0.55,
     // MacPherson struts in front, trailing arms on an elastic cross-beam behind:
     // the Samara's layout, and its preset.
     suspension: SUSP_SAMARA,
@@ -1251,6 +1269,7 @@ const SAAS_SPECS: readonly Entry[] = [
     gearboxId: 'gearbox_uaz_4',
     tankLitres: 56,
     wheelGrip: 0.59,
+    brakeDecelG: 0.53,
     suspension: SUSP_TRUCK,
     steerLock: 0.501,
     rearDriveBias: 0.5,
@@ -1298,6 +1317,7 @@ const SAAS_SPECS: readonly Entry[] = [
     tankLitres: 46,
     // 175/80 R13 period road tyre; same dry-road calibration as the 2104 estate.
     wheelGrip: 0.56,
+    brakeDecelG: 0.51,
     // Rear leaf springs carrying a 500 kg payload; not the Zhiguli coil-sprung estate.
     suspension: SUSP_TRUCK,
     // Factory outer-front turning radius is 5.25 m (autoopt.ru, IZH-2715); the
@@ -1390,6 +1410,7 @@ const GTAV_SPECS: readonly Entry[] = [
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
     wheelGrip: 0.66,
+    brakeDecelG: 0.6,
     suspension: SUSP_SAMARA,
     steerLock: 0.58,
     rearDriveBias: 0,
@@ -1463,7 +1484,7 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   gearboxId: e.gearboxId,
   tankLitres: e.tankLitres,
   wheelGrip: e.wheelGrip,
-  longitudinalGripScale: e.longitudinalGripScale,
+  brakeDecelG: e.brakeDecelG,
   suspension: e.suspension ?? SUSP_CAR,
   steerLock: e.steerLock,
   rearDriveBias: e.rearDriveBias,

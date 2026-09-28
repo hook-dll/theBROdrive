@@ -565,7 +565,7 @@ Stable `id` попадает в saves. После публикации его н
 - `scale` из factory wheelbase / source wheelbase;
 - kerb `mass`;
 - `engineId`, `gearboxId`, `tankLitres`;
-- `wheelGrip`, при исключении `longitudinalGripScale`;
+- `wheelGrip` (шина: разгон, торможение и повороты от одного коэффициента) и `brakeDecelG` (собственные тормоза машины, по периодному тесту 100-0);
 - `suspension`;
 - `steerLock`;
 - `rearDriveBias`: `0` FWD, `1` RWD, `0.5` 4WD;

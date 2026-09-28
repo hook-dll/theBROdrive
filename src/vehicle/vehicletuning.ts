@@ -321,7 +321,8 @@ export const TYRE_OVERHEAT_LOSS = 0.22;
 export const ELLIPSE_LATERAL_FLOOR = 0.05;
 
 /**
- * Grip multiplier for a tyre at this temperature, 1.0 at the reference.
+ * Grip multiplier for a tyre at this temperature, 1.0 at the reference. It scales the
+ * tyre's one coefficient, so drive, braking and cornering all feel it together.
  *
  * Rises smoothly to the optimum, then falls away: `smoothstep` at both ends so there
  * is no kink at either shoulder, and the second leg is steeper than the first because
@@ -609,17 +610,10 @@ export const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>
 // ---------------------------------------------------------------------------
 
 /**
- * Foot-brake pedal ceiling (m/s²): the most the hydraulics can ask for at full
- * pedal, before the tyres get a say. It only binds where grip is plentiful — a
- * high-wheelGrip car on clean asphalt on the experimental2 compound reaches
- * 1.2 · 1.1 · 0.988 = 1.30 g of capacity — and is what stops that combination
- * out-braking a modern car outright.
- */
-export const FOOT_BRAKE_MAX_DECEL = 13.0;
-/**
  * Fraction of the vehicle's MEASURED total longitudinal capacity that a floored
- * pedal asks for. The pedal negotiates with the tyres instead of shouting one
- * number at them.
+ * pedal asks for, where the tyres rather than the car's own brakes (`brakeDecelG`)
+ * are the limit — loose ground, the wet, bald tyres. On dry asphalt the brakes give
+ * out first, as they did on the real cars.
  *
  * What this replaces: a flat 9.6 m/s² demand, identical on every surface, every
  * compound and every load. That one number could only be right for one case, and
@@ -634,9 +628,10 @@ export const FOOT_BRAKE_MAX_DECEL = 13.0;
  *  - Load was ignored. A laden truck stopped no better than an empty one, and a wheel
  *    unloading over a crest was asked for exactly as much as one carrying the corner.
  *
- * Calibration is preserved rather than re-tuned: asphalt on standard tyres has a
- * capacity of 2.6 · 0.38 = 0.988 g, so 0.99 of it is 9.59 m/s² — the old constant to
- * within a rounding error. The established baseline stops the same.
+ * The pedal's own ceiling is the car's `brakeDecelG`. It used to be a single fleet
+ * constant, while the thing that really held these cars to their period stops — the
+ * drums themselves — lived inside the tyre's coefficient, and made every tyre spin in
+ * first gear on dry asphalt to keep the stopping distances right.
  *
  * It is deliberately an AGGREGATE, summed over the vehicle, not a per-wheel
  * allocation. Per-wheel negotiation would be an anti-lock brake the era never had:
@@ -780,6 +775,27 @@ export const WHEEL_LOAD_TAU = 0.025;
 export const SLIDING_GRIP_FRACTION = 0.75;
 /** How quickly the sliding plateau is reached, in units of PEAK_SLIP_RATIO. */
 export const SLIDE_CURVE_GAIN = 1.5;
+/**
+ * Where the longitudinal force curve in `updateWheelDynamics` really peaks, in units
+ * of the surface's `optimalSlip`: the sliding plateau lifts the peak past the peak
+ * term's own u = 1, to about 1.45. Below it a tyre is working, not sliding — a hard
+ * launch runs right up to it — so anything that SHOWS sliding (spray, dark tracks)
+ * starts here. Found numerically from the two curve constants so it cannot drift.
+ */
+export const LONGITUDINAL_PEAK_U = ((): number => {
+  let best = 1;
+  let bestForce = 0;
+  for (let u = 1; u <= 4; u += 0.001) {
+    const force =
+      (1 - SLIDING_GRIP_FRACTION) * ((2 * u) / (1 + u * u)) +
+      SLIDING_GRIP_FRACTION * Math.tanh(SLIDE_CURVE_GAIN * u);
+    if (force > bestForce) {
+      bestForce = force;
+      best = u;
+    }
+  }
+  return best;
+})();
 /** Lateral grip left on a locked, sliding tyre. */
 export const LOCKED_SIDE_GRIP = 0.22;
 
@@ -955,23 +971,19 @@ export const DIG_SURFACES: ReadonlySet<SurfaceType> = new Set([
  * one exists because the ROAD is the rest of it, and the road can be steeper than the car
  * that starts on it.
  *
- * WHAT BREAKS WITHOUT IT. `tools/climb-sweep.ts` measures the steepest grade each body
- * escapes from a parked start, and the road's own steepest grade is measured by
- * `tools/road-profile.ts`. Those two numbers are supposed to nest — the road is what the
- * fleet was designed around — and they do not: the starter VAZ-2101 escapes 10.9 degrees
- * of honest asphalt, while seed 1's road reaches 21.0% (11.9 degrees) and six seeds
- * measured reach 17.0-21.0%. From a standstill on one of those pitches the stock car
- * cannot move at all: measured on a 12-degree ramp, it sits at 0 km/h with the driven
- * wheels at 7.2 rad/s and a slip ratio of 7 against a peak-slip of 0.12, and the grade
- * wins. Even the whole plateau is not the problem — the tyre's own best point is
- * `0.946 * capacity`, and the capacity is short.
+ * WHAT IT GUARDS. `tools/climb-sweep.ts` measures the steepest grade each body escapes
+ * from a parked start, and the road's own steepest grade is measured by
+ * `tools/road-profile.ts`: seed 1's road reaches 21.0% (11.9 degrees), and six seeds
+ * measured reach 17.0-21.0%. Those two numbers have to nest — the road is what the fleet
+ * was designed around — on EVERY surface the road deck is made of.
  *
- * WHY NO COEFFICIENT FIXES IT. A 2101's `wheelGrip` is 0.558 — worn Soviet factory
- * tyres — and asphalt's own coefficient is 0.988, so the driven axle works at 0.551 of
- * mu. On an 18.7-degree climb the rear axle carries 5.1 kN and the grade asks 3.0 kN, so
- * the axle needs 0.63 of mu to hold it and has 0.55. That is not a tuning error, it is
- * the arithmetic of a 1.2-litre car on hard rubber, and it is why the honest model stops
- * it just below the steepest road the generator can draw.
+ * WHERE THE HONEST TYRE IS SHORT. On an 18.7-degree climb a 2101's rear axle carries
+ * 5.1 kN and the grade asks 3.0 kN, so the axle needs 0.63 of mu to hold it. On asphalt
+ * the tyre has about 0.99 and the floor below never binds. On GRAVEL it has 0.70, and a
+ * heavier car on softer tyres less than that: a GAZ-21 is at 0.58. That is the arithmetic
+ * of hard period rubber on loose stone, and it is why the floor still exists. It used to
+ * bind on asphalt too, when the tyre's drive coefficient was the brake test's 0.55, and
+ * its fade then read as the rear wheels breaking loose at 5-14 km/h on every launch.
  *
  * SO THE MODEL LIES, ONCE, IN ONE PLACE, AND THE LIE IS THIS: on a road surface, a
  * driven wheel at a CRAWL does not have to make its worst case. A driver on a hill start

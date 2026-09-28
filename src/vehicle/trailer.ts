@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { PhysicsWorld } from '../core/physics';
 import { WorldOrigin, type Rebasable, type RebaseShift } from '../world/origin';
-import { SurfaceType } from '../core/surfaces';
+import { SURFACES, SurfaceType } from '../core/surfaces';
 import type { GameWorld, TrailerState } from '../game/state';
 import type { Vehicle, WheelSprayState } from './vehicle';
+import { LONGITUDINAL_PEAK_U } from './vehicletuning';
 import { createTrailerModel, type TrailerFit } from '../render/trailermodel';
 
 /**
@@ -395,7 +396,7 @@ export class Trailer implements Rebasable {
         inContact: false,
         surface: SurfaceType.Asphalt,
         slipRatio: 0,
-        slideT: 0,
+        slideSlip: 0,
         forwardSpeed: 0,
       });
       this.prevWheelRotation.push(0);
@@ -731,7 +732,7 @@ export class Trailer implements Rebasable {
       if (!this.controller.wheelIsInContact(i)) {
         s.inContact = false;
         s.slipRatio = 0;
-        s.slideT = 0;
+        s.slideSlip = 0;
         continue;
       }
       s.inContact = true;
@@ -756,10 +757,12 @@ export class Trailer implements Rebasable {
       s.surface = this.physics.surfaces.lookupType(ground ? ground.handle : null);
       const reference = Math.max(Math.abs(forwardSpeed), SPRAY_SLIP_REFERENCE);
       s.slipRatio = (spin * WHEEL_RADIUS - forwardSpeed) / reference;
-      // No friction circle to report: a trailer tyre is only ever sliding
-      // longitudinally (locked) or dragged sideways, and the longitudinal term
-      // above already carries the locked case.
-      s.slideT = 0;
+      // A trailer tyre is only ever sliding longitudinally (locked) or dragged
+      // sideways, and the longitudinal term carries the locked case.
+      s.slideSlip = Math.max(
+        0,
+        Math.abs(s.slipRatio) - SURFACES[s.surface].optimalSlip * LONGITUDINAL_PEAK_U,
+      );
     }
   }
 

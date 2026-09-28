@@ -468,11 +468,19 @@ export class Drivetrain {
    * call — an AI driver or a replay cannot forget to configure it, and there is
    * no second configuration channel beside the fitted parts (reconfigure). The
    * decision itself is the OR of hardware and driver: see the gate below.
+   *
+   * Two wheel speeds, because they answer two different questions. The crank is
+   * geared to the DRIVEN wheels (`drivenWheelAngularSpeed`), so a spinning tyre revs
+   * the engine out towards its cut and the torque it makes there is what bounds the
+   * spin — the tachometer and the engine note show it too. The gearbox decides on
+   * ROAD speed (`wheelAngularSpeed`) where it matters: a wheel locked under braking
+   * is not a reason to drop to first (see `automaticShift`).
    */
   update(
     dt: number,
     throttle: number,
     wheelAngularSpeed: number,
+    drivenWheelAngularSpeed: number,
     wheelRadius: number,
     autoShift: boolean,
     reverseRequested: boolean,
@@ -498,6 +506,7 @@ export class Drivetrain {
         demand,
         clamp(forwardDemand, 0, 1),
         wheelAngularSpeed,
+        drivenWheelAngularSpeed,
         wheelRadius,
         reverseRequested,
       );
@@ -513,13 +522,13 @@ export class Drivetrain {
       this.rpmValue = this.freeRev(engine, dt, demand);
       crankSpeed = this.rpmValue / RPM_PER_RAD_PER_SEC;
     } else {
-      // In first/reverse, below the road speed corresponding to the requested crank
+      // In first/reverse, below the wheel speed corresponding to the requested crank
       // speed, the clutch slips instead of dragging the engine down to idle. This is
       // the hill-start behaviour a manual driver gets by raising the revs and feeding
       // the clutch. Taller gears stay rigidly coupled; otherwise every upshift below
       // the torque peak would silently ride the clutch.
       const total = this.gearRatio() * gearbox.finalDrive;
-      crankSpeed = wheelAngularSpeed * total;
+      crankSpeed = drivenWheelAngularSpeed * total;
       const gearedRpm = Math.abs(crankSpeed) * RPM_PER_RAD_PER_SEC;
       const launchGear = this.gear === 1 || this.gear === GEAR_REVERSE;
       const clutchRpm = launchGear
@@ -697,6 +706,7 @@ export class Drivetrain {
     throttle: number,
     forwardDemand: number,
     wheelAngularSpeed: number,
+    drivenWheelAngularSpeed: number,
     wheelRadius: number,
     reverseRequested: boolean,
   ): void {
@@ -731,9 +741,19 @@ export class Drivetrain {
       return;
     }
 
-    const wheelAbs = Math.abs(wheelAngularSpeed) * gearbox.finalDrive * RPM_PER_RAD_PER_SEC;
+    const roadAbs = Math.abs(wheelAngularSpeed) * gearbox.finalDrive * RPM_PER_RAD_PER_SEC;
+    // The engine runs at the DRIVEN wheels' speed, which a tyre working at 2% slip at
+    // the top of third already puts into the fuel cut while road speed says there is
+    // room: judged on road speed alone, the rally 2105 sat on its limiter in third at
+    // 141 km/h. So the upshift is judged on whichever is faster — the crank's own
+    // speed while a wheel flares, road speed while one is locked — and the downshift
+    // on road speed alone, because a locked wheel is not a reason to drop to first.
+    const crankAbs = Math.max(
+      roadAbs,
+      Math.abs(drivenWheelAngularSpeed) * gearbox.finalDrive * RPM_PER_RAD_PER_SEC,
+    );
     const ratio = Math.abs(this.ratioOfGear(this.gear));
-    const current = wheelAbs * ratio;
+    const current = roadAbs * ratio;
 
     if (this.gear < n) {
       const nextRatio = Math.abs(this.ratioOfGear(this.gear + 1));
@@ -741,15 +761,21 @@ export class Drivetrain {
         throttle >= WOT_SHIFT_THROTTLE
           ? fullThrottleUpshiftDue(
               engine,
-              current,
+              crankAbs * ratio,
               ratio,
               nextRatio,
               engine.redlineRpm * this.thermalRevLimit,
             )
-          : current > engine.redlineRpm * UP_SHIFT_RPM_FRACTION;
-      // Never upshift into a gear that cannot pull: the taller gear must still
-      // leave the engine clear of idle, or the box would hunt straight back down.
-      if (due && wheelAbs * nextRatio > engine.idleRpm * UP_SHIFT_IDLE_MARGIN) {
+          : crankAbs * ratio > engine.redlineRpm * UP_SHIFT_RPM_FRACTION;
+      // Never upshift into a gear that cannot pull or that the downshift rule would
+      // take straight back at this ROAD speed: a wheel spinning up in first must not
+      // make the box hunt between first and second.
+      const nextRoadRpm = roadAbs * nextRatio;
+      if (
+        due &&
+        nextRoadRpm > engine.idleRpm * UP_SHIFT_IDLE_MARGIN &&
+        nextRoadRpm >= engine.redlineRpm * DOWN_SHIFT_RPM_FRACTION
+      ) {
         this.setGear(this.gear + 1);
         return;
       }

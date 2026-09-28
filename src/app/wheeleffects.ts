@@ -24,15 +24,6 @@ import type { Terrain } from '../world/terrain';
  */
 const SPRAY_REF_SPEED = 1.5;
 /**
- * Slip below which a wheel throws nothing.
- *
- * A tyre rolling honestly still reports a small non-zero slip ratio — that is how
- * the tyre model makes force at all — so without a floor every wheel would trickle
- * motes down every straight. 0.06 is above that noise and well below the slip a
- * locked or spinning wheel reaches.
- */
-const SPRAY_MIN_SLIP = 0.06;
-/**
  * How much visible material a smoking tyre yields against a digging one.
  *
  * `SurfaceProps.dust` and `.smoke` say WHICH of the two a surface produces; this says
@@ -77,8 +68,9 @@ export function createWheelEffects(ctx: WheelEffectsContext): WheelEffects {
    * share the resolved surface so terrain projection is paid once per wheel.
    *
    * Tracks accept honest rolling contact on sand; slip only widens and darkens them.
-   * Spray retains its slip floor, because a rolling tyre leaves a track without
-   * necessarily throwing material into the air.
+   * Spray needs the tyre to be SLIDING, past the peak of its force curve (see
+   * `WheelSprayState.slideSlip`): a tyre working at its best is not a wheelspin, and
+   * throwing smoke there made every hard launch look like one.
    */
   const emit = (ws: WheelSprayState, frameDt: number, activeS: number): void => {
     if (!ws.inContact) {
@@ -90,8 +82,8 @@ export function createWheelEffects(ctx: WheelEffectsContext): WheelEffects {
     // The visible verge is the same loose ground mesh and should mark immediately at
     // the asphalt edge; its finer gravel/sand classification remains relevant to spray.
     ctx.tracks.sample(ws, terrainContact);
-    const slip = Math.max(Math.abs(ws.slipRatio), ws.slideT);
-    if (slip <= SPRAY_MIN_SLIP) return;
+    const slip = ws.slideSlip;
+    if (slip <= 0) return;
 
     const props = SURFACES[surface];
 

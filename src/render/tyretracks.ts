@@ -177,7 +177,7 @@ export class SandTyreTracks {
     }
 
     const pieces = Math.max(1, Math.round(distance / TARGET_SPACING));
-    const slip = Math.min(1, Math.max(Math.abs(wheel.slipRatio), wheel.slideT));
+    const slip = Math.min(1, wheel.slideSlip);
     let x0 = previous.x;
     let y0 = previous.y;
     let z0 = previous.z;

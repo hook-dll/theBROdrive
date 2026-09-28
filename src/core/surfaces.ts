@@ -46,18 +46,29 @@ export const enum SurfaceType {
  * That is exactly how sand became the best braking surface in the game — 2.8 was
  * chosen to stop two-wheel drives bogging, and nobody asked what it did to the brakes.
  *
- * Both channels are now the same physical quantity: the PEAK FRICTION COEFFICIENT this
- * surface offers a reference tyre of grip 1.0, dry, at nominal load. The tyre model
- * multiplies them by the car's own `wheelGrip` and by the load, slip, lock and
- * temperature factors, and each car's achieved figure is then whatever its weight
- * transfer and slip curve make of it — the same relationship a real car has with a
- * real road.
+ * `mu` is the PEAK FRICTION COEFFICIENT this surface offers a reference tyre of grip
+ * 1.0, dry, at nominal load. The tyre model multiplies it by the car's own `wheelGrip`
+ * and by the load, slip, lock and temperature factors, and each car's achieved figure
+ * is then whatever its weight transfer and slip curve make of it — the same
+ * relationship a real car has with a real road.
  *
- * The absolute scale is unchanged on purpose: asphalt keeps the numbers it has always
- * had (0.99 longitudinal, 1.70 lateral), so every car in the catalogue brakes, corners
- * and accelerates, and every bench in `tools/`, exactly as before. What changed is the
- * RELATIVE grip of the other surfaces, which now comes from measured road data instead
- * of from a chain of retunings.
+ * ONE TYRE, ONE COEFFICIENT, EVERY DIRECTION. There used to be two columns here, a
+ * longitudinal 0.988 and a lateral 1.70 on asphalt, and the 1.7:1 ratio between them
+ * ran down the whole table. It was not physics — a tyre's peak friction is the same
+ * forwards and sideways to within a few per cent on any firm surface, which is why
+ * Pacejka's similarity method, Racer's combined slip and Vehicle Physics Pro all work
+ * from one isotropic curve — it was the old Rapier cone budget (2.6 x 0.38) surviving
+ * as a column. With the car's `wheelGrip` calibrated to the period cornering figures,
+ * it left a Zhiguli tyre at 0.95 sideways and 0.55 forwards, which is a tyre that
+ * corners on dry asphalt and spins on it in first gear. The lower column was only
+ * ever right for BRAKING, and braking is now held by the car's own brakes
+ * (`CarModelDef.brakeDecelG`), which is what held those cars to it.
+ *
+ * So `mu` is the old lateral column, whose calibration the handling benches were read
+ * at, and the tyre model uses it for drive, braking and cornering alike. What stays
+ * directional is directional for a reason stated where it lives: the compound's own
+ * split (`TYRE_COMPOUNDS`), the live rear axle (`REAR_AXLE_SIDE_GRIP`) and the handling
+ * profile's cornering scale.
  *
  * Sources for the relative figures, dry, car tyre:
  *  - dry asphalt and concrete mu 0.7-0.8; loose gravel drops from 0.8 to 0.35 and
@@ -75,12 +86,11 @@ export const enum SurfaceType {
 export interface SurfaceProps {
   readonly label: string;
   /**
-   * Peak longitudinal friction coefficient — traction and braking — as a fraction of
-   * the wheel's own vertical load.
+   * Peak friction coefficient a reference tyre of grip 1.0 has on this surface, dry, at
+   * nominal load, as a fraction of the wheel's own vertical load. Drive, braking and
+   * cornering all read it: see the note above on why there is one.
    */
-  readonly longitudinalMu: number;
-  /** Peak lateral friction coefficient, same reference. */
-  readonly lateralMu: number;
+  readonly mu: number;
   /**
    * Slip ratio at which the longitudinal force peaks on this surface.
    *
@@ -189,12 +199,9 @@ export interface SurfaceProps {
 export const SURFACES: Record<SurfaceType, SurfaceProps> = {
   [SurfaceType.Asphalt]: {
     label: 'asphalt',
-    // The reference surface: every other row is stated against this one, and these two
-    // numbers are the calibration every bench in the game was read at.
-    // 0.988 is 2.6 x 0.38 to the digit — the old cone budget and its conversion,
-    // collapsed into the coefficient they always meant.
-    longitudinalMu: 0.988,
-    lateralMu: 1.7,
+    // The reference surface: every other row is stated against this one, and it is
+    // the calibration the handling benches were read at.
+    mu: 1.7,
     optimalSlip: 0.12,
     rollingResistance: 0.013,
     deformationDrag: 0,
@@ -211,10 +218,8 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
   [SurfaceType.CrackedAsphalt]: {
     label: 'cracked asphalt',
     // Weathered, polished and broken. Measured dry friction on aged asphalt runs about
-    // 0.85 of new, and the slate of loose aggregate in the cracks costs a little more
-    // lateral than longitudinal grip.
-    longitudinalMu: 0.84,
-    lateralMu: 1.43,
+    // 0.85 of new.
+    mu: 1.43,
     optimalSlip: 0.14,
     rollingResistance: 0.018,
     deformationDrag: 0,
@@ -235,8 +240,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     // that has been rolled in, they do not. The old lateral figure was 0.25 of
     // asphalt, half the longitudinal one, which made a quarter of this road's length
     // behave like wet ice while braking on it was fine.
-    longitudinalMu: 0.72,
-    lateralMu: 1.2,
+    mu: 1.2,
     optimalSlip: 0.2,
     rollingResistance: 0.02,
     // Some ploughing, because a wheel does push a ridge of loose stone — but a graded
@@ -257,21 +261,17 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
   },
   [SurfaceType.Sand]: {
     label: 'sand',
-    // THE TAR PIT, and the two channels say different things on purpose.
+    // THE TAR PIT. A peak drawbar coefficient of about a third against asphalt's 0.8,
+    // and it needs nearly three times the slip of a road tyre to reach even that. A
+    // two-wheel drive car on honest sand cannot pull itself up a 19-degree dune — that
+    // is not a bug in this table, it is what sand is. What makes it escapable anyway is
+    // `DIG_FIRM_MU` in vehicle/vehicle.ts, a deliberate and documented concession. Read
+    // that before touching this number.
     //
-    // Longitudinally it is the worst surface in the game by a wide margin: a peak
-    // drawbar coefficient of about a third against asphalt's 0.8, so 0.44 of the
-    // reference, and it needs nearly three times the slip of a road tyre to reach even
-    // that. A two-wheel drive car on honest sand cannot pull itself up a 19-degree dune
-    // — that is not a bug in this table, it is what sand is.
-    // What makes it escapable anyway is `DIG_FIRM_MU` in vehicle/vehicle.ts, a
-    // deliberate and documented concession. Read that before touching these numbers.
-    longitudinalMu: 0.44,
-    // Laterally it is poor but NOT a skating rink, and it used to be one: 0.1 of
-    // asphalt meant a car cornered at a tenth of a g, which is less grip than any
-    // surface a car is ever on. Real sand is treacherous because a wheel shears it and
-    // sinks, not because the surface is smooth.
-    lateralMu: 0.51,
+    // Poor, but NOT a skating rink, and it used to be one sideways: 0.1 of asphalt meant
+    // a car cornered at a tenth of a g. Real sand is treacherous because a wheel shears
+    // it and sinks, not because the surface is smooth.
+    mu: 0.51,
     optimalSlip: 0.3,
     // Rolling resistance is where sand's cost really lives, and this used to be 0.095 —
     // less than an eighth of what a car tyre actually sees on loose sand, measured at
@@ -298,11 +298,9 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     label: 'rock',
     // Dry rock is not slippery and never was: a solid shelf measures within a few per
     // cent of dry asphalt, and this used to be 0.4 of it, which is a wet clay figure.
-    // Broken rock loses a little more laterally than longitudinally, because the loose
-    // plates on top of it move — but the outcrops earn their reputation through their
-    // SHAPE, which is what `roughness` and `microRelief` below are for.
-    longitudinalMu: 0.89,
-    lateralMu: 1.5,
+    // The outcrops earn their reputation through their SHAPE, which is what
+    // `roughness` and `microRelief` below are for.
+    mu: 1.5,
     optimalSlip: 0.14,
     rollingResistance: 0.022,
     deformationDrag: 0,
@@ -318,8 +316,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
   [SurfaceType.Concrete]: {
     label: 'concrete',
     // Slightly denser and more uniform than asphalt, and slightly more grippy dry.
-    longitudinalMu: 0.96,
-    lateralMu: 1.65,
+    mu: 1.65,
     optimalSlip: 0.12,
     rollingResistance: 0.012,
     deformationDrag: 0,
@@ -335,12 +332,11 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
   },
   [SurfaceType.LooseShoulder]: {
     label: 'loose shoulder',
-    // Loose gravel: 0.35 of mu against 0.8 on asphalt, so 0.44 of the reference, and
-    // 0.06 of rolling resistance against a packed road's 0.012. Both figures are the
-    // measured ones, and between them they are the whole character of the surface: a
-    // car that drops a wheel here loses its line and its speed at the same time.
-    longitudinalMu: 0.44,
-    lateralMu: 0.8,
+    // Loose gravel: 0.35 of mu against 0.8 on asphalt, and 0.06 of rolling resistance
+    // against a packed road's 0.012. Both figures are the measured ones, and between
+    // them they are the whole character of the surface: a car that drops a wheel here
+    // loses its line and its speed at the same time.
+    mu: 0.8,
     // Slip peaks late because the material has to be sheared, like sand and unlike the
     // packed district gravel above.
     optimalSlip: 0.26,

@@ -109,16 +109,19 @@ interface Target {
  * power, mass, ratios and efficiency, so the power at speed is right. Its standing
  * start is where the model and the catalogue part, for three different reasons:
  *
- * LAUNCH_TRACTION. The first gear of a rear-drive classic is traction-limited for its
- * first 3-5 seconds: the tyre's longitudinal peak is `wheelGrip` x asphalt's 0.988,
- * about 0.57, because one coefficient serves the tyre AND the period brake test it was
- * calibrated to (0.53 g mean). A real 165/80R13 on dry asphalt has 0.8 or more; the
- * drum brakes, not the tyre, held those cars to 0.55 g. Measured: the driven wheels
- * sit at the tyre's optimal slip through all of first gear whether the throttle is
- * floored or feathered to hold 0.12 slip (identical 0-45 km/h times), and the clutch
- * already slips the engine at its torque peak, so neither the launch rpm nor the
- * driver is the lever. The fix is a tyre peak separate from the brake capability, in
- * the tyre model (vehicle.ts), not in the drivetrain.
+ * CLASSIC_LAUNCH. The rear-drive classics are 8-15% slower than their catalogues from
+ * rest. This used to be put down to traction — the tyre's drive coefficient was the
+ * period brake test's 0.55, and the driven wheels sat past their peak through all of
+ * first gear — and the fix named here was a tyre peak separate from the brakes. That
+ * fix is in (`SurfaceProps.mu` for the tyre, `CarModelDef.brakeDecelG` for the
+ * brakes): the driven wheels now stay under their force peak in first gear, and the
+ * gap barely moved (2106 10.9% to 8.0%, 2104 13.7% to 14.7%, 2101 unchanged). So
+ * traction was not the cause, and the real one is not yet identified.
+ *
+ * Every accepted size below was re-measured when the crank was geared to the driven
+ * wheels: a tyre working at 2-5% slip now turns the engine that much faster than road
+ * speed, and this bench's manual changes, decided on road speed, reach the fuel cut a
+ * little before they change up. That cost the front-drive cars 1.5-2%.
  *
  * CATALOGUE_OPTIMISTIC. A point-mass run from the catalogue's own net kW, kerb mass
  * plus the stated 150 kg, the gearbox's ratios and efficiency and the Cd·A that fits
@@ -134,7 +137,7 @@ interface Target {
  * a permanent 4x4 with its centre differential always turning. Per-tyre rolling
  * resistance is not a catalogue field; adding it is a tyre-model change.
  */
-const LAUNCH_TRACTION = 'launch traction-limited at the tyre/brake shared peak (see note)';
+const CLASSIC_LAUNCH = 'classic launch slower than catalogue; not traction (see note)';
 const CATALOGUE_OPTIMISTIC = 'catalogue time beats a point-mass run from its own net kW (see note)';
 const NIVA_LOSSES = 'Niva tyre rolling and full-time 4x4 losses not modelled (see note)';
 
@@ -193,13 +196,13 @@ const TARGETS: Readonly<Record<string, Target>> = {
     wheelbase: 2.424, track: 1.365, radius: 0.288, top: 137, to100: 18.5,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, brake: 76, lat: 0.69, hz: 1.1,
     source: 'AO vaz-2104 (base 2104, 1.3); turn per AO vaz-2105',
-    known0to100: { reason: LAUNCH_TRACTION, dev: 0.137 },
+    known0to100: { reason: CLASSIC_LAUNCH, dev: 0.147 },
   },
   sv_vaz2105: {
     wheelbase: 2.424, track: 1.365, radius: 0.288, top: 145, to100: 18,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, brake: 74, lat: 0.71, hz: 1.1,
     source: 'AO vaz-2105',
-    known0to100: { reason: LAUNCH_TRACTION, dev: 0.12 },
+    known0to100: { reason: CLASSIC_LAUNCH, dev: 0.121 },
   },
   // Not a catalogue car: the pack's own rally build, held to the targets it was
   // built to rather than to any factory's.
@@ -207,67 +210,67 @@ const TARGETS: Readonly<Record<string, Target>> = {
     wheelbase: 2.424, track: 1.365, radius: 0.3, top: 170, to100: 11,
     loadKg: 75, load: 'driver only (build target)', turn: 5.6, brake: 51, lat: 0.85, hz: 1.55,
     source: 'pack build targets, not factory',
-    known0to100: { reason: LAUNCH_TRACTION, dev: 0.115 },
+    known0to100: { reason: CLASSIC_LAUNCH, dev: 0.117 },
   },
   sv_vaz2106: {
     wheelbase: 2.424, track: 1.365, radius: 0.288, top: 150, to100: 16,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, brake: 74, lat: 0.72, hz: 1.1,
     source: 'AO vaz-2106',
-    known0to100: { reason: LAUNCH_TRACTION, dev: 0.109 },
+    known0to100: { reason: CLASSIC_LAUNCH, dev: 0.08 },
   },
   sv_vaz2107: {
     wheelbase: 2.424, track: 1.365, radius: 0.288, top: 150, to100: 17,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, brake: 74, lat: 0.72, hz: 1.1,
     source: 'AO vaz-2107 (VAZ-2103 engine)',
-    known0to100: { reason: LAUNCH_TRACTION, dev: 0.1 },
+    known0to100: { reason: CLASSIC_LAUNCH, dev: 0.093 },
   },
   sv_vaz2108: {
     wheelbase: 2.46, track: 1.4, radius: 0.281, top: 148, to100: 16,
     loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, brake: 66, lat: 0.78, hz: 1.3,
     source: 'AO vaz-2108; man. vaz-sputnik.ru/2109/1-4.html',
-    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.111 },
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.126 },
   },
   sa_vaz2109: {
     wheelbase: 2.46, track: 1.4, radius: 0.281, top: 148, to100: 16,
     loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, brake: 66, lat: 0.78, hz: 1.3,
     source: 'AO vaz-2109; man. vaz-sputnik.ru/2109/1-4.html',
-    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.125 },
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.141 },
   },
   sv_vaz2109: {
     wheelbase: 2.46, track: 1.4, radius: 0.281, top: 148, to100: 16,
     loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, brake: 66, lat: 0.78, hz: 1.3,
     source: 'AO vaz-2109; man. vaz-sputnik.ru/2109/1-4.html',
-    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.125 },
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.141 },
   },
   sv_vaz21099: {
     wheelbase: 2.46, track: 1.4, radius: 0.281, top: 154, to100: 13.5,
     loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, brake: 66, lat: 0.78, hz: 1.3,
     source: 'man. vaz-sputnik.ru/21099/1.html',
-    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.228 },
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.248 },
   },
   sv_niva: {
     wheelbase: 2.2, track: 1.43, radius: 0.343, top: 132, to100: 23,
     loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.5, brake: 75, lat: 0.66, hz: 1.15,
     source: 'AO vaz-2121; lada-niva.ru/niva/soobschenie-s-harakteristikami.html',
-    known0to100: { reason: NIVA_LOSSES, dev: -0.114 },
+    known0to100: { reason: NIVA_LOSSES, dev: -0.106 },
   },
   sv_niva_long: {
     wheelbase: 2.7, track: 1.44, radius: 0.343, top: 132, to100: 25,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 6.3, brake: 78, lat: 0.64, hz: 1.15,
     source: 'AO vaz-2131; lada-niva.ru/vid-img/sravnenie.jpg',
-    known0to100: { reason: NIVA_LOSSES, dev: -0.137 },
+    known0to100: { reason: NIVA_LOSSES, dev: -0.131 },
   },
   sa_azlk2141: {
     wheelbase: 2.58, track: 1.44, radius: 0.31, top: 158, to100: 14.9,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.0, brake: null, lat: null, hz: 1.15,
     source: 'AO moskvich-2141 (2141-01, VAZ-2106-70 engine)',
-    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.088 },
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.109 },
   },
   sa_oka: {
     wheelbase: 2.18, track: 1.214, radius: 0.26, top: 120, to100: 30,
     loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 4.8, brake: null, lat: null, hz: 1.3,
     source: 'man. autoprospect.ru/vaz/1111-oka/1-4-tekhnicheskie-kharakteristiki.html (no Oka brake test; the manual quotes the Samara norm)',
-    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.126 },
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.146 },
   },
   sa_uaz330364: {
     wheelbase: 2.55, track: 1.445, radius: 0.372, top: 105, to100: null,
@@ -283,7 +286,7 @@ const TARGETS: Readonly<Record<string, Target>> = {
     wheelbase: 2.492, track: 1.41, radius: 0.288, top: 162, to100: 15,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.2, brake: null, lat: null, hz: 1.3,
     source: 'man. autoprospect.ru/vaz/2110-zhiguli/1-obshhie-svedeniya.html (2110, carburettor)',
-    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.119 },
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.138 },
   },
 };
 

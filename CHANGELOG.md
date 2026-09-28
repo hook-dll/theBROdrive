@@ -27,6 +27,28 @@
 
 ### Changed
 
+- ONE TYRE, ONE GRIP: THE CLASSICS NO LONGER SPIN THEIR WHEELS ON DRY ASPHALT. A tyre
+  used to have two coefficients — 0.95 sideways and 0.55 forwards on a Zhiguli —
+  because the forward one was also doing the brakes' job of holding the car to its
+  period 100-0 stop. Every full-throttle start therefore broke the rear wheels loose
+  at 5-14 km/h and spun them in first. `SurfaceProps` now carries one `mu` (the old
+  lateral column) for drive, braking and cornering alike, and each car has its own
+  brakes, `CarModelDef.brakeDecelG`, sized to the period stop. Stopping distances sit
+  within 2.2% of the period tests (before: up to 17% off); on dry asphalt the drums,
+  not the tyres, are the limit, so a floored pedal no longer locks the wheels there,
+  while gravel, sand, the wet and bald tyres still can. `longitudinalGripScale` is
+  gone: it was the rally car's way round the same problem. Tyre temperature now
+  moves drive and braking grip too, not only cornering.
+- THE ENGINE TURNS WITH THE DRIVEN WHEELS. The crank used to follow road speed, so a
+  spinning wheel kept getting full torque and the tachometer never showed it. It now
+  follows the driven wheels: a tyre breaking loose revs the engine to its cut, which
+  bounds the spin, and the engine note says so. The automatic still downshifts on
+  road speed (a locked wheel is not a reason to drop to first) and upshifts on
+  whichever is faster, never into a gear it would take straight back.
+- SMOKE AND DUST MEAN A SLIDING TYRE. Spray and dark sand tracks used to start at 6%
+  slip, below where a tyre makes its best thrust, so every hard launch smoked like a
+  burnout. They now start past the peak of that surface's own force curve
+  (`LONGITUDINAL_PEAK_U` × `optimalSlip`).
 - THE WORLD'S STOPS ARE THE GALLERY'S FIFTY-THREE BUILDINGS, BESIDE THE ROAD AND OUT IN
   THE DESERT. Every roadside stop is now one of the three masts or fifty dwellings
   (`world/poistructures.ts`), and a second, sparser scatter stands 70–650 m out in the

@@ -70,8 +70,8 @@ const SIM_HZ = 60;
 // Standstill escape, duplicated from vehicle.ts the same way desert-ride.ts does it.
 // A stopped car on sand is ALWAYS DIGGING, so the dig's constants apply in full: see
 // the header of that block in desert-ride.ts for why both of them are needed.
-/** SurfaceProps.longitudinalMu for sand: the honest coefficient, for reference. */
-const SAND_LONGITUDINAL_MU = 0.44;
+/** SurfaceProps.mu for sand: the honest coefficient, for reference. */
+const SAND_LONGITUDINAL_MU = 0.51;
 /** DIG_FIRM_MU: driven-axle μ the dig grants at full bite. */
 const DIG_FIRM_MU = 1.6;
 /** DIG_FIRM_RR: rolling resistance of firm sand while the dig is in. */
