@@ -45,7 +45,6 @@ export class GameAudio {
   private readonly trafficCandidates: TrafficCandidate[] = [];
   private trafficCandidateCount = 0;
   private activeRadioId: string | null = null;
-  private radioVolume = 1;
   /** Last pose written to the context listener; NaN so the first frame always writes. */
   private listenerX = Number.NaN;
   private listenerY = Number.NaN;
@@ -60,9 +59,20 @@ export class GameAudio {
 
   applySettings(settings: Settings): void {
     this.mixer.setVolume(settings.masterVolume);
-    this.mixer.setBusVolumes(settings.carVolume, settings.worldVolume);
-    this.radioVolume = settings.radioVolume;
-    for (const radio of this.radios.values()) radio.setVolume(this.radioVolume);
+    this.mixer.setBusVolumes(settings.carVolume, settings.worldVolume, settings.radioVolume);
+  }
+
+  /**
+   * Dev: a thunderclap `distance` metres away on the given bearing, as a real stroke
+   * would be heard (`__bro.audio.thunder(1200)`), for judging the takes by ear.
+   */
+  thunder(distance = 1500, azimuth = 0): void {
+    this.ambience.testThunder(distance, azimuth, this.listenerRightX, this.listenerRightZ);
+  }
+
+  /** Dev: every bus's loudness and peak right now (see AudioMixer.meter). */
+  meter(): ReturnType<AudioMixer['meter']> {
+    return this.mixer.meter();
   }
 
   setPaused(paused: boolean): void {
@@ -237,7 +247,6 @@ export class GameAudio {
     let radio = this.radios.get(carId);
     if (!radio) {
       radio = new Radio(this.mixer);
-      radio.setVolume(this.radioVolume);
       this.radios.set(carId, radio);
     }
     return radio;
@@ -264,8 +273,8 @@ export class GameAudio {
     this.foleyVoices.bubbleGumPop();
   }
 
-  gunshot(): void {
-    this.foleyVoices.gunshot();
+  gunshot(weapon: 'rifle' | 'shotgun'): void {
+    this.foleyVoices.gunshot(weapon);
   }
 
   dryFire(): void {

@@ -64,3 +64,4 @@ pnpm-debug.log*
 /glass-window-options.png
 /prbr*.jpg
 /prbr*.png
+tools/sound/.cache/

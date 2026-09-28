@@ -1646,7 +1646,7 @@ async function boot(): Promise<void> {
     if (!medicineActive && held && held.type === 'weapon' && f.usePrimary) {
       const shot = weapons.tryFire(held, f.useSecondary, eye, dir, birds, inventory, dt);
       if (shot.result === 'fired') {
-        audio.gunshot();
+        audio.gunshot(held.weapon);
         if (shot.hit) {
           const added = inventory.add({
             type: 'quarry',

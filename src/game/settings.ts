@@ -358,9 +358,8 @@ export interface Settings {
    */
   mouseSensitivity: number;
   /**
-   * Volume of the synthesised game audio (engine, wind, tyres, foley), 0..1. The
-   * radio has its own, because it is broadcast material at whatever level the
-   * station mastered it and balancing it against the car is a taste decision.
+   * Master volume, 0..1: everything, the radio included (audio/mixer.ts). Car, World
+   * and Radio are each a share of it.
    */
   masterVolume: number;
   /**
@@ -373,7 +372,7 @@ export interface Settings {
    * other traffic), 0..1. Scaled by `masterVolume`.
    */
   worldVolume: number;
-  /** Car-radio volume, 0..1. */
+  /** Car-radio share of the master, 0..1. Staged to match the game sound at equal settings. */
   radioVolume: number;
   /** Action id -> key codes, overriding the defaults. Absent = default. */
   keyBindings: Record<string, readonly string[]>;

@@ -7,7 +7,7 @@
   "poiSpacingMetresMax": 5000,
   "poiSpacingMetresStep": 100,
   "defaultMasterVolume": 0.8,
-  "defaultRadioVolume": 0.6,
+  "defaultRadioVolume": 0.85,
   "defaultInkStrength": 0.2,
   "defaultMouseSensitivity": 0.0022,
   "mouseSensitivityMin": 0.0004,

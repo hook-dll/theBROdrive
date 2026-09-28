@@ -1363,9 +1363,9 @@ export class MainMenu {
         const renderSound = (): void => {
           pane.append(
             sliderField(
-              'Game Sound',
+              'Master',
               'sound',
-              'Everything the game makes: the car, the world and your own footsteps. The radio has its own.',
+              'Everything you hear: the car, the world, your own footsteps and the radio. The three below set their share of it.',
               0,
               1,
               0.01,
@@ -1404,7 +1404,7 @@ export class MainMenu {
             sliderField(
               'Radio',
               'radio',
-              'Broadcast material, at whatever level the station mastered it.',
+              'The car radio, levelled to sit with the game sound at the same setting.',
               0,
               1,
               0.01,

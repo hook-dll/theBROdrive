@@ -32,6 +32,11 @@
  *
  * One-shots: gear change, suspension jolts, landings, collisions, the starter.
  *
+ * RECORDED (2026-09-28): stones under the tyres on loose ground, the tyre squeal and
+ * the crunch of a collision are CC0 recordings (samples.ts); their synthesised versions
+ * were heard as a Geiger counter, a whistle and a burst of noise. Everything that has to
+ * follow rpm or road speed continuously stays synthesised.
+ *
  * After the engine stops: the exhaust and manifold tick and ping as they cool and
  * contract, often at first and more sparsely for minutes after a hard run; an engine
  * that stalled from overheating hisses steam and gurgles at the radiator.
@@ -42,6 +47,7 @@ import { SurfaceType } from '../core/surfaces';
 import type { VehicleAudioState } from '../vehicle/vehicle';
 import { EngineVoice } from './enginevoice';
 import { AudioMixer, ramp, setPannerPosition } from './mixer';
+import { Bed, playOnce, type SampleName } from './samples';
 
 /** Where the listener is relative to the car. */
 export type CarPerspective = 'cabin' | 'outside';
@@ -75,6 +81,14 @@ const BUMP_START_MPS = AUDIO_CONFIG.bumpStartMps;
 const BUMP_FULL_MPS = AUDIO_CONFIG.bumpFullMps;
 const BUMP_GAIN = AUDIO_CONFIG.bumpGain;
 const IMPACT_GAIN = AUDIO_CONFIG.impactGain;
+/**
+ * Recorded layers, against files built to -20 LUFS (loops) and -14 LUFS momentary
+ * (one-shots); the car bus then loses 10 dB to the game trim (mixer.ts). Gravel at speed
+ * lands near the car's own road roar, a squeal a little over the engine, a hard crash
+ * well over everything.
+ */
+const GRAVEL_GAIN = 2.4;
+const CRASH_GAIN = 6;
 
 /** Surface roughness (metres of micro-bump) treated as fully rough. */
 const ROUGHNESS_FULL = 0.05;
@@ -227,9 +241,8 @@ export class VehicleAudio {
   private readonly gritGain: GainNode;
   private readonly sprayGain: GainNode;
 
-  private readonly squealA: BiquadFilterNode;
-  private readonly squealB: BiquadFilterNode;
-  private readonly squealGain: GainNode;
+  private readonly gravel: Bed;
+  private readonly skid: Bed;
   private readonly scrabbleGain: GainNode;
   private readonly scrabbleSource: AudioBufferSourceNode;
 
@@ -260,7 +273,7 @@ export class VehicleAudio {
   private texture = 1;
   private textureTarget = 1;
   private textureLeftM = 10;
-  private squealWander = 0;
+  private lastCrash: SampleName | null = null;
 
   constructor(private readonly mixer: AudioMixer) {
     const ctx = mixer.ctx;
@@ -460,25 +473,10 @@ export class VehicleAudio {
     sprayHigh.connect(sprayLow).connect(this.sprayGain).connect(this.body);
 
     // --- skid -------------------------------------------------------------------
-    // Two narrow bands a little apart, wandering independently: a rubber squeal is
-    // a stick-slip near-tone that never holds one pitch.
-    this.squealGain = ctx.createGain();
-    this.squealGain.gain.value = 0;
-    this.squealA = ctx.createBiquadFilter();
-    this.squealA.type = 'bandpass';
-    this.squealA.frequency.value = 900;
-    this.squealA.Q.value = 10;
-    this.squealB = ctx.createBiquadFilter();
-    this.squealB.type = 'bandpass';
-    this.squealB.frequency.value = 1350;
-    this.squealB.Q.value = 14;
-    this.addNoise('pink', this.squealA);
-    this.addNoise('pink', this.squealB);
-    const squealSum = ctx.createGain();
-    squealSum.gain.value = 3.2;
-    this.squealA.connect(squealSum);
-    this.squealB.connect(squealSum);
-    squealSum.connect(this.squealGain).connect(this.body);
+    // A real tyre squealing on tarmac; its pitch follows how hard it slides.
+    this.skid = new Bed(mixer, mixer.samples, 'skid', this.body, 0.2);
+    // Stones under the tyres: a recorded roll over gravel, faster as the car is.
+    this.gravel = new Bed(mixer, mixer.samples, 'gravel-roll', this.body, 0.35);
 
     // Loose ground: stones thrown and a low roar, no tone.
     this.scrabbleSource = mixer.crackleSource();
@@ -690,7 +688,10 @@ export class VehicleAudio {
     // Played slower than recorded, the grains are longer and duller as well as fewer.
     this.gritSource.playbackRate.setTargetAtTime(0.3 + speed / 16, now, 0.1);
     this.gritFilter.frequency.setTargetAtTime(voice.gritHz * (0.85 + 0.25 * rollT), now, 0.1);
-    ramp(this.gritGain.gain, TYRE_GAIN * 1.4 * voice.grit * clamp01(speed / 12) * contact, now, 0.08);
+    ramp(this.gritGain.gain, TYRE_GAIN * 0.35 * voice.grit * clamp01(speed / 12) * contact, now, 0.08);
+    // The recorded roll carries loose ground; the synthetic grains above only add bite.
+    this.gravel.setRate(Math.min(1.5, 0.6 + speed / 22), now);
+    this.gravel.set(GRAVEL_GAIN * voice.grit * clamp01(speed / 8) * contact * (cabin ? 1.2 : 1), now, 0.12);
     // Spray: a wet road is a hiss that swamps everything else the tyre does.
     const wetRoad = voice.squeal ? pose.wet : pose.wet * 0.4;
     ramp(this.sprayGain.gain, TYRE_GAIN * 1.1 * wetRoad * rollT ** 1.5 * contact, now, 0.15);
@@ -703,12 +704,8 @@ export class VehicleAudio {
     const skidT = Math.max(slipT, lockT) * contact;
     // Wet rubber barely sings.
     const squeal = voice.squeal ? skidT * (1 - 0.75 * pose.wet) : 0;
-    this.squealWander += dt;
-    const base = (720 + 380 * slipT) * (1 + 0.05 * Math.sin(this.squealWander * 7.3));
-    this.squealA.frequency.setTargetAtTime(base * (0.96 + Math.random() * 0.08), now, 0.025);
-    this.squealB.frequency.setTargetAtTime(base * 1.52 * (0.95 + Math.random() * 0.1), now, 0.03);
-    // Stick-slip: the squeal chatters in level as well as pitch.
-    ramp(this.squealGain.gain, SKID_GAIN * squeal * (0.75 + 0.25 * Math.random()), now, 0.03);
+    this.skid.setRate(0.88 + 0.22 * slipT, now, 0.05);
+    this.skid.set(SKID_GAIN * squeal, now, 0.04);
     this.scrabbleSource.playbackRate.setTargetAtTime(0.6 + speed / 6, now, 0.05);
     ramp(this.scrabbleGain.gain, voice.squeal ? 0 : SKID_GAIN * 0.9 * skidT, now, 0.05);
 
@@ -898,51 +895,28 @@ export class VehicleAudio {
   private crash(severityMps: number): void {
     const s = clamp01(severityMps / 8);
     const gain = IMPACT_GAIN * (0.25 + 0.75 * s);
+    // The body's own blow, low and short, under whichever crunch is recorded.
     this.mixer.burst(this.impacts, {
-      gain: gain * 0.9,
+      gain: gain * 0.5,
       frequency: 140,
       endFrequency: 55,
       q: 0.7,
-      decay: 0.18 + 0.2 * s,
+      decay: 0.14 + 0.16 * s,
       type: 'lowpass',
       colour: 'brown',
-      send: 0.2,
     });
-    const crunches = 2 + Math.floor(s * 5);
-    for (let i = 0; i < crunches; i++) {
-      this.mixer.burst(this.impacts, {
-        gain: gain * (0.35 + 0.3 * Math.random()),
-        frequency: 450 + Math.random() * 1400,
-        q: 1 + Math.random() * 1.5,
-        decay: 0.04 + Math.random() * 0.08,
-        delay: Math.random() * (0.03 + 0.09 * s),
-        send: 0.15,
-      });
-    }
-    const plate = 260 + Math.random() * 280;
-    for (const [ratio, level, decay] of [[1, 0.1, 0.5], [2.76, 0.06, 0.35], [5.4, 0.035, 0.22], [8.9, 0.02, 0.14]] as const) {
-      this.mixer.blip(this.impacts, {
-        gain: gain * level * (0.5 + s),
-        frequency: plate * ratio,
-        endFrequency: plate * ratio * 0.985,
-        decay: decay * (0.6 + 0.8 * s),
-        type: 'sine',
-        delay: 0.004,
-        send: 0.2,
-      });
-    }
-    if (s > 0.5) {
-      const shards = 4 + Math.floor(s * 8);
-      for (let i = 0; i < shards; i++) {
-        this.mixer.burst(this.impacts, {
-          gain: gain * 0.22 * Math.random(),
-          frequency: 4200 + Math.random() * 4000,
-          q: 2 + Math.random() * 3,
-          decay: 0.02 + Math.random() * 0.05,
-          delay: 0.02 + Math.random() * 0.35,
-        });
-      }
-    }
+    // A knock is the light take, dulled; a real crash the heavier ones, with glass.
+    const takes: SampleName[] = s < 0.35 ? ['crash-3'] : s < 0.7 ? ['crash-1', 'crash-3'] : ['crash-1', 'crash-2'];
+    const choices = takes.length > 1 ? takes.filter((t) => t !== this.lastCrash) : takes;
+    const take = choices[Math.floor(Math.random() * choices.length)]!;
+    this.lastCrash = take;
+    playOnce(this.mixer, this.mixer.samples, take, this.impacts, {
+      gain: CRASH_GAIN * (0.2 + 0.8 * s),
+      rate: 1.08 - 0.12 * s,
+      spread: 0.04,
+      lowpass: 2500 + 14000 * s,
+      send: 0.15,
+    });
   }
 
   /** Lever through the gate, then the driveline taking up the slack. */
@@ -959,6 +933,8 @@ export class VehicleAudio {
     this.whineOsc.stop();
     this.diffOsc.stop();
     this.rotorLfo.stop();
+    this.gravel.dispose();
+    this.skid.dispose();
     this.out.disconnect();
     this.engineOut.disconnect();
   }

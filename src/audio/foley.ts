@@ -8,10 +8,15 @@
  *
  * The two continuous actions (scrubbing a part, pouring a can) hold one voice each
  * and are gated by a per-frame flag from Interaction; nothing here polls state.
+ *
+ * Footsteps, doors, shots, the bolt and the shutter are recordings (samples.ts): one
+ * hit of several, chosen at random and nudged in pitch, so no two steps are the same
+ * step. The small handling sounds stay synthesised.
  */
 
 import { SurfaceType } from '../core/surfaces';
 import { AudioMixer, ramp } from './mixer';
+import { playOnce, type SampleName } from './samples';
 
 /** Metres of ground covered per footstep. A stride, not a tick. */
 const STRIDE_METRES = 1.5;
@@ -20,6 +25,18 @@ const STEP_MIN_MPS = 0.4;
 
 const SCRUB_GAIN = 0.16;
 const POUR_GAIN = 0.14;
+/**
+ * Recorded foley levels, against one-shots built to -14 LUFS momentary (single hits —
+ * steps, a door — land lower, at their peak ceiling, and are lifted here). The game bus
+ * trim (mixer.ts) takes 10 dB off; these put a walking step about -32 LUFS at the output,
+ * a door about -24, handling about -28 and a shot about -12, loud as a shot should be.
+ */
+const STEP_GAIN = 1.1;
+const DOOR_GAIN = 1.8;
+const SHOT_GAIN = 4;
+const HANDLING_GAIN = 0.6;
+/** The shutter take is one sharp click, quieter per 400 ms than the others. */
+const SHUTTER_GAIN = 2.2;
 /** Breath level while a bubble is being inflated. Kept below footsteps and impacts. */
 const GUM_BLOW_GAIN = 0.11;
 
@@ -241,16 +258,13 @@ export class Foley {
     switch (event) {
       case 'enter-car':
       case 'exit-car':
-        // Door: a body thump with a latch click on top. Closing is the tighter of
-        // the two, so entering (door pulled shut) gets the shorter decay.
-        this.mixer.burst(this.out, {
-          gain: 0.3,
-          frequency: event === 'enter-car' ? 130 : 110,
-          q: 0.8,
-          decay: event === 'enter-car' ? 0.12 : 0.16,
-          type: 'lowpass',
+        // Getting in is a door pulled shut; getting out, the latch and the door swung
+        // open (it is shut again behind you off-screen).
+        playOnce(this.mixer, this.mixer.samples, event === 'enter-car' ? 'door-close' : 'door-open', this.out, {
+          gain: DOOR_GAIN,
+          spread: 0.04,
+          delay: event === 'enter-car' ? 0.25 : 0,
         });
-        this.mixer.blip(this.out, { gain: 0.09, frequency: 900, endFrequency: 420, decay: 0.05 });
         break;
       case 'pickup':
         this.mixer.burst(this.out, { gain: 0.18, frequency: 700, q: 1.5, decay: 0.07 });
@@ -273,13 +287,9 @@ export class Foley {
     }
   }
 
-  /** A shot: muzzle crack over a body thump, plus the action working. */
-  gunshot(): void {
-    // Out in the open a shot comes back off the ground and the distance: the reverb
-    // send is the echo, the body thump is brown noise for weight.
-    this.mixer.burst(this.out, { gain: 0.55, frequency: 1800, q: 0.6, decay: 0.09, send: 0.5 });
-    this.mixer.burst(this.out, { gain: 0.4, frequency: 180, q: 0.7, decay: 0.22, type: 'lowpass', colour: 'brown', send: 0.4 });
-    this.mixer.blip(this.out, { gain: 0.1, frequency: 3200, endFrequency: 900, decay: 0.07 });
+  /** A shot, out in the open: the recorded report, with the country answering it. */
+  gunshot(weapon: 'rifle' | 'shotgun' = 'rifle'): void {
+    playOnce(this.mixer, this.mixer.samples, weapon, this.out, { gain: SHOT_GAIN, spread: 0.03, send: 0.35 });
   }
 
   /** Dry fire: firing pin, nothing else. */
@@ -287,71 +297,30 @@ export class Foley {
     this.mixer.blip(this.out, { gain: 0.12, frequency: 1600, endFrequency: 700, decay: 0.04 });
   }
 
-  /** Mechanical mirror slap followed by the second shutter curtain. */
+  /** A film camera's shutter: mirror, curtains, and the lever wound on. */
   cameraShutter(): void {
-    this.mixer.burst(this.out, { gain: 0.19, frequency: 1250, q: 1.8, decay: 0.045 });
-    this.mixer.blip(this.out, { gain: 0.12, frequency: 420, endFrequency: 260, decay: 0.07 });
-    window.setTimeout(() => {
-      this.mixer.burst(this.out, { gain: 0.13, frequency: 920, q: 2.2, decay: 0.035 });
-    }, 65);
+    playOnce(this.mixer, this.mixer.samples, 'shutter', this.out, { gain: SHUTTER_GAIN, spread: 0.02 });
   }
 
+  /** Working the action. */
   reload(): void {
-    this.mixer.burst(this.out, { gain: 0.2, frequency: 1100, q: 2.5, decay: 0.07 });
-    window.setTimeout(() => {
-      this.mixer.burst(this.out, { gain: 0.18, frequency: 800, q: 2, decay: 0.08 });
-    }, 130);
+    playOnce(this.mixer, this.mixer.samples, 'bolt', this.out, { gain: HANDLING_GAIN, spread: 0.03 });
   }
 
   private step(speedMps: number, surface: SurfaceType): void {
-    // Alternate feet: pitch changes keep either material from sounding like a
-    // metronome striking the same sample.
-    this.stepParity ^= 1;
     const heavy = speedMps > 5;
-
-    if (surface === SurfaceType.Sand) {
-      // A boot in dry sand has no hard impact transient. The broad low crunch is
-      // the sole compressing the bed, the higher short layer is grains shearing
-      // around its edge, and only a muted heel body survives underneath.
-      this.mixer.burst(this.out, {
-        gain: heavy ? 0.13 : 0.085,
-        frequency: (this.stepParity ? 980 : 850) * (heavy ? 1.08 : 1),
-        q: 0.62,
-        attack: 0.014,
-        decay: heavy ? 0.15 : 0.12,
-        type: 'lowpass',
-      });
-      this.mixer.burst(this.out, {
-        gain: heavy ? 0.055 : 0.036,
-        frequency: this.stepParity ? 2700 : 2350,
-        q: 0.8,
-        attack: 0.006,
-        decay: heavy ? 0.09 : 0.07,
-      });
-      this.mixer.burst(this.out, {
-        gain: heavy ? 0.045 : 0.028,
-        frequency: 95,
-        q: 0.65,
-        decay: 0.075,
-        type: 'lowpass',
-      });
-      return;
-    }
-
-    // Keep the established hard-ground footstep unchanged for road, gravel,
-    // concrete and rock.
-    this.mixer.burst(this.out, {
-      gain: heavy ? 0.16 : 0.1,
-      frequency: (this.stepParity ? 520 : 430) * (heavy ? 1.15 : 1),
-      q: 1.1,
-      decay: heavy ? 0.09 : 0.07,
-    });
-    this.mixer.burst(this.out, {
-      gain: heavy ? 0.09 : 0.05,
-      frequency: 120,
-      q: 0.8,
-      decay: 0.06,
-      type: 'lowpass',
+    const take: SampleName =
+      surface === SurfaceType.Asphalt || surface === SurfaceType.CrackedAsphalt || surface === SurfaceType.Concrete
+        ? 'step-hard'
+        : surface === SurfaceType.Sand
+          ? 'step-soft'
+          : 'step-gravel';
+    playOnce(this.mixer, this.mixer.samples, take, this.out, {
+      gain: STEP_GAIN * (heavy ? 1.4 : 1),
+      // A running foot lands harder and a touch higher.
+      rate: heavy ? 1.06 : 1,
+      spread: 0.05,
+      hit: true,
     });
   }
 

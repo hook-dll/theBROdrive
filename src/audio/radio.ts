@@ -60,7 +60,6 @@ export class Radio {
   private inCar = false;
   private sourceReady = false;
   private paused = false;
-  private volume = 1;
   private status: Status = 'offline';
   private retryTimer = 0;
   /** Grows with each consecutive failure; reset the moment audio actually plays. */
@@ -97,8 +96,9 @@ export class Radio {
       rolloffFactor: 0.7,
       maxDistance: 180,
     });
-    this.mediaSource.connect(this.cabinGain).connect(ctx.destination);
-    this.mediaSource.connect(this.exteriorMono).connect(this.exteriorFilter).connect(this.panner).connect(this.exteriorGain).connect(ctx.destination);
+    // Into the mixer's radio bus, which the master and the Radio slider both scale.
+    this.mediaSource.connect(this.cabinGain).connect(mixer.radio);
+    this.mediaSource.connect(this.exteriorMono).connect(this.exteriorFilter).connect(this.panner).connect(this.exteriorGain).connect(mixer.radio);
 
     this.element.addEventListener('playing', this.onPlaying);
     this.element.addEventListener('waiting', this.onWaiting);
@@ -170,11 +170,6 @@ export class Radio {
     setPannerPosition(this.panner, x, y, z, now, SPATIAL_RAMP_SECONDS);
   }
 
-  setVolume(volume: number): void {
-    this.volume = Math.min(1, Math.max(0, volume));
-    this.element.volume = this.volume;
-  }
-
   /** Pause menu: silence the radio without forgetting that it was on. */
   setPaused(paused: boolean): void {
     if (this.paused === paused) return;
@@ -212,7 +207,6 @@ export class Radio {
       this.element.src = url;
       this.element.load();
     }
-    this.element.volume = this.volume;
     this.status = 'connecting';
     void this.element.play().catch(() => {
       // Autoplay refusal (no gesture yet) or a dead relay: both are retried, and

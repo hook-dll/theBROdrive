@@ -22,9 +22,44 @@
  */
 
 import engineWorkletUrl from './engine-worklet.ts?worker&url';
+import { SampleBank } from './samples';
+import limiterWorkletUrl from './limiter-worklet.ts?worker&url';
 
 /** Master ramp time for volume/pause changes, seconds. Short enough to feel instant. */
 const MASTER_RAMP = 0.08;
+
+/**
+ * GAIN STAGING. Every voice was written against "1 is full", and a dozen of them at
+ * once summed well past full scale, into a limiter that added gain of its own. The
+ * game bus now carries a fixed trim so the procedural sound lands where broadcast
+ * material does, and the radio a trim that brings a loud, mastered stream down to
+ * sit beside it — so at 100 % on every slider nothing reaches the limiter except a
+ * genuine spike. Measured with the dev meter (`__bro.audio.meter()`,
+ * tools/sound/levels.mjs), K-weighted, the targets are:
+ *   radio (a typical NTS stream)         about -20 LUFS
+ *   car cruising, chase camera           about -21 LUFS; idle about -30
+ *   world bed on a calm day              about -36 LUFS; rain about -27
+ *   thunder, a near stroke               momentary about -14 LUFS, peaks under -3 dBFS
+ */
+export const GAME_TRIM = 0.32;
+/**
+ * Other traffic against the driven car. A passing car at the same distance is as loud
+ * as your own, but it is only that close for a second; standing near a road the
+ * procedural engines summed louder than the car being driven.
+ */
+export const TRAFFIC_TRIM = 0.5;
+export const RADIO_TRIM = 0.42;
+
+/**
+ * Slider position (0..1) to amplitude. Loudness is heard in decibels, so a linear
+ * slider does nothing over most of its travel and everything in its last tenth; a
+ * square law is close to even in loudness and exactly 0 at the bottom. Every volume
+ * in the game uses this one curve, so 50 % means the same on each.
+ */
+export function sliderGain(value: number): number {
+  const v = Math.min(1, Math.max(0, value));
+  return v * v;
+}
 /** Length of each shared noise loop, seconds. */
 const NOISE_SECONDS = 8;
 /** Length of the crackle (sparse grain) loop, seconds. */
@@ -35,6 +70,33 @@ const CRACKLE_DENSITY = 260;
 const REVERB_SECONDS = 2.6;
 
 export type NoiseColour = 'white' | 'pink' | 'brown';
+
+export type MeterBus = 'car' | 'world' | 'traffic' | 'game' | 'radio' | 'master' | 'out';
+
+/** One bus's level over the last analyser window (~0.7 s): K-weighted loudness and peak. */
+export interface MeterReading {
+  lufs: number;
+  peakDb: number;
+}
+
+/**
+ * ITU-R BS.1770 K-weighting biquads for `sr`, [b0, b1, b2, a1, a2] per stage: the
+ * +4 dB head shelf and the 38 Hz high-pass that turn a mean square into loudness.
+ */
+function kWeightStages(sr: number): number[][] {
+  const K = Math.tan((Math.PI * 1681.974450955533) / sr);
+  const Q = 0.7071752369554196;
+  const Vh = 10 ** (3.999843853973347 / 20);
+  const Vb = Vh ** 0.4996667741545416;
+  const a0 = 1 + K / Q + K * K;
+  const K1 = Math.tan((Math.PI * 38.13547087602444) / sr);
+  const Q1 = 0.5003270373238773;
+  const d = 1 + K1 / Q1 + K1 * K1;
+  return [
+    [(Vh + (Vb * K) / Q + K * K) / a0, (2 * (K * K - Vh)) / a0, (Vh - (Vb * K) / Q + K * K) / a0, (2 * (K * K - 1)) / a0, (1 - K / Q + K * K) / a0],
+    [1, -2, 1, (2 * (K1 * K1 - 1)) / d, (1 - K1 / Q1 + K1 * K1) / d],
+  ];
+}
 
 /** Deterministic xorshift32, so the noise floor is the same between runs. */
 function xorshift(seed: number): () => number {
@@ -49,19 +111,28 @@ function xorshift(seed: number): () => number {
 
 export class AudioMixer {
   readonly ctx: AudioContext;
-  /** Procedural game audio (engine, wind, tyres, foley). The radio bypasses this. */
+  /** Game audio (engine, wind, tyres, foley, the world). Under the master, with the radio. */
   readonly sfx: GainNode;
+  /** Every radio's output. Under the master, beside the game sound. */
+  readonly radio: GainNode;
   /** The car being driven. Its own share of `sfx`, set by the Car volume. */
   readonly car: GainNode;
   /** Air, weather, animals and other traffic. Its own share, set by the World volume. */
   readonly world: GainNode;
+  /** Other cars, a part of `world` with its own trim (TRAFFIC_TRIM). */
+  readonly traffic: GainNode;
   /**
    * Send into the shared world reverb. Voices that happen OUT in the world (thunder,
    * a gunshot, a crash, a bird) send a little here; the car's own drone does not.
    */
   readonly reverb: GainNode;
+  /** The recorded sounds (samples.ts), fetched as voices first ask for them. */
+  readonly samples: SampleBank;
 
   private readonly master: GainNode;
+  /** After the limiter: what the speakers get. */
+  private readonly output: GainNode;
+  private meterTaps: Record<MeterBus, AnalyserNode> | null = null;
   private readonly noiseBuffers = new Map<NoiseColour, AudioBuffer>();
   private crackleBufferValue: AudioBuffer | null = null;
   private volume = 1;
@@ -73,26 +144,45 @@ export class AudioMixer {
 
   constructor() {
     this.ctx = new AudioContext({ latencyHint: 'interactive' });
+    this.samples = new SampleBank(this.ctx);
 
+    // master (volume, pause) -> limiter -> speakers. The limiter is a worklet and
+    // arrives a moment after construction; until then (the context is still waiting for
+    // a gesture anyway) the master goes straight out.
     this.master = this.ctx.createGain();
     this.master.gain.value = 0;
-    // A gentle safety limiter: a crash under thunder with the engine at the redline
-    // is a dozen layers at once, and clipping is the one artefact nobody forgives.
-    const limiter = this.ctx.createDynamicsCompressor();
-    limiter.threshold.value = -9;
-    limiter.knee.value = 8;
-    limiter.ratio.value = 5;
-    limiter.attack.value = 0.004;
-    limiter.release.value = 0.22;
-    this.master.connect(limiter).connect(this.ctx.destination);
+    this.output = this.ctx.createGain();
+    this.output.connect(this.ctx.destination);
+    this.master.connect(this.output);
+    void this.ctx.audioWorklet
+      .addModule(limiterWorkletUrl)
+      .then(() => {
+        if (this.disposed) return;
+        const limiter = new AudioWorkletNode(this.ctx, 'bro-limiter', {
+          numberOfInputs: 1,
+          numberOfOutputs: 1,
+          outputChannelCount: [2],
+        });
+        this.master.disconnect();
+        this.master.connect(limiter).connect(this.output);
+      })
+      .catch((error: unknown) => {
+        console.warn('limiter worklet failed to load; the mix goes out unlimited', error);
+      });
 
     this.sfx = this.ctx.createGain();
-    this.sfx.gain.value = 1;
+    this.sfx.gain.value = GAME_TRIM;
     this.sfx.connect(this.master);
+    this.radio = this.ctx.createGain();
+    this.radio.gain.value = RADIO_TRIM;
+    this.radio.connect(this.master);
     this.car = this.ctx.createGain();
     this.car.connect(this.sfx);
     this.world = this.ctx.createGain();
     this.world.connect(this.sfx);
+    this.traffic = this.ctx.createGain();
+    this.traffic.gain.value = TRAFFIC_TRIM;
+    this.traffic.connect(this.world);
 
     this.reverb = this.ctx.createGain();
     this.reverb.gain.value = 1;
@@ -144,19 +234,18 @@ export class AudioMixer {
     else this.engineWorkletWaiters.push(callback);
   }
 
-  /** 0..1 master volume for everything on the sfx bus. */
+  /** 0..1 master slider: everything the game makes, the radio included. */
   setVolume(volume: number): void {
-    this.volume = Math.min(1, Math.max(0, volume));
+    this.volume = sliderGain(volume);
     this.applyMasterGain();
   }
 
-  /** 0..1 shares of the car and of the world within the game sound. */
-  setBusVolumes(car: number, world: number): void {
+  /** 0..1 sliders for the car, the world and the radio, each under the master. */
+  setBusVolumes(car: number, world: number, radio: number): void {
     if (this.disposed) return;
-    const clamp = (v: number): number => Math.min(1, Math.max(0, v));
-    // Squared: a slider feels even in loudness, not in amplitude.
-    this.car.gain.setTargetAtTime(clamp(car) ** 2, this.now, MASTER_RAMP);
-    this.world.gain.setTargetAtTime(clamp(world) ** 2, this.now, MASTER_RAMP);
+    this.car.gain.setTargetAtTime(sliderGain(car), this.now, MASTER_RAMP);
+    this.world.gain.setTargetAtTime(sliderGain(world), this.now, MASTER_RAMP);
+    this.radio.gain.setTargetAtTime(RADIO_TRIM * sliderGain(radio), this.now, MASTER_RAMP);
   }
 
   /** Silences the graph while the pause menu is up, without tearing voices down. */
@@ -410,6 +499,61 @@ export class AudioMixer {
     }
     osc.start(t);
     osc.stop(t + options.decay + 0.05);
+  }
+
+  /**
+   * Dev meter: loudness and peak of every bus over the analysers' last window. The
+   * taps are made on first call, so a player's game never carries them. Bus levels are
+   * after their slider and trim, i.e. as they contribute to the mix.
+   */
+  meter(): Record<MeterBus, MeterReading> {
+    if (!this.meterTaps) {
+      const tap = (node: AudioNode): AnalyserNode => {
+        const a = this.ctx.createAnalyser();
+        a.fftSize = 32768;
+        node.connect(a);
+        return a;
+      };
+      this.meterTaps = {
+        car: tap(this.car),
+        world: tap(this.world),
+        traffic: tap(this.traffic),
+        game: tap(this.sfx),
+        radio: tap(this.radio),
+        master: tap(this.master),
+        out: tap(this.output),
+      };
+    }
+    const stages = kWeightStages(this.ctx.sampleRate);
+    const data = new Float32Array(32768);
+    const out = {} as Record<MeterBus, MeterReading>;
+    for (const [bus, analyser] of Object.entries(this.meterTaps) as [MeterBus, AnalyserNode][]) {
+      analyser.getFloatTimeDomainData(data);
+      let peak = 0;
+      for (const v of data) peak = Math.max(peak, Math.abs(v));
+      let energy = 0;
+      const y = data.slice();
+      for (const [b0, b1, b2, a1, a2] of stages) {
+        let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+        for (let i = 0; i < y.length; i++) {
+          const v = b0! * y[i]! + b1! * x1 + b2! * x2 - a1! * y1 - a2! * y2;
+          x2 = x1;
+          x1 = y[i]!;
+          y2 = y1;
+          y1 = v;
+          y[i] = v;
+        }
+      }
+      // Skip the filters' settling at the head of the window.
+      for (let i = 2048; i < y.length; i++) energy += y[i]! * y[i]!;
+      out[bus] = {
+        // The analyser has already downmixed to mono; +3 dB puts a centred stereo
+        // signal back where BS.1770's two-channel sum would.
+        lufs: -0.691 + 3 + 10 * Math.log10(energy / (y.length - 2048) + 1e-20),
+        peakDb: 20 * Math.log10(peak + 1e-12),
+      };
+    }
+    return out;
   }
 
   dispose(): void {
