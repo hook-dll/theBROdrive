@@ -1493,6 +1493,33 @@ export class Vehicle implements Rebasable {
    * Cost is four ray-casts per parked car per step, which is what a parked car
    * standing on its wheels is worth.
    */
+  /**
+   * Sets a car that has just been placed on the road rolling at `speedMps` along its
+   * own heading: the body, every wheel turning to match, and the gearbox in the gear
+   * that speed wants. For traffic that joins the stream from somewhere up the road
+   * rather than standing up out of it; see `RoadTraffic`.
+   */
+  launchRolling(speedMps: number): void {
+    this.chassisBody.rotation(this.rotationScratch);
+    rotateVector(this.forwardScratch, this.rotationScratch, 0, 0, 1);
+    const across = Math.hypot(this.forwardScratch.x, this.forwardScratch.z) || 1;
+    this.chassisBody.setLinvel(
+      { x: (this.forwardScratch.x / across) * speedMps, y: 0, z: (this.forwardScratch.z / across) * speedMps },
+      true,
+    );
+    let radius = 0;
+    for (const w of this.wheels) {
+      w.spinRadS = speedMps / w.radius;
+      w.slipRatio = 0;
+      w.locked = false;
+      radius += w.radius;
+    }
+    if (this.wheels.length > 0) {
+      this.drivetrain.engageAtWheelSpeed(speedMps / (radius / this.wheels.length));
+    }
+    this.impactVelocityPrimed = false;
+  }
+
   settle(dt: number): void {
     const controller = this.controller;
     if (!controller) return;

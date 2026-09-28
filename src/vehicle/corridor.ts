@@ -160,6 +160,21 @@ export interface CorridorRequest {
    * stays the cheaper way past.
    */
   readonly shoulderPassOverhang?: number;
+  /**
+   * How far past the asphalt the body's edge may go on this driver's side while it
+   * MAKES ROOM for a frantic driver to come through (`Autopilot.setYieldOffset`),
+   * metres; 0 is none. The caller moves `laneOffset` out there, so the line is free and
+   * the verge it uses is not priced as a detour.
+   */
+  readonly yieldOverhang?: number;
+  /**
+   * May the body reach over the crown on this line without crossing it? A line up to
+   * half a body past the centre is not a crossing (`crossesCentre`), so the oncoming
+   * gate never prices it — and on it, a car coming the other way in its own lane is
+   * met door to door. The caller answers from where the oncoming traffic really is;
+   * absent, every such line is allowed, as it always was.
+   */
+  readonly straddleAllowed?: (line: number) => boolean;
   /** Hard permission for the entire transition to a line, not only its destination. */
   readonly lineAllowed?: (line: number) => boolean;
   /**
@@ -460,6 +475,8 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
     obstacles,
     mayCrossCrown,
     shoulderPassOverhang = 0,
+    yieldOverhang = 0,
+    straddleAllowed,
     lineAllowed,
     passSeconds,
     passTravel = 0,
@@ -534,6 +551,19 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
       (!crossesCentre || mayCrossCrown || alreadyAcross) &&
       (lineAllowed?.(line) ?? true);
     let abandoned = crossesCentre && !mayCrossCrown;
+    // OVER THE CROWN WITHOUT CROSSING IT: only where nothing is coming. A body already
+    // out there is not refused the line it is on — it is sent home, like a crossing
+    // whose permission has gone.
+    if (
+      admissible &&
+      !crossesCentre &&
+      straddleAllowed &&
+      (line - oncomingBoundary) * ownSide > -halfWidth &&
+      !straddleAllowed(line)
+    ) {
+      if ((ownLateral - oncomingBoundary) * ownSide > -halfWidth) abandoned = true;
+      else admissible = false;
+    }
     if (!admissible && !captureRejected) return;
     const shift = Math.abs(line - ownLateral);
     // Road covered while the line is being moved there, from the manoeuvre's own arc.
@@ -791,14 +821,21 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
       shoulderPassOverhang > 0 &&
       (line - oncomingBoundary) * ownSide > 0 &&
       bodyEdge - asphaltLimit <= shoulderPassOverhang;
-    if (leavesAsphalt && !laneBlockIsStill && !shoulderPass) admissible = false;
+    const yieldVerge =
+      leavesAsphalt &&
+      yieldOverhang > 0 &&
+      (line - oncomingBoundary) * ownSide > 0 &&
+      bodyEdge - asphaltLimit <= yieldOverhang;
+    if (leavesAsphalt && !laneBlockIsStill && !shoulderPass && !yieldVerge) admissible = false;
     if (!admissible && !captureRejected) return;
     let cost = Number.POSITIVE_INFINITY;
     if (admissible) {
       cost =
         Math.abs(line - laneOffset) * LANE_COST_PER_M +
-        Math.max(0, bodyEdge - asphaltLimit) *
-          (shoulderPass ? SHOULDER_PASS_COST_PER_M : SHOULDER_COST_PER_M) +
+        (yieldVerge
+          ? 0
+          : Math.max(0, bodyEdge - asphaltLimit) *
+            (shoulderPass ? SHOULDER_PASS_COST_PER_M : SHOULDER_COST_PER_M)) +
         (crossesCentre ? oncomingLaneCost : 0);
       // Immovable things are passed on the right, so that two opposing streams go
       // round the same one and still clear each other.

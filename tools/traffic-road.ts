@@ -438,8 +438,14 @@ interface Track {
   ejected: boolean;
   ejectedWhy: string;
   activitySeconds: Map<string, number>;
+  /** Why this driver was following, by the same reading as the ego's. */
+  followWhy: Map<string, number>;
 }
 const tracks = new Map<string, Track>();
+/** How each frantic driver first went past the asphalt by a body width, under `--trace`. */
+const franticExit = new Map<string, string>();
+/** Car-seconds asked to make room for a frantic driver, easing over, and actually over. */
+const yieldSeconds = { asked: 0, moved: 0, there: 0 };
 const speedByCarSecond: number[] = [];
 const liveSamples: number[] = [];
 let measuredSeconds = 0;
@@ -452,6 +458,9 @@ let egoImpacts = 0;
 /** Contacts caused by a body the physics threw out of the world; see `sampleCar`. */
 let ejectedImpacts = 0;
 let streamImpacts = 0;
+/** Contacts by a car in its first seconds on the road: a spawn defect, not a driving one. */
+const EARLY_CONTACT_S = 5;
+let earlyContacts = 0;
 const contacts: string[] = [];
 const passedTheLine = new Set<string>();
 const PASS_LINE_M = EGO_START_S + 1_500;
@@ -478,6 +487,8 @@ const SLIP_SCARE_DEG = 8;
 const egoOrder = new Map<string, { side: number; rel: number }>();
 let egoOvertakes = 0;
 let egoOvertakenBy = 0;
+/** Of those, how many were frantic drivers: the racer the player is meant to notice. */
+let egoOvertakenByFrantic = 0;
 let egoMinHeadOnTtc = Infinity;
 let egoHeadOnScareSeconds = 0;
 let egoWorstHeadOn = '';
@@ -496,8 +507,8 @@ let egoOncomingSeconds = 0;
  * not before whatever is coming the other way.
  */
 const egoFollowWhy = new Map<string, number>();
-function followReason(): string {
-  const inner = egoAutopilot as unknown as {
+function followReason(autopilot: Autopilot = egoAutopilot): string {
+  const inner = autopilot as unknown as {
     passUrgeValue: boolean;
     lastMayCross: boolean;
     passSecondsValue: number;
@@ -523,7 +534,10 @@ function measureRacer(): void {
       if (side === 0) continue;
       if (previous && Math.abs(rel - previous.rel) < ORDER_CONTINUITY_M) {
         if (previous.side === 1 && side === -1) egoOvertakes++;
-        if (previous.side === -1 && side === 1) egoOvertakenBy++;
+        if (previous.side === -1 && side === 1) {
+          egoOvertakenBy++;
+          if (car.style === 'frantic') egoOvertakenByFrantic++;
+        }
       }
       egoOrder.set(car.id, { side, rel });
       continue;
@@ -620,6 +634,7 @@ function trackOf(
       ejected: false,
       ejectedWhy: "",
       activitySeconds: new Map(),
+      followWhy: new Map(),
     };
     tracks.set(id, track);
   }
@@ -659,6 +674,10 @@ function sampleCar(
   const roadHeading = road.sampleAt(s).heading + (direction < 0 ? Math.PI : 0);
   const headingError = wrapAngle(bodyHeading(vehicle) - roadHeading);
   const activity = autopilot.activity;
+  if (activity === 'follow') {
+    const why = followReason(autopilot);
+    track.followWhy.set(why, (track.followWhy.get(why) ?? 0) + FIXED_DT);
+  }
   // A BODY THROWN OUT OF THE GEOMETRY IS NOT A DRIVER, AND IT MUST NOT BE COUNTED AS
   // ONE.
   //
@@ -676,6 +695,14 @@ function sampleCar(
   // and stays visible; it is simply not a traffic-AI defect.
   // The ego is exempt from the speed test: a racer on a descent can genuinely pass it.
   const offAsphalt = Math.abs(baseLateral) - road.halfWidthAt(s);
+  {
+    const inner = autopilot as unknown as { yieldTarget: number; yieldValue: number };
+    if (inner.yieldTarget > 0) yieldSeconds.asked += FIXED_DT;
+    if (inner.yieldValue > 0.3) {
+      yieldSeconds.moved += FIXED_DT;
+      if (Math.abs(localLateral) > Math.abs(road.laneCentreAt(s, 0)) + 0.3) yieldSeconds.there += FIXED_DT;
+    }
+  }
   if (
     !track.ejected &&
     ((offAsphalt > EJECTED_LATERAL_M && speedKmh > EJECTED_SPEED_KMH) ||
@@ -816,6 +843,7 @@ function sampleCar(
   // fault, and the two share no code.
   const impact = vehicle.lastImpact;
   if (impact && impact.severityMps > 1.8) {
+    if (track.seconds < EARLY_CONTACT_S) earlyContacts++;
     if (track.ejected) ejectedImpacts++;
     else streamImpacts++;
     if (!track.ejected) {
@@ -840,6 +868,9 @@ function sampleCar(
   if (!track.ejected && offAsphalt > track.worstOffRoad) {
     track.worstOffRoad = offAsphalt;
     track.worstOffRoadWhy = `${activity} at ${speedKmh.toFixed(0)} km/h, s ${(s - START_S).toFixed(0)}`;
+    if (style === 'frantic' && offAsphalt > 1.5 && !franticExit.has(id)) {
+      franticExit.set(id, `${track.seconds.toFixed(1)} s into its life: ` + (history.get(id) ?? []).filter((_, i, all) => (all.length - 1 - i) % 10 === 0).slice(-36).join(' | '));
+    }
     if (id === 'ego' && offAsphalt > 1) {
       egoWorstOffRoadTrace = (history.get(id) ?? []).filter((_, i, all) => (all.length - 1 - i) % 20 === 0).join(' | ');
     }
@@ -852,6 +883,10 @@ function sampleCar(
 let ticks = 0;
 async function tick(): Promise<void> {
   egoFieldSeat.forwardS = egoS;
+  // The game hands the stream the player's hurry the same way; see `setPlayerInAHurry`.
+  traffic.setPlayerInAHurry(
+    EGO_MODE === 'frantic' && (egoAutopilot.passUrge || egoAutopilot.middlePassing),
+  );
   if (!SOLO) traffic.fixedUpdate(FIXED_DT, egoS, egoLateral, 0, 0);
   // The game feeds the player's own autopilot the stream's nearest approaching car
   // every step (`main.ts`), and the crown-crossing gate reads it. A bench that skips
@@ -1093,7 +1128,7 @@ if (!SOLO) {
   const egoMinutes = Math.max(egoTrack.seconds / 60, 1e-3);
   console.log(
     `  racer:     ${egoOvertakes} overtakes (${(egoOvertakes / egoMinutes).toFixed(1)}/min), ` +
-      `overtaken ${egoOvertakenBy}, longest follow ${egoLongestFollow.toFixed(1)} s, ` +
+      `overtaken ${egoOvertakenBy} (${egoOvertakenByFrantic} by frantic), longest follow ${egoLongestFollow.toFixed(1)} s, ` +
       `oncoming lane ${((egoOncomingSeconds / Math.max(egoTrack.seconds, 1e-3)) * 100).toFixed(1)}%, ` +
       `head-on ttc min ${egoMinHeadOnTtc === Infinity ? '-' : egoMinHeadOnTtc.toFixed(2)} s ` +
       `(${egoHeadOnScareSeconds.toFixed(1)} s under ${HEAD_ON_SCARE_TTC_S}), ` +
@@ -1122,6 +1157,31 @@ if (!SOLO) {
     }
   }
 }
+// THE STREAM'S RACERS, ONE LINE EACH: the car the player is meant to notice, so its
+// own pace, what it spent the time doing and, when it sat in a queue, why.
+for (const track of tracks.values()) {
+  if (track.seconds < 10) continue;
+  const offroadShare = (track.activitySeconds.get('offroad') ?? 0) / track.seconds;
+  if (track.style !== 'frantic' && offroadShare < 0.5) continue;
+  console.log(
+    `  ${track.style === 'frantic' ? 'frantic' : `stranded ${track.style}`} ${track.id.padEnd(12)} ${track.modelId.padEnd(13)} dir ${track.direction > 0 ? '+' : '-'} ` +
+      `${track.seconds.toFixed(0).padStart(3)} s ${((track.progress / Math.max(track.seconds, 1e-3)) * 3.6).toFixed(0).padStart(3)} km/h  ` +
+      [...track.activitySeconds]
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, seconds]) => `${name} ${((seconds / Math.max(track.seconds, 1e-3)) * 100).toFixed(0)}%`)
+        .join(' ') +
+      (track.followWhy.size > 0
+        ? `  | ` + [...track.followWhy].sort((a, b) => b[1] - a[1]).map(([why, t]) => `${why} ${t.toFixed(0)}s`).join(', ')
+        : '') +
+      (track.worstOffRoad > 0.5 ? `  | off +${track.worstOffRoad.toFixed(1)} m ${track.worstOffRoadWhy}` : ''),
+  );
+  const exit = franticExit.get(track.id);
+  if (exit) console.log(`      left the road: ${exit}`);
+}
+console.log(`  spawns:    ${earlyContacts} contacts in a car's first ${EARLY_CONTACT_S} s`);
+console.log(
+  `  yielding:  asked ${yieldSeconds.asked.toFixed(0)} car-s, line out ${yieldSeconds.moved.toFixed(0)}, body out ${yieldSeconds.there.toFixed(0)}`,
+);
 console.log(`  warm-up left ${afterWarmup.live} live of ${afterWarmup.target} target`);
 
 if (TRACE) {

@@ -10,6 +10,7 @@ import { Autopilot, AUTOPILOT_MODES, type AutopilotMode } from '../vehicle/autop
 import type { TrafficField, TrafficNeighbour } from '../vehicle/trafficfield';
 import type { Settings } from '../game/settings';
 import { CAR_MODELS } from '../vehicle/carmodels';
+import { variant } from '../parts/registry';
 import { Vehicle } from '../vehicle/vehicle';
 import { ReversedHazardIndex, type HazardField } from './hazards';
 import type { WorldOrigin } from './origin';
@@ -121,12 +122,34 @@ const DENSE_SPAWN_ROAD_GAP_M = 32;
  */
 const PLATOON_CHANCE = 0.32;
 /**
- * Share of ambient drivers drawn FRANTIC (`drawDriver`). About one in fourteen: the
- * first car of each direction is always cautious and the second always hurried, and a
- * frantic car is gone fast — ahead it pulls away, oncoming it is past in a second — so
- * at one in twenty-five it was barely ever met. Still an event, not a pack of them.
+ * Share of ambient drivers drawn FRANTIC (`drawDriver`), by direction.
+ *
+ * The one the player MEETS is the one coming up behind him: it is started in the
+ * mirror (`REAR_SPAWN_*`), closes, goes past and weaves off through the traffic ahead,
+ * and that is a car he can see and try to follow. One coming the other way is past in
+ * a second and reads as any other car, so most of the share is spent on the player's
+ * own direction — measured on the real road at one in fourteen either way, a frantic
+ * driver overtook the player once in twenty minutes. Still an event, not a pack.
  */
-const FRANTIC_TRAFFIC_SHARE = 0.07;
+const FRANTIC_SAME_DIRECTION_SHARE = 0.14;
+const FRANTIC_ONCOMING_SHARE = 0.03;
+/**
+ * WHAT A FRANTIC DRIVER DRIVES. Drawn from the whole catalogue it was as often in a
+ * 70 hp Volga or an Oka as anything else, and a racer in a car that needs nine seconds
+ * to get past a lorry is a racer that sits in the queue with everybody else — measured
+ * on the real road as a frantic median pace level with the hurried drivers'. So it
+ * gets a car with the power for its habits: a car body at least this many watts a
+ * kilogram, and the rally Five a good share of the time, which is also a car the
+ * player can recognise coming up in the mirror.
+ */
+const FRANTIC_MIN_WATTS_PER_KG = 51;
+const FRANTIC_RALLY_MODEL = 'sv_vaz2105r';
+const FRANTIC_RALLY_SHARE = 0.4;
+const FRANTIC_MODELS = CAR_MODELS.filter(
+  (model) =>
+    model.bodyClass === 'car' &&
+    ((variant(model.engineId).engine?.peakPowerKw ?? 0) * 1000) / model.mass >= FRANTIC_MIN_WATTS_PER_KG,
+);
 /** Longest chain one roll may build, so a bad streak of rolls cannot eat a whole queue. */
 const PLATOON_MAX_CHAIN = 4;
 /** Floor under the headway-derived follow gap: body clearance, not a target distance. */
@@ -167,6 +190,18 @@ const DENSE_SPAWN_INTERVAL_S = 0.5;
 const DENSITY_CHANGE_MIN_S = 36;
 const DENSITY_CHANGE_MAX_S = 72;
 const DROP_SETTLE_S = 0.8;
+/**
+ * A CAR JOINS THE STREAM ROLLING. It was driving before it came into range, so it is
+ * put down moving at what its driver would be doing there: its own pace, capped at
+ * `ROLLING_START_MAX_MPS` and at what the next `ROLLING_START_LOOK_M` of bends allow on
+ * `ROLLING_START_LATERAL_MPS2` of cornering. Started from a standstill, every spawn was
+ * a car pulling away from nowhere in the middle of the road — and the frantic driver
+ * put behind the player to come up his mirror spent twenty seconds getting going,
+ * fell back out of range and was collected before he ever saw it.
+ */
+const ROLLING_START_MAX_MPS = 75 / 3.6;
+const ROLLING_START_LOOK_M = 120;
+const ROLLING_START_LATERAL_MPS2 = 2.5;
 /** Traffic starts at its fitted wheel-contact height; settle mode handles road grade. */
 const TRAFFIC_SPAWN_DROP_M = 0;
 const SPAWN_GROUND_PROBE_UP_M = 2;
@@ -206,6 +241,18 @@ const OPPOSING_PASS_EXCLUSION_M = 260;
  */
 const LEADER_PASS_EXCLUSION_M = 120;
 const DEADLOCK_STOP_SPEED_MPS = 1.5;
+/**
+ * MAKING ROOM FOR A FRANTIC DRIVER, the other half of its pass through the middle
+ * (`MIDDLE_PASS_*` in the autopilot). A driver with one on its tail — held up behind it,
+ * within `BEHIND_M` — moves `BEHIND_OFFSET_M` over toward its verge; a driver with one
+ * coming at it, within `ONCOMING_M`, moves `ONCOMING_OFFSET_M`. Both are what people
+ * on these roads do, and neither is a pass of its own: the frantic driver still
+ * measures every metre of the room it takes.
+ */
+const YIELD_BEHIND_M = 120;
+const YIELD_BEHIND_OFFSET_M = 1;
+const YIELD_ONCOMING_M = 450;
+const YIELD_ONCOMING_OFFSET_M = 0.6;
 /**
  * Metres up the outgoing lane before a turning car is handed back to the ordinary road.
  *
@@ -298,6 +345,8 @@ interface TrafficCar {
   wasPassing: boolean;
   /** Seconds this car has been standing still; see the recycle rule in `fixedUpdate`. */
   stoppedFor: number;
+  /** Speed it is set rolling at when its settle ends; see ROLLING_START_MAX_MPS. */
+  launchSpeed: number;
   /**
    * Arclength along the turning-circle line while this car is on it, or -1 when it is
    * driving the ordinary road. A turning car is out of the road's frame entirely: it is
@@ -429,6 +478,8 @@ export class RoadTraffic {
    */
   private playerLateral = 0;
   private playerDriving = false;
+  /** See `setPlayerInAHurry`. */
+  private playerHurry = false;
   private readonly spawnPoint = { x: 0, y: 0, z: 0 };
   private readonly position = { x: 0, y: 0, z: 0 };
   private pedestrianActive = false;
@@ -775,6 +826,40 @@ export class RoadTraffic {
   }
 
   /**
+   * The player's own car on its frantic autopilot, held up or going through the middle.
+   * Ambient drivers make room for it exactly as they do for one of their own.
+   */
+  setPlayerInAHurry(hurry: boolean): void {
+    this.playerHurry = hurry;
+  }
+
+  /** Who moves over for a frantic driver; see `YIELD_BEHIND_M`. */
+  private assignYields(): void {
+    const playerHurry = this.playerDriving && this.playerHurry;
+    for (const car of this.carList) {
+      let offset = 0;
+      if (car.style !== 'frantic' && car.turnS < 0) {
+        for (const other of this.carList) {
+          if (other.style !== 'frantic' || other.turnS >= 0) continue;
+          if (!other.autopilot.passUrge && !other.autopilot.middlePassing) continue;
+          offset = Math.max(offset, this.yieldFor(car, other.forwardS, other.direction));
+        }
+        if (playerHurry) offset = Math.max(offset, this.yieldFor(car, this.playerS, 1));
+      }
+      car.autopilot.setYieldOffset(offset);
+    }
+  }
+
+  private yieldFor(car: TrafficCar, hurryS: number, hurryDirection: TrafficDirection): number {
+    if (hurryDirection === car.direction) {
+      const behind = (car.forwardS - hurryS) * car.direction;
+      return behind > 0 && behind < YIELD_BEHIND_M ? YIELD_BEHIND_OFFSET_M : 0;
+    }
+    const coming = (hurryS - car.forwardS) * car.direction;
+    return coming > 0 && coming < YIELD_ONCOMING_M ? YIELD_ONCOMING_OFFSET_M : 0;
+  }
+
+  /**
    * `Road.laneCentreAt` is signed in the caller's travel frame. Spawning uses the
    * forward road's frame even for oncoming traffic, so mirror that signed answer
    * before passing it to the forward `offsetPoint` geometry.
@@ -931,6 +1016,7 @@ export class RoadTraffic {
       this.assignDeadlockPermissions();
       this.assignReverseRoom();
       this.assignPassPermissions();
+      this.assignYields();
     }
     for (let i = this.carList.length - 1; i >= 0; i--) {
       const car = this.carList[i]!;
@@ -976,6 +1062,7 @@ export class RoadTraffic {
       if (car.settleFor > 0) {
         car.settleFor -= dt;
         car.vehicle.settle(dt);
+        if (car.settleFor <= 0 && car.launchSpeed > 0) car.vehicle.launchRolling(car.launchSpeed);
       } else {
         this.serviceTurn(car);
         car.controlAccumulator += dt;
@@ -1084,7 +1171,7 @@ export class RoadTraffic {
       direction === 1 && driver.speedCap > this.playerSpeed + REAR_SPAWN_CLOSING_MPS;
     const spawn = this.findSpawnS(direction, fromBehind, driver.style);
     if (spawn === null) return;
-    const model = CAR_MODELS[Math.floor(this.random() * CAR_MODELS.length)]!;
+    const model = this.drawModel(driver.style);
     const request: PendingSpawn = {
       generation: this.generation,
       direction,
@@ -1175,9 +1262,14 @@ export class RoadTraffic {
       }
     }
     const heading = roadPoint.heading + (request.direction === -1 ? Math.PI : 0);
+    // ON THE SURFACE THE WHEELS WILL TOUCH, NOT ON THE SPINE. `roadPoint.y` is the
+    // centreline's geometry; the collider under a lane adds the crown, the camber and
+    // the surface's own bumps, and where it stands higher the car was started inside
+    // it and thrown out sideways by the solver — measured on the real road as cars
+    // wrecked on the verge within two seconds of existing, the low rally Five worst.
     const y = carSpawnYAboveGround(
       measure,
-      roadPoint.y,
+      this.groundHeightAt(x, roadPoint.y, z) ?? roadPoint.y,
       TRAFFIC_SPAWN_DROP_M,
     );
     const state = createServiceableCarState(
@@ -1243,6 +1335,13 @@ export class RoadTraffic {
       lane: request.lane,
       lifetimeTimer: LIFETIME_SAMPLE_S,
       stoppedFor: 0,
+      launchSpeed: this.rollingStartSpeed(
+        request.forwardS,
+        request.direction,
+        request.mode,
+        request.speedCap,
+        request.pace,
+      ),
       wasPassing: false,
       controlAccumulator:
         (this.carList.length & 1) * (TRAFFIC_CONTROL_INTERVAL_S * 0.5),
@@ -1316,6 +1415,20 @@ export class RoadTraffic {
    * see why. Require fixed support at the sampled road height; a later spawn attempt
    * will succeed once that chunk has entered the physical window.
    */
+  /** Height of the fixed ground under a point, probing around `y`; null if none. */
+  private groundHeightAt(x: number, y: number, z: number): number | null {
+    this.groundProbeOrigin.x = x - this.origin.x;
+    this.groundProbeOrigin.y = y + SPAWN_GROUND_PROBE_UP_M;
+    this.groundProbeOrigin.z = z - this.origin.z;
+    const hit = this.physics.raycast(
+      this.groundProbeOrigin,
+      this.groundProbeDirection,
+      SPAWN_GROUND_PROBE_DEPTH_M,
+    );
+    if (!hit || !(this.physics.world.getCollider(hit.colliderHandle)?.parent()?.isFixed() ?? false)) return null;
+    return hit.point.y;
+  }
+
   private hasSpawnGround(x: number, y: number, z: number): boolean {
     this.groundProbeOrigin.x = x - this.origin.x;
     this.groundProbeOrigin.y = y + SPAWN_GROUND_PROBE_UP_M;
@@ -1513,7 +1626,8 @@ export class RoadTraffic {
     // the smaller gap, the racing line, the pass on the shoulder when the opposing
     // lane is taken. Rare on purpose: one of them is an event on the road, a stream of
     // them is a race. Never the second car of a direction, which is the hurried one.
-    if (directionCount !== 2 && styleRoll >= 1 - FRANTIC_TRAFFIC_SHARE) {
+    const franticShare = direction === 1 ? FRANTIC_SAME_DIRECTION_SHARE : FRANTIC_ONCOMING_SHARE;
+    if (directionCount !== 2 && styleRoll >= 1 - franticShare) {
       return {
         style: 'frantic',
         headwayS: 0.9 + this.random() * 0.4,
@@ -1524,7 +1638,8 @@ export class RoadTraffic {
     }
     // One car in five is in a hurry, and it drives the HURRIED mode: ambient traffic
     // that overtakes into windows it would take itself.
-    if (directionCount === 2 || styleRoll >= 0.8) {
+    // The frantic share comes out of the ordinary drivers, not the hurried ones.
+    if (directionCount === 2 || styleRoll >= 0.8 - franticShare) {
       return {
         style: 'hurried',
         headwayS: 1.0 + this.random() * 0.6,
@@ -1540,6 +1655,27 @@ export class RoadTraffic {
       speedCap: (72 + this.random() * 12) / 3.6,
       pace: 0.9 + this.random() * 0.1,
     };
+  }
+  private rollingStartSpeed(
+    s: number,
+    direction: TrafficDirection,
+    mode: AutopilotMode,
+    speedCap: number,
+    pace: number,
+  ): number {
+    let speed = Math.min(speedCap, AUTOPILOT_MODES[mode].cruiseMps * pace, ROLLING_START_MAX_MPS);
+    for (let d = 0; d <= ROLLING_START_LOOK_M; d += 10) {
+      const curvature = Math.abs(this.road.curvatureAt(s + direction * d));
+      if (curvature > 1e-4) speed = Math.min(speed, Math.sqrt(ROLLING_START_LATERAL_MPS2 / curvature));
+    }
+    return speed;
+  }
+
+  private drawModel(style: TrafficDriverStyle): (typeof CAR_MODELS)[number] {
+    if (style !== 'frantic') return CAR_MODELS[Math.floor(this.random() * CAR_MODELS.length)]!;
+    const rally = CAR_MODELS.find((model) => model.id === FRANTIC_RALLY_MODEL);
+    if (rally && this.random() < FRANTIC_RALLY_SHARE) return rally;
+    return FRANTIC_MODELS[Math.floor(this.random() * FRANTIC_MODELS.length)]!;
   }
   /**
    * The player sees the live spawn band, not a point sample under the car. Averaging
@@ -1629,7 +1765,11 @@ export class RoadTraffic {
     let best = -1;
     let bestBehind = OFFSCREEN_TRIM_M;
     for (let i = 0; i < this.carList.length; i++) {
-      const behind = this.playerS - this.carList[i]!.forwardS;
+      const car = this.carList[i]!;
+      // A frantic driver behind is on its way to being seen: it was put there to come
+      // up the mirror, and trimming it first would undo the whole point of it.
+      if (car.style === 'frantic' && car.direction === 1) continue;
+      const behind = this.playerS - car.forwardS;
       if (behind > bestBehind) {
         bestBehind = behind;
         best = i;

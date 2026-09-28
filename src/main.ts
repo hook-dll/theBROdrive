@@ -1314,6 +1314,12 @@ async function boot(): Promise<void> {
     }
     traffic.setDaylightFactor(sky.seeingLight);
     playerFieldSeat.forwardS = activeS;
+    traffic.setPlayerInAHurry(
+      driving !== null &&
+        autopilot.engaged &&
+        autopilot.mode === 'frantic' &&
+        (autopilot.passUrge || autopilot.middlePassing),
+    );
     frameProfiler?.begin('traffic');
     traffic.fixedUpdate(dt, activeS, activeLateral, origin.x, origin.z);
     frameProfiler?.end('traffic');

@@ -616,6 +616,30 @@ export class Drivetrain {
     };
   }
 
+  /**
+   * A car that joins the road ALREADY ROLLING: into the gear it would be in at this
+   * wheel speed — the lowest one that keeps the crank under `UP_SHIFT_RPM_FRACTION` of
+   * the redline — with the crank turning to match. Not a shift, so no interruption; and
+   * it has to be done, because the automatic only ever takes a gear from neutral at a
+   * walking pace, so a car set moving in neutral would coast for good.
+   */
+  engageAtWheelSpeed(wheelAngularSpeed: number): void {
+    const gearbox = this.gearbox;
+    const engine = this.engine;
+    if (gearbox == null || engine == null) return;
+    const wheelRpm = Math.abs(wheelAngularSpeed) * gearbox.finalDrive * RPM_PER_RAD_PER_SEC;
+    let gear = gearbox.ratios.length;
+    for (let g = 1; g <= gearbox.ratios.length; g++) {
+      if (wheelRpm * Math.abs(gearbox.ratios[g - 1]) <= engine.redlineRpm * UP_SHIFT_RPM_FRACTION) {
+        gear = g;
+        break;
+      }
+    }
+    this.gear = gear;
+    this.shiftTimer = 0;
+    this.rpmValue = clamp(wheelRpm * Math.abs(gearbox.ratios[gear - 1]), engine.idleRpm, engine.redlineRpm);
+  }
+
   private setGear(g: number): void {
     this.gear = g;
     this.shiftTimer = this.gearbox ? this.gearbox.shiftTime : 0;

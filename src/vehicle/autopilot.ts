@@ -719,16 +719,69 @@ const PASSING_VERGE_M = 1.2;
  * granted it, one step at a time (`shoulderPassAllowed`). The crossing stays cheaper, so
  * with the opposing lane free the pass is still taken there.
  *
- * `OVERHANG` is how far the body's outer edge may pass the asphalt edge: 1.8 m puts the
- * centre of a Zhiguli about 0.75 m out, its left wheels on the white line.
+ * `OVERHANG` is how far the body's outer edge may pass the asphalt edge, in the
+ * planner's generous body width. 2.1 m puts the centre of a Zhiguli a metre out and its
+ * left wheels a hand's width past the edge: the least that clears a car holding its lane
+ * centre on this road, measured at 1.9-2.5 m — the old 1.8 never granted one at all.
  * `GAP` is the room kept to the passed car's real flank, on top of the planner's own
  * body margin. The speed is the leader's plus `ADVANTAGE`, never above `MAX`: a pass
  * on the verge is a squeeze, not a sprint.
  */
-const SHOULDER_PASS_OVERHANG_M = 1.8;
+const SHOULDER_PASS_OVERHANG_M = 2.1;
 const SHOULDER_PASS_GAP_M = 0.25;
 const SHOULDER_PASS_ADVANTAGE_MPS = 6;
 const SHOULDER_PASS_MAX_MPS = 100 / 3.6;
+/**
+ * A PASS ON THE VERGE HAS TO BE GAINING. The loose ground out there costs grip and
+ * rolling drag the asphalt does not, and a car that could not find its advantage sat
+ * alongside the one it meant to pass for twenty seconds with its right wheels in the
+ * dirt — measured on the real road with a racer in a Zhiguli. Gaining less than
+ * `MIN_GAIN` on it for `STALL_S` gives the pass up: the racer drops `YIELD` below the
+ * other car until it is out from alongside, tucks back in behind it, and leaves the
+ * verge alone for `RETRY_M` of road.
+ */
+const SHOULDER_PASS_MIN_GAIN_MPS = 1.5;
+const SHOULDER_PASS_STALL_S = 3;
+const SHOULDER_PASS_YIELD_MPS = 3;
+const SHOULDER_PASS_RETRY_M = 200;
+/**
+ * THROUGH THE MIDDLE, the frantic driver's answer to a queue with traffic coming the
+ * other way — and the way it is done on a two-lane road in this part of the world: the
+ * car being passed moves over onto its verge, the car coming the other way moves over
+ * onto its own, and the one in a hurry goes between them along the centre line. The
+ * others make the room (`setYieldOffset`, asked for by the traffic coordinator); this
+ * driver only ever takes a line whose room it has MEASURED, from the field's own
+ * laterals, against every car it will meet on the way.
+ *
+ * `BODY_HALF` is the half width assumed of each car met or passed (the field reports a
+ * pessimistic 1.0 for all of them, the widest saloon being 0.9), `GAP` the air kept to
+ * each, measured to this car's REAL flank. It is not taken on a bend, and the pass is
+ * a squeeze, not a sprint: at most `ADVANTAGE` over the car being passed. Cars further
+ * than `QUEUE_M` beyond that one are room to cut back into, and oncoming ones are
+ * judged out to `LOOK_M`.
+ */
+const MIDDLE_PASS_BODY_HALF_M = 0.9;
+const MIDDLE_PASS_GAP_M = 0.35;
+const MIDDLE_PASS_LOOK_M = 300;
+const MIDDLE_PASS_QUEUE_M = 30;
+const MIDDLE_PASS_ADVANTAGE_MPS = 10;
+/** The line must reach at least this far toward the crown from the lane to be one. */
+const MIDDLE_PASS_MIN_SHIFT_M = 0.3;
+/**
+ * MAKING ROOM: how far a yielding driver's line moves toward its own verge, and how far
+ * past the asphalt its body may go doing it. Slewed, so the move reads as a driver
+ * easing over rather than a lane change. See `setYieldOffset`.
+ */
+const YIELD_OVERHANG_M = 0.6;
+/**
+ * A line whose body reaches over the crown is allowed only clear of every car coming
+ * the other way that it could meet within this many seconds, by `STRADDLE_GAP_M` of
+ * air between the two real flanks. See `straddleAllowed` in the corridor.
+ */
+const STRADDLE_LOOK_S = 4;
+const STRADDLE_LOOK_MIN_M = 30;
+const STRADDLE_GAP_M = 0.3;
+const YIELD_SLEW_MPS = 0.7;
 /** Verge proven clear of props ahead: this many seconds of travel, within bounds. */
 const SHOULDER_PASS_SIGHT_S = 5;
 const SHOULDER_PASS_SIGHT_MIN_M = 60;
@@ -1539,6 +1592,77 @@ export class Autopilot {
   private shoulderLeaderSpeed = 0;
   /** Speed of the car being passed on the verge, held while it is alongside. */
   private shoulderPassSpeed = 0;
+  /** A verge pass that stopped gaining; see SHOULDER_PASS_MIN_GAIN_MPS. */
+  private shoulderStallFor = 0;
+  private shoulderYielding = false;
+  private shoulderBarredUntil = 0;
+  /** Last step: the car being passed on the verge was still alongside. */
+  private shoulderAlongside = false;
+  /** This step's grant of the centre line past a yielding car; see MIDDLE_PASS_*. */
+  private middlePassAllowed = false;
+  /** The car is on that line, beside the car it is passing. */
+  private middlePassingValue = false;
+  private middleLine = 0;
+  private middleOwnHalf = 0;
+  private middleClear = true;
+  private middleQueueLimit = 0;
+  /** Of the queue being passed, the flank nearest the crown, in this driver's side sign. */
+  private middleQueueEdge = 0;
+  private readonly visitMiddleQueue = (neighbour: TrafficNeighbour): void => {
+    if (neighbour.s < 0 || neighbour.speed <= CRAWL_SPEED_MPS) return;
+    // In this driver's lane: the same membership test the leader search uses.
+    if (Math.abs(neighbour.lateral - this.shoulderLaneOffset) > neighbour.halfWidth + CAR_HALF_WIDTH_M) return;
+    this.middleQueueEdge = Math.min(this.middleQueueEdge, neighbour.lateral * this.shoulderSideSign);
+  };
+  /** How far toward its verge this driver has been asked to move, and has moved. */
+  private yieldTarget = 0;
+  private yieldValue = 0;
+  private middleObstacles: CorridorObstacle[] | null = null;
+  private middleObstacleHalf = 0;
+  private readonly visitMiddleOncoming = (neighbour: TrafficNeighbour): void => {
+    // Everything ahead on the crown side of the line, whichever way it is going.
+    if (neighbour.s <= 0) return;
+    if ((neighbour.lateral - this.middleLine) * this.shoulderSideSign >= 0) return;
+    this.middleObstacles?.push({
+      s: neighbour.s,
+      lateral: neighbour.lateral,
+      halfWidth: this.middleObstacleHalf,
+      speed: neighbour.speed,
+      movable: true,
+    });
+  };
+  /** Laterals of the traffic a line over the crown could meet; see STRADDLE_LOOK_S. */
+  private readonly straddleLaterals: number[] = [];
+  private straddleSpeed = 0;
+  private straddleOwnHalf = 0;
+  private straddleSide = -1;
+  private readonly visitStraddle = (neighbour: TrafficNeighbour): void => {
+    // Only what is coming, or standing on the far side: a car going our way is a
+    // leader or a car being passed, and the planner already has it.
+    const closing = this.straddleSpeed - neighbour.speed;
+    if (neighbour.speed > CRAWL_SPEED_MPS) return;
+    if (neighbour.speed >= -CRAWL_SPEED_MPS && neighbour.lateral * this.straddleSide >= 0) return;
+    if (neighbour.s > Math.max(STRADDLE_LOOK_MIN_M, closing * STRADDLE_LOOK_S)) return;
+    this.straddleLaterals.push(neighbour.lateral);
+  };
+  private readonly straddleAllowed = (line: number): boolean => {
+    const reach = MIDDLE_PASS_BODY_HALF_M + this.straddleOwnHalf + STRADDLE_GAP_M;
+    for (const lateral of this.straddleLaterals) {
+      if (Math.abs(lateral - line) < reach) return false;
+    }
+    return true;
+  };
+  private readonly visitMiddleNeighbour = (neighbour: TrafficNeighbour): void => {
+    if (!this.middleClear) return;
+    // Something going our way far enough up the road is room to come back in ahead of.
+    if (neighbour.speed > -CRAWL_SPEED_MPS && neighbour.s > this.middleQueueLimit) return;
+    if (
+      Math.abs(neighbour.lateral - this.middleLine) <
+      MIDDLE_PASS_BODY_HALF_M + MIDDLE_PASS_GAP_M + this.middleOwnHalf - 1e-3
+    ) {
+      this.middleClear = false;
+    }
+  };
   private shoulderLaneOffset = 0;
   private shoulderSideSign = -1;
   private shoulderVergeBlocked = false;
@@ -2020,6 +2144,21 @@ export class Autopilot {
   setPassingEnabled(enabled: boolean): void {
     this.passingEnabled = enabled;
   }
+  /**
+   * MAKE ROOM FOR SOMEBODY IN A HURRY: hold a line this many metres toward this
+   * driver's own verge, the body allowed `YIELD_OVERHANG_M` past the asphalt, until
+   * asked for 0 again. That is a road one lane each way; a wider one has a lane for it,
+   * and the driver takes the outer one.
+   * The coordinator asks it of the car a frantic driver is held up behind and of the
+   * cars coming the other way; see MIDDLE_PASS_*.
+   */
+  setYieldOffset(metres: number): void {
+    this.yieldTarget = Math.max(0, metres);
+  }
+  /** True while a racer is going through the middle, between two cars that made room. */
+  get middlePassing(): boolean {
+    return this.middlePassingValue;
+  }
   setLowBeamsAlwaysOn(enabled: boolean): void {
     this.lowBeamsAlwaysOn = enabled;
   }
@@ -2438,10 +2577,31 @@ export class Autopilot {
     const widePaceStep = ((WIDE_ROAD_PACE - 1) / WIDE_PACE_RAMP_S) * Math.max(dt, 0);
     this.widePaceValue += clamp(widePaceTarget - this.widePaceValue, -widePaceStep, widePaceStep);
     const desiredSpeed = ownPace * this.widePaceValue;
+    // A driver making room for somebody in a hurry on a road with a lane for it moves
+    // over into that lane; see `setYieldOffset`.
     const homeLane =
-      ownPace >= INNER_LANE_PACE_MPS ? 0 : Math.min(lanesPerSide, lanesAhead) - 1;
+      ownPace >= INNER_LANE_PACE_MPS && this.yieldTarget === 0 ? 0 : Math.min(lanesPerSide, lanesAhead) - 1;
     this.homeLaneValue = homeLane;
     const ownLaneOffset = this.road.laneCentreAt(this.hintS, homeLane);
+    const yieldStep = YIELD_SLEW_MPS * Math.max(dt, 0);
+    this.yieldValue += clamp(
+      (lanesPerSide === 1 ? this.yieldTarget : 0) - this.yieldValue,
+      -yieldStep,
+      yieldStep,
+    );
+    // Where this driver means to be in its lane: the centre, or toward the verge while
+    // it is making room. The lane itself, and every probe cast down it, stay put.
+    const laneHome =
+      this.yieldValue > 0
+        ? Math.sign(ownLaneOffset || -1) *
+          Math.max(
+            Math.abs(ownLaneOffset),
+            Math.min(
+              Math.abs(ownLaneOffset) + this.yieldValue,
+              this.road.halfWidthAt(this.hintS) + YIELD_OVERHANG_M - CAR_HALF_WIDTH_M,
+            ),
+          )
+        : ownLaneOffset;
     const passingEdge = this.asphaltHalfWidth + PASSING_VERGE_M;
     const staticAvoidEdge = this.asphaltHalfWidth + STATIC_AVOID_VERGE_M;
     const staticAvoidLine = staticAvoidEdge - CAR_HALF_WIDTH_M;
@@ -2916,6 +3076,8 @@ export class Autopilot {
       !offRoad &&
       !recovering &&
       (passUrge || this.shoulderPassing) &&
+      // A given-up pass keeps the verge only until it is out from alongside.
+      (this.shoulderYielding ? this.shoulderAlongside : this.travelled >= this.shoulderBarredUntil) &&
       currentSurface !== SurfaceType.Gravel &&
       currentSurface !== SurfaceType.Sand &&
       currentSurface !== SurfaceType.Rock &&
@@ -2960,6 +3122,71 @@ export class Autopilot {
         if ((o.lateral - projection.lateral) * this.shoulderSideSign >= 0) continue;
         obstacles[i] = { ...o, halfWidth: SHOULDER_PASS_BODY_HALF_M + SHOULDER_PASS_GAP_M };
       }
+    }
+    // MAY THIS DRIVER GO THROUGH THE MIDDLE THIS STEP? See MIDDLE_PASS_*.
+    const middleSide = Math.sign(ownLaneOffset) || -1;
+    // The band the planner is given for a body it passes or meets through the middle:
+    // with its own `CAR_HALF_WIDTH_M` on top, exactly the measured room and no more.
+    const middleBandHalf =
+      MIDDLE_PASS_BODY_HALF_M + MIDDLE_PASS_GAP_M + vehicle.modelMeasure.halfExtents[0] - CAR_HALF_WIDTH_M - 0.05;
+    this.middlePassAllowed = false;
+    if (
+      config.racer &&
+      lanesPerSide === 1 &&
+      this.passingEnabled &&
+      !offRoad &&
+      !recovering &&
+      (passUrge || this.middlePassingValue) &&
+      this.trafficField
+    ) {
+      this.shoulderLaneOffset = ownLaneOffset;
+      this.shoulderSideSign = middleSide;
+      this.shoulderLeaderGap = Infinity;
+      this.trafficField.forEachNear(horizon, 0, this.visitShoulderLeader);
+      const sightM = clamp(speed * SHOULDER_PASS_SIGHT_S, SHOULDER_PASS_SIGHT_MIN_M, SHOULDER_PASS_SIGHT_MAX_M);
+      if (this.shoulderLeaderGap < Infinity && this.straightAhead(this.hintS, sightM, config.passCurvature)) {
+        this.middleOwnHalf = vehicle.modelMeasure.halfExtents[0];
+        // The line clears the whole queue it goes past, not only the car at its head:
+        // each of them has moved over as far as its own verge let it.
+        this.middleQueueLimit = this.shoulderLeaderGap + MIDDLE_PASS_QUEUE_M;
+        this.middleQueueEdge = this.shoulderLeaderLateral * middleSide;
+        this.trafficField.forEachNear(this.middleQueueLimit, 0, this.visitMiddleQueue);
+        this.middleLine =
+          middleSide * this.middleQueueEdge -
+          middleSide * (MIDDLE_PASS_BODY_HALF_M + MIDDLE_PASS_GAP_M + this.middleOwnHalf);
+        // A line past the crown is a crossing, priced by the crossing's own gate; one
+        // that hardly leaves the lane is no way past at all.
+        if (
+          (this.middleLine - ownLaneOffset) * middleSide <= -MIDDLE_PASS_MIN_SHIFT_M &&
+          this.middleLine * middleSide >= -CAR_HALF_WIDTH_M * 0.5 + 0.05
+        ) {
+          this.middleClear = true;
+          this.trafficField.forEachNear(MIDDLE_PASS_LOOK_M, 0, this.visitMiddleNeighbour);
+          this.middlePassAllowed = this.middleClear;
+        }
+        if (this.middlePassAllowed) this.laneCentres.push(this.middleLine);
+      }
+    }
+    if (this.middlePassAllowed) {
+      // The car being passed is measured, not given a lane's width: see the leader below.
+      for (let i = 0; i < obstacles.length; i++) {
+        const o = obstacles[i]!;
+        if (!o.abeam || o.speed <= CRAWL_SPEED_MPS) continue;
+        // The car being passed is on the verge side of this one.
+        if ((o.lateral - projection.lateral) * middleSide <= 0) continue;
+        obstacles[i] = { ...o, halfWidth: Math.min(o.halfWidth, middleBandHalf) };
+      }
+    }
+    // WHAT IS COMING THE OTHER WAY IS AN OBSTACLE LIKE ANY OTHER, AT ITS REAL LATERAL.
+    // The middle line never crosses the crown, so nothing else puts an oncoming car in
+    // front of the planner — and a probe down the opposing lane would give it that
+    // lane's whole width, which is the room the oncoming driver has just made. A car
+    // that stops making room is braked for, not driven into.
+    if ((this.middlePassAllowed || this.middlePassingValue) && this.trafficField) {
+      this.middleObstacles = obstacles;
+      this.middleObstacleHalf = middleBandHalf;
+      this.trafficField.forEachNear(horizon, 0, this.visitMiddleOncoming);
+      this.middleObstacles = null;
     }
     /**
      * The kickdown, and it is the SAME number the crossing gate sizes the manoeuvre
@@ -3007,12 +3234,15 @@ export class Autopilot {
     // body must not lend this leader its velocity.
     if (ownLaneGap < Infinity) {
       const leaderMeasured =
-        this.shoulderPassAllowed && Math.abs(this.shoulderLeaderGap - ownLaneGap) < CAR_HALF_LENGTH_M * 2;
+        (this.shoulderPassAllowed || this.middlePassAllowed) &&
+        Math.abs(this.shoulderLeaderGap - ownLaneGap) < CAR_HALF_LENGTH_M * 2;
       obstacles.push({
         s: ownLaneGap,
         lateral: leaderMeasured ? this.shoulderLeaderLateral : ownLaneOffset,
         halfWidth: leaderMeasured
-          ? this.shoulderLeaderHalfWidth + SHOULDER_PASS_GAP_M
+          ? this.middlePassAllowed
+            ? middleBandHalf
+            : this.shoulderLeaderHalfWidth + SHOULDER_PASS_GAP_M
           : CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M,
         speed: ownLaneProbeSpeed,
         movable: true,
@@ -3021,6 +3251,9 @@ export class Autopilot {
     if (probeAdjacentLanes) {
       for (const laneCentre of this.laneCentres) {
         if (laneCentre === ownLaneOffset) continue;
+        // The middle line's room is measured from the field; a ray down it sees the
+        // two cars that made that room, 2 m either side, and closes it again.
+        if (this.middlePassAllowed && (laneCentre === this.middleLine || laneCentre === -ownLaneOffset)) continue;
         const laneGapForPlan = this.laneProbe(vehicle, laneCentre, sight, originX, originZ);
         if (laneGapForPlan === Infinity) continue;
         obstacles.push({
@@ -3320,10 +3553,15 @@ export class Autopilot {
     this.lastOncomingGap = crossingOncomingGap;
     this.lastRearClear = crossingRearClear;
     this.lastMayCross = mayCrossCrown;
+    this.straddleLaterals.length = 0;
+    this.straddleSpeed = speed;
+    this.straddleOwnHalf = vehicle.modelMeasure.halfExtents[0];
+    this.straddleSide = Math.sign(ownLaneOffset) || -1;
+    this.trafficField?.forEachNear(horizon, 0, this.visitStraddle);
     const corridorRequest = {
       ownLateral: projection.lateral,
       previousLine: this.planLine,
-      laneOffset: ownLaneOffset,
+      laneOffset: laneHome,
       speed,
       desiredSpeed,
       halfWidth: CAR_HALF_WIDTH_M,
@@ -3343,6 +3581,8 @@ export class Autopilot {
       lateralFreedom,
       mayCrossCrown,
       shoulderPassOverhang: this.shoulderPassAllowed ? SHOULDER_PASS_OVERHANG_M : 0,
+      yieldOverhang: laneHome !== ownLaneOffset ? YIELD_OVERHANG_M : 0,
+      straddleAllowed: this.trafficField && lanesPerSide === 1 ? this.straddleAllowed : undefined,
       lineAllowed: this.lineEntryAllowed,
       // The mode's whole appetite for the opposing lane, in one number — and a
       // dearer one for a driver that is only there because something is parked in
@@ -3371,7 +3611,18 @@ export class Autopilot {
       stopRoom: MUST_STOP_GAP_M + (speed * speed) / (2 * obstacleBrakeAccel),
       obstacles,
     };
-    const proposal = planCorridor(corridorRequest);
+    let proposal = planCorridor(corridorRequest);
+    // THROUGH THE MIDDLE IS A DECISION, NOT A LATTICE POINT. Every line between the
+    // lane and the crown prices within a lane-cost of every other, so the search
+    // settled on whichever quarter-metre was nearest the last one — the crown itself,
+    // with the car being passed still in its band — and followed. When the measured
+    // line is clearer than what the search chose, it is the answer.
+    if (this.middlePassAllowed && !proposal.usesOncomingLane) {
+      const middle = evaluateCorridorLine(corridorRequest, this.middleLine);
+      if (middle.admissible && middle.feasible && middle.blockDistance > proposal.blockDistance) {
+        proposal = middle;
+      }
+    }
     this.lastCrossingRefused = proposal.crossingRefused;
     // EVERYBODY SEES THE LOG, NOT ONLY THE LANE IT IS LYING IN.
     //
@@ -3423,10 +3674,15 @@ export class Autopilot {
     }
     // The manoeuvre decides the line; the search offers only a proposal to it, and the
     // commitment it hands back is what the car actually steers to. See `commitLane`.
+    // A pass through the middle follows the room as it is made: the line is re-measured
+    // every step from where the two cars actually are.
+    if (this.middlePassAllowed && this.detouring && proposal.line === this.middleLine) {
+      this.detourLine = this.middleLine;
+    }
     const committedLine = this.commitLane(
       proposal.line,
       projection.lateral,
-      ownLaneOffset,
+      laneHome,
       this.hintS,
       proposal.laneBlockDistance,
       proposal.laneBlockSpeed,
@@ -3601,6 +3857,35 @@ export class Autopilot {
     } else {
       this.shoulderPassing = false;
     }
+    this.shoulderAlongside = passedAlongside < Infinity;
+    if (this.shoulderPassing) {
+      this.shoulderStallFor =
+        speed - this.shoulderPassSpeed < SHOULDER_PASS_MIN_GAIN_MPS ? this.shoulderStallFor + dt : 0;
+      if (!this.shoulderYielding && this.shoulderStallFor > SHOULDER_PASS_STALL_S) {
+        this.shoulderYielding = true;
+        this.shoulderBarredUntil = this.travelled + SHOULDER_PASS_RETRY_M;
+      }
+    } else {
+      this.shoulderStallFor = 0;
+      this.shoulderYielding = false;
+    }
+    // Through the middle for as long as the car being passed is still alongside or
+    // ahead on the line the planner chose; see MIDDLE_PASS_*.
+    let middleAlongside = false;
+    for (const obstacle of obstacles) {
+      if (!obstacle.abeam || obstacle.speed <= CRAWL_SPEED_MPS) continue;
+      if ((obstacle.lateral - projection.lateral) * middleSide <= 0) continue;
+      middleAlongside = true;
+    }
+    this.middlePassingValue =
+      !offRoad &&
+      !recovering &&
+      !plan.usesOncomingLane &&
+      !plan.usesShoulder &&
+      ((this.middlePassAllowed && Math.abs(plan.line - this.middleLine) < 0.3) ||
+        (this.middlePassingValue &&
+          middleAlongside &&
+          (projection.lateral - ownLaneOffset) * middleSide < -MIDDLE_PASS_MIN_SHIFT_M));
     // Anything the corridor clears by only its hysteresis margin is squeezed past at
     // walking pace rather than at road speed.
     this.corridorSqueezeDistance = Number.POSITIVE_INFINITY;
@@ -4124,8 +4409,13 @@ export class Autopilot {
       targetSpeed = Math.min(
         targetSpeed,
         SHOULDER_PASS_MAX_MPS,
-        this.shoulderPassSpeed + SHOULDER_PASS_ADVANTAGE_MPS,
+        this.shoulderYielding
+          ? Math.max(0, this.shoulderPassSpeed - SHOULDER_PASS_YIELD_MPS)
+          : this.shoulderPassSpeed + SHOULDER_PASS_ADVANTAGE_MPS,
       );
+    }
+    if (this.middlePassingValue) {
+      targetSpeed = Math.min(targetSpeed, this.shoulderLeaderSpeed + MIDDLE_PASS_ADVANTAGE_MPS);
     }
     if (!plan.admissible) targetSpeed = 0;
     // Everything priced as being in the way has now been applied. Taken BEFORE the
@@ -4440,7 +4730,7 @@ export class Autopilot {
     }
     this.activityValue = offRoad
       ? 'offroad'
-      : this.planUsesOncomingLane
+      : this.planUsesOncomingLane || this.middlePassingValue
         ? 'pass'
         : this.planUsesShoulder
           ? 'avoid'
