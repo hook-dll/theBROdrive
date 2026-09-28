@@ -4,6 +4,21 @@
 
 ### Added
 
+- THE DESERT IS NO LONGER ONE FLAT COLOUR. Every desert ground material (tiles, vista,
+  its overlap ring, the shoulder) shares `applyDesertGround` in `world/terrainmesh.ts`:
+  broad 288/96 m patches between a redder and a paler sand, pale dry crusts, crests of
+  the wind relief a shade lighter and their troughs warmer, pebble fields where the
+  ink stipple thickens and clean sand where it thins, and wind ripples 0.55 m apart
+  near the eye, gone by 42 m and wherever they would alias. All noise is per vertex
+  (the fragment stage gets one multiply and, close in, one sine), periodic in the cloud
+  field's rebase pan so a rebase moves nothing, and fades to its mean past 700-1600 m.
+- CONTACT SHADOWS UNDER EVERY PROP (`world/props/contactshadow.ts`): a soft warm-dark
+  disc under cacti, rocks, trees and bushes, one instanced draw per chunk or tile, fading
+  with the tile props.
+- GROUND COVER: dry grass tufts and low olive bushes (`groundCoverForms`) along the
+  road, thick on the verge and thinning out by 160 m, a decoration stream of its own
+  (no existing prop moves), no colliders, built only inside the physics radius.
+
 - THE ROAD HAS SHOULDERS, SO IT LIES IN THE DESERT RATHER THAN ON IT. A strip of verge
   either side (`RoadMeshProvider.buildShoulderSteps`, `SHOULDER_STYLE` in
   `world/roadmesh.ts`) runs from the asphalt's edge down onto the sand, laid on the

@@ -20,6 +20,7 @@ import { ROAD_HALF_WIDTH } from '../road';
 import type { ChunkContext, ChunkContent, ChunkProvider } from '../chunks';
 
 import {
+  groundCoverForms,
   pickDesertForm,
   propPieces,
   rockForms,
@@ -28,6 +29,7 @@ import {
   type BreakableSink,
   type PropForm,
 } from './forms';
+import { buildContactShadows, type ContactShadowSpot } from './contactshadow';
 
 // ---------------------------------------------------------------------------
 // Scratch objects reused across the per-chunk build loops (never per-frame).
@@ -101,6 +103,19 @@ const MAX_LAT = 560;
 const ROCK_DENSITY = 0.045;
 const CACTUS_DENSITY = 0.009;
 const ROCK_COLLIDER_MIN = 0.55; // pebbles under this radius (m) get no collider
+/**
+ * Ground cover (dry tufts and low bushes), a decoration stream of its own: its own tag,
+ * so no existing cell's roll moves. Densest near the road, where runoff off the asphalt
+ * waters the verge, thinning out by `GROUND_COVER_LAT`. Only built inside the physics
+ * radius: a tuft is a few pixels by then, and a chunk rebuilds when it crosses it.
+ */
+const TAG_GROUND_COVER = 0x7f6c0e;
+const GROUND_COVER_CELL = 3;
+const GROUND_COVER_NEAR = 0.16;
+const GROUND_COVER_FAR = 0.035;
+const GROUND_COVER_LAT = 160;
+/** Nearest a tuft grows to the asphalt edge, metres: past the shoulder strip. */
+const GROUND_COVER_SETBACK_M = 2.2;
 
 /**
  * Identity of a scatter cell, packed into one integer so it can live in a save's
@@ -134,6 +149,8 @@ interface ScatterPlacement {
   /** Filled in by the instancing pass, so a break can blank the right instance. */
   mesh: THREE.InstancedMesh | null;
   instance: number;
+  /** The ground under the prop (its origin is sunk below it). */
+  groundY: number;
 }
 
 type Rot = { x: number; y: number; z: number; w: number };
@@ -333,6 +350,7 @@ export class ScatterProvider implements ChunkProvider {
             mesh: null,
             roadHazard: false,
             instance: 0,
+            groundY,
           });
         }
         if (++occupancyCells >= 8) {
@@ -410,16 +428,67 @@ export class ScatterProvider implements ChunkProvider {
             roadHazard: true,
             mesh: null,
             instance: 0,
+            groundY,
           });
         }
       }
       yield;
     }
 
+    // Ground cover: decoration only, never in `placements` (no collider, no hazard,
+    // nothing to break), so the physics pass below never walks it.
+    const cover: ScatterPlacement[] = [];
+    if (ctx.hasPhysics) {
+      const covers = groundCoverForms();
+      const coverSStart = Math.floor(ctx.sStart / GROUND_COVER_CELL);
+      const coverSEnd = Math.ceil(ctx.sEnd / GROUND_COVER_CELL);
+      const coverLMax = Math.ceil(GROUND_COVER_LAT / GROUND_COVER_CELL);
+      for (let cs = coverSStart; cs < coverSEnd; cs++) {
+        for (let cl = -coverLMax; cl < coverLMax; cl++) {
+          const roll = hash01(seed, TAG_GROUND_COVER, cs, cl);
+          if (roll >= GROUND_COVER_NEAR) continue;
+          const s = (cs + hash01(seed, TAG_GROUND_COVER, cs, cl, 1)) * GROUND_COVER_CELL;
+          if (s < ctx.sStart || s >= ctx.sEnd) continue;
+          const lateral = (cl + hash01(seed, TAG_GROUND_COVER, cs, cl, 2)) * GROUND_COVER_CELL;
+          const past = Math.abs(lateral) - ctx.road.halfWidthAt(s);
+          if (past < GROUND_COVER_SETBACK_M) continue;
+          // Thick along the verge, thin over the open desert.
+          const near = 1 - Math.min(1, past / GROUND_COVER_LAT);
+          const density = GROUND_COVER_FAR + (GROUND_COVER_NEAR - GROUND_COVER_FAR) * near * near * near;
+          if (roll >= density) continue;
+          const p = ctx.road.offsetPoint(s, lateral);
+          if (ctx.terrain.surfaceFromFrame(p.x, p.z, lateral, s) === SurfaceType.Rock) continue;
+          const form = pickDesertForm(covers, hash01(seed, TAG_GROUND_COVER, cs, cl, 3));
+          const scale = form.minScale + hash01(seed, TAG_GROUND_COVER, cs, cl, 4) * (form.maxScale - form.minScale);
+          const radius = form.baseRadius * scale;
+          const groundY = ctx.terrain.explorationHeightFromFrame(p.x, p.z, lateral, s);
+          cover.push({
+            form,
+            id: 0,
+            x: p.x,
+            y: groundY - radius * form.sink,
+            z: p.z,
+            rx: 0,
+            ry: hash01(seed, TAG_GROUND_COVER, cs, cl, 5) * Math.PI * 2,
+            rz: 0,
+            scale,
+            roadS: 0,
+            roadLateral: 0,
+            radius,
+            roadHazard: false,
+            mesh: null,
+            instance: 0,
+            groundY,
+          });
+        }
+        if ((cs & 3) === 3) yield;
+      }
+    }
+
     // One InstancedMesh per form per chunk. The form geometry/material is shared
     // across chunks; only the instance buffers are per-chunk.
     const byForm = new Map<PropForm, ScatterPlacement[]>();
-    for (const pl of placements) {
+    for (const pl of placements.concat(cover)) {
       let list = byForm.get(pl.form);
       if (!list) {
         list = [];
@@ -450,6 +519,24 @@ export class ScatterProvider implements ChunkProvider {
       group.add(mesh);
       meshes.push(mesh);
       yield;
+    }
+
+    // A contact shadow under everything standing in the desert. Not the road's rocks
+    // and piles: those lie on asphalt, above the terrain height recorded for them.
+    const spots: ContactShadowSpot[] = [];
+    for (const pl of placements) {
+      if (pl.roadHazard) continue;
+      spots.push({ x: pl.x - ox, groundY: pl.groundY, z: pl.z - oz, radius: pl.radius, height: pl.form.height * pl.scale });
+    }
+    // Bushes too; a grass tuft is too thin to shade the sand under it.
+    for (const pl of cover) {
+      if (pl.form.id !== 'bush') continue;
+      spots.push({ x: pl.x - ox, groundY: pl.groundY, z: pl.z - oz, radius: pl.radius * 0.6, height: pl.form.height * pl.scale });
+    }
+    const shadows = buildContactShadows(spots);
+    if (shadows) {
+      group.add(shadows);
+      meshes.push(shadows);
     }
 
     if (ctx.hasPhysics) {

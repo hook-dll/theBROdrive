@@ -504,6 +504,77 @@ export function rockForms(): PropForm[] {
   }
   return _rockForms;
 }
+
+/**
+ * GROUND COVER: dry grass tufts and low creosote-like bushes, the thing a real desert
+ * has thousands of and this one had none of. Decoration only (no collider, nothing
+ * breaks): a wheel rolls through a tuft. Every blade and lump is one vertex-coloured
+ * mesh on the trees' material, so each form is one instanced draw per chunk.
+ */
+function buildGrassTuft(seed: number, blades: number, straw: number, tip: number): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const base = new THREE.Color().setHex(straw, THREE.LinearSRGBColorSpace);
+  const top = new THREE.Color().setHex(tip, THREE.LinearSRGBColorSpace);
+  const c = new THREE.Color();
+  for (let i = 0; i < blades; i++) {
+    const h = 0.28 + hash01(seed, i, 1) * 0.3;
+    const blade = new THREE.ConeGeometry(0.022, h, 3, 1).toNonIndexed();
+    blade.deleteAttribute('uv');
+    blade.translate(0, h / 2, 0);
+    const pos = blade.getAttribute('position');
+    const colours = new Float32Array(pos.count * 3);
+    for (let v = 0; v < pos.count; v++) {
+      c.copy(base).lerp(top, pos.getY(v) / h);
+      colours[v * 3] = c.r;
+      colours[v * 3 + 1] = c.g;
+      colours[v * 3 + 2] = c.b;
+    }
+    blade.setAttribute('color', new THREE.BufferAttribute(colours, 3));
+    // Splayed outward from the crown, each its own way.
+    blade.rotateZ(0.2 + hash01(seed, i, 2) * 0.55);
+    blade.rotateY((i / blades) * Math.PI * 2 + hash01(seed, i, 3) * 0.6);
+    blade.translate((hash01(seed, i, 4) - 0.5) * 0.08, 0, (hash01(seed, i, 5) - 0.5) * 0.08);
+    parts.push(blade);
+  }
+  return mergeGeometries(parts);
+}
+
+function buildBush(seed: number): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  for (let i = 0; i < 4; i++) {
+    const r = 0.22 + hash01(seed, i, 1) * 0.16;
+    const lump = new THREE.IcosahedronGeometry(r, 0);
+    lump.deleteAttribute('uv');
+    lump.scale(1, 0.8, 1);
+    const a = (i / 4) * Math.PI * 2 + hash01(seed, i, 2);
+    const out = i === 0 ? 0 : 0.26;
+    lump.translate(Math.cos(a) * out, r * 0.75 + (i === 0 ? 0.12 : 0), Math.sin(a) * out);
+    parts.push(paint(lump, i % 2 === 0 ? 0x57512f : 0x46412a));
+  }
+  // Bare stems under the foliage, so the bush stands rather than sits.
+  const stem = new THREE.CylinderGeometry(0.015, 0.03, 0.3, 4, 1).toNonIndexed();
+  stem.deleteAttribute('uv');
+  stem.translate(0, 0.15, 0);
+  parts.push(paint(stem, 0x5a4632));
+  return mergeGeometries(parts);
+}
+
+let _groundCoverForms: PropForm[] | null = null;
+/** Ground-cover forms for the roadside scatter's decoration stream. */
+export function groundCoverForms(): PropForm[] {
+  if (!_groundCoverForms) {
+    const tuft = (id: string, geometry: THREE.BufferGeometry, weight: number): PropForm => ({
+      id, geometry, material: matPlant, baseRadius: 0.3, height: 0.5, collider: 'none', sink: 0.05,
+      rotate3d: false, minScale: 0.7, maxScale: 1.5, weight,
+    });
+    _groundCoverForms = [
+      tuft('tuft-straw', buildGrassTuft(0x7f01, 11, 0xa88d58, 0xd6c28d), 1),
+      tuft('tuft-grey', buildGrassTuft(0x7f02, 8, 0x8f8467, 0xbdb392), 0.7),
+      { id: 'bush', geometry: buildBush(0x7f03), material: matPlant, baseRadius: 0.45, height: 0.7, collider: 'none', sink: 0.08, rotate3d: false, minScale: 0.6, maxScale: 1.25, weight: 0.45 },
+    ];
+  }
+  return _groundCoverForms;
+}
 /** Shared visual/collision forms for deterministic world-space desert scatter. */
 export function desertPropForms(surface: SurfaceType): readonly DesertPropForm[] {
   return surface === SurfaceType.Rock ? rockForms() : sandForms();

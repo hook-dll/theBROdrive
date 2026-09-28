@@ -10,7 +10,7 @@ import { outsideGroundWindow } from './groundfade';
 import type { WorldOrigin } from '../world/origin';
 import type { Road } from '../world/road';
 import type { Terrain } from '../world/terrain';
-import { TERRAIN_MATERIAL } from '../world/terrainmesh';
+import { applyDesertGround, TERRAIN_MATERIAL } from '../world/terrainmesh';
 import type {
   VistaWorkerRequest,
   VistaWorkerResponse,
@@ -211,20 +211,22 @@ const MESA_MATERIAL = applyCloudShadow(
 // Same authored shading as streamed terrain, used only where both terrain systems
 // overlap. It draws colour but not depth, so the fine tiles win without corrupting
 // the depth of the distant vista, mesas, fog, or the post-process.
-const VISTA_OVERLAP_MATERIAL = applyCloudShadow(
-  applyComicShading(
-    new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.93,
-      metalness: 0,
-      depthWrite: false,
-    }),
-    {
-      lightingStrength: 0,
-      shadowWarmth: 0,
-      reliefShadeStrength: 0.28,
-      spotlightNormals: 'smooth',
-    },
+const VISTA_OVERLAP_MATERIAL = applyDesertGround(
+  applyCloudShadow(
+    applyComicShading(
+      new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.93,
+        metalness: 0,
+        depthWrite: false,
+      }),
+      {
+        lightingStrength: 0,
+        shadowWarmth: 0,
+        reliefShadeStrength: 0.28,
+        spotlightNormals: 'smooth',
+      },
+    ),
   ),
 );
 

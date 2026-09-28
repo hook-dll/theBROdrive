@@ -13,6 +13,7 @@ import {
   type BreakableSink,
   type DesertPropForm,
 } from './props/forms';
+import { buildContactShadows, contactShadowMatrix } from './props/contactshadow';
 import type { Road } from './road';
 import type { RoadDistance } from './roaddistance';
 import type { Terrain } from './terrain';
@@ -73,6 +74,7 @@ const ROCK_COLLIDER_MIN = 0.55;
  */
 const RECYCLED_TILE_LIMIT = 12;
 const instanceScratch = new THREE.Object3D();
+const shadowScratch = new THREE.Matrix4();
 /** Lean axis and the turn about it. A lean is measured from vertical in world space,
  *  which the instance's own euler triple cannot express once it has a yaw. */
 const leanAxis = new THREE.Vector3();
@@ -108,6 +110,12 @@ interface DesertPropPlacement {
   readonly radius: number;
   mesh: THREE.InstancedMesh | null;
   instance: number;
+  /** The ground under the prop, and its contact shadow's batch (same index as the prop). */
+  readonly groundY: number;
+  /** Standing height, metres: a tall prop's contact shadow reaches further. */
+  readonly height: number;
+  shadow: THREE.InstancedMesh | null;
+  shadowInstance: number;
 }
 
 /**
@@ -562,6 +570,10 @@ export class DesertTileStreamer {
         radius,
         mesh: null,
         instance: 0,
+        groundY: ground,
+        height: form.height * sy,
+        shadow: null,
+        shadowInstance: 0,
       });
     }
 
@@ -596,6 +608,17 @@ export class DesertTileStreamer {
       group.add(instances);
       meshes.push(instances);
     }
+    const shadows = buildContactShadows(
+      props.map((prop) => ({ x: prop.x, groundY: prop.groundY, z: prop.z, radius: prop.radius, height: prop.height })),
+    );
+    if (shadows) {
+      props.forEach((prop, i) => {
+        prop.shadow = shadows;
+        prop.shadowInstance = i;
+      });
+      group.add(shadows);
+      meshes.push(shadows);
+    }
     return { props, meshes };
   }
 
@@ -624,6 +647,10 @@ export class DesertTileStreamer {
         writeInstanceTransform(prop, fade);
         prop.mesh.setMatrixAt(prop.instance, instanceScratch.matrix);
         prop.mesh.instanceMatrix.needsUpdate = true;
+        if (prop.shadow) {
+          prop.shadow.setMatrixAt(prop.shadowInstance, contactShadowMatrix(prop, fade, shadowScratch));
+          prop.shadow.instanceMatrix.needsUpdate = true;
+        }
       }
     }
   }

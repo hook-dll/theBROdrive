@@ -273,60 +273,188 @@ if ( vShoulderGrit > 0.001 ) {
 }
 #include <tonemapping_fragment>`;
 
-function createTerrainMaterial(detailFade: boolean, shoulderGrit = false): THREE.MeshStandardMaterial {
-  // Cloud shadow is the OUTERMOST wrap, so it also finds the detail-fade patch installed
-  // below: it chains onto whatever `onBeforeCompile` already exists, and the order here
-  // decides only which patch runs first, never whether one is lost.
-  const material = applyCloudShadow(
-    applyComicShading(
-      new THREE.MeshStandardMaterial({
-        vertexColors: true,
-        roughness: 0.93,
-        metalness: 0,
-      }),
-      {
-        lightingStrength: 0,
-        shadowWarmth: 0,
-        reliefShadeStrength: 0.28,
-        spotlightNormals: 'smooth',
-      },
-    ),
-  );
-  if (!detailFade) return material;
+/**
+ * THE DESERT'S OWN SURFACE, on every material that draws it (tiles, vista, the vista's
+ * overlap ring, the road shoulder), so the pattern is continuous across every seam
+ * between them. Four things the flat one-colour-per-tile sand did not have:
+ *
+ *  1. BROAD PATCHES. Two octaves at 288 m and 96 m move the sand between a redder and a
+ *     paler, yellower tone, and a third at 144 m lays pale dry crusts. Hue and
+ *     saturation carry it; luminance moves only a few percent, because a darker patch
+ *     of ground reads as a cloud's shadow (terrainmesh's own history).
+ *  2. CRESTS AND TROUGHS. On the tiles, whose `aTerrainDetail` IS the wind-scale relief,
+ *     crests are a shade lighter and the troughs between them warmer: sand sorts that way.
+ *  3. PEBBLE FIELDS. The comic stipple's density follows a 48 m noise, so some ground is
+ *     strewn with stones and some is clean sand, and the crusts are clean.
+ *  4. WIND RIPPLES near the eye: one sine per fragment across the dune axis, 0.55 m
+ *     apart, bent by a per-vertex warp, gone by 42 m and wherever it would alias.
+ *
+ * EVERYTHING NOISY IS PER VERTEX. A fragment-stage noise on this shader once cost 34 ms
+ * of GPU through register spilling (cloudshadow.ts), so the fragment stage gets only
+ * interpolated values, one multiply and, near the eye, one sine. Every noise is periodic
+ * in the cloud field's rebase pan (`uGroundPan`, 36864 m), so a rebase moves nothing;
+ * past 700-1600 m the patches give way to their mean, where the vista's rings are too
+ * coarse to carry them.
+ */
+const GROUND_VERTEX_PARS = /* glsl */ `
+varying vec3 vGroundTint;
+varying vec2 vGroundWorld;
+varying vec3 vGroundSurface;
+float groundHash( float cx, float cz, float salt ) {
+  vec3 h = fract( vec3( cx, cz, cx + cz + salt ) * 0.1031 );
+  h += dot( h, h.yzx + 33.33 );
+  return fract( ( h.x + h.y ) * h.z );
+}
+float groundNoise( vec2 p, float cells, float salt ) {
+  vec2 i = floor( p );
+  vec2 f = p - i;
+  f = f * f * ( 3.0 - 2.0 * f );
+  vec2 i0 = i - cells * floor( i / cells );
+  vec2 i1 = i0 + 1.0;
+  i1 -= cells * floor( i1 / cells );
+  float a = groundHash( i0.x, i0.y, salt );
+  float b = groundHash( i1.x, i0.y, salt );
+  float c = groundHash( i0.x, i1.y, salt );
+  float d = groundHash( i1.x, i1.y, salt );
+  return mix( mix( a, b, f.x ), mix( c, d, f.x ), f.y );
+}`;
 
-  const compileComic = material.onBeforeCompile;
+const GROUND_VERTEX_HOOK = (crests: boolean): string => /* glsl */ `#include <worldpos_vertex>
+{
+  vec3 groundAt = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;
+  vec2 p = groundAt.xz + uGroundPan;
+  vGroundWorld = p;
+  float far = smoothstep( 700.0, 1600.0, distance( groundAt, cameraPosition ) );
+  float patchValue = groundNoise( p / 288.0, 128.0, 11.0 ) * 0.65 + groundNoise( p / 96.0, 384.0, 12.0 ) * 0.35;
+  // Value noise rarely leaves 0.3-0.7: stretched so the patches reach their full range.
+  float red = mix( clamp( ( patchValue - 0.5 ) * 3.2, -1.0, 1.0 ), 0.0, far );
+  vec3 tint = vec3( 1.0 ) + red * vec3( 0.03, -0.06, -0.16 );
+  float crust = smoothstep( 0.64, 0.84, groundNoise( p / 144.0, 256.0, 13.0 ) ) * ( 1.0 - far );
+  tint = mix( tint, vec3( 1.08, 1.07, 1.02 ), crust * 0.8 );
+${
+  crests
+    ? `  float crest = clamp( aTerrainDetail / 0.45, -1.0, 1.0 ) * ( 1.0 - crust );
+  tint *= vec3( 1.0 ) + crest * vec3( 0.035, 0.035, 0.02 ) - max( -crest, 0.0 ) * vec3( 0.0, 0.02, 0.05 );`
+    : ''
+}
+  vGroundTint = tint;
+  float pebbles = smoothstep( 0.3, 0.85, groundNoise( p / 48.0, 768.0, 14.0 ) );
+  float density = mix( mix( 0.07, 0.4, pebbles * pebbles ) * ( 1.0 - 0.8 * crust ), 0.22, far );
+  float warp = groundNoise( p / 7.2, 5120.0, 15.0 ) * 7.0;
+  float ripples = smoothstep( 0.3, 0.7, groundNoise( p / 72.0, 512.0, 16.0 ) ) * ( 1.0 - crust );
+  vGroundSurface = vec3( density, warp, ripples );
+}`;
+
+const GROUND_FRAGMENT_PARS = /* glsl */ `
+varying vec3 vGroundTint;
+varying vec2 vGroundWorld;
+varying vec3 vGroundSurface;
+float groundStipple( vec2 world, float footprint, float keepBelow ) {
+  vec2 cell = floor( world );
+  vec2 local = fract( world ) - 0.5;
+  if ( comicHash( cell ) > keepBelow ) return 0.0;
+  vec2 jitter = vec2( comicHash( cell + 11.3 ), comicHash( cell + 27.7 ) ) - 0.5;
+  float radius = 0.05 + comicHash( cell + 3.1 ) * 0.055;
+  float d = length( local - jitter * 0.55 );
+  float edge = max( footprint, 0.015 );
+  return 1.0 - smoothstep( radius - edge, radius + edge, d );
+}`;
+
+const GROUND_COLOR_HOOK = (grit: boolean): string => /* glsl */ `#include <color_fragment>
+diffuseColor.rgb *= vGroundTint;
+{
+  float rippleFade = vGroundSurface.z * ( 1.0 - smoothstep( 14.0, 42.0, length( vViewPosition ) ) );
+${grit ? '  rippleFade *= 1.0 - min( 1.0, vShoulderGrit * 2.0 );\n' : ''}  if ( rippleFade > 0.001 ) {
+    float phase = dot( vGroundWorld, vec2( -0.5736, 0.8192 ) ) * 11.42 + vGroundSurface.y;
+    float alias = 1.0 - smoothstep( 0.7, 1.8, fwidth( phase ) );
+    float wave = sin( phase );
+    // A ripple is a sharp lit crest and a broad lee, not a sine.
+    wave = wave > 0.0 ? wave * wave * wave : 0.45 * wave;
+    diffuseColor.rgb *= 1.0 + 0.055 * wave * rippleFade * alias;
+  }
+}`;
+
+interface DesertGroundOptions {
+  /** The tiles' wheel-scale relief, `aTerrainDetail`: fades out far off, tones crests. */
+  readonly detail?: boolean;
+  /** The road shoulder's grit, `aShoulderGrit`. */
+  readonly grit?: boolean;
+}
+
+/**
+ * Gives a comic, cloud-shadowed ground material the desert surface above (and, on the
+ * tiles, their detail fade; on the shoulder, its grit). Chains onto the patches already
+ * there, which must include `applyComicShading` and `applyCloudShadow`: the stipple and
+ * `uGroundPan` come from them.
+ */
+export function applyDesertGround(
+  material: THREE.MeshStandardMaterial,
+  options: DesertGroundOptions = {},
+): THREE.MeshStandardMaterial {
+  const detail = options.detail === true;
+  const grit = options.grit === true;
+  const previous = material.onBeforeCompile;
   material.onBeforeCompile = (shader, renderer) => {
-    compileComic.call(material, shader, renderer);
-    shader.vertexShader = shader.vertexShader
+    previous.call(material, shader, renderer);
+    let vertex = shader.vertexShader
       .replace(
         '#include <common>',
-        `#include <common>\nattribute float aTerrainDetail;\n${
-          shoulderGrit ? 'attribute float aShoulderGrit;\nvarying float vShoulderGrit;\n' : ''
-        }`,
+        `#include <common>\n${detail ? 'attribute float aTerrainDetail;\n' : ''}${
+          grit ? 'attribute float aShoulderGrit;\nvarying float vShoulderGrit;\n' : ''
+        }${GROUND_VERTEX_PARS}`,
       )
-      .replace(
+      .replace('#include <worldpos_vertex>', GROUND_VERTEX_HOOK(detail));
+    if (detail) {
+      vertex = vertex.replace(
         '#include <begin_vertex>',
         `vec3 transformed = vec3( position );
 float tileDistance = length( ( modelMatrix * vec4( position, 1.0 ) ).xz - cameraPosition.xz );
 float detailFade = smoothstep( ${DESERT_TILE_FADE_FULL.toFixed(1)}, ${DESERT_TILE_FADE_GONE.toFixed(1)}, tileDistance );
-transformed.y -= aTerrainDetail * detailFade;${shoulderGrit ? '\nvShoulderGrit = aShoulderGrit;' : ''}`,
+transformed.y -= aTerrainDetail * detailFade;${grit ? '\nvShoulderGrit = aShoulderGrit;' : ''}`,
       );
-    if (shoulderGrit) {
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nvarying float vShoulderGrit;\n')
-        .replace('#include <tonemapping_fragment>', SHOULDER_GRIT_FRAGMENT);
     }
+    shader.vertexShader = vertex;
+    let fragment = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>\n${grit ? 'varying float vShoulderGrit;\n' : ''}${GROUND_FRAGMENT_PARS}`,
+      )
+      .replace('#include <color_fragment>', GROUND_COLOR_HOOK(grit))
+      .replace('comicStipple( stippleUv, footprint )', 'groundStipple( stippleUv, footprint, vGroundSurface.x )');
+    if (grit) fragment = fragment.replace('#include <tonemapping_fragment>', SHOULDER_GRIT_FRAGMENT);
+    shader.fragmentShader = fragment;
   };
-  const comicProgramKey = material.customProgramCacheKey;
+  const previousKey = material.customProgramCacheKey;
   material.customProgramCacheKey = () =>
-    `${comicProgramKey.call(material)}:detail-fade-v1${shoulderGrit ? ':shoulder-grit-v1' : ''}`;
+    `${previousKey.call(material)}:desert-ground-v1${detail ? ':detail-fade-v1' : ''}${grit ? ':shoulder-grit-v1' : ''}`;
   return material;
 }
-export const TERRAIN_MATERIAL = createTerrainMaterial(false);
+
+function createTerrainMaterial(options: DesertGroundOptions): THREE.MeshStandardMaterial {
+  return applyDesertGround(
+    applyCloudShadow(
+      applyComicShading(
+        new THREE.MeshStandardMaterial({
+          vertexColors: true,
+          roughness: 0.93,
+          metalness: 0,
+        }),
+        {
+          lightingStrength: 0,
+          shadowWarmth: 0,
+          reliefShadeStrength: 0.28,
+          spotlightNormals: 'smooth',
+        },
+      ),
+    ),
+    options,
+  );
+}
+export const TERRAIN_MATERIAL = createTerrainMaterial({});
 /** Fine player-centred tiles whose small-scale height relaxes into the vista base. */
-export const DESERT_TILE_MATERIAL = createTerrainMaterial(true);
+export const DESERT_TILE_MATERIAL = createTerrainMaterial({ detail: true });
 /** The road shoulder (world/roadmesh.ts): the tile material plus its grit. */
-export const DESERT_SHOULDER_MATERIAL = createTerrainMaterial(true, true);
+export const DESERT_SHOULDER_MATERIAL = createTerrainMaterial({ detail: true, grit: true });
 
 /**
  * One chunk's terrain, as two grids sharing one vertex buffer: the sparse FIELD
