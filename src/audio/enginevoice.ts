@@ -20,7 +20,6 @@ const ENGINE_PARAMS: readonly EngineParam[] = ['rpm', 'load', 'running', 'pitch'
 function characterOf(state: VehicleAudioState): EngineCharacter {
   return {
     cylinders: state.cylinders,
-    diesel: state.fuel === 'diesel',
     displacementL: state.displacementL,
     turbo: state.turbo,
     seed: state.engineSeed,
@@ -28,7 +27,7 @@ function characterOf(state: VehicleAudioState): EngineCharacter {
 }
 
 function characterKey(c: EngineCharacter): string {
-  return `${c.cylinders}|${c.diesel}|${c.displacementL.toFixed(2)}|${c.turbo}|${c.seed.toFixed(3)}`;
+  return `${c.cylinders}|${c.displacementL.toFixed(2)}|${c.turbo}|${c.seed.toFixed(3)}`;
 }
 
 export class EngineVoice {

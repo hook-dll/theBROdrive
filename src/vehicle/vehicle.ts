@@ -28,7 +28,6 @@ import {
   variant,
   type CarStats,
   type EngineSpec,
-  type FuelType,
 } from '../parts/registry';
 import { itemMass } from '../items/items';
 import {
@@ -42,13 +41,16 @@ import {
 } from './carmodels';
 import {
   BONNET_SLOT_COUNT,
+  bonnetAirFilter,
   bonnetCanRun,
+  bonnetHasTurbo,
   bonnetPart,
   bonnetRadiator,
   destroyedEngineSpec,
   engineFailureReason,
   stockBonnetVariants,
 } from './bonnet';
+import { airFilterBreath, airFilterWear } from './airfilter';
 import {
   EngineCoolingSystem,
   ambientAirC,
@@ -63,6 +65,7 @@ import {
   type CarModelMeasure,
 } from '../render/carmodel';
 import type { CarBodySurface } from '../render/carsurface';
+import { carPaintColor, type CarPaint } from './carpaint';
 import type { ContactPatchField } from '../render/contactpatches';
 import { patchOpacity } from '../render/contactpatches';
 import type { VehicleLightRig } from '../render/vehiclelights';
@@ -180,7 +183,7 @@ import {
   WHEEL_MASS_KG,
   WHEEL_REFERENCE_RADIUS,
   clamp,
-  fuelDensity,
+  FUEL_DENSITY,
   rotateVector,
   stockRadiatorWater,
   tyreTemperatureGrip,
@@ -367,14 +370,13 @@ export interface VehicleAudioState {
   rearLockT: number;
 
   // --- engine character: what the engine IS, for the voice to be built from ---
-  fuel: FuelType;
   /**
    * Swept volume estimate, litres. Not in the catalogue, so it is read off the torque:
-   * a naturally aspirated petrol makes ~85 Nm a litre, a diesel ~57, a turbo diesel
-   * ~107. Only the audio uses it, to size the exhaust and the pulse.
+   * a naturally aspirated petrol makes ~85 Nm a litre. Only the audio uses it, to size
+   * the exhaust and the pulse.
    */
   displacementL: number;
-  /** Factory turbo, or a turbocharger fitted under the bonnet. */
+  /** A turbocharger is fitted under the bonnet. */
   turbo: boolean;
   /** Stable per-engine number, 0..1: every copy of one engine sounds the same. */
   engineSeed: number;
@@ -677,6 +679,9 @@ export class Vehicle implements Rebasable {
   private localBodyScratches: number;
   private lastAuthBodyDirt: number;
   private lastAuthBodyScratches: number;
+  /** The respray last written into the paint; null means the factory colour. */
+  private appliedPaint: CarPaint | null = null;
+  private readonly paintScratch = new THREE.Color();
   private bodyConditionEmitTimer = 0;
   private lastAuthOil: number;
   private fluidEmitTimer = 0;
@@ -684,6 +689,12 @@ export class Vehicle implements Rebasable {
   // Odometer and transform emission.
   private odoAccum = 0;
   private odoEmitTimer = 0;
+  /**
+   * Air filter wear driven since it was last written to state (vehicle/airfilter.ts),
+   * and the filter it belongs to: a filter swapped at the roadside starts clean of it.
+   */
+  private filterWearAccum = 0;
+  private filterWearPartId: string | null = null;
   private transformEmitTimer = 0;
 
   // Scratch buffers reused across fixedUpdate (no per-tick allocation).
@@ -799,7 +810,6 @@ export class Vehicle implements Rebasable {
     landingImpactMps: 0,
     frontLockT: 0,
     rearLockT: 0,
-    fuel: 'petrol',
     displacementL: 1.5,
     turbo: false,
     engineSeed: 0,
@@ -1160,9 +1170,7 @@ export class Vehicle implements Rebasable {
    * gauge is worth watching.
    */
   get engineRunning(): boolean {
-    return (
-      !this.overheatStalled && bonnetCanRun(this.car.bonnet, this.localFuel, this.car.fuelKind)
-    );
+    return !this.overheatStalled && bonnetCanRun(this.car.bonnet, this.localFuel);
   }
 
   /** The live cooling state: dashboard readout, prompts and the harness read this. */
@@ -1264,10 +1272,9 @@ export class Vehicle implements Rebasable {
 
     this.drivetrain.reconfigure(this.drivetrainEngine(), stats.gearbox);
     // Rebinds the cooling hardware in the same breath as the drivetrain, because
-    // both answer to the same four bonnet cells: swapping the radiator or the engine
+    // both answer to the same bonnet cells: swapping the radiator or the engine
     // takes effect on the next tick with no other bookkeeping. The water level is
-    // re-clamped through `setWater` because a smaller core cannot hold what a larger
-    // one did — the litres that do not fit are spilled, exactly as they would be.
+    // re-clamped through `setWater`, so a car with no radiator holds none.
     this.cooling.configure(this.drivetrainEngine(), bonnetRadiator(this.car.bonnet));
     this.cooling.setWater(this.localWater);
     this.localWater = this.cooling.waterLitres;
@@ -1564,6 +1571,7 @@ export class Vehicle implements Rebasable {
       speedMps: 0,
       ambientC: ambientAirC(this.world.state.timeOfDay, DAY_LENGTH),
       engineRunning: false,
+      boost: 0,
     });
     this.localTemp = this.cooling.temperature;
     if (this.overheatStalled && !this.cooling.getState().overheating) this.overheatStalled = false;
@@ -1843,6 +1851,7 @@ export class Vehicle implements Rebasable {
       this.world.apply({ t: 'car_odometer', carId: this.car.id, metres: this.odoAccum });
       this.odoAccum = 0;
     }
+    this.flushAirFilterWear();
     this.odoEmitTimer = 0;
     this.pushTransform();
     this.lamps.adoptLiveState();
@@ -1964,6 +1973,14 @@ export class Vehicle implements Rebasable {
       drivenWheels++;
     }
     const roadWheelSpeed = fwd / this.drivenRadius;
+    // The intake, read from the bonnet every step: a turbo bolted on or a filter
+    // swapped at the roadside is felt on the next tick, and the filter's breath
+    // includes the wear driven since its last write.
+    const filter = bonnetAirFilter(this.car.bonnet);
+    this.drivetrain.setInduction(
+      bonnetHasTurbo(this.car.bonnet),
+      filter ? airFilterBreath((filter.clog ?? 0) + this.filterWearAccum) : 1,
+    );
     const drive = this.drivetrain.update(
       dt,
       throttle,
@@ -2017,6 +2034,7 @@ export class Vehicle implements Rebasable {
       speedMps: fwd,
       ambientC: ambientAirC(this.world.state.timeOfDay, DAY_LENGTH),
       engineRunning: this.engineRunning,
+      boost: this.drivetrain.boost,
     });
     this.localWater = this.cooling.waterLitres;
     this.localTemp = this.cooling.temperature;
@@ -2645,10 +2663,8 @@ export class Vehicle implements Rebasable {
     );
     this.prevVerticalVel = vy;
     if (engine) {
-      audio.fuel = engine.fuel;
-      const nmPerLitre = engine.fuel === 'diesel' ? (engine.turbo ? 107 : 57) : 85;
-      audio.displacementL = Math.max(0.5, engine.peakTorqueNm / nmPerLitre);
-      audio.turbo = engine.turbo === true || bonnetPart(this.car.bonnet, 1) !== null;
+      audio.displacementL = Math.max(0.5, engine.peakTorqueNm / 85);
+      audio.turbo = bonnetHasTurbo(this.car.bonnet);
       audio.engineSeed =
         ((engine.peakTorqueNm * 7919 + engine.idleRpm * 104729 + engine.redlineRpm * 31) % 1000) / 1000;
     }
@@ -2721,12 +2737,23 @@ export class Vehicle implements Rebasable {
     // Odometer: metres travelled forward this tick, emitted in throttled batches.
     if (fwd > 0) {
       this.odoAccum += fwd * dt;
+      // The filter breathes only while the engine does; a car coasting dead or being
+      // pushed puts no air through it.
+      if (this.engineRunning) {
+        const filter = bonnetAirFilter(this.car.bonnet);
+        if (filter && filter.id !== this.filterWearPartId) {
+          this.filterWearPartId = filter.id;
+          this.filterWearAccum = 0;
+        }
+        this.filterWearAccum += airFilterWear(fwd * dt, weather.dust, weather.haze);
+      }
       this.odoEmitTimer += dt;
       if (this.odoEmitTimer >= ODOMETER_EMIT_INTERVAL) {
         this.odoEmitTimer = 0;
         const metres = this.odoAccum;
         this.odoAccum = 0;
         if (metres > 0) this.world.apply({ t: 'car_odometer', carId: this.car.id, metres });
+        this.flushAirFilterWear();
       }
     }
 
@@ -2913,6 +2940,26 @@ export class Vehicle implements Rebasable {
     this.lastAuthBodyScratches = this.localBodyScratches;
   }
 
+  /**
+   * Writes the car's respray into its paint when it moved. A spray can writes state
+   * directly, stroke by stroke, so this is what makes a held can visibly work.
+   */
+  private syncPaint(): void {
+    const paint = this.car.paint;
+    const applied = this.appliedPaint;
+    if (paint === null || !this.surface) return;
+    if (
+      applied !== null &&
+      applied.base === paint.base &&
+      applied.coat === paint.coat &&
+      applied.cover === paint.cover
+    ) {
+      return;
+    }
+    this.surface.setPaint(carPaintColor(paint, this.paintScratch));
+    this.appliedPaint = { ...paint };
+  }
+
   /** This car's body-condition renderer; null until its visuals are built. */
   get bodySurface(): CarBodySurface | null {
     return this.surface;
@@ -2948,6 +2995,7 @@ export class Vehicle implements Rebasable {
     // PARKED car being washed: nothing runs its fixed step, and the sponge writes
     // state directly.
     this.resyncBodyCondition();
+    this.syncPaint();
     this.surface?.setCondition(this.localBodyDirt, this.localBodyScratches);
     this.lamps.setGrime(this.localBodyDirt);
 
@@ -3635,20 +3683,18 @@ export class Vehicle implements Rebasable {
     );
     let mass = this.model.mass;
 
-    // Service parts. Cell order is engine, turbine, radiator, tank; the turbine's
-    // factory state is EMPTY, so anything fitted there is pure addition.
-    const stockByCell = [stock.engine, null, stock.radiator, stock.tank] as const;
+    // Service parts, cell by cell against the factory fit. The turbocharger's factory
+    // state is EMPTY, so anything fitted there is pure addition.
     for (let cell = 0; cell < BONNET_SLOT_COUNT; cell++) {
       const part = bonnetPart(this.car.bonnet, cell);
       const fitted = part ? variant(part.variantId).mass : 0;
-      const stockId = stockByCell[cell];
+      const stockId = stock[cell] ?? null;
       mass += fitted - (stockId === null ? 0 : variant(stockId).mass);
     }
 
-    // Fuel, water and oil, measured against full reservoirs. `fuelKind` decides the
-    // density, and a mixture weighs as the heavier of the two it could be.
-    mass += (this.car.fuelLitres - this.model.tankLitres) * fuelDensity(this.car.fuelKind);
-    mass += this.car.waterLitres - stockRadiatorWater(stock.radiator);
+    // Fuel, water and oil, measured against full reservoirs.
+    mass += (this.car.fuelLitres - this.model.tankLitres) * FUEL_DENSITY;
+    mass += this.car.waterLitres - stockRadiatorWater(stock[2]!);
     mass += (this.car.oilLitres - oilCapacity(engine)) * FLUID_DENSITY_OIL;
 
     // Cargo: the boot's own cells, and whatever the driver brought with them.
@@ -3659,7 +3705,6 @@ export class Vehicle implements Rebasable {
       mass: Math.max(1, mass),
       engine,
       gearbox: modelGearbox(this.model),
-      fuel: engine.fuel,
       tankCapacity: this.model.tankLitres,
       wheelCount: this.measure.wheels.length,
       wheelGrip: this.model.wheelGrip,
@@ -4123,6 +4168,8 @@ export class Vehicle implements Rebasable {
     this.surface = instance.surface;
     this.surface.setCondition(this.localBodyDirt, this.localBodyScratches);
     this.surface.setStickers(this.car.stickers);
+    this.appliedPaint = null;
+    this.syncPaint();
   }
 
   /** Re-prints the car's stickers after one was placed; the model may still be loading. */
@@ -4156,6 +4203,15 @@ export class Vehicle implements Rebasable {
     this.wheelMeshes.clear();
     this.steeringWheel = null;
     this.steeringWheelRest = 0;
+  }
+
+  /** Writes the air filter wear driven since the last write into the fitted filter. */
+  private flushAirFilterWear(): void {
+    const wear = this.filterWearAccum;
+    this.filterWearAccum = 0;
+    const filter = bonnetAirFilter(this.car.bonnet);
+    if (wear <= 0 || !filter || filter.id !== this.filterWearPartId) return;
+    this.world.apply({ t: 'car_air_filter', carId: this.car.id, clog: (filter.clog ?? 0) + wear });
   }
 
   private drivetrainEngine(): EngineSpec | null {

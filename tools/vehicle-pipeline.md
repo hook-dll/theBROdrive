@@ -606,7 +606,6 @@ console.log(JSON.stringify(cars.carModelMeasure('<id>'), null, 2));
 
 Новый `EngineSpec` задаёт:
 
-- fuel;
 - factory peak crank power, kW;
 - indicated `peakTorqueNm`;
 - `torquePeakRpm`, `redlineRpm`, `idleRpm`;
@@ -644,15 +643,11 @@ Transfer/high-range reduction, если отдельного поля нет, в
 
 Порядок calibration: реальные масса/колёса/ratios -> engine curve -> drag area/top speed -> grip/brakes -> suspension/steering. Иначе один tuning knob маскирует ошибку другого.
 
-### I3. Радиатор
+### I3. Радиатор и воздушный фильтр
 
-`engineHeat()` выводит сбалансированный heat profile из fuel, power и cylinders; override нужен только при доказанном отличии. `preferredRadiatorClass()` выбирает минимальный класс, способный удержать двигатель. Заводское состояние через `createBonnetStorage()` уже ставит:
+`engineHeat()` выводит сбалансированный heat profile из power и cylinders; override нужен только при доказанном отличии. Радиатор ОДИН на все двигатели: `radiatorKwPerK()` нормирует его рейтинг на полную нагрузку двигателя с запасом `RADIATOR_MARGIN`, поэтому заводское состояние через `createBonnetStorage()` ставит один и тот же `radiator` (9 L) в ячейку 2. Что реально управляет охлаждением — уровень воды в нём: `waterCoolingEffect()` теряет эффективность от 1.0 при полном до 0 при сухом. Отдельных классов/fit-предупреждений больше нет.
 
-- `radiator_small` для small;
-- `radiator_standard` для standard;
-- `radiator_copper` для large.
-
-Создавать новый radiator variant стоит только если нужны отдельные capacity/cooling/mass/visual identity. Не создавать копию существующего класса ради имени модели. Если нужен новый variant, добавить mesh blueprint части, fit body classes и проверить service/inventory UI.
+Воздушный фильтр — обязательная часть заводской комплектации (ячейка 4, `air_filter`); `bonnetCanRun()` не пускает двигатель без него, а `airFilterBreath()` задаёт потерю мощности от `clog`. Создавать новый radiator variant стоит только если нужны отдельные capacity/mass/visual identity; новый `air_filter` variant — только при отдельной модели износа.
 
 ## 14. Этап J: подвеска и ощущение управления
 
@@ -769,8 +764,8 @@ bun tools/cooling-drive.ts
 bun tools/service.ts
 ```
 
-- `cooling.ts` проверяет математическую thermal model и radiator class fit;
-- `cooling-drive.ts` проверяет wiring через реальные `Vehicle`, замену радиатора, overheat/power loss/stall/cool-down, но сейчас hard-coded на UAZ;
+- `cooling.ts` проверяет математическую thermal model, форму `waterCoolingEffect()` и то, что полный радиатор держит любой (в т.ч. импортный) двигатель;
+- `cooling-drive.ts` проверяет wiring через реальные `Vehicle`, замену радиатора, потерю мощности/stall/cool-down на низком уровне воды, но сейчас hard-coded на UAZ;
 - `service.ts` проверяет containers, длительное разрушение двигателя и замену, также на representative UAZ.
 
 При новом engine обязательны global `cooling.ts` и отдельный прогон нового агрегата под полной нагрузкой/на холостом ходу. Нельзя считать UAZ integration run проверкой уникального нового engine.
@@ -843,7 +838,7 @@ npm run dev
 
 Для визуальной проверки пыли и царапин (только dev-сборка): `/?car-lab` — все модели каталога рядами по пакам под настоящими Renderer и Sky. Слайдеры пыли, царапин и времени суток. Параметры URL `dirt`, `scratches`, `time`, `focus=<modelId>` задают то же состояние для воспроизводимых скриншотов; `window.__carLab` даёт то же из автоматизации.
 
-`/tools/coollab/` нужен только при добавлении нового radiator mesh или изменении dashboard temperature zones.
+`/tools/coollab/` нужен только при изменении radiator mesh или dashboard temperature zones.
 
 ### Gate 8: compile/build
 

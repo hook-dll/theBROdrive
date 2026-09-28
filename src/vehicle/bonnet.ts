@@ -4,17 +4,16 @@ import {
   variant,
   type BodyClass,
   type EngineSpec,
-  type FuelType,
   type PartInstance,
-  type RadiatorClass,
   type RadiatorSpec,
 } from '../parts/registry';
-import { preferredRadiatorClass } from './cooling';
 
-/** Every car exposes the same four service positions, left to right. */
-export const BONNET_SLOT_KINDS = ['engine', 'turbine', 'radiator', 'fuel_tank'] as const;
+/** Every car exposes the same five service positions, left to right. */
+export const BONNET_SLOT_KINDS = ['engine', 'turbine', 'radiator', 'fuel_tank', 'air_filter'] as const;
 export const BONNET_SLOT_COUNT = BONNET_SLOT_KINDS.length;
 export type BonnetPartKind = (typeof BONNET_SLOT_KINDS)[number];
+/** The air filter's cell, the one position added after the first four. */
+export const AIR_FILTER_CELL = 4;
 
 export function bonnetSlotKind(cell: number): BonnetPartKind | null {
   return BONNET_SLOT_KINDS[cell] ?? null;
@@ -83,20 +82,17 @@ export function bonnetAccepts(cell: number, item: Item | null): item is PartItem
   return variant(item.part.variantId).kind === bonnetSlotKind(cell);
 }
 
-function servicePart(carId: string, suffix: string, variantId: string): PartItem {
-  return {
-    type: 'part',
-    id: `${carId}:service:${suffix}`,
-    part: { id: `${carId}:service:${suffix}`, variantId, dirt: 0, rust: 0 },
-  };
+function servicePart(carId: string, suffix: string, variantId: string, clog?: number): PartItem {
+  const id = `${carId}:service:${suffix}`;
+  const part: PartInstance = { id, variantId, dirt: 0, rust: 0 };
+  if (clog !== undefined) part.clog = clog;
+  return { type: 'part', id, part };
 }
 
-/** The radiator class a given class of engine leaves the factory with. */
-const FACTORY_RADIATOR: Readonly<Record<RadiatorClass, string>> = {
-  small: 'radiator_small',
-  standard: 'radiator_standard',
-  large: 'radiator_copper',
-};
+/** The air filter a car leaves the factory with, `clog` worn. */
+export function factoryAirFilter(carId: string, clog = 0): PartItem {
+  return servicePart(carId, 'air-filter', 'air_filter', clog);
+}
 
 /**
  * The tank a body of this class and capacity leaves the factory with.
@@ -112,46 +108,35 @@ function stockTankVariant(bodyClass: BodyClass, tankCapacity: number): string {
   return 'tank_65';
 }
 
-/** The three parts a roadworthy car of this model leaves the factory with. */
+/** The parts a roadworthy car of this model leaves the factory with, by bonnet cell. */
 export function stockBonnetVariants(
   engineVariantId: string,
   bodyClass: BodyClass,
   tankCapacity: number,
-): { readonly engine: string; readonly radiator: string; readonly tank: string } {
-  const engine = variant(engineVariantId).engine;
-  return {
-    engine: engineVariantId,
-    radiator: engine ? FACTORY_RADIATOR[preferredRadiatorClass(engine)] : 'radiator_standard',
-    tank: stockTankVariant(bodyClass, tankCapacity),
-  };
+): readonly (string | null)[] {
+  return [engineVariantId, null, 'radiator', stockTankVariant(bodyClass, tankCapacity), 'air_filter'];
 }
 
 /**
- * Factory state for a roadworthy car. The turbine position starts empty: forced
- * induction is optional, while the engine and both reservoirs are required.
- *
- * The radiator is chosen to SUIT THE ENGINE (`preferredRadiatorClass`) rather than
- * being one standard core for every body. A car that left a factory was
- * cooled adequately; the undersized-radiator failure is something the player
- * creates by swapping parts or inherits from a car somebody else has been at.
+ * Factory state for a roadworthy car. The turbocharger position starts empty: forced
+ * induction is something the player finds and fits, while the engine, both
+ * reservoirs and the air filter are required.
  */
 export function createBonnetStorage(
   carId: string,
   engineVariantId: string,
   bodyClass: BodyClass,
   tankCapacity: number,
-  /**
-   * Forces a specific radiator instead of the engine's own class. This is how a
-   * roadside find can arrive with somebody else's bodge already fitted.
-   */
-  radiatorVariantId?: string,
+  /** How worn the fitted air filter already is: a roadside find has been driven. */
+  airFilterClog = 0,
 ): (Item | null)[] {
   const stock = stockBonnetVariants(engineVariantId, bodyClass, tankCapacity);
   return [
-    servicePart(carId, 'engine', stock.engine),
+    servicePart(carId, 'engine', stock[0]!),
     null,
-    servicePart(carId, 'radiator', radiatorVariantId ?? stock.radiator),
-    servicePart(carId, 'fuel-tank', stock.tank),
+    servicePart(carId, 'radiator', stock[2]!),
+    servicePart(carId, 'fuel-tank', stock[3]!),
+    factoryAirFilter(carId, airFilterClog),
   ];
 }
 
@@ -166,18 +151,17 @@ export function normalizeBonnetStorage(cells: readonly (Item | null)[]): (Item |
 }
 
 
-/** Pure service gate shared by simulation and behavioral checks. */
-export function bonnetCanRun(
-  cells: readonly (Item | null)[],
-  fuelLitres: number,
-  fuelKind: FuelType | 'mixed' | null,
-): boolean {
-  const engine = bonnetPart(cells, 0);
+/**
+ * Pure service gate shared by simulation and behavioral checks: an engine, a tank
+ * with fuel in it, and an air filter. A clogged filter still runs (it only costs
+ * power); a missing one does not start.
+ */
+export function bonnetCanRun(cells: readonly (Item | null)[], fuelLitres: number): boolean {
   return (
-    engine !== null &&
+    bonnetPart(cells, 0) !== null &&
     bonnetPart(cells, 3) !== null &&
-    fuelLitres > 0 &&
-    fuelKind === variant(engine.variantId).engine?.fuel
+    bonnetPart(cells, AIR_FILTER_CELL) !== null &&
+    fuelLitres > 0
   );
 }
 
@@ -230,4 +214,14 @@ export function bonnetRadiator(cells: readonly (Item | null)[]): RadiatorSpec | 
  */
 export function bonnetWaterCapacity(cells: readonly (Item | null)[]): number {
   return bonnetRadiator(cells)?.capacity ?? 0;
+}
+
+/** The fitted air filter, or null when the slot is empty. */
+export function bonnetAirFilter(cells: readonly (Item | null)[]): PartInstance | null {
+  return bonnetPart(cells, AIR_FILTER_CELL);
+}
+
+/** Whether the fitted turbocharger is there to boost the engine. */
+export function bonnetHasTurbo(cells: readonly (Item | null)[]): boolean {
+  return bonnetPart(cells, 1) !== null;
 }

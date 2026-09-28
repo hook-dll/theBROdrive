@@ -7,22 +7,21 @@
  * the player's hands, or be fitted into a service cell on a complete car model's
  * anchor point without changing representation.
  *
- * The authored model remains the car body, but engine, turbine, radiator and fuel
- * tank instances occupy typed bonnet cells and carry service capability.
+ * The authored model remains the car body, but engine, turbocharger, radiator, fuel
+ * tank and air filter instances occupy typed bonnet cells and carry service capability.
  * Everything mounted on free-form body anchors remains cosmetic.
  *
  * NETPLAY: every instance carries a stable string id, and nothing here references a
  * renderer object. Both are prerequisites for replication.
  */
 
-export type FuelType = 'petrol' | 'diesel';
-
 export type PartKind =
   | 'engine'
   | 'gearbox'
   | 'radiator'
   | 'fuel_tank'
-  | 'turbine';
+  | 'turbine'
+  | 'air_filter';
 
 export type BodyClass = 'car' | 'truck' | 'bus';
 
@@ -34,14 +33,13 @@ export type BodyClass = 'car' | 'truck' | 'bus';
  * copied here as printed and never adjusted for the model.
  */
 export interface EngineSpec {
-  readonly fuel: FuelType;
   /** Factory net power at `powerPeakRpm`, kW. The curve's power point. */
   readonly peakPowerKw: number;
   /** Crank speed of the rated power. Must be above `torquePeakRpm`. */
   readonly powerPeakRpm: number;
   /** Factory net torque at `torquePeakRpm`, Nm. The curve's torque point. */
   readonly peakTorqueNm: number;
-  /** Crank speed at peak torque. Diesels peak low, which is what makes them torquey. */
+  /** Crank speed at peak torque. */
   readonly torquePeakRpm: number;
   /**
    * The fuel cut: torque fades to zero over the last 150 rpm before it. At or
@@ -50,7 +48,7 @@ export interface EngineSpec {
    */
   readonly redlineRpm: number;
   readonly idleRpm: number;
-  /** Brake-specific fuel consumption, litres per kWh. Diesel is more efficient. */
+  /** Brake-specific fuel consumption, litres per kWh. */
   readonly bsfc: number;
   /**
    * Friction drag per rad/s of crank speed, Nm·s. The factory figures are already
@@ -61,14 +59,9 @@ export interface EngineSpec {
   readonly brakingCoeff: number;
   readonly cylinders: number;
   /**
-   * Exhaust-driven turbocharger. Only the audio reads it (the spool whistle); the
-   * factory figures above already include what the turbo does for power.
-   */
-  readonly turbo?: boolean;
-  /**
    * Cooling profile overrides. Anything omitted is derived by `engineHeat`, so an
    * engine only states what makes it unusual (a lazy Volga four that runs cool, a
-   * truck diesel with a big water jacket).
+   * rally engine that warns early).
    */
   readonly heat?: Partial<EngineHeatSpec>;
 }
@@ -78,7 +71,7 @@ export interface EngineSpec {
  * How hard an engine has to be cooled, and the temperatures it lives between.
  *
  * Authored as an OPTIONAL override on `EngineSpec`: `engineHeat` below derives a
- * balanced profile from the numbers an engine already declares (peak power, fuel,
+ * balanced profile from the numbers an engine already declares (peak power,
  * cylinders), so adding an engine to the catalogue gets a working cooling profile
  * for free and a tuner can override exactly the field they disagree with.
  *
@@ -107,27 +100,16 @@ export interface EngineHeatSpec {
    * decides how long warm-up and cool-down take.
    */
   readonly thermalMassKjPerK: number;
-  /**
-   * Radiator capability this engine needs, kW per kelvin of coolant-to-air
-   * difference. A radiator below it will not hold the temperature under load —
-   * that is the whole fitment mechanic (`radiatorFit` in vehicle/cooling.ts).
-   */
-  readonly coolingRequirementKwPerK: number;
 }
 
-/** Radiator size classes, smallest first. Also the three built meshes. */
-export const RADIATOR_CLASSES = ['small', 'standard', 'large'] as const;
-export type RadiatorClass = (typeof RADIATOR_CLASSES)[number];
-
+/**
+ * The radiator. One core fits every engine and is rated against the engine it cools
+ * (see `radiatorKwPerK` in vehicle/cooling.ts), so the only thing about it the player
+ * manages is the water in it.
+ */
 export interface RadiatorSpec {
-  readonly klass: RadiatorClass;
   /** Water the core and header tank hold together, litres. */
   readonly capacity: number;
-  /**
-   * Heat rejection at full airflow with a full core, kW per kelvin of
-   * coolant-to-air difference. Compare against `coolingRequirementKwPerK`.
-   */
-  readonly coolingKwPerK: number;
 }
 export interface GearboxSpec {
   /** Forward gear ratios, first to top. */
@@ -160,7 +142,7 @@ export interface PartVariant {
   readonly mass: number;
   readonly engine?: EngineSpec;
   readonly gearbox?: GearboxSpec;
-  /** Cooling capability, on radiator variants only. */
+  /** Water capacity, on the radiator only. */
   readonly radiator?: RadiatorSpec;
   /** Fuel tank capacity, litres. */
   readonly capacity?: number;
@@ -191,16 +173,16 @@ export interface SuspensionTuning {
  * ---- the loose-part engines ----
  *
  * Each of these is one real period engine, named in its entry, authored from its
- * maker's published figures. Five used to be generic "a 1.6", "a V8" guesses with
- * no unit behind them, and their numbers disagreed with each other by up to 27%.
+ * maker's published figures. The Soviet pack's own units follow further down; these
+ * are the ones no catalogue body ships with — the Moskvich and IZh units, the UAZ
+ * four, and the imports a player finds on a pallet at a scrapyard and swaps in.
  *
  * `redlineRpm` is the fuel cut. Where the maker states no limiter or red zone it is
  * the rated speed plus about 7%, the margin the VAZ family's own tachometer red zone
- * sits above its rated speed (5600 -> 6000), and a diesel's is its governor's
- * cut-off, about 5% above the rated speed.
+ * sits above its rated speed (5600 -> 6000).
  *
- * `brakingCoeff` is sized to about 10% of peak torque at the fuel cut for a petrol
- * engine and 15% for a diesel (the Soviet driveline note below explains the scale).
+ * `brakingCoeff` is sized to about 10% of peak torque at the fuel cut (the Soviet
+ * driveline note below explains the scale).
  */
 export const ENGINE_VARIANTS: readonly PartVariant[] = [
   {
@@ -213,7 +195,6 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     mass: 118,
     fits: ['car'],
     engine: {
-      fuel: 'petrol',
       peakPowerKw: 56.3,
       powerPeakRpm: 5400,
       peakTorqueNm: 121,
@@ -236,7 +217,6 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     mass: 144,
     fits: ['truck'],
     engine: {
-      fuel: 'petrol',
       peakPowerKw: 49,
       powerPeakRpm: 5800,
       peakTorqueNm: 102,
@@ -258,7 +238,6 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     mass: 170,
     fits: ['car', 'truck'],
     engine: {
-      fuel: 'petrol',
       peakPowerKw: 72.8,
       powerPeakRpm: 4000,
       peakTorqueNm: 201,
@@ -276,11 +255,10 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     // Nissan factory service manual figures quoted by xenonzcar.com.
     id: 'engine_i6_2800',
     kind: 'engine',
-    label: '2.8 inline-six',
+    label: '2.8 Nissan L28E inline-six',
     mass: 186,
     fits: ['car', 'truck'],
     engine: {
-      fuel: 'petrol',
       peakPowerKw: 100.7,
       powerPeakRpm: 5200,
       peakTorqueNm: 195,
@@ -293,53 +271,143 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
-    // Mercedes-Benz OM615 in the W123 200 D, 1976-79: 1.988 litres, 55 PS
-    // (40.5 kW) at 4200 and 113 Nm at 2400, naturally aspirated (automobile-
-    // catalog.com; rpm as Wikipedia gives them for the sister OM615.941). The
-    // governor cuts about 5% over the rated speed.
-    id: 'engine_d4_2000',
+    // BMW M30B30, the carburettor 3.0 of the E3 3.0 S and the E9 3.0 CS (1971-):
+    // 2.985 litres, 180 PS DIN (132 kW) at 6000 and 255 Nm at 3700 (BMW Group
+    // Classic, E9 technical data). Cut at the rated speed plus 7%.
+    id: 'engine_bmw_m30',
     kind: 'engine',
-    label: '2.0 diesel four',
-    mass: 152,
+    label: '3.0 BMW M30 inline-six',
+    mass: 195,
+    fits: ['car'],
+    engine: {
+      peakPowerKw: 132,
+      powerPeakRpm: 6000,
+      peakTorqueNm: 255,
+      torquePeakRpm: 3700,
+      redlineRpm: 6400,
+      idleRpm: 850,
+      bsfc: 0.33,
+      brakingCoeff: 0.038,
+      cylinders: 6,
+    },
+  },
+  {
+    // Ford Cologne 2.8i, the injected V6 of the Capri 2.8 Injection and the Granada
+    // 2.8i (1981): 2.792 litres, 160 PS (118 kW) at 5700 and 221 Nm at 4300 (Ford of
+    // Europe press data, 1981). Cut at 6000.
+    id: 'engine_ford_cologne_v6',
+    kind: 'engine',
+    label: '2.8 Ford Cologne V6',
+    mass: 172,
+    fits: ['car'],
+    engine: {
+      peakPowerKw: 118,
+      powerPeakRpm: 5700,
+      peakTorqueNm: 221,
+      torquePeakRpm: 4300,
+      redlineRpm: 6000,
+      idleRpm: 800,
+      bsfc: 0.34,
+      brakingCoeff: 0.035,
+      cylinders: 6,
+    },
+  },
+  {
+    // Rover V8 3.5 in the SD1 3500 (1976): 3.528 litres, all-aluminium, 155 bhp
+    // (115.6 kW) at 5250 and 198 lb-ft (268 Nm) at 2500 (Rover SD1 brochure, 1976).
+    // Light for its size: the block is the ex-Buick 215 alloy casting.
+    id: 'engine_rover_v8',
+    kind: 'engine',
+    label: '3.5 Rover V8',
+    mass: 150,
     fits: ['car', 'truck'],
     engine: {
-      fuel: 'diesel',
-      peakPowerKw: 40.5,
-      powerPeakRpm: 4200,
-      peakTorqueNm: 113,
-      torquePeakRpm: 2400,
-      redlineRpm: 4400,
-      idleRpm: 680,
-      bsfc: 0.24,
-      brakingCoeff: 0.037,
+      peakPowerKw: 115.6,
+      powerPeakRpm: 5250,
+      peakTorqueNm: 268,
+      torquePeakRpm: 2500,
+      redlineRpm: 5700,
+      idleRpm: 700,
+      bsfc: 0.36,
+      brakingCoeff: 0.045,
+      cylinders: 8,
+    },
+  },
+  {
+    // Chevrolet 350 small-block, L48 four-barrel of 1972, the first year of SAE net
+    // ratings: 5.733 litres, 200 hp (149 kW) at 4400 and 300 lb-ft (407 Nm) at 2800
+    // (Chevrolet 1972 passenger car specifications). A cast-iron lump, and it weighs
+    // like one.
+    id: 'engine_chevy_350',
+    kind: 'engine',
+    label: '5.7 Chevrolet 350 V8',
+    mass: 265,
+    fits: ['car', 'truck'],
+    engine: {
+      peakPowerKw: 149,
+      powerPeakRpm: 4400,
+      peakTorqueNm: 407,
+      torquePeakRpm: 2800,
+      redlineRpm: 5000,
+      idleRpm: 650,
+      bsfc: 0.37,
+      brakingCoeff: 0.078,
+      cylinders: 8,
+    },
+  },
+  {
+    // BMW M10 in the 2002 tii (1971): 1.990 litres with Kugelfischer injection,
+    // 130 PS DIN (96 kW) at 5800 and 181 Nm at 4500 (BMW Group Classic, 2002 tii
+    // technical data). Cut at 6400.
+    id: 'engine_bmw_m10_tii',
+    kind: 'engine',
+    label: '2.0 BMW M10 tii inline-four',
+    mass: 140,
+    fits: ['car'],
+    engine: {
+      peakPowerKw: 96,
+      powerPeakRpm: 5800,
+      peakTorqueNm: 181,
+      torquePeakRpm: 4500,
+      redlineRpm: 6400,
+      idleRpm: 900,
+      bsfc: 0.32,
+      brakingCoeff: 0.027,
       cylinders: 4,
     },
   },
   {
-    // Mercedes-Benz OM366 LA, the turbocharged and intercooled 5.958 litre six of
-    // the late-1980s light trucks and buses: 150 kW (204 hp) at 2600 and 640 Nm at
-    // 1400-1500 (Mercedes-Benz archive, 1987 press kit). A naturally aspirated six
-    // of this size (MAN D0826, 450 Nm) cannot make the torque a truck-diesel slot
-    // is for.
-    id: 'engine_d6_6600',
+    // Cosworth BDA, the belt-driven twin-cam sixteen-valve 1.6 of the 1970 Escort
+    // RS1600: 1.601 litres, 120 PS (88 kW) at 6500 and 152 Nm at 4000 (Ford Motor
+    // Company RS1600 homologation data). Nothing below 3500 and everything above it.
+    id: 'engine_cosworth_bda',
     kind: 'engine',
-    label: '6.0 OM366 diesel six',
-    mass: 402,
-    fits: ['truck', 'bus'],
+    label: '1.6 Cosworth BDA twin-cam four',
+    mass: 112,
+    fits: ['car'],
     engine: {
-      fuel: 'diesel',
-      peakPowerKw: 150,
-      powerPeakRpm: 2600,
-      peakTorqueNm: 640,
-      torquePeakRpm: 1450,
-      redlineRpm: 2750,
-      idleRpm: 560,
-      bsfc: 0.22,
-      brakingCoeff: 0.33,
-      cylinders: 6,
-      turbo: true,
+      peakPowerKw: 88,
+      powerPeakRpm: 6500,
+      peakTorqueNm: 152,
+      torquePeakRpm: 4000,
+      redlineRpm: 7300,
+      idleRpm: 1000,
+      bsfc: 0.35,
+      brakingCoeff: 0.02,
+      cylinders: 4,
     },
   },
+];
+
+/** Imported engines: never factory-fitted to a catalogue body, found at scrapyards. */
+export const IMPORT_ENGINE_IDS: readonly string[] = [
+  'engine_i6_2800',
+  'engine_bmw_m30',
+  'engine_ford_cologne_v6',
+  'engine_rover_v8',
+  'engine_chevy_350',
+  'engine_bmw_m10_tii',
+  'engine_cosworth_bda',
 ];
 
 export const GEARBOX_VARIANTS: readonly PartVariant[] = [
@@ -436,7 +504,9 @@ export const TANK_VARIANTS: readonly PartVariant[] = [
 ];
 
 /**
- * The turbocharger: the one optional service part a bonnet slot takes (cell 1).
+ * The turbocharger: the optional service part in bonnet cell 1. Fitted, it boosts
+ * whatever engine it sits on (see `TURBO_TORQUE_GAIN` in vehicle/drivetrain.ts):
+ * nothing below the spool speed, then up to a third more torque with a short lag.
  *
  * Everything else that used to live beside it — doors, bonnets, bumpers, seats,
  * mirrors, lamps, batteries, exhausts, dashboards and loose wheels — was cosmetic
@@ -449,6 +519,21 @@ const TURBINE_VARIANTS: readonly PartVariant[] = [
     kind: 'turbine',
     label: 'turbocharger',
     mass: 12,
+    fits: ['car', 'truck', 'bus'],
+  },
+];
+
+/**
+ * The air filter: a paper element in bonnet cell 4. It clogs with distance, faster
+ * in a dust storm, and a clogged one starves the engine of air (vehicle/airfilter.ts).
+ * No engine runs without one.
+ */
+const AIR_FILTER_VARIANTS: readonly PartVariant[] = [
+  {
+    id: 'air_filter',
+    kind: 'air_filter',
+    label: 'air filter',
+    mass: 0.8,
     fits: ['car', 'truck', 'bus'],
   },
 ];
@@ -470,7 +555,6 @@ const LADA_VARIANTS: readonly PartVariant[] = [
     mass: 114,
     fits: ['car'],
     engine: {
-      fuel: 'petrol',
       peakPowerKw: 47,
       powerPeakRpm: 5600,
       peakTorqueNm: 87.3,
@@ -550,7 +634,6 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     mass: 165,
     fits: ['car'],
     engine: {
-      fuel: 'petrol',
       peakPowerKw: 51.5,
       powerPeakRpm: 4000,
       peakTorqueNm: 166.7,
@@ -560,7 +643,7 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
       bsfc: 0.35,
       brakingCoeff: 0.037,
       cylinders: 4,
-      heat: { operatingC: 82, coolingRequirementKwPerK: 0.62 },
+      heat: { operatingC: 82 },
     },
   },
   {
@@ -573,7 +656,6 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     mass: 170,
     fits: ['car'],
     engine: {
-      fuel: 'petrol',
       peakPowerKw: 69.9,
       powerPeakRpm: 4500,
       peakTorqueNm: 186.3,
@@ -595,7 +677,6 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     mass: 116,
     fits: ['car'],
     engine: {
-      fuel: 'petrol',
       peakPowerKw: 47,
       powerPeakRpm: 5600,
       peakTorqueNm: 92,
@@ -617,7 +698,6 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     mass: 118,
     fits: ['car'],
     engine: {
-      fuel: 'petrol',
       peakPowerKw: 53.3,
       powerPeakRpm: 5600,
       peakTorqueNm: 104,
@@ -638,7 +718,6 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     mass: 121,
     fits: ['car'],
     engine: {
-      fuel: 'petrol',
       peakPowerKw: 55.5,
       powerPeakRpm: 5400,
       peakTorqueNm: 116,
@@ -660,7 +739,6 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     mass: 116,
     fits: ['car'],
     engine: {
-      fuel: 'petrol',
       peakPowerKw: 47,
       powerPeakRpm: 5600,
       peakTorqueNm: 94,
@@ -681,7 +759,6 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     mass: 118,
     fits: ['car'],
     engine: {
-      fuel: 'petrol',
       peakPowerKw: 51.5,
       powerPeakRpm: 5600,
       peakTorqueNm: 106.4,
@@ -705,7 +782,6 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     mass: 66.5,
     fits: ['car'],
     engine: {
-      fuel: 'petrol',
       peakPowerKw: 21.5,
       powerPeakRpm: 5600,
       peakTorqueNm: 44.1,
@@ -720,16 +796,14 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
   {
     // VAZ-2121: the 2106 block with the Niva's own head and manifolds, 53.7 kW (73 hp)
     // at 5400 and 114 Nm (11.6 kgf·m) at 3400 (autoopt.ru, VAZ-2121 catalogue — the
-    // same page as the car's 132 km/h and 23 s). The 2106 block's 6000 red zone. It
-    // spends its life under load, so it needs the cooling. The transfer case's loss is
-    // the gearbox's efficiency now, not a deduction from this engine.
+    // same page as the car's 132 km/h and 23 s). The 2106 block's 6000 red zone. The
+    // transfer case's loss is the gearbox's efficiency, not a deduction from this engine.
     id: 'engine_niva_1600',
     kind: 'engine',
     label: '1.6 Niva four',
     mass: 125,
     fits: ['car'],
     engine: {
-      fuel: 'petrol',
       peakPowerKw: 53.7,
       powerPeakRpm: 5400,
       peakTorqueNm: 114,
@@ -739,7 +813,6 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
       bsfc: 0.33,
       brakingCoeff: 0.0208,
       cylinders: 4,
-      heat: { coolingRequirementKwPerK: 0.72 },
     },
   },
   {
@@ -752,7 +825,6 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     mass: 128,
     fits: ['car'],
     engine: {
-      fuel: 'petrol',
       peakPowerKw: 58,
       powerPeakRpm: 5200,
       peakTorqueNm: 127,
@@ -762,7 +834,6 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
       bsfc: 0.33,
       brakingCoeff: 0.0227,
       cylinders: 4,
-      heat: { coolingRequirementKwPerK: 0.75 },
     },
   },
   {
@@ -776,7 +847,6 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     mass: 118,
     fits: ['car'],
     engine: {
-      fuel: 'petrol',
       peakPowerKw: 73.5,
       powerPeakRpm: 6400,
       peakTorqueNm: 132,
@@ -786,7 +856,7 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
       bsfc: 0.36,
       brakingCoeff: 0.018,
       cylinders: 4,
-      heat: { warningC: 108, coolingRequirementKwPerK: 0.78 },
+      heat: { warningC: 108 },
     },
   },
 ];
@@ -1033,54 +1103,18 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
 ];
 
 /**
- * Radiators. The one service part whose variants come from three corners of this
- * catalogue: a radiator IS the car's water container, so all three sit in a bonnet
- * slot rather than two of them being cosmetic look-alikes wearing the same name.
- *
- * The three size classes are the whole fitment mechanic. `coolingKwPerK` is heat
- * rejection per kelvin of coolant-to-air difference at full airflow, and an engine
- * states how much of it it needs (`coolingRequirementKwPerK`), so:
- *
- *   small     1.10 kW/K   holds a four-cylinder (needs ~0.7-0.9)
- *   standard  1.65 kW/K   holds a six (needs ~1.5)
- *   large     2.45 kW/K   holds the 6.6 truck diesel (needs ~2.3)
- *
- * Undersizing does not forbid the fit: the engine simply cannot hold temperature
- * under load, which is the failure the player is meant to diagnose. The mass
- * differences are real too, and they already feed chassis mass.
+ * The radiator. One core for every engine: what decides how well an engine is cooled
+ * is how much water is in it (`waterCoolingEffect` in vehicle/cooling.ts), not which
+ * core is bolted in.
  */
 const RADIATOR_VARIANTS: readonly PartVariant[] = [
   {
-    id: 'radiator_small',
-    kind: 'radiator',
-    label: 'small radiator',
-    mass: 7,
-    fits: ['car'],
-    radiator: { klass: 'small', capacity: 5.5, coolingKwPerK: 1.1 },
-  },
-  {
-    id: 'radiator_lada',
-    kind: 'radiator',
-    label: '2102 radiator',
-    mass: 8,
-    fits: ['car'],
-    radiator: { klass: 'small', capacity: 6.5, coolingKwPerK: 1.1 },
-  },
-  {
-    id: 'radiator_standard',
+    id: 'radiator',
     kind: 'radiator',
     label: 'radiator',
     mass: 9,
     fits: ['car', 'truck', 'bus'],
-    radiator: { klass: 'standard', capacity: 9, coolingKwPerK: 1.65 },
-  },
-  {
-    id: 'radiator_copper',
-    kind: 'radiator',
-    label: 'copper radiator',
-    mass: 13,
-    fits: ['car', 'truck', 'bus'],
-    radiator: { klass: 'large', capacity: 13, coolingKwPerK: 2.45 },
+    radiator: { capacity: 9 },
   },
 ];
 
@@ -1090,6 +1124,7 @@ export const ALL_VARIANTS: readonly PartVariant[] = [
   ...TANK_VARIANTS,
   ...RADIATOR_VARIANTS,
   ...TURBINE_VARIANTS,
+  ...AIR_FILTER_VARIANTS,
   ...LADA_VARIANTS,
   ...SOVIET_ENGINE_VARIANTS,
   ...SOVIET_GEARBOX_VARIANTS,
@@ -1103,6 +1138,10 @@ export function variant(id: string): PartVariant {
   return found;
 }
 
+export function hasVariant(id: string): boolean {
+  return VARIANTS_BY_ID.has(id);
+}
+
 export function variantsOfKind(kind: PartKind, bodyClass?: BodyClass): PartVariant[] {
   return ALL_VARIANTS.filter(
     (v) => v.kind === kind && (bodyClass === undefined || v.fits.includes(bodyClass)),
@@ -1113,7 +1152,9 @@ export function variantsOfKind(kind: PartKind, bodyClass?: BodyClass): PartVaria
  * A physical part in the world.
  *
  * `dirt` and `rust` are cosmetic. `destroyed` is the single irreversible service
- * state: only engines acquire it, and no cleaning tool clears it.
+ * state: only engines acquire it, and no cleaning tool clears it. `clog` is the air
+ * filter's own wear, which no cleaning tool clears either: a clogged element is
+ * replaced.
  *
  * `litres` is what a DETACHED container is carrying. While a container is fitted,
  * the car owns the level (`CarState.waterLitres`, `oilLitres`, `fuelLitres`) because
@@ -1132,8 +1173,8 @@ export interface PartInstance {
   destroyed?: boolean;
   /** Litres inside this container while it is detached. Absent means dry/not a container. */
   litres?: number;
-  /** Which fuel a detached tank holds. Mixed is the mis-fuelled tank the engine refuses. */
-  fuelKind?: FuelType | 'mixed' | null;
+  /** Air filters only: how clogged the element is, 0 new .. 1 worn out (may run past 1). */
+  clog?: number;
 }
 
 /** Coarse dirt a brush can shift; below this only a sponge helps. */
@@ -1183,8 +1224,7 @@ export function applySponge(part: PartInstance, dt: number): boolean {
  * Derived from cylinder count rather than authored per engine: a bigger engine
  * holds more, and the relationship is close enough to linear that a table would
  * only be six numbers restating this. Water is NOT here — it belongs to the fitted
- * radiator (`RadiatorSpec.capacity`), because which radiator is bolted in is what
- * decides how much water the car can hold.
+ * radiator (`RadiatorSpec.capacity`).
  */
 export function oilCapacity(engine: EngineSpec): number {
   return 1.4 + engine.cylinders * 0.65;
@@ -1202,11 +1242,8 @@ export function oilCapacity(engine: EngineSpec): number {
  *  - Thermal mass is the iron and the water together, and it alone sets how long
  *    warm-up takes: 30 kJ/K on a four gives about a minute and a half of cruising
  *    from a cold desert morning to 90 C.
- *  - The cooling requirement is full-load heat divided by the ~62 K rise a radiator
- *    is expected to hold at cruise, which is what maps the six engines onto the
- *    three radiator classes.
- *  - Diesels run hotter and tolerate more before they let go, exactly as the
- *    thresholds below say.
+ *  - The radiator is rated against this heat, so every engine is cooled with the same
+ *    margin when the core is full (see vehicle/cooling.ts).
  *
  * Cached per spec object: the profile is pure, and the fixed step asks for it every
  * tick for every live car.
@@ -1217,22 +1254,20 @@ export function engineHeat(engine: EngineSpec): EngineHeatSpec {
   const cached = heatCache.get(engine);
   if (cached) return cached;
 
-  const diesel = engine.fuel === 'diesel';
-  const loadHeatKw = engine.peakPowerKw * (diesel ? 0.78 : 0.85);
+  const loadHeatKw = engine.peakPowerKw * 0.85;
   const idleHeatKw = engine.peakPowerKw * 0.05;
   const rpmHeatKw = engine.peakPowerKw * 0.1;
   const derived: EngineHeatSpec = {
-    operatingC: diesel ? 95 : 90,
-    optimalMinC: diesel ? 80 : 75,
-    optimalMaxC: diesel ? 110 : 105,
-    warningC: diesel ? 115 : 110,
-    criticalC: diesel ? 135 : 125,
-    maxC: diesel ? 155 : 140,
+    operatingC: 90,
+    optimalMinC: 75,
+    optimalMaxC: 105,
+    warningC: 110,
+    criticalC: 125,
+    maxC: 140,
     idleHeatKw,
     loadHeatKw,
     rpmHeatKw,
     thermalMassKjPerK: 12 + engine.cylinders * 4.5 + engine.peakPowerKw * 0.06,
-    coolingRequirementKwPerK: (idleHeatKw + loadHeatKw + rpmHeatKw) / 62,
     ...engine.heat,
   };
   heatCache.set(engine, derived);
@@ -1249,8 +1284,8 @@ export function engineHeat(engine: EngineSpec): EngineHeatSpec {
  * can hold in their head while POIs sit every 1.2 km.
  *
  * Water has no flat rate any more. It boils off as a function of temperature (see
- * `WATER_BOIL_LPH_PER_K` in vehicle/cooling.ts), which is what makes a mismatched
- * radiator cost water as well as power.
+ * `WATER_BOIL_LPH_PER_K` in vehicle/cooling.ts), which is what makes a low radiator
+ * cost water faster the lower it gets.
  */
 export const OIL_LOSS_LPH = 2.1;
 
@@ -1264,7 +1299,6 @@ export interface CarStats {
   readonly mass: number;
   readonly engine: EngineSpec;
   readonly gearbox: GearboxSpec;
-  readonly fuel: FuelType;
   readonly tankCapacity: number;
   readonly wheelCount: number;
   /** Tyre grip multiplier on the surface's friction. */

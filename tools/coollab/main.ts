@@ -1,9 +1,9 @@
 /**
- * Cooling viewer: the four radiator meshes and the temperature gauge's five zones.
+ * Cooling viewer: the radiator mesh and the temperature gauge's five zones.
  *
- * Both are things only an eye can check. The radiators must be separable at a glance
- * in the inventory strip and in a bonnet slot, and the gauge's zone colours have to
- * be readable at dashboard size against the road behind them — neither is something
+ * Both are things only an eye can check. The radiator has to read as a radiator in
+ * the inventory strip and in a bonnet slot, and the gauge's zone colours have to be
+ * readable at dashboard size against the road behind them — neither is something
  * `tools/cooling.ts` can assert.
  *
  * Serve the dev server and open `/tools/coollab/`. Click to advance the gauge
@@ -15,7 +15,7 @@ import { variant } from '../../src/parts/registry';
 import { Hud } from '../../src/ui/hud';
 import type { CoolingZone } from '../../src/vehicle/cooling';
 
-const RADIATORS = ['radiator_small', 'radiator_lada', 'radiator_standard', 'radiator_copper'];
+const RADIATORS = ['radiator'];
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -44,7 +44,7 @@ renderer.render(scene, camera);
 const hint = document.getElementById('hint')!;
 hint.textContent = RADIATORS.map((id) => {
   const spec = variant(id).radiator!;
-  return `${variant(id).label}: ${spec.klass}, ${spec.capacity} L, ${spec.coolingKwPerK} kW/K`;
+  return `${variant(id).label}: ${spec.capacity} L`;
 }).join('\n');
 hint.style.whiteSpace = 'pre';
 

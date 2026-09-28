@@ -13,10 +13,8 @@
   --hud-border: rgba(232, 221, 196, 0.28);
   --hud-alarm: #e07a4a;              /* warm rust, legible on sand and night */
   --hud-alarm-strong: #d4552f;
-  /* Diesel marker. Deliberately the same yellow the diesel CAN is painted in
-     (0xc9a227 in render/partmesh.ts), so the badge in the spawner and the can
-     lying on a forecourt teach each other. */
-  --hud-diesel: #c9a227;
+  /* Amber: the check-engine lamp and the touch controls' accents. */
+  --hud-amber: #c9a227;
   --hud-lcd-off: rgba(224, 122, 74, 0.1);
   /* INSTRUMENT FACES, as properties rather than fills, because the autopilot paints
      them: black is the player's own car and a coloured face is a car driving itself.
@@ -513,7 +511,7 @@ body.is-cinematic #ui {
 }
 
 .hud-check-engine {
-  color: var(--hud-diesel);
+  color: var(--hud-amber);
 }
 
 .hud-oil-warning {
@@ -1704,22 +1702,6 @@ body.is-cinematic #ui {
   border-color: var(--menu-stock);
 }
 
-/* Diesel badge: the one thing in the row that changes which cans you can pour,
-   so it is filled while its neighbour is outlined. */
-.menu-body-fuel {
-  flex: 0 0 auto;
-  min-width: 18px;
-  text-align: center;
-  font-family: var(--menu-mono);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: #1d1810;
-  background: var(--hud-diesel);
-  border: 1px solid var(--hud-diesel);
-  padding: 2px 5px;
-}
-
 .menu-paints {
   display: flex;
   flex-wrap: wrap;
@@ -1876,7 +1858,7 @@ body.is-cinematic #ui {
   height: 15px;
   transform: translateX(-50%);
   border-radius: 2px;
-  background: var(--hud-diesel);
+  background: var(--hud-amber);
 }
 
 .touch-wheel.is-active .touch-wheel-rim {

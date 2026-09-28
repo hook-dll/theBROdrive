@@ -12,12 +12,19 @@ import type {
 } from '../game/state';
 import { COLD_SOAK_C } from '../vehicle/cooling';
 import { sanitizeSettings } from '../game/settings';
-import { variant, type PartInstance } from '../parts/registry';
+import { hasVariant, type PartInstance } from '../parts/registry';
 import { CAMERA_FRAME_LIMIT, type Item } from '../items/items';
 import { isStickerKind, STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
-import { createBonnetStorage, normalizeBonnetStorage, BONNET_SLOT_COUNT } from '../vehicle/bonnet';
+import {
+  AIR_FILTER_CELL,
+  createBonnetStorage,
+  factoryAirFilter,
+  normalizeBonnetStorage,
+  BONNET_SLOT_COUNT,
+} from '../vehicle/bonnet';
 import { carModel, DEFAULT_CAR_MODEL_ID, hasCarModel } from '../vehicle/carmodels';
 import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
+import { carPaintSwatch, type CarPaint } from '../vehicle/carpaint';
 
 /**
  * Save files, as both IndexedDB records and shareable text codes.
@@ -439,7 +446,13 @@ export function migrateState(raw: unknown): WorldState {
 
   const looseParts: Record<string, { part: PartInstance; x: number; y: number; z: number }> = {};
   for (const [id, value] of Object.entries(loosePartsRaw)) {
-    looseParts[id] = migrateLoosePart(asRecord(value, `loose part "${id}"`));
+    const raw = asRecord(value, `loose part "${id}"`);
+    // A part whose variant left the catalogue (the diesel engines) is dropped with it.
+    try {
+      looseParts[id] = migrateLoosePart(raw);
+    } catch {
+      continue;
+    }
   }
 
   const looseItems: Record<string, { item: Item; x: number; y: number; z: number }> = {};
@@ -536,6 +549,20 @@ function migrateStorage(raw: unknown, cells: number, where: string): (Item | nul
   return storage;
 }
 
+/** A saved respray, or null (factory colour) when absent or not three numbers. */
+function migrateCarPaint(raw: unknown): CarPaint | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const obj = raw as Record<string, unknown>;
+  const colour = (value: unknown): number | null =>
+    typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 0xffffff
+      ? value
+      : null;
+  const base = colour(obj.base);
+  const coat = colour(obj.coat);
+  if (base === null || coat === null) return null;
+  return { base, coat, cover: clamp01(numOr(obj.cover, 1)) };
+}
+
 
 function migrateCar(raw: Record<string, unknown>): CarState {
   if (typeof raw.id !== 'string') throw new Error('Save data is malformed: car is missing an id');
@@ -588,14 +615,13 @@ function migrateCar(raw: Record<string, unknown>): CarState {
   const bonnet = raw.bonnet === undefined
     ? defaultBonnet
     : normalizeBonnetStorage(migrateStorage(raw.bonnet, BONNET_SLOT_COUNT, `car "${raw.id}" bonnet`));
-  const savedFuelKind =
-    raw.fuelKind === 'petrol' || raw.fuelKind === 'diesel' || raw.fuelKind === 'mixed'
-      ? raw.fuelKind
-      : null;
+  // A bonnet saved before the air filter had its cell gets the factory filter: the car
+  // ran without one only because the game did not model it.
+  if (Array.isArray(raw.bonnet) && raw.bonnet.length <= AIR_FILTER_CELL) {
+    bonnet[AIR_FILTER_CELL] = factoryAirFilter(raw.id);
+  }
+  // There is one fuel. A tank saved holding diesel or a mixture keeps its litres as it.
   const fuelLitres = Math.max(0, numOr(raw.fuelLitres, 0));
-  const fuelKind = fuelLitres > 0
-    ? savedFuelKind ?? variant(def.engineId).engine?.fuel ?? null
-    : null;
 
   const headlightMode: HeadlightMode =
     raw.headlightMode === 'low' || raw.headlightMode === 'high' ? raw.headlightMode : 'off';
@@ -610,7 +636,6 @@ function migrateCar(raw: Record<string, unknown>): CarState {
     taillightsOn,
     reverseLightsOn,
     fuelLitres,
-    fuelKind,
     // `coolantLitres` is the pre-rename tag for the same reservoir (now the
     // radiator's water), so an old save keeps exactly what it had in it.
     waterLitres: Math.max(0, numOr(raw.waterLitres ?? raw.coolantLitres, 0)),
@@ -627,6 +652,8 @@ function migrateCar(raw: Record<string, unknown>): CarState {
     // parked it, the game just was not looking.
     dirt: clamp01(numOr(raw.dirt, 0)),
     scratches: clamp01(numOr(raw.scratches, 0)),
+    // Absent on every save written before spray paint: the factory colour.
+    paint: migrateCarPaint(raw.paint),
     // `dents` (shell deformation) and the older `damage` list (shader marks) are both
     // removed systems; a save that carries either loads the car straight.
     odometer: numOr(raw.odometer, 0),
@@ -641,35 +668,44 @@ function migrateCar(raw: Record<string, unknown>): CarState {
 }
 
 /**
- * Legacy variant ids. The coolant tank became the radiator it always was, and
- * `variant()` throws on an id it does not know — so an unmapped save would fail to
- * load rather than lose one part.
+ * Legacy variant ids. The coolant tank became the radiator it always was, and the
+ * four radiator sizes became the one radiator. `variant()` throws on an id it does not
+ * know — so an unmapped save would fail to load rather than lose one part.
  */
 const LEGACY_VARIANT_IDS: Readonly<Record<string, string>> = {
-  coolant_tank_standard: 'radiator_standard',
+  coolant_tank_standard: 'radiator',
+  radiator_small: 'radiator',
+  radiator_lada: 'radiator',
+  radiator_standard: 'radiator',
+  radiator_copper: 'radiator',
 };
 
+/**
+ * Throws on a variant the catalogue no longer has (the diesel engines went with the
+ * fuel), so every caller drops that one part rather than the save: storage cells
+ * catch it per cell, loose parts per part, carried items through `isRemovedLegacyItem`.
+ */
 function migratePart(raw: unknown, where: string): PartInstance {
   const obj = asRecord(raw, `part at ${where}`);
   if (typeof obj.id !== 'string' || typeof obj.variantId !== 'string') {
     throw new Error(`Save data is malformed: part at ${where} is missing id/variantId`);
   }
-  const fuelKind =
-    obj.fuelKind === 'petrol' || obj.fuelKind === 'diesel' || obj.fuelKind === 'mixed'
-      ? obj.fuelKind
-      : null;
-  const litres = Math.max(0, numOr(obj.litres, 0));
-  return {
+  const variantId = LEGACY_VARIANT_IDS[obj.variantId] ?? obj.variantId;
+  if (!hasVariant(variantId)) {
+    throw new Error(`Save data names a removed part at ${where}: ${variantId}`);
+  }
+  const part: PartInstance = {
     id: obj.id,
-    variantId: LEGACY_VARIANT_IDS[obj.variantId] ?? obj.variantId,
+    variantId,
     dirt: numOr(obj.dirt, 0),
     rust: numOr(obj.rust, 0),
     destroyed: obj.destroyed === true || undefined,
     // Absent on every save written before a detached container held its fluid. Those
     // parts load dry, which is what the old game modelled anyway.
-    litres,
-    fuelKind: litres > 0 ? fuelKind : null,
+    litres: Math.max(0, numOr(obj.litres, 0)),
   };
+  if (variantId === 'air_filter') part.clog = Math.max(0, numOr(obj.clog, 0));
+  return part;
 }
 
 function migrateLoosePart(raw: Record<string, unknown>): { part: PartInstance; x: number; y: number; z: number } {
@@ -695,12 +731,23 @@ function migrateLooseItem(raw: Record<string, unknown>): { item: Item; x: number
  * runtime representation, so retaining the rest of the save is safer than
  * failing the whole load. The hand winch's anchors and constraint were removed
  * with the mechanic; converting it to an unrelated item would invent progress.
+ * The wrench never had an action of its own and was taken out of the loot. Diesel
+ * went with every diesel engine: its cans, and any engine part that is no longer in
+ * the catalogue, are dropped.
  */
 function isRemovedLegacyItem(raw: unknown): boolean {
-  return typeof raw === 'object'
-    && raw !== null
-    && !Array.isArray(raw)
-    && (raw as Record<string, unknown>).type === 'hand_winch';
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return false;
+  const obj = raw as Record<string, unknown>;
+  if (obj.type === 'hand_winch') return true;
+  if (obj.type === 'tool' && obj.tool === 'wrench') return true;
+  if ((obj.type === 'fluid_can' && obj.fluid === 'diesel') || (obj.type === 'fuel_can' && obj.fuel === 'diesel')) {
+    return true;
+  }
+  if (obj.type === 'part' && typeof obj.part === 'object' && obj.part !== null) {
+    const variantId = (obj.part as Record<string, unknown>).variantId;
+    return typeof variantId === 'string' && !hasVariant(LEGACY_VARIANT_IDS[variantId] ?? variantId);
+  }
+  return false;
 }
 
 function migrateItem(raw: unknown, where: string): Item {
@@ -711,21 +758,21 @@ function migrateItem(raw: unknown, where: string): Item {
   switch (obj.type) {
     case 'tool': {
       const tool = obj.tool;
-      if (tool !== 'brush' && tool !== 'sponge' && tool !== 'wrench') {
+      if (tool !== 'brush' && tool !== 'sponge') {
         throw new Error(`Save data is malformed: item at ${where} has an invalid tool`);
       }
       return { type: 'tool', id: obj.id, tool, integrity: numOr(obj.integrity, 1) };
     }
     case 'part':
       return { type: 'part', id: obj.id, part: migratePart(obj.part, `item at ${where}`) };
-    // `fuel_can` is the pre-fluids tag. Petrol and diesel were the only two kinds
-    // then, so an old can maps straight across and keeps its contents.
+    // `fuel_can` is the pre-fluids tag; its petrol maps straight across and keeps its
+    // contents (diesel ones are dropped above, by `isRemovedLegacyItem`).
     case 'fuel_can':
     case 'fluid_can': {
       const saved = obj.type === 'fuel_can' ? obj.fuel : obj.fluid;
       // `coolant` is the pre-rename tag for the same green can, now water.
       const fluid = saved === 'coolant' ? 'water' : saved;
-      if (fluid !== 'petrol' && fluid !== 'diesel' && fluid !== 'water' && fluid !== 'oil') {
+      if (fluid !== 'petrol' && fluid !== 'water' && fluid !== 'oil') {
         throw new Error(`Save data is malformed: item at ${where} has an invalid fluid`);
       }
       return {
@@ -735,6 +782,13 @@ function migrateItem(raw: unknown, where: string): Item {
         capacity: numOr(obj.capacity, 0),
         litres: numOr(obj.litres, 0),
       };
+    }
+    case 'spray_can': {
+      const paint = obj.paint;
+      if (typeof paint !== 'number' || carPaintSwatch(paint) === undefined) {
+        throw new Error(`Save data is malformed: spray can at ${where} has an invalid paint`);
+      }
+      return { type: 'spray_can', id: obj.id, paint, charge: clamp01(numOr(obj.charge, 1)) };
     }
     case 'weapon': {
       const weapon = obj.weapon;

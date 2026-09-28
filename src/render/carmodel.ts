@@ -37,6 +37,11 @@ import {
   type CarModelDef,
   type CarModelFit,
 } from '../vehicle/carmodels';
+import {
+  appearanceHash,
+  factoryPaintHex,
+  secondaryFactoryPaintHex,
+} from '../vehicle/carpaint';
 
 /**
  * DEV-only A/B switch for the unified car style: `?carstyle=unified`, alongside any
@@ -229,55 +234,15 @@ async function loadScene(file: string): Promise<THREE.Group> {
   return scene;
 }
 
-/** Curated factory colours shared by both imported packs. */
-const CAR_PAINT_COLORS: readonly number[] = [
-  0x4078a2, // deep blue
-  0x85b5cd, // powder blue
-  0x40776b, // dark teal
-  0x88a28c, // sage
-  0xa34e43, // oxide red
-  0xcf794c, // burnt orange
-  0xd8b754, // ochre
-  0xe2ddcc, // ivory
-  0xb0a58e, // beige
-  0x846e8e, // plum
-  0x7d8e9f, // slate
-  0x444b52, // charcoal
-];
 const paintScratch = new THREE.Color();
 const secondaryPaintScratch = new THREE.Color();
 
-/**
- * Stable string avalanche: a saved/generated car keeps its colour and its wear
- * pattern across reloads.
- */
-function appearanceHash(modelId: string, appearanceKey: string): number {
-  let h = 0x811c9dc5;
-  const key = `${modelId}:${appearanceKey}`;
-  for (let i = 0; i < key.length; i++) {
-    h = Math.imul(h ^ key.charCodeAt(i), 0x01000193);
-  }
-  h ^= h >>> 16;
-  h = Math.imul(h, 0x85ebca6b);
-  h ^= h >>> 13;
-  h = Math.imul(h, 0xc2b2ae35);
-  h ^= h >>> 16;
-  return h >>> 0;
-}
-
 function paintColorFor(modelId: string, appearanceKey: string): THREE.Color {
-  const h = appearanceHash(modelId, appearanceKey);
-  return paintScratch.setHex(CAR_PAINT_COLORS[h % CAR_PAINT_COLORS.length]!);
+  return paintScratch.setHex(factoryPaintHex(modelId, appearanceKey));
 }
 
 function secondaryPaintColorFor(modelId: string, appearanceKey: string): THREE.Color {
-  const h = appearanceHash(modelId, appearanceKey);
-  const primaryIndex = h % CAR_PAINT_COLORS.length;
-  // Skip neighbouring swatches: they can read as one paint under desert sunlight.
-  const offset = 3 + ((h >>> 8) % (CAR_PAINT_COLORS.length - 5));
-  return secondaryPaintScratch.setHex(
-    CAR_PAINT_COLORS[(primaryIndex + offset) % CAR_PAINT_COLORS.length]!,
-  );
+  return secondaryPaintScratch.setHex(secondaryFactoryPaintHex(modelId, appearanceKey));
 }
 
 function isRandomPaintMesh(mesh: THREE.Mesh, def: CarModelDef): boolean {

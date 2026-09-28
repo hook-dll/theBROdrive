@@ -5,8 +5,9 @@ import { DEFAULT_POI_SPACING_METRES } from '../game/settings';
 import { SurfaceType } from '../core/surfaces';
 import { ROAD_LENGTH, type Road } from './road';
 import type { CarState, GameWorld } from '../game/state';
-import { oilCapacity, variant, type FuelType } from '../parts/registry';
-import type { FluidCanItem, FluidKind, ToolItem, ToolKind } from '../items/items';
+import { IMPORT_ENGINE_IDS, oilCapacity, variant, type PartInstance } from '../parts/registry';
+import type { FluidCanItem, FluidKind, SprayCanItem, ToolItem, ToolKind } from '../items/items';
+import { CAR_PAINTS } from '../vehicle/carpaint';
 import { makeFlatMaterial } from '../render/materials';
 import {
   carModelMeasure,
@@ -560,22 +561,9 @@ function makeFluidCan(
  * water and oil are the ones they only think about every 150 km or so, so they
  * turn up often enough to be findable and rarely enough to be worth a detour. Small
  * cans for the engine fluids, because that is how they are sold.
- *
- * The petrol/diesel split is no longer matched to the CATALOGUE: since the pack that
- * ran on diesel was dropped, no catalogue body ships with it. The two diesel engines
- * in `parts/registry.ts` are parts a player can fit, so a diesel can is for a car
- * somebody has already converted — which is why it stays a rarity here rather than a
- * share of the fleet.
- *
- * The first cut had diesel at 0.26 against petrol's 0.40, which oversupplied it
- * about two to one: a quarter of every can in the desert would have been unusable
- * to five players out of six. The split below keeps diesel rare but findable, so a
- * diesel driver is not starved by bad luck, without littering the road with cans
- * nobody can pour.
  */
 const FLUID_STOCK: readonly { fluid: FluidKind; weight: number; capacity: number }[] = [
-  { fluid: 'petrol', weight: 0.5, capacity: 20 },
-  { fluid: 'diesel', weight: 0.15, capacity: 20 },
+  { fluid: 'petrol', weight: 0.65, capacity: 20 },
   { fluid: 'water', weight: 0.19, capacity: 5 },
   { fluid: 'oil', weight: 0.16, capacity: 5 },
 ];
@@ -604,17 +592,88 @@ function makeTool(
   };
 }
 
+/**
+ * A service part left out front: a boxed air filter on a shop step, a turbocharger or
+ * an engine on a pallet at a breaker's yard. Engines come dry, like everything pulled
+ * from a wreck, and weathered; filters come new in their box.
+ */
+function stockPart(
+  ctx: ChunkContext,
+  poi: Poi,
+  yard: Yard,
+  loose: LoosePartField,
+  counter: LootCounter,
+  variantId: string,
+  across: number,
+  out: number,
+): void {
+  const sub = counter.sub++;
+  const id = ctx.world.generatedPartId('poi_item', poi.index, sub);
+  const kind = variant(variantId).kind;
+  const salvaged = kind === 'engine' || kind === 'turbine';
+  const part: PartInstance = {
+    id,
+    variantId,
+    dirt: salvaged ? 0.3 + hash01(poi.variantSeed, sub, 61) * 0.5 : 0,
+    rust: salvaged ? 0.1 + hash01(poi.variantSeed, sub, 62) * 0.4 : 0,
+  };
+  if (kind === 'air_filter') part.clog = 0;
+  const p = yardPoint(ctx, poi, yard, across, out);
+  loose.spawn(part, p.x, p.y + (kind === 'engine' ? 0.45 : 0.25), p.z);
+}
 
-const TOOL_KINDS: readonly ToolKind[] = ['brush', 'sponge', 'wrench'];
+/**
+ * The breaker's-yard finds, by chance per stop: an imported engine to swap in, a
+ * turbocharger to bolt on, a new air filter.
+ */
+function stockSalvageParts(
+  ctx: ChunkContext,
+  poi: Poi,
+  yard: Yard,
+  loose: LoosePartField,
+  counter: LootCounter,
+  engineChance: number,
+  turboChance: number,
+  filterChance: number,
+): void {
+  if (hash01(poi.variantSeed, 63) < engineChance) {
+    const engineId = pick(IMPORT_ENGINE_IDS, poi.variantSeed, 64);
+    stockPart(ctx, poi, yard, loose, counter, engineId, 0.7, 1.7);
+  }
+  if (hash01(poi.variantSeed, 65) < turboChance) {
+    stockPart(ctx, poi, yard, loose, counter, 'turbine_standard', -0.55, 1.5);
+  }
+  if (hash01(poi.variantSeed, 66) < filterChance) {
+    stockPart(ctx, poi, yard, loose, counter, 'air_filter', 0.1, 0.6);
+  }
+}
+
+/**
+ * A spray can left on a bench: any factory colour, rarely full, because a found can
+ * is somebody's leftover from a touch-up.
+ */
+function makeSprayCan(world: GameWorld, poi: Poi, counter: LootCounter): SprayCanItem {
+  const sub = counter.sub++;
+  return {
+    type: 'spray_can',
+    id: world.generatedPartId('poi_item', poi.index, sub),
+    paint: pick(CAR_PAINTS, poi.variantSeed, 43 + sub).hex,
+    charge: 0.45 + hash01(poi.variantSeed, sub, 44) * 0.55,
+  };
+}
+
+/** What turns up about a yard: the two cleaning tools and, as often, a spray can. */
+const YARD_FINDS: readonly (ToolKind | 'spray_can')[] = ['brush', 'sponge', 'spray_can'];
 
 // ---------------------------------------------------------------------------
 // Kind builders. Each builds its scenery unconditionally and its loot only when
 // `shouldLoot` is set, so an emptied POI keeps its structure but never restocks.
 //
-// POIs no longer shed loose vehicle parts. Scattering wheels, engines, bumpers
-// and seats down the whole road littered the world with scrap that had to be
-// picked up one by one, so loot is now tools and fuel cans only. Wrecks remain
-// static scenery and nothing falls off them — do not re-add part spawns here.
+// POIs do not shed loose vehicle scrap. Scattering wheels, bumpers and seats down the
+// whole road littered the world with things that had to be picked up one by one and
+// fitted nowhere. What a stop gives is tools, cans, and the few service parts worth a
+// detour (`stockSalvageParts`): an air filter now and then, and at a breaker's yard a
+// turbocharger or an imported engine on a pallet. Wrecks remain static scenery.
 // ---------------------------------------------------------------------------
 
 /**
@@ -742,8 +801,10 @@ function stockTools(
   count: number,
 ): void {
   for (let i = 0; i < count; i++) {
-    const tool = pick(TOOL_KINDS, poi.variantSeed, 98 + i);
-    const item = makeTool(ctx.world, poi, tool, counter);
+    const find = pick(YARD_FINDS, poi.variantSeed, 98 + i);
+    const item = find === 'spray_can'
+      ? makeSprayCan(ctx.world, poi, counter)
+      : makeTool(ctx.world, poi, find, counter);
     const tp = yardPoint(
       ctx,
       poi,
@@ -794,12 +855,19 @@ function grantStockLoot(
       stockFluidCans(ctx, poi, yard, loose, counter, 3 + Math.floor(hash01(poi.variantSeed, 30) * 4));
       stockGum(ctx, poi, yard, loose, counter);
       stockTrailer(ctx, poi, yard, trailers);
+      // A forecourt sells filters.
+      if (hash01(poi.variantSeed, 67) < 0.3) {
+        stockPart(ctx, poi, yard, loose, counter, 'air_filter', 0.1, 0.6);
+      }
       break;
     case 'store':
       stockTools(ctx, poi, yard, loose, counter, 1 + Math.floor(hash01(poi.variantSeed, 96) * 3));
       stockGum(ctx, poi, yard, loose, counter);
       if (hash01(poi.variantSeed, 97) < 0.5) {
         stockFluidCans(ctx, poi, yard, loose, counter, 1 + Math.floor(hash01(poi.variantSeed, 95) * 2));
+      }
+      if (hash01(poi.variantSeed, 68) < 0.45) {
+        stockPart(ctx, poi, yard, loose, counter, 'air_filter', 0.1, 0.6);
       }
       break;
     case 'home':
@@ -809,10 +877,11 @@ function grantStockLoot(
       if (hash01(poi.variantSeed, 93) < 0.35) stockFluidCans(ctx, poi, yard, loose, counter, 1);
       break;
     case 'salvage':
-      // Cars are broken down here and their trunks are worth opening; the field itself is
-      // laid out by `buildWrecks`.
+      // Cars are broken down here: the field itself is laid out by `buildWrecks`, and
+      // what came out of them stands by the front.
       stockTools(ctx, poi, yard, loose, counter, 1 + Math.floor(hash01(poi.variantSeed, 92) * 2));
       if (hash01(poi.variantSeed, 91) < 0.4) stockFluidCans(ctx, poi, yard, loose, counter, 1);
+      stockSalvageParts(ctx, poi, yard, loose, counter, 0.3, 0.2, 0.4);
       break;
     case 'mast':
       // A maintenance site: tools, and the fuel for whatever got you up there.
@@ -821,6 +890,7 @@ function grantStockLoot(
       break;
     case 'scrap':
       stockTools(ctx, poi, yard, loose, counter, 1 + Math.floor(hash01(poi.variantSeed, 89) * 2));
+      stockSalvageParts(ctx, poi, yard, loose, counter, 0.25, 0.15, 0.3);
       break;
   }
 }
@@ -1133,17 +1203,14 @@ function makeWorkingCar(
   const engine = variant(def.engineId).engine;
   const halfYaw = yaw / 2;
   const carId = ctx.world.generatedPartId('poi-car', poi.index, slot);
-  // One roadside find in four has had its radiator replaced with the cheapest core
-  // that would bolt on. It drives away fine and then will not hold temperature on a
-  // climb, which is exactly the diagnosis this system exists to make possible — and
-  // it is why radiators are worth looking for in wrecks.
-  const bodged = hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 9) < 0.25;
+  // A roadside find has been driven, and its air filter shows it: anywhere from
+  // freshly changed to well overdue, so some finds want a filter before a long leg.
   const bonnet = createBonnetStorage(
     carId,
     def.engineId,
     def.bodyClass,
     def.tankLitres,
-    bodged ? 'radiator_small' : undefined,
+    0.1 + hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 9) * 0.85,
   );
   return {
     id: carId,
@@ -1156,9 +1223,9 @@ function makeWorkingCar(
     // say somebody else drove it badly, not enough to look like salvage.
     dirt: 0.7 + hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 7) * 0.25,
     scratches: 0.25 + hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 8) * 0.3,
+    paint: null,
     // Enough fuel to make the find immediately useful, but not a free full tank.
     fuelLitres: def.tankLitres * (0.15 + hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 3) * 0.2),
-    fuelKind: engine?.fuel ?? null,
     // Part-topped, like the fuel: enough water to set off, little enough that a hot
     // afternoon makes the level worth a look before a long leg.
     waterLitres:

@@ -111,11 +111,11 @@ async function preloadModels(): Promise<void> {
 }
 
 function part(id: string) {
-  return { id, variantId: 'radiator_standard', dirt: 0.2, rust: 0.1 };
+  return { id, variantId: 'radiator', dirt: 0.2, rust: 0.1 };
 }
 
 function tool(id: string): Item {
-  return { type: 'tool', id, tool: 'wrench', integrity: 0.85 };
+  return { type: 'tool', id, tool: 'brush', integrity: 0.85 };
 }
 
 function trailer(id: string, x: number, y: number, z: number): TrailerState {

@@ -1087,6 +1087,22 @@ export function setCarBodyPalettePaint(
 }
 
 /**
+ * Resprays one car: every paint material it was instanced with takes `color`. An
+ * atlas body swaps its paint cell's replacement colour, a solid-paint body its
+ * material colour; glass, lamps and trim were never in the list.
+ */
+export function setCarBodyPaintColor(paint: readonly THREE.Material[], color: THREE.Color): void {
+  for (const material of paint) {
+    const uniforms = carBodyUniforms.get(material);
+    if (uniforms !== undefined && uniforms.palettePaint.value > 0) {
+      uniforms.paintColor.value.copy(color);
+    } else if (material instanceof THREE.MeshStandardMaterial) {
+      material.color.copy(color);
+    }
+  }
+}
+
+/**
  * Writes one car's shell dirt and scratches into the paint materials it was
  * instanced with. Uniform writes into handles captured once, so a car driving
  * through dust can call this every frame without walking its scene graph.

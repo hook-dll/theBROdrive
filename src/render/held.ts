@@ -333,17 +333,20 @@ export class HeldItemView {
       pitch += this.useT * 0.08;
     } else if (item?.type === 'tool') {
       this.useT = ramp(this.useT, use, USE_RAMP, d);
-      if (item.tool === 'brush' || item.tool === 'sponge') {
-        // A visible back-and-forth scrubbing stroke.
-        if (use) this.scrubPhase += d * SCRUB_FREQ;
-        const stroke = Math.sin(this.scrubPhase) * this.useT;
-        ox += stroke * SCRUB_AMP;
-        roll += stroke * SCRUB_ROLL;
-      } else {
-        // Wrench: a quick working twist.
-        if (use) this.scrubPhase += d * 9;
-        roll += Math.sin(this.scrubPhase) * 0.12 * this.useT;
-      }
+      // A visible back-and-forth scrubbing stroke.
+      if (use) this.scrubPhase += d * SCRUB_FREQ;
+      const stroke = Math.sin(this.scrubPhase) * this.useT;
+      ox += stroke * SCRUB_AMP;
+      roll += stroke * SCRUB_ROLL;
+    } else if (item?.type === 'spray_can') {
+      // Raised and pushed toward the panel, with the small sweep of a painter's wrist.
+      this.useT = ramp(this.useT, use, USE_RAMP, d);
+      const spray = this.useT;
+      if (use) this.scrubPhase += d * 3.2;
+      oy += spray * 0.04;
+      oz -= spray * 0.05;
+      ox += Math.sin(this.scrubPhase) * 0.035 * spray;
+      yaw += Math.sin(this.scrubPhase) * 0.1 * spray;
     } else if (item?.type === 'fluid_can') {
       // Tip forward and pour, with a slight slosh.
       this.useT = ramp(this.useT, use, USE_RAMP, d);

@@ -37,10 +37,9 @@
  *    flow noise of gas leaving the tailpipe, which is born after the silencer and so
  *    is not filtered by it.
  *  - A second channel for the engine bay: induction (noise through an airbox
- *    resonance, per intake stroke), valve-train ticking, diesel combustion clatter,
- *    turbo whistle, starter motor, and rod knock for a destroyed engine; the block's
- *    own ring under combustion (light on a petrol engine, the clatter of a diesel),
- *    the belt-driven fan's blade-pass whoosh and a faint alternator whine.
+ *    resonance, per intake stroke), valve-train ticking, turbo whistle, starter
+ *    motor, and rod knock for a destroyed engine; the block's own light ring under
+ *    combustion, the belt-driven fan's blade-pass whoosh and a faint alternator whine.
  *
  * Output channel 0 is the tailpipe, channel 1 the engine bay, so the main thread can
  * place them at the two ends of the car and filter them differently through a cabin.
@@ -62,7 +61,6 @@ declare class AudioWorkletProcessor {
 
 export interface EngineCharacter {
   cylinders: number;
-  diesel: boolean;
   displacementL: number;
   turbo: boolean;
   /** 0..1, stable per engine. */
@@ -281,7 +279,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     const n = Math.max(1, Math.round(cylinders));
     this.fireAt = new Float32Array(n);
     this.cylGain = new Float32Array(n);
-    // Tired Soviet engines are uneven; a diesel's injectors are matched worse still.
+    // Tired Soviet engines are uneven.
     this.roughness = 0.6 + 0.8 * this.rand01();
     for (let k = 0; k < n; k++) {
       const offset = k === 0 ? 0 : (this.rand01() - 0.5) * 0.012 / n;
@@ -309,9 +307,8 @@ class EngineProcessor extends AudioWorkletProcessor {
       this.runnerLen[k] = (0.22 + 0.2 * outer + 0.05 * size) * (0.9 + 0.2 * this.rand01());
       this.runners.push(new Delay(((2 * this.runnerLen[k]!) / C_EXHAUST_COOL) * sampleRate * 2.2));
     }
-    // A diesel's combustion knock rings the block high; a petrol engine's softer
-    // pressure rise rings it lower and far more quietly.
-    this.clatterHz = this.ch.diesel ? 2300 + 1300 * this.rand01() : 1400 + 800 * this.rand01();
+    // A petrol engine's soft pressure rise rings the block low and quietly.
+    this.clatterHz = 1400 + 800 * this.rand01();
     this.fanBlades = 4 + Math.floor(this.rand01() * 3);
     this.fan.set(650 + 250 * this.rand01(), 900);
     // A tappet tick, not a cymbal: the classic's rocker clatter sits in the low kHz.
@@ -343,7 +340,7 @@ class EngineProcessor extends AudioWorkletProcessor {
       const u = this.fSputter;
       if (this.rand01() < 0.25 + 0.6 * u) amp = (0.25 + 0.75 * this.rand01()) * (0.3 + 0.7 * u);
       else amp = 0.1;
-      if (!this.ch.diesel && this.rand01() < 0.06 * u) this.popEnv = 0.5;
+      if (this.rand01() < 0.06 * u) this.popEnv = 0.5;
       this.kicks[k] = this.kicks[k]! + amp;
       this.kickIntake += 0.3 * u * this.rand01();
       return;
@@ -359,9 +356,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     // delays it. Only noticeable where the flywheel has little speed to hide it in.
     if (this.fBase > 0) this.speedDev += (amp / this.fBase - 1) * (0.004 + 0.03 * this.fIdleness) * this.fCombustion;
     this.kickIntake += (0.25 + 0.75 * this.fLoad) * (0.8 + 0.4 * this.rand01());
-    const block = this.ch.diesel
-      ? (1 - 0.55 * this.fRev) * (0.6 + 0.4 * this.fLoad)
-      : 0.07 * (0.2 + 0.8 * this.fLoad) * (0.5 + 0.5 * this.fRev);
+    const block = 0.07 * (0.2 + 0.8 * this.fLoad) * (0.5 + 0.5 * this.fRev);
     this.kickClatter += this.fCombustion * block * (0.7 + 0.6 * this.rand01());
   }
 
@@ -404,7 +399,6 @@ class EngineProcessor extends AudioWorkletProcessor {
     const destroyed = parameters.destroyed![0]!;
     const idleRpm = Math.max(300, parameters.idleRpm![0]!);
     const redlineRpm = Math.max(idleRpm + 100, parameters.redlineRpm![0]!);
-    const diesel = this.ch.diesel;
     const n = this.fireAt.length;
 
     // --- start / stop state machine ---------------------------------------------
@@ -473,7 +467,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     }
     this.wobble += (this.wobbleTarget - this.wobble) * Math.min(1, blockSeconds * 3);
     const idleness = Math.max(0, 1 - (effRpm - idleRpm) / 900);
-    effRpm *= 1 + this.wobble * 0.011 * this.roughness * idleness * (diesel ? 0.6 : 1);
+    effRpm *= 1 + this.wobble * 0.011 * this.roughness * idleness;
 
     const rpmStart = this.rpmNow;
     const rpmEnd = effRpm;
@@ -481,7 +475,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     this.loadNow += (targetLoad - this.loadNow) * Math.min(1, blockSeconds * 25);
     const load = this.loadNow;
     const rev = Math.min(1, Math.max(0, (effRpm - idleRpm) / (redlineRpm - idleRpm)));
-    const overrun = !diesel && load < 0.06 && effRpm > idleRpm + 1100 && running ? 1 : 0;
+    const overrun = load < 0.06 && effRpm > idleRpm + 1100 && running ? 1 : 0;
 
     // --- per-block coefficients --------------------------------------------------
     const fireHz = Math.max(1, (effRpm / 120) * n);
@@ -507,7 +501,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     // A stock silencer: two chambers and a resonator. Wide open it still takes the
     // rasp off — an exhaust that opens to 4 kHz is a straight pipe, and a straight
     // four is then a light aircraft, not a Zhiguli.
-    const open = diesel ? 0.35 + 0.5 * rev + 0.15 * load : 0.25 * rev + 0.75 * load;
+    const open = 0.25 * rev + 0.75 * load;
     const muffHz = (420 + 850 * open * open + 200 * open) * pitch;
     this.muffler.set(muffHz, 0.7);
     this.muffler2.set(muffHz * 2.8, 0.5);
@@ -526,9 +520,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     this.bayLp.set((1400 + 2200 * (0.4 * rev + 0.6 * load)) * pitch, 0.7);
 
     // Pulse strength per firing, before per-event randomness.
-    let base: number;
-    if (diesel) base = combustion * (0.45 + 0.55 * load) + (1 - combustion) * 0.12;
-    else base = combustion * (overrun ? 0.16 : 0.26 + 0.74 * load) + (1 - combustion) * 0.1;
+    const base = combustion * (overrun ? 0.16 : 0.26 + 0.74 * load) + (1 - combustion) * 0.1;
     const cov = (0.035 + 0.1 * idleness + (overrun ? 0.12 : 0)) * this.roughness;
     // Turbulence inside the pulse is the exhaust's grit; a silenced car has little.
     const noiseAmt = 0.1 + 0.14 * load;

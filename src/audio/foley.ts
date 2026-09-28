@@ -6,8 +6,8 @@
  * steps faster than a walk for the same reason a real one does, and stopping
  * mid-stride does not leave a step queued.
  *
- * The two continuous actions (scrubbing a part, pouring a can) hold one voice each
- * and are gated by a per-frame flag from Interaction; nothing here polls state.
+ * The continuous actions (scrubbing a part, pouring a can, spraying paint) hold one
+ * voice each and are gated by a per-frame flag from Interaction; nothing here polls state.
  *
  * Footsteps, doors, shots, the bolt and the shutter are recordings (samples.ts): one
  * hit of several, chosen at random and nudged in pitch, so no two steps are the same
@@ -25,6 +25,7 @@ const STEP_MIN_MPS = 0.4;
 
 const SCRUB_GAIN = 0.16;
 const POUR_GAIN = 0.14;
+const SPRAY_GAIN = 0.1;
 /**
  * Recorded foley levels, against one-shots built to -14 LUFS momentary (single hits —
  * steps, a door — land lower, at their peak ceiling, and are lifted here). The game bus
@@ -49,7 +50,7 @@ export type FoleyEvent =
   | 'drop'
   | 'refused';
 
-export type FoleyContinuous = 'scrub' | 'pour' | null;
+export type FoleyContinuous = 'scrub' | 'pour' | 'spray' | null;
 
 export type BubbleGumAudioPhase = 'idle' | 'chew' | 'blow';
 
@@ -59,6 +60,7 @@ export class Foley {
   private readonly scrubFilter: BiquadFilterNode;
   private readonly scrubGain: GainNode;
   private readonly pourGain: GainNode;
+  private readonly sprayGain: GainNode;
   private readonly gumBlowFilter: BiquadFilterNode;
   private readonly gumBlowGain: GainNode;
   private readonly sources: AudioBufferSourceNode[] = [];
@@ -96,6 +98,16 @@ export class Foley {
     this.pourGain.gain.value = 0;
     this.addNoise(pourFilter);
     pourFilter.connect(this.pourGain).connect(this.out);
+
+    // An aerosol is a hiss with almost nothing below a few kilohertz.
+    const sprayFilter = ctx.createBiquadFilter();
+    sprayFilter.type = 'highpass';
+    sprayFilter.frequency.value = 4200;
+    sprayFilter.Q.value = 0.7;
+    this.sprayGain = ctx.createGain();
+    this.sprayGain.gain.value = 0;
+    this.addNoise(sprayFilter);
+    sprayFilter.connect(this.sprayGain).connect(this.out);
 
     // Exhaled breath is broad turbulence shaped by the mouth. A low-Q band pass
     // keeps it airy without turning it into static; the slow formant drift below
@@ -139,11 +151,12 @@ export class Foley {
     }
   }
 
-  /** Both continuous actions in one call: at most one can be running. */
+  /** Every continuous action in one call: at most one can be running. */
   setContinuous(action: FoleyContinuous): void {
     const now = this.mixer.now;
     ramp(this.scrubGain.gain, action === 'scrub' ? SCRUB_GAIN : 0, now, 0.06);
     ramp(this.pourGain.gain, action === 'pour' ? POUR_GAIN : 0, now, 0.06);
+    ramp(this.sprayGain.gain, action === 'spray' ? SPRAY_GAIN : 0, now, 0.03);
     if (action === 'scrub') {
       // Sweep the band so a held stroke does not sit on one static hiss.
       this.scrubFilter.frequency.setTargetAtTime(1800 + Math.random() * 1600, now, 0.12);

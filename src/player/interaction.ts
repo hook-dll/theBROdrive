@@ -8,11 +8,12 @@ import type {
   PartItem,
   FluidCanItem,
   FluidKind,
+  SprayCanItem,
   StickerEnvelopeItem,
   ToolKind,
 } from '../items/items';
 import { itemLabel, litreText } from '../items/items';
-import type { CarStats, FuelType, PartInstance } from '../parts/registry';
+import type { CarStats, PartInstance } from '../parts/registry';
 import {
   applyBrush,
   applySponge,
@@ -25,6 +26,7 @@ import type { LoosePartField } from '../parts/loose';
 import type { Vehicle } from '../vehicle/vehicle';
 import type { TrailerField } from '../vehicle/trailer';
 import { carModel } from '../vehicle/carmodels';
+import { carPaintSwatch, visiblePaintHex } from '../vehicle/carpaint';
 import {
   intersectStorageGrid,
   TRUNK_CELL_COUNT,
@@ -45,7 +47,6 @@ import {
   bonnetWaterCapacity,
   partContainer,
 } from '../vehicle/bonnet';
-import { radiatorFit } from '../vehicle/cooling';
 import { setPartCondition } from '../render/materials';
 import type { FoleyEvent, FoleyContinuous } from '../audio/foley';
 import type { Player } from './player';
@@ -95,6 +96,13 @@ const BODY_SPONGE_SCRATCH_RATE = 0.12;
 const BODY_SCRATCH_FLOOR = 0.08;
 /** Fuel poured per second from a held can. */
 const FUEL_POUR_RATE = 1.2;
+/**
+ * Seconds of held spray for one full coat. Long enough to read as work, short
+ * enough that a colour change is one sitting rather than a chore.
+ */
+const SPRAY_COAT_SECONDS = 6;
+/** Seconds of spray in a full can: one coat, plus a touch-up's worth. */
+const SPRAY_CAN_SECONDS = 7.5;
 /**
  * How far the towing car may be from the player while coupling a trailer. Generous
  * on purpose: you stand at the drawbar, and the car you are hooking to is a whole
@@ -249,25 +257,16 @@ const EMPTY_WRECK_TRUNK: readonly (Item | null)[] =
  * left with it (see `moveSlotFluid` in game/state.ts).
  */
 interface Reservoir {
-  /** What the readout calls it: 'oil', 'water', or the fuel actually in the tank. */
+  /** What the readout calls it: 'oil', 'water' or 'petrol'. */
   readonly label: string;
   readonly level: number;
   readonly capacity: number;
-  /**
-   * The fluid this reservoir is for. A fuel tank still ACCEPTS the other fuel —
-   * mis-fuelling is a mistake the game lets you make and then warns about — while
-   * oil and water accept nothing else.
-   */
+  /** The one fluid this reservoir takes. */
   readonly wants: FluidKind;
 }
 
-/** Narrowing guard: the two fluids a fuel tank takes, as opposed to oil or water. */
-function isFuel(fluid: FluidKind): fluid is FuelType {
-  return fluid === 'petrol' || fluid === 'diesel';
-}
-
 function reservoirAccepts(reservoir: Reservoir, fluid: FluidKind): boolean {
-  return isFuel(reservoir.wants) ? isFuel(fluid) : fluid === reservoir.wants;
+  return fluid === reservoir.wants;
 }
 
 /** `oil 3.2/4.0 L`, or `oil full — 4.0 L` once topping up would do nothing. */
@@ -282,11 +281,8 @@ function fillReadout(reservoir: Reservoir): string {
 
 /**
  * The reservoir serviced through one bonnet slot, or null when that slot holds no
- * part, is the turbine position, or the model has no capacity for it.
- *
- * A dry tank is labelled with the fuel the ENGINE wants rather than "fuel": an
- * empty tank on a diesel reads `diesel 0.0/55.0 L`, which answers "what do I go
- * and fetch" at a glance.
+ * part, is the turbocharger or air filter position, or the model has no capacity
+ * for it.
  */
 function bonnetReservoir(car: CarState, stats: CarStats, cell: number): Reservoir | null {
   if (!bonnetPart(car.bonnet, cell)) return null;
@@ -298,9 +294,6 @@ function bonnetReservoir(car: CarState, stats: CarStats, cell: number): Reservoi
         : null;
     }
     case 'radiator': {
-      // The capacity is the CORE's, not the engine's: fit a small radiator and the
-      // readout says how little water the car can now carry, which is the first
-      // visible consequence of a bad swap.
       const capacity = bonnetWaterCapacity(car.bonnet);
       return capacity > 0
         ? { label: 'water', level: car.waterLitres, capacity, wants: 'water' }
@@ -308,13 +301,7 @@ function bonnetReservoir(car: CarState, stats: CarStats, cell: number): Reservoi
     }
     case 'fuel_tank': {
       if (stats.tankCapacity <= 0) return null;
-      const label = car.fuelKind === 'mixed' ? 'mixed fuel' : (car.fuelKind ?? stats.fuel);
-      return {
-        label,
-        level: car.fuelLitres,
-        capacity: stats.tankCapacity,
-        wants: stats.fuel,
-      };
+      return { label: 'petrol', level: car.fuelLitres, capacity: stats.tankCapacity, wants: 'petrol' };
     }
     default:
       return null;
@@ -335,32 +322,13 @@ type AimedReservoir = Reservoir &
 
 /**
  * The reservoir of a container lying in the world, or null when the part holds no
- * fluid at all (a turbine, a wheel, a mirror).
- *
- * A detached tank is labelled by what is IN it, falling back to `fuel` because a
- * bare tank has no engine to prefer a fuel for it. It still accepts either, so a
- * mis-fuel is as available here as it is under the bonnet — and so is the recovery,
- * since the tank is already out of the car.
+ * fluid at all (a turbocharger, an air filter).
  */
 function loosePartReservoir(part: PartInstance): Reservoir | null {
   const container = partContainer(part);
   if (container === null) return null;
-  const level = part.litres ?? 0;
-  if (container.channel === 'fuel') {
-    const kind = part.fuelKind ?? null;
-    return {
-      label: kind === 'mixed' ? 'mixed fuel' : (kind ?? 'fuel'),
-      level,
-      capacity: container.capacity,
-      wants: kind === 'petrol' || kind === 'diesel' ? kind : 'petrol',
-    };
-  }
-  return {
-    label: container.channel,
-    level,
-    capacity: container.capacity,
-    wants: container.channel,
-  };
+  const wants: FluidKind = container.channel === 'fuel' ? 'petrol' : container.channel;
+  return { label: wants, level: part.litres ?? 0, capacity: container.capacity, wants };
 }
 
 interface Resolved {
@@ -1215,7 +1183,8 @@ export class Interaction {
       if (reservoir) return this.pourPrompt(held as FluidCanItem, reservoir);
       const container = loosePartReservoir(part);
       const holding = container ? ` — ${fillReadout(container)}` : '';
-      return `[F] pick up ${conditionPrefix(part)}${variant(part.variantId).label}${holding}`;
+      const worn = part.clog !== undefined ? ` — ${Math.round(part.clog * 100)}% clogged` : '';
+      return `[F] pick up ${conditionPrefix(part)}${variant(part.variantId).label}${holding}${worn}`;
     }
 
     if (t.kind === 'loose-item') {
@@ -1252,12 +1221,7 @@ export class Interaction {
         const reservoir = this.aimedReservoir(resolved);
         if (reservoir) {
           if (held?.type === 'fluid_can') return this.pourPrompt(held, reservoir);
-          // A radiator that cannot hold this engine says so HERE, at the part, which
-          // is where a player looking for the cause of an overheat will look.
-          const fit =
-            bonnetSlotKind(t.cell) === 'radiator' ? resolved.vehicle?.coolingState.fit.warning : null;
-          const note = fit ? ` — ${fit}` : '';
-          return `[F] take ${itemLabel(item)} — ${fillReadout(reservoir)}${note}`;
+          return `[F] take ${itemLabel(item)} — ${fillReadout(reservoir)}`;
         }
         return `[F] take ${itemLabel(item)} — cell ${t.cell + 1}`;
       }
@@ -1266,15 +1230,7 @@ export class Interaction {
         const slotLabel = expected?.replace('_', ' ') ?? 'service';
         if (!held) return `empty ${slotLabel} slot`;
         if (!bonnetAccepts(t.cell, held)) return `${slotLabel} slot — wrong part`;
-        // Fitting an undersized core is ALLOWED and warned about, never refused: the
-        // engine will run and then cook, and finding that out is the mechanic.
-        const engine = resolved.vehicle?.stats.engine;
-        const radiator = held.type === 'part' ? variant(held.part.variantId).radiator : undefined;
-        const install =
-          expected === 'radiator' && engine && radiator
-            ? radiatorFit(engine, radiator).warning
-            : null;
-        return `[F] install ${itemLabel(held)} — ${slotLabel} slot${install ? ` — ${install}` : ''}`;
+        return `[F] install ${itemLabel(held)} — ${slotLabel} slot`;
       }
       if (held?.type === 'contract_cargo' && t.owner === 'courier') {
         const courier = this.couriers.get(t.id);
@@ -1298,6 +1254,7 @@ export class Interaction {
       const car = this.world.state.cars[t.carId];
       if (!car) return null;
       const bodyPrompt = this.bodyToolPrompt(held, car);
+      if (held?.type === 'spray_can') return this.sprayPrompt(held, car);
       if (bodyPrompt) return bodyPrompt;
       if (held?.type === 'sticker_envelope') return '[F] preview sticker placement';
     }
@@ -1353,8 +1310,7 @@ export class Interaction {
         label: `${item.fluid} can`,
         level: item.litres,
         capacity: item.capacity,
-        // A can holds one fluid and mixes nothing: topping up a petrol can from a
-        // diesel one has no fiction behind it and no recovery from it.
+        // A can holds one fluid and mixes nothing.
         wants: item.fluid,
         sink: 'loose-can',
         itemId: t.itemId,
@@ -1372,12 +1328,7 @@ export class Interaction {
 
   /**
    * What pouring this can into the aimed reservoir would do, or why it would not.
-   *
-   * Wrong fuel is accepted with an explicit warning; the resulting load cannot run
-   * the engine. Pulling the tank tips the mixture out and provides the recovery
-   * path. Oil and water have no such forgiveness — they are simply the wrong
-   * reservoir.
-   *
+   * Each reservoir takes exactly one fluid.
    * An empty can drops to the bare level readout rather than announcing itself. The
    * can's own litres are already on the inventory slot, and the tank is not the
    * place to report them: what the bonnet is for is how much is in the CAR.
@@ -1390,18 +1341,14 @@ export class Interaction {
     if (can.litres <= 0 || reservoir.level >= reservoir.capacity - FLUID_FULL_EPSILON) {
       return fillReadout(reservoir);
     }
-    const warning = can.fluid === reservoir.wants ? '' : ' — wrong fuel';
-    return `[LMB] pour ${can.fluid} — ${fillReadout(reservoir)}${warning}`;
+    return `[LMB] pour ${can.fluid} — ${fillReadout(reservoir)}`;
   }
 
   private toolPrompt(held: Item | null, part: PartInstance): string | null {
     if (held?.type !== 'tool') return null;
     if (held.tool === 'brush') return `[LMB] scrub ${scrubLabel(part)}`;
-    if (held.tool === 'sponge') {
-      if (part.rust > RUST_CLEAN_EPSILON) return '[LMB] sponge — needs the brush first';
-      return '[LMB] polish';
-    }
-    return null; // wrench: no continuous action; the [F] prompt flows through.
+    if (part.rust > RUST_CLEAN_EPSILON) return '[LMB] sponge — needs the brush first';
+    return '[LMB] polish';
   }
 
 
@@ -1411,7 +1358,7 @@ export class Interaction {
    * condition that moves by only 0.55 or 0.70 per second.
    */
   private bodyToolPrompt(held: Item | null, car: CarState): string | null {
-    if (held?.type !== 'tool' || (held.tool !== 'brush' && held.tool !== 'sponge')) return null;
+    if (held?.type !== 'tool') return null;
     const dirtFraction = Math.min(1, Math.max(0, car.dirt));
     const scratchFraction = Math.min(1, Math.max(0, car.scratches));
     const dirt = Math.round(dirtFraction * 100);
@@ -1428,11 +1375,53 @@ export class Interaction {
     return `[LMB] sponge — body ${dirt}% dirt, ${scratches}% scratched`;
   }
 
+  /** What spraying this car with this can would do, as the HUD line. */
+  private sprayPrompt(can: SprayCanItem, car: CarState): string {
+    const name = carPaintSwatch(can.paint)?.name ?? 'paint';
+    const paint = car.paint;
+    const cover = paint !== null && paint.coat === can.paint ? paint.cover : 0;
+    if (cover >= 1 || (paint === null && visiblePaintHex(null, car.modelId, car.id) === can.paint)) {
+      return `body already ${name}`;
+    }
+    if (can.charge <= 0) return `${name} can is empty`;
+    return `[LMB] spray ${name} — ${Math.round(cover * 100)}% coat`;
+  }
+
   private usePrimary(dt: number, resolved: Resolved): void {
     const held = this.inventory.held;
     if (!held) return;
     if (held.type === 'tool') this.scrub(dt, held.tool, resolved);
     else if (held.type === 'fluid_can') this.pourFluid(dt, held, resolved);
+    else if (held.type === 'spray_can') this.spray(dt, held, resolved);
+  }
+
+  /**
+   * Lays the held can's colour over the car's body. A new colour starts a fresh coat
+   * over whatever is visible now, factory paint or an unfinished coat alike; the same
+   * colour continues its coat. State is written stroke by stroke (the Vehicle paints
+   * it each frame) and reported on the condition cadence.
+   */
+  private spray(dt: number, can: SprayCanItem, resolved: Resolved): void {
+    const t = resolved.target;
+    if ((t.kind !== 'car-body' && t.kind !== 'car-entry') || !resolved.vehicle) return;
+    const car = this.world.state.cars[t.carId];
+    if (!car || can.charge <= 0) return;
+    let paint = car.paint;
+    if (paint === null || paint.coat !== can.paint) {
+      const base = visiblePaintHex(paint, car.modelId, car.id);
+      if (base === can.paint) return;
+      paint = { base, coat: can.paint, cover: 0 };
+      car.paint = paint;
+    }
+    if (paint.cover >= 1) return;
+    paint.cover = Math.min(1, paint.cover + dt / SPRAY_COAT_SECONDS);
+    can.charge = Math.max(0, can.charge - dt / SPRAY_CAN_SECONDS);
+    this.continuous = 'spray';
+    this.conditionEmitTimer += dt;
+    if (this.conditionEmitTimer >= CONDITION_EMIT_INTERVAL || paint.cover >= 1 || can.charge <= 0) {
+      this.conditionEmitTimer = 0;
+      this.world.apply({ t: 'car_paint', carId: t.carId, paint: { ...paint } });
+    }
   }
 
   private scrub(dt: number, tool: ToolKind, resolved: Resolved): void {
@@ -1442,14 +1431,9 @@ export class Interaction {
     }
     const part = this.targetPart(resolved);
     if (!part) return;
-    if (tool === 'brush') {
-      if (!applyBrush(part, dt)) return;
-    } else if (tool === 'sponge') {
-      // applySponge refuses while rust remains, enforcing brush-then-sponge order.
-      if (!applySponge(part, dt)) return;
-    } else {
-      return; // wrench does nothing continuous.
-    }
+    // applySponge refuses while rust remains, enforcing brush-then-sponge order.
+    const worked = tool === 'brush' ? applyBrush(part, dt) : applySponge(part, dt);
+    if (!worked) return;
     this.continuous = 'scrub';
     this.applyConditionVisual(resolved, part);
     this.conditionEmitTimer += dt;
@@ -1479,14 +1463,12 @@ export class Interaction {
       // Like `applyBrush`, the floor limits cleaning without making a cleaner shell dirtier.
       car.dirt = Math.max(Math.min(dirt, BRUSH_DIRT_FLOOR), dirt - BODY_BRUSH_DIRT_RATE * dt);
       car.scratches = scratches;
-    } else if (tool === 'sponge') {
+    } else {
       car.dirt = Math.max(0, dirt - BODY_SPONGE_DIRT_RATE * dt);
       car.scratches = Math.max(
         Math.min(scratches, BODY_SCRATCH_FLOOR),
         scratches - BODY_SPONGE_SCRATCH_RATE * dt,
       );
-    } else {
-      return; // wrench has no continuous body action.
     }
     if (car.dirt === oldDirt && car.scratches === oldScratches) return;
 
@@ -1511,8 +1493,7 @@ export class Interaction {
    * gesture the same object as the level readout, and it is why an empty slot takes
    * nothing — there is no reservoir without the part that holds it.
    *
-   * One code path for all four fluids. The kind decides only which number goes up,
-   * and whether a mis-fuel contaminates the tank.
+   * One code path for all three fluids. The kind decides only which number goes up.
    */
   private pourFluid(dt: number, can: FluidCanItem, resolved: Resolved): void {
     if (can.litres <= 0) return;
@@ -1526,26 +1507,12 @@ export class Interaction {
     if (poured <= 0) return;
 
     const level = reservoir.level + poured;
-    // A dry container takes the identity of whatever went in first; anything else on
-    // top of a different fuel is a mixture the engine will refuse to run on. Same
-    // rule fitted or loose, so pouring diesel into a petrol tank on the ground is
-    // the same mistake with the same recovery.
-    const fuelKind = (existing: FuelType | 'mixed' | null): FuelType | 'mixed' =>
-      reservoir.level <= FLUID_FULL_EPSILON || existing === can.fluid
-        ? (can.fluid as FuelType)
-        : 'mixed';
 
     switch (reservoir.sink) {
       case 'car': {
-        const car = this.world.state.cars[reservoir.carId];
-        if (!car) return;
-        if (isFuel(can.fluid)) {
-          this.world.apply({
-            t: 'car_fuel',
-            carId: reservoir.carId,
-            litres: level,
-            fuelKind: fuelKind(car.fuelKind),
-          });
+        if (!this.world.state.cars[reservoir.carId]) return;
+        if (can.fluid === 'petrol') {
+          this.world.apply({ t: 'car_fuel', carId: reservoir.carId, litres: level });
         } else {
           // Oil and water accept nothing but themselves, so the can names the channel.
           this.world.apply({
@@ -1558,14 +1525,8 @@ export class Interaction {
         break;
       }
       case 'loose-part': {
-        const part = this.world.state.looseParts[reservoir.partId]?.part;
-        if (!part) return;
-        this.world.apply({
-          t: 'loose_part_fluid',
-          partId: reservoir.partId,
-          litres: level,
-          fuelKind: isFuel(can.fluid) ? fuelKind(part.fuelKind ?? null) : undefined,
-        });
+        if (!this.world.state.looseParts[reservoir.partId]) return;
+        this.world.apply({ t: 'loose_part_fluid', partId: reservoir.partId, litres: level });
         break;
       }
       case 'loose-can': {

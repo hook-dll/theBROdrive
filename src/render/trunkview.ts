@@ -5,7 +5,7 @@ import type { Vehicle } from '../vehicle/vehicle';
 import {
   TRUNK_CELL_COUNT,
   TRUNK_CELL_HEIGHT,
-  TRUNK_COLUMNS,
+  storageGridColumns,
   storageCellLocal,
   trunkGridWidth,
   type TrunkViewState,
@@ -162,7 +162,7 @@ export class TrunkView {
     side: TrunkViewState['side'],
     cellCount: number,
   ): void {
-    const cellWidth = trunkGridWidth(halfExtents[0]) / TRUNK_COLUMNS;
+    const cellWidth = trunkGridWidth(halfExtents[0]) / storageGridColumns(side);
     for (let cell = 0; cell < cellCount; cell++) {
       storageCellLocal(cell, halfExtents, side, this.cellPosition);
       const panel = this.panels[cell]!;
@@ -179,7 +179,7 @@ export class TrunkView {
 
   private rebuildItems(view: TrunkViewState, halfExtents: readonly [number, number, number]): void {
     this.clearItems();
-    const cellWidth = trunkGridWidth(halfExtents[0]) / TRUNK_COLUMNS;
+    const cellWidth = trunkGridWidth(halfExtents[0]) / storageGridColumns(view.side);
     const target = Math.min(cellWidth, TRUNK_CELL_HEIGHT) * ITEM_FIT;
     for (let cell = 0; cell < TRUNK_CELL_COUNT; cell++) {
       const item = view.cells[cell];

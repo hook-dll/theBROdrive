@@ -24,9 +24,45 @@
   direction, in the city's pale palette, one to six instanced draws per encounter, and
   they fade off the asphalt exactly like the rest. The schedule now deals all 25 forms
   from one shuffled deck, so each run of 25 encounters shows each once.
+- SPRAY PAINT: ANY CAR CAN BE ANY FACTORY COLOUR. Twelve spray cans, one per colour in the
+  car palette (`vehicle/carpaint.ts` `CAR_PAINTS`, which the factory colours now come from
+  too). Hold LMB on a car's body: six seconds lay a full coat, and a can holds 7.5 s. A new
+  colour starts over whatever is visible, so half a coat shows as a blend and stays one if
+  the can runs out. The respray is `CarState.paint` (`base`, `coat`, `cover`), reported by
+  the `car_paint` delta and saved; dirt and scratches sit on top of it as before. Cans turn
+  up about yards in the slot the wrench used to take, 45-100% full, and the dev item
+  spawner has a chip per colour.
+- THE TURBOCHARGER WORKS, AND IT CAN BE FOUND. Bolted into the bonnet's turbo cell it
+  boosts whatever engine it sits on: nothing below 30% of the rev range, full boost from
+  60%, in proportion to the pedal, with about a second of lag winding up
+  (`TURBO_TORQUE_GAIN` 0.35 in `vehicle/drivetrain.ts`). Power, fuel burned and heat into
+  the water rise with it. Measured in the game, a Samara 21099 from rest with the autopilot
+  flat out: 79 km/h after 12 s stock, 101 km/h with the turbo. Breaker's yards stock one
+  at 15-20% of stops.
+- SIX IMPORTED ENGINES TO SWAP IN: BMW M30 3.0 six (132 kW), Ford Cologne 2.8i V6
+  (118 kW), Rover 3.5 V8 (115.6 kW), Chevrolet 350 V8 (149 kW), BMW M10 2.0 tii four
+  (96 kW) and Cosworth BDA 1.6 twin-cam (88 kW), beside the Nissan L28E six that was
+  already in the catalogue. Each is its maker's published figures (`tools/reality.ts`
+  checks them). None is factory-fitted: they stand on pallets at breaker's yards (25-30%
+  of salvage and scrap stops), dry of oil, and fit any car.
+- THE AIR FILTER. A fifth bonnet cell. The element clogs with the kilometres the engine
+  breathes through it: 1800 km of clear desert air wears one out, and a dust storm puts
+  up to two and a half times as much sand through it per kilometre (`vehicle/airfilter.ts`).
+  Half-worn is invisible; at 85% the check-engine lamp lights and the engine is 5% down;
+  at 100% it makes 70% of its power and keeps falling. No engine starts without one.
+  Filters come new from forecourts (30%), shops (45%) and breaker's yards; roadside
+  finds arrive with their own filter anywhere from fresh to overdue. Saves from before
+  the filter get a new one fitted.
 
 ### Changed
 
+- ONE RADIATOR, AND THE WATER IN IT IS WHAT MATTERS. The four radiator sizes, the
+  fitment rule and its warnings are gone. The one core (9 L) is rated against the engine
+  it cools with a margin of 1.8 (`RADIATOR_MARGIN`), so a full radiator holds any engine
+  at its thermostat, climbs included. As the level falls the core loses effect
+  (`waterCoolingEffect`): 15% of it by 60% full, which is felt only on a hard climb; more
+  than half of it by 30%, where no real load can be held. Saves map every old radiator
+  onto the new one.
 - ONE TYRE, ONE GRIP: THE CLASSICS NO LONGER SPIN THEIR WHEELS ON DRY ASPHALT. A tyre
   used to have two coefficients — 0.95 sideways and 0.55 forwards on a Zhiguli —
   because the forward one was also doing the brakes' job of holding the car to its
@@ -188,6 +224,10 @@
   state, the `car_body_dent` delta, the time-sliced CPU deformation pass, the paint's
   dent marks and the car lab's dent buttons. Impacts still scratch the paint. A save
   that carries `dents` loads the car straight.
+- THE WRENCH. It had no action of its own. A save that carries one loads without it.
+- DIESEL. The fuel, its cans, the mis-fuelling mixture and both diesel engines (the OM615
+  and the OM366, left over from removed bodies) are gone. There is one fuel. A save with
+  diesel in a tank keeps the litres as petrol; diesel cans and diesel engines are dropped.
 
 ## 0.18.0 — 2026-09-15
 

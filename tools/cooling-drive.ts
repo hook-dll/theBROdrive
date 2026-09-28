@@ -2,10 +2,12 @@
  * Cooling integration harness: real Vehicles, real physics, real deltas.
  *
  * `tools/cooling.ts` proves the thermal MODEL. This proves the WIRING, which is a
- * different set of mistakes: that driving heats the engine at all, that the
- * temperature reaches authoritative CarState, that two cars do not share it, that a
- * radiator swapped through the bonnet delta takes effect and keeps its water, that
- * an overheated engine loses power and stalls, and that a parked car cools down.
+ * different set of mistakes: that driving heats the engine at all, that a low
+ * radiator cooks a car that a full one cannot, that a turbo raises the temperature,
+ * that the temperature reaches authoritative CarState, that two cars do not share
+ * it, that a radiator swapped through the bonnet delta takes effect and keeps its
+ * water, that an overheated engine loses power and stalls, and that a parked car
+ * cools down.
  *
  * Run: `bun tools/cooling-drive.ts`
  */
@@ -22,11 +24,11 @@ import { benchCarState } from './benchcar';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { WorldOrigin } from '../src/world/origin';
 import { preloadCarModels } from '../src/render/carmodel';
-import { COLD_SOAK_C, ambientAirC, preferredRadiatorClass } from '../src/vehicle/cooling';
+import { COLD_SOAK_C, ambientAirC } from '../src/vehicle/cooling';
 
 installAssetShim();
 
-/** A UAZ van: enough load on a small radiator to cook it, and it exists in the pack. */
+/** A UAZ van: enough load on its engine to cook a low radiator, and it exists in the pack. */
 const MODEL_ID = 'sa_uaz330364';
 const SETTLE_STEPS = 180;
 /** Mid-afternoon, so the desert is working against the radiator like it will in play. */
@@ -38,15 +40,15 @@ function check(label: string, ok: boolean, detail: string): void {
   console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${label.padEnd(52)} ${detail}`);
 }
 
-function carState(id: string, radiatorVariantId?: string, x = 0, z = 0): CarState {
+/** `waterFill` is a fraction of the fitted core: 1 is full, 0.2 is a car on fumes. */
+function carState(id: string, waterFill: number, x = 0, z = 0): CarState {
+  const car = benchCarState(MODEL_ID, { id, x, z });
   return {
-    ...benchCarState(MODEL_ID, { id, x, z, radiatorVariantId }),
+    ...car,
     // Several tanks' worth, on purpose: the overheat and cool-down runs are long,
     // and running dry mid-check would stall the engine for the wrong reason.
     fuelLitres: 200,
-    // Far more water than any core holds, also on purpose: "it can only hold the
-    // water its own core holds" checks that the fitted radiator clamps it.
-    waterLitres: 40,
+    waterLitres: car.waterLitres * waterFill,
   };
 }
 
@@ -58,7 +60,21 @@ interface Rig {
   input: InputFrame;
 }
 
-async function makeRig(id: string, radiatorVariantId?: string): Promise<Rig> {
+/** Fits a turbocharger through the same delta the player's hands use. */
+function fitTurbo(rig: Rig): void {
+  const part: Item = {
+    type: 'part',
+    id: `${rig.state.id}:turbo`,
+    part: { id: `${rig.state.id}:turbo`, variantId: 'turbine_standard', dirt: 0, rust: 0 },
+  };
+  rig.world.apply({ t: 'car_bonnet', carId: rig.state.id, cell: 1, item: part });
+  rig.vehicle.rebuild();
+}
+
+async function makeRig(
+  id: string,
+  options: { waterFill?: number; turbo?: boolean } = {},
+): Promise<Rig> {
   const physics = await PhysicsWorld.create();
   physics.addHeightfield(
     1,
@@ -70,10 +86,11 @@ async function makeRig(id: string, radiatorVariantId?: string): Promise<Rig> {
   );
   const world = new GameWorld(newWorldState(41));
   world.state.timeOfDay = HOT_AFTERNOON;
-  const state = carState(id, radiatorVariantId);
+  const state = carState(id, options.waterFill ?? 1);
   world.state.cars[id] = state;
   const vehicle = new Vehicle(physics, world, state, new THREE.Scene(), new WorldOrigin());
   const rig: Rig = { physics, world, vehicle, state, input: emptyInput() };
+  if (options.turbo) fitTurbo(rig);
   drive(rig, SETTLE_STEPS, 0);
   return rig;
 }
@@ -99,10 +116,10 @@ console.log('cooling-drive: heat through the vehicle');
 
 const factory = await makeRig('cool:factory');
 check(
-  'a factory car is fitted with a radiator that suits its engine',
-  factory.vehicle.coolingState.radiatorClass === preferredRadiatorClass(factory.vehicle.stats.engine) &&
-    factory.vehicle.coolingState.fit.warning === null,
-  `${factory.vehicle.coolingState.radiatorClass}, water ${factory.vehicle.coolingState.waterCapacity} L`,
+  'a factory car ships with the one core, full of water',
+  factory.vehicle.coolingState.waterCapacity === 9 &&
+    factory.vehicle.coolingState.waterFraction > 0.999,
+  `${factory.vehicle.coolingState.waterLitres.toFixed(2)} of ${factory.vehicle.coolingState.waterCapacity} L`,
 );
 check(
   'the gauge reads air temperature before the engine has run',
@@ -126,7 +143,7 @@ check(
   `state ${factory.state.engineTempC.toFixed(1)} C vs live ${warmed.temperatureC.toFixed(1)} C`,
 );
 check(
-  'a correctly cooled car at full throttle stays out of the warning zone',
+  'a full radiator at full throttle stays out of the warning zone',
   !warmed.overheating && warmed.performance === 1,
   `${warmed.zone}, performance ${warmed.performance.toFixed(2)}`,
 );
@@ -137,27 +154,15 @@ check(
   `${factory.vehicle.engineTemperature?.zone} at ${factory.vehicle.engineTemperature?.fraction.toFixed(2)} of scale`,
 );
 
-console.log('cooling-drive: a bodged radiator');
+console.log('cooling-drive: a low radiator');
 
-const bodged = await makeRig('cool:bodged', 'radiator_small');
+const lowCar = await makeRig('cool:low', { waterFill: 0.2 });
+drive(lowCar, seconds(300), 1);
+const cooked = lowCar.vehicle.coolingState;
 check(
-  'an undersized core is reported as the compromise it is',
-  bodged.vehicle.coolingState.radiatorClass === 'small' &&
-    bodged.vehicle.coolingState.fit.warning !== null,
-  `${bodged.vehicle.coolingState.fit.warning}`,
-);
-check(
-  'and it can only hold the water its own core holds',
-  bodged.state.waterLitres <= bodged.vehicle.coolingState.waterCapacity,
-  `${bodged.state.waterLitres.toFixed(1)} of ${bodged.vehicle.coolingState.waterCapacity} L`,
-);
-
-drive(bodged, seconds(150), 1);
-const cooked = bodged.vehicle.coolingState;
-check(
-  'the same engine on the small core overheats at full throttle',
+  'a car on a fifth-full core overheats at full throttle',
   cooked.overheating && cooked.temperatureC > warmed.temperatureC + 15,
-  `${cooked.temperatureC.toFixed(1)} C (${cooked.zone}) vs ${warmed.temperatureC.toFixed(1)} C on the right core`,
+  `${cooked.temperatureC.toFixed(1)} C (${cooked.zone}) vs ${warmed.temperatureC.toFixed(1)} C full`,
 );
 check(
   'overheating costs power and rev range',
@@ -165,8 +170,9 @@ check(
   `performance ${cooked.performance.toFixed(2)}, rev limit ${cooked.revLimit.toFixed(2)}`,
 );
 
-drive(bodged, seconds(1800), 1);
-const boiled = bodged.vehicle.coolingState;
+// Keep the foot in until the stall that a critical engine earns, or half an hour.
+for (let i = 0; i < seconds(1800) && lowCar.vehicle.engineRunning; i++) drive(lowCar, 1, 1);
+const boiled = lowCar.vehicle.coolingState;
 check(
   'ignoring the lamp boils water away, and the stall then caps the loss',
   boiled.waterCapacity - boiled.waterLitres > 0.5 && boiled.waterLitres > 0,
@@ -174,27 +180,41 @@ check(
 );
 check(
   'a critical engine stalls instead of continuing to make power',
-  !bodged.vehicle.engineRunning || bodged.vehicle.engineDestroyed,
-  `running=${bodged.vehicle.engineRunning} destroyed=${bodged.vehicle.engineDestroyed}`,
+  !lowCar.vehicle.engineRunning || lowCar.vehicle.engineDestroyed,
+  `running=${lowCar.vehicle.engineRunning} destroyed=${lowCar.vehicle.engineDestroyed}`,
+);
+
+console.log('cooling-drive: a turbo raises the equilibrium');
+
+const naturallyAspirated = await makeRig('cool:na', { waterFill: 0.4 });
+const turbocharged = await makeRig('cool:turbo', { waterFill: 0.4, turbo: true });
+drive(naturallyAspirated, seconds(180), 1);
+drive(turbocharged, seconds(180), 1);
+const naTemp = naturallyAspirated.vehicle.coolingState.temperatureC;
+const turboTemp = turbocharged.vehicle.coolingState.temperatureC;
+check(
+  'the same drive runs hotter with a turbo fitted',
+  turboTemp > naTemp + 5,
+  `turbo ${turboTemp.toFixed(1)} C vs naturally aspirated ${naTemp.toFixed(1)} C`,
 );
 
 console.log('cooling-drive: swaps, independence and cool-down');
 
-const swap = await makeRig('cool:swap', 'radiator_small');
+const swap = await makeRig('cool:swap', { waterFill: 1 });
 drive(swap, seconds(60), 1);
 const beforeSwap = swap.vehicle.coolingState.temperatureC;
-const smallCore = swap.state.bonnet[2];
-// Pull the small core and fit a large one through the same delta the player's hands
-// use, which is what proves the swap path rather than a direct field write.
+const radiator = swap.state.bonnet[2];
+// Pull the radiator and fit it back through the same delta the player's hands use,
+// which is what proves the swap path rather than a direct field write.
 swap.world.apply({ t: 'car_bonnet', carId: swap.state.id, cell: 2, item: null });
 swap.vehicle.rebuild();
 check(
   'pulling the radiator takes its water with it',
-  smallCore?.type === 'part' &&
-    (smallCore.part.litres ?? 0) > 0 &&
+  radiator?.type === 'part' &&
+    (radiator.part.litres ?? 0) > 0 &&
     swap.state.waterLitres === 0 &&
     swap.vehicle.coolingState.waterCapacity === 0,
-  `${smallCore?.type === 'part' ? (smallCore.part.litres ?? 0).toFixed(2) : 'n/a'} L in the part`,
+  `${radiator?.type === 'part' ? (radiator.part.litres ?? 0).toFixed(2) : 'n/a'} L in the part`,
 );
 drive(swap, seconds(20), 1);
 check(
@@ -203,19 +223,20 @@ check(
   `${beforeSwap.toFixed(1)} -> ${swap.vehicle.coolingState.temperatureC.toFixed(1)} C`,
 );
 
-const largeCore: Item = {
+const refittedRadiator: Item = {
   type: 'part',
-  id: 'cool:swap:large',
-  part: { id: 'cool:swap:large', variantId: 'radiator_copper', dirt: 0, rust: 0, litres: 13 },
+  id: 'cool:swap:radiator',
+  part: { id: 'cool:swap:radiator', variantId: 'radiator', dirt: 0, rust: 0, litres: 9 },
 };
-swap.world.apply({ t: 'car_bonnet', carId: swap.state.id, cell: 2, item: largeCore });
+swap.world.apply({ t: 'car_bonnet', carId: swap.state.id, cell: 2, item: refittedRadiator });
 swap.vehicle.rebuild();
+drive(swap, 1, 1);
 check(
-  'fitting a full large core gives the car its water and its capability',
-  swap.state.waterLitres === 13 &&
-    swap.vehicle.coolingState.radiatorClass === 'large' &&
-    swap.vehicle.coolingState.fit.warning === null,
-  `${swap.state.waterLitres} L, ${swap.vehicle.coolingState.radiatorClass}`,
+  'fitting a full core gives the car its water back',
+  swap.state.waterLitres === 9 &&
+    swap.vehicle.coolingState.waterCapacity === 9 &&
+    swap.vehicle.coolingState.waterEffect === 1,
+  `${swap.state.waterLitres} L, effect ${swap.vehicle.coolingState.waterEffect.toFixed(2)}`,
 );
 
 const hotCar = await makeRig('cool:hot');
@@ -233,7 +254,7 @@ check(
   `${hotBefore.toFixed(1)} -> ${hotCar.vehicle.coolingState.temperatureC.toFixed(1)} C parked 10 min`,
 );
 check(
-  'two cars in one world keep independent temperatures',
+  'two cars keep independent temperatures',
   Math.abs(factory.state.engineTempC - hotCar.state.engineTempC) > 5,
   `driven ${factory.state.engineTempC.toFixed(1)} C, parked ${hotCar.state.engineTempC.toFixed(1)} C`,
 );

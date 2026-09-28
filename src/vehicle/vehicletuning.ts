@@ -11,7 +11,7 @@
 
 import { SurfaceType } from '../core/surfaces';
 import { FLUID_DENSITY } from '../items/items';
-import { variant, type FuelType } from '../parts/registry';
+import { variant } from '../parts/registry';
 import type { HandlingProfile } from './carmodels';
 
 export const GRAVITY = 9.81;
@@ -1325,18 +1325,8 @@ export const CARRIED_MASS_EPSILON_KG = 0.1;
 /** Oil's density, kg/L. Water is 1.0 by definition and the fuel's is in the item table. */
 export const FLUID_DENSITY_OIL = 0.87;
 
-/**
- * The fuel's density, kg/L.
- *
- * `'mixed'` weighs as diesel because a tank holding both holds at least some of the
- * heavier one, and a car with NO fuel kind is a dry tank — the term it feeds is
- * measured against a full tank either way, so the density only has to be right for
- * the litres actually present.
- */
-export function fuelDensity(kind: FuelType | 'mixed' | null): number {
-  if (kind === 'diesel' || kind === 'mixed') return FLUID_DENSITY.diesel;
-  return FLUID_DENSITY.petrol;
-}
+/** Petrol's density, kg/L, the one fuel there is. */
+export const FUEL_DENSITY = FLUID_DENSITY.petrol;
 
 /** Water a stock radiator of this variant holds, litres. Zero if it holds none. */
 export function stockRadiatorWater(variantId: string): number {

@@ -589,7 +589,14 @@ export function createStartingCar(world: GameWorld): CarState {
 
   // Keep the existing deterministic fuel roll, clamped to the tank's capacity.
   const fuelLitres = Math.min(4 + hash01(world.seed, 0x3f1) * 6, def.tankLitres);
-  const bonnet = createBonnetStorage('car:start', def.engineId, def.bodyClass, def.tankLitres);
+  // The air filter has done a season already: due in a thousand-odd kilometres.
+  const bonnet = createBonnetStorage(
+    'car:start',
+    def.engineId,
+    def.bodyClass,
+    def.tankLitres,
+    0.15 + hash01(world.seed, 0x3f4) * 0.2,
+  );
   // Water and oil start part-used on the same deterministic principle: the car
   // has been sitting in a shed, not prepped. Enough to set off on, not enough to
   // finish on, which is what makes the first can worth picking up.
@@ -616,8 +623,8 @@ export function createStartingCar(world: GameWorld): CarState {
     // as stored; the player's first wash is a tutorial nobody has to write.
     dirt: 0.4,
     scratches: 0,
+    paint: null,
     fuelLitres,
-    fuelKind: engine.fuel,
     waterLitres,
     oilLitres,
     // Stood in a shut garage overnight: cold, whatever the afternoon outside is.
@@ -660,7 +667,7 @@ export function spawnStartingItems(world: GameWorld, loose: LoosePartField): voi
     {
       type: 'fluid_can',
       id: world.generatedPartId('home_item', 0, 2),
-      fluid: modelEngine(pick(CAR_MODELS, world.seed, 0x3f0)).fuel,
+      fluid: 'petrol',
       capacity: 20,
       litres: Math.round((12 + hash01(world.seed, 0x9ef) * 8) * 10) / 10,
     },

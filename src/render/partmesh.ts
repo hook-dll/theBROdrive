@@ -222,6 +222,7 @@ function buildPart(b: MeshBuilder, v: PartVariant): void {
     case 'fuel_tank': return buildTank(b, v);
     case 'radiator': return buildRadiator(b, v);
     case 'turbine': return buildTurbine(b, v);
+    case 'air_filter': return buildAirFilter(b, v);
   }
 }
 
@@ -230,34 +231,40 @@ function buildPart(b: MeshBuilder, v: PartVariant): void {
 function buildEngine(b: MeshBuilder, v: PartVariant): void {
   const spec = v.engine as EngineSpec;
   switch (v.id) {
-    case 'engine_i4_1600': return buildInline(b, spec, 1.0, false);
-    case 'engine_uzam_412de': return buildInline(b, spec, 0.97, false);
+    case 'engine_i4_1600': return buildInline(b, spec, 1.0);
+    case 'engine_uzam_412de': return buildInline(b, spec, 0.97);
     // The UAZ's tall 2.89-litre UMZ four is physically larger than the 1.6 family.
-    case 'engine_umz_4213': return buildInline(b, spec, 1.16, false);
-    case 'engine_i6_2800': return buildInline(b, spec, 1.12, false);
+    case 'engine_umz_4213': return buildInline(b, spec, 1.16);
+    case 'engine_i6_2800': return buildInline(b, spec, 1.12);
+    // The imports, scaled by displacement against the 1.6 at 1.0.
+    case 'engine_bmw_m30': return buildInline(b, spec, 1.14);
+    case 'engine_bmw_m10_tii': return buildInline(b, spec, 1.06);
+    case 'engine_cosworth_bda': return buildInline(b, spec, 0.98);
+    case 'engine_ford_cologne_v6': return buildVee(b, spec, 1.0);
+    // The Rover's alloy V8 is compact for eight cylinders; the Chevrolet is not.
+    case 'engine_rover_v8': return buildVee(b, spec, 0.98);
+    case 'engine_chevy_350': return buildVee(b, spec, 1.14);
     // The Soviet fours, scaled by displacement against the 1.6 at 1.0.
-    case 'engine_lada_1200': return buildInline(b, spec, 0.88, false);
+    case 'engine_lada_1200': return buildInline(b, spec, 0.88);
     case 'engine_lada_1300':
-    case 'engine_samara_1300': return buildInline(b, spec, 0.91, false);
+    case 'engine_samara_1300': return buildInline(b, spec, 0.91);
     case 'engine_lada_1500':
-    case 'engine_samara_1500': return buildInline(b, spec, 0.96, false);
+    case 'engine_samara_1500': return buildInline(b, spec, 0.96);
     // Half a 2108: the 1.3's 76 mm bore and block section, two cylinders long.
-    case 'engine_vaz_1111': return buildInline(b, spec, 0.91, false);
+    case 'engine_vaz_1111': return buildInline(b, spec, 0.91);
     case 'engine_lada_1600':
     case 'engine_lada_rally':
-    case 'engine_niva_1600': return buildInline(b, spec, 1.0, false);
-    case 'engine_niva_1700': return buildInline(b, spec, 1.02, false);
+    case 'engine_niva_1600': return buildInline(b, spec, 1.0);
+    case 'engine_niva_1700': return buildInline(b, spec, 1.02);
     // The Volga 2.4: a tall, long-stroke four, so a taller block than the 1.6.
     case 'engine_zmz_21':
-    case 'engine_zmz_24': return buildInline(b, spec, 1.09, false);
-    case 'engine_d4_2000': return buildInline(b, spec, 1.18, true);
-    case 'engine_d6_6600': return buildInline(b, spec, 1.62, true);
+    case 'engine_zmz_24': return buildInline(b, spec, 1.09);
     default: throw new Error(`unhandled engine variant: ${v.id}`);
   }
 }
 
-/** Inline engine: block length grows with cylinder count; diesels add a turbo. */
-function buildInline(b: MeshBuilder, spec: EngineSpec, scale: number, turbo: boolean): void {
+/** Inline engine: block length grows with cylinder count. */
+function buildInline(b: MeshBuilder, spec: EngineSpec, scale: number): void {
   const n = spec.cylinders;
   const id = `inline_${n}_${scale}`;
   const iron = cond(0x3a3f45, 0.8, 0.5);
@@ -295,13 +302,47 @@ function buildInline(b: MeshBuilder, spec: EngineSpec, scale: number, turbo: boo
     const z = (i / (n - 1) - 0.5) * len * 0.6;
     b.cylinder(`${id}_plug_${i}`, 0.018 * scale, 0.018 * scale, 0.05 * scale, 6, dark, [0, headTop + coverH + 0.01 * scale, z]);
   }
+}
 
-  if (turbo) {
-    const tz = len * 0.3;
-    b.torus(`${id}_turbo`, 0.11 * scale, 0.045 * scale, 8, 18, rusty, [-ex - 0.06 * scale, blockTop * 0.75, tz]);
-    b.cylinder(`${id}_turboin`, 0.07 * scale, 0.07 * scale, 0.16 * scale, 10, dark, [-ex - 0.06 * scale, blockTop * 0.75, tz], AXIS_X);
-    b.cylinder(`${id}_airintake`, 0.05 * scale, 0.05 * scale, 0.3 * scale, 10, dark, [w * 0.35, headTop + coverH * 0.5, len * 0.42], AXIS_Z);
+/**
+ * V engine: a short block with two banks splayed at 90 degrees, a carburettor or
+ * injection plenum in the valley between them and a manifold down each flank.
+ */
+function buildVee(b: MeshBuilder, spec: EngineSpec, scale: number): void {
+  const n = spec.cylinders;
+  const perBank = Math.ceil(n / 2);
+  const id = `vee_${n}_${scale}`;
+  const iron = cond(0x3a3f45, 0.8, 0.5);
+  const alloy = cond(0xaab0b6, 0.9, 0.3);
+  const dark = cond(0x23262a, 0.5, 0.7);
+  const rusty = cond(0x6a4a35, 0.85, 0.55);
+
+  const len = (0.24 + perBank * 0.15) * scale;
+  const w = 0.5 * scale;
+  const sumpH = 0.06 * scale;
+  const blockH = 0.16 * scale;
+  const blockTop = sumpH + blockH;
+  const bankW = 0.2 * scale;
+  const bankH = 0.14 * scale;
+  const tilt = Math.PI / 4;
+
+  b.box(`${id}_sump`, w * 0.7, sumpH, len * 0.75, iron, [0, sumpH / 2, 0]);
+  b.box(`${id}_block`, w, blockH, len, iron, [0, sumpH + blockH / 2, 0]);
+  for (const side of [-1, 1]) {
+    const x = side * w * 0.3;
+    const y = blockTop + bankH * 0.45;
+    b.box(`${id}_bank_${side}`, bankW, bankH, len, iron, [x, y, 0], [0, 0, -side * tilt]);
+    b.box(`${id}_cover_${side}`, bankW * 0.8, 0.05 * scale, len * 0.92, alloy, [x + side * 0.05 * scale, y + bankH * 0.5, 0], [0, 0, -side * tilt]);
+    // One exhaust manifold per bank, low on the flank.
+    b.cylinder(`${id}_expipe_${side}`, 0.045 * scale, 0.045 * scale, len * 0.85, 12, rusty, [side * (w * 0.5 + 0.06 * scale), blockTop * 0.6, 0], AXIS_Z);
+    for (let i = 0; i < perBank; i++) {
+      const z = (perBank > 1 ? i / (perBank - 1) - 0.5 : 0) * len * 0.7;
+      b.cylinder(`${id}_plug_${side}_${i}`, 0.018 * scale, 0.018 * scale, 0.05 * scale, 6, dark, [x + side * 0.1 * scale, y + bankH * 0.35, z], [0, 0, -side * tilt]);
+    }
   }
+  // Intake plenum in the valley, with the air cleaner's drum on top.
+  b.box(`${id}_plenum`, w * 0.34, 0.1 * scale, len * 0.7, alloy, [0, blockTop + bankH * 0.7, 0]);
+  b.cylinder(`${id}_aircleaner`, 0.16 * scale, 0.16 * scale, 0.06 * scale, 16, dark, [0, blockTop + bankH * 0.7 + 0.08 * scale, 0]);
 }
 
 // ----------------------------- gearboxes -----------------------------
@@ -403,63 +444,12 @@ function buildTank(b: MeshBuilder, v: PartVariant): void {
 
 
 
-/**
- * Radiators range from the estate's narrow single-pass unit to a twin-pass copper
- * core. Their origins all remain at the core centre so bonnet slots and previews
- * can exchange classes without changing the established mount placement.
- */
+/** The radiator: one core, a header and bottom tank, and the filler cap. */
 function buildRadiator(b: MeshBuilder, v: PartVariant): void {
-  const klass = v.radiator?.klass ?? 'standard';
   const blackenedSteel = cond(0x2c3135, 0.7, 0.6);
   const paintedSteel = cond(0x566068, 0.75, 0.5);
-  const copper = cond(0xb87333, 0.9, 0.35);
-  const copperTank = cond(0x7f4d2c, 0.85, 0.45);
   const cap = flat(0x2d4b6b, 0.55);
   const id = v.id;
-
-  if (klass === 'small') {
-    // The 2102's narrow, single-pass core has fewer exposed cooling rows than the
-    // replacement unit, which keeps it recognisable without spending detail on a
-    // part that is deliberately the cheap cooling option.
-    b.box(`${id}_core`, 0.52, 0.38, 0.05, paintedSteel, [0, 0, 0]);
-    b.box(`${id}_top`, 0.52, 0.065, 0.085, blackenedSteel, [0, 0.19, 0]);
-    b.box(`${id}_bot`, 0.52, 0.065, 0.085, blackenedSteel, [0, -0.19, 0]);
-    for (let i = -1; i <= 2; i++) {
-      b.box(`${id}_fin_${i}`, 0.48, 0.035, 0.018, paintedSteel, [0, i * 0.07 - 0.035, 0.034]);
-    }
-    b.box(`${id}_mount`, 0.30, 0.035, 0.10, blackenedSteel, [0, -0.235, 0]);
-    b.cylinder(`${id}_inlet`, 0.038, 0.038, 0.11, 8, blackenedSteel, [-0.16, 0.215, 0.07], AXIS_Z);
-    b.cylinder(`${id}_outlet`, 0.038, 0.038, 0.11, 8, blackenedSteel, [0.16, -0.205, 0.07], AXIS_Z);
-    b.cylinder(`${id}_fan_mount`, 0.052, 0.052, 0.035, 8, blackenedSteel, [0, 0, -0.055], AXIS_Z);
-    b.cylinder(`${id}_neck`, 0.048, 0.048, 0.055, 10, blackenedSteel, [0.16, 0.24, 0]);
-    b.cylinder(`${id}_cap`, 0.058, 0.058, 0.03, 10, cap, [0.16, 0.2825, 0]);
-    return;
-  }
-
-  if (klass === 'large') {
-    // Two separated slabs make the thick copper core read as a twin-pass unit from
-    // the side; the rear ring leaves the fan's clearance legible at inventory scale.
-    b.box(`${id}_core_front`, 0.92, 0.66, 0.055, copper, [0, 0, 0.0425]);
-    b.box(`${id}_core_rear`, 0.92, 0.66, 0.055, copperTank, [0, 0, -0.0425]);
-    b.box(`${id}_top`, 0.92, 0.10, 0.18, copperTank, [0, 0.33, 0]);
-    b.box(`${id}_bot`, 0.92, 0.10, 0.18, copperTank, [0, -0.33, 0]);
-    b.box(`${id}_tank_l`, 0.12, 0.60, 0.22, copperTank, [-0.46, 0, 0]);
-    b.box(`${id}_tank_r`, 0.12, 0.60, 0.22, copperTank, [0.46, 0, 0]);
-    for (let i = 0; i < 10; i++) {
-      b.box(`${id}_fin_${i}`, 0.84, 0.035, 0.024, copper, [0, (i / 9 - 0.5) * 0.54, 0.085]);
-    }
-    b.torus(`${id}_fan_shroud`, 0.19, 0.018, 8, 16, blackenedSteel, [0, 0, -0.095]);
-    b.box(`${id}_mount`, 0.50, 0.04, 0.16, copperTank, [0, -0.42, 0]);
-    b.cylinder(`${id}_inlet`, 0.055, 0.055, 0.14, 10, copperTank, [-0.30, 0.40, 0.12], AXIS_Z);
-    b.cylinder(`${id}_outlet`, 0.055, 0.055, 0.14, 10, copperTank, [0.30, -0.40, 0.12], AXIS_Z);
-    b.cylinder(`${id}_fan_mount`, 0.065, 0.065, 0.03, 10, blackenedSteel, [0, 0, -0.125], AXIS_Z);
-    b.cylinder(`${id}_neck`, 0.065, 0.065, 0.08, 12, copperTank, [0.30, 0.42, 0]);
-    b.cylinder(`${id}_cap`, 0.075, 0.075, 0.04, 12, cap, [0.30, 0.48, 0]);
-    return;
-  }
-
-  // The standard replacement preserves the original 0.72 x 0.5 x 0.06 core and
-  // seven fin rows, while side tanks distinguish it from the smaller single-pass unit.
   b.box(`${id}_core`, 0.72, 0.5, 0.06, blackenedSteel, [0, 0, 0]);
   b.box(`${id}_top`, 0.72, 0.08, 0.10, paintedSteel, [0, 0.25, 0]);
   b.box(`${id}_bot`, 0.72, 0.08, 0.10, paintedSteel, [0, -0.25, 0]);
@@ -474,6 +464,19 @@ function buildRadiator(b: MeshBuilder, v: PartVariant): void {
   b.cylinder(`${id}_fan_mount`, 0.058, 0.058, 0.03, 8, blackenedSteel, [0, 0, -0.06], AXIS_Z);
   b.cylinder(`${id}_neck`, 0.055, 0.055, 0.06, 12, paintedSteel, [0.24, 0.31, 0]);
   b.cylinder(`${id}_cap`, 0.065, 0.065, 0.035, 12, cap, [0.24, 0.3575, 0]);
+}
+
+/**
+ * The period round air cleaner element: a pleated paper ring between two steel end
+ * caps, the size of a dinner plate.
+ */
+function buildAirFilter(b: MeshBuilder, v: PartVariant): void {
+  const steel = cond(0x3d4247, 0.8, 0.45);
+  const paper = cond(0xd9c48a, 0.05, 0.9);
+  b.cylinder(`${v.id}_cap_bottom`, 0.15, 0.15, 0.01, 24, steel, [0, 0.005, 0]);
+  b.cylinder(`${v.id}_cap_top`, 0.15, 0.15, 0.01, 24, steel, [0, 0.065, 0]);
+  b.torus(`${v.id}_pleats`, 0.12, 0.028, 10, 32, paper, [0, 0.035, 0], [Math.PI / 2, 0, 0], [1, 1, 1.05]);
+  b.cylinder(`${v.id}_mesh`, 0.09, 0.09, 0.05, 20, steel, [0, 0.035, 0]);
 }
 
 function buildTurbine(b: MeshBuilder, v: PartVariant): void {
@@ -506,7 +509,6 @@ function buildToolInto(b: MeshBuilder, kind: ToolKind): void {
   switch (kind) {
     case 'brush': return brush(b);
     case 'sponge': return sponge(b);
-    case 'wrench': return wrench(b);
     default: throw new Error(`unhandled tool kind: ${kind}`);
   }
 }
@@ -524,23 +526,31 @@ function sponge(b: MeshBuilder): void {
   b.box('sponge_body', 0.14, 0.05, 0.1, body, [0, 0, 0]);
 }
 
-function wrench(b: MeshBuilder): void {
-  const steel = cond(0x8b9096, 0.9, 0.35);
-  b.cylinder('wrench_handle', 0.02, 0.02, 0.24, 10, steel, [0, 0, 0], AXIS_Z);
-  b.torus('wrench_end1', 0.05, 0.016, 6, 16, steel, [0, 0, 0.12], ZERO, ONE, Math.PI * 1.2);
-  b.torus('wrench_end2', 0.05, 0.016, 6, 16, steel, [0, 0, -0.12], ZERO, ONE, Math.PI * 1.2);
+/**
+ * A 400 ml aerosol, upright, the nozzle aimed down +Z the way the tools point. The
+ * tin is the paint's own colour, the only label a shelf of them needs.
+ */
+function buildSprayCanInto(b: MeshBuilder, paint: number): void {
+  const tin = cond(paint, 0.55, 0.32);
+  const steel = cond(0xb9bdc1, 0.9, 0.3);
+  const actuator = flat(0xe8e4dc, 0.5);
+  b.cylinder('spray_tin', 0.033, 0.033, 0.19, 16, tin, [0, 0, 0]);
+  b.cylinder('spray_rim_bottom', 0.034, 0.034, 0.01, 16, steel, [0, -0.095, 0]);
+  b.cylinder('spray_shoulder', 0.012, 0.034, 0.03, 16, steel, [0, 0.11, 0]);
+  b.cylinder('spray_valve', 0.01, 0.01, 0.012, 8, steel, [0, 0.13, 0]);
+  b.box('spray_actuator', 0.024, 0.02, 0.028, actuator, [0, 0.145, 0.002]);
+  b.cylinder('spray_nozzle', 0.004, 0.004, 0.008, 6, flat(0x202225, 0.6), [0, 0.148, 0.018], AXIS_Z);
 }
 
 /**
- * Colour-codes the can by fluid, the way a workshop shelf does: red petrol, yellow
- * diesel, and the two engine fluids in the colours those bottles actually come in —
- * blue water, dark blue-black oil. It is the only way to tell four identical cans
- * apart at a glance in the inventory strip.
+ * Colour-codes the can by fluid, the way a workshop shelf does: red petrol, and the
+ * two engine fluids in the colours those bottles actually come in — blue water, dark
+ * blue-black oil. It is the only way to tell three identical cans apart at a glance
+ * in the inventory strip.
  */
 function buildFluidCanInto(b: MeshBuilder, fluid: FluidKind): void {
   const color =
     fluid === 'petrol' ? 0xb03a2e
-    : fluid === 'diesel' ? 0xc9a227
     : fluid === 'water' ? 0x2f6fa8
     : 0x2b2f3a;
   const metal = cond(color, 0.7, 0.4);
@@ -1206,6 +1216,10 @@ export function createItemMesh(item: Item): THREE.Object3D {
     case 'fluid_can':
       return buildGroup(
         itemBlueprint(`fluid_${item.fluid}`, (b) => buildFluidCanInto(b, item.fluid)).instructions,
+      );
+    case 'spray_can':
+      return buildGroup(
+        itemBlueprint(`spray_${item.paint.toString(16)}`, (b) => buildSprayCanInto(b, item.paint)).instructions,
       );
     case 'weapon':
       return buildGroup(itemBlueprint(`weapon_${item.weapon}`, (b) => buildWeaponInto(b, item.weapon)).instructions);

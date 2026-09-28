@@ -30,7 +30,8 @@ import {
   renderScaleFor,
 } from '../core/renderer';
 import type { SpawnRequest } from '../game/spawn';
-import { modelEngine, CAR_MODELS } from '../vehicle/carmodels';
+import { CAR_MODELS } from '../vehicle/carmodels';
+import { CAR_PAINTS } from '../vehicle/carpaint';
 import { ALL_VARIANTS } from '../parts/registry';
 import { CAMERA_FRAME_LIMIT, type FluidKind, type ShadeTint } from '../items/items';
 
@@ -182,13 +183,13 @@ const DRIVE_LAYOUTS: readonly { readonly id: DriveLayout; readonly label: string
  */
 const DEV_FLUIDS: readonly { readonly fluid: FluidKind; readonly capacity: number }[] = [
   { fluid: 'petrol', capacity: 20 },
-  { fluid: 'diesel', capacity: 20 },
   { fluid: 'water', capacity: 5 },
   { fluid: 'oil', capacity: 5 },
 ];
 
 export type DevSpawnItemRequest =
   | { readonly type: 'fluid_can'; readonly fluid: FluidKind; readonly capacity: number }
+  | { readonly type: 'spray_can'; readonly paint: number }
   | { readonly type: 'bubble_gum' }
   | { readonly type: 'medicine' }
   | { readonly type: 'binoculars' }
@@ -1618,17 +1619,6 @@ export class MainMenu {
               name.textContent = def.label;
               row.append(name);
 
-              // Fuel badge. Only diesels are marked: petrol is the default across
-              // the catalogue, so badging every petrol car would be twenty chips
-              // saying nothing. What matters is spotting the handful that will
-              // refuse a petrol can, before you drive one into the desert.
-              if (modelEngine(def).fuel === 'diesel') {
-                const fuel = el('span', 'menu-body-fuel');
-                fuel.textContent = 'D';
-                fuel.title = 'diesel';
-                row.append(fuel);
-              }
-
               const cls = el('span', 'menu-body-class');
               cls.textContent = def.bodyClass;
               row.append(cls);
@@ -1653,10 +1643,7 @@ export class MainMenu {
             spawnNote.textContent = spawnModelId;
             return;
           }
-          // The note spells the fuel out in full, since 'D' is only legible once
-          // you already know what it means.
-          const fuel = modelEngine(def).fuel;
-          spawnNote.textContent = `${def.label} (${def.bodyClass}, ${fuel})`;
+          spawnNote.textContent = `${def.label} (${def.bodyClass})`;
         };
         paintNote();
         panel.appendChild(spawnNote);
@@ -1693,12 +1680,6 @@ export class MainMenu {
           const name = el('span', 'menu-body-label');
           name.textContent = spec.fluid;
           row.append(name);
-          if (spec.fluid === 'diesel') {
-            const badge = el('span', 'menu-body-fuel');
-            badge.textContent = 'D';
-            badge.title = 'diesel';
-            row.append(badge);
-          }
           const cap = el('span', 'menu-body-class');
           cap.textContent = `${spec.capacity} L`;
           row.append(cap);
@@ -1720,6 +1701,21 @@ export class MainMenu {
           finish('resume');
         });
         list.appendChild(gumRow);
+
+        // One chip per factory colour, painted in it: the spray cans.
+        const paints = el('div', 'menu-paints');
+        for (const swatch of CAR_PAINTS) {
+          const chip = button('menu-paint', '');
+          chip.style.background = `#${swatch.hex.toString(16).padStart(6, '0')}`;
+          chip.title = `${swatch.name} spray paint`;
+          chip.setAttribute('aria-label', chip.title);
+          chip.addEventListener('click', () => {
+            hooks.spawnItem?.({ type: 'spray_can', paint: swatch.hex });
+            finish('resume');
+          });
+          paints.appendChild(chip);
+        }
+        list.appendChild(paints);
 
         const equipment: readonly {
           readonly label: string;

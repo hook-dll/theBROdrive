@@ -28,7 +28,7 @@ import {
 } from './items/items';
 import { WeaponController } from './items/weapons';
 import { LoosePartField } from './parts/loose';
-import { oilCapacity, variant } from './parts/registry';
+import { oilCapacity } from './parts/registry';
 import { TouchControls } from './core/touch';
 import {
   loadCarModel,
@@ -103,7 +103,8 @@ import {
   markResumeTarget,
   RESUME_HEALTHY_SECONDS,
 } from './save/resume';
-import { bonnetPart, bonnetWaterCapacity } from './vehicle/bonnet';
+import { bonnetAirFilter, bonnetPart, bonnetWaterCapacity } from './vehicle/bonnet';
+import { AIR_FILTER_DUE_CLOG } from './vehicle/airfilter';
 import {
   TrailerField,
   TRAILER_MODEL_FIT,
@@ -2062,14 +2063,13 @@ async function boot(): Promise<void> {
       const car = s.cars[drivingId!];
       const waterCap = bonnetWaterCapacity(car?.bonnet ?? []);
       const oilCap = oilCapacity(stats.engine);
-      const enginePart = bonnetPart(car?.bonnet ?? [], 0);
-      const requiredFuel = enginePart === null
-        ? null
-        : (variant(enginePart.variantId).engine?.fuel ?? null);
-      const wrongFuel = requiredFuel !== null
-        && (car?.fuelLitres ?? 0) > 0
-        && car?.fuelKind !== requiredFuel;
-      const checkEngine = requiredFuel === null || wrongFuel || (car?.oilLitres ?? 0) <= 0;
+      // The lamp is the engine management telling the driver something is wrong under
+      // the bonnet: no engine, no oil, no air filter, or a filter due for replacement.
+      const filter = bonnetAirFilter(car?.bonnet ?? []);
+      const checkEngine = bonnetPart(car?.bonnet ?? [], 0) === null
+        || (car?.oilLitres ?? 0) <= 0
+        || filter === null
+        || (filter.clog ?? 0) >= AIR_FILTER_DUE_CLOG;
       hud.setDriving({
         speedKmh: driving.speedKmh,
         rpm: driving.rpm,

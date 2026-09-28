@@ -1,21 +1,24 @@
 /**
- * Engine cooling: water, radiators and a real coolant temperature.
+ * Engine cooling: water, the radiator and a real coolant temperature.
  *
  * This is a LUMPED THERMAL MODEL, not a fluid simulation. One temperature stands
  * for block, head and water together, heat goes in from combustion and leaves
- * through the fitted radiator, and everything the player can change — which
- * radiator is bolted in, how much water is in it, how hard they are driving, how
- * fast the air is moving through the core, what time of day it is — is a term in
- * that one balance:
+ * through the radiator, and everything the player can change — how much water is in
+ * it, how hard they are driving, whether a turbo is boosting, how fast the air is
+ * moving through the core, what time of day it is — is a term in that one balance:
  *
  *   dT/dt = ( heatIn - heatOut ) / thermalMass
- *   heatIn  = idle + load * throttle + rpm * revs                     [kW]
+ *   heatIn  = idle + load * throttle * boost + rpm * revs              [kW]
  *   heatOut = ( radiator * airflow * waterEffect + shell ) * (T - air) [kW]
+ *
+ * THERE IS ONE RADIATOR, and it is enough for any engine with room to spare
+ * (`RADIATOR_MARGIN`). What the player manages is the WATER: a full core holds any
+ * engine at its thermostat; as the level falls the core loses effect, gently at first
+ * and then steeply (`waterCoolingEffect`), and a car driven on a near-empty radiator
+ * overheats under any real load.
  *
  * Consequences that fall out of the shape rather than being special-cased:
  *  - Light load warms up to a stable temperature; heavy load stabilises higher.
- *  - An adequate radiator finds an equilibrium; an undersized one cannot, so the
- *    temperature keeps climbing while the load lasts. That is the fitment mechanic.
  *  - Dry means the radiator contributes NOTHING and only the bare shell loss
  *    remains, so temperature runs away in tens of seconds instead of instantly
  *    destroying the engine.
@@ -32,8 +35,9 @@
  * persistent state is one number, mirrored into `CarState.engineTempC`.
  */
 
-import type { EngineHeatSpec, EngineSpec, RadiatorClass, RadiatorSpec } from '../parts/registry';
+import type { EngineHeatSpec, EngineSpec, RadiatorSpec } from '../parts/registry';
 import { engineHeat } from '../parts/registry';
+import { TURBO_TORQUE_GAIN } from './drivetrain';
 import { weather } from '../world/weather';
 
 /**
@@ -65,17 +69,11 @@ export interface CoolingContext {
   readonly ambientC: number;
   /** False while the engine is not turning: no combustion heat. */
   readonly engineRunning: boolean;
-}
-
-export interface RadiatorFit {
-  /** Multiplies the radiator's rated capability once fitted. */
-  readonly multiplier: number;
   /**
-   * Why this radiator is a compromise, for the bonnet prompt. Null when the fit is
-   * right. A wrong fit is never REFUSED — an undersized radiator physically bolts
-   * on and then cooks the engine, which is the lesson.
+   * Turbocharger boost, 0..1 (vehicle/drivetrain.ts). The load heat scales with the
+   * extra torque it makes, so a boosted engine runs hotter under the same pedal.
    */
-  readonly warning: string | null;
+  readonly boost: number;
 }
 
 export interface CoolingState {
@@ -86,8 +84,8 @@ export interface CoolingState {
   readonly waterCapacity: number;
   /** 0..1 of capacity; 0 when no radiator is fitted at all. */
   readonly waterFraction: number;
-  readonly radiatorClass: RadiatorClass | null;
-  readonly fit: RadiatorFit;
+  /** How much of its rating the core has at this water level, 0..1. */
+  readonly waterEffect: number;
   /** Torque scale this temperature imposes, 0..1. */
   readonly performance: number;
   /** Rev ceiling as a fraction of the redline, 0..1. */
@@ -159,11 +157,16 @@ const IDLE_AIRFLOW = 0.34;
  */
 const SHELL_LOSS_KW_PER_K = 0.055;
 /**
- * Water level at which cooling is as good as a full core, as a fraction of
- * capacity. Below it the core is partly air and its effect falls away linearly, so
- * a half-empty radiator is a real handicap rather than a binary failure.
+ * The radiator's rating against the engine's full-load heat, at full airflow with a
+ * full core. 1.8 holds any engine near its thermostat on a long full-throttle climb in
+ * the afternoon heat; a turbo's extra heat eats some of that margin.
  */
-const FULL_WATER_FRACTION = 0.7;
+export const RADIATOR_MARGIN = 1.8;
+/**
+ * The temperature rise over air a correctly sized core holds at full load, kelvin.
+ * The rating is the engine's full-load heat over this, times the margin.
+ */
+const DESIGN_RISE_K = 62;
 /**
  * Thermostat opening window, kelvin: it starts to crack this far below the
  * engine's operating temperature and is fully open this many kelvin later.
@@ -201,52 +204,25 @@ function clamp(value: number, low: number, high: number): number {
 }
 
 /**
- * Which radiator an engine wants, for prompts and for the compatibility warning.
+ * How much of its rating the core keeps at this water level (fill 0..1).
  *
- * Derived from the engine's own cooling requirement against the class capabilities
- * in the catalogue, so adding a radiator class or retuning an engine cannot leave a
- * stale table behind.
- */
-const CLASS_CAPABILITY: Readonly<Record<RadiatorClass, number>> = {
-  small: 1.1,
-  standard: 1.65,
-  large: 2.45,
-};
-
-/**
- * How well a radiator suits an engine.
+ *   full .. 60%   1.00 -> 0.85   barely noticed: the top of the core is air
+ *   60% .. 30%    0.85 -> 0.45   a hot afternoon or a climb now shows on the gauge
+ *   30% .. dry    0.45 -> 0      no real load can be held; top up or stop
  *
- * Two penalties, both mild, because the raw kW/K difference between the classes is
- * already the main consequence:
- *  - An UNDERSIZED core also flows badly for the engine's water pump, so it loses
- *    a further tenth of its rating. This is what turns "slightly too small" into
- *    "will not hold temperature towing".
- *  - An OVERSIZED core is not a bonus. Its capability is capped at a fifth above
- *    what the engine asks for, so bolting the copper core to a 1.2 four buys the
- *    water capacity and the thermal margin but not a magic cold engine.
+ * Dry is exactly zero: no water, no circuit, and the core is an ornament.
  */
-export function radiatorFit(engine: EngineSpec, radiator: RadiatorSpec | null): RadiatorFit {
-  if (radiator === null) return { multiplier: 0, warning: 'no radiator fitted' };
-  const need = engineHeat(engine).coolingRequirementKwPerK;
-  const have = radiator.coolingKwPerK;
-  if (have < need * 0.95) {
-    return {
-      multiplier: 0.9,
-      warning: `${radiator.klass} radiator is undersized for this engine`,
-    };
-  }
-  if (have > need * 1.2) {
-    return { multiplier: (need * 1.2) / have, warning: null };
-  }
-  return { multiplier: 1, warning: null };
+export function waterCoolingEffect(fill: number): number {
+  const f = clamp(Number.isFinite(fill) ? fill : 0, 0, 1);
+  if (f <= 0) return 0;
+  if (f >= 0.6) return 0.85 + 0.15 * ((f - 0.6) / 0.4);
+  if (f >= 0.3) return 0.45 + 0.4 * ((f - 0.3) / 0.3);
+  return 0.45 * (f / 0.3);
 }
 
-/** The class an engine is happiest with: the smallest one that can hold it. */
-export function preferredRadiatorClass(engine: EngineSpec): RadiatorClass {
-  const need = engineHeat(engine).coolingRequirementKwPerK;
-  if (CLASS_CAPABILITY.small >= need * 0.95) return 'small';
-  if (CLASS_CAPABILITY.standard >= need * 0.95) return 'standard';
-  return 'large';
+/** The radiator's rating for this engine, kW per kelvin at full airflow and a full core. */
+export function radiatorKwPerK(heat: EngineHeatSpec): number {
+  return ((heat.idleHeatKw + heat.loadHeatKw + heat.rpmHeatKw) / DESIGN_RISE_K) * RADIATOR_MARGIN;
 }
 
 export function coolingZone(heat: EngineHeatSpec, celsius: number): CoolingZone {
@@ -261,8 +237,8 @@ export function coolingZone(heat: EngineHeatSpec, celsius: number): CoolingZone 
  * Gauge position, 0..1.
  *
  * Anchored on the engine's OWN thresholds rather than a fixed 0-140 scale, so the
- * needle means the same thing on a petrol four and a truck diesel that runs 20 K
- * hotter: half scale is the middle of its working band, and the red starts at its
+ * needle means the same thing on every engine, whatever its overrides: half scale is
+ * the middle of its working band, and the red starts at its
  * critical temperature. `optimalMinC - 40` puts a cold desert morning near the
  * bottom stop without ever pinning it there.
  */
@@ -321,7 +297,8 @@ export class EngineCoolingSystem {
   private engine: EngineSpec | null = null;
   private heat: EngineHeatSpec | null = null;
   private radiator: RadiatorSpec | null = null;
-  private fitCache: RadiatorFit = { multiplier: 0, warning: 'no radiator fitted' };
+  /** The core's rating for the fitted engine; 0 with no engine or no radiator. */
+  private coreKwPerK = 0;
   private temperatureC: number;
   private water = 0;
   private overheatSeconds = 0;
@@ -339,7 +316,7 @@ export class EngineCoolingSystem {
     this.engine = engine;
     this.heat = engine ? engineHeat(engine) : null;
     this.radiator = radiator;
-    this.fitCache = engine ? radiatorFit(engine, radiator) : { multiplier: 0, warning: null };
+    this.coreKwPerK = this.heat !== null && radiator !== null ? radiatorKwPerK(this.heat) : 0;
   }
 
   installRadiator(radiator: RadiatorSpec | null): void {
@@ -405,15 +382,15 @@ export class EngineCoolingSystem {
    * started steep would make the first metre per second of a rolling start dump the
    * temperature, which reads as a bug from the driver's seat.
    */
-  private lossKwPerK(speedMps: number): number {
+  private waterEffect(): number {
     const capacity = this.radiator?.capacity ?? 0;
-    const fill = capacity > 0 ? this.water / capacity : 0;
-    // Dry is dry: no water, no circuit, and the core is an ornament.
-    const waterEffect = fill <= 0 ? 0 : clamp(fill / FULL_WATER_FRACTION, 0, 1);
+    return capacity > 0 ? waterCoolingEffect(this.water / capacity) : 0;
+  }
+
+  private lossKwPerK(speedMps: number): number {
     const speed = Math.abs(Number.isFinite(speedMps) ? speedMps : 0);
     const airflow = IDLE_AIRFLOW + (1 - IDLE_AIRFLOW) * clamp(speed / FULL_AIRFLOW_MPS, 0, 1);
-    const core = (this.radiator?.coolingKwPerK ?? 0) * this.fitCache.multiplier;
-    return core * airflow * waterEffect * this.thermostat() + SHELL_LOSS_KW_PER_K;
+    return this.coreKwPerK * airflow * this.waterEffect() * this.thermostat() + SHELL_LOSS_KW_PER_K;
   }
 
   /**
@@ -460,8 +437,9 @@ export class EngineCoolingSystem {
     const running = ctx.engineRunning;
     const load = clamp(Number.isFinite(ctx.load) ? ctx.load : 0, 0, 1);
     const revs = clamp(Number.isFinite(ctx.revs) ? ctx.revs : 0, 0, 1);
+    const boost = clamp(Number.isFinite(ctx.boost) ? ctx.boost : 0, 0, 1);
     const heatInKw = running
-      ? heat.idleHeatKw + heat.loadHeatKw * load + heat.rpmHeatKw * revs
+      ? heat.idleHeatKw + heat.loadHeatKw * load * (1 + TURBO_TORQUE_GAIN * boost) + heat.rpmHeatKw * revs
       : 0;
 
     this.temperatureC = stepTemperature(
@@ -533,8 +511,7 @@ export class EngineCoolingSystem {
         waterLitres: this.water,
         waterCapacity: capacity,
         waterFraction: capacity > 0 ? this.water / capacity : 0,
-        radiatorClass: this.radiator?.klass ?? null,
-        fit: this.fitCache,
+        waterEffect: this.waterEffect(),
         performance: 1,
         revLimit: 1,
         overheating: false,
@@ -549,8 +526,7 @@ export class EngineCoolingSystem {
       waterLitres: this.water,
       waterCapacity: capacity,
       waterFraction: capacity > 0 ? this.water / capacity : 0,
-      radiatorClass: this.radiator?.klass ?? null,
-      fit: this.fitCache,
+      waterEffect: this.waterEffect(),
       performance: this.performanceFor(heat),
       // A hot engine is held short of the redline: the last thousand rpm is where
       // the heat is made, and taking it away is a limp-home, not a punishment.

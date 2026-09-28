@@ -1,5 +1,6 @@
 import type * as THREE from 'three';
 import type { Item } from '../items/items';
+import { BONNET_SLOT_COUNT } from './bonnet';
 
 /** Every car and static roadside vehicle uses the same visible four-by-two trunk layout. */
 export const TRUNK_COLUMNS = 4;
@@ -38,6 +39,11 @@ export function storageGridRows(side: StorageSide): number {
   return side === 'bonnet' ? 1 : TRUNK_ROWS;
 }
 
+/** The trunk is four by two; the bonnet is one row of its service cells. */
+export function storageGridColumns(side: StorageSide): number {
+  return side === 'bonnet' ? BONNET_SLOT_COUNT : TRUNK_COLUMNS;
+}
+
 /** Writes one cell centre in chassis-local space without allocating. */
 export function storageCellLocal(
   cell: number,
@@ -46,12 +52,13 @@ export function storageCellLocal(
   out: THREE.Vector3,
 ): THREE.Vector3 {
   const width = trunkGridWidth(halfExtents[0]);
-  const cellWidth = width / TRUNK_COLUMNS;
-  const column = cell % TRUNK_COLUMNS;
-  const row = Math.floor(cell / TRUNK_COLUMNS);
+  const columns = storageGridColumns(side);
+  const cellWidth = width / columns;
+  const column = cell % columns;
+  const row = Math.floor(cell / columns);
   const rows = storageGridRows(side);
   out.set(
-    (column - (TRUNK_COLUMNS - 1) * 0.5) * cellWidth,
+    (column - (columns - 1) * 0.5) * cellWidth,
     storageGridCentreY(halfExtents[1]) + ((rows - 1) * 0.5 - row) * TRUNK_CELL_HEIGHT,
     side === 'bonnet'
       ? halfExtents[2] + TRUNK_GRID_DEPTH
@@ -93,9 +100,10 @@ export function intersectStorageGrid(
     return false;
   }
 
-  const column = Math.min(TRUNK_COLUMNS - 1, Math.floor(((x + width * 0.5) / width) * TRUNK_COLUMNS));
+  const columns = storageGridColumns(side);
+  const column = Math.min(columns - 1, Math.floor(((x + width * 0.5) / width) * columns));
   const row = Math.min(rows - 1, Math.floor(((centreY + height * 0.5 - y) / height) * rows));
-  out.cell = row * TRUNK_COLUMNS + column;
+  out.cell = row * columns + column;
   out.distance = distance;
   return true;
 }

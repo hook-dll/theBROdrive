@@ -58,10 +58,32 @@ const LIMITER_RAMP_RPM = 150;
 /**
  * Pumping loss as a fraction of peak torque. This is the constant (RPM-
  * independent) part of engine braking: the work of dragging air through a
- * closed throttle. Scaled by engine size so a big diesel resists far more than
+ * closed throttle. Scaled by engine size so a big V8 resists far more than
  * a small four at the same crank speed.
  */
 const PUMPING_LOSS_FRACTION = 0.03;
+
+/*
+ * ---- the turbocharger ----
+ *
+ * A bolt-on exhaust turbine (bonnet cell 1) over an engine built without one. It
+ * adds torque in proportion to its BOOST, 0..1, and the boost is the whole feel of
+ * the thing:
+ *
+ *  - it wants exhaust: nothing below `TURBO_SPOOL_START` of the rev range, full
+ *    boost from `TURBO_SPOOL_FULL`, and in proportion to the pedal in between;
+ *  - it lags: the wheel takes `TURBO_SPOOL_UP_S` to wind up and sheds boost faster
+ *    when the pedal comes up, so a turbo car pulls late and then hard.
+ *
+ * At full boost the curve is `1 + TURBO_TORQUE_GAIN` times the engine's own, so the
+ * power, the fuel burned on it and the heat into the water (vehicle/cooling.ts) all
+ * rise together.
+ */
+export const TURBO_TORQUE_GAIN = 0.35;
+const TURBO_SPOOL_START = 0.3;
+const TURBO_SPOOL_FULL = 0.6;
+const TURBO_SPOOL_UP_S = 0.8;
+const TURBO_SPOOL_DOWN_S = 0.35;
 /**
  * Closed-throttle engine-braking multiplier.
  *
@@ -174,7 +196,7 @@ export function wheelTorqueToForce(torqueNm: number, wheelRadius: number): numbe
  *
  * Inertia is then a fixed clutch-and-input-shaft term plus a term that grows with
  * displacement, which is what a bigger crank and a bigger flywheel are. The result
- * lands 0.17 kg·m² for the 1.2 and about 0.5 for a truck diesel — the range real
+ * lands 0.17 kg·m² for the 1.2 and about 0.4 for the 5.7 V8 — the range real
  * assemblies of this era occupy.
  */
 const TORQUE_PER_LITRE = 72;
@@ -445,6 +467,41 @@ export class Drivetrain {
     this.thermalRevLimit = clamp(Number.isFinite(revLimit) ? revLimit : 1, 0.4, 1);
   }
 
+  /** A turbocharger is fitted (bonnet cell 1). */
+  private turboFitted = false;
+  /** Current boost, 0..1; see the turbocharger note above. */
+  private boostValue = 0;
+  /** Share of torque the air filter lets the engine breathe for (vehicle/airfilter.ts). */
+  private intakeBreath = 1;
+
+  /**
+   * The intake side, set by the Vehicle from the bonnet: whether a turbo is fitted,
+   * and how freely the air filter breathes. Like the thermal limits, these act on the
+   * torque where it is made, so fuel and engine braking describe the same engine.
+   */
+  setInduction(turboFitted: boolean, breath: number): void {
+    this.turboFitted = turboFitted;
+    if (!turboFitted) this.boostValue = 0;
+    this.intakeBreath = clamp(Number.isFinite(breath) ? breath : 1, 0, 1);
+  }
+
+  /** Turbo boost right now, 0..1. Zero with no turbocharger fitted. */
+  get boost(): number {
+    return this.boostValue;
+  }
+
+  private updateBoost(dt: number, demand: number, engine: EngineSpec | null): void {
+    if (!this.turboFitted || engine == null) {
+      this.boostValue = 0;
+      return;
+    }
+    const rev = this.rpmValue / engine.redlineRpm;
+    const u = clamp((rev - TURBO_SPOOL_START) / (TURBO_SPOOL_FULL - TURBO_SPOOL_START), 0, 1);
+    const target = demand * u * u * (3 - 2 * u);
+    const tau = target > this.boostValue ? TURBO_SPOOL_UP_S : TURBO_SPOOL_DOWN_S;
+    this.boostValue += (target - this.boostValue) * (1 - Math.exp(-dt / tau));
+  }
+
   /**
    * Net full-throttle crank torque this engine can make at `rpm` right now: the
    * catalogue curve (`engineTorqueNm`) with the cooling system's two limits applied.
@@ -457,7 +514,12 @@ export class Drivetrain {
   private wotTorqueNm(rpm: number): number {
     const e = this.engine;
     if (e == null) return 0;
-    return engineTorqueNm(e, rpm, e.redlineRpm * this.thermalRevLimit) * this.thermalPerformance;
+    return (
+      engineTorqueNm(e, rpm, e.redlineRpm * this.thermalRevLimit) *
+      this.thermalPerformance *
+      this.intakeBreath *
+      (1 + TURBO_TORQUE_GAIN * this.boostValue)
+    );
   }
 
   /**
@@ -544,6 +606,7 @@ export class Drivetrain {
       Math.abs(crankSpeed),
       demand > 0 ? this.rpmValue / RPM_PER_RAD_PER_SEC : 0,
     );
+    this.updateBoost(dt, demand, engine);
 
     let driveTorqueNm = 0;
     let engineBrakeTorqueNm = 0;

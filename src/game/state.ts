@@ -1,8 +1,9 @@
 import { hash } from '../core/rng';
 import type { Item, StickerKind, SunShadesItem } from '../items/items';
-import type { FuelType, PartInstance } from '../parts/registry';
-import { bonnetAccepts, bonnetSlotFluid, BONNET_SLOT_COUNT } from '../vehicle/bonnet';
+import type { PartInstance } from '../parts/registry';
+import { AIR_FILTER_CELL, bonnetAccepts, bonnetSlotFluid, BONNET_SLOT_COUNT } from '../vehicle/bonnet';
 import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
+import type { CarPaint } from '../vehicle/carpaint';
 import { DEFAULT_SETTINGS } from './settings';
 import { localSolarDateAt } from './calendar';
 import type { Settings } from './settings';
@@ -69,8 +70,6 @@ export interface CarState {
   /** Last rendered reverse-lamp state. */
   reverseLightsOn: boolean;
   fuelLitres: number;
-  /** Fuel currently in the fitted tank; mixed or wrong fuel cannot run the engine. */
-  fuelKind: FuelType | 'mixed' | null;
   /**
    * Water in the radiator and oil in the engine, litres.
    *
@@ -112,11 +111,16 @@ export interface CarState {
    * `dirt` is raised by driving — how fast depends on what the tyres are throwing
    * up (see `SURFACES[].dust`) — and taken off with the brush and sponge that
    * already clean parts. `scratches` are raised by impacts and never fully undone:
-   * polishing takes them back to a floor, not to zero, because a repaint is not a
-   * thing this game has.
+   * polishing takes them back to a floor, not to zero. A respray (`paint`) changes
+   * the colour under them, not their amount.
    */
   dirt: number;
   scratches: number;
+  /**
+   * A spray-can respray over the factory colour, or null for the colour the car
+   * left the works in (vehicle/carpaint.ts).
+   */
+  paint: CarPaint | null;
   /** Metres travelled by this specific car. */
   odometer: number;
   /** Last known world transform, so a save restores it where it stood. */
@@ -246,9 +250,12 @@ export type WorldDelta =
   | { t: 'car_remove'; carId: string }
   | { t: 'car_transform'; carId: string; x: number; y: number; z: number; qx: number; qy: number; qz: number; qw: number }
   | { t: 'car_odometer'; carId: string; metres: number }
-  | { t: 'car_fuel'; carId: string; litres: number; fuelKind?: FuelType | 'mixed' | null }
+  | { t: 'car_fuel'; carId: string; litres: number }
+  /** The fitted air filter's wear, written by the driving car (vehicle/airfilter.ts). */
+  | { t: 'car_air_filter'; carId: string; clog: number }
   | { t: 'car_lights'; carId: string; headlightMode: HeadlightMode; taillightsOn: boolean; reverseLightsOn: boolean }
   | { t: 'car_body_condition'; carId: string; dirt: number; scratches: number }
+  | { t: 'car_paint'; carId: string; paint: CarPaint }
   | { t: 'car_bonnet'; carId: string; cell: number; item: Item | null }
   | { t: 'car_fluid'; carId: string; fluid: 'water' | 'oil'; litres: number }
   | { t: 'car_engine_temp'; carId: string; celsius: number }
@@ -273,7 +280,7 @@ export type WorldDelta =
    * engine lying in the world. The level lives on the part (`PartInstance.litres`)
    * and comes back out through the `car_bonnet` transfer when it is installed.
    */
-  | { t: 'loose_part_fluid'; partId: string; litres: number; fuelKind?: FuelType | 'mixed' | null }
+  | { t: 'loose_part_fluid'; partId: string; litres: number }
   /** Fluid poured into a can lying in the world. */
   | { t: 'loose_item_fluid'; itemId: string; litres: number }
   | { t: 'item_drop'; item: Item; x: number; y: number; z: number }
@@ -367,15 +374,8 @@ function moveSlotFluid(
   // container for THIS slot cannot be handed a level it has no business holding.
   if (bonnetAccepts(cell, outgoing)) {
     if (channel === 'fuel') {
-      // A MIXTURE is the one thing that does not travel. Nobody carries a tank of
-      // contaminated fuel about, and pulling the tank was already the documented
-      // recovery from a mis-fuel (see `pourPrompt` in player/interaction.ts) — if it
-      // came out with you, a mis-fuelled car would have no way back at all.
-      const contaminated = car.fuelKind === 'mixed';
-      outgoing.part.litres = contaminated ? 0 : car.fuelLitres;
-      outgoing.part.fuelKind = contaminated ? null : car.fuelKind;
+      outgoing.part.litres = car.fuelLitres;
       car.fuelLitres = 0;
-      car.fuelKind = null;
     } else if (channel === 'water') {
       outgoing.part.litres = car.waterLitres;
       car.waterLitres = 0;
@@ -389,8 +389,6 @@ function moveSlotFluid(
     const litres = Math.max(0, incoming.part.litres ?? 0);
     if (channel === 'fuel') {
       car.fuelLitres = litres;
-      car.fuelKind = litres > 0 ? incoming.part.fuelKind ?? null : null;
-      incoming.part.fuelKind = null;
     } else if (channel === 'water') {
       car.waterLitres = litres;
     } else {
@@ -551,12 +549,21 @@ export class GameWorld {
         }
         break;
       }
+      case 'car_paint': {
+        const car = s.cars[delta.carId];
+        if (car) car.paint = { ...delta.paint, cover: clamp01(delta.paint.cover) };
+        break;
+      }
       case 'car_fuel': {
         const car = s.cars[delta.carId];
-        if (car) {
-          car.fuelLitres = Math.max(0, delta.litres);
-          if (delta.fuelKind !== undefined) car.fuelKind = delta.fuelKind;
-          if (car.fuelLitres === 0) car.fuelKind = null;
+        if (car) car.fuelLitres = Math.max(0, delta.litres);
+        break;
+      }
+      case 'car_air_filter': {
+        const car = s.cars[delta.carId];
+        const item = car?.bonnet[AIR_FILTER_CELL];
+        if (car && bonnetAccepts(AIR_FILTER_CELL, item ?? null) && item?.type === 'part') {
+          item.part.clog = Math.max(0, delta.clog);
         }
         break;
       }
@@ -657,11 +664,6 @@ export class GameWorld {
         const loose = s.looseParts[delta.partId];
         if (!loose) break;
         loose.part.litres = delta.litres;
-        // A dry container records no fuel kind, exactly like a dry car tank: the
-        // next fluid in decides what it is holding.
-        if (delta.fuelKind !== undefined) {
-          loose.part.fuelKind = delta.litres > 0 ? delta.fuelKind : null;
-        }
         break;
       }
       case 'loose_item_fluid': {

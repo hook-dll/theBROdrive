@@ -248,6 +248,9 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
           litres: request.capacity,
         };
         break;
+      case 'spray_can':
+        item = { type: 'spray_can', id: ctx.world.runtimePartId(), paint: request.paint, charge: 1 };
+        break;
       case 'bubble_gum':
         item = { type: 'bubble_gum', id: ctx.world.runtimePartId(), charges: 5 };
         break;

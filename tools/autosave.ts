@@ -29,6 +29,7 @@ initial.cars['car:test'] = {
   fuelLitres: 20,
   dirt: 0,
   scratches: 0,
+  paint: null,
   waterLitres: 4,
   oilLitres: 3,
   engineTempC: COLD_SOAK_C,
@@ -104,11 +105,11 @@ world.apply({ t: 'time_of_day', timeOfDay: 100 });
 await Promise.resolve();
 check('unrelated delta does not save', calls.length === 0, `${calls.length} writes`);
 
-const wrench: Item = { type: 'tool', id: 'rt:trunk', tool: 'wrench', integrity: 0.8 };
-world.apply({ t: 'car_storage', carId: 'car:test', cell: 3, item: wrench });
+const brush: Item = { type: 'tool', id: 'rt:trunk', tool: 'brush', integrity: 0.8 };
+world.apply({ t: 'car_storage', carId: 'car:test', cell: 3, item: brush });
 await Promise.resolve();
 check('trunk mutation autosaves', calls.length === 1, `${calls.length} writes`);
-check('trunk item is captured', calls[0]?.state.cars['car:test']?.storage[3]?.id === wrench.id, calls[0]?.state.cars['car:test']?.storage[3]?.id ?? 'missing');
+check('trunk item is captured', calls[0]?.state.cars['car:test']?.storage[3]?.id === brush.id, calls[0]?.state.cars['car:test']?.storage[3]?.id ?? 'missing');
 check('car runtime state is flushed', calls[0]?.state.cars['car:test']?.x === 101, `x ${calls[0]?.state.cars['car:test']?.x}`);
 check('trailer runtime state is flushed', calls[0]?.state.trailers['trailer:test']?.x === 201, `x ${calls[0]?.state.trailers['trailer:test']?.x}`);
 
@@ -135,7 +136,7 @@ check('exit save name uses final position', calls[3]?.name === 'drive @ 900 m', 
 check('autosave reports no failure', failure === null, failure === null ? 'none' : String(failure));
 
 const roundTrip = decodeSaveCode(encodeSaveCode(calls[3]!.state));
-check('save code keeps trunk item', roundTrip.cars['car:test']?.storage[3]?.id === wrench.id, roundTrip.cars['car:test']?.storage[3]?.id ?? 'missing');
+check('save code keeps trunk item', roundTrip.cars['car:test']?.storage[3]?.id === brush.id, roundTrip.cars['car:test']?.storage[3]?.id ?? 'missing');
 check('save code keeps car pose', roundTrip.cars['car:test']?.x === 104, `x ${roundTrip.cars['car:test']?.x}`);
 check('save code keeps trailer state', roundTrip.trailers['trailer:test']?.x === 204 && roundTrip.trailers['trailer:test']?.hitchedTo === 'car:test', `x ${roundTrip.trailers['trailer:test']?.x}, hitch ${roundTrip.trailers['trailer:test']?.hitchedTo}`);
 

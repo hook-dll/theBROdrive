@@ -1,6 +1,7 @@
 import type { PartInstance } from '../parts/registry';
 import { variant } from '../parts/registry';
 import { stickerDef, type StickerKind } from './stickercatalog';
+import { carPaintSwatch } from '../vehicle/carpaint';
 
 /**
  * Everything the player can hold, carry or use.
@@ -10,7 +11,7 @@ import { stickerDef, type StickerKind } from './stickercatalog';
  * not a special case of anything; it is an item whose primary use fires.
  */
 
-export type ToolKind = 'brush' | 'sponge' | 'wrench';
+export type ToolKind = 'brush' | 'sponge';
 export type WeaponKind = 'rifle' | 'shotgun';
 export type ShadeTint = 'green' | 'yellow' | 'red';
 
@@ -21,10 +22,10 @@ export const CAMERA_FRAME_LIMIT = 5;
  * Everything that can be poured into a car.
  *
  * One union rather than "fuel" plus a special case each for the others: the pour
- * mechanic is identical for all four, and the only thing the kind decides is which
- * reservoir it goes into. Petrol and diesel additionally have to match the engine.
+ * mechanic is identical for all three, and the only thing the kind decides is which
+ * reservoir it goes into.
  */
-export type FluidKind = 'petrol' | 'diesel' | 'water' | 'oil';
+export type FluidKind = 'petrol' | 'water' | 'oil';
 
 export interface ToolItem {
   readonly type: 'tool';
@@ -47,6 +48,20 @@ export interface FluidCanItem {
   readonly capacity: number;
   /** Litres currently inside. */
   litres: number;
+}
+
+/**
+ * An aerosol of car paint, in one of the factory colours (vehicle/carpaint.ts).
+ * Held against a car's body it lays that colour over whatever is there; one can is
+ * a little more than one full coat.
+ */
+export interface SprayCanItem {
+  readonly type: 'spray_can';
+  readonly id: string;
+  /** 0xRRGGBB, always one of `CAR_PAINTS`. */
+  readonly paint: number;
+  /** Paint left, 0..1 of a full can. */
+  charge: number;
 }
 
 export interface WeaponItem {
@@ -156,6 +171,7 @@ export type Item =
   | ToolItem
   | PartItem
   | FluidCanItem
+  | SprayCanItem
   | WeaponItem
   | AmmoItem
   | QuarryItem
@@ -172,8 +188,8 @@ export type Item =
   | StickerEnvelopeItem;
 
 /**
- * Density, kg/litre. Petrol and diesel are the light ones; water is water and oil
- * is a shade under it.
+ * Density, kg/litre. Petrol is the light one; water is water and oil is a shade
+ * under it.
  *
  * Exported because mass is summed in two places — the pack's own carried weight in
  * `itemMass`, and each reservoir's contribution to the car in `Vehicle.computeStats`
@@ -182,7 +198,6 @@ export type Item =
  */
 export const FLUID_DENSITY: Record<FluidKind, number> = {
   petrol: 0.75,
-  diesel: 0.84,
   water: 1.0,
   oil: 0.87,
 };
@@ -209,13 +224,20 @@ export function itemLabel(item: Item): string {
       const named = item.part.destroyed ? `destroyed ${label}` : label;
       // A detached container carries its fluid with it (see `PartInstance.litres`),
       // and the amount is the whole reason to pick this one up rather than that one.
+      // An air filter's wear is the same kind of reason.
+      if (item.part.clog !== undefined) return `${named} (${Math.round(item.part.clog * 100)}% clogged)`;
       const litres = item.part.litres ?? 0;
       if (litres <= 0) return named;
-      const fluid = item.part.fuelKind ? ` ${item.part.fuelKind}` : '';
-      return `${named} (${litreText(litres)}${fluid})`;
+      return `${named} (${litreText(litres)})`;
     }
     case 'fluid_can':
       return `${item.fluid} can (${litreText(item.litres)})`;
+    case 'spray_can': {
+      const name = carPaintSwatch(item.paint)?.name ?? 'paint';
+      return item.charge > 0
+        ? `${name} spray paint (${Math.round(item.charge * 100)}%)`
+        : `empty ${name} spray can`;
+    }
     case 'weapon':
       return `${item.weapon} (${item.loaded}/${item.magazine})`;
     case 'ammo':
@@ -258,17 +280,16 @@ export function itemMass(item: Item): number {
       const litres = item.part.litres ?? 0;
       if (litres <= 0) return v.mass;
       // A full radiator or tank is mostly fluid, and the player feels that on foot.
-      // A dry tank is recorded with no fuel kind, so the fallback is only ever the
-      // engine's oil or the radiator's water; a mis-fuelled mixture weighs as diesel.
       const fluid: FluidKind =
-        item.part.fuelKind === 'mixed'
-          ? 'diesel'
-          : (item.part.fuelKind ?? (v.kind === 'engine' ? 'oil' : 'water'));
+        v.kind === 'engine' ? 'oil' : v.kind === 'fuel_tank' ? 'petrol' : 'water';
       return v.mass + litres * FLUID_DENSITY[fluid];
     }
     case 'fluid_can':
       // Empty can plus the fluid's own weight.
       return 2.5 + item.litres * FLUID_DENSITY[item.fluid];
+    case 'spray_can':
+      // A 400 ml aerosol: the tin, plus the paint and propellant still in it.
+      return 0.12 + item.charge * 0.36;
     case 'weapon':
       return item.weapon === 'shotgun' ? 3.4 : 4.1;
     case 'ammo':
@@ -302,7 +323,7 @@ export function itemMass(item: Item): number {
 
 /** True while the item's primary action can be held down continuously. */
 export function isContinuousUse(item: Item): boolean {
-  return item.type === 'tool' || item.type === 'fluid_can';
+  return item.type === 'tool' || item.type === 'fluid_can' || item.type === 'spray_can';
 }
 
 /**

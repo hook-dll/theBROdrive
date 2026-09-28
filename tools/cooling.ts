@@ -2,9 +2,10 @@
  * Engine cooling harness.
  *
  * Drives `EngineCoolingSystem` directly — no Rapier, no Three, no world — because
- * every claim the cooling system makes is a claim about one arithmetic model:
- * which radiator holds which engine, what a dry core does, what a standing car
- * cannot cool, and above all that none of it depends on the frame rate.
+ * every claim the cooling system makes is a claim about one arithmetic model: that
+ * the one core holds every engine, what a dry core does, what a standing car
+ * cannot cool, how the core fades as its water leaves, and above all that none of
+ * it depends on the frame rate.
  *
  * Run: `bun tools/cooling.ts`
  */
@@ -12,14 +13,15 @@
 import {
   EngineCoolingSystem,
   ambientAirC,
-  preferredRadiatorClass,
-  radiatorFit,
+  radiatorKwPerK,
   stepTemperature,
+  waterCoolingEffect,
   COLD_SOAK_C,
 } from '../src/vehicle/cooling';
 import {
   engineHeat,
   variant,
+  variantsOfKind,
   type EngineSpec,
   type RadiatorSpec,
 } from '../src/parts/registry';
@@ -32,13 +34,11 @@ function check(label: string, ok: boolean, detail: string): void {
 }
 
 const engineOf = (id: string): EngineSpec => variant(id).engine!;
-const radiatorOf = (id: string): RadiatorSpec => variant(id).radiator!;
 
 const SMALL_ENGINE = engineOf('engine_i4_1600');
-const TRUCK_DIESEL = engineOf('engine_d6_6600');
-const SMALL_RAD = radiatorOf('radiator_small');
-const STANDARD_RAD = radiatorOf('radiator_standard');
-const LARGE_RAD = radiatorOf('radiator_copper');
+const BIG_ENGINE = engineOf('engine_chevy_350');
+/** The one radiator, in every car's bonnet. */
+const RADIATOR: RadiatorSpec = variant('radiator').radiator!;
 
 const CRUISE_AMBIENT = 38;
 const CRUISE_SPEED = 25;
@@ -60,6 +60,7 @@ function run(
     running?: boolean;
     waterFill?: number;
     startC?: number;
+    boost?: number;
   },
 ): { temperature: number; water: number; system: EngineCoolingSystem } {
   const system = new EngineCoolingSystem(options.startC ?? COLD_SOAK_C);
@@ -75,58 +76,87 @@ function run(
       speedMps: options.speedMps ?? 0,
       ambientC: options.ambientC ?? CRUISE_AMBIENT,
       engineRunning: options.running ?? true,
+      boost: options.boost ?? 0,
     });
   }
   return { temperature: system.temperature, water: system.waterLitres, system };
 }
 
-console.log('cooling: fitment');
+console.log('cooling: the core and the water in it');
 
 check(
-  'each catalogue engine maps onto a radiator class',
-  preferredRadiatorClass(SMALL_ENGINE) === 'small' &&
-    preferredRadiatorClass(engineOf('engine_i6_2800')) === 'standard' &&
-    preferredRadiatorClass(TRUCK_DIESEL) === 'large',
-  `1.6=${preferredRadiatorClass(SMALL_ENGINE)} 2.8=${preferredRadiatorClass(engineOf('engine_i6_2800'))} d6=${preferredRadiatorClass(TRUCK_DIESEL)}`,
+  'the one core is rated against the engine it cools, not a class',
+  radiatorKwPerK(engineHeat(SMALL_ENGINE)) < radiatorKwPerK(engineHeat(BIG_ENGINE)),
+  `1.6 ${radiatorKwPerK(engineHeat(SMALL_ENGINE)).toFixed(2)} kW/K, ` +
+    `5.7 ${radiatorKwPerK(engineHeat(BIG_ENGINE)).toFixed(2)} kW/K`,
 );
 check(
-  'an undersized radiator fits, derated, with a stated reason',
-  radiatorFit(TRUCK_DIESEL, SMALL_RAD).multiplier < 1 &&
-    radiatorFit(TRUCK_DIESEL, SMALL_RAD).warning !== null,
-  `${radiatorFit(TRUCK_DIESEL, SMALL_RAD).warning}`,
+  'water keeps full effect at the brim and none at all when dry',
+  waterCoolingEffect(1) === 1 &&
+    waterCoolingEffect(0) === 0 &&
+    Math.abs(waterCoolingEffect(0.6) - 0.85) < 1e-9 &&
+    Math.abs(waterCoolingEffect(0.3) - 0.45) < 1e-9,
+  `1.00=${waterCoolingEffect(1).toFixed(2)} 0.60=${waterCoolingEffect(0.6).toFixed(2)} ` +
+    `0.30=${waterCoolingEffect(0.3).toFixed(2)} dry=${waterCoolingEffect(0).toFixed(2)}`,
 );
 check(
-  'an oversized radiator is allowed and capped, not a bonus',
-  radiatorFit(SMALL_ENGINE, LARGE_RAD).multiplier < 1 &&
-    radiatorFit(SMALL_ENGINE, LARGE_RAD).warning === null,
-  `multiplier=${radiatorFit(SMALL_ENGINE, LARGE_RAD).multiplier.toFixed(2)}`,
+  'cooling effect only ever falls as the water leaves',
+  (() => {
+    let previous = waterCoolingEffect(0);
+    for (let fill = 0.01; fill <= 1.0001; fill += 0.01) {
+      const now = waterCoolingEffect(fill);
+      if (now < previous - 1e-9) return false;
+      previous = now;
+    }
+    return true;
+  })(),
+  'monotone across the whole 0..1 fill range',
 );
+
+// The whole point of a single core: it is rated from the engine's own full-load
+// heat, so there is no engine in the registry it cannot hold — the imports included.
 check(
-  'no radiator at all rejects nothing and says so',
-  radiatorFit(SMALL_ENGINE, null).multiplier === 0 &&
-    radiatorFit(SMALL_ENGINE, null).warning === 'no radiator fitted',
-  `${radiatorFit(SMALL_ENGINE, null).warning}`,
+  'a full core holds every catalogue engine at cruise and at full load',
+  (() => {
+    const hot: string[] = [];
+    for (const v of variantsOfKind('engine')) {
+      const heat = engineHeat(v.engine!);
+      for (const load of [0.3, 1] as const) {
+        const settled = run(v.engine!, RADIATOR, {
+          seconds: 600,
+          load,
+          revs: 0.4 + 0.4 * load,
+          speedMps: CRUISE_SPEED,
+        });
+        if (!(settled.temperature < heat.warningC && settled.temperature > heat.optimalMinC)) {
+          hot.push(`${v.id}@${load} ${settled.temperature.toFixed(0)} C`);
+        }
+      }
+    }
+    return hot.length === 0;
+  })(),
+  `${variantsOfKind('engine').length} engines in band at 38 C, 90 km/h, both loads`,
 );
 
 console.log('cooling: temperature behaviour');
 
 const smallHeat = engineHeat(SMALL_ENGINE);
-const warmUp = run(SMALL_ENGINE, SMALL_RAD, {
+const warmUp = run(SMALL_ENGINE, RADIATOR, {
   seconds: 240,
   load: 0.25,
   revs: 0.35,
   speedMps: CRUISE_SPEED,
 });
 check(
-  'small engine + matched radiator + full water stabilises in band',
+  'small engine + full water stabilises in band',
   warmUp.temperature > smallHeat.optimalMinC && warmUp.temperature < smallHeat.warningC,
   `${warmUp.temperature.toFixed(1)} C (band ${smallHeat.optimalMinC}-${smallHeat.warningC})`,
 );
 
 const warmUpTime = (() => {
   const system = new EngineCoolingSystem(COLD_SOAK_C);
-  system.configure(SMALL_ENGINE, SMALL_RAD);
-  system.setWater(SMALL_RAD.capacity);
+  system.configure(SMALL_ENGINE, RADIATOR);
+  system.setWater(RADIATOR.capacity);
   system.setTemperature(COLD_SOAK_C);
   for (let t = 0; t < 600; t += 0.5) {
     system.update(0.5, {
@@ -135,6 +165,7 @@ const warmUpTime = (() => {
       speedMps: CRUISE_SPEED,
       ambientC: CRUISE_AMBIENT,
       engineRunning: true,
+      boost: 0,
     });
     if (system.temperature >= smallHeat.optimalMinC) return t;
   }
@@ -146,31 +177,33 @@ check(
   `${warmUpTime.toFixed(0)} s to reach ${smallHeat.optimalMinC} C`,
 );
 
-const bigOnSmall = run(TRUCK_DIESEL, SMALL_RAD, {
-  seconds: 180,
+// The core no longer comes in sizes: what decides whether the car holds temperature
+// is how much water is in the one that is fitted. A fifth-full core is the in-play
+// "I ignored the gauge" case.
+const bigHeat = engineHeat(BIG_ENGINE);
+const lowWater = run(BIG_ENGINE, RADIATOR, {
+  seconds: 300,
   load: 1,
   revs: 0.8,
   speedMps: CRUISE_SPEED,
+  waterFill: 0.2,
 });
-const bigOnLarge = run(TRUCK_DIESEL, LARGE_RAD, {
-  seconds: 180,
+const fullWater = run(BIG_ENGINE, RADIATOR, {
+  seconds: 300,
   load: 1,
   revs: 0.8,
   speedMps: CRUISE_SPEED,
 });
 check(
-  'big engine on a small radiator overheats under load',
-  bigOnSmall.temperature > engineHeat(TRUCK_DIESEL).warningC,
-  `${bigOnSmall.temperature.toFixed(1)} C vs warning ${engineHeat(TRUCK_DIESEL).warningC}`,
-);
-check(
-  'the same load on the right radiator copes',
-  bigOnLarge.temperature < engineHeat(TRUCK_DIESEL).warningC &&
-    bigOnLarge.temperature < bigOnSmall.temperature - 20,
-  `${bigOnLarge.temperature.toFixed(1)} C vs ${bigOnSmall.temperature.toFixed(1)} C`,
+  'a fifth-full core climbs into the hot zone where a full one holds',
+  lowWater.temperature > bigHeat.warningC &&
+    fullWater.temperature < bigHeat.warningC &&
+    lowWater.temperature > fullWater.temperature + 20,
+  `20% ${lowWater.temperature.toFixed(1)} C vs full ${fullWater.temperature.toFixed(1)} C ` +
+    `(warning ${bigHeat.warningC})`,
 );
 
-const dry = run(SMALL_ENGINE, SMALL_RAD, {
+const dry = run(SMALL_ENGINE, RADIATOR, {
   seconds: 60,
   load: 0.5,
   revs: 0.5,
@@ -184,36 +217,58 @@ check(
   `${dry.temperature.toFixed(1)} C after 60 s dry`,
 );
 
-const half = run(SMALL_ENGINE, STANDARD_RAD, {
-  seconds: 180,
-  load: 0.6,
-  revs: 0.5,
-  speedMps: CRUISE_SPEED,
-  waterFill: 0.3,
-});
-const full = run(SMALL_ENGINE, STANDARD_RAD, {
-  seconds: 180,
-  load: 0.6,
-  revs: 0.5,
-  speedMps: CRUISE_SPEED,
-  waterFill: 1,
-});
+// Full load at a crawl: the airflow is near its standstill floor, so the boost term
+// is not masked by a thermostat that has already opened all the way.
+const unboosted = (() => {
+  const system = new EngineCoolingSystem(CRUISE_AMBIENT);
+  system.configure(BIG_ENGINE, RADIATOR);
+  system.setTemperature(CRUISE_AMBIENT);
+  for (let t = 0; t < 1200; t += 5) {
+    system.setWater(RADIATOR.capacity);
+    system.update(5, {
+      load: 1,
+      revs: 0.8,
+      speedMps: 5,
+      ambientC: CRUISE_AMBIENT,
+      engineRunning: true,
+      boost: 0,
+    });
+  }
+  return system.temperature;
+})();
+const boosted = (() => {
+  const system = new EngineCoolingSystem(CRUISE_AMBIENT);
+  system.configure(BIG_ENGINE, RADIATOR);
+  system.setTemperature(CRUISE_AMBIENT);
+  for (let t = 0; t < 1200; t += 5) {
+    system.setWater(RADIATOR.capacity);
+    system.update(5, {
+      load: 1,
+      revs: 0.8,
+      speedMps: 5,
+      ambientC: CRUISE_AMBIENT,
+      engineRunning: true,
+      boost: 1,
+    });
+  }
+  return system.temperature;
+})();
 check(
-  'a part-filled core cools worse than a full one',
-  half.temperature > full.temperature + 5,
-  `30% fill ${half.temperature.toFixed(1)} C vs full ${full.temperature.toFixed(1)} C`,
+  'a turbo raises the equilibrium temperature under full load',
+  boosted > unboosted + 10,
+  `boosted ${boosted.toFixed(1)} C vs naturally aspirated ${unboosted.toFixed(1)} C`,
 );
 
-const standing = run(SMALL_ENGINE, SMALL_RAD, {
-  seconds: 180,
-  load: 0.55,
-  revs: 0.45,
+const standing = run(SMALL_ENGINE, RADIATOR, {
+  seconds: 300,
+  load: 1,
+  revs: 0.8,
   speedMps: 0,
 });
-const moving = run(SMALL_ENGINE, SMALL_RAD, {
-  seconds: 180,
-  load: 0.55,
-  revs: 0.45,
+const moving = run(SMALL_ENGINE, RADIATOR, {
+  seconds: 300,
+  load: 1,
+  revs: 0.8,
   speedMps: CRUISE_SPEED,
 });
 check(
@@ -224,18 +279,26 @@ check(
 check(
   'the first metre per second does not dump the temperature',
   (() => {
-    const crawl = run(SMALL_ENGINE, SMALL_RAD, {
-      seconds: 180,
+    // A thermostat-dominated case: both runs sit in the working band, where the
+    // linear airflow curve is what decides the difference.
+    const still = run(SMALL_ENGINE, RADIATOR, {
+      seconds: 300,
+      load: 0.55,
+      revs: 0.45,
+      speedMps: 0,
+    });
+    const crawl = run(SMALL_ENGINE, RADIATOR, {
+      seconds: 300,
       load: 0.55,
       revs: 0.45,
       speedMps: 0.4,
     });
-    return Math.abs(crawl.temperature - standing.temperature) < 3;
+    return Math.abs(crawl.temperature - still.temperature) < 3;
   })(),
   'crawl and standstill within 3 C',
 );
 
-const cooling = run(SMALL_ENGINE, SMALL_RAD, {
+const cooling = run(SMALL_ENGINE, RADIATOR, {
   seconds: 600,
   running: false,
   startC: smallHeat.operatingC,
@@ -246,42 +309,17 @@ check(
   `${cooling.temperature.toFixed(1)} C after 10 min stopped (air ${CRUISE_AMBIENT})`,
 );
 
-// Air temperature on a MARGINAL setup: the six on a four-cylinder's core has no
-// capability to spare, so the afternoon is what decides whether it holds temperature.
-// A car that is comfortably cooled must NOT behave this way — see the next check.
-const MARGINAL_ENGINE = engineOf('engine_i6_2800');
-const hotDay = run(MARGINAL_ENGINE, SMALL_RAD, {
-  seconds: 240,
-  load: 0.8,
-  revs: 0.7,
-  speedMps: CRUISE_SPEED,
-  ambientC: 46,
-});
-const coolNight = run(MARGINAL_ENGINE, SMALL_RAD, {
-  seconds: 240,
-  load: 0.8,
-  revs: 0.7,
-  speedMps: CRUISE_SPEED,
-  ambientC: 14,
-});
-check(
-  'desert afternoon cooks a marginal radiator that copes at night',
-  hotDay.temperature > coolNight.temperature + 25 &&
-    hotDay.temperature > engineHeat(MARGINAL_ENGINE).warningC &&
-    coolNight.temperature < engineHeat(MARGINAL_ENGINE).warningC,
-  `46 C air -> ${hotDay.temperature.toFixed(1)} C, 14 C air -> ${coolNight.temperature.toFixed(1)} C`,
-);
 check(
   'a healthy engine at cruise rejects the ambient swing through its thermostat',
   (() => {
-    const hot = run(SMALL_ENGINE, SMALL_RAD, {
+    const hot = run(SMALL_ENGINE, RADIATOR, {
       seconds: 300,
       load: 0.3,
       revs: 0.4,
       speedMps: CRUISE_SPEED,
       ambientC: 46,
     });
-    const cold = run(SMALL_ENGINE, SMALL_RAD, {
+    const cold = run(SMALL_ENGINE, RADIATOR, {
       seconds: 300,
       load: 0.3,
       revs: 0.4,
@@ -299,26 +337,27 @@ check(
   'the clock produces a hot afternoon and a cool dawn',
   ambientAirC(DAY_LENGTH * 0.625, DAY_LENGTH) > 44 &&
     ambientAirC(DAY_LENGTH * 0.125, DAY_LENGTH) < 18,
-  `15:00 ${ambientAirC(DAY_LENGTH * 0.625, DAY_LENGTH).toFixed(1)} C, 03:00 ${ambientAirC(DAY_LENGTH * 0.125, DAY_LENGTH).toFixed(1)} C`,
+  `15:00 ${ambientAirC(DAY_LENGTH * 0.625, DAY_LENGTH).toFixed(1)} C, ` +
+    `03:00 ${ambientAirC(DAY_LENGTH * 0.125, DAY_LENGTH).toFixed(1)} C`,
 );
 
 console.log('cooling: robustness');
 
-const fast = run(TRUCK_DIESEL, SMALL_RAD, {
+const fast = run(BIG_ENGINE, RADIATOR, {
   seconds: 120,
   dt: 1 / 240,
   load: 1,
   revs: 0.8,
   speedMps: CRUISE_SPEED,
 });
-const slow = run(TRUCK_DIESEL, SMALL_RAD, {
+const slow = run(BIG_ENGINE, RADIATOR, {
   seconds: 120,
   dt: 0.2,
   load: 1,
   revs: 0.8,
   speedMps: CRUISE_SPEED,
 });
-const stutter = run(TRUCK_DIESEL, SMALL_RAD, {
+const stutter = run(BIG_ENGINE, RADIATOR, {
   seconds: 120,
   dt: 2,
   load: 1,
@@ -343,7 +382,7 @@ check(
   'garbage input cannot poison the state',
   (() => {
     const system = new EngineCoolingSystem();
-    system.configure(SMALL_ENGINE, SMALL_RAD);
+    system.configure(SMALL_ENGINE, RADIATOR);
     system.setWater(Number.NaN);
     system.setTemperature(Number.NaN);
     system.update(Number.NaN, {
@@ -352,6 +391,7 @@ check(
       speedMps: Number.NaN,
       ambientC: Number.NaN,
       engineRunning: true,
+      boost: Number.NaN,
     });
     system.update(1, {
       load: 2,
@@ -359,6 +399,7 @@ check(
       speedMps: Number.NEGATIVE_INFINITY,
       ambientC: 40,
       engineRunning: true,
+      boost: 5,
     });
     return (
       Number.isFinite(system.temperature) && Number.isFinite(system.waterLitres) && system.waterLitres >= 0
@@ -377,32 +418,33 @@ check(
       speedMps: 0,
       ambientC: 40,
       engineRunning: true,
+      boost: 0,
     });
     return system.readout() === null && system.getState().waterCapacity === 0;
   })(),
   'readout null, capacity 0',
 );
 check(
-  'water cannot exceed the fitted core, and a smaller core spills the rest',
+  'water cannot exceed the fitted core, and pulling the core spills it',
   (() => {
     const system = new EngineCoolingSystem();
-    system.configure(SMALL_ENGINE, LARGE_RAD);
+    system.configure(SMALL_ENGINE, RADIATOR);
     system.addWater(99);
     const filled = system.waterLitres;
-    system.installRadiator(SMALL_RAD);
+    system.installRadiator(null);
     system.setWater(filled);
-    return filled === LARGE_RAD.capacity && system.waterLitres === SMALL_RAD.capacity;
+    return filled === RADIATOR.capacity && system.waterLitres === 0;
   })(),
-  `large ${LARGE_RAD.capacity} L -> small ${SMALL_RAD.capacity} L`,
+  `filled to ${RADIATOR.capacity} L, then 0 L with no core`,
 );
 
 console.log('cooling: consequences');
 
 const cooked = (() => {
-  const system = new EngineCoolingSystem(engineHeat(TRUCK_DIESEL).operatingC);
-  system.configure(TRUCK_DIESEL, SMALL_RAD);
+  const system = new EngineCoolingSystem(bigHeat.operatingC);
+  system.configure(BIG_ENGINE, RADIATOR);
   system.setWater(0);
-  system.setTemperature(engineHeat(TRUCK_DIESEL).operatingC);
+  system.setTemperature(bigHeat.operatingC);
   let sawHot = false;
   let sawCritical = false;
   let seized = false;
@@ -414,6 +456,7 @@ const cooked = (() => {
       speedMps: CRUISE_SPEED,
       ambientC: CRUISE_AMBIENT,
       engineRunning: true,
+      boost: 0,
     });
     const state = system.getState();
     if (state.zone === 'hot') sawHot = true;
@@ -441,10 +484,10 @@ check(
 check(
   'lifting off in the hot zone does not seize the engine',
   (() => {
-    const system = new EngineCoolingSystem(engineHeat(SMALL_ENGINE).warningC + 2);
-    system.configure(SMALL_ENGINE, SMALL_RAD);
-    system.setWater(SMALL_RAD.capacity);
-    system.setTemperature(engineHeat(SMALL_ENGINE).warningC + 2);
+    const system = new EngineCoolingSystem(smallHeat.warningC + 2);
+    system.configure(SMALL_ENGINE, RADIATOR);
+    system.setWater(RADIATOR.capacity);
+    system.setTemperature(smallHeat.warningC + 2);
     for (let t = 0; t < 120; t += 0.25) {
       system.update(0.25, {
         load: 0,
@@ -452,6 +495,7 @@ check(
         speedMps: CRUISE_SPEED,
         ambientC: CRUISE_AMBIENT,
         engineRunning: true,
+        boost: 0,
       });
       if (system.takeSeizure()) return false;
     }
@@ -463,23 +507,24 @@ check(
   'a cold engine is down on power and a warm one is not',
   (() => {
     const cold = new EngineCoolingSystem(20);
-    cold.configure(SMALL_ENGINE, SMALL_RAD);
+    cold.configure(SMALL_ENGINE, RADIATOR);
     cold.setTemperature(20);
     const warm = new EngineCoolingSystem(smallHeat.operatingC);
-    warm.configure(SMALL_ENGINE, SMALL_RAD);
+    warm.configure(SMALL_ENGINE, RADIATOR);
     warm.setTemperature(smallHeat.operatingC);
     return cold.getState().performance < 0.95 && warm.getState().performance === 1;
   })(),
   'cold penalty present, warm engine unpenalised',
 );
 
-const boiled = run(TRUCK_DIESEL, SMALL_RAD, {
+const boiled = run(BIG_ENGINE, RADIATOR, {
   seconds: 600,
   load: 1,
   revs: 0.9,
   speedMps: CRUISE_SPEED,
+  waterFill: 0.2,
 });
-const sipped = run(SMALL_ENGINE, SMALL_RAD, {
+const sipped = run(SMALL_ENGINE, RADIATOR, {
   seconds: 600,
   load: 0.25,
   revs: 0.35,
@@ -487,13 +532,14 @@ const sipped = run(SMALL_ENGINE, SMALL_RAD, {
 });
 check(
   'an engine run hot loses water much faster than a healthy one',
-  SMALL_RAD.capacity - boiled.water > (SMALL_RAD.capacity - sipped.water) * 4,
-  `boiling lost ${(SMALL_RAD.capacity - boiled.water).toFixed(2)} L, healthy lost ${(SMALL_RAD.capacity - sipped.water).toFixed(2)} L in 10 min`,
+  RADIATOR.capacity * 0.2 - boiled.water > (RADIATOR.capacity - sipped.water) * 4,
+  `boiling lost ${(RADIATOR.capacity * 0.2 - boiled.water).toFixed(2)} L, ` +
+    `healthy lost ${(RADIATOR.capacity - sipped.water).toFixed(2)} L in 10 min`,
 );
 check(
   'a parked car does not boil its radiator away',
-  run(SMALL_ENGINE, SMALL_RAD, { seconds: 3600, running: false, startC: 130 }).water ===
-    SMALL_RAD.capacity,
+  run(SMALL_ENGINE, RADIATOR, { seconds: 3600, running: false, startC: 130 }).water ===
+    RADIATOR.capacity,
   'water unchanged over an hour parked',
 );
 check(
@@ -501,13 +547,13 @@ check(
   (() => {
     const a = new EngineCoolingSystem(30);
     const b = new EngineCoolingSystem(30);
-    a.configure(SMALL_ENGINE, SMALL_RAD);
-    b.configure(SMALL_ENGINE, SMALL_RAD);
-    a.setWater(SMALL_RAD.capacity);
-    b.setWater(SMALL_RAD.capacity);
+    a.configure(SMALL_ENGINE, RADIATOR);
+    b.configure(SMALL_ENGINE, RADIATOR);
+    a.setWater(RADIATOR.capacity);
+    b.setWater(RADIATOR.capacity);
     for (let i = 0; i < 600; i++) {
-      a.update(0.25, { load: 1, revs: 0.9, speedMps: 0, ambientC: 40, engineRunning: true });
-      b.update(0.25, { load: 0, revs: 0, speedMps: 0, ambientC: 40, engineRunning: false });
+      a.update(0.25, { load: 1, revs: 0.9, speedMps: 0, ambientC: 40, engineRunning: true, boost: 0 });
+      b.update(0.25, { load: 0, revs: 0, speedMps: 0, ambientC: 40, engineRunning: false, boost: 0 });
     }
     return a.temperature - b.temperature > 40;
   })(),
@@ -516,9 +562,9 @@ check(
 
 console.log(
   `\nequilibria at 38 C air, 90 km/h: ` +
-    `1.6+small ${warmUp.temperature.toFixed(0)} C, ` +
-    `d6+large ${bigOnLarge.temperature.toFixed(0)} C, ` +
-    `d6+small ${bigOnSmall.temperature.toFixed(0)} C`,
+    `1.6+full ${warmUp.temperature.toFixed(0)} C, ` +
+    `5.7+full ${fullWater.temperature.toFixed(0)} C, ` +
+    `5.7+20% ${lowWater.temperature.toFixed(0)} C`,
 );
 console.log(failures === 0 ? 'ALL OK' : `${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

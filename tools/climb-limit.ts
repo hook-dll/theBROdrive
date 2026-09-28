@@ -25,9 +25,8 @@
  *      SPEED, and the grade that pins the car to exactly that speed.
  *
  * The thermal numbers are not a re-derivation: they run the real
- * `EngineCoolingSystem` to its fixed point with the stock radiator for the engine,
- * full of water, so the thermostat, the fit multiplier and the airflow curve are the
- * shipped ones rather than copies of them.
+ * `EngineCoolingSystem` to its fixed point with the shipped radiator, full of water,
+ * so the thermostat and the airflow curve are the shipped ones rather than copies.
  *
  *   bun tools/climb-limit.ts [--sweep] [modelId ...]
  *
@@ -39,7 +38,6 @@ import {
   engineHeat,
   variant,
   type EngineSpec,
-  type RadiatorClass,
   type RadiatorSpec,
 } from '../src/parts/registry';
 import {
@@ -49,11 +47,7 @@ import {
   modelGearbox,
   type CarModelDef,
 } from '../src/vehicle/carmodels';
-import {
-  ambientAirC,
-  EngineCoolingSystem,
-  preferredRadiatorClass,
-} from '../src/vehicle/cooling';
+import { ambientAirC, EngineCoolingSystem } from '../src/vehicle/cooling';
 import fits from '../src/vehicle/model-fits.json';
 import { installAssetShim } from './assetshim';
 import { runInclineLaunchCheck } from './handling-bench';
@@ -69,12 +63,8 @@ const AIR_DENSITY = 1.2;
 const ROAD_SURFACE = SurfaceType.Asphalt;
 const ROAD = SURFACES[ROAD_SURFACE];
 
-/** The stock core for each class, so a car is judged with the radiator it ships with. */
-const STOCK_RADIATOR: Record<RadiatorClass, RadiatorSpec> = {
-  small: variant('radiator_lada').radiator!,
-  standard: variant('radiator_standard').radiator!,
-  large: variant('radiator_copper').radiator!,
-};
+/** The one radiator every car ships with, so a car is judged on the hardware it has. */
+const RADIATOR: RadiatorSpec = variant('radiator').radiator!;
 
 /** Seconds of simulated running the thermal fixed point is read after. */
 const SETTLE_SECONDS = 3600;
@@ -178,13 +168,12 @@ function settledTemperature(
   ambientC: number,
 ): number {
   const engine = modelEngine(def);
-  const radiator = STOCK_RADIATOR[preferredRadiatorClass(engine)];
   const cooling = new EngineCoolingSystem(ambientC);
-  cooling.configure(engine, radiator);
+  cooling.configure(engine, RADIATOR);
   cooling.setTemperature(ambientC);
   for (let t = 0; t < SETTLE_SECONDS; t += 5) {
-    cooling.setWater(radiator.capacity);
-    cooling.update(5, { ambientC, engineRunning: true, load, revs, speedMps });
+    cooling.setWater(RADIATOR.capacity);
+    cooling.update(5, { ambientC, engineRunning: true, load, revs, speedMps, boost: 0 });
   }
   return cooling.temperature;
 }
