@@ -18,15 +18,10 @@ thanks to them.
 | rain-roof.ogg | [Inside a car in the rain](https://freesound.org/s/448125/) | derjuli |
 | wind-grass.ogg | [Wind is blowing in the grass of a patagonian plain. Wind is blowing in the trees in background. (Tierra del fuego, Argentina). ](https://freesound.org/s/139337/) | felix.blume |
 | wind-strong.ogg | [Strong wind blowing in the plain in Anatolia (Turkey)](https://freesound.org/s/167684/) | felix.blume |
-| meadow-day.ogg | [summer meadow near village in the morning](https://freesound.org/s/692048/) | Garuda1982 |
 | grasshoppers.ogg | [Grasshoppers](https://freesound.org/s/198277/) | miklovan |
 | crickets-night.ogg | [Crickets chirping at Night 001](https://freesound.org/s/751468/) | Borgory |
 | gravel-roll.ogg | [Tires on Gravel Road 1](https://freesound.org/s/251661/) | OBXJohn |
 | skid.ogg | [Chrysler LHS tire squeal 04 (04-25-2009).wav](https://freesound.org/s/71739/) | audible-edge |
-| crow-1.ogg | [Hooded Crow: Cawing](https://freesound.org/s/741366/) | Mish7913 |
-| crow-2.ogg | [crow.wav](https://freesound.org/s/75162/) | nigelcoop |
-| cuckoo.ogg | [02 - Cuckoo_stereo](https://freesound.org/s/855951/) | Nordliecht |
-| skylark.ogg | [Single Skylark](https://freesound.org/s/387426/) | Kinoton |
 | flock-1.ogg | [121003 Pigeon flock fly away, wing flaps, Toronto.wav](https://freesound.org/s/616623/) | TRP |
 | flock-2.ogg | [Pigeon, Flies Away, Flapping Wings](https://freesound.org/s/689998/) | Kinoton |
 | crash-1.ogg | [Car Crash (with Glass)](https://freesound.org/s/592388/) | magnuswaker |
@@ -41,3 +36,7 @@ thanks to them.
 | shotgun.ogg | [Shotgun Shot 03.wav](https://freesound.org/s/473846/) | LilMati |
 | bolt.ogg | [Mosin Nagant Bolt Action Cycle](https://freesound.org/s/370345/) | Zott820 |
 | shutter.ogg | [Contarex camera shutter.wav](https://freesound.org/s/520684/) | Tonik1105 |
+| raven.ogg | [Common Raven croaks overhead 77mel 9am B 181117.mp3](https://freesound.org/s/572720/) | TRP |
+| hawk.ogg | [R30-34-Red Tailed Hawk.wav](https://freesound.org/s/479610/) | craigsmith |
+| sparrow.ogg | [House sparrows](https://freesound.org/s/670176/) | freemaster2 |
+| swallows.ogg | [R30-37-Group of Cave Swallows.wav](https://freesound.org/s/479613/) | craigsmith |

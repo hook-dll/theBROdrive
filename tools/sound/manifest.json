@@ -10,15 +10,10 @@
   {"name": "rain-roof", "id": 448125, "kind": "loop", "start": 0.5, "end": 13.2, "highpass": 40, "crossfade": 1.5, "lufs": -20, "kbps": 24},
   {"name": "wind-grass", "id": 139337, "kind": "loop", "start": 20, "end": 48, "highpass": 120, "crossfade": 3.0, "lufs": -20, "kbps": 24},
   {"name": "wind-strong", "id": 167684, "kind": "loop", "start": 30, "end": 60, "highpass": 60, "crossfade": 3.0, "lufs": -20, "kbps": 24},
-  {"name": "meadow-day", "id": 692048, "kind": "loop", "start": 10, "end": 40, "highpass": 150, "crossfade": 3.0, "lufs": -20, "kbps": 24},
   {"name": "grasshoppers", "id": 198277, "kind": "loop", "start": 1, "end": 24, "highpass": 1000, "crossfade": 2.0, "lufs": -20, "kbps": 24},
   {"name": "crickets-night", "id": 751468, "kind": "loop", "start": 20, "end": 46, "highpass": 1500, "crossfade": 2.0, "lufs": -20, "kbps": 24},
   {"name": "gravel-roll", "id": 251661, "kind": "loop", "start": 0.5, "end": 12.3, "highpass": 60, "crossfade": 1.0, "lufs": -20, "kbps": 24},
   {"name": "skid", "id": 71739, "kind": "loop", "start": 3.0, "end": 13.8, "highpass": 300, "crossfade": 0.8, "lufs": -20, "kbps": 24},
-  {"name": "crow-1", "id": 741366, "kind": "once", "start": 0, "end": 4.8, "highpass": 300, "fadeIn": 0.003, "fadeOut": 0.3, "lufs": -14, "kbps": 32},
-  {"name": "crow-2", "id": 75162, "kind": "once", "start": 0, "end": 4.1, "highpass": 300, "fadeIn": 0.003, "fadeOut": 0.3, "lufs": -14, "kbps": 32},
-  {"name": "cuckoo", "id": 855951, "kind": "once", "start": 0, "end": 12, "highpass": 200, "fadeIn": 0.3, "fadeOut": 1.5, "lufs": -14, "kbps": 32},
-  {"name": "skylark", "id": 387426, "kind": "once", "start": 10, "end": 30, "highpass": 500, "fadeIn": 1.0, "fadeOut": 2.0, "lufs": -14, "kbps": 32},
   {"name": "flock-1", "id": 616623, "kind": "once", "start": 0.4, "end": 7.4, "highpass": 80, "fadeIn": 0.2, "fadeOut": 1.0, "lufs": -14, "kbps": 32},
   {"name": "flock-2", "id": 689998, "kind": "once", "start": 0.4, "end": 3.6, "highpass": 80, "fadeIn": 0.05, "fadeOut": 0.8, "lufs": -14, "kbps": 32},
   {"name": "crash-1", "id": 592388, "kind": "once", "start": 0, "end": 2.6, "fadeIn": 0.002, "fadeOut": 0.4, "lufs": -14, "kbps": 32},
@@ -32,5 +27,9 @@
   {"name": "rifle", "id": 486063, "kind": "once", "start": 0.55, "end": 3.55, "fadeIn": 0.002, "fadeOut": 1.0, "lufs": -14, "kbps": 32},
   {"name": "shotgun", "id": 473846, "kind": "once", "start": 0, "end": 2.0, "fadeIn": 0.002, "fadeOut": 0.5, "lufs": -14, "kbps": 32},
   {"name": "bolt", "id": 370345, "kind": "once", "start": 1.75, "end": 3.35, "fadeIn": 0.002, "fadeOut": 0.1, "lufs": -14, "kbps": 32},
-  {"name": "shutter", "id": 520684, "kind": "once", "start": 0.7, "end": 1.35, "fadeIn": 0.002, "fadeOut": 0.05, "lufs": -14, "kbps": 32}
+  {"name": "shutter", "id": 520684, "kind": "once", "start": 0.7, "end": 1.35, "fadeIn": 0.002, "fadeOut": 0.05, "lufs": -14, "kbps": 32},
+  {"name": "raven", "id": 572720, "kind": "hits", "start": 0.5, "end": 5.0, "count": 5, "hitLength": 0.5, "minGap": 0.4, "highpass": 250, "lufs": -14, "kbps": 32},
+  {"name": "hawk", "id": 479610, "kind": "hits", "count": 3, "hitLength": 1.8, "minGap": 1.5, "highpass": 300, "lufs": -14, "kbps": 32},
+  {"name": "sparrow", "id": 670176, "kind": "hits", "count": 8, "hitLength": 0.25, "minGap": 0.3, "highpass": 1500, "lufs": -14, "kbps": 32},
+  {"name": "swallows", "id": 479613, "kind": "once", "start": 0, "end": 6.9, "highpass": 600, "fadeIn": 0.01, "fadeOut": 0.5, "lufs": -14, "kbps": 32}
 ]

@@ -84,10 +84,11 @@ const IMPACT_GAIN = AUDIO_CONFIG.impactGain;
 /**
  * Recorded layers, against files built to -20 LUFS (loops) and -14 LUFS momentary
  * (one-shots); the car bus then loses 10 dB to the game trim (mixer.ts). Gravel at speed
- * lands near the car's own road roar, a squeal a little over the engine, a hard crash
- * well over everything.
+ * sits under the engine like the rest of the rolling noise (tyres and surfaces were
+ * halved against everything else on 2026-09-28: the player wants them in the
+ * background), a squeal a little over the engine, a hard crash well over everything.
  */
-const GRAVEL_GAIN = 2.4;
+const GRAVEL_GAIN = 1.2;
 const CRASH_GAIN = 6;
 
 /** Surface roughness (metres of micro-bump) treated as fully rough. */

@@ -113,6 +113,31 @@ export interface BirdTakeoff {
   large: boolean;
 }
 
+/** One bird calling this frame, for the audio (relative position). */
+export interface BirdCall {
+  x: number;
+  y: number;
+  z: number;
+  species: string;
+}
+
+/**
+ * How often one bird of a species calls, per second, perched and in the air. Rare on
+ * purpose: out here a bird is heard now and then, where it is — a raven's croak as a
+ * pair goes over, a hawk's scream from high up, a sparrow flock chipping on the verge —
+ * never a woodland chorus. Vultures are nearly voiceless and stay silent. A bird
+ * startled off its perch sometimes calls as it goes (`TAKEOFF_CALL_CHANCE`).
+ */
+const CALL_RATE: Record<string, { perched: number; flying: number }> = {
+  crow: { perched: 1 / 70, flying: 1 / 40 },
+  hawk: { perched: 0, flying: 1 / 50 },
+  sparrow: { perched: 1 / 45, flying: 1 / 30 },
+  swallow: { perched: 0, flying: 1 / 45 },
+};
+const TAKEOFF_CALL_CHANCE = 0.35;
+const MAX_CALLS = 8;
+const NO_CALLS: readonly BirdCall[] = [];
+
 type BirdState = 'perched' | 'alerted' | 'takeoff' | 'flying' | 'landing';
 
 interface SpeciesDef {
@@ -302,6 +327,9 @@ export class BirdFlock {
    * wingbeat flutter. Cleared at the start of every `update`; read with `takeoffs`.
    */
   private readonly takeoffList: BirdTakeoff[] = [];
+  /** Pooled: `callCount` of them are this frame's calls. */
+  private readonly callPool: BirdCall[] = Array.from({ length: MAX_CALLS }, () => ({ x: 0, y: 0, z: 0, species: '' }));
+  private callCount = 0;
   private lastPx = 0;
   private lastPy = 0;
   private lastPz = 0;
@@ -450,6 +478,25 @@ export class BirdFlock {
     this.lastPz -= shift.dz;
   }
 
+  /** Birds that called during the last `update` (relative positions). */
+  get calls(): readonly BirdCall[] {
+    return this.callCount === 0 ? NO_CALLS : this.callPool.slice(0, this.callCount);
+  }
+
+  private call(b: Bird): void {
+    // One voice per flock per frame is plenty, and keeps a whole flock from firing at once.
+    for (let i = 0; i < this.callCount; i++) {
+      const c = this.callPool[i]!;
+      if (c.species === b.species.name && Math.abs(c.x - b.x) + Math.abs(c.z - b.z) < 40) return;
+    }
+    if (this.callCount >= MAX_CALLS) return;
+    const c = this.callPool[this.callCount++]!;
+    c.x = b.x;
+    c.y = b.y;
+    c.z = b.z;
+    c.species = b.species.name;
+  }
+
   /** Groups that took off during the last `update` (relative positions). */
   get takeoffs(): readonly BirdTakeoff[] {
     return this.takeoffList;
@@ -457,6 +504,7 @@ export class BirdFlock {
 
   update(dt: number, playerS: number, px: number, py: number, pz: number): void {
     this.takeoffList.length = 0;
+    this.callCount = 0;
     // Player speed estimate drives the alert radius (foot vs car).
     if (this.hasLastPlayer && dt > 0) {
       const dx = px - this.lastPx;
@@ -482,7 +530,13 @@ export class BirdFlock {
     // both flight position and wing phase in visible jumps; active flocks are small
     // enough that continuous kinematic simulation is cheaper than hiding that stutter.
     for (let i = 0; i < this.activeCount; i++) {
-      this.tickBird(this.birds[i]!, dt, px, py, pz, alertRadiusSq);
+      const b = this.birds[i]!;
+      this.tickBird(b, dt, px, py, pz, alertRadiusSq);
+      const rate = CALL_RATE[b.species.name];
+      if (rate) {
+        const perched = b.state === 'perched' || b.state === 'alerted';
+        if (Math.random() < (perched ? rate.perched : rate.flying) * dt) this.call(b);
+      }
     }
 
     this.syncMeshes();
@@ -790,6 +844,7 @@ export class BirdFlock {
   }
 
   private beginTakeoff(b: Bird, px: number, pz: number): void {
+    if (CALL_RATE[b.species.name] && Math.random() < TAKEOFF_CALL_CHANCE) this.call(b);
     const same = this.takeoffList.find((t) => t.group === b.group);
     if (same) same.count++;
     else {

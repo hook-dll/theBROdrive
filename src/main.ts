@@ -1238,6 +1238,7 @@ async function boot(): Promise<void> {
     boltAge: 99,
     boltDistance: 5000,
     boltAzimuth: 0,
+    roadS: 0,
   };
   const playerImpacts = createPlayerImpacts({ physics, player, vitals, vehicles, traffic });
 
@@ -1715,6 +1716,7 @@ async function boot(): Promise<void> {
     frameProfiler?.begin('agents');
     birds.update(dt, activeS, eye.x, eye.y, eye.z);
     for (const t of birds.takeoffs) audio.flockTakeoff(t.x, t.y, t.z, t.count, t.large);
+    for (const c of birds.calls) audio.birdCall(c.species, c.x, c.y, c.z);
     frameProfiler?.end('agents');
 
     // Props that come apart. The car is the only thing heavy enough to do it, so the
@@ -2163,6 +2165,7 @@ async function boot(): Promise<void> {
     ambienceFrame.boltAge = weather.boltAge;
     ambienceFrame.boltDistance = weather.boltDistance;
     ambienceFrame.boltAzimuth = weather.boltAzimuth;
+    ambienceFrame.roadS = activeS;
     audio.updateAmbience(ambienceFrame, frameDt);
     audio.beginTrafficFrame();
     traffic.forEachVehicle((id, vehicle) => {

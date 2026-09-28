@@ -22,8 +22,8 @@ export type SampleName =
   | 'thunder-near-1' | 'thunder-near-2' | 'thunder-near-3'
   | 'thunder-far-1' | 'thunder-far-2' | 'thunder-far-3' | 'thunder-far-4'
   | 'rain' | 'rain-roof' | 'wind-grass' | 'wind-strong'
-  | 'meadow-day' | 'grasshoppers' | 'crickets-night'
-  | 'crow-1' | 'crow-2' | 'cuckoo' | 'skylark'
+  | 'grasshoppers' | 'crickets-night'
+  | 'raven' | 'hawk' | 'sparrow' | 'swallows'
   | 'flock-1' | 'flock-2'
   | 'gravel-roll' | 'skid'
   | 'crash-1' | 'crash-2' | 'crash-3'
@@ -106,8 +106,9 @@ export class SampleBank {
         quiet = 0;
       } else if (!armed) {
         quiet = e < off ? quiet + 1 : 0;
-        // Re-arm after 60 ms of quiet.
-        if (quiet > 12) armed = true;
+        // Re-arm after 180 ms of quiet: build.mjs lays 250 ms of silence between hits,
+        // while a long call (a hawk's scream) has shorter dips inside it.
+        if (quiet > 36) armed = true;
       }
     });
     const slices = onsets.map((t, i): [number, number] => [t, (onsets[i + 1] ?? buffer.duration) - t]);

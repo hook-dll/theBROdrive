@@ -20,9 +20,14 @@
  *  - Thunder: one of several real strokes, near ones for a close flash and rolling far
  *    ones otherwise, slowed and darkened with distance, panned to where the flash was
  *    and arriving `distance / c` after it.
- *  - Life: a summer meadow by day (larks, small birds, insects), grasshoppers in the
- *    heat, crickets at night; now and then a crow, a cuckoo or a lark close by. All of
- *    it quiet, and all of it driven away by rain and hard wind the way animals are.
+ *  - Life: the birds the world actually has, each calling now and then from where it
+ *    is (agents/birds.ts decides when; see `birdCall`) — a raven's croak, a hawk's
+ *    scream from high up, sparrows chipping on the verge, swallows going over. No bed
+ *    of birdsong: the first one was a European summer meadow with a cuckoo in it,
+ *    and on a desert road it sounded like driving through a wood. Insects are PATCHES
+ *    along the road (`insectPatch`): grasshoppers in the heat and crickets at night
+ *    where the ground holds them, silence between. All of it goes quiet in rain and
+ *    hard wind, the way animals do.
  *  - Flocks taking off: real wingbeats where the birds actually are.
  *
  * LEVELS. Beds are built to -20 LUFS and one-shots to -14 LUFS momentary
@@ -44,12 +49,50 @@ const SPEED_OF_SOUND = 343;
 /** Bed levels (linear, against a -20 LUFS file), before the config scales. */
 const WIND_LIGHT = 0.32;
 const WIND_STRONG = 0.9;
-const MEADOW = 0.4;
-const GRASSHOPPERS = 0.3;
-const CRICKETS = 0.35;
+const GRASSHOPPERS = 0.28;
+const CRICKETS = 0.3;
 const ROOF = 1.1;
-/** One-shot bird level (against a -14 LUFS momentary file) at the nearest distance. */
-const BIRD = 0.45;
+
+/**
+ * Bird calls: the take and its level (against a -14 LUFS momentary file) at the
+ * panner's reference distance, 12 m. A hawk carries; a sparrow is a small voice.
+ */
+const BIRD_CALLS: Record<string, { take: SampleName; gain: number; rate: number }> = {
+  crow: { take: 'raven', gain: 0.6, rate: 1 },
+  hawk: { take: 'hawk', gain: 0.9, rate: 1 },
+  sparrow: { take: 'sparrow', gain: 0.35, rate: 1.05 },
+  swallow: { take: 'swallows', gain: 0.4, rate: 1 },
+};
+
+/** Shortest time between two calls of one species, seconds. */
+const BIRD_CALL_GAP_S = 5;
+
+/** Length of one insect patch along the road, metres, and the share of road that has them. */
+const INSECT_PATCH_M = 1400;
+const CRICKET_SHARE = 0.4;
+const GRASSHOPPER_SHARE = 0.45;
+
+/** Deterministic 0..1 per integer cell and salt. */
+function cellHash(cell: number, salt: number): number {
+  let h = (Math.imul(cell | 0, 0x27d4eb2d) ^ Math.imul(salt, 0x165667b1)) >>> 0;
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35) >>> 0;
+  return ((h ^ (h >>> 16)) >>> 0) / 0xffffffff;
+}
+
+/**
+ * Whether insects sing at this point of the road, 0..1, eased over the patch edges so
+ * a colony fades in as you drive into it. The same road always has the same patches.
+ */
+function insectPatch(roadS: number, salt: number, share: number): number {
+  const u = roadS / INSECT_PATCH_M;
+  const cell = Math.floor(u);
+  const f = u - cell;
+  const a = cellHash(cell, salt) < share ? 1 : 0;
+  const b = cellHash(cell + 1, salt) < share ? 1 : 0;
+  const t = f * f * (3 - 2 * f);
+  return a + (b - a) * t;
+}
 
 const THUNDER_NEAR: readonly SampleName[] = ['thunder-near-1', 'thunder-near-2', 'thunder-near-3'];
 const THUNDER_FAR: readonly SampleName[] = ['thunder-far-1', 'thunder-far-2', 'thunder-far-3', 'thunder-far-4'];
@@ -74,6 +117,8 @@ export interface AmbienceFrame {
   boltAge: number;
   boltDistance: number;
   boltAzimuth: number;
+  /** Road arclength at the listener, metres: where the insect patches are. */
+  roadS: number;
 }
 
 function clamp01(v: number): number {
@@ -96,14 +141,16 @@ export class Ambience {
   private readonly sandGain: GainNode;
   private readonly rain: Bed;
   private readonly roof: Bed;
-  private readonly meadow: Bed;
   private readonly grasshoppers: Bed;
   private readonly crickets: Bed;
   private readonly beds: Bed[];
 
   private lastBoltSeed = -1;
   private lastThunder: SampleName | null = null;
-  private birdTimer = 6;
+  /** When each species last called: a pair of hawks does not scream over each other. */
+  private readonly lastCall = new Map<string, number>();
+  /** Animals keep quiet in rain and hard wind; last frame's value, for bird calls. */
+  private shelter = 1;
   private cabin = false;
 
   constructor(private readonly mixer: AudioMixer) {
@@ -136,10 +183,9 @@ export class Ambience {
     // The roof is over your head, not outside: past the cabin's low-pass.
     this.roof = new Bed(mixer, bank, 'rain-roof', master, 0.6);
 
-    this.meadow = new Bed(mixer, bank, 'meadow-day', this.world, 0.9);
     this.grasshoppers = new Bed(mixer, bank, 'grasshoppers', this.world, 0.9);
     this.crickets = new Bed(mixer, bank, 'crickets-night', this.world, 0.9);
-    this.beds = [this.windLight, this.windStrong, this.rain, this.roof, this.meadow, this.grasshoppers, this.crickets];
+    this.beds = [this.windLight, this.windStrong, this.rain, this.roof, this.grasshoppers, this.crickets];
   }
 
   /** `rightX/Z` is the listener's horizontal ear-to-ear axis, for panning bearings. */
@@ -173,18 +219,13 @@ export class Ambience {
     // --- life -------------------------------------------------------------------
     // Animals go quiet in rain and hard wind.
     const shelter = (1 - clamp01(rain * 2)) * (1 - clamp01((windT - 0.35) * 2));
-    const day = clamp01(f.dayFactor * 1.6 - 0.2);
+    this.shelter = shelter;
     const night = 1 - clamp01(f.dayFactor * 1.6);
     const hot = clamp01((f.dayFactor - 0.6) * 2.5) * (0.35 + 0.65 * f.heat);
-    this.meadow.set(WILDLIFE_GAIN * MEADOW * day * shelter, now, 2);
-    this.grasshoppers.set(WILDLIFE_GAIN * GRASSHOPPERS * hot * shelter, now, 2);
-    this.crickets.set(WILDLIFE_GAIN * CRICKETS * night * shelter, now, 2);
-
-    this.birdTimer -= dt;
-    if (this.birdTimer <= 0) {
-      this.birdTimer = 8 + Math.random() * 22;
-      if (Math.random() < day * shelter) this.bird();
-    }
+    const crickets = insectPatch(f.roadS, 0x0c71, CRICKET_SHARE);
+    const grasshoppers = insectPatch(f.roadS, 0x9a55, GRASSHOPPER_SHARE);
+    this.grasshoppers.set(WILDLIFE_GAIN * GRASSHOPPERS * hot * shelter * grasshoppers, now, 2);
+    this.crickets.set(WILDLIFE_GAIN * CRICKETS * night * shelter * crickets, now, 2);
   }
 
   /**
@@ -223,18 +264,35 @@ export class Ambience {
     );
   }
 
-  /** One bird close by, off the road: a crow, a cuckoo, or a lark overhead. */
-  private bird(): void {
-    const roll = Math.random();
-    const name: SampleName = roll < 0.45 ? (Math.random() < 0.5 ? 'crow-1' : 'crow-2') : roll < 0.7 ? 'cuckoo' : 'skylark';
-    const distance = Math.random();
-    playOnce(this.mixer, this.mixer.samples, name, this.world, {
-      gain: WILDLIFE_GAIN * BIRD * (1 - 0.65 * distance),
-      spread: 0.03,
-      pan: Math.random() * 1.6 - 0.8,
-      lowpass: 12000 - 6000 * distance,
-      send: 0.2 + 0.3 * distance,
+  /**
+   * One bird calling where it is. `distance` is from the listener: past a few tens of
+   * metres the air takes the top off, and far calls carry more of the country's echo.
+   */
+  birdCall(species: string, x: number, y: number, z: number, distance: number): void {
+    const call = BIRD_CALLS[species];
+    if (!call || !this.mixer.running || this.shelter < 0.05) return;
+    const now = this.mixer.now;
+    if (now - (this.lastCall.get(species) ?? -Infinity) < BIRD_CALL_GAP_S) return;
+    this.lastCall.set(species, now);
+    const ctx = this.mixer.ctx;
+    const panner = new PannerNode(ctx, {
+      panningModel: 'equalpower',
+      distanceModel: 'inverse',
+      refDistance: 12,
+      rolloffFactor: 1,
+      maxDistance: 800,
     });
+    setPannerPosition(panner, x, y, z, this.mixer.now, 0.001);
+    panner.connect(this.world);
+    const played = playOnce(this.mixer, this.mixer.samples, call.take, panner, {
+      gain: WILDLIFE_GAIN * call.gain * this.shelter,
+      rate: call.rate,
+      spread: 0.04,
+      hit: call.take !== 'swallows',
+      lowpass: Math.max(2500, 16000 / (1 + distance / 120)),
+      send: 0.1 + 0.3 * clamp01(distance / 300),
+    });
+    window.setTimeout(() => panner.disconnect(), played ? 8000 : 0);
   }
 
   /**

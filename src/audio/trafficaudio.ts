@@ -24,7 +24,7 @@ import { AudioMixer, ramp, setPannerPosition } from './mixer';
 const SPEED_OF_SOUND = 343;
 const TRAFFIC_GAIN = AUDIO_CONFIG.trafficGain;
 /** Road-layer level at `ROAD_FULL_MPS`. */
-const ROAD_GAIN = 0.55;
+const ROAD_GAIN = 0.3;
 const ROAD_FULL_MPS = 30;
 
 export class TrafficAudio {

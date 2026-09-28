@@ -130,6 +130,12 @@ export class GameAudio {
     this.ambience.flockTakeoff(x, y, z, count, large);
   }
 
+  /** One bird calling at a (relative) world position; `species` as agents/birds.ts names it. */
+  birdCall(species: string, x: number, y: number, z: number): void {
+    const distance = Math.hypot(x - this.listenerX, y - this.listenerY, z - this.listenerZ);
+    this.ambience.birdCall(species, x, y, z, Number.isFinite(distance) ? distance : 50);
+  }
+
   beginTrafficFrame(): void {
     this.trafficCandidateCount = 0;
   }
