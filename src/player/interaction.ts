@@ -53,7 +53,8 @@ import type { WorldOrigin } from '../world/origin';
 import type { WreckTrunkField } from '../world/wrecktrunks';
 import type { PoiSwitchField } from '../world/poiswitches';
 import type { CourierField } from '../world/couriers';
-import { STICKER_SIZE } from '../render/stickers';
+import { stickerDef, type StickerKind } from '../items/stickercatalog';
+import { uprightStickerRoll } from '../render/stickers';
 
 /** How far the eye ray reaches for picking. */
 const RAY_RANGE = 2.6;
@@ -572,7 +573,9 @@ export class Interaction {
         && resolved.carId
         && this.inventory.held?.type === 'sticker_envelope'
       ) {
-        const surface = this.pickBody(resolved.vehicle, eyeX, eyeY, eyeZ, dirX, dirY, dirZ, 0);
+        const surface = this.pickBody(
+          resolved.vehicle, eyeX, eyeY, eyeZ, dirX, dirY, dirZ, 0, this.inventory.held.stickerKind,
+        );
         if (surface) {
           actionResolved = {
             ...resolved,
@@ -669,6 +672,7 @@ export class Interaction {
       dirY,
       dirZ,
       placement.roll,
+      held.stickerKind,
     );
     if (!surface) {
       this.onStickerPreview(null, null, false);
@@ -1088,6 +1092,7 @@ export class Interaction {
     dy: number,
     dz: number,
     roll: number,
+    kind: StickerKind = 'star',
   ): {
     distance: number;
     valid: boolean;
@@ -1121,6 +1126,7 @@ export class Interaction {
         this.stickerPoint,
         this.stickerNormal,
         roll,
+        kind,
       );
       return {
         distance,
@@ -1139,16 +1145,19 @@ export class Interaction {
     point: THREE.Vector3,
     normal: THREE.Vector3,
     roll: number,
+    kind: StickerKind,
   ): boolean {
     this.stickerQuaternion.setFromUnitVectors(this.stickerForward, normal);
     this.stickerRight.set(1, 0, 0).applyQuaternion(this.stickerQuaternion).applyAxisAngle(normal, roll);
     this.stickerUp.set(0, 1, 0).applyQuaternion(this.stickerQuaternion).applyAxisAngle(normal, roll);
     vehicle.root.getWorldQuaternion(this.qBody);
     this.stickerWorldNormal.copy(normal).applyQuaternion(this.qBody).normalize();
-    const half = STICKER_SIZE * 0.5;
+    const def = stickerDef(kind);
+    const halfW = def.widthM * 0.5;
+    const halfH = def.heightM * 0.5;
     for (let corner = 0; corner < 4; corner++) {
-      const sx = (corner & 1) === 0 ? -half : half;
-      const sy = (corner & 2) === 0 ? -half : half;
+      const sx = (corner & 1) === 0 ? -halfW : halfW;
+      const sy = (corner & 2) === 0 ? -halfH : halfH;
       this.stickerCorner
         .copy(point)
         .addScaledVector(this.stickerRight, sx)
@@ -1755,7 +1764,8 @@ export class Interaction {
     if (t.kind === 'car-body') {
       const envelope = held?.type === 'sticker_envelope' ? held : null;
       if (!envelope || !this.world.state.cars[t.carId]) return;
-      this.stickerPlacement = { envelopeId: envelope.id, carId: t.carId, roll: 0 };
+      const roll = uprightStickerRoll(t.normal.x, t.normal.y, t.normal.z);
+      this.stickerPlacement = { envelopeId: envelope.id, carId: t.carId, roll };
       this.openStorage = null;
       this.onStickerPreview(t.carId, {
         id: `${envelope.id}:sticker`,
@@ -1766,7 +1776,7 @@ export class Interaction {
         nx: t.normal.x,
         ny: t.normal.y,
         nz: t.normal.z,
-        roll: 0,
+        roll,
       }, t.valid);
       this.sound = 'mount';
       return;

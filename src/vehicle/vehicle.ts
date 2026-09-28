@@ -4059,6 +4059,12 @@ export class Vehicle implements Rebasable {
 
     this.surface = instance.surface;
     this.surface.setCondition(this.localBodyDirt, this.localBodyScratches);
+    this.surface.setStickers(this.car.stickers);
+  }
+
+  /** Re-prints the car's stickers after one was placed; the model may still be loading. */
+  refreshStickers(): void {
+    this.surface?.setStickers(this.car.stickers);
   }
 
   /** Releases per-instance lamp materials and detaches the model-owned visual tree. */

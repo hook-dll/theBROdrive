@@ -12,6 +12,9 @@ import type { WebGLProgramParametersWithUniforms } from 'three';
 import { MATERIALS_CONFIG } from '../config';
 import { applyComicShading } from './comic';
 import { SandColor } from './desertdust';
+import { stickerAtlas } from './stickerart';
+import { stickerDef } from '../items/stickercatalog';
+import type { StickerState } from '../game/state';
 
 /** Per-instance uniforms for condition-shaded materials. */
 interface ConditionUniforms {
@@ -55,6 +58,10 @@ interface CarBodyUniforms {
   readonly palettePaint: { value: number };
   readonly paintColor: { value: THREE.Color };
   readonly paintCell: { value: THREE.Vector2 };
+  /** Placed stickers (CAR_STICKERS), `stickerCount` of the array in use. */
+  readonly stickers: { value: THREE.Matrix4[] };
+  readonly stickerCount: { value: number };
+  readonly stickerAtlas: { value: THREE.Texture | null };
 }
 
 
@@ -105,7 +112,9 @@ const CONDITION_PROGRAM_KEY = 'condition-rust-dirt-v2';
  * program. What differs between a showroom car and a sand-blasted wreck is uniform
  * VALUES, so a POI full of wrecks entering the view compiles nothing.
  */
-const CAR_BODY_PROGRAM_KEY = 'car-body-condition-v1';
+const CAR_BODY_PROGRAM_KEY = 'car-body-condition-v2';
+/** Most stickers one car's paint carries; more are kept in the save but not drawn. */
+export const CAR_STICKER_MAX = 24;
 
 /**
  * Name of the vertex attribute carrying each paint vertex's chassis-local position
@@ -245,6 +254,9 @@ uniform vec4 uCarAxles;
 uniform float uPalettePaint;
 uniform vec3 uPalettePaintColor;
 uniform vec2 uPalettePaintCell;
+uniform int uStickerCount;
+uniform mat4 uStickers[ ${CAR_STICKER_MAX} ];
+uniform sampler2D uStickerAtlas;
 varying vec3 vCarBodyPos;
 ${CONDITION_NOISE}
 float carArch( vec3 p, float axleZ, float forward ) {
@@ -296,6 +308,53 @@ if ( uPalettePaint > 0.5 ) {
 #endif`;
 
 /**
+ * STICKERS, printed into the paint: clean paint, then the stickers, then the scratches
+ * and the dust over both, which is how vinyl on a real car ages — it scuffs with the
+ * panel and the desert settles on it like on the paint round it.
+ *
+ * Each sticker is a projected decal in the chassis frame (the same `vCarBodyPos` the
+ * wear uses), so it follows the panel's curve and rides the car for free. Per sticker a
+ * mat4: column 0 centre + half width, 1 normal + half height, 2 tangent (the print's
+ * +X), 3 its atlas rectangle (render/stickerart.ts). A fragment takes a sticker when it
+ * lies within a few centimetres of its plane and its own face (from the screen-space
+ * derivative of the chassis position) looks the sticker's way — so nothing projects
+ * through to the far side of the car or smears down a panel edge. The atlas is
+ * premultiplied: `paint * (1 - a) + ink`. Sampled with explicit gradients, taken
+ * outside the loop, because derivatives inside non-uniform flow are undefined.
+ */
+const CAR_STICKERS = `
+if ( uStickerCount > 0 ) {
+  vec3 stP = vCarBodyPos;
+  vec3 stDx = dFdx( stP );
+  vec3 stDy = dFdy( stP );
+  vec3 stFace = normalize( cross( stDx, stDy ) );
+  float stCover = 0.0;
+  for ( int i = 0; i < ${CAR_STICKER_MAX}; i++ ) {
+    if ( i >= uStickerCount ) break;
+    mat4 st = uStickers[ i ];
+    vec3 stN = st[ 1 ].xyz;
+    vec3 stD = stP - st[ 0 ].xyz;
+    if ( abs( dot( stD, stN ) ) > 0.04 ) continue;
+    float stFacing = abs( dot( stFace, stN ) );
+    if ( stFacing < 0.35 ) continue;
+    vec3 stT = st[ 2 ].xyz;
+    vec3 stB = cross( stN, stT );
+    vec2 stUv = vec2( dot( stD, stT ) / st[ 0 ].w, dot( stD, stB ) / st[ 1 ].w ) * 0.5 + 0.5;
+    if ( stUv.x < 0.0 || stUv.x > 1.0 || stUv.y < 0.0 || stUv.y > 1.0 ) continue;
+    vec2 stSpan = st[ 3 ].zw - st[ 3 ].xy;
+    vec2 stGx = vec2( dot( stDx, stT ) / st[ 0 ].w, dot( stDx, stB ) / st[ 1 ].w ) * 0.5 * stSpan;
+    vec2 stGy = vec2( dot( stDy, stT ) / st[ 0 ].w, dot( stDy, stB ) / st[ 1 ].w ) * 0.5 * stSpan;
+    vec4 stInk = textureGrad( uStickerAtlas, st[ 3 ].xy + stUv * stSpan, stGx, stGy );
+    stInk *= smoothstep( 0.35, 0.6, stFacing );
+    diffuseColor.rgb = diffuseColor.rgb * ( 1.0 - stInk.a ) + stInk.rgb;
+    stCover = max( stCover, stInk.a );
+  }
+  // Vinyl: a satin print, no metal flake.
+  roughnessFactor = mix( roughnessFactor, 0.42, stCover );
+  metalnessFactor = mix( metalnessFactor, 0.0, stCover );
+}`;
+
+/**
  * Dirt and scratches on car paint, in the car's own chassis frame.
  *
  * Injected after the normal is final but before `lights_physical_fragment` builds
@@ -321,6 +380,7 @@ if ( uPalettePaint > 0.5 ) {
  * loss of gloss.
  */
 const CAR_BODY_CONDITION = `#include <normal_fragment_maps>
+${CAR_STICKERS}
 if ( uDirt + uScratch > 0.0005 ) {
   vec3 carP = vCarBodyPos;
   vec3 carH = uCarBodyHalf;
@@ -495,6 +555,9 @@ function patchCarBodyShader(
   shader.uniforms.uPalettePaint = uniforms.palettePaint;
   shader.uniforms.uPalettePaintColor = uniforms.paintColor;
   shader.uniforms.uPalettePaintCell = uniforms.paintCell;
+  shader.uniforms.uStickers = uniforms.stickers;
+  shader.uniforms.uStickerCount = uniforms.stickerCount;
+  shader.uniforms.uStickerAtlas = uniforms.stickerAtlas;
 
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', CAR_BODY_VERTEX_PARS)
@@ -905,6 +968,9 @@ export function makeCarBodyConditionMaterial(
     palettePaint: { value: 0 },
     paintColor: { value: new THREE.Color() },
     paintCell: { value: new THREE.Vector2() },
+    stickers: { value: Array.from({ length: CAR_STICKER_MAX }, () => new THREE.Matrix4()) },
+    stickerCount: { value: 0 },
+    stickerAtlas: { value: null },
   };
   carBodyUniforms.set(material, uniforms);
   material.onBeforeCompile = (shader) => patchCarBodyShader(shader, uniforms, unified);
@@ -913,6 +979,54 @@ export function makeCarBodyConditionMaterial(
   return material;
 }
 
+
+const _stickerQ = new THREE.Quaternion();
+const _stickerN = new THREE.Vector3();
+const _stickerT = new THREE.Vector3();
+const STICKER_FORWARD = new THREE.Vector3(0, 0, 1);
+
+/**
+ * Writes one car's placed stickers into the paint materials it was instanced with
+ * (CAR_STICKERS). The sticker frame is the one the placement preview draws: +Z onto the
+ * surface normal, then rolled about it. Cheap enough to call on every change.
+ */
+export function setCarBodyStickers(paint: readonly THREE.Material[], stickers: readonly StickerState[]): void {
+  const count = Math.min(CAR_STICKER_MAX, stickers.length);
+  const atlas = count > 0 ? stickerAtlas() : null;
+  for (const material of paint) {
+    const uniforms = carBodyUniforms.get(material);
+    if (!uniforms) continue;
+    uniforms.stickerCount.value = count;
+    if (atlas) uniforms.stickerAtlas.value = atlas.texture;
+    for (let i = 0; i < count; i++) {
+      const sticker = stickers[i]!;
+      const def = stickerDef(sticker.kind);
+      const rect = atlas!.rects.get(sticker.kind)!;
+      _stickerN.set(sticker.nx, sticker.ny, sticker.nz);
+      if (_stickerN.lengthSq() < 1e-8) _stickerN.set(0, 1, 0);
+      _stickerN.normalize();
+      _stickerQ.setFromUnitVectors(STICKER_FORWARD, _stickerN);
+      _stickerT.set(1, 0, 0).applyQuaternion(_stickerQ).applyAxisAngle(_stickerN, sticker.roll);
+      const e = uniforms.stickers.value[i]!.elements;
+      e[0] = sticker.x;
+      e[1] = sticker.y;
+      e[2] = sticker.z;
+      e[3] = def.widthM / 2;
+      e[4] = _stickerN.x;
+      e[5] = _stickerN.y;
+      e[6] = _stickerN.z;
+      e[7] = def.heightM / 2;
+      e[8] = _stickerT.x;
+      e[9] = _stickerT.y;
+      e[10] = _stickerT.z;
+      e[11] = 0;
+      e[12] = rect[0];
+      e[13] = rect[1];
+      e[14] = rect[2];
+      e[15] = rect[3];
+    }
+  }
+}
 
 /** Selects one Soviet atlas paint cell and its per-car replacement colour. */
 export function setCarBodyPalettePaint(

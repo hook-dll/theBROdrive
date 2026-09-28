@@ -1,5 +1,6 @@
 import type { PartInstance } from '../parts/registry';
 import { variant } from '../parts/registry';
+import { stickerDef, type StickerKind } from './stickercatalog';
 
 /**
  * Everything the player can hold, carry or use.
@@ -130,7 +131,7 @@ export interface PocketWatchItem {
   readonly id: string;
 }
 
-export type StickerKind = 'star';
+export type { StickerKind } from './stickercatalog';
 
 /** A physical task object. Its source index is the complete delivery contract. */
 export interface ContractCargoItem {
@@ -242,7 +243,8 @@ export function itemLabel(item: Item): string {
     case 'contract_cargo':
       return item.cargoName;
     case 'sticker_envelope':
-      return 'signed sticker envelope';
+      // The name is on the envelope; the picture is seen when it is tried on.
+      return `sticker envelope · ${stickerDef(item.stickerKind).label}`;
   }
 }
 

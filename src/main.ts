@@ -58,7 +58,6 @@ import { SandTyreTracks } from './render/tyretracks';
 import { ambientBeamGain, VehicleLightRig } from './render/vehiclelights';
 import { ContactPatchField } from './render/contactpatches';
 import {
-  createStickerMesh,
   createStickerPreviewMesh,
   updateStickerPreview,
 } from './render/stickers';
@@ -620,7 +619,6 @@ async function boot(): Promise<void> {
       await warmup;
       const vehicle = new Vehicle(physics, world, car, renderer.scene, origin);
       vehicles.set(car.id, vehicle);
-      for (const sticker of car.stickers) vehicle.root.add(createStickerMesh(sticker));
       return vehicle;
     })().then(
       (vehicle) => {
@@ -962,9 +960,9 @@ async function boot(): Promise<void> {
       const active = activeCar();
       return active ? { carId: active.id, vehicle: active.vehicle } : null;
     },
-    (carId, sticker) => {
-      const vehicle = vehicles.get(carId);
-      if (vehicle) vehicle.root.add(createStickerMesh(sticker));
+    (carId) => {
+      // The sticker is in CarState already; the paint re-reads the list.
+      vehicles.get(carId)?.refreshStickers();
     },
     (carId, sticker, valid) => {
       if (!carId || !sticker) {

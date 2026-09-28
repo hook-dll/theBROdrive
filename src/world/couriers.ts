@@ -1,5 +1,6 @@
 import { hash, hash01 } from '../core/rng';
 import type { ContractCargoItem, Item } from '../items/items';
+import { stickerKindForSeed } from '../items/stickercatalog';
 import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
 
 /** One courier every 9 km, jittered and snapped to a guaranteed POI slot. */
@@ -114,7 +115,7 @@ export function courierDefaultStorage(seed: number, index: number): readonly (It
       sourceCourierIndex: index,
       contractKind: 'parcel',
       cargoName: PARCEL_NAMES[nameIndex]!,
-      rewardStickerKind: 'star',
+      rewardStickerKind: stickerKindForSeed(hash(seed, OFFER_DOMAIN, index, slot)),
       generatedSeed: hash(seed, OFFER_DOMAIN, index, slot),
     };
     cells[slot] = item;

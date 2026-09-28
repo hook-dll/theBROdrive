@@ -14,6 +14,7 @@ import { COLD_SOAK_C } from '../vehicle/cooling';
 import { sanitizeSettings } from '../game/settings';
 import { variant, type PartInstance } from '../parts/registry';
 import { CAMERA_FRAME_LIMIT, type Item } from '../items/items';
+import { isStickerKind } from '../items/stickercatalog';
 import { createBonnetStorage, normalizeBonnetStorage, BONNET_SLOT_COUNT } from '../vehicle/bonnet';
 import { carModel, DEFAULT_CAR_MODEL_ID, hasCarModel } from '../vehicle/carmodels';
 import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
@@ -557,10 +558,12 @@ function migrateCar(raw: Record<string, unknown>): CarState {
       const value = raw.stickers[index];
       if (typeof value !== 'object' || value === null) continue;
       const s = value as Record<string, unknown>;
-      if (s.kind !== 'star') continue;
+      // Saves before the catalog have no kind worth reading: they are all stars.
+      const kind = s.kind === undefined ? 'star' : s.kind;
+      if (!isStickerKind(kind)) continue;
       stickers.push({
         id: typeof s.id === 'string' ? s.id : `legacy:${raw.id}:sticker:${index}`,
-        kind: 'star',
+        kind,
         x: numOr(s.x, 0),
         y: numOr(s.y, 0),
         z: numOr(s.z, 0),
@@ -805,7 +808,7 @@ function migrateItem(raw: unknown, where: string): Item {
         sourceCourierIndex < 0
         || obj.contractKind !== 'parcel'
         || typeof obj.cargoName !== 'string'
-        || obj.rewardStickerKind !== 'star'
+        || !isStickerKind(obj.rewardStickerKind)
       ) {
         throw new Error(`Save data is malformed: contract cargo at ${where} is invalid`);
       }
@@ -815,18 +818,18 @@ function migrateItem(raw: unknown, where: string): Item {
         sourceCourierIndex,
         contractKind: 'parcel',
         cargoName: obj.cargoName,
-        rewardStickerKind: 'star',
+        rewardStickerKind: obj.rewardStickerKind,
         generatedSeed: numOr(obj.generatedSeed, 0) >>> 0,
       };
     }
     case 'sticker_envelope':
-      if (obj.stickerKind !== 'star' || typeof obj.completedContractId !== 'string') {
+      if (!isStickerKind(obj.stickerKind) || typeof obj.completedContractId !== 'string') {
         throw new Error(`Save data is malformed: sticker envelope at ${where} is invalid`);
       }
       return {
         type: 'sticker_envelope',
         id: obj.id,
-        stickerKind: 'star',
+        stickerKind: obj.stickerKind,
         completedContractId: obj.completedContractId,
       };
     default:

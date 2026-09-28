@@ -9,7 +9,11 @@
  * enough, and is why nothing in here has to test `import.meta.env.DEV` itself.
  */
 
+import * as THREE from 'three';
 import type { BirdFlock } from '../agents/birds';
+import { STICKERS } from '../items/stickercatalog';
+import { uprightStickerRoll } from '../render/stickers';
+import { stickerAtlas } from '../render/stickerart';
 import type { TumbleweedField } from '../agents/tumbleweed';
 import type { GameAudio } from '../audio/gameaudio';
 import type { InputReader } from '../core/input';
@@ -561,6 +565,86 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
   };
 
   const dev = (window as unknown as Record<string, Record<string, unknown>>)['__bro'];
+  /**
+   * Covers the driven (or given) car with one of every sticker in the catalog, for
+   * judging the designs and how they wear: rays from a lattice round the car find
+   * painted panel points (the same `stickerMaterialIndices` placement accepts), and the
+   * stickers go on the farthest-apart ones, upright. Writes CarState directly — a dev
+   * sheet, not a reward. `clear` removes them again.
+   */
+  /** The sticker atlas as a PNG data URL, for looking at every design at once. */
+  dev['stickerAtlasPng'] = (): string => (stickerAtlas().texture.image as HTMLCanvasElement).toDataURL('image/png');
+  dev['stickerSheet'] = (carId?: string, clear = false): number => {
+    const id = carId ?? ctx.world.state.player.drivingCarId;
+    const car = id ? ctx.world.state.cars[id] : undefined;
+    const vehicle = id ? ctx.vehicles.get(id) : undefined;
+    if (!car || !vehicle) return 0;
+    car.stickers.length = 0;
+    if (clear) {
+      vehicle.refreshStickers();
+      return 0;
+    }
+    const root = vehicle.root;
+    root.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(root);
+    const inv = root.matrixWorld.clone().invert();
+    const ray = new THREE.Raycaster();
+    const hits: THREE.Intersection[] = [];
+    const found: { p: THREE.Vector3; n: THREE.Vector3 }[] = [];
+    const nm = new THREE.Matrix3();
+    const q = new THREE.Quaternion();
+    root.getWorldQuaternion(q).invert();
+    const size = box.getSize(new THREE.Vector3());
+    const centre = box.getCenter(new THREE.Vector3());
+    const shoot = (origin: THREE.Vector3, dir: THREE.Vector3): void => {
+      ray.set(origin, dir);
+      hits.length = 0;
+      ray.intersectObject(root, true, hits);
+      const hit = hits.find((h) => h.face && (h.object.userData.stickerMaterialIndices as number[] | undefined)?.includes(h.face.materialIndex));
+      if (!hit || hit !== hits.find((h) => h.face)) return;
+      const n = hit.face!.normal.clone().applyNormalMatrix(nm.getNormalMatrix(hit.object.matrixWorld)).applyQuaternion(q).normalize();
+      found.push({ p: hit.point.clone().applyMatrix4(inv), n });
+    };
+    for (let i = 0; i <= 10; i++) {
+      for (let j = 0; j <= 6; j++) {
+        const a = box.min.x + (size.x * (0.5 + j)) / 7.5;
+        const b = box.min.z + (size.z * (0.5 + i)) / 11;
+        const y = box.min.y + (size.y * (0.35 + j * 0.08));
+        shoot(new THREE.Vector3(a, box.max.y + 1, b), new THREE.Vector3(0, -1, 0));
+        shoot(new THREE.Vector3(box.min.x - 1, y, b), new THREE.Vector3(1, 0, 0));
+        shoot(new THREE.Vector3(box.max.x + 1, y, b), new THREE.Vector3(-1, 0, 0));
+      }
+    }
+    void centre;
+    const picked: typeof found = [];
+    for (const def of STICKERS) {
+      let best: (typeof found)[number] | null = null;
+      let bestD = -1;
+      for (const f of found) {
+        let d = Infinity;
+        for (const p of picked) d = Math.min(d, f.p.distanceTo(p.p));
+        if (d > bestD) {
+          bestD = d;
+          best = f;
+        }
+      }
+      if (!best) break;
+      picked.push(best);
+      car.stickers.push({
+        id: `dev:${def.kind}`,
+        kind: def.kind,
+        x: best.p.x,
+        y: best.p.y,
+        z: best.p.z,
+        nx: best.n.x,
+        ny: best.n.y,
+        nz: best.n.z,
+        roll: uprightStickerRoll(best.n.x, best.n.y, best.n.z),
+      });
+    }
+    vehicle.refreshStickers();
+    return car.stickers.length;
+  };
   dev['killPlayer'] = (): void => {
     if (!ctx.vitals.dead) {
       ctx.vitals.beginCollisionFrame('foot');
