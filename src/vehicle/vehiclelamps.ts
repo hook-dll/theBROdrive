@@ -11,6 +11,7 @@
 import * as THREE from 'three';
 import type { CarState, GameWorld } from '../game/state';
 import type { VehicleLightRig } from '../render/vehiclelights';
+import { makeCarGrimeMaterial, setCarGrime } from '../render/materials';
 import type { CarModelDef } from './carmodels';
 import { clamp } from './vehicletuning';
 
@@ -109,6 +110,12 @@ export type IndicatorSide = 'off' | 'left' | 'right';
 
 /** Lens emission stays white-hot; only the light it THROWS carries the filament's warmth. */
 const HEADLIGHT_EMISSIVE = 0xffffff;
+/**
+ * Share of a beam a fully dirt-caked lens keeps back. A third, not more: the driven
+ * car's own beams are how the road is read at night, and a dusty lamp is a dimmer
+ * road, not a blind one.
+ */
+const LENS_GRIME_BEAM_LOSS = 0.35;
 /** Running and stop lenses are red even when unlit; controls only raise their emission. */
 const TAILLIGHT_EMISSIVE = 0xff0000;
 const REVERSE_LIGHT_EMISSIVE = 0xf4f7ff;
@@ -185,6 +192,8 @@ export class VehicleLamps {
   private readonly projectedLightSource = new THREE.Vector3();
   private readonly projectedLightTarget = new THREE.Vector3();
   private indicatorLit = false;
+  /** Dust on the lenses, 0..1: dims what they show and what they throw. */
+  private grime = 0;
 
   constructor(ctx: VehicleLampsContext) {
     this.ctx = ctx;
@@ -243,6 +252,34 @@ export class VehicleLamps {
     this.restoredLightStatePending = false;
   }
 
+  /**
+   * Dust on every lens of this car, from the body's own dirt. The lens film is the
+   * grime shader (render/materials.ts); the beam loss is here, because a dirty
+   * headlight is a darker road, not only a duller lamp — and on a night drive through
+   * the desert that is the reason to stop and wipe them.
+   */
+  setGrime(grime: number): void {
+    if (grime === this.grime) return;
+    this.grime = grime;
+    for (const list of this.lampMaterialLists()) setCarGrime(list, grime);
+  }
+
+  private lampMaterialLists(): readonly EmissiveMaterial[][] {
+    return [
+      this.headlightLensMaterials,
+      this.taillightMaterials,
+      this.brakeLightMaterials,
+      this.reverseLightMaterials,
+      this.leftBlinkerMaterials,
+      this.rightBlinkerMaterials,
+    ];
+  }
+
+  /** Share of a beam that gets through the dust on its lens. */
+  private get beamThroughGrime(): number {
+    return 1 - LENS_GRIME_BEAM_LOSS * this.grime;
+  }
+
   /** Advances the blinker phase by one step; a parked car blinks too. */
   advance(dt: number): void {
     if (this.indicatorSide === 'off') {
@@ -287,7 +324,7 @@ export class VehicleLamps {
     const headlightIntensity =
       this.headlightMode === 'off'
         ? 0
-        : headlightBeam.intensity * this.headlightEnvironmentFactor * gain;
+        : headlightBeam.intensity * this.headlightEnvironmentFactor * gain * this.beamThroughGrime;
     for (let i = 0; i < 2; i++) {
       this.projectBeam(
         rig,
@@ -301,14 +338,14 @@ export class VehicleLamps {
         rig,
         this.taillightMounts[i],
         TAILLIGHT_EMISSIVE,
-        this.taillightBeamIntensity * gain,
+        this.taillightBeamIntensity * gain * this.beamThroughGrime,
         TAILLIGHT_BEAM,
       );
       this.projectBeam(
         rig,
         this.reverseLightMounts[i],
         REVERSE_LIGHT_EMISSIVE,
-        this.reverseLightBeamIntensity * gain,
+        this.reverseLightBeamIntensity * gain * this.beamThroughGrime,
         REVERSE_LIGHT_BEAM,
       );
     }
@@ -385,9 +422,10 @@ export class VehicleLamps {
             `Car model "${this.ctx.model.id}" lamp material cannot emit light: ${source.name}`,
           );
         }
-        const material = source.clone();
+        const material = makeCarGrimeMaterial(source.clone());
         material.emissive.setHex(0x000000);
         material.emissiveIntensity = 0;
+        setCarGrime([material], this.grime);
         output.push(material);
         return material;
       };

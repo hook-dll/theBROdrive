@@ -1,5 +1,6 @@
 /**
- * One car's visible body condition: the paint's dirt and scratches.
+ * One car's visible body condition: the paint's dirt and scratches, and the dust on
+ * its windows.
  *
  * Created once per instanced car by render/carmodel.ts, which is the only place that
  * knows which materials are this car's paint. Holding those handles is the point: a
@@ -8,7 +9,14 @@
  */
 
 import type * as THREE from 'three';
-import { setCarBodyCondition } from './materials';
+import { setCarBodyCondition, setCarGrime } from './materials';
+
+/**
+ * Share of the body's dirt the windows carry. Glass is smooth, steep and — the
+ * windscreen at least — wiped, so it holds less than the paint around it; but a car
+ * that has been through the desert is not looked out of through clean glass.
+ */
+export const GLASS_DIRT_SHARE = 0.7;
 
 export class CarBodySurface {
   private appliedDirt = -1;
@@ -17,6 +25,8 @@ export class CarBodySurface {
   constructor(
     /** This car's own paint materials, captured when it was instanced. */
     readonly paint: readonly THREE.Material[],
+    /** This car's own window glass (render/carmodel.ts `cloneCarGlass`). */
+    readonly glass: readonly THREE.Material[] = [],
   ) {}
 
   /** Writes dirt and scratches into this car's paint; free when neither changed. */
@@ -25,10 +35,12 @@ export class CarBodySurface {
     this.appliedDirt = dirt;
     this.appliedScratches = scratches;
     setCarBodyCondition(this.paint, dirt, scratches);
+    setCarGrime(this.glass, dirt * GLASS_DIRT_SHARE);
   }
 
   /** Frees this car's own paint materials. */
   dispose(): void {
     for (const material of this.paint) material.dispose();
+    for (const material of this.glass) material.dispose();
   }
 }

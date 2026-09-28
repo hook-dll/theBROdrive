@@ -945,6 +945,150 @@ export function setCarBodyCondition(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Grime on glass and lamp lenses
+// ---------------------------------------------------------------------------
+
+/**
+ * DUST ON THE GLASS AND THE LENSES, as a film rather than a crust.
+ *
+ * Glass does not take the paint's shader: it has no chassis-frame attribute, no rust
+ * and no scratches, and what dirt does to it is different — it is not a colour laid
+ * over the surface so much as the MIRROR going out of it. A clean window is a sky
+ * reflection; a dusty one is a pale, matt, patchy pane. A lens does the same, and also
+ * lets less of its own light out, which is the one thing a driver actually notices.
+ *
+ * One program for every car's glass and one per lamp material kind, shared through
+ * `customProgramCacheKey`: what differs between a showroom pane and a desert one is a
+ * uniform. The mottle is sampled in the mesh's own frame, rotated into the car's, so
+ * it stays on the glass while the car moves.
+ */
+const CAR_GRIME_PROGRAM_KEY = 'car-grime-v1';
+const carGrimeUniforms = new WeakMap<THREE.Material, { value: number }>();
+
+const GRIME_VERTEX_PARS = `#include <common>
+varying vec3 vGrimeP;`;
+
+const GRIME_VERTEX = `#include <begin_vertex>
+vGrimeP = mat3( modelMatrix ) * transformed;`;
+
+const GRIME_FRAGMENT_PARS = `#include <common>
+uniform float uGrime;
+uniform float uGrimeSkyScale;
+uniform vec3 uDustLight;
+uniform vec3 uDustCrust;
+uniform vec3 uDustFilm;
+varying vec3 vGrimeP;
+float grimeHash( vec3 p ) {
+  p = fract( p * 0.3183099 + vec3( 0.1, 0.2, 0.3 ) );
+  p *= 17.0;
+  return fract( p.x * p.y * p.z * ( p.x + p.y + p.z ) );
+}
+float grimeNoise( vec3 x ) {
+  vec3 i = floor( x );
+  vec3 f = fract( x );
+  f = f * f * ( 3.0 - 2.0 * f );
+  return mix(
+    mix(
+      mix( grimeHash( i ), grimeHash( i + vec3( 1.0, 0.0, 0.0 ) ), f.x ),
+      mix( grimeHash( i + vec3( 0.0, 1.0, 0.0 ) ), grimeHash( i + vec3( 1.0, 1.0, 0.0 ) ), f.x ),
+      f.y ),
+    mix(
+      mix( grimeHash( i + vec3( 0.0, 0.0, 1.0 ) ), grimeHash( i + vec3( 1.0, 0.0, 1.0 ) ), f.x ),
+      mix( grimeHash( i + vec3( 0.0, 1.0, 1.0 ) ), grimeHash( i + vec3( 1.0, 1.0, 1.0 ) ), f.x ),
+      f.y ),
+    f.z );
+}`;
+
+// Patchy and streaked: a broad mottle, plus run-off that is long vertically and short
+// across, so a wet-then-dried pane shows drip lines rather than an even fog.
+const GRIME_COLOR = `#include <color_fragment>
+float grimeFilm = 0.0;
+if ( uGrime > 0.0005 ) {
+  float grimeMottle = grimeNoise( vGrimeP * 2.2 );
+  float grimeFine = grimeNoise( vGrimeP * 16.0 );
+  float grimeRun = grimeNoise( vec3( vGrimeP.x * 18.0, vGrimeP.y * 1.4, vGrimeP.z * 18.0 ) );
+  // Mostly an even haze: the mottle only thins or thickens it, it does not make holes.
+  grimeFilm = uGrime * ( 0.8 + 0.3 * ( grimeMottle - 0.5 ) + 0.12 * ( grimeFine - 0.5 ) + 0.22 * ( grimeRun - 0.5 ) );
+  // A little dust already takes most of a pane's shine: the film builds fast, then
+  // saturates, rather than growing in step with the paint's crust.
+  grimeFilm = saturate( 1.35 * grimeFilm );
+  // The paint's settled dust, a little crust in it and lifted toward the pale film.
+  // The pale film alone read as a grey-blue fog on a pane in shade, not as sand.
+  vec3 grimeDust = mix( mix( uDustLight, uDustCrust, 0.3 ), uDustFilm, 0.12 + 0.22 * grimeMottle );
+  diffuseColor.rgb = mix( diffuseColor.rgb, grimeDust, grimeFilm * 0.92 );
+}`;
+
+const GRIME_ROUGHNESS = `#include <roughnessmap_fragment>
+roughnessFactor = mix( roughnessFactor, 0.95, grimeFilm );`;
+
+const GRIME_METALNESS = `#include <metalnessmap_fragment>
+metalnessFactor = mix( metalnessFactor, 0.0, saturate( grimeFilm * 1.7 ) );`;
+
+// Dust is matt and sees the sky as the paint's dust does. The glass's boosted sky
+// (TINTED_GLASS.envMapIntensity) is for the MIRROR; left on the film it washed the
+// sand into a pale grey-blue fog. Where there is dust, the sky light is brought back to
+// what an ordinary surface gets.
+const GRIME_SKY = `#include <lights_fragment_maps>
+#if defined( RE_IndirectDiffuse )
+  iblIrradiance *= mix( 1.0, uGrimeSkyScale, grimeFilm );
+#endif
+#if defined( RE_IndirectSpecular )
+  radiance *= mix( 1.0, uGrimeSkyScale, grimeFilm );
+#endif`;
+
+const GRIME_SPECULAR = `#include <specularmap_fragment>
+specularStrength *= 1.0 - 0.85 * grimeFilm;`;
+
+// A lens under dust lets out a good deal less, and what it lets out has come through
+// sand: warmer, a dim amber rather than a white bulb. The loss has to be large to show
+// at all — a lit lens is several times over white, and a mild cut stays clipped white.
+const GRIME_EMISSIVE = `#include <emissivemap_fragment>
+totalEmissiveRadiance *= ( 1.0 - 0.8 * grimeFilm ) * mix( vec3( 1.0 ), vec3( 1.0, 0.8, 0.55 ), grimeFilm );`;
+
+/**
+ * Gives a glass or lamp material the grime film, in place, and returns it. The
+ * material must be this car's own (a clone): the uniform is per material.
+ */
+export function makeCarGrimeMaterial<T extends THREE.MeshStandardMaterial | THREE.MeshPhongMaterial>(
+  material: T,
+): T {
+  const grime = { value: 0 };
+  carGrimeUniforms.set(material, grime);
+  const standard = material instanceof THREE.MeshStandardMaterial;
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uGrime = grime;
+    shader.uniforms.uGrimeSkyScale = {
+      value: standard ? 1 / Math.max(1, (material as THREE.MeshStandardMaterial).envMapIntensity) : 1,
+    };
+    bindDesertDust(shader);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', GRIME_VERTEX_PARS)
+      .replace('#include <begin_vertex>', GRIME_VERTEX);
+    let fragment = shader.fragmentShader
+      .replace('#include <common>', GRIME_FRAGMENT_PARS)
+      .replace('#include <color_fragment>', GRIME_COLOR)
+      .replace('#include <emissivemap_fragment>', GRIME_EMISSIVE);
+    fragment = standard
+      ? fragment
+          .replace('#include <roughnessmap_fragment>', GRIME_ROUGHNESS)
+          .replace('#include <metalnessmap_fragment>', GRIME_METALNESS)
+          .replace('#include <lights_fragment_maps>', GRIME_SKY)
+      : fragment.replace('#include <specularmap_fragment>', GRIME_SPECULAR);
+    shader.fragmentShader = fragment;
+  };
+  material.customProgramCacheKey = () => CAR_GRIME_PROGRAM_KEY;
+  return material;
+}
+
+/** Writes grime (0..1) into glass or lamp materials made by `makeCarGrimeMaterial`. */
+export function setCarGrime(materials: readonly THREE.Material[], grime: number): void {
+  for (const material of materials) {
+    const uniform = carGrimeUniforms.get(material);
+    if (uniform) uniform.value = grime;
+  }
+}
+
 /** The condition shader's own sand, so a weathered wreck reads as the same dust. */
 const STATIC_DUST_COLOR = DUST_LIGHT.value;
 

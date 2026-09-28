@@ -2891,6 +2891,7 @@ export class Vehicle implements Rebasable {
     // state directly.
     this.resyncBodyCondition();
     this.surface?.setCondition(this.localBodyDirt, this.localBodyScratches);
+    this.lamps.setGrime(this.localBodyDirt);
 
     this.lamps.applyRearLightState();
 

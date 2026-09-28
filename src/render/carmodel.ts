@@ -20,14 +20,16 @@ import {
   makeCarBodyConditionMaterial,
   makeUnifiedAtlasMaterial,
   makeUnifiedSurfaceMaterial,
+  makeCarGrimeMaterial,
   setCarBodyCondition,
   setCarBodyPalettePaint,
+  setCarGrime,
   weatherStaticCarPaint,
   TINTED_GLASS,
   type CarBodyFrame,
   type CarSurfaceFinish,
 } from './materials';
-import { CarBodySurface } from './carsurface';
+import { CarBodySurface, GLASS_DIRT_SHARE } from './carsurface';
 import {
   CAR_MODELS,
   carModel,
@@ -667,6 +669,26 @@ function unifyCarMaterials(scene: THREE.Group, def: CarModelDef): void {
  * one program, one draw state and one place to tune the tint.
  */
 let glassMaterial: THREE.MeshStandardMaterial | null = null;
+
+/**
+ * Gives one car instance its own copy of the shared glass, so its windows can gather
+ * dust of their own (`makeCarGrimeMaterial`). One copy per car, not per pane: every
+ * window of a car is as dirty as the rest. Returns the copies (none if no glass).
+ */
+function cloneCarGlass(root: THREE.Object3D): THREE.Material[] {
+  const shared = carGlassMaterial();
+  let own: THREE.MeshStandardMaterial | null = null;
+  const swap = (material: THREE.Material): THREE.Material => {
+    if (material !== shared) return material;
+    own ??= makeCarGrimeMaterial(shared.clone());
+    return own;
+  };
+  root.traverse((mesh) => {
+    if (!(mesh instanceof THREE.Mesh)) return;
+    mesh.material = Array.isArray(mesh.material) ? mesh.material.map(swap) : swap(mesh.material);
+  });
+  return own ? [own] : [];
+}
 
 function carGlassMaterial(): THREE.MeshStandardMaterial {
   glassMaterial ??= new THREE.MeshStandardMaterial({
@@ -1461,17 +1483,19 @@ export interface CarModelInstance {
 interface StaticCarInstance {
   readonly model: THREE.Object3D;
   readonly paint: readonly THREE.Material[];
+  readonly glass: readonly THREE.Material[];
 }
 
 function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInstance {
   const wheels = cloneWheels(t, appearanceKey);
   const body = t.body.clone(true);
   const paint = cloneCarBodyPaintMaterials(body, t, appearanceKey);
+  const glass = cloneCarGlass(body);
   prepareSovietShellFaces(body, t.def);
   applyRandomPaint(body, t.def, appearanceKey);
   markStickerSurfaces(body, t.def);
   body.name = 'body';
-  const surface = new CarBodySurface(paint);
+  const surface = new CarBodySurface(paint, glass);
   return { body, wheels, surface };
 }
 
@@ -1499,6 +1523,7 @@ function cloneStaticModel(id: string, appearanceKey = id): StaticCarInstance {
   group.name = id;
   const body = t.body.clone(true);
   const paint = cloneCarBodyPaintMaterials(body, t, appearanceKey);
+  const glass = cloneCarGlass(body);
   applyRandomPaint(body, t.def, appearanceKey);
   group.add(body);
   const wheels = cloneWheels(t, appearanceKey);
@@ -1507,7 +1532,7 @@ function cloneStaticModel(id: string, appearanceKey = id): StaticCarInstance {
     mesh.position.set(wheel.pos[0], wheel.pos[1], wheel.pos[2]);
     group.add(mesh);
   }
-  return { model: group, paint };
+  return { model: group, paint, glass };
 }
 /**
  * Clones instances only for templates already resident. Lazy models warm on their
@@ -1571,7 +1596,9 @@ function staticCarInstance(id: string, appearanceKey: string): StaticCarInstance
  */
 export function createStaticCarModel(id: string, appearanceKey = id): THREE.Object3D {
   const instance = staticCarInstance(id, appearanceKey);
-  weatherStaticCarPaint(instance.paint, derelictDust(id, appearanceKey));
+  const dust = derelictDust(id, appearanceKey);
+  weatherStaticCarPaint(instance.paint, dust);
+  setCarGrime(instance.glass, dust * GLASS_DIRT_SHARE);
   return instance.model;
 }
 
@@ -1583,6 +1610,7 @@ export function createStaticCarModel(id: string, appearanceKey = id): THREE.Obje
 export function createCourierCarModel(id: string, appearanceKey: string): THREE.Object3D {
   const instance = staticCarInstance(id, appearanceKey);
   setCarBodyCondition(instance.paint, 0, 0);
+  setCarGrime(instance.glass, 0);
   applyCourierAppearance(instance.model, carModel(id));
   return instance.model;
 }
