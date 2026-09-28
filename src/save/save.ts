@@ -14,7 +14,7 @@ import { COLD_SOAK_C } from '../vehicle/cooling';
 import { sanitizeSettings } from '../game/settings';
 import { variant, type PartInstance } from '../parts/registry';
 import { CAMERA_FRAME_LIMIT, type Item } from '../items/items';
-import { isStickerKind } from '../items/stickercatalog';
+import { isStickerKind, STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
 import { createBonnetStorage, normalizeBonnetStorage, BONNET_SLOT_COUNT } from '../vehicle/bonnet';
 import { carModel, DEFAULT_CAR_MODEL_ID, hasCarModel } from '../vehicle/carmodels';
 import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
@@ -571,6 +571,8 @@ function migrateCar(raw: Record<string, unknown>): CarState {
         ny: numOr(s.ny, 1),
         nz: numOr(s.nz, 0),
         roll: numOr(s.roll, 0),
+        scale: Math.min(STICKER_SCALE_MAX, Math.max(STICKER_SCALE_MIN, numOr(s.scale, 1))),
+        mirror: s.mirror === true,
       });
     }
   }

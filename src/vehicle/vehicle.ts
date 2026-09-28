@@ -15,6 +15,7 @@
 
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
+import type { StickerState } from '../game/state';
 import type { PhysicsWorld, Vec3 } from '../core/physics';
 import type { InputFrame } from '../core/input';
 import { MicroRelief, RoadTexture, SURFACES, SurfaceType } from '../core/surfaces';
@@ -4065,6 +4066,21 @@ export class Vehicle implements Rebasable {
   /** Re-prints the car's stickers after one was placed; the model may still be loading. */
   refreshStickers(): void {
     this.surface?.setStickers(this.car.stickers);
+  }
+
+  /** Prints the sticker being tried on over the placed ones, or clears it (null). */
+  previewSticker(sticker: StickerState | null): void {
+    this.surface?.setStickers(this.car.stickers, sticker);
+  }
+
+  /** The "stick it here" glow on the paint, 0..1. */
+  setStickerHighlight(value: number): void {
+    this.surface?.setHighlight(value);
+  }
+
+  /** A key-fob wink of the blinkers. */
+  wink(): void {
+    this.lamps.wink();
   }
 
   /** Releases per-instance lamp materials and detaches the model-owned visual tree. */

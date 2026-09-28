@@ -47,6 +47,10 @@ export interface StickerState {
   readonly nz: number;
   /** Spin about the normal, radians, from where the player was standing. */
   readonly roll: number;
+  /** Size against the catalog's, STICKER_SCALE_MIN..MAX; absent on older saves = 1. */
+  readonly scale?: number;
+  /** Printed mirror-image (flipped left to right); absent on older saves = false. */
+  readonly mirror?: boolean;
 }
 
 export type HeadlightMode = 'off' | 'low' | 'high';

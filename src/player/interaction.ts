@@ -53,7 +53,7 @@ import type { WorldOrigin } from '../world/origin';
 import type { WreckTrunkField } from '../world/wrecktrunks';
 import type { PoiSwitchField } from '../world/poiswitches';
 import type { CourierField } from '../world/couriers';
-import { stickerDef, type StickerKind } from '../items/stickercatalog';
+import { STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
 import { uprightStickerRoll } from '../render/stickers';
 
 /** How far the eye ray reaches for picking. */
@@ -233,6 +233,9 @@ const BOOT_REVEAL_MARGIN = 0.15;
  * so nothing about operating a cell has changed.
  */
 const GRID_PERSIST_RANGE = BOOT_RANGE * 2;
+
+/** What a sticker in hand asks for until the crosshair finds a car. */
+const STICKER_HINT = 'sticker in hand · aim at a car to try it on';
 
 const EMPTY_WRECK_TRUNK: readonly (Item | null)[] =
   new Array<Item | null>(TRUNK_CELL_COUNT).fill(null);
@@ -466,16 +469,15 @@ export class Interaction {
   private readonly hits: THREE.Intersection[] = [];
   private prevPrimary = false;
   private prevSecondary = false;
-  private stickerPlacement: { envelopeId: string; carId: string; roll: number } | null = null;
+  /**
+   * How the held sticker is being worn while it is tried on: turned, sized and
+   * mirrored by the player, kept while the same envelope stays in hand.
+   */
+  private stickerStyle: { envelopeId: string; rollOffset: number; scale: number; mirror: boolean } | null = null;
+  private prevUseHeld = false;
   private readonly stickerPoint = new THREE.Vector3();
   private readonly stickerNormal = new THREE.Vector3();
-  private readonly stickerRight = new THREE.Vector3();
-  private readonly stickerUp = new THREE.Vector3();
-  private readonly stickerCorner = new THREE.Vector3();
-  private readonly stickerWorldNormal = new THREE.Vector3();
-  private readonly stickerQuaternion = new THREE.Quaternion();
   private readonly stickerNormalMatrix = new THREE.Matrix3();
-  private readonly stickerForward = new THREE.Vector3(0, 0, 1);
 
   constructor(
     private readonly physics: PhysicsWorld,
@@ -532,6 +534,8 @@ export class Interaction {
     this.continuous = null;
     this.prevPrimary = input.usePrimary;
     this.prevSecondary = input.useSecondary;
+    const useHeldPressed = input.useHeld && !this.prevUseHeld;
+    this.prevUseHeld = input.useHeld;
 
     if (this.world.state.player.drivingCarId) {
       // Sitting down closes whatever was open: the grid belongs to a player standing
@@ -546,12 +550,16 @@ export class Interaction {
     }
 
     const resolved = this.resolve(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
-    if (this.stickerPlacement) {
-      return this.updateStickerPlacement(
+    const envelope = this.inventory.held?.type === 'sticker_envelope' ? this.inventory.held : null;
+    if (envelope) {
+      const trying = this.updateStickerMode(
+        envelope,
         resolved,
         input,
         mountPressed || primaryPressed,
         secondaryPressed,
+        useHeldPressed,
+        dropPressed,
         eyeX,
         eyeY,
         eyeZ,
@@ -559,38 +567,27 @@ export class Interaction {
         dirY,
         dirZ,
       );
+      if (trying) return trying;
+    } else if (this.stickerStyle) {
+      this.stickerStyle = null;
+      this.onStickerPreview(null, null, false);
     }
     this.holdOpenStorage(resolved, eyeX, eyeY, eyeZ);
-    const prompt = this.promptFor(resolved);
+    // A sticker in hand turns the car into a surface, not a door: getting in, the bonnet
+    // and the boot are not offered while it is held (an already open boot still takes
+    // the envelope into a cell). What is offered is the hint to aim at the car.
+    const stickerBlocksCar = envelope !== null && this.isClosedCarTarget(resolved.target);
+    const prompt = envelope !== null && (stickerBlocksCar || resolved.target.kind === 'none')
+      ? STICKER_HINT
+      : this.promptFor(resolved);
 
     if (input.usePrimary) this.usePrimary(dt, resolved);
-    const worldActionPressed = mountPressed && this.mountHasPriority(resolved.target);
+    const worldActionPressed = mountPressed && !stickerBlocksCar && this.mountHasPriority(resolved.target);
     if (worldActionPressed) {
-      let actionResolved = resolved;
-      if (
-        resolved.target.kind === 'car-entry'
-        && resolved.vehicle
-        && resolved.carId
-        && this.inventory.held?.type === 'sticker_envelope'
-      ) {
-        const surface = this.pickBody(
-          resolved.vehicle, eyeX, eyeY, eyeZ, dirX, dirY, dirZ, 0, this.inventory.held.stickerKind,
-        );
-        if (surface) {
-          actionResolved = {
-            ...resolved,
-            target: {
-              kind: 'car-body',
-              carId: resolved.carId,
-              ...surface.local,
-              valid: surface.valid,
-            },
-          };
-        }
-      }
+      const actionResolved = resolved;
       this.mount(actionResolved);
     }
-    if (interactPressed && !worldActionPressed) this.tryEnter(resolved);
+    if (interactPressed && !worldActionPressed && !stickerBlocksCar) this.tryEnter(resolved);
     // Deliberately after the driving early-return above: dropping while seated is a
     // no-op, the item stays in the inventory.
     if (dropPressed) this.drop(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
@@ -622,97 +619,103 @@ export class Interaction {
     return { prompt, sound: this.sound, continuous: this.continuous, boot };
   }
 
-  /** Cancels the modal preview. Escape uses this before opening the pause screen. */
-  cancelStickerPlacement(): boolean {
-    if (!this.stickerPlacement) return false;
-    this.stickerPlacement = null;
-    this.onStickerPreview(null, null, false);
-    return true;
+  /** A target that belongs to a car and is not an open storage grid. */
+  private isClosedCarTarget(t: Target): boolean {
+    if (t.kind === 'car-entry' || t.kind === 'car-body') return true;
+    return t.kind === 'storage' && t.owner === 'car' && !this.isStorageOpen(t);
   }
 
-  private updateStickerPlacement(
+  /**
+   * STICKER MODE: an envelope in hand is the editing tool. Aimed at a car's paint or
+   * glass, the sticker is printed there live, see-through, exactly as it will be —
+   * trimmed by the shader to the panels that can carry it, on top of every sticker
+   * already there — and follows the crosshair. The wheel turns it, Shift+wheel sizes
+   * it, E mirrors it, right click puts it back upright at catalogue size, F or click
+   * sticks it. Returns null when the crosshair is not on a car, so the rest of the
+   * world stays usable with the envelope in hand.
+   */
+  private updateStickerMode(
+    held: StickerEnvelopeItem,
     resolved: Resolved,
     input: InputFrame,
     confirm: boolean,
-    cancel: boolean,
+    reset: boolean,
+    mirror: boolean,
+    drop: boolean,
     eyeX: number,
     eyeY: number,
     eyeZ: number,
     dirX: number,
     dirY: number,
     dirZ: number,
-  ): InteractionResult {
-    const placement = this.stickerPlacement!;
-    const held = this.inventory.held;
-    if (held?.type !== 'sticker_envelope' || held.id !== placement.envelopeId || cancel) {
-      this.cancelStickerPlacement();
-      return {
-        prompt: cancel ? 'sticker placement cancelled' : null,
-        sound: null,
-        continuous: null,
-        boot: null,
-      };
+  ): InteractionResult | null {
+    if (this.stickerStyle?.envelopeId !== held.id) {
+      this.stickerStyle = { envelopeId: held.id, rollOffset: 0, scale: 1, mirror: false };
     }
-    placement.roll += input.zoomDelta * Math.PI / 12;
-    if (!resolved.vehicle || resolved.carId !== placement.carId) {
+    const style = this.stickerStyle;
+    const t = resolved.target;
+    const vehicle = resolved.vehicle;
+    const carId = resolved.carId;
+    if (
+      !vehicle
+      || !carId
+      || !this.world.state.cars[carId]
+      || (t.kind === 'storage' && this.isStorageOpen(t))
+      || drop
+    ) {
       this.onStickerPreview(null, null, false);
-      return {
-        prompt: 'aim at the same car · Esc/right click cancel',
-        sound: null,
-        continuous: null,
-        boot: null,
-      };
+      return null;
     }
-    const surface = this.pickBody(
-      resolved.vehicle,
-      eyeX,
-      eyeY,
-      eyeZ,
-      dirX,
-      dirY,
-      dirZ,
-      placement.roll,
-      held.stickerKind,
-    );
+    const surface = this.pickBody(vehicle, eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
     if (!surface) {
       this.onStickerPreview(null, null, false);
-      return {
-        prompt: 'aim at a painted panel · Esc/right click cancel',
-        sound: null,
-        continuous: null,
-        boot: null,
-      };
+      return null;
     }
+
+    if (input.zoomDelta !== 0) {
+      if (input.sprint) {
+        style.scale = Math.min(
+          STICKER_SCALE_MAX,
+          Math.max(STICKER_SCALE_MIN, Math.round((style.scale - input.zoomDelta * 0.1) * 10) / 10),
+        );
+      } else {
+        style.rollOffset += (input.zoomDelta * Math.PI) / 12;
+      }
+    }
+    if (mirror) style.mirror = !style.mirror;
+    if (reset) {
+      style.rollOffset = 0;
+      style.scale = 1;
+      style.mirror = false;
+    }
+
+    const { point, normal } = surface.local;
     const sticker: StickerState = {
       id: `${held.id}:sticker`,
       kind: held.stickerKind,
-      x: surface.local.point.x,
-      y: surface.local.point.y,
-      z: surface.local.point.z,
-      nx: surface.local.normal.x,
-      ny: surface.local.normal.y,
-      nz: surface.local.normal.z,
-      roll: placement.roll,
+      x: point.x,
+      y: point.y,
+      z: point.z,
+      nx: normal.x,
+      ny: normal.y,
+      nz: normal.z,
+      roll: uprightStickerRoll(normal.x, normal.y, normal.z) + style.rollOffset,
+      scale: style.scale,
+      mirror: style.mirror,
     };
-    this.onStickerPreview(placement.carId, sticker, surface.valid);
-    if (confirm && surface.valid) {
-      this.world.apply({
-        t: 'sticker_place',
-        carId: placement.carId,
-        sticker,
-        envelopeId: held.id,
-      });
+    if (confirm) {
+      this.world.apply({ t: 'sticker_place', carId, sticker, envelopeId: held.id });
       this.inventory.remove(held.id);
-      this.onStickerPlaced(placement.carId, sticker);
-      this.stickerPlacement = null;
+      this.stickerStyle = null;
       this.onStickerPreview(null, null, false);
+      this.onStickerPlaced(carId, sticker);
       this.sound = 'mount';
       return { prompt: 'stuck on', sound: this.sound, continuous: null, boot: null };
     }
+    this.onStickerPreview(carId, sticker, true);
+    const size = Math.round(style.scale * 100);
     return {
-      prompt: surface.valid
-        ? '[F/click] place · wheel rotate · Esc/right click cancel'
-        : 'does not fit this painted panel · rotate or move',
+      prompt: `[F/click] stick · wheel turn · Shift+wheel size ${size}% · [E] mirror${style.mirror ? ' ✓' : ''} · right click reset`,
       sound: null,
       continuous: null,
       boot: null,
@@ -1091,8 +1094,6 @@ export class Interaction {
     dx: number,
     dy: number,
     dz: number,
-    roll: number,
-    kind: StickerKind = 'star',
   ): {
     distance: number;
     valid: boolean;
@@ -1107,10 +1108,15 @@ export class Interaction {
     this.raycaster.intersectObject(vehicle.root, true, this.hits);
     for (const hit of this.hits) {
       if (!hit.face) continue;
+      // The nearest face decides: a sticker cannot be aimed through a mirror or a
+      // bumper at the panel behind it.
       const stickerSlots = hit.object.userData.stickerMaterialIndices as number[] | undefined;
-      if (!stickerSlots?.includes(hit.face.materialIndex)) continue;
+      const mesh = hit.object as THREE.Mesh;
+      const faceMaterial = Array.isArray(mesh.material) ? mesh.material[hit.face.materialIndex] : mesh.material;
+      // Every car's own copy of the shared glass keeps its name (render/carmodel.ts).
+      const glass = faceMaterial?.name === 'car-glass';
+      if (!glass && !stickerSlots?.includes(hit.face.materialIndex)) break;
       const distance = hit.distance;
-      const surfaceObject = hit.object;
       this.stickerPoint.copy(hit.point);
       vehicle.root.worldToLocal(this.stickerPoint);
       this.stickerNormal
@@ -1120,71 +1126,16 @@ export class Interaction {
       vehicle.root.getWorldQuaternion(this.qBody).invert();
       this.stickerNormal.applyQuaternion(this.qBody).normalize();
       this.hits.length = 0;
-      const valid = this.stickerFootprintFits(
-        vehicle,
-        surfaceObject,
-        this.stickerPoint,
-        this.stickerNormal,
-        roll,
-        kind,
-      );
       return {
         distance,
-        valid,
+        // Any aimed point on paint or glass is valid: the print is trimmed to what can
+        // carry it by the paint shader, so nothing overhangs an edge.
+        valid: true,
         local: { point: this.stickerPoint, normal: this.stickerNormal },
       };
     }
     this.hits.length = 0;
     return null;
-  }
-
-  /** Centre plus four corner probes must land on the same painted mesh. */
-  private stickerFootprintFits(
-    vehicle: Vehicle,
-    surfaceObject: THREE.Object3D,
-    point: THREE.Vector3,
-    normal: THREE.Vector3,
-    roll: number,
-    kind: StickerKind,
-  ): boolean {
-    this.stickerQuaternion.setFromUnitVectors(this.stickerForward, normal);
-    this.stickerRight.set(1, 0, 0).applyQuaternion(this.stickerQuaternion).applyAxisAngle(normal, roll);
-    this.stickerUp.set(0, 1, 0).applyQuaternion(this.stickerQuaternion).applyAxisAngle(normal, roll);
-    vehicle.root.getWorldQuaternion(this.qBody);
-    this.stickerWorldNormal.copy(normal).applyQuaternion(this.qBody).normalize();
-    const def = stickerDef(kind);
-    const halfW = def.widthM * 0.5;
-    const halfH = def.heightM * 0.5;
-    for (let corner = 0; corner < 4; corner++) {
-      const sx = (corner & 1) === 0 ? -halfW : halfW;
-      const sy = (corner & 2) === 0 ? -halfH : halfH;
-      this.stickerCorner
-        .copy(point)
-        .addScaledVector(this.stickerRight, sx)
-        .addScaledVector(this.stickerUp, sy)
-        .addScaledVector(normal, 0.035);
-      vehicle.root.localToWorld(this.stickerCorner);
-      this.raycaster.set(
-        this.stickerCorner,
-        this.rayDir.copy(this.stickerWorldNormal).negate(),
-      );
-      this.raycaster.near = 0;
-      this.raycaster.far = 0.07;
-      this.hits.length = 0;
-      this.raycaster.intersectObject(vehicle.root, true, this.hits);
-      let accepted = false;
-      for (const hit of this.hits) {
-        if (hit.object !== surfaceObject || !hit.face) continue;
-        const slots = hit.object.userData.stickerMaterialIndices as number[] | undefined;
-        if (slots?.includes(hit.face.materialIndex)) {
-          accepted = true;
-          break;
-        }
-      }
-      this.hits.length = 0;
-      if (!accepted) return false;
-    }
-    return true;
   }
 
   /**
@@ -1756,29 +1707,6 @@ export class Interaction {
         this.world.apply({ t: 'car_storage', carId: t.id, cell: t.cell, item: result.item });
       }
       this.sound = result.action === 'retrieved' ? 'pickup' : 'drop';
-      return;
-    }
-
-    // First F opens a modal physical preview. The envelope stays held until the
-    // second F/click confirms a five-probe-valid painted footprint.
-    if (t.kind === 'car-body') {
-      const envelope = held?.type === 'sticker_envelope' ? held : null;
-      if (!envelope || !this.world.state.cars[t.carId]) return;
-      const roll = uprightStickerRoll(t.normal.x, t.normal.y, t.normal.z);
-      this.stickerPlacement = { envelopeId: envelope.id, carId: t.carId, roll };
-      this.openStorage = null;
-      this.onStickerPreview(t.carId, {
-        id: `${envelope.id}:sticker`,
-        kind: envelope.stickerKind,
-        x: t.point.x,
-        y: t.point.y,
-        z: t.point.z,
-        nx: t.normal.x,
-        ny: t.normal.y,
-        nz: t.normal.z,
-        roll,
-      }, t.valid);
-      this.sound = 'mount';
       return;
     }
   }

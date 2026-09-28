@@ -56,6 +56,10 @@ export const STICKERS = [
 
 export type StickerKind = (typeof STICKERS)[number]['kind'];
 
+/** How far the player may shrink or enlarge a sticker from its catalog size. */
+export const STICKER_SCALE_MIN = 0.6;
+export const STICKER_SCALE_MAX = 1.6;
+
 const BY_KIND = new Map<string, StickerDef>(STICKERS.map((def) => [def.kind, def]));
 
 export function isStickerKind(value: unknown): value is StickerKind {

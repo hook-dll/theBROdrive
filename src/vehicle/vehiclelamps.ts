@@ -108,6 +108,9 @@ export type HeadlightMode = 'off' | 'low' | 'high';
 type EmissiveMaterial = THREE.MeshStandardMaterial | THREE.MeshPhongMaterial;
 export type IndicatorSide = 'off' | 'left' | 'right';
 
+/** One flash of a key-fob wink, seconds; a wink is two flashes with a gap between. */
+const WINK_FLASH_S = 0.2;
+
 /** Lens emission stays white-hot; only the light it THROWS carries the filament's warmth. */
 const HEADLIGHT_EMISSIVE = 0xffffff;
 /**
@@ -192,6 +195,8 @@ export class VehicleLamps {
   private readonly projectedLightSource = new THREE.Vector3();
   private readonly projectedLightTarget = new THREE.Vector3();
   private indicatorLit = false;
+  /** Seconds into a "here I am" double flash of both blinkers; negative when none. */
+  private winkElapsed = -1;
   /** Dust on the lenses, 0..1: dims what they show and what they throw. */
   private grime = 0;
 
@@ -280,8 +285,35 @@ export class VehicleLamps {
     return 1 - LENS_GRIME_BEAM_LOSS * this.grime;
   }
 
+  /**
+   * Two quick flashes of all four blinkers, the way a car answers its key fob: the
+   * sticker envelope uses it to say "this one" without a marker in the world.
+   */
+  wink(): void {
+    this.winkElapsed = 0;
+  }
+
   /** Advances the blinker phase by one step; a parked car blinks too. */
   advance(dt: number): void {
+    if (this.winkElapsed >= 0) {
+      this.winkElapsed += dt;
+      const t = this.winkElapsed;
+      const lit = t < WINK_FLASH_S || (t > WINK_FLASH_S * 2 && t < WINK_FLASH_S * 3);
+      if (t > WINK_FLASH_S * 3.5) {
+        this.winkElapsed = -1;
+        this.applyIndicatorState(this.indicatorLit);
+      } else {
+        const on = (materials: readonly EmissiveMaterial[]): void => {
+          for (const material of materials) {
+            material.emissive.setHex(lit ? BLINKER_EMISSIVE : 0x000000);
+            material.emissiveIntensity = lit ? 5 : 0;
+          }
+        };
+        on(this.leftBlinkerMaterials);
+        on(this.rightBlinkerMaterials);
+      }
+      return;
+    }
     if (this.indicatorSide === 'off') {
       if (this.indicatorLit) this.applyIndicatorState(false);
       return;

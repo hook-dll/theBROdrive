@@ -10,7 +10,7 @@
 
 import type * as THREE from 'three';
 import type { StickerState } from '../game/state';
-import { setCarBodyCondition, setCarBodyStickers, setCarGrime } from './materials';
+import { setCarBodyCondition, setCarBodyHighlight, setCarBodyStickers, setCarGrime } from './materials';
 
 /**
  * Share of the body's dirt the windows carry. One: the glass evaluates the paint's own
@@ -22,6 +22,7 @@ export const GLASS_DIRT_SHARE = 1;
 
 export class CarBodySurface {
   private appliedDirt = -1;
+  private appliedHighlight = 0;
   private appliedScratches = -1;
 
   constructor(
@@ -40,9 +41,19 @@ export class CarBodySurface {
     setCarGrime(this.glass, dirt * GLASS_DIRT_SHARE);
   }
 
-  /** Prints this car's placed stickers into its paint (materials.ts CAR_STICKERS). */
-  setStickers(stickers: readonly StickerState[]): void {
-    setCarBodyStickers(this.paint, stickers);
+  /**
+   * Prints this car's placed stickers into its paint and glass (materials.ts
+   * CAR_STICKERS), with `preview` — the one being tried on — see-through on top.
+   */
+  setStickers(stickers: readonly StickerState[], preview: StickerState | null = null): void {
+    setCarBodyStickers(this.paint, stickers, preview);
+  }
+
+  /** The "stick it here" pulse, 0..1. */
+  setHighlight(value: number): void {
+    if (value === this.appliedHighlight) return;
+    this.appliedHighlight = value;
+    setCarBodyHighlight(this.paint, value);
   }
 
   /** Frees this car's own paint materials. */

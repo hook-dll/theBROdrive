@@ -57,10 +57,6 @@ import { WheelSpray } from './render/wheelspray';
 import { SandTyreTracks } from './render/tyretracks';
 import { ambientBeamGain, VehicleLightRig } from './render/vehiclelights';
 import { ContactPatchField } from './render/contactpatches';
-import {
-  createStickerPreviewMesh,
-  updateStickerPreview,
-} from './render/stickers';
 import { ChunkStreamer } from './world/chunks';
 import { DesertTileStreamer } from './world/deserttiles';
 import {
@@ -139,6 +135,10 @@ import { createWheelEffects } from './app/wheeleffects';
  * offer.
  */
 const CONTACT_PATCH_RANGE_M = 90;
+/** Cars within this of the player glow and wink while a sticker is held, metres. */
+const STICKER_HINT_RANGE_M = 40;
+/** One key-fob wink every this many seconds while the hint shows. */
+const STICKER_WINK_PERIOD_S = 3.5;
 /**
  * A frame-to-frame displacement past which the road projection is redone from scratch
  * rather than descended from last frame's arclength. A car at 300 km/h through a
@@ -394,8 +394,8 @@ async function boot(): Promise<void> {
   const weapons = new WeaponController();
   const heldView = new HeldItemView(renderer.camera, renderer.scene);
   const trunkView = new TrunkView(renderer.scene);
-  const stickerPreview = createStickerPreviewMesh();
-  renderer.scene.add(stickerPreview);
+  /** The car currently showing a sticker being tried on, so it can be cleared. */
+  let stickerPreviewCarId: string | null = null;
   // Sand/gravel spray lives for the session like the other view systems; its
   // pool ages every frame and only the driven car flings into it.
   const wheelSpray = new WheelSpray(renderer.scene, origin);
@@ -964,18 +964,14 @@ async function boot(): Promise<void> {
       // The sticker is in CarState already; the paint re-reads the list.
       vehicles.get(carId)?.refreshStickers();
     },
-    (carId, sticker, valid) => {
-      if (!carId || !sticker) {
-        stickerPreview.visible = false;
-        return;
+    (carId, sticker) => {
+      // The preview is printed by the car's own paint shader, trimmed and layered
+      // exactly as the placed sticker will be (render/materials.ts CAR_STICKERS).
+      if (stickerPreviewCarId && stickerPreviewCarId !== carId) {
+        vehicles.get(stickerPreviewCarId)?.previewSticker(null);
       }
-      const vehicle = vehicles.get(carId);
-      if (!vehicle) {
-        stickerPreview.visible = false;
-        return;
-      }
-      if (stickerPreview.parent !== vehicle.root) vehicle.root.add(stickerPreview);
-      updateStickerPreview(stickerPreview, sticker, valid);
+      stickerPreviewCarId = carId && sticker ? carId : null;
+      if (carId && sticker) vehicles.get(carId)?.previewSticker(sticker);
     },
     origin,
   );
@@ -1193,6 +1189,9 @@ async function boot(): Promise<void> {
     : null;
   /** Held devices are edge-toggled by E and reset when their item leaves the hand. */
   let binocularsActive = false;
+  /** Sticker-in-hand hint: how long it has been showing, and whether it was last frame. */
+  let stickerHintClock = 0;
+  let stickerHintActive = false;
   let torchlightActive = false;
   let cameraActive = false;
   /** A shutter press is fulfilled from the completed rendered frame, not a fixed step. */
@@ -2111,6 +2110,26 @@ async function boot(): Promise<void> {
         : 'autopilot off';
     }
 
+    // A sticker in hand: the cars it could go on glow softly and wink their blinkers now
+    // and then, like a car answering its key fob, until the crosshair finds one — then
+    // the sticker itself, printed on the paint, is the feedback.
+    const stickerHint =
+      driving === null && inventory.held?.type === 'sticker_envelope' && stickerPreviewCarId === null;
+    if (stickerHint && !stickerHintActive) stickerHintClock = 0;
+    stickerHintActive = stickerHint;
+    const hintPhase = stickerHintClock % STICKER_WINK_PERIOD_S;
+    const winkNow = stickerHint && hintPhase < frameDt;
+    stickerHintClock += frameDt;
+    // Warm glow swelling with each wink, a faint one between.
+    const glow = 0.12 + 0.4 * Math.max(0, Math.sin(Math.min(1, hintPhase / 0.8) * Math.PI));
+    for (const vehicle of vehicles.values()) {
+      const at = vehicle.chassis.translation();
+      const near = stickerHint
+        && (at.x - player.position.x) ** 2 + (at.z - player.position.z) ** 2 < STICKER_HINT_RANGE_M ** 2;
+      vehicle.setStickerHighlight(near ? glow : 0);
+      if (near && winkNow) vehicle.wink();
+    }
+
     // Vehicle audio follows the driven car while its radio remains a spatial source
     // after the player steps out.
     radioSpatial.sourceX = driving?.root.position.x ?? null;
@@ -2421,8 +2440,7 @@ async function boot(): Promise<void> {
   window.addEventListener('keydown', (e) => {
     if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || paused) return;
     if (e.code === 'Escape') {
-      if (interaction.cancelStickerPlacement()) e.preventDefault();
-      else openPause();
+      openPause();
     } else if (e.code === 'Backquote') {
       e.preventDefault();
       openPause(true);
