@@ -5,7 +5,7 @@
  * without this the eye has nothing that says where an object meets the desert.
  *
  * One instanced draw per batch of props, sharing one geometry and one material: a
- * flat disc whose vertex alpha falls from the centre to nothing at the rim, drawn
+ * disc, bowed down towards its rim, whose vertex alpha falls from the centre to nothing at the rim, drawn
  * without depth writes and pulled towards the camera so it sits on the sand it lies
  * on. It is not a light, so it does not move with the sun; it is the ground-contact
  * darkening every photograph of a desert shows under anything standing on it.
@@ -20,8 +20,20 @@ export const CONTACT_SHADOW_REACH = 0.3;
 export const CONTACT_SHADOW_PER_HEIGHT = 0.12;
 /** Smallest disc, metres: a thin dead stick still marks the sand. */
 export const CONTACT_SHADOW_MIN_RADIUS = 0.55;
-/** Lift over the ground at the centre, as a share of the radius: a disc on a slope. */
-const LIFT_PER_RADIUS = 0.06;
+/**
+ * THE DISC IS A SHALLOW BOWL, UPSIDE DOWN, AND IT IS NOT LIFTED.
+ *
+ * A flat disc lifted over the ground so it would not sink into a slope — 6% of its
+ * radius, 18 cm under a large boulder — hovered: at a grazing view its far edge stood
+ * visibly above the sand behind the prop, reported from play as a dark ring drawn a
+ * little over the ground. So the centre sits ON the ground (a couple of centimetres
+ * and the polygon offset win the depth test against the terrain mesh) and the disc
+ * falls away towards its rim by `RIM_DROP_PER_RADIUS`. On a slope or a hump the part
+ * that meets the terrain goes UNDER it and is hidden, and it is the faded outer rings
+ * that do: the shade can fade into the ground, it can never float over it.
+ */
+const CENTRE_LIFT_M = 0.02;
+const RIM_DROP_PER_RADIUS = 0.14;
 /** Darkness at the centre, 0..1. */
 const CORE_ALPHA = 0.34;
 
@@ -49,6 +61,7 @@ function contactShadowGeometry(): THREE.BufferGeometry {
       const i = 1 + (r - 1) * SEGMENTS + k;
       const a = (k / SEGMENTS) * Math.PI * 2;
       positions[i * 3] = Math.cos(a) * radius;
+      positions[i * 3 + 1] = -RIM_DROP_PER_RADIUS * radius * radius;
       positions[i * 3 + 2] = Math.sin(a) * radius;
       colours[i * 4 + 3] = alpha;
     }
@@ -105,9 +118,10 @@ export function contactShadowMatrix(spot: ContactShadowSpot, fade: number, out: 
     CONTACT_SHADOW_MIN_RADIUS,
     spot.radius * CONTACT_SHADOW_SPREAD + CONTACT_SHADOW_REACH + spot.height * CONTACT_SHADOW_PER_HEIGHT,
   );
-  dummy.position.set(spot.x, spot.groundY + r * LIFT_PER_RADIUS, spot.z);
+  dummy.position.set(spot.x, spot.groundY + CENTRE_LIFT_M, spot.z);
   dummy.rotation.set(0, 0, 0);
-  dummy.scale.set(r * fade, 1, r * fade);
+  // The bowl's depth scales with it, so the drop stays a share of the radius.
+  dummy.scale.set(r * fade, r * Math.max(fade, 1e-3), r * fade);
   dummy.updateMatrix();
   return out.copy(dummy.matrix);
 }
