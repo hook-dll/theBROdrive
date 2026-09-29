@@ -167,15 +167,21 @@ const SURGE_ACCEL_CLAMP = 12;
  * buzzing, and a slow motion reads at a fraction of the angle a fast one needs.
  */
 const SHAKE_START_KMH = 60;
-const SHAKE_FULL_KMH = 150;
 /**
- * Peak pitch at `SHAKE_FULL_KMH` on a surface of gain 1, radians (~0.06 degrees, about a
- * pixel of a 1080-line frame at the resting FOV), traversed slowly. Meant to be barely
- * there: the fast tremble it replaced was far too hard even at 0.00125.
+ * Where the sway stops growing. Above every car's top speed (the rally 2105 does 170),
+ * so across the whole reachable range it keeps rising with the square of speed.
  */
-const SHAKE_PITCH_RAD = 0.001;
-const SHAKE_YAW_SHARE = 0.45;
-const SHAKE_ROLL_SHARE = 0.6;
+const SHAKE_FULL_KMH = 180;
+/**
+ * Peak angles at `SHAKE_FULL_KMH` on a surface of gain 1, radians, per axis. The sway is
+ * mostly a slow roll and yaw with a little pitch — the owner's tuning by eye. At 130 km/h
+ * that is 0.031 / 0.076 / 0.081 degrees of pitch / yaw / roll; at 150, 0.052 / 0.126 /
+ * 0.134. (Tuned as a 360 km/h ceiling with 0.01 rad pitch and 2.45 / 2.6 shares, which is
+ * the same curve below 180: `t²` scales by a constant when the ceiling moves.)
+ */
+const SHAKE_PITCH_RAD = 0.0016;
+const SHAKE_YAW_RAD = 0.00392;
+const SHAKE_ROLL_RAD = 0.00416;
 /**
  * Surface gain: `SHAKE_SMOOTH_GAIN` on a glass-smooth road, rising to 2 at
  * `SHAKE_ROUGH_FULL` of `SurfaceDef.roughness`. That spreads the real surfaces out —
@@ -675,12 +681,12 @@ export class CameraRig {
     if (t <= 0 || target.wheelContact <= 0) return;
     const rough = clamp(target.surfaceRoughness / SHAKE_ROUGH_FULL, 0, 1);
     const gain = SHAKE_SMOOTH_GAIN + (2 - SHAKE_SMOOTH_GAIN) * rough;
-    const amp = SHAKE_PITCH_RAD * t * t * gain * target.wheelContact;
+    const scale = t * t * gain * target.wheelContact;
     const w = this.shakeTime * Math.PI * 2;
     const pitch = 0.5 * Math.sin(w * 1.3) + 0.3 * Math.sin(w * 1.9 + 1.7) + 0.35 * Math.sin(w * 0.55 + 0.6);
     const yaw = 0.55 * Math.sin(w * 0.7 + 2.1) + 0.3 * Math.sin(w * 1.1 + 0.3) + 0.25 * Math.sin(w * 0.45 + 4.4);
     const roll = 0.5 * Math.sin(w * 0.9 + 4.0) + 0.3 * Math.sin(w * 1.7 + 2.6) + 0.3 * Math.sin(w * 0.6 + 1.1);
-    _eA.set(pitch * amp, yaw * amp * SHAKE_YAW_SHARE, roll * amp * SHAKE_ROLL_SHARE, 'YXZ');
+    _eA.set(pitch * SHAKE_PITCH_RAD * scale, yaw * SHAKE_YAW_RAD * scale, roll * SHAKE_ROLL_RAD * scale, 'YXZ');
     this.camera.quaternion.multiply(_qB.setFromEuler(_eA));
   }
 

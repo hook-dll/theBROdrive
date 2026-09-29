@@ -6,10 +6,11 @@
 
 - CAMERA SWAY AT SPEED (`Settings.cameraShake`, Settings › Drive, on by default). The
   driving view floats slowly (0.5-2 Hz) from 60 km/h, with the square of speed up to
-  150, by rotation only (the aim used for interaction stays steady). Scaled by the
-  surface's roughness and by wheels on the ground. Barely there: peak at 130 km/h about
-  0.6 px on asphalt, 1.5 on gravel (1080-line frame, resting FOV). A 3-13 Hz tremble
-  was tried first and dropped: at any size the eye could see, it read as judder.
+  180 (above every car's top speed), by rotation only (the aim used for interaction
+  stays steady); mostly roll and yaw, a little pitch. Scaled by the surface's roughness
+  and by wheels on the ground. At 130 km/h on a gain-1 surface: 0.031° pitch, 0.076°
+  yaw, 0.081° roll. A 3-13 Hz tremble was tried first and dropped: at any size the eye
+  could see, it read as judder.
 - THE CHASE CAMERA SURGES. The arm stretches with the smoothed rate of change of speed
   (6% of the arm per m/s², up to +20%; braking pulls it in, up to -10%; tau 0.4 s) and
   settles once the speed holds. A 2.5 m/s² launch to 130 km/h runs about 0.8 m further
