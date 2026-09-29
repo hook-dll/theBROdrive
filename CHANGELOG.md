@@ -7,8 +7,8 @@
 - CAMERA SHAKE AT SPEED (`Settings.cameraShake`, Settings › Drive, on by default). The
   driving view trembles from 60 km/h, with the square of speed up to 150, by rotation
   only (the aim used for interaction stays steady). Scaled by the surface's roughness
-  and by wheels on the ground. Peak at 130 km/h: about 3 px on asphalt, 6 on cracked
-  asphalt, 7 on gravel (1080-line frame, resting FOV).
+  and by wheels on the ground. Barely there: peak at 130 km/h about 0.75 px on
+  asphalt, 1.4 on cracked asphalt, 1.8 on gravel (1080-line frame, resting FOV).
 - THE CHASE CAMERA SURGES. The arm stretches with the smoothed rate of change of speed
   (6% of the arm per m/s², up to +20%; braking pulls it in, up to -10%; tau 0.4 s) and
   settles once the speed holds. A 2.5 m/s² launch to 130 km/h runs about 0.8 m further

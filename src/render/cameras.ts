@@ -164,10 +164,11 @@ const SURGE_ACCEL_CLAMP = 12;
 const SHAKE_START_KMH = 60;
 const SHAKE_FULL_KMH = 150;
 /**
- * Peak pitch at `SHAKE_FULL_KMH` on a surface of gain 1, radians (~0.29 degrees, about
- * five pixels of a 1080-line frame at the resting FOV).
+ * Peak pitch at `SHAKE_FULL_KMH` on a surface of gain 1, radians (~0.07 degrees, just
+ * over a pixel of a 1080-line frame at the resting FOV). Meant to be barely there: at
+ * 0.005 it was a quarter-degree judder, far too hard.
  */
-const SHAKE_PITCH_RAD = 0.005;
+const SHAKE_PITCH_RAD = 0.00125;
 const SHAKE_YAW_SHARE = 0.45;
 const SHAKE_ROLL_SHARE = 0.6;
 /**
