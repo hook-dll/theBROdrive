@@ -270,6 +270,20 @@ Two-wheel drive cars finally leave first gear on sand, a swapped engine brings i
 
 ### Fixed
 
+- NO MORE STROBING INDICATORS ON THE FOUR-LANE ROAD. A driver with something standing in
+  its lane swapped every fixed step between its lane and the line round the obstacle,
+  the indicator flashing left, right, off at 60 Hz with it. Two feedback loops did it.
+  The full manoeuvre rate and the freedom to leave the lane, granted to a driver with
+  no way through, were read off the PREVIOUS step's plan, and the plan they produced
+  is what decided whether there was a way through; the corridor is now searched the
+  ordinary way first and again with the full manoeuvre only when that search finds no
+  way through, in the same step. And a lane handed to the search because it could not
+  stop in time was taken back the step it read stoppable again by a few decimetres,
+  while braking behind another car kept it on that edge; it is now taken back only
+  with `DETOUR_RELEASE_MARGIN_M` of stopping room to spare. On the real-road bench (four
+  seeds, three minutes each, starting on a four-lane stretch) indicator changes fell
+  from 2173 to 1135 and left/right reversals from 923 to 281. In the game on seed
+  1337's four-lane stretch: 28 reversals in 45 s before, 3-8 after.
 - AUTOMATIC DRIVERS GO ROUND A ROCK AT SPEED INSTEAD OF CREEPING PAST IT. Anything
   cleared by less than 0.6 m beyond the planning margin used to be passed at walking
   pace, and the planner put almost every line exactly on that margin, so every prop on

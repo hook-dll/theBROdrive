@@ -1582,6 +1582,8 @@ export class Autopilot {
   private readonly laneCentres: number[] = [];
   private planUsesOncomingLane = false;
   private planUsesShoulder = false;
+  /** Last step's line came from the search over an infeasible commitment; see `drive`. */
+  private planOverridden = false;
   /** Asked by the traffic coordinator to give the car in front room to reverse. */
   private yieldReverse = false;
   private bodyScanGap = Infinity;
@@ -2703,6 +2705,7 @@ export class Autopilot {
       this.detouring = false;
       this.detourLine = projection.lateral;
       this.detourUntilS = 0;
+      this.planOverridden = false;
     }
     this.hintS = projection.s;
     this.hintValid = true;
@@ -3558,7 +3561,9 @@ export class Autopilot {
     // it was out — measured on seed 545124. Going round something STANDING keeps the
     // gentle rate: the rate is also what the planner sizes the speed of a bypass on
     // (`manoeuvreSpeed`), and a brisker one only means taking the loose verge faster.
-    const lineAccel = (config.racer && passUrge) || !this.corridorFeasible
+    // A driver with NO feasible corridor gets the full rate too, once the search has
+    // said so this step; see the second search after `planCorridor`.
+    let lineAccel = config.racer && passUrge
       ? manoeuvreLateralAccel
       : clamp(
           neededLateralAccel,
@@ -3571,14 +3576,14 @@ export class Autopilot {
      * Crossing the crown is `overtakes` and only on a road that has one lane each way;
      * a lane change for pace is `lanePasses`. Getting round something STOPPED is
      * everybody's right, a manoeuvre already latched keeps what it was granted, and a
-     * driver with no feasible corridor is not choosing between lanes at all.
+     * driver with no feasible corridor is not choosing between lanes at all — that
+     * last one, like the rate, is granted by the second search after `planCorridor`.
      */
     const entitledToLeaveLane =
       config.lanePasses ||
       (lanesPerSide === 1 && config.overtakes) ||
       ownLaneObstructed ||
-      this.detouring ||
-      !this.corridorFeasible;
+      this.detouring;
     const lateralFreedom = entitledToLeaveLane
       ? Number.POSITIVE_INFINITY
       : Math.max(LANE_KEEP_FREEDOM_M, Math.abs(projection.lateral - ownLaneOffset));
@@ -3801,6 +3806,28 @@ export class Autopilot {
       obstacles,
     };
     let proposal = planCorridor(corridorRequest);
+    // A DRIVER WITH NO WAY THROUGH GETS THE WHOLE MANOEUVRE, AND IT IS ASKED THIS STEP.
+    //
+    // No feasible corridor lifts the lane-keeping leash and grants the manoeuvre's full
+    // share of the tyres. Both used to be read off LAST step's plan — and the plan they
+    // produce is the one that decides whether the corridor is feasible. With the full
+    // rate a line round the rock fits, so the corridor reads feasible; the next step
+    // plans on the gentle rate, finds the same line too late to finish, reads
+    // infeasible, and grants the full rate again. A two-step oscillator: measured on the
+    // real road's four-lane stretch (seed 1337, s 40 000), cars swapping between their
+    // lane and the verge line EVERY STEP for seconds on end, the indicator with them.
+    // So the ordinary question is asked first, and only a step whose ordinary answer
+    // has no way through asks again with the whole manoeuvre: what the driver is
+    // entitled to is a property of the road this step, not of the answer it produced.
+    if (
+      !(proposal.admissible && (proposal.feasible || offRoad || recovering)) &&
+      (lineAccel < manoeuvreLateralAccel || lateralFreedom < Number.POSITIVE_INFINITY)
+    ) {
+      lineAccel = manoeuvreLateralAccel;
+      corridorRequest.lineAccel = lineAccel;
+      corridorRequest.lateralFreedom = Number.POSITIVE_INFINITY;
+      proposal = planCorridor(corridorRequest);
+    }
     // THROUGH THE MIDDLE IS A DECISION, NOT A LATTICE POINT. Every line between the
     // lane and the crown prices within a lane-cost of every other, so the search
     // settled on whichever quarter-metre was nearest the last one — the crown itself,
@@ -3948,7 +3975,26 @@ export class Autopilot {
     // Reconcile the commitment/override once. Both it and the search proposal
     // already carry the speed cap used to admit their crossing window.
     let plan = evaluateCorridorLine(corridorRequest, desiredLine);
-    if (!plan.admissible || (!plan.feasible && proposal.admissible && proposal.feasible)) {
+    // A COMMITMENT THAT CANNOT STOP IN TIME HANDS THE LINE TO THE SEARCH — AND DOES NOT
+    // TAKE IT BACK ON THE STEP IT SCRAPES IN AGAIN.
+    //
+    // "Feasible" is a wall further off than the stopping room, and a driver braking
+    // behind somebody sheds that room as fast as it closes on the wall: measured on the
+    // four-lane stretch at seed 1337, a car with a rock 170 m ahead in its lane read its
+    // lane feasible, infeasible, feasible on alternate steps by a few decimetres, and
+    // swapped between its lane and the line round the rock on every one of them. So
+    // the lane it was handed away from is taken back only with the stopping room and
+    // `DETOUR_RELEASE_MARGIN_M` to spare: the same order of thresholds the latch keeps.
+    const searchFeasible = proposal.admissible && proposal.feasible;
+    let commitmentHolds = plan.feasible;
+    if (commitmentHolds && this.planOverridden && searchFeasible && proposal.line !== desiredLine) {
+      const stopRoom = corridorRequest.stopRoom;
+      corridorRequest.stopRoom = stopRoom + DETOUR_RELEASE_MARGIN_M;
+      commitmentHolds = evaluateCorridorLine(corridorRequest, desiredLine).feasible;
+      corridorRequest.stopRoom = stopRoom;
+    }
+    this.planOverridden = plan.admissible && !commitmentHolds && searchFeasible;
+    if (!plan.admissible || this.planOverridden) {
       this.detouring = false;
       plan = proposal;
       desiredLine = plan.line;
