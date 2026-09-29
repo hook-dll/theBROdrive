@@ -30,7 +30,7 @@
  * AND ALL OF IT IS CACHED, because building is not cheap. Measured on a 5950X, one
  * variant costs 3.74 ms to build and 11.4 ms at worst — against a streaming budget of
  * 3 ms per frame, one job per frame. Rebuilding per placement would therefore hitch on
- * every POI, and this world has one every 1.2 km. The result is position-independent:
+ * every POI, and this world has one every 7.7 km. The result is position-independent:
  * `mergePoiStatics` bakes each mesh's transform into its geometry at the local origin, so
  * the merged geometry, the collider geometry and the lamp offsets are the same wherever
  * the building ends up. So they are built once per session and shared, and placing a

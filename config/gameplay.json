@@ -1,11 +1,8 @@
 {
   "dayCycleMinutes": 24,
-  "poiSpacingMetres": 1200,
+  "poiSpacingMetres": 7700,
   "dayCycleMinutesMin": 8,
   "dayCycleMinutesMax": 128,
-  "poiSpacingMetresMin": 500,
-  "poiSpacingMetresMax": 5000,
-  "poiSpacingMetresStep": 100,
   "defaultMasterVolume": 0.8,
   "defaultRadioVolume": 0.85,
   "defaultInkStrength": 0.2,

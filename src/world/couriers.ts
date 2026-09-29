@@ -1,3 +1,4 @@
+import { GAMEPLAY_CONFIG } from '../config';
 import { hash, hash01 } from '../core/rng';
 import type { ContractCargoItem, Item } from '../items/items';
 import { stickerKindForSeed } from '../items/stickercatalog';
@@ -6,7 +7,7 @@ import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
 /** One courier every 9 km, jittered and snapped to a guaranteed POI slot. */
 const COURIER_PERIOD_M = 9_000;
 const COURIER_JITTER_M = 1_200;
-const DEFAULT_POI_SPACING_M = 1_200;
+const DEFAULT_POI_SPACING_M = GAMEPLAY_CONFIG.poiSpacingMetres;
 const FIRST_COURIER_M = 7_000;
 const COURIER_DOMAIN = 0x43555231; // 'CUR1'
 const OFFER_DOMAIN = 0x4f464631; // 'OFF1'

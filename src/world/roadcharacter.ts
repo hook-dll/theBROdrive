@@ -51,10 +51,12 @@ const HOME_DISTRICT_LENGTH_M = 30_000;
  * One kind of road.
  *
  * `cornerSpacing` is how much road one corner event owns, so it sets cadence; the
- * radius range sets what that corner is; `straightShare` is how much of the section
- * is held on the new bearing before the next event begins, which is what makes a pan
- * road a pan road rather than a slow wiggle. `deviation` scales the slow route noise
+ * radius range sets what that corner is; `deviation` scales the slow route noise
  * that wanders the whole road, and it is what separates "straight" from "sweeping".
+ * How much of a section is held straight is NOT a field: it is whatever the
+ * character's own corners leave of their sections (a pan road's take a quarter, a
+ * switchback's all of it), which is the same reason a section can no longer turn
+ * less than the gap to its own bearing — see `turnAt` in roadcurve.ts.
  */
 export interface RoadCharacter {
   readonly name: string;
@@ -63,16 +65,14 @@ export interface RoadCharacter {
   /** Peak corner radius drawn per event, metres. */
   readonly radiusMin: number;
   readonly radiusMax: number;
-  /** Heading change per event, radians, before the alternating sign. */
+  /**
+   * Magnitude of the bearing an event turns TO, radians; the sign alternates between
+   * events, so a section turns the gap between two of them — up to twice this.
+   */
   readonly headingMin: number;
   readonly headingMax: number;
   /** Amplitude of the slow route wander, radians. */
   readonly deviation: number;
-  /**
-   * Share of a section held on its new bearing. 1 spends the whole section turning,
-   * 0.75 leaves three quarters of it straight.
-   */
-  readonly straightShare: number;
   /**
    * How much superelevation this road was built with, as a share of the design
    * figure. A maintained highway is fully banked; a desert pan road is nearly flat
@@ -129,7 +129,6 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     headingMin: 0.1,
     headingMax: 0.28,
     deviation: 0.25,
-    straightShare: 0.82,
     bankShare: 0.2,
   },
   {
@@ -143,7 +142,6 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     headingMin: 0.18,
     headingMax: 0.45,
     deviation: 0.55,
-    straightShare: 0.6,
     bankShare: 1,
   },
   {
@@ -158,7 +156,6 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     headingMin: 0.22,
     headingMax: 0.52,
     deviation: 0.93,
-    straightShare: 0.45,
     bankShare: 0.75,
   },
   {
@@ -190,7 +187,6 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     headingMin: 0.45,
     headingMax: 0.85,
     deviation: 0.45,
-    straightShare: 0.2,
     bankShare: 0.9,
   },
   {
@@ -208,7 +204,6 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     headingMin: 0.35,
     headingMax: 0.6,
     deviation: 0.7,
-    straightShare: 0.15,
     bankShare: 0.85,
   },
   {
@@ -223,7 +218,6 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     headingMin: 0.4,
     headingMax: 0.8,
     deviation: 0.6,
-    straightShare: 0.55,
     bankShare: 0,
   },
 ];
@@ -405,7 +399,6 @@ export interface MutableCharacter {
   headingMin: number;
   headingMax: number;
   deviation: number;
-  straightShare: number;
   bankShare: number;
   designSpeedKmh: number;
 }
@@ -434,7 +427,6 @@ function copyCharacter(
   out.headingMin = here.headingMin * smooth + other.headingMin * u;
   out.headingMax = here.headingMax * smooth + other.headingMax * u;
   out.deviation = here.deviation * smooth + other.deviation * u;
-  out.straightShare = here.straightShare * smooth + other.straightShare * u;
   out.bankShare = here.bankShare * smooth + other.bankShare * u;
   out.designSpeedKmh = here.designSpeedKmh * smooth + other.designSpeedKmh * u;
 }

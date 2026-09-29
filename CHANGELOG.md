@@ -67,6 +67,19 @@ Two-wheel drive cars finally leave first gear on sand, a swapped engine brings i
 
 ### Changed
 
+- POIS ARE 7.7 KM APART, AND IT IS NO LONGER A SETTING. The POI Distance slider is gone
+  from Settings › Gameplay, with its `Settings.poiSpacingMetres` field and its bounds;
+  the spacing is `POI_SPACING` (`world/poi.ts`), read from `config/gameplay.json`, and
+  the couriers slot onto the same spacing. A saved spacing is dropped on load.
+- NIGHT IS VISIBLE AT LAST, JUST. The moonlit fill floor (`NIGHT_FILL_INTENSITY`,
+  `render/sky.ts`) is 1.2. Measured on sand at midnight with the real sky rig, 0.09,
+  0.12 and 0.18 all rendered 0 of 255, which is why the earlier "raise it a third"
+  changed nothing; 1.2 is the first value where the ground stops being black (9-12) and
+  dunes read as dark shapes beyond the beams.
+- THE NIGHT GLITTER IS FAR FINER. Pixel-sized points measured per screen axis (the last
+  cut drew bright dashes), about a tenth as bright, rose-gold, sea-green and lilac
+  instead of star white, and denser near the eye so it no longer lives only in the
+  distance (`GLITTER_*`, `world/terrainmesh.ts`).
 - THE RADIO IS ONE KEY. R steps station 1 → station 2 → off (`Radio.cycle`); the
   separate on/off and station keys (R and T) are gone.
 - FRANTIC DRIVERS FIND THEIR OWN WAY, AND EVERYBODY ELSE DRIVES AS USUAL. Ambient
@@ -125,6 +138,53 @@ Two-wheel drive cars finally leave first gear on sand, a swapped engine brings i
 
 ### Fixed
 
+- ROAD JOINTS NO LONGER THROW THE CAR. A section of the corner sequence could be left
+  short of the bearing it was drawn for — its transition was longer than the straight
+  share its character left it — and the next section then started at the FULL drawn
+  bearing, so the heading stepped at every such join. Measured over 300 km: on seed 1337
+  105 of 141 switchback sections and 3 of 13 pan sections stepped, the worst by 45.6
+  degrees; on seed 1, 34 of 46 switchback sections and 4 of 20 pan sections, the worst
+  38.4 degrees — and its first one only 3.4 degrees, which was still a 3.5 cm deck step
+  at the wheel tracks. That step is a kink twice over: a crease in the plan view, and,
+  once `curvatureAt`'s 4 m difference sees it, a curvature spike that switched curve
+  widening (0.7 m a side) and superelevation (its 8% cap) on and off inside one node — up
+  to 26 cm of deck step at the widened edge, which is what launched cars where the sand
+  drift lay. A section now always reaches its own bearing, and its ramp takes whatever
+  length that angle needs at the drawn radius, bounded by the section itself (`turnAt`,
+  `world/roadcurve.ts`). The drawn radius still holds wherever the ramp fits in the
+  section; where it does not — 69 of 141 switchback sections — the corner comes out
+  tighter, and the tightest the tightest character now produces is 111 m against its own
+  110 m floor. `straightShare` is gone from `RoadCharacter`
+  (`world/roadcharacter.ts`): with the angle no longer cut, how much of a section is held
+  straight is what its own corners leave of it.
+- MATERIAL JOINS NO LONGER STEP EITHER. `BUMP_AMP` is a step of arclength, so the deck's
+  short-scale roughness changed by up to 3 cm between one sample and the next at every
+  surface-district boundary — 17.6% of local slope against a 5% threshold in the samples.
+  The amplitude is now feathered over 40 m either side of a join (`SURFACE_JOIN_BLEND_M`,
+  `world/gradient.ts`); the colour still changes at the boundary, because a new course of
+  bitumen is a visible thing. The deliberate roughness is untouched: potholes and the
+  bump layer measure exactly as before. Sampled over 400 km a seed, 0.25 m at the wheel
+  tracks: heading steps 38 to 0 (seed 1) and 107 to 0 (seed 1337), join steps 0, deck
+  grade jumps over 3% per 0.5 m with the deliberate pothole layer taken out 10 to 0,
+  local-slope anomalies over 5% 9 to 0, and the centreline's own 4 m crease worst 8.41%
+  to 1.60%. `SPINE_FORMAT` is 7: the heading field integrates to different positions, so
+  the cached spine and the world built from it are regenerated.
+- THE FIRST LOAD IS NO LONGER DARKER. The sky's reflection probe is baked once and only
+  ever scaled down afterwards, and it used to be baked from whatever sky the session
+  started under: a new drive starts at 08:38 under a low sun, a reload later in the day
+  under a high one. Everything the probe lights kept that start for the whole session;
+  measured in game on the same noon view, the garage wall read 0.058 with a noon bake
+  and 0.040 with a dawn one. The probe is now always baked from the noon sky
+  (`ENVIRONMENT_BAKE_TIME`, `render/sky.ts`); a dawn-started session reads 0.057.
+  Render scale was ruled out on the way: 1, 0.7 and 0.5 gave the same frame within 2%.
+- THE GAME STARTS ON A 44.1 KHZ AUDIO DEVICE. The AudioContext reported 48 kHz while
+  running at the device's 44.1 kHz, the reverb impulses built at the reported rate were
+  refused by their ConvolverNodes, and boot failed with "failed to start". The context
+  now runs at a named 48 kHz and the browser resamples to the device.
+- GROUND COVER NO LONGER HOVERS IN THE SKY. Past 300 m the tiles drop their wheel-scale
+  relief while a tuft keeps the full-relief height, so distant tufts floated a metre up
+  and read as a swarm of dots over the dunes. The cover now shrinks away between 230
+  and 290 m from the camera, in the vertex shader, as the tiles' own props already do.
 - CLOUDS NO LONGER BREAK INTO SQUARES ON PHONES. The sky's cloud noise hashed its
   lattice with `fract(sin(x) * 43758.5)`, which needs an accurate `sin` for arguments in
   the tens of thousands; mobile GPUs reduce that range in low precision, so the hash

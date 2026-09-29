@@ -2362,12 +2362,7 @@ async function boot(): Promise<void> {
       window.location.reload();
     },
     applySettings: (next) => {
-      const poiSpacing = world.state.settings.poiSpacingMetres;
       world.apply({ t: 'settings', settings: next });
-      // POI chunks rebuild one at a time after Resume. That keeps a slider drag and
-      // a dense 500 m stop layout from turning the pause-menu interaction into a
-      // multi-second main-thread task.
-      if (world.state.settings.poiSpacingMetres !== poiSpacing) streamer.refreshProvider('poi');
       // Input and audio cache device-facing preferences; push them immediately.
       input.setKeyBindings(world.state.settings.keyBindings);
       input.setMouseSensitivity(world.state.settings.mouseSensitivity);

@@ -1,7 +1,7 @@
 import { hash01, Noise1D, Noise2D } from '../core/rng';
 import { SurfaceType } from '../core/surfaces';
 import { NODE_SPACING, type Road } from './road';
-import { roadConditionAt } from './gradient';
+import { roadConditionAt, surfaceJoinAt, type SurfaceJoinBuffer } from './gradient';
 
 /**
  * The road's actual driving surface, shared between the road ribbon and the
@@ -273,6 +273,8 @@ export class SurfaceField {
   private readonly seed: number;
   private readonly undulationNoise: Noise1D;
   private readonly bumpNoise: Noise2D;
+  /** Scratch for the material join, read once per displacement. */
+  private readonly join: SurfaceJoinBuffer = { neighbour: SurfaceType.Asphalt, t: 0 };
 
   constructor(seed: number) {
     this.seed = seed >>> 0;
@@ -285,8 +287,9 @@ export class SurfaceField {
   /**
    * Total displacement (m, positive up) at a road point. `x`/`z` are the point's
    * world position (the bump layer is 2D world noise), `decay` the road condition
-   * at this s (undulation and potholes only), `surface` the surface type, which is
-   * the bump layer's ONLY input besides the noise.
+   * at this s (undulation and potholes only), `surface` the surface type, which sets
+   * the bump layer's amplitude — together with the material across the nearest
+   * district join, which it is feathered toward.
    */
   displacement(
     s: number,
@@ -300,8 +303,15 @@ export class SurfaceField {
     const und =
       UND_AMP * (UND_FLOOR + (1 - UND_FLOOR) * decay) *
       this.undulationNoise.fbm(s / UND_WAVELENGTH, 2, 2, 0.5);
-    const bump =
-      BUMP_AMP[surface] * this.bumpNoise.fbm(x * ROUGH_FREQ, z * ROUGH_FREQ, 2, 2, ROUGH_HI_GAIN);
+    // The material owns the bump amplitude, and a material is a district — a step of
+    // arclength. Feathering the amplitude across the join is what stops the deck
+    // stepping there; see SURFACE_JOIN_BLEND_M. Away from a join `t` is 0 and this is
+    // exactly `BUMP_AMP[surface]`.
+    surfaceJoinAt(s, this.join);
+    const amp =
+      BUMP_AMP[surface]! +
+      (BUMP_AMP[this.join.neighbour]! - BUMP_AMP[surface]!) * this.join.t;
+    const bump = amp * this.bumpNoise.fbm(x * ROUGH_FREQ, z * ROUGH_FREQ, 2, 2, ROUGH_HI_GAIN);
     const edgeT = Math.max(
       0,
       Math.min(1, (Math.abs(lateral) - (halfWidth - EDGE_BREAK_WIDTH)) / EDGE_BREAK_WIDTH),

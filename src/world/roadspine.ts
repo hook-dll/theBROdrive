@@ -38,8 +38,9 @@ export const COARSE_SPACING = 200;
  *
  * 5: replace gated corner noise with guaranteed, seeded turn sequences.
  * 6: shorten turn sections and their entry window for more frequent curves.
+ * 7: a section's turn always reaches its own bearing, so no join steps (see `turnAt`).
  */
-export const SPINE_FORMAT = 6;
+export const SPINE_FORMAT = 7;
 
 export interface RoadSpine {
   /** Road length the tables were built for, metres. */

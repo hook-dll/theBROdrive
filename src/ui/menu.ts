@@ -13,9 +13,6 @@ import {
   FIELD_OF_VIEW_MIN,
   MOUSE_SENSITIVITY_MAX,
   MOUSE_SENSITIVITY_MIN,
-  POI_SPACING_MAX_METRES,
-  POI_SPACING_MIN_METRES,
-  POI_SPACING_STEP_METRES,
   FRAME_RATE_LIMITS,
   TIME_OF_DAY_PRESETS,
 } from '../game/settings';
@@ -518,7 +515,6 @@ export class MainMenu {
       const settings: Settings = {
         gearboxMode: base.gearboxMode,
         dayCycleMinutes: base.dayCycleMinutes,
-        poiSpacingMetres: base.poiSpacingMetres,
         mouseSensitivity: base.mouseSensitivity,
         masterVolume: base.masterVolume,
         carVolume: base.carVolume,
@@ -539,7 +535,6 @@ export class MainMenu {
         hooks.applySettings({
           gearboxMode: settings.gearboxMode,
           dayCycleMinutes: settings.dayCycleMinutes,
-          poiSpacingMetres: settings.poiSpacingMetres,
           mouseSensitivity: settings.mouseSensitivity,
           masterVolume: settings.masterVolume,
           carVolume: settings.carVolume,
@@ -1348,19 +1343,6 @@ export class MainMenu {
               (value) => `${Math.round(value)} min`,
               (value) => {
                 settings.dayCycleMinutes = value;
-              },
-            ),
-            sliderField(
-              'POI Distance',
-              'gameplay',
-              'Metres between roadside stop slots. The current road rebuilds after Resume.',
-              POI_SPACING_MIN_METRES,
-              POI_SPACING_MAX_METRES,
-              POI_SPACING_STEP_METRES,
-              () => settings.poiSpacingMetres,
-              (value) => `${(value / 1000).toFixed(value < 1000 ? 1 : value % 1000 === 0 ? 0 : 1)} km`,
-              (value) => {
-                settings.poiSpacingMetres = value;
               },
             ),
             sliderField(

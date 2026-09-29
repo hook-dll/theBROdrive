@@ -27,7 +27,7 @@ import { CHUNK_LENGTH, type ChunkContext } from '../src/world/chunks';
 import { Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
 import { Interaction } from '../src/player/interaction';
-import { PoiProvider, desertPoiClearOfRoad, desertPoisBetween, poisBetween, type PoiStock } from '../src/world/poi';
+import { POI_SPACING, PoiProvider, desertPoiClearOfRoad, desertPoisBetween, poisBetween, type PoiStock } from '../src/world/poi';
 import { PoiSwitchField } from '../src/world/poiswitches';
 import { createVariantInstance, variantCount, variantDef } from '../src/world/poivariantbuild';
 import {
@@ -85,8 +85,8 @@ const MAX_RESIDUAL_M = 0.6;
   let worstVerge = Infinity;
   let tightest = '';
   for (let index = 1; index <= 260; index++) {
-    const s = index * world.state.settings.poiSpacingMetres;
-    const pois = poisBetween(SEED, s - 1, s + 1, world.state.settings.poiSpacingMetres);
+    const s = index * POI_SPACING;
+    const pois = poisBetween(SEED, s - 1, s + 1, POI_SPACING);
     const poi = pois[0];
     if (!poi) continue;
     const def = structureDef(poi.structure);
@@ -136,7 +136,7 @@ const MAX_RESIDUAL_M = 0.6;
 
   // DESERT BUILDINGS STAND OUT IN THE DESERT, clear of every pass of the road and not in
   // one another: the lateral alone cannot promise that where the road doubles back.
-  const spacing = world.state.settings.poiSpacingMetres;
+  const spacing = POI_SPACING;
   const desert = desertPoisBetween(SEED, 0, 400 * spacing, spacing);
   const standing = desert.filter((poi) => desertPoiClearOfRoad(poi, road, roadDistance));
   let nearestRoad = Infinity;
@@ -161,7 +161,7 @@ const MAX_RESIDUAL_M = 0.6;
   const seen = new Set<number>();
   const perStock = new Map<PoiStock, number>();
   for (let index = 1; index <= 4000; index++) {
-    const spacing = world.state.settings.poiSpacingMetres;
+    const spacing = POI_SPACING;
     const pois = poisBetween(SEED, index * spacing - 1, index * spacing + 1, spacing);
     const poi = pois[0];
     if (!poi) continue;

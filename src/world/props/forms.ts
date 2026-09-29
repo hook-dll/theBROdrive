@@ -13,6 +13,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { hash01 } from '../../core/rng';
 import { SurfaceType } from '../../core/surfaces';
+import { DESERT_TILE_FADE_FULL } from '../terrainmesh';
 
 import {
   DELINEATOR_EMBED,
@@ -65,6 +66,34 @@ export const matRock = applyGroundFade(new THREE.MeshStandardMaterial({
  * is a single flat colour and does not need it.
  */
 const matPlant = applyGroundFade(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 }));
+
+/**
+ * The ground cover's own plant material: `matPlant` plus a fade by distance from the
+ * camera, gone before `DESERT_TILE_FADE_FULL`. Past that the tiles smooth their wheel-
+ * scale relief away while a prop keeps the height of the full relief, so a half-metre
+ * tuft hovered a metre over the drawn ground and read as a swarm of dots in the sky.
+ * The tiles' own props fade over the same band for the same reason. Each instance
+ * shrinks to its base in the vertex shader: no CPU pass, no transparency.
+ */
+const COVER_FADE_FULL_M = DESERT_TILE_FADE_FULL - 70;
+const COVER_FADE_GONE_M = DESERT_TILE_FADE_FULL - 10;
+const matCover = (() => {
+  const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 });
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+#ifdef USE_INSTANCING
+{
+  vec3 coverOrigin = ( modelMatrix * instanceMatrix * vec4( 0.0, 0.0, 0.0, 1.0 ) ).xyz;
+  transformed *= 1.0 - smoothstep( ${COVER_FADE_FULL_M.toFixed(1)}, ${COVER_FADE_GONE_M.toFixed(1)}, distance( coverOrigin.xz, cameraPosition.xz ) );
+}
+#endif`,
+    );
+  };
+  material.customProgramCacheKey = () => 'ground-cover-fade-v1';
+  return applyGroundFade(material);
+})();
 
 // ===========================================================================
 // Scatter: cacti and rocks
@@ -645,14 +674,14 @@ let _groundCoverForms: PropForm[] | null = null;
 export function groundCoverForms(): PropForm[] {
   if (!_groundCoverForms) {
     const tuft = (id: string, geometry: THREE.BufferGeometry, weight: number): PropForm => ({
-      id, geometry, material: matPlant, baseRadius: 0.3, height: 0.5, collider: 'none', sink: 0.05,
+      id, geometry, material: matCover, baseRadius: 0.3, height: 0.5, collider: 'none', sink: 0.05,
       rotate3d: false, minScale: 0.7, maxScale: 1.5, weight,
     });
     _groundCoverForms = [
       tuft('tuft-straw', buildGrassTuft(0x7f01, 11, 0xa88d58, 0xd6c28d), 1),
       tuft('tuft-grey', buildGrassTuft(0x7f02, 8, 0x8f8467, 0xbdb392), 0.7),
-      { id: 'bush', geometry: buildBush(0x7f03), material: matPlant, baseRadius: 0.5, height: 0.6, collider: 'none', sink: 0.04, rotate3d: false, minScale: 0.7, maxScale: 1.3, weight: 0.45 },
-      { id: 'rosette', geometry: buildRosette(0x7f04), material: matPlant, baseRadius: 0.4, height: 0.5, collider: 'none', sink: 0.02, rotate3d: false, minScale: 0.7, maxScale: 1.3, weight: 0.3 },
+      { id: 'bush', geometry: buildBush(0x7f03), material: matCover, baseRadius: 0.5, height: 0.6, collider: 'none', sink: 0.04, rotate3d: false, minScale: 0.7, maxScale: 1.3, weight: 0.45 },
+      { id: 'rosette', geometry: buildRosette(0x7f04), material: matCover, baseRadius: 0.4, height: 0.5, collider: 'none', sink: 0.02, rotate3d: false, minScale: 0.7, maxScale: 1.3, weight: 0.3 },
     ];
   }
   return _groundCoverForms;

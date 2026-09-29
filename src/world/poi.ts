@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import { hash, hash01, pick } from '../core/rng';
-import { DEFAULT_POI_SPACING_METRES } from '../game/settings';
+import { GAMEPLAY_CONFIG } from '../config';
 import { SurfaceType } from '../core/surfaces';
 import { ROAD_LENGTH, type Road } from './road';
 import type { CarState, GameWorld } from '../game/state';
@@ -89,8 +89,12 @@ const COURIER_MODELS = CAR_MODELS.filter((def) => def.paintStyle !== undefined);
  * already took is simply absent.
  */
 
-/** Default metres of arclength between POI slots. */
-export const POI_SPACING = DEFAULT_POI_SPACING_METRES;
+/**
+ * Metres of arclength between POI slots: 7.7 km, from `config/gameplay.json`. Not a
+ * player setting any more; a slider that re-rolled every stop on the road was a debug
+ * knob, and it moved `Poi.index`, which the looted flags are keyed by.
+ */
+export const POI_SPACING = GAMEPLAY_CONFIG.poiSpacingMetres;
 /** Fraction of roadside slots that contain a POI; the rest read as empty desert. */
 const POI_OCCUPANCY = 0.55;
 /** Domain tag for the POI hash stream, distinct from every other subsystem. */
@@ -1764,7 +1768,7 @@ export class PoiProvider implements ChunkProvider {
   ) {}
 
   build(ctx: ChunkContext): ChunkContent | null {
-    const spacing = ctx.world.state.settings.poiSpacingMetres;
+    const spacing = POI_SPACING;
     const pois = poisBetween(ctx.world.seed, ctx.sStart, ctx.sEnd, spacing);
     const desert = desertPoisBetween(ctx.world.seed, ctx.sStart, ctx.sEnd, spacing).filter(
       (poi) =>
@@ -1797,12 +1801,7 @@ export class PoiProvider implements ChunkProvider {
         registeredSwitches,
       );
     }
-    for (const stop of couriersBetween(
-      ctx.world.seed,
-      ctx.sStart,
-      ctx.sEnd,
-      ctx.world.state.settings.poiSpacingMetres,
-    )) {
+    for (const stop of couriersBetween(ctx.world.seed, ctx.sStart, ctx.sEnd, POI_SPACING)) {
       const courierPoi = pois.find((poi) => poi.s === stop.s);
       if (!courierPoi) continue;
       buildCourier(

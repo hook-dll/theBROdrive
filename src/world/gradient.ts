@@ -341,6 +341,53 @@ function districtSurface(k: number): SurfaceType {
 }
 
 /**
+ * HOW FAR A MATERIAL JOIN IS FEATHERED, metres.
+ *
+ * A district's material is a STEP of arclength, and so was every amplitude read from
+ * it — most visibly `BUMP_AMP` in `roadsurface.ts`, where the deck's short-scale
+ * roughness changed by up to 3 cm between one sample and the next at a join and left a
+ * crease right across the road, exactly where two pieces of road meet. The surface
+ * field feathers that amplitude over this half-width instead, so two materials meet
+ * over 80 m of road rather than at a line. The COLOUR still changes at the boundary: a
+ * new course of bitumen is a visible thing, and it is the roughness that must not step.
+ */
+export const SURFACE_JOIN_BLEND_M = 40;
+
+/** Caller-owned storage for `surfaceJoinAt`; the surface field asks per vertex. */
+export interface SurfaceJoinBuffer {
+  /** Material on the other side of the nearer district boundary. */
+  neighbour: SurfaceType;
+  /** 0 away from a boundary, 0.5 exactly at it: how much of the neighbour applies. */
+  t: number;
+}
+
+/**
+ * The material join at `s`: the neighbour across the nearer district boundary and how
+ * far the blend has moved toward it, smoothstepped so the amplitude is C1 in `s`.
+ * District 0 has asphalt on both sides (it IS asphalt), so the road's beginning is not
+ * a join.
+ */
+export function surfaceJoinAt(s: number, out: SurfaceJoinBuffer): void {
+  const k = districtIndex(s);
+  const start = k > 0 ? districtStart(k) : 0;
+  const end = districtStart(k + 1);
+  const distance = Math.min(s - start, end - s);
+  if (distance >= SURFACE_JOIN_BLEND_M) {
+    out.neighbour = districtSurface(k);
+    out.t = 0;
+    return;
+  }
+  const u = 1 - distance / SURFACE_JOIN_BLEND_M;
+  out.t = 0.5 * u * u * (3 - 2 * u);
+  out.neighbour =
+    s - start <= end - s
+      ? k > 0
+        ? districtSurface(k - 1)
+        : districtSurface(0)
+      : districtSurface(k + 1);
+}
+
+/**
  * Road condition at a distance.
  *
  * Two independent things, and keeping them independent is the point:

@@ -109,6 +109,9 @@ function xorshift(seed: number): () => number {
   };
 }
 
+/** The audio graph's own sample rate; see the AudioMixer constructor. */
+const AUDIO_SAMPLE_RATE = 48_000;
+
 export class AudioMixer {
   readonly ctx: AudioContext;
   /** Game audio (engine, wind, tyres, foley, the world). Under the master, with the radio. */
@@ -143,7 +146,13 @@ export class AudioMixer {
   private readonly engineWorkletWaiters: (() => void)[] = [];
 
   constructor() {
-    this.ctx = new AudioContext({ latencyHint: 'interactive' });
+    // The rate is NAMED, not left to the device. Left to it, Chrome reported 48 kHz
+    // through `sampleRate` while the context actually ran at the device's 44.1 kHz, so
+    // the reverb impulses built at `sampleRate` were refused by their ConvolverNodes
+    // ("buffer sample rate 48000 does not match the context rate of 44100") and the
+    // game failed to start. A named rate is the rate the context runs at; the browser
+    // resamples to the device.
+    this.ctx = new AudioContext({ latencyHint: 'interactive', sampleRate: AUDIO_SAMPLE_RATE });
     this.samples = new SampleBank(this.ctx);
 
     // master (volume, pause) -> limiter -> speakers. The limiter is a worklet and

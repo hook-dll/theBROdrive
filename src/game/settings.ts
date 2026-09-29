@@ -350,8 +350,6 @@ export interface Settings {
   gearboxMode: GearboxMode;
   /** Real minutes for one full day+night cycle. Clamped to [8, 128]. */
   dayCycleMinutes: number;
-  /** Metres between POI slots. Clamped to 500..5000 in 100 m increments. */
-  poiSpacingMetres: number;
   /**
    * Mouse-look radians per CSS pixel. Stored as a preference so pointer lock has
    * the same feel across sessions.
@@ -442,10 +440,6 @@ export interface Settings {
 
 export const DAY_CYCLE_MIN_MINUTES = GAMEPLAY_CONFIG.dayCycleMinutesMin;
 export const DAY_CYCLE_MAX_MINUTES = GAMEPLAY_CONFIG.dayCycleMinutesMax;
-export const POI_SPACING_MIN_METRES = GAMEPLAY_CONFIG.poiSpacingMetresMin;
-export const POI_SPACING_MAX_METRES = GAMEPLAY_CONFIG.poiSpacingMetresMax;
-export const POI_SPACING_STEP_METRES = GAMEPLAY_CONFIG.poiSpacingMetresStep;
-export const DEFAULT_POI_SPACING_METRES = GAMEPLAY_CONFIG.poiSpacingMetres;
 
 export const DEFAULT_MASTER_VOLUME = GAMEPLAY_CONFIG.defaultMasterVolume;
 export const DEFAULT_RADIO_VOLUME = GAMEPLAY_CONFIG.defaultRadioVolume;
@@ -487,7 +481,6 @@ export const DEFAULT_SETTINGS: Settings = {
   // hand stays one wheel notch away for anyone who wants it.
   gearboxMode: 'automatic',
   dayCycleMinutes: DEFAULT_DAY_CYCLE_MINUTES,
-  poiSpacingMetres: DEFAULT_POI_SPACING_METRES,
   mouseSensitivity: DEFAULT_MOUSE_SENSITIVITY,
   masterVolume: DEFAULT_MASTER_VOLUME,
   carVolume: DEFAULT_CAR_VOLUME,
@@ -560,10 +553,6 @@ export function sanitizeSettings(raw: unknown): Settings {
     typeof obj.dayCycleMinutes === 'number' && Number.isFinite(obj.dayCycleMinutes)
       ? obj.dayCycleMinutes
       : DEFAULT_DAY_CYCLE_MINUTES;
-  const poiSpacingRaw =
-    typeof obj.poiSpacingMetres === 'number' && Number.isFinite(obj.poiSpacingMetres)
-      ? obj.poiSpacingMetres
-      : DEFAULT_POI_SPACING_METRES;
   const sensitivityRaw =
     typeof obj.mouseSensitivity === 'number' && Number.isFinite(obj.mouseSensitivity)
       ? obj.mouseSensitivity
@@ -584,11 +573,6 @@ export function sanitizeSettings(raw: unknown): Settings {
     // historical mode, and the safe fallback for garbage input.
     gearboxMode: obj.gearboxMode === 'automatic' ? 'automatic' : 'manual',
     dayCycleMinutes: Math.min(DAY_CYCLE_MAX_MINUTES, Math.max(DAY_CYCLE_MIN_MINUTES, dayCycleRaw)),
-    poiSpacingMetres:
-      Math.round(
-        Math.min(POI_SPACING_MAX_METRES, Math.max(POI_SPACING_MIN_METRES, poiSpacingRaw)) /
-          POI_SPACING_STEP_METRES,
-      ) * POI_SPACING_STEP_METRES,
     mouseSensitivity: Math.min(MOUSE_SENSITIVITY_MAX, Math.max(MOUSE_SENSITIVITY_MIN, sensitivityRaw)),
     masterVolume: unitInterval(obj.masterVolume, DEFAULT_MASTER_VOLUME),
     carVolume: unitInterval(obj.carVolume, DEFAULT_CAR_VOLUME),

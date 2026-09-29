@@ -23,7 +23,7 @@ import { GameWorld, newWorldState } from '../src/game/state';
 import { CHUNK_LENGTH, type ChunkContext } from '../src/world/chunks';
 import { Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
-import { PoiProvider, desertPoiClearOfRoad, desertPoisBetween, poisBetween } from '../src/world/poi';
+import { POI_SPACING, PoiProvider, desertPoiClearOfRoad, desertPoisBetween, poisBetween } from '../src/world/poi';
 import { structureDef, type PoiStructureKind } from '../src/world/poistructures';
 import { RoadDistance } from '../src/world/roaddistance';
 import type { LoosePartField } from '../src/parts/loose';
@@ -118,7 +118,7 @@ let stops = 0;
 for (let chunk = 0; chunk < CHUNKS; chunk++) {
   const sStart = chunk * CHUNK_LENGTH;
   const sEnd = sStart + CHUNK_LENGTH;
-  const spacing = world.state.settings.poiSpacingMetres;
+  const spacing = POI_SPACING;
   const pois = [
     ...poisBetween(SEED, sStart, sEnd, spacing),
     ...desertPoisBetween(SEED, sStart, sEnd, spacing).filter((poi) => desertPoiClearOfRoad(poi, road, roadDistance)),

@@ -155,6 +155,8 @@ export const ADAPTATION_FLOOR = 0.1;
  * them to the ground exposure would erase the night sky while fixing the ground.
  */
 const CELESTIAL_ADAPTATION_FLOOR = EXPOSURE_TARGET / 25_000;
+/** Local solar noon, game minutes: the one sky the reflection probe is baked from. */
+const ENVIRONMENT_BAKE_TIME = DAY_LENGTH * 0.5;
 
 
 // ---------------------------------------------------------------------------
@@ -195,12 +197,17 @@ const DAY_SKY_FILL_BOOST = 1.5;
  * over a dim warm sand bounce, at about a hundredth of daylight. Enough that a
  * dune keeps an edge and the road keeps its verges; far too little to compete with
  * the lamps or to wash out a magnitude-8 star. A real desert night is pitch black;
- * this is the eye that has been out in it for a while, and it was raised a third
- * (0.09 to 0.12) so the shapes of the ground just read beyond the beams.
+ * this is the eye that has been out in it for a while.
+ *
+ * THE NUMBER IS SET BY THE PIXEL, not by the photometry. Measured on sand in front of
+ * the chase camera at midnight with the real sky rig: 0.09, 0.12 and 0.18 all render
+ * 0 of 255 (a +33% step here once changed nothing anyone could see), 0.54 renders 2-3,
+ * 1.2 renders 9-12 and 1.8 renders 16-20. 1.2 is the first value at which the ground
+ * stops being black and dunes read as dark shapes beyond the beams.
  */
 const C_NIGHT_FILL_SKY = new THREE.Color().setStyle('#41567f');
 const C_NIGHT_FILL_GROUND = new THREE.Color().setStyle('#241f19');
-const NIGHT_FILL_INTENSITY = 0.12;
+const NIGHT_FILL_INTENSITY = 1.2;
 
 // ---------------------------------------------------------------------------
 // Weather palettes (world/weather.ts)
@@ -872,7 +879,7 @@ export class Sky {
   private readonly moonReady: Promise<void>;
   private exposure = 1;
 
-  // --- Environment probe: what makes metal read as metal (see refreshEnvironment) ---
+  // --- Environment probe: what makes metal read as metal (see bakeEnvironment) ---
   private readonly pmrem: THREE.PMREMGenerator;
   private readonly envScene = new THREE.Scene();
   /** Holds one dome, sharing the visible dome's uniforms, shaded in linear space. */
@@ -1030,8 +1037,8 @@ export class Sky {
     this.root.add(this.dome);
 
     // --- Environment probe dome: same geometry and uniform objects as the
-    // visible dome, so the probe tracks the time of day for free. Only the
-    // fragment shader differs (linear radiance, see SKY_FRAGMENT_LINEAR).
+    // visible dome, so the one bake (see bakeEnvironment) sees exactly the sky the
+    // dome draws. Only the fragment shader differs (linear radiance, see SKY_FRAGMENT_LINEAR).
     this.envMaterial = new THREE.ShaderMaterial({
       vertexShader: SKY_VERTEX,
       fragmentShader: SKY_FRAGMENT_LINEAR,
@@ -1084,6 +1091,11 @@ export class Sky {
   }
 
 
+  /**
+   * One frame of sky. On the first call the reflection probe is baked first, from the
+   * dome composed at `ENVIRONMENT_BAKE_TIME` rather than at the session's own hour; see
+   * `bakeEnvironment` for why.
+   */
   update(
     calendarEpoch: string,
     timeOfDay: number,
@@ -1094,6 +1106,22 @@ export class Sky {
     cameraZ: number,
   ): void {
     this.didBakeEnvironment = false;
+    if (this.envTarget === null) {
+      this.compose(calendarEpoch, ENVIRONMENT_BAKE_TIME, dayIndex, s, cameraX, cameraY, cameraZ);
+      this.bakeEnvironment();
+    }
+    this.compose(calendarEpoch, timeOfDay, dayIndex, s, cameraX, cameraY, cameraZ);
+  }
+
+  private compose(
+    calendarEpoch: string,
+    timeOfDay: number,
+    dayIndex: number,
+    s: number,
+    cameraX: number,
+    cameraY: number,
+    cameraZ: number,
+  ): void {
     const g = skyGradientAt(s);
     const celestial = this.astronomy.update(calendarEpoch, dayIndex, timeOfDay);
     this._sunDir.copy(celestial.sun.direction);
@@ -1267,10 +1295,10 @@ export class Sky {
     this.exposure = EXPOSURE_TARGET / (sceneIlluminance + ADAPTATION_FLOOR);
     const celestialExposure =
       EXPOSURE_TARGET / (sceneIlluminance + CELESTIAL_ADAPTATION_FLOOR);
-    // The probe is intentionally baked once, then scaled continuously. Re-baking a
-    // PMREM through twilight caused recurrent main-thread/GPU stalls; leaving a bright
-    // daytime probe at full strength instead made night materials glow. The exposed
-    // light budget is the exact scalar both problems need.
+    // The probe is baked once, from a reference noon, then scaled continuously.
+    // Re-baking a PMREM through twilight caused recurrent main-thread/GPU stalls;
+    // leaving a bright daytime probe at full strength instead made night materials
+    // glow. The exposed light budget is the exact scalar both problems need.
     this.scene.environmentIntensity = Math.min(
       1,
       (sceneIlluminance * this.exposure) / EXPOSURE_TARGET,
@@ -1337,8 +1365,6 @@ export class Sky {
       this.hemiLight.color.lerp(C_FLASH, Math.min(1, weather.flash));
       this.hemiLight.intensity += weather.flash * 2.2 * GRAPHICS_CONFIG.hemisphereIntensityScale;
     }
-
-    this.refreshEnvironment();
 
     // --- Reposition the sky with the camera ---
     //
@@ -1490,10 +1516,20 @@ export class Sky {
   }
 
   /**
-   * Bakes the reflection probe once. Its intensity follows the analytic light budget
-   * every frame above; rebuilding the cubemap cannot add useful detail worth a hitch.
+   * Bakes the reflection probe, once, from the dome as `compose` last left it: at
+   * `ENVIRONMENT_BAKE_TIME`, on the first `update`. Its intensity then follows the
+   * analytic light budget every frame; rebuilding the cubemap cannot add detail worth
+   * a hitch.
+   *
+   * THE HOUR IS FIXED, and that is the whole fix for "the first load is darker". The
+   * probe used to be baked from whatever sky the session happened to start under, and
+   * `environmentIntensity` can only scale it DOWN (it is capped at 1). A new drive
+   * starts at 08:38 under a low sun, so its probe was dim and stayed dim all day; quit
+   * and reload later and the probe was baked under a high sun. Measured on one noon
+   * frame, the same view: probe baked at 12:00 0.142-0.150 mean linear luma, at 06:20
+   * 0.123. Baked from noon, every session gets the same probe.
    */
-  private refreshEnvironment(): void {
+  private bakeEnvironment(): void {
     if (this.envTarget !== null) return;
     this.envTarget = this.pmrem.fromScene(
       this.envScene,

@@ -107,8 +107,9 @@ const ROUTE_GAIN = 0.25;
  * every kilometre, 25-60 degrees, 85-140 m of peak radius, everywhere, for forty
  * thousand kilometres. Measured over 40 km of it, the median radius came out at 3 km
  * and the geometry allowed 350 km/h at the median — the road asked nothing of anyone.
- * Cadence, radius, angle, route wander and the straight share are properties of the
- * KIND of road, so they live in `roadcharacter.ts` and are read per section here.
+ * Cadence, radius, angle and route wander are properties of the KIND of road, so they
+ * live in `roadcharacter.ts` and are read per section here; how much of a section is
+ * held straight is what those leave of it.
  *
  * THE TRANSITION IS A CLOTHOID BUDGET, NOT A CONSTANT. Smootherstep's maximum
  * derivative is 1.875, so a transition of `1.875 · Δθ · R` makes the requested peak
@@ -117,7 +118,9 @@ const ROUTE_GAIN = 0.25;
  * `v³ · dκ/ds` and a corner entered in twenty metres is a flick of the wheel however
  * correct its apex is. Road design sizes transition curves from exactly this, so the
  * length is the longer of the two requirements: the geometric one, and `v³ · Δκ / j`
- * at the speed the corner itself allows.
+ * at the speed the corner itself allows. The one thing above it is the SECTION: a
+ * transition may not run past the end of the section that owns it, because that end is
+ * the bearing the next section starts from (see `turnAt`).
  */
 const TURN_START_MIN = 120;
 const TURN_START_MAX = 300;
@@ -267,24 +270,27 @@ export class RoadHeading {
     const radius =
       c.radiusMin +
       (c.radiusMax - c.radiusMin) * hashUnit3(this.turnRadiusSeed, k, index);
-    // The turning part of a section is what the character leaves for it. A pan road
-    // holds its bearing for four fifths of four kilometres; an esses district gives its
-    // corner almost the whole 700 m and reads as one continuous rhythm.
-    const room = sectionLength * (1 - c.straightShare);
-    // WHEN THE ROOM IS SHORT, THE ANGLE GIVES WAY — NOT THE RADIUS.
+    // A SECTION MUST ARRIVE AT THE BEARING THE NEXT SECTION STARTS FROM.
     //
-    // Both are authored, but only one can be honoured in a section that cannot hold the
-    // whole transition, and they fail differently: a clamped LENGTH makes the corner
-    // tighter than the character asked for, so a pan road would quietly acquire 700 m
-    // hairpins, while a reduced ANGLE makes it a kink instead of a corner — which is
-    // what a pan road's corners are. So the heading change is scaled to fit and the
-    // peak radius stays true by construction.
-    let change = drawn - from;
-    let length = transitionLength(radius, Math.abs(change));
-    if (length > room && room > 0) {
-      change *= room / length;
-      length = Math.min(room, transitionLength(radius, Math.abs(change)));
-    }
+    // The bearing chain is a sequence of drawn targets — that is what keeps the
+    // heading bounded, and it is why the sign alternates — so a section that turns
+    // less than the gap to its own target hands the next section a bearing it does
+    // not start from, and the heading STEPS at the join. Measured: 108 of 319
+    // sections on seed 1337 and up to 45.6 degrees, and it is a kink twice over —
+    // a crease in the plan view, and, once `curvatureAt`'s 4 m difference sees it, a
+    // full-width spike that switches curve widening and superelevation on and off
+    // inside one node. That spike is what put a step in the deck at the wheel tracks;
+    // see `roadsurface.ts`.
+    //
+    // So the angle never gives way, and the ramp takes the length that angle needs at
+    // the drawn radius — `transitionLength` is exactly that. The only bound is the
+    // section: a corner whose transition wants more road than its section has runs at
+    // a tighter radius than drawn, which is a firmer corner, not a kink. How much of a
+    // section is held straight is then what the character's own corners leave of it,
+    // rather than a separate share that could contradict them: a pan road's corners
+    // take a quarter of their sections and hold the bearing for the rest.
+    const change = drawn - from;
+    const length = Math.min(transitionLength(radius, Math.abs(change)), sectionLength);
     const start = Math.min(
       Math.max(0, sectionLength - length),
       TURN_START_MIN +

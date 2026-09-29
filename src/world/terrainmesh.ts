@@ -346,12 +346,31 @@ ${
   vGroundSurface = vec3( density, warp, ripples );
 }`;
 
+/** Night glitter lattice: one candidate grain per cell, this many metres across. */
+const GLITTER_CELL_M = 0.35;
+/**
+ * Share of cells holding a grain: dense at the eye, sparse far off. Uniform density
+ * looked like glitter only in the distance, because perspective packs thousands of
+ * cells into the far rows of the screen and leaves the near ground a few grains wide.
+ * Grading it by distance evens that out on screen: about two grains a square metre at
+ * the wheels, one in four square metres by 30 m.
+ */
+const GLITTER_OCCUPANCY_NEAR = 0.25;
+const GLITTER_OCCUPANCY_FAR = 0.03;
+/** A grain's own radius as a share of the cell: 0.012 x 0.35 m, about 4 mm. */
+const GLITTER_GRAIN_CELLS = 0.012;
+
 const GROUND_FRAGMENT_PARS = /* glsl */ `
 varying vec3 vGroundTint;
 varying vec2 vGroundWorld;
 varying vec3 vGroundSurface;
 uniform float uGlitter;
 uniform float uGlitterTime;
+float glitterHash( vec2 p ) {
+  vec3 p3 = fract( vec3( p.xyx ) * 0.1031 );
+  p3 += dot( p3, p3.yzx + 33.33 );
+  return fract( ( p3.x + p3.y ) * p3.z );
+}
 float groundStipple( vec2 world, float footprint, float keepBelow ) {
   vec2 cell = floor( world );
   vec2 local = fract( world ) - 0.5;
@@ -365,32 +384,53 @@ float groundStipple( vec2 world, float footprint, float keepBelow ) {
 
 /**
  * NIGHT GLITTER: the one piece of magic the desert keeps for the dark, when the
- * mirages are gone. A few grains in every square metre catch the starlight and wink,
- * cool white, pale gold and a faint violet, each on its own slow beat and each
- * shifting as the eye moves, the way mica in sand does. Added after lighting, so it
- * shows where no lamp reaches, and faint enough that it never reads as a light source.
+ * mirages are gone. Here and there a grain catches the starlight and winks, rose-gold,
+ * sea-green or lilac (never the white of the stars above it), each on its own slow beat
+ * and each shifting as the eye moves, the way mica in sand does. Added after lighting,
+ * shows where no lamp reaches.
  *
- * Only near the eye and only while `uGlitter` is up: a uniform branch, then one
- * distance test, then one hash for the nine cells in ten that hold no grain. Past
- * 45 m a grain is under a pixel and would only shimmer, so it fades out by then.
+ * A GRAIN IS A POINT OF LIGHT. The first cut drew each grain its true two centimetres
+ * and faded it out wherever that fell under a pixel, which from the chase camera was
+ * nearly everywhere: nobody saw it. The second floored the world radius at the pixel
+ * footprint, and at a grazing angle that footprint is long across the road and short
+ * along it, so every grain became a large bright dash. Now the disc is measured in
+ * PIXELS on each screen axis separately (the fragment's cell offset over its own
+ * fwidth) and is under a pixel wide: a faint twinkle, never a shape. It fades with
+ * distance, 40-80 m.
+ *
+ * Cost: a uniform branch, derivatives taken once outside any divergent branch (they
+ * are undefined inside one), one distance test, one arithmetic hash for the cells that
+ * hold no grain. Its own hash, not the comic one: `vGroundWorld` runs to tens of
+ * kilometres, where a sine hash is garbage.
  */
 const GROUND_GLITTER_HOOK = /* glsl */ `
 if ( uGlitter > 0.0 ) {
+  vec2 grainAt = vGroundWorld / ${GLITTER_CELL_M.toFixed(2)};
+  vec2 grainFootprint = max( fwidth( grainAt ), vec2( 1e-4 ) );
   float glitterDist = length( vViewPosition );
-  if ( glitterDist < 45.0 ) {
-    vec2 grainAt = vGroundWorld * 8.0;
-    vec2 grainCell = floor( grainAt );
-    float grainRoll = comicHash( grainCell );
-    if ( grainRoll > 0.9 ) {
-      vec2 grainOffset = vec2( comicHash( grainCell + 5.1 ), comicHash( grainCell + 9.7 ) ) - 0.5;
-      float grain = 1.0 - smoothstep( 0.04, 0.14, length( fract( grainAt ) - 0.5 - grainOffset * 0.5 ) );
+  if ( glitterDist < 80.0 ) {
+    vec2 grainCell = mod( floor( grainAt ), 4096.0 );
+    float grainRoll = glitterHash( grainCell );
+    float grainOccupancy = mix( ${GLITTER_OCCUPANCY_NEAR.toFixed(3)}, ${GLITTER_OCCUPANCY_FAR.toFixed(3)}, smoothstep( 3.0, 30.0, glitterDist ) );
+    if ( grainRoll > 1.0 - grainOccupancy ) {
+      vec2 grainOffset = vec2( glitterHash( grainCell + 5.0 ), glitterHash( grainCell + 9.0 ) ) - 0.5;
+      // Two discs, the larger wins: the grain's true few millimetres, which near the
+      // eye covers two or three pixels, and half a pixel on each screen axis (the offset
+      // over its own footprint), which keeps a distant grain a point instead of a dash.
+      vec2 grainOff = fract( grainAt ) - 0.5 - grainOffset * 0.6;
+      vec2 grainPx = grainOff / grainFootprint;
+      float grain = max(
+        1.0 - smoothstep( 0.15, 0.5, length( grainPx ) ),
+        1.0 - smoothstep( ${(GLITTER_GRAIN_CELLS * 0.4).toFixed(4)}, ${GLITTER_GRAIN_CELLS.toFixed(4)}, length( grainOff ) )
+      );
       float beat = sin( uGlitterTime * ( 0.7 + grainRoll * 2.6 ) + grainRoll * 91.0
-        + dot( cameraPosition.xz, vec2( 0.9, 1.3 ) ) * ( 0.6 + comicHash( grainCell + 2.3 ) ) );
-      float wink = pow( max( beat, 0.0 ), 10.0 );
-      float hue = comicHash( grainCell + 4.4 );
-      vec3 grainColour = hue < 0.45 ? vec3( 0.8, 0.88, 1.0 ) : hue < 0.85 ? vec3( 1.0, 0.88, 0.66 ) : vec3( 0.85, 0.74, 1.0 );
-      float alias = 1.0 - smoothstep( 0.35, 0.9, fwidth( grainAt.x ) );
-      outgoingLight += grainColour * grain * wink * alias * uGlitter * ( 1.0 - smoothstep( 20.0, 45.0, glitterDist ) );
+        + dot( cameraPosition.xz, vec2( 0.9, 1.3 ) ) * ( 0.6 + glitterHash( grainCell + 2.0 ) ) );
+      float wink = pow( max( beat, 0.0 ), 8.0 );
+      // Coloured the way sand's own crystals are, and nothing like the stars above:
+      // rose-gold, sea-green and lilac, never white.
+      float hue = glitterHash( grainCell + 4.0 );
+      vec3 grainColour = hue < 0.45 ? vec3( 1.0, 0.62, 0.42 ) : hue < 0.8 ? vec3( 0.42, 0.95, 0.78 ) : vec3( 0.78, 0.5, 1.0 );
+      outgoingLight += grainColour * grain * wink * uGlitter * ( 1.0 - smoothstep( 40.0, 80.0, glitterDist ) );
     }
   }
 }
@@ -402,7 +442,7 @@ const glitterUniforms = {
   uGlitterTime: { value: 0 },
 };
 /** Peak added radiance of one winking grain at full night (linear, before tone mapping). */
-const GLITTER_PEAK = 0.22;
+const GLITTER_PEAK = 0.05;
 
 /**
  * Per rendered frame: the glitter comes up as the day goes (`dayFactor` from the sky),
