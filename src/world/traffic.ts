@@ -3,7 +3,7 @@ import { emptyInput, type InputFrame } from '../core/input';
 import type { PhysicsWorld } from '../core/physics';
 import { SurfaceType } from '../core/surfaces';
 import { hash01, mulberry32 } from '../core/rng';
-import { createServiceableCarState } from '../game/spawn';
+import { createServiceableCarState, poseOnGround } from '../game/spawn';
 import { GameWorld, newWorldState } from '../game/state';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
 import { Autopilot, AUTOPILOT_MODES, type AutopilotMode } from '../vehicle/autopilot';
@@ -1228,20 +1228,25 @@ export class RoadTraffic {
     // the surface's own bumps, and where it stands higher the car was started inside
     // it and thrown out sideways by the solver — measured on the real road as cars
     // wrecked on the verge within two seconds of existing, the low rally Five worst.
-    const y = carSpawnYAboveGround(
-      measure,
-      this.groundHeightAt(x, roadPoint.y, z) ?? roadPoint.y,
-      TRAFFIC_SPAWN_DROP_M,
+    // AND ALONG IT: see `poseOnGround`.
+    const pose = poseOnGround(measure.wheels, x, z, heading, (gx, gz) =>
+      this.groundHeightAt(gx, roadPoint.y, gz),
     );
     const state = createServiceableCarState(
       request.id,
       request.modelId,
       x,
-      y,
+      carSpawnYAboveGround(measure, pose?.groundY ?? roadPoint.y, TRAFFIC_SPAWN_DROP_M),
       z,
       heading,
       request.engineId,
     );
+    if (pose) {
+      state.qx = pose.qx;
+      state.qy = pose.qy;
+      state.qz = pose.qz;
+      state.qw = pose.qw;
+    }
     // Nobody meets a traffic car at the start of its journey: it has already driven
     // the desert road to get here, so it arrives carrying that road's film and the
     // odd scuff, and its own driving adds to it from there. Hashed from the id rather

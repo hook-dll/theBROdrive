@@ -37,6 +37,7 @@ import * as THREE from 'three';
 import { emptyInput, type InputFrame } from '../src/core/input';
 import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
 import { SurfaceType } from '../src/core/surfaces';
+import { poseOnGround } from '../src/game/spawn';
 import { GameWorld, newWorldState } from '../src/game/state';
 import {
   carModelMeasure,
@@ -282,6 +283,20 @@ if (EGO_START_S !== START_S) {
 }
 
 const egoPoint = road.offsetPoint(EGO_START_S, road.laneCentreAt(EGO_START_S, 0));
+const egoHeading = road.sampleAt(EGO_START_S).heading;
+// ON ITS WHEELS, ALONG THE GRADE (`poseOnGround`): put down level on seed 99's 10%
+// grade the ego met the slope with its bumper, and was thrown 240 m out at 450 km/h
+// before the run began.
+const egoPose = poseOnGround(
+  carModelMeasure(EGO_MODEL).wheels,
+  egoPoint.x,
+  egoPoint.z,
+  egoHeading,
+  (x, z) => {
+    const p = road.project(x, z, EGO_START_S);
+    return roadSurfaceY(road, surface, p.s, p.lateral, x, z);
+  },
+);
 const egoCarState = benchCarState(EGO_MODEL, {
   id: 'ego',
   x: egoPoint.x,
@@ -295,12 +310,19 @@ const egoCarState = benchCarState(EGO_MODEL, {
   // corridor and nothing in front of it, for the whole four-minute run.
   y: carSpawnYAboveGround(
     carModelMeasure(EGO_MODEL),
-    roadSurfaceY(road, surface, EGO_START_S, road.laneCentreAt(EGO_START_S, 0), egoPoint.x, egoPoint.z),
+    egoPose?.groundY ??
+      roadSurfaceY(road, surface, EGO_START_S, road.laneCentreAt(EGO_START_S, 0), egoPoint.x, egoPoint.z),
     0,
   ),
   z: egoPoint.z,
-  heading: road.sampleAt(EGO_START_S).heading,
+  heading: egoHeading,
 });
+if (egoPose) {
+  egoCarState.qx = egoPose.qx;
+  egoCarState.qy = egoPose.qy;
+  egoCarState.qz = egoPose.qz;
+  egoCarState.qw = egoPose.qw;
+}
 // The stream treats the player's car as a real participant: it keeps its spawns clear
 // of it and reports it to oncoming drivers. A bench whose ego is not the driven car
 // measures a stream that cannot see the thing it is supposed to be driving around.
@@ -743,7 +765,10 @@ function sampleCar(
   ) {
     track.ejected = true;
     track.ejectedWhy =
-      `${offAsphalt.toFixed(0)} m out at ${speedKmh.toFixed(0)} km/h, s ${(s - START_S).toFixed(0)}`;
+      `(${style} ${activity}) ${offAsphalt.toFixed(0)} m out at ${speedKmh.toFixed(0)} km/h, s ${(s - START_S).toFixed(0)}`;
+    // The last second before it, step by step: an ejection is sudden, and what the car
+    // was doing the instant before it is the whole question.
+    if (TRACE) track.ejectedWhy += ` <= ${(history.get(id) ?? []).slice(-60).filter((_, i) => i % 4 === 0).join(' | ')}`;
   }
   // SETTLED IN ITS LANE, AS A LATCHED STATE.
   //
@@ -1120,7 +1145,7 @@ console.log(
         ? ''
         : `, ${ejectedImpacts} contacts from them  (${ejected
             .slice(0, 3)
-            .map((t) => `${t.id} ${t.ejectedWhy}`)
+            .map((t) => `${t.id} ${t.ejectedWhy.split(' <= ')[0]}`)
             .join('; ')})`),
   );
 }
@@ -1220,6 +1245,11 @@ console.log(`  warm-up left ${afterWarmup.live} live of ${afterWarmup.target} ta
 if (TRACE) {
   console.log('');
   console.log('  contact and jam detail:');
+  for (const track of tracks.values()) {
+    if (!track.ejected) continue;
+    console.log(`  ejected ${track.id}:`);
+    for (const step of track.ejectedWhy.split(/ <= | \| /)) console.log(`      ${step}`);
+  }
   console.log(`  contacts (${contacts.length}):`);
   for (const line of contacts.slice(0, 14)) console.log(`    ${line}`);
   console.log('');

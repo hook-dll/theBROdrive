@@ -249,6 +249,11 @@ Two-wheel drive cars finally leave first gear on sand, a swapped engine brings i
 
 ### Fixed
 
+- TRAFFIC NO LONGER LAUNCHES ITSELF OFF STEEP GRADES. A car joining the stream was put
+  down level on a 7-16% grade, touched the slope with the end of its own collider, was
+  pinned there by the settle, and was thrown out of the road at 20-90 m/s the moment it
+  pulled away. It is now put down on its wheels, pitched and rolled to the ground under
+  them (`poseOnGround`); the real-road bench's ego is placed the same way.
 - JUMPING NO LONGER PULLS THE HANDBRAKE. The handbrake and the jump share Space and the
   handbrake is a toggle, and the toggle listened on foot too: every jump flipped the
   lever of the next car the player sat in, so after an odd number of jumps in the desert
