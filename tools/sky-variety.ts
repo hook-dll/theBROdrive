@@ -489,7 +489,7 @@ console.log('\nweather schedule');
   check('pure function of seed and clock', impure === 0, `${impure} disagreements`);
   check('every channel inside 0..1', outOfRange === 0, `${outOfRange} out of range`);
   const share = active / samples;
-  check('weather present most of the time', share > 0.45 && share < 0.85, `${(share * 100).toFixed(0)}% of play`);
+  check('weather present about half the time', share > 0.35 && share < 0.65, `${(share * 100).toFixed(0)}% of play`);
   check('never the same episode twice running', repeats === 0, `${repeats} repeats`);
   console.log(`        kinds over ${SEEDS.length * 400} slots: ${JSON.stringify(kinds)}`);
   // Slot edges are clear sky, so neighbouring episodes never cut into each other.

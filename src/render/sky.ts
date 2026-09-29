@@ -199,15 +199,18 @@ const DAY_SKY_FILL_BOOST = 1.5;
  * the lamps or to wash out a magnitude-8 star. A real desert night is pitch black;
  * this is the eye that has been out in it for a while.
  *
- * THE NUMBER IS SET BY THE PIXEL, not by the photometry. Measured on sand in front of
- * the chase camera at midnight with the real sky rig: 0.09, 0.12 and 0.18 all render
- * 0 of 255 (a +33% step here once changed nothing anyone could see), 0.54 renders 2-3,
- * 1.2 renders 9-12 and 1.8 renders 16-20. 1.2 is the first value at which the ground
- * stops being black and dunes read as dark shapes beyond the beams.
+ * THE NUMBER IS SET BY THE PIXEL, not by the photometry. An earlier pass recorded
+ * 1.2 as rendering 9-12 of 255 on sand at midnight; measured again from the chase
+ * camera at midnight in clear weather (sand either side of the car, the median of the
+ * ground band), 1.2 renders 2.4, 1.6 renders 3.4, 2.4 renders 5.3 and 3.2 renders 7.3.
+ * At 1.2 the owner could barely see anything beyond the lamps, which is what the
+ * numbers say. 2.8 renders 6.4: the ground reads as ground and the dunes as shapes
+ * against the stars, and it is still a night, not a dusk. Only this floor is touched;
+ * the daytime and twilight fills are photometric and unchanged.
  */
 const C_NIGHT_FILL_SKY = new THREE.Color().setStyle('#41567f');
 const C_NIGHT_FILL_GROUND = new THREE.Color().setStyle('#241f19');
-const NIGHT_FILL_INTENSITY = 1.2;
+const NIGHT_FILL_INTENSITY = 2.8;
 
 // ---------------------------------------------------------------------------
 // Weather palettes (world/weather.ts)

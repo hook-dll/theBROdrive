@@ -385,18 +385,27 @@ float groundStipple( vec2 world, float footprint, float keepBelow ) {
 /**
  * NIGHT GLITTER: the one piece of magic the desert keeps for the dark, when the
  * mirages are gone. Here and there a grain catches the starlight and winks, rose-gold,
- * sea-green or lilac (never the white of the stars above it), each on its own slow beat
- * and each shifting as the eye moves, the way mica in sand does. Added after lighting,
- * shows where no lamp reaches.
+ * sea-green or lilac (never the white of the stars above it), each on its own slow beat,
+ * the field of them drifting past as the eye moves, the way mica in sand does. Added
+ * after lighting, shows where no lamp reaches.
  *
- * A GRAIN IS A POINT OF LIGHT. The first cut drew each grain its true two centimetres
- * and faded it out wherever that fell under a pixel, which from the chase camera was
- * nearly everywhere: nobody saw it. The second floored the world radius at the pixel
- * footprint, and at a grazing angle that footprint is long across the road and short
- * along it, so every grain became a large bright dash. Now the disc is measured in
- * PIXELS on each screen axis separately (the fragment's cell offset over its own
- * fwidth) and is under a pixel wide: a faint twinkle, never a shape. It fades with
- * distance, 40-80 m.
+ * A GRAIN IS A POINT OF LIGHT, AND IT HAS TO LAST TO BE SEEN. The first cut drew each
+ * grain its true two centimetres and faded it out wherever that fell under a pixel,
+ * which from the chase camera was nearly everywhere: nobody saw it. The second floored
+ * the world radius at the pixel footprint, and at a grazing angle that footprint is
+ * long across the road and short along it, so every grain became a large bright dash.
+ * The third measured the disc in PIXELS on each screen axis separately (the fragment's
+ * cell offset over its own fwidth) but kept it under a pixel wide, and that wrote the
+ * glitter off twice over. A disc smaller than the fragment grid is a lottery: the
+ * owning fragment reaches full brightness only when the grain happens to fall on the
+ * pixel centre, and off-duty the rest of the time, so the same grain dims and vanishes
+ * as the pixel grid slides under it. And the camera term in the beat swept each grain
+ * through its wink in 30-80 ms at driving speed — two frames of one pixel, which the
+ * eye integrates into the sand. The disc is a whole pixel across now — the fragment that
+ * owns a grain is lit in full wherever the grain falls inside it, and the light fades
+ * out over the next pixel, so a grain is a point and not a coin — the eye-motion term is
+ * a tenth of its old rate, and the peak reads at all (see GLITTER_PEAK). It fades with
+ * distance, 55-90 m.
  *
  * Cost: a uniform branch, derivatives taken once outside any divergent branch (they
  * are undefined inside one), one distance test, one arithmetic hash for the cells that
@@ -408,29 +417,31 @@ if ( uGlitter > 0.0 ) {
   vec2 grainAt = vGroundWorld / ${GLITTER_CELL_M.toFixed(2)};
   vec2 grainFootprint = max( fwidth( grainAt ), vec2( 1e-4 ) );
   float glitterDist = length( vViewPosition );
-  if ( glitterDist < 80.0 ) {
+  if ( glitterDist < 90.0 ) {
     vec2 grainCell = mod( floor( grainAt ), 4096.0 );
     float grainRoll = glitterHash( grainCell );
     float grainOccupancy = mix( ${GLITTER_OCCUPANCY_NEAR.toFixed(3)}, ${GLITTER_OCCUPANCY_FAR.toFixed(3)}, smoothstep( 3.0, 30.0, glitterDist ) );
     if ( grainRoll > 1.0 - grainOccupancy ) {
       vec2 grainOffset = vec2( glitterHash( grainCell + 5.0 ), glitterHash( grainCell + 9.0 ) ) - 0.5;
       // Two discs, the larger wins: the grain's true few millimetres, which near the
-      // eye covers two or three pixels, and half a pixel on each screen axis (the offset
-      // over its own footprint), which keeps a distant grain a point instead of a dash.
+      // eye covers two or three pixels, and a whole pixel on each screen axis (the
+      // offset over its own footprint), which keeps a distant grain a point instead of a
+      // dash and lights the fragment that owns it in full wherever the grain falls
+      // inside it — the sub-pixel phase is what used to flicker a glint into noise.
       vec2 grainOff = fract( grainAt ) - 0.5 - grainOffset * 0.6;
       vec2 grainPx = grainOff / grainFootprint;
       float grain = max(
-        1.0 - smoothstep( 0.15, 0.5, length( grainPx ) ),
+        1.0 - smoothstep( 0.55, 1.1, length( grainPx ) ),
         1.0 - smoothstep( ${(GLITTER_GRAIN_CELLS * 0.4).toFixed(4)}, ${GLITTER_GRAIN_CELLS.toFixed(4)}, length( grainOff ) )
       );
       float beat = sin( uGlitterTime * ( 0.7 + grainRoll * 2.6 ) + grainRoll * 91.0
-        + dot( cameraPosition.xz, vec2( 0.9, 1.3 ) ) * ( 0.6 + glitterHash( grainCell + 2.0 ) ) );
+        + dot( cameraPosition.xz, vec2( 0.9, 1.3 ) ) * ( 0.08 + 0.06 * glitterHash( grainCell + 2.0 ) ) );
       float wink = pow( max( beat, 0.0 ), 8.0 );
       // Coloured the way sand's own crystals are, and nothing like the stars above:
       // rose-gold, sea-green and lilac, never white.
       float hue = glitterHash( grainCell + 4.0 );
       vec3 grainColour = hue < 0.45 ? vec3( 1.0, 0.62, 0.42 ) : hue < 0.8 ? vec3( 0.42, 0.95, 0.78 ) : vec3( 0.78, 0.5, 1.0 );
-      outgoingLight += grainColour * grain * wink * uGlitter * ( 1.0 - smoothstep( 40.0, 80.0, glitterDist ) );
+      outgoingLight += grainColour * grain * wink * uGlitter * ( 1.0 - smoothstep( 55.0, 90.0, glitterDist ) );
     }
   }
 }
@@ -441,8 +452,19 @@ const glitterUniforms = {
   uGlitter: { value: 0 },
   uGlitterTime: { value: 0 },
 };
-/** Peak added radiance of one winking grain at full night (linear, before tone mapping). */
-const GLITTER_PEAK = 0.05;
+/**
+ * Peak added radiance of one winking grain at full night (linear, before tone mapping).
+ *
+ * THE NUMBER IS SET BY THE PIXEL, like `NIGHT_FILL_INTENSITY`, and measured in the game,
+ * not predicted from the tone curve: a grain spends most of its beat below its peak,
+ * lands on part of a pixel, and the canvas is resampled to the display. From the chase
+ * camera at midnight, 0.3 left the brightest glint in a frame at about 60 of 255 and no
+ * pixel over 100, a speck the owner still could not find. 0.8 puts the brightest at
+ * 130-140, a couple of dozen pixels a frame over 100 and a couple of hundred over 40,
+ * against sand at 6: points of light, still one grain per half square metre near the
+ * eye, so it is a starfield on the sand and not a carpet of light.
+ */
+const GLITTER_PEAK = 0.8;
 
 /**
  * Per rendered frame: the glitter comes up as the day goes (`dayFactor` from the sky),

@@ -256,8 +256,13 @@ export class InputReader {
   private pitchDelta = 0;
   private wheelDelta = 0;
   private locked = false;
-  /** Desktop parking brake state. Changed only by a new key press, never key hold. */
+  /**
+   * Desktop parking brake state. Changed only by a new key press, never key hold, and
+   * only while driving (see `setDriving`).
+   */
   private keyboardHandbrake = false;
+  /** Whether the player is in a driver's seat; set by the game, like precise steering. */
+  private driving = false;
   /**
    * Raw horizontal mouse travel in CSS pixels since the last sample, kept apart from
    * `yawDelta` because steering must not inherit the look sensitivity.
@@ -317,6 +322,18 @@ export class InputReader {
   setPreciseSteering(enabled: boolean): void {
     if (!enabled) this.preciseWheel = 0;
     this.preciseSteerEnabled = enabled;
+  }
+
+  /**
+   * Tells the reader whether the player is driving. The GAME owns this, not the device.
+   *
+   * The handbrake and the jump share Space, and the handbrake is a toggle, so without
+   * this every jump on foot flipped the lever of the next car the player sat in: an odd
+   * number of jumps in the desert and the car was parked on its handbrake, first gear in,
+   * engine revving, wheels standing still — which is exactly how it was reported.
+   */
+  setDriving(driving: boolean): void {
+    this.driving = driving;
   }
 
   dispose(): void {
@@ -491,7 +508,7 @@ export class InputReader {
     f.preciseSteering = preciseDrive;
 
     const taps = this.touch?.consumeTaps();
-    if (this.anyPressed(this.keys.handbrake) || taps?.handbrake === true) {
+    if (this.driving && (this.anyPressed(this.keys.handbrake) || taps?.handbrake === true)) {
       this.keyboardHandbrake = !this.keyboardHandbrake;
     }
     f.handbrake = this.keyboardHandbrake;

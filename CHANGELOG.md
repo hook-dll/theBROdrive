@@ -71,15 +71,27 @@ Two-wheel drive cars finally leave first gear on sand, a swapped engine brings i
   from Settings › Gameplay, with its `Settings.poiSpacingMetres` field and its bounds;
   the spacing is `POI_SPACING` (`world/poi.ts`), read from `config/gameplay.json`, and
   the couriers slot onto the same spacing. A saved spacing is dropped on load.
-- NIGHT IS VISIBLE AT LAST, JUST. The moonlit fill floor (`NIGHT_FILL_INTENSITY`,
-  `render/sky.ts`) is 1.2. Measured on sand at midnight with the real sky rig, 0.09,
-  0.12 and 0.18 all rendered 0 of 255, which is why the earlier "raise it a third"
-  changed nothing; 1.2 is the first value where the ground stops being black (9-12) and
-  dunes read as dark shapes beyond the beams.
-- THE NIGHT GLITTER IS FAR FINER. Pixel-sized points measured per screen axis (the last
-  cut drew bright dashes), about a tenth as bright, rose-gold, sea-green and lilac
-  instead of star white, and denser near the eye so it no longer lives only in the
-  distance (`GLITTER_*`, `world/terrainmesh.ts`).
+- NIGHT IS VISIBLE. The moonlit fill floor (`NIGHT_FILL_INTENSITY`, `render/sky.ts`) is
+  2.8. The 9-12 of 255 once recorded for 1.2 did not survive a re-measure: from the
+  chase camera at midnight in clear weather the sand either side of the car renders 2.4
+  at 1.2, 3.4 at 1.6 and 6.4 at 2.8, which is the owner's "barely see anything without
+  the headlamps" in numbers. At 2.8 the ground reads as ground and the dunes as shapes
+  against the stars; day and twilight fills are photometric and untouched.
+- THE NIGHT GLITTER CAN BE SEEN. `GLITTER_PEAK` (`world/terrainmesh.ts`) is 0.8, against
+  the 0.05 the "finer glitter" cut left: measured in the game, the brightest glint of a
+  frame now reaches 130-140 of 255 over sand at 6, where 0.05 (and 0.3) left nothing over
+  60-100. The disc is a full pixel per screen axis instead of half, so the fragment that
+  owns a grain lights in full while the pixel grid slides under it, and the eye-motion
+  term in the wink's beat is a tenth of its old rate: at 20 m/s a grain used to be
+  through its wink in 30-80 ms, two frames of one pixel, which the eye integrated into
+  the sand. The glint fades between 55 and 90 m instead of 40 and 80. Still points, one
+  grain per half square metre near the eye.
+- THE DESERT IS CLEARER AND HOTTER. A quarter of the ten-minute weather slots now hold
+  no episode at all (was a tenth), an episode fills 50-80% of its slot (was 55-85%), and
+  a heat wave is the commonest kind (`CLEAR_SHARE`, `EPISODE_*`, `WEIGHTS`,
+  `world/weather.ts`): about half of a drive is plain clear sky, where weather used to
+  be present for nearly 60% of it, and rain and haboob together hold about 16% of the
+  clock against 26%.
 - THE RADIO IS ONE KEY. R steps station 1 → station 2 → off (`Radio.cycle`); the
   separate on/off and station keys (R and T) are gone.
 - FRANTIC DRIVERS FIND THEIR OWN WAY, AND EVERYBODY ELSE DRIVES AS USUAL. Ambient
@@ -138,6 +150,12 @@ Two-wheel drive cars finally leave first gear on sand, a swapped engine brings i
 
 ### Fixed
 
+- JUMPING NO LONGER PULLS THE HANDBRAKE. The handbrake and the jump share Space and the
+  handbrake is a toggle, and the toggle listened on foot too: every jump flipped the
+  lever of the next car the player sat in, so after an odd number of jumps in the desert
+  the car sat on its parking hold with first gear in, the engine revving and the driven
+  wheels standing still. The lever now moves only from the driver's seat
+  (`InputReader.setDriving`, `core/input.ts`).
 - ROAD JOINTS NO LONGER THROW THE CAR. A section of the corner sequence could be left
   short of the bearing it was drawn for — its transition was longer than the straight
   share its character left it — and the next section then started at the FULL drawn

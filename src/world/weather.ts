@@ -22,10 +22,11 @@ import { SurfaceType } from '../core/surfaces';
  * the same reasons.
  *
  * PACE. A slot is ten minutes of play (ten game hours at the default clock). An episode
- * fills 55-85% of it, so weather is always either happening, arriving or clearing for
- * most of a drive, and a stretch of plain clear desert sky of a few minutes separates
- * one episode from the next — long enough to be missed, short enough never to be the
- * whole afternoon.
+ * fills 50-80% of it, and a quarter of the slots hold none at all, so about half of a
+ * drive is plain clear desert sky: weather is an event on the way, not the climate.
+ * Among the episodes a heat wave is the commonest and the storm fronts (rain, haboob)
+ * the rarer ones — this is a hot desert first, and a stretch of clear, shimmering
+ * afternoon is what most of it should look like.
  *
  * NEVER HOSTILE. Every channel's effect on play is bounded where it is applied: wet
  * asphalt keeps 84% of its grip, a haboob leaves a hundred-odd metres of sight, the
@@ -148,13 +149,18 @@ export const FRONT_FAR_M = 9000;
 /** Seconds of play per slot. */
 export const WEATHER_SLOT_S = 600;
 /** An episode fills this share of its slot. */
-const EPISODE_MIN = 0.55;
-const EPISODE_MAX = 0.85;
+const EPISODE_MIN = 0.5;
+const EPISODE_MAX = 0.8;
 
 const KINDS: readonly Exclude<WeatherKind, 'clear'>[] = ['haze', 'wind', 'haboob', 'storm', 'heat'];
-const WEIGHTS: readonly number[] = [0.21, 0.2, 0.18, 0.25, 0.16];
-/** Share of slots with no episode at all: a whole clear ten minutes, now and then. */
-const CLEAR_SHARE = 0.1;
+/**
+ * Heat first. Measured over 20 000 slots after the no-repeat rule: a heat wave 21% of
+ * slots, storm 13%, haboob 11%, haze and wind 15% each, clear 25%; the fronts (rain and
+ * haboob) hold about 16% of the clock against 26% before the desert was made clearer.
+ */
+const WEIGHTS: readonly number[] = [0.18, 0.18, 0.14, 0.18, 0.32];
+/** Share of slots with no episode at all: a whole clear ten minutes, one slot in four. */
+const CLEAR_SHARE = 0.25;
 
 const TAG_KIND = 0x57455231; // 'WER1'
 const TAG_SPAN = 0x57455232;

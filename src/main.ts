@@ -1286,6 +1286,7 @@ async function boot(): Promise<void> {
     const drivingId = s.player.drivingCarId;
     const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
     touch.setDriving(driving !== null);
+    input.setDriving(driving !== null);
 
     // MASS IS RE-DERIVED HERE EVERY STEP rather than wired to the deltas that can
     // change it. Fuel burns, a can pours, the boot takes a parcel, the driver picks
