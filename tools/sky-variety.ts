@@ -456,7 +456,7 @@ console.log('cloud shadow field');
 console.log('\nweather schedule');
 {
   const channels = (): WeatherChannels => ({
-    haze: 0, dust: 0, front: 0, cloud: 0, cells: 0, rain: 0, wet: 0,
+    haze: 0, dust: 0, front: 0, cloud: 0, rain: 0, wet: 0,
     wind: 0, drift: 0, heat: 0, halo: 0, clarity: 0,
   });
   const a = channels();

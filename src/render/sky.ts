@@ -463,9 +463,6 @@ uniform float uCloudTime;
 uniform float uDomeFlat;
 /** Storm deck: the cirrus becomes a grey convective overcast with darker bases. */
 uniform float uStorm;
-/** Towering cells on the horizon, 0..1, and the bearing they stand on. */
-uniform float uCells;
-uniform float uCellsAz;
 /** Cirrostratus optics: the 22-degree halo and the two sun dogs. */
 uniform float uHalo;
 uniform vec3 uDogA;
@@ -654,69 +651,6 @@ void main() {
   col = mix(col, cloudCol, deck);
 
   float sunUp = smoothstep(-0.02, 0.06, uSunDir.y);
-
-  // --- Storm cells on the horizon -------------------------------------------
-  //
-  // Cumulonimbus seen from forty kilometres: a ragged wall of towers standing on the
-  // skyline on one bearing, sunlit on top, slate at the base, with the grey smear of
-  // rain shafts hanging under it. In direction space, like everything on the dome:
-  // azimuth and elevation, a height profile along the azimuth and a billowed edge.
-  if (uCells > 0.0) {
-    float az = atan(dir.x, dir.z);
-    float da = mod(az - uCellsAz + 3.14159265, 6.28318531) - 3.14159265;
-    float e = asin(clamp(dir.y, -1.0, 1.0));
-    // A storm complex: a broad low base with a cluster of towers rising out of it,
-    // each a dome of its own width and height. Placing them explicitly is what makes
-    // them towers — a noise profile only ever made a ridge — and overlapping several
-    // is what makes the skyline lumpy instead of one egg.
-    float skirt = 0.09 * smoothstep(0.9, 0.2, abs(da));
-    float top = skirt;
-    for (int k = 0; k < 11; k++) {
-      float fk = float(k);
-      // Clustered and overlapping: the tall ones near the middle of the complex,
-      // smaller ones crowding their flanks, so the skyline is one lumpy mass.
-      float spread = cloudHash(vec2(fk, 3.0)) - 0.5;
-      float centre = spread * 0.8;
-      float width = 0.1 + 0.16 * cloudHash(vec2(fk, 5.0));
-      float height = (0.1 + 0.26 * cloudHash(vec2(fk, 9.0))) * (1.0 - abs(spread) * 1.1);
-      float x = (da - centre) / width;
-      top = max(top, height * pow(max(0.0, 1.0 - x * x), 0.4));
-    }
-    top *= uCells;
-    // Cauliflower: two octaves of billows in (bearing, elevation), the edge crisp.
-    float billow = cloudFbm(vec2(da * 18.0, e * 18.0 - uCloudTime * 0.0015));
-    float fine = cloudNoise(vec2(da * 70.0, e * 70.0));
-    float bubbles = 1.0 - abs(2.0 * cloudNoise(vec2(da * 40.0, e * 40.0 - uCloudTime * 0.001)) - 1.0);
-    float edge = top + (0.04 * (billow - 0.5) + 0.018 * (bubbles - 0.5)) * smoothstep(0.0, 0.08, top) + 0.006 * (fine - 0.5);
-    float body = smoothstep(edge + 0.002, edge - 0.005, e);
-    body *= smoothstep(0.0, 0.01, e) * step(0.001, top);
-    if (body > 0.0) {
-      float rise = clamp(e / max(top, 0.02), 0.0, 1.0);
-      vec3 flatDir = normalize(vec3(dir.x, 0.0, dir.z) + vec3(1e-4, 0.0, 0.0));
-      vec3 flatSun = normalize(vec3(uSunDir.x, 0.0, uSunDir.z) + vec3(1e-4, 0.0, 0.0));
-      float facing = dot(flatDir, flatSun);
-      // Each billow is a little dome: brighter on its upper half, shadowed below.
-      float lower = cloudFbm(vec2(da * 26.0, e * 26.0 + 0.9 - uCloudTime * 0.0015));
-      float bulge = smoothstep(0.35, 0.7, billow) - 0.6 * smoothstep(0.5, 0.85, lower);
-      vec3 sunTint = uSunColor / max(0.05, max(uSunColor.r, max(uSunColor.g, uSunColor.b)));
-      // Sunlit from our side: brilliant white crowns. Backlit: a darker body with a
-      // silver edge, which is how a storm looks with the sun behind it.
-      float lit = mix(0.62, 1.1, smoothstep(-0.6, 0.6, facing));
-      vec3 crown = vec3(1.0, 0.98, 0.95) * mix(vec3(1.0), sunTint, 0.35) * lit * (0.92 + 0.25 * bulge);
-      vec3 base = mix(uZenith, vec3(0.24, 0.27, 0.32), 0.55);
-      vec3 cellCol = mix(base, crown, smoothstep(0.1, 0.7, pow(rise, 0.75) + 0.2 * bulge));
-      float silver = (1.0 - smoothstep(-0.2, 0.3, facing)) * smoothstep(edge - 0.01, edge, e);
-      cellCol += vec3(1.0, 0.95, 0.85) * silver * 0.35;
-      // Air between here and there, and the night: silhouettes against the last light.
-      cellCol = mix(cellCol, uHorizon, 0.25 * (1.0 - rise));
-      cellCol = mix(uHorizon * 0.75, cellCol, sunUp * 0.85 + 0.15);
-      col = mix(col, cellCol, body);
-    }
-    // Rain shafts: grey streaks hanging under the towers, fading into the horizon.
-    float shaft = smoothstep(0.45, 0.8, cloudNoise(vec2(da * 34.0, 0.5)))
-      * (1.0 - smoothstep(0.0, max(top, 0.02) * 0.4, e)) * step(0.001, top);
-    col = mix(col, mix(uZenith, vec3(0.3, 0.33, 0.38), 0.5), shaft * 0.35 * (1.0 - body * 0.6) * smoothstep(0.0, 0.008, e));
-  }
 
   // --- Cirrostratus optics --------------------------------------------------
   if (uHalo > 0.0) {
@@ -969,8 +903,6 @@ export class Sky {
   // --- Weather (see the SKY_FRAGMENT weather block) ---
   private readonly uDomeFlat = { value: 0 };
   private readonly uStorm = { value: 0 };
-  private readonly uCells = { value: 0 };
-  private readonly uCellsAz = { value: 0 };
   private readonly uHalo = { value: 0 };
   private readonly uDogA = new THREE.Vector3();
   private readonly uDogAOut = new THREE.Vector3();
@@ -1065,8 +997,6 @@ export class Sky {
         uCloudTime: this.uCloudTime,
         uDomeFlat: this.uDomeFlat,
         uStorm: this.uStorm,
-        uCells: this.uCells,
-        uCellsAz: this.uCellsAz,
         uHalo: this.uHalo,
         uDogA: { value: this.uDogA },
         uDogAOut: { value: this.uDogAOut },
@@ -1475,16 +1405,13 @@ export class Sky {
   }
 
   /**
-   * The dome's weather uniforms: deck, cells, halo and sun dogs, rainbow, lightning.
+   * The dome's weather uniforms: deck, halo and sun dogs, rainbow, lightning.
    * Geometry is worked out here once a frame so the fragment shader only compares.
    */
   private updateWeatherOptics(sun: THREE.Vector3): void {
     const w = weather;
     this.uStorm.value = w.cloud;
     this.uDomeFlat.value = Math.min(0.97, w.dust * 0.97 + w.haze * 0.55 + w.rain * 0.35 + w.front ** 8 * 0.55);
-    this.uCells.value = w.cells;
-    // Cells stand upwind: the storm is coming from where the wind comes from.
-    this.uCellsAz.value = Math.atan2(-w.windX, -w.windZ);
     this.uHalo.value = w.halo;
     if (w.halo > 0) {
       // Sun dogs sit at the sun's own elevation, on a circle that widens off the

@@ -118,9 +118,6 @@ Two-wheel drive cars finally leave first gear on sand, a swapped engine brings i
 - NIGHT IS A SHADE LESS BLACK, as if the eye had been out in it a while: the moonlit
   fill floor (`NIGHT_FILL_INTENSITY`, `render/sky.ts`) is 0.12, from 0.09. The dome,
   the stars and the lamps are unchanged.
-- STORM CELLS ON THE HORIZON ARE THE STORM'S WARNING AND ITS DEPARTURE ONLY. They used
-  to stay on the skyline through the whole downpour, sunlit white under a black deck;
-  they now fade out as the rain sets in and come back as it moves off.
 - The tumbleweed's brush on the car is against its travel; it used to push it forward.
 
 ### Fixed
@@ -145,6 +142,13 @@ Two-wheel drive cars finally leave first gear on sand, a swapped engine brings i
   engine at 80% throttle. It has its own level now (`SCRABBLE_GAIN`), a smaller low roar,
   and a per-surface band: sand is a fine high hiss 3 dB over its rolling sound, gravel a
   crunch of stones.
+
+### Removed
+
+- THE STORM CELLS ON THE HORIZON. The towers a storm used to raise on the skyline, and
+  the `cells` weather channel behind them, are gone: a storm is the halo, the closing
+  deck, the wind, the rain and the wet road, and the distant sunlit towers added nothing
+  to that but a question.
 
 ## 0.19.0 — 2026-09-28
 

@@ -688,11 +688,11 @@ export function advanceCloudShadows(
   const building = w.cloud * (1 - w.cloud) * 4;
   uniforms.uCloudStrength.value =
     cloudShadowStrength(dayFactor) *
-    (1 + 0.25 * building + 0.15 * w.cells) *
+    (1 + 0.25 * building) *
     (1 - 0.9 * Math.max(0, w.cloud - 0.6) / 0.4) *
     (1 - 0.6 * w.haze) *
     (1 - w.dust);
-  uniforms.uCloudBias.value = 0.16 * Math.min(1, w.cloud * 1.6 + w.cells * 0.4);
+  uniforms.uCloudBias.value = 0.16 * Math.min(1, w.cloud * 1.6);
   uniforms.uCloudDetail.value = shadowsFor(quality, mobilePresentation) ? 1 : 0;
   uniforms.uWet.value = w.wet;
   uniforms.uGroundPan.value.set(
