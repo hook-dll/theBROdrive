@@ -82,7 +82,7 @@ import { HazardIndex } from './world/hazards';
 import { PLAYER_FIELD_ID, RoadTraffic } from './world/traffic';
 import { Autopilot } from './vehicle/autopilot';
 import { advanceCloudShadows, beginWetGlare } from './render/cloudshadow';
-import { advanceDesertGlitter } from './world/terrainmesh';
+import { advanceDesertGlitter, setDesertGroundArclength } from './world/terrainmesh';
 import { HeatHaze } from './render/heathaze';
 import { WeatherParticles } from './render/weatherparticles';
 import { setDesertDustArclength } from './render/desertdust';
@@ -1879,8 +1879,10 @@ async function boot(): Promise<void> {
     // Weather first: the sky, the fog, the lights and the ground all read it this
     // frame (world/weather.ts). A function of played time, so it needs no saving.
     updateWeather(world.seed, s.playedSeconds, frameDt);
-    // Every dust colour follows the sand the road has reached (render/desertdust.ts).
+    // Every dust colour follows the sand the road has reached (render/desertdust.ts),
+    // and so do the ground's broad patches (world/terrainmesh.ts).
     setDesertDustArclength(activeS);
+    setDesertGroundArclength(activeS);
     sky.update(
       s.calendarEpoch,
       s.timeOfDay,

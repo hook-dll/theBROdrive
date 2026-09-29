@@ -152,8 +152,9 @@ const FOAM_ALPHA = 0.32;
 
 /**
  * The water's colour has to answer to the sand's, because the sand's is not a constant:
- * `desertPaletteAt` walks its hue right around the wheel over the length of the road
- * (gradient.ts), so a fixed teal sinks into the ground at one mileage.
+ * `desertPaletteAt` walks a ring of deserts over the length of the road (gradient.ts)
+ * — ochre, pink, rust, black lava, lunar grey, mint, lavender — so a fixed teal sinks
+ * into the ground at one mileage.
  *
  * WATER IS BLUE FIRST AND DISTINCT SECOND. The complement of the local sand was tried
  * and it is the wrong answer for the same reason it is the obvious one: over the pale
@@ -166,9 +167,23 @@ const FOAM_ALPHA = 0.32;
 const WATER_HUE = 0.54;
 const MIN_HUE_GAP = 0.14;
 const DEEP_SATURATION = 0.46;
-// Dark enough to clear the sand by value as well as by hue, everywhere on the cycle: the
-// warm sand at the start of the road is the darkest ground there is, at about 0.37.
+// Lightnesses here are in the WORKING (linear) space, like `getHSL`/`setHSL` below.
+// Deep water sits this dark, or `VALUE_GAP` under its sand where the sand is darker.
 const DEEP_LIGHTNESS = 0.16;
+/** The least lightness between deep water and its shore, either way round. */
+const VALUE_GAP = 0.21;
+/**
+ * The darkest deep water allowed. Below the sand lightness that would need darker than
+ * this — Mars at 0.19, basalt at 0.14, the black lava at 0.04 — there is no room under
+ * the ground for the water, so the lake goes the other way and is LIGHTER than its
+ * shore by `VALUE_GAP`: a sky-lit pool in black glass.
+ */
+const DEEP_LIGHTNESS_FLOOR = 0.06;
+/**
+ * Grey sands (basalt, regolith, lava) have no hue worth dodging: HSL hue is noise for an
+ * almost neutral colour, so the water keeps its own blue there.
+ */
+const NEUTRAL_SAND_SATURATION = 0.1;
 const SHALLOW_SATURATION = 0.34;
 const SHALLOW_LIGHTNESS = 0.44;
 /** Foam is the sand's own hue, nearly white: spray off a shore, not a second water. */
@@ -196,15 +211,20 @@ function hueDelta(from: number, to: number): number {
  */
 export function waterPaletteAt(s: number): WaterPalette {
   const hsl = { h: 0, s: 0, l: 0 };
-  const sandHue = new THREE.Color(desertPaletteAt(s).sand).getHSL(hsl).h;
+  const sand = new THREE.Color(desertPaletteAt(s).sand).getHSL(hsl);
+  const sandHue = sand.h;
   const toWater = hueDelta(sandHue, WATER_HUE);
   const waterHue =
-    Math.abs(toWater) >= MIN_HUE_GAP
+    sand.s < NEUTRAL_SAND_SATURATION || Math.abs(toWater) >= MIN_HUE_GAP
       ? WATER_HUE
       : (sandHue + Math.sign(toWater || 1) * MIN_HUE_GAP + 1) % 1;
+  const under = Math.min(DEEP_LIGHTNESS, sand.l - VALUE_GAP);
+  const lighter = under < DEEP_LIGHTNESS_FLOOR;
+  const deepLightness = lighter ? sand.l + VALUE_GAP : under;
+  const shallowLightness = lighter ? Math.min(0.72, deepLightness + 0.28) : SHALLOW_LIGHTNESS;
   return {
-    deep: new THREE.Color().setHSL(waterHue, DEEP_SATURATION, DEEP_LIGHTNESS),
-    shallow: new THREE.Color().setHSL(waterHue, SHALLOW_SATURATION, SHALLOW_LIGHTNESS),
+    deep: new THREE.Color().setHSL(waterHue, DEEP_SATURATION, deepLightness),
+    shallow: new THREE.Color().setHSL(waterHue, SHALLOW_SATURATION, shallowLightness),
     foam: new THREE.Color().setHSL(sandHue, FOAM_SATURATION, FOAM_LIGHTNESS),
   };
 }

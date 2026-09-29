@@ -67,6 +67,27 @@ Two-wheel drive cars finally leave first gear on sand, a swapped engine brings i
 
 ### Changed
 
+- THE DESERT IS A RING OF FOURTEEN DESERTS, NOT A HUE SWEEP (`DESERTS`,
+  `desertPaletteAt` in `world/gradient.ts`). The old cycle spent 400-1 000 km at an
+  OKLab chroma of 2-3, one grey-mint moving under 1.5 ΔE per 100 km. Now, over the same
+  2 000 km: the opening ochre `#d29459` (unchanged at s = 0), golden erg, gypsum,
+  coral pink, Namib red, Mars rust, black lava, weathered basalt, lunar regolith,
+  olivine, mint, pale sky, lavender and rose brick. Each holds for 60-100 km, then
+  blends into the next along a quintic smootherstep mixed in OKLab. Every channel still
+  moves at most one 8-bit step per 200 m chunk, and sand stays at least 45.7 RGB from
+  rock. The palette is computed unquantised and packed once, so rock, gravel and spray
+  no longer round twice. On the dark deserts the rock drop is capped at half the sand's
+  lightness, so boulders on the black lava are blacker than the sand, not clamped to 0.
+- EACH DESERT HAS A SECOND SAND (`DesertPalette.accent`), and the ground shader's
+  broad 288/96 m patches now run between it and its reciprocal
+  (`setDesertGroundArclength`, `uGroundAccent` in `world/terrainmesh.ts`) instead of a
+  fixed redder/paler axis: ash drifts on the lava, butterscotch dust on Mars, mare dust
+  on the Moon. On the ochre the new axis matches the old one within a few per cent, and
+  the patch's luminance swing is held to ±10%.
+- LAKES ON DARK GROUND ARE LIGHTER THAN THEIR SHORE (`waterPaletteAt`,
+  `render/lakewater.ts`): wherever the sand leaves no room for water 0.21 darker, the
+  water sits 0.21 lighter instead. Near-grey sands no longer push the water's hue.
+
 - AUTOMATIC DRIVERS SEE TRAFFIC IN THE ROAD'S FRAME, NOT DOWN RAYS. Once a step one
   broad-phase query collects every dynamic body near the car — other cars, the
   player's, a parked car, a trailer, a standing piece of a broken prop — and places it

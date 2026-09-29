@@ -279,10 +279,13 @@ if ( vShoulderGrit > 0.001 ) {
  * overlap ring, the road shoulder), so the pattern is continuous across every seam
  * between them. Four things the flat one-colour-per-tile sand did not have:
  *
- *  1. BROAD PATCHES. Two octaves at 288 m and 96 m move the sand between a redder and a
- *     paler, yellower tone, and a third at 144 m lays pale dry crusts. Hue and
- *     saturation carry it; luminance moves only a few percent, because a darker patch
- *     of ground reads as a cloud's shadow (terrainmesh's own history).
+ *  1. BROAD PATCHES. Two octaves at 288 m and 96 m move the sand along one axis whose
+ *     ends are set by the REGION (`uGroundAccent`, from the palette's accent; see
+ *     `setDesertGroundArclength`): toward the accent at one end, away from it at the
+ *     other — paler and yellower on the opening ochre, grey ash on black lava, mare
+ *     dust on the Moon. A third at 144 m lays pale dry crusts. Luminance moves under a
+ *     tenth, because a darker patch of ground reads as a cloud's shadow (terrainmesh's
+ *     own history).
  *  2. CRESTS AND TROUGHS. On the tiles, whose `aTerrainDetail` IS the wind-scale relief,
  *     crests are a shade lighter and the troughs between them warmer: sand sorts that way.
  *  3. PEBBLE FIELDS. The comic stipple's density follows a 48 m noise, so some ground is
@@ -301,6 +304,7 @@ const GROUND_VERTEX_PARS = /* glsl */ `
 varying vec3 vGroundTint;
 varying vec2 vGroundWorld;
 varying vec3 vGroundSurface;
+uniform vec3 uGroundAccent;
 float groundHash( float cx, float cz, float salt ) {
   vec3 h = fract( vec3( cx, cz, cx + cz + salt ) * 0.1031 );
   h += dot( h, h.yzx + 33.33 );
@@ -329,7 +333,7 @@ const GROUND_VERTEX_HOOK = (crests: boolean): string => /* glsl */ `#include <wo
   float patchValue = groundNoise( p / 288.0, 128.0, 11.0 ) * 0.65 + groundNoise( p / 96.0, 384.0, 12.0 ) * 0.35;
   // Value noise rarely leaves 0.3-0.7: stretched so the patches reach their full range.
   float red = mix( clamp( ( patchValue - 0.5 ) * 3.2, -1.0, 1.0 ), 0.0, far );
-  vec3 tint = vec3( 1.0 ) + red * vec3( 0.03, -0.06, -0.16 );
+  vec3 tint = pow( uGroundAccent, vec3( -red ) );
   float crust = smoothstep( 0.64, 0.84, groundNoise( p / 144.0, 256.0, 13.0 ) ) * ( 1.0 - far );
   tint = mix( tint, vec3( 1.08, 1.07, 1.02 ), crust * 0.8 );
 ${
@@ -452,6 +456,53 @@ const glitterUniforms = {
   uGlitter: { value: 0 },
   uGlitterTime: { value: 0 },
 };
+
+/**
+ * The broad patches' tint at the accent end of their axis (the shader raises it to the
+ * patch value, so the other end is its reciprocal and the mean is untinted).
+ *
+ * It is the linear accent-over-sand ratio with its luminance mostly taken out: hue and
+ * saturation carry the patch, and only `ACCENT_LUMINANCE_SHARE` of the accent's own
+ * lightness change is kept, so a lighter or darker accent still shows on the grey and
+ * black deserts, where it has no hue to move. `ACCENT_REACH` then scales the whole
+ * ratio; at 0.6 the opening ochre lands within a couple of per cent of the fixed
+ * redder/paler axis it replaced. Last, the tint's own luminance is held inside
+ * ±`ACCENT_LUMINANCE_SWING`: Mars' butterscotch dust and the lava's grey ash are far
+ * lighter than their ground, and at full strength their dark ends would read as shade.
+ *
+ * One value for the whole drawn world, like the dust colours (render/desertdust.ts):
+ * the palette moves over tens of kilometres, the ground drawn is a few.
+ */
+const groundAccentUniform = { value: new THREE.Vector3(1, 1, 1) };
+const ACCENT_LUMINANCE_SHARE = 0.35;
+const ACCENT_REACH = 0.6;
+const ACCENT_LUMINANCE_SWING = 0.1;
+const accentScratch = new THREE.Color();
+const sandScratch = new THREE.Color();
+let groundAccentS = Number.NaN;
+
+/** Points the patches at the accent of the desert at arclength `s`. Called once a frame. */
+export function setDesertGroundArclength(s: number): void {
+  if (Math.abs(s - groundAccentS) < 25) return;
+  groundAccentS = s;
+  const palette = desertPaletteAt(s);
+  sandScratch.setHex(palette.sand);
+  accentScratch.setHex(palette.accent);
+  const lum = (c: THREE.Color): number => Math.max(1e-4, 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b);
+  const lumRatio = lum(accentScratch) / lum(sandScratch);
+  const keep = lumRatio ** ACCENT_LUMINANCE_SHARE / lumRatio;
+  const channel = (a: number, b: number): number =>
+    ((Math.max(1e-4, a) / Math.max(1e-4, b)) * keep) ** ACCENT_REACH;
+  const r = channel(accentScratch.r, sandScratch.r);
+  const g = channel(accentScratch.g, sandScratch.g);
+  const b = channel(accentScratch.b, sandScratch.b);
+  const tintLum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  const hold =
+    Math.min(1 + ACCENT_LUMINANCE_SWING, Math.max(1 - ACCENT_LUMINANCE_SWING, tintLum)) / tintLum;
+  groundAccentUniform.value.set(r * hold, g * hold, b * hold);
+}
+setDesertGroundArclength(0);
+
 /**
  * Peak added radiance of one winking grain at full night (linear, before tone mapping).
  *
@@ -515,6 +566,7 @@ export function applyDesertGround(
     previous.call(material, shader, renderer);
     shader.uniforms.uGlitter = glitterUniforms.uGlitter;
     shader.uniforms.uGlitterTime = glitterUniforms.uGlitterTime;
+    shader.uniforms.uGroundAccent = groundAccentUniform;
     let vertex = shader.vertexShader
       .replace(
         '#include <common>',
@@ -546,7 +598,7 @@ transformed.y -= aTerrainDetail * detailFade;${grit ? '\nvShoulderGrit = aShould
   };
   const previousKey = material.customProgramCacheKey;
   material.customProgramCacheKey = () =>
-    `${previousKey.call(material)}:desert-ground-v2${detail ? ':detail-fade-v1' : ''}${grit ? ':shoulder-grit-v1' : ''}`;
+    `${previousKey.call(material)}:desert-ground-v3${detail ? ':detail-fade-v1' : ''}${grit ? ':shoulder-grit-v1' : ''}`;
   return material;
 }
 

@@ -383,21 +383,23 @@ check(
 );
 
 // --- 6. The water reads against whatever colour the sand has got to ------------
-// `desertPaletteAt` walks the sand's hue right around the wheel over the length of the
-// road, so a fixed water colour sinks into the ground at one mileage and fights it at
-// another. Sampled across a full cycle, the water must stay both distinct in hue and
-// darker in value than the sand beside it.
+// `desertPaletteAt` walks a ring of deserts over the length of the road, so a fixed
+// water colour sinks into the ground at one mileage and fights it at another. Sampled
+// across a full cycle, the water must stay distinct in hue from any sand that HAS a
+// hue, and apart from the sand in value — darker than it, or on the black and grey
+// deserts that leave no room below, lighter.
 let worstHueGap = 1;
 let worstValueGap = 1;
 const sandHsl = { h: 0, s: 0, l: 0 };
 const waterHsl = { h: 0, s: 0, l: 0 };
-for (let km = 0; km <= 40_000; km += 500) {
+for (let km = 0; km <= 40_000; km += 25) {
   const sand = new THREE.Color(desertPaletteAt(km * 1000).sand).getHSL(sandHsl);
   const deep = waterPaletteAt(km * 1000).deep.getHSL(waterHsl);
   const raw = Math.abs(sand.h - deep.h);
   const hueGap = Math.min(raw, 1 - raw);
-  if (hueGap < worstHueGap) worstHueGap = hueGap;
-  if (sand.l - deep.l < worstValueGap) worstValueGap = sand.l - deep.l;
+  if (sand.s >= 0.1 && hueGap < worstHueGap) worstHueGap = hueGap;
+  const valueGap = Math.abs(sand.l - deep.l);
+  if (valueGap < worstValueGap) worstValueGap = valueGap;
 }
 check(
   // Not opposition — separation. Water is pinned blue and only slides off the sand when

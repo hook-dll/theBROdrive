@@ -4,11 +4,11 @@ import { desertPaletteAt } from '../world/gradient';
 /**
  * THE DESERT'S OWN DUST, wherever the road has got to.
  *
- * The sand walks right round the colour wheel over the palette cycle
- * (`desertPaletteAt`): ochre at the start, pastel and strange far out. Everything made
- * OF that sand — the dust a haboob carries, the haze of a mgla, the grains streaming
- * across the road, the crust on a car's sills — has to walk with it, or a violet
- * desert gets an orange storm and a green one leaves ochre on the paint.
+ * The sand changes from desert to desert over the palette cycle (`desertPaletteAt`):
+ * ochre at the start, then pink, rust, black lava, lunar grey and pastel ones far out.
+ * Everything made OF that sand — the dust a haboob carries, the haze of a mgla, the
+ * grains streaming across the road, the crust on a car's sills — has to walk with it,
+ * or a black desert gets an orange storm and a green one leaves ochre on the paint.
  *
  * So every dust colour is authored ONCE, against the sand the drive starts on, and
  * carried to wherever the road is by the same move the sand made: its hue turned by

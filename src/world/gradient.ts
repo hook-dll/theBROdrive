@@ -608,6 +608,12 @@ export function skyGradientAt(s: number): SkyGradient {
 export interface DesertPalette {
   /** Open sand albedo, 0xRRGGBB. */
   readonly sand: number;
+  /**
+   * The region's second sand, 0xRRGGBB: what the ground shader's broad patches move
+   * toward (`setDesertGroundArclength` in terrainmesh.ts). The same material in another
+   * state — pale gypsum crust, the lighter dust on a Martian plain, grey ash on lava.
+   */
+  readonly accent: number;
   /** Rock outcrop albedo, 0xRRGGBB. Always darker than `sand`. */
   readonly rock: number;
   /** Road shoulder / verge gravel albedo, 0xRRGGBB. Sits between the other two. */
@@ -627,9 +633,21 @@ export interface DesertPalette {
   readonly spray: number;
 }
 
-/** Hue/saturation/lightness (hue circular, all 0..1) -> packed 0xRRGGBB. Plain
- * numbers so this module does not depend on three.js. */
-function hslToHex(h: number, s: number, l: number): number {
+/**
+ * The palette works in UNQUANTISED sRGB triples (0..1) and packs to 0xRRGGBB exactly
+ * once, at the end. Packing the blended sand first and deriving rock, gravel and spray
+ * from the 8-bit result rounded twice: the HSL lightness drop amplifies a one-level
+ * sand step into two in the rock, and that is a visible seam between two chunks. Plain
+ * numbers so this module does not depend on three.js.
+ */
+type Rgb = [number, number, number];
+
+function hexToRgb(hex: number): Rgb {
+  return [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255];
+}
+
+/** Hue/saturation/lightness (hue circular, all 0..1) -> sRGB triple. */
+function hslToRgb(h: number, s: number, l: number): Rgb {
   const c = (1 - Math.abs(2 * l - 1)) * s;
   const hp = (h - Math.floor(h)) * 6;
   const x = c * (1 - Math.abs((hp % 2) - 1));
@@ -643,63 +661,29 @@ function hslToHex(h: number, s: number, l: number): number {
   else if (hp < 5) { r = x; b = c; }
   else { r = c; b = x; }
   const m = l - c / 2;
-  return (Math.round((r + m) * 255) << 16) |
-         (Math.round((g + m) * 255) << 8) |
-         Math.round((b + m) * 255);
+  return [r + m, g + m, b + m];
 }
 
-/**
- * THE SAND THE DRIVE OPENS ON: `#d29459`, expressed as HSL because the whole cycle is
- * built in HSL and this is the one point on it that is pinned to an exact colour.
- *
- * A pastel version of this was tried twice and rejected both times. Desaturating it
- * gave a bleached grey-beige, which is a colour a desert can be at noon in a
- * photograph and is not the colour anyone means by "sand". So the cycle is no longer
- * uniformly pastel: it is pinned WARM here and relaxes into pastel as the hue travels
- * away, which is what `warmth` below interpolates. The strange hues out in the cycle
- * still need the pastel treatment — a saturated violet desert is what started all
- * this — but the sand at kilometre zero does not.
- *
- * The hue also decides where the cycle starts, so it does double duty: it is both the
- * colour of the opening and the phase offset that puts the opening here.
- */
-const PALETTE_START_HUE = 0.0812672;
-const SAND_WARM_SAT = 0.573;
-const SAND_WARM_LIGHT = 0.586;
-/**
- * The sand at the far side of the wheel: pale and soft, because that is where the hues
- * are ones no desert has and the eye needs them muted to accept them at all.
- */
-const SAND_COOL_SAT = 0.2;
-const SAND_COOL_LIGHT = 0.71;
-/**
- * Rock and gravel as offsets from whatever the sand is doing — a fixed saturation
- * RATIO and a fixed lightness DROP, so their contrast against the sand is identical at
- * every phase of the cycle. That constancy is the whole trick to "a boulder always
- * reads darker than the ground it sits on": pinning them to absolute values instead
- * lets the gap collapse wherever the sand happens to be dark.
- */
-const ROCK_SAT_RATIO = 0.79;
-const ROCK_LIGHT_DROP = 0.26;
-const GRAVEL_SAT_RATIO = 0.54;
-const GRAVEL_LIGHT_DROP = 0.12;
-/**
- * How far thrown sand is lifted toward full lightness, as a fraction of the HEADROOM
- * above the ground's own lightness.
- *
- * Proportional rather than a fixed offset, so it behaves at both ends of the cycle: the
- * warm sand starts dark (lightness 0.586) and needs a real lift to separate from the
- * ground, while the pastel phases are already light (0.71) and a fixed offset would
- * push them to nearly white. At 0.45 the spray is always clearly brighter than the
- * ground and never blows out.
- */
-const SPRAY_LIGHT_LIFT = 0.45;
-/**
- * How sharply the warm sand gives way to pastel, as an exponent on the cosine falloff.
- * Six spends the warm treatment inside roughly the first thousand kilometres of the
- * cycle; see the note in `desertPaletteAt` for what a gentler value looked like.
- */
-const WARM_FALLOFF_POWER = 6;
+/** sRGB triple -> HSL (hue circular, all 0..1), written into `out`. */
+function rgbToHsl(rgb: Rgb, out: { h: number; s: number; l: number }): void {
+  const [r, g, b] = rgb;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const d = max - min;
+  out.l = l;
+  if (d === 0) {
+    out.h = 0;
+    out.s = 0;
+    return;
+  }
+  out.s = d / (1 - Math.abs(2 * l - 1));
+  let h: number;
+  if (max === r) h = ((g - b) / d + 6) % 6;
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  out.h = h / 6;
+}
 
 function srgbToLinear(c: number): number {
   return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
@@ -709,99 +693,229 @@ function linearToSrgb(c: number): number {
   return c <= 0.0031308 ? c * 12.92 : 1.055 * c ** (1 / 2.4) - 0.055;
 }
 
-/** Relative luminance (linear, Rec. 709) of a packed 0xRRGGBB. */
-function hexLuminance(hex: number): number {
-  return 0.2126 * srgbToLinear(((hex >> 16) & 255) / 255) +
-         0.7152 * srgbToLinear(((hex >> 8) & 255) / 255) +
-         0.0722 * srgbToLinear((hex & 255) / 255);
+/** Relative luminance (linear, Rec. 709) of an sRGB triple. */
+function luminanceOf(rgb: Rgb): number {
+  return 0.2126 * srgbToLinear(rgb[0]) + 0.7152 * srgbToLinear(rgb[1]) + 0.0722 * srgbToLinear(rgb[2]);
 }
 
-/** Scales a packed 0xRRGGBB in LINEAR light: same chromaticity, less of it. */
-function scaleHexLight(hex: number, k: number): number {
-  if (k >= 1) return hex;
-  const channel = (shift: number): number =>
-    Math.round(linearToSrgb(srgbToLinear(((hex >> shift) & 255) / 255) * k) * 255);
-  return (channel(16) << 16) | (channel(8) << 8) | channel(0);
+/** Scales an sRGB triple in LINEAR light by `k` (same chromaticity, less of it) and packs it. */
+function packScaled(rgb: Rgb, k: number): number {
+  const channel = (c: number): number => {
+    const v = Math.min(1, Math.max(0, c));
+    return Math.round((k >= 1 ? v : linearToSrgb(srgbToLinear(v) * k)) * 255);
+  };
+  return (channel(rgb[0]) << 16) | (channel(rgb[1]) << 8) | channel(rgb[2]);
 }
+
+type Lab = [number, number, number];
+
+/** Packed 0xRRGGBB -> OKLab. */
+function hexToOklab(hex: number): Lab {
+  const [r, g, b] = hexToRgb(hex).map(srgbToLinear) as Rgb;
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  return [
+    0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+  ];
+}
+
+/** The OKLab mix `a + (b - a)·w` as an sRGB triple, clamped into the gamut. */
+function mixOklab(a: Lab, b: Lab, w: number): Rgb {
+  const L = a[0] + (b[0] - a[0]) * w;
+  const A = a[1] + (b[1] - a[1]) * w;
+  const B = a[2] + (b[2] - a[2]) * w;
+  const l = (L + 0.3963377774 * A + 0.2158037573 * B) ** 3;
+  const m = (L - 0.1055613458 * A - 0.0638541728 * B) ** 3;
+  const s = (L - 0.0894841775 * A - 1.291485548 * B) ** 3;
+  const channel = (v: number): number => linearToSrgb(Math.min(1, Math.max(0, v)));
+  return [
+    channel(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+    channel(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+    channel(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s),
+  ];
+}
+
+/**
+ * One desert on the cycle: its sand, its second sand (see `DesertPalette.accent`), how
+ * long it holds pure, and how long it takes to become the next one.
+ *
+ * THE CYCLE IS A RING OF DESERTS, NOT A HUE SWEEP. It used to walk the hue once round
+ * the wheel at pastel saturation, and measured in OKLab that spent 400-1 000 km at a
+ * chroma of 2-3 — grey — moving under 1.5 ΔE per 100 km: six hundred kilometres of one
+ * grey-mint that nobody could tell apart. Real deserts are not evenly spaced round a
+ * colour wheel, so these are authored, and ordered so neighbours blend through
+ * something plausible: rust darkens into black glass, black glass weathers to basalt
+ * grey, basalt grey pales into regolith.
+ *
+ * The first entry is the sand the drive opens on, `#d29459`, and it is exact. A pastel
+ * or desaturated opening was tried twice and read as bleached grey-beige; the eye
+ * forgives a saturated warm ground and not a saturated cool one, which is why the
+ * strange hues further round are the pale ones.
+ *
+ * Kilometres are relative weights: they are scaled together to fill PALETTE_CYCLE_M.
+ * A BLEND IS SIZED TO ITS DISTANCE. tools/road-condition.ts holds every channel to
+ * one 8-bit step per 200 m chunk, and smootherstep's peak slope is 1.875 times the
+ * mean, so a blend across `d` channel levels needs at least 0.375·d km; the long ones
+ * below are the big jumps into and out of the black.
+ */
+interface Desert {
+  readonly sand: number;
+  readonly accent: number;
+  readonly holdKm: number;
+  readonly blendKm: number;
+}
+
+const DESERTS: readonly Desert[] = [
+  // The opening ochre. Accent: sunlit crests.
+  { sand: 0xd29459, accent: 0xdfaa70, holdKm: 90, blendKm: 60 },
+  // Golden erg — the Sahara of postcards. Accent: the shadowed troughs between dunes.
+  { sand: 0xd9ad6b, accent: 0xc9975a, holdKm: 80, blendKm: 55 },
+  // Gypsum flats. Accent: fresh white crust.
+  { sand: 0xd4c9ad, accent: 0xe6dfcb, holdKm: 90, blendKm: 60 },
+  // Coral-pink dunes. Accent: paler wind-sorted crests.
+  { sand: 0xd6937a, accent: 0xe3ae98, holdKm: 80, blendKm: 60 },
+  // Namib / Wadi Rum red. Accent: darker iron-rich streaks.
+  { sand: 0xc0673f, accent: 0xa85534, holdKm: 90, blendKm: 55 },
+  // Mars: rust plains under a butterscotch dust. Accent: that dust, drifted.
+  { sand: 0x9e4d2e, accent: 0xbf7a52, holdKm: 110, blendKm: 90 },
+  // Black lava — cooled magma, glassy and faintly violet. Accent: grey ash drifts.
+  { sand: 0x34313a, accent: 0x57514f, holdKm: 110, blendKm: 110 },
+  // Weathered basalt. Accent: darker gravel pans.
+  { sand: 0x6c6762, accent: 0x5a5551, holdKm: 70, blendKm: 70 },
+  // The Moon: regolith, a faintly warm grey — a neutral one read as snow under the
+  // blue sky fill. Accent: dark mare dust.
+  { sand: 0x969088, accent: 0x77726b, holdKm: 110, blendKm: 70 },
+  // Olivine sand. Accent: darker, greener grains.
+  { sand: 0x9b9760, accent: 0x868550, holdKm: 80, blendKm: 60 },
+  // The strange ones out on the cycle: mint...
+  { sand: 0x9dba9f, accent: 0xb5ccb3, holdKm: 80, blendKm: 60 },
+  // ...pale sky...
+  { sand: 0xa0b5c9, accent: 0xbccad8, holdKm: 80, blendKm: 60 },
+  // ...lavender...
+  { sand: 0xb3a0c8, accent: 0xc8b9d8, holdKm: 80, blendKm: 60 },
+  // ...and rose brick, which closes the ring back onto the ochre.
+  { sand: 0xc98170, accent: 0xb66a5a, holdKm: 80, blendKm: 70 },
+];
+
+const DESERT_SAND_LAB = DESERTS.map((d) => hexToOklab(d.sand));
+const DESERT_ACCENT_LAB = DESERTS.map((d) => hexToOklab(d.accent));
+const DESERT_KM = DESERTS.reduce((sum, d) => sum + d.holdKm + d.blendKm, 0);
+/** Each desert's hold end and blend end, in metres of the cycle. */
+const DESERT_SPANS = (() => {
+  const scale = PALETTE_CYCLE_M / DESERT_KM;
+  const spans: { holdEnd: number; end: number }[] = [];
+  let at = 0;
+  for (const d of DESERTS) {
+    const holdEnd = at + d.holdKm * scale;
+    at = holdEnd + d.blendKm * scale;
+    spans.push({ holdEnd, end: at });
+  }
+  return spans;
+})();
+
+/**
+ * Rock and gravel as offsets from whatever the sand is doing — a fixed saturation
+ * RATIO and a lightness DROP, so their contrast against the sand holds at every phase
+ * of the cycle. That constancy is the whole trick to "a boulder always reads darker
+ * than the ground it sits on".
+ *
+ * The drop is capped at a FRACTION of the sand's own lightness, because the black lava
+ * has no 0.26 of lightness to give: the fixed drop clamped its rock to pure black. Half
+ * of what there is keeps obsidian boulders visibly blacker than the black sand; above
+ * a lightness of 0.52 the cap is inactive.
+ */
+const ROCK_SAT_RATIO = 0.79;
+const ROCK_LIGHT_DROP = 0.26;
+const ROCK_DROP_FRACTION = 0.5;
+const GRAVEL_SAT_RATIO = 0.54;
+const GRAVEL_LIGHT_DROP = 0.12;
+const GRAVEL_DROP_FRACTION = 0.3;
+/**
+ * How far thrown sand is lifted toward full lightness, as a fraction of the HEADROOM
+ * above the ground's own lightness. Proportional rather than a fixed offset, so a
+ * dark sand gets a real lift and a pale one is not pushed to white.
+ */
+const SPRAY_LIGHT_LIFT = 0.45;
 
 /**
  * THE GROUND MAY NOT OUTSHINE THE SAND IT STARTED AS.
  *
- * HSL lightness is not brightness: at the same lightness a yellow-green is half again
- * as luminous as the ochre the drive opens on. With the pastel phases at lightness
- * 0.71 the ground from 100 to 1000 km carried 40-65 % more light than kilometre zero,
- * and under the same noon sun — which is exposed for the ochre — it blew out to a
- * near-white mint that hurt to drive across. So every phase is capped at this much of
- * the opening sand's luminance, by scaling its LINEAR light: hue and chroma are kept,
- * only the amount of light comes down. Solving HSL lightness down to the cap was tried
- * first and it went the other way — a darker HSL colour at the same saturation is a
- * MORE saturated one, and the pale greens came out mustard and olive.
+ * HSL lightness is not brightness, and a pale gypsum or mint carries far more light
+ * than the ochre at the same lightness; under the noon sun, which is exposed for the
+ * ochre, it blew out to a near-white that hurt to drive across. So every phase is
+ * capped at this much of the opening sand's luminance, by scaling its LINEAR light:
+ * hue and chroma are kept, only the amount of light comes down. Solving HSL lightness
+ * down to the cap was tried first and went the other way — a darker HSL colour at the
+ * same saturation is a MORE saturated one, and the pale greens came out mustard.
  *
- * Only a ceiling: the rose and brick phases near the end of the cycle are already
- * below it and stay as they were. Rock, gravel and spray take the same factor as the
- * sand, so every contrast against the ground is unchanged.
+ * Only a ceiling: the dark deserts are below it and stay as authored. Rock, gravel and
+ * spray take the sand's factor, so every contrast against the ground is unchanged. The
+ * accent takes it too — capping it on its own flattened every pale crest into the sand
+ * beneath it — and then its own, looser ceiling (ACCENT_LUMINANCE_CAP).
  */
-const SAND_LUMINANCE_CAP =
-  hexLuminance(hslToHex(PALETTE_START_HUE, SAND_WARM_SAT, SAND_WARM_LIGHT)) * 1.12;
+const SAND_LUMINANCE_CAP = luminanceOf(hexToRgb(DESERTS[0]!.sand)) * 1.12;
+/** Crests and crust may be a little brighter than any open sand, never glaring. */
+const ACCENT_LUMINANCE_CAP = SAND_LUMINANCE_CAP * 1.22;
+
+/** Quintic smoothstep of an already-normalised 0..1: zero slope AND curvature at both ends. */
+function smootherstep01(t: number): number {
+  return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
+const paletteHsl = { h: 0, s: 0, l: 0 };
 
 /**
- * The desert's colour at a distance. Pure, C1 in `s`, exact period PALETTE_CYCLE_M.
+ * The desert's colour at a distance. Pure, C2 in `s`, exact period PALETTE_CYCLE_M.
  *
- * A hue that travels the full circle once per period, NOT a keyframed interpolation
- * (linear segments leave visible creases at the knots). Hue is a circle, so the wrap
- * at the period boundary is invisible: hue 1 IS hue 0.
+ * HOLD, THEN BLEND. Each desert of `DESERTS` stands pure for its hold, then becomes the
+ * next along a quintic smootherstep — zero slope at both knots, so there is no crease
+ * where a blend starts or stops (an earlier keyframed palette used linear segments,
+ * which crease). The mix is in OKLab rather than HSL or sRGB: rust into black and
+ * ochre into gypsum pass through what the eye takes as the midpoint, not through a
+ * muddy grey or a detour round the hue wheel.
  *
- * WARM AT THE START, PASTEL AWAY FROM IT. `warmth` is 1 at `PALETTE_START_HUE` and 0
- * at the opposite side of the wheel, and both saturation and lightness are interpolated
- * along it. So s = 0 is exactly `#d29459` — real sand, warm and reasonably saturated —
- * and the further round the cycle goes the softer and paler it gets. A uniformly
- * pastel cycle was tried and it made the opening a bleached grey-beige; a uniformly
- * saturated one was the original bug, and it made the desert at 39 000 km a flat
- * violet. The eye forgives a saturated warm ground and does not forgive a saturated
- * cool one, so the two ends genuinely need different treatment.
+ * s = 0 is the first hold, so the drive opens on exactly `#d29459`.
  *
- * The two modulations exist to stop the sweep being mechanical, and BOTH are phased to
- * vanish at `PALETTE_START_HUE` — that is what makes the opening land on the pinned
- * colour exactly rather than approximately. They use different harmonics so they never
- * peak together.
- *
- * Called once per terrain mesh ROW, not per vertex, so allocating a fresh object here
- * is irrelevant — do not 'optimise' it into a shared buffer.
+ * Called once per mesh ROW, not per vertex, so allocating a fresh object here is
+ * irrelevant — do not 'optimise' it into a shared buffer.
  */
 export function desertPaletteAt(s: number): DesertPalette {
-  const t = s / PALETTE_CYCLE_M + PALETTE_START_HUE;
-  const hue = t - Math.floor(t);
+  const cycle = s - Math.floor(s / PALETTE_CYCLE_M) * PALETTE_CYCLE_M;
+  let i = 0;
+  while (i < DESERT_SPANS.length - 1 && cycle >= DESERT_SPANS[i]!.end) i++;
+  const span = DESERT_SPANS[i]!;
+  const next = (i + 1) % DESERTS.length;
+  const w = cycle <= span.holdEnd
+    ? 0
+    : smootherstep01(Math.min(1, (cycle - span.holdEnd) / (span.end - span.holdEnd)));
 
-  // Distance round the wheel from the pinned sand, as 1 (at it) to 0 (opposite).
-  //
-  // Raised to a power, and that exponent is the whole difference between "sand at the
-  // start" and "a saturated cycle". A plain cosine falls off far too slowly: it left
-  // warmth above 0.7 a full 500 km in, which came out `0xbcd56e` — a vivid
-  // yellow-green desert, no more plausible than the violet that started all this. At
-  // the sixth power the warm treatment is spent within roughly the first thousand
-  // kilometres of the cycle and the remaining three thousand are pastel, which is the
-  // shape actually asked for: real sand where the drive begins, soft strange colours
-  // out where the drive goes. It comes back up symmetrically on the approach, so the
-  // cycle closes on sand as smoothly as it opened on it.
-  const offset = hue - PALETTE_START_HUE;
-  const warmth = (0.5 + 0.5 * Math.cos(2 * Math.PI * offset)) ** WARM_FALLOFF_POWER;
+  let sand: Rgb;
+  let accent: Rgb;
+  if (w === 0) {
+    sand = hexToRgb(DESERTS[i]!.sand);
+    accent = hexToRgb(DESERTS[i]!.accent);
+  } else {
+    sand = mixOklab(DESERT_SAND_LAB[i]!, DESERT_SAND_LAB[next]!, w);
+    accent = mixOklab(DESERT_ACCENT_LAB[i]!, DESERT_ACCENT_LAB[next]!, w);
+  }
 
-  // Zero at the start hue, so they perturb everywhere except the one pinned point.
-  const lightMod = 0.04 * Math.sin(2 * Math.PI * offset);
-  const satMod = 0.03 * Math.sin(4 * Math.PI * offset);
-
-  const sandSat = SAND_COOL_SAT + (SAND_WARM_SAT - SAND_COOL_SAT) * warmth + satMod;
-  const sandLight = SAND_COOL_LIGHT + (SAND_WARM_LIGHT - SAND_COOL_LIGHT) * warmth + lightMod;
-
-  const sand = hslToHex(hue, sandSat, sandLight);
+  rgbToHsl(sand, paletteHsl);
+  const { h, s: sat, l } = paletteHsl;
+  const rockL = l - Math.min(ROCK_LIGHT_DROP, l * ROCK_DROP_FRACTION);
+  const gravelL = l - Math.min(GRAVEL_LIGHT_DROP, l * GRAVEL_DROP_FRACTION);
   // See SAND_LUMINANCE_CAP. Exactly 1 at the opening, so s = 0 stays `#d29459`.
-  const light = Math.min(1, SAND_LUMINANCE_CAP / hexLuminance(sand));
+  const light = Math.min(1, SAND_LUMINANCE_CAP / luminanceOf(sand));
+  const accentLight = Math.min(light, ACCENT_LUMINANCE_CAP / luminanceOf(accent));
 
   return {
-    sand: scaleHexLight(sand, light),
-    rock: scaleHexLight(hslToHex(hue, sandSat * ROCK_SAT_RATIO, sandLight - ROCK_LIGHT_DROP), light),
-    gravel: scaleHexLight(hslToHex(hue, sandSat * GRAVEL_SAT_RATIO, sandLight - GRAVEL_LIGHT_DROP), light),
-    spray: scaleHexLight(hslToHex(hue, sandSat, sandLight + (1 - sandLight) * SPRAY_LIGHT_LIFT), light),
+    sand: packScaled(sand, light),
+    accent: packScaled(accent, accentLight),
+    rock: packScaled(hslToRgb(h, sat * ROCK_SAT_RATIO, rockL), light),
+    gravel: packScaled(hslToRgb(h, sat * GRAVEL_SAT_RATIO, gravelL), light),
+    spray: packScaled(hslToRgb(h, sat, l + (1 - l) * SPRAY_LIGHT_LIFT), light),
   };
 }
 
