@@ -519,7 +519,7 @@ export async function bootRoadLab(): Promise<void> {
   const rotateHint = document.getElementById('rotate-hint');
   if (!(canvas instanceof HTMLCanvasElement)) throw new Error('index.html is missing #game');
   if (rotateHint instanceof HTMLElement) rotateHint.style.display = 'none';
-  document.title = 'Road laboratory · the BRO drive';
+  document.title = 'Road laboratory · Voyage Mirage';
 
   const query = new URLSearchParams(window.location.search);
   const pick = SCANS.find((scan) => scan.key === query.get('pick'));

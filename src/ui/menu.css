@@ -1,0 +1,1355 @@
+/* ------------------------------------------------------------------ *
+ *  the BRO drive — menu styles (title screen, pause, settings)       *
+ * ------------------------------------------------------------------ */
+
+/* ONE TYPE FAMILY, BUNDLED. Barlow is drawn from the lettering on highway signs, which
+ * is what this game is: a road. The condensed cut sets everything structural (titles,
+ * actions, labels, figures) and the regular cut sets everything read as a sentence.
+ * Bundled rather than named from the system, because a system stack is a different
+ * face on every machine — which is how the old menu ended up in three of them.
+ * Latin only: the menu is written in English and the other subsets would never load. */
+@import '@fontsource/barlow/latin-400.css';
+@import '@fontsource/barlow/latin-500.css';
+@import '@fontsource/barlow/latin-600.css';
+@import '@fontsource/barlow-condensed/latin-600.css';
+@import '@fontsource/barlow-condensed/latin-700.css';
+@import '@fontsource/barlow-condensed/latin-800-italic.css';
+
+:root {
+  --menu-font: 'Barlow', 'Segoe UI', system-ui, sans-serif;
+  --menu-font-cond: 'Barlow Condensed', 'Arial Narrow', 'Segoe UI', sans-serif;
+}
+
+/* ------------------------------------------------------------------ *
+ *  Tokens                                                            *
+ *                                                                    *
+ *  Warm night palette, shared with the HUD: bone ink on dark stock,  *
+ *  and ONE accent — the desert's own orange — kept for the thing you *
+ *  are most likely to want: the primary action, a live value, the    *
+ *  cap of a kilometre post. Everything else is ink at three levels.  *
+ *                                                                    *
+ *  The type scale is five sizes and nothing between them.            *
+ * ------------------------------------------------------------------ */
+
+.menu {
+  --m-stock: #16120d;
+  --m-stock-2: #201a13;
+  --m-stock-3: #2c241a;
+  --m-ink: #f2e8d0;
+  /* Secondary text: still reads as a sentence (~10:1 on the stock). */
+  --m-ink-2: #cbbd9e;
+  /* Labels only, never prose (~5.6:1). */
+  --m-ink-3: #978a70;
+  --m-line: rgba(242, 232, 208, 0.12);
+  --m-line-2: rgba(242, 232, 208, 0.26);
+  --m-accent: #ec7a3d;
+  --m-accent-hot: #f58f55;
+  --m-on-accent: #1b0f07;
+  --m-danger: #e0573a;
+
+  --m-size-xs: 12px;
+  --m-size-sm: 14px;
+  --m-size-md: 16px;
+  --m-size-lg: 22px;
+  --m-size-xl: 40px;
+
+  --m-radius: 8px;
+  --m-radius-sm: 5px;
+  --m-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  pointer-events: auto;
+  display: flex;
+  justify-content: flex-end;
+  font-family: var(--menu-font);
+  font-size: var(--m-size-md);
+  line-height: 1.4;
+  color: var(--m-ink);
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The frozen frame stays visible on the left: the pause is ON the road, not away from it. */
+.menu-pause {
+  background: linear-gradient(90deg, rgba(10, 8, 5, 0.28), rgba(10, 8, 5, 0.62) 55%, rgba(10, 8, 5, 0.8));
+}
+
+.menu-icon {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ------------------------------------------------------------------ *
+ *  Title screen                                                      *
+ * ------------------------------------------------------------------ */
+
+.menu-title-screen {
+  overflow: hidden;
+  isolation: isolate;
+  --sheet-width: min(480px, 100vw);
+}
+
+.menu-title-screen::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  z-index: -2;
+  background: url('../../optimized_bg.webp') center 48% / cover no-repeat;
+  filter: blur(1.5px) saturate(1.05);
+  transform: scale(1.01);
+}
+
+/* Dark where there is text — the name's corner, under the actions — and clear over the car. */
+.menu-title-screen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(65% 60% at 0% 0%, rgba(8, 6, 4, 0.6), transparent 72%),
+    linear-gradient(0deg, rgba(8, 6, 4, 0.82), rgba(8, 6, 4, 0.2) 38%, transparent 60%),
+    linear-gradient(90deg, rgba(8, 6, 4, 0.1), rgba(8, 6, 4, 0.35) 50%, rgba(8, 6, 4, 0.7));
+}
+
+/* Top left, in the sky: the car sits low on the left of the still, the actions sit low
+   on the right, and the name takes the empty corner the composition leaves. */
+.menu-hero {
+  position: absolute;
+  left: clamp(24px, 5vw, 80px);
+  top: clamp(24px, 8vh, 96px);
+  right: calc(var(--sheet-width) + 32px);
+  pointer-events: none;
+}
+
+.menu-wordmark {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin: 0;
+  font-family: var(--menu-font-cond);
+  line-height: 0.84;
+}
+
+/* The filter's definitions; the element itself takes no room. */
+.menu-wordmark-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+/* Each word's box is padded below for its descenders — `background-clip: text` paints
+   only inside the box, and at this line height a y or g hangs out of it — and the
+   padding is taken back with a margin, so the lines still sit tight. */
+.menu-wordmark-voyage,
+.menu-wordmark-mirage {
+  position: relative;
+  display: block;
+  padding: 0 0.08em 0.22em 0;
+  margin-bottom: -0.22em;
+  font-size: clamp(76px, 10.5vw, 168px);
+  font-style: italic;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  background-origin: content-box;
+  background-size: 100% 1.06em;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* The mirage: heat-bleached at the top, taking the sky's blue as it goes down, bent by
+   the haze filter and dissolving at its lower edge — the way a shape over hot ground is
+   never quite there. The top padding is the room its reflection hangs in; a mask hides
+   whatever lies outside the box, so the reflection has to be inside it. */
+.menu-wordmark-voyage {
+  --voyage-paint: linear-gradient(180deg, #fff6e2 0%, #f1dfbd 42%, #b9cde3 88%);
+  padding-top: 0.42em;
+  background-image: var(--voyage-paint);
+  filter: url('#menu-heat-haze') drop-shadow(0 4px 22px rgba(0, 0, 0, 0.3));
+  -webkit-mask-image: linear-gradient(180deg, #000 60%, rgba(0, 0, 0, 0.45) 100%);
+  mask-image: linear-gradient(180deg, #000 60%, rgba(0, 0, 0, 0.45) 100%);
+}
+
+/* The superior mirage: the word again, upside down and shallower, hanging over itself
+   with the tops of the letters meeting. */
+.menu-wordmark-voyage::before {
+  content: attr(data-text);
+  position: absolute;
+  left: 0;
+  top: 0.42em;
+  height: 0.84em;
+  transform: translateY(0.05em) scaleY(-0.4);
+  transform-origin: top;
+  background: var(--voyage-paint);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  opacity: 0.26;
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, transparent 70%);
+  mask-image: linear-gradient(180deg, #000 0%, transparent 70%);
+}
+
+/* And the one word you expected to shimmer stands perfectly still, painted like a sign. */
+.menu-wordmark-mirage {
+  margin-top: -0.02em;
+  background-image: linear-gradient(180deg, #ffc27a 0%, #f58f55 38%, #ec7a3d 62%, #c9542a 100%);
+  filter: drop-shadow(0 6px 26px rgba(0, 0, 0, 0.4));
+}
+
+/* ------------------------------------------------------------------ *
+ *  The sheet: one panel, docked right, used by every screen          *
+ * ------------------------------------------------------------------ */
+
+.menu-sheet {
+  position: relative;
+  box-sizing: border-box;
+  width: var(--sheet-width, min(480px, 100vw));
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding: clamp(28px, 7vh, 72px) clamp(24px, 3vw, 48px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: linear-gradient(180deg, rgba(22, 18, 13, 0.9), rgba(16, 13, 9, 0.95));
+  border-left: 1px solid var(--m-line-2);
+  box-shadow: -30px 0 80px rgba(0, 0, 0, 0.35);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  animation: menu-sheet-in 240ms var(--m-ease) both;
+  scrollbar-width: thin;
+  scrollbar-color: var(--m-line-2) transparent;
+}
+
+/* Centred vertically when it fits, top-aligned when it scrolls: auto margins give way
+   instead of pushing the first row out of reach the way `justify-content` would. */
+.menu-sheet > :first-child {
+  margin-top: auto;
+}
+
+.menu-sheet > :last-child {
+  margin-bottom: auto;
+}
+
+.menu-sheet.is-list > :first-child,
+.menu-sheet.is-wide > :first-child,
+.menu-sheet.is-settings > :first-child {
+  margin-top: 0;
+}
+
+.menu-sheet.is-wide {
+  --sheet-width: min(640px, 100vw);
+}
+
+.menu-sheet.is-settings {
+  --sheet-width: min(1120px, 100vw);
+  overflow: hidden;
+  gap: 20px;
+  padding-bottom: clamp(20px, 4vh, 40px);
+}
+
+.menu-sheet.is-list {
+  --sheet-width: min(620px, 100vw);
+}
+
+/* The title's front is three rows at most, and a first launch has one: a full panel
+   behind a single button is an empty room. So the front stands bare on the darkened
+   scene, low on the right across from the name, and the panel appears only for the
+   list of saved drives, which is a document and wants one. */
+.menu-title-screen .menu-sheet:not(.is-list) {
+  background: none;
+  border-left-color: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  padding-bottom: clamp(24px, 7vh, 80px);
+}
+
+.menu-title-screen .menu-sheet:not(.is-list) > :last-child {
+  margin-bottom: 0;
+}
+
+@keyframes menu-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu-sheet {
+    animation: none;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ *  Type roles                                                        *
+ * ------------------------------------------------------------------ */
+
+.menu-screen-title {
+  margin: 0;
+  font-family: var(--menu-font-cond);
+  font-size: var(--m-size-xl);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--m-ink);
+}
+
+.menu-eyebrow {
+  display: block;
+  font-family: var(--menu-font-cond);
+  font-size: var(--m-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--m-ink-3);
+}
+
+.menu-label {
+  font-family: var(--menu-font-cond);
+  font-size: var(--m-size-md);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--m-ink);
+}
+
+.menu-error {
+  font-size: var(--m-size-sm);
+  color: var(--m-accent-hot);
+}
+
+.menu-error:empty {
+  display: none;
+}
+
+.menu-note {
+  font-size: var(--m-size-md);
+  line-height: 1.45;
+  color: var(--m-ink-2);
+}
+
+.menu-note.is-alarm {
+  color: var(--m-accent-hot);
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------------ *
+ *  Main actions                                                      *
+ * ------------------------------------------------------------------ */
+
+.menu-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.menu-action {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  min-height: 58px;
+  padding: 10px 20px 10px 22px;
+  border: 1px solid transparent;
+  border-radius: var(--m-radius);
+  background: transparent;
+  color: var(--m-ink);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms linear, color 120ms linear, padding-left 160ms var(--m-ease);
+}
+
+/* The lane marker: a stripe that slides in beside whatever row you are on. */
+.menu-action::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 14px;
+  bottom: 14px;
+  width: 4px;
+  border-radius: 2px;
+  background: var(--m-accent);
+  opacity: 0;
+  transform: scaleY(0.4);
+  transition: opacity 120ms linear, transform 160ms var(--m-ease);
+}
+
+.menu-action:hover,
+.menu-action:focus-visible {
+  background: var(--m-stock-3);
+  padding-left: 30px;
+  outline: none;
+}
+
+.menu-action:hover::before,
+.menu-action:focus-visible::before {
+  opacity: 1;
+  transform: none;
+}
+
+.menu-action-label {
+  font-family: var(--menu-font-cond);
+  font-size: var(--m-size-lg);
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.menu-action-detail {
+  font-size: var(--m-size-sm);
+  color: var(--m-ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.menu-action.is-primary {
+  background: var(--m-accent);
+  color: var(--m-on-accent);
+  min-height: 66px;
+}
+
+.menu-action.is-primary .menu-action-detail {
+  color: rgba(27, 15, 7, 0.72);
+}
+
+.menu-action.is-primary::before {
+  background: var(--m-on-accent);
+}
+
+.menu-action.is-primary:hover,
+.menu-action.is-primary:focus-visible {
+  background: var(--m-accent-hot);
+}
+
+.menu-action.is-primary:focus-visible {
+  box-shadow: 0 0 0 2px var(--m-stock), 0 0 0 4px var(--m-accent-hot);
+}
+
+.menu-action:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+/* ------------------------------------------------------------------ *
+ *  Buttons (secondary controls)                                      *
+ * ------------------------------------------------------------------ */
+
+.menu-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 16px;
+  border: 1px solid var(--m-line-2);
+  border-radius: var(--m-radius-sm);
+  background: transparent;
+  color: var(--m-ink);
+  font-family: var(--menu-font-cond);
+  font-size: var(--m-size-md);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background-color 120ms linear, border-color 120ms linear, color 120ms linear;
+}
+
+.menu-button:hover,
+.menu-button:focus-visible {
+  background: var(--m-stock-3);
+  border-color: var(--m-ink-2);
+  outline: none;
+}
+
+.menu-button:focus-visible {
+  box-shadow: 0 0 0 2px var(--m-accent);
+}
+
+.menu-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.menu-button.menu-primary {
+  background: var(--m-accent);
+  border-color: var(--m-accent);
+  color: var(--m-on-accent);
+}
+
+.menu-button.menu-primary:hover,
+.menu-button.menu-primary:focus-visible {
+  background: var(--m-accent-hot);
+  border-color: var(--m-accent-hot);
+}
+
+.menu-button.menu-danger {
+  background: var(--m-danger);
+  border-color: var(--m-danger);
+  color: var(--m-on-accent);
+}
+
+.menu-button.menu-danger:hover,
+.menu-button.menu-danger:focus-visible {
+  background: #ee6a4c;
+  border-color: #ee6a4c;
+}
+
+.menu-button.menu-back {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 6px 14px 6px 8px;
+  font-size: var(--m-size-sm);
+}
+
+.menu-button.menu-reset {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 4px 12px;
+  font-size: var(--m-size-xs);
+  letter-spacing: 0.12em;
+}
+
+/* Sub-screen title bar. */
+.menu-screen-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--m-line-2);
+}
+
+.menu-screen-head .menu-screen-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 32px;
+}
+
+/* ------------------------------------------------------------------ *
+ *  Drives: the kilometre post, the facts beside it, the cards         *
+ * ------------------------------------------------------------------ */
+
+/* Borne kilométrique: white post, painted cap, the number in the road's own lettering. */
+.menu-milestone {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  width: 60px;
+  height: 70px;
+  padding-bottom: 7px;
+  border-radius: 30px 30px 4px 4px;
+  background:
+    linear-gradient(var(--m-accent), var(--m-accent)) top / 100% 22px no-repeat,
+    linear-gradient(180deg, #fbf5e8, #e3d9c4);
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.12), 0 2px 10px rgba(0, 0, 0, 0.35);
+  color: #1d1812;
+  line-height: 1;
+}
+
+.menu-milestone-value {
+  font-family: var(--menu-font-cond);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.menu-milestone-unit {
+  margin-top: 2px;
+  font-family: var(--menu-font-cond);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #6b5f4c;
+}
+
+.menu-facts {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.menu-facts-car {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.menu-facts-car-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--menu-font-cond);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--m-ink);
+}
+
+.menu-paint-dot {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(242, 232, 208, 0.25);
+}
+
+.menu-facts-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 7px;
+  font-size: var(--m-size-sm);
+  color: var(--m-ink-2);
+}
+
+.menu-facts-line .menu-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--m-ink-3);
+}
+
+.menu-facts-sep {
+  color: var(--m-ink-3);
+}
+
+/* The pause sheet's "where you are" card. */
+.menu-trip {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--m-line);
+  border-radius: var(--m-radius);
+  background: var(--m-stock-2);
+}
+
+.menu-drives {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.menu-drive {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--m-line);
+  border-radius: var(--m-radius);
+  background: var(--m-stock-2);
+  transition: border-color 120ms linear, background-color 120ms linear;
+}
+
+.menu-drive:hover,
+.menu-drive:focus-within {
+  border-color: var(--m-line-2);
+  background: var(--m-stock-3);
+}
+
+.menu-drive-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 8px 12px 14px;
+  border: none;
+  border-radius: var(--m-radius) 0 0 var(--m-radius);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-drive-open:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--m-accent);
+}
+
+.menu-drive-open:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.menu-drive-when {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  font-size: var(--m-size-sm);
+  color: var(--m-ink-2);
+}
+
+.menu-drive-day {
+  font-family: var(--menu-font-cond);
+  font-size: var(--m-size-md);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--m-ink);
+}
+
+.menu-drive-delete {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  border: none;
+  border-left: 1px solid var(--m-line);
+  border-radius: 0 var(--m-radius) var(--m-radius) 0;
+  background: transparent;
+  color: var(--m-ink-3);
+  cursor: pointer;
+  transition: color 120ms linear, background-color 120ms linear;
+}
+
+.menu-drive-delete:hover,
+.menu-drive-delete:focus-visible {
+  color: var(--m-danger);
+  background: rgba(224, 87, 58, 0.1);
+  outline: none;
+}
+
+.menu-drive-delete:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--m-danger);
+}
+
+/* The question sits over its own card, so there is no doubt which drive it means. */
+.menu-drive-confirm {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px 0 18px;
+  border-radius: inherit;
+  background: rgba(22, 18, 13, 0.96);
+  box-shadow: inset 0 0 0 1px var(--m-danger);
+}
+
+.menu-drive-confirm-text {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--m-size-md);
+  font-weight: 500;
+  color: var(--m-ink);
+}
+
+/* ------------------------------------------------------------------ *
+ *  Developer box (development builds only)                           *
+ * ------------------------------------------------------------------ */
+
+.menu-dev {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 18px;
+  border-top: 1px dashed var(--m-line-2);
+}
+
+.menu-dev-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.menu-dev-grid .menu-button {
+  justify-content: flex-start;
+  min-height: 34px;
+  font-size: var(--m-size-sm);
+  letter-spacing: 0.06em;
+}
+
+/* ------------------------------------------------------------------ *
+ *  Settings: section rail, pane, one hint line                       *
+ * ------------------------------------------------------------------ */
+
+.menu-settings {
+  display: grid;
+  grid-template-columns: minmax(170px, 230px) minmax(0, 1fr);
+  gap: clamp(20px, 3vw, 40px);
+  flex: 1;
+  min-height: 0;
+}
+
+.menu-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.menu-rail-btn {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 50px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: var(--m-radius);
+  background: transparent;
+  color: var(--m-ink-2);
+  font-family: var(--menu-font-cond);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms linear, color 120ms linear;
+}
+
+.menu-rail-btn .menu-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.menu-rail-btn:hover,
+.menu-rail-btn:focus-visible {
+  background: var(--m-stock-3);
+  color: var(--m-ink);
+  outline: none;
+}
+
+.menu-rail-btn:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--m-accent);
+}
+
+.menu-rail-btn.is-selected {
+  background: var(--m-ink);
+  color: var(--m-stock);
+}
+
+.menu-rail-label {
+  min-width: 0;
+}
+
+.menu-pane {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(20px, 3.4vh, 30px);
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 10px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--m-line-2) transparent;
+}
+
+.menu-field {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Label, and whatever belongs on its line: a value, a Reset, who picked the level. */
+.menu-field-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+}
+
+.menu-field-head .menu-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.menu-field-head > .menu-icon {
+  color: var(--m-ink-3);
+}
+
+/* The one thing on a row that is a measurement. */
+.menu-chip {
+  flex: 0 0 auto;
+  min-width: 56px;
+  text-align: right;
+  font-family: var(--menu-font-cond);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--m-accent);
+}
+
+/* A row of chips next to the label (who picked the detail level) reads as a note. */
+.menu-field-head .menu-chip:not(:last-child) {
+  font-size: var(--m-size-sm);
+  font-family: var(--menu-font);
+  font-weight: 500;
+  color: var(--m-ink-2);
+  min-width: 0;
+}
+
+/* Segmented control: one recessed track, the live position lifted out of it. */
+.menu-seg {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: calc(var(--m-radius) + 4px);
+  background: rgba(0, 0, 0, 0.28);
+  box-shadow: inset 0 0 0 1px var(--m-line);
+}
+
+.menu-seg-btn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 13px 8px 11px;
+  border: none;
+  border-radius: var(--m-radius);
+  background: transparent;
+  color: var(--m-ink-2);
+  font-family: var(--menu-font-cond);
+  font-size: var(--m-size-md);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background-color 120ms linear, color 120ms linear;
+}
+
+.menu-seg-btn .menu-icon {
+  width: 22px;
+  height: 22px;
+}
+
+.menu-seg-btn:hover,
+.menu-seg-btn:focus-visible {
+  background: var(--m-stock-3);
+  color: var(--m-ink);
+  outline: none;
+}
+
+.menu-seg-btn:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--m-accent);
+}
+
+.menu-seg-btn.is-selected {
+  background: var(--m-ink);
+  color: var(--m-stock);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.menu-seg-btn.is-selected:focus-visible {
+  box-shadow: 0 0 0 2px var(--m-accent);
+}
+
+.menu-seg-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Slider: a track that fills in the accent up to the thumb. `--fill` is set by menu.ts. */
+.menu-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 28px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+}
+
+.menu-slider::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background:
+    linear-gradient(var(--m-accent), var(--m-accent)) left / var(--fill, 0%) 100% no-repeat,
+    var(--m-stock-3);
+  box-shadow: inset 0 0 0 1px var(--m-line);
+}
+
+.menu-slider::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--m-stock-3);
+  box-shadow: inset 0 0 0 1px var(--m-line);
+}
+
+.menu-slider::-moz-range-progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--m-accent);
+}
+
+.menu-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 22px;
+  height: 22px;
+  margin-top: -8px;
+  border: 3px solid var(--m-stock);
+  border-radius: 50%;
+  background: var(--m-ink);
+  box-shadow: 0 0 0 1px var(--m-ink-2), 0 2px 6px rgba(0, 0, 0, 0.45);
+  transition: transform 120ms var(--m-ease);
+}
+
+.menu-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 3px solid var(--m-stock);
+  border-radius: 50%;
+  background: var(--m-ink);
+  box-shadow: 0 0 0 1px var(--m-ink-2), 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+
+.menu-slider:hover::-webkit-slider-thumb {
+  transform: scale(1.1);
+}
+
+.menu-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--m-accent), 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+
+.menu-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px var(--m-accent), 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+
+/* The one hint line: fixed height, so the layout never jumps as it changes. */
+.menu-hint {
+  flex: 0 0 auto;
+  min-height: 3.4em;
+  padding-top: 14px;
+  border-top: 1px solid var(--m-line-2);
+}
+
+/* Key bindings: two columns of rows, one keycap per key. */
+.menu-bindings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 24px;
+}
+
+.menu-binding {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: none;
+  border-bottom: 1px solid var(--m-line);
+  background: transparent;
+  color: var(--m-ink);
+  font: inherit;
+  font-size: var(--m-size-md);
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-binding:hover,
+.menu-binding:focus-visible {
+  background: var(--m-stock-3);
+  outline: none;
+}
+
+.menu-binding:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--m-accent);
+}
+
+.menu-binding.is-capturing {
+  background: rgba(236, 122, 61, 0.14);
+  box-shadow: inset 3px 0 0 var(--m-accent);
+}
+
+.menu-binding-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-binding-keys {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+
+.menu-keycap {
+  display: inline-block;
+  min-width: 30px;
+  padding: 3px 8px 2px;
+  border: 1px solid var(--m-line-2);
+  border-bottom-width: 3px;
+  border-radius: var(--m-radius-sm);
+  background: var(--m-stock-3);
+  color: var(--m-ink);
+  font-family: var(--menu-font-cond);
+  font-size: var(--m-size-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+.menu-keycap.is-waiting {
+  border-color: var(--m-accent);
+  background: transparent;
+  color: var(--m-accent);
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: var(--menu-font);
+  font-weight: 500;
+}
+
+/* ------------------------------------------------------------------ *
+ *  Dev pickers and readout                                           *
+ * ------------------------------------------------------------------ */
+
+.menu-body-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.menu-body-group {
+  padding: 18px 10px 6px;
+  font-family: var(--menu-font-cond);
+  font-size: var(--m-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--m-ink-3);
+}
+
+.menu-body {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: none;
+  border-bottom: 1px solid var(--m-line);
+  background: transparent;
+  color: var(--m-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-body:hover,
+.menu-body:focus-visible {
+  background: var(--m-stock-3);
+  outline: none;
+}
+
+.menu-body.is-selected {
+  background: var(--m-ink);
+  color: var(--m-stock);
+}
+
+.menu-body-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-body-class {
+  font-family: var(--menu-font-cond);
+  font-size: var(--m-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--m-ink-3);
+}
+
+.menu-body.is-selected .menu-body-class {
+  color: var(--m-stock-3);
+}
+
+.menu-paints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 10px;
+}
+
+.menu-paint {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--m-line-2);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.menu-paint:hover,
+.menu-paint:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--m-stock), 0 0 0 4px var(--m-accent);
+}
+
+/* Preformatted, because it is a table of figures copied by eye; wrapped, because it is
+   read on a phone in landscape where a scrolled-away line is a line never seen. */
+.menu-perf {
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--m-ink);
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--m-line);
+  border-radius: var(--m-radius);
+  padding: 12px 14px;
+}
+
+/* ------------------------------------------------------------------ *
+ *  Small screens                                                     *
+ * ------------------------------------------------------------------ */
+
+/* Narrow: the sheet takes most of the width and the name shrinks to fit beside it. */
+@media (max-width: 820px) {
+  .menu-title-screen {
+    --sheet-width: min(420px, 62vw);
+  }
+
+  .menu-wordmark-voyage,
+  .menu-wordmark-mirage {
+    font-size: clamp(52px, 9vw, 104px);
+  }
+}
+
+/* A phone on its side: a short screen, so everything tightens vertically. */
+@media (max-height: 520px) {
+  .menu {
+    --m-size-lg: 19px;
+    --m-size-xl: 30px;
+  }
+
+  .menu-sheet {
+    gap: 16px;
+    padding: 18px 20px;
+  }
+
+  .menu-action {
+    min-height: 46px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+
+  .menu-action.is-primary {
+    min-height: 52px;
+  }
+
+  .menu-trip {
+    padding: 8px 12px;
+  }
+
+  .menu-milestone {
+    width: 50px;
+    height: 58px;
+    padding-bottom: 5px;
+    background:
+      linear-gradient(var(--m-accent), var(--m-accent)) top / 100% 17px no-repeat,
+      linear-gradient(180deg, #fbf5e8, #e3d9c4);
+  }
+
+  .menu-milestone-value {
+    font-size: 18px;
+  }
+
+  .menu-screen-head {
+    padding-bottom: 10px;
+  }
+
+  .menu-screen-head .menu-screen-title {
+    font-size: 26px;
+  }
+
+  .menu-hero {
+    top: 16px;
+  }
+
+  .menu-wordmark-voyage,
+  .menu-wordmark-mirage {
+    font-size: clamp(40px, 17vh, 80px);
+  }
+
+  .menu-sheet.is-settings {
+    gap: 12px;
+  }
+
+  .menu-seg-btn {
+    padding: 8px 6px 7px;
+    gap: 5px;
+  }
+
+  .menu-hint {
+    min-height: 2.8em;
+    padding-top: 8px;
+    font-size: var(--m-size-sm);
+  }
+}
+
+/* Too narrow for a rail beside the pane: the rail becomes a row of tabs. */
+@media (max-width: 700px) {
+  .menu-settings {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .menu-rail {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .menu-rail-btn {
+    flex: 0 0 auto;
+    min-height: 40px;
+  }
+
+  .menu-bindings {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* A short, wide phone keeps the rail but only as icons. */
+@media (max-height: 520px) and (min-width: 701px) {
+  .menu-settings {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .menu-rail-btn {
+    min-height: 42px;
+    padding: 6px 12px;
+    font-size: var(--m-size-md);
+  }
+}

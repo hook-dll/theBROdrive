@@ -34,7 +34,7 @@ export async function launch({ W, H }) {
   });
 }
 
-/** Menu → New Drive → settled world → in the nearest car → tier. Returns the page. */
+/** Menu → New drive → settled world → in the nearest car → tier. Returns the page. */
 export async function bootIntoCar(browser, { URL, W, H, DPR = 1, SEED = 'flick', TIER }) {
   const page = await browser.newPage();
   await page.setViewport({ width: W, height: H, deviceScaleFactor: DPR });
@@ -43,16 +43,14 @@ export async function bootIntoCar(browser, { URL, W, H, DPR = 1, SEED = 'flick',
     const t = m.text();
     if (/error|shader/i.test(t)) console.log('console: ' + t.slice(0, 800));
   });
-  await page.goto(URL, { waitUntil: 'load', timeout: 60000 });
+  // The title screen has no seed field: the world is pinned by the URL instead.
+  const url = new globalThis.URL(URL);
+  url.searchParams.set('seed', SEED);
+  await page.goto(url.href, { waitUntil: 'load', timeout: 60000 });
 
-  const hasNewDrive = () => [...document.querySelectorAll('button')].some((b) => b.textContent === 'New Drive');
+  const hasNewDrive = () => [...document.querySelectorAll('button')].some((b) => b.textContent === 'New drive');
   await until(page, hasNewDrive, null, 30000, 'the menu');
-  const seedInput = await page.$('input[placeholder^="blank = random"]');
-  if (seedInput) {
-    await seedInput.click({ clickCount: 3 });
-    await seedInput.type(SEED);
-  }
-  await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent === 'New Drive')?.click());
+  await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent === 'New drive')?.click());
   await until(page, () => !!window.__bro, null, 60000, 'the game');
   // The boot cover measures the GPU and may still change the tier underneath; nothing
   // is set until it has gone (app/bootwarmup.ts hides it last).

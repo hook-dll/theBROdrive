@@ -97,7 +97,13 @@ import { Terrain } from './world/terrain';
 import { WorldWorkScheduler } from './world/workqueue';
 import { Hud } from './ui/hud';
 import { MainMenu, type PauseHooks } from './ui/menu';
-import { autosaveNow, IndexedDbSaves, installVehicleAutosave } from './save/save';
+import {
+  autosaveNow,
+  IndexedDbSaves,
+  installVehicleAutosave,
+  parseSeed,
+  summarizeDrive,
+} from './save/save';
 import {
   claimResumeSlot,
   clearResumeSlot,
@@ -213,12 +219,14 @@ async function boot(): Promise<void> {
   const resumed = resumedState !== null;
   // The title screen keeps the launch cover up until a drive is chosen; when a resume
   // lands instead there is nothing to show, so the cover simply stays until boot ends.
-  const chosen = resumedState !== null
-    ? { seed: resumedState.seed, state: resumedState }
-    : await menu.show(saves);
-
-  const loadedFromSave = chosen.state !== null;
-  const world = new GameWorld(chosen.state ?? newWorldState(chosen.seed));
+  //
+  // A new drive gets a random world. `?seed=` pins it — the look tools reproduce the same
+  // road run after run with it, against the dev server and the preview build alike — and
+  // it is in the URL rather than on the title screen because a player has no use for it.
+  const chosenState = resumedState ?? (await menu.show(saves));
+  const loadedFromSave = chosenState !== null;
+  const pinnedSeed = new URLSearchParams(location.search).get('seed');
+  const world = new GameWorld(chosenState ?? newWorldState(parseSeed(pinnedSeed ?? '')));
 
   // Machine preferences outrank whatever the save carried. Graphics quality and view
   // distance describe the GPU in front of the player, not the drive, so a save made on
@@ -990,7 +998,7 @@ async function boot(): Promise<void> {
   /**
    * Physics bodies and throttled vehicle counters are runtime-authoritative between
    * their normal state deltas. Flush them immediately before every manual save,
-   * export, or autosave; trunk cells already mutate `WorldState` synchronously.
+   * autosave, or pause summary; trunk cells already mutate `WorldState` synchronously.
    */
   const stateForSave = (): typeof world.state => {
     for (const vehicle of vehicles.values()) vehicle.pushState();
@@ -2378,7 +2386,6 @@ async function boot(): Promise<void> {
     applyTimePreset: (preset) => {
       world.apply({ t: 'time_of_day', timeOfDay: TIME_OF_DAY_PRESETS[preset] * DAY_LENGTH });
     },
-    exportState: stateForSave,
     // Dev only, all seven of them, and behind one fold: `devTools` is `null` unless
     // `import.meta.env.DEV`, which is a compile-time constant, so a production build
     // drops the module, these hooks, and the pause screen's buttons for them together.
@@ -2414,8 +2421,8 @@ async function boot(): Promise<void> {
     // so nothing would update the voices and they would hold their last value.
     audio.setPaused(true);
     void (async () => {
-      const s = world.state;
-      const action = await menu.showPause({ seed: s.seed, km: s.player.s / 1000 }, pauseHooks);
+      const state = stateForSave();
+      const action = await menu.showPause({ drive: summarizeDrive(state), seed: state.seed }, pauseHooks);
       menu.hidePause();
       // Do this in the menu gesture's microtask, before an IndexedDB save can
       // consume transient user activation required by requestPointerLock.

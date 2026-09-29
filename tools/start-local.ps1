@@ -26,7 +26,7 @@ $contentTypes = @{
 try {
   $listener.Start()
   Start-Process $prefix
-  Write-Host 'the BRO drive is running at http://127.0.0.1:4173/' -ForegroundColor Green
+  Write-Host 'Voyage Mirage is running at http://127.0.0.1:4173/' -ForegroundColor Green
   Write-Host 'Keep this window open while playing. Press Ctrl+C to stop the game.'
 
   $basePath = [System.IO.Path]::GetFullPath($distRoot)

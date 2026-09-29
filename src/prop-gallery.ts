@@ -123,7 +123,7 @@ export function bootPropGallery(): void {
   if (!(canvas instanceof HTMLCanvasElement)) throw new Error('index.html is missing #game');
   if (loading instanceof HTMLElement) loading.style.display = 'none';
   if (rotateHint instanceof HTMLElement) rotateHint.style.display = 'none';
-  document.title = 'Prop gallery · the BRO drive';
+  document.title = 'Prop gallery · Voyage Mirage';
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
   primeMaxAnisotropy(renderer);

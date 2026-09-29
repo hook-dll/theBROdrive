@@ -67,6 +67,26 @@ Two-wheel drive cars finally leave first gear on sand, a swapped engine brings i
 
 ### Changed
 
+- THE GAME IS CALLED VOYAGE MIRAGE. Everything a player reads says so: the title screen,
+  the page title, the rotate-your-device hint, the local launcher (`Start Voyage
+  Mirage.bat`, `release/voyage-mirage.zip`). Storage keys keep their old names
+  (`thebrodrive-saves`, `thebrodrive.resume`, the settings key), so every existing save
+  and preference survives the rename.
+- THE MENUS ARE REDRAWN AS ONE SYSTEM (`ui/menu.css`, split out of `hud.css`). One bundled
+  type family — Barlow, drawn from highway-sign lettering, the condensed cut for titles,
+  actions and figures and the regular cut for sentences — replaces the three system
+  faces the old menu mixed, on a five-size scale. Every screen is one sheet docked right
+  over the scene. The title puts the name top-left in the sky, where `Voyage` shimmers in
+  a heat haze with a faint inverted copy above it and `Mirage` stands perfectly still;
+  the front is at most three rows (Continue, New drive, Saved drives) and a first launch
+  sees only New drive. Up/Down walk the rows, Escape steps back.
+- SAVED DRIVES CAN BE TOLD APART. Each card leads with a kilometre post carrying the
+  distance, then the car in its own paint colour, the in-game day and hour with a sun or
+  moon glyph, the time played, and when it was saved (Today / Yesterday / 12 Sep). The
+  summary is read from the stored snapshot (`summarizeDrive`, `SaveBackend.list()` now
+  returns `SaveListing`), so saves written before this change show it too. Delete asks
+  once, inside the card. The pause sheet shows the same card for the drive in progress.
+
 - A HUNDRED ROADSIDE POLES. The pole line was three hand-made silhouettes, one per era,
   each with a lamp and one wire strung top to top. It is now a catalogue of one hundred
   plain line poles (`world/props/poledesigns.ts`) in fourteen families of real roadside
@@ -278,6 +298,12 @@ Two-wheel drive cars finally leave first gear on sand, a swapped engine brings i
   crunch of stones.
 
 ### Removed
+
+- THE SEED FIELD AND SAVE CODES FROM THE MENUS. A new drive's world is always random;
+  `?seed=<word or number>` in the URL pins it (the look tools use it). Paste-a-code on
+  the title screen, Export Save Code and the seed readout with Copy on the pause screen
+  are gone. The codec itself (`encodeSaveCode`/`decodeSaveCode`) stays: the save tools
+  round-trip states through it. The decorative "FORM 12-A" is gone with the old sheet.
 
 - THE STREET LAMPS ON THE POLES. The lamp heads, the lamp arms, their emissive material
   and the light markers they gave `LightBudget` are gone: the desert night is light

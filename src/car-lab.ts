@@ -223,7 +223,7 @@ export async function bootCarLab(): Promise<void> {
   if (!(canvas instanceof HTMLCanvasElement)) throw new Error('index.html is missing #game');
   if (loading instanceof HTMLElement) loading.style.display = 'none';
   if (rotateHint instanceof HTMLElement) rotateHint.style.display = 'none';
-  document.title = 'Car condition lab · the BRO drive';
+  document.title = 'Car condition lab · Voyage Mirage';
 
   const query = new URLSearchParams(window.location.search);
   const state: LabState = {

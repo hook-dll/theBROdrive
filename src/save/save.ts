@@ -1,6 +1,6 @@
 import { hash } from '../core/rng';
 import { parseCalendarEpoch } from '../game/calendar';
-import { newWorldState } from '../game/state';
+import { DAY_LENGTH, newWorldState } from '../game/state';
 import type {
   CarState,
   HeadlightMode,
@@ -24,7 +24,7 @@ import {
 } from '../vehicle/bonnet';
 import { carModel, DEFAULT_CAR_MODEL_ID, hasCarModel } from '../vehicle/carmodels';
 import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
-import { carPaintSwatch, type CarPaint } from '../vehicle/carpaint';
+import { carPaintSwatch, visiblePaintHex, type CarPaint } from '../vehicle/carpaint';
 
 /**
  * Save files, as both IndexedDB records and shareable text codes.
@@ -45,11 +45,64 @@ export interface SaveMeta {
   savedAt: number;
 }
 
+/**
+ * What a save row and the pause sheet show about a drive, beyond the stored metadata:
+ * the car, its colour and the in-game clock, which are what tell two drives apart.
+ *
+ * Read from the snapshot rather than stored beside it, so every save already written
+ * has one, and nothing about the save format changes to add a line to a menu.
+ */
+export interface DriveSummary {
+  readonly km: number;
+  /** The car being driven, else the one parked nearest the player; null with no car. */
+  readonly carLabel: string | null;
+  /** That car's visible colour, 0xRRGGBB. */
+  readonly paintHex: number | null;
+  /** Whole in-game days elapsed; day one is 0. */
+  readonly dayIndex: number;
+  /** How far through the in-game day, 0 at midnight and 0.5 at noon. */
+  readonly dayFraction: number;
+}
+
+export interface SaveListing {
+  readonly meta: SaveMeta;
+  /** Null when the snapshot is too broken to summarise; the row falls back to `meta`. */
+  readonly drive: DriveSummary | null;
+}
+
 export interface SaveBackend {
-  list(): Promise<SaveMeta[]>;
+  list(): Promise<SaveListing[]>;
   load(id: string): Promise<WorldState | null>;
   save(id: string, name: string, state: WorldState): Promise<void>;
   remove(id: string): Promise<void>;
+}
+
+/**
+ * The summary of a live or stored state. Defensive on every field: stored snapshots
+ * are not migrated before listing, and a save older than a field must still list.
+ */
+export function summarizeDrive(state: WorldState): DriveSummary {
+  const player = state.player;
+  const cars = Object.values(state.cars ?? {});
+  let car = player.drivingCarId ? state.cars[player.drivingCarId] : undefined;
+  if (car === undefined) {
+    let best = Infinity;
+    for (const candidate of cars) {
+      const d = (candidate.x - player.x) ** 2 + (candidate.z - player.z) ** 2;
+      if (d < best) {
+        best = d;
+        car = candidate;
+      }
+    }
+  }
+  const shown = car !== undefined && hasCarModel(car.modelId) ? car : null;
+  return {
+    km: numOr(player.s, 0) / 1000,
+    carLabel: shown ? carModel(shown.modelId).label : null,
+    paintHex: shown ? visiblePaintHex(migrateCarPaint(shown.paint), shown.modelId, shown.id) : null,
+    dayIndex: Math.max(0, Math.trunc(numOr(state.dayIndex, 0))),
+    dayFraction: (((numOr(state.timeOfDay, 0) / DAY_LENGTH) % 1) + 1) % 1,
+  };
 }
 
 /**
@@ -192,9 +245,9 @@ export class IndexedDbSaves implements SaveBackend {
     return promise;
   }
 
-  async list(): Promise<SaveMeta[]> {
+  async list(): Promise<SaveListing[]> {
     const db = await this.open();
-    return new Promise<SaveMeta[]>((resolve, reject) => {
+    return new Promise<SaveListing[]>((resolve, reject) => {
       let tx: IDBTransaction;
       try {
         tx = db.transaction(STORE, 'readonly');
@@ -203,17 +256,27 @@ export class IndexedDbSaves implements SaveBackend {
         return;
       }
       tx.onabort = () => reject(new Error('Save list read aborted'));
-      const metas: SaveMeta[] = [];
+      const listings: SaveListing[] = [];
       const request = tx.objectStore(STORE).openCursor();
       request.onsuccess = () => {
         const cursor = request.result;
         if (cursor) {
           const record = cursor.value as StoredRecord;
-          if (record && record.meta) metas.push(record.meta);
+          if (record && record.meta && record.state) {
+            // A snapshot too broken to summarise still lists, by its stored name and
+            // distance: the row is how the player finds out it no longer loads.
+            let drive: DriveSummary | null;
+            try {
+              drive = summarizeDrive(record.state);
+            } catch {
+              drive = null;
+            }
+            listings.push({ meta: record.meta, drive });
+          }
           cursor.continue();
         } else {
-          metas.sort((a, b) => b.savedAt - a.savedAt);
-          resolve(metas);
+          listings.sort((a, b) => b.meta.savedAt - a.meta.savedAt);
+          resolve(listings);
         }
       };
       request.onerror = () => reject(new Error(`Failed to list saves: ${request.error?.message ?? 'unknown error'}`));

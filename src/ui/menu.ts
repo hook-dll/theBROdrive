@@ -1,5 +1,4 @@
-import type { SaveBackend, SaveMeta } from '../save/save';
-import { parseSeed, decodeSaveCode, encodeSaveCode } from '../save/save';
+import type { DriveSummary, SaveBackend, SaveListing, SaveMeta } from '../save/save';
 import type { WorldState } from '../game/state';
 import { BINDABLE_ACTIONS, isSystemControlCode } from '../core/input';
 import {
@@ -39,18 +38,15 @@ import { CAMERA_FRAME_LIMIT, type FluidKind, type ShadeTint } from '../items/ite
  * Title screen and pause overlay. Plain DOM, no framework. Each call owns the
  * overlay it creates: `show` removes the title screen before resolving and
  * `showPause`/`hidePause` manage the pause overlay's lifecycle.
+ *
+ * Both are one SHEET docked to the right edge over the scene, built from the same few
+ * parts: a screen title, big action rows, drive cards led by a kilometre post, and the
+ * settings controls. menu.css holds the type scale and palette they all share.
  */
 
 function el(tag: string, cls?: string): HTMLElement {
   const node = document.createElement(tag);
   if (cls) node.className = cls;
-  return node;
-}
-
-function input(cls: string): HTMLInputElement {
-  const node = document.createElement('input');
-  node.className = cls;
-  node.type = 'text';
   return node;
 }
 
@@ -146,6 +142,8 @@ const ICONS: Record<string, readonly string[]> = {
   radio: ['M3 10h18v9H3z', 'M8 6.5l9-2.5', 'M7 14h4', 'M17 14h.01'],
   /** A bouncing wave, for the Yaris-mode toggle. */
   bounce: ['M3 18c2-8 4-8 6 0s4-8 6 0 4-8 6 0'],
+  back: ['M14.5 5.5 8 12l6.5 6.5'],
+  trash: ['M4.5 7h15', 'M9.5 7V4.5h5V7', 'M6.5 7l1 12.5h9l1-12.5', 'M10.5 10.5v6M13.5 10.5v6'],
 };
 
 /** One glyph, sized by CSS. Decorative: the control's own text is the label. */
@@ -167,6 +165,201 @@ function formatPlayed(seconds: number): string {
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+/** In-game clock, 24-hour, from a fraction of the day. */
+function formatClock(dayFraction: number): string {
+  const minutes = Math.floor(dayFraction * 24 * 60) % (24 * 60);
+  return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+}
+
+/** The sun's place in the sky as one of the time-of-day glyphs. */
+function clockIcon(dayFraction: number): string {
+  const hour = dayFraction * 24;
+  if (hour >= 5 && hour < 8.5) return 'morning';
+  if (hour >= 8.5 && hour < 17) return 'noon';
+  if (hour >= 17 && hour < 20.5) return 'evening';
+  return 'midnight';
+}
+
+/**
+ * Distance on a kilometre post: tenths while the number is short, whole kilometres once
+ * it has three digits, so the post never has to grow.
+ */
+function formatKm(km: number): string {
+  return km < 100 ? km.toFixed(1) : String(Math.floor(km));
+}
+
+const SAVED_DATE = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
+const SAVED_DATE_YEAR = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+const SAVED_TIME = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+/** When a save was written, in the words a person uses: Today, Yesterday, 12 Sep. */
+function formatSavedDay(savedAt: number, now = Date.now()): string {
+  const day = (t: number): number => {
+    const d = new Date(t);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  };
+  const days = Math.round((day(now) - day(savedAt)) / 86_400_000);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  return new Date(savedAt).getFullYear() === new Date(now).getFullYear()
+    ? SAVED_DATE.format(savedAt)
+    : SAVED_DATE_YEAR.format(savedAt);
+}
+
+function text(content: string, cls?: string): HTMLElement {
+  const node = el('span', cls);
+  node.textContent = content;
+  return node;
+}
+
+const HEAT_HAZE_ID = 'menu-heat-haze';
+
+/**
+ * The game's name, with the joke in it: the word that shimmers is not `Mirage` but
+ * `Voyage`. Mirage stands solid as a road sign; the journey is the thing that wavers
+ * in the heat, with a faint inverted copy hanging above it — a superior mirage, which
+ * is the kind that shows over the horizon rather than on the road.
+ *
+ * The shimmer is an SVG displacement over drifting noise, horizontal bands the way hot
+ * air bends light. It runs only while the title screen exists, and holds still for a
+ * player who asked the system for reduced motion.
+ */
+function wordmark(): HTMLElement {
+  const mark = el('h1', 'menu-wordmark');
+  mark.setAttribute('aria-label', 'Voyage Mirage');
+
+  const svgNode = (tag: string, attrs: Record<string, string>): SVGElement => {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const [name, value] of Object.entries(attrs)) node.setAttribute(name, value);
+    return node;
+  };
+  const svg = svgNode('svg', { class: 'menu-wordmark-defs', 'aria-hidden': 'true' });
+  const filter = svgNode('filter', { id: HEAT_HAZE_ID, x: '-4%', y: '-10%', width: '108%', height: '120%' });
+  // Wide, flat noise: bands of air, not grain. Softened, so an edge bends instead of
+  // tearing; and only its red channel is used, so the letters slide sideways and never
+  // up or down — which is how a shimmer over hot ground moves.
+  const noise = svgNode('feTurbulence', {
+    type: 'fractalNoise',
+    baseFrequency: '0.002 0.035',
+    numOctaves: '1',
+    seed: '7',
+  });
+  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    noise.appendChild(
+      svgNode('animate', {
+        attributeName: 'baseFrequency',
+        values: '0.002 0.035;0.003 0.045;0.002 0.035',
+        dur: '6s',
+        repeatCount: 'indefinite',
+      }),
+    );
+  }
+  filter.append(
+    noise,
+    svgNode('feGaussianBlur', { stdDeviation: '10 3' }),
+    svgNode('feColorMatrix', {
+      type: 'matrix',
+      values: '1 0 0 0 0  0 0 0 0 0.5  0 0 0 0 0.5  0 0 0 0 1',
+    }),
+    svgNode('feDisplacementMap', {
+      in: 'SourceGraphic',
+      scale: '12',
+      xChannelSelector: 'R',
+      yChannelSelector: 'G',
+    }),
+  );
+  svg.appendChild(filter);
+
+  const voyage = text('Voyage', 'menu-wordmark-voyage');
+  voyage.dataset.text = 'Voyage';
+  mark.append(svg, voyage, text('Mirage', 'menu-wordmark-mirage'));
+  return mark;
+}
+
+/**
+ * A roadside kilometre post, white with a painted cap, carrying the drive's distance.
+ *
+ * Distance is the one number every drive has and no two share, so it is the thing the
+ * eye lands on first in a list of saves; the post is how the desert road itself writes it.
+ */
+function milestone(km: number): HTMLElement {
+  const post = el('span', 'menu-milestone');
+  post.setAttribute('role', 'img');
+  post.setAttribute('aria-label', `${formatKm(km)} km`);
+  post.append(text(formatKm(km), 'menu-milestone-value'), text('km', 'menu-milestone-unit'));
+  return post;
+}
+
+/**
+ * The two lines that tell one drive from another: the car, in its own colour, and the
+ * in-game day and hour. `meta` adds the played time and names a car that no longer
+ * summarises; the pause sheet has no meta and shows the live drive.
+ */
+function driveFacts(drive: DriveSummary | null, meta: SaveMeta | null): HTMLElement {
+  const facts = el('span', 'menu-facts');
+  const car = el('span', 'menu-facts-car');
+  if (drive?.paintHex != null) {
+    const swatch = el('span', 'menu-paint-dot');
+    swatch.style.background = `#${drive.paintHex.toString(16).padStart(6, '0')}`;
+    car.appendChild(swatch);
+  }
+  car.appendChild(text(drive?.carLabel ?? meta?.name ?? 'On foot', 'menu-facts-car-name'));
+  facts.appendChild(car);
+
+  const line = el('span', 'menu-facts-line');
+  if (drive) {
+    line.append(
+      icon(clockIcon(drive.dayFraction)),
+      text(`Day ${drive.dayIndex + 1}, ${formatClock(drive.dayFraction)}`),
+    );
+  }
+  if (meta) {
+    if (drive) line.appendChild(text('·', 'menu-facts-sep'));
+    line.appendChild(text(`${formatPlayed(meta.playedSeconds)} played`));
+  }
+  facts.appendChild(line);
+  return facts;
+}
+
+/**
+ * One row of a menu's main list: big, left-aligned, the whole width of the sheet.
+ * `detail` is a second line under the label, for Continue to say what it continues.
+ */
+function actionButton(label: string, detail: string | null, primary: boolean): HTMLButtonElement {
+  const node = button(primary ? 'menu-action is-primary' : 'menu-action', '');
+  node.dataset.nav = '';
+  node.appendChild(text(label, 'menu-action-label'));
+  if (detail) node.appendChild(text(detail, 'menu-action-detail'));
+  return node;
+}
+
+/** A sub-screen's title bar: Back, then the name of where you are. */
+function screenHead(title: string, onBack: () => void): { head: HTMLElement; back: HTMLButtonElement } {
+  const head = el('div', 'menu-screen-head');
+  const back = button('menu-button menu-back', '');
+  back.append(icon('back'), text('Back'));
+  back.addEventListener('click', onBack);
+  const name = el('h1', 'menu-screen-title');
+  name.textContent = title;
+  head.append(back, name);
+  return { head, back };
+}
+
+/**
+ * Up and down walk the sheet's rows, the way a game menu is expected to: every row
+ * that takes part carries `data-nav`, in document order.
+ */
+function walkRows(container: HTMLElement, ev: KeyboardEvent): void {
+  const step = ev.key === 'ArrowDown' ? 1 : ev.key === 'ArrowUp' ? -1 : 0;
+  if (step === 0) return;
+  const rows = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-nav]:not(:disabled)'));
+  if (rows.length === 0) return;
+  ev.preventDefault();
+  const at = rows.indexOf(document.activeElement as HTMLButtonElement);
+  const next = at < 0 ? (step > 0 ? 0 : rows.length - 1) : (at + step + rows.length) % rows.length;
+  rows[next]!.focus();
 }
 
 type DriveLayout = 'FWD' | 'RWD' | 'AWD';
@@ -314,16 +507,6 @@ export interface PauseHooks {
    * 200-300 km, so driving to one is hours; dev only, absent in a production build.
    */
   jumpToLake?: (index: number) => void;
-  /**
-   * The LIVE world state, for "Export Save Code".
-   *
-   * This used to be rebuilt from the two numbers the overlay happens to display
-   * (seed and distance) via `newWorldState`, which meant the exported code was a
-   * fresh game at that seed: the car, its fitted parts and fuel, the time of day,
-   * every dropped part and looted POI were all silently dropped, even though the
-   * codec round-trips a whole state. The overlay is handed the real object now.
-   */
-  exportState: () => WorldState;
 }
 
 /** Turns a KeyboardEvent.code into something a human reads: KeyW -> W. */
@@ -345,141 +528,188 @@ export class MainMenu {
     private readonly loading: HTMLElement,
   ) {}
 
-  async show(backend: SaveBackend): Promise<{ seed: number; state: WorldState | null }> {
-    return new Promise((resolve) => {
-      const overlay = el('div', 'menu menu-title-screen');
-      const panel = el('div', 'menu-panel');
-      overlay.appendChild(panel);
+  /**
+   * The title screen. Resolves with the save to load, or null for a new drive.
+   *
+   * The front is at most three rows, and a first launch sees one: New drive. Continue
+   * is the latest save, and says which drive it is. Saved drives is the one place drives
+   * are told apart, so every card there leads with what differs between them: how far
+   * down the road, in which car, at what hour of which day, and when it was saved.
+   * Delete asks once, inside the card, because nothing brings a drive back.
+   *
+   * There is no seed field: a new drive's world is random, and a number the player
+   * cannot read anything from is not a choice. Tools pin it with `?seed=` (see main).
+   */
+  show(backend: SaveBackend): Promise<WorldState | null> {
+    const { promise, resolve } = Promise.withResolvers<WorldState | null>();
+    const overlay = el('div', 'menu menu-title-screen');
+    const hero = el('div', 'menu-hero');
+    hero.appendChild(wordmark());
+    const sheet = el('div', 'menu-sheet');
+    overlay.append(hero, sheet);
 
-      const title = el('h1', 'menu-title');
-      title.textContent = 'the BRO drive';
-      panel.appendChild(title);
+    let listings: SaveListing[] = [];
+    let listFailed = false;
+    let view: 'front' | 'saves' = 'front';
+    let errorLine: HTMLElement | null = null;
+    let settled = false;
 
-      const seedField = el('div', 'menu-field');
-      const seedLabel = el('label', 'menu-label');
-      seedLabel.textContent = 'Seed';
-      const seedInput = input('menu-input');
-      seedInput.placeholder = 'blank = random, or any word';
-      seedField.append(seedLabel, seedInput);
-      panel.appendChild(seedField);
+    /** Back from the list lands on the row that opened it, not on Continue. */
+    const backToFront = (): void => {
+      view = 'front';
+      render();
+      sheet.querySelector<HTMLButtonElement>('.menu-actions > :last-child')?.focus();
+    };
 
-      const newButton = button('menu-button menu-primary', 'New Drive');
-      panel.appendChild(newButton);
+    const showError = (message: string): void => {
+      if (errorLine) errorLine.textContent = message;
+    };
 
-      const savesSection = el('div', 'menu-saves');
-      const savesHeading = el('h2', 'menu-heading');
-      savesHeading.textContent = 'Saves';
-      const savesList = el('div', 'menu-saves-list');
-      const savesEmpty = el('div', 'menu-save-empty');
-      savesEmpty.style.display = 'none';
-      savesSection.append(savesHeading, savesList, savesEmpty);
-      panel.appendChild(savesSection);
+    const onKey = (ev: KeyboardEvent): void => {
+      if (ev.code === 'Escape' && view === 'saves') {
+        ev.preventDefault();
+        backToFront();
+        return;
+      }
+      walkRows(sheet, ev);
+    };
 
-      const codeSection = el('div', 'menu-code');
-      const codeLabel = el('label', 'menu-label');
-      codeLabel.textContent = 'Save Code';
-      const codeRow = el('div', 'menu-code-row');
-      const codeInput = input('menu-input');
-      codeInput.placeholder = 'paste a save code';
-      const codeButton = button('menu-button', 'Load');
-      codeRow.append(codeInput, codeButton);
-      const codeError = el('div', 'menu-error');
-      codeSection.append(codeLabel, codeRow, codeError);
-      panel.appendChild(codeSection);
+    const finish = (state: WorldState | null): void => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener('keydown', onKey);
+      this.loading.classList.remove('is-hidden');
+      overlay.remove();
+      resolve(state);
+    };
 
+    const load = (listing: SaveListing, control: HTMLButtonElement): void => {
+      control.disabled = true;
+      void backend
+        .load(listing.meta.id)
+        .catch(() => null)
+        .then((state) => {
+          if (state) {
+            finish(state);
+            return;
+          }
+          control.disabled = false;
+          showError('That drive could not be loaded.');
+        });
+    };
+
+    const refresh = async (): Promise<void> => {
+      try {
+        listings = await backend.list();
+        listFailed = false;
+      } catch {
+        listings = [];
+        listFailed = true;
+      }
+      if (listings.length === 0) view = 'front';
+      render();
+    };
+
+    const driveCard = (listing: SaveListing): HTMLElement => {
+      const card = el('div', 'menu-drive');
+      const open = button('menu-drive-open', '');
+      open.dataset.nav = '';
+      const when = el('span', 'menu-drive-when');
+      when.append(
+        text(formatSavedDay(listing.meta.savedAt), 'menu-drive-day'),
+        text(SAVED_TIME.format(listing.meta.savedAt), 'menu-drive-time'),
+      );
+      open.append(
+        milestone(listing.drive?.km ?? listing.meta.km),
+        driveFacts(listing.drive, listing.meta),
+        when,
+      );
+      open.addEventListener('click', () => load(listing, open));
+
+      const remove = button('menu-drive-delete', '');
+      remove.appendChild(icon('trash'));
+      remove.setAttribute('aria-label', 'Delete this drive');
+      remove.title = 'Delete';
+      remove.addEventListener('click', () => {
+        const ask = el('div', 'menu-drive-confirm');
+        const keep = button('menu-button', 'Keep');
+        const erase = button('menu-button menu-danger', 'Delete');
+        ask.append(text('Delete this drive? It cannot be brought back.', 'menu-drive-confirm-text'), keep, erase);
+        card.classList.add('is-confirming');
+        card.appendChild(ask);
+        keep.focus();
+        keep.addEventListener('click', () => {
+          ask.remove();
+          card.classList.remove('is-confirming');
+          remove.focus();
+        });
+        erase.addEventListener('click', () => {
+          erase.disabled = true;
+          void backend.remove(listing.meta.id).then(refresh, () => {
+            erase.disabled = false;
+            showError('That drive could not be deleted.');
+          });
+        });
+      });
+
+      card.append(open, remove);
+      return card;
+    };
+
+    const renderFront = (): void => {
+      const nav = el('nav', 'menu-actions');
+      const latest = listings[0];
+      if (latest) {
+        const car = latest.drive?.carLabel ?? latest.meta.name;
+        const km = formatKm(latest.drive?.km ?? latest.meta.km);
+        const saved = formatSavedDay(latest.meta.savedAt).toLowerCase();
+        const resume = actionButton('Continue', `${car} · ${km} km · saved ${saved}`, true);
+        resume.addEventListener('click', () => load(latest, resume));
+        nav.appendChild(resume);
+      }
+      const fresh = actionButton('New drive', null, latest === undefined);
+      fresh.addEventListener('click', () => finish(null));
+      nav.appendChild(fresh);
+      if (latest) {
+        const count = listings.length === 1 ? '1 drive' : `${listings.length} drives`;
+        const all = actionButton('Saved drives', count, false);
+        all.addEventListener('click', () => {
+          view = 'saves';
+          render();
+        });
+        nav.appendChild(all);
+      }
+      sheet.appendChild(nav);
+    };
+
+    const renderSaves = (): void => {
+      const { head } = screenHead('Saved drives', backToFront);
+      const list = el('div', 'menu-drives');
+      for (const listing of listings) list.appendChild(driveCard(listing));
+      sheet.append(head, list);
+    };
+
+    const render = (): void => {
+      sheet.textContent = '';
+      sheet.classList.toggle('is-list', view === 'saves');
+      if (view === 'front') renderFront();
+      else renderSaves();
+      errorLine = el('div', 'menu-error');
+      errorLine.setAttribute('role', 'alert');
+      if (listFailed) errorLine.textContent = 'Saved drives are unavailable right now.';
+      sheet.appendChild(errorLine);
+      sheet.querySelector<HTMLButtonElement>('[data-nav]')?.focus();
+    };
+
+    // The launch cover stays up until the list has answered, so the first frame of the
+    // title is the real one: Continue does not appear a moment after New drive did.
+    void refresh().then(() => {
       this.root.appendChild(overlay);
       this.loading.classList.add('is-hidden');
-
-      let settled = false;
-      const finish = (result: { seed: number; state: WorldState | null }): void => {
-        if (settled) return;
-        settled = true;
-        this.loading.classList.remove('is-hidden');
-        overlay.remove();
-        resolve(result);
-      };
-      const showError = (msg: string): void => {
-        codeError.textContent = msg;
-      };
-
-      const renderSaves = async (): Promise<void> => {
-        let saves: SaveMeta[];
-        try {
-          saves = await backend.list();
-        } catch {
-          savesList.textContent = '';
-          savesEmpty.style.display = '';
-          savesEmpty.textContent = 'Saves are unavailable right now.';
-          return;
-        }
-        savesList.textContent = '';
-        savesEmpty.textContent = 'No saves yet.';
-        savesEmpty.style.display = saves.length === 0 ? '' : 'none';
-        for (const meta of saves) {
-          const row = el('div', 'menu-save');
-          const name = el('span', 'menu-save-name');
-          name.textContent = meta.name || 'unnamed drive';
-          const info = el('span', 'menu-save-meta');
-          info.textContent =
-            `${meta.km.toFixed(1)} km · ${formatPlayed(meta.playedSeconds)} · seed ${meta.seed}`;
-          const loadBtn = button('menu-button menu-save-load', 'Load');
-          const delBtn = button('menu-button menu-save-delete', 'Delete');
-
-          loadBtn.addEventListener('click', () => {
-            loadBtn.disabled = true;
-            void backend.load(meta.id).then((state) => {
-              if (state) {
-                finish({ seed: state.seed, state });
-              } else {
-                loadBtn.disabled = false;
-                showError('That save could not be loaded.');
-              }
-            });
-          });
-          delBtn.addEventListener('click', () => {
-            void backend.remove(meta.id).then(() => void renderSaves());
-          });
-
-          row.append(name, info, loadBtn, delBtn);
-          savesList.appendChild(row);
-        }
-      };
-      void renderSaves();
-
-      const startNew = (): void => {
-        finish({ seed: parseSeed(seedInput.value), state: null });
-      };
-      newButton.addEventListener('click', startNew);
-      seedInput.addEventListener('keydown', (ev) => {
-        if (ev.key === 'Enter') {
-          ev.preventDefault();
-          startNew();
-        }
-      });
-
-      const loadCode = (): void => {
-        const code = codeInput.value.trim();
-        if (!code) {
-          showError('Paste a save code first.');
-          return;
-        }
-        try {
-          const state = decodeSaveCode(code);
-          finish({ seed: state.seed, state });
-        } catch {
-          showError('That is not a valid save code.');
-        }
-      };
-      codeButton.addEventListener('click', loadCode);
-      codeInput.addEventListener('keydown', (ev) => {
-        if (ev.key === 'Enter') {
-          ev.preventDefault();
-          loadCode();
-        }
-      });
-
-      seedInput.focus();
+      sheet.querySelector<HTMLButtonElement>('[data-nav]')?.focus();
+      window.addEventListener('keydown', onKey);
     });
+    return promise;
   }
 
   /**
@@ -489,11 +719,11 @@ export class MainMenu {
    * removePause (which drops the overlay) releases everything except that one
    * window listener, which pauseCleanup removes.
    */
-  showPause(info: { seed: number; km: number }, hooks: PauseHooks): Promise<PauseAction> {
+  showPause(info: { drive: DriveSummary; seed: number }, hooks: PauseHooks): Promise<PauseAction> {
     this.removePause();
     return new Promise((resolve) => {
       const overlay = el('div', 'menu menu-pause');
-      const panel = el('div', 'menu-panel');
+      const panel = el('div', 'menu-sheet');
       overlay.appendChild(panel);
       this.root.appendChild(overlay);
       this.pauseOverlay = overlay;
@@ -639,9 +869,10 @@ export class MainMenu {
           note = null;
           bindingsList = null;
         }
-        panel.classList.toggle('menu-panel-wide', next !== 'main');
-        // Settings is the one screen that is two columns wide.
-        panel.classList.toggle('menu-panel-settings', next === 'settings');
+        // Settings is the one screen that needs nearly the whole width; the dev pickers
+        // are lists and want more than the main column.
+        panel.classList.toggle('is-wide', next !== 'main' && next !== 'settings');
+        panel.classList.toggle('is-settings', next === 'settings');
         if (next === 'main') renderMain();
         else if (next === 'settings') renderSettings();
         else if (next === 'item') renderItem?.();
@@ -684,132 +915,108 @@ export class MainMenu {
           ev.preventDefault();
           if (screen === 'main') finish('resume');
           else showScreen('main');
+          return;
         }
+        if (screen === 'main') walkRows(panel, ev);
       };
       window.addEventListener('keydown', onKey);
       this.pauseCleanup = () => window.removeEventListener('keydown', onKey);
 
+      /**
+       * The pause sheet: where you are, and the four things a pause is for.
+       *
+       * The trip card is the same card the title screen lists saves with, so the drive
+       * the player saves here is recognisable there. The seed is not shown: nothing in
+       * the game takes one any more, and a number that cannot be used is noise.
+       */
       const renderMain = (): void => {
         panel.textContent = '';
 
-        const title = el('h1', 'menu-title');
+        const title = el('h1', 'menu-screen-title');
         title.textContent = 'Paused';
-        panel.appendChild(title);
+        const trip = el('div', 'menu-trip');
+        trip.append(milestone(info.drive.km), driveFacts(info.drive, null));
+        panel.append(title, trip);
 
-        const seedBox = el('div', 'menu-seed-display');
-        const seedLabel = el('span', 'menu-seed-label');
-        seedLabel.textContent = 'Seed';
-        const seedValue = el('span', 'menu-seed-value');
-        seedValue.textContent = String(info.seed);
-        const seedCopy = button('menu-button', 'Copy');
-        seedBox.append(seedLabel, seedValue, seedCopy);
-        panel.appendChild(seedBox);
+        const nav = el('nav', 'menu-actions');
+        const resumeBtn = actionButton('Resume', null, true);
+        const saveBtn = actionButton('Save drive', null, false);
+        const settingsBtn = actionButton('Settings', null, false);
+        const quitBtn = actionButton('Quit to title', null, false);
+        nav.append(resumeBtn, saveBtn, settingsBtn, quitBtn);
+        panel.appendChild(nav);
 
-        const kmText = el('div', 'menu-pause-km');
-        kmText.textContent = `Travelled ${info.km.toFixed(1)} km`;
-        panel.appendChild(kmText);
+        resumeBtn.addEventListener('click', () => finish('resume'));
+        saveBtn.addEventListener('click', () => finish('save'));
+        settingsBtn.addEventListener('click', () => showScreen('settings'));
+        quitBtn.addEventListener('click', () => finish('quit'));
 
-        const resumeBtn = button('menu-button menu-primary', 'Resume');
-        const settingsBtn = button('menu-button', 'Settings');
-        const saveBtn = button('menu-button', 'Save');
-        const exportBtn = button('menu-button', 'Export Save Code');
-        const quitBtn = button('menu-button', 'Quit');
-        panel.append(resumeBtn, settingsBtn);
-        // Dev only, and labelled so a screenshot of it is never mistaken for the
-        // shipping menu. `import.meta.env.DEV` is tested first so the branch folds
-        // to a constant false in a production build and the label goes with it.
+        // Dev only, in a box of its own under a label, so a screenshot of it is never
+        // mistaken for the shipping menu. `import.meta.env.DEV` is tested first in
+        // every branch so each folds to a constant false in a production build, and the
+        // box, its label and every button go with it.
+        const devTools: HTMLButtonElement[] = [];
+        const devButton = (label: string, onClick: () => void): void => {
+          const btn = button('menu-button', label);
+          btn.addEventListener('click', onClick);
+          devTools.push(btn);
+        };
         if (import.meta.env.DEV && hooks.spawnVehicle) {
-          const spawnBtn = button('menu-button', 'Spawn Vehicle (dev)');
-          spawnBtn.addEventListener('click', () => showScreen('spawn'));
-          panel.appendChild(spawnBtn);
+          devButton('Spawn vehicle', () => showScreen('spawn'));
         }
-        // Same dev-only fold as the car spawn: there is exactly one trailer, so no
-        // picker screen — the button is the whole surface, and it only exists when
-        // the hook does.
+        // There is exactly one trailer, so no picker screen — the button is the whole
+        // surface, and it only exists when the hook does.
         if (import.meta.env.DEV && hooks.spawnTrailer) {
-          const trailerBtn = button('menu-button', 'Spawn Trailer (dev)');
-          trailerBtn.addEventListener('click', () => {
+          devButton('Spawn trailer', () => {
             hooks.spawnTrailer?.();
             finish('resume');
           });
-          panel.appendChild(trailerBtn);
         }
         // World items share one picker: fluid cans plus the five-charge gum pack.
         if (import.meta.env.DEV && hooks.spawnItem) {
-          const itemBtn = button('menu-button', 'Spawn Item (dev)');
-          itemBtn.addEventListener('click', () => showScreen('item'));
-          panel.appendChild(itemBtn);
+          devButton('Spawn item', () => showScreen('item'));
         }
         // Every part variant the registry defines, grouped by kind: the picker is
         // how a bonnet slot, an anchor mount or a part's mesh gets exercised without
         // driving to a wreck first.
         if (import.meta.env.DEV && hooks.spawnPart) {
-          const partBtn = button('menu-button', 'Spawn Part (dev)');
-          partBtn.addEventListener('click', () => showScreen('part'));
-          panel.appendChild(partBtn);
+          devButton('Spawn part', () => showScreen('part'));
         }
         // No picker for this one either: the target is whatever the player is in or
         // standing next to, decided by main, so the button is the whole surface.
         if (import.meta.env.DEV && hooks.flipVehicle) {
-          const flipBtn = button('menu-button', 'Flip Car (dev)');
-          flipBtn.addEventListener('click', () => {
+          devButton('Flip car', () => {
             hooks.flipVehicle?.();
             finish('resume');
           });
-          panel.appendChild(flipBtn);
         }
         if (import.meta.env.DEV && hooks.seatInNearestCar) {
-          const seatBtn = button('menu-button', 'Drive Nearest Car (dev)');
-          seatBtn.addEventListener('click', () => {
+          devButton('Drive nearest car', () => {
             hooks.seatInNearestCar?.();
             finish('resume');
           });
-          panel.appendChild(seatBtn);
         }
-        // Frame cost, folded like the rest: development only, and only where its hook
-        // exists. It opens a readout rather than resuming, because a measurement is
+        // Frame cost opens a readout rather than resuming, because a measurement is
         // something you read, not something you do.
         if (import.meta.env.DEV && hooks.frameReport) {
-          const perfBtn = button('menu-button', 'Frame Report (dev)');
-          perfBtn.addEventListener('click', () => showScreen('perf'));
-          panel.appendChild(perfBtn);
+          devButton('Frame report', () => showScreen('perf'));
         }
         if (import.meta.env.DEV && hooks.jumpToLake) {
           // Cycles through the first sites on each press rather than opening a screen
           // for one number: every seed has 160 of them and they are interchangeable.
           let nextLake = 0;
-          const lakeBtn = button('menu-button', 'Jump to Lake (dev)');
-          lakeBtn.addEventListener('click', () => {
+          devButton('Jump to lake', () => {
             hooks.jumpToLake?.(nextLake++);
             finish('resume');
           });
-          panel.appendChild(lakeBtn);
         }
-        panel.append(saveBtn, exportBtn, quitBtn);
-
-        resumeBtn.addEventListener('click', () => finish('resume'));
-        settingsBtn.addEventListener('click', () => showScreen('settings'));
-        saveBtn.addEventListener('click', () => finish('save'));
-        quitBtn.addEventListener('click', () => finish('quit'));
-
-        seedCopy.addEventListener('click', () => {
-          void copyText(String(info.seed)).then((ok) => {
-            seedCopy.textContent = ok ? 'Copied' : 'Copy failed';
-            window.setTimeout(() => {
-              seedCopy.textContent = 'Copy';
-            }, 1500);
-          });
-        });
-
-        exportBtn.addEventListener('click', () => {
-          const code = encodeSaveCode(hooks.exportState());
-          void copyText(code).then((ok) => {
-            exportBtn.textContent = ok ? 'Copied' : 'Copy failed';
-            window.setTimeout(() => {
-              exportBtn.textContent = 'Export Save Code';
-            }, 1500);
-          });
-        });
+        if (import.meta.env.DEV && devTools.length > 0) {
+          const dev = el('section', 'menu-dev');
+          const grid = el('div', 'menu-dev-grid');
+          grid.append(...devTools);
+          dev.append(text(`Developer build · seed ${info.seed}`, 'menu-eyebrow'), grid);
+          panel.appendChild(dev);
+        }
 
         resumeBtn.focus();
       };
@@ -838,12 +1045,7 @@ export class MainMenu {
       const renderSettings = (): void => {
         panel.textContent = '';
 
-        const head = el('div', 'menu-settings-head');
-        const backBtn = button('menu-button menu-back', 'Back');
-        backBtn.addEventListener('click', () => showScreen('main'));
-        const title = el('h1', 'menu-title');
-        title.textContent = 'Settings';
-        head.append(backBtn, title);
+        const { head, back: backBtn } = screenHead('Settings', () => showScreen('main'));
         panel.appendChild(head);
 
         const layout = el('div', 'menu-settings');
@@ -977,6 +1179,8 @@ export class MainMenu {
           const paint = (): void => {
             slider.value = String(get());
             chip.textContent = format(get());
+            // The filled part of the track, which a range input cannot style natively.
+            slider.style.setProperty('--fill', `${((get() - min) / (max - min)) * 100}%`);
           };
           slider.addEventListener('input', () => {
             set(slider.valueAsNumber);
@@ -1546,13 +1750,7 @@ export class MainMenu {
        */
       const renderPerf = (): void => {
         panel.textContent = '';
-        const head = el('div', 'menu-settings-head');
-        const backBtn = button('menu-button menu-back', 'Back');
-        backBtn.addEventListener('click', () => showScreen('main'));
-        const title = el('h1', 'menu-title');
-        title.textContent = 'Frame Report';
-        head.append(backBtn, title);
-        panel.appendChild(head);
+        panel.appendChild(screenHead('Frame report', () => showScreen('main')).head);
 
         const report = hooks.frameReport?.() ?? 'no report available';
 
@@ -1589,13 +1787,8 @@ export class MainMenu {
       const renderSpawnScreen = (): void => {
         panel.textContent = '';
 
-        const backBtn = button('menu-button', 'Back');
-        backBtn.addEventListener('click', () => showScreen('main'));
-        panel.appendChild(backBtn);
-
-        const title = el('h1', 'menu-title');
-        title.textContent = 'Spawn Vehicle';
-        panel.appendChild(title);
+        const { head, back: backBtn } = screenHead('Spawn vehicle', () => showScreen('main'));
+        panel.appendChild(head);
 
         const modelField = el('div', 'menu-field');
         const modelLabel = el('label', 'menu-label');
@@ -1666,13 +1859,8 @@ export class MainMenu {
       const renderItemScreen = (): void => {
         panel.textContent = '';
 
-        const backBtn = button('menu-button', 'Back');
-        backBtn.addEventListener('click', () => showScreen('main'));
-        panel.appendChild(backBtn);
-
-        const title = el('h1', 'menu-title');
-        title.textContent = 'Spawn Item';
-        panel.appendChild(title);
+        const { head, back: backBtn } = screenHead('Spawn item', () => showScreen('main'));
+        panel.appendChild(head);
 
         const list = el('div', 'menu-body-list');
         for (const spec of DEV_FLUIDS) {
@@ -1768,13 +1956,8 @@ export class MainMenu {
       const renderPartScreen = (): void => {
         panel.textContent = '';
 
-        const backBtn = button('menu-button', 'Back');
-        backBtn.addEventListener('click', () => showScreen('main'));
-        panel.appendChild(backBtn);
-
-        const title = el('h1', 'menu-title');
-        title.textContent = 'Spawn Part';
-        panel.appendChild(title);
+        const { head, back: backBtn } = screenHead('Spawn part', () => showScreen('main'));
+        panel.appendChild(head);
 
         const list = el('div', 'menu-body-list');
         // Grouped by kind, in registry order: the engines stay together and the

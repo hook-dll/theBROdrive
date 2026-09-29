@@ -205,7 +205,7 @@ export function bootPoiGallery(): void {
   if (!(canvas instanceof HTMLCanvasElement)) throw new Error('index.html is missing #game');
   if (loading instanceof HTMLElement) loading.style.display = 'none';
   if (rotateHint instanceof HTMLElement) rotateHint.style.display = 'none';
-  document.title = 'POI gallery · the BRO drive';
+  document.title = 'POI gallery · Voyage Mirage';
 
   // Same framebuffer policy as the game's 'acceptable' tier: no multisampled
   // backbuffer (an N100 iGPU pays MSAA bandwidth on every one of these pixels) and

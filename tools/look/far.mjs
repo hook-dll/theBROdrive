@@ -13,7 +13,7 @@
  *
  * Environment:
  *   URL    dev server (default http://localhost:5199/)
- *   SEED   world seed typed into New Drive (default 'flick')
+ *   SEED   world seed, passed to the game as `?seed=` (default 'flick')
  *   TIER   acceptable | standard | blessing; the menu's Low/Medium/High (default: as boot picks)
  *   PITCH  camera pitch, radians, positive looks up (default 0.12: horizon in frame)
  *   W H DPR  viewport (default 1280x600 at 1)
