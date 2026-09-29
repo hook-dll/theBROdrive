@@ -347,6 +347,7 @@ async function boot(): Promise<void> {
   input.setKeyBindings(world.state.settings.keyBindings);
   input.setMouseSensitivity(world.state.settings.mouseSensitivity);
   const hud = new Hud(uiRoot);
+  hud.setDashboardScale(world.state.settings.dashboardScale);
   const vitals = new PlayerVitals(world.state.player.health, (health) => {
     world.apply({ t: 'player_health', health });
   });
@@ -2374,6 +2375,7 @@ async function boot(): Promise<void> {
       renderer.setMsaa(world.state.settings.msaa);
       renderer.setRenderScale(world.state.settings.renderScale);
       camera.setFieldOfView(world.state.settings.fieldOfView);
+      hud.setDashboardScale(world.state.settings.dashboardScale);
       // The tier owns six things and five of them apply in place: the pixel ceiling,
       // the shadow pass, the sky's star depth, the horizon (far plane, fog and vista
       // disc), and the presentation cap. The sixth — the visible-light count — cannot,

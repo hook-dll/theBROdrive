@@ -272,8 +272,9 @@ body.is-cinematic #ui {
   align-items: center;
   gap: 6px;
   pointer-events: none;
-  /* The old desktop cluster rendered at 75%; 93.75% is exactly 25% larger. */
-  transform: translateX(-50%) scale(0.9375);
+  /* The old desktop cluster rendered at 75%; 93.75% is exactly 25% larger. The
+     player's Dashboard Size (--hud-dash-scale) multiplies on top. */
+  transform: translateX(-50%) scale(calc(0.9375 * var(--hud-dash-scale, 1)));
   transform-origin: bottom center;
 }
 
@@ -688,7 +689,7 @@ body.is-cinematic #ui {
 @media (pointer: coarse) {
   /* Mobile retains its old compact footprint; the requested increase is desktop-only. */
   .hud-driving {
-    transform: translateX(-50%) scale(0.375);
+    transform: translateX(-50%) scale(calc(0.375 * var(--hud-dash-scale, 1)));
   }
 
 }

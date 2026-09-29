@@ -495,8 +495,18 @@ varying vec3 vDir;
  * fake that, uCloudAmount fades the deck out as night falls — which is close to
  * honest anyway, since unlit cirrus over a desert is not visible.
  */
+/*
+ * Arithmetic hash, not fract(sin(x) * 43758.5). The sine hash leans on the GPU's sin
+ * being accurate for arguments in the tens of thousands, and on phones it is not:
+ * Mali and Adreno reduce the range in low precision, the hash stops being random and
+ * turns into bands along the lattice, and the deck came apart into squares. This one
+ * (Dave Hoskins, "Hash without Sine") is multiply and fract only, and gives the same
+ * numbers on every GPU.
+ */
 float cloudHash(vec2 p) {
-  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
 }
 
 float cloudNoise(vec2 p) {

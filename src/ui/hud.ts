@@ -729,6 +729,11 @@ export class Hud {
     this.updateSteerStrip(readout.steering);
   }
 
+  /** Player's dashboard size (Settings.dashboardScale), on top of the presentation's own. */
+  setDashboardScale(scale: number): void {
+    this.drivingCluster.style.setProperty('--hud-dash-scale', String(scale));
+  }
+
   /** Radio remains a message source for the LCD; it has no separate lamp cell. */
   setRadio(text: string | null): void {
     if (text === this.radioText) {

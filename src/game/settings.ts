@@ -432,6 +432,12 @@ export interface Settings {
    * whether this is on or off. Off by default; nobody should be surprised by it.
    */
   bouncyCars: boolean;
+  /**
+   * Size of the driving dashboard against its authored size, 1 = as designed. Applied
+   * on top of the presentation's own scale (desktop and phone differ), so the same
+   * number means "a bit bigger" on both.
+   */
+  dashboardScale: number;
 }
 
 export const DAY_CYCLE_MIN_MINUTES = GAMEPLAY_CONFIG.dayCycleMinutesMin;
@@ -467,6 +473,10 @@ export const MOUSE_SENSITIVITY_MAX = GAMEPLAY_CONFIG.mouseSensitivityMax;
 export const DEFAULT_FIELD_OF_VIEW = GAMEPLAY_CONFIG.fieldOfViewDegrees;
 export const FIELD_OF_VIEW_MIN = GAMEPLAY_CONFIG.fieldOfViewMinDegrees;
 export const FIELD_OF_VIEW_MAX = GAMEPLAY_CONFIG.fieldOfViewMaxDegrees;
+/** Dashboard size range: a little smaller, somewhat bigger, never covering the road. */
+export const DASHBOARD_SCALE_MIN = 0.75;
+export const DASHBOARD_SCALE_MAX = 1.4;
+export const DASHBOARD_SCALE_STEP = 0.05;
 
 /** Default day length in real minutes. */
 const DEFAULT_DAY_CYCLE_MINUTES = GAMEPLAY_CONFIG.dayCycleMinutes;
@@ -507,6 +517,7 @@ export const DEFAULT_SETTINGS: Settings = {
   preciseSteering: false,
   // Off by default; a joke should be opted into, not discovered mid-drive.
   bouncyCars: false,
+  dashboardScale: 1,
 };
 
 /**
@@ -629,6 +640,14 @@ export function sanitizeSettings(raw: unknown): Settings {
     // every newly sanitized Settings object writes only the truthful new field.
     preciseSteering: obj.preciseSteering === true || obj.mouseSteering === true,
     bouncyCars: obj.bouncyCars === true,
+    // Snapped to the slider's step, clamped to its range; missing means the authored size.
+    dashboardScale:
+      typeof obj.dashboardScale === 'number' && Number.isFinite(obj.dashboardScale)
+        ? Math.round(
+            Math.min(DASHBOARD_SCALE_MAX, Math.max(DASHBOARD_SCALE_MIN, obj.dashboardScale)) /
+              DASHBOARD_SCALE_STEP,
+          ) * DASHBOARD_SCALE_STEP
+        : 1,
   };
 
   const rawBindings = obj.keyBindings;

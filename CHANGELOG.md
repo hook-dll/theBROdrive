@@ -6,6 +6,9 @@ Two-wheel drive cars finally leave first gear on sand, a swapped engine brings i
 
 ### Added
 
+- DASHBOARD SIZE in Settings › Gameplay: 75% to 140% of the authored dashboard, in 5%
+  steps, 100% by default (`Settings.dashboardScale`). It multiplies the presentation's
+  own scale, so it means the same on desktop and on a phone, and applies while you drag.
 - ROTTING CARS CAN BE LOOTED. Every shell in a salvage field (`buildWrecks`,
   `world/poi.ts`) now carries salvage of its own, laid out once per POI and kept in
   `WorldState.wreckBonnet` / `wreckStorage`. A random subset of the five bonnet cells
@@ -122,6 +125,11 @@ Two-wheel drive cars finally leave first gear on sand, a swapped engine brings i
 
 ### Fixed
 
+- CLOUDS NO LONGER BREAK INTO SQUARES ON PHONES. The sky's cloud noise hashed its
+  lattice with `fract(sin(x) * 43758.5)`, which needs an accurate `sin` for arguments in
+  the tens of thousands; mobile GPUs reduce that range in low precision, so the hash
+  banded along the lattice and the deck came apart into blocks. It is now an
+  arithmetic hash (multiply and fract only), the same on every GPU.
 - A TWO-WHEEL-DRIVE CAR CAN LEAVE FIRST GEAR ON SAND. At sand's rolling resistance of
   0.16 the driven axle of a rear-drive saloon on period tyres (about 0.12 of the car's
   weight on sand's mu) could not out-push it once the dig had faded, so every such car

@@ -6,6 +6,9 @@ import {
   DAY_CYCLE_MAX_MINUTES,
   DAY_CYCLE_MIN_MINUTES,
   DEFAULT_MOUSE_SENSITIVITY,
+  DASHBOARD_SCALE_MAX,
+  DASHBOARD_SCALE_MIN,
+  DASHBOARD_SCALE_STEP,
   FIELD_OF_VIEW_MAX,
   FIELD_OF_VIEW_MIN,
   MOUSE_SENSITIVITY_MAX,
@@ -530,6 +533,7 @@ export class MainMenu {
         fieldOfView: base.fieldOfView,
         preciseSteering: base.preciseSteering,
         bouncyCars: base.bouncyCars,
+        dashboardScale: base.dashboardScale,
       };
       const apply = (): void => {
         hooks.applySettings({
@@ -550,6 +554,7 @@ export class MainMenu {
           fieldOfView: settings.fieldOfView,
           preciseSteering: settings.preciseSteering,
           bouncyCars: settings.bouncyCars,
+          dashboardScale: settings.dashboardScale,
         });
       };
 
@@ -1356,6 +1361,19 @@ export class MainMenu {
               (value) => `${(value / 1000).toFixed(value < 1000 ? 1 : value % 1000 === 0 ? 0 : 1)} km`,
               (value) => {
                 settings.poiSpacingMetres = value;
+              },
+            ),
+            sliderField(
+              'Dashboard Size',
+              'gameplay',
+              'How big the driving dashboard is drawn. 100% is the authored size.',
+              DASHBOARD_SCALE_MIN,
+              DASHBOARD_SCALE_MAX,
+              DASHBOARD_SCALE_STEP,
+              () => settings.dashboardScale,
+              (value) => `${Math.round(value * 100)}%`,
+              (value) => {
+                settings.dashboardScale = value;
               },
             ),
           );
