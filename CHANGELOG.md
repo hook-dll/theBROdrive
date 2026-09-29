@@ -270,6 +270,28 @@ Two-wheel drive cars finally leave first gear on sand, a swapped engine brings i
 
 ### Fixed
 
+- THE HANDBRAKE LOCKS THE WHEELS AND LETS THE SPRINGS BE. Pulled at speed, it used to be a
+  12 m/s² brake shared over four wheels that never locked any of them: every tyre sat at
+  its peak slip, a perfect ABS stop with full steering. And the moment the car was below
+  0.12 m/s the parking hold pinned its WHOLE pose, nose still down from the stop: 1.52°
+  nose-down against a free rest of 0.24°, front springs carrying 5.8 kN to the rear's 3.8,
+  for as long as the handbrake stayed on — the car frozen in time. Now the cable holds
+  every wheel still (`cableLocked`), so the car slides on locked tyres and steers like
+  it, and the hold pins only where the car stands and which way it faces; the body rocks
+  back on its springs and settles at its own rest pose. A locked wheel's force is the
+  tyre's at zero spin, no longer read out of a wheel that is not turning, so the
+  handbrake now also stops a car rolling back down 8-20° grades, which it never could
+  (creep under 2 cm, held within 1.1 s); a car stopped on its handbrake on 20° holds.
+- TRAFFIC BREAKS REFLECTOR POSTS AND CACTI TOO. Only the player's car was ever an
+  impactor for breakable scenery (`DebrisField`), so a post the player snapped at
+  walking pace was a solid wall to a traffic car at road speed: it stopped dead a bumper
+  short of it, at 20 and at 41 km/h alike. Every car now strikes with its own swept box
+  (`DebrisField.strike`); the same car breaks the post and drives on at 21 and 46 km/h.
+- NO MORE SHADOWS CRAWLING OVER POLES. The comic banding quantises lit colour into hard
+  steps, which on a round, smooth-shaded pole lands the step edges along the light's
+  gradient — including the view-dependent reflection and the weathered vertex colour —
+  so ragged dark patches moved over the body whenever the viewer did, worst on pale
+  concrete. Poles keep the comic material with the light unbanded (`poleMaterial`).
 - NO MORE STROBING INDICATORS ON THE FOUR-LANE ROAD. A driver with something standing in
   its lane swapped every fixed step between its lane and the line round the obstacle,
   the indicator flashing left, right, off at 60 Hz with it. Two feedback loops did it.

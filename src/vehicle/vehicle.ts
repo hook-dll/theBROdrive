@@ -321,6 +321,8 @@ interface WheelVisual {
   driveTorqueNm: number;
   /** Brake force (N) commanded to this wheel this step. */
   brakeForceN: number;
+  /** Held still by the handbrake's cable this step, whatever the tyre asks of it. */
+  cableLocked: boolean;
   /** Wheel forward tangent in world space; projected onto steep contact surfaces. */
   forwardDir: { x: number; y: number; z: number };
   /** Contact point, normal and chassis-frame velocity; all reused every step. */
@@ -626,10 +628,14 @@ export class Vehicle implements Rebasable {
   /** Literal backward/brake control, retained while an automatic uses it as reverse throttle. */
   private brakeLightCommand = 0;
   // Relative (Rapier frame): read from the body when the hold first latches, then
-  // re-applied every step. Shifted by `rebase` alongside the interpolation
-  // snapshots, so a held car does not snap a kilometre when the origin moves.
+  // re-applied every step — horizontal position and heading only; see `postStep`.
+  // Shifted by `rebase` alongside the interpolation snapshots, so a held car does not
+  // snap a kilometre when the origin moves.
   private readonly parkingHoldPos = { x: 0, y: 0, z: 0 };
-  private readonly parkingHoldRot = { x: 0, y: 0, z: 0, w: 1 };
+  private parkingHoldYaw = 0;
+  private readonly holdTranslation = { x: 0, y: 0, z: 0 };
+  private readonly holdRotation = { x: 0, y: 0, z: 0, w: 1 };
+  private readonly holdVelocity = { x: 0, y: 0, z: 0 };
 
   // Fuel: a local mirror of car.fuelLitres, resynced on external changes.
   private localFuel: number;
@@ -1439,6 +1445,7 @@ export class Vehicle implements Rebasable {
         lateralSpeed: 0,
         driveTorqueNm: 0,
         brakeForceN: 0,
+        cableLocked: false,
         forwardDir: { x: 0, y: 0, z: 1 },
         contactPoint: { x: 0, y: 0, z: 0 },
         contactNormal: { x: 0, y: 1, z: 0 },
@@ -1920,7 +1927,7 @@ export class Vehicle implements Rebasable {
     }
     // A hold may only LATCH on a car standing on its wheels — see
     // PARK_HOLD_MIN_LOAD_FRACTION. Once latched it stays latched for as long as the
-    // handbrake is on, at whatever pose it took, which is the point of a parking brake.
+    // handbrake is on, where it took, which is the point of a parking brake.
     //
     // `w.loadN` is last step's smoothed suspension load, like everything else the wheel
     // pass publishes, and it is the right signal rather than `w.grounded`: a ray
@@ -2263,10 +2270,6 @@ export class Vehicle implements Rebasable {
     // pedal and the car delivered 2.46, arrived at a rock it had braked for from 34 m
     // still doing 5 m/s, and hit it.
     this.measuredBrakeDecelValue = mass > 0 ? footBrakeDemandN / mass : 0;
-    const parkingBrakeForce = input.handbrake
-      ? (PARK_BRAKE_DECEL * mass) / Math.max(1, this.wheels.length)
-      : 0;
-
     const wheelCount = this.wheels.length;
     const totalDrivenCount = this.frontDrivenCount + this.rearDrivenCount;
     let rollingResistanceSum = 0;
@@ -2309,12 +2312,15 @@ export class Vehicle implements Rebasable {
       const surface = SURFACES[surfaceType];
 
       // A tyre spending its friction budget on stopping or accelerating has none
-      // left for cornering (see the friction-circle note above). The rear parking
-      // cable still marks the rear wheels locked for tyre visuals and skid audio.
-      // Holding force itself is distributed across every wheel below, because a
-      // rear-only cable cannot reliably hold the vehicle's mass on this game's
-      // steep, uneven roads.
-      const handbraked = input.handbrake && !w.isFront;
+      // left for cornering (see the friction-circle note above).
+      //
+      // THE HANDBRAKE LOCKS EVERY WHEEL, AND THAT IS ALL IT DOES. It used to be a 12 m/s²
+      // brake force shared across the four wheels, which never locked anything: each
+      // tyre sat at its peak slip, so pulling it was a perfect ABS stop at 0.95 g with
+      // full steering, from 50 km/h in under two seconds. A cable holds the wheel still
+      // whatever the tyre asks of it (`cableLocked`, applied in the wheel pass), so the
+      // car slides on locked tyres instead, at their sliding grip, and steers like it.
+      //
       // Locked: the parking cable is immediate, because it is a cable pulling shoes
       // onto drums. The foot brake earns its lock from the wheel's own rotation,
       // measured by updateWheelDynamics after the step that delivered the torque.
@@ -2324,7 +2330,7 @@ export class Vehicle implements Rebasable {
       // — but the lateral force is now built in the tyre pass, which applies the
       // ellipse against the force it is computing on the same tick. Leaving it here
       // too charged a tyre twice for one shared budget.
-      const locked = handbraked || w.locked;
+      const locked = input.handbrake || w.locked;
       const lockGrip = locked ? LOCKED_SIDE_GRIP : 1;
       // The rear axle is a live axle on leaf springs and never had the front's
       // cornering power (REAR_AXLE_SIDE_GRIP).
@@ -2470,16 +2476,14 @@ export class Vehicle implements Rebasable {
       // Bullet port: any non-zero engine force skips the braking branch outright),
       // and its cone only ever scaled force down — it could not represent a tyre
       // past its peak, which is exactly what a locked or spinning one is.
-      let brakeForce = brake > 0 ? brake * footBrakeForce * (w.isFront ? brakeFrontShare : brakeRearShare) : 0;
-      // A latched parking cable takes precedence across every wheel: it is strong
-      // enough to hold the car on this road network's grades.
-      if (input.handbrake) brakeForce = parkingBrakeForce;
+      const brakeForce = brake > 0 ? brake * footBrakeForce * (w.isFront ? brakeFrontShare : brakeRearShare) : 0;
 
       controller.setWheelBrake(w.index, 0);
       controller.setWheelEngineForce(w.index, 0);
 
       w.driveTorqueNm = driven ? (appliedTorque * axleShare) / axleCount : 0;
       w.brakeForceN = brakeForce;
+      w.cableLocked = input.handbrake;
       w.frictionSlip = frictionSlip;
       w.groundSurface = surfaceType;
       w.grounded = ground !== null;
@@ -2799,16 +2803,53 @@ export class Vehicle implements Rebasable {
    * rate is unrelated.
    */
   postStep(): void {
+    // THE HOLD PINS WHERE THE CAR STANDS AND WHICH WAY IT FACES — NOT HOW IT SITS.
+    //
+    // A parking brake stops the car rolling; it does nothing to its springs. The hold
+    // used to re-place the WHOLE pose it latched, every step, and it latches the moment
+    // the car is below `PARK_HOLD_SPEED_MPS` — which after a hard stop is with the nose
+    // still down: measured from 50 km/h, pinned 1.52° nose-down (free rest 0.24°), the
+    // front springs carrying 5.8 kN against 3.8 kN at the rear, for as long as the
+    // handbrake stayed on. Reported from play as the car freezing in time with its
+    // suspension still compressed. So only the horizontal position and the heading are
+    // held; height, pitch and roll are the springs', and the body settles on them.
+    // That is also all that has to be held on a grade: a car that cannot move across
+    // the ground cannot run down it.
     if (this.parkingHoldRequested) {
+      const q = this.chassisBody.rotation(this.holdRotation);
+      const yaw = Math.atan2(2 * (q.x * q.z + q.w * q.y), 1 - 2 * (q.x * q.x + q.y * q.y));
       if (!this.parkingHoldActive) {
         this.chassisBody.translation(this.parkingHoldPos);
-        this.chassisBody.rotation(this.parkingHoldRot);
+        this.parkingHoldYaw = yaw;
         this.parkingHoldActive = true;
       } else {
-        this.chassisBody.setTranslation(this.parkingHoldPos, true);
-        this.chassisBody.setRotation(this.parkingHoldRot, true);
-        this.chassisBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
-        this.chassisBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+        const t = this.chassisBody.translation(this.holdTranslation);
+        t.x = this.parkingHoldPos.x;
+        t.z = this.parkingHoldPos.z;
+        this.chassisBody.setTranslation(t, true);
+        // Turn the body back to the held heading about the world vertical, leaving its
+        // pitch and roll as the springs have them.
+        let turn = this.parkingHoldYaw - yaw;
+        if (turn > Math.PI) turn -= Math.PI * 2;
+        else if (turn < -Math.PI) turn += Math.PI * 2;
+        const s = Math.sin(turn * 0.5);
+        const c = Math.cos(turn * 0.5);
+        const x = c * q.x + s * q.z;
+        const y = c * q.y + s * q.w;
+        const z = c * q.z - s * q.x;
+        const w = c * q.w - s * q.y;
+        q.x = x;
+        q.y = y;
+        q.z = z;
+        q.w = w;
+        this.chassisBody.setRotation(q, true);
+        const v = this.chassisBody.linvel(this.holdVelocity);
+        v.x = 0;
+        v.z = 0;
+        this.chassisBody.setLinvel(v, true);
+        const a = this.chassisBody.angvel(this.holdVelocity);
+        a.y = 0;
+        this.chassisBody.setAngvel(a, true);
       }
     } else {
       this.parkingHoldActive = false;
@@ -3285,41 +3326,57 @@ export class Vehicle implements Rebasable {
           return capacityN * ((1 - SLIDING_GRIP_FRACTION) * peak + SLIDING_GRIP_FRACTION * slide);
         };
 
-        // Damping uses the curve's own slope, clamped to the rising side: past the
-        // peak it goes negative, and feeding that back drives the wheel away from
-        // equilibrium instead of toward it.
-        const u0 = slipOf(spin) / optimalSlip;
-        const th = Math.tanh(SLIDE_CURVE_GAIN * u0);
-        const slopeU =
-          (1 - SLIDING_GRIP_FRACTION) * ((2 * (1 - u0 * u0)) / ((1 + u0 * u0) * (1 + u0 * u0))) +
-          SLIDING_GRIP_FRACTION * SLIDE_CURVE_GAIN * (1 - th * th);
-        const stiffness =
-          (capacityN * Math.max(0, slopeU) * w.radius) / (optimalSlip * reference);
+        if (w.cableLocked) {
+          // A WHEEL THE CABLE HOLDS DOES NOT TURN, so its force is the tyre's at zero
+          // spin — the sliding plateau, or less once the patch is nearly still — and the
+          // drum reacts the torque. It cannot be read out of the wheel's change like a
+          // free wheel's, because there is none: that reading is capped by the wheel's
+          // own inertia, a hundred newtons at a walk, which is why a car rolling back
+          // down 8 degrees used to keep rolling with the handbrake on. Bounded instead by
+          // what brings this wheel's share of the car to rest within the step, so the
+          // friction stops the slide and never reverses it.
+          const stopN = ((w.loadN / GRAVITY) * Math.abs(contactSpeed)) / dt;
+          longitudinalForce = clamp(forceOf(slipOf(0)), -stopN, stopN);
+          spin = 0;
+          gripUsage = Math.abs(longitudinalForce) / capacityN;
+        } else {
+          // Damping uses the curve's own slope, clamped to the rising side: past the
+          // peak it goes negative, and feeding that back drives the wheel away from
+          // equilibrium instead of toward it.
+          const u0 = slipOf(spin) / optimalSlip;
+          const th = Math.tanh(SLIDE_CURVE_GAIN * u0);
+          const slopeU =
+            (1 - SLIDING_GRIP_FRACTION) * ((2 * (1 - u0 * u0)) / ((1 + u0 * u0) * (1 + u0 * u0))) +
+            SLIDING_GRIP_FRACTION * SLIDE_CURVE_GAIN * (1 - th * th);
+          const stiffness =
+            (capacityN * Math.max(0, slopeU) * w.radius) / (optimalSlip * reference);
 
-        const spin0 = spin;
-        const force0 = forceOf(slipOf(spin0));
-        let delta = -(dt * force0 * w.radius) / (inertia + dt * stiffness * w.radius);
+          const spin0 = spin;
+          const force0 = forceOf(slipOf(spin0));
+          let delta = -(dt * force0 * w.radius) / (inertia + dt * stiffness * w.radius);
 
-        // Friction reduces sliding; it never reverses it within one step. Without
-        // this projection the wheel shot straight past synchronous speed every tick
-        // — once the tyre is past its peak the damping slope is zero, so nothing held
-        // the step back — and the force alternated sign from tick to tick. Measured
-        // like that: 23.8 km/h after twenty seconds of full throttle, and 0.06 g of
-        // braking.
-        const toSync = contactSpeed / w.radius - spin0;
-        delta =
-          delta >= 0 ? Math.min(delta, Math.max(0, toSync)) : Math.max(delta, Math.min(0, toSync));
+          // Friction reduces sliding; it never reverses it within one step. Without
+          // this projection the wheel shot straight past synchronous speed every tick
+          // — once the tyre is past its peak the damping slope is zero, so nothing held
+          // the step back — and the force alternated sign from tick to tick. Measured
+          // like that: 23.8 km/h after twenty seconds of full throttle, and 0.06 g of
+          // braking.
+          const toSync = contactSpeed / w.radius - spin0;
+          delta =
+            delta >= 0 ? Math.min(delta, Math.max(0, toSync)) : Math.max(delta, Math.min(0, toSync));
 
-        // Read the force back OUT of the wheel's actual change: whatever torque the
-        // contact took from the wheel is what the tyre put into the road. That keeps
-        // action and reaction equal on the step the projection binds — which is
-        // exactly the step where a gripping tyre is transmitting everything the
-        // engine sent it, and where deriving the force from the post-step slip would
-        // instead report zero.
-        longitudinalForce = clamp((-inertia * delta) / (dt * w.radius), -capacityN, capacityN);
-        spin = spin0 - (longitudinalForce * dt * w.radius) / inertia;
-        gripUsage = Math.abs(longitudinalForce) / capacityN;
+          // Read the force back OUT of the wheel's actual change: whatever torque the
+          // contact took from the wheel is what the tyre put into the road. That keeps
+          // action and reaction equal on the step the projection binds — which is
+          // exactly the step where a gripping tyre is transmitting everything the
+          // engine sent it, and where deriving the force from the post-step slip would
+          // instead report zero.
+          longitudinalForce = clamp((-inertia * delta) / (dt * w.radius), -capacityN, capacityN);
+          spin = spin0 - (longitudinalForce * dt * w.radius) / inertia;
+          gripUsage = Math.abs(longitudinalForce) / capacityN;
+        }
       }
+      if (w.cableLocked) spin = 0;
 
       // Geared to the engine, so it cannot outrun the engine's redline.
       if (driven && spinCeiling !== Infinity) spin = clamp(spin, -spinCeiling, spinCeiling);

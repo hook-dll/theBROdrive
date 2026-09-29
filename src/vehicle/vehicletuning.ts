@@ -1138,18 +1138,22 @@ export const MOUNT_ABOVE_WHEEL_CENTRE = 0.12;
  */
 export const SUSPENSION_FORCE_HEADROOM = 9;
 /**
- * Static holding deceleration for a parked car, m/s². Applied across all four
- * wheels so a braked car remains at rest on any drivable road grade.
+ * Static holding deceleration for a parked car nobody is driving, m/s². Applied
+ * across all four wheels so it remains at rest on any drivable road grade. A driven
+ * car's handbrake is a cable lock on every wheel instead (`cableLocked` in vehicle.ts).
  */
 export const PARK_BRAKE_DECEL = 12.0;
-/** Below this ground speed a braked car becomes a physically fixed parked car. */
+/**
+ * Below this ground speed a braked car is pinned where it stands and facing the way it
+ * faces; its height, pitch and roll stay the springs' (`Vehicle.postStep`).
+ */
 export const PARK_HOLD_SPEED_MPS = 0.12;
 /**
  * Share of its own weight the springs must be carrying before a parked car may be
  * PINNED in place, as a fraction of `m·g`.
  *
- * The hold works by teleporting the chassis back to the pose it latched, every step.
- * That is only a resting pose if the car was standing on its wheels when it latched,
+ * The hold used to teleport the WHOLE chassis back to the pose it latched, every step,
+ * which is only a resting pose if the car was standing on its wheels when it latched,
  * and nothing used to check: the handbrake pulled during the drop after a spawn — or
  * on any car whose suspension had not settled — latched the body IN THE AIR, at
  * whatever height it happened to occupy. The car then hung there for as long as the

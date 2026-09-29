@@ -75,10 +75,10 @@ const SOIL_FRICTION = 1.1;
 /**
  * What is doing the hitting: an oriented box with a velocity, in ABSOLUTE coordinates.
  *
- * Structural, so this file knows nothing about vehicles. `main.ts` fills one from the
- * driven car each step. A box and not a sphere because a car is four metres long and
- * under two wide, and a sphere fat enough to reach its bumper would scythe down
- * everything it drove past.
+ * Structural, so this file knows nothing about vehicles. `main.ts` fills one per car
+ * each step — the driven car and every traffic car — and strikes with each. A box and
+ * not a sphere because a car is four metres long and under two wide, and a sphere fat
+ * enough to reach its bumper would scythe down everything it drove past.
  */
 export interface Impactor {
   x: number;
@@ -151,11 +151,12 @@ export class DebrisField {
   private readonly pieces: Piece[] = [];
   /** Mirror of `state.flattenedProps`, so a chunk build tests it in O(1). */
   private readonly broken = new Set<number>();
-  /** Previous fixed-step chassis centre, for continuous high-speed impact sweeps. */
-  private previousX = 0;
-  private previousY = 0;
-  private previousZ = 0;
-  private previousValid = false;
+  /**
+   * Each chassis' previous fixed-step centre, for continuous high-speed impact sweeps,
+   * by the key it strikes under, and the step it was last seen on.
+   */
+  private readonly previous = new Map<string, { x: number; y: number; z: number; step: number }>();
+  private step = 0;
 
   constructor(
     private readonly physics: PhysicsWorld,
@@ -232,22 +233,15 @@ export class DebrisField {
   }
 
   /**
-   * Tests every standing prop against the impactor and breaks whatever it has reached.
-   *
-   * Linear over the props in the physics band — a couple of hundred, each costing two
-   * subtractions, two dots and two comparisons — which beats asking Rapier for contact
-   * events and needs no event queue threaded through the world step.
-   *
-   * Proximity, not contact, and deliberately a shade generous: the collider must go off
-   * just BEFORE the car reaches it, so the car walks through a breakable prop rather
-   * than bouncing off a collider that then vanishes.
+   * Retires settled pieces far from the observer, and opens a new fixed step of
+   * `strike`s. A chassis that did not strike on the step before starts its sweep fresh:
+   * the path from wherever it last was was never travelled by that body.
    */
-  update(
-    impactor: Impactor | null,
-    dt: number,
-    observerAbsoluteX: number,
-    observerAbsoluteZ: number,
-  ): void {
+  update(dt: number, observerAbsoluteX: number, observerAbsoluteZ: number): void {
+    this.step++;
+    for (const [key, previous] of this.previous) {
+      if (previous.step < this.step - 1) this.previous.delete(key);
+    }
     for (let index = this.pieces.length - 1; index >= 0; index--) {
       const piece = this.pieces[index];
       piece.age += dt;
@@ -267,18 +261,38 @@ export class DebrisField {
       this.removePiece(piece);
       this.pieces.splice(index, 1);
     }
+  }
 
-    if (!impactor) {
-      this.previousValid = false;
-      return;
+  /**
+   * Tests every standing prop against one chassis and breaks whatever it has reached.
+   *
+   * EVERY CAR IS HEAVY ENOUGH, not only the one the player drives. Striking with the
+   * driven car alone left a reflector post that the player snapped at walking pace
+   * standing as a solid wall to a traffic car at road speed: it hit the post's static
+   * collider, stopped dead against it, and stayed there. `key` names the chassis, so
+   * each one sweeps from its own previous step.
+   *
+   * Linear over the props in the physics band — a couple of hundred, each costing two
+   * subtractions, two dots and two comparisons — which beats asking Rapier for contact
+   * events and needs no event queue threaded through the world step.
+   *
+   * Proximity, not contact, and deliberately a shade generous: the collider must go off
+   * just BEFORE the car reaches it, so the car walks through a breakable prop rather
+   * than bouncing off a collider that then vanishes.
+   */
+  strike(key: string, impactor: Impactor): void {
+    let previous = this.previous.get(key);
+    if (!previous || previous.step !== this.step - 1) {
+      previous = { x: impactor.x, y: impactor.y, z: impactor.z, step: this.step };
+      this.previous.set(key, previous);
     }
-    const prevX = this.previousValid ? this.previousX : impactor.x;
-    const prevY = this.previousValid ? this.previousY : impactor.y;
-    const prevZ = this.previousValid ? this.previousZ : impactor.z;
-    this.previousX = impactor.x;
-    this.previousY = impactor.y;
-    this.previousZ = impactor.z;
-    this.previousValid = true;
+    const prevX = previous.x;
+    const prevY = previous.y;
+    const prevZ = previous.z;
+    previous.x = impactor.x;
+    previous.y = impactor.y;
+    previous.z = impactor.z;
+    previous.step = this.step;
 
     // Right of forward, so world offsets resolve into the car's current local frame.
     const rx = impactor.fz;

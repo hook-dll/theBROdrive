@@ -472,6 +472,31 @@ async function boot(): Promise<void> {
   const impactForward = new THREE.Vector3();
   const impactQuat = new THREE.Quaternion();
   const impactor: Impactor = { x: 0, y: 0, z: 0, fx: 0, fz: 1, halfWidth: 1, halfLength: 2, vx: 0, vy: 0, vz: 0 };
+  const impactPosition = { x: 0, y: 0, z: 0 };
+  /** The chassis as the debris field sees it: see `Impactor`. */
+  const fillImpactor = (vehicle: Vehicle): void => {
+    const t = vehicle.absoluteTranslation(impactPosition);
+    const q = vehicle.chassis.rotation();
+    // Chassis-local +z is forward (render/carmodel.ts measures half-length on z).
+    impactForward.set(0, 0, 1).applyQuaternion(impactQuat.set(q.x, q.y, q.z, q.w));
+    const flat = Math.hypot(impactForward.x, impactForward.z) || 1;
+    const v = vehicle.chassis.linvel();
+    const half = vehicle.modelMeasure.halfExtents;
+    impactor.x = t.x;
+    impactor.y = t.y;
+    impactor.z = t.z;
+    impactor.fx = impactForward.x / flat;
+    impactor.fz = impactForward.z / flat;
+    impactor.halfWidth = half[0];
+    impactor.halfLength = half[2];
+    impactor.vx = v.x;
+    impactor.vy = v.y;
+    impactor.vz = v.z;
+  };
+  const strikeWithTraffic = (id: string, vehicle: Vehicle): void => {
+    fillImpactor(vehicle);
+    debris.strike(id, impactor);
+  };
 
   const streamer = new ChunkStreamer(
     road,
@@ -1722,30 +1747,16 @@ async function boot(): Promise<void> {
     for (const c of birds.calls) audio.birdCall(c.species, c.x, c.y, c.z);
     frameProfiler?.end('agents');
 
-    // Props that come apart. The car is the only thing heavy enough to do it, so the
-    // impactor is the driven chassis: absolute centre, its own forward,
+    // Props that come apart. Any car is heavy enough to do it, so every chassis is an
+    // impactor — the driven car and each traffic car: absolute centre, its own forward,
     // the half extents measured off its model, and its world velocity. Filled in the
     // FIXED step rather than per frame, because breaking is a physics event and must
     // not happen twice for one step's worth of motion.
+    debris.update(dt, desertX, desertZ);
+    traffic.forEachVehicle(strikeWithTraffic);
     if (driving) {
-      const t = driving.absoluteTranslation(originAnchor);
-      const q = driving.chassis.rotation();
-      // Chassis-local +z is forward (render/carmodel.ts measures half-length on z).
-      impactForward.set(0, 0, 1).applyQuaternion(impactQuat.set(q.x, q.y, q.z, q.w));
-      const flat = Math.hypot(impactForward.x, impactForward.z) || 1;
-      const v = driving.chassis.linvel();
-      const half = driving.modelMeasure.halfExtents;
-      impactor.x = t.x;
-      impactor.y = t.y;
-      impactor.z = t.z;
-      impactor.fx = impactForward.x / flat;
-      impactor.fz = impactForward.z / flat;
-      impactor.halfWidth = half[0];
-      impactor.halfLength = half[2];
-      impactor.vx = v.x;
-      impactor.vy = v.y;
-      impactor.vz = v.z;
-      debris.update(impactor, dt, desertX, desertZ);
+      fillImpactor(driving);
+      debris.strike(drivingId!, impactor);
       const tumbleweedHit = tumbleweeds.update(dt, activeS, impactor);
       const coverHits = groundCover.update(impactor);
       if (tumbleweedHit.count > 0 || coverHits > 0) {
@@ -1760,9 +1771,6 @@ async function boot(): Promise<void> {
         if (tumbleweedHit.count > 0) audio.foley('drop');
       }
     } else {
-      // Do not sweep from the last driven car position across a period spent on foot
-      // (or across switching vehicles); that path was never travelled by one chassis.
-      debris.update(null, dt, desertX, desertZ);
       tumbleweeds.update(dt, activeS, null);
     }
 

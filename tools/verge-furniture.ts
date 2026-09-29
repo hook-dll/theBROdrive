@@ -572,7 +572,8 @@ console.log('\n=== a post is solid, and it comes apart ===\n');
     vz: 0,
   };
   const piecesBefore = debris.liveCount;
-  debris.update(impactor, 1 / 60, 0, 0);
+  debris.update(1 / 60, 0, 0);
+  debris.strike('bench', impactor);
   const piecesAfter = debris.liveCount;
 
   target.mesh.getMatrixAt(target.index, matrix);

@@ -1072,11 +1072,24 @@ export function poleDesignsOfEra(era: PoleEra): readonly number[] {
 
 let material: THREE.MeshStandardMaterial | null = null;
 
-/** The one material every pole shares: vertex colour, comic banding, like the houses. */
+/**
+ * The one material every pole shares: vertex colour and the comic material, like the
+ * houses — but with the light unbanded.
+ *
+ * Banding quantises the lit colour into hard steps, and on a flat house wall that is
+ * one step per face. A pole is round, or eight-sided with smooth normals, so its light
+ * is a gradient across the body, and the step edges land along that gradient's
+ * contours. Those contours include the view-dependent reflection and the vertex
+ * colour's weathering, so the edges are ragged and move whenever the viewer does.
+ * Reported from play as shadows crawling over the body of a pole, worst on the pale
+ * concrete ones, walking up to it or round it. With the banding off it is a smooth
+ * cylinder again; the shadow map, the reflection and the rest of the material were
+ * each ruled out by turning them off in the running game.
+ */
 export function poleMaterial(): THREE.MeshStandardMaterial {
   material ??= applyComicShading(
     new THREE.MeshStandardMaterial({ name: 'pole-body', vertexColors: true, roughness: 0.8, metalness: 0 }),
-    { contourStrength: 0, stippleStrength: 0 },
+    { contourStrength: 0, stippleStrength: 0, lightingStrength: 0 },
   );
   return material;
 }
