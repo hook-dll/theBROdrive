@@ -46,6 +46,7 @@
   --m-accent-hot: #f58f55;
   --m-on-accent: #1b0f07;
   --m-danger: #e0573a;
+  --m-ok: #5bb57a;
 
   --m-size-xs: 12px;
   --m-size-sm: 14px;
@@ -439,6 +440,59 @@
 
 .menu-action.is-primary:focus-visible {
   box-shadow: 0 0 0 2px var(--m-stock), 0 0 0 4px var(--m-accent-hot);
+}
+
+/* The pause sheet's save row, answering for a moment after a press: green when the
+   drive is on disk, the danger colour when it is not. */
+.menu-action.is-saved,
+.menu-action.is-saved:hover,
+.menu-action.is-saved:focus-visible {
+  background: var(--m-ok);
+  color: var(--m-on-accent);
+}
+
+.menu-action.is-saved::before {
+  background: var(--m-on-accent);
+}
+
+.menu-action.is-failed,
+.menu-action.is-failed:hover,
+.menu-action.is-failed:focus-visible {
+  background: var(--m-danger);
+  color: var(--m-on-accent);
+}
+
+/* On the title screen the row to press catches the light every few seconds: a sheen
+   crossing it like sun running along a bonnet. It moves by transform alone, so the
+   compositor carries it and the row is never repainted for it. */
+.menu-title-screen .menu-action.is-primary {
+  overflow: hidden;
+}
+
+.menu-title-screen .menu-action.is-primary::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 32%, rgba(255, 240, 214, 0.38) 50%, transparent 68%);
+  transform: translateX(-100%);
+  animation: menu-action-sheen 4.5s ease-in-out 1s infinite;
+  pointer-events: none;
+}
+
+@keyframes menu-action-sheen {
+  0% {
+    transform: translateX(-100%);
+  }
+  40%,
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu-title-screen .menu-action.is-primary::after {
+    display: none;
+  }
 }
 
 .menu-action:disabled {

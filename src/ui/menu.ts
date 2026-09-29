@@ -215,6 +215,10 @@ function text(content: string, cls?: string): HTMLElement {
 }
 
 const HEAT_HAZE_ID = 'menu-heat-haze';
+/** Height of one noise tile, px: the air climbs one of these per `HAZE_RISE`. */
+const HAZE_BAND = 160;
+/** Six bands per tile at about 27 px each, so roughly two and a half bands a second. */
+const HAZE_RISE = '2.4s';
 
 /**
  * The game's name, with the joke in it: the word that shimmers is not `Mirage` but
@@ -222,9 +226,11 @@ const HEAT_HAZE_ID = 'menu-heat-haze';
  * in the heat, with a faint inverted copy hanging above it — a superior mirage, which
  * is the kind that shows over the horizon rather than on the road.
  *
- * The shimmer is an SVG displacement over drifting noise, horizontal bands the way hot
- * air bends light. It runs only while the title screen exists, and holds still for a
- * player who asked the system for reduced motion.
+ * The shimmer is an SVG displacement over noise that RISES, horizontal bands of hot air
+ * climbing through the letters the way they climb off a road at noon: each band bends
+ * the word sideways as it passes, so the wobble travels up the word instead of breathing
+ * in place. It runs only while the title screen exists, and holds still for a player
+ * who asked the system for reduced motion.
  */
 function wordmark(): HTMLElement {
   const mark = el('h1', 'menu-wordmark');
@@ -240,24 +246,47 @@ function wordmark(): HTMLElement {
   // Wide, flat noise: bands of air, not grain. Softened, so an edge bends instead of
   // tearing; and only its red channel is used, so the letters slide sideways and never
   // up or down — which is how a shimmer over hot ground moves.
+  //
+  // The noise is one stitched tile, `HAZE_BAND` tall, so it repeats seamlessly; tiled
+  // over the word and slid up by exactly one tile per loop, the air rises for ever with
+  // no jump at the seam. A single offset would drag a bare strip in behind it, so two
+  // copies a tile apart are merged: where one has moved off, the other has arrived.
   const noise = svgNode('feTurbulence', {
     type: 'fractalNoise',
-    baseFrequency: '0.002 0.035',
+    baseFrequency: `0.002 ${6 / HAZE_BAND}`,
     numOctaves: '1',
     seed: '7',
+    stitchTiles: 'stitch',
+    x: '0',
+    y: '0',
+    width: '1024',
+    height: String(HAZE_BAND),
+    result: 'tile',
   });
-  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    noise.appendChild(
-      svgNode('animate', {
-        attributeName: 'baseFrequency',
-        values: '0.002 0.035;0.003 0.045;0.002 0.035',
-        dur: '6s',
-        repeatCount: 'indefinite',
-      }),
-    );
-  }
+  const rising = (from: number, result: string): SVGElement => {
+    const offset = svgNode('feOffset', { in: 'air', dy: String(from), result });
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      offset.appendChild(
+        svgNode('animate', {
+          attributeName: 'dy',
+          values: `${from};${from - HAZE_BAND}`,
+          dur: HAZE_RISE,
+          repeatCount: 'indefinite',
+        }),
+      );
+    }
+    return offset;
+  };
+  const low = rising(0, 'low');
+  const high = rising(HAZE_BAND, 'high');
+  const merge = svgNode('feMerge', {});
+  merge.append(svgNode('feMergeNode', { in: 'low' }), svgNode('feMergeNode', { in: 'high' }));
   filter.append(
     noise,
+    svgNode('feTile', { in: 'tile', result: 'air' }),
+    low,
+    high,
+    merge,
     svgNode('feGaussianBlur', { stdDeviation: '10 3' }),
     svgNode('feColorMatrix', {
       type: 'matrix',
@@ -265,7 +294,7 @@ function wordmark(): HTMLElement {
     }),
     svgNode('feDisplacementMap', {
       in: 'SourceGraphic',
-      scale: '12',
+      scale: '14',
       xChannelSelector: 'R',
       yChannelSelector: 'G',
     }),
@@ -425,8 +454,11 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
+/** How long the pause sheet's save row says `Saved` before it reads `Save drive` again. */
+const SAVE_ANSWER_MS = 1600;
+
 /** What the player chose on the pause overlay. */
-export type PauseAction = 'resume' | 'save' | 'quit';
+export type PauseAction = 'resume' | 'quit';
 
 /** Everything the pause overlay needs from the game; wired by main. */
 export interface PauseHooks {
@@ -435,6 +467,13 @@ export interface PauseHooks {
   applySettings: (next: Settings) => void;
   /** Apply a time-of-day preset immediately; not part of persisted settings. */
   applyTimePreset: (preset: TimeOfDayPreset) => void;
+  /**
+   * Write the drive in progress to its slot; resolves once the write has landed.
+   *
+   * A hook rather than a pause action: saving does not close the pause sheet — the
+   * player paused to save, not to leave — so the menu has to know when it finished.
+   */
+  saveDrive: () => Promise<void>;
   /**
    * The canvas CSS size the resolution policy is resolved against.
    *
@@ -947,7 +986,31 @@ export class MainMenu {
         panel.appendChild(nav);
 
         resumeBtn.addEventListener('click', () => finish('resume'));
-        saveBtn.addEventListener('click', () => finish('save'));
+        // The row answers for itself, green `Saved` for a moment, and the sheet stays
+        // up: a save is something done in passing, and the player may still want to
+        // change a setting or quit. A second press while the row speaks is ignored.
+        const saveLabel = saveBtn.querySelector('.menu-action-label');
+        let saving = false;
+        const answer = (text: string, cls: string): void => {
+          if (saveLabel) saveLabel.textContent = text;
+          saveBtn.classList.add(cls);
+          window.setTimeout(() => {
+            if (saveLabel) saveLabel.textContent = 'Save drive';
+            saveBtn.classList.remove(cls);
+            saving = false;
+          }, SAVE_ANSWER_MS);
+        };
+        saveBtn.addEventListener('click', () => {
+          if (saving) return;
+          saving = true;
+          hooks.saveDrive().then(
+            () => answer('Saved', 'is-saved'),
+            (error: unknown) => {
+              console.error('save failed', error);
+              answer('Save failed', 'is-failed');
+            },
+          );
+        });
         settingsBtn.addEventListener('click', () => showScreen('settings'));
         quitBtn.addEventListener('click', () => finish('quit'));
 

@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- SAVE DRIVE KEEPS THE PAUSE SHEET OPEN. The row turns green and reads `Saved` for
+  1.6 s (`Save failed` in red if the write is refused), then reads `Save drive` again;
+  the game no longer resumes on a save. Saving is the `PauseHooks.saveDrive` hook now,
+  and `PauseAction` is only `resume` or `quit`.
+- THE HEAT HAZE ON `Voyage` RISES. The title's shimmer used to breathe in place; it is
+  now a stitched 160 px noise tile climbing through the word every 2.4 s, so hot-air
+  bands travel up the letters. Reduced motion still holds it still.
+- THE TITLE SCREEN'S MAIN BUTTON CATCHES THE LIGHT: a pale sheen crosses it every
+  4.5 s. It moves by transform only, and is off under reduced motion.
+- NO `loading <car>` TOAST. A car model streaming in no longer announces itself; the
+  `could not load <car>` toast on a failed load stays.
+
 ## 0.20.0 — 2026-09-29
 
 Two-wheel drive cars finally leave first gear on sand, a swapped engine brings its own gearing, rotting cars give up parts and cans, frantic drivers thread the traffic instead of parting it, and the desert night gets a little light, a little glitter and headlamps in the wet road.

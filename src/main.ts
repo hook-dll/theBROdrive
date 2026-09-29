@@ -543,7 +543,6 @@ async function boot(): Promise<void> {
 
   const vehicles = new Map<string, Vehicle>();
   const pendingVehicleLoads = new Map<string, Promise<Vehicle>>();
-  const loadingModels = new Set<string>();
   const frameProfiler = import.meta.env.DEV ? new FrameProfiler() : null;
   if (frameProfiler) (window as unknown as { __broSpikes: unknown }).__broSpikes = frameProfiler.spikes;
   let knownPrograms = 0;
@@ -645,10 +644,6 @@ async function boot(): Promise<void> {
 
     const promise = (async () => {
       const def = carModel(car.modelId);
-      if (!loadingModels.has(def.id)) {
-        loadingModels.add(def.id);
-        hud.setToast(`loading ${def.label}`);
-      }
       await loadCarModel(def.id);
       let warmup = modelWarmups.get(def.id);
       if (!warmup) {
@@ -666,7 +661,6 @@ async function boot(): Promise<void> {
       },
       (error) => {
         pendingVehicleLoads.delete(car.id);
-        loadingModels.delete(car.modelId);
         throw error;
       },
     );
@@ -2396,6 +2390,10 @@ async function boot(): Promise<void> {
     applyTimePreset: (preset) => {
       world.apply({ t: 'time_of_day', timeOfDay: TIME_OF_DAY_PRESETS[preset] * DAY_LENGTH });
     },
+    saveDrive: async () => {
+      const state = stateForSave();
+      await saves.save(`slot-${state.seed}`, saveName(state), state);
+    },
     // Dev only, all seven of them, and behind one fold: `devTools` is `null` unless
     // `import.meta.env.DEV`, which is a compile-time constant, so a production build
     // drops the module, these hooks, and the pause screen's buttons for them together.
@@ -2434,15 +2432,10 @@ async function boot(): Promise<void> {
       const state = stateForSave();
       const action = await menu.showPause({ drive: summarizeDrive(state), seed: state.seed }, pauseHooks);
       menu.hidePause();
-      // Do this in the menu gesture's microtask, before an IndexedDB save can
-      // consume transient user activation required by requestPointerLock.
+      // Do this in the menu gesture's microtask: requestPointerLock needs the
+      // transient user activation the Resume press carries.
       if (action !== 'quit' && shouldRestorePointerLock) {
         void canvas.requestPointerLock().catch(() => undefined);
-      }
-      if (action === 'save') {
-        const state = stateForSave();
-        await saves.save(`slot-${state.seed}`, saveName(state), state);
-        hud.setToast('saved');
       }
       paused = false;
       audio.setPaused(false);
