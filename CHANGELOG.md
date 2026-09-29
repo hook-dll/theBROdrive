@@ -6,7 +6,7 @@
 
 - CAMERA SWAY AT SPEED (`Settings.cameraShake`, Settings › Drive, on by default). The
   driving view floats slowly (0.5-2 Hz) from 60 km/h, with the square of speed up to
-  180 (above every car's top speed), by rotation only (the aim used for interaction
+  300 (above any car, swapped engines included), by rotation only (the aim used for interaction
   stays steady); mostly roll and yaw, a little pitch. Scaled by the surface's roughness
   and by wheels on the ground. At 130 km/h on a gain-1 surface: 0.031° pitch, 0.076°
   yaw, 0.081° roll. A 3-13 Hz tremble was tried first and dropped: at any size the eye

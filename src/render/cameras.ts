@@ -168,20 +168,22 @@ const SURGE_ACCEL_CLAMP = 12;
  */
 const SHAKE_START_KMH = 60;
 /**
- * Where the sway stops growing. Above every car's top speed (the rally 2105 does 170),
- * so across the whole reachable range it keeps rising with the square of speed.
+ * Where the sway stops growing: 300 km/h, above anything a car reaches even with a
+ * swapped engine down a long straight (the stock catalogue tops out at 170, but a swap
+ * can pin the 200 km/h dial). Below it the sway keeps rising with the square of speed.
  */
-const SHAKE_FULL_KMH = 180;
+const SHAKE_FULL_KMH = 300;
 /**
  * Peak angles at `SHAKE_FULL_KMH` on a surface of gain 1, radians, per axis. The sway is
  * mostly a slow roll and yaw with a little pitch — the owner's tuning by eye. At 130 km/h
  * that is 0.031 / 0.076 / 0.081 degrees of pitch / yaw / roll; at 150, 0.052 / 0.126 /
- * 0.134. (Tuned as a 360 km/h ceiling with 0.01 rad pitch and 2.45 / 2.6 shares, which is
- * the same curve below 180: `t²` scales by a constant when the ceiling moves.)
+ * 0.134; at 200, 0.125 / 0.307 / 0.326. (Tuned as a 360 km/h ceiling with 0.01 rad pitch
+ * and 2.45 / 2.6 shares, which is the same curve below 300: `t²` scales by a constant
+ * when the ceiling moves.)
  */
-const SHAKE_PITCH_RAD = 0.0016;
-const SHAKE_YAW_RAD = 0.00392;
-const SHAKE_ROLL_RAD = 0.00416;
+const SHAKE_PITCH_RAD = 0.0064;
+const SHAKE_YAW_RAD = 0.01568;
+const SHAKE_ROLL_RAD = 0.01664;
 /**
  * Surface gain: `SHAKE_SMOOTH_GAIN` on a glass-smooth road, rising to 2 at
  * `SHAKE_ROUGH_FULL` of `SurfaceDef.roughness`. That spreads the real surfaces out —
