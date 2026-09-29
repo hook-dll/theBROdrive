@@ -1,20 +1,21 @@
 /**
- * WHAT THE OTHER CARS ARE DOING, IN THE ROAD'S FRAME, WITHOUT ASKING THE PHYSICS.
+ * WHAT THE OTHER CARS ARE DOING, IN THE ROAD'S FRAME, AS THE COORDINATOR KNOWS IT.
  *
- * A driver's own sensing is physical and stays that way: rays find scenery, debris and
- * anything the coordinator does not know about, and the first static hit is an honest
- * line of sight. But for OTHER TRAFFIC the road already holds the answer exactly —
- * `RoadTraffic` updates every car's arclength, lateral and speed once a step for its
- * own coordinator — and a ray is a bad way to rediscover it:
+ * A driver's own sensing is physical: every dynamic body within reach, projected onto
+ * the road (`Autopilot.collectRoadBodies`). That sees a parked car, a trailer, a car in
+ * a playground or a bench that no coordinator runs — but only within its reach, and it
+ * knows nothing a body does not show. `RoadTraffic` already updates every car's
+ * arclength, lateral and speed once a step for its own coordinator, so for the cars of
+ * the stream and for the player it can answer further out than any sensor reach —
+ * the 300-400 m a racer sizes a pass over — and do it without asking the physics:
  *
- *   - a chord is only the lane while the bend is gentle, and it is never the PROFILE.
- *     Three separate attempts at "is somebody catching me up in the next lane" were
- *     built and measured against rays, and all three failed on the same physics: a
- *     50 m look back over a wavy road either dives into the surface or passes over the
- *     car. Measured on seed 545124, the rearward probe answered 29 m with a car at
- *     12 m, and Infinity on the ticks where the answer decided the manoeuvre;
- *   - it costs. Measured with the shipped stream: 105.6 ray queries per physics step
- *     with eleven live cars, essentially all of them from the autopilot.
+ *   - a rearward look over a wavy road was the question rays could not answer. Three
+ *     separate attempts at "is somebody catching me up in the next lane" were built
+ *     and measured against them, and all three failed on the same physics: a 50 m look
+ *     back either dives into the surface or passes over the car. Measured on seed
+ *     545124, the rearward probe answered 29 m with a car at 12 m, and Infinity on the
+ *     ticks where the answer decided the manoeuvre;
+ *   - it costs nothing per driver beyond a loop over the stream.
  *
  * So this field carries the traffic, and only the traffic. It is a READER: the
  * coordinator owns the data and nothing here writes back, which is why a driver can

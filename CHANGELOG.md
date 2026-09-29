@@ -67,6 +67,19 @@ Two-wheel drive cars finally leave first gear on sand, a swapped engine brings i
 
 ### Changed
 
+- AUTOMATIC DRIVERS SEE TRAFFIC IN THE ROAD'S FRAME, NOT DOWN RAYS. Once a step one
+  broad-phase query collects every dynamic body near the car — other cars, the
+  player's, a parked car, a trailer, a standing piece of a broken prop — and places it
+  on the road: at the foot of its perpendicular on the stretch the driver is about to
+  drive, with its real collider's span along and across the road and its speed there
+  (`Autopilot.collectRoadBodies`). "Is my lane occupied" is an interval test on that
+  lateral (`laneProbe`). The chord rays it replaces cut across tight bends and read a car
+  in the opposing lane as a stopped car in their own (20/54, 23/60 and 8/39 placements on
+  seeds 1337, 545124 and 7), and stopped at the road surface over a blind crest, so a car
+  behind it did not exist (55/60, 36/51, 51/60 missed); both are now 0, pinned by the new
+  `tools/lane-sensor.ts`. The racer's own-lane field lookup and `probeReach` went with
+  them. Over 24 four-minute runs on the real road: ego contacts 45 → 29, stream contacts
+  211 → 177, summed longest stops 198 → 109 s, ego pace +5%, overtakes 200 → 188.
 - THE GAME IS CALLED VOYAGE MIRAGE. Everything a player reads says so: the title screen,
   the page title, the rotate-your-device hint, the local launcher (`Start Voyage
   Mirage.bat`, `release/voyage-mirage.zip`). Storage keys keep their old names

@@ -871,39 +871,62 @@ const EDGE_STABILITY_LATERAL_SPEED_MPS = 0.4;
 const OFFROAD_THROTTLE_BAND = 1.2;
 
 /**
- * SEEING OTHER TRAFFIC, and why it is not the same query as seeing a rock.
+ * SEEING OTHER TRAFFIC, IN THE ROAD'S FRAME.
  *
  * Road props are known in the road frame hundreds of metres out (`HazardIndex`), so
- * they need no rays at all. Other vehicles are dynamic bodies nobody indexes, and a
- * car at 130 km/h needs about 100 m of warning — five times the old 18 m corridor
- * scan, which existed to stop the car nosing into something and nothing more.
+ * they need no sensing at all. Everything that moves — other cars, the player's car, a
+ * parked car, a trailer, a standing piece of a broken prop — is a dynamic body nobody
+ * indexes, and a car at 130 km/h needs about 100 m of warning. So once a step one
+ * broad-phase query collects every dynamic body within reach and PROJECTS it onto the
+ * road (`collectRoadBodies`): arclength, lateral, the half-extents its real collider
+ * spans along and across the road there, and its speed along the road where it is.
+ * Every "is this lane occupied, and by what" question is answered in that frame
+ * (`laneProbe`), as an interval test on the lateral, never as a line in space.
  *
- * A straight ray cannot follow a curving road that far, so a lane probe is cast
- * along the CHORD of the lane it is checking: from a point in that lane a few metres
- * ahead, to the same lane offset `sight` metres further on, a metre above the
- * centreline. On a straight that is the lane itself; in a bend it stays inside it as
- * long as the bend is gentle, which is exactly the condition a pass is gated on
- * anyway. It follows the gradient too, so a climb does not read as a wall.
+ * It replaced rays cast down the CHORD of each lane, and both families of fault those
+ * carried are gone by construction rather than by tuning:
+ *   - a chord is only the lane while the bend is gentle. Walked in short segments it
+ *     still left the arc in tight bends and found the car coming the other way, or a
+ *     car on the far leg of a hairpin, standing at a fixed distance in a place the
+ *     driver would never reach — read as a parked obstacle and swerved round;
+ *   - the first static hit ended the ray, so a car behind a crest did not exist until
+ *     it was close: measured at 127 km/h, a car doing 37 seen 109 m ahead, lost for
+ *     the next 60 m behind the profile, found again at 15 m and hit.
  *
- * Only hits on DYNAMIC bodies count. Everything static — road, terrain, rocks,
- * poles — is either already known in the road frame or is not what this query is
- * for, and treating a static first hit as "no traffic seen" gives the probe a free
- * and honest line-of-sight limit: a car hidden behind a crest is not seen.
+ * Knowing where a car is and being allowed to BET on an empty road are different
+ * questions. The second has its own honest answer, the road's vertical profile
+ * (`DriveRoad.sightDistanceAt`), and it gates what has to be committed to on sight:
+ * crossing the crown, and the racer's pace over a blind crest.
+ */
+/**
+ * Height above the road a body has to stand across to count: a car's bumper line. What
+ * lies lower — a dropped wheel, a bottle, a cactus limb on its side — is not traffic.
  */
 const PROBE_HEIGHT_M = 0.9;
+/**
+ * Road metres ahead of the car's centre where a lane probe begins. Nearer than that a
+ * body is level with this one, which is the abeam scan's business, not a leader.
+ */
 const PROBE_START_M = 4;
-/** Centre plus two edge rays cover narrow cars and wider catalogue bodies. */
+/**
+ * Half the band a lane probe examines either side of its line. Narrower than a car, so
+ * a car squarely in the next lane is not in this one; any body whose own lateral span
+ * reaches into the band is.
+ */
 const PROBE_HALF_WIDTH_M = 0.8;
 const PROBE_MIN_SIGHT_M = 26;
 const PROBE_SIGHT_SECONDS = 3.2;
+/** Bodies projected further off the centreline than this are nowhere near any lane. */
+const PROBE_MAX_LATERAL_M = 30;
+/** Road metres behind the car's centre the rearward probe can ask about. */
+const PROBE_REAR_M = PROBE_START_M + ONCOMING_REAR_GAP_M;
 /**
- * Most a probe chord may deviate from the lane it is checking, metres, and the reach
- * it always keeps however tight the bend. Two metres is inside the road; the floor is
- * long enough to see the car in front of you in a hairpin.
+ * Spacing of the centreline points a body is placed against (`routeFoot`), and the
+ * most of them one step samples. Five metres keeps the polyline within 0.3 m of the
+ * turning circle's 11 m loop, which is close enough to seed an exact projection.
  */
-const PROBE_CHORD_DEVIATION_M = 2;
-/** Ceiling on the walk, so a hairpin cannot ask for fifty rays. */
-const PROBE_MAX_SEGMENTS = 5;
+const ROUTE_STEP_M = 5;
+const ROUTE_MAX_POINTS = 129;
 /** Heading error, radians, within which the car still counts as going down a lane. */
 const PROBE_PARALLEL_RAD = 0.25;
 /** Imminent-collision scan in the CAR's frame: valid even spun round or off-road. */
@@ -1233,9 +1256,9 @@ const DYNAMIC_BLOCKER_CLEAR_M = 5;
  * The band, ahead of and behind the car's own centre, in which another body counts
  * as ALONGSIDE rather than as something to follow.
  *
- * It has to cover the forward probes' blind spot — they start `PROBE_START_M` past
- * the bumper — plus a body length either way, because two cars whose centres are
- * eight metres apart still overlap for the length of a lane change.
+ * It has to cover the lane probes' blind spot — they start `PROBE_START_M` ahead of
+ * the car's centre — plus a body length either way, because two cars whose centres
+ * are eight metres apart still overlap for the length of a lane change.
  */
 const ABEAM_AHEAD_M = 9;
 const ABEAM_BEHIND_M = 9;
@@ -1400,6 +1423,18 @@ const RECOVERY_LEG_GRACE_S = 1;
 const RECOVERY_LEG_CRAWL_MPS = 0.3;
 const RECOVERY_LEG_STALL_S = 0.8;
 
+/** One dynamic body as this driver's road sees it; see `Autopilot.collectRoadBodies`. */
+interface RoadBody {
+  /** Road metres from this car's centre to the body's centre; negative is behind. */
+  s: number;
+  /** Signed lateral of its centre, positive LEFT of travel, as `DriveRoad.project`. */
+  lateral: number;
+  /** Half the span its collider covers along the road and across it, where it is. */
+  halfAlong: number;
+  halfAcross: number;
+  /** Speed along the road's direction of travel where it is; negative is oncoming. */
+  speed: number;
+}
 
 export class Autopilot {
   private modeValue: AutopilotMode = 'sleeper';
@@ -1531,7 +1566,7 @@ export class Autopilot {
   /** Asked by the traffic coordinator to give the car in front room to reverse. */
   private yieldReverse = false;
   private bodyScanGap = Infinity;
-  /** Along-road speed of the nearest hit from the most recent lane probe. */
+  /** Along-road speed of the body the most recent lane probe or axis scan found. */
   private probeHitSpeed = 0;
   /** Line actually commanded, rate-limited toward the line the driver wants. */
   private appliedLateral = 0;
@@ -1762,8 +1797,6 @@ export class Autopilot {
   private readonly position = { x: 0, y: 0, z: 0 };
   private readonly rayOrigin = { x: 0, y: 0, z: 0 };
   private readonly rayDirection = { x: 0, y: 0, z: 0 };
-  private readonly probeNear = { x: 0, y: 0, z: 0 };
-  private readonly probeFar = { x: 0, y: 0, z: 0 };
   private readonly condition: RoadConditionBuffer = {
     surface: SurfaceType.Asphalt,
     decay: 0,
@@ -2062,20 +2095,114 @@ export class Autopilot {
     return true;
   }
   /**
-   * The nearest body in this driver's own lane, from the field rather than a ray. A
-   * racer reads the stream (`ModeConfig.racer`), and its own lane was the one place
-   * still left to the probe, whose line of sight ends at a crest or where a chord
-   * leaves a bend: measured at 127 km/h, a car doing 37 seen 109 m ahead, lost for the
-   * next 60 m, found again at 15 m and hit. Same frame and start as the probe.
+   * Every dynamic body within reach this step, in the road frame; see the note above
+   * `PROBE_HEIGHT_M`. Pooled: the first `roadBodyCount` entries are this step's.
    */
-  private fieldLaneLine = 0;
-  private fieldLaneGap = Infinity;
-  private fieldLaneSpeed = 0;
-  private readonly visitFieldLane = (neighbour: TrafficNeighbour): void => {
-    if (neighbour.s < PROBE_START_M || neighbour.s >= this.fieldLaneGap) return;
-    if (Math.abs(neighbour.lateral - this.fieldLaneLine) > neighbour.halfWidth + CAR_HALF_WIDTH_M) return;
-    this.fieldLaneGap = neighbour.s;
-    this.fieldLaneSpeed = neighbour.speed;
+  private readonly roadBodies: RoadBody[] = [];
+  private roadBodyCount = 0;
+  private readonly roadBodyShape: RAPIER.Ball | null;
+  private roadBodyOriginX = 0;
+  private roadBodyOriginZ = 0;
+  private roadBodyReach = 0;
+  /**
+   * The stretch of road this driver is on, sampled once a step and only when a body
+   * needs placing on it: centreline points from `PROBE_REAR_M` behind to the reach
+   * ahead. See `routeFoot`.
+   */
+  private readonly routeS = new Float64Array(ROUTE_MAX_POINTS);
+  private readonly routeX = new Float64Array(ROUTE_MAX_POINTS);
+  private readonly routeZ = new Float64Array(ROUTE_MAX_POINTS);
+  private routeCount = 0;
+  private readonly routePoint = { x: 0, y: 0, z: 0 };
+  private readonly bodyRotation = { x: 0, y: 0, z: 0, w: 1 };
+  private readonly bodyTranslation = { x: 0, y: 0, z: 0 };
+  private readonly bodyHalfExtents = { x: 0, y: 0, z: 0 };
+  private readonly bodyVelocity = { x: 0, y: 0, z: 0 };
+  private readonly visitRoadBody = (collider: RAPIER.Collider): boolean => {
+    if (collider.isSensor()) return true;
+    const parent = collider.parent();
+    if (!parent) return true;
+    // The collider as a box of half-extents plus a rounding radius: exact for a cuboid,
+    // a ball and a capsule, and a cylinder's bounding capsule. Nothing else is dynamic.
+    const shapes = this.physics!.rapier.ShapeType;
+    const shape = collider.shapeType();
+    let hx = 0;
+    let hy = 0;
+    let hz = 0;
+    let round = 0;
+    if (shape === shapes.Cuboid) {
+      const half = collider.halfExtents(this.bodyHalfExtents);
+      if (!half) return true;
+      hx = half.x;
+      hy = half.y;
+      hz = half.z;
+    } else if (shape === shapes.Ball) {
+      round = collider.radius();
+    } else if (shape === shapes.Capsule || shape === shapes.Cylinder) {
+      hy = collider.halfHeight();
+      round = collider.radius();
+    } else {
+      return true;
+    }
+    // The collider's own axes in the world: the columns of its rotation.
+    const q = collider.rotation(this.bodyRotation);
+    const axX = 1 - 2 * (q.y * q.y + q.z * q.z);
+    const axY = 2 * (q.x * q.y + q.w * q.z);
+    const axZ = 2 * (q.x * q.z - q.w * q.y);
+    const ayX = 2 * (q.x * q.y - q.w * q.z);
+    const ayY = 1 - 2 * (q.x * q.x + q.z * q.z);
+    const ayZ = 2 * (q.y * q.z + q.w * q.x);
+    const azX = 2 * (q.x * q.z + q.w * q.y);
+    const azY = 2 * (q.y * q.z - q.w * q.x);
+    const azZ = 1 - 2 * (q.x * q.x + q.y * q.y);
+    const halfUp = hx * Math.abs(axY) + hy * Math.abs(ayY) + hz * Math.abs(azY) + round;
+    // Too small to reach the bumper line even resting on the road: skip it before
+    // paying for a projection.
+    if (2 * halfUp < PROBE_HEIGHT_M) return true;
+    const t = collider.translation(this.bodyTranslation);
+    const x = t.x + this.roadBodyOriginX;
+    const z = t.z + this.roadBodyOriginZ;
+    // WHERE ON THIS DRIVER'S ROAD the body is: the foot of its perpendicular on the
+    // stretch it is about to drive or has just driven, then refined exactly. Not a
+    // guess from the straight line between the two: the road through a hairpin, or
+    // round the turning circle, passes back within metres of itself, and a projection
+    // seeded from the wrong side settles on the wrong leg.
+    if (this.routeCount === 0) this.sampleRoute();
+    const foot = this.routeFoot(x, z);
+    if (!(foot === foot)) return true;
+    const projection = this.road.project(x, z, foot);
+    if (Math.abs(projection.lateral) > PROBE_MAX_LATERAL_M) return true;
+    const s = projection.s - this.hintS;
+    if (Math.abs(s) > this.roadBodyReach) return true;
+    const bumperLine = projection.height + PROBE_HEIGHT_M;
+    if (t.y - halfUp > bumperLine || t.y + halfUp < bumperLine) return true;
+    const heading = this.road.sampleAt(projection.s).heading;
+    const fx = Math.sin(heading);
+    const fz = Math.cos(heading);
+    // Across is (cos h, -sin h): positive LEFT of travel, the lateral's own basis.
+    const halfAlong =
+      hx * Math.abs(axX * fx + axZ * fz) +
+      hy * Math.abs(ayX * fx + ayZ * fz) +
+      hz * Math.abs(azX * fx + azZ * fz) +
+      round;
+    const halfAcross =
+      hx * Math.abs(axX * fz - axZ * fx) +
+      hy * Math.abs(ayX * fz - ayZ * fx) +
+      hz * Math.abs(azX * fz - azZ * fx) +
+      round;
+    const velocity = parent.linvel(this.bodyVelocity);
+    let entry = this.roadBodies[this.roadBodyCount];
+    if (!entry) {
+      entry = { s: 0, lateral: 0, halfAlong: 0, halfAcross: 0, speed: 0 };
+      this.roadBodies.push(entry);
+    }
+    this.roadBodyCount++;
+    entry.s = s;
+    entry.lateral = projection.lateral;
+    entry.halfAlong = halfAlong;
+    entry.halfAcross = halfAcross;
+    entry.speed = velocity.x * fx + velocity.z * fz;
+    return true;
   };
   /** Straight-line acceleration available at `speed` on `grade`; see `POWER_SHARE_PRIOR`. */
   private accelerationAt(vehicle: Vehicle, speed: number, grade: number): number {
@@ -2145,6 +2272,7 @@ export class Autopilot {
     this.dynamicProximityShape = physics
       ? new physics.rapier.Ball(DYNAMIC_BLOCKER_NEARBY_M)
       : null;
+    this.roadBodyShape = physics ? new physics.rapier.Ball(CORRIDOR_MAX_HORIZON_M) : null;
   }
 
   get mode(): AutopilotMode { return this.modeValue; }
@@ -2814,11 +2942,11 @@ export class Autopilot {
       this.visitHazard,
     );
 
-    // Traffic: the short body-frame scan for anything about to be hit, and the long
-    // lane probe for anything to be followed.
+    // Traffic: the short body-frame scan for anything about to be hit, and the lane
+    // probes, in the road's frame, for anything to be followed.
     //
-    // The probe is cast down the COMMANDED line and, when the car is not on it and is
-    // still pointing along the road, down the line the body actually occupies as well.
+    // The probe asks about the COMMANDED line and, when the car is not on it and is
+    // still pointing along the road, about the line the body actually occupies as well.
     // Those are the same corridor during ordinary lane keeping and very different
     // after an abandoned pass: the car sat in the oncoming lane while its probe
     // examined the lane it wanted to be in, and the traffic it was about to meet
@@ -2836,13 +2964,24 @@ export class Autopilot {
       ? pedestrianSpeed
       : this.probeHitSpeed;
     const sight = Math.max(PROBE_MIN_SIGHT_M, speed * PROBE_SIGHT_SECONDS);
+    const horizon = Math.max(
+      CORRIDOR_MIN_HORIZON_M,
+      obstacleSight,
+      Math.min(CORRIDOR_MAX_HORIZON_M, speed * CORRIDOR_HORIZON_SECONDS),
+    );
+    this.collectRoadBodies(
+      vehicle,
+      originX,
+      originZ,
+      PROBE_START_M + Math.max(sight, horizon),
+    );
     const pedestrianOnAppliedLine =
       pedestrianGap >= -PEDESTRIAN_RADIUS_M
       && pedestrianGap <= sight
       && Math.abs(pedestrianLateral - this.appliedLateral)
         <= CAR_HALF_WIDTH_M + PEDESTRIAN_RADIUS_M;
     const laneGap = Math.min(
-      this.laneProbe(vehicle, this.appliedLateral, sight, originX, originZ),
+      this.laneProbe(this.appliedLateral, sight),
       pedestrianOnAppliedLine ? pedestrianGap : Infinity,
     );
     const laneProbeSpeed = pedestrianOnAppliedLine && laneGap === pedestrianGap
@@ -2898,7 +3037,7 @@ export class Autopilot {
       Math.abs(headingError) < PROBE_PARALLEL_RAD &&
       Math.abs(projection.lateral - this.appliedLateral) > PROBE_HALF_WIDTH_M
         ? Math.min(
-            this.laneProbe(vehicle, projection.lateral, sight, originX, originZ),
+            this.laneProbe(projection.lateral, sight),
             pedestrianOnBodyLine ? pedestrianGap : Infinity,
           )
         : Infinity;
@@ -2917,25 +3056,18 @@ export class Autopilot {
         <= CAR_HALF_WIDTH_M + PEDESTRIAN_RADIUS_M;
     const probedLaneGap = lineInOwnLane
       ? Math.min(laneGap, bodyLaneGap)
-      : this.laneProbe(vehicle, ownLaneOffset, sight, originX, originZ);
+      : this.laneProbe(ownLaneOffset, sight);
     const probedLaneSpeed = lineInOwnLane
       ? bodyLaneGap < laneGap ? bodyLaneSpeed : laneProbeSpeed
       : this.probeHitSpeed;
-    this.fieldLaneGap = Infinity;
-    this.fieldLaneSpeed = 0;
-    if (config.racer && this.trafficField) {
-      this.fieldLaneLine = ownLaneOffset;
-      this.trafficField.forEachNear(sight, 0, this.visitFieldLane);
-    }
     const ownLaneGap = Math.min(
       probedLaneGap,
-      this.fieldLaneGap,
       pedestrianInOwnLane ? pedestrianGap : Infinity,
     );
     const ownLaneProbeSpeed =
       pedestrianInOwnLane && ownLaneGap === pedestrianGap
         ? pedestrianSpeed
-        : ownLaneGap === probedLaneGap ? probedLaneSpeed : this.fieldLaneSpeed;
+        : probedLaneSpeed;
     const nearestGap = Math.min(this.bodyScanGap, laneGap, bodyLaneGap, ownLaneGap);
     const nearestSpeed = nearestGap === ownLaneGap ? ownLaneProbeSpeed
       : nearestGap === laneGap ? laneProbeSpeed
@@ -2994,11 +3126,6 @@ export class Autopilot {
     const recovering = this.recoveryPhase !== 'none';
     const obstacles = this.corridorObstacles;
     obstacles.length = 0;
-    const horizon = Math.max(
-      CORRIDOR_MIN_HORIZON_M,
-      obstacleSight,
-      Math.min(CORRIDOR_MAX_HORIZON_M, speed * CORRIDOR_HORIZON_SECONDS),
-    );
     this.collectHorizon = horizon;
     this.hazards.forEachAhead(this.hintS, horizon, this.collectHazard);
     if (
@@ -3301,10 +3428,10 @@ export class Autopilot {
     if (probeAdjacentLanes) {
       for (const laneCentre of this.laneCentres) {
         if (laneCentre === ownLaneOffset) continue;
-        // The middle line's room is measured from the field; a ray down it sees the
-        // two cars that made that room, 2 m either side, and closes it again.
+        // The middle line's room is measured from the field, flank to flank; the probe
+        // band is the wrong question for a line that exists only between two cars.
         if (this.middlePassAllowed && (laneCentre === this.middleLine || laneCentre === -ownLaneOffset)) continue;
-        const laneGapForPlan = this.laneProbe(vehicle, laneCentre, sight, originX, originZ);
+        const laneGapForPlan = this.laneProbe(laneCentre, sight);
         if (laneGapForPlan === Infinity) continue;
         obstacles.push({
           s: laneGapForPlan,
@@ -3552,11 +3679,11 @@ export class Autopilot {
     // are there. Measured on seed 1337 at s 40 000: an 80.1 s stop for one car and a
     // 90.5 s stop for another, both with `no corridor` and the way past open.
     //
-    // The field carries the truth, for every car and for the player, without a ray:
-    // the nearest body in the opposing lane and the speed it is actually doing along
-    // this driver's direction (negative when it is coming at us). The probe stays as
-    // the second opinion — it sees debris and anything the coordinator does not know
-    // about — and the shorter of the two answers wins.
+    // The field carries the truth for every car of the stream and for the player, at
+    // any range: the nearest body in the opposing lane and the speed it is actually
+    // doing along this driver's direction (negative when it is coming at us). The
+    // probe adds the bodies the coordinator does not know about — a parked car, a
+    // trailer — and the shorter of the two answers wins.
     this.oncomingScanLine = oncomingLine;
     this.oncomingFieldGap = Infinity;
     this.oncomingFieldSpeed = 0;
@@ -3564,7 +3691,7 @@ export class Autopilot {
     const crossingOncomingGap = Math.min(
       this.oncomingGap,
       this.oncomingFieldGap,
-      this.laneProbe(vehicle, oncomingLine, horizon, originX, originZ),
+      this.laneProbe(oncomingLine, horizon),
     );
     // What that gap is closing at. An opposing car that has stopped closes at nothing,
     // and a driver may then take as long over the manoeuvre as the obstruction needs.
@@ -3589,14 +3716,7 @@ export class Autopilot {
     // racer refused the lane behind car after car of a steady oncoming stream. The
     // careful drivers keep the magnitude: their windows are sized on a kickdown they may
     // not have, and that second is margin they spend.
-    const rearProbe = this.laneProbe(
-      vehicle,
-      oncomingLine,
-      ONCOMING_REAR_GAP_M,
-      originX,
-      originZ,
-      -1,
-    );
+    const rearProbe = this.laneProbe(oncomingLine, ONCOMING_REAR_GAP_M, -1);
     const crossingRearClear =
       rearProbe >= ONCOMING_REAR_GAP_M ||
       (config.racer ? this.probeHitSpeed : Math.abs(this.probeHitSpeed)) <= CRAWL_SPEED_MPS;
@@ -4313,14 +4433,12 @@ export class Autopilot {
     // pace a crest hides a car that cannot be lost in the road that is left: measured
     // on the playground, 150 km/h over a blind crest on a 25% descent found a car doing
     // 53 at 80 m, and the only braking that could avoid it put the car off the road.
-    // So it never goes faster than it could slow to the slowest moving traffic in what
-    // it can see — vertically, and as far round the bend as the lane probe reaches —
-    // on a share of its brakes that leaves the tyres something for the bend.
+    // So it never goes faster than it could slow to the slowest moving traffic in the
+    // road it can see over the profile, on a share of its brakes that leaves the tyres
+    // something for the bend. A bend is not a limit on it: the lane probe follows the
+    // road round it and finds a car wherever the road puts it.
     if (config.racingLine) {
-      const sight = Math.min(
-        this.road.sightDistanceAt(this.hintS, RACING_SIGHT_LIMIT_M),
-        this.probeReach(this.hintS),
-      );
+      const sight = this.road.sightDistanceAt(this.hintS, RACING_SIGHT_LIMIT_M);
       const sightBrake = Math.max(MIN_PLANNED_BRAKE_MPS2, currentBrakeAccel * RACING_SIGHT_BRAKE_SHARE);
       targetSpeed = Math.min(
         targetSpeed,
@@ -5234,92 +5352,110 @@ export class Autopilot {
   }
 
   /**
-   * Metres of lane the segmented probe can actually examine from `fromS`. A caller
-   * that needs more than this has to treat a clear answer as "cannot see".
+   * Fills `roadBodies` with every dynamic body within `reach` road metres ahead, or
+   * `PROBE_REAR_M` behind, projected onto the road; see the note above
+   * `PROBE_HEIGHT_M`. Once a step, before the first lane probe.
    */
-  private probeReach(fromS: number): number {
-    const curvature = Math.max(Math.abs(this.road.curvatureAt(fromS)), 1e-4);
-    return PROBE_MAX_SEGMENTS * Math.sqrt((8 * PROBE_CHORD_DEVIATION_M) / curvature);
+  private collectRoadBodies(
+    vehicle: Vehicle,
+    originX: number,
+    originZ: number,
+    reach: number,
+  ): void {
+    this.roadBodyCount = 0;
+    this.routeCount = 0;
+    if (!this.physics || !this.roadBodyShape) return;
+    this.roadBodyOriginX = originX;
+    this.roadBodyOriginZ = originZ;
+    // A body's centre may sit half a body beyond the face a probe reports, and a
+    // straight line is never longer than the road between two points, so this ball
+    // holds everything any probe of this step can ask about.
+    this.roadBodyReach = reach + CAR_HALF_LENGTH_M;
+    this.roadBodyShape.radius = this.roadBodyReach;
+    this.rayOrigin.x = this.position.x - originX;
+    this.rayOrigin.y = this.position.y;
+    this.rayOrigin.z = this.position.z - originZ;
+    this.physics.world.intersectionsWithShape(
+      this.rayOrigin,
+      this.identityRotation,
+      this.roadBodyShape,
+      this.visitRoadBody,
+      this.physics.rapier.QueryFilterFlags.ONLY_DYNAMIC,
+      undefined,
+      undefined,
+      vehicle.chassis,
+    );
+  }
+
+  /** Centreline points over this step's stretch; see `routeS`. */
+  private sampleRoute(): void {
+    const from = this.hintS - PROBE_REAR_M - CAR_HALF_LENGTH_M;
+    const span = this.roadBodyReach + PROBE_REAR_M + CAR_HALF_LENGTH_M;
+    const count = Math.min(ROUTE_MAX_POINTS, Math.ceil(span / ROUTE_STEP_M) + 1);
+    const step = span / (count - 1);
+    for (let i = 0; i < count; i++) {
+      const s = from + i * step;
+      this.road.offsetPoint(s, 0, this.routePoint);
+      this.routeS[i] = s;
+      this.routeX[i] = this.routePoint.x;
+      this.routeZ[i] = this.routePoint.z;
+    }
+    this.routeCount = count;
   }
 
   /**
-   * Distance to the nearest dynamic body in a road lane, metres, or Infinity.
-   *
-   * The ray follows the lane's chord rather than the car's nose, so it keeps to the
-   * road's curve and gradient. See the block comment above `PROBE_HEIGHT_M` for why
-   * only dynamic hits count.
-   *
-   * A CHORD IS ONLY THE LANE WHILE THE BEND IS GENTLE, so the sight is WALKED in
-   * segments short enough that each one stays within `PROBE_CHORD_DEVIATION_M` of the
-   * lane, and the walk stops at the first dynamic hit. One segment covers a straight;
-   * a 170 m look down a 320 m sweeper takes three, and a hairpin takes one per
-   * twenty metres.
-   *
-   * Capping the reach instead was tried, and it silently forbade every fast overtake:
-   * a single 170 m chord in that sweeper misses the lane by eleven metres, so the cap
-   * shortened the answer to 71 m, and the pass rule — which must not commit to sight
-   * it does not have — refused. Before the cap existed, the same probe left the road
-   * in the 110 m esses and found a car on the far side of the lap: a body at a fixed
-   * distance in a place the car will never reach, which reads as a PARKED obstacle
-   * and had sleeper hopping onto the verge thirteen times a lap to pass nothing.
+   * Arclength of the nearest point to (x, z) on this step's stretch of road, or NaN
+   * when nothing on it is within `PROBE_MAX_LATERAL_M`. A foot beyond either end of
+   * the stretch is not on it: a car 50 m behind is not beside the stretch's first
+   * point.
    */
-  private laneProbe(
-    vehicle: Vehicle,
-    lane: number,
-    sight: number,
-    originX: number,
-    originZ: number,
-    facing: 1 | -1 = 1,
-  ): number {
-    this.probeHitSpeed = 0;
-    if (!this.physics) return Infinity;
-    // The ray must not find the car casting it.
-    const body = vehicle.chassis;
-    const fromS = this.hintS + facing * PROBE_START_M;
-    const curvature = Math.max(Math.abs(this.road.curvatureAt(fromS)), 1e-4);
-    const maxChord = Math.sqrt((8 * PROBE_CHORD_DEVIATION_M) / curvature);
-    const segments = Math.min(PROBE_MAX_SEGMENTS, Math.max(1, Math.ceil(sight / maxChord)));
-    const segment = sight / segments;
-    let nearest = Infinity;
-    // Centre and edge rays cover both narrow cars and wider catalogue bodies.
-    // Pass abort hysteresis prevents the centre ray briefly reacquiring the car
-    // alongside from being mistaken for a new stationary obstruction.
-    for (let side = -1; side <= 1; side++) {
-      const offset = lane + side * PROBE_HALF_WIDTH_M;
-      for (let step = 0; step < segments; step++) {
-        const start = fromS + facing * step * segment;
-        this.road.offsetPoint(start, offset, this.probeNear);
-        this.road.offsetPoint(start + facing * segment, offset, this.probeFar);
-        const dx = this.probeFar.x - this.probeNear.x;
-        const dy = this.probeFar.y - this.probeNear.y;
-        const dz = this.probeFar.z - this.probeNear.z;
-        const length = Math.hypot(dx, dy, dz);
-        if (length < 1) continue;
-        // Position is durable absolute state; only the ray passed to Rapier is relative.
-        this.rayOrigin.x = this.probeNear.x - originX;
-        this.rayOrigin.y = this.probeNear.y + PROBE_HEIGHT_M;
-        this.rayOrigin.z = this.probeNear.z - originZ;
-        this.rayDirection.x = dx / length;
-        this.rayDirection.y = dy / length;
-        this.rayDirection.z = dz / length;
-        const hit = this.physics.raycast(this.rayOrigin, this.rayDirection, length, body);
-        if (!hit) continue;
-        const collider = this.physics.world.getCollider(hit.colliderHandle);
-        // A static first hit ends this segment's line of sight, and the walk with it:
-        // whatever is beyond a crest or a rock is not visible from here.
-        if (!collider?.parent()?.isDynamic()) break;
-        // Chord metres are shorter than road metres in a bend; report road metres,
-        // measured from the car rather than from where the probe starts.
-        const along = PROBE_START_M + step * segment + (hit.toi * segment) / length;
-        if (along < nearest) {
-          nearest = along;
-          const otherVelocity = collider.parent()!.linvel();
-          const road = this.road.sampleAt(this.hintS + facing * along);
-          this.probeHitSpeed =
-            otherVelocity.x * Math.sin(road.heading) + otherVelocity.z * Math.cos(road.heading);
-        }
-        break;
+  private routeFoot(x: number, z: number): number {
+    let best = PROBE_MAX_LATERAL_M * PROBE_MAX_LATERAL_M;
+    let foot = Number.NaN;
+    const segments = this.routeCount - 1;
+    for (let i = 0; i < segments; i++) {
+      const ax = this.routeX[i]!;
+      const az = this.routeZ[i]!;
+      const dx = this.routeX[i + 1]! - ax;
+      const dz = this.routeZ[i + 1]! - az;
+      const lengthSq = dx * dx + dz * dz;
+      if (lengthSq < 1e-9) continue;
+      const t = ((x - ax) * dx + (z - az) * dz) / lengthSq;
+      if ((i === 0 && t < 0) || (i === segments - 1 && t > 1)) continue;
+      const along = clamp(t, 0, 1);
+      const ex = ax + dx * along - x;
+      const ez = az + dz * along - z;
+      const distanceSq = ex * ex + ez * ez;
+      if (distanceSq < best) {
+        best = distanceSq;
+        foot = this.routeS[i]! + along * (this.routeS[i + 1]! - this.routeS[i]!);
       }
+    }
+    return foot;
+  }
+
+  /**
+   * Road metres from this car's centre to the near face of the nearest body in a lane,
+   * looking `facing` along the road from `PROBE_START_M` for `sight` metres, or
+   * Infinity. Sets `probeHitSpeed` to that body's speed along the road.
+   *
+   * Membership is an interval on the lateral — the body's own span across the road
+   * against the probe band round `lane` — at the body's own arclength, so the answer
+   * follows the lane round any bend and over any crest. A body already straddling the
+   * start of the probe is reported AT the start.
+   */
+  private laneProbe(lane: number, sight: number, facing: 1 | -1 = 1): number {
+    this.probeHitSpeed = 0;
+    let nearest = Infinity;
+    for (let i = 0; i < this.roadBodyCount; i++) {
+      const body = this.roadBodies[i]!;
+      if (Math.abs(body.lateral - lane) > body.halfAcross + PROBE_HALF_WIDTH_M) continue;
+      const centre = facing * body.s;
+      if (centre + body.halfAlong < PROBE_START_M) continue;
+      const gap = Math.max(PROBE_START_M, centre - body.halfAlong);
+      if (gap > PROBE_START_M + sight || gap >= nearest) continue;
+      nearest = gap;
+      this.probeHitSpeed = body.speed;
     }
     return nearest;
   }

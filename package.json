@@ -13,7 +13,7 @@
     "check": "tsc --noEmit",
     "package:local": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/package-local.ps1",
     "bench:reality": "bun tools/reality.ts",
-    "bench": "bun tools/reality.ts && bun tools/handling-cli.ts && bun tools/climb-sweep.ts && bun tools/cooling.ts && bun tools/autopilot-bench.ts && bun tools/traffic-bench.ts && bun tools/part-mesh-coverage.ts"
+    "bench": "bun tools/reality.ts && bun tools/handling-cli.ts && bun tools/climb-sweep.ts && bun tools/cooling.ts && bun tools/autopilot-bench.ts && bun tools/lane-sensor.ts && bun tools/traffic-bench.ts && bun tools/part-mesh-coverage.ts"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.20.0",
