@@ -258,6 +258,18 @@ Two-wheel drive cars finally leave first gear on sand, a swapped engine brings i
   A lane-centre rock and a dirt pile are now passed at about 58 km/h, a trunk at the
   verge at 68 km/h. The bench's "littered road" (25 props a km, against 0.8 on the
   real road) is gone.
+- THE HEAD OF A QUEUE AT A ROCK STOPS SHORT OF IT INSTEAD OF ROLLING ONTO IT. A driver
+  with no way round yet (the oncoming lane busy, the verge too narrow) held a 13 km/h
+  crawl to within 1.5 m of the rock and only then asked for zero, which half a pedal
+  cannot deliver in that room, so it touched the rock and the cars behind began pulling
+  out round it. The approach to anything standing still in the chosen corridor is now
+  capped so the car can always stop 3 m short (`STILL_BLOCK_STANDOFF_M`), with a
+  taper the proportional brake can actually track, ending at the hold speed so a car
+  facing a rock it cannot pass still reads as stuck and backs out. A driver that loses
+  its last line round a rock at speed may now use its full brake for it, not half. The
+  real-road bench counts every touch of a scatter prop, by face and arrival speed
+  (`nobody drives into the scenery`); over six seeds and eight minutes touches fell
+  from 45 to 36 and the longest stop from 55 s to 24 s.
 - TRAFFIC NO LONGER LAUNCHES ITSELF OFF STEEP GRADES. A car joining the stream was put
   down level on a 7-16% grade, touched the slope with the end of its own collider, was
   pinned there by the settle, and was thrown out of the road at 20-90 m/s the moment it

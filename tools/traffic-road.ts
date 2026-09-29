@@ -220,6 +220,8 @@ const lastS = START_S + REACH_M;
 // their colliders disabled, exactly as the streamer requires, so the bench enables
 // them itself — the one thing `ChunkStreamer` would otherwise do here.
 const hazards = new HazardIndex();
+/** Colliders of the scatter props: what a bumper against scenery is touching. */
+const propColliders = new Set<number>();
 const roadProvider = new RoadMeshProvider(SEED);
 const terrainProvider = new TerrainMeshProvider(new RoadDistance(road));
 const scatter = new ScatterProvider(undefined, hazards);
@@ -243,7 +245,10 @@ const scatter = new ScatterProvider(undefined, hazards);
     for (const provider of [terrainProvider, roadProvider, scatter]) {
       const content = provider.build(context);
       if (!content) continue;
-      for (const collider of content.colliders) collider.setEnabled(true);
+      for (const collider of content.colliders) {
+        collider.setEnabled(true);
+        if (provider === scatter) propColliders.add(collider.handle);
+      }
     }
   }
 }
@@ -462,6 +467,11 @@ interface Track {
   /** Latched: this body was thrown out of the geometry and stopped being a driver. */
   ejected: boolean;
   ejectedWhy: string;
+  /** Some part of the body is touching a scatter prop this step; see `touchesProp`. */
+  onProp: boolean;
+  /** The last second of speedometer readings, km/h, for the speed a touch arrived at. */
+  speedRing: Float32Array;
+  speedRingAt: number;
   activitySeconds: Map<string, number>;
   /** Why this driver was following, by the same reading as the ego's. */
   followWhy: Map<string, number>;
@@ -485,6 +495,55 @@ let streamImpacts = 0;
 const EARLY_CONTACT_S = 5;
 let earlyContacts = 0;
 const contacts: string[] = [];
+/** Every touch of a scatter prop, with the approach that led to it; see `touchesProp`. */
+interface PropTouch {
+  face: 'nose' | 'tail' | 'side';
+  /** Fastest speed of the second before the touch, km/h. */
+  arrivedKmh: number;
+  line: string;
+  /** The approach, under `--trace`. */
+  before: string;
+}
+const propTouches: PropTouch[] = [];
+/**
+ * Faster than this into a prop is driving into it; slower is a scrape while easing
+ * round, which is a different fault. A walking-pace crawl is 3.5 m/s, 12.6 km/h.
+ */
+const PROP_HIT_KMH = 8;
+/**
+ * Which face of this body is in actual contact with a scatter prop — `nose`, `tail` or
+ * `side` — or null. The narrow phase keeps pairs whose bounding boxes merely overlap,
+ * so a pair counts only when its manifold holds a point at or inside the surface. The
+ * face is read off the contact normal in the chassis frame (+Z forward, +X right):
+ * running into a thing and scraping past it are different faults.
+ */
+const touchNormal = new THREE.Vector3();
+const touchRotation = new THREE.Quaternion();
+function touchesProp(vehicle: Vehicle): 'nose' | 'tail' | 'side' | null {
+  const world = physics.world;
+  const body = vehicle.chassis;
+  let face: 'nose' | 'tail' | 'side' | null = null;
+  for (let i = 0; i < body.numColliders() && !face; i++) {
+    const own = body.collider(i);
+    world.contactPairsWith(own, (other) => {
+      if (face || !propColliders.has(other.handle)) return;
+      world.contactPair(own, other, (manifold, flipped) => {
+        for (let k = 0; k < manifold.numContacts() && !face; k++) {
+          if (manifold.contactDist(k) > 0.02) continue;
+          const n = manifold.normal();
+          const sign = flipped ? -1 : 1;
+          const r = body.rotation();
+          touchNormal.set(n.x * sign, n.y * sign, n.z * sign)
+            .applyQuaternion(touchRotation.set(r.x, r.y, r.z, r.w).invert());
+          face = Math.abs(touchNormal.z) >= Math.abs(touchNormal.x)
+            ? (touchNormal.z > 0 ? 'nose' : 'tail')
+            : 'side';
+        }
+      });
+    });
+  }
+  return face;
+}
 const passedTheLine = new Set<string>();
 const PASS_LINE_M = EGO_START_S + 1_500;
 const history = new Map<string, string[]>();
@@ -696,6 +755,9 @@ function trackOf(
       worstOffRoadWhy: "",
       ejected: false,
       ejectedWhy: "",
+      onProp: false,
+      speedRing: new Float32Array(Math.round(1 / FIXED_DT)),
+      speedRingAt: 0,
       activitySeconds: new Map(),
       followWhy: new Map(),
     };
@@ -862,6 +924,7 @@ function sampleCar(
       targetSpeedValue: number;
       oncomingGap: number;
       oncomingFieldGap: number;
+      hazardDistance: number;
     };
     log.push(
       `s${(s - START_S).toFixed(0)} lat${localLateral.toFixed(1)} v${speedKmh.toFixed(0)}` +
@@ -875,6 +938,7 @@ function sampleCar(
         `[${inner.oncomingGap === Infinity ? '-' : inner.oncomingGap.toFixed(0)}` +
         `/${inner.oncomingFieldGap === Infinity ? '-' : inner.oncomingFieldGap.toFixed(0)}]` +
         `${inner.lastMayCross ? '' : ' nox'}` +
+        ` hz${inner.hazardDistance === Infinity ? '-' : inner.hazardDistance.toFixed(1)}` +
         `${inner.corridorFeasible ? '' : ' NOWAY'}`,
     );
     if (EGO_LOG && id === 'ego' && egoLogTicks++ % 30 === 0) {
@@ -920,6 +984,33 @@ function sampleCar(
       }
     }
   }
+  // SCENERY IS TOUCHED GENTLY, AND THAT IS WHY IT NEEDS ITS OWN COUNT.
+  //
+  // A car that brakes to a stop against a rock loses almost nothing to the blow, so
+  // the 1.8 m/s impact floor above never sees it; reported from play as the head of a
+  // queue that always ends with its bumper on the stone. So contact with a scatter
+  // prop is read from the physics itself — bodies touching, whatever the speed — and
+  // counted once per touch, on the step it begins.
+  const face = track.ejected ? null : touchesProp(vehicle);
+  track.speedRing[track.speedRingAt++ % track.speedRing.length] = speedKmh;
+  if (face && !track.onProp) {
+    const inner = autopilot as unknown as { hazardDistance: number; corridorFeasible: boolean };
+    // The speed at the touch is what is left after the brakes; what it arrived with
+    // is the fastest of the second before.
+    const arrived = Math.max(...track.speedRing);
+    const log = history.get(id);
+    propTouches.push({
+      face,
+      arrivedKmh: arrived,
+      line:
+        `${id} (${style}, dir ${direction > 0 ? '+' : '-'}) ${face} ${activity}, arrived at ${arrived.toFixed(1)} km/h, ` +
+        `lateral ${localLateral.toFixed(1)} m, s ${(s - START_S).toFixed(0)}, ` +
+        `hazard ${inner.hazardDistance === Infinity ? '-' : `${inner.hazardDistance.toFixed(2)} m`}` +
+        `${inner.corridorFeasible ? '' : ', no corridor'}`,
+      before: log && log.length ? log.slice(-240).filter((_, i) => i % 15 === 0).join(' | ') : '',
+    });
+  }
+  track.onProp = face !== null;
   // Off the asphalt, and by how much — with who and what they were doing, because one
   // number cannot tell a wheel on the verge from a car out in the desert. An ejected
   // body's excursion is the ejection, not a driving decision, so it is not this.
@@ -1240,6 +1331,21 @@ for (const track of tracks.values()) {
   if (exit) console.log(`      left the road: ${exit}`);
 }
 console.log(`  spawns:    ${earlyContacts} contacts in a car's first ${EARLY_CONTACT_S} s`);
+{
+  const count = (face: string) => propTouches.filter((t) => t.face === face).length;
+  const hits = propTouches.filter((t) => t.arrivedKmh > PROP_HIT_KMH).length;
+  console.log(
+    `  scenery:   ${propTouches.length} touches of a prop ` +
+      `(${count('nose')} nose, ${count('side')} side, ${count('tail')} tail; ` +
+      `${hits} arrived faster than ${PROP_HIT_KMH} km/h)`,
+  );
+  // Hardest first: a car arriving at speed is the fault worth reading.
+  const worst = [...propTouches].sort((a, b) => b.arrivedKmh - a.arrivedKmh);
+  for (const touch of worst.slice(0, TRACE ? 8 : 6)) {
+    console.log(`      ${touch.line}`);
+    if (TRACE && touch.before) console.log(`            before it: ${touch.before}`);
+  }
+}
 console.log(`  warm-up left ${afterWarmup.live} live of ${afterWarmup.target} target`);
 
 if (TRACE) {
@@ -1411,6 +1517,11 @@ if (!SOLO) {
     `longest stop ${egoTrack.longestStop.toFixed(1)} s`,
   );
 }
+check(
+  'nobody drives into the scenery',
+  propTouches.length === 0,
+  `${propTouches.length} prop touches`,
+);
 check(
   'the ego driver gets down the road',
   egoPaceKmh >= EGO_PACE_SHARE * egoCeilingKmh,

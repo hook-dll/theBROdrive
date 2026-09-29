@@ -579,11 +579,12 @@ const MANOEUVRE_LATERAL_SHARE = 0.45;
 const MERGE_YIELD_LOOKAHEAD_M = 90;
 const MERGE_YIELD_MARGIN_MPS = 2.5;
 /**
- * How close the nose may come to something STILL in the chosen corridor before the
- * car stops rather than crawls. Half a bumper: near enough to read as "went up to
- * it", far enough that the contact the driver used to make never happens.
+ * Where a car stops, nose to near edge, for something STILL in its corridor. Well
+ * inside `MUST_STOP_GAP_M`, so a car waiting there with no line round reads as having
+ * no corridor — yielding to the oncoming lane, or stuck and due a recovery — and far
+ * enough out that the stop is made on the planned brake rather than on the stone.
  */
-const STILL_BLOCK_STANDOFF_M = 1.5;
+const STILL_BLOCK_STANDOFF_M = 3;
 /** Physics rays begin ahead of the chassis, so their range differs from road-frame s. */
 const INDEXED_RAY_MATCH_M = 4;
 /**
@@ -4547,14 +4548,6 @@ export class Autopilot {
       // continuous emergency stop — measured at 0.9 m/s against a 30 m/s cruise,
       // with a clear line through the whole field the entire time.
       //
-      // BUT THE CRAWL IS FOR EASING PAST, NOT FOR LEANING ON. When the planner has
-      // found NO way through, the thing in front is going to be touched at walking
-      // pace, and the nose scan cannot prevent it: that scan sees dynamic bodies
-      // only, so an indexed rock had nothing at all to stop the car and it crept
-      // into it — measured as a 2.9 m/s nose-on contact. With a corridor still
-      // available the crawl is exactly right and the field is driven through; with
-      // none, the car stops a bumper short and waits for a line to open.
-      //
       // AND THE CRAWL IS A CRAWL, not whatever the manoeuvre limit happens to be. This
       // floor used to be the manoeuvre limit, which was always a walking pace whenever
       // anything was being gone round; now that the manoeuvre limit only prices what
@@ -4562,14 +4555,45 @@ export class Autopilot {
       // the driver's full pace and the clamp did nothing at all. Measured on the
       // boxed-in bench: a car that used to stop 4.2 m short of a rock it could not get
       // round crept into it instead.
-      targetSpeed = Math.min(
-        targetSpeed,
-        blockSpeed > CRAWL_SPEED_MPS
-          ? braking
-          : !this.corridorFeasible && this.corridorBlockDistance <= STILL_BLOCK_STANDOFF_M
-            ? 0
-            : Math.max(AVOIDANCE_CRAWL_MPS, braking),
-      );
+      //
+      // BUT THE CRAWL IS FOR EASING PAST, NOT FOR LEANING ON, and it may never be
+      // faster than the car can still stop at `STILL_BLOCK_STANDOFF_M` short. A crawl
+      // floor above the braking envelope is a promise to arrive: this used to switch
+      // the target from the crawl to zero only once the corridor had failed AND the
+      // nose was 1.5 m out, and 3.5 m/s at the planned brake needs 2.4 m. Measured on
+      // the real road with the stream's own scenery contacts counted: every one was a
+      // car rolling at 12-13 km/h from nine metres out onto a rock it had been braking
+      // for the whole way — waiting for an oncoming car with its line still in the
+      // lane, or steering out onto the verge on a line that could not finish in time.
+      // Capped, the first stops and waits, and the second slows until its own swept
+      // path clears the thing (see `sweptOverlap`) and eases round at that speed.
+      //
+      // AND THE CAP IS ONE THE PEDAL CAN FOLLOW. The brake is proportional — the
+      // obstacle pedal is the speed error over `brakeBand` — so a stopping envelope in
+      // the square root of the distance is never tracked: the error that asks for the
+      // brake only exists once the car is already too fast for the road left. Measured:
+      // a cautious driver planned 2.6 m/s² and shed 1.7. A target falling LINEARLY with
+      // the road left, `v = k·x`, is tracked by that loop as a damped second-order
+      // system (x'' + c·x' + c·k·x = 0, with c the loop's decel per m/s of error), and
+      // `k = c/4` is the fastest gain at which the nose never passes the stop point.
+      // The pedal delivers `obstacleBrakeAccel` at OBSTACLE_BRAKE_MAX, so
+      // c = obstacleBrakeAccel / (OBSTACLE_BRAKE_MAX · brakeBand).
+      //
+      // The taper lands on `HOLD_TARGET_MPS` AT the standoff, not on zero. Below that
+      // target the car stands on the hold brake, so a taper to zero parked it 1/k
+      // short — metres, outside the stopping room — where the corridor read as open,
+      // the stall was never seen, and on the bench's boulder across the whole road the
+      // car waited in front of it for good instead of backing out and trying again.
+      const standoffRoom = this.corridorBlockDistance - STILL_BLOCK_STANDOFF_M;
+      const approachGain = obstacleBrakeAccel / (4 * OBSTACLE_BRAKE_MAX * config.brakeBand);
+      const stillLimit = standoffRoom > 0
+        ? Math.min(
+            Math.max(AVOIDANCE_CRAWL_MPS, braking),
+            Math.sqrt(2 * obstacleBrakeAccel * standoffRoom),
+            HOLD_TARGET_MPS + approachGain * standoffRoom,
+          )
+        : 0;
+      targetSpeed = Math.min(targetSpeed, blockSpeed > CRAWL_SPEED_MPS ? braking : stillLimit);
       if (blockSpeed > CRAWL_SPEED_MPS) {
         // Moving: keep a time headway behind it.
         const headwayGap =
@@ -4852,12 +4876,21 @@ export class Autopilot {
     // car that is not a decision about the road any more, it is the only way not to
     // hit it: a racing driver arriving at 146 km/h on a car doing 53 it found 81 m off
     // over a blind crest braked at 0.44 of the pedal, all the cap allowed, and hit it.
-    // Something standing still keeps the cap — that is the littered road it exists for.
+    // Something standing still keeps the cap while there is a way round it: the pass is
+    // the plan, and the brake only has to buy the manoeuvre its speed. With NO corridor
+    // the thing is going to be stopped for, and the same arithmetic applies to the road
+    // left before the standoff. Measured on the real road at seed 545124: a hurried
+    // driver at 56 km/h lost its last line round a rock 28 m out, braked at half pedal
+    // with the target already at 31 km/h, and hit the rock at 33-40 km/h.
     const followRoom = Math.max(1, this.corridorBlockDistance - FOLLOW_STANDOFF_M);
     const followNeed =
-      this.corridorBlockDistance < Infinity && this.corridorBlockSpeed > CRAWL_SPEED_MPS
-        ? (speed * speed - this.corridorBlockSpeed * this.corridorBlockSpeed) / (2 * followRoom)
-        : 0;
+      this.corridorBlockDistance === Infinity
+        ? 0
+        : this.corridorBlockSpeed > CRAWL_SPEED_MPS
+          ? (speed * speed - this.corridorBlockSpeed * this.corridorBlockSpeed) / (2 * followRoom)
+          : !this.corridorFeasible
+            ? (speed * speed) / (2 * Math.max(1, this.corridorBlockDistance - STILL_BLOCK_STANDOFF_M))
+            : 0;
     const brakeCeiling =
       (obstacleLimitSpeed < roadLimitSpeed - BRAKE_LIMIT_EPSILON && followNeed <= obstacleBrakeAccel
         ? Math.min(config.brakeCeiling, OBSTACLE_BRAKE_MAX)
