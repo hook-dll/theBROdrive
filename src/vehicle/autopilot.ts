@@ -764,6 +764,12 @@ const SHOULDER_PASS_STALL_S = 3;
 const SHOULDER_PASS_YIELD_MPS = 3;
 const SHOULDER_PASS_RETRY_M = 200;
 /**
+ * Road a car the planner put on the verge has to get its body back onto the asphalt
+ * before being out there counts as a road departure: a lane's worth of return at the
+ * line's own rate (`LINE_SHIFT_PER_METRE`) is about 30 m, plus the body settling.
+ */
+const SHOULDER_PASS_RETURN_M = 40;
+/**
  * THROUGH THE MIDDLE, the frantic driver's answer to a queue the opposing lane is not
  * free enough to go round. There is no such lane as "the middle" and nobody gives it
  * one: it MEASURES the room out of the traffic field — where the cars of the queue
@@ -1639,6 +1645,8 @@ export class Autopilot {
   private shoulderStallFor = 0;
   private shoulderYielding = false;
   private shoulderBarredUntil = 0;
+  /** Road, in metres travelled, a body the plan put on the verge is still coming back from it. */
+  private vergeReturnUntil = 0;
   /** Last step: the car being passed on the verge was still alongside. */
   private shoulderAlongside = false;
   /** This step's grant of the centre line past a yielding car; see MIDDLE_PASS_*. */
@@ -2053,6 +2061,22 @@ export class Autopilot {
     this.passTravelValue = travel + v * returnSeconds;
     return true;
   }
+  /**
+   * The nearest body in this driver's own lane, from the field rather than a ray. A
+   * racer reads the stream (`ModeConfig.racer`), and its own lane was the one place
+   * still left to the probe, whose line of sight ends at a crest or where a chord
+   * leaves a bend: measured at 127 km/h, a car doing 37 seen 109 m ahead, lost for the
+   * next 60 m, found again at 15 m and hit. Same frame and start as the probe.
+   */
+  private fieldLaneLine = 0;
+  private fieldLaneGap = Infinity;
+  private fieldLaneSpeed = 0;
+  private readonly visitFieldLane = (neighbour: TrafficNeighbour): void => {
+    if (neighbour.s < PROBE_START_M || neighbour.s >= this.fieldLaneGap) return;
+    if (Math.abs(neighbour.lateral - this.fieldLaneLine) > neighbour.halfWidth + CAR_HALF_WIDTH_M) return;
+    this.fieldLaneGap = neighbour.s;
+    this.fieldLaneSpeed = neighbour.speed;
+  };
   /** Straight-line acceleration available at `speed` on `grade`; see `POWER_SHARE_PRIOR`. */
   private accelerationAt(vehicle: Vehicle, speed: number, grade: number): number {
     if (!vehicle.engineRunning) return -ROLLING_DECEL_MPS2 - GRAVITY * grade;
@@ -2632,9 +2656,19 @@ export class Autopilot {
     // A car out on the graded shoulder because its corridor goes round something is
     // not a car that has left the road: the planner put it there and will bring it
     // back. Only a departure the planner did not ask for is a road departure.
-    const insideStaticAvoidance =
-      this.planUsesShoulder && Math.abs(projection.lateral) <= staticAvoidEdge;
-    if (Math.abs(projection.lateral) > passingEdge && !insideStaticAvoidance) {
+    //
+    // AND BRINGING IT BACK TAKES ROAD. The plan stops using the verge the step a pass on
+    // it ends — the car is past, or the pass stalled and gave itself up — while the body
+    // is still out there, most of a lane from home, and sometimes still drifting outward
+    // on the loose ground. Read as a departure at that step, the car was braked to
+    // `OFFROAD_SPEED_MPS` from road speed on the verge: measured on the real road (seed
+    // 4) as a racer asking for 13 km/h at 66 km/h, and again at 32 km/h, the step each of
+    // two verge passes ended. See `SHOULDER_PASS_RETURN_M`.
+    if (this.planUsesShoulder) this.vergeReturnUntil = this.travelled + SHOULDER_PASS_RETURN_M;
+    const plannedOntoVerge =
+      (this.planUsesShoulder || this.travelled < this.vergeReturnUntil) &&
+      Math.abs(projection.lateral) <= staticAvoidEdge;
+    if (Math.abs(projection.lateral) > passingEdge && !plannedOntoVerge) {
       this.roadRecoveryActive = true;
     }
     let offRoad = this.roadRecoveryActive;
@@ -2881,18 +2915,27 @@ export class Autopilot {
       && pedestrianGap <= sight
       && Math.abs(pedestrianLateral - ownLaneOffset)
         <= CAR_HALF_WIDTH_M + PEDESTRIAN_RADIUS_M;
+    const probedLaneGap = lineInOwnLane
+      ? Math.min(laneGap, bodyLaneGap)
+      : this.laneProbe(vehicle, ownLaneOffset, sight, originX, originZ);
+    const probedLaneSpeed = lineInOwnLane
+      ? bodyLaneGap < laneGap ? bodyLaneSpeed : laneProbeSpeed
+      : this.probeHitSpeed;
+    this.fieldLaneGap = Infinity;
+    this.fieldLaneSpeed = 0;
+    if (config.racer && this.trafficField) {
+      this.fieldLaneLine = ownLaneOffset;
+      this.trafficField.forEachNear(sight, 0, this.visitFieldLane);
+    }
     const ownLaneGap = Math.min(
-      lineInOwnLane
-        ? Math.min(laneGap, bodyLaneGap)
-        : this.laneProbe(vehicle, ownLaneOffset, sight, originX, originZ),
+      probedLaneGap,
+      this.fieldLaneGap,
       pedestrianInOwnLane ? pedestrianGap : Infinity,
     );
     const ownLaneProbeSpeed =
       pedestrianInOwnLane && ownLaneGap === pedestrianGap
         ? pedestrianSpeed
-        : lineInOwnLane
-          ? bodyLaneGap < laneGap ? bodyLaneSpeed : laneProbeSpeed
-          : this.probeHitSpeed;
+        : ownLaneGap === probedLaneGap ? probedLaneSpeed : this.fieldLaneSpeed;
     const nearestGap = Math.min(this.bodyScanGap, laneGap, bodyLaneGap, ownLaneGap);
     const nearestSpeed = nearestGap === ownLaneGap ? ownLaneProbeSpeed
       : nearestGap === laneGap ? laneProbeSpeed
@@ -4341,7 +4384,16 @@ export class Autopilot {
             : Math.max(FOLLOW_STANDOFF_M, config.brakeLead)),
       );
       const blockSpeed = Math.max(0, this.corridorBlockSpeed);
-      const braking = Math.sqrt(blockSpeed * blockSpeed + 2 * obstacleBrakeAccel * room);
+      // A RACER BRAKES ONTO A MOVING CAR, NOT ONTO WHERE IT STANDS NOW. The absolute
+      // envelope plans the stop as if the leader stood still at its speed, so it charges
+      // the road the leader itself covers while the gap closes: arriving at 120 km/h on
+      // a car doing 50, at a planned 4 m/s², that is braking from 115 m back instead of
+      // 47, and then rolling up the rest of the way. Relative closing is what a racer's
+      // "last useful metre" means; the careful drivers keep the margin, and full pedal
+      // beyond `OBSTACLE_BRAKE_MAX` plus the emergency reflex stay behind both.
+      const braking = config.racer && blockSpeed > CRAWL_SPEED_MPS
+        ? blockSpeed + Math.sqrt(2 * obstacleBrakeAccel * room)
+        : Math.sqrt(blockSpeed * blockSpeed + 2 * obstacleBrakeAccel * room);
       // Something STILL in the corridor is approached at walking pace, not stopped
       // for: the car is going to ease past it, and a littered road is otherwise a
       // continuous emergency stop — measured at 0.9 m/s against a 30 m/s cruise,

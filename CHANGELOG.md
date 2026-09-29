@@ -106,6 +106,24 @@ Two-wheel drive cars finally leave first gear on sand, a swapped engine brings i
   drive meets about 150 sections. A worn pole leans as before and may have lost its arms
   and insulators (timber sooner than steel and concrete); anomalies read their placement
   off the design. `?prop-gallery` shows all hundred behind the desert forms.
+- NO TWO-LEGGED POLES. The timber H-frame and the concrete portal are out of the pole
+  catalogue (`FAMILIES`, `world/props/poledesigns.ts`), so neither is ever spawned: the
+  line is ninety designs in twelve families, every one standing on a single support.
+- FRANTIC KEEPS ITS SPEED INTO TRAFFIC. A racer now brakes onto a moving car on the
+  CLOSING speed (`leader + sqrt(2·a·room)`) instead of planning the stop as if the car
+  stood still, so it no longer starts braking twice as far back and rolls up the rest of
+  the way; it reads the car in its own lane from the traffic field as well as its probe,
+  so a slow car behind a crest is not lost and found again at 15 m; and a verge pass that
+  ends with the body still on the verge is brought home at speed for
+  `SHOULDER_PASS_RETURN_M` instead of being declared off the road and braked to walking
+  pace (`vehicle/autopilot.ts`). On `tools/traffic-road.ts --ego frantic`, twelve seeds of
+  five minutes in a VAZ-2105: 66 km/h mean against 61, a median 5 km/h given up before a
+  pull-out against 8, 4.2 s behind a caught car against 5.5, 115 s following against 129;
+  ego contacts 2.5 a run against 1.8, inside the spread one changed step makes on a seed.
+- `tools/traffic-road.ts` loads every car model before it starts, so a seed gives the
+  same run every time (spawns used to land on whichever step a file read finished), and
+  prints a `catching:` line: how long the racer sat behind each car it caught and how
+  much speed it gave up before it pulled out.
 - EVERY STRETCH OF ROAD HAS POLES. The era band in four that had none is gone
   (`poleEraForBand`, `world/gradient.ts`), and a section is a whole number of its own
   spacings long, so the widest gap between two poles anywhere is 116 m — under the

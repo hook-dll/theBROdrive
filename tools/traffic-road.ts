@@ -249,7 +249,11 @@ const scatter = new ScatterProvider(undefined, hazards);
 settle();
 
 // ---------------------------------------------------------------- the ego car
-await preloadCarModels([EGO_MODEL]);
+// Every model, not only the ego's: a spawn otherwise waits on a file read, and when
+// that read resolves decides which fixed step the car appears on, so two runs of one
+// seed drifted apart by as much as ten km/h of ego pace. Loaded up front, a spawn's
+// load promise is already settled and the run is the seed's alone.
+await preloadCarModels();
 
 /**
  * WHERE THE EGO CAR STARTS, and why it is not simply `START_S`.
@@ -504,6 +508,25 @@ let egoOncomingSeconds = 0;
  * not before whatever is coming the other way.
  */
 const egoFollowWhy = new Map<string, number>();
+/**
+ * CATCHING A CAR, as the player sees it from behind: from the step the racer first
+ * wants past something slower in its lane (`passUrge`) to the step its body leaves
+ * that lane, how long it sat there and how much of its own speed it gave up before it
+ * went. A driver threading traffic goes at once and keeps its speed; one that rolls
+ * up, tucks in and waits scores on both. A catch the urge lets go of for
+ * `CATCH_LOST_S` without a move is dropped: the car turned off, or the road stopped
+ * being worth passing on.
+ */
+const CATCH_PULLOUT_M = 1;
+const CATCH_LOST_S = 2;
+let racerClock = 0;
+let catchStart = -1;
+let catchSpeed = 0;
+let catchMin = 0;
+let catchLostFor = 0;
+let catchesDropped = 0;
+const catchWaits: number[] = [];
+const catchSheds: number[] = [];
 function followReason(autopilot: Autopilot = egoAutopilot): string {
   const inner = autopilot as unknown as {
     passUrgeValue: boolean;
@@ -574,6 +597,27 @@ function measureRacer(): void {
   }
   egoLongestFollow = Math.max(egoLongestFollow, egoFollowSpell);
   if (egoLateral > 0.55) egoOncomingSeconds += FIXED_DT;
+  racerClock += FIXED_DT;
+  const outOfLane = Math.abs(egoLateral - road.laneCentreAt(egoS, egoAutopilot.homeLane)) > CATCH_PULLOUT_M;
+  if (catchStart < 0) {
+    if (egoAutopilot.passUrge && !outOfLane) {
+      catchStart = racerClock;
+      catchSpeed = egoSpeed;
+      catchMin = egoSpeed;
+      catchLostFor = 0;
+    }
+  } else if (outOfLane) {
+    catchWaits.push(racerClock - catchStart);
+    catchSheds.push((catchSpeed - catchMin) * 3.6);
+    catchStart = -1;
+  } else {
+    catchMin = Math.min(catchMin, egoSpeed);
+    catchLostFor = egoAutopilot.passUrge ? 0 : catchLostFor + FIXED_DT;
+    if (catchLostFor >= CATCH_LOST_S) {
+      catchesDropped++;
+      catchStart = -1;
+    }
+  }
 }
 
 const position = { x: 0, y: 0, z: 0 };
@@ -1130,6 +1174,13 @@ if (!SOLO) {
         .sort((a, b) => b[1] - a[1])
         .map(([why, seconds]) => `${why} ${seconds.toFixed(0)} s`)
         .join(', ') || '-'),
+  );
+  console.log(
+    `  catching:  ${catchWaits.length + catchesDropped} caught, ${catchWaits.length} went out after ` +
+      `median ${per(catchWaits, 0.5).toFixed(1)} s (p90 ${per(catchWaits, 0.9).toFixed(1)} s, ` +
+      `total ${catchWaits.reduce((a, b) => a + b, 0).toFixed(0)} s), speed given up first ` +
+      `median ${per(catchSheds, 0.5).toFixed(0)} km/h (p90 ${per(catchSheds, 0.9).toFixed(0)}), ` +
+      `${catchesDropped} dropped`,
   );
   let printed = 0;
   for (let i = 0; i < contacts.length && printed < 6; i++) {

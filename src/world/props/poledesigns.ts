@@ -1,5 +1,5 @@
 /**
- * The roadside pole catalogue: one hundred plain, believable line poles.
+ * The roadside pole catalogue: ninety plain, believable line poles, each on one support.
  *
  * WHAT THIS REPLACED. The pole line used to be three silhouettes — a timber mast, a
  * lattice mast and a concrete streetlight — each with a lamp head, and one wire strung
@@ -7,12 +7,12 @@
  * was the same pole seven thousand times, and none of them was a pole anybody builds:
  * a line carries its wires on insulators, on arms, at the height the voltage wants.
  *
- * WHAT A DESIGN IS. Fourteen families of real roadside construction — telegraph poles,
- * rural three-phase, bracket telephone poles, timber on a concrete stub, timber
- * H-frames, rectangular, spun and octagonal concrete, concrete portals, double-circuit
- * concrete, lattice masts, tubular steel, Oppenheimer telescoping steel, and rail or
- * I-beam poles — each enumerated into a handful of variants by DISCRETE choices (arm
- * count, insulator layout and material, cap, braces, fittings), with height, taper and
+ * WHAT A DESIGN IS. Twelve families of real roadside construction — telegraph poles,
+ * rural three-phase, bracket telephone poles, timber on a concrete stub, rectangular,
+ * spun and octagonal concrete, double-circuit concrete, lattice masts, tubular steel,
+ * Oppenheimer telescoping steel, and rail or I-beam poles — each enumerated into a
+ * handful of variants by DISCRETE choices (arm count, insulator layout and material,
+ * cap, braces, fittings), with height, taper and
  * spacing drawn from the design's own hash. Discrete choices step through their lists
  * with the variant index rather than being rolled, which is what guarantees that two
  * designs of one family never come out as the same pole. Nothing is ornamental: the
@@ -547,57 +547,6 @@ const stubbed: Family = (v, h) => {
   };
 };
 
-/** E. The timber H-frame: two poles, a double crossbeam, an X brace, strings. */
-const hFrame: Family = (v, h) => {
-  const g = 1.25 + h(1) * 0.3;
-  const height = 9 + h(2) * 1.5;
-  const r0 = 0.17 + h(3) * 0.03;
-  const r1 = 0.12 + h(4) * 0.02;
-  const wood = pickOf(TIMBER, v * 3 + 2);
-  const insulator = pickOf([GLASS[2]!, PORCELAIN[1]!, PORCELAIN[0]!, GLASS[0]!, POLYMER[0]!, PORCELAIN[2]!], v);
-  const posts = v % 3 === 2;
-  const xBrace = v % 2 === 0;
-  const discs = 3 + (v % 2);
-  const radiusAt = (y: number): number => lerp(r0, r1, y / height);
-  const wire: WireStyle = { radius: 0.016, hex: WIRE_ALUMINIUM };
-  return {
-    name: `Деревянный П-портал · ${posts ? 'опорные изоляторы' : `гирлянды по ${discs}`} · ${insulator.name}`,
-    spacing: 85 + h(6) * 15,
-    height,
-    weather: timberWeather(h),
-    foot: { x: -g, r: r0 },
-    gear: { x: -g, r: radiusAt(POLE_GEAR_Y) },
-    legs: [{ x: -g, r: r0 }, { x: g, r: r0 }],
-    draw(d) {
-      const b = d.b;
-      for (const x of [-g, g]) {
-        logShaft(b, x, 0, height, r0, r1, wood, h, x < 0 ? 20 : 30);
-        timberCap(b, x, height, r1, wood, 'bevel');
-      }
-      const yb = height - 0.5;
-      const beamWood = shade(wood, 1.08);
-      for (const side of [-1, 1]) arm(b, yb, -g - 0.55, g + 0.55, side * (r1 + 0.07), beamWood, 0.09, 0.16);
-      const z = radiusAt(yb - 2) + 0.05;
-      if (xBrace) {
-        b.beam([-g, yb - 0.45, z], [g, yb - 3.3, z], 0.08, beamWood, 0.06);
-        b.beam([g, yb - 0.45, z], [-g, yb - 3.3, z], 0.08, beamWood, 0.06);
-      } else {
-        for (const x of [-g, g]) b.beam([x, yb - 1.1, z], [x * 0.35, yb - 0.08, z], 0.08, beamWood, 0.06);
-      }
-      if (!d.fittings) return;
-      for (const x of [-g - 0.3, 0, g + 0.3]) {
-        if (posts) {
-          b.box(x - 0.1, yb + 0.08, -r1 - 0.12, x + 0.1, yb + 0.1, r1 + 0.12, HARDWARE_DARK);
-          post(d, x, yb + 0.1, 0, insulator.hex, wire, 6);
-        } else {
-          string(d, x, yb - 0.08, 0, insulator.hex, wire, discs);
-        }
-      }
-      d.nest = [-g * 0.5, yb + 0.14, 0];
-    },
-  };
-};
-
 // --- concrete ---------------------------------------------------------------
 
 type Traverse = 'tri' | 'flat' | 'double' | 'offset' | 'post';
@@ -682,7 +631,7 @@ function concreteWeather(h: HashFn): Weathering {
   return { fade: 0.1 + h(90) * 0.2, grime: 0.32, patchy: 0.07 };
 }
 
-/** F. The rectangular vibrated-concrete pole, the most common line pole there is. */
+/** E. The rectangular vibrated-concrete pole, the most common line pole there is. */
 const rectConcrete: Family = (v, h) => {
   const kind = pickOf<Traverse>(['tri', 'flat', 'double', 'offset', 'post', 'tri', 'flat', 'post', 'double', 'offset'], v);
   const height = 9.5 + h(1) * 1.5;
@@ -717,7 +666,7 @@ const rectConcrete: Family = (v, h) => {
   };
 };
 
-/** G, H. Spun (round) and octagonal concrete: taller lines, later work. */
+/** F, G. Spun (round) and octagonal concrete: taller lines, later work. */
 function roundConcrete(sides: 12 | 8): Family {
   return (v, h) => {
     const kinds: readonly (Traverse | 'string')[] = sides === 12
@@ -772,49 +721,7 @@ function roundConcrete(sides: 12 | 8): Family {
   };
 }
 
-/** I. The concrete portal: two columns and a steel truss for a heavier line. */
-const portal: Family = (v, h) => {
-  const g = 1.5 + h(1) * 0.25;
-  const height = 10 + h(2) * 1.2;
-  const concrete = pickOf(CONCRETE, v * 2 + 1);
-  const steel = pickOf(STEEL, v * 2);
-  const insulator = pickOf([GLASS[2]!, PORCELAIN[1]!, POLYMER[0]!, PORCELAIN[0]!], v);
-  const outside = v % 2 === 1;
-  const discs = 4 + (v % 3);
-  const wire: WireStyle = { radius: 0.02, hex: WIRE_ALUMINIUM };
-  const span = outside ? g + 0.6 : g + 0.25;
-  return {
-    name: `Ж/б портал · гирлянды по ${discs} ${outside ? 'снаружи стоек' : 'между стойками'} · ${insulator.name}`,
-    spacing: 100 + h(6) * 15,
-    height,
-    weather: concreteWeather(h),
-    foot: { x: -g, r: 0.14 },
-    gear: { x: -g, r: 0.1 },
-    legs: [{ x: -g, r: 0.16 }, { x: g, r: 0.16 }],
-    draw(d) {
-      const b = d.b;
-      for (const x of [-g, g]) column(b, x, 0, height, 0.14, 0.09, 0.09, 0.07, concrete);
-      const yb = height;
-      const yt = height + 0.45;
-      b.box(-span, yb, -0.06, span, yb + 0.06, 0.06, steel);
-      b.box(-span, yt - 0.06, -0.06, span, yt, 0.06, steel);
-      const panels = 8;
-      for (let i = 0; i < panels; i++) {
-        const xa = lerp(-span, span, i / panels);
-        const xb = lerp(-span, span, (i + 1) / panels);
-        b.beam(i % 2 === 0 ? [xa, yb + 0.05, 0] : [xa, yt - 0.05, 0], i % 2 === 0 ? [xb, yt - 0.05, 0] : [xb, yb + 0.05, 0], 0.035, steel);
-      }
-      for (const x of [-span, span]) b.beam([x, yb, 0], [x, yt, 0], 0.04, steel);
-      for (const x of [-g, g]) b.beam([x, yb - 0.9, 0.08], [x + Math.sign(x) * -0.7, yb, 0.08], 0.05, steel);
-      if (!d.fittings) return;
-      const xs = outside ? [-g - 0.45, 0, g + 0.45] : [-g * 0.55, 0, g * 0.55];
-      for (const x of xs) string(d, x, yb, 0, insulator.hex, wire, discs);
-      d.nest = [-g * 0.3, yt + 0.02, 0];
-    },
-  };
-};
-
-/** J. Double-circuit concrete: three arms, six wires, the barrel silhouette. */
+/** H. Double-circuit concrete: three arms, six wires, the barrel silhouette. */
 const doubleCircuit: Family = (v, h) => {
   const height = 12 + h(1) * 1.2;
   const concrete = pickOf(CONCRETE, v + 2);
@@ -860,7 +767,7 @@ const doubleCircuit: Family = (v, h) => {
 
 // --- steel ------------------------------------------------------------------
 
-/** K. The lattice mast: four legs, cross-braced faces, strings off the arm tips. */
+/** I. The lattice mast: four legs, cross-braced faces, strings off the arm tips. */
 const lattice: Family = (v, h) => {
   const height = 11 + h(1) * 3;
   const body = height - 0.9;
@@ -922,7 +829,7 @@ const lattice: Family = (v, h) => {
   };
 };
 
-/** L. The tubular steel monopole: the tidy, recent line. */
+/** J. The tubular steel monopole: the tidy, recent line. */
 const tubular: Family = (v, h) => {
   const kind = pickOf(['davit', 'staggered', 'flat', 'davit', 'staggered', 'flat', 'davit', 'staggered', 'flat', 'single'] as const, v);
   const sides = v % 2 === 0 ? 12 : 8;
@@ -1000,7 +907,7 @@ const tubular: Family = (v, h) => {
   };
 };
 
-/** M. The Oppenheimer pole: telescoping iron tubes, the steel telegraph of the desert. */
+/** K. The Oppenheimer pole: telescoping iron tubes, the steel telegraph of the desert. */
 const oppenheimer: Family = (v, h) => {
   const kit = pickOf(['arm2', 'arm4', 'bracket2', 'top', 'arm2+top', 'bracket3'] as const, v);
   const height = 6 + h(1) * 0.8;
@@ -1065,7 +972,7 @@ const I_BEAM_OUTLINE: readonly P2[] = [
   [0.06, 0.07], [-0.06, 0.07], [-0.06, 0.058], [-0.005, 0.058], [-0.005, -0.058], [-0.06, -0.058],
 ];
 
-/** N. The rail or I-beam pole, set in a concrete footing. */
+/** L. The rail or I-beam pole, set in a concrete footing. */
 const railPole: Family = (v, h) => {
   const rail = v % 2 === 0;
   const kit = pickOf(['arm2', 'arm4', 'brackets', 'brackets', 'arm4', 'arm2'] as const, v);
@@ -1121,17 +1028,18 @@ interface FamilyEntry {
   readonly make: Family;
 }
 
-/** 36 timber, 32 concrete, 32 steel: one hundred. */
+/**
+ * 30 timber, 28 concrete, 32 steel: ninety. Nothing stands on two legs: the timber
+ * H-frame and the concrete portal were removed because they broke the game.
+ */
 const FAMILIES: readonly FamilyEntry[] = [
   { era: 'timber', count: 10, make: telegraph },
   { era: 'timber', count: 8, make: ruralPower },
   { era: 'timber', count: 6, make: bracketPhone },
   { era: 'timber', count: 6, make: stubbed },
-  { era: 'timber', count: 6, make: hFrame },
   { era: 'concrete', count: 10, make: rectConcrete },
   { era: 'concrete', count: 8, make: roundConcrete(12) },
   { era: 'concrete', count: 6, make: roundConcrete(8) },
-  { era: 'concrete', count: 4, make: portal },
   { era: 'concrete', count: 4, make: doubleCircuit },
   { era: 'steel', count: 10, make: lattice },
   { era: 'steel', count: 10, make: tubular },
