@@ -442,20 +442,18 @@ export function roadConditionAt(s: number, out?: RoadConditionBuffer): RoadCondi
 /**
  * Poles come in design generations. Crossing between eras is the clearest possible
  * signal that you have travelled somewhere genuinely different, because the
- * silhouette on the horizon changes.
+ * silhouette on the horizon changes: timber, then steel, then concrete. Inside an era
+ * the line is rebuilt in sections of its own design (`poleSections`,
+ * world/props/poles.ts), so the era names the material and the section the pole.
  */
-export type PoleEra = 'timber' | 'lattice' | 'concrete' | 'none';
+export type PoleEra = 'timber' | 'steel' | 'concrete';
 
 export interface PoleCondition {
   readonly era: PoleEra;
-  /** Metres between poles. Later eras space them further apart. */
-  readonly spacing: number;
   /** 0 = upright and intact, MAX_WEAR = as far gone as the world ever shows one. */
   readonly dilapidation: number;
-  /** Probability a given pole still carries its wire span. */
+  /** Probability a given wire of a span is still up. */
   readonly wireChance: number;
-  /** Probability a given lamp still works after dark. */
-  readonly lampChance: number;
 }
 
 /**
@@ -463,40 +461,32 @@ export interface PoleCondition {
  * never reads as a loop and each band's era is drawn from a fixed hash stream.
  *
  * THE LENGTH IS A COVERAGE FIGURE. At 1 000 km a 2 500 km drive crossed two or three
- * bands and met two of the four eras — measured on seed 1337: concrete and lattice,
- * nothing else, so half the roadside the world can build was content a player would
- * never see. The requirement is that a drive of that length meets EVERYTHING, and for
- * four kinds drawn per band that is the coupon collector's `4 · H(4) ≈ 8` bands. At
- * 300 km a 2 500 km drive crosses eight, which covers the set and still gives each
- * era three or four hours of driving to be the world's normal.
+ * bands and met two eras — measured on seed 1337: concrete and lattice, nothing else,
+ * so part of the roadside the world can build was content a player would never see.
+ * At 300 km a 2 500 km drive crosses eight bands, which meets all three eras and still
+ * gives each one three or four hours of driving to be the world's normal.
  */
 const POLE_ERA_BAND_M = 300_000;
 
 /** Domain tag separating the pole-era-band hash stream from every other hash01 use. */
 const POLE_ERA_TAG = 0x0e7a5e;
 
-/** Metres between poles in each maintained era. 'none' has no poles at all. */
-const POLE_SPACING: Record<Exclude<PoleEra, 'none'>, number> = {
-  timber: 44,
-  lattice: 62,
-  concrete: 85,
-};
-
-/** The era a band gets, from the fixed hash stream. Roughly one band in four is
- * 'none': a long stretch with no poles at all is what makes their return startling. */
+/**
+ * Every band has a line. There used to be a band in four with no poles at all; the
+ * owner's call is that the road is never without them, so that roll is gone and the
+ * era is drawn from the same channel it always was.
+ */
 function poleEraForBand(band: number): PoleEra {
-  if (hash01(POLE_ERA_TAG, band) < 0.25) return 'none';
   const pick = hash01(POLE_ERA_TAG, band, 1);
   if (pick < 0.25) return 'timber';
-  if (pick < 0.6) return 'lattice';
+  if (pick < 0.6) return 'steel';
   return 'concrete';
 }
 
-interface PoleEraBand {
+export interface PoleEraBand {
   readonly start: number;
   readonly end: number;
   readonly era: PoleEra;
-  readonly spacing: number;
 }
 
 let poleEraBands: readonly PoleEraBand[] | null = null;
@@ -509,8 +499,7 @@ export function poleEraSegments(): readonly PoleEraBand[] {
   for (let i = 0; i < count; i++) {
     const start = i * POLE_ERA_BAND_M;
     const end = Math.min((i + 1) * POLE_ERA_BAND_M, ROAD_LENGTH);
-    const era = poleEraForBand(i);
-    bands.push({ start, end, era, spacing: era === 'none' ? 0 : POLE_SPACING[era] });
+    bands.push({ start, end, era: poleEraForBand(i) });
   }
   poleEraBands = bands;
   return bands;
@@ -518,26 +507,20 @@ export function poleEraSegments(): readonly PoleEraBand[] {
 
 export function poleConditionAt(s: number): PoleCondition {
   const band = poleBandAt(s);
-  if (band.era === 'none') {
-    return { era: 'none', spacing: 0, dilapidation: MAX_WEAR, wireChance: 0, lampChance: 0 };
-  }
 
   // Dilapidation resets at each era boundary: a new era means newer infrastructure.
   const within = (s - band.start) / (band.end - band.start);
 
   return {
     era: band.era,
-    spacing: band.spacing,
     // Clamped like road decay, and for the same reason: an infrastructure generation
     // ends with its poles leaning, not lying in the sand. See MAX_WEAR.
     dilapidation: Math.min(MAX_WEAR, within * 1.15),
-    // Wires and lamps are NOT part of that ceiling, and deliberately. A span that has
-    // come down and a lamp that has failed are things that happened to a pole, not how
-    // worn the pole is: they are survival of attached equipment, already binary, and
-    // already tuned so most of the fleet is stripped long before the poles lean.
+    // Wires are NOT part of that ceiling, and deliberately. A span that has come down
+    // is something that happened to a line, not how worn its poles are: survival of
+    // attached equipment, already binary, and tuned so most of the wire is gone long
+    // before the poles lean.
     wireChance: Math.max(0, 1 - within * 1.3),
-    // Lamps die well before the poles fall over.
-    lampChance: Math.max(0, 1 - within * 2.2),
   };
 }
 

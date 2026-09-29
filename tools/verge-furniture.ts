@@ -42,7 +42,7 @@ import { CHUNK_LENGTH, type ChunkContent, type ChunkContext } from '../src/world
 import { DebrisField } from '../src/world/debris';
 import { WorldOrigin } from '../src/world/origin';
 import { varietyEventOfKindAt, varietyEventsBetween } from '../src/world/director';
-import { poleConditionAt, poleEraSegments } from '../src/world/gradient';
+import { poleConditionAt } from '../src/world/gradient';
 import {
   DELINEATOR_EMBED,
   DELINEATOR_GAP_MAX,
@@ -52,11 +52,11 @@ import {
   DelineatorProvider,
 } from '../src/world/props/delineators';
 import {
-  DERELICT_SINK_M,
   PoleProvider,
   createPoleDisplay,
   poleAnomalyAt,
-  poleDerelictAt,
+  poleDesignAt,
+  poleSections,
   type PoleAnomaly,
 } from '../src/world/props/poles';
 import { Road } from '../src/world/road';
@@ -805,96 +805,58 @@ interface ExpectedPole {
 }
 
 /**
- * The era schedule's own pole stations in a range, rebuilt from `poleEraSegments`.
+ * The section schedule's own pole stations in a range, rebuilt from `poleSections`.
  *
  * This is the independent side of the comparison: if an anomaly ever moved a pole,
  * added one or dropped one, these positions and the provider's would disagree.
  */
 function expectedPoles(world: World, fromS: number, toS: number): ExpectedPole[] {
-  const out: ExpectedPole[] = [];
-  let indexBase = 0;
-  for (const segment of poleEraSegments()) {
-    const count = segment.spacing > 0 ? Math.floor((segment.end - segment.start) / segment.spacing) : 0;
-    if (segment.start < toS && segment.end > fromS && count > 0) {
-      for (let k = 0; k < count; k++) {
-        const s = segment.start + (k + 0.5) * segment.spacing;
-        if (s < fromS || s >= toS) continue;
-        const p = world.road.offsetPoint(s, -(world.road.halfWidthAt(s) + POLE_SETBACK_M));
-        out.push({ s, index: indexBase + k, x: p.x, y: world.terrain.heightAt(p.x, p.z, s), z: p.z });
-      }
-    }
-    indexBase += count;
-  }
-  return out;
+  return poleStationsBetween(fromS, toS).map(({ s, index }) => {
+    const p = world.road.offsetPoint(s, -(world.road.halfWidthAt(s) + POLE_SETBACK_M));
+    return { s, index, x: p.x, y: world.terrain.heightAt(p.x, p.z, s), z: p.z };
+  });
 }
 
 /** Pole stations in a range: the same walk, without the road queries. */
 function poleStationsBetween(fromS: number, toS: number): { s: number; index: number }[] {
   const out: { s: number; index: number }[] = [];
-  let indexBase = 0;
-  for (const segment of poleEraSegments()) {
-    const count = segment.spacing > 0 ? Math.floor((segment.end - segment.start) / segment.spacing) : 0;
-    if (segment.start < toS && segment.end > fromS && count > 0) {
-      const first = Math.max(0, Math.ceil((fromS - segment.start) / segment.spacing - 0.5));
-      for (let k = first; k < count; k++) {
-        const s = segment.start + (k + 0.5) * segment.spacing;
-        if (s >= toS) break;
-        if (s >= fromS) out.push({ s, index: indexBase + k });
-      }
+  for (const section of poleSections()) {
+    if (section.start >= toS || section.end <= fromS) continue;
+    for (let k = 0; k < section.count; k++) {
+      const s = section.start + (k + 0.5) * section.spacing;
+      if (s >= toS) break;
+      if (s >= fromS) out.push({ s, index: section.firstIndex + k });
     }
-    indexBase += count;
   }
   return out;
 }
 
-// -- EVERY scheduled event produces something -------------------------------
+// -- EVERY scheduled event alters the line -----------------------------------
 //
 // The 60 km census below cannot see this case at all: pole eras are 300 km bands
 // drawn from a SEED-INDEPENDENT hash stream, so every seed spends its first 300 km
-// in the same era and that one is not the empty one. Roughly a band in four has no
-// poles (`poleEraForBand` in gradient.ts) and an override has nothing to override
-// there, so those events used to schedule a change and show nothing — 151 of 602
-// over this same road. A band with no line now gets a standalone derelict instead.
-//
-// This is the check that matters most in this file, because it is the director's
-// whole claim: over 6000 km, EVERY poleAnomaly event alters a pole line or leaves a
-// derelict, and the two are mutually exclusive by construction.
+// in the same era. There used to be bands with no poles, where an event had nothing
+// to override and a stand-in derelict was built instead; now every band has a line
+// and sections tile the road with no gap wider than the shortest event span, so this
+// is the director's whole claim: over 6000 km, EVERY poleAnomaly event alters poles.
 
 const CENSUS_M = 6_000_000;
 const CENSUS_SEED = 1337;
 let censusEvents = 0;
 let censusWithCluster = 0;
-let censusWithDerelict = 0;
-let censusStarved = 0;
-let censusDoubled = 0;
 
 for (const event of varietyEventsBetween(CENSUS_SEED, 0, CENSUS_M)) {
   if (event.kind !== 'poleAnomaly') continue;
   censusEvents++;
   const stations = poleStationsBetween(event.s - event.halfLength, event.s + event.halfLength);
-  const cluster = stations.some(({ s, index }) => poleAnomalyAt(CENSUS_SEED, s, index) !== 'none');
-  const derelict = poleDerelictAt(CENSUS_SEED, event.s) !== null;
-  if (cluster && derelict) censusDoubled++;
-  if (cluster) censusWithCluster++;
-  else if (derelict) censusWithDerelict++;
-  else censusStarved++;
+  if (stations.some(({ s, index }) => poleAnomalyAt(CENSUS_SEED, s, index) !== 'none')) censusWithCluster++;
 }
 
 console.log(
   `  seed ${CENSUS_SEED}, first ${CENSUS_M / 1000} km: ${censusEvents} events — ` +
-    `${censusWithCluster} altered a pole line, ${censusWithDerelict} left a derelict ` +
-    `where there was no line, ${censusStarved} produced nothing\n`,
+    `${censusWithCluster} altered a pole line, ${censusEvents - censusWithCluster} produced nothing\n`,
 );
-check(
-  'every scheduled event produces something',
-  censusStarved === 0 && censusWithCluster + censusWithDerelict === censusEvents,
-  `${censusWithCluster + censusWithDerelict}/${censusEvents} events`,
-);
-check(
-  'a derelict never stands beside a line it could alter',
-  censusDoubled === 0 && censusWithDerelict > 0,
-  `${censusDoubled} events with both, ${censusWithDerelict} derelicts`,
-);
+check('every scheduled event alters the line', censusWithCluster === censusEvents, `${censusWithCluster}/${censusEvents} events`);
 
 /** Radians the pole's own axis is off vertical, read back off its rendered group. */
 function leanOf(group: THREE.Object3D): number {
@@ -902,11 +864,7 @@ function leanOf(group: THREE.Object3D): number {
   return Math.acos(Math.min(1, Math.max(-1, up.y)));
 }
 
-/** Authored era heights, for the fallen-pole tip test. See POLE_HEIGHT in world/props/poles.ts. */
-const POLE_HEIGHT: Record<string, number> = { timber: 6.5, lattice: 8.5, concrete: 9, none: 0 };
-
 let anomalyEvents = 0;
-let anomalyEventsWithoutLine = 0;
 let clustersMeasured = 0;
 let clustersNotConsecutive = 0;
 let clustersTooLong = 0;
@@ -931,13 +889,6 @@ for (const seed of SEEDS) {
     anomalyEvents++;
     const spanStart = event.s - event.halfLength;
     const spanEnd = event.s + event.halfLength;
-    if (poleStationsBetween(spanStart, spanEnd).length === 0) {
-      // No line inside this span, so the event leaves a DERELICT rather than altering
-      // poles. That path has its own section below; here it would only confuse the
-      // count-and-position comparison, which is about the line.
-      anomalyEventsWithoutLine++;
-      continue;
-    }
 
     // A window either side of the span, so "only over its span" is measured against
     // poles that are outside it but close enough to be caught by an over-wide run.
@@ -949,7 +900,7 @@ for (const seed of SEEDS) {
     for (let chunk = firstChunk; chunk <= lastChunk; chunk++) {
       const content = provider.build(contextFor(world, chunk));
       contents.push(content);
-      // A pole is a Group; wires are Meshes and the light-budget markers are lights.
+      // A pole is a Group; the chunk's wires are one Mesh.
       for (const child of content.group.children) if (child instanceof THREE.Group) built.push(child);
     }
 
@@ -985,8 +936,9 @@ for (const seed of SEEDS) {
       // adds meshes; a downed pole has the same meshes and a lean no weathered pole
       // ever reaches, so both readings are needed to prove the form actually changed.
       const cond = poleConditionAt(pole.s);
-      const plain = createPoleDisplay(cond, seed, pole.index, 'none');
-      const altered = createPoleDisplay(cond, seed, pole.index, anomaly);
+      const design = poleDesignAt(pole.s)!;
+      const plain = createPoleDisplay(design, cond, seed, pole.index, 'none');
+      const altered = createPoleDisplay(design, cond, seed, pole.index, anomaly);
       if (!(altered.children.length > plain.children.length || leanOf(altered) > leanOf(plain) + 0.5)) {
         formsUnchanged++;
       }
@@ -1004,7 +956,7 @@ for (const seed of SEEDS) {
         downPolesTowardRoad++;
         continue;
       }
-      const tip = new THREE.Vector3(0, POLE_HEIGHT[cond.era]!, 0)
+      const tip = new THREE.Vector3(0, design.height, 0)
         .applyQuaternion(group.quaternion)
         .add(group.position);
       const baseOut = Math.abs(world.road.project(pole.x, pole.z, pole.s).lateral);
@@ -1022,7 +974,6 @@ const variantSummary = (['down', 'wrapped', 'nest', 'gear'] as const)
   .join(', ');
 console.log(
   `  ${anomalyEvents} scheduled events, ${clustersMeasured} clusters measured\n` +
-    `  ${anomalyEventsWithoutLine} of them had no line inside their span and left a derelict instead\n` +
     `  poles altered: ${variantSummary}\n` +
     `  fallen poles gained at least ${worstDownOutwardGain.toFixed(2)} m of clearance from the road\n` +
     `  worst pole position drift against the era schedule ${worstPoleDrift.toExponential(1)} m\n`,
@@ -1048,125 +999,6 @@ check(
   'all four variants occur',
   (['down', 'wrapped', 'nest', 'gear'] as const).every((variant) => variantCounts[variant] > 0),
   variantSummary,
-);
-
-// ===========================================================================
-// Derelicts: the fallback where there is no pole line
-// ===========================================================================
-
-console.log('\n=== derelicts ===\n');
-
-/** Start of the first era band with no poles at all. Seed-independent by design. */
-function firstEmptyBandStart(): number {
-  for (const segment of poleEraSegments()) if (segment.era === 'none') return segment.start;
-  throw new Error('the era schedule has no empty band');
-}
-
-/** How far into an empty band to look for events to build. */
-const DERELICT_PROBE_M = 60_000;
-
-let derelictsBuilt = 0;
-let derelictPartsWrong = 0;
-let derelictsWrongSide = 0;
-let derelictsOffSetback = 0;
-let derelictsOffGround = 0;
-let derelictsTowardRoad = 0;
-let derelictsWithStump = 0;
-let worstDerelictSetbackError = 0;
-let worstDerelictGroundError = 0;
-let worstDerelictOutwardGain = Infinity;
-
-const emptyBandStart = firstEmptyBandStart();
-for (const seed of SEEDS) {
-  const world = makeWorld(seed);
-  const provider = new PoleProvider();
-  for (const event of varietyEventsBetween(seed, emptyBandStart, emptyBandStart + DERELICT_PROBE_M)) {
-    if (event.kind !== 'poleAnomaly') continue;
-    const derelict = poleDerelictAt(seed, event.s);
-    if (!derelict) continue;
-    const content = provider.build(contextFor(world, Math.floor(event.s / CHUNK_LENGTH)));
-    const groups = content.group.children.filter((child): child is THREE.Group => child instanceof THREE.Group);
-    derelictsBuilt++;
-    if (derelict.stumpS !== null) derelictsWithStump++;
-    // In an empty band the line contributes nothing, so every Group here belongs to
-    // the derelict: the mast, and the stump when the roll gave it one.
-    if (groups.length !== (derelict.stumpS !== null ? 2 : 1)) {
-      derelictPartsWrong++;
-      content.dispose?.();
-      continue;
-    }
-
-    // The mast is the part at the event's own arclength; the stump is 40 m on.
-    const mast = groups.reduce((closest, candidate) =>
-      Math.abs(world.road.project(candidate.position.x, candidate.position.z, event.s).s - event.s) <
-      Math.abs(world.road.project(closest.position.x, closest.position.z, event.s).s - event.s)
-        ? candidate
-        : closest,
-    );
-    const projection = world.road.project(mast.position.x, mast.position.z, event.s);
-    if (Math.sign(projection.lateral) !== derelict.side) derelictsWrongSide++;
-    const setbackError = Math.abs(
-      Math.abs(projection.lateral) - world.road.halfWidthAt(projection.s) - POLE_SETBACK_M,
-    );
-    worstDerelictSetbackError = Math.max(worstDerelictSetbackError, setbackError);
-    if (setbackError > LATERAL_TOLERANCE) derelictsOffSetback++;
-
-    // Half-buried is an authored figure, so this is exact rather than tolerant: the
-    // butt sits `DERELICT_SINK_M` BELOW the ground, and if it ever sat above it the
-    // mast would be a nine-metre mast hovering over a dune.
-    const ground = world.terrain.heightAt(mast.position.x, mast.position.z, projection.s);
-    const groundError = Math.abs(mast.position.y - (ground - DERELICT_SINK_M));
-    worstDerelictGroundError = Math.max(worstDerelictGroundError, groundError);
-    if (groundError > GROUND_TOLERANCE) derelictsOffGround++;
-
-    // And the same test the fallen poles of a live line get: the tip ends further
-    // from the carriageway than the butt, so nothing lies across a lane.
-    const tip = new THREE.Vector3(0, POLE_HEIGHT[derelict.era]!, 0)
-      .applyQuaternion(mast.quaternion)
-      .add(mast.position);
-    const gain =
-      Math.abs(world.road.project(tip.x, tip.z, event.s).lateral) - Math.abs(projection.lateral);
-    worstDerelictOutwardGain = Math.min(worstDerelictOutwardGain, gain);
-    if (gain <= 0) derelictsTowardRoad++;
-    content.dispose?.();
-  }
-}
-
-console.log(
-  `  ${derelictsBuilt} derelicts built in the first empty era band ` +
-    `(s = ${(emptyBandStart / 1000).toFixed(0)} km), ${derelictsWithStump} with a surviving stump\n` +
-    `  setback error worst ${worstDerelictSetbackError.toFixed(3)} m against the ${POLE_SETBACK_M} m pole line\n` +
-    `  half-buried depth error worst ${worstDerelictGroundError.toFixed(4)} m ` +
-    `against ${DERELICT_SINK_M} m\n` +
-    `  masts gained at least ${worstDerelictOutwardGain.toFixed(2)} m of clearance from the road\n`,
-);
-
-check('derelicts are built at all', derelictsBuilt > 0, `${derelictsBuilt} derelicts`);
-check(
-  'a derelict is exactly its described parts',
-  derelictPartsWrong === 0,
-  `${derelictPartsWrong} of ${derelictsBuilt} with the wrong part count`,
-);
-check('some derelicts keep a stump', derelictsWithStump > 0, `${derelictsWithStump} of ${derelictsBuilt}`);
-check(
-  "every derelict lies on the event's side",
-  derelictsWrongSide === 0,
-  `${derelictsWrongSide} of ${derelictsBuilt} on the wrong side`,
-);
-check(
-  'every derelict stands on the old pole line',
-  derelictsOffSetback === 0,
-  `${derelictsOffSetback} off ${POLE_SETBACK_M} m, worst ${worstDerelictSetbackError.toFixed(3)} m`,
-);
-check(
-  'every derelict is half-buried, not floating',
-  derelictsOffGround === 0,
-  `${derelictsOffGround} of ${derelictsBuilt} off ${DERELICT_SINK_M} m depth`,
-);
-check(
-  'every derelict fell away from the road',
-  derelictsTowardRoad === 0,
-  `${derelictsTowardRoad} of ${derelictsBuilt} toward the carriageway`,
 );
 
 // ===========================================================================
@@ -1220,18 +1052,12 @@ let fingerprintNumbers = 0;
 for (const seed of SEEDS) {
   const world = makeWorld(seed);
   // Chunks that actually hold content rather than empty road: the verge events of the
-  // seed's first few kilometres, which is a run, a track and a cluster each — plus one
-  // out in the empty era band, so a derelict's rebuild is compared too.
+  // seed's first few kilometres, which is a run, a track and a cluster each.
   const chunks = new Set<number>();
   for (const event of varietyEventsBetween(seed, 0, SCAN_CHUNKS * CHUNK_LENGTH)) {
     if (event.channel !== 1) continue;
     chunks.add(Math.floor(event.s / CHUNK_LENGTH));
     if (chunks.size >= 12) break;
-  }
-  for (const event of varietyEventsBetween(seed, emptyBandStart, emptyBandStart + DERELICT_PROBE_M)) {
-    if (event.kind !== 'poleAnomaly' || !poleDerelictAt(seed, event.s)) continue;
-    chunks.add(Math.floor(event.s / CHUNK_LENGTH));
-    break;
   }
   for (const chunk of chunks) {
     const first = fingerprint(world, chunk);

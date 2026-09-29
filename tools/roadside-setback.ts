@@ -104,8 +104,8 @@ console.log(
 );
 
 // --- poles ---------------------------------------------------------------------
-// A pole's own group sits at its base; the lean and the lamp arm move the meshes off
-// it, so the BASE is what the setback is about and it is read from the group.
+// A pole's own group sits at its base; the lean and the arms move the meshes off it,
+// so the BASE is what the setback is about and it is read from the group.
 const poles = new PoleProvider();
 for (const [label, chunk] of [['narrow', narrowChunk], ['wide', wideChunk]] as const) {
   const content = poles.build(contextFor(chunk));

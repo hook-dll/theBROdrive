@@ -2,14 +2,23 @@ import * as THREE from 'three';
 import { primeMaxAnisotropy } from './render/texturequality';
 import { SurfaceType } from './core/surfaces';
 import { applyComicShading } from './render/comic';
-import { MAX_WEAR, PALETTE_CYCLE_M, desertPaletteAt, poleConditionAt, poleEraSegments } from './world/gradient';
-import type { PoleCondition, PoleEra } from './world/gradient';
+import { PALETTE_CYCLE_M, desertPaletteAt } from './world/gradient';
 import { desertPropForms } from './world/props/forms';
+import { POLE_DESIGN_COUNT, poleDesign } from './world/props/poledesigns';
 import { createPoleDisplay } from './world/props/poles';
 
 const GRID_COLUMNS = 5;
 const CELL_X = 24;
 const CELL_Z = 25;
+/**
+ * The hundred pole designs get a grid of their own behind the desert forms: ten to a
+ * row, close enough that a row reads as a catalogue page and far enough apart that
+ * the widest arms (2.4 m either side) never touch.
+ */
+const POLE_COLUMNS = 10;
+const POLE_CELL_X = 8;
+const POLE_CELL_Z = 14;
+const POLE_GRID_GAP = 16;
 const WALK_SPEED = 8;
 const FAST_SPEED = 24;
 const EYE_HEIGHT = 1.75;
@@ -20,6 +29,9 @@ interface GalleryEntry {
   readonly root: THREE.Group;
   readonly x: number;
   readonly z: number;
+  /** Where `focus` stands to look at it: metres back, and eye height. */
+  readonly back: number;
+  readonly eye: number;
 }
 
 function pixelRatio(): number {
@@ -47,7 +59,7 @@ function makeLabel(index: number, name: string): THREE.Sprite {
   context.fillText(String(index + 1).padStart(2, '0'), 72, 96);
   context.font = 'bold 29px Segoe UI, sans-serif';
   context.textAlign = 'left';
-  context.fillText(name, 132, 96);
+  context.fillText(name, 132, 96, 364);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.minFilter = THREE.LinearFilter;
@@ -104,12 +116,6 @@ function createInterface(entries: readonly GalleryEntry[], focus: (index: number
   return root;
 }
 
-function conditionForEra(era: PoleEra, dilapidation: number): PoleCondition {
-  const segment = poleEraSegments().find((candidate) => candidate.era === era);
-  if (!segment) throw new Error(`No ${era} pole era exists`);
-  return { ...poleConditionAt((segment.start + segment.end) * 0.5), dilapidation };
-}
-
 export function bootPropGallery(): void {
   const canvas = document.getElementById('game');
   const loading = document.getElementById('launch-loading');
@@ -130,40 +136,56 @@ export function bootPropGallery(): void {
   const sun = new THREE.DirectionalLight(0xffe0b1, 2.8); sun.position.set(-55, 85, -38); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.camera.left = -100; sun.shadow.camera.right = 100; sun.shadow.camera.top = 100; sun.shadow.camera.bottom = -100; sun.shadow.camera.near = 5; sun.shadow.camera.far = 250; sun.shadow.normalBias = 0.035; scene.add(sun);
 
   const forms = [...desertPropForms(SurfaceType.Rock), ...desertPropForms(SurfaceType.Sand)];
-  const specimenCount = forms.length + 6;
-  const gridRows = Math.ceil(specimenCount / GRID_COLUMNS);
+  const gridRows = Math.ceil(forms.length / GRID_COLUMNS);
+  const poleRows = Math.ceil(POLE_DESIGN_COUNT / POLE_COLUMNS);
+  const formsDepth = gridRows * CELL_Z;
+  const polesDepth = poleRows * POLE_CELL_Z;
+  const totalDepth = formsDepth + POLE_GRID_GAP + polesDepth;
+  const formsTop = -totalDepth / 2;
+  const polesTop = formsTop + formsDepth + POLE_GRID_GAP;
+  const width = Math.max(GRID_COLUMNS * CELL_X, POLE_COLUMNS * POLE_CELL_X);
   const groundMaterial = applyComicShading(new THREE.MeshStandardMaterial({ color: 0xd29459, roughness: 0.96 }), { reliefShadeStrength: 0 });
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(GRID_COLUMNS * CELL_X + 18, gridRows * CELL_Z + 18), groundMaterial);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(width + 18, totalDepth + 18), groundMaterial);
   ground.rotation.x = -Math.PI / 2; ground.position.y = -0.03; ground.receiveShadow = true; scene.add(ground);
   const entries: GalleryEntry[] = [];
   const rockPads: THREE.MeshStandardMaterial[] = [];
   const sharedMaterials = new Set<THREE.MeshStandardMaterial>();
-  const addEntry = (name: string, root: THREE.Group, rockPad: boolean): void => {
-    const index = entries.length; const column = index % GRID_COLUMNS; const row = Math.floor(index / GRID_COLUMNS);
-    const x = (column - (GRID_COLUMNS - 1) / 2) * CELL_X; const z = (row - (gridRows - 1) / 2) * CELL_Z;
-    const padMaterial = new THREE.MeshStandardMaterial({ color: rockPad ? 0x815f42 : 0xc38b50, roughness: 1 });
-    const pad = new THREE.Mesh(new THREE.CircleGeometry(8.5, 32), padMaterial); pad.rotation.x = -Math.PI / 2; pad.position.set(x, 0, z); pad.receiveShadow = true; scene.add(pad);
-    if (rockPad) rockPads.push(padMaterial);
+  // `tinted` entries take the palette slider's gravel colour, as the scatter does in the
+  // game. Poles do not: they carry their own paint in vertex colour, which a material
+  // colour would multiply.
+  const addEntry = (name: string, root: THREE.Group, x: number, z: number, pad: { radius: number; rock: boolean }, tinted: boolean, view: { back: number; eye: number }): void => {
+    const index = entries.length;
+    const padMaterial = new THREE.MeshStandardMaterial({ color: pad.rock ? 0x815f42 : 0xc38b50, roughness: 1 });
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(pad.radius, 32), padMaterial); disc.rotation.x = -Math.PI / 2; disc.position.set(x, 0, z); disc.receiveShadow = true; scene.add(disc);
+    if (pad.rock) rockPads.push(padMaterial);
     root.position.set(x, root.position.y, z);
-    root.traverse((object) => { if (object instanceof THREE.Mesh) { object.castShadow = true; object.receiveShadow = true; const material = object.material; if (material instanceof THREE.MeshStandardMaterial) { applyComicShading(material, { contourStrength: 0, stippleStrength: 0, reliefShadeStrength: 0 }); sharedMaterials.add(material); } } });
+    root.traverse((object) => { if (object instanceof THREE.Mesh) { object.castShadow = true; object.receiveShadow = true; const material = object.material; if (tinted && material instanceof THREE.MeshStandardMaterial) { applyComicShading(material, { contourStrength: 0, stippleStrength: 0, reliefShadeStrength: 0 }); sharedMaterials.add(material); } } });
     scene.add(root);
     const bounds = new THREE.Box3().setFromObject(root); const label = makeLabel(index, name); label.position.set(x, Math.max(2.6, bounds.max.y + 1.1), z); scene.add(label);
-    entries.push({ name, root, x, z });
+    entries.push({ name, root, x, z, ...view });
   };
-  for (const form of forms) {
+  forms.forEach((form, i) => {
+    const x = ((i % GRID_COLUMNS) - (GRID_COLUMNS - 1) / 2) * CELL_X;
+    const z = formsTop + (Math.floor(i / GRID_COLUMNS) + 0.5) * CELL_Z;
     const specimen = new THREE.Group(); const mesh = new THREE.Mesh(form.geometry, form.material); const scale = (form.minScale + form.maxScale) * 0.5;
-    mesh.scale.setScalar(scale); mesh.position.y = -form.sink * form.baseRadius * scale; specimen.add(mesh); addEntry(form.id, specimen, desertPropForms(SurfaceType.Rock).includes(form));
+    mesh.scale.setScalar(scale); mesh.position.y = -form.sink * form.baseRadius * scale; specimen.add(mesh);
+    addEntry(form.id, specimen, x, z, { radius: 8.5, rock: desertPropForms(SurfaceType.Rock).includes(form) }, true, { back: 10, eye: EYE_HEIGHT });
+  });
+  // Every design stands as the world builds it at the start of its section: upright,
+  // fully fitted, unworn. A worn pole differs only in lean and in whether it still
+  // has its arms, which is a pose rather than a design.
+  for (let id = 0; id < POLE_DESIGN_COUNT; id++) {
+    const design = poleDesign(id);
+    const x = ((id % POLE_COLUMNS) - (POLE_COLUMNS - 1) / 2) * POLE_CELL_X;
+    const z = polesTop + (Math.floor(id / POLE_COLUMNS) + 0.5) * POLE_CELL_Z;
+    const pole = createPoleDisplay(design, { era: design.era, dilapidation: 0, wireChance: 1 }, 0xdecade, id);
+    addEntry(design.name, pole, x, z, { radius: 3.2, rock: false }, false, { back: design.height * 1.05 + 2, eye: design.height * 0.55 });
   }
-  const eras: readonly PoleEra[] = ['timber', 'lattice', 'concrete'];
-  // The second entry is MAX_WEAR, not the old 0.98: that is now the most dilapidated
-  // pole the world builds, so it is the one the gallery has to show.
-  for (const era of eras) for (const dilapidation of [0.1, MAX_WEAR]) addEntry(`${era} · износ ${Math.round(dilapidation * 100)}%`, createPoleDisplay(conditionForEra(era, dilapidation), 0xdecade, entries.length + 71), false);
-
 
   let yaw = 0; let pitch = -0.5; const keys = new Set<string>();
   const applyLook = (): void => { camera.rotation.set(pitch, yaw, 0); };
-  const overview = (): void => { camera.position.set(0, Math.max(48, gridRows * 18), Math.max(75, gridRows * 24)); camera.lookAt(0, 3, 0); yaw = camera.rotation.y; pitch = camera.rotation.x; };
-  const focus = (index: number): void => { const entry = entries[index]; if (!entry) return; camera.position.set(entry.x, EYE_HEIGHT, entry.z + 10); yaw = 0; pitch = -0.05; applyLook(); };
+  const overview = (): void => { camera.position.set(0, Math.max(48, totalDepth * 0.7), totalDepth * 0.5 + 60); camera.lookAt(0, 3, 0); yaw = camera.rotation.y; pitch = camera.rotation.x; };
+  const focus = (index: number): void => { const entry = entries[index]; if (!entry) return; camera.position.set(entry.x, entry.eye, entry.z + entry.back); yaw = 0; pitch = -0.05; applyLook(); };
   overview(); createInterface(entries, focus, overview);
   // These singleton materials are intentionally recoloured in this dev-only scene;
   // returning to the game reloads the page, so no gameplay renderer inherits the swatch.

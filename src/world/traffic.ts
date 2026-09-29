@@ -501,7 +501,6 @@ export class RoadTraffic {
   private settingsRef: Settings | null = null;
   private clockSync = 0;
   private coordinationTimer = 0;
-  private daylightFactor = 1;
   private impactCount = 0;
   private passCount = 0;
 
@@ -585,13 +584,9 @@ export class RoadTraffic {
     };
   }
 
-  setDaylightFactor(daylightFactor: number): void {
-    this.daylightFactor = Math.max(0, Math.min(1, daylightFactor));
-  }
-
   /**
    * Distance along this driver's road direction to the nearest opposing car.
-   * Negative distances are already behind and therefore cannot keep the beam dipped.
+   * Negative distances are already behind and therefore do not count as coming.
    */
   nearestOncomingDistance(
     forwardS: number,
@@ -999,10 +994,7 @@ export class RoadTraffic {
         car.autopilot.clearPedestrianObstacle();
       }
       if (coordinate) {
-        car.autopilot.setLightingConditions(
-          this.daylightFactor,
-          this.nearestOncomingDistance(car.forwardS, car.direction, car.id),
-        );
+        car.autopilot.setOncomingGap(this.nearestOncomingDistance(car.forwardS, car.direction, car.id));
       }
       car.lifetimeTimer -= dt;
       // A CAR THAT HAS BEEN STANDING STILL FOR HALF A MINUTE IS NOT TRAFFIC.
@@ -1281,7 +1273,6 @@ export class RoadTraffic {
     autopilot.setSpeedCap(request.speedCap);
     autopilot.setPace(request.pace);
     autopilot.setTrafficRecoveryPolicy(true);
-    autopilot.setLowBeamsAlwaysOn(true);
     autopilot.setEngaged(true);
     const record: TrafficCar = {
       id: request.id,

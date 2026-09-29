@@ -795,8 +795,8 @@ bun tools/playground-lap.ts [кругов]
 Реальный участок реальной дороги: тот же `Road`, `Terrain`, `SurfaceField`,
 `RoadMeshProvider`, `TerrainMeshProvider` и `ScatterProvider`, что стримит игра, плюс
 **ego** — настоящий `Vehicle` под настоящим `Autopilot`, который едет внутри потока.
-Игроку в `main.ts` каждый шаг отдают `setLightingConditions(dayFactor,
-nearestOncomingDistance)`; стенд делает то же, иначе меряется водитель, не знающий,
+Игроку в `main.ts` каждый шаг отдают `setOncomingGap(nearestOncomingDistance)`;
+стенд делает то же, иначе меряется водитель, не знающий,
 что едет навстречу.
 
 `--ego` задаёт характер ego (по умолчанию `hurried`), и `road allows` считается для

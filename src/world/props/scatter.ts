@@ -30,7 +30,12 @@ import {
   type PropForm,
 } from './forms';
 import { buildContactShadows, type ContactShadowSpot } from './contactshadow';
-import type { GroundCoverField, GroundCoverHandle, GroundCoverSpot } from './groundcover';
+import {
+  groundCoverDensity,
+  type GroundCoverField,
+  type GroundCoverHandle,
+  type GroundCoverSpot,
+} from './groundcover';
 
 // ---------------------------------------------------------------------------
 // Scratch objects reused across the per-chunk build loops (never per-frame).
@@ -110,7 +115,10 @@ const ROCK_COLLIDER_MIN = 0.55; // pebbles under this radius (m) get no collider
  * runoff off the asphalt waters the verge, but spread well out over the open desert
  * to `GROUND_COVER_LAT`: the first cut fell off with the cube of the distance over
  * 160 m and read as a hedge along the verge. Only built inside the physics radius: a
- * tuft is a few pixels by then, and a chunk rebuilds when it crosses it.
+ * tuft is a few pixels by then, and a chunk rebuilds when it crosses it. That profile
+ * is what a stretch at full density looks like — `groundCoverDensity`
+ * (`groundcover.ts`) thins it over kilometres of road and clears it entirely on bare
+ * stretches, keyed on the arclength each candidate is placed at.
  */
 const TAG_GROUND_COVER = 0x7f6c0e;
 const GROUND_COVER_CELL = 3;
@@ -469,6 +477,12 @@ export class ScatterProvider implements ChunkProvider {
           const near = 1 - Math.min(1, past / GROUND_COVER_LAT);
           const density = GROUND_COVER_FAR + (GROUND_COVER_NEAR - GROUND_COVER_FAR) * near * near;
           if (roll >= density) continue;
+          // Cover comes and goes in long stretches along the road: `groundCoverDensity`
+          // is 1 where today's field stands, 0 on bare ground and a share between. The
+          // SAME roll is tested again against the thinned density, so a prop that
+          // survives a sparse stretch is one of the props that was already there, in the
+          // place it was — the thinning only takes candidates away, it never moves one.
+          if (roll >= density * groundCoverDensity(s, seed)) continue;
           const p = ctx.road.offsetPoint(s, lateral);
           if (ctx.terrain.surfaceFromFrame(p.x, p.z, lateral, s) === SurfaceType.Rock) continue;
           const form = pickDesertForm(covers, hash01(seed, TAG_GROUND_COVER, cs, cl, 3));

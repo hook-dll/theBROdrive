@@ -57,17 +57,30 @@ const ROAD_PHYSICS_REACH = 1200;
  * of the scene's 928 nodes in a measured drive. Freezing keeps the world matrices exact:
  * a frozen child is still re-multiplied whenever its parent's world matrix changes, so
  * whoever moves a frozen root afterwards (a rebase) only has to call its `updateMatrix`.
- *
- * Street-lamp source markers are the one thing in the scenery that a provider moves
- * after building it (`setNearestLampSources`), so anything the light budget reads keeps
- * its automatic matrix.
  */
 export function freezeStaticSubtree(root: THREE.Object3D): void {
   root.traverse((object) => {
-    if (object.userData.lightBudgetSource === true) return;
     object.matrixAutoUpdate = false;
     object.updateMatrix();
   });
+}
+
+/**
+ * Whether a chunk's content carries light-budget source markers (a building's lamps,
+ * the homestead's). `LightBudget` rescans the scene only when the streamer's lamp
+ * revision moves, so adding or removing such content is what has to move it.
+ *
+ * This used to be keyed on `setLamps`, which only the old street-lamp poles and the
+ * reflector posts implement. Every chunk had poles, so the revision moved on every
+ * chunk and a POI's markers were found by accident; with the lamps gone from the
+ * poles the key has to be the markers themselves.
+ */
+function holdsLightSources(content: ChunkContent): boolean {
+  let found = false;
+  content.group.traverse((object) => {
+    if (object.userData.lightBudgetSource === true) found = true;
+  });
+  return found;
 }
 
 export interface ChunkContext {
@@ -129,11 +142,11 @@ export interface ChunkContent {
    */
   dispose?: () => void;
   /**
-   * Night-time lamp state for providers that own lamps. Called from the render
-   * loop with the shared night factor (0..1, from the sky) and the camera
-   * position; providers without lamps simply omit it.
+   * Night-time state for providers with emissive fixtures (the reflector posts).
+   * Called from the render loop with the shared night factor (0..1, from the sky);
+   * providers without any simply omit it.
    */
-  setLamps?(on: number, nearX: number, nearZ: number): void;
+  setLamps?(on: number): void;
 }
 
 export interface ChunkProvider {
@@ -241,13 +254,10 @@ export class ChunkStreamer {
     return { ready, wanted: max - min + 1 };
   }
 
-  /**
-   * Push the shared night state into every live chunk that owns lamps. Cheap:
-   * each provider does its own nearest-fixture selection over per-chunk lists.
-   */
-  setLamps(on: number, nearX: number, nearZ: number): void {
+  /** Push the shared night factor into every live chunk that has emissive fixtures. */
+  setLamps(on: number): void {
     for (const chunk of this.built.values()) {
-      for (const entry of chunk.contents) entry.content.setLamps?.(on, nearX, nearZ);
+      for (const entry of chunk.contents) entry.content.setLamps?.(on);
     }
   }
 
@@ -438,7 +448,7 @@ export class ChunkStreamer {
         if (content) {
           this.attachContent(content, chunk.originX, chunk.originZ);
           this.insertContent(chunk, provider, content);
-          if (content.setLamps) this.lightRevision++;
+          if (holdsLightSources(content)) this.lightRevision++;
         }
       }
       chunk.complete = true;
@@ -516,7 +526,7 @@ export class ChunkStreamer {
     if (content) {
       this.attachContent(content, chunk.originX, chunk.originZ);
       this.insertContent(chunk, provider, content);
-      active.removedLamps ||= content.setLamps !== undefined;
+      active.removedLamps ||= holdsLightSources(content);
     }
     if (active.removedLamps) this.lightRevision++;
     const queueIndex = this.refreshQueue.indexOf(request);
@@ -588,7 +598,7 @@ export class ChunkStreamer {
       if (content) {
         this.attachContent(content, chunk.originX, chunk.originZ);
         this.insertContent(chunk, provider, content);
-        if (content.setLamps) this.lightRevision++;
+        if (holdsLightSources(content)) this.lightRevision++;
       }
       chunk.complete = chunk.nextProvider === this.providers.length;
       return;
@@ -599,7 +609,7 @@ export class ChunkStreamer {
     if (content) {
       this.attachContent(content, chunk.originX, chunk.originZ);
       this.insertContent(chunk, provider, content);
-      if (content.setLamps) this.lightRevision++;
+      if (holdsLightSources(content)) this.lightRevision++;
     }
     chunk.complete = chunk.nextProvider === this.providers.length;
   }
@@ -616,7 +626,7 @@ export class ChunkStreamer {
     if (content) {
       this.attachContent(content, chunk.originX, chunk.originZ);
       this.insertContent(chunk, provider, content);
-      changedLamps ||= content.setLamps !== undefined;
+      changedLamps ||= holdsLightSources(content);
     }
     if (changedLamps) this.lightRevision++;
   }
@@ -691,7 +701,7 @@ export class ChunkStreamer {
   }
 
   private teardownContent(content: ChunkContent): boolean {
-    const ownedLamps = content.setLamps !== undefined;
+    const ownedLamps = holdsLightSources(content);
     this.scene.remove(content.group);
     for (const body of content.bodies) this.physics.removeBody(body);
     content.dispose?.();

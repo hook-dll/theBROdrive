@@ -339,7 +339,6 @@ const traffic = new RoadTraffic(
     return dx * dx + dz * dz > radius * radius;
   },
 );
-traffic.setDaylightFactor(1);
 // The ego is the player: it gets the same seat in the coordinator's field that
 // `main.ts` gives him, so what this bench measures is the driver the game ships.
 const egoFieldSeat = { forwardS: EGO_START_S, direction: 1 as const };
@@ -877,7 +876,7 @@ async function tick(): Promise<void> {
   // The game feeds the player's own autopilot the stream's nearest approaching car
   // every step (`main.ts`), and the crown-crossing gate reads it. A bench that skips
   // it measures a driver with no idea what is coming.
-  egoAutopilot.setLightingConditions(1, traffic.nearestOncomingDistance(egoS, 1));
+  egoAutopilot.setOncomingGap(traffic.nearestOncomingDistance(egoS, 1));
   egoAutopilot.drive(FIXED_DT, ego, egoInput, 0, 0);
   ego.fixedUpdate(FIXED_DT, egoInput);
   physics.step();

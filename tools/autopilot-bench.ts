@@ -855,27 +855,27 @@ async function checkAutomaticLights(): Promise<void> {
   rig.autopilot.setMode('sleeper');
   rig.autopilot.setEngaged(true);
 
-  rig.autopilot.setLightingConditions(0, Infinity);
+  rig.autopilot.setOncomingGap(Infinity);
   step(rig);
-  const darkEmptyRoad = rig.vehicle.headlights;
-  rig.autopilot.setLightingConditions(0, 180);
+  const emptyRoad = rig.vehicle.headlights;
+  rig.autopilot.setOncomingGap(180);
   step(rig);
-  const darkOncomingTraffic = rig.vehicle.headlights;
-  rig.autopilot.setLightingConditions(0, Infinity);
-  step(rig);
+  const oncomingTraffic = rig.vehicle.headlights;
   check(
-    'autonomous car keeps low beam throughout darkness',
-    darkEmptyRoad === 'low' &&
-      darkOncomingTraffic === 'low' &&
-      rig.vehicle.headlights === 'low',
-    `${darkEmptyRoad}/${darkOncomingTraffic}/${rig.vehicle.headlights}`,
+    'autonomous car runs on low beam whatever is coming',
+    emptyRoad === 'low' && oncomingTraffic === 'low',
+    `${emptyRoad}/${oncomingTraffic}`,
   );
 
-  rig.autopilot.setLightingConditions(1, Infinity);
+  // The switch is the driver's once pressed: main beam stays main beam with a car
+  // 60 m away, because nothing dips it any more.
+  rig.autopilot.releaseAutomaticHeadlights();
+  rig.vehicle.setHeadlights('high');
+  rig.autopilot.setOncomingGap(60);
   step(rig);
   check(
-    'autonomous car switches headlights off in daylight',
-    rig.vehicle.headlights === 'off',
+    "the driver's main beam is left alone under autopilot",
+    rig.vehicle.headlights === 'high',
     rig.vehicle.headlights,
   );
   rig.vehicle.setIndicator('left');

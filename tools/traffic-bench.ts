@@ -107,7 +107,6 @@ const traffic = new RoadTraffic(
   loadCarModel,
   () => true,
 );
-traffic.setDaylightFactor(1);
 
 let largestCount = 0;
 let smallestPopulated = Infinity;
@@ -201,16 +200,9 @@ check(
   `${populated.sleeper} sleeper, ${populated.hurried} hurried, ${populated.cautious} cautious`,
 );
 check(
-  'daylight traffic uses only low beam',
+  'traffic runs on low beam and never on high',
   populated.highBeams === 0 && populated.lowBeams === populated.count,
   `${populated.highBeams} high, ${populated.lowBeams} low / ${populated.count} cars`,
-);
-traffic.setDaylightFactor(0);
-traffic.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0, 0);
-check(
-  'night traffic keeps every low beam lit',
-  traffic.status.highBeams === 0 && traffic.status.lowBeams === traffic.status.count,
-  `${traffic.status.highBeams} high, ${traffic.status.lowBeams} low / ${traffic.status.count} cars`,
 );
 check(
   'both directions actually drive',
@@ -528,7 +520,6 @@ check(
     loadCarModel,
     () => true,
   );
-  blocked.setDaylightFactor(1);
   const stopped = new Map<string, number>();
   let worstStop = 0;
   let passedTheRock = 0;
@@ -619,7 +610,6 @@ check(
     loadCarModel,
     () => true,
   );
-  ending.setDaylightFactor(1);
   const reachedEnd = new Set<string>();
   const cameBack = new Set<string>();
   let onPad = 0;

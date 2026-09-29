@@ -25,6 +25,7 @@
  */
 
 import { desertPaletteAt, poleEraSegments, roadConditionAt, PALETTE_CYCLE_M } from '../src/world/gradient';
+import { poleSections } from '../src/world/props/poles';
 import type { RoadConditionBuffer } from '../src/world/gradient';
 import { SURFACES, SurfaceType } from '../src/core/surfaces';
 import { surfacePaceFactor } from '../src/vehicle/autopilot';
@@ -297,13 +298,20 @@ console.log('first surface changes (10 m resolution)');
 console.log('');
 console.log('pole era schedule');
 const segs = poleEraSegments();
-const noneCount = segs.filter((b) => b.era === 'none').length;
-console.log(`  ${segs.length} bands, ${noneCount} 'none' (${((noneCount / segs.length) * 100).toFixed(0)}%)`);
-console.log('  start km   era          spacing');
+console.log(`  ${segs.length} bands, every one with a line`);
+console.log('  start km   era          sections  designs');
+const sections = poleSections();
 for (const b of segs.slice(0, 10)) {
-  console.log(`  ${(b.start / 1000).toString().padStart(8)}   ${b.era.padEnd(11)}  ${b.spacing.toString().padStart(6)}`);
+  const inBand = sections.filter((section) => section.start >= b.start && section.end <= b.end && section.design >= 0);
+  const designs = inBand.map((section) => section.design).join(' ');
+  console.log(`  ${(b.start / 1000).toString().padStart(8)}   ${b.era.padEnd(11)}  ${inBand.length.toString().padStart(8)}  ${designs}`);
 }
 if (segs.length > 10) console.log(`  ... ${segs.length - 10} more bands`);
+const lined = sections.filter((section) => section.design >= 0);
+console.log(
+  `  ${lined.length} sections, ${new Set(lined.map((section) => section.design)).size} of the designs in use, ` +
+    `${lined.filter((section, i) => i > 0 && section.design === lined[i - 1]!.design && section.start === lined[i - 1]!.end).length} back-to-back repeats`,
+);
 
 // ---------------------------------------------------------------------------
 // Palette walk

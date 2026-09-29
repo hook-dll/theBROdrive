@@ -1319,7 +1319,6 @@ async function boot(): Promise<void> {
     } else {
       traffic.clearPedestrianObstacle();
     }
-    traffic.setDaylightFactor(sky.seeingLight);
     playerFieldSeat.forwardS = activeS;
     frameProfiler?.begin('traffic');
     traffic.fixedUpdate(dt, activeS, activeLateral, origin.x, origin.z);
@@ -1347,10 +1346,7 @@ async function boot(): Promise<void> {
           autopilot.engaged ? `autopilot: ${autopilot.mode}` : 'autopilot off',
         );
       }
-      autopilot.setLightingConditions(
-        sky.seeingLight,
-        traffic.nearestOncomingDistance(activeS, 1),
-      );
+      autopilot.setOncomingGap(traffic.nearestOncomingDistance(activeS, 1));
       if (autopilot.engaged) {
         autopilot.drive(dt, driving, f, origin.x, origin.z);
       }
@@ -1368,10 +1364,6 @@ async function boot(): Promise<void> {
               : 'headlights: main beam',
         );
       }
-      // Only an engaged autopilot dips for oncoming traffic. Left running while the
-      // player drives, it kept writing its own idea of the beam state onto the car
-      // every fixed step and fought the driver for the switch.
-      if (autopilot.engaged) autopilot.syncPlayerHighBeam(driving);
       if (f.toggleLeftIndicator) driving.toggleIndicator('left');
       if (f.toggleRightIndicator) driving.toggleIndicator('right');
       if (f.cycleTyres) {
@@ -2042,23 +2034,18 @@ async function boot(): Promise<void> {
     );
     devTools?.updateLakeSeek(activeS);
 
-    // Night lamps expose exactly three lit pools ahead and three behind the view.
-    // The renderer keeps six persistent slots, so crossing a lamp boundary does not
-    // change its light-shader permutation or hitch the frame.
+    // Building and homestead lamps reach the screen through a fixed set of light slots,
+    // half ahead of the view and half behind, so a lamp coming into range does not
+    // change the light-shader permutation or hitch the frame.
     //
     // The factor is a RAMP across the twilight band, not `isNight`. Both consumers
-    // scale intensity by it — `setLamps` for emissive and point output, and the
-    // budget by copying each chosen source's own intensity — so the lamps now come
-    // up over the dusk instead of every one in view switching within a frame. The
-    // slot count is unchanged at either end, so the shader permutation still never
-    // moves.
+    // scale intensity by it — `setLamps` for the reflector posts' emissive chips, and
+    // the budget by copying each chosen source's own intensity — so the lamps come up
+    // over the dusk instead of every one in view switching within a frame. The slot
+    // count is unchanged at either end, so the shader permutation still never moves.
     const night = sky.lampFactor;
-    // `setLamps` takes an ABSOLUTE camera position: the lamps it compares against were
-    // stored relative to the origin their chunk was BUILT under, which after a rebase
-    // is not the current one, so the chunk's own build origin is the bridge and only
-    // an absolute camera makes the two sides comparable. See world/props/poles.ts setLamps.
     frameProfiler?.begin('lights');
-    streamer.setLamps(night, cam.x + origin.x, cam.z + origin.z);
+    streamer.setLamps(night);
     const lampDirection = camera.eyeDirection;
     lightBudget.update(
       cam.x,

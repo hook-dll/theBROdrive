@@ -2,11 +2,11 @@ import * as THREE from 'three';
 import { GRAPHICS_TIERS, streetLightSlotsFor, type GraphicsQuality } from '../game/settings';
 
 /**
- * GPU street-light budget.
+ * GPU lamp budget.
  *
- * Lamp chunks expose invisible PointLight markers. This class copies the nearest
- * six marker states into six persistent renderer lights: three in front of the
- * view and three behind it.
+ * Buildings and the homestead expose invisible PointLight markers. This class copies
+ * the nearest marker states into a fixed set of persistent renderer lights: half in
+ * front of the view and half behind it.
  *
  * The six slots stay visible for the whole session and are lit by intensity alone
  * (zero by day, `LAMP_POINT` at night). Three.js keys each material's shader on the
@@ -30,7 +30,7 @@ import { GRAPHICS_TIERS, streetLightSlotsFor, type GraphicsQuality } from '../ga
  * you before the pools stop. It is the same per-pixel cost story in reverse: a
  * machine with fill rate to spare can afford two more lights everywhere.
  */
-/** Three concrete-era poles can be ~255 m away. */
+/** Past this a lamp cannot light anything the camera sees well enough to matter. */
 const CUTOFF_DISTANCE = 300;
 const CUTOFF_DISTANCE_SQ = CUTOFF_DISTANCE * CUTOFF_DISTANCE;
 

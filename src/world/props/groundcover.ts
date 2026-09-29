@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { hash01 } from '../../core/rng';
 import type { Impactor } from '../debris';
 import type { WorldOrigin } from '../origin';
 import type { WheelSpray } from '../../render/wheelspray';
@@ -182,4 +183,119 @@ export class GroundCoverField {
     const edgeZ = Math.max(0, Math.abs(localZ) - car.halfLength);
     return edgeX * edgeX + edgeZ * edgeZ <= s.radius * s.radius;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Density along the road
+// ---------------------------------------------------------------------------
+//
+// A desert does not carpet every metre of a forty-thousand-kilometre road: runoff
+// collects here, the wind scours there, and cover comes and goes in stretches longer
+// than one look ahead. `groundCoverDensity` is that, as one pure function of the seed
+// and a road arclength — the same shape as everything else in the world, so a chunk
+// rebuilt out of order, or after a rebase, gets the identical answer.
+
+const TAG_COVER_STRETCH = 0x7f6c0f;
+/** Stretch length range, metres. Long enough that a sparse stretch is a place. */
+const COVER_STRETCH_MIN = 300;
+const COVER_STRETCH_MAX = 5000;
+/**
+ * Stretches come in complementary PAIRS: the two lengths of a pair sum to
+ * `COVER_STRETCH_PAIR`, so a cycle of `COVER_STRETCH_PAIRS` pairs is exactly
+ * `COVER_CYCLE` long however the rolls fall. Any chunk then finds its own stretch by
+ * division and a couple of hashes, instead of walking the road from kilometre zero and
+ * making chunk content depend on build order. `ROAD_HAZARD_CYCLE` in `scatter.ts` uses
+ * the same trick for the same reason. Two pairs per 10.6 km cycle, so stretches run a
+ * mean of 2.65 km and a cycle is short enough that the level mix below evens out
+ * over a few tens of kilometres of driving.
+ */
+const COVER_STRETCH_PAIR = COVER_STRETCH_MIN + COVER_STRETCH_MAX;
+const COVER_STRETCH_PAIRS = 2;
+const COVER_STRETCHES_PER_CYCLE = COVER_STRETCH_PAIRS * 2;
+const COVER_CYCLE = COVER_STRETCH_PAIR * COVER_STRETCH_PAIRS;
+/**
+ * The mix, as a share of ROAD LENGTH rather than of stretch count: level is drawn on
+ * hash channels the lengths never touch, so length and level are independent and this
+ * long run of a drive is the measured share. Two fifths of the road keeps exactly the
+ * field that was signed off, a third drops to a scattering — enough tufts left that the
+ * verge still reads as verge, which is why sparse has a floor rather than fading to
+ * nothing — and the last quarter is bare sand, undisturbed by any prop at all.
+ *
+ * Measured by sampling the function every metre: over 200 km, 39% full / 38% thinned /
+ * 23% bare (seed 1337) and 47 / 20 / 33 (seed 24601); over 2,000 km both seeds settle
+ * at 39-41 / 35-37 / 24. Stretch lengths came out 372-4,928 m with a 2.65 km median,
+ * and every thinned stretch between 0.11 and 0.35 of full. Because the draw is per
+ * stretch, two stretches of the same kind can meet rather than always alternating: the
+ * longest bare run in the 200 km above was 14.3 km (three bare stretches in a row).
+ * That is the shape a desert has, and it is the knob to turn — lowering the bare share
+ * shortens the dead ground far more than it thins anything else.
+ */
+const COVER_FULL_SHARE = 0.4;
+const COVER_SPARSE_SHARE = 0.35;
+const COVER_SPARSE_MIN = 0.1;
+const COVER_SPARSE_MAX = 0.35;
+/**
+ * Metres a stretch takes to ramp in from the level of the one before it. The ramp is the
+ * HEAD of the entering stretch, never a band across the boundary, so the far side of a
+ * boundary is at full level immediately — and a bare stretch is genuinely bare for
+ * everything past its first `COVER_RAMP_M`. Every stretch is longer than the ramp
+ * (`COVER_STRETCH_MIN`), so no ramp is ever cut short by the next boundary and the
+ * level never has a hard step: the transition is spread over 100 m, which at speed is
+ * still gone in a couple of seconds and reads as cover thinning, not as a line.
+ */
+const COVER_RAMP_M = 100;
+
+/** Length of one stretch of a cycle, metres. */
+function coverStretchLength(seed: number, cycle: number, index: number): number {
+  const first =
+    COVER_STRETCH_MIN +
+    hash01(seed, TAG_COVER_STRETCH, cycle, index >> 1) * (COVER_STRETCH_MAX - COVER_STRETCH_MIN);
+  return (index & 1) === 0 ? first : COVER_STRETCH_PAIR - first;
+}
+
+/** One stretch's level: today's density, the sparse share of it, or nothing. */
+function coverStretchLevel(seed: number, cycle: number, index: number): number {
+  const roll = hash01(seed, TAG_COVER_STRETCH, cycle, index, 1);
+  if (roll < COVER_FULL_SHARE) return 1;
+  if (roll < COVER_FULL_SHARE + COVER_SPARSE_SHARE) {
+    return (
+      COVER_SPARSE_MIN +
+      hash01(seed, TAG_COVER_STRETCH, cycle, index, 2) * (COVER_SPARSE_MAX - COVER_SPARSE_MIN)
+    );
+  }
+  return 0;
+}
+
+/**
+ * Share of the local ground-cover density at road arclength `s`, 0..1. Exactly 1 leaves
+ * the field as it was, 0 leaves bare desert, and in between is a thinned field.
+ *
+ * `scatter.ts` multiplies its own verge/open-desert density by this and then throws the
+ * candidate away when the SAME roll that got it this far fails against the product, so
+ * the props that survive a sparse stretch are props of the full stretch in exactly the
+ * places they always stood — nothing about the thinning reshuffles a position. It is
+ * called only for candidates that already passed the unthinned density, and at ~28 M
+ * calls/s that is microseconds per chunk build, which buys evaluating it at the
+ * candidate's own arclength rather than at a quantised guess.
+ */
+export function groundCoverDensity(s: number, seed: number): number {
+  const cycle = Math.floor(s / COVER_CYCLE);
+  let within = s - cycle * COVER_CYCLE;
+  let index = 0;
+  // The lengths of one cycle sum to `COVER_CYCLE`, so the last stretch takes the
+  // remainder rather than being walked to.
+  while (index < COVER_STRETCHES_PER_CYCLE - 1) {
+    const length = coverStretchLength(seed, cycle, index);
+    if (within < length) break;
+    within -= length;
+    index++;
+  }
+  const level = coverStretchLevel(seed, cycle, index);
+  if (within >= COVER_RAMP_M) return level;
+  const previous =
+    index === 0
+      ? coverStretchLevel(seed, cycle - 1, COVER_STRETCHES_PER_CYCLE - 1)
+      : coverStretchLevel(seed, cycle, index - 1);
+  const w = within / COVER_RAMP_M;
+  return previous + (level - previous) * w * w * (3 - 2 * w);
 }

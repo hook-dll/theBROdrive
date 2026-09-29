@@ -67,6 +67,37 @@ Two-wheel drive cars finally leave first gear on sand, a swapped engine brings i
 
 ### Changed
 
+- A HUNDRED ROADSIDE POLES. The pole line was three hand-made silhouettes, one per era,
+  each with a lamp and one wire strung top to top. It is now a catalogue of one hundred
+  plain line poles (`world/props/poledesigns.ts`) in fourteen families of real roadside
+  construction: telegraph poles with glass on their arms, rural three-phase, bracket
+  telephone poles, timber on a concrete stub, timber H-frames, rectangular, spun and
+  octagonal concrete, concrete portals, double-circuit concrete, lattice masts, tubular
+  steel, Oppenheimer telescoping steel and rail or I-beam poles. Variants step through
+  arm counts, insulator layout and material (glass, porcelain, polymer, pins, posts,
+  strings, spools), caps, braces and fittings, so no two designs of a family are the
+  same pole. Every design is one vertex-coloured geometry in one comic-banded material
+  (drawn with the dwellings' `DwellingBuilder`), casts a shadow, and carries its wires
+  on its own insulators: every tie point is strung to the same one on the next pole, each
+  wire surviving on its own `wireChance` roll, all of a chunk's wires one mesh. The era
+  bands still set the material (timber, steel — was "lattice" — or concrete) every
+  300 km; inside a band the line is rebuilt in SECTIONS of 8-25 km (`poleSections`,
+  `world/props/poles.ts`), each of one design and never the one before it, so a 2 500 km
+  drive meets about 150 sections. A worn pole leans as before and may have lost its arms
+  and insulators (timber sooner than steel and concrete); anomalies read their placement
+  off the design. `?prop-gallery` shows all hundred behind the desert forms.
+- EVERY STRETCH OF ROAD HAS POLES. The era band in four that had none is gone
+  (`poleEraForBand`, `world/gradient.ts`), and a section is a whole number of its own
+  spacings long, so the widest gap between two poles anywhere is 116 m — under the
+  shortest 'poleAnomaly' span, which is why every such event now alters the line. Fallen
+  and leaning poles stay: the 'down' anomaly and the lean of wear.
+- EVERY AUTOMATIC DRIVER RUNS ON DIPPED BEAM, AND NOBODY TOUCHES YOUR MAIN BEAM. The
+  autopilot used to dip a player's main beam for oncoming cars and put it back after
+  (`syncPlayerHighBeam`), and switched its lamps off by day. Traffic and every autopilot
+  now simply hold dipped beam day and night (`updateAutomaticHeadlights`), and what the
+  player selects with the switch is what the car shows. `Autopilot.setLightingConditions`
+  is `setOncomingGap` (the crossing gate still needs it), and the daylight plumbing that
+  only fed the lamps — `RoadTraffic.setDaylightFactor`, `setLowBeamsAlwaysOn` — is gone.
 - POIS ARE 7.7 KM APART, AND IT IS NO LONGER A SETTING. The POI Distance slider is gone
   from Settings › Gameplay, with its `Settings.poiSpacingMetres` field and its bounds;
   the spacing is `POI_SPACING` (`world/poi.ts`), read from `config/gameplay.json`, and
@@ -147,6 +178,23 @@ Two-wheel drive cars finally leave first gear on sand, a swapped engine brings i
   fill floor (`NIGHT_FILL_INTENSITY`, `render/sky.ts`) is 0.12, from 0.09. The dome,
   the stars and the lamps are unchanged.
 - The tumbleweed's brush on the car is against its travel; it used to push it forward.
+- GROUND COVER NOW COMES AND GOES ALONG THE ROAD, INSTEAD OF CARPETING EVERY METRE OF IT.
+  `groundCoverDensity` (`world/props/groundcover.ts`) cuts the road's arclength into stretches
+  of `COVER_STRETCH_MIN` 300 m to `COVER_STRETCH_MAX` 5 km — a 2.65 km mean, drawn as
+  complementary pairs so a cycle is exactly `COVER_CYCLE` long and any chunk finds its own
+  stretch by arithmetic instead of by walking the road from kilometre zero — and gives each
+  one a level: `COVER_FULL_SHARE` 0.4 of the road keeps exactly today's field,
+  `COVER_SPARSE_SHARE` 0.35 drops to `COVER_SPARSE_MIN`-`COVER_SPARSE_MAX` 0.1-0.35 of it,
+  and the remaining quarter is bare sand. Each stretch ramps in over `COVER_RAMP_M` 100 m
+  from the level of the one before it, so no boundary is a hard line and no bare stretch has
+  anything in it past its ramp. The roadside scatter (`ScatterProvider.buildSteps`,
+  `world/props/scatter.ts`) tests its occupancy roll again against
+  `density × groundCoverDensity(s, seed)`, so a prop that survives a sparse stretch is one
+  that was already there, in the place it stood — thinning only ever removes — and the car's
+  own bursts (`GroundCoverField`) see exactly what was built. Measured by sampling the
+  multiplier every metre: 39% full / 38% thinned / 23% bare over 200 km on seed 1337 and
+  47 / 20 / 33 on seed 24601, both settling at 39-41 / 35-37 / 24 over 2,000 km, longest
+  bare run 14.3 km.
 
 ### Fixed
 
@@ -231,6 +279,16 @@ Two-wheel drive cars finally leave first gear on sand, a swapped engine brings i
 
 ### Removed
 
+- THE STREET LAMPS ON THE POLES. The lamp heads, the lamp arms, their emissive material
+  and the light markers they gave `LightBudget` are gone: the desert night is light
+  enough now and every car carries its own. `ChunkContent.setLamps` takes only the night
+  factor (the reflector posts are all that use it), and the streamer's lamp revision now
+  moves on content that holds light-budget markers (`holdsLightSources`,
+  `world/chunks.ts`) rather than on content that implements `setLamps` — every chunk used
+  to have lamp poles, which is the only reason a building's lights were ever found.
+- THE DERELICT POLES OF THE EMPTY BANDS. With no band left without a line, the lone
+  snapped mast and stump that stood in for an anomaly there (`poleDerelictAt`) have
+  nothing left to stand in for.
 - THE STORM CELLS ON THE HORIZON. The towers a storm used to raise on the skyline, and
   the `cells` weather channel behind them, are gone: a storm is the halo, the closing
   deck, the wind, the rain and the wet road, and the distant sunlit towers added nothing

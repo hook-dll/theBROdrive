@@ -863,12 +863,6 @@ const EDGE_STABILITY_LATERAL_M = 1.6;
 const EDGE_STABILITY_LATERAL_SPEED_MPS = 0.4;
 /** Road recovery needs the decisive pedal that already lets frantic escape loose sand. */
 const OFFROAD_THROTTLE_BAND = 1.2;
-/** Automatic lamps come on through dusk, with hysteresis so twilight cannot chatter. */
-const AUTO_LIGHTS_ON_DAY_FACTOR = 0.22;
-const AUTO_LIGHTS_OFF_DAY_FACTOR = 0.32;
-/** Dip before the beams meet; restore high only once the opposing car is clearly past. */
-const HIGH_BEAM_DIP_M = 250;
-const HIGH_BEAM_RESTORE_M = 300;
 
 /**
  * SEEING OTHER TRAFFIC, and why it is not the same query as seeing a rock.
@@ -1606,7 +1600,6 @@ export class Autopilot {
   private paceValue = 1;
   /** Ambient traffic may use a per-driver following distance. */
   private followingHeadwayValue: number | null = null;
-  private daylightFactor = 1;
   private oncomingGap = Infinity;
   private pedestrianActive = false;
   private pedestrianX = 0;
@@ -1748,9 +1741,6 @@ export class Autopilot {
   private targetSpeedValue = 0;
   private passUrgeValue = false;
   private passAttemptValue = false;
-  private automaticLightsOn = false;
-  /** Ambient traffic keeps dipped beams lit in daylight as a visibility aid. */
-  private lowBeamsAlwaysOn = false;
   /**
    * Whether this driver still owns the light switch. Traffic always does; the
    * player's autopilot gives it up the moment the driver presses the switch itself,
@@ -1758,8 +1748,6 @@ export class Autopilot {
    * and the key looked broken.
    */
   private automaticLightsOwned = true;
-  private playerHighBeamSuppressed = false;
-  private playerHeadlightVehicle: Vehicle | null = null;
   private controlledVehicle: Vehicle | null = null;
   private readonly dynamicProximityShape: RAPIER.Ball | null;
   private readonly identityRotation = { x: 0, y: 0, z: 0, w: 1 };
@@ -2196,9 +2184,6 @@ export class Autopilot {
   get middlePassing(): boolean {
     return this.middlePassingValue;
   }
-  setLowBeamsAlwaysOn(enabled: boolean): void {
-    this.lowBeamsAlwaysOn = enabled;
-  }
   /**
    * The lateral manoeuvre, as a state with an entry and an exit.
    *
@@ -2413,9 +2398,8 @@ export class Autopilot {
     return this.detourLine;
   }
 
-  /** Supplies ambient light and road distance to the nearest approaching vehicle. */
-  setLightingConditions(daylightFactor: number, oncomingGap: number): void {
-    this.daylightFactor = clamp(daylightFactor, 0, 1);
+  /** Supplies the road distance to the nearest approaching vehicle. */
+  setOncomingGap(oncomingGap: number): void {
     this.oncomingGap = oncomingGap >= 0 ? oncomingGap : Infinity;
   }
   /** Supplies the on-foot player as a physical obstacle in absolute world space. */
@@ -2430,31 +2414,6 @@ export class Autopilot {
   /** Removes the player-shaped obstacle while the player is represented by a car. */
   clearPedestrianObstacle(): void {
     this.pedestrianActive = false;
-  }
-  /**
-   * Dips a manually driven player's high beam for an approaching vehicle, then
-   * restores it after the opposing car has passed. Low/off player choices remain
-   * untouched.
-   */
-  syncPlayerHighBeam(vehicle: Vehicle): void {
-    if (this.playerHeadlightVehicle !== vehicle) {
-      this.playerHeadlightVehicle = vehicle;
-      this.playerHighBeamSuppressed = false;
-    }
-    if (vehicle.headlights === 'high') {
-      if (this.oncomingGap <= HIGH_BEAM_DIP_M) {
-        vehicle.setHeadlights('low');
-        this.playerHighBeamSuppressed = true;
-      }
-      return;
-    }
-    if (!this.playerHighBeamSuppressed) return;
-    if (vehicle.headlights === 'off') {
-      this.playerHighBeamSuppressed = false;
-    } else if (this.oncomingGap >= HIGH_BEAM_RESTORE_M) {
-      vehicle.setHeadlights('high');
-      this.playerHighBeamSuppressed = false;
-    }
   }
   get engaged(): boolean { return this.engagedValue; }
   /** True while a racing driver is on its racing line rather than its lane. */
@@ -4841,18 +4800,14 @@ export class Autopilot {
     this.automaticLightsOwned = false;
   }
 
+  /**
+   * Every automatic driver runs on dipped beam, day and night, and never touches main
+   * beam: main beam is the player's own choice, made with the switch. The automation
+   * used to dip a player's main beam for oncoming cars and switch the player's lamps
+   * off by day; both rules are gone, so what the driver selects is what the car shows.
+   */
   private updateAutomaticHeadlights(vehicle: Vehicle): void {
-    if (!this.automaticLightsOwned) return;
-    if (this.lowBeamsAlwaysOn) {
-      vehicle.setHeadlights('low');
-      return;
-    }
-    if (this.automaticLightsOn) {
-      if (this.daylightFactor >= AUTO_LIGHTS_OFF_DAY_FACTOR) this.automaticLightsOn = false;
-    } else if (this.daylightFactor <= AUTO_LIGHTS_ON_DAY_FACTOR) {
-      this.automaticLightsOn = true;
-    }
-    vehicle.setHeadlights(this.automaticLightsOn ? 'low' : 'off');
+    if (this.automaticLightsOwned) vehicle.setHeadlights('low');
   }
 
   /** Keep blocker memory and parked confirmation, using the observed body's velocity. */
