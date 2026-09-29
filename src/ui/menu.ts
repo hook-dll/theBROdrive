@@ -1306,7 +1306,7 @@ export class MainMenu {
               {
                 label: 'On',
                 icon: 'drive',
-                hint: 'Past 60 km/h the view trembles a little, growing with speed, and more on gravel and sand than on smooth tarmac.',
+                hint: 'Past 60 km/h the view sways slowly, barely at all, growing with speed and more on gravel and sand than on smooth tarmac.',
                 active: () => settings.cameraShake,
                 pick: () => {
                   settings.cameraShake = true;

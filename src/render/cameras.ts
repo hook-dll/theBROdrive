@@ -151,7 +151,7 @@ const SURGE_OMEGA = 2.5;
 /** Measured accelerations past this (m/s²) are a crash or a teleport, not a surge. */
 const SURGE_ACCEL_CLAMP = 12;
 /**
- * THE SHAKE: a small tremble of the driving view at speed, which is what is left to say
+ * THE SWAY: a slow float of the driving view at speed, which is what is left to say
  * "fast" once acceleration has settled — the wind and the dashes are then the only cues.
  *
  * It grows with the SQUARE of speed from `SHAKE_START_KMH`, is scaled by the roughness
@@ -160,15 +160,20 @@ const SURGE_ACCEL_CLAMP = 12;
  * angle moves every pixel of the frame, a displacement only the near ones. Three
  * incommensurate sines per axis keep it from ever reading as a period. It is applied
  * after the springs, to the camera only, so interaction rays still use the steady view.
+ *
+ * SLOW on purpose, 0.5 to 2 Hz. It began as a 3-13 Hz tremble, and there was no
+ * amplitude at which that worked: big enough to see was a judder the eye flinched at,
+ * small enough not to was invisible. A car at speed floats on its springs rather than
+ * buzzing, and a slow motion reads at a fraction of the angle a fast one needs.
  */
 const SHAKE_START_KMH = 60;
 const SHAKE_FULL_KMH = 150;
 /**
- * Peak pitch at `SHAKE_FULL_KMH` on a surface of gain 1, radians (~0.07 degrees, just
- * over a pixel of a 1080-line frame at the resting FOV). Meant to be barely there: at
- * 0.005 it was a quarter-degree judder, far too hard.
+ * Peak pitch at `SHAKE_FULL_KMH` on a surface of gain 1, radians (~0.06 degrees, about a
+ * pixel of a 1080-line frame at the resting FOV), traversed slowly. Meant to be barely
+ * there: the fast tremble it replaced was far too hard even at 0.00125.
  */
-const SHAKE_PITCH_RAD = 0.00125;
+const SHAKE_PITCH_RAD = 0.001;
 const SHAKE_YAW_SHARE = 0.45;
 const SHAKE_ROLL_SHARE = 0.6;
 /**
@@ -672,9 +677,9 @@ export class CameraRig {
     const gain = SHAKE_SMOOTH_GAIN + (2 - SHAKE_SMOOTH_GAIN) * rough;
     const amp = SHAKE_PITCH_RAD * t * t * gain * target.wheelContact;
     const w = this.shakeTime * Math.PI * 2;
-    const pitch = 0.5 * Math.sin(w * 7.3) + 0.3 * Math.sin(w * 12.1 + 1.7) + 0.35 * Math.sin(w * 3.7 + 0.6);
-    const yaw = 0.55 * Math.sin(w * 5.9 + 2.1) + 0.3 * Math.sin(w * 9.7 + 0.3) + 0.25 * Math.sin(w * 2.9 + 4.4);
-    const roll = 0.5 * Math.sin(w * 6.7 + 4.0) + 0.3 * Math.sin(w * 13.3 + 2.6) + 0.3 * Math.sin(w * 3.3 + 1.1);
+    const pitch = 0.5 * Math.sin(w * 1.3) + 0.3 * Math.sin(w * 1.9 + 1.7) + 0.35 * Math.sin(w * 0.55 + 0.6);
+    const yaw = 0.55 * Math.sin(w * 0.7 + 2.1) + 0.3 * Math.sin(w * 1.1 + 0.3) + 0.25 * Math.sin(w * 0.45 + 4.4);
+    const roll = 0.5 * Math.sin(w * 0.9 + 4.0) + 0.3 * Math.sin(w * 1.7 + 2.6) + 0.3 * Math.sin(w * 0.6 + 1.1);
     _eA.set(pitch * amp, yaw * amp * SHAKE_YAW_SHARE, roll * amp * SHAKE_ROLL_SHARE, 'YXZ');
     this.camera.quaternion.multiply(_qB.setFromEuler(_eA));
   }
