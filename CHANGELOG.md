@@ -249,6 +249,15 @@ Two-wheel drive cars finally leave first gear on sand, a swapped engine brings i
 
 ### Fixed
 
+- AUTOMATIC DRIVERS GO ROUND A ROCK AT SPEED INSTEAD OF CREEPING PAST IT. Anything
+  cleared by less than 0.6 m beyond the planning margin used to be passed at walking
+  pace, and the planner put almost every line exactly on that margin, so every prop on
+  the road was crept past at 13 km/h. The gap asked for past something standing still
+  now grows with speed (0.3 m plus 0.025 m per m/s), each prop is planned round with
+  that gap, and the car slows only to the speed the gap the road actually has supports.
+  A lane-centre rock and a dirt pile are now passed at about 58 km/h, a trunk at the
+  verge at 68 km/h. The bench's "littered road" (25 props a km, against 0.8 on the
+  real road) is gone.
 - TRAFFIC NO LONGER LAUNCHES ITSELF OFF STEEP GRADES. A car joining the stream was put
   down level on a 7-16% grade, touched the slope with the end of its own collider, was
   pinned there by the settle, and was thrown out of the road at 20-90 m/s the moment it

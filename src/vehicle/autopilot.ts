@@ -85,8 +85,23 @@ const STILL_BYPASS_NERVE = 1.4;
 const ONCOMING_ASSUMED_MPS = 20;
 /** Opposing lane must be clear this far BEHIND before crossing into it. */
 const ONCOMING_REAR_GAP_M = 20;
-/** Clearance below which something alongside is squeezed past at walking pace. */
-const CORRIDOR_SQUEEZE_M = 0.6;
+/**
+ * PASSING SOMETHING STANDING STILL: how close, and how fast.
+ *
+ * A driver going past a rock keeps a gap that grows with speed, because the car's own
+ * wander about its line grows with speed. `PASS_GAP_MIN_M` is the gap a car creeping
+ * by keeps; every metre per second adds `PASS_MARGIN_S` of it. The planner is asked for
+ * that gap (it inflates each prop by it, see `collectHazard`), and where the road does
+ * not have it the car goes by at the speed the gap it does have supports.
+ *
+ * This replaced a switch: anything cleared by less than 0.6 m beyond the planning
+ * margin was passed at walking pace, and the planner — pulled home by its own lane
+ * cost — put almost every line exactly on that margin. So every rock on the road was
+ * crept past at 3.5 m/s, reported from play as cars braking nearly to a stop for an
+ * obstacle they had plenty of room to go round. At 20 m/s the gap asked for is 0.8 m.
+ */
+const PASS_GAP_MIN_M = 0.3;
+const PASS_MARGIN_S = 0.025;
 
 export type AutopilotMode = 'sleeper' | 'hurried' | 'frantic';
 
@@ -1503,7 +1518,10 @@ export class Autopilot {
   private corridorFeasible = true;
   private corridorBlockDistance = Infinity;
   private corridorBlockSpeed = 0;
-  private corridorSqueezeDistance = Infinity;
+  /** Speed the gaps to things standing beside the corridor allow; see `PASS_MARGIN_S`. */
+  private corridorSqueezeSpeed = Infinity;
+  /** Gap asked for past a prop at this step's speed, on top of the planning margin. */
+  private hazardPassMargin = 0;
   private corridorLaneBlockDistance = Infinity;
   private corridorLaneBlockSpeed = 0;
   /** Road width at this tick's projection, shared with hazard callbacks. */
@@ -1861,7 +1879,7 @@ export class Autopilot {
     this.corridorObstacles.push({
       s: Math.max(0, s),
       lateral: hazard.lateral,
-      halfWidth: hazard.radius + AVOID_HYSTERESIS_M,
+      halfWidth: hazard.radius + AVOID_HYSTERESIS_M + this.hazardPassMargin,
       speed: 0,
     });
   };
@@ -3127,6 +3145,7 @@ export class Autopilot {
     const obstacles = this.corridorObstacles;
     obstacles.length = 0;
     this.collectHorizon = horizon;
+    this.hazardPassMargin = PASS_MARGIN_S * speed;
     this.hazards.forEachAhead(this.hintS, horizon, this.collectHazard);
     if (
       pedestrianGap >= -PEDESTRIAN_RADIUS_M
@@ -4095,17 +4114,28 @@ export class Autopilot {
         (this.middlePassingValue &&
           middleAlongside &&
           (projection.lateral - ownLaneOffset) * middleSide < -MIDDLE_PASS_MIN_SHIFT_M));
-    // Anything the corridor clears by only its hysteresis margin is squeezed past at
-    // walking pace rather than at road speed.
-    this.corridorSqueezeDistance = Number.POSITIVE_INFINITY;
+    // Something standing still beside the corridor is gone past at the speed the gap
+    // to it supports; see `PASS_MARGIN_S`. A prop's width already carries the margin
+    // asked for at this speed, so a line the planner fitted costs no speed at all.
+    this.corridorSqueezeSpeed = Number.POSITIVE_INFINITY;
     for (const obstacle of obstacles) {
       // A car alongside is not a squeeze: it is beside the corridor, not in it, and
       // pricing it here put every driver with a neighbour at walking pace.
-      if (obstacle.abeam || obstacle.speed > CRAWL_SPEED_MPS) continue;
-      const clearance = Math.abs(obstacle.lateral - plan.line) - obstacle.halfWidth;
-      if (clearance < CAR_HALF_WIDTH_M + CORRIDOR_SQUEEZE_M && obstacle.s >= 0) {
-        this.corridorSqueezeDistance = Math.min(this.corridorSqueezeDistance, obstacle.s);
-      }
+      if (obstacle.abeam || obstacle.speed > CRAWL_SPEED_MPS || obstacle.s < 0) continue;
+      const gap =
+        Math.abs(obstacle.lateral - plan.line) -
+        obstacle.halfWidth -
+        CAR_HALF_WIDTH_M +
+        AVOID_HYSTERESIS_M +
+        (obstacle.movable ? 0 : this.hazardPassMargin);
+      const passSpeed = Math.max(AVOIDANCE_CRAWL_MPS, (gap - PASS_GAP_MIN_M) / PASS_MARGIN_S);
+      this.corridorSqueezeSpeed = Math.min(
+        this.corridorSqueezeSpeed,
+        Math.sqrt(
+          passSpeed * passSpeed +
+            2 * obstacleBrakeAccel * Math.max(0, obstacle.s - config.brakeLead),
+        ),
+      );
     }
     // SIGNAL WHILE THE CAR IS STILL MOVING ACROSS, which is what the commanded line
     // cannot tell us: it reaches the target line long before the body does, so a
@@ -4607,19 +4637,7 @@ export class Autopilot {
         Math.max(laneSpeed, laneSpeed + this.corridorLaneBlockDistance / secondsToClear),
       );
     }
-    // Easing past something close alongside is done at walking pace even when the
-    // corridor clears it: the clearance is centimetres of hysteresis, not a lane.
-    if (this.corridorSqueezeDistance < Infinity) {
-      targetSpeed = Math.min(
-        targetSpeed,
-        Math.sqrt(
-          AVOIDANCE_CRAWL_MPS * AVOIDANCE_CRAWL_MPS +
-            2 *
-              obstacleBrakeAccel *
-              Math.max(0, this.corridorSqueezeDistance - config.brakeLead),
-        ),
-      );
-    }
+    targetSpeed = Math.min(targetSpeed, this.corridorSqueezeSpeed);
     // A pass on the verge is a squeeze past a moving car, taken at a modest advantage.
     if (this.shoulderPassing) {
       targetSpeed = Math.min(
