@@ -4,6 +4,7 @@
   "windFullMps": 45,
   "windGain": 0.2,
   "tyreFullMps": 30,
+  "tyreTopMps": 42,
   "tyreGain": 0.17,
   "skidStartMps": 1.6,
   "skidFullMps": 7,

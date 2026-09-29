@@ -423,6 +423,12 @@ export interface Settings {
    */
   preciseSteering: boolean;
   /**
+   * A light vibration of the driving view at speed, growing from 60 km/h and stronger
+   * on rough ground; see `CameraRig`. On by default: it is the cue that says the car is
+   * still going fast once the acceleration that announced it has settled.
+   */
+  cameraShake: boolean;
+  /**
    * Purely cosmetic joke toggle: every car — the one driven and every traffic
    * car — hops in place like the viral "bouncing Yaris" clip. Applied only to
    * the visual root in Vehicle.syncVisuals; the chassis body, its collider and
@@ -508,6 +514,7 @@ export const DEFAULT_SETTINGS: Settings = {
   fieldOfView: DEFAULT_FIELD_OF_VIEW,
   // Off by default; M switches it on, and the pause menu remembers which.
   preciseSteering: false,
+  cameraShake: true,
   // Off by default; a joke should be opted into, not discovered mid-drive.
   bouncyCars: false,
   dashboardScale: 1,
@@ -623,6 +630,8 @@ export function sanitizeSettings(raw: unknown): Settings {
     // `mouseSteering` is the pre-precise-control name in existing saves. Read it once;
     // every newly sanitized Settings object writes only the truthful new field.
     preciseSteering: obj.preciseSteering === true || obj.mouseSteering === true,
+    // Missing means an older save: on, like every new drive.
+    cameraShake: obj.cameraShake !== false,
     bouncyCars: obj.bouncyCars === true,
     // Snapped to the slider's step, clamped to its range; missing means the authored size.
     dashboardScale:

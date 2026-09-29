@@ -37,6 +37,8 @@ export interface AudioConfig {
   readonly windFullMps: number;
   readonly windGain: number;
   readonly tyreFullMps: number;
+  /** Above `tyreFullMps` the tyre voice keeps growing, gently, until this speed. */
+  readonly tyreTopMps: number;
   readonly tyreGain: number;
   readonly skidStartMps: number;
   readonly skidFullMps: number;
@@ -103,6 +105,7 @@ const AUDIO_FIELDS: Fields<AudioConfig> = {
   windFullMps: true,
   windGain: true,
   tyreFullMps: true,
+  tyreTopMps: true,
   tyreGain: true,
   skidStartMps: true,
   skidFullMps: true,

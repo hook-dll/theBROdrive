@@ -462,6 +462,8 @@ export async function bootMirageLab(): Promise<void> {
     qz: carState.qz,
     qw: carState.qw,
     speedKmh: 0,
+    surfaceRoughness: 0,
+    wheelContact: 0,
     hoodOffset: vehicle.modelMeasure.hoodPoint,
   };
   const targetPosition = new THREE.Vector3();

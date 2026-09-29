@@ -229,8 +229,7 @@ const HAZE_RISE = '2.4s';
  * The shimmer is an SVG displacement over noise that RISES, horizontal bands of hot air
  * climbing through the letters the way they climb off a road at noon: each band bends
  * the word sideways as it passes, so the wobble travels up the word instead of breathing
- * in place. It runs only while the title screen exists, and holds still for a player
- * who asked the system for reduced motion.
+ * in place. It runs only while the title screen exists.
  */
 function wordmark(): HTMLElement {
   const mark = el('h1', 'menu-wordmark');
@@ -265,16 +264,14 @@ function wordmark(): HTMLElement {
   });
   const rising = (from: number, result: string): SVGElement => {
     const offset = svgNode('feOffset', { in: 'air', dy: String(from), result });
-    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      offset.appendChild(
-        svgNode('animate', {
-          attributeName: 'dy',
-          values: `${from};${from - HAZE_BAND}`,
-          dur: HAZE_RISE,
-          repeatCount: 'indefinite',
-        }),
-      );
-    }
+    offset.appendChild(
+      svgNode('animate', {
+        attributeName: 'dy',
+        values: `${from};${from - HAZE_BAND}`,
+        dur: HAZE_RISE,
+        repeatCount: 'indefinite',
+      }),
+    );
     return offset;
   };
   const low = rising(0, 'low');
@@ -797,6 +794,7 @@ export class MainMenu {
         frameRateLimit: base.frameRateLimit,
         fieldOfView: base.fieldOfView,
         preciseSteering: base.preciseSteering,
+        cameraShake: base.cameraShake,
         bouncyCars: base.bouncyCars,
         dashboardScale: base.dashboardScale,
       };
@@ -817,6 +815,7 @@ export class MainMenu {
           frameRateLimit: settings.frameRateLimit,
           fieldOfView: settings.fieldOfView,
           preciseSteering: settings.preciseSteering,
+          cameraShake: settings.cameraShake,
           bouncyCars: settings.bouncyCars,
           dashboardScale: settings.dashboardScale,
         });
@@ -1299,6 +1298,28 @@ export class MainMenu {
                 active: () => settings.preciseSteering,
                 pick: () => {
                   settings.preciseSteering = true;
+                  apply();
+                },
+              },
+            ]),
+            segmented('Camera shake', [
+              {
+                label: 'On',
+                icon: 'drive',
+                hint: 'Past 60 km/h the view trembles a little, growing with speed, and more on gravel and sand than on smooth tarmac.',
+                active: () => settings.cameraShake,
+                pick: () => {
+                  settings.cameraShake = true;
+                  apply();
+                },
+              },
+              {
+                label: 'Off',
+                icon: 'fov',
+                hint: 'The view stays steady at any speed.',
+                active: () => !settings.cameraShake,
+                pick: () => {
+                  settings.cameraShake = false;
                   apply();
                 },
               },

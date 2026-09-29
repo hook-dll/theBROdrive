@@ -20,6 +20,10 @@ export interface CameraTarget {
   qz: number;
   qw: number;
   speedKmh: number;
+  /** Mean micro-bump amplitude under the loaded wheels, metres; 0 on foot. */
+  surfaceRoughness: number;
+  /** Fraction of the wheels on the ground, 0..1; 0 on foot. */
+  wheelContact: number;
   /** Bonnet camera mount in chassis-local metres; see CarModelMeasure.hoodPoint. */
   hoodOffset: readonly [number, number, number];
 }
@@ -108,14 +112,72 @@ const GROUND_PROBE_DOWN = 40;
  * nothing to do with.
  */
 const FOV_SPEED_WIDENING = 5;
-/** Speed (km/h) at which the speed-FOV widening is fully applied. */
-const FOV_FULL_SPEED = 130;
+/**
+ * Speed (km/h) at which the speed-FOV widening is fully applied. 160 rather than the 130
+ * it was, because most cars top out between 130 and 170: at 130 the view stopped
+ * changing for the whole top of the range.
+ */
+const FOV_FULL_SPEED = 160;
 const FOV_OMEGA = 6;
 /** Ten-power binoculars: the view is the resting FOV divided by this. */
 const BINOCULAR_POWER = 10;
 const FOV_EPSILON = 0.01;
 const BOB_AMP = 0.035;
 const BOB_FREQ = 9;
+/**
+ * THE SURGE: the chase arm stretches while the car gains speed and shortens while it
+ * sheds it, then settles back once the speed holds.
+ *
+ * The follow spring alone cannot give this. It lags the car by `v / SPRING_OMEGA`, a
+ * pure SPEED term, and its acceleration term is `a / SPRING_OMEGA²` — two centimetres at
+ * a Lada's full-throttle 3 m/s². So the pull-back is written down explicitly, from the
+ * speed's own rate of change, as a fraction of the arm the player zoomed to.
+ *
+ * It is a transient on purpose: a longer arm at steady speed is a smaller car and less
+ * ground near the lens, which reads as SLOWER. Proportional to the arm so a close camera
+ * surges as visibly as a far one.
+ */
+const SURGE_STRETCH_PER_MPS2 = 0.06;
+/** Longest the surge may stretch the arm (+20%, 1.2 m at the default 6 m). */
+const SURGE_PULL_MAX = 0.2;
+/** Furthest braking may pull the arm in (-10%): a stamp on the brakes nods the view forward. */
+const SURGE_PUSH_MAX = 0.1;
+/**
+ * How quickly the surge follows the measured acceleration (rad/s, tau ~0.4 s). Slow
+ * enough that a gear change reads as a breath rather than a jolt, and that the speed's
+ * fixed-step staircase under a faster presentation never reaches the camera.
+ */
+const SURGE_OMEGA = 2.5;
+/** Measured accelerations past this (m/s²) are a crash or a teleport, not a surge. */
+const SURGE_ACCEL_CLAMP = 12;
+/**
+ * THE SHAKE: a small tremble of the driving view at speed, which is what is left to say
+ * "fast" once acceleration has settled — the wind and the dashes are then the only cues.
+ *
+ * It grows with the SQUARE of speed from `SHAKE_START_KMH`, is scaled by the roughness
+ * under the wheels and by how many of them are on the ground (a car in the air does not
+ * vibrate), and is a ROTATION of the view rather than a displacement of the eye: the same
+ * angle moves every pixel of the frame, a displacement only the near ones. Three
+ * incommensurate sines per axis keep it from ever reading as a period. It is applied
+ * after the springs, to the camera only, so interaction rays still use the steady view.
+ */
+const SHAKE_START_KMH = 60;
+const SHAKE_FULL_KMH = 150;
+/**
+ * Peak pitch at `SHAKE_FULL_KMH` on a surface of gain 1, radians (~0.29 degrees, about
+ * five pixels of a 1080-line frame at the resting FOV).
+ */
+const SHAKE_PITCH_RAD = 0.005;
+const SHAKE_YAW_SHARE = 0.45;
+const SHAKE_ROLL_SHARE = 0.6;
+/**
+ * Surface gain: `SHAKE_SMOOTH_GAIN` on a glass-smooth road, rising to 2 at
+ * `SHAKE_ROUGH_FULL` of `SurfaceDef.roughness`. That spreads the real surfaces out —
+ * concrete 0.68, asphalt 0.77, sand 1.3, cracked asphalt 1.44, gravel 1.86, rock 2 —
+ * instead of saturating everything past cracked asphalt.
+ */
+const SHAKE_SMOOTH_GAIN = 0.6;
+const SHAKE_ROUGH_FULL = 0.1;
 /** Death first turns the existing view down, then lifts it while the screen fades. */
 const DEATH_LOOK_DOWN_SECONDS = 2.5;
 const DEATH_RISE_SECONDS = 6.5;
@@ -133,6 +195,8 @@ const _UP = new THREE.Vector3(0, 1, 0);
 const _FORWARD = new THREE.Vector3(0, 0, 1);
 const _rayOrigin = { x: 0, y: 0, z: 0 };
 const _rayDir = { x: 0, y: 0, z: 0 };
+const _qB = new THREE.Quaternion();
+const _eA = new THREE.Euler();
 
 function clamp(x: number, lo: number, hi: number): number {
   return x < lo ? lo : x > hi ? hi : x;
@@ -192,6 +256,14 @@ export class CameraRig {
   private readonly deathStartEye = new THREE.Vector3();
   private readonly deathStartQuaternion = new THREE.Quaternion();
   private readonly deathDownQuaternion = new THREE.Quaternion();
+  /** Smoothed rate of change of speed, m/s²; drives the chase arm's surge. */
+  private surge = 0;
+  /** Last frame's speed, m/s, for measuring `surge`. */
+  private surgeSpeedMps = 0;
+  /** Clock of the speed shake's sines, seconds. */
+  private shakeTime = 0;
+  /** `Settings.cameraShake`. */
+  private shake = true;
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
@@ -216,6 +288,11 @@ export class CameraRig {
     this.fov += next - this.baseFov;
     this.baseFov = next;
     this.baseHalfTan = Math.tan((next * Math.PI) / 360);
+  }
+
+  /** `Settings.cameraShake`: whether the driving view trembles at speed. */
+  setShake(on: boolean): void {
+    this.shake = on;
   }
 
   /**
@@ -448,6 +525,18 @@ export class CameraRig {
     const moveMag = Math.min(1, Math.hypot(input.moveX, input.moveZ));
     if (moveMag > 1e-3) this.bobTime += d;
 
+    // The surge measures the speed's own rate of change; see SURGE_STRETCH_PER_MPS2.
+    // Speed is |forward|, so reversing harder surges the same way driving off does.
+    const speedMps = target.speedKmh / 3.6;
+    const accel = clamp(
+      (speedMps - this.surgeSpeedMps) / d,
+      -SURGE_ACCEL_CLAMP,
+      SURGE_ACCEL_CLAMP,
+    );
+    this.surgeSpeedMps = speedMps;
+    this.surge += (accel - this.surge) * (1 - Math.exp(-SURGE_OMEGA * d));
+    this.shakeTime += d;
+
     // Zoom drives the chase arm only; the hood mount has no arm to lengthen.
     if (input.zoomDelta !== 0 && !onFoot && this._mode === 'chase') {
       this.logDistance = clamp(
@@ -492,6 +581,7 @@ export class CameraRig {
 
     _mA.lookAt(this.eye, this.lookAt, _UP);
     this.camera.quaternion.setFromRotationMatrix(_mA);
+    if (mode !== 'foot' && this.shake) this.applyShake(target);
     // The camera sits in the relative scene graph, so its position is the relative
     // eye verbatim — no origin arithmetic here or at any consumer. The eye is built
     // from `target` (the car's or player's transform, already relative), and on a
@@ -565,7 +655,27 @@ export class CameraRig {
     const sa = Math.sin(armPitch);
     _vD.set(-viewX * ca, sa, -viewZ * ca);
 
-    _vA.copy(_vB).addScaledVector(_vD, Math.exp(this.logDistance));
+    const stretch = clamp(this.surge * SURGE_STRETCH_PER_MPS2, -SURGE_PUSH_MAX, SURGE_PULL_MAX);
+    _vA.copy(_vB).addScaledVector(_vD, Math.exp(this.logDistance) * (1 + stretch));
+  }
+
+  /** Turns the finished driving view by this frame's speed shake; see SHAKE_START_KMH. */
+  private applyShake(target: CameraTarget): void {
+    const t = clamp(
+      (target.speedKmh - SHAKE_START_KMH) / (SHAKE_FULL_KMH - SHAKE_START_KMH),
+      0,
+      1,
+    );
+    if (t <= 0 || target.wheelContact <= 0) return;
+    const rough = clamp(target.surfaceRoughness / SHAKE_ROUGH_FULL, 0, 1);
+    const gain = SHAKE_SMOOTH_GAIN + (2 - SHAKE_SMOOTH_GAIN) * rough;
+    const amp = SHAKE_PITCH_RAD * t * t * gain * target.wheelContact;
+    const w = this.shakeTime * Math.PI * 2;
+    const pitch = 0.5 * Math.sin(w * 7.3) + 0.3 * Math.sin(w * 12.1 + 1.7) + 0.35 * Math.sin(w * 3.7 + 0.6);
+    const yaw = 0.55 * Math.sin(w * 5.9 + 2.1) + 0.3 * Math.sin(w * 9.7 + 0.3) + 0.25 * Math.sin(w * 2.9 + 4.4);
+    const roll = 0.5 * Math.sin(w * 6.7 + 4.0) + 0.3 * Math.sin(w * 13.3 + 2.6) + 0.3 * Math.sin(w * 3.3 + 1.1);
+    _eA.set(pitch * amp, yaw * amp * SHAKE_YAW_SHARE, roll * amp * SHAKE_ROLL_SHARE, 'YXZ');
+    this.camera.quaternion.multiply(_qB.setFromEuler(_eA));
   }
 
   /**
@@ -702,11 +812,15 @@ export class CameraRig {
     this.eye.set(target.x, target.y + EYE_HEIGHT, target.z);
     this.lookAt.copy(this.eye).addScaledVector(_vC, LOOK_AHEAD);
     this.fov = this.baseFov;
+    this.surge = 0;
+    this.surgeSpeedMps = 0;
   }
 
   /** Snap into the remembered driving pose on entry, preserving its arm exactly. */
   private snapDriving(target: CameraTarget): void {
     this.updateVehicleYaw(target);
+    this.surge = 0;
+    this.surgeSpeedMps = target.speedKmh / 3.6;
     if (this._mode === 'hood') {
       this.yawValue = wrapAngle(this.vehicleYaw + this.hoodYawOffset);
       this.desiredHood(target);

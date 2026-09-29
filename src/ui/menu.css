@@ -287,12 +287,6 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .menu-sheet {
-    animation: none;
-  }
-}
-
 /* ------------------------------------------------------------------ *
  *  Type roles                                                        *
  * ------------------------------------------------------------------ */
@@ -486,12 +480,6 @@
   40%,
   100% {
     transform: translateX(100%);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .menu-title-screen .menu-action.is-primary::after {
-    display: none;
   }
 }
 

@@ -2,17 +2,35 @@
 
 ## Unreleased
 
+### Added
+
+- CAMERA SHAKE AT SPEED (`Settings.cameraShake`, Settings › Drive, on by default). The
+  driving view trembles from 60 km/h, with the square of speed up to 150, by rotation
+  only (the aim used for interaction stays steady). Scaled by the surface's roughness
+  and by wheels on the ground. Peak at 130 km/h: about 3 px on asphalt, 6 on cracked
+  asphalt, 7 on gravel (1080-line frame, resting FOV).
+- THE CHASE CAMERA SURGES. The arm stretches with the smoothed rate of change of speed
+  (6% of the arm per m/s², up to +20%; braking pulls it in, up to -10%; tau 0.4 s) and
+  settles once the speed holds. A 2.5 m/s² launch to 130 km/h runs about 0.8 m further
+  back than the cruise distance it relaxes to.
+
 ### Changed
 
+- THE FOV WIDENING IS FULL AT 160 km/h, not 130, so the top of most cars' range still
+  widens the view. Still +5 degrees in total.
+- TYRE ROAR KEEPS GROWING PAST 108 km/h, up to +3 dB (hiss +4.5 dB) at 151 km/h
+  (`tyreTopMps` in `config/audio.json`). Nothing below 108 km/h changes.
+- THE MENU IGNORES THE SYSTEM'S REDUCED-MOTION SETTING. Windows' "animation effects"
+  switch was freezing the title screen for players who never asked for that.
 - SAVE DRIVE KEEPS THE PAUSE SHEET OPEN. The row turns green and reads `Saved` for
   1.6 s (`Save failed` in red if the write is refused), then reads `Save drive` again;
   the game no longer resumes on a save. Saving is the `PauseHooks.saveDrive` hook now,
   and `PauseAction` is only `resume` or `quit`.
 - THE HEAT HAZE ON `Voyage` RISES. The title's shimmer used to breathe in place; it is
   now a stitched 160 px noise tile climbing through the word every 2.4 s, so hot-air
-  bands travel up the letters. Reduced motion still holds it still.
+  bands travel up the letters.
 - THE TITLE SCREEN'S MAIN BUTTON CATCHES THE LIGHT: a pale sheen crosses it every
-  4.5 s. It moves by transform only, and is off under reduced motion.
+  4.5 s. It moves by transform only.
 - NO `loading <car>` TOAST. A car model streaming in no longer announces itself; the
   `could not load <car>` toast on a failed load stays.
 

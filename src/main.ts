@@ -1060,6 +1060,7 @@ async function boot(): Promise<void> {
     world.state.settings.fieldOfView,
   );
   camera.setMode('foot');
+  camera.setShake(world.state.settings.cameraShake);
   camera.setYaw(initialYaw);
 
   // Synthesises ordinary InputFrame commands, so every fuel, gearbox, tyre and
@@ -1110,6 +1111,8 @@ async function boot(): Promise<void> {
     qz: 0,
     qw: 1,
     speedKmh: 0,
+    surfaceRoughness: 0,
+    wheelContact: 0,
     hoodOffset: [0, 0, 0],
   };
 
@@ -1829,6 +1832,8 @@ async function boot(): Promise<void> {
       target.qz = targetQuat.z;
       target.qw = targetQuat.w;
       target.speedKmh = driving.speedKmh;
+      target.surfaceRoughness = driving.audio.surfaceRoughness;
+      target.wheelContact = driving.audio.wheelContactFraction;
       target.hoodOffset = driving.modelMeasure.hoodPoint;
     } else {
       const p = player.interpolatedPosition(alpha);
@@ -1842,6 +1847,8 @@ async function boot(): Promise<void> {
       target.qz = 0;
       target.qw = 1;
       target.speedKmh = 0;
+      target.surfaceRoughness = 0;
+      target.wheelContact = 0;
     }
 
     Object.assign(cameraInput, lastInput);
@@ -2370,6 +2377,7 @@ async function boot(): Promise<void> {
       renderer.setMsaa(world.state.settings.msaa);
       renderer.setRenderScale(world.state.settings.renderScale);
       camera.setFieldOfView(world.state.settings.fieldOfView);
+      camera.setShake(world.state.settings.cameraShake);
       hud.setDashboardScale(world.state.settings.dashboardScale);
       // The tier owns six things and five of them apply in place: the pixel ceiling,
       // the shadow pass, the sky's star depth, the horizon (far plane, fog and vista

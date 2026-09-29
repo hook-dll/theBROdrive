@@ -69,6 +69,14 @@ export interface CarPose {
 const WIND_FULL_MPS = AUDIO_CONFIG.windFullMps;
 const WIND_GAIN = AUDIO_CONFIG.windGain;
 const TYRE_FULL_MPS = AUDIO_CONFIG.tyreFullMps;
+const TYRE_TOP_MPS = AUDIO_CONFIG.tyreTopMps;
+/**
+ * How much further `rollT` climbs between `TYRE_FULL_MPS` and `TYRE_TOP_MPS`. The tyre
+ * voice used to go flat at 108 km/h, which left the top 30-60 km/h of every car to the
+ * wind alone; this keeps the roar and hiss rising (about +3 and +4.5 dB) to 151 km/h
+ * without touching anything below the knee.
+ */
+const TYRE_OVERDRIVE = 0.3;
 const TYRE_GAIN = AUDIO_CONFIG.tyreGain;
 const SKID_START_MPS = AUDIO_CONFIG.skidStartMps;
 const SKID_FULL_MPS = AUDIO_CONFIG.skidFullMps;
@@ -702,7 +710,9 @@ export class VehicleAudio {
     const voice = SURFACE_VOICES[state.surface] ?? SURFACE_VOICES[SurfaceType.Asphalt];
     const contact = state.wheelContactFraction;
     const rough = clamp01(state.surfaceRoughness / ROUGHNESS_FULL);
-    const rollT = clamp01(speed / TYRE_FULL_MPS);
+    const rollT =
+      clamp01(speed / TYRE_FULL_MPS) +
+      TYRE_OVERDRIVE * clamp01((speed - TYRE_FULL_MPS) / (TYRE_TOP_MPS - TYRE_FULL_MPS));
     // A new patch of surface every few to few tens of metres: a shade coarser or
     // smoother, gliding in as the tyres roll onto it.
     this.textureLeftM -= speed * dt;
