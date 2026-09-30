@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { FrameProfiler } from './core/frameprofiler';
+import { installRetro, retroActive } from './render/retro';
 import { InputReader, emptyInput, type InputFrame } from './core/input';
 import { GameLoop } from './core/loop';
 import { installScreenWakeLock } from './core/wakelock';
@@ -274,6 +275,11 @@ async function boot(): Promise<void> {
     tierUndetected =
       world.state.settings.graphicsQualitySource === 'default' && !mobilePresentation;
   }
+  // Before anything is built: the retro rung changes the ground cover and the finishing
+  // pass, and both are baked for the page's lifetime (render/retro.ts).
+  if (world.state.settings.graphicsQuality === 'retro') installRetro();
+  /** A switch into or out of the retro rung has started its save-and-reload. */
+  let retroReloading = false;
 
   // The spine (checkpoints + coarse index) is what makes a long road affordable: it
   // is awaited here so the ten-million-step centreline walk never lands on the main
@@ -2444,13 +2450,36 @@ async function boot(): Promise<void> {
      * reload lands in is the one that asks the question.
      */
     remeasureGraphics: () => {
-      const settings = { ...world.state.settings, graphicsQualitySource: 'default' as const };
+      // The measurement walks the ordinary ladder only; the retro rung is a choice, and
+      // a load built for it cannot step to another rung in place.
+      const settings = {
+        ...world.state.settings,
+        graphicsQuality: world.state.settings.graphicsQuality === 'retro'
+          ? 'acceptable' as const
+          : world.state.settings.graphicsQuality,
+        graphicsQualitySource: 'default' as const,
+      };
       world.apply({ t: 'settings', settings });
       storeSettings(settings);
       window.location.reload();
     },
     applySettings: (next) => {
       world.apply({ t: 'settings', settings: next });
+      // Into or out of the retro rung is a reload: it is built into the world's ground
+      // cover and the finishing pass (render/retro.ts). The drive is saved and marked
+      // for resume first, so the player lands back in the car rather than on the title.
+      if ((world.state.settings.graphicsQuality === 'retro') !== retroActive()) {
+        if (!retroReloading) {
+          retroReloading = true;
+          const state = stateForSave();
+          const slot = `slot-${state.seed}`;
+          void saves.save(slot, saveName(state), state)
+            .then(() => markResumeTarget(slot))
+            .catch((error: unknown) => console.error('save before the retro reload failed', error))
+            .finally(() => window.location.reload());
+        }
+        return;
+      }
       // Input and audio cache device-facing preferences; push them immediately.
       input.setKeyBindings(world.state.settings.keyBindings);
       input.setMouseSensitivity(world.state.settings.mouseSensitivity);

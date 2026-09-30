@@ -119,6 +119,8 @@ const ICONS: Record<string, readonly string[]> = {
   auto: ['M13 3l-6 10h4l-1 8 7-12h-4z'],
   keys: ['M3 7h18v10H3z', 'M7 11h1M11 11h1M15 11h1M9 14h6'],
   mouse: ['M9 3h6a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3z', 'M12 7v4'],
+  /** A staircase of square steps: the retro rung's whole-pixel look. */
+  retro: ['M4 19h5v-5h5v-5h6'],
   gfx1: ['M5 18v-3'],
   gfx2: ['M5 18v-3M12 18v-7'],
   gfx3: ['M5 18v-3M12 18v-7M19 18v-11'],
@@ -1433,6 +1435,24 @@ export class MainMenu {
             // says so in the head, so the levels can describe the picture instead.
             segmented('Detail', [
               {
+                label: 'Retro',
+                icon: 'retro',
+                hint: () =>
+                  'For weak mini-PCs and old laptops. The world is drawn at about 360 lines '
+                  + 'and shown as crisp square pixels, like a late-90s game, with lighter '
+                  + 'ground cover and no sun shadows. '
+                  + (settings.graphicsQuality === 'retro'
+                    ? ''
+                    : 'Switching to it or away from it saves the drive and reloads it.'),
+                active: () => settings.graphicsQuality === 'retro',
+                pick: () => {
+                  settings.graphicsQuality = 'retro';
+                  settings.graphicsQualitySource = 'chosen';
+                  paintSource();
+                  apply();
+                },
+              },
+              {
                 label: 'Low',
                 icon: 'gfx1',
                 hint: describeTier('acceptable', mobilePresentation),
@@ -1476,7 +1496,9 @@ export class MainMenu {
             // points were the whole of the choice there. Both directions are offered:
             // down for the machine between two levels, up for the one with headroom that
             // does not want a 25 km vista and eighteen headlamps to go with it.
-            segmented('Sharpness', [
+            // Not offered on the retro rung: its resolution IS the look, fixed at whole
+            // pixels (render/retro.ts), so a sharpness choice there would do nothing.
+            ...(settings.graphicsQuality === 'retro' ? [] : [segmented('Sharpness', [
               {
                 label: 'Auto',
                 icon: 'display',
@@ -1531,7 +1553,7 @@ export class MainMenu {
                   apply();
                 },
               })),
-            ]),
+            ])]),
             // THE ONE LEVER THAT WORKS ON EVERY DEVICE, for opposite reasons, so it is
             // offered on both. On a phone it is a thermal control and has to be the
             // player's: no browser reports thermal state, battery temperature or clock

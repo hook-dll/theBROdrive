@@ -14,6 +14,8 @@ export interface DesertTileWorkerInit {
   readonly type: 'init';
   readonly seed: number;
   readonly spine: RoadSpine;
+  /** The retro rung's coarse open desert; see `DesertTileGenerationContext`. */
+  readonly coarseAway: boolean;
 }
 
 export interface DesertTileWorkerTileRequest {
@@ -67,6 +69,7 @@ scope.onmessage = (event: MessageEvent<DesertTileWorkerRequest>) => {
       road,
       terrain,
       roadDistance: new RoadDistance(road),
+      coarseAway: request.coarseAway,
     };
     scope.postMessage({ type: 'ready' });
     return;

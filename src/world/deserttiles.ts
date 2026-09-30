@@ -1,3 +1,4 @@
+import { retroActive } from '../render/retro';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 
@@ -442,6 +443,7 @@ export class DesertTileStreamer {
         road: this.road,
         terrain: this.terrain,
         roadDistance: this.roadDistance,
+        coarseAway: retroActive(),
       },
       tx,
       tz,
@@ -466,6 +468,7 @@ export class DesertTileStreamer {
     geometry.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(data.colors, 3));
     geometry.setIndex(new THREE.BufferAttribute(data.indices, 1));
+    geometry.setDrawRange(0, data.indexCount);
 
     const group = new THREE.Group();
     group.position.set(centreX - this.origin.x, 0, centreZ - this.origin.z);
@@ -697,6 +700,7 @@ export class DesertTileStreamer {
         type: 'init',
         seed: this.seed,
         spine: this.road.spine,
+        coarseAway: retroActive(),
       };
       candidate.postMessage(request);
       return candidate;
@@ -879,6 +883,7 @@ export class DesertTileStreamer {
             road: this.road,
             terrain: this.terrain,
             roadDistance: this.roadDistance,
+            coarseAway: retroActive(),
           },
           work.tx,
           work.tz,

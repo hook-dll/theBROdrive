@@ -1,6 +1,8 @@
 import type { GraphicsQuality } from '../game/settings';
 
 const DEFAULT_MIN_SCALE: Record<GraphicsQuality, number> = {
+  // Retro is always pinned (its pixels are the style), so this is never reached.
+  retro: 1,
   acceptable: 0.8,
   standard: 0.55,
   blessing: 0.7,
@@ -8,6 +10,7 @@ const DEFAULT_MIN_SCALE: Record<GraphicsQuality, number> = {
 // Acceptable deliberately targets a stable 30 Hz presentation. Its extra frame
 // budget buys image resolution on small integrated GPUs; simulation remains 60 Hz.
 const SLOW_GPU_MS: Record<GraphicsQuality, number> = {
+  retro: 26,
   acceptable: 26,
   standard: 11,
   blessing: 11,

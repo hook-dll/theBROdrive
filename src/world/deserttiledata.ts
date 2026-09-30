@@ -30,6 +30,11 @@ export interface DesertTileGenerationContext {
   readonly road: Road;
   readonly terrain: Terrain;
   readonly roadDistance: RoadDistance;
+  /**
+   * Draw open desert at half the lattice (the retro rung, render/retro.ts). Heights,
+   * normals and physics keep the full lattice; only the drawn triangles change.
+   */
+  readonly coarseAway?: boolean;
 }
 
 /**
@@ -45,6 +50,8 @@ export interface DesertTileData {
   readonly normals: Float32Array;
   readonly colors: Float32Array;
   readonly indices: Uint32Array;
+  /** How much of `indices` is drawn; less than its length when drawn coarse. */
+  readonly indexCount: number;
   readonly propSurfaces: Uint8Array;
 }
 
@@ -113,6 +120,127 @@ export function sampleGroundHeight(
   // above the trough the near terrain mesh is drawing, and the tile would sink
   // through it as the player closed. Landform stays in the height and out of here.
   out.detail = detail - context.terrain.corridorShapeAt(x, z, dist, projection.s);
+}
+
+/** Every lattice cell as two triangles. Returns the index count. */
+function writeFullIndices(indices: Uint32Array): number {
+  let io = 0;
+  for (let ix = 0; ix < DESERT_TILE_CELLS; ix++) {
+    for (let iz = 0; iz < DESERT_TILE_CELLS; iz++) {
+      const a = ix * DESERT_TILE_VERTS + iz;
+      const b = (ix + 1) * DESERT_TILE_VERTS + iz;
+      const c = a + 1;
+      const d = b + 1;
+      indices[io++] = a;
+      indices[io++] = c;
+      indices[io++] = b;
+      indices[io++] = b;
+      indices[io++] = c;
+      indices[io++] = d;
+    }
+  }
+  return io;
+}
+
+/**
+ * Open desert beyond this distance from the road, metres, is drawn at half the lattice.
+ * The corridor landform and the under-road offset end at `CORRIDOR_OUTER`; the rest is
+ * the lattice's own error in `distAt` and half a block's diagonal, so no block that
+ * shapes the verge is ever coarsened.
+ */
+const COARSE_CLEAR_M = EXACT_DISTANCE_GATE + DESERT_TILE_STEP * 1.5;
+const BLOCKS = DESERT_TILE_CELLS / 2;
+
+/**
+ * The retro rung's terrain: 2x2 cells merged into one block wherever the block is clear
+ * of the road, a quarter of the triangles over open sand.
+ *
+ * WITHOUT A CRACK. A coarse block's side skips the lattice vertex in its middle, and a
+ * neighbour that draws that vertex — a full-resolution block beside it, or whatever the
+ * next tile decides — would leave a T-junction the sky shows through. So a coarse block
+ * keeps the middle vertex on every side that borders a fine block or the tile's edge,
+ * as a fan round its own centre; coarse against coarse shares the plain edge. The
+ * winding matches the full lattice's.
+ */
+function writeCoarseIndices(
+  context: DesertTileGenerationContext,
+  indices: Uint32Array,
+  startX: number,
+  startZ: number,
+  farFromRoad: boolean,
+): number {
+  const fine = new Uint8Array(BLOCKS * BLOCKS);
+  if (!farFromRoad) {
+    const blockSize = DESERT_TILE_STEP * 2;
+    for (let bx = 0; bx < BLOCKS; bx++) {
+      for (let bz = 0; bz < BLOCKS; bz++) {
+        const x = startX + (bx + 0.5) * blockSize;
+        const z = startZ + (bz + 0.5) * blockSize;
+        fine[bx * BLOCKS + bz] = context.roadDistance.distAt(x, z, DIST_LATTICE) < COARSE_CLEAR_M ? 1 : 0;
+      }
+    }
+  }
+  const coarseAt = (bx: number, bz: number): boolean =>
+    bx >= 0 && bz >= 0 && bx < BLOCKS && bz < BLOCKS && fine[bx * BLOCKS + bz] === 0;
+  const vertex = (ix: number, iz: number): number => ix * DESERT_TILE_VERTS + iz;
+  let io = 0;
+  const ring: number[] = [];
+  for (let bx = 0; bx < BLOCKS; bx++) {
+    for (let bz = 0; bz < BLOCKS; bz++) {
+      const ix = bx * 2;
+      const iz = bz * 2;
+      if (fine[bx * BLOCKS + bz] === 1) {
+        for (let cx = ix; cx < ix + 2; cx++) {
+          for (let cz = iz; cz < iz + 2; cz++) {
+            const a = vertex(cx, cz);
+            const b = vertex(cx + 1, cz);
+            indices[io++] = a;
+            indices[io++] = a + 1;
+            indices[io++] = b;
+            indices[io++] = b;
+            indices[io++] = a + 1;
+            indices[io++] = b + 1;
+          }
+        }
+        continue;
+      }
+      const splitLowX = !coarseAt(bx - 1, bz);
+      const splitHighZ = !coarseAt(bx, bz + 1);
+      const splitHighX = !coarseAt(bx + 1, bz);
+      const splitLowZ = !coarseAt(bx, bz - 1);
+      const A = vertex(ix, iz);
+      const B = vertex(ix + 2, iz);
+      const C = vertex(ix, iz + 2);
+      const D = vertex(ix + 2, iz + 2);
+      if (!splitLowX && !splitHighZ && !splitHighX && !splitLowZ) {
+        indices[io++] = A;
+        indices[io++] = C;
+        indices[io++] = B;
+        indices[io++] = B;
+        indices[io++] = C;
+        indices[io++] = D;
+        continue;
+      }
+      // Round the block A -> C -> D -> B, which is the full lattice's winding seen from
+      // the centre, with each split side's middle vertex in its place.
+      ring.length = 0;
+      ring.push(A);
+      if (splitLowX) ring.push(vertex(ix, iz + 1));
+      ring.push(C);
+      if (splitHighZ) ring.push(vertex(ix + 1, iz + 2));
+      ring.push(D);
+      if (splitHighX) ring.push(vertex(ix + 2, iz + 1));
+      ring.push(B);
+      if (splitLowZ) ring.push(vertex(ix + 1, iz));
+      const M = vertex(ix + 1, iz + 1);
+      for (let i = 0; i < ring.length; i++) {
+        indices[io++] = M;
+        indices[io++] = ring[i]!;
+        indices[io++] = ring[(i + 1) % ring.length]!;
+      }
+    }
+  }
+  return io;
 }
 
 /**
@@ -208,21 +336,9 @@ export function generateDesertTileData(
   }
 
   const indices = fit(into?.indices, DESERT_TILE_CELLS * DESERT_TILE_CELLS * 6, Uint32Array);
-  let io = 0;
-  for (let ix = 0; ix < DESERT_TILE_CELLS; ix++) {
-    for (let iz = 0; iz < DESERT_TILE_CELLS; iz++) {
-      const a = ix * DESERT_TILE_VERTS + iz;
-      const b = (ix + 1) * DESERT_TILE_VERTS + iz;
-      const c = a + 1;
-      const d = b + 1;
-      indices[io++] = a;
-      indices[io++] = c;
-      indices[io++] = b;
-      indices[io++] = b;
-      indices[io++] = c;
-      indices[io++] = d;
-    }
-  }
+  const indexCount = context.coarseAway
+    ? writeCoarseIndices(context, indices, startX, startZ, farFromRoad)
+    : writeFullIndices(indices);
 
   const propSurfaces = fit(into?.propSurfaces, MAX_TILE_PROPS, Uint8Array);
   propSurfaces.fill(0);
@@ -239,7 +355,7 @@ export function generateDesertTileData(
     propSurfaces[i] = context.terrain.openSurfaceAt(worldX, worldZ);
   }
 
-  return { heights, positions, detailOffsets, normals, colors, indices, propSurfaces };
+  return { heights, positions, detailOffsets, normals, colors, indices, indexCount, propSurfaces };
 }
 
 /** The ground as the tiles draw it at one point: see `tileGroundSampler`. */

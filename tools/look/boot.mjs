@@ -7,7 +7,7 @@
  */
 import puppeteer from 'puppeteer-core';
 
-export const HORIZON_M = { acceptable: 1500, standard: 8000, blessing: 25000 };
+export const HORIZON_M = { retro: 1500, acceptable: 1500, standard: 8000, blessing: 25000 };
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -43,6 +43,26 @@ export async function bootIntoCar(browser, { URL, W, H, DPR = 1, SEED = 'flick',
     const t = m.text();
     if (/error|shader/i.test(t)) console.log('console: ' + t.slice(0, 800));
   });
+  // The tier goes into the stored preferences BEFORE the page runs, which is the path a
+  // player's own choice takes: the renderer, the light budget and the retro rung all
+  // read it at construction. Setting it on the live state afterwards changed the menu's
+  // idea of the tier and nothing the GPU was doing — the shadows and the MSAA of
+  // whatever the launch had picked stayed on. Stored as `chosen` so no launch
+  // measurement moves it; each launch is a fresh browser profile.
+  if (TIER) {
+    if (!HORIZON_M[TIER]) throw new Error(`unknown TIER ${TIER}`);
+    await page.evaluateOnNewDocument((tier) => {
+      const key = 'brodrive-settings-v1';
+      let stored = {};
+      try { stored = JSON.parse(localStorage.getItem(key) ?? '{}') ?? {}; } catch { /* fresh */ }
+      localStorage.setItem(key, JSON.stringify({
+        ...stored,
+        graphicsQuality: tier,
+        graphicsQualitySource: 'chosen',
+        msaa: tier === 'standard' || tier === 'blessing',
+      }));
+    }, TIER);
+  }
   // The title screen has no seed field: the world is pinned by the URL instead.
   const url = new globalThis.URL(URL);
   url.searchParams.set('seed', SEED);
@@ -77,15 +97,5 @@ export async function bootIntoCar(browser, { URL, W, H, DPR = 1, SEED = 'flick',
     if (best) b.world.apply({ t: 'enter_car', carId: best });
   });
 
-  if (TIER) {
-    const metres = HORIZON_M[TIER];
-    if (!metres) throw new Error(`unknown TIER ${TIER}`);
-    await page.evaluate(([tier, m]) => {
-      const b = window.__bro;
-      b.world.apply({ t: 'settings', settings: { ...b.world.state.settings, graphicsQuality: tier } });
-      b.renderer.setViewDistance(m);
-      b.vista.setViewDistance(m);
-    }, [TIER, metres]);
-  }
   return page;
 }

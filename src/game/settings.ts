@@ -43,7 +43,7 @@ export type TimeOfDayPreset = 'morning' | 'noon' | 'evening' | 'midnight';
  * workstation. Below the ceiling the display's own sharpness still decides, and above
  * it a supersampling multiplier lets the top rung spend headroom it is told it has.
  */
-export type GraphicsQuality = 'acceptable' | 'standard' | 'blessing';
+export type GraphicsQuality = 'retro' | 'acceptable' | 'standard' | 'blessing';
 
 /**
  * One rung. Every number here is a consequence of the same question — what can this
@@ -135,8 +135,11 @@ export interface GraphicsTier {
 }
 
 /**
- * The rungs, weakest first. Read them as three machines, not three presets:
+ * The rungs, weakest first. Read them as machines, not presets:
  *
+ *  - `retro` — a mini-PC or an old laptop that cannot hold `acceptable`. A fixed
+ *    low-resolution frame in whole pixels and cheaper ground cover; switching to or
+ *    from it reloads the drive, because it changes what the world is built from.
  *  - `acceptable` — a phone, or a mini-PC on a television. No shadow pass, because it is
  *    the one cost that cannot be paid in pixels. The authored horizon.
  *  - `standard` — an ordinary desktop with a discrete GPU or a good integrated one.
@@ -150,6 +153,31 @@ export interface GraphicsTier {
  * player's, because no browser will tell the game how warm the phone is.
  */
 export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
+  // A DIFFERENT PICTURE, NOT A SMALLER ONE. `acceptable` on an Intel N100 measured
+  // 36.5 ms of GPU at 0.92 Mpx — 20 FPS — and the only way further down that ladder
+  // was a bilinear stretch of fewer pixels, which reads as a broken image. This rung
+  // draws a fixed low-resolution frame upscaled by whole pixels (render/retro.ts), so
+  // the pixels are a style rather than a blur. Its pixel numbers are what the menu
+  // quotes; the renderer derives the real buffer from the display's height.
+  retro: {
+    maxPixels: 640 * 360,
+    mobileMaxPixels: 640 * 360,
+    minPixels: 640 * 360,
+    mobileMinPixels: 640 * 360,
+    supersample: 1,
+    shadows: false,
+    msaa: false,
+    mobileShadows: false,
+    mobileVista: 'retro',
+    starMagnitude: 6,
+    mobileStarMagnitude: 6,
+    horizonM: 1500,
+    vehicleLightSlots: 2,
+    mobileVehicleLightSlots: 2,
+    streetLightSlots: 2,
+    mobileStreetLightSlots: 2,
+    headlightDistanceScale: 1,
+  },
   acceptable: {
     maxPixels: 1600 * 900,
     mobileMaxPixels: 960 * 540,
@@ -589,7 +617,9 @@ export function sanitizeSettings(raw: unknown): Settings {
     // Anything unrecognised is standard, so an old save (which has no such field)
     // keeps the look it was made with.
     graphicsQuality:
-      obj.graphicsQuality === 'acceptable' || obj.graphicsQuality === 'blessing'
+      obj.graphicsQuality === 'retro'
+        || obj.graphicsQuality === 'acceptable'
+        || obj.graphicsQuality === 'blessing'
         ? obj.graphicsQuality
         : 'standard',
     // A MISSING source means preferences written before this field existed, and the
@@ -621,7 +651,7 @@ export function sanitizeSettings(raw: unknown): Settings {
     msaa:
       typeof obj.msaa === 'boolean'
         ? obj.msaa
-        : obj.graphicsQuality !== 'acceptable',
+        : obj.graphicsQuality !== 'acceptable' && obj.graphicsQuality !== 'retro',
     // Snap to an offered rate rather than clamping, so a hand-edited 31 or 999 cannot
     // become a frame rate the menu has no button for. `mobileFrameRate` is the phone-only
     // name this setting had first; reading it is how a save made before this change keeps

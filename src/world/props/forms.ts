@@ -8,6 +8,7 @@
  */
 
 import { applyGroundFade } from '../../render/groundfade';
+import { retroActive } from '../../render/retro';
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -378,13 +379,21 @@ function buildDragonTree(): THREE.BufferGeometry {
   // TOP of that column. Each is shorter, thinner and more tilted than its parent, and
   // carries the parent's own azimuth so the fan spreads outward instead of doubling back
   // through itself; the deepest levels are three-segment tubes, cheap to draw in bulk.
-  const levels = [
+  const allLevels = [
     { tilt: 0.80, length: 1.15, rBase: 0.3, rTip: 0.22, segments: 6, spread: 0 },
     { tilt: 1.00, length: 0.90, rBase: 0.2, rTip: 0.15, segments: 5, spread: 0.5 },
     { tilt: 1.12, length: 0.72, rBase: 0.13, rTip: 0.095, segments: 4, spread: 0.44 },
     { tilt: 1.25, length: 0.62, rBase: 0.085, rTip: 0.06, segments: 3, spread: 0.36 },
     { tilt: 1.35, length: 0.5, rBase: 0.055, rTip: 0.04, segments: 3, spread: 0.3 },
   ];
+  // The retro rung stops a doubling short — forty tips under forty larger clumps, a
+  // quarter of the vertices — because at 360 lines the last fork is under a pixel and
+  // the full tree was 8 673 vertices an instance (render/retro.ts). The silhouette is
+  // the crown's, and the crown keeps its size.
+  const retro = retroActive();
+  const levels = retro
+    ? allLevels.slice(0, 4).map((level) => ({ ...level, segments: Math.min(level.segments, 4) }))
+    : allLevels;
   let nodes: Array<{ x: number; y: number; z: number; az: number }> = [];
   for (let i = 0; i < 5; i++) nodes.push({ x: 0, y: 3.35, z: 0, az: i * (Math.PI * 2 / 5) });
   for (let level = 0; level < levels.length; level++) {
@@ -419,7 +428,7 @@ function buildDragonTree(): THREE.BufferGeometry {
   parts.push(paint(canopyPad(2.7, 0.28, 0, crownY, 0, 1), canopy));
   for (let i = 0; i < tips.length; i++) {
     const [tx, ty, tz] = tips[i]!;
-    parts.push(paint(canopyPad(0.65, 0.6, tx, ty + 0.06, tz), canopy));
+    parts.push(paint(canopyPad(retro ? 0.85 : 0.65, 0.6, tx, ty + 0.06, tz), canopy));
   }
   return standTo(mergeGeometries(parts)!, 6.3);
 }
@@ -580,8 +589,8 @@ function buildGrassTuft(seed: number, blades: number, straw: number, tip: number
  * The shrub is merged from indexed parts for that reason: thousands of them stand
  * inside the physics radius.
  */
-function weldedIcosphere(): THREE.BufferGeometry {
-  const source = new THREE.IcosahedronGeometry(1, 1);
+function weldedIcosphere(detail = 1): THREE.BufferGeometry {
+  const source = new THREE.IcosahedronGeometry(1, detail);
   source.deleteAttribute('normal');
   source.deleteAttribute('uv');
   return mergeVertices(source);
@@ -613,9 +622,12 @@ function shade(geometry: THREE.BufferGeometry, low: number, high: number, y0: nu
  * ending in a ragged clump of sage-green leaves, pale on top and dark beneath. The
  * clumps are jittered hard so their outline is leafy, never a pebble's smooth curve.
  */
-function buildBush(seed: number): THREE.BufferGeometry {
+function buildBush(seed: number, retro = false): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
-  const twigs = 11;
+  // The retro rung's bush is the same fan with fewer, coarser clumps: at 360 lines a
+  // clump is a handful of pixels, and 946 triangles per bush was the largest single
+  // share of a mini-PC's frame (render/retro.ts).
+  const twigs = retro ? 7 : 11;
   for (let i = 0; i < twigs; i++) {
     const len = 0.3 + hash01(seed, i, 1) * 0.32;
     const tilt = 0.25 + hash01(seed, i, 2) * 0.75;
@@ -632,7 +644,7 @@ function buildBush(seed: number): THREE.BufferGeometry {
     const tipZ = tipOut * Math.sin(az);
     const tipY = Math.cos(tilt) * len;
     const r = 0.08 + hash01(seed, i, 4) * 0.06;
-    const clump = weldedIcosphere();
+    const clump = weldedIcosphere(retro ? 0 : 1);
     const pos = clump.getAttribute('position') as THREE.BufferAttribute;
     for (let v = 0; v < pos.count; v++) {
       const k = 0.6 + hash01(seed, i, v + 32) * 0.75;
@@ -680,7 +692,7 @@ export function groundCoverForms(): PropForm[] {
     _groundCoverForms = [
       tuft('tuft-straw', buildGrassTuft(0x7f01, 11, 0xa88d58, 0xd6c28d), 1),
       tuft('tuft-grey', buildGrassTuft(0x7f02, 8, 0x8f8467, 0xbdb392), 0.7),
-      { id: 'bush', geometry: buildBush(0x7f03), material: matCover, baseRadius: 0.5, height: 0.6, collider: 'none', sink: 0.04, rotate3d: false, minScale: 0.7, maxScale: 1.3, weight: 0.45 },
+      { id: 'bush', geometry: buildBush(0x7f03, retroActive()), material: matCover, baseRadius: 0.5, height: 0.6, collider: 'none', sink: 0.04, rotate3d: false, minScale: 0.7, maxScale: 1.3, weight: 0.45 },
       { id: 'rosette', geometry: buildRosette(0x7f04), material: matCover, baseRadius: 0.4, height: 0.5, collider: 'none', sink: 0.02, rotate3d: false, minScale: 0.7, maxScale: 1.3, weight: 0.3 },
     ];
   }

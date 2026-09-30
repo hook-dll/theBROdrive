@@ -11,6 +11,7 @@
  * rate.
  */
 
+import { retroActive } from '../../render/retro';
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { hash01 } from '../../core/rng';
@@ -126,6 +127,11 @@ const GROUND_COVER_CELL = 3;
 const GROUND_COVER_NEAR = 0.085;
 const GROUND_COVER_FAR = 0.04;
 const GROUND_COVER_LAT = 320;
+/**
+ * The retro rung's cover stops here instead. At 360 lines a tuft past it is a single
+ * pixel that pops between two colours as the car moves, which is noise, not ground.
+ */
+const RETRO_GROUND_COVER_LAT = 140;
 /** Nearest a tuft grows to the asphalt edge, metres: past the shoulder strip. */
 const GROUND_COVER_SETBACK_M = 2.2;
 /**
@@ -466,7 +472,9 @@ export class ScatterProvider implements ChunkProvider {
       const covers = groundCoverForms();
       const coverSStart = Math.floor(ctx.sStart / GROUND_COVER_CELL);
       const coverSEnd = Math.ceil(ctx.sEnd / GROUND_COVER_CELL);
-      const coverLMax = Math.ceil(GROUND_COVER_LAT / GROUND_COVER_CELL);
+      const coverLMax = Math.ceil(
+        (retroActive() ? RETRO_GROUND_COVER_LAT : GROUND_COVER_LAT) / GROUND_COVER_CELL,
+      );
       for (let cs = coverSStart; cs < coverSEnd; cs++) {
         for (let cl = -coverLMax; cl < coverLMax; cl++) {
           const roll = hash01(seed, TAG_GROUND_COVER, cs, cl);

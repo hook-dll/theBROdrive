@@ -52,6 +52,7 @@ import {
  */
 /** The top rung also keeps the projected cone visible three times farther. */
 const HEADLIGHT_DISTANCE_SCALE: Record<GraphicsQuality, number> = {
+  retro: GRAPHICS_TIERS.retro.headlightDistanceScale,
   acceptable: GRAPHICS_TIERS.acceptable.headlightDistanceScale,
   standard: GRAPHICS_TIERS.standard.headlightDistanceScale,
   blessing: GRAPHICS_TIERS.blessing.headlightDistanceScale,

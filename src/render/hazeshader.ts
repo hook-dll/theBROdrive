@@ -850,6 +850,21 @@ export const HAZE_FRAGMENT = /* glsl */ `
     // Sub-code-value film grain: visible as texture in broad flat areas, never as
     // snow. The seed advances at 12 Hz rather than every display frame so a high
     // refresh-rate panel does not turn this tiny texture into rapid scintillation.
+    #ifdef RETRO
+    // The retro rung's grain is an ORDERED dither onto a short palette instead: at a
+    // few hundred lines a random grain is snow that crawls, while a fixed 4x4 Bayer
+    // pattern stays put on the screen and turns every gradient — the sky, the sand
+    // falling away into fog — into the stepped bands of a period framebuffer. It is
+    // also cheaper than the grain it replaces.
+    vec2 cell = mod(floor(gl_FragCoord.xy), 4.0);
+    vec2 cellLow = mod(cell, 2.0);
+    vec2 cellHigh = floor(cell * 0.5);
+    float bayer = (
+      4.0 * mod(2.0 * cellLow.x + 3.0 * cellLow.y, 4.0)
+      + mod(2.0 * cellHigh.x + 3.0 * cellHigh.y, 4.0)
+    ) / 16.0;
+    color.rgb = clamp(floor(color.rgb * RETRO_LEVELS + bayer) / RETRO_LEVELS, 0.0, 1.0);
+    #else
     float grainFrame = mod(floor(uTime * 12.0), 64.0);
     vec2 grainPixel = gl_FragCoord.xy + vec2(grainFrame * 17.0, grainFrame * 43.0);
     float grain =
@@ -858,6 +873,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
     float grainMask =
       smoothstep(0.015, 0.12, grainLum) * (1.0 - smoothstep(0.72, 1.0, grainLum));
     color.rgb = clamp(color.rgb + grain * grainMask * 0.08, 0.0, 1.0);
+    #endif
 
     // Worn shades are a coloured-glass transmission curve, not a flat alpha wash:
     // retained channels stay bright while the others are absorbed.

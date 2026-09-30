@@ -3,6 +3,7 @@ import { SandColor } from '../render/desertdust';
 import '../render/lightshader';
 import { setAirFogEdge } from '../render/airfog';
 import { primeMaxAnisotropy } from '../render/texturequality';
+import { retroActive, retroPixelRatio } from '../render/retro';
 import {
   advanceHazePhase,
   createHeatMirageUniforms,
@@ -208,6 +209,12 @@ export function offeredRenderScales(
  * graphics tiers control resolution and shadows.
  */
 const MSAA_SAMPLES = 4;
+
+/**
+ * Steps per colour channel in the retro finish. Few enough that the dithered bands read
+ * as a period framebuffer; enough that skin-tone paint and dusk skies keep their hue.
+ */
+const RETRO_LEVELS = 24;
 
 /** Touch plus a coarse pointer or phone-sized screen avoids classifying touch laptops. */
 export function prefersMobilePresentation(): boolean {
@@ -446,7 +453,8 @@ export class Renderer {
       this.timerQueryExt = null;
     }
     this.basePixelRatio = this.pixelRatioFor(quality);
-    this.adaptiveResolution.setPinned(renderScale !== null);
+    this.adaptiveResolution.setPinned(renderScale !== null || quality === 'retro');
+    this.applyRetroCanvas();
     this.updateAdaptiveFloor();
     this.renderer.setPixelRatio(this.basePixelRatio);
     this.renderer.shadowMap.enabled = shadowsFor(quality, this.mobilePresentation);
@@ -488,7 +496,9 @@ export class Renderer {
     hazeDepth.minFilter = THREE.NearestFilter;
     hazeDepth.magFilter = THREE.NearestFilter;
     this.hazeTarget = new THREE.WebGLRenderTarget(1, 1, {
-      samples: msaa ? MSAA_SAMPLES : 0,
+      // Multisampling a frame that is then shown as whole-pixel blocks only blurs the
+      // blocks' edges, so the retro rung never pays for it.
+      samples: msaa && quality !== 'retro' ? MSAA_SAMPLES : 0,
       depthTexture: hazeDepth,
     });
     this.hazeTarget.texture.colorSpace = THREE.SRGBColorSpace;
@@ -497,6 +507,9 @@ export class Renderer {
     this.hazeMaterial = new THREE.ShaderMaterial({
       vertexShader: HAZE_VERTEX,
       fragmentShader: HAZE_FRAGMENT,
+      // Page-lifetime, like the rung itself: the retro finish replaces the film grain
+      // with an ordered dither (render/hazeshader.ts).
+      defines: retroActive() ? { RETRO: '', RETRO_LEVELS: RETRO_LEVELS.toFixed(1) } : {},
       // No tone mapping, no colour conversion: pass 1 already produced final
       // sRGB pixels, so this pass only warps UVs and copies texels through.
       toneMapped: false,
@@ -673,6 +686,9 @@ export class Renderer {
   private pixelRatioFor(quality: GraphicsQuality): number {
     const canvas = this.renderer.domElement;
     const cssPixels = canvas.clientWidth * canvas.clientHeight;
+    // The retro rung's pixels are its look, so neither the player's render scale nor
+    // the adaptive controller may move them (see render/retro.ts).
+    if (quality === 'retro') return retroPixelRatio(canvas.clientHeight, window.devicePixelRatio);
     if (this.renderScale !== null) {
       return manualRenderScale(
         cssPixels,
@@ -708,6 +724,14 @@ export class Renderer {
         this.mobilePresentation,
       ),
     );
+  }
+
+  /**
+   * Nearest-neighbour upscaling of the canvas for the retro rung, done by the browser's
+   * compositor: the scale is free and each drawing-buffer pixel lands as a crisp block.
+   */
+  private applyRetroCanvas(): void {
+    this.renderer.domElement.style.imageRendering = this.quality === 'retro' ? 'pixelated' : '';
   }
 
   private resize = (): void => {
@@ -900,7 +924,7 @@ export class Renderer {
    * on a uniform every fragment agrees on.
    */
   setHeatHaze(frame: HeatHazeFrame): void {
-    const enabled = this.quality !== 'acceptable';
+    const enabled = this.quality !== 'acceptable' && this.quality !== 'retro';
     this.shimmerStrength = enabled ? Math.min(1, Math.max(0, frame.shimmer)) : 0;
     this.mirageStrength = enabled ? Math.min(1, Math.max(0, frame.mirage)) : 0;
     this.hazeMaterial.uniforms.uStrength.value = this.shimmerStrength;
@@ -1152,6 +1176,8 @@ export class Renderer {
     if (quality === this.quality) return;
     this.quality = quality;
     this.adaptiveResolution.setQuality(quality);
+    this.adaptiveResolution.setPinned(this.renderScale !== null || quality === 'retro');
+    this.applyRetroCanvas();
     this.disposeGpuQueries();
     // Read from the table, never re-derived: this line used to test the tier name
     // directly, and a phone's shadow pass is now off on every rung, so a second copy of
@@ -1174,7 +1200,7 @@ export class Renderer {
   setRenderScale(scale: RenderScale): void {
     if (scale === this.renderScale) return;
     this.renderScale = scale;
-    this.adaptiveResolution.setPinned(scale !== null);
+    this.adaptiveResolution.setPinned(scale !== null || this.quality === 'retro');
     this.disposeGpuQueries();
     this.basePixelRatio = this.pixelRatioFor(this.quality);
     this.updateAdaptiveFloor();
@@ -1200,7 +1226,7 @@ export class Renderer {
 
   /** Changes scene-target multisampling without changing resolution quality. */
   setMsaa(enabled: boolean): void {
-    const samples = enabled ? MSAA_SAMPLES : 0;
+    const samples = enabled && this.quality !== 'retro' ? MSAA_SAMPLES : 0;
     if (this.hazeTarget.samples === samples) return;
     this.hazeTarget.samples = samples;
     // Multisampling is allocation state; Three recreates the target on next bind.

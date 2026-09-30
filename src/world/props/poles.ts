@@ -16,6 +16,7 @@
  * markers they fed to `LightBudget` are gone. A pole is what holds a wire up.
  */
 
+import { retroActive } from '../../render/retro';
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -649,6 +650,13 @@ function addLegColliders(
   }
 }
 
+const _wireColour = new THREE.Color();
+let _retroWireMaterial: THREE.LineBasicMaterial | null = null;
+/** The retro rung's wire: unlit, like the dark silhouette a wire is against any sky. */
+function retroWireMaterial(): THREE.LineBasicMaterial {
+  return (_retroWireMaterial ??= new THREE.LineBasicMaterial({ vertexColors: true, fog: true }));
+}
+
 export class PoleProvider implements ChunkProvider {
   readonly id = 'poles';
 
@@ -686,6 +694,13 @@ export class PoleProvider implements ChunkProvider {
     // spans would flicker as chunks load around the boundary. Every wire of the chunk
     // goes into ONE geometry: a telegraph line is eight wires a span.
     const wires = new DwellingBuilder({ grime: 0 });
+    // The retro rung draws each wire as a one-pixel line instead of a tube: a tube a
+    // centimetre across is a fraction of a pixel at 360 lines from a few metres out, and
+    // rasterised it breaks into a dotted trail (render/retro.ts). A line is always one
+    // pixel, which is how every period game drew a wire.
+    const retro = retroActive();
+    const linePositions: number[] = [];
+    const lineColours: number[] = [];
     let wireCount = 0;
     for (const { pose, section } of poses) {
       const nextIndex = pose.index + 1;
@@ -706,12 +721,29 @@ export class PoleProvider implements ChunkProvider {
         // The clearance is the mean height of the two ties above their own poles'
         // ground, which is what the chord has to spend.
         const clearance = (a.y - pose.baseY + (b.y - next.baseY)) * 0.5;
-        wires.tube(catenary(a, b, wireSagMetres(slack, span, clearance), ox, oz), wire.radius, WIRE_SIDES, wire.hex);
+        const path = catenary(a, b, wireSagMetres(slack, span, clearance), ox, oz);
+        if (retro) {
+          _wireColour.set(wire.hex);
+          for (let i = 0; i < path.length - 1; i++) {
+            linePositions.push(...path[i]!, ...path[i + 1]!);
+            lineColours.push(_wireColour.r, _wireColour.g, _wireColour.b, _wireColour.r, _wireColour.g, _wireColour.b);
+          }
+        } else {
+          wires.tube(path, wire.radius, WIRE_SIDES, wire.hex);
+        }
         wireCount++;
       });
     }
-    const wireGeometry = wireCount > 0 ? wires.geometry() : null;
-    if (wireGeometry) group.add(new THREE.Mesh(wireGeometry, poleMaterial()));
+    let wireGeometry: THREE.BufferGeometry | null = null;
+    if (wireCount > 0 && retro) {
+      wireGeometry = new THREE.BufferGeometry();
+      wireGeometry.setAttribute('position', new THREE.Float32BufferAttribute(linePositions, 3));
+      wireGeometry.setAttribute('color', new THREE.Float32BufferAttribute(lineColours, 3));
+      group.add(new THREE.LineSegments(wireGeometry, retroWireMaterial()));
+    } else if (wireCount > 0) {
+      wireGeometry = wires.geometry();
+      group.add(new THREE.Mesh(wireGeometry, poleMaterial()));
+    }
 
     return {
       group,
