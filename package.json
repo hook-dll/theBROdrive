@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "dev:poi": "vite --open /?poi-gallery",
+    "dev:artifacts": "vite --open /?artifact-gallery",
     "build": "tsc --noEmit && vite build",
     "build:dev": "tsc --noEmit && vite build --mode development",
     "preview": "vite preview",

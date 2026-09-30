@@ -2630,6 +2630,8 @@ async function boot(): Promise<void> {
 const query = new URLSearchParams(window.location.search);
 const launch = query.has('poi-gallery')
   ? import('./poi-gallery').then(({ bootPoiGallery }) => bootPoiGallery())
+  : query.has('artifact-gallery')
+    ? import('./artifact-gallery').then(({ bootArtifactGallery }) => bootArtifactGallery())
   : query.has('prop-gallery')
     ? import('./prop-gallery').then(({ bootPropGallery }) => bootPropGallery())
     : query.has('playground')
