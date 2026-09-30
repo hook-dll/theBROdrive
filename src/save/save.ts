@@ -930,7 +930,10 @@ function migrateItem(raw: unknown, where: string): Item {
     case 'pocket_watch':
       return { type: 'pocket_watch', id: obj.id };
     case 'letter':
-      return { type: 'letter', id: obj.id };
+      // The folded note of the first story release is the same message on a card now,
+      // so an old save's sheet loads as the postcard, under its own id.
+    case 'postcard':
+      return { type: 'postcard', id: obj.id };
     case 'contract_cargo': {
       const sourceCourierIndex = Math.trunc(numOr(obj.sourceCourierIndex, -1));
       if (

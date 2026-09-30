@@ -91,6 +91,15 @@ const MEDICINE_MOUTH_Y = -0.055;
 const MEDICINE_MOUTH_Z = -0.24;
 const MEDICINE_REACH_END = 0.5;
 const MEDICINE_RELEASE_START = 0.76;
+/**
+ * How far past upright the bottle tips, radians, on top of the carry pitch.
+ *
+ * The bottle is squared to the view first (the generic carry pose holds it 45 degrees
+ * across the body), so this is a plain wrist roll in the vertical plane through the face:
+ * 2.0 rad in total puts the neck at mouth height with the body tipped up in front of the
+ * face, which is where the capsules leaving the neck need to fly to reach the mouth.
+ */
+const MEDICINE_TIP = 1.78;
 
 /* ---- pocket watch: short wrist shake while the dial fast-forwards ---- */
 const WATCH_SHAKE_CYCLES = 6;
@@ -98,10 +107,37 @@ const WATCH_SHAKE_X = 0.018;
 const WATCH_SHAKE_Y = 0.006;
 const WATCH_SHAKE_ROLL = 0.14;
 
-/* ---- letter: resting low in the hand, raised square to the eye ---- */
-const LETTER_EYE_X = 0.0;
-const LETTER_EYE_Y = -0.07;
-const LETTER_EYE_Z = -0.31;
+/* ---- postcard: a printed card, read at the eye and turned over in the hand ---- */
+const POSTCARD_EYE_X = 0.0;
+const POSTCARD_EYE_Y = -0.045;
+const POSTCARD_EYE_Z = -0.25;
+/**
+ * The card's longest side in the hand, metres.
+ *
+ * A VIEWMODEL EXAGGERATION, deliberately. The card is printed 148 mm wide; carried at
+ * that size the saturating target would shrink it further (0.10 m), and raised at 0.25 m
+ * it would put the handwriting at about 19 screen pixels on a 1080p display — a card you
+ * squint at. At 0.22 m, held 0.25 m from the eye, the card covers 45% of the frame's
+ * width and 56% of its height at 16:9 with the default 58-degree vertical FOV, and the
+ * message lands at ~28 px: a card you read. The hand is a cheat in every first-person
+ * game for the same reason.
+ */
+const POSTCARD_READ_SIZE = 0.22;
+/** The turn over: half a second or so, so a fast E-E reads as one card being flipped. */
+const POSTCARD_FLIP_RATE = 2.2;
+/**
+ * The yaw the card carries at, radians.
+ *
+ * The generic carry yaw (-2.35) presents the card's plane almost edge-on to the eye: at
+ * rest the picture side came round at 73 degrees off normal, which reads as a card seen
+ * from the side. From the resting hand position 2.62 rad (150 degrees) aims the picture
+ * side's normal within 3 degrees of the eye instead, so the card hangs low in the hand the
+ * way a card being carried does, picture to the player. Raising it then turns the card
+ * over to the message — the same wrist turn a person makes to read a card's back, the
+ * message side sweeping round on the card's hand side — and the raised card turns half a
+ * turn back about the same vertical for the picture again.
+ */
+const POSTCARD_REST_YAW = 2.62;
 
 /* ---- module-level scratch: `update` must not allocate ---- */
 const _size = new THREE.Vector3();
@@ -131,6 +167,8 @@ export class HeldItemView {
   private bobPhase = 0;
   private scrubPhase = 0;
   private useT = 0;
+  /** 0..1 of the postcard's turn-over, so the picture side arrives as a rotation. */
+  private flipT = 0;
   private recoil = 0;
   private shotClock = 0;
   private prevUse = false;
@@ -167,8 +205,8 @@ export class HeldItemView {
       dayFactor: number;
       /** Normalized pocket-watch action cycle, or -1 while idle. */
       watchActionProgress: number;
-      /** True while the held letter is raised to the eyes; drives the eased lift. */
-      letterRaised: boolean;
+      /** Which side of a held postcard faces the player; 'down' while it is lowered. */
+      postcardView: 'down' | 'text' | 'photo';
     },
   ): void {
     const d = dt > 0 ? dt : 1 / 60;
@@ -279,7 +317,20 @@ export class HeldItemView {
         ox += (MEDICINE_MOUTH_X - baseX) * reach + release * 0.08;
         oy += (MEDICINE_MOUTH_Y - baseY) * reach - release * 0.22;
         oz += (MEDICINE_MOUTH_Z - baseZ) * reach + release * 0.04;
-        pitch -= reach * 1.28;
+        // Square the bottle to the view while it is in the hand, exactly as the pocket
+        // watch and the photograph are squared. The bottle is a body of revolution, so the
+        // square itself costs nothing to look at; what it buys is that the tip below is a
+        // wrist roll in the vertical plane through the face, not a roll in the carry
+        // pose's 45-degree frame — the frame that swung the old tip out to the player's
+        // right — and that the uncorked cap leaves across the hand's own side, where the
+        // matching world cap flies.
+        yaw -= TILT_YAW;
+        // Squared, a positive camera pitch rolls the bottle's local +Y — its neck — back
+        // toward the player, so at the full tip the neck sits at mouth height below the
+        // hand with the body tipped up in front of the face, and the capsules leaving the
+        // neck travel at the mouth. The old negative tip ran the other way and walked the
+        // neck up past the right eye.
+        pitch += reach * MEDICINE_TIP;
         roll += reach * 0.18 + release * 0.35;
       }
       setMedicineUseProgress(this.mesh, medicineProgress);
@@ -330,19 +381,32 @@ export class HeldItemView {
       pitch -= TILT_PITCH;
       yaw -= TILT_YAW;
       roll -= TILT_ROLL;
-    } else if (item?.type === 'letter') {
-      // Resting, it hangs low in the hand in the generic carry pose; raised, it is
-      // squared to the eye and lowered into the bottom-middle of the view, the way
-      // you hold a note you are reading. The lift is a smoothstep, so E snaps state
-      // without the hand snapping.
-      this.useT = ramp(this.useT, opts.letterRaised, USE_RAMP * 1.2, d);
-      const raised = this.useT * this.useT * (3 - 2 * this.useT);
-      ox += (LETTER_EYE_X - baseX) * raised;
-      oy += (LETTER_EYE_Y - baseY) * raised;
-      oz += (LETTER_EYE_Z - baseZ) * raised;
-      pitch -= TILT_PITCH * raised;
-      yaw -= TILT_YAW * raised;
-      roll -= TILT_ROLL * raised;
+    } else if (item?.type === 'postcard') {
+      // Resting, the card hangs low in the hand, picture side square to the player (see
+      // POSTCARD_REST_YAW); raised, it is squared to the eye and held large enough to read,
+      // the way you hold a card you are reading. Turning it over is a rotation rather than
+      // a second pose: half a turn about the card's own vertical brings the other side to
+      // the same place on screen, so a quick E-E reads as one card being flipped instead of
+      // two cards swapped.
+      const raised = opts.postcardView !== 'down';
+      this.useT = ramp(this.useT, raised, USE_RAMP * 1.2, d);
+      const up = this.useT * this.useT * (3 - 2 * this.useT);
+      this.flipT = ramp(this.flipT, opts.postcardView === 'photo', POSTCARD_FLIP_RATE, d);
+      const turn = this.flipT * this.flipT * (3 - 2 * this.flipT);
+      ox += (POSTCARD_EYE_X - baseX) * up;
+      oy += (POSTCARD_EYE_Y - baseY) * up;
+      oz += (POSTCARD_EYE_Z - baseZ) * up;
+      pitch -= TILT_PITCH * up;
+      // Low, the card carries at POSTCARD_REST_YAW with its picture side square to the
+      // eye. Raising it turns that side away and brings the message round to be read; the
+      // message side is what turns over on the card's hand side, both arriving and, on the
+      // next press, leaving again — the raised message side is yaw 0 and the picture side
+      // is half a turn back about the same vertical, so the picture is the back of the same
+      // card turned over rather than a second pose swapped in. The rest term yields to that
+      // half-turn, so lowering from the picture cannot overshoot the resting angle on the
+      // way down.
+      yaw += POSTCARD_REST_YAW * (1 - up) * (1 - turn) - TILT_YAW + Math.PI * turn;
+      roll -= TILT_ROLL * up;
     } else if (item?.type === 'torchlight') {
       this.useT = ramp(this.useT, use, USE_RAMP, d);
       // Item primitives point down local +Z; camera forward is local -Z.
@@ -368,10 +432,13 @@ export class HeldItemView {
       ox += Math.sin(this.scrubPhase) * 0.035 * spray;
       yaw += Math.sin(this.scrubPhase) * 0.1 * spray;
     } else if (item?.type === 'fluid_can') {
-      // Tip forward and pour, with a slight slosh.
+      // Tip the can away from the player and pour, with a slight slosh. Positive camera
+      // pitch drops the item's local +Z, which is the spout, so the can's mouth goes down
+      // and forward over the reservoir and the stream lands in front of the player. The
+      // old negative sign swung the spout up: the can tipped back at the player's face.
       this.useT = ramp(this.useT, use, USE_RAMP, d);
       const pour = this.useT;
-      pitch += -pour * POUR_ANGLE;
+      pitch += pour * POUR_ANGLE;
       oy += pour * POUR_LIFT;
       if (pour > 0.01) this.scrubPhase += d * 10;
       roll += Math.sin(this.scrubPhase) * 0.02 * pour;
@@ -423,12 +490,17 @@ export class HeldItemView {
 
     // Centre the item on its bounding box, then scale it so the longest axis
     // lands at a saturating target: small items keep near-natural size, large
-    // ones read bulky without filling the screen.
+    // ones read bulky without filling the screen. A postcard is the exception — it
+    // is held larger than print because it is read (see POSTCARD_READ_SIZE).
     _box.setFromObject(mesh);
     const size = _box.getSize(_size);
     const maxDim = Math.max(size.x, size.y, size.z);
     const target =
-      maxDim > 0 ? TARGET_MAX * (1 - Math.exp(-maxDim / TARGET_TAU)) : TARGET_MAX * 0.5;
+      item.type === 'postcard'
+        ? POSTCARD_READ_SIZE
+        : maxDim > 0
+          ? TARGET_MAX * (1 - Math.exp(-maxDim / TARGET_TAU))
+          : TARGET_MAX * 0.5;
     const scale = maxDim > 0 ? target / maxDim : 1;
     const centre = _box.getCenter(_centre);
     // Three.js applies scale before the object's position, so the centring
@@ -463,6 +535,7 @@ export class HeldItemView {
 
   private resetMotion(): void {
     this.useT = 0;
+    this.flipT = 0;
     this.recoil = 0;
     this.shotClock = 0;
     this.prevUse = false;

@@ -11,16 +11,26 @@
   is a small airfield: a 225 m strip in the road's own asphalt, level across and smoothed
   along so the sand never shows through, with markings, a windsock and a light plane parked
   at its start, windows black like the cars'.
-- THE LETTER FROM HOME (`letter` item). The player starts holding it; E raises it to the
-  eyes and shows the note, with the address an illegible scrawl; E again lowers it. It is an
-  ordinary item: Q drops it, F picks it up, it saves like any other.
+- THE POSTCARD FROM HOME (`postcard` item). The paper card that used to open over the
+  held letter IS the item now: one thin 148 x 105 mm card, drawn once per session into
+  two 2048-px faces. The message side is the old card's own look — the same handwriting
+  font stack, the words verbatim, the address an illegible scrawl — with stamp, postmark,
+  address rules and dividing line around it; the other side is a painted photograph of
+  the beach the ending lands on (white house, palms, turquoise shallows, flat-topped
+  mesas). E raises it to the eyes; E again turns it over to the picture; E again puts it
+  away. It is an ordinary item: Q drops it, F picks it up, it saves like any other. A save
+  that still holds a letter loads it as the postcard, under the same id.
 - THE PLANE IS A WAY TO END THE GAME. F aimed at the parked plane (`[F] board the plane`)
   starts a letterboxed takeoff (engine start, roll, lift-off, climb away; synthesised
-  propeller), then a separate beach scene where it lands on a strip by the sea, a small
-  house and mountains behind, the propeller dies away into surf, placeholder credits roll,
-  the screen fades to black and the game returns to the title. Nothing points the player at
-  the plane; driving off is just as valid. Boarding clears the resume marker, so a reload
-  mid-flight lands on the title.
+  propeller), then a separate beach scene: the plane comes in low over flat-topped mesas,
+  lands on a strip on the beach and rolls toward the sea, stopping by a small white house
+  among the mirages' palms; the propeller dies away into surf, placeholder credits roll,
+  the screen fades to black and the game returns to the title. The sea is its own shader
+  (`story/seashader.ts`): summed swells and ripples, sky reflection, sun glitter, turquoise
+  shallows to deep blue, breakers and swash running up the sand. The plane is a lofted
+  Cessna 172 (tapered fuselage, flush black windows, spring-steel gear into the wheel
+  pants, nav lights). Nothing points the player at the plane; driving off is just as
+  valid. Boarding clears the resume marker, so a reload mid-flight lands on the title.
 - CAMERA SWAY AT SPEED (`Settings.cameraShake`, Settings › Drive, on by default). The
   driving view floats slowly (0.5-2 Hz) from 60 km/h, with the square of speed up to
   300 (above any car, swapped engines included), by rotation only (the aim used for interaction
@@ -58,6 +68,18 @@
   4.5 s. It moves by transform only.
 - NO `loading <car>` TOAST. A car model streaming in no longer announces itself; the
   `could not load <car>` toast on a failed load stays.
+
+- THE HELD ITEM'S USE ACTIONS ALL TURN THE WAY A HAND DOES. The fluid can tipped its spout
+  *up* at the player's face while pouring, and the medicine bottle walked its neck up past
+  the right eye; both actions were signed for the generic carry pose's 45-degree frame
+  rather than for the item — the pour's pitch and the bottle's tip both inverted — and the
+  bottle was never squared to the view the way the torch, camera, watch and photograph are.
+  The can now tips away over the reservoir (the stream lands at the centre of the view,
+  0.63 m out), the bottle is squared before it tips so the neck comes down to mouth height
+  with the capsules leaving it at the mouth and the uncorked cap going across the hand's
+  side, and the postcard rests picture-square to the player instead of presenting its edge,
+  its turn-over to the message and back reading as one card being turned in the hand
+  (`src/render/held.ts`).
 
 ## 0.20.0 — 2026-09-29
 

@@ -1,10 +1,10 @@
 /**
  * Procedural meshes for every part and carried item in the game.
  *
- * Everything is built from primitives; the football adds one generated leather
- * texture. Geometry and immutable materials are cached, while each create* call
- * returns a fresh Object3D. Condition-sensitive parts still get independent
- * materials so dirt and rust never bleed between instances.
+ * Everything is built from primitives; the football adds one generated leather texture
+ * and the postcard two painted faces. Geometry and immutable materials are cached, while
+ * each create* call returns a fresh Object3D. Condition-sensitive parts still get
+ * independent materials so dirt and rust never bleed between instances.
  *
  * Car bodies are complete, authored GLB models (see render/carmodel.ts); this module
  * only builds the service parts and held items.
@@ -714,11 +714,12 @@ function buildProfessionalCameraInto(b: MeshBuilder): void {
   // Full-size magnesium body, deep right-hand grip and a raised pentaprism make
   // this read as a professional SLR silhouette rather than a compact camera.
   b.box('camera_body', 0.25, 0.145, 0.09, body, [0, 0, 0]);
-  b.box('camera_grip', 0.07, 0.17, 0.105, rubber, [0.105, -0.012, 0.006]);
+  // The grip is on the holder's RIGHT: with the lens at +Z and +Y up, that is the model's -X.
+  b.box('camera_grip', 0.07, 0.17, 0.105, rubber, [-0.105, -0.012, 0.006]);
   b.box('camera_prism', 0.09, 0.055, 0.075, body, [-0.018, 0.092, 0]);
   b.box('camera_hotshoe', 0.045, 0.008, 0.04, metal, [-0.018, 0.124, -0.005]);
-  b.cylinder('camera_mode_dial', 0.027, 0.027, 0.016, 12, metal, [-0.085, 0.086, 0], ZERO);
-  b.cylinder('camera_shutter', 0.012, 0.012, 0.01, 10, metal, [0.094, 0.093, 0.02], ZERO);
+  b.cylinder('camera_mode_dial', 0.027, 0.027, 0.016, 12, metal, [0.085, 0.086, 0], ZERO);
+  b.cylinder('camera_shutter', 0.012, 0.012, 0.01, 10, metal, [-0.094, 0.093, 0.02], ZERO);
 
   // Three stepped barrel sections and a broad front element: deliberately as
   // large as the body is tall, like an L-series zoom on a full-frame DSLR.
@@ -1059,95 +1060,659 @@ export function setPocketWatchState(
   }
 }
 
-let letterPaperMaterial: THREE.MeshStandardMaterial | null = null;
+/* ---------------------------------------------------------------------------
+ * The postcard
+ * ------------------------------------------------------------------------- */
 
 /**
- * Off-white note paper: faint blue-grey rules and a fixed-seed scrawl that reads as
- * handwriting without ever resolving into words. Cached once per document, shared by
- * every letter instance, and deliberately not `itemOwnedResource` — the ordinary
- * disposer must leave it alone.
+ * The card's handwriting, the same system-cursive stack the screen-space card used:
+ * one item buys no web font, so it falls through to whatever script face the machine
+ * already has, then `cursive`. Canvas takes a font shorthand, so the quotes stay.
  */
-function letterSurfaceMaterial(): THREE.MeshStandardMaterial {
-  if (letterPaperMaterial) return letterPaperMaterial;
+const POSTCARD_HAND_FONT =
+  '"Segoe Script", "Bradley Hand", "Snell Roundhand", "Apple Chancery", "Comic Sans MS", "Brush Script MT", cursive';
+/** Printed card size, metres: real postcard proportions, 148 x 105 mm. */
+const POSTCARD_W = 0.148;
+const POSTCARD_H = 0.105;
+const POSTCARD_THICKNESS = 0.0022;
+/**
+ * Face texture: the card's own proportions to within a pixel.
+ *
+ * SUPERSAMPLED ON PURPOSE. Raised, the card sits 0.25 m from the eye, where it covers
+ * some 45% of a 16:9 frame's width at the default 58-degree vertical FOV — about 860
+ * screen pixels across at 1080p, and half that when adaptive resolution is at its floor.
+ * At 2048 the handwriting is still oversampled at the dark end of that range, which is
+ * the whole difference between a card you read and a card you squint at; mipmaps and the
+ * hardware anisotropy cap carry the minified end for free.
+ */
+const POSTCARD_TEX_W = 2048;
+const POSTCARD_TEX_H = Math.round((POSTCARD_TEX_W * POSTCARD_H) / POSTCARD_W);
 
-  const w = 128;
-  const h = 168;
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('Canvas 2D is required for the letter paper');
+/**
+ * The note's words, verbatim as the owner wrote them. The trail-off after the colon is
+ * drawn as an illegible scrawl (`drawPostcardScrawl`), so the address is never the
+ * literal word for "unreadable" — it simply cannot be read.
+ */
+export const POSTCARD_TEXT =
+  'сынок, мы с Котёной купили дом у моря, навести нас как-нибудь, тут такой кайф! вот адрес:';
 
-  ctx.fillStyle = '#efe6cf';
-  ctx.fillRect(0, 0, w, h);
-  // A fold crease down the middle and two faint rules, the way a note she's written
-  // on lined paper would carry them through the fold.
-  ctx.strokeStyle = 'rgba(120, 100, 70, 0.28)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(w / 2 + 0.5, 4);
-  ctx.lineTo(w / 2 + 0.5, h - 4);
-  ctx.stroke();
-  ctx.strokeStyle = 'rgba(92, 112, 146, 0.22)';
-  for (let y = 26; y < h - 10; y += 15) {
-    ctx.beginPath();
-    ctx.moveTo(10, y + 0.5);
-    ctx.lineTo(w - 10, y + 0.5);
-    ctx.stroke();
-  }
+/** `POSTCARD_TEXT` broken where a hand would break it, wording untouched. */
+const POSTCARD_LINES: readonly string[] = [
+  'сынок, мы с Котёной купили дом у моря,',
+  'навести нас как-нибудь, тут такой кайф!',
+  'вот адрес:',
+];
 
-  // Ink scrawl: short seeded strokes along each rule, grey-black and unhurried.
-  let seed = 0x1e77a1b3;
-  const rnd = (): number => {
-    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-    return (seed >>> 8) / 0x1000000;
+/** Fixed-seed noise: the same LCG this file's other procedural surfaces use. */
+function postcardNoise(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return (state >>> 8) / 0x1000000;
   };
-  ctx.strokeStyle = 'rgba(42, 38, 46, 0.6)';
-  ctx.lineWidth = 1.1;
-  ctx.lineCap = 'round';
-  for (let y = 24; y < h - 12; y += 15) {
-    let x = 12;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    while (x < w - 14) {
-      x += 3 + rnd() * 4;
-      ctx.lineTo(x, y + (rnd() - 0.5) * 3.6);
-    }
-    ctx.stroke();
-  }
-
-  const map = new THREE.CanvasTexture(canvas);
-  map.colorSpace = THREE.SRGBColorSpace;
-  map.anisotropy = maxAnisotropy();
-  letterPaperMaterial = new THREE.MeshStandardMaterial({
-    map,
-    side: THREE.DoubleSide,
-    roughness: 0.92,
-    metalness: 0,
-  });
-  return letterPaperMaterial;
 }
 
 /**
- * A folded sheet: two portrait panels hinged along a common fold, each turned a little
- * off the plane so the note reads as paper held partly closed rather than a card. The
- * panels share one cached geometry and one cached paper material.
+ * Centred, letter-spaced text. Canvas `letterSpacing` is not on every engine, and the
+ * tracking is the whole difference between printed furniture and a word.
  */
-function createLetterMesh(): THREE.Group {
-  const root = new THREE.Group();
-  const material = letterSurfaceMaterial();
-  // Left opens to the viewer's left, right to the right: a shallow V, fold at the middle.
-  const panels: readonly (readonly [number, number])[] = [[0, -1], [1, 1]];
-  for (const [index, sign] of panels) {
-    const panel = new THREE.Mesh(
-      cachedGeo('letter_panel', () => new THREE.PlaneGeometry(0.156, 0.215)),
-      material,
-    );
-    panel.name = `letter_panel_${index}`;
-    panel.position.set(sign * 0.077, 0, 0);
-    panel.rotation.y = sign * 0.3;
-    root.add(panel);
+function drawSpacedText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  centreX: number,
+  y: number,
+  tracking: number,
+): void {
+  const widths: number[] = [];
+  let total = 0;
+  for (const ch of text) {
+    const width = ctx.measureText(ch).width;
+    widths.push(width);
+    total += width;
   }
+  total += tracking * Math.max(0, text.length - 1);
+  let x = centreX - total / 2;
+  for (let i = 0; i < text.length; i++) {
+    ctx.fillText(text[i]!, x, y);
+    x += widths[i]! + tracking;
+  }
+}
+
+/**
+ * The illegible address: two seeded wavy strokes over a soft smudge, so even the
+ * stroke count resists reading. Deterministic, and never a word. `rowGap` is the
+ * address rule spacing, so the scrawl sits on the rules rather than across them.
+ */
+function drawPostcardScrawl(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  rowGap: number,
+): void {
+  const centreY = y + rowGap / 2;
+  const smudge = ctx.createRadialGradient(x + width / 2, centreY, 0, x + width / 2, centreY, width * 0.55);
+  smudge.addColorStop(0, 'rgba(58, 52, 60, 0.18)');
+  smudge.addColorStop(1, 'rgba(58, 52, 60, 0)');
+  ctx.fillStyle = smudge;
+  ctx.fillRect(x - 10, y - rowGap * 0.6, width + 20, rowGap * 2.2);
+
+  const rnd = postcardNoise(0x5eed1e77);
+  ctx.strokeStyle = 'rgba(38, 34, 42, 0.74)';
+  ctx.lineWidth = 3.4;
+  ctx.lineCap = 'round';
+  for (let row = 0; row < 2; row++) {
+    const base = y + row * rowGap;
+    let px = x;
+    ctx.beginPath();
+    ctx.moveTo(px, base);
+    while (px < x + width) {
+      const step = 24 + rnd() * 38;
+      const next = Math.min(px + step, x + width);
+      ctx.quadraticCurveTo(
+        px + step * 0.5,
+        base + (rnd() - 0.5) * rowGap * 0.45,
+        next,
+        base + (rnd() - 0.5) * 18,
+      );
+      px = next;
+    }
+    ctx.stroke();
+  }
+}
+
+/**
+ * The stamp: a perforated edge, a printed frame, and a thumbnail of the very beach the
+ * picture side shows, so the two faces are the same holiday.
+ */
+function drawPostcardStamp(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+  const perf = 12;
+  ctx.save();
+  ctx.translate(x + w / 2, y + h / 2);
+  ctx.rotate(0.035);
+  ctx.translate(-w / 2, -h / 2);
+
+  // The perforated edge is a body inset by one radius plus a row of bumps along each
+  // side, which is what a torn stamp edge actually looks like at this size.
+  ctx.fillStyle = '#e6d9b8';
+  ctx.fillRect(perf, 0, w - 2 * perf, h);
+  ctx.fillRect(0, perf, w, h - 2 * perf);
+  for (let cx = perf; cx <= w - perf + 0.5; cx += perf * 2) {
+    for (const cy of [0, h]) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, perf, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  for (let cy = perf; cy <= h - perf + 0.5; cy += perf * 2) {
+    for (const cx of [0, w]) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, perf, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.strokeStyle = 'rgba(158, 52, 40, 0.7)';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(22, 22, w - 44, h - 44);
+
+  // Its picture: sky, turquoise sea, sand, and the white house under its blue dome.
+  const px = 40;
+  const py = 46;
+  const pw = w - 80;
+  const ph = h - 116;
+  const inner = ctx.createLinearGradient(0, py, 0, py + ph);
+  inner.addColorStop(0, '#7fb3d8');
+  inner.addColorStop(0.4, '#cfe4e4');
+  inner.addColorStop(0.46, '#2f9d9c');
+  inner.addColorStop(0.78, '#7ed3c7');
+  inner.addColorStop(0.84, '#d8bd93');
+  inner.addColorStop(1, '#c9ae7d');
+  ctx.fillStyle = inner;
+  ctx.fillRect(px, py, pw, ph);
+  ctx.fillStyle = '#f4efe2';
+  ctx.fillRect(px + pw * 0.56, py + ph * 0.68, pw * 0.22, ph * 0.2);
+  ctx.fillStyle = '#3c6b99';
+  ctx.beginPath();
+  ctx.arc(px + pw * 0.67, py + ph * 0.68, pw * 0.11, Math.PI, 0);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(60, 54, 48, 0.85)';
+  ctx.font = '600 26px Georgia, "Times New Roman", serif';
+  drawSpacedText(ctx, 'ПОЧТА', w / 2, h - 34, 3);
+  ctx.restore();
+}
+
+let postcardTextTextureCache: THREE.CanvasTexture | null = null;
+
+/**
+ * The message side: the card's paper, the note in its own hand, and the posted
+ * furniture — stamp, cancellation, address rules, divider — drawn once per session.
+ * See `postcardFaceMaterials` for why the texture belongs to the module rather than to
+ * any one card.
+ */
+function postcardTextTexture(): THREE.CanvasTexture {
+  if (postcardTextTextureCache) return postcardTextTextureCache;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = POSTCARD_TEX_W;
+  canvas.height = POSTCARD_TEX_H;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas 2D is required for the postcard');
+
+  const W = POSTCARD_TEX_W;
+  const H = POSTCARD_TEX_H;
+  const margin = 46;
+
+  // The paper, in the tone the screen-space card used, then fibre mottle and the soft
+  // edge shading that card's inset shadow gave it.
+  ctx.fillStyle = '#efe6cf';
+  ctx.fillRect(0, 0, W, H);
+  const rnd = postcardNoise(0x1e77a1b3);
+  for (let i = 0; i < 2400; i++) {
+    ctx.fillStyle = rnd() < 0.5 ? 'rgba(255, 255, 255, 0.05)' : 'rgba(122, 102, 72, 0.045)';
+    ctx.fillRect(rnd() * W, rnd() * H, 2, 2);
+  }
+  const edge = ctx.createRadialGradient(W / 2, H / 2, H * 0.2, W / 2, H / 2, H * 0.95);
+  edge.addColorStop(0, 'rgba(150, 120, 70, 0)');
+  edge.addColorStop(1, 'rgba(150, 120, 70, 0.17)');
+  ctx.fillStyle = edge;
+  ctx.fillRect(0, 0, W, H);
+
+  // The printed frame, and the rule between the message and the address side.
+  ctx.strokeStyle = 'rgba(120, 100, 70, 0.3)';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(margin, margin, W - 2 * margin, H - 2 * margin);
+  const dividerX = Math.round(W * 0.68);
+  ctx.strokeStyle = 'rgba(96, 86, 70, 0.4)';
+  ctx.beginPath();
+  ctx.moveTo(dividerX + 0.5, margin + 40);
+  ctx.lineTo(dividerX + 0.5, H - margin - 40);
+  ctx.stroke();
+
+  // The message. Sized to its column by measurement rather than fixed, because which
+  // script face the machine falls back to decides how wide a Cyrillic line really is.
+  const messageLeft = margin + 66;
+  const messageWidth = dividerX - messageLeft - 74;
+  const longest = POSTCARD_LINES.reduce((a, b) => (a.length >= b.length ? a : b));
+  let fontPx = 116;
+  for (; fontPx > 48; fontPx -= 2) {
+    ctx.font = `${fontPx}px ${POSTCARD_HAND_FONT}`;
+    if (ctx.measureText(longest).width <= messageWidth) break;
+  }
+  ctx.font = `${fontPx}px ${POSTCARD_HAND_FONT}`;
+  ctx.fillStyle = '#2a262e';
+  ctx.textBaseline = 'alphabetic';
+  const lineGap = fontPx * 1.52;
+  let lineY = H * 0.3 + fontPx;
+  for (const line of POSTCARD_LINES) {
+    // A hand wanders: each line starts a few pixels off the one above it and tilts by
+    // well under a degree, which is the whole difference between writing and print.
+    ctx.save();
+    ctx.translate(messageLeft + (rnd() - 0.5) * 16, lineY);
+    ctx.rotate((rnd() - 0.5) * 0.012);
+    ctx.fillText(line, 0, 0);
+    ctx.restore();
+    lineY += lineGap;
+  }
+
+  // The address side: the printed legend, four rules, and the scrawl written across the
+  // top two of them.
+  const addressLeft = dividerX + 62;
+  const addressWidth = W - margin - 54 - addressLeft;
+  const ruleTop = Math.round(H * 0.42);
+  const ruleGap = Math.round(H * 0.088);
+  ctx.fillStyle = 'rgba(88, 78, 64, 0.42)';
+  ctx.font = '600 40px Georgia, "Times New Roman", serif';
+  drawSpacedText(ctx, 'POST CARD', addressLeft + addressWidth / 2, ruleTop - H * 0.085, 15);
+  ctx.strokeStyle = 'rgba(96, 86, 70, 0.26)';
+  for (let i = 0; i < 4; i++) {
+    const ry = ruleTop + i * ruleGap + 0.5;
+    ctx.beginPath();
+    ctx.moveTo(addressLeft, ry);
+    ctx.lineTo(addressLeft + addressWidth, ry);
+    ctx.stroke();
+  }
+  drawPostcardScrawl(ctx, addressLeft + 6, ruleTop - 8, addressWidth - 12, ruleGap);
+
+  // The stamp, and the cancellation struck across its lower corner and carried off
+  // toward the middle of the card.
+  const stampW = 208;
+  const stampH = 262;
+  const stampX = W - margin - 46 - stampW;
+  const stampY = margin + 42;
+  drawPostcardStamp(ctx, stampX, stampY, stampW, stampH);
+
+  ctx.save();
+  ctx.translate(stampX + 34, stampY + stampH - 30);
+  ctx.rotate(-0.13);
+  ctx.globalAlpha = 0.44;
+  ctx.strokeStyle = '#44444e';
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.arc(0, 0, 122, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(0, 0, 94, 0, Math.PI * 2);
+  ctx.stroke();
+  for (let bar = 0; bar < 4; bar++) {
+    const by = -42 + bar * 28;
+    ctx.beginPath();
+    ctx.moveTo(-104, by);
+    for (let k = 1; k <= 8; k++) ctx.lineTo(-104 - k * 26, by + (k % 2 === 0 ? 0 : 14));
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#40404a';
+  ctx.font = '600 30px Georgia, "Times New Roman", serif';
+  drawSpacedText(ctx, 'ПОЧТА', 0, 6, 3);
+  ctx.restore();
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = maxAnisotropy();
+  postcardTextTextureCache = texture;
+  return texture;
+}
+
+let postcardPhotoTextureCache: THREE.CanvasTexture | null = null;
+
+/**
+ * One flat-topped mesa: a trapezoid with talus slopes and a flat cap, lit along its
+ * left wall. This is the shape that makes this beach a desert coast and not a resort.
+ */
+function drawPostcardMesa(
+  ctx: CanvasRenderingContext2D,
+  baseY: number,
+  left: number,
+  right: number,
+  height: number,
+  body: string,
+  lit: string,
+): void {
+  const width = right - left;
+  const capLeft = left + width * 0.26;
+  const capRight = right - width * 0.3;
+  const top = baseY - height;
+  ctx.beginPath();
+  ctx.moveTo(left, baseY);
+  ctx.lineTo(left + width * 0.1, baseY - height * 0.34);
+  ctx.lineTo(capLeft, top);
+  ctx.lineTo(capRight, top);
+  ctx.lineTo(right - width * 0.08, baseY - height * 0.3);
+  ctx.lineTo(right, baseY);
+  ctx.closePath();
+  ctx.fillStyle = body;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(left + width * 0.1, baseY - height * 0.34);
+  ctx.lineTo(capLeft, top);
+  ctx.lineTo(capLeft + width * 0.16, top);
+  ctx.lineTo(left + width * 0.22, baseY - height * 0.3);
+  ctx.closePath();
+  ctx.fillStyle = lit;
+  ctx.fill();
+}
+
+/**
+ * One palm, leaning by `lean` radians: a tapering trunk and seven drooping fronds, in
+ * the two tones the ending gives its own palms, over a soft shadow thrown to the lower
+ * right because the sun stands high on the left.
+ */
+function drawPostcardPalm(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  baseY: number,
+  height: number,
+  lean: number,
+): void {
+  ctx.fillStyle = 'rgba(90, 70, 46, 0.22)';
+  ctx.beginPath();
+  ctx.ellipse(x + height * 0.18, baseY + height * 0.035, height * 0.3, height * 0.05, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  const topX = x + Math.sin(lean) * height * 0.34;
+  const topY = baseY - height;
+  // Trunk: two quadratic edges rather than a tapered stroke, so it keeps its thickness.
+  ctx.fillStyle = '#8a7355';
+  ctx.beginPath();
+  ctx.moveTo(x - height * 0.03, baseY);
+  ctx.quadraticCurveTo(x - height * 0.01, baseY - height * 0.6, topX - height * 0.02, topY);
+  ctx.lineTo(topX + height * 0.02, topY);
+  ctx.quadraticCurveTo(x + height * 0.025, baseY - height * 0.6, x + height * 0.03, baseY);
+  ctx.closePath();
+  ctx.fill();
+  // Fronds: seven lenses from the crown, each drooping past its own tip.
+  for (let i = 0; i < 7; i++) {
+    const angle = -Math.PI * 0.94 + (i / 6) * Math.PI * 0.88;
+    const len = height * (0.42 + (i % 3) * 0.05);
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const tipX = topX + cos * len;
+    const tipY = topY + sin * len + len * 0.3;
+    ctx.fillStyle = i % 2 === 0 ? '#53763a' : '#476632';
+    ctx.beginPath();
+    ctx.moveTo(topX, topY);
+    ctx.quadraticCurveTo(topX + cos * len * 0.6, topY + sin * len * 0.6 - len * 0.16, tipX, tipY);
+    ctx.quadraticCurveTo(topX + cos * len * 0.55, topY + sin * len * 0.55 + len * 0.22, topX, topY);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+/**
+ * The picture side: the beach the ending lands on — a small white house on the sand,
+ * palms, the turquoise shallows and the flat-topped mesas behind — printed as a vintage
+ * photo postcard, with a white border, a warm cast, grain and a vignette.
+ *
+ * No tone here is invented. The sky's zenith and horizon, the sea's deep, shallow and
+ * foam, the dry and wet sand, the scrub and the ridges are the ending scene's own
+ * colours (story/ending.ts, as sRGB), so the card shows the beach the player lands at
+ * rather than a postcard of somewhere else.
+ */
+function postcardPhotoTexture(): THREE.CanvasTexture {
+  if (postcardPhotoTextureCache) return postcardPhotoTextureCache;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = POSTCARD_TEX_W;
+  canvas.height = POSTCARD_TEX_H;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas 2D is required for the postcard');
+
+  const W = POSTCARD_TEX_W;
+  const H = POSTCARD_TEX_H;
+  const rnd = postcardNoise(0x50a17e2d);
+  // The print's white border, then the picture inside it.
+  ctx.fillStyle = '#f1e9d6';
+  ctx.fillRect(0, 0, W, H);
+  const bx = 62;
+  const by = 62;
+  const bw = W - 2 * bx;
+  const bh = H - 2 * by;
+  const horizon = by + bh * 0.34;
+  const shore = by + bh * 0.66;
+
+  // Sky: the ending's zenith over its pale warm horizon, with the sun's glow high on
+  // the left, which is where that scene's own sun stands.
+  const sky = ctx.createLinearGradient(0, by, 0, horizon);
+  sky.addColorStop(0, '#5a95d3');
+  sky.addColorStop(0.62, '#a8c6d8');
+  sky.addColorStop(1, '#e2e0d2');
+  ctx.fillStyle = sky;
+  ctx.fillRect(bx, by, bw, horizon - by);
+  const glow = ctx.createRadialGradient(bx + bw * 0.24, by + bh * 0.08, 0, bx + bw * 0.24, by + bh * 0.08, bw * 0.44);
+  glow.addColorStop(0, 'rgba(255, 246, 224, 0.6)');
+  glow.addColorStop(1, 'rgba(255, 246, 224, 0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(bx, by, bw, horizon - by);
+
+  // Mesas: three flat-topped layers standing across the water, painted farthest first so
+  // each nearer one overlaps the last. Depth is carried by haze alone — the far range is
+  // half the horizon's own tone, the near mesa is solid — which is how the ending stacks
+  // its own ridges.
+  drawPostcardMesa(ctx, horizon + 4, bx - 60, bx + bw * 1.08, bh * 0.19, 'rgba(150, 148, 122, 0.6)', 'rgba(178, 174, 146, 0.6)');
+  drawPostcardMesa(ctx, horizon + 4, bx + bw * 0.28, bx + bw * 0.8, bh * 0.13, 'rgba(128, 127, 100, 0.78)', 'rgba(160, 156, 124, 0.78)');
+  drawPostcardMesa(ctx, horizon + 4, bx - 40, bx + bw * 0.45, bh * 0.15, 'rgba(112, 112, 92, 0.95)', 'rgba(146, 143, 116, 0.95)');
+
+  // Sea: the deep tone at the horizon through the shallow turquoise to the foam line,
+  // with the shallow band wide, because that is what a gentle shore looks like from
+  // above it.
+  const sea = ctx.createLinearGradient(0, horizon, 0, shore);
+  sea.addColorStop(0, 'rgba(56, 123, 173, 0.96)');
+  sea.addColorStop(0.42, '#2f9d9c');
+  sea.addColorStop(0.78, '#7ed3c7');
+  sea.addColorStop(1, '#bfe8dc');
+  ctx.fillStyle = sea;
+  ctx.fillRect(bx, horizon, bw, shore - horizon);
+
+  // Ripples: short pale dashes, squeezed together toward the horizon the way rows of
+  // water compress with distance, with the sun's glint gathered on the left.
+  ctx.strokeStyle = 'rgba(240, 250, 248, 0.4)';
+  for (let row = 0; row < 26; row++) {
+    const t = row / 25;
+    const y = horizon + Math.pow(t, 1.7) * (shore - horizon) * 0.9 + 8;
+    const count = 3 + Math.round((1 - t) * 18);
+    ctx.lineWidth = 1.5 + t * 3;
+    for (let i = 0; i < count; i++) {
+      const x = bx + rnd() * bw;
+      ctx.globalAlpha = (0.1 + rnd() * 0.26) * (x < bx + bw * 0.55 ? 0.9 : 0.35);
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + (10 + rnd() * 44) * (0.4 + t), y + (rnd() - 0.5) * 3);
+      ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  // The foam line: a ragged white edge, and a second thin swash line a stride below it
+  // where the last wave stopped. Both stop at the print's edge rather than running over
+  // the white border.
+  ctx.strokeStyle = 'rgba(237, 242, 242, 0.9)';
+  ctx.lineWidth = 9;
+  ctx.beginPath();
+  ctx.moveTo(bx, shore);
+  for (let x = bx; x < bx + bw; x += 64) {
+    const end = Math.min(x + 64, bx + bw);
+    ctx.quadraticCurveTo(x + 32, shore + (rnd() - 0.5) * 26, end, shore + (rnd() - 0.5) * 14);
+  }
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(237, 242, 242, 0.45)';
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.moveTo(bx, shore + 36);
+  for (let x = bx; x < bx + bw; x += 96) {
+    const end = Math.min(x + 96, bx + bw);
+    ctx.quadraticCurveTo(x + 48, shore + 36 + (rnd() - 0.5) * 22, end, shore + 36 + (rnd() - 0.5) * 12);
+  }
+  ctx.stroke();
+
+  // The sand: wet and dark just under the foam, dry and warm at the bottom of the
+  // frame, with a mottling of grain and the wrack the sea leaves behind.
+  const sand = ctx.createLinearGradient(0, shore - 8, 0, by + bh);
+  sand.addColorStop(0, '#8f7d66');
+  sand.addColorStop(0.24, '#b8996d');
+  sand.addColorStop(0.62, '#ceb085');
+  sand.addColorStop(1, '#d8bd93');
+  ctx.fillStyle = sand;
+  ctx.fillRect(bx, shore - 8, bw, by + bh - (shore - 8));
+  for (let i = 0; i < 900; i++) {
+    const t = rnd();
+    const y = shore + Math.pow(t, 0.6) * (by + bh - shore);
+    ctx.fillStyle = rnd() < 0.55 ? 'rgba(90, 70, 46, 0.075)' : 'rgba(255, 240, 210, 0.06)';
+    ctx.fillRect(bx + rnd() * bw, y, 3 + rnd() * 9, 1 + rnd() * 2);
+  }
+  // Wrack along the waterline: pebbles and dark weed, densest where the water reaches.
+  for (let i = 0; i < 320; i++) {
+    const x = bx + rnd() * bw;
+    const y = shore - 6 + Math.pow(rnd(), 2) * 130;
+    ctx.fillStyle = rnd() < 0.5 ? 'rgba(70, 56, 42, 0.5)' : 'rgba(52, 60, 40, 0.42)';
+    ctx.beginPath();
+    ctx.ellipse(x, y, 3 + rnd() * 7, 2 + rnd() * 3, rnd() * Math.PI, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // The house, on the sand right of centre: sunlit on the left, shaded flank to the
+  // right, blue dome and shuttered windows, its shadow thrown to the lower right. It is
+  // painted before the palms so the palms' crowns fall across it and read as standing in
+  // front of it.
+  const houseW = bw * 0.17;
+  const houseH = bh * 0.15;
+  const houseX = bx + bw * 0.6;
+  const houseY = by + bh * 0.9 - houseH;
+  ctx.fillStyle = 'rgba(90, 70, 46, 0.26)';
+  ctx.beginPath();
+  ctx.moveTo(houseX, houseY + houseH);
+  ctx.lineTo(houseX + houseW * 1.95, houseY + houseH + houseH * 0.4);
+  ctx.lineTo(houseX + houseW * 2.2, houseY + houseH + houseH * 0.06);
+  ctx.lineTo(houseX + houseW * 0.9, houseY + houseH);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#f7f3e7';
+  ctx.fillRect(houseX, houseY, houseW * 0.62, houseH);
+  ctx.fillStyle = '#dcd4c0';
+  ctx.beginPath();
+  ctx.moveTo(houseX + houseW * 0.62, houseY);
+  ctx.lineTo(houseX + houseW, houseY + houseH * 0.12);
+  ctx.lineTo(houseX + houseW, houseY + houseH * 1.12);
+  ctx.lineTo(houseX + houseW * 0.62, houseY + houseH);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#3c6b99';
+  ctx.beginPath();
+  ctx.arc(houseX + houseW * 0.3, houseY, houseW * 0.28, Math.PI, 0);
+  ctx.fill();
+  ctx.fillRect(houseX + houseW * 0.27, houseY + houseH, houseW * 0.06, houseH * 0.1);
+  ctx.fillStyle = '#2b4a6b';
+  ctx.fillRect(houseX + houseW * 0.08, houseY + houseH * 0.55, houseW * 0.16, houseH * 0.45);
+  ctx.fillStyle = '#3c6b99';
+  ctx.fillRect(houseX + houseW * 0.7, houseY + houseH * 0.45, houseW * 0.16, houseH * 0.22);
+  ctx.fillRect(houseX + houseW * 0.82, houseY + houseH * 0.8, houseW * 0.14, houseH * 0.2);
+
+  // Three palms: two to the left of the house and one to its right, crowns overhanging
+  // its walls.
+  drawPostcardPalm(ctx, bx + bw * 0.5, by + bh * 0.9, bh * 0.33, -0.1);
+  drawPostcardPalm(ctx, bx + bw * 0.43, by + bh * 0.925, bh * 0.24, 0.16);
+  drawPostcardPalm(ctx, bx + bw * 0.83, by + bh * 0.93, bh * 0.28, -0.04);
+
+  // Scrub behind the house: the tufts the beach turns into a little way inland.
+  for (let i = 0; i < 26; i++) {
+    const x = bx + bw * (0.06 + rnd() * 0.36);
+    const y = by + bh * (0.9 + rnd() * 0.08);
+    ctx.fillStyle = rnd() < 0.5 ? 'rgba(99, 122, 79, 0.75)' : 'rgba(80, 100, 62, 0.7)';
+    ctx.beginPath();
+    ctx.ellipse(x, y, 8 + rnd() * 16, 5 + rnd() * 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // The print itself: a warm cast, grain, a fine halftone scan and a vignette, so the
+  // face reads as a photograph printed on card stock rather than as a rendered scene.
+  ctx.fillStyle = 'rgba(255, 205, 140, 0.07)';
+  ctx.fillRect(bx, by, bw, bh);
+  for (let i = 0; i < 22000; i++) {
+    ctx.fillStyle = rnd() < 0.5 ? 'rgba(255, 255, 255, 0.05)' : 'rgba(40, 34, 28, 0.055)';
+    ctx.fillRect(bx + rnd() * bw, by + rnd() * bh, 2, 2);
+  }
+  ctx.fillStyle = 'rgba(60, 50, 40, 0.035)';
+  for (let y = by; y < by + bh; y += 4) ctx.fillRect(bx, y, bw, 1);
+  const vignette = ctx.createRadialGradient(W / 2, H / 2, bh * 0.34, W / 2, H / 2, bw * 0.76);
+  vignette.addColorStop(0, 'rgba(30, 26, 20, 0)');
+  vignette.addColorStop(1, 'rgba(30, 26, 20, 0.34)');
+  ctx.fillStyle = vignette;
+  ctx.fillRect(bx, by, bw, bh);
+  // A hairline around the image, the way a printed postcard's photograph is keylined.
+  ctx.strokeStyle = 'rgba(90, 80, 66, 0.35)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(bx, by, bw, bh);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = maxAnisotropy();
+  postcardPhotoTextureCache = texture;
+  return texture;
+}
+
+let postcardFaceMaterialCache: THREE.MeshStandardMaterial[] | null = null;
+
+/**
+ * The card's six faces, in BoxGeometry's order: four paper edges, then the printed side
+ * (+Z) and the picture (-Z).
+ *
+ * SHARED AND MODULE-OWNED, deliberately not `itemOwnedResource`: both 2048-px faces are
+ * painted once per session and every postcard in the world — in the hand, flat in the
+ * trunk, lying on the ground — uses them, so the ordinary item disposer must leave them
+ * alone. Each printed face also carries its own texture as an emissive map at a third
+ * strength, which is what keeps the handwriting readable when the card is raised with
+ * the sun behind the player.
+ */
+function postcardFaceMaterials(): THREE.MeshStandardMaterial[] {
+  if (postcardFaceMaterialCache) return postcardFaceMaterialCache;
+
+  const paper = new THREE.MeshStandardMaterial({ color: 0xf0e7d2, roughness: 0.9, metalness: 0 });
+  const printed = [postcardTextTexture(), postcardPhotoTexture()].map(
+    (map) =>
+      new THREE.MeshStandardMaterial({
+        map,
+        emissive: 0xffffff,
+        emissiveMap: map,
+        emissiveIntensity: 0.34,
+        roughness: 0.88,
+        metalness: 0,
+      }),
+  );
+  postcardFaceMaterialCache = [paper, paper, paper, paper, ...printed];
+  return postcardFaceMaterialCache;
+}
+
+/**
+ * The postcard itself: one thin card, the same mesh wherever it is — in the hand, flat
+ * in a trunk, lying on the ground. The printed side is +Z and the picture -Z, so the
+ * card is genuinely turned over to read the other face, exactly as paper is.
+ */
+function createPostcardMesh(): THREE.Group {
+  const root = new THREE.Group();
+  const card = new THREE.Mesh(
+    cachedGeo('postcard_card', () => new THREE.BoxGeometry(POSTCARD_W, POSTCARD_H, POSTCARD_THICKNESS)),
+    postcardFaceMaterials(),
+  );
+  card.name = 'postcard_card';
+  root.add(card);
   return root;
 }
 
@@ -1346,8 +1911,8 @@ export function createItemMesh(item: Item): THREE.Object3D {
       return createFootballMesh();
     case 'pocket_watch':
       return createPocketWatchMesh();
-    case 'letter':
-      return createLetterMesh();
+    case 'postcard':
+      return createPostcardMesh();
     case 'contract_cargo':
       return buildGroup(itemBlueprint('contract_parcel', buildContractParcelInto).instructions);
     case 'sticker_envelope':

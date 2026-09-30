@@ -147,12 +147,15 @@ export interface PocketWatchItem {
 }
 
 /**
- * The note the player starts with. It carries no state of its own: the words on it
- * are HUD presentation (`LETTER_TEXT`, ui/hud.ts), so the item is only a reason for
- * the pack to hold a folded sheet that E raises to the eye.
+ * The card the player starts with: a printed postcard from home, its message on one
+ * face and a photograph of the house by the sea on the other.
+ *
+ * It carries no state of its own. The words are `POSTCARD_TEXT` (render/partmesh.ts)
+ * and the card is drawn from it at build time, so the item is only a reason for the
+ * pack to hold a piece of card that E raises to the eye and turns over.
  */
-export interface LetterItem {
-  readonly type: 'letter';
+export interface PostcardItem {
+  readonly type: 'postcard';
   readonly id: string;
 }
 
@@ -194,7 +197,7 @@ export type Item =
   | PhotographItem
   | FootballItem
   | PocketWatchItem
-  | LetterItem
+  | PostcardItem
   | ContractCargoItem
   | StickerEnvelopeItem;
 
@@ -273,8 +276,8 @@ export function itemLabel(item: Item): string {
       return 'football';
     case 'pocket_watch':
       return 'pocket watch';
-    case 'letter':
-      return 'letter from home';
+    case 'postcard':
+      return 'postcard from home';
     case 'contract_cargo':
       return item.cargoName;
     case 'sticker_envelope':
@@ -327,9 +330,9 @@ export function itemMass(item: Item): number {
       return 0.43;
     case 'pocket_watch':
       return 0.12;
-    case 'letter':
-      // One sheet of paper, and you carry that without noticing.
-      return 0.02;
+    case 'postcard':
+      // One printed card, and you carry that without noticing.
+      return 0.008;
     case 'contract_cargo':
       return 12;
     case 'sticker_envelope':

@@ -861,8 +861,8 @@ async function boot(): Promise<void> {
     }
   } else {
     spawnStartingItems(world, loose, road, terrain);
-    // The letter from home is the only thing the player starts holding.
-    inventory.add({ type: 'letter', id: world.generatedPartId('story_item', 0, 0) });
+    // The postcard from home is the only thing the player starts holding.
+    inventory.add({ type: 'postcard', id: world.generatedPartId('story_item', 0, 0) });
   }
 
   // POI working cars enter state when their chunk reaches the physics band. A new
@@ -1243,8 +1243,11 @@ async function boot(): Promise<void> {
   let stickerHintActive = false;
   let torchlightActive = false;
   let cameraActive = false;
-  /** The letter is read by E: raised to the eyes with its text overlaid, lowered by E again. */
-  let letterOpen = false;
+  /**
+   * The postcard is read by E: raised to the eyes with its message side toward the
+   * player, turned over by E again to the photograph, and put away by a third.
+   */
+  let postcardView: 'down' | 'text' | 'photo' = 'down';
   /** A shutter press is fulfilled from the completed rendered frame, not a fixed step. */
   let pendingPhotoCamera: CameraItem | null = null;
   /** 0..1 while an E-key watch action accelerates four in-game hours; 1 is idle. */
@@ -1504,7 +1507,7 @@ async function boot(): Promise<void> {
     if (driving !== null || heldAfterSelection?.type !== 'binoculars') binocularsActive = false;
     if (driving !== null || heldAfterSelection?.type !== 'torchlight') torchlightActive = false;
     if (driving !== null || heldAfterSelection?.type !== 'camera') cameraActive = false;
-    if (driving !== null || dying || heldAfterSelection?.type !== 'letter') letterOpen = false;
+    if (driving !== null || dying || heldAfterSelection?.type !== 'postcard') postcardView = 'down';
     // A LIGHT SWITCH TAKES E FROM THE HELD ITEM, and only while it is aimed.
     //
     // E is the key that works what is in your hands, and a switch is the one thing in the
@@ -1543,8 +1546,9 @@ async function boot(): Promise<void> {
       ) {
         watchFastForwardProgress = 0;
         hud.setToast('watch shaken — winding four hours forward');
-      } else if (heldAfterSelection.type === 'letter') {
-        letterOpen = !letterOpen;
+      } else if (heldAfterSelection.type === 'postcard') {
+        // One key, three faces of the same card: read it, turn it over, put it away.
+        postcardView = postcardView === 'down' ? 'text' : postcardView === 'text' ? 'photo' : 'down';
       }
     }
     if (!medicineActive && f.useHeld && heldAfterSelection?.type === 'sun_shades') {
@@ -1685,7 +1689,7 @@ async function boot(): Promise<void> {
       binocularsActive = false;
       torchlightActive = false;
       cameraActive = false;
-      letterOpen = false;
+      postcardView = 'down';
       gumActive = false;
       prompt = null;
       boot = null;
@@ -2316,7 +2320,6 @@ async function boot(): Promise<void> {
     hud.setBubbleGum(gumBlowing, (gumTimer - GUM_CHEW_SECONDS) / GUM_GROW_SECONDS);
 
     hud.setHealthEffects(vitals.damageEffect, dying, deathFade);
-    hud.setLetter(letterOpen && !dying && driving === null && inventory.held?.type === 'letter');
     // Viewmodel and slot previews are pure views of existing state, so they update
     // here rather than in the fixed step: they should track the smoothed camera.
     const held = inventory.held;
@@ -2347,7 +2350,7 @@ async function boot(): Promise<void> {
       dayFactor: sky.dayFactor,
       watchActionProgress:
         watchFastForwardProgress < 1 ? watchFastForwardProgress : -1,
-      letterRaised: letterOpen && held?.type === 'letter',
+      postcardView: held?.type === 'postcard' ? postcardView : 'down',
     });
 
     // GPU timer queries measure only render submission. The one startup PMREM bake
@@ -2503,7 +2506,7 @@ async function boot(): Promise<void> {
     const shouldRestorePointerLock = restorePointerLock && input.pointerLocked;
     if (document.pointerLockElement !== null) document.exitPointerLock();
     paused = true;
-    letterOpen = false;
+    postcardView = 'down';
     loop.stop();
     // Silence everything behind the overlay, radio included: the loop is stopped,
     // so nothing would update the voices and they would hold their last value.
