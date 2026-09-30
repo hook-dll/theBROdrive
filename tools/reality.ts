@@ -332,6 +332,12 @@ const TARGETS: Readonly<Record<string, Target>> = {
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 6.0, brake: null, lat: null, hz: 1.6,
     source: 'Ferrari Testarossa 1984 factory figures',
   },
+  // The archetype saloon on the VAZ-2101's physics: held to the 2101's own figures.
+  sh_vaz2101: {
+    wheelbase: 2.424, track: 1.349, radius: 0.297, top: 142, to100: 20,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, brake: 75, lat: 0.7, hz: 1.1,
+    source: 'AO vaz-2101 (1982 catalogue), as sv_vaz2101',
+  },
   pg_integrale: {
     wheelbase: 2.48, track: 1.4, radius: 0.295, top: 220, to100: 5.7,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.2, brake: null, lat: null, hz: 1.5,

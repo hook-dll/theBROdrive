@@ -1,0 +1,7 @@
+{
+  "id": "shape_saloon",
+  "archetype": "saloon",
+  "factory": { "length": 4.073, "width": 1.611, "height": 1.382, "clearance": 0.170, "wheelbase": 2.424,
+               "frontTrack": 1.349, "rearTrack": 1.305, "wheelRadius": 0.297, "tyreWidth": 0.155, "frontOverhang": 0.72 },
+  "style": {}
+}

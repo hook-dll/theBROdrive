@@ -649,6 +649,7 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   pg_elise:       { length: 3.726, width: 1.701, height: 1.202, clearance: 0.130, wheelbase: 2.300, frontTrack: 1.440, rearTrack: 1.453, wheelRadius: 0.306, tyreWidth: 0.205, frontOverhang: 0.75 },
   pg_testarossa:  { length: 4.485, width: 1.976, height: 1.130, clearance: 0.120, wheelbase: 2.550, frontTrack: 1.518, rearTrack: 1.660, wheelRadius: 0.334, tyreWidth: 0.280, frontOverhang: 1.00 },
   pg_integrale:   { length: 3.900, width: 1.700, height: 1.365, clearance: 0.140, wheelbase: 2.480, frontTrack: 1.400, rearTrack: 1.380, wheelRadius: 0.295, tyreWidth: 0.205, frontOverhang: 0.80 },
+  sh_vaz2101:     { length: 4.073, width: 1.611, height: 1.382, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.349, rearTrack: 1.305, wheelRadius: 0.297, tyreWidth: 0.155, frontOverhang: 0.72 },
 };
 
 function factoryGeometry(id: string): FactoryGeometry {
@@ -1845,6 +1846,53 @@ const PROVING_SPECS: readonly Entry[] = [
   },
 ];
 
+/* ---- archetype bodies ----
+ *
+ * Faceless bodies built by tools/carshape/archetype.py from a car's own published
+ * dimensions: one archetype (a saloon here), proportions as rules, flush black glass
+ * and plain lenses. The first one wears the VAZ-2101's physics unchanged, so it can
+ * be parked beside the pack's Zhiguli and judged against it.
+ */
+const SHAPE = '/models/shape';
+const ZHIGULI = SOVIET_SPECS.find((spec) => spec.id === 'sv_vaz2101')!;
+const SHAPE_SPECS: readonly Entry[] = [
+  {
+    id: 'sh_vaz2101',
+    label: 'Saloon (VAZ-2101 physics)',
+    dir: SHAPE,
+    glb: 'saloon_2101.glb',
+    bodyClass: 'car',
+    mass: ZHIGULI.mass,
+    engineId: ZHIGULI.engineId,
+    gearboxId: ZHIGULI.gearboxId,
+    tankLitres: ZHIGULI.tankLitres,
+    wheelGrip: ZHIGULI.wheelGrip,
+    brakeDecelG: ZHIGULI.brakeDecelG,
+    suspension: ZHIGULI.suspension,
+    steerLock: ZHIGULI.steerLock,
+    rearDriveBias: ZHIGULI.rearDriveBias,
+    handlingProfile: ZHIGULI.handlingProfile,
+    frontWeightShare: ZHIGULI.frontWeightShare,
+    dragArea: ZHIGULI.dragArea,
+    paintStyle: 'solid-paint',
+    glassMaterial: 'car_glass',
+    wheelSetPool: [],
+    wheelNodes: {
+      wheel_fl: ['wheel_fl'],
+      wheel_fr: ['wheel_fr'],
+      wheel_rl: ['wheel_rl'],
+      wheel_rr: ['wheel_rr'],
+    },
+    lights: {
+      headlights: ['headlights'],
+      taillights: ['taillights'],
+      reverseLights: ['reverse_lights'],
+      leftBlinkers: ['front_blinker_left', 'rear_blinker_left'],
+      rightBlinkers: ['front_blinker_right', 'rear_blinker_right'],
+    },
+  },
+];
+
 const ENTRIES: readonly Entry[] = [
   // -------------------------------------------------------------------------
   // Low Poly Soviet Car Pack. Fifteen FBX bodies, one per model, each carrying
@@ -1869,6 +1917,7 @@ const ENTRIES: readonly Entry[] = [
   // The proving ground: real cars' physics on borrowed bodies.
   // -------------------------------------------------------------------------
   ...PROVING_SPECS,
+  ...SHAPE_SPECS,
 ];
 export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   id: e.id,
