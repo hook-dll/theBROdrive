@@ -1271,7 +1271,7 @@ const SAAS_SPECS: readonly Entry[] = [
     wheelGrip: 0.59,
     brakeDecelG: 0.53,
     suspension: SUSP_TRUCK,
-    steerLock: 0.501,
+    steerLock: 0.482,
     rearDriveBias: 0.5,
     handlingProfile: 'utility',
     // Factory kerb axle loads: 1180 kg front, 665 kg rear. Boxy cab-over body:

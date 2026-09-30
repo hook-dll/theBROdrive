@@ -239,6 +239,12 @@ interface WheelVisual {
   tyreGrip: number;
   /** Progressive bump-stop force applied this step, newtons. */
   bumpStopN: number;
+  /**
+   * Anti-roll bar force on this corner (N), positive pushing the body up — the outer
+   * wheel's share of the roll the bar resists. Applied to the body at the contact patch,
+   * so the TYRE carries it too; see where it is added to `loadN`.
+   */
+  barN: number;
   /** This tyre's vertical carcass rate, N/m. Nothing to do with the springs. */
   tyreRateN: number;
   /**
@@ -1416,6 +1422,7 @@ export class Vehicle implements Rebasable {
         tyreTempC: ambientAirC(this.world.state.timeOfDay, DAY_LENGTH),
         tyreGrip: 1,
         bumpStopN: 0,
+        barN: 0,
         tyreRateN: tyreVerticalRate(wheel.radius),
         profileHeight: 0,
         profileRate: 0,
@@ -3226,7 +3233,16 @@ export class Vehicle implements Rebasable {
 
       // Ray-cast suspension load spikes over trimesh seams, so it is low-passed
       // before it is allowed to size a friction budget.
-      const rawLoad = inContact ? Math.max(0, controller.wheelSuspensionForce(w.index) ?? 0) : 0;
+      //
+      // The spring is not the only thing between body and road. The bump stop and the
+      // anti-roll bar push the body up at this contact patch as well, so the tyre
+      // carries their force too: a bar that resisted the roll without loading its outer
+      // tyre would take load transfer AWAY from its own axle — the balance lever
+      // backwards, measured as 44% front on a Zhiguli with a front bar twice the rear's
+      // (tools/roll-balance.ts). Both are last step's, which the low-pass hides.
+      const rawLoad = inContact
+        ? Math.max(0, (controller.wheelSuspensionForce(w.index) ?? 0) + w.bumpStopN + w.barN)
+        : 0;
       w.loadN += (rawLoad - w.loadN) * loadBlend;
 
       // A wheel is a disc, and a bigger wheel is a heavier one: mass scales with
@@ -4011,6 +4027,7 @@ export class Vehicle implements Rebasable {
   }
 
   private applyAntiRollBars(dt: number): void {
+    for (const w of this.wheels) w.barN = 0;
     for (let axle = 0; axle < 2; axle++) {
       const front = axle === 0;
       let leftSum = 0;
@@ -4049,7 +4066,8 @@ export class Vehicle implements Rebasable {
         const own = w.sideSign < 0 ? leftMean : rightMean;
         const other = w.sideSign < 0 ? rightMean : leftMean;
         // Up on the compressed side: that is the bar unloading the outer spring.
-        rotateVector(this.microUp, this.rotationScratch, 0, gain * (own - other) * dt, 0);
+        w.barN = gain * (own - other);
+        rotateVector(this.microUp, this.rotationScratch, 0, w.barN * dt, 0);
         this.chassisBody.applyImpulseAtPoint(this.microUp, w.contactPoint, false);
       }
     }

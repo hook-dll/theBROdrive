@@ -1269,8 +1269,18 @@ export const ANTI_ROLL_REAR_FRACTION = 0.3;
 export const ROLL_ACCEL_TAU = 0.045;
 /** Ceiling on the restored couple, in g of lateral acceleration. */
 export const ROLL_ACCEL_MAX = 12;
-/** Lean angle, degrees, at which the couple has faded to nothing. */
-export const ROLL_LIMIT_DEG = 17;
+/**
+ * Lean angle, degrees, at which the couple has faded to nothing: in effect never.
+ *
+ * It was 17, and the fade it set threw away the couple in proportion to the lean — a
+ * third of it at five degrees. The couple IS the load transfer the tyres feel, so the
+ * softest cars lost the most of theirs: tools/roll-balance.ts measured the tyres
+ * seeing 0.56-0.62 of `m · a · h` on four cars with the bar force missing as well, and
+ * 0.94-0.99 with both put back. The bars and bump stops now carry a lean to rest, a
+ * Zhiguli at 6 degrees on the limit and a 2CV at 11, and the tall vans slide before
+ * they tip.
+ */
+export const ROLL_LIMIT_DEG = 90;
 /**
  * Roll-rate damping, as a fraction of roll inertia per second. This is intentionally
  * below the previous road-car value: the worn damper should take a set, then sway once
