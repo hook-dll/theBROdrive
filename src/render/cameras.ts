@@ -422,6 +422,47 @@ export class CameraRig {
   }
 
   /**
+   * Scripted (cutscene) camera: the pose arrives already resolved, in the relative
+   * frame, and no input, spring, occlusion or ground probe touches it.
+   *
+   * Same contract as `updateDeath` — this path OWNS position and orientation for as
+   * long as it keeps being called — with one difference: a cutscene is composed, so
+   * the field of view belongs to the shot instead of following the speed. `fovDeg`
+   * overrides the resting view for this frame and is approached at the same rate the
+   * driving view uses, so a cut from a wide shot to a long lens reads as a slow push
+   * rather than a jump. The near plane is kept in step with the far plane exactly as
+   * `updateFov` keeps it.
+   *
+   * Nothing latches: a cutscene that ends in a reload never hands the camera back, and
+   * `deathActive` is deliberately left alone, so a death part-way through one still
+   * has its own sequence to run.
+   */
+  updateScripted(dt: number, eye: THREE.Vector3, lookAt: THREE.Vector3, fovDeg: number): void {
+    const d = dt > 0 ? dt : 1 / 60;
+    this.eye.copy(eye);
+    this.lookAt.copy(lookAt);
+    // A zero-length look direction has no orientation; keep the previous heading by
+    // pushing the target a metre ahead of the eye rather than letting lookAt() emit NaN.
+    if (this.lookAt.distanceToSquared(this.eye) < 1e-8) this.lookAt.z = this.eye.z - 1;
+    _mA.lookAt(this.eye, this.lookAt, _UP);
+    this.camera.quaternion.setFromRotationMatrix(_mA);
+    this.camera.position.copy(this.eye);
+
+    this.fov += (fovDeg - this.fov) * (1 - Math.exp(-FOV_OMEGA * d));
+    const targetNear = nearPlaneForFarPlane(this.camera.far);
+    let projectionChanged = false;
+    if (Math.abs(this.fov - this.camera.fov) > FOV_EPSILON) {
+      this.camera.fov = this.fov;
+      projectionChanged = true;
+    }
+    if (this.camera.near !== targetNear) {
+      this.camera.near = targetNear;
+      projectionChanged = true;
+    }
+    if (projectionChanged) this.camera.updateProjectionMatrix();
+  }
+
+  /**
    * C swaps the two driving views: the bonnet mount and the follow arm.
    *
    * Entering the hood view aims it down the car, because a bonnet camera left

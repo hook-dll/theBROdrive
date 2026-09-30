@@ -55,6 +55,7 @@ import type { WorldOrigin } from '../world/origin';
 import type { WreckTrunkField } from '../world/wrecktrunks';
 import type { PoiSwitchField } from '../world/poiswitches';
 import type { CourierField } from '../world/couriers';
+import type { BoardableField } from '../story/sitebuild';
 import { STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
 import { uprightStickerRoll } from '../render/stickers';
 
@@ -184,6 +185,7 @@ type Target =
   | { kind: 'storage'; owner: StorageOwnerKind; side: StorageSide; id: string; cell: number | null }
   | { kind: 'car-entry'; carId: string }
   | { kind: 'light-switch'; id: string }
+  | { kind: 'aircraft' }
   | {
       kind: 'car-body';
       carId: string;
@@ -206,6 +208,8 @@ export interface InteractionResult {
   continuous: FoleyContinuous;
   /** World-attached storage grid while the player is looking into an opened compartment. */
   boot: TrunkViewState | null;
+  /** True on the F edge that asks to board the parked plane. */
+  board: boolean;
 }
 
 /**
@@ -475,6 +479,8 @@ export class Interaction {
      * positions (absolute). See `world/origin.ts`.
      */
     private readonly origin: WorldOrigin,
+    /** Colliders that mean "this is the parked plane"; boarding is offered here. */
+    private readonly boardable: BoardableField,
   ) {}
 
   /** Gives interaction a handle on the on-foot character, so enter/exit can move it. */
@@ -517,7 +523,7 @@ export class Interaction {
       let prompt: string | null = null;
       if (interactPressed) prompt = this.tryExit(roadS);
       else if (input.interact) prompt = this.exitRefused();
-      return { prompt, sound: this.sound, continuous: null, boot: null };
+      return { prompt, sound: this.sound, continuous: null, boot: null, board: false };
     }
 
     const resolved = this.resolve(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
@@ -559,6 +565,9 @@ export class Interaction {
       this.mount(actionResolved);
     }
     if (interactPressed && !worldActionPressed && !stickerBlocksCar) this.tryEnter(resolved);
+    // F is also world manipulation, but `mountHasPriority` yields the plane to this
+    // edge, so an F aimed at the aircraft never reaches `mount`.
+    const board = interactPressed && !worldActionPressed && !stickerBlocksCar && resolved.target.kind === 'aircraft';
     // Deliberately after the driving early-return above: dropping while seated is a
     // no-op, the item stays in the inventory.
     if (dropPressed) this.drop(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
@@ -587,7 +596,7 @@ export class Interaction {
         };
       }
     }
-    return { prompt, sound: this.sound, continuous: this.continuous, boot };
+    return { prompt, sound: this.sound, continuous: this.continuous, boot, board };
   }
 
   /** A target that belongs to a car and is not an open storage grid. */
@@ -681,7 +690,7 @@ export class Interaction {
       this.onStickerPreview(null, null, false);
       this.onStickerPlaced(carId, sticker);
       this.sound = 'mount';
-      return { prompt: 'stuck on', sound: this.sound, continuous: null, boot: null };
+      return { prompt: 'stuck on', sound: this.sound, continuous: null, boot: null, board: false };
     }
     this.onStickerPreview(carId, sticker, true);
     const size = Math.round(style.scale * 100);
@@ -690,6 +699,7 @@ export class Interaction {
       sound: null,
       continuous: null,
       boot: null,
+      board: false,
     };
   }
 
@@ -940,6 +950,19 @@ export class Interaction {
       else if (trailerId) keep(hit.toi, { kind: 'trailer', trailerId });
     }
 
+    // The parked plane is a large hull, so boarding is offered out to `VEHICLE_RANGE`
+    // rather than the picking range. A second ray at that reach keeps every other
+    // target's reach exactly as it was and still occludes on whatever stands in front.
+    const boardHit = this.physics.raycast(
+      { x: eyeX, y: eyeY, z: eyeZ },
+      { x: dx, y: dy, z: dz },
+      VEHICLE_RANGE,
+      this.player?.rigidBody,
+    );
+    if (boardHit && boardHit.toi >= MIN_HIT_TOI && this.boardable.has(boardHit.colliderHandle)) {
+      keep(boardHit.toi, { kind: 'aircraft' });
+    }
+
     let vehicle: Vehicle | null = null;
     let carId: string | null = null;
     let vehicleDist = Infinity;
@@ -1139,6 +1162,8 @@ export class Interaction {
    */
   private mountHasPriority(target: Target): boolean {
     if (target.kind === 'none') return false;
+    // F boards the plane rather than manipulating it; see `fixedUpdate`.
+    if (target.kind === 'aircraft') return false;
     if (target.kind === 'car-body' || target.kind === 'car-entry') {
       return this.inventory.held?.type === 'sticker_envelope';
     }
@@ -1182,6 +1207,8 @@ export class Interaction {
       // thing in the world that is worked rather than picked up or got into.
       return entry.isOn() ? '[E] turn the lights off' : '[E] turn the lights on';
     }
+
+    if (t.kind === 'aircraft') return '[F] board the plane';
 
 
     if (t.kind === 'loose-part') {

@@ -279,6 +279,9 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
       case 'pocket_watch':
         item = { type: 'pocket_watch', id: ctx.world.runtimePartId() };
         break;
+      case 'letter':
+        item = { type: 'letter', id: ctx.world.runtimePartId() };
+        break;
     }
     ctx.loose.spawnItem(item, dropX + ctx.origin.x, groundY + 0.3, dropZ + ctx.origin.z);
     ctx.hud.setToast(`spawned ${itemLabel(item)}`);

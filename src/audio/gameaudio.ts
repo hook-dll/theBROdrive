@@ -11,15 +11,17 @@
 import type { SurfaceType } from '../core/surfaces';
 import type { Settings } from '../game/settings';
 import type { VehicleAudioState } from '../vehicle/vehicle';
-import { AudioMixer, setListenerPose } from './mixer';
+import { AudioMixer, setListenerPose, sliderGain } from './mixer';
 import { VehicleAudio, type CarPose } from './vehicleaudio';
 import { TrafficAudio } from './trafficaudio';
 import { Ambience, type AmbienceFrame } from './ambience';
 import { Foley, type BubbleGumAudioPhase, type FoleyContinuous, type FoleyEvent } from './foley';
 import { Radio, type RadioSpatialState } from './radio';
+import { createPropellerVoice, createSurfVoice, type PropellerVoice, type SurfVoice } from './storyaudio';
 export type { RadioSpatialState } from './radio';
 export type { CarPose } from './vehicleaudio';
 export type { AmbienceFrame } from './ambience';
+export type { PropellerVoice, SurfVoice } from './storyaudio';
 
 /** Traffic cars given a voice at once: the nearest few are all anyone can pick out. */
 const TRAFFIC_VOICES = 6;
@@ -56,10 +58,47 @@ export class GameAudio {
   /** Listener's horizontal right vector, for panning world directions (thunder). */
   private listenerRightX = 1;
   private listenerRightZ = 0;
+  /** Cutscene voices (the propeller and the surf), made on demand and stopped with them. */
+  private readonly storyVoices: { dispose(): void }[] = [];
+  /** The World slider's position, so a duck can be released back onto it. */
+  private worldVolume = 1;
 
   applySettings(settings: Settings): void {
+    this.worldVolume = settings.worldVolume;
     this.mixer.setVolume(settings.masterVolume);
     this.mixer.setBusVolumes(settings.carVolume, settings.worldVolume, settings.radioVolume);
+  }
+
+  /**
+   * The story's own voices (audio/storyaudio.ts). They are synthesised, and they sit
+   * under the master but OUTSIDE the world bus, so `setWorldLevel` ducking the world
+   * while the plane is the subject does not duck the plane itself.
+   */
+  createPropellerVoice(): PropellerVoice {
+    const voice = createPropellerVoice(this.mixer);
+    this.storyVoices.push(voice);
+    return voice;
+  }
+
+  createSurfVoice(): SurfVoice {
+    const voice = createSurfVoice(this.mixer);
+    this.storyVoices.push(voice);
+    return voice;
+  }
+
+  /**
+   * Ducks everything on the World bus — ambience, weather, animals and the other
+   * traffic — to `level` of the player's own World volume, over `tau` seconds. Used
+   * while a cutscene owns the scene; the recording voices themselves keep their
+   * levels, so releasing the duck restores exactly what was there.
+   */
+  setWorldLevel(level: number, tau = 0.5): void {
+    const clamped = level < 0 ? 0 : level > 1 ? 1 : level;
+    this.mixer.world.gain.setTargetAtTime(
+      sliderGain(this.worldVolume) * clamped,
+      this.mixer.now,
+      Math.max(0.01, tau),
+    );
   }
 
   /**
@@ -307,6 +346,8 @@ export class GameAudio {
   }
 
   dispose(): void {
+    for (const voice of this.storyVoices) voice.dispose();
+    this.storyVoices.length = 0;
     this.vehicle.dispose();
     this.foleyVoices.dispose();
     this.ambience.dispose();

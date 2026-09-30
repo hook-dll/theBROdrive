@@ -65,10 +65,10 @@ const LANE_OPEN = 0.9;
 /**
  * The first kilometre is never widened.
  *
- * The homestead's driveway is a wedge that meets the asphalt EDGE (`house.ts`), the
- * runout is dead straight by construction, and the player's first five minutes are
- * authored against a two-lane road. A widening rolled onto cell 0 would put the
- * garage a lane's width short of the tarmac.
+ * The story site (`src/story/site.ts`) is authored against a two-lane road — the house
+ * setback, the yard and the airfield verge all read the asphalt edge — and the runout is
+ * dead straight by construction. A widening rolled onto cell 0 would put the house a
+ * lane's width short of where it was placed.
  */
 const HOME_NARROW_M = 1_000;
 

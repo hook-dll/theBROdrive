@@ -25,7 +25,7 @@ import { PhysicsWorld } from '../src/core/physics';
 import { GameWorld, newWorldState } from '../src/game/state';
 import { CHUNK_LENGTH, ChunkStreamer } from '../src/world/chunks';
 import { DesertTileStreamer } from '../src/world/deserttiles';
-import { HomesteadProvider } from '../src/world/house';
+import { BoardableField, StartSiteProvider } from '../src/story/sitebuild';
 import { WorldOrigin } from '../src/world/origin';
 import { MonumentProvider } from '../src/world/props/monuments';
 import { PoleProvider } from '../src/world/props/poles';
@@ -85,7 +85,7 @@ const desert = new DesertTileStreamer(
 );
 const streamer = new ChunkStreamer(road, terrain, physics, world, scene, origin, scheduler);
 streamer.register(new RoadMeshProvider(SEED));
-streamer.register(new HomesteadProvider());
+streamer.register(new StartSiteProvider(new BoardableField()));
 streamer.register(new ScatterProvider());
 streamer.register(new PoleProvider());
 streamer.register(new MonumentProvider());

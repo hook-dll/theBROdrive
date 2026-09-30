@@ -929,6 +929,8 @@ function migrateItem(raw: unknown, where: string): Item {
       return { type: 'football', id: obj.id };
     case 'pocket_watch':
       return { type: 'pocket_watch', id: obj.id };
+    case 'letter':
+      return { type: 'letter', id: obj.id };
     case 'contract_cargo': {
       const sourceCourierIndex = Math.trunc(numOr(obj.sourceCourierIndex, -1));
       if (

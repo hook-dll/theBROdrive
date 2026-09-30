@@ -1059,6 +1059,98 @@ export function setPocketWatchState(
   }
 }
 
+let letterPaperMaterial: THREE.MeshStandardMaterial | null = null;
+
+/**
+ * Off-white note paper: faint blue-grey rules and a fixed-seed scrawl that reads as
+ * handwriting without ever resolving into words. Cached once per document, shared by
+ * every letter instance, and deliberately not `itemOwnedResource` — the ordinary
+ * disposer must leave it alone.
+ */
+function letterSurfaceMaterial(): THREE.MeshStandardMaterial {
+  if (letterPaperMaterial) return letterPaperMaterial;
+
+  const w = 128;
+  const h = 168;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas 2D is required for the letter paper');
+
+  ctx.fillStyle = '#efe6cf';
+  ctx.fillRect(0, 0, w, h);
+  // A fold crease down the middle and two faint rules, the way a note she's written
+  // on lined paper would carry them through the fold.
+  ctx.strokeStyle = 'rgba(120, 100, 70, 0.28)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(w / 2 + 0.5, 4);
+  ctx.lineTo(w / 2 + 0.5, h - 4);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(92, 112, 146, 0.22)';
+  for (let y = 26; y < h - 10; y += 15) {
+    ctx.beginPath();
+    ctx.moveTo(10, y + 0.5);
+    ctx.lineTo(w - 10, y + 0.5);
+    ctx.stroke();
+  }
+
+  // Ink scrawl: short seeded strokes along each rule, grey-black and unhurried.
+  let seed = 0x1e77a1b3;
+  const rnd = (): number => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return (seed >>> 8) / 0x1000000;
+  };
+  ctx.strokeStyle = 'rgba(42, 38, 46, 0.6)';
+  ctx.lineWidth = 1.1;
+  ctx.lineCap = 'round';
+  for (let y = 24; y < h - 12; y += 15) {
+    let x = 12;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    while (x < w - 14) {
+      x += 3 + rnd() * 4;
+      ctx.lineTo(x, y + (rnd() - 0.5) * 3.6);
+    }
+    ctx.stroke();
+  }
+
+  const map = new THREE.CanvasTexture(canvas);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.anisotropy = maxAnisotropy();
+  letterPaperMaterial = new THREE.MeshStandardMaterial({
+    map,
+    side: THREE.DoubleSide,
+    roughness: 0.92,
+    metalness: 0,
+  });
+  return letterPaperMaterial;
+}
+
+/**
+ * A folded sheet: two portrait panels hinged along a common fold, each turned a little
+ * off the plane so the note reads as paper held partly closed rather than a card. The
+ * panels share one cached geometry and one cached paper material.
+ */
+function createLetterMesh(): THREE.Group {
+  const root = new THREE.Group();
+  const material = letterSurfaceMaterial();
+  // Left opens to the viewer's left, right to the right: a shallow V, fold at the middle.
+  const panels: readonly (readonly [number, number])[] = [[0, -1], [1, 1]];
+  for (const [index, sign] of panels) {
+    const panel = new THREE.Mesh(
+      cachedGeo('letter_panel', () => new THREE.PlaneGeometry(0.156, 0.215)),
+      material,
+    );
+    panel.name = `letter_panel_${index}`;
+    panel.position.set(sign * 0.077, 0, 0);
+    panel.rotation.y = sign * 0.3;
+    root.add(panel);
+  }
+  return root;
+}
+
 function createPhotographMesh(imageDataUrl: string): THREE.Group {
   const root = buildGroup(
     itemBlueprint('photograph', (b) => {
@@ -1254,6 +1346,8 @@ export function createItemMesh(item: Item): THREE.Object3D {
       return createFootballMesh();
     case 'pocket_watch':
       return createPocketWatchMesh();
+    case 'letter':
+      return createLetterMesh();
     case 'contract_cargo':
       return buildGroup(itemBlueprint('contract_parcel', buildContractParcelInto).instructions);
     case 'sticker_envelope':

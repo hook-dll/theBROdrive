@@ -59,12 +59,11 @@ import { ambientBeamGain, VehicleLightRig } from './render/vehiclelights';
 import { ContactPatchField } from './render/contactpatches';
 import { ChunkStreamer } from './world/chunks';
 import { DesertTileStreamer } from './world/deserttiles';
-import {
-  HomesteadProvider,
-  createStartingCar,
-  homesteadSpawn,
-  spawnStartingItems,
-} from './world/house';
+import { BoardableField, StartSiteProvider } from './story/sitebuild';
+import { createStartingCar, spawnStartingItems, storySite } from './story/site';
+import { TakeoffCutscene } from './story/takeoff';
+import { StoryOverlay } from './story/overlay';
+import { playEnding } from './story/ending';
 import { TerminusPadProvider } from './world/terminuspad';
 import { PoiProvider } from './world/poi';
 import { DebrisField, type Impactor } from './world/debris';
@@ -402,6 +401,8 @@ async function boot(): Promise<void> {
   // Light switches follow their buildings in and out of the streamed world; nothing
   // about them is saved. See world/poiswitches.ts.
   const switches = new PoiSwitchField();
+  /** The parked plane's colliders, so the eye ray can tell the plane from scenery. */
+  const boardable = new BoardableField();
   const birds = new BirdFlock(renderer.scene, road, terrain, world.seed, origin);
   const weapons = new WeaponController();
   const heldView = new HeldItemView(renderer.camera, renderer.scene);
@@ -508,7 +509,8 @@ async function boot(): Promise<void> {
     worldWork,
   );
   streamer.register(new RoadMeshProvider(world.seed, roadDistance));
-  streamer.register(new HomesteadProvider(switches));
+  const startSite = new StartSiteProvider(boardable);
+  streamer.register(startSite);
   streamer.register(new TerminusPadProvider());
   // Hazards are indexed in the ROAD FRAME as the scatter provider builds them, which
   // is what lets the autopilot know a dirt pile from a rock without a physics query:
@@ -819,11 +821,11 @@ async function boot(): Promise<void> {
   });
 
   if (!loadedFromSave) {
-    const car = createStartingCar(world);
+    const car = createStartingCar(world, road, terrain);
     world.apply({ t: 'car_add', car });
     // The world does not exist behind s = 0, so a new game must start at the
-    // homestead rather than at the default state position.
-    const spawn = homesteadSpawn(road, terrain);
+    // house rather than at the default state position.
+    const spawn = storySite(world.seed, road, terrain).spawn;
     player.teleport(spawn.x, spawn.y, spawn.z);
     initialYaw = spawn.yaw;
   }
@@ -858,7 +860,9 @@ async function boot(): Promise<void> {
       });
     }
   } else {
-    spawnStartingItems(world, loose);
+    spawnStartingItems(world, loose, road, terrain);
+    // The letter from home is the only thing the player starts holding.
+    inventory.add({ type: 'letter', id: world.generatedPartId('story_item', 0, 0) });
   }
 
   // POI working cars enter state when their chunk reaches the physics band. A new
@@ -1007,6 +1011,7 @@ async function boot(): Promise<void> {
       if (carId && sticker) vehicles.get(carId)?.previewSticker(sticker);
     },
     origin,
+    boardable,
   );
   interaction.attachPlayer(player);
 
@@ -1155,6 +1160,13 @@ async function boot(): Promise<void> {
   let medicineCapReleased = false;
   let dying = vitals.dead;
   let deathReloadScheduled = false;
+  /**
+   * The plane ride: the takeoff shot while it runs, then the ending scene, which owns the
+   * canvas until it reloads to the title. Both take every control away, like a death.
+   */
+  let story: TakeoffCutscene | null = null;
+  let endingStarted = false;
+  const storyOverlay = new StoryOverlay();
   // Dust, fuel and the player's pose change every tick and are only written through
   // when something saves. Leaving the page — another tab, a closed window, a phone put
   // to sleep — is the last moment the game is sure to run, so it saves then too, but
@@ -1165,7 +1177,8 @@ async function boot(): Promise<void> {
   // hides this page, and the autosave that ran during the drive has already marked it
   // otherwise. A death is never written: the slot keeps the drive from before it.
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'hidden' || dying || world.state.player.drivingCarId) return;
+    if (document.visibilityState !== 'hidden' || dying || story !== null || endingStarted) return;
+    if (world.state.player.drivingCarId) return;
     autosaveNow(saves, stateForSave, saveName, (error) => {
       console.error('autosave failed', error);
     });
@@ -1230,6 +1243,8 @@ async function boot(): Promise<void> {
   let stickerHintActive = false;
   let torchlightActive = false;
   let cameraActive = false;
+  /** The letter is read by E: raised to the eyes with its text overlaid, lowered by E again. */
+  let letterOpen = false;
   /** A shutter press is fulfilled from the completed rendered frame, not a fixed step. */
   let pendingPhotoCamera: CameraItem | null = null;
   /** 0..1 while an E-key watch action accelerates four in-game hours; 1 is idle. */
@@ -1278,7 +1293,7 @@ async function boot(): Promise<void> {
   const fixedUpdate = (dt: number): void => {
     worldWork.beginFrame(frameId);
     const f = input.sample(dt);
-    if (dying) {
+    if (dying || story !== null) {
       // Camera look, inventory use and interaction all read this frame object below.
       // Continuing traffic/vehicle physics during the shot keeps a fatal wreck moving
       // naturally without leaving any player control alive.
@@ -1489,6 +1504,7 @@ async function boot(): Promise<void> {
     if (driving !== null || heldAfterSelection?.type !== 'binoculars') binocularsActive = false;
     if (driving !== null || heldAfterSelection?.type !== 'torchlight') torchlightActive = false;
     if (driving !== null || heldAfterSelection?.type !== 'camera') cameraActive = false;
+    if (driving !== null || dying || heldAfterSelection?.type !== 'letter') letterOpen = false;
     // A LIGHT SWITCH TAKES E FROM THE HELD ITEM, and only while it is aimed.
     //
     // E is the key that works what is in your hands, and a switch is the one thing in the
@@ -1527,6 +1543,8 @@ async function boot(): Promise<void> {
       ) {
         watchFastForwardProgress = 0;
         hud.setToast('watch shaken — winding four hours forward');
+      } else if (heldAfterSelection.type === 'letter') {
+        letterOpen = !letterOpen;
       }
     }
     if (!medicineActive && f.useHeld && heldAfterSelection?.type === 'sun_shades') {
@@ -1650,6 +1668,41 @@ async function boot(): Promise<void> {
     );
     prompt = interacted.prompt;
     boot = interacted.boot;
+    if (interacted.board && story === null && !dying) {
+      // Boarding is an ending: a reload from here on must land on the title screen, not
+      // resume beside a plane that has already gone.
+      clearResumeSlot();
+      story = new TakeoffCutscene({
+        scene: renderer.scene,
+        site: storySite(world.seed, road, terrain),
+        terrain,
+        origin,
+        audio,
+        overlay: storyOverlay,
+      });
+      startSite.setParkedPlaneVisible(false);
+      autopilot.setEngaged(false);
+      binocularsActive = false;
+      torchlightActive = false;
+      cameraActive = false;
+      letterOpen = false;
+      gumActive = false;
+      prompt = null;
+      boot = null;
+      Object.assign(lastInput, deathInput);
+      lookYawAccum = 0;
+      lookPitchAccum = 0;
+      zoomAccum = 0;
+      recenterAccum = false;
+      player.setEnabled(false);
+      if (document.pointerLockElement !== null) document.exitPointerLock();
+      // Letterboxed, and nothing of the HUD: this is a film now.
+      uiRoot.style.visibility = 'hidden';
+      if (!document.body.classList.contains('is-cinematic')) {
+        document.body.classList.add('is-cinematic');
+        renderer.resizeViewport();
+      }
+    }
     if (interacted.sound) audio.foley(interacted.sound);
     audio.setContinuous(interacted.continuous);
     audio.updateBubbleGum(
@@ -1870,6 +1923,22 @@ async function boot(): Promise<void> {
     let deathFade = 0;
     if (dying) {
       deathFade = camera.updateDeath(frameDt, target);
+    } else if (story !== null) {
+      const shot = story.update(frameDt);
+      camera.updateScripted(frameDt, shot.eye, shot.lookAt, shot.fov);
+      if (shot.done && !endingStarted) {
+        // The beach is another scene entirely: the world's loop stops here for good and
+        // the ending draws through the same renderer until it hands back to the title.
+        endingStarted = true;
+        story.dispose();
+        story = null;
+        loop.stop();
+        void playEnding({ renderer, audio, overlay: storyOverlay }).then(() => {
+          clearResumeSlot();
+          window.location.reload();
+        });
+        return;
+      }
     } else {
       camera.update(frameDt, cameraInput, target, driving === null);
     }
@@ -2247,6 +2316,7 @@ async function boot(): Promise<void> {
     hud.setBubbleGum(gumBlowing, (gumTimer - GUM_CHEW_SECONDS) / GUM_GROW_SECONDS);
 
     hud.setHealthEffects(vitals.damageEffect, dying, deathFade);
+    hud.setLetter(letterOpen && !dying && driving === null && inventory.held?.type === 'letter');
     // Viewmodel and slot previews are pure views of existing state, so they update
     // here rather than in the fixed step: they should track the smoothed camera.
     const held = inventory.held;
@@ -2266,7 +2336,7 @@ async function boot(): Promise<void> {
             : held?.type === 'pocket_watch'
               ? true
               : lastInput.usePrimary;
-    heldView.update(held, camera.mode, frameDt, {
+    heldView.update(story !== null ? null : held, camera.mode, frameDt, {
       usePrimary: heldUse,
       moveMag: Math.min(1, Math.hypot(lastInput.moveX, lastInput.moveZ)),
       speedKmh: target.speedKmh,
@@ -2277,6 +2347,7 @@ async function boot(): Promise<void> {
       dayFactor: sky.dayFactor,
       watchActionProgress:
         watchFastForwardProgress < 1 ? watchFastForwardProgress : -1,
+      letterRaised: letterOpen && held?.type === 'letter',
     });
 
     // GPU timer queries measure only render submission. The one startup PMREM bake
@@ -2428,10 +2499,11 @@ async function boot(): Promise<void> {
    * Resume; Escape keeps the browser's normal unlocked-after-Escape behaviour.
    */
   const openPause = (restorePointerLock = false): void => {
-    if (paused || dying) return;
+    if (paused || dying || story !== null || endingStarted) return;
     const shouldRestorePointerLock = restorePointerLock && input.pointerLocked;
     if (document.pointerLockElement !== null) document.exitPointerLock();
     paused = true;
+    letterOpen = false;
     loop.stop();
     // Silence everything behind the overlay, radio included: the loop is stopped,
     // so nothing would update the voices and they would hold their last value.

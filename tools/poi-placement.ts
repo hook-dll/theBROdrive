@@ -1,5 +1,5 @@
 /**
- * POI placement and the starter homestead: are the buildings where they claim to be?
+ * POI placement and the story start: are the buildings where they claim to be?
  *
  *   npx tsx tools/poi-placement.ts
  *
@@ -14,11 +14,11 @@
  * a property of the seed, not a guarantee; over a long enough stretch every one must
  * actually appear, or some of the catalogue is content nobody will ever see.
  *
- * THE HOMESTEAD IS WHERE IT SAYS IT IS. The building is tilted onto its own fitted
- * ground plane, the starter car stands inside the garage rather than beside it, the
- * player spawns on its floor, and the garage door lands where the drive from the
- * road expects it. Those four are separate constants in separate files, and nothing
- * but this bench holds them together.
+ * THE STORY SITE IS WHERE IT SAYS IT IS. The house is tilted onto its own fitted ground
+ * plane at the authored setback, the player spawns on the yard OUTSIDE it, the car is
+ * clear of its footprint, and the runway across the road is clear of both and carries
+ * the parked plane at its threshold. Those are separate constants in separate files, and
+ * nothing but this bench holds them together.
  */
 
 import * as THREE from 'three';
@@ -38,22 +38,25 @@ import {
   warmPoiStructures,
 } from '../src/world/poistructures';
 import { RoadDistance } from '../src/world/roaddistance';
-import { SHELF_PLANK_TOP } from '../src/world/poi/kit';
-import { STARTER_GARAGE_SHELF } from '../src/world/poi/starter';
 import { createPoiVariant, mergePoiStatics, poiVariantIndex } from '../src/world/poi-variants';
+import { fitGround } from '../src/world/footprint';
+import { carModelMeasure } from '../src/render/carmodel';
+import { BoardableField, StartSiteProvider } from '../src/story/sitebuild';
 import {
-  HOMESTEAD_FOOTPRINT,
-  HomesteadProvider,
   createStartingCar,
-  homesteadLayout,
-  homesteadSpawn,
+  runwaySurfaceY,
   spawnStartingItems,
-} from '../src/world/house';
+  storyKeepsClear,
+  storySite,
+} from '../src/story/site';
 import { halfWidthAt } from '../src/world/roadprofile';
-import { ROAD_HALF_WIDTH } from '../src/world/road';
-import type { LoosePartField } from '../src/parts/loose';
 import type { TrailerField } from '../src/vehicle/trailer';
 import type { WreckTrunkField } from '../src/world/wrecktrunks';
+import { installDocumentShim } from './domshim';
+
+// The story runway is laid in the road's own asphalt, which paints its maps on a 2D
+// canvas the first time it is asked for.
+installDocumentShim();
 
 const SEED = 1337;
 const failures: string[] = [];
@@ -179,13 +182,17 @@ const MAX_RESIDUAL_M = 0.6;
   console.log(`  ${seen.size}/${structureCount()} structures reachable; ${mix}`);
 }
 
-// --- 3. the homestead holds together -----------------------------------------
+// --- 3. the story site holds together ----------------------------------------
+//
+// A new game opens on a random dwelling with the car and a scatter of finds beside
+// it, and an airfield across the road. Every one of those is a separate constant in
+// `src/story/site.ts`, and nothing but this bench holds them together: the house on
+// its fitted plane and the authored setback, the spawn OUTSIDE the building, the car
+// clear of it, the runway clear of the road and of the house, the plane sitting on the
+// strip, and the items on the yard rather than inside a wall.
 {
-  // A real switch field, so the homestead's own switches are registered and can be
-  // checked: the first building a player stands in is the one whose lights most need to
-  // work, and it is registered by a different provider from every other building.
-  const homeSwitches = new PoiSwitchField();
-  const provider = new HomesteadProvider(homeSwitches);
+  const boardable = new BoardableField();
+  const provider = new StartSiteProvider(boardable);
   const ctx = {
     chunkIndex: 0,
     sStart: 0,
@@ -198,244 +205,239 @@ const MAX_RESIDUAL_M = 0.6;
     originZ: 0,
   } as unknown as ChunkContext;
   const content = provider.build(ctx);
-  check(content !== null, 'the homestead built nothing for chunk 0');
+  check(content !== null, 'the story site built nothing for chunk 0');
 
   // World matrices first: the provider returns a detached group, so every mesh's
-  // `matrixWorld` is still identity and a bounds query would measure a building at the
-  // origin. That is exactly the kind of silently-plausible number this bench exists to
-  // refuse.
+  // `matrixWorld` is still identity and a bounds query would measure the site at the
+  // origin. That is exactly the kind of silently-plausible number this bench refuses.
   content!.group.updateMatrixWorld(true);
-  const spawn = homesteadSpawn(road, terrain);
-  const car = createStartingCar(world);
 
-  // How far the compound sits from the centreline, measured laterally at its own
-  // arclength. This is the "+50 m deeper" claim, so it is measured rather than trusted.
-  const HOMESTEAD_S = 116;
-  const roadEdge = halfWidthAt(SEED, HOMESTEAD_S);
-  const distanceFromRoad = (() => {
-    const sample = road.sampleAt(HOMESTEAD_S);
-    const dx = spawn.x - sample.x;
-    const dz = spawn.z - sample.z;
-    // Lateral component only: the along-road part is not a setback.
-    const fx = Math.sin(sample.heading);
-    const fz = Math.cos(sample.heading);
-    const along = dx * fx + dz * fz;
-    const lateral = Math.hypot(dx - along * fx, dz - along * fz);
-    return lateral;
-  })();
-  // THE HOMESTEAD BELONGS AT THE ROAD, and this is the check for it.
-  //
-  // The terrain is fitted to the road only inside the 30 m corridor; past that the
-  // landscape's long bands return and keep their slope. So it is the ground's own
-  // relief under the compound's footprint that limits how far out it may stand — the
-  // building is TILTED onto that ground rather than levelled on a slab, so a steeper
-  // site means a more tilted house, not a taller pad, and `MAX_RESIDUAL_M` is where
-  // "tilted" stops being the honest word for it.
+  const SITE_S = 116;
+  const site = storySite(SEED, road, terrain);
+  const spawn = site.spawn;
+  const car = createStartingCar(world, road, terrain);
+  const instance = createStructureInstance(site.house.structure);
+  const halfX = instance.halfExtentX;
+  const halfZ = instance.halfExtentZ;
+  const houseLateral = road.project(site.house.x, site.house.z, SITE_S).lateral;
+  const frontLat = houseLateral + halfZ;
+  const roadEdge = halfWidthAt(SEED, SITE_S);
+
+  // THE HOUSE BELONGS AT THE ROAD, inside the graded corridor and at the authored
+  // setback: the terrain is fitted to the road only within 30 m of it, and past that
+  // the landscape's long bands return and keep their slope.
   check(
-    HOMESTEAD_FOOTPRINT.u0 < 30,
-    `the homestead's nearest edge is ${HOMESTEAD_FOOTPRINT.u0.toFixed(1)} m from the centreline, ` +
-      'outside the terrain corridor that is fitted to the road',
+    Math.abs(frontLat) < 30,
+    `the house front stands ${Math.abs(frontLat).toFixed(1)} m from the centreline, outside ` +
+      'the terrain corridor that is fitted to the road',
   );
-  {
-    const L = homesteadLayout(road, terrain);
-    let min = Infinity;
-    let max = -Infinity;
-    for (let u = HOMESTEAD_FOOTPRINT.u0; u <= HOMESTEAD_FOOTPRINT.u1; u += 2.5) {
-      for (let v = HOMESTEAD_FOOTPRINT.v0; v <= HOMESTEAD_FOOTPRINT.v1; v += 2.5) {
-        const [x, z] = L.toWorld(u, v);
-        const y = terrain.heightAt(x, z, HOMESTEAD_FOOTPRINT.s);
-        if (y < min) min = y;
-        if (y > max) max = y;
-      }
-    }
-    const spread = max - min;
+  check(
+    Math.abs(frontLat) - roadEdge >= 9 - 0.05 && Math.abs(frontLat) - roadEdge <= 12 + 0.05,
+    `the house stands ${(Math.abs(frontLat) - roadEdge).toFixed(1)} m off the asphalt edge, ` +
+      'outside the authored 9-12 m setback',
+  );
 
-    // No pad to hide the ground's own relief in any more: the building follows it,
-    // and `plane.residual` is the honest number for how well one rigid tilt stands
-    // in for the terrain underneath — the most any point of real ground can still
-    // poke up past the plane the building is resting on.
+  // SEATED, not floating. The provider fits one plane under the footprint, tilts the
+  // building onto it and sinks it by the plane's own residual; re-fitting the same
+  // rectangle here reproduces the numbers the site itself used, so this checks the
+  // arithmetic rather than trusting it.
+  {
+    const plane = fitGround(terrain, site.house.x, site.house.z, site.house.yaw, halfX, halfZ, SITE_S, 5);
     check(
-      L.plane.residual <= MAX_RESIDUAL_M,
-      `the homestead's fitted ground plane has a residual of ${L.plane.residual.toFixed(2)} m, ` +
-        `past the ${MAX_RESIDUAL_M} m this site is worth — the ground is too uneven for a ` +
-        'compound this size to sit on one tilt, so move it nearer the road',
+      plane.residual <= MAX_RESIDUAL_M,
+      `the house's fitted ground plane has a residual of ${plane.residual.toFixed(2)} m, past ` +
+        `the ${MAX_RESIDUAL_M} m this site is worth — the ground is too uneven for a building ` +
+        'this size to sit on one tilt',
+    );
+    const seatY = plane.centreY - plane.residual - 0.08;
+    check(
+      Math.abs(site.house.seatY - seatY) < 1e-6,
+      `the house is seated at y=${site.house.seatY.toFixed(3)} where the fitted plane puts it at ` +
+        `${seatY.toFixed(3)}`,
     );
     console.log(
-      `  homestead ground: ${min.toFixed(2)}..${max.toFixed(2)} m, spread ${spread.toFixed(2)} m, ` +
-        `plane residual ${L.plane.residual.toFixed(2)} m, grade ${(L.plane.grade * 100).toFixed(1)}%`,
+      `  story house ${structureDef(site.house.structure).id}: ${halfX.toFixed(1)}x${halfZ.toFixed(1)} m ` +
+        `half extents, residual ${plane.residual.toFixed(2)} m, grade ${(plane.grade * 100).toFixed(1)}%`,
     );
   }
 
-  // The car belongs INSIDE the building, not on the lawn: its centre must be within
-  // the building's measured footprint, which is the only thing that distinguishes
-  // "in the garage" from "beside the garage" numerically.
-  const carBounds = new THREE.Box3().setFromCenterAndSize(
-    new THREE.Vector3(car.x, car.y, car.z),
-    new THREE.Vector3(2, 1.6, 5),
-  );
-  const building = new THREE.Box3();
-  content!.group.traverse((object) => {
-    const mesh = object as THREE.Mesh;
-    if (mesh.isMesh && mesh.geometry) building.expandByObject(mesh);
-  });
-  check(building.containsPoint(new THREE.Vector3(car.x, car.y + 0.8, car.z)),
-    'the starter car does not stand inside the building footprint');
-  check(carBounds.min.y > 0, `the car spawns below ground at y=${car.y}`);
+  // The building's own bounds as the provider built it, found by the structure marker
+  // the catalogue stamps on a dwelling's group — not the whole chunk group, which now
+  // also carries the airfield.
+  const houseObject = ((): THREE.Object3D | null => {
+    let found: THREE.Object3D | null = null;
+    content!.group.traverse((object) => {
+      if (object.userData.poiStructure === structureDef(site.house.structure).id) found = object;
+    });
+    return found;
+  })();
+  check(houseObject !== null, 'the story site did not place the chosen dwelling');
+  const houseBox = new THREE.Box3().setFromObject(houseObject as THREE.Object3D);
+  check(houseBox.containsPoint(new THREE.Vector3(site.house.x, site.house.seatY + 0.5, site.house.z)),
+    'the placed dwelling is not where the site says it is');
 
-  // The spawn is a FEET position and must stand ON THE FLOOR.
-  //
-  // Not by comparing against the provider's own bounding box: that box is the whole
-  // building's extent, roof and all, so it says nothing about where the floor itself
-  // is. The honest comparison is with the TERRAIN — the building is sunk by the
-  // fitted plane's own residual, so a spawn on its floor is strictly above the sand
-  // directly under it, and not far above it.
-  const groundAtSpawn = terrain.heightAt(spawn.x, spawn.z, 116);
+  // Clearances are measured in the HOUSE'S OWN frame, not in a world-axis bounding
+  // box: the building is yawed with a small hash wobble, so its AABB's nearest face is
+  // a corner a metre nearer the road than the front wall, and a car correctly parked
+  // beside the wall would read as overlapping it.
+  const houseLocal = (x: number, z: number): [number, number] => {
+    const cos = Math.cos(site.house.yaw);
+    const sin = Math.sin(site.house.yaw);
+    const dx = x - site.house.x;
+    const dz = z - site.house.z;
+    return [dx * cos - dz * sin, dx * sin + dz * cos];
+  };
+
+  // The spawn is a FEET position OUTSIDE the building (the old homestead spawned
+  // inside its garage; this house has no interior), above the sand and not metres
+  // above it.
+  const [, spawnLocalZ] = houseLocal(spawn.x, spawn.z);
   check(
-    spawn.y > groundAtSpawn,
-    `the player spawns ${(groundAtSpawn - spawn.y).toFixed(2)} m below the ground`,
+    spawnLocalZ < -halfZ - 0.3,
+    `the player spawns ${spawnLocalZ.toFixed(2)} m along the house's depth, inside its footprint`,
+  );
+  const groundAtSpawn = terrain.heightAt(spawn.x, spawn.z, SITE_S);
+  check(spawn.y > groundAtSpawn, `the player spawns ${(groundAtSpawn - spawn.y).toFixed(2)} m below the ground`);
+  check(
+    spawn.y - groundAtSpawn < 0.5,
+    `the player spawns ${(spawn.y - groundAtSpawn).toFixed(2)} m above the ground`,
+  );
+  check(Number.isFinite(spawn.x) && Number.isFinite(spawn.z), 'the spawn position is not a number');
+
+  // The car stands clear of the building's footprint, on the ground. It is parked
+  // along the runout, so its extent across the house's own depth is its half WIDTH.
+  const measure = carModelMeasure(car.modelId);
+  const carBox = new THREE.Box3().setFromCenterAndSize(
+    new THREE.Vector3(car.x, car.y + measure.halfExtents[1], car.z),
+    new THREE.Vector3(measure.halfExtents[0] * 2, measure.halfExtents[1] * 2, measure.halfExtents[2] * 2),
+  );
+  const [, carLocalZ] = houseLocal(car.x, car.z);
+  check(
+    carLocalZ + measure.halfExtents[0] < -halfZ - 0.2,
+    `the starter car's near flank is ${(carLocalZ + measure.halfExtents[0] + halfZ).toFixed(2)} m ` +
+      'past the house wall, overlapping the building footprint',
+  );
+  check(carBox.min.y > 0, `the car spawns below ground at y=${car.y}`);
+
+  // AND THE PLAYER FACES THE HOUSE, NOT THE PLANE. The plane is behind the shoulder
+  // deliberately; a spawn pointed at it would be the one thing the feature forbids.
+  const forwardX = Math.sin(spawn.yaw);
+  const forwardZ = Math.cos(spawn.yaw);
+  const toHouse = Math.hypot(site.house.x - spawn.x, site.house.z - spawn.z);
+  const toPlane = Math.hypot(site.plane.x - spawn.x, site.plane.z - spawn.z);
+  check(
+    (forwardX * (site.house.x - spawn.x) + forwardZ * (site.house.z - spawn.z)) / toHouse > 0.9,
+    'the player does not start facing the house',
   );
   check(
-    spawn.y - groundAtSpawn < 3,
-    `the player spawns ${(spawn.y - groundAtSpawn).toFixed(2)} m above the ground — ` +
-      'higher than a floor should be',
-  );
-  // And under the building's roof, in the garage, not on the lawn beside it.
-  const standing = new THREE.Box3().setFromCenterAndSize(
-    new THREE.Vector3(spawn.x, spawn.y + 0.9, spawn.z),
-    new THREE.Vector3(0.6, 1.8, 0.6),
-  );
-  check(
-    standing.min.x >= building.min.x && standing.max.x <= building.max.x
-      && standing.min.z >= building.min.z && standing.max.z <= building.max.z,
-    'the player spawns outside the building footprint, not in the garage',
-  );
-  // The car and the player share the garage floor, so they cannot be metres apart.
-  check(
-    Math.abs(car.y - spawn.y) < 2,
-    `the car sits ${Math.abs(car.y - spawn.y).toFixed(2)} m above the player's feet`,
-  );
-  check(
-    Number.isFinite(spawn.x) && Number.isFinite(spawn.z),
-    'the spawn position is not a number',
+    (forwardX * (site.plane.x - spawn.x) + forwardZ * (site.plane.z - spawn.z)) / toPlane < 0,
+    'the player starts pointed at the plane',
   );
 
-  // AND THE HOMESTEAD'S OWN SWITCHES ARE LIVE. It registers them through a different
-  // provider from every other building, which is exactly how one building came to be the
-  // only one whose lights could not be worked.
-  const homeSwitchList = [...homeSwitches.values()];
-  check(
-    homeSwitchList.length > 0,
-    'the homestead registered no light switches, so the lights in the starter garage ' +
-      'cannot be worked at all',
+  // The runway: inside the straight runout and past the terminus pad, clear of the
+  // asphalt by a verge, and on the opposite side of the road from the house.
+  const runway = site.runway;
+  const runwayStart = road.project(runway.x0, runway.z0, SITE_S);
+  const runwayEnd = road.project(
+    runway.x0 + runway.dx * runway.length,
+    runway.z0 + runway.dz * runway.length,
+    SITE_S,
   );
-  let homeLit = 0;
-  content!.group.traverse((object) => {
-    const light = object as THREE.PointLight;
-    if (light.isLight && object.userData.lightBudgetSource === true && light.intensity > 0) {
-      homeLit++;
-    }
-  });
-  for (const entry of homeSwitchList) entry.toggle();
-  let homeOff = 0;
-  content!.group.traverse((object) => {
-    const light = object as THREE.PointLight;
-    if (light.isLight && object.userData.lightBudgetSource === true && light.intensity > 0) {
-      homeOff++;
-    }
-  });
+  check(runwayStart.s >= 25, `the runway starts at s=${runwayStart.s.toFixed(0)}, inside the terminus pad`);
+  check(runwayEnd.s <= 260, `the runway ends at s=${runwayEnd.s.toFixed(0)}, past the straight runout`);
   check(
-    homeOff < homeLit,
-    `pressing the homestead's ${homeSwitchList.length} switches left ${homeOff} lit sources ` +
-      `against ${homeLit} — they are not wired to the building's lights`,
+    Math.abs(runwayStart.lateral) - runway.width / 2 >= roadEdge + 5,
+    `the runway's near edge is ${(Math.abs(runwayStart.lateral) - runway.width / 2 - roadEdge).toFixed(1)} m ` +
+      'off the asphalt edge, inside the verge',
   );
-  for (const entry of homeSwitchList) entry.toggle();
+  check(
+    runwayStart.lateral > 0 && frontLat < 0,
+    'the runway and the house are on the same side of the road',
+  );
+  check(
+    runwayStart.lateral - runway.width / 2 - frontLat > 20,
+    `the runway's near edge and the house front are only ` +
+      `${(runwayStart.lateral - runway.width / 2 - frontLat).toFixed(1)} m apart`,
+  );
 
-  // THE STARTING ITEMS STAND ON THE SHELF. They used to stand on a workbench inside the
-  // garage door, and the two things worth checking are whether they are within the shelf
-  // at all and whether they are ABOVE a plank rather than inside one or hovering — a pair
-  // of questions a screenshot answers only from the right side of the car.
-  //
-  // The shelf is located through the PLACED BUILDING'S OWN WORLD MATRIX — not through
-  // `variantToUV`, which is what `spawnStartingItems` uses. Deriving both sides of this
-  // comparison from the same function would let a sign or yaw error move the items and the
-  // asserted shelf frame together, and the check would pass while the items stood in the
-  // sand beside the shelf. Taking the shelf's frame from the geometry the provider actually
-  // built is what makes the two independent.
+  // The plane sits ON the runway: within the strip, at its start end, nose along it,
+  // wheels on the drawn surface.
+  const toPlaneX = site.plane.x - runway.x0;
+  const toPlaneZ = site.plane.z - runway.z0;
+  const planeAlong = toPlaneX * runway.dx + toPlaneZ * runway.dz;
+  const planeAcross = toPlaneX * -runway.dz + toPlaneZ * runway.dx;
+  check(planeAlong >= 0 && planeAlong <= runway.length, 'the plane is off the runway lengthwise');
+  check(Math.abs(planeAcross) <= runway.width / 2, 'the plane is off the runway sideways');
+  check(
+    planeAlong < 20,
+    `the plane parks ${planeAlong.toFixed(1)} m along the runway, not at the start end`,
+  );
+  // THE STRIP NEVER DIPS UNDER THE SAND: the sand's own chop would show through the
+  // tarmac and the rolling plane would sink into it.
   {
-    const L = homesteadLayout(road, terrain);
-    const spawned: { type: string; y: number; u: number; v: number }[] = [];
-    spawnStartingItems(world, {
+    let worst = Infinity;
+    for (let along = 0; along <= runway.length; along += 2) {
+      for (let across = -runway.width / 2; across <= runway.width / 2 + 1e-6; across += 1) {
+        const x = runway.x0 + runway.dx * along - runway.dz * across;
+        const z = runway.z0 + runway.dz * along + runway.dx * across;
+        worst = Math.min(worst, runwaySurfaceY(runway, x, z) - terrain.heightAt(x, z, runway.hintS));
+      }
+    }
+    check(worst >= -0.02, `the runway surface dips ${(-worst).toFixed(2)} m under the sand`);
+  }
+  check(
+    Math.hypot(Math.sin(site.plane.yaw) - runway.dx, Math.cos(site.plane.yaw) - runway.dz) < 1e-6,
+    'the plane is not pointed along the runway',
+  );
+
+  // The starting items: 4-6 of them, on the yard and on the ground, out of the walls.
+  const spawned: { type: string; x: number; y: number; z: number }[] = [];
+  spawnStartingItems(
+    world,
+    {
       spawnItem: (item: { type: string }, x: number, y: number, z: number) => {
-        const [u, v] = L.toUV(x, z);
-        spawned.push({ type: item.type, y, u, v });
+        spawned.push({ type: item.type, x, y, z });
       },
       spawnPart: () => {},
       forget: () => {},
-    } as never);
-
-    // The placed homestead, found by the variant id it carries.
-    let home: THREE.Object3D | null = null;
-    content!.group.traverse((object) => {
-      if (object.userData.poiVariant === 'starter-homestead') home = object;
-    });
-    check(home !== null, 'the homestead did not place the starter-homestead variant');
-    const homeMatrix = (home as THREE.Object3D | null)?.matrixWorld ?? new THREE.Matrix4();
-    const placed = (x: number, z: number): [number, number] => {
-      const world3 = new THREE.Vector3(x, 0, z).applyMatrix4(homeMatrix);
-      return L.toUV(world3.x, world3.z);
-    };
-
-    const centre = placed(STARTER_GARAGE_SHELF.centreX, STARTER_GARAGE_SHELF.centreZ);
-    // The shelf is built yawed a quarter turn, so its length runs along the VARIANT's z
-    // and not its x — one step that way is one unit along the shelf, and taking the wrong
-    // axis is how this check first reported every item as off the shelf when all four were
-    // on it.
-    const tip = placed(STARTER_GARAGE_SHELF.centreX, STARTER_GARAGE_SHELF.centreZ - 1);
-    const axis = [tip[0] - centre[0], tip[1] - centre[1]];
-    const axisLen = Math.hypot(axis[0], axis[1]);
-    check(axisLen > 0.1, 'the shelf has no length in the homestead frame, so it is misplaced');
-
-    const shelfItems = spawned.filter(
-      (i) => i.type !== 'fluid_can' && i.type !== 'football',
-    );
-    // Without this the checks below run zero times if the items are ever renamed or
-    // dropped, and an empty shelf passes.
+    } as never,
+    road,
+    terrain,
+  );
+  check(
+    spawned.length >= 4 && spawned.length <= 6,
+    `the world scatters ${spawned.length} starting items, outside the authored 4-6`,
+  );
+  for (const item of spawned) {
+    const [itemLocalX, itemLocalZ] = houseLocal(item.x, item.z);
     check(
-      shelfItems.length === 4,
-      `${shelfItems.length} starting items are on the shelf, not the four tools the world ` +
-        'spawns for a new drive',
+      Math.abs(itemLocalZ) > halfZ + 0.35 || Math.abs(itemLocalX) > halfX + 0.35,
+      `the starting ${item.type} stands inside the house footprint`,
     );
-    let onPlanks = 0;
-    for (const item of shelfItems) {
-      const du = item.u - centre[0];
-      const dv = item.v - centre[1];
-      const along = (du * axis[0] + dv * axis[1]) / axisLen;
-      const across = Math.abs((-du * axis[1] + dv * axis[0]) / axisLen);
-      check(
-        Math.abs(along) < STARTER_GARAGE_SHELF.halfWidth
-          && across < STARTER_GARAGE_SHELF.halfDepth + 0.05,
-        `the starting ${item.type} is ${along.toFixed(2)} m along and ${across.toFixed(2)} m ` +
-          'across the garage shelf — off the planks',
-      );
-      // Above a plank's own top surface, and within an object's height of it: on the
-      // shelf, neither sunk into a plank nor hovering over one.
-      const heights = [0, 1, 2, 3]
-        .map((i) => item.y - (L.floorYAt(item.u, item.v) + SHELF_PLANK_TOP(i)))
-        .filter((d) => d > -0.03 && d < 0.3);
-      check(
-        heights.length === 1,
-        `the starting ${item.type} is not standing on any plank of the garage shelf`,
-      );
-      onPlanks++;
-    }
-    console.log(`  the ${onPlanks} starting tools stand on the garage shelf`);
+    const ground = terrain.heightAt(item.x, item.z, SITE_S);
+    check(
+      item.y > ground - 0.05 && item.y - ground < 1.5,
+      `the starting ${item.type} is ${(item.y - ground).toFixed(2)} m off the ground`,
+    );
   }
+  console.log(`  the ${spawned.length} starting finds stand on the yard, clear of the house`);
+
+  // The keep-clear the scatter and ground cover consult.
+  check(storyKeepsClear(SITE_S, -20), 'the house yard is not kept clear of scatter');
+  check(storyKeepsClear(SITE_S, 26), 'the airfield is not kept clear of scatter');
+  check(!storyKeepsClear(SITE_S, 300), 'the keep-clear reaches 300 m out to one side');
+  check(!storyKeepsClear(900, 26), 'the keep-clear reaches the far end of the road');
+
+  // The plane can be hidden for the cutscene, and disposal leaves nothing behind.
+  provider.setParkedPlaneVisible(false);
+  provider.setParkedPlaneVisible(true);
+  content!.dispose?.();
 
   console.log(
-    `  homestead: ${distanceFromRoad.toFixed(1)} m from the centreline ` +
-      `(edge ${roadEdge.toFixed(1)} m + ${(distanceFromRoad - roadEdge).toFixed(1)} m), ` +
-      `spawn ${(spawn.y - groundAtSpawn).toFixed(2)} m above the sand, ` +
-      `car ${(car.y - spawn.y).toFixed(2)} m above the player's feet`,
+    `  story site: house ${Math.abs(frontLat).toFixed(1)} m from the centreline ` +
+      `(edge ${roadEdge.toFixed(1)} m + ${(Math.abs(frontLat) - roadEdge).toFixed(1)} m), ` +
+      `runway ${runway.width.toFixed(1)}x${runway.length.toFixed(0)} m at ${runwayStart.lateral.toFixed(0)} m ` +
+      `lat, plane ${planeAlong.toFixed(1)} m in`,
   );
 }
 
@@ -571,7 +573,7 @@ const MAX_RESIDUAL_M = 0.6;
 // not about the terrain.
 //
 // And a building must stand on the sand. The apron that used to sit under every POI was
-// the wrong answer to uneven ground: measured 0.82 m deep on the homestead, it read as a
+// the wrong answer to uneven ground: measured 0.82 m deep on one building, it read as a
 // plinth. What replaced it is a fitted plane and a `residual` of burial, and whether that
 // is enough is a question about the ground under the walls — which is what is measured
 // here, directly, rather than inferred from the height of one point.
@@ -961,6 +963,7 @@ const MAX_RESIDUAL_M = 0.6;
       (() => {}) as never,
       (() => {}) as never,
       (options.origin ?? { x: 0, z: 0 }) as never,
+      new BoardableField(),
     );
 
   const field = new PoiSwitchField();

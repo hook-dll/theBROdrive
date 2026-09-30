@@ -6,8 +6,8 @@ import { createVariantInstance, warmVariantAssets, type VariantInstance } from '
 
 /**
  * Every building the world scatters: the three masts built from the POI kit, then the
- * fifty exterior-only dwellings. The starter homestead is not here; world/house.ts
- * places it on its own.
+ * fifty exterior-only dwellings. The story house is one of these dwellings, placed on its
+ * own by src/story/sitebuild.ts rather than by the road's POI stream.
  *
  * Both kinds come out as the same `VariantInstance`, so placement, colliders, switches
  * and loot never ask which kind they are standing next to. A dwelling has no lamps and
@@ -116,7 +116,7 @@ export function createStructureInstance(index: number): VariantInstance {
 /**
  * Builds every structure's shared assets during loading, so the first time each one
  * streams in while driving costs only the Object3D wrapping. Also warms the kit-built
- * variants, which includes the starter homestead.
+ * variants, which includes the kit-built masts.
  */
 export function warmPoiStructures(): void {
   warmVariantAssets();

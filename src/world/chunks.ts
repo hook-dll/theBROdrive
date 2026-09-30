@@ -404,7 +404,7 @@ export class ChunkStreamer {
    * Synchronously build the clamped road chunk containing the player.
    *
    * Boot uses this instead of consuming a scheduler slice: starter objects and the
-   * first physics step must see the complete homestead chunk. Normal updates still
+   * first physics step must see the complete start chunk. Normal updates still
    * own the desired-window queue and remain scheduler-controlled.
    */
   prime(playerS: number, playerLateral = 0): void {

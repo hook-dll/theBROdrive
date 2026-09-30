@@ -35,9 +35,8 @@ import type { Road } from './road';
 /** The first lake is authored, not rolled: it belongs to the opening drive. */
 const HOME_LAKE_S = 1_500;
 /**
- * Which side and how far out the home lake sits. The homestead is on the LEFT of
- * travel (`house.ts` SIDE = -1 with its own sign convention); the lake is on the
- * same side, far enough out that the drive to it is a decision.
+ * Which side and how far out the home lake sits — far enough out that the drive to it
+ * is a decision, and off the corridor the story site is authored in.
  */
 const HOME_LAKE_LATERAL = 620;
 

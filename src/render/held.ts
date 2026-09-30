@@ -98,6 +98,11 @@ const WATCH_SHAKE_X = 0.018;
 const WATCH_SHAKE_Y = 0.006;
 const WATCH_SHAKE_ROLL = 0.14;
 
+/* ---- letter: resting low in the hand, raised square to the eye ---- */
+const LETTER_EYE_X = 0.0;
+const LETTER_EYE_Y = -0.07;
+const LETTER_EYE_Z = -0.31;
+
 /* ---- module-level scratch: `update` must not allocate ---- */
 const _size = new THREE.Vector3();
 const _centre = new THREE.Vector3();
@@ -162,6 +167,8 @@ export class HeldItemView {
       dayFactor: number;
       /** Normalized pocket-watch action cycle, or -1 while idle. */
       watchActionProgress: number;
+      /** True while the held letter is raised to the eyes; drives the eased lift. */
+      letterRaised: boolean;
     },
   ): void {
     const d = dt > 0 ? dt : 1 / 60;
@@ -323,6 +330,19 @@ export class HeldItemView {
       pitch -= TILT_PITCH;
       yaw -= TILT_YAW;
       roll -= TILT_ROLL;
+    } else if (item?.type === 'letter') {
+      // Resting, it hangs low in the hand in the generic carry pose; raised, it is
+      // squared to the eye and lowered into the bottom-middle of the view, the way
+      // you hold a note you are reading. The lift is a smoothstep, so E snaps state
+      // without the hand snapping.
+      this.useT = ramp(this.useT, opts.letterRaised, USE_RAMP * 1.2, d);
+      const raised = this.useT * this.useT * (3 - 2 * this.useT);
+      ox += (LETTER_EYE_X - baseX) * raised;
+      oy += (LETTER_EYE_Y - baseY) * raised;
+      oz += (LETTER_EYE_Z - baseZ) * raised;
+      pitch -= TILT_PITCH * raised;
+      yaw -= TILT_YAW * raised;
+      roll -= TILT_ROLL * raised;
     } else if (item?.type === 'torchlight') {
       this.useT = ramp(this.useT, use, USE_RAMP, d);
       // Item primitives point down local +Z; camera forward is local -Z.

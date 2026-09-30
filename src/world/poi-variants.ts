@@ -2,13 +2,12 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 import type { DoorClearance } from './poi/kit';
-import { buildStarterHome } from './poi/starter';
 import { buildFallenTower, buildRelayCluster, buildStandingTower } from './poi/towers';
 
 /**
- * The kit-built buildings: the three masts the world still places, and the starter
- * homestead (world/house.ts). Everything else the world places is a dwelling
- * (world/dwellings); see world/poistructures.ts for the list the world draws from.
+ * The kit-built buildings: the three masts the world places. Everything else is a
+ * dwelling (world/dwellings); see world/poistructures.ts for the list the world draws
+ * from.
  */
 export interface PoiVariantDefinition {
   readonly id: string;
@@ -136,7 +135,6 @@ export const POI_VARIANTS: readonly PoiVariantDefinition[] = [
   { id: 'standing-tower', name: 'Стоящая вышка', footprint: [10, 10], build: buildStandingTower },
   { id: 'fallen-tower', name: 'Упавшая вышка', footprint: [32, 10], build: buildFallenTower },
   { id: 'relay-cluster', name: 'Узел связи', footprint: [23, 16], build: buildRelayCluster },
-  { id: 'starter-homestead', name: 'Стартовый двухэтажный дом', footprint: [29, 19], build: buildStarterHome },
 ];
 
 /** A variant's index by id; throws on a typo so a caller never builds the wrong thing. */

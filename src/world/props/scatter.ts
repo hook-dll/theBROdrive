@@ -17,6 +17,7 @@ import { hash01 } from '../../core/rng';
 import { SurfaceType } from '../../core/surfaces';
 import { HazardIndex } from '../hazards';
 import { ROAD_HALF_WIDTH } from '../road';
+import { storyKeepsClear } from '../../story/site';
 import type { ChunkContext, ChunkContent, ChunkProvider } from '../chunks';
 
 import {
@@ -64,7 +65,7 @@ const ROAD_HAZARD_GAP_MAX = 4200;
  * `min + max - d`, so both stay in range while any chunk can locate them directly.
  */
 const ROAD_HAZARD_CYCLE = ROAD_HAZARD_GAP_MIN + ROAD_HAZARD_GAP_MAX;
-/** Keep the homestead and the player's first few bends clear. */
+/** Keep the story start and the player's first few bends clear. */
 const ROAD_HAZARD_START = 600;
 const ROAD_HAZARD_EDGE_CLEARANCE = 0.15;
 const CELL_S = 6; // metres between candidate cells along the road
@@ -301,6 +302,10 @@ export class ScatterProvider implements ChunkProvider {
           // Jitter within the cell, then re-check the corridor/max bounds.
           const s = centreS + (hash01(seed, TAG_SCATTER, cs, cl, 1) - 0.5) * CELL_S;
           const lateral = centreL + (hash01(seed, TAG_SCATTER, cs, cl, 2) - 0.5) * CELL_L;
+          // The story house yard and the airfield are kept clear: a cactus through
+          // the runway or a boulder on the car's spot is the one patch of desert the
+          // player always sees, so it is authored rather than scattered.
+          if (storyKeepsClear(s, lateral)) break cell;
           const absLateral = Math.abs(lateral);
           if (absLateral < MIN_LAT || absLateral > MAX_LAT) break cell;
           // The exact near edge, now that `s` is known. `MIN_LAT` above is the cheap
@@ -473,6 +478,8 @@ export class ScatterProvider implements ChunkProvider {
           const lateral = (cl + hash01(seed, TAG_GROUND_COVER, cs, cl, 2)) * GROUND_COVER_CELL;
           const past = Math.abs(lateral) - ctx.road.halfWidthAt(s);
           if (past < GROUND_COVER_SETBACK_M) continue;
+          // Same keep-clear the scatter uses: no tufts through the yard or the strip.
+          if (storyKeepsClear(s, lateral)) continue;
           // A little thicker along the verge, then an even spread over the open desert.
           const near = 1 - Math.min(1, past / GROUND_COVER_LAT);
           const density = GROUND_COVER_FAR + (GROUND_COVER_NEAR - GROUND_COVER_FAR) * near * near;

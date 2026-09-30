@@ -5,6 +5,21 @@ import type { WheelRideState } from '../vehicle/vehicle';
 import type { AutopilotMode } from '../vehicle/autopilot';
 
 /**
+ * The note's words, verbatim as the owner wrote them. The trail-off after the colon
+ * is drawn as an illegible scrawl (`buildLetterAddressScrawl`), so the address is
+ * never the literal word for "unreadable" — it simply cannot be read.
+ */
+export const LETTER_TEXT =
+  'сынок, мы с Котёной купили дом у моря, навести нас как-нибудь, тут такой кайф! вот адрес:';
+
+/** `LETTER_TEXT` broken where a hand would break it, wording untouched. */
+const LETTER_LINES: readonly string[] = [
+  'сынок, мы с Котёной купили дом у моря,',
+  'навести нас как-нибудь, тут такой кайф!',
+  'вот адрес:',
+];
+
+/**
  * HUD overlay. Plain DOM, no framework. Every element is created once and cached;
  * per-frame setters only touch the DOM when a displayed value actually changes.
  * These setters run at frame rate, so unguarded `textContent`/attribute writes
@@ -261,6 +276,59 @@ function arcPath(cx: number, cy: number, r: number, startDeg: number, endDeg: nu
   return `M ${s.x.toFixed(2)} ${s.y.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${e.x.toFixed(2)} ${e.y.toFixed(2)}`;
 }
 
+/**
+ * The illegible address: two seeded wavy strokes over a blurred smudge, so even the
+ * stroke count resists reading. Deterministic, built once, and never a word.
+ */
+function buildLetterAddressScrawl(): SVGSVGElement {
+  const svg = svgEl('svg');
+  svg.setAttribute('viewBox', '0 0 240 36');
+  svg.setAttribute('class', 'hud-letter-address');
+  svg.setAttribute('aria-hidden', 'true');
+
+  const smudge = svgEl('ellipse');
+  smudge.setAttribute('cx', '120');
+  smudge.setAttribute('cy', '18');
+  smudge.setAttribute('rx', '103');
+  smudge.setAttribute('ry', '11');
+  smudge.setAttribute('class', 'hud-letter-address-smudge');
+  svg.appendChild(smudge);
+
+  let seed = 0x5eed1e77;
+  const rnd = (): number => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return (seed >>> 8) / 0x1000000;
+  };
+  for (let row = 0; row < 2; row++) {
+    const y = 12 + row * 13;
+    let x = 10;
+    let d = `M ${x} ${y}`;
+    while (x < 228) {
+      x += 4 + rnd() * 8;
+      d += ` Q ${(x - 5).toFixed(1)} ${(y + (rnd() - 0.5) * 8).toFixed(1)} ${x.toFixed(1)} ${(y + (rnd() - 0.5) * 3).toFixed(1)}`;
+    }
+    const path = svgEl('path');
+    path.setAttribute('d', d);
+    path.setAttribute('class', 'hud-letter-address-line');
+    svg.appendChild(path);
+  }
+  return svg;
+}
+
+/** The paper card the letter raises: the note's lines, then the unreadable address. */
+function buildLetterCard(): HTMLElement {
+  const card = el('div', 'hud-letter');
+  const paper = el('div', 'hud-letter-paper');
+  for (const line of LETTER_LINES) {
+    const p = el('p', 'hud-letter-line');
+    p.textContent = line;
+    paper.appendChild(p);
+  }
+  paper.appendChild(buildLetterAddressScrawl());
+  card.appendChild(paper);
+  return card;
+}
+
 
 export class Hud {
   private readonly tops: HTMLElement[] = [];
@@ -294,6 +362,7 @@ export class Hud {
   private readonly gumBubbleEl: HTMLElement;
   private readonly damageVignetteEl: HTMLElement;
   private readonly deathFadeEl: HTMLElement;
+  private readonly letterEl: HTMLElement;
   private readonly root: HTMLElement;
   private damageStrength = -1;
   private deathFade = -1;
@@ -420,6 +489,7 @@ export class Hud {
     this.gumBubbleEl = el('div', 'hud-gum-bubble is-hidden');
     this.damageVignetteEl = el('div', 'hud-damage-vignette');
     this.deathFadeEl = el('div', 'hud-death-fade');
+    this.letterEl = buildLetterCard();
 
     this.tops = [
       this.crosshairEl,
@@ -428,6 +498,7 @@ export class Hud {
       inventoryEl,
       this.toastEl,
       this.gumBubbleEl,
+      this.letterEl,
     ];
     // No full-screen blur element: see the note in hud.css for why it was removed
     // rather than tuned.
@@ -955,6 +1026,15 @@ export class Hud {
     if (rounded === this.gumBubbleProgress) return;
     this.gumBubbleProgress = rounded;
     this.gumBubbleEl.style.setProperty('--gum-grow', String(rounded));
+  }
+
+  /**
+   * Shows or hides the letter card. The delayed fade-in lives in CSS (`.hud-letter`),
+   * so this only writes the state class. `#ui.is-death-sequence` hides it with the
+   * rest of the HUD without a call here.
+   */
+  setLetter(open: boolean): void {
+    this.letterEl.classList.toggle('is-open', open);
   }
 
   private rebuildInventory(items: readonly Item[]): void {

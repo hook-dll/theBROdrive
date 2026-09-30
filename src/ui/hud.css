@@ -28,6 +28,10 @@
   --hud-dial-needle: #e4e1d9;
   --hud-dial-track: rgba(232, 228, 218, 0.6);
   --hud-font: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  /* System cursive only: the letter is one overlay and buys no web font. The stack
+     falls through to whatever script face the machine already has, then `cursive`. */
+  --hud-letter-font: 'Segoe Script', 'Bradley Hand', 'Snell Roundhand', 'Apple Chancery',
+    'Comic Sans MS', 'Brush Script MT', cursive;
 }
 
 * {
@@ -258,6 +262,63 @@ body.is-cinematic #ui {
     inset 0 0 8vmax rgba(255, 221, 235, 0.44),
     0 0 3vmax rgba(245, 110, 164, 0.4);
   will-change: transform;
+}
+
+/* The raised letter: a paper card squared to the eye and sitting in the lower middle
+   of the view. It fades in a beat after the raise starts, so the sheet is in the hand
+   before its words are; closing fades out immediately. */
+.hud-letter {
+  position: absolute;
+  left: 50%;
+  top: 60%;
+  z-index: 6;
+  width: min(54vmin, 380px);
+  transform: translate(-50%, -40%) rotate(-2.2deg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease-out;
+}
+
+.hud-letter.is-open {
+  opacity: 1;
+  /* Slight delay on the way up only, to trail the hand's lift. */
+  transition-delay: 0.25s;
+}
+
+.hud-letter-paper {
+  padding: 5.5% 6.5% 7%;
+  background: #efe6cf;
+  color: #2a262e;
+  font-family: var(--hud-letter-font);
+  font-size: clamp(15px, 2.6vmin, 21px);
+  line-height: 1.5;
+  border-radius: 2px;
+  box-shadow:
+    0 1vmin 3vmin rgba(0, 0, 0, 0.45),
+    inset 0 0 4vmin rgba(150, 120, 70, 0.16);
+}
+
+.hud-letter-line {
+  margin: 0 0 0.35em;
+}
+
+.hud-letter-address {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 0.15em;
+}
+
+.hud-letter-address-smudge {
+  fill: rgba(58, 52, 60, 0.16);
+  filter: blur(2px);
+}
+
+.hud-letter-address-line {
+  fill: none;
+  stroke: rgba(38, 34, 42, 0.72);
+  stroke-width: 1.6;
+  stroke-linecap: round;
 }
 
 

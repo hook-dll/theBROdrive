@@ -778,7 +778,12 @@ export class Renderer {
     }
   }
 
-  private drawFrame(): void {
+  /**
+   * Draws one frame of the game through the two-pass frame. `scene` and `camera`
+   * default to the game's own; an alternate pair is what `renderAlternate` passes for
+   * the ending cutscene, which owns a scene of its own once the game loop has stopped.
+   */
+  private drawFrame(scene: THREE.Scene = this.scene, camera: THREE.PerspectiveCamera = this.camera): void {
     this.renderer.info.reset();
     // Real time, not game time: the strata climb at a flicker rate the eye knows,
     // which a time-scaled or paused game clock would slow or freeze. The phases are
@@ -794,20 +799,20 @@ export class Renderer {
       advanceHazePhase(phase.y, dt, this.hazeFineRiseHz),
     );
     this.hazeMaterial.uniforms.uTime.value = nowS % HAZE_CLOCK_PERIOD_S;
-    this.hazeMaterial.uniforms.uHorizon.value = this.horizonScreenY();
+    this.hazeMaterial.uniforms.uHorizon.value = this.horizonScreenY(camera);
     this.hazeMaterial.uniforms.uEyeAbove.value = Math.max(
       this.hazeMinimumEyeHeight,
       this.hazeEyeHeight,
     );
-    this.camera.updateWorldMatrix(true, false);
+    camera.updateWorldMatrix(true, false);
     (this.hazeMaterial.uniforms.uCameraRotation.value as THREE.Matrix3).setFromMatrix4(
-      this.camera.matrixWorld,
+      camera.matrixWorld,
     );
     this.hazeMaterial.uniforms.uTanHalfFov.value = Math.tan(
-      THREE.MathUtils.degToRad(this.camera.fov) / 2,
+      THREE.MathUtils.degToRad(camera.fov) / 2,
     );
-    this.hazeMaterial.uniforms.uCameraNear.value = this.camera.near;
-    this.hazeMaterial.uniforms.uCameraFar.value = this.camera.far;
+    this.hazeMaterial.uniforms.uCameraNear.value = camera.near;
+    this.hazeMaterial.uniforms.uCameraFar.value = camera.far;
     // TWO PASSES ON EVERY TIER, and the reason is colour, not shimmer.
     //
     // Pass 1 renders into `hazeTarget`. Three writes the WORKING colour space
@@ -821,9 +826,30 @@ export class Renderer {
     // beside the other two. Acceptable keeps the pass and drops the WARP instead
     // (see `setHeatHaze`), which is where the cost actually was.
     this.renderer.setRenderTarget(this.hazeTarget);
-    this.renderer.render(this.scene, this.camera);
+    this.renderer.render(scene, camera);
     this.renderer.setRenderTarget(null);
     this.renderer.render(this.hazeScene, this.hazeCamera);
+  }
+
+  /**
+   * Draws one frame of an ALTERNATE scene and camera through the same two-pass
+   * frame — same post pass, same daylight, ink and heat uniforms.
+   *
+   * This exists for the ending cutscene: main.js has stopped its own loop by then, the
+   * world's scene is left attached to `this.scene` and simply never drawn again, and
+   * the beach is its own scene with its own sky and its own camera. The camera is
+   * passed in rather than swapped into `this.camera` so the game's rig keeps the pose
+   * it will never use again, and both scene and camera are the caller's to size (the
+   * drawing buffer, pixel ratio and viewport stay this renderer's).
+   */
+  renderAlternate(scene: THREE.Scene, camera: THREE.PerspectiveCamera): void {
+    this.pollGpuQueries();
+    const query = this.beginGpuTimerQuery();
+    try {
+      this.drawFrame(scene, camera);
+    } finally {
+      if (query !== null) this.endGpuTimerQuery();
+    }
   }
 
   /**
@@ -836,11 +862,11 @@ export class Renderer {
    * correct through the camera rig's roll and spring, and clamping a little way
    * outside the frame keeps the falloff sensible when the horizon is off-screen.
    */
-  private horizonScreenY(): number {
-    this.camera.getWorldDirection(this._forward);
+  private horizonScreenY(camera: THREE.PerspectiveCamera = this.camera): number {
+    camera.getWorldDirection(this._forward);
     const horizontal = Math.hypot(this._forward.x, this._forward.z);
     const pitch = Math.atan2(this._forward.y, horizontal);
-    const halfFov = THREE.MathUtils.degToRad(this.camera.fov) / 2;
+    const halfFov = THREE.MathUtils.degToRad(camera.fov) / 2;
     const ndc = -Math.tan(pitch) / Math.tan(halfFov);
     return Math.min(1.6, Math.max(-0.6, 0.5 + 0.5 * ndc));
   }

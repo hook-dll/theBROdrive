@@ -146,6 +146,16 @@ export interface PocketWatchItem {
   readonly id: string;
 }
 
+/**
+ * The note the player starts with. It carries no state of its own: the words on it
+ * are HUD presentation (`LETTER_TEXT`, ui/hud.ts), so the item is only a reason for
+ * the pack to hold a folded sheet that E raises to the eye.
+ */
+export interface LetterItem {
+  readonly type: 'letter';
+  readonly id: string;
+}
+
 export type { StickerKind } from './stickercatalog';
 
 /** A physical task object. Its source index is the complete delivery contract. */
@@ -184,6 +194,7 @@ export type Item =
   | PhotographItem
   | FootballItem
   | PocketWatchItem
+  | LetterItem
   | ContractCargoItem
   | StickerEnvelopeItem;
 
@@ -262,6 +273,8 @@ export function itemLabel(item: Item): string {
       return 'football';
     case 'pocket_watch':
       return 'pocket watch';
+    case 'letter':
+      return 'letter from home';
     case 'contract_cargo':
       return item.cargoName;
     case 'sticker_envelope':
@@ -314,6 +327,9 @@ export function itemMass(item: Item): number {
       return 0.43;
     case 'pocket_watch':
       return 0.12;
+    case 'letter':
+      // One sheet of paper, and you carry that without noticing.
+      return 0.02;
     case 'contract_cargo':
       return 12;
     case 'sticker_envelope':

@@ -124,9 +124,9 @@ export interface VariantSwitch {
  * the caller happened to place it with. The box and the orientation have to be where the
  * geometry is, and the geometry is placed by that matrix; deriving the two independently
  * is how a switch ends up screwed to a wall that is not there. It is also the reason this
- * is one function rather than a block in each provider — the homestead places the same
- * catalogue building as the road does, and it should not be able to register its switches
- * differently.
+ * is one function rather than a block in each provider: any provider that places a
+ * catalogue building has to register its switches the same way, or the building's lights
+ * are the one set in the world that cannot be worked.
  *
  * `prefix` must be unique among live switches; the world forgets a chunk's switches by id.
  *
@@ -206,7 +206,7 @@ const MARKER_DISTANCE = 26;
  * leaves others alone (roof panels, light switches, door-obstacle markers, anything with a
  * unique material), and those keep their transform on the Object3D. A cache that stored
  * only geometry and material and rebuilt a mesh at the origin collapsed every un-merged
- * mesh into the ground: measured, the starter homestead lost all twelve of its roof panels
+ * mesh into the ground: measured, a two-storey variant lost all twelve of its roof panels
  * and `long-house` came out 2.8 m tall instead of 5.5 m.
  *
  * It is the WORLD matrix rather than the local one, because a variant's parts are NESTED:

@@ -4,6 +4,23 @@
 
 ### Added
 
+- A STORY START. The homestead is gone: a new drive opens beside a house drawn from the
+  roadside dwellings (any one that is not an abandoned ruin, chosen by the seed, like the
+  car), on the right of the road at 116 m, with the car parked beside it and four to six
+  random finds on the yard (`src/story/site.ts`, `src/story/sitebuild.ts`). Across the road
+  is a small airfield: a 225 m strip in the road's own asphalt, level across and smoothed
+  along so the sand never shows through, with markings, a windsock and a light plane parked
+  at its start, windows black like the cars'.
+- THE LETTER FROM HOME (`letter` item). The player starts holding it; E raises it to the
+  eyes and shows the note, with the address an illegible scrawl; E again lowers it. It is an
+  ordinary item: Q drops it, F picks it up, it saves like any other.
+- THE PLANE IS A WAY TO END THE GAME. F aimed at the parked plane (`[F] board the plane`)
+  starts a letterboxed takeoff (engine start, roll, lift-off, climb away; synthesised
+  propeller), then a separate beach scene where it lands on a strip by the sea, a small
+  house and mountains behind, the propeller dies away into surf, placeholder credits roll,
+  the screen fades to black and the game returns to the title. Nothing points the player at
+  the plane; driving off is just as valid. Boarding clears the resume marker, so a reload
+  mid-flight lands on the title.
 - CAMERA SWAY AT SPEED (`Settings.cameraShake`, Settings › Drive, on by default). The
   driving view floats slowly (0.5-2 Hz) from 60 km/h, with the square of speed up to
   300 (above any car, swapped engines included), by rotation only (the aim used for interaction
@@ -15,6 +32,12 @@
   (6% of the arm per m/s², up to +20%; braking pulls it in, up to -10%; tau 0.4 s) and
   settles once the speed holds. A 2.5 m/s² launch to 130 km/h runs about 0.8 m further
   back than the cruise distance it relaxes to.
+
+### Removed
+
+- THE STARTER HOMESTEAD (`world/house.ts`, `world/poi/starter.ts`, the `starter-homestead`
+  POI variant) and its garage-shelf items. Saves from before keep their car where the old
+  garage stood.
 
 ### Changed
 

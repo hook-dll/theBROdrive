@@ -927,9 +927,9 @@ function grantStockLoot(
  *
  * "Toward the road" is not the road's heading. A building sits off to one side, so the
  * direction it should face is the one that turns its front — authored as -Z — toward the
- * centreline, which is its own lateral offset reversed. The sign convention matches
- * `house.ts`'s garage, which faces the same way for the same reason. A small hash wobble
- * keeps a row of them from looking stamped out.
+ * centreline, which is its own lateral offset reversed. The sign convention matches the
+ * story house's front (`src/story/site.ts`), which faces the same way for the same reason.
+ * A small hash wobble keeps a row of them from looking stamped out.
  *
  * Exported because a bench that measures a building's footprint against the world has to
  * place it the way the game does; `tools/wreck-spacing.ts` is that bench.

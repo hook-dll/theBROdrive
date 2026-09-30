@@ -12,9 +12,9 @@
  * each `s`, and everything (mesh, collider, corridor grading, scatter setback) is built
  * from that. A turning bulb expressed as a bulge in `halfWidthAt` is tempting because it
  * comes with all of that for free, but it is a bulge of ~17 m either side and the
- * homestead's pad starts 8.3 m off the crown at s = 12 (`house.ts`) — the bulb would eat
- * the garage. So the bulb lives BEHIND the start, in the apron the terrain already draws
- * there, where the only thing it can collide with is empty desert.
+ * story site's runway starts 30 m up the road (`src/story/site.ts`) — the bulb would eat
+ * its threshold. So the bulb lives BEHIND the start, in the apron the terrain already
+ * draws there, where the only thing it can collide with is empty desert.
  *
  * The drive line turns on 11 m. That is not a guess: the ordinary `Autopilot` was
  * driven round analytic circles and holds 30 m to 0.88 m of lateral error, 12 m to
