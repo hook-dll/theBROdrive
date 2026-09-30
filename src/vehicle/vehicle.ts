@@ -115,6 +115,8 @@ import {
   GRIP_REFERENCE_MASS,
   HANDLING_PROFILES,
   tyreCurve,
+  brushShape,
+  TYRE_MODEL,
   type TyreCurve,
   type HandlingTuning,
   IMPACT_UNEXPLAINED_FLOOR_MPS,
@@ -2384,15 +2386,6 @@ export class Vehicle implements Rebasable {
       // that decides how much slip the car runs, and it is why the number comes out
       // where a period car's does — at 0.7 g a tyre needs 0.7/LATERAL_MU of its peak,
       // which the sine reaches around five degrees.
-      const peakDeg = w.isFront ? this.tyre.peakFrontDeg : this.tyre.peakRearDeg;
-      const fullDeg = w.isFront ? this.tyre.fullFrontDeg : this.tyre.fullRearDeg;
-      const plateau = w.isFront ? this.tyre.plateauFront : this.tyre.plateauRear;
-      const slipDeg = (w.slipAngleRad * 180) / Math.PI;
-      const fadeT = clamp((slipDeg - peakDeg) / (fullDeg - peakDeg), 0, 1);
-      const risen =
-        Math.tanh(SLIP_CURVE_SHARPNESS * Math.min(slipDeg / peakDeg, 1)) / TANH_SHARPNESS;
-      const shape = risen * (1 - (1 - plateau) * fadeT * fadeT * (3 - 2 * fadeT));
-
       // μ(Fz). Exactly 1 at this wheel's static share of the car's weight, so the
       // calibrated straight-line figures stand and only TRANSFER changes anything.
       const loadFactor = clamp(
@@ -2400,6 +2393,27 @@ export class Vehicle implements Rebasable {
         LOAD_SENSITIVITY_MIN,
         LOAD_SENSITIVITY_MAX,
       );
+
+      const staticPeakDeg = w.isFront ? this.tyre.peakFrontDeg : this.tyre.peakRearDeg;
+      const fullDeg = w.isFront ? this.tyre.fullFrontDeg : this.tyre.fullRearDeg;
+      const plateau = w.isFront ? this.tyre.plateauFront : this.tyre.plateauRear;
+      const slipDeg = (w.slipAngleRad * 180) / Math.PI;
+      let peakDeg = staticPeakDeg;
+      let risen: number;
+      if (TYRE_MODEL.brush && this.model.tyre) {
+        const brush = brushShape(
+          w.slipAngleRad,
+          staticPeakDeg,
+          w.loadN / w.staticLoadN,
+          loadFactor,
+        );
+        risen = brush.shape;
+        peakDeg = Math.min(brush.peakDeg, fullDeg - 1);
+      } else {
+        risen = Math.tanh(SLIP_CURVE_SHARPNESS * Math.min(slipDeg / peakDeg, 1)) / TANH_SHARPNESS;
+      }
+      const fadeT = clamp((slipDeg - peakDeg) / (fullDeg - peakDeg), 0, 1);
+      const shape = risen * (1 - (1 - plateau) * fadeT * fadeT * (3 - 2 * fadeT));
 
       const frictionSlip =
         surface.mu * weatherGrip(surfaceType) * gripBudgetFactor * loadFactor;

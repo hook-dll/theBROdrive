@@ -588,6 +588,51 @@ export function tyreCurve(spec: { construction: 'crossply' | 'radial'; aspect: n
   };
 }
 
+/**
+ * THE BRUSH TYRE, an A/B alternative to the curve above for cars with a `TyreSpec`
+ * (`?tyre=brush`, or `__bro.brushTyres(true)` on the move).
+ *
+ * The tread is a row of bristles on the belt. Each one is carried through the contact
+ * patch and deflects sideways with the slip until the local grip under it runs out,
+ * from the back of the patch forward. With the load pressed over the patch as a
+ * parabola, the side force as a fraction of the grip is
+ *
+ *     s(z) = 3z - 3z² + z³   for z < 1, and 1 once the whole patch slides,
+ *     z    = tan α · Cα / (3 μ Fz)
+ *
+ * which is the model racing simulators build on. What it adds over a fixed curve is
+ * that the angle the tyre peaks at is not a constant: cornering stiffness Cα grows
+ * more slowly than load (`BRUSH_STIFFNESS_LOAD_EXPONENT`), so a tyre pressed harder
+ * reaches its peak LATER and a light one sooner — the outside front of a car loaded
+ * into a bend needs more lock than it did in a straight line, and a light inside tyre
+ * lets go at small angles. At the car's static load it peaks exactly where the
+ * `TyreCurve` says, so the two models agree in the straight and part in the bend.
+ */
+export const TYRE_MODEL = { brush: false };
+/** Cα ∝ Fz^this: 0.7 is a passenger radial's measured sublinear growth. */
+export const BRUSH_STIFFNESS_LOAD_EXPONENT = 0.7;
+
+/**
+ * The brush curve's shape at `slipRad`, as a fraction of the tyre's capacity, and the
+ * peak angle it implies at this load. `loadRatio` is Fz over the static load and
+ * `muRatio` the load-sensitivity factor already in the capacity.
+ */
+export function brushShape(
+  slipRad: number,
+  staticPeakDeg: number,
+  loadRatio: number,
+  muRatio: number,
+): { shape: number; peakDeg: number } {
+  const ratio = Math.max(0.05, loadRatio);
+  // Cα / (μ Fz) at static load, from the static peak: z reaches 1 there.
+  const stiffness = 3 / Math.tan((staticPeakDeg * Math.PI) / 180);
+  const scale = (stiffness * ratio ** BRUSH_STIFFNESS_LOAD_EXPONENT) / (ratio * Math.max(0.05, muRatio));
+  const z = (Math.tan(Math.min(slipRad, 1.4)) * scale) / 3;
+  const shape = z >= 1 ? 1 : 3 * z - 3 * z * z + z * z * z;
+  const peakDeg = (Math.atan(3 / scale) * 180) / Math.PI;
+  return { shape, peakDeg };
+}
+
 export const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>> = {
   classic: {
     steerInputExponent: STEER_INPUT_EXPONENT,
