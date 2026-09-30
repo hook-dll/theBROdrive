@@ -11,7 +11,6 @@ import { DAY_LENGTH, GameWorld, newWorldState, type CarState } from './game/stat
 import { parseCalendarEpoch } from './game/calendar';
 import {
   DEFAULT_INK_STRENGTH,
-  DEFAULT_PHONE_FRAME_RATE,
   TIME_OF_DAY_PRESETS,
   loadStoredSettings,
   presentationFpsFor,
@@ -254,11 +253,6 @@ async function boot(): Promise<void> {
     if (!stored && mobilePresentation) {
       // A phone's first launch must not inherit desktop DPR, MSAA and refresh costs.
       // Once the player changes a display setting, the stored machine preference wins.
-      //
-      // The frame cap belongs here rather than in the authored defaults because it is the
-      // one default that differs by presentation, and this is the only place that knows
-      // which presentation it is: a phone starts cool at 30, a desktop starts uncapped
-      // because its GPU is already the constraint and a cap there only costs smoothness.
       world.apply({
         t: 'settings',
         settings: {
@@ -268,7 +262,6 @@ async function boot(): Promise<void> {
           // say which of those it is, and a `Measure again` can still be offered.
           graphicsQualitySource: 'device',
           msaa: false,
-          frameRateLimit: DEFAULT_PHONE_FRAME_RATE,
         },
       });
     }

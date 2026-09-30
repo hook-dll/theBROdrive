@@ -19,7 +19,6 @@
  */
 
 import {
-  DEFAULT_PHONE_FRAME_RATE,
   FRAME_RATE_LIMITS,
   frameRateLimitFrom,
   GRAPHICS_TIERS,
@@ -227,9 +226,6 @@ for (const quality of LADDER) {
 {
   for (const rate of FRAME_RATE_LIMITS) {
     if (!Number.isFinite(rate) || rate <= 0) failures.push(`offered frame rate ${rate} is not a rate`);
-  }
-  if (!FRAME_RATE_LIMITS.includes(DEFAULT_PHONE_FRAME_RATE)) {
-    failures.push('the phone default is not one of the offered rates');
   }
   // The cap is the ONLY input, on every device: it is not derived from the tier, not
   // different by presentation, and `null` means uncapped. That is the whole point of it

@@ -328,8 +328,6 @@ export function presentationFpsFor(frameRateLimit: number | null): number | null
  */
 export const FRAME_RATE_LIMITS = [30, 60, 75, 120, 144] as const;
 export type FrameRateLimit = (typeof FRAME_RATE_LIMITS)[number] | null;
-/** A phone starts cool; a desktop starts uncapped, where its GPU is the constraint. */
-export const DEFAULT_PHONE_FRAME_RATE = 30;
 
 /**
  * Offered manual render scales, as a fraction of the DISPLAY's own pixels.
@@ -535,9 +533,8 @@ export const DEFAULT_SETTINGS: Settings = {
   // cannot hold it. A player who would rather name the number picks one in the menu.
   renderScale: null,
   msaa: true,
-  // Uncapped by default: on a desktop the GPU is already the constraint, so a cap would
-  // only cost smoothness. A phone's FIRST launch is set to 30 by main, which is the only
-  // place that knows the presentation — see `DEFAULT_PHONE_FRAME_RATE`.
+  // Uncapped by default on every device, phones included: a cap is the player's choice
+  // to make (heat, noise), not a default to discover.
   frameRateLimit: null,
   fieldOfView: DEFAULT_FIELD_OF_VIEW,
   // Off by default; M switches it on, and the pause menu remembers which.
@@ -547,6 +544,23 @@ export const DEFAULT_SETTINGS: Settings = {
   bouncyCars: false,
   dashboardScale: 1,
 };
+
+/**
+ * A level picked on the title screen, with the defaults that come with it: the level's
+ * own multisampling, automatic resolution and no frame cap. The title offers the level
+ * and nothing else, so everything else it implies is reset here rather than inherited
+ * from whatever the pause menu was last set to.
+ */
+export function withTierDefaults(settings: Settings, quality: GraphicsQuality): Settings {
+  return {
+    ...settings,
+    graphicsQuality: quality,
+    graphicsQualitySource: 'chosen',
+    renderScale: null,
+    msaa: GRAPHICS_TIERS[quality].msaa,
+    frameRateLimit: null,
+  };
+}
 
 /**
  * Fractions of the local mean-solar game clock. Astronomy is date-dependent, so

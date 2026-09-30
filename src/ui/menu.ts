@@ -21,7 +21,7 @@ import type {
   Settings,
   TimeOfDayPreset,
 } from '../game/settings';
-import { GRAPHICS_TIERS } from '../game/settings';
+import { GRAPHICS_TIERS, DEFAULT_SETTINGS, loadStoredSettings, storeSettings, withTierDefaults } from '../game/settings';
 import {
   manualRenderScale,
   offeredRenderScales,
@@ -719,6 +719,51 @@ export class MainMenu {
         nav.appendChild(all);
       }
       sheet.appendChild(nav);
+      sheet.appendChild(graphicsLevel());
+    };
+
+    /**
+     * The graphics level, and only the level: it is the one display choice a player has
+     * to make before the first frame, because Very Low is built into the world at load
+     * and cannot be switched to afterwards without a reload. Picking one stores it with
+     * its own defaults (settings.ts, `withTierDefaults`); everything finer is the pause
+     * menu's. Untouched, a first launch still measures the machine and picks for itself.
+     */
+    const graphicsLevel = (): HTMLElement => {
+      const field = el('div', 'menu-field menu-title-graphics');
+      const head = el('div', 'menu-field-head');
+      const label = el('span', 'menu-label');
+      label.textContent = 'Graphics';
+      head.appendChild(label);
+      const row = el('div', 'menu-seg');
+      const current = (): GraphicsQuality =>
+        (loadStoredSettings() ?? DEFAULT_SETTINGS).graphicsQuality;
+      const levels: readonly { quality: GraphicsQuality; label: string; icon: string }[] = [
+        { quality: 'retro', label: 'Very Low', icon: 'retro' },
+        { quality: 'acceptable', label: 'Low', icon: 'gfx1' },
+        { quality: 'standard', label: 'Medium', icon: 'gfx2' },
+        { quality: 'blessing', label: 'High', icon: 'gfx3' },
+      ];
+      const buttons = levels.map((level) => {
+        const btn = button('menu-seg-btn', '');
+        btn.dataset.nav = '';
+        btn.append(icon(level.icon), text(level.label, 'menu-seg-label'));
+        row.appendChild(btn);
+        return { level, btn };
+      });
+      const paint = (): void => {
+        const quality = current();
+        for (const { level, btn } of buttons) btn.classList.toggle('is-selected', level.quality === quality);
+      };
+      for (const { level, btn } of buttons) {
+        btn.addEventListener('click', () => {
+          storeSettings(withTierDefaults(loadStoredSettings() ?? DEFAULT_SETTINGS, level.quality));
+          paint();
+        });
+      }
+      paint();
+      field.append(head, row);
+      return field;
     };
 
     const renderSaves = (): void => {
@@ -1435,7 +1480,7 @@ export class MainMenu {
             // says so in the head, so the levels can describe the picture instead.
             segmented('Detail', [
               {
-                label: 'Retro',
+                label: 'Very Low',
                 icon: 'retro',
                 hint: () =>
                   'For weak mini-PCs and old laptops. The world is drawn at about 360 lines '
