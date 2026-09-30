@@ -264,6 +264,17 @@ function buildEngine(b: MeshBuilder, v: PartVariant): void {
     // The Volga 2.4: a tall, long-stroke four, so a taller block than the 1.6.
     case 'engine_zmz_21':
     case 'engine_zmz_24': return buildInline(b, spec, 1.09);
+    // The proving ground's engines. Flat (boxer) units stand in as vees until they
+    // have a blueprint of their own; the scale is displacement against the 1.6.
+    case 'engine_citroen_a06': return buildInline(b, spec, 0.72);
+    case 'engine_bmc_1275s': return buildInline(b, spec, 0.9);
+    case 'engine_rover_k18': return buildInline(b, spec, 1.0);
+    case 'engine_lancia_integrale_16v': return buildInline(b, spec, 1.06);
+    case 'engine_rover_200tdi': return buildInline(b, spec, 1.18);
+    case 'engine_vw_type1_1600': return buildVee(b, spec, 0.9);
+    case 'engine_porsche_930_10': return buildVee(b, spec, 1.04);
+    case 'engine_ford_50_ho': return buildVee(b, spec, 1.1);
+    case 'engine_ferrari_f113a': return buildVee(b, spec, 1.2);
     default: throw new Error(`unhandled engine variant: ${v.id}`);
   }
 }
@@ -382,6 +393,16 @@ function buildGearbox(b: MeshBuilder, v: PartVariant): void {
     case 'gearbox_niva_5': scale = 1.26; manual = true; fins = false; break;
     case 'gearbox_auto3': scale = 1.2; manual = false; fins = true; break;
     case 'gearbox_truck6': scale = 1.5; manual = true; fins = true; break;
+    // The proving ground's boxes; transaxles carry their final drive, so they get fins.
+    case 'gearbox_citroen_4': scale = 0.8; manual = true; fins = true; break;
+    case 'gearbox_mini_cr4': scale = 0.82; manual = true; fins = true; break;
+    case 'gearbox_vw_t2_4': scale = 0.95; manual = true; fins = true; break;
+    case 'gearbox_rover_pg1': scale = 1.0; manual = true; fins = true; break;
+    case 'gearbox_porsche_915': scale = 1.1; manual = true; fins = true; break;
+    case 'gearbox_ferrari_tr5': scale = 1.2; manual = true; fins = true; break;
+    case 'gearbox_bw_t5': scale = 1.05; manual = true; fins = false; break;
+    case 'gearbox_lancia_integrale': scale = 1.15; manual = true; fins = true; break;
+    case 'gearbox_landrover_lt77': scale = 1.3; manual = true; fins = false; break;
     default: throw new Error(`unhandled gearbox variant: ${v.id}`);
   }
   const id = v.id;

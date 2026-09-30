@@ -423,6 +423,23 @@ export interface FactoryGeometry {
 }
 
 
+/**
+ * A limited-slip differential, as the two numbers its makers quote. It may hold the
+ * two wheels of its axle apart in speed with at most `preloadNm` plus `lock` times the
+ * torque going through it; anything beyond slips, as an open differential always does.
+ *
+ *   clutch pack (Salisbury, ZF, Traction-Lok)  preload 50-150 Nm, lock 0.25-0.45
+ *   Torsen (torque-sensing gears)              preload 0, lock 0.5-0.6: open when
+ *                                              one wheel carries nothing at all
+ *   welded or spool                            lock 1 and a preload nothing reaches
+ *
+ * `lock` is (TBR - 1) / (TBR + 1) for a quoted torque bias ratio.
+ */
+export interface LimitedSlip {
+  readonly lock: number;
+  readonly preloadNm: number;
+}
+
 /** Mechanical era shared by cars with the same steering and tyre construction. */
 export type HandlingProfile = 'classic' | 'road' | 'sport' | 'utility';
 
@@ -531,6 +548,19 @@ export interface CarModelDef {
   /** Static share of kerb weight carried by the front axle, when layout needs an override. */
   readonly frontWeightShare?: number;
   /**
+   * Anti-roll bars, each as a fraction of its own axle's wheel rate (0 = no bar), when
+   * the car's are not the period saloon's front-biased pair (`ANTI_ROLL_*_FRACTION` in
+   * vehicletuning.ts). The split is the handling balance: the axle with more roll
+   * stiffness takes more of the load transfer and runs out of grip first.
+   */
+  readonly antiRoll?: { readonly front: number; readonly rear: number };
+  /**
+   * A limited-slip differential on that axle; absent is an open one. See
+   * `LimitedSlip`. Only meaningful on a driven axle.
+   */
+  readonly frontDiff?: LimitedSlip;
+  readonly rearDiff?: LimitedSlip;
+  /**
    * The body's drag area, Cd·A in m². Authored where the real car's is known; a
    * body that omits it falls back to one shared Cd over its measured box, which
    * only lands for a mid-seventies saloon shape (see `Vehicle`'s constructor).
@@ -593,6 +623,18 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   sa_uaz330364:   { length: 4.535, width: 1.974, height: 2.355, clearance: 0.205, wheelbase: 2.550, frontTrack: 1.445, rearTrack: 1.445, wheelRadius: 0.372, tyreWidth: 0.225, frontOverhang: 1.054 },
   sa_izh2715:     { length: 4.130, width: 1.590, height: 1.825, clearance: 0.185, wheelbase: 2.400, frontTrack: 1.270, rearTrack: 1.270, wheelRadius: 0.305, tyreWidth: 0.175 },
   gt_vaz2110:     { length: 4.265, width: 1.680, height: 1.420, clearance: 0.170, wheelbase: 2.492, frontTrack: 1.410, rearTrack: 1.380, wheelRadius: 0.288, tyreWidth: 0.175 },
+  // The proving ground (see `PROVING_SPECS`): published dimensions, rolling radius of
+  // the factory tyre (the larger, rear one where the axles differ), and the front
+  // overhang, because the donor body's own axle placement is some other car's.
+  pg_2cv:         { length: 3.830, width: 1.480, height: 1.600, clearance: 0.150, wheelbase: 2.400, frontTrack: 1.260, rearTrack: 1.260, wheelRadius: 0.293, tyreWidth: 0.125, frontOverhang: 0.75 },
+  pg_mini:        { length: 3.054, width: 1.410, height: 1.346, clearance: 0.150, wheelbase: 2.036, frontTrack: 1.214, rearTrack: 1.176, wheelRadius: 0.250, tyreWidth: 0.145, frontOverhang: 0.52 },
+  pg_911sc:       { length: 4.291, width: 1.652, height: 1.320, clearance: 0.120, wheelbase: 2.272, frontTrack: 1.369, rearTrack: 1.379, wheelRadius: 0.320, tyreWidth: 0.215, frontOverhang: 0.96 },
+  pg_mustang:     { length: 4.562, width: 1.735, height: 1.323, clearance: 0.130, wheelbase: 2.553, frontTrack: 1.455, rearTrack: 1.460, wheelRadius: 0.326, tyreWidth: 0.225, frontOverhang: 0.96 },
+  pg_defender:    { length: 4.599, width: 1.790, height: 1.996, clearance: 0.215, wheelbase: 2.794, frontTrack: 1.486, rearTrack: 1.486, wheelRadius: 0.393, tyreWidth: 0.190, frontOverhang: 0.70 },
+  pg_t2:          { length: 4.505, width: 1.720, height: 1.955, clearance: 0.185, wheelbase: 2.400, frontTrack: 1.385, rearTrack: 1.425, wheelRadius: 0.330, tyreWidth: 0.185, frontOverhang: 0.90 },
+  pg_elise:       { length: 3.726, width: 1.701, height: 1.202, clearance: 0.130, wheelbase: 2.300, frontTrack: 1.440, rearTrack: 1.453, wheelRadius: 0.306, tyreWidth: 0.205, frontOverhang: 0.75 },
+  pg_testarossa:  { length: 4.485, width: 1.976, height: 1.130, clearance: 0.120, wheelbase: 2.550, frontTrack: 1.518, rearTrack: 1.660, wheelRadius: 0.334, tyreWidth: 0.280, frontOverhang: 1.00 },
+  pg_integrale:   { length: 3.900, width: 1.700, height: 1.365, clearance: 0.140, wheelbase: 2.480, frontTrack: 1.400, rearTrack: 1.380, wheelRadius: 0.295, tyreWidth: 0.205, frontOverhang: 0.80 },
 };
 
 function factoryGeometry(id: string): FactoryGeometry {
@@ -1271,7 +1313,7 @@ const SAAS_SPECS: readonly Entry[] = [
     wheelGrip: 0.59,
     brakeDecelG: 0.53,
     suspension: SUSP_TRUCK,
-    steerLock: 0.501,
+    steerLock: 0.482,
     rearDriveBias: 0.5,
     handlingProfile: 'utility',
     // Factory kerb axle loads: 1180 kg front, 665 kg rear. Boxy cab-over body:
@@ -1441,6 +1483,336 @@ const GTAV_CARS: readonly Entry[] = GTAV_SPECS.map((spec) => ({
   },
 }));
 
+/* ---- the proving ground ----
+ *
+ * Nine cars picked to sit as far apart as possible on the axes that make a car feel
+ * like itself — where the engine is, which wheels it drives, how much each horse
+ * carries, how high the mass sits and how the springs hold it — so that driving them
+ * one after another tests whether the physics is where the variety lives.
+ *
+ * They are PHYSICS ONLY. Each one borrows a donor body from the packs above, which
+ * the loader stretches to the car's published length, width, height and axle
+ * positions, so the collider, the wheels and the camera are the real car's while the
+ * paint is some other car's. Bodies of their own come after the feel is proven.
+ *
+ * Figures are the published ones as reprinted by carfolio.com,
+ * automobile-catalog.com and the owners' clubs; `dragArea` is fitted to the top speed
+ * on tools/reality.ts, as everywhere else in this file.
+ */
+
+/** Ultra-soft, long-travel, barely damped: the 2CV leans until the door handles scrape. */
+const SUSP_2CV: SuspensionTuning = {
+  frontHz: 0.9,
+  rearHz: 0.95,
+  compressionRatio: 0.16,
+  reboundRatio: 0.28,
+  bumpTravel: 0.14,
+};
+
+/** Rubber cones and almost no travel: a go-kart that hops on anything sharp. */
+const SUSP_MINI: SuspensionTuning = {
+  frontHz: 1.7,
+  rearHz: 1.9,
+  compressionRatio: 0.3,
+  reboundRatio: 0.45,
+  bumpTravel: 0.05,
+};
+
+/** Torsion bars front and rear, firm for its day, rear rate for the engine over it. */
+const SUSP_911: SuspensionTuning = {
+  frontHz: 1.45,
+  rearHz: 1.7,
+  compressionRatio: 0.3,
+  reboundRatio: 0.45,
+  bumpTravel: 0.07,
+};
+
+/** Fox-body GT: struts in front, a four-link live axle behind, on the soft side of sporty. */
+const SUSP_MUSTANG: SuspensionTuning = {
+  frontHz: 1.25,
+  rearHz: 1.45,
+  compressionRatio: 0.24,
+  reboundRatio: 0.4,
+  bumpTravel: 0.09,
+};
+
+/** Coils on beam axles with long travel: it rolls and pitches and keeps its wheels down. */
+const SUSP_DEFENDER: SuspensionTuning = {
+  frontHz: 1.1,
+  rearHz: 1.25,
+  compressionRatio: 0.22,
+  reboundRatio: 0.38,
+  bumpTravel: 0.18,
+};
+
+/** Double wishbones on a bonded chassis weighing less than the driver's opinion of it. */
+const SUSP_ELISE: SuspensionTuning = {
+  frontHz: 1.8,
+  rearHz: 2.0,
+  compressionRatio: 0.32,
+  reboundRatio: 0.5,
+  bumpTravel: 0.06,
+};
+
+/** A grand tourer's wishbones: firm, but sprung to cross a country at 250. */
+const SUSP_TESTAROSSA: SuspensionTuning = {
+  frontHz: 1.6,
+  rearHz: 1.8,
+  compressionRatio: 0.3,
+  reboundRatio: 0.48,
+  bumpTravel: 0.07,
+};
+
+/** Group A homologation: rally-raised, stiff, and well damped. */
+const SUSP_INTEGRALE: SuspensionTuning = {
+  frontHz: 1.5,
+  rearHz: 1.7,
+  compressionRatio: 0.3,
+  reboundRatio: 0.46,
+  bumpTravel: 0.1,
+};
+
+/** Everything the donor body brings: the file, its materials, lamps and wheel nodes. */
+type DonorLook = Pick<
+  Entry,
+  | 'dir'
+  | 'glb'
+  | 'scale'
+  | 'yaw'
+  | 'glassMaterial'
+  | 'paintStyle'
+  | 'lights'
+  | 'wheelNodes'
+  | 'secondaryPaintMaterial'
+>;
+
+function donorLook(id: string): DonorLook {
+  const donor = [...SAAS_CARS, ...GTAV_CARS].find((e) => e.id === id);
+  if (!donor) throw new Error(`Proving-ground donor "${id}" is not a solid-paint body`);
+  return {
+    dir: donor.dir,
+    glb: donor.glb,
+    scale: donor.scale,
+    yaw: donor.yaw,
+    glassMaterial: donor.glassMaterial,
+    paintStyle: donor.paintStyle,
+    lights: donor.lights,
+    wheelNodes: donor.wheelNodes,
+    secondaryPaintMaterial: donor.secondaryPaintMaterial,
+  };
+}
+
+const PROVING_SPECS: readonly Entry[] = [
+  {
+    // Citroën 2CV6 (1979): 585 kg, 29 bhp, front drive, 117 km/h, and a turning
+    // circle of 10.7 m. The softest thing that ever had four wheels.
+    ...donorLook('sa_oka'),
+    id: 'pg_2cv',
+    label: 'Citroën 2CV6',
+    bodyClass: 'car',
+    mass: 585,
+    engineId: 'engine_citroen_a06',
+    gearboxId: 'gearbox_citroen_4',
+    tankLitres: 20,
+    wheelGrip: 0.58,
+    brakeDecelG: 0.6,
+    suspension: SUSP_2CV,
+    steerLock: 0.527,
+    rearDriveBias: 0,
+    handlingProfile: 'classic',
+    frontWeightShare: 0.58,
+    // No bars: the 2CV resists roll with its interconnected springs alone.
+    antiRoll: { front: 0, rear: 0 },
+    dragArea: 0.777,
+    wheelSetPool: [],
+  },
+  {
+    // Mini Cooper S 1275 (1965): 650 kg, 76 PS, front drive, 157 km/h on ten-inch
+    // wheels and a 9.7 m turning circle.
+    ...donorLook('sa_oka'),
+    id: 'pg_mini',
+    label: 'Mini Cooper S',
+    bodyClass: 'car',
+    mass: 650,
+    engineId: 'engine_bmc_1275s',
+    gearboxId: 'gearbox_mini_cr4',
+    tankLitres: 50,
+    wheelGrip: 0.72,
+    brakeDecelG: 0.75,
+    suspension: SUSP_MINI,
+    steerLock: 0.497,
+    rearDriveBias: 0,
+    handlingProfile: 'road',
+    frontWeightShare: 0.62,
+    // No bars either: rubber cones, and a nose carrying 62% does the balancing.
+    antiRoll: { front: 0, rear: 0 },
+    dragArea: 0.855,
+    wheelSetPool: [],
+  },
+  {
+    // Porsche 911 SC (1980): 1160 kg, 204 PS hung behind the rear axle, 39% on the
+    // front wheels, 225 km/h. Lift off in a bend and the tail comes round.
+    ...donorLook('gt_vaz2110'),
+    id: 'pg_911sc',
+    label: 'Porsche 911 SC',
+    bodyClass: 'car',
+    mass: 1160,
+    engineId: 'engine_porsche_930_10',
+    gearboxId: 'gearbox_porsche_915',
+    tankLitres: 80,
+    wheelGrip: 0.82,
+    brakeDecelG: 0.95,
+    suspension: SUSP_911,
+    steerLock: 0.500,
+    rearDriveBias: 1,
+    handlingProfile: 'sport',
+    frontWeightShare: 0.39,
+    antiRoll: { front: 0.5, rear: 0.35 },
+    dragArea: 0.827,
+    wheelSetPool: [],
+  },
+  {
+    // Ford Mustang GT 5.0 (1990): 1400 kg, 225 hp and 407 Nm through a live axle on
+    // 225/60 tyres. Torque everywhere and a tail that follows the throttle.
+    ...donorLook('sa_azlk2141'),
+    id: 'pg_mustang',
+    label: 'Ford Mustang GT 5.0',
+    bodyClass: 'car',
+    mass: 1400,
+    engineId: 'engine_ford_50_ho',
+    gearboxId: 'gearbox_bw_t5',
+    tankLitres: 58,
+    wheelGrip: 0.8,
+    brakeDecelG: 0.85,
+    suspension: SUSP_MUSTANG,
+    steerLock: 0.511,
+    rearDriveBias: 1,
+    handlingProfile: 'sport',
+    frontWeightShare: 0.57,
+    // The GT's thick front bar against a thin rear one.
+    antiRoll: { front: 0.7, rear: 0.35 },
+    // Traction-Lok clutch-pack differential, standard on the GT (TBR about 2.5).
+    rearDiff: { lock: 0.43, preloadNm: 80 },
+    dragArea: 0.846,
+    wheelSetPool: [],
+  },
+  {
+    // Land Rover Defender 110 200Tdi (1992): 2064 kg, 107 hp diesel, permanent 4x4,
+    // 137 km/h, two metres tall on 7.50R16.
+    ...donorLook('sa_uaz330364'),
+    id: 'pg_defender',
+    label: 'Land Rover Defender 110',
+    bodyClass: 'truck',
+    mass: 2064,
+    engineId: 'engine_rover_200tdi',
+    gearboxId: 'gearbox_landrover_lt77',
+    tankLitres: 79,
+    wheelGrip: 0.62,
+    brakeDecelG: 0.62,
+    suspension: SUSP_DEFENDER,
+    steerLock: 0.518,
+    rearDriveBias: 0.5,
+    handlingProfile: 'utility',
+    frontWeightShare: 0.5,
+    antiRoll: { front: 0.15, rear: 0.2 },
+    dragArea: 1.671,
+    wheelSetPool: [],
+  },
+  {
+    // VW T2 bus 1600 (1975): 1175 kg, 50 PS behind the rear axle, 110 km/h, and
+    // nearly two metres of slab side for the wind to lean on.
+    ...donorLook('sa_izh2715'),
+    id: 'pg_t2',
+    label: 'VW T2 bus',
+    bodyClass: 'truck',
+    mass: 1175,
+    engineId: 'engine_vw_type1_1600',
+    gearboxId: 'gearbox_vw_t2_4',
+    tankLitres: 56,
+    wheelGrip: 0.6,
+    brakeDecelG: 0.6,
+    suspension: SUSP_SOFT,
+    steerLock: 0.472,
+    rearDriveBias: 1,
+    handlingProfile: 'utility',
+    frontWeightShare: 0.43,
+    antiRoll: { front: 0.4, rear: 0 },
+    dragArea: 1.583,
+    wheelSetPool: [],
+  },
+  {
+    // Lotus Elise S1 (1996): 725 kg, 120 PS behind the seats, 39% on the front,
+    // 202 km/h. Every input answered at once.
+    ...donorLook('gt_vaz2110'),
+    id: 'pg_elise',
+    label: 'Lotus Elise S1',
+    bodyClass: 'car',
+    mass: 725,
+    engineId: 'engine_rover_k18',
+    gearboxId: 'gearbox_rover_pg1',
+    tankLitres: 36,
+    wheelGrip: 0.88,
+    brakeDecelG: 1.0,
+    suspension: SUSP_ELISE,
+    steerLock: 0.551,
+    rearDriveBias: 1,
+    handlingProfile: 'sport',
+    frontWeightShare: 0.39,
+    // Front bar only, as built.
+    antiRoll: { front: 0.6, rear: 0 },
+    dragArea: 0.679,
+    wheelSetPool: [],
+  },
+  {
+    // Ferrari Testarossa (1984): 1506 kg, 390 PS flat twelve amidships, two metres
+    // wide, 290 km/h.
+    ...donorLook('gt_vaz2110'),
+    id: 'pg_testarossa',
+    label: 'Ferrari Testarossa',
+    bodyClass: 'car',
+    mass: 1506,
+    engineId: 'engine_ferrari_f113a',
+    gearboxId: 'gearbox_ferrari_tr5',
+    tankLitres: 115,
+    wheelGrip: 0.88,
+    brakeDecelG: 0.95,
+    suspension: SUSP_TESTAROSSA,
+    steerLock: 0.500,
+    rearDriveBias: 1,
+    handlingProfile: 'sport',
+    frontWeightShare: 0.41,
+    antiRoll: { front: 0.55, rear: 0.4 },
+    // ZF 40% limited slip.
+    rearDiff: { lock: 0.4, preloadNm: 60 },
+    dragArea: 0.695,
+    wheelSetPool: [],
+  },
+  {
+    // Lancia Delta HF Integrale 16v (1989): 1250 kg, 200 PS turbo, permanent 4x4
+    // split 47/53, 220 km/h. The one that goes anywhere quickly.
+    ...donorLook('sa_vaz2109'),
+    id: 'pg_integrale',
+    label: 'Lancia Delta Integrale',
+    bodyClass: 'car',
+    mass: 1250,
+    engineId: 'engine_lancia_integrale_16v',
+    gearboxId: 'gearbox_lancia_integrale',
+    tankLitres: 57,
+    wheelGrip: 0.85,
+    brakeDecelG: 0.9,
+    suspension: SUSP_INTEGRALE,
+    steerLock: 0.566,
+    rearDriveBias: 0.53,
+    handlingProfile: 'sport',
+    frontWeightShare: 0.6,
+    antiRoll: { front: 0.6, rear: 0.4 },
+    // Torsen at the back, as on the 16v (TBR about 3).
+    rearDiff: { lock: 0.5, preloadNm: 0 },
+    dragArea: 0.777,
+    wheelSetPool: [],
+  },
+];
+
 const ENTRIES: readonly Entry[] = [
   // -------------------------------------------------------------------------
   // Low Poly Soviet Car Pack. Fifteen FBX bodies, one per model, each carrying
@@ -1460,6 +1832,11 @@ const ENTRIES: readonly Entry[] = [
   // to the exterior and meshopt-compressed without geometry decimation.
   // -------------------------------------------------------------------------
   ...GTAV_CARS,
+
+  // -------------------------------------------------------------------------
+  // The proving ground: real cars' physics on borrowed bodies.
+  // -------------------------------------------------------------------------
+  ...PROVING_SPECS,
 ];
 export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   id: e.id,
@@ -1490,6 +1867,9 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   rearDriveBias: e.rearDriveBias,
   handlingProfile: e.handlingProfile ?? 'classic',
   frontWeightShare: e.frontWeightShare,
+  antiRoll: e.antiRoll,
+  frontDiff: e.frontDiff,
+  rearDiff: e.rearDiff,
   dragArea: e.dragArea,
   lights: e.lights,
   storageCells: TRUNK_CELL_COUNT,

@@ -288,6 +288,55 @@ const TARGETS: Readonly<Record<string, Target>> = {
     source: 'man. autoprospect.ru/vaz/2110-zhiguli/1-obshhie-svedeniya.html (2110, carburettor)',
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.138 },
   },
+
+  // The proving ground (vehicle/carmodels.ts `PROVING_SPECS`). Figures as reprinted by
+  // carfolio.com / automobile-catalog.com and the makers' press numbers; 0-100 only
+  // where the maker printed one, braking and lateral grip not yet sourced.
+  pg_2cv: {
+    wheelbase: 2.4, track: 1.26, radius: 0.293, top: 117, to100: null,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.35, brake: null, lat: null, hz: 0.9,
+    source: 'carfolio 2CV6 1979 (29 bhp, 585 kg, 117 km/h)',
+  },
+  pg_mini: {
+    wheelbase: 2.036, track: 1.214, radius: 0.25, top: 157, to100: null,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 4.85, brake: null, lat: null, hz: 1.7,
+    source: 'automobile-catalog Cooper S 1275, 3.44 axle',
+  },
+  pg_911sc: {
+    wheelbase: 2.272, track: 1.369, radius: 0.32, top: 225, to100: 7.0,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.35, brake: null, lat: null, hz: 1.45,
+    source: 'carfolio 911 SC 1980; Porsche 0-100 for the 204 PS SC',
+  },
+  pg_mustang: {
+    wheelbase: 2.553, track: 1.455, radius: 0.326, top: 220, to100: null,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.9, brake: null, lat: null, hz: 1.25,
+    source: 'automobile-catalog Mustang GT 1990 hatchback; T5 1990-93 gear set',
+  },
+  pg_defender: {
+    wheelbase: 2.794, track: 1.486, radius: 0.393, top: 137, to100: null,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 6.4, brake: null, lat: null, hz: 1.1,
+    source: 'automobile-catalog Defender 110 County TDi 1992',
+  },
+  pg_t2: {
+    wheelbase: 2.4, track: 1.385, radius: 0.33, top: 110, to100: null,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 6.1, brake: null, lat: null, hz: 1.02,
+    source: 'VW T2b 1600 (50 PS) published top speed',
+  },
+  pg_elise: {
+    wheelbase: 2.3, track: 1.44, radius: 0.306, top: 202, to100: 5.8,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.0, brake: null, lat: null, hz: 1.8,
+    source: 'Lotus Elise S1 1996 press figures',
+  },
+  pg_testarossa: {
+    wheelbase: 2.55, track: 1.518, radius: 0.334, top: 290, to100: 5.8,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 6.0, brake: null, lat: null, hz: 1.6,
+    source: 'Ferrari Testarossa 1984 factory figures',
+  },
+  pg_integrale: {
+    wheelbase: 2.48, track: 1.4, radius: 0.295, top: 220, to100: 5.7,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.2, brake: null, lat: null, hz: 1.5,
+    source: 'Lancia Delta HF Integrale 16v 1989 factory figures',
+  },
 };
 
 /*
@@ -324,6 +373,15 @@ const FACTORY_ENGINES: Readonly<Record<string, MakerEngine>> = {
   engine_chevy_350: { power: { hp: 200 }, powerRpm: 4400, torque: { lbft: 300 }, torqueRpm: 2800, source: 'Chevrolet 350 L48; Chevrolet 1972 passenger car specifications' },
   engine_bmw_m10_tii: { power: { ps: 130 }, powerRpm: 5800, torque: { nm: 181 }, torqueRpm: 4500, source: 'BMW M10 (2002 tii); BMW Group Classic 2002 tii technical data' },
   engine_cosworth_bda: { power: { ps: 120 }, powerRpm: 6500, torque: { nm: 152 }, torqueRpm: 4000, source: 'Cosworth BDA (Escort RS1600); Ford RS1600 homologation data' },
+  engine_citroen_a06: { power: { kw: 21.6 }, powerRpm: 5750, torque: { nm: 39 }, torqueRpm: 3500, source: 'Citroën A06/635 (2CV6); carfolio 2CV6 1979' },
+  engine_bmc_1275s: { power: { kw: 56 }, powerRpm: 5800, torque: { nm: 107 }, torqueRpm: 3000, source: 'BMC A-series 1275 S; automobile-catalog Cooper S 1275' },
+  engine_porsche_930_10: { power: { ps: 204 }, powerRpm: 5900, torque: { nm: 267 }, torqueRpm: 4300, source: 'Porsche 930/10 (911 SC 1980-83); carfolio 911 SC' },
+  engine_ford_50_ho: { power: { hp: 225 }, powerRpm: 4200, torque: { lbft: 300 }, torqueRpm: 3200, source: 'Ford 5.0 HO (Mustang GT 1987-92); Ford specifications' },
+  engine_rover_200tdi: { power: { kw: 80 }, powerRpm: 3800, torque: { nm: 255 }, torqueRpm: 1800, source: 'Rover 200Tdi (Defender 1990-94); automobile-catalog Defender 110 TDi' },
+  engine_vw_type1_1600: { power: { ps: 50 }, powerRpm: 4000, torque: { nm: 106 }, torqueRpm: 2800, source: 'VW Type 1 1600 AS (T2b); VW specifications' },
+  engine_rover_k18: { power: { ps: 120 }, powerRpm: 5500, torque: { nm: 165 }, torqueRpm: 3000, source: 'Rover 18K4F (Lotus Elise S1); Lotus press data 1996' },
+  engine_ferrari_f113a: { power: { ps: 390 }, powerRpm: 6300, torque: { nm: 490 }, torqueRpm: 4500, source: 'Ferrari F113A (Testarossa 1984); Ferrari factory data' },
+  engine_lancia_integrale_16v: { power: { ps: 200 }, powerRpm: 5500, torque: { nm: 298 }, torqueRpm: 3000, source: 'Lancia 831 E5 (Delta HF Integrale 16v 1989); Lancia factory data' },
   engine_lada_1200: { power: { ps: 64 }, powerRpm: 5600, torque: { kgfm: 8.9 }, torqueRpm: 3400, source: 'VAZ-2101; AO 1982 AvtoVAZ catalogue' },
   engine_zmz_21: { power: { ps: 70 }, powerRpm: 4000, torque: { kgfm: 17 }, torqueRpm: 2200, source: 'ZMZ-21A; GAZ-21 manual (rpm: ru.wikipedia)' },
   engine_zmz_24: { power: { ps: 95 }, powerRpm: 4500, torque: { kgfm: 19 }, torqueRpm: [2200, 2400], source: 'ZMZ-24D; GAZ-24 manual' },

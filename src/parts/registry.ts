@@ -1118,6 +1118,341 @@ const RADIATOR_VARIANTS: readonly PartVariant[] = [
   },
 ];
 
+/*
+ * ---- the proving ground's drivelines ----
+ *
+ * The engines and boxes of the nine cars in `PROVING_SPECS` (vehicle/carmodels.ts):
+ * cars chosen to sit as far apart in layout, mass and power as the catalogue can
+ * reach, so that driving one after another answers whether the physics makes them
+ * feel different. Net figures from the makers' published ratings as reprinted by
+ * carfolio.com, automobile-catalog.com and the owners' clubs; not yet checked against
+ * the original brochures. `redlineRpm` and `brakingCoeff` follow the rules stated
+ * above `ENGINE_VARIANTS`.
+ */
+const PROVING_ENGINE_VARIANTS: readonly PartVariant[] = [
+  {
+    // Citroën 2CV6, 602 cc air-cooled flat twin: 21.6 kW (29 bhp) at 5750, 39 Nm at 3500.
+    id: 'engine_citroen_a06',
+    kind: 'engine',
+    label: '0.6 Citroën flat twin',
+    mass: 48,
+    fits: ['car'],
+    engine: {
+      peakPowerKw: 21.6,
+      powerPeakRpm: 5750,
+      peakTorqueNm: 39,
+      torquePeakRpm: 3500,
+      redlineRpm: 6150,
+      idleRpm: 800,
+      bsfc: 0.34,
+      brakingCoeff: 0.0061,
+      cylinders: 2,
+    },
+  },
+  {
+    // BMC A-series 1275 in the Mini Cooper S: 56 kW (76 PS) at 5800, 107 Nm at 3000.
+    id: 'engine_bmc_1275s',
+    kind: 'engine',
+    label: '1.3 BMC A-series Cooper S',
+    mass: 112,
+    fits: ['car'],
+    engine: {
+      peakPowerKw: 56,
+      powerPeakRpm: 5800,
+      peakTorqueNm: 107,
+      torquePeakRpm: 3000,
+      redlineRpm: 6500,
+      idleRpm: 750,
+      bsfc: 0.33,
+      brakingCoeff: 0.0157,
+      cylinders: 4,
+    },
+  },
+  {
+    // Porsche 930/10, the 911 SC's 3.0 flat six: 150 kW (204 PS) at 5900, 267 Nm at 4300.
+    id: 'engine_porsche_930_10',
+    kind: 'engine',
+    label: '3.0 Porsche flat six',
+    mass: 190,
+    fits: ['car'],
+    engine: {
+      peakPowerKw: 150,
+      powerPeakRpm: 5900,
+      peakTorqueNm: 267,
+      torquePeakRpm: 4300,
+      redlineRpm: 6500,
+      idleRpm: 900,
+      bsfc: 0.3,
+      brakingCoeff: 0.0392,
+      cylinders: 6,
+    },
+  },
+  {
+    // Ford 5.0 HO V8 in the 1990 Mustang GT: 168 kW (225 hp) at 4200, 407 Nm at 3200.
+    id: 'engine_ford_50_ho',
+    kind: 'engine',
+    label: '5.0 Ford HO V8',
+    mass: 210,
+    fits: ['car', 'truck'],
+    engine: {
+      peakPowerKw: 168,
+      powerPeakRpm: 4200,
+      peakTorqueNm: 407,
+      torquePeakRpm: 3200,
+      redlineRpm: 5000,
+      idleRpm: 650,
+      bsfc: 0.35,
+      brakingCoeff: 0.0777,
+      cylinders: 8,
+    },
+  },
+  {
+    // Land Rover 200Tdi, 2.5 turbodiesel: 80 kW (107 hp) at 3800, 255 Nm at 1800.
+    // The governor, not a red zone, ends it.
+    id: 'engine_rover_200tdi',
+    kind: 'engine',
+    label: '2.5 Rover 200Tdi diesel',
+    mass: 230,
+    fits: ['truck'],
+    engine: {
+      peakPowerKw: 80,
+      powerPeakRpm: 3800,
+      peakTorqueNm: 255,
+      torquePeakRpm: 1800,
+      redlineRpm: 4200,
+      idleRpm: 750,
+      bsfc: 0.27,
+      brakingCoeff: 0.058,
+      cylinders: 4,
+    },
+  },
+  {
+    // VW Type 1 1600 in the T2 bus: 37 kW (50 PS) at 4000, 106 Nm at 2800.
+    id: 'engine_vw_type1_1600',
+    kind: 'engine',
+    label: '1.6 VW air-cooled flat four',
+    mass: 112,
+    fits: ['car', 'truck'],
+    engine: {
+      peakPowerKw: 37,
+      powerPeakRpm: 4000,
+      peakTorqueNm: 106,
+      torquePeakRpm: 2800,
+      redlineRpm: 4400,
+      idleRpm: 850,
+      bsfc: 0.35,
+      brakingCoeff: 0.023,
+      cylinders: 4,
+    },
+  },
+  {
+    // Rover K-series 1.8 in the Lotus Elise S1: 88 kW (120 PS) at 5500, 165 Nm at 3000.
+    id: 'engine_rover_k18',
+    kind: 'engine',
+    label: '1.8 Rover K-series',
+    mass: 98,
+    fits: ['car'],
+    engine: {
+      peakPowerKw: 88,
+      powerPeakRpm: 5500,
+      peakTorqueNm: 165,
+      torquePeakRpm: 3000,
+      redlineRpm: 6800,
+      idleRpm: 850,
+      bsfc: 0.3,
+      brakingCoeff: 0.0232,
+      cylinders: 4,
+    },
+  },
+  {
+    // Ferrari F113A, the Testarossa's 4.9 flat twelve: 286.8 kW (390 PS) at 6300, 490 Nm at 4500.
+    id: 'engine_ferrari_f113a',
+    kind: 'engine',
+    label: '4.9 Ferrari flat twelve',
+    mass: 280,
+    fits: ['car'],
+    engine: {
+      peakPowerKw: 286.8,
+      powerPeakRpm: 6300,
+      peakTorqueNm: 490,
+      torquePeakRpm: 4500,
+      redlineRpm: 6800,
+      idleRpm: 950,
+      bsfc: 0.33,
+      brakingCoeff: 0.0688,
+      cylinders: 12,
+    },
+  },
+  {
+    // Lancia Delta HF Integrale 16v, 2.0 turbo: 147 kW (200 PS) at 5500, 298 Nm at 3000.
+    id: 'engine_lancia_integrale_16v',
+    kind: 'engine',
+    label: '2.0 Lancia turbo 16v',
+    mass: 165,
+    fits: ['car'],
+    engine: {
+      peakPowerKw: 147,
+      powerPeakRpm: 5500,
+      peakTorqueNm: 298,
+      torquePeakRpm: 3000,
+      redlineRpm: 6500,
+      idleRpm: 900,
+      bsfc: 0.32,
+      brakingCoeff: 0.0438,
+      cylinders: 4,
+    },
+  },
+];
+
+/** Efficiency bands as stated on `GearboxSpec.efficiency`; transaxles count as front-drive. */
+const PROVING_GEARBOX_VARIANTS: readonly PartVariant[] = [
+  {
+    // 2CV6 four-speed, 4.13 final drive: 117 km/h at the rated 5750 on 125R15.
+    id: 'gearbox_citroen_4',
+    kind: 'gearbox',
+    label: 'Citroën 2CV four-speed',
+    mass: 22,
+    fits: ['car'],
+    gearbox: {
+      ratios: [5.202, 2.656, 1.785, 1.315],
+      reverse: 5.0,
+      finalDrive: 4.13,
+      shiftTime: 0.45,
+      automatic: false,
+      efficiency: 0.92,
+    },
+  },
+  {
+    // Cooper S close-ratio box in the sump, 3.44 final drive.
+    id: 'gearbox_mini_cr4',
+    kind: 'gearbox',
+    label: 'Mini close-ratio four-speed',
+    mass: 30,
+    fits: ['car'],
+    gearbox: {
+      ratios: [3.33, 2.094, 1.353, 1.0],
+      reverse: 3.35,
+      finalDrive: 3.44,
+      shiftTime: 0.3,
+      automatic: false,
+      efficiency: 0.92,
+    },
+  },
+  {
+    // Porsche 915 five-speed transaxle, 3.875 final drive. Slow, notchy shift.
+    id: 'gearbox_porsche_915',
+    kind: 'gearbox',
+    label: 'Porsche 915 five-speed',
+    mass: 50,
+    fits: ['car'],
+    gearbox: {
+      ratios: [3.181, 1.833, 1.261, 1.0, 0.786],
+      reverse: 3.325,
+      finalDrive: 3.875,
+      shiftTime: 0.38,
+      automatic: false,
+      efficiency: 0.92,
+    },
+  },
+  {
+    // Borg-Warner T5 (1990-93 gear set) and the GT's 2.73 live axle.
+    id: 'gearbox_bw_t5',
+    kind: 'gearbox',
+    label: 'Borg-Warner T5 five-speed',
+    mass: 34,
+    fits: ['car', 'truck'],
+    gearbox: {
+      ratios: [3.35, 1.93, 1.26, 1.0, 0.68],
+      reverse: 3.15,
+      finalDrive: 2.73,
+      shiftTime: 0.3,
+      automatic: false,
+      efficiency: 0.9,
+    },
+  },
+  {
+    // LT77 five-speed through the LT230 transfer box in high range (1.41) onto 3.54
+    // axles: one 4.99 final drive, 137 km/h at the governed 3800 on 7.50R16.
+    id: 'gearbox_landrover_lt77',
+    kind: 'gearbox',
+    label: 'Land Rover LT77 + LT230',
+    mass: 90,
+    fits: ['truck'],
+    gearbox: {
+      ratios: [3.585, 2.301, 1.507, 1.0, 0.831],
+      reverse: 3.7,
+      finalDrive: 4.99,
+      shiftTime: 0.5,
+      automatic: false,
+      efficiency: 0.85,
+    },
+  },
+  {
+    // VW T2 four-speed transaxle, 5.375 final drive: 110 km/h at 4000 on 185R14.
+    id: 'gearbox_vw_t2_4',
+    kind: 'gearbox',
+    label: 'VW T2 four-speed',
+    mass: 36,
+    fits: ['car', 'truck'],
+    gearbox: {
+      ratios: [3.8, 2.06, 1.26, 0.82],
+      reverse: 3.61,
+      finalDrive: 5.375,
+      shiftTime: 0.45,
+      automatic: false,
+      efficiency: 0.92,
+    },
+  },
+  {
+    // Rover PG1 five-speed as fitted to the Elise S1, 3.938 final drive.
+    id: 'gearbox_rover_pg1',
+    kind: 'gearbox',
+    label: 'Rover PG1 five-speed',
+    mass: 38,
+    fits: ['car'],
+    gearbox: {
+      ratios: [3.167, 1.842, 1.308, 1.033, 0.765],
+      reverse: 3.0,
+      finalDrive: 3.938,
+      shiftTime: 0.25,
+      automatic: false,
+      efficiency: 0.92,
+    },
+  },
+  {
+    // Testarossa five-speed transaxle under the engine, 3.21 final drive.
+    id: 'gearbox_ferrari_tr5',
+    kind: 'gearbox',
+    label: 'Ferrari Testarossa five-speed',
+    mass: 60,
+    fits: ['car'],
+    gearbox: {
+      ratios: [3.139, 2.014, 1.526, 1.167, 0.875],
+      reverse: 2.535,
+      finalDrive: 3.21,
+      shiftTime: 0.3,
+      automatic: false,
+      efficiency: 0.92,
+    },
+  },
+  {
+    // Integrale five-speed, permanent 4x4 through an epicyclic centre differential.
+    id: 'gearbox_lancia_integrale',
+    kind: 'gearbox',
+    label: 'Lancia Integrale five-speed 4x4',
+    mass: 70,
+    fits: ['car'],
+    gearbox: {
+      ratios: [3.5, 2.176, 1.519, 1.132, 0.929],
+      reverse: 3.545,
+      finalDrive: 3.111,
+      shiftTime: 0.28,
+      automatic: false,
+      efficiency: 0.85,
+    },
+  },
+];
+
 export const ALL_VARIANTS: readonly PartVariant[] = [
   ...ENGINE_VARIANTS,
   ...GEARBOX_VARIANTS,
@@ -1128,6 +1463,8 @@ export const ALL_VARIANTS: readonly PartVariant[] = [
   ...LADA_VARIANTS,
   ...SOVIET_ENGINE_VARIANTS,
   ...SOVIET_GEARBOX_VARIANTS,
+  ...PROVING_ENGINE_VARIANTS,
+  ...PROVING_GEARBOX_VARIANTS,
 ];
 
 const VARIANTS_BY_ID = new Map(ALL_VARIANTS.map((v) => [v.id, v]));
