@@ -33,6 +33,7 @@ import { LakeWater } from '../render/lakewater';
 import type { Sky } from '../render/sky';
 import type { VehicleLightRig } from '../render/vehiclelights';
 import type { VistaMesh } from '../render/vista';
+import { TYRE_MODEL } from '../vehicle/vehicletuning';
 import { carModel } from '../vehicle/carmodels';
 import {
   TRAILER_HALF_LENGTH,
@@ -147,7 +148,7 @@ const DEV_JUMP_LATERAL = -1.9;
  */
 export function installDevTools(ctx: DevToolsContext): DevTools {
   /** The dev spawn tool behind `PauseHooks.spawnVehicle`. */
-  const devSpawnVehicle = (request: SpawnRequest): void => {
+  const devSpawnVehicle = (request: SpawnRequest): string => {
     // Put the car on the ground ahead of the view, not at the player's feet: a
     // chassis spawned inside the player (or inside the car being driven) would be
     // resolved by the solver as an explosion.
@@ -175,8 +176,21 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     const heading = Math.atan2(dir.x / flat, dir.z / flat);
     // `dropX`/`dropZ` are relative — they came off the camera and fed a Rapier ray.
     // `spawnCarState` writes a saved `CarState`, which is absolute.
-    spawnCarState(ctx.world, request, dropX + ctx.origin.x, y, dropZ + ctx.origin.z, heading);
+    const car = spawnCarState(ctx.world, request, dropX + ctx.origin.x, y, dropZ + ctx.origin.z, heading);
     ctx.hud.setToast(`spawned ${carModel(request.modelId).label}`);
+    return car.id;
+  };
+
+  /**
+   * `__bro.driveModel(id)`: out of the current car, a new `id` dropped ahead of the
+   * view, and straight into it — the quickest way to drive one model after another
+   * on the same stretch of road.
+   */
+  const devDriveModel = (modelId: string): string => {
+    if (ctx.world.state.player.drivingCarId) ctx.world.apply({ t: 'exit_car' });
+    const carId = devSpawnVehicle({ modelId });
+    ctx.world.apply({ t: 'enter_car', carId });
+    return carId;
   };
 
   /**
@@ -554,6 +568,13 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     // `jumpTo(480)` then poll `settled()`; see devJumpTo.
     jumpTo: devJumpTo,
     settled: jumpSettled,
+    driveModel: devDriveModel,
+    // A/B for the brush tyre (vehicletuning.ts `TYRE_MODEL`), on the move.
+    brushTyres: (on = true) => {
+      TYRE_MODEL.brush = on;
+      ctx.hud.setToast(on ? 'tyres: brush' : 'tyres: curve');
+      return on;
+    },
     tumbleweeds: ctx.tumbleweeds,
     traffic: ctx.traffic,
     vitals: ctx.vitals,

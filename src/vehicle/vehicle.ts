@@ -114,6 +114,10 @@ import {
   GRIP_MASS_EXPONENT,
   GRIP_REFERENCE_MASS,
   HANDLING_PROFILES,
+  tyreCurve,
+  brushShape,
+  TYRE_MODEL,
+  type TyreCurve,
   type HandlingTuning,
   IMPACT_UNEXPLAINED_FLOOR_MPS,
   INERTIA_PITCH_YAW_GAIN,
@@ -157,10 +161,6 @@ import {
   SLIDING_GRIP_FRACTION,
   SLIP_ANGLE_REF_MPS,
   SLIP_CURVE_SHARPNESS,
-  SLIP_FULL_FRONT_DEG,
-  SLIP_FULL_REAR_DEG,
-  SLIP_PLATEAU_FRONT,
-  SLIP_PLATEAU_REAR,
   SLIP_REFERENCE_MPS,
   STEERING_WHEEL_HALF_LOCK_RAD,
   STEER_CASTER_RETURN_RAD_S,
@@ -523,6 +523,8 @@ export class Vehicle implements Rebasable {
   private readonly model: CarModelDef;
   /** Shared immutable tuning selected once from the catalogue's mechanical family. */
   private readonly handling: HandlingTuning;
+  /** The side-force curve: the car's own tyre's, or its profile's. */
+  private readonly tyre: TyreCurve;
   private readonly measure: CarModelMeasure;
   /** Axle positions, wheel counts and weight distribution; measured once, in `measureAxles`. */
   private readonly axleGeometry: AxleGeometry;
@@ -870,6 +872,7 @@ export class Vehicle implements Rebasable {
     this.roadTexture = new RoadTexture(world.seed);
     this.model = carModel(carState.modelId);
     this.handling = HANDLING_PROFILES[this.model.handlingProfile];
+    this.tyre = tyreCurve(this.model.tyre, this.handling);
     this.measure = carModelMeasure(carState.modelId);
     this.axleGeometry = this.measureAxles();
     this.lamps = new VehicleLamps({
@@ -2373,7 +2376,7 @@ export class Vehicle implements Rebasable {
       const rollDistance = Math.abs(fwdSpeed) * dt;
       w.slipAngleRad +=
         (slipRad - w.slipAngleRad) *
-        (1 - Math.exp(-rollDistance / this.handling.tyreRelaxationLength));
+        (1 - Math.exp(-rollDistance / this.tyre.relaxationM));
       // The limiter reads the BUILT angle, not the geometric one: countersteer has to
       // respond to the slide the tyres are actually carrying.
       if (!w.isFront && w.grounded) rearSlipMax = Math.max(rearSlipMax, w.slipAngleRad);
@@ -2383,17 +2386,6 @@ export class Vehicle implements Rebasable {
       // that decides how much slip the car runs, and it is why the number comes out
       // where a period car's does — at 0.7 g a tyre needs 0.7/LATERAL_MU of its peak,
       // which the sine reaches around five degrees.
-      const peakDeg = w.isFront
-        ? this.handling.slipPeakFrontDeg
-        : this.handling.slipPeakRearDeg;
-      const fullDeg = w.isFront ? SLIP_FULL_FRONT_DEG : SLIP_FULL_REAR_DEG;
-      const plateau = w.isFront ? SLIP_PLATEAU_FRONT : SLIP_PLATEAU_REAR;
-      const slipDeg = (w.slipAngleRad * 180) / Math.PI;
-      const fadeT = clamp((slipDeg - peakDeg) / (fullDeg - peakDeg), 0, 1);
-      const risen =
-        Math.tanh(SLIP_CURVE_SHARPNESS * Math.min(slipDeg / peakDeg, 1)) / TANH_SHARPNESS;
-      const shape = risen * (1 - (1 - plateau) * fadeT * fadeT * (3 - 2 * fadeT));
-
       // μ(Fz). Exactly 1 at this wheel's static share of the car's weight, so the
       // calibrated straight-line figures stand and only TRANSFER changes anything.
       const loadFactor = clamp(
@@ -2401,6 +2393,27 @@ export class Vehicle implements Rebasable {
         LOAD_SENSITIVITY_MIN,
         LOAD_SENSITIVITY_MAX,
       );
+
+      const staticPeakDeg = w.isFront ? this.tyre.peakFrontDeg : this.tyre.peakRearDeg;
+      const fullDeg = w.isFront ? this.tyre.fullFrontDeg : this.tyre.fullRearDeg;
+      const plateau = w.isFront ? this.tyre.plateauFront : this.tyre.plateauRear;
+      const slipDeg = (w.slipAngleRad * 180) / Math.PI;
+      let peakDeg = staticPeakDeg;
+      let risen: number;
+      if (TYRE_MODEL.brush && this.model.tyre) {
+        const brush = brushShape(
+          w.slipAngleRad,
+          staticPeakDeg,
+          w.loadN / w.staticLoadN,
+          loadFactor,
+        );
+        risen = brush.shape;
+        peakDeg = Math.min(brush.peakDeg, fullDeg - 1);
+      } else {
+        risen = Math.tanh(SLIP_CURVE_SHARPNESS * Math.min(slipDeg / peakDeg, 1)) / TANH_SHARPNESS;
+      }
+      const fadeT = clamp((slipDeg - peakDeg) / (fullDeg - peakDeg), 0, 1);
+      const shape = risen * (1 - (1 - plateau) * fadeT * fadeT * (3 - 2 * fadeT));
 
       const frictionSlip =
         surface.mu * weatherGrip(surfaceType) * gripBudgetFactor * loadFactor;
@@ -3178,6 +3191,7 @@ export class Vehicle implements Rebasable {
     const drivelineInertia = this.drivetrain.drivenWheelInertiaKgM2(
       this.frontDrivenCount + this.rearDrivenCount,
     );
+    this.applyDifferentials(dt, drivelineInertia);
     // Each wheel's own parked load (`w.staticLoadN`, set in `rebuild`) is the reference
     // both the μ(Fz) factor and the traction-control load gate are measured against.
     // It varies across the axles, because the weight does.
@@ -4026,6 +4040,48 @@ export class Vehicle implements Rebasable {
     this.chassisBody.applyImpulse(this.forceScratch, true);
   }
 
+  /**
+   * LIMITED-SLIP DIFFERENTIALS, where the model has one (`frontDiff` / `rearDiff`).
+   *
+   * An open differential is what the rest of this file already is: each driven wheel
+   * gets an equal share of the torque, and a wheel that breaks loose spins up on its
+   * own while the other keeps what it had. A limited-slip one resists the two wheels of
+   * its axle turning at different speeds, and in resisting it moves torque from the
+   * faster wheel to the slower: the unloaded inside wheel stops flaring on the way out
+   * of a bend and the loaded outside one pushes, which is the whole of what one does.
+   *
+   * The resisting torque is capped by the unit's own ability (preload plus lock times
+   * the torque through it), and by what would bring the two wheels to one speed within
+   * this step with nothing else acting — a friction coupling slows slipping, it never
+   * reverses it. Half of that, because the tyres are acting too and the full figure
+   * would overshoot into the next step's opposite correction.
+   */
+  private applyDifferentials(dt: number, drivelineInertia: number): void {
+    for (let axle = 0; axle < 2; axle++) {
+      const front = axle === 0;
+      const diff = front ? this.model.frontDiff : this.model.rearDiff;
+      if (!diff || (front ? this.frontDrivenCount : this.rearDrivenCount) === 0) continue;
+      let left: WheelVisual | null = null;
+      let right: WheelVisual | null = null;
+      for (const w of this.wheels) {
+        if (w.isFront !== front) continue;
+        if (w.sideSign < 0) left = w;
+        else right = w;
+      }
+      if (!left || !right) continue;
+      const cap = diff.preloadNm + diff.lock * Math.abs(left.driveTorqueNm + right.driveTorqueNm);
+      const slip = left.spinRadS - right.spinRadS;
+      if (cap <= 0 || slip === 0) continue;
+      const radius = 0.5 * (left.radius + right.radius);
+      const wheelMass = WHEEL_MASS_KG * (radius / WHEEL_REFERENCE_RADIUS) ** 2;
+      const inertia = 0.5 * wheelMass * radius * radius + drivelineInertia;
+      const sync = (Math.abs(slip) * inertia) / (2 * dt);
+      const transfer = Math.sign(slip) * Math.min(cap, 0.5 * sync);
+      left.driveTorqueNm -= transfer;
+      right.driveTorqueNm += transfer;
+    }
+  }
+
   private applyAntiRollBars(dt: number): void {
     for (const w of this.wheels) w.barN = 0;
     for (let axle = 0; axle < 2; axle++) {
@@ -4054,7 +4110,11 @@ export class Vehicle implements Rebasable {
       const rightMean = rightSum / rightCount;
       if (leftMean === rightMean) continue;
 
-      const fraction = front ? ANTI_ROLL_FRONT_FRACTION : ANTI_ROLL_REAR_FRACTION;
+      const bars = this.model.antiRoll;
+      const fraction = front
+        ? (bars?.front ?? ANTI_ROLL_FRONT_FRACTION)
+        : (bars?.rear ?? ANTI_ROLL_REAR_FRACTION);
+      if (fraction <= 0) continue;
       // Each wheel is pushed by the bar in proportion to how much MORE compressed its
       // own side is than the other. The two are equal and opposite by construction, so
       // a bar can never lift or drop the car — only untwist it. Written this way rather

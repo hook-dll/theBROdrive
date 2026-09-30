@@ -59,6 +59,14 @@ export interface EngineSpec {
   readonly brakingCoeff: number;
   readonly cylinders: number;
   /**
+   * The full-throttle curve as published, when a maker's or a dyno's curve exists:
+   * `[rpm, Nm]` points in rising rpm, net, and passing through the torque and power
+   * points above. Between them the curve is a monotone cubic through the points, so
+   * an engine's dips and plateaus are its own rather than the two-point shape's.
+   * Absent, `engineTorqueNm` builds the curve from the two rated points alone.
+   */
+  readonly torqueCurve?: readonly (readonly [number, number])[];
+  /**
    * Cooling profile overrides. Anything omitted is derived by `engineHeat`, so an
    * engine only states what makes it unusual (a lazy Volga four that runs cool, a
    * rally engine that warns early).

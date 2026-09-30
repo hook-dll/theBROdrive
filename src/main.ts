@@ -1,3 +1,4 @@
+import { TYRE_MODEL } from './vehicle/vehicletuning';
 import * as THREE from 'three';
 import { FrameProfiler } from './core/frameprofiler';
 import { installRetro, retroActive } from './render/retro';
@@ -2628,6 +2629,8 @@ async function boot(): Promise<void> {
 // Dev scenes are separate entry points reached by query string, so their code is a
 // dynamic import the production bundle drops rather than something the game carries.
 const query = new URLSearchParams(window.location.search);
+// `?tyre=curve`: the old side-force curve instead of the brush tyre (A/B).
+if (query.get('tyre') === 'curve') TYRE_MODEL.brush = false;
 const launch = query.has('poi-gallery')
   ? import('./poi-gallery').then(({ bootPoiGallery }) => bootPoiGallery())
   : query.has('artifact-gallery')

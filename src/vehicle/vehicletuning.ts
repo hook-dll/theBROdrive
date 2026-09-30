@@ -531,6 +531,109 @@ export interface HandlingTuning {
   readonly tyreRelaxationLength: number;
 }
 
+/** The side-force curve's shape, per axle: see `tyreCurve`. */
+export interface TyreCurve {
+  readonly peakFrontDeg: number;
+  readonly peakRearDeg: number;
+  readonly fullFrontDeg: number;
+  readonly fullRearDeg: number;
+  readonly plateauFront: number;
+  readonly plateauRear: number;
+  readonly relaxationM: number;
+}
+
+/**
+ * THE CAR'S OWN TYRE. Without a `TyreSpec` a car runs its handling profile's curve and
+ * the constants above, exactly as before. With one, the curve comes from the sidewall:
+ *
+ *   peak slip angle   a cross-ply carcass needs about 8 degrees to reach its peak; a
+ *                     radial's peak falls with its sidewall, 3 + 4 · aspect (6.3 at
+ *                     an 82-series, 5 at a 50), the spread road tests measure.
+ *   relaxation        the rolling distance to build force: 0.45 m for cross-ply, and
+ *                     0.1 + 0.3 · aspect for a radial, from 0.35 m at 82-series down to
+ *                     0.24 m at 45 — tall rubber lags, low rubber answers at once.
+ *   breakaway         what the tyre keeps past its peak and how soon it gets there:
+ *                     a cross-ply fades gently to 0.86 by 30 degrees, a tall radial
+ *                     to 0.84 by 26, a 45-series to 0.72 by 20. That is the feel of
+ *                     a slide: a tall tyre warns and forgives, a low one lets go.
+ *
+ * The rear peaks 0.6 degrees before the front and reaches its plateau 4 degrees
+ * sooner, the same relation the profile constants keep (see SLIP_PEAK_*).
+ */
+export function tyreCurve(spec: { construction: 'crossply' | 'radial'; aspect: number } | undefined, handling: HandlingTuning): TyreCurve {
+  if (!spec) {
+    return {
+      peakFrontDeg: handling.slipPeakFrontDeg,
+      peakRearDeg: handling.slipPeakRearDeg,
+      fullFrontDeg: SLIP_FULL_FRONT_DEG,
+      fullRearDeg: SLIP_FULL_REAR_DEG,
+      plateauFront: SLIP_PLATEAU_FRONT,
+      plateauRear: SLIP_PLATEAU_REAR,
+      relaxationM: handling.tyreRelaxationLength,
+    };
+  }
+  const aspect = Math.min(1, Math.max(0.3, spec.aspect));
+  const crossply = spec.construction === 'crossply';
+  const peak = crossply ? 8 : 3 + 4 * aspect;
+  const full = crossply ? 30 : 12 + 17 * aspect;
+  const plateau = crossply ? 0.86 : 0.72 + 0.35 * (aspect - 0.45);
+  return {
+    peakFrontDeg: peak,
+    peakRearDeg: peak - 0.6,
+    fullFrontDeg: full,
+    fullRearDeg: full - 4,
+    plateauFront: Math.min(0.88, plateau),
+    plateauRear: Math.min(0.88, plateau),
+    relaxationM: crossply ? 0.45 : 0.1 + 0.3 * aspect,
+  };
+}
+
+/**
+ * THE BRUSH TYRE: the side-force model for every car with a `TyreSpec`, which is the
+ * whole catalogue. The curve above remains for A/B (`?tyre=curve`, or
+ * `__bro.brushTyres(false)` on the move) and for a car that names no tyre.
+ *
+ * The tread is a row of bristles on the belt. Each one is carried through the contact
+ * patch and deflects sideways with the slip until the local grip under it runs out,
+ * from the back of the patch forward. With the load pressed over the patch as a
+ * parabola, the side force as a fraction of the grip is
+ *
+ *     s(z) = 3z - 3z² + z³   for z < 1, and 1 once the whole patch slides,
+ *     z    = tan α · Cα / (3 μ Fz)
+ *
+ * which is the model racing simulators build on. What it adds over a fixed curve is
+ * that the angle the tyre peaks at is not a constant: cornering stiffness Cα grows
+ * more slowly than load (`BRUSH_STIFFNESS_LOAD_EXPONENT`), so a tyre pressed harder
+ * reaches its peak LATER and a light one sooner — the outside front of a car loaded
+ * into a bend needs more lock than it did in a straight line, and a light inside tyre
+ * lets go at small angles. At the car's static load it peaks exactly where the
+ * `TyreCurve` says, so the two models agree in the straight and part in the bend.
+ */
+export const TYRE_MODEL = { brush: true };
+/** Cα ∝ Fz^this: 0.7 is a passenger radial's measured sublinear growth. */
+export const BRUSH_STIFFNESS_LOAD_EXPONENT = 0.7;
+
+/**
+ * The brush curve's shape at `slipRad`, as a fraction of the tyre's capacity, and the
+ * peak angle it implies at this load. `loadRatio` is Fz over the static load and
+ * `muRatio` the load-sensitivity factor already in the capacity.
+ */
+export function brushShape(
+  slipRad: number,
+  staticPeakDeg: number,
+  loadRatio: number,
+  muRatio: number,
+): { shape: number; peakDeg: number } {
+  const ratio = Math.max(0.05, loadRatio);
+  // Cα / (μ Fz) at static load, from the static peak: z reaches 1 there.
+  const stiffness = 3 / Math.tan((staticPeakDeg * Math.PI) / 180);
+  const scale = (stiffness * ratio ** BRUSH_STIFFNESS_LOAD_EXPONENT) / (ratio * Math.max(0.05, muRatio));
+  const z = (Math.tan(Math.min(slipRad, 1.4)) * scale) / 3;
+  const shape = z >= 1 ? 1 : 3 * z - 3 * z * z + z * z * z;
+  const peakDeg = (Math.atan(3 / scale) * 180) / Math.PI;
+  return { shape, peakDeg };
+}
+
 export const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>> = {
   classic: {
     steerInputExponent: STEER_INPUT_EXPONENT,

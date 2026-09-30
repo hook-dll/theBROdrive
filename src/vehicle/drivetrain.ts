@@ -251,6 +251,10 @@ export function engineTorqueNm(
   cutRpm: number = engine.redlineRpm,
 ): number {
   if (!(rpm > 0) || rpm >= cutRpm) return 0;
+  if (engine.torqueCurve && engine.torqueCurve.length >= 2) {
+    const torque = publishedCurveNm(engine, engine.torqueCurve, rpm);
+    return torque > 0 ? torque * fuelCutFade(rpm, cutRpm) : 0;
+  }
   const peakNm = engine.peakTorqueNm;
   const peakRpm = engine.torquePeakRpm;
   const powerRpm = Math.max(engine.powerPeakRpm, peakRpm + 1);
@@ -284,6 +288,57 @@ export function engineTorqueNm(
   }
 
   return torque > 0 ? torque * fuelCutFade(rpm, cutRpm) : 0;
+}
+
+/**
+ * A published curve (`EngineSpec.torqueCurve`) read at `rpm`.
+ *
+ * Between its points: a monotone cubic Hermite with Fritsch-Carlson slopes, which
+ * passes through every point, keeps a plateau flat and never invents a bump the data
+ * does not have. Below the first point it rises from the idle torque the two-point
+ * curve also uses; past the last it falls as the two-point curve does past its power
+ * peak (Leiderman, `T ∝ 1 + x - x²`), from wherever the data ends.
+ */
+function publishedCurveNm(
+  engine: EngineSpec,
+  points: readonly (readonly [number, number])[],
+  rpm: number,
+): number {
+  const first = points[0]!;
+  const last = points[points.length - 1]!;
+  if (rpm <= first[0]) {
+    const idleNm = IDLE_TORQUE_FRACTION * engine.peakTorqueNm;
+    if (rpm <= engine.idleRpm || first[0] <= engine.idleRpm) return rpm < first[0] ? idleNm : first[1];
+    return idleNm + ((first[1] - idleNm) * (rpm - engine.idleRpm)) / (first[0] - engine.idleRpm);
+  }
+  if (rpm >= last[0]) {
+    const x = rpm / last[0];
+    return last[1] * (1 + x - x * x);
+  }
+  let i = 0;
+  while (points[i + 1]![0] < rpm) i++;
+  const secant = (k: number): number =>
+    (points[k + 1]![1] - points[k]![1]) / (points[k + 1]![0] - points[k]![0]);
+  const slope = (k: number): number => {
+    if (k === 0) return secant(0);
+    if (k === points.length - 1) return secant(k - 1);
+    const a = secant(k - 1);
+    const b = secant(k);
+    // Fritsch-Carlson: flat at a turning point, the harmonic mean elsewhere.
+    return a * b <= 0 ? 0 : (2 * a * b) / (a + b);
+  };
+  const [x0, y0] = points[i]!;
+  const [x1, y1] = points[i + 1]!;
+  const h = x1 - x0;
+  const t = (rpm - x0) / h;
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return (
+    (2 * t3 - 3 * t2 + 1) * y0 +
+    (t3 - 2 * t2 + t) * h * slope(i) +
+    (-2 * t3 + 3 * t2) * y1 +
+    (t3 - t2) * h * slope(i + 1)
+  );
 }
 
 /**
