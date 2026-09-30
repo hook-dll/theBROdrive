@@ -440,6 +440,18 @@ export interface LimitedSlip {
   readonly preloadNm: number;
 }
 
+/**
+ * The tyre the car was sold on, as its size is written on the sidewall. The side-force
+ * curve is derived from it (`tyreCurve` in vehicletuning.ts): a tall soft sidewall
+ * builds force slowly, peaks late and lets go gently; a low radial is quick, peaks
+ * early and breaks away more sharply.
+ */
+export interface TyreSpec {
+  readonly construction: 'crossply' | 'radial';
+  /** Sidewall height over section width: 0.82 for 165R13, 0.6 for 225/60. */
+  readonly aspect: number;
+}
+
 /** Mechanical era shared by cars with the same steering and tyre construction. */
 export type HandlingProfile = 'classic' | 'road' | 'sport' | 'utility';
 
@@ -558,6 +570,8 @@ export interface CarModelDef {
    * A limited-slip differential on that axle; absent is an open one. See
    * `LimitedSlip`. Only meaningful on a driven axle.
    */
+  /** The factory tyre, when the car's own curve should replace the profile's. */
+  readonly tyre?: TyreSpec;
   readonly frontDiff?: LimitedSlip;
   readonly rearDiff?: LimitedSlip;
   /**
@@ -1623,6 +1637,8 @@ const PROVING_SPECS: readonly Entry[] = [
     frontWeightShare: 0.58,
     // No bars: the 2CV resists roll with its interconnected springs alone.
     antiRoll: { front: 0, rear: 0 },
+    // Michelin X 125R15: the 2CV was sold on radials.
+    tyre: { construction: 'radial', aspect: 0.82 },
     dragArea: 0.777,
     wheelSetPool: [],
   },
@@ -1646,6 +1662,8 @@ const PROVING_SPECS: readonly Entry[] = [
     frontWeightShare: 0.62,
     // No bars either: rubber cones, and a nose carrying 62% does the balancing.
     antiRoll: { front: 0, rear: 0 },
+    // Dunlop SP 145R10.
+    tyre: { construction: 'radial', aspect: 0.82 },
     dragArea: 0.855,
     wheelSetPool: [],
   },
@@ -1668,6 +1686,8 @@ const PROVING_SPECS: readonly Entry[] = [
     handlingProfile: 'sport',
     frontWeightShare: 0.39,
     antiRoll: { front: 0.5, rear: 0.35 },
+    // 185/70 front, 215/60 rear.
+    tyre: { construction: 'radial', aspect: 0.65 },
     dragArea: 0.827,
     wheelSetPool: [],
   },
@@ -1693,6 +1713,8 @@ const PROVING_SPECS: readonly Entry[] = [
     antiRoll: { front: 0.7, rear: 0.35 },
     // Traction-Lok clutch-pack differential, standard on the GT (TBR about 2.5).
     rearDiff: { lock: 0.43, preloadNm: 80 },
+    // 225/60 R15.
+    tyre: { construction: 'radial', aspect: 0.6 },
     dragArea: 0.846,
     wheelSetPool: [],
   },
@@ -1715,6 +1737,8 @@ const PROVING_SPECS: readonly Entry[] = [
     handlingProfile: 'utility',
     frontWeightShare: 0.5,
     antiRoll: { front: 0.15, rear: 0.2 },
+    // 7.50 R16: a truck tyre's tall sidewall.
+    tyre: { construction: 'radial', aspect: 0.92 },
     dragArea: 1.671,
     wheelSetPool: [],
   },
@@ -1737,6 +1761,8 @@ const PROVING_SPECS: readonly Entry[] = [
     handlingProfile: 'utility',
     frontWeightShare: 0.43,
     antiRoll: { front: 0.4, rear: 0 },
+    // 185 R14 C.
+    tyre: { construction: 'radial', aspect: 0.82 },
     dragArea: 1.583,
     wheelSetPool: [],
   },
@@ -1760,6 +1786,8 @@ const PROVING_SPECS: readonly Entry[] = [
     frontWeightShare: 0.39,
     // Front bar only, as built.
     antiRoll: { front: 0.6, rear: 0 },
+    // 185/55 R15 front, 205/50 R16 rear.
+    tyre: { construction: 'radial', aspect: 0.52 },
     dragArea: 0.679,
     wheelSetPool: [],
   },
@@ -1784,6 +1812,8 @@ const PROVING_SPECS: readonly Entry[] = [
     antiRoll: { front: 0.55, rear: 0.4 },
     // ZF 40% limited slip.
     rearDiff: { lock: 0.4, preloadNm: 60 },
+    // 240/45 and 280/45 VR415.
+    tyre: { construction: 'radial', aspect: 0.45 },
     dragArea: 0.695,
     wheelSetPool: [],
   },
@@ -1808,6 +1838,8 @@ const PROVING_SPECS: readonly Entry[] = [
     antiRoll: { front: 0.6, rear: 0.4 },
     // Torsen at the back, as on the 16v (TBR about 3).
     rearDiff: { lock: 0.5, preloadNm: 0 },
+    // 205/50 R15.
+    tyre: { construction: 'radial', aspect: 0.5 },
     dragArea: 0.777,
     wheelSetPool: [],
   },
@@ -1868,6 +1900,7 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   handlingProfile: e.handlingProfile ?? 'classic',
   frontWeightShare: e.frontWeightShare,
   antiRoll: e.antiRoll,
+  tyre: e.tyre,
   frontDiff: e.frontDiff,
   rearDiff: e.rearDiff,
   dragArea: e.dragArea,

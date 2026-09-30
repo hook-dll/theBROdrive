@@ -114,6 +114,8 @@ import {
   GRIP_MASS_EXPONENT,
   GRIP_REFERENCE_MASS,
   HANDLING_PROFILES,
+  tyreCurve,
+  type TyreCurve,
   type HandlingTuning,
   IMPACT_UNEXPLAINED_FLOOR_MPS,
   INERTIA_PITCH_YAW_GAIN,
@@ -157,10 +159,6 @@ import {
   SLIDING_GRIP_FRACTION,
   SLIP_ANGLE_REF_MPS,
   SLIP_CURVE_SHARPNESS,
-  SLIP_FULL_FRONT_DEG,
-  SLIP_FULL_REAR_DEG,
-  SLIP_PLATEAU_FRONT,
-  SLIP_PLATEAU_REAR,
   SLIP_REFERENCE_MPS,
   STEERING_WHEEL_HALF_LOCK_RAD,
   STEER_CASTER_RETURN_RAD_S,
@@ -523,6 +521,8 @@ export class Vehicle implements Rebasable {
   private readonly model: CarModelDef;
   /** Shared immutable tuning selected once from the catalogue's mechanical family. */
   private readonly handling: HandlingTuning;
+  /** The side-force curve: the car's own tyre's, or its profile's. */
+  private readonly tyre: TyreCurve;
   private readonly measure: CarModelMeasure;
   /** Axle positions, wheel counts and weight distribution; measured once, in `measureAxles`. */
   private readonly axleGeometry: AxleGeometry;
@@ -870,6 +870,7 @@ export class Vehicle implements Rebasable {
     this.roadTexture = new RoadTexture(world.seed);
     this.model = carModel(carState.modelId);
     this.handling = HANDLING_PROFILES[this.model.handlingProfile];
+    this.tyre = tyreCurve(this.model.tyre, this.handling);
     this.measure = carModelMeasure(carState.modelId);
     this.axleGeometry = this.measureAxles();
     this.lamps = new VehicleLamps({
@@ -2373,7 +2374,7 @@ export class Vehicle implements Rebasable {
       const rollDistance = Math.abs(fwdSpeed) * dt;
       w.slipAngleRad +=
         (slipRad - w.slipAngleRad) *
-        (1 - Math.exp(-rollDistance / this.handling.tyreRelaxationLength));
+        (1 - Math.exp(-rollDistance / this.tyre.relaxationM));
       // The limiter reads the BUILT angle, not the geometric one: countersteer has to
       // respond to the slide the tyres are actually carrying.
       if (!w.isFront && w.grounded) rearSlipMax = Math.max(rearSlipMax, w.slipAngleRad);
@@ -2383,11 +2384,9 @@ export class Vehicle implements Rebasable {
       // that decides how much slip the car runs, and it is why the number comes out
       // where a period car's does — at 0.7 g a tyre needs 0.7/LATERAL_MU of its peak,
       // which the sine reaches around five degrees.
-      const peakDeg = w.isFront
-        ? this.handling.slipPeakFrontDeg
-        : this.handling.slipPeakRearDeg;
-      const fullDeg = w.isFront ? SLIP_FULL_FRONT_DEG : SLIP_FULL_REAR_DEG;
-      const plateau = w.isFront ? SLIP_PLATEAU_FRONT : SLIP_PLATEAU_REAR;
+      const peakDeg = w.isFront ? this.tyre.peakFrontDeg : this.tyre.peakRearDeg;
+      const fullDeg = w.isFront ? this.tyre.fullFrontDeg : this.tyre.fullRearDeg;
+      const plateau = w.isFront ? this.tyre.plateauFront : this.tyre.plateauRear;
       const slipDeg = (w.slipAngleRad * 180) / Math.PI;
       const fadeT = clamp((slipDeg - peakDeg) / (fullDeg - peakDeg), 0, 1);
       const risen =

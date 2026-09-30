@@ -531,6 +531,63 @@ export interface HandlingTuning {
   readonly tyreRelaxationLength: number;
 }
 
+/** The side-force curve's shape, per axle: see `tyreCurve`. */
+export interface TyreCurve {
+  readonly peakFrontDeg: number;
+  readonly peakRearDeg: number;
+  readonly fullFrontDeg: number;
+  readonly fullRearDeg: number;
+  readonly plateauFront: number;
+  readonly plateauRear: number;
+  readonly relaxationM: number;
+}
+
+/**
+ * THE CAR'S OWN TYRE. Without a `TyreSpec` a car runs its handling profile's curve and
+ * the constants above, exactly as before. With one, the curve comes from the sidewall:
+ *
+ *   peak slip angle   a cross-ply carcass needs about 8 degrees to reach its peak; a
+ *                     radial's peak falls with its sidewall, 3 + 4 · aspect (6.3 at
+ *                     an 82-series, 5 at a 50), the spread road tests measure.
+ *   relaxation        the rolling distance to build force: 0.45 m for cross-ply, and
+ *                     0.1 + 0.3 · aspect for a radial, from 0.35 m at 82-series down to
+ *                     0.24 m at 45 — tall rubber lags, low rubber answers at once.
+ *   breakaway         what the tyre keeps past its peak and how soon it gets there:
+ *                     a cross-ply fades gently to 0.86 by 30 degrees, a tall radial
+ *                     to 0.84 by 26, a 45-series to 0.72 by 20. That is the feel of
+ *                     a slide: a tall tyre warns and forgives, a low one lets go.
+ *
+ * The rear peaks 0.6 degrees before the front and reaches its plateau 4 degrees
+ * sooner, the same relation the profile constants keep (see SLIP_PEAK_*).
+ */
+export function tyreCurve(spec: { construction: 'crossply' | 'radial'; aspect: number } | undefined, handling: HandlingTuning): TyreCurve {
+  if (!spec) {
+    return {
+      peakFrontDeg: handling.slipPeakFrontDeg,
+      peakRearDeg: handling.slipPeakRearDeg,
+      fullFrontDeg: SLIP_FULL_FRONT_DEG,
+      fullRearDeg: SLIP_FULL_REAR_DEG,
+      plateauFront: SLIP_PLATEAU_FRONT,
+      plateauRear: SLIP_PLATEAU_REAR,
+      relaxationM: handling.tyreRelaxationLength,
+    };
+  }
+  const aspect = Math.min(1, Math.max(0.3, spec.aspect));
+  const crossply = spec.construction === 'crossply';
+  const peak = crossply ? 8 : 3 + 4 * aspect;
+  const full = crossply ? 30 : 12 + 17 * aspect;
+  const plateau = crossply ? 0.86 : 0.72 + 0.35 * (aspect - 0.45);
+  return {
+    peakFrontDeg: peak,
+    peakRearDeg: peak - 0.6,
+    fullFrontDeg: full,
+    fullRearDeg: full - 4,
+    plateauFront: Math.min(0.88, plateau),
+    plateauRear: Math.min(0.88, plateau),
+    relaxationM: crossply ? 0.45 : 0.1 + 0.3 * aspect,
+  };
+}
+
 export const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>> = {
   classic: {
     steerInputExponent: STEER_INPUT_EXPONENT,
