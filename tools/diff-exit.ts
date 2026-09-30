@@ -34,6 +34,7 @@ interface WheelView {
   readonly sideSign: number;
   readonly slipRatio: number;
   readonly driveTorqueNm: number;
+  readonly loadN: number;
 }
 type Diffs = { frontDiff?: LimitedSlip; rearDiff?: LimitedSlip };
 
@@ -47,9 +48,10 @@ async function run(id: string): Promise<string> {
     f.throttle = Math.max(0, Math.min(1, (target - speed()) * 0.6 + 0.25));
     f.steer = t < 6 ? 0 : steer * Math.min(1, (t - 6) / 2);
   });
-  // Left turn or right: the inside wheel is the one carrying less load, found by sign
-  // of the yaw rate.
-  const insideSign = v.chassis.angvel().y > 0 ? -1 : 1;
+  // The inside wheel is the one the turn has unloaded.
+  const driven = wheels.filter((w) => (w.isFront ? v.modelDef.rearDriveBias < 1 : v.modelDef.rearDriveBias > 0));
+  const lightest = driven.reduce((a, b) => (b.loadN < a.loadN ? b : a));
+  const insideSign = lightest.sideSign;
   const start = speed();
   let inside = 0;
   let outside = 0;
@@ -58,8 +60,8 @@ async function run(id: string): Promise<string> {
     f.steer = steer;
     for (const w of wheels) {
       if (w.driveTorqueNm === 0 && w.slipRatio === 0) continue;
-      if (w.isFront && v.model.rearDriveBias >= 1) continue;
-      if (!w.isFront && v.model.rearDriveBias <= 0) continue;
+      if (w.isFront && v.modelDef.rearDriveBias >= 1) continue;
+      if (!w.isFront && v.modelDef.rearDriveBias <= 0) continue;
       if (w.sideSign === insideSign) inside = Math.max(inside, w.slipRatio);
       else outside = Math.max(outside, w.slipRatio);
     }
