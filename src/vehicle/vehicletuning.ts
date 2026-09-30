@@ -589,8 +589,9 @@ export function tyreCurve(spec: { construction: 'crossply' | 'radial'; aspect: n
 }
 
 /**
- * THE BRUSH TYRE, an A/B alternative to the curve above for cars with a `TyreSpec`
- * (`?tyre=brush`, or `__bro.brushTyres(true)` on the move).
+ * THE BRUSH TYRE: the side-force model for every car with a `TyreSpec`, which is the
+ * whole catalogue. The curve above remains for A/B (`?tyre=curve`, or
+ * `__bro.brushTyres(false)` on the move) and for a car that names no tyre.
  *
  * The tread is a row of bristles on the belt. Each one is carried through the contact
  * patch and deflects sideways with the slip until the local grip under it runs out,
@@ -608,7 +609,7 @@ export function tyreCurve(spec: { construction: 'crossply' | 'radial'; aspect: n
  * lets go at small angles. At the car's static load it peaks exactly where the
  * `TyreCurve` says, so the two models agree in the straight and part in the bend.
  */
-export const TYRE_MODEL = { brush: false };
+export const TYRE_MODEL = { brush: true };
 /** Cα ∝ Fz^this: 0.7 is a passenger radial's measured sublinear growth. */
 export const BRUSH_STIFFNESS_LOAD_EXPONENT = 0.7;
 

@@ -26,7 +26,7 @@ import { makeRig, drive } from './handling-bench';
 installAssetShim();
 
 const ids = process.argv.slice(2);
-const models = ids.length > 0 ? ids : ['pg_2cv', 'pg_mini', 'pg_911sc', 'pg_mustang', 'pg_elise'];
+const models = ids.length > 0 ? ids : ['sv_gaz21', 'sv_vaz2101', 'sv_vaz2108', 'sv_niva', 'sa_uaz330364'];
 
 async function limit(id: string): Promise<{ g: number; steer: number }> {
   let best = { g: 0, steer: 0 };

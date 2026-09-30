@@ -25,7 +25,7 @@ const flag = (name: string, fallback: number): number => {
   return hit ? +hit.slice(name.length + 3) : fallback;
 };
 const ids = args.filter((a) => !a.startsWith('--'));
-const models = ids.length > 0 ? ids : ['pg_mustang', 'pg_testarossa', 'pg_integrale'];
+const models = ids.length > 0 ? ids : ['sv_vaz2105r', 'sv_niva'];
 const targetKmh = flag('kmh', 50);
 const steer = flag('steer', 0.35);
 

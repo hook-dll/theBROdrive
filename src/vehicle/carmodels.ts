@@ -566,12 +566,12 @@ export interface CarModelDef {
    * stiffness takes more of the load transfer and runs out of grip first.
    */
   readonly antiRoll?: { readonly front: number; readonly rear: number };
+  /** The factory tyre, when the car's own curve should replace the profile's. */
+  readonly tyre?: TyreSpec;
   /**
    * A limited-slip differential on that axle; absent is an open one. See
    * `LimitedSlip`. Only meaningful on a driven axle.
    */
-  /** The factory tyre, when the car's own curve should replace the profile's. */
-  readonly tyre?: TyreSpec;
   readonly frontDiff?: LimitedSlip;
   readonly rearDiff?: LimitedSlip;
   /**
@@ -719,6 +719,8 @@ interface SovietSpec {
   /** Drag area, Cd·A in m²: see the note above on how it is calibrated. */
   readonly dragArea: number;
   readonly suspension: SuspensionTuning;
+  /** The factory tyre (see `TyreSpec`). */
+  readonly tyre: TyreSpec;
   readonly storageCells?: number;
 }
 
@@ -772,6 +774,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'gz21.fbx',
     scale: 0.010305,
     mass: 1460,
+    // 6.70-15 cross-ply.
+    tyre: { construction: 'crossply', aspect: 0.95 },
     engineId: 'engine_zmz_21',
     gearboxId: 'gearbox_gaz_3',
     tankLitres: 60,
@@ -795,6 +799,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'gz24.fbx',
     scale: 0.009556,
     mass: 1420,
+    // 7.35-14 cross-ply.
+    tyre: { construction: 'crossply', aspect: 0.95 },
     engineId: 'engine_zmz_24',
     gearboxId: 'gearbox_gaz_4',
     tankLitres: 55,
@@ -816,6 +822,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'vz01.fbx',
     scale: 0.010585,
     mass: 955,
+    // 155 R13, the Zhiguli's Fiat-era radial.
+    tyre: { construction: 'radial', aspect: 0.8 },
     engineId: 'engine_lada_1200',
     gearboxId: 'gearbox_lada_4',
     tankLitres: 39,
@@ -836,6 +844,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'vz02.fbx',
     scale: 0.010632,
     mass: 1010,
+    // 165 R13.
+    tyre: { construction: 'radial', aspect: 0.8 },
     engineId: 'engine_lada_1200',
     gearboxId: 'gearbox_lada_4_2102',
     tankLitres: 39,
@@ -856,6 +866,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'vz03.fbx',
     scale: 0.010632,
     mass: 1030,
+    // 165/80 R13.
+    tyre: { construction: 'radial', aspect: 0.8 },
     engineId: 'engine_lada_1500',
     gearboxId: 'gearbox_lada_4_tall',
     tankLitres: 39,
@@ -875,6 +887,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'vz04.fbx',
     scale: 0.010585,
     mass: 1020,
+    // 165/80 R13.
+    tyre: { construction: 'radial', aspect: 0.8 },
     engineId: 'engine_lada_1300',
     gearboxId: 'gearbox_lada_4_2105',
     tankLitres: 39,
@@ -896,6 +910,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'vz05.fbx',
     scale: 0.010632,
     mass: 995,
+    // 165/80 R13.
+    tyre: { construction: 'radial', aspect: 0.8 },
     engineId: 'engine_lada_1300',
     gearboxId: 'gearbox_lada_4_2105',
     tankLitres: 39,
@@ -918,6 +934,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'vz05r.fbx',
     scale: 0.010632,
     mass: 960,
+    // 185-section competition tyre on a 13-inch rim, about a 70 profile.
+    tyre: { construction: 'radial', aspect: 0.7 },
     engineId: 'engine_lada_rally',
     gearboxId: 'gearbox_lada_5',
     tankLitres: 39,
@@ -940,6 +958,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'vz06.fbx',
     scale: 0.010585,
     mass: 1035,
+    // 165/80 R13.
+    tyre: { construction: 'radial', aspect: 0.8 },
     engineId: 'engine_lada_1600',
     gearboxId: 'gearbox_lada_4_1600',
     tankLitres: 39,
@@ -959,6 +979,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'vz07.fbx',
     scale: 0.010632,
     mass: 1030,
+    // 165/80 R13.
+    tyre: { construction: 'radial', aspect: 0.8 },
     engineId: 'engine_lada_1500',
     gearboxId: 'gearbox_lada_5',
     tankLitres: 39,
@@ -981,6 +1003,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'vz08.fbx',
     scale: 0.010123,
     mass: 900,
+    // 165/70 R13.
+    tyre: { construction: 'radial', aspect: 0.7 },
     engineId: 'engine_samara_1300',
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
@@ -1001,6 +1025,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'vz09.fbx',
     scale: 0.010123,
     mass: 915,
+    // 165/70 R13.
+    tyre: { construction: 'radial', aspect: 0.7 },
     engineId: 'engine_samara_1300',
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
@@ -1023,6 +1049,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'vz099.fbx',
     scale: 0.010082,
     mass: 970,
+    // 165/70 R13.
+    tyre: { construction: 'radial', aspect: 0.7 },
     engineId: 'engine_samara_1500',
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
@@ -1047,6 +1075,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'vz21.fbx',
     scale: 0.009649,
     mass: 1150,
+    // 175/80 R16.
+    tyre: { construction: 'radial', aspect: 0.8 },
     engineId: 'engine_niva_1600',
     gearboxId: 'gearbox_niva_4',
     tankLitres: 42,
@@ -1066,6 +1096,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'vz31.fbx',
     scale: 0.009783,
     mass: 1350,
+    // 175/80 R16.
+    tyre: { construction: 'radial', aspect: 0.8 },
     engineId: 'engine_niva_1700',
     gearboxId: 'gearbox_niva_5',
     tankLitres: 42,
@@ -1201,6 +1233,7 @@ const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
   handlingProfile: spec.handlingProfile,
   frontWeightShare: spec.frontWeightShare,
   dragArea: spec.dragArea,
+  tyre: spec.tyre,
 }));
 
 /**
@@ -1221,6 +1254,8 @@ const SAAS_SPECS: readonly Entry[] = [
     bodyClass: 'car',
     scale: 0.86595,
     mass: 1055,
+    // 165/80 R13 class road radial.
+    tyre: { construction: 'radial', aspect: 0.8 },
     engineId: 'engine_i4_1600',
     gearboxId: 'gearbox_manual5',
     tankLitres: 55,
@@ -1244,6 +1279,8 @@ const SAAS_SPECS: readonly Entry[] = [
     bodyClass: 'car',
     scale: 1,
     mass: 915,
+    // 165/70 R13.
+    tyre: { construction: 'radial', aspect: 0.7 },
     engineId: 'engine_samara_1300',
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
@@ -1286,6 +1323,8 @@ const SAAS_SPECS: readonly Entry[] = [
     bodyClass: 'car',
     scale: 0.97465,
     mass: 635,
+    // 135/80 R12.
+    tyre: { construction: 'radial', aspect: 0.8 },
     engineId: 'engine_vaz_1111',
     gearboxId: 'gearbox_oka_4',
     tankLitres: 30,
@@ -1322,6 +1361,8 @@ const SAAS_SPECS: readonly Entry[] = [
     bodyClass: 'truck',
     scale: 0.880927,
     mass: 1845,
+    // 225/75 R16.
+    tyre: { construction: 'radial', aspect: 0.75 },
     engineId: 'engine_umz_4213',
     gearboxId: 'gearbox_uaz_4',
     tankLitres: 56,
@@ -1368,6 +1409,8 @@ const SAAS_SPECS: readonly Entry[] = [
     mass: 1015,
     // 1984-1997 2715-01 in its factory low-octane commercial specification:
     // UZAM-412DE, 1478 cc, 49 kW and 102 Nm.
+    // 175/80 R13.
+    tyre: { construction: 'radial', aspect: 0.8 },
     engineId: 'engine_uzam_412de',
     // Moskvich/IZH four-speed with the 4.22 working-vehicle final drive.
     gearboxId: 'gearbox_izh_4',
@@ -1463,6 +1506,8 @@ const GTAV_SPECS: readonly Entry[] = [
     bodyClass: 'car',
     scale: 0.89255,
     mass: 1010,
+    // 175/70 R13.
+    tyre: { construction: 'radial', aspect: 0.7 },
     engineId: 'engine_samara_1500',
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
@@ -1874,6 +1919,7 @@ const SHAPE_SPECS: readonly Entry[] = [
     handlingProfile: ZHIGULI.handlingProfile,
     frontWeightShare: ZHIGULI.frontWeightShare,
     dragArea: ZHIGULI.dragArea,
+    tyre: ZHIGULI.tyre,
     paintStyle: 'solid-paint',
     glassMaterial: 'car_glass',
     wheelSetPool: [],

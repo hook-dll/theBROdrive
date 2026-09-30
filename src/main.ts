@@ -2629,8 +2629,8 @@ async function boot(): Promise<void> {
 // Dev scenes are separate entry points reached by query string, so their code is a
 // dynamic import the production bundle drops rather than something the game carries.
 const query = new URLSearchParams(window.location.search);
-// `?tyre=brush`: the brush side-force model for cars that name their tyre (A/B).
-if (query.get('tyre') === 'brush') TYRE_MODEL.brush = true;
+// `?tyre=curve`: the old side-force curve instead of the brush tyre (A/B).
+if (query.get('tyre') === 'curve') TYRE_MODEL.brush = false;
 const launch = query.has('poi-gallery')
   ? import('./poi-gallery').then(({ bootPoiGallery }) => bootPoiGallery())
   : query.has('artifact-gallery')
