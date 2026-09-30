@@ -191,7 +191,7 @@ import {
   tyreVerticalRate,
   unsprungMass,
 } from './vehicletuning';
-import { VehicleLamps, type HeadlightMode, type IndicatorSide } from './vehiclelamps';
+import { VehicleLamps, type BeamPass, type HeadlightMode, type IndicatorSide } from './vehiclelamps';
 import { weather, weatherGrip, weatherSoftness } from '../world/weather';
 
 /**
@@ -3081,8 +3081,8 @@ export class Vehicle implements Rebasable {
    * distance fade and the reason a dark lamp claims no slot all live in
    * vehiclelamps.ts, which owns the state this reads.
    */
-  syncProjectedLights(rig: VehicleLightRig, gain: number): void {
-    this.lamps.syncProjectedLights(rig, gain);
+  syncProjectedLights(rig: VehicleLightRig, gain: number, lamps: BeamPass = 'all'): void {
+    this.lamps.syncProjectedLights(rig, gain, lamps);
   }
 
   /** Offers the lit headlamps to the wet road's reflection streaks (vehiclelamps.ts). */

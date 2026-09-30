@@ -13,6 +13,7 @@
  * origin is its mount point, in +X right / +Y up / +Z forward.
  */
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { maxAnisotropy } from './texturequality';
 import { variant } from '../parts/registry';
 import type { EngineSpec, PartVariant } from '../parts/registry';
@@ -24,6 +25,7 @@ import type {
   ToolKind,
   WeaponKind,
 } from '../items/items';
+import { spongeSpent } from '../items/items';
 import { makeConditionMaterial, makeFlatMaterial } from './materials';
 import { applyComicShading } from './comic';
 
@@ -505,25 +507,32 @@ function itemBlueprint(key: string, build: (b: MeshBuilder) => void): Blueprint 
   return bp;
 }
 
-function buildToolInto(b: MeshBuilder, kind: ToolKind): void {
+function buildToolInto(b: MeshBuilder, kind: ToolKind, spent: boolean): void {
   switch (kind) {
-    case 'brush': return brush(b);
-    case 'sponge': return sponge(b);
+    case 'sponge': return sponge(b, spent);
     default: throw new Error(`unhandled tool kind: ${kind}`);
   }
 }
 
-function brush(b: MeshBuilder): void {
-  const handle = flat(0x6b4a2e, 0.7);
-  const bristle = flat(0x3a3f45, 0.9);
-  b.cylinder('brush_handle', 0.02, 0.02, 0.22, 10, handle, [0, 0.02, 0.1], AXIS_Z);
-  b.box('brush_head', 0.06, 0.03, 0.14, handle, [0, 0.02, 0.28]);
-  b.box('brush_bristles', 0.05, 0.02, 0.12, bristle, [0, -0.01, 0.28]);
-}
-
-function sponge(b: MeshBuilder): void {
-  const body = flat(0xc9a227, 0.9);
-  b.box('sponge_body', 0.14, 0.05, 0.1, body, [0, 0, 0]);
+/**
+ * A car-wash sponge: a soft rounded block with a pitted face and a thin scouring layer
+ * on its underside. A spent one has taken the colour of everything it wiped off.
+ */
+function sponge(b: MeshBuilder, spent: boolean): void {
+  const body = flat(spent ? 0x7d6c4c : 0xe7c23a, 0.95);
+  const pad = flat(spent ? 0x3f4232 : 0x2f7d45, 0.9);
+  const pore = flat(spent ? 0x4d4232 : 0xb58f1f, 1);
+  b.push('sponge_body', () => new RoundedBoxGeometry(0.13, 0.042, 0.088, 3, 0.014), body, [0, 0.004, 0]);
+  b.push('sponge_pad', () => new RoundedBoxGeometry(0.124, 0.012, 0.083, 2, 0.004), pad, [0, -0.021, 0]);
+  // The pits of the foam on the top face, flattened so they read as holes, not bumps.
+  const pits: readonly Vec3[] = [
+    [-0.043, 0.0255, -0.022], [-0.012, 0.0255, 0.019], [0.021, 0.0255, -0.012],
+    [0.047, 0.0255, 0.024], [-0.036, 0.0255, 0.027], [0.006, 0.0255, -0.031],
+    [0.041, 0.0255, -0.029], [-0.02, 0.0255, -0.004],
+  ];
+  pits.forEach((at, i) => {
+    b.push('sponge_pit', () => new THREE.SphereGeometry(0.0055, 8, 4), pore, at, ZERO, [1 + (i % 3) * 0.25, 0.25, 1 + ((i + 1) % 3) * 0.2]);
+  });
 }
 
 /**
@@ -1089,18 +1098,20 @@ const POSTCARD_TEX_W = 2048;
 const POSTCARD_TEX_H = Math.round((POSTCARD_TEX_W * POSTCARD_H) / POSTCARD_W);
 
 /**
- * The note's words, verbatim as the owner wrote them. The trail-off after the colon is
- * drawn as an illegible scrawl (`drawPostcardScrawl`), so the address is never the
- * literal word for "unreadable" — it simply cannot be read.
+ * The note's words, verbatim as the owner wrote them. The recipient's address on the
+ * right is an illegible scrawl (`drawPostcardScrawl`): it simply cannot be read.
  */
 export const POSTCARD_TEXT =
-  'сынок, мы с Котёной купили дом у моря, навести нас как-нибудь, тут такой кайф! вот адрес:';
+  'сынок, мы с Котёной купили дом у моря, навести нас как-нибудь, тут такой кайф! ' +
+  'приезжай или прилетай - главное, береги себя. Любим тебя и ждём в любое время!';
 
 /** `POSTCARD_TEXT` broken where a hand would break it, wording untouched. */
 const POSTCARD_LINES: readonly string[] = [
   'сынок, мы с Котёной купили дом у моря,',
   'навести нас как-нибудь, тут такой кайф!',
-  'вот адрес:',
+  'приезжай или прилетай - главное,',
+  'береги себя. Любим тебя и ждём',
+  'в любое время!',
 ];
 
 /** Fixed-seed noise: the same LCG this file's other procedural surfaces use. */
@@ -1301,8 +1312,8 @@ function postcardTextTexture(): THREE.CanvasTexture {
   ctx.font = `${fontPx}px ${POSTCARD_HAND_FONT}`;
   ctx.fillStyle = '#2a262e';
   ctx.textBaseline = 'alphabetic';
-  const lineGap = fontPx * 1.52;
-  let lineY = H * 0.3 + fontPx;
+  const lineGap = fontPx * 1.62;
+  let lineY = H * 0.24 + fontPx;
   for (const line of POSTCARD_LINES) {
     // A hand wanders: each line starts a few pixels off the one above it and tilts by
     // well under a degree, which is the whole difference between writing and print.
@@ -1314,15 +1325,11 @@ function postcardTextTexture(): THREE.CanvasTexture {
     lineY += lineGap;
   }
 
-  // The address side: the printed legend, four rules, and the scrawl written across the
-  // top two of them.
+  // The address side: four rules, and the scrawl written across the top two of them.
   const addressLeft = dividerX + 62;
   const addressWidth = W - margin - 54 - addressLeft;
   const ruleTop = Math.round(H * 0.42);
   const ruleGap = Math.round(H * 0.088);
-  ctx.fillStyle = 'rgba(88, 78, 64, 0.42)';
-  ctx.font = '600 40px Georgia, "Times New Roman", serif';
-  drawSpacedText(ctx, 'POST CARD', addressLeft + addressWidth / 2, ruleTop - H * 0.085, 15);
   ctx.strokeStyle = 'rgba(96, 86, 70, 0.26)';
   for (let i = 0; i < 4; i++) {
     const ry = ruleTop + i * ruleGap + 0.5;
@@ -1362,7 +1369,7 @@ function postcardTextTexture(): THREE.CanvasTexture {
   }
   ctx.fillStyle = '#40404a';
   ctx.font = '600 30px Georgia, "Times New Roman", serif';
-  drawSpacedText(ctx, 'ПОЧТА', 0, 6, 3);
+  drawSpacedText(ctx, '14 08', 0, 12, 4);
   ctx.restore();
 
   const texture = new THREE.CanvasTexture(canvas);
@@ -1868,8 +1875,12 @@ export function createItemMesh(item: Item): THREE.Object3D {
   switch (item.type) {
     case 'part':
       return createPartMesh(item.part.variantId);
-    case 'tool':
-      return buildGroup(itemBlueprint(`tool_${item.tool}`, (b) => buildToolInto(b, item.tool)).instructions);
+    case 'tool': {
+      const spent = spongeSpent(item);
+      return buildGroup(
+        itemBlueprint(`tool_${item.tool}${spent ? '_spent' : ''}`, (b) => buildToolInto(b, item.tool, spent)).instructions,
+      );
+    }
     case 'fluid_can':
       return buildGroup(
         itemBlueprint(`fluid_${item.fluid}`, (b) => buildFluidCanInto(b, item.fluid)).instructions,

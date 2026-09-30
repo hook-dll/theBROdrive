@@ -188,13 +188,13 @@ export function laneOffsetFor(halfWidth: number, lane: number): number {
  */
 const SHOULDER_WIDTH_M: Partial<Record<SurfaceType, number>> = {
   // A highway's graded crushed-stone shoulder, dusty and pale.
-  [SurfaceType.Asphalt]: 1.35,
+  [SurfaceType.Asphalt]: 2.1,
   // Older and narrower; the desert has had longer to blow back over it.
-  [SurfaceType.CrackedAsphalt]: 1.05,
+  [SurfaceType.CrackedAsphalt]: 1.8,
   // Concrete roads were built wide and pale, with cement dust in the verge.
-  [SurfaceType.Concrete]: 1.6,
+  [SurfaceType.Concrete]: 2.3,
   // The grader's spoil: the road's own gravel pushed off to the sides.
-  [SurfaceType.Gravel]: 1.1,
+  [SurfaceType.Gravel]: 1.6,
 };
 
 export function shoulderWidthM(surface: SurfaceType): number {

@@ -1,910 +1,705 @@
 /**
- * The light plane: a Cessna-172-shaped single-engine high-wing, lofted from
- * cross-sections and built at the size the story needs and nothing more.
+ * The light plane: a Cessna 172, built to its real dimensions and nothing more.
  *
- * WHY PROCEDURAL. The parked plane is scenery and the take-off and landing
- * cutscenes fly two more of the same thing, so what matters is a recognisable
- * silhouette at 20 m and a cost near zero: thirteen merged meshes (nine of them the
- * parked aeroplane, four the propeller), under four thousand triangles, and no
- * download. The kit is the one the dwellings and the props are built from — boxes,
- * cylinders, scaled spheres — plus one LOFT that carries what a box cannot: the
- * fuselage's taper, the wing's section, the cowl's bowl and the spinner are rings of
- * a handful of points swept along a table of stations.
+ * THE NUMBERS ARE THE AEROPLANE'S. Length 8.28 m, span 11.00 m, height 2.72 m; the
+ * wing a constant 1.63 m chord out to 2.55 m from the centreline and tapering to
+ * 1.12 m at the tip along a swept leading edge, the trailing edge straight, 1°44′ of
+ * dihedral, a NACA 2412 section; tailplane span 3.43 m; main gear track 2.53 m and
+ * wheelbase 1.63 m; a 1.91 m two-blade propeller. What reads as "a Cessna" at twenty
+ * metres is exactly those proportions: the long cowl, the boxy cabin under a wing laid
+ * on its roof, the strut, the swept fin with its dorsal fillet, the tail cone rising
+ * to the fin, the three spats.
  *
- * THE LOCAL FRAME (fixed by the story contract, shared with the site builder):
- * +Z is the nose, +Y is up, and y = 0 is where the TYRES touch the ground. The
- * origin sits on the ground under the wing's centre, which is roughly the main
- * gear, so a plane placed at `y = runwaySurfaceY(...)` rests on the runway with
- * no correction and `doorPoint` is a standing position beside the cabin door.
+ * ONE SKIN, PAINTED, NO DECALS. The first build laid the cheat line, the panes and the
+ * seams on the fuselage as plates a few millimetres proud of it, and on a faceted skin
+ * they tore: a facet sags inside the smooth curve between its ring points and the
+ * plate sank through in patches. Now the fuselage is ONE smooth loft (36 points round,
+ * a few dozen stations along, interpolated through a table of real sections), and
+ * everything that is paint or glass on the real aircraft is PAINTED by its material:
+ * the livery shader reads the fragment's position and normal in the aeroplane's own
+ * frame and draws the windscreen, the side and rear windows, the door and cowl seams,
+ * the cheat line, the fin stripes, the flap and aileron hinge lines, the nose inlets
+ * and the registration — crisp at any distance (edges are antialiased on their own
+ * screen-space derivative) and never coplanar with anything. Glass is the same
+ * surface with its roughness and metalness dropped, so it mirrors the sky.
  *
- * THE WINDOWS are the one window tint in the game (`TINTED_GLASS`, shared with
- * every car and house): an opaque black-blue sky mirror, never a see-through
- * pane, so nothing inside the cabin has to be modelled. Each pane is a patch laid
- * on the fuselage's own skin a few millimetres proud of it, so it follows the
- * cabin's curve instead of standing off the side as a slab.
+ * THE LOCAL FRAME (the story contract, shared with the site builder and the two
+ * cutscenes): +Z is the nose, +Y is up, y = 0 is where the tyres touch, and the origin
+ * is on the ground under the main gear. +X is the aeroplane's LEFT (the door side).
  *
- * NOTHING SHARES A PLANE WITH ANYTHING ELSE, AND THE SKIN'S OWN FACETS NEVER EAT A
- * DECAL. Every detail that is traditionally a plate lying on the skin — the cheat
- * line, the door seams, the panes, the hinge lines — is either PAINTED onto the
- * surface it belongs to (a loft's `paint`) or floated a few millimetres along the
- * normal of the FACET it sits on. Measured from the smooth curve those facets
- * approximate, a decal of a few millimetres sinks into the skin between the ring
- * points and comes out in torn patches: a facet sags several millimetres inside it.
- * And every part that meets another — a gear leg into the belly and into its wheel
- * pant, a strut into the wing, the fin into the roof — starts INSIDE the part it
- * meets, numerically, so no leg hangs in the air beside the fuselage.
- *
- * MATERIALS ARE SHARED across every plane instance for the session (the
- * dwellings' idiom: `dwellingBodyMaterial`/`dwellingGlassMaterial`), because a
- * plane is pure and building the same swatches again per instance would only add
- * programs. `dispose()` therefore frees this instance's GEOMETRY alone.
+ * MATERIALS ARE SHARED across instances for the session; `dispose()` frees this
+ * instance's geometry alone.
  */
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { TINTED_GLASS } from '../render/materials';
 import { applyComicShading } from '../render/comic';
 
-/** Nominal span, metres: tip to tip, as the site's colliders and keep-outs size it. */
+/** Tip to tip, metres, as the site's colliders and keep-outs size it. */
 export const LIGHT_PLANE_SPAN = 11;
-/** Nominal length, metres: spinner tip to rudder trailing edge. */
-export const LIGHT_PLANE_LENGTH = 8.3;
-/** Nominal height, metres: ground to the top of the fin, level attitude. */
-export const LIGHT_PLANE_HEIGHT = 2.7;
+/** Spinner tip to rudder trailing edge, metres. */
+export const LIGHT_PLANE_LENGTH = 8.28;
+/** Ground to the top of the fin, metres. */
+export const LIGHT_PLANE_HEIGHT = 2.72;
 
 /** Propeller revolutions per second at `rpmFraction = 1`, for `spin`. */
 const PROP_REV_PER_SECOND = 40;
 
-/* ---- layout: every number in the local frame, metres ---- */
+/* ---- layout, metres, local frame ---- */
 
-/** Fuselage centreline height above the tyres, metres, at the wing. */
-const AXIS_Y = 1.62;
-/** The engine cowl's front face: the nose bowl, where the spinner's base sits behind it. */
-const COWL_FRONT_Z = 3.02;
-/** Cabin: the widest part of the fuselage, its roof and floor, and the door's own span. */
-const CABIN_HALF_W = 0.575;
-const CABIN_FRONT_Z = 1.72;
-const CABIN_REAR_Z = -0.82;
-const CABIN_FLOOR_Y = 1.07;
-const CABIN_ROOF_Y = 2.18;
-/** The tail cone's own end. */
-const TAIL_END_Z = -4.22;
-/** Wing: high, strut-braced, 1.75 m at the root, rising 2 degrees outboard. */
-const WING_Y = 2.06;
-const WING_ROOT_CHORD = 1.75;
-const WING_CENTRE_Z = 0.65;
-const WING_DIHEDRAL = 0.035;
-/** Tail surfaces. */
-const FIN_TOP_Y = LIGHT_PLANE_HEIGHT;
-const STAB_Y = 1.985;
-const STAB_HALF_SPAN = 1.65;
-/** Tricycle gear: mains under the wing, nose wheel well forward of them. */
-const MAIN_WHEEL_X = 1.12;
-const MAIN_WHEEL_R = 0.3;
-const NOSE_WHEEL_Z = 2.28;
-const NOSE_WHEEL_R = 0.22;
-/** Propeller disc, just ahead of the cowl's front face. */
-const PROP_Z = 3.15;
+const NOSE_Z = 3.12; // spinner tip
+const COWL_FRONT_Z = 2.9;
+const FIREWALL_Z = 1.56;
+const WING_LE_Z = 0.95;
+const WING_TE_Z = -0.68;
+const TAIL_Z = NOSE_Z - LIGHT_PLANE_LENGTH; // -5.16, rudder trailing edge
+const CABIN_HALF_W = 0.57;
+const WING_Y = 2.04; // chord line at the root
+const WING_HALF_SPAN = LIGHT_PLANE_SPAN / 2;
+const WING_TAPER_X = 2.55;
+const WING_TIP_CHORD = 1.12;
+const WING_DIHEDRAL = (1.73 * Math.PI) / 180;
+const STAB_HALF_SPAN = 3.43 / 2;
+const MAIN_TRACK_HALF = 2.53 / 2;
+const MAIN_TYRE_R = 0.215;
+const NOSE_WHEEL_Z = 1.63;
+const NOSE_TYRE_R = 0.18;
+const SPINNER_Y = 1.26;
+const PROP_RADIUS = 1.91 / 2;
 
-/* ---- shared materials ---- */
+/* ---- the fuselage's sections, from real side and plan views ---- */
+
+/**
+ * z, half width, top, bottom, roundness of the upper and lower halves (superellipse
+ * exponents: 2 is an ellipse, higher is boxier).
+ */
+const FUSELAGE_TABLE: readonly (readonly [number, number, number, number, number, number])[] = [
+  [TAIL_Z + 0.04, 0.045, 1.66, 1.57, 2, 2],
+  [-4.8, 0.1, 1.68, 1.52, 2.1, 2.1],
+  [-4.0, 0.17, 1.71, 1.43, 2.2, 2.3],
+  [-3.0, 0.27, 1.77, 1.27, 2.4, 2.6],
+  [-2.0, 0.39, 1.86, 1.08, 2.7, 2.9],
+  [-1.2, 0.5, 1.95, 0.9, 3.0, 3.2],
+  [-0.7, 0.55, 2.0, 0.82, 3.3, 3.6],
+  [-0.2, 0.57, 2.02, 0.78, 3.5, 3.8],
+  [0.5, 0.57, 2.02, 0.78, 3.5, 3.8],
+  [0.95, 0.565, 2.0, 0.79, 3.4, 3.8],
+  // The windscreen: the roof falls to the cowl at the rake of the real screen.
+  [1.25, 0.55, 1.84, 0.8, 3.2, 3.6],
+  [FIREWALL_Z, 0.53, 1.69, 0.82, 3.0, 3.4],
+  [2.0, 0.5, 1.63, 0.86, 2.8, 3.0],
+  [2.45, 0.46, 1.58, 0.9, 2.6, 2.7],
+  [2.75, 0.41, 1.54, 0.95, 2.4, 2.4],
+  // The nose bowl, rounding in to the spinner's base.
+  [2.85, 0.35, 1.5, 1.0, 2.2, 2.2],
+  [COWL_FRONT_Z, 0.28, 1.46, 1.05, 2.1, 2.1],
+];
+
+function catmull(p0: number, p1: number, p2: number, p3: number, t: number): number {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return 0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+}
+
+/** The section at z, Catmull-Rom through the table: a smooth silhouette, no kinks. */
+function fuselageSection(z: number): readonly number[] {
+  const rows = FUSELAGE_TABLE;
+  let i = 0;
+  while (i < rows.length - 2 && rows[i + 1]![0] < z) i++;
+  const a = rows[Math.max(0, i - 1)]!;
+  const b = rows[i]!;
+  const c = rows[i + 1]!;
+  const d = rows[Math.min(rows.length - 1, i + 2)]!;
+  const t = Math.min(1, Math.max(0, (z - b[0]) / (c[0] - b[0])));
+  const out: number[] = [];
+  for (let k = 1; k < 6; k++) out.push(catmull(a[k]!, b[k]!, c[k]!, d[k]!, t));
+  return out;
+}
+
+const RING = 36;
+
+function sgnPow(v: number, p: number): number {
+  return Math.sign(v) * Math.abs(v) ** p;
+}
+
+type V3 = [number, number, number];
+
+function fuselageRing(z: number): V3[] {
+  const [hw, top, bot, nTop, nBot] = fuselageSection(z) as [number, number, number, number, number];
+  const cy = (top + bot) / 2;
+  const hh = (top - bot) / 2;
+  const ring: V3[] = [];
+  for (let i = 0; i < RING; i++) {
+    const a = (i / RING) * Math.PI * 2;
+    const c = Math.cos(a);
+    const s = Math.sin(a);
+    const n = s >= 0 ? nTop : nBot;
+    ring.push([hw * sgnPow(c, 2 / n), cy + hh * sgnPow(s, 2 / n), z]);
+  }
+  return ring;
+}
+
+/* ---- geometry kit ---- */
+
+/**
+ * Rings of equal length swept into one indexed skin, optionally capped at either end
+ * with its own (flat) fan. Normals come from the shared vertices, so the skin is smooth;
+ * `closed` wraps each ring.
+ */
+function loft(rings: readonly V3[][], closed = true, capStart = false, capEnd = false): THREE.BufferGeometry {
+  const m = rings[0]!.length;
+  const positions: number[] = [];
+  const index: number[] = [];
+  for (const ring of rings) for (const p of ring) positions.push(p[0], p[1], p[2]);
+  const span = closed ? m : m - 1;
+  for (let r = 0; r + 1 < rings.length; r++) {
+    for (let i = 0; i < span; i++) {
+      const a = r * m + i;
+      const b = r * m + ((i + 1) % m);
+      const c = a + m;
+      const d = b + m;
+      index.push(a, b, d, a, d, c);
+    }
+  }
+  const cap = (ring: V3[], flip: boolean): void => {
+    const base = positions.length / 3;
+    let cx = 0;
+    let cy = 0;
+    let cz = 0;
+    for (const p of ring) {
+      positions.push(p[0], p[1], p[2]);
+      cx += p[0];
+      cy += p[1];
+      cz += p[2];
+    }
+    positions.push(cx / m, cy / m, cz / m);
+    const centre = base + m;
+    for (let i = 0; i < m; i++) {
+      const a = base + i;
+      const b = base + ((i + 1) % m);
+      if (flip) index.push(centre, b, a);
+      else index.push(centre, a, b);
+    }
+  };
+  if (capStart) cap(rings[0]!, false);
+  if (capEnd) cap(rings[rings.length - 1]!, true);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  g.setIndex(index);
+  g.computeVertexNormals();
+  return g;
+}
+
+/**
+ * Flips the winding if the vertex at `probe` has a normal pointing away from `outward`,
+ * so a loft never has to be written in the one ring order that happens to face out.
+ */
+function faceOutward(g: THREE.BufferGeometry, probe: number, outward: THREE.Vector3): THREE.BufferGeometry {
+  const n = g.getAttribute('normal') as THREE.BufferAttribute;
+  const probeNormal = new THREE.Vector3(n.getX(probe), n.getY(probe), n.getZ(probe));
+  if (probeNormal.dot(outward) >= 0) return g;
+  const index = g.getIndex()!;
+  const arr = index.array as Uint16Array | Uint32Array;
+  for (let i = 0; i < arr.length; i += 3) {
+    const t = arr[i + 1]!;
+    arr[i + 1] = arr[i + 2]!;
+    arr[i + 2] = t;
+  }
+  index.needsUpdate = true;
+  g.computeVertexNormals();
+  return g;
+}
+
+/** The mirror image across the aeroplane's centre plane, wound to face out. */
+function mirrorX(g: THREE.BufferGeometry): THREE.BufferGeometry {
+  const m = g.clone();
+  m.scale(-1, 1, 1);
+  const index = m.getIndex();
+  if (index) {
+    const arr = index.array as Uint16Array | Uint32Array;
+    for (let i = 0; i < arr.length; i += 3) {
+      const t = arr[i + 1]!;
+      arr[i + 1] = arr[i + 2]!;
+      arr[i + 2] = t;
+    }
+  }
+  m.computeVertexNormals();
+  return m;
+}
+
+/** A ring swept from `a` to `b`: `profile` gives points in (side, up) about the axis. */
+function strut(a: V3, b: V3, profile: readonly [number, number][], upHint: V3, scaleB = 1): THREE.BufferGeometry {
+  const A = new THREE.Vector3(...a);
+  const B = new THREE.Vector3(...b);
+  const d = B.clone().sub(A).normalize();
+  const side = new THREE.Vector3().crossVectors(d, new THREE.Vector3(...upHint)).normalize();
+  const up = new THREE.Vector3().crossVectors(side, d).normalize();
+  const ring = (o: THREE.Vector3, k: number): V3[] =>
+    profile.map(([s, u]) => {
+      const p = o.clone().addScaledVector(side, s * k).addScaledVector(up, u * k);
+      return [p.x, p.y, p.z];
+    });
+  const g = loft([ring(A, 1), ring(B, scaleB)], true, true, true);
+  return faceOutward(g, 0, side.clone().multiplyScalar(profile[0]![0]).addScaledVector(up, profile[0]![1]));
+}
+
+function ellipseProfile(rs: number, ru: number, n = 10): [number, number][] {
+  const out: [number, number][] = [];
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    out.push([Math.cos(a) * rs, Math.sin(a) * ru]);
+  }
+  return out;
+}
+
+/** A body of revolution about +Z from a (z, r) profile. */
+function lathe(profile: readonly [number, number][], segments = 24): THREE.BufferGeometry {
+  // LatheGeometry revolves (x, y) about +Y; rotating +Y onto +Z makes the axis the nose.
+  const g = new THREE.LatheGeometry(profile.map(([z, r]) => new THREE.Vector2(Math.max(r, 1e-4), z)), segments);
+  g.rotateX(Math.PI / 2);
+  return g;
+}
+
+/* ---- airfoils ---- */
+
+/** NACA 4-digit section, cosine-spaced: [chordwise 0..1, thickness-wise] from TE over the top to LE and back. */
+function naca(camber: number, camberPos: number, thickness: number, n = 14): [number, number][] {
+  const upper: [number, number][] = [];
+  const lower: [number, number][] = [];
+  for (let i = 0; i <= n; i++) {
+    const x = 0.5 * (1 - Math.cos((i / n) * Math.PI));
+    const yt = 5 * thickness * (0.2969 * Math.sqrt(x) - 0.126 * x - 0.3516 * x * x + 0.2843 * x ** 3 - 0.1036 * x ** 4);
+    let yc = 0;
+    let dy = 0;
+    if (camber > 0) {
+      if (x < camberPos) {
+        yc = (camber / camberPos ** 2) * (2 * camberPos * x - x * x);
+        dy = ((2 * camber) / camberPos ** 2) * (camberPos - x);
+      } else {
+        yc = (camber / (1 - camberPos) ** 2) * (1 - 2 * camberPos + 2 * camberPos * x - x * x);
+        dy = ((2 * camber) / (1 - camberPos) ** 2) * (camberPos - x);
+      }
+    }
+    const th = Math.atan(dy);
+    upper.push([x - yt * Math.sin(th), yc + yt * Math.cos(th)]);
+    lower.push([x + yt * Math.sin(th), yc - yt * Math.cos(th)]);
+  }
+  // TE (upper) -> LE -> TE (lower); the LE point is shared, the TE keeps a hair of thickness.
+  const ring: [number, number][] = [];
+  for (let i = n; i >= 0; i--) ring.push(upper[i]!);
+  for (let i = 1; i <= n; i++) ring.push(lower[i]!);
+  ring[0] = [1, ring[0]![1] + 0.002];
+  ring[ring.length - 1] = [1, ring[ring.length - 1]![1] - 0.002];
+  return ring;
+}
+
+const WING_FOIL = naca(0.02, 0.4, 0.12);
+const TAIL_FOIL = naca(0, 0.4, 0.09);
+
+/* ---- materials ---- */
 
 function comic(material: THREE.MeshStandardMaterial): THREE.MeshStandardMaterial {
   return applyComicShading(material, { contourStrength: 0, stippleStrength: 0 });
 }
 
-let bodyMaterial: THREE.MeshStandardMaterial | null = null;
-let trimMaterial: THREE.MeshStandardMaterial | null = null;
-let darkMaterial: THREE.MeshStandardMaterial | null = null;
-let chromeMaterial: THREE.MeshStandardMaterial | null = null;
-let bladeMaterial: THREE.MeshStandardMaterial | null = null;
-let tipMaterial: THREE.MeshStandardMaterial | null = null;
-let rubberMaterial: THREE.MeshStandardMaterial | null = null;
-let glassMaterial: THREE.MeshStandardMaterial | null = null;
-let portLampMaterial: THREE.MeshStandardMaterial | null = null;
-let starboardLampMaterial: THREE.MeshStandardMaterial | null = null;
+type LiveryPart = 'FUSELAGE' | 'WING' | 'TAIL';
 
-/** The airframe's white: warm off-white, semi-matt, no metalness. */
-function planeBodyMaterial(): THREE.MeshStandardMaterial {
-  bodyMaterial ??= comic(new THREE.MeshStandardMaterial({ name: 'plane-body', color: 0xeef0ee, roughness: 0.42, metalness: 0.05 }));
-  return bodyMaterial;
-}
-/** The cheat line and the trim: one deep blue, the classic high-wing livery. */
-function planeTrimMaterial(): THREE.MeshStandardMaterial {
-  trimMaterial ??= comic(new THREE.MeshStandardMaterial({ name: 'plane-trim', color: 0x1d3f74, roughness: 0.38, metalness: 0.05 }));
-  return trimMaterial;
-}
-/** Structural dark: gear legs, cowl lips, exhausts, panel seams. */
-function planeDarkMaterial(): THREE.MeshStandardMaterial {
-  darkMaterial ??= comic(new THREE.MeshStandardMaterial({ name: 'plane-dark', color: 0x3a3d40, roughness: 0.62, metalness: 0.25 }));
-  return darkMaterial;
-}
-/** Spinner and hub: bright metal, and the only mirror on the airframe. */
-function planeChromeMaterial(): THREE.MeshStandardMaterial {
-  chromeMaterial ??= new THREE.MeshStandardMaterial({ name: 'plane-chrome', color: 0xd9dce0, roughness: 0.18, metalness: 0.9, envMapIntensity: 1.2 });
-  return chromeMaterial;
-}
-/** Propeller blades: matt dark grey, deliberately not shiny. */
-function planeBladeMaterial(): THREE.MeshStandardMaterial {
-  bladeMaterial ??= comic(new THREE.MeshStandardMaterial({ name: 'plane-blade', color: 0x25272b, roughness: 0.55, metalness: 0.15 }));
-  return bladeMaterial;
-}
-/** Blade tips, painted so a turning prop reads as a disc. */
-function planeTipMaterial(): THREE.MeshStandardMaterial {
-  tipMaterial ??= comic(new THREE.MeshStandardMaterial({ name: 'plane-blade-tip', color: 0xe3b53a, roughness: 0.5, metalness: 0 }));
-  return tipMaterial;
-}
-/** Tyres. */
-function planeRubberMaterial(): THREE.MeshStandardMaterial {
-  rubberMaterial ??= comic(new THREE.MeshStandardMaterial({ name: 'plane-tyre', color: 0x1b1c1e, roughness: 0.92, metalness: 0 }));
-  return rubberMaterial;
-}
-/** Windscreen, side windows and the rear panes: the game's one window tint. */
-function planeGlassMaterial(): THREE.MeshStandardMaterial {
-  glassMaterial ??= new THREE.MeshStandardMaterial({ name: 'plane-glass', ...TINTED_GLASS });
-  return glassMaterial;
-}
-/** Port navigation light: red, on the local +X flank, which is the aeroplane's left. */
-function planePortLampMaterial(): THREE.MeshStandardMaterial {
-  portLampMaterial ??= comic(new THREE.MeshStandardMaterial({ name: 'plane-nav-port', color: 0xc0392b, roughness: 0.24, metalness: 0.1 }));
-  return portLampMaterial;
-}
-/** Starboard navigation light: green, on the local -X flank. */
-function planeStarboardLampMaterial(): THREE.MeshStandardMaterial {
-  starboardLampMaterial ??= comic(new THREE.MeshStandardMaterial({ name: 'plane-nav-starboard', color: 0x1f7a3d, roughness: 0.24, metalness: 0.1 }));
-  return starboardLampMaterial;
-}
-
-/* ---- superellipse sections: the fuselage and the cowl ---- */
-
-type Vec2 = readonly [number, number];
-type Vec3 = readonly [number, number, number];
-
-/** A cross-section: centre height, half width, half height, and how boxy it is. */
-interface Section {
-  readonly cy: number;
-  readonly hw: number;
-  readonly hh: number;
-  readonly e: number;
-}
-
-/** `sign(value) * |value| ** power`: the superellipse's exponent rule. */
-function sgnPow(value: number, power: number): number {
-  return Math.sign(value) * Math.abs(value) ** power;
-}
-
-/** `a` to `b`, linearly. */
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}
-
-/**
- * The outward unit normal of `section` at ring angle `t`: the gradient of the
- * superellipse `|x/hw|^e + |y/hh|^e = 1`. It is what puts a decal's points a few
- * millimetres OFF the skin rather than exactly on it, where they would fight it.
- */
-function skinNormal(section: Section, t: number): Vec2 {
-  const x = sgnPow(Math.cos(t), (2 * (section.e - 1)) / section.e) / section.hw;
-  const y = sgnPow(Math.sin(t), (2 * (section.e - 1)) / section.e) / section.hh;
-  const length = Math.hypot(x, y) || 1;
-  return [x / length, y / length];
-}
-
-/** The skin's point at ring angle `t` (0 = the +X flank, π/2 = the crown), `out` metres along the normal. */
-function skinPoint(section: Section, t: number, out = 0): Vec2 {
-  const x = section.hw * sgnPow(Math.cos(t), 2 / section.e);
-  const y = section.cy + section.hh * sgnPow(Math.sin(t), 2 / section.e);
-  if (out === 0) return [x, y];
-  const normal = skinNormal(section, t);
-  return [x + normal[0] * out, y + normal[1] * out];
-}
-
-/** The ring angle at height `y`, on `side` (+1 = the local +X flank, -1 = the other one). */
-function skinAngle(section: Section, y: number, side: number): number {
-  const fraction = Math.max(-1, Math.min(1, (y - section.cy) / section.hh));
-  const t = Math.asin(Math.max(-1, Math.min(1, sgnPow(fraction, section.e / 2))));
-  return side >= 0 ? t : Math.PI - t;
-}
-
-/**
- * The fuselage's stations, tail first: `[z, centre y, half width, half height,
- * squareness]`. The squareness rises through the cabin — a 172's greenhouse is a
- * rounded rectangle — and falls away into the tail cone and the cowl, which are
- * nearer round.
- */
-const FUSELAGE: readonly (readonly [number, number, number, number, number])[] = [
-  [TAIL_END_Z, 1.865, 0.075, 0.085, 2.6],
-  [-3.9, 1.828, 0.132, 0.146, 2.6],
-  [-3.4, 1.775, 0.205, 0.222, 2.7],
-  [-2.7, 1.705, 0.3, 0.312, 2.8],
-  [-2.0, 1.668, 0.385, 0.392, 3.0],
-  [-1.3, 1.65, 0.462, 0.462, 3.2],
-  [-0.7, 1.638, 0.52, 0.508, 3.5],
-  [0.0, 1.628, 0.56, 0.54, 3.6],
-  [0.6, 1.624, 0.575, 0.552, 3.6],
-  [1.2, 1.622, 0.566, 0.556, 3.6],
-  [CABIN_FRONT_Z, 1.62, 0.505, 0.548, 3.4],
-  [2.2, 1.615, 0.46, 0.47, 3.1],
-  [2.65, 1.612, 0.395, 0.4, 2.9],
-  [COWL_FRONT_Z, 1.61, 0.315, 0.325, 2.8],
-];
-
-/** How many points go round the fuselage: twenty quads a bay, smooth under a flat light. */
-const FUSELAGE_SEGMENTS = 20;
-
-/** The fuselage's cross-section at `z`, between stations and clamped at the ends. */
-function fuselageSection(z: number): Section {
-  const last = FUSELAGE.length - 1;
-  const first = FUSELAGE[0]!;
-  if (z <= first[0]) return { cy: first[1], hw: first[2], hh: first[3], e: first[4] };
-  for (let i = 1; i <= last; i++) {
-    const b = FUSELAGE[i]!;
-    if (z > b[0]) continue;
-    const a = FUSELAGE[i - 1]!;
-    const t = (z - a[0]) / (b[0] - a[0]);
-    return { cy: lerp(a[1], b[1], t), hw: lerp(a[2], b[2], t), hh: lerp(a[3], b[3], t), e: lerp(a[4], b[4], t) };
+/** The registration, painted on the tail cone by the livery shader. */
+let registrationTexture: THREE.CanvasTexture | null = null;
+function planeRegistration(): THREE.CanvasTexture {
+  if (registrationTexture) return registrationTexture;
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024;
+  canvas.height = 160;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 142px "Arial Narrow", "Helvetica Neue", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('RA-67172', canvas.width / 2, canvas.height / 2 + 6);
   }
-  const end = FUSELAGE[last]!;
-  return { cy: end[1], hw: end[2], hh: end[3], e: end[4] };
+  registrationTexture = new THREE.CanvasTexture(canvas);
+  registrationTexture.anisotropy = 8;
+  return registrationTexture;
 }
 
-/** The fuselage's ring at `z`: `n` points counter-clockwise in `(x, y)`. */
-function fuselageRing(z: number, n: number): Vec2[] {
-  const section = fuselageSection(z);
-  const ring: Vec2[] = [];
-  for (let i = 0; i < n; i++) ring.push(skinPoint(section, (i * Math.PI * 2) / n));
-  return ring;
+/** Livery colours, linear. */
+const NAVY = new THREE.Color(0x1b3363);
+const GOLD = new THREE.Color(0xd6a23a);
+const GLASS = new THREE.Color(0x14222e);
+const SEAM = new THREE.Color(0x8e9398);
+
+const LIVERY_PARS = /* glsl */ `
+varying vec3 vPlaneLocal;
+varying vec3 vPlaneNormal;
+uniform sampler2D uPlaneReg;
+uniform vec3 uNavy;
+uniform vec3 uGold;
+uniform vec3 uGlass;
+uniform vec3 uSeam;
+float planeBox( vec2 p, vec2 c, vec2 h, float r ) {
+  vec2 d = abs( p - c ) - h + r;
+  return length( max( d, 0.0 ) ) + min( max( d.x, d.y ), 0.0 ) - r;
 }
-
-/**
- * The same point ON THE DRAWN SKIN. The fuselage is a loft of flat facets, and a facet
- * sags up to seven millimetres inside the superellipse its ring points are taken from, so
- * a decal placed on the analytic surface sinks into the fuselage between the ring points
- * and comes out in torn patches — the skin's own chords eat it. Snapping the angle into
- * the facet it falls in keeps the whole offset, so a cheat line reads as a line and a pane
- * reads as one pane the length of the cabin.
- */
-function skinFacetPoint(section: Section, t: number, out = 0): Vec2 {
-  const step = (Math.PI * 2) / FUSELAGE_SEGMENTS;
-  const wrapped = ((t % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-  const index = Math.floor(wrapped / step) % FUSELAGE_SEGMENTS;
-  const from = skinPoint(section, index * step);
-  const to = skinPoint(section, (index + 1) * step);
-  const chordX = to[0] - from[0];
-  const chordY = to[1] - from[1];
-  const length = Math.hypot(chordX, chordY) || 1;
-  const along = (wrapped - index * step) / step;
-  // The ring runs counter-clockwise, so the chord turned a quarter turn clockwise points
-  // out of the fuselage.
-  return [from[0] + chordX * along + (chordY / length) * out, from[1] + chordY * along - (chordX / length) * out];
+// 1 inside, antialiased on the field's own screen-space rate.
+float planeFill( float sdf ) {
+  float w = max( fwidth( sdf ), 1e-4 );
+  return 1.0 - smoothstep( -w, w, sdf );
 }
-
-/* ---- the wing's section: a plate with a round nose and a sharp trailing edge ---- */
-
-/** A wing section: centre height, half chord, half thickness, and its mid-chord station. */
-interface WingSection {
-  readonly cy: number;
-  readonly halfChord: number;
-  readonly halfT: number;
-  readonly zMid: number;
+float planeLine( float sdf, float halfWidth ) {
+  float w = max( fwidth( sdf ), 1e-4 );
+  return 1.0 - smoothstep( halfWidth - w, halfWidth + w, abs( sdf ) );
 }
-
-/**
- * Wing stations, root first: `[x, half chord, half thickness, mid-chord z]`. The centre
- * height is `WING_Y + tan(2°) * x`, so the dihedral is one number rather than eight, and
- * the last four stations cut the chord away so the tip rounds off instead of ending
- * square.
- */
-const WING: readonly (readonly [number, number, number, number])[] = [
-  [0.0, WING_ROOT_CHORD / 2, 0.135, WING_CENTRE_Z],
-  [1.6, 0.82, 0.128, 0.63],
-  [3.2, 0.752, 0.112, 0.6],
-  [4.4, 0.7, 0.1, 0.575],
-  [5.0, 0.64, 0.09, 0.56],
-  [5.3, 0.5, 0.078, 0.545],
-  [5.46, 0.3, 0.058, 0.53],
-  [5.5, 0.12, 0.03, 0.52],
-];
-
-/**
- * The wing's profile in `(u, v)` fractions: `u` along the chord (+1 = the leading
- * edge) and `v` through the thickness (+1 = up). Read from the leading edge under the
- * section, aft along the bottom, round the trailing edge and forward over the top —
- * which is what puts the `(y, z)` ring the loft wants the counter-clockwise way round.
- * The two close pairs near `u = -0.46` are the flap and aileron hinge line: one quad
- * wide, painted dark, on the surface itself.
- */
-const WING_PROFILE: readonly Vec2[] = [
-  [1.0, 0.0],
-  [0.85, -0.72],
-  [0.45, -0.98],
-  [-0.1, -1.0],
-  [-0.44, -0.975],
-  [-0.48, -0.972],
-  [-0.65, -0.92],
-  [-1.0, -0.35],
-  [-1.0, 0.35],
-  [-0.65, 0.92],
-  [-0.48, 0.972],
-  [-0.44, 0.975],
-  [-0.1, 1.0],
-  [0.45, 0.98],
-  [0.85, 0.72],
-];
-
-/** The wing profile's quads that carry the hinge line: the bottom one and the top one. */
-const WING_HINGE_BOTTOM = 4;
-const WING_HINGE_TOP = 10;
-
-/** The wing's section at `x`, between stations and clamped at the ends. */
-function wingSection(x: number): WingSection {
-  const distance = Math.abs(x);
-  const last = WING.length - 1;
-  let station = last;
-  for (let i = 0; i < last; i++) {
-    if (distance <= WING[i + 1]![0]!) {
-      station = i;
-      break;
-    }
+vec3 planeLivery( vec3 p, vec3 n, out float glass ) {
+  vec3 colour = vec3( 1.0 );
+  glass = 0.0;
+  float side = smoothstep( 0.45, 0.7, abs( n.x ) );
+#if defined( PLANE_FUSELAGE )
+  // Cheat line: navy over a gold pinstripe, level along the cabin and sweeping up the
+  // tail cone towards the fin.
+  float yc = p.z > -0.6 ? 1.2 : 1.2 + ( -0.6 - p.z ) * 0.085;
+  float band = planeFill( abs( p.y - yc ) - 0.062 ) * step( p.z, 2.86 );
+  float pin = planeFill( abs( p.y - ( yc - 0.098 ) ) - 0.013 ) * step( p.z, 2.8 );
+  float stripeSide = smoothstep( 0.25, 0.45, abs( n.x ) );
+  colour = mix( colour, uNavy, band * stripeSide );
+  colour = mix( colour, uGold, pin * stripeSide );
+  // Registration on the tail cone, read from nose to tail on the left (+X) and from
+  // tail to nose on the right, the way a real one reads on each side.
+  vec2 regUv = vec2( ( p.x > 0.0 ? ( -1.75 - p.z ) : ( p.z + 3.55 ) ) / 1.8, ( p.y - ( yc + 0.1 ) ) / 0.18 );
+  if ( regUv.x > 0.0 && regUv.x < 1.0 && regUv.y > 0.0 && regUv.y < 1.0 ) {
+    colour = mix( colour, uNavy, texture2D( uPlaneReg, regUv ).a * side );
   }
-  const a = WING[station]!;
-  const b = WING[Math.min(station + 1, last)]!;
-  const span = b[0] - a[0];
-  const t = span > 1e-9 ? Math.max(0, Math.min(1, (distance - a[0]) / span)) : 0;
-  return {
-    cy: WING_Y + WING_DIHEDRAL * distance,
-    halfChord: lerp(a[1], b[1], t),
-    halfT: lerp(a[2], b[2], t),
-    zMid: lerp(a[3], b[3], t),
+  // Side windows: the door's, raked at the front with the screen, and the rear quarter
+  // pane, narrowing at the top with the roof's fall.
+  float doorWin = planeBox( vec2( p.z - ( p.y - 1.69 ) * 0.42, p.y ), vec2( 0.5, 1.69 ), vec2( 0.37, 0.215 ), 0.07 );
+  float rearWin = planeBox( vec2( p.z + ( p.y - 1.69 ) * 0.5, p.y ), vec2( -0.31, 1.69 ), vec2( 0.29, 0.2 ), 0.09 );
+  float sideGlass = max( planeFill( doorWin ), planeFill( rearWin ) ) * side;
+  // Windscreen: seen from above it is the sloped band between the cowl and the roof.
+  float screen = planeFill( planeBox( vec2( p.x, p.z ), vec2( 0.0, 1.24 ), vec2( 0.5, 0.27 ), 0.14 ) )
+    * smoothstep( 1.68, 1.72, p.y ) * smoothstep( 0.1, 0.3, n.y + n.z );
+  // Rear window over the tail cone, behind the wing.
+  float rear = planeFill( planeBox( vec2( p.x, p.z ), vec2( 0.0, -0.98 ), vec2( 0.34, 0.24 ), 0.1 ) )
+    * smoothstep( 0.35, 0.55, n.y ) * step( 1.85, p.y );
+  glass = max( max( sideGlass, screen ), rear );
+  // Seams: the door around its window, and the cowl's joint at the firewall.
+  float door = planeBox( vec2( p.z - ( p.y - 1.69 ) * 0.42, p.y ), vec2( 0.52, 1.4 ), vec2( 0.46, 0.56 ), 0.06 );
+  float seams = planeLine( door, 0.005 ) * side * step( 1.0, p.y );
+  seams = max( seams, planeLine( p.z - 1.57, 0.005 ) );
+  seams = max( seams, planeLine( abs( p.x ) - 0.16, 0.004 ) * step( 1.9, p.z ) * step( 1.2, p.y ) * smoothstep( 0.6, 0.8, n.y ) );
+  colour = mix( colour, uSeam, seams * 0.8 );
+  // The nose bowl: two air inlets beside the spinner, and the dark throat under it.
+  float inlets = planeFill( length( ( vec2( abs( p.x ), p.y ) - vec2( 0.19, 1.13 ) ) / vec2( 0.095, 0.055 ) ) - 1.0 );
+  inlets = max( inlets, planeFill( length( ( vec2( p.x, p.y ) - vec2( 0.0, 1.08 ) ) / vec2( 0.11, 0.035 ) ) - 1.0 ) );
+  colour = mix( colour, vec3( 0.04 ), inlets * smoothstep( 2.8, 2.86, p.z ) );
+#elif defined( PLANE_WING )
+  // Flap and aileron hinge lines, top and bottom, and the gaps at their ends.
+  float ax = abs( p.x );
+  float flap = planeLine( p.z - ( ${WING_TE_Z.toFixed(3)} + 0.36 ), 0.006 ) * step( 0.6, ax ) * step( ax, 2.9 );
+  float aileron = planeLine( p.z - ( ${WING_TE_Z.toFixed(3)} + 0.3 ), 0.006 ) * step( 2.98, ax ) * step( ax, 5.05 );
+  float ends = 0.0;
+  ends = max( ends, planeLine( ax - 2.94, 0.006 ) );
+  ends = max( ends, planeLine( ax - 5.05, 0.006 ) );
+  ends = max( ends, planeLine( ax - 0.6, 0.006 ) );
+  ends *= step( p.z, ${WING_TE_Z.toFixed(3)} + 0.36 ) * step( 0.6, ax );
+  float surface = smoothstep( 0.3, 0.5, abs( n.y ) );
+  colour = mix( colour, uSeam, max( max( flap, aileron ), ends ) * surface * 0.85 );
+  // Fuel caps on top of each wing root.
+  float cap = planeLine( length( vec2( ax - 1.05, p.z - 0.25 ) ) - 0.05, 0.007 ) * step( 0.0, n.y );
+  colour = mix( colour, uSeam, cap );
+  // A navy tip.
+  colour = mix( colour, uNavy, planeFill( 5.22 - ax ) );
+#elif defined( PLANE_TAIL )
+  float ax = abs( p.x );
+  // Elevator hinge across the tailplane, rudder hinge down the fin.
+  float elevator = planeLine( p.z + 4.62, 0.006 ) * step( 0.12, ax ) * smoothstep( 0.3, 0.5, abs( n.y ) );
+  float rudder = planeLine( p.z + 4.66 - ( p.y - 1.8 ) * 0.1, 0.006 ) * step( 1.78, p.y ) * side;
+  colour = mix( colour, uSeam, max( elevator, rudder ) * 0.85 );
+  // Fin stripes, raked with the leading edge.
+  float s = p.y + ( p.z + 4.6 ) * 0.55;
+  float finBand = planeFill( abs( s - 2.16 ) - 0.07 ) * step( 1.7, p.y );
+  float finPin = planeFill( abs( s - 2.285 ) - 0.014 ) * step( 1.7, p.y );
+  colour = mix( colour, uNavy, finBand * side );
+  colour = mix( colour, uGold, finPin * side );
+#endif
+  colour = mix( colour, uGlass, glass );
+  return colour;
+}`;
+
+const liveryMaterials = new Map<LiveryPart, THREE.MeshStandardMaterial>();
+
+/** The white airframe, with the livery for one family of parts painted in. */
+function liveryMaterial(part: LiveryPart): THREE.MeshStandardMaterial {
+  const cached = liveryMaterials.get(part);
+  if (cached) return cached;
+  const material = comic(
+    new THREE.MeshStandardMaterial({ name: `plane-${part.toLowerCase()}`, color: 0xf1f2ee, roughness: 0.5, metalness: 0.02 }),
+  );
+  const uniforms = {
+    uPlaneReg: { value: planeRegistration() },
+    uNavy: { value: NAVY },
+    uGold: { value: GOLD },
+    uGlass: { value: GLASS },
+    uSeam: { value: SEAM },
   };
+  const previous = material.onBeforeCompile;
+  material.onBeforeCompile = (shader, renderer) => {
+    previous.call(material, shader, renderer);
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vPlaneLocal;\nvarying vec3 vPlaneNormal;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvPlaneLocal = position;\nvPlaneNormal = normal;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>\n#define PLANE_${part}\n${LIVERY_PARS}`)
+      .replace(
+        '#include <color_fragment>',
+        '#include <color_fragment>\nfloat planeGlass = 0.0;\ndiffuseColor.rgb *= planeLivery( vPlaneLocal, normalize( vPlaneNormal ), planeGlass );',
+      )
+      .replace(
+        '#include <roughnessmap_fragment>',
+        '#include <roughnessmap_fragment>\nroughnessFactor = mix( roughnessFactor, 0.07, planeGlass );',
+      )
+      .replace(
+        '#include <metalnessmap_fragment>',
+        '#include <metalnessmap_fragment>\nmetalnessFactor = mix( metalnessFactor, 0.4, planeGlass );',
+      );
+  };
+  const previousKey = material.customProgramCacheKey;
+  material.customProgramCacheKey = () => `${previousKey.call(material)}:plane-livery-v1-${part}`;
+  liveryMaterials.set(part, material);
+  return material;
 }
 
-/** A profile point of `section`, in the loft's `(y, z)` plane. */
-function wingPoint(section: WingSection, index: number): Vec2 {
-  const [u, v] = WING_PROFILE[index]!;
-  return [section.cy + v * section.halfT, section.zMid + u * section.halfChord];
-}
-
-/** The wing section's outward normals, one per profile point. */
-function wingNormals(section: WingSection): Vec2[] {
-  const n = WING_PROFILE.length;
-  const normals: Vec2[] = [];
-  for (let i = 0; i < n; i++) {
-    const previous = wingPoint(section, (i - 1 + n) % n);
-    const here = wingPoint(section, i);
-    const next = wingPoint(section, (i + 1) % n);
-    // Counter-clockwise in (y, z): an edge turned a quarter turn to the right points out.
-    const beforeX = here[1] - previous[1];
-    const beforeY = previous[0] - here[0];
-    const afterX = next[1] - here[1];
-    const afterY = here[0] - next[0];
-    const before = Math.hypot(beforeX, beforeY) || 1;
-    const after = Math.hypot(afterX, afterY) || 1;
-    const x = beforeX / before + afterX / after;
-    const y = beforeY / before + afterY / after;
-    const length = Math.hypot(x, y) || 1;
-    normals.push([x / length, y / length]);
+const plainMaterials = new Map<string, THREE.MeshStandardMaterial>();
+function plain(
+  name: string,
+  color: number,
+  roughness: number,
+  metalness: number,
+  options: { emissive?: number; comic?: boolean } = {},
+): THREE.MeshStandardMaterial {
+  let m = plainMaterials.get(name);
+  if (!m) {
+    m = new THREE.MeshStandardMaterial({ name: `plane-${name}`, color, roughness, metalness });
+    if (options.emissive !== undefined) {
+      m.emissive.setHex(options.emissive);
+      m.emissiveIntensity = 0.6;
+    }
+    if (options.comic !== false) m = comic(m);
+    plainMaterials.set(name, m);
   }
-  return normals;
+  return m;
 }
 
-/** The wing's ring: the whole profile, in the loft's `(y, z)` plane. */
-function wingRing(section: WingSection): Vec2[] {
-  return WING_PROFILE.map((_point, index) => wingPoint(section, index));
-}
+/* ---- parts ---- */
 
-/** A run of profile points pushed `out` along their own normals: one shell of a stripe. */
-function wingBand(section: WingSection, indices: readonly number[], out: number): Vec2[] {
-  const normals = wingNormals(section);
-  const band: Vec2[] = [];
-  for (const index of indices) {
-    const [y, z] = wingPoint(section, index);
-    const [ny, nz] = normals[index]!;
-    band.push([y + ny * out, z + nz * out]);
+function buildFuselage(): THREE.BufferGeometry {
+  const rings: V3[][] = [];
+  const stations = 56;
+  for (let i = 0; i <= stations; i++) {
+    // Denser at both ends, where the curvature is.
+    const u = i / stations;
+    const t = 0.5 - 0.5 * Math.cos(u * Math.PI);
+    const z = TAIL_Z + 0.04 + (COWL_FRONT_Z - TAIL_Z - 0.04) * (0.35 * u + 0.65 * t);
+    rings.push(fuselageRing(z));
   }
-  return band;
+  const g = loft(rings, true, true, true);
+  // Vertex 0 of a mid ring lies on +X.
+  return faceOutward(g, 20 * RING, new THREE.Vector3(1, 0, 0));
 }
 
-/** The leading edge's arc, from the upper shoulder round the nose to the lower one. */
-const WING_NOSE = [13, 14, 0, 1, 2] as const;
-
-/* ---- the tail surfaces ---- */
-
-/**
- * Fin, rudder and dorsal fillet as one plate, `[z, bottom y, top y, half thickness,
- * band]`. The band is how far up the side the cheat line runs: it is painted onto the
- * plate itself, so the livery's sweep up the fin is part of the surface rather than a
- * strip lying on it. Every station's bottom edge is inside the tail cone, an inch or
- * two under its skin, and every band stays inside its own section — a band taller than
- * the station it is painted on folds the ring over itself.
- */
-const FIN: readonly (readonly [number, number, number, number, number])[] = [
-  [-4.55, 2.1, 2.34, 0.028, 0.08],
-  [-4.34, 1.98, 2.52, 0.031, 0.18],
-  [-4.1, 1.86, 2.66, 0.034, 0.24],
-  [-3.8, 1.79, 2.7, 0.036, 0.26],
-  [-3.4, 1.8, 2.7, 0.038, 0.26],
-  // The fin's top-front corner: from here forward the leading edge is the dorsal fillet,
-  // a long low ramp over the roof, and from here aft the fin's top runs level to the
-  // rudder. A leading edge that climbs gently the whole way reads as a sail, not a fin.
-  [-3.05, 1.82, 2.7, 0.04, 0.24],
-  [-2.6, 1.88, 2.26, 0.042, 0.16],
-  [-2.2, 1.94, 2.22, 0.044, 0.1],
-  [-1.7, 2.0, 2.16, 0.045, 0.06],
-  [-1.2, 2.05, 2.14, 0.045, 0.04],
-];
-
-/** Where the fin's trailing edge gives way to the rudder, and the tailplane's rear spar. */
-const RUDDER_HINGE_Z = -3.98;
-const ELEVATOR_HINGE_Z = -4.16;
-
-/**
- * Tailplane, elevator and their hinge line as one plate, `[x, centre y, half thickness,
- * leading edge z, trailing edge z]`. The root is buried in the tail cone and the plate
- * passes through the fin's own base.
- */
-const STAB: readonly (readonly [number, number, number, number, number])[] = [
-  [0.0, STAB_Y, 0.052, -3.12, -4.38],
-  [0.7, STAB_Y, 0.048, -3.22, -4.38],
-  [1.3, 1.99, 0.042, -3.34, -4.34],
-  [STAB_HALF_SPAN, 1.995, 0.036, -3.44, -4.28],
-];
-
-/** Propeller blade sections, `[half thickness, half chord, pitch]`, root to tip. */
-const BLADE: readonly (readonly [number, number, number])[] = [
-  [0.026, 0.055, 0.58],
-  [0.022, 0.078, 0.45],
-  [0.016, 0.072, 0.33],
-  [0.012, 0.056, 0.26],
-];
-
-/* ---- the primitive builder ---- */
-
-const ZERO: Vec3 = [0, 0, 0];
-const ONE: Vec3 = [1, 1, 1];
-/** Cylinders are built along +Y; this Euler re-points that axis along +Z. */
-const AXIS_Z: Vec3 = [Math.PI / 2, 0, 0];
-/** ...and along +X. */
-const AXIS_X: Vec3 = [0, 0, -Math.PI / 2];
-
-const _m = new THREE.Matrix4();
-const _q = new THREE.Quaternion();
-const _e = new THREE.Euler();
-const _p = new THREE.Vector3();
-const _s = new THREE.Vector3();
-const _up = new THREE.Vector3(0, 1, 0);
-const _a = new THREE.Vector3();
-const _b = new THREE.Vector3();
-const _ref = new THREE.Vector3();
-const _dir = new THREE.Vector3();
-const _t1 = new THREE.Vector3();
-const _t2 = new THREE.Vector3();
-const _n = new THREE.Vector3();
-
-/** One cross-section of a loft: where along the axis it sits, and its ring. */
-interface Station {
-  readonly at: number;
-  readonly ring: readonly Vec2[];
+/** Wing section ring at span station x (positive, the left wing). */
+function wingRing(x: number): V3[] {
+  const inboard = x <= WING_TAPER_X;
+  const chord = inboard
+    ? 1.63
+    : 1.63 + ((WING_TIP_CHORD - 1.63) * (x - WING_TAPER_X)) / (WING_HALF_SPAN - WING_TAPER_X);
+  const le = WING_TE_Z + chord;
+  const y = WING_Y + Math.max(0, x - CABIN_HALF_W) * Math.tan(WING_DIHEDRAL);
+  // 1.5 degrees of incidence at the root, washed out to zero at the tip.
+  const incidence = ((1.5 - (1.5 * x) / WING_HALF_SPAN) * Math.PI) / 180;
+  const ci = Math.cos(incidence);
+  const si = Math.sin(incidence);
+  return WING_FOIL.map(([u, v]) => {
+    const along = u * chord;
+    const up = v * chord;
+    return [x, y + up * ci + along * si * 0.2, le - along * ci + up * si];
+  });
 }
 
-/** Which material one quad of a loft takes; `undefined` leaves the loft's own material. */
-type Paint = (station: number, segment: number) => THREE.Material | undefined;
-
-/** A ring turned the counter-clockwise way round in the plane the loft does not advance along. */
-function orientRing(ring: readonly Vec2[]): Vec2[] {
-  const points = [...ring];
-  let area = 0;
-  for (let i = 0; i < points.length; i++) {
-    const p = points[i]!;
-    const q = points[(i + 1) % points.length]!;
-    area += p[0] * q[1] - q[0] * p[1];
+function buildWing(): THREE.BufferGeometry {
+  const xs = [0, 0.6, 1.4, WING_TAPER_X, 3.4, 4.3, 5.1, WING_HALF_SPAN - 0.12];
+  const rings = xs.map(wingRing);
+  // The tip: a shallow rounded cap, the section shrinking in thickness and chord.
+  const tip = wingRing(WING_HALF_SPAN - 0.12);
+  const cx = tip.reduce((s, p) => s + p[2], 0) / tip.length;
+  const cy = tip.reduce((s, p) => s + p[1], 0) / tip.length;
+  for (const [dx, k, kz] of [
+    [0.07, 0.62, 0.96],
+    [0.12, 0.2, 0.9],
+  ] as const) {
+    rings.push(tip.map((p) => [WING_HALF_SPAN - 0.12 + dx, cy + (p[1] - cy) * k, cx + (p[2] - cx) * kz]));
   }
-  return area < 0 ? points.reverse() : points;
+  const g = loft(rings, true, true, true);
+  const probe = 3 * WING_FOIL.length + Math.floor(WING_FOIL.length / 4);
+  const left = faceOutward(g, probe, new THREE.Vector3(0, 1, 0));
+  return mergeGeometries([left, mirrorX(left)])!;
 }
 
-/** A station list given nose-in is turned around, so the quads wind the same either way. */
-function orderStations(stations: readonly Station[]): readonly Station[] {
-  const points = [...stations];
-  return points[points.length - 1]!.at < points[0]!.at ? points.reverse() : points;
+function buildTailplane(): THREE.BufferGeometry {
+  const ring = (x: number): V3[] => {
+    const rootChord = 1.42;
+    const chord = rootChord + ((0.95 - rootChord) * x) / STAB_HALF_SPAN;
+    const te = -4.98;
+    const le = te + chord;
+    return TAIL_FOIL.map(([u, v]) => [x, 1.63 + v * chord, le - u * chord]);
+  };
+  const xs = [0, 0.6, 1.2, STAB_HALF_SPAN - 0.06];
+  const rings = xs.map(ring);
+  const tip = ring(STAB_HALF_SPAN - 0.06);
+  const cz = tip.reduce((s, p) => s + p[2], 0) / tip.length;
+  rings.push(tip.map((p) => [STAB_HALF_SPAN, 1.63 + (p[1] - 1.63) * 0.4, cz + (p[2] - cz) * 0.93]));
+  const g = faceOutward(loft(rings, true, true, true), 2 * TAIL_FOIL.length + 4, new THREE.Vector3(0, 1, 0));
+  return mergeGeometries([g, mirrorX(g)])!;
 }
 
-/** A rectangle, counter-clockwise in the `(a, b)` plane: a plate's or a strap's section. */
-function rectRing(halfA: number, centreB: number, halfB: number): Vec2[] {
-  return [
-    [-halfA, centreB - halfB],
-    [halfA, centreB - halfB],
-    [halfA, centreB + halfB],
-    [-halfA, centreB + halfB],
-  ];
-}
-
-/** A blade's section in `(y, z)`: a rectangle turned by its pitch. */
-function bladeRing(halfT: number, halfChord: number, pitch: number): Vec2[] {
-  const cos = Math.cos(pitch);
-  const sin = Math.sin(pitch);
-  const ring: Vec2[] = [];
-  for (const [a, b] of rectRing(halfT, 0, halfChord)) ring.push([a * cos - b * sin, a * sin + b * cos]);
-  return ring;
-}
-
-/** A round ring of `n` points about `(cx, cy)`: a wheel pant's section. */
-function circleRing(cx: number, cy: number, rx: number, ry: number, n: number): Vec2[] {
-  const ring: Vec2[] = [];
-  for (let i = 0; i < n; i++) {
-    const t = (i * Math.PI * 2) / n;
-    ring.push([cx + Math.cos(t) * rx, cy + Math.sin(t) * ry]);
-  }
-  return ring;
+function buildFin(): THREE.BufferGeometry {
+  // Sections in (z, x) at height y: LE swept back 38 degrees, TE nearly upright.
+  const ring = (y: number): V3[] => {
+    const t = (y - 1.6) / (LIGHT_PLANE_HEIGHT - 0.06 - 1.6);
+    const te = TAIL_Z - 0.02 * t;
+    const le = -3.5 - t * 0.95;
+    const chord = le - te;
+    return TAIL_FOIL.map(([u, v]) => [v * chord, y, le - u * chord]);
+  };
+  const ys = [1.6, 1.9, 2.2, 2.45, LIGHT_PLANE_HEIGHT - 0.06];
+  const rings = ys.map(ring);
+  const top = ring(LIGHT_PLANE_HEIGHT - 0.06);
+  const cz = top.reduce((s, p) => s + p[2], 0) / top.length;
+  rings.push(top.map((p) => [p[0] * 0.4, LIGHT_PLANE_HEIGHT - 0.01, cz + (p[2] - cz) * 0.92]));
+  const g = loft(rings, true, true, true);
+  const probe = 2 * TAIL_FOIL.length + Math.floor(TAIL_FOIL.length / 4);
+  return faceOutward(g, probe, new THREE.Vector3(1, 0, 0));
 }
 
 /**
- * Accumulates primitives and merges them one mesh per material. The geometries are
- * freshly created here and never shared, so transforming them in place is safe;
- * nothing is retained after `build()`.
+ * The dorsal fillet: a thin blade rising off the tail cone behind the rear window and
+ * running up into the fin's leading edge, so the fin grows out of the fuselage the way
+ * the real one does instead of standing on it.
  */
-class Airframe {
-  private readonly geometry: THREE.BufferGeometry[] = [];
-  private readonly materials: THREE.Material[] = [];
-
-  box(size: Vec3, material: THREE.Material, position: Vec3, rotation: Vec3 = ZERO, scale: Vec3 = ONE): void {
-    this.add(new THREE.BoxGeometry(size[0], size[1], size[2]), material, position, rotation, scale);
-  }
-
-  cylinder(
-    radiusTop: number,
-    radiusBottom: number,
-    height: number,
-    segments: number,
-    material: THREE.Material,
-    position: Vec3,
-    rotation: Vec3 = ZERO,
-    scale: Vec3 = ONE,
-    openEnded = false,
-  ): void {
-    this.add(
-      new THREE.CylinderGeometry(radiusTop, radiusBottom, height, segments, 1, openEnded),
-      material,
-      position,
-      rotation,
-      scale,
-    );
-  }
-
-  sphere(radius: number, widthSegments: number, heightSegments: number, material: THREE.Material, position: Vec3, scale: Vec3 = ONE): void {
-    this.add(new THREE.SphereGeometry(radius, widthSegments, heightSegments), material, position, ZERO, scale);
-  }
-
-  /** A round tube spanning two local points; `radiusFrom` is the end at `from`, metres. */
-  strut(from: Vec3, to: Vec3, radiusFrom: number, radiusTo: number, material: THREE.Material, segments = 8): void {
-    _a.set(from[0], from[1], from[2]);
-    _b.set(to[0], to[1], to[2]);
-    _dir.subVectors(_b, _a);
-    const length = _dir.length();
-    if (length < 1e-6) return;
-    _dir.divideScalar(length);
-    _q.setFromUnitVectors(_up, _dir);
-    _e.setFromQuaternion(_q);
-    this.add(
-      new THREE.CylinderGeometry(radiusTo, radiusFrom, length, segments, 1, false),
-      material,
-      [(_a.x + _b.x) / 2, (_a.y + _b.y) / 2, (_a.z + _b.z) / 2],
-      [_e.x, _e.y, _e.z],
-      ONE,
-    );
-  }
-
-  /**
-   * A closed lofted solid: `stations` are cross-sections along the axis, all rings with
-   * the same number of points, each counter-clockwise in `(x, y)` for a `z` loft or in
-   * `(y, z)` for an `x` loft — the loft turns a ring round if it is not that way, and
-   * reads a nose-in station list backwards. Both ends are capped, and `paint` overrides
-   * the material of a single quad, which is how the fin's livery and the wing's hinge
-   * line are laid on the surfaces they belong to.
-   */
-  loft(axis: 'x' | 'z', stations: readonly Station[], material: THREE.Material, paint?: Paint): void {
-    this.loftPart(axis, stations, material, paint);
-  }
-
-  /**
-   * The same loft in a frame of its own: the axis runs from `from` to `to`, and `refX`
-   * — take its part across the axis — becomes the ring's own `x`, so a strap's thin
-   * direction and a fairing's chord can be pointed in the aeroplane rather than
-   * wherever the rotation happens to leave them. The gear legs and the wing struts.
-   */
-  aimed(from: Vec3, to: Vec3, refX: Vec3, stations: readonly Station[], material: THREE.Material): void {
-    _a.set(from[0], from[1], from[2]);
-    _b.set(to[0], to[1], to[2]);
-    _dir.subVectors(_b, _a);
-    const length = _dir.length();
-    if (length < 1e-6) return;
-    _dir.divideScalar(length);
-    _ref.set(refX[0], refX[1], refX[2]);
-    _ref.addScaledVector(_dir, -_ref.dot(_dir));
-    if (_ref.lengthSq() < 1e-8) _ref.set(0, 1, 0).addScaledVector(_dir, -_dir.y);
-    _ref.normalize();
-    _s.crossVectors(_dir, _ref);
-    _m.makeBasis(_ref, _s, _dir);
-    _m.setPosition(_a);
-    this.loftPart('z', stations, material, undefined, _m);
-  }
-
-  /**
-   * A patch — glass, paint or dark trim — laid on the fuselage's own skin: `corners` are
-   * `[z, y, side]` triples in the order they come round the patch. A patch that stays on
-   * one flank is banded by HEIGHT, so the cheat line's edges are straight lines in a side
-   * view whatever the fuselage is doing underneath them; the windscreen wraps the crown,
-   * where one height is two points on the ring, so that one is banded by ring angle
-   * instead. Every point is then snapped to the drawn skin and lifted `out` metres along
-   * its facet's normal, so a pane sits the same few millimetres out along its whole
-   * length. The normals are the grid's own tangents and the winding is settled against
-   * them, so the caller's corners only have to come round the patch.
-   */
-  skinPatch(corners: readonly (readonly [number, number, number])[], out: number, material: THREE.Material): void {
-    if (corners.length < 4) return;
-    const cornerZ: number[] = [];
-    const cornerY: number[] = [];
-    const cornerT: number[] = [];
-    const cornerSide: number[] = [];
-    for (const corner of corners) {
-      const side = corner[2] >= 0 ? 1 : -1;
-      cornerZ.push(corner[0]);
-      cornerY.push(corner[1]);
-      cornerT.push(skinAngle(fuselageSection(corner[0]), corner[1], side));
-      cornerSide.push(side);
-    }
-    const banded = cornerSide.every((side) => side === cornerSide[0]);
-    const at = (index: number): [number, number, number] => {
-      const point = skinFacetPoint(fuselageSection(cornerZ[index]!), cornerT[index]!);
-      return [point[0], point[1], cornerZ[index]!];
-    };
-    const corner = [at(0), at(1), at(2), at(3)];
-    const span = (a: readonly number[], b: readonly number[]): number => Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!);
-    // One quad per 150 mm of surface. The fuselage's stations are half a metre apart and
-    // the flank bulges between them, so a coarser patch chords across the bulge and sinks
-    // under the skin it is supposed to lie on — which is what turns a cheat line into a
-    // row of blobs.
-    const across = Math.max(2, Math.min(24, Math.ceil(Math.max(span(corner[0]!, corner[1]!), span(corner[3]!, corner[2]!)) / 0.15)));
-    const along = Math.max(2, Math.min(48, Math.ceil(Math.max(span(corner[0]!, corner[3]!), span(corner[1]!, corner[2]!)) / 0.15)));
-    const mixed = (u: number, v: number, values: readonly number[]): number =>
-      values[0]! * (1 - u) * (1 - v) + values[1]! * u * (1 - v) + values[2]! * u * v + values[3]! * (1 - u) * v;
-
-    const position: number[] = [];
-    const uv: number[] = [];
-    const grid: number[][] = [];
-    for (let v = 0; v <= along; v++) {
-      const row: number[] = [];
-      for (let u = 0; u <= across; u++) {
-        const z = mixed(u / across, v / along, cornerZ);
-        const section = fuselageSection(z);
-        const t = banded ? skinAngle(section, mixed(u / across, v / along, cornerY), cornerSide[0]!) : mixed(u / across, v / along, cornerT);
-        const point = skinFacetPoint(section, t, out);
-        row.push(position.length / 3);
-        position.push(point[0], point[1], z);
-        uv.push(u / across, v / along);
-      }
-      grid.push(row);
-    }
-
-    // Normals from the grid's own tangents, which carry the taper the ring's normal
-    // alone would miss, then one sign taken from the skin's own outward normal at the
-    // first corner: that is also the way the quads wind.
-    const normal: number[] = [];
-    for (let v = 0; v <= along; v++) {
-      for (let u = 0; u <= across; u++) {
-        const before = grid[v]![Math.max(0, u - 1)]!;
-        const after = grid[v]![Math.min(across, u + 1)]!;
-        const down = grid[Math.max(0, v - 1)]![u]!;
-        const up = grid[Math.min(along, v + 1)]![u]!;
-        _t1.set(
-          position[after * 3]! - position[before * 3]!,
-          position[after * 3 + 1]! - position[before * 3 + 1]!,
-          position[after * 3 + 2]! - position[before * 3 + 2]!,
-        );
-        _t2.set(
-          position[up * 3]! - position[down * 3]!,
-          position[up * 3 + 1]! - position[down * 3 + 1]!,
-          position[up * 3 + 2]! - position[down * 3 + 2]!,
-        );
-        _n.crossVectors(_t1, _t2).normalize();
-        normal.push(_n.x, _n.y, _n.z);
-      }
-    }
-    const lean = skinNormal(fuselageSection(cornerZ[0]!), cornerT[0]!);
-    const sign = normal[0]! * lean[0] + normal[1]! * lean[1] >= 0 ? 1 : -1;
-    if (sign < 0) {
-      for (let i = 0; i < normal.length; i++) normal[i] = -normal[i]!;
-    }
-
-    const index: number[] = [];
-    for (let v = 0; v < along; v++) {
-      for (let u = 0; u < across; u++) {
-        const a = grid[v]![u]!;
-        const bb = grid[v]![u + 1]!;
-        const c = grid[v + 1]![u + 1]!;
-        const d = grid[v + 1]![u]!;
-        if (sign > 0) index.push(a, bb, c, a, c, d);
-        else index.push(a, c, bb, a, d, c);
-      }
-    }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(position, 3));
-    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normal, 3));
-    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-    geometry.setIndex(index);
-    this.push(geometry, material);
-  }
-
-  private loftPart(
-    axis: 'x' | 'z',
-    stations: readonly Station[],
-    material: THREE.Material,
-    paint?: Paint,
-    matrix?: THREE.Matrix4,
-  ): void {
-    if (stations.length < 2) return;
-    const ordered = orderStations(stations);
-    const rings = ordered.map((station) => orientRing(station.ring));
-    const n = rings[0]!.length;
-    if (n < 3) return;
-    const last = ordered.length - 1;
-    const at = (station: number): number => ordered[station]!.at;
-    const point = (station: number, index: number): Vec2 => rings[station]![index % n]!;
-
-    interface Bucket {
-      readonly position: number[];
-      readonly uv: number[];
-      readonly index: number[];
-      readonly vertices: Map<number, number>;
-    }
-    const buckets = new Map<THREE.Material, Bucket>();
-    const bucketFor = (bucketMaterial: THREE.Material): Bucket => {
-      let bucket = buckets.get(bucketMaterial);
-      if (!bucket) {
-        bucket = { position: [], uv: [], index: [], vertices: new Map() };
-        buckets.set(bucketMaterial, bucket);
-      }
-      return bucket;
-    };
-    const vertex = (bucket: Bucket, station: number, index: number): number => {
-      const key = station * n + (index % n);
-      let found = bucket.vertices.get(key);
-      if (found === undefined) {
-        found = bucket.position.length / 3;
-        const p = point(station, index);
-        if (axis === 'z') bucket.position.push(p[0], p[1], at(station));
-        else bucket.position.push(at(station), p[0], p[1]);
-        bucket.uv.push((index % n) / n, station / last);
-        bucket.vertices.set(key, found);
-      }
-      return found;
-    };
-
-    for (let station = 0; station < last; station++) {
-      for (let index = 0; index < n; index++) {
-        const bucket = bucketFor(paint?.(station, index) ?? material);
-        const a = vertex(bucket, station, index);
-        const bb = vertex(bucket, station, index + 1);
-        const c = vertex(bucket, station + 1, index + 1);
-        const d = vertex(bucket, station + 1, index);
-        bucket.index.push(a, bb, c, a, c, d);
-      }
-    }
-    // Caps: a fan at each end, wound to face out of the solid along the axis. The fan
-    // takes its own copy of the ring, so the cap's normals stay the cap's own plane
-    // instead of leaning into the sides — a crisp end edge, and no sliver averaged
-    // past the point where its winding would read as inside out.
-    for (const [end, outwards] of [[0, -1], [last, 1]] as const) {
-      const bucket = bucketFor(material);
-      let cx = 0;
-      let cy = 0;
-      for (let index = 0; index < n; index++) {
-        const p = point(end, index);
-        cx += p[0];
-        cy += p[1];
-      }
-      const cap: number[] = [];
-      for (let index = 0; index < n; index++) {
-        const p = point(end, index);
-        cap.push(bucket.position.length / 3);
-        if (axis === 'z') bucket.position.push(p[0], p[1], at(end));
-        else bucket.position.push(at(end), p[0], p[1]);
-        bucket.uv.push(index / n, end === 0 ? 0 : 1);
-      }
-      const centre = bucket.position.length / 3;
-      if (axis === 'z') bucket.position.push(cx / n, cy / n, at(end));
-      else bucket.position.push(at(end), cx / n, cy / n);
-      bucket.uv.push(0.5, end === 0 ? 0 : 1);
-      for (let index = 0; index < n; index++) {
-        const a = cap[index]!;
-        const bb = cap[(index + 1) % n]!;
-        if (outwards < 0) bucket.index.push(centre, bb, a);
-        else bucket.index.push(centre, a, bb);
-      }
-    }
-
-    for (const [bucketMaterial, bucket] of buckets) {
-      if (bucket.index.length === 0) continue;
-      const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute('position', new THREE.Float32BufferAttribute(bucket.position, 3));
-      geometry.setAttribute('uv', new THREE.Float32BufferAttribute(bucket.uv, 2));
-      geometry.setIndex(bucket.index);
-      geometry.computeVertexNormals();
-      if (matrix) geometry.applyMatrix4(matrix);
-      this.push(geometry, bucketMaterial);
-    }
-  }
-
-  private push(geometry: THREE.BufferGeometry, material: THREE.Material): void {
-    this.geometry.push(geometry);
-    this.materials.push(material);
-  }
-
-  private add(
-    geometry: THREE.BufferGeometry,
-    material: THREE.Material,
-    position: Vec3,
-    rotation: Vec3,
-    scale: Vec3,
-  ): void {
-    _p.set(position[0], position[1], position[2]);
-    _e.set(rotation[0], rotation[1], rotation[2]);
-    _q.setFromEuler(_e);
-    _s.set(scale[0], scale[1], scale[2]);
-    _m.compose(_p, _q, _s);
-    geometry.applyMatrix4(_m);
-    this.push(geometry, material);
-  }
-
-  /** One mesh per material, in first-seen order. */
-  build(): { meshes: THREE.Mesh[]; geometries: THREE.BufferGeometry[] } {
-    const buckets = new Map<THREE.Material, THREE.BufferGeometry[]>();
-    for (let i = 0; i < this.geometry.length; i++) {
-      const material = this.materials[i]!;
-      let list = buckets.get(material);
-      if (!list) {
-        list = [];
-        buckets.set(material, list);
-      }
-      list.push(this.geometry[i]!);
-    }
-    const meshes: THREE.Mesh[] = [];
-    const owned: THREE.BufferGeometry[] = [];
-    for (const [material, list] of buckets) {
-      const merged = list.length === 1 ? list[0]! : mergeGeometries(list, false);
-      if (!merged) continue;
-      if (list.length > 1) for (const geometry of list) geometry.dispose();
-      merged.name = material.name || 'part';
-      meshes.push(new THREE.Mesh(merged, material));
-      owned.push(merged);
-    }
-    return { meshes, geometries: owned };
-  }
+function finLeadingEdgeY(z: number): number {
+  // Inverse of `buildFin`'s leading edge: le = -3.5 - t * 0.95 over the fin's height.
+  const t = (-3.5 - z) / 0.95;
+  return 1.6 + t * (LIGHT_PLANE_HEIGHT - 0.06 - 1.6);
 }
 
-/** Local collision boxes of the airframe: `[min, max]` corners, metres. */
+function buildDorsal(): THREE.BufferGeometry {
+  const rings: V3[][] = [];
+  const start = -1.6;
+  const end = -4.1;
+  const n = 14;
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const z = start + (end - start) * t;
+    const top = fuselageSection(z)[1]!;
+    // A concave rise: slow off the cone, then up to meet the fin's leading edge.
+    const target = finLeadingEdgeY(end) + 0.04;
+    const y = top + (target - top) * t ** 1.8;
+    const hw = 0.02 + 0.03 * t;
+    rings.push([
+      [hw * 1.6, top - 0.05, z],
+      [hw, (top + y) / 2, z],
+      [hw * 0.45, y - 0.01, z],
+      [0, y, z],
+      [-hw * 0.45, y - 0.01, z],
+      [-hw, (top + y) / 2, z],
+      [-hw * 1.6, top - 0.05, z],
+    ]);
+  }
+  return faceOutward(loft(rings, true, true, true), 7 * 7 + 1, new THREE.Vector3(1, 0, 0));
+}
+
+/** A speed fairing round a wheel: a teardrop, taller than wide, open at the bottom. */
+function spat(length: number, radius: number): THREE.BufferGeometry {
+  const profile: [number, number][] = [];
+  const n = 14;
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    // Blunt nose, long tail.
+    const r = radius * Math.sin(Math.PI * Math.min(1, t ** 0.75)) ** 0.8;
+    profile.push([length * (0.4 - t), r]);
+  }
+  // Tail first: the lathe faces outward when its profile runs towards +Z.
+  const g = lathe(profile.reverse(), 20);
+  g.scale(0.78, 1.45, 1);
+  return g;
+}
+
+function tyre(radius: number, width: number): THREE.BufferGeometry {
+  const g = new THREE.TorusGeometry(radius - width / 2, width / 2, 10, 24);
+  g.rotateY(Math.PI / 2);
+  return g;
+}
+
+function buildPropeller(): { blades: THREE.BufferGeometry; tips: THREE.BufferGeometry; spinner: THREE.BufferGeometry } {
+  const bladeRing = (r: number): V3[] => {
+    const t = (r - 0.1) / (PROP_RADIUS - 0.1);
+    const chord = 0.1 + 0.07 * Math.sin(Math.PI * Math.min(1, t * 1.25)) - 0.04 * t;
+    const thick = 0.03 * (1 - t) + 0.008;
+    const pitch = ((38 - 26 * t) * Math.PI) / 180;
+    const c = Math.cos(pitch);
+    const s = Math.sin(pitch);
+    return ellipseProfile(chord / 2, thick / 2, 10).map(([u, v]) => [u * c - v * s * 0.3, r, -u * s * 0.6 + v * c]);
+  };
+  const radii = (from: number, to: number, n: number): number[] =>
+    Array.from({ length: n + 1 }, (_, i) => from + ((to - from) * i) / n);
+  const one = (from: number, to: number, n: number, capEnd: boolean): THREE.BufferGeometry =>
+    loft(radii(from, to, n).map(bladeRing), true, true, capEnd);
+  const blade = one(0.1, PROP_RADIUS - 0.1, 8, false);
+  const tip = one(PROP_RADIUS - 0.1, PROP_RADIUS, 2, true);
+  const pair = (g: THREE.BufferGeometry): THREE.BufferGeometry => {
+    const other = g.clone();
+    other.rotateZ(Math.PI);
+    return mergeGeometries([g, other])!;
+  };
+  // Back plate, rim, then the dome to its point.
+  const spinnerProfile: [number, number][] = [[-0.02, 0], [-0.02, 0.2]];
+  for (let i = 0; i <= 12; i++) {
+    const t = i / 12;
+    spinnerProfile.push([0.32 * t, 0.2 * Math.sqrt(Math.max(0, 1 - t ** 2.4))]);
+  }
+  const spinner = lathe(spinnerProfile, 24);
+  return { blades: pair(blade), tips: pair(tip), spinner };
+}
+
+/* ---- assembly ---- */
+
+/** Collision boxes, local frame: [min, max]. */
 const COLLIDER_BOXES: readonly (readonly [readonly [number, number, number], readonly [number, number, number]])[] = [
-  // The cabin and the cowl: floor to roof, the cabin's rear to the nose bowl.
-  [[-0.62, CABIN_FLOOR_Y - 0.07, CABIN_REAR_Z - 0.08], [0.62, CABIN_ROOF_Y + 0.06, COWL_FRONT_Z]],
-  // The aft fuselage cone, rising to the tail.
-  [[-0.6, 1.32, TAIL_END_Z], [0.6, 2.2, CABIN_REAR_Z - 0.08]],
-  // The wing, to the tips' own (dihedral-raised) thickness.
-  [[-LIGHT_PLANE_SPAN / 2, 1.9, -0.3], [LIGHT_PLANE_SPAN / 2, 2.44, WING_CENTRE_Z + WING_ROOT_CHORD / 2]],
-  // Tailplane, elevator and the hinge between them.
-  [[-STAB_HALF_SPAN, 1.9, -4.42], [STAB_HALF_SPAN, 2.1, -3.05]],
-  // Fin, rudder and the dorsal fillet.
-  [[-0.08, 1.95, -4.6], [0.08, FIN_TOP_Y, -1.2]],
-  // Main gear, wheel pants included.
-  [[MAIN_WHEEL_X - 0.24, 0, -0.66], [MAIN_WHEEL_X + 0.24, 0.7, 0.52]],
-  [[-MAIN_WHEEL_X - 0.24, 0, -0.66], [-MAIN_WHEEL_X + 0.24, 0.7, 0.52]],
-  // Nose gear and its wheel pant.
-  [[-0.18, 0, NOSE_WHEEL_Z - 0.36], [0.18, 0.5, NOSE_WHEEL_Z + 0.3]],
+  // Cabin and cowl.
+  [[-CABIN_HALF_W, 0.78, -0.7], [CABIN_HALF_W, 2.05, COWL_FRONT_Z]],
+  // Tail cone.
+  [[-0.5, 0.9, TAIL_Z], [0.5, 2.0, -0.7]],
+  // Wing.
+  [[-WING_HALF_SPAN, 1.92, WING_TE_Z], [WING_HALF_SPAN, 2.35, WING_LE_Z]],
+  // Tailplane.
+  [[-STAB_HALF_SPAN, 1.55, -5.0], [STAB_HALF_SPAN, 1.72, -3.56]],
+  // Fin.
+  [[-0.08, 1.6, TAIL_Z], [0.08, LIGHT_PLANE_HEIGHT, -3.5]],
+  // Main gear and spats.
+  [[MAIN_TRACK_HALF - 0.15, 0, -0.45], [MAIN_TRACK_HALF + 0.15, 0.5, 0.4]],
+  [[-MAIN_TRACK_HALF - 0.15, 0, -0.45], [-MAIN_TRACK_HALF + 0.15, 0.5, 0.4]],
+  // Nose gear.
+  [[-0.14, 0, NOSE_WHEEL_Z - 0.35], [0.14, 0.9, NOSE_WHEEL_Z + 0.3]],
 ];
 
 export interface LightPlane {
-  /** Root. Local frame: +Z = nose/forward, +Y up, wheels' contact at y = 0, origin under the wing's centre (≈ main gear). */
+  /** Root. Local frame: +Z nose, +Y up, tyres at y = 0, origin under the main gear. */
   readonly group: THREE.Group;
   /** Spins about its local Z; set `.rotation.z` or call `spin(dt, rpmFraction)`. */
   readonly propeller: THREE.Object3D;
-  /** Collision boxes in the plane's LOCAL frame: [min, max] pairs (fuselage, wing, tail…). */
+  /** Collision boxes in the plane's LOCAL frame: [min, max] pairs. */
   readonly colliderBoxes: readonly (readonly [readonly [number, number, number], readonly [number, number, number]])[];
   /** Local point beside the cabin door (left side), feet height 0. */
   readonly doorPoint: readonly [number, number, number];
@@ -912,446 +707,142 @@ export interface LightPlane {
   dispose(): void;
 }
 
-/**
- * Builds the airframe: the lofted fuselage, the wing and its struts, the tail, the
- * tricycle gear, the panes, the small details and the propeller.
- */
+/** Strips everything but position and normal, un-indexes, so any parts merge. */
+function prepared(g: THREE.BufferGeometry): THREE.BufferGeometry {
+  const out = g.index ? g.toNonIndexed() : g.clone();
+  for (const name of Object.keys(out.attributes)) {
+    if (name !== 'position' && name !== 'normal') out.deleteAttribute(name);
+  }
+  if (!out.getAttribute('normal')) out.computeVertexNormals();
+  return out;
+}
+
+class PartBin {
+  private readonly bins = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  add(material: THREE.Material, ...geometries: THREE.BufferGeometry[]): void {
+    const list = this.bins.get(material) ?? [];
+    for (const g of geometries) list.push(prepared(g));
+    this.bins.set(material, list);
+  }
+  build(parent: THREE.Object3D, owned: THREE.BufferGeometry[]): void {
+    for (const [material, list] of this.bins) {
+      const merged = mergeGeometries(list)!;
+      for (const g of list) g.dispose();
+      merged.computeBoundingSphere();
+      owned.push(merged);
+      const mesh = new THREE.Mesh(merged, material);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      parent.add(mesh);
+    }
+  }
+}
+
 function buildAirframe(): { group: THREE.Group; propeller: THREE.Group; geometries: THREE.BufferGeometry[] } {
-  const white = planeBodyMaterial();
-  const trim = planeTrimMaterial();
-  const dark = planeDarkMaterial();
-  const chrome = planeChromeMaterial();
-  const blade = planeBladeMaterial();
-  const tip = planeTipMaterial();
-  const rubber = planeRubberMaterial();
-  const glass = planeGlassMaterial();
+  const fuselageMat = liveryMaterial('FUSELAGE');
+  const wingMat = liveryMaterial('WING');
+  const tailMat = liveryMaterial('TAIL');
+  const white = plain('white', 0xf1f2ee, 0.5, 0.02);
+  const steel = plain('gear', 0x9ea3a8, 0.35, 0.7);
+  const dark = plain('dark', 0x2c2f33, 0.6, 0.3);
+  const rubber = plain('tyre', 0x1b1c1e, 0.92, 0);
+  const blade = plain('blade', 0x2a2c30, 0.5, 0.2);
+  const tipPaint = plain('blade-tip', 0xe7b43a, 0.5, 0);
+  const spinnerMat = plain('spinner', 0xf1f2ee, 0.45, 0.05);
+  const port = plain('nav-port', 0xd23a2a, 0.3, 0.1, { emissive: 0x801010, comic: false });
+  const starboard = plain('nav-starboard', 0x2aa050, 0.3, 0.1, { emissive: 0x0a5020, comic: false });
+  const clear = plain('nav-white', 0xf4f4f0, 0.3, 0.1, { emissive: 0x505050, comic: false });
 
-  const b = new Airframe();
-  const prop = new Airframe();
+  const bin = new PartBin();
+  const geometries: THREE.BufferGeometry[] = [];
 
-  // --- fuselage: one lofted skin from the tail cone to the cowl's front ----------
-  b.loft(
-    'z',
-    FUSELAGE.map((station) => ({ at: station[0], ring: fuselageRing(station[0], FUSELAGE_SEGMENTS) })),
-    white,
-  );
+  bin.add(fuselageMat, buildFuselage(), buildDorsal());
+  bin.add(wingMat, buildWing());
+  bin.add(tailMat, buildTailplane(), buildFin());
 
-  // --- livery: the cheat line, laid on the skin a few millimetres proud ----------
-  // It leaves the firewall under the door's sill and sweeps up the tapering tail cone;
-  // the fin carries it on up as its own painted band (see FIN).
+  // --- wing struts: streamlined tubes from the cabin's floor to the wing's underside ---
+  const strutProfile = ellipseProfile(0.022, 0.055, 12);
   for (const side of [1, -1] as const) {
-    b.skinPatch(
-      [
-        [-3.95, 1.8, side],
-        [-3.95, 1.9, side],
-        [1.62, 1.5, side],
-        [1.62, 1.3, side],
-      ],
-      0.006,
-      trim,
-    );
+    const root: V3 = [side * (CABIN_HALF_W - 0.03), 1.0, 0.1];
+    const wingAt: V3 = [side * 2.95, WING_Y - 0.07 + (2.95 - CABIN_HALF_W) * Math.tan(WING_DIHEDRAL), 0.33];
+    bin.add(white, strut(root, wingAt, strutProfile, [0, 0, 1]));
+    // The fitting where it meets the wing, a short fairing.
+    bin.add(white, strut([wingAt[0] - side * 0.14, wingAt[1] - 0.05, wingAt[2]], [wingAt[0] + side * 0.04, wingAt[1] + 0.02, wingAt[2]], ellipseProfile(0.035, 0.08, 10), [0, 0, 1], 0.7));
   }
 
-  // --- glass: black sky mirrors, the cars' own tint -----------------------------
+  // --- main gear: spring-steel legs sweeping out and down into the spats ---
   for (const side of [1, -1] as const) {
-    // Door window: the frame first, the pane next, each a touch further off the skin
-    // than the last, so the frame reads as a mullion and nothing is ever coincident.
-    b.skinPatch(
-      [
-        [0.02, 1.66, side],
-        [0.02, 2.07, side],
-        [1.02, 2.07, side],
-        [1.02, 1.66, side],
-      ],
-      0.004,
-      dark,
-    );
-    b.skinPatch(
-      [
-        [0.08, 1.7, side],
-        [0.08, 2.03, side],
-        [0.96, 2.03, side],
-        [0.96, 1.7, side],
-      ],
-      0.008,
-      glass,
-    );
-    // Rear quarter window, behind the door's trailing edge.
-    b.skinPatch(
-      [
-        [-0.78, 1.7, side],
-        [-0.78, 2.04, side],
-        [-0.08, 2.04, side],
-        [-0.08, 1.7, side],
-      ],
-      0.004,
-      dark,
-    );
-    b.skinPatch(
-      [
-        [-0.72, 1.74, side],
-        [-0.72, 2.0, side],
-        [-0.14, 2.0, side],
-        [-0.14, 1.74, side],
-      ],
-      0.008,
-      glass,
-    );
-    // Door outline: the front and rear seams down the flank, and the sill.
-    b.skinPatch(
-      [
-        [1.02, 1.24, side],
-        [1.02, 2.09, side],
-        [1.06, 2.09, side],
-        [1.06, 1.24, side],
-      ],
-      0.005,
-      dark,
-    );
-    b.skinPatch(
-      [
-        [-0.06, 1.24, side],
-        [-0.06, 2.09, side],
-        [-0.02, 2.09, side],
-        [-0.02, 1.24, side],
-      ],
-      0.005,
-      dark,
-    );
-    b.skinPatch(
-      [
-        [-0.06, 1.2, side],
-        [-0.06, 1.26, side],
-        [1.02, 1.26, side],
-        [1.02, 1.2, side],
-      ],
-      0.005,
-      dark,
-    );
-    // The gear leg's fitting, where it comes through the belly's flank.
-    b.skinPatch(
-      [
-        [0.56, 1.09, side],
-        [0.56, 1.2, side],
-        [0.9, 1.2, side],
-        [0.9, 1.09, side],
-      ],
-      0.005,
-      dark,
-    );
-  }
-  // Windscreen: one raked pane wrapping the cabin's front, its frame behind it.
-  b.skinPatch(
-    [
-      [1.24, 2.05, 1],
-      [1.24, 2.05, -1],
-      [1.86, 1.76, -1],
-      [1.86, 1.76, 1],
-    ],
-    0.004,
-    dark,
-  );
-  b.skinPatch(
-    [
-      [1.3, 2.02, 1],
-      [1.3, 2.02, -1],
-      [1.8, 1.8, -1],
-      [1.8, 1.8, 1],
-    ],
-    0.008,
-    glass,
-  );
-  // The handle is on the pilot's side. Facing +Z with +Y up and a right-handed basis,
-  // the LEFT hand points along +X (`right × up = backward`).
-  b.skinPatch(
-    [
-      [0.3, 1.5, 1],
-      [0.3, 1.58, 1],
-      [0.46, 1.58, 1],
-      [0.46, 1.5, 1],
-    ],
-    0.014,
-    dark,
-  );
-
-  // --- the nose: cowl inlets, the landing light and the exhausts -----------------
-  for (const side of [1, -1] as const) {
-    // The two inlets sit in the half-moon of nose bowl either side of the spinner.
-    b.cylinder(1, 1, 1, 12, dark, [side * 0.19, 1.5, 3.022], AXIS_Z, [0.098, 0.04, 0.072]);
-    // Exhaust stub, out through the cowl's lower flank and aft.
-    b.strut([side * 0.3, 1.35, 2.35], [side * 0.44, 1.22, 2.0], 0.035, 0.028, dark, 8);
-  }
-  // Landing light in the port cheek: bezel first, lens proud of it.
-  const cowl = fuselageSection(2.55);
-  const lampAngle = skinAngle(cowl, 1.44, 1);
-  const lampAt = skinPoint(cowl, lampAngle);
-  const lampNormal = skinNormal(cowl, lampAngle);
-  b.strut(
-    [lampAt[0] - lampNormal[0] * 0.05, lampAt[1] - lampNormal[1] * 0.05, 2.55],
-    [lampAt[0] + lampNormal[0] * 0.012, lampAt[1] + lampNormal[1] * 0.012, 2.55],
-    0.075,
-    0.075,
-    chrome,
-    12,
-  );
-  b.strut(
-    [lampAt[0] - lampNormal[0] * 0.03, lampAt[1] - lampNormal[1] * 0.03, 2.55],
-    [lampAt[0] + lampNormal[0] * 0.02, lampAt[1] + lampNormal[1] * 0.02, 2.55],
-    0.058,
-    0.058,
-    glass,
-    12,
-  );
-
-  // --- wing: one loft a side, the dihedral built into the stations ---------------
-  for (const side of [1, -1] as const) {
-    b.loft(
-      'x',
-      WING.map((station) => ({ at: side * station[0], ring: wingRing(wingSection(station[0])) })),
-      white,
-      (_station, segment) => (segment === WING_HINGE_BOTTOM || segment === WING_HINGE_TOP ? dark : white),
-    );
-    // The cheat line carries out along the leading edge as a sock over the nose of the
-    // section: six millimetres proud, ten inside, so it is part of the wing's surface
-    // rather than a box standing in front of it.
-    b.loft(
-      'x',
-      [0.2, 2.0, 4.0, 5.1].map((x) => {
-        const section = wingSection(x);
-        return {
-          at: side * x,
-          ring: [...wingBand(section, WING_NOSE, 0.006), ...wingBand(section, [...WING_NOSE].reverse(), -0.01)],
-        };
-      }),
-      trim,
-    );
-    // Wing root: no fairing shelf is needed. The cabin's flank rises to within a
-    // centimetre or two of the wing's underside at the root, so the joint is closed by
-    // the two surfaces themselves — and a shelf big enough to be seen would sit straight
-    // across the cabin's windows.
-    // V strut: from inside the sill out to the front spar, faired.
-    b.aimed(
-      [side * 0.34, 1.3, 0.92],
-      [side * 2.55, 2.1, 1.0],
-      [0, 0, 1],
-      [
-        { at: 0, ring: rectRing(0.07, 0, 0.032) },
-        { at: 1.2, ring: rectRing(0.062, 0, 0.028) },
-        { at: 2.32, ring: rectRing(0.058, 0, 0.026) },
-      ],
-      white,
-    );
-    // Navigation light: red to port (the local +X flank), green to starboard.
-    b.sphere(
-      1,
-      8,
-      6,
-      side > 0 ? planePortLampMaterial() : planeStarboardLampMaterial(),
-      [side * 5.44, 2.256, 0.8],
-      [0.05, 0.045, 0.062],
-    );
+    const axleX = side * MAIN_TRACK_HALF;
+    const legTop: V3 = [side * 0.42, 0.84, -0.02];
+    const legFoot: V3 = [axleX - side * 0.1, MAIN_TYRE_R + 0.06, -0.02];
+    bin.add(steel, strut(legTop, legFoot, [[-0.018, -0.045], [0.018, -0.045], [0.018, 0.045], [-0.018, 0.045]], [0, 0, 1], 0.7));
+    const t = tyre(MAIN_TYRE_R, 0.14);
+    t.translate(axleX, MAIN_TYRE_R, 0);
+    bin.add(rubber, t);
+    const hub = new THREE.CylinderGeometry(0.08, 0.08, 0.15, 14).rotateZ(Math.PI / 2).translate(axleX, MAIN_TYRE_R, 0);
+    bin.add(steel, hub);
+    const pant = spat(0.9, 0.16);
+    pant.translate(axleX, MAIN_TYRE_R + 0.07, 0.02);
+    bin.add(white, pant);
+    // A step on the left leg, where the pilot climbs up to the fuel caps.
+    if (side === 1) bin.add(dark, new THREE.BoxGeometry(0.12, 0.015, 0.09).translate(side * 0.78, 0.6, 0.05));
   }
 
-  // --- tail: fin, rudder, tailplane and their hinge lines ------------------------
-  b.loft(
-    'z',
-    FIN.map((station) => ({
-      at: station[0],
-      ring: [
-        [-station[3], station[1]],
-        [station[3], station[1]],
-        [station[3], station[1] + station[4]],
-        [station[3], station[2]],
-        [-station[3], station[2]],
-        [-station[3], station[1] + station[4]],
-      ],
-    })),
-    white,
-    (_station, segment) => (segment === 1 || segment === 5 ? trim : white),
-  );
+  // --- nose gear: oleo strut, torque links, fork, its own spat ---
   {
-    // Rudder hinge: a dark band round the fin where its trailing edge gives way to the
-    // rudder, a few millimetres proud of the fin's own sides.
-    const rear = FIN[2]!;
-    const front = FIN[3]!;
-    const mix = (RUDDER_HINGE_Z - rear[0]) / (front[0] - rear[0]);
-    const bottom = lerp(rear[1], front[1], mix);
-    const top = lerp(rear[2], front[2], mix);
-    const halfT = lerp(rear[3], front[3], mix) + 0.005;
-    b.loft(
-      'z',
-      [RUDDER_HINGE_Z - 0.016, RUDDER_HINGE_Z + 0.016].map((z) => ({
-        at: z,
-        ring: rectRing(halfT, (bottom + top) / 2, (top - bottom) / 2),
-      })),
-      dark,
-    );
-  }
-  for (const side of [1, -1] as const) {
-    b.loft(
-      'x',
-      STAB.map((station) => ({
-        at: side * station[0],
-        ring: [
-          [station[1] - station[2], station[3]],
-          [station[1] + station[2], station[3]],
-          [station[1] + station[2], station[4]],
-          [station[1] - station[2], station[4]],
-        ],
-      })),
-      white,
-    );
-    // Elevator hinge: the same plate's thickness, a hair proud, at the rear spar. Its
-    // own end caps stop short of the tailplane's, which are in the plane they would share.
-    b.loft(
-      'x',
-      STAB.map((station, index) => ({
-        at: side * (index === 0 ? 0.04 : index === STAB.length - 1 ? STAB_HALF_SPAN - 0.03 : station[0]),
-        ring: [
-          [station[1] - station[2] - 0.005, ELEVATOR_HINGE_Z - 0.016],
-          [station[1] + station[2] + 0.005, ELEVATOR_HINGE_Z - 0.016],
-          [station[1] + station[2] + 0.005, ELEVATOR_HINGE_Z + 0.016],
-          [station[1] - station[2] - 0.005, ELEVATOR_HINGE_Z + 0.016],
-        ],
-      })),
-      dark,
-    );
+    const z = NOSE_WHEEL_Z;
+    bin.add(dark, new THREE.CylinderGeometry(0.05, 0.05, 0.28, 14).translate(0, 0.86, z - 0.05));
+    bin.add(steel, new THREE.CylinderGeometry(0.035, 0.035, 0.38, 14).translate(0, 0.55, z - 0.03));
+    bin.add(dark, strut([0, 0.72, z + 0.02], [0, 0.56, z + 0.1], [[-0.015, -0.012], [0.015, -0.012], [0.015, 0.012], [-0.015, 0.012]], [1, 0, 0]));
+    bin.add(dark, strut([0, 0.56, z + 0.1], [0, 0.42, z + 0.01], [[-0.015, -0.012], [0.015, -0.012], [0.015, 0.012], [-0.015, 0.012]], [1, 0, 0]));
+    const t = tyre(NOSE_TYRE_R, 0.12);
+    t.translate(0, NOSE_TYRE_R, z);
+    bin.add(rubber, t);
+    bin.add(steel, new THREE.CylinderGeometry(0.06, 0.06, 0.13, 12).rotateZ(Math.PI / 2).translate(0, NOSE_TYRE_R, z));
+    const pant = spat(0.62, 0.13);
+    pant.translate(0, NOSE_TYRE_R + 0.06, z + 0.02);
+    bin.add(white, pant);
   }
 
-  // --- tricycle gear: spring-steel legs, wheel pants, tyres ----------------------
-  for (const side of [1, -1] as const) {
-    const x = side * MAIN_WHEEL_X;
-    // The leg starts inside the belly and ends inside the pant: two straps with the bow
-    // of a spring leg at the knee, and the pant swallows the axle.
-    b.aimed(
-      [side * 0.42, 1.22, 0.72],
-      [side * 0.8, 0.86, 0.3],
-      [1, 0, 0],
-      [
-        { at: 0, ring: rectRing(0.012, 0, 0.03) },
-        { at: 0.3, ring: rectRing(0.013, 0, 0.032) },
-        { at: 0.62, ring: rectRing(0.013, 0, 0.03) },
-      ],
-      dark,
-    );
-    b.aimed(
-      [side * 0.76, 0.88, 0.34],
-      [x, 0.4, 0.02],
-      [1, 0, 0],
-      [
-        { at: 0, ring: rectRing(0.013, 0, 0.03) },
-        { at: 0.3, ring: rectRing(0.013, 0, 0.028) },
-        { at: 0.56, ring: rectRing(0.012, 0, 0.024) },
-      ],
-      dark,
-    );
-    b.loft(
-      'z',
-      [
-        { at: -0.62, ring: circleRing(x, 0.6, 0.045, 0.085, 10) },
-        { at: -0.44, ring: circleRing(x, 0.48, 0.115, 0.19, 10) },
-        { at: -0.22, ring: circleRing(x, 0.39, 0.155, 0.23, 10) },
-        { at: 0.02, ring: circleRing(x, 0.37, 0.175, 0.245, 10) },
-        { at: 0.3, ring: circleRing(x, 0.39, 0.13, 0.175, 10) },
-        { at: 0.46, ring: circleRing(x, 0.42, 0.055, 0.07, 10) },
-      ],
-      white,
-    );
-    b.cylinder(MAIN_WHEEL_R, MAIN_WHEEL_R, 0.16, 14, rubber, [x, MAIN_WHEEL_R, 0], AXIS_X);
-    b.cylinder(0.1, 0.1, 0.18, 10, chrome, [x, MAIN_WHEEL_R, 0], AXIS_X);
-  }
-  // Nose gear: strut out of the cowl's bottom down into its own pant and fork.
-  b.aimed(
-    [0, 1.32, NOSE_WHEEL_Z],
-    [0, 0.34, NOSE_WHEEL_Z],
-    [0, 0, 1],
-    [
-      { at: 0, ring: rectRing(0.05, 0, 0.028) },
-      { at: 0.5, ring: rectRing(0.042, 0, 0.024) },
-      { at: 0.99, ring: rectRing(0.036, 0, 0.022) },
-    ],
-    dark,
-  );
-  b.loft(
-    'z',
-    [
-      { at: 1.96, ring: circleRing(0, 0.37, 0.045, 0.07, 10) },
-      { at: 2.08, ring: circleRing(0, 0.31, 0.115, 0.155, 10) },
-      { at: 2.26, ring: circleRing(0, 0.28, 0.14, 0.185, 10) },
-      { at: 2.44, ring: circleRing(0, 0.29, 0.115, 0.145, 10) },
-      { at: 2.56, ring: circleRing(0, 0.3, 0.055, 0.065, 10) },
-    ],
-    white,
-  );
-  b.cylinder(NOSE_WHEEL_R, NOSE_WHEEL_R, 0.13, 12, rubber, [0, NOSE_WHEEL_R, NOSE_WHEEL_Z], AXIS_X);
-  b.cylinder(0.07, 0.07, 0.15, 10, chrome, [0, NOSE_WHEEL_R, NOSE_WHEEL_Z], AXIS_X);
+  // --- small things that make it read as an aeroplane up close ---
+  // Exhaust stub under the cowl, right side; the pitot under the left wing.
+  bin.add(dark, new THREE.CylinderGeometry(0.028, 0.032, 0.16, 10).rotateX(0.5).translate(-0.2, 0.86, 2.45));
+  bin.add(steel, new THREE.CylinderGeometry(0.008, 0.008, 0.36, 6).rotateX(Math.PI / 2).translate(3.2, WING_Y - 0.12 + 2.6 * Math.tan(WING_DIHEDRAL), 0.95));
+  // Antennas on the roof and the tail cone.
+  bin.add(dark, new THREE.BoxGeometry(0.012, 0.26, 0.09).translate(0, 2.13, -0.2));
+  bin.add(dark, new THREE.BoxGeometry(0.012, 0.2, 0.08).translate(0, 1.88, -2.3));
+  // Navigation lights: red on the left tip, green on the right, white on the tail; the
+  // beacon on the fin's top.
+  const tipY = WING_Y + (WING_HALF_SPAN - CABIN_HALF_W) * Math.tan(WING_DIHEDRAL);
+  bin.add(port, new THREE.SphereGeometry(0.04, 10, 8).scale(1, 0.8, 1.6).translate(WING_HALF_SPAN + 0.02, tipY, WING_TE_Z + WING_TIP_CHORD - 0.12));
+  bin.add(starboard, new THREE.SphereGeometry(0.04, 10, 8).scale(1, 0.8, 1.6).translate(-WING_HALF_SPAN - 0.02, tipY, WING_TE_Z + WING_TIP_CHORD - 0.12));
+  bin.add(clear, new THREE.SphereGeometry(0.03, 8, 6).translate(0, 1.9, TAIL_Z - 0.02));
+  bin.add(port, new THREE.CylinderGeometry(0.035, 0.04, 0.07, 10).translate(0, LIGHT_PLANE_HEIGHT - 0.0, -4.62));
 
-  // --- the step under the door, and the antenna behind the cabin -----------------
-  b.strut([0.42, 1.2, 0.72], [0.46, 1.0, 0.72], 0.022, 0.022, dark, 6);
-  b.box([0.24, 0.03, 0.32], dark, [0.46, 0.985, 0.72]);
-  b.box([0.1, 0.05, 0.16], dark, [0, 2.13, -0.62]);
-  b.strut([0, 2.11, -0.62], [0, 2.52, -0.78], 0.014, 0.005, dark, 6);
-
-  // --- propeller: the spinning group, blades and spinner on one axis -------------
-  // Spinner: an ogive whose base is tucked up inside the cowl's mouth.
-  prop.loft(
-    'z',
-    [
-      { at: -0.16, ring: circleRing(0, 0, 0.17, 0.17, 12) },
-      { at: -0.02, ring: circleRing(0, 0, 0.156, 0.156, 12) },
-      { at: 0.08, ring: circleRing(0, 0, 0.14, 0.14, 12) },
-      { at: 0.19, ring: circleRing(0, 0, 0.108, 0.108, 12) },
-      { at: 0.27, ring: circleRing(0, 0, 0.07, 0.07, 12) },
-      { at: 0.34, ring: circleRing(0, 0, 0.022, 0.022, 12) },
-    ],
-    chrome,
-  );
-  // Crank flange, kept off the cowl's front face: its cap and that face would be one
-  // plane otherwise, and two faces in one plane is the shimmer this file is arranged
-  // to avoid.
-  prop.cylinder(0.12, 0.12, 0.12, 10, dark, [0, 0, -0.24], AXIS_Z);
-  // Two blades, pitched from the root out, the last bay painted as the tip band.
-  for (const side of [1, -1] as const) {
-    prop.loft(
-      'x',
-      [0.13, 0.45, 0.75, 0.94].map((x, index) => {
-        const [halfT, halfChord, pitch] = BLADE[index]!;
-        return { at: side * x, ring: bladeRing(halfT, halfChord, pitch) };
-      }),
-      blade,
-      (station) => (station === BLADE.length - 2 ? tip : blade),
-    );
-  }
-  const hub = new THREE.Group();
-  hub.name = 'propeller';
-  hub.position.set(0, AXIS_Y, PROP_Z);
-  const propBuilt = prop.build();
-  for (const mesh of propBuilt.meshes) {
-    mesh.castShadow = false;
-    hub.add(mesh);
-  }
-
-  const built = b.build();
   const group = new THREE.Group();
   group.name = 'light-plane';
-  for (const mesh of built.meshes) group.add(mesh);
+  bin.build(group, geometries);
+
+  // --- propeller: blades and tips turn with the spinner about +Z ---
+  const hub = new THREE.Group();
+  hub.name = 'light-plane-propeller';
+  hub.position.set(0, SPINNER_Y, COWL_FRONT_Z + 0.03);
+  const { blades, tips, spinner } = buildPropeller();
+  blades.translate(0, 0, 0.1);
+  tips.translate(0, 0, 0.1);
+  const propBin = new PartBin();
+  propBin.add(blade, blades);
+  propBin.add(tipPaint, tips);
+  propBin.add(spinnerMat, spinner);
+  propBin.build(hub, geometries);
   group.add(hub);
 
-  return { group, propeller: hub, geometries: [...built.geometries, ...propBuilt.geometries] };
+  return { group, propeller: hub, geometries };
 }
 
 /** A fresh plane standing on its tyres at the local origin. */
 export function createLightPlane(): LightPlane {
   const { group, propeller, geometries } = buildAirframe();
-  const glass = planeGlassMaterial();
-  group.traverse((child) => {
-    if (!(child instanceof THREE.Mesh)) return;
-    // Glass must never be shadowed into a black slab (render/partmesh.ts makes the
-    // same call for the cars' windows).
-    const isGlass = child.material === glass;
-    child.castShadow = !isGlass;
-    child.receiveShadow = !isGlass;
-  });
   return {
     group,
     propeller,
@@ -1369,3 +860,6 @@ export function createLightPlane(): LightPlane {
     },
   };
 }
+
+/** Exported for the plane lab: the nose, so a camera can frame the whole aeroplane. */
+export const LIGHT_PLANE_NOSE_Z = NOSE_Z;

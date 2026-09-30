@@ -56,6 +56,8 @@ import { roadTextures } from './render/roadtexture';
 import { WheelSpray } from './render/wheelspray';
 import { SandTyreTracks } from './render/tyretracks';
 import { ambientBeamGain, VehicleLightRig } from './render/vehiclelights';
+/** Projection passes over the lit cars, in slot priority order. */
+const BEAM_PASSES = ['front', 'rear'] as const;
 import { ContactPatchField } from './render/contactpatches';
 import { ChunkStreamer } from './world/chunks';
 import { DesertTileStreamer } from './world/deserttiles';
@@ -2006,12 +2008,17 @@ async function boot(): Promise<void> {
           (b === driving ? -1 : b.root.position.distanceToSquared(cam)),
       );
     }
+    // Headlamps first, every car's, then the short rear pools: a tail lamp's glow is
+    // never worth an oncoming car's light on the road.
     vehicleLights.beginFrame();
-    for (const vehicle of litVehicles) {
-      vehicle.syncProjectedLights(
-        vehicleLights,
-        vehicle === driving ? 1 : ambientBeamGain(vehicle.root.position.distanceTo(cam)),
-      );
+    for (const pass of BEAM_PASSES) {
+      for (const vehicle of litVehicles) {
+        vehicle.syncProjectedLights(
+          vehicleLights,
+          vehicle === driving ? 1 : ambientBeamGain(vehicle.root.position.distanceTo(cam)),
+          pass,
+        );
+      }
     }
     vehicleLights.endFrame();
 
@@ -2611,7 +2618,9 @@ const launch = query.has('poi-gallery')
           ? import('./road-lab').then(({ bootRoadLab }) => bootRoadLab())
           : import.meta.env.DEV && query.has('car-lab')
             ? import('./car-lab').then(({ bootCarLab }) => bootCarLab())
-            : boot();
+            : import.meta.env.DEV && query.has('plane-lab')
+              ? import('./plane-lab').then(({ bootPlaneLab }) => bootPlaneLab())
+              : boot();
 
 void launch.catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);

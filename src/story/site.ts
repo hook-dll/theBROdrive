@@ -28,7 +28,7 @@ import {
 } from '../world/poistructures';
 import { faceRoadYaw } from '../world/poi';
 import { CAR_PAINTS } from '../vehicle/carpaint';
-import { CAMERA_FRAME_LIMIT, type Item } from '../items/items';
+import { CAMERA_FRAME_LIMIT, makeSponge, type Item } from '../items/items';
 import { CAR_MODELS, modelEngine } from '../vehicle/carmodels';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
 import { bonnetWaterCapacity, createBonnetStorage } from '../vehicle/bonnet';
@@ -465,12 +465,7 @@ function homeItem(world: GameWorld, slot: number, choice: number): Item {
     case 10:
       return { type: 'bubble_gum', id, charges: 2 + Math.floor(roll(4) * 4) };
     default:
-      return {
-        type: 'tool',
-        id,
-        tool: roll(5) < 0.5 ? 'brush' : 'sponge',
-        integrity: 0.8 + roll(6) * 0.2,
-      };
+      return makeSponge(id, roll(6));
   }
 }
 

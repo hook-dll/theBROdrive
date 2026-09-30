@@ -61,14 +61,15 @@ const DORMANT_INTENSITY = 1e-8;
 /**
  * Beam scale for a car the player is NOT driving, by distance from the camera.
  *
- * `AMBIENT_BEAM_GAIN` is the ceiling: enough that a passing car lays a soft wash on
- * the road, not enough to compete with the player's own beams for the lane ahead.
- * The window closes before `SPAWN_MIN_M` in world/traffic.ts (140 m), so a spawn can
- * never arrive already lighting the ground.
+ * `AMBIENT_BEAM_GAIN` is the ceiling: enough that an oncoming car's light is seen
+ * on the asphalt well before it is alongside (at 60-130 m and a third of the gain it
+ * only showed once the car was nearly level), not enough to compete with the
+ * player's own beams. A car spawned at 140-170 m arrives with its light already
+ * mostly faded out, and grows it in as it comes.
  */
-const AMBIENT_BEAM_GAIN = 0.34;
-const AMBIENT_BEAM_FULL_M = 60;
-const AMBIENT_BEAM_GONE_M = 130;
+const AMBIENT_BEAM_GAIN = 0.5;
+const AMBIENT_BEAM_FULL_M = 110;
+const AMBIENT_BEAM_GONE_M = 170;
 
 export function ambientBeamGain(distanceM: number): number {
   if (distanceM <= AMBIENT_BEAM_FULL_M) return AMBIENT_BEAM_GAIN;

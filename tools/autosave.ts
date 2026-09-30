@@ -105,7 +105,7 @@ world.apply({ t: 'time_of_day', timeOfDay: 100 });
 await Promise.resolve();
 check('unrelated delta does not save', calls.length === 0, `${calls.length} writes`);
 
-const brush: Item = { type: 'tool', id: 'rt:trunk', tool: 'brush', integrity: 0.8 };
+const brush: Item = { type: 'tool', id: 'rt:trunk', tool: 'sponge', integrity: 0.8, capacity: 0.55 };
 world.apply({ t: 'car_storage', carId: 'car:test', cell: 3, item: brush });
 await Promise.resolve();
 check('trunk mutation autosaves', calls.length === 1, `${calls.length} writes`);

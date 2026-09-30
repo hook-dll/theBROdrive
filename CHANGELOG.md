@@ -4,6 +4,27 @@
 
 ### Added
 
+- THE ARTEFACTS AT THE 20 KM MARKS (`world/props/artifacts.ts`). The cairn, the chrome
+  shrine and the snapped sign are gone; a 20 km mark is now a distance sign (two in five)
+  or one of four things nobody on this road made, each slowly moving: an obsidian
+  MONOLITH hanging over a disc of fused glass, bobbing and turning, glyph seams breathing
+  teal and pebbles floating under it; a violet crystal spinning over a scorched ring with
+  seven stones ORBITING it on a tilted path; a BLOOM of hexagonal crystals with a pulse of
+  light climbing through them and a shard floating above; a half-sunk ring GATE whose lamps
+  chase round it, with a shimmering membrane in the hole. Animation runs in each mesh's
+  `onBeforeRender` from absolute time, so nothing off screen costs anything. They stand
+  4 m further from the asphalt than a sign.
+- THE SPONGE DOES EVERYTHING, AND WEARS OUT. A sponge takes off dirt, rust and scratches
+  together, and cleans between 45% and 65% (`ToolItem.capacity`, a sum of what it removes)
+  over its life; the HUD shows what is left. Spent, it turns the colour of what it took
+  off, can no longer be used, and drops from the hand at the player's feet. It is a
+  car-wash sponge now: a rounded, pitted block with a green scouring layer.
+- EVERY COURIER'S BOOT HOLDS A PACK OF GUM in one of the bottom row's cells, and about one
+  in three a sponge beside it.
+- `tools/look/plane.mjs` and the `?plane-lab` page (dev builds) for judging the plane;
+  `tools/look/night.mjs`, a night drive photographed whenever a car is ahead; `left` and
+  `right` looks in `tools/look/far.mjs`.
+
 - A STORY START. The homestead is gone: a new drive opens beside a house drawn from the
   roadside dwellings (any one that is not an abandoned ruin, chosen by the seed, like the
   car), on the right of the road at 116 m, with the car parked beside it and four to six
@@ -45,12 +66,54 @@
 
 ### Removed
 
+- THE BRUSH. The sponge does its work; an old save's brush loads as a sponge with the
+  same life left.
 - THE STARTER HOMESTEAD (`world/house.ts`, `world/poi/starter.ts`, the `starter-homestead`
   POI variant) and its garage-shelf items. Saves from before keep their car where the old
   garage stood.
 
 ### Changed
 
+- THE ROAD NO LONGER GETS WORSE THE FURTHER YOU DRIVE. Wear is no longer a 300 km
+  regional envelope with a maintained opening: the road is cut into 3-5 km wear bands
+  that alternate fresh, lightly worn, middling, worn and abandoned (22/24/24/18/12%),
+  never the same twice running, blended over 350 m, with a small patch noise on top. The
+  first band is fresh. Poles and their wires alternate the same way on bands of their own
+  (7-11 km) instead of decaying through each 300 km era. Surface districts draw from one
+  fixed mix everywhere rather than a regional one.
+- THE SHOULDER IS BACK. With the new desert palettes the verge, drawn at the sand's own
+  luminance, had vanished. It is 1.6-2.3 m wide now (was 1.05-1.6), clearly paler and
+  greyer than the sand (compacted fines), and fades into the ground only in its outer
+  quarter; wear narrows and softens it far less.
+- POIS HAVE CARS. Every roadside stop has a small field of shells to strip for parts
+  (1-2; a scrapyard still 1-3), and the first two stops of a drive always have a car you
+  can take among them. After that one stop in five has one (a scrapyard one in three):
+  8 of the first 47 stops on seed `flick`.
+- OTHER CARS' HEADLAMPS LIGHT THE ROAD FROM FAR OFF. The projection pool is filled with
+  every car's headlamps before anyone's tail lamps, so a tail lamp's 6 m glow no longer
+  costs an oncoming car its beam; ambient beams are at half strength (was a third) out to
+  110 m and fade out by 170 m (was 60-130 m); and the band of light a headlamp lays on the
+  asphalt towards the eye (`render/cloudshadow.ts`) shows on a DRY road too, broader and
+  a little softer than on a wet one.
+- NO MORE FLICKERING COLOURED WALLS ON DISTANT HOUSES. Everything a facade lays a few
+  centimetres proud of its wall — a wall in a second colour, frames, sills, hoods — is
+  drawn as a second group of the house's geometry with a polygon offset, and so is the
+  glass; at 1-3 cm the depth buffer could not separate them from the wall from a couple of
+  hundred metres, and the red wall of the Bauhaus house blinked in and out.
+- THE PLANE IS REBUILT as a Cessna 172 to its real dimensions (8.28 m long, 11.0 m span,
+  2.72 m high; 1.63 m wing chord tapering to 1.12 m past 2.55 m with 1°44′ of dihedral and
+  a NACA 2412 section; 3.43 m tailplane; 2.53 m track and 1.63 m wheelbase; 1.91 m
+  propeller). The fuselage is one smooth loft through a table of real sections; windows,
+  door and cowl seams, the cheat line, fin stripes, hinge lines, nose inlets and the
+  registration are painted by the material's own shader in the aeroplane's frame instead
+  of being laid on as plates, which is what tore the old skin. Swept fin with a dorsal
+  fillet, streamlined struts, spring-steel legs into proper speed fairings, an oleo nose
+  leg with torque links, a twisted two-blade propeller with painted tips, nav lights and a
+  beacon.
+- THE POSTCARD'S WORDS: "вот адрес" is gone; after the invitation it now reads
+  "приезжай или прилетай - главное, береги себя. Любим тебя и ждём в любое время!" The
+  printed POST CARD legend is gone and the postmark carries a date, so ПОЧТА appears once,
+  on the stamp.
 - THE FOV WIDENING IS FULL AT 160 km/h, not 130, so the top of most cars' range still
   widens the view. Still +5 degrees in total.
 - TYRE ROAR KEEPS GROWING PAST 108 km/h, up to +3 dB (hiss +4.5 dB) at 151 km/h

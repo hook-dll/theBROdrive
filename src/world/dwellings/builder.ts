@@ -190,9 +190,40 @@ export function dwellingBodyMaterial(): THREE.MeshStandardMaterial {
   return bodyMaterial;
 }
 
+let skinMaterial: THREE.MeshStandardMaterial | null = null;
+
+/**
+ * The facade skin's material: the body's, pulled towards the eye by a polygon offset.
+ * The offset scales with the depth slope and the buffer's own resolution, so a panel a
+ * centimetre off its wall wins cleanly at any distance instead of fighting the wall
+ * once the depth steps grow past a centimetre.
+ */
+export function dwellingSkinMaterial(): THREE.MeshStandardMaterial {
+  skinMaterial ??= applyComicShading(
+    new THREE.MeshStandardMaterial({
+      name: 'dwelling-skin',
+      vertexColors: true,
+      roughness: 0.86,
+      metalness: 0,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -4,
+    }),
+    { contourStrength: 0, stippleStrength: 0 },
+  );
+  return skinMaterial;
+}
+
 /** Window panes: the car tint, so a house window and a windscreen are the same glass. */
 export function dwellingGlassMaterial(): THREE.MeshStandardMaterial {
-  glassMaterial ??= new THREE.MeshStandardMaterial({ name: 'dwelling-glass', ...TINTED_GLASS });
+  glassMaterial ??= new THREE.MeshStandardMaterial({
+    name: 'dwelling-glass',
+    ...TINTED_GLASS,
+    // A pane is a skin on its wall too (see `dwellingSkinMaterial`).
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -4,
+  });
   return glassMaterial;
 }
 
@@ -221,6 +252,17 @@ export class DwellingBuilder {
   private readonly bodyPositions: number[] = [];
   private readonly bodyNormals: number[] = [];
   private readonly bodyColours: number[] = [];
+  /**
+   * SKIN: everything a facade lays a few centimetres proud of its wall — painted panels,
+   * frames, sills, a whole wall in a second colour. Kept apart from the shell and drawn
+   * with a polygon offset (see `dwellingSkinMaterial`), because at 1-3 cm off the wall
+   * the depth buffer cannot tell the two apart from a couple of hundred metres, and the
+   * coloured panel flickered in and out of the white wall behind it.
+   */
+  private readonly skinPositions: number[] = [];
+  private readonly skinNormals: number[] = [];
+  private readonly skinColours: number[] = [];
+  private skinDepth = 0;
   private readonly glassPositions: number[] = [];
   private readonly glassNormals: number[] = [];
   private matrix = new THREE.Matrix4();
@@ -283,10 +325,26 @@ export class DwellingBuilder {
       this.glassNormals.push(n.x, n.y, n.z);
       return;
     }
+    const colour = this.shadeInto(hex, p.y, serial, _colour);
+    if (this.skinDepth > 0) {
+      this.skinPositions.push(p.x, p.y, p.z);
+      this.skinNormals.push(n.x, n.y, n.z);
+      this.skinColours.push(colour.r, colour.g, colour.b);
+      return;
+    }
     this.bodyPositions.push(p.x, p.y, p.z);
     this.bodyNormals.push(n.x, n.y, n.z);
-    const colour = this.shadeInto(hex, p.y, serial, _colour);
     this.bodyColours.push(colour.r, colour.g, colour.b);
+  }
+
+  /** Draws `draw` into the facade skin (see `skinPositions`). */
+  skin(draw: () => void): void {
+    this.skinDepth++;
+    try {
+      draw();
+    } finally {
+      this.skinDepth--;
+    }
   }
 
   /** One flat triangle; `outward` (local direction) settles the winding. */
@@ -901,9 +959,18 @@ export class DwellingBuilder {
   /** Everything opaque that was drawn, as one vertex-coloured geometry. */
   geometry(): THREE.BufferGeometry {
     const body = new THREE.BufferGeometry();
-    body.setAttribute('position', new THREE.Float32BufferAttribute(this.bodyPositions, 3));
-    body.setAttribute('normal', new THREE.Float32BufferAttribute(this.bodyNormals, 3));
-    body.setAttribute('color', new THREE.Float32BufferAttribute(this.bodyColours, 3));
+    // Shell first, skin after it, as two draw groups of one geometry: the shell drawn
+    // plain, the skin with a polygon offset (`dwellingGroup`). A consumer that ignores
+    // the groups — the collider, a single-material mirage — sees one closed body.
+    body.setAttribute('position', new THREE.Float32BufferAttribute([...this.bodyPositions, ...this.skinPositions], 3));
+    body.setAttribute('normal', new THREE.Float32BufferAttribute([...this.bodyNormals, ...this.skinNormals], 3));
+    body.setAttribute('color', new THREE.Float32BufferAttribute([...this.bodyColours, ...this.skinColours], 3));
+    const shell = this.bodyPositions.length / 3;
+    const skin = this.skinPositions.length / 3;
+    if (skin > 0) {
+      body.addGroup(0, shell, 0);
+      body.addGroup(shell, skin, 1);
+    }
     body.computeBoundingSphere();
     return body;
   }
@@ -934,7 +1001,10 @@ export function dwellingGroup(
 ): THREE.Group {
   const group = new THREE.Group();
   group.name = name;
-  const bodyMesh = new THREE.Mesh(body, dwellingBodyMaterial());
+  const bodyMesh = new THREE.Mesh(
+    body,
+    body.groups.length > 0 ? [dwellingBodyMaterial(), dwellingSkinMaterial()] : dwellingBodyMaterial(),
+  );
   bodyMesh.name = `${name}-body`;
   bodyMesh.castShadow = true;
   bodyMesh.receiveShadow = true;
@@ -985,17 +1055,21 @@ export class Facade {
 
   /** Box in wall coordinates. */
   box(u0: number, u1: number, v0: number, v1: number, d0: number, d1: number, hex: number): void {
-    this.b.hexa(
+    this.b.skin(() => this.b.hexa(
       [
         this.p(u0, v0, d0), this.p(u1, v0, d0), this.p(u1, v0, d1), this.p(u0, v0, d1),
         this.p(u0, v1, d0), this.p(u1, v1, d0), this.p(u1, v1, d1), this.p(u0, v1, d1),
       ],
       hex,
-    );
+    ));
   }
 
   /** Painted shape: any outline, raised `depth` off the wall (starting at `from`). */
   shape(outline: readonly P2[], hex: number, depth = 0.025, from = 0): void {
+    this.b.skin(() => this.drawShape(outline, hex, depth, from));
+  }
+
+  private drawShape(outline: readonly P2[], hex: number, depth: number, from: number): void {
     const points = ccw(outline);
     const outward = this.n;
     const front = from + depth;
@@ -1100,15 +1174,16 @@ export class Facade {
     }
     if (style.hood !== undefined) {
       const top = v + h + fw;
-      this.b.hexa(
+      const hood = style.hood;
+      this.b.skin(() => this.b.hexa(
         [
           this.p(left - fw - 0.1, top + 0.02, 0), this.p(right + fw + 0.1, top + 0.02, 0),
           this.p(right + fw + 0.1, top - 0.18, 0.42), this.p(left - fw - 0.1, top - 0.18, 0.42),
           this.p(left - fw - 0.1, top + 0.1, 0), this.p(right + fw + 0.1, top + 0.1, 0),
           this.p(right + fw + 0.1, top - 0.12, 0.42), this.p(left - fw - 0.1, top - 0.12, 0.42),
         ],
-        style.hood,
-      );
+        hood,
+      ));
     }
     if (style.shutters !== undefined) {
       const sw = w / 2 + fw * 0.5;

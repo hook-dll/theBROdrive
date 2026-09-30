@@ -20,8 +20,8 @@ import type {
   PartItem,
   SprayCanItem,
   ToolItem,
-  ToolKind,
 } from '../items/items';
+import { makeSponge } from '../items/items';
 import { CAR_PAINTS } from '../vehicle/carpaint';
 import { makeFlatMaterial } from '../render/materials';
 import {
@@ -183,6 +183,11 @@ export interface Poi {
   readonly desert: boolean;
   /** Deterministic per-POI variation seed for shape and loot. */
   readonly variantSeed: number;
+  /**
+   * One of the first two roadside stops of the drive: its car field always holds a car
+   * the player can take, so a swap is on offer before the road asks for one.
+   */
+  readonly guaranteedCar?: boolean;
 }
 
 function halfStructure(structure: number): number {
@@ -224,10 +229,21 @@ function rollStructure(seed: number, domain: number, key: number): { structure: 
  * is used rather than a measured one because this is pure and cheap by contract —
  * `poisBetween` resolves a stretch of road without building a single triangle.
  */
+function roadsideOccupied(seed: number, slot: number, spacing: number): boolean {
+  return hash01(seed, POI_DOMAIN, slot) < POI_OCCUPANCY || isCourierPoiSlot(seed, slot, spacing);
+}
+
+/** Stops of the drive whose car field always has a car to take (see `Poi.guaranteedCar`). */
+const GUARANTEED_CAR_STOPS = 2;
+
 function roadsidePoi(seed: number, slot: number, spacing: number): Poi | null {
   const s = slot * spacing;
   if (slot < 1 || s > ROAD_LENGTH) return null;
-  if (hash01(seed, POI_DOMAIN, slot) >= POI_OCCUPANCY && !isCourierPoiSlot(seed, slot, spacing)) return null;
+  if (!roadsideOccupied(seed, slot, spacing)) return null;
+  let earlier = 0;
+  for (let k = 1; k < slot && earlier < GUARANTEED_CAR_STOPS; k++) {
+    if (roadsideOccupied(seed, k, spacing)) earlier++;
+  }
   const { structure, stock } = rollStructure(seed, POI_DOMAIN, slot);
   const side = hash01(seed, POI_DOMAIN, slot, 2) < 0.5 ? -1 : 1;
   const verge = VARIANT_SETBACK_MIN_M + hash01(seed, POI_DOMAIN, slot, 3) * VARIANT_SETBACK_SPAN_M;
@@ -239,6 +255,7 @@ function roadsidePoi(seed: number, slot: number, spacing: number): Poi | null {
     stock,
     desert: false,
     variantSeed: hash(seed, POI_DOMAIN, slot, 4),
+    guaranteedCar: earlier < GUARANTEED_CAR_STOPS,
   };
 }
 
@@ -602,19 +619,12 @@ function pickFluid(roll: number): { fluid: FluidKind; capacity: number } {
   return FLUID_STOCK[0];
 }
 
-function makeTool(
-  world: GameWorld,
-  poi: Poi,
-  tool: ToolKind,
-  counter: LootCounter,
-): ToolItem {
+function makeTool(world: GameWorld, poi: Poi, counter: LootCounter): ToolItem {
   const sub = counter.sub++;
-  return {
-    type: 'tool',
-    id: world.generatedPartId('poi_item', poi.index, sub),
-    tool,
-    integrity: 0.8 + hash01(poi.variantSeed, sub, 41) * 0.2,
-  };
+  return makeSponge(
+    world.generatedPartId('poi_item', poi.index, sub),
+    hash01(poi.variantSeed, sub, 41),
+  );
 }
 
 /**
@@ -687,8 +697,8 @@ function makeSprayCan(world: GameWorld, poi: Poi, counter: LootCounter): SprayCa
   };
 }
 
-/** What turns up about a yard: the two cleaning tools and, as often, a spray can. */
-const YARD_FINDS: readonly (ToolKind | 'spray_can')[] = ['brush', 'sponge', 'spray_can'];
+/** What turns up about a yard: a sponge or, as often, a spray can. */
+const YARD_FINDS: readonly ('sponge' | 'spray_can')[] = ['sponge', 'spray_can'];
 
 // ---------------------------------------------------------------------------
 // Kind builders. Each builds its scenery unconditionally and its loot only when
@@ -831,7 +841,7 @@ function stockTools(
     const find = pick(YARD_FINDS, poi.variantSeed, 98 + i);
     const item = find === 'spray_can'
       ? makeSprayCan(ctx.world, poi, counter)
-      : makeTool(ctx.world, poi, find, counter);
+      : makeTool(ctx.world, poi, counter);
     const tp = yardPoint(
       ctx,
       poi,
@@ -1058,10 +1068,11 @@ function buildStructurePoi(
     }
   }
 
-  // The salvageable car field. `buildWrecks` places its cars around the POI's own
-  // anchor, which is exactly where this building stands, so it is handed the footprint
-  // to lay out around.
-  if (poi.stock === 'salvage') {
+  // The car field. Every roadside stop has one — mostly shells to strip for parts —
+  // and a desert stop only when it is a scrapyard. `buildWrecks` places its cars around
+  // the POI's own anchor, which is exactly where this building stands, so it is handed
+  // the footprint to lay out around.
+  if (!poi.desert || poi.stock === 'salvage') {
     buildWrecks(
       ctx,
       poi,
@@ -1225,6 +1236,12 @@ function buildCourier(
  * exactly one roadworthy car parked among them.
  */
 const WORKING_CAR_CHANCE = 0.34;
+/**
+ * Same, at an ordinary roadside stop: every one of them has shells to strip now, and
+ * only now and then a car to take. The first two stops always have one
+ * (`Poi.guaranteedCar`).
+ */
+const ROADSIDE_WORKING_CAR_CHANCE = 0.2;
 /** Domain tag for the working-car roll, distinct from the placement stream. */
 const WORKING_CAR_DOMAIN = 0x52554e31; // 'RUN1'
 
@@ -1367,7 +1384,8 @@ export interface WreckKeepOut {
 
 export function layOutWreckField(poi: Poi, road: Road, keepOut?: WreckKeepOut): WreckSlot[] {
   const sSpread = WRECK_S_SPREAD + (keepOut ? 2 * Math.max(keepOut.halfX, keepOut.halfZ) : 0);
-  const count = 1 + Math.floor(hash01(poi.variantSeed, 10) * 3); // 1..3 bodies
+  // A scrapyard strings 1..3 bodies round its yard; any other stop 1..2.
+  const count = 1 + Math.floor(hash01(poi.variantSeed, 10) * (poi.stock === 'salvage' ? 3 : 2));
   const slots: WreckSlot[] = [];
 
   for (let w = 0; w < count; w++) {
@@ -1471,7 +1489,6 @@ type WreckFind =
   | 'petrol_can'
   | 'water_can'
   | 'oil_can'
-  | 'brush'
   | 'sponge'
   | 'medicine'
   | 'gum'
@@ -1485,8 +1502,7 @@ const WRECK_TRUNK_FINDS: readonly { readonly find: WreckFind; readonly weight: n
   { find: 'petrol_can', weight: 0.3 },
   { find: 'water_can', weight: 0.1 },
   { find: 'oil_can', weight: 0.1 },
-  { find: 'brush', weight: 0.1 },
-  { find: 'sponge', weight: 0.1 },
+  { find: 'sponge', weight: 0.2 },
   { find: 'medicine', weight: 0.08 },
   { find: 'gum', weight: 0.1 },
   { find: 'spray_can', weight: 0.12 },
@@ -1561,14 +1577,13 @@ function makeWreckItem(
         Math.round(capacity * (0.3 + hash01(poi.variantSeed, wreckIndex, 270 + cell) * 0.65) * 10) / 10;
       return { type: 'fluid_can', id, fluid, capacity, litres };
     }
-    case 'brush':
     case 'sponge':
-      return {
-        type: 'tool',
+      // Somebody used it on this car once: half to nearly all of its life left.
+      return makeSponge(
         id,
-        tool: find,
-        integrity: 0.4 + hash01(poi.variantSeed, wreckIndex, 280 + cell) * 0.5,
-      };
+        hash01(poi.variantSeed, wreckIndex, 281 + cell),
+        0.5 + hash01(poi.variantSeed, wreckIndex, 280 + cell) * 0.5,
+      );
     case 'medicine':
       return { type: 'medicine', id };
     case 'gum':
@@ -1642,8 +1657,9 @@ function buildWrecks(
   const slots = layOutWreckField(poi, ctx.road, keepOut);
   const count = slots.length;
 
+  const workingChance = poi.stock === 'salvage' ? WORKING_CAR_CHANCE : ROADSIDE_WORKING_CAR_CHANCE;
   const hasWorkingCar =
-    hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 0) < WORKING_CAR_CHANCE;
+    poi.guaranteedCar === true || hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 0) < workingChance;
   const workingSlot = hasWorkingCar
     ? Math.floor(hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 1) * count)
     : -1;

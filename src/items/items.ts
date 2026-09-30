@@ -11,7 +11,11 @@ import { carPaintSwatch } from '../vehicle/carpaint';
  * not a special case of anything; it is an item whose primary use fires.
  */
 
-export type ToolKind = 'brush' | 'sponge';
+/**
+ * The one cleaning tool. There used to be a brush for rust and coarse dirt and a sponge
+ * to finish; the sponge now does everything, and it wears out (`ToolItem.capacity`).
+ */
+export type ToolKind = 'sponge';
 export type WeaponKind = 'rifle' | 'shotgun';
 export type ShadeTint = 'green' | 'yellow' | 'red';
 
@@ -31,8 +35,34 @@ export interface ToolItem {
   readonly type: 'tool';
   readonly id: string;
   readonly tool: ToolKind;
-  /** Tools wear out slowly with use; 0..1, where 1 is new. */
+  /** Share of the sponge's life left, 0..1 where 1 is new; 0 is used up. */
   integrity: number;
+  /**
+   * Everything it can take off over its whole life, as a sum of fractions of a full
+   * layer: dirt, rust and scratches all count. 0.45..0.65 for every sponge made.
+   */
+  readonly capacity: number;
+}
+
+/** A new sponge cleans away between 45% and 65% before it is spent. */
+export const SPONGE_CAPACITY_MIN = 0.45;
+export const SPONGE_CAPACITY_MAX = 0.65;
+/** Below this share of its life a sponge is spent: dirty, and no use to anyone. */
+export const SPONGE_SPENT = 1e-4;
+
+/** A sponge; `capacityRoll` is a 0..1 roll for how much it can clean over its life. */
+export function makeSponge(id: string, capacityRoll: number, integrity = 1): ToolItem {
+  return {
+    type: 'tool',
+    id,
+    tool: 'sponge',
+    integrity,
+    capacity: SPONGE_CAPACITY_MIN + (SPONGE_CAPACITY_MAX - SPONGE_CAPACITY_MIN) * capacityRoll,
+  };
+}
+
+export function spongeSpent(item: ToolItem): boolean {
+  return item.integrity <= SPONGE_SPENT;
 }
 
 export interface PartItem {
@@ -232,7 +262,7 @@ export function litreText(litres: number): string {
 export function itemLabel(item: Item): string {
   switch (item.type) {
     case 'tool':
-      return item.tool;
+      return spongeSpent(item) ? 'used-up sponge' : `sponge (${Math.round(item.integrity * 100)}%)`;
     case 'part': {
       const label = variant(item.part.variantId).label;
       const named = item.part.destroyed ? `destroyed ${label}` : label;

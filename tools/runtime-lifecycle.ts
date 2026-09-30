@@ -115,7 +115,7 @@ function part(id: string) {
 }
 
 function tool(id: string): Item {
-  return { type: 'tool', id, tool: 'brush', integrity: 0.85 };
+  return { type: 'tool', id, tool: 'sponge', integrity: 0.85, capacity: 0.55 };
 }
 
 function trailer(id: string, x: number, y: number, z: number): TrailerState {

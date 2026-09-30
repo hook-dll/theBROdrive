@@ -10,17 +10,15 @@ import type {
   FluidKind,
   SprayCanItem,
   StickerEnvelopeItem,
-  ToolKind,
+  ToolItem,
 } from '../items/items';
-import { itemLabel, litreText } from '../items/items';
+import { itemLabel, litreText, spongeSpent } from '../items/items';
 import type { CarStats, PartInstance } from '../parts/registry';
 import {
-  applyBrush,
   applySponge,
   oilCapacity,
   variant,
   RUST_CLEAN_EPSILON,
-  BRUSH_DIRT_FLOOR,
 } from '../parts/registry';
 import type { LoosePartField } from '../parts/loose';
 import type { Vehicle } from '../vehicle/vehicle';
@@ -82,12 +80,7 @@ const EXIT_SPEED_LIMIT_KMH = 5;
 const EXIT_REFUSED_PROMPT = 'slow down to step out';
 /** Condition deltas are throttled; the visual updates every tick regardless. */
 const CONDITION_EMIT_INTERVAL = 0.25;
-/**
- * A body brush follows the removable-parts fiction: 0.55/s removes loose dirt, but
- * its bristles leave a 22% road film for the sponge to lift.
- */
-const BODY_BRUSH_DIRT_RATE = 0.55;
-/** The sponge shifts dirt as fast as it does on parts, so the two clean together. */
+/** The sponge shifts a car's dirt as fast as it does a part's. */
 const BODY_SPONGE_DIRT_RATE = 0.7;
 /**
  * Polishing removes 12 percentage points of visible scuffing per second, slow enough
@@ -355,8 +348,7 @@ function conditionPrefix(part: PartInstance): string {
 
 function scrubLabel(part: PartInstance): string {
   if (part.rust > RUST_CLEAN_EPSILON) return 'rust';
-  if (part.dirt > BRUSH_DIRT_FLOOR) return 'dirt';
-  return 'grime';
+  return 'dirt';
 }
 
 export type TrunkCellAction = 'none' | 'refused' | 'stored' | 'retrieved';
@@ -436,6 +428,8 @@ export class Interaction {
   /** This tick's discrete sound and held action; reset at the top of every tick. */
   private sound: FoleyEvent | null = null;
   private continuous: FoleyContinuous = null;
+  /** A sponge that wore out this tick, to be let fall from the hand. */
+  private spentSponge: string | null = null;
   /** Scene-graph raycaster and scratch, for picking real bodywork. */
   private readonly raycaster = new THREE.Raycaster();
   private readonly rayOrigin = new THREE.Vector3();
@@ -559,6 +553,11 @@ export class Interaction {
       : this.promptFor(resolved);
 
     if (input.usePrimary) this.usePrimary(dt, resolved);
+    if (this.spentSponge !== null) {
+      // Let go of it: dropped straight down a little ahead of the feet.
+      if (this.inventory.held?.id === this.spentSponge) this.drop(eyeX, eyeY, eyeZ, dirX * 0.25, -1, dirZ * 0.25);
+      this.spentSponge = null;
+    }
     const worldActionPressed = mountPressed && !stickerBlocksCar && this.mountHasPriority(resolved.target);
     if (worldActionPressed) {
       const actionResolved = resolved;
@@ -1385,9 +1384,8 @@ export class Interaction {
 
   private toolPrompt(held: Item | null, part: PartInstance): string | null {
     if (held?.type !== 'tool') return null;
-    if (held.tool === 'brush') return `[LMB] scrub ${scrubLabel(part)}`;
-    if (part.rust > RUST_CLEAN_EPSILON) return '[LMB] sponge — needs the brush first';
-    return '[LMB] polish';
+    if (part.rust <= RUST_CLEAN_EPSILON && part.dirt <= 0.005) return 'clean';
+    return `[LMB] scrub ${scrubLabel(part)}`;
   }
 
 
@@ -1404,12 +1402,6 @@ export class Interaction {
     const scratches = Math.round(scratchFraction * 100);
     if (dirtFraction <= 0 && scratchFraction <= BODY_SCRATCH_FLOOR) {
       return 'body clean and polished';
-    }
-    if (held.tool === 'brush') {
-      if (dirtFraction <= BRUSH_DIRT_FLOOR) {
-        return `body ${dirt}% dirt, ${scratches}% scratched — needs sponge`;
-      }
-      return `[LMB] scrub — body ${dirt}% dirt, ${scratches}% scratched`;
     }
     return `[LMB] sponge — body ${dirt}% dirt, ${scratches}% scratched`;
   }
@@ -1429,7 +1421,7 @@ export class Interaction {
   private usePrimary(dt: number, resolved: Resolved): void {
     const held = this.inventory.held;
     if (!held) return;
-    if (held.type === 'tool') this.scrub(dt, held.tool, resolved);
+    if (held.type === 'tool') this.scrub(dt, held, resolved);
     else if (held.type === 'fluid_can') this.pourFluid(dt, held, resolved);
     else if (held.type === 'spray_can') this.spray(dt, held, resolved);
   }
@@ -1463,23 +1455,36 @@ export class Interaction {
     }
   }
 
-  private scrub(dt: number, tool: ToolKind, resolved: Resolved): void {
+  private scrub(dt: number, sponge: ToolItem, resolved: Resolved): void {
+    if (spongeSpent(sponge)) return;
     if (resolved.target.kind === 'car-body' || resolved.target.kind === 'car-entry') {
-      this.scrubBody(dt, tool, resolved);
+      this.scrubBody(dt, sponge, resolved);
       return;
     }
     const part = this.targetPart(resolved);
     if (!part) return;
-    // applySponge refuses while rust remains, enforcing brush-then-sponge order.
-    const worked = tool === 'brush' ? applyBrush(part, dt) : applySponge(part, dt);
-    if (!worked) return;
+    const removed = applySponge(part, dt, sponge.capacity * sponge.integrity);
+    if (removed <= 0) return;
+    this.wearSponge(sponge, removed);
     this.continuous = 'scrub';
     this.applyConditionVisual(resolved, part);
     this.conditionEmitTimer += dt;
-    if (this.conditionEmitTimer >= CONDITION_EMIT_INTERVAL) {
+    if (this.conditionEmitTimer >= CONDITION_EMIT_INTERVAL || spongeSpent(sponge)) {
       this.conditionEmitTimer = 0;
       this.world.apply({ t: 'part_condition', partId: part.id, dirt: part.dirt, rust: part.rust });
     }
+  }
+
+  /**
+   * Takes what a stroke cleaned off the sponge's life. A spent sponge has turned the
+   * colour of what it took off and is no use to anyone: it falls from the hand at the
+   * player's feet, the way a used-up rag is dropped.
+   */
+  private wearSponge(sponge: ToolItem, removed: number): void {
+    sponge.integrity = Math.max(0, sponge.integrity - removed / Math.max(1e-4, sponge.capacity));
+    if (!spongeSpent(sponge)) return;
+    sponge.integrity = 0;
+    this.spentSponge = sponge.id;
   }
 
   /**
@@ -1487,33 +1492,28 @@ export class Interaction {
    * as parts. Each stroke writes the car's state directly, and the Vehicle adopts
    * any value it did not write itself on its next rendered frame (`syncVisuals`), so
    * a held sponge visibly works stroke by stroke rather than in 0.25-second jumps.
+   * Dirt and scratches come off together and both wear the sponge.
    */
-  private scrubBody(dt: number, tool: ToolKind, resolved: Resolved): void {
+  private scrubBody(dt: number, sponge: ToolItem, resolved: Resolved): void {
     const t = resolved.target;
     if ((t.kind !== 'car-body' && t.kind !== 'car-entry') || !resolved.vehicle) return;
     const car = this.world.state.cars[t.carId];
     if (!car) return;
 
-    const oldDirt = car.dirt;
-    const oldScratches = car.scratches;
-    const dirt = Math.min(1, Math.max(0, oldDirt));
-    const scratches = Math.min(1, Math.max(0, oldScratches));
-    if (tool === 'brush') {
-      // Like `applyBrush`, the floor limits cleaning without making a cleaner shell dirtier.
-      car.dirt = Math.max(Math.min(dirt, BRUSH_DIRT_FLOOR), dirt - BODY_BRUSH_DIRT_RATE * dt);
-      car.scratches = scratches;
-    } else {
-      car.dirt = Math.max(0, dirt - BODY_SPONGE_DIRT_RATE * dt);
-      car.scratches = Math.max(
-        Math.min(scratches, BODY_SCRATCH_FLOOR),
-        scratches - BODY_SPONGE_SCRATCH_RATE * dt,
-      );
-    }
-    if (car.dirt === oldDirt && car.scratches === oldScratches) return;
+    const dirt = Math.min(1, Math.max(0, car.dirt));
+    const scratches = Math.min(1, Math.max(0, car.scratches));
+    const dirtStep = Math.min(dirt, BODY_SPONGE_DIRT_RATE * dt);
+    const scratchStep = Math.max(0, Math.min(scratches - BODY_SCRATCH_FLOOR, BODY_SPONGE_SCRATCH_RATE * dt));
+    const total = dirtStep + scratchStep;
+    if (total <= 0) return;
+    const k = Math.min(1, (sponge.capacity * sponge.integrity) / total);
+    car.dirt = dirt - dirtStep * k;
+    car.scratches = scratches - scratchStep * k;
+    this.wearSponge(sponge, total * k);
 
     this.continuous = 'scrub';
     this.conditionEmitTimer += dt;
-    if (this.conditionEmitTimer >= CONDITION_EMIT_INTERVAL) {
+    if (this.conditionEmitTimer >= CONDITION_EMIT_INTERVAL || spongeSpent(sponge)) {
       this.conditionEmitTimer = 0;
       this.world.apply({
         t: 'car_body_condition',

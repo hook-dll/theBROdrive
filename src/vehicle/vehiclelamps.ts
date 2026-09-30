@@ -12,6 +12,13 @@ import * as THREE from 'three';
 import type { CarState, GameWorld } from '../game/state';
 import type { VehicleLightRig } from '../render/vehiclelights';
 import { addWetGlare } from '../render/cloudshadow';
+
+/**
+ * Which of a vehicle's lamps a projection pass offers: the rig is filled headlamps
+ * first for every car, then the short rear pools, so a tail lamp's six-metre glow
+ * can never cost an oncoming car the light its headlamps lay on the road.
+ */
+export type BeamPass = 'all' | 'front' | 'rear';
 import { makeCarGrimeMaterial, setCarGrime } from '../render/materials';
 import type { CarModelDef } from './carmodels';
 import { clamp } from './vehicletuning';
@@ -351,14 +358,16 @@ export class VehicleLamps {
    * A gain of zero claims no slot at all, so the pool always belongs to the beams
    * near enough to be seen.
    */
-  syncProjectedLights(rig: VehicleLightRig, gain: number): void {
+  syncProjectedLights(rig: VehicleLightRig, gain: number, lamps: BeamPass = 'all'): void {
     if (!(gain > 0)) return;
+    const front = lamps !== 'rear';
+    const rear = lamps !== 'front';
     const headlightBeam = this.headlightMode === 'high' ? HEADLIGHT_HIGH : HEADLIGHT_LOW;
     const headlightIntensity =
       this.headlightMode === 'off'
         ? 0
         : headlightBeam.intensity * this.headlightEnvironmentFactor * gain * this.beamThroughGrime;
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 2 && front; i++) {
       this.projectBeam(
         rig,
         this.headlightMounts[i],
@@ -367,6 +376,8 @@ export class VehicleLamps {
         headlightBeam,
         rig.headlightDistanceScale,
       );
+    }
+    for (let i = 0; i < 2 && rear; i++) {
       this.projectBeam(
         rig,
         this.taillightMounts[i],

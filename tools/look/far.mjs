@@ -9,7 +9,8 @@
  *   node tools/look/far.mjs <outdir> 'km:hour[:look],...'
  *
  * `look` is `road` (default, the chase camera behind the car), `sun`, `anti` (toward
- * and away from the sun), or `y<radians>` for an absolute camera yaw.
+ * and away from the sun), `left`/`right` (square to the road), or `y<radians>` for an
+ * absolute camera yaw.
  *
  * Environment:
  *   URL    dev server (default http://localhost:5199/)
@@ -62,6 +63,12 @@ try {
       const sign = look === 'sun' ? 1 : look === 'anti' ? -1 : 0;
       if (sign !== 0) b.camera.setYaw(Math.atan2(d.x * sign, d.z * sign));
       if (look[0] === 'y') b.camera.setYaw(+look.slice(1));
+      // Square to the car, to either side. The chase camera eases back behind the car
+      // once the mouse has been idle for a while, so the idle timer is held at zero.
+      if (look === 'left' || look === 'right') {
+        b.camera.setYaw(b.camera.yaw + (look === 'left' ? 1 : -1) * Math.PI / 2);
+        b.camera.chaseLookIdle = -1e9;
+      }
       // Private in TypeScript only; the rig re-reads these every frame.
       b.camera.pitch = b.camera.drivingPitch = pitch;
     }, [look, PITCH]);

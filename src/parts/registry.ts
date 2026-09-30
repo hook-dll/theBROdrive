@@ -1177,45 +1177,27 @@ export interface PartInstance {
   clog?: number;
 }
 
-/** Coarse dirt a brush can shift; below this only a sponge helps. */
-export const BRUSH_DIRT_FLOOR = 0.22;
-/** Rust low enough to count as bare metal, so a sponge can finish the job. */
+/** Rust low enough to count as bare metal. */
 export const RUST_CLEAN_EPSILON = 0.02;
 
-/** Brush rates per second, applied while the tool is held against the part. */
-const BRUSH_RUST_RATE = 0.28;
-const BRUSH_DIRT_RATE = 0.55;
-/** Sponge rate per second. */
+/** Sponge rates per second, applied while it is held against the part. */
+const SPONGE_RUST_RATE = 0.28;
 const SPONGE_DIRT_RATE = 0.7;
 
 /**
- * Scrubs with a brush: shifts rust and the coarse layer of dirt, but leaves a film
- * behind. Returns true if anything changed, for tool feedback and delta recording.
+ * Scrubs a part with a sponge: rust and dirt come off together. `budget` is what the
+ * sponge has left to give (a sum of fractions, see `ToolItem.capacity`); the stroke is
+ * cut short to fit it. Returns how much it took off, 0 when nothing changed.
  */
-export function applyBrush(part: PartInstance, dt: number): boolean {
-  const rust = Math.max(0, part.rust - BRUSH_RUST_RATE * dt);
-  // The floor is a limit on how far a brush can clean, never a level it imposes:
-  // clamping straight to BRUSH_DIRT_FLOOR would make brushing an already-clean part
-  // dirtier. So the target floor is whichever is lower, the floor or current dirt.
-  const floor = Math.min(part.dirt, BRUSH_DIRT_FLOOR);
-  const dirt = Math.max(floor, part.dirt - BRUSH_DIRT_RATE * dt);
-  const changed = rust !== part.rust || dirt !== part.dirt;
-  part.rust = rust;
-  part.dirt = dirt;
-  return changed;
-}
-
-/**
- * Polishes with a sponge: takes an already de-rusted part to perfect. Refuses to do
- * anything while rust remains, which is what forces brush-then-sponge order.
- */
-export function applySponge(part: PartInstance, dt: number): boolean {
-  if (part.rust > RUST_CLEAN_EPSILON) return false;
-  const dirt = Math.max(0, part.dirt - SPONGE_DIRT_RATE * dt);
-  const changed = dirt !== part.dirt || part.rust !== 0;
-  part.dirt = dirt;
-  part.rust = 0;
-  return changed;
+export function applySponge(part: PartInstance, dt: number, budget: number): number {
+  const rustStep = Math.min(part.rust, SPONGE_RUST_RATE * dt);
+  const dirtStep = Math.min(part.dirt, SPONGE_DIRT_RATE * dt);
+  const total = rustStep + dirtStep;
+  if (total <= 0 || budget <= 0) return 0;
+  const k = Math.min(1, budget / total);
+  part.rust = Math.max(0, part.rust - rustStep * k);
+  part.dirt = Math.max(0, part.dirt - dirtStep * k);
+  return total * k;
 }
 
 /**

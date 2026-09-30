@@ -13,7 +13,7 @@ import type {
 import { COLD_SOAK_C } from '../vehicle/cooling';
 import { sanitizeSettings } from '../game/settings';
 import { hasVariant, type PartInstance } from '../parts/registry';
-import { CAMERA_FRAME_LIMIT, type Item } from '../items/items';
+import { CAMERA_FRAME_LIMIT, SPONGE_CAPACITY_MAX, SPONGE_CAPACITY_MIN, type Item } from '../items/items';
 import { isStickerKind, STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
 import {
   AIR_FILTER_CELL,
@@ -832,7 +832,15 @@ function migrateItem(raw: unknown, where: string): Item {
       if (tool !== 'brush' && tool !== 'sponge') {
         throw new Error(`Save data is malformed: item at ${where} has an invalid tool`);
       }
-      return { type: 'tool', id: obj.id, tool, integrity: numOr(obj.integrity, 1) };
+      // The brush is gone: an old save's brush comes back as a sponge with the same
+      // life left, so nothing a player carried simply vanishes.
+      return {
+        type: 'tool',
+        id: obj.id,
+        tool: 'sponge',
+        integrity: Math.min(1, Math.max(0, numOr(obj.integrity, 1))),
+        capacity: numOr(obj.capacity, (SPONGE_CAPACITY_MIN + SPONGE_CAPACITY_MAX) / 2),
+      };
     }
     case 'part':
       return { type: 'part', id: obj.id, part: migratePart(obj.part, `item at ${where}`) };

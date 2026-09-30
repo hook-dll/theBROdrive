@@ -88,9 +88,10 @@ const MARKING_MIN = 0.03;
  * into the plain sand.
  *
  * NOT A DARK BAND. A darker verge painted into the terrain once read as shadow patches
- * in play (terrainmesh.ts), so past the first half of the strip a shoulder has the
- * sand's luminance and changes only its character: paler and greyer where it is
- * compacted fines and dust. Only the road's own spill near the edge may be darker
+ * in play (terrainmesh.ts), so the strip is PALER than the sand and much greyer: the
+ * compacted fines and dust of a graded verge. It has to be a clear change of material:
+ * a strip at the sand's own luminance with a quarter of its saturation taken out
+ * vanished completely once the palettes went saturated (Mars, the orange ergs). Only the road's own spill near the edge may be darker
  * (`edgeTone`), which is what makes a gravel road's verge read as the grader's
  * windrow rather than a pale kerb laid beside a dark road.
  *
@@ -117,17 +118,17 @@ interface ShoulderStyle {
  */
 const SHOULDER_STYLE: Partial<Record<SurfaceType, ShoulderStyle>> = {
   // A highway's graded crushed-stone shoulder, dusty and pale.
-  [SurfaceType.Asphalt]: { grey: 0.26, stone: 0.3, edgeTone: 0.94, bright: 1.05, grit: 0.75 },
-  // Older and narrower; the desert has had longer to blow back over it.
-  [SurfaceType.CrackedAsphalt]: { grey: 0.18, stone: 0.3, edgeTone: 0.9, bright: 1.03, grit: 0.7 },
+  [SurfaceType.Asphalt]: { grey: 0.6, stone: 0.34, edgeTone: 0.9, bright: 1.09, grit: 0.85 },
+  // Older; the desert has had longer to blow back over it, but it is still a verge.
+  [SurfaceType.CrackedAsphalt]: { grey: 0.5, stone: 0.34, edgeTone: 0.88, bright: 1.07, grit: 0.8 },
   // Concrete roads were built wide and pale, with cement dust in the verge.
-  [SurfaceType.Concrete]: { grey: 0.28, stone: 0.16, edgeTone: 1, bright: 1.05, grit: 0.5 },
+  [SurfaceType.Concrete]: { grey: 0.7, stone: 0.2, edgeTone: 0.96, bright: 1.16, grit: 0.6 },
   // The grader's spoil: the road's own gravel pushed off to the sides.
-  [SurfaceType.Gravel]: { grey: 0.08, stone: 0.7, edgeTone: 0.68, bright: 1, grit: 1 },
+  [SurfaceType.Gravel]: { grey: 0.4, stone: 0.7, edgeTone: 0.72, bright: 1.02, grit: 1 },
 };
 const DEFAULT_SHOULDER_STYLE = SHOULDER_STYLE[SurfaceType.Asphalt]!;
 /** Across-strip positions of the columns, 0 at the asphalt edge, 1 at the sand. */
-const SHOULDER_ACROSS: readonly number[] = [0, 0.1, 0.4, 0.75, 1];
+const SHOULDER_ACROSS: readonly number[] = [0, 0.1, 0.45, 0.8, 1];
 /** Part of the strip over which it comes down from the asphalt's lip to the ground. */
 const SHOULDER_RAMP = 0.55;
 /** Height of the settled strip over the drawn ground, and its tuck under it, metres. */
@@ -690,12 +691,12 @@ export class RoadMeshProvider implements ChunkProvider {
       const sandLum = luminance(shoulderSand);
       // A worn road's verge is half sand already: the same wedge the lanes get.
       const wear = Math.max(cond.decay, cond.sandCover);
-      const grey = style.grey * (1 - 0.5 * wear);
-      const stone = style.stone * (1 - 0.6 * wear);
-      const gritLevel = style.grit * (1 - 0.5 * wear);
-      const edgeTone = 1 - (1 - style.edgeTone) * (1 - 0.5 * wear);
+      const grey = style.grey * (1 - 0.3 * wear);
+      const stone = style.stone * (1 - 0.4 * wear);
+      const gritLevel = style.grit * (1 - 0.3 * wear);
+      const edgeTone = 1 - (1 - style.edgeTone) * (1 - 0.4 * wear);
       // The strip's own width, from the road's cross-section rather than this table.
-      const stripWidth = shoulderWidthM(cond.surface) * (1 - 0.25 * wear);
+      const stripWidth = shoulderWidthM(cond.surface) * (1 - 0.2 * wear);
 
       for (let side = 0; side < 2; side++) {
         const sign = side === 0 ? -1 : 1;
@@ -751,14 +752,14 @@ export class RoadMeshProvider implements ChunkProvider {
 
           // Colour: the road's stone near the edge, then compacted grey dust, then the
           // sand itself at the last column — exactly the tile's colour there.
-          const stoneMix = stone * (1 - smoothstep(0.1, 0.75, t));
+          const stoneMix = stone * (1 - smoothstep(0.3, 0.85, t));
           shoulderColour.copy(shoulderSand).lerp(shoulderStone, stoneMix);
           const mixedLum = luminance(shoulderColour);
-          const greyMix = grey * (1 - smoothstep(0.5, 1, t));
+          const greyMix = grey * (1 - smoothstep(0.72, 1, t));
           // Dust is a warm grey, not a neutral one: a neutral grey beside a green
           // palette's ground read as a cold concrete kerb.
           shoulderColour.lerp(shoulderGrey.setRGB(mixedLum * 1.06, mixedLum, mixedLum * 0.86), greyMix);
-          const outer = smoothstep(0.6, 1, t);
+          const outer = smoothstep(0.72, 1, t);
           const mottle =
             1 + SHOULDER_MOTTLE * (1 - outer) * this.mottleNoise.fbm(s / 3.1 + sign * 17, t * 1.3, 2, 2, 0.5);
           const sandTone = sandLum * (1 + (style.bright - 1) * (1 - outer));

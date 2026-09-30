@@ -10,8 +10,8 @@ import { ROAD_LENGTH } from './road';
  *    star density, the galactic band, the aurora. Distance from home must not come
  *    back around.
  *  - Road quality and colour are stationary or cyclic in ABSOLUTE distance. Decay
- *    is a regional envelope plus a fine patch, so a pristine stretch is possible at
- *    39 000 km and a badly-worn one at 200 km; the desert palette (and the dust, haze
+ *    ALTERNATES in 3-5 km wear bands (new, tired, abandoned, in turn) plus a fine
+ *    patch, and never grows with distance; the desert palette (and the dust, haze
  *    and sky tint that track it) cycles with a fixed period, so a driver who
  *    covers a full cycle sees every colour and then begins again. Wear stops at
  *    MAX_WEAR rather than running to ruin.
@@ -92,38 +92,75 @@ export const MAX_WEAR = 0.6;
 const decayNoise = new Noise1D(0x51ed270b);
 
 /**
- * Wavelength of the REGIONAL envelope, metres. 300 km of road sits inside roughly
- * one "region"; the envelope drifts slowly between kept-up and abandoned districts
- * over a few hundred kilometres. That is what makes a stretch read as "this part
- * of the desert is maintained" rather than as a difficulty knob. Two octaves is
- * enough at this wavelength: the envelope only needs broad regions, and the fine
- * texture is the patch noise's job.
+ * WEAR BANDS: how kept-up the road is, ALTERNATING along the whole drive.
+ *
+ * There is deliberately no distance ramp and no slow regional envelope any more. A
+ * 300 km envelope made whole sessions abandoned and whole sessions pristine, and the
+ * owner's call is that the road is never "worse the further you go": new, middling and
+ * abandoned stretches take turns everywhere, in measure.
+ *
+ * So the road is cut into bands of 3-5 km, and each band draws a wear LEVEL from a
+ * small deck that excludes its predecessor's level, so two neighbouring bands always
+ * differ. Levels are blended over WEAR_BLEND_M either side of a boundary, and the fine
+ * patch noise on top keeps a band from reading as one flat value.
  */
-const DECAY_ENVELOPE_WAVELENGTH = 300_000;
+const WEAR_BAND_M = 4000;
+const WEAR_BAND_JITTER_M = 1800;
+const WEAR_TAG = 0x77ea12;
+/** Half-width of the blend between two bands' levels, metres. */
+const WEAR_BLEND_M = 350;
+/** Wear levels (0 fresh .. MAX_WEAR abandoned) and how often each is drawn. */
+const WEAR_LEVELS: readonly number[] = [0.03, 0.17, 0.3, 0.44, 0.58];
+const WEAR_WEIGHTS: readonly number[] = [0.22, 0.24, 0.24, 0.18, 0.12];
 
-/** Fixed seed (not the world seed) so the envelope is identical in every world. */
-const envelopeNoise = new Noise1D(0x4f9d3b7e);
+/** One weighted draw from the level deck, with `exclude` removed (-1 for none). */
+function drawWearLevel(roll: number, exclude: number): number {
+  let total = 0;
+  for (let i = 0; i < WEAR_WEIGHTS.length; i++) if (i !== exclude) total += WEAR_WEIGHTS[i]!;
+  let pick = roll * total;
+  for (let i = 0; i < WEAR_WEIGHTS.length; i++) {
+    if (i === exclude) continue;
+    pick -= WEAR_WEIGHTS[i]!;
+    if (pick <= 0) return i;
+  }
+  return WEAR_WEIGHTS.length - 1 === exclude ? 0 : WEAR_WEIGHTS.length - 1;
+}
 
 /**
- * The maintained opening out of the house, in metres.
- *
- * Twenty-five kilometres, held pristine for the first five and eased into whatever
- * the region says by the last. It was three kilometres, and the road-condition table
- * showed why that is not enough: with quality stationary rather than ramped, the
- * region the house happens to sit in is whatever the envelope says, and it says 0.83.
- * So at three kilometres the player left the garage, drove for ninety seconds and
- * arrived on ruined gravel with no lane markings — a legible opening turned into the
- * roughest thing in the game before they had shifted into third.
- *
- * Twenty-five kilometres is about seventeen minutes at 90 km/h: long enough to learn
- * the car, meet a fuel stop and see the road in good condition before it starts to
- * break up, and 0.06% of the road, so it costs the stationary design nothing. The
- * five-kilometre flat start matters as much as the length — a blend that begins
- * immediately still puts visible decay in the first minute.
+ * The level index of band `k` under tag `tag`. The first band is always fresh (the
+ * drive opens on a maintained road). A band rejects its predecessor's UNCHAINED draw,
+ * which keeps this O(1); a repeat is therefore rare and at most two bands long.
  */
-const GARAGE_RAMP_M = 25_000;
-/** Held fully maintained before the blend begins, metres. */
-const GARAGE_FLAT_M = 5000;
+function wearLevelIndex(tag: number, k: number): number {
+  if (k <= 0) return 0;
+  const raw = (j: number): number => (j <= 0 ? 0 : drawWearLevel(hash01(tag, j, 1), -1));
+  return drawWearLevel(hash01(tag, k, 2), raw(k - 1));
+}
+
+/**
+ * Banded wear at `s` for the band scheme (`tag`, nominal length, jitter), blended
+ * smoothly across boundaries.
+ */
+function bandedWear(s: number, tag: number, nominal: number, jitter: number, blend: number): number {
+  const start = (k: number): number => k * nominal + (hash01(tag, k, 0) - 0.5) * jitter;
+  let k = Math.floor(s / nominal);
+  if (s < start(k)) k -= 1;
+  else if (s >= start(k + 1)) k += 1;
+  const here = WEAR_LEVELS[wearLevelIndex(tag, k)]!;
+  const toStart = s - start(k);
+  const toEnd = start(k + 1) - s;
+  if (toStart >= blend && toEnd >= blend) return here;
+  const nearStart = toStart < toEnd;
+  const other = WEAR_LEVELS[wearLevelIndex(tag, nearStart ? k - 1 : k + 1)]!;
+  const u = 1 - Math.min(toStart, toEnd) / blend;
+  const t = 0.5 * u * u * (3 - 2 * u);
+  return here + (other - here) * t;
+}
+
+/** The wear level the band scheme gives the road at `s`, before the fine patch. */
+export function roadWearLevelAt(s: number): number {
+  return bandedWear(s, WEAR_TAG, WEAR_BAND_M, WEAR_BAND_JITTER_M, WEAR_BLEND_M);
+}
 
 /**
  * SURFACE DISTRICTS: which MATERIAL the lanes are made of, and the fix for a road
@@ -242,13 +279,11 @@ function districtIndex(s: number): number {
 }
 
 /**
- * Regional mean decay: the slow absolute-distance drift between maintained and
- * abandoned districts. fbm (never a sine) so regions never repeat on a schedule.
+ * The mix the material deck is weighed at. It used to follow a 300 km regional
+ * envelope, which let a whole session's region be gravel; now every district draws
+ * from the same mix, so sealed and broken surfaces alternate everywhere.
  */
-function regionalDecay(s: number): number {
-  const env = envelopeNoise.fbm(s / DECAY_ENVELOPE_WAVELENGTH, 2, 2.1, 0.5);
-  return 0.45 + env * 0.55;
-}
+const DISTRICT_MIX = 0.45;
 
 /**
  * One weighted draw for district `k`, with `exclude` removed from the deck (-1 for
@@ -282,8 +317,8 @@ const DISTRICTS_PER_BLOCK = 4;
  * district. The envelope's wavelength is 300 km and a block is 24 km, so the two
  * differ by under a hundredth — and it turns four fbm evaluations into one.
  */
-function blockRegional(b: number): number {
-  return regionalDecay((b + 0.5) * DISTRICTS_PER_BLOCK * DISTRICT_NOMINAL_M);
+function blockRegional(_b: number): number {
+  return DISTRICT_MIX;
 }
 
 /**
@@ -393,11 +428,9 @@ export function surfaceJoinAt(s: number, out: SurfaceJoinBuffer): void {
  * Two independent things, and keeping them independent is the point:
  *
  *  - MATERIAL comes from the 5-7 km surface districts above, weighted by the region.
- *  - DECAY is stationary in absolute distance, not a one-way ramp: the regional
- *    envelope summed with fine patch noise, so a pristine stretch is possible at
- *    39 000 km and a broken one at 200 km. The garage ramp holds it pristine for the
- *    first five kilometres and eases into the region by twenty-five, so the player
- *    always learns the car on a maintained road.
+ *  - DECAY alternates in wear bands (see WEAR_LEVELS): fresh, tired and abandoned
+ *    stretches take turns along the whole road, with a small patch noise on top. The
+ *    first band is always fresh.
  *
  * Decay is clamped to MAX_WEAR, so the broken half of that range stops at the worst
  * road the world is willing to show. Everything downstream — sand cover, markings,
@@ -409,20 +442,9 @@ export function surfaceJoinAt(s: number, out: SurfaceJoinBuffer): void {
  * was reachable while the material WAS a threshold on the decay.
  */
 export function roadConditionAt(s: number, out?: RoadConditionBuffer): RoadCondition {
-  // Garage ramp: hold the regional mean at pristine for GARAGE_FLAT_M, then blend it
-  // up to whatever the region says by GARAGE_RAMP_M. Cubic smoothstep, so the join is
-  // C1 at both ends and there is no distance at which the road visibly steps.
-  const rampT = Math.min(
-    1,
-    Math.max(0, (s - GARAGE_FLAT_M) / (GARAGE_RAMP_M - GARAGE_FLAT_M)),
-  );
-  const ramp = rampT * rampT * (3 - 2 * rampT);
-  const envelope = 0.05 + (regionalDecay(s) - 0.05) * ramp;
-
-  // Fine patch: the existing 3-octave fbm, unchanged. It no longer moves the material
-  // (districts own that), so it is purely how broken this stretch is.
-  const patch = decayNoise.fbm(s / DECAY_PATCH_WAVELENGTH, 3, 2.1, 0.45) * 0.28;
-  const decay = Math.min(MAX_WEAR, Math.max(0, envelope + patch));
+  // The band's level, then the fine patch: how broken this particular stretch is.
+  const patch = decayNoise.fbm(s / DECAY_PATCH_WAVELENGTH, 3, 2.1, 0.45) * 0.12;
+  const decay = Math.min(MAX_WEAR, Math.max(0, roadWearLevelAt(s) + patch));
   const surface = districtSurface(districtIndex(s));
   const condition = out ?? { surface, decay, sandCover: 0, markings: 0 };
   condition.surface = surface;
@@ -505,22 +527,25 @@ export function poleEraSegments(): readonly PoleEraBand[] {
   return bands;
 }
 
+/**
+ * Pole wear alternates on its own bands (7-11 km), exactly like the road's: a new
+ * line, a tired one and a half-fallen one take turns everywhere, and nothing gets
+ * worse with distance. Its own tag and length, so a fresh road can run beside an old
+ * line and the other way round.
+ */
+const POLE_WEAR_TAG = 0x901e5;
+const POLE_WEAR_BAND_M = 9000;
+const POLE_WEAR_JITTER_M = 4000;
+
 export function poleConditionAt(s: number): PoleCondition {
   const band = poleBandAt(s);
-
-  // Dilapidation resets at each era boundary: a new era means newer infrastructure.
-  const within = (s - band.start) / (band.end - band.start);
-
+  const wear = bandedWear(s, POLE_WEAR_TAG, POLE_WEAR_BAND_M, POLE_WEAR_JITTER_M, 400);
   return {
     era: band.era,
-    // Clamped like road decay, and for the same reason: an infrastructure generation
-    // ends with its poles leaning, not lying in the sand. See MAX_WEAR.
-    dilapidation: Math.min(MAX_WEAR, within * 1.15),
-    // Wires are NOT part of that ceiling, and deliberately. A span that has come down
-    // is something that happened to a line, not how worn its poles are: survival of
-    // attached equipment, already binary, and tuned so most of the wire is gone long
-    // before the poles lean.
-    wireChance: Math.max(0, 1 - within * 1.3),
+    // Clamped like road decay: a line ends leaning, not lying in the sand.
+    dilapidation: Math.min(MAX_WEAR, wear),
+    // Most of the wire is up on a kept line and most of it gone on an abandoned one.
+    wireChance: Math.max(0, Math.min(1, 1.05 - wear * 1.45)),
   };
 }
 
@@ -923,11 +948,12 @@ export function desertPaletteAt(s: number): DesertPalette {
 // Monuments
 // ---------------------------------------------------------------------------
 
-export type MonumentKind =
-  | 'distance_sign'
-  | 'ornament_shrine'
-  | 'cairn'
-  | 'wrecked_marker';
+/**
+ * A distance sign, or one of the four artefacts nobody on this road made
+ * (`world/props/artifacts.ts`), which replaced the cairn, the chrome shrine and the
+ * snapped sign.
+ */
+export type MonumentKind = 'distance_sign' | 'monolith' | 'orbit' | 'bloom' | 'gate';
 
 export interface Monument {
   /** Arclength of the monument. */
@@ -973,12 +999,13 @@ export function monumentsBetween(seed: number, fromS: number, toS: number): Monu
     const roll = hash01(seed, 0x4d4f4e55, i);
     const km = Math.round(s / 1000);
 
-    // Signs dominate early; shrines and cairns take over as the road ages.
+    // Signs are two in five; the artefacts share the rest evenly.
     let kind: MonumentKind;
-    if (roll < 0.45) kind = 'distance_sign';
-    else if (roll < 0.7) kind = 'cairn';
-    else if (roll < 0.9) kind = 'ornament_shrine';
-    else kind = 'wrecked_marker';
+    if (roll < 0.4) kind = 'distance_sign';
+    else if (roll < 0.55) kind = 'monolith';
+    else if (roll < 0.7) kind = 'orbit';
+    else if (roll < 0.85) kind = 'bloom';
+    else kind = 'gate';
 
     result.push({
       s,

@@ -517,6 +517,14 @@ const CLOUD_VERTEX_HOOK = /* glsl */ `#include <worldpos_vertex>
  * tier gating: a zero-strength frame does no work at all, and `uCloudStrength` is a
  * uniform, so the branch is coherent across every fragment in the draw.
  */
+/**
+ * A DRY road shows other cars' headlamps too — the long soft sheen oncoming lights
+ * lay on night asphalt — at this share of the wet streak's strength and this many
+ * times its width.
+ */
+const DRY_GLARE_SHARE = 2.2;
+const DRY_GLARE_SPREAD = 1.5;
+
 const CLOUD_FRAGMENT_HOOK = /* glsl */ `
 	if ( uCloudStrength > 0.0 ) {
 		outgoingLight *= 1.0 - vCloudShade * uCloudStrength;
@@ -532,11 +540,21 @@ const CLOUD_FRAGMENT_HOOK = /* glsl */ `
 		float wetNdv = clamp( dot( normal, normalize( vViewPosition ) ), 0.0, 1.0 );
 		float wetFresnel = 0.03 + 0.97 * pow( 1.0 - wetNdv, 5.0 );
 		outgoingLight = mix( outgoingLight, fogColor * 1.08, wetFresnel * vWetMask * 0.9 );
-		// Other cars' headlamps in the water: a band of light LYING ON THE ROAD, from
-		// the ground under each lamp towards the ground under the eye. See
-		// WET_GLARE_MAX for why this is not left to the spotlights' own specular.
+		#endif
+	}
+	#ifdef WET_SHEEN
+	// Other cars' headlamps in the road: a band of light LYING ON THE ROAD, from the
+	// ground under each lamp towards the ground under the eye. See WET_GLARE_MAX for
+	// why this is not left to the spotlights' own specular. Dry asphalt shows it too,
+	// dimmer and broader (its aggregate is a rough mirror at grazing angles); water
+	// sharpens and brightens it.
+	if ( uGlareCount > 0 ) {
+		float glareWet = uWet > 0.0 ? vWetMask : 0.0;
+		float glareNdv = clamp( dot( normal, normalize( vViewPosition ) ), 0.0, 1.0 );
+		float glareFresnel = 0.03 + 0.97 * pow( 1.0 - glareNdv, 5.0 );
+		float glareSpread = mix( ${DRY_GLARE_SPREAD.toFixed(2)}, 1.0, glareWet );
+		float glareGain = mix( ${DRY_GLARE_SHARE.toFixed(2)}, 1.0, glareWet );
 		vec3 glare = vec3( 0.0 );
-		if ( uGlareCount > 0 ) {
 			vec3 gP = - vViewPosition;
 			vec3 gN = nonPerturbedNormal;
 			// The eye dropped onto this fragment's plane.
@@ -555,7 +573,7 @@ const CLOUD_FRAGMENT_HOOK = /* glsl */ `
 				float along = dot( fromLamp, pathDir );
 				float across = length( fromLamp - along * pathDir );
 				// Narrow at the lamp, spreading as it comes towards the eye.
-				float halfWidth = 0.16 + 0.012 * max( along, 0.0 );
+				float halfWidth = ( 0.16 + 0.012 * max( along, 0.0 ) ) * glareSpread;
 				float band = exp( - across * across / ( halfWidth * halfWidth ) );
 				// Starts at the lamp, brightest there, and fades out on the way over.
 				band *= smoothstep( - 0.6, 0.8, along ) * exp( - max( along, 0.0 ) / ( 8.0 + pathLen * 0.35 ) );
@@ -565,10 +583,9 @@ const CLOUD_FRAGMENT_HOOK = /* glsl */ `
 				float aim = smoothstep( 0.0, 0.6, dot( normalize( lampFwd - gN * dot( lampFwd, gN ) ), pathDir ) );
 				glare += band * aim * uGlarePos[ i ].w / ( 1.0 + pathLen / 80.0 );
 			}
-		}
-		outgoingLight += vec3( 1.0, 0.93, 0.8 ) * glare * wetFresnel * vWetMask;
-		#endif
+		outgoingLight += vec3( 1.0, 0.93, 0.8 ) * glare * glareFresnel * glareGain;
 	}
+	#endif
 #include <opaque_fragment>`;
 
 /** A wet road also goes glossy: the sun and headlamps draw a glint along it. */
@@ -576,7 +593,7 @@ const WET_ROUGHNESS_HOOK = /* glsl */ `#include <roughnessmap_fragment>
 	roughnessFactor = mix( roughnessFactor, 0.34, uWet * vWetMask );`;
 
 /** Suffix, so a patched material never shares a program with an unpatched one. */
-const CLOUD_PROGRAM_KEY = 'cloud-shadow-v2';
+const CLOUD_PROGRAM_KEY = 'cloud-shadow-v3';
 
 /**
  * ONE uniform block for the whole world. Every patched material is bound to these
