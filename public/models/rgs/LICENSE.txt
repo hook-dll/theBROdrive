@@ -1,0 +1,8 @@
+Free Low Poly Vehicles Pack by Raphael Gonçalves (Rgsdev)
+https://opengameart.org/content/free-low-poly-vehicles-pack
+
+License: CC0 (public domain). Free to use in any project, even commercial.
+
+Converted from the pack's FBX files by tools/carshape/normalize_rgs.py: materials
+renamed to the game's roles, glass and lenses split into their own nodes, rims and
+lenses brought to the catalogue's finish, scaled toward life size. Shapes unchanged.

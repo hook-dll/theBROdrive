@@ -1550,10 +1550,9 @@ const GTAV_CARS: readonly Entry[] = GTAV_SPECS.map((spec) => ({
  * carries, how high the mass sits and how the springs hold it — so that driving them
  * one after another tests whether the physics is where the variety lives.
  *
- * They are PHYSICS ONLY. Each one borrows a donor body from the packs above, which
- * the loader stretches to the car's published length, width, height and axle
- * positions, so the collider, the wheels and the camera are the real car's while the
- * paint is some other car's. Bodies of their own come after the feel is proven.
+ * Each wears the Rgsdev body of its kind (see `rgsLook`), which the loader stretches
+ * to the car's published length, width, height and axle positions, so the collider,
+ * the wheels and the camera are the real car's and the shape is its archetype's.
  *
  * Figures are the published ones as reprinted by carfolio.com,
  * automobile-catalog.com and the owners' clubs; `dragArea` is fitted to the top speed
@@ -1632,7 +1631,7 @@ const SUSP_INTEGRALE: SuspensionTuning = {
   bumpTravel: 0.1,
 };
 
-/** Everything the donor body brings: the file, its materials, lamps and wheel nodes. */
+/** Everything a borrowed body brings: the file, its materials, lamps and wheel nodes. */
 type DonorLook = Pick<
   Entry,
   | 'dir'
@@ -1646,19 +1645,30 @@ type DonorLook = Pick<
   | 'secondaryPaintMaterial'
 >;
 
-function donorLook(id: string): DonorLook {
-  const donor = [...SAAS_CARS, ...GTAV_CARS].find((e) => e.id === id);
-  if (!donor) throw new Error(`Proving-ground donor "${id}" is not a solid-paint body`);
+/**
+ * Bodies from Rgsdev's Free Low Poly Vehicles Pack (CC0, Raphael Gonçalves,
+ * opengameart.org/content/free-low-poly-vehicles-pack), normalized by
+ * tools/carshape/normalize_rgs.py: faceless, flat-shaded, a few hundred faces each,
+ * with their own wheels, glass and lenses. The loader stretches each to the car's
+ * published dimensions, so one sedan can be any saloon.
+ */
+const RGS = '/models/rgs';
+function rgsLook(glb: string): DonorLook {
   return {
-    dir: donor.dir,
-    glb: donor.glb,
-    scale: donor.scale,
-    yaw: donor.yaw,
-    glassMaterial: donor.glassMaterial,
-    paintStyle: donor.paintStyle,
-    lights: donor.lights,
-    wheelNodes: donor.wheelNodes,
-    secondaryPaintMaterial: donor.secondaryPaintMaterial,
+    dir: RGS,
+    glb,
+    scale: 1,
+    yaw: undefined,
+    glassMaterial: 'car_glass',
+    paintStyle: 'solid-paint',
+    lights: { headlights: ['headlights'], taillights: ['taillights'] },
+    wheelNodes: {
+      wheel_fl: ['wheel_fl'],
+      wheel_fr: ['wheel_fr'],
+      wheel_rl: ['wheel_rl'],
+      wheel_rr: ['wheel_rr'],
+    },
+    secondaryPaintMaterial: undefined,
   };
 }
 
@@ -1666,7 +1676,7 @@ const PROVING_SPECS: readonly Entry[] = [
   {
     // Citroën 2CV6 (1979): 585 kg, 29 bhp, front drive, 117 km/h, and a turning
     // circle of 10.7 m. The softest thing that ever had four wheels.
-    ...donorLook('sa_oka'),
+    ...rgsLook('hatchback.glb'),
     id: 'pg_2cv',
     label: 'Citroën 2CV6',
     bodyClass: 'car',
@@ -1691,7 +1701,7 @@ const PROVING_SPECS: readonly Entry[] = [
   {
     // Mini Cooper S 1275 (1965): 650 kg, 76 PS, front drive, 157 km/h on ten-inch
     // wheels and a 9.7 m turning circle.
-    ...donorLook('sa_oka'),
+    ...rgsLook('hatchback.glb'),
     id: 'pg_mini',
     label: 'Mini Cooper S',
     bodyClass: 'car',
@@ -1716,7 +1726,7 @@ const PROVING_SPECS: readonly Entry[] = [
   {
     // Porsche 911 SC (1980): 1160 kg, 204 PS hung behind the rear axle, 39% on the
     // front wheels, 225 km/h. Lift off in a bend and the tail comes round.
-    ...donorLook('gt_vaz2110'),
+    ...rgsLook('sports.glb'),
     id: 'pg_911sc',
     label: 'Porsche 911 SC',
     bodyClass: 'car',
@@ -1740,7 +1750,7 @@ const PROVING_SPECS: readonly Entry[] = [
   {
     // Ford Mustang GT 5.0 (1990): 1400 kg, 225 hp and 407 Nm through a live axle on
     // 225/60 tyres. Torque everywhere and a tail that follows the throttle.
-    ...donorLook('sa_azlk2141'),
+    ...rgsLook('muscle.glb'),
     id: 'pg_mustang',
     label: 'Ford Mustang GT 5.0',
     bodyClass: 'car',
@@ -1767,7 +1777,7 @@ const PROVING_SPECS: readonly Entry[] = [
   {
     // Land Rover Defender 110 200Tdi (1992): 2064 kg, 107 hp diesel, permanent 4x4,
     // 137 km/h, two metres tall on 7.50R16.
-    ...donorLook('sa_uaz330364'),
+    ...rgsLook('suv.glb'),
     id: 'pg_defender',
     label: 'Land Rover Defender 110',
     bodyClass: 'truck',
@@ -1791,7 +1801,7 @@ const PROVING_SPECS: readonly Entry[] = [
   {
     // VW T2 bus 1600 (1975): 1175 kg, 50 PS behind the rear axle, 110 km/h, and
     // nearly two metres of slab side for the wind to lean on.
-    ...donorLook('sa_izh2715'),
+    ...rgsLook('van.glb'),
     id: 'pg_t2',
     label: 'VW T2 bus',
     bodyClass: 'truck',
@@ -1815,7 +1825,7 @@ const PROVING_SPECS: readonly Entry[] = [
   {
     // Lotus Elise S1 (1996): 725 kg, 120 PS behind the seats, 39% on the front,
     // 202 km/h. Every input answered at once.
-    ...donorLook('gt_vaz2110'),
+    ...rgsLook('roadster.glb'),
     id: 'pg_elise',
     label: 'Lotus Elise S1',
     bodyClass: 'car',
@@ -1840,7 +1850,7 @@ const PROVING_SPECS: readonly Entry[] = [
   {
     // Ferrari Testarossa (1984): 1506 kg, 390 PS flat twelve amidships, two metres
     // wide, 290 km/h.
-    ...donorLook('gt_vaz2110'),
+    ...rgsLook('sports.glb'),
     id: 'pg_testarossa',
     label: 'Ferrari Testarossa',
     bodyClass: 'car',
@@ -1866,7 +1876,7 @@ const PROVING_SPECS: readonly Entry[] = [
   {
     // Lancia Delta HF Integrale 16v (1989): 1250 kg, 200 PS turbo, permanent 4x4
     // split 47/53, 220 km/h. The one that goes anywhere quickly.
-    ...donorLook('sa_vaz2109'),
+    ...rgsLook('hatchback.glb'),
     id: 'pg_integrale',
     label: 'Lancia Delta Integrale',
     bodyClass: 'car',
@@ -1891,21 +1901,17 @@ const PROVING_SPECS: readonly Entry[] = [
   },
 ];
 
-/* ---- archetype bodies ----
+/* ---- the saloon ----
  *
- * Faceless bodies built by tools/carshape/archetype.py from a car's own published
- * dimensions: one archetype (a saloon here), proportions as rules, flush black glass
- * and plain lenses. The first one wears the VAZ-2101's physics unchanged, so it can
- * be parked beside the pack's Zhiguli and judged against it.
+ * Rgsdev's sedan on the VAZ-2101's physics unchanged, so it can be parked beside the
+ * pack's Zhiguli and judged against it.
  */
-const SHAPE = '/models/shape';
 const ZHIGULI = SOVIET_SPECS.find((spec) => spec.id === 'sv_vaz2101')!;
 const SHAPE_SPECS: readonly Entry[] = [
   {
     id: 'sh_vaz2101',
     label: 'Saloon (VAZ-2101 physics)',
-    dir: SHAPE,
-    glb: 'saloon_2101.glb',
+    ...rgsLook('sedan.glb'),
     bodyClass: 'car',
     mass: ZHIGULI.mass,
     engineId: ZHIGULI.engineId,
@@ -1920,22 +1926,7 @@ const SHAPE_SPECS: readonly Entry[] = [
     frontWeightShare: ZHIGULI.frontWeightShare,
     dragArea: ZHIGULI.dragArea,
     tyre: ZHIGULI.tyre,
-    paintStyle: 'solid-paint',
-    glassMaterial: 'car_glass',
     wheelSetPool: [],
-    wheelNodes: {
-      wheel_fl: ['wheel_fl'],
-      wheel_fr: ['wheel_fr'],
-      wheel_rl: ['wheel_rl'],
-      wheel_rr: ['wheel_rr'],
-    },
-    lights: {
-      headlights: ['headlights'],
-      taillights: ['taillights'],
-      reverseLights: ['reverse_lights'],
-      leftBlinkers: ['front_blinker_left', 'rear_blinker_left'],
-      rightBlinkers: ['front_blinker_right', 'rear_blinker_right'],
-    },
   },
 ];
 
