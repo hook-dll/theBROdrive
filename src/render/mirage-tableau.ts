@@ -194,82 +194,102 @@ const PALM_FORMS: readonly PalmForm[] = [
  * they are simply a crown with a front and a back, and the ordering is unambiguous.
  */
 export function palmGeometry(variant = 0): THREE.BufferGeometry {
-  const form = PALM_FORMS[Math.abs(Math.round(variant)) % PALM_FORMS.length]!;
-  return crossedCardGeometry((triangle) => {
-    const barkLit = displayColour(0xd0a271);
-    const barkShade = displayColour(0x946c45);
-    const leafLit = displayColour(0x9ad778);
-    const leafShade = displayColour(0x4f8149);
-    const nut = displayColour(0xc8893f);
-    const quad = (
-      ax: number, ay: number, bx: number, by: number,
-      cx: number, cy: number, dx: number, dy: number,
-      colour: THREE.Color, z = 0,
-    ): void => {
+  const colours = new Map<number, THREE.Color>();
+  return crossedCardGeometry((triangle) =>
+    drawPalmCard(variant, (ax, ay, bx, by, cx, cy, hex, z) => {
+      let colour = colours.get(hex);
+      if (!colour) colours.set(hex, (colour = displayColour(hex)));
       triangle(ax, ay, bx, by, cx, cy, colour, z);
-      triangle(ax, ay, cx, cy, dx, dy, colour, z);
-    };
+    }),
+  );
+}
 
-    // Trunk: a leaning arc, split down its length into a lit face and a shaded one.
-    const crownY = form.crownY;
-    const trunkAt = (t: number): readonly [number, number, number] => [
-      form.lean * t * t,
-      crownY * t,
-      0.055 * form.girth * (1 - 0.42 * t),
+/** One palm-card triangle in unit-height card space, its paint as an sRGB hex. */
+export type PalmCardTriangle = (
+  ax: number, ay: number, bx: number, by: number, cx: number, cy: number, hex: number, z: number,
+) => void;
+
+/**
+ * The palm card's triangles, `palmGeometry`'s single source: the ending's grove and the
+ * postcard's picture both paint these, so the palms on the card are the palms on the
+ * beach. `z` is the card-depth the geometry spreads the crown over; a flat painter
+ * draws in ascending `z` to get the same front and back.
+ */
+export function drawPalmCard(variant: number, triangle: PalmCardTriangle): void {
+  const form = PALM_FORMS[Math.abs(Math.round(variant)) % PALM_FORMS.length]!;
+  const barkLit = 0xd0a271;
+  const barkShade = 0x946c45;
+  const leafLit = 0x9ad778;
+  const leafShade = 0x4f8149;
+  const nut = 0xc8893f;
+  const quad = (
+    ax: number, ay: number, bx: number, by: number,
+    cx: number, cy: number, dx: number, dy: number,
+    colour: number, z = 0,
+  ): void => {
+    triangle(ax, ay, bx, by, cx, cy, colour, z);
+    triangle(ax, ay, cx, cy, dx, dy, colour, z);
+  };
+
+  // Trunk: a leaning arc, split down its length into a lit face and a shaded one.
+  const crownY = form.crownY;
+  const trunkAt = (t: number): readonly [number, number, number] => [
+    form.lean * t * t,
+    crownY * t,
+    0.055 * form.girth * (1 - 0.42 * t),
+  ];
+  for (let i = 0; i < 5; i++) {
+    const [x0, y0, r0] = trunkAt(i / 5);
+    const [x1, y1, r1] = trunkAt((i + 1) / 5);
+    quad(x0 - r0, y0, x0, y0, x1, y1, x1 - r1, y1, barkShade);
+    quad(x0, y0, x0 + r0, y0, x1 + r1, y1, x1, y1, barkLit);
+  }
+
+  const [crownX, crownTop] = trunkAt(1);
+  const count = form.fronds;
+  for (let k = 0; k < count; k++) {
+    // Fan from one side to the other, with the frond's own reach and droop varied
+    // by a fixed wobble so no two arms of a crown are the same length.
+    const spread = k / (count - 1);
+    const angle = Math.PI * (1.08 - spread * 1.16);
+    const wobble = Math.sin(k * 2.399 + form.phase);
+    const reach = form.reach * (0.86 + wobble * 0.14);
+    const droop = form.droop * (0.8 + (1 - Math.abs(Math.cos(angle))) * 0.5);
+    const halfWidth = 0.052 * form.leafWidth;
+    // Interleaved depth: neighbours in the fan are never neighbours in depth, so
+    // the pair that overlaps most on screen is the pair furthest apart in z.
+    const z = (((k * 7) % count) / (count - 1) - 0.5) * form.depth;
+
+    const spine = (t: number): readonly [number, number] => [
+      crownX + Math.cos(angle) * reach * t,
+      crownTop + Math.sin(angle) * reach * t - droop * reach * t * t,
     ];
-    for (let i = 0; i < 5; i++) {
-      const [x0, y0, r0] = trunkAt(i / 5);
-      const [x1, y1, r1] = trunkAt((i + 1) / 5);
-      quad(x0 - r0, y0, x0, y0, x1, y1, x1 - r1, y1, barkShade);
-      quad(x0, y0, x0 + r0, y0, x1 + r1, y1, x1, y1, barkLit);
+    const SEGMENTS = 4;
+    for (let i = 0; i < SEGMENTS; i++) {
+      const t0 = i / SEGMENTS;
+      const t1 = (i + 1) / SEGMENTS;
+      const [ax, ay] = spine(t0);
+      const [bx, by] = spine(t1);
+      const dx = bx - ax;
+      const dy = by - ay;
+      const len = Math.max(1e-4, Math.hypot(dx, dy));
+      const nx = (-dy / len);
+      const ny = (dx / len);
+      // Widest a third of the way out, closed to a point at the tip.
+      const w0 = halfWidth * Math.sin(Math.PI * Math.pow(t0, 0.55));
+      const w1 = halfWidth * Math.sin(Math.PI * Math.pow(t1, 0.55));
+      quad(ax, ay, ax + nx * w0, ay + ny * w0, bx + nx * w1, by + ny * w1, bx, by, leafLit, z);
+      quad(ax, ay, bx, by, bx - nx * w1, by - ny * w1, ax - nx * w0, ay - ny * w0, leafShade, z - 0.03);
     }
+  }
 
-    const [crownX, crownTop] = trunkAt(1);
-    const count = form.fronds;
-    for (let k = 0; k < count; k++) {
-      // Fan from one side to the other, with the frond's own reach and droop varied
-      // by a fixed wobble so no two arms of a crown are the same length.
-      const spread = k / (count - 1);
-      const angle = Math.PI * (1.08 - spread * 1.16);
-      const wobble = Math.sin(k * 2.399 + form.phase);
-      const reach = form.reach * (0.86 + wobble * 0.14);
-      const droop = form.droop * (0.8 + (1 - Math.abs(Math.cos(angle))) * 0.5);
-      const halfWidth = 0.052 * form.leafWidth;
-      // Interleaved depth: neighbours in the fan are never neighbours in depth, so
-      // the pair that overlaps most on screen is the pair furthest apart in z.
-      const z = (((k * 7) % count) / (count - 1) - 0.5) * form.depth;
-
-      const spine = (t: number): readonly [number, number] => [
-        crownX + Math.cos(angle) * reach * t,
-        crownTop + Math.sin(angle) * reach * t - droop * reach * t * t,
-      ];
-      const SEGMENTS = 4;
-      for (let i = 0; i < SEGMENTS; i++) {
-        const t0 = i / SEGMENTS;
-        const t1 = (i + 1) / SEGMENTS;
-        const [ax, ay] = spine(t0);
-        const [bx, by] = spine(t1);
-        const dx = bx - ax;
-        const dy = by - ay;
-        const len = Math.max(1e-4, Math.hypot(dx, dy));
-        const nx = (-dy / len);
-        const ny = (dx / len);
-        // Widest a third of the way out, closed to a point at the tip.
-        const w0 = halfWidth * Math.sin(Math.PI * Math.pow(t0, 0.55));
-        const w1 = halfWidth * Math.sin(Math.PI * Math.pow(t1, 0.55));
-        quad(ax, ay, ax + nx * w0, ay + ny * w0, bx + nx * w1, by + ny * w1, bx, by, leafLit, z);
-        quad(ax, ay, bx, by, bx - nx * w1, by - ny * w1, ax - nx * w0, ay - ny * w0, leafShade, z - 0.03);
-      }
+  if (form.nuts) {
+    // A date cluster hanging under the crown: three small darts, not a sphere.
+    for (let i = 0; i < 3; i++) {
+      const x = crownX + (i - 1) * 0.055;
+      triangle(x - 0.045, crownTop - 0.01, x + 0.045, crownTop - 0.01, x, crownTop - 0.11, nut, -0.34);
     }
-
-    if (form.nuts) {
-      // A date cluster hanging under the crown: three small darts, not a sphere.
-      for (let i = 0; i < 3; i++) {
-        const x = crownX + (i - 1) * 0.055;
-        triangle(x - 0.045, crownTop - 0.01, x + 0.045, crownTop - 0.01, x, crownTop - 0.11, nut, -0.34);
-      }
-    }
-  });
+  }
 }
 
 /**

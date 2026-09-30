@@ -14,6 +14,7 @@
  */
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { maxAnisotropy } from './texturequality';
 import { variant } from '../parts/registry';
 import type { EngineSpec, PartVariant } from '../parts/registry';
@@ -28,6 +29,8 @@ import type {
 import { spongeSpent } from '../items/items';
 import { makeConditionMaterial, makeFlatMaterial } from './materials';
 import { applyComicShading } from './comic';
+import { drawPalmCard } from './mirage-tableau';
+import { locale, t } from '../i18n/i18n';
 
 // ---------------------------------------------------------------------------
 // Geometry cache
@@ -514,25 +517,121 @@ function buildToolInto(b: MeshBuilder, kind: ToolKind, spent: boolean): void {
   }
 }
 
+/** Car-wash sponge size, metres: the big bone-shaped block sold for washing a car. */
+const SPONGE_L = 0.21;
+const SPONGE_T = 0.07;
+const SPONGE_END_W = 0.125;
+const SPONGE_WAIST_W = 0.088;
+/** How far in from each end the rounding of the end starts. */
+const SPONGE_END_R = 0.035;
+
+/** Half the sponge's width at `x` along it: full at the ends, pinched at the waist. */
+function spongeHalfWidth(x: number): number {
+  const waist = Math.cos((Math.PI * x) / SPONGE_L);
+  let half = SPONGE_END_W / 2 - ((SPONGE_END_W - SPONGE_WAIST_W) / 2) * waist * waist;
+  const intoEnd = Math.abs(x) - (SPONGE_L / 2 - SPONGE_END_R);
+  if (intoEnd > 0) half *= Math.sqrt(Math.max(0, 1 - (intoEnd / SPONGE_END_R) ** 2));
+  return half;
+}
+
 /**
- * A car-wash sponge: a soft rounded block with a pitted face and a thin scouring layer
- * on its underside. A spent one has taken the colour of everything it wiped off.
+ * The foam body: the bone outline extruded through the sponge's thickness with a deep
+ * soft bevel, so every edge is the rounded, squashable edge of coarse foam rather than
+ * a cut block. Built in XY, then laid flat: length along X, thickness along Y.
+ */
+function spongeBodyGeometry(): THREE.BufferGeometry {
+  const bevel = 0.014;
+  const inset = 0.011;
+  const shape = new THREE.Shape();
+  const steps = 40;
+  const outline = (x: number): number => Math.max(0.004, spongeHalfWidth(x) - inset);
+  const reach = SPONGE_L / 2 - inset;
+  for (let i = 0; i <= steps; i++) {
+    const x = -reach + (2 * reach * i) / steps;
+    const y = outline(x * (SPONGE_L / 2) / reach);
+    if (i === 0) shape.moveTo(x, y);
+    else shape.lineTo(x, y);
+  }
+  for (let i = steps; i >= 0; i--) {
+    const x = -reach + (2 * reach * i) / steps;
+    shape.lineTo(x, -outline(x * (SPONGE_L / 2) / reach));
+  }
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: SPONGE_T - 2 * bevel,
+    bevelEnabled: true,
+    bevelThickness: bevel,
+    bevelSize: inset,
+    bevelSegments: 4,
+    curveSegments: 8,
+  });
+  geometry.rotateX(Math.PI / 2);
+  geometry.center();
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/**
+ * The open cells of the foam, merged into one mesh: shallow flattened pits scattered
+ * over the top, bottom and both long flanks, dense and of every size, which is what
+ * tells a coarse wash sponge from a fine kitchen one at arm's length.
+ */
+function spongePoresGeometry(): THREE.BufferGeometry {
+  const rnd = (() => {
+    let state = 0x5b0a9e11;
+    return () => {
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+      return (state >>> 8) / 0x1000000;
+    };
+  })();
+  const cell = new THREE.SphereGeometry(1, 7, 4);
+  const pores: THREE.BufferGeometry[] = [];
+  const matrix = new THREE.Matrix4();
+  const quat = new THREE.Quaternion();
+  const up = new THREE.Vector3(0, 1, 0);
+  const add = (x: number, y: number, z: number, normal: THREE.Vector3, r: number): void => {
+    quat.setFromUnitVectors(up, normal);
+    matrix.compose(new THREE.Vector3(x, y, z), quat, new THREE.Vector3(r * (0.8 + rnd() * 0.6), r * 0.22, r * (0.7 + rnd() * 0.5)));
+    pores.push(cell.clone().applyMatrix4(matrix));
+  };
+  const half = SPONGE_T / 2;
+  // Top and bottom faces, inside the bevel.
+  for (const side of [1, -1]) {
+    for (let i = 0; i < 70; i++) {
+      const x = (rnd() - 0.5) * (SPONGE_L - 0.04);
+      const w = spongeHalfWidth(x) - 0.018;
+      if (w <= 0) continue;
+      add(x, side * (half - 0.0005), (rnd() * 2 - 1) * w, new THREE.Vector3(0, side, 0), 0.0025 + rnd() * rnd() * 0.0055);
+    }
+  }
+  // The two long flanks, following the waist's curve.
+  for (const side of [1, -1]) {
+    for (let i = 0; i < 64; i++) {
+      const x = (rnd() - 0.5) * (SPONGE_L - 0.06);
+      const w = spongeHalfWidth(x);
+      const dw = (spongeHalfWidth(x + 0.001) - spongeHalfWidth(x - 0.001)) / 0.002;
+      const normal = new THREE.Vector3(-dw * side, 0, side).normalize();
+      add(x, (rnd() - 0.5) * (SPONGE_T - 0.03), side * (w - 0.0005), normal, 0.0022 + rnd() * rnd() * 0.005);
+    }
+  }
+  const merged = mergeGeometries(pores, false);
+  cell.dispose();
+  for (const pore of pores) pore.dispose();
+  if (!merged) throw new Error('sponge pores failed to merge');
+  return merged;
+}
+
+/**
+ * A car-wash sponge: the big bone-shaped block of coarse open-cell foam sold for
+ * washing a car — about 21 by 12 by 7 cm, pinched at the waist for the grip, soft on
+ * every edge, pitted all over, and with no scouring layer, because a scourer is the
+ * last thing that goes near paint. A spent one has taken the colour of everything it
+ * wiped off.
  */
 function sponge(b: MeshBuilder, spent: boolean): void {
-  const body = flat(spent ? 0x7d6c4c : 0xe7c23a, 0.95);
-  const pad = flat(spent ? 0x3f4232 : 0x2f7d45, 0.9);
-  const pore = flat(spent ? 0x4d4232 : 0xb58f1f, 1);
-  b.push('sponge_body', () => new RoundedBoxGeometry(0.13, 0.042, 0.088, 3, 0.014), body, [0, 0.004, 0]);
-  b.push('sponge_pad', () => new RoundedBoxGeometry(0.124, 0.012, 0.083, 2, 0.004), pad, [0, -0.021, 0]);
-  // The pits of the foam on the top face, flattened so they read as holes, not bumps.
-  const pits: readonly Vec3[] = [
-    [-0.043, 0.0255, -0.022], [-0.012, 0.0255, 0.019], [0.021, 0.0255, -0.012],
-    [0.047, 0.0255, 0.024], [-0.036, 0.0255, 0.027], [0.006, 0.0255, -0.031],
-    [0.041, 0.0255, -0.029], [-0.02, 0.0255, -0.004],
-  ];
-  pits.forEach((at, i) => {
-    b.push('sponge_pit', () => new THREE.SphereGeometry(0.0055, 8, 4), pore, at, ZERO, [1 + (i % 3) * 0.25, 0.25, 1 + ((i + 1) % 3) * 0.2]);
-  });
+  const body = flat(spent ? 0x7d6c4c : 0xf0b62e, 0.97);
+  const pore = flat(spent ? 0x4a3e2e : 0xa8741a, 1);
+  b.push('sponge_body_bone', spongeBodyGeometry, body, [0, 0, 0]);
+  b.push('sponge_pores_bone', spongePoresGeometry, pore, [0, 0, 0]);
 }
 
 /**
@@ -1098,21 +1197,56 @@ const POSTCARD_TEX_W = 2048;
 const POSTCARD_TEX_H = Math.round((POSTCARD_TEX_W * POSTCARD_H) / POSTCARD_W);
 
 /**
- * The note's words, verbatim as the owner wrote them. The recipient's address on the
- * right is an illegible scrawl (`drawPostcardScrawl`): it simply cannot be read.
+ * The note's words: the `postcard.message` string in the player's language. The
+ * recipient's address on the right is an illegible scrawl (`drawPostcardScrawl`): it
+ * simply cannot be read.
  */
-export const POSTCARD_TEXT =
-  'сынок, мы с Котёной купили дом у моря, навести нас как-нибудь, тут такой кайф! ' +
-  'приезжай или прилетай - главное, береги себя. Любим тебя и ждём в любое время!';
+function postcardText(): string {
+  return t('postcard.message');
+}
 
-/** `POSTCARD_TEXT` broken where a hand would break it, wording untouched. */
-const POSTCARD_LINES: readonly string[] = [
-  'сынок, мы с Котёной купили дом у моря,',
-  'навести нас как-нибудь, тут такой кайф!',
-  'приезжай или прилетай - главное,',
-  'береги себя. Любим тебя и ждём',
-  'в любое время!',
-];
+/**
+ * The hand for the player's language. The Latin script faces carry Cyrillic on most
+ * machines, but not Chinese, Japanese or Korean, so those languages put a brush or pen
+ * face of their own first rather than landing on whatever sans the system picks.
+ */
+function postcardHandFont(): string {
+  switch (locale()) {
+    case 'zh':
+      return `"Kaiti SC", "STKaiti", "KaiTi", "Xingkai SC", ${POSTCARD_HAND_FONT}`;
+    case 'ja':
+      return `"Klee Medium", "Klee", "Klee One", "YuKyokasho", "Hiragino Maru Gothic ProN", ${POSTCARD_HAND_FONT}`;
+    case 'ko':
+      return `"Nanum Pen Script", "Nanum Pen", "Nanum Brush Script", "Apple SD Gothic Neo", ${POSTCARD_HAND_FONT}`;
+    default:
+      return POSTCARD_HAND_FONT;
+  }
+}
+
+/**
+ * The message broken into lines that fit `width` in the context's current font. Words
+ * break at spaces; Chinese and Japanese, which do not space their words, break between
+ * any two characters, except that closing punctuation stays on the line it closes.
+ */
+function wrapPostcardText(ctx: CanvasRenderingContext2D, text: string, width: number): string[] {
+  const cjk = locale() === 'zh' || locale() === 'ja';
+  const tokens = cjk ? [...text] : text.split(' ');
+  const joiner = cjk ? '' : ' ';
+  const noLineStart = '，。、！？：；）」』—…';
+  const lines: string[] = [];
+  let line = '';
+  for (const token of tokens) {
+    const candidate = line ? line + joiner + token : token;
+    if (!line || ctx.measureText(candidate).width <= width || (cjk && noLineStart.includes(token))) {
+      line = candidate;
+    } else {
+      lines.push(line);
+      line = token;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
 
 /** Fixed-seed noise: the same LCG this file's other procedural surfaces use. */
 function postcardNoise(seed: number): () => number {
@@ -1193,7 +1327,7 @@ function drawPostcardScrawl(
 }
 
 /**
- * The stamp: a perforated edge, a printed frame, and a thumbnail of the very beach the
+ * The stamp: a perforated edge, a printed frame, and a thumbnail of the very sunset the
  * picture side shows, so the two faces are the same holiday.
  */
 function drawPostcardStamp(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
@@ -1226,21 +1360,28 @@ function drawPostcardStamp(ctx: CanvasRenderingContext2D, x: number, y: number, 
   ctx.lineWidth = 4;
   ctx.strokeRect(22, 22, w - 44, h - 44);
 
-  // Its picture: sky, turquoise sea, sand, and the white house under its blue dome.
+  // Its picture: the picture side's sunset in miniature — the sky going from violet to
+  // gold, the sun on the sea, sand, and the white house under its blue dome.
   const px = 40;
   const py = 46;
   const pw = w - 80;
   const ph = h - 116;
   const inner = ctx.createLinearGradient(0, py, 0, py + ph);
-  inner.addColorStop(0, '#7fb3d8');
-  inner.addColorStop(0.4, '#cfe4e4');
-  inner.addColorStop(0.46, '#2f9d9c');
-  inner.addColorStop(0.78, '#7ed3c7');
-  inner.addColorStop(0.84, '#d8bd93');
-  inner.addColorStop(1, '#c9ae7d');
+  inner.addColorStop(0, '#5d4a7e');
+  inner.addColorStop(0.25, '#c06a74');
+  inner.addColorStop(0.44, '#fbc070');
+  inner.addColorStop(0.46, '#7a5a7e');
+  inner.addColorStop(0.78, '#3f6f7c');
+  inner.addColorStop(0.84, '#d9a478');
+  inner.addColorStop(1, '#b8845f');
   ctx.fillStyle = inner;
   ctx.fillRect(px, py, pw, ph);
-  ctx.fillStyle = '#f4efe2';
+  ctx.fillStyle = '#ffe2a0';
+  ctx.beginPath();
+  ctx.arc(px + pw * 0.34, py + ph * 0.45, pw * 0.09, Math.PI, 0);
+  ctx.fill();
+  ctx.fillRect(px + pw * 0.31, py + ph * 0.5, pw * 0.06, ph * 0.2);
+  ctx.fillStyle = '#f2c6ae';
   ctx.fillRect(px + pw * 0.56, py + ph * 0.68, pw * 0.22, ph * 0.2);
   ctx.fillStyle = '#3c6b99';
   ctx.beginPath();
@@ -1299,22 +1440,27 @@ function postcardTextTexture(): THREE.CanvasTexture {
   ctx.lineTo(dividerX + 0.5, H - margin - 40);
   ctx.stroke();
 
-  // The message. Sized to its column by measurement rather than fixed, because which
-  // script face the machine falls back to decides how wide a Cyrillic line really is.
+  // The message: the largest hand that wraps into the column's width and height, found
+  // by measurement, because which script face the machine falls back to decides how
+  // wide a line really is, and one language runs half again as long as another.
   const messageLeft = margin + 66;
   const messageWidth = dividerX - messageLeft - 74;
-  const longest = POSTCARD_LINES.reduce((a, b) => (a.length >= b.length ? a : b));
+  const messageTop = H * 0.2;
+  const messageHeight = H - margin - 70 - messageTop;
+  const text = postcardText();
+  const handFont = postcardHandFont();
   let fontPx = 116;
-  for (; fontPx > 48; fontPx -= 2) {
-    ctx.font = `${fontPx}px ${POSTCARD_HAND_FONT}`;
-    if (ctx.measureText(longest).width <= messageWidth) break;
+  let lines: string[] = [];
+  for (; fontPx >= 40; fontPx -= 2) {
+    ctx.font = `${fontPx}px ${handFont}`;
+    lines = wrapPostcardText(ctx, text, messageWidth);
+    if ((lines.length - 1) * fontPx * 1.62 + fontPx <= messageHeight) break;
   }
-  ctx.font = `${fontPx}px ${POSTCARD_HAND_FONT}`;
   ctx.fillStyle = '#2a262e';
   ctx.textBaseline = 'alphabetic';
   const lineGap = fontPx * 1.62;
-  let lineY = H * 0.24 + fontPx;
-  for (const line of POSTCARD_LINES) {
+  let lineY = messageTop + fontPx;
+  for (const line of lines) {
     // A hand wanders: each line starts a few pixels off the one above it and tilts by
     // well under a degree, which is the whole difference between writing and print.
     ctx.save();
@@ -1382,97 +1528,107 @@ function postcardTextTexture(): THREE.CanvasTexture {
 let postcardPhotoTextureCache: THREE.CanvasTexture | null = null;
 
 /**
- * One flat-topped mesa: a trapezoid with talus slopes and a flat cap, lit along its
- * left wall. This is the shape that makes this beach a desert coast and not a resort.
+ * The evening light on the card: what the low sun does to a paint. Warm and a little
+ * down, with the blue pulled hardest, so a green stays a green but a sunset one.
  */
-function drawPostcardMesa(
-  ctx: CanvasRenderingContext2D,
-  baseY: number,
-  left: number,
-  right: number,
-  height: number,
-  body: string,
-  lit: string,
-): void {
-  const width = right - left;
-  const capLeft = left + width * 0.26;
-  const capRight = right - width * 0.3;
-  const top = baseY - height;
-  ctx.beginPath();
-  ctx.moveTo(left, baseY);
-  ctx.lineTo(left + width * 0.1, baseY - height * 0.34);
-  ctx.lineTo(capLeft, top);
-  ctx.lineTo(capRight, top);
-  ctx.lineTo(right - width * 0.08, baseY - height * 0.3);
-  ctx.lineTo(right, baseY);
-  ctx.closePath();
-  ctx.fillStyle = body;
-  ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(left + width * 0.1, baseY - height * 0.34);
-  ctx.lineTo(capLeft, top);
-  ctx.lineTo(capLeft + width * 0.16, top);
-  ctx.lineTo(left + width * 0.22, baseY - height * 0.3);
-  ctx.closePath();
-  ctx.fillStyle = lit;
-  ctx.fill();
+const POSTCARD_DUSK: readonly [number, number, number] = [0.94, 0.74, 0.62];
+/** `PALM_TINT` (render/mirage-tableau.ts) as sRGB: the grove's own warm haze. */
+const POSTCARD_PALM_TINT: readonly [number, number, number] = [1, 0xf1 / 255, 0xdc / 255];
+
+function postcardDuskPaint(hex: number): string {
+  const r = ((hex >> 16) & 255) * POSTCARD_PALM_TINT[0] * POSTCARD_DUSK[0];
+  const g = ((hex >> 8) & 255) * POSTCARD_PALM_TINT[1] * POSTCARD_DUSK[1];
+  const b = (hex & 255) * POSTCARD_PALM_TINT[2] * POSTCARD_DUSK[2];
+  return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
 }
 
 /**
- * One palm, leaning by `lean` radians: a tapering trunk and seven drooping fronds, in
- * the two tones the ending gives its own palms, over a soft shadow thrown to the lower
- * right because the sun stands high on the left.
+ * One palm, painted from the ending grove's own card (`drawPalmCard`), so the palms on
+ * the card are the date palms that stand round the house: the same leaning two-tone
+ * trunk, the same fan of drooping split fronds, dates on the stout one. The card is
+ * painted back to front in its own depth, which is the order the geometry resolves in,
+ * and `mirror` turns it round the way the grove's random yaw does.
+ *
+ * Its shadow runs long toward the viewer and to the right: the sun is low over the sea,
+ * behind the grove and to the left.
  */
 function drawPostcardPalm(
   ctx: CanvasRenderingContext2D,
+  variant: number,
   x: number,
   baseY: number,
   height: number,
-  lean: number,
+  mirror: boolean,
 ): void {
-  ctx.fillStyle = 'rgba(90, 70, 46, 0.22)';
+  ctx.save();
+  ctx.fillStyle = 'rgba(70, 44, 52, 0.28)';
+  ctx.translate(x, baseY);
+  ctx.transform(1, 0, 0.9, 1, 0, 0);
   ctx.beginPath();
-  ctx.ellipse(x + height * 0.18, baseY + height * 0.035, height * 0.3, height * 0.05, 0, 0, Math.PI * 2);
+  ctx.ellipse(height * 0.02, height * 0.08, height * 0.05, height * 0.1, 0, 0, Math.PI * 2);
   ctx.fill();
+  ctx.restore();
 
-  const topX = x + Math.sin(lean) * height * 0.34;
-  const topY = baseY - height;
-  // Trunk: two quadratic edges rather than a tapered stroke, so it keeps its thickness.
-  ctx.fillStyle = '#8a7355';
-  ctx.beginPath();
-  ctx.moveTo(x - height * 0.03, baseY);
-  ctx.quadraticCurveTo(x - height * 0.01, baseY - height * 0.6, topX - height * 0.02, topY);
-  ctx.lineTo(topX + height * 0.02, topY);
-  ctx.quadraticCurveTo(x + height * 0.025, baseY - height * 0.6, x + height * 0.03, baseY);
-  ctx.closePath();
-  ctx.fill();
-  // Fronds: seven lenses from the crown, each drooping past its own tip.
-  for (let i = 0; i < 7; i++) {
-    const angle = -Math.PI * 0.94 + (i / 6) * Math.PI * 0.88;
-    const len = height * (0.42 + (i % 3) * 0.05);
-    const cos = Math.cos(angle);
-    const sin = Math.sin(angle);
-    const tipX = topX + cos * len;
-    const tipY = topY + sin * len + len * 0.3;
-    ctx.fillStyle = i % 2 === 0 ? '#53763a' : '#476632';
+  const triangles: { pts: number[]; hex: number; z: number }[] = [];
+  drawPalmCard(variant, (ax, ay, bx, by, cx, cy, hex, z) => {
+    triangles.push({ pts: [ax, ay, bx, by, cx, cy], hex, z });
+  });
+  triangles.sort((a, b) => a.z - b.z);
+  const sx = mirror ? -height : height;
+  const paints = new Map<number, string>();
+  for (const tri of triangles) {
+    let paint = paints.get(tri.hex);
+    if (!paint) paints.set(tri.hex, (paint = postcardDuskPaint(tri.hex)));
+    const p = tri.pts;
+    ctx.fillStyle = paint;
+    ctx.strokeStyle = paint;
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(topX, topY);
-    ctx.quadraticCurveTo(topX + cos * len * 0.6, topY + sin * len * 0.6 - len * 0.16, tipX, tipY);
-    ctx.quadraticCurveTo(topX + cos * len * 0.55, topY + sin * len * 0.55 + len * 0.22, topX, topY);
+    ctx.moveTo(x + p[0]! * sx, baseY - p[1]! * height);
+    ctx.lineTo(x + p[2]! * sx, baseY - p[3]! * height);
+    ctx.lineTo(x + p[4]! * sx, baseY - p[5]! * height);
     ctx.closePath();
+    ctx.fill();
+    // A hairline in the same paint closes the seams antialiasing leaves between two
+    // triangles of one strip.
+    ctx.stroke();
+  }
+}
+
+/**
+ * A long, thin evening cloud: a flat lens, violet on top where it is in its own shade
+ * and lit rose-gold underneath where the sun, below it, catches it.
+ */
+function drawPostcardCloud(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, glow: number): void {
+  // Built from overlapping puffs of varying length and depth, so the edge frays the way
+  // a real streak of cirrus does instead of reading as one ruled lens.
+  const rnd = postcardNoise(Math.round(x * 131 + y * 7));
+  const puffs = 5 + Math.floor(rnd() * 4);
+  for (let i = 0; i < puffs; i++) {
+    const px = x + (rnd() - 0.5) * w * 0.8;
+    const py = y + (rnd() - 0.5) * h * 0.9;
+    const pw = w * (0.18 + rnd() * 0.3);
+    const ph = h * (0.5 + rnd() * 0.9);
+    ctx.fillStyle = `rgba(118, 82, 124, ${(0.35 * glow + 0.14) * (0.6 + rnd() * 0.4)})`;
+    ctx.beginPath();
+    ctx.ellipse(px, py, pw / 2, ph / 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = `rgba(255, 170, 118, ${0.6 * glow * (0.5 + rnd() * 0.5)})`;
+    ctx.beginPath();
+    ctx.ellipse(px + pw * 0.04, py + ph * 0.24, pw * 0.44, ph * 0.26, 0, 0, Math.PI * 2);
     ctx.fill();
   }
 }
 
 /**
- * The picture side: the beach the ending lands on — a small white house on the sand,
- * palms, the turquoise shallows and the flat-topped mesas behind — printed as a vintage
- * photo postcard, with a white border, a warm cast, grain and a vignette.
+ * The picture side: the house by the sea at sunset — the sun going down into the sea,
+ * its path laid across the water, the white house with its blue dome on the sand and
+ * the ending's date palms round it — printed as a vintage photo postcard, with a white
+ * border, a warm cast, grain and a vignette.
  *
- * No tone here is invented. The sky's zenith and horizon, the sea's deep, shallow and
- * foam, the dry and wet sand, the scrub and the ridges are the ending scene's own
- * colours (story/ending.ts, as sRGB), so the card shows the beach the player lands at
- * rather than a postcard of somewhere else.
+ * The house and the palms are the ones the ending lands beside (the cycladic dwelling,
+ * `drawPalmCard`); only the hour is the card's own, because a postcard from the sea is
+ * a sunset.
  */
 function postcardPhotoTexture(): THREE.CanvasTexture {
   if (postcardPhotoTextureCache) return postcardPhotoTextureCache;
@@ -1493,127 +1649,183 @@ function postcardPhotoTexture(): THREE.CanvasTexture {
   const by = 62;
   const bw = W - 2 * bx;
   const bh = H - 2 * by;
-  const horizon = by + bh * 0.34;
-  const shore = by + bh * 0.66;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(bx, by, bw, bh);
+  ctx.clip();
+  const horizon = by + bh * 0.47;
+  const shore = by + bh * 0.72;
+  const sunX = bx + bw * 0.34;
+  const sunR = bh * 0.055;
+  const sunY = horizon - sunR * 0.35;
 
-  // Sky: the ending's zenith over its pale warm horizon, with the sun's glow high on
-  // the left, which is where that scene's own sun stands.
+  // Sky: indigo overhead, through violet and rose to the gold band along the sea.
   const sky = ctx.createLinearGradient(0, by, 0, horizon);
-  sky.addColorStop(0, '#5a95d3');
-  sky.addColorStop(0.62, '#a8c6d8');
-  sky.addColorStop(1, '#e2e0d2');
+  sky.addColorStop(0, '#2e3566');
+  sky.addColorStop(0.3, '#5d4a7e');
+  sky.addColorStop(0.58, '#b86478');
+  sky.addColorStop(0.8, '#ec8c5e');
+  sky.addColorStop(0.94, '#fbc070');
+  sky.addColorStop(1, '#ffd98e');
   ctx.fillStyle = sky;
   ctx.fillRect(bx, by, bw, horizon - by);
-  const glow = ctx.createRadialGradient(bx + bw * 0.24, by + bh * 0.08, 0, bx + bw * 0.24, by + bh * 0.08, bw * 0.44);
-  glow.addColorStop(0, 'rgba(255, 246, 224, 0.6)');
-  glow.addColorStop(1, 'rgba(255, 246, 224, 0)');
+  // The sun's own glow, wide and low, gathered over where it is setting.
+  const glow = ctx.createRadialGradient(sunX, sunY, sunR, sunX, sunY, bw * 0.5);
+  glow.addColorStop(0, 'rgba(255, 226, 150, 0.85)');
+  glow.addColorStop(0.25, 'rgba(255, 170, 100, 0.35)');
+  glow.addColorStop(1, 'rgba(255, 140, 100, 0)');
   ctx.fillStyle = glow;
   ctx.fillRect(bx, by, bw, horizon - by);
 
-  // Mesas: three flat-topped layers standing across the water, painted farthest first so
-  // each nearer one overlaps the last. Depth is carried by haze alone — the far range is
-  // half the horizon's own tone, the near mesa is solid — which is how the ending stacks
-  // its own ridges.
-  drawPostcardMesa(ctx, horizon + 4, bx - 60, bx + bw * 1.08, bh * 0.19, 'rgba(150, 148, 122, 0.6)', 'rgba(178, 174, 146, 0.6)');
-  drawPostcardMesa(ctx, horizon + 4, bx + bw * 0.28, bx + bw * 0.8, bh * 0.13, 'rgba(128, 127, 100, 0.78)', 'rgba(160, 156, 124, 0.78)');
-  drawPostcardMesa(ctx, horizon + 4, bx - 40, bx + bw * 0.45, bh * 0.15, 'rgba(112, 112, 92, 0.95)', 'rgba(146, 143, 116, 0.95)');
+  // Thin evening clouds in streaks, lit from underneath, brightest nearest the sun.
+  for (let i = 0; i < 7; i++) {
+    const cy = by + bh * (0.06 + rnd() * 0.32);
+    const cx = bx + rnd() * bw;
+    const near = 1 - Math.min(1, Math.abs(cx - sunX) / (bw * 0.6));
+    const lift = (cy - by) / (horizon - by);
+    drawPostcardCloud(ctx, cx, cy, bw * (0.12 + rnd() * 0.22), bh * (0.012 + rnd() * 0.014), 0.25 + near * 0.5 * lift + 0.25 * lift);
+  }
 
-  // Sea: the deep tone at the horizon through the shallow turquoise to the foam line,
-  // with the shallow band wide, because that is what a gentle shore looks like from
-  // above it.
+  // The sun: half gone into the sea already, a flattened disc the colour of the band.
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(bx, by, bw, horizon - by);
+  ctx.clip();
+  const disc = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, sunR);
+  disc.addColorStop(0, '#fff6d8');
+  disc.addColorStop(0.7, '#ffe6a4');
+  disc.addColorStop(1, '#ffc978');
+  ctx.fillStyle = disc;
+  ctx.beginPath();
+  ctx.ellipse(sunX, sunY, sunR * 1.04, sunR * 0.94, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // Sea: the sky's gold and rose thrown back at the horizon, darkening to dusk blue,
+  // then the shallows over the sand going turquoise-grey toward the foam.
   const sea = ctx.createLinearGradient(0, horizon, 0, shore);
-  sea.addColorStop(0, 'rgba(56, 123, 173, 0.96)');
-  sea.addColorStop(0.42, '#2f9d9c');
-  sea.addColorStop(0.78, '#7ed3c7');
-  sea.addColorStop(1, '#bfe8dc');
+  sea.addColorStop(0, '#c77a74');
+  sea.addColorStop(0.12, '#7a5a7e');
+  sea.addColorStop(0.5, '#3a4a74');
+  sea.addColorStop(0.82, '#3f6f7c');
+  sea.addColorStop(1, '#8fb2a8');
   ctx.fillStyle = sea;
   ctx.fillRect(bx, horizon, bw, shore - horizon);
+  // A hairline of light where the sky meets the water.
+  ctx.fillStyle = 'rgba(255, 214, 150, 0.7)';
+  ctx.fillRect(bx, horizon - 1, bw, 3);
 
-  // Ripples: short pale dashes, squeezed together toward the horizon the way rows of
-  // water compress with distance, with the sun's glint gathered on the left.
-  ctx.strokeStyle = 'rgba(240, 250, 248, 0.4)';
-  for (let row = 0; row < 26; row++) {
-    const t = row / 25;
-    const y = horizon + Math.pow(t, 1.7) * (shore - horizon) * 0.9 + 8;
-    const count = 3 + Math.round((1 - t) * 18);
+  // Ripples: short dashes squeezed toward the horizon as rows of water are, each
+  // lit rose on its sky-facing side.
+  ctx.strokeStyle = 'rgba(236, 170, 170, 1)';
+  for (let row = 0; row < 30; row++) {
+    const t = row / 29;
+    const y = horizon + Math.pow(t, 1.7) * (shore - horizon) * 0.9 + 6;
+    const count = 4 + Math.round((1 - t) * 20);
     ctx.lineWidth = 1.5 + t * 3;
     for (let i = 0; i < count; i++) {
       const x = bx + rnd() * bw;
-      ctx.globalAlpha = (0.1 + rnd() * 0.26) * (x < bx + bw * 0.55 ? 0.9 : 0.35);
+      ctx.globalAlpha = 0.06 + rnd() * 0.16;
       ctx.beginPath();
       ctx.moveTo(x, y);
       ctx.lineTo(x + (10 + rnd() * 44) * (0.4 + t), y + (rnd() - 0.5) * 3);
       ctx.stroke();
     }
   }
+  // The sun's path: a column of gold glints under the sun, narrow at the horizon and
+  // opening toward the shore, brightest in its middle.
+  for (let row = 0; row < 70; row++) {
+    const t = row / 69;
+    const y = horizon + 3 + Math.pow(t, 1.5) * (shore - horizon) * 0.95;
+    const halfWidth = sunR * (0.9 + t * 2.6);
+    const count = 3 + Math.round(t * 7);
+    ctx.lineWidth = 2 + t * 4;
+    for (let i = 0; i < count; i++) {
+      const u = (rnd() + rnd() + rnd()) / 3 - 0.5;
+      const x = sunX + u * 2 * halfWidth + t * bw * 0.02;
+      ctx.strokeStyle = rnd() < 0.3 ? '#fff4d0' : '#ffc46e';
+      ctx.globalAlpha = (0.45 + rnd() * 0.5) * (1 - Math.abs(u) * 1.2) * (1 - t * 0.45);
+      const len = (14 + rnd() * 40) * (0.5 + t);
+      ctx.beginPath();
+      ctx.moveTo(x - len / 2, y);
+      ctx.lineTo(x + len / 2, y + (rnd() - 0.5) * 2);
+      ctx.stroke();
+    }
+  }
   ctx.globalAlpha = 1;
 
-  // The foam line: a ragged white edge, and a second thin swash line a stride below it
-  // where the last wave stopped. Both stop at the print's edge rather than running over
-  // the white border.
-  ctx.strokeStyle = 'rgba(237, 242, 242, 0.9)';
-  ctx.lineWidth = 9;
+  // The foam line and a thin swash line below it, both catching the sky's rose.
+  ctx.strokeStyle = 'rgba(250, 226, 214, 0.9)';
+  ctx.lineWidth = 8;
   ctx.beginPath();
   ctx.moveTo(bx, shore);
   for (let x = bx; x < bx + bw; x += 64) {
-    const end = Math.min(x + 64, bx + bw);
-    ctx.quadraticCurveTo(x + 32, shore + (rnd() - 0.5) * 26, end, shore + (rnd() - 0.5) * 14);
+    ctx.quadraticCurveTo(x + 32, shore + (rnd() - 0.5) * 24, x + 64, shore + (rnd() - 0.5) * 12);
   }
   ctx.stroke();
-  ctx.strokeStyle = 'rgba(237, 242, 242, 0.45)';
-  ctx.lineWidth = 5;
+  ctx.strokeStyle = 'rgba(250, 226, 214, 0.4)';
+  ctx.lineWidth = 4;
   ctx.beginPath();
-  ctx.moveTo(bx, shore + 36);
+  ctx.moveTo(bx, shore + 34);
   for (let x = bx; x < bx + bw; x += 96) {
-    const end = Math.min(x + 96, bx + bw);
-    ctx.quadraticCurveTo(x + 48, shore + 36 + (rnd() - 0.5) * 22, end, shore + 36 + (rnd() - 0.5) * 12);
+    ctx.quadraticCurveTo(x + 48, shore + 34 + (rnd() - 0.5) * 20, x + 96, shore + 34 + (rnd() - 0.5) * 10);
   }
   ctx.stroke();
 
-  // The sand: wet and dark just under the foam, dry and warm at the bottom of the
-  // frame, with a mottling of grain and the wrack the sea leaves behind.
+  // The sand in evening light: wet and mirroring the sky just under the foam, then
+  // warm apricot, dimming toward the bottom of the frame as the light goes.
   const sand = ctx.createLinearGradient(0, shore - 8, 0, by + bh);
-  sand.addColorStop(0, '#8f7d66');
-  sand.addColorStop(0.24, '#b8996d');
-  sand.addColorStop(0.62, '#ceb085');
-  sand.addColorStop(1, '#d8bd93');
+  sand.addColorStop(0, '#8e6a72');
+  sand.addColorStop(0.2, '#c8906c');
+  sand.addColorStop(0.55, '#d9a478');
+  sand.addColorStop(1, '#a8795e');
   ctx.fillStyle = sand;
   ctx.fillRect(bx, shore - 8, bw, by + bh - (shore - 8));
+  // The wet sand's reflection of the sun's path.
+  const wet = ctx.createRadialGradient(sunX + bw * 0.03, shore + 40, 0, sunX + bw * 0.03, shore + 40, bw * 0.16);
+  wet.addColorStop(0, 'rgba(255, 200, 130, 0.45)');
+  wet.addColorStop(1, 'rgba(255, 200, 130, 0)');
+  ctx.fillStyle = wet;
+  ctx.fillRect(bx, shore - 8, bw, 120);
   for (let i = 0; i < 900; i++) {
     const t = rnd();
     const y = shore + Math.pow(t, 0.6) * (by + bh - shore);
-    ctx.fillStyle = rnd() < 0.55 ? 'rgba(90, 70, 46, 0.075)' : 'rgba(255, 240, 210, 0.06)';
+    ctx.fillStyle = rnd() < 0.55 ? 'rgba(90, 56, 50, 0.08)' : 'rgba(255, 220, 180, 0.07)';
     ctx.fillRect(bx + rnd() * bw, y, 3 + rnd() * 9, 1 + rnd() * 2);
   }
-  // Wrack along the waterline: pebbles and dark weed, densest where the water reaches.
-  for (let i = 0; i < 320; i++) {
+  // Wrack along the waterline.
+  for (let i = 0; i < 260; i++) {
     const x = bx + rnd() * bw;
-    const y = shore - 6 + Math.pow(rnd(), 2) * 130;
-    ctx.fillStyle = rnd() < 0.5 ? 'rgba(70, 56, 42, 0.5)' : 'rgba(52, 60, 40, 0.42)';
+    const y = shore - 6 + Math.pow(rnd(), 2) * 120;
+    ctx.fillStyle = rnd() < 0.5 ? 'rgba(70, 46, 48, 0.45)' : 'rgba(52, 50, 48, 0.38)';
     ctx.beginPath();
     ctx.ellipse(x, y, 3 + rnd() * 7, 2 + rnd() * 3, rnd() * Math.PI, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  // The house, on the sand right of centre: sunlit on the left, shaded flank to the
-  // right, blue dome and shuttered windows, its shadow thrown to the lower right. It is
-  // painted before the palms so the palms' crowns fall across it and read as standing in
-  // front of it.
+  // Palms standing behind the house, painted first so the house stands in front.
+  const ground = by + bh * 0.9;
+  drawPostcardPalm(ctx, 0, bx + bw * 0.79, ground - bh * 0.05, bh * 0.3, false);
+  drawPostcardPalm(ctx, 2, bx + bw * 0.95, ground - bh * 0.04, bh * 0.22, true);
+
+  // The house, on the sand right of centre: the cycladic dwelling the ending builds.
+  // Its seaward flank takes the last rose light; the face toward us is already in the
+  // blue of evening, the windows lit.
   const houseW = bw * 0.17;
   const houseH = bh * 0.15;
   const houseX = bx + bw * 0.6;
-  const houseY = by + bh * 0.9 - houseH;
-  ctx.fillStyle = 'rgba(90, 70, 46, 0.26)';
+  const houseY = ground - houseH;
+  ctx.fillStyle = 'rgba(70, 44, 52, 0.3)';
   ctx.beginPath();
   ctx.moveTo(houseX, houseY + houseH);
-  ctx.lineTo(houseX + houseW * 1.95, houseY + houseH + houseH * 0.4);
-  ctx.lineTo(houseX + houseW * 2.2, houseY + houseH + houseH * 0.06);
   ctx.lineTo(houseX + houseW * 0.9, houseY + houseH);
+  ctx.lineTo(houseX + houseW * 1.5, houseY + houseH * 1.5);
+  ctx.lineTo(houseX + houseW * 0.4, houseY + houseH * 1.5);
   ctx.closePath();
   ctx.fill();
-  ctx.fillStyle = '#f7f3e7';
+  ctx.fillStyle = '#f2c6ae';
   ctx.fillRect(houseX, houseY, houseW * 0.62, houseH);
-  ctx.fillStyle = '#dcd4c0';
+  ctx.fillStyle = '#b39cb0';
   ctx.beginPath();
   ctx.moveTo(houseX + houseW * 0.62, houseY);
   ctx.lineTo(houseX + houseW, houseY + houseH * 0.12);
@@ -1621,28 +1833,44 @@ function postcardPhotoTexture(): THREE.CanvasTexture {
   ctx.lineTo(houseX + houseW * 0.62, houseY + houseH);
   ctx.closePath();
   ctx.fill();
-  ctx.fillStyle = '#3c6b99';
+  ctx.fillStyle = '#3f5f94';
   ctx.beginPath();
   ctx.arc(houseX + houseW * 0.3, houseY, houseW * 0.28, Math.PI, 0);
   ctx.fill();
+  // The dome's rim of sunset, on the side toward the sun.
+  ctx.strokeStyle = 'rgba(255, 190, 140, 0.8)';
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.arc(houseX + houseW * 0.3, houseY, houseW * 0.28 - 2, Math.PI, Math.PI * 1.45);
+  ctx.stroke();
+  ctx.fillStyle = '#3f5f94';
   ctx.fillRect(houseX + houseW * 0.27, houseY + houseH, houseW * 0.06, houseH * 0.1);
-  ctx.fillStyle = '#2b4a6b';
+  ctx.fillStyle = '#2b3f63';
   ctx.fillRect(houseX + houseW * 0.08, houseY + houseH * 0.55, houseW * 0.16, houseH * 0.45);
-  ctx.fillStyle = '#3c6b99';
+  // Windows with the lamps already on inside.
+  ctx.fillStyle = '#ffd488';
+  ctx.fillRect(houseX + houseW * 0.36, houseY + houseH * 0.4, houseW * 0.14, houseH * 0.2);
   ctx.fillRect(houseX + houseW * 0.7, houseY + houseH * 0.45, houseW * 0.16, houseH * 0.22);
-  ctx.fillRect(houseX + houseW * 0.82, houseY + houseH * 0.8, houseW * 0.14, houseH * 0.2);
+  const lamp = ctx.createRadialGradient(houseX + houseW * 0.78, houseY + houseH * 0.56, 0, houseX + houseW * 0.78, houseY + houseH * 0.56, houseW * 0.3);
+  lamp.addColorStop(0, 'rgba(255, 210, 130, 0.35)');
+  lamp.addColorStop(1, 'rgba(255, 210, 130, 0)');
+  ctx.fillStyle = lamp;
+  ctx.fillRect(houseX, houseY, houseW * 1.2, houseH * 1.2);
 
-  // Three palms: two to the left of the house and one to its right, crowns overhanging
-  // its walls.
-  drawPostcardPalm(ctx, bx + bw * 0.5, by + bh * 0.9, bh * 0.33, -0.1);
-  drawPostcardPalm(ctx, bx + bw * 0.43, by + bh * 0.925, bh * 0.24, 0.16);
-  drawPostcardPalm(ctx, bx + bw * 0.83, by + bh * 0.93, bh * 0.28, -0.04);
+  // Palms in front of the house and down the beach: the grove the ending plants round
+  // it, one of each form, their crowns across the walls.
+  drawPostcardPalm(ctx, 1, bx + bw * 0.54, ground + bh * 0.01, bh * 0.3, false);
+  drawPostcardPalm(ctx, 2, bx + bw * 0.43, ground + bh * 0.035, bh * 0.21, false);
+  drawPostcardPalm(ctx, 0, bx + bw * 0.88, ground + bh * 0.05, bh * 0.36, true);
+  // Two far down the beach to the left, small with distance.
+  drawPostcardPalm(ctx, 0, bx + bw * 0.1, shore + bh * 0.09, bh * 0.2, true);
+  drawPostcardPalm(ctx, 1, bx + bw * 0.16, shore + bh * 0.1, bh * 0.16, false);
 
-  // Scrub behind the house: the tufts the beach turns into a little way inland.
+  // Scrub on the dune in front, already in shade.
   for (let i = 0; i < 26; i++) {
-    const x = bx + bw * (0.06 + rnd() * 0.36);
-    const y = by + bh * (0.9 + rnd() * 0.08);
-    ctx.fillStyle = rnd() < 0.5 ? 'rgba(99, 122, 79, 0.75)' : 'rgba(80, 100, 62, 0.7)';
+    const x = bx + bw * (0.02 + rnd() * 0.4);
+    const y = by + bh * (0.91 + rnd() * 0.08);
+    ctx.fillStyle = rnd() < 0.5 ? 'rgba(96, 88, 68, 0.55)' : 'rgba(78, 74, 58, 0.5)';
     ctx.beginPath();
     ctx.ellipse(x, y, 8 + rnd() * 16, 5 + rnd() * 7, 0, 0, Math.PI * 2);
     ctx.fill();
@@ -1650,7 +1878,7 @@ function postcardPhotoTexture(): THREE.CanvasTexture {
 
   // The print itself: a warm cast, grain, a fine halftone scan and a vignette, so the
   // face reads as a photograph printed on card stock rather than as a rendered scene.
-  ctx.fillStyle = 'rgba(255, 205, 140, 0.07)';
+  ctx.fillStyle = 'rgba(255, 190, 130, 0.06)';
   ctx.fillRect(bx, by, bw, bh);
   for (let i = 0; i < 22000; i++) {
     ctx.fillStyle = rnd() < 0.5 ? 'rgba(255, 255, 255, 0.05)' : 'rgba(40, 34, 28, 0.055)';
@@ -1659,10 +1887,11 @@ function postcardPhotoTexture(): THREE.CanvasTexture {
   ctx.fillStyle = 'rgba(60, 50, 40, 0.035)';
   for (let y = by; y < by + bh; y += 4) ctx.fillRect(bx, y, bw, 1);
   const vignette = ctx.createRadialGradient(W / 2, H / 2, bh * 0.34, W / 2, H / 2, bw * 0.76);
-  vignette.addColorStop(0, 'rgba(30, 26, 20, 0)');
-  vignette.addColorStop(1, 'rgba(30, 26, 20, 0.34)');
+  vignette.addColorStop(0, 'rgba(30, 20, 30, 0)');
+  vignette.addColorStop(1, 'rgba(30, 20, 30, 0.36)');
   ctx.fillStyle = vignette;
   ctx.fillRect(bx, by, bw, bh);
+  ctx.restore();
   // A hairline around the image, the way a printed postcard's photograph is keylined.
   ctx.strokeStyle = 'rgba(90, 80, 66, 0.35)';
   ctx.lineWidth = 2;

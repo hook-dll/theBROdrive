@@ -4,6 +4,16 @@
 
 ### Added
 
+- LOCALISATION (`src/i18n/`). `t(key)` looks a message up in the player's language: the
+  first of the browser's languages with a table, English otherwise, `?lang=xx` to force
+  one. Twelve tables: en, ru, es, pt, fr, de, it, pl, tr, zh, ja, ko. The postcard's note
+  is the first message (`postcard.message`), wrapped to its column by measurement, with a
+  brush or pen face first for Chinese, Japanese and Korean. The Russian now opens with a
+  capital, and so does its second sentence.
+- THE POSTCARD'S PICTURE IS A SUNSET OVER THE SEA: the sun half down into the water, its
+  path across it, evening clouds lit from below, the white house with its lamps on. The
+  mesas are gone, and the palms are the ending grove's own date palms, painted from the
+  same card (`drawPalmCard`, shared with `palmGeometry`). The stamp shows the same sunset.
 - THE ARTEFACTS AT THE 20 KM MARKS (`world/props/artifacts.ts`). The cairn, the chrome
   shrine and the snapped sign are gone; a 20 km mark is now a distance sign (two in five)
   or one of four things nobody on this road made, each slowly moving: an obsidian
@@ -18,7 +28,8 @@
   together, and cleans between 45% and 65% (`ToolItem.capacity`, a sum of what it removes)
   over its life; the HUD shows what is left. Spent, it turns the colour of what it took
   off, can no longer be used, and drops from the hand at the player's feet. It is a
-  car-wash sponge now: a rounded, pitted block with a green scouring layer.
+  car-wash sponge now: the big bone-shaped block (21 x 12 x 7 cm) of coarse open-cell
+  foam, pinched at the waist, pitted all over, and with no scouring layer.
 - EVERY COURIER'S BOOT HOLDS A PACK OF GUM in one of the bottom row's cells, and about one
   in three a sponge beside it.
 - `tools/look/plane.mjs` and the `?plane-lab` page (dev builds) for judging the plane;

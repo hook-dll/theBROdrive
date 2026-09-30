@@ -180,7 +180,7 @@ export interface PocketWatchItem {
  * The card the player starts with: a printed postcard from home, its message on one
  * face and a photograph of the house by the sea on the other.
  *
- * It carries no state of its own. The words are `POSTCARD_TEXT` (render/partmesh.ts)
+ * It carries no state of its own. The words are the `postcard.message` string (i18n/strings.ts)
  * and the card is drawn from it at build time, so the item is only a reason for the
  * pack to hold a piece of card that E raises to the eye and turns over.
  */
