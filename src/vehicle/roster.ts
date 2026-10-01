@@ -1096,6 +1096,37 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'crossply', aspect: 0.95 },
     target: { top: 110, to100: null, turn: 5.8, source: 'Land Rover Series III 88 data; 11.6 m turning circle; final drive is 4.7 axle x 1.148 high range' },
   },
+  {
+    // Jeep CJ-5 (1955-71): F-head Hurricane 2.2 four, 75 hp gross (net about 54 hp, 40 kW)
+    // at 4000 and 114 lb-ft gross at 2000, T-90 three-speed through a 1:1 Dana 18 high
+    // range to 4.27 axles, 4x4 engaged, leaf springs, 1100 kg; about 100 km/h, 11.4 m circle.
+    id: 'rs_jeep',
+    label: 'Jeep CJ-5',
+    body: 'jeep.glb',
+    bodyClass: 'car',
+    factory: { length: 3.44, width: 1.74, height: 1.7, clearance: 0.21, wheelbase: 2.057, frontTrack: 1.234, rearTrack: 1.234, wheelRadius: 0.37, tyreWidth: 0.16, frontOverhang: 0.55 },
+    mass: 1100,
+    frontWeightShare: 0.55,
+    rearDriveBias: 0.5,
+    engine: {
+      label: '2.2 Willys Hurricane four', mass: 150,
+      spec: { peakPowerKw: 40, powerPeakRpm: 4000, peakTorqueNm: 136, torquePeakRpm: 2000, redlineRpm: 4400, idleRpm: 600, bsfc: 0.31, brakingCoeff: 0.03, cylinders: 4 },
+      rated: { kw: 40 }, ratedTorqueNm: 136, source: 'Willys F4-134 Hurricane: 75 hp gross at 4000, 114 lb-ft gross at 2000; net estimated at 72% power, 88% torque',
+    },
+    gearbox: {
+      label: 'Warner T-90 three-speed', mass: 35,
+      spec: { ratios: [2.798, 1.551, 1.0], reverse: 3.798, finalDrive: 4.27, shiftTime: 0.5, automatic: false, efficiency: 0.85 },
+    },
+    tankLitres: 40,
+    wheelGrip: 0.55,
+    brakeDecelG: 0.45,
+    steerLock: 0.426,
+    dragArea: 2.129,
+    handlingProfile: 'utility',
+    suspension: S(1.35, 1.45, 0.2, 0.36, 0.16),
+    tyre: { construction: 'crossply', aspect: 0.95 },
+    target: { top: 100, to100: null, turn: 5.7, source: 'Jeep CJ-5 (1955-71) data; 37.5 ft turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
