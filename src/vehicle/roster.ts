@@ -794,6 +794,36 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'radial', aspect: 0.82 },
     target: { top: 170, to100: null, turn: 5.0, source: 'Lancia Fulvia Coupé Rallye 1.3 S (1970) data' },
   },
+  {
+    // Honda Civic 1200 (1973): EB1 1.2, 50 PS DIN at 5000 and 8.6 kgm at 3000, four-
+    // speed transaxle on a 4.21 final drive, 700 kg; 140 km/h, 9.4 m turning circle.
+    id: 'rs_civic',
+    label: 'Honda Civic',
+    body: 'civic.glb',
+    bodyClass: 'car',
+    factory: { length: 3.405, width: 1.505, height: 1.325, clearance: 0.165, wheelbase: 2.2, frontTrack: 1.3, rearTrack: 1.28, wheelRadius: 0.27, tyreWidth: 0.145, frontOverhang: 0.65 },
+    mass: 700,
+    frontWeightShare: 0.62,
+    rearDriveBias: 0,
+    engine: {
+      label: '1.2 Honda EB1 inline-four', mass: 85,
+      spec: { peakPowerKw: 36.8, powerPeakRpm: 5000, peakTorqueNm: 84, torquePeakRpm: 3000, redlineRpm: 6000, idleRpm: 850, bsfc: 0.32, brakingCoeff: 0.0134, cylinders: 4 },
+      rated: { ps: 50 }, ratedTorqueNm: 84, source: 'Honda Civic 1200 (1973) data: 50 PS DIN at 5000, 8.6 kgm at 3000',
+    },
+    gearbox: {
+      label: 'Honda Civic four-speed transaxle', mass: 26,
+      spec: { ratios: [3.0, 1.789, 1.182, 0.846], reverse: 2.916, finalDrive: 4.21, shiftTime: 0.3, automatic: false, efficiency: 0.92 },
+    },
+    tankLitres: 38,
+    wheelGrip: 0.66,
+    brakeDecelG: 0.7,
+    steerLock: 0.561,
+    dragArea: 0.799,
+    handlingProfile: 'road',
+    suspension: S(1.35, 1.55, 0.28, 0.42, 0.09),
+    tyre: { construction: 'radial', aspect: 0.82 },
+    target: { top: 140, to100: null, turn: 4.7, source: 'Honda Civic 1200 (1973) data; 9.4 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {

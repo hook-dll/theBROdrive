@@ -1,0 +1,52 @@
+# Honda Civic 1200 (first generation, 1972-79), three-door. Factory: 3405 x 1505 x
+# 1325, wheelbase 2200, tracks 1300/1280, 6.00-12 / 145 SR 12. Read off the drawing
+# reprinted at 3dcar.ru/blueprints/honda/civic_3doors_1972 (141 px/m by the
+# wheelbase). A tiny two-box: a short bonnet with round lamps in a mesh grille, a
+# tall glasshouse, a steep hatch, slim chrome bumpers.
+CAR = {
+    'id': 'civic',
+    'label': 'Honda Civic',
+    'kind': 'hatchback',
+    'factory': {'length': 3.405, 'width': 1.505, 'height': 1.325, 'clearance': 0.165, 'wheelbase': 2.2,
+                'frontTrack': 1.3, 'rearTrack': 1.28, 'wheelRadius': 0.27, 'tyreWidth': 0.145, 'frontOverhang': 0.65},
+    'yRange': [-1.69, 1.76],
+    'deck': [[-1.69, 0.48], [-1.63, 0.80], [-1.14, 0.86], [-0.71, 0.91], [0.0, 0.90], [1.13, 0.92],
+             [1.56, 0.96], [1.76, 0.80]],
+    'belt': 0.91,
+    'cabin': [-0.71, -0.29, 1.13, 1.70],
+    'roof': [1.325, 1.29],
+    'screenTop': 1.26,
+    'topLine': [[-0.71, 0.92], [-0.5, 1.12], [-0.29, 1.31], [0.49, 1.325], [1.13, 1.30], [1.4, 1.15], [1.70, 0.90]],
+    'railLine': [[-0.71, 0.915], [-0.5, 1.10], [-0.29, 1.28], [0.49, 1.29], [1.13, 1.27], [1.4, 1.13], [1.70, 0.89]],
+    'crown': 0.012,
+    'widths': {'waist': 0.752, 'shoulder': 0.74, 'deckEdge': 0.72, 'glassDeck': 0.66, 'glass': 0.64,
+               'railDeck': 0.55, 'railPillar': 0.60, 'rail': 0.58, 'sill': 0.71},
+    'planFactor': [[-1.69, 0.95], [-1.6, 1.0], [1.65, 1.0], [1.76, 0.97]],
+    'sill': [[-1.69, 0.40], [-1.4, 0.31], [-1.1, 0.28], [1.0, 0.28], [1.4, 0.31], [1.76, 0.40]],
+    'floor': [[-1.69, 0.38], [-1.4, 0.21], [-1.1, 0.18], [1.0, 0.18], [1.4, 0.21], [1.76, 0.38]],
+    'waistZ': 0.62,
+    'shoulderDrop': 0.05,
+    'shoulderRound': 0.15,
+    'hatchLip': 0.10,
+    'windows': [[[-0.62, 0.91], [-0.27, 1.26], [0.55, 1.26], [0.55, 0.91]],
+                [[0.61, 0.91], [0.61, 1.26], [1.27, 1.26], [1.47, 0.95]]],
+    'arch': {'radiusFactor': 1.17, 'lift': 0.02, 'wellDepth': 0.27},
+    'parts': {
+        'headlamps': [[0.50, 0.66, 0.085]], 'bezel': 0.012,
+        'grille': {'halfWidth': 0.38, 'z': [0.58, 0.72], 'slats': 6},
+        'bumper': {'depth': 0.04, 'height': 0.05, 'standOff': 0.02, 'wrap': 0.2, 'halfWidth': 0.73,
+                   'zFront': 0.42, 'zRear': 0.44},
+        'doorHandles': [[0.45, 0.85]],
+        'windowFrame': 0.01,
+        'lamps': [
+            {'node': 'front_blinker_left', 'material': 'IndicatorLights', 'end': 'front', 'shape': 'rect', 'x': 0.55, 'z': 0.50, 'w': 0.10, 'h': 0.04},
+            {'node': 'front_blinker_right', 'material': 'IndicatorLights', 'end': 'front', 'shape': 'rect', 'x': 0.55, 'z': 0.50, 'w': 0.10, 'h': 0.04},
+            {'node': 'taillights', 'material': 'TailLights', 'end': 'rear', 'shape': 'rect', 'x': 0.62, 'z': 0.66, 'w': 0.07, 'h': 0.10},
+            {'node': 'rear_blinker_left', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'rect', 'x': 0.62, 'z': 0.76, 'w': 0.07, 'h': 0.06},
+            {'node': 'rear_blinker_right', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'rect', 'x': 0.62, 'z': 0.76, 'w': 0.07, 'h': 0.06},
+            {'node': 'reverse_lights', 'material': 'ReverseLights', 'end': 'rear', 'shape': 'rect', 'x': 0.62, 'z': 0.585, 'w': 0.07, 'h': 0.04},
+        ],
+        'mirror': {'x': 0.72, 'y': -1.2, 'z': 0.92},
+        'wheel': {'style': 'hubcap', 'rimFactor': 0.62},
+    },
+}
