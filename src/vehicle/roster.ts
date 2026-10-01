@@ -90,7 +90,7 @@ export const ROSTER: readonly RosterCar[] = [
     label: 'VAZ-2101 Zhiguli',
     body: 'vaz2101.glb',
     bodyClass: 'car',
-    factory: { length: 4.073, width: 1.611, height: 1.382, clearance: 0.17, wheelbase: 2.424, frontTrack: 1.349, rearTrack: 1.305, wheelRadius: 0.297, tyreWidth: 0.155, frontOverhang: 0.63 },
+    factory: { length: 4.073, width: 1.611, height: 1.382, clearance: 0.17, wheelbase: 2.424, frontTrack: 1.349, rearTrack: 1.305, wheelRadius: 0.297, tyreWidth: 0.155, frontOverhang: 0.603 },
     mass: 955,
     frontWeightShare: 0.51,
     rearDriveBias: 1,
