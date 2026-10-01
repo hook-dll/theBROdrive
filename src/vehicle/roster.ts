@@ -1534,6 +1534,37 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'crossply', aspect: 0.85 },
     target: { top: 155, to100: null, turn: 7.3, source: 'Chevrolet C10 long bed (1970) data; 48 ft turning circle' },
   },
+  {
+    // Volkswagen T2 Kombi 1600 (1971): Type 1 1.6 air-cooled flat-four behind the rear
+    // axle, 50 PS DIN at 4000 and 10.8 kgm at 2800, four-speed transaxle on a 5.375 overall
+    // final drive (4.125 with 1.26 reduction hubs), 1175 kg; 105 km/h, 12.3 m circle.
+    id: 'rs_t2',
+    label: 'Volkswagen T2',
+    body: 't2.glb',
+    bodyClass: 'car',
+    factory: { length: 4.505, width: 1.72, height: 1.95, clearance: 0.185, wheelbase: 2.4, frontTrack: 1.384, rearTrack: 1.425, wheelRadius: 0.33, tyreWidth: 0.185, frontOverhang: 1.0 },
+    mass: 1175,
+    frontWeightShare: 0.44,
+    rearDriveBias: 1,
+    engine: {
+      label: '1.6 VW Type 1 flat-four', mass: 115,
+      spec: { peakPowerKw: 36.8, powerPeakRpm: 4000, peakTorqueNm: 106, torquePeakRpm: 2800, redlineRpm: 4600, idleRpm: 850, bsfc: 0.3, brakingCoeff: 0.02, cylinders: 4 },
+      rated: { ps: 50 }, ratedTorqueNm: 106, source: 'VW T2 1600 (1971): 50 PS DIN at 4000, 10.8 kgm at 2800',
+    },
+    gearbox: {
+      label: 'VW Type 2 four-speed transaxle', mass: 40,
+      spec: { ratios: [3.8, 2.06, 1.26, 0.82], reverse: 3.61, finalDrive: 5.375, shiftTime: 0.45, automatic: false, efficiency: 0.88 },
+    },
+    tankLitres: 56,
+    wheelGrip: 0.6,
+    brakeDecelG: 0.55,
+    steerLock: 0.465,
+    dragArea: 1.741,
+    handlingProfile: 'utility',
+    suspension: S(1.1, 1.2, 0.22, 0.36, 0.12),
+    tyre: { construction: 'radial', aspect: 0.82 },
+    target: { top: 105, to100: null, turn: 6.15, source: 'VW T2 1600 (1971) data; 12.3 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
