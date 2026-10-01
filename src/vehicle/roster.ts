@@ -1314,6 +1314,36 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'radial', aspect: 0.82 },
     target: { top: 130, to100: null, turn: 5.25, source: 'Wartburg 353 data; 10.5 m turning circle' },
   },
+  {
+    // Peugeot 504 GL (1971): XN1 2.0 four, 93 PS DIN at 5600 and 16.7 kgm at 3000, BA7
+    // four-speed on a 3.89 axle, semi-trailing-arm rear, 1220 kg; 163 km/h, 10.5 m circle.
+    id: 'rs_p504',
+    label: 'Peugeot 504',
+    body: 'p504.glb',
+    bodyClass: 'car',
+    factory: { length: 4.49, width: 1.69, height: 1.46, clearance: 0.16, wheelbase: 2.74, frontTrack: 1.42, rearTrack: 1.34, wheelRadius: 0.31, tyreWidth: 0.175, frontOverhang: 0.68 },
+    mass: 1220,
+    frontWeightShare: 0.54,
+    rearDriveBias: 1,
+    engine: {
+      label: '2.0 Peugeot XN1', mass: 140,
+      spec: { peakPowerKw: 68.4, powerPeakRpm: 5600, peakTorqueNm: 164, torquePeakRpm: 3000, redlineRpm: 6000, idleRpm: 800, bsfc: 0.28, brakingCoeff: 0.03, cylinders: 4 },
+      rated: { ps: 93 }, ratedTorqueNm: 164, source: 'Peugeot 504 GL (1971): 93 PS DIN at 5600, 16.7 kgm at 3000',
+    },
+    gearbox: {
+      label: 'Peugeot BA7 four-speed', mass: 38,
+      spec: { ratios: [3.61, 2.08, 1.36, 1.0], reverse: 3.7, finalDrive: 3.89, shiftTime: 0.35, automatic: false, efficiency: 0.91 },
+    },
+    tankLitres: 56,
+    wheelGrip: 0.7,
+    brakeDecelG: 0.72,
+    steerLock: 0.622,
+    dragArea: 0.934,
+    handlingProfile: 'road',
+    suspension: S(1.1, 1.25, 0.24, 0.4, 0.1),
+    tyre: { construction: 'radial', aspect: 0.82 },
+    target: { top: 163, to100: null, turn: 5.25, source: 'Peugeot 504 GL data; 10.5 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
