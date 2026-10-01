@@ -1283,6 +1283,37 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'radial', aspect: 0.82 },
     target: { top: 107, to100: null, turn: 5.0, source: 'Trabant 601 data; 10 m turning circle' },
   },
+  {
+    // Wartburg 353 (1966): 992 cc two-stroke triple, 50 PS at 4250 and 10 kgm at 3000,
+    // four-speed on a 4.22 final drive (fourth chosen to meet the published top speed), front drive, coil-sprung independent all round,
+    // 900 kg; 130 km/h, 10.5 m turning circle.
+    id: 'rs_wartburg',
+    label: 'Wartburg 353',
+    body: 'wartburg.glb',
+    bodyClass: 'car',
+    factory: { length: 4.22, width: 1.64, height: 1.4, clearance: 0.155, wheelbase: 2.45, frontTrack: 1.26, rearTrack: 1.29, wheelRadius: 0.29, tyreWidth: 0.165, frontOverhang: 0.79 },
+    mass: 900,
+    frontWeightShare: 0.58,
+    rearDriveBias: 0,
+    engine: {
+      label: '1.0 Wartburg two-stroke triple', mass: 70,
+      spec: { peakPowerKw: 36.8, powerPeakRpm: 4250, peakTorqueNm: 98, torquePeakRpm: 3000, redlineRpm: 4800, idleRpm: 800, bsfc: 0.37, brakingCoeff: 0.012, cylinders: 3 },
+      rated: { ps: 50 }, ratedTorqueNm: 98, source: 'Wartburg 353 data: 50 PS at 4250, 10 kgm at 3000',
+    },
+    gearbox: {
+      label: 'Wartburg four-speed', mass: 30,
+      spec: { ratios: [3.77, 2.16, 1.35, 0.86], reverse: 3.27, finalDrive: 4.22, shiftTime: 0.4, automatic: false, efficiency: 0.9 },
+    },
+    tankLitres: 44,
+    wheelGrip: 0.64,
+    brakeDecelG: 0.6,
+    steerLock: 0.539,
+    dragArea: 0.936,
+    handlingProfile: 'road',
+    suspension: S(1.15, 1.25, 0.22, 0.36, 0.1),
+    tyre: { construction: 'radial', aspect: 0.82 },
+    target: { top: 130, to100: null, turn: 5.25, source: 'Wartburg 353 data; 10.5 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {

@@ -1,0 +1,57 @@
+# Wartburg 353 (1966-75). Factory: 4220 x 1640 x 1400, wheelbase 2450, tracks 1260/1290,
+# 165 SR 13, clearance 155. The Commons side photograph ('Wartburg 353' side, public
+# domain) is close-up and wide-angle, so stations were taken as fractions of its wheelbase
+# and heights from the factory figures; the front from a 3/4 photograph (CC BY-SA 4.0).
+# The three-box: a flat bonnet over an upright full-width grille between rectangular
+# lamps in chrome bezels, slab sides with a crisp belt, a broad louvred C pillar, a long
+# flat boot, thin chrome bumpers with black overriders.
+CAR = {
+    'id': 'wartburg',
+    'label': 'Wartburg 353',
+    'kind': 'saloon',
+    'factory': {'length': 4.22, 'width': 1.64, 'height': 1.4, 'clearance': 0.155, 'wheelbase': 2.45,
+                'frontTrack': 1.26, 'rearTrack': 1.29, 'wheelRadius': 0.29, 'tyreWidth': 0.165, 'frontOverhang': 0.79},
+    'trimEnds': 0.08,
+    'deck': [[-2.03, 0.84], [-1.98, 0.87], [-1.5, 0.89], [-0.51, 0.93], [1.22, 0.94], [1.6, 0.935], [2.03, 0.92]],
+    'belt': 0.94,
+    'cabin': [-0.51, -0.25, 0.91, 1.22],
+    'roof': [1.40, 1.37],
+    'screenTop': 1.31,
+    'crown': 0.012,
+    'roofCrown': 0.03,
+    'rearScreenHalf': 0.58,
+    'widths': {'waist': 0.82, 'shoulder': 0.815, 'deckEdge': 0.80, 'glassDeck': 0.76, 'glass': 0.72,
+               'railDeck': 0.62, 'railPillar': 0.70, 'rail': 0.68, 'sill': 0.80},
+    'planFactor': [[-2.03, 0.98], [-1.95, 1.0], [1.95, 1.0], [2.03, 0.99]],
+    'sill': [[-2.03, 0.40], [-1.8, 0.34], [-1.0, 0.30], [1.0, 0.30], [1.8, 0.36], [2.03, 0.42]],
+    'floor': [[-2.03, 0.36], [-1.8, 0.26], [-1.0, 0.22], [1.0, 0.22], [1.8, 0.28], [2.03, 0.38]],
+    'waistZ': 0.72,
+    'shoulderDrop': 0.02,
+    'edgeDrop': 0.01,
+    'shoulderRound': 0.05,
+    'tumbleunder': 0.04,
+    'smoothAngleDeg': 26,
+    'windows': [[[-0.45, 0.95], [-0.27, 1.31], [0.24, 1.32], [0.24, 0.95]],
+                [[0.30, 0.95], [0.30, 1.32], [0.80, 1.31], [0.99, 0.95]]],
+    'arch': {'radiusFactor': 1.15, 'lift': 0.03, 'wellDepth': 0.3},
+    'parts': {
+        'headlamps': [{'shape': 'rect', 'x': 0.60, 'z': 0.66, 'w': 0.19, 'h': 0.14}], 'bezel': 0.018,
+        'grille': {'halfWidth': 0.48, 'z': [0.57, 0.76], 'slats': 8},
+        'bumper': {'depth': 0.06, 'height': 0.09, 'standOff': 0.04, 'wrap': 0.22, 'halfWidth': 0.82,
+                   'zFront': 0.45, 'zRear': 0.47},
+        'overriders': {'x': 0.42, 'height': 0.16, 'width': 0.06},
+        'doorHandles': [[-0.10, 0.88], [0.55, 0.88]],
+        'windowFrame': 0.014,
+        'lensColours': {'FrontLampLens': [0.9, 0.62, 0.25]},
+        'lamps': [
+            {'node': 'front_blinker_left', 'material': 'FrontLampLens', 'end': 'side', 'shape': 'rect', 'y': -1.93, 'z': 0.66, 'w': 0.14, 'h': 0.05, 'depth': 0.014},
+            {'node': 'front_blinker_right', 'material': 'FrontLampLens', 'end': 'side', 'shape': 'rect', 'y': -1.93, 'z': 0.66, 'w': 0.14, 'h': 0.05, 'depth': 0.014},
+            {'node': 'rear_blinker_left', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'rect', 'x': 0.74, 'z': 0.74, 'w': 0.10, 'h': 0.09},
+            {'node': 'rear_blinker_right', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'rect', 'x': 0.74, 'z': 0.74, 'w': 0.10, 'h': 0.09},
+            {'node': 'taillights', 'material': 'TailLights', 'end': 'rear', 'shape': 'rect', 'x': 0.62, 'z': 0.74, 'w': 0.13, 'h': 0.09},
+            {'node': 'reverse_lights', 'material': 'ReverseLights', 'end': 'rear', 'shape': 'rect', 'x': 0.52, 'z': 0.74, 'w': 0.06, 'h': 0.09},
+        ],
+        'mirror': {'x': 0.86, 'y': -0.45, 'z': 1.02},
+        'wheel': {'style': 'hubcap', 'rimFactor': 0.66},
+    },
+}
