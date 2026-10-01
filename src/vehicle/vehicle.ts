@@ -191,7 +191,7 @@ import {
   tyreVerticalRate,
   unsprungMass,
 } from './vehicletuning';
-import { VehicleLamps, type BeamPass, type HeadlightMode, type IndicatorSide } from './vehiclelamps';
+import { VehicleLamps, type BeamGroup, type HeadlightMode, type IndicatorSide } from './vehiclelamps';
 import { weather, weatherGrip, weatherSoftness } from '../world/weather';
 
 /**
@@ -3096,18 +3096,27 @@ export class Vehicle implements Rebasable {
     return this.lamps.anyLit();
   }
 
-  /**
-   * Offers this vehicle's LIT lamps to the shared rig. The beams, their mounts, the
-   * distance fade and the reason a dark lamp claims no slot all live in
-   * vehiclelamps.ts, which owns the state this reads.
-   */
-  syncProjectedLights(rig: VehicleLightRig, gain: number, lamps: BeamPass = 'all'): void {
-    this.lamps.syncProjectedLights(rig, gain, lamps);
+  /** Spotlights one of this vehicle's lamp groups needs while lit (vehiclelamps.ts). */
+  beamCount(group: BeamGroup, merged: boolean): number {
+    return this.lamps.beamCount(group, merged);
   }
 
-  /** Offers the lit headlamps to the wet road's reflection streaks (vehiclelamps.ts). */
-  offerWetGlare(): void {
-    this.lamps.offerWetGlare();
+  /**
+   * Offers one LIT lamp group to the shared rig. The beams, their mounts and the
+   * merged ambient form all live in vehiclelamps.ts, which owns the state this reads.
+   */
+  syncProjectedLights(rig: VehicleLightRig, group: BeamGroup, gain: number, merged: boolean): void {
+    this.lamps.syncProjectedLights(rig, group, gain, merged);
+  }
+
+  /** Headlamps this car would lay in the road for an eye at `eye` (vehiclelamps.ts). */
+  wetGlareLamps(eye: THREE.Vector3): number {
+    return this.lamps.wetGlareLamps(eye);
+  }
+
+  /** Offers the lit headlamps to the road's reflection streaks, scaled by `share`. */
+  offerWetGlare(share: number): void {
+    this.lamps.offerWetGlare(share);
   }
 
   /**

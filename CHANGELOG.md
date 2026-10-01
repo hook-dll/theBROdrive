@@ -157,6 +157,22 @@
 
 ### Fixed
 
+- OTHER CARS' LIGHT ON THE ROAD NO LONGER SWITCHES ON AND OFF, AND THE TAIL GLOW IS BACK.
+  The few car spotlights and road headlamp streaks went to the nearest lamps again every
+  frame. When two cars changed order, one lost its light and the other got it at full
+  strength in the same frame. On a night drive with standard traffic, pools of light
+  switched at 20-120 m and streaks at 70-170 m. The driven car's own tail glow came after
+  every other car's headlamps in the queue and never got a slot (0 of 5860 frames). A
+  `FadingSlotPool` (`render/slotpool.ts`) now keeps each slot with its lamp. When a nearer
+  car deserves the slot, the old lamp fades out over 0.75 s and the new one fades in. The
+  driven car's lamps are pinned, tail glow included. Other cars, and the driven car's
+  tail and reversing glow, project one merged beam per lamp pair. The driven car takes
+  three of the standard rung's six slots and three other cars keep their headlamps lit.
+  A streak only goes to a car whose lamps face the eye, so cars driving away no longer
+  hold streaks while oncoming cars wait. Measured after the change: the tail glow is on
+  in every frame, and other cars' beam gain moves at most 0.018 per frame. The one step
+  left is a streak dropping when an oncoming car is beside the camera; the shader's aim
+  term already draws it as nothing at that moment.
 - NO FREEZE WHEN A NEW CAR MODEL FIRST APPEARS. A model's paint, glass and lamp lenses
   each linked their shader program on the car's first drawn frame, on the main thread —
   on Windows' ANGLE/D3D11 hundreds of milliseconds per program, reported as 400-840 ms

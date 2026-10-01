@@ -33,22 +33,26 @@ import {
  *    frame. Spawning a car at night and switching its lamps on is exactly how a
  *    player meets it. No beam is worth a four-second freeze.
  *
- * Demand beyond the pool is therefore refused. `main.ts` offers beams in priority
- * order — the driven car first, then nearest to the camera — so a refusal costs the
- * FARTHEST lamp its pool of light on the ground, while its lens still glows.
+ * Demand beyond the pool is therefore refused, and WHO is refused is decided before
+ * any beam is offered: `main.ts` hands the slots out through a `FadingSlotPool`
+ * (render/slotpool.ts) — the driven car's lamps pinned, then everyone else's nearest
+ * to the camera first — so the farthest lamps lose their pool of light on the ground
+ * while their lenses still glow, and a slot changes hands by fading out and in.
  *
  * WHOSE LIGHT MATTERS. The driven car's beams are the only way to read the road at
  * night, so they are projected exactly as authored. Every other car's are projected
- * faded (`ambientBeamGain`), for two reasons that happen to be the same fix:
+ * faded (`ambientBeamGain`) and one beam per lamp pair:
  *
  *  - Comfort. A night with four cars around threw four full-brightness pools across
  *    the asphalt, one of them oncoming and sweeping over the player's own lane. It
  *    read as glare rather than as traffic, which is not a night anybody wants to
  *    drive through, however defensible it is as photometry.
- *  - Pop-in. A pool used to arrive at FULL brightness — the instant a car spawned
- *    140 m ahead, or the instant the pool stopped refusing its beam. Fading the
- *    gain to nothing before either range means there is no step left to see: the
- *    lens still glows and approaches, and the ground light grows in behind it.
+ *  - Pop-in. A pool used to arrive at FULL brightness the instant a car spawned
+ *    140 m ahead. Fading the gain to nothing before that range means there is no
+ *    step left to see: the lens still glows and approaches, and the ground light
+ *    grows in behind it. The range fade alone did NOT cover the pool refusing a
+ *    beam: with three cars lit the pool is full well inside 110 m, so slots changed
+ *    hands at full gain until the handover fade took that over.
  */
 /** The top rung also keeps the projected cone visible three times farther. */
 const HEADLIGHT_DISTANCE_SCALE: Record<GraphicsQuality, number> = {

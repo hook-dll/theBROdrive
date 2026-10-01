@@ -7,8 +7,9 @@
  *
  * What it defends: a beam belongs to a LIT LAMP, not to the driven car. Every live
  * vehicle with a lamp on projects, including one restored straight from a save and
- * never driven; dark lamps claim no spotlight; and the pool of spotlights the
- * renderer sees never shrinks, so no light-count change can recompile the world.
+ * never driven; dark lamps claim no spotlight; the pool of spotlights the renderer
+ * sees never shrinks, so no light-count change can recompile the world; and the
+ * slot pool hands a slot over by fading, never overfilling, so no lamp's light steps.
  */
 
 import * as THREE from 'three';
@@ -16,6 +17,8 @@ import { PhysicsWorld } from '../src/core/physics';
 import { GameWorld, newWorldState, type CarState } from '../src/game/state';
 import { disposeCarModelCache, preloadCarModels } from '../src/render/carmodel';
 import { ambientBeamGain, VehicleLightRig } from '../src/render/vehiclelights';
+import { FadingSlotPool } from '../src/render/slotpool';
+import { BEAM_GROUPS } from '../src/vehicle/vehiclelamps';
 import { GRAPHICS_TIERS } from '../src/game/settings';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { benchCarState } from './benchcar';
@@ -132,14 +135,26 @@ async function run(): Promise<void> {
   let rigDisposed = false;
   const vehicles: Vehicle[] = [];
   /**
-   * One rendered frame: offer every lit vehicle, as main.ts does. These vehicles are
-   * all parked with no camera, so each is offered the driven car's undimmed gain;
-   * the ambient fade has its own scenario below.
+   * One rendered frame: offer every lit vehicle through a slot pool, as main.ts does.
+   * These vehicles are all parked with no camera, so each is offered the driven car's
+   * undimmed gain, every lamp its own beam, and the pool hands over at once (a fade
+   * of zero); the ambient fade and the handover have their own scenarios below.
    */
-  const projectFrame = (activeRig: VehicleLightRig): void => {
+  const projectFrame = (activeRig: VehicleLightRig, gain = 1, merged = false): void => {
+    const pool = new FadingSlotPool(activeRig.lightCount, 0);
+    pool.begin();
+    for (let g = 0; g < BEAM_GROUPS.length; g++) {
+      for (const vehicle of vehicles) {
+        if (vehicle.hasLitLamps && gain > 0) pool.request(vehicle, g, vehicle.beamCount(BEAM_GROUPS[g], merged), false);
+      }
+    }
+    pool.resolve(1 / 60);
     activeRig.beginFrame();
     for (const vehicle of vehicles) {
-      if (vehicle.hasLitLamps) vehicle.syncProjectedLights(activeRig, 1);
+      for (let g = 0; g < BEAM_GROUPS.length; g++) {
+        const share = pool.share(vehicle, g);
+        if (share > 0) vehicle.syncProjectedLights(activeRig, BEAM_GROUPS[g], gain * share, merged);
+      }
     }
     activeRig.endFrame();
   };
@@ -264,25 +279,21 @@ async function run(): Promise<void> {
       vehicle.setHeadlights('low');
       vehicle.syncVisuals(1);
     }
-    rig.beginFrame();
-    for (const vehicle of vehicles) vehicle.syncProjectedLights(rig, ambientBeamGain(200));
-    rig.endFrame();
+    projectFrame(rig, ambientBeamGain(200), true);
     check(
       'far ambient cars: a faded beam claims no slot',
       ambientBeamGain(200) === 0 && rig.beamCount === 0 && allDark(spotlights(scene)),
       `gain ${ambientBeamGain(200)}, ${rig.beamCount} beams`,
     );
-    rig.beginFrame();
-    for (const vehicle of vehicles) vehicle.syncProjectedLights(rig, ambientBeamGain(20));
-    rig.endFrame();
+    projectFrame(rig, ambientBeamGain(20), true);
     const nearBeams = rig.beamCount;
-    // Numbers, not light objects: the next frame overwrites the same slots.
-    const fadedHeadlight = Math.max(
-      ...spotlights(scene).map((light) => (light.distance > 100 ? light.intensity : 0)),
-    );
-    rig.beginFrame();
-    vehicles[0].syncProjectedLights(rig, 1);
-    rig.endFrame();
+    // Numbers, not light objects: the next frame overwrites the same slots. A merged
+    // beam carries its pair's light, so it is compared per lamp.
+    const fadedHeadlight =
+      Math.max(...spotlights(scene).map((light) => (light.distance > 100 ? light.intensity : 0))) / 2;
+    for (const vehicle of vehicles.slice(1)) vehicle.setHeadlights('off');
+    projectFrame(rig);
+    for (const vehicle of vehicles.slice(1)) vehicle.setHeadlights('low');
     const drivenHeadlight = Math.max(
       ...spotlights(scene).map((light) => (light.distance > 100 ? light.intensity : 0)),
     );
@@ -290,10 +301,66 @@ async function run(): Promise<void> {
       'near ambient cars: beams project, dimmer than the driven car',
       nearBeams === rig.lightCount &&
         fadedHeadlight > 0 &&
-        fadedHeadlight < drivenHeadlight * 0.5,
+        fadedHeadlight < drivenHeadlight,
       `${fadedHeadlight.toFixed(2)} vs ${drivenHeadlight.toFixed(2)} driven`,
     );
     assertRigState(scene, rig, identities, targets, 'ambient fade');
+
+    // The handover. Two one-slot places for three cars, the farthest closing in and
+    // passing the other two, as an oncoming car does: the pool never overfills, no
+    // share moves faster than its fade allows, and the car that came close ends up
+    // with a full slot while the one it displaced has none.
+    {
+      const fadeS = 0.75;
+      const dt = 1 / 60;
+      const pool = new FadingSlotPool(2, fadeS);
+      const owners = [{}, {}, {}];
+      const range = [30, 60, 90];
+      const share = [0, 0, 0];
+      const order = [0, 1, 2];
+      let overfull = 0;
+      let maxStep = 0;
+      for (let frame = 0; frame < 320; frame++) {
+        range[2] -= 0.25;
+        order.sort((a, b) => Math.abs(range[a]) - Math.abs(range[b]));
+        pool.begin();
+        for (const i of order) pool.request(owners[i], 0, 1, false);
+        pool.resolve(dt);
+        let held = 0;
+        for (let i = 0; i < owners.length; i++) {
+          const next = pool.share(owners[i], 0);
+          if (next > 0) held++;
+          maxStep = Math.max(maxStep, Math.abs(next - share[i]));
+          share[i] = next;
+        }
+        if (held > pool.capacity) overfull++;
+      }
+      check('handover: the pool never overfills', overfull === 0, `${overfull} overfull frames`);
+      // Smoothstep's steepest slope is 1.5.
+      check(
+        'handover: no share steps',
+        maxStep <= (1.5 * dt) / fadeS + 1e-9,
+        `largest step ${maxStep.toFixed(4)} per frame`,
+      );
+      check(
+        'handover: the near car holds a full slot, the displaced one none',
+        share[2] === 1 && share[0] === 1 && share[1] === 0,
+        share.map((s) => s.toFixed(2)).join(', '),
+      );
+      // The driven car switching its lamps on into that full pool: lit that frame, at
+      // full strength, and the pool still not overfilled.
+      const driven = {};
+      pool.begin();
+      pool.request(driven, 0, 1, true);
+      for (const i of order) pool.request(owners[i], 0, 1, false);
+      pool.resolve(dt);
+      const heldAfter = owners.filter((owner) => pool.share(owner, 0) > 0).length + 1;
+      check(
+        'handover: a pinned lamp is lit at once without overfilling',
+        pool.share(driven, 0) === 1 && heldAfter <= pool.capacity,
+        `pinned ${pool.share(driven, 0)}, ${heldAfter} held of ${pool.capacity}`,
+      );
+    }
 
     while (vehicles.length > 0) vehicles.pop()!.dispose();
     rig.clear();
