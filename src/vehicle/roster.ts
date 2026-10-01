@@ -671,6 +671,37 @@ export const ROSTER: readonly RosterCar[] = [
     rearDiff: { lock: 0.5, preloadNm: 0 },
     target: { top: 220, to100: null, turn: 5.2, source: 'Lancia Delta HF Integrale 16v (1989) factory figures' },
   },
+  {
+    // Honda CR-X 1.6i-16 (1985): ZC 1.6 DOHC, 125 PS at 6500 and 143 Nm at 5500, five-
+    // speed transaxle on a 4.27 final drive, 840 kg; 200 km/h, 0-100 in 8.6 s.
+    id: 'rs_crx',
+    label: 'Honda CR-X',
+    body: 'crx.glb',
+    bodyClass: 'car',
+    factory: { length: 3.675, width: 1.625, height: 1.29, clearance: 0.14, wheelbase: 2.2, frontTrack: 1.4, rearTrack: 1.415, wheelRadius: 0.29, tyreWidth: 0.185, frontOverhang: 0.755 },
+    mass: 840,
+    frontWeightShare: 0.62,
+    rearDriveBias: 0,
+    engine: {
+      label: '1.6 Honda ZC DOHC inline-four', mass: 105,
+      spec: { peakPowerKw: 91.9, powerPeakRpm: 6500, peakTorqueNm: 143, torquePeakRpm: 5500, redlineRpm: 7300, idleRpm: 800, bsfc: 0.29, brakingCoeff: 0.0187, cylinders: 4 },
+      rated: { ps: 125 }, ratedTorqueNm: 143, source: 'Honda CR-X 1.6i-16 (1985) data: 125 PS DIN at 6500, 143 Nm at 5500',
+    },
+    gearbox: {
+      label: 'Honda five-speed transaxle', mass: 34,
+      spec: { ratios: [3.25, 1.89, 1.25, 0.97, 0.81], reverse: 3.0, finalDrive: 4.27, shiftTime: 0.22, automatic: false, efficiency: 0.92 },
+    },
+    tankLitres: 41,
+    wheelGrip: 0.82,
+    brakeDecelG: 0.9,
+    steerLock: 0.55,
+    dragArea: 0.718,
+    handlingProfile: 'sport',
+    suspension: S(1.5, 1.7, 0.3, 0.45, 0.08),
+    tyre: { construction: 'radial', aspect: 0.6 },
+    antiRoll: { front: 0.5, rear: 0.4 },
+    target: { top: 200, to100: null, turn: 4.8, source: 'Honda CR-X 1.6i-16 (1985) data' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
