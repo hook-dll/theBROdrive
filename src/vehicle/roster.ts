@@ -824,6 +824,36 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'radial', aspect: 0.82 },
     target: { top: 140, to100: null, turn: 4.7, source: 'Honda Civic 1200 (1973) data; 9.4 m turning circle' },
   },
+  {
+    // Datsun 1600 (510, 1968): L16 1.6, 96 hp SAE (70 kW) at 5600 and 135 Nm at 3600,
+    // four-speed on a 3.7 axle, semi-trailing-arm independent rear, 920 kg; 160 km/h.
+    id: 'rs_datsun510',
+    label: 'Datsun 510',
+    body: 'datsun510.glb',
+    bodyClass: 'car',
+    factory: { length: 3.93, width: 1.56, height: 1.395, clearance: 0.15, wheelbase: 2.42, frontTrack: 1.28, rearTrack: 1.28, wheelRadius: 0.29, tyreWidth: 0.155, frontOverhang: 0.55 },
+    mass: 920,
+    frontWeightShare: 0.54,
+    rearDriveBias: 1,
+    engine: {
+      label: '1.6 Nissan L16 inline-four', mass: 120,
+      spec: { peakPowerKw: 70, powerPeakRpm: 5600, peakTorqueNm: 135, torquePeakRpm: 3600, redlineRpm: 6400, idleRpm: 800, bsfc: 0.32, brakingCoeff: 0.0201, cylinders: 4 },
+      rated: { kw: 70 }, ratedTorqueNm: 135, source: 'Datsun 1600 (510, 1968) data: 96 hp SAE gross / 70 kW, 135 Nm at 3600',
+    },
+    gearbox: {
+      label: 'Datsun four-speed', mass: 30,
+      spec: { ratios: [3.382, 2.013, 1.312, 1.0], reverse: 3.365, finalDrive: 3.7, shiftTime: 0.3, automatic: false, efficiency: 0.9 },
+    },
+    tankLitres: 45,
+    wheelGrip: 0.68,
+    brakeDecelG: 0.72,
+    steerLock: 0.571,
+    dragArea: 1.020,
+    handlingProfile: 'road',
+    suspension: S(1.2, 1.4, 0.26, 0.42, 0.09),
+    tyre: { construction: 'crossply', aspect: 0.9 },
+    target: { top: 160, to100: null, turn: 5.0, source: 'Datsun 1600 (510) data' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {

@@ -1,0 +1,52 @@
+# Datsun 1600 (Bluebird 510, 1968-73), four-door. Factory: 4120 (US bumpers; 3930 over
+# the body as photographed) x 1560 x 1405, wheelbase 2420, tracks 1280, 5.60-13.
+# Read off a straight profile photograph on a metric grid (430 px/m by the wheelbase):
+#   side  '1970 Datsun 1600 (P510) sedan (21091515801).jpg' (CC BY 2.0)
+# The crisp Japanese BMW: a flat bonnet with quad round lamps in a full-width grille,
+# a light airy glasshouse with thin pillars, a long flat boot.
+CAR = {
+    'id': 'datsun510',
+    'label': 'Datsun 510',
+    'kind': 'saloon',
+    'factory': {'length': 3.93, 'width': 1.56, 'height': 1.395, 'clearance': 0.15, 'wheelbase': 2.42,
+                'frontTrack': 1.28, 'rearTrack': 1.28, 'wheelRadius': 0.29, 'tyreWidth': 0.155, 'frontOverhang': 0.55},
+    'trimEnds': 0.02,
+    'deck': [[-1.945, 0.72], [-1.91, 0.79], [-1.47, 0.87], [-1.0, 0.915], [-0.93, 0.93], [-0.4, 0.93],
+             [0.81, 0.95], [1.21, 0.965], [1.56, 0.945], [1.945, 0.89]],
+    'belt': 0.93,
+    'cabin': [-0.93, -0.47, 0.81, 1.21],
+    'roof': [1.395, 1.36],
+    'screenTop': 1.32,
+    'crown': 0.012,
+    'widths': {'waist': 0.78, 'shoulder': 0.77, 'deckEdge': 0.75, 'glassDeck': 0.68, 'glass': 0.66,
+               'railDeck': 0.55, 'railPillar': 0.62, 'rail': 0.58, 'sill': 0.73},
+    'planFactor': [[-1.945, 0.95], [-1.85, 0.99], [-1.7, 1.0], [1.8, 1.0], [1.945, 0.97]],
+    'sill': [[-1.945, 0.42], [-1.7, 0.33], [-1.5, 0.30], [1.4, 0.30], [1.7, 0.34], [1.945, 0.42]],
+    'floor': [[-1.945, 0.40], [-1.7, 0.23], [-1.5, 0.20], [1.4, 0.20], [1.7, 0.24], [1.945, 0.40]],
+    'waistZ': 0.62,
+    'shoulderDrop': 0.05,
+    'shoulderRound': 0.15,
+    'windows': [[[-0.85, 0.93], [-0.49, 1.32], [0.02, 1.32], [0.02, 0.93]],
+                [[0.06, 0.93], [0.06, 1.32], [0.62, 1.32], [0.92, 0.94]]],
+    'arch': {'radiusFactor': 1.15, 'lift': 0.02, 'wellDepth': 0.28},
+    'parts': {
+        'headlamps': [[0.44, 0.67, 0.07], [0.60, 0.67, 0.07]], 'bezel': 0.012,
+        'grille': {'halfWidth': 0.68, 'z': [0.60, 0.74], 'slats': 6},
+        'bumper': {'depth': 0.05, 'height': 0.06, 'standOff': 0.03, 'wrap': 0.22, 'halfWidth': 0.77,
+                   'zFront': 0.45, 'zRear': 0.46},
+        'doorHandles': [[-0.55, 0.82], [0.35, 0.82]],
+        'windowFrame': 0.012,
+        'lamps': [
+            {'node': 'front_blinker_left', 'material': 'IndicatorLights', 'end': 'front', 'shape': 'rect', 'x': 0.55, 'z': 0.52, 'w': 0.10, 'h': 0.04},
+            {'node': 'front_blinker_right', 'material': 'IndicatorLights', 'end': 'front', 'shape': 'rect', 'x': 0.55, 'z': 0.52, 'w': 0.10, 'h': 0.04},
+            {'node': 'front_blinker_left', 'material': 'IndicatorLights', 'end': 'side', 'shape': 'rect', 'y': -1.85, 'z': 0.72, 'w': 0.12, 'h': 0.025, 'depth': 0.012},
+            {'node': 'front_blinker_right', 'material': 'IndicatorLights', 'end': 'side', 'shape': 'rect', 'y': -1.85, 'z': 0.72, 'w': 0.12, 'h': 0.025, 'depth': 0.012},
+            {'node': 'taillights', 'material': 'TailLights', 'end': 'rear', 'shape': 'rect', 'x': 0.50, 'z': 0.72, 'w': 0.22, 'h': 0.08},
+            {'node': 'rear_blinker_left', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'rect', 'x': 0.66, 'z': 0.72, 'w': 0.10, 'h': 0.08},
+            {'node': 'rear_blinker_right', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'rect', 'x': 0.66, 'z': 0.72, 'w': 0.10, 'h': 0.08},
+            {'node': 'reverse_lights', 'material': 'ReverseLights', 'end': 'rear', 'shape': 'rect', 'x': 0.35, 'z': 0.72, 'w': 0.07, 'h': 0.08},
+        ],
+        'mirror': {'x': 0.80, 'y': -0.75, 'z': 0.99},
+        'wheel': {'style': 'hubcap', 'rimFactor': 0.62},
+    },
+}
