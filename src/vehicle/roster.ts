@@ -854,6 +854,37 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'crossply', aspect: 0.9 },
     target: { top: 160, to100: null, turn: 5.0, source: 'Datsun 1600 (510) data' },
   },
+  {
+    // Ford Mustang 289 hardtop (1965): 289 cu in V8 two-barrel, 200 hp gross (net
+    // about 145 hp, 108 kW) at 4400 and 382 Nm at 2400, three-speed manual on a 3.0
+    // axle, leaf-sprung live axle, 1300 kg; 175 km/h, 11.8 m circle.
+    id: 'rs_mustang65',
+    label: 'Ford Mustang 1965',
+    body: 'mustang65.glb',
+    bodyClass: 'car',
+    factory: { length: 4.613, width: 1.732, height: 1.30, clearance: 0.14, wheelbase: 2.743, frontTrack: 1.422, rearTrack: 1.422, wheelRadius: 0.32, tyreWidth: 0.18, frontOverhang: 0.77 },
+    mass: 1300,
+    frontWeightShare: 0.56,
+    rearDriveBias: 1,
+    engine: {
+      label: '4.7 Ford 289 V8', mass: 210,
+      spec: { peakPowerKw: 108, powerPeakRpm: 4400, peakTorqueNm: 382, torquePeakRpm: 2400, redlineRpm: 4900, idleRpm: 600, bsfc: 0.37, brakingCoeff: 0.0745, cylinders: 8 },
+      rated: { kw: 108 }, ratedTorqueNm: 382, source: 'Ford 289 2V (1965): 200 hp gross at 4400; net power estimated at 72%, torque 282 lb-ft gross',
+    },
+    gearbox: {
+      label: 'Ford three-speed', mass: 34,
+      spec: { ratios: [2.79, 1.70, 1.0], reverse: 2.87, finalDrive: 3.0, shiftTime: 0.35, automatic: false, efficiency: 0.9 },
+    },
+    tankLitres: 61,
+    wheelGrip: 0.66,
+    brakeDecelG: 0.62,
+    steerLock: 0.550,
+    dragArea: 1.219,
+    handlingProfile: 'classic',
+    suspension: S(1.1, 1.35, 0.22, 0.36, 0.1),
+    tyre: { construction: 'crossply', aspect: 0.9 },
+    target: { top: 175, to100: null, turn: 5.9, source: 'Ford Mustang 289 (1965) road tests; 11.8 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {

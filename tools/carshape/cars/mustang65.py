@@ -1,0 +1,51 @@
+# Ford Mustang hardtop 289 (1965-66). Factory: 4613 x 1732 x 1300, wheelbase 2743,
+# tracks 1422/1422, 6.95-14. Read off the drawing reprinted at
+# 3dcar.ru/blueprints/ford/mustang (145 px/m by the wheelbase, heights scaled 3% to
+# the catalogue). The long-hood short-deck original: a flat bonnet over a wide oval
+# grille between single round lamps, a notchback roof, a short flat deck, the tri-bar
+# tail lamps, chrome bumpers.
+CAR = {
+    'id': 'mustang65',
+    'label': 'Ford Mustang 1965',
+    'kind': 'saloon',
+    'factory': {'length': 4.613, 'width': 1.732, 'height': 1.30, 'clearance': 0.14, 'wheelbase': 2.743,
+                'frontTrack': 1.422, 'rearTrack': 1.422, 'wheelRadius': 0.32, 'tyreWidth': 0.18, 'frontOverhang': 0.77},
+    'trimEnds': 0.03,
+    'deck': [[-2.277, 0.80], [-2.22, 0.84], [-1.89, 0.89], [-0.86, 0.95], [-0.65, 0.96], [0.0, 0.93],
+             [1.0, 0.93], [1.38, 0.95], [1.9, 0.92], [2.277, 0.76]],
+    'belt': 0.93,
+    'cabin': [-0.65, -0.205, 1.0, 1.38],
+    'roof': [1.30, 1.27],
+    'screenTop': 1.20,
+    'crown': 0.012,
+    'widths': {'waist': 0.866, 'shoulder': 0.855, 'deckEdge': 0.83, 'glassDeck': 0.72, 'glass': 0.70,
+               'railDeck': 0.60, 'railPillar': 0.66, 'rail': 0.62, 'sill': 0.82},
+    'planFactor': [[-2.277, 0.92], [-2.15, 0.98], [-2.0, 1.0], [2.1, 1.0], [2.277, 0.96]],
+    'sill': [[-2.277, 0.44], [-2.0, 0.33], [-1.7, 0.29], [1.6, 0.29], [2.0, 0.34], [2.277, 0.44]],
+    'floor': [[-2.277, 0.42], [-2.0, 0.23], [-1.7, 0.18], [1.6, 0.18], [2.0, 0.24], [2.277, 0.42]],
+    'waistZ': 0.66,
+    'shoulderDrop': 0.05,
+    'shoulderRound': 0.15,
+    'windows': [[[-0.31, 0.93], [-0.14, 1.20], [0.62, 1.20], [0.62, 0.93]],
+                [[0.66, 0.93], [0.66, 1.20], [0.86, 1.19], [1.07, 0.96]]],
+    'arch': {'radiusFactor': 1.14, 'lift': 0.02, 'wellDepth': 0.3},
+    'parts': {
+        'headlamps': [[0.71, 0.69, 0.09]], 'bezel': 0.014,
+        'grille': {'halfWidth': 0.45, 'z': [0.60, 0.78], 'slats': 1, 'bars': 0},
+        'bumper': {'depth': 0.05, 'height': 0.07, 'standOff': 0.03, 'wrap': 0.3, 'halfWidth': 0.86,
+                   'zFront': 0.50, 'zRear': 0.48},
+        'overriders': {'x': 0.42, 'height': 0.14, 'width': 0.03},
+        'doorHandles': [[0.50, 0.86]],
+        'windowFrame': 0.012,
+        'lamps': [
+            {'node': 'front_blinker_left', 'material': 'IndicatorLights', 'end': 'front', 'shape': 'disc', 'x': 0.62, 'z': 0.43, 'r': 0.04},
+            {'node': 'front_blinker_right', 'material': 'IndicatorLights', 'end': 'front', 'shape': 'disc', 'x': 0.62, 'z': 0.43, 'r': 0.04},
+            {'node': 'taillights', 'material': 'TailLights', 'end': 'rear', 'shape': 'rect', 'x': 0.58, 'z': 0.66, 'w': 0.20, 'h': 0.13},
+            {'node': 'rear_blinker_left', 'material': 'TailLights', 'end': 'rear', 'shape': 'rect', 'x': 0.70, 'z': 0.66, 'w': 0.03, 'h': 0.13},
+            {'node': 'rear_blinker_right', 'material': 'TailLights', 'end': 'rear', 'shape': 'rect', 'x': 0.70, 'z': 0.66, 'w': 0.03, 'h': 0.13},
+            {'node': 'reverse_lights', 'material': 'ReverseLights', 'end': 'rear', 'shape': 'disc', 'x': 0.50, 'z': 0.40, 'r': 0.035},
+        ],
+        'mirror': {'x': 0.90, 'y': -0.40, 'z': 0.99},
+        'wheel': {'style': 'hubcap', 'rimFactor': 0.66},
+    },
+}
