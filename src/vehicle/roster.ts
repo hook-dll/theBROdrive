@@ -137,6 +137,36 @@ export const ROSTER: readonly RosterCar[] = [
     lights: { ...CARSHAPE_LIGHTS },
     target: { top: 150, to100: null, turn: 5.3, source: 'Fiat 124 (1966) catalogue; turning circle 10.6 m' },
   },
+  {
+    // Moskvich-412 (1967): UZAM-412 1.48 four, 75 hp at 5800 and 11.5 kgm at 3800,
+    // four-speed on a 4.22 axle, leaf-sprung rear, 1045 kg; 140 km/h, 0-100 in 19 s.
+    id: 'rs_moskvich412',
+    label: 'Moskvich-412',
+    body: 'moskvich412.glb',
+    bodyClass: 'car',
+    factory: { length: 4.25, width: 1.55, height: 1.48, clearance: 0.175, wheelbase: 2.4, frontTrack: 1.27, rearTrack: 1.27, wheelRadius: 0.29, tyreWidth: 0.165, frontOverhang: 0.68 },
+    mass: 1045,
+    frontWeightShare: 0.53,
+    rearDriveBias: 1,
+    engine: {
+      label: '1.5 UZAM-412 inline-four', mass: 125,
+      spec: { peakPowerKw: 55.2, powerPeakRpm: 5800, peakTorqueNm: 113, torquePeakRpm: 3800, redlineRpm: 6200, idleRpm: 800, bsfc: 0.33, brakingCoeff: 0.0174, cylinders: 4 },
+      rated: { hp: 74 }, ratedTorqueNm: 113, source: 'Moskvich-412 catalogue: 75 l.s. at 5800, 11.5 kgm at 3800',
+    },
+    gearbox: {
+      label: 'Moskvich-412 four-speed', mass: 32,
+      spec: { ratios: [3.49, 2.04, 1.33, 1.0], reverse: 3.39, finalDrive: 4.22, shiftTime: 0.35, automatic: false, efficiency: 0.9 },
+    },
+    tankLitres: 46,
+    wheelGrip: 0.56,
+    brakeDecelG: 0.55,
+    steerLock: 0.52,
+    dragArea: 1.181,
+    handlingProfile: 'classic',
+    suspension: S(1.15, 1.45, 0.24, 0.38, 0.1),
+    tyre: { construction: 'crossply', aspect: 0.9 },
+    target: { top: 140, to100: null, turn: 5.5, source: 'Moskvich-412 catalogue (autoopt.ru)' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {

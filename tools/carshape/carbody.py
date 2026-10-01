@@ -357,6 +357,11 @@ if g:
     for k in range(g.get('slats', 6)):
         z = gz0 + (k + 0.5) * (gz1 - gz0) / max(1, g.get('slats', 6))
         box(bm_, (0, nose_y - 0.018, z), (2 * gx, 0.012, 0.012), 0)
+    # Vertical bars, for the grilles that have them.
+    n_bars = g.get('bars', 0)
+    for k in range(n_bars):
+        x = -gx + (k + 0.5) * 2 * gx / n_bars
+        box(bm_, (x, nose_y - 0.016, (gz0 + gz1) / 2), (0.008, 0.012, gz1 - gz0), 0)
 slat_mat = MAT['chrome'] if (g or {}).get('slatMaterial', 'chrome') == 'chrome' else MAT['trim']
 chrome_front = new_object('chrome_front', bm_, [slat_mat])
 bm_ = bmesh.new()
