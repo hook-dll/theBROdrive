@@ -1,0 +1,51 @@
+# Mercedes-Benz 240 D (W123, 1976-85). Factory: 4725 x 1786 x 1438, wheelbase 2795,
+# tracks 1488/1446, 175 SR 14. Read off the drawing reprinted at
+# 3dcar.ru/blueprints/mercedes/w123_1976 (side, front, rear, plan with dimension
+# lines), calibrated by the wheelbase (194.6 px/m).
+# Long flat bonnet behind the upright chrome grille, wide lamp units with the
+# indicator in their outer end, a tall glasshouse, ribbed tail lamps, chrome bumpers.
+CAR = {
+    'id': 'w123',
+    'label': 'Mercedes-Benz 240 D',
+    'kind': 'saloon',
+    'factory': {'length': 4.725, 'width': 1.786, 'height': 1.438, 'clearance': 0.16, 'wheelbase': 2.795,
+                'frontTrack': 1.488, 'rearTrack': 1.446, 'wheelRadius': 0.31, 'tyreWidth': 0.175, 'frontOverhang': 0.81},
+    'trimEnds': 0.05,
+    'deck': [[-2.31, 0.86], [-2.24, 0.89], [-2.0, 0.93], [-1.5, 0.965], [-1.13, 0.99], [-1.02, 1.0],
+             [-0.5, 1.0], [1.1, 1.0], [1.59, 1.0], [1.64, 0.99], [2.0, 0.965], [2.23, 0.94], [2.31, 0.91]],
+    'belt': 0.985,
+    'cabin': [-1.02, -0.52, 1.08, 1.59],
+    'roof': [1.438, 1.40],
+    'screenTop': 1.37,
+    'crown': 0.015,
+    'widths': {'waist': 0.893, 'shoulder': 0.885, 'deckEdge': 0.86, 'glassDeck': 0.77, 'glass': 0.74,
+               'railDeck': 0.64, 'railPillar': 0.71, 'rail': 0.66, 'sill': 0.85},
+    'planFactor': [[-2.31, 0.95], [-2.2, 0.99], [-2.05, 1.0], [2.1, 1.0], [2.25, 0.985], [2.31, 0.965]],
+    'sill': [[-2.31, 0.48], [-2.0, 0.38], [-1.8, 0.35], [1.8, 0.35], [2.0, 0.40], [2.31, 0.47]],
+    'floor': [[-2.31, 0.45], [-2.0, 0.27], [-1.8, 0.23], [1.8, 0.23], [2.0, 0.28], [2.31, 0.45]],
+    'waistZ': 0.68,
+    'shoulderDrop': 0.06,
+    'edgeDrop': 0.015,
+    'shoulderRound': 0.15,
+    'windows': [[[-0.82, 0.99], [-0.44, 1.37], [0.10, 1.37], [0.10, 0.99]],
+                [[0.15, 0.99], [0.15, 1.37], [0.84, 1.37], [1.12, 0.99]]],
+    'arch': {'radiusFactor': 1.14, 'lift': 0.03, 'wellDepth': 0.3},
+    'parts': {
+        'headlamps': [{'shape': 'rect', 'x': 0.535, 'z': 0.68, 'w': 0.32, 'h': 0.19}], 'bezel': 0.012,
+        'grille': {'halfWidth': 0.35, 'z': [0.57, 0.86], 'slats': 1, 'bars': 11},
+        'bumper': {'depth': 0.08, 'height': 0.10, 'standOff': 0.04, 'wrap': 0.35, 'halfWidth': 0.88,
+                   'zFront': 0.46, 'zRear': 0.50},
+        'doorHandles': [[-0.18, 0.86], [0.73, 0.86]],
+        'windowFrame': 0.016,
+        'lamps': [
+            {'node': 'front_blinker_left', 'material': 'IndicatorLights', 'end': 'front', 'shape': 'rect', 'x': 0.745, 'z': 0.68, 'w': 0.08, 'h': 0.19},
+            {'node': 'front_blinker_right', 'material': 'IndicatorLights', 'end': 'front', 'shape': 'rect', 'x': 0.745, 'z': 0.68, 'w': 0.08, 'h': 0.19},
+            {'node': 'rear_blinker_left', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'rect', 'x': 0.77, 'z': 0.70, 'w': 0.14, 'h': 0.13},
+            {'node': 'rear_blinker_right', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'rect', 'x': 0.77, 'z': 0.70, 'w': 0.14, 'h': 0.13},
+            {'node': 'taillights', 'material': 'TailLights', 'end': 'rear', 'shape': 'rect', 'x': 0.585, 'z': 0.70, 'w': 0.23, 'h': 0.13},
+            {'node': 'reverse_lights', 'material': 'ReverseLights', 'end': 'rear', 'shape': 'rect', 'x': 0.40, 'z': 0.70, 'w': 0.13, 'h': 0.13},
+        ],
+        'mirror': {'x': 0.93, 'y': -0.75, 'z': 1.04},
+        'wheel': {'style': 'hubcap', 'rimFactor': 0.66},
+    },
+}

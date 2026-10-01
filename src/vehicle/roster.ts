@@ -241,6 +241,36 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'crossply', aspect: 0.95 },
     target: { top: 130, to100: null, turn: 6.3, source: 'AO gaz-21' },
   },
+  {
+    // Mercedes-Benz 240 D (W123): OM616 2.4 diesel, 72 PS at 4400 and 137 Nm at 2400,
+    // four-speed on a 3.69 axle, 1390 kg, semi-trailing-arm rear; 138 km/h, 11.3 m circle.
+    id: 'rs_w123',
+    label: 'Mercedes-Benz 240 D',
+    body: 'w123.glb',
+    bodyClass: 'car',
+    factory: { length: 4.725, width: 1.786, height: 1.438, clearance: 0.16, wheelbase: 2.795, frontTrack: 1.488, rearTrack: 1.446, wheelRadius: 0.31, tyreWidth: 0.175, frontOverhang: 0.81 },
+    mass: 1390,
+    frontWeightShare: 0.54,
+    rearDriveBias: 1,
+    engine: {
+      label: '2.4 Mercedes OM616 diesel', mass: 210,
+      spec: { peakPowerKw: 53, powerPeakRpm: 4400, peakTorqueNm: 137, torquePeakRpm: 2400, redlineRpm: 4700, idleRpm: 750, bsfc: 0.26, brakingCoeff: 0.0278, cylinders: 4 },
+      rated: { ps: 72 }, ratedTorqueNm: 137, source: 'Mercedes-Benz 240 D (W123) data: 72 PS at 4400, 137 Nm at 2400',
+    },
+    gearbox: {
+      label: 'Mercedes four-speed', mass: 40,
+      spec: { ratios: [3.9, 2.3, 1.41, 1.0], reverse: 3.66, finalDrive: 3.69, shiftTime: 0.4, automatic: false, efficiency: 0.9 },
+    },
+    tankLitres: 65,
+    wheelGrip: 0.7,
+    brakeDecelG: 0.75,
+    steerLock: 0.590,
+    dragArea: 1.127,
+    handlingProfile: 'road',
+    suspension: S(1.1, 1.25, 0.26, 0.42, 0.1),
+    tyre: { construction: 'radial', aspect: 0.82 },
+    target: { top: 138, to100: null, turn: 5.65, source: 'Mercedes-Benz W123 240 D data; 11.3 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
