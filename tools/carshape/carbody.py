@@ -362,11 +362,24 @@ if g:
     for k in range(n_bars):
         x = -gx + (k + 0.5) * 2 * gx / n_bars
         box(bm_, (x, nose_y - 0.016, (gz0 + gz1) / 2), (0.008, 0.012, gz1 - gz0), 0)
+# Twin kidneys (BMW) or any other centre grille standing proud of the main one:
+# a chrome frame with a dark field, mirrored either side of the centreline.
+k = (g or {}).get('kidneys')
+kidney_bm = bmesh.new()
+if k:
+    for s_ in (1, -1):
+        cx = s_ * (k['gap'] / 2 + k['w'] / 2)
+        box(kidney_bm, (cx, nose_y - 0.03, k['z']), (k['w'] + 0.03, 0.02, k['h'] + 0.03), 0)
+kidney_frames = new_object('kidneys', kidney_bm, [MAT['chrome']])
 slat_mat = MAT['chrome'] if (g or {}).get('slatMaterial', 'chrome') == 'chrome' else MAT['trim']
 chrome_front = new_object('chrome_front', bm_, [slat_mat])
 bm_ = bmesh.new()
 if g:
     box(bm_, (0, nose_y - 0.01, (gz0 + gz1) / 2), (2 * gx, 0.012, gz1 - gz0), 0)
+    if g.get('kidneys'):
+        k = g['kidneys']
+        for s_ in (1, -1):
+            box(bm_, (s_ * (k['gap'] / 2 + k['w'] / 2), nose_y - 0.042, k['z']), (k['w'], 0.012, k['h']), 0)
 grille_field = new_object('grille', bm_, [MAT['trim']])
 
 
@@ -543,7 +556,7 @@ for o in scene.objects:
         o.name = 'glass'
         o.data.name = 'glass'
 bpy.ops.object.select_all(action='DESELECT')
-for o in (chrome_front, grille_field, bezels, bumpers, detail_chrome, front_slots):
+for o in (chrome_front, grille_field, bezels, kidney_frames, bumpers, detail_chrome, front_slots):
     o.select_set(True)
 bpy.context.view_layer.objects.active = bumpers
 bpy.ops.object.join()

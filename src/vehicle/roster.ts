@@ -271,6 +271,37 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'radial', aspect: 0.82 },
     target: { top: 138, to100: null, turn: 5.65, source: 'Mercedes-Benz W123 240 D data; 11.3 m turning circle' },
   },
+  {
+    // BMW 2002 (1968): M10 2.0, 100 PS DIN at 5500 and 16 kgm at 3000, four-speed on a
+    // 3.64 axle, semi-trailing-arm rear, 990 kg; 170 km/h, 0-100 in 10.6 s, 10.4 m circle.
+    id: 'rs_bmw2002',
+    label: 'BMW 2002',
+    body: 'bmw2002.glb',
+    bodyClass: 'car',
+    factory: { length: 4.23, width: 1.59, height: 1.41, clearance: 0.16, wheelbase: 2.5, frontTrack: 1.33, rearTrack: 1.33, wheelRadius: 0.29, tyreWidth: 0.165, frontOverhang: 0.66 },
+    mass: 990,
+    frontWeightShare: 0.53,
+    rearDriveBias: 1,
+    engine: {
+      label: '2.0 BMW M10 inline-four', mass: 135,
+      spec: { peakPowerKw: 73.5, powerPeakRpm: 5500, peakTorqueNm: 157, torquePeakRpm: 3000, redlineRpm: 6200, idleRpm: 850, bsfc: 0.31, brakingCoeff: 0.0242, cylinders: 4 },
+      rated: { ps: 100 }, ratedTorqueNm: 157, source: 'BMW 2002 (1968) data: 100 PS DIN at 5500, 16 kgm at 3000',
+    },
+    gearbox: {
+      label: 'BMW 2002 four-speed', mass: 32,
+      spec: { ratios: [3.835, 2.053, 1.345, 1.0], reverse: 4.18, finalDrive: 3.64, shiftTime: 0.3, automatic: false, efficiency: 0.9 },
+    },
+    tankLitres: 46,
+    wheelGrip: 0.72,
+    brakeDecelG: 0.75,
+    steerLock: 0.564,
+    dragArea: 0.879,
+    handlingProfile: 'road',
+    suspension: S(1.2, 1.4, 0.26, 0.42, 0.09),
+    tyre: { construction: 'radial', aspect: 0.82 },
+    antiRoll: { front: 0.5, rear: 0.0 },
+    target: { top: 170, to100: null, turn: 5.2, source: 'BMW 2002 (1968) data; 10.4 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
