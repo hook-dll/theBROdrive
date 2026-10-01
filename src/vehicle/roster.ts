@@ -499,6 +499,36 @@ export const ROSTER: readonly RosterCar[] = [
     antiRoll: { front: 0, rear: 0 },
     target: { top: 157, to100: null, turn: 4.85, source: 'automobile-catalog Cooper S 1275, 3.44 axle' },
   },
+  {
+    // Ford Capri 2.0 S (Mk III, 1978): Pinto 2.0, 101 PS at 5200 and 152 Nm at 3500,
+    // four-speed on a 3.44 axle, leaf-sprung live axle, 1050 kg; 180 km/h, 10.4 m circle.
+    id: 'rs_capri',
+    label: 'Ford Capri',
+    body: 'capri.glb',
+    bodyClass: 'car',
+    factory: { length: 4.439, width: 1.698, height: 1.32, clearance: 0.12, wheelbase: 2.563, frontTrack: 1.353, rearTrack: 1.384, wheelRadius: 0.295, tyreWidth: 0.185, frontOverhang: 0.86 },
+    mass: 1050,
+    frontWeightShare: 0.55,
+    rearDriveBias: 1,
+    engine: {
+      label: '2.0 Ford Pinto inline-four', mass: 140,
+      spec: { peakPowerKw: 74.3, powerPeakRpm: 5200, peakTorqueNm: 152, torquePeakRpm: 3500, redlineRpm: 6000, idleRpm: 800, bsfc: 0.32, brakingCoeff: 0.0242, cylinders: 4 },
+      rated: { ps: 101 }, ratedTorqueNm: 152, source: 'Ford Capri 2.0 S (1978) data: 101 PS DIN at 5200, 152 Nm at 3500',
+    },
+    gearbox: {
+      label: 'Ford Type E four-speed', mass: 30,
+      spec: { ratios: [3.65, 1.97, 1.37, 1.0], reverse: 3.66, finalDrive: 3.44, shiftTime: 0.3, automatic: false, efficiency: 0.9 },
+    },
+    tankLitres: 58,
+    wheelGrip: 0.74,
+    brakeDecelG: 0.78,
+    steerLock: 0.584,
+    dragArea: 0.748,
+    handlingProfile: 'road',
+    suspension: S(1.2, 1.5, 0.26, 0.42, 0.09),
+    tyre: { construction: 'radial', aspect: 0.7 },
+    target: { top: 180, to100: null, turn: 5.2, source: 'Ford Capri 2.0 S (Mk III) data; 10.4 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
