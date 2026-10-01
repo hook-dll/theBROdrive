@@ -235,7 +235,8 @@ scene.collection.objects.link(body)
 
 # ---- wheel arches: the outer skin only, leaving a well ----------------------------------
 arch = B.get('arch', {})
-for axle_y, track in AXLES:
+# A car with skirts over its rear wheels (the DS) has no rear arch to cut.
+for axle_y, track in (AXLES[:1] if arch.get('rearSkirt') else AXLES):
     radius = R * arch.get('radiusFactor', 1.13)
     centre_z = R + arch.get('lift', 0.02)
     outline = [(axle_y + radius * math.cos(a), centre_z + radius * math.sin(a))
@@ -325,16 +326,36 @@ P = spec['parts']
 nose_y, tail_y = y_front, y_rear
 front_n, rear_n = (0, -1, 0), (0, 1, 0)
 
+# Where the skin actually is at a given (x, z) seen from the nose or the tail, so a
+# lamp sits ON a sloping nose or a curved tail rather than at the body's end plane.
+from mathutils.bvhtree import BVHTree  # noqa: E402
+_dg = bpy.context.evaluated_depsgraph_get()
+_skin = BVHTree.FromObject(body, _dg)
+
+
+def surface_y(x, z, end):
+    toward = 1 if end == 'front' else -1
+    start = Vector((x, -toward * (L / 2 + 1.0), z))
+    hit = _skin.ray_cast(start, Vector((0, toward, 0)), L + 2)
+    if hit[0] is None:
+        return nose_y if end == 'front' else tail_y
+    return hit[0].y
+
 # Headlamps: a lens in a bezel. Each entry is [x, z, r] for a round lamp, or a dict
 # {"shape": "rect", "x", "z", "w", "h"} for a rectangular one; mirrored to both sides.
 def lamp_shape(bm_, lamp, y, grow, depth):
+    # Each lamp sits on the skin in front of it (see `surface_y`); `y` here is only
+    # the offset from the nose the caller asks for (lens proud of the bezel).
+    offset = y - nose_y
     if isinstance(lamp, dict) and lamp.get('shape') == 'rect':
+        face = lamp.get('y', surface_y(lamp['x'], lamp['z'], 'front'))
         for s_ in (1, -1):
-            box(bm_, (s_ * lamp['x'], y, lamp['z']), (lamp['w'] + 2 * grow, depth, lamp['h'] + 2 * grow), 0)
+            box(bm_, (s_ * lamp['x'], face + offset, lamp['z']), (lamp['w'] + 2 * grow, depth, lamp['h'] + 2 * grow), 0)
     else:
-        x, z, r = lamp
+        x, z, r = lamp[:3]
+        face = lamp[3] if len(lamp) > 3 else surface_y(x, z, 'front')
         for s_ in (1, -1):
-            disc(bm_, (s_ * x, y, z), front_n, r + grow, depth, 24, 0)
+            disc(bm_, (s_ * x, face + offset, z), front_n, r + grow, depth, 24, 0)
 
 
 bezel_mat = MAT['chrome'] if P.get('bezelMaterial', 'chrome') == 'chrome' else MAT['trim']
@@ -440,7 +461,7 @@ for lamp in P.get('lamps', []):
             centre, normal = (sgn * x, lamp['y'], lamp['z']), (sgn, 0, 0)
         else:
             # A lamp that sits up a sloping tailgate or nose gives its own `y`.
-            face = lamp.get('y', nose_y if lamp['end'] == 'front' else tail_y)
+            face = lamp.get('y', surface_y(lamp['x'], lamp['z'], lamp['end']))
             n = -1 if lamp['end'] == 'front' else 1
             centre, normal = (sgn * lamp['x'], face + n * (depth / 2 - 0.004), lamp['z']), (0, n, 0)
         if lamp['shape'] == 'disc':

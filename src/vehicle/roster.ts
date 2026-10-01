@@ -560,6 +560,37 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'radial', aspect: 0.82 },
     target: { top: 145, to100: null, turn: 5.4, source: 'Saab 96 V4 (1967) data; 10.8 m turning circle' },
   },
+  {
+    // Citroën DS 21 (1968): 2175 cc four, 100 PS DIN at 5500 and 17 kgm at 3000, four-
+    // speed on a 3.31 final drive, hydropneumatic suspension, 1280 kg; 175 km/h.
+    id: 'rs_citroends',
+    label: 'Citroën DS',
+    body: 'citroends.glb',
+    bodyClass: 'car',
+    factory: { length: 4.874, width: 1.79, height: 1.47, clearance: 0.145, wheelbase: 3.125, frontTrack: 1.516, rearTrack: 1.316, wheelRadius: 0.33, tyreWidth: 0.18, frontOverhang: 1.016 },
+    mass: 1280,
+    frontWeightShare: 0.65,
+    rearDriveBias: 0,
+    engine: {
+      label: '2.2 Citroën DX inline-four', mass: 160,
+      spec: { peakPowerKw: 73.5, powerPeakRpm: 5500, peakTorqueNm: 167, torquePeakRpm: 3000, redlineRpm: 5900, idleRpm: 800, bsfc: 0.32, brakingCoeff: 0.0270, cylinders: 4 },
+      rated: { ps: 100 }, ratedTorqueNm: 167, source: 'Citroën DS 21 (1968) data: 100 PS DIN at 5500, 17 kgm at 3000',
+    },
+    gearbox: {
+      label: 'Citroën DS four-speed transaxle', mass: 40,
+      spec: { ratios: [3.25, 1.94, 1.27, 0.86], reverse: 3.17, finalDrive: 3.31, shiftTime: 0.4, automatic: false, efficiency: 0.92 },
+    },
+    tankLitres: 65,
+    wheelGrip: 0.7,
+    brakeDecelG: 0.8,
+    steerLock: 0.640,
+    dragArea: 0.727,
+    handlingProfile: 'road',
+    // Hydropneumatic: the softest springs on the list, well damped, long travel.
+    suspension: S(0.75, 0.8, 0.3, 0.45, 0.16),
+    tyre: { construction: 'radial', aspect: 0.82 },
+    target: { top: 175, to100: null, turn: 5.6, source: 'Citroën DS 21 (1968) data' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
