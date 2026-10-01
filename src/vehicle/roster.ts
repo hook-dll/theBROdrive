@@ -1438,6 +1438,37 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'crossply', aspect: 0.9 },
     target: { top: 150, to100: null, turn: 5.95, source: 'Plymouth Valiant (1964) data; 11.9 m turning circle' },
   },
+  {
+    // AMC Eagle wagon (1981): 258 cu in (4.2) six, 110 hp at 3200 and 210 lb-ft at 1800
+    // (net), Torque-Command three-speed automatic on a 2.35 axle, full-time four-wheel
+    // drive through a viscous centre, 1500 kg; about 143 km/h (89 mph), 11.7 m turning circle.
+    id: 'rs_eagle',
+    label: 'AMC Eagle',
+    body: 'eagle.glb',
+    bodyClass: 'car',
+    factory: { length: 4.74, width: 1.83, height: 1.405, clearance: 0.19, wheelbase: 2.776, frontTrack: 1.5, rearTrack: 1.46, wheelRadius: 0.34, tyreWidth: 0.195, frontOverhang: 0.82 },
+    mass: 1500,
+    frontWeightShare: 0.56,
+    rearDriveBias: 0.5,
+    engine: {
+      label: '4.2 AMC 258 six', mass: 230,
+      spec: { peakPowerKw: 82, powerPeakRpm: 3200, peakTorqueNm: 285, torquePeakRpm: 1800, redlineRpm: 4200, idleRpm: 600, bsfc: 0.3, brakingCoeff: 0.04, cylinders: 6 },
+      rated: { hp: 110 }, ratedTorqueNm: 285, source: 'AMC 258 (1981 Eagle): 110 hp net at 3200, 210 lb-ft at 1800',
+    },
+    gearbox: {
+      label: 'Chrysler TorqueFlite (Torque-Command) three-speed', mass: 70,
+      spec: { ratios: [2.45, 1.45, 1.0], reverse: 2.2, finalDrive: 2.35, shiftTime: 0.5, automatic: true, efficiency: 0.84 },
+    },
+    tankLitres: 79,
+    wheelGrip: 0.62,
+    brakeDecelG: 0.6,
+    steerLock: 0.565,
+    dragArea: 1.420,
+    handlingProfile: 'classic',
+    suspension: S(1.05, 1.2, 0.22, 0.36, 0.12),
+    tyre: { construction: 'radial', aspect: 0.75 },
+    target: { top: 143, to100: null, turn: 5.85, source: 'AMC Eagle wagon (1981) data; 89 mph road-test top speed; 11.7 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
