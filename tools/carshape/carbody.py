@@ -428,10 +428,20 @@ def build_wing(bm_, w):
                 bm_.faces.new((ring_t[j], ring_b[j], ring_b[j + 1], ring_t[j + 1]))
 
 
-if P.get('wings'):
-    wbm = bmesh.new()
+# Black plastic arch flares (the Panda 4x4) ride with the trim, not the paint.
+trim_wings = []
+if any(w.get('material') == 'trim' for w in P.get('wings', [])):
+    tbm = bmesh.new()
     for w in P['wings']:
-        build_wing(wbm, w)
+        if w.get('material') == 'trim':
+            build_wing(tbm, w)
+    bmesh.ops.recalc_face_normals(tbm, faces=tbm.faces)
+    trim_wings.append(new_object('flares', tbm, [MAT['trim']]))
+if any(w.get('material') != 'trim' for w in P.get('wings', [])) or P.get('runningBoards'):
+    wbm = bmesh.new()
+    for w in P.get('wings', []):
+        if w.get('material') != 'trim':
+            build_wing(wbm, w)
     # Running boards between the wings: [y0, y1, z, inner x, outer x].
     for y0, y1, z, xi, xo in P.get('runningBoards', []):
         for sgn in (1, -1):
@@ -737,7 +747,7 @@ for o in scene.objects:
         o.name = 'glass'
         o.data.name = 'glass'
 bpy.ops.object.select_all(action='DESELECT')
-for o in (chrome_front, grille_field, bezels, kidney_frames, bumpers, detail_chrome, front_slots, *spare_parts):
+for o in (chrome_front, grille_field, bezels, kidney_frames, bumpers, detail_chrome, front_slots, *spare_parts, *trim_wings):
     o.select_set(True)
 bpy.context.view_layer.objects.active = bumpers
 bpy.ops.object.join()

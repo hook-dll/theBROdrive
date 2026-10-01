@@ -1220,6 +1220,38 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'radial', aspect: 0.82 },
     target: { top: 135, to100: null, turn: 5.3, source: 'Toyota Hilux N40 data; 10.6 m turning circle' },
   },
+  {
+    // Fiat Panda 4x4 (1983): 965 cc four, 48 PS at 5600 and 7.1 kgm at 3500, five-speed
+    // with a crawler first through the Steyr-Puch part-time rear drive (engaged), leaf-
+    // sprung rear axle, 740 kg; 135 km/h, 9.6 m turning circle. The final drive is chosen
+    // to meet the published top speed at peak power in fifth.
+    id: 'rs_panda4x4',
+    label: 'Fiat Panda 4x4',
+    body: 'panda4x4.glb',
+    bodyClass: 'car',
+    factory: { length: 3.39, width: 1.485, height: 1.461, clearance: 0.18, wheelbase: 2.17, frontTrack: 1.254, rearTrack: 1.258, wheelRadius: 0.29, tyreWidth: 0.145, frontOverhang: 0.585 },
+    mass: 740,
+    frontWeightShare: 0.58,
+    rearDriveBias: 0.5,
+    engine: {
+      label: '1.0 Fiat 100 four', mass: 80,
+      spec: { peakPowerKw: 35, powerPeakRpm: 5600, peakTorqueNm: 70, torquePeakRpm: 3500, redlineRpm: 6200, idleRpm: 800, bsfc: 0.29, brakingCoeff: 0.02, cylinders: 4 },
+      rated: { ps: 48 }, ratedTorqueNm: 70, source: 'Fiat Panda 4x4 (1983) data: 48 CV DIN at 5600, 7.1 kgm at 3500',
+    },
+    gearbox: {
+      label: 'Panda 4x4 five-speed', mass: 30,
+      spec: { ratios: [3.91, 2.055, 1.348, 0.963, 0.766], reverse: 3.62, finalDrive: 5.9, shiftTime: 0.3, automatic: false, efficiency: 0.87 },
+    },
+    tankLitres: 35,
+    wheelGrip: 0.6,
+    brakeDecelG: 0.6,
+    steerLock: 0.554,
+    dragArea: 0.804,
+    handlingProfile: 'utility',
+    suspension: S(1.35, 1.5, 0.22, 0.36, 0.12),
+    tyre: { construction: 'radial', aspect: 0.82 },
+    target: { top: 135, to100: null, turn: 4.8, source: 'Fiat Panda 4x4 (1983) data; 9.6 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {

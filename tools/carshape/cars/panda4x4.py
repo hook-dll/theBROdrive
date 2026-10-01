@@ -1,0 +1,60 @@
+# Fiat Panda 4x4 (1983-86). Factory: 3390 x 1485 x 1461, wheelbase 2170, overhangs
+# 585/635, tracks 1254/1258, 145 SR 13, clearance 180. Read off the dimensioned drawing
+# reprinted at 3dcar.ru/blueprints/fiat/panda_4x4_1983 (224 px/m by the wheelbase).
+# Giugiaro's box: flat glass everywhere, a short bonnet sloping to a slatted grille
+# between square lamps, slab sides, a near-vertical tailgate, deep black bumpers and
+# arch flares, a roof that runs dead level to the back.
+CAR = {
+    'id': 'panda4x4',
+    'label': 'Fiat Panda 4x4',
+    'kind': 'hatchback',
+    'factory': {'length': 3.39, 'width': 1.485, 'height': 1.461, 'clearance': 0.18, 'wheelbase': 2.17,
+                'frontTrack': 1.254, 'rearTrack': 1.258, 'wheelRadius': 0.29, 'tyreWidth': 0.145, 'frontOverhang': 0.585},
+    'yRange': [-1.665, 1.63],
+    'deck': [[-1.665, 0.855], [-1.645, 0.87], [-0.70, 0.99], [1.56, 1.0], [1.63, 0.97]],
+    'belt': 0.98,
+    'cabin': [-0.67, -0.22, 1.20, 1.56],
+    'roof': [1.46, 1.43],
+    'screenTop': 1.37,
+    'crown': 0.008,
+    'roofCrown': 0.02,
+    'hatchLip': 0.06,
+    'rearScreenHalf': 0.56,
+    'widths': {'waist': 0.74, 'shoulder': 0.735, 'deckEdge': 0.72, 'glassDeck': 0.70, 'glass': 0.68,
+               'railDeck': 0.64, 'railPillar': 0.67, 'rail': 0.66, 'sill': 0.72},
+    'planFactor': [[-1.665, 0.97], [-1.55, 1.0], [1.55, 1.0], [1.63, 0.98]],
+    'sill': [[-1.665, 0.42], [-1.4, 0.36], [-0.7, 0.30], [0.9, 0.30], [1.4, 0.36], [1.63, 0.42]],
+    'floor': [[-1.665, 0.38], [-1.4, 0.27], [-0.7, 0.22], [0.9, 0.22], [1.4, 0.27], [1.63, 0.38]],
+    'waistZ': 0.75,
+    'shoulderDrop': 0.015,
+    'edgeDrop': 0.01,
+    'shoulderRound': 0.02,
+    'tumbleunder': 0.02,
+    'smoothAngleDeg': 24,
+    'windows': [[[-0.60, 0.98], [-0.245, 1.35], [0.367, 1.35], [0.367, 0.98]],
+                [[0.48, 0.99], [0.48, 1.35], [1.07, 1.35], [1.225, 1.02]]],
+    'arch': {'radiusFactor': 1.35, 'lift': 0.02, 'wellDepth': 0.3},
+    'parts': {
+        'wings': [
+            {'axle': 'front', 'inner': 0.70, 'outer': 0.765, 'radius': 0.40, 'lift': 0.02, 'from': 18, 'to': 162, 'crown': 0.01, 'thickness': 0.03, 'material': 'trim'},
+            {'axle': 'rear', 'inner': 0.70, 'outer': 0.765, 'radius': 0.40, 'lift': 0.02, 'from': 18, 'to': 162, 'crown': 0.01, 'thickness': 0.03, 'material': 'trim'},
+        ],
+        'headlamps': [{'shape': 'rect', 'x': 0.535, 'z': 0.74, 'w': 0.26, 'h': 0.15}], 'bezel': 0.012, 'bezelMaterial': 'trim',
+        'grille': {'halfWidth': 0.39, 'z': [0.67, 0.83], 'slats': 7},
+        'bumper': {'depth': 0.07, 'height': 0.20, 'standOff': 0.03, 'wrap': 0.28, 'halfWidth': 0.75,
+                   'zFront': 0.52, 'zRear': 0.52, 'material': 'trim'},
+        'doorHandles': [[0.30, 0.90]],
+        'windowFrame': 0.012,
+        'lensColours': {'FrontLampLens': [0.9, 0.62, 0.25]},
+        'lamps': [
+            {'node': 'front_blinker_left', 'material': 'FrontLampLens', 'end': 'front', 'shape': 'rect', 'x': 0.55, 'z': 0.60, 'w': 0.12, 'h': 0.04, 'y': -1.73},
+            {'node': 'front_blinker_right', 'material': 'FrontLampLens', 'end': 'front', 'shape': 'rect', 'x': 0.55, 'z': 0.60, 'w': 0.12, 'h': 0.04, 'y': -1.73},
+            {'node': 'taillights', 'material': 'TailLights', 'end': 'rear', 'shape': 'rect', 'x': 0.60, 'z': 0.90, 'w': 0.10, 'h': 0.10},
+            {'node': 'rear_blinker_left', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'rect', 'x': 0.60, 'z': 0.80, 'w': 0.10, 'h': 0.08},
+            {'node': 'rear_blinker_right', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'rect', 'x': 0.60, 'z': 0.80, 'w': 0.10, 'h': 0.08},
+            {'node': 'reverse_lights', 'material': 'ReverseLights', 'end': 'rear', 'shape': 'rect', 'x': 0.60, 'z': 0.725, 'w': 0.10, 'h': 0.05},
+        ],
+        'mirror': {'x': 0.78, 'y': -0.58, 'z': 1.05},
+        'wheel': {'style': 'steel', 'windows': 5, 'rimFactor': 0.62},
+    },
+}
