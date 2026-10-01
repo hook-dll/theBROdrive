@@ -1376,6 +1376,37 @@ export const ROSTER: readonly RosterCar[] = [
     antiRoll: { front: 0.45, rear: 0.2 },
     target: { top: 175, to100: null, turn: 5.5, source: 'Alfa Romeo Giulia Super (1965) data; 11 m turning circle' },
   },
+  {
+    // Subaru Leone 1600 4WD estate (1975): EA71 1.6 flat-four, 72 PS at 5600 and 11.4 kgm
+    // at 3600, four-speed on a 3.889 final drive, part-time rear drive engaged, 1000 kg;
+    // 145 km/h, 9.6 m turning circle.
+    id: 'rs_leone',
+    label: 'Subaru Leone 4WD',
+    body: 'leone.glb',
+    bodyClass: 'car',
+    factory: { length: 3.995, width: 1.5, height: 1.46, clearance: 0.21, wheelbase: 2.455, frontTrack: 1.3, rearTrack: 1.28, wheelRadius: 0.29, tyreWidth: 0.155, frontOverhang: 0.75 },
+    mass: 1000,
+    frontWeightShare: 0.6,
+    rearDriveBias: 0.5,
+    engine: {
+      label: '1.6 Subaru EA71 flat-four', mass: 95,
+      spec: { peakPowerKw: 53, powerPeakRpm: 5600, peakTorqueNm: 112, torquePeakRpm: 3600, redlineRpm: 6200, idleRpm: 800, bsfc: 0.29, brakingCoeff: 0.022, cylinders: 4 },
+      rated: { ps: 72 }, ratedTorqueNm: 112, source: 'Subaru Leone 1600 4WD (1975): 72 PS at 5600, 11.4 kgm at 3600',
+    },
+    gearbox: {
+      label: 'Subaru four-speed transaxle', mass: 40,
+      spec: { ratios: [3.666, 2.157, 1.379, 0.971], reverse: 3.583, finalDrive: 3.889, shiftTime: 0.3, automatic: false, efficiency: 0.87 },
+    },
+    tankLitres: 50,
+    wheelGrip: 0.62,
+    brakeDecelG: 0.62,
+    steerLock: 0.624,
+    dragArea: 0.977,
+    handlingProfile: 'utility',
+    suspension: S(1.25, 1.35, 0.22, 0.38, 0.11),
+    tyre: { construction: 'radial', aspect: 0.82 },
+    target: { top: 145, to100: null, turn: 4.8, source: 'Subaru Leone 1600 4WD (1975) data; 9.6 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
