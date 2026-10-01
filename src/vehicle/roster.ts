@@ -529,6 +529,37 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'radial', aspect: 0.7 },
     target: { top: 180, to100: null, turn: 5.2, source: 'Ford Capri 2.0 S (Mk III) data; 10.4 m turning circle' },
   },
+  {
+    // Saab 96 V4 (1967): Ford Taunus 1.5 V4, 65 PS at 4700 and 116 Nm at 2500, column-
+    // shift four-speed with the freewheel, front drive, 950 kg; 145 km/h, 10.8 m circle.
+    id: 'rs_saab96',
+    label: 'Saab 96',
+    body: 'saab96.glb',
+    bodyClass: 'car',
+    factory: { length: 4.02, width: 1.58, height: 1.47, clearance: 0.18, wheelbase: 2.498, frontTrack: 1.22, rearTrack: 1.22, wheelRadius: 0.31, tyreWidth: 0.155, frontOverhang: 0.63 },
+    mass: 950,
+    frontWeightShare: 0.6,
+    rearDriveBias: 0,
+    engine: {
+      label: '1.5 Ford Taunus V4', mass: 110,
+      spec: { peakPowerKw: 47.8, powerPeakRpm: 4700, peakTorqueNm: 116, torquePeakRpm: 2500, redlineRpm: 5500, idleRpm: 800, bsfc: 0.33, brakingCoeff: 0.0209, cylinders: 4 },
+      rated: { ps: 65 }, ratedTorqueNm: 116, source: 'Saab 96 V4 (1967) data: 65 PS DIN at 4700, 116 Nm at 2500',
+    },
+    gearbox: {
+      label: 'Saab four-speed with freewheel', mass: 32,
+      // Final drive not sourced: set so the published top speed falls at the rated speed.
+      spec: { ratios: [3.39, 2.1, 1.34, 0.96], reverse: 3.29, finalDrive: 4.4, shiftTime: 0.4, automatic: false, efficiency: 0.92 },
+    },
+    tankLitres: 40,
+    wheelGrip: 0.66,
+    brakeDecelG: 0.66,
+    steerLock: 0.52,
+    dragArea: 0.618,
+    handlingProfile: 'road',
+    suspension: S(1.1, 1.3, 0.24, 0.4, 0.11),
+    tyre: { construction: 'radial', aspect: 0.82 },
+    target: { top: 145, to100: null, turn: 5.4, source: 'Saab 96 V4 (1967) data; 10.8 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
