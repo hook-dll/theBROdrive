@@ -603,7 +603,8 @@
      -0.99,
      -0.53
     ],
-    "x": 0.56
+    "x": 0.56,
+    "zMax": 1.255
    },
    {
     "panel": "rail-topCentre",
@@ -611,7 +612,8 @@
      0.97,
      1.32
     ],
-    "x": 0.52
+    "x": 0.52,
+    "zMax": 1.255
    }
   ],
   "arch": {
@@ -625,18 +627,18 @@
   "headlamps": [
    [
     0.575,
-    0.67,
-    0.085
+    0.665,
+    0.088
    ]
   ],
   "bezel": 0.016,
   "grille": {
-   "halfWidth": 0.46,
+   "halfWidth": 0.47,
    "z": [
-    0.55,
-    0.73
+    0.56,
+    0.74
    ],
-   "slats": 6
+   "slats": 7
   },
   "bumper": {
    "depth": 0.06,
@@ -647,30 +649,6 @@
    "zFront": 0.44,
    "zRear": 0.45
   },
-  "frontIndicator": [
-   0.53,
-   0.62,
-   0.49,
-   0.53
-  ],
-  "tailRed": [
-   0.46,
-   0.76,
-   0.6,
-   0.68
-  ],
-  "tailAmber": [
-   0.46,
-   0.76,
-   0.56,
-   0.6
-  ],
-  "tailWhite": [
-   0.39,
-   0.46,
-   0.56,
-   0.68
-  ],
   "mirror": {
    "x": 0.86,
    "y": -0.78,
@@ -688,9 +666,122 @@
   ],
   "windowFrame": 0.014,
   "overriders": {
-   "x": 0.36,
-   "height": 0.13,
-   "width": 0.035
+   "x": 0.33,
+   "height": 0.17,
+   "width": 0.04
+  },
+  "photos": {
+   "front": "VAZ-2101 beige colored (front view).jpg",
+   "rear": "VAZ-2101 beige colored (rear view).jpg",
+   "licence": "CC BY-SA 4.0, Kirill Borisenko, Wikimedia Commons"
+  },
+  "lensColours": {
+   "FrontLampLens": [
+    0.8,
+    0.8,
+    0.76
+   ]
+  },
+  "lamps": [
+   {
+    "node": "front_blinker_left",
+    "material": "FrontLampLens",
+    "end": "front",
+    "shape": "rect",
+    "x": 0.575,
+    "z": 0.535,
+    "w": 0.12,
+    "h": 0.045
+   },
+   {
+    "node": "front_blinker_right",
+    "material": "FrontLampLens",
+    "end": "front",
+    "shape": "rect",
+    "x": 0.575,
+    "z": 0.535,
+    "w": 0.12,
+    "h": 0.045
+   },
+   {
+    "node": "front_blinker_left",
+    "material": "IndicatorLights",
+    "end": "side",
+    "shape": "disc",
+    "y": -1.86,
+    "z": 0.69,
+    "r": 0.022,
+    "depth": 0.012
+   },
+   {
+    "node": "front_blinker_right",
+    "material": "IndicatorLights",
+    "end": "side",
+    "shape": "disc",
+    "y": -1.86,
+    "z": 0.69,
+    "r": 0.022,
+    "depth": 0.012
+   },
+   {
+    "node": "taillights",
+    "material": "TailLights",
+    "end": "rear",
+    "shape": "rect",
+    "x": 0.555,
+    "z": 0.665,
+    "w": 0.15,
+    "h": 0.095
+   },
+   {
+    "node": "rear_blinker_left",
+    "material": "IndicatorLights",
+    "end": "rear",
+    "shape": "rect",
+    "x": 0.69,
+    "z": 0.665,
+    "w": 0.12,
+    "h": 0.095
+   },
+   {
+    "node": "rear_blinker_right",
+    "material": "IndicatorLights",
+    "end": "rear",
+    "shape": "rect",
+    "x": 0.69,
+    "z": 0.665,
+    "w": 0.12,
+    "h": 0.095
+   },
+   {
+    "node": "reverse_lights",
+    "material": "ReverseLights",
+    "end": "rear",
+    "shape": "rect",
+    "x": 0.62,
+    "z": 0.565,
+    "w": 0.085,
+    "h": 0.055
+   }
+  ],
+  "frontSlots": [
+   [
+    0.06,
+    0.2,
+    0.485,
+    0.51
+   ],
+   [
+    0.24,
+    0.38,
+    0.485,
+    0.51
+   ]
+  ],
+  "wheel": {
+   "style": "steel",
+   "windows": 6,
+   "rimFactor": 0.7
   }
  }
 }

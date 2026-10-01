@@ -196,6 +196,12 @@ for region in B.get('glass', []):
             faces = [f for f in bm.faces if f[panel_layer] == pid]
             geom = list({v for f in faces for v in f.verts}) + list({e for f in faces for e in f.edges}) + faces
             bmesh.ops.bisect_plane(bm, geom=geom, plane_co=(region['x'], 0, 0), plane_no=(1, 0, 0), dist=1e-5)
+        if 'zMax' in region:
+            # A screen's top edge is the same height as the side windows' on most cars:
+            # the roof's leading and trailing strip is paint.
+            faces = [f for f in bm.faces if f[panel_layer] == pid]
+            geom = list({v for f in faces for v in f.verts}) + list({e for f in faces for e in f.edges}) + faces
+            bmesh.ops.bisect_plane(bm, geom=geom, plane_co=(0, 0, region['zMax']), plane_no=(0, 0, 1), dist=1e-5)
 
 GLASS_FACES = set()
 for f in bm.faces:
@@ -205,7 +211,8 @@ for f in bm.faces:
             continue
         if 'outline' in region and inside(region['outline'], c.y, c.z):
             GLASS_FACES.add(f)
-        if 'y' in region and region['y'][0] <= c.y <= region['y'][1] and c.x <= region.get('x', 9):
+        if 'y' in region and region['y'][0] <= c.y <= region['y'][1] and c.x <= region.get('x', 9) \
+                and c.z <= region.get('zMax', 9):
             GLASS_FACES.add(f)
 for f in bm.faces:
     f.material_index = 1 if f in GLASS_FACES else 0
@@ -375,20 +382,48 @@ if ov:
             box(bm_, (s_ * ov['x'], y, z - 0.01), (ov['width'], 0.04, ov['height']), 0)
 bumpers = new_object('bumpers', bm_, [MAT['chrome']])
 
-# Indicators, tail clusters, reversing lamps.
-for name, mat, items, y, n in (
-        ('front_blinker_left', 'IndicatorLights', [P['frontIndicator']], nose_y, -1),
-        ('front_blinker_right', 'IndicatorLights', [P['frontIndicator']], nose_y, -1),
-        ('taillights', 'TailLights', [P['tailRed']], tail_y, 1),
-        ('rear_blinker_left', 'IndicatorLights', [P['tailAmber']], tail_y, 1),
-        ('rear_blinker_right', 'IndicatorLights', [P['tailAmber']], tail_y, 1),
-        ('reverse_lights', 'ReverseLights', [P['tailWhite']], tail_y, 1)):
-    bm_ = bmesh.new()
-    sides = (1, -1) if name in ('taillights', 'reverse_lights') else ((1,) if name.endswith('left') else (-1,))
-    for x0, x1, z0, z1 in items:
-        for s in sides:
-            box(bm_, (s * (x0 + x1) / 2, y + n * 0.01, (z0 + z1) / 2), (x1 - x0, 0.02, z1 - z0), 0)
-    new_object(name, bm_, [MAT[mat]])
+# Lamps, from the car's own photographs: one entry per lens, each a real lamp function
+# (tools/vehicle-lamp-authoring.md) with its off-state lens colour. `end` puts it on the
+# nose or the tail face, `side` on a front wing; `x` is the lens centre's distance from
+# the centreline and `mirror` repeats it on the other side. Shapes are `rect` (w, h) or
+# `disc` (r). Lenses that share a node are gathered into it.
+LENS = {}
+for lamp in P.get('lamps', []):
+    sides = (1, -1) if lamp.get('mirror', True) else (1,)
+    if lamp['node'].endswith('_left'):
+        sides = (1,)
+    elif lamp['node'].endswith('_right'):
+        sides = (-1,)
+    for sgn in sides:
+        bm_l, node_mats = LENS.setdefault(lamp['node'], (bmesh.new(), []))
+        if lamp['material'] not in node_mats:
+            node_mats.append(lamp['material'])
+        slot = node_mats.index(lamp['material'])
+        depth = lamp.get('depth', 0.018)
+        if lamp['end'] == 'side':
+            x = float(np.interp(lamp['y'], stations, LINES['waist'][0])) + depth / 2 - 0.004
+            centre, normal = (sgn * x, lamp['y'], lamp['z']), (sgn, 0, 0)
+        else:
+            face = nose_y if lamp['end'] == 'front' else tail_y
+            n = -1 if lamp['end'] == 'front' else 1
+            centre, normal = (sgn * lamp['x'], face + n * (depth / 2 - 0.004), lamp['z']), (0, n, 0)
+        if lamp['shape'] == 'disc':
+            disc(bm_l, centre, normal, lamp['r'], depth, 18, slot)
+        else:
+            size = (depth, lamp['w'], lamp['h']) if lamp['end'] == 'side' else (lamp['w'], depth, lamp['h'])
+            box(bm_l, centre, size, slot)
+for node, (bm_l, mat_names) in LENS.items():
+    for mat_name in mat_names:
+        if mat_name not in MAT:
+            MAT[mat_name] = material(mat_name, tuple(P['lensColours'][mat_name]), 0.3)
+    new_object(node, bm_l, [MAT[n] for n in mat_names])
+
+# Dark slots in the panel under the grille, and anything else flush and black.
+bm_ = bmesh.new()
+for x0, x1, z0, z1 in P.get('frontSlots', []):
+    for sgn in (1, -1):
+        box(bm_, (sgn * (x0 + x1) / 2, nose_y - 0.004, (z0 + z1) / 2), (x1 - x0, 0.01, z1 - z0), 0)
+front_slots = new_object('front_slots', bm_, [MAT['trim']])
 
 # Mirrors: a stalk and a head on each door.
 m = P['mirror']
@@ -440,8 +475,24 @@ for name, (axle_y, track), side in (('wheel_fl', AXLES[0], 1), ('wheel_fr', AXLE
     bm_ = bmesh.new()
     tw = F['tyreWidth']
     disc(bm_, (0, 0, 0), (1, 0, 0), R, tw, 28, 0)
-    disc(bm_, (side * (tw / 2 - 0.004), 0, 0), (side, 0, 0), R * 0.68, 0.012, 24, 1)
-    disc(bm_, (side * (tw / 2 + 0.006), 0, 0), (side, 0, 0), R * 0.42, 0.02, 20, 1)
+    wheel = P.get('wheel', {'style': 'hubcap'})
+    rim_r = R * wheel.get('rimFactor', 0.68)
+    disc(bm_, (side * (tw / 2 - 0.004), 0, 0), (side, 0, 0), rim_r, 0.012, 24, 1)
+    if wheel['style'] == 'steel':
+        # A pressed steel wheel: painted disc, a ring of oval windows, a bare hub.
+        n_win = wheel.get('windows', 6)
+        for k in range(n_win):
+            a = 2 * math.pi * k / n_win
+            r_mid = rim_r * 0.68
+            c = (side * (tw / 2 + 0.003), r_mid * math.cos(a), r_mid * math.sin(a))
+            w_ = bmesh.ops.create_cube(bm_, size=1.0)
+            rot = Matrix.Rotation(a, 4, 'X')
+            bmesh.ops.transform(bm_, matrix=Matrix.Translation(Vector(c)) @ rot @ Matrix.Diagonal((0.006, rim_r * 0.16, rim_r * 0.3, 1)), verts=w_['verts'])
+            for f in {f for v in w_['verts'] for f in v.link_faces}:
+                f.material_index = 0
+        disc(bm_, (side * (tw / 2 + 0.008), 0, 0), (side, 0, 0), rim_r * 0.3, 0.025, 16, 0)
+    else:
+        disc(bm_, (side * (tw / 2 + 0.006), 0, 0), (side, 0, 0), R * 0.42, 0.02, 20, 1)
     obj = new_object(name, bm_, [MAT['Tyres'], MAT['wheel_rim']])
     obj.location = (side * track / 2, axle_y, R)
     wheels.append(obj)
@@ -470,7 +521,7 @@ for o in scene.objects:
         o.name = 'glass'
         o.data.name = 'glass'
 bpy.ops.object.select_all(action='DESELECT')
-for o in (chrome_front, grille_field, bumpers, detail_chrome):
+for o in (chrome_front, grille_field, bumpers, detail_chrome, front_slots):
     o.select_set(True)
 bpy.context.view_layer.objects.active = bumpers
 bpy.ops.object.join()
