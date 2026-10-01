@@ -493,7 +493,14 @@ for lamp in P['headlamps']:
 head_lens = new_object('headlights', bm_, [MAT['Headlights']])
 bm_ = bmesh.new()
 for lamp in P['headlamps']:
-    lamp_shape(bm_, lamp, nose_y - 0.006, P.get('bezel', 0.016), 0.012)
+    if P.get('bezelShape') == 'square' and not isinstance(lamp, dict):
+        # A round lens in a square bezel (the C10, the Hilux, the SJ410).
+        side_ = 2 * (lamp[2] + P.get('bezel', 0.016))
+        lamp = {'shape': 'rect', 'x': lamp[0], 'z': lamp[1], 'w': side_, 'h': side_,
+                **({'y': lamp[3]} if len(lamp) > 3 else {})}
+        lamp_shape(bm_, lamp, nose_y - 0.006, 0.0, 0.012)
+    else:
+        lamp_shape(bm_, lamp, nose_y - 0.006, P.get('bezel', 0.016), 0.012)
 bezels = new_object('bezels', bm_, [bezel_mat])
 
 # Grille: a dark field, optionally with slats and a surround (chrome or black).

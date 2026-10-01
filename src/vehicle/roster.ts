@@ -1502,6 +1502,38 @@ export const ROSTER: readonly RosterCar[] = [
     rearDiff: { lock: 0.45, preloadNm: 40 },
     target: { top: 220, to100: 6.6, turn: 5.95, source: 'Ford Mustang GT 5.0 (1988) road tests; 39 ft turning circle' },
   },
+  {
+    // Chevrolet C10 (1970): 307 cu in V8, 200 hp gross (net about 145 hp, 108 kW) at 4600
+    // and 300 lb-ft gross at 2400, three-speed column shift on a 3.73 axle, coil-sprung
+    // trailing-arm rear on the half-ton, empty long bed, 1700 kg; about 155 km/h, 14.6 m
+    // turning circle.
+    id: 'rs_c10',
+    label: 'Chevrolet C10',
+    body: 'c10.glb',
+    bodyClass: 'car',
+    factory: { length: 4.994, width: 1.999, height: 1.77, clearance: 0.2, wheelbase: 3.226, frontTrack: 1.626, rearTrack: 1.6, wheelRadius: 0.36, tyreWidth: 0.2, frontOverhang: 0.73 },
+    mass: 1700,
+    frontWeightShare: 0.58,
+    rearDriveBias: 1,
+    engine: {
+      label: '5.0 Chevrolet 307 V8', mass: 250,
+      spec: { peakPowerKw: 108, powerPeakRpm: 4600, peakTorqueNm: 358, torquePeakRpm: 2400, redlineRpm: 5000, idleRpm: 600, bsfc: 0.36, brakingCoeff: 0.075, cylinders: 8 },
+      rated: { kw: 108 }, ratedTorqueNm: 358, source: 'Chevrolet 307 (1970): 200 hp gross at 4600, 300 lb-ft gross at 2400; net estimated at 72% power, 88% torque',
+    },
+    gearbox: {
+      label: 'Saginaw three-speed', mass: 38,
+      spec: { ratios: [2.85, 1.68, 1.0], reverse: 2.95, finalDrive: 3.73, shiftTime: 0.5, automatic: false, efficiency: 0.9 },
+    },
+    tankLitres: 76,
+    wheelGrip: 0.6,
+    brakeDecelG: 0.55,
+    steerLock: 0.521,
+    dragArea: 1.720,
+    handlingProfile: 'utility',
+    suspension: S(1.0, 1.4, 0.2, 0.34, 0.12),
+    tyre: { construction: 'crossply', aspect: 0.85 },
+    target: { top: 155, to100: null, turn: 7.3, source: 'Chevrolet C10 long bed (1970) data; 48 ft turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {

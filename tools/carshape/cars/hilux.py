@@ -34,7 +34,7 @@ CAR = {
     'windows': [[[-0.70, 1.03], [-0.41, 1.46], [0.25, 1.47], [0.25, 1.03]]],
     'arch': {'radiusFactor': 1.3, 'lift': 0.03, 'wellDepth': 0.3},
     'parts': {
-        'headlamps': [[0.63, 0.74, 0.075]], 'bezel': 0.035, 'bezelMaterial': 'trim',
+        'headlamps': [[0.63, 0.74, 0.075]], 'bezel': 0.03, 'bezelShape': 'square', 'bezelMaterial': 'trim',
         'grille': {'halfWidth': 0.53, 'z': [0.62, 0.84], 'slats': 4},
         'bumper': {'depth': 0.08, 'height': 0.12, 'standOff': 0.05, 'wrap': 0.20, 'halfWidth': 0.80,
                    'zFront': 0.47, 'zRear': 0.46},
