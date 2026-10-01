@@ -99,6 +99,22 @@ if kind in ('hatchback', 'estate'):
     rail_plan = [p for p in rail_plan if p[0] <= rw1] + [[y1, wid['railPillar']]]
     glass_base_plan = [p for p in glass_base_plan if p[0] <= rw1] + [[y1, wid['glass']]]
 
+# A pickup's open bed: {"y": [front wall, tailgate], "floor": z, "wall": inner half-width}.
+# Over the bed the centre and rail lines drop to the floor while the shoulder and the
+# glass base stay at the bed rails, so the glass-base-to-rail panel is the bed's inner
+# wall; the tailgate and the cab's back close its ends.
+bed = car.get('bed')
+if bed:
+    b0, b1 = bed['y']
+    zf = bed['floor']
+    top = [p for p in top if not (rw1 < p[0] < y1)] + [[b0, zf], [b1, zf]]
+    rail = [p for p in rail if not (rw1 < p[0] < y1)] + [[b0, zf + 0.005], [b1, zf + 0.005]]
+    top.sort()
+    rail.sort()
+    rail_plan = [p for p in rail_plan if p[0] <= rw1] + [[b0, bed['wall']], [b1, bed['wall']], [y1, rail_x]]
+    glass_base_plan = [p for p in glass_base_plan if p[0] <= rw1] + \
+        [[b0, bed['wall'] + 0.015], [b1, bed['wall'] + 0.015], [y1, wid['glassDeck']]]
+
 sill = car['sill']          # [[y, z]]
 floor = car['floor']        # [[y, z]]
 lines = {
@@ -121,6 +137,8 @@ if car.get('rearScreen', True):
     glass.append({'panel': 'rail-topCentre', 'y': rear_y, 'x': car.get('rearScreenHalf', wid['rail'] - 0.08), 'zMax': screen_top})
 
 extra = [ws0, ws1, rw0, rw1] + [p[0] for w in car['windows'] for p in w]
+if bed:
+    extra += [b0, b1]
 R = F['wheelRadius']
 for axle in (-L / 2 + F['frontOverhang'], -L / 2 + F['frontOverhang'] + F['wheelbase']):
     extra += [round(axle - R * 1.13, 4), round(axle + R * 1.13, 4)]

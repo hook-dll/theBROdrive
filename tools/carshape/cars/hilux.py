@@ -1,0 +1,57 @@
+# Toyota Hilux N40 short bed (1979-83). Factory: 4305 x 1610 x 1580, wheelbase 2585,
+# tracks 1300/1275, 185R14, clearance 190. No orthographic drawing of this generation was
+# found; proportions read off Commons photographs ('Toyota Hilux 1979' side, CC BY-SA
+# 3.0; 1981-83 Toyota Hilux 2-door utility, public domain) against the factory figures.
+# The plain little pickup: a long flat bonnet over a full-width grille with round lamps
+# in square bezels, a raked screen, a short cab with an upright back window, a flat-sided
+# open bed with its rails at the belt, a chrome bumper and hubcaps.
+CAR = {
+    'id': 'hilux',
+    'label': 'Toyota Hilux',
+    'kind': 'saloon',
+    'factory': {'length': 4.305, 'width': 1.61, 'height': 1.58, 'clearance': 0.19, 'wheelbase': 2.585,
+                'frontTrack': 1.3, 'rearTrack': 1.275, 'wheelRadius': 0.31, 'tyreWidth': 0.185, 'frontOverhang': 0.8},
+    'yRange': [-2.14, 2.14],
+    'deck': [[-2.14, 0.86], [-2.10, 0.90], [-1.6, 0.935], [-0.90, 0.985], [0.36, 1.0], [2.14, 0.975]],
+    'belt': 1.02,
+    'cabin': [-0.90, -0.42, 0.29, 0.36],
+    'roof': [1.58, 1.55],
+    'screenTop': 1.48,
+    'bed': {'y': [0.395, 2.10], 'floor': 0.72, 'wall': 0.74},
+    'rearScreenHalf': 0.50,
+    'crown': 0.015,
+    'roofCrown': 0.03,
+    'widths': {'waist': 0.80, 'shoulder': 0.795, 'deckEdge': 0.78, 'glassDeck': 0.74, 'glass': 0.70,
+               'railDeck': 0.66, 'railPillar': 0.70, 'rail': 0.65, 'sill': 0.78},
+    'planFactor': [[-2.14, 0.99], [-2.06, 1.0], [2.14, 1.0]],
+    'sill': [[-2.14, 0.48], [-1.9, 0.42], [-1.0, 0.40], [1.8, 0.40], [2.14, 0.48]],
+    'floor': [[-2.14, 0.44], [-1.9, 0.34], [-1.0, 0.33], [1.8, 0.33], [2.14, 0.44]],
+    'waistZ': 0.78,
+    'shoulderDrop': 0.03,
+    'edgeDrop': 0.012,
+    'shoulderRound': 0.06,
+    'smoothAngleDeg': 28,
+    'windows': [[[-0.70, 1.03], [-0.41, 1.46], [0.25, 1.47], [0.25, 1.03]]],
+    'arch': {'radiusFactor': 1.3, 'lift': 0.03, 'wellDepth': 0.3},
+    'parts': {
+        'headlamps': [[0.63, 0.74, 0.075]], 'bezel': 0.035, 'bezelMaterial': 'trim',
+        'grille': {'halfWidth': 0.53, 'z': [0.62, 0.84], 'slats': 4},
+        'bumper': {'depth': 0.08, 'height': 0.12, 'standOff': 0.05, 'wrap': 0.20, 'halfWidth': 0.80,
+                   'zFront': 0.47, 'zRear': 0.46},
+        'doorHandles': [[0.10, 0.93]],
+        'windowFrame': 0.012,
+        'lensColours': {'FrontLampLens': [0.9, 0.62, 0.25]},
+        'lamps': [
+            {'node': 'front_blinker_left', 'material': 'FrontLampLens', 'end': 'front', 'shape': 'rect', 'x': 0.58, 'z': 0.47, 'w': 0.12, 'h': 0.04, 'y': -2.20},
+            {'node': 'front_blinker_right', 'material': 'FrontLampLens', 'end': 'front', 'shape': 'rect', 'x': 0.58, 'z': 0.47, 'w': 0.12, 'h': 0.04, 'y': -2.20},
+            {'node': 'front_blinker_left', 'material': 'IndicatorLights', 'end': 'side', 'shape': 'rect', 'y': -1.85, 'z': 0.78, 'w': 0.08, 'h': 0.03, 'depth': 0.012},
+            {'node': 'front_blinker_right', 'material': 'IndicatorLights', 'end': 'side', 'shape': 'rect', 'y': -1.85, 'z': 0.78, 'w': 0.08, 'h': 0.03, 'depth': 0.012},
+            {'node': 'taillights', 'material': 'TailLights', 'end': 'rear', 'shape': 'rect', 'x': 0.72, 'z': 0.80, 'w': 0.10, 'h': 0.09},
+            {'node': 'rear_blinker_left', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'rect', 'x': 0.72, 'z': 0.71, 'w': 0.10, 'h': 0.07},
+            {'node': 'rear_blinker_right', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'rect', 'x': 0.72, 'z': 0.71, 'w': 0.10, 'h': 0.07},
+            {'node': 'reverse_lights', 'material': 'ReverseLights', 'end': 'rear', 'shape': 'rect', 'x': 0.72, 'z': 0.635, 'w': 0.10, 'h': 0.045},
+        ],
+        'mirror': {'x': 0.82, 'y': -0.70, 'z': 1.10},
+        'wheel': {'style': 'hubcap', 'rimFactor': 0.66},
+    },
+}

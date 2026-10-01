@@ -1189,6 +1189,37 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'crossply', aspect: 0.95 },
     target: { top: 110, to100: null, turn: 4.9, source: 'Suzuki SJ410 data; 9.8 m turning circle; final drive is 4.111 axle x 1.564 high range' },
   },
+  {
+    // Toyota Hilux N40 (1979): 12R 1.6 four, 80 PS JIS gross (net about 68 PS, 50 kW)
+    // at 5200 and 12.5 kgm gross at 3000, four-speed on a 4.3 axle, leaf-sprung live
+    // axle under an empty bed, 1150 kg; about 135 km/h, 10.6 m turning circle.
+    id: 'rs_hilux',
+    label: 'Toyota Hilux',
+    body: 'hilux.glb',
+    bodyClass: 'car',
+    factory: { length: 4.305, width: 1.61, height: 1.58, clearance: 0.19, wheelbase: 2.585, frontTrack: 1.3, rearTrack: 1.275, wheelRadius: 0.31, tyreWidth: 0.185, frontOverhang: 0.8 },
+    mass: 1150,
+    frontWeightShare: 0.58,
+    rearDriveBias: 1,
+    engine: {
+      label: '1.6 Toyota 12R', mass: 140,
+      spec: { peakPowerKw: 50, powerPeakRpm: 5200, peakTorqueNm: 110, torquePeakRpm: 3000, redlineRpm: 5800, idleRpm: 700, bsfc: 0.3, brakingCoeff: 0.025, cylinders: 4 },
+      rated: { kw: 50 }, ratedTorqueNm: 110, source: 'Toyota 12R: 80 PS JIS gross at 5200, 12.5 kgm at 3000; net estimated at 85% power, 88% torque',
+    },
+    gearbox: {
+      label: 'Toyota four-speed', mass: 36,
+      spec: { ratios: [3.789, 2.22, 1.435, 1.0], reverse: 4.316, finalDrive: 4.3, shiftTime: 0.35, automatic: false, efficiency: 0.9 },
+    },
+    tankLitres: 46,
+    wheelGrip: 0.6,
+    brakeDecelG: 0.55,
+    steerLock: 0.588,
+    dragArea: 1.164,
+    handlingProfile: 'utility',
+    suspension: S(1.15, 1.6, 0.2, 0.34, 0.12),
+    tyre: { construction: 'radial', aspect: 0.82 },
+    target: { top: 135, to100: null, turn: 5.3, source: 'Toyota Hilux N40 data; 10.6 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
