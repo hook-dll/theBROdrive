@@ -103,7 +103,7 @@ stations = np.array(sorted(set(np.round(np.concatenate([
     np.linspace(y_front, y_rear, B.get('stations', 60)),
     np.array(B.get('extraStations', [])),
 ]), 4))))
-stations = stations[(stations >= y_front) & (stations <= y_rear)]
+stations = stations[(stations >= y_front - 1e-6) & (stations <= y_rear + 1e-6)]
 plan_factor = pchip(B['planFactor'], stations) if 'planFactor' in B else np.ones_like(stations)
 
 LINES = {}
@@ -325,26 +325,43 @@ P = spec['parts']
 nose_y, tail_y = y_front, y_rear
 front_n, rear_n = (0, -1, 0), (0, 1, 0)
 
-# Headlamps: a chrome bezel ring and a lens inside it.
+# Headlamps: a lens in a bezel. Each entry is [x, z, r] for a round lamp, or a dict
+# {"shape": "rect", "x", "z", "w", "h"} for a rectangular one; mirrored to both sides.
+def lamp_shape(bm_, lamp, y, grow, depth):
+    if isinstance(lamp, dict) and lamp.get('shape') == 'rect':
+        for s_ in (1, -1):
+            box(bm_, (s_ * lamp['x'], y, lamp['z']), (lamp['w'] + 2 * grow, depth, lamp['h'] + 2 * grow), 0)
+    else:
+        x, z, r = lamp
+        for s_ in (1, -1):
+            disc(bm_, (s_ * x, y, z), front_n, r + grow, depth, 24, 0)
+
+
+bezel_mat = MAT['chrome'] if P.get('bezelMaterial', 'chrome') == 'chrome' else MAT['trim']
 bm_ = bmesh.new()
-for x, z, r in P['headlamps']:
-    for s in (1, -1):
-        disc(bm_, (s * x, nose_y - 0.012, z), front_n, r, 0.024, 24, 0)
+for lamp in P['headlamps']:
+    lamp_shape(bm_, lamp, nose_y - 0.012, 0.0, 0.024)
 head_lens = new_object('headlights', bm_, [MAT['Headlights']])
 bm_ = bmesh.new()
-for x, z, r in P['headlamps']:
-    for s in (1, -1):
-        disc(bm_, (s * x, nose_y - 0.006, z), front_n, r + P.get('bezel', 0.016), 0.012, 24, 0)
-# Grille: a dark field with chrome slats and a chrome surround.
-g = P['grille']
-gx, gz0, gz1 = g['halfWidth'], g['z'][0], g['z'][1]
-box(bm_, (0, nose_y - 0.004, (gz0 + gz1) / 2), (2 * gx + 0.03, 0.01, gz1 - gz0 + 0.03), 0)
-for k in range(g.get('slats', 6)):
-    z = gz0 + (k + 0.5) * (gz1 - gz0) / g.get('slats', 6)
-    box(bm_, (0, nose_y - 0.018, z), (2 * gx, 0.012, 0.012), 0)
-chrome_front = new_object('chrome_front', bm_, [MAT['chrome']])
+for lamp in P['headlamps']:
+    lamp_shape(bm_, lamp, nose_y - 0.006, P.get('bezel', 0.016), 0.012)
+bezels = new_object('bezels', bm_, [bezel_mat])
+
+# Grille: a dark field, optionally with slats and a surround (chrome or black).
 bm_ = bmesh.new()
-box(bm_, (0, nose_y - 0.01, (gz0 + gz1) / 2), (2 * gx, 0.012, gz1 - gz0), 0)
+g = P.get('grille')
+if g:
+    gx, gz0, gz1 = g['halfWidth'], g['z'][0], g['z'][1]
+    if g.get('surround', True):
+        box(bm_, (0, nose_y - 0.004, (gz0 + gz1) / 2), (2 * gx + 0.03, 0.01, gz1 - gz0 + 0.03), 0)
+    for k in range(g.get('slats', 6)):
+        z = gz0 + (k + 0.5) * (gz1 - gz0) / max(1, g.get('slats', 6))
+        box(bm_, (0, nose_y - 0.018, z), (2 * gx, 0.012, 0.012), 0)
+slat_mat = MAT['chrome'] if (g or {}).get('slatMaterial', 'chrome') == 'chrome' else MAT['trim']
+chrome_front = new_object('chrome_front', bm_, [slat_mat])
+bm_ = bmesh.new()
+if g:
+    box(bm_, (0, nose_y - 0.01, (gz0 + gz1) / 2), (2 * gx, 0.012, gz1 - gz0), 0)
 grille_field = new_object('grille', bm_, [MAT['trim']])
 
 
@@ -380,7 +397,7 @@ if ov:
                  (tail_y + bp['standOff'] + bp['depth'] / 2 + 0.01, bp['zRear'])):
         for s_ in (1, -1):
             box(bm_, (s_ * ov['x'], y, z - 0.01), (ov['width'], 0.04, ov['height']), 0)
-bumpers = new_object('bumpers', bm_, [MAT['chrome']])
+bumpers = new_object('bumpers', bm_, [MAT['chrome'] if bp.get('material', 'chrome') == 'chrome' else MAT['trim']])
 
 # Lamps, from the car's own photographs: one entry per lens, each a real lamp function
 # (tools/vehicle-lamp-authoring.md) with its off-state lens colour. `end` puts it on the
@@ -426,9 +443,9 @@ for x0, x1, z0, z1 in P.get('frontSlots', []):
 front_slots = new_object('front_slots', bm_, [MAT['trim']])
 
 # Mirrors: a stalk and a head on each door.
-m = P['mirror']
+m = P.get('mirror')
 bm_ = bmesh.new()
-for s in (1, -1):
+for s in ((1, -1) if m else ()):
     # A round head on a short arm that leaves the door at the window's front corner.
     box(bm_, (s * (m['x'] - 0.045), m['y'], m['z'] - 0.04), (0.09, 0.025, 0.02), 0)
     disc(bm_, (s * m['x'], m['y'], m['z']), (0, -1, 0), 0.055, 0.035, 16, 0)
@@ -521,7 +538,7 @@ for o in scene.objects:
         o.name = 'glass'
         o.data.name = 'glass'
 bpy.ops.object.select_all(action='DESELECT')
-for o in (chrome_front, grille_field, bumpers, detail_chrome, front_slots):
+for o in (chrome_front, grille_field, bezels, bumpers, detail_chrome, front_slots):
     o.select_set(True)
 bpy.context.view_layer.objects.active = bumpers
 bpy.ops.object.join()

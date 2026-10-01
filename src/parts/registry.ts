@@ -15,6 +15,8 @@
  * renderer object. Both are prerequisites for replication.
  */
 
+import { ROSTER, rosterEngineId, rosterGearboxId } from '../vehicle/roster';
+
 export type PartKind =
   | 'engine'
   | 'gearbox'
@@ -1461,6 +1463,19 @@ const PROVING_GEARBOX_VARIANTS: readonly PartVariant[] = [
   },
 ];
 
+/** The roster's inline engines and gearboxes (vehicle/roster.ts), as part variants. */
+const ROSTER_VARIANTS: readonly PartVariant[] = ROSTER.flatMap((car): PartVariant[] => {
+  const out: PartVariant[] = [];
+  const fits: BodyClass[] = [car.bodyClass];
+  if (typeof car.engine !== 'string') {
+    out.push({ id: rosterEngineId(car), kind: 'engine', label: car.engine.label, mass: car.engine.mass, fits, engine: car.engine.spec });
+  }
+  if (typeof car.gearbox !== 'string') {
+    out.push({ id: rosterGearboxId(car), kind: 'gearbox', label: car.gearbox.label, mass: car.gearbox.mass, fits, gearbox: car.gearbox.spec });
+  }
+  return out;
+});
+
 export const ALL_VARIANTS: readonly PartVariant[] = [
   ...ENGINE_VARIANTS,
   ...GEARBOX_VARIANTS,
@@ -1473,6 +1488,7 @@ export const ALL_VARIANTS: readonly PartVariant[] = [
   ...SOVIET_GEARBOX_VARIANTS,
   ...PROVING_ENGINE_VARIANTS,
   ...PROVING_GEARBOX_VARIANTS,
+  ...ROSTER_VARIANTS,
 ];
 
 const VARIANTS_BY_ID = new Map(ALL_VARIANTS.map((v) => [v.id, v]));

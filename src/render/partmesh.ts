@@ -275,7 +275,14 @@ function buildEngine(b: MeshBuilder, v: PartVariant): void {
     case 'engine_porsche_930_10': return buildVee(b, spec, 1.04);
     case 'engine_ford_50_ho': return buildVee(b, spec, 1.1);
     case 'engine_ferrari_f113a': return buildVee(b, spec, 1.2);
-    default: throw new Error(`unhandled engine variant: ${v.id}`);
+    default:
+      // Roster engines (vehicle/roster.ts): a vee for six cylinders and more or a
+      // boxer, an inline otherwise, sized by torque as displacement's stand-in.
+      if (v.id.startsWith('rs_')) {
+        const size = Math.min(1.3, Math.max(0.7, Math.sqrt(spec.peakTorqueNm / 116)));
+        return spec.cylinders >= 6 || v.label.toLowerCase().includes('flat') ? buildVee(b, spec, size) : buildInline(b, spec, size);
+      }
+      throw new Error(`unhandled engine variant: ${v.id}`);
   }
 }
 
@@ -403,7 +410,14 @@ function buildGearbox(b: MeshBuilder, v: PartVariant): void {
     case 'gearbox_bw_t5': scale = 1.05; manual = true; fins = false; break;
     case 'gearbox_lancia_integrale': scale = 1.15; manual = true; fins = true; break;
     case 'gearbox_landrover_lt77': scale = 1.3; manual = true; fins = false; break;
-    default: throw new Error(`unhandled gearbox variant: ${v.id}`);
+    default:
+      if (v.id.startsWith('rs_')) {
+        scale = Math.min(1.4, Math.max(0.8, v.mass / 40));
+        manual = !(v.gearbox?.automatic ?? false);
+        fins = true;
+        break;
+      }
+      throw new Error(`unhandled gearbox variant: ${v.id}`);
   }
   const id = v.id;
   const len = 0.6 * scale;

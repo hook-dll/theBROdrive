@@ -24,11 +24,35 @@ import { variant } from '../parts/registry';
 import modelFits from './model-fits.json';
 
 import { TRUNK_CELL_COUNT } from './trunk';
+import { CARSHAPE_LIGHTS, ROSTER, rosterEngineId, rosterGearboxId } from './roster';
 const MODEL_FITS = modelFits as unknown as Record<string, CarModelFit>;
-function modelFit(id: string): CarModelFit {
+function modelFit(id: string, factory?: FactoryGeometry): CarModelFit {
   const fit = MODEL_FITS[id];
-  if (!fit) throw new Error(`Model "${id}" is missing fit metadata`);
-  return fit;
+  if (fit) return fit;
+  // A roster car built but not yet measured by tools/fit-models.ts: a provisional fit
+  // from its factory figures, replaced by the loaded body's own measure on load.
+  if (factory) return provisionalFit(factory);
+  throw new Error(`Model "${id}" is missing fit metadata`);
+}
+
+function provisionalFit(f: FactoryGeometry): CarModelFit {
+  const half: [number, number, number] = [f.width / 2, (f.height - f.clearance) / 2, f.length / 2];
+  const frontZ = half[2] - (f.frontOverhang ?? f.length * 0.2);
+  const rearZ = frontZ - f.wheelbase;
+  const y = -half[1] - f.clearance + f.wheelRadius;
+  const wheel = (id: string, x: number, z: number, isFront: boolean) =>
+    ({ id, pos: [x, y, z] as [number, number, number], radius: f.wheelRadius, isFront });
+  return {
+    halfExtents: half,
+    wheels: [
+      wheel('wheel_fl', f.frontTrack / 2, frontZ, true),
+      wheel('wheel_fr', -f.frontTrack / 2, frontZ, true),
+      wheel('wheel_rl', f.rearTrack / 2, rearZ, false),
+      wheel('wheel_rr', -f.rearTrack / 2, rearZ, false),
+    ],
+    hoodPoint: [0, half[1] * 0.5, half[2] * 0.5],
+    visualOffset: [0, 0, 0],
+  };
 }
 
 
@@ -649,11 +673,10 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   pg_elise:       { length: 3.726, width: 1.701, height: 1.202, clearance: 0.130, wheelbase: 2.300, frontTrack: 1.440, rearTrack: 1.453, wheelRadius: 0.306, tyreWidth: 0.205, frontOverhang: 0.75 },
   pg_testarossa:  { length: 4.485, width: 1.976, height: 1.130, clearance: 0.120, wheelbase: 2.550, frontTrack: 1.518, rearTrack: 1.660, wheelRadius: 0.334, tyreWidth: 0.280, frontOverhang: 1.00 },
   pg_integrale:   { length: 3.900, width: 1.700, height: 1.365, clearance: 0.140, wheelbase: 2.480, frontTrack: 1.400, rearTrack: 1.380, wheelRadius: 0.295, tyreWidth: 0.205, frontOverhang: 0.80 },
-  sh_vaz2101:     { length: 4.073, width: 1.611, height: 1.382, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.349, rearTrack: 1.305, wheelRadius: 0.297, tyreWidth: 0.155, frontOverhang: 0.72 },
 };
 
 function factoryGeometry(id: string): FactoryGeometry {
-  const geometry = FACTORY_GEOMETRY[id];
+  const geometry = FACTORY_GEOMETRY[id] ?? ROSTER_FACTORY.get(id);
   if (!geometry) throw new Error(`Model "${id}" is missing factory geometry`);
   return geometry;
 }
@@ -1901,52 +1924,46 @@ const PROVING_SPECS: readonly Entry[] = [
   },
 ];
 
-/* ---- the saloon ----
+/* ---- the roster ----
  *
- * The VAZ-2101 body built by tools/carshape/carbody.py from authored character lines
- * (tools/carshape/cars/vaz2101.json), on the VAZ-2101's physics unchanged, so it can be
- * parked beside the pack's Zhiguli and judged against it.
+ * The cars of cooking.md on bodies built by tools/carshape from their own photographs
+ * and dimensions; one record each in vehicle/roster.ts.
  */
-const ZHIGULI = SOVIET_SPECS.find((spec) => spec.id === 'sv_vaz2101')!;
-const SHAPE_SPECS: readonly Entry[] = [
-  {
-    id: 'sh_vaz2101',
-    label: 'VAZ-2101 (carshape)',
-    dir: '/models/carshape',
-    glb: 'vaz2101.glb',
-    scale: 1,
-    glassMaterial: 'car_glass',
-    paintStyle: 'solid-paint',
-    wheelNodes: {
-      wheel_fl: ['wheel_fl'],
-      wheel_fr: ['wheel_fr'],
-      wheel_rl: ['wheel_rl'],
-      wheel_rr: ['wheel_rr'],
-    },
-    lights: {
-      headlights: ['headlights'],
-      taillights: ['taillights'],
-      reverseLights: ['reverse_lights'],
-      leftBlinkers: ['front_blinker_left', 'rear_blinker_left'],
-      rightBlinkers: ['front_blinker_right', 'rear_blinker_right'],
-    },
-    bodyClass: 'car',
-    mass: ZHIGULI.mass,
-    engineId: ZHIGULI.engineId,
-    gearboxId: ZHIGULI.gearboxId,
-    tankLitres: ZHIGULI.tankLitres,
-    wheelGrip: ZHIGULI.wheelGrip,
-    brakeDecelG: ZHIGULI.brakeDecelG,
-    suspension: ZHIGULI.suspension,
-    steerLock: ZHIGULI.steerLock,
-    rearDriveBias: ZHIGULI.rearDriveBias,
-    handlingProfile: ZHIGULI.handlingProfile,
-    frontWeightShare: ZHIGULI.frontWeightShare,
-    dragArea: ZHIGULI.dragArea,
-    tyre: ZHIGULI.tyre,
-    wheelSetPool: [],
+const ROSTER_FACTORY = new Map(ROSTER.map((car) => [car.id, car.factory]));
+const ROSTER_CARS: readonly Entry[] = ROSTER.map((car) => ({
+  id: car.id,
+  label: car.label,
+  dir: '/models/carshape',
+  glb: car.body,
+  scale: 1,
+  bodyClass: car.bodyClass,
+  mass: car.mass,
+  engineId: rosterEngineId(car),
+  gearboxId: rosterGearboxId(car),
+  tankLitres: car.tankLitres,
+  wheelGrip: car.wheelGrip,
+  brakeDecelG: car.brakeDecelG,
+  suspension: car.suspension,
+  steerLock: car.steerLock,
+  rearDriveBias: car.rearDriveBias,
+  handlingProfile: car.handlingProfile,
+  frontWeightShare: car.frontWeightShare,
+  dragArea: car.dragArea,
+  tyre: car.tyre,
+  antiRoll: car.antiRoll,
+  frontDiff: car.frontDiff,
+  rearDiff: car.rearDiff,
+  paintStyle: 'solid-paint',
+  glassMaterial: 'car_glass',
+  wheelSetPool: [],
+  wheelNodes: {
+    wheel_fl: ['wheel_fl'],
+    wheel_fr: ['wheel_fr'],
+    wheel_rl: ['wheel_rl'],
+    wheel_rr: ['wheel_rr'],
   },
-];
+  lights: car.lights ?? CARSHAPE_LIGHTS,
+}));
 
 const ENTRIES: readonly Entry[] = [
   // -------------------------------------------------------------------------
@@ -1972,13 +1989,13 @@ const ENTRIES: readonly Entry[] = [
   // The proving ground: real cars' physics on borrowed bodies.
   // -------------------------------------------------------------------------
   ...PROVING_SPECS,
-  ...SHAPE_SPECS,
+  ...ROSTER_CARS,
 ];
 export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   id: e.id,
   label: e.label,
   file: `${e.dir}/${e.glb}`,
-  fit: modelFit(e.id),
+  fit: modelFit(e.id, ROSTER_FACTORY.get(e.id)),
   textureFile: e.textureFile,
   paintStyle: e.paintStyle ?? (e.dir === SOVIET ? 'soviet-atlas' : undefined),
   secondaryPaintMaterial: e.secondaryPaintMaterial,

@@ -33,6 +33,7 @@
  */
 
 import { installAssetShim } from './assetshim';
+import { ROSTER, rosterEngineId } from '../src/vehicle/roster';
 import { FIXED_DT, type PhysicsWorld } from '../src/core/physics';
 import { SurfaceType } from '../src/core/surfaces';
 import { CAR_MODELS, carModel, modelEngine, modelGearbox } from '../src/vehicle/carmodels';
@@ -166,7 +167,7 @@ const ASSUMED = 'driver + passenger (assumed: the VAZ manuals\' condition)';
  * "with driver and one passenger"; the 2103 catalogue says the same of its top speed.
  * The classics' catalogues print no condition, and they are measured the same way.
  */
-const TARGETS: Readonly<Record<string, Target>> = {
+const TARGETS: Record<string, Target> = {
   sv_gaz21: {
     wheelbase: 2.7, track: 1.41, radius: 0.365, top: 130, to100: null,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 6.3, brake: 87, lat: 0.6, hz: 0.95,
@@ -332,12 +333,6 @@ const TARGETS: Readonly<Record<string, Target>> = {
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 6.0, brake: null, lat: null, hz: 1.6,
     source: 'Ferrari Testarossa 1984 factory figures',
   },
-  // The archetype saloon on the VAZ-2101's physics: held to the 2101's own figures.
-  sh_vaz2101: {
-    wheelbase: 2.424, track: 1.349, radius: 0.297, top: 142, to100: 20,
-    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, brake: 75, lat: 0.7, hz: 1.1,
-    source: 'AO vaz-2101 (1982 catalogue), as sv_vaz2101',
-  },
   pg_integrale: {
     wheelbase: 2.48, track: 1.4, radius: 0.295, top: 220, to100: 5.7,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.2, brake: null, lat: null, hz: 1.5,
@@ -368,7 +363,7 @@ interface MakerEngine {
   readonly source: string;
 }
 
-const FACTORY_ENGINES: Readonly<Record<string, MakerEngine>> = {
+const FACTORY_ENGINES: Record<string, MakerEngine> = {
   engine_i4_1600: { power: { kw: 56.3 }, powerRpm: 5400, torque: { nm: 121 }, torqueRpm: 3000, source: 'VAZ-2106-70; AO AZLK-2141 1998 catalogue' },
   engine_uzam_412de: { power: { kw: 49 }, powerRpm: 5800, torque: { nm: 102 }, torqueRpm: [3000, 3800], source: 'UZAM-412DE; AO Moskvich-412 catalogue' },
   engine_umz_4213: { power: { ps: 99 }, powerRpm: 4000, torque: { nm: 201 }, torqueRpm: 3000, source: 'UMZ-4213.10-10; truck-and-bus.ru UAZ-330364 sheet' },
@@ -546,6 +541,21 @@ function judgedKnown(
     known.push(`${id} ${label} ${percent(dev)} (accepted ${percent(accepted.dev)}): ${accepted.reason}`);
   }
   return `${pad(percent(dev), 6)}${out && !drifted ? '~' : '!'}`;
+}
+
+// The roster's targets and its inline engines' ratings (vehicle/roster.ts).
+for (const car of ROSTER) {
+  TARGETS[car.id] = {
+    wheelbase: car.factory.wheelbase, track: car.factory.frontTrack, radius: car.factory.wheelRadius,
+    top: car.target.top, to100: car.target.to100, loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED,
+    turn: car.target.turn, brake: null, lat: null, hz: car.suspension.frontHz, source: car.target.source,
+  };
+  if (typeof car.engine !== 'string') {
+    FACTORY_ENGINES[rosterEngineId(car)] = {
+      power: car.engine.rated, powerRpm: car.engine.spec.powerPeakRpm,
+      torque: { nm: car.engine.ratedTorqueNm }, torqueRpm: car.engine.spec.torquePeakRpm, source: car.engine.source,
+    };
+  }
 }
 
 const argv = process.argv.slice(2);
