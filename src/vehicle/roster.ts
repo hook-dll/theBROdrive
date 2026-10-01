@@ -1003,6 +1003,37 @@ export const ROSTER: readonly RosterCar[] = [
     antiRoll: { front: 0.3, rear: 0.7 },
     target: { top: 190, to100: null, turn: 5.1, source: 'Peugeot 205 GTI 1.6 (1984) data' },
   },
+  {
+    // Ford Falcon (1960): 144 cu in Thriftpower six, 90 hp gross (net about 65 hp, 48 kW)
+    // at 4200 and 138 lb-ft at 2000, three-speed column shift on a 3.10 axle, 1070 kg, leaf-sprung live axle;
+    // about 140 km/h, 38.6 ft (11.8 m) turning circle.
+    id: 'rs_falcon',
+    label: 'Ford Falcon',
+    body: 'falcon.glb',
+    bodyClass: 'car',
+    factory: { length: 4.602, width: 1.793, height: 1.384, clearance: 0.15, wheelbase: 2.781, frontTrack: 1.397, rearTrack: 1.384, wheelRadius: 0.29, tyreWidth: 0.16, frontOverhang: 0.73 },
+    mass: 1070,
+    frontWeightShare: 0.55,
+    rearDriveBias: 1,
+    engine: {
+      label: '2.4 Ford Thriftpower six', mass: 160,
+      spec: { peakPowerKw: 48, powerPeakRpm: 4200, peakTorqueNm: 165, torquePeakRpm: 2000, redlineRpm: 4600, idleRpm: 550, bsfc: 0.29, brakingCoeff: 0.026, cylinders: 6 },
+      rated: { kw: 48 }, ratedTorqueNm: 165, source: 'Ford Falcon 1960: 90 hp gross at 4200, 138 lb-ft gross at 2000; net estimated at 72% power, 88% torque',
+    },
+    gearbox: {
+      label: 'Ford three-speed', mass: 32,
+      spec: { ratios: [2.76, 1.69, 1.0], reverse: 3.57, finalDrive: 3.1, shiftTime: 0.45, automatic: false, efficiency: 0.9 },
+    },
+    tankLitres: 53,
+    wheelGrip: 0.55,
+    brakeDecelG: 0.5,
+    steerLock: 0.558,
+    dragArea: 1.029,
+    handlingProfile: 'classic',
+    suspension: S(1.0, 1.2, 0.2, 0.32, 0.1),
+    tyre: { construction: 'crossply', aspect: 0.95 },
+    target: { top: 140, to100: null, turn: 5.9, source: 'Ford Falcon 1960 data; 38.6 ft turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {

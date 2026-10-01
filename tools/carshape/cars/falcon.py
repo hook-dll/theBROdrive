@@ -1,0 +1,58 @@
+# Ford Falcon (1960-63, US). Factory: 4602 x 1793 x 1384, wheelbase 2781, tracks
+# 1397/1384, 6.00-13. Read off the drawing reprinted at 3dcar.ru/blueprints/ford/falcon_1960
+# (side, front, rear and plan; 206 px/m by the wheelbase).
+# The compact: a long flat bonnet with the round lamps hooded in the wing ends, a wide
+# mesh grille between them, a thin-pillared glasshouse, a short flat boot ending in two
+# big round tail lamps, thin chrome bumpers.
+CAR = {
+    'id': 'falcon',
+    'label': 'Ford Falcon',
+    'kind': 'saloon',
+    'factory': {'length': 4.602, 'width': 1.793, 'height': 1.384, 'clearance': 0.15, 'wheelbase': 2.781,
+                'frontTrack': 1.397, 'rearTrack': 1.384, 'wheelRadius': 0.29, 'tyreWidth': 0.16, 'frontOverhang': 0.73},
+    'trimEnds': 0.12,
+    'deck': [[-2.25, 0.79], [-2.2, 0.81], [-2.0, 0.86], [-1.6, 0.915], [-1.2, 0.955], [-0.9, 0.975],
+             [1.39, 0.93], [1.6, 0.90], [2.0, 0.86], [2.25, 0.81]],
+    'belt': 0.94,
+    'cabin': [-0.90, -0.43, 1.0, 1.39],
+    'roof': [1.40, 1.32],
+    'screenTop': 1.33,
+    'topLine': [[-0.90, 0.98], [-0.6, 1.22], [-0.43, 1.37], [-0.3, 1.40], [0.6, 1.40], [0.9, 1.36],
+                [1.0, 1.32], [1.2, 1.12], [1.39, 0.94]],
+    'railLine': [[-0.90, 0.975], [-0.6, 1.20], [-0.43, 1.335], [-0.3, 1.355], [0.6, 1.35], [0.9, 1.31],
+                 [1.0, 1.28], [1.2, 1.10], [1.39, 0.935]],
+    'roofCrown': 0.05,
+    'crown': 0.015,
+    'widths': {'waist': 0.89, 'shoulder': 0.885, 'deckEdge': 0.86, 'glassDeck': 0.79, 'glass': 0.77,
+               'railDeck': 0.66, 'railPillar': 0.74, 'rail': 0.70, 'sill': 0.85},
+    'planFactor': [[-2.25, 0.95], [-2.15, 1.0], [2.1, 1.0], [2.25, 0.96]],
+    'sill': [[-2.25, 0.40], [-2.0, 0.36], [-1.6, 0.30], [1.7, 0.30], [2.0, 0.33], [2.25, 0.38]],
+    'floor': [[-2.25, 0.36], [-2.0, 0.30], [-1.6, 0.26], [1.7, 0.26], [2.0, 0.30], [2.25, 0.36]],
+    'waistZ': 0.82,
+    'shoulderDrop': 0.03,
+    'edgeDrop': 0.015,
+    'shoulderRound': 0.10,
+    'smoothAngleDeg': 30,
+    'windows': [[[-0.82, 0.95], [-0.42, 1.30], [0.16, 1.30], [0.16, 0.95]],
+                [[0.21, 0.95], [0.21, 1.30], [0.85, 1.28], [1.08, 0.95]]],
+    'arch': {'radiusFactor': 1.18, 'lift': 0.05, 'wellDepth': 0.3},
+    'parts': {
+        'headlamps': [[0.69, 0.68, 0.09]], 'bezel': 0.02,
+        'grille': {'halfWidth': 0.56, 'z': [0.60, 0.79], 'slats': 2, 'bars': 5},
+        'bumper': {'depth': 0.07, 'height': 0.085, 'standOff': 0.035, 'wrap': 0.35, 'halfWidth': 0.88,
+                   'zFront': 0.50, 'zRear': 0.47},
+        'doorHandles': [[-0.10, 0.88], [0.82, 0.88]],
+        'windowFrame': 0.014,
+        'lensColours': {'FrontLampLens': [0.85, 0.80, 0.70]},
+        'lamps': [
+            {'node': 'front_blinker_left', 'material': 'FrontLampLens', 'end': 'front', 'shape': 'disc', 'x': 0.50, 'z': 0.69, 'r': 0.035},
+            {'node': 'front_blinker_right', 'material': 'FrontLampLens', 'end': 'front', 'shape': 'disc', 'x': 0.50, 'z': 0.69, 'r': 0.035},
+            {'node': 'taillights', 'material': 'TailLights', 'end': 'rear', 'shape': 'disc', 'x': 0.73, 'z': 0.69, 'r': 0.105},
+            {'node': 'rear_blinker_left', 'material': 'TailLights', 'end': 'rear', 'shape': 'disc', 'x': 0.73, 'z': 0.69, 'r': 0.05, 'depth': 0.03},
+            {'node': 'rear_blinker_right', 'material': 'TailLights', 'end': 'rear', 'shape': 'disc', 'x': 0.73, 'z': 0.69, 'r': 0.05, 'depth': 0.03},
+            {'node': 'reverse_lights', 'material': 'ReverseLights', 'end': 'rear', 'shape': 'rect', 'x': 0.22, 'z': 0.56, 'w': 0.06, 'h': 0.035},
+        ],
+        'mirror': {'x': 0.88, 'y': -0.72, 'z': 1.0},
+        'wheel': {'style': 'hubcap', 'rimFactor': 0.62},
+    },
+}
