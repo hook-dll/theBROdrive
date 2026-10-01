@@ -1,0 +1,68 @@
+# Toyota Land Cruiser BJ40 hardtop (1974-84). Factory: 3870 x 1665 x 1950, wheelbase
+# 2285, overhangs 705/880 (to the spare), tracks 1404/1400, 7.00-15, clearance 210. Read
+# off the dimensioned drawing reprinted at 3dcar.ru/blueprints/toyota/land_cruiser_fj40_1963
+# (105 px/m by the wheelbase; heights scaled 4.8% to the stated 1950).
+# The tough little box: flat-topped front wings sloping down to the step, round lamps in
+# the corners of a wide grille panel, an upright screen, a hardtop rising slightly toward
+# the back with wide quarter windows, flared rear arches, the spare on the back door.
+CAR = {
+    'id': 'bj40',
+    'label': 'Toyota Land Cruiser BJ40',
+    'kind': 'estate',
+    'factory': {'length': 3.87, 'width': 1.665, 'height': 1.95, 'clearance': 0.21, 'wheelbase': 2.285,
+                'frontTrack': 1.404, 'rearTrack': 1.4, 'wheelRadius': 0.37, 'tyreWidth': 0.19, 'frontOverhang': 0.705},
+    'yRange': [-1.565, 1.73],
+    'trimEnds': 0.04,
+    'deck': [[-1.565, 1.10], [-1.54, 1.16], [-1.0, 1.23], [-0.38, 1.28], [-0.2, 1.14], [1.73, 1.13]],
+    'belt': 1.13,
+    'cabin': [-0.38, -0.29, 1.69, 1.73],
+    'roof': [1.95, 1.93],
+    'screenTop': 1.84,
+    'topLine': [[-0.38, 1.29], [-0.29, 1.86], [0.5, 1.95], [1.69, 1.95], [1.73, 1.90]],
+    'railLine': [[-0.38, 1.285], [-0.29, 1.82], [0.5, 1.89], [1.69, 1.89], [1.73, 1.86]],
+    'crown': 0.01,
+    'roofCrown': 0.04,
+    'rearScreen': False,
+    'widths': {'waist': 0.76, 'shoulder': 0.76, 'deckEdge': 0.74, 'glassDeck': 0.74, 'glass': 0.72,
+               'railDeck': 0.66, 'railPillar': 0.70, 'rail': 0.66, 'sill': 0.75},
+    'planFactor': [[-1.565, 0.74], [-0.50, 0.74], [-0.42, 1.0], [1.73, 1.0]],
+    'sill': [[-1.565, 0.63], [-0.50, 0.60], [-0.42, 0.58], [1.73, 0.58]],
+    'floor': [[-1.565, 0.58], [-0.50, 0.52], [-0.42, 0.50], [1.73, 0.50]],
+    'waistZ': 0.95,
+    'shoulderDrop': 0.01,
+    'edgeDrop': 0.01,
+    'shoulderRound': 0.03,
+    'hatchLip': 0.02,
+    'smoothAngleDeg': 22,
+    'windows': [[[-0.26, 1.33], [-0.26, 1.75], [0.25, 1.75], [0.25, 1.33]],
+                [[0.78, 1.48], [0.78, 1.75], [1.41, 1.75], [1.41, 1.48]]],
+    'arch': {'radiusFactor': 1.15, 'lift': 0.0, 'wellDepth': 0.3},
+    'parts': {
+        'wings': [
+            {'axle': 'front', 'inner': 0.45, 'outer': 0.83, 'radius': 0.43, 'lift': 0.0,
+             'path': [[-1.55, 0.60], [-1.575, 0.96], [-1.52, 1.0], [-0.92, 0.995], [-0.76, 0.83], [-0.48, 0.47]],
+             'crown': 0.02, 'thickness': 0.04},
+            {'axle': 'rear', 'inner': 0.74, 'outer': 0.83, 'radius': 0.45, 'lift': 0.0, 'from': 5, 'to': 175,
+             'crown': 0.02, 'thickness': 0.04},
+        ],
+        'headlamps': [[0.43, 0.92, 0.085]], 'bezel': 0.016,
+        'grille': {'halfWidth': 0.30, 'z': [0.70, 1.04], 'slats': 3, 'bars': 7},
+        'bumper': {'depth': 0.10, 'height': 0.12, 'standOff': 0.27, 'wrap': 0.02, 'halfWidth': 0.83,
+                   'zFront': 0.60, 'zRear': 0.62, 'material': 'trim'},
+        'doorHandles': [[0.18, 1.22]],
+        'windowFrame': 0.014,
+        'lensColours': {'FrontLampLens': [0.9, 0.62, 0.25]},
+        'lamps': [
+            {'node': 'front_blinker_left', 'material': 'FrontLampLens', 'end': 'front', 'shape': 'disc', 'x': 0.43, 'z': 0.77, 'r': 0.03},
+            {'node': 'front_blinker_right', 'material': 'FrontLampLens', 'end': 'front', 'shape': 'disc', 'x': 0.43, 'z': 0.77, 'r': 0.03},
+            {'node': 'rear_blinker_left', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'disc', 'x': 0.64, 'z': 0.97, 'r': 0.035},
+            {'node': 'rear_blinker_right', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'disc', 'x': 0.64, 'z': 0.97, 'r': 0.035},
+            {'node': 'taillights', 'material': 'TailLights', 'end': 'rear', 'shape': 'disc', 'x': 0.64, 'z': 0.88, 'r': 0.04},
+            {'node': 'reverse_lights', 'material': 'ReverseLights', 'end': 'rear', 'shape': 'disc', 'x': 0.64, 'z': 0.80, 'r': 0.03},
+        ],
+        'mirror': {'x': 0.80, 'y': -0.45, 'z': 1.40},
+        'tailWindow': {'halfWidth': 0.45, 'z': [1.45, 1.75]},
+        'spareWheel': {'x': -0.40, 'z': 1.02, 'r': 0.37},
+        'wheel': {'style': 'steel', 'windows': 0, 'rimFactor': 0.6},
+    },
+}

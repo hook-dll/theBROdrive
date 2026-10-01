@@ -1127,6 +1127,37 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'crossply', aspect: 0.95 },
     target: { top: 100, to100: null, turn: 5.7, source: 'Jeep CJ-5 (1955-71) data; 37.5 ft turning circle' },
   },
+  {
+    // Toyota Land Cruiser BJ40 (1974): 3.0 B diesel, 85 PS at 3600 and 20 kgm at 2200,
+    // H41 four-speed through a 1:1 high range to 3.70 axles, 4x4 engaged, leaf springs on
+    // beam axles, 1550 kg; about 110 km/h, 10.8 m turning circle.
+    id: 'rs_bj40',
+    label: 'Toyota Land Cruiser BJ40',
+    body: 'bj40.glb',
+    bodyClass: 'car',
+    factory: { length: 3.87, width: 1.665, height: 1.95, clearance: 0.21, wheelbase: 2.285, frontTrack: 1.404, rearTrack: 1.4, wheelRadius: 0.37, tyreWidth: 0.19, frontOverhang: 0.705 },
+    mass: 1550,
+    frontWeightShare: 0.55,
+    rearDriveBias: 0.5,
+    engine: {
+      label: '3.0 Toyota B diesel', mass: 250,
+      spec: { peakPowerKw: 62.5, powerPeakRpm: 3600, peakTorqueNm: 196, torquePeakRpm: 2200, redlineRpm: 3900, idleRpm: 650, bsfc: 0.25, brakingCoeff: 0.035, cylinders: 4 },
+      rated: { ps: 85 }, ratedTorqueNm: 196, source: 'Toyota B diesel (BJ40): 85 PS at 3600, 20 kgm at 2200',
+    },
+    gearbox: {
+      label: 'Toyota H41 four-speed', mass: 55,
+      spec: { ratios: [4.925, 2.643, 1.519, 1.0], reverse: 4.925, finalDrive: 3.7, shiftTime: 0.5, automatic: false, efficiency: 0.85 },
+    },
+    tankLitres: 70,
+    wheelGrip: 0.56,
+    brakeDecelG: 0.48,
+    steerLock: 0.524,
+    dragArea: 2.320,
+    handlingProfile: 'utility',
+    suspension: S(1.25, 1.35, 0.2, 0.36, 0.16),
+    tyre: { construction: 'crossply', aspect: 0.95 },
+    target: { top: 110, to100: null, turn: 5.4, source: 'Toyota Land Cruiser BJ40 data; 10.8 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
