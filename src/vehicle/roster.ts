@@ -733,6 +733,37 @@ export const ROSTER: readonly RosterCar[] = [
     antiRoll: { front: 0.5, rear: 0.3 },
     target: { top: 195, to100: null, turn: 4.6, source: 'Mazda MX-5 1.6 (NA) data; 9.2 m turning circle' },
   },
+  {
+    // Toyota Corolla Levin GT (AE86, 1985 Europe): 4A-GE 1.6, 124 PS at 6600 and 142 Nm
+    // at 5800, T50 five-speed on a 4.3 live axle, 950 kg; 195 km/h, 0-100 in 8.5 s.
+    id: 'rs_ae86',
+    label: 'Toyota Corolla AE86',
+    body: 'ae86.glb',
+    bodyClass: 'car',
+    factory: { length: 4.18, width: 1.625, height: 1.335, clearance: 0.135, wheelbase: 2.4, frontTrack: 1.355, rearTrack: 1.345, wheelRadius: 0.285, tyreWidth: 0.185, frontOverhang: 0.88 },
+    mass: 950,
+    frontWeightShare: 0.53,
+    rearDriveBias: 1,
+    engine: {
+      label: '1.6 Toyota 4A-GE inline-four', mass: 110,
+      spec: { peakPowerKw: 91.2, powerPeakRpm: 6600, peakTorqueNm: 142, torquePeakRpm: 5800, redlineRpm: 7600, idleRpm: 850, bsfc: 0.29, brakingCoeff: 0.0178, cylinders: 4 },
+      rated: { ps: 124 }, ratedTorqueNm: 142, source: 'Toyota Corolla GT (AE86, 1985 Europe) data: 124 PS at 6600, 142 Nm at 5800',
+    },
+    gearbox: {
+      label: 'Toyota T50 five-speed', mass: 32,
+      spec: { ratios: [3.587, 2.022, 1.384, 1.0, 0.861], reverse: 3.484, finalDrive: 4.3, shiftTime: 0.22, automatic: false, efficiency: 0.9 },
+    },
+    tankLitres: 50,
+    wheelGrip: 0.78,
+    brakeDecelG: 0.85,
+    steerLock: 0.581,
+    dragArea: 0.744,
+    handlingProfile: 'sport',
+    suspension: S(1.35, 1.55, 0.28, 0.44, 0.09),
+    tyre: { construction: 'radial', aspect: 0.7 },
+    antiRoll: { front: 0.55, rear: 0.35 },
+    target: { top: 195, to100: null, turn: 4.9, source: 'Toyota Corolla GT (AE86, 1985) data; 9.8 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {

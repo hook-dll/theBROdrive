@@ -3125,5 +3125,64 @@
       -5.551115123125783e-17,
       0
     ]
+  },
+  "rs_ae86": {
+    "halfExtents": [
+      0.8125,
+      0.6,
+      2.09
+    ],
+    "wheels": [
+      {
+        "id": "wheel_fl",
+        "pos": [
+          0.6775,
+          -0.45,
+          1.21
+        ],
+        "radius": 0.285,
+        "isFront": true
+      },
+      {
+        "id": "wheel_fr",
+        "pos": [
+          -0.6775,
+          -0.45,
+          1.21
+        ],
+        "radius": 0.285,
+        "isFront": true
+      },
+      {
+        "id": "wheel_rl",
+        "pos": [
+          0.6725,
+          -0.45,
+          -1.19
+        ],
+        "radius": 0.285,
+        "isFront": false
+      },
+      {
+        "id": "wheel_rr",
+        "pos": [
+          -0.6725,
+          -0.45,
+          -1.19
+        ],
+        "radius": 0.285,
+        "isFront": false
+      }
+    ],
+    "hoodPoint": [
+      0,
+      0.2665836433608978,
+      1.254
+    ],
+    "visualOffset": [
+      0,
+      0,
+      0
+    ]
   }
 }
