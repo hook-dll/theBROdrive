@@ -366,12 +366,22 @@ def build_wing(bm_, w):
     rad = w['radius']
     t_ = w.get('thickness', 0.04)
     path = []
-    if 'start' in w:
-        path.append(Vector((0, w['start'][0], w['start'][1])))
-    for a in np.linspace(math.radians(w.get('from', 0)), math.radians(w.get('to', 180)), 16):
-        path.append(Vector((0, axle_y - rad * math.cos(a), cz + rad * math.sin(a))))
-    if 'end' in w:
-        path.append(Vector((0, w['end'][0], w['end'][1])))
+    if 'path' in w:
+        # A flat-topped wing (UAZ, Land Rover): its side outline as [y, z] points, front
+        # to back; the panel reaches down from the outline to the arch circle.
+        for k in range(len(w['path']) - 1):
+            a_, b_ = Vector((0, *w['path'][k])), Vector((0, *w['path'][k + 1]))
+            n_ = max(1, int((b_ - a_).length / 0.06))
+            path += [a_.lerp(b_, j / n_) for j in range(n_)]
+        path.append(Vector((0, *w['path'][-1])))
+    else:
+        if 'start' in w:
+            path.append(Vector((0, w['start'][0], w['start'][1])))
+        for a in np.linspace(math.radians(w.get('from', 0)), math.radians(w.get('to', 180)), 16):
+            path.append(Vector((0, axle_y - rad * math.cos(a), cz + rad * math.sin(a))))
+        if 'end' in w:
+            path.append(Vector((0, w['end'][0], w['end'][1])))
+    centre = Vector((0, axle_y, cz))
     xs = np.linspace(w['inner'], w['outer'], 7)
     crown = w.get('crown', 0.03)
     for sgn in (1, -1):
@@ -389,7 +399,11 @@ def build_wing(bm_, w):
                 bulge = crown * math.sin(math.pi * u)
                 q = p + nrm * bulge
                 rt.append(bm_.verts.new((sgn * x, q.y, q.z)))
-                q2 = p - nrm * t_
+                if 'path' in w:
+                    d_ = p - centre
+                    q2 = centre + d_.normalized() * rad if d_.length > rad + t_ else p - d_.normalized() * t_
+                else:
+                    q2 = p - nrm * t_
                 rb.append(bm_.verts.new((sgn * x, q2.y, q2.z)))
             top.append(rt)
             bot.append(rb)
@@ -669,6 +683,19 @@ for name, (axle_y, track), side in (('wheel_fl', AXLES[0], 1), ('wheel_fr', AXLE
     obj.location = (side * track / 2, axle_y, R)
     wheels.append(obj)
 
+# A spare wheel hung on the tail door (the off-roaders): tyre and rim on the tail face,
+# `x` across, `z` its centre, `r` its radius (the road wheels' by default).
+spare_parts = []
+sp = P.get('spareWheel')
+if sp:
+    bm_ = bmesh.new()
+    r_s, w_s = sp.get('r', R), sp.get('width', F['tyreWidth'])
+    yt = sp.get('y', surface_y(sp.get('x', 0.0), sp['z'], 'rear')) + sp.get('standOff', 0.03)
+    disc(bm_, (sp.get('x', 0.0), yt + w_s / 2, sp['z']), (0, 1, 0), r_s, w_s, 28, 0)
+    disc(bm_, (sp.get('x', 0.0), yt + w_s - 0.004, sp['z']), (0, 1, 0), r_s * P.get('wheel', {}).get('rimFactor', 0.62), 0.012, 24, 1)
+    disc(bm_, (sp.get('x', 0.0), yt + w_s + 0.004, sp['z']), (0, 1, 0), r_s * 0.3, 0.025, 16, 1)
+    spare_parts.append(new_object('spare', bm_, [MAT['Tyres'], MAT['wheel_rim']]))
+
 # ---- shading and export -------------------------------------------------------------------
 for obj in scene.objects:
     if obj.type == 'MESH':
@@ -693,7 +720,7 @@ for o in scene.objects:
         o.name = 'glass'
         o.data.name = 'glass'
 bpy.ops.object.select_all(action='DESELECT')
-for o in (chrome_front, grille_field, bezels, kidney_frames, bumpers, detail_chrome, front_slots):
+for o in (chrome_front, grille_field, bezels, kidney_frames, bumpers, detail_chrome, front_slots, *spare_parts):
     o.select_set(True)
 bpy.context.view_layer.objects.active = bumpers
 bpy.ops.object.join()

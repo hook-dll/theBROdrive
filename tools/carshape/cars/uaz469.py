@@ -1,0 +1,68 @@
+# UAZ-469B (1972-85). Factory: 4025 x 1785 x 2015, wheelbase 2380, overhangs 680/965
+# (to the spare), tracks 1445, 8.40-15, clearance 220. Read off the dimensioned factory
+# drawing of its hard-top descendant, the UAZ-31514 (the same body), reprinted at
+# 3dcar.ru/blueprints/uaz/uaz_31514 (172 px/m by the wheelbase).
+# The box: upright slab sides narrower than the flat-topped front wings with their
+# flared lips, a flat bonnet over a slotted grille between round lamps, an upright
+# framed screen, a canvas top, flared rear arches, the spare on the tail door.
+CAR = {
+    'id': 'uaz469',
+    'label': 'UAZ-469',
+    'kind': 'estate',
+    'factory': {'length': 4.025, 'width': 1.785, 'height': 2.015, 'clearance': 0.22, 'wheelbase': 2.38,
+                'frontTrack': 1.445, 'rearTrack': 1.445, 'wheelRadius': 0.37, 'tyreWidth': 0.215, 'frontOverhang': 0.68},
+    'yRange': [-1.85, 1.70],
+    'trimEnds': 0.04,
+    'deck': [[-1.85, 1.17], [-1.80, 1.19], [-1.2, 1.22], [-0.705, 1.26], [-0.3, 1.24], [1.5, 1.22], [1.70, 1.21]],
+    'belt': 1.24,
+    'cabin': [-0.705, -0.44, 1.66, 1.70],
+    'roof': [1.96, 1.94],
+    'screenTop': 1.80,
+    'crown': 0.01,
+    'roofCrown': 0.03,
+    'trimRegions': [{'panel': 'rail-topCentre', 'y': [-0.40, 1.70]}, {'panel': 'glassBase-rail', 'y': [0.82, 1.70]}],
+    'widths': {'waist': 0.77, 'shoulder': 0.77, 'deckEdge': 0.755, 'glassDeck': 0.76, 'glass': 0.75,
+               'railDeck': 0.72, 'railPillar': 0.75, 'rail': 0.74, 'sill': 0.765},
+    'planFactor': [[-1.85, 0.78], [-0.82, 0.78], [-0.74, 1.0], [1.70, 1.0]],
+    'sill': [[-1.85, 0.62], [-0.85, 0.56], [-0.76, 0.47], [1.6, 0.47], [1.70, 0.50]],
+    'floor': [[-1.85, 0.56], [-0.85, 0.48], [-0.76, 0.44], [1.6, 0.44], [1.70, 0.47]],
+    'waistZ': 0.90,
+    'shoulderDrop': 0.01,
+    'edgeDrop': 0.01,
+    'shoulderRound': 0.03,
+    'hatchLip': 0.02,
+    'rearScreen': False,
+    'smoothAngleDeg': 20,
+    'windows': [[[-0.42, 1.31], [-0.42, 1.73], [0.08, 1.73], [0.08, 1.31]],
+                [[0.17, 1.31], [0.17, 1.73], [0.74, 1.73], [0.78, 1.31]],
+                [[0.84, 1.37], [0.84, 1.72], [1.55, 1.72], [1.55, 1.37]]],
+    'arch': {'radiusFactor': 1.40, 'lift': 0.0, 'wellDepth': 0.3},
+    'parts': {
+        'wings': [
+            {'axle': 'front', 'inner': 0.58, 'outer': 0.89, 'radius': 0.53, 'lift': 0.0,
+             'path': [[-1.84, 0.60], [-1.85, 0.94], [-1.79, 0.985], [-1.0, 0.995], [-0.93, 0.95], [-0.79, 0.50]],
+             'crown': 0.02, 'thickness': 0.04},
+            {'axle': 'rear', 'inner': 0.74, 'outer': 0.88, 'radius': 0.53, 'lift': 0.0, 'from': 8, 'to': 172,
+             'crown': 0.03, 'thickness': 0.04},
+        ],
+        'headlamps': [[0.53, 0.96, 0.09]], 'bezel': 0.015,
+        'grille': {'halfWidth': 0.30, 'z': [0.80, 1.12], 'slats': 0, 'bars': 9},
+        'bumper': {'depth': 0.10, 'height': 0.13, 'standOff': 0.08, 'wrap': 0.04, 'halfWidth': 0.89,
+                   'zFront': 0.58, 'zRear': 0.58, 'material': 'trim'},
+        'doorHandles': [[-0.08, 1.20], [0.64, 1.20]],
+        'windowFrame': 0.02,
+        'lensColours': {'FrontLampLens': [0.9, 0.62, 0.25]},
+        'lamps': [
+            {'node': 'front_blinker_left', 'material': 'FrontLampLens', 'end': 'front', 'shape': 'disc', 'x': 0.68, 'z': 0.77, 'r': 0.035},
+            {'node': 'front_blinker_right', 'material': 'FrontLampLens', 'end': 'front', 'shape': 'disc', 'x': 0.68, 'z': 0.77, 'r': 0.035},
+            {'node': 'rear_blinker_left', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'rect', 'x': 0.69, 'z': 1.0, 'w': 0.08, 'h': 0.07},
+            {'node': 'rear_blinker_right', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'rect', 'x': 0.69, 'z': 1.0, 'w': 0.08, 'h': 0.07},
+            {'node': 'taillights', 'material': 'TailLights', 'end': 'rear', 'shape': 'rect', 'x': 0.69, 'z': 0.90, 'w': 0.08, 'h': 0.10},
+            {'node': 'reverse_lights', 'material': 'ReverseLights', 'end': 'rear', 'shape': 'rect', 'x': 0.69, 'z': 0.81, 'w': 0.08, 'h': 0.05},
+        ],
+        'mirror': {'x': 0.86, 'y': -0.55, 'z': 1.38},
+        'tailWindow': {'halfWidth': 0.30, 'z': [1.42, 1.76]},
+        'spareWheel': {'x': -0.17, 'z': 1.08, 'r': 0.37},
+        'wheel': {'style': 'steel', 'windows': 0, 'rimFactor': 0.6},
+    },
+}

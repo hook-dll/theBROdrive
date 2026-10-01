@@ -1034,6 +1034,37 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'crossply', aspect: 0.95 },
     target: { top: 140, to100: null, turn: 5.9, source: 'Ford Falcon 1960 data; 38.6 ft turning circle' },
   },
+  {
+    // UAZ-469B (1972): UMZ-451M 2.45, 75 hp at 4000 and 167 Nm at 2200, four-speed and a
+    // two-range transfer case (high 1:1) on 5.125 axles without hub reductions, 4x4
+    // engaged, leaf springs all round, 1540 kg; about 110 km/h, 13 m turning circle.
+    id: 'rs_uaz469',
+    label: 'UAZ-469',
+    body: 'uaz469.glb',
+    bodyClass: 'car',
+    factory: { length: 4.025, width: 1.785, height: 2.015, clearance: 0.22, wheelbase: 2.38, frontTrack: 1.445, rearTrack: 1.445, wheelRadius: 0.37, tyreWidth: 0.215, frontOverhang: 0.68 },
+    mass: 1540,
+    frontWeightShare: 0.52,
+    rearDriveBias: 0.5,
+    engine: {
+      label: '2.45 UMZ-451M', mass: 170,
+      spec: { peakPowerKw: 55, powerPeakRpm: 4000, peakTorqueNm: 167, torquePeakRpm: 2200, redlineRpm: 4300, idleRpm: 600, bsfc: 0.31, brakingCoeff: 0.03, cylinders: 4 },
+      rated: { hp: 74 }, ratedTorqueNm: 167, source: 'UAZ-469B catalogue: 75 l.s. at 4000, 17 kgm at 2200',
+    },
+    gearbox: {
+      label: 'UAZ-469 four-speed', mass: 46,
+      spec: { ratios: [4.124, 2.641, 1.58, 1.0], reverse: 5.224, finalDrive: 5.125, shiftTime: 0.45, automatic: false, efficiency: 0.85 },
+    },
+    tankLitres: 78,
+    wheelGrip: 0.55,
+    brakeDecelG: 0.45,
+    steerLock: 0.435,
+    dragArea: 2.152,
+    handlingProfile: 'utility',
+    suspension: S(1.15, 1.25, 0.22, 0.38, 0.16),
+    tyre: { construction: 'crossply', aspect: 0.95 },
+    target: { top: 110, to100: null, turn: 6.5, source: 'UAZ-469B catalogue; 13 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
