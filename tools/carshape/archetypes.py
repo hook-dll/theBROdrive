@@ -28,6 +28,10 @@ car = runpy.run_path(sys.argv[1])['CAR']
 F = car['factory']
 L = F['length']
 y0, y1 = -L / 2 + car.get('trimEnds', 0.016), L / 2 - car.get('trimEnds', 0.016)
+if 'yRange' in car:
+    # Bumpers that stand well off one end (the Renault 4's tail) make the body's own
+    # extent asymmetric about the factory length.
+    y0, y1 = car['yRange']
 
 deck = car['deck']
 ws0, ws1, rw0, rw1 = car['cabin']
@@ -113,7 +117,8 @@ screen_top = car['screenTop']
 glass = [{'panel': 'glassBase-rail', 'outline': w} for w in car['windows']]
 glass.append({'panel': 'rail-topCentre', 'y': [ws0 + 0.01, ws1 - 0.01], 'x': car.get('screenHalf', wid['rail'] - 0.05), 'zMax': screen_top})
 rear_y = [rw0 + 0.02, rw1 - 0.01] if kind == 'saloon' else [rw0 + 0.02, y1 - car.get('hatchLip', 0.08)]
-glass.append({'panel': 'rail-topCentre', 'y': rear_y, 'x': car.get('rearScreenHalf', wid['rail'] - 0.08), 'zMax': screen_top})
+if car.get('rearScreen', True):
+    glass.append({'panel': 'rail-topCentre', 'y': rear_y, 'x': car.get('rearScreenHalf', wid['rail'] - 0.08), 'zMax': screen_top})
 
 extra = [ws0, ws1, rw0, rw1] + [p[0] for w in car['windows'] for p in w]
 R = F['wheelRadius']

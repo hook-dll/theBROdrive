@@ -591,6 +591,38 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'radial', aspect: 0.82 },
     target: { top: 175, to100: null, turn: 5.6, source: 'Citroën DS 21 (1968) data' },
   },
+  {
+    // Renault 4 TL (1978): 845 cc four, 34 PS DIN at 5000 and 57 Nm at 2500, four-speed
+    // transaxle with the dashboard push-pull lever, 620 kg; 115 km/h, 9.6 m circle.
+    id: 'rs_renault4',
+    label: 'Renault 4',
+    body: 'renault4.glb',
+    bodyClass: 'car',
+    factory: { length: 3.668, width: 1.485, height: 1.55, clearance: 0.175, wheelbase: 2.401, frontTrack: 1.28, rearTrack: 1.244, wheelRadius: 0.275, tyreWidth: 0.135, frontOverhang: 0.528 },
+    mass: 620,
+    frontWeightShare: 0.6,
+    rearDriveBias: 0,
+    engine: {
+      label: '0.85 Renault Billancourt inline-four', mass: 70,
+      spec: { peakPowerKw: 25, powerPeakRpm: 5000, peakTorqueNm: 57, torquePeakRpm: 2500, redlineRpm: 5400, idleRpm: 800, bsfc: 0.34, brakingCoeff: 0.0101, cylinders: 4 },
+      rated: { ps: 34 }, ratedTorqueNm: 57, source: 'Renault 4 TL (1978) data: 34 PS DIN at 5000, 57 Nm at 2500',
+    },
+    gearbox: {
+      label: 'Renault 4 four-speed transaxle', mass: 25,
+      spec: { ratios: [3.8, 2.06, 1.36, 0.97], reverse: 3.8, finalDrive: 4.12, shiftTime: 0.45, automatic: false, efficiency: 0.92 },
+    },
+    tankLitres: 34,
+    wheelGrip: 0.6,
+    brakeDecelG: 0.62,
+    steerLock: 0.590,
+    dragArea: 0.942,
+    handlingProfile: 'classic',
+    // Long soft torsion bars: it leans a long way and rides everything.
+    suspension: S(0.95, 1.05, 0.2, 0.32, 0.14),
+    tyre: { construction: 'radial', aspect: 0.82 },
+    antiRoll: { front: 0.3, rear: 0.0 },
+    target: { top: 115, to100: null, turn: 4.8, source: 'Renault 4 TL (1978) data; 9.6 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {

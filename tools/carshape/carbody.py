@@ -79,7 +79,11 @@ MAT = {
 # ---- lines ----------------------------------------------------------------------------
 def pchip(points, at):
     """Monotone cubic through the points: never overshoots, so flats stay flat."""
-    p = np.array(sorted(points), dtype=float)
+    # Points sharing an x would divide by zero below: the last one given wins.
+    unique = {}
+    for x_, y_ in points:
+        unique[round(float(x_), 6)] = float(y_)
+    p = np.array(sorted(unique.items()), dtype=float)
     xs, ys = p[:, 0], p[:, 1]
     at = np.clip(np.asarray(at, float), xs[0], xs[-1])
     if len(p) < 3:
@@ -160,9 +164,15 @@ for a, b in zip(rings, rings[1:]):
     for k in range(len(a) - 1):
         f = bm.faces.new((a[k], a[k + 1], b[k + 1], b[k]))
         f[panel_layer] = owners[k]
+# The end faces are fanned from the middle of the centreline edge: a half-section is
+# concave wherever the shoulder or the glasshouse steps in, and one n-gon over it
+# triangulates into spikes (it did on the Renault 4's upright tail).
 for cap in (rings[0], rings[-1][::-1]):
-    f = bm.faces.new(cap)
-    f[panel_layer] = -1
+    a, b = cap[0].co, cap[-1].co
+    centre = bm.verts.new(((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2))
+    for k in range(len(cap) - 1):
+        f = bm.faces.new((centre, cap[k], cap[k + 1]))
+        f[panel_layer] = -1
 bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-4)
 bmesh.ops.dissolve_degenerate(bm, edges=bm.edges, dist=1e-4)
 
@@ -474,6 +484,16 @@ for node, (bm_l, mat_names) in LENS.items():
         if mat_name not in MAT:
             MAT[mat_name] = material(mat_name, tuple(P['lensColours'][mat_name]), 0.3)
     new_object(node, bm_l, [MAT[n] for n in mat_names])
+
+# A window in an upright tailgate (the estates): flat glass on the tail face, with a
+# chrome surround when the car has one.
+tw = P.get('tailWindow')
+if tw:
+    bm_ = bmesh.new()
+    zc = (tw['z'][0] + tw['z'][1]) / 2
+    yt = surface_y(0.0, zc, 'rear')
+    box(bm_, (0, yt + 0.004, zc), (2 * tw['halfWidth'], 0.012, tw['z'][1] - tw['z'][0]), 0)
+    new_object('glass_tail', bm_, [MAT['glass']])
 
 # Dark slots in the panel under the grille, and anything else flush and black.
 bm_ = bmesh.new()
