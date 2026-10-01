@@ -414,6 +414,37 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'crossply', aspect: 0.9 },
     target: { top: 118, to100: null, turn: 5.25, source: 'ZAZ-968M catalogue (autoopt.ru)' },
   },
+  {
+    // Renault 5 Alpine (1976): 1.4 Cléon-Fonte, 93 PS at 6400 and 11.8 kgm at 4000,
+    // five-speed transaxle, 850 kg; 175 km/h, 0-100 in 9.7 s, a 10 m turning circle.
+    id: 'rs_renault5',
+    label: 'Renault 5 Alpine',
+    body: 'renault5.glb',
+    bodyClass: 'car',
+    factory: { length: 3.506, width: 1.525, height: 1.33, clearance: 0.12, wheelbase: 2.434, frontTrack: 1.29, rearTrack: 1.27, wheelRadius: 0.275, tyreWidth: 0.155, frontOverhang: 0.55 },
+    mass: 850,
+    frontWeightShare: 0.6,
+    rearDriveBias: 0,
+    engine: {
+      label: '1.4 Renault Cléon-Fonte inline-four', mass: 105,
+      spec: { peakPowerKw: 68.4, powerPeakRpm: 6400, peakTorqueNm: 116, torquePeakRpm: 4000, redlineRpm: 6900, idleRpm: 900, bsfc: 0.31, brakingCoeff: 0.0161, cylinders: 4 },
+      rated: { ps: 93 }, ratedTorqueNm: 116, source: 'Renault 5 Alpine (1976) data: 93 PS DIN at 6400, 11.8 kgm at 4000',
+    },
+    gearbox: {
+      label: 'Renault five-speed transaxle', mass: 34,
+      spec: { ratios: [3.818, 2.235, 1.478, 1.036, 0.861], reverse: 3.083, finalDrive: 3.78, shiftTime: 0.28, automatic: false, efficiency: 0.92 },
+    },
+    tankLitres: 38,
+    wheelGrip: 0.78,
+    brakeDecelG: 0.8,
+    steerLock: 0.55,
+    dragArea: 0.75,
+    handlingProfile: 'sport',
+    suspension: S(1.45, 1.7, 0.3, 0.45, 0.08),
+    tyre: { construction: 'radial', aspect: 0.7 },
+    antiRoll: { front: 0.6, rear: 0.3 },
+    target: { top: 175, to100: 9.7, turn: 5.0, source: 'Renault 5 Alpine (1976) data' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {

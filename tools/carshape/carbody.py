@@ -439,7 +439,8 @@ for lamp in P.get('lamps', []):
             x = float(np.interp(lamp['y'], stations, LINES['waist'][0])) + depth / 2 - 0.004
             centre, normal = (sgn * x, lamp['y'], lamp['z']), (sgn, 0, 0)
         else:
-            face = nose_y if lamp['end'] == 'front' else tail_y
+            # A lamp that sits up a sloping tailgate or nose gives its own `y`.
+            face = lamp.get('y', nose_y if lamp['end'] == 'front' else tail_y)
             n = -1 if lamp['end'] == 'front' else 1
             centre, normal = (sgn * lamp['x'], face + n * (depth / 2 - 0.004), lamp['z']), (0, n, 0)
         if lamp['shape'] == 'disc':
