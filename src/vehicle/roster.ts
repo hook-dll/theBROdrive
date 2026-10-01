@@ -1158,6 +1158,37 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'crossply', aspect: 0.95 },
     target: { top: 110, to100: null, turn: 5.4, source: 'Toyota Land Cruiser BJ40 data; 10.8 m turning circle' },
   },
+  {
+    // Suzuki SJ410 (1982): F10A 970 cc three-cylinder, 45 PS at 5500 and 7.4 kgm at 3000,
+    // four-speed through a 1.564 high-range transfer to 4.111 axles, 4x4 engaged, leaf
+    // springs, 850 kg; about 110 km/h, 9.8 m turning circle.
+    id: 'rs_sj410',
+    label: 'Suzuki SJ410',
+    body: 'sj410.glb',
+    bodyClass: 'car',
+    factory: { length: 3.43, width: 1.46, height: 1.68, clearance: 0.21, wheelbase: 2.03, frontTrack: 1.21, rearTrack: 1.22, wheelRadius: 0.35, tyreWidth: 0.16, frontOverhang: 0.557 },
+    mass: 850,
+    frontWeightShare: 0.54,
+    rearDriveBias: 0.5,
+    engine: {
+      label: '1.0 Suzuki F10A', mass: 80,
+      spec: { peakPowerKw: 33, powerPeakRpm: 5500, peakTorqueNm: 73, torquePeakRpm: 3000, redlineRpm: 6000, idleRpm: 800, bsfc: 0.3, brakingCoeff: 0.02, cylinders: 3 },
+      rated: { ps: 45 }, ratedTorqueNm: 73, source: 'Suzuki SJ410 data: 45 PS at 5500, 7.4 kgm at 3000',
+    },
+    gearbox: {
+      label: 'Suzuki SJ410 four-speed', mass: 35,
+      spec: { ratios: [3.581, 2.022, 1.384, 1.0], reverse: 3.667, finalDrive: 6.43, shiftTime: 0.35, automatic: false, efficiency: 0.85 },
+    },
+    tankLitres: 40,
+    wheelGrip: 0.55,
+    brakeDecelG: 0.5,
+    steerLock: 0.5,
+    dragArea: 1.336,
+    handlingProfile: 'utility',
+    suspension: S(1.45, 1.55, 0.2, 0.36, 0.15),
+    tyre: { construction: 'crossply', aspect: 0.95 },
+    target: { top: 110, to100: null, turn: 4.9, source: 'Suzuki SJ410 data; 9.8 m turning circle; final drive is 4.111 axle x 1.564 high range' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
