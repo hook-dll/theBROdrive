@@ -362,6 +362,28 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'radial', aspect: 0.7 },
     target: { top: 160, to100: null, turn: 4.8, source: 'Ford Escort Mk II 1600 Sport data; 9.6 m turning circle' },
   },
+  {
+    // VAZ-2121 Niva: the pack's sv_niva driveline and chassis on its own body.
+    id: 'rs_niva',
+    label: 'VAZ-2121 Niva',
+    body: 'niva.glb',
+    bodyClass: 'car',
+    factory: { length: 3.72, width: 1.68, height: 1.64, clearance: 0.22, wheelbase: 2.2, frontTrack: 1.43, rearTrack: 1.4, wheelRadius: 0.343, tyreWidth: 0.175, frontOverhang: 0.7 },
+    mass: 1150,
+    frontWeightShare: 0.53,
+    rearDriveBias: 0.5,
+    engine: 'engine_niva_1600',
+    gearbox: 'gearbox_niva_4',
+    tankLitres: 42,
+    wheelGrip: 0.576,
+    brakeDecelG: 0.48,
+    steerLock: 0.496,
+    dragArea: 1.3,
+    handlingProfile: 'utility',
+    suspension: S(1.15, 1.2, 0.24, 0.4, 0.14),
+    tyre: { construction: 'radial', aspect: 0.8 },
+    target: { top: 132, to100: null, turn: 5.5, source: 'AO vaz-2121' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
