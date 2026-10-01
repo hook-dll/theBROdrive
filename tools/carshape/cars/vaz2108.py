@@ -1,0 +1,55 @@
+# VAZ-2108 Sputnik (1984). Factory: 4006 x 1620 x 1335, wheelbase 2460, overhangs
+# 785/761, tracks 1390/1360, 165/70 R13. Everything read off the factory drawing
+# reprinted at 3dcar.ru/blueprints/vaz/vaz_2108 (side, front, rear, plan with
+# dimension lines) on a metric grid calibrated by the wheelbase (260.6 px/m).
+# The wedge: a long falling bonnet, a fast windscreen, a flat roof ending in a
+# steep hatch, wide rectangular lamps in black plastic bumpers.
+CAR = {
+    'id': 'vaz2108',
+    'label': 'VAZ-2108',
+    'kind': 'hatchback',
+    'factory': {'length': 4.006, 'width': 1.62, 'height': 1.335, 'clearance': 0.16, 'wheelbase': 2.46,
+                'frontTrack': 1.39, 'rearTrack': 1.36, 'wheelRadius': 0.281, 'tyreWidth': 0.165, 'frontOverhang': 0.785},
+    'trimEnds': 0.12,
+    'deck': [[-1.88, 0.73], [-1.85, 0.78], [-1.5, 0.84], [-1.2, 0.88], [-0.88, 0.935], [-0.5, 0.94],
+             [1.2, 0.92], [1.6, 0.90], [1.83, 0.89], [1.88, 0.87]],
+    'belt': 0.91,
+    'cabin': [-0.88, -0.26, 1.16, 1.83],
+    'roof': [1.33, 1.29],
+    'screenTop': 1.26,
+    'crown': 0.015,
+    'widths': {'waist': 0.81, 'shoulder': 0.80, 'deckEdge': 0.78, 'glassDeck': 0.72, 'glass': 0.70,
+               'railDeck': 0.60, 'railPillar': 0.66, 'rail': 0.61, 'sill': 0.76},
+    'planFactor': [[-1.88, 0.95], [-1.8, 0.99], [-1.7, 1.0], [1.75, 1.0], [1.85, 0.985], [1.88, 0.97]],
+    'sill': [[-1.88, 0.36], [-1.6, 0.30], [-1.4, 0.28], [1.4, 0.28], [1.6, 0.30], [1.88, 0.33]],
+    'floor': [[-1.88, 0.34], [-1.6, 0.21], [-1.4, 0.18], [1.4, 0.18], [1.6, 0.21], [1.88, 0.30]],
+    'waistZ': 0.62,
+    'shoulderDrop': 0.06,
+    'edgeDrop': 0.015,
+    'shoulderRound': 0.12,
+    'hatchLip': 0.10,
+    'windows': [[[-0.64, 0.91], [-0.24, 1.26], [0.43, 1.26], [0.43, 0.91]],
+                [[0.62, 0.92], [0.62, 1.25], [1.1, 1.25], [1.48, 0.93]]],
+    'arch': {'radiusFactor': 1.14, 'lift': 0.02, 'wellDepth': 0.3},
+    'parts': {
+        'headlamps': [{'shape': 'rect', 'x': 0.485, 'z': 0.685, 'w': 0.33, 'h': 0.12}], 'bezel': 0.01,
+        'bezelMaterial': 'trim',
+        'grille': {'halfWidth': 0.30, 'z': [0.63, 0.74], 'slats': 3, 'slatMaterial': 'trim', 'surround': False},
+        'bumper': {'depth': 0.10, 'height': 0.17, 'standOff': 0.03, 'wrap': 0.35, 'halfWidth': 0.80,
+                   'zFront': 0.48, 'zRear': 0.46, 'material': 'trim'},
+        'doorHandles': [[0.32, 0.85]],
+        'windowFrame': 0.012,
+        'lamps': [
+            {'node': 'front_blinker_left', 'material': 'IndicatorLights', 'end': 'front', 'shape': 'rect', 'x': 0.71, 'z': 0.685, 'w': 0.09, 'h': 0.12},
+            {'node': 'front_blinker_right', 'material': 'IndicatorLights', 'end': 'front', 'shape': 'rect', 'x': 0.71, 'z': 0.685, 'w': 0.09, 'h': 0.12},
+            {'node': 'front_blinker_left', 'material': 'IndicatorLights', 'end': 'side', 'shape': 'rect', 'y': -1.55, 'z': 0.77, 'w': 0.06, 'h': 0.025, 'depth': 0.012},
+            {'node': 'front_blinker_right', 'material': 'IndicatorLights', 'end': 'side', 'shape': 'rect', 'y': -1.55, 'z': 0.77, 'w': 0.06, 'h': 0.025, 'depth': 0.012},
+            {'node': 'rear_blinker_left', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'rect', 'x': 0.66, 'z': 0.625, 'w': 0.12, 'h': 0.13},
+            {'node': 'rear_blinker_right', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'rect', 'x': 0.66, 'z': 0.625, 'w': 0.12, 'h': 0.13},
+            {'node': 'taillights', 'material': 'TailLights', 'end': 'rear', 'shape': 'rect', 'x': 0.52, 'z': 0.625, 'w': 0.16, 'h': 0.13},
+            {'node': 'reverse_lights', 'material': 'ReverseLights', 'end': 'rear', 'shape': 'rect', 'x': 0.385, 'z': 0.625, 'w': 0.09, 'h': 0.13},
+        ],
+        'mirror': {'x': 0.84, 'y': -0.60, 'z': 0.97},
+        'wheel': {'style': 'steel', 'windows': 4, 'rimFactor': 0.68},
+    },
+}

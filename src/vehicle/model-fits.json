@@ -2004,5 +2004,64 @@
       0,
       0
     ]
+  },
+  "rs_vaz2108": {
+    "halfExtents": [
+      0.81,
+      0.5875,
+      2.003
+    ],
+    "wheels": [
+      {
+        "id": "wheel_fl",
+        "pos": [
+          0.695,
+          -0.4665,
+          1.218
+        ],
+        "radius": 0.281,
+        "isFront": true
+      },
+      {
+        "id": "wheel_fr",
+        "pos": [
+          -0.695,
+          -0.4665,
+          1.218
+        ],
+        "radius": 0.281,
+        "isFront": true
+      },
+      {
+        "id": "wheel_rl",
+        "pos": [
+          0.68,
+          -0.4665,
+          -1.242
+        ],
+        "radius": 0.281,
+        "isFront": false
+      },
+      {
+        "id": "wheel_rr",
+        "pos": [
+          -0.68,
+          -0.4665,
+          -1.242
+        ],
+        "radius": 0.281,
+        "isFront": false
+      }
+    ],
+    "hoodPoint": [
+      0,
+      0.3966239962642919,
+      1.2018
+    ],
+    "visualOffset": [
+      0,
+      0,
+      0
+    ]
   }
 }

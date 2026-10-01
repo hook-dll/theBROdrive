@@ -197,6 +197,28 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'radial', aspect: 0.7 },
     target: { top: 175, to100: null, turn: 4.95, source: 'Volvo 240 GL 2.3 (1990) brochure; 9.9 m turning circle' },
   },
+  {
+    // VAZ-2108 (1984): the pack's sv_vaz2108 driveline and chassis on its own body.
+    id: 'rs_vaz2108',
+    label: 'VAZ-2108 Sputnik',
+    body: 'vaz2108.glb',
+    bodyClass: 'car',
+    factory: { length: 4.006, width: 1.62, height: 1.335, clearance: 0.16, wheelbase: 2.46, frontTrack: 1.39, rearTrack: 1.36, wheelRadius: 0.281, tyreWidth: 0.165, frontOverhang: 0.785 },
+    mass: 900,
+    frontWeightShare: 0.62,
+    rearDriveBias: 0,
+    engine: 'engine_samara_1300',
+    gearbox: 'gearbox_samara_5',
+    tankLitres: 43,
+    wheelGrip: 0.65,
+    brakeDecelG: 0.57,
+    steerLock: 0.56,
+    dragArea: 0.88,
+    handlingProfile: 'road',
+    suspension: S(1.3, 1.55, 0.28, 0.42, 0.085),
+    tyre: { construction: 'radial', aspect: 0.7 },
+    target: { top: 148, to100: null, turn: 5.2, source: 'AO vaz-2108 (its 16 s 0-100 is the catalogue-optimistic case in tools/reality.ts)' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
