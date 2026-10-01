@@ -332,6 +332,36 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'radial', aspect: 0.82 },
     target: { top: 140, to100: null, turn: 5.15, source: 'VW Golf 1.1 (1974) data; 10.3 m turning circle' },
   },
+  {
+    // Ford Escort Mk II 1600 Sport (1975): Kent 1.6, 84 PS at 5500 and 12.7 kgm at 3500,
+    // four-speed on a 3.54 axle, leaf-sprung live axle, 900 kg; 160 km/h, 0-100 in 10.8 s.
+    id: 'rs_escort',
+    label: 'Ford Escort',
+    body: 'escort.glb',
+    bodyClass: 'car',
+    factory: { length: 3.978, width: 1.595, height: 1.39, clearance: 0.14, wheelbase: 2.405, frontTrack: 1.27, rearTrack: 1.3, wheelRadius: 0.29, tyreWidth: 0.175, frontOverhang: 0.68 },
+    mass: 900,
+    frontWeightShare: 0.53,
+    rearDriveBias: 1,
+    engine: {
+      label: '1.6 Ford Kent inline-four', mass: 120,
+      spec: { peakPowerKw: 61.8, powerPeakRpm: 5500, peakTorqueNm: 125, torquePeakRpm: 3500, redlineRpm: 6200, idleRpm: 800, bsfc: 0.32, brakingCoeff: 0.0193, cylinders: 4 },
+      rated: { ps: 84 }, ratedTorqueNm: 125, source: 'Ford Escort 1600 Sport (1975) data: 84 PS DIN at 5500, 125 Nm at 3500',
+    },
+    gearbox: {
+      label: 'Ford Type E four-speed', mass: 28,
+      spec: { ratios: [3.337, 1.995, 1.418, 1.0], reverse: 3.876, finalDrive: 3.54, shiftTime: 0.28, automatic: false, efficiency: 0.9 },
+    },
+    tankLitres: 41,
+    wheelGrip: 0.74,
+    brakeDecelG: 0.75,
+    steerLock: 0.591,
+    dragArea: 0.893,
+    handlingProfile: 'road',
+    suspension: S(1.25, 1.55, 0.26, 0.42, 0.09),
+    tyre: { construction: 'radial', aspect: 0.7 },
+    target: { top: 160, to100: null, turn: 4.8, source: 'Ford Escort Mk II 1600 Sport data; 9.6 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
