@@ -475,6 +475,30 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'radial', aspect: 0.82 },
     target: { top: 145, to100: null, turn: 5.25, source: 'Škoda 110 R (1970) data' },
   },
+  {
+    // Mini Cooper S 1275 (1965): the proving ground's pg_mini driveline and chassis
+    // (vehicle/carmodels.ts) on its own body.
+    id: 'rs_mini',
+    label: 'Mini Cooper S',
+    body: 'mini.glb',
+    bodyClass: 'car',
+    factory: { length: 3.054, width: 1.41, height: 1.346, clearance: 0.15, wheelbase: 2.036, frontTrack: 1.214, rearTrack: 1.176, wheelRadius: 0.255, tyreWidth: 0.145, frontOverhang: 0.45 },
+    mass: 650,
+    frontWeightShare: 0.62,
+    rearDriveBias: 0,
+    engine: 'engine_bmc_1275s',
+    gearbox: 'gearbox_mini_cr4',
+    tankLitres: 50,
+    wheelGrip: 0.72,
+    brakeDecelG: 0.75,
+    steerLock: 0.489,
+    dragArea: 0.905,
+    handlingProfile: 'road',
+    suspension: S(1.7, 1.9, 0.3, 0.45, 0.05),
+    tyre: { construction: 'radial', aspect: 0.82 },
+    antiRoll: { front: 0, rear: 0 },
+    target: { top: 157, to100: null, turn: 4.85, source: 'automobile-catalog Cooper S 1275, 3.44 axle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
