@@ -1,0 +1,57 @@
+# Ford Mustang GT 5.0 hatchback (1987-93, Fox body). Factory: 4562 x 1756 x 1321,
+# wheelbase 2553, tracks 1448, 225/60 R15, clearance 130. No orthographic drawing found;
+# dimensions from the factory data, the lines read off Commons photographs (black GT side
+# three-quarter CC BY 2.0, grey GT front CC BY-SA 4.0, black GT rear CC BY 2.0).
+# The eighties wedge: a low sloping nose with flush composite lamps and no grille, a deep
+# fascia, a sharply raked screen, a short roof running into a long shallow fastback, a
+# small quarter window, GT skirts, louvred tail lamps across a square tail.
+CAR = {
+    'id': 'foxgt',
+    'label': 'Ford Mustang GT 5.0',
+    'kind': 'hatchback',
+    'factory': {'length': 4.562, 'width': 1.756, 'height': 1.321, 'clearance': 0.13, 'wheelbase': 2.553,
+                'frontTrack': 1.448, 'rearTrack': 1.448, 'wheelRadius': 0.32, 'tyreWidth': 0.225, 'frontOverhang': 0.95},
+    'trimEnds': 0.0,
+    'deck': [[-2.28, 0.60], [-2.22, 0.68], [-1.8, 0.74], [-1.2, 0.81], [-0.62, 0.87], [1.95, 1.0], [2.15, 1.02], [2.28, 0.98]],
+    'belt': 0.90,
+    'cabin': [-0.62, 0.0, 0.45, 1.95],
+    'roof': [1.32, 1.29],
+    'screenTop': 1.26,
+    'crown': 0.02,
+    'roofCrown': 0.03,
+    'hatchLip': 0.30,
+    'rearScreenHalf': 0.58,
+    'widths': {'waist': 0.878, 'shoulder': 0.87, 'deckEdge': 0.84, 'glassDeck': 0.78, 'glass': 0.72,
+               'railDeck': 0.60, 'railPillar': 0.68, 'rail': 0.64, 'sill': 0.86},
+    'planFactor': [[-2.28, 0.86], [-2.1, 0.97], [-1.9, 1.0], [2.1, 1.0], [2.28, 0.97]],
+    'sill': [[-2.28, 0.30], [-2.0, 0.26], [-1.2, 0.22], [1.2, 0.22], [2.0, 0.30], [2.28, 0.34]],
+    'floor': [[-2.28, 0.27], [-2.0, 0.20], [-1.2, 0.17], [1.2, 0.17], [2.0, 0.22], [2.28, 0.30]],
+    'waistZ': 0.62,
+    'shoulderDrop': 0.02,
+    'edgeDrop': 0.01,
+    'shoulderRound': 0.08,
+    'tumbleunder': 0.06,
+    'smoothAngleDeg': 30,
+    'windows': [[[-0.50, 0.92], [0.0, 1.26], [0.68, 1.27], [0.68, 0.92]],
+                [[0.75, 0.93], [0.75, 1.25], [1.05, 1.21], [1.50, 0.98]]],
+    'arch': {'radiusFactor': 1.15, 'lift': 0.02, 'wellDepth': 0.3},
+    'parts': {
+        'headlamps': [{'shape': 'rect', 'x': 0.55, 'z': 0.64, 'w': 0.38, 'h': 0.10}], 'bezel': 0.006, 'bezelMaterial': 'trim',
+        'grille': {'halfWidth': 0.30, 'z': [0.605, 0.66], 'slats': 1, 'surround': False},
+        'bumper': {'depth': 0.03, 'height': 0.05, 'standOff': 0.0, 'wrap': 0.40, 'halfWidth': 0.86,
+                   'zFront': 0.47, 'zRear': 0.50, 'material': 'trim'},
+        'doorHandles': [[0.55, 0.86]],
+        'windowFrame': 0.0,
+        'lensColours': {'FrontLampLens': [0.9, 0.62, 0.25]},
+        'lamps': [
+            {'node': 'front_blinker_left', 'material': 'FrontLampLens', 'end': 'front', 'shape': 'rect', 'x': 0.79, 'z': 0.64, 'w': 0.06, 'h': 0.09},
+            {'node': 'front_blinker_right', 'material': 'FrontLampLens', 'end': 'front', 'shape': 'rect', 'x': 0.79, 'z': 0.64, 'w': 0.06, 'h': 0.09},
+            {'node': 'rear_blinker_left', 'material': 'TailLights', 'end': 'rear', 'shape': 'rect', 'x': 0.72, 'z': 0.76, 'w': 0.16, 'h': 0.12},
+            {'node': 'rear_blinker_right', 'material': 'TailLights', 'end': 'rear', 'shape': 'rect', 'x': 0.72, 'z': 0.76, 'w': 0.16, 'h': 0.12},
+            {'node': 'taillights', 'material': 'TailLights', 'end': 'rear', 'shape': 'rect', 'x': 0.51, 'z': 0.76, 'w': 0.24, 'h': 0.12},
+            {'node': 'reverse_lights', 'material': 'ReverseLights', 'end': 'rear', 'shape': 'rect', 'x': 0.34, 'z': 0.76, 'w': 0.09, 'h': 0.12},
+        ],
+        'mirror': {'x': 0.90, 'y': -0.40, 'z': 0.98},
+        'wheel': {'style': 'steel', 'windows': 5, 'rimFactor': 0.72},
+    },
+}

@@ -1469,6 +1469,39 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'radial', aspect: 0.75 },
     target: { top: 143, to100: null, turn: 5.85, source: 'AMC Eagle wagon (1981) data; 89 mph road-test top speed; 11.7 m turning circle' },
   },
+  {
+    // Ford Mustang GT 5.0 (1988): 302 HO V8, 225 hp at 4200 and 300 lb-ft at 3200 (net),
+    // Borg-Warner T-5 five-speed on a 2.73 Traction-Lok axle, quadra-shock live axle,
+    // 1400 kg; 220 km/h, 0-100 in 6.6 s, 11.9 m turning circle.
+    id: 'rs_foxgt',
+    label: 'Ford Mustang GT 5.0',
+    body: 'foxgt.glb',
+    bodyClass: 'car',
+    factory: { length: 4.562, width: 1.756, height: 1.321, clearance: 0.13, wheelbase: 2.553, frontTrack: 1.448, rearTrack: 1.448, wheelRadius: 0.32, tyreWidth: 0.225, frontOverhang: 0.95 },
+    mass: 1400,
+    frontWeightShare: 0.57,
+    rearDriveBias: 1,
+    engine: {
+      label: '5.0 Ford 302 HO V8', mass: 210,
+      spec: { peakPowerKw: 168, powerPeakRpm: 4200, peakTorqueNm: 407, torquePeakRpm: 3200, redlineRpm: 5000, idleRpm: 650, bsfc: 0.3, brakingCoeff: 0.075, cylinders: 8 },
+      rated: { hp: 225 }, ratedTorqueNm: 407, source: 'Ford 5.0 HO (1987-92): 225 hp net at 4200, 300 lb-ft at 3200',
+    },
+    gearbox: {
+      label: 'Borg-Warner T-5 five-speed', mass: 36,
+      spec: { ratios: [3.35, 1.93, 1.29, 1.0, 0.68], reverse: 3.15, finalDrive: 2.73, shiftTime: 0.3, automatic: false, efficiency: 0.9 },
+    },
+    tankLitres: 58,
+    wheelGrip: 0.82,
+    brakeDecelG: 0.85,
+    steerLock: 0.506,
+    dragArea: 0.821,
+    handlingProfile: 'sport',
+    suspension: S(1.3, 1.45, 0.28, 0.45, 0.08),
+    tyre: { construction: 'radial', aspect: 0.6 },
+    antiRoll: { front: 0.55, rear: 0.25 },
+    rearDiff: { lock: 0.45, preloadNm: 40 },
+    target: { top: 220, to100: 6.6, turn: 5.95, source: 'Ford Mustang GT 5.0 (1988) road tests; 39 ft turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
