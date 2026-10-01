@@ -646,6 +646,31 @@ export const ROSTER: readonly RosterCar[] = [
     antiRoll: { front: 0.5, rear: 0.35 },
     target: { top: 225, to100: 7.0, turn: 5.35, source: 'carfolio 911 SC 1980; Porsche 0-100 for the 204 PS SC' },
   },
+  {
+    // Lancia Delta HF Integrale 16v: the proving ground's pg_integrale driveline and
+    // chassis on its own body.
+    id: 'rs_delta',
+    label: 'Lancia Delta Integrale',
+    body: 'delta.glb',
+    bodyClass: 'car',
+    factory: { length: 3.9, width: 1.7, height: 1.365, clearance: 0.14, wheelbase: 2.48, frontTrack: 1.4, rearTrack: 1.38, wheelRadius: 0.295, tyreWidth: 0.205, frontOverhang: 0.75 },
+    mass: 1250,
+    frontWeightShare: 0.6,
+    rearDriveBias: 0.53,
+    engine: 'engine_lancia_integrale_16v',
+    gearbox: 'gearbox_lancia_integrale',
+    tankLitres: 57,
+    wheelGrip: 0.85,
+    brakeDecelG: 0.9,
+    steerLock: 0.563,
+    dragArea: 0.777,
+    handlingProfile: 'sport',
+    suspension: S(1.5, 1.7, 0.3, 0.46, 0.1),
+    tyre: { construction: 'radial', aspect: 0.5 },
+    antiRoll: { front: 0.6, rear: 0.4 },
+    rearDiff: { lock: 0.5, preloadNm: 0 },
+    target: { top: 220, to100: null, turn: 5.2, source: 'Lancia Delta HF Integrale 16v (1989) factory figures' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
