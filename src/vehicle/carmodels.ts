@@ -1903,15 +1903,33 @@ const PROVING_SPECS: readonly Entry[] = [
 
 /* ---- the saloon ----
  *
- * Rgsdev's sedan on the VAZ-2101's physics unchanged, so it can be parked beside the
- * pack's Zhiguli and judged against it.
+ * The VAZ-2101 body built by tools/carshape/carbody.py from authored character lines
+ * (tools/carshape/cars/vaz2101.json), on the VAZ-2101's physics unchanged, so it can be
+ * parked beside the pack's Zhiguli and judged against it.
  */
 const ZHIGULI = SOVIET_SPECS.find((spec) => spec.id === 'sv_vaz2101')!;
 const SHAPE_SPECS: readonly Entry[] = [
   {
     id: 'sh_vaz2101',
-    label: 'Saloon (VAZ-2101 physics)',
-    ...rgsLook('sedan.glb'),
+    label: 'VAZ-2101 (carshape)',
+    dir: '/models/carshape',
+    glb: 'vaz2101.glb',
+    scale: 1,
+    glassMaterial: 'car_glass',
+    paintStyle: 'solid-paint',
+    wheelNodes: {
+      wheel_fl: ['wheel_fl'],
+      wheel_fr: ['wheel_fr'],
+      wheel_rl: ['wheel_rl'],
+      wheel_rr: ['wheel_rr'],
+    },
+    lights: {
+      headlights: ['headlights'],
+      taillights: ['taillights'],
+      reverseLights: ['reverse_lights'],
+      leftBlinkers: ['front_blinker_left', 'rear_blinker_left'],
+      rightBlinkers: ['front_blinker_right', 'rear_blinker_right'],
+    },
     bodyClass: 'car',
     mass: ZHIGULI.mass,
     engineId: ZHIGULI.engineId,
