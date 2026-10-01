@@ -1252,6 +1252,37 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'radial', aspect: 0.82 },
     target: { top: 135, to100: null, turn: 4.8, source: 'Fiat Panda 4x4 (1983) data; 9.6 m turning circle' },
   },
+  {
+    // Trabant 601 (1964-90): P65 594 cc two-stroke twin, 26 PS at 4200 and 5.5 kgm at 3000,
+    // four-speed on a 4.33 final drive, front drive, transverse leaf springs, 615 kg;
+    // 107 km/h, 10 m turning circle.
+    id: 'rs_trabant',
+    label: 'Trabant 601',
+    body: 'trabant.glb',
+    bodyClass: 'car',
+    factory: { length: 3.555, width: 1.504, height: 1.437, clearance: 0.15, wheelbase: 2.02, frontTrack: 1.206, rearTrack: 1.255, wheelRadius: 0.28, tyreWidth: 0.145, frontOverhang: 0.6 },
+    mass: 615,
+    frontWeightShare: 0.6,
+    rearDriveBias: 0,
+    engine: {
+      label: '0.6 Trabant P65 two-stroke', mass: 45,
+      spec: { peakPowerKw: 19, powerPeakRpm: 4200, peakTorqueNm: 54, torquePeakRpm: 3000, redlineRpm: 4800, idleRpm: 900, bsfc: 0.38, brakingCoeff: 0.012, cylinders: 2 },
+      rated: { ps: 26 }, ratedTorqueNm: 54, source: 'Trabant 601 data: 26 PS at 4200, 5.5 kgm at 3000',
+    },
+    gearbox: {
+      label: 'Trabant four-speed', mass: 25,
+      spec: { ratios: [4.08, 2.32, 1.52, 1.03], reverse: 3.83, finalDrive: 4.33, shiftTime: 0.4, automatic: false, efficiency: 0.9 },
+    },
+    tankLitres: 26,
+    wheelGrip: 0.62,
+    brakeDecelG: 0.55,
+    steerLock: 0.469,
+    dragArea: 0.846,
+    handlingProfile: 'road',
+    suspension: S(1.25, 1.35, 0.22, 0.36, 0.1),
+    tyre: { construction: 'radial', aspect: 0.82 },
+    target: { top: 107, to100: null, turn: 5.0, source: 'Trabant 601 data; 10 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
