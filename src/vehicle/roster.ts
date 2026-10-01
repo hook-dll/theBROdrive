@@ -885,6 +885,36 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'crossply', aspect: 0.9 },
     target: { top: 175, to100: null, turn: 5.9, source: 'Ford Mustang 289 (1965) road tests; 11.8 m turning circle' },
   },
+  {
+    // Dacia 1300 (1969): Renault 810 1.3, 54 PS DIN at 5250 and 9.0 kgm at 3000, four-
+    // speed transaxle on a 3.78 final drive, front drive, 900 kg; 145 km/h.
+    id: 'rs_dacia',
+    label: 'Dacia 1300',
+    body: 'dacia.glb',
+    bodyClass: 'car',
+    factory: { length: 4.348, width: 1.616, height: 1.435, clearance: 0.12, wheelbase: 2.441, frontTrack: 1.312, rearTrack: 1.312, wheelRadius: 0.28, tyreWidth: 0.145, frontOverhang: 0.87 },
+    mass: 900,
+    frontWeightShare: 0.6,
+    rearDriveBias: 0,
+    engine: {
+      label: '1.3 Renault 810 inline-four', mass: 100,
+      spec: { peakPowerKw: 39.7, powerPeakRpm: 5250, peakTorqueNm: 88, torquePeakRpm: 3000, redlineRpm: 5700, idleRpm: 800, bsfc: 0.33, brakingCoeff: 0.0147, cylinders: 4 },
+      rated: { ps: 54 }, ratedTorqueNm: 88, source: 'Dacia 1300 (1969) data: 54 PS DIN at 5250, 9.0 kgm at 3000',
+    },
+    gearbox: {
+      label: 'Renault 12 four-speed transaxle', mass: 30,
+      spec: { ratios: [3.61, 2.26, 1.48, 1.03], reverse: 3.08, finalDrive: 3.78, shiftTime: 0.38, automatic: false, efficiency: 0.92 },
+    },
+    tankLitres: 47,
+    wheelGrip: 0.6,
+    brakeDecelG: 0.62,
+    steerLock: 0.560,
+    dragArea: 0.765,
+    handlingProfile: 'classic',
+    suspension: S(1.05, 1.25, 0.22, 0.36, 0.11),
+    tyre: { construction: 'radial', aspect: 0.82 },
+    target: { top: 145, to100: null, turn: 5.2, source: 'Dacia 1300 (1969) data' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
