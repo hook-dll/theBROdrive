@@ -235,7 +235,9 @@ if (!target) {
   }
   advanceFixedSteps(4, prop.x + 140, prop.z);
   check('distant settled pieces retire', debris.liveCount === 0, `${debris.liveCount} live`);
-  check('retirement removes debris meshes', scene.children.length === 0, `${scene.children.length} scene meshes`);
+  // Pieces are meshes straight under the scene; the field's program warm-up is a group.
+  const pieceMeshes = scene.children.filter((child) => child instanceof THREE.Mesh).length;
+  check('retirement removes debris meshes', pieceMeshes === 0, `${pieceMeshes} scene meshes`);
   check(
     'retirement removes physics bodies',
     physics.world.bodies.len() === bodiesBefore,

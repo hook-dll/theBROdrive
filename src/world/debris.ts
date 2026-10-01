@@ -5,6 +5,7 @@ import { SurfaceType } from '../core/surfaces';
 import type { GameWorld } from '../game/state';
 import type { WorldOrigin } from './origin';
 import type { BreakableProp, PropPiece } from './props/forms';
+import { breakablePieceDefs } from './props/forms';
 import {
   createMedicineRemnantMesh,
   disposeItemMeshResources,
@@ -146,9 +147,28 @@ function segmentHitsBox(
   return enter <= leave;
 }
 
+/**
+ * The shader-relevant shape of a geometry: the attribute names present and their item
+ * sizes, which is all `getParameters` reads off a geometry for the program cache key.
+ * Two geometries with the same layout compile the same program, so the boot warm-up
+ * needs one anchor per distinct layout rather than one per piece.
+ */
+function geometryLayoutKey(geometry: THREE.BufferGeometry): string {
+  let key = '';
+  for (const name of Object.keys(geometry.attributes).sort()) {
+    key += `${name}:${geometry.attributes[name]!.itemSize};`;
+  }
+  return key;
+}
+
 export class DebrisField {
   private readonly standing = new Map<number, BreakableProp>();
   private readonly pieces: Piece[] = [];
+  /**
+   * Invisible non-instanced anchors that hold the piece programs compiled from boot.
+   * Owned here because this class owns every piece mesh; removed in `dispose`.
+   */
+  private readonly pieceWarmup = new THREE.Group();
   /** Mirror of `state.flattenedProps`, so a chunk build tests it in O(1). */
   private readonly broken = new Set<number>();
   /**
@@ -165,6 +185,32 @@ export class DebrisField {
     private readonly origin: WorldOrigin,
   ) {
     for (const id of world.state.flattenedProps) this.broken.add(id);
+    this.warmUpPiecePrograms();
+  }
+
+  /**
+   * Compiles the NON-INSTANCED variant of every breakable piece material at boot.
+   *
+   * `breakProp` turns a prop into `new THREE.Mesh(def.geometry, def.material)` — the
+   * same material object the instanced desert scatter draws with, but on a plain Mesh.
+   * Its program differs from the scatter's by the INSTANCING define alone, so the boot
+   * warm-up, which only ever saw `InstancedMesh`es, left the first break of each form
+   * to compile and link a whole new program mid-drive — the 400–840 ms stall this
+   * covers. Three's `compile` walks the scene with `traverse`, not `traverseVisible`,
+   * so an invisible mesh is compiled with the live lights and keeps the program alive
+   * for the session.
+   */
+  private warmUpPiecePrograms(): void {
+    const seen = new Set<string>();
+    for (const def of breakablePieceDefs()) {
+      const key = `${def.material.uuid}|${geometryLayoutKey(def.geometry)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const anchor = new THREE.Mesh(def.geometry, def.material);
+      anchor.visible = false;
+      this.pieceWarmup.add(anchor);
+    }
+    this.scene.add(this.pieceWarmup);
   }
 
   isBroken(id: number): boolean {
@@ -346,6 +392,8 @@ export class DebrisField {
     for (const piece of this.pieces) this.removePiece(piece);
     this.pieces.length = 0;
     this.standing.clear();
+    this.scene.remove(this.pieceWarmup);
+    this.pieceWarmup.clear();
   }
 
   private removePiece(piece: Piece): void {

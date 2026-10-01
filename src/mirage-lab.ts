@@ -13,7 +13,6 @@ import {
   carModelMeasure,
   carSpawnYAboveGround,
   loadCarModel,
-  warmCarModelInstances,
 } from './render/carmodel';
 import { CameraRig, type CameraTarget } from './render/cameras';
 import {
@@ -385,8 +384,6 @@ export async function bootMirageLab(): Promise<void> {
   addStaticMeshCollider(physics, landscape, SurfaceType.Sand);
   addStaticMeshCollider(physics, roadMesh, SurfaceType.Asphalt);
   renderer.setViewDistance(2_500);
-
-  await warmCarModelInstances(renderer.renderer, renderer.scene, renderer.camera);
   const surfaceField = new SurfaceField(SEED);
   const roadY = roadSurfaceY(
     road,

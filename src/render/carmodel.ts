@@ -42,6 +42,7 @@ import {
   factoryPaintHex,
   secondaryFactoryPaintHex,
 } from '../vehicle/carpaint';
+import { lampLensAnchors } from '../vehicle/vehiclelamps';
 
 /**
  * DEV-only A/B switch for the unified car style: `?carstyle=unified`, alongside any
@@ -179,14 +180,37 @@ interface Template {
 const templates = new Map<string, Template>();
 const modelLoads = new Map<string, Promise<void>>();
 const paletteLoads = new Map<string, Promise<THREE.Texture>>();
+
 /**
- * One ready-to-attach instance of every loaded model. GLB parsing is already paid
- * before play; cloning its scene graph was still first paid at a roadside POI or
- * dev spawn, creating the multi-second hitch those paths exposed. These pools move
- * that one-off CPU work behind the loading screen.
+ * Compiles an object's programs as the frame will draw them; the game's is
+ * `Renderer.compileForScenePass`. Resolves when every program has linked.
  */
-const warmDrivingInstances = new Map<string, CarModelInstance>();
-const warmStaticInstances = new Map<string, StaticCarInstance>();
+export type CarProgramCompiler = (object: THREE.Object3D) => Promise<unknown>;
+
+/**
+ * PROGRAM ANCHORS: one never-drawn copy of every loaded model — the driven body and its
+ * wheels, the static shell wrecks and couriers use, and the lamp lenses a Vehicle binds
+ * — compiled before the model counts as loaded, then kept for the session.
+ *
+ * A model's first draw used to link its programs on the spot. Paint, glass and lens
+ * variants differ across packs (Phong or Standard, palette map or none, the static
+ * shell single-sided), each is a lit program carrying every light slot, and on ANGLE's
+ * D3D11 one link is hundreds of milliseconds of main thread: the freezes from the first
+ * seconds of a drive, while traffic was still bringing models in. The warm-up these
+ * replace compiled clones against the canvas instead of the scene pass's target (a
+ * different program), never saw the lens materials a Vehicle makes, and cloned every
+ * model met so far again for each new one.
+ *
+ * KEPT because a program dies with its last material: a despawning traffic car disposes
+ * its own, and a variant only traffic used was linked again by the next car of it.
+ */
+const programAnchors = new THREE.Group();
+programAnchors.name = 'car-program-anchors';
+/** Per model: its anchor built, and compiled once a compiler is registered. */
+const modelReadiness = new Map<string, Promise<void>>();
+/** Models whose `modelReadiness` has resolved: an instance draws without a link stall. */
+const readyModels = new Set<string>();
+let programCompiler: CarProgramCompiler | null = null;
 let gltf: GLTFLoader | null = null;
 let fbx: FBXLoader | null = null;
 let textures: THREE.TextureLoader | null = null;
@@ -1358,14 +1382,43 @@ export async function preloadCarModels(ids?: readonly string[]): Promise<void> {
   await Promise.all([...idsToLoad].map((id) => loadModel(carModel(id))));
 }
 
-/** Lazy-loading entry point used by runtime consumers that need one model. */
+/**
+ * Lazy-loading entry point used by runtime consumers that need one model. Resolves
+ * once the model is resident AND its program anchor is compiled, so its first instance
+ * draws without linking a program.
+ */
 export function loadCarModel(id: string): Promise<void> {
-  return preloadCarModels([id]);
+  let ready = modelReadiness.get(id);
+  if (!ready) {
+    ready = (async () => {
+      await preloadCarModels([id]);
+      const anchor = await buildProgramAnchor(id);
+      programAnchors.add(anchor);
+      if (programCompiler) await programCompiler(anchor);
+      readyModels.add(id);
+    })().catch((error: unknown) => {
+      modelReadiness.delete(id);
+      throw error;
+    });
+    modelReadiness.set(id, ready);
+  }
+  return ready;
 }
 
-/** True when a visual template is resident and can be cloned synchronously. */
+/** True once `loadCarModel` has resolved: an instance can be cloned and drawn synchronously. */
 export function isCarModelLoaded(id: string): boolean {
-  return templates.has(id);
+  return readyModels.has(id);
+}
+
+/**
+ * Registers the compiler every model's programs go through from now on, and compiles
+ * the anchors of the models loaded before it. The game registers the live scene pass
+ * once the scene is in its drawing state (lights, fog, baked environment) — anchors
+ * built earlier were not compiled against any of it.
+ */
+export function compileCarProgramsWith(compile: CarProgramCompiler): Promise<unknown> {
+  programCompiler = compile;
+  return compile(programAnchors);
 }
 
 function measureFromFit(fit: CarModelFit): CarModelMeasure {
@@ -1473,26 +1526,16 @@ function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInsta
 
 /** A fresh instance of a loaded model, sharing geometry but owning its paint state. */
 export function createCarModel(id: string, appearanceKey = id): CarModelInstance {
-  const t = template(id);
-  const warmed = warmDrivingInstances.get(id);
-  if (warmed) {
-    warmDrivingInstances.delete(id);
-    if (appearanceKey === id) {
-      applyRandomPaint(warmed.body, t.def, appearanceKey);
-      return warmed;
-    }
-  }
-  return cloneDrivingModel(t, appearanceKey);
+  return cloneDrivingModel(template(id), appearanceKey);
 }
 
 /**
  * A static, non-driven copy of a whole vehicle, with its wheels placed at the same
  * factory track, wheelbase and clearance used by the driven chassis.
  */
-function cloneStaticModel(id: string, appearanceKey = id): StaticCarInstance {
-  const t = template(id);
+function cloneStaticModel(t: Template, appearanceKey = t.def.id): StaticCarInstance {
   const group = new THREE.Group();
-  group.name = id;
+  group.name = t.def.id;
   const body = t.body.clone(true);
   const paint = cloneCarBodyPaintMaterials(body, t, appearanceKey);
   const glass = cloneCarGlass(body, paint);
@@ -1506,59 +1549,33 @@ function cloneStaticModel(id: string, appearanceKey = id): StaticCarInstance {
   }
   return { model: group, paint, glass };
 }
-/**
- * Clones instances only for templates already resident. Lazy models warm on their
- * first visual attach instead of turning the loading screen into a catalogue preload.
- */
-export async function warmCarModelInstances(
-  renderer: THREE.WebGLRenderer,
-  scene: THREE.Scene,
-  camera: THREE.Camera,
-): Promise<void> {
-  const compileGroup = new THREE.Group();
-  const drivingBodies: THREE.Object3D[] = [];
-  compileGroup.position.z = -20;
-  for (const def of CAR_MODELS) {
-    if (!templates.has(def.id) || warmDrivingInstances.has(def.id)) continue;
-    // Two clones of a whole car are several milliseconds; a pack that arrived at once
-    // must not clone all its cars in one frame (see `onOwnFrame`).
-    await onOwnFrame(() => {
-      if (warmDrivingInstances.has(def.id)) return;
-      const drivingModel = cloneDrivingModel(template(def.id));
-      warmDrivingInstances.set(def.id, drivingModel);
-      drivingBodies.push(drivingModel.body);
-      compileGroup.add(drivingModel.body);
-      const staticModel = cloneStaticModel(def.id);
-      staticModel.model.traverse((object) => {
-        object.frustumCulled = false;
-      });
-      warmStaticInstances.set(def.id, staticModel);
-      compileGroup.add(staticModel.model);
-    });
-  }
-  scene.add(compileGroup);
-  // Only the new instances, against the live scene's lights and fog. Passed the
-  // scene itself, `compileAsync` walks and re-prepares every object in the world —
-  // measured at 20 ms of main thread per model mid-drive, where it is called once
-  // for each traffic model the session meets.
-  await renderer.compileAsync(compileGroup, camera, scene);
-  scene.remove(compileGroup);
-  for (const instance of warmStaticInstances.values()) compileGroup.remove(instance.model);
-  for (const body of drivingBodies) compileGroup.remove(body);
-}
 
-/** A warmed static shell when one fits the key, otherwise a fresh clone. */
-function staticCarInstance(id: string, appearanceKey: string): StaticCarInstance {
-  const t = template(id);
-  const warmed = warmStaticInstances.get(id);
-  if (warmed) {
-    warmStaticInstances.delete(id);
-    if (appearanceKey === id) {
-      applyRandomPaint(warmed.model, t.def, appearanceKey);
-      return warmed;
+/**
+ * One model's program anchor (see `programAnchors`): every material its instances draw
+ * with, over the geometry they draw it on. Two frames, because two whole-car clones are
+ * already several milliseconds.
+ */
+async function buildProgramAnchor(id: string): Promise<THREE.Group> {
+  const anchor = await onOwnFrame(() => {
+    const t = template(id);
+    const group = new THREE.Group();
+    group.name = id;
+    const driving = cloneDrivingModel(t);
+    group.add(driving.body, ...driving.wheels.values(), ...lampLensAnchors(t.def, driving.body));
+    // Every set the wheel pool can give this body, not only the one its own key picks.
+    for (const sourceId of t.def.wheelSetPool ?? []) {
+      const source = templates.get(sourceId);
+      if (source) for (const wheel of source.wheels.values()) group.add(wheel.clone(true));
     }
-  }
-  return cloneStaticModel(id, appearanceKey);
+    return group;
+  });
+  await onOwnFrame(() => {
+    const t = template(id);
+    const courier = cloneStaticModel(t);
+    applyCourierAppearance(courier.model, t.def);
+    anchor.add(cloneStaticModel(t).model, courier.model);
+  });
+  return anchor;
 }
 
 /**
@@ -1567,7 +1584,7 @@ function staticCarInstance(id: string, appearanceKey: string): StaticCarInstance
  * weathered (`derelictDust`).
  */
 export function createStaticCarModel(id: string, appearanceKey = id): THREE.Object3D {
-  const instance = staticCarInstance(id, appearanceKey);
+  const instance = cloneStaticModel(template(id), appearanceKey);
   const dust = derelictDust(id, appearanceKey);
   weatherStaticCarPaint(instance.paint, dust);
   setCarGrime(instance.glass, dust * GLASS_DIRT_SHARE);
@@ -1580,7 +1597,7 @@ export function createStaticCarModel(id: string, appearanceKey = id): THREE.Obje
  * noise entirely.
  */
 export function createCourierCarModel(id: string, appearanceKey: string): THREE.Object3D {
-  const instance = staticCarInstance(id, appearanceKey);
+  const instance = cloneStaticModel(template(id), appearanceKey);
   setCarBodyCondition(instance.paint, 0, 0);
   setCarGrime(instance.glass, 0);
   applyCourierAppearance(instance.model, carModel(id));
@@ -1608,8 +1625,13 @@ export function disposeCarModelCache(): void {
       }
     });
   };
-  warmDrivingInstances.clear();
-  warmStaticInstances.clear();
+  // The anchors first: they own the only references to their cloned paint, glass and
+  // lens materials, and disposing those releases the programs they were holding.
+  dispose(programAnchors);
+  programAnchors.clear();
+  modelReadiness.clear();
+  readyModels.clear();
+  programCompiler = null;
   for (const t of templates.values()) {
     dispose(t.body);
     for (const wheel of t.wheels.values()) dispose(wheel);

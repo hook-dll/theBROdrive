@@ -47,6 +47,9 @@ const LATERAL_RANGE = 180;
 /** Handles, lids and feet. Four is the most any vessel here asks for. */
 const MAX_RINGS = 4;
 
+/** White (no tint), for the ring instance colours pre-created at construction. */
+const _ringWhite = new THREE.Color(1, 1, 1);
+
 const SALT_SIDE = 0x83c9;
 const SALT_LATERAL = 0xa14f;
 const SALT_SHAPE = 0xd46b;
@@ -423,6 +426,10 @@ export class DistantMirage {
     this.rings.frustumCulled = false;
     this.rings.castShadow = false;
     this.rings.receiveShadow = false;
+    // Pre-create instanceColor so the vessel material compiles with
+    // USE_INSTANCING_COLOR. The first handle's `setColorAt` would otherwise flip the
+    // program mid-drive, a whole new link the boot warm-up never made.
+    for (let i = 0; i < MAX_RINGS; i++) this.rings.setColorAt(i, _ringWhite);
     this.root.add(this.rings);
 
     this.root.visible = false;

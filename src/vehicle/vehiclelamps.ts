@@ -154,6 +154,48 @@ const REVERSE_LIGHT_BEAM = {
 /** 90 flashes per minute, with equal on/off halves. */
 const BLINKER_PERIOD_S = 2 / 3;
 
+/** An authored lamp lens: the node is named by a selector, or its material is. */
+function isLampLens(selectors: ReadonlySet<string>, mesh: THREE.Mesh, source: THREE.Material): boolean {
+  return selectors.has(mesh.name) || selectors.has(source.name);
+}
+
+/** The car's own copy of an authored lens material: grimed, and dark until a control lights it. */
+function lensMaterial(source: EmissiveMaterial): EmissiveMaterial {
+  const material = makeCarGrimeMaterial(source.clone());
+  material.emissive.setHex(0x000000);
+  material.emissiveIntensity = 0;
+  return material;
+}
+
+/**
+ * One mesh per lamp lens a Vehicle of `model` binds on `root`, over the lens's own
+ * geometry and carrying the material the Vehicle makes for it — what a shader warm-up
+ * has to compile, because a Vehicle makes its lens materials only as it is built.
+ * Never bound into `root` and never drawn (see carmodel.ts, program anchors).
+ */
+export function lampLensAnchors(model: CarModelDef, root: THREE.Object3D): THREE.Mesh[] {
+  const lights = model.lights;
+  if (!lights) return [];
+  const selectors = new Set([
+    ...lights.headlights,
+    ...lights.taillights,
+    ...(lights.brakeLights ?? []),
+    ...(lights.reverseLights ?? []),
+    ...(lights.leftBlinkers ?? []),
+    ...(lights.rightBlinkers ?? []),
+  ]);
+  const anchors: THREE.Mesh[] = [];
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    for (const source of Array.isArray(object.material) ? object.material : [object.material]) {
+      if (!isLampLens(selectors, object, source)) continue;
+      if (!(source instanceof THREE.MeshStandardMaterial) && !(source instanceof THREE.MeshPhongMaterial)) continue;
+      anchors.push(new THREE.Mesh(object.geometry, lensMaterial(source)));
+    }
+  });
+  return anchors;
+}
+
 /**
  * What the lamps need from the vehicle that owns them.
  */
@@ -477,10 +519,9 @@ export class VehicleLamps {
     const meshes: THREE.Mesh[] = [];
     this.ctx.rootGroup.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return;
-      const nodeMatch = wanted.has(object.name);
       let matched = false;
       const bind = (source: THREE.Material): THREE.Material => {
-        if (!nodeMatch && !wanted.has(source.name)) return source;
+        if (!isLampLens(wanted, object, source)) return source;
         matched = true;
         if (
           !(source instanceof THREE.MeshStandardMaterial) &&
@@ -490,9 +531,7 @@ export class VehicleLamps {
             `Car model "${this.ctx.model.id}" lamp material cannot emit light: ${source.name}`,
           );
         }
-        const material = makeCarGrimeMaterial(source.clone());
-        material.emissive.setHex(0x000000);
-        material.emissiveIntensity = 0;
+        const material = lensMaterial(source);
         setCarGrime([material], this.grime);
         output.push(material);
         return material;

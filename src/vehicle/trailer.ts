@@ -998,13 +998,39 @@ export class Trailer implements Rebasable {
 export class TrailerField {
   private readonly trailers = new Map<string, Trailer>();
   private readonly colliderToTrailerId = new Map<number, string>();
+  /** Invisible instance that holds the trailer material's program compiled from boot. */
+  private readonly warmup = new THREE.Group();
 
   constructor(
     private readonly physics: PhysicsWorld,
     private readonly world: GameWorld,
     private readonly scene: THREE.Scene,
     private readonly origin: WorldOrigin,
-  ) {}
+  ) {
+    this.mountWarmup();
+  }
+
+  /**
+   * Holds the trailer material's program compiled from boot.
+   *
+   * A trailer is visualised only when it materialises at an encounter, so its one
+   * shared material — which no warmed car model draws, because the car paints carry
+   * their own custom program cache key — would first compile and link mid-drive.
+   * `createTrailerModel` wraps the template's shared geometry and material, so one
+   * invisible instance is enough; Three's `compile` walks the scene with `traverse`,
+   * not `traverseVisible`, and covers the body and wheel layouts.
+   */
+  private mountWarmup(): void {
+    if (this.warmup.children.length > 0) return;
+    const model = createTrailerModel();
+    for (const mesh of [model.body, model.leftWheel, model.rightWheel]) {
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      mesh.visible = false;
+      this.warmup.add(mesh);
+    }
+    this.scene.add(this.warmup);
+  }
 
   /** The number of trailers with physics and visuals currently materialised. */
   get liveCount(): number {
@@ -1025,6 +1051,9 @@ export class TrailerField {
    */
   restoreFromState(vehicleFor: (carId: string) => Vehicle | null): void {
     this.dispose();
+    // `dispose` took the warm-up node with it, so put it back before anything can
+    // draw: a restored save may hold no trailer at all.
+    this.mountWarmup();
 
     for (const state of Object.values(this.world.state.trailers)) {
       this.materialise(state);
@@ -1167,6 +1196,8 @@ export class TrailerField {
     }
     this.trailers.clear();
     this.colliderToTrailerId.clear();
+    this.scene.remove(this.warmup);
+    this.warmup.clear();
   }
 
   private materialise(state: TrailerState): Trailer {

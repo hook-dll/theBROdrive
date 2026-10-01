@@ -18,6 +18,7 @@ import {
   type GraphicsQuality,
 } from '../game/settings';
 import type { GameWorld } from '../game/state';
+import { compileCarProgramsWith } from '../render/carmodel';
 import type { Sky } from '../render/sky';
 import type { VistaMesh } from '../render/vista';
 import type { ChunkStreamer } from '../world/chunks';
@@ -275,10 +276,15 @@ export async function warmUpBoot(ctx: BootWarmupContext): Promise<void> {
   // Prime the exact live render path while the loading cover still owns the screen.
   // The first pass establishes sky/fog/post uniforms and bakes the environment.
   // compileAsync then waits for the exact offscreen scene and canvas post variants,
-  // not a different direct-to-canvas scene variant. The second draw uploads every
-  // remaining texture, shadow and PMREM result; its GPU fence is the final barrier.
+  // not a different direct-to-canvas scene variant — and, from here on, for every car
+  // model as it loads (render/carmodel.ts, program anchors), the ones already loaded
+  // first. The second draw uploads every remaining texture, shadow and PMREM result;
+  // its GPU fence is the final barrier.
   render(0, 0);
-  await ctx.renderer.waitForFrameShaders();
+  await Promise.all([
+    ctx.renderer.waitForFrameShaders(),
+    compileCarProgramsWith((object) => ctx.renderer.compileForScenePass(object)),
+  ]);
   render(0, 0);
   await ctx.renderer.waitForSubmittedFrame();
   await settleLaunchResolution();

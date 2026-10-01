@@ -1440,6 +1440,8 @@ const SPECS: Readonly<Record<NoveltyKind, NoveltySpec>> = {
 };
 
 const _paint = new THREE.Color();
+/** White (no tint), for the anchor's pre-created instance colour. */
+const _anchorWhite = new THREE.Color(1, 1, 1);
 
 function novelMaterial(): THREE.MeshBasicMaterial {
   return new THREE.MeshBasicMaterial({
@@ -1495,7 +1497,17 @@ export class NoveltyField implements Placer {
     private readonly road: Road,
     private readonly terrain: Terrain,
     private readonly seed: number,
-  ) {}
+  ) {
+    // A kind's meshes are built on its first encounter, so nothing of `material` is in
+    // the scene at boot and its instanced+instanceColor program would first compile
+    // mid-drive. One invisible, empty InstancedMesh holds it from boot; every form is
+    // built by `solid`, so they all share one attribute layout and therefore one program.
+    const anchor = new THREE.InstancedMesh(SPECS[NOVELTY_KINDS[0]].forms[0]!(), this.material, 1);
+    anchor.count = 0;
+    anchor.visible = false;
+    anchor.setColorAt(0, _anchorWhite);
+    this.group.add(anchor);
+  }
 
   clear(): void {
     for (const mesh of this.active) {

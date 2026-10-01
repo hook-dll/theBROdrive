@@ -155,6 +155,38 @@
   its turn-over to the message and back reading as one card being turned in the hand
   (`src/render/held.ts`).
 
+### Fixed
+
+- NO FREEZE WHEN A NEW CAR MODEL FIRST APPEARS. A model's paint, glass and lamp lenses
+  each linked their shader program on the car's first drawn frame, on the main thread —
+  on Windows' ANGLE/D3D11 hundreds of milliseconds per program, reported as 400-840 ms
+  of input delay from the first seconds of a drive while traffic brought models in. The
+  warm-up meant to prevent it compiled against the canvas instead of the scene pass's
+  render target (a different program, never drawn), never saw the lens materials a
+  Vehicle makes for itself, and re-cloned every model met so far for each new one. Now
+  `loadCarModel` resolves only once the model's PROGRAM ANCHOR — a never-drawn driven
+  body with its wheels and every pool wheel set, its lenses, a wreck shell and a courier
+  shell — is compiled for the live pass (`Renderer.compileForScenePass`); the boot
+  compiles the anchors of models loaded before it. The anchors are kept, so a variant
+  only traffic used no longer dies with the last despawned car and links again with the
+  next. Measured in the dev build by counting programs linked inside `render()` while
+  spawning seven models: GAZ-21 and Oka linked 2 and 3 before, none now (the Oka's 4 are
+  compiled while it loads).
+- NO FREEZE AT THE FIRST BROKEN PROP, LAKE, MIRAGE OR TRAILER. Each first drew a program
+  variant the boot never compiled: a broken prop's piece is a plain mesh with the
+  scatter's instanced material (`DebrisField` now holds one hidden piece per material);
+  lake fringe, distant-mirage rings and tableau meshes gained instance colours on their
+  first `setColorAt` (now created with the mesh); the mirage novelties' material and the
+  trailer body existed nowhere at boot (each now keeps one hidden instance in the scene).
+- NO MORE POCKED, CRAWLING SHADOWS ON SUNLIT HOUSE WALLS. Facade skin — siding boards,
+  frames, panels, stonework — is closed boxes whose back face lies in the wall, and the
+  sun's shadow pass draws back faces, so the shadow map held the wall's own depth
+  wherever skin covered it: acne a 7 cm texel deep beside every board and under every
+  panel, jittered per screen pixel by the PCF and stepped into hard blotches by the comic
+  banding. Skin no deeper than 8 cm (`CASTING_SKIN_DEPTH`) is now its own mesh that
+  casts nothing — its real shadow is under a texel wide — while hoods, sills, lintels and
+  balconies still cast. Same light, same banding; checked on the starting house's siding.
+
 ## 0.20.0 — 2026-09-29
 
 Two-wheel drive cars finally leave first gear on sand, a swapped engine brings its own gearing, rotting cars give up parts and cans, frantic drivers thread the traffic instead of parting it, and the desert night gets a little light, a little glitter and headlamps in the wet road.

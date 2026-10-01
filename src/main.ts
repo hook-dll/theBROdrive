@@ -31,10 +31,7 @@ import { WeaponController } from './items/weapons';
 import { LoosePartField } from './parts/loose';
 import { oilCapacity } from './parts/registry';
 import { TouchControls } from './core/touch';
-import {
-  loadCarModel,
-  warmCarModelInstances,
-} from './render/carmodel';
+import { loadCarModel } from './render/carmodel';
 import { preloadTrailerModel } from './render/trailermodel';
 import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
 import { Interaction } from './player/interaction';
@@ -372,13 +369,10 @@ async function boot(): Promise<void> {
   );
   const sky = new Sky(renderer.scene, renderer.fog, renderer.renderer, starField);
   await sky.waitForAssets();
-  // Warm only models already requested by the active set. Later models parse and
-  // compile on demand, before their first Vehicle instance is attached.
-  await warmCarModelInstances(renderer.renderer, renderer.scene, renderer.camera);
-  // And warm every POI building, for the same reason: building one costs 3.7 ms on a
-  // 5950X — more than the whole 3 ms streaming budget — and a first use happens while
-  // the player is driving past. Paid here, once, behind the loading cover, later
-  // placements are Object3D wrapping. See world/poistructures.ts.
+  // Warm every POI building: building one costs 3.7 ms on a 5950X — more than the
+  // whole 3 ms streaming budget — and a first use happens while the player is driving
+  // past. Paid here, once, behind the loading cover, later placements are Object3D
+  // wrapping. See world/poistructures.ts.
   warmPoiStructures();
   const inventory = new Inventory();
   // The pack mirrors itself into state on every structural change, so a save taken
@@ -639,7 +633,6 @@ async function boot(): Promise<void> {
         );
       }
     : undefined;
-  const modelWarmups = new Map<string, Promise<void>>();
   const materializeVehicle = (car: CarState): Promise<Vehicle> => {
     const existing = vehicles.get(car.id);
     if (existing) return Promise.resolve(existing);
@@ -649,12 +642,6 @@ async function boot(): Promise<void> {
     const promise = (async () => {
       const def = carModel(car.modelId);
       await loadCarModel(def.id);
-      let warmup = modelWarmups.get(def.id);
-      if (!warmup) {
-        warmup = warmCarModelInstances(renderer.renderer, renderer.scene, renderer.camera);
-        modelWarmups.set(def.id, warmup);
-      }
-      await warmup;
       const vehicle = new Vehicle(physics, world, car, renderer.scene, origin);
       vehicles.set(car.id, vehicle);
       return vehicle;
@@ -718,15 +705,7 @@ async function boot(): Promise<void> {
     origin,
     road,
     hazards,
-    async (modelId) => {
-      await loadCarModel(modelId);
-      let warmup = modelWarmups.get(modelId);
-      if (!warmup) {
-        warmup = warmCarModelInstances(renderer.renderer, renderer.scene, renderer.camera);
-        modelWarmups.set(modelId, warmup);
-      }
-      await warmup;
-    },
+    loadCarModel,
     (x, z, radius) => {
       const radiusSquared = radius * radius;
       const anchor = activeWorldAnchor();

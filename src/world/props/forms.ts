@@ -771,8 +771,7 @@ function postPiece(height: number): THREE.BufferGeometry {
 
 let _pieces: Record<string, readonly PropPiece[]> | null = null;
 
-/** Pieces for a form that comes apart, or null for one that does not. */
-export function propPieces(formId: string): readonly PropPiece[] | null {
+function pieceTable(): Record<string, readonly PropPiece[]> {
   if (!_pieces) {
     const lump = (r: number, squashY = 0.8): THREE.BufferGeometry => {
       const g = new THREE.IcosahedronGeometry(r, 0);
@@ -812,7 +811,28 @@ export function propPieces(formId: string): readonly PropPiece[] | null {
       ],
     };
   }
-  return _pieces[formId] ?? null;
+  return _pieces;
+}
+
+/** Pieces for a form that comes apart, or null for one that does not. */
+export function propPieces(formId: string): readonly PropPiece[] | null {
+  return pieceTable()[formId] ?? null;
+}
+
+/**
+ * Every piece definition of every breakable form, flattened.
+ *
+ * `DebrisField` walks this once at boot to compile the NON-INSTANCED variant of each
+ * piece material. A broken prop is a plain `Mesh` sharing the scatter's material, so
+ * its program differs from the scatter's `InstancedMesh` one by the INSTANCING define
+ * alone — and the boot warm-up, which only ever saw instanced meshes, left the first
+ * break of each form to compile and link a whole new program mid-drive.
+ */
+export function breakablePieceDefs(): readonly PropPiece[] {
+  const table = pieceTable();
+  const defs: PropPiece[] = [];
+  for (const id in table) defs.push(...table[id]!);
+  return defs;
 }
 
 /**
