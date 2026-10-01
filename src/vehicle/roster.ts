@@ -167,6 +167,36 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'crossply', aspect: 0.9 },
     target: { top: 140, to100: null, turn: 5.5, source: 'Moskvich-412 catalogue (autoopt.ru)' },
   },
+  {
+    // Volvo 240 GL 2.3 (1986): B230F, 114 hp at 5400 and 185 Nm at 2750, M47 five-speed
+    // on a 3.73 axle, 1300 kg, live rear axle; 175 km/h, a 9.9 m turning circle.
+    id: 'rs_volvo240',
+    label: 'Volvo 240',
+    body: 'volvo240.glb',
+    bodyClass: 'car',
+    factory: { length: 4.79, width: 1.71, height: 1.435, clearance: 0.14, wheelbase: 2.64, frontTrack: 1.42, rearTrack: 1.36, wheelRadius: 0.305, tyreWidth: 0.185, frontOverhang: 0.84 },
+    mass: 1300,
+    frontWeightShare: 0.54,
+    rearDriveBias: 1,
+    engine: {
+      label: '2.3 Volvo B230F inline-four', mass: 150,
+      spec: { peakPowerKw: 85, powerPeakRpm: 5400, peakTorqueNm: 185, torquePeakRpm: 2750, redlineRpm: 6000, idleRpm: 800, bsfc: 0.31, brakingCoeff: 0.0294, cylinders: 4 },
+      rated: { hp: 114 }, ratedTorqueNm: 185, source: 'Volvo 240 1990 specifications: B230F 114 hp at 5400, 185 Nm at 2750',
+    },
+    gearbox: {
+      label: 'Volvo M47 five-speed', mass: 38,
+      spec: { ratios: [4.03, 2.16, 1.37, 1.0, 0.83], reverse: 3.68, finalDrive: 3.73, shiftTime: 0.32, automatic: false, efficiency: 0.9 },
+    },
+    tankLitres: 60,
+    wheelGrip: 0.72,
+    brakeDecelG: 0.8,
+    steerLock: 0.645,
+    dragArea: 0.9,
+    handlingProfile: 'road',
+    suspension: S(1.05, 1.25, 0.24, 0.4, 0.1),
+    tyre: { construction: 'radial', aspect: 0.7 },
+    target: { top: 175, to100: null, turn: 4.95, source: 'Volvo 240 GL 2.3 (1990) brochure; 9.9 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
