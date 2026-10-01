@@ -224,8 +224,23 @@ for f in bm.faces:
         if 'y' in region and region['y'][0] <= c.y <= region['y'][1] and c.x <= region.get('x', 9) \
                 and c.z <= region.get('zMax', 9):
             GLASS_FACES.add(f)
+# Panels that are not paint: a soft top's canvas, a vinyl roof. Same region syntax as
+# the glass spans; they take the trim material.
+TRIM_FACES = set()
+for region in B.get('trimRegions', []):
+    pid = panel_index[region['panel']]
+    for y_cut in region['y']:
+        faces = [f for f in bm.faces if f[panel_layer] == pid]
+        geom = list({v for f in faces for v in f.verts}) + list({e for f in faces for e in f.edges}) + faces
+        bmesh.ops.bisect_plane(bm, geom=geom, plane_co=(0.0, y_cut, 0.0), plane_no=(0, 1, 0), dist=1e-5)
 for f in bm.faces:
-    f.material_index = 1 if f in GLASS_FACES else 0
+    c = f.calc_center_median()
+    for region in B.get('trimRegions', []):
+        if f[panel_layer] == panel_index[region['panel']] and region['y'][0] <= c.y <= region['y'][1] \
+                and c.z >= region.get('zMin', -9):
+            TRIM_FACES.add(f)
+for f in bm.faces:
+    f.material_index = 1 if f in GLASS_FACES else (2 if f in TRIM_FACES else 0)
 
 mirror = bmesh.ops.duplicate(bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:])
 for e in mirror['geom']:

@@ -139,6 +139,7 @@ spec = {
                    {'n': 1, 'bulge': car.get('shoulderRound', 0.25)}, {'n': 0}, {'n': 2, 'bulge': 0.02}, {'n': 3, 'bulge': car.get('roofCrown', 0.05)}],
         'lines': lines,
         'glass': glass,
+        'trimRegions': car.get('trimRegions', []),
         'arch': car.get('arch', {'radiusFactor': 1.13, 'lift': 0.02, 'wellDepth': 0.3}),
         'smoothAngleDeg': car.get('smoothAngleDeg', 32),
     },

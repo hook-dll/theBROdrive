@@ -702,6 +702,37 @@ export const ROSTER: readonly RosterCar[] = [
     antiRoll: { front: 0.5, rear: 0.4 },
     target: { top: 200, to100: null, turn: 4.8, source: 'Honda CR-X 1.6i-16 (1985) data' },
   },
+  {
+    // Mazda MX-5 1.6 (NA, 1989): B6 1.6 DOHC, 115 PS at 6500 and 136 Nm at 5500, five-
+    // speed on a 4.3 final drive, double wishbones, 950 kg; 195 km/h, 0-100 in 8.6 s.
+    id: 'rs_mx5',
+    label: 'Mazda MX-5',
+    body: 'mx5.glb',
+    bodyClass: 'car',
+    factory: { length: 3.97, width: 1.675, height: 1.23, clearance: 0.135, wheelbase: 2.265, frontTrack: 1.41, rearTrack: 1.43, wheelRadius: 0.285, tyreWidth: 0.185, frontOverhang: 0.81 },
+    mass: 950,
+    frontWeightShare: 0.51,
+    rearDriveBias: 1,
+    engine: {
+      label: '1.6 Mazda B6 DOHC inline-four', mass: 110,
+      spec: { peakPowerKw: 84.6, powerPeakRpm: 6500, peakTorqueNm: 136, torquePeakRpm: 5500, redlineRpm: 7200, idleRpm: 850, bsfc: 0.29, brakingCoeff: 0.018, cylinders: 4 },
+      rated: { ps: 115 }, ratedTorqueNm: 136, source: 'Mazda MX-5 1.6 (1989) data: 115 PS at 6500, 136 Nm at 5500',
+    },
+    gearbox: {
+      label: 'Mazda M five-speed', mass: 35,
+      spec: { ratios: [3.136, 1.888, 1.33, 1.0, 0.814], reverse: 3.758, finalDrive: 4.3, shiftTime: 0.2, automatic: false, efficiency: 0.9 },
+    },
+    tankLitres: 45,
+    wheelGrip: 0.84,
+    brakeDecelG: 0.92,
+    steerLock: 0.604,
+    dragArea: 0.68,
+    handlingProfile: 'sport',
+    suspension: S(1.45, 1.6, 0.3, 0.45, 0.08),
+    tyre: { construction: 'radial', aspect: 0.6 },
+    antiRoll: { front: 0.5, rear: 0.3 },
+    target: { top: 195, to100: null, turn: 4.6, source: 'Mazda MX-5 1.6 (NA) data; 9.2 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
