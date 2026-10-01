@@ -458,6 +458,16 @@ bm_ = bmesh.new()
 for x0, x1, z0, z1 in P.get('frontSlots', []):
     for sgn in (1, -1):
         box(bm_, (sgn * (x0 + x1) / 2, nose_y - 0.004, (z0 + z1) / 2), (x1 - x0, 0.01, z1 - z0), 0)
+# Air intakes on the flanks (the rear-engined cars): a dark field with vertical
+# louvres, set on the side of the body at [y0, y1, z0, z1].
+for y0, y1, z0, z1 in P.get('sideVents', []):
+    for sgn in (1, -1):
+        x = float(np.interp((y0 + y1) / 2, stations, LINES['waist'][0])) - 0.004
+        box(bm_, (sgn * x, (y0 + y1) / 2, (z0 + z1) / 2), (0.012, y1 - y0, z1 - z0), 0)
+        n_l = max(3, int((y1 - y0) / 0.025))
+        for k in range(n_l):
+            yy = y0 + (k + 0.5) * (y1 - y0) / n_l
+            box(bm_, (sgn * (x + 0.006), yy, (z0 + z1) / 2), (0.008, 0.006, (z1 - z0) * 0.8), 0)
 front_slots = new_object('front_slots', bm_, [MAT['trim']])
 
 # Mirrors: a stalk and a head on each door.

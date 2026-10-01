@@ -384,6 +384,36 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'radial', aspect: 0.8 },
     target: { top: 132, to100: null, turn: 5.5, source: 'AO vaz-2121' },
   },
+  {
+    // ZAZ-968M (1979): MeMZ-968 1.2 air-cooled V4 behind the rear axle, 41 hp at 4400
+    // and 75 Nm at 3000, four-speed transaxle on a 4.125 final drive, 840 kg; 118 km/h.
+    id: 'rs_zaz968',
+    label: 'ZAZ-968M',
+    body: 'zaz968.glb',
+    bodyClass: 'car',
+    factory: { length: 3.765, width: 1.49, height: 1.37, clearance: 0.175, wheelbase: 2.16, frontTrack: 1.228, rearTrack: 1.212, wheelRadius: 0.29, tyreWidth: 0.155, frontOverhang: 0.72 },
+    mass: 840,
+    frontWeightShare: 0.41,
+    rearDriveBias: 1,
+    engine: {
+      label: '1.2 MeMZ-968 air-cooled V4', mass: 95,
+      spec: { peakPowerKw: 30.2, powerPeakRpm: 4400, peakTorqueNm: 75, torquePeakRpm: 3000, redlineRpm: 4800, idleRpm: 900, bsfc: 0.35, brakingCoeff: 0.0149, cylinders: 4 },
+      rated: { hp: 41 }, ratedTorqueNm: 75, source: 'ZAZ-968M catalogue: MeMZ-968 41 hp at 4400, 7.6 kgm at 3000',
+    },
+    gearbox: {
+      label: 'ZAZ-968 four-speed transaxle', mass: 30,
+      spec: { ratios: [3.8, 2.12, 1.41, 0.96], reverse: 4.165, finalDrive: 4.125, shiftTime: 0.4, automatic: false, efficiency: 0.92 },
+    },
+    tankLitres: 40,
+    wheelGrip: 0.56,
+    brakeDecelG: 0.5,
+    steerLock: 0.487,
+    dragArea: 1.044,
+    handlingProfile: 'classic',
+    suspension: S(1.15, 1.3, 0.22, 0.36, 0.1),
+    tyre: { construction: 'crossply', aspect: 0.9 },
+    target: { top: 118, to100: null, turn: 5.25, source: 'ZAZ-968M catalogue (autoopt.ru)' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
