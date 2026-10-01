@@ -1407,6 +1407,37 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'radial', aspect: 0.82 },
     target: { top: 145, to100: null, turn: 4.8, source: 'Subaru Leone 1600 4WD (1975) data; 9.6 m turning circle' },
   },
+  {
+    // Plymouth Valiant (1964): 170 cu in Slant Six, 101 hp gross (net about 73 hp, 54 kW)
+    // at 4400 and 155 lb-ft gross at 2400, three-speed on a 3.23 axle, leaf-sprung live
+    // axle, torsion bars in front, 1250 kg; about 150 km/h, 11.9 m turning circle.
+    id: 'rs_valiant',
+    label: 'Plymouth Valiant',
+    body: 'valiant.glb',
+    bodyClass: 'car',
+    factory: { length: 4.628, width: 1.78, height: 1.355, clearance: 0.15, wheelbase: 2.705, frontTrack: 1.42, rearTrack: 1.41, wheelRadius: 0.3, tyreWidth: 0.165, frontOverhang: 0.86 },
+    mass: 1250,
+    frontWeightShare: 0.55,
+    rearDriveBias: 1,
+    engine: {
+      label: '2.8 Chrysler Slant Six', mass: 190,
+      spec: { peakPowerKw: 54, powerPeakRpm: 4400, peakTorqueNm: 185, torquePeakRpm: 2400, redlineRpm: 4800, idleRpm: 600, bsfc: 0.3, brakingCoeff: 0.03, cylinders: 6 },
+      rated: { kw: 54 }, ratedTorqueNm: 185, source: 'Chrysler 170 Slant Six (1964): 101 hp gross at 4400, 155 lb-ft gross at 2400; net estimated at 72% power, 88% torque',
+    },
+    gearbox: {
+      label: 'Chrysler three-speed', mass: 35,
+      spec: { ratios: [2.95, 1.83, 1.0], reverse: 3.8, finalDrive: 3.23, shiftTime: 0.45, automatic: false, efficiency: 0.9 },
+    },
+    tankLitres: 49,
+    wheelGrip: 0.6,
+    brakeDecelG: 0.55,
+    steerLock: 0.540,
+    dragArea: 0.903,
+    handlingProfile: 'classic',
+    suspension: S(1.0, 1.15, 0.2, 0.32, 0.1),
+    tyre: { construction: 'crossply', aspect: 0.9 },
+    target: { top: 150, to100: null, turn: 5.95, source: 'Plymouth Valiant (1964) data; 11.9 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
