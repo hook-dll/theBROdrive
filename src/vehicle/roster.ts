@@ -623,6 +623,29 @@ export const ROSTER: readonly RosterCar[] = [
     antiRoll: { front: 0.3, rear: 0.0 },
     target: { top: 115, to100: null, turn: 4.8, source: 'Renault 4 TL (1978) data; 9.6 m turning circle' },
   },
+  {
+    // Porsche 911 SC: the proving ground's pg_911sc driveline and chassis on its own body.
+    id: 'rs_porsche911',
+    label: 'Porsche 911 SC',
+    body: 'porsche911.glb',
+    bodyClass: 'car',
+    factory: { length: 4.291, width: 1.652, height: 1.32, clearance: 0.12, wheelbase: 2.272, frontTrack: 1.372, rearTrack: 1.38, wheelRadius: 0.31, tyreWidth: 0.2, frontOverhang: 0.932 },
+    mass: 1160,
+    frontWeightShare: 0.39,
+    rearDriveBias: 1,
+    engine: 'engine_porsche_930_10',
+    gearbox: 'gearbox_porsche_915',
+    tankLitres: 80,
+    wheelGrip: 0.82,
+    brakeDecelG: 0.95,
+    steerLock: 0.501,
+    dragArea: 0.827,
+    handlingProfile: 'sport',
+    suspension: S(1.45, 1.7, 0.3, 0.45, 0.07),
+    tyre: { construction: 'radial', aspect: 0.65 },
+    antiRoll: { front: 0.5, rear: 0.35 },
+    target: { top: 225, to100: 7.0, turn: 5.35, source: 'carfolio 911 SC 1980; Porsche 0-100 for the 204 PS SC' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
