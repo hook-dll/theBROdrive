@@ -915,6 +915,39 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'radial', aspect: 0.82 },
     target: { top: 145, to100: null, turn: 5.2, source: 'Dacia 1300 (1969) data' },
   },
+  {
+    // Volkswagen 1300 Beetle (1966): air-cooled flat four behind the rear axle, 44 PS
+    // DIN at 4100 and 89 Nm at 3000, four-speed transaxle on a 4.375 final drive, swing
+    // axles, 820 kg; 120 km/h.
+    id: 'rs_kafer',
+    label: 'Volkswagen Käfer',
+    body: 'kafer.glb',
+    bodyClass: 'car',
+    factory: { length: 4.08, width: 1.58, height: 1.5, clearance: 0.15, wheelbase: 2.42, frontTrack: 1.37, rearTrack: 1.35, wheelRadius: 0.315, tyreWidth: 0.15, frontOverhang: 0.753 },
+    mass: 820,
+    frontWeightShare: 0.42,
+    rearDriveBias: 1,
+    engine: {
+      label: '1.3 VW air-cooled flat four', mass: 105,
+      spec: { peakPowerKw: 32.4, powerPeakRpm: 4100, peakTorqueNm: 89, torquePeakRpm: 3000, redlineRpm: 4600, idleRpm: 850, bsfc: 0.34, brakingCoeff: 0.0185, cylinders: 4 },
+      rated: { ps: 44 }, ratedTorqueNm: 89, source: 'VW 1300 (1966) data: 44 PS DIN at 4100, 89 Nm at 3000',
+    },
+    gearbox: {
+      label: 'VW Beetle four-speed transaxle', mass: 30,
+      spec: { ratios: [3.8, 2.06, 1.26, 0.89], reverse: 3.88, finalDrive: 4.375, shiftTime: 0.4, automatic: false, efficiency: 0.92 },
+    },
+    tankLitres: 40,
+    wheelGrip: 0.6,
+    brakeDecelG: 0.6,
+    steerLock: 0.526,
+    dragArea: 1.081,
+    handlingProfile: 'classic',
+    // Swing axles: a soft, high roll centre at the back, and a tail that tucks in.
+    suspension: S(1.05, 1.2, 0.22, 0.36, 0.11),
+    tyre: { construction: 'crossply', aspect: 0.92 },
+    antiRoll: { front: 0.3, rear: 0.0 },
+    target: { top: 120, to100: null, turn: 5.5, source: 'VW 1300 (1966) data; 11 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {

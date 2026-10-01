@@ -351,6 +351,76 @@ P = spec['parts']
 nose_y, tail_y = y_front, y_rear
 front_n, rear_n = (0, -1, 0), (0, 1, 0)
 
+# ---- separate wings ------------------------------------------------------------------
+# The cars whose wings stand off a narrower body (the Beetle, the 2CV, the Land Rover,
+# the Jeep): each wing is a shell swept round its wheel. A wing is given as
+#   {"axle": "front" | "rear", "inner": x, "outer": x, "radius": arc radius over the
+#    tyre, "lift": arc centre above the axle, "from": deg, "to": deg (0 = forward,
+#    90 = up, 180 = back), "start": [y, z], "end": [y, z] (where the wing runs out to,
+#    the running board or the bumper; omitted, it ends on the arc), "crown": how much
+#    the top bulges outward across its width, "thickness"}
+# and joins the body, so lamps set into a wing find it as skin.
+def build_wing(bm_, w):
+    axle_y = AXLES[0][0] if w['axle'] == 'front' else AXLES[1][0]
+    cz = R + w.get('lift', 0.0)
+    rad = w['radius']
+    t_ = w.get('thickness', 0.04)
+    path = []
+    if 'start' in w:
+        path.append(Vector((0, w['start'][0], w['start'][1])))
+    for a in np.linspace(math.radians(w.get('from', 0)), math.radians(w.get('to', 180)), 16):
+        path.append(Vector((0, axle_y - rad * math.cos(a), cz + rad * math.sin(a))))
+    if 'end' in w:
+        path.append(Vector((0, w['end'][0], w['end'][1])))
+    xs = np.linspace(w['inner'], w['outer'], 7)
+    crown = w.get('crown', 0.03)
+    for sgn in (1, -1):
+        top, bot = [], []
+        for k, p in enumerate(path):
+            a = path[max(k - 1, 0)]
+            b = path[min(k + 1, len(path) - 1)]
+            tang = (b - a).normalized()
+            nrm = Vector((0, -tang.z, tang.y))          # outward from the wheel, in y-z
+            if nrm.z < 0 and k not in (0, len(path) - 1):
+                nrm = -nrm
+            rt, rb = [], []
+            for x in xs:
+                u = (x - w['inner']) / (w['outer'] - w['inner'])
+                bulge = crown * math.sin(math.pi * u)
+                q = p + nrm * bulge
+                rt.append(bm_.verts.new((sgn * x, q.y, q.z)))
+                q2 = p - nrm * t_
+                rb.append(bm_.verts.new((sgn * x, q2.y, q2.z)))
+            top.append(rt)
+            bot.append(rb)
+        n = len(xs)
+        for r0, r1, b0, b1 in zip(top, top[1:], bot, bot[1:]):
+            for j in range(n - 1):
+                bm_.faces.new((r0[j], r0[j + 1], r1[j + 1], r1[j]))
+                bm_.faces.new((b0[j], b1[j], b1[j + 1], b0[j + 1]))
+            bm_.faces.new((r0[-1], b0[-1], b1[-1], r1[-1]))
+            bm_.faces.new((r0[0], r1[0], b1[0], b0[0]))
+        for ring_t, ring_b in ((top[0], bot[0]), (top[-1], bot[-1])):
+            for j in range(n - 1):
+                bm_.faces.new((ring_t[j], ring_b[j], ring_b[j + 1], ring_t[j + 1]))
+
+
+if P.get('wings'):
+    wbm = bmesh.new()
+    for w in P['wings']:
+        build_wing(wbm, w)
+    # Running boards between the wings: [y0, y1, z, inner x, outer x].
+    for y0, y1, z, xi, xo in P.get('runningBoards', []):
+        for sgn in (1, -1):
+            box(wbm, (sgn * (xi + xo) / 2, (y0 + y1) / 2, z), (xo - xi, y1 - y0, 0.03), 0)
+    bmesh.ops.recalc_face_normals(wbm, faces=wbm.faces)
+    wing_obj = new_object('wings', wbm, [MAT['paint']])
+    bpy.ops.object.select_all(action='DESELECT')
+    wing_obj.select_set(True)
+    body.select_set(True)
+    bpy.context.view_layer.objects.active = body
+    bpy.ops.object.join()
+
 # Where the skin actually is at a given (x, z) seen from the nose or the tail, so a
 # lamp sits ON a sloping nose or a curved tail rather than at the body's end plane.
 from mathutils.bvhtree import BVHTree  # noqa: E402

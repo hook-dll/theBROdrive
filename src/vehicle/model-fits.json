@@ -3479,5 +3479,64 @@
       0,
       0
     ]
+  },
+  "rs_kafer": {
+    "halfExtents": [
+      0.79,
+      0.675,
+      2.04
+    ],
+    "wheels": [
+      {
+        "id": "wheel_fl",
+        "pos": [
+          0.685,
+          -0.51,
+          1.287
+        ],
+        "radius": 0.315,
+        "isFront": true
+      },
+      {
+        "id": "wheel_fr",
+        "pos": [
+          -0.685,
+          -0.51,
+          1.287
+        ],
+        "radius": 0.315,
+        "isFront": true
+      },
+      {
+        "id": "wheel_rl",
+        "pos": [
+          0.675,
+          -0.51,
+          -1.133
+        ],
+        "radius": 0.315,
+        "isFront": false
+      },
+      {
+        "id": "wheel_rr",
+        "pos": [
+          -0.675,
+          -0.51,
+          -1.133
+        ],
+        "radius": 0.315,
+        "isFront": false
+      }
+    ],
+    "hoodPoint": [
+      0,
+      0.3140997748654829,
+      1.224
+    ],
+    "visualOffset": [
+      0,
+      0,
+      0
+    ]
   }
 }
