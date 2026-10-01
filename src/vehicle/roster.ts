@@ -1065,6 +1065,37 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'crossply', aspect: 0.95 },
     target: { top: 110, to100: null, turn: 6.5, source: 'UAZ-469B catalogue; 13 m turning circle' },
   },
+  {
+    // Land Rover Series III 88 (1971): 2.25 petrol four, 70 hp at 4000 and 120 lb-ft at
+    // 1500, all-synchromesh four-speed through a 1.148 high-range transfer to 4.7 axles,
+    // 4x4 engaged, leaf springs on beam axles, 1420 kg; about 110 km/h, 11.6 m circle.
+    id: 'rs_landrover',
+    label: 'Land Rover 88',
+    body: 'landrover.glb',
+    bodyClass: 'car',
+    factory: { length: 3.62, width: 1.68, height: 1.97, clearance: 0.21, wheelbase: 2.235, frontTrack: 1.31, rearTrack: 1.31, wheelRadius: 0.37, tyreWidth: 0.16, frontOverhang: 0.56 },
+    mass: 1420,
+    frontWeightShare: 0.53,
+    rearDriveBias: 0.5,
+    engine: {
+      label: '2.25 Land Rover petrol four', mass: 175,
+      spec: { peakPowerKw: 52, powerPeakRpm: 4000, peakTorqueNm: 163, torquePeakRpm: 1500, redlineRpm: 4400, idleRpm: 600, bsfc: 0.31, brakingCoeff: 0.03, cylinders: 4 },
+      rated: { hp: 70 }, ratedTorqueNm: 163, source: 'Land Rover Series III 2.25 petrol: 70 bhp at 4000, 120 lb-ft at 1500',
+    },
+    gearbox: {
+      label: 'Land Rover Series III four-speed', mass: 60,
+      spec: { ratios: [3.68, 2.22, 1.5, 1.0], reverse: 4.02, finalDrive: 5.396, shiftTime: 0.5, automatic: false, efficiency: 0.85 },
+    },
+    tankLitres: 45,
+    wheelGrip: 0.55,
+    brakeDecelG: 0.45,
+    steerLock: 0.459,
+    dragArea: 1.6,
+    handlingProfile: 'utility',
+    suspension: S(1.25, 1.35, 0.2, 0.36, 0.16),
+    tyre: { construction: 'crossply', aspect: 0.95 },
+    target: { top: 110, to100: null, turn: 5.8, source: 'Land Rover Series III 88 data; 11.6 m turning circle; final drive is 4.7 axle x 1.148 high range' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {

@@ -227,7 +227,16 @@ for f in bm.faces:
 # Panels that are not paint: a soft top's canvas, a vinyl roof. Same region syntax as
 # the glass spans; they take the trim material.
 TRIM_FACES = set()
-for region in B.get('trimRegions', []):
+# A soft top that closes the tail (the Land Rover's tilt): {"panel": "tail", "zMin": z}
+# cuts the rear end cap at zMin and covers what is above it.
+for region in [r_ for r_ in B.get('trimRegions', []) if r_['panel'] == 'tail']:
+    faces = [f for f in bm.faces if f[panel_layer] == -1 and f.calc_center_median().y > 0]
+    geom = list({v for f in faces for v in f.verts}) + list({e for f in faces for e in f.edges}) + faces
+    bmesh.ops.bisect_plane(bm, geom=geom, plane_co=(0.0, 0.0, region['zMin']), plane_no=(0, 0, 1), dist=1e-5)
+    for f in bm.faces:
+        if f[panel_layer] == -1 and f.calc_center_median().y > 0 and f.calc_center_median().z >= region['zMin']:
+            TRIM_FACES.add(f)
+for region in [r_ for r_ in B.get('trimRegions', []) if r_['panel'] != 'tail']:
     pid = panel_index[region['panel']]
     for y_cut in region['y']:
         faces = [f for f in bm.faces if f[panel_layer] == pid]
@@ -235,7 +244,7 @@ for region in B.get('trimRegions', []):
         bmesh.ops.bisect_plane(bm, geom=geom, plane_co=(0.0, y_cut, 0.0), plane_no=(0, 1, 0), dist=1e-5)
 for f in bm.faces:
     c = f.calc_center_median()
-    for region in B.get('trimRegions', []):
+    for region in [r_ for r_ in B.get('trimRegions', []) if r_['panel'] != 'tail']:
         if f[panel_layer] == panel_index[region['panel']] and region['y'][0] <= c.y <= region['y'][1] \
                 and c.z >= region.get('zMin', -9):
             TRIM_FACES.add(f)
@@ -690,10 +699,18 @@ sp = P.get('spareWheel')
 if sp:
     bm_ = bmesh.new()
     r_s, w_s = sp.get('r', R), sp.get('width', F['tyreWidth'])
-    yt = sp.get('y', surface_y(sp.get('x', 0.0), sp['z'], 'rear')) + sp.get('standOff', 0.03)
-    disc(bm_, (sp.get('x', 0.0), yt + w_s / 2, sp['z']), (0, 1, 0), r_s, w_s, 28, 0)
-    disc(bm_, (sp.get('x', 0.0), yt + w_s - 0.004, sp['z']), (0, 1, 0), r_s * P.get('wheel', {}).get('rimFactor', 0.62), 0.012, 24, 1)
-    disc(bm_, (sp.get('x', 0.0), yt + w_s + 0.004, sp['z']), (0, 1, 0), r_s * 0.3, 0.025, 16, 1)
+    if sp.get('end') == 'bonnet':
+        # Lying on the bonnet (the Land Rover): `y` its centre along the car.
+        x_s = sp.get('x', 0.0)
+        hit = _skin.ray_cast(Vector((x_s, sp['y'], H + 1.0)), Vector((0, 0, -1)), H + 2)
+        zb = (hit[0].z if hit[0] is not None else H) + sp.get('standOff', 0.02)
+        o_, a_ = Vector((x_s, sp['y'], zb)), Vector((0, 0, 1))
+    else:
+        yt = sp.get('y', surface_y(sp.get('x', 0.0), sp['z'], 'rear')) + sp.get('standOff', 0.03)
+        o_, a_ = Vector((sp.get('x', 0.0), yt, sp['z'])), Vector((0, 1, 0))
+    disc(bm_, o_ + a_ * (w_s / 2), a_, r_s, w_s, 28, 0)
+    disc(bm_, o_ + a_ * (w_s - 0.004), a_, r_s * P.get('wheel', {}).get('rimFactor', 0.62), 0.012, 24, 1)
+    disc(bm_, o_ + a_ * (w_s + 0.004), a_, r_s * 0.3, 0.025, 16, 1)
     spare_parts.append(new_object('spare', bm_, [MAT['Tyres'], MAT['wheel_rim']]))
 
 # ---- shading and export -------------------------------------------------------------------
