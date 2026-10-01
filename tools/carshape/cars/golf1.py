@@ -1,0 +1,52 @@
+# Volkswagen Golf I 1.1 (1974-83). Factory: 3705 x 1610 x 1395 (3815 over the later
+# bumpers this drawing has), wheelbase 2400, tracks 1390/1350, 155 SR 13. Read off the
+# drawing reprinted at 3dcar.ru/blueprints/vw/golf_1_3doors_1975, calibrated by the
+# wheelbase (320 px/m). Giugiaro's box: a flat bonnet and roof, a thick C pillar
+# falling into a near-upright hatch, round lamps either side of a slatted black grille.
+CAR = {
+    'id': 'golf1',
+    'label': 'Volkswagen Golf',
+    'kind': 'hatchback',
+    'factory': {'length': 3.815, 'width': 1.61, 'height': 1.395, 'clearance': 0.12, 'wheelbase': 2.4,
+                'frontTrack': 1.39, 'rearTrack': 1.35, 'wheelRadius': 0.28, 'tyreWidth': 0.155, 'frontOverhang': 0.77},
+    'trimEnds': 0.09,
+    'deck': [[-1.8175, 0.83], [-1.5, 0.90], [-1.0, 0.94], [-0.65, 0.97], [-0.3, 0.955],
+             [1.0, 0.95], [1.72, 0.97], [1.8175, 0.95]],
+    'belt': 0.95,
+    'cabin': [-0.65, -0.27, 1.25, 1.72],
+    'roof': [1.395, 1.36],
+    'screenTop': 1.34,
+    'crown': 0.012,
+    'widths': {'waist': 0.805, 'shoulder': 0.795, 'deckEdge': 0.775, 'glassDeck': 0.71, 'glass': 0.69,
+               'railDeck': 0.58, 'railPillar': 0.66, 'rail': 0.61, 'sill': 0.76},
+    'planFactor': [[-1.8175, 0.95], [-1.72, 0.99], [-1.6, 1.0], [1.7, 1.0], [1.8175, 0.98]],
+    'sill': [[-1.8175, 0.47], [-1.6, 0.36], [-1.4, 0.30], [1.3, 0.30], [1.6, 0.36], [1.8175, 0.47]],
+    'floor': [[-1.8175, 0.45], [-1.6, 0.26], [-1.4, 0.21], [1.3, 0.21], [1.6, 0.26], [1.8175, 0.45]],
+    'waistZ': 0.62,
+    'shoulderDrop': 0.05,
+    'shoulderRound': 0.12,
+    'hatchLip': 0.11,
+    'windows': [[[-0.57, 0.955], [-0.28, 1.34], [0.45, 1.34], [0.45, 0.955]],
+                [[0.52, 0.955], [0.52, 1.34], [0.98, 1.34], [1.27, 0.97]]],
+    'arch': {'radiusFactor': 1.15, 'lift': 0.02, 'wellDepth': 0.3},
+    'parts': {
+        'headlamps': [[0.56, 0.715, 0.085]], 'bezel': 0.012, 'bezelMaterial': 'trim',
+        'grille': {'halfWidth': 0.47, 'z': [0.64, 0.79], 'slats': 6, 'slatMaterial': 'trim', 'surround': False},
+        'bumper': {'depth': 0.06, 'height': 0.07, 'standOff': 0.03, 'wrap': 0.2, 'halfWidth': 0.79,
+                   'zFront': 0.53, 'zRear': 0.55},
+        'doorHandles': [[0.18, 0.87]],
+        'windowFrame': 0.012,
+        'lamps': [
+            {'node': 'front_blinker_left', 'material': 'IndicatorLights', 'end': 'front', 'shape': 'rect', 'x': 0.58, 'z': 0.535, 'w': 0.10, 'h': 0.04},
+            {'node': 'front_blinker_right', 'material': 'IndicatorLights', 'end': 'front', 'shape': 'rect', 'x': 0.58, 'z': 0.535, 'w': 0.10, 'h': 0.04},
+            {'node': 'front_blinker_left', 'material': 'IndicatorLights', 'end': 'side', 'shape': 'rect', 'y': -1.69, 'z': 0.70, 'w': 0.10, 'h': 0.04, 'depth': 0.012},
+            {'node': 'front_blinker_right', 'material': 'IndicatorLights', 'end': 'side', 'shape': 'rect', 'y': -1.69, 'z': 0.70, 'w': 0.10, 'h': 0.04, 'depth': 0.012},
+            {'node': 'taillights', 'material': 'TailLights', 'end': 'rear', 'shape': 'rect', 'x': 0.60, 'z': 0.77, 'w': 0.15, 'h': 0.07},
+            {'node': 'rear_blinker_left', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'rect', 'x': 0.60, 'z': 0.70, 'w': 0.15, 'h': 0.06},
+            {'node': 'rear_blinker_right', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'rect', 'x': 0.60, 'z': 0.70, 'w': 0.15, 'h': 0.06},
+            {'node': 'reverse_lights', 'material': 'ReverseLights', 'end': 'rear', 'shape': 'rect', 'x': 0.60, 'z': 0.645, 'w': 0.15, 'h': 0.04},
+        ],
+        'mirror': {'x': 0.84, 'y': -0.45, 'z': 1.0},
+        'wheel': {'style': 'steel', 'windows': 4, 'rimFactor': 0.68},
+    },
+}

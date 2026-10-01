@@ -302,6 +302,36 @@ export const ROSTER: readonly RosterCar[] = [
     antiRoll: { front: 0.5, rear: 0.0 },
     target: { top: 170, to100: null, turn: 5.2, source: 'BMW 2002 (1968) data; 10.4 m turning circle' },
   },
+  {
+    // Volkswagen Golf 1.1 (1974): EA111 1.1, 50 PS at 6000 and 7.8 kgm at 3000, four-speed
+    // transaxle on a 4.57 final drive, 750 kg; 140 km/h, 0-100 in 16 s, 10.3 m circle.
+    id: 'rs_golf1',
+    label: 'Volkswagen Golf',
+    body: 'golf1.glb',
+    bodyClass: 'car',
+    factory: { length: 3.815, width: 1.61, height: 1.395, clearance: 0.12, wheelbase: 2.4, frontTrack: 1.39, rearTrack: 1.35, wheelRadius: 0.28, tyreWidth: 0.155, frontOverhang: 0.77 },
+    mass: 750,
+    frontWeightShare: 0.62,
+    rearDriveBias: 0,
+    engine: {
+      label: '1.1 VW EA111 inline-four', mass: 92,
+      spec: { peakPowerKw: 36.8, powerPeakRpm: 6000, peakTorqueNm: 77, torquePeakRpm: 3000, redlineRpm: 6400, idleRpm: 850, bsfc: 0.32, brakingCoeff: 0.0115, cylinders: 4 },
+      rated: { ps: 50 }, ratedTorqueNm: 77, source: 'VW Golf 1.1 (1974) data: 50 PS at 6000, 77 Nm at 3000',
+    },
+    gearbox: {
+      label: 'VW Golf four-speed transaxle', mass: 30,
+      spec: { ratios: [3.45, 1.96, 1.37, 0.97], reverse: 3.17, finalDrive: 4.57, shiftTime: 0.3, automatic: false, efficiency: 0.92 },
+    },
+    tankLitres: 45,
+    wheelGrip: 0.7,
+    brakeDecelG: 0.72,
+    steerLock: 0.55,
+    dragArea: 0.799,
+    handlingProfile: 'road',
+    suspension: S(1.3, 1.55, 0.28, 0.42, 0.09),
+    tyre: { construction: 'radial', aspect: 0.82 },
+    target: { top: 140, to100: null, turn: 5.15, source: 'VW Golf 1.1 (1974) data; 10.3 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
