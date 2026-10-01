@@ -1344,6 +1344,38 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'radial', aspect: 0.82 },
     target: { top: 163, to100: null, turn: 5.25, source: 'Peugeot 504 GL data; 10.5 m turning circle' },
   },
+  {
+    // Alfa Romeo Giulia Super (1965): 1.6 twin-cam, 98 PS DIN at 5500 and 14 kgm at 2900,
+    // five-speed on a 4.56 axle, coil-sprung live axle on a T-bar, 1000 kg; 175 km/h,
+    // 11 m turning circle.
+    id: 'rs_giulia',
+    label: 'Alfa Romeo Giulia',
+    body: 'giulia.glb',
+    bodyClass: 'car',
+    factory: { length: 4.14, width: 1.56, height: 1.43, clearance: 0.15, wheelbase: 2.51, frontTrack: 1.31, rearTrack: 1.27, wheelRadius: 0.3, tyreWidth: 0.155, frontOverhang: 0.6 },
+    mass: 1000,
+    frontWeightShare: 0.53,
+    rearDriveBias: 1,
+    engine: {
+      label: '1.6 Alfa Romeo twin-cam', mass: 120,
+      spec: { peakPowerKw: 72, powerPeakRpm: 5500, peakTorqueNm: 137, torquePeakRpm: 2900, redlineRpm: 6500, idleRpm: 850, bsfc: 0.29, brakingCoeff: 0.025, cylinders: 4 },
+      rated: { ps: 98 }, ratedTorqueNm: 137, source: 'Alfa Romeo Giulia Super (1965): 98 CV DIN at 5500, 14 kgm at 2900',
+    },
+    gearbox: {
+      label: 'Alfa Romeo five-speed', mass: 34,
+      spec: { ratios: [3.3, 1.99, 1.35, 1.0, 0.79], reverse: 3.01, finalDrive: 4.56, shiftTime: 0.28, automatic: false, efficiency: 0.92 },
+    },
+    tankLitres: 46,
+    wheelGrip: 0.74,
+    brakeDecelG: 0.8,
+    steerLock: 0.520,
+    dragArea: 0.800,
+    handlingProfile: 'sport',
+    suspension: S(1.25, 1.4, 0.26, 0.42, 0.09),
+    tyre: { construction: 'radial', aspect: 0.82 },
+    antiRoll: { front: 0.45, rear: 0.2 },
+    target: { top: 175, to100: null, turn: 5.5, source: 'Alfa Romeo Giulia Super (1965) data; 11 m turning circle' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
