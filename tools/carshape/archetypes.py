@@ -78,6 +78,14 @@ if kind in ('hatchback', 'estate'):
     rail.append([y1, round(deck[-1][1] + lift(rail_x), 4)])
 top.sort()
 rail.sort()
+# A car whose roof is not flat (a dome, a fastback) gives its own centre and rail lines
+# over the cabin; the deck outside the cabin still comes from `deck`.
+if 'topLine' in car:
+    top = [p for p in top if p[0] < ws0 or p[0] > rw1] + [list(p) for p in car['topLine']]
+    top.sort()
+if 'railLine' in car:
+    rail = [p for p in rail if p[0] < ws0 or p[0] > rw1] + [list(p) for p in car['railLine']]
+    rail.sort()
 
 glass_base_plan = [[y0, wid['glassDeck']], [ws0, wid['glassDeck']], [ws1, wid['glass']], [rw0, wid['glass']],
                    [rw1, wid['glassDeck']], [y1, wid['glassDeck']]]
@@ -123,7 +131,7 @@ spec = {
         'planFactor': car['planFactor'],
         'ring': ['floorCentre', 'sill', 'waist', 'shoulder', 'deckEdge', 'glassBase', 'rail', 'topCentre'],
         'panels': [{'n': 1, 'bulge': 0}, {'n': 2, 'bulge': car.get('tumbleunder', 0.06)}, {'n': 1, 'bulge': 0.02},
-                   {'n': 1, 'bulge': car.get('shoulderRound', 0.25)}, {'n': 0}, {'n': 2, 'bulge': 0.02}, {'n': 3, 'bulge': 0.05}],
+                   {'n': 1, 'bulge': car.get('shoulderRound', 0.25)}, {'n': 0}, {'n': 2, 'bulge': 0.02}, {'n': 3, 'bulge': car.get('roofCrown', 0.05)}],
         'lines': lines,
         'glass': glass,
         'arch': car.get('arch', {'radiusFactor': 1.13, 'lift': 0.02, 'wellDepth': 0.3}),

@@ -219,6 +219,28 @@ export const ROSTER: readonly RosterCar[] = [
     tyre: { construction: 'radial', aspect: 0.7 },
     target: { top: 148, to100: null, turn: 5.2, source: 'AO vaz-2108 (its 16 s 0-100 is the catalogue-optimistic case in tools/reality.ts)' },
   },
+  {
+    // GAZ-21 Volga: the pack's sv_gaz21 driveline and chassis on its own body.
+    id: 'rs_gaz21',
+    label: 'GAZ-21 Volga',
+    body: 'gaz21.glb',
+    bodyClass: 'car',
+    factory: { length: 4.83, width: 1.8, height: 1.62, clearance: 0.19, wheelbase: 2.7, frontTrack: 1.41, rearTrack: 1.42, wheelRadius: 0.365, tyreWidth: 0.17, frontOverhang: 0.82 },
+    mass: 1460,
+    frontWeightShare: 0.48,
+    rearDriveBias: 1,
+    engine: 'engine_zmz_21',
+    gearbox: 'gearbox_gaz_3',
+    tankLitres: 60,
+    wheelGrip: 0.522,
+    brakeDecelG: 0.42,
+    steerLock: 0.504,
+    dragArea: 1.12,
+    handlingProfile: 'classic',
+    suspension: S(0.95, 1.15, 0.18, 0.3, 0.1),
+    tyre: { construction: 'crossply', aspect: 0.95 },
+    target: { top: 130, to100: null, turn: 6.3, source: 'AO gaz-21' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
