@@ -764,6 +764,36 @@ export const ROSTER: readonly RosterCar[] = [
     antiRoll: { front: 0.55, rear: 0.35 },
     target: { top: 195, to100: null, turn: 4.9, source: 'Toyota Corolla GT (AE86, 1985) data; 9.8 m turning circle' },
   },
+  {
+    // Lancia Fulvia Coupé Rallye 1.3 S (1970): narrow-angle V4 1.3, 90 PS DIN at 6000
+    // and 11.5 kgm at 5000, five-speed on a 4.18 final drive, front drive, 960 kg; 170 km/h.
+    id: 'rs_fulvia',
+    label: 'Lancia Fulvia Coupé',
+    body: 'fulvia.glb',
+    bodyClass: 'car',
+    factory: { length: 3.935, width: 1.555, height: 1.3, clearance: 0.13, wheelbase: 2.33, frontTrack: 1.3, rearTrack: 1.28, wheelRadius: 0.29, tyreWidth: 0.155, frontOverhang: 0.805 },
+    mass: 960,
+    frontWeightShare: 0.62,
+    rearDriveBias: 0,
+    engine: {
+      label: '1.3 Lancia narrow V4', mass: 110,
+      spec: { peakPowerKw: 66.2, powerPeakRpm: 6000, peakTorqueNm: 113, torquePeakRpm: 5000, redlineRpm: 6800, idleRpm: 900, bsfc: 0.31, brakingCoeff: 0.0159, cylinders: 4 },
+      rated: { ps: 90 }, ratedTorqueNm: 113, source: 'Lancia Fulvia Coupé Rallye 1.3 S (1970) data: 90 PS DIN at 6000, 11.5 kgm at 5000',
+    },
+    gearbox: {
+      label: 'Lancia Fulvia five-speed', mass: 34,
+      spec: { ratios: [3.25, 2.08, 1.42, 1.0, 0.83], reverse: 3.14, finalDrive: 4.18, shiftTime: 0.28, automatic: false, efficiency: 0.92 },
+    },
+    tankLitres: 38,
+    wheelGrip: 0.72,
+    brakeDecelG: 0.8,
+    steerLock: 0.55,
+    dragArea: 0.804,
+    handlingProfile: 'road',
+    suspension: S(1.3, 1.5, 0.28, 0.42, 0.09),
+    tyre: { construction: 'radial', aspect: 0.82 },
+    target: { top: 170, to100: null, turn: 5.0, source: 'Lancia Fulvia Coupé Rallye 1.3 S (1970) data' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {

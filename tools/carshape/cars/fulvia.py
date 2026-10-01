@@ -1,0 +1,50 @@
+# Lancia Fulvia Coupé Rallye 1.3 S (1967-76). Factory: 3935 x 1555 x 1300, wheelbase
+# 2330, overhangs 805/800, tracks 1300/1280, 155-14. Read off the dimensioned drawing
+# reprinted at 3dcar.ru/blueprints/lancia/fulvia_coupe_hf_1967 (210 px/m by the
+# wheelbase; heights scaled 6% to the stated 1300). A crisp slim coupé: a flat
+# bonnet, quad round lamps across a fine grille, a glassy cabin with thin pillars,
+# a short flat boot.
+CAR = {
+    'id': 'fulvia',
+    'label': 'Lancia Fulvia Coupé',
+    'kind': 'saloon',
+    'factory': {'length': 3.935, 'width': 1.555, 'height': 1.3, 'clearance': 0.13, 'wheelbase': 2.33,
+                'frontTrack': 1.3, 'rearTrack': 1.28, 'wheelRadius': 0.29, 'tyreWidth': 0.155, 'frontOverhang': 0.805},
+    'trimEnds': 0.0,
+    'deck': [[-1.9675, 0.70], [-1.88, 0.82], [-1.40, 0.87], [-0.64, 0.89], [0.0, 0.86], [0.79, 0.87],
+             [1.17, 0.87], [1.74, 0.82], [1.9675, 0.72]],
+    'belt': 0.85,
+    'cabin': [-0.64, -0.23, 0.79, 1.17],
+    'roof': [1.30, 1.27],
+    'screenTop': 1.25,
+    'crown': 0.012,
+    'widths': {'waist': 0.777, 'shoulder': 0.77, 'deckEdge': 0.75, 'glassDeck': 0.67, 'glass': 0.65,
+               'railDeck': 0.55, 'railPillar': 0.61, 'rail': 0.58, 'sill': 0.73},
+    'planFactor': [[-1.9675, 0.94], [-1.85, 0.99], [-1.7, 1.0], [1.8, 1.0], [1.9675, 0.96]],
+    'sill': [[-1.9675, 0.38], [-1.7, 0.30], [-1.4, 0.26], [1.4, 0.26], [1.7, 0.30], [1.9675, 0.38]],
+    'floor': [[-1.9675, 0.36], [-1.7, 0.20], [-1.4, 0.16], [1.4, 0.16], [1.7, 0.20], [1.9675, 0.36]],
+    'waistZ': 0.6,
+    'shoulderDrop': 0.05,
+    'shoulderRound': 0.15,
+    'windows': [[[-0.40, 0.85], [-0.12, 1.25], [0.58, 1.25], [0.58, 0.85]],
+                [[0.62, 0.85], [0.62, 1.25], [0.82, 1.24], [1.03, 0.88], [1.03, 0.85]]],
+    'arch': {'radiusFactor': 1.15, 'lift': 0.02, 'wellDepth': 0.28},
+    'parts': {
+        'headlamps': [[0.40, 0.55, 0.075], [0.60, 0.55, 0.075]], 'bezel': 0.012,
+        'grille': {'halfWidth': 0.24, 'z': [0.46, 0.64], 'slats': 7},
+        'bumper': {'depth': 0.04, 'height': 0.04, 'standOff': 0.02, 'wrap': 0.2, 'halfWidth': 0.75,
+                   'zFront': 0.40, 'zRear': 0.42},
+        'doorHandles': [[0.50, 0.80]],
+        'windowFrame': 0.01,
+        'lamps': [
+            {'node': 'front_blinker_left', 'material': 'IndicatorLights', 'end': 'front', 'shape': 'rect', 'x': 0.30, 'z': 0.42, 'w': 0.08, 'h': 0.03},
+            {'node': 'front_blinker_right', 'material': 'IndicatorLights', 'end': 'front', 'shape': 'rect', 'x': 0.30, 'z': 0.42, 'w': 0.08, 'h': 0.03},
+            {'node': 'taillights', 'material': 'TailLights', 'end': 'rear', 'shape': 'disc', 'x': 0.55, 'z': 0.58, 'r': 0.05},
+            {'node': 'rear_blinker_left', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'disc', 'x': 0.43, 'z': 0.58, 'r': 0.045},
+            {'node': 'rear_blinker_right', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'disc', 'x': 0.43, 'z': 0.58, 'r': 0.045},
+            {'node': 'reverse_lights', 'material': 'ReverseLights', 'end': 'rear', 'shape': 'rect', 'x': 0.52, 'z': 0.50, 'w': 0.06, 'h': 0.03},
+        ],
+        'mirror': {'x': 0.80, 'y': -1.2, 'z': 0.90},
+        'wheel': {'style': 'hubcap', 'rimFactor': 0.62},
+    },
+}
