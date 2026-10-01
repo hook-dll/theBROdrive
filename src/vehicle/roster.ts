@@ -971,6 +971,38 @@ export const ROSTER: readonly RosterCar[] = [
     antiRoll: { front: 0, rear: 0 },
     target: { top: 117, to100: null, turn: 5.35, source: 'carfolio 2CV6 1979 (29 bhp, 585 kg, 117 km/h)' },
   },
+  {
+    // Peugeot 205 GTI 1.6 (1984): XU5J 1.6, 105 PS at 6250 and 135 Nm at 4000, five-
+    // speed transaxle on a 4.06 final drive, 875 kg; 190 km/h, 0-100 in 8.7 s. Lifts off
+    // into oversteer: torsion-bar rear with no bar to speak of at the front.
+    id: 'rs_peugeot205',
+    label: 'Peugeot 205 GTI',
+    body: 'peugeot205.glb',
+    bodyClass: 'car',
+    factory: { length: 3.705, width: 1.572, height: 1.355, clearance: 0.108, wheelbase: 2.42, frontTrack: 1.393, rearTrack: 1.332, wheelRadius: 0.29, tyreWidth: 0.185, frontOverhang: 0.68 },
+    mass: 875,
+    frontWeightShare: 0.63,
+    rearDriveBias: 0,
+    engine: {
+      label: '1.6 Peugeot XU5J inline-four', mass: 115,
+      spec: { peakPowerKw: 77.2, powerPeakRpm: 6250, peakTorqueNm: 135, torquePeakRpm: 4000, redlineRpm: 6800, idleRpm: 850, bsfc: 0.3, brakingCoeff: 0.019, cylinders: 4 },
+      rated: { ps: 105 }, ratedTorqueNm: 135, source: 'Peugeot 205 GTI 1.6 (1984) data: 105 PS DIN at 6250, 135 Nm at 4000',
+    },
+    gearbox: {
+      label: 'Peugeot BE1 five-speed', mass: 34,
+      spec: { ratios: [3.25, 1.85, 1.28, 0.97, 0.76], reverse: 3.33, finalDrive: 4.06, shiftTime: 0.24, automatic: false, efficiency: 0.92 },
+    },
+    tankLitres: 50,
+    wheelGrip: 0.8,
+    brakeDecelG: 0.88,
+    steerLock: 0.559,
+    dragArea: 0.66,
+    handlingProfile: 'sport',
+    suspension: S(1.5, 1.85, 0.3, 0.45, 0.08),
+    tyre: { construction: 'radial', aspect: 0.6 },
+    antiRoll: { front: 0.3, rear: 0.7 },
+    target: { top: 190, to100: null, turn: 5.1, source: 'Peugeot 205 GTI 1.6 (1984) data' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
