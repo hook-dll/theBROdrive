@@ -948,6 +948,29 @@ export const ROSTER: readonly RosterCar[] = [
     antiRoll: { front: 0.3, rear: 0.0 },
     target: { top: 120, to100: null, turn: 5.5, source: 'VW 1300 (1966) data; 11 m turning circle' },
   },
+  {
+    // Citroën 2CV6: the proving ground's pg_2cv driveline and chassis on its own body.
+    id: 'rs_citroen2cv',
+    label: 'Citroën 2CV',
+    body: 'citroen2cv.glb',
+    bodyClass: 'car',
+    factory: { length: 3.83, width: 1.48, height: 1.6, clearance: 0.16, wheelbase: 2.4, frontTrack: 1.26, rearTrack: 1.26, wheelRadius: 0.30, tyreWidth: 0.125, frontOverhang: 0.68 },
+    mass: 585,
+    frontWeightShare: 0.58,
+    rearDriveBias: 0,
+    engine: 'engine_citroen_a06',
+    gearbox: 'gearbox_citroen_4',
+    tankLitres: 20,
+    wheelGrip: 0.58,
+    brakeDecelG: 0.6,
+    steerLock: 0.516,
+    dragArea: 0.777,
+    handlingProfile: 'classic',
+    suspension: S(0.9, 0.95, 0.16, 0.28, 0.14),
+    tyre: { construction: 'radial', aspect: 0.82 },
+    antiRoll: { front: 0, rear: 0 },
+    target: { top: 117, to100: null, turn: 5.35, source: 'carfolio 2CV6 1979 (29 bhp, 585 kg, 117 km/h)' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {
