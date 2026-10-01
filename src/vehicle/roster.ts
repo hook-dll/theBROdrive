@@ -445,6 +445,36 @@ export const ROSTER: readonly RosterCar[] = [
     antiRoll: { front: 0.6, rear: 0.3 },
     target: { top: 175, to100: 9.7, turn: 5.0, source: 'Renault 5 Alpine (1976) data' },
   },
+  {
+    // Škoda 110 R (1970): 1.1 OHV four behind the rear axle, 52 PS DIN at 4650 and
+    // 9.1 kgm at 3500, four-speed transaxle on a 4.44 final drive, 880 kg; 145 km/h.
+    id: 'rs_skoda110r',
+    label: 'Škoda 110 R',
+    body: 'skoda110r.glb',
+    bodyClass: 'car',
+    factory: { length: 4.155, width: 1.62, height: 1.35, clearance: 0.175, wheelbase: 2.4, frontTrack: 1.28, rearTrack: 1.25, wheelRadius: 0.30, tyreWidth: 0.155, frontOverhang: 0.815 },
+    mass: 880,
+    frontWeightShare: 0.39,
+    rearDriveBias: 1,
+    engine: {
+      label: '1.1 Škoda 742 inline-four', mass: 95,
+      spec: { peakPowerKw: 38.2, powerPeakRpm: 4650, peakTorqueNm: 89, torquePeakRpm: 3500, redlineRpm: 5800, idleRpm: 850, bsfc: 0.33, brakingCoeff: 0.0157, cylinders: 4 },
+      rated: { ps: 52 }, ratedTorqueNm: 89, source: 'Škoda 110 R (1970) data: 52 PS DIN at 4650, 9.1 kgm at 3500',
+    },
+    gearbox: {
+      label: 'Škoda four-speed transaxle', mass: 30,
+      spec: { ratios: [3.8, 2.12, 1.41, 0.96], reverse: 3.27, finalDrive: 4.44, shiftTime: 0.35, automatic: false, efficiency: 0.92 },
+    },
+    tankLitres: 32,
+    wheelGrip: 0.62,
+    brakeDecelG: 0.65,
+    steerLock: 0.542,
+    dragArea: 0.640,
+    handlingProfile: 'classic',
+    suspension: S(1.15, 1.35, 0.24, 0.38, 0.1),
+    tyre: { construction: 'radial', aspect: 0.82 },
+    target: { top: 145, to100: null, turn: 5.25, source: 'Škoda 110 R (1970) data' },
+  },
 ];
 
 export function rosterEngineId(car: RosterCar): string {

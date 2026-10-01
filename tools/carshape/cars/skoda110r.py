@@ -1,0 +1,52 @@
+# Škoda 110 R coupé (1970-80). Factory: 4155 x 1620 x 1340, wheelbase 2400, overhangs
+# 815/940, tracks 1280/1250, 155-14. Read off the factory drawing reprinted at
+# 3dcar.ru/blueprints/skoda/110r_coupe (all views, dimensioned), calibrated by the
+# wheelbase (260 px/m). A rear-engined fastback: a low bonnet with round lamps, a long
+# glass roof falling straight into the engine lid, air intakes behind the doors.
+CAR = {
+    'id': 'skoda110r',
+    'label': 'Škoda 110 R',
+    'kind': 'saloon',
+    'factory': {'length': 4.155, 'width': 1.62, 'height': 1.35, 'clearance': 0.175, 'wheelbase': 2.4,
+                'frontTrack': 1.28, 'rearTrack': 1.25, 'wheelRadius': 0.30, 'tyreWidth': 0.155, 'frontOverhang': 0.815},
+    'trimEnds': 0.08,
+    'deck': [[-1.9975, 0.80], [-1.85, 0.84], [-1.55, 0.87], [-1.09, 0.915], [-0.94, 0.95], [-0.5, 0.92],
+             [0.5, 0.93], [1.35, 0.98], [1.7, 0.90], [1.9975, 0.80]],
+    'belt': 0.92,
+    'cabin': [-0.94, -0.42, 0.70, 1.35],
+    'roof': [1.35, 1.315],
+    'screenTop': 1.30,
+    'topLine': [[-0.94, 0.965], [-0.7, 1.17], [-0.42, 1.34], [0.1, 1.35], [0.68, 1.32], [1.0, 1.17], [1.35, 0.995]],
+    'railLine': [[-0.94, 0.955], [-0.7, 1.14], [-0.42, 1.30], [0.1, 1.31], [0.68, 1.28], [1.0, 1.14], [1.35, 0.985]],
+    'crown': 0.018,
+    'widths': {'waist': 0.81, 'shoulder': 0.80, 'deckEdge': 0.78, 'glassDeck': 0.70, 'glass': 0.68,
+               'railDeck': 0.57, 'railPillar': 0.64, 'rail': 0.60, 'sill': 0.76},
+    'planFactor': [[-1.9975, 0.93], [-1.88, 0.98], [-1.75, 1.0], [1.8, 1.0], [1.9975, 0.95]],
+    'sill': [[-1.9975, 0.40], [-1.75, 0.32], [-1.5, 0.28], [1.4, 0.28], [1.75, 0.32], [1.9975, 0.36]],
+    'floor': [[-1.9975, 0.38], [-1.75, 0.23], [-1.5, 0.20], [1.4, 0.20], [1.75, 0.23], [1.9975, 0.34]],
+    'waistZ': 0.6,
+    'shoulderDrop': 0.06,
+    'shoulderRound': 0.18,
+    'windows': [[[-0.86, 0.92], [-0.42, 1.30], [0.33, 1.30], [0.33, 0.92]],
+                [[0.41, 0.925], [0.41, 1.29], [0.62, 1.25], [0.98, 0.96], [0.93, 0.925]]],
+    'arch': {'radiusFactor': 1.12, 'lift': 0.02, 'wellDepth': 0.3},
+    'parts': {
+        'headlamps': [[0.59, 0.63, 0.085]], 'bezel': 0.014,
+        'grille': {'halfWidth': 0.33, 'z': [0.60, 0.66], 'slats': 2},
+        'bumper': {'depth': 0.05, 'height': 0.06, 'standOff': 0.03, 'wrap': 0.25, 'halfWidth': 0.80,
+                   'zFront': 0.45, 'zRear': 0.46},
+        'sideVents': [[0.91, 1.30, 0.70, 0.87]],
+        'doorHandles': [[0.18, 0.80]],
+        'windowFrame': 0.012,
+        'lamps': [
+            {'node': 'front_blinker_left', 'material': 'IndicatorLights', 'end': 'front', 'shape': 'rect', 'x': 0.62, 'z': 0.46, 'w': 0.10, 'h': 0.05},
+            {'node': 'front_blinker_right', 'material': 'IndicatorLights', 'end': 'front', 'shape': 'rect', 'x': 0.62, 'z': 0.46, 'w': 0.10, 'h': 0.05},
+            {'node': 'taillights', 'material': 'TailLights', 'end': 'rear', 'shape': 'rect', 'x': 0.38, 'z': 0.66, 'w': 0.16, 'h': 0.07},
+            {'node': 'rear_blinker_left', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'rect', 'x': 0.55, 'z': 0.66, 'w': 0.14, 'h': 0.07},
+            {'node': 'rear_blinker_right', 'material': 'IndicatorLights', 'end': 'rear', 'shape': 'rect', 'x': 0.55, 'z': 0.66, 'w': 0.14, 'h': 0.07},
+            {'node': 'reverse_lights', 'material': 'ReverseLights', 'end': 'rear', 'shape': 'rect', 'x': 0.22, 'z': 0.66, 'w': 0.08, 'h': 0.07},
+        ],
+        'mirror': {'x': 0.84, 'y': -0.75, 'z': 0.98},
+        'wheel': {'style': 'hubcap', 'rimFactor': 0.62},
+    },
+}
