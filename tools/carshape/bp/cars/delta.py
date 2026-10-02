@@ -60,7 +60,7 @@ CAR = {
             {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.80, 0.63], [0.05, 0.10]], 'radius': 0.006,
              'material': 'IndicatorLights', 'height': 0.008, 'facingMin': 0.4, 'depthRange': [-2.0, -1.5]},
             {'view': 'top', 'rect': [[-1.25, 0.0], [0.45, 0.07]], 'radius': 0.015, 'mirror': False, 'material': 'grille', 'height': 0.004},
-            {'view': 'top', 'rect': [[-0.95, 0.24], [0.25, 0.09]], 'radius': 0.015, 'material': 'grille', 'height': 0.004},
+            {'view': 'top', 'rect': [[-1.20, 0.24], [0.25, 0.09]], 'radius': 0.015, 'material': 'grille', 'height': 0.004},
             # Tail: wedge lamps in the corners above, the small lamps below.
             {'view': 'rear', 'node': 'taillights', 'outline': [[0.47, 0.84], [0.60, 0.84], [0.64, 0.74], [0.47, 0.74]],
              'material': 'TailLights', 'height': 0.008, 'depthRange': [1.6, 2.0], 'facingMin': 0.1},

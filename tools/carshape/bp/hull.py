@@ -318,10 +318,25 @@ def build(car):
             return pl(tc[i]['z'], xs)
         f = (y - tc[i]['y']) / (tc[i + 1]['y'] - tc[i]['y'])
         return pl(tc[i]['z'], xs) * (1 - f) + pl(tc[i + 1]['z'], xs) * f
+    # Where the cabin starts and ends the body's top runs on from the deck outside it to
+    # the belt over `beltBlend`, not as a step: a belt above the bonnet's last height
+    # stood a ridge across the car at the screen's foot (and a dent where it was below).
+    cab_idx = np.nonzero(in_cabin)[0]
+    lower_tops = np.where(in_cabin, belt, top)
+    if len(cab_idx):
+        bb = hs.get('beltBlend', 0.20)
+        for edge, out in ((cab_idx[0], max(cab_idx[0] - 1, 0)), (cab_idx[-1], min(cab_idx[-1] + 1, len(ys) - 1))):
+            zt_out = top[out]
+            for j in cab_idx:
+                dist_ = abs(ys[j] - ys[edge])
+                if dist_ < bb:
+                    t_ = dist_ / bb
+                    t_ = t_ * t_ * (3 - 2 * t_)
+                    lower_tops[j] = zt_out + (belt[j] - zt_out) * t_ if zt_out < belt[j] + 0.1 else belt[j]
     for j, y in enumerate(ys):
         if d_side[:, j].max() <= -0.05:
             continue
-        lower_top = belt[j] if in_cabin[j] else top[j]
+        lower_top = lower_tops[j]
         xl = plan[j] * sec[:, j] / max(lower_ref[j], 1e-3)          # [z]
         if w_abs[j] > 0:
             xl = xl * (1 - w_abs[j]) + sec_abs[:, j] * w_abs[j]

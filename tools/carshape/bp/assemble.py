@@ -268,6 +268,7 @@ def plane_for(view, p, q):
 
 
 def cut(view, sign, poly, d):
+    _VIS_TREE.clear()
     # A depth range bounds the region as sharply as its outline does.
     dr = d.get('depthRange')
     if dr:
@@ -294,6 +295,9 @@ def cut(view, sign, poly, d):
         bmesh.ops.bisect_plane(bm, geom=geom, plane_co=pq[0], plane_no=pq[1], dist=1e-5)
 
 
+_VIS_TREE = {}
+
+
 def select(view, sign, poly, d, hole=None):
     V = VIEW[view]
     a_, b_ = V['a'], V['b']
@@ -302,8 +306,9 @@ def select(view, sign, poly, d, hole=None):
     if d.get('visible'):
         # Only what the view itself sees there: the first surface a ray along the view
         # meets (a sloping nose's lamps, not the bonnet top behind them).
-        tree = BVHTree.FromBMesh(bm)
-        look = -V['facing']
+        tree = _VIS_TREE.get('t') or BVHTree.FromBMesh(bm)
+        _VIS_TREE['t'] = tree
+        look = -(Vector((sign, 0, 0)) if view == 'side' else V['facing'])
         idx = {f: i for i, f in enumerate(bm.faces)}
     for f in candidates(view, sign, poly, d):
         c = f.calc_center_median()
@@ -504,9 +509,11 @@ for f in bm.faces:
     for ya, ra, za in ARCHES:
         dy, dz = c.y - ya, c.z - za
         inside_arch = (dz >= 0 and dy * dy + dz * dz < (ra - 0.006) ** 2) or (dz < 0 and abs(dy) < ra - 0.006)
-        if inside_arch and abs(f.normal.x) < 0.9 and f.material_index == SLOT['paint']:
+        # only the well's own walls: a face of the side that happens to sit inside the
+        # arch's radius stays paint (picked by centre it drew the lip as a staircase)
+        if inside_arch and abs(f.normal.x) < 0.6 and f.material_index == SLOT['paint']:
             f.material_index = SLOT['trim']
-        elif inside_arch and abs(c.x) < W / 2 - 0.03 and f.material_index == SLOT['paint']:
+        elif inside_arch and abs(c.x) < W / 2 - 0.10 and f.material_index == SLOT['paint']:
             f.material_index = SLOT['trim']
 
 # Painted regions in the shell itself: a second colour (roof, bonnet), or black.
@@ -536,7 +543,30 @@ def tag(view, sign, poly, d, node, mat, height, hole=None):
     # the face; the others show round it.
     # A tagged face remembers what it was under the patch (paint, black, a second
     # colour): slot TAG0 + 4 * tag + base.
-    for f in select(view, sign, poly, d, hole):
+    sel = select(view, sign, poly, d, hole)
+    # Stray slivers on a surface turning away (an indicator's corner over the wing's
+    # curve) are dropped: only pieces with a real share of the patch's area stay.
+    if len(sel) > 1:
+        sset = set(sel)
+        comps, seen = [], set()
+        for f0 in sel:
+            if f0 in seen:
+                continue
+            stack, comp = [f0], []
+            seen.add(f0)
+            while stack:
+                f1 = stack.pop()
+                comp.append(f1)
+                for e in f1.edges:
+                    for f2 in e.link_faces:
+                        if f2 in sset and f2 not in seen:
+                            seen.add(f2)
+                            stack.append(f2)
+            comps.append(comp)
+        areas = [sum(f.calc_area() for f in c_) for c_ in comps]
+        big = max(areas)
+        sel = [f for c_, a_ in zip(comps, areas) if a_ >= 0.2 * big for f in c_]
+    for f in sel:
         m_ = f.material_index
         if m_ == SLOT['glass']:
             continue
@@ -581,6 +611,18 @@ def decal_shapes():
         if ln in FRAME_LINES:
             continue
         pts = np.array(ln['points'], float)
+        if len(pts) > 2 and ln.get('width', 0.005) <= 0.008 and not ln.get('keep'):
+            # A shut line drawn point by point wobbles with the reading: each straight
+            # run between corners (turns over 25 degrees) is laid straight from its
+            # first point to its last.
+            keep_i = [0]
+            for i in range(1, len(pts) - 1):
+                e0, e1 = pts[i] - pts[i - 1], pts[i + 1] - pts[i]
+                c_ = np.dot(e0, e1) / max(np.linalg.norm(e0) * np.linalg.norm(e1), 1e-9)
+                if c_ < math.cos(math.radians(25)):
+                    keep_i.append(i)
+            keep_i.append(len(pts) - 1)
+            pts = pts[keep_i]
         w = ln.get('width', 0.005)
         for p, q in zip(pts, pts[1:]):
             e = q - p
@@ -591,6 +633,10 @@ def decal_shapes():
             # A thin strip must not run onto a surface turning away from the view: there it
             # would smear (a frame line slipping over the tumblehome, a shut line round a corner).
             seg.setdefault('facingMin', 0.45)
+            if ln['view'] == 'side' and not ln.get('drawn'):
+                # Thin lines along the side are cut cleanly where the side turns away
+                # and by what the side view sees, never torn across a fold.
+                seg = dict(seg, visible=True)
             for sign, poly in sides_of(seg):
                 out.append((ln['view'], sign, poly, seg, 'decal_trim', ln.get('material', 'rubber'), ln.get('height', 0.0015), None))
     return out
@@ -1088,32 +1134,36 @@ if wp:
     def on_glass(x_, y_):
         h_ = _skin.ray_cast(Vector((x_, y_, H + 0.5)), Vector((0, 0, -1)), 3.0)
         return h_[0] is not None and _mi[h_[2]] == SLOT['glass']
+    def glass_point(x_, y0_):
+        """The windscreen's surface a few cm up from its foot at x: walking back from
+        the nose along the centre of the car until the surface below is glass."""
+        for y_ in np.arange(y0_ - 0.5, y0_ + 0.8, 0.01):
+            h_ = _skin.ray_cast(Vector((x_, y_, H + 0.5)), Vector((0, 0, -1)), 3.0)
+            if h_[0] is not None and _mi[h_[2]] == SLOT['glass']:
+                h2 = _skin.ray_cast(Vector((x_, y_ + 0.05, H + 0.5)), Vector((0, 0, -1)), 3.0)
+                if h2[0] is not None and _mi[h2[2]] == SLOT['glass']:
+                    return h2[0], h2[1]
+                return None
+        return None
     for x0, x1, y, z in wp['arms']:
-        # parked a few centimetres up the glass from its foot, wherever the car file put
-        # them: found by walking back from the nose until the arm's middle is on glass
-        xm = (x0 + x1) / 2
-        for y_try in np.arange(y - 0.4, y + 0.6, 0.01):
-            if on_glass(xm, y_try):
-                y = y_try + 0.05
-                break
+        # each blade lies on the glass along its whole length, just above the foot
         pts = []
         for t in np.linspace(0, 1, 9):
-            x_ = x0 + (x1 - x0) * t
-            hit, nrm = skin_point((x_, y - 0.6, z + 0.6), (0, 0.6, -0.6))
-            if hit is None:
-                hit, nrm = skin_point((x_, y, H + 0.5), (0, 0, -1))
-            if hit is not None:
-                pts.append((hit, nrm))
+            g_ = glass_point(x0 + (x1 - x0) * t, y)
+            if g_ is not None:
+                pts.append(g_)
+        if len(pts) < 2:
+            continue
         for (pa, na), (pb, nb) in zip(pts, pts[1:]):
             n_ = (na + nb).normalized()
-            along = (pb - pa)
+            along = pb - pa
             if along.length < 1e-4:
                 continue
             xv = along.normalized()
             zv = (n_ - xv * n_.dot(xv)).normalized()
             yv = zv.cross(xv)
             rot = Matrix((xv, yv, zv)).transposed().to_4x4()
-            box(bm_, (pa + pb) / 2 + zv * 0.008, (along.length + 0.004, 0.012, 0.008), 0, rot)
+            box(bm_, (pa + pb) / 2 + zv * 0.007, (along.length + 0.004, 0.012, 0.007), 0, rot)
     trim_parts.append(new_object('wipers', bm_, ['trim']))
 
 # The underside. The body's own bottom closes it flush along the sills; below it hang
@@ -1171,24 +1221,26 @@ if 0 < rear_bias < 1:
     pod(bm_, (-0.08, yA, R), 0.12, min(rf, 0.14), rf, 14)
     if ub.get('frame'):
         disc(bm_, (0, yA, R), (1, 0, 0), 0.04, 2 * inner, segments=12)
-# The exhaust: a pipe along under the floor from the engine to a silencer hung
-# ahead of the rear axle (behind it, across the tail, on a rear-engined car). When
-# nothing else reaches the clearance (no live axle), the silencer's bottom does.
+# The exhaust: a slim pipe along under the floor to a flat silencer tucked under the
+# middle of the floor ahead of the rear axle (under the engine on a rear-engined car),
+# out of sight from the side. When nothing else reaches the clearance (no live axle),
+# the silencer's bottom does, a flat pan rather than a hanging can.
 z_low = C if not (live_rear or 0 < rear_bias < 1) else None
-if rear_engine:
-    ys = yB + 0.35
-    zs_ = (z_low if z_low is not None else floor_at(ys) - 0.12) + 0.06
-    pod(bm_, (0, ys, zs_), inner * 0.75, 0.08, 0.06, 12)
+y_sil = (yB + 0.30) if rear_engine else (yB - R - 0.30)
+z_floor = floor_at(y_sil)
+rz_ = 0.035
+zs_ = (z_low + rz_) if z_low is not None else max(z_floor - rz_ - 0.01, C + 0.05)
+if z_low is not None:
+    # a flat rounded pan reaching up into the floor, never a box hanging below it
+    hz = (z_floor + 0.03 - z_low) / 2
+    pod(bm_, (0, y_sil, z_low + hz), 0.22, 0.24, hz, 14)
 else:
-    y_sil = yB - R - 0.35
-    z_floor = floor_at(y_sil)
-    zs_ = (z_low + 0.065) if z_low is not None else max(z_floor - 0.08, C + 0.07)
-    pod(bm_, (x_ex, y_sil, zs_), 0.11, 0.26, 0.065, 12)
-    zp = min(floor_at((yA + y_sil) / 2) - 0.035, zs_ + 0.03)
-    tube(bm_, (x_ex * 0.6, yA + 0.15, zp + 0.02), (x_ex, y_sil - 0.24, zs_), 0.024)
-    # tail pipe out behind the silencer, under the tail
+    pod(bm_, (x_ex * 0.5, y_sil, zs_), 0.14, 0.22, rz_, 12)
+if not rear_engine:
+    zp = min(floor_at((yA + y_sil) / 2) - 0.03, zs_ + 0.02)
+    tube(bm_, (x_ex * 0.3, yA + 0.15, zp + 0.02), (x_ex * 0.5, y_sil - 0.2, zs_), 0.022)
     y_t = L / 2 - 0.15
-    tube(bm_, (x_ex, y_sil + 0.24, zs_), (x_ex + 0.1, y_t, max(zs_, floor_at(y_t) - 0.05)), 0.022)
+    tube(bm_, (x_ex * 0.5, y_sil + 0.2, zs_), (x_ex + 0.1, y_t, max(zs_, floor_at(y_t) - 0.04)), 0.02)
 if ub.get('frame'):
     # The chassis rails, tucked under the body from end to end, following its floor.
     xr = inner - 0.22
@@ -1266,9 +1318,27 @@ for sp in P.get('spares', []):
 # Extra hand-placed solid boxes (aerials, spare wheel carriers, roof racks...).
 for bx in P.get('boxes', []):
     bm_ = bmesh.new()
+    sx_, sy_, sz_ = bx['size']
+    rail = sy_ >= 0.6 and sx_ <= 0.08 and sz_ <= 0.06
     for s_ in ((1, -1) if bx.get('mirror', True) else (1,)):
         c = list(bx['c'])
         c[0] *= s_
+        if rail:
+            # A roof rail: a bar along the roof standing 3 cm off it on feet at its
+            # ends and middle, following the roof (a box set at one height floated).
+            ys_ = np.linspace(c[1] - sy_ / 2, c[1] + sy_ / 2, 13)
+            pts = []
+            for y_ in ys_:
+                hit, _n = skin_point((c[0], y_, H + 1.0), (0, 0, -1), 3.0)
+                if hit is not None:
+                    pts.append(Vector((c[0], y_, hit.z)))
+            for pa, pb in zip(pts, pts[1:]):
+                d_ = pb - pa
+                rot = Vector((0, 1, 0)).rotation_difference(d_.normalized()).to_matrix().to_4x4()
+                box(bm_, (pa + pb) / 2 + Vector((0, 0, 0.03 + sz_ / 2)), (sx_, d_.length + 0.002, sz_), 0, rot)
+            for pf in (pts[0], pts[len(pts) // 2], pts[-1]) if pts else ():
+                box(bm_, pf + Vector((0, 0, 0.018)), (sx_ * 1.2, 0.05, 0.04), 0)
+            continue
         box(bm_, c, bx['size'], 0)
     trim_parts.append(new_object('box', bm_, [bx.get('material', 'trim')]))
 
