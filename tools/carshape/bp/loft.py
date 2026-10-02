@@ -252,7 +252,86 @@ def traced_shell(spec):
     house = traced_rings(len(hy), t['houseSection'], t['belt'], t['roof'], t['glass'],
                          t.get('houseNose', [[0, h0], [9, h0]]), t.get('houseTail', t['tail']))
     return to_manifold(shell_from_rings(body)) + to_manifold(shell_from_rings(house)), \
-        [(y, {'sill': float(lin(t['sill'], y))}) for y in ys], [(y, {'roof': float(lin(t['roof'], y))}) for y in hy]
+        [(y, {'sill': float(lin(t['sill'], y))}) for y in ys], [(y, {'roof': float(lin(t['roof'], y))}) for y in hy], \
+        glazing(t, house)
+
+
+def glazing(t, house):
+    """The panes, from the glasshouse itself: each side window between its pillars,
+    from the belt up to the roof's edge (so it follows the screen pillar's slope where
+    it meets it), the screen and the back light from the glasshouse's own section
+    above the body, every one set inside a frame of the body. Outlines in the views'
+    coordinates, as the car files give them.
+      glazing: {gutter (the index in houseSection of the roof's edge), frame,
+                side: [[y0, y1], ...], screen: {y: [foot, head], frame},
+                back: {y: [head, foot], frame}}"""
+    from shapely.geometry import Polygon
+    g = t.get('glazing')
+    if not g:
+        return []
+    rings = [np.array(r) for r in house]
+    k = g['gutter']
+    edge = np.array(sorted((r[k][1], r[k][2]) for r in rings))
+    out = []
+
+    def inset(pts, f):
+        poly = Polygon(pts).buffer(-f, join_style=2)
+        if poly.is_empty:
+            return None
+        if poly.geom_type != 'Polygon':
+            poly = max(poly.geoms, key=lambda q: q.area)
+        return [[round(a, 4), round(b, 4)] for a, b in list(poly.exterior.coords)[:-1]]
+    belt = g.get('belt', [[p[0], p[1] - 0.01] for p in t['deck']])
+    for y0, y1 in g.get('side', []):
+        yy = np.linspace(y0, y1, 40)
+        zb = lin(belt, yy)
+        zt = np.interp(yy, edge[:, 0], edge[:, 1])
+        ok = zt > zb + 0.02
+        if ok.sum() < 2:
+            continue
+        pts = [(a, b) for a, b in zip(yy[ok], zb[ok])] + [(a, b) for a, b in zip(yy[ok][::-1], zt[ok][::-1])]
+        o = inset(pts, g.get('frame', 0.035))
+        if o:
+            out.append({'view': 'side', 'outline': o, 'facingMin': 0.3})
+
+    def section_above(y, z_floor):
+        r = min(rings, key=lambda r: abs(np.mean(r[:, 1]) - y))
+        half = [(x, z) for x, _, z in r if x >= -1e-9][: len(r) // 2 + 1]
+        half = [(x, max(z, z_floor)) for x, z in half]
+        return half + [(-x, z) for x, z in half[::-1]]
+    if g.get('houseMaterial'):
+        # A soft top: the whole glasshouse behind the screen's head, down to where it
+        # sits on the deck, in its own material (the panes keep theirs).
+        y_head = g['screen']['y'][1] if g.get('screen') else t['house'][0]
+        yy = np.linspace(y_head - 0.03, t['house'][1] + 0.1, 60)
+        pts = [(a, float(lin(t['deck'], a)) - 0.005) for a in yy] + [(yy[-1], 3.0), (yy[0], 3.0)]
+        out.append({'region': True, 'view': 'side', 'outline': [[round(a, 4), round(b, 4)] for a, b in pts],
+                    'material': g['houseMaterial'], 'facingMin': -1.0})
+    for key, view in (('screen', 'front'), ('back', 'rear')):
+        sc = g.get(key)
+        if not sc:
+            continue
+        ya, yb = sc['y']
+        z_floor = float(lin(belt, yb if key == 'back' else ya)) + sc.get('lift', 0.0)
+        # the full section: at the screen's head, at the back light's head; or a pane
+        # given outright in the view (a soft top's window sewn into the canvas), half
+        # [[x, z], ...] mirrored
+        if sc.get('outline'):
+            h_ = sc['outline']
+            o = [[a, b] for a, b in h_] + [[-a, b] for a, b in h_[::-1] if a > 0]
+        else:
+            o = inset(section_above(yb if key == 'screen' else ya, z_floor), sc.get('frame', 0.05))
+        if o:
+            lo_, hi_ = min(ya, yb), max(ya, yb)
+            out.append({'view': view, 'outline': o, 'mirror': False, 'depthRange': [lo_ - 0.04, hi_ + 0.04],
+                        'facingMin': sc.get('facingMin', 0.15)})
+            if sc.get('frameMaterial'):
+                # A frame in its own colour (a black screen surround): a ring round the pane.
+                outer = inset(section_above(yb if key == 'screen' else ya, z_floor), 0.005)
+                out.append({'frame': True, 'view': view, 'outline': outer, 'ring': sc.get('frame', 0.05) - 0.005,
+                            'mirror': False, 'material': sc['frameMaterial'], 'height': 0.003,
+                            'depthRange': [lo_ - 0.04, hi_ + 0.04], 'facingMin': sc.get('facingMin', 0.15)})
+    return out
 
 
 def build(car):
@@ -261,7 +340,7 @@ def build(car):
     L, W, R = F['length'], F['width'], F['wheelRadius']
     hs = spec.get('hull', {})
     if 'trace' in spec:
-        shell, body_rows, house_rows = traced_shell(spec)
+        shell, body_rows, house_rows, glass = traced_shell(spec)
     else:
         lo = spec['loft']
         body_rows = runs(lo['body'], ['sill', 'w', 'sh', 'top', 'crown', 'tumble', 'tuck', 'bev'], BODY_DEF)
@@ -300,6 +379,8 @@ def build(car):
     top = np.interp(ys, [y for y, _ in house_rows], [p['roof'] for _, p in house_rows], left=0, right=0)
     info = {'ys': ys.tolist(), 'sill': np.round(sill, 3).tolist(), 'top': np.round(top, 3).tolist(),
             'cabin': [house_rows[0][0], house_rows[-1][0]], 'loft': True}
+    if 'trace' in spec:
+        info['glass'] = glass
     info['bumperPaths'] = hull_mod.bumper_paths(mesh, spec, info, {})
     json.dump(info, open(os.path.join(out, 'hull.json'), 'w'))
     print(f'LOFT {car}: {len(mesh.faces)} faces, volume {mesh.volume:.3f} m3, '

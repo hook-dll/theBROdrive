@@ -54,34 +54,31 @@ CAR = {
         'roof': [[-0.70, 0.70], [-0.675, 0.80], [-0.03, 1.13], [0.15, 1.23], [0.50, 1.22], [0.70, 1.15], [0.90, 0.98],
                  [1.05, 0.86], [1.12, 0.80], [1.15, 0.72]],
         'glass': [[-0.70, 0.70], [0.0, 0.72], [0.6, 0.74], [1.0, 0.70], [1.15, 0.66]],
+        # The door's window up under the hood's edge; the screen in its black frame; the
+        # hood's small plastic back light.
+        'glazing': {'gutter': 5, 'frame': 0.03, 'houseMaterial': 'trim', 'belt': [[-0.9, 0.755], [1.2, 0.755]],
+                    'side': [[-0.66, 0.42]],
+                    'screen': {'y': [-0.675, -0.03], 'frame': 0.045, 'lift': 0.045, 'frameMaterial': 'trim'},
+                    'back': {'y': [0.70, 1.05], 'outline': [[0.0, 1.10], [0.36, 1.095], [0.38, 1.07], [0.40, 0.93], [0.37, 0.91], [0.0, 0.91]],
+                             'facingMin': 0.02}},
     },
     'parts': {
         'underbody': {'rearBias': 1},
         'bodySmoothDeg': 40,
-        'glass': [
-            {'view': 'side', 'outline': [[-0.40, 0.80], [-0.12, 1.10], [0.40, 1.12], [0.44, 0.80]], 'facingMin': 0.3},
-            {'view': 'front', 'outline': [[0.0, 1.12], [0.44, 1.115], [0.48, 1.09], [0.58, 0.86], [0.56, 0.84], [0.0, 0.84]],
-             'depthRange': [-0.9, -0.05], 'facingMin': 0.25},
-            {'view': 'rear', 'outline': [[0.0, 1.10], [0.36, 1.095], [0.38, 1.07], [0.40, 0.93], [0.37, 0.91], [0.0, 0.91]],
-             'depthRange': [0.6, 1.2], 'facingMin': 0.02, 'fit': False},
-        ],
-        # The soft top: black canvas over the cabin.
-        'regions': [
-            {'view': 'top', 'rect': [[0.47, 0.0], [1.28, 1.6]], 'radius': 0.001, 'mirror': False, 'facingMin': 0.05,
-             'depthRange': [0.95, 1.5]},
-            {'view': 'side', 'outline': [[-0.13, 1.10], [-0.06, 1.30], [1.15, 1.30], [1.15, 0.84], [0.45, 0.80], [0.45, 1.12]]},
-        ],
         'decals': [
             {'view': 'front', 'outline': [[0.0, 0.40], [0.20, 0.40], [0.28, 0.37], [0.30, 0.33], [0.27, 0.30], [0.20, 0.29], [0.0, 0.29]],
              'material': 'grille', 'height': 0.004, 'depthRange': [-2.1, -1.6]},
             {'view': 'front', 'rect': [[0.0, 0.405], [0.30, 0.10]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [-2.1, -1.6]},
-            {'view': 'front', 'node': 'headlights', 'rect': [[0.41, 0.585], [0.12, 0.05]], 'radius': 0.024,
-             'material': 'Headlights', 'height': 0.009, 'depthRange': [-2.1, -1.5]},
-            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.47, 0.585], [0.24, 0.055]], 'radius': 0.027,
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-2.1, -1.5]},
-            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.47, 0.585], [0.24, 0.055]], 'radius': 0.027,
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-2.1, -1.5]},
+            # The oval lamps in the bumper either side of the mouth (front view z .48-.53):
+            # clear, with the turn signal at their outer end; the headlamps themselves
+            # are the pop-ups, folded flush.
+            {'view': 'front', 'node': 'headlights', 'rect': [[0.45, 0.505], [0.24, 0.05]], 'radius': 0.025,
+             'material': 'Headlights', 'height': 0.008, 'depthRange': [-2.1, -1.6]},
+            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.59, 0.505], [0.05, 0.045]], 'radius': 0.02,
+             'material': 'IndicatorLights', 'height': 0.009, 'depthRange': [-2.1, -1.6]},
+            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.59, 0.505], [0.05, 0.045]], 'radius': 0.02,
+             'material': 'IndicatorLights', 'height': 0.009, 'depthRange': [-2.1, -1.6]},
             # The pop-up lamps lie folded flush in the bonnet: their lids' outline.
             {'view': 'top', 'rect': [[-1.42, 0.53], [0.30, 0.20]], 'radius': 0.03, 'material': 'paint', 'height': 0.004},
             {'view': 'side', 'node': 'front_blinker_left', 'rect': [[-1.62, 0.52], [0.10, 0.03]], 'radius': 0.012, 'material': 'IndicatorLights', 'height': 0.005},
@@ -105,7 +102,7 @@ CAR = {
             {'view': 'top', 'points': [[-1.90, 0.55], [-0.75, 0.62]], 'width': 0.005},
             {'view': 'rear', 'points': [[0.0, 0.81], [0.62, 0.81]], 'width': 0.005, 'depthRange': [1.5, 2.1]},
         ],
-        'mirror': {'y': -0.42, 'z': 0.88, 'reach': 0.93, 'w': 0.13, 'h': 0.08, 'shape': 'round', 'material': 'paint'},
+        'mirror': {'y': -0.45, 'z': 0.82, 'reach': 0.95, 'w': 0.14, 'h': 0.085, 'material': 'paint'},
         'handles': {'at': [[0.35, 0.69]], 'w': 0.10, 'material': 'chrome'},
         'wipers': {'arms': [[-0.5, -0.05, -0.68, 0.84], [0.05, 0.45, -0.68, 0.84]]},
         'wheel': {'style': 'alloy', 'spokes': 8, 'rimFactor': 0.68, 'spokeWidth': 0.35},

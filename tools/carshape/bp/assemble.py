@@ -43,6 +43,9 @@ P = spec.get('parts', {})
 # materials is dropped, whatever list it sits in.
 P = {k: [d for d in v if not (isinstance(d, dict) and d.get('material') in ('plate', 'plate_ink'))]
      if isinstance(v, list) else v for k, v in P.items()}
+# Frames a traced glasshouse puts round its panes are decals like any other.
+P['decals'] = P.get('decals', []) + [{k: v for k, v in g.items() if k != 'frame'}
+                                     for g in info.get('glass', []) if g.get('frame')]
 L, W, H, R = F['length'], F['width'], F['height'], F['wheelRadius']
 AXLES = [(-L / 2 + F['frontOverhang'], F['frontTrack']),
          (-L / 2 + F['frontOverhang'] + F['wheelbase'], F['rearTrack'])]
@@ -301,7 +304,12 @@ def select(view, sign, poly, d, hole=None):
 
 
 # ---- glass: cut into the shell ------------------------------------------------------
-GL = P.get('glass', [])
+# A traced body's panes come from its own glasshouse (loft.glazing); a car file can
+# add to them.
+GL = ([g for g in info['glass'] if not (g.get('frame') or g.get('region'))] + P.get('glassExtra', [])) \
+    if info.get('glass') else P.get('glass', [])
+P['regions'] = P.get('regions', []) + [{k: v for k, v in g.items() if k != 'region'}
+                                       for g in info.get('glass', []) if g.get('region')]
 glass_faces = set()
 
 
@@ -785,21 +793,49 @@ for node, (b_, mats) in LAMP_SOLID.items():
     else:
         part_objects[node] = new_object(node, b_, mats)
 
-# Mirrors: an arm off the door and a head, at {y, z, x (outer edge), shape}.
+# Mirrors: {y, z (where the arm leaves the door, the window's front corner), reach (the
+# head's outer edge), w, h, shape: rect|round, material (the housing)}. A sail on the
+# door, a short arm, and a housing drawn out 6 cm and tapering forward, its glass set
+# into the back.
+def mirror_head(bm_, c, w_, h_, d_, shape, s_):
+    """Housing (slot 0) round c, its back face (+y) holding the glass (slot 1)."""
+    if shape == 'round':
+        ring = circle((0, 0), w_ / 2, 20)
+    else:
+        ring = rounded_rect((0, 0), w_, h_, min(w_, h_) * 0.32, 4)
+    n = len(ring)
+    rows = []
+    for yo, k in ((-d_ / 2, 0.82), (d_ * 0.1, 1.0), (d_ / 2, 1.0)):
+        rows.append([bm_.verts.new((c[0] + a * k, c[1] + yo, c[2] + b * k)) for a, b in ring])
+    glass = [bm_.verts.new((c[0] + a * 0.86, c[1] + d_ / 2 - 0.004, c[2] + b * 0.86)) for a, b in ring]
+    for r0, r1 in zip(rows, rows[1:]):
+        for i in range(n):
+            bm_.faces.new((r0[i], r0[(i + 1) % n], r1[(i + 1) % n], r1[i]))
+    for i in range(n):
+        f = bm_.faces.new((rows[-1][i], rows[-1][(i + 1) % n], glass[(i + 1) % n], glass[i]))
+    bm_.faces.new(rows[0][::-1])
+    f = bm_.faces.new(glass)
+    f.material_index = 1
+
+
 m = P.get('mirror')
 if m:
     bm_ = bmesh.new()
+    w_, h_ = m.get('w', 0.13), m.get('h', 0.08)
     for s_ in m.get('sides', (1, -1)):
         hit, nrm = skin_point((s_ * 1.5, m['y'], m['z']), (-s_, 0, 0))
         x0 = hit.x if hit else s_ * W / 2
         x1 = s_ * m.get('reach', abs(x0) + 0.13)
-        w_, h_ = m.get('w', 0.13), m.get('h', 0.08)
-        box(bm_, ((x0 + x1) / 2, m['y'] + 0.02, m['z'] - h_ * 0.25), (abs(x1 - x0), 0.03, 0.025), 0)
-        if m.get('shape', 'rect') == 'round':
-            disc(bm_, (x1 - s_ * w_ / 2, m['y'], m['z']), (0, -1, 0), w_ / 2, 0.05, 16, 0, w_ / 2 * 0.85)
-        else:
-            box(bm_, (x1 - s_ * w_ / 2, m['y'], m['z']), (w_, 0.06, h_), 0)
-    trim_parts.append(new_object('mirrors', bm_, [m.get('material', 'trim')]))
+        xc = x1 - s_ * w_ / 2
+        # the sail, lying on the door
+        box(bm_, (x0 + s_ * 0.004, m['y'] + 0.01, m['z']), (0.016, 0.09, 0.06), 0)
+        # the arm, from the sail to the housing's inner edge, under its middle
+        arm = abs((xc - s_ * w_ * 0.3) - x0)
+        if arm > 0.005:
+            box(bm_, (x0 + s_ * arm / 2, m['y'] + 0.015, m['z'] - h_ * 0.15), (arm, 0.035, min(0.03, h_ * 0.4)), 0)
+        mirror_head(bm_, (xc, m['y'] + 0.02, m['z']), w_, h_, 0.06, m.get('shape', 'rect'), s_)
+    bmesh.ops.recalc_face_normals(bm_, faces=bm_.faces)
+    trim_parts.append(new_object('mirrors', bm_, [m.get('material', 'trim'), 'chrome']))
 
 # Door handles: {y, z, w} on the door's skin.
 hd = P.get('handles')
