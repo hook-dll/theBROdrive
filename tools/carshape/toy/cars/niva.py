@@ -12,15 +12,15 @@ TOY = {
     ],
     # screen foot, screen head, door glass, B pillar, quarter glass, C pillar, back light
     'house': [
-        {'y': -0.70, 'belt': 1.03, 'bw': 0.78, 'gutter': 1.045, 'rw': 0.77, 'roof': 1.05},
+        {'y': -0.70, 'belt': 1.03, 'bw': 0.78, 'gutter': 1.07, 'rw': 0.765, 'roof': 1.075},
         {'y': -0.25, 'belt': 1.03, 'bw': 0.78, 'gutter': 1.53, 'rw': 0.64, 'roof': 1.60},
         {'y': 0.42, 'belt': 1.03, 'bw': 0.78, 'gutter': 1.53, 'rw': 0.64, 'roof': 1.60},
         {'y': 0.51, 'belt': 1.03, 'bw': 0.78, 'gutter': 1.53, 'rw': 0.64, 'roof': 1.60},
         {'y': 1.34, 'belt': 1.03, 'bw': 0.78, 'gutter': 1.51, 'rw': 0.64, 'roof': 1.56},
         {'y': 1.45, 'belt': 1.03, 'bw': 0.775, 'gutter': 1.47, 'rw': 0.63, 'roof': 1.52},
-        {'y': 1.72, 'belt': 1.03, 'bw': 0.76, 'gutter': 1.04, 'rw': 0.75, 'roof': 1.045},
+        {'y': 1.72, 'belt': 1.03, 'bw': 0.76, 'gutter': 1.07, 'rw': 0.745, 'roof': 1.075},
     ],
-    'windows': [[-0.25, 0.42], [0.51, 1.34]],
+    'windows': [[-0.70, 0.42], [0.51, 1.34]],
     'frame': 0.03,
     'screenFrame': 0.045,
     'backLightFrame': 0.07,

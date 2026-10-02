@@ -265,6 +265,25 @@ if not arch.get('none'):
 # ---- glasshouse ---------------------------------------------------------------------
 HKEYS = ['belt', 'bw', 'gutter', 'rw', 'roof']
 hs = sorted(T['house'], key=lambda s: s['y'])
+# The screen's and the back light's top edges lie at the roof's edge, like the side
+# windows': the station at the screen's head is flat across at gutter height (its
+# header), and a station a little behind it carries the roof's full crown; the same at
+# the back light's head.
+if T.get('headers', True):
+    def header(i, j):
+        global fr
+        a_, b_ = hs[i], hs[j]
+        gap = abs(b_['y'] - a_['y'])
+        crown = dict(a_, y=a_['y'] + math.copysign(min(0.12, gap / 2), b_['y'] - a_['y']))
+        # the pane's top edge then lands about where the doors' shut lines run, just
+        # under the roof's edge
+        hs[i] = dict(a_, roof=a_['gutter'] + fr - 0.012)
+        return crown
+    fr = T.get('screenFrame', 0.05)
+    front_crown = header(1, 2)
+    fr = T.get('backLightFrame', 0.06)
+    back_crown = header(len(hs) - 2, len(hs) - 3)
+    hs = sorted(hs + [front_crown, back_crown], key=lambda s: s['y'])
 
 
 def house_half(p):
@@ -293,7 +312,8 @@ def window(faces, f, depth=-0.012):
     faces = [x for x in faces if x is not None and x.is_valid]
     if not faces:
         return
-    bmesh.ops.inset_region(hb, faces=faces, thickness=f, depth=0.0, use_even_offset=True)
+    frame_mat = faces[0].material_index
+    bmesh.ops.inset_region(hb, faces=faces, thickness=f, depth=0.0, use_even_offset=False)
     for x in faces:
         x.material_index = 9          # the opening, until its corners are turned
     region = set(faces)
@@ -309,15 +329,18 @@ def window(faces, f, depth=-0.012):
             corners.append(v)
     rr = T.get('cornerRadius', 0.035)
     if corners:
-        bmesh.ops.bevel(hb, geom=corners, offset=rr, offset_type='OFFSET', segments=3, profile=0.5,
-                        affect='VERTICES', clamp_overlap=True)
+        r_ = bmesh.ops.bevel(hb, geom=corners, offset=rr, offset_type='OFFSET', segments=3, profile=0.5,
+                             affect='VERTICES', clamp_overlap=True)
+        # the rounding fills each corner of the opening with the frame
+        for x in r_['faces']:
+            x.material_index = frame_mat
     glass = [x for x in hb.faces if x.material_index == 9]
     for x in glass:
         x.material_index = 1
-    r = bmesh.ops.inset_region(hb, faces=glass, thickness=T.get('seal', 0.012), depth=0.0, use_even_offset=True)
+    r = bmesh.ops.inset_region(hb, faces=glass, thickness=T.get('seal', 0.008), depth=0.0, use_even_offset=False)
     for x in r['faces']:
         x.material_index = 4
-    bmesh.ops.inset_region(hb, faces=glass, thickness=0.001, depth=depth, use_even_offset=True)
+    bmesh.ops.inset_region(hb, faces=glass, thickness=0.001, depth=depth, use_even_offset=False)
 
 
 def inset(faces, f, depth=-0.012):
@@ -438,18 +461,77 @@ for d in T.get('ends', []):
         else:
             box(b, (x, y - sgn * dep / 2, d['z']), (d['w'], dep, d['h']), mi)
 
-# Bumpers: {end, z0, z1, depth, proud, wrap, material, half (half-width)}
+# Bumpers, after the soviet pack's: a blade swept round the body's end at its height,
+# a faceted section (its top bevelled back), wrapping the corners and tapering off along
+# the sides; overriders standing on it. {end, z0, z1, depth, proud, wrap, material,
+# overriders: [x, ...], bevel}
+def sweep(b, path, prof, mi, taper=None):
+    """A closed-section tube along path [(x, y, z)], prof [(across, up)] about the path,
+    across pointing outward from the body; capped."""
+    rings = []
+    for i, p in enumerate(path):
+        a_ = Vector(path[max(i - 1, 0)])
+        c_ = Vector(path[min(i + 1, len(path) - 1)])
+        t_ = (c_ - a_).normalized()
+        up = Vector((0, 0, 1))
+        out = t_.cross(up).normalized()
+        if out.dot(Vector((p[0], p[1], 0))) < 0:
+            out = -out
+        k = taper[i] if taper else 1.0
+        rings.append([b.verts.new(Vector(p) + out * (u * k) + up * (v * (0.5 + 0.5 * k))) for u, v in prof])
+    n_ = len(prof)
+    for r0, r1 in zip(rings, rings[1:]):
+        for j in range(n_):
+            f = b.faces.new((r0[j], r0[(j + 1) % n_], r1[(j + 1) % n_], r1[j]))
+            f.material_index = mi
+    for r in (rings[0], rings[-1][::-1]):
+        f = b.faces.new(r[::-1])
+        f.material_index = mi
+
+
 for d in T.get('bumpers', []):
-    b, mi = slot('trim', d.get('material', 'chrome'))
+    b, mi = slot('bumpers', d.get('material', 'chrome'))
     sgn = -1 if d['end'] == 'front' else 1
     zc, h = (d['z0'] + d['z1']) / 2, d['z1'] - d['z0']
-    y = end_y(d['end'], 0, zc) + sgn * d.get('proud', 0.03)
+    dep, pr = d.get('depth', 0.07), d.get('proud', 0.03)
     hw = d.get('half', W / 2 - 0.02)
-    dep = d.get('depth', 0.07)
-    box(b, (0, y - sgn * dep / 2, zc), (2 * hw, dep, h), mi)
-    wr = d.get('wrap', 0.12)
-    for s_ in (1, -1):
-        box(b, (s_ * (hw - dep / 2), y - sgn * (wr / 2), zc), (dep, wr, h), mi)
+    # Round the end: the skin's own outline at the bumper's height, stood off it.
+    path = []
+    xs_ = [hw * math.sin(math.radians(a_)) for a_ in range(-90, 91, 6)]
+    if d.get('bow') is not None:
+        # A bar standing clear of the body on its brackets (the Beetle's): straight
+        # across with a gentle bow, out from the body's furthest point.
+        ys_hit = [skin_hit((x, sgn * 4.0, zc), (0, -sgn, 0)) for x in xs_]
+        y_far = max((sgn * h_[0].y for h_ in ys_hit if h_ is not None), default=sgn * end_y(d['end'], 0, zc)) * sgn
+        for x in xs_:
+            u_ = x / hw
+            path.append((x, y_far + sgn * (pr + dep / 2 + d['bow'] * (1 - u_ * u_)), zc))
+    else:
+        for x in xs_:
+            hit = skin_hit((x, sgn * 4.0, zc), (0, -sgn, 0))
+            y_ = hit[0].y if hit is not None else end_y(d['end'], abs(x), zc)
+            path.append((x, y_ + sgn * (pr + dep / 2), zc))
+    # Along the sides, back from the corners.
+    wr = d.get('wrap', 0.14)
+    for s_ in ((1, -1) if wr > 0 else ()):
+        yc_ = path[-1 if s_ > 0 else 0][1]
+        ext = []
+        for i in range(1, 6):
+            y_ = yc_ - sgn * wr * i / 5
+            x_ = skin_x(y_, zc) + pr * 0.6 + dep / 2
+            ext.append((s_ * min(x_, W / 2 + 0.01), y_, zc))
+        path = path + ext if s_ > 0 else ext[::-1] + path
+    bv = d.get('bevel', 0.35)
+    prof = [(-dep / 2, -h / 2), (dep / 2 * 0.7, -h / 2), (dep / 2, -h / 2 * 0.5), (dep / 2, h / 2 * (1 - bv)),
+            (dep / 2 * (1 - bv), h / 2), (-dep / 2, h / 2)]
+    nn = len(path)
+    taper = [min(1.0, 0.45 + 0.55 * min(i, nn - 1 - i) / 4) for i in range(nn)]
+    sweep(b, path, prof, mi, taper)
+    for ox in d.get('overriders', []):
+        for s_ in (1, -1):
+            hit = skin_hit((s_ * ox, sgn * 4.0, zc), (0, -sgn, 0))
+            y_ = (hit[0].y if hit is not None else end_y(d['end'], ox, zc)) + sgn * (pr + dep + 0.01)
+            cyl(b, (s_ * ox, y_, zc + h * 0.6), (0, 0, 1), 0.035, h * 2.4, 8, mi, 0.025)
 
 # Side pieces on the flanks: {y, z, w (along), h, proud, material, node}: handles,
 # side lamps, mouldings.
@@ -476,7 +558,7 @@ for d in T.get('flank', []):
 # Doors: the shut line all the way round, as a thin dark strip standing on the skin: up
 # the front edge, along under the roof's edge (so up the screen pillar where the door
 # reaches it), down the back edge and along the bottom. {y0, y1, z0}
-def ribbon(b, mi, path, width=0.007, proud=0.002, step=0.03):
+def ribbon(b, mi, path, width=0.005, proud=0.0015, step=0.03):
     """A strip along a path of (y, z) on the skin, both sides."""
     pts = []
     for (y0, z0), (y1, z1) in zip(path, path[1:]):
