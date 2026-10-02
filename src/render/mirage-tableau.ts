@@ -35,6 +35,13 @@ const ROOF_SINK_M = 0.3;
 const MAX_SHIPS = 64;
 
 /**
+ * White (no tint), for the instance colours pre-created at construction. Every mesh here
+ * is coloured per instance (`put` calls `setColorAt`), so the material would otherwise
+ * compile a second, USE_INSTANCING_COLOR program the first time an encounter places.
+ */
+const _instanceWhite = new THREE.Color(1, 1, 1);
+
+/**
  * Nearest a wreck may ground itself to the asphalt, and how far the field reaches out.
  *
  * A hull is up to seventy metres of ship. Sat at the verge like a palm it is a wall the
@@ -664,6 +671,9 @@ export class MirageTableau {
       mesh.frustumCulled = false;
       mesh.castShadow = false;
       mesh.receiveShadow = false;
+      // Pre-create instanceColor so each material compiles with USE_INSTANCING_COLOR:
+      // the encounter's first `put` would otherwise flip the program mid-drive.
+      for (let i = 0; i < mesh.instanceMatrix.count; i++) mesh.setColorAt(i, _instanceWhite);
       this.root.add(mesh);
     }
     this.novelties = new NoveltyField(road, terrain, seed);

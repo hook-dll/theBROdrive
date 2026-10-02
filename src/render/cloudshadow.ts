@@ -371,9 +371,13 @@ export function cloudShadowFactorFromPan(
  * in metres on the fragment's own plane, narrow at the lamp and widening as it comes
  * over. A screen-space mirror streak was tried first; being one screen width top to
  * bottom, it read as a pillar of light standing down into the ground. Road deck only
- * (`WET_SHEEN`), only while wet, a uniform-bounded loop.
+ * (`WET_SHEEN`), dimmer and broader while dry, a uniform-bounded loop.
+ *
+ * The list is handed out by a `FadingSlotPool` in main.ts, to lamps that face the eye,
+ * nearest first, so a streak fades over when a nearer car takes its place instead of
+ * vanishing in one frame.
  */
-const WET_GLARE_MAX = 6;
+export const WET_GLARE_MAX = 6;
 
 /**
  * Written once and shared by every ground material. The literals come from the

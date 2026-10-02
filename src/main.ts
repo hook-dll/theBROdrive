@@ -31,10 +31,7 @@ import { WeaponController } from './items/weapons';
 import { LoosePartField } from './parts/loose';
 import { oilCapacity } from './parts/registry';
 import { TouchControls } from './core/touch';
-import {
-  loadCarModel,
-  warmCarModelInstances,
-} from './render/carmodel';
+import { loadCarModel } from './render/carmodel';
 import { preloadTrailerModel } from './render/trailermodel';
 import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
 import { Interaction } from './player/interaction';
@@ -57,8 +54,15 @@ import { roadTextures } from './render/roadtexture';
 import { WheelSpray } from './render/wheelspray';
 import { SandTyreTracks } from './render/tyretracks';
 import { ambientBeamGain, VehicleLightRig } from './render/vehiclelights';
-/** Projection passes over the lit cars, in slot priority order. */
-const BEAM_PASSES = ['front', 'rear'] as const;
+import { FadingSlotPool } from './render/slotpool';
+import { BEAM_GROUPS } from './vehicle/vehiclelamps';
+/**
+ * Seconds a lamp takes to fade into or out of a shared light pool when its slot is
+ * handed to another car. Long enough that a handover reads as a car's light growing
+ * or dimming, not as a switch; short enough that a nearer car's pool is not kept
+ * waiting behind a far one for more than a second and a half.
+ */
+const LAMP_HANDOVER_S = 0.75;
 import { ContactPatchField } from './render/contactpatches';
 import { ChunkStreamer } from './world/chunks';
 import { DesertTileStreamer } from './world/deserttiles';
@@ -83,7 +87,7 @@ import { WorldOrigin } from './world/origin';
 import { HazardIndex } from './world/hazards';
 import { PLAYER_FIELD_ID, RoadTraffic } from './world/traffic';
 import { Autopilot } from './vehicle/autopilot';
-import { advanceCloudShadows, beginWetGlare } from './render/cloudshadow';
+import { advanceCloudShadows, beginWetGlare, WET_GLARE_MAX } from './render/cloudshadow';
 import { advanceDesertGlitter, setDesertGroundArclength } from './world/terrainmesh';
 import { HeatHaze } from './render/heathaze';
 import { WeatherParticles } from './render/weatherparticles';
@@ -338,6 +342,10 @@ async function boot(): Promise<void> {
     world.state.settings.graphicsQuality,
     mobilePresentation,
   );
+  // Who holds the rig's spotlights, and the road's headlamp streaks, frame to frame:
+  // a slot is handed over by fading, never reassigned in one frame (render/slotpool.ts).
+  const beamPool = new FadingSlotPool(vehicleLights.lightCount, LAMP_HANDOVER_S);
+  const glarePool = new FadingSlotPool(WET_GLARE_MAX, LAMP_HANDOVER_S);
   // Contact shadows are not a night effect and are not gated on the light rig: they are
   // the only thing on screen that reports what each tyre is carrying, they are the one
   // shadow source that survives the cheapest graphics tier, and they cost one draw call.
@@ -372,13 +380,10 @@ async function boot(): Promise<void> {
   );
   const sky = new Sky(renderer.scene, renderer.fog, renderer.renderer, starField);
   await sky.waitForAssets();
-  // Warm only models already requested by the active set. Later models parse and
-  // compile on demand, before their first Vehicle instance is attached.
-  await warmCarModelInstances(renderer.renderer, renderer.scene, renderer.camera);
-  // And warm every POI building, for the same reason: building one costs 3.7 ms on a
-  // 5950X — more than the whole 3 ms streaming budget — and a first use happens while
-  // the player is driving past. Paid here, once, behind the loading cover, later
-  // placements are Object3D wrapping. See world/poistructures.ts.
+  // Warm every POI building: building one costs 3.7 ms on a 5950X — more than the
+  // whole 3 ms streaming budget — and a first use happens while the player is driving
+  // past. Paid here, once, behind the loading cover, later placements are Object3D
+  // wrapping. See world/poistructures.ts.
   warmPoiStructures();
   const inventory = new Inventory();
   // The pack mirrors itself into state on every structural change, so a save taken
@@ -639,7 +644,6 @@ async function boot(): Promise<void> {
         );
       }
     : undefined;
-  const modelWarmups = new Map<string, Promise<void>>();
   const materializeVehicle = (car: CarState): Promise<Vehicle> => {
     const existing = vehicles.get(car.id);
     if (existing) return Promise.resolve(existing);
@@ -649,12 +653,6 @@ async function boot(): Promise<void> {
     const promise = (async () => {
       const def = carModel(car.modelId);
       await loadCarModel(def.id);
-      let warmup = modelWarmups.get(def.id);
-      if (!warmup) {
-        warmup = warmCarModelInstances(renderer.renderer, renderer.scene, renderer.camera);
-        modelWarmups.set(def.id, warmup);
-      }
-      await warmup;
       const vehicle = new Vehicle(physics, world, car, renderer.scene, origin);
       vehicles.set(car.id, vehicle);
       return vehicle;
@@ -718,15 +716,7 @@ async function boot(): Promise<void> {
     origin,
     road,
     hazards,
-    async (modelId) => {
-      await loadCarModel(modelId);
-      let warmup = modelWarmups.get(modelId);
-      if (!warmup) {
-        warmup = warmCarModelInstances(renderer.renderer, renderer.scene, renderer.camera);
-        modelWarmups.set(modelId, warmup);
-      }
-      await warmup;
-    },
+    loadCarModel,
     (x, z, radius) => {
       const radiusSquared = radius * radius;
       const anchor = activeWorldAnchor();
@@ -1262,6 +1252,8 @@ async function boot(): Promise<void> {
    * nothing for the common case of one lit car.
    */
   const litVehicles: Vehicle[] = [];
+  /** `ambientBeamGain` of each of `litVehicles`, 1 for the driven car. */
+  const litGains: number[] = [];
 
   // Reused radio pose. The radio keeps the last non-null source coordinates after
   // exit, while the listener follows the camera every rendered frame.
@@ -1987,15 +1979,20 @@ async function boot(): Promise<void> {
     //
     // This runs AFTER the environment factor above, because that factor is a
     // multiplier on the beam intensities the rig is about to read; projecting first
-    // spent a frame on yesterday's twilight. The offer order is the priority order
-    // only beams a full pool can refuse are the farthest ones.
+    // spent a frame on yesterday's twilight.
     //
-    // The driven car projects its beams as authored; everyone else's are faded by
-    // range (see `ambientBeamGain`). Full-strength ambient pools made a night with
-    // traffic read as glare, and arrived as a step: a car spawns 140 m ahead, or the
-    // pool stops refusing its lamp, and a bright ellipse existed where there had
-    // been none. Faded, the farthest offers are worth nothing anyway, so a refusal
-    // and a spawn are both invisible.
+    // The rig's spotlights are few, so they go through `beamPool`, which hands a slot
+    // from one car to another by fading rather than in one frame. The driven car's
+    // lamps are pinned at full strength, the tail glow included, since the chase
+    // camera looks straight at it. Everyone else's are faded by range
+    // (`ambientBeamGain`) and ask in order of range, all headlamps before any tail or
+    // reversing glow: a tail lamp's six-metre pool is never worth an oncoming car's
+    // light on the road.
+    //
+    // This order used to fill the rig directly, nearest first, headlamps before ANY
+    // rear lamp. With two other cars lit within 170 m the driven car's own tail glow
+    // never got a slot, and every change of order between two cars switched one pool
+    // off and another on at full strength, at 20-120 m.
     litVehicles.length = 0;
     for (const vehicle of vehicles.values()) {
       if (vehicle.hasLitLamps) litVehicles.push(vehicle);
@@ -2008,25 +2005,55 @@ async function boot(): Promise<void> {
           (b === driving ? -1 : b.root.position.distanceToSquared(cam)),
       );
     }
-    // Headlamps first, every car's, then the short rear pools: a tail lamp's glow is
-    // never worth an oncoming car's light on the road.
+    litGains.length = litVehicles.length;
+    for (let i = 0; i < litVehicles.length; i++) {
+      const vehicle = litVehicles[i];
+      litGains[i] = vehicle === driving ? 1 : ambientBeamGain(vehicle.root.position.distanceTo(cam));
+    }
+    // Merged (`vehicle !== driving || g !== 0`): one beam per lamp pair. Everything but
+    // the driven car's headlamps, whose two cones are how the road is read. Its tail and
+    // reversing glow are a few metres of light behind it, where two pools a metre apart
+    // are one; merged, the driven car holds three slots and leaves the rest to traffic.
+    beamPool.begin();
+    if (driving && driving.hasLitLamps) {
+      for (let g = 0; g < BEAM_GROUPS.length; g++) {
+        beamPool.request(driving, g, driving.beamCount(BEAM_GROUPS[g], g !== 0), true);
+      }
+    }
+    for (let g = 0; g < BEAM_GROUPS.length; g++) {
+      for (let i = 0; i < litVehicles.length; i++) {
+        const vehicle = litVehicles[i];
+        // A gain of zero asks for nothing: past the range fade the pool belongs to
+        // the beams near enough to be seen.
+        if (vehicle === driving || !(litGains[i] > 0)) continue;
+        beamPool.request(vehicle, g, vehicle.beamCount(BEAM_GROUPS[g], true), false);
+      }
+    }
+    beamPool.resolve(frameDt);
     vehicleLights.beginFrame();
-    for (const pass of BEAM_PASSES) {
-      for (const vehicle of litVehicles) {
-        vehicle.syncProjectedLights(
-          vehicleLights,
-          vehicle === driving ? 1 : ambientBeamGain(vehicle.root.position.distanceTo(cam)),
-          pass,
-        );
+    for (let i = 0; i < litVehicles.length; i++) {
+      const vehicle = litVehicles[i];
+      for (let g = 0; g < BEAM_GROUPS.length; g++) {
+        const share = beamPool.share(vehicle, g);
+        if (share > 0) {
+          vehicle.syncProjectedLights(vehicleLights, BEAM_GROUPS[g], litGains[i] * share, vehicle !== driving || g !== 0);
+        }
       }
     }
     vehicleLights.endFrame();
 
-    // Their headlamps in the wet road, nearest first. Not the driven car's own: from
-    // behind it, its lamps' mirror image lies under its own bonnet.
+    // Their headlamps in the road, nearest first, through the same kind of handover.
+    // Not the driven car's own: from behind it, its lamps' mirror image lies under its
+    // own bonnet. Nor any lamp pointing away from the eye, which draws no streak.
+    glarePool.begin();
+    for (const vehicle of litVehicles) {
+      if (vehicle !== driving) glarePool.request(vehicle, 0, vehicle.wetGlareLamps(cam), false);
+    }
+    glarePool.resolve(frameDt);
     beginWetGlare();
     for (const vehicle of litVehicles) {
-      if (vehicle !== driving) vehicle.offerWetGlare();
+      const share = glarePool.share(vehicle, 0);
+      if (share > 0) vehicle.offerWetGlare(share);
     }
 
     // Tyres are offered to the patch pool in the same order and for the same reason:

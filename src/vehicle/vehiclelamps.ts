@@ -14,11 +14,13 @@ import type { VehicleLightRig } from '../render/vehiclelights';
 import { addWetGlare } from '../render/cloudshadow';
 
 /**
- * Which of a vehicle's lamps a projection pass offers: the rig is filled headlamps
- * first for every car, then the short rear pools, so a tail lamp's six-metre glow
- * can never cost an oncoming car the light its headlamps lay on the road.
+ * A vehicle's lamps as the light pool sees them: each group is lit or dark as a
+ * whole and holds its slots as a whole (render/slotpool.ts). Headlamps, the running
+ * and stop glow, and the reversing lamps are separate because they switch
+ * separately; the index of a group in `BEAM_GROUPS` is its pool key.
  */
-export type BeamPass = 'all' | 'front' | 'rear';
+export const BEAM_GROUPS = ['front', 'tail', 'reverse'] as const;
+export type BeamGroup = (typeof BEAM_GROUPS)[number];
 import { makeCarGrimeMaterial, setCarGrime } from '../render/materials';
 import type { CarModelDef } from './carmodels';
 import { clamp } from './vehicletuning';
@@ -153,6 +155,48 @@ const REVERSE_LIGHT_BEAM = {
 } as const;
 /** 90 flashes per minute, with equal on/off halves. */
 const BLINKER_PERIOD_S = 2 / 3;
+
+/** An authored lamp lens: the node is named by a selector, or its material is. */
+function isLampLens(selectors: ReadonlySet<string>, mesh: THREE.Mesh, source: THREE.Material): boolean {
+  return selectors.has(mesh.name) || selectors.has(source.name);
+}
+
+/** The car's own copy of an authored lens material: grimed, and dark until a control lights it. */
+function lensMaterial(source: EmissiveMaterial): EmissiveMaterial {
+  const material = makeCarGrimeMaterial(source.clone());
+  material.emissive.setHex(0x000000);
+  material.emissiveIntensity = 0;
+  return material;
+}
+
+/**
+ * One mesh per lamp lens a Vehicle of `model` binds on `root`, over the lens's own
+ * geometry and carrying the material the Vehicle makes for it — what a shader warm-up
+ * has to compile, because a Vehicle makes its lens materials only as it is built.
+ * Never bound into `root` and never drawn (see carmodel.ts, program anchors).
+ */
+export function lampLensAnchors(model: CarModelDef, root: THREE.Object3D): THREE.Mesh[] {
+  const lights = model.lights;
+  if (!lights) return [];
+  const selectors = new Set([
+    ...lights.headlights,
+    ...lights.taillights,
+    ...(lights.brakeLights ?? []),
+    ...(lights.reverseLights ?? []),
+    ...(lights.leftBlinkers ?? []),
+    ...(lights.rightBlinkers ?? []),
+  ]);
+  const anchors: THREE.Mesh[] = [];
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    for (const source of Array.isArray(object.material) ? object.material : [object.material]) {
+      if (!isLampLens(selectors, object, source)) continue;
+      if (!(source instanceof THREE.MeshStandardMaterial) && !(source instanceof THREE.MeshPhongMaterial)) continue;
+      anchors.push(new THREE.Mesh(object.geometry, lensMaterial(source)));
+    }
+  });
+  return anchors;
+}
 
 /**
  * What the lamps need from the vehicle that owns them.
@@ -343,72 +387,110 @@ export class VehicleLamps {
     );
   }
 
-  /**
-   * Offers this vehicle's LIT lamps to the shared rig, projected from local mounts
-   * through the interpolated render pose. Called for every live vehicle, not just
-   * the driven one: a lamp that is on casts a beam whoever left it on, so a
-   * restored save and a car abandoned with its headlights burning both light the
-   * ground. Dark lamps are offered nothing and cost no slot.
-   *
-   * `gain` scales every beam this vehicle casts. The driven car is offered 1: its
-   * own beams are the only way to read the road at night and MUST NOT be touched.
-   * Ambient cars are offered a faded gain (see `ambientBeamGain`), which is both a
-   * comfort and a pop-in fix: a beam that is already near zero at the range where
-   * the pool refuses it, or where its car spawned, has nothing left to snap.
-   * A gain of zero claims no slot at all, so the pool always belongs to the beams
-   * near enough to be seen.
-   */
-  syncProjectedLights(rig: VehicleLightRig, gain: number, lamps: BeamPass = 'all'): void {
-    if (!(gain > 0)) return;
-    const front = lamps !== 'rear';
-    const rear = lamps !== 'front';
-    const headlightBeam = this.headlightMode === 'high' ? HEADLIGHT_HIGH : HEADLIGHT_LOW;
-    const headlightIntensity =
-      this.headlightMode === 'off'
-        ? 0
-        : headlightBeam.intensity * this.headlightEnvironmentFactor * gain * this.beamThroughGrime;
-    for (let i = 0; i < 2 && front; i++) {
-      this.projectBeam(
-        rig,
-        this.headlightMounts[i],
-        HEADLIGHT_BEAM_TINT,
-        headlightIntensity,
-        headlightBeam,
-        rig.headlightDistanceScale,
-      );
+  /** Mounts of one beam group, and the intensity it projects at full gain. */
+  private beamGroup(group: BeamGroup): { mounts: readonly VehicleBeamMount[]; intensity: number } {
+    const out = this.beamGroupScratch;
+    if (group === 'front') {
+      out.mounts = this.headlightMounts;
+      out.intensity =
+        this.headlightMode === 'off'
+          ? 0
+          : (this.headlightMode === 'high' ? HEADLIGHT_HIGH : HEADLIGHT_LOW).intensity *
+            this.headlightEnvironmentFactor;
+    } else if (group === 'tail') {
+      out.mounts = this.taillightMounts;
+      out.intensity = this.taillightBeamIntensity;
+    } else {
+      out.mounts = this.reverseLightMounts;
+      out.intensity = this.reverseLightBeamIntensity;
     }
-    for (let i = 0; i < 2 && rear; i++) {
-      this.projectBeam(
-        rig,
-        this.taillightMounts[i],
-        TAILLIGHT_EMISSIVE,
-        this.taillightBeamIntensity * gain * this.beamThroughGrime,
-        TAILLIGHT_BEAM,
-      );
-      this.projectBeam(
-        rig,
-        this.reverseLightMounts[i],
-        REVERSE_LIGHT_EMISSIVE,
-        this.reverseLightBeamIntensity * gain * this.beamThroughGrime,
-        REVERSE_LIGHT_BEAM,
-      );
+    out.intensity *= this.beamThroughGrime;
+    return out;
+  }
+  private readonly beamGroupScratch: { mounts: readonly VehicleBeamMount[]; intensity: number } = {
+    mounts: [],
+    intensity: 0,
+  };
+
+  /**
+   * Spotlights `group` projects while lit: one per lamp, or a single one for the
+   * pair when `merged`. Zero while it is dark, so a dark group asks the pool nothing.
+   */
+  beamCount(group: BeamGroup, merged: boolean): number {
+    const { mounts, intensity } = this.beamGroup(group);
+    if (mounts.length === 0 || !(intensity > 0)) return 0;
+    return merged ? 1 : mounts.length;
+  }
+
+  /**
+   * Offers one LIT lamp group to the shared rig, projected from local mounts through
+   * the interpolated render pose. Called for every live vehicle, not just the driven
+   * one: a lamp that is on casts a beam whoever left it on, so a restored save and a
+   * car abandoned with its headlights burning both light the ground. The caller has
+   * already secured `beamCount(group, merged)` slots for it (render/slotpool.ts).
+   *
+   * `gain` scales the beam. The driven car is offered 1: its own beams are the only
+   * way to read the road at night and MUST NOT be touched. Every other car is offered
+   * its range fade (`ambientBeamGain`) times its share of the pool.
+   *
+   * `merged` projects a lamp pair as ONE spotlight from between the two, carrying
+   * both lamps' light. Other cars are drawn that way: at the range their pools are
+   * seen from, two cones a metre apart are one pool of light, and the pool then
+   * carries twice as many cars as it would lamps.
+   */
+  syncProjectedLights(rig: VehicleLightRig, group: BeamGroup, gain: number, merged: boolean): void {
+    if (!(gain > 0)) return;
+    const { mounts, intensity } = this.beamGroup(group);
+    if (mounts.length === 0 || !(intensity > 0)) return;
+    const shape: ProjectedBeamShape =
+      group === 'front'
+        ? this.headlightMode === 'high'
+          ? HEADLIGHT_HIGH
+          : HEADLIGHT_LOW
+        : group === 'tail'
+          ? TAILLIGHT_BEAM
+          : REVERSE_LIGHT_BEAM;
+    const color =
+      group === 'front' ? HEADLIGHT_BEAM_TINT : group === 'tail' ? TAILLIGHT_EMISSIVE : REVERSE_LIGHT_EMISSIVE;
+    const distanceScale = group === 'front' ? rig.headlightDistanceScale : 1;
+    if (merged) {
+      this.projectBeam(rig, mounts, color, intensity * gain * mounts.length, shape, distanceScale);
+      return;
+    }
+    for (const mount of mounts) {
+      this.projectBeam(rig, mount, color, intensity * gain, shape, distanceScale);
     }
   }
 
   /**
-   * Offers the lit headlamps to the wet road's reflection streaks
-   * (`render/cloudshadow.ts`). Not range-faded like the projected beams: the streak
-   * of a lamp in the water is seen as far as the lamp itself is.
+   * Headlamps this car would lay in the road for an eye at `eye` (scene space): both,
+   * or none while they are off or point away from it. A lamp aimed away draws no
+   * streak at all (the shader's `aim`), so it must not hold one of the few streaks the
+   * road can draw while an oncoming car waits for it.
    */
-  offerWetGlare(): void {
+  wetGlareLamps(eye: THREE.Vector3): number {
+    if (this.headlightMode === 'off' || !(this.headlightEnvironmentFactor > 0)) return 0;
+    const root = this.ctx.rootGroup;
+    const forward = this.projectedLightTarget.set(0, 0, 1).applyQuaternion(root.quaternion);
+    const facing = forward.x * (eye.x - root.position.x) + forward.z * (eye.z - root.position.z);
+    return facing > 0 ? this.headlightMounts.length : 0;
+  }
+
+  /**
+   * Offers the lit headlamps to the road's reflection streaks (`render/cloudshadow.ts`),
+   * scaled by `share`, this car's hold on the streak list. Not range-faded like the
+   * projected beams: the streak of a lamp in the road is seen as far as the lamp is.
+   */
+  offerWetGlare(share: number): void {
     if (this.headlightMode === 'off') return;
     const strength =
-      (this.headlightMode === 'high' ? 1.4 : 1) * this.headlightEnvironmentFactor * this.beamThroughGrime;
+      (this.headlightMode === 'high' ? 1.4 : 1) *
+      this.headlightEnvironmentFactor *
+      this.beamThroughGrime *
+      share;
     if (!(strength > 0)) return;
     const q = this.ctx.rootGroup.quaternion;
-    for (let i = 0; i < 2; i++) {
-      const mount = this.headlightMounts[i];
-      if (!mount) continue;
+    for (const mount of this.headlightMounts) {
       const source = this.projectedLightSource.copy(mount.sourceLocal).applyQuaternion(q).add(this.ctx.rootGroup.position);
       const forward = this.projectedLightTarget
         .copy(mount.aimLocal)
@@ -419,23 +501,33 @@ export class VehicleLamps {
     }
   }
 
+  /** One spotlight from `mount`, or from between all of `mount`'s lamps. */
   private projectBeam(
     rig: VehicleLightRig,
-    mount: VehicleBeamMount | undefined,
+    mount: VehicleBeamMount | readonly VehicleBeamMount[],
     color: THREE.ColorRepresentation,
     intensity: number,
     shape: ProjectedBeamShape,
-    distanceScale = 1,
+    distanceScale: number,
   ): void {
-    if (!mount || !(intensity > 0)) return;
-    const sourceWorld = this.projectedLightSource
-      .copy(mount.sourceLocal)
-      .applyQuaternion(this.ctx.rootGroup.quaternion)
-      .add(this.ctx.rootGroup.position);
-    const targetWorld = this.projectedLightTarget
-      .copy(mount.aimLocal)
-      .applyQuaternion(this.ctx.rootGroup.quaternion)
-      .add(this.ctx.rootGroup.position);
+    const sourceWorld = this.projectedLightSource;
+    const targetWorld = this.projectedLightTarget;
+    if (Array.isArray(mount)) {
+      sourceWorld.set(0, 0, 0);
+      targetWorld.set(0, 0, 0);
+      for (const lamp of mount as readonly VehicleBeamMount[]) {
+        sourceWorld.add(lamp.sourceLocal);
+        targetWorld.add(lamp.aimLocal);
+      }
+      sourceWorld.multiplyScalar(1 / mount.length);
+      targetWorld.multiplyScalar(1 / mount.length);
+    } else {
+      const lamp = mount as VehicleBeamMount;
+      sourceWorld.copy(lamp.sourceLocal);
+      targetWorld.copy(lamp.aimLocal);
+    }
+    sourceWorld.applyQuaternion(this.ctx.rootGroup.quaternion).add(this.ctx.rootGroup.position);
+    targetWorld.applyQuaternion(this.ctx.rootGroup.quaternion).add(this.ctx.rootGroup.position);
     rig.addBeam(
       sourceWorld,
       targetWorld,
@@ -477,10 +569,9 @@ export class VehicleLamps {
     const meshes: THREE.Mesh[] = [];
     this.ctx.rootGroup.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return;
-      const nodeMatch = wanted.has(object.name);
       let matched = false;
       const bind = (source: THREE.Material): THREE.Material => {
-        if (!nodeMatch && !wanted.has(source.name)) return source;
+        if (!isLampLens(wanted, object, source)) return source;
         matched = true;
         if (
           !(source instanceof THREE.MeshStandardMaterial) &&
@@ -490,9 +581,7 @@ export class VehicleLamps {
             `Car model "${this.ctx.model.id}" lamp material cannot emit light: ${source.name}`,
           );
         }
-        const material = makeCarGrimeMaterial(source.clone());
-        material.emissive.setHex(0x000000);
-        material.emissiveIntensity = 0;
+        const material = lensMaterial(source);
         setCarGrime([material], this.grime);
         output.push(material);
         return material;

@@ -62,6 +62,8 @@ import { createWaterMaterial, WAVE_TILE_METRES, type WaterMaterial } from './wat
 /** Arclength between attempts at a lake. A genuine curiosity, not a landmark. */
 const MIN_GAP_M = 200_000;
 const GAP_RANGE_M = 100_000;
+/** White (no tint), for the fringe instance colours pre-created at construction. */
+const _fringeWhite = new THREE.Color(1, 1, 1);
 /**
  * Lateral band the search window is centred on.
  *
@@ -398,6 +400,10 @@ export class LakeWater {
       mesh.frustumCulled = false;
       mesh.castShadow = false;
       mesh.receiveShadow = false;
+      // Pre-create instanceColor so the card material compiles with
+      // USE_INSTANCING_COLOR. `fill`'s first `setColorAt` would otherwise flip the
+      // program, and a lake can arrive while the player is already driving.
+      for (let i = 0; i < mesh.instanceMatrix.count; i++) mesh.setColorAt(i, _fringeWhite);
       this.root.add(mesh);
     }
 

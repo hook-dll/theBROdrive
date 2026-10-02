@@ -596,20 +596,35 @@ export class Renderer {
 
   /**
    * Waits until both program variants used by the live two-pass frame are ready.
-   *
-   * The scene pass renders into `hazeTarget`, where Three disables renderer tone
-   * mapping and uses the working colour space. Compiling it with the default target
-   * instead builds a different canvas-output program; on a cold driver cache that
-   * left the real scene programs compiling after the loading cover disappeared.
    */
   async waitForFrameShaders(): Promise<void> {
+    const sceneReady = this.compileForScenePass(this.scene);
     const previousTarget = this.renderer.getRenderTarget();
     try {
-      this.renderer.setRenderTarget(this.hazeTarget);
-      const sceneReady = this.renderer.compileAsync(this.scene, this.camera);
       this.renderer.setRenderTarget(null);
       const postReady = this.renderer.compileAsync(this.hazeScene, this.hazeCamera);
       await Promise.all([sceneReady, postReady]);
+    } finally {
+      this.renderer.setRenderTarget(previousTarget);
+    }
+  }
+
+  /**
+   * Compiles `object`'s programs exactly as the scene pass will draw them — against
+   * this scene's lights, fog and environment, into `hazeTarget` — and resolves when
+   * every one has linked. `object` need not be in the scene.
+   *
+   * The target is the point. The scene pass renders into `hazeTarget`, where Three
+   * disables renderer tone mapping and uses the working colour space; compiled with
+   * the default target, the same material builds a canvas-output program the frame
+   * never draws, and the real one still links on first draw, on the main thread —
+   * on a cold driver cache, after the loading cover had gone.
+   */
+  compileForScenePass(object: THREE.Object3D): Promise<unknown> {
+    const previousTarget = this.renderer.getRenderTarget();
+    this.renderer.setRenderTarget(this.hazeTarget);
+    try {
+      return this.renderer.compileAsync(object, this.camera, this.scene);
     } finally {
       this.renderer.setRenderTarget(previousTarget);
     }

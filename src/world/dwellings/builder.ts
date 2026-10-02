@@ -125,6 +125,15 @@ const HEXA_FACES = [
 const DUST = new THREE.Color(0xb7a68a);
 /** The dark of damp sand and old splash at a wall's foot. */
 const SPLASH = new THREE.Color(0x5b4632);
+/**
+ * Skin deeper than this off its wall casts the sun's shadow (see `skinPositions`).
+ * A sun shadow texel is 7 cm (2048 over 144 m, config/graphics.json), so a piece no
+ * deeper than this throws a shadow under a texel wide: boards, frames, panels lose
+ * nothing by not casting, while hoods, sills, lintels and balconies keep theirs.
+ */
+const CASTING_SKIN_DEPTH = 0.08;
+/** Material index `geometry()` gives the flush skin's draw group. */
+const FLUSH_SKIN_GROUP = 2;
 
 const linearCache = new Map<number, THREE.Color>();
 function linear(hex: number): THREE.Color {
@@ -258,11 +267,24 @@ export class DwellingBuilder {
    * with a polygon offset (see `dwellingSkinMaterial`), because at 1-3 cm off the wall
    * the depth buffer cannot tell the two apart from a couple of hundred metres, and the
    * coloured panel flickered in and out of the white wall behind it.
+   *
+   * Two layers of it, because a skin piece is a closed solid whose back face lies IN the
+   * wall. The sun's shadow pass draws back faces, so wherever flush skin covered a
+   * facade the shadow map held the wall's own depth, and the wall beside every board,
+   * frame and panel — or the panel's own face — came out at its own depth: acne, a
+   * texel (7 cm) deep. Three's PCF jitters its taps per screen pixel, so it crawled as
+   * the camera moved, and the comic banding stepped it into hard pocks over sunlit
+   * walls. FLUSH skin (these arrays) therefore casts no shadow — a board's real shadow
+   * is narrower than a texel anyway — and only PROUD skin, deeper than
+   * `CASTING_SKIN_DEPTH` (hoods, sills, balconies), does.
    */
   private readonly skinPositions: number[] = [];
   private readonly skinNormals: number[] = [];
   private readonly skinColours: number[] = [];
-  private skinDepth = 0;
+  private readonly proudPositions: number[] = [];
+  private readonly proudNormals: number[] = [];
+  private readonly proudColours: number[] = [];
+  private skinLayer: 'shell' | 'flush' | 'proud' = 'shell';
   private readonly glassPositions: number[] = [];
   private readonly glassNormals: number[] = [];
   private matrix = new THREE.Matrix4();
@@ -326,10 +348,16 @@ export class DwellingBuilder {
       return;
     }
     const colour = this.shadeInto(hex, p.y, serial, _colour);
-    if (this.skinDepth > 0) {
+    if (this.skinLayer === 'flush') {
       this.skinPositions.push(p.x, p.y, p.z);
       this.skinNormals.push(n.x, n.y, n.z);
       this.skinColours.push(colour.r, colour.g, colour.b);
+      return;
+    }
+    if (this.skinLayer === 'proud') {
+      this.proudPositions.push(p.x, p.y, p.z);
+      this.proudNormals.push(n.x, n.y, n.z);
+      this.proudColours.push(colour.r, colour.g, colour.b);
       return;
     }
     this.bodyPositions.push(p.x, p.y, p.z);
@@ -337,13 +365,17 @@ export class DwellingBuilder {
     this.bodyColours.push(colour.r, colour.g, colour.b);
   }
 
-  /** Draws `draw` into the facade skin (see `skinPositions`). */
-  skin(draw: () => void): void {
-    this.skinDepth++;
+  /**
+   * Draws `draw` into the facade skin (see `skinPositions`): a piece standing `depth`
+   * metres off its wall, which decides whether it casts a shadow.
+   */
+  skin(draw: () => void, depth: number): void {
+    const outer = this.skinLayer;
+    this.skinLayer = depth > CASTING_SKIN_DEPTH ? 'proud' : 'flush';
     try {
       draw();
     } finally {
-      this.skinDepth--;
+      this.skinLayer = outer;
     }
   }
 
@@ -959,17 +991,20 @@ export class DwellingBuilder {
   /** Everything opaque that was drawn, as one vertex-coloured geometry. */
   geometry(): THREE.BufferGeometry {
     const body = new THREE.BufferGeometry();
-    // Shell first, skin after it, as two draw groups of one geometry: the shell drawn
-    // plain, the skin with a polygon offset (`dwellingGroup`). A consumer that ignores
-    // the groups — the collider, a single-material mirage — sees one closed body.
-    body.setAttribute('position', new THREE.Float32BufferAttribute([...this.bodyPositions, ...this.skinPositions], 3));
-    body.setAttribute('normal', new THREE.Float32BufferAttribute([...this.bodyNormals, ...this.skinNormals], 3));
-    body.setAttribute('color', new THREE.Float32BufferAttribute([...this.bodyColours, ...this.skinColours], 3));
+    // Shell, proud skin, flush skin, as draw groups of one geometry: the shell drawn
+    // plain, both skins with a polygon offset, the flush one casting nothing
+    // (`dwellingGroup`). A consumer that ignores the groups — the collider, a
+    // single-material mirage — sees one closed body.
+    body.setAttribute('position', new THREE.Float32BufferAttribute(this.bodyPositions.concat(this.proudPositions, this.skinPositions), 3));
+    body.setAttribute('normal', new THREE.Float32BufferAttribute(this.bodyNormals.concat(this.proudNormals, this.skinNormals), 3));
+    body.setAttribute('color', new THREE.Float32BufferAttribute(this.bodyColours.concat(this.proudColours, this.skinColours), 3));
     const shell = this.bodyPositions.length / 3;
-    const skin = this.skinPositions.length / 3;
-    if (skin > 0) {
+    const proud = this.proudPositions.length / 3;
+    const flush = this.skinPositions.length / 3;
+    if (proud + flush > 0) {
       body.addGroup(0, shell, 0);
-      body.addGroup(shell, skin, 1);
+      if (proud > 0) body.addGroup(shell, proud, 1);
+      if (flush > 0) body.addGroup(shell + proud, flush, FLUSH_SKIN_GROUP);
     }
     body.computeBoundingSphere();
     return body;
@@ -990,6 +1025,44 @@ export class DwellingBuilder {
   }
 }
 
+/** A body's two drawn parts: everything that casts, and the flush skin that does not. */
+interface DwellingBodyViews {
+  readonly casting: THREE.BufferGeometry;
+  readonly flush: THREE.BufferGeometry | null;
+}
+
+const bodyViews = new WeakMap<THREE.BufferGeometry, DwellingBodyViews>();
+
+/**
+ * Splits a body into the part that casts and the flush skin, which must not (see
+ * `skinPositions`). Shadow casting is per object, so the two need two meshes; both
+ * draw over the body's own attributes — one upload — and are made once per body.
+ */
+function dwellingBodyViews(body: THREE.BufferGeometry): DwellingBodyViews {
+  let views = bodyViews.get(body);
+  if (views) return views;
+  const flushGroup = body.groups.find((group) => group.materialIndex === FLUSH_SKIN_GROUP);
+  if (!flushGroup) {
+    views = { casting: body, flush: null };
+  } else {
+    const view = (): THREE.BufferGeometry => {
+      const geometry = new THREE.BufferGeometry();
+      for (const name in body.attributes) geometry.setAttribute(name, body.attributes[name]!);
+      geometry.boundingSphere = body.boundingSphere?.clone() ?? null;
+      return geometry;
+    };
+    const casting = view();
+    for (const group of body.groups) {
+      if (group !== flushGroup) casting.addGroup(group.start, group.count, group.materialIndex);
+    }
+    const flush = view();
+    flush.setDrawRange(flushGroup.start, flushGroup.count);
+    views = { casting, flush };
+  }
+  bodyViews.set(body, views);
+  return views;
+}
+
 /**
  * The drawn house over its two geometries. They are not owned by the group: the world
  * caches one pair per dwelling and wraps it again for every placement.
@@ -1001,14 +1074,22 @@ export function dwellingGroup(
 ): THREE.Group {
   const group = new THREE.Group();
   group.name = name;
+  const { casting, flush } = dwellingBodyViews(body);
   const bodyMesh = new THREE.Mesh(
-    body,
-    body.groups.length > 0 ? [dwellingBodyMaterial(), dwellingSkinMaterial()] : dwellingBodyMaterial(),
+    casting,
+    casting.groups.length > 0 ? [dwellingBodyMaterial(), dwellingSkinMaterial()] : dwellingBodyMaterial(),
   );
   bodyMesh.name = `${name}-body`;
   bodyMesh.castShadow = true;
   bodyMesh.receiveShadow = true;
   group.add(bodyMesh);
+  if (flush) {
+    const skinMesh = new THREE.Mesh(flush, dwellingSkinMaterial());
+    skinMesh.name = `${name}-skin`;
+    skinMesh.castShadow = false;
+    skinMesh.receiveShadow = true;
+    group.add(skinMesh);
+  }
   if (glass) {
     const glassMesh = new THREE.Mesh(glass, dwellingGlassMaterial());
     glassMesh.name = `${name}-glass`;
@@ -1061,12 +1142,12 @@ export class Facade {
         this.p(u0, v1, d0), this.p(u1, v1, d0), this.p(u1, v1, d1), this.p(u0, v1, d1),
       ],
       hex,
-    ));
+    ), Math.abs(d1 - d0));
   }
 
   /** Painted shape: any outline, raised `depth` off the wall (starting at `from`). */
   shape(outline: readonly P2[], hex: number, depth = 0.025, from = 0): void {
-    this.b.skin(() => this.drawShape(outline, hex, depth, from));
+    this.b.skin(() => this.drawShape(outline, hex, depth, from), depth);
   }
 
   private drawShape(outline: readonly P2[], hex: number, depth: number, from: number): void {
@@ -1183,7 +1264,7 @@ export class Facade {
           this.p(right + fw + 0.1, top - 0.12, 0.42), this.p(left - fw - 0.1, top - 0.12, 0.42),
         ],
         hood,
-      ));
+      ), 0.42);
     }
     if (style.shutters !== undefined) {
       const sw = w / 2 + fw * 0.5;

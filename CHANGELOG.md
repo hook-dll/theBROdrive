@@ -155,6 +155,54 @@
   its turn-over to the message and back reading as one card being turned in the hand
   (`src/render/held.ts`).
 
+### Fixed
+
+- OTHER CARS' LIGHT ON THE ROAD NO LONGER SWITCHES ON AND OFF, AND THE TAIL GLOW IS BACK.
+  The few car spotlights and road headlamp streaks went to the nearest lamps again every
+  frame. When two cars changed order, one lost its light and the other got it at full
+  strength in the same frame. On a night drive with standard traffic, pools of light
+  switched at 20-120 m and streaks at 70-170 m. The driven car's own tail glow came after
+  every other car's headlamps in the queue and never got a slot (0 of 5860 frames). A
+  `FadingSlotPool` (`render/slotpool.ts`) now keeps each slot with its lamp. When a nearer
+  car deserves the slot, the old lamp fades out over 0.75 s and the new one fades in. The
+  driven car's lamps are pinned, tail glow included. Other cars, and the driven car's
+  tail and reversing glow, project one merged beam per lamp pair. The driven car takes
+  three of the standard rung's six slots and three other cars keep their headlamps lit.
+  A streak only goes to a car whose lamps face the eye, so cars driving away no longer
+  hold streaks while oncoming cars wait. Measured after the change: the tail glow is on
+  in every frame, and other cars' beam gain moves at most 0.018 per frame. The one step
+  left is a streak dropping when an oncoming car is beside the camera; the shader's aim
+  term already draws it as nothing at that moment.
+- NO FREEZE WHEN A NEW CAR MODEL FIRST APPEARS. A model's paint, glass and lamp lenses
+  each linked their shader program on the car's first drawn frame, on the main thread —
+  on Windows' ANGLE/D3D11 hundreds of milliseconds per program, reported as 400-840 ms
+  of input delay from the first seconds of a drive while traffic brought models in. The
+  warm-up meant to prevent it compiled against the canvas instead of the scene pass's
+  render target (a different program, never drawn), never saw the lens materials a
+  Vehicle makes for itself, and re-cloned every model met so far for each new one. Now
+  `loadCarModel` resolves only once the model's PROGRAM ANCHOR — a never-drawn driven
+  body with its wheels and every pool wheel set, its lenses, a wreck shell and a courier
+  shell — is compiled for the live pass (`Renderer.compileForScenePass`); the boot
+  compiles the anchors of models loaded before it. The anchors are kept, so a variant
+  only traffic used no longer dies with the last despawned car and links again with the
+  next. Measured in the dev build by counting programs linked inside `render()` while
+  spawning seven models: GAZ-21 and Oka linked 2 and 3 before, none now (the Oka's 4 are
+  compiled while it loads).
+- NO FREEZE AT THE FIRST BROKEN PROP, LAKE, MIRAGE OR TRAILER. Each first drew a program
+  variant the boot never compiled: a broken prop's piece is a plain mesh with the
+  scatter's instanced material (`DebrisField` now holds one hidden piece per material);
+  lake fringe, distant-mirage rings and tableau meshes gained instance colours on their
+  first `setColorAt` (now created with the mesh); the mirage novelties' material and the
+  trailer body existed nowhere at boot (each now keeps one hidden instance in the scene).
+- NO MORE POCKED, CRAWLING SHADOWS ON SUNLIT HOUSE WALLS. Facade skin — siding boards,
+  frames, panels, stonework — is closed boxes whose back face lies in the wall, and the
+  sun's shadow pass draws back faces, so the shadow map held the wall's own depth
+  wherever skin covered it: acne a 7 cm texel deep beside every board and under every
+  panel, jittered per screen pixel by the PCF and stepped into hard blotches by the comic
+  banding. Skin no deeper than 8 cm (`CASTING_SKIN_DEPTH`) is now its own mesh that
+  casts nothing — its real shadow is under a texel wide — while hoods, sills, lintels and
+  balconies still cast. Same light, same banding; checked on the starting house's siding.
+
 ## 0.20.0 — 2026-09-29
 
 Two-wheel drive cars finally leave first gear on sand, a swapped engine brings its own gearing, rotting cars give up parts and cans, frantic drivers thread the traffic instead of parting it, and the desert night gets a little light, a little glitter and headlamps in the wet road.
