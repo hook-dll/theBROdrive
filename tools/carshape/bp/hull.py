@@ -94,9 +94,15 @@ def build(car):
         c = np.nonzero(side[i])[0]
         if len(c):
             nose[i], tail[i] = yf[c[0]], yf[c[-1]]
+    raw_ends = {}
     for end, ext in (('front', nose), ('rear', tail)):
         b = hs.get('bumpers', {}).get(end)
         ok = ~np.isnan(ext)
+        if b:
+            # Where the drawing's bumper stands: its outer face, for the bumper part.
+            band = (zf >= b['z'][0]) & (zf <= b['z'][1]) & ok
+            if band.any():
+                raw_ends[end] = float(ext[band].min() if end == 'front' else ext[band].max())
         ext[:] = np.interp(np.arange(len(zf)), np.nonzero(ok)[0], ext[ok])
         if b:
             ext[:] = fill_band(ext, zf, b['z'])
@@ -130,7 +136,9 @@ def build(car):
     plan = smooth_inner(plan, ys, hs.get('planSmooth', 0.08), 0.18)
     for band in hs.get('planBridge', []):
         plan = fill_band(plan, ys, band)
-    plan = np.minimum(plan, W / 2)
+    # Lamps and mouldings on the flanks stand a few mm proud: the shell stays inside
+    # the factory width by that much.
+    plan = np.minimum(plan, W / 2 - hs.get('skinInset', 0.008))
     if 'planOverride' in hs:
         m = (ys >= hs['planOverride'][0][0]) & (ys <= hs['planOverride'][-1][0])
         plan[m] = pl(hs['planOverride'], ys[m])
@@ -238,14 +246,14 @@ def build(car):
         'plan': [round(float(a), 3) for a in plan], 'belt': [round(float(a), 3) for a in belt],
         'sill': [round(float(a), 3) for a in sill], 'cabin': [c0, c1],
     }
-    info['bumperPaths'] = bumper_paths(mesh, spec, info)
+    info['bumperPaths'] = bumper_paths(mesh, spec, info, raw_ends)
     json.dump(info, open(os.path.join(out, 'hull.json'), 'w'))
     print(f'HULL {car}: {len(mesh.faces)} faces, volume {mesh.volume:.3f} m3, '
           f'extent {np.round(mesh.extents, 3).tolist()}')
     return spec, bp, info
 
 
-def bumper_paths(mesh, spec, info):
+def bumper_paths(mesh, spec, info, raw_ends):
     """Each bumper's centreline in plan: the shell's own outline at the bumper's height,
     stood off it, from one wrap end round the nose (or tail) to the other."""
     out = {}
@@ -268,10 +276,24 @@ def bumper_paths(mesh, spec, info):
         rel, ang = rel[order], ang[order]
         rad = np.hypot(rel[:, 0], rel[:, 1])
         a_s = np.linspace(ang.min(), ang.max(), 41)
-        r_s = np.interp(a_s, ang, rad) + b.get('standOff', 0.02) + b.get('depth', 0.06) / 2
+        # Stood off the shell so its face is where the drawing has it (the factory
+        # length includes the bumpers), but never closer than 5 mm.
+        dpt = b.get('depth', 0.06)
+        stand = b.get('standOff')
+        if stand is None and end in raw_ends:
+            stand = abs(y_end - raw_ends[end]) - dpt
+            if b.get('overriders'):
+                stand -= 0.015
+            print('BUMPER', end, 'shell', round(float(y_end), 3), 'drawn', round(raw_ends[end], 3), 'stand', round(stand, 3))
+        # (negative: the bar sits partly inside the shell, as a wrapped bumper does)
+        stand = max(-dpt / 2 + 0.01, 0.02 if stand is None else stand)
+        r_s = np.interp(a_s, ang, rad) + stand + dpt / 2
         path = np.stack([c[0] + r_s * np.sin(a_s), c[1] + sgn * r_s * np.cos(a_s)], axis=1)
         # Ends no further back than `wrap` from the face.
         path = path[np.abs(path[:, 1] - y_end) <= wrap + 1e-3]
+        # The wrap ends no wider than the body.
+        W = spec['factory']['width']
+        path[:, 0] = np.clip(path[:, 0], -(W / 2 - dpt / 2), W / 2 - dpt / 2)
         out[end] = [[round(float(x), 4), round(float(y), 4), round(zc, 4)] for x, y in path]
     return out
 

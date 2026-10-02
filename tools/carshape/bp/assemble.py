@@ -594,7 +594,8 @@ for end, b in P.get('bumpers', {}).items():
         x, w_, z0, z1 = ov
         y_face = min(p.y for p in pts) if end == 'front' else max(p.y for p in pts)
         for s_ in (1, -1):
-            box(bm_, (s_ * x, y_face - sgn * dpt / 2, (z0 + z1) / 2), (w_, 0.05, z1 - z0), 0)
+            # Through the bar, standing 15 mm proud of its face.
+            box(bm_, (s_ * x, y_face - sgn * 0.0075, (z0 + z1) / 2), (w_, dpt + 0.015, z1 - z0), 0)
         trim_parts.append(new_object('overriders_' + end, bm_, [b.get('material', 'chrome')]))
 
 
@@ -607,7 +608,7 @@ def skin_point(origin, direction, dist=3.0):
 m = P.get('mirror')
 if m:
     bm_ = bmesh.new()
-    for s_ in (1, -1):
+    for s_ in m.get('sides', (1, -1)):
         hit, nrm = skin_point((s_ * 1.5, m['y'], m['z']), (-s_, 0, 0))
         x0 = hit.x if hit else s_ * W / 2
         x1 = s_ * m.get('reach', abs(x0) + 0.13)
@@ -641,6 +642,17 @@ if wp:
         d = Vector((x1 - x0, 0, 0))
         box(bm_, ((x0 + x1) / 2, y, zc), (abs(x1 - x0), 0.014, 0.012), 0)
     trim_parts.append(new_object('wipers', bm_, ['trim']))
+
+# The floor pan: the car's lowest point is its published ground clearance (the
+# runtime scales the body by height minus clearance), so a dark pan runs between the
+# wheels from the clearance up into the shell.
+fl = P.get('floor', {})
+x_pan = min(F['frontTrack'], F['rearTrack']) / 2 - F['tyreWidth'] / 2 - 0.05
+bm_ = bmesh.new()
+y0p = fl.get('y', [AXLES[0][0] - R * 0.6, AXLES[1][0] + R * 0.6])
+z_top = min(info['sill']) + 0.05
+box(bm_, (0, (y0p[0] + y0p[1]) / 2, (F['clearance'] + z_top) / 2), (2 * fl.get('half', x_pan), y0p[1] - y0p[0], z_top - F['clearance']), 0)
+trim_parts.append(new_object('floor', bm_, ['trim']))
 
 # Extra hand-placed solid boxes (aerials, spare wheel carriers, roof racks...).
 for bx in P.get('boxes', []):
@@ -693,9 +705,12 @@ for name, (axle_y, track), side in (('wheel_fl', AXLES[0], 1), ('wheel_fr', AXLE
         if wheel.get('cap'):
             lathe(bm_, [(rim_r * 0.42, face_x), (rim_r * 0.4, face_x + s * 0.012), (0.0, face_x + s * 0.02)], 20, 2)
     elif st == 'hubcap':
-        # A full chrome hubcap over a black-painted rim.
-        lathe(bm_, [(rim_r, face_x), (rim_r * 0.96, face_x + s * 0.008), (rim_r * 0.6, face_x + s * 0.02),
-                    (rim_r * 0.25, face_x + s * 0.03), (0.0, face_x + s * 0.032)], 24, 2)
+        # A painted steel rim, its lip and a dished face, under a domed chrome cap.
+        cap = wheel.get('cap', 0.62)
+        lathe(bm_, [(rim_r, face_x), (rim_r * 0.94, face_x - s * 0.006), (rim_r * 0.86, face_x - s * 0.022),
+                    (rim_r * cap, face_x - s * 0.02)], 24, 1)
+        lathe(bm_, [(rim_r * cap, face_x - s * 0.02), (rim_r * cap * 0.98, face_x + s * 0.004),
+                    (rim_r * cap * 0.8, face_x + s * 0.016), (rim_r * cap * 0.4, face_x + s * 0.024), (0.0, face_x + s * 0.026)], 24, 2)
     elif st in ('alloy', 'spokes'):
         # Cast spokes: a shallow dish, `spokes` arms, a centre cap.
         lathe(bm_, [(rim_r, face_x), (rim_r * 0.94, face_x - s * 0.006), (rim_r * 0.9, face_x - s * 0.03),
@@ -767,6 +782,26 @@ if join:
     bpy.ops.object.join()
     join[0].name = 'trim'
     join[0].data.name = 'trim'
+
+# What the runtime will do to this body: it scales it to the factory width (measured
+# on the lower 55%), height minus clearance and length. All three should be ~1.
+lo = Vector((1e9, 1e9, 1e9))
+hi = -lo
+for o in scene.objects:
+    if o.type != 'MESH' or o.name.startswith('wheel_'):
+        continue
+    for v in o.data.vertices:
+        w = o.matrix_world @ v.co
+        lo = Vector(map(min, lo, w))
+        hi = Vector(map(max, hi, w))
+cut_z = lo.z + (hi.z - lo.z) * 0.55
+xs_low = [abs((o.matrix_world @ v.co).x) for o in scene.objects if o.type == 'MESH' and not o.name.startswith('wheel_')
+          and o.name != 'mirrors' for v in o.data.vertices if (o.matrix_world @ v.co).z <= cut_z]
+sx = W / (2 * max(xs_low))
+sz = (H - F['clearance']) / (hi.z - lo.z)
+sy = L / (hi.y - lo.y)
+print(f'SCALE {car}: width {sx:.3f} height {sz:.3f} length {sy:.3f} (bottom {lo.z:.3f}, top {hi.z:.3f}, '
+      f'nose {lo.y:.3f}, tail {hi.y:.3f})')
 
 faces = sum(len(o.data.polygons) for o in scene.objects if o.type == 'MESH')
 print(f'ASSEMBLE {car}: {faces} faces, ' + ', '.join(f'{o.name} {len(o.data.polygons)}' for o in scene.objects if o.type == 'MESH'))

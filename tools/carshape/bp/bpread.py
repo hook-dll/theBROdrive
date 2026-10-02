@@ -43,19 +43,33 @@ class View:
         mask = np.zeros((h + 4, w + 4), np.uint8)
         cv2.floodFill(flood, mask, (0, 0), 2)
         inside = (flood[1:-1, 1:-1] != 2).astype(np.uint8)
-        # Give back the dilation so the outline sits on the line's centre.
-        k = max(1, close // 2)
-        return cv2.erode(inside, np.ones((k, k), np.uint8))
+        # Give back the dilation: the outline is the drawn line's outer edge.
+        return cv2.erode(inside, np.ones((close, close), np.uint8))
 
 
-def wheel_centres(view, r_px):
-    g = cv2.medianBlur(view.grey, 5)
-    c = cv2.HoughCircles(g, cv2.HOUGH_GRADIENT, dp=1, minDist=r_px * 4, param1=100, param2=30,
-                         minRadius=int(r_px * 0.55), maxRadius=int(r_px * 1.25))
-    if c is None or len(c[0]) < 2:
+def wheel_centres(view, r_px, wb_px):
+    """The two wheels: a pair of circles level with each other, a wheelbase apart, the
+    lowest such pair in the view."""
+    g = cv2.medianBlur(view.grey, 3)
+    c = cv2.HoughCircles(g, cv2.HOUGH_GRADIENT, dp=1, minDist=r_px * 1.5, param1=100, param2=20,
+                         minRadius=int(r_px * 0.5), maxRadius=int(r_px * 1.3))
+    if c is None:
         raise RuntimeError('no wheels found in the side view')
-    c = sorted(c[0][:2], key=lambda p: p[0])
-    return [(float(p[0]), float(p[1])) for p in c]
+    c = c[0]
+    best = None
+    for i in range(len(c)):
+        for j in range(len(c)):
+            a_, b_ = c[i], c[j]
+            if b_[0] <= a_[0] or abs(a_[1] - b_[1]) > 6:
+                continue
+            if abs((b_[0] - a_[0]) / wb_px - 1) > 0.3:
+                continue
+            score = (a_[1] + b_[1]) / 2
+            if best is None or score > best[0]:
+                best = (score, a_, b_)
+    if best is None:
+        raise RuntimeError('no level pair of wheels in the side view')
+    return [(float(best[1][0]), float(best[1][1])), (float(best[2][0]), float(best[2][1]))]
 
 
 def read(spec, image_path):
@@ -73,7 +87,7 @@ def read(spec, image_path):
     if 'wheels' in sv:
         wl, wr = [(u - side.x0, v - side.y0) for u, v in sv['wheels']]
     else:
-        wl, wr = wheel_centres(side, R * ppm0)
+        wl, wr = wheel_centres(side, R * ppm0, WB * ppm0)
     ppm = abs(wr[0] - wl[0]) / WB
     nose_left = sv.get('nose', 'left') == 'left'
     uF = wl[0] if nose_left else wr[0]
@@ -87,9 +101,20 @@ def read(spec, image_path):
         vg -= side.y0
     y_axle_f = -L / 2 + F['frontOverhang']
     dirn = 1.0 if nose_left else -1.0
+    # Scanned drawings are often stretched a few per cent one way: the height is
+    # scaled by the roof (the factory height) and the length by the wheelbase.
+    # The roof: the top of the outline over the middle of the car, ignoring anything
+    # narrower than a tenth of it (an aerial, a roof light, a drawn bump).
+    cols = np.nonzero(sil.any(axis=0))[0]
+    c0_, c1_ = cols.min(), cols.max()
+    mid = range(int(c0_ + 0.3 * (c1_ - c0_)), int(c0_ + 0.7 * (c1_ - c0_)))
+    tops = np.array([np.nonzero(sil[:, c])[0].min() for c in mid if sil[:, c].any()])
+    top_row = float(np.percentile(tops, 10))
+    ppmz = sv.get('ppmz', ppm if sv.get('isotropic') else (vg - top_row) / sv.get('height', F['height']))
+    aspect = ppmz / ppm
 
     def side_px(y, z):
-        return uF + (y - y_axle_f) * ppm * dirn, vg - z * ppm
+        return uF + (y - y_axle_f) * ppm * dirn, vg - z * ppmz
 
     ys = np.arange(-L / 2 - 0.15, L / 2 + 0.15, GRID)
     zs = np.arange(0.0, F['height'] + 0.15, GRID)
@@ -98,7 +123,7 @@ def read(spec, image_path):
     ok = (Ui >= 0) & (Ui < sil.shape[1]) & (Vi >= 0) & (Vi < sil.shape[0])
     side_mask = np.zeros(U.shape, bool)
     side_mask[ok] = sil[Vi[ok], Ui[ok]] > 0
-    out.update(ppm=ppm, ys=ys, zs=zs, side=side_mask, side_px=side_px, side_view=side,
+    out.update(ppm=ppm, ppmz=ppmz, ys=ys, zs=zs, side=side_mask, side_px=side_px, side_view=side,
                side_sil=sil, wheels=(wl, wr), ground=vg, nose_left=nose_left)
 
     # ---- top: plan half-width per station --------------------------------------------
@@ -123,7 +148,7 @@ def read(spec, image_path):
             side_y[0] += tv['yShift']
 
         def top_px(y, x):
-            return t0 + (y - side_y[0]) * tp * tdir, centre - x * tp
+            return t0 + (y - side_y[0]) * tp * tdir, centre - x * tp * aspect
 
         half = np.zeros_like(ys)
         for i, y in enumerate(ys):
@@ -131,7 +156,7 @@ def read(spec, image_path):
             if 0 <= u < tsil.shape[1]:
                 r = np.nonzero(tsil[:, u])[0]
                 if len(r):
-                    half[i] = max(centre - r.min(), r.max() - centre) / tp
+                    half[i] = max(centre - r.min(), r.max() - centre) / (tp * aspect)
         out.update(plan=half, top_px=top_px, top_view=top, top_sil=tsil)
 
     # ---- ends: half-width per height -------------------------------------------------
@@ -148,12 +173,13 @@ def read(spec, image_path):
         # the factory height (the tyres at the bottom are often cut short or drawn
         # lower than the side view has them).
         ep = ev.get('ppm', ppm)
+        epz = ev.get('ppmz', ep * aspect)
         top_row = rows.min()
-        ground = ev['ground'] - v_.y0 if 'ground' in ev else top_row + ev.get('height', F['height']) * ep
+        ground = ev['ground'] - v_.y0 if 'ground' in ev else top_row + ev.get('height', F['height']) * epz
         out[end + '_ppm'] = ep
 
-        def end_px(x, z, centre=centre, ground=ground, ep=ep):
-            return centre + x * ep, ground - z * ep
+        def end_px(x, z, centre=centre, ground=ground, ep=ep, epz=epz):
+            return centre + x * ep, ground - z * epz
 
         half = np.zeros_like(zs)
         for i, z in enumerate(zs):

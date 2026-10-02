@@ -20,7 +20,7 @@ for i in range(1, n):
     x, y, w, h, a = stats[i]
     if w * h < img.shape[0] * img.shape[1] * 0.01:
         continue
-    boxes.append((x + k // 2, y + k // 2, x + w - k // 2, y + h - k // 2))
+    boxes.append((x, y, x + w, y + h))
 boxes.sort(key=lambda b: (b[1] // 200, b[0]))
 out = img.copy()
 for i, (x0, y0, x1, y1) in enumerate(boxes):
