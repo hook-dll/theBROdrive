@@ -298,9 +298,20 @@ def select(view, sign, poly, d, hole=None):
     V = VIEW[view]
     a_, b_ = V['a'], V['b']
     out = []
+    tree = None
+    if d.get('visible'):
+        # Only what the view itself sees there: the first surface a ray along the view
+        # meets (a sloping nose's lamps, not the bonnet top behind them).
+        tree = BVHTree.FromBMesh(bm)
+        look = -V['facing']
+        idx = {f: i for i, f in enumerate(bm.faces)}
     for f in candidates(view, sign, poly, d):
         c = f.calc_center_median()
         if inside(poly, c[a_], c[b_]) and not (hole and inside(hole, c[a_], c[b_])):
+            if tree is not None:
+                hit = tree.ray_cast(c - look * 3.0, look, 6.0)
+                if hit[0] is None or (hit[0] - c).length > 0.01:
+                    continue
             out.append(f)
     return out
 
@@ -539,10 +550,11 @@ def decal_shapes():
     """Every patch the car's file asks for, as (view, sign, poly, d, node, mat, height, hole)."""
     out = []
     for d in P.get('decals', []):
-        if d['view'] in ('front', 'rear') and 'facingMin' not in d:
-            # A lamp drawn on an end stays on the end: it may turn the corner a little,
-            # as real ones do, and is cut cleanly where it stops (iso_cut).
-            d = dict(d, facingMin=0.1)
+        if d['view'] in ('front', 'rear'):
+            # A lamp drawn on an end lies on what that end shows: the surface seen from
+            # in front (or behind), however steeply it slopes, stopping only where it
+            # turns past grazing, and cut cleanly there (iso_cut).
+            d = dict(d, facingMin=min(d.get('facingMin', 0.15), 0.15), visible=True)
         for sign, poly in sides_of(d):
             hole = offset_poly(poly, -d['ring']) if d.get('ring') else None
             node = d.get('node', 'decal_trim')
@@ -1055,15 +1067,42 @@ if hd:
             box(bm_, (hit.x + s_ * 0.008, y, z), (0.016, hd.get('w', 0.12), hd.get('h', 0.022)), 0)
     trim_parts.append(new_object('handles', bm_, [hd.get('material', 'chrome')]))
 
-# Wipers: parked arms along the base of the windscreen.
+# Wipers: parked blades lying on the windscreen just above its foot, each a slim strip
+# following the glass, a thin arm under it.
 wp = P.get('wipers')
 if wp:
     bm_ = bmesh.new()
+    _mi = [p_.material_index for p_ in body.data.polygons]
+
+    def on_glass(x_, y_):
+        h_ = _skin.ray_cast(Vector((x_, y_, H + 0.5)), Vector((0, 0, -1)), 3.0)
+        return h_[0] is not None and _mi[h_[2]] == SLOT['glass']
     for x0, x1, y, z in wp['arms']:
-        hit, nrm = skin_point(((x0 + x1) / 2, y, H + 0.5), (0, 0, -1))
-        zc = hit.z + 0.012 if hit else z
-        d = Vector((x1 - x0, 0, 0))
-        box(bm_, ((x0 + x1) / 2, y, zc), (abs(x1 - x0), 0.014, 0.012), 0)
+        # parked a few centimetres up the glass from its foot, wherever the car file put
+        # them: found by walking back from the nose until the arm's middle is on glass
+        xm = (x0 + x1) / 2
+        for y_try in np.arange(y - 0.4, y + 0.6, 0.01):
+            if on_glass(xm, y_try):
+                y = y_try + 0.05
+                break
+        pts = []
+        for t in np.linspace(0, 1, 9):
+            x_ = x0 + (x1 - x0) * t
+            hit, nrm = skin_point((x_, y - 0.6, z + 0.6), (0, 0.6, -0.6))
+            if hit is None:
+                hit, nrm = skin_point((x_, y, H + 0.5), (0, 0, -1))
+            if hit is not None:
+                pts.append((hit, nrm))
+        for (pa, na), (pb, nb) in zip(pts, pts[1:]):
+            n_ = (na + nb).normalized()
+            along = (pb - pa)
+            if along.length < 1e-4:
+                continue
+            xv = along.normalized()
+            zv = (n_ - xv * n_.dot(xv)).normalized()
+            yv = zv.cross(xv)
+            rot = Matrix((xv, yv, zv)).transposed().to_4x4()
+            box(bm_, (pa + pb) / 2 + zv * 0.008, (along.length + 0.004, 0.012, 0.008), 0, rot)
     trim_parts.append(new_object('wipers', bm_, ['trim']))
 
 # The underside. The body's own bottom closes it flush along the sills; below it hang

@@ -279,12 +279,21 @@ def build(car):
     c0, c1 = hs['cabin']
     belt = sm(hs['belt'], ys)
     in_cabin = (ys >= c0) & (ys <= c1)
+    # The glasshouse goes on wherever the outline still stands above the belt near the
+    # cabin's ends (the screen's foot, the pillars running down to the deck): there the
+    # body stops at the belt and the glasshouse's narrower section carries on, so it
+    # thins away to nothing as the outline meets the belt. Ended at the cabin's given
+    # ends instead, the body went up full width beside the pillar's foot: a step the
+    # smoothing crumpled.
+    ext = hs.get('cabinRun', 0.35)
+    near = (ys >= c0 - ext) & (ys <= c1 + ext)
+    in_cabin = in_cabin | (near & (top > belt + 0.005))
     gplan = sm(hs['glassPlan'], ys)
-    z_ref = hs.get('beltRef', float(np.median(belt[in_cabin])))
+    z_ref = hs.get('beltRef', float(np.median(belt[(ys >= c0) & (ys <= c1)])))
     i_ref = np.searchsorted(zs, z_ref)
     # Below the belt the section is scaled to the plan by its widest point there.
     lower_ref = np.array([sec[: i_ref + 1, j].max() for j in range(len(ys))])
-    roof_top = hs.get('roofTop', float(top[in_cabin].max()))
+    roof_top = hs.get('roofTop', float(top[(ys >= c0) & (ys <= c1)].max()))
     # The roof's cross-curve, carried down the screens: a crown over the roof's width.
     sec_mid = sec[:, np.argmin(np.abs(ys - (c0 + c1) / 2))]
     xq = np.arange(0, W / 2 + G, G)
@@ -328,6 +337,16 @@ def build(car):
             xg = sec[:, j] * k
             if w_abs[j] > 0:
                 xg = xg * (1 - w_abs[j]) + sec_abs[:, j] * w_abs[j]
+            if hs.get('shelf') is not False:
+                # The glasshouse stands an even `shelf` in from the body's side at the
+                # belt all along the car, its drawn shape taking over above: a shelf
+                # widening as the glass plan narrows was a diagonal fold down the
+                # rear quarter.
+                ib_ = min(np.searchsorted(zs, belt[j]), len(zs) - 1)
+                foot = xl[ib_] - hs.get('shelf', 0.03)
+                fade = np.clip(1 - (zs - belt[j]) / hs.get('shelfRise', 0.18), 0, 1)
+                fade = fade * fade * (3 - 2 * fade)
+                xg = xg + (foot - xg[ib_]) * fade
             drop = np.interp(xs / max(k, 1e-3), xq, roof_drop)
             zg = top[j] - drop
             up = np.minimum(np.minimum(xg[None, :] - xs[:, None], zg[:, None] - zs[None, :]),
@@ -367,7 +386,12 @@ def build(car):
     wf = np.concatenate([wells[:0:-1], wells], axis=0)
     wf = np.pad(np.clip(wf, -4 * G, 4 * G), pad, constant_values=-4 * G)
     wf = ndimage.gaussian_filter(wf, hs.get('archEdge', 0.02) / G)
-    smooth = np.minimum(smooth, -wf)
+    # The lip where the side meets the well: a rounded intersection (a smooth minimum
+    # over `archLip`), not a sharp one, which the 1 cm grid drew as a row of teeth.
+    k_ = hs.get('archLip', 0.012)
+    a_, b_ = smooth, -wf
+    h_ = np.clip(0.5 + 0.5 * (b_ - a_) / k_, 0, 1)
+    smooth = b_ * (1 - h_) + a_ * h_ - k_ * h_ * (1 - h_)
     verts, faces, normals, _ = measure.marching_cubes(smooth, 0.0)
     verts = (verts - pad) * G
     verts[:, 0] += xs_full[0]
