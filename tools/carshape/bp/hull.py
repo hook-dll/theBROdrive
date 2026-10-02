@@ -183,6 +183,41 @@ def build(car):
     t = np.clip((ys - ya_f) / (ya_r - ya_f), 0, 1)
     t = t * t * (3 - 2 * t)
     sec = secs['front'][:, None] * (1 - t[None, :]) + secs['rear'][:, None] * t[None, :]   # [z, y]
+    # Sections given outright over a span of stations, {y: [y0, y1], half: [[z, x], ...],
+    # blend}: a body whose middle is not a blend of its ends (the Beetle's doors are
+    # narrower than the wings either side of them).
+    for k in hs.get('sectionKeys', []):
+        y0, y1 = k['y']
+        bl = k.get('blend', 0.15)
+        w = np.clip(np.minimum((ys - (y0 - bl)) / bl, ((y1 + bl) - ys) / bl), 0, 1)
+        w = w * w * (3 - 2 * w)
+        sk = np.minimum(pl(k['half'], zs), W / 2)
+        sk[zs > max(p[0] for p in k['half'])] = 0
+        sec = sec * (1 - w[None, :]) + sk[:, None] * w[None, :]
+
+    # Sections at stations, in metres as they are ({y, half: [[z, x], ...]}, interpolated
+    # between stations and blended into the views' section over `stationBlend` beyond
+    # the first and last): where the plan and one end view cannot say it (wings that
+    # end before the lid between them does).
+    st = sorted(hs.get('sectionStations', []), key=lambda c: c['y'])
+    w_abs = np.zeros(len(ys))
+    sec_abs = np.zeros_like(sec)
+    if st:
+        bl = hs.get('stationBlend', 0.08)
+        prof = [np.minimum(pl(c['half'], zs), W / 2) * (zs <= max(p[0] for p in c['half'])) for c in st]
+        sy = np.array([c['y'] for c in st])
+        for j, y in enumerate(ys):
+            if y < sy[0] - bl or y > sy[-1] + bl:
+                continue
+            if y <= sy[0]:
+                sec_abs[:, j], w = prof[0], 1 - (sy[0] - y) / bl
+            elif y >= sy[-1]:
+                sec_abs[:, j], w = prof[-1], 1 - (y - sy[-1]) / bl
+            else:
+                i = int(np.searchsorted(sy, y)) - 1
+                f = (y - sy[i]) / (sy[i + 1] - sy[i])
+                sec_abs[:, j], w = prof[i] * (1 - f) + prof[i + 1] * f, 1.0
+            w_abs[j] = w * w * (3 - 2 * w)
 
     # ---- the glasshouse -----------------------------------------------------------
     c0, c1 = hs['cabin']
@@ -206,17 +241,37 @@ def build(car):
     big = 1.0
     dist = np.full((len(xs), len(zs), len(ys)), -big, np.float32)
     crown = pl(hs.get('crown', [[-9, 0.02], [9, 0.02]]), ys)
+    # The top across the car given at stations, {y, z: [[x, z], ...]}, interpolated
+    # between them: a bonnet lower than the wings either side of it, a valley between.
+    tc = sorted(hs.get('topCross', []), key=lambda c: c['y'])
+
+    def top_cross(y):
+        if not tc or y < tc[0]['y'] or y > tc[-1]['y']:
+            return None
+        i = max(k for k in range(len(tc)) if tc[k]['y'] <= y)
+        if i == len(tc) - 1:
+            return pl(tc[i]['z'], xs)
+        f = (y - tc[i]['y']) / (tc[i + 1]['y'] - tc[i]['y'])
+        return pl(tc[i]['z'], xs) * (1 - f) + pl(tc[i + 1]['z'], xs) * f
     for j, y in enumerate(ys):
         if d_side[:, j].max() <= -0.05:
             continue
         lower_top = belt[j] if in_cabin[j] else top[j]
         xl = plan[j] * sec[:, j] / max(lower_ref[j], 1e-3)          # [z]
+        if w_abs[j] > 0:
+            xl = xl * (1 - w_abs[j]) + sec_abs[:, j] * w_abs[j]
         u = np.clip(xs / max(plan[j], 1e-3), 0, 1)
         zl = lower_top - crown[j] * u ** 2                            # [x]
+        if not in_cabin[j]:
+            zc = top_cross(y)
+            if zc is not None:
+                zl = zc
         d = np.minimum(xl[None, :] - xs[:, None], zl[:, None] - zs[None, :])
         if in_cabin[j]:
             k = gplan[j] / max(g_ref, 1e-3)
             xg = sec[:, j] * k
+            if w_abs[j] > 0:
+                xg = xg * (1 - w_abs[j]) + sec_abs[:, j] * w_abs[j]
             drop = np.interp(xs / max(k, 1e-3), xq, roof_drop)
             zg = top[j] - drop
             up = np.minimum(np.minimum(xg[None, :] - xs[:, None], zg[:, None] - zs[None, :]),

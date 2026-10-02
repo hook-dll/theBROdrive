@@ -189,8 +189,10 @@ def read(spec, image_path):
         if 'yShift' in tv:
             side_y[0] += tv['yShift']
 
-        def top_px(y, x):
-            return t0 + (y - side_y[0]) * tp * tdir, centre - x * tp * aspect
+        lat = [tp * aspect]
+
+        def top_px(y, x, centre=centre):
+            return t0 + (y - side_y[0]) * tp * tdir, centre - x * lat[0]
 
         if 'outline' in tv:
             # Given as the right half [[y, x]], mirrored.
@@ -203,10 +205,13 @@ def read(spec, image_path):
             if 0 <= u < tsil.shape[1]:
                 r = np.nonzero(tsil[:, u])[0]
                 if len(r):
-                    half[i] = max(centre - r.min(), r.max() - centre) / (tp * aspect)
+                    half[i] = max(centre - r.min(), r.max() - centre) / lat[0]
         if tv.get('fitWidth'):
-            # A plan drawn out of proportion across: its widest point is the factory width.
-            half *= (F['width'] / 2) / np.percentile(half[half > 0], 97)
+            # A plan drawn out of proportion across: its widest point is the factory width
+            # (and the view's lateral scale is that, for anything read off it).
+            f = (F['width'] / 2) / np.percentile(half[half > 0], 97)
+            half *= f
+            lat[0] /= f
         out.update(plan=half, top_px=top_px, top_view=top, top_sil=tsil)
 
     # ---- ends: half-width per height -------------------------------------------------
