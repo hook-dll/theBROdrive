@@ -819,6 +819,10 @@ def mirror_head(bm_, c, w_, h_, d_, shape, s_):
 
 
 m = P.get('mirror')
+if m and info.get('mirrorAt') and not m.get('fixed'):
+    # A traced glasshouse says where the door's window begins: the mirror stands at its
+    # front lower corner.
+    m = dict(m, y=info['mirrorAt'][0] + 0.05, z=info['mirrorAt'][1] + 0.05)
 if m:
     bm_ = bmesh.new()
     w_, h_ = m.get('w', 0.13), m.get('h', 0.08)
@@ -854,6 +858,9 @@ wp = P.get('wipers')
 if wp:
     bm_ = bmesh.new()
     for x0, x1, y, z in wp['arms']:
+        if info.get('screenFoot'):
+            # parked just above the screen's foot
+            y = info['screenFoot'][0] + 0.05
         hit, nrm = skin_point(((x0 + x1) / 2, y, H + 0.5), (0, 0, -1))
         zc = hit.z + 0.012 if hit else z
         d = Vector((x1 - x0, 0, 0))
