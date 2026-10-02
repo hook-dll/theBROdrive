@@ -38,9 +38,11 @@ CAR = {
         ],
         # The soft top: black canvas over the cabin.
         'regions': [
-            {'view': 'top', 'rect': [[0.47, 0.0], [1.28, 1.6]], 'radius': 0.001, 'mirror': False, 'facingMin': 0.05,
+            # the hood's front rail over the screen, facing forward
+            {'view': 'front', 'rect': [[0.0, 1.18], [1.40, 0.16]], 'mirror': False, 'depthRange': [-0.35, 0.15], 'facingMin': 0.0},
+            {'view': 'top', 'rect': [[0.44, 0.0], [1.36, 1.6]], 'radius': 0.001, 'mirror': False, 'facingMin': 0.05,
              'depthRange': [0.95, 1.5]},
-            {'view': 'side', 'outline': [[-0.13, 1.10], [-0.06, 1.30], [1.15, 1.30], [1.15, 0.84], [0.45, 0.80], [0.45, 1.12]]},
+            {'view': 'side', 'outline': [[-0.20, 1.08], [-0.10, 1.30], [1.15, 1.30], [1.15, 0.84], [0.45, 0.80], [0.45, 1.12]]},
         ],
         'decals': [
             {'view': 'front', 'outline': [[0.0, 0.40], [0.20, 0.40], [0.28, 0.37], [0.30, 0.33], [0.27, 0.30], [0.20, 0.29], [0.0, 0.29]],
@@ -76,7 +78,7 @@ CAR = {
             {'view': 'top', 'points': [[-1.90, 0.55], [-0.75, 0.62]], 'width': 0.005},
             {'view': 'rear', 'points': [[0.0, 0.81], [0.62, 0.81]], 'width': 0.005, 'depthRange': [1.5, 2.1]},
         ],
-        'mirror': {'y': -0.42, 'z': 0.88, 'reach': 0.93, 'w': 0.13, 'h': 0.08, 'shape': 'round', 'material': 'paint'},
+        'mirror': {'y': -0.42, 'z': 0.88, 'reach': 0.95, 'w': 0.14, 'h': 0.075, 'material': 'paint', 'mount': 'door'},
         'handles': {'at': [[0.35, 0.69]], 'w': 0.10, 'material': 'chrome'},
         'wipers': {'arms': [[-0.5, -0.05, -0.68, 0.84], [0.05, 0.45, -0.68, 0.84]]},
         'wheel': {'style': 'alloy', 'spokes': 8, 'rimFactor': 0.68, 'spokeWidth': 0.35},

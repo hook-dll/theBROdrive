@@ -70,7 +70,7 @@ CAR = {
         ],
         'regions': [
             # The canvas roof, from the screen header down the back to the boot lid.
-            {'view': 'top', 'outline': [[-0.28, 0.0], [-0.28, 0.56], [1.30, 0.56], [1.55, 0.50], [1.55, 0.0]], 'material': 'paint2',
+            {'view': 'top', 'outline': [[-0.28, 0.0], [-0.28, 0.56], [1.30, 0.56], [1.55, 0.50], [1.55, 0.0]], 'material': 'paint2', 'depthRange': [1.08, 2.0],
              'facingMin': 0.15},
         ],
         'podLamps': [

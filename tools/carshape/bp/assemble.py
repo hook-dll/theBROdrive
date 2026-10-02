@@ -922,18 +922,40 @@ m = P.get('mirror')
 if m:
     bm_ = bmesh.new()
     w_, h_ = m.get('w', 0.13), m.get('h', 0.08)
+    shape = m.get('shape', 'rect')
     for s_ in m.get('sides', (1, -1)):
         hit, nrm = skin_point((s_ * 1.5, m['y'], m['z']), (-s_, 0, 0))
-        x0 = hit.x if hit else s_ * W / 2
-        x1 = s_ * m.get('reach', abs(x0) + 0.13)
+        x1 = s_ * m.get('reach', (abs(hit.x) if hit else W / 2) + 0.13)
         xc = x1 - s_ * w_ / 2
-        # the sail, lying on the door
-        box(bm_, (x0 + s_ * 0.004, m['y'] + 0.01, m['z']), (0.016, 0.09, 0.06), 0)
-        # the arm, from the sail to the housing's inner edge, under its middle
-        arm = abs((xc - s_ * w_ * 0.3) - x0)
-        if arm > 0.005:
-            box(bm_, (x0 + s_ * arm / 2, m['y'] + 0.015, m['z'] - h_ * 0.15), (arm, 0.035, min(0.03, h_ * 0.4)), 0)
-        mirror_head(bm_, (xc, m['y'] + 0.02, m['z']), w_, h_, 0.06, m.get('shape', 'rect'), s_)
+        # Where it stands: on the door (the side is right there at its height) or on
+        # the wing's top (the side ray reaches the glasshouse, well inboard).
+        on_wing = m.get('mount') == 'wing' or (m.get('mount') != 'door' and (hit is None or abs(hit.x) < W / 2 - 0.12))
+        if on_wing:
+            down, _n = skin_point((xc, m['y'] + 0.01, m['z']), (0, 0, -1))
+            z_foot = down.z if down else m['z'] - 0.15
+            z_head = m['z'] - h_ * 0.45
+            # a thin stalk from a small foot on the wing up into the head
+            disc(bm_, (xc, m['y'] + 0.01, z_foot + 0.004), (0, 0, 1), 0.018, 0.012, 10, 0)
+            if z_head - z_foot > 0.01:
+                disc(bm_, (xc, m['y'] + 0.01, (z_foot + z_head) / 2), (0, 0, 1), 0.007, z_head - z_foot, 8, 0)
+        else:
+            # The sail on the door's own skin: at the mirror's height, or lower down to
+            # the door's top when the glass is what is there.
+            z_s, x0 = m['z'], hit.x if hit else s_ * W / 2
+            for k in range(26):
+                h2, _n = skin_point((s_ * 1.5, m['y'], m['z'] - 0.01 * k), (-s_, 0, 0))
+                if h2 and abs(h2.x) >= W / 2 - 0.12:
+                    z_s, x0 = m['z'] - 0.01 * k, h2.x
+                    break
+            box(bm_, (x0 + s_ * 0.003, m['y'] + 0.01, z_s + 0.01), (0.01, 0.07, 0.05), 0)
+            # the arm, from the sail out and up into the housing's inner side
+            a0 = Vector((x0 + s_ * 0.006, m['y'] + 0.012, z_s + 0.01))
+            a1 = Vector((xc - s_ * w_ * 0.3, m['y'] + 0.012, m['z'] - h_ * 0.1))
+            dv = a1 - a0
+            if dv.length > 0.005:
+                rot = Vector((1, 0, 0)).rotation_difference(dv.normalized()).to_matrix().to_4x4()
+                box(bm_, (a0 + a1) / 2, (dv.length, 0.022, 0.018), 0, rot)
+        mirror_head(bm_, (xc, m['y'] + 0.02, m['z']), w_, h_, 0.05 if shape == 'round' else 0.06, shape, s_)
     bmesh.ops.recalc_face_normals(bm_, faces=bm_.faces)
     trim_parts.append(new_object('mirrors', bm_, [m.get('material', 'trim'), 'chrome']))
 
