@@ -204,8 +204,12 @@ def build(car):
         dist[:, :, j] = np.minimum(d, d_side[None, :, j])
 
     # ---- wheel wells ---------------------------------------------------------------
-    arch = hs.get('arch', {})
-    for ya, track in ((ya_f, F['frontTrack']), (ya_r, F['rearTrack'])):
+    for ya, track, which in ((ya_f, F['frontTrack'], 'front'), (ya_r, F['rearTrack'], 'rear')):
+        # One arch for both axles, or a `front` / `rear` entry overriding it (the rear
+        # arch of a pontoon body sits lower, a skirted one is not cut at all).
+        arch = dict(hs.get('arch', {}), **hs.get('arch', {}).get(which, {}))
+        if arch.get('skirt'):
+            continue
         ra = arch.get('radius', R * 1.14)
         za = R + arch.get('lift', 0.02)
         x_in = track / 2 - F['tyreWidth'] / 2 - arch.get('inset', 0.04)

@@ -258,6 +258,19 @@ def plane_for(view, p, q):
 
 
 def cut(view, sign, poly, d):
+    # A depth range bounds the region as sharply as its outline does.
+    dr = d.get('depthRange')
+    if dr:
+        dp = VIEW[view]['depth']
+        for v_cut in dr:
+            faces = candidates(view, sign, poly, dict(d, depthRange=[v_cut - 0.1, v_cut + 0.1]))
+            if faces:
+                geom = list({v for f in faces for v in f.verts}) + list({e for f in faces for e in f.edges}) + faces
+                co = [0.0, 0.0, 0.0]
+                co[dp] = v_cut
+                no = [0.0, 0.0, 0.0]
+                no[dp] = 1.0
+                bmesh.ops.bisect_plane(bm, geom=geom, plane_co=co, plane_no=no, dist=1e-5)
     for p, q in zip(poly, poly[1:] + poly[:1]):
         pq = plane_for(view, p, q)
         if pq is None:
@@ -296,12 +309,15 @@ for f in glass_faces:
 
 # Wheel wells: everything the arch cut exposed (inside the arch's radius and inboard
 # of the body side) is the black of the inner wing, not paint.
-HA = spec.get('hull', {}).get('arch', {})
-ra = HA.get('radius', R * 1.14)
-za = R + HA.get('lift', 0.02)
+HA0 = spec.get('hull', {}).get('arch', {})
+ARCHES = []
+for (ya, track), which in zip(AXLES, ('front', 'rear')):
+    HA = dict(HA0, **HA0.get(which, {}))
+    if not HA.get('skirt'):
+        ARCHES.append((ya, HA.get('radius', R * 1.14), R + HA.get('lift', 0.02)))
 for f in bm.faces:
     c = f.calc_center_median()
-    for ya, track in AXLES:
+    for ya, ra, za in ARCHES:
         dy, dz = c.y - ya, c.z - za
         inside_arch = (dz >= 0 and dy * dy + dz * dz < (ra - 0.006) ** 2) or (dz < 0 and abs(dy) < ra - 0.006)
         if inside_arch and abs(f.normal.x) < 0.9 and f.material_index == SLOT['paint']:
@@ -332,10 +348,16 @@ def tag(view, sign, poly, d, node, mat, height, hole=None):
     TAGS.append((node, mat, height))
     # Where patches overlap the one standing proudest (a lens over its surround) owns
     # the face; the others show round it.
+    # A tagged face remembers what it was under the patch (paint, black, a second
+    # colour): slot TAG0 + 4 * tag + base.
     for f in select(view, sign, poly, d, hole):
         m_ = f.material_index
-        if m_ == SLOT['paint'] or (m_ >= TAG0 and TAGS[m_ - TAG0][2] <= height):
-            f.material_index = TAG0 + t
+        if m_ == SLOT['glass']:
+            continue
+        if m_ < TAG0:
+            f.material_index = TAG0 + 4 * t + m_
+        elif TAGS[(m_ - TAG0) // 4][2] <= height:
+            f.material_index = TAG0 + 4 * t + (m_ - TAG0) % 4
 
 
 def decal_shapes():
@@ -397,7 +419,7 @@ bm.verts.index_update()
 keep = [v.index for v in keep]
 bm.to_mesh(body.data)
 bm.free()
-while len(body.data.materials) < TAG0 + len(TAGS):
+while len(body.data.materials) < TAG0 + 4 * len(TAGS):
     body.data.materials.append(MAT['paint'])
 bpy.context.view_layer.objects.active = body
 # The cuts leave fans of small faces along every outline; near-flat runs are merged
@@ -469,12 +491,12 @@ bm.normal_update()
 by_tag = {}
 for f in bm.faces:
     if f.material_index >= TAG0:
-        by_tag.setdefault(f.material_index - TAG0, []).append(f)
+        by_tag.setdefault((f.material_index - TAG0) // 4, []).append(f)
 for t, (node, mat, height) in enumerate(TAGS):
     lift(by_tag.get(t, []), node, mat, height)
 for f in bm.faces:
     if f.material_index >= TAG0:
-        f.material_index = SLOT['paint']
+        f.material_index = (f.material_index - TAG0) % 4
 bm.to_mesh(body.data)
 bm.free()
 while len(body.data.materials) > 4:
