@@ -316,6 +316,9 @@ def build(car):
         dist[:, :, j] = np.minimum(d, d_side[None, :, j])
 
     # ---- wheel wells ---------------------------------------------------------------
+    # Cut after the body is smoothed, not before: blurred together with the body, the
+    # well's sharp edge spread into a ring of dent and bulge round every arch.
+    wells = np.full_like(dist, -big)
     for ya, track, which in ((ya_f, F['frontTrack'], 'front'), (ya_r, F['rearTrack'], 'rear')):
         # One arch for both axles, or a `front` / `rear` entry overriding it (the rear
         # arch of a pontoon body sits lower, a skirted one is not cut at all).
@@ -328,7 +331,7 @@ def build(car):
         r = np.sqrt((ys[None, :] - ya) ** 2 + (zs[:, None] - za) ** 2)
         inside_well = np.where(zs[:, None] >= za, ra - r, ra - np.abs(ys[None, :] - ya))   # [z, y]
         cut = np.minimum(inside_well[None, :, :], (xs - x_in)[:, None, None])
-        dist = np.minimum(dist, -cut)
+        wells = np.maximum(wells, cut)
 
     # ---- mirror, smooth, contour ----------------------------------------------------
     full = np.concatenate([dist[:0:-1], dist], axis=0)
@@ -340,6 +343,11 @@ def build(car):
     # the steps between them (a dent where the cabin ends, a ripple from a drawn line).
     sigma_y = max(sigma, hs.get('edgeY', 0.035) / G)
     smooth = ndimage.gaussian_filter(full, (sigma, sigma, sigma_y))
+    # the wells, mirrored and padded the same way, rounded only by the edge radius
+    wf = np.concatenate([wells[:0:-1], wells], axis=0)
+    wf = np.pad(np.clip(wf, -4 * G, 4 * G), pad, constant_values=-4 * G)
+    wf = ndimage.gaussian_filter(wf, hs.get('archEdge', 0.02) / G)
+    smooth = np.minimum(smooth, -wf)
     verts, faces, normals, _ = measure.marching_cubes(smooth, 0.0)
     verts = (verts - pad) * G
     verts[:, 0] += xs_full[0]
@@ -347,11 +355,19 @@ def build(car):
     verts[:, 2] += ys[0]
     # grid axes are (x, z, y) -> car (x, y, z)
     v = np.stack([verts[:, 0], verts[:, 2], verts[:, 1]], axis=1)
-    mesh = trimesh.Trimesh(v, faces[:, [0, 2, 1]], process=True)
+    mesh = trimesh.Trimesh(v, faces[:, [0, 2, 1]], process=False)
     if mesh.volume < 0:
         mesh.invert()
+    # The field's own gradient as the normals: smooth (the triangles' normals carry the
+    # voxel steps); assemble.py shades the working shell from them.
+    n = normals[:, [0, 2, 1]]
+    n /= np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-9)
+    if np.mean(np.sum(n * mesh.vertex_normals, axis=1)) < 0:
+        n = -n
     out = os.path.join(grid.ROOT, 'build/carshape', car)
-    mesh.export(os.path.join(out, 'hull.ply'))
+    with open(os.path.join(out, 'hull.ply'), 'wb') as fh:
+        fh.write(trimesh.exchange.ply.export_ply(trimesh.Trimesh(mesh.vertices, mesh.faces, vertex_normals=n, process=False),
+                                                 vertex_normal=True))
     # The working shell: the full one reduced by quadric error, which keeps creases
     # (the arch lips, the bonnet edge) where they are.
     import pymeshlab

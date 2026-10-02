@@ -732,16 +732,82 @@ while len(body.data.materials) > 4:
 
 # Shading from the full-resolution shell, projected along each corner's own normal,
 # so the coarse working mesh shades with the true curvature.
+# Each corner of the working shell takes the full-resolution shell's normal where a
+# ray along its own face's normal meets it: a corner on the side never picks up the
+# normal of an arch's wall next to it (Blender's projected transfer did, and spread it
+# into wedges up the wings).
 body.data.shade_smooth()
-dense.data.shade_smooth()
 scene.collection.objects.link(dense)
-bpy.context.view_layer.objects.active = body
-dt = body.modifiers.new('normals', 'DATA_TRANSFER')
-dt.object = dense
-dt.use_loop_data = True
-dt.data_types_loops = {'CUSTOM_NORMAL'}
-dt.loop_mapping = 'POLYINTERP_LNORPROJ'
-bpy.ops.object.modifier_apply(modifier=dt.name)
+_dg = bpy.context.evaluated_depsgraph_get()
+_dt = BVHTree.FromObject(dense, _dg)
+_dm = dense.data
+# the field's gradient, stored in the ply as the vertices' normals
+_dvn = [None] * len(_dm.vertices)
+for _l in _dm.loops:
+    if _dvn[_l.vertex_index] is None:
+        _dvn[_l.vertex_index] = _dm.corner_normals[_l.index].vector.copy()
+_dvn = [n_ if n_ is not None else v.normal.copy() for n_, v in zip(_dvn, _dm.vertices)]
+_dvc = [v.co.copy() for v in _dm.vertices]
+_dpv = [tuple(p.vertices) for p in _dm.polygons]
+
+
+def dense_normal(loc, idx):
+    """The smooth normal at a point of the dense shell: its triangle's vertex normals,
+    blended by where the point lies in it (a lone triangle's own normal carries the
+    voxel steps)."""
+    vs = _dpv[idx]
+    if len(vs) != 3:
+        return None
+    a_, b_, c_ = (_dvc[i] for i in vs)
+    v0, v1, v2 = b_ - a_, c_ - a_, loc - a_
+    d00, d01, d11 = v0.dot(v0), v0.dot(v1), v1.dot(v1)
+    d20, d21 = v2.dot(v0), v2.dot(v1)
+    den = d00 * d11 - d01 * d01
+    if abs(den) < 1e-14:
+        return None
+    w1 = (d11 * d20 - d01 * d21) / den
+    w2 = (d00 * d21 - d01 * d20) / den
+    w0 = 1 - w1 - w2
+    n_ = _dvn[vs[0]] * w0 + _dvn[vs[1]] * w1 + _dvn[vs[2]] * w2
+    return n_.normalized() if n_.length > 1e-9 else None
+
+
+_me = body.data
+_vco = [v.co.copy() for v in _me.vertices]
+_custom = []
+_miss = 0
+def sample(co, fn):
+    """The dense shell's smooth normal under a point, looked for along fn."""
+    hit = _dt.ray_cast(co + fn * 0.015, -fn, 0.04)
+    if hit[0] is not None and hit[1].dot(fn) > 0.5:
+        return dense_normal(hit[0], hit[2]) or hit[1]
+    loc, nrm, _i, _d = _dt.find_nearest(co, 0.02)
+    if loc is not None and nrm.dot(fn) > 0.5:
+        return dense_normal(loc, _i) or nrm
+    return None
+
+
+# one normal per vertex (so faces meet smoothly), looked for along its faces' mean
+_vn = {}
+for v in _me.vertices:
+    _vn[v.index] = sample(v.co.copy(), v.normal.copy())
+for poly in _me.polygons:
+    fn = poly.normal.copy()
+    cen = poly.center.copy()
+    for li in poly.loop_indices:
+        vi = _me.loops[li].vertex_index
+        n_ = _vn[vi]
+        if n_ is None or n_.dot(fn) < math.cos(math.radians(30)):
+            # a corner on a crease (an arch's lip): its own face's side of it, sampled a
+            # little way into the face, so a long triangle reaching from the crease into a
+            # panel shades as the panel
+            co = _vco[vi]
+            to_c = cen - co
+            n_ = sample(co + to_c * min(1.0, 0.025 / max(to_c.length, 1e-6)), fn)
+        _custom.append(tuple((n_ if n_ is not None else fn).normalized()))
+        _miss += n_ is None
+_me.normals_split_custom_set(_custom)
+print(f'NORMALS {car}: {_miss} of {len(_custom)} corners fell back to their face')
 bpy.data.objects.remove(dense)
 
 
@@ -995,12 +1061,12 @@ if wp:
         box(bm_, ((x0 + x1) / 2, y, zc), (abs(x1 - x0), 0.014, 0.012), 0)
     trim_parts.append(new_object('wipers', bm_, ['trim']))
 
-# The underside. The body's own bottom closes it flush along the sills; below that
-# hangs only what really sets a car's ground clearance: the sump and the subframe
-# (the engine at the back of a rear-engined car), the rear axle with its diff and the
-# propshaft on a driven rear axle, a front diff on four-wheel drive, the chassis rails
-# of a body on a frame. The lowest of them sits at the published clearance, which is
-# what the runtime fits the body's bottom to. {engine: 'front'|'rear', frame: bool}.
+# The underside. The body's own bottom closes it flush along the sills; below it hang
+# only round, real parts: a live rear axle's tube and the diff's pumpkin (whose bottom
+# is such a car's clearance), a 4x4's front diff, the exhaust with its silencer (the
+# lowest point of a car without a live axle), a frame's rails tucked under the floor.
+# The lowest of them sits at the published clearance, which is what the runtime fits
+# the body's bottom to. {engine: 'front'|'rear', frame, independentRear, exhaustX}.
 ub = P.get('underbody', {})
 _roster = open(os.path.join(ROOT, 'src/vehicle/roster.ts')).read()
 _m = re.search(r"id: 'rs_%s'.*?rearDriveBias: ([\d.]+)" % car, _roster, re.S)
@@ -1016,38 +1082,66 @@ def floor_at(y_):
     return hit.z if hit is not None else min(info['sill'])
 
 
-def hang(bm_, x0, x1, y0, y1, z_bottom):
-    """A block from z_bottom up into the body (its top buried 3 cm in the floor)."""
-    z_top = max(floor_at(y_) for y_ in np.linspace(y0, y1, 4)) + 0.03
-    if z_top > z_bottom:
-        box(bm_, ((x0 + x1) / 2, (y0 + y1) / 2, (z_bottom + z_top) / 2), (x1 - x0, y1 - y0, z_top - z_bottom), 0)
+def pod(bm_, c, rx, ry, rz, segs=12):
+    """A rounded housing (a diff's pumpkin, a silencer's can): a squashed sphere."""
+    r = bmesh.ops.create_uvsphere(bm_, u_segments=segs, v_segments=max(6, segs // 2), radius=1.0)
+    bmesh.ops.transform(bm_, matrix=Matrix.Translation(Vector(c)) @ Matrix.Diagonal((rx, ry, rz, 1)), verts=r['verts'])
+
+
+def tube(bm_, a, b, r, segs=10):
+    """A pipe from a to b."""
+    a, b = Vector(a), Vector(b)
+    d = b - a
+    if d.length < 1e-4:
+        return
+    disc(bm_, (a + b) / 2, d.normalized(), r, d.length, segments=segs)
 
 
 bm_ = bmesh.new()
 rear_engine = ub.get('engine', 'front') == 'rear'
-ye = yB if rear_engine else yA
-# Sump and gearbox, and a crossmember (the subframe) across the engine bay.
-hang(bm_, -0.17, 0.17, ye - 0.12, ye + 0.22 if not rear_engine else ye + 0.32, C)
-hang(bm_, -inner + 0.06, inner - 0.06, ye + 0.02, ye + 0.10, C + 0.07)
-if rear_bias > 0 and not rear_engine:
-    # A driven rear axle: the casing between the wheels at hub height, the diff, and the
-    # propshaft just under the tunnel.
-    disc(bm_, (0, yB, R), (1, 0, 0), 0.045, 2 * inner, segments=12)
-    hang(bm_, -0.15, 0.15, yB - 0.13, yB + 0.13, C + 0.005)
-    z_ps = max(floor_at((yA + yB) / 2) - 0.03, C + 0.04)
-    disc(bm_, (0, (yA + 0.22 + yB - 0.13) / 2, z_ps), (0, 1, 0), 0.035, (yB - 0.13) - (yA + 0.22), segments=10)
+x_ex = ub.get('exhaustX', 0.25)
+live_rear = rear_bias > 0 and not rear_engine and not ub.get('independentRear')
+if live_rear:
+    # A live rear axle: the tube between the hubs and the diff's pumpkin on it, its
+    # bottom the car's lowest point.
+    disc(bm_, (0, yB, R), (1, 0, 0), 0.04, 2 * inner, segments=12)
+    rr = max(R - C, 0.06)
+    pod(bm_, (0.04, yB, R), 0.13, min(rr, 0.15), rr, 14)
+    # the propshaft up to the gearbox, just under the floor
+    z_ps = floor_at((yA + yB) / 2) - 0.04
+    tube(bm_, (0, yA + 0.35, z_ps), (0, yB - 0.12, R), 0.032)
 if 0 < rear_bias < 1:
-    hang(bm_, -0.05, 0.22, yA - 0.12, yA + 0.12, C + 0.02)
+    # four-wheel drive: the front axle's diff, a little higher than the rear's
+    rf = max(R - C - 0.02, 0.06)
+    pod(bm_, (-0.08, yA, R), 0.12, min(rf, 0.14), rf, 14)
     if ub.get('frame'):
-        disc(bm_, (0, yA, R), (1, 0, 0), 0.045, 2 * inner, segments=12)
+        disc(bm_, (0, yA, R), (1, 0, 0), 0.04, 2 * inner, segments=12)
+# The exhaust: a pipe along under the floor from the engine to a silencer hung
+# ahead of the rear axle (behind it, across the tail, on a rear-engined car). When
+# nothing else reaches the clearance (no live axle), the silencer's bottom does.
+z_low = C if not (live_rear or 0 < rear_bias < 1) else None
+if rear_engine:
+    ys = yB + 0.35
+    zs_ = (z_low if z_low is not None else floor_at(ys) - 0.12) + 0.06
+    pod(bm_, (0, ys, zs_), inner * 0.75, 0.08, 0.06, 12)
+else:
+    y_sil = yB - R - 0.35
+    z_floor = floor_at(y_sil)
+    zs_ = (z_low + 0.065) if z_low is not None else max(z_floor - 0.08, C + 0.07)
+    pod(bm_, (x_ex, y_sil, zs_), 0.11, 0.26, 0.065, 12)
+    zp = min(floor_at((yA + y_sil) / 2) - 0.035, zs_ + 0.03)
+    tube(bm_, (x_ex * 0.6, yA + 0.15, zp + 0.02), (x_ex, y_sil - 0.24, zs_), 0.024)
+    # tail pipe out behind the silencer, under the tail
+    y_t = L / 2 - 0.15
+    tube(bm_, (x_ex, y_sil + 0.24, zs_), (x_ex + 0.1, y_t, max(zs_, floor_at(y_t) - 0.05)), 0.022)
 if ub.get('frame'):
-    # The chassis rails, under the body from end to end, following its floor.
+    # The chassis rails, tucked under the body from end to end, following its floor.
     xr = inner - 0.22
-    ys_ = np.linspace(-L / 2 + 0.3, L / 2 - 0.25, 12)
+    ys_ = np.linspace(-L / 2 + 0.35, L / 2 - 0.3, 12)
     for y0_, y1_ in zip(ys_, ys_[1:]):
         zf = floor_at((y0_ + y1_) / 2)
         for sx in (1, -1):
-            box(bm_, (sx * xr, (y0_ + y1_) / 2, zf - 0.05), (0.07, y1_ - y0_ + 0.01, 0.16), 0)
+            box(bm_, (sx * xr, (y0_ + y1_) / 2, zf - 0.03), (0.06, y1_ - y0_ + 0.01, 0.10), 0)
 trim_parts.append(new_object('underbody', bm_, ['trim']))
 
 # Arch flares and lips: a band round each wheel arch standing off the body side, built
