@@ -152,7 +152,8 @@ def build(car):
     # ---- sections ------------------------------------------------------------------
     secs = {}
     for end in ('front', 'rear'):
-        s = bp.get(end, bp.get('front')).copy()
+        # No end views at all: a plain box section (the stations give the shape).
+        s = bp.get(end, bp.get('front', np.full(len(zs), W / 2))).copy()
         # Mirrors and lamp pods stick out of an end view for a few centimetres of height:
         # a running median as tall as a mirror head takes them out of the section.
         med = hs.get('sectionMedian', 15)
