@@ -1415,7 +1415,7 @@ export const ROSTER: readonly RosterCar[] = [
     label: 'Plymouth Valiant',
     body: 'valiant.glb',
     bodyClass: 'car',
-    factory: { length: 4.628, width: 1.78, height: 1.355, clearance: 0.15, wheelbase: 2.705, frontTrack: 1.42, rearTrack: 1.41, wheelRadius: 0.3, tyreWidth: 0.165, frontOverhang: 0.86 },
+    factory: { length: 4.628, width: 1.78, height: 1.355, clearance: 0.15, wheelbase: 2.705, frontTrack: 1.42, rearTrack: 1.41, wheelRadius: 0.3, tyreWidth: 0.165, frontOverhang: 0.78 },
     mass: 1250,
     frontWeightShare: 0.55,
     rearDriveBias: 1,
