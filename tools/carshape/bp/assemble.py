@@ -1003,3 +1003,13 @@ if preview:
         cam.rotation_euler = (target - pos).to_track_quat('-Z', 'Y').to_euler()
         sc.render.filepath = preview.replace('.png', f'-{name}.png')
         bpy.ops.render.render(write_still=True)
+    # Zebra: a striped reflection shows every wave and dent the way the game's sun does.
+    sc.display.shading.light = 'MATCAP'
+    sc.display.shading.studio_light = 'check_reflection_horizontal.exr'
+    sc.display.shading.color_type = 'SINGLE'
+    for name in ('front34', 'rear34', 'side'):
+        pos = views[name]
+        cam.location = pos
+        cam.rotation_euler = (target - pos).to_track_quat('-Z', 'Y').to_euler()
+        sc.render.filepath = preview.replace('.png', f'-z{name}.png')
+        bpy.ops.render.render(write_still=True)

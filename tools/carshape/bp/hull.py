@@ -302,7 +302,10 @@ def build(car):
     pad = 4
     full = np.pad(np.clip(full, -4 * G, 4 * G), pad, constant_values=-4 * G)
     sigma = hs.get('edge', 0.015) / G
-    smooth = ndimage.gaussian_filter(full, sigma)
+    # Along the car the shell is built station by station: a longer blur there evens out
+    # the steps between them (a dent where the cabin ends, a ripple from a drawn line).
+    sigma_y = max(sigma, hs.get('edgeY', 0.035) / G)
+    smooth = ndimage.gaussian_filter(full, (sigma, sigma, sigma_y))
     verts, faces, normals, _ = measure.marching_cubes(smooth, 0.0)
     verts = (verts - pad) * G
     verts[:, 0] += xs_full[0]

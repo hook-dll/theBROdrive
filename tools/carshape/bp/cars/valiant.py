@@ -4,6 +4,9 @@
 # front axle 0.78 behind the bumper). The compact: a long flat bonnet over a full-width
 # grille with the lamps in its ends, a crisp feature line from the nose along the flank,
 # a thin-pillared glasshouse, a long flat deck.
+# Slab sides up to the shoulder crease, a short tumblehome to the belt, a wide glasshouse.
+SEC = [[0.30, 0.80], [0.40, 0.87], [0.82, 0.89], [0.88, 0.88], [0.96, 0.85], [1.02, 0.82], [1.15, 0.78], [1.28, 0.73], [1.35, 0.66],
+       [1.39, 0.45], [1.40, 0.2]]
 CAR = {
     'id': 'valiant',
     'label': 'Plymouth Valiant',
@@ -19,10 +22,17 @@ CAR = {
     'hull': {
         'bumpers': {'front': {'z': [0.38, 0.53]}, 'rear': {'z': [0.38, 0.53]}},
         'sill': [[-2.3, 0.38], [-2.0, 0.34], [-1.0, 0.30], [0.7, 0.30], [1.5, 0.33], [2.4, 0.38]],
-        'planOverride': [[-2.31, 0.80], [-2.22, 0.87], [-2.0, 0.89], [2.0, 0.89], [2.3, 0.86], [2.40, 0.80]],
+        'planOverride': [[-2.31, 0.85], [-2.26, 0.885], [-2.0, 0.89], [2.0, 0.89], [2.3, 0.86], [2.40, 0.80]],
+        'sectionStations': [{'y': -2.0, 'half': SEC}, {'y': 2.15, 'half': SEC}],
+        'stationBlend': 0.3,
+        # Flat bonnet between the wings' crisp top edges.
+        'topCross': [
+            {'y': -2.25, 'z': [[0.0, 0.90], [0.50, 0.905], [0.78, 0.93], [0.86, 0.92], [0.89, 0.86]]},
+            {'y': -0.85, 'z': [[0.0, 1.03], [0.50, 1.035], [0.78, 1.05], [0.86, 1.04], [0.89, 0.99]]},
+        ],
         'cabin': [-0.83, 1.43],
         'belt': [[-0.83, 1.03], [-0.5, 1.02], [0.7, 1.02], [1.43, 1.03]],
-        'glassPlan': [[-0.83, 0.70], [-0.4, 0.76], [0.8, 0.76], [1.43, 0.68]],
+        'glassPlan': [[-0.83, 0.76], [-0.4, 0.81], [0.8, 0.81], [1.43, 0.76]],
         'crown': [[-2.4, 0.02], [2.4, 0.02]],
         'roofCrown': 0.03,
         'edge': 0.010,
@@ -32,20 +42,18 @@ CAR = {
         'glass': [
             {'view': 'side', 'outline': [[0.04, 1.025], [-0.605, 1.025], [-0.444, 1.33], [0.04, 1.33]], 'facingMin': 0.3},
             {'view': 'side', 'outline': [[0.606, 1.025], [0.101, 1.025], [0.101, 1.33], [0.606, 1.33]], 'facingMin': 0.3},
-            {'view': 'front', 'outline': [[0.0, 1.36], [0.55, 1.35], [0.66, 1.28], [0.72, 1.06], [0.68, 1.04], [0.0, 1.04]],
-             'depthRange': [-1.1, -0.3], 'facingMin': 0.2},
+            {'view': 'front', 'outline': [[0.0, 1.36], [0.55, 1.35], [0.66, 1.28], [0.72, 1.08], [0.68, 1.06], [0.0, 1.06]],
+             'depthRange': [-0.84, -0.3], 'facingMin': 0.2},
             {'view': 'rear', 'outline': [[0.0, 1.36], [0.55, 1.35], [0.66, 1.28], [0.72, 1.06], [0.68, 1.04], [0.0, 1.04]],
              'depthRange': [0.9, 1.6], 'facingMin': 0.15},
         ],
+        'podLamps': [{'node': 'headlights', 'x': 0.75, 'z': 0.60, 'r': 0.085, 'end': 'front', 'bezel': 0.02, 'podDepth': 0.05,
+                      'proud': 0.005}],
         'decals': [
             {'view': 'front', 'rect': [[0.0, 0.58], [1.66, 0.28]], 'radius': 0.03, 'mirror': False, 'material': 'chrome',
              'height': 0.003, 'depthRange': [-2.4, -2.0]},
             {'view': 'front', 'rect': [[0.0, 0.58], [1.30, 0.24]], 'radius': 0.02, 'mirror': False, 'material': 'grille',
              'height': 0.005, 'depthRange': [-2.4, -2.0]},
-            {'view': 'front', 'circle': [[0.765, 0.58], 0.105], 'material': 'chrome', 'height': 0.007, 'depthRange': [-2.4, -2.0],
-             'facingMin': 0.0},
-            {'view': 'front', 'node': 'headlights', 'circle': [[0.765, 0.58], 0.085], 'material': 'Headlights', 'height': 0.011,
-             'depthRange': [-2.4, -2.0], 'facingMin': 0.0},
             {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.62, 0.48], [0.10, 0.03]], 'radius': 0.008,
              'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [-2.4, -2.0]},
             {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.62, 0.48], [0.10, 0.03]], 'radius': 0.008,
