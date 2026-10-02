@@ -1991,7 +1991,7 @@ const ENTRIES: readonly Entry[] = [
   ...PROVING_SPECS,
   ...ROSTER_CARS,
 ];
-export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
+const ALL_CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   id: e.id,
   label: e.label,
   file: `${e.dir}/${e.glb}`,
@@ -2029,14 +2029,26 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   storageCells: TRUNK_CELL_COUNT,
 }));
 
-const BY_ID = new Map(CAR_MODELS.map((m) => [m.id, m]));
+/**
+ * While the roster's bodies are being brought to their real cars (cooking.md), only
+ * the fifty roster cars are offered anywhere: the spawn menu, traffic, roadside
+ * cars, the story. Every other model still resolves by id, so saves and dev tools
+ * that name one keep working.
+ */
+const ROSTER_ONLY = true;
+
+export const CAR_MODELS: readonly CarModelDef[] = ROSTER_ONLY
+  ? ALL_CAR_MODELS.filter((m) => ROSTER_FACTORY.has(m.id))
+  : ALL_CAR_MODELS;
+
+const BY_ID = new Map(ALL_CAR_MODELS.map((m) => [m.id, m]));
 
 /**
  * The model a new game starts in and every unknown saved id resolves to. The
  * Zhiguli: the cheapest, softest, most ordinary thing in the catalogue, and the
  * one car this game is most about.
  */
-export const DEFAULT_CAR_MODEL_ID = 'sv_vaz2101';
+export const DEFAULT_CAR_MODEL_ID = ROSTER_ONLY ? 'rs_vaz2101' : 'sv_vaz2101';
 
 export function carModel(id: string): CarModelDef {
   const m = BY_ID.get(id);
