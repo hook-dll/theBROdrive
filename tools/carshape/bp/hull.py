@@ -164,6 +164,12 @@ def build(car):
     # ---- plan --------------------------------------------------------------------------
     # No top view: the plan is the factory width, or what planOverride gives.
     plan = smooth1(bp['plan'], 9, 3.0) if 'plan' in bp else np.full(len(ys), W / 2)
+    # The top view's outline carries the mirrors, handles and lamp pods too: whatever
+    # stands out of it for less than `planOpen` along the car is taken out, or it widens
+    # the whole section there and bends the side (a bulge at the screen pillar).
+    op = int(round(hs.get('planOpen', 0.30) / G))
+    if op > 1 and 'plan' in bp:
+        plan = ndimage.grey_opening(plan, size=op, mode='nearest')
     # Away from the ends the plan is a long, slow curve: lines the top view draws
     # along the sides (mouldings, shut lines) only nick it.
     plan = smooth_inner(plan, ys, hs.get('planSmooth', 0.08), 0.18)
@@ -186,6 +192,13 @@ def build(car):
         med = hs.get('sectionMedian', 15)
         if med:
             s = ndimage.median_filter(s, size=med, mode='nearest')
+        # Whatever stands out of the outline for less than `sectionOpen` of height is
+        # not the body's section (mirrors on their arms, lamp pods, handles, drip
+        # rails): taken out by an opening, which leaves wider shapes as they are. Left
+        # in, a mirror made the glasshouse's reference width and pinched it at the belt.
+        op = int(round(hs.get('sectionOpen', 0.25) / G))
+        if op > 1:
+            s = ndimage.grey_opening(s, size=op, mode='nearest')
         s = smooth1(s, 7, 2.0)
         s = smooth_inner(s, zs, hs.get('sectionSmooth', 0.03), 0.06)
         b = hs.get('bumpers', {}).get(end)
@@ -211,7 +224,14 @@ def build(car):
     ya_r = ya_f + F['wheelbase']
     t = np.clip((ys - ya_f) / (ya_r - ya_f), 0, 1)
     t = t * t * (3 - 2 * t)
-    sec = secs['front'][:, None] * (1 - t[None, :]) + secs['rear'][:, None] * t[None, :]   # [z, y]
+    # Both end views are the outline of one body seen from either end: they differ only
+    # in what is drawn on them. One section for the whole car, their mean, unless the
+    # car asks for the old blend from one to the other along the wheelbase (which bent
+    # the sides slowly from one shape into the other).
+    if hs.get('sectionBlend'):
+        sec = secs['front'][:, None] * (1 - t[None, :]) + secs['rear'][:, None] * t[None, :]   # [z, y]
+    else:
+        sec = np.repeat(((secs['front'] + secs['rear']) / 2)[:, None], len(ys), axis=1)
     # Sections given outright over a span of stations, {y: [y0, y1], half: [[z, x], ...],
     # blend}: a body whose middle is not a blend of its ends (the Beetle's doors are
     # narrower than the wings either side of them).

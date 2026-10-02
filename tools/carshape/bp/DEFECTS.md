@@ -25,13 +25,22 @@ in-game contact sheet, install.sh, commit.
 
 ## The list
 
-1. **Underside on every car.** [done 824adb5, in every rebuild since] The floor
-   closes at the sills; only the real low points (sump and subframe, a driven rear
-   axle and its diff, a 4x4's front diff, a frame's rails) reach the clearance.
-2. **Waves.** Measured on the dense hull: the side is smooth to 0.01 degrees of slope
-   between the arches and the field normals agree with the faces to 0.06 degrees, so
-   the waves are not triangle noise but shape: they live round the arches, at the
-   shoulder and where profiles meet. Open.
+1. **Underside on every car.** [done 824adb5, reworked dafb636] No boxes: the floor
+   closes at the sills and below it hang only round, real parts: a live rear axle's
+   tube and the diff's pumpkin (its bottom the clearance), a 4x4's front diff, the
+   propshaft, the exhaust and its silencer (the lowest point of a car without a live
+   axle), a frame's slim rails.
+2. **Waves.** [done dafb636] What the user saw as dents and bulges round the arches
+   and diagonal wedges up the wings was two things. (a) The wells were cut into the
+   distance field before it was smoothed, so the blur spread the sharp cut into a
+   ring; they are now cut after, rounded only by `archEdge` (2 cm). (b) Blender's
+   projected normal transfer from the dense shell to the working one gave corners on
+   the side the normal of the arch's wall; the side's long fan triangles spread it
+   into wedges. Now each vertex takes the dense shell's smooth normal (the distance
+   field's gradient, written into hull.ply by hull.py) found along its own normal, and
+   a corner on a crease takes its own face's side, sampled a little way into the face.
+   Checked by rendering the dense shell, the working shell and the final body alone
+   from the same view: final now matches dense.
 3. **Compression artefacts (accordion).** [done 362a66c] Folds across the body at the
    points of the car files' lines: sill, belt, glass plan, crown, plan and top
    overrides and the sections between stations were joined by straight pieces; they
@@ -47,7 +56,8 @@ in-game contact sheet, install.sh, commit.
    bonnet edge) blur away; tails and noses swell (2CV tail, MX-5 tail). Open.
 6. Soft tops / canvas. [done 3f01c20] MX-5's hood rail black, 2CV's canvas stops at
    the back light's foot.
-7. Lamp decals with torn edges (UAZ reversing lamp). Open.
+7. Lamps on rounded ends. [done] End lamps may turn the corner a little (facing
+   limit 0.1) and are cut cleanly along the limit, not torn into pieces.
 
 Done before: no number plates or blank plate patches (824adb5); arch flares built on
 the skin.

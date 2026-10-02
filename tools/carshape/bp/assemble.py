@@ -502,8 +502,10 @@ for f in bm.faces:
 for r in P.get('regions', []):
     for sign, poly in sides_of(r):
         cut(r['view'], sign, poly, r)
+        if r.get('facingMin', 0.2) > -0.5:
+            iso_cut(r['view'], sign, poly, r)
     for sign, poly in sides_of(r):
-        for f in select(r['view'], sign, poly, r):
+        for f in select(r['view'], sign, poly, dict(r, iso=True)):
             if f.material_index == SLOT['paint']:
                 f.material_index = SLOT[r.get('material', 'trim')]
 
