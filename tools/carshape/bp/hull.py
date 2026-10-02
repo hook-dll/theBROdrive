@@ -167,6 +167,16 @@ def build(car):
         # Below the sill the drawing shows tyres, not body: hold the sill's width.
         z_lo = min(hs['sill'], key=lambda p: p[1])[1]
         s[zs < z_lo + 0.05] = s[np.searchsorted(zs, z_lo + 0.05)]
+        if hs.get('sectionExtendTop'):
+            # An end view drawn lower than the hull's top (an open car given a hood):
+            # the glasshouse keeps its topmost drawn width up to the roof.
+            nz = np.nonzero(s > 0.05)[0]
+            if len(nz):
+                k = nz[-1]
+                ext = hs['sectionExtendTop']
+                s[k + 1:] = ext if not isinstance(ext, bool) else s[max(k - 3, 0)]
+                # and the last drawn rows blend into it
+                s[max(k - 8, 0):k + 1] = np.maximum(s[max(k - 8, 0):k + 1], np.linspace(s[max(k - 8, 0)], s[k + 1], k + 1 - max(k - 8, 0)))
         secs[end] = np.minimum(s, W / 2)
     ya_f = -L / 2 + F['frontOverhang']
     ya_r = ya_f + F['wheelbase']
