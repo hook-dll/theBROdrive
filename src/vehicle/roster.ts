@@ -421,7 +421,7 @@ export const ROSTER: readonly RosterCar[] = [
     label: 'Renault 5 Alpine',
     body: 'renault5.glb',
     bodyClass: 'car',
-    factory: { length: 3.506, width: 1.525, height: 1.33, clearance: 0.12, wheelbase: 2.434, frontTrack: 1.29, rearTrack: 1.27, wheelRadius: 0.275, tyreWidth: 0.155, frontOverhang: 0.55 },
+    factory: { length: 3.506, width: 1.525, height: 1.33, clearance: 0.12, wheelbase: 2.434, frontTrack: 1.29, rearTrack: 1.27, wheelRadius: 0.275, tyreWidth: 0.155, frontOverhang: 0.50 },
     mass: 850,
     frontWeightShare: 0.6,
     rearDriveBias: 0,
