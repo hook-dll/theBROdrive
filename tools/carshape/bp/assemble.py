@@ -965,9 +965,20 @@ for lp in P.get('podLamps', []):
         y_back -= sgn_end * 0.03
         n_ = (0, sgn_end, 0)
         b_, mats = LAMP_SOLID.setdefault(node, (bmesh.new(), [lp.get('material', 'Headlights')]))
+        bz = lp.get('bezel', 0.014)
+        if lp.get('seat') == 'flush' and hitc is not None:
+            # Under a cover on a sloping wing: the lens and its ring lie on the skin,
+            # facing the way the skin does there.
+            _h, nrm = skin_point((x, sgn_end * (L / 2 + 1.0), z), (0, -sgn_end, 0), L + 2)
+            nv = Vector(nrm).normalized()
+            c_ = Vector(hitc)
+            disc(b_, c_ + nv * 0.007, nv, r, 0.008, 24, 0)
+            tb = bmesh.new()
+            disc(tb, c_ + nv * 0.003, nv, r + bz, 0.008, 24, 0)
+            trim_parts.append(new_object('pod_rim', tb, [lp.get('bezelMaterial', 'chrome')]))
+            continue
         disc(b_, (x, y_face + sgn_end * 0.004, z), n_, r, 0.012, 24, 0)
         tb = bmesh.new()
-        bz = lp.get('bezel', 0.014)
         disc(tb, (x, y_face - sgn_end * 0.001, z), n_, r + bz, 0.012, 24, 0)
         trim_parts.append(new_object('pod_rim', tb, [lp.get('bezelMaterial', 'chrome')]))
         if lp.get('pod', True) and abs(y_back - y_face) > 0.01:

@@ -25,6 +25,7 @@ CAR = {
         'arch': {'radius': 0.40, 'lift': 0.04, 'rear': {'skirt': True}},
     },
     'parts': {
+        # The lamps stand under the covers facing straight ahead in chrome rings (podLamps).
         'glass': [
             {'view': 'side', 'outline': [[-0.387, 1.107], [-0.337, 0.972], [0.334, 0.96], [0.33, 1.316], [0.099, 1.33], [-0.182, 1.34],
                                          [-0.227, 1.312]], 'facingMin': 0.3},
@@ -38,12 +39,10 @@ CAR = {
         ],
         'decals': [
             # The faired headlamps: twin lamps under a glass cover in each wing.
-            {'view': 'front', 'outline': [[0.54, 0.80], [0.66, 0.87], [0.85, 0.88], [0.93, 0.78], [0.92, 0.66], [0.85, 0.63], [0.58, 0.63]],
-             'material': 'grille', 'height': 0.004, 'depthRange': [-2.5, -1.6], 'facingMin': 0.2},
-            {'view': 'front', 'node': 'headlights', 'circle': [[0.833, 0.745], 0.09], 'material': 'Headlights',
-             'height': 0.008, 'depthRange': [-2.5, -1.6], 'facingMin': 0.2},
-            {'view': 'front', 'node': 'headlights', 'circle': [[0.62, 0.735], 0.072], 'material': 'Headlights',
-             'height': 0.008, 'depthRange': [-2.5, -1.6], 'facingMin': 0.2},
+            # (the cover's outline from the front view: x=(px-655)/620, z=1-(py-325)/674)
+            {'view': 'front', 'outline': [[0.50, 0.651], [0.532, 0.815], [0.718, 0.889], [0.903, 0.881], [0.968, 0.785],
+                                          [0.968, 0.622], [0.556, 0.629]],
+             'material': 'grille', 'height': 0.004, 'depthRange': [-2.5, -1.6]},
             {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.83, 0.57], [0.12, 0.035]], 'radius': 0.008,
              'material': 'IndicatorLights', 'height': 0.006, 'depthRange': [-2.5, -1.6], 'facingMin': 0.1},
             {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.83, 0.57], [0.12, 0.035]], 'radius': 0.008,
@@ -67,6 +66,10 @@ CAR = {
              'height': 0.006, 'depthRange': [2.0, 2.6]},
         ],
         'podLamps': [
+            {'node': 'headlights', 'x': 0.815, 'z': 0.755, 'r': 0.095, 'end': 'front', 'bezel': 0.012, 'pod': False,
+             'proud': 0.0, 'seat': 'flush'},
+            {'node': 'headlights', 'x': 0.605, 'z': 0.733, 'r': 0.080, 'end': 'front', 'bezel': 0.010, 'pod': False,
+             'proud': 0.0, 'seat': 'flush'},
             {'node': 'rear_blinker_left', 'x': 0.555, 'z': 1.31, 'r': 0.035, 'end': 'rear', 'material': 'IndicatorLights',
              'bezel': 0.012, 'bezelMaterial': 'chrome', 'podDepth': 0.12},
             {'node': 'rear_blinker_right', 'x': 0.555, 'z': 1.31, 'r': 0.035, 'end': 'rear', 'material': 'IndicatorLights',
