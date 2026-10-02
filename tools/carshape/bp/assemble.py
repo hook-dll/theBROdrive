@@ -815,6 +815,18 @@ z_top = min(info['sill']) + 0.05
 box(bm_, (0, (y0p[0] + y0p[1]) / 2, (F['clearance'] + z_top) / 2), (2 * fl.get('half', x_pan), y0p[1] - y0p[0], z_top - F['clearance']), 0)
 trim_parts.append(new_object('floor', bm_, ['trim']))
 
+# Spare wheels on a tail door or a bonnet: {c, n (the way it faces), r, w}, a tyre with
+# its rim and hub.
+for sp in P.get('spares', []):
+    bm_ = bmesh.new()
+    c, n_ = Vector(sp['c']), Vector(sp.get('n', (0, 1, 0))).normalized()
+    r, w = sp['r'], sp.get('w', 0.2)
+    disc(bm_, c, n_, r * 0.97, w * 0.8, 28, 0, r * 0.97)
+    disc(bm_, c + n_ * (w * 0.4), n_, r * 0.88, 0.01, 28, 0, r * 0.85)
+    disc(bm_, c + n_ * (w * 0.42), n_, r * 0.6, 0.02, 24, 1)
+    disc(bm_, c + n_ * (w * 0.44), n_, r * 0.22, 0.03, 16, 1)
+    trim_parts.append(new_object('spare', bm_, ['Tyres', sp.get('rim', 'wheel_rim')]))
+
 # Extra hand-placed solid boxes (aerials, spare wheel carriers, roof racks...).
 for bx in P.get('boxes', []):
     bm_ = bmesh.new()
