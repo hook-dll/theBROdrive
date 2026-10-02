@@ -229,8 +229,13 @@ def candidates(view, sign, poly, d):
     lo, hi = arr.min(axis=0) - 0.03, arr.max(axis=0) + 0.03
     dr = d.get('depthRange')
     out = []
+    iso = d.get('iso')
     for f in bm.faces:
-        if f.normal.dot(facing) < lim:
+        if iso:
+            # after iso_cut: a face is in when its corners are, so the edge is the cut line
+            if sum(v.normal.dot(facing) for v in f.verts) / len(f.verts) < lim - 1e-3:
+                continue
+        elif f.normal.dot(facing) < lim:
             continue
         c = f.calc_center_median()
         # Overlap of the face's own box, not its centre: a long sliver whose centre
@@ -368,6 +373,79 @@ def fit_pane(view, sign, poly, d, ks=None):
     return moved(*ks)
 
 
+def iso_cut(view, sign, poly, d):
+    """Cuts the shell inside an outline along the line where it turns past the view's
+    facing limit, so a pane that runs onto a surface turning away (a tumblehome, a
+    fastback's shoulders) ends in a smooth edge, not in the teeth of whole triangles."""
+    V = VIEW[view]
+    facing = Vector((sign, 0, 0)) if view == 'side' else V['facing'].copy()
+    lim = d.get('facingMin', 0.2)
+    bm.normal_update()
+    region = select(view, sign, poly, dict(d, facingMin=-1.0))
+    val = {}
+    for f in region:
+        for v in f.verts:
+            if v not in val:
+                val[v] = v.normal.dot(facing) - lim
+    edges = {e for f in region for e in f.edges
+             if all(v in val for v in e.verts) and val[e.verts[0]] * val[e.verts[1]] < 0
+             and min(abs(val[e.verts[0]]), abs(val[e.verts[1]])) > 1e-4}
+    new = set()
+    for e in edges:
+        v0, v1 = e.verts
+        t = val[v0] / (val[v0] - val[v1])
+        n0, n1 = v0.normal.copy(), v1.normal.copy()
+        _e, nv = bmesh.utils.edge_split(e, v0, t)
+        nv.normal = n0.lerp(n1, t).normalized()
+        new.add(nv)
+    faces = {f for v in new for f in v.link_faces}
+    for f in faces:
+        vs = [v for v in f.verts if v in new]
+        if len(vs) == 2 and not any(e for e in vs[0].link_edges if e.other_vert(vs[0]) is vs[1]):
+            try:
+                bmesh.ops.connect_verts(bm, verts=vs)
+            except Exception:
+                pass
+    # the new corners' normals: their own, kept for the selection
+    for v in new:
+        v.normal = v.normal.normalized()
+
+
+def along_pane(ln):
+    """A line drawn along a pane's edge in the same view (a window's frame or rubber):
+    most of its length within 5 cm of the edge of a pane's outline."""
+    pts = np.array(ln['points'], float)
+    if len(pts) < 2 or ln.get('width', 0.005) > 0.03:
+        return False
+    edges = []
+    for g in GL:
+        if g['view'] != ln['view'] or 'outline' not in g:
+            continue
+        o = np.array(g['outline'], float)
+        edges += list(zip(o, np.roll(o, -1, axis=0)))
+        if ln['view'] in ('front', 'rear'):
+            om = o * np.array([-1, 1])
+            edges += list(zip(om, np.roll(om, -1, axis=0)))
+    if not edges:
+        return False
+    samples = []
+    for p, q in zip(pts, pts[1:]):
+        n_ = max(2, int(np.linalg.norm(q - p) / 0.02))
+        samples += [p + (q - p) * t for t in np.linspace(0, 1, n_)]
+    near = 0
+    for s_ in samples:
+        dmin = min(np.linalg.norm(s_ - (a + np.clip(np.dot(s_ - a, b - a) / max(np.dot(b - a, b - a), 1e-12), 0, 1) * (b - a)))
+                   for a, b in edges)
+        near += dmin < 0.05
+    return near / len(samples) > 0.7
+
+
+FRAME_LINES = [ln for ln in P.get('lines', []) if along_pane(ln)]
+_mats = [ln.get('material', 'rubber') for ln in FRAME_LINES]
+SEAL = P.get('glassSeal', {'material': max(set(_mats), key=_mats.count) if _mats else 'rubber'})
+SEAL.setdefault('width', 0.012 if SEAL['material'] == 'chrome' else 0.014)
+print('SEAL', car, SEAL, 'frame lines dropped', len(FRAME_LINES))
+
 FIT_KS = {}
 FITTED = {}
 for gi, g in enumerate(GL):
@@ -375,16 +453,19 @@ for gi, g in enumerate(GL):
         # Both halves of a screen take the first half's fit: a pane is symmetric.
         FITTED[(gi, sign)] = fit_pane(g['view'], sign, poly, g, FIT_KS.get((g['view'], id(g))))
         cut(g['view'], sign, FITTED[(gi, sign)], g)
+        iso_cut(g['view'], sign, FITTED[(gi, sign)], g)
 for gi, g in enumerate(GL):
     for sign, poly in sides_of(g):
         poly = FITTED[(gi, sign)]
-        sel = set(select(g['view'], sign, poly, g))
+        sel = set(select(g['view'], sign, poly, dict(g, iso=True)))
         glass_faces |= sel
         # A pane whose outline runs off the surface the view sees ends in a ragged
         # edge (faces inside the outline but turned away): reported, so the outline
         # can be brought in.
         loose = set(select(g['view'], sign, poly, dict(g, facingMin=-1.0))) - sel
-        rf = [f for f in loose if any(o in sel for e in f.edges for o in e.link_faces)]
+        rf = [f for f in loose if any(o in sel for e in f.edges for o in e.link_faces)
+              and min(v.normal.dot(Vector((sign, 0, 0)) if g['view'] == 'side' else VIEW[g['view']]['facing'])
+                      for v in f.verts) < g.get('facingMin', 0.2) - 0.05]
         ragged = len(rf)
         if os.environ.get('RAGDEBUG') and g['view'] != 'side':
             p0 = sides_of(g)[0][1] if sign == 1 else sides_of(g)[-1][1]
@@ -479,8 +560,11 @@ def decal_shapes():
             for sign, poly in sides_of(strip):
                 out.append((d['view'], sign, poly, strip, 'decal_trim', d.get('material', 'chrome'), d.get('height', 0.008), None))
     # Lines on the skin: shut lines, window rubbers, rubbing strips. A polyline
-    # [[a, b], ...] in a view, `width` wide.
+    # [[a, b], ...] in a view, `width` wide. A window's frame is not drawn: the panes
+    # carry their own seal (SEAL), so a line running along a pane's edge is left out.
     for ln in P.get('lines', []):
+        if ln in FRAME_LINES:
+            continue
         pts = np.array(ln['points'], float)
         w = ln.get('width', 0.005)
         for p, q in zip(pts, pts[1:]):
@@ -497,6 +581,39 @@ def decal_shapes():
     return out
 
 
+# The seal round every pane: a band of even width inside the pane's own edge, so it
+# follows the glass exactly (a drawn frame never quite did), lifted like a decal.
+_gl = [f for f in bm.faces if f.material_index == SLOT['glass']]
+# First the panes' edges are evened out: where the cut met the triangles unluckily the
+# edge has notches; each edge vertex is drawn towards the middle of its neighbours
+# along the edge and laid back on the surface.
+_tree0 = BVHTree.FromBMesh(bm)
+_gs = set(_gl)
+_bedges = [e for e in bm.edges if sum(1 for f in e.link_faces if f in _gs) == 1]
+_nb = {}
+for e in _bedges:
+    a_, b_ = e.verts
+    _nb.setdefault(a_, []).append(b_)
+    _nb.setdefault(b_, []).append(a_)
+for _ in range(P.get('paneEdgeRelax', 4)):
+    moves = {}
+    for v, ns in _nb.items():
+        if len(ns) != 2:
+            continue
+        d0, d1 = (ns[0].co - v.co), (ns[1].co - v.co)
+        if d0.length < 1e-6 or d1.length < 1e-6 or d0.normalized().dot(d1.normalized()) > -0.5:
+            continue            # a corner (sharper than 120 degrees) stays where it is
+        moves[v] = v.co * 0.5 + (ns[0].co + ns[1].co) * 0.25
+    for v, co in moves.items():
+        hit = _tree0.find_nearest(co)
+        v.co = hit[0] if hit[0] is not None else co
+bm.normal_update()
+if _gl and SEAL.get('width', 0) > 0:
+    res = bmesh.ops.inset_region(bm, faces=_gl, thickness=SEAL['width'], depth=0.0, use_even_offset=True)
+    t_seal = len(TAGS)
+    TAGS.append(('decal_trim', SEAL['material'], SEAL.get('height', 0.002)))
+    for f in res['faces']:
+        f.material_index = TAG0 + 4 * t_seal + SLOT['trim']
 print('FACES before decals', len(bm.faces))
 SHAPES = decal_shapes()
 for view, sign, poly, d, node, mat, height, hole in SHAPES:
