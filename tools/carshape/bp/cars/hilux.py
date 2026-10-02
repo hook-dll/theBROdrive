@@ -36,6 +36,7 @@ CAR = {
         'arch': {'radius': 0.40, 'lift': 0.03},
     },
     'parts': {
+        'underbody': {'frame': True},
         'glass': [
             {'view': 'side', 'outline': [[-0.13, 1.33], [-0.62, 1.33], [-0.88, 1.02], [-0.13, 1.02]], 'facingMin': 0.3},
             {'view': 'front', 'outline': [[0.0, 1.37], [0.58, 1.37], [0.66, 1.03], [0.0, 1.03]], 'depthRange': [-1.1, -0.5], 'facingMin': 0.2},

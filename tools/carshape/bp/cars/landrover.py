@@ -40,6 +40,7 @@ CAR = {
         'arch': {'radius': 0.43, 'lift': 0.0},
     },
     'parts': {
+        'underbody': {'frame': True},
         'paint2': {'name': 'trim_canvas', 'rgb': [0.32, 0.30, 0.22]},
         'glass': [
             {'view': 'side', 'outline': [[0.33, 1.22], [-0.27, 1.22], [-0.27, 1.62], [0.33, 1.62]], 'facingMin': 0.3},

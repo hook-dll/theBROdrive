@@ -33,6 +33,7 @@ CAR = {
         'arch': {'radius': 0.39, 'lift': 0.03},
     },
     'parts': {
+        'underbody': {'engine': 'rear'},
         'glass': [
             {'view': 'side', 'outline': [[-1.78, 1.30], [-0.97, 1.30], [-0.97, 1.64], [-1.70, 1.64], [-1.78, 1.55]], 'facingMin': 0.3},
             {'view': 'side', 'outline': [[-0.78, 1.30], [0.27, 1.30], [0.27, 1.64], [-0.78, 1.64]], 'facingMin': 0.3},

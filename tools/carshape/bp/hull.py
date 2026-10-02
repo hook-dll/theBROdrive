@@ -85,6 +85,19 @@ def build(car):
     zf = np.arange(zs[0], zs[-1] + 1e-9, G / FINE)
     side = bpread.sample_side(bp, yf, zf)                 # [z, y]
     side = ndimage.gaussian_filter(side.astype(np.float32), FINE * 0.6) > 0.5
+    # Over the cabin a column of the outline is solid from the sill to the roof: a roof
+    # strip the flood fill could not reach (a drip rail drawn as two lines, a gap at a
+    # pillar) is closed, or the roof would hang on its drawn line alone.
+    c0_, c1_ = hs['cabin']
+    gap_max = hs.get('roofGap', 0.15) / (G / FINE)
+    for j in np.nonzero((yf >= c0_) & (yf <= c1_))[0]:
+        col = np.nonzero(side[:, j])[0]
+        if len(col) < 2:
+            continue
+        gaps = np.nonzero(np.diff(col) > 1)[0]
+        for g in gaps:
+            if col[g + 1] - col[g] <= gap_max and zf[col[g]] > 0.6:
+                side[col[g]:col[g + 1], j] = True
 
     # ---- side: bumpers out, floor up ------------------------------------------------
     # Row extents of the outline (nose and tail), with each bumper's band bridged.

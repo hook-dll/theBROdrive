@@ -30,6 +30,7 @@ CAR = {
         'arch': {'radius': 0.355, 'lift': 0.03},
     },
     'parts': {
+        'archFlares': [{'axle': 'both', 'r': 0.36, 'w': 0.04, 't': 0.012, 'lift': 0.03}],
         'lensColours': {'trim_red': [0.55, 0.03, 0.03]},
         'glass': [
             {'view': 'side', 'outline': [[0.481, 1.29], [0.269, 1.293], [0.115, 1.29], [-0.021, 1.28], [-0.079, 1.266], [-0.173, 1.21],
@@ -105,8 +106,6 @@ CAR = {
             # Rubbing strip with its red line, and the GTI's black arch lips.
             {'view': 'side', 'points': [[-1.50, 0.455], [1.60, 0.455]], 'width': 0.045, 'material': 'trim', 'height': 0.006},
             {'view': 'side', 'points': [[-1.50, 0.455], [1.60, 0.455]], 'width': 0.008, 'material': 'trim_red', 'height': 0.008},
-            {'view': 'side', 'points': ARCH_F, 'width': 0.035, 'material': 'trim', 'height': 0.006},
-            {'view': 'side', 'points': ARCH_R, 'width': 0.035, 'material': 'trim', 'height': 0.006},
             {'view': 'rear', 'points': [[0.0, 0.70], [0.52, 0.70], [0.57, 0.96]], 'width': 0.005, 'depthRange': [1.5, 1.95]},
             {'view': 'side', 'points': [[0.481, 1.326], [-0.079, 1.294], [-0.173, 1.234], [-0.36, 1.083], [-0.44, 0.98], [-0.40, 0.875],
                                         [0.487, 0.875], [0.481, 1.326]], 'width': 0.016, 'material': 'trim', 'height': 0.003},

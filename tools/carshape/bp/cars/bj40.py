@@ -36,6 +36,7 @@ CAR = {
         'arch': {'radius': 0.44, 'lift': 0.0},
     },
     'parts': {
+        'underbody': {'frame': True},
         'paint2': {'name': 'trim_hardtop', 'rgb': [0.86, 0.86, 0.83]},
         'glass': [
             {'view': 'side', 'outline': [[-0.25, 1.21], [0.25, 1.21], [0.25, 1.61], [-0.25, 1.61]], 'facingMin': 0.3},

@@ -36,6 +36,7 @@ CAR = {
         'arch': {'radius': 0.355, 'lift': 0.03},
     },
     'parts': {
+        'archFlares': [{'axle': 'both', 'r': 0.36, 'w': 0.05, 't': 0.02, 'lift': 0.03}],
         'glass': [
             {'view': 'side', 'outline': [[-0.572, 0.974], [-0.262, 1.329], [0.371, 1.342], [0.371, 0.974]], 'facingMin': 0.3},
             {'view': 'side', 'outline': [[0.469, 0.974], [0.469, 1.351], [1.111, 1.351], [1.213, 1.151], [1.213, 0.974]], 'facingMin': 0.3},
@@ -83,8 +84,6 @@ CAR = {
             {'view': 'side', 'points': [[-0.60, 0.95], [-0.62, 0.42], [0.42, 0.42], [0.42, 0.97]], 'width': 0.005},
             {'view': 'side', 'points': [[-1.62, 0.90], [-0.64, 1.07]], 'width': 0.005},
             {'view': 'side', 'points': [[-1.40, 0.52], [1.43, 0.52]], 'width': 0.05, 'material': 'trim', 'height': 0.006},
-            {'view': 'side', 'points': ARCH_F, 'width': 0.05, 'material': 'trim', 'height': 0.008},
-            {'view': 'side', 'points': ARCH_R, 'width': 0.05, 'material': 'trim', 'height': 0.008},
             {'view': 'side', 'points': [[0.42, 0.975], [0.42, 1.35]], 'width': 0.05, 'material': 'trim', 'height': 0.003},
             {'view': 'rear', 'points': [[0.0, 0.66], [0.60, 0.66], [0.60, 1.40]], 'width': 0.005, 'depthRange': [1.4, 1.8]},
         ],

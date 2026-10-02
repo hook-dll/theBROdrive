@@ -19,6 +19,7 @@ are put on that side only. Coordinates are car coordinates (carbody.py): nose -y
 import json
 import math
 import os
+import re
 import runpy
 import sys
 
@@ -38,6 +39,10 @@ spec = runpy.run_path(os.path.join(HERE, 'cars', car + '.py'))['CAR']
 info = json.load(open(os.path.join(ROOT, 'build/carshape', car, 'hull.json')))
 F = spec['factory']
 P = spec.get('parts', {})
+# No number plates (nor blank plate patches): every part drawn in the plate's
+# materials is dropped, whatever list it sits in.
+P = {k: [d for d in v if not (isinstance(d, dict) and d.get('material') in ('plate', 'plate_ink'))]
+     if isinstance(v, list) else v for k, v in P.items()}
 L, W, H, R = F['length'], F['width'], F['height'], F['wheelRadius']
 AXLES = [(-L / 2 + F['frontOverhang'], F['frontTrack']),
          (-L / 2 + F['frontOverhang'] + F['wheelbase'], F['rearTrack'])]
@@ -451,6 +456,9 @@ def decal_shapes():
     """Every patch the car's file asks for, as (view, sign, poly, d, node, mat, height, hole)."""
     out = []
     for d in P.get('decals', []):
+        if d['view'] in ('front', 'rear') and 'facingMin' not in d:
+            # A lamp or a plate drawn on an end stays on the end: it does not wrap round.
+            d = dict(d, facingMin=0.3)
         for sign, poly in sides_of(d):
             hole = offset_poly(poly, -d['ring']) if d.get('ring') else None
             node = d.get('node', 'decal_trim')
@@ -481,6 +489,9 @@ def decal_shapes():
             ext = e / max(np.linalg.norm(e), 1e-9) * w / 2
             quad = [(p - ext + n).tolist(), (q + ext + n).tolist(), (q + ext - n).tolist(), (p - ext - n).tolist()]
             seg = dict(ln, outline=quad)
+            # A thin strip must not run onto a surface turning away from the view: there it
+            # would smear (a frame line slipping over the tumblehome, a shut line round a corner).
+            seg.setdefault('facingMin', 0.45)
             for sign, poly in sides_of(seg):
                 out.append((ln['view'], sign, poly, seg, 'decal_trim', ln.get('material', 'rubber'), ln.get('height', 0.0015), None))
     return out
@@ -804,16 +815,112 @@ if wp:
         box(bm_, ((x0 + x1) / 2, y, zc), (abs(x1 - x0), 0.014, 0.012), 0)
     trim_parts.append(new_object('wipers', bm_, ['trim']))
 
-# The floor pan: the car's lowest point is its published ground clearance (the
-# runtime scales the body by height minus clearance), so a dark pan runs between the
-# wheels from the clearance up into the shell.
-fl = P.get('floor', {})
-x_pan = min(F['frontTrack'], F['rearTrack']) / 2 - F['tyreWidth'] / 2 - 0.05
+# The underside. The body's own bottom closes it flush along the sills; below that
+# hangs only what really sets a car's ground clearance: the sump and the subframe
+# (the engine at the back of a rear-engined car), the rear axle with its diff and the
+# propshaft on a driven rear axle, a front diff on four-wheel drive, the chassis rails
+# of a body on a frame. The lowest of them sits at the published clearance, which is
+# what the runtime fits the body's bottom to. {engine: 'front'|'rear', frame: bool}.
+ub = P.get('underbody', {})
+_roster = open(os.path.join(ROOT, 'src/vehicle/roster.ts')).read()
+_m = re.search(r"id: 'rs_%s'.*?rearDriveBias: ([\d.]+)" % car, _roster, re.S)
+rear_bias = float(_m.group(1)) if _m else 0.0
+C = F['clearance']
+yA, yB = AXLES[0][0], AXLES[1][0]
+inner = min(F['frontTrack'], F['rearTrack']) / 2 - F['tyreWidth'] / 2 - 0.04
+
+
+def floor_at(y_):
+    """The body's bottom at y on the centre line."""
+    hit, _n = skin_point((0, y_, -0.5), (0, 0, 1), 4.0)
+    return hit.z if hit is not None else min(info['sill'])
+
+
+def hang(bm_, x0, x1, y0, y1, z_bottom):
+    """A block from z_bottom up into the body (its top buried 3 cm in the floor)."""
+    z_top = max(floor_at(y_) for y_ in np.linspace(y0, y1, 4)) + 0.03
+    if z_top > z_bottom:
+        box(bm_, ((x0 + x1) / 2, (y0 + y1) / 2, (z_bottom + z_top) / 2), (x1 - x0, y1 - y0, z_top - z_bottom), 0)
+
+
 bm_ = bmesh.new()
-y0p = fl.get('y', [AXLES[0][0] - R * 0.6, AXLES[1][0] + R * 0.6])
-z_top = min(info['sill']) + 0.05
-box(bm_, (0, (y0p[0] + y0p[1]) / 2, (F['clearance'] + z_top) / 2), (2 * fl.get('half', x_pan), y0p[1] - y0p[0], z_top - F['clearance']), 0)
-trim_parts.append(new_object('floor', bm_, ['trim']))
+rear_engine = ub.get('engine', 'front') == 'rear'
+ye = yB if rear_engine else yA
+# Sump and gearbox, and a crossmember (the subframe) across the engine bay.
+hang(bm_, -0.17, 0.17, ye - 0.12, ye + 0.22 if not rear_engine else ye + 0.32, C)
+hang(bm_, -inner + 0.06, inner - 0.06, ye + 0.02, ye + 0.10, C + 0.07)
+if rear_bias > 0 and not rear_engine:
+    # A driven rear axle: the casing between the wheels at hub height, the diff, and the
+    # propshaft just under the tunnel.
+    disc(bm_, (0, yB, R), (1, 0, 0), 0.045, 2 * inner, segments=12)
+    hang(bm_, -0.15, 0.15, yB - 0.13, yB + 0.13, C + 0.005)
+    z_ps = floor_at((yA + yB) / 2) - 0.03
+    disc(bm_, (0, (yA + 0.22 + yB - 0.13) / 2, z_ps), (0, 1, 0), 0.035, (yB - 0.13) - (yA + 0.22), segments=10)
+if 0 < rear_bias < 1:
+    hang(bm_, -0.05, 0.22, yA - 0.12, yA + 0.12, C + 0.02)
+    if ub.get('frame'):
+        disc(bm_, (0, yA, R), (1, 0, 0), 0.045, 2 * inner, segments=12)
+if ub.get('frame'):
+    # The chassis rails, under the body from end to end, following its floor.
+    xr = inner - 0.22
+    ys_ = np.linspace(-L / 2 + 0.3, L / 2 - 0.25, 12)
+    for y0_, y1_ in zip(ys_, ys_[1:]):
+        zf = floor_at((y0_ + y1_) / 2)
+        for sx in (1, -1):
+            box(bm_, (sx * xr, (y0_ + y1_) / 2, zf - 0.05), (0.07, y1_ - y0_ + 0.01, 0.16), 0)
+trim_parts.append(new_object('underbody', bm_, ['trim']))
+
+# Arch flares and lips: a band round each wheel arch standing off the body side, built
+# on the skin itself so it neither floats nor tears where the side turns into the well.
+# {axle: 'front'|'rear'|'both', r (inner radius), w (band width), t (stand-off), material}.
+for fl in P.get('archFlares', []):
+    bm_ = bmesh.new()
+    axles = {'front': [AXLES[0]], 'rear': [AXLES[1]], 'both': AXLES}[fl.get('axle', 'both')]
+    za = R + fl.get('lift', 0.0)
+    r0, w, t = fl['r'], fl.get('w', 0.05), fl.get('t', 0.02)
+    radii = np.linspace(r0, r0 + w, 4)
+    for ya, _tr in axles:
+        for s_ in (1, -1):
+            rows = []
+            for a in np.linspace(math.radians(fl.get('from', 0)), math.radians(180 - fl.get('from', 0)), 49):
+                row = []
+                for rr in radii:
+                    y_, z_ = ya - rr * math.cos(a), za + rr * math.sin(a)
+                    hit, _n = skin_point((s_ * 1.5, y_, z_), (-s_, 0, 0))
+                    row.append(None if hit is None else hit.x)
+                rows.append((a, row))
+            # The band runs from the top of the arch down each leg for as long as the side
+            # is there and carries on smoothly: where the skin is missing (past the body's
+            # end) or jumps inwards (into the wheel well, under the sill) it stops, rather
+            # than folding into a tab.
+            mid = len(rows) // 2
+            keep = set()
+            for step in (1, -1):
+                prev = None
+                for i in range(mid, len(rows) if step > 0 else -1, step):
+                    xs_ = rows[i][1]
+                    if None in xs_ or max(xs_) - min(xs_) > 0.03 or (prev is not None and abs(xs_[0] - prev) > 0.02):
+                        break
+                    keep.add(i)
+                    prev = xs_[0]
+            # Each ring: the lip turned in over the arch's cut edge (the voxel hull leaves it
+            # ragged, and a band starting on it shows the tears), the band's face across
+            # (standing t off the most outward point of the skin beneath it, so the side
+            # cannot show through), the skin under the outer edge.
+            r_in = r0 - fl.get('lip', 0.03)
+            rings = []
+            for i in sorted(keep):
+                a, xs_ = rows[i]
+                out_x = max(x_ * s_ for x_ in xs_) * s_ + s_ * t
+                pts = ([(out_x - s_ * (t + 0.04), r_in), (out_x, r_in)] + [(out_x, rr) for rr in radii]
+                       + [(xs_[-1] - s_ * 0.01, radii[-1])])
+                rings.append([bm_.verts.new((x_, ya - rr * math.cos(a), za + rr * math.sin(a))) for x_, rr in pts])
+            for r_a, r_b in zip(rings, rings[1:]):
+                for k in range(len(r_a) - 1):
+                    q = (r_a[k], r_a[k + 1], r_b[k + 1], r_b[k])
+                    bm_.faces.new(q if s_ > 0 else q[::-1])
+    bmesh.ops.recalc_face_normals(bm_, faces=bm_.faces)
+    trim_parts.append(new_object('flare', bm_, [fl.get('material', 'trim')]))
 
 # Spare wheels on a tail door or a bonnet: {c, n (the way it faces), r, w}, a tyre with
 # its rim and hub.
@@ -997,10 +1104,14 @@ if preview:
     target = Vector((0, 0, H * 0.45))
     views = {'front34': Vector((L * 0.95, -L * 1.2, H * 1.1)), 'side': Vector((L * 1.75, 0, H * 0.5)),
              'rear34': Vector((-L * 0.95, L * 1.2, H * 1.2)), 'front': Vector((0, -L * 1.9, H * 0.55)),
-             'rear': Vector((0, L * 1.9, H * 0.6))}
+             'rear': Vector((0, L * 1.9, H * 0.6)),
+             # Low and close, where the chase camera sits: the underside, the tail's
+             # edges and the soft shapes show here and hide in the high views.
+             'lowrear': Vector((-W * 0.9, L * 1.05, 0.42)), 'lowfront': Vector((W * 0.9, -L * 1.05, 0.42))}
+    aims = {'lowrear': Vector((0, L * 0.3, H * 0.32)), 'lowfront': Vector((0, -L * 0.3, H * 0.32))}
     for name, pos in views.items():
         cam.location = pos
-        cam.rotation_euler = (target - pos).to_track_quat('-Z', 'Y').to_euler()
+        cam.rotation_euler = (aims.get(name, target) - pos).to_track_quat('-Z', 'Y').to_euler()
         sc.render.filepath = preview.replace('.png', f'-{name}.png')
         bpy.ops.render.render(write_still=True)
     # Zebra: a striped reflection shows every wave and dent the way the game's sun does.

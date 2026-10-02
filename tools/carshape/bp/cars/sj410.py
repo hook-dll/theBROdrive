@@ -37,6 +37,8 @@ CAR = {
         'arch': {'radius': 0.42, 'lift': 0.0},
     },
     'parts': {
+        'underbody': {'frame': True},
+        'archFlares': [{'axle': 'both', 'r': 0.425, 'w': 0.06, 't': 0.03}],
         'paint2': {'name': 'trim_canvas', 'rgb': [0.07, 0.07, 0.075]},
         'glass': [
             {'view': 'side', 'outline': [[-0.30, 1.06], [0.36, 1.06], [0.36, 1.50], [-0.20, 1.50]], 'facingMin': 0.3},
@@ -81,8 +83,6 @@ CAR = {
              'material': 'paint', 'height': 0.006, 'depthRange': [-1.85, -1.5]},
         ],
         'lines': [
-            {'view': 'side', 'points': ARCH_F, 'width': 0.06, 'material': 'trim', 'height': 0.03},
-            {'view': 'side', 'points': ARCH_R, 'width': 0.06, 'material': 'trim', 'height': 0.03},
             {'view': 'side', 'points': [[-0.62, 1.05], [-0.60, 0.52], [0.42, 0.52], [0.42, 1.05]], 'width': 0.006},
             {'view': 'side', 'points': [[-1.62, 0.93], [-0.62, 1.05]], 'width': 0.005},
         ],
