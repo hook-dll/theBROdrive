@@ -91,7 +91,6 @@ CAR = {
         'mirror': {'y': -0.50, 'z': 1.03, 'reach': 0.84, 'w': 0.11, 'h': 0.09},
         'handles': {'at': [[0.30, 0.90]], 'w': 0.13, 'material': 'trim'},
         'wipers': {'arms': [[-0.5, 0.0, -0.66, 1.09], [0.02, 0.5, -0.66, 1.09]]},
-        'boxes': [{'c': [0.0, 1.62, 1.20], 'size': [0.02, 0.02, 0.02], 'mirror': False}],
         'wheel': {'style': 'steel', 'windows': 6, 'rimFactor': 0.66, 'cap': True},
     },
 }
