@@ -1511,7 +1511,7 @@ export const ROSTER: readonly RosterCar[] = [
     label: 'Chevrolet C10',
     body: 'c10.glb',
     bodyClass: 'car',
-    factory: { length: 4.994, width: 1.999, height: 1.77, clearance: 0.2, wheelbase: 3.226, frontTrack: 1.626, rearTrack: 1.6, wheelRadius: 0.36, tyreWidth: 0.2, frontOverhang: 0.73 },
+    factory: { length: 5.33, width: 1.999, height: 1.77, clearance: 0.2, wheelbase: 3.226, frontTrack: 1.626, rearTrack: 1.6, wheelRadius: 0.36, tyreWidth: 0.2, frontOverhang: 0.835 },
     mass: 1700,
     frontWeightShare: 0.58,
     rearDriveBias: 1,
