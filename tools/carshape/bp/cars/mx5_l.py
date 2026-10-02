@@ -1,0 +1,117 @@
+# Mazda MX-5 1.6 (NA, 1989-97). Factory: 3970 x 1675 x 1230 (soft top up), wheelbase
+# 2265, tracks 1410/1430, 185/60 R14, clearance 135. The Eunos Roadster drawing at
+# getoutlines.com (CC, 2x upscaled), drawn open: the soft top is put up over it, its
+# line from photographs of the car with the hood raised.
+CAR = {
+    'id': 'mx5_l',
+    'label': 'Mazda MX-5',
+    'factory': {'length': 3.97, 'width': 1.675, 'height': 1.23, 'clearance': 0.135, 'wheelbase': 2.265,
+                'frontTrack': 1.41, 'rearTrack': 1.43, 'wheelRadius': 0.285, 'tyreWidth': 0.185, 'frontOverhang': 0.81},
+    'blueprint': {
+        'image': 'mx5_go.png',
+        'side': {'box': [14, 14, 1135, 346], 'nose': 'left', 'isotropic': True, 'wheels': [[242.5, 261.5], [880.5, 261.5]], 'ground': 341.5},
+        'top': {'box': [14, 354, 1139, 880], 'nose': 'left'},
+        # Drawn open: the end views' top is the screen header, 1.14 m.
+        'front': {'box': [1136, 6, 1657, 343], 'height': 1.14},
+        'rear': {'box': [1154, 450, 1681, 791], 'height': 1.14},
+    },
+    'hull': {
+        'topOverride': [[-0.75, 0.83], [-0.55, 0.88], [-0.35, 1.0], [-0.12, 1.13], [-0.02, 1.20], [0.15, 1.23], [0.50, 1.22],
+                        [0.70, 1.15], [0.90, 0.98], [1.05, 0.86], [1.15, 0.83]],
+        'sectionExtendTop': 0.56,
+        'sill': [[-2.0, 0.30], [-1.7, 0.27], [-1.3, 0.23], [0.8, 0.23], [1.2, 0.26], [1.95, 0.30]],
+        'cabin': [-0.72, 1.12],
+        'belt': [[-0.72, 0.82], [-0.4, 0.78], [0.6, 0.78], [1.12, 0.82]],
+        'glassPlan': [[-0.72, 0.66], [-0.3, 0.66], [0.3, 0.62], [0.8, 0.56], [1.12, 0.52]],
+        'crown': [[-2.0, 0.025], [2.0, 0.025]],
+        'roofCrown': 0.03,
+        'edge': 0.016,
+        'arch': {'radius': 0.33, 'lift': 0.05},
+    },
+    # Stations read off the side (281.7 px/m, front axle at px 242.5) and plan; the
+    # soft top's line from photographs of the car with the hood raised.
+    'loft': {
+        'body': [
+            {'y': -1.95, 'sill': 0.28, 'w': 0.40, 'sh': 0.40, 'top': 0.48, 'tumble': 0.06, 'bev': 0.04, 'kink': True},
+            {'y': -1.90, 'sill': 0.24, 'w': 0.62, 'sh': 0.45, 'top': 0.54, 'tumble': 0.07, 'bev': 0.05},
+            {'y': -1.80, 'sill': 0.22, 'w': 0.74, 'sh': 0.50, 'top': 0.59, 'tumble': 0.08, 'bev': 0.06},
+            {'y': -1.65, 'sill': 0.22, 'w': 0.80, 'sh': 0.53, 'top': 0.65},
+            {'y': -1.35, 'sill': 0.21, 'w': 0.825, 'sh': 0.55, 'top': 0.74},
+            {'y': -1.00, 'sill': 0.20, 'w': 0.83, 'sh': 0.55, 'top': 0.785},
+            {'y': -0.66, 'sill': 0.20, 'w': 0.835, 'sh': 0.55, 'top': 0.80},
+            {'y': 0.00, 'sill': 0.20, 'w': 0.835, 'sh': 0.55, 'top': 0.775},
+            {'y': 0.70, 'sill': 0.20, 'w': 0.835, 'sh': 0.55, 'top': 0.79},
+            {'y': 1.30, 'sill': 0.22, 'w': 0.83, 'sh': 0.55, 'top': 0.84},
+            {'y': 1.60, 'sill': 0.24, 'w': 0.80, 'sh': 0.55, 'top': 0.84},
+            {'y': 1.80, 'sill': 0.27, 'w': 0.74, 'sh': 0.54, 'top': 0.825},
+            {'y': 1.87, 'sill': 0.29, 'w': 0.67, 'sh': 0.52, 'top': 0.80, 'tumble': 0.07, 'bev': 0.05},
+            {'y': 1.90, 'sill': 0.30, 'w': 0.62, 'sh': 0.50, 'top': 0.77, 'tumble': 0.06, 'bev': 0.04, 'kink': True},
+        ],
+        'house': [
+            {'y': -0.70, 'base': 0.70, 'bw': 0.70, 'roof': 0.78, 'rw': 0.66, 'crown': 0.01},
+            {'y': -0.66, 'base': 0.70, 'bw': 0.72, 'roof': 0.81, 'rw': 0.68, 'crown': 0.01, 'kink': True},
+            {'y': -0.04, 'base': 0.70, 'bw': 0.70, 'roof': 1.15, 'rw': 0.58, 'crown': 0.03, 'kink': True},
+            {'y': 0.15, 'base': 0.70, 'bw': 0.70, 'roof': 1.23, 'rw': 0.60, 'crown': 0.04},
+            {'y': 0.50, 'base': 0.70, 'bw': 0.70, 'roof': 1.22, 'rw': 0.60, 'crown': 0.04},
+            {'y': 0.70, 'base': 0.70, 'bw': 0.70, 'roof': 1.15, 'rw': 0.58, 'crown': 0.04, 'kink': True},
+            {'y': 0.90, 'base': 0.70, 'bw': 0.69, 'roof': 0.98, 'rw': 0.56, 'crown': 0.03},
+            {'y': 1.05, 'base': 0.70, 'bw': 0.67, 'roof': 0.86, 'rw': 0.55, 'crown': 0.02},
+            {'y': 1.12, 'base': 0.70, 'bw': 0.66, 'roof': 0.80, 'rw': 0.54, 'crown': 0.01, 'kink': True},
+        ],
+    },
+    'parts': {
+        'underbody': {'rearBias': 1},
+        'bodySmoothDeg': 40,
+        'glass': [
+            {'view': 'side', 'outline': [[-0.40, 0.80], [-0.12, 1.10], [0.40, 1.12], [0.44, 0.80]], 'facingMin': 0.3},
+            {'view': 'front', 'outline': [[0.0, 1.12], [0.44, 1.115], [0.48, 1.09], [0.58, 0.86], [0.56, 0.84], [0.0, 0.84]],
+             'depthRange': [-0.9, -0.05], 'facingMin': 0.25},
+            {'view': 'rear', 'outline': [[0.0, 1.10], [0.36, 1.095], [0.38, 1.07], [0.40, 0.93], [0.37, 0.91], [0.0, 0.91]],
+             'depthRange': [0.6, 1.2], 'facingMin': 0.02, 'fit': False},
+        ],
+        # The soft top: black canvas over the cabin.
+        'regions': [
+            {'view': 'top', 'rect': [[0.47, 0.0], [1.28, 1.6]], 'radius': 0.001, 'mirror': False, 'facingMin': 0.05,
+             'depthRange': [0.95, 1.5]},
+            {'view': 'side', 'outline': [[-0.13, 1.10], [-0.06, 1.30], [1.15, 1.30], [1.15, 0.84], [0.45, 0.80], [0.45, 1.12]]},
+        ],
+        'decals': [
+            {'view': 'front', 'outline': [[0.0, 0.40], [0.20, 0.40], [0.28, 0.37], [0.30, 0.33], [0.27, 0.30], [0.20, 0.29], [0.0, 0.29]],
+             'material': 'grille', 'height': 0.004, 'depthRange': [-2.1, -1.6]},
+            {'view': 'front', 'rect': [[0.0, 0.405], [0.30, 0.10]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
+             'height': 0.006, 'depthRange': [-2.1, -1.6]},
+            {'view': 'front', 'node': 'headlights', 'rect': [[0.41, 0.585], [0.12, 0.05]], 'radius': 0.024,
+             'material': 'Headlights', 'height': 0.009, 'depthRange': [-2.1, -1.5]},
+            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.47, 0.585], [0.24, 0.055]], 'radius': 0.027,
+             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-2.1, -1.5]},
+            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.47, 0.585], [0.24, 0.055]], 'radius': 0.027,
+             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-2.1, -1.5]},
+            # The pop-up lamps lie folded flush in the bonnet: their lids' outline.
+            {'view': 'top', 'rect': [[-1.42, 0.53], [0.30, 0.20]], 'radius': 0.03, 'material': 'paint', 'height': 0.004},
+            {'view': 'side', 'node': 'front_blinker_left', 'rect': [[-1.62, 0.52], [0.10, 0.03]], 'radius': 0.012, 'material': 'IndicatorLights', 'height': 0.005},
+            {'view': 'side', 'node': 'front_blinker_right', 'rect': [[-1.62, 0.52], [0.10, 0.03]], 'radius': 0.012, 'material': 'IndicatorLights', 'height': 0.005},
+            # Oval tail lamps, plate between.
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.43, 0.63], [0.28, 0.13]], 'radius': 0.06,
+             'material': 'TailLights', 'height': 0.008, 'depthRange': [1.6, 2.1]},
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.43, 0.595], [0.12, 0.04]], 'radius': 0.015,
+             'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [1.6, 2.1]},
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.43, 0.595], [0.12, 0.04]], 'radius': 0.015,
+             'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [1.6, 2.1]},
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.36, 0.66], [0.08, 0.03]], 'radius': 0.012,
+             'material': 'ReverseLights', 'height': 0.010, 'depthRange': [1.6, 2.1]},
+            {'view': 'rear', 'rect': [[0.0, 0.715], [0.34, 0.16]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
+             'height': 0.006, 'depthRange': [1.6, 2.1]},
+            {'view': 'side', 'node': 'taillights', 'rect': [[1.82, 0.69], [0.16, 0.10]], 'radius': 0.04, 'material': 'TailLights', 'height': 0.004},
+        ],
+        'lines': [
+            {'view': 'side', 'points': [[-0.62, 0.76], [-0.62, 0.32], [0.53, 0.32], [0.53, 0.78]], 'width': 0.005},
+            {'view': 'side', 'points': [[-1.95, 0.48], [1.95, 0.48]], 'width': 0.008, 'material': 'trim', 'height': 0.004},
+            {'view': 'top', 'points': [[-1.90, 0.55], [-0.75, 0.62]], 'width': 0.005},
+            {'view': 'rear', 'points': [[0.0, 0.81], [0.62, 0.81]], 'width': 0.005, 'depthRange': [1.5, 2.1]},
+        ],
+        'mirror': {'y': -0.42, 'z': 0.88, 'reach': 0.93, 'w': 0.13, 'h': 0.08, 'shape': 'round', 'material': 'paint'},
+        'handles': {'at': [[0.35, 0.69]], 'w': 0.10, 'material': 'chrome'},
+        'wipers': {'arms': [[-0.5, -0.05, -0.68, 0.84], [0.05, 0.45, -0.68, 0.84]]},
+        'wheel': {'style': 'alloy', 'spokes': 8, 'rimFactor': 0.68, 'spokeWidth': 0.35},
+    },
+}

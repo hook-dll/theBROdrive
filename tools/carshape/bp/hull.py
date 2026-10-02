@@ -360,7 +360,15 @@ def bumper_paths(mesh, spec, info, raw_ends):
         sec = mesh.section(plane_origin=[0, 0, zc], plane_normal=[0, 0, 1])
         if sec is None:
             continue
-        pts = np.vstack([d[:, :2] for d in sec.discrete])
+        # Every 1 cm along the outline: a lofted shell's flat end gives its section only
+        # a few vertices, and the envelope below would sag between them.
+        pts = []
+        for d in sec.discrete:
+            seg = np.linalg.norm(np.diff(d[:, :2], axis=0), axis=1)
+            at = np.concatenate([[0], np.cumsum(seg)])
+            u = np.arange(0, at[-1] + 1e-9, 0.01)
+            pts.append(np.stack([np.interp(u, at, d[:, 0]), np.interp(u, at, d[:, 1])], axis=1))
+        pts = np.vstack(pts)
         sgn = -1 if end == 'front' else 1
         y_end = pts[:, 1].min() if end == 'front' else pts[:, 1].max()
         wrap = b.get('wrap', 0.25)
@@ -409,4 +417,8 @@ def bumper_paths(mesh, spec, info, raw_ends):
 
 
 if __name__ == '__main__':
-    build(sys.argv[1])
+    if 'loft' in grid.load(sys.argv[1])[0]:
+        import loft
+        loft.build(sys.argv[1])
+    else:
+        build(sys.argv[1])

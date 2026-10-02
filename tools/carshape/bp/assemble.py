@@ -602,17 +602,26 @@ while len(body.data.materials) > 4:
 
 # Shading from the full-resolution shell, projected along each corner's own normal,
 # so the coarse working mesh shades with the true curvature.
-body.data.shade_smooth()
-dense.data.shade_smooth()
-scene.collection.objects.link(dense)
-bpy.context.view_layer.objects.active = body
-dt = body.modifiers.new('normals', 'DATA_TRANSFER')
-dt.object = dense
-dt.use_loop_data = True
-dt.data_types_loops = {'CUSTOM_NORMAL'}
-dt.loop_mapping = 'POLYINTERP_LNORPROJ'
-bpy.ops.object.modifier_apply(modifier=dt.name)
-bpy.data.objects.remove(dense)
+if info.get('loft'):
+    # A lofted shell is its own truth: smooth across its gentle bends, crisp at its
+    # edges.
+    bpy.context.view_layer.objects.active = body
+    body.select_set(True)
+    bpy.ops.object.shade_smooth_by_angle(angle=math.radians(P.get('bodySmoothDeg', 32)))
+    body.select_set(False)
+    bpy.data.objects.remove(dense)
+else:
+    body.data.shade_smooth()
+    dense.data.shade_smooth()
+    scene.collection.objects.link(dense)
+    bpy.context.view_layer.objects.active = body
+    dt = body.modifiers.new('normals', 'DATA_TRANSFER')
+    dt.object = dense
+    dt.use_loop_data = True
+    dt.data_types_loops = {'CUSTOM_NORMAL'}
+    dt.loop_mapping = 'POLYINTERP_LNORPROJ'
+    bpy.ops.object.modifier_apply(modifier=dt.name)
+    bpy.data.objects.remove(dense)
 
 
 def new_object(name, bm_, mats):
@@ -824,7 +833,7 @@ if wp:
 ub = P.get('underbody', {})
 _roster = open(os.path.join(ROOT, 'src/vehicle/roster.ts')).read()
 _m = re.search(r"id: 'rs_%s'.*?rearDriveBias: ([\d.]+)" % car, _roster, re.S)
-rear_bias = float(_m.group(1)) if _m else 0.0
+rear_bias = ub.get('rearBias', float(_m.group(1)) if _m else 0.0)
 C = F['clearance']
 yA, yB = AXLES[0][0], AXLES[1][0]
 inner = min(F['frontTrack'], F['rearTrack']) / 2 - F['tyreWidth'] / 2 - 0.04
