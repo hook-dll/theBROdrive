@@ -23,11 +23,23 @@ GRID = 0.01  # m
 
 
 class View:
-    def __init__(self, img, box, dark):
+    def __init__(self, img, box, dark, degrid=False):
         x0, y0, x1, y1 = box
         self.x0, self.y0 = x0, y0
         self.grey = img[y0:y1, x0:x1]
         self.lines = (self.grey < dark).astype(np.uint8)
+        if degrid == 'thin':
+            # Squared paper whose 1-px rules stop at the car: an opening removes them and
+            # keeps the car's heavier line work.
+            self.lines = cv2.morphologyEx(self.lines, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
+        elif degrid:
+            # A drawing on squared paper: the grid's rows and columns run the whole view,
+            # the car's own lines never do.
+            h, w = self.lines.shape
+            rows = self.lines.sum(axis=1) > 0.55 * w
+            cols = self.lines.sum(axis=0) > 0.55 * h
+            self.lines[rows, :] = 0
+            self.lines[:, cols] = 0
 
     def silhouette(self, close=7, drop=()):
         """Pixels a flood from the border cannot reach. `drop` boxes (in view pixels)
@@ -45,6 +57,31 @@ class View:
         inside = (flood[1:-1, 1:-1] != 2).astype(np.uint8)
         # Give back the dilation: the outline is the drawn line's outer edge.
         return cv2.erode(inside, np.ones((close, close), np.uint8))
+
+
+def contact_patches(sil, wb_px):
+    """The axles from where the tyres touch the ground: the outline's lowest columns
+    fall into two runs, one under each wheel, a wheelbase apart."""
+    has = sil.any(axis=0)
+    bottom = np.array([np.nonzero(sil[:, c])[0].max() if has[c] else -1 for c in range(sil.shape[1])])
+    g = bottom.max()
+    low = np.nonzero(bottom >= g - 2)[0]
+    if len(low) < 2:
+        return None
+    runs = np.split(low, np.nonzero(np.diff(low) > 3)[0] + 1)
+    runs = [r for r in runs if len(r) >= 2]
+    if len(runs) < 2:
+        return None
+    # The two runs furthest apart that are about a wheelbase apart.
+    best = None
+    for i in range(len(runs)):
+        for j in range(i + 1, len(runs)):
+            d = runs[j].mean() - runs[i].mean()
+            if abs(d / wb_px - 1) < 0.25 and (best is None or len(runs[i]) + len(runs[j]) > best[0]):
+                best = (len(runs[i]) + len(runs[j]), runs[i].mean(), runs[j].mean())
+    if best is None:
+        return None
+    return [(float(best[1]), float(g)), (float(best[2]), float(g))]
 
 
 def wheel_centres(view, r_px, wb_px):
@@ -82,8 +119,9 @@ def read(spec, image_path):
 
     # ---- side: scale and datum from the wheels ----------------------------------------
     sv = bp['side']
-    side = View(img, sv['box'], dark)
+    side = View(img, sv['box'], dark, sv.get('degrid', bp.get('degrid', False)))
     ppm0 = side.grey.shape[1] / L
+    sil = side.silhouette(sv.get('close', 7), sv.get('drop', ()))
     if 'wheels' in sv:
         wl, wr = [(u - side.x0, v - side.y0) for u, v in sv['wheels']]
     else:
@@ -91,7 +129,6 @@ def read(spec, image_path):
     ppm = abs(wr[0] - wl[0]) / WB
     nose_left = sv.get('nose', 'left') == 'left'
     uF = wl[0] if nose_left else wr[0]
-    sil = side.silhouette(sv.get('close', 7), sv.get('drop', ()))
     # The ground: the lowest silhouette row under the wheels.
     vg = sv.get('ground')
     if vg is None:
@@ -116,6 +153,11 @@ def read(spec, image_path):
     def side_px(y, z):
         return uF + (y - y_axle_f) * ppm * dirn, vg - z * ppmz
 
+    if 'outline' in sv:
+        # A drawing too poor (or a photograph) to fill: the outline is given in metres.
+        sil = np.zeros_like(sil)
+        cv2.fillPoly(sil, [np.round([side_px(y, z) for y, z in sv['outline']]).astype(np.int32)], 1)
+
     ys = np.arange(-L / 2 - 0.15, L / 2 + 0.15, GRID)
     zs = np.arange(0.0, F['height'] + 0.15, GRID)
     U, V = np.broadcast_arrays(*side_px(ys[None, :], zs[:, None]))
@@ -129,7 +171,7 @@ def read(spec, image_path):
     # ---- top: plan half-width per station --------------------------------------------
     if 'top' in bp:
         tv = bp['top']
-        top = View(img, tv['box'], dark)
+        top = View(img, tv['box'], dark, tv.get('degrid', bp.get('degrid', False)))
         tsil = top.silhouette(tv.get('close', 7), tv.get('drop', ()))
         cols = np.nonzero(tsil.any(axis=0))[0]
         rows = np.nonzero(tsil.any(axis=1))[0]
@@ -150,6 +192,11 @@ def read(spec, image_path):
         def top_px(y, x):
             return t0 + (y - side_y[0]) * tp * tdir, centre - x * tp * aspect
 
+        if 'outline' in tv:
+            # Given as the right half [[y, x]], mirrored.
+            pts = [top_px(y, x) for y, x in tv['outline']] + [top_px(y, -x) for y, x in tv['outline'][::-1]]
+            tsil = np.zeros_like(tsil)
+            cv2.fillPoly(tsil, [np.round(pts).astype(np.int32)], 1)
         half = np.zeros_like(ys)
         for i, y in enumerate(ys):
             u = int(round(top_px(y, 0)[0]))
@@ -164,7 +211,7 @@ def read(spec, image_path):
         if end not in bp:
             continue
         ev = bp[end]
-        v_ = View(img, ev['box'], dark)
+        v_ = View(img, ev['box'], dark, ev.get('degrid', bp.get('degrid', False)))
         esil = v_.silhouette(ev.get('close', 7), ev.get('drop', ()))
         cols = np.nonzero(esil.any(axis=0))[0]
         rows = np.nonzero(esil.any(axis=1))[0]
@@ -176,11 +223,21 @@ def read(spec, image_path):
         epz = ev.get('ppmz', ep * aspect)
         top_row = rows.min()
         ground = ev['ground'] - v_.y0 if 'ground' in ev else top_row + ev.get('height', F['height']) * epz
+        if 'zRef' in ev:
+            # Two features whose heights the side view gives (the roof, a bumper): old
+            # drawings' end views are often drawn to their own vertical scale.
+            (r1, z1), (r2, z2) = ev['zRef']
+            epz = (r2 - r1) / (z1 - z2)
+            ground = r1 - v_.y0 + z1 * epz
         out[end + '_ppm'] = ep
 
         def end_px(x, z, centre=centre, ground=ground, ep=ep, epz=epz):
             return centre + x * ep, ground - z * epz
 
+        if 'outline' in ev:
+            pts = [end_px(x, z) for x, z in ev['outline']] + [end_px(-x, z) for x, z in ev['outline'][::-1]]
+            esil = np.zeros_like(esil)
+            cv2.fillPoly(esil, [np.round(pts).astype(np.int32)], 1)
         half = np.zeros_like(zs)
         for i, z in enumerate(zs):
             v = int(round(end_px(0, z)[1]))
