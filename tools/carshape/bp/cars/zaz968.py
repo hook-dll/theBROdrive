@@ -87,8 +87,8 @@ CAR = {
             {'view': 'side', 'points': [[-0.55, 0.89], [0.86, 0.885]], 'width': 0.01, 'material': 'chrome', 'height': 0.003},
         ],
         'bumpers': {
-            'front': {'z': [0.41, 0.47], 'depth': 0.05, 'wrap': 0.25, 'profile': 'blade'},
-            'rear': {'z': [0.40, 0.46], 'depth': 0.05, 'wrap': 0.25, 'profile': 'blade'},
+            'front': {'z': [0.41, 0.47], 'depth': 0.05, 'wrap': 0.25, 'profile': 'blade', 'material': 'trim'},
+            'rear': {'z': [0.40, 0.46], 'depth': 0.05, 'wrap': 0.25, 'profile': 'blade', 'material': 'trim'},
         },
         'mirror': {'y': -0.70, 'z': 0.94, 'reach': 0.82, 'w': 0.13, 'h': 0.08, 'material': 'chrome', 'sides': [1]},
         'handles': {'at': [[0.0, 0.84], [0.70, 0.84]], 'w': 0.12},
