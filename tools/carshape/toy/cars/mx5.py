@@ -49,12 +49,13 @@ TOY = {
     # lamps' lids as shallow blocks on the bonnet.
     'bumpers': [{'end': 'rear', 'z0': 0.33, 'z1': 0.48, 'depth': 0.10, 'proud': 0.03, 'wrap': 0.25,
                  'material': 'paint', 'half': 0.80}],
-    'blocks': [{'c': [0.53, -1.47, 0.715], 'size': [0.30, 0.20, 0.03], 'material': 'paint', 'mirror': True}],
+    'blocks': [{'c': [0.53, -1.47, 0.715], 'size': [0.30, 0.20, 0.03], 'material': 'paint', 'mirror': True, 'onTop': True,
+                'proud': 0.006}],
     'flank': [
         {'y': 0.35, 'z': 0.69, 'w': 0.10, 'h': 0.02},
         {'y': 0.0, 'z': 0.48, 'w': 3.7, 'h': 0.016, 'material': 'trim', 'proud': 0.004},
     ],
-    'seams': [{'y0': -0.62, 'y1': 0.53, 'z0': 0.30, 'z1': 0.77}],
+    'doors': [{'y0': -0.62, 'y1': 0.53, 'z0': 0.30, 'frame': False, 'top': 0.77}],
     'mirror': {'y': -0.02, 'z': 0.82, 'w': 0.13, 'h': 0.08, 'arm': 0.03, 'material': 'paint'},
     'underbody': {'rearDrive': True},
     'wheel': {'rim': 0.68, 'cap': 0.3},

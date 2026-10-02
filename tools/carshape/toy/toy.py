@@ -99,13 +99,31 @@ for s in T['body']:
 BKEYS = ['w', 'sill', 'sh', 'top', 'crown', 'tumble', 'ch', 'lch', 'yTop']
 
 
+def bez(p0, c, p2, n):
+    """n points along a quadratic curve from p0 (excluded) to p2 (included)."""
+    out = []
+    for i in range(1, n + 1):
+        t = i / n
+        out.append(((1 - t) ** 2 * p0[0] + 2 * (1 - t) * t * c[0] + t * t * p2[0],
+                    (1 - t) ** 2 * p0[1] + 2 * (1 - t) * t * c[1] + t * t * p2[1]))
+    return out
+
+
+SEG = T.get('segments', 3)
+
+
 def body_half(p):
-    """Half section from the floor's centre out, up the side, over the deck."""
+    """Half section from the floor's centre out, up the side, over the deck: the sill's
+    and the shoulder's turns and the deck's crown each a short curve."""
     w, sill, sh, top = p['w'], p['sill'], p['sh'], p['top']
     e = top - p['crown']
     xe = w - p['tumble']
-    return [(0.0, sill), (w - p['lch'], sill), (w, sill + p['lch']), (w, sh),
-            (xe + p['ch'] * 0.3, e - p['ch']), (xe - p['ch'], e), (xe * 0.5, top - p['crown'] * 0.25), (0.0, top)]
+    pts = [(0.0, sill), (w - p['lch'], sill)]
+    pts += bez(pts[-1], (w, sill), (w, sill + p['lch']), 2)
+    pts.append((w, sh))
+    pts += bez((w, sh), (xe + p['ch'] * 0.15, e), (xe - p['ch'], e), SEG)
+    pts += bez(pts[-1], (xe * 0.45, top), (0.0, top), 2)
+    return pts
 
 
 def body_x_at(y, z):
@@ -157,7 +175,7 @@ def loft(bm, rings, mat):
     return grid
 
 
-SLOTS = ['paint', 'glass', 'trim', T.get('houseMaterial', 'paint')]
+SLOTS = ['paint', 'glass', 'trim', T.get('houseMaterial', 'paint'), T.get('sealMaterial', 'trim')]
 bm = bmesh.new()
 
 # ---- body ---------------------------------------------------------------------------
@@ -250,9 +268,12 @@ hs = sorted(T['house'], key=lambda s: s['y'])
 
 
 def house_half(p):
+    """The glasshouse's half section: its buried foot, the window band from the belt to
+    the roof's edge, the roof curving over to the centre."""
     base = p['belt'] - 0.08
-    return [(0.0, base), (p['bw'], base), (p['bw'], p['belt']), (p['rw'], p['gutter']),
-            (p['rw'] * 0.55, p['roof'] - (p['roof'] - p['gutter']) * 0.2), (0.0, p['roof'])]
+    pts = [(0.0, base), (p['bw'], base), (p['bw'], p['belt']), (p['rw'], p['gutter'])]
+    pts += bez(pts[-1], (p['rw'] * T.get('roofTurn', 0.8), p['roof']), (0.0, p['roof']), T.get('roofSegments', 4))
+    return pts
 
 
 hb = bmesh.new()
@@ -261,20 +282,46 @@ grid = loft(hb, house_rings, 3)
 n = len(house_rings[0])
 # Index of each face round the ring: 0 floor, 1 lower wall (buried), 2 window band, 3, 4 roof
 # right; mirrored after.
-half_n = len(house_half(hs[0]))
 side_k = [2, n - 3]                   # the window band, right and left
-top_k = [3, 4, n - 5, n - 4]          # roof (or screen / back light) across
+top_k = list(range(3, n - 3))         # the roof across (the screen, the back light)
 frame = T.get('frame', 0.035)
 
 
-def inset(faces, f, depth=-0.012):
+def window(faces, f, depth=-0.012):
+    """A pane in the faces: a frame `f` wide left in the body's colour, the opening's
+    corners rounded, a seal round the glass, the glass set in."""
     faces = [x for x in faces if x is not None and x.is_valid]
     if not faces:
-        return []
-    r = bmesh.ops.inset_region(hb, faces=faces, thickness=f, depth=depth, use_even_offset=True)
+        return
+    bmesh.ops.inset_region(hb, faces=faces, thickness=f, depth=0.0, use_even_offset=True)
     for x in faces:
+        x.material_index = 9          # the opening, until its corners are turned
+    region = set(faces)
+    edges = {e for x in region for e in x.edges if sum(1 for l in e.link_faces if l in region) == 1}
+    corners = []
+    for v in {v for e in edges for v in e.verts}:
+        es = [e for e in v.link_edges if e in edges]
+        if len(es) != 2:
+            continue
+        d0 = (es[0].other_vert(v).co - v.co).normalized()
+        d1 = (es[1].other_vert(v).co - v.co).normalized()
+        if d0.dot(d1) > -0.85:            # a turn of more than ~30 degrees
+            corners.append(v)
+    rr = T.get('cornerRadius', 0.035)
+    if corners:
+        bmesh.ops.bevel(hb, geom=corners, offset=rr, offset_type='OFFSET', segments=3, profile=0.5,
+                        affect='VERTICES', clamp_overlap=True)
+    glass = [x for x in hb.faces if x.material_index == 9]
+    for x in glass:
         x.material_index = 1
-    return faces
+    r = bmesh.ops.inset_region(hb, faces=glass, thickness=T.get('seal', 0.012), depth=0.0, use_even_offset=True)
+    for x in r['faces']:
+        x.material_index = 4
+    bmesh.ops.inset_region(hb, faces=glass, thickness=0.001, depth=depth, use_even_offset=True)
+
+
+def inset(faces, f, depth=-0.012):
+    window(faces, f, depth)
 
 
 # The screen: the roof faces between its foot and head; the back light: between the last two.
@@ -292,6 +339,39 @@ bmesh.ops.recalc_face_normals(hb, faces=hb.faces)
 house = new_object('house', hb, SLOTS)
 
 # ---- parts --------------------------------------------------------------------------
+# Parts stand on the real skin: rays against the body and the glasshouse as built.
+from mathutils.bvhtree import BVHTree
+_dg = bpy.context.evaluated_depsgraph_get()
+_trees = [BVHTree.FromObject(o, _dg) for o in (body, house)]
+
+
+def skin_hit(origin, direction, dist=5.0):
+    best = None
+    for tr in _trees:
+        hit = tr.ray_cast(Vector(origin), Vector(direction).normalized(), dist)
+        if hit[0] is not None and (best is None or hit[3] < best[3]):
+            best = hit
+    return best
+
+
+def house_x_at(y, z):
+    """The glasshouse's half-width at (y, z) on its window band, or None off it."""
+    if not hs[0]['y'] <= y <= hs[-1]['y']:
+        return None
+    p = lerp_station(hs, y, HKEYS)
+    if z < p['belt'] - 1e-6 or z > p['gutter'] + 1e-6 or p['gutter'] - p['belt'] < 1e-4:
+        return None
+    return p['bw'] + (p['rw'] - p['bw']) * (z - p['belt']) / (p['gutter'] - p['belt'])
+
+
+def skin_x(y, z):
+    hit = skin_hit((2.0, y, z), (-1, 0, 0))
+    if hit is not None:
+        return hit[0].x
+    hx = house_x_at(y, z)
+    return hx if hx is not None else body_x_at(y, z)
+
+
 PARTS = {}            # node -> bmesh
 
 
@@ -350,7 +430,7 @@ for d in T.get('ends', []):
     b, mi = slot(node, d.get('material', 'trim'))
     sgn = -1 if d['end'] == 'front' else 1
     for s_ in sides(d, node):
-        x = s_ * d.get('x', 0.0)
+        x = s_ * abs(d.get('x', 0.0))
         y = end_y(d['end'], abs(x), d['z']) + sgn * d.get('proud', 0.012)
         dep = d.get('depth', 0.04)
         if d.get('shape') == 'round':
@@ -389,20 +469,64 @@ for d in T.get('flank', []):
             yc = (ya_ + yb_) / 2
             if any(abs(yc - ax) < R * 1.12 + 0.03 and d['z'] < R + 0.03 + R * 1.12 for ax, _ in AXLES):
                 continue
-            x = body_x_at(yc, d['z'])
+            x = skin_x(yc, d['z'])
             pr = d.get('proud', 0.006)
             box(b, (s_ * (x + pr / 2), yc, d['z']), (pr + 0.01, yb_ - ya_ + 0.002, d['h']), mi)
 
-# Seams: a door's outline as thin dark strips on the flank. {y0, y1, z0, z1}
+# Doors: the shut line all the way round, as a thin dark strip standing on the skin: up
+# the front edge, along under the roof's edge (so up the screen pillar where the door
+# reaches it), down the back edge and along the bottom. {y0, y1, z0}
+def ribbon(b, mi, path, width=0.007, proud=0.002, step=0.03):
+    """A strip along a path of (y, z) on the skin, both sides."""
+    pts = []
+    for (y0, z0), (y1, z1) in zip(path, path[1:]):
+        n_ = max(1, int(math.hypot(y1 - y0, z1 - z0) / step))
+        for i in range(n_):
+            pts.append((y0 + (y1 - y0) * i / n_, z0 + (z1 - z0) * i / n_))
+    pts.append(path[-1])
+    for s_ in (1, -1):
+        on = []
+        for y_, z_ in pts:
+            hit = skin_hit((s_ * 2.0, y_, z_), (-s_, 0, 0))
+            if hit is None:
+                on.append(None)
+                continue
+            on.append((hit[0], hit[1]))
+        for a_, b_ in zip(on, on[1:]):
+            if a_ is None or b_ is None:
+                continue
+            p0, p1 = a_[0], b_[0]
+            along = p1 - p0
+            ln = along.length
+            if ln < 1e-5:
+                continue
+            yv = along / ln
+            nv = (a_[1] + b_[1]).normalized()
+            xv = (nv - yv * nv.dot(yv)).normalized()
+            zv = xv.cross(yv)
+            rot = Matrix((xv, yv, zv)).transposed().to_4x4()
+            c_ = (p0 + p1) / 2 + nv * (proud / 2)
+            box(b, c_, (proud + 0.004, ln + width * 0.6, width), mi, rot)
+
+
+for d in T.get('doors', []):
+    b, mi = slot('trim', d.get('material', 'trim'))
+    y0, y1, z0 = d['y0'], d['y1'], d['z0']
+    e = d.get('below', 0.012)
+
+    def top_z(y):
+        p = lerp_station(hs, y, HKEYS)
+        return max(p['gutter'] - e, p['belt'] + 0.01)
+    belt0 = lerp_station(hs, y0, HKEYS)['belt'] if hs[0]['y'] <= y0 <= hs[-1]['y'] else d.get('top', 1.0)
+    belt1 = lerp_station(hs, y1, HKEYS)['belt'] if hs[0]['y'] <= y1 <= hs[-1]['y'] else d.get('top', 1.0)
+    along = [(y, top_z(y)) for y in [y0 + (y1 - y0) * i / 30 for i in range(31)]] if d.get('frame', True) else \
+        [(y0, belt0), (y1, belt1)]
+    path = [(y0, z0)] + along + [(y1, z0), (y0, z0)]
+    ribbon(b, mi, path)
 for d in T.get('seams', []):
     b, mi = slot('trim', 'trim')
-    t_ = 0.006
-    for s_ in (1, -1):
-        for yy, zz, ly, lz in ((d['y0'], (d['z0'] + d['z1']) / 2, t_, d['z1'] - d['z0']),
-                               (d['y1'], (d['z0'] + d['z1']) / 2, t_, d['z1'] - d['z0']),
-                               ((d['y0'] + d['y1']) / 2, d['z0'], d['y1'] - d['y0'], t_)):
-            x = body_x_at(yy, zz)
-            box(b, (s_ * (x + 0.001), yy, zz), (0.006, ly, lz), mi)
+    ribbon(b, mi, [(d['y0'], d['z1']), (d['y0'], d['z0']), (d['y1'], d['z0']), (d['y1'], d['z1'])])
+
 
 # Mirror: {y, z, w, h, d, arm, material}: a block on a short arm off the door.
 mr = T.get('mirror')
@@ -410,7 +534,7 @@ if mr:
     b, mi = slot('trim', mr.get('material', 'trim'))
     _, gi = slot('trim', 'chrome')
     for s_ in (1, -1):
-        x0 = body_x_at(mr['y'], mr['z'] - 0.02)
+        x0 = skin_x(mr['y'], mr['z'] - 0.02)
         arm = mr.get('arm', 0.06)
         w_, h_, d_ = mr.get('w', 0.14), mr.get('h', 0.09), mr.get('d', 0.06)
         box(b, (s_ * (x0 + arm / 2), mr['y'] + 0.01, mr['z'] - 0.01), (arm + 0.02, 0.04, 0.03), mi)
@@ -429,7 +553,12 @@ for d in T.get('blocks', []):
     b, mi = slot(node, d.get('material', 'trim'))
     xs = (1, -1) if d.get('mirror') else (1,)
     for s_ in xs:
-        c = d['c']
+        c = list(d['c'])
+        if d.get('onTop'):
+            # laid flush on the skin below: its top just proud of it
+            hit = skin_hit((s_ * c[0], c[1], 3.0), (0, 0, -1))
+            if hit is not None:
+                c[2] = hit[0].z + d.get('proud', 0.004) - d['size'][2] / 2
         if d.get('round'):
             cyl(b, (s_ * c[0], c[1], c[2]), d.get('axis', (0, 1, 0)), d['r'], d['depth'], d.get('seg', 12), mi)
         else:
@@ -451,13 +580,15 @@ part_objs = {node: new_object(node, b, mats) for node, (b, mats) in PARTS.items(
 # ---- wheels -------------------------------------------------------------------------
 wh = T.get('wheel', {})
 tw = F['tyreWidth']
-seg = wh.get('segments', 16)
+seg = wh.get('segments', 20)
 for name, (ya, track), side in (('wheel_fl', AXLES[0], 1), ('wheel_fr', AXLES[0], -1),
                                 ('wheel_rl', AXLES[1], 1), ('wheel_rr', AXLES[1], -1)):
     b = bmesh.new()
     rim = R * wh.get('rim', 0.6)
-    prof = [(rim, -side * tw / 2), (R * 0.9, -side * tw / 2), (R, -side * tw * 0.35), (R, side * tw * 0.35),
-            (R * 0.9, side * tw / 2), (rim, side * tw / 2)]
+    hw = tw / 2
+    # a rounded tyre: shoulders turned over, the sidewalls bulging a little past the rim
+    prof = [(rim, -side * hw * 0.88), (R * 0.86, -side * hw), (R * 0.96, -side * hw * 0.85), (R, -side * hw * 0.5),
+            (R, side * hw * 0.5), (R * 0.96, side * hw * 0.85), (R * 0.86, side * hw), (rim, side * hw * 0.88)]
     rings = []
     for k in range(seg):
         a = 2 * math.pi * k / seg
@@ -467,10 +598,13 @@ for name, (ya, track), side in (('wheel_fl', AXLES[0], 1), ('wheel_fr', AXLES[0]
         for j in range(len(prof) - 1):
             f = b.faces.new((r0[j], r0[j + 1], r1[j + 1], r1[j]))
             f.material_index = 0
-    # the face: a dished disc and a cap
-    for sgn_x, rr, dx, mi_ in ((1, rim, -0.012, 1), (1, rim * wh.get('cap', 0.45), 0.004, 1)):
-        cyl(b, (side * (tw / 2 + dx), 0, 0), (1, 0, 0), rr, 0.02, seg, mi_)
-    o = new_object(name, b, ['Tyres', 'wheel_rim'])
+    # the face: a rim lip, a dished disc, a domed cap
+    fx = side * hw * 0.88
+    cyl(b, (fx - side * 0.004, 0, 0), (1, 0, 0), rim, 0.012, seg, 1)
+    cyl(b, (fx - side * 0.014, 0, 0), (1, 0, 0), rim * 0.86, 0.012, seg, 2)
+    cap = rim * wh.get('cap', 0.45)
+    cyl(b, (fx + side * 0.006, 0, 0), (side, 0, 0), cap, 0.03, seg, 1, cap * 0.55)
+    o = new_object(name, b, ['Tyres', 'wheel_rim', 'trim'])
     o.location = (side * track / 2, ya, R)
 
 # ---- join, shade, export ------------------------------------------------------------
@@ -507,6 +641,9 @@ for o in scene.objects:
     bpy.context.view_layer.objects.active = o
     if o.name.startswith('wheel_'):
         bpy.ops.object.shade_smooth_by_angle(angle=math.radians(50))
+    elif o.name in ('paint', 'glass', 'fenders'):
+        # soft across the curves, crisp at the creases
+        bpy.ops.object.shade_smooth_by_angle(angle=math.radians(T.get('smoothDeg', 34)))
     else:
         bpy.ops.object.shade_flat()
     for p_ in o.data.polygons:
