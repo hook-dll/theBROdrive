@@ -59,6 +59,23 @@ in-game contact sheet, install.sh, commit.
 7. Lamps on rounded ends. [done] End lamps may turn the corner a little (facing
    limit 0.1) and are cut cleanly along the limit, not torn into pieces.
 
+8. **Sides bending along the car.** [done e9e9638] One section for the whole car (the
+   two end views' mean) instead of a blend from front view to rear view; mirrors, pods
+   and handles opened out of the end views and the plan. Bend score (spread of the
+   side's lean between the arches) Niva 4.0 -> 0.1 deg, Golf 2.8 -> 0.1.
+9. **Rear quarters crumpled.** [done e7586da] The glasshouse stands an even 3 cm shelf
+   in from the side at the belt; a shelf widening as the glass plan narrowed was a
+   diagonal fold (Fulvia, Fiat 124, Renault 4).
+10. **Toothed arch lips.** [done e7586da] Smooth minimum of side and well.
+11. **End lamps lost or smeared on sloping noses.** [done e7586da] End decals lie on
+   what the end view sees (by ray), down to grazing.
+12. **Wipers floating.** [done e7586da] Slim blades on the glass just above its foot.
+13. **Bumpers.** [done 690a57d, c0eb1a9] Run round the convex hull of the end; each car's
+   own height, profile, material and overriders checked against photos
+   (build/carshape/_refs/photos/<car>).
+
+Open, car by car: Mustang GT's nose (fascia, fog lamps, cladding); 2CV's tail.
+
 Done before: no number plates or blank plate patches (824adb5); arch flares built on
 the skin.
 
