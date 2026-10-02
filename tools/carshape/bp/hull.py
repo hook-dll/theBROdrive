@@ -336,7 +336,9 @@ def build(car):
             k = gplan[j] / max(g_ref, 1e-3)
             xg = sec[:, j] * k
             if w_abs[j] > 0:
-                xg = xg * (1 - w_abs[j]) + sec_abs[:, j] * w_abs[j]
+                # a station's section speaks only up to its own top: above it the
+                # glasshouse keeps its own (it zeroed the roof's slope behind the cabin)
+                xg = np.where(sec_abs[:, j] > 0, xg * (1 - w_abs[j]) + sec_abs[:, j] * w_abs[j], xg)
             if hs.get('shelf') is not False:
                 # The glasshouse stands an even `shelf` in from the body's side at the
                 # belt all along the car, its drawn shape taking over above: a shelf
