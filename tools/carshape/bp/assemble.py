@@ -464,16 +464,21 @@ print('SEAL', car, SEAL, 'frame lines dropped', len(FRAME_LINES))
 
 FIT_KS = {}
 FITTED = {}
+# A side window is its drawn outline on what the side view sees: its edges are the
+# drawing's straight lines, never the curve where the side turns away.
+GL = [dict(g, visible=True, facingMin=min(g.get('facingMin', 0.3), -0.2), sideWin=True) if g['view'] == 'side' else g
+      for g in GL]
 for gi, g in enumerate(GL):
     for sign, poly in sides_of(g):
         # Both halves of a screen take the first half's fit: a pane is symmetric.
         FITTED[(gi, sign)] = fit_pane(g['view'], sign, poly, g, FIT_KS.get((g['view'], id(g))))
         cut(g['view'], sign, FITTED[(gi, sign)], g)
-        iso_cut(g['view'], sign, FITTED[(gi, sign)], g)
+        if not g.get('sideWin'):
+            iso_cut(g['view'], sign, FITTED[(gi, sign)], g)
 for gi, g in enumerate(GL):
     for sign, poly in sides_of(g):
         poly = FITTED[(gi, sign)]
-        sel = set(select(g['view'], sign, poly, dict(g, iso=True)))
+        sel = set(select(g['view'], sign, poly, dict(g, iso=not g.get('sideWin'))))
         glass_faces |= sel
         # A pane whose outline runs off the surface the view sees ends in a ragged
         # edge (faces inside the outline but turned away): reported, so the outline
@@ -589,8 +594,11 @@ def decal_shapes():
             hole = offset_poly(poly, -d['ring']) if d.get('ring') else None
             node = d.get('node', 'decal_trim')
             out.append((d['view'], sign, poly, d, node, d.get('material', 'trim'), d.get('height', 0.004), hole))
-    # Bars across a grille or a lamp: thin strips, each its own patch.
+    # Bars across a grille or a lamp: thin strips, each its own patch (on the ends they
+    # are straight solid bars instead, built with the parts: BARS_SOLID).
     for d in P.get('bars', []):
+        if d['view'] in ('front', 'rear'):
+            continue
         a0, a1 = d['span']
         for k in range(d['count']):
             t = (k + 0.5) / d['count']
@@ -914,9 +922,9 @@ def box(bm_, centre, size, mat=0, rot=None):
     return r
 
 
-def sweep(bm_, path, profile, mat=0, closed_ends=True):
+def sweep(bm_, path, profile, mat=0, closed_ends=True, scales=None):
     """A closed 2D `profile` [(u, v)] carried along a 3D `path`: u across (horizontal,
-    outward), v up."""
+    outward), v up; `scales` shrinks the section ring by ring (a rounded end)."""
     rings_ = []
     for k, p in enumerate(path):
         p = Vector(p)
@@ -924,7 +932,8 @@ def sweep(bm_, path, profile, mat=0, closed_ends=True):
         b = Vector(path[min(k + 1, len(path) - 1)])
         t = (b - a).normalized()
         side = t.cross(Vector((0, 0, 1))).normalized()
-        rings_.append([bm_.verts.new(p + side * u + Vector((0, 0, v))) for u, v in profile])
+        sc_ = scales[k] if scales else 1.0
+        rings_.append([bm_.verts.new(p + side * u * sc_ + Vector((0, 0, v * sc_))) for u, v in profile])
     faces = []
     for r0, r1 in zip(rings_, rings_[1:]):
         for k in range(len(profile)):
@@ -957,8 +966,17 @@ for end, b in P.get('bumpers', {}).items():
     # The path runs round the end; the profile's +u must face out of the car.
     pts = [Vector(p) for p in path]
     pts.sort(key=lambda p: p.x * sgn)
+    # The bar's ends are rounded off: extra rings at each end shrinking to a cap, not a
+    # sawn-off square section.
+    def tip(p0, p1, k):
+        d_ = (p0 - p1).normalized()
+        return p0 + d_ * (dpt * 0.35) * k
+    tips0 = [tip(pts[0], pts[1], k) for k in (0.6, 1.0)]
+    tips1 = [tip(pts[-1], pts[-2], k) for k in (0.6, 1.0)]
+    path_all = tips0[::-1] + pts + tips1
+    scale = [0.45, 0.8] + [1.0] * len(pts) + [0.8, 0.45]
     bm_ = bmesh.new()
-    sweep(bm_, [tuple(p) for p in pts], prof, 0)
+    sweep(bm_, [tuple(p) for p in path_all], prof, 0, scales=scale)
     o = new_object('bumper_' + end, bm_, [b.get('material', 'chrome')])
     trim_parts.append(o)
     if b.get('rubber'):
@@ -971,10 +989,32 @@ for end, b in P.get('bumpers', {}).items():
     for ov in b.get('overriders', []):
         bm_ = bmesh.new()
         x, w_, z0, z1 = ov
-        y_face = min(p.y for p in pts) if end == 'front' else max(p.y for p in pts)
         for s_ in (1, -1):
-            # Through the bar, standing 15 mm proud of its face.
-            box(bm_, (s_ * x, y_face - sgn * 0.0075, (z0 + z1) / 2), (w_, dpt + 0.015, z1 - z0), 0)
+            # A rounded fang through the bar at x, standing on the bar's own face there
+            # (the bar curves away at the corners), tapered top and bottom.
+            near = min(pts, key=lambda p: abs(p.x - s_ * x))
+            yc = near.y - sgn * 0.012
+            hz = (z1 - z0) / 2
+            prof_ov = [(0.0, -hz), (0.6, -hz * 0.92), (0.95, -hz * 0.5), (1.0, 0.0), (0.95, hz * 0.55), (0.6, hz * 0.95), (0.0, hz)]
+            rings = []
+            for k in range(12):
+                a_ = 2 * math.pi * k / 12
+                rx, ry = math.cos(a_) * w_ / 2, math.sin(a_) * (dpt + 0.03) / 2
+                rings.append(a_)
+            vs = []
+            for t_, zz in prof_ov:
+                ring = []
+                for a_ in rings:
+                    rx = math.cos(a_) * w_ / 2 * max(t_, 0.35)
+                    ry = math.sin(a_) * (dpt + 0.03) / 2 * max(t_, 0.35)
+                    ring.append(bm_.verts.new((s_ * x + rx, yc + ry, (z0 + z1) / 2 + zz)))
+                vs.append(ring)
+            for r0, r1 in zip(vs, vs[1:]):
+                for k in range(12):
+                    bm_.faces.new((r0[k], r0[(k + 1) % 12], r1[(k + 1) % 12], r1[k]))
+            bm_.faces.new(vs[0][::-1])
+            bm_.faces.new(vs[-1])
+        bmesh.ops.recalc_face_normals(bm_, faces=bm_.faces)
         trim_parts.append(new_object('overriders_' + end, bm_, [b.get('material', 'chrome')]))
 
 
@@ -1314,6 +1354,38 @@ for sp in P.get('spares', []):
     disc(bm_, c + n_ * (w * 0.42), n_, r * 0.6, 0.02, 24, 1)
     disc(bm_, c + n_ * (w * 0.44), n_, r * 0.22, 0.03, 16, 1)
     trim_parts.append(new_object('spare', bm_, ['Tyres', sp.get('rim', 'wheel_rim')]))
+
+# Grille bars on the ends: straight solid bars standing just proud of the grille behind
+# them, each set at the surface's depth under its middle (as decals they followed
+# every dent of the shell and waved).
+for d in P.get('bars', []):
+    if d['view'] not in ('front', 'rear'):
+        continue
+    bm_ = bmesh.new()
+    sgn = -1 if d['view'] == 'front' else 1
+    a0, a1 = d['span']
+    w_ = d['width']
+    for k in range(d['count']):
+        t = (k + 0.5) / d['count']
+        if d.get('dir', 'h') == 'h':
+            zc = d['b'][0] + (d['b'][1] - d['b'][0]) * t
+            xa, xb, za, zb = a0, a1, zc, zc
+        else:
+            xc = a0 + (a1 - a0) * t
+            xa, xb, za, zb = xc, xc, d['b'][0], d['b'][1]
+        ys_ = []
+        for tt in np.linspace(0, 1, 5):
+            x_, z_ = xa + (xb - xa) * tt, za + (zb - za) * tt
+            hit, _n = skin_point((x_, sgn * (L / 2 + 1.0), z_), (0, -sgn, 0), L + 2)
+            if hit is not None:
+                ys_.append(hit.y)
+        if not ys_:
+            continue
+        yb = (min(ys_) if sgn < 0 else max(ys_)) + sgn * d.get('height', 0.008)
+        ln = max(abs(xb - xa), abs(zb - za))
+        size = (ln, 0.012, w_) if d.get('dir', 'h') == 'h' else (w_, 0.012, ln)
+        box(bm_, ((xa + xb) / 2, yb - sgn * 0.006, (za + zb) / 2), size, 0)
+    trim_parts.append(new_object('bars', bm_, [d.get('material', 'chrome')]))
 
 # Extra hand-placed solid boxes (aerials, spare wheel carriers, roof racks...).
 for bx in P.get('boxes', []):

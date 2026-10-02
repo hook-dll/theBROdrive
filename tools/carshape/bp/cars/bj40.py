@@ -95,7 +95,7 @@ CAR = {
             'rear': {'z': [0.44, 0.56], 'depth': 0.08, 'wrap': 0.02, 'profile': 'blade', 'material': 'trim', 'standOff': 0.0},
         },
         'spares': [{'c': [-0.47, 1.85, 1.02], 'n': [0, 1, 0], 'r': 0.36, 'w': 0.19}],
-        'mirror': {'y': -0.33, 'z': 1.30, 'reach': 0.98, 'w': 0.10, 'h': 0.10, 'shape': 'round'},
+        'mirror': {'y': -0.33, 'z': 1.18, 'reach': 0.98, 'w': 0.10, 'h': 0.10, 'shape': 'round', 'mount': 'door'},
         'handles': {'at': [[0.30, 1.10]], 'w': 0.10},
         'wipers': {'arms': [[-0.5, -0.1, -0.42, 1.68], [0.1, 0.5, -0.42, 1.68]]},
         'wheel': {'style': 'steel', 'windows': 0, 'rimFactor': 0.6, 'cap': True},
