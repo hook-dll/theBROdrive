@@ -1,0 +1,93 @@
+# Alfa Romeo Giulia Super (1965-72). Factory: 4140 x 1560 x 1430, wheelbase 2510, tracks
+# 1310/1270, 155 SR 15, clearance 150. Autocar's dimensioned cutaway of the 1966 Giulia
+# Super at getoutlines.com (178 px/m by the 8 ft 2.5 in wheelbase; side outline read off
+# by hand, its cross-section for the section; the front axle 0.655 behind the bumper as
+# drawn). The brick shaped by the wind: a short nose with four round lamps across a wide
+# chrome grille and the shield, a long flat-sided body with its feature line, the
+# glasshouse set back, the Kamm tail with its flat boot lid.
+CAR = {
+    'id': 'giulia',
+    'label': 'Alfa Romeo Giulia',
+    'factory': {'length': 4.14, 'width': 1.56, 'height': 1.43, 'clearance': 0.15, 'wheelbase': 2.51,
+                'frontTrack': 1.31, 'rearTrack': 1.27, 'wheelRadius': 0.3, 'tyreWidth': 0.155, 'frontOverhang': 0.655},
+    'blueprint': {
+        'image': 'giulia_go.png',
+        'dark': 120,
+        'side': {'box': [360, 40, 1120, 310], 'nose': 'left', 'wheels': [[490, 252], [935, 252]], 'ground': 305, 'isotropic': True,
+                 'outline': [[-2.073, 0.394], [-2.073, 0.523], [-2.006, 0.546], [-1.989, 0.692], [-1.921, 0.782], [-1.527, 0.872], [-0.993, 0.996], [-0.796, 1.181], [-0.571, 1.389], [-0.459, 1.434], [0.891, 1.389], [0.975, 1.35], [1.212, 0.984], [1.453, 0.967], [1.92, 0.928], [1.999, 0.855], [2.021, 0.731], [2.005, 0.59], [2.061, 0.562], [2.061, 0.377], [1.988, 0.354], [1.566, 0.242], [0.778, 0.186], [-1.021, 0.169], [-1.809, 0.242], [-2.034, 0.337]]},
+        'front': {'box': [0, 40, 305, 310], 'ppm': 184, 'centre': 152, 'zRef': [[50, 1.43], [305, 0.0]]},
+    },
+    'hull': {
+        'bumpers': {'front': {'z': [0.38, 0.53]}, 'rear': {'z': [0.36, 0.53]}},
+        'sill': [[-2.07, 0.36], [-1.8, 0.26], [-1.0, 0.20], [0.8, 0.20], [1.55, 0.26], [2.06, 0.37]],
+        'planOverride': [[-2.08, 0.70], [-2.0, 0.76], [-1.8, 0.78], [1.8, 0.78], [2.0, 0.76], [2.07, 0.72]],
+        'cabin': [-0.99, 1.22],
+        'belt': [[-0.99, 1.0], [-0.55, 0.975], [0.85, 0.975], [1.22, 0.99]],
+        'glassPlan': [[-0.99, 0.62], [-0.5, 0.68], [0.8, 0.68], [1.22, 0.60]],
+        'crown': [[-2.2, 0.025], [2.2, 0.025]],
+        'roofCrown': 0.03,
+        'edge': 0.010,
+        'arch': {'radius': 0.36, 'lift': 0.04},
+    },
+    'parts': {
+        'glass': [
+            {'view': 'side', 'outline': [[-0.487, 0.98], [0.075, 0.98], [0.075, 1.31], [-0.414, 1.31]], 'facingMin': 0.3},
+            {'view': 'side', 'outline': [[0.16, 0.98], [0.835, 0.98], [0.722, 1.277], [0.16, 1.31]], 'facingMin': 0.3},
+            {'view': 'front', 'outline': [[0.0, 1.38], [0.52, 1.37], [0.60, 1.30], [0.64, 1.02], [0.60, 0.99], [0.0, 0.99]],
+             'depthRange': [-1.1, -0.4], 'facingMin': 0.2},
+            {'view': 'rear', 'outline': [[0.0, 1.36], [0.50, 1.35], [0.58, 1.28], [0.62, 1.04], [0.58, 1.02], [0.0, 1.02]],
+             'depthRange': [0.8, 1.3], 'facingMin': 0.15},
+        ],
+        'decals': [
+            {'view': 'front', 'rect': [[0.0, 0.635], [1.42, 0.18]], 'radius': 0.03, 'mirror': False, 'material': 'chrome',
+             'height': 0.003, 'depthRange': [-2.2, -1.8]},
+            {'view': 'front', 'rect': [[0.0, 0.635], [1.38, 0.14]], 'radius': 0.02, 'mirror': False, 'material': 'grille',
+             'height': 0.005, 'depthRange': [-2.2, -1.8]},
+            {'view': 'front', 'circle': [[0.60, 0.64], 0.095], 'material': 'chrome', 'height': 0.007, 'depthRange': [-2.2, -1.8]},
+            {'view': 'front', 'node': 'headlights', 'circle': [[0.60, 0.64], 0.08], 'material': 'Headlights', 'height': 0.011,
+             'depthRange': [-2.2, -1.8]},
+            {'view': 'front', 'circle': [[0.40, 0.64], 0.075], 'material': 'chrome', 'height': 0.007, 'depthRange': [-2.2, -1.8]},
+            {'view': 'front', 'node': 'headlights', 'circle': [[0.40, 0.64], 0.062], 'material': 'Headlights', 'height': 0.011,
+             'depthRange': [-2.2, -1.8]},
+            {'view': 'front', 'outline': [[0.0, 0.76], [0.09, 0.74], [0.08, 0.62], [0.0, 0.53], [-0.08, 0.62], [-0.09, 0.74]],
+             'mirror': False, 'material': 'chrome', 'height': 0.010, 'depthRange': [-2.2, -1.8]},
+            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.62, 0.48], [0.08, 0.035]], 'radius': 0.01,
+             'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [-2.2, -1.8]},
+            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.62, 0.48], [0.08, 0.035]], 'radius': 0.01,
+             'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [-2.2, -1.8]},
+            {'view': 'front', 'rect': [[0.0, 0.36], [0.48, 0.10]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
+             'height': 0.006, 'depthRange': [-2.3, -1.8]},
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.64, 0.70], [0.16, 0.14]], 'radius': 0.01, 'material': 'TailLights',
+             'height': 0.010, 'depthRange': [1.7, 2.2], 'facingMin': 0.05},
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.64, 0.60], [0.16, 0.06]], 'radius': 0.01,
+             'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [1.7, 2.2], 'facingMin': 0.05},
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.64, 0.60], [0.16, 0.06]], 'radius': 0.01,
+             'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [1.7, 2.2], 'facingMin': 0.05},
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.0, 0.70], [0.10, 0.03]], 'radius': 0.01, 'mirror': False,
+             'material': 'ReverseLights', 'height': 0.010, 'depthRange': [1.7, 2.2], 'facingMin': 0.05},
+            {'view': 'rear', 'rect': [[0.0, 0.60], [0.48, 0.10]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
+             'height': 0.006, 'depthRange': [1.7, 2.2], 'facingMin': 0.05},
+        ],
+        'bars': [
+            {'view': 'front', 'span': [-0.68, 0.68], 'b': [0.58, 0.69], 'count': 5, 'width': 0.006, 'material': 'chrome',
+             'height': 0.007, 'depthRange': [-2.2, -1.8]},
+        ],
+        'lines': [
+            {'view': 'side', 'points': [[-1.95, 0.80], [1.98, 0.80]], 'width': 0.008, 'material': 'chrome', 'height': 0.003},
+            {'view': 'side', 'points': [[-1.0, 0.97], [-1.02, 0.28], [0.12, 0.25], [0.12, 0.97]], 'width': 0.005},
+            {'view': 'side', 'points': [[0.12, 0.25], [0.95, 0.27], [1.08, 0.45], [1.10, 0.98]], 'width': 0.005},
+            {'view': 'side', 'points': [[-0.55, 0.97], [-0.42, 1.32], [0.75, 1.30], [0.86, 0.97]], 'width': 0.012, 'material': 'chrome',
+             'height': 0.003},
+            {'view': 'top', 'points': [[1.30, 0.0], [1.30, 0.58], [1.98, 0.62]], 'width': 0.005, 'facingMin': 0.5},
+        ],
+        'bumpers': {
+            'front': {'z': [0.41, 0.50], 'depth': 0.05, 'wrap': 0.28, 'profile': 'blade', 'standOff': -0.03,
+                      'overriders': [[0.30, 0.04, 0.38, 0.56]]},
+            'rear': {'z': [0.40, 0.49], 'depth': 0.05, 'wrap': 0.28, 'profile': 'blade', 'standOff': -0.03},
+        },
+        'mirror': {'y': -0.70, 'z': 0.98, 'reach': 0.86, 'w': 0.10, 'h': 0.07, 'material': 'chrome', 'shape': 'round', 'sides': [1]},
+        'handles': {'at': [[-0.05, 0.88], [0.95, 0.88]], 'w': 0.11},
+        'wipers': {'arms': [[-0.5, -0.05, -1.0, 1.02], [0.05, 0.5, -1.0, 1.02]]},
+        'wheel': {'style': 'hubcap', 'rimFactor': 0.62, 'cap': 0.66},
+    },
+}

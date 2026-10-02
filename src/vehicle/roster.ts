@@ -1352,7 +1352,7 @@ export const ROSTER: readonly RosterCar[] = [
     label: 'Alfa Romeo Giulia',
     body: 'giulia.glb',
     bodyClass: 'car',
-    factory: { length: 4.14, width: 1.56, height: 1.43, clearance: 0.15, wheelbase: 2.51, frontTrack: 1.31, rearTrack: 1.27, wheelRadius: 0.3, tyreWidth: 0.155, frontOverhang: 0.6 },
+    factory: { length: 4.14, width: 1.56, height: 1.43, clearance: 0.15, wheelbase: 2.51, frontTrack: 1.31, rearTrack: 1.27, wheelRadius: 0.3, tyreWidth: 0.155, frontOverhang: 0.655 },
     mass: 1000,
     frontWeightShare: 0.53,
     rearDriveBias: 1,
