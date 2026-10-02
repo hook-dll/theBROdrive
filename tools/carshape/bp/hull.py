@@ -43,6 +43,20 @@ def pl(points, at):
     return np.interp(at, p[:, 0], p[:, 1])
 
 
+def sm(points, at):
+    """A smooth curve through [[a, b], ...] (monotone cubic: no overshoot, no kink at
+    the points), held flat past the ends. For lines along the car: joined by straight
+    pieces, every point given would be a fold across the body."""
+    p = np.array(sorted(points), float)
+    _, keep = np.unique(p[:, 0], return_index=True)
+    p = p[np.sort(keep)]
+    if len(p) < 3:
+        return np.interp(at, p[:, 0], p[:, 1])
+    from scipy.interpolate import PchipInterpolator
+    a = np.clip(at, p[0, 0], p[-1, 0])
+    return PchipInterpolator(p[:, 0], p[:, 1])(a)
+
+
 def fill_band(arr, axis_vals, band):
     """Replaces arr over axis_vals in [band] by a straight line between its ends."""
     a, b = band
@@ -128,18 +142,18 @@ def build(car):
             m = (zf >= pts[:, 0].min()) & (zf <= pts[:, 0].max())
             ext[m] = np.interp(zf[m], pts[:, 0], pts[:, 1])
     side &= (yf[None, :] >= nose[:, None] - 1e-6) & (yf[None, :] <= tail[:, None] + 1e-6)
-    side &= zf[:, None] >= pl(hs['sill'], yf)[None, :]
+    side &= zf[:, None] >= sm(hs['sill'], yf)[None, :]
     if 'topOverride' in hs:
         # The top over a span given outright (an open tailgate drawn over the roof, a
         # roof rack): clipped above, and filled below down to the sill.
         to = hs['topOverride']
         span = (yf[None, :] >= to[0][0]) & (yf[None, :] <= to[-1][0])
-        zt = pl(to, yf)[None, :]
+        zt = sm(to, yf)[None, :]
         side &= ~span | (zf[:, None] <= zt)
-        side |= span & (zf[:, None] <= zt) & (zf[:, None] >= pl(hs['sill'], yf)[None, :])
+        side |= span & (zf[:, None] <= zt) & (zf[:, None] >= sm(hs['sill'], yf)[None, :])
     d_side_f = (ndimage.distance_transform_edt(side) - ndimage.distance_transform_edt(~side)) * (G / FINE)
     d_side = d_side_f[::FINE, ::FINE][:len(zs), :len(ys)]                   # [z, y], metres
-    sill = pl(hs['sill'], ys)
+    sill = sm(hs['sill'], ys)
     # The top of the outline at every station.
     top_f = np.array([zf[np.nonzero(side[:, j])[0][-1]] if side[:, j].any() else 0 for j in range(len(yf))])
     top = smooth1(top_f, 9, 2.0)[::FINE][:len(ys)]
@@ -160,7 +174,7 @@ def build(car):
     plan = np.minimum(plan, W / 2 - hs.get('skinInset', 0.008))
     if 'planOverride' in hs:
         m = (ys >= hs['planOverride'][0][0]) & (ys <= hs['planOverride'][-1][0])
-        plan[m] = pl(hs['planOverride'], ys[m])
+        plan[m] = sm(hs['planOverride'], ys[m])
 
     # ---- sections ------------------------------------------------------------------
     secs = {}
@@ -221,6 +235,13 @@ def build(car):
         bl = hs.get('stationBlend', 0.08)
         prof = [np.minimum(pl(c['half'], zs), W / 2) * (zs <= max(p[0] for p in c['half'])) for c in st]
         sy = np.array([c['y'] for c in st])
+        if len(st) > 2:
+            from scipy.interpolate import PchipInterpolator
+            interp_st = PchipInterpolator(sy, np.array(prof), axis=0)
+        else:
+            def interp_st(y, sy=sy, prof=prof):
+                f = (y - sy[0]) / max(sy[1] - sy[0], 1e-9)
+                return prof[0] * (1 - f) + prof[1] * f
         for j, y in enumerate(ys):
             if y < sy[0] - bl or y > sy[-1] + bl:
                 continue
@@ -229,16 +250,16 @@ def build(car):
             elif y >= sy[-1]:
                 sec_abs[:, j], w = prof[-1], 1 - (y - sy[-1]) / bl
             else:
-                i = int(np.searchsorted(sy, y)) - 1
-                f = (y - sy[i]) / (sy[i + 1] - sy[i])
-                sec_abs[:, j], w = prof[i] * (1 - f) + prof[i + 1] * f, 1.0
+                # between stations on a smooth curve through them, so a station is no
+                # fold across the body
+                sec_abs[:, j], w = interp_st(y), 1.0
             w_abs[j] = w * w * (3 - 2 * w)
 
     # ---- the glasshouse -----------------------------------------------------------
     c0, c1 = hs['cabin']
-    belt = pl(hs['belt'], ys)
+    belt = sm(hs['belt'], ys)
     in_cabin = (ys >= c0) & (ys <= c1)
-    gplan = pl(hs['glassPlan'], ys)
+    gplan = sm(hs['glassPlan'], ys)
     z_ref = hs.get('beltRef', float(np.median(belt[in_cabin])))
     i_ref = np.searchsorted(zs, z_ref)
     # Below the belt the section is scaled to the plan by its widest point there.
@@ -255,7 +276,7 @@ def build(car):
     xs = np.arange(0, W / 2 + 0.03, G)
     big = 1.0
     dist = np.full((len(xs), len(zs), len(ys)), -big, np.float32)
-    crown = pl(hs.get('crown', [[-9, 0.02], [9, 0.02]]), ys)
+    crown = sm(hs.get('crown', [[-9, 0.02], [9, 0.02]]), ys)
     # The top across the car given at stations, {y, z: [[x, z], ...]}, interpolated
     # between them: a bonnet lower than the wings either side of it, a valley between.
     tc = sorted(hs.get('topCross', []), key=lambda c: c['y'])
