@@ -538,8 +538,9 @@ def decal_shapes():
     out = []
     for d in P.get('decals', []):
         if d['view'] in ('front', 'rear') and 'facingMin' not in d:
-            # A lamp or a plate drawn on an end stays on the end: it does not wrap round.
-            d = dict(d, facingMin=0.3)
+            # A lamp drawn on an end stays on the end: it may turn the corner a little,
+            # as real ones do, and is cut cleanly where it stops (iso_cut).
+            d = dict(d, facingMin=0.1)
         for sign, poly in sides_of(d):
             hole = offset_poly(poly, -d['ring']) if d.get('ring') else None
             node = d.get('node', 'decal_trim')
@@ -633,8 +634,10 @@ for view, sign, poly, d, node, mat, height, hole in SHAPES:
     cut(view, sign, poly, d)
     if hole:
         cut(view, sign, hole, d)
+    if view in ('front', 'rear') and d.get('facingMin', 0.2) > -0.5:
+        iso_cut(view, sign, poly, d)
 for view, sign, poly, d, node, mat, height, hole in SHAPES:
-    tag(view, sign, poly, d, node, mat, height, hole)
+    tag(view, sign, poly, dict(d, iso=view in ('front', 'rear')), node, mat, height, hole)
 
 print('FACES after decals', len(bm.faces), 'shapes', len(SHAPES))
 # The edges where the shell changes material or tag are the lines the drawing
