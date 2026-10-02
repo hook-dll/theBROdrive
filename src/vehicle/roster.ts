@@ -1542,7 +1542,7 @@ export const ROSTER: readonly RosterCar[] = [
     label: 'Volkswagen T2',
     body: 't2.glb',
     bodyClass: 'car',
-    factory: { length: 4.505, width: 1.72, height: 1.95, clearance: 0.185, wheelbase: 2.4, frontTrack: 1.384, rearTrack: 1.425, wheelRadius: 0.33, tyreWidth: 0.185, frontOverhang: 1.0 },
+    factory: { length: 4.505, width: 1.72, height: 1.95, clearance: 0.185, wheelbase: 2.4, frontTrack: 1.384, rearTrack: 1.425, wheelRadius: 0.33, tyreWidth: 0.185, frontOverhang: 1.13 },
     mass: 1175,
     frontWeightShare: 0.44,
     rearDriveBias: 1,
