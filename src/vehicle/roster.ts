@@ -1197,7 +1197,7 @@ export const ROSTER: readonly RosterCar[] = [
     label: 'Toyota Hilux',
     body: 'hilux.glb',
     bodyClass: 'car',
-    factory: { length: 4.305, width: 1.61, height: 1.58, clearance: 0.19, wheelbase: 2.585, frontTrack: 1.3, rearTrack: 1.275, wheelRadius: 0.31, tyreWidth: 0.185, frontOverhang: 0.8 },
+    factory: { length: 4.305, width: 1.61, height: 1.58, clearance: 0.19, wheelbase: 2.585, frontTrack: 1.3, rearTrack: 1.275, wheelRadius: 0.31, tyreWidth: 0.185, frontOverhang: 0.66 },
     mass: 1150,
     frontWeightShare: 0.58,
     rearDriveBias: 1,

@@ -368,7 +368,8 @@ def bumper_paths(mesh, spec, info, raw_ends):
                 stand -= 0.015
             print('BUMPER', end, 'shell', round(float(y_end), 3), 'drawn', round(raw_ends[end], 3), 'stand', round(stand, 3))
         # (negative: the bar sits partly inside the shell, as a wrapped bumper does)
-        stand = max(-dpt / 2 + 0.01, 0.02 if stand is None else stand)
+        if b.get('standOff') is None:
+            stand = max(-dpt / 2 + 0.01, 0.02 if stand is None else stand)
         # The outer envelope: the furthest point in each angular bin (the section can
         # hold inner loops, an arch or a recess, that must not pull the bar in).
         bins = np.clip(np.searchsorted(a_s, ang), 0, 40)
