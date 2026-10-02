@@ -43,9 +43,6 @@ P = spec.get('parts', {})
 # materials is dropped, whatever list it sits in.
 P = {k: [d for d in v if not (isinstance(d, dict) and d.get('material') in ('plate', 'plate_ink'))]
      if isinstance(v, list) else v for k, v in P.items()}
-# Frames a traced glasshouse puts round its panes are decals like any other.
-P['decals'] = P.get('decals', []) + [{k: v for k, v in g.items() if k != 'frame'}
-                                     for g in info.get('glass', []) if g.get('frame')]
 L, W, H, R = F['length'], F['width'], F['height'], F['wheelRadius']
 AXLES = [(-L / 2 + F['frontOverhang'], F['frontTrack']),
          (-L / 2 + F['frontOverhang'] + F['wheelbase'], F['rearTrack'])]
@@ -304,12 +301,7 @@ def select(view, sign, poly, d, hole=None):
 
 
 # ---- glass: cut into the shell ------------------------------------------------------
-# A traced body's panes come from its own glasshouse (loft.glazing); a car file can
-# add to them.
-GL = ([g for g in info['glass'] if not (g.get('frame') or g.get('region'))] + P.get('glassExtra', [])) \
-    if info.get('glass') else P.get('glass', [])
-P['regions'] = P.get('regions', []) + [{k: v for k, v in g.items() if k != 'region'}
-                                       for g in info.get('glass', []) if g.get('region')]
+GL = P.get('glass', [])
 glass_faces = set()
 
 
@@ -610,26 +602,17 @@ while len(body.data.materials) > 4:
 
 # Shading from the full-resolution shell, projected along each corner's own normal,
 # so the coarse working mesh shades with the true curvature.
-if info.get('loft'):
-    # A lofted shell is its own truth: smooth across its gentle bends, crisp at its
-    # edges.
-    bpy.context.view_layer.objects.active = body
-    body.select_set(True)
-    bpy.ops.object.shade_smooth_by_angle(angle=math.radians(P.get('bodySmoothDeg', 32)))
-    body.select_set(False)
-    bpy.data.objects.remove(dense)
-else:
-    body.data.shade_smooth()
-    dense.data.shade_smooth()
-    scene.collection.objects.link(dense)
-    bpy.context.view_layer.objects.active = body
-    dt = body.modifiers.new('normals', 'DATA_TRANSFER')
-    dt.object = dense
-    dt.use_loop_data = True
-    dt.data_types_loops = {'CUSTOM_NORMAL'}
-    dt.loop_mapping = 'POLYINTERP_LNORPROJ'
-    bpy.ops.object.modifier_apply(modifier=dt.name)
-    bpy.data.objects.remove(dense)
+body.data.shade_smooth()
+dense.data.shade_smooth()
+scene.collection.objects.link(dense)
+bpy.context.view_layer.objects.active = body
+dt = body.modifiers.new('normals', 'DATA_TRANSFER')
+dt.object = dense
+dt.use_loop_data = True
+dt.data_types_loops = {'CUSTOM_NORMAL'}
+dt.loop_mapping = 'POLYINTERP_LNORPROJ'
+bpy.ops.object.modifier_apply(modifier=dt.name)
+bpy.data.objects.remove(dense)
 
 
 def new_object(name, bm_, mats):
@@ -819,10 +802,6 @@ def mirror_head(bm_, c, w_, h_, d_, shape, s_):
 
 
 m = P.get('mirror')
-if m and info.get('mirrorAt') and not m.get('fixed'):
-    # A traced glasshouse says where the door's window begins: the mirror stands at its
-    # front lower corner.
-    m = dict(m, y=info['mirrorAt'][0] + 0.05, z=info['mirrorAt'][1] + 0.05)
 if m:
     bm_ = bmesh.new()
     w_, h_ = m.get('w', 0.13), m.get('h', 0.08)
@@ -858,9 +837,6 @@ wp = P.get('wipers')
 if wp:
     bm_ = bmesh.new()
     for x0, x1, y, z in wp['arms']:
-        if info.get('screenFoot'):
-            # parked just above the screen's foot
-            y = info['screenFoot'][0] + 0.05
         hit, nrm = skin_point(((x0 + x1) / 2, y, H + 0.5), (0, 0, -1))
         zc = hit.z + 0.012 if hit else z
         d = Vector((x1 - x0, 0, 0))
