@@ -44,6 +44,12 @@ Done: no number plates or blank plate patches (824adb5); mirrors with a sail, a 
 arm and a tapered housing with its glass; arch flares built on the skin, stopping
 where the side ends, a lip over the arch's cut edge.
 
+## Tried and dropped
+
+- Waves: MeshLab's two-step smoothing on the dense hull (normals averaged under 35°,
+  vertices fitted) breaks the surface into facets; worse than none. Taubin smoothing
+  was dropped earlier (spikes on the Valiant's screen).
+
 ## Why the bodies are soft and wavy (2, 3, 5), found on the MX-5 tail
 
 The shell is the intersection of 1-D profiles (side outline per height, plan
