@@ -298,12 +298,99 @@ def select(view, sign, poly, d, hole=None):
 # ---- glass: cut into the shell ------------------------------------------------------
 GL = P.get('glass', [])
 glass_faces = set()
-for g in GL:
+
+
+def ragged(view, sign, poly, d):
+    """Faces inside the outline that the view does not see, next to ones it does: where
+    a pane's edge would follow the surface's turn instead of the drawn line."""
+    inside_all = set(select(view, sign, poly, dict(d, facingMin=-1.0)))
+    seen = set(select(view, sign, poly, d))
+    return sum(1 for f in inside_all - seen if any(o in seen for e in f.edges for o in e.link_faces))
+
+
+def fit_pane(view, sign, poly, d, ks=None):
+    """A screen drawn a little wider than the shell's glasshouse would end raggedly on
+    the pillars: its outline is brought in, a centimetre at a time, until it lies on
+    the surface the view sees."""
+    if view == 'side' or d.get('fit') is False:
+        return poly
+    lo = min(p[1] for p in poly)
+    hi = max(p[1] for p in poly)
+
+    def moved(k, kb, kt):
+        out = []
+        for a_, b_ in poly:
+            a2 = a_ - math.copysign(0.01 * k, a_) * (abs(a_) > 0.15)
+            b2 = b_ + 0.01 * kb * (b_ < lo + 0.03) - 0.01 * kt * (b_ > hi - 0.03)
+            out.append([a2, b2])
+        return out
+
+    # Greedy: whichever centimetre (in at the pillars, up at the base, down at the
+    # header) clears the most turned-away faces, until the pane lies on what it sees.
+    if ks is not None:
+        return moved(*ks)
+    V = VIEW[view]
+
+    def loose(p_):
+        inside_all = set(select(view, sign, p_, dict(d, facingMin=-1.0)))
+        seen = set(select(view, sign, p_, d))
+        return [f for f in inside_all - seen if any(o in seen for e in f.edges for o in e.link_faces)]
+
+    # Each turned-away face says which edge to move: one near the base raises the
+    # base, near the header lowers it, anything else brings the sides in.
+    ks = [0, 0, 0]
+    limits = (10, 12, 8)
+    lf = loose(poly)
+    r = len(lf)
+    while r > 2:
+        votes = [0, 0, 0]
+        cur = moved(*ks)
+        lo_ = min(p[1] for p in cur)
+        hi_ = max(p[1] for p in cur)
+        for f in lf:
+            b_ = f.calc_center_median()[V['b']]
+            votes[1 if b_ < lo_ + 0.08 else 2 if b_ > hi_ - 0.08 else 0] += 1
+        order = sorted(range(3), key=lambda i: -votes[i])
+        i = next((i for i in order if ks[i] < limits[i] and votes[i]), None)
+        if i is None:
+            break
+        ks[i] += 1
+        lf = loose(moved(*ks))
+        r = len(lf)
+    if any(ks):
+        print(f'PANE {car} ({view}) in {ks[0]} cm, base up {ks[1]} cm, top down {ks[2]} cm, ragged {r}')
+    FIT_KS[(view, id(d))] = ks
+    return moved(*ks)
+
+
+FIT_KS = {}
+FITTED = {}
+for gi, g in enumerate(GL):
     for sign, poly in sides_of(g):
-        cut(g['view'], sign, poly, g)
-for g in GL:
+        # Both halves of a screen take the first half's fit: a pane is symmetric.
+        FITTED[(gi, sign)] = fit_pane(g['view'], sign, poly, g, FIT_KS.get((g['view'], id(g))))
+        cut(g['view'], sign, FITTED[(gi, sign)], g)
+for gi, g in enumerate(GL):
     for sign, poly in sides_of(g):
-        glass_faces |= set(select(g['view'], sign, poly, g))
+        poly = FITTED[(gi, sign)]
+        sel = set(select(g['view'], sign, poly, g))
+        glass_faces |= sel
+        # A pane whose outline runs off the surface the view sees ends in a ragged
+        # edge (faces inside the outline but turned away): reported, so the outline
+        # can be brought in.
+        loose = set(select(g['view'], sign, poly, dict(g, facingMin=-1.0))) - sel
+        rf = [f for f in loose if any(o in sel for e in f.edges for o in e.link_faces)]
+        ragged = len(rf)
+        if os.environ.get('RAGDEBUG') and g['view'] != 'side':
+            p0 = sides_of(g)[0][1] if sign == 1 else sides_of(g)[-1][1]
+            rf = [f for f in set(select(g['view'], sign, p0, dict(g, facingMin=-1.0))) -
+                  set(select(g['view'], sign, p0, g))]
+            print('  pane', gi, 'turned-away faces inside the drawn outline:', len(rf))
+            for f in rf[:40]:
+                c_ = f.calc_center_median()
+                print('  loose', tuple(round(v, 3) for v in c_), 'n', tuple(round(v, 2) for v in f.normal))
+        if ragged > 3:
+            print(f'GLASS-RAGGED {car} pane {gi} ({g["view"]}, side {sign}): {ragged} faces')
 for f in glass_faces:
     f.material_index = SLOT['glass']
 
@@ -625,6 +712,58 @@ def skin_point(origin, direction, dist=3.0):
     hit = _skin.ray_cast(Vector(origin), Vector(direction).normalized(), dist)
     return hit[0], hit[1]
 
+
+# Lamps that stand out of the body in their own pods (the Mini's, the Beetle's, the
+# 2CV's): {node, x, z, r, end, material, bezel, pod (paint housing), tilt}. The lens
+# faces straight along the car at the drawn position; a housing reaches back from it
+# until it buries itself in the skin, so the lamp never floats.
+LAMP_SOLID = {}
+for lp in P.get('podLamps', []):
+    sgn_end = -1 if lp.get('end', 'front') == 'front' else 1
+    for sx in ((1, -1) if lp.get('mirror', True) else (1,)):
+        node = lp['node']
+        if node.endswith('_left') and sx != 1 or node.endswith('_right') and sx != -1:
+            continue
+        x, z, r = sx * lp['x'], lp['z'], lp['r']
+        # Where the skin is under the rim, along the car.
+        far = []
+        for a in np.linspace(0, 2 * math.pi, 12, endpoint=False):
+            o = Vector((x + r * math.cos(a), sgn_end * (L / 2 + 1.0), z + r * math.sin(a)))
+            hit, _ = skin_point(o, (0, -sgn_end, 0), L + 2)
+            if hit is not None:
+                far.append(hit.y)
+        hitc, _ = skin_point((x, sgn_end * (L / 2 + 1.0), z), (0, -sgn_end, 0), L + 2)
+        ys_ = far + ([hitc.y] if hitc is not None else [])
+        if not ys_:
+            continue
+        y_face = (min(ys_) if sgn_end < 0 else max(ys_)) + sgn_end * lp.get('proud', 0.015)
+        y_back = max(ys_) if sgn_end < 0 else min(ys_)
+        y_back -= sgn_end * 0.03
+        n_ = (0, sgn_end, 0)
+        b_, mats = LAMP_SOLID.setdefault(node, (bmesh.new(), [lp.get('material', 'Headlights')]))
+        disc(b_, (x, y_face + sgn_end * 0.004, z), n_, r, 0.012, 24, 0)
+        tb = bmesh.new()
+        bz = lp.get('bezel', 0.014)
+        disc(tb, (x, y_face - sgn_end * 0.001, z), n_, r + bz, 0.012, 24, 0)
+        trim_parts.append(new_object('pod_rim', tb, [lp.get('bezelMaterial', 'chrome')]))
+        if lp.get('pod', True) and abs(y_back - y_face) > 0.01:
+            pb = bmesh.new()
+            # Never longer than the pod the car has; it tapers into the wing.
+            depth = min(abs(y_back - y_face), lp.get('podDepth', 0.16))
+            y_back = y_face - sgn_end * depth
+            disc(pb, (x, (y_face + y_back) / 2, z), n_, r * 0.75, depth, 24, 0, r + bz * 0.8)
+            trim_parts.append(new_object('pod', pb, ['paint']))
+for node, (b_, mats) in LAMP_SOLID.items():
+    if node in part_objects:
+        # Join with the patches that already share the node.
+        o = new_object(node + '_pod', b_, mats)
+        bpy.ops.object.select_all(action='DESELECT')
+        o.select_set(True)
+        part_objects[node].select_set(True)
+        bpy.context.view_layer.objects.active = part_objects[node]
+        bpy.ops.object.join()
+    else:
+        part_objects[node] = new_object(node, b_, mats)
 
 # Mirrors: an arm off the door and a head, at {y, z, x (outer edge), shape}.
 m = P.get('mirror')
