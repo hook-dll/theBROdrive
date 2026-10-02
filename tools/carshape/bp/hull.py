@@ -135,7 +135,8 @@ def build(car):
         top = np.minimum(top, hs['roofTop'])
 
     # ---- plan --------------------------------------------------------------------------
-    plan = smooth1(bp['plan'], 9, 3.0)
+    # No top view: the plan is the factory width, or what planOverride gives.
+    plan = smooth1(bp['plan'], 9, 3.0) if 'plan' in bp else np.full(len(ys), W / 2)
     # Away from the ends the plan is a long, slow curve: lines the top view draws
     # along the sides (mouldings, shut lines) only nick it.
     plan = smooth_inner(plan, ys, hs.get('planSmooth', 0.08), 0.18)
