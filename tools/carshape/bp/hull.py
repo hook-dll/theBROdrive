@@ -451,17 +451,26 @@ def bumper_paths(mesh, spec, info, raw_ends):
         # (negative: the bar sits partly inside the shell, as a wrapped bumper does)
         if b.get('standOff') is None:
             stand = max(-dpt / 2 + 0.01, 0.02 if stand is None else stand)
-        # The outer envelope: the furthest point in each angular bin (the section can
-        # hold inner loops, an arch or a recess, that must not pull the bar in).
-        bins = np.clip(np.searchsorted(a_s, ang), 0, 40)
-        r_env = np.full(41, np.nan)
-        for k in range(41):
-            m = bins == k
-            if m.any():
-                r_env[k] = rad[m].max()
-        ok = ~np.isnan(r_env)
-        r_env = np.interp(np.arange(41), np.nonzero(ok)[0], r_env[ok])
-        r_env = ndimage.gaussian_filter1d(ndimage.maximum_filter1d(r_env, 3), 1.0, mode='nearest')
+        # The bar runs round the convex hull of the end's outline at its height: a bumper
+        # is convex in plan, and the outline's recesses (a grille, the lamps' nests)
+        # must not dent it.
+        from scipy.spatial import ConvexHull
+        hp = rel[ConvexHull(rel).vertices] if len(rel) >= 3 else rel
+        hp = np.vstack([hp, hp[:1]])
+        r_env = np.zeros(41)
+        for k, a_ in enumerate(a_s):
+            d_ = np.array([np.sin(a_), sgn * np.cos(a_)])
+            best = 0.0
+            for p0, p1 in zip(hp, hp[1:]):
+                e_ = p1 - p0
+                den = d_[0] * e_[1] - d_[1] * e_[0]
+                if abs(den) < 1e-12:
+                    continue
+                t_ = (p0[0] * e_[1] - p0[1] * e_[0]) / den
+                u_ = (p0[0] * d_[1] - p0[1] * d_[0]) / den
+                if t_ > 0 and -1e-9 <= u_ <= 1 + 1e-9:
+                    best = max(best, t_)
+            r_env[k] = best if best > 0 else np.max(rad)
         r_s = r_env + stand + dpt / 2
         path = np.stack([c[0] + r_s * np.sin(a_s), c[1] + sgn * r_s * np.cos(a_s)], axis=1)
         # Ends no further back than `wrap` from the face.
