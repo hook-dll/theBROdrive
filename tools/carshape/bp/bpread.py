@@ -204,6 +204,9 @@ def read(spec, image_path):
                 r = np.nonzero(tsil[:, u])[0]
                 if len(r):
                     half[i] = max(centre - r.min(), r.max() - centre) / (tp * aspect)
+        if tv.get('fitWidth'):
+            # A plan drawn out of proportion across: its widest point is the factory width.
+            half *= (F['width'] / 2) / np.percentile(half[half > 0], 97)
         out.update(plan=half, top_px=top_px, top_view=top, top_sil=tsil)
 
     # ---- ends: half-width per height -------------------------------------------------

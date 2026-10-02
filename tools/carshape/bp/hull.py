@@ -291,7 +291,18 @@ def bumper_paths(mesh, spec, info, raw_ends):
             print('BUMPER', end, 'shell', round(float(y_end), 3), 'drawn', round(raw_ends[end], 3), 'stand', round(stand, 3))
         # (negative: the bar sits partly inside the shell, as a wrapped bumper does)
         stand = max(-dpt / 2 + 0.01, 0.02 if stand is None else stand)
-        r_s = np.interp(a_s, ang, rad) + stand + dpt / 2
+        # The outer envelope: the furthest point in each angular bin (the section can
+        # hold inner loops, an arch or a recess, that must not pull the bar in).
+        bins = np.clip(np.searchsorted(a_s, ang), 0, 40)
+        r_env = np.full(41, np.nan)
+        for k in range(41):
+            m = bins == k
+            if m.any():
+                r_env[k] = rad[m].max()
+        ok = ~np.isnan(r_env)
+        r_env = np.interp(np.arange(41), np.nonzero(ok)[0], r_env[ok])
+        r_env = ndimage.gaussian_filter1d(ndimage.maximum_filter1d(r_env, 3), 1.0, mode='nearest')
+        r_s = r_env + stand + dpt / 2
         path = np.stack([c[0] + r_s * np.sin(a_s), c[1] + sgn * r_s * np.cos(a_s)], axis=1)
         # Ends no further back than `wrap` from the face.
         path = path[np.abs(path[:, 1] - y_end) <= wrap + 1e-3]
