@@ -831,7 +831,7 @@ export const ROSTER: readonly RosterCar[] = [
     label: 'Datsun 510',
     body: 'datsun510.glb',
     bodyClass: 'car',
-    factory: { length: 3.93, width: 1.56, height: 1.395, clearance: 0.15, wheelbase: 2.42, frontTrack: 1.28, rearTrack: 1.28, wheelRadius: 0.29, tyreWidth: 0.155, frontOverhang: 0.55 },
+    factory: { length: 4.12, width: 1.56, height: 1.40, clearance: 0.15, wheelbase: 2.42, frontTrack: 1.28, rearTrack: 1.28, wheelRadius: 0.29, tyreWidth: 0.155, frontOverhang: 0.69 },
     mass: 920,
     frontWeightShare: 0.54,
     rearDriveBias: 1,
