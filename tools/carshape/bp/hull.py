@@ -117,8 +117,13 @@ def build(car):
     side &= (yf[None, :] >= nose[:, None] - 1e-6) & (yf[None, :] <= tail[:, None] + 1e-6)
     side &= zf[:, None] >= pl(hs['sill'], yf)[None, :]
     if 'topOverride' in hs:
-        side &= zf[:, None] <= pl(hs['topOverride'], yf)[None, :] + (yf[None, :] < hs['topOverride'][0][0]) * 9 \
-            + (yf[None, :] > hs['topOverride'][-1][0]) * 9
+        # The top over a span given outright (an open tailgate drawn over the roof, a
+        # roof rack): clipped above, and filled below down to the sill.
+        to = hs['topOverride']
+        span = (yf[None, :] >= to[0][0]) & (yf[None, :] <= to[-1][0])
+        zt = pl(to, yf)[None, :]
+        side &= ~span | (zf[:, None] <= zt)
+        side |= span & (zf[:, None] <= zt) & (zf[:, None] >= pl(hs['sill'], yf)[None, :])
     d_side_f = (ndimage.distance_transform_edt(side) - ndimage.distance_transform_edt(~side)) * (G / FINE)
     d_side = d_side_f[::FINE, ::FINE][:len(zs), :len(ys)]                   # [z, y], metres
     sill = pl(hs['sill'], ys)
@@ -146,7 +151,13 @@ def build(car):
     # ---- sections ------------------------------------------------------------------
     secs = {}
     for end in ('front', 'rear'):
-        s = smooth1(bp.get(end, bp.get('front')), 7, 2.0)
+        s = bp.get(end, bp.get('front')).copy()
+        # Mirrors and lamp pods stick out of an end view for a few centimetres of height:
+        # a running median as tall as a mirror head takes them out of the section.
+        med = hs.get('sectionMedian', 15)
+        if med:
+            s = ndimage.median_filter(s, size=med, mode='nearest')
+        s = smooth1(s, 7, 2.0)
         s = smooth_inner(s, zs, hs.get('sectionSmooth', 0.03), 0.06)
         b = hs.get('bumpers', {}).get(end)
         if b:
