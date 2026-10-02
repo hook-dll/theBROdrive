@@ -595,6 +595,7 @@ for e in _bedges:
     a_, b_ = e.verts
     _nb.setdefault(a_, []).append(b_)
     _nb.setdefault(b_, []).append(a_)
+_start = {v: v.co.copy() for v in _nb}
 for _ in range(P.get('paneEdgeRelax', 4)):
     moves = {}
     for v, ns in _nb.items():
@@ -606,10 +607,22 @@ for _ in range(P.get('paneEdgeRelax', 4)):
         moves[v] = v.co * 0.5 + (ns[0].co + ns[1].co) * 0.25
     for v, co in moves.items():
         hit = _tree0.find_nearest(co)
-        v.co = hit[0] if hit[0] is not None else co
+        # only a small slide over the surface: never off it, never far along it
+        if hit[0] is None or (hit[0] - co).length > 0.01 or (hit[0] - _start[v]).length > 0.015:
+            continue
+        v.co = hit[0]
 bm.normal_update()
 if _gl and SEAL.get('width', 0) > 0:
-    res = bmesh.ops.inset_region(bm, faces=_gl, thickness=SEAL['width'], depth=0.0, use_even_offset=True)
+    _before = {v: v.co.copy() for f in _gl for v in f.verts}
+    res = bmesh.ops.inset_region(bm, faces=_gl, thickness=SEAL['width'], depth=0.0, use_even_offset=False)
+    # At a corner the band's inner edge can run far out (an outline doubling back):
+    # no vertex moves further than a few band widths from where it was.
+    for f in _gl:
+        for v in f.verts:
+            if v in _before:
+                d_ = v.co - _before[v]
+                if d_.length > 3 * SEAL['width']:
+                    v.co = _before[v] + d_.normalized() * 3 * SEAL['width']
     t_seal = len(TAGS)
     TAGS.append(('decal_trim', SEAL['material'], SEAL.get('height', 0.002)))
     for f in res['faces']:
