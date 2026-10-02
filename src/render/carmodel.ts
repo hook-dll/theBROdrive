@@ -424,6 +424,43 @@ function markStickerSurfaces(root: THREE.Object3D, def: CarModelDef): void {
   });
 }
 
+/**
+ * The roster's finish: the fifty blueprint bodies painted like die-cast models, one
+ * family. A deeper, slightly metallic lacquer with a broad soft highlight, colour a
+ * touch richer, and a thin light rim round the silhouette that reads the shape at a
+ * distance. `?finish=off` shows them without it, to compare.
+ */
+export const CAR_FINISH_ON: boolean =
+  typeof window === 'undefined' || new URLSearchParams(window.location.search).get('finish') !== 'off';
+
+const finishHsl = { h: 0, s: 0, l: 0 };
+
+function applyDiecastFinish(paint: readonly THREE.Material[], def: CarModelDef): void {
+  if (!CAR_FINISH_ON || !def.id.startsWith('rs_')) return;
+  for (const material of paint) {
+    if (!(material instanceof THREE.MeshStandardMaterial)) continue;
+    material.color.getHSL(finishHsl);
+    material.color.setHSL(finishHsl.h, Math.min(1, finishHsl.s * 1.12), finishHsl.l);
+    material.metalness = 0.3;
+    material.roughness = 0.32;
+    const previousCompile = material.onBeforeCompile;
+    const previousKey = material.customProgramCacheKey;
+    material.onBeforeCompile = (shader, renderer) => {
+      previousCompile.call(material, shader, renderer);
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <opaque_fragment>',
+        `{
+          float rim = pow(1.0 - abs(dot(normalize(normal), normalize(vViewPosition))), 3.0);
+          outgoingLight += mix(vec3(1.0), diffuseColor.rgb, 0.45) * rim * 0.32;
+        }
+        #include <opaque_fragment>`,
+      );
+    };
+    material.customProgramCacheKey = () => `${previousKey.call(material)}|diecast-v1`;
+    material.needsUpdate = true;
+  }
+}
+
 /** Courier-only shader accent: turquoise paint with a bright view-angle rim. */
 function applyCourierAppearance(root: THREE.Object3D, def: CarModelDef): void {
   root.traverse((child) => {
@@ -1518,6 +1555,7 @@ function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInsta
   const glass = cloneCarGlass(body, paint);
   prepareSovietShellFaces(body, t.def);
   applyRandomPaint(body, t.def, appearanceKey);
+  applyDiecastFinish(paint, t.def);
   markStickerSurfaces(body, t.def);
   body.name = 'body';
   const surface = new CarBodySurface(paint, glass);
@@ -1540,6 +1578,7 @@ function cloneStaticModel(t: Template, appearanceKey = t.def.id): StaticCarInsta
   const paint = cloneCarBodyPaintMaterials(body, t, appearanceKey);
   const glass = cloneCarGlass(body, paint);
   applyRandomPaint(body, t.def, appearanceKey);
+  applyDiecastFinish(paint, t.def);
   group.add(body);
   const wheels = cloneWheels(t, appearanceKey);
   for (const wheel of t.measure.wheels) {
