@@ -863,7 +863,7 @@ if rear_bias > 0 and not rear_engine:
     # propshaft just under the tunnel.
     disc(bm_, (0, yB, R), (1, 0, 0), 0.045, 2 * inner, segments=12)
     hang(bm_, -0.15, 0.15, yB - 0.13, yB + 0.13, C + 0.005)
-    z_ps = floor_at((yA + yB) / 2) - 0.03
+    z_ps = max(floor_at((yA + yB) / 2) - 0.03, C + 0.04)
     disc(bm_, (0, (yA + 0.22 + yB - 0.13) / 2, z_ps), (0, 1, 0), 0.035, (yB - 0.13) - (yA + 0.22), segments=10)
 if 0 < rear_bias < 1:
     hang(bm_, -0.05, 0.22, yA - 0.12, yA + 0.12, C + 0.02)

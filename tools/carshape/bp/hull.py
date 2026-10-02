@@ -417,7 +417,7 @@ def bumper_paths(mesh, spec, info, raw_ends):
 
 
 if __name__ == '__main__':
-    if 'loft' in grid.load(sys.argv[1])[0]:
+    if {'loft', 'trace'} & set(grid.load(sys.argv[1])[0]):
         import loft
         loft.build(sys.argv[1])
     else:

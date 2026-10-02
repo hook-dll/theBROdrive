@@ -53,7 +53,9 @@ def runs(stations, keys, defaults):
             fs[k] = PchipInterpolator(yy, vv) if len(seg) > 2 else (lambda y, yy=yy, vv=vv: np.interp(y, yy, vv))
         out.append((yy[0], yy[-1], fs))
     # Stations along the loft: every given one, and even steps between.
-    samples = sorted(set(np.round(np.concatenate([np.arange(ys[0], ys[-1], STEP), ys]), 4)))
+    # (finer towards the ends, where round_ends bends the body in)
+    fine = np.concatenate([np.arange(ys[0], ys[0] + 0.2, 0.01), np.arange(ys[-1] - 0.2, ys[-1], 0.01)])
+    samples = sorted(set(np.round(np.concatenate([np.arange(ys[0], ys[-1], STEP), fine, ys]), 4)))
     rows = []
     for y in samples:
         for y0, y1, fs in out:
@@ -62,6 +64,33 @@ def runs(stations, keys, defaults):
                 break
     # A kink is two rings at one station only if a run changes there; one is enough.
     return rows
+
+
+def round_ends(rows, ends, widths, top, sill=None):
+    """Rounds the loft's ends the way a body's corners turn: within `plan` of the end
+    the half-widths come in on a quarter circle of that radius, the top drops on one of
+    radius `top`, the sill rises on one of radius `sill`. {front: {...}, rear: {...}}"""
+    if not ends:
+        return rows
+    y0, y1 = rows[0][0], rows[-1][0]
+
+    def fall(d, r):
+        return r - np.sqrt(max(r * r - (r - d) ** 2, 0.0)) if 0 <= d < r else 0.0
+    out = []
+    for y, p in rows:
+        p = dict(p)
+        for end, d in (('front', y - y0), ('rear', y1 - y)):
+            e = ends.get(end)
+            if not e:
+                continue
+            k = fall(d, e.get('plan', 0.0))
+            for w in widths:
+                p[w] -= k
+            p[top] -= fall(d, e.get('top', 0.0))
+            if sill:
+                p[sill] += fall(d, e.get('sill', 0.0))
+        out.append((y, p))
+    return out
 
 
 BODY_DEF = {'crown': 0.02, 'tumble': 0.03, 'tuck': 0.02, 'bev': 0.03}
@@ -142,15 +171,104 @@ def from_manifold(M):
     return trimesh.Trimesh(np.asarray(mm.vert_properties)[:, :3], np.asarray(mm.tri_verts), process=True)
 
 
+def lin(points, at):
+    """Linear through traced [[a, b], ...] (sorted by a), held flat past the ends."""
+    p = np.array(sorted(points), float)
+    return np.interp(at, p[:, 0], p[:, 1])
+
+
+def traced_rings(n, master, bottom, top, width, nose, tail):
+    """Rings through a traced section: the master half-section (front view, metres)
+    stretched between the bottom and top lines and scaled to the plan. Ring k of n
+    runs at the same fraction of the body's length at every height, from the nose's
+    side profile to the tail's, so the first ring lies on the nose and the last on the
+    tail, and the ends lean as drawn."""
+    m = np.array(master, float)[:, :2]
+    zb, zt, xm = m[:, 1].min(), m[:, 1].max(), m[:, 0].max()
+    u, v = m[:, 0] / xm, (m[:, 1] - zb) / (zt - zb)
+    y0, y1 = min(p[1] for p in nose), max(p[1] for p in tail)
+    rings = []
+    for t in np.linspace(0, 1, n):
+        yy = np.full(len(u), y0 + t * (y1 - y0))
+        for _ in range(6):
+            z = lin(bottom, yy) + v * (lin(top, yy) - lin(bottom, yy))
+            a, b = lin(nose, z), lin(tail, z)
+            yy = a + t * (b - a)
+        x = u * lin(width, yy)
+        half = list(zip(x, yy, z))
+        rings.append(half + [(-a_, b_, c_) for a_, b_, c_ in half[-2:0:-1]])
+    return rings
+
+
+def shell_from_rings(rings):
+    """A closed tube through the rings, capped at both ends. Kept exactly as built (no
+    welding): where an end's profile squeezes rings together their points coincide, and
+    welding them would tear the topology the boolean needs."""
+    n = len(rings[0])
+    verts = [v for r in rings for v in r]
+    faces = []
+    for i in range(len(rings) - 1):
+        a, b = i * n, (i + 1) * n
+        for k in range(n):
+            k2 = (k + 1) % n
+            faces.append((a + k, a + k2, b + k2))
+            faces.append((a + k, b + k2, b + k))
+    # The ends: strips straight across, each point to its mirror, so an end stands at
+    # its own profile's depth at every height (a fan from the middle would cone it).
+    h = (n + 2) // 2
+
+    def mirror(k):
+        return k if k in (0, h - 1) else n - k
+    for i in (0, len(rings) - 1):
+        o = i * n
+        for k in range(h - 1):
+            a_, b_, c_, d_ = o + k, o + k + 1, o + mirror(k + 1), o + mirror(k)
+            faces.append((a_, b_, c_))
+            if d_ != a_:
+                faces.append((a_, c_, d_))
+    m = trimesh.Trimesh(np.array(verts), np.array(faces), process=False)
+    m.update_faces(np.array([len(set(f)) == 3 for f in m.faces]))
+    m.fix_normals()
+    return m
+
+
+def traced_shell(spec):
+    """`trace`: the body as traced off the drawing, line for line.
+      section / houseSection   half-sections from the front view, [[x, z], ...] in metres,
+                               from the floor's (base's) centre out and over to the top's
+      sill, deck               the body's bottom and top on the centre line, [[y, z], ...]
+      plan                     the body's half-width, [[y, x], ...] (top view)
+      belt, roof, glass        the glasshouse's foot, its top on the centre line, its
+                               half-width at the foot
+      nose, tail               the ends' side profiles, [[z, y], ...]
+      house                    [y0, y1], where the glasshouse runs"""
+    t = spec['trace']
+    y0 = min(p[1] for p in t['nose'])
+    y1 = max(p[1] for p in t['tail'])
+    ys = np.arange(y0, y1 + 1e-9, 0.02)
+    body = traced_rings(len(ys), t['section'], t['sill'], t['deck'], t['plan'], t['nose'], t['tail'])
+    h0, h1 = t['house']
+    hy = np.arange(h0, h1 + 1e-9, 0.02)
+    house = traced_rings(len(hy), t['houseSection'], t['belt'], t['roof'], t['glass'],
+                         t.get('houseNose', [[0, h0], [9, h0]]), t.get('houseTail', t['tail']))
+    return to_manifold(shell_from_rings(body)) + to_manifold(shell_from_rings(house)), \
+        [(y, {'sill': float(lin(t['sill'], y))}) for y in ys], [(y, {'roof': float(lin(t['roof'], y))}) for y in hy]
+
+
 def build(car):
     spec, _bp = grid.load(car)
     F = spec['factory']
     L, W, R = F['length'], F['width'], F['wheelRadius']
-    lo = spec['loft']
     hs = spec.get('hull', {})
-    body_rows = runs(lo['body'], ['sill', 'w', 'sh', 'top', 'crown', 'tumble', 'tuck', 'bev'], BODY_DEF)
-    house_rows = runs(lo['house'], ['base', 'bw', 'roof', 'rw', 'crown', 'bev'], HOUSE_DEF)
-    shell = to_manifold(loft(body_rows, body_profile)) + to_manifold(loft(house_rows, house_profile))
+    if 'trace' in spec:
+        shell, body_rows, house_rows = traced_shell(spec)
+    else:
+        lo = spec['loft']
+        body_rows = runs(lo['body'], ['sill', 'w', 'sh', 'top', 'crown', 'tumble', 'tuck', 'bev'], BODY_DEF)
+        house_rows = runs(lo['house'], ['base', 'bw', 'roof', 'rw', 'crown', 'bev'], HOUSE_DEF)
+        body_rows = round_ends(body_rows, lo.get('ends'), ['w'], 'top', 'sill')
+        house_rows = round_ends(house_rows, lo.get('houseEnds'), ['bw', 'rw'], 'roof')
+        shell = to_manifold(loft(body_rows, body_profile)) + to_manifold(loft(house_rows, house_profile))
 
     # Wheel wells: a drum round each axle from just inside the tyre outwards, carried
     # straight down below the hub.
