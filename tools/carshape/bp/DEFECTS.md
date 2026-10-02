@@ -25,27 +25,37 @@ in-game contact sheet, install.sh, commit.
 
 ## The list
 
-1. **Underside on every car.** The slab hanging from the sill down to the clearance
-   is gone in the generator (824adb5): the floor closes at the sills and only the real
-   low points (sump and subframe, the driven rear axle and diff, a 4x4's front diff,
-   a frame's rails) reach the clearance. Not yet in the game for most cars: they need
-   the one rebuild.
-2. **Waves.** Ripples in the reflection on wings, doors and round the arches.
-3. **Compression artefacts.** In places the body is crumpled like an accordion, as if
-   squeezed: steps between stations and folds where the views disagree.
-4. **Glazing.** Panes and their seals out of line with pillars and door shut lines;
-   the screen's and side glass's edges not one line.
+1. **Underside on every car.** [done 824adb5, in every rebuild since] The floor
+   closes at the sills; only the real low points (sump and subframe, a driven rear
+   axle and its diff, a 4x4's front diff, a frame's rails) reach the clearance.
+2. **Waves.** Measured on the dense hull: the side is smooth to 0.01 degrees of slope
+   between the arches and the field normals agree with the faces to 0.06 degrees, so
+   the waves are not triangle noise but shape: they live round the arches, at the
+   shoulder and where profiles meet. Open.
+3. **Compression artefacts (accordion).** [done 362a66c] Folds across the body at the
+   points of the car files' lines: sill, belt, glass plan, crown, plan and top
+   overrides and the sections between stations were joined by straight pieces; they
+   now run on monotone cubics through the same points. Found with a curvature map of
+   the side (d2x/dy2 by ray, vertical bands = folds).
+4. **Glazing.** [done 342cd68] Every pane carries its own seal, an even band inside
+   its edge, in the car's frame material (chrome or rubber, learnt from the frame
+   lines the car file drew, which are no longer drawn); pane edges evened out and laid
+   back on the surface; panes running onto surfaces turning away cut along the facing
+   limit. Mirrors (3f01c20): on the wing on a thin stalk, or on the door's skin on a
+   slim sail and a slanted arm.
 5. **Pillow bodies.** Crisp edges the drawings have (deck to tail panel, shoulder,
-   bonnet edge) blur away; tails and noses swell.
-6. Soft tops / canvas: a box on the cabin (MX-5), a fang over the boot (2CV).
-7. Lamp decals with torn edges (UAZ reversing lamp).
+   bonnet edge) blur away; tails and noses swell (2CV tail, MX-5 tail). Open.
+6. Soft tops / canvas. [done 3f01c20] MX-5's hood rail black, 2CV's canvas stops at
+   the back light's foot.
+7. Lamp decals with torn edges (UAZ reversing lamp). Open.
 
-Done: no number plates or blank plate patches (824adb5); mirrors with a sail, a short
-arm and a tapered housing with its glass; arch flares built on the skin, stopping
-where the side ends, a lip over the arch's cut edge.
+Done before: no number plates or blank plate patches (824adb5); arch flares built on
+the skin.
 
 ## Tried and dropped
 
+- Waves: normals from the distance field's gradient instead of the triangles' (no
+  visible change: the triangles were not the noise).
 - Waves: MeshLab's two-step smoothing on the dense hull (normals averaged under 35°,
   vertices fitted) breaks the surface into facets; worse than none. Taubin smoothing
   was dropped earlier (spikes on the Valiant's screen).
