@@ -1,0 +1,61 @@
+# Mazda MX-5 (NA) as a toy, hood up: a low wedge with a blunt round nose, the pop-up
+# lamps' lids flush, oval lamps low in the bumper, a ducktail deck over big oval tail
+# lamps, a black hood. Shapes from the drawing's traced lines (bp/cars/mx5_l.py).
+TOY = {
+    'houseMaterial': 'canvas',
+    'bodyDefaults': {'crown': 0.03, 'tumble': 0.10, 'ch': 0.06, 'lch': 0.04},
+    'body': [
+        {'y': -1.99, 'yTop': -1.94, 'w': 0.60, 'sill': 0.24, 'sh': 0.42, 'top': 0.50, 'tumble': 0.08, 'ch': 0.05},
+        {'y': -1.88, 'w': 0.74, 'sill': 0.19, 'sh': 0.48, 'top': 0.57},
+        {'y': -1.65, 'w': 0.81, 'sill': 0.17, 'sh': 0.53, 'top': 0.67},
+        {'y': -1.25, 'w': 0.83, 'sill': 0.15, 'sh': 0.55, 'top': 0.775},
+        {'y': -0.66, 'w': 0.835, 'sill': 0.15, 'sh': 0.56, 'top': 0.80},
+        {'y': 0.0, 'w': 0.835, 'sill': 0.15, 'sh': 0.56, 'top': 0.77},
+        {'y': 0.65, 'w': 0.835, 'sill': 0.15, 'sh': 0.56, 'top': 0.79},
+        {'y': 1.25, 'w': 0.83, 'sill': 0.16, 'sh': 0.56, 'top': 0.84},
+        {'y': 1.70, 'w': 0.78, 'sill': 0.20, 'sh': 0.55, 'top': 0.81},
+        {'y': 1.89, 'yTop': 1.85, 'w': 0.68, 'sill': 0.25, 'sh': 0.50, 'top': 0.77},
+    ],
+    'house': [
+        {'y': -0.68, 'belt': 0.79, 'bw': 0.70, 'gutter': 0.80, 'rw': 0.69, 'roof': 0.805},
+        {'y': -0.04, 'belt': 0.78, 'bw': 0.72, 'gutter': 1.10, 'rw': 0.60, 'roof': 1.14},
+        {'y': 0.15, 'belt': 0.78, 'bw': 0.72, 'gutter': 1.17, 'rw': 0.62, 'roof': 1.23},
+        {'y': 0.40, 'belt': 0.78, 'bw': 0.72, 'gutter': 1.17, 'rw': 0.62, 'roof': 1.23},
+        {'y': 0.60, 'belt': 0.79, 'bw': 0.72, 'gutter': 1.15, 'rw': 0.61, 'roof': 1.21},
+        {'y': 0.72, 'belt': 0.79, 'bw': 0.71, 'gutter': 1.10, 'rw': 0.58, 'roof': 1.15},
+        {'y': 1.12, 'belt': 0.81, 'bw': 0.66, 'gutter': 0.82, 'rw': 0.65, 'roof': 0.825},
+    ],
+    'windows': [[-0.04, 0.40]],
+    'frame': 0.03,
+    'screenFrame': 0.04,
+    'backLightFrame': 0.12,
+    'arch': {'radius': 0.33, 'lift': 0.05},
+    'ends': [
+        {'end': 'front', 'z': 0.35, 'w': 0.42, 'h': 0.09, 'material': 'grille', 'proud': 0.006},
+        {'end': 'front', 'node': 'headlights', 'x': 0.45, 'z': 0.505, 'w': 0.24, 'h': 0.05, 'material': 'Headlights'},
+        {'end': 'front', 'node': 'front_blinker_left', 'x': 0.59, 'z': 0.505, 'w': 0.05, 'h': 0.045,
+         'material': 'IndicatorLights', 'proud': 0.016},
+        {'end': 'front', 'node': 'front_blinker_right', 'x': -0.59, 'z': 0.505, 'w': 0.05, 'h': 0.045,
+         'material': 'IndicatorLights', 'proud': 0.016},
+        {'end': 'rear', 'node': 'taillights', 'x': 0.525, 'z': 0.60, 'w': 0.33, 'h': 0.14, 'material': 'TailLights'},
+        {'end': 'rear', 'node': 'rear_blinker_left', 'x': 0.46, 'z': 0.565, 'w': 0.13, 'h': 0.035,
+         'material': 'IndicatorLights', 'proud': 0.016},
+        {'end': 'rear', 'node': 'rear_blinker_right', 'x': -0.46, 'z': 0.565, 'w': 0.13, 'h': 0.035,
+         'material': 'IndicatorLights', 'proud': 0.016},
+        {'end': 'rear', 'node': 'reverse_lights', 'x': 0.43, 'z': 0.63, 'w': 0.07, 'h': 0.03,
+         'material': 'ReverseLights', 'proud': 0.016},
+    ],
+    # The bumpers are the body's: a body-colour bar proud of the tail, and the pop-up
+    # lamps' lids as shallow blocks on the bonnet.
+    'bumpers': [{'end': 'rear', 'z0': 0.33, 'z1': 0.48, 'depth': 0.10, 'proud': 0.03, 'wrap': 0.25,
+                 'material': 'paint', 'half': 0.80}],
+    'blocks': [{'c': [0.53, -1.47, 0.715], 'size': [0.30, 0.20, 0.03], 'material': 'paint', 'mirror': True}],
+    'flank': [
+        {'y': 0.35, 'z': 0.69, 'w': 0.10, 'h': 0.02},
+        {'y': 0.0, 'z': 0.48, 'w': 3.7, 'h': 0.016, 'material': 'trim', 'proud': 0.004},
+    ],
+    'seams': [{'y0': -0.62, 'y1': 0.53, 'z0': 0.30, 'z1': 0.77}],
+    'mirror': {'y': -0.02, 'z': 0.82, 'w': 0.13, 'h': 0.08, 'arm': 0.03, 'material': 'paint'},
+    'underbody': {'rearDrive': True},
+    'wheel': {'rim': 0.68, 'cap': 0.3},
+}
