@@ -36,6 +36,9 @@ CAR = {
              'depthRange': [1.0, 1.8], 'facingMin': 0.15},
         ],
         'decals': [
+            # the lamps sit in one black panel with the grille, across the nose (photos)
+            {'view': 'front', 'rect': [[0.0, 0.64], [1.30, 0.20]], 'radius': 0.02, 'mirror': False, 'material': 'trim',
+             'height': 0.003, 'depthRange': [-1.8, -1.4]},
             {'view': 'front', 'rect': [[0.0, 0.64], [0.80, 0.11]], 'radius': 0.02, 'mirror': False, 'material': 'grille',
              'height': 0.005, 'depthRange': [-1.8, -1.4]},
             {'view': 'front', 'node': 'headlights', 'circle': [[0.53, 0.64], 0.085], 'material': 'Headlights',
@@ -50,11 +53,12 @@ CAR = {
             {'view': 'side', 'node': 'front_blinker_left', 'rect': [[-1.53, 0.62], [0.08, 0.03]], 'radius': 0.01, 'material': 'IndicatorLights', 'height': 0.005},
             {'view': 'side', 'node': 'front_blinker_right', 'rect': [[-1.53, 0.62], [0.08, 0.03]], 'radius': 0.01, 'material': 'IndicatorLights', 'height': 0.005},
             # Upright tail lamps on the corners, plate between in the tailgate.
-            {'view': 'rear', 'node': 'taillights', 'rect': [[0.62, 0.72], [0.10, 0.10]], 'radius': 0.01,
+            # tall lamp units at the corners: red over amber (photos)
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.61, 0.76], [0.12, 0.16]], 'radius': 0.01,
              'material': 'TailLights', 'height': 0.008, 'facingMin': 0.05, 'depthRange': [1.5, 1.9]},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.62, 0.635], [0.10, 0.06]], 'radius': 0.01,
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.61, 0.635], [0.12, 0.08]], 'radius': 0.01,
              'material': 'IndicatorLights', 'height': 0.008, 'facingMin': 0.05, 'depthRange': [1.5, 1.9]},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.62, 0.635], [0.10, 0.06]], 'radius': 0.01,
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.61, 0.635], [0.12, 0.08]], 'radius': 0.01,
              'material': 'IndicatorLights', 'height': 0.008, 'facingMin': 0.05, 'depthRange': [1.5, 1.9]},
             {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.45, 0.42], [0.10, 0.035]], 'radius': 0.01,
              'material': 'ReverseLights', 'height': 0.008, 'depthRange': [1.5, 1.9]},
@@ -77,7 +81,7 @@ CAR = {
             'front': {'z': [0.38, 0.45], 'depth': 0.05, 'wrap': 0.20, 'profile': 'blade'},
             'rear': {'z': [0.38, 0.45], 'depth': 0.05, 'wrap': 0.20, 'profile': 'blade'},
         },
-        'mirror': {'y': -1.35, 'z': 0.88, 'reach': 0.60, 'w': 0.08, 'shape': 'round', 'material': 'chrome'},
+        'mirror': {'y': -1.35, 'z': 0.88, 'reach': 0.60, 'w': 0.08, 'shape': 'round', 'material': 'trim'},
         'handles': {'at': [[0.33, 0.82]], 'w': 0.11},
         'wipers': {'arms': [[-0.5, -0.05, -0.92, 0.88], [0.05, 0.45, -0.92, 0.88]]},
         'wheel': {'style': 'steel', 'windows': 8, 'rimFactor': 0.66, 'cap': True},
