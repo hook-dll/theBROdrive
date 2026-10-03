@@ -229,3 +229,35 @@ More, found car by car (AE86, BJ40):
     decals, lines, regions, station sections above the belt. The side view's crop
     must leave room above the roof (`side.box`): an outline in metres is drawn into the
     cropped drawing and was clipped at its top edge.
+
+Waves, found on the Panda 4x4 and the 911 SC (zebra of hull.ply against the photos):
+
+25. **Steps in the top view blurred into the body.** The plan is the top view's widest
+    line at every station, and that line steps out where a bumper's wrap or an arch
+    flare ends (Panda: 13 mm at -1.38, 17 mm at +0.86). Smoothed, a step is a twist up
+    the whole wing (the section scales the plan at every height) and a ripple along the
+    rear quarter. Where the photos show flat sides, `planOverride` gives the plan as
+    the car's: straight tapers into the ends' corners.
+26. **A top view read off centre.** Half-width is the wider side of each station from
+    `centre` (default: the middle of the silhouette's rows). A box cutting one side's
+    outline, or a mirror or an open door drawn on one side, moves that middle, and the
+    wider side wins everywhere (911: the front wings and door came out as wide as the
+    rear wings, the door's rear half a 3 cm dent). Give the drawn centreline as
+    `top.centre` and a box that takes in the whole outline.
+27. **Top line rung by the drawing.** `smooth1` on the top line keeps the drawing's
+    pixel steps and small drawn lips (911: the scuttle's 1 cm hump before the screen);
+    the 3-D blur only softens them into waves along the bonnet and the lid. On a body
+    with no steps in its top line (no drip rails, no cab-to-bed) `topSpacing` 0.15 with
+    `cornerDeg` 20 fairs it and keeps the screen foot and the lid's end; a drawn lip is
+    replaced by `topOverride`.
+28. **topCross folds.** Stations were joined by straight pieces along the car and their
+    points by straight pieces across it: every station a fold, every point a crease.
+    Both are monotone cubics now (as sections at stations are). Bodies with topCross
+    built before this change (Käfer, 2CV, jeeps, Land Rover, UAZ, Valiant...) pick it
+    up on their next rebuild; the Käfer's hull checked: the same shape, no new folds.
+
+Car-file fixes from the photos: the Panda's bonnet one straight line to the screen (the
+hand-read outline bent at -1.17 and the blur made an S of it); the 911's front wings
+above the bonnet with the headlamps in their noses and a valley between (`topCross`;
+the side outline is the wings' crest, so the bonnet had been as high as the lamps).
+The 911's reference photos were of the Safari rally car; now stock 1980-83 coupés.

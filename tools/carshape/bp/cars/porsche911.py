@@ -10,7 +10,10 @@ CAR = {
         'image': 'porsche911.jpg',
         'side': {'box': [845, 138, 2047, 503], 'nose': 'left', 'ground': 506,
                  'wheels': [[1098, 414], [1731, 414]], 'drop': [[0, 0, 380, 120]]},
-        'top': {'box': [851, 893, 2032, 1350], 'nose': 'left'},
+        # The box takes in the rear wings' outline (it cut them off at 893), and the
+        # centreline is the drawn one: off by 4 px, the wider side of every station
+        # made the front wings and the door as wide as the rear wings.
+        'top': {'box': [851, 884, 2032, 1350], 'nose': 'left', 'centre': 1116.8, 'fitWidth': True},
         'front': {'box': [138, 138, 627, 500], 'drop': [[472, 0, 489, 362]]},
         'rear': {'box': [115, 885, 627, 1252], 'drop': [[478, 0, 512, 367]]},
     },
@@ -23,6 +26,23 @@ CAR = {
         'crown': [[-2.2, 0.03], [2.2, 0.03]],
         'roofCrown': 0.035,
         'edge': 0.016,
+        # The top line faired (the drawing's pixels and the scuttle's lip rang along the
+        # bonnet and the engine lid), its corners (screen foot, roof, lid's end) kept.
+        'topSpacing': 0.15,
+        'cornerDeg': 20,
+        'topOverride': [[-1.15, 0.872], [-1.0, 0.879], [-0.88, 0.883], [-0.79, 0.886]],
+        # The front wings stand above the bonnet, the headlamps in their noses, a
+        # valley between (the side outline is the wings' crest).
+        'topCross': [
+            {'y': -1.90, 'z': [[0.0, 0.66], [0.40, 0.655], [0.55, 0.67], [0.64, 0.68], [0.75, 0.64], [0.82, 0.58]]},
+            {'y': -1.75, 'z': [[0.0, 0.715], [0.25, 0.71], [0.40, 0.70], [0.50, 0.725], [0.58, 0.775], [0.64, 0.80],
+                               [0.70, 0.79], [0.76, 0.74], [0.82, 0.66]]},
+            {'y': -1.45, 'z': [[0.0, 0.795], [0.25, 0.79], [0.42, 0.78], [0.52, 0.80], [0.60, 0.83], [0.66, 0.842],
+                               [0.72, 0.83], [0.78, 0.79], [0.82, 0.73]]},
+            {'y': -1.15, 'z': [[0.0, 0.852], [0.30, 0.848], [0.45, 0.843], [0.55, 0.855], [0.63, 0.868], [0.68, 0.872],
+                               [0.74, 0.86], [0.79, 0.83], [0.82, 0.78]]},
+            {'y': -0.85, 'z': [[0.0, 0.886], [0.40, 0.88], [0.60, 0.872], [0.75, 0.862], [0.82, 0.85]]},
+        ],
         'arch': {'radius': 0.37, 'lift': 0.05},
     },
     'parts': {

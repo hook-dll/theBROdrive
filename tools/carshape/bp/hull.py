@@ -407,18 +407,25 @@ def build(car):
     big = 1.0
     dist = np.full((len(xs), len(zs), len(ys)), -big, np.float32)
     crown = sm(hs.get('crown', [[-9, 0.02], [9, 0.02]]), ys)
-    # The top across the car given at stations, {y, z: [[x, z], ...]}, interpolated
-    # between them: a bonnet lower than the wings either side of it, a valley between.
+    # The top across the car given at stations, {y, z: [[x, z], ...]}, on monotone cubics
+    # across and between them (straight pieces made every point a crease along the
+    # bonnet and every station a fold across it): a bonnet lower than the wings either
+    # side of it, a valley between.
     tc = sorted(hs.get('topCross', []), key=lambda c: c['y'])
+    if len(tc) > 2:
+        from scipy.interpolate import PchipInterpolator
+        tc_at = PchipInterpolator([c['y'] for c in tc], np.array([sm(c['z'], xs) for c in tc]), axis=0)
+    elif tc:
+        def tc_at(y):
+            if len(tc) == 1:
+                return sm(tc[0]['z'], xs)
+            f = (y - tc[0]['y']) / (tc[1]['y'] - tc[0]['y'])
+            return sm(tc[0]['z'], xs) * (1 - f) + sm(tc[1]['z'], xs) * f
 
     def top_cross(y):
         if not tc or y < tc[0]['y'] or y > tc[-1]['y']:
             return None
-        i = max(k for k in range(len(tc)) if tc[k]['y'] <= y)
-        if i == len(tc) - 1:
-            return pl(tc[i]['z'], xs)
-        f = (y - tc[i]['y']) / (tc[i + 1]['y'] - tc[i]['y'])
-        return pl(tc[i]['z'], xs) * (1 - f) + pl(tc[i + 1]['z'], xs) * f
+        return tc_at(y)
     # Where the cabin starts and ends the body's top runs on from the deck outside it to
     # the belt over `beltBlend`, not as a step: a belt above the bonnet's last height
     # stood a ridge across the car at the screen's foot (and a dent where it was below).
