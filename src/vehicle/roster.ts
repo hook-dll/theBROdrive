@@ -1192,13 +1192,14 @@ export const ROSTER: readonly RosterCar[] = [
   {
     // Toyota Hilux N40 (1979): 12R 1.6 four, 80 PS JIS gross (net about 68 PS, 50 kW)
     // at 5200 and 12.5 kgm gross at 3000, four-speed on a 4.3 axle, leaf-sprung live
-    // axle under an empty bed, 1150 kg; about 135 km/h, 10.6 m turning circle.
+    // axle under an empty bed, 1075 kg kerb (4305 x 1610 x 1570 short bed); about
+    // 135 km/h, 10.6 m turning circle.
     id: 'rs_hilux',
     label: 'Toyota Hilux',
     body: 'hilux.glb',
     bodyClass: 'car',
-    factory: { length: 4.305, width: 1.61, height: 1.58, clearance: 0.19, wheelbase: 2.585, frontTrack: 1.3, rearTrack: 1.275, wheelRadius: 0.325, tyreWidth: 0.185, frontOverhang: 0.66 },
-    mass: 1150,
+    factory: { length: 4.305, width: 1.61, height: 1.57, clearance: 0.19, wheelbase: 2.585, frontTrack: 1.3, rearTrack: 1.275, wheelRadius: 0.325, tyreWidth: 0.185, frontOverhang: 0.66 },
+    mass: 1075,
     frontWeightShare: 0.58,
     rearDriveBias: 1,
     engine: {

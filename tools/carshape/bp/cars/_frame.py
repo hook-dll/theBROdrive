@@ -73,7 +73,9 @@ def set_overhang(CAR, fo):
 def scale_above(CAR, belt, top_from, top_to):
     """A drawing whose top stands at `top_from` for a car `top_to` tall: every height
     above `belt` is brought to it in proportion (outlines, panes, regions, decals,
-    lines, roof boxes, wipers, mirror)."""
+    lines, roof boxes, wipers, mirror, handles, lamp pods, bumpers; the hull's belt,
+    sill, top overrides and cross-sections, bumper bands). `belt` 0 scales the whole
+    drawing (one drawn too low throughout: Hilux)."""
     k = (top_to - belt) / (top_from - belt)
 
     def z(v):
@@ -112,6 +114,22 @@ def scale_above(CAR, belt, top_from, top_to):
     for key in ('sectionStations', 'sectionKeys'):
         for st in h.get(key, []):
             st['half'] = [[z(a), x] + list(r) for a, x, *r in st['half']]
+    for key in ('belt', 'sill', 'topOverride'):
+        if key in h:
+            h[key] = pts(h[key])
+    for tc in h.get('topCross', []):
+        tc['z'] = pts(tc['z'])
+    if 'roofTop' in h:
+        h['roofTop'] = z(h['roofTop'])
+    for bands in (h.get('bumpers', {}), P.get('bumpers', {})):
+        for b in bands.values():
+            b['z'] = [z(b['z'][0]), z(b['z'][1])]
+            if 'overriders' in b:
+                b['overriders'] = [[o[0], o[1], z(o[2]), z(o[3])] + list(o[4:]) for o in b['overriders']]
+    for pl in P.get('podLamps', []):
+        pl['z'] = z(pl['z'])
+    if 'handles' in P:
+        P['handles']['at'] = pts(P['handles']['at'])
     if 'wipers' in P:
         P['wipers']['arms'] = [list(a[:3]) + [z(a[3])] + list(a[4:]) for a in P['wipers']['arms']]
     if 'mirror' in P:

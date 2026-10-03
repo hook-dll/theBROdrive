@@ -13,7 +13,7 @@ CAR = {
     'blueprint': {
         'image': 'hilux_go.png',
         'dark': 140,
-        'side': {'box': [0, 0, 1956, 650], 'nose': 'right', 'wheels': [[536, 496], [1644, 496]], 'ground': 630, 'isotropic': True,
+        'side': {'box': [0, 0, 1956, 760], 'nose': 'right', 'wheels': [[536, 596], [1644, 596]], 'ground': 730, 'isotropic': True,
                  'outline': [[-2.146, 0.537], [-2.146, 0.434], [-2.043, 0.406], [-1.856, 0.35], [-1.133, 0.313], [0.103, 0.294], [1.457, 0.434], [2.133, 0.434], [2.18, 0.467], [2.18, 0.98], [2.157, 1.003], [0.057, 1.003], [0.043, 1.4], [0.01, 1.433], [-0.597, 1.433], [-0.643, 1.4], [-1.017, 1.003], [-1.087, 0.98], [-1.926, 0.887], [-2.034, 0.84], [-2.08, 0.77], [-2.071, 0.583]]},
         'top': {'box': [30, 670, 1910, 1340], 'nose': 'right', 'fitWidth': True},
     },
@@ -53,19 +53,22 @@ CAR = {
              'depthRange': [-2.2, -1.8]},
             {'view': 'front', 'node': 'headlights', 'circle': [[0.60, 0.73], 0.08], 'material': 'Headlights', 'height': 0.010,
              'depthRange': [-2.2, -1.8]},
-            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.62, 0.48], [0.14, 0.05]], 'radius': 0.006,
+            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.60, 0.585], [0.12, 0.04]], 'radius': 0.006,
              'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [-2.25, -1.8]},
-            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.62, 0.48], [0.14, 0.05]], 'radius': 0.006,
+            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.60, 0.585], [0.12, 0.04]], 'radius': 0.006,
              'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [-2.25, -1.8]},
             {'view': 'front', 'rect': [[0.0, 0.73], [0.20, 0.05]], 'radius': 0.006, 'mirror': False, 'material': 'chrome',
              'height': 0.008, 'depthRange': [-2.2, -1.8]},
-            {'view': 'rear', 'node': 'taillights', 'rect': [[0.70, 0.635], [0.12, 0.11]], 'radius': 0.006, 'material': 'TailLights',
+            # The lamps on the bed's rear corners (photos of 1981 cars): the turn lamp on top
+            # of the tail lamp, the reversing lamp at the foot. The shell ends at the bed's
+            # floor (the walls and tailgate are boxes), so they sit on its tail below it.
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.72, 0.60], [0.09, 0.09]], 'radius': 0.006, 'material': 'TailLights',
              'height': 0.012, 'depthRange': [2.0, 2.3], 'facingMin': 0.3},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.70, 0.535], [0.12, 0.07]], 'radius': 0.006,
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.72, 0.67], [0.09, 0.045]], 'radius': 0.006,
              'material': 'IndicatorLights', 'height': 0.012, 'depthRange': [2.0, 2.3], 'facingMin': 0.3},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.70, 0.535], [0.12, 0.07]], 'radius': 0.006,
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.72, 0.67], [0.09, 0.045]], 'radius': 0.006,
              'material': 'IndicatorLights', 'height': 0.012, 'depthRange': [2.0, 2.3], 'facingMin': 0.3},
-            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.56, 0.62], [0.08, 0.05]], 'radius': 0.006,
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.60, 0.60], [0.08, 0.05]], 'radius': 0.006,
              'material': 'ReverseLights', 'height': 0.012, 'depthRange': [2.0, 2.3], 'facingMin': 0.3},
             {'view': 'rear', 'rect': [[0.0, 0.60], [0.36, 0.12]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [2.0, 2.3], 'facingMin': 0.3},
@@ -97,3 +100,11 @@ CAR = {
         'wheel': {'style': 'hubcap', 'rimFactor': 0.64, 'cap': 0.62},
     },
 }
+
+# The drawing stands 1.433 m to the cab's roof for the short bed's published 1.570
+# (autotrader/Toyota: 4305 x 1610 x 1570, 1075 kg); photos of 1981 cars show it low
+# throughout (bonnet, bed and cab alike), so every height is brought up in proportion.
+import os as _os, sys as _sys  # noqa: E402
+_sys.path.insert(0, _os.path.dirname(__file__))
+from _frame import scale_above  # noqa: E402
+scale_above(CAR, 0.0, 1.433, 1.57)

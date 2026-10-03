@@ -1466,9 +1466,14 @@ if ub.get('frame'):
     y_hi = max(p_[1] for p_ in bp_['rear']) - 0.03 if bp_.get('rear') else L / 2 - 0.3
     ys_ = np.linspace(y_lo, y_hi, 14)
     for y0_, y1_ in zip(ys_, ys_[1:]):
-        zf = floor_at(min(max((y0_ + y1_) / 2, -L / 2 + 0.35), L / 2 - 0.3))
+        ym = (y0_ + y1_) / 2
+        zf = floor_at(min(max(ym, -L / 2 + 0.35), L / 2 - 0.3))
         for sx in (1, -1):
-            box(bm_, (sx * xr, (y0_ + y1_) / 2, zf - 0.03), (0.06, y1_ - y0_ + 0.01, 0.10), 0)
+            # Past the floor the rail tucks up under the apron over it (it hung below the
+            # nose and tail as two black beams: Hilux).
+            hit, _n = skin_point((sx * xr, ym, -0.5), (0, 0, 1), 4.0)
+            z_ = max(zf, hit.z) if hit is not None else zf
+            box(bm_, (sx * xr, ym, z_ - 0.03), (0.06, y1_ - y0_ + 0.01, 0.10), 0)
 trim_parts.append(new_object('underbody', bm_, ['trim']))
 
 # Arch flares and lips: a band round each wheel arch standing off the body side, built
