@@ -388,7 +388,10 @@ def build(car):
     # smoothing crumpled.
     ext = hs.get('cabinRun', 0.35)
     near = (ys >= c0 - ext) & (ys <= c1 + ext)
-    in_cabin = in_cabin | (near & (top > belt + 0.005))
+    # ...and only there: a cabin given past the point where a sloping tail's outline
+    # comes down to the belt stood the glasshouse's narrower section, its shelf and its
+    # fillet on the tailgate below the glass, a ledge across it (Panda, Civic).
+    in_cabin = (in_cabin | near) & (top > belt + 0.005)
     gplan = sm(hs['glassPlan'], ys)
     z_ref = hs.get('beltRef', float(np.median(belt[(ys >= c0) & (ys <= c1)])))
     i_ref = np.searchsorted(zs, z_ref)
@@ -475,6 +478,13 @@ def build(car):
                 fade = np.clip(1 - (zs - belt[j]) / hs.get('shelfRise', 0.18), 0, 1)
                 fade = fade * fade * (3 - 2 * fade)
                 xg = xg + (foot - xg[ib_]) * fade
+            # Over the roof the end view's section only tapers to nothing (its blurred
+            # top), which made the roof a shallow tent: a ridge along the centre. The
+            # section is held at its width `roofEdge` below the top, so the roof is the
+            # crown curve across (roofCrown, roofHalf) down to the side's shoulder.
+            ic = int(np.searchsorted(zs, top[j] - hs.get('roofEdge', 0.06)))
+            if ic < len(zs):
+                xg[ic:] = xg[ic]
             drop = np.interp(xs / max(k, 1e-3), xq, roof_drop)
             zg = top[j] - drop
             up = np.minimum(np.minimum(xg[None, :] - xs[:, None], zg[:, None] - zs[None, :]),
