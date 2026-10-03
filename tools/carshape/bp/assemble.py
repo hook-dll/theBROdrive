@@ -462,33 +462,42 @@ SEAL = P.get('glassSeal', {'material': max(set(_mats), key=_mats.count) if _mats
 SEAL.setdefault('width', 0.012 if SEAL['material'] == 'chrome' else 0.014)
 print('SEAL', car, SEAL, 'frame lines dropped', len(FRAME_LINES))
 
+_glass_tree = BVHTree.FromBMesh(bm)
+
+
+def skin_point_g(origin, direction, dist=3.0):
+    """skin_point for the glass stage, on the shell as it stands before the parts."""
+    hit = _glass_tree.ray_cast(Vector(origin), Vector(direction).normalized(), dist)
+    return hit[0], hit[1]
+
+
 def widen_screen(g):
-    """A screen or back light reaches out to its pillars: at each height its outline's
-    outer points move out to the glasshouse's half-width there less a pillar, `pillar`
-    wide (the drawn panes stopped short and left pillars twice as wide as the car's)."""
-    if g['view'] not in ('front', 'rear') or 'outline' not in g or g.get('fit') is False and g.get('widen') is False:
+    """A screen or back light reaches out to its pillars: the whole outline is stretched
+    across by one factor, found where the pane is widest above its foot, so the pillars
+    there are `pillar` wide (the drawn panes stopped short and left pillars twice as wide
+    as the car's); one factor keeps the outline's own smooth shape."""
+    if g['view'] not in ('front', 'rear') or 'outline' not in g or g.get('widen') is False:
         return g
     pil = g.get('pillar', P.get('pillar', 0.05))
     sgn = -1 if g['view'] == 'front' else 1
-    dr = g.get('depthRange')
-    out = []
-    for a_, b_ in g['outline']:
-        if abs(a_) < 0.15:
-            out.append([a_, b_])
+    pts_ = g['outline']
+    lo_b = min(q[1] for q in pts_)
+    hi_b = max(q[1] for q in pts_)
+    ratios = []
+    for a_, b_ in pts_:
+        if abs(a_) < 0.2 or b_ < lo_b + 0.3 * (hi_b - lo_b) or b_ > hi_b - 0.05:
             continue
-        # the pane's own surface at this height, on the centre line
-        hit, _n = skin_point((0.0, sgn * (L / 2 + 1.0), b_), (0, -sgn, 0), L + 2)
-        if hit is None or (dr and not dr[0] - 0.1 <= hit.y <= dr[1] + 0.1):
-            out.append([a_, b_])
+        hit, _n = skin_point_g((0.0, sgn * (L / 2 + 1.0), b_), (0, -sgn, 0), L + 2)
+        if hit is None:
             continue
-        # the glasshouse's half-width a little behind (in front of) that point
-        side_, _n2 = skin_point((1.5, hit.y - sgn * 0.06, b_), (-1, 0, 0), 3.0)
+        side_, _n2 = skin_point_g((1.5, hit.y - sgn * 0.06, b_), (-1, 0, 0), 3.0)
         if side_ is None:
-            out.append([a_, b_])
             continue
-        target = side_.x - pil
-        out.append([math.copysign(max(abs(a_), target), a_), b_])
-    return dict(g, outline=out, fit=False, facingMin=min(g.get('facingMin', 0.25), 0.1))
+        ratios.append((side_.x - pil) / abs(a_))
+    if not ratios:
+        return g
+    k = min(max(min(ratios), 1.0), g.get('widenMax', 1.12))
+    return dict(g, outline=[[a_ * k, b_] for a_, b_ in pts_])
 
 
 def reach_pillar(g):
@@ -502,23 +511,25 @@ def reach_pillar(g):
     if ymin > info['cabin'][0] + 0.7:
         return g            # not the front window
     pil = g.get('pillar', P.get('pillar', 0.05))
-    out = []
+    # how far forward each front point could go, then one shift for all of them (the
+    # smallest): the edge moves parallel to itself and never runs onto the wing below
+    shifts = []
     for y_, z_ in pts_:
         if y_ > ymin + 0.12:
-            out.append([y_, z_])
             continue
-        h0, _ = skin_point((1.5, y_ + 0.05, z_), (-1, 0, 0), 3.0)
+        h0, _ = skin_point_g((1.5, y_ + 0.05, z_), (-1, 0, 0), 3.0)
         if h0 is None:
-            out.append([y_, z_])
             continue
         yy, lim = y_, y_
-        while yy > y_ - 0.6:
+        while yy > y_ - 0.3:
             yy -= 0.01
-            h1, _ = skin_point((1.5, yy, z_), (-1, 0, 0), 3.0)
+            h1, _ = skin_point_g((1.5, yy, z_), (-1, 0, 0), 3.0)
             if h1 is None or h1.x < h0.x - 0.04:
                 break
             lim = yy
-        out.append([min(y_, lim + pil), z_])
+        shifts.append(max(0.0, y_ - (lim + pil)))
+    sh = min(min(shifts) if shifts else 0.0, 0.15)
+    out = [[y_ - sh if y_ <= ymin + 0.12 else y_, z_] for y_, z_ in pts_]
     return dict(g, outline=out)
 
 
@@ -1259,6 +1270,11 @@ if wp:
         # of the glass beneath it (a blade is straight; following the glass's ragged
         # foot it waved)
         pa, pb = pts[0][0], pts[-1][0]
+        if (pb - pa).length > abs(x1 - x0) * 1.3:
+            # a stray point off the glass: keep the blade its drawn length
+            mid = (pa + pb) / 2
+            dvec = (pb - pa).normalized() * abs(x1 - x0) / 2
+            pa, pb = mid - dvec, mid + dvec
         nrm_ = sum((n for _, n in pts), Vector()).normalized()
         lift_ = max(0.0, max((p.dot(nrm_) - (pa + (pb - pa) * ((p - pa).dot(pb - pa) / max((pb - pa).length_squared, 1e-9))).dot(nrm_)) for p, _ in pts))
         pts = [(pa + nrm_ * lift_, nrm_), (pb + nrm_ * lift_, nrm_)]

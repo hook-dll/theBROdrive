@@ -34,7 +34,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import bpread  # noqa: E402
 import grid  # noqa: E402
 
-G = 0.01
+G = float(os.environ.get('CARSHAPE_G', 0.01))
 
 
 def pl(points, at):
@@ -70,6 +70,64 @@ def fill_band(arr, axis_vals, band):
     return arr
 
 
+FAIR_CORNER = [28.0]
+
+
+def fair(at, val, spacing=0.15, corner_deg=None, mask=None):
+    """A drawn profile made fair: a least-squares cubic spline with knots every
+    `spacing`, so it cannot ripple at any shorter wavelength than that, with a corner
+    (triple knot) wherever the drawing really turns sharply (more than `corner_deg`
+    within 5 cm), so creases stay creases. `mask` limits the fit to where the profile
+    exists; outside it the values are returned as they were."""
+    from scipy.interpolate import make_lsq_spline
+    if corner_deg is None:
+        corner_deg = FAIR_CORNER[0]
+    at = np.asarray(at, float)
+    val = np.asarray(val, float)
+    out = val.copy()
+    if spacing <= 0:
+        return out
+    m = np.ones(len(at), bool) if mask is None else np.asarray(mask, bool)
+    idx = np.nonzero(m)[0]
+    if len(idx) < 12:
+        return out
+    # each run of the mask on its own
+    runs = np.split(idx, np.nonzero(np.diff(idx) > 1)[0] + 1)
+    step = at[1] - at[0]
+    for r in runs:
+        if len(r) < 12:
+            continue
+        x, y = at[r], val[r]
+        span = x[-1] - x[0]
+        if span < 2 * spacing:
+            continue
+        # corners: the direction of the lightly smoothed profile turns sharply
+        ys_ = ndimage.gaussian_filter1d(y, max(1.0, 0.01 / step), mode='nearest')
+        w = max(2, int(round(0.025 / step)))
+        ang = np.full(len(x), 0.0)
+        for i in range(w, len(x) - w):
+            a1 = np.arctan2(ys_[i] - ys_[i - w], x[i] - x[i - w])
+            a2 = np.arctan2(ys_[i + w] - ys_[i], x[i + w] - x[i])
+            ang[i] = abs(np.degrees(a2 - a1))
+        corners = []
+        for i in np.argsort(-ang):
+            if ang[i] < corner_deg:
+                break
+            if all(abs(x[i] - c) > 0.05 for c in corners) and x[0] + 0.03 < x[i] < x[-1] - 0.03:
+                corners.append(x[i])
+        n_in = max(1, int(span / spacing))
+        inner = list(np.linspace(x[0], x[-1], n_in + 1)[1:-1])
+        inner = [k for k in inner if all(abs(k - c) > 0.04 for c in corners)]
+        knots_in = sorted(inner + corners * 3)
+        t = np.r_[[x[0]] * 4, knots_in, [x[-1]] * 4]
+        try:
+            spl = make_lsq_spline(x, y, t, k=3)
+            out[r] = spl(x)
+        except Exception:
+            pass
+    return out
+
+
 def smooth1(a, size=5, sigma=1.5):
     return ndimage.gaussian_filter1d(ndimage.median_filter(a, size, mode='nearest'), sigma, mode='nearest')
 
@@ -88,6 +146,7 @@ def smooth_inner(a, at, sigma, margin):
 
 def build(car):
     spec, bp = grid.load(car)
+    FAIR_CORNER[0] = spec['hull'].get('cornerDeg', 999.0)
     F = spec['factory']
     L, W, H, R = F['length'], F['width'], F['height'], F['wheelRadius']
     hs = spec['hull']
@@ -135,7 +194,10 @@ def build(car):
             ext[:] = fill_band(ext, zf, b['z'])
         # Lines drawn across the face (a valance, a grille's edge) nick the outline row by
         # row: the face is smoothed up and down (4 cm), its top and bottom kept.
-        ext[:] = ndimage.gaussian_filter1d(ext, hs.get('faceSmooth', 0.04) / (G / FINE), mode='nearest')
+        if hs.get('faceSpacing', 0):
+            ext[:] = fair(zf, ext, hs.get('faceSpacing', 0), mask=(zf > 0.05))
+        else:
+            ext[:] = ndimage.gaussian_filter1d(ext, hs.get('faceSmooth', 0.04) / (G / FINE), mode='nearest')
         if 'face' in hs and end in hs['face']:
             # A face given outright: [[z, y], ...] for the band it spans.
             pts = np.array(hs['face'][end])
@@ -151,15 +213,20 @@ def build(car):
         zt = sm(to, yf)[None, :]
         side &= ~span | (zf[:, None] <= zt)
         side |= span & (zf[:, None] <= zt) & (zf[:, None] >= sm(hs['sill'], yf)[None, :])
+    # The top of the outline at every station, made fair, and the outline rebuilt from
+    # its fair lines (sill, top, nose, tail): the drawing's own pixels rippled the side.
+    top_f = np.array([zf[np.nonzero(side[:, j])[0][-1]] if side[:, j].any() else 0 for j in range(len(yf))])
+    if hs.get('topSpacing', 0.2):
+        top_f = fair(yf, top_f, hs.get('topSpacing', 0.2), mask=top_f > 0.05)
+    else:
+        top_f = smooth1(top_f, 9, 2.0)
+    if hs.get('fairSide', False):
+        side = ((zf[:, None] <= top_f[None, :]) & (zf[:, None] >= sm(hs['sill'], yf)[None, :])
+                & (yf[None, :] >= nose[:, None] - 1e-6) & (yf[None, :] <= tail[:, None] + 1e-6))
     d_side_f = (ndimage.distance_transform_edt(side) - ndimage.distance_transform_edt(~side)) * (G / FINE)
     d_side = d_side_f[::FINE, ::FINE][:len(zs), :len(ys)]                   # [z, y], metres
     sill = sm(hs['sill'], ys)
-    # The top of the outline at every station.
-    top_f = np.array([zf[np.nonzero(side[:, j])[0][-1]] if side[:, j].any() else 0 for j in range(len(yf))])
-    top = smooth1(top_f, 9, 2.0)
-    if hs.get('topSmooth'):
-        top = ndimage.gaussian_filter1d(top, hs['topSmooth'] / (G / FINE), mode='nearest')
-    top = top[::FINE][:len(ys)]
+    top = top_f[::FINE][:len(ys)]
     # Drip rails, aerials and the like stand above the roof in the drawing.
     if 'roofTop' in hs:
         top = np.minimum(top, hs['roofTop'])
@@ -175,7 +242,10 @@ def build(car):
         plan = ndimage.grey_opening(plan, size=op, mode='nearest')
     # Away from the ends the plan is a long, slow curve: lines the top view draws
     # along the sides (mouldings, shut lines) only nick it.
-    plan = smooth_inner(plan, ys, hs.get('planSmooth', 0.08), 0.18)
+    if hs.get('planSpacing', 0.2):
+        plan = fair(ys, plan, hs.get('planSpacing', 0.2), mask=plan > 0.02)
+    else:
+        plan = smooth_inner(plan, ys, hs.get('planSmooth', 0.08), 0.18)
     for band in hs.get('planBridge', []):
         plan = fill_band(plan, ys, band)
     # Lamps and mouldings on the flanks stand a few mm proud: the shell stays inside
@@ -214,7 +284,10 @@ def build(car):
                 kmax = k0 + int(np.argmax(s[k0:k1 + 1]))
                 s[k0:kmax + 1] = np.maximum.accumulate(s[k0:kmax + 1])
                 s[kmax:k1 + 1] = np.minimum.accumulate(s[kmax:k1 + 1])
-        s = smooth_inner(s, zs, hs.get('sectionSmooth', 0.05), 0.06)
+        if hs.get('sectionSpacing', 0):
+            s = fair(zs, s, hs.get('sectionSpacing', 0), mask=s > 0.03)
+        else:
+            s = smooth_inner(s, zs, hs.get('sectionSmooth', 0.05), hs.get('sectionMargin', 0.01))
         b = hs.get('bumpers', {}).get(end)
         if b:
             s = fill_band(s, zs, [b['z'][0] - 0.02, b['z'][1] + 0.02])
@@ -382,7 +455,14 @@ def build(car):
             zg = top[j] - drop
             up = np.minimum(np.minimum(xg[None, :] - xs[:, None], zg[:, None] - zs[None, :]),
                             zs[None, :] - (belt[j] - 0.03))
-            d = np.maximum(d, up)
+            # a soft union (a fillet `glassFillet` wide) where the glasshouse meets the
+            # body: a hard one pinched into a fold at the pillars' feet and the cowl
+            kf = hs.get('glassFillet', 0.03)
+            if kf > 0:
+                h_ = np.clip(0.5 + 0.5 * (up - d) / kf, 0, 1)
+                d = d * (1 - h_) + up * h_ + kf * h_ * (1 - h_)
+            else:
+                d = np.maximum(d, up)
         dist[:, :, j] = np.minimum(d, d_side[None, :, j])
 
     # ---- wheel wells ---------------------------------------------------------------
@@ -407,15 +487,19 @@ def build(car):
     full = np.concatenate([dist[:0:-1], dist], axis=0)
     xs_full = np.concatenate([-xs[:0:-1], xs])
     pad = 4
-    full = np.pad(np.clip(full, -4 * G, 4 * G), pad, constant_values=-4 * G)
-    sigma = hs.get('edge', 0.015) / G
+    CL = hs.get('fieldClip', 0.15)
+    pad = max(pad, int(CL / G) // 3)
+    full = np.pad(np.clip(full, -CL, CL), pad, constant_values=-CL)
+    # The finest an edge may be: rounder than this the field kept every unevenness of
+    # the drawing (streaks on the screens, folds at the pillars' feet) in the reflection.
+    sigma = max(hs.get('edge', 0.015), hs.get('edgeMin', 0.022)) / G
     # Along the car the shell is built station by station: a longer blur there evens out
     # the steps between them (a dent where the cabin ends, a ripple from a drawn line).
-    sigma_y = max(sigma, hs.get('edgeY', 0.035) / G)
+    sigma_y = max(sigma, max(hs.get('edgeY', 0.06), hs.get('edgeYMin', 0.06)) / G)
     smooth = ndimage.gaussian_filter(full, (sigma, sigma, sigma_y))
     # the wells, mirrored and padded the same way, rounded only by the edge radius
     wf = np.concatenate([wells[:0:-1], wells], axis=0)
-    wf = np.pad(np.clip(wf, -4 * G, 4 * G), pad, constant_values=-4 * G)
+    wf = np.pad(np.clip(wf, -CL, CL), pad, constant_values=-CL)
     wf = ndimage.gaussian_filter(wf, hs.get('archEdge', 0.02) / G)
     # The lip where the side meets the well: a rounded intersection (a smooth minimum
     # over `archLip`), not a sharp one, which the 1 cm grid drew as a row of teeth.

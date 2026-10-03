@@ -82,6 +82,12 @@ export interface CarLabApi {
   set(values: Partial<Pick<LabState, 'dirt' | 'scratches' | 'timeHours' | 'factory'>>): void;
   /** Frames one car from `azimuth` radians around it, or the whole grid with no id. */
   focus(modelId?: string, azimuth?: number): void;
+  /**
+   * A close-up of one car: the camera `distance` metres from a point given in the car's
+   * own frame (`at`: across, up, along, metres from its centre), at `azimuth` radians
+   * round it and `elevation` radians up.
+   */
+  closeUp(modelId: string, at: readonly [number, number, number], distance: number, azimuth: number, elevation: number): void;
   /** Renders a frame now and returns the canvas as a PNG data URL. */
   capture(): string;
   readonly models: readonly string[];
@@ -346,6 +352,13 @@ export async function bootCarLab(): Promise<void> {
       const target = car.anchor.position.clone();
       target.y = half[1] * 0.9;
       frame(target, Math.max(half[2], half[0]) * 2.6, CAR_YAW + azimuth, 0.18);
+    },
+    closeUp(modelId, at, distance, azimuth, elevation) {
+      const car = cars.find((candidate) => candidate.def.id === modelId);
+      if (!car) return;
+      for (const other of cars) other.label.visible = false;
+      const local = new THREE.Vector3(at[0], at[1], at[2]).applyAxisAngle(new THREE.Vector3(0, 1, 0), car.anchor.rotation.y);
+      frame(car.anchor.position.clone().add(local), distance, CAR_YAW + azimuth, elevation);
     },
     capture() {
       renderFrame();

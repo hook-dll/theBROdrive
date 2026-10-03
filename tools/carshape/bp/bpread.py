@@ -19,7 +19,7 @@ work is closed a little: every inside line drops out and only the outline counts
 import cv2
 import numpy as np
 
-GRID = 0.01  # m
+GRID = float(__import__('os').environ.get('CARSHAPE_G', 0.01))  # m
 
 
 class View:
