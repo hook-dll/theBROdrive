@@ -916,14 +916,14 @@ export const ROSTER: readonly RosterCar[] = [
     target: { top: 145, to100: null, turn: 5.2, source: 'Dacia 1300 (1969) data' },
   },
   {
-    // Volkswagen 1300 Beetle (1966): air-cooled flat four behind the rear axle, 44 PS
+    // Volkswagen 1300 Beetle (1970): air-cooled flat four behind the rear axle, 44 PS
     // DIN at 4100 and 89 Nm at 3000, four-speed transaxle on a 4.375 final drive, swing
     // axles, 820 kg; 120 km/h.
     id: 'rs_kafer',
     label: 'Volkswagen Käfer',
     body: 'kafer.glb',
     bodyClass: 'car',
-    factory: { length: 4.08, width: 1.58, height: 1.5, clearance: 0.15, wheelbase: 2.42, frontTrack: 1.37, rearTrack: 1.35, wheelRadius: 0.315, tyreWidth: 0.15, frontOverhang: 0.753 },
+    factory: { length: 4.08, width: 1.55, height: 1.5, clearance: 0.15, wheelbase: 2.42, frontTrack: 1.31, rearTrack: 1.35, wheelRadius: 0.315, tyreWidth: 0.15, frontOverhang: 0.753 },
     mass: 820,
     frontWeightShare: 0.42,
     rearDriveBias: 1,

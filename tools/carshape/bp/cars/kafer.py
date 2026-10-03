@@ -1,13 +1,13 @@
-# Volkswagen Käfer (Beetle). Factory: 4080 x 1580 x 1500, wheelbase 2420, tracks
-# 1370/1350, 5.60-15, clearance 150. The drawing reprinted at
+# Volkswagen 1300 Käfer (Beetle), 1970. Factory: 4080 x 1550 x 1500, wheelbase 2420, tracks
+# 1310/1350, 5.60-15, clearance 150. The drawing reprinted at
 # 3dcar.ru/blueprints/vw/vw_kafer_1970. A domed body narrower than its separate wings,
 # lamps in the front wings, running boards between them, blade bumpers.
 DOOR = [[0.18, 0.70], [0.21, 0.775], [0.29, 0.775], [0.32, 0.70], [0.55, 0.705], [0.80, 0.695], [0.95, 0.67], [1.0, 0.66], [1.2, 0.625], [1.38, 0.575], [1.45, 0.52], [1.49, 0.40], [1.51, 0.2]]
 CAR = {
     'id': 'kafer',
     'label': 'Volkswagen Käfer',
-    'factory': {'length': 4.08, 'width': 1.58, 'height': 1.5, 'clearance': 0.15, 'wheelbase': 2.42,
-                'frontTrack': 1.37, 'rearTrack': 1.35, 'wheelRadius': 0.315, 'tyreWidth': 0.15, 'frontOverhang': 0.753},
+    'factory': {'length': 4.08, 'width': 1.55, 'height': 1.5, 'clearance': 0.15, 'wheelbase': 2.42,
+                'frontTrack': 1.31, 'rearTrack': 1.35, 'wheelRadius': 0.315, 'tyreWidth': 0.15, 'frontOverhang': 0.753},
     'blueprint': {
         'image': 'kafer.jpg',
         'dark': 110,
@@ -150,7 +150,7 @@ CAR = {
             'front': {'z': [0.385, 0.455], 'depth': 0.05, 'wrap': 0.30, 'profile': 'blade', 'rubber': 0.014},
             'rear': {'z': [0.385, 0.455], 'depth': 0.05, 'wrap': 0.30, 'profile': 'blade', 'rubber': 0.014},
         },
-        'mirror': {'y': -0.45, 'z': 1.04, 'reach': 0.90, 'w': 0.12, 'h': 0.07, 'material': 'chrome', 'sides': [1], 'shape': 'round'},
+        'mirror': {'y': -0.47, 'z': 1.02, 'reach': 0.80, 'w': 0.12, 'h': 0.07, 'material': 'chrome', 'sides': [1], 'shape': 'round'},
         'handles': {'at': [[0.17, 0.86]], 'w': 0.11},
         'wipers': {'arms': [[-0.45, 0.0, -0.66, 1.06], [0.05, 0.45, -0.66, 1.06]]},
         'wheel': {'style': 'hubcap', 'rimFactor': 0.62, 'cap': 0.66},
