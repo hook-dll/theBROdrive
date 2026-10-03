@@ -38,21 +38,21 @@ CAR = {
              'depthRange': [1.2, 2.2], 'facingMin': 0.15},
         ],
         'decals': [
-            # The faired headlamps: twin lamps under a glass cover in each wing.
-            # (the cover's outline from the front view: x=(px-655)/620, z=1-(py-325)/674)
-            {'view': 'front', 'outline': [[0.50, 0.651], [0.532, 0.815], [0.718, 0.889], [0.903, 0.881], [0.968, 0.785],
-                                          [0.968, 0.622], [0.556, 0.629]],
-             'material': 'grille', 'height': 0.004, 'depthRange': [-2.5, -1.6]},
-            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.83, 0.57], [0.12, 0.035]], 'radius': 0.008,
-             'material': 'IndicatorLights', 'height': 0.006, 'depthRange': [-2.5, -1.6], 'facingMin': 0.1},
-            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.83, 0.57], [0.12, 0.035]], 'radius': 0.008,
-             'material': 'IndicatorLights', 'height': 0.006, 'depthRange': [-2.5, -1.6], 'facingMin': 0.1},
-            {'view': 'front', 'rect': [[0.0, 0.57], [0.92, 0.035]], 'radius': 0.015, 'mirror': False, 'material': 'grille',
-             'height': 0.006, 'depthRange': [-2.5, -2.0]},
-            {'view': 'front', 'outline': [[0.0, 0.59], [0.03, 0.59], [0.0, 0.53], [-0.03, 0.59]], 'mirror': False, 'material': 'chrome',
-             'height': 0.012, 'depthRange': [-2.5, -2.0]},
-            {'view': 'front', 'rect': [[0.0, 0.43], [0.62, 0.11]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
-             'height': 0.006, 'depthRange': [-2.5, -2.0]},
+            # The faired headlamps (1968 on): twin lamps on a silver reflector under one
+            # smooth glass cover on the front of each wing, its foot just over the bumper
+            # (photos; the drawing's front view put it up on the wing's top).
+            {'view': 'front', 'outline': [[0.89, 0.726], [0.882, 0.765], [0.857, 0.789], [0.817, 0.806], [0.76, 0.814], [0.672, 0.813],
+                                          [0.584, 0.805], [0.527, 0.791], [0.487, 0.771], [0.462, 0.744], [0.454, 0.704], [0.462, 0.665],
+                                          [0.487, 0.641], [0.527, 0.624], [0.584, 0.616], [0.672, 0.617], [0.76, 0.625], [0.817, 0.639],
+                                          [0.857, 0.659], [0.882, 0.686]],
+             'material': 'chrome', 'height': 0.004, 'depthRange': [-2.5, -1.9], 'facingMin': 0.2},
+            # Under the bumper: the two wide air intakes, round turn lamps at the corners.
+            {'view': 'front', 'rect': [[0.27, 0.44], [0.34, 0.075]], 'radius': 0.03, 'material': 'grille',
+             'height': 0.005, 'depthRange': [-2.5, -2.0], 'facingMin': 0.1},
+            {'view': 'front', 'node': 'front_blinker_left', 'circle': [[0.66, 0.44], 0.035], 'material': 'IndicatorLights',
+             'height': 0.008, 'depthRange': [-2.5, -1.8], 'facingMin': 0.1},
+            {'view': 'front', 'node': 'front_blinker_right', 'circle': [[0.66, 0.44], 0.035], 'material': 'IndicatorLights',
+             'height': 0.008, 'depthRange': [-2.5, -1.8], 'facingMin': 0.1},
             # Tail lamps in the bumper's recess; the indicator trumpets on the roof's corners.
             {'view': 'rear', 'rect': [[0.45, 0.545], [0.25, 0.085]], 'radius': 0.035, 'material': 'chrome',
              'height': 0.005, 'depthRange': [2.0, 2.6]},
@@ -85,10 +85,11 @@ CAR = {
         ],
         'bumpers': {
             'front': {'z': [0.50, 0.56], 'depth': 0.06, 'wrap': 0.40, 'profile': 'blade',
-                      'overriders': [[0.48, 0.05, 0.36, 0.56]]},
+                      'overriders': [[0.45, 0.04, 0.45, 0.56]]},
             'rear': {'z': [0.42, 0.49], 'depth': 0.06, 'wrap': 0.35, 'profile': 'blade'},
         },
-        'mirror': {'y': -0.70, 'z': 1.08, 'reach': 0.98, 'w': 0.13, 'h': 0.08, 'material': 'chrome', 'sides': [-1]},
+        # A round chrome mirror on the door's front corner at the window's foot (photos).
+        'mirror': {'y': -0.33, 'z': 0.99, 'reach': 0.92, 'w': 0.11, 'h': 0.08, 'material': 'chrome', 'shape': 'round', 'sides': [-1]},
         'handles': {'at': [[0.20, 0.97], [1.02, 0.97]], 'w': 0.10},
         'wipers': {'arms': [[-0.6, -0.05, -0.75, 1.1], [0.05, 0.6, -0.75, 1.1]]},
         'wheel': {'style': 'hubcap', 'rimFactor': 0.66, 'cap': 0.95},
