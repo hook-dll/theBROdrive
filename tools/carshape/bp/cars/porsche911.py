@@ -81,7 +81,9 @@ CAR = {
              'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.8, 2.4]},
             {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.65, 0.545], [0.12, 0.09]], 'radius': 0.006,
              'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.8, 2.4]},
-            {'view': 'rear', 'rect': [[0.0, 0.88], [0.86, 0.17]], 'radius': 0.04, 'mirror': False, 'material': 'grille',
+            # the engine lid's grille: ~60 x 10 cm, a hand's breadth of paint under the back
+            # light (86 x 17 it ran into the glass as one black mass)
+            {'view': 'rear', 'rect': [[0.0, 0.82], [0.60, 0.10]], 'radius': 0.03, 'mirror': False, 'material': 'grille',
              'height': 0.004, 'depthRange': [1.3, 2.3], 'facingMin': 0.1},
             {'view': 'rear', 'rect': [[0.0, 0.425], [0.50, 0.08]], 'radius': 0.008, 'mirror': False, 'material': 'plate',
              'height': 0.01, 'depthRange': [1.9, 2.4]},
@@ -89,7 +91,7 @@ CAR = {
         ],
         'podLamps': [{'node': 'headlights', 'x': 0.65, 'z': 0.70, 'r': 0.09, 'bezel': 0.018, 'proud': 0.01, 'podDepth': 0.1}],
         'bars': [
-            {'view': 'rear', 'span': [-0.40, 0.40], 'b': [0.82, 0.94], 'count': 4, 'width': 0.008,
+            {'view': 'rear', 'span': [-0.27, 0.27], 'b': [0.78, 0.86], 'count': 3, 'width': 0.008,
              'material': 'trim', 'height': 0.006, 'depthRange': [1.3, 2.3], 'facingMin': 0.1},
         ],
         'lines': [
