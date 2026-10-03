@@ -87,8 +87,9 @@ CAR = {
              'width': 0.014, 'material': 'rubber', 'height': 0.003},
         ],
         'bumpers': {
-            'front': {'z': [0.38, 0.49], 'depth': 0.07, 'wrap': 0.22, 'profile': 'blade', 'material': 'chrome'},
-            'rear': {'z': [0.425, 0.55], 'depth': 0.07, 'wrap': 0.22, 'profile': 'blade', 'material': 'chrome'},
+            # slim chrome blades with a rounded face (a 12 cm flat-topped slab read as a step)
+            'front': {'z': [0.39, 0.48], 'depth': 0.05, 'wrap': 0.22, 'profile': 'round', 'material': 'chrome'},
+            'rear': {'z': [0.445, 0.535], 'depth': 0.05, 'wrap': 0.22, 'profile': 'round', 'material': 'chrome'},
         },
         'mirror': {'y': -0.44, 'z': 1.13, 'reach': 0.98, 'w': 0.14, 'h': 0.09},
         'handles': {'at': [[0.33, 1.02]], 'w': 0.14},

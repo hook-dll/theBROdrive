@@ -16,8 +16,10 @@ CAR = {
         'rear': {'box': [1154, 450, 1681, 791], 'height': 1.14},
     },
     'hull': {
-        'topOverride': [[-0.75, 0.83], [-0.55, 0.88], [-0.35, 1.0], [-0.12, 1.13], [-0.02, 1.20], [0.15, 1.23], [0.50, 1.22],
-                        [0.70, 1.15], [0.90, 0.98], [1.05, 0.86], [1.15, 0.83]],
+        # The hood up: from the screen's header (1.12) it rises gently to its crown and
+        # falls to the deck; a step at the header made it a slab laid on the car.
+        'topOverride': [[-0.75, 0.83], [-0.55, 0.88], [-0.35, 1.0], [-0.20, 1.10], [-0.08, 1.155], [0.05, 1.195],
+                        [0.20, 1.222], [0.50, 1.215], [0.70, 1.15], [0.90, 0.98], [1.05, 0.86], [1.15, 0.83]],
         'sectionExtendTop': 0.56,
         'sill': [[-2.0, 0.30], [-1.7, 0.27], [-1.3, 0.23], [0.8, 0.23], [1.2, 0.26], [1.95, 0.30]],
         'cabin': [-0.72, 1.12],
@@ -30,7 +32,9 @@ CAR = {
     },
     'parts': {
         'glass': [
-            {'view': 'side', 'outline': [[-0.40, 0.80], [-0.12, 1.10], [0.40, 1.12], [0.44, 0.80]], 'facingMin': 0.3},
+            # The door glass runs up under the hood's side rail: its top edge is the hood's
+            # lower edge (they overlapped and the glass's corners poked into the canvas).
+            {'view': 'side', 'outline': [[-0.40, 0.80], [-0.15, 1.075], [0.34, 1.105], [0.38, 1.08], [0.40, 0.80]], 'facingMin': 0.3},
             {'view': 'front', 'outline': [[0.0, 1.12], [0.44, 1.115], [0.48, 1.09], [0.58, 0.86], [0.56, 0.84], [0.0, 0.84]],
              'depthRange': [-0.9, -0.05], 'facingMin': 0.25},
             {'view': 'rear', 'outline': [[0.0, 1.10], [0.36, 1.095], [0.38, 1.07], [0.40, 0.93], [0.37, 0.91], [0.0, 0.91]],
@@ -38,11 +42,12 @@ CAR = {
         ],
         # The soft top: black canvas over the cabin.
         'regions': [
-            # the hood's front rail over the screen, facing forward
-            {'view': 'front', 'rect': [[0.0, 1.18], [1.40, 0.16]], 'mirror': False, 'depthRange': [-0.35, 0.15], 'facingMin': 0.0},
+            # the hood's front rail over the screen, facing forward: from the screen's top
+            {'view': 'front', 'rect': [[0.0, 1.19], [1.40, 0.14]], 'mirror': False, 'depthRange': [-0.35, 0.15], 'facingMin': 0.0},
             {'view': 'top', 'rect': [[0.44, 0.0], [1.36, 1.6]], 'radius': 0.001, 'mirror': False, 'facingMin': 0.05,
              'depthRange': [0.95, 1.5]},
-            {'view': 'side', 'outline': [[-0.20, 1.08], [-0.10, 1.30], [1.15, 1.30], [1.15, 0.84], [0.38, 0.80], [0.38, 1.12]], 'facingMin': -1.0},
+            {'view': 'side', 'outline': [[-0.22, 1.075], [-0.15, 1.075], [0.34, 1.105], [0.38, 1.08], [0.40, 0.80], [1.15, 0.84],
+                                         [1.15, 1.30], [-0.12, 1.30]], 'facingMin': -1.0},
         ],
         'decals': [
             {'view': 'front', 'outline': [[0.0, 0.40], [0.20, 0.40], [0.28, 0.37], [0.30, 0.33], [0.27, 0.30], [0.20, 0.29], [0.0, 0.29]],
