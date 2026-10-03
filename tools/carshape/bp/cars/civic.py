@@ -38,10 +38,7 @@ CAR = {
     },
     'parts': {
         'glass': [
-            # the vent pane, divided from the door glass by its own seal (the drawn
-            # division just behind the screen pillar)
-            {'view': 'side', 'outline': [[-0.62, 0.89], [-0.35, 1.21], [-0.26, 1.21], [-0.51, 0.89]], 'facingMin': 0.3},
-            {'view': 'side', 'outline': [[-0.51, 0.89], [-0.26, 1.21], [0.38, 1.24], [0.38, 0.89]], 'facingMin': 0.3},
+            {'view': 'side', 'outline': [[-0.62, 0.89], [-0.35, 1.21], [0.38, 1.24], [0.38, 0.89]], 'facingMin': 0.3},
             {'view': 'side', 'outline': [[0.47, 0.89], [0.47, 1.24], [0.86, 1.235], [0.99, 1.09], [0.94, 0.89]], 'facingMin': 0.3},
             {'view': 'front', 'outline': [[0.0, 1.25], [0.47, 1.245], [0.51, 1.22], [0.58, 0.92], [0.55, 0.90], [0.0, 0.90]],
              'depthRange': [-1.1, -0.3], 'facingMin': 0.25},
@@ -86,7 +83,6 @@ CAR = {
             {'view': 'side', 'points': [[-0.64, 0.885], [-0.36, 1.235], [0.38, 1.26], [1.02, 1.25], [1.02, 1.05], [0.93, 0.88]],
              'width': 0.012, 'material': 'chrome', 'height': 0.003},
             {'view': 'side', 'points': [[-0.64, 0.88], [0.93, 0.875]], 'width': 0.01, 'material': 'chrome', 'height': 0.003},
-            # the door glass' vent pane division is the vent pane's own seal (above)
             # the grille's chrome surround: the drawing has a framed honeycomb, not the
             # horizontal slats drawn before
             {'view': 'front', 'points': [[-0.36, 0.535], [0.36, 0.535], [0.36, 0.70], [-0.36, 0.70], [-0.36, 0.535]],

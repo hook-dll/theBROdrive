@@ -18,7 +18,7 @@ CAR = {
         'image': 'eagle_go.png',
         'dark': 120,
         'side': {'box': [0, 0, 1097, 365], 'nose': 'right', 'wheels': [[243, 280], [875, 280]], 'ground': 358, 'isotropic': True,
-                 'outline': [[2.258, 0.52], [2.258, 0.694], [2.161, 0.716], [2.17, 1.001], [2.165, 1.37], [2.14, 1.425], [2.08, 1.45], [-0.167, 1.46], [-0.364, 1.45], [-0.452, 1.41], [-0.957, 1.133], [-2.24, 0.99], [-2.30, 0.98], [-2.315, 0.95], [-2.315, 0.848], [-2.319, 0.694], [-2.472, 0.672], [-2.472, 0.518], [-2.30, 0.52], [-2.25, 0.45], [-1.835, 0.452], [-1.089, 0.422], [0.8, 0.395], [1.59, 0.452], [1.941, 0.487], [2.12, 0.48], [2.17, 0.52]]},
+                 'outline': [[2.258, 0.52], [2.258, 0.694], [2.161, 0.716], [2.17, 1.001], [2.165, 1.37], [2.14, 1.425], [2.08, 1.45], [-0.167, 1.46], [-0.364, 1.45], [-0.452, 1.41], [-0.957, 1.133], [-2.24, 0.99], [-2.30, 0.98], [-2.315, 0.95], [-2.315, 0.848], [-2.319, 0.694], [-2.472, 0.672], [-2.472, 0.518], [-2.30, 0.52], [-2.25, 0.44], [-1.835, 0.40], [-1.089, 0.275], [0.8, 0.245], [1.59, 0.28], [1.85, 0.33], [2.12, 0.44], [2.17, 0.52]]},
         'front': {'box': [30, 372, 540, 751], 'ppm': 251, 'centre': 280, 'zRef': [[380, 1.405], [745, 0.0]],
                   'drop': [[0, 90, 60, 140], [450, 90, 510, 140]],
                   'outline': [[0.0, 1.46], [0.66, 1.457], [0.725, 1.447], [0.755, 1.42], [0.83, 1.06], [0.87, 1.02], [0.90, 0.98], [0.912, 0.90], [0.912, 0.60], [0.90, 0.48], [0.86, 0.40], [0.82, 0.0], [0.0, 0.0]],},
@@ -27,7 +27,10 @@ CAR = {
     },
     'hull': {
         'bumpers': {'front': {'z': [0.50, 0.71]}, 'rear': {'z': [0.50, 0.71]}},
-        'sill': [[-2.4, 0.46], [-1.8, 0.45], [-1.1, 0.42], [0.8, 0.40], [1.6, 0.45], [2.2, 0.50]],
+        # The body's lower edge (photo side_rear_wagon and the drawing's own rocker line,
+        # read again: the outline had been taken at the cladding's crease, 0.15 m too
+        # high, so the body stopped halfway down the car's own cladding).
+        'sill': [[-2.4, 0.44], [-1.9, 0.40], [-1.1, 0.28], [0.8, 0.25], [1.6, 0.29], [2.2, 0.44]],
         'planOverride': [[-2.33, 0.82], [-2.25, 0.88], [-2.0, 0.905], [2.0, 0.905], [2.15, 0.90], [2.18, 0.89]],
         'sectionBridge': {'front': [[1.0, 1.25]]},
         'cabin': [-0.96, 2.17],
@@ -57,8 +60,10 @@ CAR = {
         # a hand's width wide and just behind the front door's handle, the C-pillar as
         # wide again, and a quarter window running back to the D-pillar at 2.05.
         'glass': [
-            {'view': 'side', 'outline': [[0.13, 0.955], [-0.60, 0.955], [-0.60, 1.30], [0.13, 1.30]], 'facingMin': 0.3},
-            {'view': 'side', 'outline': [[-0.60, 0.955], [-0.93, 0.955], [-0.80, 1.17], [-0.60, 1.17]], 'facingMin': 0.3},
+            # The door's main pane starts at the vent divider (a vertical chrome strip)
+            # and its front corner runs up along the A-pillar's rake above it.
+            {'view': 'side', 'outline': [[0.13, 0.955], [-0.52, 0.955], [-0.52, 1.17], [-0.30, 1.30], [0.13, 1.30]], 'facingMin': 0.3},
+            {'view': 'side', 'outline': [[-0.52, 0.955], [-0.78, 0.955], [-0.64, 1.17], [-0.52, 1.17]], 'facingMin': 0.3},
             {'view': 'side', 'outline': [[0.80, 0.955], [0.24, 0.955], [0.24, 1.30], [0.78, 1.30]], 'facingMin': 0.3},
             {'view': 'side', 'outline': [[2.05, 0.96], [0.99, 0.955], [0.97, 1.30], [1.97, 1.30], [2.05, 1.22]], 'facingMin': 0.3},
             {'view': 'front', 'outline': [[0.0, 1.36], [0.60, 1.34], [0.68, 1.26], [0.74, 1.10], [0.70, 1.08], [0.0, 1.08]],
@@ -73,7 +78,7 @@ CAR = {
             # from the sill up to 0.53 (photos of the wagons: a tall black rocker with a
             # chrome strip over it, not the sliver the drawing showed), and the valances
             # under both bumpers.
-            {'view': 'side', 'outline': [[-2.5, 0.33], [-2.5, 0.53], [2.3, 0.53], [2.3, 0.33]]},
+            {'view': 'side', 'outline': [[-2.5, 0.24], [-2.5, 0.50], [2.3, 0.50], [2.3, 0.24]]},
             {'view': 'front', 'rect': [[0.0, 0.53], [1.9, 0.20]], 'radius': 0.001, 'mirror': False, 'depthRange': [-2.6, -2.2]},
             {'view': 'rear', 'rect': [[0.0, 0.53], [1.9, 0.20]], 'radius': 0.001, 'mirror': False, 'depthRange': [2.0, 2.4]},
         ],
@@ -125,9 +130,11 @@ CAR = {
              'material': 'chrome', 'height': 0.008, 'depthRange': [-2.6, -2.2]},
         ],
         'lines': [
-            {'view': 'side', 'points': [[-0.96, 0.955], [-1.0, 0.47], [0.13, 0.45], [0.13, 0.955]], 'width': 0.005},
-            {'view': 'side', 'points': [[0.13, 0.45], [0.82, 0.44], [0.85, 0.955]], 'width': 0.005},
+            {'view': 'side', 'points': [[-0.96, 0.955], [-1.0, 0.26], [0.13, 0.25], [0.13, 0.955]], 'width': 0.005},
+            {'view': 'side', 'points': [[0.13, 0.25], [0.82, 0.24], [0.85, 0.955]], 'width': 0.005},
             {'view': 'side', 'points': [[-2.30, 0.94], [2.15, 0.94]], 'width': 0.006, 'material': 'chrome', 'height': 0.003},
+            # the moulding along the cladding's top (the photo's bright line at 0.50)
+            {'view': 'side', 'points': [[-2.30, 0.50], [2.15, 0.495]], 'width': 0.006, 'material': 'chrome', 'height': 0.003},
             {'view': 'side', 'points': [[-0.93, 0.955], [-0.60, 1.30], [0.97, 1.30], [2.05, 0.955]], 'width': 0.012, 'material': 'chrome',
              'height': 0.003},
         ],

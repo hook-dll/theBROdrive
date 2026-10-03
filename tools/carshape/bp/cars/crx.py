@@ -37,42 +37,52 @@ CAR = {
             {'view': 'rear', 'outline': [[0.0, 0.93], [0.52, 0.93], [0.52, 0.84], [0.0, 0.84]], 'depthRange': [1.6, 2.0], 'facingMin': 0.05, 'fit': False},
         ],
         'regions': [
-            {'view': 'front', 'rect': [[0.0, 0.405], [1.8, 0.33]], 'radius': 0.001, 'mirror': False, 'depthRange': [-2.0, -1.55]},
-            {'view': 'side', 'outline': [[-1.85, 0.24], [-1.85, 0.57], [-1.32, 0.57], [-1.38, 0.40], [-1.39, 0.24]]},
-            {'view': 'rear', 'rect': [[0.0, 0.42], [1.8, 0.36]], 'radius': 0.001, 'mirror': False, 'depthRange': [1.5, 2.0]},
-            {'view': 'side', 'outline': [[1.42, 0.30], [1.42, 0.60], [1.85, 0.60], [1.85, 0.30]]},
+            # Black only where the car's black is: the lower grille and valance under the
+            # body-coloured bumper (the 1.6i-16's bumper is the lower body's colour with
+            # the stripe along its top edge), not the whole bumper face as before
+            {'view': 'front', 'rect': [[0.0, 0.35], [1.8, 0.26]], 'radius': 0.001, 'mirror': False, 'depthRange': [-2.0, -1.55]},
+            {'view': 'side', 'outline': [[-1.85, 0.22], [-1.85, 0.46], [-1.34, 0.46], [-1.39, 0.36], [-1.40, 0.22]]},
+            {'view': 'rear', 'rect': [[0.0, 0.36], [1.8, 0.28]], 'radius': 0.001, 'mirror': False, 'depthRange': [1.5, 2.0]},
+            {'view': 'side', 'outline': [[1.42, 0.22], [1.42, 0.46], [1.85, 0.46], [1.85, 0.22]]},
             {'view': 'side', 'outline': [[-1.30, 0.235], [1.40, 0.235], [1.40, 0.31], [-1.30, 0.31]]},
         ],
         'decals': [
-            # wide flush lamps from the grille slot to the corners (photos, 1986)
-            {'view': 'front', 'node': 'headlights', 'rect': [[0.45, 0.60], [0.42, 0.11]], 'radius': 0.012, 'material': 'Headlights',
+            # Wide flush lamps from the grille slot to the corners, each in a black
+            # recess (photos, 1986). Front view: lamps 0.42-0.78, 0.585-0.715; the black
+            # slot +-0.42 the same height with the H badge; the lower grille below the
+            # bumper's face (0.49)
+            {'view': 'front', 'rect': [[0.60, 0.65], [0.40, 0.15]], 'radius': 0.012, 'material': 'trim',
+             'height': 0.004, 'depthRange': [-2.0, -1.5], 'facingMin': 0.05},
+            {'view': 'front', 'node': 'headlights', 'rect': [[0.60, 0.65], [0.36, 0.13]], 'radius': 0.012, 'material': 'Headlights',
              'height': 0.008, 'depthRange': [-2.0, -1.5], 'facingMin': 0.05},
-            {'view': 'front', 'rect': [[0.0, 0.60], [0.46, 0.045]], 'radius': 0.006, 'mirror': False, 'material': 'grille',
+            {'view': 'front', 'rect': [[0.0, 0.65], [0.84, 0.13]], 'radius': 0.006, 'mirror': False, 'material': 'grille',
              'height': 0.006, 'depthRange': [-2.0, -1.5]},
-            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.62, 0.48], [0.15, 0.05]], 'radius': 0.006,
+            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.69, 0.53], [0.17, 0.065]], 'radius': 0.006,
              'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-2.0, -1.5], 'facingMin': 0.05},
-            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.62, 0.48], [0.15, 0.05]], 'radius': 0.006,
+            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.69, 0.53], [0.17, 0.065]], 'radius': 0.006,
              'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-2.0, -1.5], 'facingMin': 0.05},
-            {'view': 'front', 'rect': [[0.0, 0.39], [0.92, 0.13]], 'radius': 0.01, 'mirror': False, 'material': 'grille',
+            {'view': 'front', 'rect': [[0.0, 0.34], [0.88, 0.16]], 'radius': 0.01, 'mirror': False, 'material': 'grille',
              'height': 0.004, 'depthRange': [-2.0, -1.5]},
             {'view': 'side', 'node': 'front_blinker_left', 'rect': [[-1.68, 0.62], [0.08, 0.04]], 'radius': 0.006, 'material': 'IndicatorLights', 'height': 0.005},
             {'view': 'side', 'node': 'front_blinker_right', 'rect': [[-1.68, 0.62], [0.08, 0.04]], 'radius': 0.006, 'material': 'IndicatorLights', 'height': 0.005},
-            # Tail: the black lamp band across the Kamm tail.
-            {'view': 'rear', 'rect': [[0.0, 0.725], [1.50, 0.16]], 'radius': 0.008, 'mirror': False, 'material': 'trim',
+            # Tail: the black lamp band across the Kamm tail; the drawing's rear view has
+            # the outer lens to the corner (0.62-0.83) and the reverse lamp and its
+            # reflector in two stacked squares inboard of it (0.50-0.60)
+            {'view': 'rear', 'rect': [[0.0, 0.71], [1.66, 0.17]], 'radius': 0.008, 'mirror': False, 'material': 'trim',
              'height': 0.003, 'depthRange': [1.6, 2.0]},
-            {'view': 'rear', 'node': 'taillights', 'rect': [[0.44, 0.725], [0.21, 0.13]], 'radius': 0.006,
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.68, 0.7125], [0.16, 0.155]], 'radius': 0.006,
              'material': 'TailLights', 'height': 0.007, 'depthRange': [1.6, 2.0]},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.66, 0.725], [0.10, 0.13]], 'radius': 0.006,
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.79, 0.7125], [0.08, 0.155]], 'radius': 0.006,
              'material': 'IndicatorLights', 'height': 0.007, 'depthRange': [1.6, 2.0], 'facingMin': 0.1},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.66, 0.725], [0.10, 0.13]], 'radius': 0.006,
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.79, 0.7125], [0.08, 0.155]], 'radius': 0.006,
              'material': 'IndicatorLights', 'height': 0.007, 'depthRange': [1.6, 2.0], 'facingMin': 0.1},
-            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.29, 0.70], [0.07, 0.05]], 'radius': 0.006,
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.55, 0.755], [0.10, 0.065]], 'radius': 0.006,
              'material': 'ReverseLights', 'height': 0.007, 'depthRange': [1.6, 2.0]},
             {'view': 'rear', 'rect': [[0.0, 0.53], [0.40, 0.11]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [1.6, 2.0]},
         ],
         'bars': [
-            {'view': 'front', 'span': [-0.45, 0.45], 'b': [0.34, 0.44], 'count': 4, 'width': 0.008,
+            {'view': 'front', 'span': [-0.42, 0.42], 'b': [0.285, 0.395], 'count': 4, 'width': 0.008,
              'material': 'trim', 'height': 0.006, 'depthRange': [-2.0, -1.5]},
         ],
         'lines': [
