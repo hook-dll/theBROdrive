@@ -1,4 +1,4 @@
-# Land Rover Series III 88 soft top (1971-85). Factory: 3620 x 1680 x 1970, wheelbase 2235,
+# Land Rover Series III 88 soft top (1971-85). Factory: 3530 x 1680 x 1950, wheelbase 2235,
 # tracks 1310, 6.00-16, clearance 210. The four views of the 88 at getoutlines.com (the
 # 1973 pickup with its tilt; 3x upscaled, 388 px/m by the wheelbase). The tool: a flat
 # bonnet between flat-topped wings that carry the lamps, a recessed grille panel, an
@@ -9,13 +9,18 @@ BOX = [[0.42, 0.82], [0.50, 0.84], [1.17, 0.84], [1.20, 0.82], [1.75, 0.81], [1.
 CAR = {
     'id': 'landrover',
     'label': 'Land Rover 88',
-    'factory': {'length': 3.62, 'width': 1.68, 'height': 1.97, 'clearance': 0.21, 'wheelbase': 2.235,
+    'factory': {'length': 3.53, 'width': 1.68, 'height': 1.97, 'clearance': 0.21, 'wheelbase': 2.235,
                 'frontTrack': 1.31, 'rearTrack': 1.31, 'wheelRadius': 0.355, 'tyreWidth': 0.16, 'frontOverhang': 0.56},
     'blueprint': {
         'image': 'lr88_go.png',
         'dark': 150,
-        'side': {'box': [0, 0, 1615, 740], 'nose': 'right', 'wheels': [[512, 589], [1378.5, 589]], 'ground': 732, 'isotropic': True,
-                 'drop': [[0, 345, 248, 525]]},
+        # The side read off the drawing in metres (its tilt stands at 1.83; the frame is
+        # moved 100 px down so the outline brought up to 1.95 below is not clipped).
+        'side': {'box': [0, 0, 1615, 840], 'nose': 'right', 'wheels': [[512, 689], [1378.5, 689]], 'ground': 832, 'isotropic': True,
+                 'outline': [[-1.74, 0.50], [-1.74, 0.98], [-1.70, 1.02], [-1.63, 1.052], [-1.56, 1.086], [-1.50, 1.127],
+                             [-1.24, 1.145], [-0.98, 1.161], [-0.66, 1.176], [-0.60, 1.18], [-0.58, 1.19], [-0.32, 1.67],
+                             [-0.27, 1.679], [-0.02, 1.736], [0.24, 1.795], [0.44, 1.831], [1.00, 1.834], [1.47, 1.826],
+                             [1.66, 1.818], [1.67, 1.78], [1.67, 0.50], [1.60, 0.47], [-1.60, 0.48]]},
         'top': {'box': [200, 740, 1610, 1390], 'nose': 'right', 'fitWidth': True},
         'front': {'box': [1635, 15, 2310, 720], 'zRef': [[44, 1.83], [690, 0.0]], 'ppm': 353},
         'rear': {'box': [1635, 720, 2310, 1400], 'zRef': [[728, 1.83], [1377, 0.0]], 'ppm': 355},
@@ -37,6 +42,10 @@ CAR = {
         'roofHalf': 0.81,
         'roofCrown': 0.02,
         'edge': 0.012,
+        # flat aluminium panels folded at crisp edges
+        'edgeMin': 0.015,
+        'edgeY': 0.04,
+        'edgeYMin': 0.04,
         'arch': {'radius': 0.43, 'lift': 0.0},
     },
     'parts': {
@@ -55,15 +64,13 @@ CAR = {
             {'view': 'side', 'outline': [[-0.45, 1.68], [0.40, 1.68], [0.40, 1.95], [-0.45, 1.95]], 'material': 'paint2'},
             {'view': 'top', 'outline': [[-0.45, 0.0], [-0.45, 0.9], [1.85, 0.9], [1.85, 0.0]], 'material': 'paint2', 'facingMin': 0.5},
             {'view': 'rear', 'rect': [[0.0, 1.57], [1.8, 0.80]], 'mirror': False, 'material': 'paint2', 'depthRange': [1.5, 1.95]},
-            # The grille panel sits back between the wings, black.
+            # The grille panel sits back between the wings (the grille on it grey plastic).
             {'view': 'front', 'outline': [[0.0, 1.10], [0.20, 1.10], [0.20, 1.06], [0.37, 1.06], [0.37, 0.71], [0.0, 0.71]],
              'depthRange': [-1.95, -1.5]},
         ],
         'decals': [
-            {'view': 'front', 'rect': [[0.0, 0.89], [0.62, 0.26]], 'radius': 0.03, 'mirror': False, 'material': 'grille',
+            {'view': 'front', 'rect': [[0.0, 0.89], [0.62, 0.26]], 'radius': 0.03, 'mirror': False, 'material': 'alu',
              'height': 0.004, 'depthRange': [-1.95, -1.5]},
-            {'view': 'front', 'rect': [[0.59, 0.86], [0.36, 0.30]], 'radius': 0.02, 'material': 'trim', 'height': 0.003,
-             'depthRange': [-1.95, -1.5]},
             {'view': 'front', 'circle': [[0.52, 0.88], 0.10], 'material': 'chrome', 'height': 0.006, 'depthRange': [-1.95, -1.5]},
             {'view': 'front', 'node': 'headlights', 'circle': [[0.52, 0.88], 0.085], 'material': 'Headlights', 'height': 0.010,
              'depthRange': [-1.95, -1.5]},
@@ -103,9 +110,18 @@ CAR = {
             'front': {'z': [0.51, 0.62], 'depth': 0.10, 'wrap': 0.02, 'profile': 'blade', 'material': 'trim', 'standOff': 0.0},
             'rear': {'z': [0.50, 0.56], 'depth': 0.06, 'wrap': 0.02, 'profile': 'blade', 'material': 'trim', 'standOff': 0.0},
         },
-        'mirror': {'y': -0.45, 'z': 1.32, 'reach': 1.0, 'w': 0.13, 'h': 0.13, 'shape': 'round'},
+        'mirror': {'y': -0.45, 'z': 1.32, 'reach': 0.92, 'w': 0.13, 'h': 0.13, 'shape': 'round'},
         'handles': {'at': [[0.25, 1.08]], 'w': 0.10},
         'wipers': {'arms': [[-0.55, -0.1, -0.52, 1.75], [0.1, 0.55, -0.52, 1.75]]},
         'wheel': {'style': 'steel', 'windows': 0, 'rimFactor': 0.62, 'cap': True},
     },
 }
+
+# The tilt is drawn at 1.83 m for the car's 1.95 unladen (Land Rover: 76.875 in): the cab
+# and tilt are brought up above the waist. The length is the body's, front bumper to the
+# rear crossmember: the 3620 published counts the towing jaw behind it.
+import os as _os, sys as _sys  # noqa: E402
+_sys.path.insert(0, _os.path.dirname(__file__))
+from _frame import scale_above, shift_along  # noqa: E402
+shift_along(CAR, 0.045)  # the front axle 4.5 cm further from the middle at 3530
+scale_above(CAR, 1.17, 1.834, 1.95)

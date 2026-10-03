@@ -1073,7 +1073,7 @@ export const ROSTER: readonly RosterCar[] = [
     label: 'Land Rover 88',
     body: 'landrover.glb',
     bodyClass: 'car',
-    factory: { length: 3.62, width: 1.68, height: 1.97, clearance: 0.21, wheelbase: 2.235, frontTrack: 1.31, rearTrack: 1.31, wheelRadius: 0.355, tyreWidth: 0.16, frontOverhang: 0.56 },
+    factory: { length: 3.53, width: 1.68, height: 1.95, clearance: 0.21, wheelbase: 2.235, frontTrack: 1.31, rearTrack: 1.31, wheelRadius: 0.355, tyreWidth: 0.16, frontOverhang: 0.56 },
     mass: 1420,
     frontWeightShare: 0.53,
     rearDriveBias: 0.5,
