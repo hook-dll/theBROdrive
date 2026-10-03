@@ -1366,8 +1366,9 @@ else:
 if not rear_engine:
     zp = min(floor_at((yA + y_sil) / 2) - 0.03, zs_ + 0.02)
     tube(bm_, (x_ex * 0.3, yA + 0.15, zp + 0.02), (x_ex * 0.5, y_sil - 0.2, zs_), 0.022)
-    y_t = L / 2 - 0.15
-    tube(bm_, (x_ex * 0.5, y_sil + 0.2, zs_), (x_ex + 0.1, y_t, max(zs_, floor_at(y_t) - 0.04)), 0.02)
+    y_t = L / 2 - 0.45
+    # the tail pipe runs straight back, level, to just under the tail
+    tube(bm_, (x_ex * 0.5, y_sil + 0.2, zs_), (x_ex + 0.1, y_t, zs_ + 0.01), 0.02)
 if ub.get('frame'):
     # The chassis rails, tucked under the body from end to end, following its floor.
     xr = inner - 0.22
