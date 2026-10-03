@@ -113,7 +113,7 @@ export const ROSTER: readonly RosterCar[] = [
     label: 'Fiat 124',
     body: 'fiat124.glb',
     bodyClass: 'car',
-    factory: { length: 4.042, width: 1.625, height: 1.42, clearance: 0.13, wheelbase: 2.42, frontTrack: 1.33, rearTrack: 1.30, wheelRadius: 0.29, tyreWidth: 0.15, frontOverhang: 0.595 },
+    factory: { length: 4.042, width: 1.625, height: 1.42, clearance: 0.13, wheelbase: 2.42, frontTrack: 1.33, rearTrack: 1.3, wheelRadius: 0.29, tyreWidth: 0.15, frontOverhang: 0.595 },
     mass: 855,
     frontWeightShare: 0.53,
     rearDriveBias: 1,
