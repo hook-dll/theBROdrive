@@ -24,9 +24,28 @@ CAR = {
         'crown': [[-2.4, 0.02], [2.4, 0.02]],
         'roofCrown': 0.035,
         'edge': 0.012,
-        'arch': {'radius': 0.37, 'lift': 0.05},
+        # The drawn front wheel opening's lip sits at z 0.65 (side view, ink above the
+        # tyre at the axle): the old 0.37 + lift 0.05 put the lip at 0.725, an 11 cm
+        # gap over the tyre that read as a swollen wing over a floating wheel.
+        'arch': {'radius': 0.33, 'lift': 0.02},
     },
     'parts': {
+        # The round lamps are pods, not decals: a decal is the front view's circle laid
+        # on a wing nose that narrows from 0.888 half-width at -1.85 to 0.858 at -2.15,
+        # so its outer third wrapped the corner and came out a teardrop (same at the
+        # tail). A pod's lens faces straight along the car, a true circle in its chrome
+        # ring, with a housing reaching back until it buries itself in the skin. The
+        # tail lamp's amber indicator is a second, smaller disc 4 mm proud of the lens.
+        'podLamps': [
+            {'node': 'headlights', 'x': 0.69, 'z': 0.665, 'r': 0.085, 'end': 'front', 'bezel': 0.018, 'proud': 0.008,
+             'podDepth': 0.10},
+            {'node': 'taillights', 'x': 0.745, 'z': 0.72, 'r': 0.095, 'end': 'rear', 'bezel': 0.018, 'proud': 0.004,
+             'podDepth': 0.10, 'material': 'TailLights'},
+            {'node': 'rear_blinker_left', 'x': 0.745, 'z': 0.72, 'r': 0.03, 'end': 'rear', 'bezel': 0.004, 'proud': 0.013,
+             'pod': False, 'material': 'IndicatorLights', 'mirror': False},
+            {'node': 'rear_blinker_right', 'x': 0.745, 'z': 0.72, 'r': 0.03, 'end': 'rear', 'bezel': 0.004, 'proud': 0.013,
+             'pod': False, 'material': 'IndicatorLights'},
+        ],
         'glass': [
             {'view': 'side', 'outline': [[-0.66, 0.935], [0.12, 0.922], [0.12, 1.27], [-0.25, 1.275], [-0.37, 1.24], [-0.53, 1.08]],
              'facingMin': 0.3},
@@ -43,24 +62,18 @@ CAR = {
             {'view': 'front', 'rect': [[0.0, 0.67], [1.20, 0.22]], 'radius': 0.02, 'mirror': False, 'material': 'chrome',
              'height': 0.004, 'depthRange': [-2.4, -2.0]},
             {'view': 'front', 'rect': [[0.0, 0.67], [1.16, 0.18]], 'radius': 0.015, 'mirror': False, 'material': 'grille',
+             'height': 0.004, 'depthRange': [-2.4, -2.0]},
+            # The photos show a fine, bright (silver) horizontal mesh filling the whole
+            # opening, not a dark egg-crate: the same rect again in chrome over the
+            # grille material, with the bars laid over it.
+            {'view': 'front', 'rect': [[0.0, 0.67], [1.13, 0.16]], 'radius': 0.015, 'mirror': False, 'material': 'chrome',
              'height': 0.006, 'depthRange': [-2.4, -2.0]},
-            {'view': 'front', 'circle': [[0.69, 0.665], 0.105], 'material': 'chrome', 'height': 0.008, 'depthRange': [-2.4, -1.9]},
-            {'view': 'front', 'node': 'headlights', 'circle': [[0.69, 0.665], 0.085], 'material': 'Headlights', 'height': 0.012,
-             'depthRange': [-2.4, -1.9]},
             {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.48, 0.67], [0.07, 0.05]], 'radius': 0.005,
              'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [-2.4, -2.0]},
             {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.48, 0.67], [0.07, 0.05]], 'radius': 0.005,
              'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [-2.4, -2.0]},
             {'view': 'front', 'rect': [[0.0, 0.485], [0.34, 0.13]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.004, 'depthRange': [-2.5, -2.0]},
-            # Round tail lamps in the wing ends, the boot lid between them.
-            {'view': 'rear', 'circle': [[0.745, 0.72], 0.115], 'material': 'chrome', 'height': 0.008, 'depthRange': [1.9, 2.4]},
-            {'view': 'rear', 'node': 'taillights', 'circle': [[0.745, 0.72], 0.095], 'material': 'TailLights', 'height': 0.012,
-             'depthRange': [1.9, 2.4]},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'circle': [[0.745, 0.72], 0.03], 'material': 'IndicatorLights', 'height': 0.016,
-             'depthRange': [1.9, 2.4]},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'circle': [[0.745, 0.72], 0.03], 'material': 'IndicatorLights', 'height': 0.016,
-             'depthRange': [1.9, 2.4]},
             {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.0, 0.52], [0.10, 0.025]], 'radius': 0.006, 'mirror': False,
              'material': 'ReverseLights', 'height': 0.008, 'depthRange': [1.9, 2.5]},
             {'view': 'rear', 'rect': [[0.0, 0.44], [0.34, 0.11]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
@@ -69,26 +82,36 @@ CAR = {
              'depthRange': [1.9, 2.5]},
         ],
         'bars': [
-            {'view': 'front', 'span': [-0.56, 0.56], 'b': [0.59, 0.75], 'count': 6, 'width': 0.008, 'dir': 'v',
+            {'view': 'front', 'span': [-0.56, 0.56], 'b': [0.59, 0.75], 'count': 6, 'width': 0.006, 'dir': 'v',
              'material': 'chrome', 'height': 0.009, 'depthRange': [-2.4, -2.0]},
-            {'view': 'front', 'span': [-0.56, 0.56], 'b': [0.59, 0.75], 'count': 3, 'width': 0.006,
+            {'view': 'front', 'span': [-0.56, 0.56], 'b': [0.59, 0.75], 'count': 6, 'width': 0.005,
              'material': 'chrome', 'height': 0.009, 'depthRange': [-2.4, -2.0]},
         ],
         'lines': [
             {'view': 'side', 'points': [[-0.72, 0.92], [-0.72, 0.28], [0.14, 0.28], [0.14, 0.92]], 'width': 0.005},
             {'view': 'side', 'points': [[0.14, 0.28], [0.76, 0.28], [0.80, 0.40], [0.80, 0.92]], 'width': 0.005},
-            {'view': 'side', 'points': [[-2.22, 0.79], [2.25, 0.79]], 'width': 0.012, 'material': 'chrome', 'height': 0.003},
+            # The chrome side spear: a strong line at mid height from the headlamp
+            # back, kicking up over the rear wheel to the tail lamps (photos 2-3).
+            {'view': 'side', 'points': [[-2.20, 0.80], [0.70, 0.80], [1.15, 0.845], [1.62, 0.885], [2.22, 0.905]],
+             'width': 0.020, 'material': 'chrome', 'height': 0.006},
             {'view': 'side', 'points': [[-0.70, 0.93], [-0.53, 1.09], [-0.37, 1.255], [-0.25, 1.29], [0.12, 1.285], [0.55, 1.26],
                                         [0.68, 1.238], [0.77, 1.205], [0.82, 1.15], [1.03, 0.92]], 'width': 0.012, 'material': 'chrome',
              'height': 0.003},
             {'view': 'side', 'points': [[-0.70, 0.915], [1.03, 0.912]], 'width': 0.01, 'material': 'chrome', 'height': 0.003},
-            {'view': 'side', 'points': [[0.14, 0.92], [0.14, 1.285]], 'width': 0.04, 'material': 'chrome', 'height': 0.003},
+            # The B-pillar's chrome strip: ended at the panes' headers (1.255, a little
+            # under the shoulder), not at 1.285, where it wrapped over the roof's edge
+            # and stood as a tongue above the shoulder.
+            {'view': 'side', 'points': [[0.14, 0.92], [0.14, 1.255]], 'width': 0.04, 'material': 'chrome', 'height': 0.003,
+             'facingMin': 0.6},
             {'view': 'rear', 'points': [[0.0, 0.92], [0.33, 0.914], [0.53, 0.90], [0.585, 0.89], [0.54, 0.80], [0.535, 0.745],
                                         [0.0, 0.742]], 'width': 0.005, 'depthRange': [1.6, 2.4]},
         ],
         'bumpers': {
-            'front': {'z': [0.43, 0.55], 'depth': 0.045, 'wrap': 0.28, 'profile': 'blade', 'standOff': -0.02},
-            'rear': {'z': [0.40, 0.52], 'depth': 0.045, 'wrap': 0.28, 'profile': 'blade', 'standOff': -0.02},
+            # The rear bar is the deep flat chrome bar of the 62-63 cars (photos 2-3):
+            # 45 mm of bar left it 29 mm off the shell (the drawn tail behind it is at
+            # 2.230, the factory face 2.301); 70 mm leaves 4 mm, front unchanged.
+            'front': {'z': [0.43, 0.55], 'depth': 0.045, 'wrap': 0.28, 'profile': 'blade'},
+            'rear': {'z': [0.40, 0.52], 'depth': 0.070, 'wrap': 0.28, 'profile': 'blade'},
         },
         'mirror': {'y': -0.62, 'z': 1.0, 'reach': 0.98, 'w': 0.11, 'h': 0.07, 'material': 'chrome', 'sides': [1], 'shape': 'round'},
         'handles': {'at': [[0.0, 0.87], [0.72, 0.87]], 'w': 0.12},

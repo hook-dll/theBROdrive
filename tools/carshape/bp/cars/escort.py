@@ -29,9 +29,20 @@ CAR = {
         'cabin': [-0.75, 1.45],
         'belt': [[-0.75, 0.90], [-0.5, 0.915], [1.0, 0.925], [1.45, 0.93]],
         'glassPlan': [[-0.75, 0.62], [-0.4, 0.70], [0.9, 0.70], [1.45, 0.62]],
-        'crown': [[-2.1, 0.018], [2.1, 0.018]],
-        'roofCrown': 0.03,
+        'crown': [[-2.1, 0.012], [2.1, 0.012]],
+        'roofCrown': 0.022,
         'edge': 0.012,
+        # The plan as the car's, not the one-width-for-the-whole-car the top view was read
+        # as: the drawing's own top view gives 0.770 at the doors and 0.786 / 0.791 under
+        # the rally flares at the arches, and its corners at the ends are 6-8 cm. Read as
+        # one width (786-791 everywhere) and then blurred, the hand-read plan rounded those
+        # corners into a 40 cm ramp (the nose and the tail came out domed, 90 mm narrow at
+        # the front arch) and held the doors 20 mm too wide.
+        'planOverride': [[-1.99, 0.30], [-1.96, 0.55], [-1.90, 0.60], [-1.85, 0.690], [-1.80, 0.718], [-1.70, 0.729],
+                         [-1.60, 0.780], [-1.50, 0.786], [-1.30, 0.786], [-1.10, 0.790], [-1.00, 0.788], [-0.90, 0.762],
+                         [-0.60, 0.762], [-0.30, 0.766], [0.30, 0.770], [0.55, 0.778], [0.70, 0.791], [0.95, 0.791],
+                         [1.15, 0.791], [1.30, 0.788], [1.50, 0.786], [1.70, 0.786], [1.82, 0.780], [1.90, 0.760],
+                         [1.95, 0.700], [1.98, 0.55], [1.99, 0.30]],
         # a crisp three-box body (photos)
         'edgeMin': 0.015,
         'edgeY': 0.04,
@@ -65,18 +76,19 @@ CAR = {
             {'view': 'side', 'node': 'front_blinker_right', 'rect': [[-1.53, 0.695], [0.07, 0.025]], 'radius': 0.004, 'material': 'IndicatorLights', 'height': 0.005},
             {'view': 'front', 'rect': [[0.0, 0.40], [0.50, 0.10]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [-2.1, -1.6]},
-            # Tail clusters: indicator outboard, tail lamp, reversing lamp inboard.
-            {'view': 'rear', 'rect': [[0.625, 0.58], [0.275, 0.125]], 'radius': 0.006, 'material': 'trim',
+            # Tail clusters: the photos' wide rectangular units across the corners -
+            # clear (reversing) inboard, red, amber outboard, 42 cm of lens a side.
+            {'view': 'rear', 'rect': [[0.51, 0.58], [0.44, 0.135]], 'radius': 0.008, 'material': 'trim',
              'height': 0.004, 'depthRange': [1.7, 2.1]},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.72, 0.58], [0.075, 0.11]], 'radius': 0.004,
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.7, 2.1]},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.72, 0.58], [0.075, 0.11]], 'radius': 0.004,
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.7, 2.1]},
-            {'view': 'rear', 'node': 'taillights', 'rect': [[0.615, 0.58], [0.125, 0.11]], 'radius': 0.004,
-             'material': 'TailLights', 'height': 0.008, 'depthRange': [1.7, 2.1]},
-            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.525, 0.58], [0.05, 0.11]], 'radius': 0.004,
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.36, 0.58], [0.10, 0.115]], 'radius': 0.006,
              'material': 'ReverseLights', 'height': 0.008, 'depthRange': [1.7, 2.1]},
-            {'view': 'side', 'node': 'taillights', 'rect': [[1.95, 0.58], [0.05, 0.11]], 'material': 'TailLights', 'height': 0.004},
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.505, 0.58], [0.145, 0.115]], 'radius': 0.006,
+             'material': 'TailLights', 'height': 0.008, 'depthRange': [1.7, 2.1]},
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.655, 0.58], [0.11, 0.115]], 'radius': 0.006,
+             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.7, 2.1]},
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.655, 0.58], [0.11, 0.115]], 'radius': 0.006,
+             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.7, 2.1]},
+            {'view': 'side', 'node': 'taillights', 'rect': [[1.90, 0.58], [0.10, 0.115]], 'material': 'TailLights', 'height': 0.005},
             {'view': 'rear', 'rect': [[0.0, 0.585], [0.52, 0.11]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.005, 'depthRange': [1.7, 2.1]},
         ],
@@ -96,9 +108,12 @@ CAR = {
             {'view': 'side', 'points': [[0.465, 0.91], [0.49, 1.27]], 'width': 0.03, 'material': 'trim', 'height': 0.003},
         ],
         'bumpers': {
-            'front': {'z': [0.42, 0.50], 'depth': 0.06, 'wrap': 0.24, 'profile': 'blade', 'material': 'chrome',
+            # The photo's blade: a slim chrome bar (5 cm deep, 9 cm tall) round the nose
+            # with its black end caps, the ends stopping on the wings (the 0.24 m wrap
+            # carried the ends out to the body's widest point, proud of the nose).
+            'front': {'z': [0.42, 0.51], 'depth': 0.05, 'wrap': 0.20, 'profile': 'blade', 'material': 'chrome',
                       'overriders': [[0.42, 0.06, 0.40, 0.52]]},
-            'rear': {'z': [0.40, 0.48], 'depth': 0.06, 'wrap': 0.24, 'profile': 'blade', 'material': 'chrome'},
+            'rear': {'z': [0.40, 0.49], 'depth': 0.05, 'wrap': 0.20, 'profile': 'blade', 'material': 'chrome'},
         },
         'mirror': {'y': -0.66, 'z': 0.96, 'reach': 0.90, 'w': 0.13, 'h': 0.075},
         'handles': {'at': [[0.33, 0.855]], 'w': 0.13},

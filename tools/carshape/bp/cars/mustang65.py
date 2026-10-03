@@ -26,6 +26,14 @@ CAR = {
         'arch': {'radius': 0.38, 'lift': 0.04},
     },
     'parts': {
+        # Round headlamps are pods, not decals (the drawing's circle laid on the fender
+        # end wrapped the corner): the lens faces straight along the car, a true circle
+        # in its chrome ring, the housing buried in the skin. The tri-bar tail lamps
+        # stay decals (flat rectangles on the tail panel's flat part, |x| <= 0.75).
+        'podLamps': [
+            {'node': 'headlights', 'x': 0.655, 'z': 0.735, 'r': 0.082, 'end': 'front', 'bezel': 0.016, 'proud': 0.010,
+             'podDepth': 0.10},
+        ],
         'glass': [
             {'view': 'side', 'outline': [[-0.314, 0.914], [0.54, 0.904], [0.544, 0.984], [0.537, 1.14], [0.53, 1.174], [0.32, 1.18],
                                          [-0.016, 1.187], [-0.118, 1.18], [-0.162, 1.16], [-0.185, 1.137]], 'facingMin': 0.3},
@@ -43,16 +51,17 @@ CAR = {
              'height': 0.006, 'depthRange': [-2.4, -2.0]},
             {'view': 'front', 'rect': [[0.0, 0.725], [0.24, 0.08]], 'radius': 0.03, 'mirror': False, 'material': 'chrome',
              'height': 0.012, 'depthRange': [-2.4, -2.0]},
-            {'view': 'front', 'node': 'headlights', 'circle': [[0.655, 0.735], 0.08], 'material': 'Headlights',
-             'height': 0.012, 'depthRange': [-2.4, -1.9]},
-            {'view': 'front', 'circle': [[0.655, 0.735], 0.095], 'ring': 0.016, 'material': 'chrome', 'height': 0.013, 'depthRange': [-2.4, -1.9]},
             {'view': 'front', 'node': 'front_blinker_left', 'circle': [[0.70, 0.43], 0.045], 'material': 'FrontLampLens',
              'height': 0.010, 'depthRange': [-2.4, -1.9]},
             {'view': 'front', 'node': 'front_blinker_right', 'circle': [[0.70, 0.43], 0.045], 'material': 'FrontLampLens',
              'height': 0.010, 'depthRange': [-2.4, -1.9]},
             {'view': 'front', 'outline': [[0.0, 0.53], [0.17, 0.53], [0.17, 0.45], [0.0, 0.36]], 'material': 'paint',
              'height': 0.012, 'depthRange': [-2.4, -2.0]},
-            {'view': 'side', 'rect': [[0.64, 0.55], [0.17, 0.16]], 'radius': 0.02, 'material': 'chrome', 'height': 0.004},
+            # The quarter ornament: a chrome-edged scoop with a dark recess, not a
+            # flat silver sticker (photos); the drawing puts it at x 0.59-0.80,
+            # z 0.42-0.66.
+            {'view': 'side', 'rect': [[0.68, 0.55], [0.20, 0.22]], 'radius': 0.03, 'material': 'chrome', 'height': 0.004},
+            {'view': 'side', 'rect': [[0.68, 0.545], [0.16, 0.18]], 'radius': 0.02, 'material': 'grille', 'height': 0.007},
             {'view': 'side', 'node': 'front_blinker_left', 'rect': [[-2.08, 0.47], [0.03, 0.08]], 'radius': 0.01, 'material': 'IndicatorLights', 'height': 0.005},
             {'view': 'side', 'node': 'front_blinker_right', 'rect': [[-2.08, 0.47], [0.03, 0.08]], 'radius': 0.01, 'material': 'IndicatorLights', 'height': 0.005},
             # The tri-bar tail lamps in their chrome bezels, the fuel cap between.
@@ -60,12 +69,21 @@ CAR = {
              'height': 0.003, 'depthRange': [2.0, 2.4]},
             {'view': 'rear', 'rect': [[0.0, 0.73], [1.36, 0.15]], 'radius': 0.025, 'mirror': False, 'material': 'paint',
              'height': 0.004, 'depthRange': [2.0, 2.4]},
-            {'view': 'rear', 'node': 'taillights', 'rect': [[0.53, 0.745], [0.12, 0.10]], 'radius': 0.015,
-             'material': 'TailLights', 'height': 0.008, 'depthRange': [2.0, 2.4]},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.625, 0.745], [0.07, 0.10]], 'radius': 0.015,
-             'material': 'TailLights', 'height': 0.009, 'depthRange': [2.0, 2.4]},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.625, 0.745], [0.07, 0.10]], 'radius': 0.015,
-             'material': 'TailLights', 'height': 0.009, 'depthRange': [2.0, 2.4]},
+            # The lamp reads as three vertical red bars in a dark bezel (photos): a
+            # dark panel the size of the whole lamp, then three red bars on it, the
+            # inner one carrying the blinker node.
+            {'view': 'rear', 'rect': [[0.565, 0.745], [0.205, 0.125]], 'radius': 0.014, 'mirror': True,
+             'material': 'grille', 'height': 0.005, 'depthRange': [2.0, 2.4]},
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.500, 0.745], [0.034, 0.100]], 'radius': 0.008,
+             'material': 'TailLights', 'height': 0.010, 'depthRange': [2.0, 2.4]},
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.565, 0.745], [0.034, 0.100]], 'radius': 0.008,
+             'material': 'TailLights', 'height': 0.010, 'depthRange': [2.0, 2.4]},
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.630, 0.745], [0.034, 0.100]], 'radius': 0.008,
+             'material': 'TailLights', 'height': 0.010, 'depthRange': [2.0, 2.4]},
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.630, 0.745], [0.034, 0.100]], 'radius': 0.008,
+             'material': 'TailLights', 'height': 0.011, 'depthRange': [2.0, 2.4], 'mirror': False},
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.630, 0.745], [0.034, 0.100]], 'radius': 0.008,
+             'material': 'TailLights', 'height': 0.011, 'depthRange': [2.0, 2.4]},
             {'view': 'rear', 'node': 'reverse_lights', 'circle': [[0.66, 0.43], 0.04], 'material': 'ReverseLights',
              'height': 0.010, 'depthRange': [2.0, 2.4]},
             {'view': 'rear', 'circle': [[0.0, 0.74], 0.045], 'ring': 0.008, 'mirror': False, 'material': 'chrome',
@@ -74,10 +92,11 @@ CAR = {
              'height': 0.012, 'depthRange': [2.0, 2.4]},
         ],
         'bars': [
-            {'view': 'front', 'span': [-0.45, 0.45], 'b': [0.67, 0.79], 'count': 3, 'width': 0.005,
+            # One horizontal chrome bar through the grille, the running horse on it at
+            # the centre (photos, drawing): three bars read as a coarse egg-crate.
+            {'view': 'front', 'span': [-0.45, 0.45], 'b': [0.72, 0.74], 'count': 1, 'width': 0.024,
              'material': 'chrome', 'height': 0.008, 'depthRange': [-2.4, -2.0]},
-            {'view': 'rear', 'span': [0.47, 0.66], 'b': [0.695, 0.795], 'count': 2, 'dir': 'v', 'width': 0.008, 'mirror': True,
-             'material': 'chrome', 'height': 0.011, 'depthRange': [2.0, 2.4]},
+            # (no chrome dividers: the three red bars on their dark bezel are the lamp)
         ],
         'lines': [
             {'view': 'side', 'points': [[-0.66, 0.92], [-0.70, 0.29], [0.56, 0.29], [0.57, 0.91]], 'width': 0.005},
@@ -87,11 +106,11 @@ CAR = {
              'width': 0.012, 'material': 'chrome', 'height': 0.003},
             {'view': 'top', 'points': [[-2.25, 0.62], [-0.85, 0.66]], 'width': 0.005},
         ],
+        # Plain bars: the car has no overriders front or rear (photos 1-3, and the
+        # drawing's front and rear views show none either).
         'bumpers': {
-            'front': {'z': [0.52, 0.58], 'depth': 0.06, 'wrap': 0.35, 'profile': 'blade',
-                      'overriders': [[0.42, 0.04, 0.38, 0.58]]},
-            'rear': {'z': [0.56, 0.62], 'depth': 0.06, 'wrap': 0.35, 'profile': 'blade',
-                     'overriders': [[0.46, 0.04, 0.38, 0.62]]},
+            'front': {'z': [0.52, 0.58], 'depth': 0.06, 'wrap': 0.35, 'profile': 'blade'},
+            'rear': {'z': [0.56, 0.62], 'depth': 0.06, 'wrap': 0.35, 'profile': 'blade'},
         },
         'lensColours': {'FrontLampLens': [0.85, 0.80, 0.65]},
         'mirror': {'y': -0.55, 'z': 0.94, 'reach': 0.89, 'w': 0.10, 'shape': 'round', 'material': 'chrome', 'sides': [1]},

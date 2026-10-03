@@ -8,7 +8,8 @@ CAR = {
     'blueprint': {
         'image': 'capri.jpg',
         'side': {'box': [464, 45, 1253, 290], 'nose': 'left'},
-        'top': {'box': [462, 304, 1257, 656], 'nose': 'left'},
+        # The drawn centreline (the outline's own middle sits 2 px, 11 mm, off the box's).
+        'top': {'box': [462, 304, 1257, 656], 'nose': 'left', 'centre': 479},
         'front': {'box': [52, 47, 404, 289]},
         'rear': {'box': [51, 355, 404, 595]},
     },
@@ -21,6 +22,35 @@ CAR = {
         'crown': [[-2.3, 0.02], [2.3, 0.02]],
         'roofCrown': 0.03,
         'edge': 0.012,
+        # The plan as the car's: the drawn widths (the arches' 862, the doors' 829)
+        # tapering straight into the ends' corners. Taken raw, the top view's arch
+        # steps (16 mm over 4 cm) twisted the front wings and rippled the quarters,
+        # and `planOpen`'s 0.30 m opening cut both flares away, leaving the nose and
+        # the tail 60 mm narrow per side: the ends came out domed and the lamps of
+        # both the grille panel and the tail sat on the dome, standing off the body.
+        'planOverride': [[-2.17, 0.30], [-2.15, 0.62], [-2.13, 0.72], [-2.10, 0.788], [-2.00, 0.800], [-1.90, 0.812],
+                         [-1.80, 0.822], [-1.70, 0.830], [-1.60, 0.845], [-1.50, 0.858], [-1.40, 0.862], [-1.28, 0.862],
+                         [-1.20, 0.858], [-1.10, 0.850], [-1.00, 0.838], [-0.90, 0.831], [-0.65, 0.829], [0.90, 0.829],
+                         [1.00, 0.856], [1.10, 0.862], [1.30, 0.862], [1.38, 0.855], [1.46, 0.838], [1.55, 0.815],
+                         [1.75, 0.812], [1.90, 0.801], [2.00, 0.784], [2.06, 0.762], [2.09, 0.72], [2.11, 0.60],
+                         [2.12, 0.30]],
+        # No drip rails or cab-to-bed: the top line is one curve. The drawing's pixel
+        # steps (5-7 mm plateaus along the bonnet, the lid and the scuttle) rung along
+        # the whole car once the blur had softened them.
+        'topSpacing': 0.15,
+        'cornerDeg': 20,
+        # The drawing's own car is 4.308 m over the bumpers, the roster's figure 4.439 (Ford
+        # with them), so the drawn tail panel stops 13 cm short of +L/2 where the bar's face
+        # goes: it stood 6 cm behind the bar (BUMPER rear stand 0.06). The face given at the
+        # bar's inner face over the tail panel's band stretches the drawn shape (hull.py's
+        # ENDS, pivoted on the arch) out to it: stand 0.06 -> 0.00, and the arches, the
+        # wheelbase and the front (already at the bar, stand 0.001) are untouched.
+        'face': {'rear': [[0.45, 2.1395], [0.88, 2.1395]]},
+        # The drawing's tail carries a little boot lip: its top line rises 0.88 -> 0.90
+        # over +1.85..+2.05 and only then drops, which read as a long flat deck behind the
+        # back light (the Mk III is a fastback: the photo's glass runs on down to the tail).
+        # The line continued to the tail's top edge instead.
+        'topOverride': [[1.70, 0.950], [1.85, 0.910], [2.00, 0.880], [2.14, 0.850]],
         'arch': {'radius': 0.34, 'lift': 0.04},
     },
     'parts': {
@@ -31,8 +61,10 @@ CAR = {
                                          [1.151, 1.073], [1.018, 1.127], [0.82, 1.171], [0.626, 1.194], [0.56, 1.194]], 'facingMin': 0.3},
             {'view': 'front', 'outline': [[0.0, 1.27], [0.46, 1.265], [0.50, 1.24], [0.58, 0.96], [0.56, 0.94], [0.0, 0.94]],
              'depthRange': [-1.0, -0.2], 'facingMin': 0.25},
-            {'view': 'rear', 'outline': [[0.0, 1.23], [0.48, 1.22], [0.52, 1.19], [0.61, 0.97], [0.58, 0.95], [0.0, 0.95]],
-             'depthRange': [0.6, 1.8], 'facingMin': 0.15},
+            # The back light runs on down the hatch to near the tail, as the photo of the
+            # white 2.0 has it (the drawing's outline stops 5 cm higher, at 0.95).
+            {'view': 'rear', 'outline': [[0.0, 1.23], [0.48, 1.22], [0.52, 1.19], [0.62, 0.96], [0.60, 0.91], [0.0, 0.91]],
+             'depthRange': [0.6, 1.95], 'facingMin': 0.15},
         ],
         'decals': [
             {'view': 'front', 'rect': [[0.0, 0.615], [1.43, 0.155]], 'radius': 0.01, 'mirror': False,
@@ -51,21 +83,27 @@ CAR = {
              'material': 'IndicatorLights', 'height': 0.012, 'depthRange': [-2.4, -1.9]},
             {'view': 'side', 'node': 'front_blinker_left', 'rect': [[-1.98, 0.62], [0.06, 0.03]], 'radius': 0.005, 'material': 'IndicatorLights', 'height': 0.005},
             {'view': 'side', 'node': 'front_blinker_right', 'rect': [[-1.98, 0.62], [0.06, 0.03]], 'radius': 0.005, 'material': 'IndicatorLights', 'height': 0.005},
-            {'view': 'front', 'rect': [[0.0, 0.47], [0.46, 0.10]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
+            # The plate is drawn on the bumper's face, where a decal on the body cannot
+            # reach (the bar covers it): given below the bar, on the valance, like the
+            # rest of the cars.
+            {'view': 'front', 'rect': [[0.0, 0.365], [0.46, 0.10]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.012, 'depthRange': [-2.4, -1.9]},
-            # Ribbed tail lamps across the tail.
-            {'view': 'rear', 'rect': [[0.0, 0.625], [1.36, 0.15]], 'radius': 0.006, 'mirror': False, 'material': 'trim',
+            # The lamp units (the drawing's ribbed band either side of the plate; the
+            # bars below rib the lenses). Sections as the 2.0 photo has them: amber
+            # inboard beside the plate, red either side of it, the clear reversing lamp
+            # outboard.
+            {'view': 'rear', 'rect': [[0.50, 0.625], [0.40, 0.15]], 'radius': 0.006, 'material': 'trim',
              'height': 0.003, 'depthRange': [1.8, 2.3]},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.64, 0.625], [0.08, 0.14]], 'radius': 0.004,
-             'material': 'IndicatorLights', 'height': 0.007, 'depthRange': [1.8, 2.3]},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.64, 0.625], [0.08, 0.14]], 'radius': 0.004,
-             'material': 'IndicatorLights', 'height': 0.007, 'depthRange': [1.8, 2.3]},
-            {'view': 'rear', 'node': 'taillights', 'rect': [[0.51, 0.625], [0.17, 0.14]], 'radius': 0.004,
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.325, 0.625], [0.075, 0.14]], 'radius': 0.004,
              'material': 'TailLights', 'height': 0.007, 'depthRange': [1.8, 2.3]},
-            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.385, 0.625], [0.065, 0.14]], 'radius': 0.004,
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.415, 0.625], [0.085, 0.14]], 'radius': 0.004,
+             'material': 'IndicatorLights', 'height': 0.007, 'depthRange': [1.8, 2.3]},
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.415, 0.625], [0.085, 0.14]], 'radius': 0.004,
+             'material': 'IndicatorLights', 'height': 0.007, 'depthRange': [1.8, 2.3]},
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.525, 0.625], [0.09, 0.14]], 'radius': 0.004,
+             'material': 'TailLights', 'height': 0.007, 'depthRange': [1.8, 2.3]},
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.635, 0.625], [0.08, 0.14]], 'radius': 0.004,
              'material': 'ReverseLights', 'height': 0.007, 'depthRange': [1.8, 2.3]},
-            {'view': 'rear', 'node': 'taillights', 'rect': [[0.31, 0.625], [0.07, 0.14]], 'radius': 0.004,
-             'material': 'TailLights', 'height': 0.007, 'depthRange': [1.8, 2.3]},
             {'view': 'rear', 'rect': [[0.0, 0.632], [0.46, 0.095]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [1.8, 2.3]},
             {'view': 'side', 'node': 'taillights', 'rect': [[2.05, 0.625], [0.06, 0.12]], 'material': 'TailLights', 'height': 0.004},
@@ -79,7 +117,16 @@ CAR = {
         'lines': [
             {'view': 'side', 'points': [[-0.66, 0.97], [-0.67, 0.27], [0.53, 0.27], [0.53, 0.91]], 'width': 0.005},
             {'view': 'top', 'points': [[-2.1, 0.68], [-0.75, 0.70]], 'width': 0.005},
-            {'view': 'side', 'points': [[-1.29, 0.30], [1.38, 0.31]], 'width': 0.03, 'material': 'rubber', 'height': 0.004},
+            # The waist line: the drawing's thin line at 0.67-0.70 over the wings and the
+            # quarter, the 2.0 photo's chrome/red pinstripe with the model script on it.
+            {'view': 'side', 'points': [[-2.05, 0.685], [-0.50, 0.688], [1.20, 0.700], [1.95, 0.706]], 'width': 0.008,
+             'material': 'chrome', 'height': 0.003},
+            # The side moulding: the drawing's two lines at 0.41 and 0.455 along the
+            # doors and wings, rising to 0.49-0.555 over the rear quarter (the photo's
+            # black strip at the same heights). It sat at 0.30, at the sill, where the
+            # drawing has only the door's own bottom edge (0.27).
+            {'view': 'side', 'points': [[-1.29, 0.432], [1.30, 0.432], [1.55, 0.50], [2.05, 0.525]], 'width': 0.045,
+             'material': 'rubber', 'height': 0.004},
             {'view': 'rear', 'points': [[0.0, 0.70], [0.66, 0.70], [0.68, 0.72], [0.64, 0.92]], 'width': 0.005, 'depthRange': [1.6, 2.3]},
             {'view': 'side', 'points': [[-0.345, 0.99], [-0.15, 1.18], [0.07, 1.225], [0.50, 1.215], [0.82, 1.185], [1.03, 1.14],
                                         [1.20, 1.06], [1.23, 1.0], [1.18, 0.95], [1.0, 0.92], [-0.34, 0.905]], 'width': 0.012,
