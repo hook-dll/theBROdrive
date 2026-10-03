@@ -543,6 +543,11 @@ def build(car):
     for end, want, ya, ra in (('front', float(np.nanmin(nose)), ya_f, None), ('rear', float(np.nanmax(tail)), ya_r, None)):
         if end not in bars:
             want = -L / 2 if end == 'front' else L / 2
+        else:
+            # A drawing longer than the factory car (Mini, Käfer) put the body's end
+            # past its own bar's face: the body stops inside the bar's depth.
+            lim = L / 2 - 0.6 * bars[end].get('depth', 0.05)
+            want = max(want, -lim) if end == 'front' else min(want, lim)
         arch = dict(hs.get('arch', {}), **hs.get('arch', {}).get(end, {}))
         ra = arch.get('radius', R * 1.14)
         sg = -1 if end == 'front' else 1

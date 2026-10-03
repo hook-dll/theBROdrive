@@ -25,6 +25,12 @@ CAR = {
         'arch': {'radius': 0.29, 'lift': 0.05},
     },
     'parts': {
+        # The Cooper S's contrasting roof (photos of 1965 cars: black over red, white over blue).
+        'paint2': {'name': 'trim_roof', 'rgb': [0.03, 0.03, 0.035]},
+        'regions': [
+            {'view': 'top', 'outline': [[-0.42, 0.0], [-0.42, 0.66], [0.97, 0.66], [0.97, 0.0]], 'material': 'paint2',
+             'depthRange': [1.18, 1.5], 'facingMin': 0.5},
+        ],
         'glass': [
             {'view': 'side', 'outline': [[-0.509, 0.98], [-0.434, 0.95], [-0.434, 0.90], [-0.512, 0.873], [0.184, 0.864], [0.184, 1.135],
                                          [0.139, 1.179], [-0.341, 1.176], [-0.383, 1.144]], 'facingMin': 0.3},
@@ -63,7 +69,7 @@ CAR = {
             {'view': 'rear', 'rect': [[0.0, 0.615], [0.52, 0.11]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [1.2, 1.7]},
         ],
-        'podLamps': [{'node': 'headlights', 'x': 0.50, 'z': 0.79, 'r': 0.085, 'bezel': 0.016, 'proud': 0.02}],
+        'podLamps': [{'node': 'headlights', 'x': 0.51, 'z': 0.745, 'r': 0.085, 'bezel': 0.016, 'proud': 0.02}],
         'bars': [
             {'view': 'front', 'span': [-0.40, 0.40], 'b': [0.54, 0.70], 'count': 7, 'width': 0.008,
              'material': 'chrome', 'height': 0.009, 'depthRange': [-1.7, -1.3]},
@@ -80,9 +86,9 @@ CAR = {
         ],
         'bumpers': {
             'front': {'z': [0.465, 0.505], 'depth': 0.045, 'wrap': 0.20, 'profile': 'blade',
-                      'overriders': [[0.30, 0.04, 0.42, 0.56]]},
+                      'overriders': [[0.30, 0.04, 0.36, 0.62]]},
             'rear': {'z': [0.46, 0.50], 'depth': 0.045, 'wrap': 0.20, 'profile': 'blade',
-                     'overriders': [[0.30, 0.04, 0.42, 0.55]]},
+                     'overriders': [[0.30, 0.04, 0.36, 0.60]]},
         },
         'mirror': {'y': -0.55, 'z': 0.93, 'reach': 0.78, 'w': 0.09, 'shape': 'round', 'material': 'chrome'},
         'handles': {'at': [[0.08, 0.80]], 'w': 0.10},
