@@ -41,7 +41,36 @@ CAR = {
         'belt': [[-1.0, 0.985], [-0.7, 0.99], [0.85, 0.99], [1.165, 0.975]],
         'glassPlan': [[-1.0, 0.62], [-0.6, 0.67], [0.8, 0.67], [1.165, 0.61]],
         'sectionBridge': {'front': [[0.95, 1.15]], 'rear': [[0.95, 1.15]]},
-        'crown': [[-2.2, 0.02], [2.2, 0.02]],
+        # The 412's boot lid is a flat panel with crisp edges and its tail panel is
+        # vertical: a 2 cm across-crown over the boot domed it into a pillow, and the
+        # 6 cm along-car blur rounded the lid's rear edge and the fins' step (the rear
+        # view draws the fin as a step: x 0.703 at z 0.916 -> 0.647 at 0.96).
+        # Stations at the boot on the monotone-cubic path (>2 stations): the plan and the
+        # mean end view cannot say the fin - the rear view's own step (x 0.703 at z 0.916
+        # -> 0.647 at 0.96) is averaged with the front view and blurred to a shoulder, so
+        # the quarter bulged over the arch and the fins rounded into the lid. Each
+        # station's top stands 4-6 cm above the outline's top there (a section topping out
+        # at the cap dropped the field on the centreline and the blur read it as a ridge
+        # down the lid - escort.py's comment), and the widths hold past the fin's step.
+        'sectionStations': [
+            {'y': 1.20, 'half': [[0.0, 0.70], [0.35, 0.72], [0.45, 0.775], [0.65, 0.775], [0.85, 0.766], [0.950, 0.720],
+                                 [0.965, 0.706], [0.975, 0.675], [0.99, 0.665], [1.03, 0.655]]},
+            {'y': 1.50, 'half': [[0.0, 0.70], [0.30, 0.71], [0.42, 0.775], [0.62, 0.775], [0.82, 0.768], [0.925, 0.715],
+                                 [0.940, 0.702], [0.955, 0.665], [0.97, 0.655], [1.02, 0.645]]},
+            {'y': 1.80, 'half': [[0.0, 0.70], [0.30, 0.71], [0.40, 0.775], [0.60, 0.775], [0.80, 0.768], [0.910, 0.712],
+                                 [0.925, 0.700], [0.945, 0.660], [0.96, 0.650], [1.01, 0.640]]},
+            {'y': 2.03, 'half': [[0.0, 0.69], [0.30, 0.70], [0.37, 0.755], [0.538, 0.774], [0.734, 0.767], [0.900, 0.710],
+                                 [0.916, 0.703], [0.935, 0.660], [0.95, 0.647], [1.00, 0.635]]},
+        ],
+        'stationBlend': 0.15,
+        'crown': [[-2.2, 0.02], [0.4, 0.02], [1.0, 0.006], [2.2, 0.004]],
+        'edgeY': 0.025,
+        'edgeYMin': 0.02,
+        # The tail panel given outright (nearly vertical, tucking under below the bar)
+        # so the blur cannot round it forward; faces faired at 0.15 m with 20 deg corners.
+        'face': {'rear': [[0.30, 2.05], [0.42, 2.095], [0.92, 2.095]]},
+        'faceSpacing': 0.15,
+        'cornerDeg': 20,
         'roofCrown': 0.035,
         'edge': 0.012,
         'arch': {'radius': 0.355, 'lift': 0.01},
@@ -56,11 +85,12 @@ CAR = {
                                          [0.0, 0.985]], 'depthRange': [0.7, 1.4]},
         ],
         'decals': [
-            # The 1967-76 front (photos): one chrome surround across the panel, round lamps
-            # in chrome rings at its ends, the grille of fine horizontal bars between them.
-            {'view': 'front', 'rect': [[0.0, 0.69], [1.44, 0.22]], 'radius': 0.03, 'mirror': False,
+            # The 1967-76 front (photos): a wide chrome-framed panel across the front with
+            # the lamps in its ends, its grille of fine VERTICAL slats (with a chrome
+            # divider at the badge), not the horizontal bars the drawing's shading read as.
+            {'view': 'front', 'rect': [[0.0, 0.69], [1.30, 0.22]], 'radius': 0.03, 'mirror': False,
              'material': 'chrome', 'height': 0.004, 'depthRange': [-2.2, -1.8]},
-            {'view': 'front', 'rect': [[0.0, 0.69], [0.96, 0.17]], 'radius': 0.015, 'mirror': False,
+            {'view': 'front', 'rect': [[0.0, 0.69], [1.22, 0.17]], 'radius': 0.015, 'mirror': False,
              'material': 'grille', 'height': 0.006, 'depthRange': [-2.2, -1.8]},
             {'view': 'front', 'circle': [[0.60, 0.69], 0.095], 'material': 'chrome', 'height': 0.007, 'depthRange': [-2.2, -1.8]},
             {'view': 'front', 'node': 'headlights', 'circle': [[0.60, 0.69], 0.08], 'material': 'Headlights',
@@ -77,17 +107,20 @@ CAR = {
              'height': 0.005, 'depthRange': [1.6, 2.1]},
             {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.428, 0.6185], [0.07, 0.09]], 'radius': 0.008,
              'material': 'ReverseLights', 'height': 0.009, 'depthRange': [1.6, 2.1]},
-            {'view': 'rear', 'node': 'taillights', 'rect': [[0.545, 0.6185], [0.15, 0.09]], 'radius': 0.008,
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.585, 0.6185], [0.23, 0.09]], 'radius': 0.008,
              'material': 'TailLights', 'height': 0.009, 'depthRange': [1.6, 2.1]},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.663, 0.6185], [0.07, 0.09]], 'radius': 0.008,
-             'material': 'IndicatorLights', 'height': 0.009, 'depthRange': [1.6, 2.1]},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.663, 0.6185], [0.07, 0.09]], 'radius': 0.008,
-             'material': 'IndicatorLights', 'height': 0.009, 'depthRange': [1.6, 2.1]},
+            # The amber indicator is not in the unit: it is the triangular lamp on the fin
+            # at the corner (photos: taillamp.jpg, rear34-left.jpg), so the unit is red
+            # lenses + the reversing lamp inboard and the corner lamp carries the blinker.
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.655, 0.745], [0.10, 0.085]], 'radius': 0.022,
+             'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [1.6, 2.2]},
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.655, 0.745], [0.10, 0.085]], 'radius': 0.022,
+             'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [1.6, 2.2]},
             {'view': 'rear', 'rect': [[0.0, 0.565], [0.39, 0.165]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.005, 'depthRange': [1.6, 2.1]},
         ],
         'bars': [
-            {'view': 'front', 'span': [-0.46, 0.46], 'b': [0.62, 0.76], 'count': 10, 'dir': 'h', 'width': 0.006,
+            {'view': 'front', 'span': [-0.58, 0.58], 'b': [0.615, 0.765], 'count': 32, 'dir': 'v', 'width': 0.006,
              'material': 'chrome', 'height': 0.008, 'depthRange': [-2.2, -1.8]},
         ],
         'lines': [

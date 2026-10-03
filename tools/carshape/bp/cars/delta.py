@@ -8,7 +8,30 @@ CAR = {
                 'frontTrack': 1.4, 'rearTrack': 1.38, 'wheelRadius': 0.295, 'tyreWidth': 0.205, 'frontOverhang': 0.75},
     'blueprint': {
         'image': 'delta_go.png',
-        'side': {'box': [578, 12, 1735, 410], 'nose': 'left', 'ground': 411},
+        # The drawing's own side silhouette, traced in metres (nose left, z up). With the
+        # pixels left to speak, two of the drawing's lines, not the car's, were built: the
+        # top line's +15 mm bump over the roof at y 0.45-0.52 (a drip rail / aerial drawn
+        # above the skin, which stood a ridge along the roof's middle) and the spoiler lip
+        # at y 1.65-1.80 (the rear wiper and the drawn hatch lip, 20-40 mm above the
+        # panel's own line). The hatch is one flat raked panel from the roof's end
+        # (1.160, 1.336) to the corner at (1.888, 0.905) -- the photo's crisp edge -- over
+        # a vertical tail panel, with the bumper standing proud below it, and the front is
+        # the drawing's: the bumper's face at y -1.96, a near-vertical grille above it and
+        # a long, flat bonnet (0.78 -> 0.92 over 0.9 m) to the screen.
+        'side': {'box': [578, 12, 1735, 410], 'nose': 'left', 'ground': 411,
+                 'outline': [[-1.962, 0.545], [-1.930, 0.565], [-1.914, 0.635], [-1.904, 0.700],
+                             [-1.886, 0.760], [-1.858, 0.782],
+                             [-1.700, 0.822], [-1.500, 0.855], [-1.300, 0.883], [-1.100, 0.903], [-0.960, 0.917],
+                             [-0.900, 0.963], [-0.800, 1.000], [-0.700, 1.035], [-0.600, 1.100], [-0.500, 1.162],
+                             [-0.400, 1.228], [-0.300, 1.290], [-0.220, 1.330],
+                             [0.000, 1.352], [0.250, 1.364], [0.500, 1.365], [0.750, 1.362], [0.950, 1.355],
+                             [1.060, 1.348], [1.160, 1.336],
+                             [1.888, 0.905], [1.888, 0.562], [1.915, 0.552], [1.945, 0.535], [1.950, 0.520],
+                             [1.950, 0.465], [1.945, 0.455], [1.930, 0.430], [1.920, 0.410], [1.900, 0.390],
+                             [1.888, 0.300],
+                             [1.700, 0.262], [1.400, 0.245], [1.000, 0.220], [0.000, 0.210], [-1.000, 0.210],
+                             [-1.300, 0.218], [-1.550, 0.235], [-1.650, 0.215], [-1.720, 0.205], [-1.780, 0.235],
+                             [-1.840, 0.240], [-1.880, 0.320], [-1.920, 0.380], [-1.960, 0.400]]},
         'top': {'box': [580, 440, 1735, 995], 'nose': 'left', 'fitWidth': True},
         'front': {'box': [5, 10, 565, 410]},
         'rear': {'box': [5, 518, 568, 916]},
@@ -23,8 +46,12 @@ CAR = {
         'edge': 0.012,
         # a boxy car: crisp edges (the default 2.2 / 6 cm blur made it a pebble)
         'edgeMin': 0.013,
-        'edgeY': 0.025,
-        'edgeYMin': 0.025,
+        # The tail's corner and the bonnet's leading edge are features along the car: a
+        # 2.5 cm blur along y rounded both by 8 cm (the bonnet's top, at y -1.90, came out
+        # at 0.637 where the drawing has 0.723, and the tail's crisp edge rolled into the
+        # hatch). Down to the in-plane radius, so the corners keep theirs.
+        'edgeY': 0.014,
+        'edgeYMin': 0.014,
         'edge': 0.012,
         # a crisp box hatchback (photos): the end faces and the shoulder lines are the
         # car's, not the drawing's pixels, so they are faired with corners kept
@@ -38,11 +65,15 @@ CAR = {
         # over both wheels. The 16v's body is flat-sided under the plastic extensions
         # (parts.archFlares) and its corners turn in 15 cm (photos), where the fitted
         # plan spread the taper over 30.
+        # ...and its tail: the drawing's top view, and its rear view (half 0.83 at the
+        # shoulder), keeps the full width back to y 1.90 and turns in over the last 5 cm.
+        # The old hand taper (0.55 at 1.90, 0 at 1.95) pinched the tail's corners into
+        # the dome the rear render showed, with the tail lamps' outer halves cut off.
         'planOverride': [[-1.950, 0.00], [-1.945, 0.26], [-1.920, 0.44], [-1.890, 0.56], [-1.860, 0.65],
                          [-1.820, 0.73], [-1.780, 0.775], [-1.720, 0.800], [-1.650, 0.812], [-1.550, 0.816],
                          [-1.200, 0.817], [-0.600, 0.818], [0.000, 0.818], [0.600, 0.818], [1.100, 0.818],
-                         [1.400, 0.816], [1.600, 0.812], [1.720, 0.800], [1.780, 0.775], [1.830, 0.730],
-                         [1.870, 0.660], [1.900, 0.550], [1.925, 0.400], [1.945, 0.220], [1.950, 0.00]],
+                         [1.400, 0.816], [1.600, 0.812], [1.720, 0.804], [1.800, 0.798], [1.860, 0.790],
+                         [1.900, 0.772], [1.922, 0.730], [1.938, 0.640], [1.948, 0.420], [1.950, 0.00]],
         # The wheel openings are the body's, under the extensions: the tyre (0.59) with
         # 5 cm of gap above it, where 0.35/0.05 left 10.5 cm of air in the arch.
         'arch': {'radius': 0.33, 'lift': 0.015},
@@ -60,8 +91,13 @@ CAR = {
              'facingMin': 0.3},
             {'view': 'front', 'outline': [[0.0, 1.30], [0.48, 1.295], [0.52, 1.27], [0.62, 0.97], [0.60, 0.95], [0.0, 0.95]],
              'depthRange': [-1.0, -0.2], 'facingMin': 0.25},
-            {'view': 'rear', 'outline': [[0.0, 1.258], [0.46, 1.253], [0.51, 1.215], [0.55, 1.13], [0.53, 1.12], [0.0, 1.12]],
-             'depthRange': [1.2, 2.0], 'facingMin': 0.15},
+            # The big back light (photo): the screen runs from the roof's end down to
+            # 8 cm above the hatch's corner (0.985) as the drawn outline has it -- with
+            # `fit` off, so the foot stays where the drawing puts it instead of being
+            # raised on to the shell's turned-away faces. At 1.12 it was a letterbox.
+            {'view': 'rear', 'outline': [[0.0, 1.275], [0.44, 1.268], [0.505, 1.230], [0.548, 1.105], [0.548, 0.985],
+                                         [0.0, 0.985]],
+             'depthRange': [1.2, 2.0], 'facingMin': 0.15, 'fit': False},
         ],
         # Grey moulded bumpers wrapping the ends.
         'regions': [
