@@ -27,9 +27,14 @@ CAR = {
     },
     'hull': {
         'sill': [[-1.70, 0.42], [-1.55, 0.30], [-1.35, 0.25], [0.85, 0.25], [1.35, 0.33], [1.69, 0.42]],
-        'cabin': [-0.64, 1.62],
-        'belt': [[-0.64, 1.08], [-0.45, 0.975], [1.2, 0.975], [1.62, 0.98]],
-        'glassPlan': [[-0.64, 0.67], [-0.3, 0.715], [1.2, 0.715], [1.62, 0.66]],
+        # The glasshouse ends where the tail's outline crosses the belt (1.56) and stands
+        # flush on the body: carried on to 1.62 and 3 cm in from the sides, it stood a
+        # ledge across the tailgate under the glass and shoulders over the quarters, and
+        # bent the tail lamps round them. The photos show glass and tailgate one face.
+        'cabin': [-0.64, 1.56],
+        'belt': [[-0.64, 1.08], [-0.45, 0.975], [1.2, 0.975], [1.56, 0.98]],
+        'glassPlan': [[-0.64, 0.67], [-0.3, 0.715], [1.2, 0.715], [1.56, 0.69]],
+        'shelf': 0.005,
         'crown': [[-1.8, 0.015], [1.8, 0.015]],
         'roofCrown': 0.02,
         'edge': 0.010,
@@ -54,7 +59,8 @@ CAR = {
             {'view': 'side', 'outline': [[0.469, 0.974], [0.469, 1.351], [1.111, 1.351], [1.213, 1.151], [1.213, 0.974]], 'facingMin': 0.3},
             {'view': 'front', 'outline': [[0.0, 1.36], [0.56, 1.36], [0.59, 1.32], [0.59, 1.05], [0.56, 1.02], [0.0, 1.02]],
              'depthRange': [-0.8, -0.1], 'facingMin': 0.2},
-            {'view': 'rear', 'outline': [[0.0, 1.38], [0.52, 1.38], [0.55, 1.34], [0.55, 1.06], [0.52, 1.02], [0.0, 1.02]],
+            # the back light nearly the tailgate's width, thin pillars beside it (photos)
+            {'view': 'rear', 'outline': [[0.0, 1.38], [0.56, 1.38], [0.59, 1.34], [0.59, 1.06], [0.56, 1.02], [0.0, 1.02]],
              'depthRange': [1.0, 1.8], 'facingMin': 0.15},
         ],
         'regions': [
@@ -97,7 +103,8 @@ CAR = {
         'lines': [
             {'view': 'side', 'points': [[-0.60, 0.95], [-0.62, 0.42], [0.42, 0.42], [0.42, 0.97]], 'width': 0.005},
             {'view': 'side', 'points': [[-1.62, 0.90], [-0.64, 1.07]], 'width': 0.005},
-            {'view': 'side', 'points': [[-1.40, 0.52], [1.43, 0.52]], 'width': 0.05, 'material': 'trim', 'height': 0.006},
+            # the grey rubbing strip along the doors, about 9 cm tall in the photos
+            {'view': 'side', 'points': [[-1.40, 0.52], [1.43, 0.52]], 'width': 0.09, 'material': 'trim', 'height': 0.006},
             {'view': 'rear', 'points': [[0.0, 0.66], [0.60, 0.66], [0.60, 1.40]], 'width': 0.005, 'depthRange': [1.4, 1.8]},
         ],
         'mirror': {'y': -0.50, 'z': 1.03, 'reach': 0.84, 'w': 0.11, 'h': 0.09},
