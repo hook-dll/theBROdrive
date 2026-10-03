@@ -18,9 +18,14 @@ CAR = {
         'cabin': [-0.80, 1.90],
         'belt': [[-0.80, 0.96], [-0.5, 0.89], [1.0, 0.895], [1.5, 0.90], [1.90, 0.88]],
         'glassPlan': [[-0.80, 0.68], [-0.4, 0.72], [1.0, 0.72], [1.5, 0.68], [1.90, 0.63]],
-        'crown': [[-2.0, 0.02], [2.0, 0.02]],
-        'roofCrown': 0.03,
+        'crown': [[-2.0, 0.008], [2.0, 0.008]],
+        'roofCrown': 0.015,
         'edge': 0.012,
+        # a boxy car: crisp edges (the default 2.2 / 6 cm blur made it a pebble)
+        'edgeMin': 0.015,
+        'edgeY': 0.04,
+        'edgeYMin': 0.04,
+        'crownScale': 1,
         'arch': {'radius': 0.35, 'lift': 0.05},
     },
     'parts': {
