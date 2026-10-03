@@ -285,7 +285,9 @@ function isRandomPaintMesh(mesh: THREE.Mesh, def: CarModelDef): boolean {
 function isPaintSlot(material: THREE.Material, def: CarModelDef): boolean {
   if (def.paintStyle === 'solid-paint') {
     if (def.glassMaterial && material.name === def.glassMaterial) return false;
-    return !/(glass|lamp|light|chrome|trim|tyre|tire|wheel)/i.test(material.name);
+    // car_paint_2 is a body's fixed second colour (a two-tone's lower body, a GT's
+    // accent stripe): the car's paint must not cover it.
+    return !/(glass|lamp|light|chrome|trim|tyre|tire|wheel|paint_2)/i.test(material.name);
   }
   return true;
 }
