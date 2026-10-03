@@ -21,6 +21,10 @@ CAR = {
         'crown': [[-1.9, 0.02], [1.9, 0.02]],
         'roofCrown': 0.03,
         'edge': 0.012,
+        # The nose/tail rows were blurred over 4 cm, which rounded the bonnet's leading
+        # edge and the flat fascia away (the top line came out 3 cm low at the tip:
+        # drawing 560/673 at -1.825/-1.75, hull 529/651). Faired with the corners kept.
+        'faceSpacing': 0.15, 'cornerDeg': 20,
         'arch': {'radius': 0.335, 'lift': 0.04},
     },
     'parts': {
@@ -37,26 +41,33 @@ CAR = {
             {'view': 'rear', 'outline': [[0.0, 0.93], [0.52, 0.93], [0.52, 0.84], [0.0, 0.84]], 'depthRange': [1.6, 2.0], 'facingMin': 0.05, 'fit': False},
         ],
         'regions': [
-            # Black only where the car's black is: the lower grille and valance under the
-            # body-coloured bumper (the 1.6i-16's bumper is the lower body's colour with
-            # the stripe along its top edge), not the whole bumper face as before
+            # Black first (the two-tone pass below only picks up faces still in paint):
+            # the lower grille and the valance under the bumper
             {'view': 'front', 'rect': [[0.0, 0.35], [1.8, 0.26]], 'radius': 0.001, 'mirror': False, 'depthRange': [-2.0, -1.55]},
             {'view': 'side', 'outline': [[-1.85, 0.22], [-1.85, 0.46], [-1.34, 0.46], [-1.39, 0.36], [-1.40, 0.22]]},
             {'view': 'rear', 'rect': [[0.0, 0.36], [1.8, 0.28]], 'radius': 0.001, 'mirror': False, 'depthRange': [1.5, 2.0]},
             {'view': 'side', 'outline': [[1.42, 0.22], [1.42, 0.46], [1.85, 0.46], [1.85, 0.22]]},
-            {'view': 'side', 'outline': [[-1.30, 0.235], [1.40, 0.235], [1.40, 0.31], [-1.30, 0.31]]},
+            # The 1.6i-16's two-tone: everything below the beltline stripe is the lower
+            # body's grey - sills, quarter panels, the bumper's faces (photos, the
+            # European car in this folder)
+            {'view': 'side', 'outline': [[-1.83, 0.18], [1.83, 0.18], [1.83, 0.60], [-1.83, 0.60]], 'material': 'paint2'},
+            {'view': 'front', 'rect': [[0.0, 0.42], [1.8, 0.40]], 'radius': 0.001, 'mirror': False, 'material': 'paint2',
+             'depthRange': [-2.0, -1.55]},
+            {'view': 'rear', 'rect': [[0.0, 0.42], [1.8, 0.40]], 'radius': 0.001, 'mirror': False, 'material': 'paint2',
+             'depthRange': [1.5, 2.0]},
         ],
         'decals': [
             # Wide flush lamps from the grille slot to the corners, each in a black
-            # recess (photos, 1986). Front view: lamps 0.42-0.78, 0.585-0.715; the black
-            # slot +-0.42 the same height with the H badge; the lower grille below the
-            # bumper's face (0.49)
-            {'view': 'front', 'rect': [[0.60, 0.65], [0.40, 0.15]], 'radius': 0.012, 'material': 'trim',
-             'height': 0.004, 'depthRange': [-2.0, -1.5], 'facingMin': 0.05},
-            {'view': 'front', 'node': 'headlights', 'rect': [[0.60, 0.65], [0.36, 0.13]], 'radius': 0.012, 'material': 'Headlights',
-             'height': 0.008, 'depthRange': [-2.0, -1.5], 'facingMin': 0.05},
-            {'view': 'front', 'rect': [[0.0, 0.65], [0.84, 0.13]], 'radius': 0.006, 'mirror': False, 'material': 'grille',
-             'height': 0.006, 'depthRange': [-2.0, -1.5]},
+            # recess (photos, 1986). The photos' lens is slim (about 10 cm) and sits on
+            # the flat front face, not wrapped round the wings; the front view gives
+            # lamps 0.42-0.78, 0.595-0.695; the black slot +-0.42 the same height with the
+            # H badge; the lower grille below the bumper's face (0.49)
+            {'view': 'front', 'rect': [[0.60, 0.645], [0.40, 0.12]], 'radius': 0.01, 'material': 'trim',
+             'height': 0.004, 'depthRange': [-2.0, -1.5], 'facingMin': 0.25},
+            {'view': 'front', 'node': 'headlights', 'rect': [[0.60, 0.645], [0.36, 0.10]], 'radius': 0.01, 'material': 'Headlights',
+             'height': 0.008, 'depthRange': [-2.0, -1.5], 'facingMin': 0.25},
+            {'view': 'front', 'rect': [[0.0, 0.645], [0.84, 0.10]], 'radius': 0.006, 'mirror': False, 'material': 'grille',
+             'height': 0.006, 'depthRange': [-2.0, -1.5], 'facingMin': 0.25},
             {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.69, 0.53], [0.17, 0.065]], 'radius': 0.006,
              'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-2.0, -1.5], 'facingMin': 0.05},
             {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.69, 0.53], [0.17, 0.065]], 'radius': 0.006,
@@ -78,6 +89,9 @@ CAR = {
              'material': 'IndicatorLights', 'height': 0.007, 'depthRange': [1.6, 2.0], 'facingMin': 0.1},
             {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.55, 0.755], [0.10, 0.065]], 'radius': 0.006,
              'material': 'ReverseLights', 'height': 0.007, 'depthRange': [1.6, 2.0]},
+            # the red reflector square under the reverse lamp (drawing's rear view, photos)
+            {'view': 'rear', 'rect': [[0.55, 0.6675], [0.10, 0.065]], 'radius': 0.006,
+             'material': 'TailLights', 'height': 0.006, 'depthRange': [1.6, 2.0]},
             {'view': 'rear', 'rect': [[0.0, 0.53], [0.40, 0.11]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [1.6, 2.0]},
         ],
@@ -87,7 +101,9 @@ CAR = {
         ],
         'lines': [
             {'view': 'side', 'points': [[-0.48, 0.86], [-0.50, 0.33], [0.66, 0.33], [0.72, 0.60], [0.72, 0.90]], 'width': 0.005},
-            {'view': 'side', 'points': [[-1.80, 0.60], [1.85, 0.62]], 'width': 0.02, 'material': 'trim', 'height': 0.004},
+            # the beltline pinstripe: red, on the grey lower body below it (photos); the
+            # line is the body's own paint
+            {'view': 'side', 'points': [[-1.80, 0.605], [1.85, 0.615]], 'width': 0.015, 'material': 'paint', 'height': 0.004},
             {'view': 'side', 'points': [[-0.40, 0.87], [-0.10, 1.15], [0.20, 1.22], [0.62, 1.21], [1.10, 1.13], [1.40, 1.00], [1.39, 0.92],
                                         [-0.40, 0.87]], 'width': 0.014, 'material': 'trim', 'height': 0.003},
             {'view': 'side', 'points': [[0.66, 0.90], [0.62, 1.20]], 'width': 0.10, 'material': 'trim', 'height': 0.003},
@@ -97,5 +113,8 @@ CAR = {
         'handles': {'at': [[0.55, 0.80]], 'w': 0.10, 'material': 'trim'},
         'wipers': {'arms': [[-0.55, -0.05, -0.60, 0.89], [0.05, 0.5, -0.60, 0.89]]},
         'wheel': {'style': 'alloy', 'spokes': 4, 'rimFactor': 0.70, 'spokeWidth': 0.6},
+        # The 1.6i-16's lower body keeps its own grey whatever the car is painted (the
+        # roster paints car_paint only): the European photos' mid-grey.
+        'paint2': {'rgb': [0.46, 0.47, 0.49], 'name': 'car_paint_2'},
     },
 }

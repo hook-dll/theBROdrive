@@ -36,7 +36,10 @@ CAR = {
             {'view': 'side', 'outline': [[1.40, 0.90], [0.565, 0.89], [0.565, 1.216], [0.898, 1.216]], 'facingMin': 0.3},
             {'view': 'front', 'outline': [[0.0, 1.27], [0.50, 1.26], [0.60, 1.18], [0.68, 0.96], [0.64, 0.93], [0.0, 0.93]],
              'depthRange': [-0.8, 0.1], 'facingMin': 0.1},
-            {'view': 'top', 'outline': [[1.00, 0.0], [1.00, 0.55], [1.62, 0.51], [1.62, 0.0]], 'facingMin': 0.3},
+            # The hatch glass runs down the slope and over the deck to within ~15 cm of
+            # the tail panel (photo 3: the back light nearly reaches the spoiler); the
+            # old pane stopped at y 1.62 and left a 0.6 m painted deck behind it.
+            {'view': 'top', 'outline': [[1.00, 0.0], [1.00, 0.545], [1.62, 0.505], [1.95, 0.46], [1.95, 0.0]], 'facingMin': 0.3},
         ],
         'regions': [
             # Body-colour fascias with black lower lips, the black window frames.
@@ -74,34 +77,32 @@ CAR = {
              'height': 0.007, 'depthRange': [-2.45, -1.9]},
             {'view': 'front', 'rect': [[0.0, 0.50], [1.72, 0.035]], 'radius': 0.004, 'mirror': False, 'material': 'trim',
              'height': 0.003, 'depthRange': [-2.45, -1.9]},
-            # Under the spoiler: the louvred tail lamps either side of a dark plate panel
-            # (photo 2: the lens is red slats with black between, its outboard end tapering
-            # on the corner, the reversing lamp a full-height clear section at its inboard
-            # end; the old drawing had a coarse three-rib lens and an amber turn lamp where
-            # the US car has a red one).
-            {'view': 'rear', 'rect': [[0.0, 0.87], [1.60, 0.17]], 'radius': 0.01, 'mirror': False, 'material': 'trim',
+            # Under the spoiler: two wide louvred lenses filling the tail either side of
+            # the plate recess (photos 2/3: each lens ~0.6 x 0.15, red slats with black
+            # grooves, its outboard end tapering on the corner, a clear louvred section at
+            # its inboard end; the dark area is only the plate recess between them, not a
+            # full-width black panel with small lamps in it).
+            {'view': 'rear', 'rect': [[0.0, 0.875], [0.42, 0.17]], 'radius': 0.01, 'mirror': False, 'material': 'trim',
              'height': 0.004, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'node': 'taillights', 'rect': [[0.59, 0.875], [0.42, 0.14]], 'radius': 0.008, 'material': 'TailLights',
-             'height': 0.008, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.68, 0.815], [0.12, 0.028]], 'radius': 0.006,
+            {'view': 'rear', 'node': 'taillights', 'outline': [[0.83, 0.950], [0.818, 0.845], [0.78, 0.800], [0.215, 0.800], [0.215, 0.950]],
+             'material': 'TailLights', 'height': 0.008, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.70, 0.815], [0.13, 0.028]], 'radius': 0.006,
              'material': 'TailLights', 'height': 0.010, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.68, 0.815], [0.12, 0.028]], 'radius': 0.006,
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.70, 0.815], [0.13, 0.028]], 'radius': 0.006,
              'material': 'TailLights', 'height': 0.010, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.315, 0.828], [0.09, 0.011]], 'radius': 0.003,
-             'mirror': False, 'material': 'ReverseLights', 'height': 0.008, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.315, 0.874], [0.09, 0.011]], 'radius': 0.003,
-             'mirror': False, 'material': 'ReverseLights', 'height': 0.008, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.315, 0.920], [0.09, 0.011]], 'radius': 0.003,
-             'mirror': False, 'material': 'ReverseLights', 'height': 0.008, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'rect': [[0.59, 0.822], [0.42, 0.009]], 'material': 'trim', 'height': 0.011,
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.265, 0.828], [0.09, 0.011]], 'radius': 0.003,
+             'mirror': False, 'material': 'ReverseLights', 'height': 0.010, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.265, 0.874], [0.09, 0.011]], 'radius': 0.003,
+             'mirror': False, 'material': 'ReverseLights', 'height': 0.010, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.265, 0.920], [0.09, 0.011]], 'radius': 0.003,
+             'mirror': False, 'material': 'ReverseLights', 'height': 0.010, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
+            {'view': 'rear', 'rect': [[0.525, 0.828], [0.59, 0.009]], 'material': 'trim', 'height': 0.011,
              'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'rect': [[0.59, 0.848], [0.42, 0.009]], 'material': 'trim', 'height': 0.011,
+            {'view': 'rear', 'rect': [[0.525, 0.855], [0.59, 0.009]], 'material': 'trim', 'height': 0.011,
              'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'rect': [[0.59, 0.874], [0.42, 0.009]], 'material': 'trim', 'height': 0.011,
+            {'view': 'rear', 'rect': [[0.525, 0.882], [0.59, 0.009]], 'material': 'trim', 'height': 0.011,
              'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'rect': [[0.59, 0.900], [0.42, 0.009]], 'material': 'trim', 'height': 0.011,
-             'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'rect': [[0.59, 0.926], [0.42, 0.009]], 'material': 'trim', 'height': 0.011,
+            {'view': 'rear', 'rect': [[0.525, 0.909], [0.59, 0.009]], 'material': 'trim', 'height': 0.011,
              'depthRange': [2.0, 2.45], 'facingMin': 0.05},
             # The bumper's rubbing strip, the same height as the sides'.
             {'view': 'rear', 'rect': [[0.0, 0.50], [1.72, 0.035]], 'radius': 0.004, 'mirror': False, 'material': 'trim',

@@ -93,7 +93,10 @@ CAR = {
             'front': {'z': [0.38, 0.45], 'depth': 0.05, 'wrap': 0.20, 'profile': 'blade'},
             'rear': {'z': [0.38, 0.45], 'depth': 0.05, 'wrap': 0.20, 'profile': 'blade'},
         },
-        'mirror': {'y': -1.35, 'z': 0.88, 'reach': 0.60, 'w': 0.08, 'shape': 'round', 'material': 'trim'},
+        # The wing mirror: the drawing's side view has it on the wing just ahead of the
+        # screen's foot (its base at y -0.80..-0.65, the wing's top there 0.91), and the
+        # photos show the same: near the cowl, not at the wing's front corner where it was
+        'mirror': {'y': -0.82, 'z': 0.96, 'reach': 0.60, 'w': 0.08, 'shape': 'round', 'material': 'trim'},
         'handles': {'at': [[0.33, 0.82]], 'w': 0.11},
         'wipers': {'arms': [[-0.5, -0.05, -0.92, 0.88], [0.05, 0.45, -0.92, 0.88]]},
         'wheel': {'style': 'steel', 'windows': 8, 'rimFactor': 0.66, 'cap': True},
