@@ -76,7 +76,7 @@ CAR = {
             # left a 25 cm painted deck sloping to the tail - the notchback the drawing's
             # lipped boot suggested, where the car is a fastback.
             {'view': 'rear', 'outline': [[0.0, 1.23], [0.48, 1.22], [0.52, 1.19], [0.60, 1.02], [0.62, 0.93], [0.60, 0.86], [0.0, 0.85]],
-             'depthRange': [0.5, 2.16], 'facingMin': 0.15},
+             'depthRange': [0.5, 2.16], 'facingMin': 0.15, 'fit': False},
         ],
         'decals': [
             {'view': 'front', 'rect': [[0.0, 0.615], [1.43, 0.155]], 'radius': 0.01, 'mirror': False,
