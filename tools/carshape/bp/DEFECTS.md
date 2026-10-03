@@ -99,3 +99,59 @@ raw within 18 cm of each end (smooth_inner's margin), so a kink in the top view'
 tail curve becomes a vertical groove down the tail panel; and a tail or nose has one
 section for all its stations, so a bumper crease and a tucked-under valance cannot
 exist.
+
+## 2026-10-03: checked against the real car, not the previous build
+
+Passing a build because it was "not worse than before" let the old faults through
+(Eagle's screen into a domed roof, mirrors hanging on stalks, GAZ-21's screen corner).
+Every car is now judged against its photos and its factory figures:
+
+- `build/carshape/refsheet.sh <tag> <car>...` – the photos in `_refs/photos/<car>` beside
+  game-renderer shots from the same angles (front/rear three-quarters both sides, side,
+  screen close-up): `$S/ref-<tag>-<car>.jpg`.
+- `build/carshape/dims.py <car>...` – the built body against the car file's factory
+  figures (length, width, height, wheelbase, tracks, wheel radius). The game stretches
+  the body per axis to the factory size and sets the wheels by the factory wheelbase and
+  overhang, so a body built short is stretched lengthways: arches drift off the wheels,
+  round lamps go oval. Off by more than 2 % is a defect to fix in the build.
+- `build/carshape/symm.py <car>...` – each part against its mirror image (shells and
+  glass are symmetric to 1 cm; one-sided parts are one mirror, blinkers).
+
+What was found, and what fixed it (generator, all cars):
+
+14. **Glass curling over into the roof.** Side windows took every face whose normal was
+    within ~81 deg of the side (facing 0.15), well round the roof's edge: the "capsule"
+    glasshouse. Now a side window keeps its drawn straight edges but its header comes
+    down, measured by ray at stations along the header only (not the slanted ends,
+    not a pillar's turn towards the screen), to 1 cm under where the side turns past
+    `sideFit` 0.6 across the car (`fit_pane`, `clip_below`). Screens and back lights are
+    fitted against `endFit` 0.55 (they had 0.15-0.3) so they lie on the end, not round
+    its corners. Tried and dropped: a limit relative to the pane's own mean normal
+    (cut the side windows into strips: the glasshouse side is curved top and bottom).
+15. **Domed roofs, rounded glasshouse shoulders.** The end-view section is smoothed
+    as width against height with a 5 cm gaussian, kept raw only 1 cm from its ends,
+    and that end was taken where an earlier blur's tail faded out, above the drawn roof:
+    the roof's corner was spread over +-10 cm. `smooth_inner` now takes the ends where
+    the width falls to half, and `sectionMargin` defaults to 12 cm. (Eagle: side upright
+    to 1.39 m instead of 1.27, window headers 1.33 -> 1.36.) `roofCrown` was not it.
+16. **Wagon and hatch tails cut back under the belt.** Where the cabin ends, the body's
+    top blends to the next station's top over `beltBlend`; with the cabin running to the
+    tail, the next station is beyond the car, so the tail was cut in a wedge (Eagle
+    10 cm short at the belt, the glasshouse overhanging it like a spoiler). Only blends
+    to a deck within 0.3 m below the belt now.
+17. **Mirrors.** On the door unless set ahead of the front side window by over 12 cm
+    (was: on the wing whenever the side ray at the mirror's height hit glass inboard);
+    a wing mirror's head stands over its stalk, at most 4 cm out (it hung at `reach`).
+18. **Arch flare scraps.** The band's innermost ring lies on the arch's rounded edge
+    (under the lip) and is left out of the "skin jumps" test; a band shorter than a
+    quarter of its arc is not built (Eagle's black teeth over the arches).
+
+Car-file fixes that came from the photos (not the drawing):
+
+- Eagle: the drawing is a four-door with a sloping hatch, the car a wagon: tail,
+  cabin to the tail, quarter windows and back light from the photo; end sections given
+  as outlines (the drawing's glasshouse has a tumblehome the car does not); a dark panel
+  behind the lamps and grille; bumpers 9 cm deep, wrap 30 cm.
+
+Open: Moskvich-412's body is built 3.56 m long for 4.25 (its drawing's scale), so its
+nose decals find no faces; GAZ-21 and Eagle 4 % short.

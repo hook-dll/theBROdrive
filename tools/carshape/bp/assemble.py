@@ -334,12 +334,65 @@ def ragged(view, sign, poly, d):
     return sum(1 for f in inside_all - seen if any(o in seen for e in f.edges for o in e.link_faces))
 
 
+def clip_below(poly, cap):
+    """The part of an outline below the height `cap` (its slanted edges kept)."""
+    out = []
+    for p, q in zip(poly, poly[1:] + poly[:1]):
+        pin, qin = p[1] <= cap, q[1] <= cap
+        if pin:
+            out.append(list(p))
+        if pin != qin:
+            t = (cap - p[1]) / (q[1] - p[1])
+            out.append([p[0] + (q[0] - p[0]) * t, cap])
+    return out
+
+
 def fit_pane(view, sign, poly, d, ks=None):
     """A screen drawn a little wider than the shell's glasshouse would end raggedly on
     the pillars: its outline is brought in, a centimetre at a time, until it lies on
     the surface the view sees."""
-    if view == 'side' or d.get('fit') is False:
+    if d.get('fit') is False:
         return poly
+    key = (view, id(d))
+    if view == 'side':
+        # A side window lies on the glasshouse's near-upright side: its header comes
+        # down to just under where the side turns over into the roof (past
+        # `sideFit`), measured by ray at stations along it; its drawn straight
+        # edges are kept.
+        if ks is not None:
+            return clip_below(poly, ks)
+        tree = _VIS_TREE.get('t') or BVHTree.FromBMesh(bm)
+        _VIS_TREE['t'] = tree
+        lim = d.get('sideFit', 0.6)
+        arr = np.array(poly, float)
+        a0, a1 = arr[:, 0].min(), arr[:, 0].max()
+        hi = arr[:, 1].max()
+        cap = hi
+        for a_ in np.linspace(a0 + 0.05, a1 - 0.05, 9):
+            # the outline's own top at this station
+            tops = []
+            for p, q in zip(poly, poly[1:] + poly[:1]):
+                if (p[0] - a_) * (q[0] - a_) <= 0 and p[0] != q[0]:
+                    tops.append(p[1] + (q[1] - p[1]) * (a_ - p[0]) / (q[0] - p[0]))
+            # (only along the header: the slanted ends follow the pillars)
+            if not tops or max(tops) < hi - 0.02:
+                continue
+            for z_ in np.arange(max(tops), max(tops) - 0.20, -0.005):
+                hit = tree.ray_cast(Vector((sign * 2.0, a_, z_)), Vector((-sign, 0, 0)), 4.0)
+                # the turn over into the roof only (across the car), not a pillar's
+                # turn towards the screen
+                if hit[0] is not None and hit[1].x * sign >= lim * math.hypot(hit[1].x, hit[1].z):
+                    if z_ < max(tops) - 0.004:
+                        cap = min(cap, z_ - 0.01)
+                    break
+        if cap < hi - 0.005:
+            print(f'PANE {car} (side) header {hi:.3f} -> {cap:.3f}')
+        FIT_KS[key] = cap
+        return clip_below(poly, cap)
+    elif d.get('facingMin', 0.2) >= 0:
+        # a screen lies on the end it looks out of, not round its corners into the
+        # sides or over into the roof
+        d = dict(d, facingMin=max(d.get('facingMin', 0.2), d.get('endFit', 0.55)))
     lo = min(p[1] for p in poly)
     hi = max(p[1] for p in poly)
 
@@ -365,7 +418,7 @@ def fit_pane(view, sign, poly, d, ks=None):
     # Each turned-away face says which edge to move: one near the base raises the
     # base, near the header lowers it, anything else brings the sides in.
     ks = [0, 0, 0]
-    limits = (10, 12, 8)
+    limits = (0, 6, 10) if view == 'side' else (10, 12, 8)
     lf = loose(poly)
     r = len(lf)
     while r > 2:
@@ -385,7 +438,7 @@ def fit_pane(view, sign, poly, d, ks=None):
         r = len(lf)
     if any(ks):
         print(f'PANE {car} ({view}) in {ks[0]} cm, base up {ks[1]} cm, top down {ks[2]} cm, ragged {r}')
-    FIT_KS[(view, id(d))] = ks
+    FIT_KS[key] = ks
     return moved(*ks)
 
 
@@ -547,6 +600,8 @@ for gi, g in enumerate(GL):
     for sign, poly in sides_of(g):
         # Both halves of a screen take the first half's fit: a pane is symmetric.
         FITTED[(gi, sign)] = fit_pane(g['view'], sign, poly, g, FIT_KS.get((g['view'], id(g))))
+for gi, g in enumerate(GL):
+    for sign, poly in sides_of(g):
         cut(g['view'], sign, FITTED[(gi, sign)], g)
         if not g.get('sideWin'):
             iso_cut(g['view'], sign, FITTED[(gi, sign)], g)
@@ -1187,6 +1242,7 @@ def mirror_head(bm_, c, w_, h_, d_, shape, s_):
 
 
 m = P.get('mirror')
+_side_front = min((min(p_[0] for p_ in g_['outline']) for g_ in GL if g_['view'] == 'side'), default=-9.0)
 if m:
     bm_ = bmesh.new()
     w_, h_ = m.get('w', 0.13), m.get('h', 0.08)
@@ -1197,15 +1253,30 @@ if m:
         xc = x1 - s_ * w_ / 2
         # Where it stands: on the door (the side is right there at its height) or on
         # the wing's top (the side ray reaches the glasshouse, well inboard).
-        on_wing = m.get('mount') == 'wing' or (m.get('mount') != 'door' and (hit is None or abs(hit.x) < W / 2 - 0.12))
+        # A mirror at the front side window's corner is on the door; one well ahead of
+        # it stands on the wing.
+        on_wing = m.get('mount') == 'wing' or (m.get('mount') != 'door' and m['y'] < _side_front - 0.12)
         if on_wing:
-            down, _n = skin_point((xc, m['y'] + 0.01, m['z']), (0, 0, -1))
+            # The stalk stands on the wing's top, the head over it (at most a few cm
+            # out): a head out at `reach` above a foot well inboard hangs in the air.
+            down = None
+            for k in range(40):
+                xf = xc - s_ * 0.01 * k
+                down, _n = skin_point((xf, m['y'] + 0.01, m['z']), (0, 0, -1))
+                if down is not None and down.z > m['z'] - 0.35:
+                    break
+                down = None
+            if down is None:
+                xf = xc
+            else:
+                xc = xf + s_ * min(abs(xc - xf), 0.04)
+                x1 = xc + s_ * w_ / 2
             z_foot = down.z if down else m['z'] - 0.15
             z_head = m['z'] - h_ * 0.45
             # a thin stalk from a small foot on the wing up into the head
-            disc(bm_, (xc, m['y'] + 0.01, z_foot + 0.004), (0, 0, 1), 0.018, 0.012, 10, 0)
+            disc(bm_, (xf, m['y'] + 0.01, z_foot + 0.004), (0, 0, 1), 0.018, 0.012, 10, 0)
             if z_head - z_foot > 0.01:
-                disc(bm_, (xc, m['y'] + 0.01, (z_foot + z_head) / 2), (0, 0, 1), 0.007, z_head - z_foot, 8, 0)
+                disc(bm_, (xf, m['y'] + 0.01, (z_foot + z_head) / 2), (0, 0, 1), 0.007, z_head - z_foot, 8, 0)
         else:
             # The sail on the door's own skin: at the mirror's height, or lower down to
             # the door's top when the glass is what is there.
@@ -1408,10 +1479,14 @@ for fl in P.get('archFlares', []):
                 prev = None
                 for i in range(mid, len(rows) if step > 0 else -1, step):
                     xs_ = rows[i][1]
-                    if None in xs_ or max(xs_) - min(xs_) > 0.03 or (prev is not None and abs(xs_[0] - prev) > 0.02):
+                    # (the innermost ring lies on the arch's rounded edge, under the lip)
+                    if None in xs_ or max(xs_[1:]) - min(xs_[1:]) > 0.03 or (prev is not None and abs(xs_[1] - prev) > 0.02):
                         break
                     keep.add(i)
-                    prev = xs_[0]
+                    prev = xs_[1]
+            if len(keep) < len(rows) // 4:
+                # a scrap at the arch's top is no flare
+                continue
             # Each ring: the lip turned in over the arch's cut edge (the voxel hull leaves it
             # ragged, and a band starting on it shows the tears), the band's face across
             # (standing t off the most outward point of the skin beneath it, so the side

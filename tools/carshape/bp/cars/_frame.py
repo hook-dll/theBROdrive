@@ -1,0 +1,62 @@
+"""Moving a car file's drawing along the car: when the factory front overhang is
+corrected, the front axle moves (it stands at -length/2 + frontOverhang) and the wheel
+arches with it, but outlines given in metres stay put. shift_along(CAR, dy) moves
+everything a car file places along the car by dy, so the body moves with its axles."""
+
+
+def _side(pts, dy):
+    return [[p[0] + dy] + list(p[1:]) for p in pts]
+
+
+def _patch(d, dy, view):
+    if view == 'side':
+        if 'outline' in d:
+            d['outline'] = _side(d['outline'], dy)
+        if 'points' in d:
+            d['points'] = _side(d['points'], dy)
+        if 'rect' in d:
+            d['rect'] = [[d['rect'][0][0] + dy, d['rect'][0][1]], d['rect'][1]]
+        if 'circle' in d:
+            d['circle'] = [[d['circle'][0][0] + dy, d['circle'][0][1]], d['circle'][1]]
+        if 'span' in d:
+            d['span'] = [d['span'][0] + dy, d['span'][1] + dy]
+    elif view in ('front', 'rear') and d.get('depthRange'):
+        d['depthRange'] = [d['depthRange'][0] + dy, d['depthRange'][1] + dy]
+    elif view == 'top':
+        if 'outline' in d:
+            d['outline'] = _side(d['outline'], dy)
+        if 'rect' in d:
+            d['rect'] = [[d['rect'][0][0] + dy, d['rect'][0][1]], d['rect'][1]]
+
+
+def shift_along(CAR, dy):
+    bp = CAR['blueprint']
+    if 'outline' in bp.get('side', {}):
+        bp['side']['outline'] = _side(bp['side']['outline'], dy)
+    if 'outline' in bp.get('top', {}):
+        bp['top']['outline'] = _side(bp['top']['outline'], dy)
+    h = CAR['hull']
+    for k in ('sill', 'belt', 'glassPlan', 'crown', 'planOverride', 'topOverride'):
+        if k in h:
+            h[k] = _side(h[k], dy)
+    if 'cabin' in h:
+        h['cabin'] = [h['cabin'][0] + dy, h['cabin'][1] + dy]
+    for k in h.get('sectionKeys', []):
+        k['y'] = [k['y'][0] + dy, k['y'][1] + dy]
+    for tc in h.get('topCross', []):
+        tc['y'] += dy
+    P = CAR['parts']
+    for key in ('glass', 'decals', 'lines', 'regions', 'bars'):
+        for d in P.get(key, []):
+            _patch(d, dy, d['view'])
+    if 'mirror' in P:
+        P['mirror']['y'] += dy
+    if 'handles' in P:
+        P['handles']['at'] = [[y + dy, z] for y, z in P['handles']['at']]
+    if 'wipers' in P:
+        P['wipers']['arms'] = [[a[0], a[1], a[2] + dy] + list(a[3:]) for a in P['wipers']['arms']]
+    for b in P.get('boxes', []):
+        b['c'][1] += dy
+    for pl in P.get('podLamps', []):
+        if 'y' in pl:
+            pl['y'] += dy

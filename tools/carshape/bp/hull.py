@@ -138,7 +138,10 @@ def smooth_inner(a, at, sigma, margin):
     nz = np.nonzero(a > 1e-3)[0]
     if len(nz) < 3:
         return a
-    lo, hi = at[nz[0]], at[nz[-1]]
+    # the ends where the shape turns in (half its width), not where an earlier blur's
+    # tail fades out above them
+    nh = np.nonzero(a > 0.5 * a.max())[0]
+    lo, hi = at[nh[0]], at[nh[-1]]
     wide = ndimage.gaussian_filter1d(a, sigma / (at[1] - at[0]), mode='nearest')
     w = np.clip(np.minimum(at - lo, hi - at) / margin, 0, 1)
     return a * (1 - w) + wide * w
@@ -287,7 +290,7 @@ def build(car):
         if hs.get('sectionSpacing', 0):
             s = fair(zs, s, hs.get('sectionSpacing', 0), mask=s > 0.03)
         else:
-            s = smooth_inner(s, zs, hs.get('sectionSmooth', 0.05), hs.get('sectionMargin', 0.01))
+            s = smooth_inner(s, zs, hs.get('sectionSmooth', 0.05), hs.get('sectionMargin', 0.12))
         b = hs.get('bumpers', {}).get(end)
         if b:
             s = fill_band(s, zs, [b['z'][0] - 0.02, b['z'][1] + 0.02])
@@ -419,7 +422,10 @@ def build(car):
                 if dist_ < bb:
                     t_ = dist_ / bb
                     t_ = t_ * t_ * (3 - 2 * t_)
-                    lower_tops[j] = zt_out + (belt[j] - zt_out) * t_ if zt_out < belt[j] + 0.1 else belt[j]
+                    # (no deck there, the car's end: a wagon's or a hatch's cabin
+                    # running to the tail kept the belt, not a slope down to nothing)
+                    deck = belt[j] - 0.3 < zt_out < belt[j] + 0.1
+                    lower_tops[j] = zt_out + (belt[j] - zt_out) * t_ if deck else belt[j]
     for j, y in enumerate(ys):
         if d_side[:, j].max() <= -0.05:
             continue
@@ -581,15 +587,20 @@ def bumper_paths(mesh, spec, info, raw_ends):
         # Stood off the shell so its face is where the drawing has it (the factory
         # length includes the bumpers), but never closer than 5 mm.
         dpt = b.get('depth', 0.06)
-        stand = b.get('standOff')
-        if stand is None and end in raw_ends:
-            stand = abs(y_end - raw_ends[end]) - dpt
-            if b.get('overriders'):
-                stand -= 0.015
-            print('BUMPER', end, 'shell', round(float(y_end), 3), 'drawn', round(raw_ends[end], 3), 'stand', round(stand, 3))
-        # (negative: the bar sits partly inside the shell, as a wrapped bumper does)
-        if b.get('standOff') is None:
-            stand = max(-dpt / 2 + 0.01, 0.02 if stand is None else stand)
+        # The bar's face is the car's end: the factory length includes the bumpers, and
+        # the game stretches a body to it (and sets the wheels by the factory overhang),
+        # so a bar short of it moved the arches off the wheels. Front face at -L/2 (the
+        # front overhang from the front axle), rear face at +L/2.
+        L_ = spec['factory']['length']
+        target = -L_ / 2 if end == 'front' else L_ / 2
+        stand = abs(target - y_end) - dpt
+        if b.get('overriders'):
+            stand -= 0.015
+        lo_ = -dpt / 2 + 0.01
+        if stand < lo_ or stand > 0.25:
+            print('BUMPER-OFF', end, 'shell', round(float(y_end), 3), 'target', round(target, 3), 'stand', round(stand, 3))
+        stand = min(max(stand, lo_), 0.25)
+        print('BUMPER', end, 'shell', round(float(y_end), 3), 'target', round(target, 3), 'stand', round(stand, 3))
         # The bar runs round the convex hull of the end's outline at its height: a bumper
         # is convex in plan, and the outline's recesses (a grille, the lamps' nests)
         # must not dent it.
