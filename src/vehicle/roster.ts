@@ -1446,7 +1446,7 @@ export const ROSTER: readonly RosterCar[] = [
     label: 'AMC Eagle',
     body: 'eagle.glb',
     bodyClass: 'car',
-    factory: { length: 4.74, width: 1.83, height: 1.405, clearance: 0.19, wheelbase: 2.776, frontTrack: 1.5, rearTrack: 1.46, wheelRadius: 0.34, tyreWidth: 0.195, frontOverhang: 0.82 },
+    factory: { length: 4.729, width: 1.836, height: 1.387, clearance: 0.175, wheelbase: 2.776, frontTrack: 1.514, rearTrack: 1.463, wheelRadius: 0.324, tyreWidth: 0.195, frontOverhang: 0.922 },
     mass: 1500,
     frontWeightShare: 0.56,
     rearDriveBias: 0.5,
