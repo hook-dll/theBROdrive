@@ -16,7 +16,7 @@
 #   z 0.86-0.89 the outer lip (the car's full width), 0.93 -> 0.75, 1.01 -> 0.55,
 #   1.04 -> 0.46, the bonnet's edge; the old flat 0.86-0.88 plateau put a 13 cm cliff
 #   right at the bonnet's edge and left the fender top dead flat (photos: a shoulder).
-WING = [[0.40, 0.50], [0.62, 0.50], [0.70, 0.86], [0.86, 0.875], [0.89, 0.87], [0.93, 0.75],
+WING = [[0.40, 0.50], [0.56, 0.50], [0.62, 0.58], [0.68, 0.72], [0.73, 0.85], [0.86, 0.875], [0.89, 0.87], [0.93, 0.75],
         [0.97, 0.65], [1.01, 0.55], [1.04, 0.46], [1.07, 0.42], [1.10, 0.20]]
 TUB = [[0.34, 0.68], [0.40, 0.70], [1.05, 0.70], [1.10, 0.68], [1.62, 0.67], [1.67, 0.6], [1.70, 0.2]]
 CAR = {
@@ -36,11 +36,12 @@ CAR = {
     'hull': {
         'sill': [[-1.72, 0.40], [-1.5, 0.39], [-0.75, 0.34], [0.5, 0.34], [1.25, 0.45], [1.55, 0.48]],
         'planOverride': [[-1.72, 0.84], [1.55, 0.84]],
-        # A station at the tail as well as at 1.55: outside the last station the section
-        # fell back to the end view's (the MB front view's fenders, 0.87 wide), which
-        # blew the tail panel out to 0.82 and rounded its corners into a cushion.
-        'sectionStations': [{'y': -1.50, 'half': WING}, {'y': -0.60, 'half': WING}, {'y': -0.48, 'half': TUB},
-                            {'y': 1.55, 'half': TUB}, {'y': 1.60, 'half': TUB}],
+        # Stations also at the two ends, not just at 1.55/-1.50: outside the last station
+        # the section fell back to the end view's (the MB front view's fenders, 0.87 wide),
+        # which blew the tail panel out to 0.82 into a cushion and put a 0.87-wide flange
+        # under the nose below the grille.
+        'sectionStations': [{'y': -1.62, 'half': WING}, {'y': -1.50, 'half': WING}, {'y': -0.60, 'half': WING},
+                            {'y': -0.48, 'half': TUB}, {'y': 1.55, 'half': TUB}, {'y': 1.60, 'half': TUB}],
         'stationBlend': 0.08,
         # Bonnet between the wings up to the cowl, then the tub's flat full-width cowl
         # (the bonnet's dips carried onto the cowl crumpled it). Across the wings: the
@@ -73,8 +74,9 @@ CAR = {
             {'view': 'side', 'outline': [[0.472, 1.528], [-0.10, 1.528], [-0.16, 1.157], [0.472, 1.157]], 'facingMin': 0.3},
             {'view': 'side', 'outline': [[1.433, 1.507], [0.647, 1.507], [0.647, 1.10], [1.433, 1.10]], 'facingMin': 0.3},
             # One screen pane, not the MB drawing's two with a centre bar: the 1967 CJ-5
-            # has a one-piece screen (photos) with a slim frame all round.
-            {'view': 'front', 'outline': [[-0.60, 1.15], [0.60, 1.15], [0.60, 1.55], [-0.60, 1.55]], 'mirror': False,
+            # has a one-piece screen (photos) with a slim frame all round (5 cm: the pane
+            # ran 1.15-1.55 inside a 1.07-1.68 glasshouse and left an 8-13 cm frame).
+            {'view': 'front', 'outline': [[-0.62, 1.12], [0.62, 1.12], [0.62, 1.60], [-0.62, 1.60]], 'mirror': False,
              'depthRange': [-0.4, 0.0], 'facingMin': 0.2, 'fit': False},
             {'view': 'rear', 'outline': [[-0.45, 1.25], [0.45, 1.25], [0.45, 1.55], [-0.45, 1.55]], 'mirror': False,
              'depthRange': [1.3, 1.7], 'facingMin': 0.2, 'fit': False},
@@ -92,10 +94,12 @@ CAR = {
             {'view': 'front', 'circle': [[0.42, 0.845], 0.105], 'material': 'chrome', 'height': 0.006, 'depthRange': [-1.8, -1.35]},
             {'view': 'front', 'node': 'headlights', 'circle': [[0.42, 0.845], 0.088], 'material': 'Headlights', 'height': 0.010,
              'depthRange': [-1.8, -1.35]},
-            {'view': 'front', 'circle': [[0.42, 0.645], 0.046], 'material': 'chrome', 'height': 0.006, 'depthRange': [-1.8, -1.35]},
-            {'view': 'front', 'node': 'front_blinker_left', 'circle': [[0.42, 0.645], 0.035], 'material': 'IndicatorLights',
+            # (the lamps sit on the panel's flat part: at x 0.42 the 4.6 cm bezel's outer
+            # edge crossed onto the wing's curving underside and its decal shredded)
+            {'view': 'front', 'circle': [[0.40, 0.66], 0.043], 'material': 'chrome', 'height': 0.006, 'depthRange': [-1.8, -1.35]},
+            {'view': 'front', 'node': 'front_blinker_left', 'circle': [[0.40, 0.66], 0.033], 'material': 'IndicatorLights',
              'height': 0.010, 'depthRange': [-1.8, -1.35]},
-            {'view': 'front', 'node': 'front_blinker_right', 'circle': [[0.42, 0.645], 0.035], 'material': 'IndicatorLights',
+            {'view': 'front', 'node': 'front_blinker_right', 'circle': [[0.40, 0.66], 0.033], 'material': 'IndicatorLights',
              'height': 0.010, 'depthRange': [-1.8, -1.35]},
             # Tail: one round lamp a side in a bezel (photos), low on the tail panel; the
             # indicator is inside the same lamp (the '58-'71 CJ-5's combined stop/turn
@@ -111,8 +115,8 @@ CAR = {
              'material': 'ReverseLights', 'height': 0.010, 'depthRange': [1.3, 1.7], 'facingMin': 0.2},
             {'view': 'rear', 'rect': [[0.30, 0.66], [0.30, 0.13]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [1.3, 1.7], 'facingMin': 0.2},
-            {'view': 'front', 'rect': [[0.0, 0.37], [0.40, 0.10]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
-             'height': 0.006, 'depthRange': [-1.8, -1.35]},
+            # (no front plate: the photo's car carries none, and the rect at z 0.32-0.42
+            # was projected over the frame's curved face and torn into a sawtooth)
         ],
         'bars': [
             # Nine slots in the grille, not seven: the photo's slotted panel between the
@@ -122,7 +126,10 @@ CAR = {
         ],
         'lines': [
             {'view': 'side', 'points': [[-1.50, 0.86], [-0.55, 0.86]], 'width': 0.006},
-            {'view': 'side', 'points': [[-0.95, 0.40], [-0.80, 0.50], [-0.70, 0.62], [-0.60, 0.85]], 'width': 0.006},
+            # The wing's rear edge, kept on the part of the skin that faces sideways: the
+            # drawing's points (sill 0.40 at y -0.95) lie inside the wheel opening and on
+            # the wing's underside, where a side decal grazes and tears into a black fan.
+            {'view': 'side', 'points': [[-0.72, 0.73], [-0.68, 0.78], [-0.63, 0.83], [-0.60, 0.86]], 'width': 0.006},
         ],
         'bumpers': {
             'front': {'z': [0.41, 0.52], 'depth': 0.10, 'wrap': 0.02, 'profile': 'blade', 'material': 'trim', 'standOff': 0.0},
@@ -130,7 +137,7 @@ CAR = {
             # 0.40-0.48 it was below the body's sill (0.48 at the tail) and stood 0.205
             # clear of the shell, in the air behind it.
             'rear': {'z': [0.43, 0.52], 'depth': 0.06, 'wrap': 0.02, 'profile': 'blade', 'material': 'trim',
-                     'standOff': 0.0, 'standMax': 0.12, 'span': 1.0},
+                     'standOff': 0.0, 'standMax': 0.15, 'span': 1.0},
         },
         'mirror': {'y': -0.22, 'z': 1.22, 'reach': 0.76, 'w': 0.11, 'h': 0.11, 'shape': 'round'},
         'wipers': {'arms': [[-0.5, -0.1, -0.24, 1.55], [0.1, 0.5, -0.24, 1.55]]},

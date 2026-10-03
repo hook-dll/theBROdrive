@@ -25,7 +25,14 @@ CAR = {
         'crown': [[-2.0, 0.02], [2.0, 0.02]],
         'roofCrown': 0.03,
         'edge': 0.010,
-        'arch': {'radius': 0.36, 'lift': 0.03},
+        # The 4 cm blur rounded the nose and the deck's rear edge away (the tail came off
+        # its drawn line 6 cm low at +1.90): the ends' outlines faired with their corners
+        # kept (the drawing's bonnet brow over the lamps, the boot lid's rear edge).
+        'faceSpacing': 0.15, 'cornerDeg': 20,
+        # The drawing's arch lip tops out at z 0.645 over the axle (the swage line at
+        # 0.689 is above it); with R 0.29 + lift 0.03 + r 0.36 the opening sat 4 cm high
+        # and read as a gap above the tyre (the photos leave 6 cm, not 10).
+        'arch': {'radius': 0.355, 'lift': 0.0},
     },
     'parts': {
         'glass': [
@@ -53,23 +60,30 @@ CAR = {
              'depthRange': [-2.1, -1.6]},
             {'view': 'front', 'outline': [[0.0, 0.67], [0.03, 0.64], [0.03, 0.56], [0.0, 0.53], [-0.03, 0.56], [-0.03, 0.64]],
              'mirror': False, 'material': 'chrome', 'height': 0.010, 'depthRange': [-2.1, -1.6]},
-            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.36, 0.405], [0.08, 0.025]], 'radius': 0.01,
+            # The amber indicators sit in the lamp panel's outer ends at the lamps' own
+            # height (the photos of the 1.3 S), not low and inboard where the drawing's
+            # four HF slots are: outboard of the outer lamp, at the wing's corner.
+            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.652, 0.527], [0.062, 0.028]], 'radius': 0.013,
              'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-2.1, -1.6]},
-            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.36, 0.405], [0.08, 0.025]], 'radius': 0.01,
+            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.652, 0.527], [0.062, 0.028]], 'radius': 0.013,
              'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-2.1, -1.6]},
             {'view': 'front', 'rect': [[0.0, 0.33], [0.40, 0.09]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
              'height': 0.004, 'depthRange': [-2.1, -1.6]},
-            # The tail: body colour; chrome-framed lamp clusters on its corners under the deck
-            # (tail lamp over the turn lamp), the plate between them.
-            {'view': 'rear', 'rect': [[0.55, 0.615], [0.27, 0.115]], 'radius': 0.02, 'material': 'chrome',
+            # The tail: one chrome-framed cluster a side under the deck: the stop/tail a
+            # round red lens inboard with the amber indicator lens beside it outboard (the
+            # photos of the 1.3 S); the reversing lamp sits on the panel below the
+            # cluster's outer end, in its own chrome bezel.
+            {'view': 'rear', 'rect': [[0.545, 0.60], [0.30, 0.10]], 'radius': 0.025, 'material': 'chrome',
              'height': 0.004, 'depthRange': [1.6, 2.1], 'facingMin': 0.1},
-            {'view': 'rear', 'node': 'taillights', 'rect': [[0.55, 0.64], [0.245, 0.045]], 'radius': 0.01, 'material': 'TailLights',
+            {'view': 'rear', 'node': 'taillights', 'circle': [[0.475, 0.60], 0.042], 'material': 'TailLights',
              'height': 0.008, 'depthRange': [1.6, 2.1], 'facingMin': 0.1},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.59, 0.592], [0.165, 0.04]], 'radius': 0.01,
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.625, 0.60], [0.105, 0.05]], 'radius': 0.02,
              'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.6, 2.1], 'facingMin': 0.1},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.59, 0.592], [0.165, 0.04]], 'radius': 0.01,
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.625, 0.60], [0.105, 0.05]], 'radius': 0.02,
              'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.6, 2.1], 'facingMin': 0.1},
-            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.465, 0.592], [0.065, 0.04]], 'radius': 0.005,
+            {'view': 'rear', 'rect': [[0.625, 0.495], [0.075, 0.045]], 'radius': 0.012, 'material': 'chrome',
+             'height': 0.004, 'depthRange': [1.6, 2.1], 'facingMin': 0.1},
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.625, 0.495], [0.055, 0.03]], 'radius': 0.006,
              'material': 'ReverseLights', 'height': 0.008, 'depthRange': [1.6, 2.1], 'facingMin': 0.1},
             {'view': 'rear', 'rect': [[0.0, 0.51], [0.30, 0.13]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.008, 'depthRange': [1.6, 2.1], 'facingMin': 0.1},

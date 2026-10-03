@@ -26,9 +26,27 @@ CAR = {
         'edgeY': 0.04,
         'edgeYMin': 0.04,
         'crownScale': 1,
-        'arch': {'radius': 0.35, 'lift': 0.05},
+        # The plan as the 16v's, not the Evo drawing's: the drawing's top view carries
+        # the Evo's arch flares (0.83-0.85 over the wheels against 0.81 at the doors),
+        # and the section scales the plan at every height, so each arch came out as a
+        # 15-35 mm swelling with a ramp up to the door -- the blisters the zebra shows
+        # over both wheels. The 16v's body is flat-sided under the plastic extensions
+        # (parts.archFlares) and its corners turn in 15 cm (photos), where the fitted
+        # plan spread the taper over 30.
+        'planOverride': [[-1.950, 0.00], [-1.945, 0.26], [-1.920, 0.44], [-1.890, 0.56], [-1.860, 0.65],
+                         [-1.820, 0.73], [-1.780, 0.775], [-1.720, 0.800], [-1.650, 0.812], [-1.550, 0.816],
+                         [-1.200, 0.817], [-0.600, 0.818], [0.000, 0.818], [0.600, 0.818], [1.100, 0.818],
+                         [1.400, 0.816], [1.600, 0.812], [1.720, 0.800], [1.780, 0.775], [1.830, 0.730],
+                         [1.870, 0.660], [1.900, 0.550], [1.925, 0.400], [1.945, 0.220], [1.950, 0.00]],
+        # The wheel openings are the body's, under the extensions: the tyre (0.59) with
+        # 5 cm of gap above it, where 0.35/0.05 left 10.5 cm of air in the arch.
+        'arch': {'radius': 0.33, 'lift': 0.015},
     },
     'parts': {
+        # The 16v's black plastic arch extensions (photos): a band round each opening,
+        # standing 12 mm off the flat side. The Evo drawing's flares are in the plan
+        # above, not here.
+        'archFlares': [{'axle': 'both', 'r': 0.345, 'w': 0.05, 't': 0.012, 'lift': 0.015}],
         'glass': [
             {'view': 'side', 'outline': [[0.295, 1.261], [0.066, 1.251], [-0.195, 1.237], [-0.42, 1.06], [-0.45, 0.90], [0.30, 0.89]],
              'facingMin': 0.3},
@@ -64,22 +82,42 @@ CAR = {
              'material': 'IndicatorLights', 'height': 0.008, 'facingMin': 0.4, 'depthRange': [-2.0, -1.5]},
             {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.80, 0.63], [0.05, 0.10]], 'radius': 0.006,
              'material': 'IndicatorLights', 'height': 0.008, 'facingMin': 0.4, 'depthRange': [-2.0, -1.5]},
-            {'view': 'top', 'rect': [[-1.25, 0.0], [0.45, 0.07]], 'radius': 0.015, 'mirror': False, 'material': 'grille', 'height': 0.004},
-            {'view': 'top', 'rect': [[-1.20, 0.24], [0.25, 0.09]], 'radius': 0.015, 'material': 'grille', 'height': 0.004},
-            # Tail: wedge lamps in the corners above, the small lamps below.
-            {'view': 'rear', 'node': 'taillights', 'outline': [[0.47, 0.84], [0.60, 0.84], [0.64, 0.74], [0.47, 0.74]],
+            # The 16v's bonnet: one recessed louvred panel on the left half (photos), a
+            # 44 x 28 cm rounded panel with six louvres across it. The old pair of 7 and
+            # 9 cm strips, one of them on the centre line, read as painted bars.
+            {'view': 'top', 'rect': [[-1.30, 0.30], [0.44, 0.28]], 'radius': 0.035, 'mirror': False,
+             'material': 'grille', 'height': 0.004},
+            {'view': 'top', 'rect': [[-1.30, 0.1875], [0.42, 0.016]], 'radius': 0.006, 'mirror': False, 'material': 'chrome', 'height': 0.006},
+            {'view': 'top', 'rect': [[-1.30, 0.2325], [0.42, 0.016]], 'radius': 0.006, 'mirror': False, 'material': 'chrome', 'height': 0.006},
+            {'view': 'top', 'rect': [[-1.30, 0.2775], [0.42, 0.016]], 'radius': 0.006, 'mirror': False, 'material': 'chrome', 'height': 0.006},
+            {'view': 'top', 'rect': [[-1.30, 0.3225], [0.42, 0.016]], 'radius': 0.006, 'mirror': False, 'material': 'chrome', 'height': 0.006},
+            {'view': 'top', 'rect': [[-1.30, 0.3675], [0.42, 0.016]], 'radius': 0.006, 'mirror': False, 'material': 'chrome', 'height': 0.006},
+            {'view': 'top', 'rect': [[-1.30, 0.4125], [0.42, 0.016]], 'radius': 0.006, 'mirror': False, 'material': 'chrome', 'height': 0.006},
+            # The scuttle vents along the screen's foot, and the wing's repeater.
+            {'view': 'top', 'rect': [[-0.75, 0.0], [0.10, 1.25]], 'radius': 0.01, 'mirror': False,
+             'material': 'grille', 'height': 0.004},
+            {'view': 'side', 'node': 'front_blinker_left', 'rect': [[-1.30, 0.76], [0.05, 0.03]],
+             'material': 'IndicatorLights', 'height': 0.005},
+            {'view': 'side', 'node': 'front_blinker_right', 'rect': [[-1.30, 0.76], [0.05, 0.03]],
+             'material': 'IndicatorLights', 'height': 0.005},
+            # Tail: the 16v's tall corner units (photos) -- red at the top, an amber
+            # band, red below, the outer edge following the quarter's corner out as it
+            # comes down, from the hatch's lower edge to the bumper. The old wedges were
+            # half that height and sat up at the belt.
+            {'view': 'rear', 'node': 'taillights', 'outline': [[0.49, 0.85], [0.665, 0.85], [0.715, 0.50], [0.49, 0.50]],
              'material': 'TailLights', 'height': 0.008, 'depthRange': [1.6, 2.0], 'facingMin': 0.1},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'outline': [[0.47, 0.74], [0.64, 0.74], [0.68, 0.66], [0.47, 0.66]],
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.6, 2.0], 'facingMin': 0.1},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'outline': [[0.47, 0.74], [0.64, 0.74], [0.68, 0.66], [0.47, 0.66]],
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.6, 2.0], 'facingMin': 0.1},
-            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.57, 0.615], [0.08, 0.06]], 'radius': 0.006,
-             'material': 'ReverseLights', 'height': 0.008, 'depthRange': [1.6, 2.0]},
+            {'view': 'rear', 'node': 'rear_blinker_left', 'outline': [[0.49, 0.73], [0.678, 0.73], [0.688, 0.64], [0.49, 0.64]],
+             'material': 'IndicatorLights', 'height': 0.011, 'depthRange': [1.6, 2.0], 'facingMin': 0.1},
+            {'view': 'rear', 'node': 'rear_blinker_right', 'outline': [[0.49, 0.73], [0.678, 0.73], [0.688, 0.64], [0.49, 0.64]],
+             'material': 'IndicatorLights', 'height': 0.011, 'depthRange': [1.6, 2.0], 'facingMin': 0.1},
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.545, 0.532], [0.07, 0.06]], 'radius': 0.006,
+             'material': 'ReverseLights', 'height': 0.011, 'depthRange': [1.6, 2.0]},
             {'view': 'rear', 'rect': [[0.0, 0.76], [0.66, 0.15]], 'radius': 0.01, 'mirror': False, 'material': 'plate',
              'height': 0.005, 'depthRange': [1.6, 2.0]},
         ],
         'bars': [
-            {'view': 'front', 'span': [-0.25, 0.25], 'b': [0.45, 0.53], 'count': 5, 'dir': 'v', 'width': 0.05,
+            # The bumper's lower intake has cross slats (photos), not a row of teeth.
+            {'view': 'front', 'span': [-0.30, 0.30], 'b': [0.44, 0.53], 'count': 3, 'dir': 'h', 'width': 0.015,
              'material': 'grille', 'height': 0.006, 'depthRange': [-2.0, -1.55]},
         ],
         'lines': [
