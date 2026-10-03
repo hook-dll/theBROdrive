@@ -1104,7 +1104,7 @@ export const ROSTER: readonly RosterCar[] = [
     label: 'Jeep CJ-5',
     body: 'jeep.glb',
     bodyClass: 'car',
-    factory: { length: 3.44, width: 1.74, height: 1.7, clearance: 0.21, wheelbase: 2.057, frontTrack: 1.234, rearTrack: 1.234, wheelRadius: 0.355, tyreWidth: 0.16, frontOverhang: 0.55 },
+    factory: { length: 3.29, width: 1.74, height: 1.7, clearance: 0.21, wheelbase: 2.057, frontTrack: 1.234, rearTrack: 1.234, wheelRadius: 0.355, tyreWidth: 0.16, frontOverhang: 0.55 },
     mass: 1100,
     frontWeightShare: 0.55,
     rearDriveBias: 0.5,

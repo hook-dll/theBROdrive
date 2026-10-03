@@ -45,6 +45,8 @@ def shift_along(CAR, dy):
         k['y'] = [k['y'][0] + dy, k['y'][1] + dy]
     for tc in h.get('topCross', []):
         tc['y'] += dy
+    for st in h.get('sectionStations', []):
+        st['y'] += dy
     P = CAR['parts']
     for key in ('glass', 'decals', 'lines', 'regions', 'bars'):
         for d in P.get(key, []):
@@ -60,6 +62,8 @@ def shift_along(CAR, dy):
     for pl in P.get('podLamps', []):
         if 'y' in pl:
             pl['y'] += dy
+    for sp in P.get('spares', []):
+        sp['c'][1] += dy
 
 
 def set_overhang(CAR, fo):
