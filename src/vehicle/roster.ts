@@ -339,7 +339,7 @@ export const ROSTER: readonly RosterCar[] = [
     label: 'Ford Escort',
     body: 'escort.glb',
     bodyClass: 'car',
-    factory: { length: 3.978, width: 1.595, height: 1.39, clearance: 0.14, wheelbase: 2.405, frontTrack: 1.27, rearTrack: 1.3, wheelRadius: 0.29, tyreWidth: 0.175, frontOverhang: 0.68 },
+    factory: { length: 3.978, width: 1.595, height: 1.39, clearance: 0.14, wheelbase: 2.405, frontTrack: 1.27, rearTrack: 1.3, wheelRadius: 0.29, tyreWidth: 0.175, frontOverhang: 0.57 },
     mass: 900,
     frontWeightShare: 0.53,
     rearDriveBias: 1,

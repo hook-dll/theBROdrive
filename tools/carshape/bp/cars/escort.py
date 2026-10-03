@@ -32,6 +32,10 @@ CAR = {
         'crown': [[-2.1, 0.018], [2.1, 0.018]],
         'roofCrown': 0.03,
         'edge': 0.012,
+        # a crisp three-box body (photos)
+        'edgeMin': 0.015,
+        'edgeY': 0.04,
+        'edgeYMin': 0.04,
         'arch': {'radius': 0.33, 'lift': 0.02},
     },
     'parts': {
@@ -92,9 +96,9 @@ CAR = {
             {'view': 'side', 'points': [[0.465, 0.91], [0.49, 1.27]], 'width': 0.03, 'material': 'trim', 'height': 0.003},
         ],
         'bumpers': {
-            'front': {'z': [0.42, 0.50], 'depth': 0.06, 'wrap': 0.24, 'profile': 'blade', 'material': 'trim',
+            'front': {'z': [0.42, 0.50], 'depth': 0.06, 'wrap': 0.24, 'profile': 'blade', 'material': 'chrome',
                       'overriders': [[0.42, 0.06, 0.40, 0.52]]},
-            'rear': {'z': [0.40, 0.48], 'depth': 0.06, 'wrap': 0.24, 'profile': 'blade', 'material': 'trim'},
+            'rear': {'z': [0.40, 0.48], 'depth': 0.06, 'wrap': 0.24, 'profile': 'blade', 'material': 'chrome'},
         },
         'mirror': {'y': -0.66, 'z': 0.96, 'reach': 0.90, 'w': 0.13, 'h': 0.075},
         'handles': {'at': [[0.33, 0.855]], 'w': 0.13},
@@ -102,3 +106,10 @@ CAR = {
         'wheel': {'style': 'steel', 'windows': 8, 'rimFactor': 0.68, 'cap': True},
     },
 }
+
+# No front overhang is published; the drawing's (0.553 / 0.972) scaled to length less
+# wheelbase. The file's 0.680 stretched the nose 12 cm past the drawing.
+import os as _os, sys as _sys  # noqa: E402
+_sys.path.insert(0, _os.path.dirname(__file__))
+from _frame import set_overhang  # noqa: E402
+set_overhang(CAR, 0.570)
