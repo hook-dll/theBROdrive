@@ -11,6 +11,9 @@ CAR = {
         'image': 'moskvich412.jpg',
         'degrid': 'thin',
         'side': {'box': [276, 16, 767, 190], 'nose': 'left', 'ground': 191, 'ppmz': 108.9,
+                 # the axles placed for the outline (in metres) to sit inside the box: without
+                 # them the wheel finder picked a pair off the grid and clipped the nose
+                 'wheels': [[370, 156.7], [631.4, 156.7]],
                  'outline': [[-2.09, 0.30], [-2.10, 0.70], [-2.08, 0.90], [-2.0, 0.925], [-1.5, 0.966], [-1.0, 0.99],
                              [-0.69, 1.424], [-0.615, 1.47], [0.84, 1.47], [0.908, 1.424], [1.164, 0.986], [1.838, 0.915],
                              [1.919, 0.873], [1.946, 0.83], [1.952, 0.48], [1.93, 0.30], [1.9, 0.0], [-2.05, 0.0]]},
@@ -48,15 +51,18 @@ CAR = {
                                          [0.0, 0.985]], 'depthRange': [0.7, 1.4]},
         ],
         'decals': [
-            {'view': 'front', 'rect': [[0.0, 0.645], [0.86, 0.315]], 'radius': 0.015, 'mirror': False,
-             'material': 'grille', 'height': 0.005, 'depthRange': [-2.2, -1.8]},
-            {'view': 'front', 'rect': [[0.585, 0.681], [0.29, 0.205]], 'radius': 0.015,
-             'material': 'chrome', 'height': 0.006, 'depthRange': [-2.2, -1.8]},
-            {'view': 'front', 'node': 'headlights', 'rect': [[0.585, 0.681], [0.26, 0.17]], 'radius': 0.012,
-             'material': 'Headlights', 'height': 0.012, 'depthRange': [-2.2, -1.8]},
-            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.65, 0.537], [0.13, 0.05]], 'radius': 0.01,
+            # The 1967-76 front (photos): one chrome surround across the panel, round lamps
+            # in chrome rings at its ends, the grille of fine horizontal bars between them.
+            {'view': 'front', 'rect': [[0.0, 0.69], [1.44, 0.22]], 'radius': 0.03, 'mirror': False,
+             'material': 'chrome', 'height': 0.004, 'depthRange': [-2.2, -1.8]},
+            {'view': 'front', 'rect': [[0.0, 0.69], [0.96, 0.17]], 'radius': 0.015, 'mirror': False,
+             'material': 'grille', 'height': 0.006, 'depthRange': [-2.2, -1.8]},
+            {'view': 'front', 'circle': [[0.60, 0.69], 0.095], 'material': 'chrome', 'height': 0.007, 'depthRange': [-2.2, -1.8]},
+            {'view': 'front', 'node': 'headlights', 'circle': [[0.60, 0.69], 0.08], 'material': 'Headlights',
+             'height': 0.012, 'depthRange': [-2.2, -1.8]},
+            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.60, 0.55], [0.12, 0.04]], 'radius': 0.01,
              'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-2.2, -1.8]},
-            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.65, 0.537], [0.13, 0.05]], 'radius': 0.01,
+            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.60, 0.55], [0.12, 0.04]], 'radius': 0.01,
              'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-2.2, -1.8]},
             {'view': 'side', 'node': 'front_blinker_left', 'circle': [[-0.965, 0.873], 0.02], 'material': 'IndicatorLights', 'height': 0.006},
             {'view': 'side', 'node': 'front_blinker_right', 'circle': [[-0.965, 0.873], 0.02], 'material': 'IndicatorLights', 'height': 0.006},
@@ -76,7 +82,7 @@ CAR = {
              'height': 0.005, 'depthRange': [1.6, 2.1]},
         ],
         'bars': [
-            {'view': 'front', 'span': [-0.41, 0.41], 'b': [0.50, 0.79], 'count': 14, 'dir': 'v', 'width': 0.008,
+            {'view': 'front', 'span': [-0.46, 0.46], 'b': [0.62, 0.76], 'count': 10, 'dir': 'h', 'width': 0.006,
              'material': 'chrome', 'height': 0.008, 'depthRange': [-2.2, -1.8]},
         ],
         'lines': [
