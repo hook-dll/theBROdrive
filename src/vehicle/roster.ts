@@ -954,7 +954,7 @@ export const ROSTER: readonly RosterCar[] = [
     label: 'Citroën 2CV',
     body: 'citroen2cv.glb',
     bodyClass: 'car',
-    factory: { length: 3.83, width: 1.48, height: 1.6, clearance: 0.16, wheelbase: 2.4, frontTrack: 1.26, rearTrack: 1.26, wheelRadius: 0.30, tyreWidth: 0.125, frontOverhang: 0.68 },
+    factory: { length: 3.83, width: 1.48, height: 1.6, clearance: 0.16, wheelbase: 2.4, frontTrack: 1.26, rearTrack: 1.26, wheelRadius: 0.3, tyreWidth: 0.125, frontOverhang: 0.68 },
     mass: 585,
     frontWeightShare: 0.58,
     rearDriveBias: 0,

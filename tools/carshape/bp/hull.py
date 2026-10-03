@@ -616,7 +616,19 @@ def bumper_paths(mesh, spec, info, raw_ends):
     out = {}
     for end, b in spec.get('parts', {}).get('bumpers', {}).items():
         zc = (b['z'][0] + b['z'][1]) / 2
-        sec = mesh.section(plane_origin=[0, 0, zc], plane_normal=[0, 0, 1])
+        # A bar below the body (on brackets under a high sill) takes the end where the
+        # body begins above it: at its own height there is no end, or a stray one
+        # mid-car (2CV's rear bar stood under the car).
+        y_far = mesh.bounds[0][1] if end == 'front' else mesh.bounds[1][1]
+        sec = None
+        for dz in np.arange(0.0, 0.4, 0.02):
+            s_ = mesh.section(plane_origin=[0, 0, zc + dz], plane_normal=[0, 0, 1])
+            if s_ is None:
+                continue
+            ye = s_.vertices[:, 1].min() if end == 'front' else s_.vertices[:, 1].max()
+            if abs(ye - y_far) < 0.3:
+                sec = s_
+                break
         if sec is None:
             continue
         # Every 1 cm along the outline: a flat end gives its section only a few
@@ -657,7 +669,7 @@ def bumper_paths(mesh, spec, info, raw_ends):
             stand -= 0.015
         lo_ = -dpt / 2 + 0.01
         # (a bar on a frame's horns stands well clear of the body)
-        hi_ = 0.7 if spec.get('parts', {}).get('underbody', {}).get('frame') else 0.25
+        hi_ = b.get('standMax', 0.7 if spec.get('parts', {}).get('underbody', {}).get('frame') else 0.25)
         if stand < lo_ or stand > hi_:
             print('BUMPER-OFF', end, 'shell', round(float(y_end), 3), 'target', round(target, 3), 'stand', round(stand, 3))
         stand = min(max(stand, lo_), hi_)
@@ -705,6 +717,8 @@ def bumper_paths(mesh, spec, info, raw_ends):
         W = spec['factory']['width']
         path[:, 0] = np.clip(path[:, 0], -(W / 2 - dpt / 2), W / 2 - dpt / 2)
         out[end] = [[round(float(x), 4), round(float(y), 4), round(zc, 4)] for x, y in path]
+        # where the bar stands clear of the shell, its brackets reach back to it
+        info.setdefault('bumperShell', {})[end] = [round(float(y_end), 4), round(float(sec.vertices[:, 2].mean()), 4)]
     return out
 
 

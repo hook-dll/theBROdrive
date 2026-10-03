@@ -1113,6 +1113,17 @@ for end, b in P.get('bumpers', {}).items():
     scale = [0.45, 0.8] + [1.0] * len(pts) + [0.8, 0.45]
     bm_ = bmesh.new()
     sweep(bm_, [tuple(p) for p in path_all], prof, 0, scales=scale)
+    # brackets back to the shell for a bar standing clear of it
+    sh = info.get('bumperShell', {}).get(end)
+    if sh:
+        y_face_ = min(p_.y for p_ in pts) if end == 'front' else max(p_.y for p_ in pts)
+        gap = abs(y_face_ - sh[0]) - dpt
+        if gap > 0.08:
+            zc_ = pts[0].z
+            for xb in (-0.3, 0.3):
+                yb = (y_face_ + sh[0]) / 2
+                box(bm_, (xb, yb, (zc_ + sh[1]) / 2 if sh[1] > zc_ + 0.05 else zc_),
+                    (0.035, abs(y_face_ - sh[0]), 0.035 + max(0.0, sh[1] - zc_ - 0.05)), 0)
     o = new_object('bumper_' + end, bm_, [b.get('material', 'chrome')])
     trim_parts.append(o)
     if b.get('rubber'):

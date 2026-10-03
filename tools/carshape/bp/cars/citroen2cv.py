@@ -4,7 +4,15 @@
 # dimension and interior lines, so the outline is read off by hand. A tall narrow body
 # between separate wings, a high corrugated bonnet with the lamps on stalks over the
 # wings, skirted rear wheels, a canvas roof running down to the tail.
-DOOR = [[0.33, 0.66], [0.5, 0.70], [0.75, 0.71], [0.95, 0.69], [1.1, 0.66], [1.3, 0.62], [1.45, 0.56], [1.53, 0.45], [1.58, 0.2]]
+# Sections (half widths) read off the top and end views: the cabin is narrow (its sides
+# 0.60 out, the top view's 1120 between them inside), only the separate wings stand out
+# to the full 1480.
+DOOR = [[0.33, 0.58], [0.45, 0.60], [0.75, 0.61], [0.95, 0.61], [1.05, 0.60], [1.2, 0.58], [1.35, 0.54], [1.45, 0.48],
+        [1.53, 0.40], [1.58, 0.2]]
+FWING = [[0.30, 0.62], [0.40, 0.70], [0.62, 0.73], [0.72, 0.68], [0.78, 0.50], [0.90, 0.46], [1.0, 0.40], [1.04, 0.1]]
+RWING = [[0.40, 0.70], [0.46, 0.74], [0.70, 0.74], [0.80, 0.70], [0.85, 0.60], [1.0, 0.59], [1.2, 0.57], [1.35, 0.52],
+         [1.45, 0.45], [1.52, 0.2]]
+TAIL = [[0.40, 0.55], [0.50, 0.58], [0.75, 0.58], [0.85, 0.55], [0.95, 0.50], [1.05, 0.2]]
 CAR = {
     'id': 'citroen2cv',
     'label': 'Citroën 2CV',
@@ -31,20 +39,20 @@ CAR = {
         # between the rear wings, which fall away below the belt to the tail.
         'cabin': [-0.63, 1.86],
         'belt': [[-0.63, 1.07], [-0.4, 1.05], [0.75, 1.05], [1.0, 0.97], [1.3, 0.84], [1.6, 0.70], [1.86, 0.58]],
-        'glassPlan': [[-0.63, 0.58], [-0.3, 0.63], [0.9, 0.63], [1.3, 0.58], [1.6, 0.53], [1.86, 0.52]],
+        'glassPlan': [[-0.63, 0.55], [-0.3, 0.58], [0.9, 0.58], [1.3, 0.57], [1.6, 0.56], [1.86, 0.54]],
+        # the boot lid is the cabin's own side carried down: no shelf at the belt
+        'shelf': 0.0,
         'sectionStations': [
             {'y': -1.70, 'half': [[0.30, 0.60], [0.40, 0.68], [0.60, 0.70], [0.66, 0.66], [0.72, 0.42], [0.88, 0.40], [0.95, 0.3], [1.0, 0.1]]},
-            {'y': -1.40, 'half': [[0.30, 0.70], [0.45, 0.74], [0.70, 0.74], [0.78, 0.66], [0.82, 0.43], [0.96, 0.42], [1.0, 0.3], [1.02, 0.1]]},
-            {'y': -1.05, 'half': [[0.30, 0.70], [0.45, 0.74], [0.70, 0.74], [0.78, 0.66], [0.82, 0.45], [1.0, 0.44], [1.04, 0.3], [1.06, 0.1]]},
-            {'y': -0.80, 'half': [[0.10, 0.70], [0.35, 0.73], [0.60, 0.72], [0.68, 0.68], [0.75, 0.52], [0.95, 0.50], [1.06, 0.44], [1.08, 0.2]]},
-            {'y': -0.60, 'half': DOOR},
-            {'y': 0.75, 'half': DOOR},
-            {'y': 1.00, 'half': [[0.40, 0.69], [0.50, 0.74], [0.70, 0.74], [0.82, 0.71], [0.90, 0.66], [1.1, 0.63], [1.3, 0.58], [1.42, 0.50],
-                                 [1.5, 0.2]]},
-            {'y': 1.50, 'half': [[0.40, 0.70], [0.55, 0.72], [0.72, 0.70], [0.80, 0.62], [0.9, 0.56], [1.0, 0.50], [1.06, 0.2]]},
-            {'y': 1.80, 'half': [[0.40, 0.52], [0.55, 0.56], [0.65, 0.54], [0.75, 0.48], [0.8, 0.2]]},
+            {'y': -1.35, 'half': FWING},
+            {'y': -0.95, 'half': FWING},
+            {'y': -0.72, 'half': DOOR},
+            {'y': 0.80, 'half': DOOR},
+            {'y': 1.05, 'half': RWING},
+            {'y': 1.55, 'half': RWING},
+            {'y': 1.85, 'half': TAIL},
         ],
-        'stationBlend': 0.15,
+        'stationBlend': 0.22,
         # The corrugated bonnet stands high between low wings.
         'topCross': [
             {'y': -1.92, 'z': [[0.0, 0.50], [0.7, 0.45]]},
@@ -110,11 +118,22 @@ CAR = {
             {'view': 'side', 'points': [[-0.62, 1.05], [-0.65, 0.37], [0.21, 0.37], [0.21, 1.05]], 'width': 0.005},
             {'view': 'side', 'points': [[0.21, 0.37], [0.84, 0.40], [0.85, 1.05]], 'width': 0.005},
             {'view': 'side', 'points': [[-0.66, 1.06], [1.25, 1.06]], 'width': 0.010, 'material': 'trim', 'height': 0.003},
+            # the separate rear wing's edge over the skirted wheel
+            {'view': 'side', 'points': [[0.88, 0.45], [0.92, 0.66], [1.02, 0.78], [1.20, 0.84], [1.42, 0.83], [1.62, 0.76],
+                                        [1.78, 0.62], [1.86, 0.48]], 'width': 0.007, 'keep': True},
         ],
+        # thin tubes on brackets well clear of the wings (photo)
         'bumpers': {
-            'front': {'z': [0.30, 0.36], 'depth': 0.04, 'wrap': 0.10, 'profile': 'round', 'material': 'alu'},
-            'rear': {'z': [0.38, 0.44], 'depth': 0.04, 'wrap': 0.10, 'profile': 'round', 'material': 'alu'},
+            'front': {'z': [0.30, 0.36], 'depth': 0.04, 'wrap': 0.10, 'profile': 'round', 'material': 'alu', 'standMax': 0.5,
+                      'span': 1.30},
+            'rear': {'z': [0.38, 0.44], 'depth': 0.04, 'wrap': 0.10, 'profile': 'round', 'material': 'alu', 'standMax': 0.5,
+                     'span': 1.30},
         },
+        'bars': [
+            # the grille's chrome ribs
+            {'view': 'front', 'span': [-0.19, 0.19], 'b': [0.52, 0.63], 'count': 5, 'width': 0.012, 'material': 'chrome',
+             'height': 0.008, 'depthRange': [-2.0, -1.6]},
+        ],
         'mirror': {'y': -0.45, 'z': 1.07, 'reach': 0.84, 'w': 0.10, 'h': 0.07, 'shape': 'round', 'sides': [1]},
         'handles': {'at': [[0.10, 0.98], [0.75, 0.98]], 'w': 0.10},
         'wipers': {'arms': [[-0.45, 0.0, -0.66, 1.09], [0.05, 0.45, -0.66, 1.09]]},
