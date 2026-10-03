@@ -35,8 +35,10 @@ CAR = {
             # The door glass runs up under the hood's side rail: its top edge is the hood's
             # lower edge (they overlapped and the glass's corners poked into the canvas).
             {'view': 'side', 'outline': [[-0.40, 0.80], [-0.15, 1.075], [0.34, 1.105], [0.38, 1.08], [0.40, 0.80]], 'facingMin': 0.3},
-            {'view': 'front', 'outline': [[0.0, 1.12], [0.44, 1.115], [0.48, 1.09], [0.58, 0.86], [0.56, 0.84], [0.0, 0.84]],
-             'depthRange': [-0.9, -0.05], 'facingMin': 0.25},
+            # The screen stops at its header (it ran back over the hood's front slope and
+            # down its shoulders as a light strip of glass).
+            {'view': 'front', 'outline': [[0.0, 1.11], [0.44, 1.105], [0.48, 1.08], [0.58, 0.86], [0.56, 0.84], [0.0, 0.84]],
+             'depthRange': [-0.9, -0.21], 'facingMin': 0.25},
             {'view': 'rear', 'outline': [[0.0, 1.10], [0.36, 1.095], [0.38, 1.07], [0.40, 0.93], [0.37, 0.91], [0.0, 0.91]],
              'depthRange': [0.6, 1.2], 'facingMin': 0.02, 'fit': False},
         ],
@@ -50,8 +52,9 @@ CAR = {
                                          [1.15, 1.30], [-0.12, 1.30]], 'facingMin': -1.0},
         ],
         'decals': [
-            {'view': 'front', 'outline': [[0.0, 0.40], [0.20, 0.40], [0.28, 0.37], [0.30, 0.33], [0.27, 0.30], [0.20, 0.29], [0.0, 0.29]],
-             'material': 'grille', 'height': 0.004, 'depthRange': [-2.1, -1.6]},
+            # The mouth: a wide oval intake low in the nose (photos).
+            {'view': 'front', 'outline': [[0.0, 0.46], [0.24, 0.455], [0.33, 0.43], [0.36, 0.395], [0.33, 0.36], [0.24, 0.34], [0.0, 0.335]],
+             'material': 'grille', 'height': 0.004, 'depthRange': [-2.1, -1.6], 'facingMin': 0.0},
             {'view': 'front', 'rect': [[0.0, 0.405], [0.30, 0.10]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [-2.1, -1.6]},
             # The oblong clear-lens parking and turn lamps in the nose's corners (the main
@@ -80,7 +83,6 @@ CAR = {
         ],
         'lines': [
             {'view': 'side', 'points': [[-0.62, 0.76], [-0.62, 0.32], [0.53, 0.32], [0.53, 0.78]], 'width': 0.005},
-            {'view': 'side', 'points': [[-1.95, 0.48], [1.95, 0.48]], 'width': 0.008, 'material': 'trim', 'height': 0.004},
             {'view': 'top', 'points': [[-1.90, 0.55], [-0.75, 0.62]], 'width': 0.005},
             {'view': 'rear', 'points': [[0.0, 0.81], [0.62, 0.81]], 'width': 0.005, 'depthRange': [1.5, 2.1]},
         ],
