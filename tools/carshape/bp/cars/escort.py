@@ -23,7 +23,6 @@ CAR = {
                              [0.795, 0.60], [0.79, 0.35], [0.76, 0.0], [0.0, 0.0]]},
     },
     'hull': {
-        'face': {'front': [[0.30, -1.93], [0.75, -1.94]], 'rear': [[0.30, 1.975], [0.70, 1.98]]},
         'topOverride': [[1.45, 0.97], [1.75, 0.94], [1.98, 0.86]],
         'sill': [[-2.0, 0.34], [-1.8, 0.30], [-1.6, 0.27], [-1.3, 0.25], [1.3, 0.25], [1.6, 0.27], [1.8, 0.29], [2.0, 0.33]],
         'cabin': [-0.75, 1.45],
@@ -32,21 +31,44 @@ CAR = {
         'crown': [[-2.1, 0.012], [2.1, 0.012]],
         'roofCrown': 0.022,
         'edge': 0.012,
-        # The plan as the car's, not the one-width-for-the-whole-car the top view was read
-        # as: the drawing's own top view gives 0.770 at the doors and 0.786 / 0.791 under
-        # the rally flares at the arches, and its corners at the ends are 6-8 cm. Read as
-        # one width (786-791 everywhere) and then blurred, the hand-read plan rounded those
-        # corners into a 40 cm ramp (the nose and the tail came out domed, 90 mm narrow at
-        # the front arch) and held the doors 20 mm too wide.
-        'planOverride': [[-1.99, 0.30], [-1.96, 0.55], [-1.90, 0.60], [-1.85, 0.690], [-1.80, 0.718], [-1.70, 0.729],
-                         [-1.60, 0.780], [-1.50, 0.786], [-1.30, 0.786], [-1.10, 0.790], [-1.00, 0.788], [-0.90, 0.762],
-                         [-0.60, 0.762], [-0.30, 0.766], [0.30, 0.770], [0.55, 0.778], [0.70, 0.791], [0.95, 0.791],
-                         [1.15, 0.791], [1.30, 0.788], [1.50, 0.786], [1.70, 0.786], [1.82, 0.780], [1.90, 0.760],
-                         [1.95, 0.700], [1.98, 0.55], [1.99, 0.30]],
+        # The plan as the road car's, not the drawing's. Its top view carries the rally
+        # flares: 0.786-0.791 out over the arches against 0.762 at the doors, and read
+        # off by hand the flare stayed in the plan - a 25 mm swelling over each arch with
+        # a 10 cm ramp behind it. The section scales the plan at every height, so the
+        # swelling came out as the blister over the front arch the photos do not have
+        # (they are flat-sided, the arch lip is all of it), with a crease where the ramp
+        # met the door. The plan is flat from the nose taper to the rear arch now, and its
+        # tail taper is where the car's is: 0.78 to 0 over the last 5 cm (the old one ran
+        # out at 1.88, so the shell's own blunt end took over and rounded the tail corner
+        # to ~10 cm radius where the photos are 4-5).
+        'planOverride': [[-1.99, 0.30], [-1.96, 0.55], [-1.90, 0.60], [-1.85, 0.690], [-1.80, 0.718],
+                         [-1.72, 0.746], [-1.62, 0.758], [-1.50, 0.764], [-1.30, 0.766], [-1.10, 0.768],
+                         [-1.00, 0.768], [-0.90, 0.768], [-0.60, 0.770], [-0.30, 0.772],
+                         [0.30, 0.776], [0.55, 0.780], [0.70, 0.786], [0.95, 0.788], [1.15, 0.788],
+                         [1.30, 0.786], [1.50, 0.784], [1.70, 0.784], [1.90, 0.782], [1.965, 0.780],
+                         [1.985, 0.780], [2.000, 0.770], [2.010, 0.720], [2.018, 0.620],
+                         [2.026, 0.460], [2.032, 0.250], [2.038, 0.0]],
+        # The photo's boot section at three stations: the side near vertical up to the
+        # shoulder at the belt, a 6 cm crisp shoulder, then the lid flat at 0.70 out to
+        # its edge (the rally drawing's own rear view carries the flares and its lid
+        # curves away: that section is what melted the boot's corners and the wings'
+        # shoulders - a rounded loaf).
+        'sectionStations': [
+            {'y': 1.45, 'half': [[0.14, 0.790], [0.88, 0.795], [0.925, 0.792], [0.950, 0.760], [0.965, 0.712], [0.972, 0.700],
+                                 [0.978, 0.0]]},
+            {'y': 1.75, 'half': [[0.14, 0.790], [0.88, 0.795], [0.925, 0.792], [0.950, 0.760], [0.965, 0.712], [0.972, 0.700],
+                                 [0.978, 0.0]]},
+            {'y': 1.95, 'half': [[0.14, 0.786], [0.88, 0.790], [0.925, 0.786], [0.948, 0.752], [0.962, 0.706], [0.968, 0.694],
+                                 [0.974, 0.0]]},
+        ],
+        'stationBlend': 0.06,
+        # The drawn tail face is round (yaw 0 -> 25 -> 87 deg over the last 20 cm): its
+        # panel given as a vertical line, so the lid's end and the wing's end meet it.
+        'face': {'rear': [[0.45, 1.930], [0.92, 1.930]]},
         # a crisp three-box body (photos)
         'edgeMin': 0.015,
-        'edgeY': 0.04,
-        'edgeYMin': 0.04,
+        'edgeY': 0.028,
+        'edgeYMin': 0.028,
         'arch': {'radius': 0.33, 'lift': 0.02},
     },
     'parts': {
@@ -99,7 +121,14 @@ CAR = {
         'lines': [
             {'view': 'side', 'points': [[-0.73, 0.90], [-0.73, 0.28], [0.47, 0.28], [0.47, 0.91]], 'width': 0.005},
             {'view': 'top', 'points': [[-1.88, 0.63], [-0.80, 0.64]], 'width': 0.005},
-            {'view': 'rear', 'points': [[0.0, 0.67], [0.72, 0.67], [0.73, 0.70], [0.70, 0.92]], 'width': 0.005, 'depthRange': [1.6, 2.1]},
+            # The boot lid's shut line: across the tail panel, then turned up along the
+            # lid's side. Drawn as a square elbow at the corner, the ray onto the rounded
+            # tail corner bent the line into a kink there; the turn is on a curve now.
+            # `keep`: the file's own points are the line (assemble.py otherwise lays each
+            # run straight between turns over 25 deg, which flattened the curve into a V).
+            {'view': 'rear', 'points': [[0.0, 0.672], [0.40, 0.672], [0.58, 0.676], [0.68, 0.688],
+                                        [0.730, 0.716], [0.742, 0.762], [0.740, 0.850], [0.728, 0.920]],
+             'width': 0.005, 'depthRange': [1.6, 2.1], 'keep': True},
             # The waist moulding and the window surrounds.
             {'view': 'side', 'points': [[-1.9, 0.72], [-0.75, 0.735], [2.0, 0.75]], 'width': 0.012, 'material': 'rubber', 'height': 0.004},
             {'view': 'side', 'points': [[-0.51, 0.92], [-0.25, 1.25], [-0.18, 1.285], [0.60, 1.28], [0.84, 1.25], [1.06, 1.12],
@@ -110,12 +139,21 @@ CAR = {
         'bumpers': {
             # The photo's blade: a slim chrome bar (5 cm deep, 9 cm tall) round the nose
             # with its black end caps, the ends stopping on the wings (the 0.24 m wrap
-            # carried the ends out to the body's widest point, proud of the nose).
-            'front': {'z': [0.42, 0.51], 'depth': 0.05, 'wrap': 0.20, 'profile': 'blade', 'material': 'chrome',
-                      'overriders': [[0.42, 0.06, 0.40, 0.52]]},
+            # carried the ends out to the body's widest point, proud of the nose). The
+            # overriders that were here are not on the car: both photos' bumpers are a
+            # plain bar, and the only black on them is the end caps (see `boxes`).
+            'front': {'z': [0.42, 0.51], 'depth': 0.05, 'wrap': 0.20, 'profile': 'blade', 'material': 'chrome'},
             'rear': {'z': [0.40, 0.49], 'depth': 0.05, 'wrap': 0.20, 'profile': 'blade', 'material': 'chrome'},
         },
         'mirror': {'y': -0.66, 'z': 0.96, 'reach': 0.90, 'w': 0.13, 'h': 0.075},
+        # The bumpers' black plastic end caps (photos: the yellow car's front, the maroon
+        # car's rear), at the ends of hull.py's bumper paths (front path ends 0.772,
+        # -1.805 post-shift; rear 0.772, 1.786 - written here 11 cm forward of that, as
+        # set_overhang moves everything the file places).
+        'boxes': [
+            {'c': [0.762, -1.705, 0.465], 'size': [0.070, 0.125, 0.105], 'material': 'trim'},
+            {'c': [0.762, 1.910, 0.445], 'size': [0.070, 0.110, 0.105], 'material': 'trim'},
+        ],
         'handles': {'at': [[0.33, 0.855]], 'w': 0.13},
         'wipers': {'arms': [[-0.55, -0.05, -0.80, 0.94], [0.05, 0.5, -0.80, 0.94]]},
         'wheel': {'style': 'steel', 'windows': 8, 'rimFactor': 0.68, 'cap': True},

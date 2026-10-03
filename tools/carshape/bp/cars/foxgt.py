@@ -43,47 +43,67 @@ CAR = {
             {'view': 'side', 'outline': [[-2.5, 0.15], [-2.5, 0.25], [2.5, 0.25], [2.5, 0.15]]},
         ],
         'decals': [
-            # The GT's nose (side view 360 px/m: the lamps from z 0.66 to the bonnet's
-            # edge at 0.77): flush composite lamps across the top of the fascia, the
-            # corner lamps wrapping round, a thin slot between them for a grille; the
-            # fascia's air dam low down with the fog lamps in its ends.
-            {'view': 'front', 'node': 'headlights', 'outline': [[0.08, 0.725], [0.56, 0.715], [0.63, 0.69], [0.63, 0.605], [0.08, 0.615]],
+            # The GT's nose, from the photos of the 1988 GT (photo 1 and w1-w3): the
+            # composite lamps lie under the bonnet's leading edge (the drawing's side
+            # outline puts that edge at z 0.78 and the lamps' foot on the bumper at
+            # 0.66) and reach out to the wing's corner, where the amber corner lens
+            # wraps round; between them the black panel with the running horse, as wide
+            # as the gap the lamps leave (the old drawing had the lamps running in to
+            # x 0.08 and a 15 cm slot: the panel was mistaken for a slot and the lamps
+            # sat 5 cm low, under a body-colour brow). The air dam carries a wide slot
+            # low down between the round fog lamps in its ends.
+            {'view': 'front', 'rect': [[0.0, 0.705], [0.58, 0.098]], 'radius': 0.012, 'mirror': False, 'material': 'grille',
+             'height': 0.004, 'depthRange': [-2.45, -1.9]},
+            {'view': 'front', 'node': 'headlights', 'outline': [[0.30, 0.758], [0.60, 0.752], [0.69, 0.734], [0.72, 0.700], [0.72, 0.664], [0.30, 0.656]],
              'material': 'Headlights', 'height': 0.006, 'depthRange': [-2.45, -1.9]},
-            {'view': 'front', 'node': 'front_blinker_left', 'outline': [[0.645, 0.69], [0.76, 0.66], [0.79, 0.60], [0.645, 0.605]],
+            {'view': 'front', 'node': 'front_blinker_left', 'outline': [[0.72, 0.758], [0.79, 0.748], [0.845, 0.716], [0.855, 0.672], [0.838, 0.652], [0.72, 0.660]],
              'material': 'IndicatorLights', 'height': 0.006, 'depthRange': [-2.45, -1.9]},
-            {'view': 'front', 'node': 'front_blinker_right', 'outline': [[0.645, 0.69], [0.76, 0.66], [0.79, 0.60], [0.645, 0.605]],
+            {'view': 'front', 'node': 'front_blinker_right', 'outline': [[0.72, 0.758], [0.79, 0.748], [0.845, 0.716], [0.855, 0.672], [0.838, 0.652], [0.72, 0.660]],
              'material': 'IndicatorLights', 'height': 0.006, 'depthRange': [-2.45, -1.9]},
-            {'view': 'front', 'rect': [[0.0, 0.665], [0.15, 0.05]], 'radius': 0.012, 'mirror': False, 'material': 'grille',
+            {'view': 'front', 'rect': [[0.0, 0.305], [0.50, 0.05]], 'radius': 0.02, 'mirror': False, 'material': 'grille',
              'height': 0.004, 'depthRange': [-2.45, -1.9]},
-            {'view': 'front', 'rect': [[0.0, 0.37], [0.66, 0.08]], 'radius': 0.03, 'mirror': False, 'material': 'grille',
-             'height': 0.004, 'depthRange': [-2.45, -1.9]},
-            {'view': 'front', 'node': 'headlights', 'circle': [[0.48, 0.37], 0.042], 'material': 'Headlights',
+            {'view': 'front', 'node': 'headlights', 'circle': [[0.60, 0.325], 0.040], 'material': 'Headlights',
              'height': 0.007, 'depthRange': [-2.45, -1.9]},
-            {'view': 'front', 'rect': [[0.0, 0.48], [1.30, 0.012]], 'radius': 0.004, 'mirror': False, 'material': 'trim',
+            {'view': 'front', 'rect': [[0.0, 0.50], [1.72, 0.035]], 'radius': 0.004, 'mirror': False, 'material': 'trim',
              'height': 0.003, 'depthRange': [-2.45, -1.9]},
-            # Under the spoiler: the louvred tail lamps either side of a dark plate panel, the
-            # turn and reversing lamps in their lower edge (US red turn lamps).
-            {'view': 'rear', 'rect': [[0.0, 0.87], [1.54, 0.17]], 'radius': 0.01, 'mirror': False, 'material': 'trim',
+            # Under the spoiler: the louvred tail lamps either side of a dark plate panel
+            # (photo 2: the lens is red slats with black between, its outboard end tapering
+            # on the corner, the reversing lamp a full-height clear section at its inboard
+            # end; the old drawing had a coarse three-rib lens and an amber turn lamp where
+            # the US car has a red one).
+            {'view': 'rear', 'rect': [[0.0, 0.87], [1.60, 0.17]], 'radius': 0.01, 'mirror': False, 'material': 'trim',
              'height': 0.004, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'node': 'taillights', 'rect': [[0.50, 0.875], [0.48, 0.14]], 'radius': 0.008, 'material': 'TailLights',
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.59, 0.875], [0.42, 0.14]], 'radius': 0.008, 'material': 'TailLights',
              'height': 0.008, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.64, 0.82], [0.18, 0.025]], 'radius': 0.006,
-             'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.64, 0.82], [0.18, 0.025]], 'radius': 0.006,
-             'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.34, 0.82], [0.10, 0.025]], 'radius': 0.006,
-             'material': 'ReverseLights', 'height': 0.010, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'rect': [[0.50, 0.85], [0.48, 0.008]], 'material': 'trim', 'height': 0.011,
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.68, 0.815], [0.12, 0.028]], 'radius': 0.006,
+             'material': 'TailLights', 'height': 0.010, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.68, 0.815], [0.12, 0.028]], 'radius': 0.006,
+             'material': 'TailLights', 'height': 0.010, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.31, 0.875], [0.11, 0.13]], 'radius': 0.006,
+             'material': 'ReverseLights', 'height': 0.008, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
+            {'view': 'rear', 'rect': [[0.59, 0.822], [0.42, 0.009]], 'material': 'trim', 'height': 0.011,
              'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'rect': [[0.50, 0.88], [0.48, 0.008]], 'material': 'trim', 'height': 0.011,
+            {'view': 'rear', 'rect': [[0.59, 0.848], [0.42, 0.009]], 'material': 'trim', 'height': 0.011,
              'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'rect': [[0.50, 0.91], [0.48, 0.008]], 'material': 'trim', 'height': 0.011,
+            {'view': 'rear', 'rect': [[0.59, 0.874], [0.42, 0.009]], 'material': 'trim', 'height': 0.011,
              'depthRange': [2.0, 2.45], 'facingMin': 0.05},
+            {'view': 'rear', 'rect': [[0.59, 0.900], [0.42, 0.009]], 'material': 'trim', 'height': 0.011,
+             'depthRange': [2.0, 2.45], 'facingMin': 0.05},
+            {'view': 'rear', 'rect': [[0.59, 0.926], [0.42, 0.009]], 'material': 'trim', 'height': 0.011,
+             'depthRange': [2.0, 2.45], 'facingMin': 0.05},
+            # The bumper's rubbing strip, the same height as the sides'.
+            {'view': 'rear', 'rect': [[0.0, 0.50], [1.72, 0.035]], 'radius': 0.004, 'mirror': False, 'material': 'trim',
+             'height': 0.003, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
         ],
         'lines': [
-            {'view': 'side', 'points': [[-2.32, 0.50], [2.35, 0.48]], 'width': 0.02, 'material': 'trim', 'height': 0.004},
-            {'view': 'side', 'points': [[-1.55, 0.36], [0.95, 0.35]], 'width': 0.012, 'material': 'paint', 'height': 0.006},
-            {'view': 'side', 'points': [[-1.55, 0.31], [0.95, 0.30]], 'width': 0.012, 'material': 'paint', 'height': 0.006},
+            # The bodyside rubbing strip (photo 1: it runs round the bumpers at the same
+            # height, ~4 cm tall; the drawn one was a hairline 2 cm).
+            {'view': 'side', 'points': [[-2.32, 0.50], [2.36, 0.50]], 'width': 0.035, 'material': 'trim', 'height': 0.004},
+            # The GT's lower-body accent: a red pinstripe pair along the skirts
+            # (photo 1: the red line runs the length of the lower moulding on a
+            # body-colour skirt).
+            {'view': 'side', 'points': [[-1.55, 0.36], [0.95, 0.35]], 'width': 0.012, 'material': 'paint2', 'height': 0.006},
+            {'view': 'side', 'points': [[-1.55, 0.31], [0.95, 0.30]], 'width': 0.012, 'material': 'paint2', 'height': 0.006},
             {'view': 'side', 'points': [[-0.68, 0.88], [-0.70, 0.27], [0.53, 0.25], [0.53, 1.22]], 'width': 0.005},
             {'view': 'side', 'points': [[-0.38, 0.88], [-0.144, 1.24], [0.90, 1.23], [1.42, 0.90], [-0.38, 0.88]], 'width': 0.02,
              'material': 'trim', 'height': 0.002},
@@ -91,11 +111,15 @@ CAR = {
         'mirror': {'y': -0.42, 'z': 0.93, 'reach': 0.92, 'w': 0.15, 'h': 0.09},
         'handles': {'at': [[0.35, 0.80]], 'w': 0.14, 'material': 'trim'},
         'wipers': {'arms': [[-0.55, -0.05, -0.72, 0.97], [0.05, 0.55, -0.72, 0.97]]},
-        # The hatch's spoiler: a body-colour wing across the deck's end on two short posts.
+        # The hatch's spoiler: a body-colour blade across the deck's end on two short
+        # pedestals (photo 2: the blade's ends come down to the deck at the quarters;
+        # the old one's ends hung 8 cm in the air past its posts).
         'boxes': [
-            {'c': [0.0, 1.97, 1.035], 'size': [1.40, 0.17, 0.03], 'mirror': False, 'material': 'paint'},
-            {'c': [0.60, 1.97, 0.985], 'size': [0.06, 0.14, 0.10], 'material': 'paint'},
+            {'c': [0.0, 1.97, 1.020], 'size': [1.32, 0.17, 0.035], 'mirror': False, 'material': 'paint'},
+            {'c': [0.61, 1.97, 0.985], 'size': [0.10, 0.15, 0.10], 'material': 'paint'},
         ],
         'wheel': {'style': 'alloy', 'spokes': 15, 'rimFactor': 0.70, 'spokeWidth': 0.5},
+        # The GT's red accent stripe keeps its colour whatever the car is painted.
+        'paint2': {'rgb': [0.52, 0.05, 0.04], 'name': 'car_paint_2'},
     },
 }

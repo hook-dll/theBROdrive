@@ -9,16 +9,20 @@ CAR = {
     'blueprint': {
         'image': 'gaz21.jpg',
         # Squared paper over the drawing: every outline is read off by hand on the
-        # metric grid (tools/carshape/bp/grid.py) rather than filled.
+        # metric grid (tools/carshape/bp/grid.py) rather than filled. The hand reading
+        # stopped at the body's own panel and left both bumpers 12-15 cm short of the
+        # drawing (whose front bumper's face is at -2.42 and rear at +2.35 on the grid),
+        # so each bar, its face set at the factory's end, stood 10 cm clear of the shell
+        # with air behind it. The ends are taken out to the drawn bumpers.
         'side': {'box': [500, 50, 1450, 370], 'nose': 'left', 'wheels': [[667, 290], [1174, 290]], 'ground': 358,
                  'ppmz': 181.5,
-                 'outline': [[-2.0, 0.20], [-2.02, 0.386], [-2.21, 0.53], [-2.29, 0.565], [-2.37, 0.70], [-2.38, 0.908],
+                 'outline': [[-2.20, 0.20], [-2.28, 0.386], [-2.30, 0.53], [-2.32, 0.565], [-2.37, 0.70], [-2.38, 0.908],
                              [-2.35, 1.005], [-2.21, 1.088], [-1.73, 1.137], [-1.196, 1.17], [-1.13, 1.17], [-0.69, 1.546],
                              [-0.47, 1.595], [0.16, 1.611], [0.64, 1.546], [0.956, 1.464], [1.40, 1.072], [1.59, 1.04],
-                             [2.03, 0.908], [2.16, 0.794], [2.205, 0.63], [2.22, 0.565], [2.19, 0.37], [2.06, 0.20]]},
+                             [2.03, 0.908], [2.24, 0.794], [2.29, 0.63], [2.32, 0.565], [2.28, 0.37], [2.15, 0.20]]},
         'top': {'box': [500, 398, 1450, 750], 'nose': 'left',
                 'outline': [[-2.38, 0.0], [-2.38, 0.55], [-2.3, 0.80], [-2.1, 0.88], [-1.5, 0.895], [1.2, 0.895],
-                            [2.0, 0.85], [2.18, 0.75], [2.22, 0.55], [2.22, 0.0]]},
+                            [2.06, 0.85], [2.24, 0.75], [2.32, 0.55], [2.32, 0.0]]},
         'front': {'box': [80, 48, 455, 355], 'zRef': [[65.3, 1.62], [277.9, 0.475]],
                   'outline': [[0.0, 1.62], [0.35, 1.61], [0.55, 1.57], [0.60, 1.52], [0.63, 1.17], [0.70, 1.08],
                               [0.80, 1.02], [0.86, 0.90], [0.89, 0.75], [0.892, 0.53], [0.87, 0.42], [0.85, 0.0], [0.0, 0.0]]},
@@ -40,9 +44,12 @@ CAR = {
         'glass': [
             {'view': 'side', 'outline': [[-0.91, 1.088], [-0.59, 1.415], [0.0, 1.42], [0.0, 1.075], [-0.88, 1.075]], 'facingMin': 0.3},
             {'view': 'side', 'outline': [[0.117, 1.415], [0.655, 1.35], [0.80, 1.27], [0.86, 1.15], [0.86, 1.06], [0.117, 1.06]], 'facingMin': 0.3},
-            {'view': 'front', 'outline': [[0.0, 1.53], [0.50, 1.52], [0.58, 1.50], [0.61, 1.45], [0.645, 1.19], [0.62, 1.16], [0.0, 1.17]],
+            # The panes' corners are rounded, not the drawn points: a pointed corner
+            # (the old outline's [0.645, 1.19] -> [0.62, 1.16]) came out on the shell as a
+            # spike with the seal pinched round it (photos: a rounded corner, ~6 cm).
+            {'view': 'front', 'outline': [[0.0, 1.53], [0.50, 1.52], [0.585, 1.495], [0.625, 1.44], [0.645, 1.30], [0.638, 1.215], [0.610, 1.175], [0.55, 1.168], [0.0, 1.17]],
              'depthRange': [-1.4, -0.5], 'facingMin': -0.3},
-            {'view': 'rear', 'outline': [[0.0, 1.425], [0.45, 1.41], [0.55, 1.37], [0.60, 1.30], [0.635, 1.13], [0.60, 1.10], [0.0, 1.105]],
+            {'view': 'rear', 'outline': [[0.0, 1.425], [0.45, 1.41], [0.555, 1.375], [0.60, 1.30], [0.635, 1.16], [0.628, 1.115], [0.600, 1.108], [0.54, 1.104], [0.0, 1.105]],
              'depthRange': [0.7, 1.7], 'facingMin': -0.3},
         ],
         'decals': [
@@ -65,6 +72,10 @@ CAR = {
              'height': 0.006, 'depthRange': [-2.5, -2.0]},
             {'view': 'front', 'rect': [[0.0, 0.93], [0.14, 0.05]], 'radius': 0.02, 'mirror': False, 'material': 'chrome',
              'height': 0.012, 'depthRange': [-2.5, -2.0]},
+            # The lamp's chrome frame (photo: the lens sits in a chrome bezel on the
+            # fin's rear face, its top at the belt).
+            {'view': 'rear', 'outline': [[0.655, 0.918], [0.748, 0.918], [0.752, 0.86], [0.752, 0.785], [0.722, 0.668], [0.655, 0.745]],
+             'material': 'chrome', 'height': 0.009, 'depthRange': [1.9, 2.5]},
             {'view': 'rear', 'node': 'taillights', 'outline': [[0.70, 0.905], [0.735, 0.85], [0.74, 0.79], [0.665, 0.79], [0.665, 0.85]],
              'material': 'TailLights', 'height': 0.010, 'depthRange': [1.9, 2.5]},
             {'view': 'rear', 'node': 'rear_blinker_left', 'outline': [[0.74, 0.79], [0.71, 0.68], [0.665, 0.76], [0.665, 0.79]],
@@ -99,7 +110,7 @@ CAR = {
                      'overriders': [[0.28, 0.06, 0.42, 0.67]]},
         },
         'lensColours': {'FrontLampLens': [0.82, 0.80, 0.74]},
-        'mirror': {'y': -0.95, 'z': 1.2, 'reach': 0.98, 'w': 0.11, 'shape': 'round', 'material': 'chrome', 'sides': [1]},
+        'mirror': {'y': -0.95, 'z': 1.2, 'reach': 0.755, 'w': 0.11, 'shape': 'round', 'material': 'chrome', 'sides': [1]},
         'handles': {'at': [[-0.15, 0.99], [0.72, 0.99]], 'w': 0.14},
         'wipers': {'arms': [[-0.6, -0.1, -1.1, 1.17], [0.05, 0.55, -1.1, 1.17]]},
         'wheel': {'style': 'hubcap', 'rimFactor': 0.66, 'cap': 0.85},
