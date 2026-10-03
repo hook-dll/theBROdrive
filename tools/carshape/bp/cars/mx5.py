@@ -49,19 +49,21 @@ CAR = {
              'material': 'grille', 'height': 0.004, 'depthRange': [-2.1, -1.6]},
             {'view': 'front', 'rect': [[0.0, 0.405], [0.30, 0.10]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [-2.1, -1.6]},
-            {'view': 'front', 'node': 'headlights', 'rect': [[0.41, 0.585], [0.12, 0.05]], 'radius': 0.024,
-             'material': 'Headlights', 'height': 0.009, 'depthRange': [-2.1, -1.5]},
-            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.47, 0.585], [0.24, 0.055]], 'radius': 0.027,
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-2.1, -1.5]},
-            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.47, 0.585], [0.24, 0.055]], 'radius': 0.027,
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-2.1, -1.5]},
+            # The oblong clear-lens parking and turn lamps in the nose's corners (the main
+            # lamps pop up).
+            {'view': 'front', 'node': 'headlights', 'rect': [[0.42, 0.585], [0.16, 0.05]], 'radius': 0.024,
+             'material': 'Headlights', 'height': 0.009, 'depthRange': [-2.1, -1.5], 'facingMin': 0.1},
+            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.535, 0.585], [0.07, 0.05]], 'radius': 0.02,
+             'material': 'IndicatorLights', 'height': 0.009, 'depthRange': [-2.1, -1.5], 'facingMin': 0.0},
+            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.535, 0.585], [0.07, 0.05]], 'radius': 0.02,
+             'material': 'IndicatorLights', 'height': 0.009, 'depthRange': [-2.1, -1.5], 'facingMin': 0.0},
             # The pop-up lamps lie folded flush in the bonnet: their lids' outline.
             {'view': 'top', 'rect': [[-1.42, 0.53], [0.30, 0.20]], 'radius': 0.03, 'material': 'paint', 'height': 0.004},
             {'view': 'side', 'node': 'front_blinker_left', 'rect': [[-1.62, 0.52], [0.10, 0.03]], 'radius': 0.012, 'material': 'IndicatorLights', 'height': 0.005},
             {'view': 'side', 'node': 'front_blinker_right', 'rect': [[-1.62, 0.52], [0.10, 0.03]], 'radius': 0.012, 'material': 'IndicatorLights', 'height': 0.005},
-            # Oval tail lamps, plate between.
-            {'view': 'rear', 'node': 'taillights', 'rect': [[0.43, 0.715], [0.28, 0.13]], 'radius': 0.06,
-             'material': 'TailLights', 'height': 0.008, 'depthRange': [1.6, 2.1]},
+            # Oval tail lamps running round the tail's corners in one piece, plate between.
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.45, 0.715], [0.32, 0.12]], 'radius': 0.055,
+             'material': 'TailLights', 'height': 0.008, 'depthRange': [1.6, 2.1], 'facingMin': -0.2},
             {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.43, 0.68], [0.12, 0.04]], 'radius': 0.015,
              'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [1.6, 2.1]},
             {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.43, 0.68], [0.12, 0.04]], 'radius': 0.015,
@@ -70,7 +72,6 @@ CAR = {
              'material': 'ReverseLights', 'height': 0.010, 'depthRange': [1.6, 2.1]},
             {'view': 'rear', 'rect': [[0.0, 0.715], [0.34, 0.16]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [1.6, 2.1]},
-            {'view': 'side', 'node': 'taillights', 'rect': [[1.82, 0.69], [0.16, 0.10]], 'radius': 0.04, 'material': 'TailLights', 'height': 0.004},
         ],
         'lines': [
             {'view': 'side', 'points': [[-0.62, 0.76], [-0.62, 0.32], [0.53, 0.32], [0.53, 0.78]], 'width': 0.005},
