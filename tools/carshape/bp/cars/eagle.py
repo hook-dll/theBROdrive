@@ -18,7 +18,7 @@ CAR = {
         'image': 'eagle_go.png',
         'dark': 120,
         'side': {'box': [0, 0, 1097, 365], 'nose': 'right', 'wheels': [[243, 280], [875, 280]], 'ground': 358, 'isotropic': True,
-                 'outline': [[2.258, 0.52], [2.258, 0.694], [2.161, 0.716], [2.17, 1.001], [2.165, 1.37], [2.14, 1.425], [2.08, 1.45], [-0.167, 1.46], [-0.364, 1.45], [-0.452, 1.41], [-0.957, 1.133], [-2.24, 0.99], [-2.30, 0.98], [-2.315, 0.95], [-2.315, 0.848], [-2.319, 0.694], [-2.472, 0.672], [-2.472, 0.518], [-2.30, 0.52], [-2.25, 0.44], [-1.835, 0.40], [-1.089, 0.275], [0.8, 0.245], [1.59, 0.28], [1.85, 0.33], [2.12, 0.44], [2.17, 0.52]]},
+                 'outline': [[2.258, 0.52], [2.258, 0.694], [2.161, 0.716], [2.17, 1.001], [2.165, 1.37], [2.14, 1.425], [2.08, 1.45], [-0.167, 1.46], [-0.364, 1.45], [-0.452, 1.41], [-0.957, 1.133], [-2.24, 0.95], [-2.30, 0.94], [-2.315, 0.91], [-2.315, 0.82], [-2.319, 0.694], [-2.472, 0.672], [-2.472, 0.518], [-2.30, 0.52], [-2.25, 0.44], [-1.835, 0.40], [-1.089, 0.275], [0.8, 0.245], [1.59, 0.28], [1.85, 0.33], [2.12, 0.44], [2.17, 0.52]]},
         'front': {'box': [30, 372, 540, 751], 'ppm': 251, 'centre': 280, 'zRef': [[380, 1.405], [745, 0.0]],
                   'drop': [[0, 90, 60, 140], [450, 90, 510, 140]],
                   'outline': [[0.0, 1.46], [0.66, 1.457], [0.725, 1.447], [0.755, 1.42], [0.83, 1.06], [0.87, 1.02], [0.90, 0.98], [0.912, 0.90], [0.912, 0.60], [0.90, 0.48], [0.86, 0.40], [0.82, 0.0], [0.0, 0.0]],},
@@ -62,15 +62,17 @@ CAR = {
         'glass': [
             # The door's main pane starts at the vent divider (a vertical chrome strip)
             # and its front corner runs up along the A-pillar's rake above it.
-            {'view': 'side', 'outline': [[0.13, 0.955], [-0.52, 0.955], [-0.52, 1.17], [-0.30, 1.30], [0.13, 1.30]], 'facingMin': 0.3},
-            {'view': 'side', 'outline': [[-0.52, 0.955], [-0.78, 0.955], [-0.64, 1.17], [-0.52, 1.17]], 'facingMin': 0.3},
-            {'view': 'side', 'outline': [[0.80, 0.955], [0.24, 0.955], [0.24, 1.30], [0.78, 1.30]], 'facingMin': 0.3},
-            {'view': 'side', 'outline': [[2.05, 0.96], [0.99, 0.955], [0.97, 1.30], [1.97, 1.30], [2.05, 1.22]], 'facingMin': 0.3},
-            {'view': 'front', 'outline': [[0.0, 1.36], [0.60, 1.34], [0.68, 1.26], [0.74, 1.10], [0.70, 1.08], [0.0, 1.08]],
+            {'view': 'side', 'outline': [[0.13, 0.955], [-0.52, 0.955], [-0.52, 1.18], [-0.30, 1.345], [0.13, 1.345]], 'facingMin': 0.3},
+            {'view': 'side', 'outline': [[-0.52, 0.955], [-0.78, 0.955], [-0.64, 1.18], [-0.52, 1.18]], 'facingMin': 0.3},
+            {'view': 'side', 'outline': [[0.80, 0.955], [0.24, 0.955], [0.24, 1.345], [0.78, 1.345]], 'facingMin': 0.3},
+            # The quarter window runs back to the rear corner (photos: the D-pillar is a
+            # thin wrap, not the 30 cm panel the first read of the side left).
+            {'view': 'side', 'outline': [[2.10, 0.96], [0.99, 0.955], [0.97, 1.345], [1.99, 1.345], [2.10, 1.27]], 'facingMin': 0.3},
+            {'view': 'front', 'outline': [[0.0, 1.345], [0.60, 1.33], [0.68, 1.26], [0.74, 1.10], [0.70, 1.08], [0.0, 1.08]],
              'depthRange': [-1.2, -0.4], 'facingMin': 0.2},
-            # The back light: the wagon's tailgate window, wide at its foot (0.64 of the
-            # 0.905 half-width against the photo's 0.70) and drawn in to 0.53 at the top.
-            {'view': 'rear', 'outline': [[0.0, 1.325], [0.53, 1.32], [0.60, 1.28], [0.64, 1.03], [0.60, 0.98], [0.0, 0.98]],
+            # The back light: the wagon's tailgate window, wide at its foot and nearly the
+            # tailgate's width at its top (photo rear_wagon: 0.59-0.70 of the body).
+            {'view': 'rear', 'outline': [[0.0, 1.31], [0.56, 1.305], [0.62, 1.27], [0.66, 1.03], [0.62, 0.98], [0.0, 0.98]],
              'depthRange': [1.6, 2.3], 'facingMin': 0.15},
         ],
         'regions': [
@@ -86,19 +88,19 @@ CAR = {
             # The Eagle's face (photos, 1982 wagon): one chrome-framed panel across the
             # nose; two rectangular lamps each side, side by side; an egg-crate grille
             # between; an amber parking lamp strip under each pair of lamps.
-            {'view': 'front', 'rect': [[0.0, 0.79], [1.64, 0.27]], 'radius': 0.012, 'mirror': False, 'material': 'chrome',
+            {'view': 'front', 'rect': [[0.0, 0.775], [1.64, 0.24]], 'radius': 0.012, 'mirror': False, 'material': 'chrome',
              'height': 0.002, 'depthRange': [-2.6, -2.2]},
-            {'view': 'front', 'rect': [[0.0, 0.785], [1.58, 0.23]], 'radius': 0.008, 'mirror': False, 'material': 'trim',
+            {'view': 'front', 'rect': [[0.0, 0.775], [1.58, 0.21]], 'radius': 0.008, 'mirror': False, 'material': 'trim',
              'height': 0.003, 'depthRange': [-2.6, -2.2]},
-            {'view': 'front', 'rect': [[0.0, 0.765], [0.62, 0.16]], 'radius': 0.006, 'mirror': False, 'material': 'grille',
+            {'view': 'front', 'rect': [[0.0, 0.752], [0.62, 0.15]], 'radius': 0.006, 'mirror': False, 'material': 'grille',
              'height': 0.005, 'depthRange': [-2.6, -2.2]},
-            {'view': 'front', 'node': 'headlights', 'rect': [[0.425, 0.79], [0.16, 0.10]], 'radius': 0.008, 'material': 'Headlights',
+            {'view': 'front', 'node': 'headlights', 'rect': [[0.425, 0.775], [0.16, 0.10]], 'radius': 0.008, 'material': 'Headlights',
              'height': 0.008, 'depthRange': [-2.6, -2.2]},
-            {'view': 'front', 'node': 'headlights', 'rect': [[0.61, 0.79], [0.16, 0.10]], 'radius': 0.008, 'material': 'Headlights',
+            {'view': 'front', 'node': 'headlights', 'rect': [[0.61, 0.775], [0.16, 0.10]], 'radius': 0.008, 'material': 'Headlights',
              'height': 0.008, 'depthRange': [-2.6, -2.2], 'facingMin': 0.0},
-            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.52, 0.708], [0.36, 0.035]], 'radius': 0.004,
+            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.52, 0.695], [0.36, 0.035]], 'radius': 0.004,
              'material': 'IndicatorLights', 'height': 0.009, 'depthRange': [-2.6, -2.2], 'facingMin': 0.0},
-            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.52, 0.708], [0.36, 0.035]], 'radius': 0.004,
+            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.52, 0.695], [0.36, 0.035]], 'radius': 0.004,
              'material': 'IndicatorLights', 'height': 0.009, 'depthRange': [-2.6, -2.2], 'facingMin': 0.0},
             {'view': 'front', 'rect': [[0.0, 0.53], [0.52, 0.11]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [-2.7, -2.2]},
@@ -124,9 +126,9 @@ CAR = {
         ],
         'bars': [
             # the egg crate: bars across and up
-            {'view': 'front', 'span': [-0.31, 0.31], 'b': [0.69, 0.84], 'count': 3, 'width': 0.010, 'material': 'chrome',
+            {'view': 'front', 'span': [-0.31, 0.31], 'b': [0.68, 0.83], 'count': 3, 'width': 0.010, 'material': 'chrome',
              'height': 0.008, 'depthRange': [-2.6, -2.2]},
-            {'view': 'front', 'span': [-0.31, 0.31], 'b': [0.69, 0.84], 'count': 7, 'dir': 'v', 'width': 0.010,
+            {'view': 'front', 'span': [-0.31, 0.31], 'b': [0.68, 0.83], 'count': 7, 'dir': 'v', 'width': 0.010,
              'material': 'chrome', 'height': 0.008, 'depthRange': [-2.6, -2.2]},
         ],
         'lines': [
@@ -135,7 +137,7 @@ CAR = {
             {'view': 'side', 'points': [[-2.30, 0.94], [2.15, 0.94]], 'width': 0.006, 'material': 'chrome', 'height': 0.003},
             # the moulding along the cladding's top (the photo's bright line at 0.50)
             {'view': 'side', 'points': [[-2.30, 0.50], [2.15, 0.495]], 'width': 0.006, 'material': 'chrome', 'height': 0.003},
-            {'view': 'side', 'points': [[-0.93, 0.955], [-0.60, 1.30], [0.97, 1.30], [2.05, 0.955]], 'width': 0.012, 'material': 'chrome',
+            {'view': 'side', 'points': [[-0.93, 0.955], [-0.60, 1.345], [0.97, 1.345], [2.18, 0.955]], 'width': 0.012, 'material': 'chrome',
              'height': 0.003},
         ],
         'boxes': [{'c': [0.58, 0.55, 1.43], 'size': [0.04, 1.8, 0.03], 'material': 'chrome'}],
@@ -152,11 +154,11 @@ CAR = {
 }
 
 
-# The blueprint outlines were drawn to a 1.46 m roof; the wagon stands 1.387 m:
-# everything above the drawing's belt (1.10) is brought down in proportion. The glass
-# panes and the car's own lines are already in the model's frame (belt 0.955, roof
-# 1.387) and are left alone.
-def _lower(z, top=1.46, to=1.387, belt=1.10):
+# The blueprint outlines were drawn to a 1.46 m roof. The wagon stands 1.387 m overall
+# and its roof rack (parts.boxes) is built 3 cm over the roof skin by assemble.py, so
+# the drawn roof is brought to 1.355: body + rack = the factory height (dims.py reads
+# the complete body box, and render/carmodel.ts fits that box to factory.height).
+def _lower(z, top=1.46, to=1.355, belt=1.10):
     return z if z <= belt else belt + (z - belt) * (to - belt) / (top - belt)
 
 
