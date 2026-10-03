@@ -391,8 +391,14 @@ def fit_pane(view, sign, poly, d, ks=None):
         return clip_below(poly, cap)
     elif d.get('facingMin', 0.2) >= 0:
         # a screen lies on the end it looks out of, not round its corners into the
-        # sides or over into the roof
-        d = dict(d, facingMin=max(d.get('facingMin', 0.2), d.get('endFit', 0.55)))
+        # sides or over into the roof: fitted to 60 % of its own mean facing (an
+        # upright back light 0.55, a fastback's hatch glass lying at 20 deg ~0.2;
+        # a fixed 0.55 took the hatch's glass away)
+        fs = select(view, sign, poly, d)
+        V_ = VIEW[view]
+        a_ = sum(f.calc_area() for f in fs)
+        mf = sum(f.normal.dot(V_['facing']) * f.calc_area() for f in fs) / a_ if a_ > 0 else 1.0
+        d = dict(d, facingMin=max(d.get('facingMin', 0.2), min(d.get('endFit', 0.55), 0.6 * mf)))
     lo = min(p[1] for p in poly)
     hi = max(p[1] for p in poly)
 
