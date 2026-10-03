@@ -1,23 +1,24 @@
-# Jeep CJ-5 (1955-71, Hurricane four). Factory: 3290 x 1740 x 1700 (soft top), wheelbase
+# Jeep CJ-5 (1955-71, Hurricane four). Factory: 3290 x 1740 x 1700, wheelbase
 # 2057, tracks 1234, 6.00-16, clearance 210. The side of the CJ-5
 # Standard at getoutlines.com (4x upscaled, 458 px/m by the wheelbase, outline read off
 # by hand), its grille and lamps from the Willys MB front view at 3dcar.ru stretched to
 # the CJ-5's width (cj5_go.png puts the three together). A narrow flat-sided tub with
-# the rear arch cut in it, rounded flat-topped front wings wider than the tub, a flat
-# bonnet over the slotted grille with the lamps in it, an upright screen, a canvas top
-# and soft doors.
-# The reference photos (a 1967 CJ-5, front and rear three-quarters) are of the 3290 car
-# as the roster and the factory figures give it: no spare is carried (the drawing's
-# spare, on the tail, is the 3440 length), and the wings' tops are a shoulder sloping
-# from the bonnet's edge out to a rolled lip, not a flat slab under a cliff (photos).
-# The front wings are fenders over open wheels (photos): full width only from 0.70 up;
-# below them the radiator's housing and the frame between the wheels.
-# WING, x against z: the fender's side, then its shoulder up to the bonnet's edge --
-#   z 0.86-0.89 the outer lip (the car's full width), 0.93 -> 0.75, 1.01 -> 0.55,
-#   1.04 -> 0.46, the bonnet's edge; the old flat 0.86-0.88 plateau put a 13 cm cliff
-#   right at the bonnet's edge and left the fender top dead flat (photos: a shoulder).
-WING = [[0.40, 0.50], [0.56, 0.50], [0.62, 0.58], [0.68, 0.72], [0.73, 0.85], [0.86, 0.875], [0.89, 0.87], [0.93, 0.75],
-        [0.97, 0.65], [1.01, 0.55], [1.04, 0.46], [1.07, 0.42], [1.10, 0.20]]
+# the rear arch cut in it, flat-topped front wings wider than the tub, a flat
+# bonnet over the slotted grille with the lamps in it, and the folding screen standing
+# on the cowl.
+# The reference photos (a 1967 CJ-5, front and rear three-quarters) show the car open:
+# no canvas top and no doors, the tub's sides bare from the cowl to the tail with the
+# door openings cut in them, and the folding screen standing alone. The drawing's top
+# and soft doors are not on this car, so the body's top behind the screen is the belt
+# (topOverride) and the screen is the only glasshouse (cabin = its 6 cm footprint).
+# The wings are fenders over open wheels (photos): flat-topped shelves standing out
+# from the narrow bonnet, full width only from 0.70 up; below them the radiator's
+# housing and the frame between the wheels.
+# WING, x against z: the fender's side, its flat top (0.86-0.89), then the step up to
+#   the bonnet's edge -- 0.93 -> 0.80, 1.00 -> 0.68, 1.06 -> 0.47 (photos: the fender's
+#   top is a shelf, the bonnet a narrow box on it; a 19 deg shoulder merged the two).
+WING = [[0.40, 0.50], [0.56, 0.50], [0.62, 0.58], [0.68, 0.72], [0.73, 0.85], [0.86, 0.875], [0.89, 0.87], [0.94, 0.80],
+        [1.00, 0.68], [1.03, 0.55], [1.06, 0.47], [1.09, 0.20]]
 TUB = [[0.34, 0.68], [0.40, 0.70], [1.05, 0.70], [1.10, 0.68], [1.62, 0.67], [1.67, 0.6], [1.70, 0.2]]
 CAR = {
     'id': 'jeep',
@@ -45,47 +46,56 @@ CAR = {
         'stationBlend': 0.08,
         # Bonnet between the wings up to the cowl, then the tub's flat full-width cowl
         # (the bonnet's dips carried onto the cowl crumpled it). Across the wings: the
-        # bonnet's edge (a short step, x 0.40-0.46) and then the shoulder down to the
-        # rolled lip at 0.87 -- the old cliffs at x 0.48-0.52 were a 58 deg wall.
+        # bonnet's edge (a short step, x 0.43-0.52) and then the fender's shelf out to
+        # the rolled lip at 0.87 (photos: flat-topped fenders, a narrow bonnet).
         'topCross': [
-            {'y': -1.72, 'z': [[0.0, 1.03], [0.40, 1.025], [0.44, 0.995], [0.52, 0.965], [0.62, 0.935], [0.72, 0.905],
-                               [0.82, 0.878], [0.87, 0.857], [0.89, 0.83]]},
-            {'y': -0.56, 'z': [[0.0, 1.075], [0.42, 1.07], [0.46, 1.04], [0.52, 1.01], [0.62, 0.975], [0.72, 0.94],
-                               [0.82, 0.905], [0.87, 0.885], [0.89, 0.86]]},
+            {'y': -1.72, 'z': [[0.0, 1.03], [0.38, 1.025], [0.43, 0.99], [0.48, 0.945], [0.56, 0.925], [0.66, 0.905],
+                               [0.78, 0.888], [0.87, 0.865], [0.89, 0.83]]},
+            {'y': -0.56, 'z': [[0.0, 1.075], [0.40, 1.07], [0.45, 1.03], [0.50, 0.965], [0.58, 0.945], [0.68, 0.925],
+                               [0.80, 0.905], [0.87, 0.885], [0.89, 0.86]]},
             {'y': -0.47, 'z': [[0.0, 1.08], [0.66, 1.075], [0.70, 1.05]]},
             {'y': -0.30, 'z': [[0.0, 1.08], [0.66, 1.075], [0.70, 1.05]]},
+            # The open car: from the screen back the body's top is the tub's belt.
         ],
-        'cabin': [-0.27, 1.55],
+        'topOverride': [[-0.095, 1.075], [1.60, 1.07]],
+        # The screen alone: cabin is the drawing's screen wedge, which in the built frame
+        # (the drawing moves +0.075 with the 3290 length) stands at y -0.19 to -0.10, so
+        # the glasshouse is that one standing panel and the tub behind it stops at the
+        # belt. The pane's y -0.095 onward is the canvas top's, cut away with it.
+        'cabin': [-0.19, -0.095],
         'belt': [[-0.27, 1.07], [1.55, 1.07]],
-        'glassPlan': [[-0.27, 0.66], [1.55, 0.66]],
+        'glassPlan': [[-0.19, 0.66], [-0.095, 0.66]],
         'roofHalf': 0.66,
         'roofCrown': 0.02,
-        # a pressed-steel tub and flat wings: crisp edges (the default blur rounded the tub)
-        'edgeMin': 0.015,
-        'edgeY': 0.04,
-        'edgeYMin': 0.04,
-        'edge': 0.016,
+        'shelf': 0.012,
+        # a pressed-steel tub, flat wings and a thin folding screen: crisp edges (the
+        # default 4 cm along-car blur rounded the tub's panels and dragged the screen's
+        # head down; 1.5 cm keeps the 6 cm frame and the tub's corner posts)
+        'edgeMin': 0.013,
+        'edgeY': 0.015,
+        'edgeYMin': 0.015,
+        'edge': 0.013,
+        'faceSpacing': 0.15,
+        'cornerDeg': 20,
         'arch': {'radius': 0.40, 'lift': 0.0},
     },
     'parts': {
         'underbody': {'frame': True},
-        'paint2': {'name': 'trim_canvas', 'rgb': [0.08, 0.08, 0.08]},
         'glass': [
-            {'view': 'side', 'outline': [[0.472, 1.528], [-0.10, 1.528], [-0.16, 1.157], [0.472, 1.157]], 'facingMin': 0.3},
-            {'view': 'side', 'outline': [[1.433, 1.507], [0.647, 1.507], [0.647, 1.10], [1.433, 1.10]], 'facingMin': 0.3},
-            # One screen pane, not the MB drawing's two with a centre bar: the 1967 CJ-5
-            # has a one-piece screen (photos) with a slim frame all round (5 cm: the pane
-            # ran 1.15-1.55 inside a 1.07-1.68 glasshouse and left an 8-13 cm frame).
+            # Only the folding screen: the reference car is open (photos), so the door
+            # and quarter windows and the canvas top's rear light are gone with the top.
             {'view': 'front', 'outline': [[-0.62, 1.12], [0.62, 1.12], [0.62, 1.60], [-0.62, 1.60]], 'mirror': False,
              'depthRange': [-0.4, 0.0], 'facingMin': 0.2, 'fit': False},
-            {'view': 'rear', 'outline': [[-0.45, 1.25], [0.45, 1.25], [0.45, 1.55], [-0.45, 1.55]], 'mirror': False,
-             'depthRange': [1.3, 1.7], 'facingMin': 0.2, 'fit': False},
         ],
         'regions': [
-            # Soft top and soft doors over the tub.
-            {'view': 'side', 'outline': [[-0.22, 1.09], [1.65, 1.09], [1.65, 1.80], [-0.22, 1.80]], 'material': 'paint2'},
-            {'view': 'top', 'outline': [[-0.22, 0.0], [-0.22, 0.75], [1.65, 0.75], [1.65, 0.0]], 'material': 'paint2', 'facingMin': 0.5},
-            {'view': 'rear', 'rect': [[0.0, 1.42], [1.5, 0.66]], 'mirror': False, 'material': 'paint2', 'depthRange': [1.3, 1.7]},
+            # The door openings cut in the tub's sides, dark to the sill, as the photos
+            # show them (a real hole through the side is not something the shell can be
+            # given; this is the opening read off the photo's silhouette).
+            {'view': 'side', 'outline': [[-0.30, 1.045], [0.62, 1.045], [0.62, 0.52], [-0.30, 0.52]],
+             'material': 'trim', 'height': 0.0},
+            # The tub's floor, seen through the openings.
+            {'view': 'top', 'outline': [[-0.30, 0.0], [-0.30, 0.70], [1.55, 0.70], [1.55, 0.0]],
+             'material': 'trim', 'facingMin': 0.5},
         ],
         'decals': [
             # Headlights and the parking lamps under them, in the grille panel: the

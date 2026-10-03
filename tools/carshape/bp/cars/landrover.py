@@ -46,6 +46,11 @@ CAR = {
         'edgeMin': 0.015,
         'edgeY': 0.04,
         'edgeYMin': 0.04,
+        # The 4 cm blur ate the ends' vertical faces: the bonnet's leading edge at -1.40
+        # came out 3 cm low (the drawn line steps 4 cm there) and the tilt's rear edge at
+        # +1.70 was cut back to the tub's capping (1.87 -> 1.24: a wedge missing off the
+        # back).  Faired with the corners kept instead.
+        'faceSpacing': 0.15, 'cornerDeg': 20,
         'arch': {'radius': 0.43, 'lift': 0.0},
     },
     'parts': {
