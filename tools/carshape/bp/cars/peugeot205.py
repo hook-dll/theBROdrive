@@ -27,6 +27,10 @@ CAR = {
         'crown': [[-1.9, 0.02], [1.9, 0.02]],
         'roofCrown': 0.03,
         'edge': 0.012,
+        # crisp folds of a flat-panelled hatch
+        'edgeMin': 0.015,
+        'edgeY': 0.04,
+        'edgeYMin': 0.04,
         'arch': {'radius': 0.355, 'lift': 0.03},
     },
     'parts': {
@@ -52,6 +56,8 @@ CAR = {
             {'view': 'side', 'outline': [[-0.82, 0.18], [-0.82, 0.36], [0.89, 0.36], [0.89, 0.18]]},
             # The black panel between the tail lamps.
             {'view': 'rear', 'rect': [[0.0, 0.625], [1.06, 0.12]], 'radius': 0.004, 'mirror': False, 'depthRange': [1.6, 1.95]},
+            # the black B-pillar between the door glass and the quarter light, part of the body
+            {'view': 'side', 'outline': [[0.487, 0.875], [0.55, 0.875], [0.556, 1.29], [0.481, 1.29]], 'facingMin': 0.3},
         ],
         'decals': [
             {'view': 'front', 'outline': [[0.0, 0.69], [0.36, 0.69], [0.33, 0.555], [0.0, 0.555]], 'material': 'grille',
@@ -97,8 +103,8 @@ CAR = {
              'height': 0.004, 'depthRange': [1.5, 1.95]},
         ],
         'bars': [
-            {'view': 'front', 'span': [-0.33, 0.33], 'b': [0.57, 0.68], 'count': 4, 'width': 0.007,
-             'material': 'trim', 'height': 0.007, 'depthRange': [-1.95, -1.5]},
+            {'view': 'front', 'span': [-0.33, 0.33], 'b': [0.57, 0.68], 'count': 4, 'width': 0.012,
+             'material': 'paint', 'height': 0.007, 'depthRange': [-1.95, -1.5]},
         ],
         'lines': [
             {'view': 'side', 'points': [[-0.65, 0.87], [-0.687, 0.70], [-0.687, 0.36]], 'width': 0.005},
@@ -107,15 +113,16 @@ CAR = {
             {'view': 'side', 'points': [[-1.50, 0.455], [1.60, 0.455]], 'width': 0.045, 'material': 'trim', 'height': 0.006},
             {'view': 'side', 'points': [[-1.50, 0.455], [1.60, 0.455]], 'width': 0.008, 'material': 'trim_red', 'height': 0.008},
             {'view': 'rear', 'points': [[0.0, 0.70], [0.52, 0.70], [0.57, 0.96]], 'width': 0.005, 'depthRange': [1.5, 1.95]},
-            {'view': 'side', 'points': [[0.481, 1.326], [-0.079, 1.294], [-0.173, 1.234], [-0.36, 1.083], [-0.44, 0.98], [-0.40, 0.875],
-                                        [0.487, 0.875], [0.481, 1.326]], 'width': 0.016, 'material': 'trim', 'height': 0.003},
-            {'view': 'side', 'points': [[0.556, 1.317], [0.55, 0.901], [0.95, 0.92], [1.019, 0.984], [1.019, 1.144], [1.001, 1.237],
-                                        [0.947, 1.291], [0.671, 1.317], [0.556, 1.317]], 'width': 0.016, 'material': 'trim', 'height': 0.003},
-            {'view': 'side', 'points': [[0.515, 0.88], [0.515, 1.325]], 'width': 0.04, 'material': 'trim', 'height': 0.003},
+            # the black rubbers on the glass's own edges (they stood 3 cm above it on the roof)
+            {'view': 'side', 'points': [[0.481, 1.29], [-0.079, 1.266], [-0.173, 1.21], [-0.36, 1.083], [-0.44, 0.98], [-0.40, 0.875],
+                                        [0.487, 0.875], [0.481, 1.29]], 'width': 0.014, 'material': 'trim', 'height': 0.003},
+            {'view': 'side', 'points': [[0.556, 1.285], [0.55, 0.901], [0.95, 0.92], [1.019, 0.984], [1.019, 1.144], [1.001, 1.22],
+                                        [0.947, 1.265], [0.671, 1.285], [0.556, 1.285]], 'width': 0.014, 'material': 'trim', 'height': 0.003},
         ],
         'mirror': {'y': -0.40, 'z': 0.95, 'reach': 0.88, 'w': 0.13, 'h': 0.08},
         'handles': {'at': [[0.35, 0.765]], 'w': 0.16, 'material': 'trim'},
         'wipers': {'arms': [[-0.55, -0.05, -0.80, 0.93], [0.05, 0.5, -0.80, 0.93]]},
+        # the GTI's 'pepper pot' alloys: a disc ringed with holes (photos)
         'wheel': {'style': 'steel', 'windows': 12, 'rimFactor': 0.70, 'cap': True},
     },
 }
