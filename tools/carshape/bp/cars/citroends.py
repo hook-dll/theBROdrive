@@ -66,7 +66,7 @@ CAR = {
              'height': 0.006, 'depthRange': [2.0, 2.6]},
         ],
         'podLamps': [
-            {'node': 'headlights', 'x': 0.815, 'z': 0.755, 'r': 0.095, 'end': 'front', 'bezel': 0.012, 'pod': False,
+            {'node': 'headlights', 'x': 0.79, 'z': 0.755, 'r': 0.09, 'end': 'front', 'bezel': 0.012, 'pod': False,
              'proud': 0.0, 'seat': 'flush'},
             {'node': 'headlights', 'x': 0.605, 'z': 0.733, 'r': 0.080, 'end': 'front', 'bezel': 0.010, 'pod': False,
              'proud': 0.0, 'seat': 'flush'},
