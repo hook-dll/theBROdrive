@@ -60,3 +60,11 @@ def shift_along(CAR, dy):
     for pl in P.get('podLamps', []):
         if 'y' in pl:
             pl['y'] += dy
+
+
+def set_overhang(CAR, fo):
+    """The factory front overhang changed to `fo`: the front axle moves by the change and
+    everything the file places along the car moves with it (a drawing's own outline
+    moves by itself: it is placed by its wheels)."""
+    shift_along(CAR, fo - CAR['factory']['frontOverhang'])
+    CAR['factory']['frontOverhang'] = fo

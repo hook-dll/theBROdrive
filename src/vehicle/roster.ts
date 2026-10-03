@@ -740,7 +740,7 @@ export const ROSTER: readonly RosterCar[] = [
     label: 'Toyota Corolla AE86',
     body: 'ae86.glb',
     bodyClass: 'car',
-    factory: { length: 4.18, width: 1.625, height: 1.335, clearance: 0.135, wheelbase: 2.4, frontTrack: 1.355, rearTrack: 1.345, wheelRadius: 0.285, tyreWidth: 0.185, frontOverhang: 0.88 },
+    factory: { length: 4.18, width: 1.625, height: 1.335, clearance: 0.135, wheelbase: 2.4, frontTrack: 1.355, rearTrack: 1.345, wheelRadius: 0.285, tyreWidth: 0.185, frontOverhang: 0.806 },
     mass: 950,
     frontWeightShare: 0.53,
     rearDriveBias: 1,

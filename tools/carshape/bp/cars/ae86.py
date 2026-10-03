@@ -52,8 +52,11 @@ CAR = {
              'material': 'IndicatorLights', 'height': 0.008, 'facingMin': 0.1, 'depthRange': [-2.2, -1.6]},
             {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.70, 0.645], [0.07, 0.09]], 'radius': 0.008,
              'material': 'IndicatorLights', 'height': 0.008, 'facingMin': 0.1, 'depthRange': [-2.2, -1.6]},
-            {'view': 'front', 'rect': [[0.44, 0.465], [0.24, 0.05]], 'radius': 0.015, 'material': 'reflector',
-             'height': 0.008, 'depthRange': [-2.2, -1.7]},
+            # turn lamps in the bumper's corners (amber, as on the Levin's zenki bumper)
+            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.52, 0.465], [0.16, 0.045]], 'radius': 0.012,
+             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-2.2, -1.7]},
+            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.52, 0.465], [0.16, 0.045]], 'radius': 0.012,
+             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-2.2, -1.7]},
             {'view': 'front', 'rect': [[0.0, 0.36], [0.62, 0.07]], 'radius': 0.006, 'mirror': False, 'material': 'grille',
              'height': 0.004, 'depthRange': [-2.2, -1.7]},
             {'view': 'front', 'rect': [[0.0, 0.35], [0.30, 0.11]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
@@ -61,15 +64,17 @@ CAR = {
             {'view': 'side', 'node': 'front_blinker_left', 'rect': [[-1.96, 0.63], [0.08, 0.06]], 'radius': 0.006, 'material': 'IndicatorLights', 'height': 0.005},
             {'view': 'side', 'node': 'front_blinker_right', 'rect': [[-1.96, 0.63], [0.08, 0.06]], 'radius': 0.006, 'material': 'IndicatorLights', 'height': 0.005},
             # Tail: lamp bands across, the plate in a black recess between them.
-            {'view': 'rear', 'rect': [[0.0, 0.69], [1.40, 0.11]], 'radius': 0.006, 'mirror': False, 'material': 'trim',
+            # wide lamp units from the corners to the plate recess: amber outboard, red, a
+            # white reversing lamp inboard (photo)
+            {'view': 'rear', 'rect': [[0.0, 0.70], [1.46, 0.16]], 'radius': 0.006, 'mirror': False, 'material': 'trim',
              'height': 0.003, 'depthRange': [1.8, 2.2]},
-            {'view': 'rear', 'node': 'taillights', 'rect': [[0.52, 0.69], [0.30, 0.09]], 'radius': 0.006,
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.46, 0.70], [0.26, 0.13]], 'radius': 0.006,
              'material': 'TailLights', 'height': 0.007, 'depthRange': [1.8, 2.2]},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.40, 0.69], [0.07, 0.09]], 'radius': 0.006,
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.8, 2.2]},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.40, 0.69], [0.07, 0.09]], 'radius': 0.006,
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.8, 2.2]},
-            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.31, 0.69], [0.05, 0.08]], 'radius': 0.006,
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.66, 0.70], [0.14, 0.13]], 'radius': 0.006,
+             'material': 'IndicatorLights', 'height': 0.008, 'facingMin': 0.1, 'depthRange': [1.8, 2.2]},
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.66, 0.70], [0.14, 0.13]], 'radius': 0.006,
+             'material': 'IndicatorLights', 'height': 0.008, 'facingMin': 0.1, 'depthRange': [1.8, 2.2]},
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.30, 0.70], [0.06, 0.13]], 'radius': 0.006,
              'material': 'ReverseLights', 'height': 0.008, 'depthRange': [1.8, 2.2]},
             {'view': 'rear', 'rect': [[0.0, 0.66], [0.58, 0.22]], 'radius': 0.01, 'mirror': False, 'material': 'trim',
              'height': 0.004, 'depthRange': [1.8, 2.2]},
@@ -95,3 +100,10 @@ CAR = {
         'wheel': {'style': 'alloy', 'spokes': 12, 'rimFactor': 0.68, 'spokeWidth': 0.25},
     },
 }
+
+# No front overhang is published; the drawing's (0.813 + 0.982 = 1.795, the Trueno's
+# 4205 less the wheelbase) scaled to the Levin's 1.780.
+import os as _os, sys as _sys  # noqa: E402
+_sys.path.insert(0, _os.path.dirname(__file__))
+from _frame import set_overhang  # noqa: E402
+set_overhang(CAR, 0.806)

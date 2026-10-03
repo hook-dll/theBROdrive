@@ -184,8 +184,19 @@ def build(car):
         if len(c):
             nose[i], tail[i] = yf[c[0]], yf[c[-1]]
     raw_ends = {}
+    # The drawing's overhangs against the factory's: a drawing at odds with them puts
+    # the arches off the wheels once the game sets the wheels by the factory figures.
+    _ya_f = -F['length'] / 2 + F['frontOverhang']
+    _fo, _ro = _ya_f - np.nanmin(nose), np.nanmax(tail) - (_ya_f + F['wheelbase'])
+    _ro_f = F['length'] - F['wheelbase'] - F['frontOverhang']
+    print(f"OVERHANG {car}: drawn front {_fo:.3f} rear {_ro:.3f}, factory {F['frontOverhang']:.3f} / {_ro_f:.3f}"
+          + (' OFF' if max(abs(_fo - F['frontOverhang']), abs(_ro - _ro_f)) > 0.04 else ''))
+    if os.environ.get('OVERHANG_ONLY'):
+        return
     for end, ext in (('front', nose), ('rear', tail)):
-        b = hs.get('bumpers', {}).get(end)
+        # A bumper's band is bridged out of the shell only where a bar part replaces it:
+        # without one the drawn bumper is the shell's (it had cut AE86's ends short).
+        b = hs.get('bumpers', {}).get(end) if end in spec.get('parts', {}).get('bumpers', {}) else None
         ok = ~np.isnan(ext)
         if b:
             # Where the drawing's bumper stands: its outer face, for the bumper part.
@@ -520,6 +531,30 @@ def build(car):
     verts[:, 2] += ys[0]
     # grid axes are (x, z, y) -> car (x, y, z)
     v = np.stack([verts[:, 0], verts[:, 2], verts[:, 1]], axis=1)
+    # The blur eats into a convex end (a wedge nose, a rounded tail) by several cm: the
+    # car came out short of its drawing and the game stretched it, arches and all, to
+    # the factory length. Each overhang beyond its arch is brought out to the drawn end;
+    # the wheelbase and the arches stay where they are.
+    ny = normals[:, 2].copy()          # (grid order x, z, y)
+    # Without a bar of its own an end is the car's end: the factory length from the axle
+    # (the game sets the wheels by the factory overhang and centres the body on its box),
+    # so the arches meet the wheels even where the drawing's overhangs differ.
+    bars = spec.get('parts', {}).get('bumpers', {})
+    for end, want, ya, ra in (('front', float(np.nanmin(nose)), ya_f, None), ('rear', float(np.nanmax(tail)), ya_r, None)):
+        if end not in bars:
+            want = -L / 2 if end == 'front' else L / 2
+        arch = dict(hs.get('arch', {}), **hs.get('arch', {}).get(end, {}))
+        ra = arch.get('radius', R * 1.14)
+        sg = -1 if end == 'front' else 1
+        pivot = ya + sg * (ra + 0.03)
+        have = v[:, 1].min() if end == 'front' else v[:, 1].max()
+        if abs(want - have) > 0.005 and (have - pivot) * sg > 0.1:
+            k = (want - pivot) / (have - pivot)
+            m = (v[:, 1] - pivot) * sg > 0
+            v[m, 1] = pivot + (v[m, 1] - pivot) * k
+            ny[m] /= k
+            print(f'ENDS {car} {end}: {have:.3f} -> {want:.3f} (overhang past the arch x{k:.3f})')
+    normals = np.stack([normals[:, 0], normals[:, 1], ny], axis=1)
     mesh = trimesh.Trimesh(v, faces[:, [0, 2, 1]], process=False)
     if mesh.volume < 0:
         mesh.invert()
