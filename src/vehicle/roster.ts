@@ -567,7 +567,7 @@ export const ROSTER: readonly RosterCar[] = [
     label: 'Citroën DS',
     body: 'citroends.glb',
     bodyClass: 'car',
-    factory: { length: 4.874, width: 1.79, height: 1.47, clearance: 0.145, wheelbase: 3.125, frontTrack: 1.516, rearTrack: 1.316, wheelRadius: 0.33, tyreWidth: 0.18, frontOverhang: 1.016 },
+    factory: { length: 4.874, width: 1.79, height: 1.47, clearance: 0.145, wheelbase: 3.125, frontTrack: 1.516, rearTrack: 1.316, wheelRadius: 0.33, tyreWidth: 0.18, frontOverhang: 0.97 },
     mass: 1280,
     frontWeightShare: 0.65,
     rearDriveBias: 0,

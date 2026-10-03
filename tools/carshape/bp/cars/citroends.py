@@ -14,7 +14,7 @@ CAR = {
         'rear': {'box': [66, 640, 425, 938]},
     },
     'hull': {
-        'bumpers': {'front': {'z': [0.30, 0.60]}, 'rear': {'z': [0.30, 0.55]}},
+        'bumpers': {'front': {'z': [0.48, 0.58]}, 'rear': {'z': [0.40, 0.51]}},
         'sill': [[-2.45, 0.42], [-2.2, 0.36], [-1.9, 0.26], [-1.6, 0.21], [1.3, 0.21], [1.8, 0.25], [2.2, 0.32], [2.45, 0.40]],
         'cabin': [-0.80, 2.0],
         'belt': [[-0.80, 1.0], [-0.4, 0.96], [1.2, 0.93], [1.6, 0.95], [2.0, 0.93]],
@@ -94,3 +94,11 @@ CAR = {
         'wheel': {'style': 'hubcap', 'rimFactor': 0.66, 'cap': 0.95},
     },
 }
+
+# The drawing's overhangs (0.926 / 0.744) fall 8 cm short of length less wheelbase; its
+# dimension says 1016 in front, which stood the bumper 18 cm off the nose the photos
+# show it hugging. The shortfall shared in proportion: 0.970 in front.
+import os as _os, sys as _sys  # noqa: E402
+_sys.path.insert(0, _os.path.dirname(__file__))
+from _frame import set_overhang  # noqa: E402
+set_overhang(CAR, 0.970)
