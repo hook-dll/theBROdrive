@@ -84,7 +84,7 @@ CAR = {
              'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [1.9, 2.5]},
             {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.40, 0.60], [0.08, 0.04]], 'radius': 0.01,
              'material': 'ReverseLights', 'height': 0.008, 'depthRange': [1.9, 2.5]},
-            {'view': 'rear', 'rect': [[0.0, 0.875], [0.40, 0.07]], 'radius': 0.03, 'mirror': False, 'material': 'chrome',
+            {'view': 'rear', 'rect': [[0.0, 0.78], [0.16, 0.035]], 'radius': 0.01, 'mirror': False, 'material': 'chrome',
              'height': 0.008, 'depthRange': [1.9, 2.5]},
             {'view': 'rear', 'rect': [[0.0, 0.66], [0.47, 0.115]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [1.9, 2.5]},
@@ -110,7 +110,10 @@ CAR = {
                      'overriders': [[0.28, 0.06, 0.42, 0.67]]},
         },
         'lensColours': {'FrontLampLens': [0.82, 0.80, 0.74]},
-        'mirror': {'y': -0.95, 'z': 1.2, 'reach': 0.755, 'w': 0.11, 'shape': 'round', 'material': 'chrome', 'sides': [1]},
+        # On the door's front corner: the head out at the belt line's skin + a short
+        # arm up to it (reach 0.98 put the head 33 cm off the skin at its own height -
+        # the tube is 0.647 there - so the arm ran 23 cm across the shoulder).
+        'mirror': {'y': -0.95, 'z': 1.19, 'reach': 0.94, 'w': 0.11, 'shape': 'round', 'material': 'chrome', 'sides': [1]},
         'handles': {'at': [[-0.15, 0.99], [0.72, 0.99]], 'w': 0.14},
         'wipers': {'arms': [[-0.6, -0.1, -1.1, 1.17], [0.05, 0.55, -1.1, 1.17]]},
         'wheel': {'style': 'hubcap', 'rimFactor': 0.66, 'cap': 0.85},

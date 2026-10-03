@@ -24,27 +24,42 @@ CAR = {
         'crown': [[-1.8, 0.02], [1.8, 0.02]],
         'roofCrown': 0.03,
         'edge': 0.014,
-        'arch': {'radius': 0.32, 'lift': 0.04},
+        # The nose and tail rows (the outline's front/rear extent at every height) were
+        # blurred over 4 cm, and the tail's step from the bumper up to the roof's rear
+        # edge carries into the outline as a clip: the roof's rear edge came out 3 cm low
+        # at +1.0 and the roof ended 15 cm early (drawing's top line 1310/1300/1298 at
+        # +0.9/+1.0/+1.05, hull 1302/1283/1269). Faired instead, corners kept (`cornerDeg`
+        # 20 keeps the roof's rear edge, the bonnet's leading edge), the drawn nicks from
+        # the lines across the faces still smoothed away.
+        'faceSpacing': 0.15, 'cornerDeg': 20,
+        # the drawing's arches: r 0.30 on the axle centre +4 cm -> lip 0.60 above ground
+        # (0.57 of it the drawing's, the tyre's top 0.54), not 0.63
+        'arch': {'radius': 0.30, 'lift': 0.03},
     },
     'parts': {
         'glass': [
-            {'view': 'side', 'outline': [[-0.62, 0.89], [-0.35, 1.21], [0.38, 1.24], [0.38, 0.89]], 'facingMin': 0.3},
-            {'view': 'side', 'outline': [[0.47, 0.89], [0.47, 1.24], [1.0, 1.23], [1.20, 0.98], [1.15, 0.89]], 'facingMin': 0.3},
+            # the vent pane, divided from the door glass by its own seal (the drawn
+            # division just behind the screen pillar)
+            {'view': 'side', 'outline': [[-0.62, 0.89], [-0.35, 1.21], [-0.26, 1.21], [-0.51, 0.89]], 'facingMin': 0.3},
+            {'view': 'side', 'outline': [[-0.51, 0.89], [-0.26, 1.21], [0.38, 1.24], [0.38, 0.89]], 'facingMin': 0.3},
+            {'view': 'side', 'outline': [[0.47, 0.89], [0.47, 1.24], [0.86, 1.235], [0.99, 1.09], [0.94, 0.89]], 'facingMin': 0.3},
             {'view': 'front', 'outline': [[0.0, 1.25], [0.47, 1.245], [0.51, 1.22], [0.58, 0.92], [0.55, 0.90], [0.0, 0.90]],
              'depthRange': [-1.1, -0.3], 'facingMin': 0.25},
             {'view': 'rear', 'outline': [[0.0, 1.22], [0.45, 1.215], [0.49, 1.18], [0.53, 0.97], [0.50, 0.95], [0.0, 0.95]],
              'depthRange': [1.0, 1.8], 'facingMin': 0.15},
         ],
         'decals': [
-            # the lamps sit in one black panel with the grille, across the nose (photos)
-            {'view': 'front', 'rect': [[0.0, 0.64], [1.30, 0.20]], 'radius': 0.02, 'mirror': False, 'material': 'trim',
+            # the lamps sit in one black panel with the grille, across the nose (photos);
+            # panel and lamps from the front view: panel +-0.70, 0.50-0.72; lamps r 0.085
+            # centred (+-0.57, 0.625); honeycomb grille +-0.36, 0.53-0.70
+            {'view': 'front', 'rect': [[0.0, 0.61], [1.40, 0.22]], 'radius': 0.02, 'mirror': False, 'material': 'trim',
              'height': 0.003, 'depthRange': [-1.8, -1.4]},
-            {'view': 'front', 'rect': [[0.0, 0.64], [0.80, 0.11]], 'radius': 0.02, 'mirror': False, 'material': 'grille',
+            {'view': 'front', 'rect': [[0.0, 0.615], [0.72, 0.17]], 'radius': 0.02, 'mirror': False, 'material': 'grille',
              'height': 0.005, 'depthRange': [-1.8, -1.4]},
-            {'view': 'front', 'node': 'headlights', 'circle': [[0.53, 0.64], 0.085], 'material': 'Headlights',
+            {'view': 'front', 'node': 'headlights', 'circle': [[0.57, 0.625], 0.085], 'material': 'Headlights',
              'height': 0.012, 'depthRange': [-1.8, -1.4]},
-            {'view': 'front', 'circle': [[0.53, 0.64], 0.10], 'ring': 0.015, 'material': 'chrome', 'height': 0.013, 'depthRange': [-1.8, -1.4]},
-            {'view': 'front', 'rect': [[0.0, 0.64], [0.06, 0.12]], 'radius': 0.01, 'mirror': False, 'material': 'chrome',
+            {'view': 'front', 'circle': [[0.57, 0.625], 0.10], 'ring': 0.015, 'material': 'chrome', 'height': 0.013, 'depthRange': [-1.8, -1.4]},
+            {'view': 'front', 'rect': [[0.0, 0.615], [0.05, 0.17]], 'radius': 0.01, 'mirror': False, 'material': 'chrome',
              'height': 0.009, 'depthRange': [-1.8, -1.4]},
             {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.60, 0.50], [0.12, 0.04]], 'radius': 0.01,
              'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-1.8, -1.4]},
@@ -66,15 +81,16 @@ CAR = {
              'height': 0.006, 'depthRange': [1.5, 1.9]},
             {'view': 'side', 'node': 'taillights', 'rect': [[1.66, 0.74], [0.06, 0.16]], 'radius': 0.01, 'material': 'TailLights', 'height': 0.004},
         ],
-        'bars': [
-            {'view': 'front', 'span': [-0.36, 0.36], 'b': [0.60, 0.69], 'count': 3, 'width': 0.008,
-             'material': 'chrome', 'height': 0.007, 'depthRange': [-1.8, -1.4]},
-        ],
         'lines': [
             {'view': 'side', 'points': [[-0.68, 0.86], [-0.68, 0.30], [0.43, 0.30], [0.43, 0.88]], 'width': 0.005},
-            {'view': 'side', 'points': [[-0.64, 0.885], [-0.36, 1.235], [0.38, 1.26], [1.02, 1.25], [1.23, 0.98], [1.17, 0.875]],
+            {'view': 'side', 'points': [[-0.64, 0.885], [-0.36, 1.235], [0.38, 1.26], [1.02, 1.25], [1.02, 1.05], [0.93, 0.88]],
              'width': 0.012, 'material': 'chrome', 'height': 0.003},
-            {'view': 'side', 'points': [[-0.64, 0.88], [1.17, 0.875]], 'width': 0.01, 'material': 'chrome', 'height': 0.003},
+            {'view': 'side', 'points': [[-0.64, 0.88], [0.93, 0.875]], 'width': 0.01, 'material': 'chrome', 'height': 0.003},
+            # the door glass' vent pane division is the vent pane's own seal (above)
+            # the grille's chrome surround: the drawing has a framed honeycomb, not the
+            # horizontal slats drawn before
+            {'view': 'front', 'points': [[-0.36, 0.535], [0.36, 0.535], [0.36, 0.70], [-0.36, 0.70], [-0.36, 0.535]],
+             'width': 0.012, 'material': 'chrome', 'height': 0.007, 'depthRange': [-1.8, -1.4]},
             {'view': 'rear', 'points': [[0.0, 0.48], [0.53, 0.48], [0.55, 1.25], [0.0, 1.25]], 'width': 0.005, 'depthRange': [1.0, 1.9]},
         ],
         'bumpers': {

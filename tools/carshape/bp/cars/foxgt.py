@@ -5,7 +5,7 @@
 # with flush composite lamps and no grille, a deep fascia, a sharply raked screen, a
 # short roof running into a long shallow fastback with louvred quarter glass, a spoiler,
 # the GT's body-colour skirts with a red stripe, full-width tail lamps.
-SEC = [[0.18, 0.80], [0.30, 0.86], [0.75, 0.87], [0.88, 0.84], [1.0, 0.76], [1.15, 0.70], [1.25, 0.64], [1.30, 0.55], [1.33, 0.2]]
+SEC = [[0.16, 0.85], [0.28, 0.865], [0.75, 0.87], [0.88, 0.84], [1.0, 0.76], [1.15, 0.70], [1.25, 0.64], [1.30, 0.55], [1.33, 0.2]]
 CAR = {
     'id': 'foxgt',
     'label': 'Ford Mustang GT 5.0',
@@ -28,7 +28,7 @@ CAR = {
         'roofHalf': 0.62,
         'roofCrown': 0.04,
         'edge': 0.010, 'edgeY': 0.014, 'faceSmooth': 0.012,
-        'arch': {'radius': 0.37, 'lift': 0.03},
+        'arch': {'radius': 0.36, 'lift': 0.015},
     },
     'parts': {
         'glass': [
@@ -52,17 +52,25 @@ CAR = {
             # x 0.08 and a 15 cm slot: the panel was mistaken for a slot and the lamps
             # sat 5 cm low, under a body-colour brow). The air dam carries a wide slot
             # low down between the round fog lamps in its ends.
-            {'view': 'front', 'rect': [[0.0, 0.705], [0.58, 0.098]], 'radius': 0.012, 'mirror': False, 'material': 'grille',
+            {'view': 'front', 'rect': [[0.0, 0.678], [0.40, 0.056]], 'radius': 0.012, 'mirror': False, 'material': 'grille',
              'height': 0.004, 'depthRange': [-2.45, -1.9]},
-            {'view': 'front', 'node': 'headlights', 'outline': [[0.30, 0.758], [0.60, 0.752], [0.69, 0.734], [0.72, 0.700], [0.72, 0.664], [0.30, 0.656]],
+            # Photo 1: one wide lens in a black bezel - the clear headlamp inboard, the
+            # amber turn lens the outer third of it, tapering round the wing's corner.
+            {'view': 'front', 'outline': [[0.245, 0.762], [0.60, 0.756], [0.685, 0.740], [0.735, 0.706], [0.835, 0.688],
+                                          [0.828, 0.642], [0.735, 0.640], [0.245, 0.618]],
+             'material': 'trim', 'height': 0.004, 'depthRange': [-2.45, -1.9]},
+            {'view': 'front', 'node': 'headlights', 'outline': [[0.255, 0.750], [0.55, 0.744], [0.555, 0.650], [0.255, 0.632]],
              'material': 'Headlights', 'height': 0.006, 'depthRange': [-2.45, -1.9]},
-            {'view': 'front', 'node': 'front_blinker_left', 'outline': [[0.72, 0.758], [0.79, 0.748], [0.845, 0.716], [0.855, 0.672], [0.838, 0.652], [0.72, 0.660]],
+            {'view': 'front', 'node': 'front_blinker_left', 'outline': [[0.55, 0.744], [0.63, 0.738], [0.70, 0.720], [0.815, 0.690], [0.808, 0.646], [0.70, 0.654], [0.55, 0.650]],
              'material': 'IndicatorLights', 'height': 0.006, 'depthRange': [-2.45, -1.9]},
-            {'view': 'front', 'node': 'front_blinker_right', 'outline': [[0.72, 0.758], [0.79, 0.748], [0.845, 0.716], [0.855, 0.672], [0.838, 0.652], [0.72, 0.660]],
+            {'view': 'front', 'node': 'front_blinker_right', 'outline': [[0.55, 0.744], [0.63, 0.738], [0.70, 0.720], [0.815, 0.690], [0.808, 0.646], [0.70, 0.654], [0.55, 0.650]],
              'material': 'IndicatorLights', 'height': 0.006, 'depthRange': [-2.45, -1.9]},
             {'view': 'front', 'rect': [[0.0, 0.305], [0.50, 0.05]], 'radius': 0.02, 'mirror': False, 'material': 'grille',
              'height': 0.004, 'depthRange': [-2.45, -1.9]},
-            {'view': 'front', 'node': 'headlights', 'circle': [[0.60, 0.325], 0.040], 'material': 'Headlights',
+            # The fog lamp sits in a round recess in the air dam (photo 1).
+            {'view': 'front', 'circle': [[0.60, 0.335], 0.054], 'ring': 0.014, 'material': 'trim',
+             'height': 0.003, 'depthRange': [-2.45, -1.9]},
+            {'view': 'front', 'node': 'headlights', 'circle': [[0.60, 0.335], 0.038], 'material': 'Headlights',
              'height': 0.007, 'depthRange': [-2.45, -1.9]},
             {'view': 'front', 'rect': [[0.0, 0.50], [1.72, 0.035]], 'radius': 0.004, 'mirror': False, 'material': 'trim',
              'height': 0.003, 'depthRange': [-2.45, -1.9]},
@@ -79,8 +87,12 @@ CAR = {
              'material': 'TailLights', 'height': 0.010, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
             {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.68, 0.815], [0.12, 0.028]], 'radius': 0.006,
              'material': 'TailLights', 'height': 0.010, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.31, 0.875], [0.11, 0.13]], 'radius': 0.006,
-             'material': 'ReverseLights', 'height': 0.008, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.315, 0.828], [0.09, 0.011]], 'radius': 0.003,
+             'mirror': False, 'material': 'ReverseLights', 'height': 0.008, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.315, 0.874], [0.09, 0.011]], 'radius': 0.003,
+             'mirror': False, 'material': 'ReverseLights', 'height': 0.008, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.315, 0.920], [0.09, 0.011]], 'radius': 0.003,
+             'mirror': False, 'material': 'ReverseLights', 'height': 0.008, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
             {'view': 'rear', 'rect': [[0.59, 0.822], [0.42, 0.009]], 'material': 'trim', 'height': 0.011,
              'depthRange': [2.0, 2.45], 'facingMin': 0.05},
             {'view': 'rear', 'rect': [[0.59, 0.848], [0.42, 0.009]], 'material': 'trim', 'height': 0.011,
@@ -111,12 +123,12 @@ CAR = {
         'mirror': {'y': -0.42, 'z': 0.93, 'reach': 0.92, 'w': 0.15, 'h': 0.09},
         'handles': {'at': [[0.35, 0.80]], 'w': 0.14, 'material': 'trim'},
         'wipers': {'arms': [[-0.55, -0.05, -0.72, 0.97], [0.05, 0.55, -0.72, 0.97]]},
-        # The hatch's spoiler: a body-colour blade across the deck's end on two short
-        # pedestals (photo 2: the blade's ends come down to the deck at the quarters;
-        # the old one's ends hung 8 cm in the air past its posts).
+        # The hatch's spoiler: a slim body-colour blade on two small pedestals at the
+        # deck's ends (photo 2). The old one was a thick slab whose box posts were as
+        # deep as the blade, so it read as a block; and its ends hung 8 cm in the air.
         'boxes': [
-            {'c': [0.0, 1.97, 1.020], 'size': [1.32, 0.17, 0.035], 'mirror': False, 'material': 'paint'},
-            {'c': [0.61, 1.97, 0.985], 'size': [0.10, 0.15, 0.10], 'material': 'paint'},
+            {'c': [0.0, 2.05, 1.010], 'size': [1.32, 0.16, 0.025], 'mirror': False, 'material': 'paint'},
+            {'c': [0.61, 2.05, 0.973], 'size': [0.10, 0.07, 0.078], 'material': 'paint'},
         ],
         'wheel': {'style': 'alloy', 'spokes': 15, 'rimFactor': 0.70, 'spokeWidth': 0.5},
         # The GT's red accent stripe keeps its colour whatever the car is painted.

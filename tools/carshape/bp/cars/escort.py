@@ -151,8 +151,8 @@ CAR = {
         # -1.805 post-shift; rear 0.772, 1.786 - written here 11 cm forward of that, as
         # set_overhang moves everything the file places).
         'boxes': [
-            {'c': [0.762, -1.705, 0.465], 'size': [0.070, 0.125, 0.105], 'material': 'trim'},
-            {'c': [0.762, 1.910, 0.445], 'size': [0.070, 0.110, 0.105], 'material': 'trim'},
+            {'c': [0.760, -1.705, 0.465], 'size': [0.072, 0.085, 0.098], 'material': 'trim'},
+            {'c': [0.760, 1.910, 0.445], 'size': [0.072, 0.080, 0.098], 'material': 'trim'},
         ],
         'handles': {'at': [[0.33, 0.855]], 'w': 0.13},
         'wipers': {'arms': [[-0.55, -0.05, -0.80, 0.94], [0.05, 0.5, -0.80, 0.94]]},

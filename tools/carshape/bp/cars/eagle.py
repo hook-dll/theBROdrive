@@ -31,7 +31,11 @@ CAR = {
         'planOverride': [[-2.33, 0.82], [-2.25, 0.88], [-2.0, 0.905], [2.0, 0.905], [2.15, 0.90], [2.18, 0.89]],
         'sectionBridge': {'front': [[1.0, 1.25]]},
         'cabin': [-0.96, 2.17],
-        'belt': [[-0.96, 1.10], [-0.8, 1.02], [1.2, 1.01], [1.8, 1.02], [2.17, 1.02]],
+        # The belt (photo side_rear_wagon, scaled by the wheelbase): the side glass's
+        # foot sits at 0.95-0.96, a hand's width over the door handles - the drawing's
+        # 1.02/1.10 was its roof band read as the belt. The windows are 0.34 m tall, not
+        # 0.30, and the glasshouse no longer reads as a van's slots under a high belt.
+        'belt': [[-0.96, 1.02], [-0.8, 0.96], [1.2, 0.955], [1.8, 0.96], [2.17, 0.975]],
         'glassPlan': [[-0.96, 0.82], [-0.5, 0.875], [1.6, 0.875], [2.17, 0.865]],
         'shelf': 0.012,
         'crown': [[-2.4, 0.006], [2.4, 0.006]],
@@ -41,24 +45,37 @@ CAR = {
         'roofCrown': 0.012,
         'roofHalf': 0.75,
         'edge': 0.010,
-        'arch': {'radius': 0.44, 'lift': 0.04},
+        'arch': {'radius': 0.37, 'lift': 0.04},
     },
     'parts': {
-        'archFlares': [{'axle': 'both', 'r': 0.445, 'w': 0.07, 't': 0.025, 'lift': 0.04}],
+        # The black plastic arch flares (photos: a band round each opening standing a
+        # hand's width proud of the body), and the openings themselves: the photo's lip
+        # sits 6 cm over the tyre, not the 15 cm the drawing's deep wells gave.
+        'archFlares': [{'axle': 'both', 'r': 0.375, 'w': 0.09, 't': 0.03, 'lift': 0.04}],
+        # Panes in the model's own frame (the belt at 0.955, the head at 1.30), measured
+        # off side_rear_wagon: a vent pane ahead of the front door's glass, the B-pillar
+        # a hand's width wide and just behind the front door's handle, the C-pillar as
+        # wide again, and a quarter window running back to the D-pillar at 2.05.
         'glass': [
-            {'view': 'side', 'outline': [[0.80, 1.02], [0.141, 1.02], [0.141, 1.40], [0.646, 1.40]], 'facingMin': 0.3},
-            {'view': 'side', 'outline': [[0.075, 1.02], [-0.76, 1.03], [-0.42, 1.40], [0.075, 1.40]], 'facingMin': 0.3},
-            {'view': 'side', 'outline': [[1.86, 1.03], [0.844, 1.02], [0.80, 1.38], [1.80, 1.38], [1.86, 1.33]], 'facingMin': 0.3},
-            {'view': 'front', 'outline': [[0.0, 1.38], [0.60, 1.36], [0.68, 1.28], [0.74, 1.12], [0.70, 1.10], [0.0, 1.10]],
+            {'view': 'side', 'outline': [[0.13, 0.955], [-0.60, 0.955], [-0.60, 1.30], [0.13, 1.30]], 'facingMin': 0.3},
+            {'view': 'side', 'outline': [[-0.60, 0.955], [-0.93, 0.955], [-0.80, 1.17], [-0.60, 1.17]], 'facingMin': 0.3},
+            {'view': 'side', 'outline': [[0.80, 0.955], [0.24, 0.955], [0.24, 1.30], [0.78, 1.30]], 'facingMin': 0.3},
+            {'view': 'side', 'outline': [[2.05, 0.96], [0.99, 0.955], [0.97, 1.30], [1.97, 1.30], [2.05, 1.22]], 'facingMin': 0.3},
+            {'view': 'front', 'outline': [[0.0, 1.36], [0.60, 1.34], [0.68, 1.26], [0.74, 1.10], [0.70, 1.08], [0.0, 1.08]],
              'depthRange': [-1.2, -0.4], 'facingMin': 0.2},
-            {'view': 'rear', 'outline': [[0.0, 1.38], [0.56, 1.375], [0.60, 1.35], [0.62, 1.03], [0.58, 0.99], [0.0, 0.99]],
+            # The back light: the wagon's tailgate window, wide at its foot (0.64 of the
+            # 0.905 half-width against the photo's 0.70) and drawn in to 0.53 at the top.
+            {'view': 'rear', 'outline': [[0.0, 1.325], [0.53, 1.32], [0.60, 1.28], [0.64, 1.03], [0.60, 0.98], [0.0, 0.98]],
              'depthRange': [1.6, 2.3], 'facingMin': 0.15},
         ],
         'regions': [
-            # Black flares, cladding and bumper faces.
-            {'view': 'side', 'outline': [[-2.5, 0.38], [-2.5, 0.50], [2.3, 0.50], [2.3, 0.38]]},
-            {'view': 'front', 'rect': [[0.0, 0.53], [1.9, 0.18]], 'radius': 0.001, 'mirror': False, 'depthRange': [-2.6, -2.2]},
-            {'view': 'rear', 'rect': [[0.0, 0.53], [1.9, 0.18]], 'radius': 0.001, 'mirror': False, 'depthRange': [2.0, 2.4]},
+            # The Eagle's black plastic: the flares (parts.archFlares), a cladding band
+            # from the sill up to 0.53 (photos of the wagons: a tall black rocker with a
+            # chrome strip over it, not the sliver the drawing showed), and the valances
+            # under both bumpers.
+            {'view': 'side', 'outline': [[-2.5, 0.33], [-2.5, 0.53], [2.3, 0.53], [2.3, 0.33]]},
+            {'view': 'front', 'rect': [[0.0, 0.53], [1.9, 0.20]], 'radius': 0.001, 'mirror': False, 'depthRange': [-2.6, -2.2]},
+            {'view': 'rear', 'rect': [[0.0, 0.53], [1.9, 0.20]], 'radius': 0.001, 'mirror': False, 'depthRange': [2.0, 2.4]},
         ],
         'decals': [
             # The Eagle's face (photos, 1982 wagon): one chrome-framed panel across the
@@ -81,19 +98,24 @@ CAR = {
             {'view': 'front', 'rect': [[0.0, 0.53], [0.52, 0.11]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [-2.7, -2.2]},
             {'view': 'side', 'rect': [[-2.20, 0.85], [0.14, 0.04]], 'radius': 0.01, 'material': 'IndicatorLights', 'height': 0.004},
-            # The full-width band of tail lamps, the plate in its middle.
-            {'view': 'rear', 'rect': [[0.0, 0.73], [1.70, 0.20]], 'radius': 0.01, 'mirror': False, 'material': 'trim',
+            # The full-width band of tail lamps (photos of the 1983 wagon): a chrome
+            # framed unit high on the tailgate's lower panel, red lamps outboard, the
+            # amber turn lamp between them and the clear reversing lamp inboard, the
+            # plate in the middle of it.
+            {'view': 'rear', 'rect': [[0.0, 0.84], [1.76, 0.17]], 'radius': 0.012, 'mirror': False, 'material': 'chrome',
              'height': 0.004, 'depthRange': [2.0, 2.4], 'facingMin': 0.05},
-            {'view': 'rear', 'node': 'taillights', 'rect': [[0.62, 0.75], [0.44, 0.10]], 'radius': 0.008, 'material': 'TailLights',
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.795, 0.84], [0.21, 0.13]], 'radius': 0.008, 'material': 'TailLights',
              'height': 0.008, 'depthRange': [2.0, 2.4], 'facingMin': 0.05},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.72, 0.67], [0.24, 0.045]], 'radius': 0.006,
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.6085, 0.84], [0.163, 0.13]], 'radius': 0.006,
              'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [2.0, 2.4], 'facingMin': 0.05},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.72, 0.67], [0.24, 0.045]], 'radius': 0.006,
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.6085, 0.84], [0.163, 0.13]], 'radius': 0.006,
              'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [2.0, 2.4], 'facingMin': 0.05},
-            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.46, 0.67], [0.16, 0.045]], 'radius': 0.006,
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.4365, 0.84], [0.181, 0.13]], 'radius': 0.008, 'material': 'TailLights',
+             'height': 0.008, 'depthRange': [2.0, 2.4], 'facingMin': 0.05},
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.276, 0.84], [0.14, 0.13]], 'radius': 0.006,
              'material': 'ReverseLights', 'height': 0.008, 'depthRange': [2.0, 2.4], 'facingMin': 0.05},
-            {'view': 'rear', 'rect': [[0.0, 0.73], [0.36, 0.13]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
-             'height': 0.008, 'depthRange': [2.0, 2.4], 'facingMin': 0.05},
+            {'view': 'rear', 'rect': [[0.0, 0.84], [0.32, 0.145]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
+             'height': 0.010, 'depthRange': [2.0, 2.4], 'facingMin': 0.05},
         ],
         'bars': [
             # the egg crate: bars across and up
@@ -103,10 +125,10 @@ CAR = {
              'material': 'chrome', 'height': 0.008, 'depthRange': [-2.6, -2.2]},
         ],
         'lines': [
-            {'view': 'side', 'points': [[-0.96, 1.01], [-1.0, 0.47], [0.11, 0.45], [0.11, 1.01]], 'width': 0.005},
-            {'view': 'side', 'points': [[0.11, 0.45], [0.82, 0.44], [0.85, 1.01]], 'width': 0.005},
-            {'view': 'side', 'points': [[-2.30, 0.90], [2.15, 0.90]], 'width': 0.006, 'material': 'chrome', 'height': 0.003},
-            {'view': 'side', 'points': [[-0.80, 1.02], [-0.42, 1.41], [0.66, 1.41], [0.80, 1.02]], 'width': 0.012, 'material': 'chrome',
+            {'view': 'side', 'points': [[-0.96, 0.955], [-1.0, 0.47], [0.13, 0.45], [0.13, 0.955]], 'width': 0.005},
+            {'view': 'side', 'points': [[0.13, 0.45], [0.82, 0.44], [0.85, 0.955]], 'width': 0.005},
+            {'view': 'side', 'points': [[-2.30, 0.94], [2.15, 0.94]], 'width': 0.006, 'material': 'chrome', 'height': 0.003},
+            {'view': 'side', 'points': [[-0.93, 0.955], [-0.60, 1.30], [0.97, 1.30], [2.05, 0.955]], 'width': 0.012, 'material': 'chrome',
              'height': 0.003},
         ],
         'boxes': [{'c': [0.58, 0.55, 1.43], 'size': [0.04, 1.8, 0.03], 'material': 'chrome'}],
@@ -115,16 +137,18 @@ CAR = {
                       'overriders': [[0.40, 0.07, 0.44, 0.68]]},
             'rear': {'z': [0.46, 0.66], 'depth': 0.09, 'wrap': 0.30, 'profile': 'blade', 'rubber': 0.06, 'standOff': -0.01},
         },
-        'mirror': {'y': -0.74, 'z': 1.07, 'reach': 0.99, 'w': 0.13, 'h': 0.09, 'material': 'chrome'},
-        'handles': {'at': [[-0.05, 0.93], [0.75, 0.93]], 'w': 0.13},
+        'mirror': {'y': -0.88, 'z': 0.90, 'reach': 0.99, 'w': 0.13, 'h': 0.09, 'material': 'chrome'},
+        'handles': {'at': [[-0.03, 0.80], [0.72, 0.80]], 'w': 0.13},
         'wipers': {'arms': [[-0.6, -0.05, -0.98, 1.15], [0.05, 0.6, -0.98, 1.15]]},
         'wheel': {'style': 'alloy', 'spokes': 10, 'rimFactor': 0.66, 'spokeWidth': 0.35},
     },
 }
 
 
-# The outlines above were drawn to a 1.46 m roof; the wagon stands 1.387 m: everything
-# above the belt (1.10) is brought down in proportion.
+# The blueprint outlines were drawn to a 1.46 m roof; the wagon stands 1.387 m:
+# everything above the drawing's belt (1.10) is brought down in proportion. The glass
+# panes and the car's own lines are already in the model's frame (belt 0.955, roof
+# 1.387) and are left alone.
 def _lower(z, top=1.46, to=1.387, belt=1.10):
     return z if z <= belt else belt + (z - belt) * (to - belt) / (top - belt)
 
@@ -137,10 +161,6 @@ _bp = CAR['blueprint']
 _bp['side']['outline'] = _pts(_bp['side']['outline'])
 for _e in ('front', 'rear'):
     _bp[_e]['outline'] = _pts(_bp[_e]['outline'])
-for _g in CAR['parts']['glass']:
-    _g['outline'] = _pts(_g['outline'])
-for _l in CAR['parts']['lines']:
-    _l['points'] = _pts(_l['points'])
 for _b in CAR['parts']['boxes']:
     _b['c'][2] = _lower(_b['c'][2])
 
