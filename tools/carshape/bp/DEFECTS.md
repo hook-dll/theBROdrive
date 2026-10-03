@@ -155,3 +155,38 @@ Car-file fixes that came from the photos (not the drawing):
 
 Open: Moskvich-412's body is built 3.56 m long for 4.25 (its drawing's scale), so its
 nose decals find no faces; GAZ-21 and Eagle 4 % short.
+
+More, found car by car (AE86, BJ40):
+
+19. **Ends and roofs short of the drawing, then stretched by the game.** The blur eats
+    4-8 cm off a convex end and ~5 cm off a roof. After marching cubes each overhang
+    past its arch is stretched out to its end (hull.py, `ENDS` in the log): to the
+    factory end (+-L/2) where no bar part stands there, so the front axle sits at the
+    factory overhang from the nose; to the drawn body end where a bar does (the bar is
+    then placed with its face at +-L/2: `BUMPER ... target`). The glasshouse above the
+    belt is stretched up to the drawn top likewise.
+20. **Factory overhangs.** `OVERHANG` in the log compares the drawing's with the car
+    file's (`OVERHANG_ONLY=1 python hull.py <car>` prints it alone). Where none is
+    published and the drawing's add up to length less wheelbase, the drawing's is
+    taken: `_frame.set_overhang(CAR, fo)` moves everything the file places along the
+    car with the axle; `build/carshape/syncroster.py` (run by ship.sh) copies the
+    factory figures into the roster. Spare wheels on the tail count in the factory
+    length (Jeep, UAZ, SJ410, BJ40): the bar goes to the drawn end there.
+21. **A drawn bumper bridged out with no bar to replace it** cut the ends short (AE86):
+    the band is bridged only where `parts.bumpers` has that end. Where the band is
+    bridged and nothing of the body is below it (a frame car), the face behind the bar
+    is given with `hull.face` (BJ40).
+22. **Bars standing well clear** (on a frame's horns): stood off along the envelope's
+    normal, not along rays from a centre (the middle bowed out and the wrap filter kept
+    two stubs); the wrap measured from the bar's own face; a bar exactly symmetric;
+    `span` for a straight bar across the frame; stand-off up to 0.7 m on a frame; the
+    frame rails run out to the bars.
+23. **Mirrors joined into the trim** were measured as the body's side by the game (it
+    leaves out only the `mirrors` node, and a two-material node comes in as meshes
+    `mirrors`, `mirrors_1`): mirrors stay their own node; carmodel.ts leaves out any
+    mesh named `mirrors*` or under such a node.
+24. **Heights.** `_frame.scale_above(CAR, belt, top_from, top_to)` for a drawing lower
+    than the car (BJ40's FJ40 drawing 1.80 m, the hardtop 1.93): outlines, panes,
+    decals, lines, regions, station sections above the belt. The side view's crop
+    must leave room above the roof (`side.box`): an outline in metres is drawn into the
+    cropped drawing and was clipped at its top edge.

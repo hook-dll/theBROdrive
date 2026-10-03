@@ -1141,7 +1141,9 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   let shellMinX = Infinity;
   let shellMaxX = -Infinity;
   scene.traverse((node) => {
-    if (!(node instanceof THREE.Mesh) || node.name === MIRRORS_NODE) return;
+    // a two-material node comes in as a group of meshes (mirrors, mirrors_1)
+    if (!(node instanceof THREE.Mesh) || node.name.startsWith(MIRRORS_NODE)
+      || node.parent?.name.startsWith(MIRRORS_NODE)) return;
     const positions = node.geometry.getAttribute('position');
     if (!positions) return;
     for (let i = 0; i < positions.count; i++) {
