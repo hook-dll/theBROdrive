@@ -46,19 +46,22 @@ CAR = {
              'depthRange': [0.7, 1.7], 'facingMin': -0.3},
         ],
         'decals': [
-            {'view': 'front', 'outline': [[0.0, 0.895], [0.3, 0.88], [0.5, 0.85], [0.555, 0.80], [0.555, 0.555], [0.0, 0.555]],
+            # The third series' (1962-70) wide low grille of fine vertical bars between the
+            # wings, the round lamps in chrome rings on the wings' fronts, the side lamps
+            # under them.
+            {'view': 'front', 'outline': [[0.0, 0.80], [0.50, 0.79], [0.545, 0.76], [0.545, 0.60], [0.50, 0.575], [0.0, 0.575]],
              'material': 'chrome', 'height': 0.006, 'depthRange': [-2.5, -2.0]},
-            {'view': 'front', 'outline': [[0.0, 0.875], [0.29, 0.862], [0.48, 0.835], [0.53, 0.79], [0.53, 0.575], [0.0, 0.575]],
+            {'view': 'front', 'outline': [[0.0, 0.78], [0.49, 0.772], [0.525, 0.75], [0.525, 0.61], [0.49, 0.595], [0.0, 0.595]],
              'material': 'grille', 'height': 0.007, 'depthRange': [-2.5, -2.0]},
-            {'view': 'front', 'node': 'headlights', 'circle': [[0.685, 0.889], 0.092], 'material': 'Headlights',
+            {'view': 'front', 'node': 'headlights', 'circle': [[0.64, 0.889], 0.085], 'material': 'Headlights',
              'height': 0.014, 'depthRange': [-2.5, -1.8]},
-            {'view': 'front', 'circle': [[0.685, 0.889], 0.122], 'ring': 0.03, 'material': 'chrome',
+            {'view': 'front', 'circle': [[0.64, 0.889], 0.11], 'ring': 0.025, 'material': 'chrome',
              'height': 0.016, 'depthRange': [-2.5, -1.8]},
-            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.685, 0.64], [0.17, 0.07]], 'radius': 0.02,
+            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.66, 0.68], [0.15, 0.06]], 'radius': 0.02,
              'material': 'FrontLampLens', 'height': 0.010, 'depthRange': [-2.5, -2.0]},
-            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.685, 0.64], [0.17, 0.07]], 'radius': 0.02,
+            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.66, 0.68], [0.15, 0.06]], 'radius': 0.02,
              'material': 'FrontLampLens', 'height': 0.010, 'depthRange': [-2.5, -2.0]},
-            {'view': 'front', 'rect': [[0.685, 0.64], [0.19, 0.09]], 'radius': 0.025, 'material': 'chrome',
+            {'view': 'front', 'rect': [[0.66, 0.68], [0.17, 0.08]], 'radius': 0.025, 'material': 'chrome',
              'height': 0.006, 'depthRange': [-2.5, -2.0]},
             {'view': 'front', 'rect': [[0.0, 0.93], [0.14, 0.05]], 'radius': 0.02, 'mirror': False, 'material': 'chrome',
              'height': 0.012, 'depthRange': [-2.5, -2.0]},
@@ -76,8 +79,8 @@ CAR = {
              'height': 0.006, 'depthRange': [1.9, 2.5]},
         ],
         'bars': [
-            {'view': 'front', 'span': [-0.50, 0.50], 'b': [0.58, 0.85], 'count': 16, 'dir': 'v', 'width': 0.02,
-             'material': 'chrome', 'height': 0.012, 'depthRange': [-2.5, -2.0]},
+            {'view': 'front', 'span': [-0.51, 0.51], 'b': [0.60, 0.775], 'count': 34, 'dir': 'v', 'width': 0.012,
+             'material': 'chrome', 'height': 0.010, 'depthRange': [-2.5, -2.0]},
         ],
         'lines': [
             {'view': 'side', 'points': [[-0.927, 1.04], [-0.927, 0.337], [0.054, 0.337], [0.054, 1.07]], 'width': 0.005},
@@ -90,9 +93,9 @@ CAR = {
                                         for a in [i * 0.2 for i in range(32)]], 'width': 0.005, 'depthRange': [1.8, 2.5]},
         ],
         'bumpers': {
-            'front': {'z': [0.41, 0.535], 'depth': 0.07, 'wrap': 0.3, 'profile': 'round',
+            'front': {'z': [0.43, 0.575], 'depth': 0.10, 'wrap': 0.3, 'profile': 'round',
                       'overriders': [[0.39, 0.06, 0.40, 0.65]]},
-            'rear': {'z': [0.42, 0.565], 'depth': 0.07, 'wrap': 0.3, 'profile': 'round',
+            'rear': {'z': [0.42, 0.565], 'depth': 0.09, 'wrap': 0.3, 'profile': 'round',
                      'overriders': [[0.28, 0.06, 0.42, 0.67]]},
         },
         'lensColours': {'FrontLampLens': [0.82, 0.80, 0.74]},
