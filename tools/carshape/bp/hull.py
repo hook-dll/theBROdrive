@@ -216,8 +216,8 @@ def build(car):
     # The top of the outline at every station, made fair, and the outline rebuilt from
     # its fair lines (sill, top, nose, tail): the drawing's own pixels rippled the side.
     top_f = np.array([zf[np.nonzero(side[:, j])[0][-1]] if side[:, j].any() else 0 for j in range(len(yf))])
-    if hs.get('topSpacing', 0.2):
-        top_f = fair(yf, top_f, hs.get('topSpacing', 0.2), mask=top_f > 0.05)
+    if hs.get('topSpacing', 0):
+        top_f = fair(yf, top_f, hs.get('topSpacing', 0), mask=top_f > 0.05)
     else:
         top_f = smooth1(top_f, 9, 2.0)
     if hs.get('fairSide', False):
@@ -242,8 +242,8 @@ def build(car):
         plan = ndimage.grey_opening(plan, size=op, mode='nearest')
     # Away from the ends the plan is a long, slow curve: lines the top view draws
     # along the sides (mouldings, shut lines) only nick it.
-    if hs.get('planSpacing', 0.2):
-        plan = fair(ys, plan, hs.get('planSpacing', 0.2), mask=plan > 0.02)
+    if hs.get('planSpacing', 0):
+        plan = fair(ys, plan, hs.get('planSpacing', 0), mask=plan > 0.02)
     else:
         plan = smooth_inner(plan, ys, hs.get('planSmooth', 0.08), 0.18)
     for band in hs.get('planBridge', []):

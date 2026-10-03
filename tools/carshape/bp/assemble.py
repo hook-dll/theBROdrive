@@ -478,6 +478,8 @@ def widen_screen(g):
     as the car's); one factor keeps the outline's own smooth shape."""
     if g['view'] not in ('front', 'rear') or 'outline' not in g or g.get('widen') is False:
         return g
+    if g.get('facingMin', 0.2) < 0:
+        return g            # a pane already wrapping round onto the sides
     pil = g.get('pillar', P.get('pillar', 0.05))
     sgn = -1 if g['view'] == 'front' else 1
     pts_ = g['outline']
@@ -496,7 +498,7 @@ def widen_screen(g):
         ratios.append((side_.x - pil) / abs(a_))
     if not ratios:
         return g
-    k = min(max(min(ratios), 1.0), g.get('widenMax', 1.12))
+    k = min(max(min(ratios), 1.0), g.get('widenMax', P.get('widenMax', 1.07)))
     return dict(g, outline=[[a_ * k, b_] for a_, b_ in pts_])
 
 
@@ -528,17 +530,18 @@ def reach_pillar(g):
                 break
             lim = yy
         shifts.append(max(0.0, y_ - (lim + pil)))
-    sh = min(min(shifts) if shifts else 0.0, 0.15)
+    sh = min(min(shifts) if shifts else 0.0, P.get('pillarReach', 0.06))
     out = [[y_ - sh if y_ <= ymin + 0.12 else y_, z_] for y_, z_ in pts_]
     return dict(g, outline=out)
 
 
-GL = [reach_pillar(widen_screen(g)) for g in GL]
+_wrap_screen = any(g['view'] == 'front' and g.get('facingMin', 0.2) < 0 for g in GL)
+GL = [widen_screen(g) if _wrap_screen else reach_pillar(widen_screen(g)) for g in GL]
 FIT_KS = {}
 FITTED = {}
 # A side window is its drawn outline on what the side view sees: its edges are the
 # drawing's straight lines, never the curve where the side turns away.
-GL = [dict(g, visible=True, facingMin=min(g.get('facingMin', 0.3), -0.2), sideWin=True) if g['view'] == 'side' else g
+GL = [dict(g, visible=True, facingMin=min(g.get('facingMin', 0.3), 0.15), sideWin=True) if g['view'] == 'side' else g
       for g in GL]
 for gi, g in enumerate(GL):
     for sign, poly in sides_of(g):
