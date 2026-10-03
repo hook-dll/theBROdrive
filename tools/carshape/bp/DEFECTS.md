@@ -117,6 +117,45 @@ Every car is now judged against its photos and its factory figures:
 - `build/carshape/symm.py <car>...` – each part against its mirror image (shells and
   glass are symmetric to 1 cm; one-sided parts are one mirror, blinkers).
 
+### The per-car checklist (the user's, 2026-10-03)
+
+A car is shipped only when every line holds against the real car of the roster's
+model **and year** (Giulia Super 1965, Golf I 1978-83 with plastic bumpers, Mustang GT
+1987-93...):
+
+1. **References are the right car.** Photos found by model plus year or generation
+   ("1982 Volkswagen Golf", "Golf I", never just "Golf"): four times a folder held the
+   wrong generation or a modern namesake (Giulia 2016, Golf VI/VIII, Civic, CR-X II).
+   The drawing is a true orthographic one: an artist's cutaway (Giulia's Autocar sketch)
+   or a racing variant gives the wrong body. the-blueprints.com previews
+   (`/vectordrawings/show/<id>/<slug>/`, image `modules/vectordrawings/preview-wm/...`)
+   and getoutlines.com (`_refs/web/go.sh`) have four-view drawings; 3dcar.ru is
+   unreachable from here.
+2. **Specs.** Factory length, width, height, wheelbase, tracks, tyre size and wheel
+   radius, clearance, mass, engine and gearbox in `roster.ts` for that model and year
+   (`dims.py`, `syncroster.py`).
+3. **Body.** The side silhouette, the plan and the end sections (tumblehome, shoulder,
+   roof width) from the drawing; every swelling, crease, slope and rounding where the
+   photos have it: bonnet, boot, roof (its peak, its gutters), the noses' and tails'
+   faces.
+4. **Glazing.** Pillars where and as thick as the car's, window heads and feet at the
+   drawing's heights, vent panes, screens without ragged edges (`GLASS-RAGGED` in the
+   log is a defect).
+5. **Wheels.** Size against the factory tyre, sitting centred in arches of the right
+   size and shape (skirts where the car has them).
+6. **Ends.** Bumpers of the car's own height, depth, profile, overriders and fit to the
+   body (`BUMPER ... stand` in the log); lamps at the drawing's positions and sizes in
+   their own bezels (no invented black panels); grille shape and size; turn and reverse
+   lamps where the car has them.
+7. **Small parts.** Mirrors where the car has them and close to the skin (no stalks in
+   the air), handles, wipers, trim lines.
+
+Seen in the game renderer, all of it: `refsheet.sh` (whole car beside the photos) and
+`labshots.sh <tag> <car>` (close-ups: A-pillar, door, rear quarter, nose, tail, roof).
+Faults the whole-car sheet hid and the close-ups or the user showed: Giulia's ragged
+front pane and mirror on an arm, the DS's black lamp patch on the wing's top and its
+mirror on a stalk.
+
 What was found, and what fixed it (generator, all cars):
 
 14. **Glass curling over into the roof.** Side windows took every face whose normal was

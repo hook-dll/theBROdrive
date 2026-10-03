@@ -1,4 +1,4 @@
-# Volkswagen Golf I 1.1 (1974-83), three doors.
+# Volkswagen Golf I 1.1 (1978-83, the plastic-bumper car), three doors. Photos: 1982 cars.
 CAR = {
     'id': 'golf1',
     'label': 'Volkswagen Golf',
@@ -20,9 +20,17 @@ CAR = {
         'glassPlan': [[-0.85, 0.64], [-0.5, 0.68], [1.0, 0.68], [1.5, 0.62], [1.95, 0.58]],
         'planBridge': [[-1.48, -0.78], [0.82, 1.48]],
         'sectionBridge': {'both': [[0.9, 1.12]]},
-        'crown': [[-2, 0.02], [2, 0.02]],
-        'roofTop': 1.43,
+        # the plan's corners tight (photos: the nose and tail turn the corner in a few cm)
+        'planOverride': [[-1.811, 0.66], [-1.795, 0.74], [-1.75, 0.785], [-1.5, 0.797], [1.5, 0.797], [1.78, 0.78],
+                         [1.832, 0.74], [1.848, 0.64]],
+        'crown': [[-2, 0.01], [2, 0.01]],
+        'roofTop': 1.395,
         'edge': 0.012,
+        # Giugiaro's folded-paper box: crisp edges (the default blur made it a soft pebble)
+        'edgeMin': 0.015,
+        'edgeY': 0.04,
+        'edgeYMin': 0.04,
+        'crownScale': 1,
         'arch': {'radius': 0.34, 'lift': 0.03},
     },
     'parts': {
@@ -44,10 +52,11 @@ CAR = {
              'height': 0.014, 'depthRange': [-2.0, -1.6]},
             {'view': 'front', 'circle': [[0.0, 0.62], 0.05], 'mirror': False, 'material': 'chrome',
              'height': 0.012, 'depthRange': [-2.0, -1.6]},
-            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.728, 0.66], [0.04, 0.065]], 'material': 'IndicatorLights',
-             'height': 0.006, 'facingMin': -0.2, 'depthRange': [-2.0, -1.5]},
-            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.728, 0.66], [0.04, 0.065]], 'material': 'IndicatorLights',
-             'height': 0.006, 'facingMin': -0.2, 'depthRange': [-2.0, -1.5]},
+            # the 1978-on turn lamps in the bumper's ends, under the headlamps
+            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.60, 0.405], [0.12, 0.035]], 'radius': 0.006,
+             'material': 'IndicatorLights', 'height': 0.006, 'facingMin': 0.1, 'depthRange': [-2.0, -1.5]},
+            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.60, 0.405], [0.12, 0.035]], 'radius': 0.006,
+             'material': 'IndicatorLights', 'height': 0.006, 'facingMin': 0.1, 'depthRange': [-2.0, -1.5]},
             {'view': 'side', 'node': 'front_blinker_left', 'rect': [[-1.65, 0.658], [0.12, 0.055]], 'material': 'IndicatorLights', 'height': 0.005},
             {'view': 'side', 'node': 'front_blinker_right', 'rect': [[-1.65, 0.658], [0.12, 0.055]], 'material': 'IndicatorLights', 'height': 0.005},
             # Tail clusters: reversing lamp inboard, the red tail lamp, the indicator outboard.
@@ -70,6 +79,8 @@ CAR = {
              'material': 'trim', 'height': 0.006, 'depthRange': [-2.0, -1.6]},
         ],
         'lines': [
+            # the black waist strip along the crease (CL/LX, photos)
+            {'view': 'side', 'points': [[-1.78, 0.76], [1.83, 0.80]], 'width': 0.012, 'material': 'trim', 'height': 0.003},
             # Door shut lines and window rubbers.
             {'view': 'side', 'points': [[-0.674, 0.93], [-0.674, 0.33], [0.47, 0.33], [0.476, 0.92]], 'width': 0.005},
             {'view': 'side', 'points': [[-0.552, 0.924], [-0.243, 1.274], [0.457, 1.305], [0.448, 0.924], [-0.552, 0.924]],
