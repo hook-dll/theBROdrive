@@ -24,7 +24,8 @@ CAR = {
     'hull': {
         'bumpers': {'front': {'z': [0.34, 0.47]}, 'rear': {'z': [0.34, 0.46]}},
         'sill': [[-2.2, 0.30], [-1.9, 0.27], [-1.3, 0.24], [0.9, 0.24], [1.6, 0.28], [2.2, 0.33]],
-        'planOverride': [[-2.23, 0.70], [-2.15, 0.80], [-1.9, 0.84], [1.9, 0.84], [2.12, 0.80], [2.21, 0.72]],
+        # the nose nearly flat across, turning the corner tight (photos)
+        'planOverride': [[-2.23, 0.76], [-2.20, 0.815], [-2.12, 0.84], [1.9, 0.84], [2.12, 0.80], [2.21, 0.72]],
         'cabin': [-0.84, 1.50],
         'belt': [[-0.84, 0.95], [-0.6, 0.92], [0.8, 0.92], [1.1, 0.95], [1.5, 0.97]],
         'glassPlan': [[-0.84, 0.66], [-0.4, 0.72], [0.8, 0.72], [1.5, 0.62]],
@@ -35,42 +36,53 @@ CAR = {
     },
     'parts': {
         'glass': [
-            {'view': 'side', 'outline': [[0.12, 0.93], [-0.70, 0.93], [-0.52, 1.30], [0.12, 1.32]], 'facingMin': 0.3},
-            {'view': 'side', 'outline': [[0.19, 0.93], [0.78, 0.93], [0.78, 1.30], [0.19, 1.32]], 'facingMin': 0.3},
+            {'view': 'side', 'outline': [[0.12, 0.93], [-0.70, 0.93], [-0.50, 1.265], [0.12, 1.27]], 'facingMin': 0.3},
+            {'view': 'side', 'outline': [[0.19, 0.93], [0.78, 0.93], [0.78, 1.265], [0.19, 1.27]], 'facingMin': 0.3},
             {'view': 'front', 'outline': [[0.0, 1.38], [0.55, 1.37], [0.64, 1.30], [0.68, 0.98], [0.64, 0.95], [0.0, 0.95]],
              'depthRange': [-1.1, -0.3], 'facingMin': 0.2},
             {'view': 'rear', 'outline': [[0.0, 1.37], [0.52, 1.36], [0.60, 1.28], [0.64, 1.04], [0.60, 1.01], [0.0, 1.01]],
              'depthRange': [0.9, 1.6], 'facingMin': 0.15},
         ],
         'decals': [
-            {'view': 'front', 'rect': [[0.0, 0.655], [0.84, 0.18]], 'radius': 0.01, 'mirror': False, 'material': 'grille',
-             'height': 0.004, 'depthRange': [-2.3, -1.9]},
-            {'view': 'front', 'node': 'headlights', 'outline': [[0.42, 0.745], [0.66, 0.755], [0.70, 0.73], [0.70, 0.56], [0.42, 0.545]],
-             'material': 'Headlights', 'height': 0.008, 'depthRange': [-2.3, -1.9]},
-            {'view': 'front', 'node': 'front_blinker_left', 'outline': [[0.70, 0.73], [0.745, 0.70], [0.745, 0.56], [0.70, 0.56]],
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-2.3, -1.8], 'facingMin': 0.0},
-            {'view': 'front', 'node': 'front_blinker_right', 'outline': [[0.70, 0.73], [0.745, 0.70], [0.745, 0.56], [0.70, 0.56]],
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-2.3, -1.8], 'facingMin': 0.0},
+            {'view': 'front', 'rect': [[0.0, 0.645], [0.80, 0.11]], 'radius': 0.01, 'mirror': False, 'material': 'grille',
+             'height': 0.004, 'depthRange': [-2.3, -1.9], 'facingMin': 0.4},
+            # Trapezoid lamps in chrome rims, their tops sloping with the bonnet's edge; the
+            # clear side lamps with the turn lamp below them over the bumper (photos).
+            {'view': 'front', 'outline': [[0.41, 0.715], [0.67, 0.705], [0.70, 0.685], [0.70, 0.585], [0.41, 0.585]],
+             'material': 'chrome', 'height': 0.006, 'depthRange': [-2.3, -1.9], 'facingMin': 0.4},
+            {'view': 'front', 'node': 'headlights', 'outline': [[0.425, 0.70], [0.665, 0.692], [0.685, 0.675], [0.685, 0.60], [0.425, 0.60]],
+             'material': 'Headlights', 'height': 0.010, 'depthRange': [-2.3, -1.9], 'facingMin': 0.4},
+            {'view': 'front', 'rect': [[0.56, 0.545], [0.24, 0.05]], 'radius': 0.006, 'material': 'chrome',
+             'height': 0.006, 'depthRange': [-2.3, -1.9]},
+            {'view': 'front', 'rect': [[0.50, 0.545], [0.11, 0.035]], 'radius': 0.005, 'material': 'Headlights',
+             'height': 0.009, 'depthRange': [-2.3, -1.9]},
+            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.625, 0.545], [0.10, 0.035]], 'radius': 0.005,
+             'material': 'IndicatorLights', 'height': 0.009, 'depthRange': [-2.3, -1.9]},
+            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.625, 0.545], [0.10, 0.035]], 'radius': 0.005,
+             'material': 'IndicatorLights', 'height': 0.009, 'depthRange': [-2.3, -1.9]},
             {'view': 'front', 'rect': [[0.0, 0.355], [0.47, 0.11]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
              'height': 0.005, 'depthRange': [-2.4, -1.9]},
             {'view': 'front', 'rect': [[0.0, 0.79], [0.14, 0.025]], 'radius': 0.005, 'mirror': False, 'material': 'chrome',
              'height': 0.005, 'depthRange': [-2.3, -1.8]},
-            # Wide tail lamps either side of the plate, under the boot lid.
-            {'view': 'rear', 'node': 'taillights', 'rect': [[0.56, 0.71], [0.40, 0.08]], 'radius': 0.01, 'material': 'TailLights',
-             'height': 0.008, 'depthRange': [1.9, 2.3], 'facingMin': 0.1},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.70, 0.635], [0.13, 0.06]], 'radius': 0.01,
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.9, 2.3], 'facingMin': 0.1},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.70, 0.635], [0.13, 0.06]], 'radius': 0.01,
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.9, 2.3], 'facingMin': 0.1},
-            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.45, 0.635], [0.13, 0.06]], 'radius': 0.01,
-             'material': 'ReverseLights', 'height': 0.008, 'depthRange': [1.9, 2.3], 'facingMin': 0.1},
+            # Trapezoid tail lamps on the tail's corners (photos), the amber turn lamp at the
+            # outer top, reversing lamp inboard at the foot.
+            {'view': 'rear', 'outline': [[0.50, 0.77], [0.76, 0.77], [0.80, 0.72], [0.80, 0.58], [0.50, 0.58]],
+             'material': 'chrome', 'height': 0.005, 'depthRange': [1.9, 2.3], 'facingMin': -0.1},
+            {'view': 'rear', 'node': 'taillights', 'outline': [[0.515, 0.755], [0.68, 0.755], [0.68, 0.595], [0.515, 0.595]],
+             'material': 'TailLights', 'height': 0.008, 'depthRange': [1.9, 2.3], 'facingMin': -0.1},
+            {'view': 'rear', 'node': 'rear_blinker_left', 'outline': [[0.69, 0.755], [0.755, 0.755], [0.785, 0.715], [0.785, 0.66], [0.69, 0.66]],
+             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.9, 2.3], 'facingMin': -0.1},
+            {'view': 'rear', 'node': 'rear_blinker_right', 'outline': [[0.69, 0.755], [0.755, 0.755], [0.785, 0.715], [0.785, 0.66], [0.69, 0.66]],
+             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.9, 2.3], 'facingMin': -0.1},
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.735, 0.62], [0.09, 0.05]], 'radius': 0.004,
+             'material': 'ReverseLights', 'height': 0.008, 'depthRange': [1.9, 2.3], 'facingMin': -0.1},
             {'view': 'rear', 'rect': [[0.0, 0.66], [0.50, 0.11]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [1.9, 2.3], 'facingMin': 0.1},
             # The louvre in the C-pillar.
             {'view': 'side', 'outline': [[0.86, 1.06], [1.12, 1.06], [1.20, 1.20], [0.93, 1.22]], 'material': 'grille', 'height': 0.003},
         ],
         'bars': [
-            {'view': 'front', 'span': [-0.40, 0.40], 'b': [0.58, 0.73], 'count': 8, 'width': 0.010, 'dir': 'v', 'material': 'chrome',
+            {'view': 'front', 'span': [-0.40, 0.40], 'b': [0.60, 0.69], 'count': 5, 'width': 0.008, 'dir': 'h', 'material': 'chrome',
              'height': 0.007, 'depthRange': [-2.3, -1.9]},
             {'view': 'side', 'span': [0.88, 1.16], 'b': [1.08, 1.19], 'count': 4, 'width': 0.012, 'material': 'paint', 'height': 0.005},
         ],
@@ -78,7 +90,7 @@ CAR = {
             {'view': 'side', 'points': [[-0.87, 0.92], [-0.87, 0.30], [0.13, 0.30], [0.13, 0.93]], 'width': 0.005},
             {'view': 'side', 'points': [[0.13, 0.30], [1.0, 0.30], [1.10, 0.45], [1.10, 0.93]], 'width': 0.005},
             {'view': 'side', 'points': [[-1.5, 0.33], [1.6, 0.33]], 'width': 0.012, 'material': 'chrome', 'height': 0.003},
-            {'view': 'side', 'points': [[-0.72, 0.92], [-0.53, 1.32], [0.80, 1.33], [0.80, 0.92]], 'width': 0.012, 'material': 'chrome',
+            {'view': 'side', 'points': [[-0.72, 0.92], [-0.50, 1.27], [0.80, 1.275], [0.80, 0.92]], 'width': 0.012, 'material': 'chrome',
              'height': 0.003},
             {'view': 'side', 'points': [[-0.72, 0.915], [0.80, 0.915]], 'width': 0.010, 'material': 'chrome', 'height': 0.003},
             {'view': 'rear', 'points': [[0.0, 0.93], [0.62, 0.92], [0.70, 0.78], [0.0, 0.775]], 'width': 0.005, 'depthRange': [1.5, 2.3],
@@ -94,3 +106,10 @@ CAR = {
         'wheel': {'style': 'hubcap', 'rimFactor': 0.64, 'cap': 0.62},
     },
 }
+
+# The drawing's roof stands at 1.403 for the car's 1.46: the glasshouse is brought up (the
+# game had stretched the whole body 4.5 % taller).
+import os as _os, sys as _sys  # noqa: E402
+_sys.path.insert(0, _os.path.dirname(__file__))
+from _frame import scale_above  # noqa: E402
+scale_above(CAR, 0.92, 1.403, 1.46)
