@@ -106,3 +106,10 @@ CAR = {
         'wheel': {'style': 'hubcap', 'rimFactor': 0.62, 'cap': 0.60},
     },
 }
+
+# The drawing's cab stands 1.712 m; the C10 is 1.77 (the K10 71 in): the cab above the
+# belt raised.
+import os as _os, sys as _sys  # noqa: E402
+_sys.path.insert(0, _os.path.dirname(__file__))
+from _frame import scale_above  # noqa: E402
+scale_above(CAR, 1.20, 1.712, 1.77)
