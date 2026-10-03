@@ -36,7 +36,7 @@ CAR = {
             {'view': 'side', 'outline': [[1.40, 0.90], [0.565, 0.89], [0.565, 1.216], [0.898, 1.216]], 'facingMin': 0.3},
             {'view': 'front', 'outline': [[0.0, 1.27], [0.50, 1.26], [0.60, 1.18], [0.68, 0.96], [0.64, 0.93], [0.0, 0.93]],
              'depthRange': [-0.8, 0.1], 'facingMin': 0.1},
-            {'view': 'top', 'outline': [[1.00, 0.0], [1.00, 0.55], [1.75, 0.50], [1.75, 0.0]], 'facingMin': 0.3},
+            {'view': 'top', 'outline': [[1.00, 0.0], [1.00, 0.55], [1.62, 0.51], [1.62, 0.0]], 'facingMin': 0.3},
         ],
         'regions': [
             # Body-colour fascias with black lower lips, the black window frames.
@@ -47,15 +47,13 @@ CAR = {
             # edge at 0.77): flush composite lamps across the top of the fascia, the
             # corner lamps wrapping round, a thin slot between them for a grille; the
             # fascia's air dam low down with the fog lamps in its ends.
-            {'view': 'front', 'node': 'headlights', 'outline': [[0.18, 0.765], [0.56, 0.75], [0.63, 0.72], [0.63, 0.665], [0.18, 0.675]],
+            {'view': 'front', 'node': 'headlights', 'outline': [[0.08, 0.725], [0.56, 0.715], [0.63, 0.69], [0.63, 0.605], [0.08, 0.615]],
              'material': 'Headlights', 'height': 0.006, 'depthRange': [-2.45, -1.9]},
-            {'view': 'front', 'outline': [[0.16, 0.775], [0.58, 0.76], [0.645, 0.73], [0.645, 0.655], [0.16, 0.665]],
-             'material': 'grille', 'height': 0.004, 'depthRange': [-2.45, -1.9]},
-            {'view': 'front', 'node': 'front_blinker_left', 'outline': [[0.645, 0.73], [0.76, 0.69], [0.79, 0.64], [0.645, 0.655]],
+            {'view': 'front', 'node': 'front_blinker_left', 'outline': [[0.645, 0.69], [0.76, 0.66], [0.79, 0.60], [0.645, 0.605]],
              'material': 'IndicatorLights', 'height': 0.006, 'depthRange': [-2.45, -1.9]},
-            {'view': 'front', 'node': 'front_blinker_right', 'outline': [[0.645, 0.73], [0.76, 0.69], [0.79, 0.64], [0.645, 0.655]],
+            {'view': 'front', 'node': 'front_blinker_right', 'outline': [[0.645, 0.69], [0.76, 0.66], [0.79, 0.60], [0.645, 0.605]],
              'material': 'IndicatorLights', 'height': 0.006, 'depthRange': [-2.45, -1.9]},
-            {'view': 'front', 'rect': [[0.0, 0.70], [0.30, 0.035]], 'radius': 0.012, 'mirror': False, 'material': 'grille',
+            {'view': 'front', 'rect': [[0.0, 0.665], [0.15, 0.05]], 'radius': 0.012, 'mirror': False, 'material': 'grille',
              'height': 0.004, 'depthRange': [-2.45, -1.9]},
             {'view': 'front', 'rect': [[0.0, 0.37], [0.66, 0.08]], 'radius': 0.03, 'mirror': False, 'material': 'grille',
              'height': 0.004, 'depthRange': [-2.45, -1.9]},
@@ -63,25 +61,27 @@ CAR = {
              'height': 0.007, 'depthRange': [-2.45, -1.9]},
             {'view': 'front', 'rect': [[0.0, 0.48], [1.30, 0.012]], 'radius': 0.004, 'mirror': False, 'material': 'trim',
              'height': 0.003, 'depthRange': [-2.45, -1.9]},
-            {'view': 'rear', 'rect': [[0.0, 0.83], [1.62, 0.16]], 'radius': 0.01, 'mirror': False, 'material': 'trim',
+            # Under the spoiler: the louvred tail lamps either side of a dark plate panel, the
+            # turn and reversing lamps in their lower edge (US red turn lamps).
+            {'view': 'rear', 'rect': [[0.0, 0.87], [1.54, 0.17]], 'radius': 0.01, 'mirror': False, 'material': 'trim',
              'height': 0.004, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'node': 'taillights', 'rect': [[0.52, 0.85], [0.56, 0.08]], 'radius': 0.008, 'material': 'TailLights',
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.50, 0.875], [0.48, 0.14]], 'radius': 0.008, 'material': 'TailLights',
              'height': 0.008, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.62, 0.785], [0.32, 0.04]], 'radius': 0.006,
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.62, 0.785], [0.32, 0.04]], 'radius': 0.006,
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.30, 0.785], [0.14, 0.04]], 'radius': 0.006,
-             'material': 'ReverseLights', 'height': 0.008, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-            {'view': 'rear', 'rect': [[0.0, 0.58], [0.52, 0.11]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
-             'height': 0.006, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
-        ],
-        'bars': [
-            {'view': 'side', 'span': [0.95, 1.38], 'b': [0.93, 1.13], 'count': 6, 'width': 0.012, 'dir': 'v', 'material': 'trim',
-             'height': 0.006, 'mirror': True},
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.64, 0.82], [0.18, 0.025]], 'radius': 0.006,
+             'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.64, 0.82], [0.18, 0.025]], 'radius': 0.006,
+             'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.34, 0.82], [0.10, 0.025]], 'radius': 0.006,
+             'material': 'ReverseLights', 'height': 0.010, 'depthRange': [2.0, 2.45], 'facingMin': 0.05},
+            {'view': 'rear', 'rect': [[0.50, 0.85], [0.48, 0.008]], 'material': 'trim', 'height': 0.011,
+             'depthRange': [2.0, 2.45], 'facingMin': 0.05},
+            {'view': 'rear', 'rect': [[0.50, 0.88], [0.48, 0.008]], 'material': 'trim', 'height': 0.011,
+             'depthRange': [2.0, 2.45], 'facingMin': 0.05},
+            {'view': 'rear', 'rect': [[0.50, 0.91], [0.48, 0.008]], 'material': 'trim', 'height': 0.011,
+             'depthRange': [2.0, 2.45], 'facingMin': 0.05},
         ],
         'lines': [
-            {'view': 'side', 'points': [[-2.32, 0.52], [2.35, 0.50]], 'width': 0.012, 'material': 'TailLights', 'height': 0.004},
+            {'view': 'side', 'points': [[-2.32, 0.50], [2.35, 0.48]], 'width': 0.02, 'material': 'trim', 'height': 0.004},
             {'view': 'side', 'points': [[-1.55, 0.36], [0.95, 0.35]], 'width': 0.012, 'material': 'paint', 'height': 0.006},
             {'view': 'side', 'points': [[-1.55, 0.31], [0.95, 0.30]], 'width': 0.012, 'material': 'paint', 'height': 0.006},
             {'view': 'side', 'points': [[-0.68, 0.88], [-0.70, 0.27], [0.53, 0.25], [0.53, 1.22]], 'width': 0.005},
@@ -91,6 +91,11 @@ CAR = {
         'mirror': {'y': -0.42, 'z': 0.93, 'reach': 0.92, 'w': 0.15, 'h': 0.09},
         'handles': {'at': [[0.35, 0.80]], 'w': 0.14, 'material': 'trim'},
         'wipers': {'arms': [[-0.55, -0.05, -0.72, 0.97], [0.05, 0.55, -0.72, 0.97]]},
+        # The hatch's spoiler: a body-colour wing across the deck's end on two short posts.
+        'boxes': [
+            {'c': [0.0, 1.97, 1.035], 'size': [1.40, 0.17, 0.03], 'mirror': False, 'material': 'paint'},
+            {'c': [0.60, 1.97, 0.985], 'size': [0.06, 0.14, 0.10], 'material': 'paint'},
+        ],
         'wheel': {'style': 'alloy', 'spokes': 15, 'rimFactor': 0.70, 'spokeWidth': 0.5},
     },
 }
