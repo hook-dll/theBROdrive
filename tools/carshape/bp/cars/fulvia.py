@@ -22,9 +22,18 @@ CAR = {
         'cabin': [-0.68, 1.03],
         'belt': [[-0.68, 0.89], [-0.45, 0.85], [0.6, 0.835], [1.03, 0.82]],
         'glassPlan': [[-0.68, 0.64], [-0.3, 0.70], [0.6, 0.70], [1.03, 0.62]],
-        'crown': [[-2.0, 0.02], [2.0, 0.02]],
-        'roofCrown': 0.03,
-        'edge': 0.010,
+        # The car is a slim coupé: flat sides with a shoulder crease along the belt, a
+        # flat bonnet and a flat roof, so no crown along the car and next to none across
+        # it (2-3 cm of crown domed the roof and swelled the wings).
+        'crown': [[-2.0, 0.008], [2.0, 0.008]],
+        'roofCrown': 0.012,
+        # Crisp folds (0.011 over a 1.4 cm floor, 2 cm along the car instead of the
+        # 6 cm default): the blur was what made the nose a rounded block, the shoulders
+        # soft and the tail panel roll.
+        'edge': 0.011,
+        'edgeMin': 0.014,
+        'edgeY': 0.02,
+        'edgeYMin': 0.02,
         # The 4 cm blur rounded the nose and the deck's rear edge away (the tail came off
         # its drawn line 6 cm low at +1.90): the ends' outlines faired with their corners
         # kept (the drawing's bonnet brow over the lamps, the boot lid's rear edge).

@@ -60,7 +60,7 @@ CAR = {
              'facingMin': 0.3},
             {'view': 'front', 'outline': [[0.0, 1.30], [0.48, 1.295], [0.52, 1.27], [0.62, 0.97], [0.60, 0.95], [0.0, 0.95]],
              'depthRange': [-1.0, -0.2], 'facingMin': 0.25},
-            {'view': 'rear', 'outline': [[0.0, 1.26], [0.47, 1.255], [0.51, 1.22], [0.57, 1.0], [0.55, 0.98], [0.0, 0.98]],
+            {'view': 'rear', 'outline': [[0.0, 1.258], [0.46, 1.253], [0.51, 1.215], [0.55, 1.13], [0.53, 1.12], [0.0, 1.12]],
              'depthRange': [1.2, 2.0], 'facingMin': 0.15},
         ],
         # Grey moulded bumpers wrapping the ends.
@@ -87,17 +87,17 @@ CAR = {
              'material': 'IndicatorLights', 'height': 0.008, 'facingMin': 0.4, 'depthRange': [-2.0, -1.5]},
             {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.80, 0.63], [0.05, 0.10]], 'radius': 0.006,
              'material': 'IndicatorLights', 'height': 0.008, 'facingMin': 0.4, 'depthRange': [-2.0, -1.5]},
-            # The 16v's bonnet: one recessed louvred panel on the left half (photos), a
-            # 44 x 28 cm rounded panel with six louvres across it. The old pair of 7 and
-            # 9 cm strips, one of them on the centre line, read as painted bars.
-            {'view': 'top', 'rect': [[-1.30, 0.30], [0.44, 0.28]], 'radius': 0.035, 'mirror': False,
+            # The 16v's bonnet: one recessed louvred panel, centred on the bonnet (photos:
+            # symmetric about the centre line), a 44 x 28 cm rounded panel with six
+            # louvres across it. The old pair of 7 and 9 cm strips read as painted bars.
+            {'view': 'top', 'rect': [[-1.30, 0.0], [0.44, 0.28]], 'radius': 0.035, 'mirror': False,
              'material': 'grille', 'height': 0.004},
-            {'view': 'top', 'rect': [[-1.30, 0.1875], [0.42, 0.016]], 'radius': 0.006, 'mirror': False, 'material': 'chrome', 'height': 0.006},
-            {'view': 'top', 'rect': [[-1.30, 0.2325], [0.42, 0.016]], 'radius': 0.006, 'mirror': False, 'material': 'chrome', 'height': 0.006},
-            {'view': 'top', 'rect': [[-1.30, 0.2775], [0.42, 0.016]], 'radius': 0.006, 'mirror': False, 'material': 'chrome', 'height': 0.006},
-            {'view': 'top', 'rect': [[-1.30, 0.3225], [0.42, 0.016]], 'radius': 0.006, 'mirror': False, 'material': 'chrome', 'height': 0.006},
-            {'view': 'top', 'rect': [[-1.30, 0.3675], [0.42, 0.016]], 'radius': 0.006, 'mirror': False, 'material': 'chrome', 'height': 0.006},
-            {'view': 'top', 'rect': [[-1.30, 0.4125], [0.42, 0.016]], 'radius': 0.006, 'mirror': False, 'material': 'chrome', 'height': 0.006},
+            {'view': 'top', 'rect': [[-1.30, -0.1125], [0.42, 0.016]], 'radius': 0.006, 'mirror': False, 'material': 'chrome', 'height': 0.006},
+            {'view': 'top', 'rect': [[-1.30, -0.0675], [0.42, 0.016]], 'radius': 0.006, 'mirror': False, 'material': 'chrome', 'height': 0.006},
+            {'view': 'top', 'rect': [[-1.30, -0.0225], [0.42, 0.016]], 'radius': 0.006, 'mirror': False, 'material': 'chrome', 'height': 0.006},
+            {'view': 'top', 'rect': [[-1.30, 0.0225], [0.42, 0.016]], 'radius': 0.006, 'mirror': False, 'material': 'chrome', 'height': 0.006},
+            {'view': 'top', 'rect': [[-1.30, 0.0675], [0.42, 0.016]], 'radius': 0.006, 'mirror': False, 'material': 'chrome', 'height': 0.006},
+            {'view': 'top', 'rect': [[-1.30, 0.1125], [0.42, 0.016]], 'radius': 0.006, 'mirror': False, 'material': 'chrome', 'height': 0.006},
             # The scuttle vents along the screen's foot, and the wing's repeater.
             {'view': 'top', 'rect': [[-0.75, 0.0], [0.10, 1.25]], 'radius': 0.01, 'mirror': False,
              'material': 'grille', 'height': 0.004},

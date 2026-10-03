@@ -40,12 +40,15 @@ CAR = {
         'sectionStations': [{'y': -1.80, 'half': WING}, {'y': -0.56, 'half': WING}, {'y': -0.50, 'half': BOX}, {'y': 1.75, 'half': BOX}],
         'stationBlend': 0.08,
         'roofHalf': 0.81,
-        'roofCrown': 0.02,
-        'edge': 0.012,
+        # Flat panels: no crown along the car and next to none across it (the bonnet
+        # domed into a bulge and the canvas's top edges rounded).
+        'crown': [[-2.0, 0.008], [2.0, 0.008]],
+        'roofCrown': 0.008,
+        'edge': 0.011,
         # flat aluminium panels folded at crisp edges
-        'edgeMin': 0.015,
-        'edgeY': 0.04,
-        'edgeYMin': 0.04,
+        'edgeMin': 0.013,
+        'edgeY': 0.02,
+        'edgeYMin': 0.02,
         # The 4 cm blur ate the ends' vertical faces: the bonnet's leading edge at -1.40
         # came out 3 cm low (the drawn line steps 4 cm there) and the tilt's rear edge at
         # +1.70 was cut back to the tub's capping (1.87 -> 1.24: a wedge missing off the
