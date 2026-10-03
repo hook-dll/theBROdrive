@@ -77,6 +77,9 @@ CAR = {
              'height': 0.010, 'depthRange': [1.8, 2.2]},
             {'view': 'rear', 'node': 'rear_blinker_right', 'circle': [[0.56, 0.635], 0.036], 'material': 'IndicatorLights',
              'height': 0.010, 'depthRange': [1.8, 2.2]},
+            # the reversing lamps: small lenses either side of the plate
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.27, 0.635], [0.06, 0.04]], 'radius': 0.008,
+             'material': 'ReverseLights', 'height': 0.008, 'depthRange': [1.8, 2.2]},
             {'view': 'rear', 'rect': [[0.0, 0.635], [0.34, 0.12]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.005, 'depthRange': [1.8, 2.2]},
             {'view': 'rear', 'circle': [[0.31, 0.635], 0.03], 'ring': 0.006, 'material': 'chrome', 'mirror': False,
