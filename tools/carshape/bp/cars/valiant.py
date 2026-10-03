@@ -62,22 +62,34 @@ CAR = {
              'depthRange': [-2.4, -2.0]},
             {'view': 'front', 'rect': [[0.0, 0.29], [0.34, 0.12]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [-2.5, -2.0]},
-            {'view': 'rear', 'rect': [[0.70, 0.66], [0.25, 0.12]], 'radius': 0.03, 'material': 'chrome', 'height': 0.006,
+            # A tall, narrow lamp standing on the quarter's trailing corner (photos: red
+            # lens over the whole tail panel, a narrow clear reversing lens at its foot,
+            # a chrome rim), not a wide one across the panel top.
+            {'view': 'rear', 'rect': [[0.835, 0.665], [0.13, 0.35]], 'radius': 0.035, 'material': 'chrome', 'height': 0.006,
              'depthRange': [2.1, 2.5], 'facingMin': 0.05},
-            {'view': 'rear', 'node': 'taillights', 'rect': [[0.70, 0.66], [0.22, 0.09]], 'radius': 0.02, 'material': 'TailLights',
-             'height': 0.010, 'depthRange': [2.1, 2.5], 'facingMin': 0.05},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.70, 0.66], [0.08, 0.05]], 'radius': 0.01,
-             'material': 'IndicatorLights', 'height': 0.013, 'depthRange': [2.1, 2.5], 'facingMin': 0.05},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.70, 0.66], [0.08, 0.05]], 'radius': 0.01,
-             'material': 'IndicatorLights', 'height': 0.013, 'depthRange': [2.1, 2.5], 'facingMin': 0.05},
-            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.0, 0.58], [0.10, 0.03]], 'radius': 0.01, 'mirror': False,
-             'material': 'ReverseLights', 'height': 0.010, 'depthRange': [2.1, 2.5], 'facingMin': 0.05},
-            {'view': 'rear', 'rect': [[0.0, 0.66], [0.34, 0.12]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.835, 0.715], [0.085, 0.225]], 'radius': 0.03,
+             'material': 'TailLights', 'height': 0.010, 'depthRange': [2.1, 2.5], 'facingMin': 0.05},
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.835, 0.575], [0.085, 0.045]], 'radius': 0.012,
+             'material': 'IndicatorLights', 'height': 0.012, 'depthRange': [2.1, 2.5], 'facingMin': 0.05},
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.835, 0.575], [0.085, 0.045]], 'radius': 0.012,
+             'material': 'IndicatorLights', 'height': 0.012, 'depthRange': [2.1, 2.5], 'facingMin': 0.05},
+            {'view': 'rear', 'rect': [[0.835, 0.528], [0.085, 0.038]], 'radius': 0.01, 'mirror': True,
+             'material': 'ReverseLights', 'height': 0.012, 'depthRange': [2.1, 2.5], 'facingMin': 0.05},
+            # The ribbed bright panel across the tail between the lamps, the V emblem in it.
+            {'view': 'rear', 'rect': [[0.0, 0.655], [1.50, 0.24]], 'radius': 0.012, 'mirror': False, 'material': 'grille',
+             'height': 0.004, 'depthRange': [2.1, 2.5], 'facingMin': 0.05},
+            {'view': 'rear', 'circle': [[0.0, 0.655], 0.05], 'mirror': False, 'material': 'chrome', 'height': 0.010,
+             'depthRange': [2.1, 2.5], 'facingMin': 0.05},
+            {'view': 'rear', 'rect': [[0.0, 0.665], [0.34, 0.13]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [2.1, 2.5], 'facingMin': 0.05},
         ],
         'bars': [
             {'view': 'front', 'span': [-0.64, 0.64], 'b': [0.48, 0.68], 'count': 6, 'width': 0.008, 'material': 'chrome',
              'height': 0.008, 'depthRange': [-2.4, -2.0]},
+            # The ribbed bright panel across the tail between the lamps (photos), the same
+            # motif as the grille; the V emblem sits in its middle.
+            {'view': 'rear', 'span': [-0.74, 0.74], 'b': [0.56, 0.755], 'count': 7, 'width': 0.008, 'material': 'chrome',
+             'height': 0.006, 'depthRange': [2.1, 2.5]},
         ],
         'lines': [
             # The feature line from the nose along the flank.
@@ -99,3 +111,13 @@ CAR = {
         'wheel': {'style': 'hubcap', 'rimFactor': 0.62, 'cap': 0.70},
     },
 }
+
+# The drawing's roof stands at 1.397 (its own sheet is dimensioned to 55 in, the
+# Australian AP5's height) for the car file's published 1.355: the whole drawing is
+# brought down, so the game no longer squashes the body 3.4 % vertically (round arches
+# went oval). The glasshouse keeps its shape (the glass stays 0.29 m, what the photos
+# of the 1964 car show); the ends' overhangs, sills and lamps move with it.
+import os as _os, sys as _sys  # noqa: E402
+_sys.path.insert(0, _os.path.dirname(__file__))
+from _frame import scale_above  # noqa: E402
+scale_above(CAR, 0.0, 1.397, 1.355)

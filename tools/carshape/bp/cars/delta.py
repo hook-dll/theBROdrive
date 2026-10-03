@@ -21,9 +21,8 @@ CAR = {
         'side': {'box': [578, 12, 1735, 410], 'nose': 'left', 'ground': 411,
                  'outline': [[-1.962, 0.545], [-1.930, 0.565], [-1.914, 0.635], [-1.904, 0.700],
                              [-1.886, 0.760], [-1.858, 0.782],
-                             [-1.700, 0.822], [-1.500, 0.855], [-1.300, 0.883], [-1.100, 0.903], [-0.960, 0.917],
-                             [-0.900, 0.963], [-0.800, 1.000], [-0.700, 1.035], [-0.600, 1.100], [-0.500, 1.162],
-                             [-0.400, 1.228], [-0.300, 1.290], [-0.220, 1.330],
+                             [-1.620, 0.836], [-1.400, 0.868], [-1.150, 0.900], [-0.960, 0.916],
+                             [-0.220, 1.330],
                              [0.000, 1.352], [0.250, 1.364], [0.500, 1.365], [0.750, 1.362], [0.950, 1.355],
                              [1.060, 1.348], [1.160, 1.336],
                              [1.888, 0.905], [1.888, 0.562], [1.915, 0.552], [1.945, 0.535], [1.950, 0.520],
@@ -39,7 +38,13 @@ CAR = {
     'hull': {
         'sill': [[-1.95, 0.32], [-1.7, 0.27], [-1.3, 0.22], [1.0, 0.22], [1.4, 0.25], [1.95, 0.30]],
         'cabin': [-0.80, 1.90],
-        'belt': [[-0.80, 0.96], [-0.5, 0.89], [1.0, 0.895], [1.5, 0.90], [1.90, 0.88]],
+        # The belt rises to the tail (0.905) so the cabin ends where the hatch's panel
+        # does. At 0.88 the outline's top at the last cabin station (1.88, 0.90) was
+        # still above it, so the station past the cabin -- the bumper's top, 0.70 -- was
+        # read as the "deck" and beltBlend dragged the last 20 cm of the quarter's top
+        # down on to it: a 12 cm dent in the tail's face below the hatch's corner
+        # (the quarter "rolling" into the tail panel).
+        'belt': [[-0.80, 0.96], [-0.5, 0.89], [1.0, 0.895], [1.45, 0.898], [1.72, 0.904], [1.90, 0.905]],
         'glassPlan': [[-0.80, 0.68], [-0.4, 0.72], [1.0, 0.72], [1.5, 0.68], [1.90, 0.63]],
         'crown': [[-2.0, 0.008], [2.0, 0.008]],
         'roofCrown': 0.015,
@@ -52,11 +57,15 @@ CAR = {
         # hatch). Down to the in-plane radius, so the corners keep theirs.
         'edgeY': 0.014,
         'edgeYMin': 0.014,
-        'edge': 0.012,
         # a crisp box hatchback (photos): the end faces and the shoulder lines are the
-        # car's, not the drawing's pixels, so they are faired with corners kept
-        'faceSpacing': 0.15,
-        'cornerDeg': 20,
+        # car's, not the drawing's pixels. With the side outline above traced by hand
+        # they carry no drawing noise of their own, and fairing them hurt: its 15 cm
+        # knots, over the 27 cm the nose's profile runs back between z 0.78 and 0.86
+        # (the bonnet's leading edge), pulled the profile 13 cm further back, and the
+        # mask's clip then cut the bonnet's surface down with it -- an 8 mm sag along
+        # its middle that no drawn line accounts for.
+        'faceSpacing': 0,
+        'faceSmooth': 0.004,
         'crownScale': 1,
         # The plan as the 16v's, not the Evo drawing's: the drawing's top view carries
         # the Evo's arch flares (0.83-0.85 over the wheels against 0.81 at the doors),

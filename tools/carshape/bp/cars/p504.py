@@ -36,8 +36,11 @@ CAR = {
     },
     'parts': {
         'glass': [
-            {'view': 'side', 'outline': [[0.12, 0.93], [-0.70, 0.93], [-0.50, 1.265], [0.12, 1.27]], 'facingMin': 0.3},
-            {'view': 'side', 'outline': [[0.19, 0.93], [0.78, 0.93], [0.78, 1.265], [0.19, 1.27]], 'facingMin': 0.3},
+            # The side panes' heads were 4 cm low: the drawing's own window line stands at
+            # 1.325 and the photos give a roof band of ~11 cm (0.11 of 1.46), not the
+            # 15 cm the panes left.
+            {'view': 'side', 'outline': [[0.12, 0.93], [-0.70, 0.93], [-0.47, 1.295], [0.12, 1.30]], 'facingMin': 0.3},
+            {'view': 'side', 'outline': [[0.19, 0.93], [0.78, 0.93], [0.76, 1.295], [0.19, 1.30]], 'facingMin': 0.3},
             {'view': 'front', 'outline': [[0.0, 1.38], [0.55, 1.37], [0.64, 1.30], [0.68, 0.98], [0.64, 0.95], [0.0, 0.95]],
              'depthRange': [-1.1, -0.3], 'facingMin': 0.2},
             {'view': 'rear', 'outline': [[0.0, 1.37], [0.52, 1.36], [0.60, 1.28], [0.64, 1.04], [0.60, 1.01], [0.0, 1.01]],
@@ -64,18 +67,20 @@ CAR = {
              'height': 0.005, 'depthRange': [-2.4, -1.9]},
             {'view': 'front', 'rect': [[0.0, 0.79], [0.14, 0.025]], 'radius': 0.005, 'mirror': False, 'material': 'chrome',
              'height': 0.005, 'depthRange': [-2.3, -1.8]},
-            # Trapezoid tail lamps on the tail's corners (photos), the amber turn lamp at the
-            # outer top, reversing lamp inboard at the foot.
-            {'view': 'rear', 'outline': [[0.50, 0.77], [0.76, 0.77], [0.80, 0.72], [0.80, 0.58], [0.50, 0.58]],
+            # The lamp runs the tail panel's height, foot a hand's width above the bumper
+            # (the drawing's own side view puts it 0.48-0.69, the photos' lamps touch the
+            # bumper's top). Lens: clear reversing section inboard at the top, the amber
+            # turn lens filling outboard of it, red across the bottom (photos).
+            {'view': 'rear', 'outline': [[0.50, 0.765], [0.755, 0.765], [0.80, 0.71], [0.80, 0.50], [0.50, 0.50]],
              'material': 'chrome', 'height': 0.005, 'depthRange': [1.9, 2.3], 'facingMin': -0.1},
-            {'view': 'rear', 'node': 'taillights', 'outline': [[0.515, 0.755], [0.68, 0.755], [0.68, 0.595], [0.515, 0.595]],
-             'material': 'TailLights', 'height': 0.008, 'depthRange': [1.9, 2.3], 'facingMin': -0.1},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'outline': [[0.69, 0.755], [0.755, 0.755], [0.785, 0.715], [0.785, 0.66], [0.69, 0.66]],
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.9, 2.3], 'facingMin': -0.1},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'outline': [[0.69, 0.755], [0.755, 0.755], [0.785, 0.715], [0.785, 0.66], [0.69, 0.66]],
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.9, 2.3], 'facingMin': -0.1},
-            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.735, 0.62], [0.09, 0.05]], 'radius': 0.004,
+            {'view': 'rear', 'node': 'reverse_lights', 'outline': [[0.508, 0.752], [0.60, 0.752], [0.60, 0.635], [0.508, 0.635]],
              'material': 'ReverseLights', 'height': 0.008, 'depthRange': [1.9, 2.3], 'facingMin': -0.1},
+            {'view': 'rear', 'node': 'rear_blinker_left', 'outline': [[0.61, 0.75], [0.72, 0.75], [0.785, 0.705], [0.785, 0.635], [0.61, 0.635]],
+             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.9, 2.3], 'facingMin': -0.1},
+            {'view': 'rear', 'node': 'rear_blinker_right', 'outline': [[0.61, 0.75], [0.72, 0.75], [0.785, 0.705], [0.785, 0.635], [0.61, 0.635]],
+             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.9, 2.3], 'facingMin': -0.1},
+            {'view': 'rear', 'node': 'taillights', 'outline': [[0.508, 0.635], [0.785, 0.635], [0.785, 0.508], [0.508, 0.508]],
+             'material': 'TailLights', 'height': 0.008, 'depthRange': [1.9, 2.3], 'facingMin': -0.1},
             {'view': 'rear', 'rect': [[0.0, 0.66], [0.50, 0.11]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [1.9, 2.3], 'facingMin': 0.1},
             # The louvre in the C-pillar.
@@ -90,7 +95,7 @@ CAR = {
             {'view': 'side', 'points': [[-0.87, 0.92], [-0.87, 0.30], [0.13, 0.30], [0.13, 0.93]], 'width': 0.005},
             {'view': 'side', 'points': [[0.13, 0.30], [1.0, 0.30], [1.10, 0.45], [1.10, 0.93]], 'width': 0.005},
             {'view': 'side', 'points': [[-1.5, 0.33], [1.6, 0.33]], 'width': 0.012, 'material': 'chrome', 'height': 0.003},
-            {'view': 'side', 'points': [[-0.72, 0.92], [-0.50, 1.27], [0.80, 1.275], [0.80, 0.92]], 'width': 0.012, 'material': 'chrome',
+            {'view': 'side', 'points': [[-0.72, 0.92], [-0.47, 1.30], [0.78, 1.305], [0.78, 0.92]], 'width': 0.012, 'material': 'chrome',
              'height': 0.003},
             {'view': 'side', 'points': [[-0.72, 0.915], [0.80, 0.915]], 'width': 0.010, 'material': 'chrome', 'height': 0.003},
             {'view': 'rear', 'points': [[0.0, 0.93], [0.62, 0.92], [0.70, 0.78], [0.0, 0.775]], 'width': 0.005, 'depthRange': [1.5, 2.3],
