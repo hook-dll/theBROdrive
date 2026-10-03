@@ -9,7 +9,26 @@ CAR = {
                 'frontTrack': 1.27, 'rearTrack': 1.30, 'wheelRadius': 0.29, 'tyreWidth': 0.175, 'frontOverhang': 0.68},
     'blueprint': {
         'image': 'escort_mk2_rally.jpg',
-        'side': {'box': [478, 86, 1257, 345], 'nose': 'left', 'drop': [[0, 100, 30, 215]]},
+        'side': {'box': [478, 86, 1257, 345], 'nose': 'left', 'drop': [[0, 100, 30, 215]],
+                 # The drawing's own silhouette, with its top line put right. The rally
+                 # drawing's roof runs off in one long arc from +0.5 to the boot (a
+                 # fastback, and its rear window slope ~25 deg where the photos' is
+                 # 50-odd): the roof is flat to +0.98, the back light drops from
+                 # (1.04, 1.380) to the belt at (1.34, 0.945), the boot lid is level
+                 # from there to the tail corner at (1.930, 0.945) and the tail panel
+                 # vertical below it - a notchback, as the photos (the yellow car's
+                 # rear 3/4, the maroon Sport's) have it. Everything else is the
+                 # drawing's own outline, traced.
+                 'outline': [[-1.859, 0.440], [-1.859, 0.520], [-1.829, 0.540], [-1.829, 0.560], [-1.839, 0.580], [-1.839, 0.620],
+                             [-1.849, 0.640], [-1.849, 0.700], [-1.859, 0.720], [-1.859, 0.760], [-1.809, 0.800], [-1.739, 0.820],
+                             [-1.499, 0.860], [-0.739, 0.940], [-0.689, 0.980], [-0.689, 1.000], [-0.679, 1.020], [-0.619, 1.040],
+                             [-0.489, 1.160], [-0.459, 1.180], [-0.419, 1.220], [-0.359, 1.260], [-0.319, 1.300], [-0.209, 1.360],
+                             [-0.129, 1.380], [0.110, 1.390], [1.090, 1.388], [1.150, 1.380], [1.450, 0.945], [2.040, 0.945],
+                             [2.040, 0.430], [1.961, 0.410], [1.951, 0.390], [1.931, 0.370], [1.871, 0.330], [1.851, 0.310],
+                             [1.801, 0.290], [1.711, 0.270], [1.371, 0.250], [1.361, 0.190], [1.311, 0.090], [1.211, 0.010],
+                             [1.211, 0.000], [-1.429, 0.000], [-1.439, 0.020], [-1.479, 0.060], [-1.509, 0.080], [-1.569, 0.200],
+                             [-1.569, 0.220], [-1.779, 0.240], [-1.779, 0.260], [-1.759, 0.280], [-1.759, 0.320], [-1.779, 0.340],
+                             [-1.799, 0.380], [-1.799, 0.400], [-1.809, 0.420]]},
         # The rally car's flares and lamp pods are not the road car's: plan and sections
         # are read off by hand under them.
         'top': {'box': [476, 404, 1255, 744], 'nose': 'left',
@@ -23,10 +42,14 @@ CAR = {
                              [0.795, 0.60], [0.79, 0.35], [0.76, 0.0], [0.0, 0.0]]},
     },
     'hull': {
-        'topOverride': [[1.45, 0.97], [1.75, 0.94], [1.98, 0.86]],
+        # (topOverride is gone: the side outline above carries the roof, the back light
+        # and the level lid; left in, its own line cut the lid down to 0.86 at the tail.)
         'sill': [[-2.0, 0.34], [-1.8, 0.30], [-1.6, 0.27], [-1.3, 0.25], [1.3, 0.25], [1.6, 0.27], [1.8, 0.29], [2.0, 0.33]],
         'cabin': [-0.75, 1.45],
-        'belt': [[-0.75, 0.90], [-0.5, 0.915], [1.0, 0.925], [1.45, 0.93]],
+        # The belt ends on the back light's foot AT the lid's height (0.945): at 0.93 the
+        # outline still stood above it over the boot, which kept the glasshouse's
+        # narrower section (and its shelf) on the lid - a narrow ridge down the boot.
+        'belt': [[-0.75, 0.90], [-0.5, 0.915], [1.0, 0.925], [1.45, 0.945]],
         'glassPlan': [[-0.75, 0.62], [-0.4, 0.70], [0.9, 0.70], [1.45, 0.62]],
         'crown': [[-2.1, 0.012], [2.1, 0.012]],
         'roofCrown': 0.022,
@@ -52,7 +75,11 @@ CAR = {
         # shoulder at the belt, a 6 cm crisp shoulder, then the lid flat at 0.70 out to
         # its edge (the rally drawing's own rear view carries the flares and its lid
         # curves away: that section is what melted the boot's corners and the wings'
-        # shoulders - a rounded loaf).
+        # shoulders - a rounded loaf). The station's own top stays well above the
+        # outline's level lid (0.945): brought down to it the section's width, which runs
+        # out to nothing at its top, dropped the field to -0.16 over every x > 0 and to 0
+        # at x = 0, and the blur averaged that step into a 15 mm ridge down the lid's
+        # centre with the lid 18 mm below the line either side of it.
         'sectionStations': [
             {'y': 1.45, 'half': [[0.14, 0.790], [0.88, 0.795], [0.925, 0.792], [0.950, 0.760], [0.965, 0.712], [0.972, 0.700],
                                  [0.978, 0.0]]},
@@ -64,11 +91,13 @@ CAR = {
         'stationBlend': 0.06,
         # The drawn tail face is round (yaw 0 -> 25 -> 87 deg over the last 20 cm): its
         # panel given as a vertical line, so the lid's end and the wing's end meet it.
-        'face': {'rear': [[0.45, 1.930], [0.92, 1.930]]},
+        # Carried up to the lid's own corner (0.945): at 0.92 the panel's top rounded
+        # off into the lid, a 10 cm radius where the photos' corner is tight.
+        'face': {'rear': [[0.45, 1.930], [0.945, 1.930]]},
         # a crisp three-box body (photos)
         'edgeMin': 0.015,
-        'edgeY': 0.028,
-        'edgeYMin': 0.028,
+        'edgeY': 0.020,
+        'edgeYMin': 0.020,
         'arch': {'radius': 0.33, 'lift': 0.02},
     },
     'parts': {
@@ -78,8 +107,11 @@ CAR = {
                                          [0.591, 1.266]], 'facingMin': 0.3},
             {'view': 'front', 'outline': [[0.0, 1.335], [0.50, 1.33], [0.545, 1.30], [0.66, 0.98], [0.64, 0.955], [0.0, 0.955]],
              'depthRange': [-1.0, -0.3], 'facingMin': -0.3},
-            {'view': 'rear', 'outline': [[0.0, 1.33], [0.48, 1.325], [0.52, 1.30], [0.60, 0.99], [0.58, 0.965], [0.0, 0.965]],
-             'depthRange': [0.9, 1.6], 'facingMin': -0.3},
+            # The back light: upright, from the roof's rear edge (1.38) down to the lid's
+            # front (0.955) - the outline above gives it 50 deg of rake, where the drawn
+            # one lay back at 25 and read as the fastback's rear glass.
+            {'view': 'rear', 'outline': [[0.0, 1.37], [0.46, 1.365], [0.50, 1.33], [0.58, 1.02], [0.56, 0.965], [0.0, 0.955]],
+             'depthRange': [1.08, 1.50], 'facingMin': -0.3},
         ],
         'decals': [
             {'view': 'front', 'rect': [[0.0, 0.632], [1.40, 0.20]], 'radius': 0.02, 'mirror': False,

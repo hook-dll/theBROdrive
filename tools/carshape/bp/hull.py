@@ -516,6 +516,15 @@ def build(car):
         inside_well = np.where(zs[:, None] >= za, ra - r, ra - np.abs(ys[None, :] - ya))   # [z, y]
         cut = np.minimum(inside_well[None, :, :], (xs - x_in)[:, None, None])
         wells = np.maximum(wells, cut)
+    # Open bodies (a jeep's tub): {y: [y0, y1], half, floor} hollowed out down to the
+    # floor, a wall of the body's own thickness left round it.
+    for ck in hs.get('cockpits', []):
+        y0_, y1_ = ck['y']
+        cut = np.minimum.reduce([
+            np.broadcast_to((ck['half'] - xs)[:, None, None], dist.shape),
+            np.broadcast_to((zs - ck['floor'])[None, :, None], dist.shape),
+            np.broadcast_to(np.minimum(ys - y0_, y1_ - ys)[None, None, :], dist.shape)])
+        wells = np.maximum(wells, cut)
 
     # ---- mirror, smooth, contour ----------------------------------------------------
     full = np.concatenate([dist[:0:-1], dist], axis=0)

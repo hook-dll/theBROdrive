@@ -22,9 +22,14 @@ CAR = {
         'roofCrown': 0.015,
         'edge': 0.012,
         # a boxy car: crisp edges (the default 2.2 / 6 cm blur made it a pebble)
-        'edgeMin': 0.015,
-        'edgeY': 0.04,
-        'edgeYMin': 0.04,
+        'edgeMin': 0.013,
+        'edgeY': 0.025,
+        'edgeYMin': 0.025,
+        'edge': 0.012,
+        # a crisp box hatchback (photos): the end faces and the shoulder lines are the
+        # car's, not the drawing's pixels, so they are faired with corners kept
+        'faceSpacing': 0.15,
+        'cornerDeg': 20,
         'crownScale': 1,
         # The plan as the 16v's, not the Evo drawing's: the drawing's top view carries
         # the Evo's arch flares (0.83-0.85 over the wheels against 0.81 at the doors),

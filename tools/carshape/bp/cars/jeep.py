@@ -77,24 +77,27 @@ CAR = {
         'edge': 0.013,
         'faceSpacing': 0.15,
         'cornerDeg': 20,
+        # The open tub (photos): hollow behind the screen to its floor, 4 cm walls, and
+        # the door cut-outs down through the sides to the photo's 0.80.
+        'cockpits': [{'y': [-0.05, 1.53], 'half': 0.66, 'floor': 0.55},
+                     {'y': [-0.06, 0.55], 'half': 2.0, 'floor': 0.80}],
         'arch': {'radius': 0.40, 'lift': 0.0},
     },
     'parts': {
         'underbody': {'frame': True},
         'glass': [
+            # the same screen seen from the tub (it is glass both ways, not a painted board)
+            {'view': 'rear', 'outline': [[-0.62, 1.12], [0.62, 1.12], [0.62, 1.60], [-0.62, 1.60]], 'mirror': False,
+             'depthRange': [-0.4, 0.05], 'facingMin': 0.2, 'fit': False},
             # Only the folding screen: the reference car is open (photos), so the door
             # and quarter windows and the canvas top's rear light are gone with the top.
             {'view': 'front', 'outline': [[-0.62, 1.12], [0.62, 1.12], [0.62, 1.60], [-0.62, 1.60]], 'mirror': False,
              'depthRange': [-0.4, 0.0], 'facingMin': 0.2, 'fit': False},
         ],
         'regions': [
-            # The door openings cut in the tub's sides, dark to the sill, as the photos
-            # show them (a real hole through the side is not something the shell can be
-            # given; this is the opening read off the photo's silhouette).
-            {'view': 'side', 'outline': [[-0.30, 1.045], [0.62, 1.045], [0.62, 0.52], [-0.30, 0.52]],
-             'material': 'trim', 'height': 0.0},
+            # (the door cut-outs are real openings in the shell: hull 'cockpits')
             # The tub's floor, seen through the openings.
-            {'view': 'top', 'outline': [[-0.30, 0.0], [-0.30, 0.70], [1.55, 0.70], [1.55, 0.0]],
+            {'view': 'top', 'outline': [[-0.22, 0.10], [-0.22, 0.58], [1.42, 0.58], [1.42, 0.10]],
              'material': 'trim', 'facingMin': 0.5},
         ],
         'decals': [

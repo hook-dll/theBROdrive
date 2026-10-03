@@ -108,6 +108,8 @@ CAR = {
         'mirror': {'y': -0.52, 'z': 0.90, 'reach': 0.84, 'w': 0.08, 'h': 0.06, 'material': 'chrome', 'shape': 'round'},
         'handles': {'at': [[0.45, 0.76]], 'w': 0.11},
         'wipers': {'arms': [[-0.5, -0.05, -0.70, 0.90], [0.05, 0.5, -0.70, 0.90]]},
-        'wheel': {'style': 'alloy', 'spokes': 8, 'rimFactor': 0.68, 'spokeWidth': 0.3},
+        # Plain steel wheels with a small chrome centre cap (the photos of the Rallye
+        # 1.3 S: no cast alloy, the hubcap type came with the 1.6 HF's Cromodoras).
+        'wheel': {'style': 'steel', 'windows': 0, 'rimFactor': 0.68, 'cap': True},
     },
 }

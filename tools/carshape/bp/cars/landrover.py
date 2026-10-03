@@ -58,16 +58,21 @@ CAR = {
         'paint2': {'name': 'trim_canvas', 'rgb': [0.32, 0.30, 0.22]},
         'glass': [
             {'view': 'side', 'outline': [[0.33, 1.22], [-0.27, 1.22], [-0.27, 1.62], [0.33, 1.62]], 'facingMin': 0.3},
-            {'view': 'front', 'outline': [[0.03, 1.38], [0.70, 1.38], [0.72, 1.76], [0.03, 1.76]], 'depthRange': [-0.7, -0.2],
+            # The screen's pane down to the frame's lower rail (the drawings' front view
+            # put the glass 20 cm up, so a body-coloured band stood under it and the
+            # wipers landed mid-screen); its top stops at the screen's own top rather
+            # than running over onto the roof.
+            {'view': 'front', 'outline': [[0.03, 1.26], [0.70, 1.26], [0.72, 1.68], [0.03, 1.68]], 'depthRange': [-0.62, -0.30],
              'facingMin': 0.2, 'fit': False},
             {'view': 'rear', 'outline': [[0.03, 1.42], [0.72, 1.42], [0.72, 1.75], [0.03, 1.75]], 'depthRange': [1.5, 1.9],
              'facingMin': 0.2, 'fit': False},
         ],
         'regions': [
-            # The canvas tilt over the cab and the tub.
+            # The canvas tilt over the tub only: the drawing (a pickup with its tilt) and
+            # the photos both have the cab's own roof panel over the seats and the canvas
+            # starting at the cab's back, not a full tilt over the cab too.
             {'view': 'side', 'outline': [[0.40, 1.18], [1.85, 1.18], [1.85, 1.95], [0.40, 1.95]], 'material': 'paint2'},
-            {'view': 'side', 'outline': [[-0.45, 1.68], [0.40, 1.68], [0.40, 1.95], [-0.45, 1.95]], 'material': 'paint2'},
-            {'view': 'top', 'outline': [[-0.45, 0.0], [-0.45, 0.9], [1.85, 0.9], [1.85, 0.0]], 'material': 'paint2', 'facingMin': 0.5},
+            {'view': 'top', 'outline': [[0.40, 0.0], [0.40, 0.9], [1.85, 0.9], [1.85, 0.0]], 'material': 'paint2', 'facingMin': 0.5},
             {'view': 'rear', 'rect': [[0.0, 1.57], [1.8, 0.80]], 'mirror': False, 'material': 'paint2', 'depthRange': [1.5, 1.95]},
             # The grille panel sits back between the wings (the grille on it grey plastic).
             {'view': 'front', 'outline': [[0.0, 1.10], [0.20, 1.10], [0.20, 1.06], [0.37, 1.06], [0.37, 0.71], [0.0, 0.71]],
@@ -79,11 +84,14 @@ CAR = {
             {'view': 'front', 'circle': [[0.52, 0.88], 0.10], 'material': 'chrome', 'height': 0.006, 'depthRange': [-1.95, -1.5]},
             {'view': 'front', 'node': 'headlights', 'circle': [[0.52, 0.88], 0.085], 'material': 'Headlights', 'height': 0.010,
              'depthRange': [-1.95, -1.5]},
-            {'view': 'front', 'node': 'front_blinker_left', 'circle': [[0.71, 0.80], 0.03], 'material': 'IndicatorLights',
-             'height': 0.010, 'depthRange': [-1.95, -1.5]},
-            {'view': 'front', 'node': 'front_blinker_right', 'circle': [[0.71, 0.80], 0.03], 'material': 'IndicatorLights',
-             'height': 0.010, 'depthRange': [-1.95, -1.5]},
-            {'view': 'front', 'circle': [[0.71, 0.96], 0.03], 'material': 'Headlights', 'height': 0.010, 'depthRange': [-1.95, -1.5]},
+            # The wing's front face: the amber indicator is the UPPER of the two small
+            # lamps outboard of the headlamp and the clear side lamp the lower (the
+            # photos), an elongated amber lens and a small round side lamp.
+            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.71, 0.955], [0.075, 0.04]], 'radius': 0.016,
+             'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [-1.95, -1.5]},
+            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.71, 0.955], [0.075, 0.04]], 'radius': 0.016,
+             'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [-1.95, -1.5]},
+            {'view': 'front', 'circle': [[0.71, 0.80], 0.023], 'material': 'Headlights', 'height': 0.010, 'depthRange': [-1.95, -1.5]},
             {'view': 'rear', 'node': 'taillights', 'circle': [[0.77, 1.07], 0.045], 'material': 'TailLights', 'height': 0.012,
              'depthRange': [1.5, 1.95], 'facingMin': 0.2},
             {'view': 'rear', 'node': 'rear_blinker_left', 'circle': [[0.77, 0.96], 0.045], 'material': 'IndicatorLights',
@@ -98,22 +106,25 @@ CAR = {
              'height': 0.006, 'depthRange': [-2.0, -1.5]},
         ],
         'bars': [
+            # Bright galvanised grille slats on the dark recess (the photos' grille is
+            # bare metal, not black plastic).
             {'view': 'front', 'span': [-0.30, 0.30], 'b': [0.74, 1.04], 'count': 10, 'width': 0.012, 'dir': 'v',
-             'material': 'trim', 'height': 0.006, 'depthRange': [-1.95, -1.5]},
+             'material': 'alu', 'height': 0.006, 'depthRange': [-1.95, -1.5]},
         ],
         'lines': [
             {'view': 'side', 'points': [[-0.49, 1.66], [-0.49, 0.52], [0.37, 0.52], [0.37, 1.66]], 'width': 0.008},
             {'view': 'side', 'points': [[-0.49, 1.17], [0.37, 1.17]], 'width': 0.008},
             {'view': 'side', 'points': [[-1.78, 1.06], [-0.50, 1.10]], 'width': 0.005},
-            {'view': 'side', 'points': [[0.40, 1.17], [1.80, 1.17]], 'width': 0.02, 'material': 'paint', 'height': 0.012},
+            {'view': 'side', 'points': [[0.40, 1.17], [1.80, 1.17]], 'width': 0.02, 'material': 'alu', 'height': 0.012},
             {'view': 'rear', 'points': [[-0.50, 0.70], [-0.50, 1.20], [0.50, 1.20], [0.50, 0.70]], 'mirror': False, 'width': 0.008,
              'depthRange': [1.5, 1.95], 'facingMin': 0.2},
             {'view': 'rear', 'points': [[0.0, 0.72], [0.0, 1.17]], 'mirror': False, 'width': 0.008, 'depthRange': [1.5, 1.95],
              'facingMin': 0.2},
         ],
         'bumpers': {
-            'front': {'z': [0.51, 0.62], 'depth': 0.10, 'wrap': 0.02, 'profile': 'blade', 'material': 'trim', 'standOff': 0.0},
-            'rear': {'z': [0.50, 0.56], 'depth': 0.06, 'wrap': 0.02, 'profile': 'blade', 'material': 'trim', 'standOff': 0.0},
+            # Galvanised steel blades, bare (the photos), not black plastic.
+            'front': {'z': [0.51, 0.62], 'depth': 0.10, 'wrap': 0.02, 'profile': 'blade', 'material': 'alu', 'standOff': 0.0},
+            'rear': {'z': [0.50, 0.56], 'depth': 0.06, 'wrap': 0.02, 'profile': 'blade', 'material': 'alu', 'standOff': 0.0},
         },
         'mirror': {'y': -0.45, 'z': 1.32, 'reach': 0.92, 'w': 0.13, 'h': 0.13, 'shape': 'round'},
         'handles': {'at': [[0.25, 1.08]], 'w': 0.10},
