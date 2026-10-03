@@ -39,10 +39,11 @@ CAR = {
              'depthRange': [0.7, 1.6], 'facingMin': 0.15},
         ],
         'decals': [
-            # A chrome-framed panel across the nose: four round lamps, the fine grille and its shield.
-            {'view': 'front', 'rect': [[0.0, 0.54], [1.42, 0.21]], 'radius': 0.05, 'mirror': False, 'material': 'chrome',
+            # The nose: four round lamps in chrome rings on the body, the fine grille in a
+            # chrome trapezoid between the inner pair, its shield.
+            {'view': 'front', 'outline': [[0.0, 0.64], [0.31, 0.64], [0.29, 0.44], [0.0, 0.44]], 'material': 'chrome',
              'height': 0.003, 'depthRange': [-2.1, -1.6]},
-            {'view': 'front', 'rect': [[0.0, 0.54], [1.38, 0.17]], 'radius': 0.04, 'mirror': False, 'material': 'grille',
+            {'view': 'front', 'outline': [[0.0, 0.625], [0.295, 0.625], [0.275, 0.455], [0.0, 0.455]], 'material': 'grille',
              'height': 0.005, 'depthRange': [-2.1, -1.6]},
             {'view': 'front', 'circle': [[0.387, 0.54], 0.074], 'material': 'chrome', 'height': 0.008, 'depthRange': [-2.1, -1.6]},
             {'view': 'front', 'circle': [[0.585, 0.538], 0.074], 'material': 'chrome', 'height': 0.008, 'depthRange': [-2.1, -1.6]},
@@ -58,20 +59,17 @@ CAR = {
              'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-2.1, -1.6]},
             {'view': 'front', 'rect': [[0.0, 0.33], [0.40, 0.09]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
              'height': 0.004, 'depthRange': [-2.1, -1.6]},
-            # The tail's own framed panel: lamp clusters, plate in the middle.
-            {'view': 'rear', 'rect': [[0.0, 0.57], [1.40, 0.24]], 'radius': 0.06, 'mirror': False, 'material': 'chrome',
-             'height': 0.003, 'depthRange': [1.6, 2.1], 'facingMin': 0.1},
-            {'view': 'rear', 'rect': [[0.0, 0.57], [1.36, 0.20]], 'radius': 0.05, 'mirror': False, 'material': 'trim',
+            # The tail: body colour; chrome-framed lamp clusters on its corners under the deck
+            # (tail lamp over the turn lamp), the plate between them.
+            {'view': 'rear', 'rect': [[0.55, 0.615], [0.27, 0.115]], 'radius': 0.02, 'material': 'chrome',
              'height': 0.004, 'depthRange': [1.6, 2.1], 'facingMin': 0.1},
-            {'view': 'rear', 'node': 'taillights', 'rect': [[0.57, 0.61], [0.18, 0.05]], 'radius': 0.01, 'material': 'TailLights',
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.55, 0.64], [0.245, 0.045]], 'radius': 0.01, 'material': 'TailLights',
              'height': 0.008, 'depthRange': [1.6, 2.1], 'facingMin': 0.1},
-            {'view': 'rear', 'node': 'taillights', 'circle': [[0.445, 0.578], 0.048], 'material': 'TailLights', 'height': 0.009,
-             'depthRange': [1.6, 2.1], 'facingMin': 0.1},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.58, 0.55], [0.15, 0.045]], 'radius': 0.01,
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.59, 0.592], [0.165, 0.04]], 'radius': 0.01,
              'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.6, 2.1], 'facingMin': 0.1},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.58, 0.55], [0.15, 0.045]], 'radius': 0.01,
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.59, 0.592], [0.165, 0.04]], 'radius': 0.01,
              'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.6, 2.1], 'facingMin': 0.1},
-            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.54, 0.47], [0.06, 0.03]], 'radius': 0.005,
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.465, 0.592], [0.065, 0.04]], 'radius': 0.005,
              'material': 'ReverseLights', 'height': 0.008, 'depthRange': [1.6, 2.1], 'facingMin': 0.1},
             {'view': 'rear', 'rect': [[0.0, 0.51], [0.30, 0.13]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.008, 'depthRange': [1.6, 2.1], 'facingMin': 0.1},
@@ -90,8 +88,8 @@ CAR = {
             {'view': 'side', 'points': [[-1.94, 0.70], [1.95, 0.70]], 'width': 0.004, 'material': 'rubber'},
         ],
         'bumpers': {
-            'front': {'z': [0.385, 0.425], 'depth': 0.035, 'wrap': 0.30, 'profile': 'round', 'standOff': 0.0},
-            'rear': {'z': [0.335, 0.375], 'depth': 0.035, 'wrap': 0.30, 'profile': 'round', 'standOff': 0.0},
+            'front': {'z': [0.40, 0.44], 'depth': 0.035, 'wrap': 0.30, 'profile': 'round', 'standOff': 0.0},
+            'rear': {'z': [0.43, 0.47], 'depth': 0.035, 'wrap': 0.30, 'profile': 'round', 'standOff': 0.0},
         },
         'mirror': {'y': -0.52, 'z': 0.90, 'reach': 0.84, 'w': 0.08, 'h': 0.06, 'material': 'chrome', 'shape': 'round'},
         'handles': {'at': [[0.45, 0.76]], 'w': 0.11},
