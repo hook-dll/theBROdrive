@@ -862,7 +862,7 @@ export const ROSTER: readonly RosterCar[] = [
     label: 'Ford Mustang 1965',
     body: 'mustang65.glb',
     bodyClass: 'car',
-    factory: { length: 4.613, width: 1.732, height: 1.30, clearance: 0.14, wheelbase: 2.743, frontTrack: 1.422, rearTrack: 1.422, wheelRadius: 0.33, tyreWidth: 0.18, frontOverhang: 0.77 },
+    factory: { length: 4.613, width: 1.732, height: 1.3, clearance: 0.14, wheelbase: 2.743, frontTrack: 1.422, rearTrack: 1.422, wheelRadius: 0.33, tyreWidth: 0.18, frontOverhang: 0.77 },
     mass: 1300,
     frontWeightShare: 0.56,
     rearDriveBias: 1,
