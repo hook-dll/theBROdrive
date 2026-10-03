@@ -68,3 +68,52 @@ def set_overhang(CAR, fo):
     moves by itself: it is placed by its wheels)."""
     shift_along(CAR, fo - CAR['factory']['frontOverhang'])
     CAR['factory']['frontOverhang'] = fo
+
+
+def scale_above(CAR, belt, top_from, top_to):
+    """A drawing whose top stands at `top_from` for a car `top_to` tall: every height
+    above `belt` is brought to it in proportion (outlines, panes, regions, decals,
+    lines, roof boxes, wipers, mirror)."""
+    k = (top_to - belt) / (top_from - belt)
+
+    def z(v):
+        return v if v <= belt else belt + (v - belt) * k
+
+    def pts(p):
+        return [[a, z(b)] + list(rest) for a, b, *rest in p]
+
+    def patch(d):
+        if d.get('view') == 'top':
+            return
+        if 'outline' in d:
+            d['outline'] = pts(d['outline'])
+        if 'points' in d:
+            d['points'] = pts(d['points'])
+        if 'rect' in d:
+            (a, b), (w, h) = d['rect']
+            lo, hi = z(b - h / 2), z(b + h / 2)
+            d['rect'] = [[a, (lo + hi) / 2], [w, hi - lo]]
+        if 'circle' in d:
+            d['circle'] = [[d['circle'][0][0], z(d['circle'][0][1])], d['circle'][1]]
+
+    bp = CAR['blueprint']
+    for v in ('side', 'front', 'rear'):
+        if 'outline' in bp.get(v, {}):
+            bp[v]['outline'] = pts(bp[v]['outline'])
+    P = CAR['parts']
+    for key in ('glass', 'decals', 'lines', 'regions', 'bars'):
+        for d in P.get(key, []):
+            patch(d)
+            if key == 'bars' and d.get('view') != 'top':
+                d['b'] = [z(d['b'][0]), z(d['b'][1])]
+    for b in P.get('boxes', []):
+        b['c'][2] = z(b['c'][2])
+    h = CAR['hull']
+    for key in ('sectionStations', 'sectionKeys'):
+        for st in h.get(key, []):
+            st['half'] = [[z(a), x] + list(r) for a, x, *r in st['half']]
+    if 'wipers' in P:
+        P['wipers']['arms'] = [list(a[:3]) + [z(a[3])] + list(a[4:]) for a in P['wipers']['arms']]
+    if 'mirror' in P:
+        P['mirror']['z'] = z(P['mirror']['z'])
+    CAR['factory']['height'] = top_to

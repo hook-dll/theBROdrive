@@ -554,7 +554,18 @@ def build(car):
             v[m, 1] = pivot + (v[m, 1] - pivot) * k
             ny[m] /= k
             print(f'ENDS {car} {end}: {have:.3f} -> {want:.3f} (overhang past the arch x{k:.3f})')
-    normals = np.stack([normals[:, 0], normals[:, 1], ny], axis=1)
+    # The roof likewise: the glasshouse above the belt brought up to the drawn top.
+    nz_ = normals[:, 1].copy()
+    want_top = float(np.max(top))
+    have_top = float(v[:, 2].max())
+    zb = float(np.median(belt[(ys >= c0) & (ys <= c1)]))
+    if want_top - have_top > 0.005 and have_top - zb > 0.2:
+        k = (want_top - zb) / (have_top - zb)
+        m = v[:, 2] > zb
+        v[m, 2] = zb + (v[m, 2] - zb) * k
+        nz_[m] /= k
+        print(f'ENDS {car} top: {have_top:.3f} -> {want_top:.3f} (above the belt x{k:.3f})')
+    normals = np.stack([normals[:, 0], nz_, ny], axis=1)
     mesh = trimesh.Trimesh(v, faces[:, [0, 2, 1]], process=False)
     if mesh.volume < 0:
         mesh.invert()
@@ -618,7 +629,9 @@ def bumper_paths(mesh, spec, info, raw_ends):
         order = np.argsort(ang)
         rel, ang = rel[order], ang[order]
         rad = np.hypot(rel[:, 0], rel[:, 1])
-        a_s = np.linspace(ang.min(), ang.max(), 41)
+        # symmetric about the centre line: a bar is (the sections' samples are not quite)
+        a_m = max(-ang.min(), ang.max())
+        a_s = np.linspace(-a_m, a_m, 41)
         # Stood off the shell so its face is where the drawing has it (the factory
         # length includes the bumpers), but never closer than 5 mm.
         dpt = b.get('depth', 0.06)
@@ -632,9 +645,11 @@ def bumper_paths(mesh, spec, info, raw_ends):
         if b.get('overriders'):
             stand -= 0.015
         lo_ = -dpt / 2 + 0.01
-        if stand < lo_ or stand > 0.25:
+        # (a bar on a frame's horns stands well clear of the body)
+        hi_ = 0.7 if spec.get('parts', {}).get('underbody', {}).get('frame') else 0.25
+        if stand < lo_ or stand > hi_:
             print('BUMPER-OFF', end, 'shell', round(float(y_end), 3), 'target', round(target, 3), 'stand', round(stand, 3))
-        stand = min(max(stand, lo_), 0.25)
+        stand = min(max(stand, lo_), hi_)
         print('BUMPER', end, 'shell', round(float(y_end), 3), 'target', round(target, 3), 'stand', round(stand, 3))
         # The bar runs round the convex hull of the end's outline at its height: a bumper
         # is convex in plan, and the outline's recesses (a grille, the lamps' nests)
@@ -656,10 +671,25 @@ def bumper_paths(mesh, spec, info, raw_ends):
                 if t_ > 0 and -1e-9 <= u_ <= 1 + 1e-9:
                     best = max(best, t_)
             r_env[k] = best if best > 0 else np.max(rad)
-        r_s = r_env + stand + dpt / 2
-        path = np.stack([c[0] + r_s * np.sin(a_s), c[1] + sgn * r_s * np.cos(a_s)], axis=1)
-        # Ends no further back than `wrap` from the face.
-        path = path[np.abs(path[:, 1] - y_end) <= wrap + 1e-3]
+        # the envelope, then stood off along its own normal in plan (stood off along the
+        # rays from the centre, a bar well clear of the shell bowed out in the middle)
+        env = np.stack([c[0] + r_env * np.sin(a_s), c[1] + sgn * r_env * np.cos(a_s)], axis=1)
+        tng = np.gradient(env, axis=0)
+        nrm = np.stack([tng[:, 1], -tng[:, 0]], axis=1)
+        nrm /= np.maximum(np.linalg.norm(nrm, axis=1, keepdims=True), 1e-9)
+        if np.dot(nrm[len(nrm) // 2], [0, sgn]) < 0:
+            nrm = -nrm
+        path = env + nrm * (stand + dpt / 2)
+        # Ends no further back than `wrap` from the bar's own face (a bar standing well
+        # clear of the shell kept nothing when measured from the shell's end).
+        y_face = path[:, 1].min() if end == 'front' else path[:, 1].max()
+        path = path[np.abs(path[:, 1] - y_face) <= wrap + 1e-3]
+        if b.get('span'):
+            # a straight bar across the frame's horns, `span` wide
+            xs_ = np.linspace(-b['span'] / 2 + dpt / 2, b['span'] / 2 - dpt / 2, 25)
+            path = np.stack([xs_, np.full(len(xs_), y_face)], axis=1)
+        # mirrored onto itself: exactly symmetric
+        path = (path + (path[::-1] * [-1, 1])) / 2
         # The wrap ends no wider than the body.
         W = spec['factory']['width']
         path[:, 0] = np.clip(path[:, 0], -(W / 2 - dpt / 2), W / 2 - dpt / 2)

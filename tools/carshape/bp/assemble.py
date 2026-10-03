@@ -1443,9 +1443,13 @@ if not rear_engine:
 if ub.get('frame'):
     # The chassis rails, tucked under the body from end to end, following its floor.
     xr = inner - 0.22
-    ys_ = np.linspace(-L / 2 + 0.35, L / 2 - 0.3, 12)
+    # out to the bars where there are bars: a bumper on a frame stands on its horns
+    bp_ = info.get('bumperPaths', {})
+    y_lo = min(p_[1] for p_ in bp_['front']) + 0.03 if bp_.get('front') else -L / 2 + 0.35
+    y_hi = max(p_[1] for p_ in bp_['rear']) - 0.03 if bp_.get('rear') else L / 2 - 0.3
+    ys_ = np.linspace(y_lo, y_hi, 14)
     for y0_, y1_ in zip(ys_, ys_[1:]):
-        zf = floor_at((y0_ + y1_) / 2)
+        zf = floor_at(min(max((y0_ + y1_) / 2, -L / 2 + 0.35), L / 2 - 0.3))
         for sx in (1, -1):
             box(bm_, (sx * xr, (y0_ + y1_) / 2, zf - 0.03), (0.06, y1_ - y0_ + 0.01, 0.10), 0)
 trim_parts.append(new_object('underbody', bm_, ['trim']))
@@ -1678,7 +1682,10 @@ for o in scene.objects:
         o.data.name = 'glass'
 LAMP_NODES = {'headlights', 'taillights', 'reverse_lights', 'brake_lights', 'front_blinker_left',
               'front_blinker_right', 'rear_blinker_left', 'rear_blinker_right'}
-join = [o for o in trim_parts] + [o for n, o in part_objects.items() if n not in LAMP_NODES]
+# The mirrors stay a node of their own, `mirrors`: the game measures the body's width
+# without that node (a mirror joined into the trim was taken for the body's side, and the
+# whole car squeezed narrower to fit it into the factory width).
+join = [o for o in trim_parts if not o.name.startswith('mirrors')] + [o for n, o in part_objects.items() if n not in LAMP_NODES]
 for o in part_objects.values():
     if o.name in LAMP_NODES:
         bpy.context.view_layer.objects.active = o

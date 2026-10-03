@@ -1135,7 +1135,7 @@ export const ROSTER: readonly RosterCar[] = [
     label: 'Toyota Land Cruiser BJ40',
     body: 'bj40.glb',
     bodyClass: 'car',
-    factory: { length: 3.87, width: 1.665, height: 1.95, clearance: 0.21, wheelbase: 2.285, frontTrack: 1.404, rearTrack: 1.4, wheelRadius: 0.37, tyreWidth: 0.19, frontOverhang: 0.705 },
+    factory: { length: 3.87, width: 1.665, height: 1.93, clearance: 0.21, wheelbase: 2.285, frontTrack: 1.404, rearTrack: 1.4, wheelRadius: 0.37, tyreWidth: 0.19, frontOverhang: 0.705 },
     mass: 1550,
     frontWeightShare: 0.55,
     rearDriveBias: 0.5,
