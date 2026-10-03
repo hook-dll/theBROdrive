@@ -565,7 +565,18 @@ def build(car):
         v[m, 2] = zb + (v[m, 2] - zb) * k
         nz_[m] /= k
         print(f'ENDS {car} top: {have_top:.3f} -> {want_top:.3f} (above the belt x{k:.3f})')
-    normals = np.stack([normals[:, 0], nz_, ny], axis=1)
+    # And the width: the blur and the sections leave the shell a few cm narrower than
+    # the factory's; the game fits the body's width by its widest low part (often a
+    # bumper's end), so a narrow shell stayed narrow.
+    nx_ = normals[:, 0].copy()
+    want_w = W / 2 - hs.get('skinInset', 0.008)
+    have_w = float(np.abs(v[:, 0]).max())
+    if want_w - have_w > 0.003:
+        k = want_w / have_w
+        v[:, 0] *= k
+        nx_ /= k
+        print(f'ENDS {car} width: {2 * have_w:.3f} -> {2 * want_w:.3f} (x{k:.3f})')
+    normals = np.stack([nx_, nz_, ny], axis=1)
     mesh = trimesh.Trimesh(v, faces[:, [0, 2, 1]], process=False)
     if mesh.volume < 0:
         mesh.invert()
