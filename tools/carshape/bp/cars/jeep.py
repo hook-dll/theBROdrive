@@ -12,7 +12,7 @@ CAR = {
     'id': 'jeep',
     'label': 'Jeep CJ-5',
     'factory': {'length': 3.44, 'width': 1.74, 'height': 1.7, 'clearance': 0.21, 'wheelbase': 2.057,
-                'frontTrack': 1.234, 'rearTrack': 1.234, 'wheelRadius': 0.37, 'tyreWidth': 0.16, 'frontOverhang': 0.55},
+                'frontTrack': 1.234, 'rearTrack': 1.234, 'wheelRadius': 0.355, 'tyreWidth': 0.16, 'frontOverhang': 0.55},
     'blueprint': {
         'image': 'cj5_go.png',
         'dark': 200,

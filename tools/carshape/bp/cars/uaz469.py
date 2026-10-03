@@ -14,7 +14,7 @@ CAR = {
     'id': 'uaz469',
     'label': 'UAZ-469',
     'factory': {'length': 4.025, 'width': 1.785, 'height': 2.015, 'clearance': 0.22, 'wheelbase': 2.38,
-                'frontTrack': 1.445, 'rearTrack': 1.445, 'wheelRadius': 0.37, 'tyreWidth': 0.215, 'frontOverhang': 0.68},
+                'frontTrack': 1.445, 'rearTrack': 1.445, 'wheelRadius': 0.395, 'tyreWidth': 0.215, 'frontOverhang': 0.68},
     'blueprint': {
         'image': 'uaz2.jpg',
         'dark': 120,

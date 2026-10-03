@@ -5,7 +5,7 @@ CAR = {
     'id': 'mustang65',
     'label': 'Ford Mustang',
     'factory': {'length': 4.613, 'width': 1.732, 'height': 1.30, 'clearance': 0.14, 'wheelbase': 2.743,
-                'frontTrack': 1.422, 'rearTrack': 1.422, 'wheelRadius': 0.32, 'tyreWidth': 0.18, 'frontOverhang': 0.77},
+                'frontTrack': 1.422, 'rearTrack': 1.422, 'wheelRadius': 0.33, 'tyreWidth': 0.18, 'frontOverhang': 0.77},
     'blueprint': {
         'image': 'mustang65x2.png',
         'dark': 170,

@@ -10,7 +10,7 @@ CAR = {
     'id': 'landrover',
     'label': 'Land Rover 88',
     'factory': {'length': 3.62, 'width': 1.68, 'height': 1.97, 'clearance': 0.21, 'wheelbase': 2.235,
-                'frontTrack': 1.31, 'rearTrack': 1.31, 'wheelRadius': 0.37, 'tyreWidth': 0.16, 'frontOverhang': 0.56},
+                'frontTrack': 1.31, 'rearTrack': 1.31, 'wheelRadius': 0.355, 'tyreWidth': 0.16, 'frontOverhang': 0.56},
     'blueprint': {
         'image': 'lr88_go.png',
         'dark': 150,

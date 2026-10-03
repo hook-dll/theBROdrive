@@ -5,7 +5,7 @@ CAR = {
     'id': 'falcon',
     'label': 'Ford Falcon',
     'factory': {'length': 4.602, 'width': 1.793, 'height': 1.384, 'clearance': 0.15, 'wheelbase': 2.781,
-                'frontTrack': 1.397, 'rearTrack': 1.384, 'wheelRadius': 0.29, 'tyreWidth': 0.16, 'frontOverhang': 0.73},
+                'frontTrack': 1.397, 'rearTrack': 1.384, 'wheelRadius': 0.305, 'tyreWidth': 0.16, 'frontOverhang': 0.73},
     'blueprint': {
         'image': 'falcon.jpg',
         'dark': 128,

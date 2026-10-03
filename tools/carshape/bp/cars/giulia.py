@@ -9,7 +9,7 @@ CAR = {
     'id': 'giulia',
     'label': 'Alfa Romeo Giulia',
     'factory': {'length': 4.14, 'width': 1.56, 'height': 1.43, 'clearance': 0.15, 'wheelbase': 2.51,
-                'frontTrack': 1.31, 'rearTrack': 1.27, 'wheelRadius': 0.3, 'tyreWidth': 0.155, 'frontOverhang': 0.655},
+                'frontTrack': 1.31, 'rearTrack': 1.27, 'wheelRadius': 0.315, 'tyreWidth': 0.155, 'frontOverhang': 0.655},
     'blueprint': {
         'image': 'giulia_go.png',
         'dark': 120,

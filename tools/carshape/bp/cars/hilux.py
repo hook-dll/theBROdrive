@@ -9,7 +9,7 @@ CAR = {
     'id': 'hilux',
     'label': 'Toyota Hilux',
     'factory': {'length': 4.305, 'width': 1.61, 'height': 1.58, 'clearance': 0.19, 'wheelbase': 2.585,
-                'frontTrack': 1.3, 'rearTrack': 1.275, 'wheelRadius': 0.31, 'tyreWidth': 0.185, 'frontOverhang': 0.66},
+                'frontTrack': 1.3, 'rearTrack': 1.275, 'wheelRadius': 0.325, 'tyreWidth': 0.185, 'frontOverhang': 0.66},
     'blueprint': {
         'image': 'hilux_go.png',
         'dark': 140,

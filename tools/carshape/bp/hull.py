@@ -98,7 +98,7 @@ def build(car):
     yf = np.arange(ys[0], ys[-1] + 1e-9, G / FINE)
     zf = np.arange(zs[0], zs[-1] + 1e-9, G / FINE)
     side = bpread.sample_side(bp, yf, zf)                 # [z, y]
-    side = ndimage.gaussian_filter(side.astype(np.float32), FINE * 0.6) > 0.5
+    side = ndimage.gaussian_filter(side.astype(np.float32), hs.get('sideBlur', 0.006) / (G / FINE)) > 0.5
     # Over the cabin a column of the outline is solid from the sill to the roof: a roof
     # strip the flood fill could not reach (a drip rail drawn as two lines, a gap at a
     # pillar) is closed, or the roof would hang on its drawn line alone.
@@ -156,7 +156,10 @@ def build(car):
     sill = sm(hs['sill'], ys)
     # The top of the outline at every station.
     top_f = np.array([zf[np.nonzero(side[:, j])[0][-1]] if side[:, j].any() else 0 for j in range(len(yf))])
-    top = smooth1(top_f, 9, 2.0)[::FINE][:len(ys)]
+    top = smooth1(top_f, 9, 2.0)
+    if hs.get('topSmooth'):
+        top = ndimage.gaussian_filter1d(top, hs['topSmooth'] / (G / FINE), mode='nearest')
+    top = top[::FINE][:len(ys)]
     # Drip rails, aerials and the like stand above the roof in the drawing.
     if 'roofTop' in hs:
         top = np.minimum(top, hs['roofTop'])
@@ -200,7 +203,18 @@ def build(car):
         if op > 1:
             s = ndimage.grey_opening(s, size=op, mode='nearest')
         s = smooth1(s, 7, 2.0)
-        s = smooth_inner(s, zs, hs.get('sectionSmooth', 0.03), 0.06)
+        if hs.get('sectionMono', True):
+            # A body's section widens from the sill to its widest point and narrows above
+            # it; the drawing's lines across the end views add ripples to that, which
+            # ran along the whole car as waves. Held to that shape: non-decreasing up
+            # to the widest point, non-increasing above it.
+            nz = np.nonzero(s > 0.05)[0]
+            if len(nz) > 4:
+                k0, k1 = nz[0], nz[-1]
+                kmax = k0 + int(np.argmax(s[k0:k1 + 1]))
+                s[k0:kmax + 1] = np.maximum.accumulate(s[k0:kmax + 1])
+                s[kmax:k1 + 1] = np.minimum.accumulate(s[kmax:k1 + 1])
+        s = smooth_inner(s, zs, hs.get('sectionSmooth', 0.05), 0.06)
         b = hs.get('bumpers', {}).get(end)
         if b:
             s = fill_band(s, zs, [b['z'][0] - 0.02, b['z'][1] + 0.02])

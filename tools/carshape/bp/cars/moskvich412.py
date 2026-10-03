@@ -6,7 +6,7 @@ CAR = {
     'id': 'moskvich412',
     'label': 'Moskvich-412',
     'factory': {'length': 4.25, 'width': 1.55, 'height': 1.48, 'clearance': 0.175, 'wheelbase': 2.4,
-                'frontTrack': 1.27, 'rearTrack': 1.27, 'wheelRadius': 0.29, 'tyreWidth': 0.165, 'frontOverhang': 0.675},
+                'frontTrack': 1.27, 'rearTrack': 1.27, 'wheelRadius': 0.315, 'tyreWidth': 0.165, 'frontOverhang': 0.675},
     'blueprint': {
         'image': 'moskvich412.jpg',
         'degrid': 'thin',
@@ -36,7 +36,7 @@ CAR = {
         'crown': [[-2.2, 0.02], [2.2, 0.02]],
         'roofCrown': 0.035,
         'edge': 0.012,
-        'arch': {'radius': 0.33, 'lift': 0.01},
+        'arch': {'radius': 0.355, 'lift': 0.01},
     },
     'parts': {
         'glass': [

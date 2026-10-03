@@ -462,6 +462,67 @@ SEAL = P.get('glassSeal', {'material': max(set(_mats), key=_mats.count) if _mats
 SEAL.setdefault('width', 0.012 if SEAL['material'] == 'chrome' else 0.014)
 print('SEAL', car, SEAL, 'frame lines dropped', len(FRAME_LINES))
 
+def widen_screen(g):
+    """A screen or back light reaches out to its pillars: at each height its outline's
+    outer points move out to the glasshouse's half-width there less a pillar, `pillar`
+    wide (the drawn panes stopped short and left pillars twice as wide as the car's)."""
+    if g['view'] not in ('front', 'rear') or 'outline' not in g or g.get('fit') is False and g.get('widen') is False:
+        return g
+    pil = g.get('pillar', P.get('pillar', 0.05))
+    sgn = -1 if g['view'] == 'front' else 1
+    dr = g.get('depthRange')
+    out = []
+    for a_, b_ in g['outline']:
+        if abs(a_) < 0.15:
+            out.append([a_, b_])
+            continue
+        # the pane's own surface at this height, on the centre line
+        hit, _n = skin_point((0.0, sgn * (L / 2 + 1.0), b_), (0, -sgn, 0), L + 2)
+        if hit is None or (dr and not dr[0] - 0.1 <= hit.y <= dr[1] + 0.1):
+            out.append([a_, b_])
+            continue
+        # the glasshouse's half-width a little behind (in front of) that point
+        side_, _n2 = skin_point((1.5, hit.y - sgn * 0.06, b_), (-1, 0, 0), 3.0)
+        if side_ is None:
+            out.append([a_, b_])
+            continue
+        target = side_.x - pil
+        out.append([math.copysign(max(abs(a_), target), a_), b_])
+    return dict(g, outline=out, fit=False, facingMin=min(g.get('facingMin', 0.25), 0.1))
+
+
+def reach_pillar(g):
+    """The front side window runs forward to the screen pillar: at each of its front
+    points' heights, forward to where the side turns in towards the screen, less a
+    pillar `pillar` wide."""
+    if g['view'] != 'side' or 'outline' not in g:
+        return g
+    pts_ = g['outline']
+    ymin = min(p_[0] for p_ in pts_)
+    if ymin > info['cabin'][0] + 0.7:
+        return g            # not the front window
+    pil = g.get('pillar', P.get('pillar', 0.05))
+    out = []
+    for y_, z_ in pts_:
+        if y_ > ymin + 0.12:
+            out.append([y_, z_])
+            continue
+        h0, _ = skin_point((1.5, y_ + 0.05, z_), (-1, 0, 0), 3.0)
+        if h0 is None:
+            out.append([y_, z_])
+            continue
+        yy, lim = y_, y_
+        while yy > y_ - 0.6:
+            yy -= 0.01
+            h1, _ = skin_point((1.5, yy, z_), (-1, 0, 0), 3.0)
+            if h1 is None or h1.x < h0.x - 0.04:
+                break
+            lim = yy
+        out.append([min(y_, lim + pil), z_])
+    return dict(g, outline=out)
+
+
+GL = [reach_pillar(widen_screen(g)) for g in GL]
 FIT_KS = {}
 FITTED = {}
 # A side window is its drawn outline on what the side view sees: its edges are the
@@ -1194,6 +1255,13 @@ if wp:
                 pts.append(g_)
         if len(pts) < 2:
             continue
+        # one straight blade: from the first point to the last, standing on the higher
+        # of the glass beneath it (a blade is straight; following the glass's ragged
+        # foot it waved)
+        pa, pb = pts[0][0], pts[-1][0]
+        nrm_ = sum((n for _, n in pts), Vector()).normalized()
+        lift_ = max(0.0, max((p.dot(nrm_) - (pa + (pb - pa) * ((p - pa).dot(pb - pa) / max((pb - pa).length_squared, 1e-9))).dot(nrm_)) for p, _ in pts))
+        pts = [(pa + nrm_ * lift_, nrm_), (pb + nrm_ * lift_, nrm_)]
         for (pa, na), (pb, nb) in zip(pts, pts[1:]):
             n_ = (na + nb).normalized()
             along = pb - pa
