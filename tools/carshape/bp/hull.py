@@ -574,6 +574,10 @@ def build(car):
             # past its own bar's face: the body stops inside the bar's depth.
             lim = L / 2 - 0.6 * bars[end].get('depth', 0.05)
             want = max(want, -lim) if end == 'front' else min(want, lim)
+        # The sheet metal's own end where photographs show it well short of the
+        # factory length (that length is to the bumpers' faces: Fulvia).
+        if end in hs.get('bodyEnds', {}):
+            want = hs['bodyEnds'][end]
         arch = dict(hs.get('arch', {}), **hs.get('arch', {}).get(end, {}))
         ra = arch.get('radius', R * 1.14)
         sg = -1 if end == 'front' else 1

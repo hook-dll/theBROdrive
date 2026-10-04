@@ -42,7 +42,16 @@ CAR = {
                         [-1.16, 0.842], [-1.07, 0.850], [-0.98, 0.855], [-0.90, 0.861], [-0.82, 0.867],
                         [-0.74, 0.873], [-0.68, 0.880], [-0.66, 0.885], [-0.55, 0.978], [-0.45, 1.065],
                         [-0.35, 1.152], [-0.27, 1.228], [-0.218, 1.290], [-0.18, 1.293], [0.0, 1.299],
-                        [0.20, 1.3035], [0.40, 1.3055], [0.56, 1.307]],
+                        [0.20, 1.3035], [0.40, 1.3055], [0.56, 1.307],
+                        # The rear, from the same photograph's trace: the back light's
+                        # rake (1.49 m of y per m of z, which the drawing agrees with to
+                        # 1%) down to its foot at (+1.15, 0.91), then the deck falling
+                        # steadily to a low rounded tail at (+1.95, 0.79). The drawn rear
+                        # view put the deck 5 cm lower (0.826 at +1.263); the photograph
+                        # wins, and its trace is the line shifted up 2 cm for the 1.30 m
+                        # factory roof (the photograph's car reads 1.28).
+                        [0.90, 1.150], [1.05, 1.020], [1.15, 0.910], [1.30, 0.895], [1.50, 0.872],
+                        [1.70, 0.845], [1.85, 0.820], [1.94, 0.795], [1.98, 0.770]],
         # The cabin starts at the screen's foot (-0.64), not 18 cm ahead of it: the
         # glasshouse's section was carried forward over the bonnet's rear.
         'cabin': [-0.64, 1.03],
@@ -65,7 +74,9 @@ CAR = {
         # The 4 cm blur rounded the nose and the deck's rear edge away (the tail came off
         # its drawn line 6 cm low at +1.90): the ends' outlines faired with their corners
         # kept (the drawing's bonnet brow over the lamps, the boot lid's rear edge).
-        'faceSpacing': 0.15, 'cornerDeg': 20,
+        # cornerDeg 32: the ends' outlines faired with rounder corners - the photographs'
+        # tail is a low rounded shape, not the boxed square the 20 degree corner gave.
+        'faceSpacing': 0.15, 'cornerDeg': 32,
         # The arch's opening over the tyre: the side photograph's lip measures 0.330 m
         # above the front axle's centre (0.628 from the ground) over a 0.297 m tyre -
         # a 3.5 cm gap, not the 6.5 the drawn 0.645-lip gave (the drawing's arch line is
@@ -81,6 +92,11 @@ CAR = {
         # the belt" and "held above it": a 2 cm bulge-and-dip on the scuttle's shoulder
         # at -0.68..-0.52 (the crumpled skin the user photographed).
         'roofEdge': 0.03,
+        # The sheet metal ends 0.745 m ahead of the front axle and 0.735 m behind the
+        # rear one (side photograph, its wheelbase as the scale; body 3.81 m). The
+        # factory 3975 is over the bumpers: stretched to it, the body's ends grew 8 cm
+        # each, the heavy nose and boxy tail.
+        'bodyEnds': {'front': -1.9075, 'rear': 1.9025},
     },
     # Thin chrome frames (the photos: about 8 mm, not the 12 the drawn frame lines
     # carried); every pane's own seal carries them.
@@ -131,17 +147,20 @@ CAR = {
             # drawn chrome trapezoid is that panel's chrome surround, so the panel keeps
             # its outline and a `ring` band frames it; the drawn four HF slots are the
             # slat grille between the inner pair.
-            {'view': 'front', 'outline': [[0.0, 0.645], [0.52, 0.645], [0.60, 0.628], [0.628, 0.575],
-                                          [0.628, 0.505], [0.60, 0.455], [0.52, 0.44], [0.0, 0.44]],
+            {'view': 'front', 'outline': [[0.0, 0.645], [0.58, 0.645], [0.665, 0.625], [0.695, 0.575],
+                                          [0.695, 0.505], [0.665, 0.455], [0.58, 0.44], [0.0, 0.44]],
              'material': 'grille', 'height': 0.004, 'depthRange': [-2.1, -1.6], 'facingMin': 0.1},
-            {'view': 'front', 'outline': [[0.0, 0.645], [0.52, 0.645], [0.60, 0.628], [0.628, 0.575],
-                                          [0.628, 0.505], [0.60, 0.455], [0.52, 0.44], [0.0, 0.44]],
+            {'view': 'front', 'outline': [[0.0, 0.645], [0.58, 0.645], [0.665, 0.625], [0.695, 0.575],
+                                          [0.695, 0.505], [0.665, 0.455], [0.58, 0.44], [0.0, 0.44]],
              'material': 'chrome', 'height': 0.006, 'ring': 0.013, 'depthRange': [-2.1, -1.6], 'facingMin': 0.1},
-            {'view': 'front', 'circle': [[0.387, 0.54], 0.074], 'material': 'chrome', 'height': 0.008, 'depthRange': [-2.1, -1.6]},
-            {'view': 'front', 'circle': [[0.585, 0.538], 0.074], 'material': 'chrome', 'height': 0.008, 'depthRange': [-2.1, -1.6]},
-            {'view': 'front', 'node': 'headlights', 'circle': [[0.387, 0.54], 0.06], 'material': 'Headlights', 'height': 0.012,
+            # The 1.3 S lamps fill the panel: the outer 18 cm, the inner 15 (the
+            # photographs), so their outer edges reach the wings at x ~0.69 - the drawn
+            # 7.4 cm pair sat small and inboard with a wide body-colour margin round it.
+            {'view': 'front', 'circle': [[0.415, 0.540], 0.078], 'material': 'chrome', 'height': 0.008, 'depthRange': [-2.1, -1.6]},
+            {'view': 'front', 'circle': [[0.600, 0.538], 0.092], 'material': 'chrome', 'height': 0.008, 'depthRange': [-2.1, -1.6]},
+            {'view': 'front', 'node': 'headlights', 'circle': [[0.415, 0.540], 0.070], 'material': 'Headlights', 'height': 0.012,
              'depthRange': [-2.1, -1.6]},
-            {'view': 'front', 'node': 'headlights', 'circle': [[0.585, 0.538], 0.06], 'material': 'Headlights', 'height': 0.012,
+            {'view': 'front', 'node': 'headlights', 'circle': [[0.600, 0.538], 0.084], 'material': 'Headlights', 'height': 0.012,
              'depthRange': [-2.1, -1.6]},
             {'view': 'front', 'outline': [[0.0, 0.67], [0.03, 0.64], [0.03, 0.56], [0.0, 0.53], [-0.03, 0.56], [-0.03, 0.64]],
              'mirror': False, 'material': 'chrome', 'height': 0.010, 'depthRange': [-2.1, -1.6]},
@@ -184,7 +203,9 @@ CAR = {
              'height': 0.008, 'depthRange': [1.6, 2.1], 'facingMin': 0.1},
         ],
         'bars': [
-            {'view': 'front', 'span': [-0.27, 0.27], 'b': [0.46, 0.62], 'count': 8, 'width': 0.005,
+            # The slat grille between the inner lamps (the drawn HF slots), chrome like
+            # the photographs' grille surround; it spans the gap the lamps leave.
+            {'view': 'front', 'span': [-0.34, 0.34], 'b': [0.46, 0.62], 'count': 8, 'width': 0.005,
              'material': 'chrome', 'height': 0.008, 'depthRange': [-2.1, -1.6]},
         ],
         'lines': [
@@ -200,12 +221,11 @@ CAR = {
             {'view': 'side', 'points': [[-1.94, 0.70], [1.95, 0.70]], 'width': 0.003, 'material': 'rubber'},
         ],
         'bumpers': {
-            # The front blade: 2 cm deep, so it stands just proud of the nose. At 3.5 cm
-            # its back face fell 1.2 cm inside the shell's nose, which now reaches the
-            # drawn body end (hull.py stretches to the drawn end where a bar stands):
-            # BUMPER ... stand -0.013 in the log.
-            'front': {'z': [0.40, 0.44], 'depth': 0.020, 'wrap': 0.30, 'profile': 'round', 'standOff': 0.0},
-            'rear': {'z': [0.43, 0.47], 'depth': 0.035, 'wrap': 0.30, 'profile': 'round', 'standOff': 0.0},
+            # The side photograph (scaled by its own 2.33 m wheelbase): blades ~10 and
+            # ~8 cm tall at z 0.33-0.44 / 0.41-0.49, standing ahead of the sheet metal,
+            # whose ends are bodyEnds; the factory 3975 is to the bars' faces.
+            'front': {'z': [0.34, 0.44], 'depth': 0.05, 'wrap': 0.30, 'profile': 'round'},
+            'rear': {'z': [0.41, 0.49], 'depth': 0.05, 'wrap': 0.30, 'profile': 'round'},
         },
         # On the door's front corner at the belt, as the side photograph shows it: a
         # small oval head (about 7.5 x 9.5 cm, its stem no longer than the head) just
