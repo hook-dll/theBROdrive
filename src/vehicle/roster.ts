@@ -303,7 +303,7 @@ export const ROSTER: readonly RosterCar[] = [
     target: { top: 170, to100: null, turn: 5.2, source: 'BMW 2002 (1968) data; 10.4 m turning circle' },
   },
   {
-    // Volkswagen Golf 1.1 (1974): EA111 1.1, 50 PS at 6000 and 7.8 kgm at 3000, four-speed
+    // Volkswagen Golf 1.1 (body: the 1978-83 car; the 1.1 was unchanged 1974-83): EA111 1.1, 50 PS at 6000 and 7.8 kgm at 3000, four-speed
     // transaxle on a 4.57 final drive, 750 kg; 140 km/h, 0-100 in 16 s, 10.3 m circle.
     id: 'rs_golf1',
     label: 'Volkswagen Golf',
@@ -1383,12 +1383,13 @@ export const ROSTER: readonly RosterCar[] = [
   {
     // Subaru Leone 1600 4WD estate (1975): EA71 1.6 flat-four, 72 PS at 5600 and 11.4 kgm
     // at 3600, four-speed on a 3.889 final drive, part-time rear drive engaged, 1000 kg;
-    // 145 km/h, 9.6 m turning circle.
+    // 145 km/h, 9.6 m turning circle. Tracks 1275/1215 (carfolio, 1974 estate; period
+    // sheets give 1230-1275 / 1200-1215, never the 1300/1280 this had).
     id: 'rs_leone',
     label: 'Subaru Leone 4WD',
     body: 'leone.glb',
     bodyClass: 'car',
-    factory: { length: 3.995, width: 1.5, height: 1.46, clearance: 0.21, wheelbase: 2.455, frontTrack: 1.3, rearTrack: 1.28, wheelRadius: 0.29, tyreWidth: 0.155, frontOverhang: 0.75 },
+    factory: { length: 3.995, width: 1.5, height: 1.46, clearance: 0.21, wheelbase: 2.455, frontTrack: 1.275, rearTrack: 1.215, wheelRadius: 0.29, tyreWidth: 0.155, frontOverhang: 0.75 },
     mass: 1000,
     frontWeightShare: 0.6,
     rearDriveBias: 0.5,

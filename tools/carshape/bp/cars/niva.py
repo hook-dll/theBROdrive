@@ -96,6 +96,7 @@ CAR = {
         'mirror': {'y': -0.44, 'z': 1.13, 'reach': 0.98, 'w': 0.14, 'h': 0.09},
         'handles': {'at': [[0.33, 1.02]], 'w': 0.14},
         'wipers': {'arms': [[-0.55, -0.05, -0.45, 1.06], [0.0, 0.48, -0.45, 1.06]]},
-        'wheel': {'style': 'steel', 'windows': 10, 'rimFactor': 0.62},
+        # 1983 photos: six openings round a chrome dome cap.
+        'wheel': {'style': 'steel', 'windows': 6, 'rimFactor': 0.62, 'cap': True},
     },
 }

@@ -1,5 +1,5 @@
 # Subaru Leone 1600 4WD estate (1975-79). Factory: 3995 x 1500 x 1460, wheelbase 2455,
-# tracks 1300/1280, 155 SR 13, clearance 210. The side of the first Leone 4WD estate at
+# tracks 1275/1215 (1974 estate), 155 SR 13, clearance 210. The side of the first Leone 4WD estate at
 # getoutlines.com (2.18x upscaled, 351 px/m by the wheelbase; outline read off by hand
 # over its halftone ground). The first four-wheel-drive estate: a low bonnet with round
 # lamps either side of a narrow grille, a long flat roof, an upright tailgate, small
@@ -8,7 +8,7 @@ CAR = {
     'id': 'leone',
     'label': 'Subaru Leone 4WD',
     'factory': {'length': 3.995, 'width': 1.5, 'height': 1.46, 'clearance': 0.21, 'wheelbase': 2.455,
-                'frontTrack': 1.3, 'rearTrack': 1.28, 'wheelRadius': 0.29, 'tyreWidth': 0.155, 'frontOverhang': 0.75},
+                'frontTrack': 1.275, 'rearTrack': 1.215, 'wheelRadius': 0.29, 'tyreWidth': 0.155, 'frontOverhang': 0.75},
     'blueprint': {
         'image': 'leone_go.png',
         'dark': 60,

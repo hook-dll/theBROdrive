@@ -329,3 +329,31 @@ small smooth surface waves were retained. `build/carshape/dims.py` reports
 `OFF []` for both (largest envelope error about 1.1%); TypeScript check passes.
 Four live metal/clay switches created zero shader programs inside render, and
 the browser reported no errors.
+
+## 2026-10-04: Saab 96 to Škoda 110 R, the rest of the alphabet
+
+Every car after the Renaults was checked against photos of its roster version,
+rebuilt, checked in the lab (metal and clay) and committed (d51c19e, 9586af2,
+00856bc, 2e6109a). The reference folders were wrong again for: Niva (2010s Lada 4x4),
+VAZ-2101 (21011 front mixed in), VAZ-2108 (a chopped convertible), Saab 96 (rally
+car), Trabant (Kübelwagen), UAZ-469 (hardtops for the canvas 469B), T2 (late-bay
+T2b for a 1971 T2a), Volvo 240 (245 wagon for the 244 saloon), Wartburg (none).
+
+Generic findings:
+- **Side-view `bars` are never built** (assemble.py skips views other than front
+  and rear). The slats on ZAZ-968M, Škoda 110 R, T2 and Leone sides are decals now.
+- **Vertical bars on a raked face stand off as a tab** (box set at the rearmost
+  sample): Käfer's lid louvres are decals.
+- **A pane's end-view fit can pull a header or foot under the roof's edge**
+  (Alpine screen, Volvo and Wartburg back lights): measure the slope by rays and
+  author the pane in plan (`view: 'top'`, outline `[y, half-width]`, `fit: False`).
+- **Bumper at +-L/2 when the factory length runs to a spare**: SJ410 and UAZ rear
+  bars stood 26-31 cm off; `standMax` keeps them on the body, the spare's face
+  carries the length (SJ410's spare on a carrier box at the photos' height).
+- **`overriderMaterial`**: new bumper key, rubber overriders on chrome bars
+  (Trabant, Wartburg, VAZ-2101, Škoda). `standOff` was a dead key and is gone.
+
+Open: Leone's roster tracks (1300/1280) look 30-60 mm wide against period sheets;
+Golf roster comment says 1974 while the body is the 1978-83 car; the ZAZ-968M and
+Škoda bars stand 8-13 cm off their drawn ends (short drawn overhangs), reading as
+bracketed bars; Niva's wheel has slots where the 1983 car has round holes.
