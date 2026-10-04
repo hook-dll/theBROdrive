@@ -357,3 +357,22 @@ Open: Leone's roster tracks (1300/1280) look 30-60 mm wide against period sheets
 Golf roster comment says 1974 while the body is the 1978-83 car; the ZAZ-968M and
 Škoda bars stand 8-13 cm off their drawn ends (short drawn overhangs), reading as
 bracketed bars; Niva's wheel has slots where the 1983 car has round holes.
+
+## 2026-10-04: the user's in-game screenshots (2108, 240, 2002, Escort, Niva, ZAZ, R5, 110 R)
+
+- **Bumper ends as stepped blocks** (Volvo 240's rear corner): assemble.py sorted the
+  bar's path by x, regrouping points that share the clipped side x; the path now only
+  reverses. Every body rebuilt with it and checked from the rear quarter.
+- **New key `rubberTop`**: the rubber strip along the bar's top edge (BMW 2002: the
+  chrome top bevel mirrored the sky as a blue band).
+- Decals that wrap a corner as two patches (2108's amber) stand off as a flap: one
+  end-view patch with a facing limit instead.
+- A rear pane with a negative `facingMin` rides the tail's crest and its edge catches
+  the sky as a box's face (Niva): keep it positive, outline from the drawing.
+- A concave glasshouse side came from `shelfRise` spreading the inset down the door
+  (Volvo 240); `roofEdge` 0.035 for a tight drip rail.
+- Rear-engined underbody pan hangs out behind a tucked tail (ZAZ-968M).
+- Mirrors whose sail lands on a quarterlight hang in the air (110 R): door corner at
+  the belt.
+- ZAZ-968M is a two-door (the drawing is a four-door); 2108 has a black lip above its
+  back light; Niva 1983 bumpers black.

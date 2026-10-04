@@ -1099,9 +1099,13 @@ for end, b in P.get('bumpers', {}).items():
         prof = [(-dpt / 2, -h / 2), (dpt / 2 - r_, -h / 2), (dpt / 2, -h / 2 + r_), (dpt / 2, h / 2 - r_),
                 (dpt / 2 - r_, h / 2), (-dpt / 2, h / 2)]
     sgn = 1 if end == 'front' else -1
-    # The path runs round the end; the profile's +u must face out of the car.
     pts = [Vector(p) for p in path]
-    pts.sort(key=lambda p: p.x * sgn)
+    # The path already runs from one wrap end round the end of the car to the other; the
+    # profile's +u must face out of the car, so the path must start at the end whose
+    # x*sgn is smaller. (Sorting by x regrouped a long straight run along the side, which
+    # all share one x: the bar then jumped between them and its end came out in steps.)
+    if pts[0].x * sgn > pts[-1].x * sgn:
+        pts = pts[::-1]
     # The bar's ends are rounded off: extra rings at each end shrinking to a cap, not a
     # sawn-off square section.
     def tip(p0, p1, k):
@@ -1127,11 +1131,14 @@ for end, b in P.get('bumpers', {}).items():
     o = new_object('bumper_' + end, bm_, [b.get('material', 'chrome')])
     trim_parts.append(o)
     if b.get('rubber'):
-        # A rubber strip along the bar's face.
+        # A rubber strip along the bar's face: down its middle, or (rubberTop) along its
+        # top edge, where the chromium bevel would otherwise mirror the sky.
         rh = b['rubber']
+        v0 = h / 2 - rh if b.get('rubberTop') else -rh / 2
+        uo = 0.004 if b.get('rubberTop') else 0.008
         bm_ = bmesh.new()
-        sweep(bm_, [tuple(p) for p in pts], [(dpt / 2 - 0.004, -rh / 2), (dpt / 2 + 0.008, -rh / 2),
-                                            (dpt / 2 + 0.008, rh / 2), (dpt / 2 - 0.004, rh / 2)], 0)
+        sweep(bm_, [tuple(p) for p in pts], [(dpt / 2 - 0.004, v0), (dpt / 2 + uo, v0),
+                                             (dpt / 2 + uo, v0 + rh), (dpt / 2 - 0.004, v0 + rh)], 0)
         trim_parts.append(new_object('bumper_rubber_' + end, bm_, ['rubber']))
     for ov in b.get('overriders', []):
         bm_ = bmesh.new()

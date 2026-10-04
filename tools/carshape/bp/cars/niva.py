@@ -31,8 +31,14 @@ CAR = {
                                          [1.078, 1.448], [0.56, 1.46]], 'facingMin': 0.3},
             {'view': 'front', 'outline': [[0.0, 1.53], [0.58, 1.52], [0.625, 1.49], [0.685, 1.09], [0.665, 1.075], [0.0, 1.075]],
              'depthRange': [-0.75, -0.1], 'facingMin': 0.25},
-            {'view': 'rear', 'outline': [[0.0, 1.44], [0.50, 1.44], [0.55, 1.40], [0.55, 1.05], [0.52, 1.01], [0.0, 1.01]],
-             'depthRange': [1.5, 2.0], 'facingMin': -0.3},
+            # The drawing's rear view puts the tailgate glass at 1.07..1.51 m (its
+            # rubber 1.05..1.53) and 1.10 m wide, the header a hand's width under the
+            # roof; the photos agree. Authored at 1.01..1.44 with facingMin -0.3 it was
+            # a squat pane low on the tailgate and the only pane in the fleet whose
+            # face collection ran round the tail's shoulder (a negative facing limit),
+            # so the glass doubled over the panel's turn and read as a raised slab.
+            {'view': 'rear', 'outline': [[0.0, 1.50], [0.49, 1.495], [0.54, 1.46], [0.54, 1.10], [0.51, 1.07], [0.0, 1.07]],
+             'depthRange': [1.4, 2.0], 'facingMin': 0.2},
         ],
         'decals': [
             {'view': 'front', 'rect': [[0.0, 0.632], [1.43, 0.265]], 'radius': 0.01, 'mirror': False,
@@ -89,9 +95,10 @@ CAR = {
              'width': 0.014, 'material': 'rubber', 'height': 0.003},
         ],
         'bumpers': {
-            # slim chrome blades with a rounded face (a 12 cm flat-topped slab read as a step)
-            'front': {'z': [0.39, 0.48], 'depth': 0.05, 'wrap': 0.22, 'profile': 'round', 'material': 'chrome'},
-            'rear': {'z': [0.445, 0.535], 'depth': 0.05, 'wrap': 0.22, 'profile': 'round', 'material': 'chrome'},
+            # The 1983 car of the photo set carries black bumpers (front/rear/siderear
+            # photos): bright chrome blades were the early 2121's.
+            'front': {'z': [0.39, 0.48], 'depth': 0.05, 'wrap': 0.22, 'profile': 'round', 'material': 'trim'},
+            'rear': {'z': [0.445, 0.535], 'depth': 0.05, 'wrap': 0.22, 'profile': 'round', 'material': 'trim'},
         },
         'mirror': {'y': -0.44, 'z': 1.13, 'reach': 0.98, 'w': 0.14, 'h': 0.09},
         'handles': {'at': [[0.33, 1.02]], 'w': 0.14},

@@ -14,7 +14,7 @@ CAR = {
                              [-1.54, 0.915], [-1.02, 0.965], [-0.556, 1.38], [-0.34, 1.42], [0.30, 1.41], [0.80, 1.35],
                              [1.226, 0.92], [1.73, 0.86], [2.0, 0.84], [2.03, 0.80], [2.03, 0.40], [1.96, 0.25]]},
         'top': {'box': [0, 860, 1977, 1554], 'nose': 'left',
-                'outline': [[-2.12, 0.0], [-2.12, 0.66], [-2.04, 0.76], [-1.8, 0.795], [1.8, 0.795], [1.98, 0.77],
+                'outline': [[-2.12, 0.0], [-2.12, 0.72], [-2.04, 0.782], [-1.8, 0.795], [1.8, 0.795], [1.98, 0.77],
                             [2.03, 0.70], [2.03, 0.0]]},
         'front': {'box': [0, 0, 960, 800], 'ppm': 562, 'zRef': [[33, 1.41], [552, 0.46]],
                   'outline': [[0.0, 1.41], [0.45, 1.40], [0.55, 1.37], [0.62, 1.05], [0.70, 0.90], [0.78, 0.78],
@@ -28,7 +28,7 @@ CAR = {
         'cabin': [-1.02, 1.226],
         'belt': [[-1.02, 0.95], [-0.8, 0.89], [0.85, 0.89], [1.226, 0.91]],
         'glassPlan': [[-1.02, 0.64], [-0.6, 0.70], [0.8, 0.70], [1.226, 0.62]],
-        'crown': [[-2.2, 0.02], [2.2, 0.02]],
+        'crown': [[-2.2, 0.028], [2.2, 0.028]],
         'roofCrown': 0.03,
         'edge': 0.012,
         'arch': {'radius': 0.33, 'lift': 0.04},
@@ -86,8 +86,18 @@ CAR = {
              'height': 0.006, 'depthRange': [1.8, 2.2]},
         ],
         'bars': [
-            {'view': 'front', 'span': [-0.66, 0.66], 'b': [0.52, 0.70], 'count': 9, 'width': 0.006,
+            # The grille's horizontal slats run between the kidneys and the headlamps
+            # only: drawn right across (span 0.66) they lay over the round lenses.
+            {'view': 'front', 'span': [0.105, 0.46], 'b': [0.52, 0.70], 'count': 9, 'width': 0.006,
              'material': 'chrome', 'height': 0.008, 'depthRange': [-2.3, -1.9]},
+            {'view': 'front', 'span': [-0.46, -0.105], 'b': [0.52, 0.70], 'count': 9, 'width': 0.006,
+             'material': 'chrome', 'height': 0.008, 'depthRange': [-2.3, -1.9]},
+            # The kidney grilles are not empty: four vertical chrome slats each, proud of
+            # the black behind them.
+            {'view': 'front', 'span': [0.030, 0.076], 'b': [0.515, 0.725], 'count': 4, 'width': 0.005, 'dir': 'v',
+             'material': 'chrome', 'height': 0.026, 'depthRange': [-2.3, -1.9]},
+            {'view': 'front', 'span': [-0.076, -0.030], 'b': [0.515, 0.725], 'count': 4, 'width': 0.005, 'dir': 'v',
+             'material': 'chrome', 'height': 0.026, 'depthRange': [-2.3, -1.9]},
         ],
         'lines': [
             {'view': 'side', 'points': [[-0.89, 0.93], [-0.89, 0.29], [0.20, 0.29], [0.20, 0.89]], 'width': 0.005},
@@ -100,10 +110,14 @@ CAR = {
             {'view': 'side', 'points': [[-0.87, 0.89], [0.89, 0.89]], 'width': 0.01, 'material': 'chrome', 'height': 0.003},
         ],
         'bumpers': {
-            'front': {'z': [0.39, 0.45], 'depth': 0.05, 'wrap': 0.28, 'profile': 'blade', 'rubber': 0.02,
-                      'overriders': [[0.45, 0.05, 0.33, 0.50]]},
-            'rear': {'z': [0.39, 0.46], 'depth': 0.05, 'wrap': 0.28, 'profile': 'blade', 'rubber': 0.02,
-                     'overriders': [[0.535, 0.05, 0.35, 0.48]]},
+            # The 2002's blade: chrome with the black rubber strip along its top edge
+            # (photographs), not down the middle - the chrome top bevel there mirrored
+            # the sky and read as a blue band. The overriders sit on the bar's face
+            # within its height, not hung through it below.
+            'front': {'z': [0.39, 0.45], 'depth': 0.05, 'wrap': 0.28, 'profile': 'blade', 'rubber': 0.02, 'rubberTop': True,
+                      'overriders': [[0.45, 0.05, 0.395, 0.447]]},
+            'rear': {'z': [0.39, 0.46], 'depth': 0.05, 'wrap': 0.28, 'profile': 'blade', 'rubber': 0.02, 'rubberTop': True,
+                     'overriders': [[0.535, 0.05, 0.395, 0.457]]},
         },
         'mirror': {'y': -0.80, 'z': 0.96, 'reach': 0.86, 'w': 0.10, 'shape': 'round', 'material': 'chrome'},
         'handles': {'at': [[0.05, 0.84]], 'w': 0.13},

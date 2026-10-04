@@ -27,8 +27,12 @@ CAR = {
     'parts': {
         'underbody': {'engine': 'rear'},
         'glass': [
-            {'view': 'side', 'outline': [[-0.60, 1.02], [-0.53, 0.915], [-0.508, 0.89], [-0.454, 0.89], [-0.262, 1.267], [-0.327, 1.278],
-                                         [-0.362, 1.267]], 'facingMin': 0.3},
+            # Quarter light: its rear edge is the door glass's front edge (one straight
+            # divider bar from the header to the belt). Drawn with its own outline the
+            # two panes left a tapering wedge of paint between them and the vent pane's
+            # seal ended in a spike halfway up the glass.
+            {'view': 'side', 'outline': [[-0.60, 1.02], [-0.53, 0.915], [-0.508, 0.89], [-0.423, 0.89], [-0.22, 1.282],
+                                         [-0.327, 1.278], [-0.362, 1.267]], 'facingMin': 0.3},
             {'view': 'side', 'outline': [[-0.423, 0.89], [0.256, 0.89], [0.352, 1.248], [0.264, 1.263], [0.049, 1.278], [-0.22, 1.282]],
              'facingMin': 0.3},
             {'view': 'side', 'outline': [[0.298, 0.897], [0.871, 0.894], [0.921, 0.916], [0.967, 0.962], [0.993, 1.003], [0.993, 1.033],
@@ -111,7 +115,10 @@ CAR = {
             'rear': {'z': [0.42, 0.48], 'depth': 0.05, 'wrap': 0.25, 'profile': 'blade',
                      'overriders': [[0.40, 0.05, 0.34, 0.52]], 'overriderMaterial': 'rubber'},
         },
-        'mirror': {'y': -0.68, 'z': 0.96, 'reach': 0.86, 'w': 0.10, 'h': 0.07, 'material': 'chrome'},
+        # The car's mirror is chromium, on the door's front corner at the belt (front
+        # photo). At z 0.96 it stood on the quarter light's glass, where no skin is,
+        # and the head hung in the air as a white box.
+        'mirror': {'y': -0.63, 'z': 0.905, 'reach': 0.86, 'w': 0.10, 'h': 0.07, 'material': 'chrome'},
         'handles': {'at': [[0.15, 0.84]], 'w': 0.12},
         'wipers': {'arms': [[-0.55, -0.05, -0.95, 0.93], [0.05, 0.5, -0.95, 0.93]]},
         'wheel': {'style': 'hubcap', 'rimFactor': 0.66, 'cap': 0.75},

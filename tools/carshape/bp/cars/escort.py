@@ -152,7 +152,12 @@ CAR = {
         ],
         'lines': [
             {'view': 'side', 'points': [[-0.73, 0.90], [-0.73, 0.28], [0.47, 0.28], [0.47, 0.91]], 'width': 0.005},
-            {'view': 'top', 'points': [[-1.88, 0.63], [-0.80, 0.64]], 'width': 0.005},
+            # The bonnet's shut line runs straight along the wing's top, 3 cm in from its
+            # outer edge (photographs). At x 0.63-0.64 it lay 9 cm inboard over the wing's
+            # whole width - a bright ledge that read as a swollen wing top - and at the
+            # nose, where the plan narrows to 0.63, it slipped off the wing's edge and
+            # ran down the flank.
+            {'view': 'top', 'points': [[-1.87, 0.655], [-1.72, 0.680], [-1.45, 0.698], [-0.80, 0.702]], 'width': 0.005},
             # The boot lid's shut line: across the tail panel, then turned up along the
             # lid's side. Drawn as a square elbow at the corner, the ray onto the rounded
             # tail corner bent the line into a kink there; the turn is on a curve now.
@@ -177,7 +182,9 @@ CAR = {
             'front': {'z': [0.42, 0.51], 'depth': 0.05, 'wrap': 0.20, 'profile': 'blade', 'material': 'chrome'},
             'rear': {'z': [0.40, 0.49], 'depth': 0.05, 'wrap': 0.20, 'profile': 'blade', 'material': 'chrome'},
         },
-        'mirror': {'y': -0.66, 'z': 0.96, 'reach': 0.90, 'w': 0.13, 'h': 0.075},
+        # On the door's front corner (photographs): without the mount it stood on the
+        # wing, its head on a long thin stalk out in the air.
+        'mirror': {'y': -0.62, 'z': 0.95, 'reach': 0.86, 'w': 0.13, 'h': 0.075, 'mount': 'door'},
         # The bumpers' black plastic end caps (photos: the yellow car's front, the maroon
         # car's rear), at the ends of hull.py's bumper paths (front path ends 0.772,
         # -1.805 post-shift; rear 0.772, 1.786 - written here 11 cm forward of that, as
@@ -185,6 +192,10 @@ CAR = {
         'boxes': [
             {'c': [0.760, -1.705, 0.465], 'size': [0.072, 0.085, 0.098], 'material': 'trim'},
             {'c': [0.760, 1.910, 0.445], 'size': [0.072, 0.080, 0.098], 'material': 'trim'},
+            # The 1600 Sport's boot-lid spoiler (photographs): a black blade along the
+            # lid's rear edge, which is what finishes the tail - without it the boot's
+            # trailing edge read as sitting low.
+            {'c': [0.0, 1.900, 0.972], 'size': [0.99, 0.085, 0.045], 'material': 'trim', 'mirror': False},
         ],
         'handles': {'at': [[0.33, 0.855]], 'w': 0.13},
         'wipers': {'arms': [[-0.55, -0.05, -0.80, 0.94], [0.05, 0.5, -0.80, 0.94]]},

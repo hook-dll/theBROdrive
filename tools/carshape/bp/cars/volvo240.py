@@ -26,9 +26,23 @@ CAR = {
         'cabin': [-1.05, 1.42],
         'belt': [[-1.05, 0.97], [-0.74, 0.965], [1.09, 0.96], [1.42, 0.975]],
         'glassPlan': [[-1.05, 0.66], [-0.5, 0.72], [0.9, 0.72], [1.42, 0.64]],
-        'crown': [[-2.5, 0.02], [2.5, 0.02]],
-        'roofCrown': 0.03,
+        'crown': [[-2.5, 0.012], [2.5, 0.012]],
+        'roofCrown': 0.016,
+        # The 244's flanks are flat slabs and the shoulder is a crease, not a sweep: the
+        # default 2.2 cm edge and 6 cm along-car blur rolled the belt into a barrel, and
+        # the 18 cm `shelfRise` fade spread the glasshouse's 13 cm inset over the whole
+        # upper door, so the flanks read hollow (concave) round the cabin. Tightened as
+        # on the Renault 4: crisp shoulders, flat panels, a straight glasshouse.
         'edge': 0.010,
+        'edgeMin': 0.010,
+        'edgeY': 0.045,
+        'edgeYMin': 0.045,
+        'shelf': 0.03,
+        'shelfRise': 0.06,
+        'glassFillet': 0.025,
+        # The roof's edge is a drip rail, not a rolled shoulder: hold the section's
+        # width closer under the roof so the corner between roof and side is tight.
+        'roofEdge': 0.035,
         'arch': {'radius': 0.36, 'lift': 0.04},
     },
     'parts': {
@@ -39,8 +53,10 @@ CAR = {
              'depthRange': [-1.2, -0.4], 'facingMin': 0.2},
             # The back light in plan on the measured slope (y 1.00-1.39, z 1.32-1.00):
             # fitted in the rear view its header was pulled 4 cm down, leaving a 10 cm
-            # painted band where the photos show about 6.
-            {'view': 'top', 'outline': [[1.00, 0.0], [1.00, 0.54], [1.04, 0.58], [1.36, 0.64], [1.39, 0.60], [1.39, 0.0]],
+            # painted band where the photos show about 6. Its plan was 0.54-0.64 wide
+            # against a 0.72 glasshouse, leaving a 8 cm C-pillar at its foot where the
+            # photographs' is 17: narrowed to 0.46-0.545.
+            {'view': 'top', 'outline': [[1.00, 0.0], [1.00, 0.46], [1.04, 0.50], [1.36, 0.545], [1.39, 0.52], [1.39, 0.0]],
              'facingMin': 0.25, 'fit': False},
         ],
         'regions': [
@@ -64,18 +80,20 @@ CAR = {
              'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-2.5, -2.1], 'facingMin': -0.1},
             {'view': 'front', 'rect': [[0.0, 0.42], [0.52, 0.11]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [-2.7, -2.2]},
-            # The cluster is a tall column on each corner: red tail/brake along the whole
-            # of it, the reversing lamp set in the upper third, the amber indicator at
-            # the foot (1986/88 photographs). The later patches sit a little prouder so
-            # they read as separate lenses, not coplanar with the red.
-            {'view': 'rear', 'node': 'taillights', 'rect': [[0.66, 0.73], [0.26, 0.31]], 'radius': 0.008, 'material': 'TailLights',
-             'height': 0.008, 'depthRange': [2.0, 2.4], 'facingMin': 0.0},
-            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.66, 0.80], [0.26, 0.06]], 'radius': 0.008,
-             'material': 'ReverseLights', 'height': 0.011, 'depthRange': [2.0, 2.4], 'facingMin': 0.0},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.66, 0.62], [0.26, 0.08]], 'radius': 0.008,
-             'material': 'IndicatorLights', 'height': 0.011, 'depthRange': [2.0, 2.4], 'facingMin': 0.0},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.66, 0.62], [0.26, 0.08]], 'radius': 0.008,
-             'material': 'IndicatorLights', 'height': 0.011, 'depthRange': [2.0, 2.4], 'facingMin': 0.0},
+            # The cluster is a column on each corner: red tail/brake along the whole of
+            # it, the reversing lamp a small square in its upper third, the amber
+            # indicator a band at the foot (1986 photographs). Its top stays below the
+            # boot's rear edge: drawn to 0.885 it ran over the deck's crease and its
+            # rounded top stood off the body like a sticker. The lenses sit nearly flush
+            # (the later ones a hair prouder so they read as separate glasses).
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.66, 0.695], [0.26, 0.27]], 'radius': 0.008, 'material': 'TailLights',
+             'height': 0.005, 'depthRange': [2.0, 2.4], 'facingMin': 0.05},
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.61, 0.775], [0.10, 0.05]], 'radius': 0.008,
+             'material': 'ReverseLights', 'height': 0.007, 'depthRange': [2.0, 2.4], 'facingMin': 0.05},
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.66, 0.605], [0.26, 0.07]], 'radius': 0.008,
+             'material': 'IndicatorLights', 'height': 0.007, 'depthRange': [2.0, 2.4], 'facingMin': 0.05},
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.66, 0.605], [0.26, 0.07]], 'radius': 0.008,
+             'material': 'IndicatorLights', 'height': 0.007, 'depthRange': [2.0, 2.4], 'facingMin': 0.05},
             {'view': 'rear', 'rect': [[0.0, 0.61], [0.52, 0.11]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [2.0, 2.4], 'facingMin': 0.1},
         ],

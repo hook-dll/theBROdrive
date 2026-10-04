@@ -111,15 +111,13 @@ CAR = {
             # there (the old pair sat down on the bumper at z 0.345, where the car has none).
             {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.325, 0.70], [0.085, 0.06]], 'radius': 0.006,
              'material': 'ReverseLights', 'height': 0.008, 'depthRange': [1.5, 1.9]},
-            # Narrow C-pillar vent, dark perforated centre and thin bright rim.
-            # Side-facing projection excludes the roof/header: allowing horizontal
-            # faces painted a silver band across the rear glass's top.
+            # The Alpine's C-pillar vent is ONE clean bright fine-mesh strip flush on
+            # the pillar (rear photo): a dark trim patch with an alu ring over it tore
+            # into a saw-tooth bright edge and left a black wedge on the pillar.
             {'view': 'side', 'outline': [[1.125, 1.199], [1.185, 1.225], [1.395, 0.920], [1.335, 0.894]],
-             'material': 'trim', 'height': 0.004, 'facingMin': 0.35},
-            {'view': 'side', 'outline': [[1.125, 1.199], [1.185, 1.225], [1.395, 0.920], [1.335, 0.894]], 'ring': 0.006,
-             'material': 'alu', 'height': 0.007, 'facingMin': 0.35},
+             'material': 'alu', 'height': 0.004, 'facingMin': 0.35},
             {'view': 'rear', 'outline': [[0.595, 1.19], [0.675, 1.19], [0.675, 0.90], [0.595, 0.90]],
-             'material': 'trim', 'height': 0.004, 'facingMin': 0.55, 'depthRange': [1.35, 1.9]},
+             'material': 'alu', 'height': 0.004, 'facingMin': 0.55, 'depthRange': [1.35, 1.9]},
             {'view': 'rear', 'rect': [[0.0, 0.655], [0.56, 0.13]], 'radius': 0.01, 'mirror': False, 'material': 'plate',
              'height': 0.005, 'depthRange': [1.5, 1.9]},
         ],

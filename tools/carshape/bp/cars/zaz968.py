@@ -21,13 +21,37 @@ CAR = {
         'cabin': [-0.83, 1.06],
         'belt': [[-0.83, 0.89], [-0.5, 0.895], [0.85, 0.89], [1.06, 0.88]],
         'glassPlan': [[-0.83, 0.58], [-0.5, 0.64], [0.75, 0.64], [1.06, 0.58]],
-        'crown': [[-2.0, 0.025], [2.0, 0.025]],
-        'roofCrown': 0.035,
-        'edge': 0.013,
-        'arch': {'radius': 0.335, 'lift': 0.03},
+        'crown': [[-2.0, 0.015], [2.0, 0.015]],
+        'roofCrown': 0.022,
+        # Crisp folds (the R4/R5 pattern): the 2.2 cm across / 6 cm along default blur
+        # domed the flanks, rolled the shoulder into the glasshouse and rounded the
+        # deck-to-tail corner over ~0.3 m; the photos show a tight waist crease, a
+        # defined shoulder and a crisp tail corner. 1.1 cm across, 5 cm along keeps
+        # them and still leaves the drawn nose/tail their reach.
+        'edge': 0.011,
+        'edgeMin': 0.013,
+        'edgeY': 0.050,
+        'edgeYMin': 0.050,
+        'faceSpacing': 0.15, 'cornerDeg': 20,
+        # 155 R13 wheels of 0.29 m radius in an arch of the drawing's 0.32 (the photo
+        # shows a hand's width of gap round the tyre); centred on the axle, not lifted,
+        # or the arch hangs over the tyre.
+        'arch': {'radius': 0.32, 'lift': 0.005},
+        # Behind its bar the tail panel is the near-vertical face the drawing and the
+        # side photo show (the bar band is bridged out, and what was left tucked
+        # 13 cm forward: the tail curled under, the bar stood 13.6 cm off it and the
+        # exhaust pan hung out behind as a loose black fragment). Given past the drawn
+        # face by the blur's own pull-back, so the shell meets the bar at the factory
+        # end (stand 0.086 -> ~0.01).
+        'face': {'rear': [[0.26, 1.67], [0.34, 1.81], [0.42, 1.88], [0.52, 1.90]]},
     },
     'parts': {
-        'underbody': {'engine': 'rear'},
+        # The engine sits in its bay, nothing hangs below the tail: with the underbody
+        # read as rear-engined its flat pan was placed BEHIND the rear axle, where the
+        # tail curls up, and hung out past the bumper as a loose black fragment. Read
+        # as a plain (independent-rear) floor the pan tucks under the middle of the
+        # floor like every other car's silencer, and the exhaust ends in a tail pipe.
+        'underbody': {'engine': 'front', 'independentRear': True},
         'glass': [
             {'view': 'side', 'outline': [[-0.346, 1.224], [-0.39, 1.203], [-0.538, 0.998], [-0.541, 0.968], [-0.468, 0.899],
                                          [-0.346, 0.891]], 'facingMin': 0.3},
@@ -57,8 +81,11 @@ CAR = {
             {'view': 'side', 'node': 'front_blinker_right', 'circle': [[-1.523, 0.625], 0.02], 'material': 'IndicatorLights', 'height': 0.006},
             {'view': 'front', 'rect': [[0.0, 0.33], [0.44, 0.10]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [-2.0, -1.5]},
-            # The side air intakes of the 968M, black with louvres.
-            {'view': 'side', 'rect': [[1.357, 0.606], [0.47, 0.11]], 'radius': 0.02, 'material': 'grille', 'height': 0.004},
+            # The side air intakes of the 968M, black with louvres: the drawing's side
+            # view puts the recessed panel at z 0.585..0.695, and the side photo just
+            # under the belt (0.60..0.76); at 0.55..0.66 the panel's lower slats hung
+            # under the arch's lip, so it read as sitting at the wheel's top.
+            {'view': 'side', 'rect': [[1.425, 0.640], [0.47, 0.105]], 'radius': 0.02, 'material': 'grille', 'height': 0.004},
             {'view': 'rear', 'rect': [[0.0, 0.587], [0.52, 0.11]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.005, 'depthRange': [1.6, 2.1]},
             # Rear cluster: four cells in a row - amber (outermost), red, the reversing
@@ -80,31 +107,41 @@ CAR = {
              'material': 'chrome', 'height': 0.009, 'depthRange': [-2.0, -1.5]},
         ] + (
             # Louvres as decals: bars with view 'side' are skipped by assemble.py, so the
-            # 14 side-intake slats never appeared; the engine cover's top slots (four
-            # groups - rear photo, the drawing's top view) have no bar view at all.
-            [{'view': 'side', 'rect': [[1.16 + k * 0.0315, 0.606], [0.011, 0.086]], 'radius': 0.004,
+            # 14 side-intake slats never appeared; the engine lid's slots are ONE group
+            # of seven a side (centred 0.45 m off the centre line, under the back
+            # light's foot) as the rear photo shows, where two groups a side read as
+            # four separate patches of vents.
+            [{'view': 'side', 'rect': [[1.22 + k * 0.0315, 0.640], [0.011, 0.088]], 'radius': 0.004,
               'material': 'paint', 'height': 0.005, 'facingMin': 0.35} for k in range(14)]
-            + [{'view': 'top', 'rect': [[1.52, x], [0.20, 0.016]], 'radius': 0.007, 'material': 'grille',
+            + [{'view': 'top', 'rect': [[1.52, 0.342 + k * 0.036], [0.20, 0.016]], 'radius': 0.007, 'material': 'grille',
                 'height': 0.004, 'depthRange': [0.55, 1.05]}
-               for x in (0.20, 0.235, 0.27, 0.305, 0.38, 0.415, 0.45, 0.485, 0.52)]
+               for k in range(7)]
         ),
         'bars': [],
         'lines': [
+            # The 968M is a two-door (factory sheet, the side photo: one handle, one
+            # door, a fixed quarter light behind it): the second door's shut line and
+            # handle came from the drawing, which is a four-door.
             {'view': 'side', 'points': [[-0.63, 0.89], [-0.63, 0.30], [0.18, 0.30], [0.18, 0.89]], 'width': 0.005},
-            {'view': 'side', 'points': [[0.18, 0.30], [0.65, 0.30], [0.88, 0.55], [0.88, 0.88]], 'width': 0.005},
             {'view': 'top', 'points': [[-1.84, 0.56], [-0.88, 0.58]], 'width': 0.005},
             {'view': 'side', 'points': [[-1.83, 0.82], [1.88, 0.80]], 'width': 0.008, 'material': 'chrome', 'height': 0.003},
-            {'view': 'side', 'points': [[-0.55, 0.97], [-0.36, 1.24], [0.62, 1.235], [0.70, 1.21], [0.87, 0.89]], 'width': 0.012,
+            {'view': 'side', 'points': [[-0.55, 0.97], [-0.36, 1.24], [0.62, 1.235], [0.70, 1.21], [0.87, 0.89]], 'width': 0.032,
              'material': 'chrome', 'height': 0.003},
             {'view': 'side', 'points': [[-0.55, 0.89], [0.86, 0.885]], 'width': 0.01, 'material': 'chrome', 'height': 0.003},
         ],
+        # The 968M's bars are chromium-plated blades (rear and side photos), not black:
+        # as flat black slabs they read as a floating bracket under the tail.
         'bumpers': {
-            'front': {'z': [0.41, 0.47], 'depth': 0.05, 'wrap': 0.25, 'profile': 'blade', 'material': 'trim'},
-            'rear': {'z': [0.40, 0.46], 'depth': 0.05, 'wrap': 0.25, 'profile': 'blade', 'material': 'trim'},
+            'front': {'z': [0.41, 0.47], 'depth': 0.05, 'wrap': 0.25, 'profile': 'blade', 'material': 'chrome'},
+            'rear': {'z': [0.40, 0.46], 'depth': 0.05, 'wrap': 0.25, 'profile': 'blade', 'material': 'chrome'},
         },
+        # The car's windows sit in black rubber (windscreen and back light) while the
+        # door and quarter glass carry a chrome frame: the frame line is drawn rather
+        # than taken for the seal (the seal was chrome on every pane).
+        'glassSeal': {'material': 'rubber', 'width': 0.012},
         # A black mirror on the door's front corner (front photo), not a bright one.
         'mirror': {'y': -0.70, 'z': 0.94, 'reach': 0.82, 'w': 0.13, 'h': 0.08, 'material': 'trim', 'sides': [1]},
-        'handles': {'at': [[0.0, 0.84], [0.70, 0.84]], 'w': 0.12},
+        'handles': {'at': [[0.0, 0.84]], 'w': 0.12},
         'wipers': {'arms': [[-0.5, -0.05, -0.85, 0.89], [0.05, 0.5, -0.85, 0.89]]},
         'wheel': {'style': 'hubcap', 'rimFactor': 0.66, 'cap': 0.55},
     },

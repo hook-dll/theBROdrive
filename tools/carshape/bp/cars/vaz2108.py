@@ -20,9 +20,15 @@ CAR = {
         'belt': [[-0.77, 0.87], [-0.5, 0.90], [0.6, 0.905], [1.5, 0.93], [1.85, 0.88], [2.05, 0.87]],
         'glassPlan': [[-0.77, 0.73], [-0.4, 0.74], [0.8, 0.73], [1.5, 0.68], [2.0, 0.62]],
         'sectionBridge': {'front': [[0.82, 1.05]], 'rear': [[0.82, 1.05]]},
-        'crown': [[-2.1, 0.02], [2.1, 0.02]],
-        'roofCrown': 0.03,
-        'edge': 0.012,
+        'crown': [[-2.1, 0.012], [2.1, 0.012]],
+        'roofCrown': 0.02,
+        # A pressed, flat-panelled hatch: the default 2.2 cm edge and 6 cm along-car blur
+        # rounded the belt, the hatch's frame and the tail's corners off. Tightened as on
+        # the Renault 4 (the top view's plan is already flat; checked with probe.py plan).
+        'edge': 0.013,
+        'edgeMin': 0.013,
+        'edgeY': 0.05,
+        'edgeYMin': 0.05,
         'arch': {'radius': 0.315, 'lift': 0.0},
     },
     'parts': {
@@ -32,7 +38,12 @@ CAR = {
                                          [1.084, 1.22], [0.825, 1.232]], 'facingMin': 0.3},
             {'view': 'front', 'outline': [[0.0, 1.235], [0.50, 1.233], [0.535, 1.21], [0.68, 0.90], [0.66, 0.887], [0.0, 0.887]],
              'depthRange': [-0.9, -0.2], 'facingMin': -0.3},
-            {'view': 'rear', 'outline': [[0.0, 1.24], [0.43, 1.238], [0.46, 1.22], [0.58, 0.93], [0.565, 0.912], [0.0, 0.912]],
+            # The tailgate glass is a rounded rectangle, its sides nearly parallel (the
+            # drawing and the photographs): at 0.46/0.58 it tapered hard and its foot
+            # ran to within 4 cm of the flank, leaving no C-pillar where the real car
+            # has 10-12 cm.
+            {'view': 'rear', 'outline': [[0.0, 1.243], [0.40, 1.240], [0.46, 1.225], [0.51, 1.16], [0.545, 0.99],
+                                         [0.535, 0.930], [0.49, 0.914], [0.0, 0.912]],
              'depthRange': [1.0, 2.1], 'facingMin': -0.3},
         ],
         # The bumpers are moulded plastic in the body's own shape: black regions of it.
@@ -59,21 +70,27 @@ CAR = {
              'height': 0.005, 'depthRange': [-2.1, -1.6]},
             {'view': 'front', 'rect': [[0.18, 0.365], [0.32, 0.05]], 'radius': 0.01, 'material': 'grille',
              'height': 0.003, 'depthRange': [-2.1, -1.6]},
-            # Tail lamps: indicator outboard, red, reversing lamp inboard; they wrap the corner.
-            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.71, 0.617], [0.12, 0.13]], 'radius': 0.004,
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.6, 2.1]},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.71, 0.617], [0.12, 0.13]], 'radius': 0.004,
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.6, 2.1]},
+            # Tail lamps: indicator outboard, red, reversing lamp inboard. The amber
+            # lens wraps the corner onto the quarter as ONE piece (the photographs): drawn
+            # as a rear patch reaching past the corner with the end view's facing limit
+            # (-0.1, like the front blinkers) it is cut cleanly where the quarter turns
+            # away. The former separate side patch stood off the body as a flap beside
+            # the lens, and the red side patch under it was never visible.
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.71, 0.617], [0.16, 0.13]], 'radius': 0.004,
+             'material': 'IndicatorLights', 'height': 0.006, 'facingMin': 0.42, 'depthRange': [1.6, 2.1]},
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.71, 0.617], [0.16, 0.13]], 'radius': 0.004,
+             'material': 'IndicatorLights', 'height': 0.006, 'facingMin': 0.42, 'depthRange': [1.6, 2.1]},
             {'view': 'rear', 'node': 'taillights', 'rect': [[0.55, 0.617], [0.2, 0.13]], 'radius': 0.004,
              'material': 'TailLights', 'height': 0.008, 'depthRange': [1.6, 2.1]},
             {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.415, 0.617], [0.07, 0.13]], 'radius': 0.004,
              'material': 'ReverseLights', 'height': 0.008, 'depthRange': [1.6, 2.1]},
-            {'view': 'side', 'node': 'taillights', 'rect': [[1.90, 0.627], [0.03, 0.135]], 'material': 'TailLights', 'height': 0.004},
-            # the indicator lens wraps the corner onto the quarter panel (1988 photographs).
-            {'view': 'side', 'node': 'rear_blinker_left', 'rect': [[1.90, 0.627], [0.035, 0.135]], 'material': 'IndicatorLights', 'height': 0.004},
-            {'view': 'side', 'node': 'rear_blinker_right', 'rect': [[1.90, 0.627], [0.035, 0.135]], 'material': 'IndicatorLights', 'height': 0.004},
             {'view': 'rear', 'rect': [[0.0, 0.43], [0.52, 0.112]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.005, 'depthRange': [1.6, 2.1]},
+            # The tailgate's black spoiler lip above the glass (the drawing's line over
+            # the window and the photographs): without it the roof's rear edge ran
+            # straight onto the glass.
+            {'view': 'rear', 'rect': [[0.0, 1.266], [0.96, 0.048]], 'radius': 0.006, 'mirror': False,
+             'material': 'trim', 'height': 0.009, 'facingMin': 0.1, 'depthRange': [1.0, 2.1]},
             {'view': 'rear', 'rect': [[0.39, 0.765], [0.28, 0.04]], 'radius': 0.01, 'material': 'chrome', 'mirror': False,
              'height': 0.004, 'depthRange': [1.6, 2.1]},
         ],
@@ -83,7 +100,12 @@ CAR = {
         ],
         'lines': [
             {'view': 'side', 'points': [[-0.75, 0.86], [-0.75, 0.265], [0.505, 0.265], [0.505, 0.89]], 'width': 0.005},
-            {'view': 'rear', 'points': [[0.0, 0.70], [0.60, 0.70], [0.62, 0.86]], 'width': 0.005, 'depthRange': [1.5, 2.1]},
+            # The hatch's lower edge, just above the bumper band and under the lamps
+            # (the drawing), and its side edge at the corner, up to the screen's foot.
+            # The former single line ran across the panel at 0.70 and up at x 0.62, so
+            # its end touched the indicator lens.
+            {'view': 'rear', 'points': [[0.0, 0.545], [0.62, 0.545]], 'width': 0.005, 'depthRange': [1.5, 2.1]},
+            {'view': 'rear', 'points': [[0.735, 0.545], [0.78, 0.90]], 'width': 0.005, 'depthRange': [1.5, 2.1]},
             {'view': 'side', 'points': [[0.425, 1.224], [-0.196, 1.213], [-0.268, 1.167], [-0.519, 0.975], [-0.512, 0.903],
                                         [0.429, 0.903], [0.425, 1.224]], 'width': 0.018, 'height': 0.003},
             {'view': 'side', 'points': [[0.608, 1.232], [0.627, 1.09], [0.654, 0.907], [1.0, 0.91], [1.49, 0.935], [1.50, 0.96],
