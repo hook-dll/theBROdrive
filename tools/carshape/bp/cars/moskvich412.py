@@ -81,8 +81,12 @@ CAR = {
             {'view': 'side', 'outline': [[0.075, 0.99], [0.075, 1.375], [0.60, 1.365], [0.70, 1.33], [0.85, 0.99]], 'facingMin': 0.3},
             {'view': 'front', 'outline': [[0.0, 1.388], [0.50, 1.384], [0.555, 1.36], [0.62, 1.02], [0.60, 0.995], [0.0, 0.995]],
              'depthRange': [-1.1, -0.4]},
-            {'view': 'rear', 'outline': [[0.0, 1.29], [0.4, 1.275], [0.53, 1.24], [0.575, 1.18], [0.62, 0.975], [0.6, 0.955],
-                                         [0.0, 0.985]], 'depthRange': [0.7, 1.4]},
+            # Photos rear-straight/rear34-left: the rear glass reaches almost to the
+            # roof, at the side panes' header height, with rounded upper corners.
+            # The old 1.29 m header left an 18 cm painted band and made a squat slit.
+            {'view': 'rear', 'outline': [[0.0, 1.405], [0.40, 1.39], [0.50, 1.37], [0.55, 1.33],
+                                         [0.575, 1.26], [0.62, 1.015], [0.60, 0.995], [0.0, 1.015]],
+             'depthRange': [0.7, 1.4]},
         ],
         'decals': [
             # The 1967-76 front (photos): a wide chrome-framed panel across the front with

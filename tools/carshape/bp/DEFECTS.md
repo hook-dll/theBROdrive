@@ -261,3 +261,15 @@ hand-read outline bent at -1.17 and the blur made an S of it); the 911's front w
 above the bonnet with the headlamps in their noses and a valley between (`topCross`;
 the side outline is the wings' crest, so the bonnet had been as high as the lamps).
 The 911's reference photos were of the Safari rally car; now stock 1980-83 coupés.
+
+## 2026-10-04: Moskvich-412 rear glass missed in review
+
+The rear pane was authored with its centre header at 1.29 m under a 1.47 m roof.
+It passed assembly but looked like a squat slit with a broad painted band above it.
+The rear-straight and rear34-left photographs show the header close to the roof,
+at the side windows' height. The car file now puts it at 1.405 m, with rounded upper
+corners and the lower edge just above the deck. Assembly keeps that header
+(`top down 0 cm`, `ragged 0`); checked in the game head-on and rear three-quarter.
+Dimension checks alone did not catch this. Glazing review must compare the visible
+header, sill, corners and roof band against the photographs, not just accept the
+absence of a fitting warning.
