@@ -89,3 +89,10 @@ CAR = {
         'wheel': {'style': 'steel', 'windows': 4, 'rimFactor': 0.66, 'cap': True},
     },
 }
+
+import os as _os, sys as _sys  # noqa: E402
+_sys.path.insert(0, _os.path.dirname(__file__))
+from _frame import scale_above  # noqa: E402
+# The getoutlines side stands 1397 mm at the roof for the 601's 1437 (the factory figure
+# of the saloon); the whole drawing raised, belt and sill with it.
+scale_above(CAR, 0.0, 1.397, 1.437)

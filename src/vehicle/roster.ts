@@ -539,7 +539,7 @@ export const ROSTER: readonly RosterCar[] = [
     label: 'Saab 96',
     body: 'saab96.glb',
     bodyClass: 'car',
-    factory: { length: 4.02, width: 1.58, height: 1.47, clearance: 0.18, wheelbase: 2.498, frontTrack: 1.22, rearTrack: 1.22, wheelRadius: 0.31, tyreWidth: 0.155, frontOverhang: 0.63 },
+    factory: { length: 4.165, width: 1.58, height: 1.47, clearance: 0.18, wheelbase: 2.498, frontTrack: 1.22, rearTrack: 1.22, wheelRadius: 0.31, tyreWidth: 0.155, frontOverhang: 0.775 },
     mass: 950,
     frontWeightShare: 0.6,
     rearDriveBias: 0,

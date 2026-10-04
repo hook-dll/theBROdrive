@@ -106,13 +106,22 @@ CAR = {
              'depthRange': [1.5, 1.9], 'facingMin': 0.2},
         ],
         'bumpers': {
-            'front': {'z': [0.55, 0.65], 'depth': 0.10, 'wrap': 0.05, 'profile': 'blade', 'material': 'trim', 'standOff': 0.0},
-            'rear': {'z': [0.52, 0.60], 'depth': 0.06, 'wrap': 0.05, 'profile': 'blade', 'material': 'trim', 'standOff': 0.0},
+            'front': {'z': [0.55, 0.65], 'depth': 0.10, 'wrap': 0.05, 'profile': 'blade', 'material': 'trim'},
+            # The factory length runs to the door spare; the bar sits on the tail.
+            'rear': {'z': [0.52, 0.60], 'depth': 0.06, 'wrap': 0.05, 'profile': 'blade', 'material': 'trim', 'standMax': 0.03},
         },
-        'spares': [{'c': [0.19, 1.82, 1.0], 'n': [0, 1, 0], 'r': 0.37, 'w': 0.21}],
+        # On its door bracket, its face at the factory length (4025 to the spare).
+        'spares': [{'c': [0.19, 1.863, 1.0], 'n': [0, 1, 0], 'r': 0.37, 'w': 0.21}],
         'mirror': {'y': -0.55, 'z': 1.42, 'reach': 1.02, 'w': 0.12, 'h': 0.17},
         'handles': {'at': [[-0.05, 1.20], [0.65, 1.20]], 'w': 0.10},
         'wipers': {'arms': [[-0.55, -0.1, -0.68, 1.36], [0.05, 0.5, -0.68, 1.36]]},
         'wheel': {'style': 'steel', 'windows': 0, 'rimFactor': 0.62, 'cap': True},
     },
 }
+
+import os as _os, sys as _sys  # noqa: E402
+_sys.path.insert(0, _os.path.dirname(__file__))
+from _frame import scale_above  # noqa: E402
+# The 31514 drawing's canvas top stands 1952 mm for the 469B's 2015 (the factory figure);
+# the whole drawing raised, belt and sill with it.
+scale_above(CAR, 0.0, 1.952, 2.015)

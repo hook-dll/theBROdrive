@@ -87,12 +87,23 @@ CAR = {
             {'view': 'side', 'points': [[-1.62, 0.93], [-0.62, 1.05]], 'width': 0.005},
         ],
         'bumpers': {
-            'front': {'z': [0.50, 0.62], 'depth': 0.07, 'wrap': 0.05, 'profile': 'blade', 'material': 'trim', 'standOff': 0.0},
-            'rear': {'z': [0.48, 0.58], 'depth': 0.07, 'wrap': 0.05, 'profile': 'blade', 'material': 'trim', 'standOff': 0.0},
+            'front': {'z': [0.50, 0.62], 'depth': 0.07, 'wrap': 0.05, 'profile': 'blade', 'material': 'trim'},
+            # The factory length runs to the spare; the bar itself sits on the tail
+            # (photos), so it may not stand out to +L/2.
+            'rear': {'z': [0.48, 0.58], 'depth': 0.07, 'wrap': 0.05, 'profile': 'blade', 'material': 'trim', 'standMax': 0.03},
         },
-        'spares': [{'c': [-0.15, 1.565, 0.86], 'n': [0, 1, 0], 'r': 0.34, 'w': 0.16}],
+        # Photos: the spare hangs on the tail door, its tyre's foot just over the
+        # bumper (centre 0.92), on a ~10 cm carrier; its face is the factory 3430 end.
+        'spares': [{'c': [-0.15, 1.64, 0.92], 'n': [0, 1, 0], 'r': 0.34, 'w': 0.16}],
+        'boxes': [{'c': [-0.15, 1.525, 0.92], 'size': [0.14, 0.11, 0.14], 'mirror': False, 'material': 'trim'}],
         'mirror': {'y': -0.50, 'z': 1.25, 'reach': 0.84, 'w': 0.09, 'h': 0.12},
         'wipers': {'arms': [[-0.5, -0.05, -0.62, 1.22], [0.05, 0.5, -0.62, 1.22]]},
         'wheel': {'style': 'steel', 'windows': 0, 'rimFactor': 0.6, 'cap': True},
     },
 }
+
+import os as _os, sys as _sys  # noqa: E402
+_sys.path.insert(0, _os.path.dirname(__file__))
+from _frame import scale_above  # noqa: E402
+# The hand-read outline stands 1646 mm at the roof where the drawing dimensions 1680.
+scale_above(CAR, 0.0, 1.646, 1.68)

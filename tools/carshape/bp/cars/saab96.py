@@ -1,14 +1,18 @@
-# Saab 96 (1960-80). Factory: 4020 x 1580 x 1470, wheelbase 2498, tracks 1220, 155 SR 15,
-# clearance 180. The drawing reprinted at 3dcar.ru/blueprints/saab/96_1960 (3x upscaled).
+# Saab 96 V4 (1967-80). Factory: 4165 x 1580 x 1470 (automobile-catalog 1967, the 1966
+# carfolio sheet gives 4170), wheelbase 2498, tracks 1220, 155 SR 15, clearance 180.
+# The 3dcar.ru/blueprints/saab/96_1960 drawing (3x upscaled) is the 1960 short nose: its
+# own front overhang is 0.671 m to the bumper face (1960: 4020 - 2498 - 892 = 0.63; V4:
+# 4165 - 2498 - 892 = 0.775). saab96v4x3.png is that sheet with the front of the side and
+# top views - ahead of the front tyre, so no arch moves - stretched out to the V4's.
 CAR = {
     'id': 'saab96',
     'label': 'Saab 96',
-    'factory': {'length': 4.02, 'width': 1.58, 'height': 1.47, 'clearance': 0.18, 'wheelbase': 2.498,
-                'frontTrack': 1.22, 'rearTrack': 1.22, 'wheelRadius': 0.31, 'tyreWidth': 0.155, 'frontOverhang': 0.63},
+    'factory': {'length': 4.165, 'width': 1.58, 'height': 1.47, 'clearance': 0.18, 'wheelbase': 2.498,
+                'frontTrack': 1.22, 'rearTrack': 1.22, 'wheelRadius': 0.31, 'tyreWidth': 0.155, 'frontOverhang': 0.775},
     'blueprint': {
-        'image': 'saab96x3.png',
-        'side': {'box': [876, 171, 2580, 790], 'nose': 'left', 'ground': 793, 'wheels': [[1186.5, 650], [2200.5, 650]]},
-        'top': {'box': [903, 960, 2577, 1629], 'nose': 'left'},
+        'image': 'saab96v4x3.png',
+        'side': {'box': [950, 171, 2700, 790], 'nose': 'left', 'ground': 793, 'wheels': [[1306.5, 650], [2320.5, 650]]},
+        'top': {'box': [975, 960, 2697, 1629], 'nose': 'left'},
         'front': {'box': [90, 171, 816, 780]},
         'rear': {'box': [81, 945, 816, 1560]},
     },
@@ -37,11 +41,15 @@ CAR = {
              'depthRange': [0.9, 1.6], 'facingMin': 0.1},
         ],
         'decals': [
-            # The tall shield grille between round lamps, intakes either side.
-            {'view': 'front', 'outline': [[0.0, 0.78], [0.08, 0.775], [0.12, 0.75], [0.135, 0.60], [0.13, 0.48], [0.10, 0.455], [0.0, 0.45]],
+            # The central chrome bar with the emblem between the lamps (the drawing's
+            # shield, narrowed to the 1967 V4 photograph's bar), the grille slats either
+            # side of it reaching each lamp's bezel.
+            {'view': 'front', 'outline': [[0.0, 0.78], [0.048, 0.775], [0.072, 0.75], [0.081, 0.60], [0.078, 0.505], [0.06, 0.499], [0.0, 0.497]],
              'material': 'chrome', 'height': 0.006, 'depthRange': [-2.2, -1.7]},
-            {'view': 'front', 'outline': [[0.0, 0.76], [0.07, 0.755], [0.105, 0.735], [0.12, 0.60], [0.115, 0.49], [0.09, 0.47], [0.0, 0.465]],
+            {'view': 'front', 'outline': [[0.0, 0.76], [0.042, 0.755], [0.063, 0.735], [0.072, 0.60], [0.069, 0.512], [0.054, 0.505], [0.0, 0.503]],
              'material': 'grille', 'height': 0.008, 'depthRange': [-2.2, -1.7]},
+            {'view': 'front', 'rect': [[0.17, 0.6525], [0.24, 0.245]], 'radius': 0.005, 'material': 'grille',
+             'height': 0.006, 'depthRange': [-2.2, -1.7]},
             {'view': 'front', 'node': 'headlights', 'circle': [[0.38, 0.673], 0.085], 'material': 'Headlights',
              'height': 0.012, 'depthRange': [-2.2, -1.5], 'facingMin': 0.4},
             {'view': 'front', 'circle': [[0.38, 0.673], 0.10], 'ring': 0.015, 'material': 'chrome',
@@ -68,7 +76,11 @@ CAR = {
              'height': 0.006, 'depthRange': [1.6, 2.2]},
         ],
         'bars': [
-            {'view': 'front', 'span': [-0.11, 0.11], 'b': [0.47, 0.76], 'count': 7, 'width': 0.006, 'dir': 'v',
+            # The grille is a mesh: horizontals across it and verticals, the 1966-68
+            # photographs' grid, with the central shield proud of it.
+            {'view': 'front', 'span': [-0.29, 0.29], 'b': [0.545, 0.765], 'count': 5, 'width': 0.006, 'dir': 'h',
+             'material': 'chrome', 'height': 0.010, 'depthRange': [-2.2, -1.7]},
+            {'view': 'front', 'span': [-0.285, 0.285], 'b': [0.535, 0.775], 'count': 8, 'width': 0.006, 'dir': 'v',
              'material': 'chrome', 'height': 0.010, 'depthRange': [-2.2, -1.7]},
         ],
         'lines': [
@@ -90,3 +102,10 @@ CAR = {
         'wheel': {'style': 'hubcap', 'rimFactor': 0.62, 'cap': 0.7},
     },
 }
+
+import os as _os, sys as _sys  # noqa: E402
+_sys.path.insert(0, _os.path.dirname(__file__))
+from _frame import shift_along  # noqa: E402
+# The V4's 4165/775 figures (the drawing is placed by its wheels) put the front axle 7.25 cm
+# further from the body's nose than the 1960 4020/630 the parts were placed for.
+shift_along(CAR, 0.0725)

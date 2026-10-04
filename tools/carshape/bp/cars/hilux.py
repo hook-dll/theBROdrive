@@ -2,8 +2,10 @@
 # tracks 1300/1275, 185R14, clearance 190. The side and plan of the 1978 Hilux EC (short
 # bed) at getoutlines.com (4x upscaled, 429 px/m by the wheelbase; the side read off by
 # hand), which puts the front axle 0.66 behind the bumper. The plain little pickup: a
-# long flat bonnet over a full-width grille with round lamps in square bezels, a raked
-# screen, a short cab, a flat-sided open bed with its rails at the belt, chrome bumpers.
+# long flat bonnet over a full-width slatted grille with the 1979 N40's rectangular
+# lamps in chrome bezels (the drawing is a 1978 EC with round lamps in square bezels,
+# the photographs are 1979-81 cars), a raked screen, a short cab, a flat-sided open bed
+# with its rails at the belt, chrome bumpers.
 BOX = [[0.28, 0.76], [0.38, 0.80], [0.98, 0.80], [1.03, 0.77], [1.38, 0.70], [1.42, 0.5], [1.45, 0.2]]
 CAR = {
     'id': 'hilux',
@@ -49,13 +51,15 @@ CAR = {
         'decals': [
             {'view': 'front', 'rect': [[0.0, 0.73], [1.42, 0.22]], 'radius': 0.01, 'mirror': False, 'material': 'grille',
              'height': 0.004, 'depthRange': [-2.2, -1.8]},
-            {'view': 'front', 'rect': [[0.60, 0.73], [0.21, 0.20]], 'radius': 0.015, 'material': 'chrome', 'height': 0.006,
+            # The 1979 N40's rectangular headlamps (photos 1 and 3) in wide chrome bezels;
+            # the drawing is a 1978 EC with round lamps in square bezels.
+            {'view': 'front', 'rect': [[0.565, 0.725], [0.30, 0.20]], 'radius': 0.02, 'material': 'chrome', 'height': 0.006,
              'depthRange': [-2.2, -1.8]},
-            {'view': 'front', 'node': 'headlights', 'circle': [[0.60, 0.73], 0.08], 'material': 'Headlights', 'height': 0.010,
-             'depthRange': [-2.2, -1.8]},
-            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.60, 0.585], [0.12, 0.04]], 'radius': 0.006,
+            {'view': 'front', 'node': 'headlights', 'rect': [[0.565, 0.725], [0.255, 0.155]], 'radius': 0.018,
+             'material': 'Headlights', 'height': 0.010, 'depthRange': [-2.2, -1.8]},
+            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.565, 0.575], [0.18, 0.06]], 'radius': 0.008,
              'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [-2.25, -1.8]},
-            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.60, 0.585], [0.12, 0.04]], 'radius': 0.006,
+            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.565, 0.575], [0.18, 0.06]], 'radius': 0.008,
              'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [-2.25, -1.8]},
             {'view': 'front', 'rect': [[0.0, 0.73], [0.20, 0.05]], 'radius': 0.006, 'mirror': False, 'material': 'chrome',
              'height': 0.008, 'depthRange': [-2.2, -1.8]},

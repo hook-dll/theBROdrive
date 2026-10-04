@@ -14,21 +14,21 @@ CAR = {
         'dark': 60,
         'side': {'box': [0, 0, 1400, 520], 'nose': 'right', 'wheels': [[258, 413], [1120, 413]], 'ground': 508, 'isotropic': True,
                  'outline': [[-2.017, 0.393], [-2.017, 0.501], [-1.965, 0.521], [-1.974, 0.763], [-1.945, 0.863], [-1.846, 0.897],
-                             [-0.906, 1.005], [-0.778, 1.02], [-0.379, 1.376], [-0.308, 1.407], [1.373, 1.407], [1.43, 1.384],
-                             [1.658, 1.248], [1.829, 0.963], [1.871, 0.849], [1.88, 0.507], [1.908, 0.496], [1.908, 0.387],
-                             [1.829, 0.37], [1.515, 0.35], [0.86, 0.273], [-0.877, 0.273], [-1.646, 0.33]]},
+                             [-0.906, 1.005], [-0.778, 1.02], [-0.379, 1.376], [-0.308, 1.407], [1.373, 1.407], [1.52, 1.384],
+                             [1.748, 1.248], [1.919, 0.963], [1.961, 0.849], [1.97, 0.507], [1.998, 0.496], [1.998, 0.387],
+                             [1.919, 0.37], [1.605, 0.35], [0.86, 0.273], [-0.877, 0.273], [-1.646, 0.33]]},
     },
     'hull': {
         'bumpers': {'front': {'z': [0.38, 0.53]}, 'rear': {'z': [0.37, 0.51]}},
-        'sill': [[-2.0, 0.40], [-1.65, 0.34], [-0.88, 0.28], [0.86, 0.28], [1.5, 0.35], [1.9, 0.38]],
-        'planOverride': [[-2.0, 0.66], [-1.94, 0.72], [-1.8, 0.745], [1.75, 0.745], [1.86, 0.72], [1.90, 0.68]],
+        'sill': [[-2.0, 0.40], [-1.65, 0.34], [-0.88, 0.28], [0.86, 0.28], [1.59, 0.35], [1.99, 0.38]],
+        'planOverride': [[-2.0, 0.66], [-1.94, 0.72], [-1.8, 0.745], [1.84, 0.745], [1.95, 0.72], [1.99, 0.68]],
         'sectionStations': [{'y': -1.9, 'half': [[0.30, 0.70], [0.40, 0.745], [0.90, 0.74], [0.98, 0.72], [1.10, 0.66], [1.30, 0.62],
                                                  [1.38, 0.58], [1.42, 0.45], [1.44, 0.2]]},
-                            {'y': 1.85, 'half': [[0.30, 0.70], [0.40, 0.745], [0.90, 0.74], [0.98, 0.72], [1.10, 0.66], [1.30, 0.62],
+                            {'y': 1.94, 'half': [[0.30, 0.70], [0.40, 0.745], [0.90, 0.74], [0.98, 0.72], [1.10, 0.66], [1.30, 0.62],
                                                  [1.38, 0.58], [1.42, 0.45], [1.44, 0.2]]}],
-        'cabin': [-0.80, 1.88],
-        'belt': [[-0.80, 1.0], [-0.55, 0.99], [1.0, 0.99], [1.5, 1.02], [1.88, 1.02]],
-        'glassPlan': [[-0.80, 0.64], [1.88, 0.64]],
+        'cabin': [-0.80, 1.97],
+        'belt': [[-0.80, 1.0], [-0.55, 0.99], [1.0, 0.99], [1.59, 1.02], [1.97, 1.02]],
+        'glassPlan': [[-0.80, 0.64], [1.97, 0.64]],
         'crown': [[-2.1, 0.02], [2.1, 0.02]],
         'roofCrown': 0.03,
         'edge': 0.012,
@@ -38,11 +38,11 @@ CAR = {
         'glass': [
             {'view': 'side', 'outline': [[-0.535, 1.0], [0.148, 1.0], [0.148, 1.304], [-0.336, 1.304]], 'facingMin': 0.3},
             {'view': 'side', 'outline': [[0.211, 1.0], [0.917, 1.0], [0.86, 1.304], [0.211, 1.304]], 'facingMin': 0.3},
-            {'view': 'side', 'outline': [[1.003, 1.03], [1.487, 1.03], [1.359, 1.29], [0.95, 1.29]], 'facingMin': 0.3},
+            {'view': 'side', 'outline': [[1.003, 1.03], [1.577, 1.03], [1.449, 1.29], [0.95, 1.29]], 'facingMin': 0.3},
             {'view': 'front', 'outline': [[0.0, 1.36], [0.52, 1.35], [0.59, 1.28], [0.63, 1.03], [0.60, 1.01], [0.0, 1.01]],
              'depthRange': [-1.0, -0.3], 'facingMin': 0.2},
             {'view': 'rear', 'outline': [[0.0, 1.30], [0.50, 1.29], [0.55, 1.24], [0.57, 0.98], [0.54, 0.95], [0.0, 0.95]],
-             'depthRange': [1.5, 2.0], 'facingMin': 0.15},
+             'depthRange': [1.6, 2.1], 'facingMin': 0.15},
         ],
         'decals': [
             {'view': 'front', 'rect': [[0.0, 0.68], [1.30, 0.20]], 'radius': 0.01, 'mirror': False, 'material': 'grille',
@@ -61,15 +61,15 @@ CAR = {
             # Tall lamps up the tailgate's corners (photos of 1979 cars): turn lamp on top,
             # reversing lamp at the foot.
             {'view': 'rear', 'node': 'taillights', 'rect': [[0.655, 0.77], [0.10, 0.22]], 'radius': 0.01, 'material': 'TailLights',
-             'height': 0.010, 'depthRange': [1.6, 2.0], 'facingMin': 0.05},
+             'height': 0.010, 'depthRange': [1.6, 2.1], 'facingMin': 0.05},
             {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.655, 0.915], [0.10, 0.07]], 'radius': 0.01,
-             'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [1.6, 2.0], 'facingMin': 0.05},
+             'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [1.6, 2.1], 'facingMin': 0.05},
             {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.655, 0.915], [0.10, 0.07]], 'radius': 0.01,
-             'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [1.6, 2.0], 'facingMin': 0.05},
+             'material': 'IndicatorLights', 'height': 0.010, 'depthRange': [1.6, 2.1], 'facingMin': 0.05},
             {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.655, 0.63], [0.10, 0.05]], 'radius': 0.01,
-             'material': 'ReverseLights', 'height': 0.010, 'depthRange': [1.6, 2.0], 'facingMin': 0.05},
+             'material': 'ReverseLights', 'height': 0.010, 'depthRange': [1.6, 2.1], 'facingMin': 0.05},
             {'view': 'rear', 'rect': [[0.0, 0.66], [0.44, 0.10]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
-             'height': 0.006, 'depthRange': [1.6, 2.0], 'facingMin': 0.1},
+             'height': 0.006, 'depthRange': [1.6, 2.1], 'facingMin': 0.1},
             {'view': 'side', 'node': 'front_blinker_left', 'rect': [[-1.60, 0.72], [0.08, 0.03]], 'radius': 0.006,
              'material': 'IndicatorLights', 'height': 0.004},
             {'view': 'side', 'node': 'front_blinker_right', 'rect': [[-1.60, 0.72], [0.08, 0.03]], 'radius': 0.006,
@@ -78,15 +78,15 @@ CAR = {
         'bars': [
             {'view': 'front', 'span': [-0.40, 0.40], 'b': [0.62, 0.74], 'count': 4, 'width': 0.008, 'material': 'chrome',
              'height': 0.007, 'depthRange': [-2.1, -1.8]},
-            {'view': 'side', 'span': [1.70, 1.82], 'b': [0.84, 0.92], 'count': 3, 'width': 0.012, 'dir': 'v', 'material': 'trim',
+            {'view': 'side', 'span': [1.79, 1.91], 'b': [0.84, 0.92], 'count': 3, 'width': 0.012, 'dir': 'v', 'material': 'trim',
              'height': 0.004, 'mirror': True},
         ],
         'lines': [
             {'view': 'side', 'points': [[-0.78, 1.0], [-0.80, 0.33], [0.18, 0.33], [0.18, 1.0]], 'width': 0.005},
             {'view': 'side', 'points': [[0.18, 0.33], [0.95, 0.33], [0.95, 0.99]], 'width': 0.005},
-            {'view': 'side', 'points': [[-1.95, 0.77], [1.88, 0.77]], 'width': 0.005},
+            {'view': 'side', 'points': [[-1.95, 0.77], [1.97, 0.77]], 'width': 0.005},
             {'view': 'side', 'points': [[-0.85, 0.30], [0.85, 0.30]], 'width': 0.016, 'material': 'chrome', 'height': 0.003},
-            {'view': 'rear', 'points': [[0.0, 0.53], [0.56, 0.53], [0.58, 1.34]], 'width': 0.005, 'depthRange': [1.6, 2.0], 'facingMin': 0.1},
+            {'view': 'rear', 'points': [[0.0, 0.53], [0.56, 0.53], [0.58, 1.34]], 'width': 0.005, 'depthRange': [1.6, 2.1], 'facingMin': 0.1},
         ],
         'bumpers': {
             'front': {'z': [0.40, 0.50], 'depth': 0.05, 'wrap': 0.25, 'profile': 'blade', 'standOff': -0.03},
@@ -98,3 +98,10 @@ CAR = {
         'wheel': {'style': 'steel', 'windows': 0, 'rimFactor': 0.62, 'cap': True},
     },
 }
+
+import os as _os, sys as _sys  # noqa: E402
+_sys.path.insert(0, _os.path.dirname(__file__))
+from _frame import scale_above  # noqa: E402
+# The outline read off the photograph is 1407 mm at the roof for the factory's 1460 (the
+# 1977 estate van's own height): the whole drawing raised, so the belt and sill go with it.
+scale_above(CAR, 0.0, 1.407, 1.46)
