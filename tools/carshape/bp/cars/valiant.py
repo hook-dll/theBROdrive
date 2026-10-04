@@ -16,26 +16,41 @@ CAR = {
         'image': 'valiant_go.png',
         'dark': 120,
         'side': {'box': [0, 0, 1175, 372], 'nose': 'right', 'wheels': [[305, 288], [975, 288]], 'ground': 360, 'isotropic': True,
-                 'outline': [[-2.301, 0.412], [-2.301, 0.517], [-2.249, 0.533], [-2.24, 0.727], [-2.192, 0.848], [-2.079, 0.92], [-0.949, 1.034], [-0.828, 1.05], [-0.472, 1.365], [-0.424, 1.397], [1.009, 1.397], [1.05, 1.365], [1.433, 1.034], [1.797, 0.977], [2.281, 0.908], [2.362, 0.84], [2.37, 0.533], [2.402, 0.517], [2.402, 0.452], [2.221, 0.436], [2.16, 0.384], [1.474, 0.339], [0.707, 0.315], [-0.949, 0.315], [-2.039, 0.371]]},
+                 'outline': [[-2.301, 0.412], [-2.301, 0.517], [-2.249, 0.533], [-2.245, 0.80], [-2.10, 0.83], [-0.949, 1.034], [-0.828, 1.05], [-0.472, 1.365], [-0.424, 1.397], [1.009, 1.397], [1.05, 1.365], [1.433, 1.034], [1.797, 0.977], [2.281, 0.908], [2.362, 0.84], [2.37, 0.533], [2.402, 0.517], [2.402, 0.452], [2.221, 0.436], [2.16, 0.384], [1.474, 0.339], [0.707, 0.315], [-0.949, 0.315], [-2.039, 0.371]]},
         'front': {'box': [1180, 0, 1698, 372], 'ppm': 281, 'centre': 1430, 'zRef': [[8, 1.355], [358, 0.0]]},
     },
     'hull': {
         'bumpers': {'front': {'z': [0.38, 0.53]}, 'rear': {'z': [0.38, 0.53]}},
         'sill': [[-2.3, 0.38], [-2.0, 0.34], [-1.0, 0.30], [0.7, 0.30], [1.5, 0.33], [2.4, 0.38]],
         'planOverride': [[-2.31, 0.85], [-2.26, 0.885], [-2.0, 0.89], [2.0, 0.89], [2.3, 0.86], [2.40, 0.80]],
+        # One section for the whole car: a station of its own over the deck (a crisper
+        # roll for the fin edges the photos show) folded the belt and the glasshouse's
+        # foot into a 3-4 cm ripple along the car, so the deck keeps the end view's.
         'sectionStations': [{'y': -2.0, 'half': SEC}, {'y': 2.15, 'half': SEC}],
         'stationBlend': 0.3,
-        # Flat bonnet between the wings' crisp top edges.
+        # Flat-panelled compact: the 6 cm blur along the car (the default edgeY) softened
+        # the deck's fin edges and the shoulder crease; the ends' faces are faired with
+        # their corners kept (the boot lid's rear edge, the nose's brow).
+        'edgeMin': 0.015,
+        'edgeY': 0.035,
+        'edgeYMin': 0.035,
+        'faceSpacing': 0.15, 'cornerDeg': 20,
+        # Photos front/front34: a narrow brow directly over the lamp bezels. The side
+        # drawing puts the nose at 1.0 m, inconsistent with its front view and the photos;
+        # carrying that height across the bonnet left 30 cm of blank panel over the grille.
+        # Keep the cowl, but bring the leading edge down to the bezel's upper edge.
         'topCross': [
-            {'y': -2.25, 'z': [[0.0, 0.90], [0.50, 0.905], [0.78, 0.93], [0.86, 0.92], [0.89, 0.86]]},
+            {'y': -2.30, 'z': [[0.0, 0.80], [0.50, 0.80], [0.78, 0.82], [0.86, 0.81], [0.89, 0.77]]},
+            {'y': -2.10, 'z': [[0.0, 0.83], [0.50, 0.83], [0.78, 0.85], [0.86, 0.84], [0.89, 0.80]]},
             {'y': -0.85, 'z': [[0.0, 1.03], [0.50, 1.035], [0.78, 1.05], [0.86, 1.04], [0.89, 0.99]]},
         ],
         'cabin': [-0.83, 1.43],
         'belt': [[-0.83, 1.03], [-0.5, 1.02], [0.7, 1.02], [1.43, 1.03]],
         'glassPlan': [[-0.83, 0.76], [-0.4, 0.81], [0.8, 0.81], [1.43, 0.76]],
         'crown': [[-2.4, 0.02], [2.4, 0.02]],
-        'roofCrown': 0.03,
-        'edge': 0.010,
+        'roofCrown': 0.018,
+        'roofHalf': 0.62,
+        'edge': 0.011,
         'arch': {'radius': 0.37, 'lift': 0.05},
     },
     'parts': {
@@ -47,8 +62,8 @@ CAR = {
             {'view': 'rear', 'outline': [[0.0, 1.36], [0.55, 1.35], [0.66, 1.28], [0.72, 1.06], [0.68, 1.04], [0.0, 1.04]],
              'depthRange': [0.9, 1.6], 'facingMin': 0.15},
         ],
-        'podLamps': [{'node': 'headlights', 'x': 0.75, 'z': 0.60, 'r': 0.085, 'end': 'front', 'bezel': 0.02, 'podDepth': 0.05,
-                      'proud': 0.005}],
+        'podLamps': [{'node': 'headlights', 'x': 0.78, 'z': 0.63, 'r': 0.09, 'end': 'front', 'bezel': 0.025, 'podDepth': 0.08,
+                      'proud': 0.008}],
         'decals': [
             {'view': 'front', 'rect': [[0.0, 0.58], [1.66, 0.28]], 'radius': 0.03, 'mirror': False, 'material': 'chrome',
              'height': 0.003, 'depthRange': [-2.4, -2.0]},
@@ -73,7 +88,7 @@ CAR = {
              'material': 'IndicatorLights', 'height': 0.012, 'depthRange': [2.1, 2.5], 'facingMin': 0.05},
             {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.835, 0.575], [0.085, 0.045]], 'radius': 0.012,
              'material': 'IndicatorLights', 'height': 0.012, 'depthRange': [2.1, 2.5], 'facingMin': 0.05},
-            {'view': 'rear', 'rect': [[0.835, 0.528], [0.085, 0.038]], 'radius': 0.01, 'mirror': True,
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.835, 0.528], [0.085, 0.038]], 'radius': 0.01, 'mirror': True,
              'material': 'ReverseLights', 'height': 0.012, 'depthRange': [2.1, 2.5], 'facingMin': 0.05},
             # The ribbed bright panel across the tail between the lamps, the V emblem in it.
             {'view': 'rear', 'rect': [[0.0, 0.655], [1.50, 0.24]], 'radius': 0.012, 'mirror': False, 'material': 'grille',

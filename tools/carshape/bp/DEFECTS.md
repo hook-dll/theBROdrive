@@ -278,3 +278,12 @@ The AMC Eagle's mirror was another missed placement error: its head stayed at
 0.90 m after the belt was moved to 0.955 m, below the window. It now sits at
 1.02 m at the front corner of the door glass, as in the wagon photographs;
 checked in game from both front quarters.
+
+Peugeot 504: the headlamp lens was only 8.5 cm high and read as a white strip.
+The lens and bezel now fill the grille band, with the inner edge sloped as in the
+1971 saloon photographs; the parking/turn lamps remain below, above the bumper.
+Plymouth Valiant: a 1.0 m nose taken from the side drawing left a broad blank brow
+over the grille, unlike the front view and photographs. Its leading edge now
+meets the lamp bezels, keeping the cowl height. Its clear rear lens also needed
+the `reverse_lights` node name, not just the `ReverseLights` material. Both cars
+were rebuilt, installed, viewed close-up in game, and passed `dims.py` within 2%.
