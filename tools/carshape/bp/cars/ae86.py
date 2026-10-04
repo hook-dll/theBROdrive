@@ -43,15 +43,18 @@ CAR = {
             {'view': 'side', 'outline': [[-1.55, 0.24], [1.45, 0.24], [1.45, 0.34], [-1.55, 0.34]]},
         ],
         'decals': [
-            # Wide fixed lamps either side of a slatted grille.
-            {'view': 'front', 'rect': [[0.0, 0.645], [1.40, 0.11]], 'radius': 0.008, 'mirror': False, 'material': 'grille',
+            # The Levin front (drawing, front photo): a tall lamp unit each side with the
+            # amber corner in its outer end, and a shallower slatted grille between them.
+            # The lamps run |x| 0.25-0.62 and z 0.52-0.695 with body colour outboard to
+            # the corner; the old thin 0.09-high lens was cut into wedges at the corner.
+            {'view': 'front', 'rect': [[0.0, 0.6225], [1.26, 0.145]], 'radius': 0.008, 'mirror': False, 'material': 'grille',
              'height': 0.004, 'depthRange': [-2.2, -1.75]},
-            {'view': 'front', 'node': 'headlights', 'rect': [[0.52, 0.652], [0.36, 0.09]], 'radius': 0.008,
+            {'view': 'front', 'node': 'headlights', 'rect': [[0.435, 0.6225], [0.37, 0.145]], 'radius': 0.008,
              'material': 'Headlights', 'height': 0.008, 'depthRange': [-2.2, -1.75]},
-            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.70, 0.645], [0.07, 0.09]], 'radius': 0.008,
-             'material': 'IndicatorLights', 'height': 0.008, 'facingMin': 0.1, 'depthRange': [-2.2, -1.6]},
-            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.70, 0.645], [0.07, 0.09]], 'radius': 0.008,
-             'material': 'IndicatorLights', 'height': 0.008, 'facingMin': 0.1, 'depthRange': [-2.2, -1.6]},
+            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.575, 0.6225], [0.09, 0.145]], 'radius': 0.008,
+             'material': 'IndicatorLights', 'height': 0.009, 'facingMin': 0.12, 'depthRange': [-2.2, -1.7]},
+            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.575, 0.6225], [0.09, 0.145]], 'radius': 0.008,
+             'material': 'IndicatorLights', 'height': 0.009, 'facingMin': 0.12, 'depthRange': [-2.2, -1.7]},
             # turn lamps in the bumper's corners (amber, as on the Levin's zenki bumper)
             {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.52, 0.465], [0.16, 0.045]], 'radius': 0.012,
              'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-2.2, -1.7]},
@@ -61,8 +64,13 @@ CAR = {
              'height': 0.004, 'depthRange': [-2.2, -1.7]},
             {'view': 'front', 'rect': [[0.0, 0.35], [0.30, 0.11]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [-2.2, -1.7]},
-            {'view': 'side', 'node': 'front_blinker_left', 'rect': [[-1.96, 0.63], [0.08, 0.06]], 'radius': 0.006, 'material': 'IndicatorLights', 'height': 0.005},
-            {'view': 'side', 'node': 'front_blinker_right', 'rect': [[-1.96, 0.63], [0.08, 0.06]], 'radius': 0.006, 'material': 'IndicatorLights', 'height': 0.005},
+            {'view': 'side', 'node': 'front_blinker_left', 'rect': [[-1.96, 0.6225], [0.09, 0.11]], 'radius': 0.006, 'material': 'IndicatorLights', 'height': 0.005},
+            {'view': 'side', 'node': 'front_blinker_right', 'rect': [[-1.96, 0.6225], [0.09, 0.11]], 'radius': 0.006, 'material': 'IndicatorLights', 'height': 0.005},
+            # The B-pillar's black trim, between the door glass (rear edge y 0.42) and
+            # the quarter light (front edge y 0.565), up to the roof's edge. A 2-point
+            # 'line' 5 cm wide was projected as a slab that stood off the glasshouse and
+            # poked above the roof.
+            {'view': 'side', 'rect': [[0.49, 1.10], [0.14, 0.30]], 'radius': 0.004, 'material': 'trim', 'height': 0.003},
             # Tail: lamp bands across, the plate in a black recess between them.
             # wide lamp units from the corners to the plate recess: amber outboard, red, a
             # white reversing lamp inboard (photo)
@@ -82,18 +90,27 @@ CAR = {
              'height': 0.006, 'depthRange': [1.8, 2.2]},
         ],
         'bars': [
-            {'view': 'front', 'span': [-0.30, 0.30], 'b': [0.60, 0.70], 'count': 22, 'dir': 'v', 'width': 0.006,
-             'material': 'trim', 'height': 0.007, 'depthRange': [-2.2, -1.75]},
+            # The grille's slats run across the car (photo), not up it; four of them
+            # between the lamps, in the drawing's z 0.52-0.60 band.
+            {'view': 'front', 'span': [-0.25, 0.25], 'b': [0.56, 0.605], 'count': 4, 'dir': 'h', 'width': 0.010,
+             'material': 'trim', 'height': 0.006, 'depthRange': [-2.2, -1.75]},
         ],
         'lines': [
             {'view': 'side', 'points': [[-0.70, 0.94], [-0.72, 0.30], [0.48, 0.30], [0.50, 0.94]], 'width': 0.005},
             {'view': 'side', 'points': [[-1.55, 0.585], [1.95, 0.60]], 'width': 0.012, 'material': 'trim', 'height': 0.004},
             {'view': 'side', 'points': [[-0.38, 0.94], [-0.08, 1.28], [0.40, 1.29], [0.80, 1.28], [1.45, 0.97], [1.40, 0.94], [-0.38, 0.94]],
              'width': 0.014, 'material': 'trim', 'height': 0.003},
-            {'view': 'side', 'points': [[0.42, 0.94], [0.44, 1.28]], 'width': 0.05, 'material': 'trim', 'height': 0.003},
             {'view': 'top', 'points': [[-2.0, 0.62], [-0.85, 0.64]], 'width': 0.005},
         ],
-        'boxes': [{'c': [0.0, 1.88, 0.985], 'size': [1.30, 0.14, 0.02], 'material': 'trim', 'mirror': False}],
+        # The hatch's spoiler (both photos, and the rear view's pointed wing sitting
+        # just under the roof): a blade on the tailgate's top edge at the roof's rear,
+        # overhanging the back light, its ends coming down to the quarters. It used to
+        # sit at y 1.88 - 2-6 cm over the sloping deck at the glass's foot, 8 cm past
+        # its end, i.e. a detached plank low on the tail.
+        'boxes': [
+            {'c': [0.0, 1.575, 1.082], 'size': [1.30, 0.17, 0.045], 'material': 'trim', 'mirror': False},
+            {'c': [0.60, 1.55, 1.040], 'size': [0.10, 0.14, 0.075], 'material': 'trim'},
+        ],
         'mirror': {'y': -0.45, 'z': 0.99, 'reach': 0.90, 'w': 0.14, 'h': 0.08, 'material': 'trim'},
         'handles': {'at': [[0.30, 0.86]], 'w': 0.11, 'material': 'trim'},
         'wipers': {'arms': [[-0.55, -0.05, -0.78, 0.95], [0.05, 0.5, -0.78, 0.95]]},

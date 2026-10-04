@@ -18,7 +18,16 @@ CAR = {
     'hull': {
         'sill': [[-1.97, 0.40], [-1.8, 0.32], [-1.55, 0.27], [-1.2, 0.26], [1.1, 0.26], [1.45, 0.28], [1.75, 0.32], [1.97, 0.36]],
         # The wing mirrors and washer jets stand on the scuttle in the drawing.
-        'topOverride': [[-1.20, 0.87], [-0.95, 0.88], [-0.75, 0.89], [-0.66, 0.905]],
+        # One top line for the whole bonnet, screen and roof (a second `topOverride`
+        # key would shadow this one - the roof's did, so the bonnet ran on the drawing's
+        # raw line and waved +-3 cm: the mirrors and jets drawn standing on the scuttle
+        # bump it). The line is the drawing's own: bonnet 0.87 at -1.30 to 0.95 at the
+        # screen's foot, the screen's straight rake to 1.29 at -0.42, the roof's true
+        # height (the drawing's 1.375-1.40 there is its gutter/rack, the car is 1.30)
+        # flat to the rear edge.
+        'topOverride': [[-1.30, 0.870], [-1.10, 0.888], [-0.95, 0.915], [-0.82, 0.95], [-0.70, 1.055],
+                        [-0.60, 1.1425], [-0.50, 1.23], [-0.42, 1.29], [-0.34, 1.292], [-0.18, 1.2925],
+                        [0.0, 1.299], [0.20, 1.3035], [0.40, 1.3055], [0.56, 1.307]],
         'cabin': [-0.68, 1.03],
         'belt': [[-0.68, 0.89], [-0.45, 0.85], [0.6, 0.835], [1.03, 0.82]],
         'glassPlan': [[-0.68, 0.64], [-0.3, 0.70], [0.6, 0.70], [1.03, 0.62]],
@@ -42,12 +51,25 @@ CAR = {
         # 0.689 is above it); with R 0.29 + lift 0.03 + r 0.36 the opening sat 4 cm high
         # and read as a gap above the tyre (the photos leave 6 cm, not 10).
         'arch': {'radius': 0.355, 'lift': 0.0},
+        # The roof's side edge above the windows also waved (the drawn section's top
+        # left it a wide roll that a 3 mm dip read as a crumple): the section is held
+        # at its width 8 cm below the top line, so the roof is a flat panel with one
+        # crisp crease down each side as the photos show.
+        'roofEdge': 0.08,
     },
+    # Thin chrome frames (the photos: about 8 mm, not the 12 the drawn frame lines
+    # carried); every pane's own seal carries them.
+    'glassSeal': {'material': 'chrome', 'width': 0.008},
     'parts': {
         'glass': [
             {'view': 'side', 'outline': [[-0.29, 1.0], [-0.24, 0.848], [0.568, 0.837], [0.582, 1.181], [0.536, 1.193], [0.181, 1.219],
                                          [-0.10, 1.215], [-0.14, 1.20], [-0.25, 1.07]], 'facingMin': 0.3},
-            {'view': 'side', 'outline': [[0.625, 1.174], [0.611, 0.833], [1.026, 0.822], [0.811, 1.07], [0.747, 1.126], [0.704, 1.152],
+            # The quarter light's foot corner: its two edges meet at 48 degrees and the
+            # seal's inset (assemble.py, capped at 3 band widths) ran a 2.4 cm spur out
+            # of it, over the C-pillar. A 3 cm radius arc in the outline takes the
+            # corner out of the inset.
+            {'view': 'side', 'outline': [[0.625, 1.174], [0.611, 0.833], [0.980, 0.8235], [1.010, 0.826], [1.023, 0.833],
+                                         [1.019, 0.845], [0.811, 1.07], [0.747, 1.126], [0.704, 1.152],
                                          [0.657, 1.17]], 'facingMin': 0.3},
             {'view': 'front', 'outline': [[0.0, 1.235], [0.42, 1.215], [0.52, 1.165], [0.575, 0.90], [0.555, 0.875], [0.0, 0.875]],
              'depthRange': [-0.75, -0.15], 'facingMin': 0.2},

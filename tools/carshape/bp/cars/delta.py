@@ -48,6 +48,10 @@ CAR = {
         'glassPlan': [[-0.80, 0.68], [-0.4, 0.72], [1.0, 0.72], [1.5, 0.68], [1.90, 0.63]],
         'crown': [[-2.0, 0.008], [2.0, 0.008]],
         'roofCrown': 0.015,
+        # A boxy hatchback: the roof's edge is a tight drip rail, not the default 6 cm
+        # roll (which left the gutter line wandering over a soft shoulder and pinched a
+        # fold where the screen meets the roof at the A-pillar).
+        'roofEdge': 0.035,
         'edge': 0.012,
         # a boxy car: crisp edges (the default 2.2 / 6 cm blur made it a pebble)
         'edgeMin': 0.013,
@@ -88,6 +92,8 @@ CAR = {
         'arch': {'radius': 0.33, 'lift': 0.015},
     },
     'parts': {
+        # A thin black seal: the default 14 mm read as a thick band next to the drip rail.
+        'glassSeal': {'material': 'rubber', 'width': 0.010},
         # The 16v's black plastic arch extensions (photos): a band round each opening,
         # standing 12 mm off the flat side. The Evo drawing's flares are in the plan
         # above, not here.
@@ -175,8 +181,12 @@ CAR = {
             {'view': 'side', 'points': [[0.36, 0.30], [0.97, 0.30], [1.0, 0.45], [0.99, 0.90]], 'width': 0.005},
             {'view': 'side', 'points': [[-1.45, 0.78], [-0.3, 0.80], [1.75, 0.83]], 'width': 0.006, 'material': 'trim', 'height': 0.003},
             {'view': 'side', 'points': [[-0.42, 0.24], [1.05, 0.24]], 'width': 0.06, 'material': 'trim', 'height': 0.004},
-            {'view': 'side', 'points': [[-0.45, 0.89], [-0.21, 1.25], [0.30, 1.275], [0.93, 1.26], [1.10, 1.28], [1.86, 0.92]],
-             'width': 0.014, 'material': 'trim', 'height': 0.003},
+            # The drip rail along the roof's edge: a thin black line in the photographs (the
+            # 14 mm one lay as a second thick band beside the panes' seals). It starts at
+            # the roof's front edge: carried down the A-pillar it crossed the screen's own
+            # seal at the pillar's head, where the two cut a soft fold into the shoulder.
+            {'view': 'side', 'points': [[-0.26, 1.245], [0.30, 1.275], [0.93, 1.26], [1.10, 1.28], [1.86, 0.92]],
+             'width': 0.007, 'material': 'trim', 'height': 0.003},
             {'view': 'side', 'points': [[0.34, 0.89], [0.37, 1.27]], 'width': 0.04, 'material': 'trim', 'height': 0.003},
             {'view': 'side', 'points': [[0.92, 0.90], [0.93, 1.25]], 'width': 0.04, 'material': 'trim', 'height': 0.003},
         ],

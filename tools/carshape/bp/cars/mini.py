@@ -41,7 +41,9 @@ CAR = {
              'material': 'paint2', 'depthRange': [1.14, 1.5], 'facingMin': 0.2},
         ],
         'glass': [
-            {'view': 'side', 'outline': [[-0.509, 0.98], [-0.434, 0.95], [-0.434, 0.90], [-0.512, 0.873], [0.184, 0.864], [0.184, 1.135],
+            # The door glass's front edge runs straight down the A-pillar (photos); the
+            # hand-read outline carried a 5 cm step at -0.43 that showed as a tooth.
+            {'view': 'side', 'outline': [[-0.52, 0.873], [0.184, 0.864], [0.184, 1.135],
                                          [0.139, 1.179], [-0.341, 1.176], [-0.383, 1.144]], 'facingMin': 0.3},
             {'view': 'side', 'outline': [[0.253, 1.111], [0.253, 0.929], [0.289, 0.867], [0.91, 0.861], [0.958, 0.887], [0.952, 0.932],
                                          [0.862, 1.09], [0.784, 1.17], [0.337, 1.185], [0.271, 1.161]], 'facingMin': 0.3},
@@ -62,6 +64,16 @@ CAR = {
              'height': 0.010, 'depthRange': [-1.7, -1.2]},
             {'view': 'front', 'circle': [[0.52, 0.555], 0.042], 'ring': 0.009, 'material': 'chrome',
              'height': 0.011, 'depthRange': [-1.7, -1.2]},
+            # The headlamps: the lens in its chrome ring, cut into the wing's nose and
+            # lifted with it, so the ring wraps the wing's curve as the photos show.
+            # The depth range holds the patch on the wing's front face (the drawings
+            # show the lamp a few cm below the panel's top edge): with the front view
+            # alone the circle's projection runs on over the bonnet's leading edge and
+            # up the wing's shoulder, a teardrop three times the lamp's size.
+            {'view': 'front', 'circle': [[0.51, 0.72], 0.101], 'ring': 0.016, 'material': 'chrome',
+             'height': 0.009, 'depthRange': [-1.58, -1.37]},
+            {'view': 'front', 'node': 'headlights', 'circle': [[0.51, 0.72], 0.085], 'material': 'Headlights',
+             'height': 0.006, 'depthRange': [-1.58, -1.37]},
             {'view': 'front', 'rect': [[0.0, 0.37], [0.52, 0.09]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.005, 'depthRange': [-1.7, -1.3]},
             # Upright tail lamps on the rear wings: amber, red, red.
@@ -78,10 +90,11 @@ CAR = {
             {'view': 'rear', 'rect': [[0.0, 0.615], [0.52, 0.11]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [1.2, 1.7]},
         ],
-        # The headlamps sit in the wings' front faces behind a chrome rim: no housing
-        # stands proud of the skin (a pod there read as a boss round each lamp).
-        'podLamps': [{'node': 'headlights', 'x': 0.51, 'z': 0.745, 'r': 0.085, 'bezel': 0.016, 'pod': False,
-                      'proud': 0.0, 'seat': 'flush'}],
+        # The headlamps sit in the wings' front faces behind a chrome rim (1965 photos:
+        # a 7" lamp in the wing's nose, its bezel lying on the skin). Patches on the
+        # shell, not a pod: the wing's nose is so round that a lamp disc set flush along
+        # the skin's normal stood off the body as a floating plate (seen close up in the
+        # game), while a patch follows the surface where it curves.
         'bars': [
             {'view': 'front', 'span': [-0.40, 0.40], 'b': [0.54, 0.70], 'count': 7, 'width': 0.008,
              'material': 'chrome', 'height': 0.009, 'depthRange': [-1.7, -1.3]},
@@ -100,15 +113,22 @@ CAR = {
             {'view': 'side', 'points': [[-0.51, 0.87], [0.96, 0.86]], 'width': 0.01, 'material': 'chrome', 'height': 0.003},
         ],
         'bumpers': {
-            'front': {'z': [0.465, 0.505], 'depth': 0.045, 'wrap': 0.20, 'profile': 'blade',
-                      'overriders': [[0.30, 0.04, 0.36, 0.62]]},
-            'rear': {'z': [0.46, 0.50], 'depth': 0.045, 'wrap': 0.20, 'profile': 'blade',
-                     'overriders': [[0.30, 0.04, 0.36, 0.60]]},
+            # The 1965 bar wraps round to the arch's leading edge (photos) and carries
+            # slim vertical overriders at the grille's edges, standing a little above the
+            # bar and hanging below it -- not the drawing's tall fangs, which at a
+            # three-quarter view read as a melted lump at the corner.
+            'front': {'z': [0.465, 0.505], 'depth': 0.045, 'wrap': 0.28, 'profile': 'blade',
+                      'overriders': [[0.32, 0.035, 0.43, 0.53]]},
+            'rear': {'z': [0.46, 0.50], 'depth': 0.045, 'wrap': 0.24, 'profile': 'blade',
+                     'overriders': [[0.32, 0.035, 0.43, 0.52]]},
         },
-        # The drawn mirror stands on the door at the A-pillar's foot, its head just off
-        # the skin: reach is the head's outer edge (the body's side there is at 0.60,
-        # the widest point 0.697), not out in the air.
-        'mirror': {'y': -0.51, 'z': 0.92, 'reach': 0.72, 'w': 0.10, 'shape': 'round', 'material': 'chrome'},
+        # A small round chrome mirror on a short stem on the wing's top at the A-pillar's
+        # foot (the 1965 photographs: the blue car's and the rear-quarter ones both show
+        # it on the wing, close to the screen's foot, not on the door).
+        # Head ~12 cm over the wing's top (0.80), not on a 26 cm pole, and over the wing
+        # (reach 0.63): out at the body's edge the stalk's foot fell to the flank.
+        'mirror': {'y': -0.72, 'z': 0.93, 'reach': 0.63, 'w': 0.09, 'h': 0.09, 'shape': 'round',
+                   'material': 'chrome', 'mount': 'wing'},
         'handles': {'at': [[0.08, 0.80]], 'w': 0.10},
         'wipers': {'arms': [[-0.45, -0.05, -0.82, 0.90], [0.05, 0.42, -0.82, 0.90]]},
         'wheel': {'style': 'steel', 'windows': 8, 'rimFactor': 0.62, 'cap': True},

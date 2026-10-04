@@ -38,14 +38,26 @@ CAR = {
              'depthRange': [1.2, 2.2], 'facingMin': 0.15},
         ],
         'decals': [
-            # The faired headlamps (1968 on): twin lamps on a silver reflector under one
-            # smooth glass cover on the front of each wing, its foot just over the bumper
-            # (photos; the drawing's front view put it up on the wing's top).
+            # The faired headlamps (1968 on): one glazed cover flush in the wing's nose
+            # over the twin lamps and their silver reflector (photos). A patch cut into
+            # the wing itself, so the cover follows the nose; the two flush pod lamps
+            # that stood here before were flat discs tangent to a domed wing and read as
+            # chrome plates floating over it, their rims catching the sky as a blue ring.
             {'view': 'front', 'outline': [[0.89, 0.726], [0.882, 0.765], [0.857, 0.789], [0.817, 0.806], [0.76, 0.814], [0.672, 0.813],
                                           [0.584, 0.805], [0.527, 0.791], [0.487, 0.771], [0.462, 0.744], [0.454, 0.704], [0.462, 0.665],
                                           [0.487, 0.641], [0.527, 0.624], [0.584, 0.616], [0.672, 0.617], [0.76, 0.625], [0.817, 0.639],
                                           [0.857, 0.659], [0.882, 0.686]],
              'material': 'chrome', 'height': 0.004, 'depthRange': [-2.5, -1.9], 'facingMin': 0.2},
+            # its chrome edge trim, a hair prouder than the cover
+            {'view': 'front', 'outline': [[0.89, 0.726], [0.882, 0.765], [0.857, 0.789], [0.817, 0.806], [0.76, 0.814], [0.672, 0.813],
+                                          [0.584, 0.805], [0.527, 0.791], [0.487, 0.771], [0.462, 0.744], [0.454, 0.704], [0.462, 0.665],
+                                          [0.487, 0.641], [0.527, 0.624], [0.584, 0.616], [0.672, 0.617], [0.76, 0.625], [0.817, 0.639],
+                                          [0.857, 0.659], [0.882, 0.686]],
+             'ring': 0.012, 'material': 'chrome', 'height': 0.006, 'depthRange': [-2.5, -1.9], 'facingMin': 0.2},
+            {'view': 'front', 'node': 'headlights', 'circle': [[0.79, 0.755], 0.09], 'material': 'Headlights',
+             'height': 0.008, 'depthRange': [-2.5, -1.9]},
+            {'view': 'front', 'node': 'headlights', 'circle': [[0.605, 0.733], 0.08], 'material': 'Headlights',
+             'height': 0.008, 'depthRange': [-2.5, -1.9]},
             # Under the bumper: the two wide air intakes, round turn lamps at the corners.
             {'view': 'front', 'rect': [[0.27, 0.44], [0.34, 0.075]], 'radius': 0.03, 'material': 'grille',
              'height': 0.005, 'depthRange': [-2.5, -2.0], 'facingMin': 0.1},
@@ -66,10 +78,6 @@ CAR = {
              'height': 0.006, 'depthRange': [2.0, 2.6]},
         ],
         'podLamps': [
-            {'node': 'headlights', 'x': 0.79, 'z': 0.755, 'r': 0.09, 'end': 'front', 'bezel': 0.012, 'pod': False,
-             'proud': 0.0, 'seat': 'flush'},
-            {'node': 'headlights', 'x': 0.605, 'z': 0.733, 'r': 0.080, 'end': 'front', 'bezel': 0.010, 'pod': False,
-             'proud': 0.0, 'seat': 'flush'},
             {'node': 'rear_blinker_left', 'x': 0.555, 'z': 1.31, 'r': 0.035, 'end': 'rear', 'material': 'IndicatorLights',
              'bezel': 0.012, 'bezelMaterial': 'chrome', 'podDepth': 0.12},
             {'node': 'rear_blinker_right', 'x': 0.555, 'z': 1.31, 'r': 0.035, 'end': 'rear', 'material': 'IndicatorLights',

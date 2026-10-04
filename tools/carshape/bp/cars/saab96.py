@@ -26,7 +26,21 @@ CAR = {
         'roofCrown': 0.05,
         'roofHalf': 0.55,
         'edge': 0.02,
-        'arch': {'radius': 0.36, 'lift': 0.02},
+        # The wing's skin runs nearly parallel to the arch's cylinder round the front of
+        # the opening: the default 12 mm lip left the rim a row of teeth (the photos show
+        # a plain lip). 30 mm smooths the intersection (as on the Mini).
+        'archLip': 0.03,
+        # The tyre (155 SR 15, R 0.31) with the drawing's own few cm of gap, not the 5 cm
+        # 0.36 left: the arch looked a size too big around the wheel.
+        'arch': {'radius': 0.345, 'lift': 0.02},
+        # The bumpers stand against the body in the photographs, but the body's front and
+        # tail faces tuck back 9-20 cm at the bars' height (a valance drawn well behind
+        # the bumper's face), so the bars (their faces on the factory ends) floated clear
+        # of the shell. The drawn 1960 nose curls under from z 0.6; the V4's front panel
+        # is upright over the bumper, so the face is given over that band and the drawn
+        # outline kept above it.
+        'face': {'front': [[0.34, -2.02], [0.50, -2.02], [0.62, -2.014]],
+                 'rear': [[0.36, 2.02], [0.50, 2.02], [0.62, 1.96]]},
     },
     'parts': {
         'glass': [
@@ -48,11 +62,11 @@ CAR = {
              'material': 'chrome', 'height': 0.006, 'depthRange': [-2.2, -1.7]},
             {'view': 'front', 'outline': [[0.0, 0.76], [0.042, 0.755], [0.063, 0.735], [0.072, 0.60], [0.069, 0.512], [0.054, 0.505], [0.0, 0.503]],
              'material': 'grille', 'height': 0.008, 'depthRange': [-2.2, -1.7]},
-            {'view': 'front', 'rect': [[0.17, 0.6525], [0.24, 0.245]], 'radius': 0.005, 'material': 'grille',
+            {'view': 'front', 'rect': [[0.34, 0.6525], [0.62, 0.245]], 'radius': 0.005, 'material': 'grille',
              'height': 0.006, 'depthRange': [-2.2, -1.7]},
-            {'view': 'front', 'node': 'headlights', 'circle': [[0.38, 0.673], 0.085], 'material': 'Headlights',
+            {'view': 'front', 'node': 'headlights', 'circle': [[0.47, 0.673], 0.085], 'material': 'Headlights',
              'height': 0.012, 'depthRange': [-2.2, -1.5], 'facingMin': 0.4},
-            {'view': 'front', 'circle': [[0.38, 0.673], 0.10], 'ring': 0.015, 'material': 'chrome',
+            {'view': 'front', 'circle': [[0.47, 0.673], 0.10], 'ring': 0.015, 'material': 'chrome',
              'height': 0.013, 'depthRange': [-2.2, -1.5], 'facingMin': 0.4},
             {'view': 'front', 'rect': [[0.335, 0.555], [0.30, 0.06]], 'radius': 0.02, 'material': 'chrome',
              'height': 0.005, 'depthRange': [-2.2, -1.6]},
@@ -85,8 +99,13 @@ CAR = {
         ],
         'lines': [
             {'view': 'side', 'points': [[-0.66, 1.0], [-0.66, 0.30], [0.18, 0.30], [0.20, 1.0]], 'width': 0.005},
-            {'view': 'side', 'points': [[-1.95, 0.75], [-1.3, 0.62], [-0.9, 0.60]], 'width': 0.008, 'material': 'chrome', 'height': 0.003},
-            {'view': 'side', 'points': [[0.9, 0.49], [1.75, 0.50]], 'width': 0.008, 'material': 'chrome', 'height': 0.003},
+            # The chrome waist moulding runs low on the body (the 1967 photographs: nose to
+            # front arch, along the doors, rear arch to tail) and is stopped at each arch's
+            # edge. The old single line ran from the nose to the door at z 0.6-0.75 and
+            # straight through the front opening.
+            {'view': 'side', 'points': [[-2.0725, 0.50], [-1.7225, 0.50]], 'width': 0.008, 'material': 'chrome', 'height': 0.003},
+            {'view': 'side', 'points': [[-1.0325, 0.50], [0.7975, 0.51]], 'width': 0.008, 'material': 'chrome', 'height': 0.003},
+            {'view': 'side', 'points': [[1.4475, 0.52], [1.8475, 0.53]], 'width': 0.008, 'material': 'chrome', 'height': 0.003},
             {'view': 'side', 'points': [[-0.63, 1.07], [-0.44, 1.24], [-0.23, 1.32], [0.10, 1.335], [0.45, 1.325], [0.80, 1.24], [0.99, 1.03]],
              'width': 0.012, 'material': 'chrome', 'height': 0.003},
         ],
@@ -96,7 +115,11 @@ CAR = {
             'rear': {'z': [0.40, 0.47], 'depth': 0.05, 'wrap': 0.25, 'profile': 'blade',
                      'overriders': [[0.42, 0.05, 0.33, 0.55]]},
         },
-        'mirror': {'y': -0.95, 'z': 1.06, 'reach': 0.77, 'w': 0.09, 'shape': 'round', 'material': 'chrome', 'sides': [1]},
+        # A round chrome mirror on a short stem on the wing's top at the A-pillar's foot
+        # (the front photograph): the old one stood on a tall thin pole 30 cm ahead of
+        # the pillar with its head well above the wing.
+        'mirror': {'y': -0.7925, 'z': 1.00, 'reach': 0.77, 'w': 0.09, 'h': 0.09, 'shape': 'round',
+                   'material': 'chrome', 'mount': 'wing', 'sides': [1]},
         'handles': {'at': [[-0.05, 0.91]], 'w': 0.14},
         'wipers': {'arms': [[-0.5, -0.05, -0.70, 1.04], [0.05, 0.5, -0.70, 1.04]]},
         'wheel': {'style': 'hubcap', 'rimFactor': 0.62, 'cap': 0.7},

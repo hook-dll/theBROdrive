@@ -41,7 +41,10 @@ CAR = {
         'glass': [
             # The door glass runs up under the hood's side rail: its top edge is the hood's
             # lower edge (they overlapped and the glass's corners poked into the canvas).
-            {'view': 'side', 'outline': [[-0.40, 0.80], [-0.15, 1.075], [0.34, 1.105], [0.38, 1.08], [0.40, 0.80]], 'facingMin': 0.3},
+            # Its header is 5-7 cm under the hood's fabric edge (photos of a raised hood):
+            # at 1.105 the canvas stood a 12 cm band over the glass and pane and fabric
+            # merged into one dark panel.
+            {'view': 'side', 'outline': [[-0.40, 0.80], [-0.15, 1.09], [0.34, 1.145], [0.38, 1.13], [0.40, 0.80]], 'facingMin': 0.3},
             # The screen stops at its header (it ran back over the hood's front slope and
             # down its shoulders as a light strip of glass).
             {'view': 'front', 'outline': [[0.0, 1.11], [0.44, 1.105], [0.48, 1.08], [0.58, 0.86], [0.56, 0.84], [0.0, 0.84]],
@@ -55,7 +58,7 @@ CAR = {
             {'view': 'front', 'rect': [[0.0, 1.19], [1.40, 0.14]], 'mirror': False, 'depthRange': [-0.35, 0.15], 'facingMin': 0.0},
             {'view': 'top', 'rect': [[0.44, 0.0], [1.36, 1.6]], 'radius': 0.001, 'mirror': False, 'facingMin': 0.05,
              'depthRange': [0.95, 1.5]},
-            {'view': 'side', 'outline': [[-0.22, 1.075], [-0.15, 1.075], [0.34, 1.105], [0.38, 1.08], [0.40, 0.80], [1.15, 0.84],
+            {'view': 'side', 'outline': [[-0.22, 1.09], [-0.15, 1.09], [0.34, 1.145], [0.38, 1.13], [0.40, 0.80], [1.15, 0.84],
                                          [1.15, 1.30], [-0.12, 1.30]], 'facingMin': -1.0},
         ],
         'decals': [
@@ -93,7 +96,10 @@ CAR = {
             {'view': 'top', 'points': [[-1.90, 0.55], [-0.75, 0.62]], 'width': 0.005},
             {'view': 'rear', 'points': [[0.0, 0.81], [0.62, 0.81]], 'width': 0.005, 'depthRange': [1.5, 2.1]},
         ],
-        'mirror': {'y': -0.42, 'z': 0.88, 'reach': 0.95, 'w': 0.14, 'h': 0.075, 'material': 'paint', 'mount': 'door'},
+        # The NA's mirror stands on the door's front corner by the quarter triangle (the
+        # photographs): a short arm, the head just off the skin. `reach` 0.95 put the
+        # head 15 cm out in the air on a long arm.
+        'mirror': {'y': -0.42, 'z': 0.88, 'reach': 0.86, 'w': 0.14, 'h': 0.075, 'material': 'paint', 'mount': 'door'},
         'handles': {'at': [[0.35, 0.69]], 'w': 0.10, 'material': 'chrome'},
         'wipers': {'arms': [[-0.5, -0.05, -0.68, 0.84], [0.05, 0.45, -0.68, 0.84]]},
         'wheel': {'style': 'alloy', 'spokes': 8, 'rimFactor': 0.68, 'spokeWidth': 0.35},

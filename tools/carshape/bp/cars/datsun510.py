@@ -42,8 +42,16 @@ CAR = {
             {'view': 'side', 'outline': [[0.33, 0.96], [0.33, 1.34], [0.93, 1.335], [1.20, 1.02], [1.18, 0.97]], 'facingMin': 0.3},
             {'view': 'front', 'outline': [[0.0, 1.35], [0.48, 1.345], [0.53, 1.31], [0.60, 1.00], [0.58, 0.98], [0.0, 0.98]],
              'depthRange': [-1.0, -0.3], 'facingMin': 0.25},
-            {'view': 'rear', 'outline': [[0.0, 1.35], [0.46, 1.345], [0.51, 1.31], [0.58, 1.04], [0.55, 1.02], [0.0, 1.02]],
-             'depthRange': [0.9, 1.6], 'facingMin': 0.15},
+            # The four-door's back light (photo, rear three-quarter), authored in plan
+            # on the slope measured by rays from behind: the header sits on the roof's
+            # rear edge (y 0.97-1.00) and the foot on the deck (y 1.38), so no end-view
+            # fit is needed (fit False) and the header is never pulled down under the
+            # roof's edge - what crimped the surface into a notch over the C-pillar and
+            # kinked the seal. z is bounded inside the roof (depthRange), so the pane
+            # cannot creep onto it.
+            {'view': 'top', 'outline': [[0.98, 0.0], [0.97, 0.30], [1.00, 0.40], [1.06, 0.465], [1.24, 0.525],
+                                        [1.35, 0.56], [1.378, 0.535], [1.378, 0.0]],
+             'depthRange': [0.98, 1.36], 'facingMin': 0.3, 'fit': False, 'visible': True},
         ],
         'decals': [
             {'view': 'front', 'rect': [[0.0, 0.655], [1.36, 0.14]], 'radius': 0.02, 'mirror': False, 'material': 'chrome',

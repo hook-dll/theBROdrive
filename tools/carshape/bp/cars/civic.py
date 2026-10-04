@@ -38,7 +38,13 @@ CAR = {
     },
     'parts': {
         'glass': [
-            {'view': 'side', 'outline': [[-0.62, 0.89], [-0.35, 1.21], [0.38, 1.24], [0.38, 0.89]], 'facingMin': 0.3},
+            # The door glass's front edge is the A-pillar's rear side; the drawing's
+            # DLO line at y -0.62 is the pillar's front (the screen's edge, which the
+            # screen pane's own outer edge lands on). With the pane run out to the
+            # drawing's line the pillar had no width at the top: the screen's fitted
+            # edge and the pane's crossed at z 1.2 and the seal was lifted into a spike
+            # over the cowl. 4-6 cm back leaves the pillar a 9-12 cm band as the photos.
+            {'view': 'side', 'outline': [[-0.58, 0.89], [-0.29, 1.20], [0.38, 1.24], [0.38, 0.89]], 'facingMin': 0.3},
             {'view': 'side', 'outline': [[0.47, 0.89], [0.47, 1.24], [0.86, 1.235], [0.99, 1.09], [0.94, 0.89]], 'facingMin': 0.3},
             {'view': 'front', 'outline': [[0.0, 1.25], [0.47, 1.245], [0.51, 1.22], [0.58, 0.92], [0.55, 0.90], [0.0, 0.90]],
              'depthRange': [-1.1, -0.3], 'facingMin': 0.25},
@@ -96,7 +102,7 @@ CAR = {
         # The wing mirror: the drawing's side view has it on the wing just ahead of the
         # screen's foot (its base at y -0.80..-0.65, the wing's top there 0.91), and the
         # photos show the same: near the cowl, not at the wing's front corner where it was
-        'mirror': {'y': -0.82, 'z': 0.96, 'reach': 0.60, 'w': 0.08, 'shape': 'round', 'material': 'trim'},
+        'mirror': {'y': -0.82, 'z': 0.96, 'reach': 0.60, 'w': 0.11, 'h': 0.07, 'shape': 'rect', 'material': 'trim'},
         'handles': {'at': [[0.33, 0.82]], 'w': 0.11},
         'wipers': {'arms': [[-0.5, -0.05, -0.92, 0.88], [0.05, 0.45, -0.92, 0.88]]},
         'wheel': {'style': 'steel', 'windows': 8, 'rimFactor': 0.66, 'cap': True},
