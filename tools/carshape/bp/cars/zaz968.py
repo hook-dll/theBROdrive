@@ -16,8 +16,13 @@ CAR = {
     },
     'hull': {
         'bumpers': {'front': {'z': [0.30, 0.48]}, 'rear': {'z': [0.30, 0.48]}},
-        'topOverride': [[0.75, 1.37], [0.85, 1.33], [1.06, 0.90], [1.3, 0.865]],
-        'sill': [[-1.9, 0.40], [-1.65, 0.36], [-1.4, 0.30], [0.75, 0.30], [1.0, 0.32], [1.6, 0.42], [1.9, 0.42]],
+        # The 968M's engine bay is a deep slab: the deck runs level to a square tail
+        # corner and the body hangs down to the bar's foot (side photo: 0.33-0.80 m
+        # behind the rear wheel against the nose's 0.42-0.78). The drawn outline let
+        # the deck sag and the lower edge rise to 0.46, so the tail read thinner than
+        # the nose.
+        'topOverride': [[0.75, 1.37], [0.85, 1.33], [1.06, 0.90], [1.3, 0.875], [1.6, 0.872], [1.80, 0.868], [1.87, 0.84]],
+        'sill': [[-1.9, 0.42], [-1.65, 0.38], [-1.4, 0.30], [0.75, 0.30], [1.0, 0.31], [1.30, 0.34], [1.5, 0.33], [1.9, 0.33]],
         'cabin': [-0.83, 1.06],
         'belt': [[-0.83, 0.89], [-0.5, 0.895], [0.85, 0.89], [1.06, 0.88]],
         'glassPlan': [[-0.83, 0.58], [-0.5, 0.64], [0.75, 0.64], [1.06, 0.58]],
@@ -122,7 +127,9 @@ CAR = {
             # The 968M is a two-door (factory sheet, the side photo: one handle, one
             # door, a fixed quarter light behind it): the second door's shut line and
             # handle came from the drawing, which is a four-door.
-            {'view': 'side', 'points': [[-0.63, 0.89], [-0.63, 0.30], [0.18, 0.30], [0.18, 0.89]], 'width': 0.005},
+            # One long door from just behind the front arch (side photo: its front edge
+            # 0.31 m behind the front axle) to the B-pillar.
+            {'view': 'side', 'points': [[-0.84, 0.89], [-0.84, 0.32], [0.18, 0.30], [0.18, 0.89]], 'width': 0.005},
             {'view': 'top', 'points': [[-1.84, 0.56], [-0.88, 0.58]], 'width': 0.005},
             {'view': 'side', 'points': [[-1.83, 0.82], [1.88, 0.80]], 'width': 0.008, 'material': 'chrome', 'height': 0.003},
             {'view': 'side', 'points': [[-0.55, 0.97], [-0.36, 1.24], [0.62, 1.235], [0.70, 1.21], [0.87, 0.89]], 'width': 0.032,
@@ -143,6 +150,7 @@ CAR = {
         'mirror': {'y': -0.70, 'z': 0.94, 'reach': 0.82, 'w': 0.13, 'h': 0.08, 'material': 'trim', 'sides': [1]},
         'handles': {'at': [[0.0, 0.84]], 'w': 0.12},
         'wipers': {'arms': [[-0.5, -0.05, -0.85, 0.89], [0.05, 0.5, -0.85, 0.89]]},
-        'wheel': {'style': 'hubcap', 'rimFactor': 0.66, 'cap': 0.55},
+        # Plain painted steel wheels with a small chrome cap (side photo).
+        'wheel': {'style': 'steel', 'windows': 0, 'rimFactor': 0.66, 'cap': True},
     },
 }
