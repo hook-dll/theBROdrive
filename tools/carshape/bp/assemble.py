@@ -723,9 +723,11 @@ def decal_shapes():
     for d in P.get('decals', []):
         if d['view'] in ('front', 'rear'):
             # A lamp drawn on an end lies on what that end shows: the surface seen from
-            # in front (or behind), however steeply it slopes, stopping only where it
-            # turns past grazing, and cut cleanly there (iso_cut).
-            d = dict(d, facingMin=min(d.get('facingMin', 0.15), 0.15), visible=True)
+            # in front (or behind), however steeply it slopes, and cut cleanly where it
+            # stops (iso_cut). The car file's own facingMin is that stopping point -- a
+            # lamp kept off the bonnet's brow says so here; when it says nothing, the
+            # limit reaches down to grazing so a steep nose keeps its lamps.
+            d = dict(d, facingMin=d.get('facingMin', 0.15), visible=True)
         for sign, poly in sides_of(d):
             hole = offset_poly(poly, -d['ring']) if d.get('ring') else None
             node = d.get('node', 'decal_trim')
@@ -818,16 +820,26 @@ for _ in range(P.get('paneEdgeRelax', 4)):
         v.co = hit[0]
 bm.normal_update()
 if _gl and SEAL.get('width', 0) > 0:
-    _before = {v: v.co.copy() for f in _gl for v in f.verts}
+    # The pane's outline before insetting: every vertex of the band is held to it.
+    _bsegs = [(e.verts[0].co.copy(), e.verts[1].co.copy()) for e in _bedges]
     res = bmesh.ops.inset_region(bm, faces=_gl, thickness=SEAL['width'], depth=0.0, use_even_offset=False)
-    # At a corner the band's inner edge can run far out (an outline doubling back):
-    # no vertex moves further than a few band widths from where it was.
-    for f in _gl:
-        for v in f.verts:
-            if v in _before:
-                d_ = v.co - _before[v]
-                if d_.length > 3 * SEAL['width']:
-                    v.co = _before[v] + d_.normalized() * 3 * SEAL['width']
+    # At a corner the band's inner edge can run out along the corner's bisector
+    # (an outline doubling back; the old clamp only looked at vertices that had moved,
+    # never at the new ones the inset makes). No vertex of the band is left further
+    # than 1.5 band widths from the pane's own edge: an even band (one width) and a
+    # right-angle corner (1.41 w) are kept whole, a sharper corner is trimmed.
+    _lim = 1.5 * SEAL['width']
+    for v in {v for f in res['faces'] for v in f.verts}:
+        best, bp = 1e9, None
+        for a_, b_ in _bsegs:
+            ab = b_ - a_
+            t = max(0.0, min(1.0, (v.co - a_).dot(ab) / ab.length_squared)) if ab.length_squared > 1e-12 else 0.0
+            p = a_ + ab * t
+            d_ = (v.co - p).length
+            if d_ < best:
+                best, bp = d_, p
+        if bp is not None and best > _lim:
+            v.co = bp + (v.co - bp) * (_lim / best)
     t_seal = len(TAGS)
     TAGS.append(('decal_trim', SEAL['material'], SEAL.get('height', 0.002)))
     for f in res['faces']:
@@ -1281,23 +1293,35 @@ if m:
         # A mirror at the front side window's corner is on the door; one well ahead of
         # it stands on the wing.
         on_wing = m.get('mount') == 'wing' or (m.get('mount') != 'door' and m['y'] < _side_front - 0.12)
+        z_mir = m['z']
         if on_wing:
             # The stalk stands on the wing's top, the head over it (at most a few cm
             # out): a head out at `reach` above a foot well inboard hangs in the air.
-            down = None
-            for k in range(40):
-                xf = xc - s_ * 0.01 * k
-                down, _n = skin_point((xf, m['y'] + 0.01, m['z']), (0, 0, -1))
-                if down is not None and down.z > m['z'] - 0.35:
-                    break
-                down = None
+            # The first downward hit inboard is the flank when the head is past the
+            # wing's edge (a pole down the body's side, Mini/Saab 96), so only a
+            # gently up-facing panel counts (a wing's rounded crown is ~0.6-0.7, a
+            # flank ~0). The head may sit level with or a little under that crown
+            # (the Mini's fender top is above the height the car file gives), so the
+            # ray starts just above the head and the head is set above the foot.
+            def wing_hit(nz_lo, z_lo, z_hi):
+                for k_ in range(40):
+                    xf_ = xc - s_ * 0.01 * k_
+                    h_, n_ = skin_point((xf_, m['y'] + 0.01, m['z'] + 0.12), (0, 0, -1))
+                    if h_ is not None and n_[2] > nz_lo and z_lo < h_.z <= z_hi:
+                        return xf_, h_
+                return None, None
+            xf, down = wing_hit(0.55, m['z'] - 0.18, m['z'] + 0.12)
             if down is None:
-                xf = xc
+                # a rounded crown or a mirrored flank: anything up-facing near the head
+                xf, down = wing_hit(0.3, m['z'] - 0.28, m['z'] + 0.14)
+            if down is None:
+                xf, down = xc, None
             else:
                 xc = xf + s_ * min(abs(xc - xf), 0.04)
                 x1 = xc + s_ * w_ / 2
+                z_mir = max(m['z'], down.z + h_ * 0.6)
             z_foot = down.z if down else m['z'] - 0.15
-            z_head = m['z'] - h_ * 0.45
+            z_head = z_mir - h_ * 0.45
             # a thin stalk from a small foot on the wing up into the head
             disc(bm_, (xf, m['y'] + 0.01, z_foot + 0.004), (0, 0, 1), 0.018, 0.012, 10, 0)
             if z_head - z_foot > 0.01:
@@ -1319,7 +1343,7 @@ if m:
             if dv.length > 0.005:
                 rot = Vector((1, 0, 0)).rotation_difference(dv.normalized()).to_matrix().to_4x4()
                 box(bm_, (a0 + a1) / 2, (dv.length, 0.022, 0.018), 0, rot)
-        mirror_head(bm_, (xc, m['y'] + 0.02, m['z']), w_, h_, 0.05 if shape == 'round' else 0.06, shape, s_)
+        mirror_head(bm_, (xc, m['y'] + 0.02, z_mir), w_, h_, 0.05 if shape == 'round' else 0.06, shape, s_)
     bmesh.ops.recalc_face_normals(bm_, faces=bm_.faces)
     trim_parts.append(new_object('mirrors', bm_, [m.get('material', 'trim'), 'chrome']))
 
