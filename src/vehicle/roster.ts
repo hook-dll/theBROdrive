@@ -417,11 +417,14 @@ export const ROSTER: readonly RosterCar[] = [
   {
     // Renault 5 Alpine (1976): 1.4 Cléon-Fonte, 93 PS at 6400 and 11.8 kgm at 4000,
     // five-speed transaxle, 850 kg; 175 km/h, 0-100 in 9.7 s, a 10 m turning circle.
+    // Renault/FIA form 5650 (1977), pp. 1, 5, 9: 3543 with bumpers (3506 WITHOUT),
+    // 1395 empty height, tracks 1294/1270; use the mean of the 2412/2442 wheelbases.
+    // Standard final drive is 31/8, not 3.78.
     id: 'rs_renault5',
     label: 'Renault 5 Alpine',
     body: 'renault5.glb',
     bodyClass: 'car',
-    factory: { length: 3.506, width: 1.525, height: 1.33, clearance: 0.12, wheelbase: 2.434, frontTrack: 1.29, rearTrack: 1.27, wheelRadius: 0.275, tyreWidth: 0.155, frontOverhang: 0.50 },
+    factory: { length: 3.543, width: 1.525, height: 1.395, clearance: 0.12, wheelbase: 2.427, frontTrack: 1.294, rearTrack: 1.27, wheelRadius: 0.275, tyreWidth: 0.155, frontOverhang: 0.50 },
     mass: 850,
     frontWeightShare: 0.6,
     rearDriveBias: 0,
@@ -432,7 +435,7 @@ export const ROSTER: readonly RosterCar[] = [
     },
     gearbox: {
       label: 'Renault five-speed transaxle', mass: 34,
-      spec: { ratios: [3.818, 2.235, 1.478, 1.036, 0.861], reverse: 3.083, finalDrive: 3.78, shiftTime: 0.28, automatic: false, efficiency: 0.92 },
+      spec: { ratios: [3.818, 2.235, 1.478, 1.035, 0.861], reverse: 3.083, finalDrive: 3.875, shiftTime: 0.28, automatic: false, efficiency: 0.92 },
     },
     tankLitres: 38,
     wheelGrip: 0.78,

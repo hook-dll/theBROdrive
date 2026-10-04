@@ -106,6 +106,13 @@ Passing a build because it was "not worse than before" let the old faults throug
 (Eagle's screen into a domed roof, mirrors hanging on stalks, GAZ-21's screen corner).
 Every car is now judged against its photos and its factory figures:
 
+During the clay-style evaluation, compare the SAME body with ordinary paint and
+the selected Clay preset before removing small smooth waves: they may suit the
+hand-modelled style. This does not excuse sharp accidental folds, holes, detached
+parts, malformed glass, wrong lamps or incorrect factory dimensions/proportions.
+Material relief changes the highlight, not the geometry. Preserve character only
+where it does not break the car's recognisable shape and correctly fitted details.
+
 - `build/carshape/refsheet.sh <tag> <car>...` – the photos in `_refs/photos/<car>` beside
   game-renderer shots from the same angles (front/rear three-quarters both sides, side,
   screen close-up): `$S/ref-<tag>-<car>.jpg`.
@@ -287,3 +294,38 @@ over the grille, unlike the front view and photographs. Its leading edge now
 meets the lamp bezels, keeping the cowl height. Its clear rear lens also needed
 the `reverse_lights` node name, not just the `ReverseLights` material. Both cars
 were rebuilt, installed, viewed close-up in game, and passed `dims.py` within 2%.
+
+## 2026-10-04: Renault review with the selected clay finish
+
+Renault 4 TL: the drawing is a 1961 car; the former front photo was an early car,
+and the side/rear photos were a GTL. Replaced the photo set with the documented
+[1978 TL, Collecting Cars lot 002678](https://collectingcars.com/for-sale/1978-renault-4-tl)
+(Spanish-built R1125, 845 cc; being sold in Germany does not make it a German-market car).
+The shell still uses the drawing, at the later 1485 mm width. Details now follow
+the TL: black grille with a thin bright rim, rectangular amber/clear front units,
+flush black plastic cowl intake, narrow bright waist moulding, eight-hole wheels,
+chrome mirror and rear bumper overriders. The rear cluster is red/amber/red in
+black rubber, not a clear reversing lens in chrome. Rear glass widened to 840 mm,
+with the tailgate shut line outside it. The roster's 620 kg remains unverified;
+no French 782 cc or GTL 1108 cc specification was substituted for its 845 cc engine.
+
+Renault 5 Alpine: read the original scan of
+[FIA form 5650](https://historicdb.fia.com/sites/default/files/car_attachment/1613145601/homologation_form_number_5650_group_1.pdf),
+not just OCR. Length 3543 mm includes bumpers (3506 excludes them), empty height
+1395, front/rear tracks 1294/1270, wheelbases 2412/2442 (model mean 2427).
+Fourth gear is 1.035, final drive 31/8 = 3.875. Roof/glazing height adapted in the
+car file, not by a whole-body game stretch. Thin bright grille bars, four-opening
+flat wheel faces and narrow dark C-pillar vents with bright rims replace the
+cross-shaped wheels and silver sail panels. Side vent projection excludes the
+roof; the rear-window header is body colour, not a silver band.
+
+The Alpine's front-view pane fitter still raised the foot 9 cm after two contour
+adjustments. Measured the actual skin by vertical rays: the screen slope runs
+from y -0.68 to -0.30, approximately 1.0 to 1.30 m high. Its pane is now authored
+in plan on that slope, with no end-view fitting. Final assembly has no PANE or
+GLASS-RAGGED warning. Both rebuilt GLBs were installed/refitted, checked front
+and rear in the lab with ordinary paint and the same selected clay preset;
+small smooth surface waves were retained. `build/carshape/dims.py` reports
+`OFF []` for both (largest envelope error about 1.1%); TypeScript check passes.
+Four live metal/clay switches created zero shader programs inside render, and
+the browser reported no errors.
