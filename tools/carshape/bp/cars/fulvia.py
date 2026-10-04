@@ -1,11 +1,17 @@
-# Lancia Fulvia Coupé Rallye 1.3 S (1967-76). Factory: 3935 x 1555 x 1300, wheelbase 2330,
-# overhangs 805/800, tracks 1300/1280, 155-14, clearance 130. The dimensioned drawing
-# reprinted at 3dcar.ru/blueprints/lancia/fulvia_coupe_hf_1967.
+# Lancia Fulvia Coupé Rallye 1.3 S (1967-76). Factory (automobile-catalog/carfolio/
+# conceptcarz for the 1967-70 Coupé, all agreeing): 3975 x 1555 x 1300, wheelbase 2330,
+# tracks 1300/1280, clearance 130, 145 SR 14 (155 SR 14 on later cars). The file's
+# 3935 was 805+800+2330 - a rear overhang 40 mm short of the factory length; the wheel
+# radius was 0.29 where a 145 SR 14 is 0.1778+0.145*0.82 = 0.297 (the side photograph's
+# tyre measures 0.591 m across, ground 2908 px, front axle x 1199, 1159 px/m).
+# Front overhang 0.805 is the dimensioned drawing's own (side view content -1.969 to
+# +1.947 at z 0.70 over a 2330 mm wheelbase = 279.4 px/m), rear = 3.975-2.330-0.805.
+# The dimensioned drawing reprinted at 3dcar.ru/blueprints/lancia/fulvia_coupe_hf_1967.
 CAR = {
     'id': 'fulvia',
     'label': 'Lancia Fulvia Coupé',
-    'factory': {'length': 3.935, 'width': 1.555, 'height': 1.3, 'clearance': 0.13, 'wheelbase': 2.33,
-                'frontTrack': 1.3, 'rearTrack': 1.28, 'wheelRadius': 0.29, 'tyreWidth': 0.155, 'frontOverhang': 0.805},
+    'factory': {'length': 3.975, 'width': 1.555, 'height': 1.3, 'clearance': 0.13, 'wheelbase': 2.33,
+                'frontTrack': 1.3, 'rearTrack': 1.28, 'wheelRadius': 0.297, 'tyreWidth': 0.145, 'frontOverhang': 0.825},
     'blueprint': {
         'image': 'fulvia.jpg',
         'dark': 110,
@@ -21,21 +27,34 @@ CAR = {
         # One top line for the whole bonnet, screen and roof (a second `topOverride`
         # key would shadow this one - the roof's did, so the bonnet ran on the drawing's
         # raw line and waved +-3 cm: the mirrors and jets drawn standing on the scuttle
-        # bump it). The line is the drawing's own: bonnet 0.87 at -1.30 to 0.95 at the
-        # screen's foot, the screen's straight rake to 1.29 at -0.42, the roof's true
-        # height (the drawing's 1.375-1.40 there is its gutter/rack, the car is 1.30)
-        # flat to the rear edge.
-        'topOverride': [[-1.30, 0.870], [-1.10, 0.888], [-0.95, 0.915], [-0.82, 0.95], [-0.70, 1.055],
-                        [-0.60, 1.1425], [-0.50, 1.23], [-0.42, 1.29], [-0.34, 1.292], [-0.18, 1.2925],
-                        [0.0, 1.299], [0.20, 1.3035], [0.40, 1.3055], [0.56, 1.307]],
-        'cabin': [-0.68, 1.03],
-        'belt': [[-0.68, 0.89], [-0.45, 0.85], [0.6, 0.835], [1.03, 0.82]],
-        'glassPlan': [[-0.68, 0.64], [-0.3, 0.70], [0.6, 0.70], [1.03, 0.62]],
+        # bump it). The line is the side photograph's own silhouette (full-res 5184 px:
+        # 1159 px/m from the 2.33 m wheelbase, ground row 2908, front axle column 1199),
+        # read column by column as the first long run of car pixels: the bonnet falls
+        # from 0.885 at the cowl to 0.780 at y -1.59 and rounds down onto the nose's
+        # brow at ~0.66-0.68, which the dimensioned drawing's own silhouette agrees with
+        # (0.711 at -1.958). The old line started at y -1.30, so the whole nose was
+        # clamped level at 0.870: the flat, high front that lost the light overhang.
+        # The screen's rake is the photograph's (its silhouette passes -0.51 at z 1.00
+        # and -0.29 at 1.15), the header the drawn -0.218, the roof 1.30 (the drawing's
+        # 1.375-1.40 there is its gutter/rack) flat to the rear edge.
+        'topOverride': [[-1.97, 0.660], [-1.90, 0.680], [-1.82, 0.712], [-1.75, 0.735], [-1.67, 0.755],
+                        [-1.59, 0.780], [-1.50, 0.797], [-1.42, 0.811], [-1.33, 0.819], [-1.25, 0.831],
+                        [-1.16, 0.842], [-1.07, 0.850], [-0.98, 0.855], [-0.90, 0.861], [-0.82, 0.867],
+                        [-0.74, 0.873], [-0.68, 0.880], [-0.66, 0.885], [-0.55, 0.978], [-0.45, 1.065],
+                        [-0.35, 1.152], [-0.27, 1.228], [-0.218, 1.290], [-0.18, 1.293], [0.0, 1.299],
+                        [0.20, 1.3035], [0.40, 1.3055], [0.56, 1.307]],
+        # The cabin starts at the screen's foot (-0.64), not 18 cm ahead of it: the
+        # glasshouse's section was carried forward over the bonnet's rear.
+        'cabin': [-0.64, 1.03],
+        'belt': [[-0.60, 0.868], [-0.45, 0.85], [0.6, 0.835], [1.03, 0.82]],
+        'glassPlan': [[-0.60, 0.655], [-0.3, 0.70], [0.6, 0.70], [1.03, 0.62]],
         # The car is a slim coupé: flat sides with a shoulder crease along the belt, a
         # flat bonnet and a flat roof, so no crown along the car and next to none across
-        # it (2-3 cm of crown domed the roof and swelled the wings).
-        'crown': [[-2.0, 0.008], [2.0, 0.008]],
-        'roofCrown': 0.012,
+        # it (2-3 cm of crown domed the roof and swelled the wings). The photographs'
+        # bonnet is a flat panel with its edge crease at the wings: 4 mm across keeps
+        # the panel flat, and the deck's edges then fall where the drawn section turns.
+        'crown': [[-2.0, 0.004], [2.0, 0.004]],
+        'roofCrown': 0.004,
         # Crisp folds (0.011 over a 1.4 cm floor, 2 cm along the car instead of the
         # 6 cm default): the blur was what made the nose a rounded block, the shoulders
         # soft and the tail panel roll.
@@ -47,42 +66,77 @@ CAR = {
         # its drawn line 6 cm low at +1.90): the ends' outlines faired with their corners
         # kept (the drawing's bonnet brow over the lamps, the boot lid's rear edge).
         'faceSpacing': 0.15, 'cornerDeg': 20,
-        # The drawing's arch lip tops out at z 0.645 over the axle (the swage line at
-        # 0.689 is above it); with R 0.29 + lift 0.03 + r 0.36 the opening sat 4 cm high
-        # and read as a gap above the tyre (the photos leave 6 cm, not 10).
-        'arch': {'radius': 0.355, 'lift': 0.0},
+        # The arch's opening over the tyre: the side photograph's lip measures 0.330 m
+        # above the front axle's centre (0.628 from the ground) over a 0.297 m tyre -
+        # a 3.5 cm gap, not the 6.5 the drawn 0.645-lip gave (the drawing's arch line is
+        # the flare's crest, not the opening). With the wheel at 0.29 and the opening at
+        # 0.355 the wheels read small in the arches.
+        'arch': {'radius': 0.33, 'lift': 0.0},
         # The roof's side edge above the windows also waved (the drawn section's top
         # left it a wide roll that a 3 mm dip read as a crumple): the section is held
-        # at its width 8 cm below the top line, so the roof is a flat panel with one
-        # crisp crease down each side as the photos show.
-        'roofEdge': 0.08,
+        # at its width 3 cm below the top line, so the roof is a flat panel with one
+        # crisp crease down each side as the photos show (a tight drip rail). At the
+        # 8 cm it was, the hold ran *below* the belt at the cowl's corner - the station
+        # where the screen's foot is - and the section jumped between "held from below
+        # the belt" and "held above it": a 2 cm bulge-and-dip on the scuttle's shoulder
+        # at -0.68..-0.52 (the crumpled skin the user photographed).
+        'roofEdge': 0.03,
     },
     # Thin chrome frames (the photos: about 8 mm, not the 12 the drawn frame lines
     # carried); every pane's own seal carries them.
     'glassSeal': {'material': 'chrome', 'width': 0.008},
+    # The side panes are drawn to the drawn pillar lines already; assemble.py's
+    # `reach_pillar` (it pushes a front window forward to the pillar, for cars whose
+    # panes stopped short) must leave them where they are.
+    'pillarReach': 0.0,
     'parts': {
         'glass': [
-            {'view': 'side', 'outline': [[-0.29, 1.0], [-0.24, 0.848], [0.568, 0.837], [0.582, 1.181], [0.536, 1.193], [0.181, 1.219],
-                                         [-0.10, 1.215], [-0.14, 1.20], [-0.25, 1.07]], 'facingMin': 0.3},
+            # The screen is authored in plan (view 'top'), not in the front view: fitted
+            # there it stopped where the shell turns away sideways - 20 cm short of the
+            # pillar - and the paint left between read as a 30 cm A-pillar (the user's
+            # screenshot). The outline is the drawn glasshouse in plan: the cowl line at
+            # -0.64 in the middle sweeping back to the pillar's foot at -0.44, the
+            # A-pillar's front edge (the drawn band runs -0.451 at 0.852 to -0.193 at
+            # 1.207) up to the roof's front edge at -0.225, which closes it. It wraps
+            # onto the pillar's front face at `facingMin` 0.15 - that face is 0.26-0.47
+            # up-facing - and its own `iso_cut` rounds the corner; `depthRange` holds it
+            # between the screen's foot and the roof.
+            {'view': 'top', 'outline': [[-0.64, 0.0], [-0.625, 0.30], [-0.575, 0.50], [-0.52, 0.60],
+                                        [-0.465, 0.655], [-0.35, 0.634], [-0.30, 0.614], [-0.26, 0.60],
+                                        [-0.235, 0.585], [-0.225, 0.40], [-0.225, 0.0]],
+             'depthRange': [0.86, 1.295], 'facingMin': 0.15, 'fit': False},
+            # The door window runs forward to the screen pillar's rear edge: the drawn
+            # pane stopped at -0.29 and left 30 cm of paint in front of it. Its front
+            # edge is the drawn pillar band's rear line (0.852 at -0.397 to 1.207 at
+            # -0.132); the chrome line below marks its vent window's division.
+            {'view': 'side', 'outline': [[-0.40, 0.852], [-0.135, 1.208], [0.181, 1.219], [0.536, 1.193],
+                                         [0.582, 1.181], [0.568, 0.837]], 'facingMin': 0.3},
             # The quarter light's foot corner: its two edges meet at 48 degrees and the
             # seal's inset (assemble.py, capped at 3 band widths) ran a 2.4 cm spur out
             # of it, over the C-pillar. A 3 cm radius arc in the outline takes the
             # corner out of the inset.
             {'view': 'side', 'outline': [[0.625, 1.174], [0.611, 0.833], [0.980, 0.8235], [1.010, 0.826], [1.023, 0.833],
-                                         [1.019, 0.845], [0.811, 1.07], [0.747, 1.126], [0.704, 1.152],
-                                         [0.657, 1.17]], 'facingMin': 0.3},
-            {'view': 'front', 'outline': [[0.0, 1.235], [0.42, 1.215], [0.52, 1.165], [0.575, 0.90], [0.555, 0.875], [0.0, 0.875]],
-             'depthRange': [-0.75, -0.15], 'facingMin': 0.2},
-            {'view': 'rear', 'outline': [[0.0, 1.195], [0.40, 1.18], [0.48, 1.13], [0.53, 0.87], [0.51, 0.852], [0.0, 0.86]],
+                                         [1.017, 0.845], [0.958, 0.900], [0.905, 0.950], [0.852, 1.000],
+                                         [0.773, 1.075], [0.735, 1.111], [0.680, 1.163], [0.645, 1.175]], 'facingMin': 0.3},
+            # The back light reaches the roof: its drawn header (1.195 m) left a 10 cm
+            # painted band above the glass where the photographs show 3-4 cm, the same
+            # fault the Moskvich-412's rear pane had. Its foot stays on the deck.
+            {'view': 'rear', 'outline': [[0.0, 1.26], [0.40, 1.245], [0.48, 1.195], [0.53, 0.90], [0.51, 0.88],
+                                         [0.0, 0.885]],
              'depthRange': [0.7, 1.6], 'facingMin': 0.15},
         ],
         'decals': [
-            # The nose: four round lamps in chrome rings on the body, the fine grille in a
-            # chrome trapezoid between the inner pair, its shield.
-            {'view': 'front', 'outline': [[0.0, 0.64], [0.31, 0.64], [0.29, 0.44], [0.0, 0.44]], 'material': 'chrome',
-             'height': 0.003, 'depthRange': [-2.1, -1.6]},
-            {'view': 'front', 'outline': [[0.0, 0.625], [0.295, 0.625], [0.275, 0.455], [0.0, 0.455]], 'material': 'grille',
-             'height': 0.005, 'depthRange': [-2.1, -1.6]},
+            # The nose: four round lamps in a BLACK panel that spans the front between
+            # the wings (the 1.3 S photographs), not four chrome rings on the paint. The
+            # drawn chrome trapezoid is that panel's chrome surround, so the panel keeps
+            # its outline and a `ring` band frames it; the drawn four HF slots are the
+            # slat grille between the inner pair.
+            {'view': 'front', 'outline': [[0.0, 0.645], [0.52, 0.645], [0.60, 0.628], [0.628, 0.575],
+                                          [0.628, 0.505], [0.60, 0.455], [0.52, 0.44], [0.0, 0.44]],
+             'material': 'grille', 'height': 0.004, 'depthRange': [-2.1, -1.6], 'facingMin': 0.1},
+            {'view': 'front', 'outline': [[0.0, 0.645], [0.52, 0.645], [0.60, 0.628], [0.628, 0.575],
+                                          [0.628, 0.505], [0.60, 0.455], [0.52, 0.44], [0.0, 0.44]],
+             'material': 'chrome', 'height': 0.006, 'ring': 0.013, 'depthRange': [-2.1, -1.6], 'facingMin': 0.1},
             {'view': 'front', 'circle': [[0.387, 0.54], 0.074], 'material': 'chrome', 'height': 0.008, 'depthRange': [-2.1, -1.6]},
             {'view': 'front', 'circle': [[0.585, 0.538], 0.074], 'material': 'chrome', 'height': 0.008, 'depthRange': [-2.1, -1.6]},
             {'view': 'front', 'node': 'headlights', 'circle': [[0.387, 0.54], 0.06], 'material': 'Headlights', 'height': 0.012,
@@ -91,15 +145,25 @@ CAR = {
              'depthRange': [-2.1, -1.6]},
             {'view': 'front', 'outline': [[0.0, 0.67], [0.03, 0.64], [0.03, 0.56], [0.0, 0.53], [-0.03, 0.56], [-0.03, 0.64]],
              'mirror': False, 'material': 'chrome', 'height': 0.010, 'depthRange': [-2.1, -1.6]},
-            # The amber indicators sit in the lamp panel's outer ends at the lamps' own
-            # height (the photos of the 1.3 S), not low and inboard where the drawing's
-            # four HF slots are: outboard of the outer lamp, at the wing's corner.
-            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.652, 0.527], [0.062, 0.028]], 'radius': 0.013,
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-2.1, -1.6]},
-            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.652, 0.527], [0.062, 0.028]], 'radius': 0.013,
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-2.1, -1.6]},
+            # The front indicators sit on the front wings' sides beside the lamp panel
+            # (the photographs: an amber oval at y -1.50, z 0.55, measured off side.jpg
+            # at 1159 px/m), not on the wing's rear and not in the lamp panel.
+            {'view': 'side', 'node': 'front_blinker_left', 'outline': [[-1.56, 0.578], [-1.44, 0.578], [-1.43, 0.551],
+                                                                        [-1.44, 0.524], [-1.56, 0.524], [-1.57, 0.551]],
+             'material': 'IndicatorLights', 'height': 0.006, 'facingMin': 0.3},
+            {'view': 'side', 'node': 'front_blinker_right', 'outline': [[-1.56, 0.578], [-1.44, 0.578], [-1.43, 0.551],
+                                                                         [-1.44, 0.524], [-1.56, 0.524], [-1.57, 0.551]],
+             'material': 'IndicatorLights', 'height': 0.006, 'facingMin': 0.3},
             {'view': 'front', 'rect': [[0.0, 0.33], [0.40, 0.09]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
              'height': 0.004, 'depthRange': [-2.1, -1.6]},
+            # The scuttle's air intake: a slotted panel with a chrome frame across the
+            # base of the screen (the photographs) - the crisp line the screen's foot
+            # stands on. Without it the bonnet simply ran up into the screen in one
+            # rounded sweep, which is what read as a pillow.
+            {'view': 'top', 'rect': [[-0.662, 0.0], [0.052, 0.60]], 'radius': 0.010, 'mirror': False,
+             'material': 'chrome', 'height': 0.004},
+            {'view': 'top', 'rect': [[-0.660, 0.0], [0.040, 0.575]], 'radius': 0.008, 'mirror': False,
+             'material': 'grille', 'height': 0.006},
             # The tail: one chrome-framed cluster a side under the deck: the stop/tail a
             # round red lens inboard with the amber indicator lens beside it outboard (the
             # photos of the 1.3 S); the reversing lamp sits on the panel below the
@@ -124,23 +188,37 @@ CAR = {
              'material': 'chrome', 'height': 0.008, 'depthRange': [-2.1, -1.6]},
         ],
         'lines': [
+            # The door's shut lines (front at the A-pillar's foot, rear at its trailing
+            # edge) and the waist moulding. The two chrome outlines the file used to draw
+            # around the side panes are gone: every pane's own seal carries the frame now.
             {'view': 'side', 'points': [[-0.50, 0.85], [-0.516, 0.29], [0.62, 0.28], [0.62, 0.83]], 'width': 0.005},
-            {'view': 'side', 'points': [[-0.29, 1.0], [-0.24, 0.848], [0.568, 0.837], [0.582, 1.181], [0.536, 1.193], [0.181, 1.219],
-                                        [-0.10, 1.215], [-0.25, 1.07], [-0.29, 1.0]], 'width': 0.012, 'material': 'chrome', 'height': 0.003},
-            {'view': 'side', 'points': [[0.625, 1.174], [0.611, 0.833], [1.026, 0.822], [0.811, 1.07], [0.704, 1.152], [0.625, 1.174]],
-             'width': 0.012, 'material': 'chrome', 'height': 0.003},
-            {'view': 'side', 'points': [[-0.10, 1.215], [-0.09, 0.85]], 'width': 0.012, 'material': 'chrome', 'height': 0.003},
-            {'view': 'side', 'points': [[-1.94, 0.70], [1.95, 0.70]], 'width': 0.004, 'material': 'rubber'},
+            # The vent window's division: drawn 5 cm behind the pillar at the belt,
+            # tapering to the header (the drawn line, -0.13 at 0.87 to -0.09 at 1.21).
+            {'view': 'side', 'points': [[-0.132, 1.20], [-0.09, 0.858]], 'width': 0.012, 'material': 'chrome', 'height': 0.003},
+            # The flank's feature line (the drawing's own, and the photograph's dark
+            # shading line at z 0.692-0.706): drawn thin, 3 mm, not the 4 mm ridge it was.
+            {'view': 'side', 'points': [[-1.94, 0.70], [1.95, 0.70]], 'width': 0.003, 'material': 'rubber'},
         ],
         'bumpers': {
-            'front': {'z': [0.40, 0.44], 'depth': 0.035, 'wrap': 0.30, 'profile': 'round', 'standOff': 0.0},
+            # The front blade: 2 cm deep, so it stands just proud of the nose. At 3.5 cm
+            # its back face fell 1.2 cm inside the shell's nose, which now reaches the
+            # drawn body end (hull.py stretches to the drawn end where a bar stands):
+            # BUMPER ... stand -0.013 in the log.
+            'front': {'z': [0.40, 0.44], 'depth': 0.020, 'wrap': 0.30, 'profile': 'round', 'standOff': 0.0},
             'rear': {'z': [0.43, 0.47], 'depth': 0.035, 'wrap': 0.30, 'profile': 'round', 'standOff': 0.0},
         },
-        'mirror': {'y': -0.52, 'z': 0.90, 'reach': 0.84, 'w': 0.08, 'h': 0.06, 'material': 'chrome', 'shape': 'round'},
+        # On the door's front corner at the belt, as the side photograph shows it: a
+        # small oval head (about 7.5 x 9.5 cm, its stem no longer than the head) just
+        # over the belt, not a round 8.5 cm dish out at the cowl on a stalk: the file
+        # had y -0.52, 20 cm ahead of the side window, so assemble.py stood it on the
+        # wing on a pole.
+        'mirror': {'y': -0.06, 'z': 0.90, 'reach': 0.750, 'w': 0.075, 'h': 0.095, 'material': 'chrome', 'shape': 'rect'},
         'handles': {'at': [[0.45, 0.76]], 'w': 0.11},
         'wipers': {'arms': [[-0.5, -0.05, -0.70, 0.90], [0.05, 0.5, -0.70, 0.90]]},
         # Plain steel wheels with a small chrome centre cap (the photos of the Rallye
-        # 1.3 S: no cast alloy, the hubcap type came with the 1.6 HF's Cromodoras).
-        'wheel': {'style': 'steel', 'windows': 0, 'rimFactor': 0.68, 'cap': True},
+        # 1.3 S: no cast alloy, the hubcap type came with the 1.6 HF's Cromodoras). The
+        # rim is 14 in: 0.178 of the 0.297 tyre = 0.60, not the 0.68 the file carried
+        # (a rim 2 cm too big made the tyre look thin, so the wheels looked small).
+        'wheel': {'style': 'steel', 'windows': 0, 'rimFactor': 0.60, 'cap': True},
     },
 }

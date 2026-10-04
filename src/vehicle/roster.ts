@@ -770,11 +770,18 @@ export const ROSTER: readonly RosterCar[] = [
   {
     // Lancia Fulvia Coupé Rallye 1.3 S (1970): narrow-angle V4 1.3, 90 PS DIN at 6000
     // and 11.5 kgm at 5000, five-speed on a 4.18 final drive, front drive, 960 kg; 170 km/h.
+    // Factory figures: 3975 x 1555 x 1300, wheelbase 2330, tracks 1300/1280
+    // (automobile-catalog/carfolio/conceptcarz for the 1967-70 Coupé, all agreeing; the
+    // FIA historic-db forms 622/3020 for the Rallye 1.3 S share the wheelbase and tracks).
+    // 145 SR 14 (the Coupé's standard tyre; 155 SR 14 on the later cars): 0.1778 +
+    // 0.145*0.82 = 0.297 m radius, which the side photograph's 0.591 m tyre confirms.
+    // Front overhang 0.825 is axle-to-bumper (drawing: body nose -1.969 m, bumper face
+    // -1.99, axles +-1.1625 at 279.4 px/m), so the length, wheelbase and overhangs agree.
     id: 'rs_fulvia',
     label: 'Lancia Fulvia Coupé',
     body: 'fulvia.glb',
     bodyClass: 'car',
-    factory: { length: 3.935, width: 1.555, height: 1.3, clearance: 0.13, wheelbase: 2.33, frontTrack: 1.3, rearTrack: 1.28, wheelRadius: 0.29, tyreWidth: 0.155, frontOverhang: 0.805 },
+    factory: { length: 3.975, width: 1.555, height: 1.3, clearance: 0.13, wheelbase: 2.33, frontTrack: 1.3, rearTrack: 1.28, wheelRadius: 0.297, tyreWidth: 0.145, frontOverhang: 0.825 },
     mass: 960,
     frontWeightShare: 0.62,
     rearDriveBias: 0,
