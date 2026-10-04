@@ -31,6 +31,8 @@ import { parseCalendarEpoch } from './game/calendar';
 import { DEFAULT_INK_STRENGTH, type GraphicsQuality } from './game/settings';
 import { DAY_LENGTH, newWorldState } from './game/state';
 import {
+  CAR_CLAY_UNIFORMS,
+  CAR_FINISH,
   CAR_STYLE_UNIFIED,
   carModelMeasure,
   carSpawnYAboveGround,
@@ -128,6 +130,24 @@ function queryNumber(query: URLSearchParams, key: string, fallback: number): num
   return query.has(key) && Number.isFinite(value) ? value : fallback;
 }
 
+const CLAY_CONTROLS: readonly {
+  key: Exclude<keyof typeof CAR_CLAY_UNIFORMS, 'uClayEnabled'>;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  scale: number;
+}[] = [
+  { key: 'uClayFineRelief', label: 'Мелкий рельеф, мм', min: 0, max: 80, step: 1, scale: 1000 },
+  { key: 'uClayBroadRelief', label: 'Широкий рельеф, мм', min: 0, max: 150, step: 1, scale: 1000 },
+  { key: 'uClayFineScale', label: 'Частота мелких, 1/м', min: 0.5, max: 30, step: 0.25, scale: 1 },
+  { key: 'uClayBroadScale', label: 'Частота широких, 1/м', min: 0.2, max: 12, step: 0.1, scale: 1 },
+  { key: 'uClayRoughness', label: 'Шероховатость', min: 0.02, max: 1, step: 0.01, scale: 1 },
+  { key: 'uClayRoughnessVariation', label: 'Разница блеска', min: 0, max: 1, step: 0.01, scale: 1 },
+  { key: 'uClayColourVariation', label: 'Пятнистость цвета', min: 0, max: 1, step: 0.005, scale: 1 },
+  { key: 'uClayMetalness', label: 'Металличность', min: 0, max: 1, step: 0.01, scale: 1 },
+];
+
 function createInterface(
   state: LabState,
   cars: readonly LabCar[],
@@ -145,6 +165,7 @@ function createInterface(
   root.innerHTML = `
     <style>
       .car-lab{position:fixed;z-index:50;left:14px;top:14px;width:min(360px,calc(100vw - 28px));padding:14px;color:#eadfca;background:rgba(19,17,13,.9);border:1px solid #82735b;font:12px/1.3 Consolas,monospace;box-shadow:0 8px 35px #0008}
+      .car-lab{max-height:calc(100vh - 28px);overflow-y:auto;box-sizing:border-box}
       .car-lab h1{font:700 18px/1.1 "Segoe UI",sans-serif;margin:0 0 8px}.car-lab p{color:#bfb39e;margin:0 0 10px}
       .car-lab label{display:grid;grid-template-columns:1fr 150px 44px;gap:7px;align-items:center;margin:6px 0}.car-lab input[type=range]{width:100%}.car-lab output{text-align:right;color:#f2d59b}
       .car-lab select,.car-lab button{color:#eadfca;background:#2b251b;border:1px solid #6b5c44;padding:6px;font:12px Consolas,monospace}.car-lab select{width:100%}
@@ -158,6 +179,13 @@ function createInterface(
     <label><span>Царапины</span><input data-control="scratches" type="range" min="0" max="1" step="0.01"><output></output></label>
     <label><span>Время суток</span><input data-control="timeHours" type="range" min="0" max="24" step="0.05"><output></output></label>
     <label><span>Качество</span><select data-control="quality"><option value="acceptable">Acceptable</option><option value="standard">Standard</option><option value="blessing">Blessing</option></select><output></output></label>
+    <label><span>Кузов</span><select data-finish><option value="metal">Металл</option><option value="clay">Пластилин</option><option value="off">Исходный</option></select><output></output></label>
+    <label class="toggle"><span>Clay</span><input data-toggle="clay" type="checkbox"><output></output></label>
+    <fieldset data-clay-panel style="margin:8px 0;padding:6px;border:1px solid #6b5c44">
+      <legend>Пластилиновый кузов</legend>
+      ${CLAY_CONTROLS.map((c) => `<label><span>${c.label}</span><input data-clay="${c.key}" type="range" min="${c.min}" max="${c.max}" step="${c.step}"><output></output></label>`).join('')}
+      <p style="margin:8px 0 0">Частота ↑ — пятна мельче. Рельеф меняет блик, не геометрию.</p>
+    </fieldset>
     ${unifiedRow}
     ${styleRow}
     <select data-control="focus"><option value="">Общий вид</option>${cars.map((car) => `<option value="${car.def.id}">${car.pack} · ${car.def.label}</option>`).join('')}</select>
@@ -183,10 +211,33 @@ function createInterface(
       const output = toggle.parentElement?.querySelector('output');
       if (output) output.textContent = CAR_STYLE_UNIFIED ? 'unified' : 'source';
     }
+    const finish = root.querySelector<HTMLSelectElement>('[data-finish]');
+    if (finish) finish.value = CAR_CLAY_UNIFORMS.uClayEnabled.value > 0.5 ? 'clay' : CAR_FINISH === 'off' ? 'off' : 'metal';
+    const clayToggle = root.querySelector<HTMLInputElement>('[data-toggle="clay"]');
+    if (clayToggle) clayToggle.checked = CAR_CLAY_UNIFORMS.uClayEnabled.value > 0.5;
+    const clayPanel = root.querySelector<HTMLFieldSetElement>('[data-clay-panel]');
+    if (clayPanel) clayPanel.disabled = CAR_CLAY_UNIFORMS.uClayEnabled.value < 0.5;
+    for (const control of CLAY_CONTROLS) {
+      const input = root.querySelector<HTMLInputElement>(`[data-clay="${control.key}"]`);
+      if (!input) continue;
+      const value = CAR_CLAY_UNIFORMS[control.key].value * control.scale;
+      input.value = String(value);
+      const output = input.parentElement?.querySelector('output');
+      if (output) output.textContent = String(Number(value.toFixed(3)));
+    }
   };
   root.addEventListener('input', (event) => {
     const input = event.target;
     if (!(input instanceof HTMLInputElement || input instanceof HTMLSelectElement)) return;
+    const clayKey = input.dataset.clay;
+    if (clayKey !== undefined) {
+      const control = CLAY_CONTROLS.find((c) => c.key === clayKey);
+      if (!control) return;
+      CAR_CLAY_UNIFORMS[control.key].value = Number(input.value) / control.scale;
+      const output = input.parentElement?.querySelector('output');
+      if (output) output.textContent = input.value;
+      return;
+    }
     // Only the controls this handler owns: the style toggle fires an input event of
     // its own, and running sync() for it would write the loaded flag back over the
     // box the player just clicked, before its change event is even delivered.
@@ -205,6 +256,23 @@ function createInterface(
     }
     sync();
     apply();
+  });
+  root.querySelector('[data-toggle="clay"]')?.addEventListener('change', (event) => {
+    if (!(event.target instanceof HTMLInputElement)) return;
+    CAR_CLAY_UNIFORMS.uClayEnabled.value = event.target.checked ? 1 : 0;
+    sync();
+  });
+  root.querySelector('[data-finish]')?.addEventListener('change', (event) => {
+    if (!(event.target instanceof HTMLSelectElement)) return;
+    const query = new URLSearchParams(window.location.search);
+    query.set('finish', event.target.value);
+    query.set('dirt', String(state.dirt));
+    query.set('scratches', String(state.scratches));
+    query.set('time', String(state.timeHours));
+    query.set('quality', state.quality);
+    const focus = root.querySelector<HTMLSelectElement>('[data-control="focus"]')?.value;
+    if (focus) query.set('focus', focus);
+    window.location.search = query.toString();
   });
   root.querySelector('[data-toggle="carstyle"]')?.addEventListener('change', (event) => {
     const unified = event.target instanceof HTMLInputElement && event.target.checked;
@@ -232,11 +300,12 @@ export async function bootCarLab(): Promise<void> {
   document.title = 'Car condition lab · Voyage Mirage';
 
   const query = new URLSearchParams(window.location.search);
+  const quality = query.get('quality');
   const state: LabState = {
     dirt: queryNumber(query, 'dirt', 0),
     scratches: queryNumber(query, 'scratches', 0),
     timeHours: queryNumber(query, 'time', 11),
-    quality: 'standard',
+    quality: quality === 'acceptable' || quality === 'blessing' ? quality : 'standard',
     factory: 0,
   };
   const renderer = new Renderer(canvas, state.quality, true, DEFAULT_INK_STRENGTH);

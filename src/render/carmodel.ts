@@ -427,38 +427,91 @@ function markStickerSurfaces(root: THREE.Object3D, def: CarModelDef): void {
 }
 
 /**
- * The roster's finish: the fifty blueprint bodies painted like die-cast models, one
- * family. A deeper, slightly metallic lacquer with a broad soft highlight, colour a
- * touch richer, and a thin light rim round the silhouette that reads the shape at a
- * distance. `?finish=off` shows them without it, to compare.
+ * Initial body-only finish. The lab can toggle Clay through shared uniforms without
+ * replacing materials or recompiling their program anchors.
+ * The default stays metallic; `?finish=clay` tries a lightly hand-worked surface and
+ * `?finish=off` keeps the authored paint. Glass, lenses, trim and wheels are untouched.
  */
-export const CAR_FINISH_ON: boolean =
-  typeof window === 'undefined' || new URLSearchParams(window.location.search).get('finish') !== 'off';
+const finishParam = typeof window === 'undefined'
+  ? null
+  : new URLSearchParams(window.location.search).get('finish');
+export const CAR_FINISH: 'metal' | 'clay' | 'off' =
+  finishParam === 'clay' || finishParam === 'off' ? finishParam : 'metal';
 
 const finishHsl = { h: 0, s: 0, l: 0 };
 
-function applyDiecastFinish(paint: readonly THREE.Material[], def: CarModelDef): void {
-  if (!CAR_FINISH_ON || !def.id.startsWith('rs_')) return;
+/** Shared, live body-finish uniforms: lab controls never rebuild cars or programs. */
+export const CAR_CLAY_UNIFORMS = {
+  uClayEnabled: { value: CAR_FINISH === 'clay' ? 1 : 0 },
+  uClayFineRelief: { value: 0.020 },
+  uClayBroadRelief: { value: 0.010 },
+  uClayFineScale: { value: 3.75 },
+  uClayBroadScale: { value: 6.0 },
+  uClayRoughness: { value: 0.5 },
+  uClayRoughnessVariation: { value: 0 },
+  uClayColourVariation: { value: 0 },
+  uClayMetalness: { value: 0 },
+};
+const CLAY_UNIFORM_DECLARATIONS = Object.keys(CAR_CLAY_UNIFORMS)
+  .map((name) => `uniform float ${name};`).join('\n');
+
+// Millimetre-scale apparent relief, not vertex displacement: the car's silhouette,
+// panes and panel joints stay authored. Reuse the wear shader's chassis coordinates
+// and seeded noise so the impressions stay on the car while it moves.
+const CLAY_BODY_NORMAL = `
+if ( uClayEnabled > 0.5 ) {
+  vec3 clayP = vCarBodyPos + uCarFieldOrigin;
+  float clayPress = condNoise( clayP * uClayFineScale );
+  float clayBroad = condNoise( clayP * uClayBroadScale + vec3( 5.1, 2.7, 8.3 ) );
+  float clayHeight = ( clayPress - 0.5 ) * uClayFineRelief + ( clayBroad - 0.5 ) * uClayBroadRelief;
+  // Surface-gradient bump mapping in view space; no UV seams or camera-space noise.
+  vec3 clayDx = dFdx( -vViewPosition );
+  vec3 clayDy = dFdy( -vViewPosition );
+  vec3 clayR1 = cross( clayDy, normal );
+  vec3 clayR2 = cross( normal, clayDx );
+  float clayDet = dot( clayDx, clayR1 );
+  vec3 clayGrad = sign( clayDet ) * ( dFdx( clayHeight ) * clayR1 + dFdy( clayHeight ) * clayR2 );
+  float clayFootprint = max( length( dFdx( clayP ) ), length( dFdy( clayP ) ) )
+    * max( uClayFineScale, uClayBroadScale );
+  float clayDetail = 1.0 - smoothstep( 0.3, 0.9, clayFootprint );
+  normal = normalize( max( abs( clayDet ), 1e-8 ) * normal - clayGrad * clayDetail );
+  roughnessFactor = clamp( uClayRoughness + ( clayPress - 0.5 ) * uClayRoughnessVariation, 0.02, 1.0 );
+  metalnessFactor = uClayMetalness;
+  diffuseColor.rgb *= 1.0 + ( clayBroad - 0.5 ) * uClayColourVariation;
+}
+`;
+
+function applyCarFinish(paint: readonly THREE.Material[], def: CarModelDef): void {
+  if (!def.id.startsWith('rs_')) return;
   for (const material of paint) {
     if (!(material instanceof THREE.MeshStandardMaterial)) continue;
-    material.color.getHSL(finishHsl);
-    material.color.setHSL(finishHsl.h, Math.min(1, finishHsl.s * 1.12), finishHsl.l);
-    material.metalness = 0.3;
-    material.roughness = 0.32;
     const previousCompile = material.onBeforeCompile;
     const previousKey = material.customProgramCacheKey;
+    if (CAR_FINISH !== 'off') {
+      if (CAR_FINISH === 'metal') {
+        material.color.getHSL(finishHsl);
+        material.color.setHSL(finishHsl.h, Math.min(1, finishHsl.s * 1.12), finishHsl.l);
+      }
+      material.metalness = 0.3;
+      material.roughness = 0.32;
+    }
     material.onBeforeCompile = (shader, renderer) => {
       previousCompile.call(material, shader, renderer);
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <opaque_fragment>',
-        `{
-          float rim = pow(1.0 - abs(dot(normalize(normal), normalize(vViewPosition))), 3.0);
-          outgoingLight += mix(vec3(1.0), diffuseColor.rgb, 0.45) * rim * 0.32;
-        }
-        #include <opaque_fragment>`,
-      );
+      Object.assign(shader.uniforms, CAR_CLAY_UNIFORMS);
+      shader.uniforms.uMetalFinish = { value: CAR_FINISH === 'off' ? 0 : 1 };
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\n' + CLAY_UNIFORM_DECLARATIONS + '\nuniform float uMetalFinish;')
+        .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>' + CLAY_BODY_NORMAL)
+        .replace(
+          '#include <opaque_fragment>',
+          `if ( uClayEnabled < 0.5 && uMetalFinish > 0.5 ) {
+            float rim = pow(1.0 - abs(dot(normalize(normal), normalize(vViewPosition))), 3.0);
+            outgoingLight += mix(vec3(1.0), diffuseColor.rgb, 0.45) * rim * 0.32;
+          }
+          #include <opaque_fragment>`,
+        );
     };
-    material.customProgramCacheKey = () => `${previousKey.call(material)}|diecast-v1`;
+    material.customProgramCacheKey = () => `${previousKey.call(material)}|car-finish-v2`;
     material.needsUpdate = true;
   }
 }
@@ -1559,7 +1612,7 @@ function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInsta
   const glass = cloneCarGlass(body, paint);
   prepareSovietShellFaces(body, t.def);
   applyRandomPaint(body, t.def, appearanceKey);
-  applyDiecastFinish(paint, t.def);
+  applyCarFinish(paint, t.def);
   markStickerSurfaces(body, t.def);
   body.name = 'body';
   const surface = new CarBodySurface(paint, glass);
@@ -1582,7 +1635,7 @@ function cloneStaticModel(t: Template, appearanceKey = t.def.id): StaticCarInsta
   const paint = cloneCarBodyPaintMaterials(body, t, appearanceKey);
   const glass = cloneCarGlass(body, paint);
   applyRandomPaint(body, t.def, appearanceKey);
-  applyDiecastFinish(paint, t.def);
+  applyCarFinish(paint, t.def);
   group.add(body);
   const wheels = cloneWheels(t, appearanceKey);
   for (const wheel of t.measure.wheels) {
