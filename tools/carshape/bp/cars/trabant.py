@@ -80,8 +80,9 @@ CAR = {
              'material': 'chrome', 'height': 0.003},
         ],
         'bumpers': {
-            'front': {'z': [0.30, 0.37], 'depth': 0.05, 'wrap': 0.25, 'profile': 'blade', 'overriders': [[0.36, 0.05, 0.28, 0.40]]},
-            'rear': {'z': [0.30, 0.37], 'depth': 0.05, 'wrap': 0.25, 'profile': 'blade', 'overriders': [[0.36, 0.05, 0.28, 0.40]]},
+            # Chrome blades with black rubber overriders (photos).
+            'front': {'z': [0.30, 0.37], 'depth': 0.05, 'wrap': 0.25, 'profile': 'blade', 'overriders': [[0.36, 0.05, 0.28, 0.40]], 'overriderMaterial': 'rubber'},
+            'rear': {'z': [0.30, 0.37], 'depth': 0.05, 'wrap': 0.25, 'profile': 'blade', 'overriders': [[0.36, 0.05, 0.28, 0.40]], 'overriderMaterial': 'rubber'},
         },
         'mirror': {'y': -0.55, 'z': 0.95, 'reach': 0.84, 'w': 0.10, 'h': 0.07, 'sides': [1]},
         'handles': {'at': [[0.05, 0.82]], 'w': 0.10},

@@ -74,11 +74,12 @@ CAR = {
             # Engine-bay louvres behind the last side window.
             {'view': 'side', 'outline': [[1.56, 1.32], [1.68, 1.32], [1.68, 1.62], [1.56, 1.62]], 'material': 'grille', 'height': 0.003},
         ],
-        'bars': [
-            {'view': 'side', 'span': [1.57, 1.67], 'b': [1.33, 1.61], 'count': 7, 'width': 0.012, 'material': 'paint', 'height': 0.005,
-             'mirror': True},
-        ],
         'lines': [
+            # Engine-bay louvres behind the last side window, as slats on the dark panel
+            # (side-view bars are skipped by assemble.py and left a bare black rectangle).
+            {'view': 'side', 'points': [[1.565, z], [1.675, z]], 'width': 0.022, 'material': 'paint', 'height': 0.005}
+            for z in (1.365, 1.410, 1.455, 1.500, 1.545, 1.590)
+        ] + [
             # The swage line round the waist, under the windows.
             {'view': 'side', 'points': [[-2.2, 1.205], [2.2, 1.205]], 'width': 0.012, 'material': 'paint', 'height': 0.008},
             {'view': 'front', 'points': [[-0.85, 1.25], [0.85, 1.25]], 'width': 0.014, 'mirror': False, 'material': 'paint',

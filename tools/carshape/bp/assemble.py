@@ -1162,7 +1162,8 @@ for end, b in P.get('bumpers', {}).items():
             bm_.faces.new(vs[0][::-1])
             bm_.faces.new(vs[-1])
         bmesh.ops.recalc_face_normals(bm_, faces=bm_.faces)
-        trim_parts.append(new_object('overriders_' + end, bm_, [b.get('material', 'chrome')]))
+        # Rubber overriders on a chrome bar (Trabant, early Wartburg): their own material.
+        trim_parts.append(new_object('overriders_' + end, bm_, [b.get('overriderMaterial', b.get('material', 'chrome'))]))
 
 
 def skin_point(origin, direction, dist=3.0):

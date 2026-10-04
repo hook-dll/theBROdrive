@@ -37,8 +37,11 @@ CAR = {
             {'view': 'side', 'outline': [[0.10, 0.975], [1.08, 0.975], [0.80, 1.29], [0.10, 1.30]], 'facingMin': 0.3},
             {'view': 'front', 'outline': [[0.0, 1.36], [0.56, 1.35], [0.64, 1.28], [0.68, 1.0], [0.64, 0.98], [0.0, 0.98]],
              'depthRange': [-1.2, -0.4], 'facingMin': 0.2},
-            {'view': 'rear', 'outline': [[0.0, 1.34], [0.56, 1.33], [0.63, 1.26], [0.66, 1.01], [0.62, 0.99], [0.0, 0.99]],
-             'depthRange': [0.9, 1.6], 'facingMin': 0.15},
+            # The back light in plan on the measured slope (y 1.00-1.39, z 1.32-1.00):
+            # fitted in the rear view its header was pulled 4 cm down, leaving a 10 cm
+            # painted band where the photos show about 6.
+            {'view': 'top', 'outline': [[1.00, 0.0], [1.00, 0.54], [1.04, 0.58], [1.36, 0.64], [1.39, 0.60], [1.39, 0.0]],
+             'facingMin': 0.25, 'fit': False},
         ],
         'regions': [
             {'view': 'side', 'outline': [[-2.6, 0.30], [-2.6, 0.53], [-2.30, 0.53], [-2.25, 0.30]]},
@@ -61,23 +64,25 @@ CAR = {
              'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [-2.5, -2.1], 'facingMin': -0.1},
             {'view': 'front', 'rect': [[0.0, 0.42], [0.52, 0.11]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [-2.7, -2.2]},
-            # Tall tail lamps wrapping the corners, ribbed.
-            {'view': 'rear', 'node': 'taillights', 'rect': [[0.66, 0.70], [0.26, 0.12]], 'radius': 0.01, 'material': 'TailLights',
+            # The cluster is a tall column on each corner: red tail/brake along the whole
+            # of it, the reversing lamp set in the upper third, the amber indicator at
+            # the foot (1986/88 photographs). The later patches sit a little prouder so
+            # they read as separate lenses, not coplanar with the red.
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.66, 0.73], [0.26, 0.31]], 'radius': 0.008, 'material': 'TailLights',
              'height': 0.008, 'depthRange': [2.0, 2.4], 'facingMin': 0.0},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.66, 0.80], [0.26, 0.06]], 'radius': 0.01,
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [2.0, 2.4], 'facingMin': 0.0},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.66, 0.80], [0.26, 0.06]], 'radius': 0.01,
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [2.0, 2.4], 'facingMin': 0.0},
-            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.66, 0.595], [0.26, 0.07]], 'radius': 0.01,
-             'material': 'ReverseLights', 'height': 0.008, 'depthRange': [2.0, 2.4], 'facingMin': 0.0},
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.66, 0.80], [0.26, 0.06]], 'radius': 0.008,
+             'material': 'ReverseLights', 'height': 0.011, 'depthRange': [2.0, 2.4], 'facingMin': 0.0},
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.66, 0.62], [0.26, 0.08]], 'radius': 0.008,
+             'material': 'IndicatorLights', 'height': 0.011, 'depthRange': [2.0, 2.4], 'facingMin': 0.0},
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.66, 0.62], [0.26, 0.08]], 'radius': 0.008,
+             'material': 'IndicatorLights', 'height': 0.011, 'depthRange': [2.0, 2.4], 'facingMin': 0.0},
             {'view': 'rear', 'rect': [[0.0, 0.61], [0.52, 0.11]], 'radius': 0.005, 'mirror': False, 'material': 'plate',
              'height': 0.006, 'depthRange': [2.0, 2.4], 'facingMin': 0.1},
         ],
         'bars': [
             {'view': 'front', 'span': [-0.34, 0.34], 'b': [0.58, 0.76], 'count': 10, 'width': 0.008, 'dir': 'v',
              'material': 'chrome', 'height': 0.008, 'depthRange': [-2.5, -2.2]},
-            {'view': 'rear', 'span': [0.54, 0.78], 'b': [0.66, 0.74], 'count': 3, 'width': 0.008, 'material': 'trim',
-             'height': 0.010, 'depthRange': [2.0, 2.4], 'facingMin': 0.0, 'mirror': True},
+
         ],
         'lines': [
             {'view': 'side', 'points': [[-1.0, 0.96], [-1.06, 0.30], [0.05, 0.27], [0.05, 0.96]], 'width': 0.005},
