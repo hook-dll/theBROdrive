@@ -118,11 +118,17 @@ CAR = {
             # Badge on the bonnet's nose.
             {'view': 'front', 'circle': [[0.0, 0.66], 0.035], 'mirror': False, 'material': 'chrome', 'height': 0.008,
              'depthRange': [-2.1, -1.7]},
+        ] + [
+            # Cooling louvres under the rear window (the drawing: a band of vertical
+            # slats, ~9 cm tall). Solid 'bars' put each slat's box at the rear-most skin
+            # sample, and on the lid's 48-degree rake the slat's top stood ~3 cm off the
+            # skin as a flat tab at the rear edge (visible in the side view); thin
+            # decals lie on the skin.
+            {'view': 'rear', 'rect': [[-0.38 + 0.76 * (i + 0.5) / 26, 1.0225], [0.009, 0.075]],
+             'radius': 0.001, 'material': 'paint', 'height': 0.004,
+             'depthRange': [1.2, 1.8], 'facingMin': 0.25} for i in range(26)
         ],
-        'bars': [
-            {'view': 'rear', 'span': [-0.38, 0.38], 'b': [0.99, 1.05], 'count': 26, 'width': 0.009, 'dir': 'v',
-             'material': 'paint', 'height': 0.006, 'depthRange': [1.2, 1.7], 'facingMin': 0.1},
-        ],
+        'bars': [],
         'lines': [
             # Door shut lines.
             {'view': 'side', 'points': [[-0.69, 0.99], [-0.69, 0.29], [0.30, 0.29], [0.30, 0.99]], 'width': 0.005},

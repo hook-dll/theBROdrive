@@ -69,6 +69,9 @@ CAR = {
             {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.415, 0.617], [0.07, 0.13]], 'radius': 0.004,
              'material': 'ReverseLights', 'height': 0.008, 'depthRange': [1.6, 2.1]},
             {'view': 'side', 'node': 'taillights', 'rect': [[1.90, 0.627], [0.03, 0.135]], 'material': 'TailLights', 'height': 0.004},
+            # the indicator lens wraps the corner onto the quarter panel (1988 photographs).
+            {'view': 'side', 'node': 'rear_blinker_left', 'rect': [[1.90, 0.627], [0.035, 0.135]], 'material': 'IndicatorLights', 'height': 0.004},
+            {'view': 'side', 'node': 'rear_blinker_right', 'rect': [[1.90, 0.627], [0.035, 0.135]], 'material': 'IndicatorLights', 'height': 0.004},
             {'view': 'rear', 'rect': [[0.0, 0.43], [0.52, 0.112]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.005, 'depthRange': [1.6, 2.1]},
             {'view': 'rear', 'rect': [[0.39, 0.765], [0.28, 0.04]], 'radius': 0.01, 'material': 'chrome', 'mirror': False,

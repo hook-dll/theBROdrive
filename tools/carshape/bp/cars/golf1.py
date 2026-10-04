@@ -52,10 +52,12 @@ CAR = {
              'height': 0.014, 'depthRange': [-2.0, -1.6]},
             {'view': 'front', 'circle': [[0.0, 0.62], 0.05], 'mirror': False, 'material': 'chrome',
              'height': 0.012, 'depthRange': [-2.0, -1.6]},
-            # the 1978-on turn lamps in the bumper's ends, under the headlamps
-            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.60, 0.405], [0.12, 0.035]], 'radius': 0.006,
+            # the turn lamps sit in the plastic bumper's face under the headlamps
+            # (1982 photographs); the hull has no surface there (the bumper bar covers
+            # it), so they are drawn on the exposed valance just under the bar.
+            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.60, 0.405], [0.12, 0.038]], 'radius': 0.006,
              'material': 'IndicatorLights', 'height': 0.006, 'facingMin': 0.1, 'depthRange': [-2.0, -1.5]},
-            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.60, 0.405], [0.12, 0.035]], 'radius': 0.006,
+            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.60, 0.405], [0.12, 0.038]], 'radius': 0.006,
              'material': 'IndicatorLights', 'height': 0.006, 'facingMin': 0.1, 'depthRange': [-2.0, -1.5]},
             {'view': 'side', 'node': 'front_blinker_left', 'rect': [[-1.65, 0.658], [0.12, 0.055]], 'material': 'IndicatorLights', 'height': 0.005},
             {'view': 'side', 'node': 'front_blinker_right', 'rect': [[-1.65, 0.658], [0.12, 0.055]], 'material': 'IndicatorLights', 'height': 0.005},
@@ -64,10 +66,14 @@ CAR = {
              'material': 'ReverseLights', 'height': 0.008, 'depthRange': [1.6, 2.1]},
             {'view': 'rear', 'node': 'taillights', 'rect': [[0.523, 0.67], [0.104, 0.11]], 'radius': 0.004,
              'material': 'TailLights', 'height': 0.008, 'depthRange': [1.6, 2.1]},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.625, 0.67], [0.098, 0.11]], 'radius': 0.004,
+            # The indicator lens is the cluster's outer TOP section only; the red tail
+            # lens is below it (1982 photographs, side_rear: amber over red at the corner).
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.625, 0.6975], [0.098, 0.055]], 'radius': 0.004,
              'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.6, 2.1]},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.625, 0.67], [0.098, 0.11]], 'radius': 0.004,
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.625, 0.6975], [0.098, 0.055]], 'radius': 0.004,
              'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.6, 2.1]},
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.625, 0.6425], [0.098, 0.055]], 'radius': 0.004,
+             'material': 'TailLights', 'height': 0.008, 'depthRange': [1.6, 2.1]},
             {'view': 'rear', 'rect': [[0.555, 0.67], [0.30, 0.13]], 'radius': 0.008, 'material': 'trim',
              'height': 0.004, 'depthRange': [1.6, 2.1]},
             {'view': 'side', 'node': 'taillights', 'rect': [[1.63, 0.695], [0.11, 0.05]], 'material': 'TailLights', 'height': 0.005},

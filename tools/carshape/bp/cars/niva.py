@@ -72,8 +72,10 @@ CAR = {
              'height': 0.004, 'depthRange': [1.6, 2.1]},
         ],
         'bars': [
+            # the 2121 grille is an all-black slatted panel with the chrome sail badge
+            # (1983 photographs); the slats were chrome and read as a bright striped grille.
             {'view': 'front', 'span': [-0.44, 0.44], 'b': [0.52, 0.745], 'count': 6, 'width': 0.012,
-             'material': 'chrome', 'height': 0.008, 'depthRange': [-2.0, -1.6]},
+             'material': 'trim', 'height': 0.008, 'depthRange': [-2.0, -1.6]},
         ],
         'lines': [
             {'view': 'side', 'points': [[-0.52, 1.09], [-0.52, 0.46], [0.47, 0.46], [0.47, 1.10]], 'width': 0.005},
