@@ -59,24 +59,36 @@ CAR = {
              'height': 0.006, 'depthRange': [-2.0, -1.5]},
             # The side air intakes of the 968M, black with louvres.
             {'view': 'side', 'rect': [[1.357, 0.606], [0.47, 0.11]], 'radius': 0.02, 'material': 'grille', 'height': 0.004},
-            # Tail lamps: three across, red outboard over amber and white.
-            {'view': 'rear', 'rect': [[0.535, 0.585], [0.355, 0.15]], 'radius': 0.012, 'material': 'chrome',
-             'height': 0.004, 'depthRange': [1.6, 2.1]},
-            {'view': 'rear', 'node': 'taillights', 'rect': [[0.625, 0.585], [0.16, 0.125]], 'radius': 0.008,
-             'material': 'TailLights', 'height': 0.008, 'depthRange': [1.6, 2.1]},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.47, 0.62], [0.17, 0.06]], 'radius': 0.006,
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.6, 2.1]},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.47, 0.62], [0.17, 0.06]], 'radius': 0.006,
-             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.6, 2.1]},
-            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.47, 0.552], [0.17, 0.06]], 'radius': 0.006,
-             'material': 'ReverseLights', 'height': 0.008, 'depthRange': [1.6, 2.1]},
             {'view': 'rear', 'rect': [[0.0, 0.587], [0.52, 0.11]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.005, 'depthRange': [1.6, 2.1]},
-        ],
-        'bars': [
-            {'view': 'side', 'span': [1.14, 1.58], 'b': [0.56, 0.65], 'count': 14, 'dir': 'v', 'width': 0.008, 'mirror': True,
-             'material': 'trim', 'height': 0.006},
-        ],
+            # Rear cluster: four cells in a row - amber (outermost), red, the reversing
+            # white, red (innermost), in one housing ~40 cm wide. The former split (red
+            # outside with thin amber/white strips inboard, stacked) is not the car's
+            # (rear photo and the drawing's rear view).
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.372, 0.585], [0.100, 0.12]], 'radius': 0.010,
+             'material': 'TailLights', 'height': 0.008, 'depthRange': [1.6, 2.1]},
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.466, 0.585], [0.078, 0.12]], 'radius': 0.010,
+             'material': 'ReverseLights', 'height': 0.008, 'depthRange': [1.6, 2.1]},
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.566, 0.585], [0.110, 0.12]], 'radius': 0.010,
+             'material': 'TailLights', 'height': 0.008, 'depthRange': [1.6, 2.1]},
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.672, 0.585], [0.090, 0.12]], 'radius': 0.010,
+             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.6, 2.1]},
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.672, 0.585], [0.090, 0.12]], 'radius': 0.010,
+             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.6, 2.1]},
+            # The 968M nameplate in the middle of the front panel's dark strip.
+            {'view': 'front', 'rect': [[0.0, 0.617], [0.20, 0.032]], 'radius': 0.006, 'mirror': False,
+             'material': 'chrome', 'height': 0.009, 'depthRange': [-2.0, -1.5]},
+        ] + (
+            # Louvres as decals: bars with view 'side' are skipped by assemble.py, so the
+            # 14 side-intake slats never appeared; the engine cover's top slots (four
+            # groups - rear photo, the drawing's top view) have no bar view at all.
+            [{'view': 'side', 'rect': [[1.16 + k * 0.0315, 0.606], [0.011, 0.086]], 'radius': 0.004,
+              'material': 'paint', 'height': 0.005, 'facingMin': 0.35} for k in range(14)]
+            + [{'view': 'top', 'rect': [[1.52, x], [0.20, 0.016]], 'radius': 0.007, 'material': 'grille',
+                'height': 0.004, 'depthRange': [0.55, 1.05]}
+               for x in (0.20, 0.235, 0.27, 0.305, 0.38, 0.415, 0.45, 0.485, 0.52)]
+        ),
+        'bars': [],
         'lines': [
             {'view': 'side', 'points': [[-0.63, 0.89], [-0.63, 0.30], [0.18, 0.30], [0.18, 0.89]], 'width': 0.005},
             {'view': 'side', 'points': [[0.18, 0.30], [0.65, 0.30], [0.88, 0.55], [0.88, 0.88]], 'width': 0.005},
@@ -90,7 +102,8 @@ CAR = {
             'front': {'z': [0.41, 0.47], 'depth': 0.05, 'wrap': 0.25, 'profile': 'blade', 'material': 'trim'},
             'rear': {'z': [0.40, 0.46], 'depth': 0.05, 'wrap': 0.25, 'profile': 'blade', 'material': 'trim'},
         },
-        'mirror': {'y': -0.70, 'z': 0.94, 'reach': 0.82, 'w': 0.13, 'h': 0.08, 'material': 'chrome', 'sides': [1]},
+        # A black mirror on the door's front corner (front photo), not a bright one.
+        'mirror': {'y': -0.70, 'z': 0.94, 'reach': 0.82, 'w': 0.13, 'h': 0.08, 'material': 'trim', 'sides': [1]},
         'handles': {'at': [[0.0, 0.84], [0.70, 0.84]], 'w': 0.12},
         'wipers': {'arms': [[-0.5, -0.05, -0.85, 0.89], [0.05, 0.5, -0.85, 0.89]]},
         'wheel': {'style': 'hubcap', 'rimFactor': 0.66, 'cap': 0.55},

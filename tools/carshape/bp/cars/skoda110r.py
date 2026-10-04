@@ -43,6 +43,12 @@ CAR = {
              'height': 0.012, 'depthRange': [-2.2, -1.6]},
             {'view': 'front', 'circle': [[0.62, 0.6], 0.10], 'ring': 0.015, 'material': 'chrome',
              'height': 0.013, 'depthRange': [-2.2, -1.6]},
+            # The 110 R's front carries TWO round lamps a side, a smaller inboard of the
+            # 7" outer (front photo); the single lamp a side was the saloon's front.
+            {'view': 'front', 'node': 'headlights', 'circle': [[0.45, 0.6], 0.058], 'material': 'Headlights',
+             'height': 0.012, 'depthRange': [-2.2, -1.6]},
+            {'view': 'front', 'circle': [[0.45, 0.6], 0.072], 'ring': 0.012, 'material': 'chrome',
+             'height': 0.013, 'depthRange': [-2.2, -1.6]},
             # The chrome bar across the nose with the badge in its middle.
             {'view': 'front', 'rect': [[0.0, 0.6], [1.0, 0.025]], 'radius': 0.008, 'mirror': False, 'material': 'chrome',
              'height': 0.008, 'depthRange': [-2.2, -1.6]},
@@ -56,29 +62,39 @@ CAR = {
             {'view': 'side', 'node': 'front_blinker_right', 'outline': [[-1.98, 0.66], [-1.90, 0.68], [-1.90, 0.64]], 'material': 'IndicatorLights', 'height': 0.005},
             {'view': 'front', 'rect': [[0.0, 0.40], [0.52, 0.10]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.005, 'depthRange': [-2.2, -1.6]},
-            # The engine cover's air intakes on the flanks.
-            {'view': 'side', 'rect': [[1.12, 0.755], [0.36, 0.11]], 'radius': 0.02, 'material': 'grille', 'height': 0.004},
-            # Tail: four round lamps a side over a black mesh panel.
+            # The engine's side air intakes on the rear quarters: a recessed panel of
+            # HORIZONTAL slats (drawing's side view). The 10 slats were drawn as bars
+            # with view 'side', which assemble.py skips, so only the panel appeared.
+            {'view': 'side', 'rect': [[1.12, 0.755], [0.36, 0.11]], 'radius': 0.02, 'material': 'paint', 'height': 0.004},
+            # Tail: the lamp cluster a side and, between them, the engine's outlet
+            # grille - one band across the tail (drawing's rear view, rear photo).
             {'view': 'rear', 'rect': [[0.0, 0.62], [1.30, 0.26]], 'radius': 0.015, 'mirror': False, 'material': 'trim',
              'height': 0.003, 'depthRange': [1.7, 2.2]},
-            {'view': 'rear', 'node': 'taillights', 'circle': [[0.68, 0.70], 0.04], 'material': 'TailLights',
-             'height': 0.008, 'depthRange': [1.7, 2.2]},
-            {'view': 'rear', 'node': 'taillights', 'circle': [[0.54, 0.70], 0.04], 'material': 'TailLights',
-             'height': 0.008, 'depthRange': [1.7, 2.2]},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'circle': [[0.61, 0.70], 0.04], 'material': 'IndicatorLights',
-             'height': 0.008, 'depthRange': [1.7, 2.2]},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'circle': [[0.61, 0.70], 0.04], 'material': 'IndicatorLights',
-             'height': 0.008, 'depthRange': [1.7, 2.2]},
-            {'view': 'rear', 'node': 'reverse_lights', 'circle': [[0.47, 0.70], 0.04], 'material': 'ReverseLights',
-             'height': 0.008, 'depthRange': [1.7, 2.2]},
+            # The cluster's four cells: amber (outboard), red, red, the clear reversing
+            # lamp (inboard), in a bright frame - not four round lamps a side.
+            {'view': 'rear', 'rect': [[0.470, 0.625], [0.40, 0.115]], 'radius': 0.012, 'material': 'chrome',
+             'height': 0.005, 'depthRange': [1.7, 2.2]},
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.6125, 0.625], [0.086, 0.086]], 'radius': 0.008,
+             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.7, 2.2]},
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.6125, 0.625], [0.086, 0.086]], 'radius': 0.008,
+             'material': 'IndicatorLights', 'height': 0.008, 'depthRange': [1.7, 2.2]},
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.5175, 0.625], [0.086, 0.086]], 'radius': 0.008,
+             'material': 'TailLights', 'height': 0.008, 'depthRange': [1.7, 2.2]},
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.4225, 0.625], [0.086, 0.086]], 'radius': 0.008,
+             'material': 'TailLights', 'height': 0.008, 'depthRange': [1.7, 2.2]},
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.3275, 0.625], [0.086, 0.086]], 'radius': 0.008,
+             'material': 'ReverseLights', 'height': 0.008, 'depthRange': [1.7, 2.2]},
             {'view': 'rear', 'rect': [[0.0, 0.70], [0.50, 0.11]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
              'height': 0.005, 'depthRange': [1.7, 2.2]},
-        ],
+        ] + (
+            # the side intake's slats (see above), horizontal, body colour showing through
+            [{'view': 'side', 'rect': [[1.13, 0.7125 + k * 0.0145], [0.33, 0.011]], 'radius': 0.004,
+              'material': 'grille', 'height': 0.005, 'facingMin': 0.35} for k in range(7)]
+        ),
         'bars': [
-            {'view': 'side', 'span': [0.97, 1.27], 'b': [0.715, 0.795], 'count': 10, 'dir': 'v', 'width': 0.01, 'mirror': True,
-             'material': 'trim', 'height': 0.006},
-            {'view': 'rear', 'span': [-0.62, 0.62], 'b': [0.53, 0.63], 'count': 4, 'width': 0.008,
-             'material': 'grille', 'height': 0.005, 'depthRange': [1.7, 2.2]},
+            # The tail grille between the clusters: eight bright slats in a dark recess.
+            {'view': 'rear', 'span': [-0.26, 0.26], 'b': [0.55, 0.70], 'count': 8, 'width': 0.008,
+             'material': 'chrome', 'height': 0.005, 'depthRange': [1.7, 2.2]},
         ],
         'lines': [
             {'view': 'side', 'points': [[-0.80, 0.95], [-0.86, 0.60], [-0.82, 0.30], [0.25, 0.30], [0.30, 0.60], [0.33, 0.90]], 'width': 0.005},
@@ -89,10 +105,11 @@ CAR = {
             {'view': 'side', 'points': [[-0.62, 0.89], [0.92, 0.89]], 'width': 0.01, 'material': 'chrome', 'height': 0.003},
         ],
         'bumpers': {
+            # Chrome bars, black overriders (front and rear photos of the 110 R).
             'front': {'z': [0.42, 0.48], 'depth': 0.05, 'wrap': 0.25, 'profile': 'blade',
-                      'overriders': [[0.40, 0.05, 0.36, 0.52]]},
+                      'overriders': [[0.40, 0.05, 0.36, 0.52]], 'overriderMaterial': 'rubber'},
             'rear': {'z': [0.42, 0.48], 'depth': 0.05, 'wrap': 0.25, 'profile': 'blade',
-                     'overriders': [[0.40, 0.05, 0.34, 0.52]]},
+                     'overriders': [[0.40, 0.05, 0.34, 0.52]], 'overriderMaterial': 'rubber'},
         },
         'mirror': {'y': -0.68, 'z': 0.96, 'reach': 0.86, 'w': 0.10, 'h': 0.07, 'material': 'chrome'},
         'handles': {'at': [[0.15, 0.84]], 'w': 0.12},

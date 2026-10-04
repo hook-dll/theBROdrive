@@ -29,7 +29,10 @@ CAR = {
     },
     'parts': {
         'glass': [
-            {'view': 'side', 'outline': [[-0.658, 1.007], [-0.54, 1.214], [-0.505, 1.235], [-0.505, 0.92], [-0.6, 0.94], [-0.62, 0.99]], 'facingMin': 0.3},
+            # The front door's vent window: its foot lies on the belt like the main
+            # glass (photo/drawing). The former rising foot (0.92 at the divider to
+            # 1.007 at the A-pillar) came out as a staircase on the skin.
+            {'view': 'side', 'outline': [[-0.70, 0.90], [-0.505, 0.90], [-0.505, 1.235], [-0.54, 1.214]], 'facingMin': 0.3},
             {'view': 'side', 'outline': [[-0.476, 1.25], [-0.483, 0.90], [-0.008, 0.905], [-0.004, 1.262]], 'facingMin': 0.3},
             {'view': 'side', 'outline': [[0.087, 1.262], [0.087, 0.898], [0.594, 0.895], [0.597, 1.235], [0.37, 1.252]], 'facingMin': 0.3},
             {'view': 'side', 'outline': [[0.625, 1.228], [0.625, 0.895], [0.849, 0.888], [0.70, 1.175], [0.672, 1.21]], 'facingMin': 0.3},
@@ -50,10 +53,14 @@ CAR = {
              'height': 0.016, 'depthRange': [-2.1, -1.7]},
             {'view': 'front', 'rect': [[0.0, 0.62], [0.045, 0.06]], 'radius': 0.01, 'mirror': False, 'material': 'chrome',
              'height': 0.014, 'depthRange': [-2.1, -1.7]},
-            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.585, 0.46], [0.12, 0.064]], 'radius': 0.012,
-             'material': 'FrontLampLens', 'height': 0.008, 'depthRange': [-2.1, -1.7]},
-            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.585, 0.46], [0.12, 0.064]], 'radius': 0.012,
-             'material': 'FrontLampLens', 'height': 0.008, 'depthRange': [-2.1, -1.7]},
+            # The 2101's front indicators: small AMBER lamps in a bright frame directly
+            # under the headlamps (photo and front view) - they were white lenses.
+            {'view': 'front', 'rect': [[0.585, 0.468], [0.115, 0.058]], 'radius': 0.012,
+             'material': 'chrome', 'height': 0.007, 'depthRange': [-2.1, -1.7]},
+            {'view': 'front', 'node': 'front_blinker_left', 'rect': [[0.585, 0.468], [0.10, 0.048]], 'radius': 0.01,
+             'material': 'IndicatorLights', 'height': 0.009, 'depthRange': [-2.1, -1.7]},
+            {'view': 'front', 'node': 'front_blinker_right', 'rect': [[0.585, 0.468], [0.10, 0.048]], 'radius': 0.01,
+             'material': 'IndicatorLights', 'height': 0.009, 'depthRange': [-2.1, -1.7]},
             {'view': 'side', 'node': 'front_blinker_left', 'circle': [[-1.85, 0.71], 0.022], 'material': 'IndicatorLights', 'height': 0.008},
             {'view': 'side', 'node': 'front_blinker_right', 'circle': [[-1.85, 0.71], 0.022], 'material': 'IndicatorLights', 'height': 0.008},
             {'view': 'front', 'rect': [[0.0, 0.29], [0.44, 0.095]], 'radius': 0.006, 'mirror': False, 'material': 'plate',
@@ -62,21 +69,28 @@ CAR = {
             # reversing lamp under it.
             {'view': 'rear', 'rect': [[0.5375, 0.5965], [0.315, 0.117]], 'radius': 0.03, 'material': 'chrome',
              'height': 0.005, 'depthRange': [1.6, 2.1]},
-            {'view': 'rear', 'node': 'taillights', 'rect': [[0.465, 0.5965], [0.148, 0.095]], 'radius': 0.02,
+            # The red stop/tail lens fills the inboard two thirds of the housing, the
+            # amber indicator the outboard third (rear photo); the single reversing
+            # lamp sits on the left, under the amber, in a bright frame - the right
+            # side carries the model badge there.
+            {'view': 'rear', 'node': 'taillights', 'rect': [[0.475, 0.5965], [0.185, 0.095]], 'radius': 0.02,
              'material': 'TailLights', 'height': 0.009, 'depthRange': [1.6, 2.1]},
-            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.618, 0.5965], [0.14, 0.095]], 'radius': 0.02,
+            {'view': 'rear', 'node': 'rear_blinker_left', 'rect': [[0.625, 0.5965], [0.105, 0.095]], 'radius': 0.02,
              'material': 'IndicatorLights', 'height': 0.009, 'depthRange': [1.6, 2.1]},
-            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.618, 0.5965], [0.14, 0.095]], 'radius': 0.02,
+            {'view': 'rear', 'node': 'rear_blinker_right', 'rect': [[0.625, 0.5965], [0.105, 0.095]], 'radius': 0.02,
              'material': 'IndicatorLights', 'height': 0.009, 'depthRange': [1.6, 2.1]},
-            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.537, 0.492], [0.122, 0.047]], 'radius': 0.015,
-             'material': 'ReverseLights', 'height': 0.008, 'depthRange': [1.6, 2.1]},
+            {'view': 'rear', 'rect': [[0.622, 0.502], [0.118, 0.05]], 'radius': 0.012, 'mirror': False,
+             'material': 'chrome', 'height': 0.006, 'depthRange': [1.6, 2.1]},
+            {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.622, 0.502], [0.10, 0.038]], 'radius': 0.01,
+             'mirror': False, 'material': 'ReverseLights', 'height': 0.008, 'depthRange': [1.6, 2.1]},
             {'view': 'rear', 'rect': [[0.0, 0.58], [0.30, 0.17]], 'radius': 0.02, 'mirror': False, 'material': 'plate',
              'height': 0.005, 'depthRange': [1.6, 2.1]},
         ],
         'bars': [
-            {'view': 'front', 'span': [-0.46, 0.46], 'b': [0.515, 0.70], 'count': 8, 'width': 0.008,
-             'material': 'chrome', 'height': 0.010, 'depthRange': [-2.1, -1.7]},
-            {'view': 'front', 'span': [-0.40, 0.40], 'b': [0.515, 0.70], 'count': 9, 'dir': 'v', 'width': 0.008,
+            # The 2101 grille has 9 horizontal bars and no vertical ones (the 19
+            # vertical bars belong to the 21011): photos and the front view show
+            # horizontal slats only. The vertical set here made an egg-crate.
+            {'view': 'front', 'span': [-0.46, 0.46], 'b': [0.515, 0.70], 'count': 9, 'width': 0.008,
              'material': 'chrome', 'height': 0.010, 'depthRange': [-2.1, -1.7]},
         ],
         'lines': [
@@ -94,14 +108,19 @@ CAR = {
             {'view': 'side', 'points': [[0.611, 0.895], [0.611, 1.24]], 'width': 0.016, 'material': 'chrome', 'height': 0.003},
         ],
         'bumpers': {
+            # Chrome bars with black rubber-faced overriders (photo of the museum car).
             'front': {'z': [0.36, 0.43], 'depth': 0.05, 'wrap': 0.24, 'profile': 'blade',
-                      'overriders': [[0.38, 0.045, 0.28, 0.47]]},
+                      'overriders': [[0.38, 0.045, 0.28, 0.47]], 'overriderMaterial': 'rubber'},
             'rear': {'z': [0.335, 0.405], 'depth': 0.05, 'wrap': 0.24, 'profile': 'blade',
-                     'overriders': [[0.50, 0.045, 0.25, 0.45]]},
+                     'overriders': [[0.50, 0.045, 0.25, 0.45]], 'overriderMaterial': 'rubber'},
         },
-        'lensColours': {'FrontLampLens': [0.80, 0.80, 0.76]},
-        'mirror': {'y': -1.0, 'z': 0.96, 'reach': 0.80, 'w': 0.10, 'shape': 'round', 'material': 'chrome', 'sides': [1]},
-        'handles': {'at': [[-0.09, 0.73], [0.755, 0.73]], 'w': 0.15},
+        # A rectangular chrome mirror on the door's front corner (photo), not the
+        # drawing's round head on a stalk out on the wing.
+        'mirror': {'y': -0.86, 'z': 0.92, 'reach': 0.92, 'w': 0.11, 'h': 0.055, 'shape': 'rect',
+                   'material': 'chrome', 'sides': [1], 'mount': 'door'},
+        # Push-button handles just under the waist moulding (photo: about 8 cm
+        # below the belt), not 15 cm down the door.
+        'handles': {'at': [[-0.09, 0.81], [0.755, 0.81]], 'w': 0.15},
         'wipers': {'arms': [[-0.6, -0.1, -0.88, 0.9], [0.0, 0.5, -0.88, 0.9]]},
         'wheel': {'style': 'hubcap', 'rimFactor': 0.66},
     },
