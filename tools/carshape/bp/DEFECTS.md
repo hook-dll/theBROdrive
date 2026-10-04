@@ -273,3 +273,8 @@ corners and the lower edge just above the deck. Assembly keeps that header
 Dimension checks alone did not catch this. Glazing review must compare the visible
 header, sill, corners and roof band against the photographs, not just accept the
 absence of a fitting warning.
+
+The AMC Eagle's mirror was another missed placement error: its head stayed at
+0.90 m after the belt was moved to 0.955 m, below the window. It now sits at
+1.02 m at the front corner of the door glass, as in the wagon photographs;
+checked in game from both front quarters.

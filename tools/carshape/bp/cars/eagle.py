@@ -152,7 +152,9 @@ CAR = {
                       'overriders': [[0.40, 0.07, 0.44, 0.68]]},
             'rear': {'z': [0.46, 0.66], 'depth': 0.09, 'wrap': 0.30, 'profile': 'blade', 'rubber': 0.06, 'standOff': -0.01},
         },
-        'mirror': {'y': -0.88, 'z': 0.90, 'reach': 0.99, 'w': 0.13, 'h': 0.09, 'material': 'chrome'},
+        # On the door at the front corner of its window, just over the belt (photos); it
+        # had been left at 0.90 when the belt came down, half-way down the door.
+        'mirror': {'y': -0.66, 'z': 1.02, 'reach': 0.99, 'w': 0.13, 'h': 0.09, 'material': 'chrome'},
         'handles': {'at': [[-0.03, 0.80], [0.72, 0.80]], 'w': 0.13},
         'wipers': {'arms': [[-0.6, -0.05, -0.98, 1.15], [0.05, 0.6, -0.98, 1.15]]},
         'wheel': {'style': 'alloy', 'spokes': 10, 'rimFactor': 0.66, 'spokeWidth': 0.35},
