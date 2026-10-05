@@ -19,7 +19,7 @@
   NTS 2, Underground 80s and Left Coast 70s streams.
 - DEFAULT CLAY BODY FINISH (`src/render/carmodel.ts`). All cars now start with the
   selected soft non-metallic body finish and body-fixed impressions. The defaults are
-  fine/broad relief 20/10 mm, noise scales 3.75/6 per metre, roughness 0.5, and zero
+  fine/broad relief 20/150 mm, noise scales 3.75/1 per metre, roughness 0.42, and zero
   roughness variation, colour variation and metalness.
   Apparent relief only: geometry, silhouettes, glass, lamp lenses, trim and tyres are
   unchanged; existing dirt and scratches remain. The car lab keeps a live Clay checkbox

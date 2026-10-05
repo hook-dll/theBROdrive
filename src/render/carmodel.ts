@@ -445,10 +445,10 @@ const finishHsl = { h: 0, s: 0, l: 0 };
 export const CAR_CLAY_UNIFORMS = {
   uClayEnabled: { value: CAR_FINISH === 'clay' ? 1 : 0 },
   uClayFineRelief: { value: 0.020 },
-  uClayBroadRelief: { value: 0.010 },
+  uClayBroadRelief: { value: 0.150 },
   uClayFineScale: { value: 3.75 },
-  uClayBroadScale: { value: 6.0 },
-  uClayRoughness: { value: 0.5 },
+  uClayBroadScale: { value: 1.0 },
+  uClayRoughness: { value: 0.42 },
   uClayRoughnessVariation: { value: 0 },
   uClayColourVariation: { value: 0 },
   uClayMetalness: { value: 0 },
