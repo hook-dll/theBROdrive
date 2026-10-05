@@ -8,6 +8,9 @@
   Porsche 911 SC tyres are represented per axle. Corrected the confirmed Renault 4,
   Peugeot 205, Toyota BJ40, AMC Eagle and related engine/gearbox specifications.
   Part-time 4WD remains represented by the existing fixed AWD approximation.
+- VAZ-2108 blueprint/body and the alternate roster now use the audited 4006 × 1650 ×
+  1402 mm dimensions and 1400/1370 mm tracks; Niva 2121 and VAZ-2101 were rechecked
+  against the same factory dimensions and required no geometry change.
 
 
 ### Added

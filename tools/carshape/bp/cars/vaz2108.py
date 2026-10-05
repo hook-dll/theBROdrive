@@ -1,11 +1,11 @@
-# VAZ-2108 Sputnik (1984). Factory: 4006 x 1620 x 1335, wheelbase 2460, overhangs
-# 785/761, tracks 1390/1360, 165/70 R13. The factory drawing reprinted at
+# VAZ-2108 Sputnik (1984). Factory: 4006 x 1650 x 1402, wheelbase 2460, overhangs
+# 785/761, tracks 1400/1370, 165/70 R13. The factory drawing reprinted at
 # 3dcar.ru/blueprints/vaz/vaz_2108.
 CAR = {
     'id': 'vaz2108',
     'label': 'VAZ-2108',
-    'factory': {'length': 4.006, 'width': 1.62, 'height': 1.335, 'clearance': 0.16, 'wheelbase': 2.46,
-                'frontTrack': 1.39, 'rearTrack': 1.36, 'wheelRadius': 0.281, 'tyreWidth': 0.165, 'frontOverhang': 0.785},
+    'factory': {'length': 4.006, 'width': 1.65, 'height': 1.402, 'clearance': 0.17, 'wheelbase': 2.46,
+                'frontTrack': 1.40, 'rearTrack': 1.37, 'wheelRadius': 0.281, 'tyreWidth': 0.165, 'frontOverhang': 0.785},
     'blueprint': {
         'image': 'vaz2108.jpg',
         'side': {'box': [612, 70, 1700, 429], 'nose': 'left', 'drop': [[868, 4, 1088, 14]]},

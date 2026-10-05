@@ -203,7 +203,7 @@ export const ROSTER: readonly RosterCar[] = [
     label: 'VAZ-2108 Sputnik',
     body: 'vaz2108.glb',
     bodyClass: 'car',
-    factory: { length: 4.006, width: 1.62, height: 1.335, clearance: 0.16, wheelbase: 2.46, frontTrack: 1.39, rearTrack: 1.36, wheelRadius: 0.281, tyreWidth: 0.165, frontOverhang: 0.785 },
+    factory: { length: 4.006, width: 1.650, height: 1.402, clearance: 0.17, wheelbase: 2.46, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.281, tyreWidth: 0.165, frontOverhang: 0.785 },
     mass: 900,
     frontWeightShare: 0.62,
     rearDriveBias: 0,
