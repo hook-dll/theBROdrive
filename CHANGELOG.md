@@ -11,7 +11,9 @@
 
 
 ### Added
-
+ 
+- In-game radio settings now provide two editable station URLs, with recommended NTS 1,
+  NTS 2, Underground 80s and Left Coast 70s streams.
 - OPTIONAL CLAY BODY FINISH (`?finish=clay`, `src/render/carmodel.ts`). Blueprint
   cars can trade the metallic paint accent for a soft non-metallic highlight and
   body-fixed impressions. The selected clay defaults are fine/broad relief

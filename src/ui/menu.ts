@@ -22,6 +22,7 @@ import type {
   TimeOfDayPreset,
 } from '../game/settings';
 import { GRAPHICS_TIERS, DEFAULT_SETTINGS, loadStoredSettings, storeSettings, withTierDefaults } from '../game/settings';
+import { RADIO_RECOMMENDATIONS } from '../audio/radio';
 import {
   manualRenderScale,
   offeredRenderScales,
@@ -834,6 +835,8 @@ export class MainMenu {
         carVolume: base.carVolume,
         worldVolume: base.worldVolume,
         radioVolume: base.radioVolume,
+        radioStation1Url: base.radioStation1Url,
+        radioStation2Url: base.radioStation2Url,
         keyBindings: { ...base.keyBindings },
         graphicsQuality: base.graphicsQuality,
         graphicsQualitySource: base.graphicsQualitySource,
@@ -855,6 +858,8 @@ export class MainMenu {
           carVolume: settings.carVolume,
           worldVolume: settings.worldVolume,
           radioVolume: settings.radioVolume,
+          radioStation1Url: settings.radioStation1Url,
+          radioStation2Url: settings.radioStation2Url,
           keyBindings: { ...settings.keyBindings },
           graphicsQuality: settings.graphicsQuality,
           graphicsQualitySource: settings.graphicsQualitySource,
@@ -1717,6 +1722,43 @@ export class MainMenu {
           );
         };
 
+        const radioStationField = (
+          labelText: string,
+          get: () => string,
+          set: (value: string) => void,
+        ): HTMLElement => {
+          const field = el('div', 'menu-field');
+          const label = el('div', 'menu-label');
+          label.textContent = labelText;
+          const input = document.createElement('input');
+          input.type = 'url';
+          input.value = get();
+          input.placeholder = 'https://…';
+          input.autocomplete = 'off';
+          input.className = 'menu-radio-url';
+          input.style.width = '100%';
+          input.addEventListener('change', () => {
+            set(input.value.trim());
+            apply();
+          });
+          const recommended = document.createElement('select');
+          recommended.className = 'menu-radio-recommendations';
+          recommended.style.width = '100%';
+          recommended.add(new Option('Recommended streams…', ''));
+          for (const station of RADIO_RECOMMENDATIONS) {
+            recommended.add(new Option(`${station.label} — ${station.url}`, station.url));
+          }
+          recommended.addEventListener('change', () => {
+            if (!recommended.value) return;
+            input.value = recommended.value;
+            set(recommended.value);
+            apply();
+            recommended.value = '';
+          });
+          field.append(label, input, recommended);
+          return field;
+        };
+
         const renderSound = (): void => {
           pane.append(
             sliderField(
@@ -1771,6 +1813,12 @@ export class MainMenu {
                 settings.radioVolume = value;
               },
             ),
+            radioStationField('Radio station 1 URL', () => settings.radioStation1Url, (value) => {
+              settings.radioStation1Url = value;
+            }),
+            radioStationField('Radio station 2 URL', () => settings.radioStation2Url, (value) => {
+              settings.radioStation2Url = value;
+            }),
           );
         };
 
