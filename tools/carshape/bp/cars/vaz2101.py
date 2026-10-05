@@ -28,6 +28,7 @@ CAR = {
         'arch': {'radius': 0.32, 'lift': 0.02},
     },
     'parts': {
+        'glassOverlay': True,
         'glass': [
             # The front door's vent window: its foot lies on the belt like the main
             # glass (photo/drawing). The former rising foot (0.92 at the divider to

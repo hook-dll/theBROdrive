@@ -46,7 +46,7 @@ P = spec.get('parts', {})
 # to leave alone), its `paneEdgeRelax` in `hull`. Every key must be one this stage or
 # hull.py reads (`KEYS` in hull.py for the hull's own).
 CAR_KEYS = {'id', 'label', 'factory', 'blueprint', 'hull', 'parts'}
-PARTS_KEYS = {'archFlares', 'bars', 'boxes', 'bumpers', 'decals', 'flatDeg', 'glass', 'glassCheck', 'glassOverlay',
+PARTS_KEYS = {'archFlares', 'bars', 'boxes', 'bumpers', 'decals', 'flatDeg', 'glass', 'glassCheck', 'glassFit', 'glassOverlay',
               'glassSeal', 'handles', 'lensColours', 'lines', 'mirror', 'paint2', 'paneEdgeRelax', 'pillar',
               'pillarReach', 'podLamps', 'regions', 'smoothAngleDeg', 'spares', 'underbody', 'wheel', 'widenMax',
               'wipers'}
@@ -623,7 +623,8 @@ def reach_pillar(g):
 # glass faster than `bendDegCm` (a pane run onto a fillet or a crease), the shell
 # coming through the glass, and two panes closer than `gapMin` (a pillar gone);
 # `parts.glassCheck` overrides the limits.
-GO = bool(P.get('glassOverlay'))
+# (GLASS_OVERLAY=1 in the environment tries it on a car whose file does not ask for it)
+GO = bool(P.get('glassOverlay')) or os.environ.get('GLASS_OVERLAY') == '1'
 GO_LIFT, GO_SEAL_LIFT, GO_STEP, GO_GRID, GO_BACK = 0.002, 0.004, 0.01, 0.02, 0.012
 GO_CHECK = dict({'facing': 0.3, 'bendDegCm': 8.0, 'gapMin': 0.012}, **P.get('glassCheck', {}))
 
@@ -718,9 +719,109 @@ def go_panes():
     return out
 
 
+def go_clip(poly, lo, hi):
+    """The part of an outline between the heights lo and hi (its slanted edges kept)."""
+    p = clip_below(poly, hi)
+    return [[a_, -b_] for a_, b_ in clip_below([[a_, -b_] for a_, b_ in p], -lo)]
+
+
+def go_fit(gi, view, sign, poly):
+    """A pane drawn a little past the clean surface brought onto it: its foot raised,
+    its header lowered and (seen from an end) its sides brought in, half a centimetre
+    at a time, until no point just inside its edge misses the skin, faces away from the
+    view or sits on a bend (a fillet, the roof's roll, the shoulder). The working shell
+    is faceted, so a normal is the mean of five rays 1 cm apart. A car's own panes
+    that already lie clean are left as drawn; `fit: False` never moves one."""
+    g = GL[gi]
+    if view == 'top' or g.get('fit') is False or P.get('glassFit') is False:
+        return poly, (0, 0, 0)
+    V = VIEW[view]
+    dr = g.get('depthRange')
+
+    def ray_at(a, b):
+        o = [0.0, 0.0, 0.0]
+        o[V['a']], o[V['b']] = a, b
+        if view == 'side':
+            o[0], r_ = sign * 2.0, Vector((-sign, 0, 0))
+        else:
+            s_ = -1 if view == 'front' else 1
+            o[1], r_ = s_ * (L / 2 + 1.0), Vector((0, -s_, 0))
+        o = Vector(o)
+        for _ in range(6):
+            co, n_, _i, _d = _glass_tree.ray_cast(o, r_, 10.0)
+            if co is None:
+                return None
+            if not dr or dr[0] <= co[V['depth']] <= dr[1]:
+                return co, (n_ if n_.dot(r_) < 0 else -n_), r_
+            o = co + r_ * 1e-4
+        return None
+
+    def normal(a, b):
+        ns = [ray_at(a + da, b + db) for da, db in ((0, 0), (0.01, 0), (-0.01, 0), (0, 0.01), (0, -0.01))]
+        if ns[0] is None:
+            return None
+        n_ = sum((h[1] for h in ns if h is not None), Vector()).normalized()
+        return ns[0][0], n_, ns[0][2]
+
+    def bad(p_):
+        p_ = go_ccw(p_)
+        sub = go_densify(p_, 0.02)
+        out = []
+        for i in range(len(sub)):
+            a_, b_ = np.array(sub[i]), np.array(sub[(i + 1) % len(sub)])
+            t_ = (b_ - a_) / max(np.linalg.norm(b_ - a_), 1e-9)
+            u_ = np.array([-t_[1], t_[0]])
+            m_ = (a_ + b_) / 2
+            h_e = ray_at(*(m_ + u_ * 0.003))
+            h0, h1 = normal(*(m_ + u_ * 0.008)), normal(*(m_ + u_ * 0.025))
+            if h_e is None or h0 is None or h1 is None or h_e[1].dot(-h_e[2]) < 0.3:
+                out.append(m_)
+                continue
+            if h0[1].dot(-h0[2]) < 0.35 or math.degrees(h0[1].angle(h1[1], 0.0)) > 11.0:
+                out.append(m_)
+        return out
+    ks = [0, 0, 0]                      # in at the sides, foot up, header down (half cm)
+    limits = (0 if view == 'side' else 12, 12, 16)
+    lo0, hi0 = min(p[1] for p in poly), max(p[1] for p in poly)
+
+    def moved(k):
+        p_ = go_clip(poly, lo0 + 0.005 * k[1], hi0 - 0.005 * k[2])
+        if k[0]:
+            p_ = [[a_ - math.copysign(0.005 * k[0], a_) * (abs(a_) > 0.15), b_] for a_, b_ in p_]
+        return p_
+    cur = bad(poly)
+    while cur:
+        lo_, hi_ = lo0 + 0.005 * ks[1], hi0 - 0.005 * ks[2]
+        band = min(0.06, 0.3 * (hi_ - lo_))
+        a_max = max(abs(p[0]) for p in moved(ks))
+        votes = [0, 0, 0]
+        for a_, b_ in cur:
+            # a point may speak for more than one edge: a top corner for the header and
+            # for the side it is on
+            if b_ < lo_ + band:
+                votes[1] += 1
+            if b_ > hi_ - band:
+                votes[2] += 1
+            if abs(a_) > a_max - 0.08 or not (b_ < lo_ + band or b_ > hi_ - band):
+                votes[0] += 1
+        i = next((i for i in sorted(range(3), key=lambda i: -votes[i]) if votes[i] and ks[i] < limits[i]), None)
+        if i is None:
+            break
+        ks[i] += 1
+        cur = bad(moved(ks))
+    return (moved(ks) if any(ks) else poly), tuple(ks)
+
+
 if GO:
+    GO_PANES = []
+    for gi, view, sign, poly in go_panes():
+        fitted, ks = go_fit(gi, view, sign, poly)
+        if any(ks):
+            print(f'GLASS-FIT {car} pane {gi} ({view}, side {sign}): in {ks[0] * 5} mm, foot up {ks[1] * 5} mm, '
+                  f'header down {ks[2] * 5} mm')
+        GO_PANES.append((gi, view, sign, go_ccw(fitted)))
     # every cut first: a later cut splits faces an earlier selection held
-    GO_BACKS = [(gi, view, sign, offset_poly(poly, -GO_BACK)) for gi, view, sign, poly in go_panes()]
+    GO_BACKS = [(gi, view, sign, offset_poly(poly, -GO_BACK)) for gi, view, sign, poly in GO_PANES]
     for gi, view, sign, back in GO_BACKS:
         cut(view, sign, back, dict(GL[gi], facingMin=-1.0, visible=True))
     for gi, view, sign, back in GO_BACKS:
@@ -1275,7 +1376,7 @@ if GO:
         if f.normal.dot(n_) < 0:
             f.normal_flip()
 
-    for gi, view, sign, poly in go_panes():
+    for gi, view, sign, poly in GO_PANES:
         dr = GL[gi].get('depthRange')
         tag_ = f'pane {gi} ({view}, side {sign})'
 

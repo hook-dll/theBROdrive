@@ -29,6 +29,7 @@ CAR = {
         'arch': {'radius': 0.29, 'lift': 0.05},
     },
     'parts': {
+        'glassOverlay': True,
         # The Cooper S's contrasting roof (photos of 1965 cars: black over red, white over blue).
         'paint2': {'name': 'trim_roof', 'rgb': [0.03, 0.03, 0.035]},
         'regions': [

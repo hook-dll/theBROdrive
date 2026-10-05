@@ -84,6 +84,7 @@ CAR = {
         'arch': {'radius': 0.40, 'lift': 0.0},
     },
     'parts': {
+        'glassOverlay': True,
         'underbody': {'frame': True},
         'glass': [
             # the same screen seen from the tub (it is glass both ways, not a painted board)

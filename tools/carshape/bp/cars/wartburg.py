@@ -33,6 +33,7 @@ CAR = {
         'arch': {'radius': 0.35, 'lift': 0.04},
     },
     'parts': {
+        'glassOverlay': True,
         'glass': [
             {'view': 'side', 'outline': [[0.122, 0.915], [-0.554, 0.915], [-0.323, 1.282], [0.122, 1.282]], 'facingMin': 0.3},
             {'view': 'side', 'outline': [[0.941, 0.915], [0.176, 0.915], [0.176, 1.282], [0.71, 1.282]], 'facingMin': 0.3},

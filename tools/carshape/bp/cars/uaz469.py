@@ -52,6 +52,7 @@ CAR = {
         'arch': {'radius': 0.45, 'lift': 0.06},
     },
     'parts': {
+        'glassOverlay': True,
         'underbody': {'frame': True},
         'archFlares': [{'axle': 'both', 'r': 0.455, 'w': 0.05, 't': 0.02, 'lift': 0.06, 'material': 'paint'}],
         'paint2': {'name': 'trim_canvas', 'rgb': [0.20, 0.22, 0.16]},

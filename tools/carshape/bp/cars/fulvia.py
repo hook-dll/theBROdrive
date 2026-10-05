@@ -182,6 +182,8 @@ CAR = {
         # `parts` until now, where nothing read them: the seals were the default rubber
         # and `pillarReach` 0 never applied, so the door glass was pushed forward.)
         'glassOverlay': True,
+        # Panes measured off the photograph and checked by hand: never auto-fitted.
+        'glassFit': False,
         # Chrome frames: 1 cm round the screen and the back light (the photographs'
         # bright trim), 1.4 cm round the side glass (each pane's `seal`: the door frame,
         # belt and B-pillar chrome are 1.7-3 cm wide there).
