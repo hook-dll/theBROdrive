@@ -376,3 +376,66 @@ bracketed bars; Niva's wheel has slots where the 1983 car has round holes.
   the belt.
 - ZAZ-968M is a two-door (the drawing is a four-door); 2108 has a black lip above its
   back light; Niva 1983 bumpers black.
+
+## 2026-10-05: Fulvia roof "dent", mirrors, and end views read as the car's section
+
+- **An end view is the end's shape, not the car's section.** The Fulvia's drawn front
+  and rear profiles both taper 13 cm a side between z 0.50 (1.555 m over the wings) and
+  z 0.90 (1.30 m at the belt) because the wings bulge past the cowl and the lid. Taken
+  as the one section for all stations (as hull.py uses them) that made the doors
+  barrel-sided - widest at mid-height, the waist rolling away instead of a crease. The
+  file's `front`/`rear` outlines are now the door's own cross-section (full width up to
+  the waist moulding at 0.86, a 11 cm step in at the belt, then the glasshouse's
+  tumblehome), traced off the drawings but not as the ends' own profiles.
+- **A narrow `roofEdge` makes a roof tent, not a drip rail.** With the roof's width
+  left to the hold (0.012), it took the section at 1.29 where the outline has only the
+  crown left: a 0.98 m ridge and a 17 cm roll a side, which reads as a soft dome and,
+  under the sun, as a dent down one flank. The section now carries the roof's width
+  (0.53-0.58 half) and `roofEdge` only fairs the rail (0.03 first, 0.045 after the
+  second pass below).
+- **`shelf` double-counts a stepped section.** With a real 11 cm shoulder step in the
+  section, `shelf`'s 3 cm inset and `shelfRise` flare the glasshouse's foot back out to
+  the flank; `shelf: False` leaves the car's own step as the crease.
+- The Fulvia's roof was checked for left/right asymmetry and has none: the dense hull
+  mirrors to 0.0 mm, the working shell to 1.1 mm (surface-to-mirror), the roof's faces
+  to 0.6 mm and 5 deg (p90) in normal, and two mirrored zebra cameras agree to
+  antialiasing. The defect was the symmetric ridge-and-roll read under a directional
+  sun, fixed by the roof width above. `symm.py`'s large figures are its known
+  one-sided parts (blinkers, the exhaust and prop shaft on `car_trim`) and the
+  paint/trim material split through the floor, not the skin.
+- Mirrors: the Fulvia file's `y -0.06` was the middle of the door (the comment already
+  said the corner); the door's front shut line is y -0.50, and `_side_front - 0.12`
+  keeps it a door mount there. Small round chrome head per the photographs.
+
+## 2026-10-05 (later): Fulvia second pass - re-traced against the photographs
+
+Measured the built body's silhouette against `_refs/photos/fulvia/side.jpg` instead of
+against the previous build: the drawing's wheelbase gives 288.4 px/m, the front axle
+is at x 298 and the ground at row 731, so the photograph's own top line can be taken
+column by column (red mask) and compared with an orthographic render of the body at
+the same scale and axle (tools/carshape/overlay.py's model render). What it showed:
+
+- **A body line traced from the drawing is not the photograph's.** The bonnet, roof
+  and tail matched within 1 cm, but the back light's rake was 2-6.6 cm high through its
+  middle (the file's line was curved: shallow at the roof, steep at the foot) and the
+  whole deck sat 1.7-4.5 cm low to the tail. Both are now the photograph's own points;
+  the deck and rake agree to 1.7 cm.
+- **The belt rises nose to tail.** The photograph's glass foot is 0.870 over the front
+  door and 0.888 over the rear quarter; the file had the belt falling 0.868 -> 0.82,
+  which tilted the whole glasshouse down at the back. With the belt raised, the
+  side panes' feet (0.837-0.852) fall below the glasshouse's floor (belt - 0.03) and
+  must be lifted with it.
+- **A widened section meets the glass feet.** Raising the section's shoulder step to
+  0.885-0.915 (so the belt's rise does not push `lower_ref` above the step and scale
+  the whole car wide) put an up-facing band of shoulder either side of the pane feet:
+  `GLASS-RAGGED` on the quarter light and the screen. `sectionSmooth` 0.03 -> 0.015
+  (a 1.5 cm gaussian) tightened the shoulder back to a crease and cleared it
+  (0 faces ragged). The screen also needed its plan outline pulled in to x 0.615 at
+  the A-pillar's foot and its `facingMin` to 0.22 - at 0.30 the outline included
+  side-facing faces of the pillar's foot, 6 of them ragged.
+- `crown` 0.004 -> 0.008 and the bumper's `depth` 0.04 -> 0.03, `wrap` 0.30 -> 0.26.
+- Still open: the nose's leading edge is a rounded roll where the photograph has a
+  crisp brow over the lamps (the photo's mask reads 2-4.5 cm above the built line
+  between y -1.85 and -1.65, but the mask catches the bonnet's highlight there, so the
+  line was left on the file's full-resolution trace); the lamp decals' circles are 28
+  sided and their chrome rims show facets; a wrapped bumper end still cuts as a step.

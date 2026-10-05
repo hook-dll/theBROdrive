@@ -296,6 +296,16 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
       case 'postcard':
         item = { type: 'postcard', id: ctx.world.runtimePartId() };
         break;
+      case 'sticker_envelope':
+        // Not earned: the `dev:` id says so in a save, where every other envelope
+        // names the contract cargo it was signed for.
+        item = {
+          type: 'sticker_envelope',
+          id: ctx.world.runtimePartId(),
+          stickerKind: request.stickerKind,
+          completedContractId: `dev:${request.stickerKind}`,
+        };
+        break;
     }
     ctx.loose.spawnItem(item, dropX + ctx.origin.x, groundY + 0.3, dropZ + ctx.origin.z);
     ctx.hud.setToast(`spawned ${itemLabel(item)}`);

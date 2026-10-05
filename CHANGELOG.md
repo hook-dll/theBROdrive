@@ -12,11 +12,28 @@
   1402 mm dimensions and 1400/1370 mm tracks; Niva 2121 and VAZ-2101 were rechecked
   against the same factory dimensions and required no geometry change.
 
+- LANCIA FULVIA GLASSHOUSE (`tools/carshape/bp/cars/fulvia.py`). The A-pillars are
+  back: the screen stays on the front-facing shell and the glasshouse narrows ahead
+  of the pillar's foot, so the screen no longer runs into the door glass or onto the
+  shoulder. Door glass and quarter light re-traced from the side photograph on one
+  foot line (0.945 m) and one top line; door mirrors at the door's front corner (were
+  mid-door); roof section, belt wedge and back-light rake re-traced from photographs.
 
 ### Added
  
 - In-game radio settings now provide two editable station URLs, with recommended NTS 1,
   NTS 2, Underground 80s and Left Coast 70s streams.
+- CONTRACT KINDS (`src/contracts/`). All twenty catalogue kinds are offered by
+  couriers, each with its own condition and signature sticker: heavy crate, fragile
+  radio, urgent film, medical thermo box, trailer equipment, oversize load, one tank,
+  don't overheat, clean delivery, bald tyres, sand route and desert slalom gates,
+  long haul, night courier, convoy escort, towing (new car-to-car tow bar), car
+  transfer, part order and photo errand (photographs now carry subject evidence).
+  See `contracts.md`.
+- HANDBRAKE SOUND: the lever's ratchet on a pull and the button-and-drop on release,
+  a CC0 recording (Freesound 818295), heard from the lever between the seats.
+- Touch sticker try-on strip (turn, size, reset) shown while a sticker is previewed.
+- Dev menu "Spawn item" offers a signed envelope of every sticker design (30).
 - DEFAULT CLAY BODY FINISH (`src/render/carmodel.ts`). All cars now start with the
   selected soft non-metallic body finish and body-fixed impressions. The defaults are
   fine/broad relief 20/150 mm, noise scales 3.75/1 per metre, roughness 0.42, and zero

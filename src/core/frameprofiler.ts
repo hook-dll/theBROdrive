@@ -20,6 +20,7 @@ export type FrameSection =
   | 'sim'
   | 'physics'
   | 'traffic'
+  | 'contracts'
   | 'agents'
   | 'streaming'
   | 'inventory'
@@ -35,6 +36,7 @@ const SECTIONS: readonly FrameSection[] = [
   'sim',
   'physics',
   'traffic',
+  'contracts',
   'agents',
   'streaming',
   'inventory',
@@ -296,6 +298,7 @@ export class FrameProfiler {
     const TICK_SECTIONS: readonly FrameSection[] = [
       'physics',
       'traffic',
+      'contracts',
       'agents',
       'streaming',
       'inventory',

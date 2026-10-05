@@ -1662,6 +1662,49 @@ export const TYRE_COMPOUNDS = [
   { label: 'experimental2', grip: 1.1, side: 0.3 },
 ] as const;
 
+/** The compound a fresh car runs: standard, index 1. */
+export const TYRE_COMPOUND_DEFAULT = 1;
+
+/**
+ * A car's live tyre-compound selection, and the force a contract may put on it.
+ *
+ * `enforced` is the bald compound (kind 11) for as long as its cargo rides in the
+ * car. It has to be re-applied every tick rather than set once, because a respawned
+ * `Vehicle` is built fresh with `enforced` null. `chosen` is what the driver last
+ * picked by hand: it is frozen while the force holds, so the cycle key cannot undo the
+ * contract and removing the force restores exactly the tyres he had.
+ */
+export interface TyreCompoundState {
+  index: number;
+  enforced: number | null;
+  chosen: number;
+}
+
+/**
+ * Applies or clears a contract's forced compound. `null` restores the driver's own
+ * choice; a repeated call with the same force changes nothing, so a kind may call it
+ * on every tick.
+ */
+export function setEnforcedTyreCompound(state: TyreCompoundState, index: number | null): void {
+  if (index === null) {
+    if (state.enforced === null) return;
+    state.enforced = null;
+    state.index = state.chosen;
+    return;
+  }
+  if (state.enforced === null) state.chosen = state.index;
+  state.enforced = index;
+  state.index = index;
+}
+
+/** Returns whether a cycle press changed anything; it does not while a force holds. */
+export function cycleTyreCompoundState(state: TyreCompoundState): boolean {
+  if (state.enforced !== null) return false;
+  state.index = (state.index + 1) % TYRE_COMPOUNDS.length;
+  state.chosen = state.index;
+  return true;
+}
+
 export function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
 }

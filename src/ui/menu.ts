@@ -34,6 +34,7 @@ import { CAR_MODELS } from '../vehicle/carmodels';
 import { CAR_PAINTS } from '../vehicle/carpaint';
 import { ALL_VARIANTS } from '../parts/registry';
 import { CAMERA_FRAME_LIMIT, type FluidKind, type ShadeTint } from '../items/items';
+import { STICKERS, type StickerKind } from '../items/stickercatalog';
 
 /**
  * Title screen and pause overlay. Plain DOM, no framework. Each call owns the
@@ -420,7 +421,8 @@ export type DevSpawnItemRequest =
   | { readonly type: 'camera' }
   | { readonly type: 'football' }
   | { readonly type: 'pocket_watch' }
-  | { readonly type: 'postcard' };
+  | { readonly type: 'postcard' }
+  | { readonly type: 'sticker_envelope'; readonly stickerKind: StickerKind };
 
 function driveLayout(rearDriveBias: number): DriveLayout {
   if (rearDriveBias <= 0) return 'FWD';
@@ -2054,7 +2056,8 @@ export class MainMenu {
 
       /**
        * Dev item dispenser. Fluid capacities mirror gas-stop stock; bubble gum uses
-       * the same five-charge pack found there. Every row drops a real world pickup.
+       * the same five-charge pack found there. Every row drops a real world pickup,
+       * the sticker rows one signed envelope of each design in the catalog.
        */
       const renderItemScreen = (): void => {
         panel.textContent = '';
@@ -2134,6 +2137,23 @@ export class MainMenu {
           row.append(name, detail);
           row.addEventListener('click', () => {
             hooks.spawnItem?.(spec.request);
+            finish('resume');
+          });
+          list.appendChild(row);
+        }
+
+        const stickerHeading = el('div', 'menu-body-group');
+        stickerHeading.textContent = `sticker envelopes · ${STICKERS.length}`;
+        list.appendChild(stickerHeading);
+        for (const sticker of STICKERS) {
+          const row = button('menu-body', '');
+          const name = el('span', 'menu-body-label');
+          name.textContent = sticker.label;
+          const size = el('span', 'menu-body-class');
+          size.textContent = `${Math.round(sticker.widthM * 100)} × ${Math.round(sticker.heightM * 100)} cm`;
+          row.append(name, size);
+          row.addEventListener('click', () => {
+            hooks.spawnItem?.({ type: 'sticker_envelope', stickerKind: sticker.kind });
             finish('resume');
           });
           list.appendChild(row);

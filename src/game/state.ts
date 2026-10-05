@@ -132,6 +132,15 @@ export interface CarState {
   qy: number;
   qz: number;
   qw: number;
+  /**
+   * The car this one is coupled to as the TOWED end of a car-to-car tow bar, or
+   * null/absent. There is no mirror field on the tower: the set of towers is
+   * derived from the cars that are somebody's `towedBy`, exactly as a trailer's
+   * `hitchedTo` names the car pulling it. Saved, and it IS the coupling — the live
+   * Rapier joint is rebuilt from it whenever both cars are materialised
+   * (vehicle/cartow.ts), so a reload puts the pair back on the bar.
+   */
+  towedBy?: string | null;
 }
 
 export interface PlayerState {
@@ -171,6 +180,8 @@ export interface TrailerState {
   hitchedTo: string | null;
   /** Mass on the bed, kg. Zero when empty. */
   cargoKg: number;
+  /** Oversize load description, or absent for an ordinary flatbed. */
+  load?: TrailerLoad;
   x: number;
   y: number;
   z: number;
@@ -180,6 +191,24 @@ export interface TrailerState {
   qz: number;
   qw: number;
 }
+
+/**
+ * A load lashed to a trailer bed that overhangs it.
+ *
+ * An oversize contract is the only producer today. The shape is state, not a mesh
+ * detail: the trailer builds a real collider from `halfExtents`, so whatever the
+ * overhang hits is hit for real, and it lives in the save so a reloaded trailer is
+ * the same physical object. Mass is NOT here — it is the bed's `cargoKg`, so it
+ * takes the one mass path every trailer already uses.
+ */
+export interface TrailerLoad {
+  /** Which load it is: 'pipes' or 'beams'. Saved; never renamed. */
+  readonly kind: TrailerLoadKind;
+  /** Half-extents of the load box, m. Longer than the bed, so it overhangs. */
+  readonly halfExtents: readonly [number, number, number];
+}
+
+export type TrailerLoadKind = 'pipes' | 'beams';
 
 
 export interface WorldState {
@@ -254,6 +283,8 @@ export type WorldDelta =
   | { t: 'exit_car' }
   | { t: 'car_add'; car: CarState }
   | { t: 'car_remove'; carId: string }
+  /** `carId` is the TOWED car; `towerId` null drops the bar. */
+  | { t: 'car_tow'; carId: string; towerId: string | null }
   | { t: 'car_transform'; carId: string; x: number; y: number; z: number; qx: number; qy: number; qz: number; qw: number }
   | { t: 'car_odometer'; carId: string; metres: number }
   | { t: 'car_fuel'; carId: string; litres: number }
@@ -287,6 +318,7 @@ export type WorldDelta =
       completedContractId?: string;
     }
   | { t: 'trailer_add'; trailer: TrailerState }
+  | { t: 'trailer_remove'; trailerId: string }
   | { t: 'trailer_transform'; trailerId: string; x: number; y: number; z: number; qx: number; qy: number; qz: number; qw: number }
   | { t: 'trailer_hitch'; trailerId: string; carId: string | null }
   | { t: 'trailer_cargo'; trailerId: string; cargoKg: number }
@@ -520,6 +552,13 @@ export class GameWorld {
       case 'car_remove':
         delete s.cars[delta.carId];
         break;
+      case 'car_tow': {
+        // A coupling to a car that is not there is not a coupling; the tower side
+        // is derived from this field, so a dangling id would keep a ghost alive.
+        const car = s.cars[delta.carId];
+        if (car) car.towedBy = delta.towerId !== null && s.cars[delta.towerId] ? delta.towerId : null;
+        break;
+      }
       case 'player_move':
         s.player.x = delta.x;
         s.player.y = delta.y;
@@ -650,6 +689,11 @@ export class GameWorld {
         break;
       case 'trailer_add':
         s.trailers[delta.trailer.id] = delta.trailer;
+        break;
+      case 'trailer_remove':
+        // A contract trailer that was handed over. Streaming reconciles from state,
+        // so the runtime body is dropped by the composition root's own listener.
+        delete s.trailers[delta.trailerId];
         break;
       case 'trailer_transform': {
         const trailer = s.trailers[delta.trailerId];

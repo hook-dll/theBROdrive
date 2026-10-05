@@ -47,6 +47,10 @@ export interface TouchState {
   lights: boolean;
   autopilot: boolean;
   handbrake: boolean;
+  /** Sticker try-on taps: notches turned, size steps, back to upright. */
+  stickerTurn: number;
+  stickerSize: number;
+  stickerReset: boolean;
 }
 
 interface TouchHooks {
@@ -84,6 +88,23 @@ const BUTTONS: readonly ButtonSpec[] = [
   { id: 'cinema', key: '-', label: 'Toggle cinema viewport', mode: 'drive', side: 'right', position: 'bottom' },
 ];
 
+/**
+ * The sticker try-on strip, shown only while a sticker is previewed on a car. Sticking
+ * and mirroring are the F and E face buttons, as on the keyboard; these are what the
+ * desktop does with the wheel, Shift+wheel and the right button.
+ */
+const STICKER_BUTTONS: readonly {
+  readonly label: string;
+  readonly aria: string;
+  readonly tap: (state: TouchState) => void;
+}[] = [
+  { label: '↺', aria: 'Turn sticker left', tap: (s) => { s.stickerTurn -= 1; } },
+  { label: '↻', aria: 'Turn sticker right', tap: (s) => { s.stickerTurn += 1; } },
+  { label: '−', aria: 'Smaller sticker', tap: (s) => { s.stickerSize -= 1; } },
+  { label: '+', aria: 'Larger sticker', tap: (s) => { s.stickerSize += 1; } },
+  { label: 'RESET', aria: 'Sticker upright, catalogue size', tap: (s) => { s.stickerReset = true; } },
+];
+
 export class TouchControls {
   private readonly root: HTMLElement;
   private readonly canvas: HTMLCanvasElement;
@@ -116,6 +137,7 @@ export class TouchControls {
   private zoomAxis = 0;
   private driving = false;
   private zoomAvailable = false;
+  private stickerTools = false;
 
   private readonly state: TouchState & {
     active: boolean;
@@ -139,6 +161,9 @@ export class TouchControls {
     lights: false,
     autopilot: false,
     handbrake: false,
+    stickerTurn: 0,
+    stickerSize: 0,
+    stickerReset: false,
   };
 
   constructor(root: HTMLElement, canvas: HTMLCanvasElement, hooks: TouchHooks) {
@@ -192,6 +217,13 @@ export class TouchControls {
     if (!visible) this.releaseZoomFader();
   }
 
+  /** The sticker try-on strip, while a sticker is previewed on a car. */
+  setStickerTools(active: boolean): void {
+    if (active === this.stickerTools) return;
+    this.stickerTools = active;
+    this.overlay?.classList.toggle('has-sticker', active);
+  }
+
   /** Release all analogue touch axes when the tab returns. */
   private onVisibility = (): void => {
     if (document.visibilityState !== 'visible') return;
@@ -226,6 +258,9 @@ export class TouchControls {
     lights: boolean;
     autopilot: boolean;
     handbrake: boolean;
+    stickerTurn: number;
+    stickerSize: number;
+    stickerReset: boolean;
   } {
     const taps = {
       interact: this.state.interact,
@@ -238,6 +273,9 @@ export class TouchControls {
       lights: this.state.lights,
       autopilot: this.state.autopilot,
       handbrake: this.state.handbrake,
+      stickerTurn: this.state.stickerTurn,
+      stickerSize: this.state.stickerSize,
+      stickerReset: this.state.stickerReset,
     };
     this.state.interact = false;
     this.state.mount = false;
@@ -249,6 +287,9 @@ export class TouchControls {
     this.state.lights = false;
     this.state.autopilot = false;
     this.state.handbrake = false;
+    this.state.stickerTurn = 0;
+    this.state.stickerSize = 0;
+    this.state.stickerReset = false;
     return taps;
   }
 
@@ -462,7 +503,8 @@ export class TouchControls {
     const overlay = document.createElement('div');
     overlay.className =
       `touch-ui${this.driving ? ' is-driving' : ''}` +
-      `${this.driving && this.zoomAvailable ? ' has-zoom' : ''}`;
+      `${this.driving && this.zoomAvailable ? ' has-zoom' : ''}` +
+      `${this.stickerTools ? ' has-sticker' : ''}`;
 
     const systems = document.createElement('div');
     systems.className = 'touch-system-row';
@@ -499,6 +541,19 @@ export class TouchControls {
     }
     overlay.appendChild(leftButtons);
     overlay.appendChild(rightButtons);
+
+    const stickerRow = document.createElement('div');
+    stickerRow.className = 'touch-sticker-row';
+    for (const spec of STICKER_BUTTONS) {
+      const button = document.createElement('button');
+      button.className = 'touch-system-btn';
+      button.type = 'button';
+      button.textContent = spec.label;
+      button.setAttribute('aria-label', spec.aria);
+      this.bindSystemButton(button, () => spec.tap(this.state));
+      stickerRow.appendChild(button);
+    }
+    overlay.appendChild(stickerRow);
 
     const wheel = this.makeWheel();
     this.wheel = wheel.control;

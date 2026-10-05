@@ -7,14 +7,24 @@ import type {
   PlayerState,
   StickerState,
   TrailerState,
+  TrailerLoad,
   WorldState,
   GameWorld,
 } from '../game/state';
 import { COLD_SOAK_C } from '../vehicle/cooling';
 import { sanitizeSettings } from '../game/settings';
 import { hasVariant, type PartInstance } from '../parts/registry';
-import { CAMERA_FRAME_LIMIT, SPONGE_CAPACITY_MAX, SPONGE_CAPACITY_MIN, type Item } from '../items/items';
+import {
+  CAMERA_FRAME_LIMIT,
+  SPONGE_CAPACITY_MAX,
+  SPONGE_CAPACITY_MIN,
+  type ContractCargoItem,
+  type Item,
+  type PhotoEvidence,
+} from '../items/items';
 import { isStickerKind, STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
+import { isContractKind } from '../contracts/registry';
+import type { ContractProgress } from '../contracts/types';
 import {
   AIR_FILTER_CELL,
   createBonnetStorage,
@@ -493,6 +503,28 @@ export function migrateState(raw: unknown): WorldState {
   for (const [id, value] of Object.entries(carsRaw)) {
     cars[id] = migrateCar(asRecord(value, `car "${id}"`));
   }
+  // A tow bar needs both ends and only one end per car. Checked here, where the
+  // whole car set is known: a save naming a tower that is gone (or claiming a
+  // second car on one tower, or a three-car chain) loads with the bar off rather
+  // than with a coupling the runtime would have to hallucinate.
+  for (const car of Object.values(cars)) {
+    const towerId = car.towedBy ?? null;
+    if (towerId === null) continue;
+    const tower = cars[towerId];
+    if (
+      towerId === car.id ||
+      !tower ||
+      tower.towedBy != null
+    ) {
+      car.towedBy = null;
+    }
+  }
+  const towedIds = new Set<string>();
+  for (const car of Object.values(cars)) {
+    const towerId = car.towedBy ?? null;
+    if (towerId !== null && towedIds.has(towerId)) car.towedBy = null;
+    else if (towerId !== null) towedIds.add(towerId);
+  }
 
   const trailers: Record<string, TrailerState> = {};
   for (const [id, value] of Object.entries(trailersRaw)) {
@@ -589,7 +621,7 @@ function migrateTrailer(raw: Record<string, unknown>): TrailerState {
   if (typeof raw.id !== 'string') {
     throw new Error('Save data is malformed: trailer is missing an id');
   }
-  return {
+  const trailer: TrailerState = {
     id: raw.id,
     // A dangling car id would leave a trailer coupled to nothing; the caller
     // re-hitches from this field, and an unknown car simply leaves it standing.
@@ -603,6 +635,28 @@ function migrateTrailer(raw: Record<string, unknown>): TrailerState {
     qz: numOr(raw.qz, 0),
     qw: numOr(raw.qw, 1),
   };
+  const load = migrateTrailerLoad(raw.load);
+  if (load !== null) trailer.load = load;
+  return trailer;
+}
+
+/**
+ * A trailer's oversize load. `halfExtents` sizes a real collider, so they are
+ * bounded rather than trusted: a corrupt save must not hand Rapier a 40 m box.
+ */
+function migrateTrailerLoad(raw: unknown): TrailerLoad | null {
+  if (raw === null || raw === undefined) return null;
+  const obj = asRecord(raw, 'trailer load');
+  if (obj.kind !== 'pipes' && obj.kind !== 'beams') return null;
+  const ext = obj.halfExtents;
+  if (!Array.isArray(ext) || ext.length !== 3) return null;
+  const half: [number, number, number] = [0, 0, 0];
+  for (let i = 0; i < 3; i++) {
+    const value = ext[i];
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null;
+    half[i] = Math.min(6, value);
+  }
+  return { kind: obj.kind, halfExtents: half };
 }
 
 function migrateStorage(raw: unknown, cells: number, where: string): (Item | null)[] {
@@ -699,7 +753,7 @@ function migrateCar(raw: Record<string, unknown>): CarState {
   const taillightsOn = raw.taillightsOn === true;
   const reverseLightsOn = raw.reverseLightsOn === true;
 
-  return {
+  const car: CarState = {
     id: raw.id,
     modelId,
     stickers,
@@ -736,6 +790,10 @@ function migrateCar(raw: Record<string, unknown>): CarState {
     qz: numOr(raw.qz, 0),
     qw: numOr(raw.qw, 1),
   };
+  // The towed car's own field only; the tower carries no mirror. Whether the named
+  // car exists is decided once the whole car set is known, in `fromSaveData`.
+  if (typeof raw.towedBy === 'string' && raw.towedBy.length > 0) car.towedBy = raw.towedBy;
+  return car;
 }
 
 /**
@@ -819,6 +877,87 @@ function isRemovedLegacyItem(raw: unknown): boolean {
     return typeof variantId === 'string' && !hasVariant(LEGACY_VARIANT_IDS[variantId] ?? variantId);
   }
   return false;
+}
+
+/**
+ * Rebuilds a contract's saved progress from known keys only, clamping every
+ * number. A missing record (an older save, or a hand-edited one) loads as a fresh,
+ * unstarted contract rather than as a NaN that would poison the reward test.
+ */
+function sanitizeContractProgress(raw: unknown): ContractProgress {
+  const obj =
+    typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+  return {
+    started: obj.started === true,
+    startedAtS: Math.max(0, numOr(obj.startedAtS, 0)),
+    deadlineS: Math.max(0, numOr(obj.deadlineS, 0)),
+    softDeadlineS: Math.max(0, numOr(obj.softDeadlineS, 0)),
+    condition: clamp01(numOr(obj.condition, 1)),
+    heat: Math.max(0, numOr(obj.heat, 0)),
+    exposureS: Math.max(0, numOr(obj.exposureS, 0)),
+    violated: obj.violated === true,
+    late: obj.late === true,
+    gatesPassed: Math.max(0, Math.floor(numOr(obj.gatesPassed, 0))),
+    gateStartedAtS: Math.max(0, numOr(obj.gateStartedAtS, 0)),
+    gateFinishedAtS: Math.max(0, numOr(obj.gateFinishedAtS, 0)),
+    gateTimeLimitS: Math.max(0, numOr(obj.gateTimeLimitS, 0)),
+    gateReturned: obj.gateReturned === true,
+    statusText: typeof obj.statusText === 'string' ? obj.statusText.slice(0, 40) : '',
+    subjectId: typeof obj.subjectId === 'string' ? obj.subjectId.slice(0, 48) : '',
+  };
+}
+
+/** Subject ids in a photo's evidence: short strings only, and only a handful. */
+function photoSubjectIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const value of raw) {
+    if (typeof value === 'string' && value.length > 0 && value.length <= 48) out.push(value);
+    if (out.length >= 24) break;
+  }
+  return out;
+}
+
+function photoVec3(raw: unknown): { x: number; y: number; z: number } | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined;
+  const obj = raw as Record<string, unknown>;
+  const x = numOr(obj.x, NaN);
+  const y = numOr(obj.y, NaN);
+  const z = numOr(obj.z, NaN);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return undefined;
+  return { x, y, z };
+}
+
+/**
+ * Rebuilds a photograph's evidence, or drops it. A photo is never lost because its
+ * evidence is corrupt — the pixels are the item and the evidence is only what the
+ * errand reads — so an old photo (no evidence at all) or a hand-edited one loads
+ * without it rather than failing the whole save.
+ */
+function sanitizePhotoEvidence(raw: unknown): PhotoEvidence | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined;
+  const obj = raw as Record<string, unknown>;
+  const cameraPosition = photoVec3(obj.cameraPosition);
+  const cameraDirection = photoVec3(obj.cameraDirection);
+  const roadS = numOr(obj.roadS, NaN);
+  const timeOfDay = numOr(obj.timeOfDay, NaN);
+  const playedS = numOr(obj.playedS, NaN);
+  if (!cameraPosition || !cameraDirection) return undefined;
+  if (!Number.isFinite(roadS) || !Number.isFinite(timeOfDay) || !Number.isFinite(playedS)) {
+    return undefined;
+  }
+  const subjects = photoSubjectIds(obj.subjects);
+  return {
+    subjects,
+    subjectsClose: photoSubjectIds(obj.subjectsClose).filter((id) => subjects.includes(id)),
+    roadS: Math.max(0, roadS),
+    timeOfDay,
+    playedS: Math.max(0, playedS),
+    cameraPosition,
+    cameraDirection,
+  };
 }
 
 function migrateItem(raw: unknown, where: string): Item {
@@ -931,7 +1070,12 @@ function migrateItem(raw: unknown, where: string): Item {
       ) {
         throw new Error(`Save data is malformed: photograph at ${where} has invalid image data`);
       }
-      return { type: 'photograph', id: obj.id, imageDataUrl };
+      // Old photos carry no evidence; a corrupt one is dropped rather than losing the
+      // picture.
+      const evidence = sanitizePhotoEvidence(obj.evidence);
+      return evidence === undefined
+        ? { type: 'photograph', id: obj.id, imageDataUrl }
+        : { type: 'photograph', id: obj.id, imageDataUrl, evidence };
     }
     case 'football':
       return { type: 'football', id: obj.id };
@@ -946,21 +1090,26 @@ function migrateItem(raw: unknown, where: string): Item {
       const sourceCourierIndex = Math.trunc(numOr(obj.sourceCourierIndex, -1));
       if (
         sourceCourierIndex < 0
-        || obj.contractKind !== 'parcel'
+        || !isContractKind(obj.contractKind)
         || typeof obj.cargoName !== 'string'
         || !isStickerKind(obj.rewardStickerKind)
       ) {
         throw new Error(`Save data is malformed: contract cargo at ${where} is invalid`);
       }
-      return {
+      const item: ContractCargoItem = {
         type: 'contract_cargo',
         id: obj.id,
         sourceCourierIndex,
-        contractKind: 'parcel',
+        contractKind: obj.contractKind,
         cargoName: obj.cargoName,
         rewardStickerKind: obj.rewardStickerKind,
         generatedSeed: numOr(obj.generatedSeed, 0) >>> 0,
+        progress: sanitizeContractProgress(obj.progress),
       };
+      if (typeof obj.massKg === 'number' && Number.isFinite(obj.massKg) && obj.massKg > 0) {
+        item.massKg = obj.massKg;
+      }
+      return item;
     }
     case 'sticker_envelope':
       if (!isStickerKind(obj.stickerKind) || typeof obj.completedContractId !== 'string') {

@@ -712,6 +712,27 @@ export class MirageTableau {
   }
 
   /**
+   * Read-only look at the tableau the player is being shown right now, or null. The
+   * photograph's subject test reads this; nothing here changes what is drawn.
+   */
+  visibleSubject(): {
+    readonly encounterIndex: number;
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+    readonly opacity: number;
+  } | null {
+    if (!this.root.visible || this.previewActive || this.activeEncounter < 0) return null;
+    return {
+      encounterIndex: this.activeEncounter,
+      x: this.anchorX,
+      y: this.anchorY,
+      z: this.anchorZ,
+      opacity: this.materials[0]!.opacity,
+    };
+  }
+
+  /**
    * Direct presentation path for comparing every authored tableau in the lab.
    *
    * The tableau always straddles the road exactly as it does in game: the anchor is

@@ -36,6 +36,8 @@ thanks to them.
 | shotgun.ogg | [Shotgun Shot 03.wav](https://freesound.org/s/473846/) | LilMati |
 | bolt.ogg | [Mosin Nagant Bolt Action Cycle](https://freesound.org/s/370345/) | Zott820 |
 | shutter.ogg | [Contarex camera shutter.wav](https://freesound.org/s/520684/) | Tonik1105 |
+| handbrake-on.ogg | [Handbrake Engage, Disengage](https://freesound.org/s/818295/) | microman502 |
+| handbrake-off.ogg | [Handbrake Engage, Disengage](https://freesound.org/s/818295/) | microman502 |
 | raven.ogg | [Common Raven croaks overhead 77mel 9am B 181117.mp3](https://freesound.org/s/572720/) | TRP |
 | hawk.ogg | [R30-34-Red Tailed Hawk.wav](https://freesound.org/s/479610/) | craigsmith |
 | sparrow.ogg | [House sparrows](https://freesound.org/s/670176/) | freemaster2 |

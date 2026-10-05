@@ -26,6 +26,7 @@ import { warmPoiStructures } from './world/poistructures';
 import {
   Inventory,
   type CameraItem,
+  type ContractCargoItem,
 } from './items/items';
 import { WeaponController } from './items/weapons';
 import { LoosePartField } from './parts/loose';
@@ -35,6 +36,14 @@ import { loadCarModel } from './render/carmodel';
 import { preloadTrailerModel } from './render/trailermodel';
 import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
 import { Interaction } from './player/interaction';
+import { sandRouteGates, slalomGates, type ContractGate } from './contracts/gates';
+import { ContractRuntime } from './contracts/runtime';
+import { photoEvidence } from './contracts/photosubjects';
+import { contractCarId, ensureContractWorldObjects, type ContractWorldDeps } from './contracts/world';
+import type { ContractCarSnapshot, ContractCarTelemetry, ContractPlace } from './contracts/types';
+import { CarTowField } from './vehicle/cartow';
+import { ambientAirC } from './vehicle/cooling';
+import { SurfaceType } from './core/surfaces';
 import { Player } from './player/player';
 import { PlayerVitals } from './player/vitals';
 import { BirdFlock } from './agents/birds';
@@ -72,7 +81,7 @@ import { TakeoffCutscene } from './story/takeoff';
 import { StoryOverlay } from './story/overlay';
 import { playEnding } from './story/ending';
 import { TerminusPadProvider } from './world/terminuspad';
-import { PoiProvider } from './world/poi';
+import { PoiProvider, poisBetween } from './world/poi';
 import { DebrisField, type Impactor } from './world/debris';
 import { GroundCoverField } from './world/props/groundcover';
 import { hasEscapedWorld } from './world/landscape';
@@ -95,7 +104,8 @@ import { setDesertDustArclength } from './render/desertdust';
 import { setGroundFadeWindow } from './render/groundfade';
 import { WreckTrunkField } from './world/wrecktrunks';
 import { PoiSwitchField } from './world/poiswitches';
-import { CourierField } from './world/couriers';
+import { CourierField, courierStop } from './world/couriers';
+import { GateField } from './world/gates';
 import { loadSpine } from './world/spinecache';
 import { RoadMeshProvider } from './world/roadmesh';
 import { RoadDistance } from './world/roaddistance';
@@ -168,6 +178,19 @@ const ACTIVE_LOAD_RADIUS = 800;
 const ACTIVE_UNLOAD_RADIUS = 1000;
 const ACTIVE_LOAD_RADIUS_SQUARED = ACTIVE_LOAD_RADIUS * ACTIVE_LOAD_RADIUS;
 const ACTIVE_UNLOAD_RADIUS_SQUARED = ACTIVE_UNLOAD_RADIUS * ACTIVE_UNLOAD_RADIUS;
+
+/**
+ * Convoy escort pace policy, m/s. The escort is an ordinary road driver whose speed
+ * cap is the only thing this registry decides: close on the car it escorts at a few
+ * m/s above the leader's speed, keep a hint of creep when the leader is stopped so a
+ * released handbrake is answered, and allow a full cruise once a bend or a jam has
+ * opened a real gap, so it can catch up rather than fall out of the stream.
+ */
+const CONVOY_HEADWAY_S = 2.0;
+const CONVOY_CLOSE_MARGIN_MPS = 3;
+const CONVOY_CREEP_MPS = 3;
+const CONVOY_RECOVER_GAP_M = 45;
+const CONVOY_CRUISE_MPS = 22;
 
 /** How often the record marker and player position are pushed into state. */
 const RECORD_INTERVAL = 2;
@@ -427,6 +450,9 @@ async function boot(): Promise<void> {
   const tumbleweeds = new TumbleweedField(renderer.scene, road, terrain, world.seed, origin, wheelSpray);
   // Tufts, shrubs and rosettes burst into the same spray ring; no Rapier colliders.
   const groundCover = new GroundCoverField(wheelSpray, origin);
+  // Gate posts for the sand route and the slalom (kinds 12/13). Constructed before the
+  // boot warm-up so its hidden anchors compile the shared post and flag programs then.
+  const gateField = new GateField(renderer.scene, terrain);
 
   // Shared exact nearest-road field: the tile streamer uses it to grade the open
   // lattice into the road corridor without searching the full spine per vertex.
@@ -552,6 +578,19 @@ async function boot(): Promise<void> {
 
   const vehicles = new Map<string, Vehicle>();
   const pendingVehicleLoads = new Map<string, Promise<Vehicle>>();
+  /**
+   * The car-to-car tow bar of kind 17. Built here because it reads the live
+   * `Vehicle` by id: a bar needs both ends materialised, and `reconcileActiveWorld`
+   * keeps both ends in the active set before this field reconciles from state.
+   */
+  const carTowField = new CarTowField(
+    physics,
+    world,
+    renderer.scene,
+    origin,
+    (carId) => vehicles.get(carId) ?? null,
+    () => hud.setToast('the tow bar snapped'),
+  );
   const frameProfiler = import.meta.env.DEV ? new FrameProfiler() : null;
   if (frameProfiler) (window as unknown as { __broSpikes: unknown }).__broSpikes = frameProfiler.spikes;
   let knownPrograms = 0;
@@ -654,7 +693,12 @@ async function boot(): Promise<void> {
       const def = carModel(car.modelId);
       await loadCarModel(def.id);
       const vehicle = new Vehicle(physics, world, car, renderer.scene, origin);
-      vehicles.set(car.id, vehicle);
+      // The car can leave state while its model is loading — a delivered contract car
+      // (`car_remove`). A Vehicle nothing owns must not be inserted, and must not be
+      // left standing in the scene either. The boot path awaits these and its cars
+      // cannot vanish mid-load, so the disposed return is unreachable there.
+      if (world.state.cars[car.id] === undefined) vehicle.dispose();
+      else vehicles.set(car.id, vehicle);
       return vehicle;
     })().then(
       (vehicle) => {
@@ -709,6 +753,12 @@ async function boot(): Promise<void> {
     return dx * dx + dz * dz <= radiusSquared;
   };
   const trafficPosition = { x: 0, y: 0, z: 0 };
+  /** Reused receivers for the convoy escort's gap and absolute pose. */
+  const escortPosition = { x: 0, y: 0, z: 0 };
+  const escortChassis = { x: 0, y: 0, z: 0 };
+  const escortLeadChassis = { x: 0, y: 0, z: 0 };
+  /** Reused receiver for interaction's car lookups; see `CarLookup`. */
+  const interactionCarPosition = { x: 0, y: 0, z: 0 };
   const traffic = new RoadTraffic(
     physics,
     world,
@@ -742,6 +792,14 @@ async function boot(): Promise<void> {
     const towingCarIds = new Set<string>();
     for (const trailer of Object.values(world.state.trailers)) {
       if (trailer.hitchedTo !== null) towingCarIds.add(trailer.hitchedTo);
+    }
+    // A tow bar holds BOTH cars: the towed one must be materialised to be dragged,
+    // and its tower must stay so the bar has something to pull from.
+    for (const id in cars) {
+      const towerId = cars[id]!.towedBy ?? null;
+      if (towerId === null) continue;
+      towingCarIds.add(id);
+      towingCarIds.add(towerId);
     }
     for (const id in cars) {
       const car = cars[id];
@@ -779,7 +837,63 @@ async function boot(): Promise<void> {
       ACTIVE_LOAD_RADIUS,
       ACTIVE_UNLOAD_RADIUS,
     );
+    // After the cars: a bar whose state says two cars are coupled gets its joint
+    // back only when both have live bodies, so this must follow the loop above.
+    carTowField.syncFromState();
     loose.updateActive(anchorX, anchorZ, ACTIVE_LOAD_RADIUS, ACTIVE_UNLOAD_RADIUS);
+  };
+
+  /**
+   * AI-DRIVEN PERSISTENT CARS, BY CAR ID. Only the convoy escort (kind 16) for now.
+   *
+   * The escort is a real `CarState` in the world and a real `Vehicle` while it is
+   * near the player. What it is not is a driver: it gets its own `Autopilot` — the
+   * same planner ambient traffic uses — and follows the player's car by the ordinary
+   * means, because the player's chassis is a dynamic body in the corridor and the
+   * planner's own lead-following holds a headway behind whatever is there. That is
+   * the whole follow mode: match the leader's speed, brake when it brakes, stop when
+   * it stops, and accelerate back to the cap once the road ahead is clear again.
+   *
+   * This registry decides only the speed CEILING (see CONVOY_*) and whether the
+   * papers are aboard the car being driven. An escort with the papers elsewhere is
+   * capped at zero, which the planner brakes to, so an unattended escort parks
+   * under its own control instead of being pinned by `settle`.
+   */
+  interface EscortRuntime {
+    readonly carId: string;
+    readonly autopilot: Autopilot;
+    readonly input: InputFrame;
+    readonly seat: { forwardS: number; direction: 1 };
+    /** The convoy papers are aboard the car the player is driving right now. */
+    following: boolean;
+    engaged: boolean;
+  }
+  const escorts = new Map<string, EscortRuntime>();
+  const escortFor = (carId: string): EscortRuntime => {
+    const existing = escorts.get(carId);
+    if (existing) return existing;
+    const seat = { forwardS: 0, direction: 1 as const };
+    const autopilot = new Autopilot(road, hazards, physics);
+    autopilot.setMode('sleeper');
+    autopilot.setPace(1);
+    // An escort does not overtake the car it is escorting, and it must not treat
+    // that car as something to get past.
+    autopilot.setPassingEnabled(false);
+    autopilot.setFollowingHeadway(CONVOY_HEADWAY_S);
+    autopilot.setTrafficRecoveryPolicy(true);
+    // Its own seat in the stream's road-frame view, so the traffic coordinator
+    // knows where it is even though it is not one of the stream's own cars.
+    autopilot.setTrafficField(traffic.fieldFor(seat, carId));
+    const escort: EscortRuntime = {
+      carId,
+      autopilot,
+      input: emptyInput(),
+      seat,
+      following: false,
+      engaged: false,
+    };
+    escorts.set(carId, escort);
+    return escort;
   };
 
   /**
@@ -860,6 +974,32 @@ async function boot(): Promise<void> {
   // POI working cars enter state when their chunk reaches the physics band. A new
   // runtime exists immediately only if the car belongs in the current active set.
   world.onDelta((delta) => {
+    // A delivered contract car or trailer leaves state and must leave the scene and
+    // the collider maps with it: the streaming reconcile walks the cars and trailers
+    // that ARE in state, so a removed one would otherwise stand there for the session.
+    if (delta.t === 'car_remove') {
+      // ORDER MATTERS. A trailer still coupled to the car holds that body in a rapier
+      // impulse joint, and `enforceHitch` reads the car's body every step: removing the
+      // body first traps the wasm on the next step ("Unreachable code should not be
+      // executed" in rawrigidbodyset_rbTranslation, measured). Unhitch first; the
+      // trailer is left standing where it is, and `unhitch` records that in state.
+      const coupled = trailerField.hitchedTo(delta.carId);
+      if (coupled) coupled.unhitch();
+      // The same order for a tow bar: its joint references the body, so the bar
+      // goes before the body does. `remove` handles the car as either end.
+      carTowField.remove(delta.carId);
+      escorts.delete(delta.carId);
+      const vehicle = vehicles.get(delta.carId);
+      if (vehicle) {
+        vehicle.dispose();
+        vehicles.delete(delta.carId);
+      }
+      return;
+    }
+    if (delta.t === 'trailer_remove') {
+      trailerField.remove(delta.trailerId);
+      return;
+    }
     if (delta.t !== 'car_add') return;
     const anchor = activeWorldAnchor();
     if (
@@ -885,6 +1025,12 @@ async function boot(): Promise<void> {
       .filter((trailer) => trailer.hitchedTo !== null)
       .map((trailer) => trailer.hitchedTo as string),
   );
+  for (const car of Object.values(world.state.cars)) {
+    const towerId = car.towedBy ?? null;
+    if (towerId === null) continue;
+    initialTowingIds.add(car.id);
+    initialTowingIds.add(towerId);
+  }
   const initialCars = Object.values(world.state.cars).filter(
     (car) =>
       car.id === initialDrivingId ||
@@ -989,6 +1135,45 @@ async function boot(): Promise<void> {
       const active = activeCar();
       return active ? { carId: active.id, vehicle: active.vehicle } : null;
     },
+    {
+      // The live Vehicle by id, for the bar's geometry.
+      vehicle: (carId) => vehicles.get(carId) ?? null,
+      // Absolute X/Z: the body when materialised (a moving car's saved pose is up to
+      // a transform-emit interval stale), the saved pose otherwise.
+      position: (carId) => {
+        const vehicle = vehicles.get(carId);
+        if (vehicle) return vehicle.absoluteTranslation(interactionCarPosition);
+        const car = world.state.cars[carId];
+        return car ? { x: car.x, z: car.z } : null;
+      },
+      // Rapier's own frame: the caller passes the player's relative position and the
+      // cars answer from their chassis, so no origin conversion is needed.
+      nearest: (x, z, out) => {
+        let count = 0;
+        let firstId: string | null = null;
+        let secondId: string | null = null;
+        let firstSq = Infinity;
+        let secondSq = Infinity;
+        for (const [id, vehicle] of vehicles) {
+          const t = vehicle.chassis.translation(interactionCarPosition);
+          const distanceSq = (t.x - x) * (t.x - x) + (t.z - z) * (t.z - z);
+          if (distanceSq < firstSq) {
+            secondSq = firstSq;
+            secondId = firstId;
+            firstSq = distanceSq;
+            firstId = id;
+          } else if (distanceSq < secondSq) {
+            secondSq = distanceSq;
+            secondId = id;
+          }
+          count++;
+        }
+        out[0] = firstId;
+        out[1] = secondId;
+        return Math.min(2, count);
+      },
+    },
+    carTowField,
     (carId) => {
       // The sticker is in CarState already; the paint re-reads the list.
       vehicles.get(carId)?.refreshStickers();
@@ -1287,6 +1472,179 @@ async function boot(): Promise<void> {
   };
   const playerImpacts = createPlayerImpacts({ physics, player, vitals, vehicles, traffic });
 
+  // Contract runtime. It reads the durable numbers (fuel, temperature) from
+  // `CarState` and the physics-only ones (impacts, rollover) from the live Vehicle,
+  // both through this provider; one scratch object is reused per call.
+  const contracts = new ContractRuntime(world);
+  type MutableCarTelemetry = { -readonly [K in keyof ContractCarTelemetry]: ContractCarTelemetry[K] };
+  const contractCarTelemetry: MutableCarTelemetry = {
+    fuelLitres: 0,
+    refuelled: false,
+    engineOverheating: false,
+    engineRunning: false,
+    impactMps: 0,
+    landingMps: 0,
+    upsideDown: false,
+    absoluteX: 0,
+    absoluteZ: 0,
+    onRoad: false,
+    trailerId: null,
+    trailerImpactMps: 0,
+    trailerUpsideDown: false,
+  };
+  /** Reused receiver for a carrying car's absolute position. */
+  const contractCarPosition = { x: 0, y: 0, z: 0 };
+  /** Fuel seen at the previous tick, per car, for spotting a pour. */
+  const lastContractFuel = new Map<string, number>();
+  const carTelemetryForContract = (carId: string): ContractCarTelemetry | null => {
+    const car = world.state.cars[carId];
+    if (!car) return null;
+    const previousFuel = lastContractFuel.get(carId);
+    const refuelled = previousFuel !== undefined && car.fuelLitres > previousFuel + 0.05;
+    lastContractFuel.set(carId, car.fuelLitres);
+    const vehicle = vehicles.get(carId) ?? null;
+    const impact = vehicle?.lastImpact ?? null;
+    const q = vehicle?.chassis.rotation();
+    const position = vehicle?.absoluteTranslation(contractCarPosition) ?? null;
+    // The trailer coupled to THIS car: a coupled trailer is always materialised, so
+    // a live one is the only one that can be towing, and it is where the towed
+    // load's own impacts live.
+    const trailer = trailerField.hitchedTo(carId);
+    const trailerRotation = trailer?.rigidBody.rotation();
+    contractCarTelemetry.fuelLitres = car.fuelLitres;
+    contractCarTelemetry.refuelled = refuelled;
+    contractCarTelemetry.engineOverheating = vehicle
+      ? vehicle.coolingState.overheating
+      : car.engineTempC >= 110;
+    contractCarTelemetry.engineRunning = vehicle?.engineRunning ?? false;
+    contractCarTelemetry.impactMps = impact?.severityMps ?? 0;
+    contractCarTelemetry.landingMps = vehicle?.audio.landingImpactMps ?? 0;
+    // Y component of the chassis up-axis (0,1,0) for quaternion q.
+    contractCarTelemetry.upsideDown = q !== undefined && 1 - 2 * (q.x * q.x + q.z * q.z) < 0.15;
+    contractCarTelemetry.absoluteX = position ? position.x : car.x;
+    contractCarTelemetry.absoluteZ = position ? position.z : car.z;
+    // At least one loaded wheel on the asphalt — sound or cracked, both are the road
+    // ribbon — from the same registered contact the tyre model and the spray use. No
+    // wheel at all (an engine-less wreck hull) is not on the road.
+    let onRoad = false;
+    if (vehicle) {
+      const wheels = vehicle.wheelSpray;
+      for (let i = 0; i < wheels.length; i++) {
+        const wheel = wheels[i]!;
+        if (
+          wheel.inContact
+          && (wheel.surface === SurfaceType.Asphalt || wheel.surface === SurfaceType.CrackedAsphalt)
+        ) {
+          onRoad = true;
+          break;
+        }
+      }
+    }
+    contractCarTelemetry.onRoad = onRoad;
+    contractCarTelemetry.trailerId = trailer?.id ?? null;
+    contractCarTelemetry.trailerImpactMps = trailer?.lastImpact?.severityMps ?? 0;
+    contractCarTelemetry.trailerUpsideDown = trailerRotation !== undefined
+      && 1 - 2 * (trailerRotation.x * trailerRotation.x + trailerRotation.z * trailerRotation.z) < 0.15;
+    return contractCarTelemetry;
+  };
+
+  /**
+   * A kind's look at a SECOND car it owns by id (a towed car, an escort), as opposed
+   * to the telemetry above, which is only ever the carrying car. Reused object: a
+   * kind reads it inside its own `step` and must not retain it.
+   */
+  const contractCarSnapshot = {
+    absoluteX: 0,
+    absoluteZ: 0,
+    impactMps: 0,
+    upsideDown: false,
+    scratches: 0,
+    towedBy: null as string | null,
+  };
+  const carForContract = (carId: string): ContractCarSnapshot | null => {
+    const car = world.state.cars[carId];
+    if (!car) return null;
+    const vehicle = vehicles.get(carId) ?? null;
+    const position = vehicle?.absoluteTranslation(contractCarPosition) ?? null;
+    const q = vehicle?.chassis.rotation();
+    contractCarSnapshot.absoluteX = position ? position.x : car.x;
+    contractCarSnapshot.absoluteZ = position ? position.z : car.z;
+    contractCarSnapshot.impactMps = vehicle?.lastImpact?.severityMps ?? 0;
+    contractCarSnapshot.upsideDown = q !== undefined && 1 - 2 * (q.x * q.x + q.z * q.z) < 0.15;
+    contractCarSnapshot.scratches = car.scratches;
+    contractCarSnapshot.towedBy = car.towedBy ?? null;
+    return contractCarSnapshot;
+  };
+
+  /**
+   * The world objects the live contracts are about — a loaded trailer spawned at its
+   * source courier, or the car of a transfer, a tow or a convoy. Idempotent, and
+   * called from the tick for every cargo item, so a save that predates a kind heals
+   * on the next tick.
+   *
+   * The convoy escort's engagement is decided here too: the papers must be in the
+   * car the player is DRIVING, which is what "it starts following when the player
+   * drives off with the papers aboard" means in state rather than in time.
+   */
+  const contractWorldDeps: ContractWorldDeps = { world, road, terrain, couriers };
+
+  /**
+   * Gate sequences for kinds 12/13, built once per cargo item from the offer seed and
+   * the source courier's arclength. Both the kind (crossing detection) and the gate
+   * field (the posts on screen) read the same list, so what the player drives at is
+   * exactly what is being counted.
+   */
+  const gatePlans = new Map<string, readonly ContractGate[]>();
+  const gatesForContract = (item: ContractCargoItem): readonly ContractGate[] | null => {
+    if (item.contractKind !== 'sand_route' && item.contractKind !== 'desert_slalom') return null;
+    let gates = gatePlans.get(item.id);
+    if (gates === undefined) {
+      const sourceS = courierStop(world.seed, item.sourceCourierIndex).s;
+      gates = item.contractKind === 'sand_route'
+        ? sandRouteGates(item.generatedSeed, sourceS, road, terrain)
+        : slalomGates(item.generatedSeed, sourceS, road, terrain);
+      gatePlans.set(item.id, gates);
+    }
+    return gates;
+  };
+  /** Cargo items whose gates are on screen this tick; refilled by `onContractItem`. */
+  const activeGateSets = new Map<string, readonly ContractGate[]>();
+
+  /** Cars that carried the bald-tyre crate this tick, and those already fitted. */
+  const baldCars = new Set<string>();
+  const baldFittedCars = new Set<string>();
+  /**
+   * Fits the bald compound to every carrying car and removes it from a car that no
+   * longer carries the crate. Run every tick, because a respawned Vehicle starts free
+   * and the contract re-claims it here; the driver's cycle key cannot undo it (see
+   * `Vehicle.tyreCompoundLocked`).
+   */
+  const applyBaldTyres = (): void => {
+    for (const carId of baldFittedCars) {
+      if (baldCars.has(carId)) continue;
+      vehicles.get(carId)?.setEnforcedTyreCompound(null);
+      baldFittedCars.delete(carId);
+    }
+    for (const carId of baldCars) {
+      vehicles.get(carId)?.setEnforcedTyreCompound(0);
+      baldFittedCars.add(carId);
+    }
+  };
+
+  const onContractItem = (item: ContractCargoItem, place: ContractPlace, carId: string | null): void => {
+    ensureContractWorldObjects(contractWorldDeps, item, place);
+    if (item.contractKind === 'convoy') {
+      const escort = escortFor(contractCarId(item));
+      escort.following =
+        place === 'car' && carId !== null && carId === world.state.player.drivingCarId;
+    }
+    if (item.contractKind === 'bald_tyres' && place === 'car' && carId !== null) baldCars.add(carId);
+    if (place !== 'courier') {
+      const gates = gatesForContract(item);
+      if (gates !== null) activeGateSets.set(item.id, gates);
+    }
+  };
+
   const fixedUpdate = (dt: number): void => {
     worldWork.beginFrame(frameId);
     const f = input.sample(dt);
@@ -1409,8 +1767,8 @@ async function boot(): Promise<void> {
       if (f.toggleLeftIndicator) driving.toggleIndicator('left');
       if (f.toggleRightIndicator) driving.toggleIndicator('right');
       if (f.cycleTyres) {
-        driving.cycleTyreCompound();
-        hud.setToast(`tyres: ${driving.tyreCompoundLabel}`);
+        if (driving.cycleTyreCompound()) hud.setToast(`tyres: ${driving.tyreCompoundLabel}`);
+        else hud.setToast('bald tyres fitted — contract cargo aboard');
       }
     } else {
       player.setEnabled(true);
@@ -1426,13 +1784,64 @@ async function boot(): Promise<void> {
       if (f.cycleCamera) camera.setMode('foot');
     }
 
+    // Convoy escorts. A real driver, on the real road, behind the car the papers
+    // are in: the Autopilot's own lead-following finds the player's chassis in its
+    // corridor and holds the headway, so this loop only decides the speed CEILING —
+    // close when the papers are aboard the player's car, hurry back after a real
+    // gap, and stand still when they are not.
+    for (const escort of escorts.values()) {
+      const vehicle = vehicles.get(escort.carId);
+      if (!vehicle) {
+        if (escort.engaged) {
+          escort.autopilot.setEngaged(false);
+          escort.engaged = false;
+        }
+        continue;
+      }
+      if (!escort.engaged) {
+        // A fresh engagement resets the planner's held place on the road, which is
+        // what a car that has just been materialised (or just resumed following)
+        // needs; see `setEngaged`.
+        escort.autopilot.setEngaged(true);
+        escort.engaged = true;
+      }
+      const position = vehicle.absoluteTranslation(escortPosition);
+      escort.seat.forwardS = road.project(position.x, position.z, escort.seat.forwardS).s;
+      escort.autopilot.setOncomingGap(
+        traffic.nearestOncomingDistance(escort.seat.forwardS, 1, escort.carId),
+      );
+      if (!escort.following || !driving) {
+        escort.autopilot.setSpeedCap(0);
+      } else {
+        // Distance in Rapier's own frame: both bodies share it, so no origin is
+        // needed and the gap is exact even across an origin rebase.
+        const self = vehicle.chassis.translation(escortChassis);
+        const lead = driving.chassis.translation(escortLeadChassis);
+        const gap = Math.hypot(lead.x - self.x, lead.z - self.z);
+        const cap = gap > CONVOY_RECOVER_GAP_M
+          ? CONVOY_CRUISE_MPS
+          : Math.max(CONVOY_CREEP_MPS, driving.speedKmh / 3.6 + CONVOY_CLOSE_MARGIN_MPS);
+        escort.autopilot.setSpeedCap(cap);
+      }
+      escort.autopilot.drive(dt, vehicle, escort.input, origin.x, origin.z);
+      vehicle.fixedUpdate(dt, escort.input);
+    }
+
     // Every other car still needs its suspension solved, or it has no springs at
     // all: Rapier recomputes suspension force inside updateVehicle, so a vehicle
     // that is never stepped sinks onto its own chassis collider and its wheels end
     // up under the road. `settle` does the suspension and a holding brake only.
+    //
+    // A towed car and an escort are the exceptions: `settle` PINS a car to the spot
+    // it is standing on, and both have to roll, so they are stepped by their own
+    // controllers above/below and left out of this loop.
     for (const [id, vehicle] of vehicles) {
-      if (id !== drivingId) vehicle.settle(dt);
+      if (id === drivingId || carTowField.stepping(id) || escorts.has(id)) continue;
+      vehicle.settle(dt);
     }
+
+    // The towed car of a live bar: no engine, no gear, brakes on the tower's pedal.
+    carTowField.fixedUpdate(dt, (carId) => vehicles.get(carId)?.brakeCommand ?? 0);
 
     // Trailers get the same treatment for the same reason: their springs only exist
     // inside `updateVehicle`, towed or standing.
@@ -1449,6 +1858,30 @@ async function boot(): Promise<void> {
     const injury = playerImpacts.resolve(driving);
     if (injury > 0 && vitals.dead) beginDeathSequence();
     loose.fixedUpdate(dt);
+
+    // Contracts advance after every controller and the physics step, so the impacts
+    // and landings the kinds read are this tick's. `s` is the live state; its clock
+    // was advanced at the top of this step.
+    frameProfiler?.begin('contracts');
+    contracts.tick({
+      dt,
+      timeOfDay: s.timeOfDay,
+      dayLength: DAY_LENGTH,
+      ambientC: ambientAirC(s.timeOfDay, DAY_LENGTH),
+      carTelemetry: carTelemetryForContract,
+      carById: carForContract,
+      gatesFor: gatesForContract,
+      onContractItem,
+      onNotice: (text) => hud.setToast(text),
+    });
+    // The tick filled the two per-contract collectors; act on them once, then reset.
+    // The gate field rebuilds only when a sequence appears or goes away, so this is a
+    // map walk on almost every tick.
+    applyBaldTyres();
+    gateField.setActive(activeGateSets);
+    activeGateSets.clear();
+    baldCars.clear();
+    frameProfiler?.end('contracts');
 
     // Recover only after Rapier has produced the escaped pose, before origin
     // rebasing and interpolation latches can preserve that pose for another frame.
@@ -1483,6 +1916,13 @@ async function boot(): Promise<void> {
 
     // Latch the post-step transforms so the renderer can interpolate between the
     // last two steps instead of snapping to the newest one.
+    //
+    // The tow bar's stretch correction runs FIRST: it moves the towed chassis and
+    // cancels its drift velocity, and the towed car's own `postStep` below is what
+    // classifies its impacts from the velocity it ends the step with. Left to run
+    // after, the correction itself would read as an unexplained speed change and
+    // scratch the car every step.
+    carTowField.postStep(dt);
     for (const vehicle of vehicles.values()) vehicle.postStep();
     traffic.postStep();
     trailerField.postStep();
@@ -1867,6 +2307,9 @@ async function boot(): Promise<void> {
     // Without this call the rigid body and hitch moved while the GLB stayed forever
     // at its constructor pose, leaving an invisible trailer attached to the car.
     trailerField.syncVisuals(alpha);
+    // The bar is drawn from the two chassis' corrected poses, not from a snapshot of
+    // its own, so it needs no interpolation and is placed after the cars moved.
+    carTowField.syncVisuals();
     debris.syncVisuals();
     frameProfiler?.end('vehicles');
 
@@ -1949,6 +2392,7 @@ async function boot(): Promise<void> {
       window.setTimeout(() => window.location.reload(), 250);
     }
     touch.setZoomAvailable(!dying && camera.mode === 'chase');
+    touch.setStickerTools(!dying && stickerPreviewCarId !== null);
 
     const cam = renderer.camera.position;
     frameProfiler?.begin('sky');
@@ -2075,6 +2519,8 @@ async function boot(): Promise<void> {
       vehicle.syncContactPatches(contactPatches, patchGain(vehicle.root.position));
     });
     contactPatches.endFrame();
+    // Gate posts are placed in absolute coordinates; the field follows the origin.
+    gateField.update(origin.x, origin.z);
     frameProfiler?.end('effects');
     frameProfiler?.begin('vista');
     vista.update(cam.x, cam.z, activeS, frameDt);
@@ -2408,11 +2854,48 @@ async function boot(): Promise<void> {
         hud.setToast('camera could not expose the frame');
       } else {
         const direction = camera.eyeDirection;
+        // The frame test reads the camera and the world once, here, and records which
+        // known subjects the frame contains. It is a reader: nothing it does changes
+        // the world or the picture.
+        const evidence = photoEvidence(
+          {
+            seed: world.seed,
+            road,
+            terrain,
+            camera: renderer.camera,
+            originX: origin.x,
+            originZ: origin.z,
+            dayFactor: sky.dayFactor,
+            pois: (fromS, toS) => poisBetween(world.seed, fromS, toS),
+            // At most one mirage encounter is on screen at a time (mirage-schedule.ts).
+            visibleMirage: mirage.visibleSubject() ?? mirageTableau.visibleSubject(),
+            // Occlusion in scene (origin-relative) coordinates. The driven chassis is
+            // excluded so the chase camera does not read its own car as a wall.
+            occluded: (fromX, fromY, fromZ, toX, toY, toZ, radius) => {
+              const dx = toX - fromX;
+              const dy = toY - fromY;
+              const dz = toZ - fromZ;
+              const length = Math.hypot(dx, dy, dz);
+              if (length <= radius + 1) return false;
+              const hit = physics.raycast(
+                { x: fromX, y: fromY, z: fromZ },
+                { x: dx / length, y: dy / length, z: dz / length },
+                length - radius,
+                driving?.chassis,
+              );
+              return hit !== null;
+            },
+          },
+          activeS,
+          s.timeOfDay,
+          s.playedSeconds,
+        );
         loose.spawnItem(
           {
             type: 'photograph',
             id: world.runtimePartId(),
             imageDataUrl,
+            evidence,
           },
           cam.x + origin.x + direction.x * 0.65,
           cam.y - 0.2,

@@ -1,8 +1,6 @@
 import { GAMEPLAY_CONFIG } from '../config';
 import { hash, hash01 } from '../core/rng';
-import { makeSponge, type ContractCargoItem, type Item } from '../items/items';
-import { stickerKindForSeed } from '../items/stickercatalog';
-import { TRUNK_CELL_COUNT, TRUNK_COLUMNS } from '../vehicle/trunk';
+import type { Item } from '../items/items';
 
 /** One courier every 9 km, jittered and snapped to a guaranteed POI slot. */
 const COURIER_PERIOD_M = 9_000;
@@ -13,19 +11,6 @@ const COURIER_DOMAIN = 0x43555231; // 'CUR1'
 const OFFER_DOMAIN = 0x4f464631; // 'OFF1'
 /** Road-centre distance: visible from the lane without blocking the asphalt. */
 const COURIER_PARKING_LATERAL_M = 9.5;
-/** Share of couriers with a sponge in the boot as well as the gum. */
-const COURIER_SPONGE_CHANCE = 0.35;
-
-const PARCEL_NAMES = [
-  'sealed film parcel',
-  'radio parts parcel',
-  'workshop papers',
-  'road letters',
-  'medical parcel',
-  'machine drawings',
-  'cassette parcel',
-  'survey notes',
-] as const;
 
 export interface CourierStop {
   /** Monotonic along the road. Any greater index may receive this courier's cargo. */
@@ -79,6 +64,27 @@ export function courierParkingLateral(poiLateral: number): number {
   return (poiLateral < 0 ? -1 : 1) * COURIER_PARKING_LATERAL_M;
 }
 
+/**
+ * The single courier stop with this index, purely from the seed. `couriersBetween`
+ * is a range query; this is the same draw for one index, so a system that only knows
+ * "the cargo came from courier 7" can find where courier 7 parks without the chunk
+ * being built (the contract spawn of a trailer or a car needs exactly that).
+ */
+export function courierStop(
+  seed: number,
+  index: number,
+  poiSpacing = DEFAULT_POI_SPACING_M,
+): CourierStop {
+  const s = courierSlotIndex(seed, index, poiSpacing) * poiSpacing;
+  const side = hash01(seed, COURIER_DOMAIN, index, 1) < 0.5 ? -1 : 1;
+  return {
+    index,
+    s,
+    lateral: side * (17 + hash01(seed, COURIER_DOMAIN, index, 2) * 8),
+    appearanceSeed: hash(seed, COURIER_DOMAIN, index, 3),
+  };
+}
+
 export function couriersBetween(
   seed: number,
   fromS: number,
@@ -95,50 +101,13 @@ export function couriersBetween(
   );
   const out: CourierStop[] = [];
   for (let index = first; index <= last; index++) {
-    const s = courierSlotIndex(seed, index, poiSpacing) * poiSpacing;
-    if (s < fromS || s >= toS) continue;
-    const side = hash01(seed, COURIER_DOMAIN, index, 1) < 0.5 ? -1 : 1;
-    out.push({
-      index,
-      s,
-      lateral: side * (17 + hash01(seed, COURIER_DOMAIN, index, 2) * 8),
-      appearanceSeed: hash(seed, COURIER_DOMAIN, index, 3),
-    });
+    const stop = courierStop(seed, index, poiSpacing);
+    if (stop.s < fromS || stop.s >= toS) continue;
+    out.push(stop);
   }
   return out;
 }
 
-export function courierDefaultStorage(seed: number, index: number): readonly (Item | null)[] {
-  const cells: (Item | null)[] = new Array(TRUNK_CELL_COUNT).fill(null);
-  for (let slot = 0; slot < 4; slot++) {
-    const nameIndex = Math.floor(hash01(seed, OFFER_DOMAIN, index, slot) * PARCEL_NAMES.length);
-    const item: ContractCargoItem = {
-      type: 'contract_cargo',
-      id: `${courierId(index)}:offer:${slot}`,
-      sourceCourierIndex: index,
-      contractKind: 'parcel',
-      cargoName: PARCEL_NAMES[nameIndex]!,
-      rewardStickerKind: stickerKindForSeed(hash(seed, OFFER_DOMAIN, index, slot)),
-      generatedSeed: hash(seed, OFFER_DOMAIN, index, slot),
-    };
-    cells[slot] = item;
-  }
-  // The bottom row: always a pack of gum, and now and then a sponge beside it, each in
-  // a cell of its own chosen by the seed.
-  const bottom = TRUNK_CELL_COUNT - TRUNK_COLUMNS;
-  const gumCell = bottom + Math.floor(hash01(seed, OFFER_DOMAIN, index, 10) * TRUNK_COLUMNS);
-  cells[gumCell] = {
-    type: 'bubble_gum',
-    id: `${courierId(index)}:gum`,
-    charges: 3 + Math.floor(hash01(seed, OFFER_DOMAIN, index, 11) * 3),
-  };
-  if (hash01(seed, OFFER_DOMAIN, index, 12) < COURIER_SPONGE_CHANCE) {
-    const shift = 1 + Math.floor(hash01(seed, OFFER_DOMAIN, index, 13) * (TRUNK_COLUMNS - 1));
-    const spongeCell = bottom + ((gumCell - bottom + shift) % TRUNK_COLUMNS);
-    cells[spongeCell] = makeSponge(`${courierId(index)}:sponge`, hash01(seed, OFFER_DOMAIN, index, 14));
-  }
-  return cells;
-}
 
 /** Live registrations follow streamed physics chunks; save data owns edited contents. */
 export class CourierField {
