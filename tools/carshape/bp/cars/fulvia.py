@@ -86,18 +86,45 @@ CAR = {
         # The cabin starts at the screen's foot (-0.64), not 18 cm ahead of it: the
         # glasshouse's section was carried forward over the bonnet's rear.
         'cabin': [-0.64, 1.03],
-        # The belt (the window sill and the top of the flank) measured off the side
-        # photograph's glass foot: 0.870 over the front door (y -0.55), 0.888 over the
-        # rear quarter (+0.85) - a gentle wedge rising to the tail. The file had it
-        # falling 0.868 -> 0.82, which tilted the whole glasshouse down at the back and
-        # made the boot read long and flat.
+        # The belt (where the body below hands over to the glasshouse) along the foot of
+        # the side photograph's belt chrome: 0.870 over the front door (y -0.55), 0.888
+        # over the rear quarter (+0.85) - a gentle wedge rising to the tail (the glass
+        # itself starts over the chrome, at 0.905-0.91). The file had it falling 0.868 ->
+        # 0.82, which tilted the whole glasshouse down at the back and made the boot
+        # read long and flat.
         'belt': [[-0.60, 0.868], [-0.45, 0.864], [0.0, 0.872], [0.6, 0.882], [1.03, 0.888]],
-        # The glasshouse at the end views' own width (0.649 just over the belt). Ahead of
-        # the A-pillar's foot it narrows (0.46 at the cowl): held full width to the
-        # cabin's start, its side wall ran on as a painted fin beside the screen down to
-        # the cowl, and the screen had no corner to wrap - the screen and the door glass
-        # met edge to edge and the pillar vanished (the user's screenshot, 2026-10-05).
-        'glassPlan': [[-0.64, 0.46], [-0.56, 0.585], [-0.46, 0.640], [-0.3, 0.649], [0.6, 0.649], [1.03, 0.575]],
+        # The glasshouse at the cabin section's own width just over the shoulder (0.662
+        # at z 0.925, so the glasshouse and the body below the belt share one shoulder,
+        # not two a centimetre apart), full width to the cabin's start: the screen's wrap
+        # (below) brings its sides down to the belt at the A-pillar's foot, so no
+        # narrowing of the plan is needed there.
+        'glassPlan': [[-0.64, 0.662], [0.6, 0.662], [1.03, 0.586]],
+        # The cabin's section, from the A-pillar's foot to the back light's: the end
+        # views' (smoothed) section, but with the shoulder a crisp ledge. Smoothed, the
+        # drawn 11 cm step became a 45-degree bevel from z 0.83 to 0.96, so the side
+        # glass stood 5 cm over the crease on a sloping band and its foot followed the
+        # bevel's fillet out. The photographs' belt chrome lies at 0.876-0.904 right on
+        # the crease and the glass starts at 0.905-0.91: flank to 0.845, the crease rolled
+        # over at 0.86, a ledge rising 16 degrees in to the glasshouse's wall at 0.89.
+        'sectionKeys': [{'y': [-0.70, 1.10], 'blend': 0.12,
+                         'half': [[0.20, 0.6915], [0.31, 0.6915], [0.34, 0.7095], [0.37, 0.7249], [0.40, 0.7381],
+                                  [0.43, 0.7484], [0.46, 0.7565], [0.50, 0.7649], [0.54, 0.7712], [0.58, 0.7755],
+                                  [0.62, 0.7766], [0.82, 0.7766], [0.845, 0.7760], [0.856, 0.7725], [0.863, 0.7650],
+                                  [0.869, 0.7500], [0.876, 0.7250], [0.882, 0.7000], [0.887, 0.6800], [0.893, 0.6700],
+                                  [0.905, 0.6640], [0.93, 0.6610], [0.96, 0.6580], [1.00, 0.6454], [1.04, 0.6348],
+                                  [1.08, 0.6236], [1.12, 0.6120], [1.16, 0.5988], [1.20, 0.5860], [1.24, 0.5739],
+                                  [1.26, 0.5532], [1.28, 0.4699], [1.30, 0.2754], [1.32, 0.0882]]}],
+        # The windscreen curves round in plan to its pillars (the top view draws the
+        # foot as an arc, the sides 0.285 behind the middle). The shell's turn from the
+        # screen's wrap into the side wall is 6-8 cm wide (a 27-degree crease under the
+        # field's blur); its middle is put on the side photograph's pillar (red at y
+        # -0.405, z 0.905 and -0.168 at 1.238; the screen's middle at -0.636 and
+        # -0.262 there), so the pillar stands on the corner, the screen ahead of it and
+        # the vent glass behind it on the side. `across` is the drawn arc's shape, an
+        # ellipse of 0.70 half-width, as a share of the setback at the pillar (x 0.66).
+        'screenWrap': {'across': [[0.0, 0.0], [0.1, 0.0155], [0.2, 0.0625], [0.3, 0.145], [0.4, 0.269],
+                                  [0.5, 0.450], [0.55, 0.572], [0.6, 0.727], [0.63, 0.846], [0.66, 1.0]],
+                       'foot': [0.905, 0.206], 'head': [1.24, 0.118], 'until': 0.0},
         # The car is a slim coupé: flat sides with a shoulder crease along the belt, a
         # flat bonnet and a flat roof, so no crown along the car and next to none across
         # it (2-3 cm of crown domed the roof and swelled the wings). The photographs'
@@ -133,20 +160,12 @@ CAR = {
         # under the sun, as a dent down one flank of it. 0.045 (a 2 cm roll) is the
         # photograph's own drip rail; the 0.03 first pass still showed a 3 cm roll.
         'roofEdge': 0.045,
-        # Cleaner pane edges: the windscreen is authored in plan, so its foot lands on
-        # the scuttle's curve as the working mesh's triangles cut it, and the drawn
-        # edge came out a 2 cm staircase. Two and a half times the default relaxation
-        # (the 15 mm travel cap is what limits it, not the count) evens it out.
-        'paneEdgeRelax': 10,
-        # No separate shelf at the belt: the section itself steps in 11 cm there (the
-        # waist moulding), which is the car's own shoulder. `shelf` (3 cm) added its
-        # inset on top of that step and flared the glasshouse's foot out to the flank
-        # again over `shelfRise`.
+        # No separate shelf at the belt: the cabin's section has the car's own
+        # shoulder ledge (`sectionKeys`); `shelf` (3 cm) added its inset on top of it
+        # and flared the glasshouse's foot back out to the flank over `shelfRise`.
         'shelf': False,
-        # A 5 cm gaussian on the section rounded the shoulder back into a roll (and its
-        # up-facing band spread 3 cm either side of the waist crease, which the side
-        # glass's feet then caught); 1.5 cm keeps the crease crisp, still fairing the
-        # ends' corners.
+        # The ends' section (outside the cabin's `sectionKeys`): a 1.5 cm gaussian, not
+        # the 5 cm default that rounded the wings' shoulders into a roll.
         'sectionSmooth': 0.015,
         # The sheet metal ends 0.745 m ahead of the front axle and 0.735 m behind the
         # rear one (side photograph, its wheelbase as the scale; body 3.81 m). The
@@ -154,50 +173,69 @@ CAR = {
         # each, the heavy nose and boxy tail.
         'bodyEnds': {'front': -1.9075, 'rear': 1.9025},
     },
-    # Thin chrome frames (the photos: about 8 mm, not the 12 the drawn frame lines
-    # carried); every pane's own seal carries them.
-    'glassSeal': {'material': 'chrome', 'width': 0.008},
-    # The side panes are drawn to the drawn pillar lines already; assemble.py's
-    # `reach_pillar` (it pushes a front window forward to the pillar, for cars whose
-    # panes stopped short) must leave them where they are.
-    'pillarReach': 0.0,
     'parts': {
+        # The glass laid over the shell (assemble.py's `glassOverlay`): every pane is its
+        # outline exactly, wherever the shell's triangles fall. Cut out of the shell's
+        # own faces, as before, the panes' edges came out notched, the quarter light's
+        # foot ran out along the shoulder's fillet and the screen wrapped on round its
+        # corner into the door glass's place. (This key and `glassSeal` sat beside
+        # `parts` until now, where nothing read them: the seals were the default rubber
+        # and `pillarReach` 0 never applied, so the door glass was pushed forward.)
+        'glassOverlay': True,
+        # Chrome frames: 1 cm round the screen and the back light (the photographs'
+        # bright trim), 1.4 cm round the side glass (each pane's `seal`: the door frame,
+        # belt and B-pillar chrome are 1.7-3 cm wide there).
+        'glassSeal': {'material': 'chrome', 'width': 0.010},
         'glass': [
-            # The screen in plan, kept on the front-facing shell (`facingMin` 0.42; its
-            # own faces are 0.72-0.76 up, the glasshouse's side 0.22-0.26): it stops at
-            # the corner where the shell turns to the side, and the paint between that
-            # corner and the door glass is the A-pillar. At 0.22 with the plan out at
-            # 0.615-0.68 it wrapped down the side over the door glass's place and onto
-            # the shoulder beside the pillar's foot, so no pillar was left. The plan stays
-            # inside the shoulder (0.615; the shoulder starts at 0.635) and rounds into
-            # the header, where a square corner tore on the roof's edge.
-            {'view': 'top', 'outline': [[-0.66, 0.0], [-0.65, 0.30], [-0.61, 0.50], [-0.56, 0.585], [-0.48, 0.615],
-                                        [-0.30, 0.615], [-0.255, 0.595], [-0.232, 0.555], [-0.218, 0.47], [-0.215, 0.0]],
-             'depthRange': [0.86, 1.295], 'facingMin': 0.42, 'fit': False},
-            # The side glass off the side photograph (288.4 px/m): the door glass and its
-            # vent from just behind the pillar to the B-pillar's chrome at +0.58, top at
-            # 1.238 (the photograph's frame is 6 cm under the roof), and one foot line
-            # for door and quarter light - the photograph's sill chrome is level within
-            # 1 cm. The foot sits at 0.945, on the glasshouse just over the shoulder
-            # (0.90-0.95): at the old 0.856 the panes lay on the shoulder's ledge, their
-            # foot a step below the screen's. `fit` off: fitted, the door glass's foot
-            # followed the shoulder down beside the pillar. The front corner is an arc,
-            # or the seal's inset knots at its 49 degrees.
-            {'view': 'side', 'outline': [[-0.415, 0.945], [-0.432, 0.951], [-0.425, 0.964], [-0.17, 1.235],
-                                         [0.580, 1.238], [0.580, 0.945]],
-             'facingMin': 0.3, 'fit': False},
-            # The quarter light: front edge 2 cm behind the door glass (the B-pillar's
-            # chrome), top level with it, the rear edge the photograph's curve down the
-            # C-pillar to its foot at +0.99.
-            {'view': 'side', 'outline': [[0.600, 1.234], [0.600, 0.945], [0.965, 0.945], [0.985, 0.952],
-                                         [0.93, 1.010], [0.85, 1.095], [0.75, 1.185], [0.66, 1.230]], 'facingMin': 0.15,
-             'fit': False},
-            # The back light reaches the roof: its drawn header (1.195 m) left a 10 cm
-            # painted band above the glass where the photographs show 3-4 cm, the same
-            # fault the Moskvich-412's rear pane had. Its foot stays on the deck.
-            {'view': 'rear', 'outline': [[0.0, 1.26], [0.40, 1.245], [0.48, 1.195], [0.53, 0.90], [0.51, 0.88],
-                                         [0.0, 0.885]],
-             'depthRange': [0.7, 1.6], 'facingMin': 0.15},
+            # The screen in plan, generated off the built shell: its foot the line where
+            # the screen rises through z 0.90 (just over the scuttle's intake), its header
+            # where it reaches 1.262 (3 cm under the roof's front edge: at 1.275 its top
+            # corners lay on the roof edge's roll), and its sides 7 mm ahead of the side
+            # photograph's pillar line (red at y -0.405, z 0.905; -0.168 at 1.238), found
+            # on the skin by side rays. Rounded 6 cm into the header, 2 cm at the foot.
+            {'view': 'top', 'outline': [[-0.6332, 0.0], [-0.6325, 0.05], [-0.6314, 0.1], [-0.6276, 0.15], [-0.6216, 0.2],
+                                        [-0.614, 0.25], [-0.6041, 0.3], [-0.592, 0.35], [-0.5773, 0.4], [-0.5595, 0.45],
+                                        [-0.5385, 0.5], [-0.5123, 0.55], [-0.4792, 0.6], [-0.4295, 0.6501], [-0.4198, 0.6568],
+                                        [-0.4094, 0.6581], [-0.3983, 0.6539], [-0.3795, 0.6484], [-0.3631, 0.6427],
+                                        [-0.3455, 0.6363], [-0.327, 0.6294], [-0.3099, 0.6213], [-0.2928, 0.6123],
+                                        [-0.2742, 0.6033], [-0.2545, 0.5946], [-0.2349, 0.5864], [-0.2152, 0.5775],
+                                        [-0.2118, 0.5763], [-0.1977, 0.5693], [-0.187, 0.5611], [-0.1799, 0.5516],
+                                        [-0.1762, 0.541], [-0.176, 0.5291], [-0.1793, 0.5161], [-0.1861, 0.5018], [-0.1871, 0.5],
+                                        [-0.1997, 0.45], [-0.2102, 0.4], [-0.2183, 0.35], [-0.2254, 0.3], [-0.2312, 0.25],
+                                        [-0.2352, 0.2], [-0.238, 0.15], [-0.2398, 0.1], [-0.2407, 0.05], [-0.2411, 0.0]],
+             'depthRange': [0.86, 1.30]},
+            # The side glass off the side photograph (288.4 px/m), its frames' outer edges:
+            # the frame's top at 1.25 (the roof's edge 5 cm over it), the foot at 0.905,
+            # where the shoulder ledge has turned up into the glasshouse's wall (the glass
+            # inside the 1.4 cm frame starts at 0.919, the photograph's at 0.905-0.91; any
+            # lower and it lies on the ledge's fillet). The vent window from the pillar
+            # (7 mm behind its red) to the drawing's vertical divider at y -0.087; the
+            # divider and the B-pillar are the two panes' frames side by side, 2.6 and 2.4
+            # cm of chrome (the photograph's -0.108..-0.066 and 0.566..0.594).
+            {'view': 'side', 'outline': [[-0.1, 0.905], [-0.398, 0.905], [-0.3807, 0.9296], [-0.3639, 0.9543],
+                                         [-0.3483, 0.9789], [-0.3314, 1.0036], [-0.3138, 1.0282], [-0.2974, 1.0529],
+                                         [-0.2812, 1.0775], [-0.2638, 1.1021], [-0.2451, 1.1268], [-0.2263, 1.1514],
+                                         [-0.2076, 1.1761], [-0.1888, 1.2007], [-0.1701, 1.2254], [-0.1665, 1.2301],
+                                         [-0.1583, 1.2388], [-0.1489, 1.245], [-0.1383, 1.2488], [-0.1264, 1.25], [-0.1, 1.25]],
+             'seal': 0.014},
+            {'view': 'side', 'outline': [[-0.074, 0.905], [0.566, 0.905], [0.566, 1.25], [-0.074, 1.25]], 'seal': 0.014},
+            # The quarter light: the photograph's glass edge down the C-pillar moved out
+            # by its frame and 1.5 cm forward (the shell's rake runs 2-3 cm short of the
+            # photograph's near the roof, so its C-pillar is that much narrower; and the
+            # pane's rear tip at the belt lay on the turn into the C-pillar's corner), its
+            # last straight run carried down to the belt at 1.0075 (the photograph's edge
+            # flattens into the belt there; drawn out to it, the pane's corner ran on
+            # along the belt as a 7 cm sliver).
+            {'view': 'side', 'outline': [[0.59, 0.905], [0.59, 1.238], [0.593, 1.2469], [0.602, 1.2495], [0.615, 1.2475],
+                                         [0.6276, 1.2398], [0.6987, 1.192], [0.7686, 1.1282], [0.8386, 1.0592],
+                                         [0.9074, 0.9964], [1.0075, 0.905]], 'seal': 0.014},
+            # The back light in the rear view: 6 cm of C-pillar either side of it (the
+            # glasshouse's rear corner is at x 0.575-0.58), its header 2 cm under the
+            # roof's rear edge, its foot 2.5 cm over the deck's crease; round corners.
+            {'view': 'rear', 'outline': [[0.0, 1.228], [0.425, 1.228], [0.4489, 1.2262], [0.4691, 1.2207], [0.4856, 1.2115],
+                                         [0.4985, 1.1986], [0.5077, 1.1821], [0.5132, 1.1619], [0.515, 1.138], [0.515, 0.97],
+                                         [0.5122, 0.9503], [0.5038, 0.9363], [0.4897, 0.9278], [0.47, 0.925], [0.0, 0.925]],
+             'depthRange': [0.65, 1.2]},
         ],
         'decals': [
             # The nose: four round lamps in a BLACK panel that spans the front between
@@ -280,10 +318,21 @@ CAR = {
              'material': 'chrome', 'height': 0.008, 'depthRange': [-2.1, -1.6]},
         ],
         'lines': [
-            # The door's shut lines (front at the A-pillar's foot, rear at its trailing
-            # edge) and the waist moulding. The two chrome outlines the file used to draw
-            # around the side panes are gone: every pane's own seal carries the frame now.
-            {'view': 'side', 'points': [[-0.50, 0.85], [-0.516, 0.29], [0.62, 0.28], [0.62, 0.83]], 'width': 0.005},
+            # The door's shut line traced off the side photograph (288.4 px/m): the front
+            # edge leaves the A-pillar's foot at -0.403 and curves forward to -0.475 by
+            # z 0.70, straight down to the bottom edge at 0.325; the rear edge leaves the
+            # B-pillar's foot at 0.606, bows back to 0.646 at 0.74 and sweeps forward
+            # into the bottom. The old box (front at -0.50, rear at 0.62, bottom 0.28)
+            # started 10 cm ahead of the pillar and 3 cm behind the B-pillar. Topped at
+            # the shoulder's crease (0.862), not run up onto the ledge.
+            {'view': 'side', 'points': [[-0.412, 0.862], [-0.424, 0.845], [-0.438, 0.82], [-0.452, 0.79], [-0.463, 0.76],
+                                        [-0.470, 0.73], [-0.474, 0.70], [-0.476, 0.66], [-0.476, 0.36], [-0.472, 0.337],
+                                        [-0.458, 0.326], [0.43, 0.326], [0.47, 0.34], [0.515, 0.375], [0.554, 0.418],
+                                        [0.58, 0.46], [0.600, 0.511], [0.618, 0.57], [0.635, 0.638], [0.643, 0.69],
+                                        [0.646, 0.742], [0.643, 0.79], [0.634, 0.83], [0.622, 0.862]], 'width': 0.005,
+             # traced curves: assemble.py's straightening of hand-read runs (turns under
+             # 25 degrees dropped) laid the rear edge's sweep as one diagonal
+             'keep': True},
             # The flank's feature line (the drawing's own, and the photograph's dark
             # shading line at z 0.692-0.706): drawn thin, 3 mm, not the 4 mm ridge it was.
             {'view': 'side', 'points': [[-1.94, 0.70], [1.95, 0.70]], 'width': 0.003, 'material': 'rubber'},
@@ -299,18 +348,16 @@ CAR = {
             'front': {'z': [0.35, 0.44], 'depth': 0.03, 'wrap': 0.26, 'profile': 'blade'},
             'rear': {'z': [0.41, 0.49], 'depth': 0.03, 'wrap': 0.26, 'profile': 'blade'},
         },
-        # On the door's front corner at the belt, as the side and 3/4 photographs show
-        # it: a small round chrome head (8.5 cm) just over the waist moulding, its sail
-        # on the door's own skin and an arm no longer than the head. The file had
-        # y -0.06 - the middle of the door, 44 cm behind the corner - so the pair sat
-        # mid-car. The door's front edge is the drawn shut line at y -0.50 (the A-pillar
-        # foot is the screen's foot at -0.64), well ahead of the side window's first
-        # glass at -0.41, so assemble.py keeps it a door mount (`_side_front` - 0.12).
-        # z 0.89 is the belt there (0.862) plus the moulding; `reach` 0.745 puts the
-        # head's outer edge 7.5 cm off the shoulder (the body is 0.67 there). Round,
-        # not the rectangular 7.5 x 9.5 the earlier pass used: the photographs' mirror
-        # is the small round chrome disc on a stalk.
-        'mirror': {'y': -0.50, 'z': 0.89, 'reach': 0.745, 'w': 0.085, 'h': 0.085, 'material': 'chrome', 'shape': 'round'},
+        # On the door at the vent window's divider, as the side and 3/4 photographs show
+        # it: a small round chrome head (8.5 cm) centred at y -0.11, z 0.935 (the side
+        # photograph: head 0.884-0.982), its sail on the door's top under the belt chrome
+        # (`sailZ` 0.875: the glasshouse here is as wide as assemble.py's door test, so
+        # it would have stood the sail on the glass). The last pass had it at y -0.50,
+        # the A-pillar's foot: with the screen wrapped round to its pillars that is the
+        # wing's top ahead of the door. Round, not the rectangular 7.5 x 9.5 an earlier
+        # pass used.
+        'mirror': {'y': -0.10, 'z': 0.935, 'sailZ': 0.875, 'reach': 0.75, 'w': 0.085, 'h': 0.085, 'mount': 'door',
+                   'material': 'chrome', 'shape': 'round'},
         'handles': {'at': [[0.45, 0.76]], 'w': 0.11},
         'wipers': {'arms': [[-0.5, -0.05, -0.70, 0.90], [0.05, 0.5, -0.70, 0.90]]},
         # Plain steel wheels with a small chrome centre cap (the photos of the Rallye

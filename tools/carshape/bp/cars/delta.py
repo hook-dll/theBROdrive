@@ -70,7 +70,6 @@ CAR = {
         # its middle that no drawn line accounts for.
         'faceSpacing': 0,
         'faceSmooth': 0.004,
-        'crownScale': 1,
         # The plan as the 16v's, not the Evo drawing's: the drawing's top view carries
         # the Evo's arch flares (0.83-0.85 over the wheels against 0.81 at the doors),
         # and the section scales the plan at every height, so each arch came out as a

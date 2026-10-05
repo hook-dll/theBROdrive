@@ -439,3 +439,60 @@ the same scale and axle (tools/carshape/overlay.py's model render). What it show
   between y -1.85 and -1.65, but the mask catches the bonnet's highlight there, so the
   line was left on the file's full-resolution trace); the lamp decals' circles are 28
   sided and their chrome rims show facets; a wrapped bumper end still cuts as a step.
+
+## 2026-10-05 (third): Fulvia glazing - why ten passes kept shipping defects
+
+The user's screenshot after the second pass still showed the screen running into the
+door glass with no pillar, a notched screen edge at the pillar's foot and the quarter
+light's foot smeared along the shoulder as a black sliver. The causes, none of which a
+pass-by-pass outline tweak could reach:
+
+- **Keys nothing read.** `glassSeal` and `pillarReach` sat in the Fulvia file beside
+  `parts`, `paneEdgeRelax` in `hull`; assemble.py reads all three from `parts`. So the
+  seals were the default 14 mm black rubber, not the 8 mm chrome the file asked for,
+  and `reach_pillar` pushed the door glass up to 6 cm forward into the screen the file
+  said to leave alone. Now both stages stop on any key they do not read (`KEYS`;
+  hull.py's `KEYS`, assemble.py's `CAR_KEYS`/`PARTS_KEYS`). The four cars carrying a
+  dead `crownScale: 1` (Delta, Giulia, Golf, Panda) lost it; their bodies are
+  unchanged (Golf rebuilt: the same shell, the same parts but its wiper blades, which
+  moved up to 1 cm with the glass foot now found exactly).
+- **No place for the A-pillar.** The screen was the side profile run straight across,
+  so it met the glasshouse side in a square fold where the photograph's pillar is
+  25 cm further back at its foot (the screen wraps round; the top view draws its foot
+  as an arc). Any screen outline either stopped at the fold, leaving a paint slab, or
+  ran round it onto the side. New hull key `screenWrap` curves the screen in plan;
+  the shell's turn from screen to side wall now sits on the photograph's pillar line.
+- **A shoulder that was a bevel.** The end views' smoothing turned the drawn 11 cm
+  shoulder step into a 45-degree bevel from z 0.83 to 0.96, so a pane's foot always
+  lay on a fillet. The cabin's section is now given outright (`sectionKeys`) with a
+  crisp ledge; the side wall is clean (normal > 0.93) from 0.91.
+- **Glass made of the shell's own triangles.** The pane edge was wherever the working
+  mesh's triangles and a facing limit put it. New `glassOverlay` (Fulvia only so far;
+  every other car still cuts its glass from the shell): each pane is triangulated
+  from its outline in the view's plane, dropped onto the skin 2 mm off it, with its
+  own seal band 4 mm off and walled into the skin, so the edge IS the outline. Each
+  pane is checked in the log (GLASS/PILLAR lines, GLASS-FAIL): rays that miss, facing
+  under 0.3, the skin bending under the glass faster than 8 deg/cm, the shell coming
+  through the glass, two panes closer than 1.2 cm. The checks caught, before any
+  render, the side glass's foot on the ledge's fillet (10.5 deg/cm at z 0.916), the
+  quarter light's rear tip on the C-pillar's turn and the screen's top corners on the
+  roof's edge roll.
+- **Judged on whole-car sheets.** The defects were visible only in close-ups at the
+  user's angles. The review is now a fixed set of game-renderer close-ups of every
+  glazing junction, both sides, high and low (A-pillar foot and top, vent divider and
+  mirror, B-pillar, quarter light's rear foot and top, back light's corner, wipers),
+  cropped and looked at full size, plus the user's own angle; a pass ships only with
+  zero GLASS-FAIL and nothing wrong in those crops.
+
+Measured off the side photograph (288.4 px/m, front axle x 298, ground row 731): the
+pillar's red from y -0.405 at z 0.905 to -0.168 at 1.238; the belt chrome 0.876-0.904,
+glass from 0.905-0.91; the frames' top 1.25; the vent divider at -0.087 (the drawing's
+vertical line), the B-pillar chrome 0.566-0.594; the door's shut line from the pillar's
+foot curving to -0.475 and its rear edge bowing to 0.646 (the file's box started 10 cm
+ahead of the pillar). The mirror stands on the vent divider (y -0.11), not at the
+pillar's foot, which the wrapped screen turns into the wing's top.
+
+Still open: near the roof the C-pillar is 1-1.5 cm narrower than the photograph's (the
+shell's rake runs 2-3 cm forward of the photograph's there; the quarter light's rear
+edge was moved 1.5 cm forward to keep most of it); the round mirror head is a short
+cylinder where the car's is a shallow dome (shared by 19 cars' `shape: 'round'`).

@@ -42,7 +42,6 @@ CAR = {
         'edgeMin': 0.015,
         'edgeY': 0.04,
         'edgeYMin': 0.04,
-        'crownScale': 1,
         # The plan as the car's: flat sides tapering straight to tight corners. The top
         # view's outline steps out 13-17 mm where the bumper and the arch flares end;
         # blurred into the body those steps twisted the front wing and rippled the rear

@@ -35,6 +35,16 @@ import bpread  # noqa: E402
 import grid  # noqa: E402
 
 G = float(os.environ.get('CARSHAPE_G', 0.01))
+# Every `hull` key something reads (here, or assemble.py's `arch`): any other is
+# misplaced or misspelt and would silently do nothing (the Fulvia's `paneEdgeRelax`
+# sat here, where nothing reads it, instead of in `parts`).
+KEYS = {'arch', 'archEdge', 'archLip', 'belt', 'beltBlend', 'beltRef', 'bodyEnds', 'bumpers', 'cabin', 'cabinRun',
+        'cockpits', 'cornerDeg', 'crown', 'edge', 'edgeMin', 'edgeY', 'edgeYMin', 'face', 'faceSmooth', 'faceSpacing',
+        'fairSide', 'fieldClip', 'glassFillet', 'glassPlan', 'glassRefLift', 'planBridge', 'planOpen', 'planOverride',
+        'planSmooth', 'planSpacing', 'roofCrown', 'roofEdge', 'roofGap', 'roofHalf', 'roofTop', 'screenWrap',
+        'sectionBlend', 'sectionBridge', 'sectionExtendTop', 'sectionKeys', 'sectionMargin', 'sectionMedian',
+        'sectionMono', 'sectionOpen', 'sectionSmooth', 'sectionSpacing', 'sectionStations', 'shelf', 'shelfRise',
+        'sideBlur', 'sill', 'skinInset', 'stationBlend', 'topCross', 'topOverride', 'topSpacing', 'workFaces'}
 
 
 def pl(points, at):
@@ -153,6 +163,8 @@ def build(car):
     F = spec['factory']
     L, W, H, R = F['length'], F['width'], F['height'], F['wheelRadius']
     hs = spec['hull']
+    if set(hs) - KEYS:
+        sys.exit(f'KEYS {car}: nothing reads hull {sorted(set(hs) - KEYS)} (misplaced or misspelt)')
     ys, zs = bp['ys'], bp['zs']
     # The side outline is worked on a 2.5 mm grid and turned into a signed distance, so
     # the shell's sides land between voxels instead of stepping from one to the next.
@@ -447,6 +459,15 @@ def build(car):
                     # running to the tail kept the belt, not a slope down to nothing)
                     deck = belt[j] - 0.3 < zt_out < belt[j] + 0.1
                     lower_tops[j] = zt_out + (belt[j] - zt_out) * t_ if deck else belt[j]
+    # A windscreen curved round in plan (the wrap-round screens of the 1960s: Fulvia):
+    # {across: [[x, share]] (0 in the middle, 1 at the pillar), foot: [z, setback],
+    # head: [z, setback], until: y}. At every height the screen's sides stand `share`
+    # of the setback behind its middle, the most at the foot: the glasshouse's top at
+    # (y, x) is the centreline's top that far further forward. Without it the screen
+    # was the side profile run straight across and folded square into the side wall,
+    # so the A-pillar had nowhere to stand.
+    sw = hs.get('screenWrap')
+    sw_share = sm(sw['across'], xs) if sw else None
     for j, y in enumerate(ys):
         if d_side[:, j].max() <= -0.05:
             continue
@@ -487,6 +508,13 @@ def build(car):
                 xg[ic:] = xg[ic]
             drop = np.interp(xs / max(k, 1e-3), xq, roof_drop)
             zg = top[j] - drop
+            if sw and y < sw['until']:
+                (zf_, df_), (zh_, dh_) = sw['foot'], sw['head']
+                zw = zg
+                for _ in range(8):
+                    f_ = np.clip((zw - zf_) / (zh_ - zf_), 0, 1)
+                    zw = np.interp(y - sw_share * (df_ + (dh_ - df_) * f_), ys, top) - drop
+                zg = np.minimum(zg, zw)
             up = np.minimum(np.minimum(xg[None, :] - xs[:, None], zg[:, None] - zs[None, :]),
                             zs[None, :] - (belt[j] - 0.03))
             # a soft union (a fillet `glassFillet` wide) where the glasshouse meets the

@@ -12,12 +12,20 @@
   1402 mm dimensions and 1400/1370 mm tracks; Niva 2121 and VAZ-2101 were rechecked
   against the same factory dimensions and required no geometry change.
 
-- LANCIA FULVIA GLASSHOUSE (`tools/carshape/bp/cars/fulvia.py`). The A-pillars are
-  back: the screen stays on the front-facing shell and the glasshouse narrows ahead
-  of the pillar's foot, so the screen no longer runs into the door glass or onto the
-  shoulder. Door glass and quarter light re-traced from the side photograph on one
-  foot line (0.945 m) and one top line; door mirrors at the door's front corner (were
-  mid-door); roof section, belt wedge and back-light rake re-traced from photographs.
+- LANCIA FULVIA GLAZING (`tools/carshape/bp/cars/fulvia.py`, `hull.py`, `assemble.py`).
+  The windscreen wraps round to its A-pillars as on the car (new hull key
+  `screenWrap`), and every pane is now laid over the body as its exact outline
+  (`glassOverlay`) instead of being cut out of the shell's triangles: no notched
+  edges, no glass running onto the shoulder or round a corner. Slim A-pillars on the
+  side photograph's line, a vent window with its chrome divider, door glass, B-pillar
+  chrome and quarter light from the photograph, a rounded back light; chrome frames
+  (the car file asked for them, but the key sat where nothing read it, so the seals
+  were black rubber). The cabin's shoulder is a crisp ledge, so the glass starts just
+  over the belt chrome. Door mirror on the vent divider, door shut line traced from
+  the photograph, wiper blades follow the curved screen.
+- CAR GENERATOR CHECKS: a car file key nothing reads now stops the build (`KEYS`);
+  laid-over glass is checked pane by pane for the skin turning away or bending under
+  it, the shell coming through and pillars closing up (`GLASS-FAIL`).
 
 ### Added
  

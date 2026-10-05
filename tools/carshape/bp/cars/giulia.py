@@ -53,7 +53,6 @@ CAR = {
         'edgeMin': 0.015,
         'edgeY': 0.04,
         'edgeYMin': 0.04,
-        'crownScale': 1,
         'arch': {'radius': 0.37, 'lift': 0.04},
     },
     'parts': {

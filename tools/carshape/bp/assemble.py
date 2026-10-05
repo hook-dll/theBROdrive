@@ -7,7 +7,8 @@ Everything the drawing shows on the skin is PROJECTED onto the skin from the vie
 drawn in: an outline read off the front view (a headlamp, the grille, the plate) is cut
 into the shell along that outline and lifted off it as its own part, so it follows the
 nose's real curvature, sits where the drawing puts it and has the drawing's shape. The
-glass is the same cut, left in the shell on its own material. Bumpers run round the
+glass is the same cut, left in the shell on its own material (or, with `glassOverlay`,
+laid over the shell as its exact outline: see the glass stage). Bumpers run round the
 shell's own outline at their height (hull.py), wheels sit on the factory axles.
 
 Outlines are given for the car's RIGHT side seen from the view (x >= 0 on the front
@@ -39,6 +40,19 @@ spec = runpy.run_path(os.path.join(HERE, 'cars', car + '.py'))['CAR']
 info = json.load(open(os.path.join(ROOT, 'build/carshape', car, 'hull.json')))
 F = spec['factory']
 P = spec.get('parts', {})
+# A key nothing reads does nothing, silently: the Fulvia's `glassSeal` and
+# `pillarReach` sat beside `parts` instead of in it for a dozen passes (rubber seals
+# where it asked for chrome, the door glass pushed forward into the screen it was told
+# to leave alone), its `paneEdgeRelax` in `hull`. Every key must be one this stage or
+# hull.py reads (`KEYS` in hull.py for the hull's own).
+CAR_KEYS = {'id', 'label', 'factory', 'blueprint', 'hull', 'parts'}
+PARTS_KEYS = {'archFlares', 'bars', 'boxes', 'bumpers', 'decals', 'flatDeg', 'glass', 'glassCheck', 'glassOverlay',
+              'glassSeal', 'handles', 'lensColours', 'lines', 'mirror', 'paint2', 'paneEdgeRelax', 'pillar',
+              'pillarReach', 'podLamps', 'regions', 'smoothAngleDeg', 'spares', 'underbody', 'wheel', 'widenMax',
+              'wipers'}
+_bad = sorted(set(spec) - CAR_KEYS) + sorted(f'parts.{k}' for k in set(P) - PARTS_KEYS)
+if _bad:
+    sys.exit(f'KEYS {car}: nothing reads {_bad} (misplaced or misspelt)')
 # No number plates (nor blank plate patches): every part drawn in the plate's
 # materials is dropped, whatever list it sits in.
 P = {k: [d for d in v if not (isinstance(d, dict) and d.get('material') in ('plate', 'plate_ink'))]
@@ -594,46 +608,164 @@ def reach_pillar(g):
     return dict(g, outline=out)
 
 
-_wrap_screen = any(g['view'] == 'front' and g.get('facingMin', 0.2) < 0 for g in GL)
-GL = [widen_screen(g) if _wrap_screen else reach_pillar(widen_screen(g)) for g in GL]
-FIT_KS = {}
-FITTED = {}
-# A side window is its drawn outline on what the side view sees: its edges are the
-# drawing's straight lines, never the curve where the side turns away.
-GL = [dict(g, visible=True, facingMin=min(g.get('facingMin', 0.3), 0.15), sideWin=True) if g['view'] == 'side' else g
-      for g in GL]
-for gi, g in enumerate(GL):
-    for sign, poly in sides_of(g):
-        # Both halves of a screen take the first half's fit: a pane is symmetric.
-        FITTED[(gi, sign)] = fit_pane(g['view'], sign, poly, g, FIT_KS.get((g['view'], id(g))))
-for gi, g in enumerate(GL):
-    for sign, poly in sides_of(g):
-        cut(g['view'], sign, FITTED[(gi, sign)], g)
-        if not g.get('sideWin'):
-            iso_cut(g['view'], sign, FITTED[(gi, sign)], g)
-for gi, g in enumerate(GL):
-    for sign, poly in sides_of(g):
-        poly = FITTED[(gi, sign)]
-        sel = set(select(g['view'], sign, poly, dict(g, iso=not g.get('sideWin'))))
-        glass_faces |= sel
-        # A pane whose outline runs off the surface the view sees ends in a ragged
-        # edge (faces inside the outline but turned away): reported, so the outline
-        # can be brought in.
-        loose = set(select(g['view'], sign, poly, dict(g, facingMin=-1.0))) - sel
-        rf = [f for f in loose if any(o in sel for e in f.edges for o in e.link_faces)
-              and min(v.normal.dot(Vector((sign, 0, 0)) if g['view'] == 'side' else VIEW[g['view']]['facing'])
-                      for v in f.verts) < g.get('facingMin', 0.2) - 0.05]
-        ragged = len(rf)
-        if os.environ.get('RAGDEBUG') and g['view'] != 'side':
-            p0 = sides_of(g)[0][1] if sign == 1 else sides_of(g)[-1][1]
-            rf = [f for f in set(select(g['view'], sign, p0, dict(g, facingMin=-1.0))) -
-                  set(select(g['view'], sign, p0, g))]
-            print('  pane', gi, 'turned-away faces inside the drawn outline:', len(rf))
-            for f in rf[:40]:
-                c_ = f.calc_center_median()
-                print('  loose', tuple(round(v, 3) for v in c_), 'n', tuple(round(v, 2) for v in f.normal))
-        if ragged > 3:
-            print(f'GLASS-RAGGED {car} pane {gi} ({g["view"]}, side {sign}): {ragged} faces')
+# ---- glass laid over the shell (`glassOverlay`) ------------------------------------------
+# A pane cut out of the shell's own faces ends where the shell's triangles and a facing
+# limit let it: notched edges, a foot following a fillet round onto the shoulder, a
+# screen running on round its corner into the side window's place (the Fulvia, again
+# and again). Laid over the shell instead, a pane IS its drawn outline: the outline, the
+# seal's inner edge and a grid inside are triangulated in the view's plane and dropped
+# onto the shell along the view; the glass stands `GO_LIFT` off the skin, the seal is an
+# even band inside the edge `GO_SEAL_LIFT` off it, walled down into the skin. The shell
+# under a pane keeps a glass backing `GO_BACK` inside the outline (the wipers find the
+# screen by it). A pane may carry its own `seal` width. Every pane is checked, GLASS
+# and PILLAR lines in the log and GLASS-FAIL on a fault: rays that miss the skin, the
+# skin under a pane turning from the view below `facing`, the skin bending under the
+# glass faster than `bendDegCm` (a pane run onto a fillet or a crease), the shell
+# coming through the glass, and two panes closer than `gapMin` (a pillar gone);
+# `parts.glassCheck` overrides the limits.
+GO = bool(P.get('glassOverlay'))
+GO_LIFT, GO_SEAL_LIFT, GO_STEP, GO_GRID, GO_BACK = 0.002, 0.004, 0.01, 0.02, 0.012
+GO_CHECK = dict({'facing': 0.3, 'bendDegCm': 8.0, 'gapMin': 0.012}, **P.get('glassCheck', {}))
+
+
+def go_ccw(poly):
+    p = np.array(poly, float)
+    area = 0.5 * np.sum(p[:, 0] * np.roll(p[:, 1], -1) - np.roll(p[:, 0], -1) * p[:, 1])
+    return [list(map(float, q)) for q in (p if area > 0 else p[::-1])]
+
+
+def go_densify(poly, step):
+    out = []
+    n = len(poly)
+    for i in range(n):
+        a_, b_ = np.array(poly[i], float), np.array(poly[(i + 1) % n], float)
+        k = max(1, int(math.ceil(np.linalg.norm(b_ - a_) / step)))
+        out += [(a_ + (b_ - a_) * (j / k)).tolist() for j in range(k)]
+    return out
+
+
+def go_inside(poly, pts):
+    """Even-odd test of many points against one closed outline."""
+    p = np.array(poly, float)
+    q = np.array(pts, float).reshape(-1, 2)
+    a0, b0 = p[:, 0][None, :], p[:, 1][None, :]
+    a1, b1 = np.roll(p[:, 0], -1)[None, :], np.roll(p[:, 1], -1)[None, :]
+    qa, qb = q[:, :1], q[:, 1:]
+    with np.errstate(divide='ignore', invalid='ignore'):
+        cross = ((b0 > qb) != (b1 > qb)) & (qa < a0 + (qb - b0) * (a1 - a0) / (b1 - b0))
+    return np.logical_xor.reduce(cross, axis=1)
+
+
+def go_seg_dist(poly, pts):
+    """Distance of many points to a closed outline's edges."""
+    p = np.array(poly, float)
+    q = np.array(pts, float).reshape(-1, 2)
+    a, b = p[None, :, :], np.roll(p, -1, axis=0)[None, :, :]
+    ab = b - a
+    t = np.clip(np.sum((q[:, None, :] - a) * ab, axis=2) / np.maximum(np.sum(ab * ab, axis=2), 1e-12), 0, 1)
+    return np.min(np.linalg.norm(q[:, None, :] - (a + ab * t[:, :, None]), axis=2), axis=1)
+
+
+def go_crossing(poly):
+    """The first two edges of a closed outline that do not share a corner and cross:
+    (i, j, the crossing point), or None."""
+    p = np.array(poly, float)
+    n = len(p)
+
+    def cr(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    for i in range(n):
+        a0, a1 = p[i], p[(i + 1) % n]
+        for j in range(i + 2, n):
+            if i == 0 and j == n - 1:
+                continue
+            b0, b1 = p[j], p[(j + 1) % n]
+            c0, c1 = cr(b0, b1, a0), cr(b0, b1, a1)
+            if c0 * c1 < 0 and cr(a0, a1, b0) * cr(a0, a1, b1) < 0:
+                return i, j, (a0 + (a1 - a0) * (c0 / (c0 - c1))).tolist()
+    return None
+
+
+def go_unloop(poly):
+    """An outline moved in by a seal's width folds over itself where a corner is
+    sharper, or a rounding tighter, than that width: each fold is cut off at its
+    crossing, the shorter way round dropped."""
+    p = [list(q) for q in poly]
+    while len(p) > 3:
+        c_ = go_crossing(p)
+        if c_ is None:
+            break
+        i, j, x_ = c_
+        p = p[:i + 1] + [x_] + p[j + 1:] if j - i <= len(p) - (j - i) else p[i + 1:j + 1] + [x_]
+    return p
+
+
+def go_panes():
+    """(pane index, view, sign, outline counter-clockwise) for every pane; a front, rear
+    or top outline drawn as a half that starts and ends on the centreline is one pane
+    across the car (sign 0), not two halves sealed down the middle."""
+    out = []
+    for gi, g in enumerate(GL):
+        view, poly = g['view'], shape(g)
+        if view != 'side' and g.get('mirror', True):
+            ai = 1 if view == 'top' else 0
+            if abs(poly[0][ai]) < 1e-6 and abs(poly[-1][ai]) < 1e-6:
+                mir = [[p[0], -p[1]] if view == 'top' else [-p[0], p[1]] for p in reversed(poly)]
+                out.append((gi, view, 0, go_ccw(poly + mir[1:-1])))
+                continue
+        for sign, poly_ in sides_of(g):
+            out.append((gi, view, sign, go_ccw(poly_)))
+    return out
+
+
+if GO:
+    # every cut first: a later cut splits faces an earlier selection held
+    GO_BACKS = [(gi, view, sign, offset_poly(poly, -GO_BACK)) for gi, view, sign, poly in go_panes()]
+    for gi, view, sign, back in GO_BACKS:
+        cut(view, sign, back, dict(GL[gi], facingMin=-1.0, visible=True))
+    for gi, view, sign, back in GO_BACKS:
+        glass_faces |= set(select(view, sign, back, dict(GL[gi], facingMin=-1.0, visible=True)))
+else:
+    _wrap_screen = any(g['view'] == 'front' and g.get('facingMin', 0.2) < 0 for g in GL)
+    GL = [widen_screen(g) if _wrap_screen else reach_pillar(widen_screen(g)) for g in GL]
+    FIT_KS = {}
+    FITTED = {}
+    # A side window is its drawn outline on what the side view sees: its edges are the
+    # drawing's straight lines, never the curve where the side turns away.
+    GL = [dict(g, visible=True, facingMin=min(g.get('facingMin', 0.3), 0.15), sideWin=True) if g['view'] == 'side' else g
+          for g in GL]
+    for gi, g in enumerate(GL):
+        for sign, poly in sides_of(g):
+            # Both halves of a screen take the first half's fit: a pane is symmetric.
+            FITTED[(gi, sign)] = fit_pane(g['view'], sign, poly, g, FIT_KS.get((g['view'], id(g))))
+    for gi, g in enumerate(GL):
+        for sign, poly in sides_of(g):
+            cut(g['view'], sign, FITTED[(gi, sign)], g)
+            if not g.get('sideWin'):
+                iso_cut(g['view'], sign, FITTED[(gi, sign)], g)
+    for gi, g in enumerate(GL):
+        for sign, poly in sides_of(g):
+            poly = FITTED[(gi, sign)]
+            sel = set(select(g['view'], sign, poly, dict(g, iso=not g.get('sideWin'))))
+            glass_faces |= sel
+            # A pane whose outline runs off the surface the view sees ends in a ragged
+            # edge (faces inside the outline but turned away): reported, so the outline
+            # can be brought in.
+            loose = set(select(g['view'], sign, poly, dict(g, facingMin=-1.0))) - sel
+            rf = [f for f in loose if any(o in sel for e in f.edges for o in e.link_faces)
+                  and min(v.normal.dot(Vector((sign, 0, 0)) if g['view'] == 'side' else VIEW[g['view']]['facing'])
+                          for v in f.verts) < g.get('facingMin', 0.2) - 0.05]
+            ragged = len(rf)
+            if os.environ.get('RAGDEBUG') and g['view'] != 'side':
+                p0 = sides_of(g)[0][1] if sign == 1 else sides_of(g)[-1][1]
+                rf = [f for f in set(select(g['view'], sign, p0, dict(g, facingMin=-1.0))) -
+                      set(select(g['view'], sign, p0, g))]
+                print('  pane', gi, 'turned-away faces inside the drawn outline:', len(rf))
+                for f in rf[:40]:
+                    c_ = f.calc_center_median()
+                    print('  loose', tuple(round(v, 3) for v in c_), 'n', tuple(round(v, 2) for v in f.normal))
+            if ragged > 3:
+                print(f'GLASS-RAGGED {car} pane {gi} ({g["view"]}, side {sign}): {ragged} faces')
 for f in glass_faces:
     f.material_index = SLOT['glass']
 
@@ -790,7 +922,8 @@ def decal_shapes():
 
 # The seal round every pane: a band of even width inside the pane's own edge, so it
 # follows the glass exactly (a drawn frame never quite did), lifted like a decal.
-_gl = [f for f in bm.faces if f.material_index == SLOT['glass']]
+# (Panes laid over the shell carry their own; the backing under them has none.)
+_gl = [] if GO else [f for f in bm.faces if f.material_index == SLOT['glass']]
 # First the panes' edges are evened out: where the cut met the triangles unluckily the
 # edge has notches; each edge vertex is drawn towards the middle of its neighbours
 # along the edge and laid back on the surface.
@@ -1096,6 +1229,226 @@ def sweep(bm_, path, profile, mat=0, closed_ends=True, scales=None):
 
 
 trim_parts = []
+
+# ---- the panes laid over the shell (`glassOverlay`, see the glass stage) ----------------
+GO_GLASS = None
+if GO:
+    from mathutils.geometry import delaunay_2d_cdt
+    _go_tree = BVHTree.FromObject(body, bpy.context.evaluated_depsgraph_get())
+    _go_w = SEAL.get('width', 0.008)
+    _go_gbm, _go_sbm = bmesh.new(), bmesh.new()
+    _go_nrm = {}                # glass vertex -> the dense shell's smooth normal under it
+    _go_loops = []              # (pane, sign, its edge on the skin [n, 3])
+    _go_fails = []
+    _go_rough = [0]             # rays whose dense-shell normal was not found
+
+    def go_hit(view, sign, a, b, dr):
+        """Where the view's ray through (a, b) meets the skin within the pane's depth
+        range: the point, the dense shell's smooth normal there, the ray."""
+        V = VIEW[view]
+        o = [0.0, 0.0, 0.0]
+        o[V['a']], o[V['b']] = a, b
+        if view == 'side':
+            o[0], ray = sign * 2.0, Vector((-sign, 0, 0))
+        elif view == 'top':
+            o[2], ray = H + 1.0, Vector((0, 0, -1))
+        else:
+            s_ = -1 if view == 'front' else 1
+            o[1], ray = s_ * (L / 2 + 1.0), Vector((0, -s_, 0))
+        o = Vector(o)
+        for _ in range(6):
+            co, n_, _i, _d = _go_tree.ray_cast(o, ray, 10.0)
+            if co is None:
+                return None
+            if not dr or dr[0] <= co[V['depth']] <= dr[1]:
+                n_ = n_ if n_.dot(ray) < 0 else -n_
+                ns = sample(co, n_)
+                if ns is None or ns.dot(n_) < 0.5:
+                    _go_rough[0] += 1
+                    ns = n_
+                return co, ns, ray
+            o = co + ray * 1e-4
+        return None
+
+    def go_orient(f, n_):
+        f.normal_update()
+        if f.normal.dot(n_) < 0:
+            f.normal_flip()
+
+    for gi, view, sign, poly in go_panes():
+        dr = GL[gi].get('depthRange')
+        tag_ = f'pane {gi} ({view}, side {sign})'
+
+        def hit(a, b):
+            return go_hit(view, sign, a, b, dr)
+        # The seal's inner edge: every 3 cm of the outline moved in by the seal's width
+        # as it lies on the skin (a screen seen from above is foreshortened), its corners
+        # mitred.
+        sub = go_densify(poly, 0.03)
+        ns_ = len(sub)
+        offs = []
+        for i in range(ns_):
+            a_, b_ = np.array(sub[i]), np.array(sub[(i + 1) % ns_])
+            t_ = (b_ - a_) / max(np.linalg.norm(b_ - a_), 1e-9)
+            u_ = np.array([-t_[1], t_[0]])              # inwards: the outline runs anticlockwise
+            m_ = (a_ + b_) / 2
+            h0, h1 = hit(*(m_ + u_ * 0.002)), hit(*(m_ + u_ * 0.006))
+            st = (h1[0] - h0[0]).length / 0.004 if h0 and h1 else 1.0
+            # (a pane's own `seal` width over the car's)
+            offs.append((u_, GL[gi].get('seal', _go_w) / max(st, 1.0)))
+        inner = []
+        for i in range(ns_):
+            (u0, d0), (u1, d1) = offs[i - 1], offs[i]
+            if abs(u0[0] * u1[1] - u0[1] * u1[0]) < 0.09:
+                m_ = u0 + u1
+                r_ = m_ / max(np.linalg.norm(m_), 1e-9) * (d0 + d1) / 2
+            else:
+                r_ = np.linalg.solve(np.array([u0, u1]), np.array([d0, d1]))
+                lim = 3 * max(d0, d1)
+                if np.linalg.norm(r_) > lim:
+                    r_ = r_ * (lim / np.linalg.norm(r_))
+            inner.append((np.array(sub[i]) + r_).tolist())
+        inner = go_unloop(inner)
+        if go_crossing(inner) is not None or not go_inside(poly, inner).all():
+            _go_fails.append(f"{tag_}: the seal's inner edge cannot be laid inside the outline")
+            continue
+        # The outline, the seal's inner edge and a grid inside, triangulated in the view.
+        outer_d, inner_d = go_densify(poly, GO_STEP), go_densify(inner, GO_STEP)
+        arr = np.array(inner)
+        lo_, hi_ = arr.min(0), arr.max(0)
+        ga, gb = np.meshgrid(np.arange(lo_[0] + GO_GRID / 2, hi_[0], GO_GRID),
+                             np.arange(lo_[1] + GO_GRID / 2, hi_[1], GO_GRID))
+        gp = np.stack([ga.ravel(), gb.ravel()], 1)
+        gp = gp[go_inside(inner, gp)] if len(gp) else gp
+        gp = gp[go_seg_dist(inner, gp) > GO_GRID * 0.4] if len(gp) else gp
+        no, ni = len(outer_d), len(inner_d)
+        vin = [Vector(p) for p in outer_d + inner_d + gp.tolist()]
+        ein = [(i, (i + 1) % no) for i in range(no)] + [(no + i, no + (i + 1) % ni) for i in range(ni)]
+        vout, _eo, fout, origv, _oe, _of = delaunay_2d_cdt(vin, ein, [], 0, 1e-7)
+        cen = np.array([[sum(vout[k][0] for k in f) / len(f), sum(vout[k][1] for k in f) / len(f)] for f in fout])
+        keep, in_glass = go_inside(outer_d, cen), go_inside(inner_d, cen)
+        on_outer = [any(k < no for k in ov) for ov in origv]
+        to_out = {k: i for i, ov in enumerate(origv) for k in ov}
+        used = sorted({k for f, k_ in zip(fout, keep) if k_ for k in f})
+        hits = {k: hit(vout[k][0], vout[k][1]) for k in used}
+        missed = [k for k in used if hits[k] is None]
+        if missed:
+            _go_fails.append(f'{tag_}: {len(missed)} of its points miss the skin, first at '
+                             f'{tuple(round(c, 3) for c in vout[missed[0]])}')
+            continue
+        facing = {k: hits[k][1].dot(-hits[k][2]) for k in used}
+        kf = min(used, key=lambda k: facing[k])
+        # the glass
+        vg = {}
+        gfaces = []
+        # the bend: how fast the skin's normal turns under the glass, degrees per cm
+        # along its edges (a body panel 1-6, a fillet the glass has run onto 20 or more)
+        fold, fold_at = 0.0, None
+        for f, k_, g_ in zip(fout, keep, in_glass):
+            if not (k_ and g_):
+                continue
+            for k in f:
+                if k not in vg:
+                    co, n_, _r = hits[k]
+                    vg[k] = _go_gbm.verts.new(co + n_ * GO_LIFT)
+                    _go_nrm[vg[k]] = n_
+            ff = _go_gbm.faces.new([vg[k] for k in f])
+            go_orient(ff, sum((hits[k][1] for k in f), Vector()))
+            gfaces.append(f)
+            for a_, b_ in zip(f, f[1:] + f[:1]):
+                rate = math.degrees(hits[a_][1].angle(hits[b_][1], 0.0)) / max((hits[a_][0] - hits[b_][0]).length * 100, 0.5)
+                if rate > fold:
+                    fold, fold_at = rate, (hits[a_][0] + hits[b_][0]) / 2
+        # nothing of the shell may stand above the glass between its corners
+        clear, clear_at = 1.0, None
+        for f in gfaces:
+            c_ = sum((hits[k][0] + hits[k][1] * GO_LIFT for k in f), Vector()) / len(f)
+            n_ = sum((hits[k][1] for k in f), Vector()).normalized()
+            hh = _go_tree.ray_cast(c_ + n_ * 0.01, -n_, 0.05)
+            if hh[0] is not None and hh[3] - 0.01 < clear:
+                clear, clear_at = hh[3] - 0.01, c_
+        # the seal: a band from the outline to its inner edge, walled down into the skin
+        # outside and down to the glass inside
+        top_, bot_ = {}, {}
+        sfaces = [f for f, k_, g_ in zip(fout, keep, in_glass) if k_ and not g_]
+        n_edge = {}
+        for f in sfaces:
+            for a_, b_ in zip(f, f[1:] + f[:1]):
+                n_edge[(min(a_, b_), max(a_, b_))] = n_edge.get((min(a_, b_), max(a_, b_)), 0) + 1
+
+        def vtop(k):
+            if k not in top_:
+                top_[k] = _go_sbm.verts.new(hits[k][0] + hits[k][1] * GO_SEAL_LIFT)
+            return top_[k]
+
+        def vbot(k):
+            if k not in bot_:
+                bot_[k] = _go_sbm.verts.new(hits[k][0] + hits[k][1] * (-0.001 if on_outer[k] else GO_LIFT))
+            return bot_[k]
+        for f in sfaces:
+            ff = _go_sbm.faces.new([vtop(k) for k in f])
+            go_orient(ff, sum((hits[k][1] for k in f), Vector()))
+            fc = sum((hits[k][0] for k in f), Vector()) / len(f)
+            for a_, b_ in zip(f, f[1:] + f[:1]):
+                if n_edge[(min(a_, b_), max(a_, b_))] == 1:
+                    try:
+                        wf = _go_sbm.faces.new((vbot(a_), vbot(b_), vtop(b_), vtop(a_)))
+                    except ValueError:
+                        continue
+                    go_orient(wf, (hits[a_][0] + hits[b_][0]) / 2 - fc)
+        _go_loops.append((gi, sign, np.array([tuple(hits[to_out[k]][0]) for k in range(no)])))
+        print(f'GLASS {car} {tag_}: {len(gfaces)} glass tris, facing min {facing[kf]:.2f} at '
+              f'{tuple(round(c, 3) for c in hits[kf][0])}, bend max {fold:.1f} deg/cm at '
+              f'{tuple(round(c, 3) for c in fold_at) if fold_at else None}, skin under it by {clear * 1000:.1f} mm '
+              f'or more (least at {tuple(round(c, 3) for c in clear_at) if clear_at else None})')
+        if facing[kf] < GO_CHECK['facing']:
+            _go_fails.append(f'{tag_}: the skin under it turns away from the view to {facing[kf]:.2f} at '
+                             f'{tuple(round(c, 3) for c in hits[kf][0])} (limit {GO_CHECK["facing"]})')
+        if fold > GO_CHECK['bendDegCm']:
+            _go_fails.append(f'{tag_}: bends {fold:.1f} deg/cm at {tuple(round(c, 3) for c in fold_at)} - a fillet or '
+                             f'crease under the glass (limit {GO_CHECK["bendDegCm"]})')
+        if clear < 0.0005:
+            _go_fails.append(f'{tag_}: the shell comes through the glass ({clear * 1000:.1f} mm) at '
+                             f'{tuple(round(c, 3) for c in clear_at)}')
+    # The pillars: the paint left between neighbouring panes' edges.
+    for i in range(len(_go_loops)):
+        for j in range(i + 1, len(_go_loops)):
+            (gi, si, A), (gj, sj, B) = _go_loops[i], _go_loops[j]
+            if si and sj and si != sj:
+                continue
+            s_ = si or sj
+            if s_:
+                A, B = A[A[:, 0] * s_ > 0], B[B[:, 0] * s_ > 0]
+            if not len(A) or not len(B):
+                continue
+            dd = np.linalg.norm(A[:, None, :] - B[None, :, :], axis=2)
+            if dd.min() > 0.10:
+                continue
+            ia, ib = np.unravel_index(np.argmin(dd), dd.shape)
+            near = dd.min(axis=1)
+            zone = near[near < 0.06]
+            where = tuple(np.round((A[ia] + B[ib]) / 2, 3).tolist())
+            print(f'PILLAR {car} pane {gi}|{gj} side {s_}: gap min {dd.min():.3f} at {where}, median '
+                  f'{float(np.median(zone)) if len(zone) else 0:.3f} over {len(zone)} edge points within 6 cm')
+            if dd.min() < GO_CHECK['gapMin']:
+                _go_fails.append(f'panes {gi} and {gj} (side {s_}) come within {dd.min():.3f} at {where} '
+                                 f'(limit {GO_CHECK["gapMin"]})')
+    print(f'GLASS {car}: {_go_rough[0]} points shaded by the working shell (no dense normal)')
+    for msg in _go_fails:
+        print(f'GLASS-FAIL {car} {msg}')
+    _go_gbm.verts.index_update()
+    _go_vn = [None] * len(_go_gbm.verts)
+    for v in _go_gbm.verts:
+        _go_vn[v.index] = _go_nrm[v]
+    _me_go = bpy.data.meshes.new('glass_overlay')
+    _go_gbm.to_mesh(_me_go)
+    _go_gbm.free()
+    _me_go.materials.append(MAT['glass'])
+    _me_go.shade_smooth()
+    _me_go.normals_split_custom_set([tuple(_go_vn[lp.vertex_index]) for lp in _me_go.loops])
+    GO_GLASS = bpy.data.objects.new('glass_overlay', _me_go)
+    scene.collection.objects.link(GO_GLASS)
+    trim_parts.append(new_object('glass_seal', _go_sbm, [SEAL['material']]))
 # Bumpers: a section swept round the shell's outline at the bumper's height.
 for end, b in P.get('bumpers', {}).items():
     path = info['bumperPaths'].get(end)
@@ -1328,9 +1681,14 @@ if m:
                 disc(bm_, (xf, m['y'] + 0.01, (z_foot + z_head) / 2), (0, 0, 1), 0.007, z_head - z_foot, 8, 0)
         else:
             # The sail on the door's own skin: at the mirror's height, or lower down to
-            # the door's top when the glass is what is there.
+            # the door's top when the glass is what is there (or at `sailZ`, the door's
+            # top under the belt chrome, where the glasshouse is as wide as that test's
+            # door: Fulvia).
             z_s, x0 = m['z'], hit.x if hit else s_ * W / 2
-            for k in range(26):
+            if 'sailZ' in m:
+                h2, _n = skin_point((s_ * 1.5, m['y'], m['sailZ']), (-s_, 0, 0))
+                z_s, x0 = m['sailZ'], h2.x if h2 else x0
+            for k in range(0 if 'sailZ' in m else 26):
                 h2, _n = skin_point((s_ * 1.5, m['y'], m['z'] - 0.01 * k), (-s_, 0, 0))
                 if h2 and abs(h2.x) >= W / 2 - 0.12:
                     z_s, x0 = m['z'] - 0.01 * k, h2.x
@@ -1371,11 +1729,16 @@ if wp:
         return h_[0] is not None and _mi[h_[2]] == SLOT['glass']
     def glass_point(x_, y0_):
         """The windscreen's surface a few cm up from its foot at x: walking back from
-        the nose along the centre of the car until the surface below is glass."""
+        the nose along the centre of the car until the surface below is glass (the
+        foot then found to a fraction of a millimetre: on 1 cm steps a blade following
+        the glass waved)."""
         for y_ in np.arange(y0_ - 0.5, y0_ + 0.8, 0.01):
-            h_ = _skin.ray_cast(Vector((x_, y_, H + 0.5)), Vector((0, 0, -1)), 3.0)
-            if h_[0] is not None and _mi[h_[2]] == SLOT['glass']:
-                h2 = _skin.ray_cast(Vector((x_, y_ + 0.05, H + 0.5)), Vector((0, 0, -1)), 3.0)
+            if on_glass(x_, y_):
+                lo_, hi_ = y_ - 0.01, y_
+                for _ in range(7):
+                    mid_ = (lo_ + hi_) / 2
+                    lo_, hi_ = (lo_, mid_) if on_glass(x_, mid_) else (mid_, hi_)
+                h2 = _skin.ray_cast(Vector((x_, hi_ + 0.05, H + 0.5)), Vector((0, 0, -1)), 3.0)
                 if h2[0] is not None and _mi[h2[2]] == SLOT['glass']:
                     return h2[0], h2[1]
                 return None
@@ -1391,16 +1754,19 @@ if wp:
             continue
         # one straight blade: from the first point to the last, standing on the higher
         # of the glass beneath it (a blade is straight; following the glass's ragged
-        # foot it waved)
-        pa, pb = pts[0][0], pts[-1][0]
-        if (pb - pa).length > abs(x1 - x0) * 1.3:
-            # a stray point off the glass: keep the blade its drawn length
-            mid = (pa + pb) / 2
-            dvec = (pb - pa).normalized() * abs(x1 - x0) / 2
-            pa, pb = mid - dvec, mid + dvec
-        nrm_ = sum((n for _, n in pts), Vector()).normalized()
-        lift_ = max(0.0, max((p.dot(nrm_) - (pa + (pb - pa) * ((p - pa).dot(pb - pa) / max((pb - pa).length_squared, 1e-9))).dot(nrm_)) for p, _ in pts))
-        pts = [(pa + nrm_ * lift_, nrm_), (pb + nrm_ * lift_, nrm_)]
+        # foot it waved). Under laid-over glass the foot is the drawn outline, smooth,
+        # and the blade bends with the glass: kept straight across the Fulvia's
+        # wrap-round screen, its outer end stood a centimetre off the glass, past it.
+        if not GO:
+            pa, pb = pts[0][0], pts[-1][0]
+            if (pb - pa).length > abs(x1 - x0) * 1.3:
+                # a stray point off the glass: keep the blade its drawn length
+                mid = (pa + pb) / 2
+                dvec = (pb - pa).normalized() * abs(x1 - x0) / 2
+                pa, pb = mid - dvec, mid + dvec
+            nrm_ = sum((n for _, n in pts), Vector()).normalized()
+            lift_ = max(0.0, max((p.dot(nrm_) - (pa + (pb - pa) * ((p - pa).dot(pb - pa) / max((pb - pa).length_squared, 1e-9))).dot(nrm_)) for p, _ in pts))
+            pts = [(pa + nrm_ * lift_, nrm_), (pb + nrm_ * lift_, nrm_)]
         for (pa, na), (pb, nb) in zip(pts, pts[1:]):
             n_ = (na + nb).normalized()
             along = pb - pa
@@ -1711,7 +2077,8 @@ for name, (axle_y, track), side in (('wheel_fl', AXLES[0], 1), ('wheel_fr', AXLE
 
 # ---- shading and export -------------------------------------------------------------
 for obj in scene.objects:
-    if obj.type == 'MESH' and obj is not body:
+    # (the laid-over glass carries the dense shell's normals already)
+    if obj.type == 'MESH' and obj is not body and obj is not GO_GLASS:
         bpy.context.view_layer.objects.active = obj
         obj.select_set(True)
         bpy.ops.object.shade_smooth_by_angle(angle=math.radians(P.get('smoothAngleDeg', 40)))
@@ -1734,6 +2101,17 @@ for o in scene.objects:
     if o.name.startswith('paint.'):
         o.name = 'glass'
         o.data.name = 'glass'
+if GO_GLASS is not None:
+    # the laid-over panes join their backing in the one `glass` node
+    _gl_obj = bpy.data.objects.get('glass')
+    if _gl_obj is None:
+        GO_GLASS.name = GO_GLASS.data.name = 'glass'
+    else:
+        bpy.ops.object.select_all(action='DESELECT')
+        GO_GLASS.select_set(True)
+        _gl_obj.select_set(True)
+        bpy.context.view_layer.objects.active = _gl_obj
+        bpy.ops.object.join()
 LAMP_NODES = {'headlights', 'taillights', 'reverse_lights', 'brake_lights', 'front_blinker_left',
               'front_blinker_right', 'rear_blinker_left', 'rear_blinker_right'}
 # The mirrors stay a node of their own, `mirrors`: the game measures the body's width
