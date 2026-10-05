@@ -429,14 +429,15 @@ function markStickerSurfaces(root: THREE.Object3D, def: CarModelDef): void {
 /**
  * Initial body-only finish. The lab can toggle Clay through shared uniforms without
  * replacing materials or recompiling their program anchors.
- * The default stays metallic; `?finish=clay` tries a lightly hand-worked surface and
- * `?finish=off` keeps the authored paint. Glass, lenses, trim and wheels are untouched.
+ * The default uses the selected clay finish and hand-worked surface; `?finish=metal`
+ * restores the metallic paint accent, while `?finish=off` keeps the authored paint.
+ * Glass, lenses, trim and wheels are untouched.
  */
 const finishParam = typeof window === 'undefined'
   ? null
   : new URLSearchParams(window.location.search).get('finish');
 export const CAR_FINISH: 'metal' | 'clay' | 'off' =
-  finishParam === 'clay' || finishParam === 'off' ? finishParam : 'metal';
+  finishParam === 'metal' || finishParam === 'off' ? finishParam : 'clay';
 
 const finishHsl = { h: 0, s: 0, l: 0 };
 
@@ -481,8 +482,7 @@ if ( uClayEnabled > 0.5 ) {
 }
 `;
 
-function applyCarFinish(paint: readonly THREE.Material[], def: CarModelDef): void {
-  if (!def.id.startsWith('rs_')) return;
+function applyCarFinish(paint: readonly THREE.Material[]): void {
   for (const material of paint) {
     if (!(material instanceof THREE.MeshStandardMaterial)) continue;
     const previousCompile = material.onBeforeCompile;
@@ -1616,7 +1616,7 @@ function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInsta
   const glass = cloneCarGlass(body, paint);
   prepareSovietShellFaces(body, t.def);
   applyRandomPaint(body, t.def, appearanceKey);
-  applyCarFinish(paint, t.def);
+  applyCarFinish(paint);
   markStickerSurfaces(body, t.def);
   body.name = 'body';
   const surface = new CarBodySurface(paint, glass);
@@ -1639,7 +1639,7 @@ function cloneStaticModel(t: Template, appearanceKey = t.def.id): StaticCarInsta
   const paint = cloneCarBodyPaintMaterials(body, t, appearanceKey);
   const glass = cloneCarGlass(body, paint);
   applyRandomPaint(body, t.def, appearanceKey);
-  applyCarFinish(paint, t.def);
+  applyCarFinish(paint);
   group.add(body);
   const wheels = cloneWheels(t, appearanceKey);
   for (const wheel of t.measure.wheels) {

@@ -17,21 +17,15 @@
  
 - In-game radio settings now provide two editable station URLs, with recommended NTS 1,
   NTS 2, Underground 80s and Left Coast 70s streams.
-- OPTIONAL CLAY BODY FINISH (`?finish=clay`, `src/render/carmodel.ts`). Blueprint
-  cars can trade the metallic paint accent for a soft non-metallic highlight and
-  body-fixed impressions. The selected clay defaults are fine/broad relief
-  20/10 mm, noise scales 3.75/6 per metre, roughness 0.5, and zero roughness
-  variation, colour variation and metalness.
-  Apparent relief only: geometry, silhouettes,
-  glass, lamp lenses, trim and tyres are unchanged; existing dirt and scratches
-  remain. The car lab has a live Clay checkbox and eight independent sliders for
-  fine/broad relief, both noise scales, roughness, roughness variation, colour
-  variation and metalness. These edit shared uniforms without rebuilding cars,
-  reloading the page, moving the camera or compiling new programs. Values survive
-  Clay toggles within the page; slider settings are not saved across reloads.
-  The body selector still compares metal, clay and authored paint (`?finish=off`).
-  Metal stays the default. All variants use the normal car-program anchor and
-  scene-pass compilation path.
+- DEFAULT CLAY BODY FINISH (`src/render/carmodel.ts`). All cars now start with the
+  selected soft non-metallic body finish and body-fixed impressions. The defaults are
+  fine/broad relief 20/10 mm, noise scales 3.75/6 per metre, roughness 0.5, and zero
+  roughness variation, colour variation and metalness.
+  Apparent relief only: geometry, silhouettes, glass, lamp lenses, trim and tyres are
+  unchanged; existing dirt and scratches remain. The car lab keeps a live Clay checkbox
+  and eight independent sliders. `?finish=metal` restores the metallic accent and
+  `?finish=off` keeps authored paint. All variants use the normal car-program anchor
+  and scene-pass compilation path.
 
 - LOCALISATION (`src/i18n/`). `t(key)` looks a message up in the player's language: the
   first of the browser's languages with a table, English otherwise, `?lang=xx` to force
