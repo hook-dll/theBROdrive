@@ -26,6 +26,9 @@
   and eight independent sliders. `?finish=metal` restores the metallic accent and
   `?finish=off` keeps authored paint. All variants use the normal car-program anchor
   and scene-pass compilation path.
+- RENAULT 5 REAR QUARTER (`tools/carshape/bp/cars/renault5.py`). The hatch shoulder is
+  faired against blueprint pixel noise, and the C-pillar vent is three clean,
+  body-hugging aluminium slats instead of a broken projected patch.
 
 - LOCALISATION (`src/i18n/`). `t(key)` looks a message up in the player's language: the
   first of the browser's languages with a table, English otherwise, `?lang=xx` to force

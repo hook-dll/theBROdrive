@@ -25,6 +25,9 @@ CAR = {
         'cabin': [-0.68, 1.75],
         'belt': [[-0.68, 0.89], [-0.4, 0.85], [1.1, 0.85], [1.75, 0.86]],
         'glassPlan': [[-0.68, 0.63], [-0.3, 0.69], [1.1, 0.69], [1.75, 0.62]],
+        # Fair the roof and hatch shoulder along the car. The raw side drawing's
+        # centimetre-scale pixels were turning the rear quarter into corrugated facets.
+        'topSpacing': 0.15,
         # Flat flanks with a crisp shoulder crease and a flat tailgate (photos): no
         # crown along the car, a nearly flat roof, and the folds at 1.1 cm / 1.8 cm
         # instead of the 2.2 / 6 cm default, which pillowed the flanks and rolled the
@@ -111,13 +114,6 @@ CAR = {
             # there (the old pair sat down on the bumper at z 0.345, where the car has none).
             {'view': 'rear', 'node': 'reverse_lights', 'rect': [[0.325, 0.70], [0.085, 0.06]], 'radius': 0.006,
              'material': 'ReverseLights', 'height': 0.008, 'depthRange': [1.5, 1.9]},
-            # The Alpine's C-pillar vent is ONE clean bright fine-mesh strip flush on
-            # the pillar (rear photo): a dark trim patch with an alu ring over it tore
-            # into a saw-tooth bright edge and left a black wedge on the pillar.
-            {'view': 'side', 'outline': [[1.125, 1.199], [1.185, 1.225], [1.395, 0.920], [1.335, 0.894]],
-             'material': 'alu', 'height': 0.004, 'facingMin': 0.35},
-            {'view': 'rear', 'outline': [[0.595, 1.19], [0.675, 1.19], [0.675, 0.90], [0.595, 0.90]],
-             'material': 'alu', 'height': 0.004, 'facingMin': 0.55, 'depthRange': [1.35, 1.9]},
             {'view': 'rear', 'rect': [[0.0, 0.655], [0.56, 0.13]], 'radius': 0.01, 'mirror': False, 'material': 'plate',
              'height': 0.005, 'depthRange': [1.5, 1.9]},
         ],
@@ -136,6 +132,15 @@ CAR = {
             {'view': 'top', 'points': [[-1.62, 0.63], [-0.72, 0.64]], 'width': 0.005},
             {'view': 'rear', 'points': [[0.0, 0.47], [0.55, 0.47], [0.56, 1.23], [0.0, 1.23]], 'width': 0.005, 'depthRange': [1.0, 1.9]},
             {'view': 'side', 'points': [[-0.315, 0.93], [-0.26, 0.835], [0.535, 0.83], [1.15, 0.84]], 'width': 0.012, 'material': 'rubber', 'height': 0.003},
+            # The C-pillar's three narrow vent slats are body-hugging lines. A broad
+            # projected patch crossed the faceted shoulder and produced broken, saw-tooth
+            # edges in the rear quarter; the slats keep one clean diagonal.
+            {'view': 'side', 'points': [[1.125, 1.199], [1.395, 0.920]], 'width': 0.012,
+             'material': 'alu', 'height': 0.004},
+            {'view': 'side', 'points': [[1.155, 1.206], [1.425, 0.927]], 'width': 0.012,
+             'material': 'alu', 'height': 0.004},
+            {'view': 'side', 'points': [[1.095, 1.192], [1.365, 0.913]], 'width': 0.012,
+             'material': 'alu', 'height': 0.004},
             # The Alpine's belt pinstripe: the photos show a PAIR of thin red lines
             # running the flank just under the window line, meeting at a point on the front
             # wing (they open towards the rear quarter, where they form the banner round
