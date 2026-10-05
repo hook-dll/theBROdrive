@@ -441,7 +441,11 @@ export interface FactoryGeometry {
   readonly frontTrack: number;
   readonly rearTrack: number;
   readonly wheelRadius: number;
+  /** Factory tyre section width when both axles share the same fitment. */
   readonly tyreWidth: number;
+  /** Optional axle-specific factory tyre widths for staggered fitments. */
+  readonly frontTyreWidth?: number;
+  readonly rearTyreWidth?: number;
   /** Nose to front axle; set when source-art axle bias disagrees with factory drawings. */
   readonly frontOverhang?: number;
 }

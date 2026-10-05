@@ -1550,8 +1550,12 @@ function cloneWheels(t: Template, appearanceKey: string): Map<string, THREE.Obje
       throw new Error(`Car model "${t.def.id}" has a wheel with invalid dimensions`);
     }
     // A shared wheel contributes its rim style, not the donor car's tyre section.
-    // Keep the target model's factory tyre width as well as its rolling radius.
-    mesh.scale.x *= t.def.factory.tyreWidth / visualWidth;
+    // A staggered car keeps its factory section width on each axle; ordinary cars
+    // continue using the shared width.
+    const tyreWidth = targetWheel.isFront
+      ? (t.def.factory.frontTyreWidth ?? t.def.factory.tyreWidth)
+      : (t.def.factory.rearTyreWidth ?? t.def.factory.tyreWidth);
+    mesh.scale.x *= tyreWidth / visualWidth;
     const rollingScale = targetWheel.radius / visualRadius;
     mesh.scale.y *= rollingScale;
     mesh.scale.z *= rollingScale;

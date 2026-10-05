@@ -3132,8 +3132,12 @@ export class Vehicle implements Rebasable {
    */
   syncContactPatches(field: ContactPatchField, gain: number): void {
     if (!(gain > 0)) return;
-    const halfWidth = Math.max(0.06, this.model.factory.tyreWidth * 0.62);
     for (let i = 0; i < this.wheels.length; i++) {
+      const wheel = this.wheels[i]!;
+      const tyreWidth = wheel.isFront
+        ? (this.model.factory.frontTyreWidth ?? this.model.factory.tyreWidth)
+        : (this.model.factory.rearTyreWidth ?? this.model.factory.tyreWidth);
+      const halfWidth = Math.max(0.06, tyreWidth * 0.62);
       const spray = this.wheelSpray[i];
       const ride = this.wheelRide[i];
       if (!spray.inContact || !ride.inContact) continue;

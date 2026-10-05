@@ -1,6 +1,14 @@
 # Changelog
 
 ## Unreleased
+### Changed
+
+- Factory roster corrections: wheelbase, track, rolling radius, tyre sections and
+  kerb mass now use the audited 50-car source variants; staggered Citroën DS and
+  Porsche 911 SC tyres are represented per axle. Corrected the confirmed Renault 4,
+  Peugeot 205, Toyota BJ40, AMC Eagle and related engine/gearbox specifications.
+  Part-time 4WD remains represented by the existing fixed AWD approximation.
+
 
 ### Added
 
