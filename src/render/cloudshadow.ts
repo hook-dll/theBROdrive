@@ -119,19 +119,23 @@ const CLOUD_DETAIL_PERIOD_CELLS = CLOUD_PERIOD_M / CLOUD_DETAIL_CELL_M;
 const CLOUD_DETAIL_AMPLITUDE = 0.14;
 /**
  * The soft edge, in field units. Value noise of this kind has almost all of its
- * mass in 0.25..0.75, so a band across the upper half puts roughly a third of the
- * ground in shade with an edge hundreds of metres wide — the penumbra of a cloud
- * two kilometres up, which is what a hard-edged patch got wrong.
+ * mass in 0.25..0.75, so a band centred just under the middle puts a little over
+ * half the ground in shade with an edge hundreds of metres wide — the penumbra of a
+ * cloud two kilometres up, which is what a hard-edged patch got wrong.
  *
  * WIDENED ONCE, from 0.54..0.74. The first band produced a visible edge at 75 m of
  * 10-90% penumbra — a cloud's shadow on the ground has no edge at all, and 75 m
- * reads as one when the patch is 400 m across. The band is 0.40 wide and centred
- * where the old one was, so coverage and the deep end are unchanged and the
- * transition is a little over twice as long. Measured by `tools/sky-variety.ts`,
- * which fails below 100 m: 170 m median, 129 m at the worst quartile.
+ * reads as one when the patch is 400 m across. The band is 0.40 wide; measured by
+ * `tools/sky-variety.ts`, which fails below 100 m.
+ *
+ * LOWERED ONCE, from 0.42..0.82. That band shaded a third of the ground and only a
+ * storm moved it down, by up to 0.16, while the deck built and cleared. The clearing
+ * after rain was the one time the patches were seen at all — and as the last of the
+ * cloud went the band slid back up and the desert went uniformly bright again within
+ * a minute. The clearing's band is now every day's.
  */
-const CLOUD_EDGE_LOW = 0.42;
-const CLOUD_EDGE_HIGH = 0.82;
+const CLOUD_EDGE_LOW = 0.26;
+const CLOUD_EDGE_HIGH = 0.66;
 /**
  * Deepest darkening, as a fraction of the light leaving the surface.
  *
@@ -389,7 +393,6 @@ uniform vec2 uCloudPan;
 uniform float uCloudSalt;
 uniform float uCloudDetail;
 uniform float uCloudStrength;
-uniform float uCloudBias;
 uniform float uWet;
 uniform vec2 uGroundPan;
 varying float vCloudShade;
@@ -439,7 +442,7 @@ float cloudShade( vec2 scene, float dist ) {
 			uCloudSalt + ${CLOUD_DETAIL_SALT.toFixed(1)}
 		) - 0.5 ) * ${CLOUD_DETAIL_AMPLITUDE.toFixed(2)};
 	}
-	return smoothstep( ${CLOUD_EDGE_LOW.toFixed(2)} - uCloudBias, ${CLOUD_EDGE_HIGH.toFixed(2)} - uCloudBias, field );
+	return smoothstep( ${CLOUD_EDGE_LOW.toFixed(2)}, ${CLOUD_EDGE_HIGH.toFixed(2)}, field );
 }
 `;
 
@@ -609,8 +612,6 @@ const uniforms = {
   uCloudSalt: { value: 0 },
   uCloudStrength: { value: 0 },
   uCloudDetail: { value: 0 },
-  /** Lowers the shade band: more of the ground under cloud while a storm builds. */
-  uCloudBias: { value: 0 },
   /** Ground wetness from world/weather.ts, 0..1. */
   uWet: { value: 0 },
   /** The rebase origin reduced into one wet-patch period: puddles stay put on a rebase. */
@@ -701,10 +702,9 @@ export function advanceCloudShadows(
   cloudShadowPan(seed, elapsed, originX, originZ, pan);
   uniforms.uCloudPan.value.set(pan.x, pan.z);
   uniforms.uCloudSalt.value = cloudShadowSalt(seed);
-  // Weather on the shade: a building storm puts more ground under deeper, bigger
-  // shade; once the deck has closed the sun is gone and so are the patches (the
-  // lights carry the gloom). Haze and dust scatter the sun into a flat light that
-  // casts no patch at all.
+  // Weather on the shade: a building storm puts deeper shade on the ground; once the
+  // deck has closed the sun is gone and so are the patches (the lights carry the
+  // gloom). Haze and dust scatter the sun into a flat light that casts no patch at all.
   const w = weather;
   const building = w.cloud * (1 - w.cloud) * 4;
   uniforms.uCloudStrength.value =
@@ -713,7 +713,6 @@ export function advanceCloudShadows(
     (1 - 0.9 * Math.max(0, w.cloud - 0.6) / 0.4) *
     (1 - 0.6 * w.haze) *
     (1 - w.dust);
-  uniforms.uCloudBias.value = 0.16 * Math.min(1, w.cloud * 1.6);
   uniforms.uCloudDetail.value = shadowsFor(quality, mobilePresentation) ? 1 : 0;
   uniforms.uWet.value = w.wet;
   uniforms.uGroundPan.value.set(

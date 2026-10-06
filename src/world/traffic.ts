@@ -95,28 +95,27 @@ const SPAWN_ARRIVAL_SLACK_M = 60;
 /** Extra room for numerical drift/acceleration beyond one step's measured travel. */
 const PHYSICS_EDGE_SLACK_M = 1;
 /**
- * A density trim may only take a car this far BEHIND the player, where its removal
- * cannot be watched. The physical support boundary still applies in both directions.
+ * NOTHING APPEARS OR DISAPPEARS WHERE IT CAN BE SEEN.
+ *
+ * A car is created no nearer than `SPAWN_MIN_M`, and the same distance is the nearest
+ * one may be taken out by anything but the physics edge: a density trim, a recycled
+ * receding car, a stuck car. Removals used to start 90 m (trim) and 200 m (recycle)
+ * behind a moving player, on the theory that a car he had passed would not be looked
+ * at again; on an open desert road a player who looked back watched the cars he had
+ * just met blink out of the world. Moving or standing, he sees the same distance.
  */
-const OFFSCREEN_TRIM_M = 90;
+const UNSEEN_M = SPAWN_MIN_M;
 /**
  * THE BUDGET IS SPENT ON ROAD THE PLAYER CAN SEE.
  *
  * Every car he overtakes and every oncoming car he meets ends up behind him, and used
  * to hold its slot until it fell out of the support window — a minute for a car
- * overtaken at 25 km/h more — while the road ahead stayed empty. A car this far behind
- * that is getting FARTHER away (oncoming, or same-direction and slower than him) will
- * never be seen again, so its slot is handed back to a spawn when the stream is full.
- * A stopped player recedes from nothing: what is behind him then is kept.
+ * overtaken at 25 km/h more — while the road ahead stayed empty. A car past `UNSEEN_M`
+ * behind that is getting FARTHER away (oncoming, or same-direction and slower than him)
+ * will never be seen again, so its slot is handed back to a spawn when the stream is
+ * full.
  */
-const RECYCLE_BEHIND_M = 200;
-/** Closing speed below which a same-direction car behind counts as dropping back. */
 const RECYCLE_RECEDE_MPS = 0.5;
-/**
- * Below this the player is standing and may be looking back down the road, so a car
- * behind him is only removed once it is as far away as a spawn ahead would be made.
- */
-const PLAYER_MOVING_MPS = 5;
 /** Seconds between spawn attempts on an ordinary road; the dense mode halves it. */
 const SPAWN_INTERVAL_S = 1;
 /** Same-lane separation for the normal stream; dense 30-car mode packs to 32 m. */
@@ -234,10 +233,8 @@ const SPAWN_GROUND_PROBE_DEPTH_M = 4;
 const LIFETIME_SAMPLE_S = 0.5;
 /** Below this the car is standing, not crawling. */
 const STUCK_SPEED_KMH = 2;
-/** Seconds of standing still after which a car out of sight is recycled. */
+/** Seconds of standing still after which a car out of sight (`UNSEEN_M`) is recycled. */
 const STUCK_RECYCLE_S = 18;
-/** Never recycle a stopped car closer than this: the player would watch it vanish. */
-const STUCK_RECYCLE_SIGHT_M = 70;
 /** Even samples keep the local density response cheap and free of profile chatter. */
 const DENSITY_PROFILE_SAMPLES = 5;
 const CLOCK_SYNC_S = 1;
@@ -1170,7 +1167,7 @@ export class RoadTraffic {
         const offset = car.forwardS - playerS;
         if (
           car.stoppedFor > STUCK_RECYCLE_S &&
-          Math.abs(offset) > STUCK_RECYCLE_SIGHT_M &&
+          Math.abs(offset) > UNSEEN_M &&
           car.settleFor <= 0
         ) {
           this.removeAt(i);
@@ -2185,7 +2182,7 @@ export class RoadTraffic {
    */
   private pickTrimIndex(): number {
     let best = -1;
-    let bestBehind = this.unwatchedBehindM(OFFSCREEN_TRIM_M);
+    let bestBehind = UNSEEN_M;
     for (let i = 0; i < this.carList.length; i++) {
       const car = this.carList[i]!;
       // A frantic driver behind is on its way to being seen: it was put there to come
@@ -2200,15 +2197,10 @@ export class RoadTraffic {
     return best;
   }
 
-  /** How far behind a car must be before its removal goes unseen; see PLAYER_MOVING_MPS. */
-  private unwatchedBehindM(whileDriving: number): number {
-    return Math.abs(this.playerSpeed) > PLAYER_MOVING_MPS ? whileDriving : SPAWN_MIN_M;
-  }
-
-  /** Farthest car behind the player that is receding from him; see RECYCLE_BEHIND_M. */
+  /** Farthest car past `UNSEEN_M` behind the player that is receding from him. */
   private pickRecycleIndex(): number {
     let best = -1;
-    let bestBehind = this.unwatchedBehindM(RECYCLE_BEHIND_M);
+    let bestBehind = UNSEEN_M;
     for (let i = 0; i < this.carList.length; i++) {
       const car = this.carList[i]!;
       const behind = this.playerS - car.forwardS;

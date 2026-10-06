@@ -107,6 +107,17 @@
 
 ### Changed
 
+- TRAFFIC IS BACK TO ITS OLD SIZE ON THE 800 M ROAD. `TRAFFIC_CAPS` halved to
+  low 4/8, medium 8/16, high 12/24 cars (two-lane/four-lane). The doubling that came
+  with the 800 m reach assumed the cars spread over the whole window, but receding
+  cars behind are recycled, so the budget lives on the road ahead and read as twice
+  the traffic.
+- CLOUD SHADOWS ON EVERY DAY, NOT ONLY AFTER RAIN. The shade band is 0.26..0.66
+  (`CLOUD_EDGE_*`), the band a clearing storm used to lower it to: about 55% of the
+  ground in patches, against 31% before. `uCloudBias` is gone, so the desert no longer
+  goes uniformly bright within a minute as the last storm cloud clears, and the CPU
+  twin (`cloudShadowShadeAt`, read by the heat haze) now agrees with the shader in all
+  weather.
 - DISTANT TRAFFIC RIDES ON RAILS. A traffic car more than 360 m of road from the
   player that is simply cruising or following in its lane is moved along that lane by
   a car-following law (Intelligent Driver Model, the driver's own headway, its pace
@@ -205,6 +216,10 @@
 
 ### Fixed
 
+- TRAFFIC NO LONGER VANISHES IN SIGHT BEHIND THE PLAYER. A density trim, a recycled
+  receding car and a stuck car are all taken out no nearer than `UNSEEN_M` (500 m,
+  the nearest a car is created). They used to go at 90 m, 200 m and 70 m whenever the
+  player was moving. Measured over 150 s on autopilot: 63 removals, the nearest 500 m.
 - THE WHEELS NO LONGER DROP FOR A FRAME EVERY KILOMETRE. The floating origin moved
   between the physics step and the next one, and Rapier rebuilds its scene-query tree
   only inside a step, so for one tick every suspension ray searched the tree in the old

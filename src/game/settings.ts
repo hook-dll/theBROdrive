@@ -301,11 +301,18 @@ export function presentationFpsFor(frameRateLimit: number | null): number | null
  */
 export type CpuLoad = 'low' | 'medium' | 'high';
 
-/** Traffic replenishment ceilings per CPU level: two-lane and four-lane road. */
+/**
+ * Traffic replenishment ceilings per CPU level: two-lane and four-lane road.
+ *
+ * High is the 12/24 the stream had when it lived in 400 m either side of the player.
+ * Doubling it with the 800 m reach was meant to hold the density per metre, but the
+ * cars do not spread over the window: receding cars behind are recycled and the budget
+ * lives on the road ahead, so the doubled count read as twice the traffic.
+ */
 export const TRAFFIC_CAPS: Record<CpuLoad, { readonly narrow: number; readonly wide: number }> = {
-  low: { narrow: 8, wide: 16 },
-  medium: { narrow: 16, wide: 32 },
-  high: { narrow: 24, wide: 48 },
+  low: { narrow: 4, wide: 8 },
+  medium: { narrow: 8, wide: 16 },
+  high: { narrow: 12, wide: 24 },
 };
 
 /**

@@ -207,9 +207,11 @@ console.log('cloud shadow field');
     runM > 120 && runM < 900,
     `mean shaded run ${runM.toFixed(0)} m`,
   );
+  // About half: the band a clearing storm used to lower the field to, now every day's
+  // (see CLOUD_EDGE_LOW). Past two thirds it stops reading as patches and reads as overcast.
   check(
-    'some of the ground is shaded, not most',
-    cover > 0.06 && cover < 0.45,
+    'shade comes in patches, not as an overcast',
+    cover > 0.06 && cover < 0.65,
     `${(cover * 100).toFixed(1)}% in shade`,
   );
   check(
