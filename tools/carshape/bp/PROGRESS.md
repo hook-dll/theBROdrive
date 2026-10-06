@@ -14,11 +14,10 @@ Defects the owner has seen in game must not survive a pass.
 
 - Per car: `tools/carshape/bp/RECIPE.md` (measure off the calibrated side photo, fix
   body, screen, glass, trim in the car file, build, look in the game renderer at every
-  junction, iterate, document). One worker agent per car; the captain reviews its
-  shots and commits per car.
-- Machine limits (`.omp/rules/process-hygiene.md`): at most two workers at once; one
-  game tab in the whole session, guarded by the lock directory `/tmp/carlab.lock`; one
-  shared dev server on port 5199 (started by the captain, never by workers).
+  junction, iterate, document). Done by the main session itself, one car at a time,
+  unhurried (the owner's call, 2026-10-06: no worker agents); committed per car.
+- Machine limits (`.omp/rules/process-hygiene.md`): one game tab, one dev server on
+  port 5199, builds under `nice`, one at a time.
 - Tools: `glassaudit.py` (shipped glass: slivers, folds, notches, closed pillars, all
   cars in 3 s), `sidecal.py` (side photo calibration), `tools/carshape/photosheet.py`
   (metric grid over a calibrated photo), `tools/carshape/overlay.py` (model silhouette
@@ -56,7 +55,7 @@ Stage: `-` not started, `glass` automatic laid-over glass only, `wip` worker on 
 | car | stage | notes |
 |---|---|---|
 | fulvia | done | the reference |
-| valiant | wip | roof runs back like a limousine, shut lines off the pillars, thick A-pillar |
+| valiant | done | side glass, belt, A-pillar (screenWrap), shut lines, trim off the photo; open: back light wrap, bonnet highlights by the cowl |
 | zaz968 | wip | chrome strip over the windows, fat A-pillar, chamfered door glass |
 | bj40 bmw2002 jeep mini moskvich412 niva uaz469 vaz2101 w123 wartburg | glass | body and trim still to do |
 | ae86 c10 capri citroen2cv citroends civic crx dacia | - | triage: all have A defects (capri hatch glass, c10 bed/pillar, crx lamps, 2cv wing) |

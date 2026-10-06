@@ -32,8 +32,11 @@ CAR = {
         # the deck's fin edges and the shoulder crease; the ends' faces are faired with
         # their corners kept (the boot lid's rear edge, the nose's brow).
         'edgeMin': 0.015,
-        'edgeY': 0.035,
-        'edgeYMin': 0.035,
+        # 2 cm along the car (3.5 before): with the screen wrapped round, the blur along
+        # the car is what rolls the A-pillar's corner; at 3.5 cm the side glass behind it
+        # lay on a 6 cm roll (GLASS-FAIL bend at the vent's front edge).
+        'edgeY': 0.02,
+        'edgeYMin': 0.02,
         'faceSpacing': 0.15, 'cornerDeg': 20,
         # Photos front/front34: a narrow brow directly over the lamp bezels. The side
         # drawing puts the nose at 1.0 m, inconsistent with its front view and the photos;
@@ -42,11 +45,34 @@ CAR = {
         'topCross': [
             {'y': -2.30, 'z': [[0.0, 0.80], [0.50, 0.80], [0.78, 0.82], [0.86, 0.81], [0.89, 0.77]]},
             {'y': -2.10, 'z': [[0.0, 0.83], [0.50, 0.83], [0.78, 0.85], [0.86, 0.84], [0.89, 0.80]]},
-            {'y': -0.85, 'z': [[0.0, 1.03], [0.50, 1.035], [0.78, 1.05], [0.86, 1.04], [0.89, 0.99]]},
+            # At the screen's foot the wings come down to the belt (the photographs: the
+            # wing's top runs straight into the belt chrome, the bonnet's middle stands
+            # above it to the cowl at 1.0); the wings at 1.05 here made a lump either side
+            # of the cowl and a hump at the A-pillar's foot.
+            {'y': -0.85, 'z': [[0.0, 1.03], [0.40, 1.025], [0.60, 1.0], [0.70, 0.98], [0.78, 0.97], [0.86, 0.96], [0.89, 0.93]]},
         ],
         'cabin': [-0.83, 1.43],
-        'belt': [[-0.83, 1.03], [-0.5, 1.02], [0.7, 1.02], [1.43, 1.03]],
-        'glassPlan': [[-0.83, 0.76], [-0.4, 0.81], [0.8, 0.81], [1.43, 0.76]],
+        # The belt off the side photograph (198.5 px/m by its own wheelbase): the belt
+        # chrome's top at z 0.915 the length of the doors, the glass from 0.93. The file
+        # had 1.02-1.03 (0.99 after the drawing's height scaling at the end): the whole
+        # glasshouse stood 6 cm high, the side glass a strip under the roof. Values in this
+        # file are the drawing's heights (x 1.031 over the photo's), see scale_above.
+        'belt': [[-0.83, 0.95], [-0.5, 0.943], [0.7, 0.943], [1.43, 0.95]],
+        # The cowl (1.0 at the screen's foot) drops to the belt right at the A-pillar's
+        # foot (y -0.76 in the photograph), not over the default 20 cm behind it: that
+        # ramp ran under the vent window's front corner as a hump (GLASS-FAIL bend).
+        'beltBlend': 0.06,
+        # Full width to the cabin's start: the screen's wrap brings its sides in.
+        'glassPlan': [[-0.83, 0.81], [0.8, 0.81], [1.43, 0.76]],
+        # The screen wraps round to its A-pillars (the photographs: a thin chrome pillar,
+        # the screen's glass seen from the side for 6 cm ahead of it). Built square, the
+        # shell's corner between the screen and the side glass was a 17 cm painted band
+        # along the car at z 1.05. The side photograph's pillar line runs from y -0.756
+        # at z 0.92 to -0.413 at 1.24; the screen's middle is at -0.77 / -0.56 there, so
+        # the sides stand 0.18 behind the middle at the foot and 0.15 at the header.
+        'screenWrap': {'across': [[0.0, 0.0], [0.2, 0.06], [0.4, 0.25], [0.55, 0.47], [0.65, 0.67], [0.72, 0.85],
+                                  [0.78, 1.0]],
+                       'foot': [1.0, 0.18], 'head': [1.30, 0.14], 'until': 0.0},
         'crown': [[-2.4, 0.02], [2.4, 0.02]],
         'roofCrown': 0.018,
         'roofHalf': 0.62,
@@ -55,11 +81,40 @@ CAR = {
     },
     'parts': {
         'glassOverlay': True,
+        'glassFit': False,
+        # The side glass off the side photograph, the chrome frames' outer edges (heights
+        # x 1.031, the drawing's scale): the foot at 0.93 (0.959 here), the header 1.305
+        # (1.345). Front: a vent window from the A-pillar's curve (y -0.756 at the belt,
+        # -0.574 at 1.07, -0.413 at 1.24) to its slanted divider (-0.44 at the foot, -0.395
+        # where it meets the pillar), then the door glass to the B-pillar. The B-pillar is
+        # 5 cm of chrome (0.146-0.196): two 1.6 cm frames and 1.3 cm between. Rear door:
+        # the drop glass to a vertical bar at 0.676 and a fixed quarter pane behind it to
+        # the slanted rear edge (0.958 at the foot, 0.668 at the top). The file's two
+        # boxes stopped 14 cm short of the A-pillar and 30 cm short of the rear edge: the
+        # thick A-pillar and the blank rear quarter.
         'glass': [
-            {'view': 'side', 'outline': [[0.04, 1.025], [-0.605, 1.025], [-0.444, 1.33], [0.04, 1.33]], 'facingMin': 0.3},
-            {'view': 'side', 'outline': [[0.606, 1.025], [0.101, 1.025], [0.101, 1.33], [0.606, 1.33]], 'facingMin': 0.3},
-            {'view': 'front', 'outline': [[0.0, 1.36], [0.55, 1.35], [0.66, 1.28], [0.72, 1.08], [0.68, 1.06], [0.0, 1.06]],
-             'depthRange': [-0.84, -0.3], 'facingMin': 0.2},
+            {'view': 'side', 'outline': [[-0.452, 0.959], [-0.70, 0.959], [-0.612, 1.021], [-0.532, 1.102], [-0.452, 1.196],
+                                         [-0.405, 1.263]], 'seal': 0.014},
+            {'view': 'side', 'outline': [[-0.428, 0.959], [0.165, 0.959], [0.165, 1.345], [-0.29, 1.345], [-0.35, 1.330],
+                                         [-0.385, 1.294], [-0.393, 1.253]], 'seal': 0.016},
+            {'view': 'side', 'outline': [[0.178, 0.952], [0.668, 0.952], [0.668, 1.345], [0.178, 1.345]], 'seal': 0.016},
+            {'view': 'side', 'outline': [[0.684, 0.952], [0.958, 0.952], [0.807, 1.146], [0.70, 1.31], [0.684, 1.325]],
+             'seal': 0.014},
+            # The screen in plan, generated off the wrapped shell (screengen.py valiant 1.04
+            # 1.31 with the photo's pillar line): its foot where it rises through 1.04 over
+            # the cowl, header 1.31 (4.5 cm under the roof), sides 7 mm ahead of the pillar.
+            {'view': 'top', 'outline': [[-0.7936, 0.0], [-0.7933, 0.05], [-0.7919, 0.1], [-0.7894, 0.15], [-0.7858, 0.2],
+                                        [-0.7808, 0.25], [-0.7722, 0.3], [-0.7613, 0.35], [-0.7493, 0.4], [-0.7368, 0.45],
+                                        [-0.7221, 0.5], [-0.7056, 0.55], [-0.6871, 0.6], [-0.6658, 0.65], [-0.6414, 0.7],
+                                        [-0.6255, 0.7291], [-0.618, 0.7393], [-0.6083, 0.7465], [-0.5964, 0.7508],
+                                        [-0.5864, 0.7528], [-0.562, 0.7531], [-0.5387, 0.7478], [-0.5155, 0.7412],
+                                        [-0.4922, 0.7327], [-0.469, 0.7253], [-0.4457, 0.7179], [-0.4225, 0.7089],
+                                        [-0.4034, 0.6929], [-0.3955, 0.6785], [-0.3899, 0.6639], [-0.3864, 0.649],
+                                        [-0.3852, 0.634], [-0.3862, 0.6187], [-0.3894, 0.6032], [-0.3948, 0.5875],
+                                        [-0.407, 0.55], [-0.421, 0.5], [-0.433, 0.45], [-0.444, 0.4], [-0.454, 0.35],
+                                        [-0.4629, 0.3], [-0.4705, 0.25], [-0.4757, 0.2], [-0.4791, 0.15], [-0.482, 0.1],
+                                        [-0.4834, 0.05], [-0.4839, 0.0]],
+             'depthRange': [0.99, 1.35]},
             {'view': 'rear', 'outline': [[0.0, 1.36], [0.55, 1.35], [0.66, 1.28], [0.72, 1.06], [0.68, 1.04], [0.0, 1.04]],
              'depthRange': [0.9, 1.6], 'facingMin': 0.15},
         ],
@@ -111,18 +166,25 @@ CAR = {
             # The feature line from the nose along the flank.
             {'view': 'side', 'points': [[-2.12, 0.84], [-1.6, 0.86], [-0.9, 0.88], [0.6, 0.88], [1.6, 0.87], [2.30, 0.85]],
              'width': 0.008, 'material': 'chrome', 'height': 0.003},
-            {'view': 'side', 'points': [[-0.85, 1.02], [-0.87, 0.36], [0.10, 0.34], [0.10, 1.02]], 'width': 0.005},
-            {'view': 'side', 'points': [[0.10, 0.34], [0.90, 0.34], [0.92, 1.02]], 'width': 0.005},
-            {'view': 'side', 'points': [[-0.62, 1.02], [-0.45, 1.34], [0.62, 1.34], [0.62, 1.02]], 'width': 0.012, 'material': 'chrome',
-             'height': 0.003},
-            {'view': 'side', 'points': [[-1.8, 0.36], [1.5, 0.36]], 'width': 0.012, 'material': 'chrome', 'height': 0.003},
+            # Shut lines off the photograph: the doors' bottom at 0.30 (0.31 here), the
+            # split at the B-pillar's middle 0.171 (the file had 0.10, 7 cm ahead of the
+            # pillar), the rear door's edge curving up to the quarter glass's foot.
+            {'view': 'side', 'points': [[-0.86, 0.943], [-0.875, 0.40], [-0.86, 0.33], [-0.83, 0.31], [0.171, 0.31],
+                                        [0.171, 0.943]], 'width': 0.005},
+            {'view': 'side', 'points': [[0.171, 0.31], [0.86, 0.31], [0.89, 0.33], [0.90, 0.40], [0.925, 0.70], [0.958, 0.943]],
+             'width': 0.005, 'keep': True},
+            # The bright moulding along the doors (z 0.47, 0.485 here), from the front door's
+            # edge to the rear door's, and the spear along the rear wing to the tail.
+            {'view': 'side', 'points': [[-1.10, 0.485], [0.89, 0.485]], 'width': 0.012, 'material': 'chrome', 'height': 0.003},
+            {'view': 'side', 'points': [[1.75, 0.464], [2.30, 0.464]], 'width': 0.012, 'material': 'chrome', 'height': 0.003},
         ],
         'bumpers': {
-            'front': {'z': [0.40, 0.51], 'depth': 0.06, 'wrap': 0.30, 'profile': 'blade', 'standOff': -0.03},
-            'rear': {'z': [0.40, 0.51], 'depth': 0.06, 'wrap': 0.30, 'profile': 'blade', 'standOff': -0.03},
+            'front': {'z': [0.40, 0.51], 'depth': 0.06, 'wrap': 0.30, 'profile': 'blade'},
+            'rear': {'z': [0.40, 0.51], 'depth': 0.06, 'wrap': 0.30, 'profile': 'blade'},
         },
-        'mirror': {'y': -0.72, 'z': 1.07, 'reach': 0.98, 'w': 0.11, 'h': 0.07, 'material': 'chrome', 'shape': 'round', 'sides': [1]},
-        'handles': {'at': [[-0.02, 0.92], [0.80, 0.92]], 'w': 0.12},
+        'mirror': {'y': -0.72, 'z': 1.07, 'reach': 0.95, 'w': 0.11, 'h': 0.07, 'material': 'chrome', 'shape': 'round', 'sides': [1]},
+        # Handles off the photograph: z 0.806 (0.83 here), y 0.02 and 0.84.
+        'handles': {'at': [[0.02, 0.83], [0.84, 0.83]], 'w': 0.12},
         'wipers': {'arms': [[-0.6, -0.05, -0.86, 1.06], [0.05, 0.6, -0.86, 1.06]]},
         'wheel': {'style': 'hubcap', 'rimFactor': 0.62, 'cap': 0.70},
     },

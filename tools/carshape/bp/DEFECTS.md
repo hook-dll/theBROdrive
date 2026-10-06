@@ -496,3 +496,26 @@ Still open: near the roof the C-pillar is 1-1.5 cm narrower than the photograph'
 shell's rake runs 2-3 cm forward of the photograph's there; the quarter light's rear
 edge was moved 1.5 cm forward to keep most of it); the round mirror head is a short
 cylinder where the car's is a shallow dome (shared by 19 cars' `shape: 'round'`).
+
+## 2026-10-06: Valiant to the Fulvia standard
+
+Measured off `_refs/photos/valiant/side.jpg` (198.5 px/m by its wheelbase; `sidecmp.py`
+shows photo, model and outline at one scale). The roof and silhouette were right; the
+"limousine roof" the triage reported was the glazing.
+- **Side glass 14 cm short of the A-pillar and 30 cm short of the rear edge**, the
+  whole glasshouse 6 cm high (belt 0.99 against the photograph's 0.915). Belt lowered;
+  vent, door glass, rear drop glass and fixed quarter pane traced off the photo with a
+  5 cm chrome B-pillar; door split moved 7 cm back to the B-pillar's middle; door
+  bottom, bright moulding (0.47, it was drawn at 0.35), rear-wing spear, handles.
+- **A 17 cm painted band at the A-pillar**: the screen was square to the side wall.
+  `screenWrap` put the corner on the photograph's pillar line (checked by side rays:
+  the turn's middle within 1 cm of the line, z 1.0-1.2); the screen generated off the
+  shell (`screengen.py`). The corner still rolled over 6 cm with `edgeY` 3.5 cm, so the
+  vent glass lay on it (GLASS-FAIL bend): `edgeY` 2 cm makes the turn 2 cm, the vent's
+  front edge on the clean wall just behind it.
+- `beltBlend` 0.06: the cowl drops to the belt at the pillar's foot, not 20 cm behind
+  it; the `topCross` wings at the screen's foot at the belt, not 5 cm above the cowl.
+- Dead `standOff` bumper keys removed. 0 GLASS-FAIL, dims `OFF []`.
+Open: the back light's wrap (seen edge-on from the side in the photograph) is not
+modelled; the bonnet shows diagonal highlights by the cowl; the exhaust shows below
+the sill in a straight side view.

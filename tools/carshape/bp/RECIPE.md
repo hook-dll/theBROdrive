@@ -13,9 +13,15 @@ The standard: the body and every detail are measured off the real car's photogra
 1. Metric grid over the side photo: `build/pyenv/bin/python tools/carshape/photosheet.py side build/carshape/_refs/photos/<car>/side.jpg /tmp/<car>-grid.png build/carshape/<car>/spec.json uF vF uR vR` (values from calib.json). Read lines off it in the car's metres (y along, nose -y; z up from ground). Zoom with PIL crops; do not guess sub-pixel things you cannot see.
 2. Silhouette: `/Applications/Blender.app/Contents/MacOS/Blender --background --factory-startup --python tools/carshape/overlay.py -- public/models/carshape/<car>.glb build/carshape/<car>/spec.json build/carshape/_refs/photos/<car>/side.jpg /tmp/<car>-ov.png uF vF uR vR` draws the model's outline (magenta) and glass (blue tint) over the photo. Where the line leaves the car, the body is wrong there.
 
+3a. Side by side: `build/pyenv/bin/python tools/carshape/bp/sidecmp.py <car>` writes
+   `build/carshape/_audit/cmp/<car>.jpg`: photo, shaded model and outline at one scale,
+   axles aligned. Compare window heads/feet, pillars, shut lines, row against row.
+   Heights in a car file that ends with `scale_above(...)` are the drawing's: multiply
+   the photo's z by top_from/top_to (Valiant 1.031); top-view outlines are not scaled.
+
 ## Fix (car file first; generator only for a fault that is clearly general, and then say so)
 3. Body: top line (`topOverride`), belt, sill, nose/tail (`bodyEnds`, `face`), arches, roof width and drip rail, shoulder section (`sectionKeys` with a crisp ledge where the car has one: see Fulvia). Target: the overlay's outline on the photo's within ~1.5 cm along roof, screen, bonnet, deck, nose, tail, arches.
-4. Screen: a wrap-round screen gets `screenWrap` so the A-pillar sits on the photo's pillar line; a flat screen gets its outline to the pillar.
+4. Screen: a wrap-round screen gets `screenWrap` (hull) so the shell's corner sits on the photo's pillar line (check: side rays, normal x crossing 0.5 within 1 cm of the line); then `tools/carshape/bp/screengen.py <car> <foot z> <head z> <pillar z:y,...>` prints the screen outline in plan. If the side glass behind the pillar bends (GLASS-FAIL), the corner is too round: lower `edgeY` (2 cm) and put the side glass's front edge where the wall is clean (normal x > 0.9). A flat screen gets its outline to the pillar.
 5. Glass: `'glassOverlay': True, 'glassFit': False` in parts; every pane outline measured off the photo (pillar lines 5-7 mm inside the paint, frame tops, belt chrome, dividers, quarter lights), seal widths as the photo's chrome/rubber. Screens and back lights in plan or end view from the end photos/drawing. Must give 0 `GLASS-FAIL`; read the GLASS/PILLAR lines.
 6. Trim the shots show wrong: shut lines traced off the photo (`'keep': True` on traced curves), mirror where the photo has it, handles, lamps/grille, wipers.
 
