@@ -34,8 +34,13 @@ const VISUAL_RADIUS = 6;
  * behind): measured in a browser trace as every stutter of a 60 fps drive. This band
  * is now only the floor that is repaired on the spot when it is ever found without
  * physics — after a return from the open desert, or a teleport.
+ *
+ * Four, not two: ambient traffic lives inside `PHYSICS_REACH_M`, and 400 m of it
+ * either side was too short a stretch of road to look down. On the road this costs
+ * nothing (every chunk out to VISUAL_RADIUS is physical already); the price is a
+ * larger synchronous repair after a teleport or a return from the desert.
  */
-const PHYSICS_RADIUS = 2;
+const PHYSICS_RADIUS = 4;
 /**
  * Road arclength either side of the player that is GUARANTEED to carry collision.
  *

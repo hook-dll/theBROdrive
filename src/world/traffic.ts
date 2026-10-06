@@ -34,8 +34,9 @@ import type { RoadConditionBuffer } from './gradient';
  * thirty. That asked the player a question about a number they had no way to judge — the
  * honest answer is a property of the road, and the road already knows it.
  */
-const NARROW_TRAFFIC = 12;
-const WIDE_TRAFFIC = 24;
+// Doubled with PHYSICS_REACH_M (400 -> 800 m) so the density per metre holds.
+const NARROW_TRAFFIC = 24;
+const WIDE_TRAFFIC = 48;
 /**
  * The smallest target fraction of the cap, so a long drive keeps changing.
  * The target is a single draw in `[DENSITY_FLOOR * cap, cap]`, re-rolled
@@ -1458,10 +1459,9 @@ export class RoadTraffic {
         // so it under-samples near 0 and over-samples near 1. A flat draw put half its
         // mass inside the first 130 m of this 260 m band, so the median spawn sat
         // close enough that "a car appears" was a distinct, watched event rather than
-        // something resolving out of the fog. SPAWN_MAX_M cannot move — it is exactly
-        // PHYSICS_REACH_M, the edge of the road's own collision support, past which
-        // `hasSpawnGround` has nothing to raycast against — so this reshapes the same
-        // band instead of widening it.
+        // something resolving out of the fog. SPAWN_MAX_M is exactly PHYSICS_REACH_M,
+        // the edge of the road's guaranteed collision support, past which
+        // `hasSpawnGround` has nothing to raycast against.
         : SPAWN_MIN_M + Math.sqrt(this.random()) * (SPAWN_MAX_M - SPAWN_MIN_M);
       const s = this.playerS + distance;
       if (s < END_MARGIN_M || s > this.road.length - END_MARGIN_M) continue;
