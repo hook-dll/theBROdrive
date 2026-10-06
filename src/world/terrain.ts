@@ -3,6 +3,7 @@ import { LakeBasins } from './lakes';
 import { corridorBatterAt, outcropBeltAt } from './corridorshape';
 import { SurfaceType } from '../core/surfaces';
 import { ROAD_HALF_WIDTH, ROAD_MAX_HALF_WIDTH, type Road } from './road';
+import { RoadDistance } from './roaddistance';
 import { SurfaceField, roadSurfaceY } from './roadsurface';
 import { onTerminusPad, terminusWeight } from './terminus';
 
@@ -283,6 +284,13 @@ const BERM_RAGGED_WAVELENGTH = 900;
  */
 const MOUNTAIN_START = 2500;
 const MOUNTAIN_RAMP = 7000;
+/**
+ * Lattice spacing of the road-distance query that gates the mountains. Coarse because the
+ * ramp it feeds is seven kilometres long and the whole vista disc must stay a few
+ * thousand nodes. Bilinear error stays under half a cell diagonal (566 m), so nothing
+ * inside 1.9 km of the road ever gets a mountain; the berm ends at 1.1 km.
+ */
+const MOUNTAIN_DIST_LATTICE = 800;
 
 function smoothstep01(t: number): number {
   const c = t < 0 ? 0 : t > 1 ? 1 : t;
@@ -343,6 +351,8 @@ export class Terrain {
 
   /** Lake basins dug into this terrain, and the schedule they come from. */
   readonly basins: LakeBasins;
+  /** Whole-road distance for the mountain gate; built on first vista sample. */
+  private mountainDistance: RoadDistance | null = null;
 
   /** Strength of the rock-outcrop field at a point, used for both height and material. */
   private outcropAt(x: number, z: number): number {
@@ -545,8 +555,8 @@ export class Terrain {
 
   /**
    * Open-desert height without wheel-scale detail. This is now the driveable field:
-   * no berm and no road-distance mountain wall. Horizon mountains are applied only
-   * by `horizonHeight`, in the camera-centred vista where they remain unreachable.
+   * no berm and no mountains. Horizon mountains are applied only by `horizonHeight`,
+   * in the vista, kilometres outside anything the car can reach.
    */
   openBase(x: number, z: number, dist: number, s: number): number {
     const open = this.undugOpen(x, z, dist, s);
@@ -692,31 +702,31 @@ export class Terrain {
     return this.baseFromFrame(x, z, lateral, s) + this.detailAt(x, z, Math.abs(lateral), s);
   }
 
-  /** Mountain contribution actually drawn at a camera-relative vista distance. */
-  private horizonMountainHeight(x: number, z: number, distanceFromCamera: number): number {
-    if (distanceFromCamera <= MOUNTAIN_START) return 0;
-    return (
-      this.road.landscape.mountainAt(x, z) *
-      smoothstep01((distanceFromCamera - MOUNTAIN_START) / MOUNTAIN_RAMP)
-    );
+  /**
+   * Mountain contribution at a world point: ramped in by distance from the nearest pass
+   * of the road, so a range stands at a fixed place on the map. It used to ramp by
+   * distance from the CAMERA, which lifted the ground in every direction toward ~9 km and
+   * drew one continuous rim around the player that receded as he drove at it.
+   */
+  private horizonMountainHeight(x: number, z: number): number {
+    const mountain = this.road.landscape.mountainAt(x, z);
+    if (mountain <= 0) return 0;
+    this.mountainDistance ??= new RoadDistance(this.road);
+    const dist = this.mountainDistance.distAt(x, z, MOUNTAIN_DIST_LATTICE);
+    if (dist <= MOUNTAIN_START) return 0;
+    return mountain * smoothstep01((dist - MOUNTAIN_START) / MOUNTAIN_RAMP);
   }
 
   /**
-   * Camera-centred horizon height. `distanceFromCamera` rather than distance from
-   * the road makes mountain ranges permanent horizon scenery. `reliefWeight` is a
-   * continuous vista fade; a boolean cutoff would turn a tall dune into a ring cliff.
+   * Distant vista height. `reliefWeight` is a continuous camera-distance fade of the
+   * dunes; a boolean cutoff would turn a tall dune into a ring cliff.
    */
-  horizonHeight(
-    x: number,
-    z: number,
-    distanceFromCamera: number,
-    reliefWeight: number,
-  ): number {
+  horizonHeight(x: number, z: number, reliefWeight: number): number {
     let h = this.road.landscape.heightAt(x, z);
     if (reliefWeight > 0) {
       h += this.relief(x, z, RELIEF_FULL, ROAD_MAX_HALF_WIDTH) * Math.min(1, reliefWeight);
     }
-    h += this.horizonMountainHeight(x, z, distanceFromCamera);
+    h += this.horizonMountainHeight(x, z);
     return h;
   }
 

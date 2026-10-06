@@ -107,6 +107,15 @@
 
 ### Changed
 
+- THE MOUNTAINS STAND ON THE MAP, NOT AROUND THE CAMERA. `Terrain.horizonHeight` ramped
+  the mountain field in by distance from the camera, so in every direction the ground
+  climbed to a crest at 7-10 km: one sand-coloured rim around the player, receding as he
+  drove at it, with the mesas usually below it. The ramp now reads distance from the
+  nearest pass of the road (`RoadDistance`, 800 m lattice; still 2.5 km start, 7 km
+  ramp), and `MOUNTAIN_THRESHOLD` rises from 0.15 to 0.5 (mountain cover 70% to 57% of
+  the world). Skyline over 200 km of road, 32 bearings, 25 km horizon: median 6.2° to
+  3.8°, bearings under 3° from 23% to 41%. Vista cell load 23 to 25 ms in its worker.
+
 - THE ROAD NO LONGER GETS WORSE THE FURTHER YOU DRIVE. Wear is no longer a 300 km
   regional envelope with a maintained opening: the road is cut into 3-5 km wear bands
   that alternate fresh, lightly worn, middling, worn and abandoned (22/24/24/18/12%),

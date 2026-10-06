@@ -24,7 +24,8 @@ import type {
  * scheduling delay cannot expose sky between the two terrain systems. A second, much
  * smaller mesh places sparse sedimentary mesas through the middle distance.
  *
- * Mountains rise with distance. Mesas keep a stable world position, then dissolve
+ * Mountain ranges stand at fixed world positions, kilometres off the road. Mesas keep a
+ * stable world position too, then dissolve
  * irreversibly before the player reaches them. The horizon is a spatial interpolation
  * of fixed world samples, never a timed animation.
  */
@@ -1037,7 +1038,7 @@ export class VistaMesh {
         const vi = i * 3;
         const absoluteX = cx + this.groundLocalPositions[vi]! + ox;
         const absoluteZ = cz + this.groundLocalPositions[vi + 2]! + oz;
-        horizon[i] = this.terrain.horizonHeight(absoluteX, absoluteZ, radius, reliefWeight);
+        horizon[i] = this.terrain.horizonHeight(absoluteX, absoluteZ, reliefWeight);
         base[i] = this.terrain.baseHeight(absoluteX, absoluteZ, radius);
       }
     }

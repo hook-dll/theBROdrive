@@ -311,8 +311,15 @@ const MOUNTAIN_BANDS: readonly { readonly amplitude: number; readonly wavelength
   /** Spurs and saddles, so a range is not one smooth mound. */
   { amplitude: 340, wavelength: 5000 },
 ];
-/** Field value below which there is no mountain at all. Fraction of the band's range. */
-const MOUNTAIN_THRESHOLD = 0.15;
+/**
+ * Field value below which there is no mountain at all. Fraction of the band's range.
+ *
+ * 0.5 rather than 0.15: measured over a 400 km square, mountains (any height) cover 70%
+ * of the world at 0.15 and 57% at 0.5. Higher still thins them further (38% at
+ * 0.85) but squeezes each range's whole rise into the last sliver of the field, so the
+ * feet turn into walls and the tops into flat plateaus.
+ */
+const MOUNTAIN_THRESHOLD = 0.5;
 
 /** Tallest the mountain field can reach, metres. */
 export const MAX_MOUNTAIN = MOUNTAIN_BANDS.reduce((sum, b) => sum + b.amplitude, 0);

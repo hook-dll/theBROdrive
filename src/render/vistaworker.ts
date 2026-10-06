@@ -123,7 +123,7 @@ scope.onmessage = (event: MessageEvent<VistaWorkerRequest>) => {
       const vi = i * 3;
       const absoluteX = request.cornerX + positions[vi]! + request.originX;
       const absoluteZ = request.cornerZ + positions[vi + 2]! + request.originZ;
-      horizon[i] = terrain.horizonHeight(absoluteX, absoluteZ, radius, reliefWeight);
+      horizon[i] = terrain.horizonHeight(absoluteX, absoluteZ, reliefWeight);
       base[i] = terrain.baseHeight(absoluteX, absoluteZ, radius);
     }
   }
