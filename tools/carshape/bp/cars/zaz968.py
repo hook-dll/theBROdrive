@@ -1,6 +1,9 @@
 # ZAZ-968M Zaporozhets (1979-94). Factory: 3765 x 1490 x 1370, wheelbase 2160, overhangs
 # 720/890, tracks 1228/1212, 155 R13, clearance 175. The factory drawing reprinted at
 # 3dcar.ru/blueprints/zaz/zaz_968m (with its dimension lines).
+import os as _os, sys as _sys  # noqa: E402
+_sys.path.insert(0, _os.path.dirname(__file__))
+from _frame import rounded  # noqa: E402
 CAR = {
     'id': 'zaz968',
     'label': 'ZAZ-968M',
@@ -21,14 +24,21 @@ CAR = {
         # behind the rear wheel against the nose's 0.42-0.78). The drawn outline let
         # the deck sag and the lower edge rise to 0.46, so the tail read thinner than
         # the nose.
-        'topOverride': [[0.75, 1.37], [0.85, 1.33], [1.06, 0.90], [1.3, 0.875], [1.6, 0.872], [1.80, 0.868], [1.87, 0.84]],
+        # The roof rolls over into the back light in one curve (rear photograph: a thin
+        # rounded roof edge over the glass). With the 2 cm blur the old knee at (0.85,
+        # 1.33) stood as a ridge across the roof over the back light.
+        'topOverride': [[0.72, 1.37], [0.79, 1.362], [0.84, 1.335], [0.88, 1.27], [1.06, 0.90], [1.3, 0.875],
+                        [1.6, 0.872], [1.80, 0.868], [1.87, 0.84]],
         'sill': [[-1.9, 0.42], [-1.65, 0.38], [-1.4, 0.30], [0.75, 0.30], [1.0, 0.31], [1.30, 0.34], [1.5, 0.33], [1.9, 0.33]],
         'cabin': [-0.83, 1.06],
         # The belt off the side photograph (265.8 px/m by its wheelbase): the door glass's
         # chrome frame and the quarter light's rubber both start at 0.86; the drawing's
         # 0.89 stood above the glass's own foot.
-        'belt': [[-0.83, 0.85], [-0.5, 0.845], [0.85, 0.845], [1.06, 0.85]],
-        'glassPlan': [[-0.83, 0.58], [-0.5, 0.64], [0.75, 0.64], [1.06, 0.58]],
+        'belt': [[-0.83, 0.84], [-0.5, 0.835], [0.85, 0.835], [1.06, 0.84]],
+        # Full width to the cabin's start: narrowing from 0.64 to 0.58 ahead of y -0.5
+        # twisted the glasshouse's side under the vent window, so the door frame's
+        # straight front edge bent into an S in 3/4 views.
+        'glassPlan': [[-0.83, 0.64], [0.75, 0.64], [1.06, 0.58]],
         'crown': [[-2.0, 0.015], [2.0, 0.015]],
         'roofCrown': 0.022,
         # Crisp folds (the R4/R5 pattern): the 2.2 cm across / 6 cm along default blur
@@ -38,8 +48,11 @@ CAR = {
         # them and still leaves the drawn nose/tail their reach.
         'edge': 0.011,
         'edgeMin': 0.013,
-        'edgeY': 0.050,
-        'edgeYMin': 0.050,
+        # 2 cm along the car (5 before): the 5 cm blur rolled the glasshouse's rear
+        # corners into bulbous C-pillars round a back light that could not reach out to
+        # the photograph's width (the user's screenshot, 2026-10-06).
+        'edgeY': 0.020,
+        'edgeYMin': 0.020,
         'faceSpacing': 0.15, 'cornerDeg': 20,
         # 155 R13 wheels of 0.29 m radius in an arch of the drawing's 0.32 (the photo
         # shows a hand's width of gap round the tyre); centred on the axle, not lifted,
@@ -52,6 +65,17 @@ CAR = {
         # face by the blur's own pull-back, so the shell meets the bar at the factory
         # end (stand 0.086 -> ~0.01).
         'face': {'rear': [[0.26, 1.67], [0.34, 1.81], [0.42, 1.88], [0.52, 1.90]]},
+        # The cabin's section: the body below the belt as the end views give it, but the
+        # glasshouse's side one straight lean from the belt (0.66 at 0.88) to the roof's
+        # roll (0.47 at 1.30). The end views' own section bent at 1.0 (45 degrees below,
+        # 15 above) right across the side glass, so the door's straight vent divider and
+        # frames read as S-curves in 3/4 views (the user's screenshot, 2026-10-06).
+        'sectionKeys': [{'y': [-0.83, 1.06], 'blend': 0.12,
+                         'half': [[0.30, 0.713], [0.36, 0.734], [0.72, 0.734], [0.78, 0.728], [0.81, 0.712], [0.835, 0.685],
+                                  [0.85, 0.662], [1.30, 0.47], [1.33, 0.43], [1.355, 0.30], [1.37, 0.10]]}],
+        # The glasshouse's fillet into the body 1.5 cm (3 by default): the glass's foot
+        # (0.863) sat on the 3 cm fillet's bend (GLASS-FAIL).
+        'glassFillet': 0.015,
     },
     'parts': {
         # The engine sits in its bay, nothing hangs below the tail: with the underbody
@@ -71,20 +95,23 @@ CAR = {
         # pillar with the vent's foot chamfered off, and the quarter light 6 cm short
         # at both ends.
         'glass': [
-            {'view': 'side', 'outline': [[-0.371, 0.863], [-0.60, 0.863], [-0.622, 0.872], [-0.632, 0.895], [-0.631, 0.936],
-                                         [-0.52, 1.08], [-0.412, 1.227], [-0.395, 1.237], [-0.371, 1.237]],
+            {'view': 'side', 'outline': rounded([[-0.371, 0.863], [-0.628, 0.863], [-0.631, 0.936], [-0.412, 1.227],
+                                                 [-0.371, 1.237]], 0.02, corners=[1, 3]),
              'seal': 0.009, 'sealMaterial': 'chrome'},
-            {'view': 'side', 'outline': [[-0.358, 0.863], [0.125, 0.863], [0.14, 0.878], [0.14, 1.222], [0.125, 1.237],
-                                         [-0.358, 1.237]], 'seal': 0.009, 'sealMaterial': 'chrome'},
-            {'view': 'side', 'outline': [[0.179, 0.89], [0.19, 0.868], [0.215, 0.86], [0.86, 0.86], [0.895, 0.868],
-                                         [0.912, 0.895], [0.915, 0.92], [0.784, 1.237], [0.765, 1.256], [0.733, 1.262],
-                                         [0.215, 1.262], [0.19, 1.255], [0.179, 1.23]], 'seal': 0.012},
-            # Screen and back light on their clean faces (front/rear rays on the shell:
-            # facing over 0.6 from 0.92 to 1.28, out to x 0.50-0.53 and 0.46-0.47).
-            {'view': 'front', 'outline': [[0.0, 1.27], [0.42, 1.265], [0.46, 1.24], [0.50, 1.13], [0.52, 1.0], [0.53, 0.95],
-                                          [0.51, 0.925], [0.0, 0.925]], 'depthRange': [-0.9, -0.3]},
-            {'view': 'rear', 'outline': [[0.0, 1.27], [0.38, 1.265], [0.43, 1.24], [0.46, 1.15], [0.47, 1.0], [0.46, 0.95],
-                                         [0.43, 0.93], [0.0, 0.93]], 'depthRange': [0.7, 1.2]},
+            {'view': 'side', 'outline': rounded([[-0.358, 0.863], [0.14, 0.863], [0.14, 1.237], [-0.358, 1.237]], 0.02,
+                                                corners=[1, 2]), 'seal': 0.009, 'sealMaterial': 'chrome'},
+            # (the rear edge the photograph's slant: 0.915 at 0.92, 0.784 at 1.237;
+            # corners of 3.5 cm radius as photographed, not typed-in chamfers)
+            {'view': 'side', 'outline': rounded([[0.179, 0.86], [0.93, 0.86], [0.775, 1.262], [0.179, 1.262]], 0.035),
+             'seal': 0.010},
+            # Screen and back light on their clean faces (front/rear rays on the shell after
+            # the 2 cm blur: the back light's face clean out to x 0.52 at 1.0, 0.50 at
+            # 1.1-1.2, 0.47 at 1.26; the rear photograph's back light is 1.05 m wide at its
+            # foot with 7 cm round corners). The old outlines were typed-in octagons.
+            {'view': 'front', 'outline': rounded([[0.0, 1.27], [0.47, 1.27], [0.53, 0.93], [0.0, 0.93]], 0.06,
+                                                 corners=[1, 2]), 'depthRange': [-0.9, -0.3]},
+            {'view': 'rear', 'outline': rounded([[0.0, 1.285], [0.45, 1.285], [0.52, 0.955], [0.0, 0.955]], 0.07,
+                                                corners=[1, 2]), 'depthRange': [0.7, 1.2]},
         ],
         'decals': [
             {'view': 'front', 'node': 'headlights', 'circle': [[0.59, 0.62], 0.09], 'material': 'Headlights',
@@ -165,7 +192,7 @@ CAR = {
         'glassSeal': {'material': 'rubber', 'width': 0.012},
         # A black mirror on the door below the vent glass's foot (side photograph: its
         # base at y -0.665, z 0.82-0.88), not a bright one.
-        'mirror': {'y': -0.665, 'z': 0.92, 'reach': 0.82, 'w': 0.13, 'h': 0.08, 'material': 'trim', 'sides': [1]},
+        'mirror': {'y': -0.665, 'z': 0.92, 'reach': 0.80, 'w': 0.10, 'h': 0.065, 'material': 'trim', 'sides': [1]},
         'handles': {'at': [[0.0, 0.84]], 'w': 0.12},
         'wipers': {'arms': [[-0.5, -0.05, -0.85, 0.89], [0.05, 0.5, -0.85, 0.89]]},
         # Plain painted steel wheels with a small chrome cap (side photo).

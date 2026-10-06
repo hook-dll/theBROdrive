@@ -536,3 +536,23 @@ roof left at the factory 1.37).
   with the photograph's round corners; belt 0.89 -> 0.845 (the glass starts at 0.86).
 - Screen and back light on their clean faces (rays: facing over 0.6), mirror below the
   vent's foot. 0 GLASS-FAIL, dims `OFF []`.
+
+## 2026-10-06 (later): the owner's screenshots of Valiant and ZAZ after "0 GLASS-FAIL"
+
+Both were reported done on 0 GLASS-FAIL and a high 3/4 sheet; the owner's in-game
+screenshots showed (Valiant) S-curved B-pillar and door frames, black rubber where the
+car has chrome, a large mirror on a long arm; (ZAZ) an octagonal back light of
+typed-in chamfers inside fat bulbous C-pillars, wavy side-glass frames, a ridge over
+the back light. GLASS-FAIL checks the skin under the glass, not the shapes people see.
+- **S-curved frames**: the glasshouse section had knees across the side glass (the
+  drawn/end-view section bent at 1.0-1.02 and 1.28). Straight side glass needs a
+  straight section from the belt to the roof's roll: Valiant `SEC`, ZAZ `sectionKeys`
+  (+ `glassPlan` full width to the screen: narrowing it twisted the side wall).
+- **Typed-in chamfers**: glass outlines given as a few corner points render as
+  octagons. `_frame.rounded(poly, r, corners)` rounds them; use it for every pane.
+- **Fat C-pillars**: `edgeY` 5 cm rolled the rear corners; 2 cm, and the back light
+  widened to the clean face (rear photo: 1.05 m at its foot).
+- Seal material is a per-car decision checked against photos (Valiant chrome).
+Review rule added to RECIPE.md: look at every 3/4 view at FULL size, both sides, low
+and high, and at the owner's usual camera (behind and above the car), before calling a
+car done; numbers are necessary, not sufficient.

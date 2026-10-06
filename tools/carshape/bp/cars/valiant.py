@@ -5,7 +5,11 @@
 # grille with the lamps in its ends, a crisp feature line from the nose along the flank,
 # a thin-pillared glasshouse, a long flat deck.
 # Slab sides up to the shoulder crease, a short tumblehome to the belt, a wide glasshouse.
-SEC = [[0.30, 0.80], [0.40, 0.87], [0.82, 0.89], [0.88, 0.88], [0.96, 0.85], [1.02, 0.82], [1.15, 0.78], [1.28, 0.73], [1.35, 0.66],
+# Above the belt the glasshouse leans in on one straight line (0.85 at 0.96 to 0.745 at
+# 1.33) to the roof's roll: the drawn section's knees at 1.02 and 1.28 ran across the
+# side glass, so its straight pillars and frames read as S-curves in 3/4 views (the
+# user's screenshot, 2026-10-06).
+SEC = [[0.30, 0.80], [0.40, 0.87], [0.82, 0.89], [0.88, 0.88], [0.96, 0.85], [1.33, 0.745], [1.36, 0.68],
        [1.39, 0.45], [1.40, 0.2]]
 CAR = {
     'id': 'valiant',
@@ -82,6 +86,9 @@ CAR = {
     'parts': {
         'glassOverlay': True,
         'glassFit': False,
+        # Bright chrome frames round every pane and the B-pillar (photographs); the
+        # default black rubber left the side glass's frames and pillars nearly invisible.
+        'glassSeal': {'material': 'chrome', 'width': 0.012},
         # The side glass off the side photograph, the chrome frames' outer edges (heights
         # x 1.031, the drawing's scale): the foot at 0.93 (0.959 here), the header 1.305
         # (1.345). Front: a vent window from the A-pillar's curve (y -0.756 at the belt,
@@ -103,17 +110,17 @@ CAR = {
             # The screen in plan, generated off the wrapped shell (screengen.py valiant 1.04
             # 1.31 with the photo's pillar line): its foot where it rises through 1.04 over
             # the cowl, header 1.31 (4.5 cm under the roof), sides 7 mm ahead of the pillar.
-            {'view': 'top', 'outline': [[-0.7936, 0.0], [-0.7933, 0.05], [-0.7919, 0.1], [-0.7894, 0.15], [-0.7858, 0.2],
-                                        [-0.7808, 0.25], [-0.7722, 0.3], [-0.7613, 0.35], [-0.7493, 0.4], [-0.7368, 0.45],
-                                        [-0.7221, 0.5], [-0.7056, 0.55], [-0.6871, 0.6], [-0.6658, 0.65], [-0.6414, 0.7],
-                                        [-0.6255, 0.7291], [-0.618, 0.7393], [-0.6083, 0.7465], [-0.5964, 0.7508],
-                                        [-0.5864, 0.7528], [-0.562, 0.7531], [-0.5387, 0.7478], [-0.5155, 0.7412],
-                                        [-0.4922, 0.7327], [-0.469, 0.7253], [-0.4457, 0.7179], [-0.4225, 0.7089],
-                                        [-0.4034, 0.6929], [-0.3955, 0.6785], [-0.3899, 0.6639], [-0.3864, 0.649],
-                                        [-0.3852, 0.634], [-0.3862, 0.6187], [-0.3894, 0.6032], [-0.3948, 0.5875],
-                                        [-0.407, 0.55], [-0.421, 0.5], [-0.433, 0.45], [-0.444, 0.4], [-0.454, 0.35],
-                                        [-0.4629, 0.3], [-0.4705, 0.25], [-0.4757, 0.2], [-0.4791, 0.15], [-0.482, 0.1],
-                                        [-0.4834, 0.05], [-0.4839, 0.0]],
+            {'view': 'top', 'outline': [[-0.7886, 0.0], [-0.7879, 0.05], [-0.7864, 0.1], [-0.7837, 0.15], [-0.78, 0.2],
+                                        [-0.7741, 0.25], [-0.7655, 0.3], [-0.7551, 0.35], [-0.7437, 0.4], [-0.7311, 0.45],
+                                        [-0.7166, 0.5], [-0.7004, 0.55], [-0.6823, 0.6], [-0.6614, 0.65], [-0.6375, 0.7],
+                                        [-0.6248, 0.7258], [-0.618, 0.7368], [-0.6093, 0.7462], [-0.5987, 0.7539],
+                                        [-0.5864, 0.7612], [-0.562, 0.7632], [-0.5387, 0.759], [-0.5155, 0.7523],
+                                        [-0.4922, 0.7453], [-0.469, 0.7391], [-0.4457, 0.7345], [-0.4225, 0.7296],
+                                        [-0.4028, 0.7173], [-0.3963, 0.7128], [-0.3903, 0.6979], [-0.3861, 0.6829],
+                                        [-0.3837, 0.6676], [-0.3831, 0.6521], [-0.3843, 0.6365], [-0.3873, 0.6206],
+                                        [-0.3922, 0.6046], [-0.3938, 0.6], [-0.4093, 0.55], [-0.4231, 0.5], [-0.4355, 0.45],
+                                        [-0.4463, 0.4], [-0.4558, 0.35], [-0.4649, 0.3], [-0.4724, 0.25], [-0.4776, 0.2],
+                                        [-0.481, 0.15], [-0.4837, 0.1], [-0.4857, 0.05], [-0.4859, 0.0]],
              'depthRange': [0.99, 1.35]},
             {'view': 'rear', 'outline': [[0.0, 1.36], [0.55, 1.35], [0.66, 1.28], [0.72, 1.06], [0.68, 1.04], [0.0, 1.04]],
              'depthRange': [0.9, 1.6], 'facingMin': 0.15},
@@ -182,7 +189,10 @@ CAR = {
             'front': {'z': [0.40, 0.51], 'depth': 0.06, 'wrap': 0.30, 'profile': 'blade'},
             'rear': {'z': [0.40, 0.51], 'depth': 0.06, 'wrap': 0.30, 'profile': 'blade'},
         },
-        'mirror': {'y': -0.72, 'z': 1.07, 'reach': 0.95, 'w': 0.11, 'h': 0.07, 'material': 'chrome', 'shape': 'round', 'sides': [1]},
+        # A small round chrome mirror just behind the A-pillar's foot (front 3/4 photo),
+        # 8.5 cm across on a short arm; the 11 cm disc stood off on a long one.
+        'mirror': {'y': -0.72, 'z': 1.0, 'reach': 0.93, 'w': 0.085, 'h': 0.085, 'material': 'chrome', 'shape': 'round',
+                   'sides': [1]},
         # Handles off the photograph: z 0.806 (0.83 here), y 0.02 and 0.84.
         'handles': {'at': [[0.02, 0.83], [0.84, 0.83]], 'w': 0.12},
         'wipers': {'arms': [[-0.6, -0.05, -0.86, 1.06], [0.05, 0.6, -0.86, 1.06]]},

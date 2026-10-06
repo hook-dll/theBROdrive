@@ -139,3 +139,28 @@ def scale_above(CAR, belt, top_from, top_to):
     if 'mirror' in P:
         P['mirror']['z'] = z(P['mirror']['z'])
     CAR['factory']['height'] = top_to
+
+
+def rounded(poly, r, corners=None, n=9):
+    """An outline with its corners rounded: each listed corner (all by default) cut back
+    `r` along both edges and joined by a smooth arc of `n` points through it. Car files
+    use it for glass and lamp outlines: a pane typed in as a few straight points shows
+    every corner as a chamfer (the ZAZ's octagonal back light)."""
+    import numpy as np
+    p = [np.array(q, float) for q in poly]
+    k = len(p)
+    corners = range(k) if corners is None else corners
+    out = []
+    for i in range(k):
+        if i not in corners:
+            out.append([float(p[i][0]), float(p[i][1])])
+            continue
+        a, b, c = p[i - 1], p[i], p[(i + 1) % k]
+        ra = min(r, 0.45 * np.linalg.norm(a - b))
+        rc = min(r, 0.45 * np.linalg.norm(c - b))
+        s = b + (a - b) / np.linalg.norm(a - b) * ra
+        e = b + (c - b) / np.linalg.norm(c - b) * rc
+        for t in np.linspace(0, 1, n):
+            q = (1 - t) ** 2 * s + 2 * (1 - t) * t * b + t * t * e
+            out.append([round(float(q[0]), 4), round(float(q[1]), 4)])
+    return out
