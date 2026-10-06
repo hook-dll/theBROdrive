@@ -21,8 +21,9 @@
  * Nothing here is part of the game bundle.
  */
 
+import { SurfaceType, SURFACES } from '../src/core/surfaces';
 import { roadConditionAt } from '../src/world/gradient';
-import { ROAD_LENGTH } from '../src/world/road';
+import { ROAD_HALF_WIDTH, ROAD_LENGTH } from '../src/world/road';
 import { SURFACE_STEP, SurfaceField } from '../src/world/roadsurface';
 
 /** Right-lane wheel paths, from roadmesh.ts. A car sits in one lane, not both. */
@@ -82,7 +83,8 @@ interface Ride {
   notchMaxMm: number;
 }
 
-function measureBand(seed: number, s0: number): Ride {
+/** `surface` forces one material over the whole span; otherwise the road's own district. */
+function measureBand(seed: number, s0: number, surface?: SurfaceType): Ride {
   const field = new SurfaceField(seed);
   const count = Math.round(SPAN_M / SURFACE_STEP);
 
@@ -101,7 +103,9 @@ function measureBand(seed: number, s0: number): Ride {
       // The bump layer is 2D world noise; the road is locally straight enough over
       // 3 km that walking x with s is a faithful stand-in for offsetPoint here, and
       // it keeps the bench independent of the road's curvature.
-      h.push(field.displacement(s, lateral, s, lateral, cond.decay, cond.surface));
+      h.push(
+        field.displacement(s, lateral, s, lateral, cond.decay, surface ?? cond.surface, ROAD_HALF_WIDTH),
+      );
       if (lateral === WHEEL_PATHS[0]) decaySum += cond.decay;
     }
 
@@ -134,14 +138,13 @@ function measureBand(seed: number, s0: number): Ride {
   };
 }
 
-console.log(`ride bench @ ${speedKmh} km/h, ${SPAN_M} m per band, wheel paths ${WHEEL_PATHS.join('/')} m`);
-console.log('band        decay   rms mm   kick rms   kick p99   kick max   notch/km   worst notch');
-for (const band of BANDS) {
-  const rides = SEEDS.map((seed) => measureBand(seed, band.s));
+const HEADER = 'decay   rms mm   kick rms   kick p99   kick max   notch/km   worst notch';
+
+function report(label: string, rides: Ride[]): void {
   const mean = (pick: (r: Ride) => number): number =>
     rides.reduce((acc, r) => acc + pick(r), 0) / rides.length;
   console.log(
-    `${band.label}  ${mean((r) => r.decay).toFixed(2)}` +
+    `${label}  ${mean((r) => r.decay).toFixed(2)}` +
       `    ${mean((r) => r.rmsMm).toFixed(1).padStart(5)}` +
       `     ${mean((r) => r.kickRms).toFixed(3).padStart(6)}` +
       `     ${mean((r) => r.kickP99).toFixed(3).padStart(6)}` +
@@ -149,4 +152,24 @@ for (const band of BANDS) {
       `      ${mean((r) => r.notchesPerKm).toFixed(1).padStart(5)}` +
       `      ${mean((r) => r.notchMaxMm).toFixed(1).padStart(5)} mm`,
   );
+}
+
+console.log(`ride bench @ ${speedKmh} km/h, ${SPAN_M} m per band, wheel paths ${WHEEL_PATHS.join('/')} m`);
+console.log(`band        ${HEADER}`);
+for (const band of BANDS) {
+  report(band.label, SEEDS.map((seed) => measureBand(seed, band.s)));
+}
+
+// The same bands with one material forced over them: what each district surface is
+// worth on its own, across the full range of decay the bands above sample.
+const DISTRICT_SURFACES = [
+  SurfaceType.Asphalt,
+  SurfaceType.CrackedAsphalt,
+  SurfaceType.Gravel,
+  SurfaceType.Concrete,
+];
+console.log(`\nsurface           ${HEADER}`);
+for (const surface of DISTRICT_SURFACES) {
+  const rides = BANDS.flatMap((band) => SEEDS.map((seed) => measureBand(seed, band.s, surface)));
+  report(SURFACES[surface].label.padEnd(16), rides);
 }

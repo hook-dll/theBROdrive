@@ -86,26 +86,26 @@ const ROUGH_HI_GAIN = 0.78;
  * to swim under an on-foot camera even though its texture and heat haze were static.
  */
 const BUMP_AMP: Record<SurfaceType, number> = {
-  [SurfaceType.Asphalt]: 0.028,
-  [SurfaceType.CrackedAsphalt]: 0.04,
+  [SurfaceType.Asphalt]: 0.034,
+  [SurfaceType.CrackedAsphalt]: 0.048,
   // The loose surfaces keep more of it: a gravel track and a rock shelf really are
   // this uneven at a few metres of wavelength, and it is what makes them read as a
   // track rather than a painted road.
-  [SurfaceType.Gravel]: 0.06,
+  [SurfaceType.Gravel]: 0.072,
   [SurfaceType.Sand]: 0.05,
   [SurfaceType.Rock]: 0.09,
-  [SurfaceType.Concrete]: 0.014,
+  [SurfaceType.Concrete]: 0.018,
   // Between the district's packed course and the open desert: the grader's spoil is
   // coarser than the road it came off and nothing has ever rolled it flat.
-  [SurfaceType.LooseShoulder]: 0.07,
+  [SurfaceType.LooseShoulder]: 0.08,
 };
 
 /** Long undulation: broad enough to pitch the car over a visible rise and fall. */
 const UND_WAVELENGTH = 30;
 /** Long undulation amplitude at decay = 1 (m). */
-const UND_AMP = 0.04;
+const UND_AMP = 0.07;
 /** Fraction of the amplitude kept even on pristine road; glass is boring. */
-const UND_FLOOR = 0.35;
+const UND_FLOOR = 0.55;
 /** Physical breakup across the outer asphalt strip. Zero at both strip boundaries. */
 const EDGE_BREAK_WIDTH = 0.8;
 const EDGE_BREAK_DEPTH = 0.075;

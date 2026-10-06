@@ -4,6 +4,13 @@
 
 ### Added
 
+- THE ROAD IS A LITTLE LESS GLASSY, on every surface. The long 15-30 m swell is
+  `UND_AMP` 0.07 with a floor of 0.55, so new asphalt keeps 3.9 cm where it used to keep
+  1.4. The short bumps are about 20% taller: `BUMP_AMP` is asphalt 3.4 cm, cracked
+  4.8, gravel 7.2, concrete 1.8 and the shoulder 8. The sub-collider `texture` is about
+  30% up: asphalt 8 mm, cracked 14, gravel 10, concrete 3.5, shoulder 8. Potholes are
+  unchanged. `tools/ride-bench.ts` runs again (it now passes `halfWidth`) and adds a
+  table per surface.
 - CONTRACT KINDS (`src/contracts/`). All twenty catalogue kinds are offered by
   couriers, each with its own condition and signature sticker: heavy crate, fragile
   radio, urgent film, medical thermo box, trailer equipment, oversize load, one tank,

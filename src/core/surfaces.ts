@@ -210,7 +210,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     hummock: 0,
     // Sun-aged neutral asphalt: light enough to read as an old dry road rather than
     // freshly laid wet bitumen. Fine aggregate and bleaching vary this base in the map.
-    texture: 0.006,
+    texture: 0.008,
     color: 0x9e9c9d,
     dust: 0.0,
     smoke: 1.0,
@@ -227,7 +227,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     microRelief: 0,
     hummock: 0,
     // Older cracked districts stay distinct, but no longer collapse back to wet black.
-    texture: 0.011,
+    texture: 0.014,
     color: 0x888482,
     dust: 0.1,
     smoke: 0.85,
@@ -254,7 +254,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     // tyre the way sand does.
     microRelief: 0.026,
     hummock: 0.045,
-    texture: 0.008,
+    texture: 0.010,
     color: 0x7a6c56,
     dust: 0.6,
     smoke: 0.15,
@@ -330,7 +330,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     hummock: 0,
     // Slabs are smoother than asphalt between their joints, and the joints are in
     // the collider's own rows rather than here.
-    texture: 0.0025,
+    texture: 0.0035,
     color: 0x9a978f,
     dust: 0.0,
     smoke: 1.0,
@@ -353,7 +353,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     // so it holds a coarser ripple than the road it came off.
     microRelief: 0.022,
     hummock: 0.038,
-    texture: 0.006,
+    texture: 0.008,
     color: 0x8a7d63,
     dust: 0.8,
     smoke: 0.1,
