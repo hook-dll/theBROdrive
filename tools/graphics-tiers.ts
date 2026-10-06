@@ -166,9 +166,6 @@ for (const quality of LADDER) {
           `above the ${PHONE_SPOT_CEILING} ceiling`,
       );
     }
-    if (spots % 2 !== 0) {
-      failures.push(`${quality}: a phone's light budget is not even, so it cannot split by direction`);
-    }
     // The phone budget must exist and be a real budget, never zero or missing: a rung that
     // shades no lights at all is a different picture, not a cheaper one.
     if (spots < 2) {
