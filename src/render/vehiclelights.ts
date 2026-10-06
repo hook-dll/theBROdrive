@@ -17,8 +17,8 @@ import {
  * could not do, because nothing but the driven or last-exited car ever reached it.
  *
  * SHADER PERMUTATIONS. Three keys every lit material's program on the count of
- * *visible* lights, so changing that count recompiles the world (see the dusk hitch
- * documented in render/lights.ts). Some GPU drivers also specialize the first
+ * *visible* lights, so changing that count recompiles the whole world — the measured
+ * dusk hitch the fixed pools exist to avoid. Some GPU drivers also specialize the first
  * executed program around an exactly-zero light contribution, causing a multi-
  * second hitch when a slot first becomes nonzero. Two rules keep both costs off
  * the driving frame:

@@ -12,8 +12,8 @@
  *
  * THE LINE CARRIES NO LAMPS. It used to be a lamppost line, three of whose eras hung
  * a light over the road; the desert night is no longer dark enough to need them and
- * every car carries its own, so the fixtures, their emissive material and the light
- * markers they fed to `LightBudget` are gone. A pole is what holds a wire up.
+ * every car carries its own, so the fixtures and their emissive material are gone. A
+ * pole is what holds a wire up.
  */
 
 import { retroActive } from '../../render/retro';

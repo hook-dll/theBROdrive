@@ -11,20 +11,6 @@ export const geometryCache = new Map<string, THREE.BufferGeometry>();
 const surfaceTextures = new Map<SurfacePattern, THREE.DataTexture>();
 const surfaceMaterials = new Map<string, THREE.MeshStandardMaterial>();
 /**
- * A room light's intensity, in the same units as the street lamps' `LAMP_POINT`.
- *
- * Exported because the placement builds the marker this describes. It is the catalogue's
- * number either way: how brightly a room is lit is a decision about the building.
- *
- * It has to be those units because a room light is one now: it reaches the screen
- * through the shared `LightBudget` as a point source, exactly like a street lamp, rather
- * than as the spot light it used to be. Slightly under a street lamp's 90, because a room
- * is lit to be lived in and a road is lit to be driven.
- */
-export const ROOM_LIGHT_INTENSITY = 55;
-export const BULB_EMISSIVE_INTENSITY = 2.4;
-
-/**
  * How much smaller the furniture is than it was drawn.
  *
  * One number for the whole catalogue, because "the furniture is too big" is one
@@ -43,36 +29,6 @@ export const BULB_EMISSIVE_INTENSITY = 2.4;
  *    them scales with them rather than changing.
  */
 export const FURNITURE_SCALE = 1 / 1.5;
-
-/**
- * How much smaller the light switch is than it was drawn.
- *
- * Half, and the reason it is not simply the furniture factor is that a switch is not
- * furniture: it is a fitting whose size reads against the human hand, and a switchplate
- * shrunk to two thirds of a plausible size still reads as a switchplate while the old one
- * read as a box.
- */
-const SWITCH_SCALE = 0.5;
-/** Depth of the switchplate's housing, metres. The face the wall is measured from. */
-const SWITCH_PLATE_DEPTH = 0.055;
-/**
- * How far below its ceiling a room light hangs, metres.
- *
- * One number for the fixture, the bulb and the light source, because they are one fitting:
- * the light a room is lit by comes from where the visible fixture hangs. Anywhere else
- * would put the bulb the player sees and the light that lights the room in two places.
- */
-const LIGHT_DROP_Y = -0.43;
-/**
- * How far a room light reaches, metres.
- *
- * Read by nobody: `LightBudget` takes a source's intensity and position into its own fixed
- * slot and composes the reach from the slot, so this is the one number in the light path
- * that is deliberately unused. It is exported anyway rather than deleted, so that the
- * placement can build a light that would work on its own terms — a zero-range light is a
- * shape that reads as a mistake.
- */
-export const ROOM_LIGHT_REACH = 14;
 
 export const C = {
   plaster: 0xb99b72,
@@ -347,12 +303,6 @@ export function registerDoorClearance(parent: THREE.Object3D, box: THREE.Box3, l
   parent.userData.poiDoorClearances = clearances;
 }
 
-function registerWindowClearance(parent: THREE.Object3D, box: THREE.Box3, label: string): void {
-  const clearances = (parent.userData.poiWindowClearances as DoorClearance[] | undefined) ?? [];
-  clearances.push({ box, label });
-  parent.userData.poiWindowClearances = clearances;
-}
-
 export function markDoorObstacle(object: THREE.Object3D, label: string): void {
   object.userData.poiDoorObstacle = label;
 }
@@ -366,14 +316,6 @@ export function buildingShell(parent: THREE.Object3D, options: ShellOptions): vo
   const roofPattern = options.roofPattern ?? (roof === C.roofTin ? 'metal' : 'tiles');
   parent.userData.poiShell = { width, depth, front, back, left, right } satisfies ShellLayout;
   for (const opening of front) {
-    if (opening[2] > 0.05) registerWindowClearance(
-      parent,
-      new THREE.Box3(
-        new THREE.Vector3(opening[0], opening[2], -depth / 2 - 0.35),
-        new THREE.Vector3(opening[1], opening[3], -depth / 2 + 0.35),
-      ),
-      'front window',
-    );
     if (opening[2] <= 0.05) registerDoorClearance(
       parent,
       new THREE.Box3(
@@ -384,14 +326,6 @@ export function buildingShell(parent: THREE.Object3D, options: ShellOptions): vo
     );
   }
   for (const opening of back) {
-    if (opening[2] > 0.05) registerWindowClearance(
-      parent,
-      new THREE.Box3(
-        new THREE.Vector3(opening[0], opening[2], depth / 2 - 0.35),
-        new THREE.Vector3(opening[1], opening[3], depth / 2 + 0.35),
-      ),
-      'back window',
-    );
     if (opening[2] <= 0.05) registerDoorClearance(
       parent,
       new THREE.Box3(
@@ -402,14 +336,6 @@ export function buildingShell(parent: THREE.Object3D, options: ShellOptions): vo
     );
   }
   for (const opening of left) {
-    if (opening[2] > 0.05) registerWindowClearance(
-      parent,
-      new THREE.Box3(
-        new THREE.Vector3(-width / 2 - 0.35, opening[2], opening[0]),
-        new THREE.Vector3(-width / 2 + 0.35, opening[3], opening[1]),
-      ),
-      'left window',
-    );
     if (opening[2] <= 0.05) registerDoorClearance(
       parent,
       new THREE.Box3(
@@ -420,14 +346,6 @@ export function buildingShell(parent: THREE.Object3D, options: ShellOptions): vo
     );
   }
   for (const opening of right) {
-    if (opening[2] > 0.05) registerWindowClearance(
-      parent,
-      new THREE.Box3(
-        new THREE.Vector3(width / 2 - 0.35, opening[2], opening[0]),
-        new THREE.Vector3(width / 2 + 0.35, opening[3], opening[1]),
-      ),
-      'right window',
-    );
     if (opening[2] <= 0.05) registerDoorClearance(
       parent,
       new THREE.Box3(
@@ -678,116 +596,3 @@ export function rug(parent: THREE.Object3D, x: number, z: number, width: number,
   );
 }
 
-export function roomLights(
-  parent: THREE.Object3D,
-  positions: readonly (readonly [x: number, z: number])[],
-  ceilingY: number,
-  switchPosition: V3,
-  switchYaw = 0,
-): void {
-  // THE SWITCH DOES NOT BUILD ITS LIGHTS, AND THAT IS THE DESIGN.
-  //
-  // A variant is built ONCE and placed MANY times, so anything a switch controls has to
-  // belong to the PLACEMENT rather than to the build: two houses of the same variant must
-  // not share a light, or switching one off would darken the other. So this builds the
-  // fixtures and their bulbs — geometry like any other — and RECORDS what the switch
-  // drives for `poivariantbuild.ts` to create per placement.
-  //
-  // What those lights will be is that module's business, but the reason is worth stating
-  // here: a real light added to the scene compiles its own shader permutation, so a room
-  // light streaming in would recompile the world's materials. The world keeps its rendered
-  // lights in fixed budgets (`render/lights.ts`), so a room light is an invisible MARKER
-  // that `LightBudget` draws like any street lamp — and a switch that is off is genuinely
-  // off, because an unlit marker is not an eligible source to spend a slot on.
-  for (const [x, z] of positions) {
-    const fixture = new THREE.Group();
-    fixture.position.set(x, ceilingY, z);
-    parent.add(fixture);
-    // Never a shadow caster: a ceiling fixture is metres from the floor and centimetres
-    // across, so its sun shadow is a dark disc that reads as a stray blob under whoever
-    // is standing nearby — not a shading cue anyone is meant to notice. The canopy roofs
-    // and wings elsewhere in this file are excluded from `castShadow` for the same
-    // reason; this is that same exclusion for every room light in every building.
-    const stem = cylinder(fixture, 0.08, 0.08, 0.22, 8, [0, -0.11, 0], C.darkMetal);
-    stem.castShadow = false;
-    const shade = cylinder(fixture, 0.2, 0.08, 0.12, 12, [0, -0.24, 0], C.white);
-    shade.castShadow = false;
-  }
-
-  const switchGroup = new THREE.Group();
-  switchGroup.position.set(switchPosition[0], switchPosition[1], switchPosition[2]);
-  // The lever protrudes along local -Z; yaw must point that vector away from the wall.
-  switchGroup.rotation.y = switchYaw;
-  parent.add(switchGroup);
-  markDoorObstacle(switchGroup, 'light switch');
-  // A marker on the GROUP alone, so the world can find the switch — and so that
-  // `mergePoiStatics` leaves it and its plate out of the wall it is mounted on.
-  switchGroup.userData.poiLightSwitch = true;
-  // HALF SIZE, WITH THE PLATE'S BACK FACE LEFT EXACTLY WHERE IT WAS.
-  //
-  // Scaling about the group origin would not do: the plate is centred on that origin, so
-  // halving it would pull its back 0.014 m off the wall and leave the switch floating in
-  // front of its own mounting. Offsetting the scaled body by half the difference puts the
-  // back face back on the wall — and does so ARITHMETICALLY, for any scale, rather than
-  // for the one value that happens to be right today.
-  const body = new THREE.Group();
-  body.scale.setScalar(SWITCH_SCALE);
-  body.position.z = (SWITCH_PLATE_DEPTH / 2) * (1 - SWITCH_SCALE);
-  switchGroup.add(body);
-  box(body, [0.24, 0.32, SWITCH_PLATE_DEPTH], [0, 0, 0], C.white);
-  box(body, [0.08, 0.14, 0.045], [0, 0.01, -0.045], C.darkMetal, [-0.22, 0, 0]);
-
-  // What the switch drives, for the placement to build and to work: where each light hangs,
-  // measured FROM THE SWITCH. `positions` arrives in the caller's frame and the switch is
-  // placed and yawed inside that same frame, so the two are reconciled here, once, rather
-  // than leaving the placement to guess which frame it was handed. The bulbs are the
-  // placement's too — see `roomBulbMaterial`.
-  const toSwitch = new THREE.Matrix4()
-    .makeRotationY(-switchYaw)
-    .multiply(
-      new THREE.Matrix4().makeTranslation(
-        -switchPosition[0],
-        -switchPosition[1],
-        -switchPosition[2],
-      ),
-    );
-  switchGroup.userData.poiSwitchLights = positions.map(([x, z]) => {
-    const point = new THREE.Vector3(x, ceilingY + LIGHT_DROP_Y, z).applyMatrix4(toSwitch);
-    return [point.x, point.y, point.z] as V3;
-  });
-}
-
-/**
- * A fresh bulb material, plus the size of the bulb it goes on.
- *
- * A FACTORY, NOT A SHARED MATERIAL, and the difference is the whole reason the bulbs are
- * built by the placement: two buildings of one variant share a catalogue, so a shared
- * material would let one building's switch darken the other's bulbs. Handing out a new
- * material per bulb makes that impossible by construction, rather than by remembering to
- * clone at the right moment.
- */
-export function roomBulbMaterial(): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({
-    color: 0xffe6ad,
-    roughness: 0.22,
-    emissive: 0xffc66d,
-    emissiveIntensity: BULB_EMISSIVE_INTENSITY,
-  });
-}
-
-/** Radius of a room bulb, metres. Its fixture is sized around it. */
-export const ROOM_BULB_RADIUS = 0.13;
-
-/** How far above the light's own height the bulb sits, metres, so it hangs in its shade. */
-export const ROOM_BULB_LIFT = 0.07;
-
-export function roomLight(
-  parent: THREE.Object3D,
-  x: number,
-  z: number,
-  ceilingY: number,
-  switchPosition: V3,
-  switchYaw = 0,
-): void {
-  roomLights(parent, [[x, z]], ceilingY, switchPosition, switchYaw);
-}

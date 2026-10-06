@@ -45,7 +45,6 @@ import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
 import { COLD_SOAK_C } from '../vehicle/cooling';
 import type { TrailerField } from '../vehicle/trailer';
 import type { WreckTrunkField } from './wrecktrunks';
-import type { PoiSwitchField } from './poiswitches';
 import { courierDefaultStorage } from '../contracts/offers';
 import { photoSubjects } from '../contracts/photosubjects';
 import {
@@ -60,7 +59,7 @@ import { fitGround, type GroundPlane } from './footprint';
 import { halfWidthAt } from './roadprofile';
 import { BASIN_OUTER_M, lakeSites, type LakeSite } from './lakes';
 import type { RoadDistance } from './roaddistance';
-import { registerPlacedSwitches, type VariantInstance } from './poivariantbuild';
+import type { VariantInstance } from './poivariantbuild';
 import { createStructureInstance, structureCount, structureDef } from './poistructures';
 
 const COURIER_MODELS = CAR_MODELS.filter((def) => def.paintStyle !== undefined);
@@ -960,9 +959,6 @@ export function poiYaw(poi: Poi, heading: number): number {
     : faceRoadYaw(heading, poi.lateral, poi.variantSeed);
 }
 
-/** Intensity of a building's authored lamps, as handed to the light budget. */
-const VARIANT_LAMP_INTENSITY = 0.55;
-
 /**
  * How far below the fitted plane a building is pushed, on top of the plane's own residual.
  *
@@ -984,9 +980,7 @@ function buildStructurePoi(
   loose: LoosePartField,
   trailers: TrailerField,
   wreckTrunks: WreckTrunkField,
-  switches: PoiSwitchField,
   registeredWrecks: string[],
-  registeredSwitches: string[],
   deferredVisuals: Array<() => void>,
   counter: LootCounter,
   shouldLoot: boolean,
@@ -1023,27 +1017,6 @@ function buildStructurePoi(
   instance.group.rotation.set(site.plane.pitch, yaw, site.plane.roll, 'YXZ');
   instance.group.updateMatrixWorld(true);
   group.add(instance.group);
-
-  for (const source of instance.lightSources) {
-    // Lit, and the budget decides whether any of it is drawn: it takes the nearest few
-    // sources at night and leaves every pool dark by day. An intensity of zero would
-    // make the source ineligible, and the building would never light at all.
-    source.intensity = VARIANT_LAMP_INTENSITY;
-    source.userData.lightBudgetSource = true;
-  }
-
-  // The switches, placed into the world. Their boxes are ORIENTED: the switch is built
-  // upright and yawed about Y inside the variant, and the variant is then yawed and tilted
-  // onto the ground here, so the plate's final orientation is the two composed — which is
-  // why the orientation is stored rather than approximated by an axis-aligned box.
-  registerPlacedSwitches(
-    switches,
-    instance,
-    `poi-switch:${poi.index}`,
-    registeredSwitches,
-    ctx.originX,
-    ctx.originZ,
-  );
 
   if (ctx.hasPhysics) {
     const matrix = poseMatrix(
@@ -1119,9 +1092,7 @@ function buildPoi(
   loose: LoosePartField,
   trailers: TrailerField,
   wreckTrunks: WreckTrunkField,
-  switches: PoiSwitchField,
   registeredWrecks: string[],
-  registeredSwitches: string[],
 ): void {
   const counter: LootCounter = { sub: 0 };
   const shouldLoot = ctx.hasPhysics && !ctx.world.state.lootedPois.includes(poi.index);
@@ -1135,9 +1106,7 @@ function buildPoi(
     loose,
     trailers,
     wreckTrunks,
-    switches,
     registeredWrecks,
-    registeredSwitches,
     deferredVisuals,
     counter,
     shouldLoot,
@@ -1781,7 +1750,6 @@ export class PoiProvider implements ChunkProvider {
     private readonly loose: LoosePartField,
     private readonly trailers: TrailerField,
     private readonly wreckTrunks: WreckTrunkField,
-    private readonly switches: PoiSwitchField,
     private readonly couriers: CourierField,
     private readonly roadDistance: RoadDistance,
   ) {}
@@ -1801,7 +1769,6 @@ export class PoiProvider implements ChunkProvider {
     const colliders: RAPIER.Collider[] = [];
     const deferredVisuals: Array<() => void> = [];
     const registeredWrecks: string[] = [];
-    const registeredSwitches: string[] = [];
     const registeredCouriers: string[] = [];
 
     for (const poi of [...pois, ...desert]) {
@@ -1815,9 +1782,7 @@ export class PoiProvider implements ChunkProvider {
         this.loose,
         this.trailers,
         this.wreckTrunks,
-        this.switches,
         registeredWrecks,
-        registeredSwitches,
       );
     }
     for (const stop of couriersBetween(ctx.world.seed, ctx.sStart, ctx.sEnd, POI_SPACING)) {
@@ -1844,7 +1809,6 @@ export class PoiProvider implements ChunkProvider {
       colliders,
       dispose: () => {
         this.wreckTrunks.forget(registeredWrecks);
-        this.switches.forget(registeredSwitches);
         this.couriers.forget(registeredCouriers);
         for (const cancel of deferredVisuals) cancel();
       },

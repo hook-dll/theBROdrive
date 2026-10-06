@@ -26,7 +26,6 @@ import {
   RENDER_SCALES,
   renderScaleFrom,
   starMagnitudeFor,
-  streetLightSlotsFor,
   vehicleLightSlotsFor,
   viewDistanceFor,
   type GraphicsQuality,
@@ -68,12 +67,10 @@ const COST_KEYS = [
   'mobileStarMagnitude',
   'vehicleLightSlots',
   'mobileVehicleLightSlots',
-  // Not the point slots: with the street lamps gone they only serve the mast huts' room
-  // lights, and the top rung gave its points to the car lamps (settings.ts, blessing).
 ] as const;
 const WILLINGNESS_KEYS = ['supersample', 'headlightDistanceScale'] as const;
 
-console.log('rung         Mpx ceiling   Mpx floor   stars   car lamps   street lamps');
+console.log('rung         Mpx ceiling   Mpx floor   stars   car lamps');
 let previous: GraphicsQuality | null = null;
 for (const quality of LADDER) {
   const tier = GRAPHICS_TIERS[quality];
@@ -81,7 +78,7 @@ for (const quality of LADDER) {
     `${quality.padEnd(12)} ${(tier.maxPixels / 1e6).toFixed(2).padStart(11)} ` +
       `${(tier.minPixels / 1e6).toFixed(2).padStart(11)} ` +
       `${tier.starMagnitude.toFixed(1).padStart(7)} ` +
-      `${String(tier.vehicleLightSlots).padStart(11)} ${String(tier.streetLightSlots).padStart(14)}`,
+      `${String(tier.vehicleLightSlots).padStart(11)}`,
   );
 
   if (tier.minPixels >= tier.maxPixels) {
@@ -154,37 +151,34 @@ for (const quality of LADDER) {
 // light count into every lit material as an unrolled loop bound, so every lit fragment
 // evaluates every slot — dark ones included, which is why unused lamps are held at an
 // intensity of 1e-8 rather than switched off. The bill is PIXELS x SLOTS on every frame,
-// and the top rung's desktop budget is 18 spotlights plus 8 point lights, which on a phone
-// presenting 1.44 megapixels at 50 FPS came to 37 million light evaluations per frame and
-// 1.9 BILLION per second. That was, measurably, where the heat was.
+// and the only slots left are the car lamps; the point-light path went with the room
+// lights. This is the check that a phone's share of them stays a phone's share.
 {
-  // A phone's ceiling. Six spots and six points keeps three cars' beams drawn and the lit
-  // road receding, which is all a phone screen resolves; more than the desktop standard
-  // budget is a desktop's fill rate being spent on a phone's pixels.
-  const PHONE_LIGHT_CEILING = 12;
+  // A phone's ceiling. Six spots keeps three cars' beams drawn and the lit road receding,
+  // which is all a phone screen resolves; more than the desktop standard budget is a
+  // desktop's fill rate being spent on a phone's pixels.
+  const PHONE_SPOT_CEILING = 12;
   for (const quality of LADDER) {
     const spots = vehicleLightSlotsFor(quality, true);
-    const points = streetLightSlotsFor(quality, true);
-    const total = spots + points;
-    if (total > PHONE_LIGHT_CEILING) {
+    if (spots > PHONE_SPOT_CEILING) {
       failures.push(
-        `${quality}: a phone is asked to shade ${spots} spotlights + ${points} point lights ` +
-          `= ${total} per lit fragment, above the ${PHONE_LIGHT_CEILING} ceiling`,
+        `${quality}: a phone is asked to shade ${spots} spotlights per lit fragment, ` +
+          `above the ${PHONE_SPOT_CEILING} ceiling`,
       );
     }
-    if (spots % 2 !== 0 || points % 2 !== 0) {
+    if (spots % 2 !== 0) {
       failures.push(`${quality}: a phone's light budget is not even, so it cannot split by direction`);
     }
     // The phone budget must exist and be a real budget, never zero or missing: a rung that
     // shades no lights at all is a different picture, not a cheaper one.
-    if (spots < 2 || points < 2) {
-      failures.push(`${quality}: a phone gets ${spots} spots and ${points} points — too few to light a night`);
+    if (spots < 2) {
+      failures.push(`${quality}: a phone gets ${spots} spots — too few to light a night`);
     }
     // And it must not simply echo the desktop column, or the cap is doing nothing.
-    const desktop = GRAPHICS_TIERS[quality].vehicleLightSlots + GRAPHICS_TIERS[quality].streetLightSlots;
-    if (quality !== 'acceptable' && total >= desktop) {
+    const desktop = GRAPHICS_TIERS[quality].vehicleLightSlots;
+    if (quality !== 'acceptable' && spots >= desktop) {
       failures.push(
-        `${quality}: a phone gets ${total} lights against a desktop's ${desktop} — the cap does nothing here`,
+        `${quality}: a phone gets ${spots} lights against a desktop's ${desktop} — the cap does nothing here`,
       );
     }
   }
@@ -203,7 +197,7 @@ for (const quality of LADDER) {
     // The phone column throughout: the pixel ceiling a phone gets is `mobileMaxPixels`,
     // and the slot count is the phone's own.
     const pixels = tier.mobileMaxPixels;
-    const slots = vehicleLightSlotsFor(quality, true) + streetLightSlotsFor(quality, true);
+    const slots = vehicleLightSlotsFor(quality, true);
     const perFrame = pixels * slots;
     console.log(
       `${quality.padEnd(12)} ${(pixels / 1e6).toFixed(2).padStart(6)} Mpx ${String(slots).padStart(7)} ` +

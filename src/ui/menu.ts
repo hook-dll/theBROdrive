@@ -89,10 +89,9 @@ function describeTier(quality: GraphicsQuality, mobilePresentation: boolean): st
   // quoting the desktop column at a phone would be describing a rung nobody is on.
   const shadows = mobilePresentation ? tier.mobileShadows : tier.shadows;
   const spots = mobilePresentation ? tier.mobileVehicleLightSlots : tier.vehicleLightSlots;
-  const points = mobilePresentation ? tier.mobileStreetLightSlots : tier.streetLightSlots;
   return (
     `${shadows ? 'Sun shadows' : 'No sun shadows'}, ` +
-    `${spots + points} lights shaded on every lit pixel. ` +
+    `${spots} lights shaded on every lit pixel. ` +
     `Stars to magnitude ${mobilePresentation ? tier.mobileStarMagnitude : tier.starMagnitude}. ` +
     'The light count is compiled into the world, so it changes on the next load.'
   );

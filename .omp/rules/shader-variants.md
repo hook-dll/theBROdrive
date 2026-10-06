@@ -16,7 +16,7 @@ A variant is the program cache key, not the material object. These all make a ne
   - a hidden anchor mesh in a group that is in the scene at boot (`DebrisField`, `TrailerField`, `NoveltyField`);
   - for car models, `loadCarModel`, which compiles the model's program anchor before it resolves (render/carmodel.ts).
 - An `InstancedMesh` that will ever call `setColorAt` must create `instanceColor` in its constructor (birds.ts, lakewater.ts, mirage*.ts). The first `setColorAt` otherwise changes the program mid-drive.
-- Never change a light's `visible` or `castShadow`, or the number of lights, at runtime. Light slots are fixed and lit by intensity only (render/lights.ts, render/vehiclelights.ts). One count change recompiles every lit material at once.
+- Never change a light's `visible` or `castShadow`, or the number of lights, at runtime. The renderer's light slots are fixed and lit by intensity only (render/vehiclelights.ts). One count change recompiles every lit material at once.
 - A material that is disposed with its chunk or car takes its program with it, if nothing else holds that program. Keep one long-lived holder (an anchor) for variants that come and go.
 - New runtime material patches need a stable, shared `customProgramCacheKey`. Do not make it per instance.
 

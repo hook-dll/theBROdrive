@@ -18,7 +18,6 @@ import {
   shadowsFor,
   starMagnitudeFor,
   storeSettings,
-  streetLightSlotsFor,
   vehicleLightSlotsFor,
   viewDistanceFor,
 } from './game/settings';
@@ -51,7 +50,6 @@ import { TumbleweedField } from './agents/tumbleweed';
 import { CameraRig, type CameraTarget } from './render/cameras';
 import { HeldItemView } from './render/held';
 import { TrunkView } from './render/trunkview';
-import { LightBudget } from './render/lights';
 import { Sky } from './render/sky';
 import { loadStarField } from './render/starcatalog';
 import { VistaMesh } from './render/vista';
@@ -103,7 +101,6 @@ import { WeatherParticles } from './render/weatherparticles';
 import { setDesertDustArclength } from './render/desertdust';
 import { setGroundFadeWindow } from './render/groundfade';
 import { WreckTrunkField } from './world/wrecktrunks';
-import { PoiSwitchField } from './world/poiswitches';
 import { CourierField, courierStop } from './world/couriers';
 import { GateField } from './world/gates';
 import { loadSpine } from './world/spinecache';
@@ -431,9 +428,6 @@ async function boot(): Promise<void> {
   // Static trunk registries follow streamed physics chunks; edited contents live in state.
   const wreckTrunks = new WreckTrunkField();
   const couriers = new CourierField();
-  // Light switches follow their buildings in and out of the streamed world; nothing
-  // about them is saved. See world/poiswitches.ts.
-  const switches = new PoiSwitchField();
   /** The parked plane's colliders, so the eye ray can tell the plane from scenery. */
   const boardable = new BoardableField();
   const birds = new BirdFlock(renderer.scene, road, terrain, world.seed, origin);
@@ -565,15 +559,7 @@ async function boot(): Promise<void> {
   streamer.register(new DelineatorProvider(roadDistance, debris));
   streamer.register(new SidetrackProvider(roadDistance));
   streamer.register(new MonumentProvider());
-  streamer.register(new PoiProvider(loose, trailerField, wreckTrunks, switches, couriers, roadDistance));
-
-  // Point lights are budgeted per frame (see LightBudget); constructed before the
-  // first chunk build so the budget's first scan sees chunk 0's lamps.
-  const lightBudget = new LightBudget(
-    renderer.scene,
-    world.state.settings.graphicsQuality,
-    mobilePresentation,
-  );
+  streamer.register(new PoiProvider(loose, trailerField, wreckTrunks, couriers, roadDistance));
 
   let initialYaw = 0;
   const player = new Player(physics, world, origin);
@@ -632,13 +618,12 @@ async function boot(): Promise<void> {
         // simulation rate can never leave the report describing a rate the game is not
         // running. The header and the per-second split have to agree about it.
         const simulationHz = Math.round(1 / FIXED_DT);
-        // The light budget belongs in the header because it is the largest per-PIXEL cost
+        // The spot budget belongs in the header because it is the largest per-PIXEL cost
         // the game has, and it is invisible anywhere else: the lamps are dormant in
         // daylight and there is nothing on screen to suggest that every lit fragment is
         // still paying for all of them. Pixels x slots is the number that explains a warm
         // phone, so it is printed rather than left to be inferred.
         const spotSlots = vehicleLightSlotsFor(s.graphicsQuality, mobilePresentation);
-        const pointSlots = streetLightSlotsFor(s.graphicsQuality, mobilePresentation);
         const stars = starMagnitudeFor(s.graphicsQuality, mobilePresentation);
         const framesPerSecond =
           s.frameRateLimit === null ? 'uncapped' : `${s.frameRateLimit} FPS (capped)`;
@@ -655,8 +640,7 @@ async function boot(): Promise<void> {
             `msaa ${s.msaa ? 'on' : 'off'}`,
           gpuLine,
           `simulation fixed at ${simulationHz} Hz`,
-          `light slots ${spotSlots} spot + ${pointSlots} point = ${spotSlots + pointSlots} ` +
-            `per lit fragment, stars to magnitude ${stars}`,
+          `light slots ${spotSlots} spot per lit fragment, stars to magnitude ${stars}`,
           // The decisive pair. A frame whose `draw` is large because of FILL has a big
           // triangle count or a big pixel count; one that is large because of ISSUING has
           // a big call count. The two want opposite fixes, and this is the only place the
@@ -1132,7 +1116,6 @@ async function boot(): Promise<void> {
     loose,
     trailerField,
     wreckTrunks,
-    switches,
     couriers,
     () => {
       const active = activeCar();
@@ -1945,17 +1928,7 @@ async function boot(): Promise<void> {
     if (driving !== null || heldAfterSelection?.type !== 'torchlight') torchlightActive = false;
     if (driving !== null || heldAfterSelection?.type !== 'camera') cameraActive = false;
     if (driving !== null || dying || heldAfterSelection?.type !== 'postcard') postcardView = 'down';
-    // A LIGHT SWITCH TAKES E FROM THE HELD ITEM, and only while it is aimed.
-    //
-    // E is the key that works what is in your hands, and a switch is the one thing in the
-    // world that is worked rather than carried or got into — so the aimed switch wins, and
-    // only while aimed. Letting the item have it as well would mean switching a light off
-    // every time a player with a torchlight walked past a wall.
-    const aimedSwitch = f.useHeld ? interaction.aimedSwitch() : null;
-    if (driving === null && !dying && !medicineActive && aimedSwitch !== null) {
-      const lit = interaction.flipAimedSwitch();
-      if (lit !== null) hud.setToast(lit ? 'lights on' : 'lights off');
-    } else if (driving === null && !dying && !medicineActive && f.useHeld && heldAfterSelection !== null) {
+    if (driving === null && !dying && !medicineActive && f.useHeld && heldAfterSelection !== null) {
       if (heldAfterSelection.type === 'medicine') {
         // Health and inventory change in one turn before the autosave microtask.
         // The removed item's viewmodel remains owned by the timed animation below.
@@ -2609,28 +2582,12 @@ async function boot(): Promise<void> {
     );
     devTools?.updateLakeSeek(activeS);
 
-    // Building and homestead lamps reach the screen through a fixed set of light slots,
-    // half ahead of the view and half behind, so a lamp coming into range does not
-    // change the light-shader permutation or hitch the frame.
-    //
-    // The factor is a RAMP across the twilight band, not `isNight`. Both consumers
-    // scale intensity by it — `setLamps` for the reflector posts' emissive chips, and
-    // the budget by copying each chosen source's own intensity — so the lamps come up
-    // over the dusk instead of every one in view switching within a frame. The slot
-    // count is unchanged at either end, so the shader permutation still never moves.
+    // The night factor is a RAMP across the twilight band, not `isNight`, so the
+    // reflector posts' emissive chips come up over the dusk instead of every one in
+    // view switching within a frame.
     const night = sky.lampFactor;
     frameProfiler?.begin('lights');
     streamer.setLamps(night);
-    const lampDirection = camera.eyeDirection;
-    lightBudget.update(
-      cam.x,
-      cam.y,
-      cam.z,
-      lampDirection.x,
-      lampDirection.z,
-      night,
-      streamer.lampRevision,
-    );
     frameProfiler?.end('lights');
 
     if (driving) {

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-import { C, barrel, box, buildingShell, cylinder, roomLight, shelf, type V3 } from './kit';
+import { C, barrel, box, buildingShell, cylinder, shelf, type V3 } from './kit';
 
 export function beamBetween(parent: THREE.Object3D, a: THREE.Vector3, b: THREE.Vector3, width: number, color: number): void {
   const direction = new THREE.Vector3().subVectors(b, a);
@@ -117,7 +117,6 @@ export function buildRelayCluster(root: THREE.Group): void {
     right: [[-0.7, 0.55, 0.8, 1.75]],
   });
   shelf(hut, -1.4, 0.6, 1.5, Math.PI / 2, false);
-  roomLight(hut, 0, 0, 2.4, [0.9, 1.2, -1.38], Math.PI);
   box(root, [2.4, 1.55, 1.35], [9.0, 0.78, 6.0], C.fadedGreen);
   cylinder(root, 0.34, 0.34, 1.4, 10, [10.5, 0.7, 6.0], C.darkMetal, [Math.PI / 2, 0, 0]);
   for (let i = 0; i < 5; i++) box(root, [0.1, 0.1, 7.2], [-5.5 + i * 2.7, 0.08, 0.5], C.darkMetal, [0, 0.12 * i, 0]);

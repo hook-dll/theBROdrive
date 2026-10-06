@@ -26,9 +26,7 @@ import { GameWorld, newWorldState } from '../src/game/state';
 import { CHUNK_LENGTH, type ChunkContext } from '../src/world/chunks';
 import { Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
-import { Interaction } from '../src/player/interaction';
 import { POI_SPACING, PoiProvider, desertPoiClearOfRoad, desertPoisBetween, poisBetween, type PoiStock } from '../src/world/poi';
-import { PoiSwitchField } from '../src/world/poiswitches';
 import { createVariantInstance, variantCount, variantDef } from '../src/world/poivariantbuild';
 import {
   POI_STRUCTURES,
@@ -38,7 +36,7 @@ import {
   warmPoiStructures,
 } from '../src/world/poistructures';
 import { RoadDistance } from '../src/world/roaddistance';
-import { createPoiVariant, mergePoiStatics, poiVariantIndex } from '../src/world/poi-variants';
+import { createPoiVariant, mergePoiStatics } from '../src/world/poi-variants';
 import { fitGround } from '../src/world/footprint';
 import { carModelMeasure } from '../src/render/carmodel';
 import { BoardableField, StartSiteProvider } from '../src/story/sitebuild';
@@ -481,7 +479,7 @@ const MAX_RESIDUAL_M = 0.6;
 // THE CHECK THIS FILE WAS MISSING, and its absence cost a real bug. A variant is built
 // from the catalogue, merged, then cached and re-made per placement — and the caching
 // step reconstructed every mesh at the origin, which silently flattened every mesh that
-// `mergePoiStatics` does not merge (roofs, switches, unique-material trims). The result
+// `mergePoiStatics` does not merge (roofs, door markers, unique-material trims). The result
 // was buildings with no roofs and one variant 2.7 m short, and it looked plausible in a
 // screenshot, because most of a building IS merged.
 //
@@ -511,10 +509,6 @@ const MAX_RESIDUAL_M = 0.6;
     instance.group.traverse((object) => {
       const mesh = object as THREE.Mesh;
       if (!mesh.isMesh || !mesh.geometry) return;
-      // A bulb and its light belong to the PLACEMENT, deliberately: two buildings of one
-      // variant must not be able to darken each other's bulbs. They are therefore not part
-      // of what the catalogue builds, and this check is about the catalogue's geometry.
-      if (mesh.userData.poiBulb === true) return;
       instanceMeshes++;
       if (mesh.userData.poiRoof === true) instanceRoofs++;
     });
@@ -534,7 +528,6 @@ const MAX_RESIDUAL_M = 0.6;
     instance.group.traverse((object) => {
       const mesh = object as THREE.Mesh;
       if (!mesh.isMesh || !mesh.geometry) return;
-      if (mesh.userData.poiBulb === true) return;
       got.expandByObject(mesh, true);
     });
     const delta = Math.max(
@@ -560,34 +553,20 @@ const MAX_RESIDUAL_M = 0.6;
   );
 }
 
-// --- 6. the switches work, and the buildings stand ON the ground ------------------
+// --- 6. the buildings stand ON the ground -------------------------------------
 //
-// Two properties, both of which have already been broken here once.
-//
-// A switch is the one interactive fitting these buildings have, and it is easy to build
-// one that looks right and does nothing: the closures once drove spot lights that the
-// world's marker replacement then removed and disposed, so pressing a switch would flip a
-// boolean nobody could see. So the switch is tested by its CONSEQUENCE — after every
-// switch in a chunk is pressed, strictly fewer light sources are lit — and by whether it
-// is where a person could reach it, which is a question about the variant's own frame,
-// not about the terrain.
-//
-// And a building must stand on the sand. The apron that used to sit under every POI was
+// A building must stand on the sand. The apron that used to sit under every POI was
 // the wrong answer to uneven ground: measured 0.82 m deep on one building, it read as a
 // plinth. What replaced it is a fitted plane and a `residual` of burial, and whether that
 // is enough is a question about the ground under the walls — which is what is measured
 // here, directly, rather than inferred from the height of one point.
 {
-  // Switches only live in the relay station now, one structure in fifty-three, so the
-  // walk is long enough to meet several.
   const WALK_CHUNKS = 1500;
   const walkKm = (WALK_CHUNKS * CHUNK_LENGTH) / 1000;
-  const switches = new PoiSwitchField();
   const provider = new PoiProvider(
     { spawnItem: () => {}, spawnPart: () => {}, forget: () => {} } as never,
     { spawn: () => {}, forget: () => {} } as never,
     { register: () => {}, forget: () => {} } as never,
-    switches,
     { register: () => {}, forget: () => {} } as never,
     roadDistance,
   );
@@ -609,7 +588,6 @@ const MAX_RESIDUAL_M = 0.6;
   };
 
   /** Buildings spanning a stretch of road, built the way the streamer builds them. */
-  const built: THREE.Object3D[] = [];
   const buildings: THREE.Object3D[] = [];
   const placed: { readonly object: THREE.Object3D; readonly s: number }[] = [];
   for (let chunk = 0; chunk < WALK_CHUNKS; chunk++) {
@@ -630,7 +608,6 @@ const MAX_RESIDUAL_M = 0.6;
     // Chunk-local and world coincide here (`originX`/`originZ` are zero), so the matrix
     // this bakes is a real world matrix and the terrain can be asked about it.
     content.group.updateMatrixWorld(true);
-    built.push(content.group);
     const nearS = sStart + CHUNK_LENGTH / 2;
     content.group.traverse((object) => {
       if (typeof object.userData.poiStructure !== 'string') return;
@@ -639,192 +616,7 @@ const MAX_RESIDUAL_M = 0.6;
     });
   }
 
-  const litSources = (): number => {
-    let on = 0;
-    for (const group of built) {
-      group.traverse((object) => {
-        const light = object as THREE.PointLight;
-        if (light.isLight && object.userData.lightBudgetSource === true && light.intensity > 0) {
-          on++;
-        }
-      });
-    }
-    return on;
-  };
-
-  const registered = [...switches.values()];
-  check(registered.length > 0, `not one light switch was registered in ${walkKm} km of road`);
   check(buildings.length > 0, `not one building was placed in ${walkKm} km of road`);
-
-  // A REGISTRY IS IN ABSOLUTE COORDINATES, and the geometry is not.
-  //
-  // A chunk builds relative to its own floating origin, so a building's world matrix is
-  // chunk-local; every registry in the world — wreck trunks, couriers, switches — and
-  // every consumer of one, including the interaction ray, is in absolute coordinates. So
-  // registering through the matrix alone puts the switch wherever the origin happens to
-  // be, which on a real chunk is kilometres. That is invisible in the checks above,
-  // because they build with `originX`/`originZ` at zero and zero hides the error exactly.
-  //
-  // The property is therefore stated as an INVARIANCE: build the same stretch of road
-  // twice, once at the floating origin and once a long way from it, and a switch registered
-  // in absolute coordinates lands in the same place both times. Registered from the chunk's
-  // local matrix instead, it lands a whole origin away — and the check fails by exactly the
-  // distance between the two builds, which is the diagnostic.
-  {
-    const buildAt = (originX: number, originZ: number): PoiSwitchField => {
-      const field = new PoiSwitchField();
-      const shifted = new PoiProvider(
-        { spawnItem: () => {}, spawnPart: () => {}, forget: () => {} } as never,
-        { spawn: () => {}, forget: () => {} } as never,
-        { register: () => {}, forget: () => {} } as never,
-        field,
-        { register: () => {}, forget: () => {} } as never,
-        roadDistance,
-      );
-      for (let chunk = 0; chunk < WALK_CHUNKS; chunk++) {
-        const sStart = chunk * CHUNK_LENGTH;
-        const content = shifted.build({
-          chunkIndex: chunk,
-          sStart,
-          sEnd: sStart + CHUNK_LENGTH,
-          road,
-          terrain,
-          world,
-          hasPhysics: false,
-          originX,
-          originZ,
-        } as unknown as ChunkContext);
-        content?.group.updateMatrixWorld(true);
-      }
-      return field;
-    };
-
-    const here = buildAt(0, 0);
-    const far = buildAt(26_000, -41_000);
-    const hereList = [...here.values()];
-    const farList = [...far.values()];
-    check(
-      hereList.length > 1 && hereList.length === farList.length,
-      `the same road registered ${hereList.length} switches at the origin and ` +
-        `${farList.length} far from it`,
-    );
-    const byId = new Map(hereList.map((entry) => [entry.id, entry]));
-    let wrong = 0;
-    let worst = 0;
-    for (const entry of farList) {
-      const origin = byId.get(entry.id);
-      if (!origin) continue;
-      const drift = Math.max(
-        Math.abs(entry.x - origin.x),
-        Math.abs(entry.y - origin.y),
-        Math.abs(entry.z - origin.z),
-      );
-      if (drift > 0.01) {
-        wrong++;
-        if (drift > worst) worst = drift;
-      }
-    }
-    check(
-      wrong === 0,
-      `${wrong} switches landed somewhere else when the chunk's floating origin moved ` +
-        `(worst: ${worst.toFixed(0)} m) — the registry is in absolute coordinates and they ` +
-        'are not',
-    );
-  }
-
-  // A switch is a switchplate at the height of a hand. Measured in the building's own
-  // frame, because that is the frame the question is well posed in: a ground-floor switch
-  // is 1.2 m above the floor, the landing of a two-storey house puts the same plate at
-  // 4.55 m, and both are right. What is not right is a plate sunk into the floor, and what
-  // is measured above the base catches a plate left in the ceiling.
-  //
-  // The variant is not placed on terrain here on purpose: the ground a switch is above is
-  // the building's own floor, and asking the terrain instead conflates a switch with the
-  // hill the building is buried in.
-  const down = new THREE.Vector3(0, -1, 0);
-  const raycaster = new THREE.Raycaster();
-  let switchCount = 0;
-  for (let index = 0; index < variantCount(); index++) {
-    const instance = createVariantInstance(index);
-    const id = variantDef(index).id;
-    for (const entry of instance.switches) {
-      switchCount++;
-      check(
-        entry.centre.y > 0.6 && entry.centre.y < 5.8,
-        `${id}: a light switch is mounted ${entry.centre.y.toFixed(2)} m above the floor`,
-      );
-      raycaster.set(
-        new THREE.Vector3(entry.centre.x, entry.centre.y - 0.01, entry.centre.z),
-        down,
-      );
-      const hits = raycaster.intersectObject(instance.group, true);
-      // NO HIT IS NOT A DEFECT, and requiring one was measured to be wrong: `porch-house`,
-      // `spacious-veranda-house` and `relay-cluster` each have a plate at local y = 1.20 to
-      // 1.30 with no floor modelled beneath it — these buildings have verandas, porches and
-      // equipment aprons rather than a continuous slab — and all three are switches at the
-      // height of a hand, which the check above already requires. Demanding floor geometry
-      // here would fail three of the twenty-six for a property they do not need.
-      //
-      // So the ray is asked the one question it answers reliably: is the plate SUNK into
-      // whatever is beneath it? That is the failure that matters, and a plate with open air
-      // below is one a player can reach.
-      if (hits.length > 0) {
-        check(
-          hits[0]!.distance > 0.6,
-          `${id}: a light switch is sunk ${hits[0]!.distance.toFixed(2)} m into what is below it`,
-        );
-      }
-      const longest = Math.max(...entry.halfExtents) * 2;
-      check(
-        longest > 0.05 && longest < 0.25,
-        `${id}: a light switch measures ${longest.toFixed(3)} m across, not a switchplate`,
-      );
-      check(
-        entry.isOn() === true,
-        `${id}: a light switch starts switched off, so a press would turn it on`,
-      );
-    }
-  }
-  check(switchCount > 0, 'no variant in the catalogue has a light switch at all');
-
-  // AND IT MUST BE WHERE ITS BUILDING IS. The switch is registered with the world as a
-  // world-space box, so the registration has to place it through the building's own
-  // transform — and the failure this catches is quiet: a switch registered while its
-  // building was still at the origin still has the right size, still toggles, and is
-  // standing in the sand fifty metres from the wall it is screwed to. Measured as
-  // coincidence with the placed building rather than by asking the terrain, because the
-  // terrain has no opinion about where a wall is.
-  const box = new THREE.Box3();
-  const want = new THREE.Vector3();
-  let strays = 0;
-  let misplaced = 0;
-  for (const entry of registered) {
-    let host: THREE.Object3D | null = null;
-    for (const building of buildings) {
-      box.setFromObject(building, true).expandByScalar(0.4);
-      if (box.containsPoint(new THREE.Vector3(entry.x, entry.y, entry.z))) host = building;
-    }
-    if (host === null) {
-      strays++;
-      continue;
-    }
-    const structureId = String(host.userData.poiStructure);
-    if (structureDef(POI_STRUCTURES.findIndex((s) => s.id === structureId)).kind !== 'mast') continue;
-    const index = poiVariantIndex(structureId);
-    const matches = createVariantInstance(index).switches.some((spec) => {
-      want.copy(spec.centre).applyMatrix4(host!.matrixWorld);
-      return want.distanceTo(new THREE.Vector3(entry.x, entry.y, entry.z)) < 0.01;
-    });
-    if (!matches) misplaced++;
-  }
-  check(
-    strays === 0,
-    `${strays} of ${registered.length} light switches are not inside any building`,
-  );
-  check(
-    misplaced === 0,
-    `${misplaced} light switches are not where their building's own transform puts them`,
-  );
 
   // A WALL MUST MEET THE GROUND. The building's floor is the plane its local y=0 lies in,
   // so ground that resolves BELOW that plane at any point under the footprint is daylight
@@ -864,222 +656,10 @@ const MAX_RESIDUAL_M = 0.6;
       'there is daylight under a wall',
   );
 
-  // EACH SWITCH, ON ITS OWN. A total that falls after every switch is pressed is satisfied
-  // by ONE switch doing all the work while the rest flip a private boolean — which is the
-  // original bug, in the case where only some of a chunk's switches were ever connected.
-  // So each one is pressed, its own effect is required, and it is put back before the next.
-  const before = litSources();
-  let flipped = 0;
-  for (const entry of registered) {
-    const litBefore = litSources();
-    if (entry.toggle() !== false) failures.push(`${entry.id} did not switch off when pressed`);
-    const litAfter = litSources();
-    if (!(litAfter < litBefore)) {
-      failures.push(
-        `${entry.id} switched off but changed nothing: ${litBefore} lit sources before and ` +
-          `${litAfter} after, so it controls no light in the world`,
-      );
-    }
-    if (entry.toggle() !== true) failures.push(`${entry.id} did not switch back on`);
-    flipped++;
-  }
-  // And the night-time picture, which is what a player sees: with every switch off, far
-  // fewer sources are lit.
-  for (const entry of registered) entry.toggle();
-  const allOff = litSources();
-  for (const entry of registered) entry.toggle();
-  const restored = litSources();
-  check(
-    flipped > 0 && allOff < before,
-    `with every switch off the world still lights ${allOff} sources against the ${before} ` +
-      'it started with',
-  );
-  check(
-    restored === before,
-    `after pressing and restoring all ${flipped} switches the world has ${restored} lit ` +
-      `sources against the ${before} it started with — a switch is not idempotent`,
-  );
-
   console.log(
-    `  ${buildings.length} buildings and ${flipped} switches over ${walkKm} km: pressing every ` +
-      `switch takes ${before} lit sources to ${allOff}; worst gap under a wall ` +
+    `  ${buildings.length} buildings over ${walkKm} km: worst gap under a wall ` +
       `${worstGap.toFixed(3)} m`,
   );
-}
-
-// --- 7. E works a switch, and only the one being aimed at --------------------
-//
-// The switch's wiring being right is not the same as the KEY being right, and the failure
-// mode is a mismatch rather than an absence: `pickedSwitch` is found by a proximity test
-// before the targets are ranked, so it means "a switch is in front of you" rather than "you
-// are looking at it". A player standing at a car with a switch on the wall beside them
-// would then get a prompt saying "open the door" and a key that turned the lights off.
-//
-// So this drives `Interaction` itself — the real class, with the real arbitration — and
-// asserts what the player sees and what the key does, in all three cases: aimed, looking
-// away, and out of reach.
-{
-  const stub = (over: Record<string, unknown> = {}) => ({
-    spawn: () => {},
-    spawnItem: () => {},
-    spawnPart: () => {},
-    register: () => {},
-    forget: () => {},
-    partIdForCollider: () => null,
-    itemIdForCollider: () => null,
-    trailerIdForCollider: () => null,
-    values: () => [][Symbol.iterator](),
-    ...over,
-  });
-  const frame = (over: Record<string, boolean> = {}) =>
-    ({
-      interact: false,
-      mount: false,
-      dropItem: false,
-      useHeld: false,
-      usePrimary: false,
-      useSecondary: false,
-      ...over,
-    }) as never;
-
-  const makeInteraction = (
-    field: PoiSwitchField,
-    options: {
-      hit?: unknown;
-      loose?: Record<string, unknown>;
-      origin?: { x: number; z: number };
-    } = {},
-  ): Interaction =>
-    new Interaction(
-      { raycast: () => options.hit ?? null } as never,
-      world,
-      { held: null } as never,
-      stub(options.loose) as never,
-      stub() as never,
-      stub() as never,
-      field,
-      stub() as never,
-      () => null,
-      (() => {}) as never,
-      (() => {}) as never,
-      (options.origin ?? { x: 0, z: 0 }) as never,
-      new BoardableField(),
-    );
-
-  const field = new PoiSwitchField();
-  let toggles = 0;
-  field.register({
-    id: 'probe-plate',
-    x: 0,
-    y: 1.2,
-    z: 2,
-    qx: 0,
-    qy: 0,
-    qz: 0,
-    qw: 1,
-    halfExtents: [0.12, 0.16, 0.03],
-    toggle: () => {
-      toggles++;
-      return false;
-    },
-    isOn: () => true,
-  });
-
-  const eye = { x: 0, y: 1.2, z: 0 };
-  const look = (interaction: Interaction, dx: number, dz: number, fromZ = 0) =>
-    interaction.fixedUpdate(1 / 60, frame(), eye.x, eye.y, fromZ, dx, 0, dz, 0);
-
-  const facing = makeInteraction(field);
-  const seen = look(facing, 0, 1);
-  check(
-    seen.prompt === '[E] turn the lights off',
-    `looking straight at a switch in reach, the prompt says ${JSON.stringify(seen.prompt)}`,
-  );
-  check(
-    facing.aimedSwitch()?.id === 'probe-plate',
-    'looking straight at a switch in reach, no switch is aimed',
-  );
-  check(facing.flipAimedSwitch() === false, 'E did not work the aimed switch');
-  check(toggles === 1, `E worked the switch ${toggles} times, not once`);
-
-  // Turned away: the prompt must go, and E must do nothing. This is the case the proximity
-  // test alone gets wrong.
-  const away = look(facing, 0, -1);
-  check(away.prompt === null, `looking away from the switch, the prompt still says ${JSON.stringify(away.prompt)}`);
-  check(facing.aimedSwitch() === null, 'a switch behind the player is still aimed');
-  check(facing.flipAimedSwitch() === null, 'E worked a switch the player is not looking at');
-  check(toggles === 1, `E worked a switch the player is not looking at (${toggles} presses)`);
-
-  // AND THE ARBITRATION ITSELF, which the case above does not reach: the switch has to be
-  // IN FRONT OF the player, so that the proximity test finds it, and a nearer target has to
-  // win the ranking anyway. That is the real shape of the bug — the prompt says one thing
-  // and the key does another — and it needs a second target to exist at all.
-  const contested = makeInteraction(field, {
-    hit: { colliderHandle: 7, toi: 0.8 },
-    loose: { partIdForCollider: (h: number) => (h === 7 ? 'a-part' : null) },
-  });
-  const ranking = look(contested, 0, 1);
-  // The prompt may be null here — the winner is a loose part, and offering it is up to the
-  // part's own rules. What matters is that it does not offer the SWITCH.
-  check(
-    ranking.prompt === null || !ranking.prompt.includes('lights'),
-    `with a part 0.8 m away the prompt offers the switch 2 m away: ` +
-      `${JSON.stringify(ranking.prompt)}`,
-  );
-  check(
-    contested.aimedSwitch() === null,
-    'a switch 2 m away is aimed while a part 0.8 m away won the ranking — the prompt and ' +
-      'the key disagree about what the player is looking at',
-  );
-  check(
-    contested.flipAimedSwitch() === null,
-    'E worked a switch that did not win the ranking, so the key did something the prompt ' +
-      'never offered',
-  );
-
-  // THE FLOATING FRAME, on the reading side this time. The eye arrives relative to the
-  // origin and the registry is absolute, so a switch is reachable only while the origin is
-  // at zero unless the conversion is done here too — which means the first few metres of a
-  // drive work and nothing after them does.
-  const ORIGIN = { x: 26_000, z: -41_000 };
-  // The eye's ABSOLUTE position is the same as in the first case — the plate two metres
-  // ahead — but expressed relative to an origin 48 km away, which is what `fixedUpdate`
-  // receives once the world has rebased.
-  const rebased = makeInteraction(field, { origin: ORIGIN });
-  rebased.fixedUpdate(1 / 60, frame(), 0 - ORIGIN.x, 1.2, 0 - ORIGIN.z, 0, 0, 1, 0);
-  check(
-    rebased.aimedSwitch()?.id === 'probe-plate',
-    'a switch two metres away could not be aimed once the world had rebased 48 km — the ' +
-      'aim is compared against the registry without converting the eye out of the ' +
-      'floating frame, so switches work only near the world origin',
-  );
-  check(
-    rebased.flipAimedSwitch() === false,
-    'E did not work the switch after the world rebased',
-  );
-
-  // A WALL BETWEEN THE EYE AND THE PLATE. The switch has no collider of its own, so the ray
-  // hits the wall — and a hit nearer than the plate means the plate is behind it. Without
-  // this, a player standing against a wall can work the light on the other side of it.
-  const throughWall = makeInteraction(field, { hit: { colliderHandle: 9, toi: 1.0 } });
-  const blocked = look(throughWall, 0, 1);
-  check(
-    throughWall.aimedSwitch() === null,
-    `a switch 2 m away is aimed through a wall 1 m away (prompt ${JSON.stringify(blocked.prompt)})`,
-  );
-  check(
-    throughWall.flipAimedSwitch() === null,
-    'E worked a switch through a wall',
-  );
-
-  // Out of reach: a switch three metres behind a wall still must not be offerable.
-  const far = makeInteraction(field);
-  const missed = look(far, 0, 1, -2.5);
-  check(missed.prompt === null, `a switch 4.5 m away still offers a prompt: ${JSON.stringify(missed.prompt)}`);
-  check(far.aimedSwitch() === null, 'a switch out of reach is aimed');
-  check(far.flipAimedSwitch() === null, 'E worked a switch out of reach');
-
-  console.log('  E works an aimed switch, and does nothing when one is not aimed');
 }
 
 if (failures.length > 0) {

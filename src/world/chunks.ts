@@ -70,24 +70,6 @@ export function freezeStaticSubtree(root: THREE.Object3D): void {
   });
 }
 
-/**
- * Whether a chunk's content carries light-budget source markers (a building's lamps,
- * the homestead's). `LightBudget` rescans the scene only when the streamer's lamp
- * revision moves, so adding or removing such content is what has to move it.
- *
- * This used to be keyed on `setLamps`, which only the old street-lamp poles and the
- * reflector posts implement. Every chunk had poles, so the revision moved on every
- * chunk and a POI's markers were found by accident; with the lamps gone from the
- * poles the key has to be the markers themselves.
- */
-function holdsLightSources(content: ChunkContent): boolean {
-  let found = false;
-  content.group.traverse((object) => {
-    if (object.userData.lightBudgetSource === true) found = true;
-  });
-  return found;
-}
-
 export interface ChunkContext {
   chunkIndex: number;
   sStart: number;
@@ -180,8 +162,6 @@ interface ActiveProviderBuild {
   readonly iterator: Iterator<void, ChunkContent | null>;
   /** A refresh does not affect construction-stage ordering. */
   readonly refresh: boolean;
-  /** Tracks lamp ownership across a partial replacement. */
-  removedLamps: boolean;
 }
 
 interface BuiltChunk {
@@ -210,8 +190,6 @@ export class ChunkStreamer {
   /** Provider contributions awaiting an amortized rebuild after a world setting changes. */
   private readonly refreshQueue: { index: number; providerId: string }[] = [];
   private readonly lastChunkIndex: number;
-  /** Increments only when scene-owned lamp sources are added or removed. */
-  private lightRevision = 0;
   private previousPlayerS: number | null = null;
   private travelDirection: -1 | 0 | 1 = 0;
 
@@ -234,10 +212,6 @@ export class ChunkStreamer {
       chunk.complete = false;
     }
     if (this.built.size > 0) this.scheduler.setPending('road', true);
-  }
-
-  get lampRevision(): number {
-    return this.lightRevision;
   }
 
   /**
@@ -328,7 +302,7 @@ export class ChunkStreamer {
       const wanted = (index >= min && index <= max) || index === prefetch;
       const needsPhysics = onRoad && Math.abs(index - playerChunk) <= PHYSICS_RADIUS;
       if (!wanted) {
-        if (this.teardown(chunk)) this.lightRevision++;
+        this.teardown(chunk);
         this.built.delete(index);
       } else if (needsPhysics && !chunk.hasPhysics) {
         if (chunk.complete) {
@@ -336,7 +310,7 @@ export class ChunkStreamer {
         } else {
           // Still mid-build without physics: no completed content to redo in place,
           // so cancel and let the normal queue restart it below, physical this time.
-          if (this.teardown(chunk)) this.lightRevision++;
+          this.teardown(chunk);
           this.built.delete(index);
         }
       }
@@ -433,7 +407,7 @@ export class ChunkStreamer {
   private buildChunkSync(index: number, hasPhysics: boolean): void {
     const existing = this.built.get(index);
     if (existing) {
-      if (this.teardown(existing)) this.lightRevision++;
+      this.teardown(existing);
       this.built.delete(index);
     }
     const chunk: BuiltChunk = {
@@ -453,12 +427,11 @@ export class ChunkStreamer {
         if (content) {
           this.attachContent(content, chunk.originX, chunk.originZ);
           this.insertContent(chunk, provider, content);
-          if (holdsLightSources(content)) this.lightRevision++;
         }
       }
       chunk.complete = true;
     } catch (error) {
-      if (this.teardown(chunk)) this.lightRevision++;
+      this.teardown(chunk);
       this.built.delete(index);
       throw error;
     }
@@ -503,16 +476,14 @@ export class ChunkStreamer {
         return;
       }
       const current = chunk.contents.findIndex((entry) => entry.providerId === provider.id);
-      let removedLamps = false;
       if (current >= 0) {
-        removedLamps = this.teardownContent(chunk.contents[current]!.content);
+        this.teardownContent(chunk.contents[current]!.content);
         chunk.contents.splice(current, 1);
       }
       active = {
         provider,
         iterator: provider.buildSteps(this.context(chunk)),
         refresh: true,
-        removedLamps,
       };
       chunk.activeBuild = active;
     }
@@ -531,9 +502,7 @@ export class ChunkStreamer {
     if (content) {
       this.attachContent(content, chunk.originX, chunk.originZ);
       this.insertContent(chunk, provider, content);
-      active.removedLamps ||= holdsLightSources(content);
     }
-    if (active.removedLamps) this.lightRevision++;
     const queueIndex = this.refreshQueue.indexOf(request);
     if (queueIndex >= 0) this.refreshQueue.splice(queueIndex, 1);
   }
@@ -583,7 +552,6 @@ export class ChunkStreamer {
           provider,
           iterator: provider.buildSteps(this.context(chunk)),
           refresh: false,
-          removedLamps: false,
         };
         chunk.activeBuild = active;
       }
@@ -603,7 +571,6 @@ export class ChunkStreamer {
       if (content) {
         this.attachContent(content, chunk.originX, chunk.originZ);
         this.insertContent(chunk, provider, content);
-        if (holdsLightSources(content)) this.lightRevision++;
       }
       chunk.complete = chunk.nextProvider === this.providers.length;
       return;
@@ -614,7 +581,6 @@ export class ChunkStreamer {
     if (content) {
       this.attachContent(content, chunk.originX, chunk.originZ);
       this.insertContent(chunk, provider, content);
-      if (holdsLightSources(content)) this.lightRevision++;
     }
     chunk.complete = chunk.nextProvider === this.providers.length;
   }
@@ -622,18 +588,15 @@ export class ChunkStreamer {
   /** Rebuild one provider's current contribution for a live, complete chunk. */
   private replaceContribution(chunk: BuiltChunk, provider: ChunkProvider): void {
     const current = chunk.contents.findIndex((entry) => entry.providerId === provider.id);
-    let changedLamps = false;
     if (current >= 0) {
-      changedLamps = this.teardownContent(chunk.contents[current]!.content);
+      this.teardownContent(chunk.contents[current]!.content);
       chunk.contents.splice(current, 1);
     }
     const content = provider.build(this.context(chunk));
     if (content) {
       this.attachContent(content, chunk.originX, chunk.originZ);
       this.insertContent(chunk, provider, content);
-      changedLamps ||= holdsLightSources(content);
     }
-    if (changedLamps) this.lightRevision++;
   }
 
   private insertContent(chunk: BuiltChunk, provider: ChunkProvider, content: ChunkContent): void {
@@ -661,7 +624,7 @@ export class ChunkStreamer {
       if (!chunk.complete) incomplete.push(chunk);
     }
     for (const chunk of incomplete) {
-      if (this.teardown(chunk)) this.lightRevision++;
+      this.teardown(chunk);
       this.built.delete(chunk.index);
     }
 
@@ -705,12 +668,10 @@ export class ChunkStreamer {
     for (const collider of content.colliders) collider.setEnabled(true);
   }
 
-  private teardownContent(content: ChunkContent): boolean {
-    const ownedLamps = holdsLightSources(content);
+  private teardownContent(content: ChunkContent): void {
     this.scene.remove(content.group);
     for (const body of content.bodies) this.physics.removeBody(body);
     content.dispose?.();
-    return ownedLamps;
   }
 
   private cancelBuild(chunk: BuiltChunk): void {
@@ -720,14 +681,9 @@ export class ChunkStreamer {
     active.iterator.return?.();
   }
 
-  private teardown(chunk: BuiltChunk): boolean {
+  private teardown(chunk: BuiltChunk): void {
     this.cancelBuild(chunk);
-    let removedLamps = false;
-    for (const entry of chunk.contents) {
-      const contentRemovedLamps = this.teardownContent(entry.content);
-      removedLamps ||= contentRemovedLamps;
-    }
-    return removedLamps;
+    for (const entry of chunk.contents) this.teardownContent(entry.content);
   }
 
   private syncPending(): void {
@@ -744,12 +700,7 @@ export class ChunkStreamer {
   }
 
   dispose(): void {
-    let removedLamps = false;
-    for (const [, chunk] of this.built) {
-      const chunkRemovedLamps = this.teardown(chunk);
-      removedLamps ||= chunkRemovedLamps;
-    }
-    if (removedLamps) this.lightRevision++;
+    for (const [, chunk] of this.built) this.teardown(chunk);
     this.built.clear();
     this.buildQueue.length = 0;
     this.refreshQueue.length = 0;

@@ -110,14 +110,11 @@ export interface GraphicsTier {
    * claims it — which is why the rig keeps its unused lamps at an intensity of 1e-8
    * instead of switching them off: toggling one would recompile the world. The bill is
    * therefore pixels x slots, every frame, and it does not care that most of them are
-   * dark. Measured: the top rung's desktop budget is 18 spots plus 8 points, and a phone
-   * presenting 1.44 megapixels at 50 FPS was evaluating 26 lights on every lit fragment —
-   * 37 million light evaluations per frame, 1.9 billion per second. That is the heat.
+   * dark. Measured: the top rung's desktop budget was 26 lights, and a phone presenting
+   * 1.44 megapixels at 50 FPS was evaluating all 26 on every lit fragment — 37 million
+   * light evaluations per frame, 1.9 billion per second. That is the heat.
    */
   readonly mobileVehicleLightSlots: number;
-  /** The same, for the street-lamp pool. */
-  readonly streetLightSlots: number;
-  readonly mobileStreetLightSlots: number;
   /** Reach multiplier for a projected headlamp beam; the top rung throws light further. */
   readonly headlightDistanceScale: number;
 }
@@ -160,8 +157,6 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     mobileStarMagnitude: 6,
     vehicleLightSlots: 2,
     mobileVehicleLightSlots: 2,
-    streetLightSlots: 2,
-    mobileStreetLightSlots: 2,
     headlightDistanceScale: 1,
   },
   acceptable: {
@@ -177,8 +172,6 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     mobileStarMagnitude: 7,
     vehicleLightSlots: 2,
     mobileVehicleLightSlots: 2,
-    streetLightSlots: 2,
-    mobileStreetLightSlots: 2,
     headlightDistanceScale: 1,
   },
   standard: {
@@ -198,8 +191,6 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     // car's headlamp pair is one merged beam, so the desktop six keeps two more cars'
     // headlamps projected, and the phone's four only the driven car's own.
     mobileVehicleLightSlots: 4,
-    streetLightSlots: 6,
-    mobileStreetLightSlots: 4,
     headlightDistanceScale: 1,
   },
   blessing: {
@@ -217,24 +208,21 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     // EIGHTEEN WAS A CLIFF, MEASURED. The lit-fragment shader costs almost nothing per
     // light up to about thirteen slots and then a great deal per light after them — same
     // scene, same pixels, on an M2 Pro at 2 Mpx: 11 slots 6.5 ms, 13 slots 7.5, 15 slots
-    // 10.0, 19 slots 17.9, and 25-26 slots 53-78. This rung asked for 18 spots + 8 points
-    // and so sat on the wrong side of that edge, which is why a machine that ran the
-    // standard rung at 120 frames a second ran this one at 22-26. Spots are also the
+    // 10.0, 19 slots 17.9, and 25-26 slots 53-78. This rung once asked for 18 spots + 8
+    // points and so sat on the wrong side of that edge, which is why a machine that ran
+    // the standard rung at 120 frames a second ran this one at 22-26. Spots are also the
     // dearer half — twelve spots alone cost 13.2 ms where twelve points cost 6.0 — so the
-    // cut is taken out of the spots. The tier keeps everything else it was chosen for:
+    // cut was taken out of the spots. The tier keeps everything else it was chosen for:
     // the supersampling, the sky.
     //
-    // THE POINTS WENT TO THE CARS. Street lamps and lit forecourts are gone; the only
-    // point sources left are the switchable room lights in the mast huts, and one pool
-    // each way covers a hut you stand in. The four points freed, at roughly half a
-    // spot's cost each, buy three spots at the same total — 11 + 2 = 13, still on the
-    // cheap side of the cliff — so traffic beams and unmerged tail lamps both fit.
+    // THE POINT SLOTS ARE GONE. Their only sources were the switchable room lights in
+    // the mast huts, and the whole point-light path went with them. What is left is 11
+    // spots — still on the cheap side of the cliff — so traffic beams and unmerged tail
+    // lamps both fit.
     vehicleLightSlots: 11,
-    // Two thirds of a desktop again, as on the standard rung; the phone's points are
-    // cut the same way, so it spends 8 + 2 where it spent 6 + 6.
+    // Two thirds of a desktop again; the phone's spots are cut the same way, 8 where the
+    // desktop spends 11.
     mobileVehicleLightSlots: 8,
-    streetLightSlots: 2,
-    mobileStreetLightSlots: 2,
     headlightDistanceScale: 3,
   },
 };
@@ -265,15 +253,6 @@ export function vehicleLightSlotsFor(
 ): number {
   const tier = GRAPHICS_TIERS[quality];
   return mobilePresentation ? tier.mobileVehicleLightSlots : tier.vehicleLightSlots;
-}
-
-/** Street-lamp budget, as this presentation will compile it. */
-export function streetLightSlotsFor(
-  quality: GraphicsQuality,
-  mobilePresentation: boolean,
-): number {
-  const tier = GRAPHICS_TIERS[quality];
-  return mobilePresentation ? tier.mobileStreetLightSlots : tier.streetLightSlots;
 }
 
 /** Catalogue star depth, as this presentation will draw it. */

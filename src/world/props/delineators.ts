@@ -96,10 +96,10 @@ function delineatorId(window: number, ordinal: number, side: -1 | 1): number {
   return -(DELINEATOR_ID_BASE + window * DELINEATOR_ID_SLOTS + ordinal * 2 + (side > 0 ? 1 : 0));
 }
 /**
- * Emissive intensity of a reflector at full night. It is NOT a light: the light
- * budget is six real PointLights for the whole world (see `LightBudget` in main.ts)
- * and a kilometre of posts would eat it twice over. An emissive chip that comes up
- * over the same dusk ramp as the lamps is what makes the run read as an avenue.
+ * Emissive intensity of a reflector at full night. It is NOT a light: a real one per
+ * post would put hundreds of lights in the scene, and a kilometre of posts would eat
+ * any such budget twice over. An emissive chip that comes up over the same dusk ramp
+ * as the lamps is what makes the run read as an avenue.
  */
 const REFLECTOR_EMISSIVE = 2.6;
 

@@ -2,10 +2,10 @@
  * A gallery POI variant, made ready to stand in the world.
  *
  * The variants in `poi-variants.ts` are a VISUAL catalogue. They are authored about a
- * local origin with the ground at Y=0, they carry no physics and no game entities, and
- * between them they contain a couple of hundred lights. None of that is a defect in the
- * catalogue — it is what a catalogue is — but it means the three things the world needs
- * from a building have to be produced here, once, for every variant:
+ * local origin with the ground at Y=0, they carry no physics and no game entities. None
+ * of that is a defect in the catalogue — it is what a catalogue is — but it means the two
+ * things the world needs from a building have to be produced here, once, for every
+ * variant:
  *
  *   ONE MERGED GROUP. The variants are built from thousands of small boxes (measured:
  *   3,954 meshes across the 26), which is fine for a gallery you look at one building at
@@ -19,21 +19,13 @@
  *   and needs no hand-authored proxy. Roofs are excluded: nobody drives on them, and they
  *   are the one part that would enclose the interior from above.
  *
- *   LIGHT SOURCES, NOT LIGHTS. This is the subtle one. Three's forward renderer compiles
- *   the light count into every material, so adding or removing a real light recompiles the
- *   world's shaders — which is why the game keeps its rendered lights in fixed pools
- *   (`render/lights.ts`, `render/vehiclelights.ts`). A variant's 65 authored lights are
- *   therefore replaced by INVISIBLE PointLight markers that the existing `LightBudget`
- *   already knows how to find and budget, exactly as the streamed street lamps do. The
- *   fixtures' own emissive materials stay, so a window still glows.
- *
  * AND ALL OF IT IS CACHED, because building is not cheap. Measured on a 5950X, one
  * variant costs 3.74 ms to build and 11.4 ms at worst — against a streaming budget of
  * 3 ms per frame, one job per frame. Rebuilding per placement would therefore hitch on
  * every POI, and this world has one every 7.7 km. The result is position-independent:
  * `mergePoiStatics` bakes each mesh's transform into its geometry at the local origin, so
- * the merged geometry, the collider geometry and the lamp offsets are the same wherever
- * the building ends up. So they are built once per session and shared, and placing a
+ * the merged geometry and the collider geometry are the same wherever the building ends
+ * up. So they are built once per session and shared, and placing a
  * building afterwards is only wrapping them in fresh Object3Ds. That also means the
  * geometry is never leaked: it belongs to the cache, not to a streamed chunk.
  *
@@ -43,21 +35,12 @@
  */
 
 import * as THREE from 'three';
-import type { PoiSwitchField } from './poiswitches';
-import {
-  BULB_EMISSIVE_INTENSITY,
-  ROOM_BULB_LIFT,
-  ROOM_BULB_RADIUS,
-  ROOM_LIGHT_INTENSITY,
-  ROOM_LIGHT_REACH,
-  roomBulbMaterial,
-} from './poi/kit';
 import { createPoiVariant, mergePoiStatics, POI_VARIANTS } from './poi-variants';
 
 /**
  * What the world needs from any building it places: a visual group, one collider
- * geometry, measured extents, and its lamps and switches. Kit-built variants and
- * dwellings both produce one (see world/poistructures.ts).
+ * geometry and measured extents. Kit-built variants and dwellings both produce one
+ * (see world/poistructures.ts).
  */
 export interface VariantInstance {
   /** Merged visual group. Local origin is the building's ground centre. */
@@ -76,106 +59,6 @@ export interface VariantInstance {
   /** Authored footprint, `[x, z]`, for reference. */
   readonly footprint: readonly [number, number];
   readonly id: string;
-  /** Invisible light markers handed to `LightBudget`. */
-  readonly lightSources: readonly THREE.PointLight[];
-  /** The building's light switches, in the variant's local space. */
-  readonly switches: readonly VariantSwitch[];
-}
-
-/**
- * A light switch as the CATALOGUE describes it: where its plate sits, and where the lights
- * it controls hang. No closures and no light objects, because both belong to a placement.
- *
- * That split is the whole design. A variant is cached and placed many times, so a closure
- * built here would be shared by every instance and every instance's switch would drive the
- * same lights — turning one house's lights off would darken the house next door. The
- * catalogue therefore states only what is true of the variant; `createVariantInstance`
- * turns that into lights, bulbs and a switch that belong to one placement.
- */
-interface SwitchSpec {
-  /** Centre of the switchplate in the variant's local space, metres. */
-  readonly centre: THREE.Vector3;
-  /** The plate's orientation, so the world can store an oriented box rather than a bin. */
-  readonly quaternion: THREE.Quaternion;
-  /** Half extents of the whole switch, handle included. */
-  readonly halfExtents: readonly [number, number, number];
-  /** Where the lights this switch controls hang, in the variant's local space, metres. */
-  readonly lights: readonly THREE.Vector3[];
-}
-
-/** One light switch, made real for one placement and ready to be operated in the world. */
-export interface VariantSwitch {
-  /** Centre of the switchplate in the variant's local space, metres. */
-  readonly centre: THREE.Vector3;
-  /** The plate's orientation, so the world can store an oriented box rather than a bin. */
-  readonly quaternion: THREE.Quaternion;
-  /** Half extents of the whole switch, handle included. */
-  readonly halfExtents: readonly [number, number, number];
-  /** Flips this switch's lights; returns the state it moved TO. */
-  readonly toggle: () => boolean;
-  /** The state before any press, for a prompt that says what pressing will do. */
-  readonly isOn: () => boolean;
-}
-
-/**
- * Registers a placed building's switches with the world.
- *
- * Composed through the GROUP'S OWN WORLD MATRIX rather than through the yaw and the tilt
- * the caller happened to place it with. The box and the orientation have to be where the
- * geometry is, and the geometry is placed by that matrix; deriving the two independently
- * is how a switch ends up screwed to a wall that is not there. It is also the reason this
- * is one function rather than a block in each provider: any provider that places a
- * catalogue building has to register its switches the same way, or the building's lights
- * are the one set in the world that cannot be worked.
- *
- * `prefix` must be unique among live switches; the world forgets a chunk's switches by id.
- *
- * THE ORIGIN IS ADDED BACK, and leaving it out is the quiet version of this bug: a chunk
- * builds its geometry relative to its own floating origin, so the group's world matrix is
- * CHUNK-LOCAL, while every registry in the world — trunks, couriers, this — is expressed
- * in absolute coordinates and every consumer of them (the interaction ray, the terrain
- * height query) works in absolute coordinates. Measured on the first chunk that streams
- * in: the origin is thousands of metres from the world origin, so a switch registered
- * without it is not slightly misplaced, it is in another part of the desert.
- */
-export function registerPlacedSwitches(
-  field: PoiSwitchField,
-  instance: VariantInstance,
-  prefix: string,
-  registered: string[],
-  originX: number,
-  originZ: number,
-): void {
-  instance.group.updateMatrixWorld(true);
-  const orientation = new THREE.Quaternion();
-  instance.group.matrixWorld.decompose(new THREE.Vector3(), orientation, new THREE.Vector3());
-  const centre = new THREE.Vector3();
-  const world = new THREE.Quaternion();
-  instance.switches.forEach((entry, index) => {
-    // Through the whole matrix, not through the rotation alone: the offset is a point and
-    // the box has to land where the geometry is. (The rotation would do here, because a
-    // placement never scales — but that is a fact about today's callers, and this is a
-    // point transform, which is what `applyMatrix4` is for.)
-    centre.copy(entry.centre).applyMatrix4(instance.group.matrixWorld);
-    centre.x += originX;
-    centre.z += originZ;
-    world.copy(orientation).multiply(entry.quaternion);
-    const id = `${prefix}:${index}`;
-    field.register({
-      id,
-      x: centre.x,
-      y: centre.y,
-      z: centre.z,
-      qx: world.x,
-      qy: world.y,
-      qz: world.z,
-      qw: world.w,
-      halfExtents: entry.halfExtents,
-      toggle: entry.toggle,
-      isOn: entry.isOn,
-    });
-    registered.push(id);
-  });
 }
 
 export function variantCount(): number {
@@ -189,22 +72,12 @@ export function variantDef(index: number): (typeof POI_VARIANTS)[number] {
 }
 
 /**
- * Render distance for every lamp marker, from the authored light's own reach.
- *
- * A single value rather than the authored one: `LightBudget` only ever reads a source's
- * intensity and position, and it composes the reach itself when it copies the chosen
- * source into a slot. Keeping the authored distance here would be a number nothing
- * consults, and a number nothing consults is a number that drifts.
- */
-const MARKER_DISTANCE = 26;
-
-/**
  * One mesh of the finished variant, with everything needed to rebuild it.
  *
  * THE TRANSFORM IS NOT OPTIONAL, and getting this wrong is not subtle. `mergePoiStatics`
  * bakes the world matrix into the geometry of every mesh it MERGES — but it deliberately
- * leaves others alone (roof panels, light switches, door-obstacle markers, anything with a
- * unique material), and those keep their transform on the Object3D. A cache that stored
+ * leaves others alone (roof panels, door-obstacle markers, anything with a unique
+ * material), and those keep their transform on the Object3D. A cache that stored
  * only geometry and material and rebuilt a mesh at the origin collapsed every un-merged
  * mesh into the ground: measured, a two-storey variant lost all twelve of its roof panels
  * and `long-house` came out 2.8 m tall instead of 5.5 m.
@@ -215,8 +88,8 @@ const MARKER_DISTANCE = 26;
  * `buried-container`, which is the deliberately half-sunk one: 0.46 m too tall. Composing
  * the whole chain costs nothing and removes the whole class of error.
  *
- * `userData` is kept for the same reason as the transform — `poiRoof` and the light-toggle
- * closure live there, and the gallery's roof button reads the first of them.
+ * `userData` is kept for the same reason as the transform — `poiRoof` lives there, and
+ * the gallery's roof button reads it.
  */
 interface MergedMesh {
   readonly geometry: THREE.BufferGeometry;
@@ -232,45 +105,10 @@ interface VariantAssets {
   readonly solid: THREE.BufferGeometry;
   readonly halfExtentX: number;
   readonly halfExtentZ: number;
-  /** Lamp offsets in local space, with the colour the fixture was authored in. */
-  readonly lamps: readonly { readonly color: THREE.Color; readonly position: THREE.Vector3 }[];
-  readonly switches: readonly SwitchSpec[];
   readonly def: (typeof POI_VARIANTS)[number];
 }
 
 const assetCache = new Map<number, VariantAssets>();
-
-/**
- * Replaces every real light in the tree with an invisible marker.
- *
- * `visible = false` is what makes this safe: Three's renderer walks the scene graph to
- * collect lights and skips invisible objects, so the compiled light count never changes
- * when a chunk of buildings streams in. The marker still resolves a world position, which
- * is all `LightBudget`'s selection needs.
- */
-function replaceLightsWithMarkers(root: THREE.Group): THREE.Vector3[] {
-  const authored: THREE.Light[] = [];
-  root.traverse((object) => {
-    // A MARKER IS ALREADY A MARKER. The catalogue now creates light-budget sources of its
-    // own where a switch has to be able to turn them off, and replacing those would
-    // disconnect the switch from the lights it controls — the control would still work,
-    // silently, on objects no longer in the scene.
-    if (object.userData.lightBudgetSource === true) return;
-    if ((object as THREE.Light).isLight) authored.push(object as THREE.Light);
-  });
-  const positions: THREE.Vector3[] = [];
-  const scratch = new THREE.Vector3();
-  for (const light of authored) {
-    light.getWorldPosition(scratch);
-    // The root has not been moved yet, so world position is group-local here.
-    positions.push(scratch.clone());
-    const target = (light as THREE.SpotLight).target;
-    if (target && target.parent === light) target.removeFromParent();
-    light.removeFromParent();
-    light.dispose();
-  }
-  return positions;
-}
 
 /** Keeps only the triangles, in the root's local space, of everything solid. */
 function collectSolidGeometry(root: THREE.Group): THREE.BufferGeometry {
@@ -316,8 +154,6 @@ function measureHalfExtents(root: THREE.Group): { x: number; z: number } {
 function buildAssets(index: number): VariantAssets {
   const root = createPoiVariant(index);
   root.updateMatrixWorld(true);
-  const lampPositions = replaceLightsWithMarkers(root);
-  root.updateMatrixWorld(true);
   mergePoiStatics(root);
   root.updateMatrixWorld(true);
 
@@ -335,45 +171,14 @@ function buildAssets(index: number): VariantAssets {
     });
   });
 
-  // Collect the switches while the tree is still in one piece, measuring each plate
-  // rather than trusting the catalogue's numbers: the plate is scaled and offset by the
-  // switch's own construction, so its real size is a property of that code, not a
-  // constant anything else should restate.
-  const switches: SwitchSpec[] = [];
-  root.traverse((object) => {
-    if (object.userData.poiLightSwitch !== true) return;
-    const local = object.userData.poiSwitchLights as readonly (readonly [number, number, number])[] | undefined;
-    if (!Array.isArray(local) || local.length === 0) return;
-    const box = new THREE.Box3().setFromObject(object, true);
-    const centre = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
-    switches.push({
-      centre,
-      // The switch is built upright and yawed about Y, so its box stays axis-aligned in
-      // the variant's space and stores as half extents rather than as an orientation.
-      quaternion: object.getWorldQuaternion(new THREE.Quaternion()),
-      halfExtents: [size.x / 2, size.y / 2, size.z / 2],
-      // Resolved through the switch's own matrix rather than taken as given: a fixture
-      // hangs from a ceiling that may itself sit inside a rotated or raised group, and the
-      // catalogue records the offset in ITS parent's space. Identity today, not by
-      // contract — and the same `getWorldQuaternion` above exists for the same reason.
-      lights: local.map((point) => object.localToWorld(new THREE.Vector3(...point))),
-    });
-  });
-
   const solid = collectSolidGeometry(root);
   const half = measureHalfExtents(root);
   const def = variantDef(index);
-  // Every authored lamp gets one colour for the whole building: they are room lights and
-  // canopy lamps, and the budget only needs a source to exist and be lit.
-  const colour = new THREE.Color(0xffd9a0);
   return {
     meshes,
     solid,
     halfExtentX: half.x,
     halfExtentZ: half.z,
-    lamps: lampPositions.map((position) => ({ color: colour.clone(), position })),
-    switches,
     def,
   };
 }
@@ -416,69 +221,12 @@ export function createVariantInstance(index: number): VariantInstance {
   for (const part of assets.meshes) {
     const mesh = new THREE.Mesh(part.geometry, part.material);
     part.matrix.decompose(mesh.position, mesh.quaternion, mesh.scale);
-    // `poiRoof` and the light-toggle closure ride here. The closure is shared, which is
-    // correct: every instance of a variant is the same building.
+    // `poiRoof` rides here, which is correct: every instance of a variant is the same
+    // building, and the gallery's roof button reads this same flag.
     Object.assign(mesh.userData, part.userData);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     group.add(mesh);
-  }
-
-  const lightSources: THREE.PointLight[] = [];
-  for (const lamp of assets.lamps) {
-    const marker = new THREE.PointLight(lamp.color, 0, MARKER_DISTANCE, 2);
-    marker.visible = false;
-    marker.userData.lightBudgetSource = true;
-    marker.position.copy(lamp.position);
-    group.add(marker);
-    lightSources.push(marker);
-  }
-
-  // THE SWITCH ITSELF, MADE REAL. The catalogue said where the plate is and where its
-  // lights hang; this makes the lights, the bulbs that show them and the closure that
-  // works them, so that every one of them belongs to this placement alone.
-  const switches: VariantSwitch[] = [];
-  for (const spec of assets.switches) {
-    const markers: THREE.PointLight[] = [];
-    const bulbs: THREE.Mesh[] = [];
-    for (const light of spec.lights) {
-      const marker = new THREE.PointLight(0xffd49a, ROOM_LIGHT_INTENSITY, ROOM_LIGHT_REACH, 2);
-      marker.position.copy(light);
-      marker.visible = false;
-      marker.userData.lightBudgetSource = true;
-      group.add(marker);
-      markers.push(marker);
-
-      const bulb = new THREE.Mesh(
-        new THREE.SphereGeometry(ROOM_BULB_RADIUS, 12, 8),
-        roomBulbMaterial(),
-      );
-      bulb.position.copy(light);
-      bulb.position.y += ROOM_BULB_LIFT;
-      // Tagged, so anything comparing this building against the catalogue knows the bulb
-      // is the placement's own and not a part the catalogue declined to build.
-      bulb.userData.poiBulb = true;
-      group.add(bulb);
-      bulbs.push(bulb);
-    }
-
-    let on = true;
-    switches.push({
-      centre: spec.centre,
-      quaternion: spec.quaternion,
-      halfExtents: spec.halfExtents,
-      toggle: () => {
-        on = !on;
-        for (const marker of markers) marker.intensity = on ? ROOM_LIGHT_INTENSITY : 0;
-        for (const bulb of bulbs) {
-          (bulb.material as THREE.MeshStandardMaterial).emissiveIntensity = on
-            ? BULB_EMISSIVE_INTENSITY
-            : 0;
-        }
-        return on;
-      },
-      isOn: () => on,
-    });
   }
 
   return {
@@ -488,7 +236,5 @@ export function createVariantInstance(index: number): VariantInstance {
     halfExtentZ: assets.halfExtentZ,
     footprint: assets.def.footprint,
     id: assets.def.id,
-    lightSources,
-    switches,
   };
 }

@@ -9,9 +9,8 @@ import { createVariantInstance, warmVariantAssets, type VariantInstance } from '
  * fifty exterior-only dwellings. The story house is one of these dwellings, placed on its
  * own by src/story/sitebuild.ts rather than by the road's POI stream.
  *
- * Both kinds come out as the same `VariantInstance`, so placement, colliders, switches
- * and loot never ask which kind they are standing next to. A dwelling has no lamps and
- * no switches: it cannot be entered, so there is nothing inside to light.
+ * Both kinds come out as the same `VariantInstance`, so placement, colliders and loot
+ * never ask which kind they are standing next to.
  */
 export type PoiStructureKind = 'mast' | 'dwelling';
 
@@ -108,8 +107,6 @@ export function createStructureInstance(index: number): VariantInstance {
     halfExtentZ: assets.halfZ,
     footprint: definition.footprint,
     id: definition.id,
-    lightSources: [],
-    switches: [],
   };
 }
 

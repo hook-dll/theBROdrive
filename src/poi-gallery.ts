@@ -8,9 +8,8 @@ import { dwellingGlassMaterial } from './world/dwellings/builder';
 
 /**
  * What the gallery shows: exactly the buildings the world scatters, in the order the
- * world numbers them (world/poistructures.ts). Masts are built from the kit with their
- * real lights and switches, so a room light can be tried here; dwellings are the very
- * instances the world places.
+ * world numbers them (world/poistructures.ts). Masts are built from the kit; dwellings
+ * are the very instances the world places.
  */
 interface GallerySource {
   readonly name: string;
@@ -300,123 +299,6 @@ export function bootPoiGallery(): void {
     scene.add(divider);
   }
 
-  /**
-   * Room-light budget.
-   *
-   * Three.js forward-shades: every lit fragment evaluates every *visible* light in
-   * the scene. The 26 prototypes ship 45 room spots and 20 canopy lamps; on an
-   * Intel N100 iGPU all 65 of them measured 69 ms of a 116 ms frame with the grid
-   * on screen, and a light standing in its own cone — an interior — costs ~3.7 ms
-   * of the 1.44 Mpixel frame all by itself.
-   *
-   * So the fixtures' own lights become invisible source markers and a fixed pool of
-   * slots mirrors the nearest few, exactly as `LightBudget` does for streetlights.
-   * Four spots reach the room you stand in plus the one through the doorway, which
-   * is what these prototypes are inspected for; two point slots cover a forecourt's
-   * canopy lamps. The counts are constant for the session on purpose: the shader
-   * permutation is keyed on the visible light count, so a varying count would
-   * recompile every lit material as you walk between prototypes.
-   */
-  const SPOT_SLOT_COUNT = 4;
-  const POINT_SLOT_COUNT = 2;
-  const LIGHT_RANGE_SQ = 46 * 46;
-  const spotSources: THREE.SpotLight[] = [];
-  const pointSources: THREE.PointLight[] = [];
-  for (const entry of entries) {
-    entry.root.traverse((object) => {
-      if (object instanceof THREE.SpotLight) {
-        object.visible = false;
-        spotSources.push(object);
-      } else if (object instanceof THREE.PointLight) {
-        object.visible = false;
-        pointSources.push(object);
-      }
-    });
-  }
-  const spotSlots: THREE.SpotLight[] = [];
-  for (let slot = 0; slot < SPOT_SLOT_COUNT; slot++) {
-    const light = new THREE.SpotLight(0xffffff, 0, 4, 0.7, 0.9, 2);
-    light.castShadow = false;
-    scene.add(light, light.target);
-    spotSlots.push(light);
-  }
-  const pointSlots: THREE.PointLight[] = [];
-  for (let slot = 0; slot < POINT_SLOT_COUNT; slot++) {
-    const light = new THREE.PointLight(0xffffff, 0, 4, 2);
-    scene.add(light);
-    pointSlots.push(light);
-  }
-
-  const sourceWorld = new THREE.Vector3();
-  const targetWorld = new THREE.Vector3();
-  const spotChoice: number[] = [];
-  const spotChoiceDistance: number[] = [];
-  const pointChoice: number[] = [];
-  const pointChoiceDistance: number[] = [];
-  /** Insertion-sorts the lit sources in range into `choice`, nearest first. */
-  const pickNearest = (
-    sources: readonly THREE.Light[],
-    limit: number,
-    eye: THREE.Vector3,
-    choice: number[],
-    choiceDistance: number[],
-  ): void => {
-    choice.length = 0;
-    choiceDistance.length = 0;
-    for (let index = 0; index < sources.length; index++) {
-      const source = sources[index];
-      if (!source || source.intensity <= 0) continue;
-      const distanceSq = source.getWorldPosition(sourceWorld).distanceToSquared(eye);
-      if (distanceSq > LIGHT_RANGE_SQ) continue;
-      let at = choiceDistance.length;
-      while (at > 0 && (choiceDistance[at - 1] ?? 0) > distanceSq) at--;
-      if (at >= limit) continue;
-      choice.splice(at, 0, index);
-      choiceDistance.splice(at, 0, distanceSq);
-      if (choice.length > limit) {
-        choice.pop();
-        choiceDistance.pop();
-      }
-    }
-  };
-  const updateLightSlots = (): void => {
-    pickNearest(spotSources, SPOT_SLOT_COUNT, camera.position, spotChoice, spotChoiceDistance);
-    for (let slot = 0; slot < spotSlots.length; slot++) {
-      const light = spotSlots[slot];
-      if (!light) continue;
-      const sourceIndex = spotChoice[slot];
-      const source = sourceIndex === undefined ? undefined : spotSources[sourceIndex];
-      if (!source) {
-        light.intensity = 0;
-        continue;
-      }
-      light.position.copy(source.getWorldPosition(sourceWorld));
-      light.target.position.copy(source.target.getWorldPosition(targetWorld));
-      light.color.copy(source.color);
-      light.intensity = source.intensity;
-      light.distance = source.distance;
-      light.angle = source.angle;
-      light.penumbra = source.penumbra;
-      light.decay = source.decay;
-    }
-    pickNearest(pointSources, POINT_SLOT_COUNT, camera.position, pointChoice, pointChoiceDistance);
-    for (let slot = 0; slot < pointSlots.length; slot++) {
-      const light = pointSlots[slot];
-      if (!light) continue;
-      const sourceIndex = pointChoice[slot];
-      const source = sourceIndex === undefined ? undefined : pointSources[sourceIndex];
-      if (!source) {
-        light.intensity = 0;
-        continue;
-      }
-      light.position.copy(source.getWorldPosition(sourceWorld));
-      light.color.copy(source.color);
-      light.intensity = source.intensity;
-      light.distance = source.distance;
-      light.decay = source.decay;
-    }
-  };
-
   let yaw = camera.rotation.y;
   let pitch = camera.rotation.x;
   let roofsVisible = true;
@@ -449,35 +331,8 @@ export function bootPoiGallery(): void {
   };
 
   const interfaceRoot = createInterface(entries, focus, overview, toggleRoofs);
-  const galleryStatus = interfaceRoot.querySelector('.poi-gallery-status');
-  const switchRaycaster = new THREE.Raycaster();
-  const switchAim = new THREE.Vector2();
-  const lightSwitchTargets: THREE.Mesh[] = [];
-  for (const entry of entries) {
-    entry.root.traverse((object) => {
-      if (object instanceof THREE.Mesh && typeof object.userData.poiLightToggle === 'function') lightSwitchTargets.push(object);
-    });
-  }
-  const toggleAimedLight = (): boolean => {
-    switchRaycaster.setFromCamera(switchAim, camera);
-    for (const hit of switchRaycaster.intersectObjects(lightSwitchTargets, false)) {
-      if (hit.distance > 4) break;
-      const toggle = hit.object.userData.poiLightToggle as unknown;
-      if (typeof toggle !== 'function') continue;
-      const switchedOn = Boolean(toggle());
-      if (galleryStatus instanceof HTMLElement) {
-        galleryStatus.textContent = switchedOn ? 'Свет включён' : 'Свет выключен';
-      }
-      return true;
-    }
-    return false;
-  };
   canvas.addEventListener('click', () => {
-    if (document.pointerLockElement === canvas) {
-      toggleAimedLight();
-    } else {
-      void canvas.requestPointerLock();
-    }
+    if (document.pointerLockElement !== canvas) void canvas.requestPointerLock();
   });
   window.addEventListener('mousemove', (event) => {
     if (document.pointerLockElement !== canvas) return;
@@ -547,7 +402,6 @@ export function bootPoiGallery(): void {
       camera.position.addScaledVector(movement.normalize(), speed * delta);
       camera.position.y = Math.max(0.3, Math.min(95, camera.position.y));
     }
-    updateLightSlots();
     renderer.render(scene, camera);
     requestAnimationFrame(render);
   };

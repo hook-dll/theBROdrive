@@ -30,7 +30,6 @@ import type { LoosePartField } from '../src/parts/loose';
 import type { TrailerField } from '../src/vehicle/trailer';
 import type { WreckTrunkField } from '../src/world/wrecktrunks';
 import type { CourierField } from '../src/world/couriers';
-import { PoiSwitchField } from '../src/world/poiswitches';
 
 const SEED = Number(process.argv[2] ?? 1337) >>> 0;
 /** Chunks walked. 60 chunks is 12 km of road, around 10 stops. */
@@ -50,10 +49,9 @@ const noLoose = {
 const noTrailers = { spawn: () => {}, forget: () => {} } as unknown as TrailerField;
 const noWreckTrunks = { register: () => {}, forget: () => {} } as unknown as WreckTrunkField;
 const noCouriers = { register: () => {}, forget: () => {} } as unknown as CourierField;
-const switches = new PoiSwitchField();
 
 const roadDistance = new RoadDistance(road);
-const provider = new PoiProvider(noLoose, noTrailers, noWreckTrunks, switches, noCouriers, roadDistance);
+const provider = new PoiProvider(noLoose, noTrailers, noWreckTrunks, noCouriers, roadDistance);
 
 interface Piece {
   readonly minX: number;

@@ -19,18 +19,10 @@ export interface PoiVariantDefinition {
 function validateDoorClearances(root: THREE.Group): void {
   root.updateMatrixWorld(true);
   const clearances: DoorClearance[] = [];
-  const windowClearances: DoorClearance[] = [];
   root.traverse((owner) => {
     const local = owner.userData.poiDoorClearances as DoorClearance[] | undefined;
     for (const clearance of local ?? []) {
       clearances.push({
-        box: clearance.box.clone().applyMatrix4(owner.matrixWorld),
-        label: clearance.label,
-      });
-    }
-    const localWindows = owner.userData.poiWindowClearances as DoorClearance[] | undefined;
-    for (const clearance of localWindows ?? []) {
-      windowClearances.push({
         box: clearance.box.clone().applyMatrix4(owner.matrixWorld),
         label: clearance.label,
       });
@@ -44,25 +36,7 @@ function validateDoorClearances(root: THREE.Group): void {
     if (blocked) {
       throw new Error(`${root.name}: ${obstacle} blocks ${blocked.label}`);
     }
-    if (obstacle === 'light switch') {
-      const window = windowClearances.find((clearance) => clearance.box.intersectsBox(bounds));
-      if (window) throw new Error(`${root.name}: light switch overlaps ${window.label}`);
-    }
   });
-}
-
-/**
- * Whether `object`, or anything it hangs from, carries `flag` in its `userData`.
- *
- * Used to keep whole subtrees out of a merge: a marker is set on the GROUP that owns the
- * part, but the geometry that would be merged is its grandchild, and a one-level parent
- * test silently misses it.
- */
-function hasAncestorFlag(object: THREE.Object3D, flag: string): boolean {
-  for (let node: THREE.Object3D | null = object; node !== null; node = node.parent) {
-    if (node.userData[flag] === true) return true;
-  }
-  return false;
 }
 
 /**
@@ -76,9 +50,8 @@ function hasAncestorFlag(object: THREE.Object3D, flag: string): boolean {
  * into a single buffer costs nothing visually and cuts the call count by ~10x.
  *
  * Meshes that must keep their identity are left alone: roof panels (the viewer
- * hides them), light switches (raycast targets carrying the toggle closure), door
- * obstacles (clearance metadata) and anything with a one-off material, such as the
- * bulbs whose emissive intensity follows their switch.
+ * hides them), door obstacles (clearance metadata) and anything with a one-off
+ * material.
  *
  * Call it on a finished root, before it is positioned in the world.
  */
@@ -88,14 +61,6 @@ export function mergePoiStatics(root: THREE.Group): void {
   root.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) return;
     if (object.userData.poiRoof === true) return;
-    // Light switches must stay their own objects: they are aim targets, and merging them
-    // into the wall would leave the world unable to find one. Keyed on the marker the
-    // catalogue sets, which is why that marker exists.
-    // The WHOLE SUBTREE, not the marker object alone: the plate and its lever hang two
-    // levels below the switch group, and merging either would leave the switch group with
-    // no geometry — which does not look broken, it measures as a switch nought metres
-    // across at the origin. So walk up, rather than testing one parent.
-    if (hasAncestorFlag(object, 'poiLightSwitch')) return;
     if (typeof object.userData.poiDoorObstacle === 'string') return;
     if (Array.isArray(object.material)) return;
     const group = groups.get(object.material);
