@@ -4,6 +4,24 @@
 
 ### Added
 
+- STICKERS ARE DECAL GEOMETRY NOW, AND A CAR CAN CARRY HUNDREDS. They used to be
+  printed inside the paint and glass shaders out of a fixed 24-slot uniform array, so a
+  car with more kept the extras in its save and never drew them. Each sticker is
+  projected once, in chassis metres, onto the surfaces that carry it (paint slots and
+  window glass, the same ones placement accepts), trimmed by its own plane and outline,
+  and every decal of a car is merged into ONE BufferGeometry with the atlas for a
+  texture: one draw call for any number of them. The geometry is rebuilt only when the
+  stickers change, and in 3 ms slices across frames — one sticker costs about 0.3 ms on
+  the densest body in the fleet, so two hundred in one go would be four frames of hitch
+  — while the try-on preview stays a small second mesh re-projected only when the aimed
+  pose moves. Wear, dust and scratches still fall over the print, and the decal program
+  is compiled with the model's anchor before its first draw. See `stickers.md`.
+- THE OKA'S REAR WINDOW IS A WINDOW. The pack drew it as a `car_trim` plate filling the
+  tailgate's opening instead of glass, so it neither mirrored nor took stickers —
+  placement only accepts paint and glass. `buildTemplate` now cuts the plate that closes
+  the opening out of the trim mesh and hands it to `car_glass`
+  (`CarModelDef.rearScreenMaterial`, `glassOverTailOpening`).
+
 - THE ROAD IS LESS GLASSY, on every surface, and the sealed ones now ride nearly as
   gravel does. The long 15-30 m swell is `UND_AMP` 0.07 with a floor of 0.55, so new
   asphalt keeps 3.9 cm where it used to keep 1.4. `BUMP_AMP`, the short bumps, is now

@@ -494,6 +494,18 @@ export interface CarModelDef {
    */
   readonly glassMaterial?: string;
   readonly glassUvCell?: readonly [number, number];
+  /**
+   * Material this body's REAR SCREEN is drawn with when the pack did not draw it as
+   * glass: GTA SA models often leave the tailgate's opening empty and author the piece
+   * behind it as a trim plate, which reads as a window and is aimed at like one but is
+   * neither glass nor paint anywhere downstream. `sa_oka` is one, on `car_trim`.
+   *
+   * `buildTemplate` then cuts the plate that closes the opening out of that material's
+   * mesh into the glass (`glassOverTailOpening` in render/carmodel.ts), so the window
+   * mirrors, gathers dust and takes stickers like every other window. The pack's own
+   * contract is that windows ship as `car_glass` — see `tools/dff-pack-import.md`.
+   */
+  readonly rearScreenMaterial?: string;
   /** Factory geometry used to fit body, axles and tyres at load time. */
   readonly factory: FactoryGeometry;
   /**
@@ -1307,6 +1319,10 @@ const SAAS_SPECS: readonly Entry[] = [
     label: 'VAZ-1111 Oka',
     dir: SAAS,
     glb: 'oka.glb',
+    // The pack drew this body's rear screen as a `car_trim` plate filling the tailgate's
+    // opening instead of glass, the one window in the fleet that is not `car_glass`:
+    // render/carmodel.ts cuts that plate into the glass at load (CarModelDef.rearScreenMaterial).
+    rearScreenMaterial: 'car_trim',
     bodyClass: 'car',
     scale: 0.97465,
     mass: 635,
@@ -1561,6 +1577,7 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   paintUvCell: e.dir === SOVIET ? SOVIET_PAINT_CELLS[e.glb] : undefined,
   glassMaterial: e.glassMaterial,
   glassUvCell: e.glassUvCell,
+  rearScreenMaterial: e.rearScreenMaterial,
   factory: factoryGeometry(e.id),
   wheelSetPool: e.wheelSetPool,
   loadedRideDrop: e.loadedRideDrop,

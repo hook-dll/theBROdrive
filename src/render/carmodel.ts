@@ -31,6 +31,7 @@ import {
   type CarSurfaceFinish,
 } from './materials';
 import { CarBodySurface, GLASS_DIRT_SHARE } from './carsurface';
+import { CarStickerDecals, type StickerDecalSurface } from './stickerdecals';
 import {
   CAR_MODELS,
   carModel,
@@ -413,14 +414,31 @@ function applyRandomPaint(root: THREE.Object3D, def: CarModelDef, appearanceKey:
   });
 }
 
-/** Records exact paint material slots so decal raycasts never accept glass or trim. */
-function markStickerSurfaces(root: THREE.Object3D, def: CarModelDef): void {
+/**
+ * Records, per mesh, the material slots a sticker may go on, and the palette cell if the
+ * mesh is atlas paint. This is the one rule both sides use: placement accepts exactly
+ * these slots (`player/interaction.ts` pickBody), and the decal path prints on exactly
+ * their triangles (render/stickerdecals.ts).
+ *
+ * The slots are the paint slots and this car's own window glass. On a palette-atlas body
+ * the sheet holds paint, chrome, glass and lamps in one swatch, so the mesh's slots say
+ * nothing on their own: `stickerPaintCell` narrows its triangles to the paint cell, which
+ * is what the printed decal's `carPaintPanel` test did per fragment.
+ */
+function markStickerSurfaces(root: THREE.Object3D, def: CarModelDef, glass: readonly THREE.Material[]): void {
   root.traverse((child) => {
-    if (!(child instanceof THREE.Mesh) || !isRandomPaintMesh(child, def)) return;
+    if (!(child instanceof THREE.Mesh)) return;
     const materials = materialsOf(child);
+    const paintMesh = isRandomPaintMesh(child, def);
     child.userData.stickerMaterialIndices = materials
-      .map((material, index) => (isPaintSlot(material, def) ? index : -1))
+      .map((material, index) =>
+        glass.includes(material) || (paintMesh && isPaintSlot(material, def)) ? index : -1,
+      )
       .filter((index) => index >= 0);
+    child.userData.stickerPaintCell =
+      paintMesh && def.paintStyle === 'soviet-atlas' && child.geometry.getAttribute('uv')
+        ? def.paintUvCell
+        : undefined;
   });
 }
 
@@ -850,6 +868,187 @@ function subGeometry(
   return out;
 }
 
+/** Cell size of the tail's painted silhouette, metres. */
+const TAIL_CELL_M = 0.06;
+/** A face counts as facing the tail once its normal is this aligned with the tail axis. */
+const TAIL_FACING_DOT = 0.5;
+/** How far behind a cell's outermost surface a plate may sit and still close that cell. */
+const TAIL_PLATE_DEPTH_M = 0.05;
+
+/**
+ * Hands the glass material the rear screen of a body whose pack drew it as a trim plate.
+ *
+ * GTA SA models often fake a rear screen: the tailgate's opening is left empty and the
+ * piece behind it is authored on the trim material, so the car reads as having a window
+ * while no glass exists there. `sa_oka` is one (`CarModelDef.rearScreenMaterial`), and it
+ * costs the game a real thing: the plate is a window to the player, but placement refuses
+ * it — a sticker may only go on paint or glass — and the glass shader never renders there.
+ *
+ * Finding the plate needs no guesswork. Rasterize the tail's silhouette — every paint
+ * triangle onto the car's own (x, y) — and the cells the paint leaves open INSIDE it are
+ * its openings; the cells it leaves open at the border of the picture are just the edge
+ * of the silhouette, which is where a bumper's own skin is. A rear-facing triangle of the
+ * declared material in the rear half, in an opening cell, at that cell's outermost depth,
+ * is the plate that closes that opening.
+ *
+ * `rearSign` is which way the tail points along Z (chassis metres: nose at +Z for the
+ * packs that ship here, -Z for the Soviet ones). Runs once per model, at load, before the
+ * wear chassis stamp reads the geometry.
+ */
+function glassOverTailOpening(scene: THREE.Group, def: CarModelDef, rearSign: number): void {
+  const material = def.rearScreenMaterial;
+  if (!material) return;
+  scene.updateMatrixWorld(true);
+  const box = boundsOf(scene);
+  const nx = Math.max(1, Math.ceil((box.max.x - box.min.x) / TAIL_CELL_M));
+  const ny = Math.max(1, Math.ceil((box.max.y - box.min.y) / TAIL_CELL_M));
+  const painted = new Uint8Array(nx * ny);
+  const outermost = new Float32Array(nx * ny).fill(-Infinity);
+  const corners = new Float64Array(9);
+
+  const cellX = (x: number): number => {
+    const index = Math.floor((x - box.min.x) / TAIL_CELL_M);
+    return index < 0 ? 0 : index >= nx ? nx - 1 : index;
+  };
+  const cellY = (y: number): number => {
+    const index = Math.floor((y - box.min.y) / TAIL_CELL_M);
+    return index < 0 ? 0 : index >= ny ? ny - 1 : index;
+  };
+  /** Reads one triangle of a mesh into `corners`, in chassis metres. */
+  const readTriangle = (mesh: THREE.Mesh, tri: number): void => {
+    const geometry = mesh.geometry;
+    const index = geometry.index;
+    const position = geometry.attributes.position as THREE.BufferAttribute;
+    for (let c = 0; c < 3; c++) {
+      const vertex = index ? index.getX(tri * 3 + c) : tri * 3 + c;
+      _sample.fromBufferAttribute(position, vertex).applyMatrix4(mesh.matrixWorld);
+      corners[c * 3] = _sample.x;
+      corners[c * 3 + 1] = _sample.y;
+      corners[c * 3 + 2] = _sample.z;
+    }
+  };
+  /** How far back the triangle's rearward-most corner sits, or null if it faces elsewhere. */
+  const tailFacing = (): number | null => {
+    const e1x = corners[3]! - corners[0]!;
+    const e1y = corners[4]! - corners[1]!;
+    const e1z = corners[5]! - corners[2]!;
+    const e2x = corners[6]! - corners[0]!;
+    const e2y = corners[7]! - corners[1]!;
+    const e2z = corners[8]! - corners[2]!;
+    const nz = e1x * e2y - e1y * e2x;
+    const length = Math.hypot(e1y * e2z - e1z * e2y, e1z * e2x - e1x * e2z, nz);
+    if (length < 1e-12 || (nz / length) * rearSign <= TAIL_FACING_DOT) return null;
+    return Math.max(corners[2]!, corners[5]!, corners[8]!) * rearSign;
+  };
+  /** Whether a point, in the triangle's own (x, y), lies inside it. */
+  const coversCell = (x: number, y: number): boolean => {
+    const d1 = (corners[3]! - corners[0]!) * (y - corners[1]!) - (corners[4]! - corners[1]!) * (x - corners[0]!);
+    const d2 = (corners[6]! - corners[3]!) * (y - corners[4]!) - (corners[7]! - corners[4]!) * (x - corners[3]!);
+    const d3 = (corners[0]! - corners[6]!) * (y - corners[7]!) - (corners[1]! - corners[7]!) * (x - corners[6]!);
+    return (d1 >= 0 && d2 >= 0 && d3 >= 0) || (d1 <= 0 && d2 <= 0 && d3 <= 0);
+  };
+
+  // The tail's silhouette: what the paint covers, and the outermost surface over each
+  // cell of it.
+  scene.traverse((node) => {
+    if (!(node instanceof THREE.Mesh)) return;
+    const materials = materialsOf(node);
+    const paint = isRandomPaintMesh(node, def) && materials.some((m) => isPaintSlot(m, def));
+    const count = node.geometry.index
+      ? node.geometry.index.count / 3
+      : node.geometry.attributes.position.count / 3;
+    for (let tri = 0; tri < count; tri++) {
+      readTriangle(node, tri);
+      const depth = paint ? 0 : tailFacing();
+      if (depth === null) continue;
+      const x0 = cellX(Math.min(corners[0]!, corners[3]!, corners[6]!));
+      const x1 = cellX(Math.max(corners[0]!, corners[3]!, corners[6]!));
+      const y0 = cellY(Math.min(corners[1]!, corners[4]!, corners[7]!));
+      const y1 = cellY(Math.max(corners[1]!, corners[4]!, corners[7]!));
+      for (let iy = y0; iy <= y1; iy++) {
+        const y = box.min.y + (iy + 0.5) * TAIL_CELL_M;
+        for (let ix = x0; ix <= x1; ix++) {
+          const x = box.min.x + (ix + 0.5) * TAIL_CELL_M;
+          if (!coversCell(x, y)) continue;
+          const cell = ix + iy * nx;
+          if (paint) painted[cell] = 1;
+          else if (depth > outermost[cell]!) outermost[cell] = depth;
+        }
+      }
+    }
+  });
+
+  // An opening is a cell no paint covers and the picture's edge cannot reach: the paint
+  // closes round it, the way the tailgate closes round a window.
+  const outside = new Uint8Array(nx * ny);
+  const queue: number[] = [];
+  const reach = (ix: number, iy: number): void => {
+    if (ix < 0 || iy < 0 || ix >= nx || iy >= ny) return;
+    const cell = ix + iy * nx;
+    if (outside[cell] === 1 || painted[cell] === 1) return;
+    outside[cell] = 1;
+    queue.push(cell);
+  };
+  for (let ix = 0; ix < nx; ix++) {
+    reach(ix, 0);
+    reach(ix, ny - 1);
+  }
+  for (let iy = 0; iy < ny; iy++) {
+    reach(0, iy);
+    reach(nx - 1, iy);
+  }
+  while (queue.length > 0) {
+    const cell = queue.pop()!;
+    const ix = cell % nx;
+    const iy = (cell - ix) / nx;
+    reach(ix - 1, iy);
+    reach(ix + 1, iy);
+    reach(ix, iy - 1);
+    reach(ix, iy + 1);
+  }
+
+  // The plate: rear-facing, on the declared material, in an opening of the tail's rear
+  // half, at that cell's own outermost depth.
+  const hosts: THREE.Mesh[] = [];
+  scene.traverse((node) => {
+    if (!(node instanceof THREE.Mesh)) return;
+    const materials = materialsOf(node);
+    if (materials.length === 1 && materials[0]!.name === material) hosts.push(node);
+  });
+  for (const host of hosts) {
+    const count = host.geometry.index
+      ? host.geometry.index.count / 3
+      : host.geometry.attributes.position.count / 3;
+    const plate = new Uint8Array(count);
+    let found = 0;
+    for (let tri = 0; tri < count; tri++) {
+      readTriangle(host, tri);
+      const depth = tailFacing();
+      if (depth === null) continue;
+      if ((corners[2]! + corners[5]! + corners[8]!) / 3 * rearSign <= 0) continue;
+      const cell =
+        cellX((corners[0]! + corners[3]! + corners[6]!) / 3)
+        + cellY((corners[1]! + corners[4]! + corners[7]!) / 3) * nx;
+      if (painted[cell] === 1 || outside[cell] === 1) continue;
+      if (depth < outermost[cell]! - TAIL_PLATE_DEPTH_M) continue;
+      plate[tri] = 1;
+      found++;
+    }
+    if (found === 0) continue;
+    const cut = triangleRuns(host.geometry, (tri) => plate[tri] === 1);
+    const pane = new THREE.Mesh(subGeometry(host.geometry, cut.matched), carGlassMaterial());
+    pane.name = 'glass-rear';
+    pane.position.copy(host.position);
+    pane.quaternion.copy(host.quaternion);
+    pane.scale.copy(host.scale);
+    host.parent?.add(pane);
+    const remainder = subGeometry(host.geometry, cut.rest);
+    host.geometry.dispose();
+    host.geometry = remainder;
+    return;
+  }
+}
+
 /**
  * Detaches the four wheel nodes of a model that carries its own wheels.
  *
@@ -1200,6 +1399,12 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   }
   applyLoadedRideDrop(scene, wheels, def.loadedRideDrop ?? 0);
 
+  // The one window a pack drew as trim rather than glass becomes glass here, while the
+  // car is fitted but before the wear's chassis stamp reads the geometry.
+  const rearAxleZ = (wheels[2]!.pos[2] + wheels[3]!.pos[2]) * 0.5;
+  const frontAxleZ = (wheels[0]!.pos[2] + wheels[1]!.pos[2]) * 0.5;
+  glassOverTailOpening(scene, def, Math.sign(rearAxleZ - frontAxleZ) || 1);
+
   // Hood camera mount, measured rather than authored.
   //
   // The bonnet is the highest bodywork over the front third of the car, on the
@@ -1522,10 +1727,39 @@ function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInsta
   const glass = cloneCarGlass(body, paint);
   prepareSovietShellFaces(body, t.def);
   applyRandomPaint(body, t.def, appearanceKey);
-  markStickerSurfaces(body, t.def);
+  markStickerSurfaces(body, t.def, glass);
   body.name = 'body';
-  const surface = new CarBodySurface(paint, glass);
+  const decals = new CarStickerDecals(
+    body,
+    stickerDecalSurfaces(body, t.def),
+    paint.length > 0 ? carPaintGrimeFrame(paint[0]!) : null,
+  );
+  const surface = new CarBodySurface(paint, glass, decals);
   return { body, wheels, surface };
+}
+
+/**
+ * The triangles of a fitted body a sticker may be printed on: each mesh's sticker slots
+ * (`markStickerSurfaces`), narrowed on a palette atlas body to the paint cell.
+ *
+ * The decal path reads this once per car, lazily, the first time the car has a sticker —
+ * a traffic car with none never pays for it.
+ */
+function stickerDecalSurfaces(root: THREE.Object3D, def: CarModelDef): StickerDecalSurface[] {
+  const surfaces: StickerDecalSurface[] = [];
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    const indices = child.userData.stickerMaterialIndices as number[] | undefined;
+    if (!indices || indices.length === 0) return;
+    const geometry = child.geometry;
+    const cell = child.userData.stickerPaintCell as readonly [number, number] | undefined;
+    surfaces.push({
+      mesh: child,
+      accepts: (slot, triangle) =>
+        indices.includes(slot) && (cell === undefined || uvCellOf(geometry, triangle, cell)),
+    });
+  });
+  return surfaces;
 }
 
 /** A fresh instance of a loaded model, sharing geometry but owning its paint state. */

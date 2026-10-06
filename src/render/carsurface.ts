@@ -1,6 +1,6 @@
 /**
- * One car's visible body condition: the paint's dirt and scratches, and the dust on
- * its windows.
+ * One car's visible body condition: the paint's dirt and scratches, the dust on its
+ * windows, and the stickers on both.
  *
  * Created once per instanced car by render/carmodel.ts, which is the only place that
  * knows which materials are this car's paint. Holding those handles is the point: a
@@ -14,9 +14,9 @@ import {
   setCarBodyCondition,
   setCarBodyHighlight,
   setCarBodyPaintColor,
-  setCarBodyStickers,
   setCarGrime,
 } from './materials';
+import type { CarStickerDecals } from './stickerdecals';
 
 /**
  * Share of the body's dirt the windows carry. One: the glass evaluates the paint's own
@@ -36,6 +36,8 @@ export class CarBodySurface {
     readonly paint: readonly THREE.Material[],
     /** This car's own window glass (render/carmodel.ts `cloneCarGlass`). */
     readonly glass: readonly THREE.Material[] = [],
+    /** This car's sticker decals (render/stickerdecals.ts). */
+    private readonly decals: CarStickerDecals | null = null,
   ) {}
 
   /** Writes dirt and scratches into this car's paint; free when neither changed. */
@@ -53,11 +55,12 @@ export class CarBodySurface {
   }
 
   /**
-   * Prints this car's placed stickers into its paint and glass (materials.ts
-   * CAR_STICKERS), with `preview` — the one being tried on — see-through on top.
+   * Draws this car's placed stickers, plus `preview` — the one being tried on — over
+   * them. The decal geometry is rebuilt only when the stickers or the aimed pose change
+   * (render/stickerdecals.ts), so calling this every frame costs nothing.
    */
   setStickers(stickers: readonly StickerState[], preview: StickerState | null = null): void {
-    setCarBodyStickers(this.paint, stickers, preview);
+    this.decals?.setStickers(stickers, preview);
   }
 
   /** The "stick it here" pulse, 0..1. */
@@ -67,9 +70,10 @@ export class CarBodySurface {
     setCarBodyHighlight(this.paint, value);
   }
 
-  /** Frees this car's own paint materials. */
+  /** Frees this car's own paint, glass and decal materials. */
   dispose(): void {
     for (const material of this.paint) material.dispose();
     for (const material of this.glass) material.dispose();
+    this.decals?.dispose();
   }
 }
