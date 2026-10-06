@@ -16,12 +16,20 @@ import {
   TIME_OF_DAY_PRESETS,
 } from '../game/settings';
 import type {
+  CpuLoad,
   GraphicsQuality,
   GraphicsQualitySource,
   Settings,
   TimeOfDayPreset,
 } from '../game/settings';
-import { GRAPHICS_TIERS, DEFAULT_SETTINGS, loadStoredSettings, storeSettings, withTierDefaults } from '../game/settings';
+import {
+  GRAPHICS_TIERS,
+  DEFAULT_SETTINGS,
+  TRAFFIC_CAPS,
+  loadStoredSettings,
+  storeSettings,
+  withTierDefaults,
+} from '../game/settings';
 import { RADIO_RECOMMENDATIONS } from '../audio/radio';
 import {
   manualRenderScale,
@@ -35,6 +43,13 @@ import { CAR_PAINTS } from '../vehicle/carpaint';
 import { ALL_VARIANTS } from '../parts/registry';
 import { CAMERA_FRAME_LIMIT, type FluidKind, type ShadeTint } from '../items/items';
 import { STICKERS, type StickerKind } from '../items/stickercatalog';
+
+/** The CPU row's buttons, lightest first; see `CpuLoad`. */
+const TRAFFIC_LEVELS: readonly { load: CpuLoad; label: string; icon: string }[] = [
+  { load: 'low', label: 'Low', icon: 'gfx1' },
+  { load: 'medium', label: 'Medium', icon: 'gfx2' },
+  { load: 'high', label: 'High', icon: 'gfx3' },
+];
 
 /**
  * Title screen and pause overlay. Plain DOM, no framework. Each call owns the
@@ -850,6 +865,7 @@ export class MainMenu {
         cameraShake: base.cameraShake,
         bouncyCars: base.bouncyCars,
         dashboardScale: base.dashboardScale,
+        cpuLoad: base.cpuLoad,
       };
       const apply = (): void => {
         hooks.applySettings({
@@ -873,6 +889,7 @@ export class MainMenu {
           cameraShake: settings.cameraShake,
           bouncyCars: settings.bouncyCars,
           dashboardScale: settings.dashboardScale,
+          cpuLoad: settings.cpuLoad,
         });
       };
 
@@ -1642,6 +1659,23 @@ export class MainMenu {
                 },
               },
             ]),
+            // A DIFFERENT CHIP FROM EVERY ROW ABOVE. Those are the graphics card's bill;
+            // this is the processor's, and today that is the traffic: every car on the
+            // road is a full physical vehicle with its own driver. Applies live.
+            segmented('CPU', TRAFFIC_LEVELS.map((level) => ({
+              label: level.label,
+              icon: level.icon,
+              hint:
+                `Up to ${TRAFFIC_CAPS[level.load].narrow} cars on a two-lane road, `
+                + `${TRAFFIC_CAPS[level.load].wide} on a four-lane one. `
+                + 'Each is a fully simulated car with its own driver, paid for by the '
+                + 'processor, not the graphics card. Applies at once.',
+              active: () => settings.cpuLoad === level.load,
+              pick: () => {
+                settings.cpuLoad = level.load;
+                apply();
+              },
+            }))),
             segmented('Smooth Edges', [
               {
                 label: 'On',

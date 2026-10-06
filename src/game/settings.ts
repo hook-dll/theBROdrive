@@ -320,6 +320,23 @@ export function presentationFpsFor(frameRateLimit: number | null): number | null
 }
 
 /**
+ * Processor budget, separate from the graphics rung because it is a different chip.
+ * The graphics rung is pixels and shader cost; this is simulation the main thread pays
+ * for whatever the screen is: today, how many ambient traffic cars are live, each a
+ * full physical vehicle with its own autopilot and pairwise coordination that grows
+ * with the square of the count. Changes apply live: surplus cars drain behind the
+ * player, new ones fill in ahead.
+ */
+export type CpuLoad = 'low' | 'medium' | 'high';
+
+/** Traffic replenishment ceilings per CPU level: two-lane and four-lane road. */
+export const TRAFFIC_CAPS: Record<CpuLoad, { readonly narrow: number; readonly wide: number }> = {
+  low: { narrow: 8, wide: 16 },
+  medium: { narrow: 16, wide: 32 },
+  high: { narrow: 24, wide: 48 },
+};
+
+/**
  * The frame rates the player may choose, and `null` for no cap.
  *
  * 30 and 60 are the useful thermal steps. 75, 120 and 144 exist because panels have them
@@ -474,6 +491,8 @@ export interface Settings {
    * number means "a bit bigger" on both.
    */
   dashboardScale: number;
+  /** Processor budget; see `CpuLoad`. */
+  cpuLoad: CpuLoad;
 }
 
 export const DAY_CYCLE_MIN_MINUTES = GAMEPLAY_CONFIG.dayCycleMinutesMin;
@@ -551,6 +570,8 @@ export const DEFAULT_SETTINGS: Settings = {
   // Off by default; a joke should be opted into, not discovered mid-drive.
   bouncyCars: false,
   dashboardScale: 1,
+  // The full stream. A machine that cannot carry it is told so by the menu's CPU row.
+  cpuLoad: 'high',
 };
 
 /**
@@ -701,6 +722,7 @@ export function sanitizeSettings(raw: unknown): Settings {
               DASHBOARD_SCALE_STEP,
           ) * DASHBOARD_SCALE_STEP
         : 1,
+    cpuLoad: obj.cpuLoad === 'low' || obj.cpuLoad === 'medium' ? obj.cpuLoad : 'high',
   };
 
   const rawBindings = obj.keyBindings;

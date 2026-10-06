@@ -8,7 +8,7 @@ import { GameWorld, newWorldState } from '../game/state';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
 import { Autopilot, AUTOPILOT_MODES, type AutopilotMode } from '../vehicle/autopilot';
 import type { TrafficField, TrafficNeighbour } from '../vehicle/trafficfield';
-import type { Settings } from '../game/settings';
+import { TRAFFIC_CAPS, type Settings } from '../game/settings';
 import { CAR_MODELS } from '../vehicle/carmodels';
 import { variantsOfKind, variant, type BodyClass } from '../parts/registry';
 import { Vehicle } from '../vehicle/vehicle';
@@ -22,21 +22,17 @@ import { PHYSICS_REACH_M } from './chunks';
 import type { RoadConditionBuffer } from './gradient';
 
 /**
- * THE STREAM'S SIZE COMES FROM THE CARRIAGEWAY, not from a setting.
+ * THE STREAM'S SIZE COMES FROM THE CARRIAGEWAY, scaled by what the processor can carry.
  *
- * A two-lane road replenishes up to `NARROW_TRAFFIC` cars; a four-lane road up to
- * `WIDE_TRAFFIC`. In between the ceiling follows the widening. Existing visible
+ * A two-lane road replenishes up to `TRAFFIC_CAPS[cpuLoad].narrow` cars; a four-lane
+ * road up to `.wide`. In between the ceiling follows the widening. Existing visible
  * cars drain naturally rather than disappearing at a profile step. The density
  * samples the entire spawn band, not one point (see `refreshRoadCap`).
  *
- * It used to be a player setting with a menu slider, defaulting to OFF, that only ever
- * RAISED: a narrow road ran at the setting and a widened one ran up to a fixed ceiling of
- * thirty. That asked the player a question about a number they had no way to judge — the
- * honest answer is a property of the road, and the road already knows it.
+ * It once was a "traffic" slider, removed because it asked a number the player had no
+ * way to judge. The CPU level asks something he can: how much his processor can give.
+ * The road's shape still decides where in that budget the stream sits.
  */
-// Doubled with PHYSICS_REACH_M (400 -> 800 m) so the density per metre holds.
-const NARROW_TRAFFIC = 24;
-const WIDE_TRAFFIC = 48;
 /**
  * The smallest target fraction of the cap, so a long drive keeps changing.
  * The target is a single draw in `[DENSITY_FLOOR * cap, cap]`, re-rolled
@@ -50,12 +46,6 @@ const WIDE_TRAFFIC = 48;
  * for minutes at a time, which is what a fifth of twelve means in practice.
  */
 const DENSITY_FLOOR = 0.5;
-/**
- * Above this the stream packs tighter (see `SPAWN_ROAD_GAP_M`). It is the narrow road's
- * whole capacity, so the rule reads: a stream busier than a full two-lane road's worth
- * is a busy road and queues up. Only a widened carriageway can reach it.
- */
-const DENSE_TRAFFIC_THRESHOLD = NARROW_TRAFFIC;
 /**
  * Nearest a car may be created ahead of the player. 140 m was "behind a crest or a
  * bend", which on an open desert road is nothing: cars were watched appearing and
@@ -442,8 +432,8 @@ export interface TrafficStatus {
    */
   readonly target: number;
   /**
-   * Replenishment ceiling from the carriageway: `NARROW_TRAFFIC` on two lanes and
-   * `WIDE_TRAFFIC` on four. Existing visible cars can exceed it while a narrowing
+   * Replenishment ceiling from the carriageway: `TRAFFIC_CAPS[cpuLoad].narrow` on two
+   * lanes and `.wide` on four. Existing visible cars can exceed it while a narrowing
    * drains naturally; it is not a hard limit on the live count.
    */
   readonly cap: number;
@@ -495,7 +485,7 @@ export class RoadTraffic {
    * The widest stream this stretch of road will hold, from `widenessAt`. Recomputed
    * every step because the widening changes under the stream as it drives.
    */
-  private roadCap = NARROW_TRAFFIC;
+  private roadCap = 0;
   /** Current natural-looking density, at or below `roadCap`. */
   private desiredCount = 0;
   /**
@@ -1005,7 +995,7 @@ export class RoadTraffic {
     //
     // All three are O(cars²) — each asks "is anybody else doing X within N metres" for
     // every car — and they were being answered sixty times a second. On a widened
-    // stretch the stream is `WIDE_TRAFFIC` rather than `NARROW_TRAFFIC`, so the pair
+    // stretch the stream is the wide ceiling rather than the narrow one, so the pair
     // count more than quadruples exactly where the road opens out, which is where the
     // simulation was reported growing teeth. The same is true of the oncoming scan in
     // the loop below, which is a linear pass per car and exists to dip a headlight.
@@ -1090,7 +1080,7 @@ export class RoadTraffic {
       if (this.carList.length < this.desiredCount) {
         this.queueSpawn();
         this.spawnCooldown =
-          this.desiredCount > DENSE_TRAFFIC_THRESHOLD ? DENSE_SPAWN_INTERVAL_S : SPAWN_INTERVAL_S;
+          this.desiredCount > this.trafficCaps.narrow ? DENSE_SPAWN_INTERVAL_S : SPAWN_INTERVAL_S;
       }
     }
   }
@@ -1552,7 +1542,7 @@ export class RoadTraffic {
     platoonLeaderId: string | null = null,
   ): boolean {
     const sameDirectionGap =
-      this.desiredCount > DENSE_TRAFFIC_THRESHOLD ? DENSE_SPAWN_ROAD_GAP_M : SPAWN_ROAD_GAP_M;
+      this.desiredCount > this.trafficCaps.narrow ? DENSE_SPAWN_ROAD_GAP_M : SPAWN_ROAD_GAP_M;
     const lateral = this.forwardLaneCentreAt(s, direction, lane);
     for (const car of this.carList) {
       const gap = Math.abs(car.forwardS - s);
@@ -1691,7 +1681,7 @@ export class RoadTraffic {
    * while still responding within the band traffic is about to occupy.
    *
    * The answer is the band's own carriageway size: a two-lane stretch holds
-   * `NARROW_TRAFFIC` and a four-lane one `WIDE_TRAFFIC`, with the taper between them
+   * the narrow ceiling and a four-lane one the wide, with the taper between them
    * interpolated so the cap follows the asphalt the stream is about to occupy.
    */
   private refreshRoadCap(): void {
@@ -1705,7 +1695,17 @@ export class RoadTraffic {
       wideness += widenessAt(this.sourceWorld.seed, s);
     }
     wideness /= DENSITY_PROFILE_SAMPLES;
-    this.roadCap = NARROW_TRAFFIC + (WIDE_TRAFFIC - NARROW_TRAFFIC) * wideness;
+    const { narrow, wide } = this.trafficCaps;
+    this.roadCap = narrow + (wide - narrow) * wideness;
+  }
+
+  /**
+   * This machine's traffic ceilings; see `CpuLoad`. Read live so the menu applies at
+   * once. Above `.narrow` the stream packs tighter (`DENSE_SPAWN_*`): a stream busier
+   * than a full two-lane road's worth is a busy road and queues up.
+   */
+  private get trafficCaps(): { readonly narrow: number; readonly wide: number } {
+    return TRAFFIC_CAPS[this.sourceWorld.state.settings.cpuLoad];
   }
 
   /**
@@ -1720,7 +1720,7 @@ export class RoadTraffic {
 
   private scaleDesiredCount(cap: number): number {
     if (cap <= 0) return 0;
-    return Math.min(WIDE_TRAFFIC, Math.max(1, Math.round(cap * this.densityFraction)));
+    return Math.min(this.trafficCaps.wide, Math.max(1, Math.round(cap * this.densityFraction)));
   }
 
   /**
