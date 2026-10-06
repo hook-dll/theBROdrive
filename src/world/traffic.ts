@@ -10,6 +10,7 @@ import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
 import { Autopilot, AUTOPILOT_MODES, roadPaceCeiling, type AutopilotMode } from '../vehicle/autopilot';
 import type { TrafficField, TrafficNeighbour } from '../vehicle/trafficfield';
 import { TRAFFIC_CAPS, type Settings } from '../game/settings';
+import type { Item } from '../items/items';
 import { CAR_MODELS } from '../vehicle/carmodels';
 import { variantsOfKind, variant, type BodyClass } from '../parts/registry';
 import { Vehicle } from '../vehicle/vehicle';
@@ -375,6 +376,30 @@ export interface FieldOwner {
   readonly direction: 1 | -1;
 }
 
+/**
+ * A race rival (contracts/race.ts) handed to the stream to drive while it is inside
+ * the physical window. The race owns where it is between visits; the stream only
+ * drives it, never trims, recycles or counts it against the density.
+ */
+export interface RivalSpawn {
+  readonly id: string;
+  readonly modelId: string;
+  /** Forward-frame arclength, metres; rivals always drive the road's own direction. */
+  readonly s: number;
+  /** Speed it is put down rolling at, m/s; 0 starts it standing. */
+  readonly speed: number;
+  readonly speedCap: number;
+  /** Its copy of the race cargo, loaded into the boot so its mass is the player's. */
+  readonly cargo: Item | null;
+}
+
+/** A live rival's place on the road, written by `RoadTraffic.rivalPose`. */
+export interface RivalPose {
+  s: number;
+  /** Along-road speed in its direction of travel, m/s. */
+  speed: number;
+}
+
 type TrafficDirection = 1 | -1;
 export type TrafficDriverStyle = 'cautious' | 'normal' | 'hurried' | 'frantic';
 
@@ -463,6 +488,8 @@ interface TrafficCar {
   rails: TrafficRails | null;
   /** Seconds before this car may be put on rails again; see RAILS_PASS_HOLDOFF_S. */
   railsHoldoff: number;
+  /** Driven for a race (see `RivalSpawn`): exempt from trim, recycle and the count. */
+  rival: boolean;
 }
 
 const FORWARD_QUEUE_ORDER = (a: TrafficCar, b: TrafficCar): number =>
@@ -1166,6 +1193,7 @@ export class RoadTraffic {
         car.lifetimeTimer = LIFETIME_SAMPLE_S;
         const offset = car.forwardS - playerS;
         if (
+          !car.rival &&
           car.stoppedFor > STUCK_RECYCLE_S &&
           Math.abs(offset) > UNSEEN_M &&
           car.settleFor <= 0
@@ -1214,11 +1242,11 @@ export class RoadTraffic {
 
     this.spawnCooldown -= dt;
     if (this.spawnCooldown <= 0 && this.pending === null) {
-      if (this.carList.length >= this.desiredCount) {
+      if (this.ambientCount() >= this.desiredCount) {
         const stale = this.pickRecycleIndex();
         if (stale >= 0) this.removeAt(stale);
       }
-      if (this.carList.length < this.desiredCount) {
+      if (this.ambientCount() < this.desiredCount) {
         this.queueSpawn();
         this.spawnCooldown =
           this.desiredCount > this.trafficCaps.narrow ? DENSE_SPAWN_INTERVAL_S : SPAWN_INTERVAL_S;
@@ -1624,22 +1652,34 @@ export class RoadTraffic {
       : offset >= SPAWN_MIN_M - SPAWN_ARRIVAL_SLACK_M && offset <= SPAWN_MAX_M;
     if (
       this.desiredCount === 0 ||
-      this.carList.length >= this.desiredCount ||
+      this.ambientCount() >= this.desiredCount ||
       request.generation !== this.generation ||
       this.pending !== request ||
       !arrivalOk
     ) {
       return;
     }
+    const record = this.placeCar(request, null, null);
+    if (record) this.queuePlatoonMate(record, request.platoonChain ?? PLATOON_MAX_CHAIN);
+  }
+
+  /**
+   * Puts a loaded spawn on the road if its site is still good: the lane, the stopping
+   * room, the ground, the support window and every body nearby. Null with nothing
+   * changed when it is not. `launchSpeed` null is the ordinary rolling start; `cargo`
+   * goes into the boot before the body exists, so its mass is there from the first step.
+   */
+  private placeCar(request: PendingSpawn, launchSpeed: number | null, cargo: Item | null): TrafficCar | null {
+    const offset = request.forwardS - this.playerS;
     const measure = carModelMeasure(request.modelId);
     const bodyRadius = Math.hypot(...measure.halfExtents);
     if (
       request.lane >= this.road.lanesPerSideAt(request.forwardS) ||
       !this.spawnSiteClear(request.forwardS, request.direction, request.lane, measure.halfExtents[0], bodyRadius)
     ) {
-      return;
+      return null;
     }
-    if (Math.abs(offset) + bodyRadius + this.playerStepTravel + PHYSICS_EDGE_SLACK_M >= PHYSICS_REACH_M) return;
+    if (Math.abs(offset) + bodyRadius + this.playerStepTravel + PHYSICS_EDGE_SLACK_M >= PHYSICS_REACH_M) return null;
 
     const roadPoint = this.road.sampleAt(request.forwardS);
     const forwardLateral = this.forwardLaneCentreAt(
@@ -1653,7 +1693,7 @@ export class RoadTraffic {
       this.road.lanesPerSideAt(request.forwardS) === 2
         ? WIDE_SPAWN_WORLD_GAP_M
         : SPAWN_WORLD_GAP_M;
-    if (!this.isSpawnClear(x, z, worldGap)) return;
+    if (!this.isSpawnClear(x, z, worldGap)) return null;
     // Keep the immediate spawn footprint clear of every body, in either direction,
     // in addition to the same-direction stopping room checked by roadGapClear.
     // `forwardLateral` is already the road-frame offset used to build x/z above.
@@ -1662,7 +1702,7 @@ export class RoadTraffic {
         Math.abs(car.forwardS - request.forwardS) < SPAWN_BODY_ALONG_M &&
         Math.abs(car.roadLateral - forwardLateral) < SPAWN_BODY_ACROSS_M
       ) {
-        return;
+        return null;
       }
     }
     const heading = roadPoint.heading + (request.direction === -1 ? Math.PI : 0);
@@ -1690,6 +1730,7 @@ export class RoadTraffic {
       state.qz = pose.qz;
       state.qw = pose.qw;
     }
+    if (cargo) state.storage[0] = cargo;
     // Nobody meets a traffic car at the start of its journey: it has already driven
     // the desert road to get here, so it arrives carrying that road's film and the
     // odd scuff, and its own driving adds to it from there. Hashed from the id rather
@@ -1744,7 +1785,7 @@ export class RoadTraffic {
       lane: request.lane,
       lifetimeTimer: LIFETIME_SAMPLE_S,
       stoppedFor: 0,
-      launchSpeed: this.rollingStartSpeed(
+      launchSpeed: launchSpeed ?? this.rollingStartSpeed(
         request.forwardS,
         request.direction,
         request.mode,
@@ -1758,12 +1799,80 @@ export class RoadTraffic {
       turnS: -1,
       rails: null,
       railsHoldoff: 0,
+      rival: false,
     };
     // The field reads the record's live arclength and direction, so it keeps working
     // as the car drives and, after a turnaround, as its direction flips.
     autopilot.setTrafficField(this.fieldFor(record, record.id));
     this.carList.push(record);
-    this.queuePlatoonMate(record, request.platoonChain ?? PLATOON_MAX_CHAIN);
+    return record;
+  }
+
+  /**
+   * Drives a race rival while it is inside the physical window; see `RivalSpawn`.
+   * Resolves true once it is on the road, false when its site was not usable (the
+   * race keeps it as a ghost and asks again). It leaves the way every car does, at
+   * the support edge, and `rivalPose` then answers false.
+   */
+  spawnRival(spec: RivalSpawn): Promise<boolean> {
+    const model = CAR_MODELS.find((candidate) => candidate.id === spec.modelId);
+    if (!model) return Promise.resolve(false);
+    const request: PendingSpawn = {
+      generation: this.generation,
+      direction: 1,
+      forwardS: spec.s,
+      modelId: spec.modelId,
+      engineId: franticEngine(model.bodyClass),
+      id: spec.id,
+      style: 'frantic',
+      headwayS: 1,
+      mode: 'frantic',
+      speedCap: spec.speedCap,
+      pace: 1,
+      lane: this.pickSpawnLane(spec.s, 'frantic'),
+      rear: spec.s < this.playerS,
+    };
+    return this.prepareModel(spec.modelId).then(
+      () => {
+        if (request.generation !== this.generation) return false;
+        if (this.carList.some((car) => car.id === spec.id)) return false;
+        const record = this.placeCar(request, spec.speed, spec.cargo);
+        if (!record) return false;
+        record.rival = true;
+        return true;
+      },
+      (error: unknown) => {
+        console.error(`failed to load rival model "${spec.modelId}"`, error);
+        return false;
+      },
+    );
+  }
+
+  /** Writes a live rival's road place into `out`; false when it is not on the road. */
+  rivalPose(id: string, out: RivalPose): boolean {
+    const car = this.rivalCar(id);
+    if (!car) return false;
+    out.s = car.forwardS;
+    out.speed = car.forwardSpeed;
+    return true;
+  }
+
+  /** The race's speed ceiling for a live rival, m/s: its braking curve to a stop. */
+  setRivalSpeedCap(id: string, mps: number): void {
+    this.rivalCar(id)?.autopilot.setSpeedCap(mps);
+  }
+
+  /** Hands a rival whose race is over back to the stream as ordinary frantic traffic. */
+  releaseRival(id: string): void {
+    const car = this.rivalCar(id);
+    if (!car) return;
+    car.rival = false;
+    car.autopilot.setSpeedCap(car.speedCap);
+  }
+
+  private rivalCar(id: string): TrafficCar | null {
+    for (const car of this.carList) if (car.rival && car.id === id) return car;
+    return null;
   }
 
   /**
@@ -1778,7 +1887,7 @@ export class RoadTraffic {
     // Nobody rides in convoy behind a frantic driver: it is gone in a minute.
     if (leader.style === 'frantic') return;
     if (this.pending !== null) return;
-    if (this.carList.length >= this.desiredCount) return;
+    if (this.ambientCount() >= this.desiredCount) return;
     if (this.random() >= PLATOON_CHANCE) return;
     const followGap = Math.max(PLATOON_MIN_GAP_M, leader.speedCap * leader.headwayS);
     const s = leader.forwardS - leader.direction * followGap;
@@ -1857,6 +1966,7 @@ export class RoadTraffic {
     let same = 0;
     let oncoming = 0;
     for (const car of this.carList) {
+      if (car.rival) continue;
       if (car.direction === 1) same++;
       else oncoming++;
     }
@@ -2020,7 +2130,7 @@ export class RoadTraffic {
     pace: number;
   } {
     const directionCount = this.carList.reduce(
-      (count, car) => count + Number(car.direction === direction),
+      (count, car) => count + Number(!car.rival && car.direction === direction),
       0,
     );
     const styleRoll = this.random();
@@ -2169,7 +2279,7 @@ export class RoadTraffic {
    * behind. Neither is permission to make visible traffic vanish.
    */
   private trimTo(count: number): void {
-    while (this.carList.length > count) {
+    while (this.ambientCount() > count) {
       const index = this.pickTrimIndex();
       if (index < 0) return;
       this.removeAt(index);
@@ -2187,7 +2297,7 @@ export class RoadTraffic {
       const car = this.carList[i]!;
       // A frantic driver behind is on its way to being seen: it was put there to come
       // up the mirror, and trimming it first would undo the whole point of it.
-      if (car.style === 'frantic' && car.direction === 1) continue;
+      if (car.rival || (car.style === 'frantic' && car.direction === 1)) continue;
       const behind = this.playerS - car.forwardS;
       if (behind > bestBehind) {
         bestBehind = behind;
@@ -2204,7 +2314,7 @@ export class RoadTraffic {
     for (let i = 0; i < this.carList.length; i++) {
       const car = this.carList[i]!;
       const behind = this.playerS - car.forwardS;
-      if (behind <= bestBehind) continue;
+      if (car.rival || behind <= bestBehind) continue;
       const receding =
         car.direction === -1 || car.forwardSpeed < this.playerSpeed - RECYCLE_RECEDE_MPS;
       if (!receding) continue;
@@ -2221,6 +2331,13 @@ export class RoadTraffic {
     car.vehicle.dispose();
     this.trafficWorld.apply({ t: 'car_remove', carId: car.id });
     this.carList.splice(index, 1);
+  }
+
+  /** Cars the density governs: everything but the race rivals. */
+  private ambientCount(): number {
+    let count = 0;
+    for (const car of this.carList) if (!car.rival) count++;
+    return count;
   }
 
   private clear(): void {

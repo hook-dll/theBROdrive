@@ -135,6 +135,7 @@ import type { TrunkViewState } from './vehicle/trunk';
 import { GameAudio, type AmbienceFrame, type CarPose, type RadioSpatialState } from './audio/gameaudio';
 import { STREAM_FRAME_BUDGET_MS, STREAM_JOBS_PER_FRAME, warmUpBoot } from './app/bootwarmup';
 import { installDevTools } from './app/devtools';
+import { RivalRace } from './contracts/race';
 import { createPlayerImpacts } from './app/playerimpacts';
 import { createWheelEffects } from './app/wheeleffects';
 
@@ -771,6 +772,8 @@ async function boot(): Promise<void> {
       return true;
     },
   );
+  /** Three frantic rivals carrying the player's cargo to the next courier; see contracts/race.ts. */
+  const race = new RivalRace(world.seed, road, traffic, loadCarModel, (text) => hud.setToast(text));
   const reconcileActiveWorld = (anchorX: number, anchorZ: number): void => {
     const drivingId = world.state.player.drivingCarId;
     const cars = world.state.cars;
@@ -1211,6 +1214,7 @@ async function boot(): Promise<void> {
   world.onDelta((delta) => {
     if (delta.t === 'courier_storage' && delta.completedContractId) {
       hud.setToast('delivered — signed sticker envelope received');
+      race.playerDelivered(delta.completedContractId);
     } else if (delta.t === 'sticker_place') {
       hud.setToast('stuck on');
     } else if (delta.t === 'settings') {
@@ -1393,6 +1397,7 @@ async function boot(): Promise<void> {
         lakeWater,
         tumbleweeds,
         traffic,
+        race,
         vitals,
         autopilot,
         hud,
@@ -1618,6 +1623,7 @@ async function boot(): Promise<void> {
   };
 
   const onContractItem = (item: ContractCargoItem, place: ContractPlace, carId: string | null): void => {
+    race.observe(item, place, activeS);
     ensureContractWorldObjects(contractWorldDeps, item, place);
     if (item.contractKind === 'convoy') {
       const escort = escortFor(contractCarId(item));
@@ -1708,6 +1714,8 @@ async function boot(): Promise<void> {
     playerFieldSeat.forwardS = activeS;
     frameProfiler?.begin('traffic');
     traffic.fixedUpdate(dt, activeS, activeLateral, origin.x, origin.z);
+    race.fixedUpdate(dt, activeS);
+    hud.setRaceStatus(race.statusText(activeS));
     frameProfiler?.end('traffic');
 
     if (driving) {

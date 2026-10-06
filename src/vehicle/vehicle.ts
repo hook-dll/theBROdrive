@@ -1569,6 +1569,11 @@ export class Vehicle implements Rebasable {
    * rather than standing up out of it; see `RoadTraffic`.
    */
   launchRolling(speedMps: number): void {
+    // The settle that put the car down latched the parking hold, and `postStep` would
+    // zero this velocity on the very step it is set: measured, every rolling spawn
+    // (traffic and race rivals alike) stood up from 0 km/h after its settle.
+    this.parkingHoldRequested = false;
+    this.parkingHoldActive = false;
     this.chassisBody.rotation(this.rotationScratch);
     rotateVector(this.forwardScratch, this.rotationScratch, 0, 0, 1);
     const across = Math.hypot(this.forwardScratch.x, this.forwardScratch.z) || 1;

@@ -749,7 +749,20 @@ body.is-cinematic #ui {
 
 
 
-
+.hud-race {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--hud-panel);
+  color: var(--hud-fg);
+  border: 1px solid var(--hud-border);
+  padding: 4px 12px;
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
 .hud-toasts {
   position: absolute;
   top: 72px;

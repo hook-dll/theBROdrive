@@ -282,6 +282,9 @@ export class Hud {
   private readonly invMassEl: HTMLElement;
   private readonly invSlotsEl: HTMLElement;
   private readonly toastEl: HTMLElement;
+  /** Race strip at the top: place and road left to the hand-in; see `setRaceStatus`. */
+  private readonly raceEl: HTMLElement;
+  private raceText: string | null = null;
   private readonly checkEngineEl: HTMLElement;
   private readonly oilWarningEl: HTMLElement;
   private readonly lcdEl: SVGSVGElement;
@@ -416,6 +419,7 @@ export class Hud {
 
 
     this.toastEl = el('div', 'hud-toasts');
+    this.raceEl = el('div', 'hud-race is-hidden');
     this.gumBubbleEl = el('div', 'hud-gum-bubble is-hidden');
     this.damageVignetteEl = el('div', 'hud-damage-vignette');
     this.deathFadeEl = el('div', 'hud-death-fade');
@@ -426,6 +430,7 @@ export class Hud {
       this.drivingCluster,
       inventoryEl,
       this.toastEl,
+      this.raceEl,
       this.gumBubbleEl,
     ];
     // No full-screen blur element: see the note in hud.css for why it was removed
@@ -982,6 +987,13 @@ export class Hud {
   }
 
 
+  /** The race strip's text, or null to hide it. Written only when it changes. */
+  setRaceStatus(text: string | null): void {
+    if (this.disposed || text === this.raceText) return;
+    this.raceText = text;
+    this.setVisible(this.raceEl, text !== null);
+    if (text !== null) this.raceEl.textContent = text;
+  }
   setToast(text: string): void {
     if (this.disposed) return;
     const toast = el('div', 'hud-toast');
