@@ -155,8 +155,9 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     mobileShadows: false,
     starMagnitude: 6,
     mobileStarMagnitude: 6,
-    vehicleLightSlots: 2,
-    mobileVehicleLightSlots: 2,
+    // The two point slots this rung had went to the cars at half a spot each: +1 spot.
+    vehicleLightSlots: 3,
+    mobileVehicleLightSlots: 3,
     headlightDistanceScale: 1,
   },
   acceptable: {
@@ -170,8 +171,9 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     mobileShadows: false,
     starMagnitude: 7,
     mobileStarMagnitude: 7,
-    vehicleLightSlots: 2,
-    mobileVehicleLightSlots: 2,
+    // As on retro: two freed point slots, one more spot.
+    vehicleLightSlots: 3,
+    mobileVehicleLightSlots: 3,
     headlightDistanceScale: 1,
   },
   standard: {
@@ -185,12 +187,13 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     mobileShadows: false,
     starMagnitude: 8,
     mobileStarMagnitude: 7.5,
-    vehicleLightSlots: 6,
-    // A phone gets two thirds of the desktop budget here, not half. The driven car holds
-    // four (two headlamps, two tail lamps — tail lamps are never merged) and every other
-    // car's headlamp pair is one merged beam, so the desktop six keeps two more cars'
-    // headlamps projected, and the phone's four only the driven car's own.
-    mobileVehicleLightSlots: 4,
+    // The six freed point slots (four on a phone), at about half a spot's cost each,
+    // became three more spots (two on a phone). The driven car holds four — two
+    // headlamps, two tail lamps, which are never merged — and every other car's
+    // headlamp pair is one merged beam, so the desktop nine keeps five more cars'
+    // headlamps projected and the phone's six two more.
+    vehicleLightSlots: 9,
+    mobileVehicleLightSlots: 6,
     headlightDistanceScale: 1,
   },
   blessing: {
