@@ -16,6 +16,7 @@ import * as THREE from 'three';
 
 import { CHUNK_LENGTH, type ChunkContext } from '../src/world/chunks';
 import { Road } from '../src/world/road';
+import { RoadDistance } from '../src/world/roaddistance';
 import { Terrain } from '../src/world/terrain';
 import { MonumentProvider } from '../src/world/props/monuments';
 import { PoleProvider } from '../src/world/props/poles';
@@ -106,7 +107,7 @@ console.log(
 // --- poles ---------------------------------------------------------------------
 // A pole's own group sits at its base; the lean and the arms move the meshes off it,
 // so the BASE is what the setback is about and it is read from the group.
-const poles = new PoleProvider();
+const poles = new PoleProvider(new RoadDistance(road));
 for (const [label, chunk] of [['narrow', narrowChunk], ['wide', wideChunk]] as const) {
   const content = poles.build(contextFor(chunk));
   const hintS = chunk * CHUNK_LENGTH + CHUNK_LENGTH * 0.5;

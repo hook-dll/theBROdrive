@@ -179,6 +179,18 @@
 
 ### Fixed
 
+- POLES STAND IN THE SAND, NOT ON IT. A pole's base was set on `Terrain.heightAt`, which
+  the drawn tiles only chord, so 183 of 565 poles over the first 80 km showed more than
+  5 cm of daylight under the footing (worst 24 cm). Poles now stand on `drawnGroundY`,
+  10 cm under it (`POLE_SINK_M`), and every part a design draws down to y = 0 continues
+  `POLE_ROOT_M` = 0.6 m into the ground, so a lean cannot lift a footing's edge clear.
+  The rail pole's footing is a proper block (0.36 m tall, was 0.14), and the tubular
+  monopole's base plate stands on a 0.3 m concrete plinth instead of on the sand.
+  `PoleProvider` now takes the `RoadDistance`.
+- THE SHOULDER NO LONGER STAYS GREY BESIDE SAND ON THE ROAD. Sand reaching the asphalt
+  edge now carries over the shoulder's lip (`SHOULDER_LIP_SAND`), and a drift's reach
+  into the lane buries the whole strip and its grit (full at 1 m, `SHOULDER_BURY_M`).
+  This covers both the district's sand wedge and the director's tongues, on their own side.
 - OTHER CARS' LIGHT ON THE ROAD NO LONGER SWITCHES ON AND OFF, AND THE TAIL GLOW IS BACK.
   The few car spotlights and road headlamp streaks went to the nearest lamps again every
   frame. When two cars changed order, one lost its light and the other got it at full

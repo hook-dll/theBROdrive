@@ -881,7 +881,7 @@ const variantCounts: Record<PoleAnomaly, number> = { none: 0, down: 0, wrapped: 
 
 for (const seed of SEEDS) {
   const world = makeWorld(seed);
-  const provider = new PoleProvider();
+  const provider = new PoleProvider(world.roadDistance);
   const events = varietyEventsBetween(seed, 0, SCAN_CHUNKS * CHUNK_LENGTH).filter(
     (event) => event.kind === 'poleAnomaly',
   );
@@ -1028,7 +1028,7 @@ function fingerprint(world: World, chunk: number): number[] {
     }
     sidetracks.dispose?.();
   }
-  const poles = new PoleProvider().build(contextFor(world, chunk));
+  const poles = new PoleProvider(world.roadDistance).build(contextFor(world, chunk));
   for (const child of poles.group.children) {
     if (!(child instanceof THREE.Group)) continue;
     out.push(

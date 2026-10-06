@@ -27,6 +27,8 @@ import { DwellingBuilder, type P3 } from '../dwellings/builder';
 import { poleConditionAt, poleEraSegments, type PoleCondition, type PoleEra } from '../gradient';
 import { ROAD_LENGTH, type Road } from '../road';
 import type { Terrain } from '../terrain';
+import { drawnGroundY } from '../terrainmesh';
+import type { RoadDistance } from '../roaddistance';
 import type { ChunkContext, ChunkContent, ChunkProvider } from '../chunks';
 
 import { deformIcosahedron, matDeadStick } from './forms';
@@ -59,6 +61,12 @@ const TAG_WIRE = 0x90f1c7;
  * whole line sweeps out and back through a taper exactly as the carriageway does.
  */
 const POLE_SETBACK_M = 3.1;
+/**
+ * How far below the drawn sand a pole's ground plane is set: a pole is planted, and
+ * the sand sits up round its footing rather than meeting it at an edge. Below this the
+ * design's own root (`POLE_ROOT_M`) carries the body on down.
+ */
+const POLE_SINK_M = 0.1;
 
 /**
  * SECTIONS: the line is rebuilt in stretches of one design.
@@ -388,16 +396,31 @@ function sectionCondition(section: PoleSection, s: number): PoleCondition {
   return poleConditionAt(Math.min(Math.max(s, section.bandStart), section.bandEnd - 1));
 }
 
-/** Pure, chunk-independent description of the pole at global index `index`. */
-function describePole(road: Road, terrain: Terrain, seed: number, s: number, index: number, section: PoleSection): PolePose {
+/**
+ * Pure, chunk-independent description of the pole at global index `index`.
+ *
+ * STANDS ON THE DRAWN GROUND, not on `Terrain.heightAt`: the tiles chord the field, and
+ * a footing set on the field hovered over the sand by the chord's error, which is the
+ * daylight that showed under every pole that had a footing to show it.
+ */
+function describePole(
+  road: Road,
+  terrain: Terrain,
+  roadDistance: RoadDistance,
+  seed: number,
+  s: number,
+  index: number,
+  section: PoleSection,
+): PolePose {
   const sample = road.sampleAt(s);
-  const p = road.offsetPoint(s, -(road.halfWidthAt(s) + POLE_SETBACK_M));
+  const lateral = -(road.halfWidthAt(s) + POLE_SETBACK_M);
+  const p = road.offsetPoint(s, lateral);
   return describePoleAt(
     seed,
     s,
     index,
     p.x,
-    terrain.heightAt(p.x, p.z, s),
+    drawnGroundY(road, terrain, roadDistance, s, lateral) - POLE_SINK_M,
     p.z,
     sample.heading,
     sectionCondition(section, s),
@@ -660,6 +683,9 @@ function retroWireMaterial(): THREE.LineBasicMaterial {
 export class PoleProvider implements ChunkProvider {
   readonly id = 'poles';
 
+  /** The drawn ground's sampler needs it: see `describePole`. */
+  constructor(private readonly roadDistance: RoadDistance) {}
+
   build(ctx: ChunkContext): ChunkContent {
     const group = new THREE.Group();
     const bodies: RAPIER.RigidBody[] = [];
@@ -671,7 +697,7 @@ export class PoleProvider implements ChunkProvider {
     const oz = ctx.originZ;
 
     forEachPole(ctx.sStart, ctx.sEnd, (s, index, section) => {
-      const pose = describePole(ctx.road, ctx.terrain, seed, s, index, section);
+      const pose = describePole(ctx.road, ctx.terrain, this.roadDistance, seed, s, index, section);
       poses.push({ pose, section });
 
       const poleGroup = new THREE.Group();
@@ -707,7 +733,7 @@ export class PoleProvider implements ChunkProvider {
       // No span across a section boundary: the next design ties on elsewhere.
       if (nextIndex >= section.firstIndex + section.count || !pose.fitted) continue;
       const nextS = section.start + (nextIndex - section.firstIndex + 0.5) * section.spacing;
-      const next = describePole(ctx.road, ctx.terrain, seed, nextS, nextIndex, section);
+      const next = describePole(ctx.road, ctx.terrain, this.roadDistance, seed, nextS, nextIndex, section);
       if (!next.fitted) continue;
       // Either end being down makes the span slack, and a line that came down stays
       // attached: that is the whole read of a fallen pole.

@@ -19,7 +19,9 @@
  * owner asked for poles that are not fancy, and every part here is one that holds a
  * wire up or holds the pole up.
  *
- * FRAME. Metres, ground at y = 0, the pole's own axis on y. +X is LEFT of travel —
+ * FRAME. Metres, ground at y = 0, the pole's own axis on y. Parts are authored standing
+ * ON the ground; `POLE_ROOT_M` then carries everything that touches y = 0 on down into
+ * it, so no design has to author its own buried length. +X is LEFT of travel —
  * over the carriageway, because the line stands right of the road (see `twist` in
  * poles.ts) — and Z runs along the road, which is the direction the wires leave in.
  * No part reaches further than 2.6 m toward the road: the line stands 3.1 m outside
@@ -40,6 +42,20 @@ import type { PoleEra } from '../gradient';
 
 /** Height up the shaft that line gear (anomalies in poles.ts) is bolted at. */
 export const POLE_GEAR_Y = 3.4;
+
+/**
+ * Depth every part that stands on y = 0 is carried on below it: the shaft's butt and
+ * the footing's buried body.
+ *
+ * A pole is set IN the ground, and drawn ending at y = 0 it stood ON it. The sand under
+ * it is never quite where the pole's base height says (a dune chord, the shoulder's
+ * lift, a lean that lifts one side of a footing), and every centimetre of that showed
+ * as daylight under a footing. Deep enough for the worst lean to keep the raised edge
+ * of a footing in the sand; nothing here is ever seen from below.
+ */
+export const POLE_ROOT_M = 0.6;
+/** Height under which a vertex counts as standing on the ground plane. */
+const ROOT_EPS = 1e-4;
 
 /** One leg of a pole: where it stands on local X and how thick it is there. */
 export interface PoleLeg {
@@ -851,10 +867,16 @@ const tubular: Family = (v, h) => {
     legs: [{ x: 0, r: r0 }],
     draw(d) {
       const b = d.b;
-      b.box(-0.34, 0, -0.34, 0.34, 0.05, 0.34, shade(steel, 0.9));
-      for (const [x, z] of [[-0.26, -0.26], [0.26, -0.26], [0.26, 0.26], [-0.26, 0.26]] as const) b.cylinder(x, z, 0.05, 0.12, 0.025, HARDWARE_DARK, 6);
+      // Bolted onto a cast plinth, as every steel monopole is: a base plate laid on
+      // the sand would be the first thing a drift buries and the first to rust.
+      const plinth = 0.3;
+      b.box(-0.44, 0, -0.44, 0.44, plinth, 0.44, pickOf(CONCRETE, v + 1));
+      b.box(-0.34, plinth, -0.34, 0.34, plinth + 0.05, 0.34, shade(steel, 0.9));
+      for (const [x, z] of [[-0.26, -0.26], [0.26, -0.26], [0.26, 0.26], [-0.26, 0.26]] as const) {
+        b.cylinder(x, z, plinth + 0.05, plinth + 0.12, 0.025, HARDWARE_DARK, 6);
+      }
       const joint = height * (0.38 + h(4) * 0.1);
-      shaft(b, 0, 0, 0.05, joint + 0.3, r0, radiusAt(joint + 0.3), steel, sides, sides === 12, 2);
+      shaft(b, 0, 0, plinth + 0.05, joint + 0.3, r0, radiusAt(joint + 0.3), steel, sides, sides === 12, 2);
       shaft(b, 0, 0, joint, height, radiusAt(joint) - 0.012, r1, steel, sides, sides === 12, 3);
       b.cylinder(0, 0, height, height + 0.04, r1 + 0.015, shade(steel, 0.85), sides);
       if (!d.fittings) return;
@@ -990,7 +1012,9 @@ const railPole: Family = (v, h) => {
     legs: [{ x: 0, r: 0.12 }],
     draw(d) {
       const b = d.b;
-      b.box(-0.22, 0, -0.18, 0.22, 0.14, 0.18, pickOf(CONCRETE, v));
+      // A footing, not a tile: it holds a steel section up against the wind, so it is
+      // a solid block with a good third of a metre of it standing proud of the sand.
+      b.box(-0.27, 0, -0.23, 0.27, 0.36, 0.23, pickOf(CONCRETE, v));
       // The section is authored in (x, y) and pushed along Z; pitching the frame by
       // -PI/2 stands it up, which maps its Z onto the pole's Y.
       b.at(0, 0, 0, 0, () => b.extrude(rail ? RAIL_OUTLINE : I_BEAM_OUTLINE, 'z', 0.1, height, iron), -Math.PI * 0.5);
@@ -1097,7 +1121,15 @@ export function poleMaterial(): THREE.MeshStandardMaterial {
 function geometryOf(plan: Plan, fittings: boolean): { geometry: THREE.BufferGeometry; draw: Draw } {
   const draw: Draw = { b: new DwellingBuilder(plan.weather), fittings, wires: [], nest: null };
   plan.draw(draw);
-  return { geometry: draw.b.geometry(), draw };
+  const geometry = draw.b.geometry();
+  // Set in the ground: see POLE_ROOT_M.
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute;
+  for (let i = 0; i < position.count; i++) {
+    if (position.getY(i) <= ROOT_EPS) position.setY(i, -POLE_ROOT_M);
+  }
+  geometry.computeBoundingSphere();
+  geometry.computeBoundingBox();
+  return { geometry, draw };
 }
 
 const plans: (Plan | undefined)[] = [];

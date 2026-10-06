@@ -549,7 +549,7 @@ async function boot(): Promise<void> {
   // is what lets the autopilot know a dirt pile from a rock without a physics query:
   // the generator already knew, and this is the only place that knowledge survives.
   streamer.register(new ScatterProvider(debris, hazards, groundCover));
-  streamer.register(new PoleProvider());
+  streamer.register(new PoleProvider(roadDistance));
   // The verge furniture the director schedules: reflector posts, and the graded
   // tracks that leave the road for the desert. Both sit outside the asphalt edge at
   // the width the road has there, so they follow the poles — and both take the

@@ -119,7 +119,7 @@ const desert = new DesertTileStreamer(
 const streamer = new ChunkStreamer(road, terrain, physics, world, scene, origin, scheduler);
 streamer.register(new RoadMeshProvider(SEED));
 streamer.register(new ScatterProvider());
-streamer.register(new PoleProvider());
+streamer.register(new PoleProvider(roadDistance));
 streamer.register(new MonumentProvider());
 
 let frameId = 1;

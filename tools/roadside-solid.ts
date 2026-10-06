@@ -38,6 +38,7 @@ import { MonumentProvider } from '../src/world/props/monuments';
 import { PoleProvider } from '../src/world/props/poles';
 import { ScatterProvider } from '../src/world/props/scatter';
 import { Road } from '../src/world/road';
+import { RoadDistance } from '../src/world/roaddistance';
 import { RoadMeshProvider } from '../src/world/roadmesh';
 import { Terrain } from '../src/world/terrain';
 import { WorldWorkScheduler } from '../src/world/workqueue';
@@ -89,7 +90,7 @@ const scheduler = new WorldWorkScheduler(3);
 const start = road.sampleAt(START_S);
 origin.reset(start.x, start.z);
 
-const poles = new Capturing(new PoleProvider());
+const poles = new Capturing(new PoleProvider(new RoadDistance(road)));
 const monuments = new Capturing(new MonumentProvider());
 
 const streamer = new ChunkStreamer(road, terrain, physics, world, scene, origin, scheduler);

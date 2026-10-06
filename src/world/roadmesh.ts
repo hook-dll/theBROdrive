@@ -147,6 +147,25 @@ const SHOULDER_MAX_RISE = 0.25;
 const SHOULDER_MOTTLE = 0.05;
 /** Darkening of the crumbs right at the asphalt edge (column 0 only). */
 const SHOULDER_CRUMB = 0.12;
+/**
+ * Reach of the sand on the asphalt, metres in from the edge, at which the shoulder
+ * beside it is buried outright.
+ *
+ * Sand that lies on the road crossed the verge to get there. Drawn without this, a
+ * district's sand wedge or a director's tongue stopped at the mat's edge as bright sand
+ * and the strip beside it stayed grey crushed stone with its grit: a hard seam of
+ * clean verge between two sands, as if the drift had jumped it. Below this reach the
+ * verge is partly covered (thin dust on the road is thin dust on the verge).
+ */
+const SHOULDER_BURY_M = 1;
+/**
+ * Part of the strip, from the asphalt, that the sand banked against the road's lip
+ * covers wherever the mat's edge carries any sand at all. `sandFactor` puts the edge
+ * vertex at full sand for ANY cover, so a verge that only took the reach above met
+ * that sand with its own grey and crumbs in a hard line; this carries the edge's
+ * colour over the lip and lets the verge come up out of it.
+ */
+const SHOULDER_LIP_SAND = 0.45;
 
 /**
  * Weathering of the driving surface, as three things a photograph of an old road
@@ -301,6 +320,9 @@ const TONGUE_TAG = 0x544e4745; // 'TNGE'
  * detail; sand over the crown is a road nobody can drive, and the asphalt wins.
  */
 const TONGUE_MAX_SHARE = 0.95;
+
+/** The row's sand tongue: extra reach in metres, and the shoulder (-1, 0, 1) it is on. */
+const tongueRow = { reach: 0, side: 0 };
 
 /** What the paint is doing at an arclength. */
 const enum MarkingMode {
@@ -694,12 +716,21 @@ export class RoadMeshProvider implements ChunkProvider {
       const grey = style.grey * (1 - 0.3 * wear);
       const stone = style.stone * (1 - 0.4 * wear);
       const gritLevel = style.grit * (1 - 0.3 * wear);
+      this.sandTongueAt(s, halfWidth);
       const edgeTone = 1 - (1 - style.edgeTone) * (1 - 0.4 * wear);
       // The strip's own width, from the road's cross-section rather than this table.
       const stripWidth = shoulderWidthM(cond.surface) * (1 - 0.2 * wear);
 
       for (let side = 0; side < 2; side++) {
         const sign = side === 0 ? -1 : 1;
+        // How far the sand on the asphalt reaches in from THIS edge (see sandFactor):
+        // the verge under it is buried by as much.
+        const sandReach = Math.max(
+          cond.sandCover * halfWidth,
+          sign * tongueRow.side > 0 ? tongueRow.reach : 0,
+        );
+        const bury = smoothstep(0, SHOULDER_BURY_M, sandReach);
+        const lipSand = sandReach > 0 ? 1 : 0;
         // Each side wanders on its own, slow and a little faster on top.
         const k = side === 0 ? 1.7 : 4.3;
         const wander = 1 + 0.14 * Math.sin(s / 23 + k) + 0.08 * Math.sin(s / 7.3 + 2.1 * k);
@@ -767,10 +798,14 @@ export class RoadMeshProvider implements ChunkProvider {
           const target =
             sandTone * (1 + (edgeTone - 1) * spill) * mottle * (c === 0 ? 1 - SHOULDER_CRUMB : 1);
           shoulderColour.multiplyScalar(target / Math.max(1e-4, luminance(shoulderColour)));
+          // A drift on the road lies across the verge too, in the sand's own colour,
+          // and whatever sand reaches the mat's edge is banked against its lip.
+          const sanded = Math.max(bury, lipSand * (1 - smoothstep(0, SHOULDER_LIP_SAND, t)));
+          shoulderColour.lerp(shoulderSand, sanded);
           col[vi * 3] = shoulderColour.r;
           col[vi * 3 + 1] = shoulderColour.g;
           col[vi * 3 + 2] = shoulderColour.b;
-          grit[vi] = gritLevel * (1 - smoothstep(0.35, 1, t));
+          grit[vi] = gritLevel * (1 - smoothstep(0.35, 1, t)) * (1 - sanded);
         }
       }
       if ((si & 7) === 7) yield;
@@ -875,12 +910,7 @@ export class RoadMeshProvider implements ChunkProvider {
         } else {
           skidRow.ink = 0;
         }
-        const tongueEvent = varietyEventOfKindAt(this.seed, 'sandTongue', s);
-        const tongueReach = tongueEvent
-          ? this.tongueReachAt(s, halfWidth, tongueEvent.draw) *
-            varietyWeightAt(this.seed, 'sandTongue', s)
-          : 0;
-        const tongueSide = tongueEvent ? tongueEvent.side : 0;
+        this.sandTongueAt(s, halfWidth);
 
         for (let li = 0; li < latCount; li++) {
           const lateral = sectionLateral(halfWidth, li);
@@ -905,7 +935,7 @@ export class RoadMeshProvider implements ChunkProvider {
           color.lerpColors(
             laneBase ?? gravelLinear,
             sandLinear,
-            sandFactor(a, halfWidth, cond.sandCover, lateral * tongueSide > 0 ? tongueReach : 0),
+            sandFactor(a, halfWidth, cond.sandCover, lateral * tongueRow.side > 0 ? tongueRow.reach : 0),
           );
           this.weather(color, gravelLinear, s, lateral, a, halfWidth, cond.decay);
           // Repair and rubber go on AFTER the weathering, in the order the road got
@@ -1278,6 +1308,23 @@ export class RoadMeshProvider implements ChunkProvider {
     const edge = (halfWidth - a) / EDGE_RAVEL;
     if (edge < 1) coverage *= Math.max(0, edge);
     return coverage * patchRow.weight;
+  }
+
+  /**
+   * The director's sand tongue at this arclength, into `tongueRow`: its reach with the
+   * event's ramp applied, and its side. Read by the ribbon and by the shoulder beside
+   * it, so a drift on the asphalt and the verge it crossed cannot disagree.
+   */
+  private sandTongueAt(s: number, halfWidth: number): void {
+    const event = varietyEventOfKindAt(this.seed, 'sandTongue', s);
+    if (!event) {
+      tongueRow.reach = 0;
+      tongueRow.side = 0;
+      return;
+    }
+    tongueRow.reach =
+      this.tongueReachAt(s, halfWidth, event.draw) * varietyWeightAt(this.seed, 'sandTongue', s);
+    tongueRow.side = event.side;
   }
 
   /**
