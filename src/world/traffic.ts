@@ -49,7 +49,7 @@ const WIDE_TRAFFIC = 48;
  * end too hard, leaving a narrow road with two or three cars and the player alone on it
  * for minutes at a time, which is what a fifth of twelve means in practice.
  */
-const DENSITY_FLOOR = 0.35;
+const DENSITY_FLOOR = 0.5;
 /**
  * Above this the stream packs tighter (see `SPAWN_ROAD_GAP_M`). It is the narrow road's
  * whole capacity, so the rule reads: a stream busier than a full two-lane road's worth
@@ -102,6 +102,19 @@ const PHYSICS_EDGE_SLACK_M = 1;
  * cannot be watched. The physical support boundary still applies in both directions.
  */
 const OFFSCREEN_TRIM_M = 90;
+/**
+ * THE BUDGET IS SPENT ON ROAD THE PLAYER CAN SEE.
+ *
+ * Every car he overtakes and every oncoming car he meets ends up behind him, and used
+ * to hold its slot until it fell out of the support window — a minute for a car
+ * overtaken at 25 km/h more — while the road ahead stayed empty. A car this far behind
+ * that is getting FARTHER away (oncoming, or same-direction and slower than him) will
+ * never be seen again, so its slot is handed back to a spawn when the stream is full.
+ * A stopped player recedes from nothing: what is behind him then is kept.
+ */
+const RECYCLE_BEHIND_M = 200;
+/** Closing speed below which a same-direction car behind counts as dropping back. */
+const RECYCLE_RECEDE_MPS = 0.5;
 /** Seconds between spawn attempts on an ordinary road; the dense mode halves it. */
 const SPAWN_INTERVAL_S = 1;
 /** Same-lane separation for the normal stream; dense 30-car mode packs to 32 m. */
@@ -1058,14 +1071,16 @@ export class RoadTraffic {
     }
 
     this.spawnCooldown -= dt;
-    if (
-      this.spawnCooldown <= 0 &&
-      this.pending === null &&
-      this.carList.length < this.desiredCount
-    ) {
-      this.queueSpawn();
-      this.spawnCooldown =
-        this.desiredCount > DENSE_TRAFFIC_THRESHOLD ? DENSE_SPAWN_INTERVAL_S : SPAWN_INTERVAL_S;
+    if (this.spawnCooldown <= 0 && this.pending === null) {
+      if (this.carList.length >= this.desiredCount) {
+        const stale = this.pickRecycleIndex();
+        if (stale >= 0) this.removeAt(stale);
+      }
+      if (this.carList.length < this.desiredCount) {
+        this.queueSpawn();
+        this.spawnCooldown =
+          this.desiredCount > DENSE_TRAFFIC_THRESHOLD ? DENSE_SPAWN_INTERVAL_S : SPAWN_INTERVAL_S;
+      }
     }
   }
 
@@ -1756,6 +1771,23 @@ export class RoadTraffic {
         bestBehind = behind;
         best = i;
       }
+    }
+    return best;
+  }
+
+  /** Farthest car behind the player that is receding from him; see RECYCLE_BEHIND_M. */
+  private pickRecycleIndex(): number {
+    let best = -1;
+    let bestBehind = RECYCLE_BEHIND_M;
+    for (let i = 0; i < this.carList.length; i++) {
+      const car = this.carList[i]!;
+      const behind = this.playerS - car.forwardS;
+      if (behind <= bestBehind) continue;
+      const receding =
+        car.direction === -1 || car.forwardSpeed < this.playerSpeed - RECYCLE_RECEDE_MPS;
+      if (!receding) continue;
+      bestBehind = behind;
+      best = i;
     }
     return best;
   }
