@@ -370,7 +370,7 @@ class RoadLookLab {
 
     const mobile = prefersMobilePresentation();
     this.renderer.setQuality(this.state.quality);
-    this.renderer.setViewDistance(viewDistanceFor(this.state.quality, mobile));
+    this.renderer.setViewDistance(viewDistanceFor('high', mobile));
     this.rebuildGrid();
   }
 

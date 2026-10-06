@@ -26,8 +26,9 @@ export type TimeOfDayPreset = 'morning' | 'noon' | 'evening' | 'midnight';
  * so as a free control it only offered a player the chance to pick 25 km on a machine
  * that cannot rebuild a cell inside a frame and hitch on every cell crossing.
  *
- * So one ladder owns all of it, and each rung is a coherent statement about a machine
- * rather than a knob.
+ * It is still not a free control, but it is not the GRAPHICS card's either: the cost is
+ * processor time, so it moved to the CPU level (`viewDistanceFor`), next to the traffic.
+ * Everything left here is what the graphics card pays for.
  *
  * THE PIXEL NUMBERS ARE ABSOLUTE CEILINGS, and that is the second half of the fix. The
  * tiers used to resolve their resolution as `min(DPR x multiplier, DPR cap)` — a display
@@ -82,17 +83,6 @@ export interface GraphicsTier {
    * the choice.
    */
   readonly mobileShadows: boolean;
-  /**
-   * The desktop rung whose horizon and fog a phone presentation inherits.
-   *
-   * A phone's pixel cap does nothing for the vista, because the vista costs CPU terrain
-   * sampling and that is set by RADIUS, not by how many pixels the screen has. Measured
-   * on the vista with a 5950X: a cell rebuild costs 13.0 ms at 4 km, 17.3 ms at 8 km and
-   * 32.8 ms at 25 km, and a phone core is slower than that — so the 25 km map is a
-   * multi-frame hitch on every cell crossing. Naming an AUTHORED pair rather than
-   * inventing a horizon keeps the fog the tuned one.
-   */
-  readonly mobileVista: GraphicsQuality;
   /** Catalogue star depth, as a limiting visual magnitude. */
   readonly starMagnitude: number;
   /**
@@ -104,8 +94,6 @@ export interface GraphicsTier {
    * 7, and past roughly 8 a phone screen cannot resolve the extra ones anyway.
    */
   readonly mobileStarMagnitude: number;
-  /** How far the desert is drawn before the fog dissolves it, metres. */
-  readonly horizonM: number;
   /**
    * Permanent spotlights compiled into every lit material, for car headlamps.
    *
@@ -141,14 +129,14 @@ export interface GraphicsTier {
  *    low-resolution frame in whole pixels and cheaper ground cover; switching to or
  *    from it reloads the drive, because it changes what the world is built from.
  *  - `acceptable` — a phone, or a mini-PC on a television. No shadow pass, because it is
- *    the one cost that cannot be paid in pixels. The authored horizon.
+ *    the one cost that cannot be paid in pixels.
  *  - `standard` — an ordinary desktop with a discrete GPU or a good integrated one.
- *    Native on a 1440p display, shadows on, 8 km of horizon.
- *  - `blessing` — a machine with headroom to spare. Supersamples, 25 km of horizon,
+ *    Native on a 1440p display, shadows on.
+ *  - `blessing` — a machine with headroom to spare. Supersamples,
  *    and a sky deep enough to be crowded rather than plotted.
  *
  * A rung is a statement about the MACHINE, and a phone is two machines at once: the one
- * that draws the picture and the one that gets hot. Its pixel ceiling and its vista are
+ * that draws the picture and the one that gets hot. Its pixel ceiling is
  * the first; its shadow pass and its frame rate are the second — and the second is the
  * player's, because no browser will tell the game how warm the phone is.
  */
@@ -168,10 +156,8 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     shadows: false,
     msaa: false,
     mobileShadows: false,
-    mobileVista: 'retro',
     starMagnitude: 6,
     mobileStarMagnitude: 6,
-    horizonM: 1500,
     vehicleLightSlots: 2,
     mobileVehicleLightSlots: 2,
     streetLightSlots: 2,
@@ -187,10 +173,8 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     shadows: false,
     msaa: false,
     mobileShadows: false,
-    mobileVista: 'acceptable',
     starMagnitude: 7,
     mobileStarMagnitude: 7,
-    horizonM: 1500,
     vehicleLightSlots: 2,
     mobileVehicleLightSlots: 2,
     streetLightSlots: 2,
@@ -206,10 +190,8 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     shadows: true,
     msaa: true,
     mobileShadows: false,
-    mobileVista: 'standard',
     starMagnitude: 8,
     mobileStarMagnitude: 7.5,
-    horizonM: 8000,
     vehicleLightSlots: 6,
     // A phone gets two thirds of the desktop budget here, not half. The driven car holds
     // three (two headlamps, one merged tail glow) and every other car's lamp pair is one
@@ -231,10 +213,8 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     shadows: true,
     msaa: true,
     mobileShadows: false,
-    mobileVista: 'standard',
     starMagnitude: 8.5,
     mobileStarMagnitude: 8,
-    horizonM: 25000,
     // EIGHTEEN WAS A CLIFF, MEASURED. The lit-fragment shader costs almost nothing per
     // light up to about thirteen slots and then a great deal per light after them — same
     // scene, same pixels, on an M2 Pro at 2 Mpx: 11 slots 6.5 ms, 13 slots 7.5, 15 slots
@@ -244,7 +224,7 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     // dearer half — twelve spots alone cost 13.2 ms where twelve points cost 6.0 — so the
     // cut is taken out of the spots: eight keeps five other cars' beams projected, and the lamp
     // pools, which are what a lit road actually reads by, are unchanged. The tier keeps
-    // everything else it was chosen for: the supersampling, the 25 km horizon, the sky.
+    // everything else it was chosen for: the supersampling, the sky.
     vehicleLightSlots: 8,
     // Capped at the desktop STANDARD budget. A phone at 1.44 megapixels is not a desktop;
     // six spots and six points keep the lit road receding and three other cars' beams
@@ -257,16 +237,22 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
 };
 
 /**
- * The rung whose vista a presentation actually gets, which is not always its own: a
- * phone inherits the authored pair its rung names. See `GraphicsTier.mobileVista`.
+ * How far the desert is drawn before the fog dissolves it, metres: the far plane, the
+ * fog and the vista disc together, which must agree or the edge of the world shows.
+ *
+ * A CPU figure, not a graphics one. The vista costs terrain sampling, set by RADIUS
+ * rather than by pixels: measured on a 5950X, a cell rebuild costs 13.0 ms at 1.5 km,
+ * 17.3 ms at 8 km and 31.9 ms at 25 km, and the mesa vertex count goes from 897 to
+ * 16 419 — a hitch on every cell crossing for a processor that cannot keep up.
  */
-function vistaRungFor(quality: GraphicsQuality, mobilePresentation: boolean): GraphicsQuality {
-  return mobilePresentation ? GRAPHICS_TIERS[quality].mobileVista : quality;
-}
+const HORIZON_M: Record<CpuLoad, number> = { low: 1500, medium: 8000, high: 25000 };
 
-/** Convenience readers, so callers ask the question they mean. */
-export function viewDistanceFor(quality: GraphicsQuality, mobilePresentation: boolean): number {
-  return GRAPHICS_TIERS[vistaRungFor(quality, mobilePresentation)].horizonM;
+/**
+ * The horizon this presentation draws. A phone never gets the 25 km map: a phone core
+ * is slower than the 5950X above, so that radius is a multi-frame hitch per cell.
+ */
+export function viewDistanceFor(cpuLoad: CpuLoad, mobilePresentation: boolean): number {
+  return mobilePresentation ? Math.min(HORIZON_M[cpuLoad], HORIZON_M.medium) : HORIZON_M[cpuLoad];
 }
 
 /** Spotlight budget for vehicle lamps, as this presentation will compile it. */
@@ -321,11 +307,11 @@ export function presentationFpsFor(frameRateLimit: number | null): number | null
 
 /**
  * Processor budget, separate from the graphics rung because it is a different chip.
- * The graphics rung is pixels and shader cost; this is simulation the main thread pays
- * for whatever the screen is: today, how many ambient traffic cars are live, each a
- * full physical vehicle with its own autopilot and pairwise coordination that grows
- * with the square of the count. Changes apply live: surplus cars drain behind the
- * player, new ones fill in ahead.
+ * The graphics rung is pixels and shader cost; this is work the processor pays for
+ * whatever the screen is: how many ambient traffic cars are live, each a full physical
+ * vehicle with its own autopilot and pairwise coordination that grows with the square
+ * of the count, and how far the desert is drawn (`viewDistanceFor`). Both apply live:
+ * surplus cars drain behind the player, the horizon moves in place.
  */
 export type CpuLoad = 'low' | 'medium' | 'high';
 
@@ -356,7 +342,7 @@ export type FrameRateLimit = (typeof FRAME_RATE_LIMITS)[number] | null;
  * for this window — which only has a meaning against the window. 100% is one
  * drawing-buffer pixel per device pixel; below that is the in-between a three-rung
  * ladder cannot offer; above it is supersampling, which used to be reachable only by
- * also buying a 25 km vista and eighteen headlamps.
+ * also buying eighteen headlamps.
  *
  * It exists because `Auto` cannot work everywhere: the measurement behind it is a GPU
  * timer query, and a browser without `EXT_disjoint_timer_query_webgl2` — Safari, most
@@ -692,7 +678,7 @@ export function sanitizeSettings(raw: unknown): Settings {
       Math.min(FIELD_OF_VIEW_MAX, Math.max(FIELD_OF_VIEW_MIN, fieldOfViewRaw)),
     ),
     // A save's `viewDistance` is DELIBERATELY DROPPED rather than migrated. The horizon
-    // is a property of the rendering rung now, and the two ladders do not line up: an old
+    // is a property of the CPU level now, and the two ladders do not line up: an old
     // save asking for `vast` on `acceptable` was a combination that should never have
     // been offerable, and there is no honest way to guess which half the player meant.
     // The tier they chose is the answer, and it is right there in the same object.

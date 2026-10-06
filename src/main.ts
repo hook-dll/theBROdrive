@@ -290,6 +290,9 @@ async function boot(): Promise<void> {
           // say which of those it is, and a `Measure again` can still be offered.
           graphicsQualitySource: 'device',
           msaa: false,
+          // A phone core is the slowest processor this game runs on: the lightest stream
+          // and the 1.5 km horizon, as the phone's graphics default always gave it.
+          cpuLoad: 'low',
         },
       });
     }
@@ -482,7 +485,7 @@ async function boot(): Promise<void> {
   // A save carries the tier it was played at, so apply it before the first frame
   // rather than waiting for someone to open the pause menu.
   {
-    const metres = viewDistanceFor(world.state.settings.graphicsQuality, mobilePresentation);
+    const metres = viewDistanceFor(world.state.settings.cpuLoad, mobilePresentation);
     renderer.setViewDistance(metres);
     vista.setViewDistance(metres);
   }
@@ -2993,16 +2996,16 @@ async function boot(): Promise<void> {
       camera.setFieldOfView(world.state.settings.fieldOfView);
       camera.setShake(world.state.settings.cameraShake);
       hud.setDashboardScale(world.state.settings.dashboardScale);
-      // The tier owns six things and five of them apply in place: the pixel ceiling,
-      // the shadow pass, the sky's star depth, the horizon (far plane, fog and vista
-      // disc), and the presentation cap. The sixth — the visible-light count — cannot,
-      // because it is compiled into every lit material as an array size, so changing it
-      // would recompile the world's shaders mid-session. That one waits for the next
-      // load, and the menu says so.
+      // The tier owns four things that apply in place: the pixel ceiling, the shadow
+      // pass, the sky's star depth and the presentation cap. The fifth — the visible-
+      // light count — cannot, because it is compiled into every lit material as an
+      // array size, so changing it would recompile the world's shaders mid-session.
+      // That one waits for the next load, and the menu says so. The horizon (far
+      // plane, fog and vista disc) belongs to the CPU level and also applies in place.
       const tier = world.state.settings.graphicsQuality;
       renderer.setQuality(tier);
       sky.setQuality(tier, mobilePresentation);
-      const horizon = viewDistanceFor(tier, mobilePresentation);
+      const horizon = viewDistanceFor(world.state.settings.cpuLoad, mobilePresentation);
       renderer.setViewDistance(horizon);
       vista.setViewDistance(horizon);
       loop.setRenderFps(

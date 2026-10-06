@@ -26,6 +26,7 @@ import {
   GRAPHICS_TIERS,
   DEFAULT_SETTINGS,
   TRAFFIC_CAPS,
+  viewDistanceFor,
   loadStoredSettings,
   storeSettings,
   withTierDefaults,
@@ -84,20 +85,21 @@ function el(tag: string, cls?: string): HTMLElement {
 function describeTier(quality: GraphicsQuality, mobilePresentation: boolean): string {
   const tier = GRAPHICS_TIERS[quality];
   // Read as the presentation in front of the player will actually get it. A phone is
-  // handed different numbers for the vista, the shadow pass and the light slots, and a
-  // label quoting the desktop column at a phone would be describing a rung nobody is on.
-  const vista = mobilePresentation ? GRAPHICS_TIERS[tier.mobileVista] : tier;
+  // handed different numbers for the shadow pass and the light slots, and a label
+  // quoting the desktop column at a phone would be describing a rung nobody is on.
   const shadows = mobilePresentation ? tier.mobileShadows : tier.shadows;
   const spots = mobilePresentation ? tier.mobileVehicleLightSlots : tier.vehicleLightSlots;
   const points = mobilePresentation ? tier.mobileStreetLightSlots : tier.streetLightSlots;
-  const horizon =
-    vista.horizonM >= 1000 ? `${Math.round(vista.horizonM / 1000)} km` : `${vista.horizonM} m`;
   return (
-    `${horizon} of desert, ${shadows ? 'sun shadows' : 'no sun shadows'}, ` +
+    `${shadows ? 'Sun shadows' : 'No sun shadows'}, ` +
     `${spots + points} lights shaded on every lit pixel. ` +
     `Stars to magnitude ${mobilePresentation ? tier.mobileStarMagnitude : tier.starMagnitude}. ` +
     'The light count is compiled into the world, so it changes on the next load.'
   );
+}
+
+function formatHorizon(metres: number): string {
+  return metres >= 1000 ? `${Math.round(metres / 1000)} km` : `${metres} m`;
 }
 
 function button(cls: string, label: string): HTMLButtonElement {
@@ -1660,16 +1662,18 @@ export class MainMenu {
               },
             ]),
             // A DIFFERENT CHIP FROM EVERY ROW ABOVE. Those are the graphics card's bill;
-            // this is the processor's, and today that is the traffic: every car on the
-            // road is a full physical vehicle with its own driver. Applies live.
+            // this is the processor's: the traffic, every car a full physical vehicle with
+            // its own driver, and the horizon, rebuilt cell by cell as you drive. Live.
             segmented('CPU', TRAFFIC_LEVELS.map((level) => ({
               label: level.label,
               icon: level.icon,
               hint:
-                `Up to ${TRAFFIC_CAPS[level.load].narrow} cars on a two-lane road, `
+                `${formatHorizon(viewDistanceFor(level.load, mobilePresentation))} of desert, `
+                + `up to ${TRAFFIC_CAPS[level.load].narrow} cars on a two-lane road and `
                 + `${TRAFFIC_CAPS[level.load].wide} on a four-lane one. `
-                + 'Each is a fully simulated car with its own driver, paid for by the '
-                + 'processor, not the graphics card. Applies at once.',
+                + 'Both are paid for by the processor, not the graphics card: the far '
+                + 'desert is rebuilt as you drive, and every car is fully simulated with '
+                + 'its own driver. Applies at once.',
               active: () => settings.cpuLoad === level.load,
               pick: () => {
                 settings.cpuLoad = level.load;

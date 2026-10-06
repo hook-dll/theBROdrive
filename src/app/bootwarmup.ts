@@ -14,7 +14,6 @@ import {
   GRAPHICS_TIERS,
   presentationFpsFor,
   storeSettings,
-  viewDistanceFor,
   type GraphicsQuality,
 } from '../game/settings';
 import type { GameWorld } from '../game/state';
@@ -243,9 +242,6 @@ export async function warmUpBoot(ctx: BootWarmupContext): Promise<void> {
       ctx.renderer.setMsaa(settings.msaa);
       ctx.renderer.setQuality(tier);
       ctx.sky.setQuality(tier, ctx.mobilePresentation);
-      const horizon = viewDistanceFor(tier, ctx.mobilePresentation);
-      ctx.renderer.setViewDistance(horizon);
-      ctx.vista.setViewDistance(horizon);
       ctx.loop.setRenderFps(presentationFpsFor(ctx.world.state.settings.frameRateLimit));
       await settleLaunchResolution();
     };

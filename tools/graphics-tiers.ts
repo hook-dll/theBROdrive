@@ -28,6 +28,7 @@ import {
   starMagnitudeFor,
   streetLightSlotsFor,
   vehicleLightSlotsFor,
+  viewDistanceFor,
   type GraphicsQuality,
 } from '../src/game/settings';
 import { FIXED_DT } from '../src/core/physics';
@@ -65,7 +66,6 @@ const COST_KEYS = [
   'mobileMinPixels',
   'starMagnitude',
   'mobileStarMagnitude',
-  'horizonM',
   'vehicleLightSlots',
   'mobileVehicleLightSlots',
   'streetLightSlots',
@@ -73,14 +73,14 @@ const COST_KEYS = [
 ] as const;
 const WILLINGNESS_KEYS = ['supersample', 'headlightDistanceScale'] as const;
 
-console.log('rung         Mpx ceiling   Mpx floor   horizon   stars   car lamps   street lamps');
+console.log('rung         Mpx ceiling   Mpx floor   stars   car lamps   street lamps');
 let previous: GraphicsQuality | null = null;
 for (const quality of LADDER) {
   const tier = GRAPHICS_TIERS[quality];
   console.log(
     `${quality.padEnd(12)} ${(tier.maxPixels / 1e6).toFixed(2).padStart(11)} ` +
       `${(tier.minPixels / 1e6).toFixed(2).padStart(11)} ` +
-      `${String(tier.horizonM).padStart(9)} ${tier.starMagnitude.toFixed(1).padStart(7)} ` +
+      `${tier.starMagnitude.toFixed(1).padStart(7)} ` +
       `${String(tier.vehicleLightSlots).padStart(11)} ${String(tier.streetLightSlots).padStart(14)}`,
   );
 
@@ -130,30 +130,20 @@ for (const quality of LADDER) {
 // or the only way off a blurry picture on a 1440p screen would be to accept 60 FPS of
 // heat along with it.
 {
-  const measuredCellLoadMs: Record<string, number> = { acceptable: 13.0, standard: 17.3, blessing: 31.9 };
   for (const quality of LADDER) {
-    const tier = GRAPHICS_TIERS[quality];
-    if (tier.mobileShadows) {
+    if (GRAPHICS_TIERS[quality].mobileShadows) {
       failures.push(
         `${quality}: a phone presentation still claims a shadow pass, which is a second ` +
           `render of the world and the largest sustained GPU cost a phone can be given`,
       );
     }
-    const vista = GRAPHICS_TIERS[tier.mobileVista];
-    if (vista.horizonM > GRAPHICS_TIERS.blessing.horizonM) {
-      failures.push(`${quality}: a phone inherits a vista beyond the strongest rung's own`);
-    }
-    if (vista.horizonM > GRAPHICS_TIERS.standard.horizonM) {
-      failures.push(
-        `${quality}: a phone inherits the ${vista.horizonM} m vista ` +
-          `(${measuredCellLoadMs[tier.mobileVista] ?? '?'} ms per cell rebuild measured on a ` +
-          `5950X, and a phone core is slower) — no phone is handed that map`,
-      );
-    }
-    // The vista a phone gets must still be a real, authored pair: an unknown name would
-    // silently fall through to `undefined` metres and draw nothing.
-    if (!Number.isFinite(vista.horizonM) || vista.horizonM <= 0) {
-      failures.push(`${quality}: mobileVista "${tier.mobileVista}" is not a rung`);
+  }
+  // The horizon is the CPU level's now (`viewDistanceFor`), and the phone cap moved
+  // with it: 31.9 ms per cell rebuild at 25 km on a 5950X, and a phone core is slower.
+  for (const load of ['low', 'medium', 'high'] as const) {
+    const phone = viewDistanceFor(load, true);
+    if (phone > viewDistanceFor('medium', false)) {
+      failures.push(`CPU ${load}: a phone is handed the ${phone} m vista`);
     }
   }
 }
