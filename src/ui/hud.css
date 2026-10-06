@@ -749,19 +749,49 @@ body.is-cinematic #ui {
 
 
 
+/* Race progress: a line from the source courier to the finish tick, the player a
+   filled bead and each rival a hollow one. Beads move by transform only. */
 .hud-race {
   position: absolute;
-  top: 16px;
+  top: 18px;
   left: 50%;
-  transform: translateX(-50%);
-  background: var(--hud-panel);
-  color: var(--hud-fg);
-  border: 1px solid var(--hud-border);
-  padding: 4px 12px;
-  font-size: 14px;
-  letter-spacing: 0.06em;
-  font-variant-numeric: tabular-nums;
+  width: 260px;
+  height: 12px;
+  margin-left: -130px;
   pointer-events: none;
+}
+.hud-race-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 5px;
+  height: 2px;
+  background: var(--hud-fg);
+  opacity: 0.55;
+}
+.hud-race-finish {
+  position: absolute;
+  right: -1px;
+  top: -1px;
+  width: 2px;
+  height: 14px;
+  background: var(--hud-fg);
+}
+.hud-race-bead {
+  position: absolute;
+  left: -5px;
+  top: 1px;
+  width: 10px;
+  height: 10px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid var(--hud-fg);
+  background: var(--hud-panel);
+  will-change: transform;
+}
+.hud-race-bead.is-player {
+  background: var(--hud-fg);
+  z-index: 1;
 }
 .hud-toasts {
   position: absolute;

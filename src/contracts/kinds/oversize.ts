@@ -1,5 +1,5 @@
 /**
- * Oversize load (kind 7): a 5.5 m bundle of pipes or beams on a contract trailer,
+ * Oversize load (kind 7): a 3.8 m bundle of pipes or beams on a contract trailer,
  * overhanging both ends of the 2.8 m bed. Same trailer-to-courier delivery as kind 6,
  * with the load as the whole point.
  *
@@ -18,7 +18,7 @@ import { defaultProgress, type ContractKindDef } from '../types';
 const DELIVERY_RANGE_M = 25;
 /**
  * Lower than the equipment trailer's bar, because this is the dimension the kind
- * exists for: a 5.5 m overhang clips things the bed would clear, so the player is
+ * exists for: the overhang clips things the bed would clear, so the player is
  * asked to keep it clean and a 3 m/s scrape is already a real one.
  */
 const IMPACT_LIMIT_MPS = 3;

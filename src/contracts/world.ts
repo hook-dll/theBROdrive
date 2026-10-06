@@ -80,13 +80,15 @@ export function contractCarId(item: ContractCargoItem): string {
 
 /**
  * The overhanging load of an oversize trailer: a bundle of pipes or a pair of beams,
- * about 5.5 m long against a 2.8 m bed, so it overhangs both ends and is what the
- * traffic and the rocks get to hit. Deterministic from the offer seed.
+ * about 3.8 m long against a 2.8 m bed, so it overhangs each end by half a metre and
+ * is what the traffic and the rocks get to hit. It was 5.5-5.8 m, and the front
+ * overhang reached the towing car's tail: the trailer could hardly be hitched.
+ * Deterministic from the offer seed.
  */
 export function oversizeLoad(seed: number): TrailerLoad {
   return hash01(seed, OVERSIZE_LOAD_DOMAIN, 0) < 0.5
-    ? { kind: 'pipes', halfExtents: [0.6, 0.19, 2.75] }
-    : { kind: 'beams', halfExtents: [0.5, 0.3, 2.9] };
+    ? { kind: 'pipes', halfExtents: [0.6, 0.19, 1.85] }
+    : { kind: 'beams', halfExtents: [0.5, 0.3, 1.95] };
 }
 
 /** Mass on the bed of a contract trailer, kg. */

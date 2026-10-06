@@ -100,6 +100,16 @@ const RIVAL_MODE = 'hurried';
 const CAP_MIN_KMH = 95;
 const CAP_SPAN_KMH = 20;
 
+/** Everyone's place on the race line, 0 at the source courier and 1 at the finish. */
+export interface RaceProgress {
+  player: number;
+  readonly rivals: number[];
+}
+
+export function newRaceProgress(): RaceProgress {
+  return { player: 0, rivals: new Array<number>(RIVAL_COUNT).fill(0) };
+}
+
 type RivalPhase = 'waiting' | 'driving' | 'loading' | 'done';
 
 interface Rival {
@@ -221,20 +231,22 @@ export class RivalRace {
   }
 
   /**
-   * The HUD strip: the player's place and the road left to the receiving courier,
-   * e.g. `RACE 2/4 · 3.4 km`; null with no race. Place counts every rival that has
-   * handed in or is further up the road. Rounded so the text changes rarely.
+   * The HUD bead line: everyone's progress from the source courier (0) to the
+   * receiving one (1), written into `out`; false with no race. A rival that handed
+   * in sits at 1; one still waiting at the source sits at 0. No distances: only
+   * where each is relative to the others and to the finish.
    */
-  statusText(playerS: number): string | null {
+  progress(playerS: number, out: RaceProgress): boolean {
     const race = this.race;
-    if (race === null) return null;
-    let place = 1;
-    for (const rival of race.rivals) {
-      if (rival.phase === 'done' || (rival.phase !== 'waiting' && rival.s > playerS)) place++;
+    if (race === null) return false;
+    const finishS = race.stopS - STOP_PAST_COURIER_M;
+    const span = Math.max(1, finishS - race.sourceS);
+    out.player = Math.min(1, Math.max(0, (playerS - race.sourceS) / span));
+    for (let i = 0; i < RIVAL_COUNT; i++) {
+      const rival = race.rivals[i]!;
+      out.rivals[i] = rival.phase === 'done' ? 1 : Math.min(1, Math.max(0, (rival.s - race.sourceS) / span));
     }
-    const left = Math.max(0, race.stopS - STOP_PAST_COURIER_M - playerS);
-    const distance = left >= 1000 ? `${(left / 1000).toFixed(1)} km` : `${Math.round(left / 10) * 10} m`;
-    return `RACE ${place}/${RIVAL_COUNT + 1} · ${distance}`;
+    return true;
   }
 
   snapshot(): RaceSnapshot | null {

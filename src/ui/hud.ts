@@ -209,6 +209,8 @@ const MASS_ALARM_FRACTION = 0.9;
 const TOAST_DURATION_MS = 3200;
 const TOAST_LEAVE_MS = 300;
 const MAX_TOASTS = 4;
+/** Length of the race bead line, px; matches `.hud-race` width in hud.css. */
+const RACE_LINE_PX = 260;
 
 function el(tag: string, cls?: string): HTMLElement {
   const node = document.createElement(tag);
@@ -282,9 +284,13 @@ export class Hud {
   private readonly invMassEl: HTMLElement;
   private readonly invSlotsEl: HTMLElement;
   private readonly toastEl: HTMLElement;
-  /** Race strip at the top: place and road left to the hand-in; see `setRaceStatus`. */
+  /** Race bead line at the top; see `setRaceProgress`. */
   private readonly raceEl: HTMLElement;
-  private raceText: string | null = null;
+  /** Player's bead first, then the rivals'. */
+  private readonly raceBeads: HTMLElement[] = [];
+  /** Last written x per bead, px; NaN forces a write. */
+  private readonly raceBeadX: number[] = [];
+  private raceShown = false;
   private readonly checkEngineEl: HTMLElement;
   private readonly oilWarningEl: HTMLElement;
   private readonly lcdEl: SVGSVGElement;
@@ -420,6 +426,7 @@ export class Hud {
 
     this.toastEl = el('div', 'hud-toasts');
     this.raceEl = el('div', 'hud-race is-hidden');
+    this.raceEl.append(el('div', 'hud-race-line'), el('div', 'hud-race-finish'));
     this.gumBubbleEl = el('div', 'hud-gum-bubble is-hidden');
     this.damageVignetteEl = el('div', 'hud-damage-vignette');
     this.deathFadeEl = el('div', 'hud-death-fade');
@@ -987,12 +994,31 @@ export class Hud {
   }
 
 
-  /** The race strip's text, or null to hide it. Written only when it changes. */
-  setRaceStatus(text: string | null): void {
-    if (this.disposed || text === this.raceText) return;
-    this.raceText = text;
-    this.setVisible(this.raceEl, text !== null);
-    if (text !== null) this.raceEl.textContent = text;
+  /**
+   * The race bead line: `player` and each of `rivals` as 0 (source courier) .. 1
+   * (finish), or null to hide it. A bead is moved only when it shifts half a pixel.
+   */
+  setRaceProgress(player: number, rivals: readonly number[] | null): void {
+    if (this.disposed) return;
+    const shown = rivals !== null;
+    if (shown !== this.raceShown) {
+      this.raceShown = shown;
+      this.setVisible(this.raceEl, shown);
+    }
+    if (!rivals) return;
+    const count = rivals.length + 1;
+    while (this.raceBeads.length < count) {
+      const bead = el('div', this.raceBeads.length === 0 ? 'hud-race-bead is-player' : 'hud-race-bead');
+      this.raceEl.append(bead);
+      this.raceBeads.push(bead);
+      this.raceBeadX.push(Number.NaN);
+    }
+    for (let i = 0; i < count; i++) {
+      const x = Math.round((i === 0 ? player : rivals[i - 1]!) * RACE_LINE_PX * 2) / 2;
+      if (x === this.raceBeadX[i]) continue;
+      this.raceBeadX[i] = x;
+      this.raceBeads[i]!.style.transform = `translateX(${x}px)`;
+    }
   }
   setToast(text: string): void {
     if (this.disposed) return;

@@ -103,6 +103,7 @@ import { setGroundFadeWindow } from './render/groundfade';
 import { WreckTrunkField } from './world/wrecktrunks';
 import { CourierField, courierStop } from './world/couriers';
 import { GateField } from './world/gates';
+import { DancerField } from './world/props/airdancer';
 import { loadSpine } from './world/spinecache';
 import { RoadMeshProvider } from './world/roadmesh';
 import { RoadDistance } from './world/roaddistance';
@@ -135,7 +136,7 @@ import type { TrunkViewState } from './vehicle/trunk';
 import { GameAudio, type AmbienceFrame, type CarPose, type RadioSpatialState } from './audio/gameaudio';
 import { STREAM_FRAME_BUDGET_MS, STREAM_JOBS_PER_FRAME, warmUpBoot } from './app/bootwarmup';
 import { installDevTools } from './app/devtools';
-import { RivalRace } from './contracts/race';
+import { RivalRace, newRaceProgress } from './contracts/race';
 import { createPlayerImpacts } from './app/playerimpacts';
 import { createWheelEffects } from './app/wheeleffects';
 
@@ -451,6 +452,10 @@ async function boot(): Promise<void> {
   // Gate posts for the sand route and the slalom (kinds 12/13). Constructed before the
   // boot warm-up so its hidden anchors compile the shared post and flag programs then.
   const gateField = new GateField(renderer.scene, terrain);
+  // Cactus air dancers beside every courier. Built here, before the boot warm-up, so
+  // the hidden anchor rig it adds to the scene compiles their skinned program under
+  // the loading cover. See world/props/airdancer.ts.
+  const dancers = new DancerField(renderer.scene);
 
   // Shared exact nearest-road field: the tile streamer uses it to grade the open
   // lattice into the road corridor without searching the full spine per vertex.
@@ -560,7 +565,7 @@ async function boot(): Promise<void> {
   streamer.register(new DelineatorProvider(roadDistance, debris));
   streamer.register(new SidetrackProvider(roadDistance));
   streamer.register(new MonumentProvider());
-  streamer.register(new PoiProvider(loose, trailerField, wreckTrunks, couriers, roadDistance));
+  streamer.register(new PoiProvider(loose, trailerField, wreckTrunks, couriers, roadDistance, dancers));
 
   let initialYaw = 0;
   const player = new Player(physics, world, origin);
@@ -774,6 +779,8 @@ async function boot(): Promise<void> {
   );
   /** Three hurried rivals carrying the player's cargo to the next courier; see contracts/race.ts. */
   const race = new RivalRace(world.seed, road, traffic, loadCarModel, (text) => hud.setToast(text));
+  /** Reused receiver for the HUD bead line; see `RivalRace.progress`. */
+  const raceProgress = newRaceProgress();
   const reconcileActiveWorld = (anchorX: number, anchorZ: number): void => {
     const drivingId = world.state.player.drivingCarId;
     const cars = world.state.cars;
@@ -1379,6 +1386,7 @@ async function boot(): Promise<void> {
         loose,
         debris,
         couriers,
+        dancers,
         sky,
         trailers: trailerField,
         road,
@@ -1715,7 +1723,8 @@ async function boot(): Promise<void> {
     frameProfiler?.begin('traffic');
     traffic.fixedUpdate(dt, activeS, activeLateral, origin.x, origin.z);
     race.fixedUpdate(dt, activeS);
-    hud.setRaceStatus(race.statusText(activeS));
+    if (race.progress(activeS, raceProgress)) hud.setRaceProgress(raceProgress.player, raceProgress.rivals);
+    else hud.setRaceProgress(0, null);
     frameProfiler?.end('traffic');
 
     if (driving) {
@@ -2516,6 +2525,9 @@ async function boot(): Promise<void> {
     contactPatches.endFrame();
     // Gate posts are placed in absolute coordinates; the field follows the origin.
     gateField.update(origin.x, origin.z);
+    // The courier air dancers stand in the chunk frame; the field only needs the
+    // camera in absolute metres to know which of them are near enough to simulate.
+    dancers.update(frameDt, cam.x + origin.x, cam.z + origin.z);
     frameProfiler?.end('effects');
     frameProfiler?.begin('vista');
     vista.update(cam.x, cam.z, activeS, frameDt);
