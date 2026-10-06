@@ -60,38 +60,39 @@ export class PhysicsWorld {
    * a piece of the world that teleports a kilometre sideways, and the only way to be
    * sure is to not have a list.
    *
-   * `setTranslation` does not immediately propagate the new body poses into Rapier's
-   * collider/query acceleration structure — that normally happens inside `world.step`.
-   * The ray-cast vehicle controller runs BEFORE the next step, so the propagation at
-   * the end of this method is mandatory: suspension must query road and terrain at their
-   * rebased positions, not at AABBs still expressed in the old origin.
+   * MUST be followed by `step()` before any scene query. Rapier rebuilds its query tree
+   * only inside the step; moving bodies, and even propagating them to their colliders,
+   * leaves every ray searching the tree in the old origin, where nothing stands under
+   * the ray any more. That was the once-a-kilometre wheel drop: a whole tick of
+   * suspension rays that all missed, so every car drew its wheels at full droop and
+   * its springs pushed nothing. The propagation below only keeps `collider.translation()`
+   * truthful until then.
    *
-   * Velocities are untouched on purpose: a change of origin is not a motion. Kinematic
-   * bodies are included, but anything holding its own copy of a target position must
-   * still shift that copy, which is what `Rebasable` is for.
-   *
-   * MUST be called between `step()` and the post-step transform latches. Between a
-   * body's `translation()` read and its matching `setTranslation` write, the shift
-   * would read as a kilometre of drift — the trailer's hitch guard would treat it as
-   * a teleport and fight it.
+   * Velocities are untouched on purpose: a change of origin is not a motion. A
+   * kinematic body's pending target moves with it: `setTranslation` overwrites the
+   * target, and the character controller has already written this tick's step by the
+   * time the origin moves, so dropping it would stall the player for a tick. Anything
+   * else holding its own copy of a position must still shift that copy, which is what
+   * `Rebasable` is for.
    */
   rebase(dx: number, dz: number): void {
     const shifted = { x: 0, y: 0, z: 0 };
+    const target = { x: 0, y: 0, z: 0 };
     this.world.bodies.forEach((body) => {
+      const kinematic = body.isKinematic();
+      if (kinematic) {
+        const next = body.nextTranslation();
+        target.x = next.x - dx;
+        target.y = next.y;
+        target.z = next.z - dz;
+      }
       const t = body.translation();
       shifted.x = t.x - dx;
       shifted.y = t.y;
       shifted.z = t.z - dz;
       body.setTranslation(shifted, false);
+      if (kinematic) body.setNextKinematicTranslation(target);
     });
-    // The vehicle controller ray-casts before the next world step. Make every shifted
-    // collider queryable at its new position now, rather than letting one tick of
-    // suspension see the old broad-phase AABBs.
-    //
-    // The controller also owns a wheel contact point cache which this public API cannot
-    // invalidate. Vehicle.rebase handles that separately by omitting one custom
-    // tyre-force pass while updateVehicle refreshes the cache; applying a normal tyre
-    // impulse at the stale point was the distance-triggered invisible bump.
     this.world.propagateModifiedBodyPositionsToColliders();
   }
 

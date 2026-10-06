@@ -1833,6 +1833,36 @@ async function boot(): Promise<void> {
     // inside `updateVehicle`, towed or standing.
     trailerField.fixedUpdate(dt, (carId) => vehicles.get(carId)?.brakeCommand ?? 0);
 
+    // FLOATING ORIGIN. Here and nowhere else: after every controller has written this
+    // tick's intent, immediately before the solver. The order is load-bearing twice.
+    //
+    // Rapier refreshes its scene-query tree only inside `world.step`; moving bodies and
+    // propagating them to their colliders does not touch it. Every query issued between
+    // a shift and the next step therefore searches the tree in the old origin and finds
+    // nothing under the cars: each vehicle's suspension rays missed for one whole tick,
+    // all four wheels dropped to full droop on screen and the springs pushed nothing,
+    // once per kilometre. Shifting here hands the tree straight to the step, so the
+    // post-step interaction rays and the next tick's suspension see the moved world.
+    //
+    // And no `translation()` read is ever separated from its matching `setTranslation`
+    // write by a kilometre: the controllers above have finished theirs, and the trailer's
+    // hitch enforcement, whose 1.5 m drift guard would read the step as a teleport, runs
+    // in the post-step latches below. Those latches, the camera, the HUD and the save
+    // deltas all observe the one origin the solver ran in.
+    //
+    // The anchor is whatever the player is: the driven chassis, or the character on
+    // foot. Bodies hold RELATIVE positions, so the origin is added back to get the
+    // absolute position `advance` wants.
+    {
+      const anchor = activeWorldAnchor();
+      const shift = origin.advance(anchor.x, anchor.z);
+      if (shift) {
+        physics.rebase(shift.dx, shift.dz);
+        streamer.rebase();
+        desert.rebase();
+        rebasedThisFrame = true;
+      }
+    }
 
     playerImpacts.capture();
     // Advance the simulation only after every controller has written its intent for
@@ -1869,34 +1899,15 @@ async function boot(): Promise<void> {
     baldCars.clear();
     frameProfiler?.end('contracts');
 
-    // Recover only after Rapier has produced the escaped pose, before origin
-    // rebasing and interpolation latches can preserve that pose for another frame.
+    // Recover only after Rapier has produced the escaped pose, before the
+    // interpolation latches can preserve that pose for another frame.
     recoverUnderworld();
 
-    // FLOATING ORIGIN. Here and nowhere else: after the solver has run, before the
-    // post-step latches read a single transform. Everything downstream this frame —
-    // the interpolation snapshots, the camera, the HUD, the save deltas — then observes
-    // one origin, and no `translation()` read is ever separated from its matching
-    // `setTranslation` write by a kilometre. The trailer's hitch enforcement is the
-    // reason that matters: it has a 1.5 m drift guard, and a rebase landing inside its
-    // read/write pair would read as the trailer having teleported.
-    //
-    // The anchor is whatever the player is: the driven chassis, or the character on
-    // foot. Bodies hold RELATIVE positions, so the origin is added back to get the
-    // absolute position `advance` wants.
+    // Lifetime changes follow the solve, never interrupting controller/hitch writes.
+    // Cars resolve first, then their trailers, then loose objects so a live coupling is
+    // available to the trailer field.
     {
       const anchor = activeWorldAnchor();
-      const shift = origin.advance(anchor.x, anchor.z);
-      if (shift) {
-        physics.rebase(shift.dx, shift.dz);
-        streamer.rebase();
-        desert.rebase();
-        rebasedThisFrame = true;
-      }
-
-      // Lifetime changes follow the solve and any origin shift, never interrupting
-      // controller/hitch writes. Cars resolve first, then their trailers, then loose
-      // objects so a live coupling is available to the trailer field.
       reconcileActiveWorld(anchor.x, anchor.z);
     }
 

@@ -1,4 +1,4 @@
-import { Road, type RoadProjection, type RoadSample } from '../world/road';
+import { Road, type RoadCentre, type RoadProjection, type RoadSample } from '../world/road';
 import { CIRCUIT_HALF_WIDTH, PlaygroundCircuit } from './circuit';
 
 /**
@@ -42,6 +42,24 @@ export class PlaygroundRoad extends Road {
 
   override sampleAt(s: number): RoadSample {
     return this.circuit.sampleAt(s);
+  }
+
+  // The lap answers geometry from its own table, which already carries everything a
+  // sample does: the curvature-free reads delegate to `sampleAt`, so the reversed
+  // circuit's override of it covers them too.
+  protected override centreInto(s: number, out: RoadCentre): RoadCentre {
+    const sample = this.sampleAt(s);
+    out.s = sample.s;
+    out.x = sample.x;
+    out.y = sample.y;
+    out.z = sample.z;
+    out.heading = sample.heading;
+    out.grade = sample.grade;
+    return out;
+  }
+
+  override headingAt(s: number): number {
+    return this.sampleAt(s).heading;
   }
 
   override curvatureAt(s: number): number {

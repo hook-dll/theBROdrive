@@ -38,11 +38,14 @@
  * reload is bit-identical to the one that was unloaded. Following the player
  * continuously would put a different rounding error in every rebuild.
  *
- * WHERE IT MOVES. Between the physics step and the post-step latches, so the camera,
- * the HUD and the save all observe one origin per frame. Never in the middle of a
- * `translation()`-then-`setTranslation()` pair: the trailer's hitch enforcement has a
- * 1.5 m drift guard, and a 1 km origin step landing inside that pair reads as the
- * trailer having teleported.
+ * WHERE IT MOVES. After every controller has written its tick and immediately before
+ * the physics step, so the solver, the post-step latches, the camera, the HUD and the
+ * save all observe one origin per frame. Before the step and not after it, because
+ * the step is the only thing that rebuilds Rapier's query tree: shifted between a step
+ * and the next tick's suspension rays, every ray missed for a tick and every car's
+ * wheels dropped. Never in the middle of a `translation()`-then-`setTranslation()`
+ * pair: the trailer's hitch enforcement has a 1.5 m drift guard, and a 1 km origin
+ * step landing inside that pair reads as the trailer having teleported.
  */
 
 /** Lattice the origin snaps to, metres. */

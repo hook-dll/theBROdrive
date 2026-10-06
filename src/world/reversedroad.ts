@@ -32,6 +32,10 @@ export class ReversedRoad implements DriveRoad {
     };
   }
 
+  headingAt(s: number): number {
+    return this.forward.headingAt(this.forwardS(s)) + Math.PI;
+  }
+
   curvatureAt(s: number): number {
     return -this.forward.curvatureAt(this.forwardS(s));
   }

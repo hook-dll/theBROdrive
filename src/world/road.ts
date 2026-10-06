@@ -113,6 +113,19 @@ export interface RoadSample {
   readonly curvature: number;
 }
 
+/**
+ * A centreline sample without its curvature: everything the node table holds. Written
+ * into caller storage by `Road.centreInto`; see there for why it exists.
+ */
+export interface RoadCentre {
+  s: number;
+  x: number;
+  y: number;
+  z: number;
+  heading: number;
+  grade: number;
+}
+
 export interface RoadProjection {
   /** Arclength of the closest centreline point. */
   readonly s: number;
@@ -128,6 +141,11 @@ export interface DriveRoad {
   /** Non-geometric road state in this driving direction, written into caller storage. */
   conditionAt(s: number, out: RoadConditionBuffer): void;
   sampleAt(s: number): RoadSample;
+  /**
+   * Tangent direction at `s`, radians: `sampleAt(s).heading` without paying for the
+   * curvature, which is most of what a sample costs.
+   */
+  headingAt(s: number): number;
   curvatureAt(s: number): number;
   /**
    * Cross-slope the corner is banked at, as a fraction, signed like the curvature.
@@ -194,6 +212,8 @@ export class Road {
    * far more branches than converge anywhere on this road — see `project`.
    */
   private readonly candidates = new Float64Array(16);
+  /** Scratch for the curvature-free samples `offsetPoint`, `project` and the sight line take. */
+  private readonly centre: RoadCentre = { s: 0, x: 0, y: 0, z: 0, heading: 0, grade: 0 };
 
   /**
    * `spine` is optional so every dev tool can still write `new Road(seed)` and every
@@ -241,7 +261,7 @@ export class Road {
    * hilliness is a property of the ground the road crosses, not of the arclength.
    */
   hillinessAt(s: number): number {
-    const c = this.sampleAt(s);
+    const c = this.centreInto(s, this.centre);
     return this.landscape.hillinessAt(c.x, c.z);
   }
 
@@ -267,13 +287,13 @@ export class Road {
    * view can share the implementation rather than keep its own.
    */
   sightDistanceAt(s: number, limit: number, direction: 1 | -1 = 1): number {
-    const eyeY = this.sampleAt(s).y + SIGHT_EYE_HEIGHT_M;
+    const eyeY = this.centreInto(s, this.centre).y + SIGHT_EYE_HEIGHT_M;
     const step = Math.max(SIGHT_STEP_M, limit / SIGHT_MAX_SAMPLES);
     let worstSlope = -Infinity;
     for (let d = step; d <= limit; d += step) {
       const target = s + direction * d;
       if (target < 0 || target > this.length) return d;
-      const groundY = this.sampleAt(target).y;
+      const groundY = this.centreInto(target, this.centre).y;
       // Anything at object height is visible only if it clears every ridge between.
       if ((groundY + SIGHT_OBJECT_HEIGHT_M - eyeY) / d < worstSlope) return d - step;
       const ridgeSlope = (groundY - eyeY) / d;
@@ -341,6 +361,40 @@ export class Road {
    * nodes are 4 m apart. Linear interpolation here shows up as visible faceting.
    */
   sampleAt(s: number): RoadSample {
+    const sample = { s: 0, x: 0, y: 0, z: 0, heading: 0, grade: 0, curvature: 0 };
+    this.hermiteInto(s, sample);
+    sample.curvature = this.headingField.curvatureAt(sample.s);
+    return sample;
+  }
+
+  /**
+   * `sampleAt` without the curvature, written into `out`.
+   *
+   * The curvature is the expensive half of a sample: two evaluations of the heading
+   * field's district, corner and route-noise tables, where everything else is read
+   * from the cached node block. A projection, a lateral offset and a sight line never
+   * read it, and through every driver's lane model they are asked tens of thousands of
+   * times a second — measured, two fifths of the traffic tick went on curvatures
+   * nobody looked at. Overridable because the playground circuit answers geometry
+   * from its own lap.
+   */
+  protected centreInto(s: number, out: RoadCentre): RoadCentre {
+    this.hermiteInto(s, out);
+    return out;
+  }
+
+  headingAt(s: number): number {
+    const clamped = Math.min(Math.max(s, 0), this.length);
+    const fi = clamped / NODE_SPACING;
+    const i = Math.min(Math.floor(fi), this.lastNode - 1);
+    const t = fi - i;
+    const block = this.blockFor(i);
+    const k = i - block.index * CHECKPOINT_NODES;
+    const h0 = block.headings[k]!;
+    return h0 + (block.headings[k + 1]! - h0) * t;
+  }
+
+  private hermiteInto(s: number, out: RoadCentre): void {
     const clamped = Math.min(Math.max(s, 0), this.length);
     const fi = clamped / NODE_SPACING;
     const i = Math.min(Math.floor(fi), this.lastNode - 1);
@@ -362,25 +416,22 @@ export class Road {
     const b1 = -2 * t3 + 3 * t2;
     const m1 = t3 - t2;
 
-    return {
-      s: clamped,
-      x:
-        b0 * block.xs[k]! +
-        m0 * Math.sin(h0) * NODE_SPACING +
-        b1 * block.xs[k + 1]! +
-        m1 * Math.sin(h1) * NODE_SPACING,
-      y: y0 + (y1 - y0) * t,
-      z:
-        b0 * block.zs[k]! +
-        m0 * Math.cos(h0) * NODE_SPACING +
-        b1 * block.zs[k + 1]! +
-        m1 * Math.cos(h1) * NODE_SPACING,
-      heading: h0 + (h1 - h0) * t,
-      // The grade the driver actually rides: the slope of the interpolated y, which
-      // is linear across the segment. Differencing the nodes is therefore exact.
-      grade: (y1 - y0) / NODE_SPACING,
-      curvature: this.headingField.curvatureAt(clamped),
-    };
+    out.s = clamped;
+    out.x =
+      b0 * block.xs[k]! +
+      m0 * Math.sin(h0) * NODE_SPACING +
+      b1 * block.xs[k + 1]! +
+      m1 * Math.sin(h1) * NODE_SPACING;
+    out.y = y0 + (y1 - y0) * t;
+    out.z =
+      b0 * block.zs[k]! +
+      m0 * Math.cos(h0) * NODE_SPACING +
+      b1 * block.zs[k + 1]! +
+      m1 * Math.cos(h1) * NODE_SPACING;
+    out.heading = h0 + (h1 - h0) * t;
+    // The grade the driver actually rides: the slope of the interpolated y, which
+    // is linear across the segment. Differencing the nodes is therefore exact.
+    out.grade = (y1 - y0) / NODE_SPACING;
   }
 
   /**
@@ -395,7 +446,7 @@ export class Road {
    * the road it sits on must negate, as the pole line does.
    */
   offsetPoint(s: number, lateral: number, out?: { x: number; y: number; z: number }) {
-    const c = this.sampleAt(s);
+    const c = this.centreInto(s, this.centre);
     const target = out ?? { x: 0, y: 0, z: 0 };
     target.x = c.x + Math.cos(c.heading) * lateral;
     target.y = c.y;
@@ -487,7 +538,7 @@ export class Road {
       bestS = this.descend(x, z, Math.min(Math.max(hintS, 0), this.length), 90);
     }
 
-    const c = this.sampleAt(bestS);
+    const c = this.centreInto(bestS, this.centre);
     return {
       s: bestS,
       // Same basis as `offsetPoint`, so positive is LEFT of travel. See its comment.

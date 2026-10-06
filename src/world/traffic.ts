@@ -1,3 +1,4 @@
+import type RAPIER from '@dimforge/rapier3d-compat';
 import type * as THREE from 'three';
 import { emptyInput, type InputFrame } from '../core/input';
 import type { PhysicsWorld } from '../core/physics';
@@ -6,13 +7,13 @@ import { hash01, mulberry32 } from '../core/rng';
 import { createServiceableCarState, poseOnGround } from '../game/spawn';
 import { GameWorld, newWorldState } from '../game/state';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
-import { Autopilot, AUTOPILOT_MODES, type AutopilotMode } from '../vehicle/autopilot';
+import { Autopilot, AUTOPILOT_MODES, roadPaceCeiling, type AutopilotMode } from '../vehicle/autopilot';
 import type { TrafficField, TrafficNeighbour } from '../vehicle/trafficfield';
 import { TRAFFIC_CAPS, type Settings } from '../game/settings';
 import { CAR_MODELS } from '../vehicle/carmodels';
 import { variantsOfKind, variant, type BodyClass } from '../parts/registry';
 import { Vehicle } from '../vehicle/vehicle';
-import { ReversedHazardIndex, type HazardField } from './hazards';
+import { ReversedHazardIndex, type HazardField, type RoadHazard } from './hazards';
 import type { WorldOrigin } from './origin';
 import { laneHalfWidthFor, widenessAt } from './roadprofile';
 import type { DriveRoad } from './road';
@@ -289,6 +290,74 @@ const TRAFFIC_CONTROL_INTERVAL_S = 1 / 45;
  */
 const COORDINATION_INTERVAL_S = 0.1;
 /**
+ * DISTANT TRAFFIC RIDES ON RAILS (see `Vehicle.enterRails`).
+ *
+ * Measured with 28 cars in the stream, a driven traffic car cost about 65 µs a step —
+ * two thirds of it its driver's lane model and speed plan, the rest the ray-cast
+ * suspension and the tyre model — and the stream was four fifths of the simulation
+ * step. Past a few hundred metres none of that can be seen: at 300 m a car is six
+ * pixels wide on a 1080-line screen and its springs move it by a tenth of one, and the
+ * player is too far away to be part of anything its driver decides — the widest
+ * window a driver reasons about him in is the 260 m opposing-pass exclusion. So a car
+ * that is simply cruising in its lane more than `RAILS_SLEEP_M` of road from the
+ * player is moved along that lane by a car-following law, and handed back to its
+ * springs and its driver, at the speed it is doing, the moment it is nearer than
+ * `RAILS_WAKE_M`. The gap between the two is hysteresis: a car pacing the player at
+ * the boundary does not change hands every step. Measured on the same 28-car stream:
+ * the traffic step fell from 1.87 ms to 0.97 ms.
+ */
+const RAILS_WAKE_M = 300;
+const RAILS_SLEEP_M = 360;
+/**
+ * How often a car on rails re-reads the road ahead, seconds. Anything only a driver can
+ * deal with wakes it: the lane it holds ending, a prop in it, the turning circle, or
+ * any body in it that is not on rails too — a driven car in either direction, a wreck,
+ * a parked car, a dropped part. So does slowing to a crawl: a queue is a driver's.
+ */
+const RAILS_SURVEY_S = 0.25;
+/** That road ahead: at least this many metres, or this many seconds of travel. */
+const RAILS_SURVEY_MIN_M = 60;
+const RAILS_SURVEY_HORIZON_S = 3;
+/** A slower car is standing or queueing for a reason only its driver knows. */
+const RAILS_MIN_SPEED_MPS = 4;
+/**
+ * A driver held up behind a car this much slower than its own pace, within twice its
+ * following distance, for this long, wants past: it wakes to decide whether it can,
+ * and stays driven for the holdoff whether or not it does. The advantage is the one a
+ * driven car needs to start a pass (`PASS_ADVANTAGE_MPS` in autopilot.ts).
+ */
+const RAILS_PASS_ADVANTAGE_MPS = 3;
+const RAILS_HELD_UP_S = 3;
+const RAILS_PASS_HOLDOFF_S = 12;
+/** Up-axis height a body needs to be put on rails: a tilted car is mid-incident. */
+const RAILS_UPRIGHT_MIN = 0.97;
+/** Furthest from its lane's centre a car may be to be put on rails, metres. */
+const RAILS_LANE_TOLERANCE_M = 0.6;
+/** Clearance a prop needs from a car's flank to be passed by on rails, metres. */
+const RAILS_HAZARD_MARGIN_M = 0.4;
+/**
+ * Car-following on rails: the Intelligent Driver Model, with the driver's own
+ * headway. Gentle numbers on purpose; it only has to look like traffic from afar.
+ */
+const RAILS_ACCEL_MPS2 = 1.2;
+const RAILS_COMFORT_DECEL_MPS2 = 2.5;
+const RAILS_MAX_DECEL_MPS2 = 7;
+const RAILS_STANDSTILL_GAP_M = 4;
+/** Lateral distance inside which another car counts as in this car's lane, metres. */
+const RAILS_SAME_LANE_M = 2;
+/** Deceleration that lights the brake lamps on rails, m/s². */
+const RAILS_BRAKE_LAMP_MPS2 = 1;
+/** Half the baseline the rails pitch is measured over, metres. */
+const RAILS_GRADE_BASE_M = 2;
+/** Rate the rails ride height follows the measured ground, m/s. */
+const RAILS_RISE_SLEW_MPS = 0.3;
+/** How far below the chassis the rails ground probe reaches, metres. */
+const RAILS_GROUND_PROBE_M = 4;
+/** The survey's box for bodies in the lane: half its width and height, and how far it reaches under the surface, metres. */
+const RAILS_PROBE_HALF_WIDTH_M = 1.3;
+const RAILS_PROBE_HALF_HEIGHT_M = 1.5;
+const RAILS_PROBE_BELOW_M = 0.5;
+/**
  * Body half-extents the traffic field reports, metres. One figure for the catalogue
  * rather than a per-model measure: the field is consulted to decide whether a body is
  * in a lane and whether it is closing, and being slightly pessimistic about the widest
@@ -312,6 +381,30 @@ export interface FieldOwner {
 type TrafficDirection = 1 | -1;
 export type TrafficDriverStyle = 'cautious' | 'normal' | 'hurried' | 'frantic';
 
+
+/**
+ * A car on rails. Arclength and lateral are the stream's forward frame, like
+ * `forwardS` and `roadLateral`, and the chassis origin sits exactly there.
+ */
+interface TrafficRails {
+  s: number;
+  lateral: number;
+  /** Speed along its own direction of travel, m/s; never negative. */
+  speed: number;
+  /** The lane held, numbered in its own direction; the car wakes before it ends. */
+  readonly lane: number;
+  /** Chassis height above the ground under it when it was put on rails, metres. */
+  readonly clearance: number;
+  /** Chassis height above the centreline elevation, and the value it is slewing to. */
+  rise: number;
+  riseTarget: number;
+  /** Clear-road speed here and over the road ahead; refreshed by the survey. */
+  cruise: number;
+  /** Seconds to the next survey; see RAILS_SURVEY_S. */
+  survey: number;
+  /** Seconds held up behind a slower car; see RAILS_HELD_UP_S. */
+  heldUp: number;
+}
 
 interface TrafficCar {
   readonly id: string;
@@ -369,6 +462,10 @@ interface TrafficCar {
   /** Schedule remainder, independent of elapsed time actually sent to drive. */
   controlAccumulator: number;
   controlElapsed: number;
+  /** Present while the car rides on rails; see RAILS_WAKE_M. */
+  rails: TrafficRails | null;
+  /** Seconds before this car may be put on rails again; see RAILS_PASS_HOLDOFF_S. */
+  railsHoldoff: number;
 }
 
 const FORWARD_QUEUE_ORDER = (a: TrafficCar, b: TrafficCar): number =>
@@ -454,6 +551,8 @@ export interface TrafficStatus {
   /** Retained in status telemetry; autonomous traffic must leave this at zero. */
   readonly highBeams: number;
   readonly lowBeams: number;
+  /** Cars riding on rails (see RAILS_WAKE_M) rather than driven. */
+  readonly onRails: number;
 }
 
 /**
@@ -534,6 +633,24 @@ export class RoadTraffic {
   private coordinationTimer = 0;
   private impactCount = 0;
   private passCount = 0;
+  /**
+   * Chassis handles of the cars on rails: the only bodies a rails survey may share a
+   * lane with. Anything else in it — a driven car, whichever way it is going — means
+   * a driver's decision is coming, and the car wakes to make its own.
+   */
+  private readonly railBodies = new Set<number>();
+  private readonly railPoint = { x: 0, y: 0, z: 0 };
+  private readonly railCondition: RoadConditionBuffer = {
+    surface: SurfaceType.Asphalt, decay: 0, sandCover: 0, markings: 0,
+  };
+  private railProbeShape: RAPIER.Cuboid | null = null;
+  private readonly railProbeCentre = { x: 0, y: 0, z: 0 };
+  private readonly railProbeRotation = { x: 0, y: 0, z: 0, w: 1 };
+  private railProbeHit = false;
+  /** One survey's prop test, held in fields so the hazard walk allocates nothing. */
+  private railHazardLateral = 0;
+  private railHazardHalfWidth = 0;
+  private railHazardHit = false;
 
   constructor(
     private readonly physics: PhysicsWorld,
@@ -570,6 +687,7 @@ export class RoadTraffic {
     let cautious = 0;
     let passing = 0;
     let ahead = 0;
+    let onRails = 0;
     for (const car of this.carList) {
       if (car.direction === 1) {
         sameDirection++;
@@ -590,6 +708,7 @@ export class RoadTraffic {
         nearestRoadDistance,
         Math.abs(car.forwardS - this.playerS),
       );
+      if (car.rails) onRails++;
     }
     return {
       count: this.carList.length,
@@ -612,6 +731,7 @@ export class RoadTraffic {
       movingOncoming,
       highBeams,
       lowBeams,
+      onRails,
     };
   }
 
@@ -963,14 +1083,20 @@ export class RoadTraffic {
     // Support is checked every physics step, not on the slower stuck-car timer.
     for (let i = this.carList.length - 1; i >= 0; i--) {
       const car = this.carList[i]!;
-      car.vehicle.absoluteTranslation(this.position);
-      const projection = this.road.project(this.position.x, this.position.z, car.forwardS);
-      car.forwardS = projection.s;
-      car.roadLateral = projection.lateral;
+      if (car.rails) {
+        // The rails put the chassis origin exactly here; nothing to project.
+        car.forwardS = car.rails.s;
+        car.roadLateral = car.rails.lateral;
+      } else {
+        car.vehicle.absoluteTranslation(this.position);
+        const projection = this.road.project(this.position.x, this.position.z, car.forwardS);
+        car.forwardS = projection.s;
+        car.roadLateral = projection.lateral;
+      }
       // Along the road, not along the body: a car halfway through a manoeuvre still
       // closes on what is in front of it at its road speed, and that is the number a
       // driver behind it has to reason about.
-      const sample = this.road.sampleAt(projection.s);
+      const heading = this.road.headingAt(car.forwardS);
       const velocity = car.vehicle.chassis.linvel();
       const half = car.halfExtents;
       const travelMargin = Math.hypot(velocity.x, velocity.z) * dt + this.playerStepTravel;
@@ -979,15 +1105,15 @@ export class RoadTraffic {
         continue;
       }
       const q = car.vehicle.chassis.rotation();
-      const rightX = Math.cos(sample.heading);
-      const rightZ = -Math.sin(sample.heading);
+      const rightX = Math.cos(heading);
+      const rightZ = -Math.sin(heading);
       // Project each rotated chassis-box axis onto the road's lateral axis.
       car.roadHalfWidth =
         Math.abs(rightX * (1 - 2 * (q.y * q.y + q.z * q.z)) + rightZ * 2 * (q.x * q.z - q.w * q.y)) * half[0] +
         Math.abs(rightX * 2 * (q.x * q.y - q.w * q.z) + rightZ * 2 * (q.y * q.z + q.w * q.x)) * half[1] +
         Math.abs(rightX * 2 * (q.x * q.z + q.w * q.y) + rightZ * (1 - 2 * (q.x * q.x + q.y * q.y))) * half[2];
       car.forwardSpeed =
-        velocity.x * Math.sin(sample.heading) + velocity.z * Math.cos(sample.heading);
+        velocity.x * Math.sin(heading) + velocity.z * Math.cos(heading);
     }
     this.trimTo(this.desiredCount);
 
@@ -1038,7 +1164,8 @@ export class RoadTraffic {
       // of sight: a car the player is watching keeps trying, because a car that
       // vanished in front of him would be worse than the wait.
       car.stoppedFor = car.vehicle.speedKmh < STUCK_SPEED_KMH ? car.stoppedFor + dt : 0;
-      if (car.lifetimeTimer <= 0) {
+      const sampled = car.lifetimeTimer <= 0;
+      if (sampled) {
         car.lifetimeTimer = LIFETIME_SAMPLE_S;
         const offset = car.forwardS - playerS;
         if (
@@ -1049,6 +1176,23 @@ export class RoadTraffic {
           this.removeAt(i);
           continue;
         }
+      }
+      if (car.railsHoldoff > 0) car.railsHoldoff -= dt;
+      if (car.rails) {
+        if (
+          Math.abs(car.forwardS - playerS) >= RAILS_WAKE_M &&
+          car.rails.speed >= RAILS_MIN_SPEED_MPS &&
+          car.rails.heldUp < RAILS_HELD_UP_S &&
+          this.surveyRails(car, dt)
+        ) {
+          this.advanceRails(car, dt);
+          continue;
+        }
+        if (car.rails.heldUp >= RAILS_HELD_UP_S) car.railsHoldoff = RAILS_PASS_HOLDOFF_S;
+        this.wake(car);
+      } else if (sampled && this.putOnRails(car, playerS)) {
+        this.advanceRails(car, dt);
+        continue;
       }
       if (car.settleFor > 0) {
         car.settleFor -= dt;
@@ -1115,6 +1259,274 @@ export class RoadTraffic {
     car.spawnS = car.forwardS;
     car.autopilot.retarget(this.road, this.hazards);
     car.autopilot.setEngaged(true);
+  }
+
+  /**
+   * Puts a cruising car on rails when nothing about where it is needs a driver; see
+   * RAILS_WAKE_M. Asked on the lifetime sample, so a car that cannot go is not asked
+   * again every step. False, with nothing changed, when it stays driven.
+   */
+  private putOnRails(car: TrafficCar, playerS: number): boolean {
+    if (car.settleFor > 0 || car.turnS >= 0 || car.railsHoldoff > 0) return false;
+    // A driver that wants past the car in front is about to do something.
+    if (car.autopilot.passUrge) return false;
+    if (Math.abs(car.forwardS - playerS) < RAILS_SLEEP_M) return false;
+    const activity = car.autopilot.activity;
+    if (activity !== 'cruise' && activity !== 'follow') return false;
+    const speed = car.forwardSpeed * car.direction;
+    if (speed < RAILS_MIN_SPEED_MPS) return false;
+    const q = car.vehicle.chassis.rotation();
+    if (1 - 2 * (q.x * q.x + q.z * q.z) < RAILS_UPRIGHT_MIN) return false;
+    const lane = car.autopilot.homeLane;
+    const laneCentre = this.forwardLaneCentreAt(car.forwardS, car.direction, lane);
+    if (Math.abs(car.roadLateral - laneCentre) > RAILS_LANE_TOLERANCE_M) return false;
+    if (!this.railsRoadClear(car, car.forwardS, car.roadLateral, speed, lane)) return false;
+    const t = car.vehicle.chassis.translation();
+    const ground = this.railGroundUnder(car, t.x, t.y, t.z);
+    if (ground === null) return false;
+    const rise = t.y - this.road.offsetPoint(car.forwardS, car.roadLateral, this.railPoint).y;
+    car.rails = {
+      s: car.forwardS,
+      lateral: car.roadLateral,
+      speed,
+      lane,
+      clearance: t.y - ground,
+      rise,
+      riseTarget: rise,
+      cruise: this.railCruise(car, car.forwardS, speed),
+      // Spread over the interval, so the stream's surveys do not land on one step.
+      survey: RAILS_SURVEY_S * ((car.forwardS / 37) % 1),
+      heldUp: 0,
+    };
+    car.vehicle.enterRails();
+    this.railBodies.add(car.vehicle.chassis.handle);
+    return true;
+  }
+
+  /** Hands a car on rails back to its springs and its driver, at the speed it is doing. */
+  private wake(car: TrafficCar): void {
+    const rails = car.rails!;
+    car.rails = null;
+    this.railBodies.delete(car.vehicle.chassis.handle);
+    car.vehicle.leaveRails(rails.speed);
+    // A fresh engagement, as at a spawn: the driver projects itself onto the road and
+    // plans its line from where it is, rather than from where it last decided anything.
+    // It decides on this very step, over the one step it has been driving.
+    car.autopilot.setEngaged(true);
+    car.controlAccumulator = TRAFFIC_CONTROL_INTERVAL_S;
+    car.controlElapsed = 0;
+  }
+
+  /**
+   * Re-reads the road ahead of a car on rails every `RAILS_SURVEY_S`: false when it
+   * needs its driver back. Also refreshes its clear-road speed and the height of the
+   * ground it rides over.
+   */
+  private surveyRails(car: TrafficCar, dt: number): boolean {
+    const rails = car.rails!;
+    rails.survey -= dt;
+    if (rails.survey > 0) return true;
+    rails.survey = RAILS_SURVEY_S;
+    if (!this.railsRoadClear(car, rails.s, rails.lateral, rails.speed, rails.lane)) return false;
+    rails.cruise = this.railCruise(car, rails.s, rails.speed);
+    const t = car.vehicle.chassis.translation();
+    const ground = this.railGroundUnder(car, t.x, t.y, t.z);
+    if (ground !== null) {
+      rails.riseTarget =
+        ground + rails.clearance - this.road.offsetPoint(rails.s, rails.lateral, this.railPoint).y;
+    }
+    return true;
+  }
+
+  /**
+   * One step on rails: the Intelligent Driver Model behind whatever is ahead in the
+   * lane, then the chassis sent along the lane at that speed, at its ride height over
+   * the measured ground and pitched to the road.
+   */
+  private advanceRails(car: TrafficCar, dt: number): void {
+    const rails = car.rails!;
+    const direction = car.direction;
+    let gap = Infinity;
+    let leaderSpeed = 0;
+    for (const other of this.carList) {
+      if (other === car || other.direction !== direction || other.turnS >= 0) continue;
+      if (Math.abs(other.roadLateral - rails.lateral) > RAILS_SAME_LANE_M) continue;
+      const along = (other.forwardS - rails.s) * direction;
+      if (along <= 0) continue;
+      const bumper = along - car.halfExtents[2] - other.halfExtents[2];
+      if (bumper < gap) {
+        gap = bumper;
+        leaderSpeed = other.forwardSpeed * direction;
+      }
+    }
+    const speed = rails.speed;
+    let accel = RAILS_ACCEL_MPS2 * (1 - (speed / Math.max(rails.cruise, 1)) ** 4);
+    if (gap < Infinity) {
+      const desired =
+        RAILS_STANDSTILL_GAP_M +
+        Math.max(
+          0,
+          speed * car.headwayS +
+            (speed * (speed - leaderSpeed)) /
+              (2 * Math.sqrt(RAILS_ACCEL_MPS2 * RAILS_COMFORT_DECEL_MPS2)),
+        );
+      accel -= RAILS_ACCEL_MPS2 * (desired / Math.max(gap, 0.5)) ** 2;
+    }
+    accel = Math.max(-RAILS_MAX_DECEL_MPS2, Math.min(RAILS_ACCEL_MPS2, accel));
+    rails.speed = Math.max(0, speed + accel * dt);
+    const heldUp =
+      car.autopilot.overtakes &&
+      gap < 2 * (RAILS_STANDSTILL_GAP_M + speed * car.headwayS) &&
+      leaderSpeed < rails.cruise - RAILS_PASS_ADVANTAGE_MPS;
+    rails.heldUp = heldUp ? rails.heldUp + dt : 0;
+    rails.s += direction * rails.speed * dt;
+
+    const behindY = this.road.offsetPoint(rails.s - RAILS_GRADE_BASE_M, rails.lateral, this.railPoint).y;
+    const aheadY = this.road.offsetPoint(rails.s + RAILS_GRADE_BASE_M, rails.lateral, this.railPoint).y;
+    const point = this.road.offsetPoint(rails.s, rails.lateral, this.railPoint);
+    const slew = RAILS_RISE_SLEW_MPS * dt;
+    rails.rise += Math.max(-slew, Math.min(slew, rails.riseTarget - rails.rise));
+    car.vehicle.railStep(
+      dt,
+      point.x,
+      point.y + rails.rise,
+      point.z,
+      this.road.headingAt(rails.s) + (direction === -1 ? Math.PI : 0),
+      ((aheadY - behindY) / (2 * RAILS_GRADE_BASE_M)) * direction,
+      rails.speed,
+      accel < -RAILS_BRAKE_LAMP_MPS2,
+    );
+  }
+
+  /**
+   * Nothing ahead of a car at (s, lateral) that only a driver can deal with: the lane
+   * it holds goes on, the road's ends are not near, no indexed prop is in the lane and
+   * no body that is not on rails itself stands in it.
+   */
+  private railsRoadClear(
+    car: TrafficCar,
+    s: number,
+    lateral: number,
+    speed: number,
+    lane: number,
+  ): boolean {
+    const reach = Math.max(RAILS_SURVEY_MIN_M, speed * RAILS_SURVEY_HORIZON_S);
+    const ahead = s + car.direction * reach;
+    const from = Math.min(s, ahead);
+    if (from < TURNAROUND_ENTRY_S + RAILS_SURVEY_MIN_M) return false;
+    if (Math.max(s, ahead) > this.road.length - END_MARGIN_M) return false;
+    if (
+      this.road.lanesPerSideAt(ahead) <= lane ||
+      this.road.lanesPerSideAt(s + car.direction * reach * 0.5) <= lane
+    ) {
+      return false;
+    }
+    this.railHazardLateral = lateral;
+    this.railHazardHalfWidth = car.halfExtents[0] + RAILS_HAZARD_MARGIN_M;
+    this.railHazardHit = false;
+    this.hazards.forEachAhead(from, reach, this.visitRailHazard);
+    if (this.railHazardHit) return false;
+    return !this.foreignBodyAhead(car, s, lateral, reach);
+  }
+
+  private readonly visitRailHazard = (hazard: RoadHazard): void => {
+    if (Math.abs(hazard.lateral - this.railHazardLateral) < hazard.radius + this.railHazardHalfWidth) {
+      this.railHazardHit = true;
+    }
+  };
+
+  /**
+   * Any dynamic body in the lane over the next `reach` metres that is not itself on
+   * rails: a box along the road, pitched to its grade, from just under the surface to
+   * above a van's roof.
+   */
+  private foreignBodyAhead(car: TrafficCar, s: number, lateral: number, reach: number): boolean {
+    const shape = (this.railProbeShape ??= new this.physics.rapier.Cuboid(
+      RAILS_PROBE_HALF_WIDTH_M,
+      RAILS_PROBE_HALF_HEIGHT_M,
+      1,
+    ));
+    shape.halfExtents.z = reach * 0.5;
+    const mid = s + car.direction * reach * 0.5;
+    const lowY = this.road.offsetPoint(mid - reach * 0.5, lateral, this.railPoint).y;
+    const highY = this.road.offsetPoint(mid + reach * 0.5, lateral, this.railPoint).y;
+    const centre = this.road.offsetPoint(mid, lateral, this.railPoint);
+    this.railProbeCentre.x = centre.x - this.origin.x;
+    this.railProbeCentre.y = centre.y + RAILS_PROBE_HALF_HEIGHT_M - RAILS_PROBE_BELOW_M;
+    this.railProbeCentre.z = centre.z - this.origin.z;
+    // Yaw to the road, then pitch about the box's own right axis; see `Vehicle.rescueTo`.
+    const halfYaw = this.road.headingAt(mid) / 2;
+    const halfPitch = -Math.atan((highY - lowY) / reach) / 2;
+    const cy = Math.cos(halfYaw);
+    const sy = Math.sin(halfYaw);
+    const cp = Math.cos(halfPitch);
+    const sp = Math.sin(halfPitch);
+    this.railProbeRotation.x = cy * sp;
+    this.railProbeRotation.y = sy * cp;
+    this.railProbeRotation.z = -sy * sp;
+    this.railProbeRotation.w = cy * cp;
+    this.railProbeHit = false;
+    this.physics.world.intersectionsWithShape(
+      this.railProbeCentre,
+      this.railProbeRotation,
+      shape,
+      this.visitRailProbe,
+      this.physics.rapier.QueryFilterFlags.ONLY_DYNAMIC,
+      undefined,
+      undefined,
+      car.vehicle.chassis,
+    );
+    return this.railProbeHit;
+  }
+
+  private readonly visitRailProbe = (collider: RAPIER.Collider): boolean => {
+    if (collider.isSensor()) return true;
+    const parent = collider.parent();
+    if (parent !== null && this.railBodies.has(parent.handle)) return true;
+    this.railProbeHit = true;
+    return false;
+  };
+
+  /** Height of the fixed ground under a relative point, ignoring the car itself. */
+  private railGroundUnder(car: TrafficCar, x: number, y: number, z: number): number | null {
+    this.groundProbeOrigin.x = x;
+    this.groundProbeOrigin.y = y;
+    this.groundProbeOrigin.z = z;
+    const hit = this.physics.raycast(
+      this.groundProbeOrigin,
+      this.groundProbeDirection,
+      RAILS_GROUND_PROBE_M,
+      car.vehicle.chassis,
+    );
+    if (!hit || !(this.physics.world.getCollider(hit.colliderHandle)?.parent()?.isFixed() ?? false)) {
+      return null;
+    }
+    return hit.point.y;
+  }
+
+  /**
+   * The speed a car on rails holds with the road clear: its driver's own pace under
+   * the ceiling its mode allows for the surface and the bend, here and over the road
+   * ahead, each ceiling reachable from here at a comfortable deceleration.
+   */
+  private railCruise(car: TrafficCar, s: number, speed: number): number {
+    const reach = Math.max(RAILS_SURVEY_MIN_M, speed * RAILS_SURVEY_HORIZON_S);
+    let cruise = car.autopilot.cruisePace;
+    for (let k = 0; k <= 2; k++) {
+      const distance = reach * k * 0.5;
+      const sampleS = s + car.direction * distance;
+      this.road.conditionAt(sampleS, this.railCondition);
+      const ceiling = roadPaceCeiling(
+        car.autopilot.mode,
+        this.railCondition,
+        this.road.curvatureAt(sampleS),
+      );
+      cruise = Math.min(
+        cruise,
+        Math.sqrt(ceiling * ceiling + 2 * RAILS_COMFORT_DECEL_MPS2 * distance),
+      );
+    }
+    return cruise;
   }
 
   postStep(): void {
@@ -1347,6 +1759,8 @@ export class RoadTraffic {
         (this.carList.length & 1) * (TRAFFIC_CONTROL_INTERVAL_S * 0.5),
       controlElapsed: 0,
       turnS: -1,
+      rails: null,
+      railsHoldoff: 0,
     };
     // The field reads the record's live arclength and direction, so it keeps working
     // as the car drives and, after a turnaround, as its direction flips.
@@ -1811,6 +2225,7 @@ export class RoadTraffic {
   private removeAt(index: number): void {
     const car = this.carList[index]!;
     car.autopilot.setEngaged(false);
+    this.railBodies.delete(car.vehicle.chassis.handle);
     car.vehicle.dispose();
     this.trafficWorld.apply({ t: 'car_remove', carId: car.id });
     this.carList.splice(index, 1);

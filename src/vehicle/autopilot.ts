@@ -2197,7 +2197,7 @@ export class Autopilot {
     if (Math.abs(s) > this.roadBodyReach) return true;
     const bumperLine = projection.height + PROBE_HEIGHT_M;
     if (t.y - halfUp > bumperLine || t.y + halfUp < bumperLine) return true;
-    const heading = this.road.sampleAt(projection.s).heading;
+    const heading = this.road.headingAt(projection.s);
     const fx = Math.sin(heading);
     const fz = Math.cos(heading);
     // Across is (cos h, -sin h): positive LEFT of travel, the lateral's own basis.
@@ -2618,6 +2618,19 @@ export class Autopilot {
   get manoeuvreSpeed(): number { return this.manoeuvreSpeedValue; }
   /** What the speed plan asked the pedal for this step, m/s, before the bumper veto. */
   get targetSpeed(): number { return this.targetSpeedValue; }
+  /**
+   * The pace this driver holds on a clear straight, m/s: its mode's cruise at its own
+   * pace, under its speed cap, with the wide-road bonus it last had. No surface, bend
+   * or traffic in it; see `roadPaceCeiling` for the road's half.
+   */
+  get cruisePace(): number {
+    return Math.min(MODES[this.modeValue].cruiseMps * this.paceValue, this.speedCapValue) * this.widePaceValue;
+  }
+  /** Whether this driver's mode passes slower cars at all, across the crown or between lanes. */
+  get overtakes(): boolean {
+    const config = MODES[this.modeValue];
+    return config.overtakes || config.lanePasses;
+  }
   /** Nearest thing in the HOME lane and its speed, whatever line was chosen. */
   get laneBlockDistance(): number { return this.corridorLaneBlockDistance; }
   get laneBlockSpeed(): number { return this.corridorLaneBlockSpeed; }
@@ -5595,8 +5608,8 @@ export class Autopilot {
         nearest = hit.toi;
         if (other?.isDynamic()) {
           const velocity = other.linvel();
-          const road = this.road.sampleAt(this.hintS);
-          this.probeHitSpeed = velocity.x * Math.sin(road.heading) + velocity.z * Math.cos(road.heading);
+          const heading = this.road.headingAt(this.hintS);
+          this.probeHitSpeed = velocity.x * Math.sin(heading) + velocity.z * Math.cos(heading);
         } else {
           this.probeHitSpeed = 0;
         }

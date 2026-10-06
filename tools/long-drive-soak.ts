@@ -225,7 +225,8 @@ try {
       });
     }
 
-    physics.step();
+    // Production order: the origin moves before the step, which is the only thing
+    // that rebuilds Rapier's query tree (see PhysicsWorld.rebase).
     const shift = origin.advance(position.x, position.z);
     if (shift) {
       physics.rebase(shift.dx, shift.dz);
@@ -236,6 +237,7 @@ try {
         fail(distanceTravelled, frameId, `rebased streamed body is ${physics.maxBodyDistance().toFixed(1)} m from origin`);
       }
     }
+    physics.step();
 
     const roadChunk = Math.floor(s / CHUNK_LENGTH);
     roadBoundaryCrossings += Math.abs(roadChunk - lastRoadChunk);

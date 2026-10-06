@@ -203,6 +203,14 @@ export class TurnaroundRoad implements DriveRoad {
     };
   }
 
+  /** Straight from the leg: no ground height, which is what makes a sample cost anything here. */
+  headingAt(s: number): number {
+    const leg = this.legAt(s);
+    if (leg.kind === 'straight') return Math.atan2(leg.dx, leg.dz);
+    const phi = leg.phi0 + (leg.sense * (s - leg.s0)) / leg.radius;
+    return Math.atan2(-leg.sense * Math.sin(phi), leg.sense * Math.cos(phi));
+  }
+
   curvatureAt(s: number): number {
     const leg = this.legAt(s);
     return leg.kind === 'straight' ? 0 : -leg.sense / leg.radius;

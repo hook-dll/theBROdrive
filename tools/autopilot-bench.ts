@@ -776,6 +776,7 @@ async function checkPassingSafety(): Promise<void> {
     length: 100_000,
     conditionAt(_s, out) { Object.assign(out, { surface: SurfaceType.Asphalt, decay: 0, sandCover: 0 }); },
     sampleAt(s) { return { s, x: 0, y: 0, z: s, heading: 0, grade: 0, curvature: 0 }; },
+    headingAt() { return 0; },
     curvatureAt() { return 0; },
     bankingAt() { return 0; },
     sightDistanceAt(_s, limit) { return limit; },

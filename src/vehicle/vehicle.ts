@@ -205,6 +205,8 @@ import { weather, weatherGrip, weatherSoftness } from '../world/weather';
 const SIDE_WIND_CY = 0.85;
 /** Most the wind may ever push, in g: about a quarter of what a dry tyre holds. */
 const WIND_FORCE_MAX_G = 0.18;
+/** Read-only zero for Rapier setters; never written. */
+const ZERO_VECTOR: Readonly<{ x: number; y: number; z: number }> = { x: 0, y: 0, z: 0 };
 
 interface WheelVisual {
   index: number;
@@ -635,6 +637,11 @@ export class Vehicle implements Rebasable {
    */
   private parkingHoldRequested = false;
   private parkingHoldActive = false;
+  /** Distant traffic moved along its lane instead of driven; see `enterRails`. */
+  private railsActive = false;
+  private readonly railTranslation = { x: 0, y: 0, z: 0 };
+  private readonly railVelocity = { x: 0, y: 0, z: 0 };
+  private readonly railRotation = { x: 0, y: 0, z: 0, w: 1 };
   /**
    * Seconds of shove left before the parking hold re-latches. Counted down in `settle`,
    * so it only ever matters on a car nobody is driving.
@@ -780,22 +787,6 @@ export class Vehicle implements Rebasable {
    * build, and it is what keeps this a single-pass update instead of two.
    */
   private rearSlipRad = 0;
-  /**
-   * Custom tyre-force passes suppressed after the floating origin moves.
-   *
-   * Rapier's vehicle controller caches each wheel's world-space contact point and
-   * refreshes it one controller update AFTER a body teleport. The floating origin is
-   * such a teleport. On the first tick after a rebase, `updateWheelDynamics` therefore
-   * received a point still expressed in the old origin and applied an ordinary tyre
-   * impulse roughly one kilometre from the chassis: measured angular velocity jumped
-   * from 0.05 to 19.8 rad/s inside that method alone — the distance-triggered
-   * "invisible bump" that could spin a car in place.
-   *
-   * Suspension still updates on that tick, which refreshes the controller's contact
-   * cache. Suppressing one 16.7 ms custom tyre pass is imperceptible and means the next
-   * one applies at a contact point beside the wheel rather than a kilometre away.
-   */
-  private skipTyreDynamicsSteps = 0;
   // Roll-couple state: low-passed lateral acceleration and its lever arm.
   private prevLatVel = 0;
   private rollAccel = 0;
@@ -1585,6 +1576,11 @@ export class Vehicle implements Rebasable {
       { x: (this.forwardScratch.x / across) * speedMps, y: 0, z: (this.forwardScratch.z / across) * speedMps },
       true,
     );
+    this.rollWheelsAt(speedMps);
+  }
+
+  /** Every wheel turning at `speedMps` of road speed, and the gearbox in the gear it wants. */
+  private rollWheelsAt(speedMps: number): void {
     let radius = 0;
     for (const w of this.wheels) {
       w.spinRadS = speedMps / w.radius;
@@ -1596,6 +1592,106 @@ export class Vehicle implements Rebasable {
       this.drivetrain.engageAtWheelSpeed(speedMps / (radius / this.wheels.length));
     }
     this.impactVelocityPrimed = false;
+  }
+
+  /**
+   * DISTANT TRAFFIC RIDES ON RAILS.
+   *
+   * A traffic car far enough from the player that nothing about its springs, tyres or
+   * driver can be seen is moved along its lane by `RoadTraffic` instead of driven: no
+   * ray-cast suspension, no tyre model, no autopilot. Those are nine tenths of what a
+   * traffic car costs, and most of the stream is that far away.
+   *
+   * The body stays dynamic and keeps its colliders, so every sensor, query and
+   * neighbour still finds it where it is drawn. Gravity is off and the pose is tracked
+   * by velocity (`railStep`), so it arrives exactly where it is put and reports the
+   * speed it is moving at. The suspension holds the lengths it had, which is how a
+   * cruising car sits, and the wheels point straight ahead.
+   */
+  enterRails(): void {
+    if (this.railsActive) return;
+    this.railsActive = true;
+    this.chassisBody.setGravityScale(0, true);
+    this.chassisBody.setAngvel(ZERO_VECTOR, true);
+    this.parkingHoldRequested = false;
+    this.impactVelocityPrimed = false;
+    this.steerAngle = 0;
+    const controller = this.controller;
+    if (controller) for (const w of this.wheels) controller.setWheelSteering(w.index, 0);
+  }
+
+  /** True between `enterRails` and `leaveRails`. */
+  get onRails(): boolean {
+    return this.railsActive;
+  }
+
+  /**
+   * One fixed step on rails: the chassis is sent to the absolute pose given, yawed to
+   * `heading` and pitched to `grade` (rise over run along it), by the velocity that
+   * lands it there at the end of the coming physics step.
+   */
+  railStep(
+    dt: number,
+    x: number,
+    y: number,
+    z: number,
+    heading: number,
+    grade: number,
+    speedMps: number,
+    braking: boolean,
+  ): void {
+    this.lamps.adoptLiveState();
+    const t = this.chassisBody.translation(this.railTranslation);
+    const v = this.railVelocity;
+    v.x = (x - this.origin.x - t.x) / dt;
+    v.y = (y - t.y) / dt;
+    v.z = (z - this.origin.z - t.z) / dt;
+    this.chassisBody.setLinvel(v, true);
+    // Yaw about world up, then pitch about the car's own right axis; see `rescueTo`.
+    const halfYaw = heading / 2;
+    const halfPitch = -Math.atan(grade) / 2;
+    const cy = Math.cos(halfYaw);
+    const sy = Math.sin(halfYaw);
+    const cp = Math.cos(halfPitch);
+    const sp = Math.sin(halfPitch);
+    const q = this.railRotation;
+    q.x = cy * sp;
+    q.y = sy * cp;
+    q.z = -sy * sp;
+    q.w = cy * cp;
+    this.chassisBody.setRotation(q, true);
+    this.chassisBody.setAngvel(ZERO_VECTOR, true);
+    for (const w of this.wheels) {
+      w.spinRadS = speedMps / w.radius;
+      w.drawnSpin += w.spinRadS * dt;
+    }
+    this.brakeLightCommand = braking ? 1 : 0;
+    this.serviceBrakeCommand = braking ? 1 : 0;
+    // What a distant listener hears follows the road speed; the engine note keeps the
+    // gear it had. The vertical speed is primed so the first driven step hears no landing.
+    this.audioState.forwardMps = speedMps;
+    this.audioState.brake = this.serviceBrakeCommand;
+    this.prevVerticalVel = v.y;
+    // Nothing this step does is a collision, and the detector must not take the first
+    // driven step after the rails for one either.
+    this.impactVelocityPrimed = false;
+    this.transformEmitTimer += dt;
+    if (this.transformEmitTimer >= TRANSFORM_EMIT_INTERVAL) this.pushTransform();
+    this.lamps.advance(dt);
+  }
+
+  /**
+   * Hands the car back to its springs and its driver at `speedMps`. The body keeps the
+   * velocity the rails gave it, which already follows the road's grade; only gravity,
+   * the wheels' spin and the gear are restored.
+   */
+  leaveRails(speedMps: number): void {
+    if (!this.railsActive) return;
+    this.railsActive = false;
+    this.chassisBody.setGravityScale(1, true);
+    this.chassisBody.setAngvel(ZERO_VECTOR, true);
+    this.brakeLightCommand = 0;
+    this.rollWheelsAt(speedMps);
   }
 
   settle(dt: number): void {
@@ -2568,25 +2664,7 @@ export class Vehicle implements Rebasable {
     // Wheel rotation, before the telemetry pass that reads it: each wheel is
     // integrated from its own drive and brake torque against what its contact can
     // actually transmit, so lock-up and wheelspin are outcomes, not timers.
-    //
-    // One pass is deliberately omitted after a floating-origin rebase; see
-    // `skipTyreDynamicsSteps`. `longitudinalForceSum` must be cleared on that path or
-    // anti-pitch would reuse the previous tick's force even though no tyre force was
-    // applied this tick.
-    if (this.skipTyreDynamicsSteps > 0) {
-      this.skipTyreDynamicsSteps--;
-      this.longitudinalForceSum = 0;
-      this.ownTyreCapacityN = 0;
-      // No tyre pass ran, so nothing dug this step either. Leaving the last value would
-      // hand the chassis firm sand's rolling resistance on a step with no wheels on it.
-      this.digWeightCar = 0;
-      for (const w of this.wheels) w.digWeight = 0;
-      // No tyre pass ran, so no aligning moment was earned. Leaving a stale one would
-      // apply the previous tick's yaw damping to a step that had no tyre forces at all.
-      this.alignTorqueImpulse = 0;
-    } else {
-      this.updateWheelDynamics(dt, tyreCarGrip * compound.grip, fwd, ambientC);
-    }
+    this.updateWheelDynamics(dt, tyreCarGrip * compound.grip, fwd, ambientC);
     this.refreshWheelSpray(fwd);
 
     // Each grounded wheel contributes its travelled tyre-track on its reported
@@ -2960,14 +3038,13 @@ export class Vehicle implements Rebasable {
     this.prevPos.z -= shift.dz;
     this.stepPos.x -= shift.dx;
     this.stepPos.z -= shift.dz;
-    // The wheel contact scratch is in the same relative world frame as the chassis.
-    // Shift the last good value for spray telemetry, then omit the first custom tyre
-    // pass while Rapier refreshes its own internal copy (see the field comment).
+    // The wheel contact scratch is in the same relative world frame as the chassis,
+    // and an airborne wheel keeps its last one: the bump stop and the anti-roll bar
+    // push at it until the ray finds ground again.
     for (const wheel of this.wheels) {
       wheel.contactPoint.x -= shift.dx;
       wheel.contactPoint.z -= shift.dz;
     }
-    this.skipTyreDynamicsSteps = Math.max(this.skipTyreDynamicsSteps, 1);
   }
 
   /**

@@ -107,6 +107,23 @@
 
 ### Changed
 
+- DISTANT TRAFFIC RIDES ON RAILS. A traffic car more than 360 m of road from the
+  player that is simply cruising or following in its lane is moved along that lane by
+  a car-following law (Intelligent Driver Model, the driver's own headway, its pace
+  under the surface and bend ceiling) instead of being driven: no autopilot, no ray-cast
+  suspension, no tyre model. The body stays dynamic with gravity off and is tracked by
+  velocity, so every sensor still finds it. It is handed back to its springs and driver,
+  at the speed it is doing, nearer than 300 m, or anywhere when its lane ends, a prop or
+  any body not itself on rails is in the lane ahead, it slows to a crawl, or it has been
+  held up behind a slower car for 3 s and wants past (then it stays driven for 12 s).
+  Measured on a 28-car stream: traffic step 1.87 -> 0.97 ms. On the real-road bench over
+  four seeds: stream contacts 91 (was 133), bodies thrown out of the geometry 1 (was 10),
+  passes 308 (was 241). `RoadTraffic.status.onRails` counts them.
+- `Road.sampleAt` no longer pays for the curvature where nobody reads it. `offsetPoint`,
+  `project`, `sightDistanceAt` and `hillinessAt` take the node block's position, height
+  and heading only (`centreInto`), and `DriveRoad.headingAt` answers the heading alone;
+  the drivers' lane model and the traffic snapshot use it. Same numbers, 12% off the
+  traffic step: two fifths of it had gone on curvatures that were thrown away.
 - THE MOUNTAINS STAND ON THE MAP, NOT AROUND THE CAMERA. `Terrain.horizonHeight` ramped
   the mountain field in by distance from the camera, so in every direction the ground
   climbed to a crest at 7-10 km: one sand-coloured rim around the player, receding as he
@@ -188,6 +205,15 @@
 
 ### Fixed
 
+- THE WHEELS NO LONGER DROP FOR A FRAME EVERY KILOMETRE. The floating origin moved
+  between the physics step and the next one, and Rapier rebuilds its scene-query tree
+  only inside a step, so for one tick every suspension ray searched the tree in the old
+  origin and found no road: every car drew its wheels at full droop and its springs
+  pushed nothing. That was also what the old "invisible bump" was; skipping one tyre
+  pass hid the impulse, not the cause, and is gone. The origin now moves after the
+  controllers and immediately before `physics.step()`; `PhysicsWorld.rebase` carries a
+  kinematic body's pending target across, so the player on foot does not stall a tick.
+  `tools/long-drive-soak.ts` follows the same order.
 - POLES STAND IN THE SAND, NOT ON IT. A pole's base was set on `Terrain.heightAt`, which
   the drawn tiles only chord, so 183 of 565 poles over the first 80 km showed more than
   5 cm of daylight under the footing (worst 24 cm). Poles now stand on `drawnGroundY`,

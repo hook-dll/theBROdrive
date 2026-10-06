@@ -125,7 +125,9 @@ function sampleStoppedTraffic(): void {
   }
 }
 // Observe dt delivered to real controllers, including their staggered first calls.
-type ClockCar = { settleFor: number; autopilot: Autopilot; vehicle: Vehicle; modelId: string; forwardS: number };
+// A car on rails is not driven: its clock restarts when it wakes, so its elapsed time
+// is re-synced after every step it spends on them (`syncRailClocks`).
+type ClockCar = { settleFor: number; autopilot: Autopilot; vehicle: Vehicle; modelId: string; forwardS: number; rails: unknown };
 // Bench-only access to the live records; controls are still the real Autopilots.
 const clockTraffic = traffic as unknown as { carList: ClockCar[] };
 const clocks = new Map<ClockCar, { elapsed: number; delivered: number }>();
@@ -149,6 +151,12 @@ function observeControlClocks(): void {
     if (car.settleFor <= 0) clock.elapsed += FIXED_DT;
   }
 }
+function syncRailClocks(): void {
+  for (const car of clockTraffic.carList) {
+    const clock = clocks.get(car);
+    if (clock && car.rails) clock.elapsed = clock.delivered;
+  }
+}
 let unsupportedSamples = 0;
 let supportSamples = 0;
 function sampleTrafficSupport(playerS: number): void {
@@ -164,6 +172,7 @@ function sampleTrafficSupport(playerS: number): void {
 for (let step = 0; step < Math.ceil(30 / FIXED_DT); step++) {
   observeControlClocks();
   traffic.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0, 0);
+  syncRailClocks();
   physics.step();
   traffic.postStep();
   sampleTrafficSupport(PLAYER_S);
