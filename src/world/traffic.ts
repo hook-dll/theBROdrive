@@ -56,7 +56,13 @@ const DENSITY_FLOOR = 0.5;
  * is a busy road and queues up. Only a widened carriageway can reach it.
  */
 const DENSE_TRAFFIC_THRESHOLD = NARROW_TRAFFIC;
-const SPAWN_MIN_M = 140;
+/**
+ * Nearest a car may be created ahead of the player. 140 m was "behind a crest or a
+ * bend", which on an open desert road is nothing: cars were watched appearing and
+ * pulling away a few hundred metres up the road. With 800 m of guaranteed support
+ * the band can start past where a car still reads as one.
+ */
+const SPAWN_MIN_M = 500;
 /**
  * THE BAND ENDS WHERE THE GROUND DOES.
  *
@@ -78,18 +84,18 @@ const SPAWN_MAX_M = PHYSICS_REACH_M;
  * player's current speed is instead put behind, closes, and arrives in view — the
  * only way a car can populate the road AHEAD of the spawn band.
  */
-const REAR_SPAWN_MIN_M = 250;
-const REAR_SPAWN_MAX_M = 360;
+const REAR_SPAWN_MIN_M = 500;
+const REAR_SPAWN_MAX_M = 720;
 /** Speed advantage over the player that makes a rear spawn worth its slot. */
 const REAR_SPAWN_CLOSING_MPS = 2.5;
 /**
  * A frantic driver's rear band, closer than everyone else's. It is the car the player
- * is meant to meet coming up his mirror; started at 250-360 m it sat within a few
- * seconds of the 400 m support edge, and any lag on the launch got it collected
- * before it ever closed.
+ * is meant to meet coming up his mirror; started at the far edge of the rear band it
+ * sits within a few seconds of the 800 m support edge, and any lag on the launch gets
+ * it collected before it ever closes.
  */
-const FRANTIC_REAR_SPAWN_MIN_M = 150;
-const FRANTIC_REAR_SPAWN_MAX_M = 250;
+const FRANTIC_REAR_SPAWN_MIN_M = 450;
+const FRANTIC_REAR_SPAWN_MAX_M = 600;
 /**
  * Road the player may have covered between a spawn being chosen and its model
  * finishing loading. See `finishSpawn`.
@@ -115,6 +121,11 @@ const OFFSCREEN_TRIM_M = 90;
 const RECYCLE_BEHIND_M = 200;
 /** Closing speed below which a same-direction car behind counts as dropping back. */
 const RECYCLE_RECEDE_MPS = 0.5;
+/**
+ * Below this the player is standing and may be looking back down the road, so a car
+ * behind him is only removed once it is as far away as a spawn ahead would be made.
+ */
+const PLAYER_MOVING_MPS = 5;
 /** Seconds between spawn attempts on an ordinary road; the dense mode halves it. */
 const SPAWN_INTERVAL_S = 1;
 /** Same-lane separation for the normal stream; dense 30-car mode packs to 32 m. */
@@ -1192,7 +1203,7 @@ export class RoadTraffic {
   private finishSpawn(request: PendingSpawn): void {
     // THE PLAYER MOVES WHILE THE MODEL LOADS.
     //
-    // The site was picked at least `SPAWN_MIN_M` (140 m) ahead, and this runs when
+    // The site was picked at least `SPAWN_MIN_M` ahead, and this runs when
     // the car's model finishes loading — several ticks later, and a whole load if
     // that model has never been used this session. At 90 km/h the player covers 25
     // metres a second, so the band check failed by one or two metres and the spawn
@@ -1760,7 +1771,7 @@ export class RoadTraffic {
    */
   private pickTrimIndex(): number {
     let best = -1;
-    let bestBehind = OFFSCREEN_TRIM_M;
+    let bestBehind = this.unwatchedBehindM(OFFSCREEN_TRIM_M);
     for (let i = 0; i < this.carList.length; i++) {
       const car = this.carList[i]!;
       // A frantic driver behind is on its way to being seen: it was put there to come
@@ -1775,10 +1786,15 @@ export class RoadTraffic {
     return best;
   }
 
+  /** How far behind a car must be before its removal goes unseen; see PLAYER_MOVING_MPS. */
+  private unwatchedBehindM(whileDriving: number): number {
+    return Math.abs(this.playerSpeed) > PLAYER_MOVING_MPS ? whileDriving : SPAWN_MIN_M;
+  }
+
   /** Farthest car behind the player that is receding from him; see RECYCLE_BEHIND_M. */
   private pickRecycleIndex(): number {
     let best = -1;
-    let bestBehind = RECYCLE_BEHIND_M;
+    let bestBehind = this.unwatchedBehindM(RECYCLE_BEHIND_M);
     for (let i = 0; i < this.carList.length; i++) {
       const car = this.carList[i]!;
       const behind = this.playerS - car.forwardS;
