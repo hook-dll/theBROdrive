@@ -424,32 +424,36 @@ function markStickerSurfaces(root: THREE.Object3D, def: CarModelDef): void {
   });
 }
 
-/** Courier-only shader accent: turquoise paint with a bright view-angle rim. */
-function applyCourierAppearance(root: THREE.Object3D, def: CarModelDef): void {
-  root.traverse((child) => {
-    if (!(child instanceof THREE.Mesh) || !isRandomPaintMesh(child, def)) return;
-    for (const material of materialsOf(child)) {
-      if (!(material instanceof THREE.MeshStandardMaterial) || !isPaintSlot(material, def)) continue;
-      material.color.setHex(0x36b8b3);
-      material.metalness = 0.68;
-      material.roughness = 0.22;
-      material.emissive.setHex(0x481b55);
-      material.emissiveIntensity = 0.28;
-      const previousCompile = material.onBeforeCompile;
-      const previousKey = material.customProgramCacheKey;
-      material.onBeforeCompile = (shader, renderer) => {
-        previousCompile.call(material, shader, renderer);
-        shader.fragmentShader = shader.fragmentShader.replace(
-          '#include <opaque_fragment>',
-          `outgoingLight += mix(vec3(0.05, 0.9, 0.82), vec3(0.9, 0.15, 0.72),
-            0.5 + 0.5 * normal.y) * pow(1.0 - abs(dot(normalize(normal), normalize(vViewPosition))), 2.2) * 1.4;
-          #include <opaque_fragment>`,
-        );
-      };
-      material.customProgramCacheKey = () => `${previousKey.call(material)}|courier-rim-v1`;
-      material.needsUpdate = true;
-    }
-  });
+/**
+ * Courier-only shader accent: turquoise paint with a bright view-angle rim.
+ *
+ * Takes the instance's own paint clones (`cloneCarBodyPaintMaterials`), never a scene
+ * walk: wheels and trim are shared with every other car of the template, and a
+ * solid-paint body counts all of them as paint, so writing through the graph repainted
+ * every pool wheel in the world once the unified style made them Standard.
+ */
+function applyCourierAppearance(paint: readonly THREE.Material[]): void {
+  for (const material of paint) {
+    if (!(material instanceof THREE.MeshStandardMaterial)) continue;
+    material.color.setHex(0x36b8b3);
+    material.metalness = 0.68;
+    material.roughness = 0.22;
+    material.emissive.setHex(0x481b55);
+    material.emissiveIntensity = 0.28;
+    const previousCompile = material.onBeforeCompile;
+    const previousKey = material.customProgramCacheKey;
+    material.onBeforeCompile = (shader, renderer) => {
+      previousCompile.call(material, shader, renderer);
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <opaque_fragment>',
+        `outgoingLight += mix(vec3(0.05, 0.9, 0.82), vec3(0.9, 0.15, 0.72),
+          0.5 + 0.5 * normal.y) * pow(1.0 - abs(dot(normalize(normal), normalize(vViewPosition))), 2.2) * 1.4;
+        #include <opaque_fragment>`,
+      );
+    };
+    material.customProgramCacheKey = () => `${previousKey.call(material)}|courier-rim-v1`;
+    material.needsUpdate = true;
+  }
 }
 
 /**
@@ -1572,7 +1576,7 @@ async function buildProgramAnchor(id: string): Promise<THREE.Group> {
   await onOwnFrame(() => {
     const t = template(id);
     const courier = cloneStaticModel(t);
-    applyCourierAppearance(courier.model, t.def);
+    applyCourierAppearance(courier.paint);
     anchor.add(cloneStaticModel(t).model, courier.model);
   });
   return anchor;
@@ -1600,7 +1604,7 @@ export function createCourierCarModel(id: string, appearanceKey: string): THREE.
   const instance = cloneStaticModel(template(id), appearanceKey);
   setCarBodyCondition(instance.paint, 0, 0);
   setCarGrime(instance.glass, 0);
-  applyCourierAppearance(instance.model, carModel(id));
+  applyCourierAppearance(instance.paint);
   return instance.model;
 }
 

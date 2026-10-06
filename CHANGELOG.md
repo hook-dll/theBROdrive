@@ -216,6 +216,14 @@
 
 ### Fixed
 
+- THE COURIER'S FINISH STAYS ON THE COURIER. Under `?carstyle=unified` the turquoise rim
+  shader turned up on the wheels of the Izh, the Oka and every car on the Soviet wheel
+  pool. The courier finish walked the whole static model and recoloured in place every
+  Standard material that counted as paint. On a solid-paint body that includes the
+  pool wheels, whose atlas material (`__DEFAULT`) every car of that template shares,
+  and the unified style is what made it Standard. Each model's program anchor builds
+  a courier at load, so the wheels changed even when no courier was in sight.
+  `applyCourierAppearance` now takes the instance's own paint clones.
 - TRAFFIC NO LONGER VANISHES IN SIGHT BEHIND THE PLAYER. A density trim, a recycled
   receding car and a stuck car are all taken out no nearer than `UNSEEN_M` (500 m,
   the nearest a car is created). They used to go at 90 m, 200 m and 70 m whenever the
