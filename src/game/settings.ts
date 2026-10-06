@@ -240,14 +240,14 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
  * 17.3 ms at 8 km and 31.9 ms at 25 km, and the mesa vertex count goes from 897 to
  * 16 419 — a hitch on every cell crossing for a processor that cannot keep up.
  */
-const HORIZON_M: Record<CpuLoad, number> = { low: 1500, medium: 8000, high: 25000 };
+const HORIZON_M: Record<CpuLoad, number> = { very_low: 1500, low: 8000, medium: 25000, high: 25000 };
 
 /**
  * The horizon this presentation draws. A phone never gets the 25 km map: a phone core
  * is slower than the 5950X above, so that radius is a multi-frame hitch per cell.
  */
 export function viewDistanceFor(cpuLoad: CpuLoad, mobilePresentation: boolean): number {
-  return mobilePresentation ? Math.min(HORIZON_M[cpuLoad], HORIZON_M.medium) : HORIZON_M[cpuLoad];
+  return mobilePresentation ? Math.min(HORIZON_M[cpuLoad], HORIZON_M.low) : HORIZON_M[cpuLoad];
 }
 
 /** Spotlight budget for vehicle lamps, as this presentation will compile it. */
@@ -299,20 +299,22 @@ export function presentationFpsFor(frameRateLimit: number | null): number | null
  * of the count, and how far the desert is drawn (`viewDistanceFor`). Both apply live:
  * surplus cars drain behind the player, the horizon moves in place.
  */
-export type CpuLoad = 'low' | 'medium' | 'high';
+export type CpuLoad = 'very_low' | 'low' | 'medium' | 'high';
 
 /**
  * Traffic replenishment ceilings per CPU level: two-lane and four-lane road.
  *
- * High is the 12/24 the stream had when it lived in 400 m either side of the player.
+ * Medium is the 12/24 the stream had when it lived in 400 m either side of the player.
  * Doubling it with the 800 m reach was meant to hold the density per metre, but the
  * cars do not spread over the window: receding cars behind are recycled and the budget
- * lives on the road ahead, so the doubled count read as twice the traffic.
+ * lives on the road ahead, so the doubled count read as twice the traffic. High is
+ * half as much again, 18/36: a busy road for a processor that can carry it.
  */
 export const TRAFFIC_CAPS: Record<CpuLoad, { readonly narrow: number; readonly wide: number }> = {
-  low: { narrow: 4, wide: 8 },
-  medium: { narrow: 8, wide: 16 },
-  high: { narrow: 12, wide: 24 },
+  very_low: { narrow: 4, wide: 8 },
+  low: { narrow: 8, wide: 16 },
+  medium: { narrow: 12, wide: 24 },
+  high: { narrow: 18, wide: 36 },
 };
 
 /**
@@ -549,8 +551,8 @@ export const DEFAULT_SETTINGS: Settings = {
   // Off by default; a joke should be opted into, not discovered mid-drive.
   bouncyCars: false,
   dashboardScale: 1,
-  // The full stream. A machine that cannot carry it is told so by the menu's CPU row.
-  cpuLoad: 'high',
+  // The 12/24 stream; High is for a processor that has room beyond it.
+  cpuLoad: 'medium',
 };
 
 /**
@@ -701,7 +703,9 @@ export function sanitizeSettings(raw: unknown): Settings {
               DASHBOARD_SCALE_STEP,
           ) * DASHBOARD_SCALE_STEP
         : 1,
-    cpuLoad: obj.cpuLoad === 'low' || obj.cpuLoad === 'medium' ? obj.cpuLoad : 'high',
+    cpuLoad: obj.cpuLoad === 'very_low' || obj.cpuLoad === 'low' || obj.cpuLoad === 'high'
+      ? obj.cpuLoad
+      : 'medium',
   };
 
   const rawBindings = obj.keyBindings;

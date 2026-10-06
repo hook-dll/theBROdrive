@@ -290,7 +290,7 @@ async function boot(): Promise<void> {
           msaa: false,
           // A phone core is the slowest processor this game runs on: the lightest stream
           // and the 1.5 km horizon, as the phone's graphics default always gave it.
-          cpuLoad: 'low',
+          cpuLoad: 'very_low',
         },
       });
     }
@@ -772,7 +772,7 @@ async function boot(): Promise<void> {
       return true;
     },
   );
-  /** Three frantic rivals carrying the player's cargo to the next courier; see contracts/race.ts. */
+  /** Three hurried rivals carrying the player's cargo to the next courier; see contracts/race.ts. */
   const race = new RivalRace(world.seed, road, traffic, loadCarModel, (text) => hud.setToast(text));
   const reconcileActiveWorld = (anchorX: number, anchorZ: number): void => {
     const drivingId = world.state.player.drivingCarId;

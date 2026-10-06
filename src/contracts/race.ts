@@ -1,5 +1,5 @@
 /**
- * THE RACE: three frantic rivals carry the same cargo to the next courier.
+ * THE RACE: three hurried rivals carry the same cargo to the next courier.
  *
  * Taking a raceable cargo out of a courier starts it. Two rivals already left (one
  * `AHEAD_FAR_M`, one `AHEAD_NEAR_M` up the road), and the third leaves the courier
@@ -11,9 +11,9 @@
  *
  * A RIVAL IS A GHOST UNTIL IT IS NEAR. Physics exists only `PHYSICS_REACH_M` either
  * side of the player, so a rival out there is an arclength and a speed advanced
- * here, at the pace the autopilot's own `roadPaceCeiling` allows the frantic mode on
+ * here, at the pace the autopilot's own `roadPaceCeiling` allows `RIVAL_MODE` on
  * that road. Inside the spawn band it is handed to the traffic stream as a real car
- * (`RoadTraffic.spawnRival`) driven by the frantic autopilot; when the stream drops
+ * (`RoadTraffic.spawnRival`) driven by that autopilot mode; when the stream drops
  * it at the support edge, the ghost resumes from its last pose.
  *
  * NO MANOEUVRE AT THE COURIER. A rival never leaves the asphalt: the courier stands
@@ -62,7 +62,7 @@ const LATE_DEPARTURE_M = 560;
 /**
  * WHERE A GHOST BECOMES A CAR: the traffic stream's own bands, so nothing appears
  * where it can be seen. Ahead, `SPAWN_MIN_M` out to just inside the `PHYSICS_REACH_M`
- * support edge. Behind, the frantic driver's rear band, and only while the rival is
+ * support edge. Behind, the frantic traffic driver's rear band, and only while the rival is
  * closing: one put down behind a faster player only falls out of the window again,
  * and every such visit cost the ghost its speed (measured: the late rival spawned
  * standing at 560 m, was dropped at the edge 10 s later, twice in a minute).
@@ -83,17 +83,22 @@ const ARRIVE_SPEED_MPS = 1;
 /** A rival's hand-in: about the player's walk round to his own boot and back. */
 const LOAD_S = 20;
 /**
- * The ghost's own driving. Acceleration is the frantic car's on the flat; the curve
- * lookahead uses the rails' comfortable deceleration. Calibrated against the live
- * frantic driver on the same road (see the race notes in contracts.md).
+ * The ghost's own driving. Acceleration is a stock catalogue car's on the flat; the
+ * curve lookahead uses the rails' comfortable deceleration. Not yet calibrated against
+ * the live driver; if a ghost visibly gains or loses on a live rival, this is the number.
  */
-const GHOST_ACCEL_MPS2 = 2.5;
+const GHOST_ACCEL_MPS2 = 1.5;
 const GHOST_LOOK_DECEL_MPS2 = 2.5;
 const GHOST_LOOK_MIN_M = 60;
 const GHOST_LOOK_S = 3;
 const GHOST_LOOK_SAMPLES = 4;
-const CAP_MIN_KMH = 125;
-const CAP_SPAN_KMH = 35;
+/**
+ * Who drives the rivals. Frantic with the M30 swap simply flew off up the road; the
+ * hurried driver in a stock car is the trial, on ambient hurried traffic's 95-115 km/h.
+ */
+const RIVAL_MODE = 'hurried';
+const CAP_MIN_KMH = 95;
+const CAP_SPAN_KMH = 20;
 
 type RivalPhase = 'waiting' | 'driving' | 'loading' | 'done';
 
@@ -284,15 +289,15 @@ export class RivalRace {
     this.notify(`race on — three rivals carry the same ${item.cargoName} to the next courier`);
   }
 
-  /** The pace the frantic mode gets from this road, under the rival's cap and the stop. */
+  /** The pace `RIVAL_MODE` gets from this road, under the rival's cap and the stop. */
   private ghostTarget(rival: Rival, stopS: number): number {
-    let target = Math.min(rival.capMps, AUTOPILOT_MODES.frantic.cruiseMps);
+    let target = Math.min(rival.capMps, AUTOPILOT_MODES[RIVAL_MODE].cruiseMps);
     const look = Math.max(GHOST_LOOK_MIN_M, rival.speed * GHOST_LOOK_S);
     for (let k = 0; k < GHOST_LOOK_SAMPLES; k++) {
       const distance = (look * k) / (GHOST_LOOK_SAMPLES - 1);
       const s = Math.min(rival.s + distance, this.road.length);
       this.road.conditionAt(s, this.condition);
-      const ceiling = roadPaceCeiling('frantic', this.condition, this.road.curvatureAt(s));
+      const ceiling = roadPaceCeiling(RIVAL_MODE, this.condition, this.road.curvatureAt(s));
       target = Math.min(target, Math.sqrt(ceiling * ceiling + 2 * GHOST_LOOK_DECEL_MPS2 * distance));
     }
     return Math.min(target, this.stopCurve(rival.s, stopS));
@@ -326,7 +331,7 @@ export class RivalRace {
     rival.phase = 'done';
     race.delivered++;
     this.notify(`${rival.label} handed in the ${race.cargo.cargoName} — rival ${race.delivered} of ${RIVAL_COUNT} done`);
-    // Its race is over; it drives on as an ordinary frantic driver, or vanishes as a ghost.
+    // Its race is over; it drives on as ordinary traffic, or vanishes as a ghost.
     if (rival.live) this.host.releaseRival(rival.id);
   }
 
@@ -366,6 +371,7 @@ export class RivalRace {
         speed: rival.speed,
         // Its own ceiling; the stop curve is applied by `fixedUpdate` from the next step.
         speedCap: rival.capMps,
+        mode: RIVAL_MODE,
         cargo,
       })
       .then((placed) => {

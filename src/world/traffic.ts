@@ -389,6 +389,11 @@ export interface RivalSpawn {
   /** Speed it is put down rolling at, m/s; 0 starts it standing. */
   readonly speed: number;
   readonly speedCap: number;
+  /**
+   * Who drives it: `frantic` gets the frantic engine swap, `hurried` drives the car as
+   * it came from the catalogue.
+   */
+  readonly mode: 'frantic' | 'hurried';
   /** Its copy of the race cargo, loaded into the boot so its mass is the player's. */
   readonly cargo: Item | null;
 }
@@ -1822,14 +1827,14 @@ export class RoadTraffic {
       direction: 1,
       forwardS: spec.s,
       modelId: spec.modelId,
-      engineId: franticEngine(model.bodyClass),
+      engineId: spec.mode === 'frantic' ? franticEngine(model.bodyClass) : undefined,
       id: spec.id,
-      style: 'frantic',
-      headwayS: 1,
-      mode: 'frantic',
+      style: spec.mode,
+      headwayS: spec.mode === 'frantic' ? 1 : 1.2,
+      mode: spec.mode,
       speedCap: spec.speedCap,
       pace: 1,
-      lane: this.pickSpawnLane(spec.s, 'frantic'),
+      lane: this.pickSpawnLane(spec.s, spec.mode),
       rear: spec.s < this.playerS,
     };
     return this.prepareModel(spec.modelId).then(

@@ -47,6 +47,7 @@ import { STICKERS, type StickerKind } from '../items/stickercatalog';
 
 /** The CPU row's buttons, lightest first; see `CpuLoad`. */
 const TRAFFIC_LEVELS: readonly { load: CpuLoad; label: string; icon: string }[] = [
+  { load: 'very_low', label: 'Very Low', icon: 'retro' },
   { load: 'low', label: 'Low', icon: 'gfx1' },
   { load: 'medium', label: 'Medium', icon: 'gfx2' },
   { load: 'high', label: 'High', icon: 'gfx3' },
