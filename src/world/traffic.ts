@@ -131,8 +131,9 @@ const PLATOON_CHANCE = 0.32;
  * own direction — measured on the real road at one in fourteen either way, a frantic
  * driver overtook the player once in twenty minutes. Still an event, not a pack.
  */
-const FRANTIC_SAME_DIRECTION_SHARE = 0.14;
-const FRANTIC_ONCOMING_SHARE = 0.03;
+// TEST: raised from 0.14 / 0.03 to see many frantic drivers; revert after testing.
+const FRANTIC_SAME_DIRECTION_SHARE = 0.5;
+const FRANTIC_ONCOMING_SHARE = 0.25;
 /**
  * WHAT A FRANTIC DRIVER DRIVES, AND WHAT IS UNDER ITS BONNET. Any car the stream can
  * spawn, exactly as it is drawn for every other driver — a man in a hurry is a man in
