@@ -82,6 +82,14 @@ const REAR_SPAWN_MAX_M = 360;
 /** Speed advantage over the player that makes a rear spawn worth its slot. */
 const REAR_SPAWN_CLOSING_MPS = 2.5;
 /**
+ * A frantic driver's rear band, closer than everyone else's. It is the car the player
+ * is meant to meet coming up his mirror; started at 250-360 m it sat within a few
+ * seconds of the 400 m support edge, and any lag on the launch got it collected
+ * before it ever closed.
+ */
+const FRANTIC_REAR_SPAWN_MIN_M = 150;
+const FRANTIC_REAR_SPAWN_MAX_M = 250;
+/**
  * Road the player may have covered between a spawn being chosen and its model
  * finishing loading. See `finishSpawn`.
  */
@@ -366,6 +374,13 @@ function franticEngine(bodyClass: BodyClass): string {
     }
   }
   return strongest;
+}
+
+/** Rear spawn band `[min, max]` in metres behind the player for a driver of this style. */
+function rearSpawnBand(style: TrafficDriverStyle): readonly [number, number] {
+  return style === 'frantic'
+    ? [FRANTIC_REAR_SPAWN_MIN_M, FRANTIC_REAR_SPAWN_MAX_M]
+    : [REAR_SPAWN_MIN_M, REAR_SPAWN_MAX_M];
 }
 
 interface PendingSpawn {
@@ -1177,8 +1192,9 @@ export class RoadTraffic {
     // it — so its far edge is the one that has to hold, or the car materialises
     // already outside the physical support window.
     const offset = request.forwardS - this.playerS;
+    const [rearMin, rearMax] = rearSpawnBand(request.style);
     const arrivalOk = request.rear
-      ? -offset >= REAR_SPAWN_MIN_M - SPAWN_ARRIVAL_SLACK_M && -offset <= REAR_SPAWN_MAX_M
+      ? -offset >= rearMin - SPAWN_ARRIVAL_SLACK_M && -offset <= rearMax
       : offset >= SPAWN_MIN_M - SPAWN_ARRIVAL_SLACK_M && offset <= SPAWN_MAX_M;
     if (
       this.desiredCount === 0 ||
@@ -1433,10 +1449,11 @@ export class RoadTraffic {
     fromBehind: boolean,
     style: TrafficDriverStyle,
   ): { s: number; lane: number } | null {
+    const [rearMin, rearMax] = rearSpawnBand(style);
     for (let attempt = 0; attempt < 12; attempt++) {
       const behind = fromBehind && attempt < 6;
       const distance = behind
-        ? -(REAR_SPAWN_MIN_M + this.random() * (REAR_SPAWN_MAX_M - REAR_SPAWN_MIN_M))
+        ? -(rearMin + this.random() * (rearMax - rearMin))
         // Skewed toward SPAWN_MAX_M: `sqrt(u)` for `u` uniform on [0,1] has CDF `x^2`,
         // so it under-samples near 0 and over-samples near 1. A flat draw put half its
         // mass inside the first 130 m of this 260 m band, so the median spawn sat
@@ -1630,7 +1647,11 @@ export class RoadTraffic {
     speedCap: number,
     pace: number,
   ): number {
-    let speed = Math.min(speedCap, AUTOPILOT_MODES[mode].cruiseMps * pace, ROLLING_START_MAX_MPS);
+    // A frantic driver is launched at its own pace, bends permitting: capped at the
+    // ordinary 75 km/h it was put behind a faster player already losing ground, and
+    // fell out of the support window before its engine could make that back.
+    const launchCap = mode === 'frantic' ? Infinity : ROLLING_START_MAX_MPS;
+    let speed = Math.min(speedCap, AUTOPILOT_MODES[mode].cruiseMps * pace, launchCap);
     for (let d = 0; d <= ROLLING_START_LOOK_M; d += 10) {
       const curvature = Math.abs(this.road.curvatureAt(s + direction * d));
       if (curvature > 1e-4) speed = Math.min(speed, Math.sqrt(ROLLING_START_LATERAL_MPS2 / curvature));
