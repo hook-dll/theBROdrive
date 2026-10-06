@@ -1337,7 +1337,7 @@ if GO:
     from mathutils.geometry import delaunay_2d_cdt
     _go_tree = BVHTree.FromObject(body, bpy.context.evaluated_depsgraph_get())
     _go_w = SEAL.get('width', 0.008)
-    _go_gbm, _go_sbm = bmesh.new(), bmesh.new()
+    _go_gbm, _go_sbms = bmesh.new(), {}
     _go_nrm = {}                # glass vertex -> the dense shell's smooth normal under it
     _go_loops = []              # (pane, sign, its edge on the skin [n, 3])
     _go_fails = []
@@ -1471,6 +1471,8 @@ if GO:
         # the seal: a band from the outline to its inner edge, walled down into the skin
         # outside and down to the glass inside
         top_, bot_ = {}, {}
+        # a pane's own `sealMaterial` (chrome door frames, rubber screens) over the car's
+        sbm = _go_sbms.setdefault(GL[gi].get('sealMaterial', SEAL['material']), bmesh.new())
         sfaces = [f for f, k_, g_ in zip(fout, keep, in_glass) if k_ and not g_]
         n_edge = {}
         for f in sfaces:
@@ -1479,21 +1481,21 @@ if GO:
 
         def vtop(k):
             if k not in top_:
-                top_[k] = _go_sbm.verts.new(hits[k][0] + hits[k][1] * GO_SEAL_LIFT)
+                top_[k] = sbm.verts.new(hits[k][0] + hits[k][1] * GO_SEAL_LIFT)
             return top_[k]
 
         def vbot(k):
             if k not in bot_:
-                bot_[k] = _go_sbm.verts.new(hits[k][0] + hits[k][1] * (-0.001 if on_outer[k] else GO_LIFT))
+                bot_[k] = sbm.verts.new(hits[k][0] + hits[k][1] * (-0.001 if on_outer[k] else GO_LIFT))
             return bot_[k]
         for f in sfaces:
-            ff = _go_sbm.faces.new([vtop(k) for k in f])
+            ff = sbm.faces.new([vtop(k) for k in f])
             go_orient(ff, sum((hits[k][1] for k in f), Vector()))
             fc = sum((hits[k][0] for k in f), Vector()) / len(f)
             for a_, b_ in zip(f, f[1:] + f[:1]):
                 if n_edge[(min(a_, b_), max(a_, b_))] == 1:
                     try:
-                        wf = _go_sbm.faces.new((vbot(a_), vbot(b_), vtop(b_), vtop(a_)))
+                        wf = sbm.faces.new((vbot(a_), vbot(b_), vtop(b_), vtop(a_)))
                     except ValueError:
                         continue
                     go_orient(wf, (hits[a_][0] + hits[b_][0]) / 2 - fc)
@@ -1549,7 +1551,8 @@ if GO:
     _me_go.normals_split_custom_set([tuple(_go_vn[lp.vertex_index]) for lp in _me_go.loops])
     GO_GLASS = bpy.data.objects.new('glass_overlay', _me_go)
     scene.collection.objects.link(GO_GLASS)
-    trim_parts.append(new_object('glass_seal', _go_sbm, [SEAL['material']]))
+    for mat_, sbm_ in _go_sbms.items():
+        trim_parts.append(new_object('glass_seal', sbm_, [mat_]))
 # Bumpers: a section swept round the shell's outline at the bumper's height.
 for end, b in P.get('bumpers', {}).items():
     path = info['bumperPaths'].get(end)

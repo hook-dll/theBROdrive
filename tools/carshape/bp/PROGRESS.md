@@ -56,7 +56,7 @@ Stage: `-` not started, `glass` automatic laid-over glass only, `wip` worker on 
 |---|---|---|
 | fulvia | done | the reference |
 | valiant | done | side glass, belt, A-pillar (screenWrap), shut lines, trim off the photo; open: back light wrap, bonnet highlights by the cowl |
-| zaz968 | wip | chrome strip over the windows, fat A-pillar, chamfered door glass |
+| zaz968 | done | chrome strip removed, door/quarter glass and belt off the photo, rubber/chrome seals |
 | bj40 bmw2002 jeep mini moskvich412 niva uaz469 vaz2101 w123 wartburg | glass | body and trim still to do |
 | ae86 c10 capri citroen2cv citroends civic crx dacia | - | triage: all have A defects (capri hatch glass, c10 bed/pillar, crx lamps, 2cv wing) |
 | trabant volvo240 vaz2108 | - | triaged (trabant: boot groove, octagon screen, lamps) |

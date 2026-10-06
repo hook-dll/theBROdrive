@@ -519,3 +519,20 @@ shows photo, model and outline at one scale). The roof and silhouette were right
 Open: the back light's wrap (seen edge-on from the side in the photograph) is not
 modelled; the bonnet shows diagonal highlights by the cowl; the exhaust shows below
 the sill in a straight side view.
+
+## 2026-10-06: ZAZ-968M to the Fulvia standard
+
+Side photo `_refs/photos/zaz968/side.jpg` (265.8 px/m; taken from slightly above, so
+the roof and deck read 5-7 cm low on it: heights off the near side's plane only, the
+roof left at the factory 1.37).
+- **A 3.2 cm chrome strip drawn over the windows** and down behind the quarter light,
+  with a hooked front end on the A-pillar, and a second one along the sills: neither
+  is on the car. Gone; the door glass carries its own thin chrome frame and the quarter
+  light, screen and back light black rubber (new per-pane `sealMaterial` in
+  assemble.py's laid-over glass).
+- **Door glass chamfered and short**: vent and drop glass re-traced off the photo (front
+  edge on the A-pillar's slant -0.631 at 0.94 to -0.412 at 1.227, a small round corner
+  at the foot instead of the 7 cm chamfer); quarter light 0.179-0.915 (was 0.236-0.856)
+  with the photograph's round corners; belt 0.89 -> 0.845 (the glass starts at 0.86).
+- Screen and back light on their clean faces (rays: facing over 0.6), mirror below the
+  vent's foot. 0 GLASS-FAIL, dims `OFF []`.

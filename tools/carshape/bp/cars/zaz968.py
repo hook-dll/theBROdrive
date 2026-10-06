@@ -24,7 +24,10 @@ CAR = {
         'topOverride': [[0.75, 1.37], [0.85, 1.33], [1.06, 0.90], [1.3, 0.875], [1.6, 0.872], [1.80, 0.868], [1.87, 0.84]],
         'sill': [[-1.9, 0.42], [-1.65, 0.38], [-1.4, 0.30], [0.75, 0.30], [1.0, 0.31], [1.30, 0.34], [1.5, 0.33], [1.9, 0.33]],
         'cabin': [-0.83, 1.06],
-        'belt': [[-0.83, 0.89], [-0.5, 0.895], [0.85, 0.89], [1.06, 0.88]],
+        # The belt off the side photograph (265.8 px/m by its wheelbase): the door glass's
+        # chrome frame and the quarter light's rubber both start at 0.86; the drawing's
+        # 0.89 stood above the glass's own foot.
+        'belt': [[-0.83, 0.85], [-0.5, 0.845], [0.85, 0.845], [1.06, 0.85]],
         'glassPlan': [[-0.83, 0.58], [-0.5, 0.64], [0.75, 0.64], [1.06, 0.58]],
         'crown': [[-2.0, 0.015], [2.0, 0.015]],
         'roofCrown': 0.022,
@@ -57,16 +60,31 @@ CAR = {
         # as a plain (independent-rear) floor the pan tucks under the middle of the
         # floor like every other car's silencer, and the exhaust ends in a tail pipe.
         'underbody': {'engine': 'front', 'independentRear': True},
+        'glassOverlay': True,
+        'glassFit': False,
+        # The side glass off the side photograph, outer edges of the frames: the door's
+        # vent (its front edge the A-pillar's slant, -0.631 at 0.94 to -0.412 at 1.227,
+        # a small round corner at the foot) and drop glass to 0.14, in a thin chrome
+        # frame, the head at 1.237 and the foot 0.863; the fixed quarter light in black
+        # rubber from 0.179 to its slanted rear edge (0.915 at 0.92, 0.784 at 1.237),
+        # the head at 1.262, round corners. The old outlines stopped 9 cm short of the
+        # pillar with the vent's foot chamfered off, and the quarter light 6 cm short
+        # at both ends.
         'glass': [
-            {'view': 'side', 'outline': [[-0.346, 1.224], [-0.39, 1.203], [-0.538, 0.998], [-0.541, 0.968], [-0.468, 0.899],
-                                         [-0.346, 0.891]], 'facingMin': 0.3},
-            {'view': 'side', 'outline': [[-0.308, 1.233], [-0.308, 0.891], [0.07, 0.885], [0.129, 0.902], [0.129, 1.215], [0.114, 1.23]], 'facingMin': 0.3},
-            {'view': 'side', 'outline': [[0.236, 1.194], [0.236, 0.911], [0.257, 0.893], [0.786, 0.879], [0.856, 0.893], [0.853, 0.932],
-                                         [0.76, 1.114], [0.699, 1.194], [0.615, 1.218], [0.254, 1.218]], 'facingMin': 0.3},
-            {'view': 'front', 'outline': [[0.0, 1.26], [0.50, 1.255], [0.53, 1.23], [0.58, 0.91], [0.56, 0.885], [0.0, 0.885]],
-             'depthRange': [-0.9, -0.3], 'facingMin': 0.25},
-            {'view': 'rear', 'outline': [[0.0, 1.23], [0.49, 1.225], [0.52, 1.20], [0.52, 0.89], [0.49, 0.865], [0.0, 0.865]],
-             'depthRange': [0.7, 1.2], 'facingMin': 0.25},
+            {'view': 'side', 'outline': [[-0.371, 0.863], [-0.60, 0.863], [-0.622, 0.872], [-0.632, 0.895], [-0.631, 0.936],
+                                         [-0.52, 1.08], [-0.412, 1.227], [-0.395, 1.237], [-0.371, 1.237]],
+             'seal': 0.009, 'sealMaterial': 'chrome'},
+            {'view': 'side', 'outline': [[-0.358, 0.863], [0.125, 0.863], [0.14, 0.878], [0.14, 1.222], [0.125, 1.237],
+                                         [-0.358, 1.237]], 'seal': 0.009, 'sealMaterial': 'chrome'},
+            {'view': 'side', 'outline': [[0.179, 0.89], [0.19, 0.868], [0.215, 0.86], [0.86, 0.86], [0.895, 0.868],
+                                         [0.912, 0.895], [0.915, 0.92], [0.784, 1.237], [0.765, 1.256], [0.733, 1.262],
+                                         [0.215, 1.262], [0.19, 1.255], [0.179, 1.23]], 'seal': 0.012},
+            # Screen and back light on their clean faces (front/rear rays on the shell:
+            # facing over 0.6 from 0.92 to 1.28, out to x 0.50-0.53 and 0.46-0.47).
+            {'view': 'front', 'outline': [[0.0, 1.27], [0.42, 1.265], [0.46, 1.24], [0.50, 1.13], [0.52, 1.0], [0.53, 0.95],
+                                          [0.51, 0.925], [0.0, 0.925]], 'depthRange': [-0.9, -0.3]},
+            {'view': 'rear', 'outline': [[0.0, 1.27], [0.38, 1.265], [0.43, 1.24], [0.46, 1.15], [0.47, 1.0], [0.46, 0.95],
+                                         [0.43, 0.93], [0.0, 0.93]], 'depthRange': [0.7, 1.2]},
         ],
         'decals': [
             {'view': 'front', 'node': 'headlights', 'circle': [[0.59, 0.62], 0.09], 'material': 'Headlights',
@@ -129,12 +147,12 @@ CAR = {
             # handle came from the drawing, which is a four-door.
             # One long door from just behind the front arch (side photo: its front edge
             # 0.31 m behind the front axle) to the B-pillar.
-            {'view': 'side', 'points': [[-0.84, 0.89], [-0.84, 0.32], [0.18, 0.30], [0.18, 0.89]], 'width': 0.005},
+            {'view': 'side', 'points': [[-0.84, 0.845], [-0.84, 0.32], [0.18, 0.30], [0.18, 0.845]], 'width': 0.005},
             {'view': 'top', 'points': [[-1.84, 0.56], [-0.88, 0.58]], 'width': 0.005},
             {'view': 'side', 'points': [[-1.83, 0.82], [1.88, 0.80]], 'width': 0.008, 'material': 'chrome', 'height': 0.003},
-            {'view': 'side', 'points': [[-0.55, 0.97], [-0.36, 1.24], [0.62, 1.235], [0.70, 1.21], [0.87, 0.89]], 'width': 0.032,
-             'material': 'chrome', 'height': 0.003},
-            {'view': 'side', 'points': [[-0.55, 0.89], [0.86, 0.885]], 'width': 0.01, 'material': 'chrome', 'height': 0.003},
+            # (The chrome strip drawn over the windows and down behind the quarter light,
+            # 3.2 cm wide, and the one along the sills are gone: the photographs have a
+            # thin chrome frame round the door glass only, now the glass's own seal.)
         ],
         # The 968M's bars are chromium-plated blades (rear and side photos), not black:
         # as flat black slabs they read as a floating bracket under the tail.
@@ -142,12 +160,12 @@ CAR = {
             'front': {'z': [0.41, 0.47], 'depth': 0.05, 'wrap': 0.25, 'profile': 'blade', 'material': 'chrome'},
             'rear': {'z': [0.40, 0.46], 'depth': 0.05, 'wrap': 0.25, 'profile': 'blade', 'material': 'chrome'},
         },
-        # The car's windows sit in black rubber (windscreen and back light) while the
-        # door and quarter glass carry a chrome frame: the frame line is drawn rather
-        # than taken for the seal (the seal was chrome on every pane).
+        # The windscreen, back light and quarter light sit in black rubber; the door's
+        # glass in a thin chrome frame (its panes' `sealMaterial`).
         'glassSeal': {'material': 'rubber', 'width': 0.012},
-        # A black mirror on the door's front corner (front photo), not a bright one.
-        'mirror': {'y': -0.70, 'z': 0.94, 'reach': 0.82, 'w': 0.13, 'h': 0.08, 'material': 'trim', 'sides': [1]},
+        # A black mirror on the door below the vent glass's foot (side photograph: its
+        # base at y -0.665, z 0.82-0.88), not a bright one.
+        'mirror': {'y': -0.665, 'z': 0.92, 'reach': 0.82, 'w': 0.13, 'h': 0.08, 'material': 'trim', 'sides': [1]},
         'handles': {'at': [[0.0, 0.84]], 'w': 0.12},
         'wipers': {'arms': [[-0.5, -0.05, -0.85, 0.89], [0.05, 0.5, -0.85, 0.89]]},
         # Plain painted steel wheels with a small chrome cap (side photo).
