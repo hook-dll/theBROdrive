@@ -155,9 +155,10 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     mobileShadows: false,
     starMagnitude: 6,
     mobileStarMagnitude: 6,
-    // The two point slots this rung had went to the cars at half a spot each: +1 spot.
-    vehicleLightSlots: 3,
-    mobileVehicleLightSlots: 3,
+    // Four: the driven car's own two headlamps and two tail lamps, which are never
+    // merged. Fewer, and lit headlamps leave its brake lights dark.
+    vehicleLightSlots: 4,
+    mobileVehicleLightSlots: 4,
     headlightDistanceScale: 1,
   },
   acceptable: {
@@ -171,9 +172,9 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     mobileShadows: false,
     starMagnitude: 7,
     mobileStarMagnitude: 7,
-    // As on retro: two freed point slots, one more spot.
-    vehicleLightSlots: 3,
-    mobileVehicleLightSlots: 3,
+    // Four, as on retro: the driven car's own lamps, all of them.
+    vehicleLightSlots: 4,
+    mobileVehicleLightSlots: 4,
     headlightDistanceScale: 1,
   },
   standard: {
