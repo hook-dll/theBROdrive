@@ -13,10 +13,14 @@ export interface RadioStation {
   readonly url: string;
 }
 
-export const RADIO_STATIONS: readonly RadioStation[] = [
+export const RADIO_RECOMMENDATIONS: readonly RadioStation[] = [
   { label: 'NTS 1', url: 'https://streams.radiomast.io/nts1' },
   { label: 'NTS 2', url: 'https://streams.radiomast.io/nts2' },
+  { label: 'Underground 80s', url: 'https://ice6.somafm.com/u80s-128-mp3' },
+  { label: 'Left Coast 70s', url: 'https://ice6.somafm.com/seventies-128-mp3' },
 ];
+
+export const RADIO_STATIONS = RADIO_RECOMMENDATIONS.slice(0, 2);
 
 /** Listener and car positions in the renderer's current relative world frame. */
 export interface RadioSpatialState {
@@ -54,6 +58,7 @@ export class Radio {
   private readonly exteriorMono: GainNode;
   private readonly exteriorFilter: BiquadFilterNode;
   private readonly panner: PannerNode;
+  private stations: RadioStation[] = [...RADIO_STATIONS];
   private stationIndex = 0;
   private on = false;
   private seated = true;
@@ -114,7 +119,31 @@ export class Radio {
   }
 
   get station(): RadioStation {
-    return RADIO_STATIONS[this.stationIndex]!;
+    return this.stations[this.stationIndex]!;
+  }
+
+  /** Applies the two URLs configured in Settings to this car's radio. */
+  setStationUrls(urls: readonly string[]): void {
+    const next = urls.slice(0, 2).map((rawUrl, index) => {
+      const trimmed = rawUrl.trim();
+      const url = /^https?:\/\//i.test(trimmed) && trimmed.length <= 2048
+        ? trimmed
+        : RADIO_STATIONS[index]!.url;
+      return {
+        label: RADIO_RECOMMENDATIONS.find((entry) => entry.url === url)?.label ?? `Station ${index + 1}`,
+        url,
+      };
+    });
+    while (next.length < 2) next.push(RADIO_STATIONS[next.length]!);
+    const changed = next.some((entry, index) => entry.url !== this.stations[index]?.url);
+    this.stations = next;
+    if (this.stationIndex >= this.stations.length) this.stationIndex = 0;
+    if (changed && this.on) {
+      this.element.pause();
+      this.element.removeAttribute('src');
+      this.resetBackoff();
+      this.sync();
+    }
   }
 
   /** HUD line, or null when the radio has no dashboard to report on. */
@@ -133,7 +162,7 @@ export class Radio {
     if (!this.on) {
       this.on = true;
       this.stationIndex = 0;
-    } else if (this.stationIndex < RADIO_STATIONS.length - 1) {
+    } else if (this.stationIndex < this.stations.length - 1) {
       this.stationIndex++;
     } else {
       this.on = false;

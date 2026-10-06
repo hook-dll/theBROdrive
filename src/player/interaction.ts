@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import type { PhysicsWorld } from '../core/physics';
+import { DAY_LENGTH } from '../game/state';
 import type { CarState, GameWorld, StickerState } from '../game/state';
+import { contractAcceptRefusal, contractDeliveryEffect, contractRewardSticker } from '../contracts/registry';
+import type { DeliveryContext, DeliveryProbe } from '../contracts/types';
+import { TOW_COUPLE_RANGE_M, towEyeWorld, type CarTowField } from '../vehicle/cartow';
 import type { InputFrame } from '../core/input';
 import type {
   Inventory,
@@ -52,7 +56,7 @@ import type { Player } from './player';
 import type { WorldOrigin } from '../world/origin';
 import type { WreckTrunkField } from '../world/wrecktrunks';
 import type { PoiSwitchField } from '../world/poiswitches';
-import type { CourierField } from '../world/couriers';
+import type { CourierField, CourierTrunk } from '../world/couriers';
 import type { BoardableField } from '../story/sitebuild';
 import { STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
 import { uprightStickerRoll } from '../render/stickers';
@@ -331,12 +335,51 @@ function loosePartReservoir(part: PartInstance): Reservoir | null {
   return { label: wants, level: part.litres ?? 0, capacity: container.capacity, wants };
 }
 
+/**
+ * The composition root's view of the world's cars, by id. Interaction knows the
+ * prompt's geometry and the contract probe's needs; it does not own the live
+ * `Vehicle` map, so the three reads it needs are handed in.
+ */
+export interface CarLookup {
+  /** The live `Vehicle` of a car, or null when it is not materialised. */
+  vehicle(carId: string): Vehicle | null;
+  /** Absolute X/Z of a car: its body when materialised, its saved pose otherwise. */
+  position(carId: string): { readonly x: number; readonly z: number } | null;
+  /**
+   * Fills `out` with the ids of the two cars nearest a point in Rapier's own frame
+   * (the same frame `Vehicle.chassis.translation` answers in), nearest first, and
+   * returns how many were written. `out` is the caller's reused array.
+   */
+  nearest(x: number, z: number, out: (string | null)[]): number;
+}
+
+/** The bar action available where the player stands; see `towAction`. */
+interface TowAction {
+  readonly towerId: string;
+  readonly towedId: string;
+  /** False when the two are already coupled and the action is to drop the bar. */
+  readonly hitch: boolean;
+}
+
 interface Resolved {
   target: Target;
   vehicle: Vehicle | null;
   carId: string | null;
   /** Distance from the eye to the car's chassis centre, metres. */
   vehicleDist: number;
+}
+
+/** `DeliveryProbe` with writable fields, so one instance can track the aim. */
+interface MutableDeliveryProbe {
+  targetCourierIndex: number;
+  courierX: number;
+  courierZ: number;
+  drivingCarId: string | null;
+  courierCells: readonly (Item | null)[];
+  carried: readonly Item[];
+  readonly trailerPosition: DeliveryProbe['trailerPosition'];
+  readonly carPosition: DeliveryProbe['carPosition'];
+  readonly car: DeliveryProbe['car'];
 }
 
 function conditionPrefix(part: PartInstance): string {
@@ -447,6 +490,32 @@ export class Interaction {
   private readonly stickerPoint = new THREE.Vector3();
   private readonly stickerNormal = new THREE.Vector3();
   private readonly stickerNormalMatrix = new THREE.Matrix3();
+  /** This tick's car-to-car bar action, or null; see `towAction`. */
+  private towActionValue: TowAction | null = null;
+  /** Reused receiver for the two cars nearest the player, and their eyes. */
+  private readonly towNearest: (string | null)[] = [null, null];
+  private readonly towEyeA = { x: 0, y: 0, z: 0 };
+  private readonly towEyeB = { x: 0, y: 0, z: 0 };
+  private readonly towEyeC = { x: 0, y: 0, z: 0 };
+  private readonly towEyeD = { x: 0, y: 0, z: 0 };
+  /**
+   * The delivery probe handed to contract kinds, reused in place: the prompt that
+   * aims at a courier boot with a contract in hand rebuilds it every tick, and it
+   * must not allocate. Valid only for the call that filled it.
+   */
+  private readonly deliveryProbeValue: MutableDeliveryProbe = {
+    targetCourierIndex: -1,
+    courierX: 0,
+    courierZ: 0,
+    drivingCarId: null,
+    courierCells: [],
+    carried: [],
+    // Arrows, not values: they read the live world when the kind asks, and the
+    // fields above are only the courier and pack this call is about.
+    trailerPosition: (id) => this.trailerPositionOf(id),
+    carPosition: (id) => this.carLookup.position(id),
+    car: (id) => this.world.state.cars[id] ?? null,
+  };
 
   constructor(
     private readonly physics: PhysicsWorld,
@@ -457,8 +526,12 @@ export class Interaction {
     private readonly wreckTrunks: WreckTrunkField,
     private readonly switches: PoiSwitchField,
     private readonly couriers: CourierField,
-    /** The car in reach, WITH its id. Never re-derive the id from geometry. */
+    /** Never re-derive the id from geometry. */
     private readonly getVehicle: () => { carId: string; vehicle: Vehicle } | null,
+    /** The composition root's lookups over the world's cars, by id. */
+    private readonly carLookup: CarLookup,
+    /** The car-to-car tow bars; hitching is a world mutation like a trailer's. */
+    private readonly towField: CarTowField,
     /** Draws a newly placed sticker; the renderer owns the decal meshes. */
     private readonly onStickerPlaced: (carId: string, sticker: StickerState) => void,
     /** Owns the single reusable translucent placement preview. */
@@ -521,6 +594,18 @@ export class Interaction {
     }
 
     const resolved = this.resolve(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
+    // The bar action is settled before the prompt is built from it. A storage cell,
+    // a loose item or a trailer in the aim keeps its own action: the bar is what is
+    // offered when the player is simply standing at the join with nothing to aim at.
+    this.towActionValue = this.towAction();
+    const towTargetKind = resolved.target.kind;
+    if (
+      towTargetKind !== 'none' &&
+      towTargetKind !== 'car-entry' &&
+      towTargetKind !== 'car-body'
+    ) {
+      this.towActionValue = null;
+    }
     const envelope = this.inventory.held?.type === 'sticker_envelope' ? this.inventory.held : null;
     if (envelope) {
       const trying = this.updateStickerMode(
@@ -558,7 +643,8 @@ export class Interaction {
       if (this.inventory.held?.id === this.spentSponge) this.drop(eyeX, eyeY, eyeZ, dirX * 0.25, -1, dirZ * 0.25);
       this.spentSponge = null;
     }
-    const worldActionPressed = mountPressed && !stickerBlocksCar && this.mountHasPriority(resolved.target);
+    const worldActionPressed = mountPressed && !stickerBlocksCar
+      && (this.towActionValue !== null || this.mountHasPriority(resolved.target));
     if (worldActionPressed) {
       const actionResolved = resolved;
       this.mount(actionResolved);
@@ -651,18 +737,19 @@ export class Interaction {
       return null;
     }
 
-    if (input.zoomDelta !== 0) {
-      if (input.sprint) {
-        style.scale = Math.min(
-          STICKER_SCALE_MAX,
-          Math.max(STICKER_SCALE_MIN, Math.round((style.scale - input.zoomDelta * 0.1) * 10) / 10),
-        );
-      } else {
-        style.rollOffset += (input.zoomDelta * Math.PI) / 12;
-      }
+    // The wheel turns it and Shift+wheel sizes it; the touch strip steps the same
+    // notches (core/touch.ts).
+    const sizeSteps = (input.sprint ? -input.zoomDelta : 0) + input.stickerSize;
+    const turnNotches = (input.sprint ? 0 : input.zoomDelta) + input.stickerTurn;
+    if (sizeSteps !== 0) {
+      style.scale = Math.min(
+        STICKER_SCALE_MAX,
+        Math.max(STICKER_SCALE_MIN, Math.round((style.scale + sizeSteps * 0.1) * 10) / 10),
+      );
     }
+    style.rollOffset += (turnNotches * Math.PI) / 12;
     if (mirror) style.mirror = !style.mirror;
-    if (reset) {
+    if (reset || input.stickerReset) {
       style.rollOffset = 0;
       style.scale = 1;
       style.mirror = false;
@@ -716,6 +803,124 @@ export class Interaction {
     }
     const car = this.world.state.cars[target.id];
     return target.side === 'bonnet' ? car?.bonnet ?? null : car?.storage ?? null;
+  }
+
+  /**
+   * Fills the shared probe for one courier and one aim and returns it. The prompt
+   * and the commit both go through here, so what the sentence promises and what F
+   * does are read from the same world at the same moment.
+   */
+  private deliveryProbe(courier: CourierTrunk, cells: readonly (Item | null)[]): DeliveryProbe {
+    const probe = this.deliveryProbeValue;
+    probe.targetCourierIndex = courier.index;
+    probe.courierX = courier.x;
+    probe.courierZ = courier.z;
+    probe.drivingCarId = this.world.state.player.drivingCarId;
+    probe.courierCells = cells;
+    probe.carried = this.inventory.all;
+    return probe;
+  }
+
+  /**
+   * Absolute X/Z of a trailer: the live body while it is materialised (a towed one
+   * always is), the saved pose while it is dormant. State alone is up to two seconds
+   * stale for a moving trailer, which is why the live body wins when there is one.
+   */
+  private trailerPositionOf(id: string): { readonly x: number; readonly z: number } | null {
+    const live = this.trailers.get(id);
+    if (live) {
+      const t = live.rigidBody.translation();
+      return { x: t.x + this.origin.x, z: t.z + this.origin.z };
+    }
+    const saved = this.world.state.trailers[id];
+    return saved ? { x: saved.x, z: saved.z } : null;
+  }
+
+  /**
+   * The car-to-car bar action available where the player stands, or null.
+   *
+   * Read from the two cars NEAREST the player, not from the aim. Hitching is
+   * standing at the join: one car's tail and another's nose, with nothing in
+   * particular to point a crosshair at, which is why a trailer is worked from its
+   * drawbar end too. The pairing is "the two nearest live cars, if one's tow eye is
+   * at the other's and they point the same way"; either order is allowed, so the
+   * tower is whichever car can actually drive — a car with no engine in its bay
+   * cannot pull anything, and the contract's stranded car has exactly that.
+   *
+   * Offered on foot only: seated, the bar is on the far side of the car around the
+   * player, and walking round to work it is the whole gesture.
+   */
+  private towAction(): TowAction | null {
+    if (this.world.state.player.drivingCarId !== null) return null;
+    const p = this.player?.position;
+    if (!p) return null;
+    if (this.carLookup.nearest(p.x, p.z, this.towNearest) < 2) return null;
+    const first = this.towNearest[0];
+    const second = this.towNearest[1];
+    if (!first || !second) return null;
+    // On a bar already: the action is to drop it, and it reads from either end.
+    for (const towedId of [first, second]) {
+      const towerId = this.world.state.cars[towedId]?.towedBy ?? null;
+      if (towerId !== null) return { towerId, towedId, hitch: false };
+    }
+    const a = this.carLookup.vehicle(first);
+    const b = this.carLookup.vehicle(second);
+    if (!a || !b) return null;
+    const qa = a.chassis.rotation();
+    const qb = b.chassis.rotation();
+    const aligned =
+      (2 * (qa.x * qa.z + qa.w * qa.y)) * (2 * (qb.x * qb.z + qb.w * qb.y)) +
+      (1 - 2 * (qa.x * qa.x + qa.y * qa.y)) * (1 - 2 * (qb.x * qb.x + qb.y * qb.y));
+    if (aligned < 0.5) return null;
+    const aRear = towEyeWorld(a, 'rear', this.towEyeA);
+    const bFront = towEyeWorld(b, 'front', this.towEyeB);
+    const aFront = towEyeWorld(a, 'front', this.towEyeC);
+    const bRear = towEyeWorld(b, 'rear', this.towEyeD);
+    // `first` may be either end of the pair; the tower is the driveable one.
+    if (Math.hypot(aRear.x - bFront.x, aRear.z - bFront.z) <= TOW_COUPLE_RANGE_M) {
+      return this.towOrder(first, second);
+    }
+    if (Math.hypot(bRear.x - aFront.x, bRear.z - aFront.z) <= TOW_COUPLE_RANGE_M) {
+      return this.towOrder(second, first);
+    }
+    return null;
+  }
+
+  /**
+   * Picks tower and towed for a pair that is geometrically coupled, preferring the
+   * car with an engine in its bay: the contract's stranded car has none, and a car
+   * that cannot run cannot pull.
+   */
+  private towOrder(towerId: string, towedId: string): TowAction {
+    const driveable = (carId: string): boolean =>
+      (this.world.state.cars[carId]?.bonnet[0] ?? null) !== null;
+    if (driveable(towedId) && !driveable(towerId)) return { towerId: towedId, towedId: towerId, hitch: true };
+    return { towerId, towedId, hitch: true };
+  }
+
+  private towPrompt(action: TowAction): string {
+    const towed = this.world.state.cars[action.towedId];
+    if (!towed) return '';
+    const label = carModel(towed.modelId).label;
+    if (!action.hitch) return `[F] unhitch the tow bar — ${label}`;
+    const tower = this.world.state.cars[action.towerId];
+    const towerLabel = tower ? carModel(tower.modelId).label : 'car';
+    return `[F] hitch the ${label} behind the ${towerLabel}`;
+  }
+
+  private applyTowAction(action: TowAction): void {
+    if (!action.hitch) {
+      this.towField.unhitch(action.towedId);
+      this.sound = 'drop';
+      this.towActionValue = null;
+      return;
+    }
+    const tower = this.carLookup.vehicle(action.towerId);
+    const towed = this.carLookup.vehicle(action.towedId);
+    if (!tower || !towed) return;
+    this.towField.hitch(tower, action.towerId, towed, action.towedId);
+    this.sound = 'mount';
+    this.towActionValue = null;
   }
 
   private isStorageOpen(
@@ -1199,6 +1404,12 @@ export class Interaction {
     const held = this.inventory.held;
     const t = resolved.target;
 
+    // The bar is offered before anything the aim could name, because it is the one
+    // action that is about where the player STANDS rather than what he looks at.
+    // It is cleared whenever the aim named something with its own action (see
+    // `fixedUpdate`), so a boot cell or a trailer in the crosshair keeps its prompt.
+    if (this.towActionValue) return this.towPrompt(this.towActionValue);
+
     if (t.kind === 'light-switch') {
       const entry = this.switches.get(t.id);
       if (!entry) return null;
@@ -1272,9 +1483,9 @@ export class Interaction {
       }
       if (held?.type === 'contract_cargo' && t.owner === 'courier') {
         const courier = this.couriers.get(t.id);
-        if (!courier || courier.index <= held.sourceCourierIndex) {
-          return 'this courier cannot sign its own parcel';
-        }
+        if (!courier) return null;
+        const refusal = contractAcceptRefusal(held, this.deliveryProbe(courier, cells));
+        if (refusal) return refusal;
         return `[F] deliver ${itemLabel(held)} — receive signed envelope`;
       }
       if (
@@ -1581,6 +1792,11 @@ export class Interaction {
     const t = resolved.target;
     const held = this.inventory.held;
 
+    // The bar wins the F key where it is offered: see `promptFor`.
+    if (this.towActionValue) {
+      this.applyTowAction(this.towActionValue);
+      return;
+    }
 
     if (t.kind === 'loose-part') {
       const loose = this.world.state.looseParts[t.partId];
@@ -1654,17 +1870,44 @@ export class Interaction {
       }
       if (!cells[t.cell] && held?.type === 'contract_cargo' && t.owner === 'courier') {
         const courier = this.couriers.get(t.id);
-        if (!courier || courier.index <= held.sourceCourierIndex) {
+        if (!courier) {
           this.sound = 'refused';
           return;
         }
+        const probe = this.deliveryProbe(courier, cells);
+        if (contractAcceptRefusal(held, probe)) {
+          this.sound = 'refused';
+          return;
+        }
+        // The kind decides the payout here: its signature sticker when its own
+        // condition held, the offer's seed-random sticker otherwise. A delivery
+        // never fails.
+        const delivery: DeliveryContext = {
+          item: held,
+          nowS: this.world.state.playedSeconds,
+          timeOfDay: this.world.state.timeOfDay,
+          dayLength: DAY_LENGTH,
+          probe,
+        };
         const envelope: StickerEnvelopeItem = {
           type: 'sticker_envelope',
           id: `${held.id}:signed:${courier.index}`,
-          stickerKind: held.rewardStickerKind,
+          stickerKind: contractRewardSticker(held, delivery),
           completedContractId: held.id,
         };
+        // What the kind consumes besides the cargo: the trailer, car or part the
+        // contract named. Items leaving the courier's own cells go out in the SAME
+        // array as the envelope, and the world deltas follow the `courier_storage`
+        // delta that writes the completed id — so a crash between the halves cannot
+        // pay twice, and the pack edits are the last thing that happens.
+        const effect = contractDeliveryEffect(held, probe, delivery);
         const nextCells = cells.slice();
+        if (effect?.consumeCourierItems) {
+          for (let cell = 0; cell < nextCells.length; cell++) {
+            const stored = nextCells[cell];
+            if (stored && effect.consumeCourierItems.includes(stored.id)) nextCells[cell] = null;
+          }
+        }
         nextCells[t.cell] = envelope;
         this.world.apply({
           t: 'courier_storage',
@@ -1673,6 +1916,12 @@ export class Interaction {
           consumedItemId: held.id,
           completedContractId: held.id,
         });
+        if (effect?.deltas) {
+          for (const delta of effect.deltas) this.world.apply(delta);
+        }
+        if (effect?.consumeCarried) {
+          for (const id of effect.consumeCarried) this.inventory.remove(id);
+        }
         this.inventory.remove(held.id);
         this.sound = 'mount';
         return;

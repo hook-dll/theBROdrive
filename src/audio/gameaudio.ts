@@ -46,6 +46,7 @@ export class GameAudio {
   private readonly trafficVoices = new Map<string, TrafficAudio>();
   private readonly trafficCandidates: TrafficCandidate[] = [];
   private trafficCandidateCount = 0;
+  private radioStationUrls: readonly string[] = ['https://streams.radiomast.io/nts1', 'https://streams.radiomast.io/nts2'];
   private activeRadioId: string | null = null;
   /** Last pose written to the context listener; NaN so the first frame always writes. */
   private listenerX = Number.NaN;
@@ -67,6 +68,10 @@ export class GameAudio {
     this.worldVolume = settings.worldVolume;
     this.mixer.setVolume(settings.masterVolume);
     this.mixer.setBusVolumes(settings.carVolume, settings.worldVolume, settings.radioVolume);
+    this.radioStationUrls = [settings.radioStation1Url, settings.radioStation2Url];
+    for (const radio of this.radios.values()) {
+      radio.setStationUrls(this.radioStationUrls);
+    }
   }
 
   /**
@@ -292,6 +297,7 @@ export class GameAudio {
     let radio = this.radios.get(carId);
     if (!radio) {
       radio = new Radio(this.mixer);
+      radio.setStationUrls(this.radioStationUrls);
       this.radios.set(carId, radio);
     }
     return radio;

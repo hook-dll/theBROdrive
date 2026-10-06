@@ -30,12 +30,15 @@
  *    all — a scrabble of stones and a roar instead.
  *  - Brakes: a low-mid pad rub pulsed once per wheel revolution (see below).
  *
- * One-shots: gear change, suspension jolts, landings, collisions, the starter.
+ * One-shots: gear change, the handbrake lever, suspension jolts, landings, collisions,
+ * the starter.
  *
  * RECORDED (2026-09-28): stones under the tyres on loose ground, the tyre squeal and
  * the crunch of a collision are CC0 recordings (samples.ts); their synthesised versions
- * were heard as a Geiger counter, a whistle and a burst of noise. Everything that has to
- * follow rpm or road speed continuously stays synthesised.
+ * were heard as a Geiger counter, a whistle and a burst of noise. So is the handbrake
+ * lever (2026-10-05): the pawl ratcheting up on a pull, the button's click and the
+ * lever's drop on release. Everything that has to follow rpm or road speed
+ * continuously stays synthesised.
  *
  * After the engine stops: the exhaust and manifold tick and ping as they cool and
  * contract, often at first and more sparsely for minutes after a hard run; an engine
@@ -107,6 +110,12 @@ const GRAVEL_GAIN = 0.22;
 const GRAVEL_HIGHPASS_HZ = 650;
 const GRAVEL_WIDTH = 0.12;
 const CRASH_GAIN = 6;
+/**
+ * The lever is between the seats, an arm's length from the driver: close and dry.
+ * Metered on the car bus with the engine off: 1.4 peaked at -1.3 dBFS and -19 LUFS,
+ * louder than the whole car cruising (-21); 0.8 sits a few dB under it.
+ */
+const HANDBRAKE_GAIN = 0.8;
 /**
  * A tyre sliding on loose ground, against SKID_GAIN (which is levelled for the
  * recorded squeal). The synthetic scrabble is not a -20 LUFS file: at the squeal's
@@ -309,8 +318,16 @@ export class VehicleAudio {
   private textureTarget = 1;
   private textureLeftM = 10;
   private lastCrash: SampleName | null = null;
+  /**
+   * The lever's last position, `null` until the first update after the car is entered:
+   * sitting down in a car parked on its handbrake is not pulling it.
+   */
+  private lastHandbrake: boolean | null = null;
 
   constructor(private readonly mixer: AudioMixer) {
+    // The lever answers the first press of a session, so its takes cannot wait for it.
+    void mixer.samples.load('handbrake-on');
+    void mixer.samples.load('handbrake-off');
     const ctx = mixer.ctx;
 
     // --- places and the cabin ---------------------------------------------------
@@ -584,7 +601,10 @@ export class VehicleAudio {
     this.active = active;
     ramp(this.out.gain, active ? 1 : 0, this.mixer.now, 0.12);
     ramp(this.engineOut.gain, active ? 1 : 0, this.mixer.now, 0.12);
-    if (!active) this.wasRunning = false;
+    if (!active) {
+      this.wasRunning = false;
+      this.lastHandbrake = null;
+    }
   }
 
   /** Cabin (bonnet camera) or outside (chase). Crossfades the shell's filtering. */
@@ -772,6 +792,8 @@ export class VehicleAudio {
       if (this.lastGearLabel !== '') this.shiftClunk();
       this.lastGearLabel = state.gearLabel;
     }
+    if (this.lastHandbrake !== null && state.handbrake !== this.lastHandbrake) this.handbrakeLever(state.handbrake);
+    this.lastHandbrake = state.handbrake;
     if (landing > 0.6) this.landing(landing);
     else if (bump > BUMP_START_MPS && now - this.lastBumpAt > 0.07) {
       this.lastBumpAt = now;
@@ -972,6 +994,14 @@ export class VehicleAudio {
     this.mixer.burst(this.impacts, { gain: 0.05, frequency: 2300, q: 3, decay: 0.03 });
     this.mixer.burst(this.impacts, { gain: 0.07, frequency: 520, q: 1.6, decay: 0.05, delay: 0.03 });
     this.mixer.burst(this.impacts, { gain: 0.1, frequency: 130, q: 0.8, decay: 0.08, type: 'lowpass', colour: 'brown', delay: 0.09 });
+  }
+
+  /** Pulled: the pawl ratcheting over the teeth. Released: the button, then the drop. */
+  private handbrakeLever(on: boolean): void {
+    playOnce(this.mixer, this.mixer.samples, on ? 'handbrake-on' : 'handbrake-off', this.impacts, {
+      gain: HANDBRAKE_GAIN,
+      spread: 0.04,
+    });
   }
 
   dispose(): void {

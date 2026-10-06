@@ -29,7 +29,8 @@ export type SampleName =
   | 'crash-1' | 'crash-2' | 'crash-3'
   | 'door-open' | 'door-close'
   | 'step-gravel' | 'step-soft' | 'step-hard'
-  | 'rifle' | 'shotgun' | 'bolt' | 'shutter';
+  | 'rifle' | 'shotgun' | 'bolt' | 'shutter'
+  | 'handbrake-on' | 'handbrake-off';
 
 const BASE = `${import.meta.env.BASE_URL}audio/`;
 

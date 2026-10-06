@@ -1311,6 +1311,29 @@ body.is-cinematic #ui {
   background: var(--hud-panel-strong);
 }
 
+/* Sticker try-on: under the system row, only while a sticker is on a car in preview. */
+.touch-sticker-row {
+  position: fixed;
+  top: calc(48px + env(safe-area-inset-top));
+  left: 50%;
+  display: none;
+  gap: 8px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.touch-ui.has-sticker:not(.is-driving) .touch-sticker-row {
+  display: flex;
+}
+
+.touch-sticker-row .touch-system-btn {
+  min-width: 44px;
+  height: 40px;
+  border-radius: 20px;
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
 .touch-hint {
   position: fixed;
   left: 50%;

@@ -172,6 +172,7 @@ import {
   TANH_SHARPNESS,
   TRANSFORM_EMIT_INTERVAL,
   TWO_PI,
+  TYRE_COMPOUND_DEFAULT,
   TYRE_COMPOUNDS,
   TYRE_COOLING_AIRFLOW_GAIN,
   TYRE_COOLING_STILL_W_PER_K,
@@ -184,9 +185,12 @@ import {
   WHEEL_MASS_KG,
   WHEEL_REFERENCE_RADIUS,
   clamp,
+  cycleTyreCompoundState,
   FUEL_DENSITY,
   rotateVector,
+  setEnforcedTyreCompound,
   stockRadiatorWater,
+  type TyreCompoundState,
   tyreTemperatureGrip,
   tyreVerticalRate,
   unsprungMass,
@@ -584,8 +588,16 @@ export class Vehicle implements Rebasable {
   private steeringWheelRest = 0;
   /** This car's lamps: beam mode, indicator, lens materials and the beams they cast. */
   private readonly lamps: VehicleLamps;
-  /** One selected compound for every wheel; standard preserves existing handling. */
-  private tyreCompoundIndex = 1;
+  /**
+   * One selected compound for every wheel, plus any force a contract has put on it.
+   * Standard preserves existing handling; the state object lets a kind's forced
+   * compound and the driver's own choice be told apart (see `vehicletuning.ts`).
+   */
+  private readonly tyres: TyreCompoundState = {
+    index: TYRE_COMPOUND_DEFAULT,
+    enforced: null,
+    chosen: TYRE_COMPOUND_DEFAULT,
+  };
   /** Measured full-pedal braking authority, m/s²; see `measuredBrakeDecel`. */
   private measuredBrakeDecelValue = 0;
 
@@ -1040,7 +1052,24 @@ export class Vehicle implements Rebasable {
   }
 
   get tyreCompoundLabel(): string {
-    return TYRE_COMPOUNDS[this.tyreCompoundIndex].label;
+    return TYRE_COMPOUNDS[this.tyres.index].label;
+  }
+
+  /**
+   * True while a contract has forced the compound (bald tyres, kind 11): the driver
+   * cannot cycle it away, and the caller shows why.
+   */
+  get tyreCompoundLocked(): boolean {
+    return this.tyres.enforced !== null;
+  }
+
+  /**
+   * Applies the compound a contract demands, or clears it (null). Idempotent, because
+   * a respawned Vehicle is built without the force and the contract re-applies it on
+   * every tick.
+   */
+  setEnforcedTyreCompound(index: number | null): void {
+    setEnforcedTyreCompound(this.tyres, index);
   }
 
   get speedKmh(): number {
@@ -1084,7 +1113,7 @@ export class Vehicle implements Rebasable {
    * own car cannot take — which is exactly the state a long, hard drive puts it in.
    */
   estimatedLateralAccel(surfaceType: SurfaceType, _speedMps: number): number {
-    const compound = TYRE_COMPOUNDS[this.tyreCompoundIndex];
+    const compound = TYRE_COMPOUNDS[this.tyres.index];
     return (
       GRAVITY *
       SURFACES[surfaceType].mu *
@@ -1111,7 +1140,7 @@ export class Vehicle implements Rebasable {
    * brakes, or the tyres where the tyres give out first.
    */
   estimatedBrakeDecel(surfaceType: SurfaceType): number {
-    const compound = TYRE_COMPOUNDS[this.tyreCompoundIndex];
+    const compound = TYRE_COMPOUNDS[this.tyres.index];
     return Math.min(
       this.model.brakeDecelG * GRAVITY,
       FOOT_BRAKE_GRIP_RATIO *
@@ -1262,8 +1291,8 @@ export class Vehicle implements Rebasable {
    * Bald -> standard -> experimental -> experimental2 -> bald, applied to every wheel
    * on the next step. Not persisted: a reload or a change of car is back on standard.
    */
-  cycleTyreCompound(): void {
-    this.tyreCompoundIndex = (this.tyreCompoundIndex + 1) % TYRE_COMPOUNDS.length;
+  cycleTyreCompound(): boolean {
+    return cycleTyreCompoundState(this.tyres);
   }
 
   /** Rebuilds stats, drivetrain, controller and meshes from the model and its parts. */
@@ -2233,7 +2262,7 @@ export class Vehicle implements Rebasable {
 
     // Compound first: the pedal's demand is sized against the grip the tyres have,
     // so it has to know which tyres are fitted before it can ask for anything.
-    const compound = TYRE_COMPOUNDS[this.tyreCompoundIndex];
+    const compound = TYRE_COMPOUNDS[this.tyres.index];
     // The tyre's own coefficient, shared by drive, braking and cornering: see
     // `tyreCarGrip`, and the note on `SurfaceProps.mu` for why there is one.
     const tyreCarGrip = this.tyreCarGrip(mass);

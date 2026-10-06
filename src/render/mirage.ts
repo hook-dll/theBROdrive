@@ -462,6 +462,28 @@ export class DistantMirage {
     this.root.position.set(this.eventX - this.origin.x, this.eventY, this.eventZ - this.origin.z);
   }
 
+  /**
+   * Read-only look at the vessel the player is being shown right now, or null. The
+   * photograph's subject test reads this so it can never credit an apparition that is
+   * not on screen; nothing here changes what is drawn.
+   */
+  visibleSubject(): {
+    readonly encounterIndex: number;
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+    readonly opacity: number;
+  } | null {
+    if (!this.root.visible || this.previewActive || this.activeEncounter < 0) return null;
+    return {
+      encounterIndex: this.activeEncounter,
+      x: this.eventX,
+      y: this.eventY,
+      z: this.eventZ,
+      opacity: this.material.opacity,
+    };
+  }
+
   /** Direct, deterministic presentation path used by the isolated mirage laboratory. */
   showPreview(
     family: DistantMirageFamily,

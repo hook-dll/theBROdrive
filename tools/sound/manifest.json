@@ -28,6 +28,8 @@
   {"name": "shotgun", "id": 473846, "kind": "once", "start": 0, "end": 2.0, "fadeIn": 0.002, "fadeOut": 0.5, "lufs": -14, "kbps": 32},
   {"name": "bolt", "id": 370345, "kind": "once", "start": 1.75, "end": 3.35, "fadeIn": 0.002, "fadeOut": 0.1, "lufs": -14, "kbps": 32},
   {"name": "shutter", "id": 520684, "kind": "once", "start": 0.7, "end": 1.35, "fadeIn": 0.002, "fadeOut": 0.05, "lufs": -14, "kbps": 32},
+  {"name": "handbrake-on", "id": 818295, "kind": "once", "start": 0.85, "end": 1.32, "highpass": 60, "fadeIn": 0.002, "fadeOut": 0.06, "lufs": -14, "kbps": 32},
+  {"name": "handbrake-off", "id": 818295, "kind": "once", "start": 3.12, "end": 4.1, "highpass": 40, "fadeIn": 0.002, "fadeOut": 0.12, "lufs": -14, "kbps": 32},
   {"name": "raven", "id": 572720, "kind": "hits", "start": 0.5, "end": 5.0, "count": 5, "hitLength": 0.5, "minGap": 0.4, "highpass": 250, "lufs": -14, "kbps": 32},
   {"name": "hawk", "id": 479610, "kind": "hits", "count": 3, "hitLength": 1.8, "minGap": 1.5, "highpass": 300, "lufs": -14, "kbps": 32},
   {"name": "sparrow", "id": 670176, "kind": "hits", "count": 8, "hitLength": 0.25, "minGap": 0.3, "highpass": 1500, "lufs": -14, "kbps": 32},

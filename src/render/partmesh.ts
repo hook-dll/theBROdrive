@@ -1990,6 +1990,58 @@ function buildContractParcelInto(b: MeshBuilder): void {
   b.box('contract_parcel_label', 0.15, 0.075, 0.006, label, [0.045, 0.025, 0.088]);
 }
 
+/** A heavy crate: a wooden box with corner slats and a paper label. */
+function buildContractCrateInto(b: MeshBuilder): void {
+  const wood = flat(0x7a5533, 0.94);
+  const slat = flat(0x5e4028, 0.94);
+  const paper = flat(0xd9c8a5, 0.9);
+  b.box('contract_crate_body', 0.46, 0.36, 0.36, wood, [0, 0, 0]);
+  b.box('contract_crate_slat_v', 0.03, 0.38, 0.38, slat, [-0.205, 0, 0]);
+  b.box('contract_crate_slat_v', 0.03, 0.38, 0.38, slat, [0.205, 0, 0]);
+  b.box('contract_crate_slat_h', 0.48, 0.03, 0.38, slat, [0, -0.145, 0]);
+  b.box('contract_crate_label', 0.18, 0.1, 0.006, paper, [0.06, 0.06, 0.181]);
+}
+
+/** A valve radio: a wooden shell, a face plate, a dial and a speaker grille. */
+function buildContractRadioInto(b: MeshBuilder): void {
+  const shell = flat(0x6b4a2f, 0.85);
+  const face = flat(0xd8c9a8, 0.8);
+  const dark = flat(0x2b2320, 0.6);
+  const metal = cond(0xb9a06a, 0.7, 0.45);
+  b.box('contract_radio_body', 0.4, 0.26, 0.18, shell, [0, 0, 0]);
+  b.box('contract_radio_face', 0.34, 0.2, 0.02, face, [0, 0, 0.095]);
+  b.cylinder('contract_radio_dial', 0.06, 0.06, 0.02, 16, dark, [-0.11, 0.02, 0.107], AXIS_Z);
+  b.box('contract_radio_dial_pin', 0.008, 0.05, 0.006, metal, [-0.11, 0.02, 0.118]);
+  b.box('contract_radio_grille', 0.16, 0.14, 0.012, dark, [0.09, 0, 0.106]);
+  b.box('contract_radio_handle', 0.16, 0.02, 0.02, metal, [0, 0.15, 0]);
+}
+
+/** A film can lying on its side, hub visible at the end. */
+function buildContractFilmCanInto(b: MeshBuilder): void {
+  const can = cond(0x9aa0a6, 0.7, 0.35);
+  const lid = cond(0xc9ccce, 0.6, 0.3);
+  const label = flat(0xd9c8a5, 0.9);
+  b.cylinder('contract_film_body', 0.108, 0.108, 0.16, 18, can, [0, 0, 0], AXIS_Z);
+  b.cylinder('contract_film_lid', 0.112, 0.112, 0.02, 18, lid, [0, 0, 0.09], AXIS_Z);
+  b.cylinder('contract_film_hub', 0.028, 0.028, 0.2, 12, can, [0, 0, 0], AXIS_Z);
+  b.box('contract_film_label', 0.14, 0.1, 0.006, label, [0, 0, 0.113]);
+}
+
+/** A medical thermo box: an insulated carrier with a lid and a red cross. */
+function buildContractThermoInto(b: MeshBuilder): void {
+  const shell = flat(0x2f6f8f, 0.85);
+  const lid = flat(0x3f88a8, 0.8);
+  const latch = cond(0xc9ccce, 0.6, 0.4);
+  const white = flat(0xf2f2f2, 0.7);
+  const red = flat(0xc0392b, 0.7);
+  b.box('contract_thermo_body', 0.42, 0.3, 0.3, shell, [0, 0, 0]);
+  b.box('contract_thermo_lid', 0.44, 0.06, 0.32, lid, [0, 0.175, 0]);
+  b.box('contract_thermo_handle', 0.16, 0.03, 0.03, latch, [0, 0.225, 0]);
+  b.box('contract_thermo_panel', 0.16, 0.16, 0.006, white, [0, 0, 0.151]);
+  b.box('contract_thermo_cross_v', 0.04, 0.13, 0.008, red, [0, 0, 0.153]);
+  b.box('contract_thermo_cross_h', 0.13, 0.04, 0.008, red, [0, 0, 0.153]);
+}
+
 function buildStickerEnvelopeInto(b: MeshBuilder): void {
   const paper = flat(0xd8c8ad, 0.9);
   const fold = flat(0xb9a78c, 0.92);
@@ -2153,8 +2205,22 @@ export function createItemMesh(item: Item): THREE.Object3D {
       return createPocketWatchMesh();
     case 'postcard':
       return createPostcardMesh();
-    case 'contract_cargo':
-      return buildGroup(itemBlueprint('contract_parcel', buildContractParcelInto).instructions);
+    case 'contract_cargo': {
+      // The wave-1 kinds each get their own cheap primitive shape so the cargo is
+      // recognisable in the hand and the boot. Wave-2 kinds fall back to the parcel.
+      switch (item.contractKind) {
+        case 'heavy_crate':
+          return buildGroup(itemBlueprint('contract_crate', buildContractCrateInto).instructions);
+        case 'fragile_radio':
+          return buildGroup(itemBlueprint('contract_radio', buildContractRadioInto).instructions);
+        case 'urgent_film':
+          return buildGroup(itemBlueprint('contract_film_can', buildContractFilmCanInto).instructions);
+        case 'medical_thermo':
+          return buildGroup(itemBlueprint('contract_thermo_box', buildContractThermoInto).instructions);
+        default:
+          return buildGroup(itemBlueprint('contract_parcel', buildContractParcelInto).instructions);
+      }
+    }
     case 'sticker_envelope':
       return buildGroup(itemBlueprint('sticker_envelope', buildStickerEnvelopeInto).instructions);
   }

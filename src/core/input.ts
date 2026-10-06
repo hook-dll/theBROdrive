@@ -59,6 +59,14 @@ export interface InputFrame {
   lookPitch: number;
   /** Wheel notches since the last frame. Positive zooms out. */
   zoomDelta: number;
+  /**
+   * Sticker try-on steps from the touch buttons, taps consumed once: turn by -1/+1
+   * notches, size by -1/+1 steps, back upright at catalogue size. The desktop does
+   * the same with the wheel, Shift+wheel and the right button.
+   */
+  stickerTurn: number;
+  stickerSize: number;
+  stickerReset: boolean;
   /** Toggle precise control: tap, consumed once by the settings owner. */
   togglePreciseSteer: boolean;
   /** Cycles autopilot: sleeper -> hurried -> frantic -> off; edge-triggered. */
@@ -99,6 +107,9 @@ export function emptyInput(): InputFrame {
     lookYaw: 0,
     lookPitch: 0,
     zoomDelta: 0,
+    stickerTurn: 0,
+    stickerSize: 0,
+    stickerReset: false,
     togglePreciseSteer: false,
     preciseSteering: false,
   };
@@ -568,6 +579,9 @@ export class InputReader {
     f.lookYaw = steerWithMouse ? drag?.yaw ?? 0 : this.yawDelta + (drag?.yaw ?? 0);
     f.lookPitch = steerWithMouse ? drag?.pitch ?? 0 : this.pitchDelta + (drag?.pitch ?? 0);
     f.zoomDelta = this.wheelDelta + (this.touch?.consumeZoom(dt) ?? 0);
+    f.stickerTurn = taps?.stickerTurn ?? 0;
+    f.stickerSize = taps?.stickerSize ?? 0;
+    f.stickerReset = taps?.stickerReset === true;
     this.yawDelta = 0;
     this.pitchDelta = 0;
     this.rawDX = 0;

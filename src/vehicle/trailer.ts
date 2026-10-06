@@ -5,7 +5,7 @@ import { WorldOrigin, type Rebasable, type RebaseShift } from '../world/origin';
 import { SURFACES, SurfaceType } from '../core/surfaces';
 import type { GameWorld, TrailerState } from '../game/state';
 import type { Vehicle, WheelSprayState } from './vehicle';
-import { LONGITUDINAL_PEAK_U } from './vehicletuning';
+import { IMPACT_UNEXPLAINED_FLOOR_MPS, LONGITUDINAL_PEAK_U } from './vehicletuning';
 import { createTrailerModel, type TrailerFit } from '../render/trailermodel';
 
 /**
@@ -194,6 +194,27 @@ const PROP_FOOT_HALF: readonly [number, number, number] = [0.1, 0.02, 0.1];
 const CRATE_HALF: readonly [number, number, number] = [0.7, 0.45, 1.1];
 const CRATE_CENTRE_Y = BED_HALF[1] + CRATE_HALF[1];
 
+/**
+ * An oversize load: a bed-length pile of pipes or a pair of beams that overhangs
+ * BOTH ends of the 2.8 m bed. Only a contract trailer carries one.
+ *
+ * The load is drawn as a real collider rather than decoration, which is the point of
+ * the kind: the overhang can take a traffic car or a rock, and a blow that slows the
+ * trailer is what voids the special reward. Its own mass rides the existing bed
+ * payload path (`cargoKg`), so the car in front feels it through the tow ball exactly
+ * like any other load.
+ */
+const LOAD_RADIUS = 0.19;
+/** Gap between the pipe centres, so three pipes span about 1.1 m. */
+const LOAD_PIPE_SPREAD = 0.38;
+
+/**
+ * The oversize load's own look: bright sawn metal against the dark bed, so the
+ * overhang reads from the driver's seat. Same shader features as the crate and the
+ * steel, so it links the program the trailer warm-up already compiles.
+ */
+const matLoad = new THREE.MeshStandardMaterial({ color: 0x9e988c, roughness: 0.55, metalness: 0.35 });
+
 /** Wheel spin is kept inside one turn, so a long haul cannot lose float precision. */
 const TWO_PI = Math.PI * 2;
 
@@ -287,6 +308,18 @@ export class Trailer implements Rebasable {
   private readonly wheelMeshes: THREE.Mesh[] = [];
   private readonly drawbar: THREE.Mesh;
   private readonly crate: THREE.Mesh;
+  /**
+   * Unexplained speed loss of the trailer this step, m/s, and the two numbers it
+   * needs: the horizontal speed at the end of the previous step and what this
+   * step's own brakes could explain. Mirrors `Vehicle.lastImpact`.
+   */
+  private readonly impactState = { severityMps: 0 };
+  private impactThisStep = false;
+  private prevSpeedMps = 0;
+  private prevSpeedKnown = false;
+  private ownDecelMps2 = 0;
+  /** dt of the step whose physics `postStep` will read; set by `fixedUpdate`. */
+  private lastStepDt = 0;
   /** Prop stand: one collider and two meshes, all live only while uncoupled. */
   private readonly propCollider: RAPIER.Collider;
   private readonly propMeshes: THREE.Mesh[] = [];
@@ -450,6 +483,42 @@ export class Trailer implements Rebasable {
     this.crate.castShadow = true;
     this.root.add(this.crate);
 
+    // An oversize load (contract kinds 7): a real collider on the overhang plus the
+    // meshes that show it. The crate above is drawn for ordinary cargo only.
+    const load = state.load;
+    if (load) {
+      const [lx, ly, lz] = load.halfExtents;
+      const centreY = BED_HALF[1] + ly;
+      physics.world.createCollider(
+        RAPIER.ColliderDesc.cuboid(lx, ly, lz)
+          .setTranslation(0, centreY, 0)
+          .setDensity(0)
+          .setFriction(0.6)
+          .setRestitution(0.02),
+        this.body,
+      );
+      if (load.kind === 'pipes') {
+        // Three tubes lying along the bed, which is what makes it read as a pipe
+        // bundle rather than a crate. One shared cross-section per tube.
+        const geo = new THREE.CylinderGeometry(LOAD_RADIUS, LOAD_RADIUS, lz * 2, 10);
+        geo.rotateX(Math.PI / 2);
+        this.disposables.push(geo);
+        for (const offset of [-LOAD_PIPE_SPREAD, 0, LOAD_PIPE_SPREAD]) {
+          const mesh = new THREE.Mesh(geo, matLoad);
+          mesh.position.set(offset, BED_HALF[1] + LOAD_RADIUS, 0);
+          mesh.castShadow = true;
+          this.root.add(mesh);
+        }
+      } else {
+        const geo = new THREE.BoxGeometry(lx * 2, ly * 2, lz * 2);
+        this.disposables.push(geo);
+        const mesh = new THREE.Mesh(geo, matLoad);
+        mesh.position.set(0, centreY, 0);
+        mesh.castShadow = true;
+        this.root.add(mesh);
+      }
+    }
+
     // The prop stand's leg and foot, matching the collider above.
     const legGeo = new THREE.BoxGeometry(PROP_LEG_HALF[0] * 2, PROP_LEG_HALF[1] * 2, PROP_LEG_HALF[2] * 2);
     const footGeo = new THREE.BoxGeometry(PROP_FOOT_HALF[0] * 2, PROP_FOOT_HALF[1] * 2, PROP_FOOT_HALF[2] * 2);
@@ -494,6 +563,15 @@ export class Trailer implements Rebasable {
   /** Total mass on the road: tare plus whatever is on the bed. */
   get massKg(): number {
     return TRAILER_TARE_KG + this.state.cargoKg;
+  }
+
+  /**
+   * Non-null during the step that classified the previous solve as a collision.
+   * Same contract as `Vehicle.lastImpact`, which is what lets the trailer cargo
+   * kinds read a blow the player put through the tow ball.
+   */
+  get lastImpact(): { readonly severityMps: number } | null {
+    return this.impactThisStep ? this.impactState : null;
   }
 
   /** True when a world-space sphere touches the trailer bed's oriented box. */
@@ -685,6 +763,10 @@ export class Trailer implements Rebasable {
    */
   fixedUpdate(dt: number, carBrake = 0): void {
     const wheels = this.controller.numWheels();
+    // What this step's own braking can explain, for the impact classification in
+    // `postStep`: the mirror of the car's "unexplained speed loss" (vehicle.ts).
+    this.ownDecelMps2 = 0;
+    this.lastStepDt = dt;
     if (wheels > 0) {
       // Coupled: the pedal, but never less than rolling resistance — the tyres are
       // always dragging a little, and that little is what keeps the ball quiet.
@@ -694,6 +776,7 @@ export class Trailer implements Rebasable {
             Math.min(1, Math.max(0, carBrake)) * SERVICE_BRAKE_DECEL,
           )
         : PARK_BRAKE_DECEL;
+      this.ownDecelMps2 = decel;
       // Impulse per wheel for this step: see the brake note at the top of the file.
       const impulse = (decel * this.massKg * dt) / wheels;
       for (let i = 0; i < wheels; i++) this.controller.setWheelBrake(i, impulse);
@@ -854,6 +937,27 @@ export class Trailer implements Rebasable {
     this.enforceHitch();
     const t = this.body.translation();
     const r = this.body.rotation();
+
+    // IMPACT, the same way the car classifies one: horizontal speed the trailer's own
+    // brakes and rolling resistance cannot account for. A trailer has no tyre model to
+    // subtract, so `ownDecelMps2` IS its whole budget — which is why a hard stop the
+    // player asked for is not an impact while a rock is. Blind to a blow that jolts
+    // the load without slowing the trailer (a side swipe from behind at matched speed).
+    const lv = this.body.linvel();
+    const speed = Math.hypot(lv.x, lv.z);
+    this.impactThisStep = false;
+    if (this.prevSpeedKnown && this.lastStepDt > 0) {
+      const severity =
+        this.prevSpeedMps - speed - this.ownDecelMps2 * this.lastStepDt
+        - IMPACT_UNEXPLAINED_FLOOR_MPS;
+      if (severity > 0) {
+        this.impactThisStep = true;
+        this.impactState.severityMps = severity;
+      }
+    }
+    this.prevSpeedMps = speed;
+    this.prevSpeedKnown = true;
+
     if (!this.snapshotPrimed) {
       this.prevPos.set(t.x, t.y, t.z);
       this.prevQuat.set(r.x, r.y, r.z, r.w);
@@ -893,7 +997,7 @@ export class Trailer implements Rebasable {
       mesh.rotation.x = (this.controller.wheelRotation(i) ?? 0) % TWO_PI;
     }
 
-    this.crate.visible = this.state.cargoKg > 0;
+    this.crate.visible = this.state.cargoKg > 0 && this.state.load === undefined;
   }
 
   /** Pushes the current pose into state, so a save puts the trailer back here. */
@@ -967,11 +1071,17 @@ export class Trailer implements Rebasable {
     const cargo = this.state.cargoKg;
     const mass = TRAILER_TARE_KG + cargo;
     const tareComY = -0.35 * BED_HALF[1];
-    const comY = (TRAILER_TARE_KG * tareComY + cargo * CRATE_CENTRE_Y) / mass;
+    // Cargo rides at the crate's centre; an oversize load rides at its own, and its
+    // box is what the inertia is taken about, so the long load resists yaw in a way
+    // the square crate does not.
+    const load = this.state.load;
+    const cargoHalfY = load ? load.halfExtents[1] : CRATE_HALF[1];
+    const cargoComY = BED_HALF[1] + cargoHalfY;
+    const comY = (TRAILER_TARE_KG * tareComY + cargo * cargoComY) / mass;
 
-    const hx = BED_HALF[0];
-    const hy = BED_HALF[1] + (cargo > 0 ? CRATE_HALF[1] : 0);
-    const hz = BED_HALF[2];
+    const hx = load ? load.halfExtents[0] : BED_HALF[0];
+    const hy = BED_HALF[1] + (cargo > 0 ? cargoHalfY : 0);
+    const hz = load ? load.halfExtents[2] : BED_HALF[2];
     this.body.setAdditionalMassProperties(
       mass,
       { x: 0, y: comY, z: 0 },
@@ -1029,6 +1139,14 @@ export class TrailerField {
       mesh.visible = false;
       this.warmup.add(mesh);
     }
+    // The oversize load's material shares the crate's shader features, but a contract
+    // trailer is spawned long after boot, so its one instance is compiled here with the
+    // rest rather than the first time a pipe bundle is drawn.
+    const load = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), matLoad);
+    load.castShadow = false;
+    load.receiveShadow = false;
+    load.visible = false;
+    this.warmup.add(load);
     this.scene.add(this.warmup);
   }
 
@@ -1131,6 +1249,20 @@ export class TrailerField {
 
   get(id: string): Trailer | null {
     return this.trailers.get(id) ?? null;
+  }
+
+  /**
+   * Drops a trailer that left authoritative state — a contract trailer handed over
+   * at a courier. `updateActive` reconciles FROM state, so a trailer missing there
+   * would never be visited again and its body, meshes and collider map would stand
+   * in the world for the rest of the session.
+   */
+  remove(id: string): void {
+    const trailer = this.trailers.get(id);
+    if (!trailer) return;
+    this.removeColliderHandles(trailer);
+    this.trailers.delete(id);
+    trailer.dispose();
   }
 
   /** Visits each live trailer without allocating a temporary collection. */

@@ -4,6 +4,19 @@
 
 ### Added
 
+- CONTRACT KINDS (`src/contracts/`). All twenty catalogue kinds are offered by
+  couriers, each with its own condition and signature sticker: heavy crate, fragile
+  radio, urgent film, medical thermo box, trailer equipment, oversize load, one tank,
+  don't overheat, clean delivery, bald tyres, sand route and desert slalom gates,
+  long haul, night courier, convoy escort, towing (new car-to-car tow bar), car
+  transfer, part order and photo errand (photographs now carry subject evidence).
+  See `contracts.md`.
+- HANDBRAKE SOUND: the lever's ratchet on a pull and the button-and-drop on release,
+  a CC0 recording (Freesound 818295), heard from the lever between the seats.
+- Touch sticker try-on strip (turn, size, reset) shown while a sticker is previewed.
+- Dev menu "Spawn item" offers a signed envelope of every sticker design (30).
+- In-game radio settings now provide two editable station URLs, with recommended NTS 1,
+  NTS 2, Underground 80s and Left Coast 70s streams.
 - LOCALISATION (`src/i18n/`). `t(key)` looks a message up in the player's language: the
   first of the browser's languages with a table, English otherwise, `?lang=xx` to force
   one. Twelve tables: en, ru, es, pt, fr, de, it, pl, tr, zh, ja, ko. The postcard's note

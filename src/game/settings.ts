@@ -388,6 +388,8 @@ export interface Settings {
    * and Radio are each a share of it.
    */
   masterVolume: number;
+  /** Share of the game sound given to the in-car radio, 0..1. */
+  radioVolume: number;
   /**
    * Share of the game sound given to the car being driven (engine, tyres, wind over
    * the body, its knocks and clunks), 0..1. Scaled by `masterVolume`.
@@ -398,8 +400,10 @@ export interface Settings {
    * other traffic), 0..1. Scaled by `masterVolume`.
    */
   worldVolume: number;
-  /** Car-radio share of the master, 0..1. Staged to match the game sound at equal settings. */
-  radioVolume: number;
+  /** Stream URL for the first in-car radio preset. */
+  radioStation1Url: string;
+  /** Stream URL for the second in-car radio preset. */
+  radioStation2Url: string;
   /** Action id -> key codes, overriding the defaults. Absent = default. */
   keyBindings: Record<string, readonly string[]>;
   /**
@@ -520,6 +524,8 @@ export const DEFAULT_SETTINGS: Settings = {
   carVolume: DEFAULT_CAR_VOLUME,
   worldVolume: DEFAULT_WORLD_VOLUME,
   radioVolume: DEFAULT_RADIO_VOLUME,
+  radioStation1Url: 'https://streams.radiomast.io/nts1',
+  radioStation2Url: 'https://streams.radiomast.io/nts2',
   // Absent entries mean "use the default binding", so the empty record is the
   // correct default: it can never diverge from BINDABLE_ACTIONS. Shared by
   // design — Settings objects are replaced wholesale through world.apply
@@ -619,6 +625,12 @@ export function sanitizeSettings(raw: unknown): Settings {
       ? Math.min(1, Math.max(0, value))
       : fallback;
 
+  const radioUrl = (value: unknown, fallback: string): string => {
+    if (typeof value !== 'string') return fallback;
+    const url = value.trim();
+    return /^https?:\/\//i.test(url) && url.length <= 2048 ? url : fallback;
+  };
+
   const settings: Settings = {
     // Anything that is not exactly the automatic string is manual: the
     // historical mode, and the safe fallback for garbage input.
@@ -629,6 +641,8 @@ export function sanitizeSettings(raw: unknown): Settings {
     carVolume: unitInterval(obj.carVolume, DEFAULT_CAR_VOLUME),
     worldVolume: unitInterval(obj.worldVolume, DEFAULT_WORLD_VOLUME),
     radioVolume: unitInterval(obj.radioVolume, DEFAULT_RADIO_VOLUME),
+    radioStation1Url: radioUrl(obj.radioStation1Url, 'https://streams.radiomast.io/nts1'),
+    radioStation2Url: radioUrl(obj.radioStation2Url, 'https://streams.radiomast.io/nts2'),
     keyBindings: {},
     // Anything unrecognised is standard, so an old save (which has no such field)
     // keeps the look it was made with.
