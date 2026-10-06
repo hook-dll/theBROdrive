@@ -26,9 +26,9 @@ import { GRAPHICS_TIERS, streetLightSlotsFor, type GraphicsQuality } from '../ga
  * (see the recompile note above), so the low tier simply keeps fewer: two lit
  * pools, one each way, which is a dimmer night rather than a different one.
  *
- * `blessing` gets eight — four each way — so a lit road recedes further ahead of
- * you before the pools stop. It is the same per-pixel cost story in reverse: a
- * machine with fill rate to spare can afford two more lights everywhere.
+ * The street lamps are gone, so the sources left are the mast huts' switchable room
+ * lights. `blessing` therefore keeps two as well and spends the rest on car lamps
+ * (`vehicleLightSlots`); `standard` still keeps six.
  */
 /** Past this a lamp cannot light anything the camera sees well enough to matter. */
 const CUTOFF_DISTANCE = 300;

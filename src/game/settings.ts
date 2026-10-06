@@ -194,10 +194,9 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     mobileStarMagnitude: 7.5,
     vehicleLightSlots: 6,
     // A phone gets two thirds of the desktop budget here, not half. The driven car holds
-    // three (two headlamps, one merged tail glow) and every other car's lamp pair is one
-    // merged beam, so the desktop six keeps three more cars' headlamps projected and the
-    // phone's four one more: the difference between traffic that reads as traffic and
-    // traffic that is only a lens flare.
+    // four (two headlamps, two tail lamps — tail lamps are never merged) and every other
+    // car's headlamp pair is one merged beam, so the desktop six keeps two more cars'
+    // headlamps projected, and the phone's four only the driven car's own.
     mobileVehicleLightSlots: 4,
     streetLightSlots: 6,
     mobileStreetLightSlots: 4,
@@ -222,16 +221,20 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     // and so sat on the wrong side of that edge, which is why a machine that ran the
     // standard rung at 120 frames a second ran this one at 22-26. Spots are also the
     // dearer half — twelve spots alone cost 13.2 ms where twelve points cost 6.0 — so the
-    // cut is taken out of the spots: eight keeps five other cars' beams projected, and the lamp
-    // pools, which are what a lit road actually reads by, are unchanged. The tier keeps
-    // everything else it was chosen for: the supersampling, the sky.
-    vehicleLightSlots: 8,
-    // Capped at the desktop STANDARD budget. A phone at 1.44 megapixels is not a desktop;
-    // six spots and six points keep the lit road receding and three other cars' beams
-    // drawn, which is everything a phone screen can show anyway.
-    mobileVehicleLightSlots: 6,
-    streetLightSlots: 6,
-    mobileStreetLightSlots: 6,
+    // cut is taken out of the spots. The tier keeps everything else it was chosen for:
+    // the supersampling, the sky.
+    //
+    // THE POINTS WENT TO THE CARS. Street lamps and lit forecourts are gone; the only
+    // point sources left are the switchable room lights in the mast huts, and one pool
+    // each way covers a hut you stand in. The four points freed, at roughly half a
+    // spot's cost each, buy three spots at the same total — 11 + 2 = 13, still on the
+    // cheap side of the cliff — so traffic beams and unmerged tail lamps both fit.
+    vehicleLightSlots: 11,
+    // Two thirds of a desktop again, as on the standard rung; the phone's points are
+    // cut the same way, so it spends 8 + 2 where it spent 6 + 6.
+    mobileVehicleLightSlots: 8,
+    streetLightSlots: 2,
+    mobileStreetLightSlots: 2,
     headlightDistanceScale: 3,
   },
 };

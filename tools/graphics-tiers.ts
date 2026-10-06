@@ -68,8 +68,8 @@ const COST_KEYS = [
   'mobileStarMagnitude',
   'vehicleLightSlots',
   'mobileVehicleLightSlots',
-  'streetLightSlots',
-  'mobileStreetLightSlots',
+  // Not the point slots: with the street lamps gone they only serve the mast huts' room
+  // lights, and the top rung gave its points to the car lamps (settings.ts, blessing).
 ] as const;
 const WILLINGNESS_KEYS = ['supersample', 'headlightDistanceScale'] as const;
 
