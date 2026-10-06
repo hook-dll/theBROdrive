@@ -86,15 +86,15 @@ const ROUGH_HI_GAIN = 0.78;
  * to swim under an on-foot camera even though its texture and heat haze were static.
  */
 const BUMP_AMP: Record<SurfaceType, number> = {
-  [SurfaceType.Asphalt]: 0.034,
-  [SurfaceType.CrackedAsphalt]: 0.048,
+  [SurfaceType.Asphalt]: 0.06,
+  [SurfaceType.CrackedAsphalt]: 0.066,
   // The loose surfaces keep more of it: a gravel track and a rock shelf really are
   // this uneven at a few metres of wavelength, and it is what makes them read as a
   // track rather than a painted road.
-  [SurfaceType.Gravel]: 0.072,
+  [SurfaceType.Gravel]: 0.08,
   [SurfaceType.Sand]: 0.05,
   [SurfaceType.Rock]: 0.09,
-  [SurfaceType.Concrete]: 0.018,
+  [SurfaceType.Concrete]: 0.055,
   // Between the district's packed course and the open desert: the grader's spoil is
   // coarser than the road it came off and nothing has ever rolled it flat.
   [SurfaceType.LooseShoulder]: 0.08,

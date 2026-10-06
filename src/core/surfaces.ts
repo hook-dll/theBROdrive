@@ -159,8 +159,8 @@ export interface SurfaceProps {
    * cannot crumple a dune, so it is the knob to turn when the desert must feel rougher
    * without the landscape changing shape at all.
    *
-   * Zero for the sealed surfaces: a graded road has no hummocks. What a road has in
-   * this band is its own collider's 3.33 m bump octave.
+   * Sealed surfaces carry a little of it too, below gravel's: an old desert road has
+   * settled and heaved under its own traffic, and without it the road felt like glass.
    */
   readonly hummock: number;
   /**
@@ -206,11 +206,11 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     rollingResistance: 0.013,
     deformationDrag: 0,
     roughness: 0.012,
-    microRelief: 0,
-    hummock: 0,
+    microRelief: 0.012,
+    hummock: 0.03,
     // Sun-aged neutral asphalt: light enough to read as an old dry road rather than
     // freshly laid wet bitumen. Fine aggregate and bleaching vary this base in the map.
-    texture: 0.008,
+    texture: 0.009,
     color: 0x9e9c9d,
     dust: 0.0,
     smoke: 1.0,
@@ -224,8 +224,8 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     rollingResistance: 0.018,
     deformationDrag: 0,
     roughness: 0.06,
-    microRelief: 0,
-    hummock: 0,
+    microRelief: 0.016,
+    hummock: 0.036,
     // Older cracked districts stay distinct, but no longer collapse back to wet black.
     texture: 0.014,
     color: 0x888482,
@@ -252,9 +252,9 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     // 7 mm against sand's 18. A graded track corrugates under its own traffic —
     // washboard is the thing gravel is famous for — and stones do not deform under a
     // tyre the way sand does.
-    microRelief: 0.026,
-    hummock: 0.045,
-    texture: 0.010,
+    microRelief: 0.029,
+    hummock: 0.05,
+    texture: 0.012,
     color: 0x7a6c56,
     dust: 0.6,
     smoke: 0.15,
@@ -326,11 +326,11 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     rollingResistance: 0.012,
     deformationDrag: 0,
     roughness: 0.006,
-    microRelief: 0,
-    hummock: 0,
+    microRelief: 0.01,
+    hummock: 0.028,
     // Slabs are smoother than asphalt between their joints, and the joints are in
     // the collider's own rows rather than here.
-    texture: 0.0035,
+    texture: 0.007,
     color: 0x9a978f,
     dust: 0.0,
     smoke: 1.0,
