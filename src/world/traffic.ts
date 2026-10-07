@@ -245,6 +245,8 @@ const STUCK_SPEED_KMH = 2;
 const STUCK_RECYCLE_S = 18;
 /** Metres below the road surface at which a car has fallen out of the world. */
 const FELL_OUT_M = 30;
+/** Up-axis height below which a still car is a wreck (on its side, its end or its roof). */
+const WRECK_UP_MAX = 0.5;
 /** A car standing below this, m/s, with its plan wanting this far across, is blocked. */
 const BOTTLENECK_STILL_MPS = 1;
 const BOTTLENECK_ACROSS_M = 0.8;
@@ -1324,6 +1326,19 @@ export class RoadTraffic {
         if (!car.rails) {
           const t = car.vehicle.chassis.translation();
           if (t.y < this.road.offsetPoint(car.forwardS, car.roadLateral, this.railPoint).y - FELL_OUT_M) {
+            this.removeAt(i);
+            continue;
+          }
+          // A WRECK IS NOT A JAM TO WAIT OUT. Nothing rights a car on its side or its
+          // end, so one that has lain still for the stuck time goes once it is far
+          // enough that its pose is a few pixels (`RAILS_WAKE_M`), not only past 500 m.
+          const q = car.vehicle.chassis.rotation();
+          if (
+            !car.rival &&
+            car.stoppedFor > STUCK_RECYCLE_S &&
+            Math.abs(offset) > RAILS_WAKE_M &&
+            1 - 2 * (q.x * q.x + q.z * q.z) < WRECK_UP_MAX
+          ) {
             this.removeAt(i);
             continue;
           }

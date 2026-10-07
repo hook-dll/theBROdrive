@@ -67,7 +67,8 @@ const VISUAL_RADIUS = 2;
  * the player: measured at 30.6 km, every car that touched the verge further out than
  * that dropped off the end of the world and fell for good — the cars seen "flying"
  * off the road past a bend. Two rings put solid desert under the verge to 480 m at
- * the least.
+ * the least; past that the road chunks' own verge skirt (`SKIRT_ACROSS_M` in
+ * world/roadmesh.ts) carries it to the end of road physics.
  */
 const PHYSICS_RADIUS = 2;
 /** Past this player-to-road distance no live tile can intersect the corridor. */

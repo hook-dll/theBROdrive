@@ -13,7 +13,7 @@ import type { RoadDistance } from './roaddistance';
 import { LANE_WIDTH, laneHalfWidthFor, laneOffsetFor, shoulderWidthM } from './roadprofile';
 import { SUB_DIVISIONS, SURFACE_STEP, SurfaceField, roadSurfaceY } from './roadsurface';
 import { terminusWeight } from './terminus';
-import { DESERT_SHOULDER_MATERIAL } from './terrainmesh';
+import { DESERT_SHOULDER_MATERIAL, TERRAIN_COLLIDER_SURFACE } from './terrainmesh';
 import type { ChunkContent, ChunkContext, ChunkProvider } from './chunks';
 
 /**
@@ -427,6 +427,21 @@ function smoothstep(lo: number, hi: number, v: number): number {
   return t * t * (3 - 2 * t);
 }
 
+/**
+ * VERGE SKIRT: collider-only ground beside the shoulder, out to `SKIRT_ACROSS_M` past
+ * its outer edge, on the tiles' own drawn ground (`tileGroundSampler`).
+ *
+ * Solid ground beside the road used to be the desert streamer's business alone, and
+ * its physical tiles end 480-720 m from the player while road chunks — and the traffic
+ * on them — carry physics to `PHYSICS_REACH_M` (800 m). In between, a car that put a
+ * wheel a metre past the shoulder fell off the world, hung nose-down on the shoulder's
+ * edge and was found standing on end with the desert built through it. The skirt makes
+ * "ground beside the road" part of the road chunk, so it exists exactly as far as the
+ * road's own physics does, whatever radius the tiles keep. Where a physical tile lies
+ * under it too, both are the same surface to within the skirt's coarser chord.
+ */
+const SKIRT_ACROSS_M: readonly number[] = [0, 3, 7, 12, 16, 20];
+
 /** The shoulder's drawn strip and its collider source, both origin-relative. */
 interface ShoulderBuild {
   readonly geometry: THREE.BufferGeometry;
@@ -436,6 +451,11 @@ interface ShoulderBuild {
   readonly rowVertices: number;
   /** Indices per quad row (both sides). */
   readonly rowIndices: number;
+  /** The verge skirt (`SKIRT_ACROSS_M`), collider only, rows matching the strip's. */
+  readonly skirtVertices: Float32Array;
+  readonly skirtIndices: Uint32Array;
+  readonly skirtRowVertices: number;
+  readonly skirtRowIndices: number;
 }
 
 // Shared across every chunk; never disposed by the streamer. The maps are built on
@@ -701,6 +721,9 @@ export class RoadMeshProvider implements ChunkProvider {
     const point = { x: 0, y: 0, z: 0 };
     // Arclength row index, so the ragged edge is a function of the road, not the chunk.
     const rowBase = Math.round(sStart / SURFACE_STEP);
+    const skirtCols = SKIRT_ACROSS_M.length;
+    const skirtRowVertices = 2 * skirtCols;
+    const skirt = new Float32Array(sCount * skirtRowVertices * 3);
 
     for (let si = 0; si < sCount; si++) {
       const s = sStart + (si * (sEnd - sStart)) / (sCount - 1);
@@ -807,6 +830,23 @@ export class RoadMeshProvider implements ChunkProvider {
           col[vi * 3 + 2] = shoulderColour.b;
           grit[vi] = gritLevel * (1 - smoothstep(0.35, 1, t)) * (1 - sanded);
         }
+        // The skirt starts on the strip's own outer vertex, so the two share an edge.
+        const outer = ((si * 2 + side) * cols + cols - 1) * 3;
+        const outerLateral = halfWidth + width + ragged;
+        for (let c = 0; c < skirtCols; c++) {
+          const k = ((si * 2 + side) * skirtCols + c) * 3;
+          if (c === 0) {
+            skirt[k] = pos[outer]!;
+            skirt[k + 1] = pos[outer + 1]!;
+            skirt[k + 2] = pos[outer + 2]!;
+            continue;
+          }
+          road.offsetPoint(s, sign * (outerLateral + SKIRT_ACROSS_M[c]!), point);
+          ground(point.x, point.z, g);
+          skirt[k] = point.x - ox;
+          skirt[k + 1] = g.height;
+          skirt[k + 2] = point.z - oz;
+        }
       }
       if ((si & 7) === 7) yield;
     }
@@ -826,6 +866,20 @@ export class RoadMeshProvider implements ChunkProvider {
         }
       }
     }
+    const skirtRowIndices = 2 * (skirtCols - 1) * 6;
+    const skirtIndex = new Uint32Array((sCount - 1) * skirtRowIndices);
+    w = 0;
+    for (let si = 0; si < sCount - 1; si++) {
+      for (let side = 0; side < 2; side++) {
+        for (let c = 0; c < skirtCols - 1; c++) {
+          const a = (si * 2 + side) * skirtCols + c;
+          const b = a + skirtRowVertices;
+          if (side === 0) skirtIndex.set([a, a + 1, b, a + 1, b + 1, b], w);
+          else skirtIndex.set([a, b, a + 1, a + 1, b, b + 1], w);
+          w += 6;
+        }
+      }
+    }
 
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -834,7 +888,17 @@ export class RoadMeshProvider implements ChunkProvider {
     geometry.setAttribute('aTerrainDetail', new THREE.BufferAttribute(detail, 1));
     geometry.setAttribute('aShoulderGrit', new THREE.BufferAttribute(grit, 1));
     geometry.setIndex(new THREE.BufferAttribute(index, 1));
-    return { geometry, vertices: pos, indices: index, rowVertices, rowIndices };
+    return {
+      geometry,
+      vertices: pos,
+      indices: index,
+      rowVertices,
+      rowIndices,
+      skirtVertices: skirt,
+      skirtIndices: skirtIndex,
+      skirtRowVertices,
+      skirtRowIndices,
+    };
   }
 
   *buildSteps(ctx: ChunkContext): Iterator<void, ChunkContent | null> {
@@ -1064,22 +1128,26 @@ export class RoadMeshProvider implements ChunkProvider {
         shoulderMesh.receiveShadow = true;
         group.add(shoulderMesh);
         if (hasPhysics) {
-          // Slabs, as the ribbon's: rows of the same vertices, sharing boundary rows.
-          for (let q0 = 0; q0 < sCount - 1; q0 += COLLIDER_SLAB_QUADS) {
-            const q1 = Math.min(q0 + COLLIDER_SLAB_QUADS, sCount - 1);
-            const slabVertices = shoulder.vertices.subarray(
-              q0 * shoulder.rowVertices * 3,
-              (q1 + 1) * shoulder.rowVertices * 3,
-            );
-            const slabIndices = shoulder.indices.slice(q0 * shoulder.rowIndices, q1 * shoulder.rowIndices);
-            const rebase = q0 * shoulder.rowVertices;
-            for (let i = 0; i < slabIndices.length; i++) slabIndices[i] = slabIndices[i]! - rebase;
-            const collider = physics.addStaticTrimesh(slabVertices, slabIndices, SurfaceType.LooseShoulder);
-            collider.setEnabled(false);
-            colliders.push(collider);
-            const body = collider.parent();
-            if (body) bodies.push(body);
-            yield;
+          // Slabs, as the ribbon's: rows of the same vertices, sharing boundary rows. The
+          // drawn strip is loose shoulder; the skirt beyond it is the tiles' own ground.
+          const parts = [
+            [shoulder.vertices, shoulder.indices, shoulder.rowVertices, shoulder.rowIndices, SurfaceType.LooseShoulder],
+            [shoulder.skirtVertices, shoulder.skirtIndices, shoulder.skirtRowVertices, shoulder.skirtRowIndices, TERRAIN_COLLIDER_SURFACE],
+          ] as const;
+          for (const [vertices, indices, rowVertices, rowIndices, surface] of parts) {
+            for (let q0 = 0; q0 < sCount - 1; q0 += COLLIDER_SLAB_QUADS) {
+              const q1 = Math.min(q0 + COLLIDER_SLAB_QUADS, sCount - 1);
+              const slabVertices = vertices.subarray(q0 * rowVertices * 3, (q1 + 1) * rowVertices * 3);
+              const slabIndices = indices.slice(q0 * rowIndices, q1 * rowIndices);
+              const rebase = q0 * rowVertices;
+              for (let i = 0; i < slabIndices.length; i++) slabIndices[i] = slabIndices[i]! - rebase;
+              const collider = physics.addStaticTrimesh(slabVertices, slabIndices, surface);
+              collider.setEnabled(false);
+              colliders.push(collider);
+              const body = collider.parent();
+              if (body) bodies.push(body);
+              yield;
+            }
           }
         }
       }

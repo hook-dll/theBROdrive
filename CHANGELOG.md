@@ -43,6 +43,16 @@
   beyond ~400 m a car that touched the verge fell out of the world for good. A car
   30 m below the road is removed. Measured at seed 1337, 100.5 km, 8 min on High:
   flips 5 → 1, impacts 64 → 26.
+- GROUND BESIDE THE ROAD BELONGS TO THE ROAD. Each road chunk adds a collider-only
+  skirt 20 m past the shoulder on the tiles' own drawn ground (`SKIRT_ACROSS_M`,
+  world/roadmesh.ts), so the verge is solid as far as road physics reaches (800 m)
+  whatever the desert tiles keep (480-720 m). Before, a car that left the asphalt in
+  that gap hung nose-down on the shoulder's edge and was later found on end with the
+  desert built through it. Measured with road chunks only, seed 1337 at 30.6 and 80
+  km: verge rays 2-18 m past the shoulder hit 0/626 before, 626/626 after; collider
+  within 0.03 m of the drawn ground on average, 0.18 m at worst. A wreck (up-axis
+  under 0.5) still for 18 s is recycled past 300 m, not only past 500 m.
+  `tools/traffic-bench.ts` loads its cars again (document shim).
 - AI DRIVING: verge speed set by the bend ahead (2.5 m/s² on loose stone) and 60 km/h
   past anything standing; threshold braking instead of locked wheels; the racing
   line's edge margin grows with speed; rolling spawns launch at a speed they can stop

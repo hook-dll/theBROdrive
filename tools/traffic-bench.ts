@@ -16,6 +16,7 @@ import { TERMINUS_CENTRE_M, TERMINUS_PAD_M } from '../src/world/terminus';
 import { widenessAt } from '../src/world/roadprofile';
 import { PHYSICS_REACH_M } from '../src/world/chunks';
 import { installAssetShim } from './assetshim';
+import { installDocumentShim } from './domshim';
 
 class BunProgressEvent extends Event implements ProgressEvent {
   readonly lengthComputable: boolean;
@@ -31,6 +32,7 @@ class BunProgressEvent extends Event implements ProgressEvent {
 }
 if (globalThis.ProgressEvent === undefined) globalThis.ProgressEvent = BunProgressEvent;
 installAssetShim();
+installDocumentShim();
 
 const SEED = Number(process.argv[2] ?? 42);
 const PLAYER_S = 1_000;
