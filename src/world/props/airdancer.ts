@@ -459,6 +459,16 @@ class Dancer implements DancerHandle {
   phaseId = PHASE_UP;
   phaseTime = 0;
   groundFor = 1;
+  /** Seconds this collapse takes: a choke's own, or shorter when a car knocked it. */
+  collapseFor = COLLAPSE_SECONDS;
+  /** Fold the collapse starts from (a knock can catch it half risen). */
+  collapseFrom = 0;
+  /** Last pose's fold, 0 upright .. 1 folded. */
+  lastFold = 0;
+  /** Knocked by a car: fold along (knockX, knockZ), its own frame, not the choke's way. */
+  knocked = false;
+  knockX = 0;
+  knockZ = 1;
 
   constructor(site: DancerSite) {
     for (const rest of REST) {
@@ -558,6 +568,11 @@ export class DancerField {
     }
   }
 
+  /** Dancers whose chunks are built; zero almost everywhere between couriers. */
+  get count(): number {
+    return this.dancers.length;
+  }
+
   /**
    * Poses every dancer near enough to be seen, from the live weather wind. Absolute
    * camera coordinates: the caller adds the floating origin, so a rebase never moves
@@ -577,6 +592,34 @@ export class DancerField {
     }
   }
 
+  /**
+   * A car at absolute (x, z) doing `speedMps`. The blower is not solid, so a car
+   * reaches the tube; one that comes within KNOCK_RADIUS_M of it knocks it over away
+   * from itself, faster the faster it comes, and it gets back up as after a choke.
+   * Called per live car before `update`; a handful of distance checks.
+   */
+  knock(x: number, z: number, speedMps: number): void {
+    if (speedMps < KNOCK_MIN_MPS) return;
+    for (const dancer of this.dancers) {
+      if (dancer.phaseId !== PHASE_UP && dancer.phaseId !== PHASE_RISE) continue;
+      const dx = dancer.absX - x;
+      const dz = dancer.absZ - z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 > KNOCK_RADIUS_M * KNOCK_RADIUS_M) continue;
+      // Away from the car, in the dancer's own frame (same turn as the wind's).
+      const inv = 1 / Math.max(1e-4, Math.sqrt(d2));
+      const cos = Math.cos(dancer.root.rotation.y);
+      const sin = Math.sin(dancer.root.rotation.y);
+      dancer.knockX = cos * dx * inv - sin * dz * inv;
+      dancer.knockZ = sin * dx * inv + cos * dz * inv;
+      dancer.knocked = true;
+      dancer.collapseFrom = Math.max(0, dancer.lastFold);
+      dancer.collapseFor = Math.max(KNOCK_COLLAPSE_MIN_S, COLLAPSE_SECONDS - speedMps * KNOCK_COLLAPSE_PER_MPS);
+      dancer.phaseId = PHASE_COLLAPSE;
+      dancer.phaseTime = 0;
+    }
+  }
+
   dispose(): void {
     for (const dancer of this.dancers) dancer.skeleton.dispose();
     this.dancers.length = 0;
@@ -590,10 +633,12 @@ export class DancerField {
         if (this.time >= dancer.nextChoke) {
           dancer.phaseId = PHASE_COLLAPSE;
           dancer.phaseTime = 0;
+          dancer.collapseFrom = 0;
+          dancer.collapseFor = COLLAPSE_SECONDS;
         }
         break;
       case PHASE_COLLAPSE:
-        if (dancer.phaseTime >= COLLAPSE_SECONDS) {
+        if (dancer.phaseTime >= dancer.collapseFor) {
           dancer.phaseId = PHASE_GROUND;
           dancer.phaseTime = 0;
           dancer.groundFor =
@@ -611,6 +656,7 @@ export class DancerField {
         if (dancer.phaseTime >= RISE_SECONDS) {
           dancer.phaseId = PHASE_UP;
           dancer.phaseTime = 0;
+          dancer.knocked = false;
           dancer.nextChoke =
             this.time +
             CHOKE_MIN_SECONDS +
@@ -625,7 +671,8 @@ export class DancerField {
     let fold: number;
     switch (dancer.phaseId) {
       case PHASE_COLLAPSE:
-        fold = easeInOut(Math.min(1, dancer.phaseTime / COLLAPSE_SECONDS));
+        fold = dancer.collapseFrom +
+          (1 - dancer.collapseFrom) * easeInOut(Math.min(1, dancer.phaseTime / dancer.collapseFor));
         break;
       case PHASE_GROUND:
         fold = 1 + Math.sin(time * 2.3 + dancer.phase) * 0.03;
@@ -637,6 +684,7 @@ export class DancerField {
         fold = 0;
         break;
     }
+    dancer.lastFold = fold;
     const flow = Math.max(0, 1 - fold * 0.8);
     const foldAngle = fold * dancer.foldMax;
 
@@ -646,9 +694,9 @@ export class DancerField {
     const windLocalX = cos * windX - sin * windZ;
     const windLocalZ = sin * windX + cos * windZ;
 
-    // Fold away from the road, nudged by the weather.
-    const dirX = dancer.foldX + windLocalX * FOLD_WIND_MIX;
-    const dirZ = dancer.foldZ + windLocalZ * FOLD_WIND_MIX;
+    // Fold away from the road, nudged by the weather; a knocked one away from the car.
+    const dirX = dancer.knocked ? dancer.knockX : dancer.foldX + windLocalX * FOLD_WIND_MIX;
+    const dirZ = dancer.knocked ? dancer.knockZ : dancer.foldZ + windLocalZ * FOLD_WIND_MIX;
     const inv = 1 / Math.max(1e-4, Math.hypot(dirX, dirZ));
     const foldX = dirX * inv;
     const foldZ = dirZ * inv;
@@ -700,3 +748,15 @@ export class DancerField {
     }
   }
 }
+
+/**
+ * A car this close to the tube (centre to centre, metres) knocks it over: well out
+ * past the blower's 0.4 m half-width and a car's half-length, so the tube goes down
+ * as the bumper arrives rather than after the car is through it.
+ */
+const KNOCK_RADIUS_M = 3;
+/** Slower than this a car is parking beside it, not hitting it. */
+const KNOCK_MIN_MPS = 1.5;
+/** A knock folds faster than a choke: this much less per m/s, down to the floor. */
+const KNOCK_COLLAPSE_PER_MPS = 0.05;
+const KNOCK_COLLAPSE_MIN_S = 0.22;

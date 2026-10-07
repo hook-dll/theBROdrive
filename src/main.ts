@@ -456,6 +456,12 @@ async function boot(): Promise<void> {
   // the hidden anchor rig it adds to the scene compiles their skinned program under
   // the loading cover. See world/props/airdancer.ts.
   const dancers = new DancerField(renderer.scene);
+  /** Every live car knocks the dancers it reaches; one visitor, made once. */
+  const knockPosition = { x: 0, y: 0, z: 0 };
+  const knockDancers = (_id: string, vehicle: Vehicle): void => {
+    const p = vehicle.absoluteTranslation(knockPosition);
+    dancers.knock(p.x, p.z, vehicle.speedKmh / 3.6);
+  };
 
   // Shared exact nearest-road field: the tile streamer uses it to grade the open
   // lattice into the road corridor without searching the full spine per vertex.
@@ -2527,6 +2533,11 @@ async function boot(): Promise<void> {
     gateField.update(origin.x, origin.z);
     // The courier air dancers stand in the chunk frame; the field only needs the
     // camera in absolute metres to know which of them are near enough to simulate.
+    // Any car that reaches one knocks it over first (its blower is not solid).
+    if (dancers.count > 0) {
+      for (const [id, vehicle] of vehicles) knockDancers(id, vehicle);
+      traffic.forEachVehicle(knockDancers);
+    }
     dancers.update(frameDt, cam.x + origin.x, cam.z + origin.z);
     frameProfiler?.end('effects');
     frameProfiler?.begin('vista');
