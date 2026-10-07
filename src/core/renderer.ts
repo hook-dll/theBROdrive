@@ -1078,6 +1078,15 @@ export class Renderer {
     return this.adaptiveResolution.averageGpuMs;
   }
 
+  /**
+   * The newest single GPU frame time, ms — not the controller's average — for a live
+   * graph (ui/perfoverlay.ts). Null until a timer query has completed.
+   */
+  get latestGpuMs(): number | null {
+    return this.latestGpuMsValue;
+  }
+  private latestGpuMsValue: number | null = null;
+
   /** Whether the live scale has been measured long enough to stand on its own. */
   get resolutionSettled(): boolean {
     return this.adaptiveResolution.verdictReached(performance.now());
@@ -1168,6 +1177,7 @@ export class Renderer {
         this.completedGpuSampleEligibility.shift();
       }
       this.completedGpuSamples.push(gpuMs);
+      this.latestGpuMsValue = gpuMs;
       this.completedGpuSampleEligibility.push(pending.eligible);
     }
   }

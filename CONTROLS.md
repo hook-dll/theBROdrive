@@ -60,14 +60,10 @@ while a key binding is being captured.
 
 ### Rumble
 
-Strong motor: suspension bumps (`bumpMps`), landings (`landingImpactMps`) and
-collisions (`impactMps`) — read from the vehicle's audio telemetry *before* the audio
-layer consumes it, since those three are zeroed on read. Weak motor: road texture
-(surface roughness × contact × speed), tyre slide past the peak of the curve, lock-up
-and side slip, plus the steering going **light**: the front tyres past the peak of
-their aligning moment (`Vehicle.steeringLightness`), the cue a real wheel gives before
-the nose washes wide. Pads that advertise `trigger-rumble` also get the front tyres'
-own slip per side.
+Collisions only: the strong motor follows the vehicle's `impactMps` (full at 4 m/s),
+read from its audio telemetry *before* the audio layer consumes it, since it is zeroed
+on read. Road texture, bumps, landings, slides and the steering going light no longer
+rumble — they kept a motor running for the whole drive.
 
 Effects are re-issued every 80 ms while demanded, never per frame; they scale with
 **Settings → Controller → Vibration** (default 70%) and stop on pause, exit and blur.

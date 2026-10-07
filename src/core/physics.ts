@@ -14,6 +14,7 @@ import { SurfaceRegistry, SurfaceType } from './surfaces';
 export const FIXED_DT = 1 / 60;
 
 export type Vec3 = { x: number; y: number; z: number };
+const DOWN: Vec3 = { x: 0, y: -1, z: 0 };
 
 export interface RaycastHit {
   readonly colliderHandle: number;
@@ -239,4 +240,22 @@ export class PhysicsWorld {
       toi: hit.timeOfImpact,
     };
   }
+
+  /**
+   * Whether FIXED ground — a road chunk, the verge skirt, a desert tile, a static
+   * prop — lies within `depth` below a point relative to the world origin.
+   *
+   * The one question every streamed body has to have answered before it is given
+   * gravity: the world builds its ground in several layers with several reaches
+   * (world/ranges.ts), and a body put where none of them reaches falls out of it.
+   */
+  hasFixedGroundBelow(x: number, y: number, z: number, depth: number): boolean {
+    this.groundProbe.x = x;
+    this.groundProbe.y = y;
+    this.groundProbe.z = z;
+    this.scratchRay.origin = this.groundProbe;
+    this.scratchRay.dir = DOWN;
+    return this.world.castRay(this.scratchRay, depth, true, this.rapier.QueryFilterFlags.ONLY_FIXED) !== null;
+  }
+  private readonly groundProbe = { x: 0, y: 0, z: 0 };
 }

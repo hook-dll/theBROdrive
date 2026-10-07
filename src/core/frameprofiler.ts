@@ -110,6 +110,12 @@ export class FrameProfiler {
   /** Anything the caller can say about the frame a hitch landed on (new shader programs). */
   spikeNote: (() => string | undefined) | null = null;
 
+  /**
+   * The frame just closed, for a live readout (ui/perfoverlay.ts): milliseconds per
+   * section — `renderWall` included — and the gap since the frame before it.
+   */
+  readonly last = { sections: new Map<SampleKey, number>(), gapMs: 0 };
+
   /** Length of the current window, seconds. The divisor for every per-second figure. */
   private elapsedSeconds = 0;
 
@@ -149,14 +155,18 @@ export class FrameProfiler {
     // still accounted for instead of looking like free time.
     this.current.set('renderWall', this.clock() - this.renderStart);
     const endMs = this.clock();
-    if (this.lastEndMs > 0 && endMs - this.lastEndMs > SPIKE_MS) {
+    const gapMs = this.lastEndMs > 0 ? endMs - this.lastEndMs : 0;
+    if (gapMs > SPIKE_MS) {
       const sections: Record<string, number> = {};
       for (const [section, ms] of this.current) if (ms >= 1) sections[section] = Math.round(ms);
       const note = this.spikeNote?.();
-      this.spikes.push({ atMs: Math.round(endMs), gapMs: Math.round(endMs - this.lastEndMs), sections, note });
+      this.spikes.push({ atMs: Math.round(endMs), gapMs: Math.round(gapMs), sections, note });
       if (this.spikes.length > 64) this.spikes.shift();
     }
     this.lastEndMs = endMs;
+    this.last.gapMs = gapMs;
+    this.last.sections.clear();
+    for (const [section, ms] of this.current) this.last.sections.set(section, ms);
     // All sections share the presented-frame denominator, including frames before a
     // section first appears. Keeping their zeros also makes p95 a per-frame percentile.
     for (const [section, list] of this.samples) {

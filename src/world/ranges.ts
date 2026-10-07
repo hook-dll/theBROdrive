@@ -133,6 +133,30 @@ export const TRAFFIC_FRANTIC_REAR_SPAWN_MIN_M = 450;
 export const TRAFFIC_FRANTIC_REAR_SPAWN_MAX_M = 600;
 
 /**
+ * SAVED OBJECTS — parked and working cars, standing trailers, loose parts and items —
+ * are given a live body within `STATE_LOAD_RADIUS_M` of the player and lose it past
+ * `STATE_UNLOAD_RADIUS_M` (main.ts, TrailerField, LoosePartField).
+ *
+ * THOSE RADII DO NOT PROMISE GROUND. They reach 800 m, the solid desert only
+ * `DESERT_SOLID_REACH_M`, and the road's skirt only 20 m past the shoulder — so a car
+ * parked out in the desert, a stop's spare trailer 300 m off the road, or a box the
+ * player left behind would get gravity over nothing and fall out of the world. Every
+ * one of them therefore ALSO asks for fixed ground under it
+ * (`PhysicsWorld.hasFixedGroundBelow`, `STATE_GROUND_PROBE_*`): no ground, no body —
+ * it stays in state, dormant, until the ground arrives; a live one whose ground is
+ * taken away is put back into state where it stands.
+ */
+export const STATE_LOAD_RADIUS_M = 800;
+export const STATE_UNLOAD_RADIUS_M = 1000;
+/**
+ * The probe starts this far above a saved pose and looks this far below it, metres:
+ * far enough that a body saved mid-fall still finds the ground it was falling to, so
+ * only a body over NOTHING is held back.
+ */
+export const STATE_GROUND_PROBE_UP_M = 2;
+export const STATE_GROUND_PROBE_DOWN_M = 200;
+
+/**
  * The relations the figures above must keep. Each failure names the pair and why it
  * matters. Exported for tools that change a figure and want the verdict as a list.
  */
@@ -176,6 +200,10 @@ export function worldRangeFailures(): string[] {
       TRAFFIC_FRANTIC_REAR_SPAWN_MIN_M >= RAILS_SLEEP_M,
     `the frantic rear band ${TRAFFIC_FRANTIC_REAR_SPAWN_MIN_M}-${TRAFFIC_FRANTIC_REAR_SPAWN_MAX_M} m must be ` +
       `inside traffic's ${TRAFFIC_REACH_M} m and past the rails' ${RAILS_SLEEP_M} m`,
+  );
+  need(
+    STATE_LOAD_RADIUS_M < STATE_UNLOAD_RADIUS_M,
+    `saved objects need hysteresis: load ${STATE_LOAD_RADIUS_M} m inside unload ${STATE_UNLOAD_RADIUS_M} m`,
   );
   return failures;
 }

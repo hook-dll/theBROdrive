@@ -1392,18 +1392,43 @@ const MOVING_BLOCKER_GRACE_S = 25;
  */
 const LANE_ENTRY_REAR_LOOK_M = 50;
 const LANE_ENTRY_SAFE_DECEL = 3;
-const RECOVERY_REVERSE_S = 1.8;
+/**
+ * THE ESCAPE STARTS SMALL. Reported from play: a stuck car swung back in a sweeping
+ * ten-metre arc at 0.85 lock with nothing limiting its reverse speed, and only then
+ * worked out where the road was — an overreaction for what is usually a bumper's
+ * length of trouble. A driver first backs off a metre or two with the wheel one way
+ * and pulls forward with it the other; only if that does not clear it does he back
+ * further, harder over. So each rung of the ladder is a distance, a reverse speed, a
+ * lock and a pull-out crawl, from gentle to the old decisive turn, and the reverse is
+ * measured in METRES covered rather than seconds of pedal.
+ */
+const RECOVERY_RUNG_REVERSE_M = [1.8, 3.2, 5, 7.5] as const;
+const RECOVERY_RUNG_REVERSE_MPS = [1.1, 1.5, 2, 2.5] as const;
+const RECOVERY_RUNG_LOCK = [0.55, 0.7, 0.85, 1] as const;
+const RECOVERY_RUNG_CRAWL_MPS = [2.5, 3.2, 4, 4.5] as const;
+/** Seconds past the time the rung's distance needs at its speed before the leg gives up. */
+const RECOVERY_REVERSE_SLACK_S = 2.5;
 const RECOVERY_PULLOUT_S = 1.6;
-/** Opposite substantial locks make the two-point turn decisive without tyre scrub at full lock. */
-const RECOVERY_REVERSE_STEER = 0.85;
-const RECOVERY_PULLOUT_STEER = 0.85;
 const RECOVERY_REVERSE_BRAKE = 0.72;
+/**
+ * A car whose tail is boxed in waits this long, in reverse, for the queue behind to
+ * ease back (`needsReverseRoom`), before it gives up the reverse and pulls out.
+ */
+const RECOVERY_ROOM_WAIT_S = 2.5;
 /** Room a yielding car keeps behind itself, and how fast it gives ground back. */
 const YIELD_REVERSE_ROOM_M = 6;
-const YIELD_REVERSE_MPS = 1.6;
-const RECOVERY_CRAWL_MPS = 4.5;
+/** A crawl: the car in front only needs a metre or two, so nobody behind lunges. */
+const YIELD_REVERSE_MPS = 0.8;
+/** Most a yielding car gives back per request, metres. */
+const YIELD_REVERSE_BUDGET_M = 2.5;
+/** A prop this close in front decides which way the escape goes (`beginRecovery`). */
+const RECOVERY_PROP_AWARE_M = 6;
+/**
+ * Opposing lane an escape may swing into, metres of it clear: a car closing at 25 m/s
+ * plus this one's own 15 m/s needs about four seconds, which is the whole manoeuvre.
+ */
+const RECOVERY_ONCOMING_CLEAR_M = 160;
 const RECOVERY_BIAS_METRES = 50;
-const RECOVERY_REAR_CLEAR_M = 5;
 /** Generic recovery remains bounded; indexed traffic roadblocks bypass this guard. */
 const RECOVERY_RETRY_METRES = 45;
 const RECOVERY_ATTEMPT_LIMIT = 2;
@@ -1436,20 +1461,17 @@ const RECOVERY_BIAS_M = 3.2;
  *
  * Attempts at the same place now each go one rung further out: longer reverse, more
  * lock, and an escape line further from the lane — the three things a driver actually
- * changes when the first go does not clear it. Three rungs take the manoeuvre from
- * "back up a length and ease round" to "back most of two lengths at full lock and
- * come back along the shoulder".
+ * changes when the first go does not clear it. The rungs (`RECOVERY_RUNG_*`) take the
+ * manoeuvre from "ease back under two metres at half lock" to "back most of two
+ * lengths at full lock and come back along the shoulder".
  *
  * The ladder is bounded because past that the manoeuvre stops being a two-point turn
  * on a road: a bigger swing only puts more of the carriageway under a car that is
  * already lying across it, which is the failure `RECOVERY_REARM_S` was written for.
  */
-const RECOVERY_ESCALATION_MAX = 3;
-/** Seconds of reverse, and of pull-out, added per rung. */
-const RECOVERY_REVERSE_STEP_S = 1.2;
+const RECOVERY_ESCALATION_MAX = RECOVERY_RUNG_REVERSE_M.length - 1;
+/** Seconds of pull-out added per rung. */
 const RECOVERY_PULLOUT_STEP_S = 0.6;
-/** Lock added per rung; the last rung is full lock. */
-const RECOVERY_STEER_STEP = 0.05;
 /**
  * Escape line added per rung, and the same allowance for every line limit the
  * manoeuvre is measured against. An ordinary escape is clamped to the asphalt — which
@@ -1535,6 +1557,8 @@ export class Autopilot {
   private hazardDistance = Infinity;
   /** The same, counting only props the body would actually touch. See `visitHazard`. */
   private hazardContactDistance = Infinity;
+  /** Road lateral of the prop `hazardDistance` measured: which side it blocks. */
+  private hazardLateral = 0;
   /** Nearest dynamic body in the driving corridor, metres, from either scan. */
   private obstacleGapValue = Infinity;
   /** Signed along-road speed of the same observed body. */
@@ -1696,6 +1720,11 @@ export class Autopilot {
   /** Seconds the current reverse leg has run, and how long it has been going nowhere. */
   private recoveryLegElapsed = 0;
   private recoveryLegStalled = 0;
+  /** Metres the current reverse leg has covered, and seconds it has waited for room. */
+  private recoveryReversed = 0;
+  private recoveryRoomWait = 0;
+  /** Metres given back to the car in front during the current yield request. */
+  private yieldReversed = 0;
   private lastRecoveryAt = -Infinity;
   private recoveryAttempts = 0;
   private speedCapValue = Infinity;
@@ -1899,6 +1928,7 @@ export class Autopilot {
     const reach = hazard.radius + CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M;
     if (Math.abs(hazard.lateral - this.scanLateral) >= reach) return;
     this.hazardDistance = distance;
+    this.hazardLateral = hazard.lateral;
     // AND "MY BUMPER IS AGAINST IT" IS A DIFFERENT QUESTION TO "IT IS NEAR MY LINE".
     //
     // The reach above carries the avoidance margin, which is planning slack, not
@@ -2735,6 +2765,9 @@ export class Autopilot {
     this.recoveryEscalation = 0;
     this.recoveryLegElapsed = 0;
     this.recoveryLegStalled = 0;
+    this.recoveryReversed = 0;
+    this.recoveryRoomWait = 0;
+    this.yieldReversed = 0;
     this.recoveryCommitted = false;
     this.deadlockPermission = false;
     this.yieldReverse = false;
@@ -4895,14 +4928,21 @@ export class Autopilot {
       const rearClear =
         this.axisScan(vehicle, originX, originZ, -1, YIELD_REVERSE_ROOM_M + 2) >
         YIELD_REVERSE_ROOM_M;
+      // A little, not all it can: the car in front needs a metre or two for its first
+      // rung, and a queue that each backs off its whole free room moves the jam back
+      // down the road. Measured on the real road, seed 1337 at 150 km: a follower gave
+      // 6.6 m to a car that reversed 1.7.
+      this.yieldReversed += Math.max(0, -forwardSpeed) * dt;
       out.throttle = 0;
       out.handbrake = false;
-      out.reverse = rearClear && forwardSpeed > -YIELD_REVERSE_MPS;
+      out.reverse =
+        rearClear && forwardSpeed > -YIELD_REVERSE_MPS && this.yieldReversed < YIELD_REVERSE_BUDGET_M;
       out.brake = out.reverse ? RECOVERY_REVERSE_BRAKE * 0.6 : 0.4;
       out.steer = 0;
       this.activityValue = 'recover';
       return;
     }
+    this.yieldReversed = 0;
 
     // BEING STUCK IS "NO WAY THROUGH", AND THAT IS NOW ONE QUESTION.
     //
@@ -5331,8 +5371,20 @@ export class Autopilot {
       return;
     }
     const right = Math.sign(this.road.laneCentreAt(this.hintS, 0) || -1);
-    this.recoverySide =
-      lateral * right > this.road.halfWidthAt(this.hintS) - CAR_HALF_WIDTH_M ? -right : right;
+    // THE SIDE THE OBSTACLE IS NOT ON. A prop the car is up against, or about to be,
+    // says which way round is open: away from where it stands across the road. With
+    // nothing indexed in front the driver's own shoulder is the default, as before.
+    const propSide =
+      this.hazardDistance < RECOVERY_PROP_AWARE_M ? Math.sign(lateral - this.hazardLateral) : 0;
+    const preferred = propSide !== 0 ? propSide : right;
+    const side =
+      lateral * preferred > this.road.halfWidthAt(this.hintS) - CAR_HALF_WIDTH_M ? -preferred : preferred;
+    // BUT NEVER INTO A CAR THAT IS COMING. `-right` is the opposing carriageway, and
+    // the reverse and the pull-out are blind fixed-lock legs: unlike the planner's own
+    // crossing (corridor.ts), nothing in them looks up the other lane. So the escape
+    // swings that way only with the opposing lane clear for `RECOVERY_ONCOMING_CLEAR_M`;
+    // otherwise it goes to the car's own shoulder, as it always used to.
+    this.recoverySide = side === right || this.oncomingGap > RECOVERY_ONCOMING_CLEAR_M ? side : right;
     this.recoveryAttempts = persistentRoadblock
       ? 0
       : samePlace
@@ -5347,6 +5399,8 @@ export class Autopilot {
       : 0;
     this.recoveryLegElapsed = 0;
     this.recoveryLegStalled = 0;
+    this.recoveryReversed = 0;
+    this.recoveryRoomWait = 0;
     this.lastRecoveryAt = this.travelled;
     this.sinceRecovery = 0;
     this.stoppedFor = 0;
@@ -5367,15 +5421,14 @@ export class Autopilot {
     this.recoveryBias =
       this.recoverySide * (RECOVERY_BIAS_M + this.recoveryEscalation * RECOVERY_BIAS_STEP_M);
     this.recoveryBiasUntil = this.travelled + RECOVERY_BIAS_METRES;
-    // Reversing into the car behind is worse than the obstacle in front, so a blocked
-    // tail skips straight to the pull-out and steers out of the problem instead.
-    const rearClear =
-      this.axisScan(vehicle, originX, originZ, -1, RECOVERY_REAR_CLEAR_M + 2) >
-      RECOVERY_REAR_CLEAR_M;
-    this.recoveryPhase = rearClear ? 'reverse' : 'pullout';
-    this.recoveryTimer = rearClear
-      ? RECOVERY_REVERSE_S + this.recoveryEscalation * RECOVERY_REVERSE_STEP_S
-      : RECOVERY_PULLOUT_S + this.recoveryEscalation * RECOVERY_PULLOUT_STEP_S;
+    // A boxed-in tail no longer skips the reverse outright: the leg starts and WAITS
+    // (`RECOVERY_ROOM_WAIT_S`), and because a reversing car asks for room
+    // (`needsReverseRoom`) the queue behind eases back a little to give it.
+    this.recoveryPhase = 'reverse';
+    this.recoveryTimer =
+      RECOVERY_RUNG_REVERSE_M[this.recoveryEscalation]! / RECOVERY_RUNG_REVERSE_MPS[this.recoveryEscalation]! +
+      RECOVERY_REVERSE_SLACK_S +
+      RECOVERY_ROOM_WAIT_S;
   }
 
   /**
@@ -5501,35 +5554,35 @@ export class Autopilot {
     out.handbrake = false;
     // What this rung of the ladder steers with. Both legs escalate together: the
     // pull-out has to follow the arc the reverse set up.
-    const reverseLock = Math.min(
-      1,
-      RECOVERY_REVERSE_STEER + this.recoveryEscalation * RECOVERY_STEER_STEP,
-    );
-    const pulloutLock = Math.min(
-      1,
-      RECOVERY_PULLOUT_STEER + this.recoveryEscalation * RECOVERY_STEER_STEP,
-    );
+    const rung = this.recoveryEscalation;
+    const lock = RECOVERY_RUNG_LOCK[rung]!;
     if (this.recoveryPhase === 'reverse') {
       this.recoveryTimer -= dt;
-      this.recoveryLegElapsed += dt;
       out.throttle = 0;
+      out.reverse = true;
+      out.steer = clamp(this.recoverySide * lock, -1, 1);
+      // A LONGER REVERSE HAS TO BE WATCHED WHILE IT RUNS. The queue behind can close
+      // the space up while the car is using it, and static scenery no ray reports — a
+      // fence, a bank, a pole — is found by the car's own evidence: it has selected
+      // reverse and is covering no ground.
+      const roomBehind = this.axisScan(vehicle, originX, originZ, -1, RECOVERY_REVERSE_LOOK_M);
+      // NO ROOM YET: WAIT FOR IT. Still in the reverse phase, so `needsReverseRoom`
+      // keeps asking the car behind to ease back; the leg itself does not move and its
+      // stall clock does not run, because standing still is the point.
+      if (roomBehind < RECOVERY_REVERSE_STOP_M && this.recoveryRoomWait < RECOVERY_ROOM_WAIT_S) {
+        this.recoveryRoomWait += dt;
+        out.brake = 0;
+        return;
+      }
+      this.recoveryLegElapsed += dt;
       // In automatic mode, reverse=true selects R at rest and brake becomes reverse
       // throttle on the following tick, so the same pedal stops a car still rolling
-      // forward and then backs it up.
-      out.brake = RECOVERY_REVERSE_BRAKE;
-      out.reverse = true;
-      out.steer = clamp(this.recoverySide * reverseLock, -1, 1);
-      // A LONGER REVERSE HAS TO BE WATCHED WHILE IT RUNS.
-      //
-      // At 1.8 s the one-off rear check in `beginRecovery` was the whole story. An
-      // escalated leg is long enough for the queue behind to close the space up while
-      // the car is still using it, and long enough to spend itself pressed against
-      // static scenery no ray reports — a fence, a bank, a pole. The first is
-      // answered by re-measuring the room; the second by the car's own evidence,
-      // which is that it has selected reverse and is covering no ground. Either way
-      // the leg ends and the pull-out — the half that gets the car ROUND the
-      // obstacle — starts, rather than the car grinding backwards for five seconds.
-      const roomBehind = this.axisScan(vehicle, originX, originZ, -1, RECOVERY_REVERSE_LOOK_M);
+      // forward and then backs it up. Eased off toward the rung's walking pace: the
+      // reverse is a crawl, not a lunge.
+      const back = Math.max(0, -forwardSpeed);
+      const cap = RECOVERY_RUNG_REVERSE_MPS[rung]!;
+      out.brake = RECOVERY_REVERSE_BRAKE * clamp((cap - back) / cap, 0, 1) * 0.6;
+      this.recoveryReversed += back * dt;
       this.recoveryLegStalled =
         this.recoveryLegElapsed > RECOVERY_LEG_GRACE_S &&
         forwardSpeed > -RECOVERY_LEG_CRAWL_MPS
@@ -5539,13 +5592,14 @@ export class Autopilot {
       // round what blocked it". A car that was ALREADY out there — wedged on a pole
       // on the verge — satisfies it on the first tick, which ended the reverse
       // before the clutch had taken up and handed straight back to a pull-out that
-      // drove into the same pole. Out there the timer owns the phase.
+      // drove into the same pole. Out there the distance and the timer own the phase.
       //
       // The line it is measured against widens with the rung. Held at the verge, the
       // reverse stops inside the width the obstruction blocks, and the pull-out that
       // follows aims back down it: that is the second and third bump the ladder
       // exists to break.
       if (
+        this.recoveryReversed >= RECOVERY_RUNG_REVERSE_M[rung]! ||
         this.recoveryTimer <= 0 ||
         roomBehind < RECOVERY_REVERSE_STOP_M ||
         this.recoveryLegStalled > RECOVERY_LEG_STALL_S ||
@@ -5553,11 +5607,10 @@ export class Autopilot {
           Math.abs(lateral) >
             this.road.halfWidthAt(this.hintS) +
             PASSING_VERGE_M +
-            this.recoveryEscalation * RECOVERY_BIAS_STEP_M)
+            rung * RECOVERY_BIAS_STEP_M)
       ) {
         this.recoveryPhase = 'pullout';
-        this.recoveryTimer =
-          RECOVERY_PULLOUT_S + this.recoveryEscalation * RECOVERY_PULLOUT_STEP_S;
+        this.recoveryTimer = RECOVERY_PULLOUT_S + rung * RECOVERY_PULLOUT_STEP_S;
       }
       return;
     }
@@ -5567,16 +5620,16 @@ export class Autopilot {
     // the wheel before the car reverses its travel bends the tail back toward the
     // obstacle and also spends the pull-out timer without moving forward.
     if (forwardSpeed < -0.15) {
-      out.steer = clamp(this.recoverySide * reverseLock, -1, 1);
+      out.steer = clamp(this.recoverySide * lock, -1, 1);
       out.throttle = 0;
       out.brake = 0.5;
       return;
     }
 
     this.recoveryTimer -= dt;
-    out.steer = clamp(-this.recoverySide * pulloutLock, -1, 1);
+    out.steer = clamp(-this.recoverySide * lock, -1, 1);
     out.brake = 0;
-    out.throttle = forwardSpeed < RECOVERY_CRAWL_MPS ? 0.55 : 0;
+    out.throttle = forwardSpeed < RECOVERY_RUNG_CRAWL_MPS[rung]! ? 0.45 : 0;
     // The pull-out is what brings a car back from where the reverse put it, so its
     // own end condition cannot be the indexed prop or the line limit the reverse
     // just crossed. Both ended the manoeuvre on its first tick. A dynamic body still

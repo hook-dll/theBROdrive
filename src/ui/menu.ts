@@ -735,6 +735,8 @@ export interface PauseHooks {
    * to in a car, so the numbers have to be able to appear on its screen.
    */
   frameReport?: () => string;
+  /** The live performance graph across the top of the screen (ui/perfoverlay.ts). Dev only. */
+  perfOverlay?: { readonly enabled: boolean; setEnabled(on: boolean): void };
   /**
    * Record a fully fuelled car into the world.
    *
@@ -1401,6 +1403,18 @@ export class MainMenu {
         // something you read, not something you do.
         if (import.meta.env.DEV && hooks.frameReport) {
           devButton('Frame report', () => showScreen('perf'));
+        }
+        // A switch rather than a screen: the graph is for watching the drive, so the
+        // label carries the state and pressing it leaves the menu where it is.
+        if (import.meta.env.DEV && hooks.perfOverlay) {
+          const overlay = hooks.perfOverlay;
+          const label = (): string => `Performance overlay: ${overlay.enabled ? 'on' : 'off'}`;
+          const index = devTools.length;
+          devButton(label(), () => {
+            overlay.setEnabled(!overlay.enabled);
+            const btn = devTools[index];
+            if (btn) btn.textContent = label();
+          });
         }
         if (import.meta.env.DEV && hooks.jumpToLake) {
           // Cycles through the first sites on each press rather than opening a screen

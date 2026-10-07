@@ -231,6 +231,8 @@ export class LoosePartField {
   private activeX = 0;
   private activeZ = 0;
   private loadRadiusSq = 0;
+  /** Set by `updateActive`; nothing materialises before it has run (`hasActiveCenter`). */
+  private groundUnder: (x: number, y: number, z: number) => boolean = () => false;
 
   constructor(
     private readonly physics: PhysicsWorld,
@@ -251,7 +253,14 @@ export class LoosePartField {
    * complete; only entries within the load radius gain a relative runtime, and an
    * already-live entry remains until it crosses the wider unload radius.
    */
-  updateActive(absoluteX: number, absoluteZ: number, loadRadius: number, unloadRadius: number): void {
+  updateActive(
+    absoluteX: number,
+    absoluteZ: number,
+    loadRadius: number,
+    unloadRadius: number,
+    /** Fixed ground under an ABSOLUTE point; see STATE_LOAD_RADIUS_M in world/ranges.ts. */
+    groundUnder: (x: number, y: number, z: number) => boolean,
+  ): void {
     if (
       !Number.isFinite(loadRadius) ||
       !Number.isFinite(unloadRadius) ||
@@ -265,23 +274,19 @@ export class LoosePartField {
     this.activeX = absoluteX;
     this.activeZ = absoluteZ;
     this.loadRadiusSq = loadRadius * loadRadius;
+    this.groundUnder = groundUnder;
 
+    // Out of range, or the ground under it taken away: back into state where it lies.
     const unloadRadiusSq = unloadRadius * unloadRadius;
     for (const [id, entry] of this.parts) {
-      const translation = entry.body.translation(this.tScratch);
-      const dx = translation.x + this.origin.x - absoluteX;
-      const dz = translation.z + this.origin.z - absoluteZ;
-      if (dx * dx + dz * dz <= unloadRadiusSq) continue;
+      if (this.keepsLive(entry, unloadRadiusSq)) continue;
       const loose = this.world.state.looseParts[id];
       if (loose) this.flushPose(entry, loose);
       this.disposeEntry(entry);
       this.parts.delete(id);
     }
     for (const [id, entry] of this.items) {
-      const translation = entry.body.translation(this.tScratch);
-      const dx = translation.x + this.origin.x - absoluteX;
-      const dz = translation.z + this.origin.z - absoluteZ;
-      if (dx * dx + dz * dz <= unloadRadiusSq) continue;
+      if (this.keepsLive(entry, unloadRadiusSq)) continue;
       const loose = this.world.state.looseItems[id];
       if (loose) this.flushPose(entry, loose);
       this.disposeEntry(entry);
@@ -291,13 +296,22 @@ export class LoosePartField {
     this.materialiseNearbyFromState();
   }
 
+  private keepsLive(entry: LooseEntry, unloadRadiusSq: number): boolean {
+    const t = entry.body.translation(this.tScratch);
+    const x = t.x + this.origin.x;
+    const z = t.z + this.origin.z;
+    const dx = x - this.activeX;
+    const dz = z - this.activeZ;
+    return dx * dx + dz * dz <= unloadRadiusSq && this.groundUnder(x, t.y, z);
+  }
+
   /**
    * Records a part into state and materialises its body + visual only when it is in
    * the active field. `x, y, z` are ABSOLUTE world coordinates.
    */
   spawn(part: PartInstance, x: number, y: number, z: number): void {
     this.world.apply({ t: 'part_drop', part, x, y, z });
-    if (!this.parts.has(part.id) && this.isInsideLoadRadius(x, z)) {
+    if (!this.parts.has(part.id) && this.isInsideLoadRadius(x, y, z)) {
       this.materialisePart(part, x, y, z);
     }
   }
@@ -308,7 +322,7 @@ export class LoosePartField {
    */
   spawnItem(item: Item, x: number, y: number, z: number): void {
     this.world.apply({ t: 'item_drop', item, x, y, z });
-    if (!this.items.has(item.id) && this.isInsideLoadRadius(x, z)) {
+    if (!this.items.has(item.id) && this.isInsideLoadRadius(x, y, z)) {
       this.materialiseItem(item, x, y, z);
     }
   }
@@ -410,24 +424,24 @@ export class LoosePartField {
   private readonly tScratch = { x: 0, y: 0, z: 0 };
   private readonly rScratch = { x: 0, y: 0, z: 0, w: 1 };
 
-  private isInsideLoadRadius(x: number, z: number): boolean {
+  private isInsideLoadRadius(x: number, y: number, z: number): boolean {
     if (!this.hasActiveCenter) return false;
     const dx = x - this.activeX;
     const dz = z - this.activeZ;
-    return dx * dx + dz * dz <= this.loadRadiusSq;
+    return dx * dx + dz * dz <= this.loadRadiusSq && this.groundUnder(x, y, z);
   }
 
   private materialiseNearbyFromState(): void {
     if (!this.hasActiveCenter) return;
     for (const id in this.world.state.looseParts) {
       const loose = this.world.state.looseParts[id]!;
-      if (!this.parts.has(id) && this.isInsideLoadRadius(loose.x, loose.z)) {
+      if (!this.parts.has(id) && this.isInsideLoadRadius(loose.x, loose.y, loose.z)) {
         this.materialisePart(loose.part, loose.x, loose.y, loose.z);
       }
     }
     for (const id in this.world.state.looseItems) {
       const loose = this.world.state.looseItems[id]!;
-      if (!this.items.has(id) && this.isInsideLoadRadius(loose.x, loose.z)) {
+      if (!this.items.has(id) && this.isInsideLoadRadius(loose.x, loose.y, loose.z)) {
         this.materialiseItem(loose.item, loose.x, loose.y, loose.z);
       }
     }

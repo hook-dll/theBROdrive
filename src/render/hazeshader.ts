@@ -463,6 +463,14 @@ export const HAZE_FRAGMENT = /* glsl */ `
 
   /** Strata the lattice repeats at vertically; see HAZE_PHASE_PERIOD. */
   const float PHASE_PERIOD = ${HAZE_PHASE_PERIOD.toFixed(1)};
+  /**
+   * Graze below the ground line past which a ray's shimmer boils in place instead of
+   * rising (\`strataLayer\`): 4 mrad meets flat ground about 800 m out from a 3 m eye,
+   * so everything nearer stands still and only the far rim keeps the climb.
+   */
+  const float BOIL_GRAZE_RAD = 0.004;
+  /** Lattice rows between two boil slices: far enough apart to be unrelated fields. */
+  const float BOIL_SLICE_SHIFT = 37.0;
   const float TURN = 6.28318530718;
 
   /** Unit view-space direction for a pixel. */
@@ -549,26 +557,51 @@ export const HAZE_FRAGMENT = /* glsl */ `
   }
 
   /**
+   * One octave of the strata at an (azimuth, elevation), as the field looks after
+   * \`phase\` strata of drift.
+   *
+   * RISING is the strata climbing the sky, which is what hot air over the horizon
+   * does. But a stratum is a band of constant ELEVATION, and on flat ground a band of
+   * constant elevation below the horizon is a circle round the camera: as it climbs,
+   * that circle runs out across the desert to the horizon and is gone. One strong
+   * stratum was the wide thin ring the player saw now and then, travelling away from
+   * him and vanishing (reported from play, seen about once a week).
+   *
+   * BOILING is the same lattice evolving in place instead: two time slices of it,
+   * crossfaded, so nothing travels. \`boil\` is how much of a ground-grazing ray takes
+   * that form (\`hazeWarp\`); the sky and the horizon keep rising.
+   */
+  float strataLayer(float azimuth, float elevation, float around, float up, float phase, float boil) {
+    float rising = boil >= 1.0 ? 0.0 : strataNoise(vec2(azimuth * around, elevation * up - phase), around);
+    if (boil <= 0.0) return rising;
+    float slice = floor(phase);
+    float t = phase - slice;
+    t = t * t * (3.0 - 2.0 * t);
+    float a = strataNoise(vec2(azimuth * around, elevation * up + slice * BOIL_SLICE_SHIFT), around);
+    float b = strataNoise(vec2(azimuth * around, elevation * up + (slice + 1.0) * BOIL_SLICE_SHIFT), around);
+    // A crossfade of two independent fields is quieter halfway; rescale so the
+    // boil does not pulse once a slice.
+    float boiling = mix(a, b, t) / sqrt(t * t + (1.0 - t) * (1.0 - t));
+    return mix(rising, boiling, boil);
+  }
+
+  /**
    * The stirred layer's refraction at a direction, as a displacement direction in
    * (lateral, vertical), each roughly in [-1, 1].
    *
-   * Two octaves of flat strata climbing at their own rates. Which octave dominates is
-   * a matter of range: the same eddies further off subtend less, so distant surfaces
-   * ripple finely and the middle distance broadly. Only the MIX follows depth — see
+   * Two octaves of flat strata at their own rates. Which octave dominates is a matter
+   * of range: the same eddies further off subtend less, so distant surfaces ripple
+   * finely and the middle distance broadly. Only the MIX follows depth — see
    * HAZE_FINE_ONSET_M for why the lattices themselves may not. The same two noises
    * form both channels with swapped weights; a second pair for the small lateral part
-   * would double the cost without adding visible structure.
+   * would double the cost without adding visible structure. Rays that meet the ground
+   * steeper than BOIL_GRAZE_RAD boil in place rather than rise (\`strataLayer\`).
    */
-  vec2 hazeWarp(vec3 dir, float distance) {
+  vec2 hazeWarp(vec3 dir, float distance, float climb) {
     float around = atan(dir.x, dir.z) / TURN + 0.5;
-    float broad = strataNoise(
-      vec2(around * BROAD_AROUND, dir.y * BROAD_UP - uHazePhase.x),
-      BROAD_AROUND
-    );
-    float fine = strataNoise(
-      vec2(around * FINE_AROUND, dir.y * FINE_UP - uHazePhase.y),
-      FINE_AROUND
-    );
+    float boil = smoothstep(0.0, BOIL_GRAZE_RAD, -climb);
+    float broad = strataLayer(around, dir.y, BROAD_AROUND, BROAD_UP, uHazePhase.x, boil);
+    float fine = strataLayer(around, dir.y, FINE_AROUND, FINE_UP, uHazePhase.y, boil);
     float broadShare = mix(0.8, 0.3, smoothstep(FINE_ONSET_M, FINE_FULL_M, distance));
     return vec2(
       (1.0 - broadShare) * broad - broadShare * fine,
@@ -721,7 +754,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
       // Most of the frame — steep sky, the road, the car — has no path through hot
       // air at all, and it skips the field and the second depth tap here.
       if (shimmerWeight > 1e-3) {
-        vec2 warp = hazeWarp(dir, distance);
+        vec2 warp = hazeWarp(dir, distance, climb);
         // Angle to screen. A displacement of a radians spans a / (2*tan(halfFov)) of
         // the frame height, and the same over the width with the aspect divided out —
         // which is what makes the boil magnify correctly under the binoculars instead

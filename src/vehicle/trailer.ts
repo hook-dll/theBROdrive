@@ -1556,6 +1556,8 @@ export class TrailerField {
     vehicleFor: (carId: string) => Vehicle | null,
     loadRadius: number,
     unloadRadius: number,
+    /** Fixed ground under an ABSOLUTE point; see STATE_LOAD_RADIUS_M in world/ranges.ts. */
+    groundUnder: (x: number, y: number, z: number) => boolean,
   ): void {
     if (!(loadRadius >= 0) || !(loadRadius < unloadRadius)) {
       throw new RangeError('TrailerField load radius must be non-negative and smaller than unload radius');
@@ -1586,18 +1588,20 @@ export class TrailerField {
       // trailers have no body, so only those fall back to their saved absolute pose.
       const position = trailer?.rigidBody.translation();
       const x = position ? position.x + this.origin.x : state.x;
+      const y = position ? position.y : state.y;
       const z = position ? position.z + this.origin.z : state.z;
       const dx = x - absoluteX;
       const dz = z - absoluteZ;
       const distanceSq = dx * dx + dz * dz;
       if (!trailer) {
-        if (distanceSq <= loadRadiusSq) this.materialise(state);
+        if (distanceSq <= loadRadiusSq && groundUnder(x, y, z)) this.materialise(state);
         continue;
       }
 
       // A joint owns a live physics relationship and must never be torn down by
-      // range streaming. In the normal path `vehicle` above keeps it alive.
-      if (!trailer.coupled && distanceSq > unloadRadiusSq) {
+      // range streaming. In the normal path `vehicle` above keeps it alive. A standing
+      // trailer whose ground has been taken away goes back into state where it stands.
+      if (!trailer.coupled && (distanceSq > unloadRadiusSq || !groundUnder(x, y, z))) {
         this.dematerialise(trailer);
       }
     }

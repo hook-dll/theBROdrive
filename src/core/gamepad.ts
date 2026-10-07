@@ -84,13 +84,9 @@ const RUMBLE_INTERVAL_MS = 80;
 
 /** One frame of rumble demand, levels 0..1. Reused by the caller, never retained. */
 export interface RumbleFrame {
-  /** Strong motor: suspension bumps, landings, impacts. */
+  /** Strong (low-frequency) motor; the game drives it with collisions (main.ts). */
   strong: number;
-  /**
-   * Weak motor: road texture under the tyres, tyre slide, lock-up, and the steering
-   * going light as the front tyres' aligning moment collapses past its peak — the one
-   * piece of steering feel a pad without force feedback can carry.
-   */
+  /** Weak (high-frequency) motor. */
   weak: number;
   /** Left trigger motor, 0..1; only used on pads that support trigger rumble. */
   leftTrigger: number;

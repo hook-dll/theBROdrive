@@ -19,6 +19,7 @@ import { benchCarState } from './benchcar';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { WorldOrigin, type RebaseShift } from '../src/world/origin';
 import { installAssetShim } from './assetshim';
+import { installDocumentShim } from './domshim';
 
 class BunProgressEvent extends Event implements ProgressEvent {
   readonly lengthComputable: boolean;
@@ -38,6 +39,8 @@ if (globalThis.ProgressEvent === undefined) globalThis.ProgressEvent = BunProgre
 const SEED = 0x5eed;
 const LOAD_RADIUS = 800;
 const UNLOAD_RADIUS = 1000;
+/** This bench is about radii, not ground: every point has some (see `hasFixedGroundBelow`). */
+const groundEverywhere = (): boolean => true;
 const NEAR_CENTER = { x: 0, z: 0 };
 const HYSTERESIS_CENTER = { x: 1000, z: 0 };
 const FAR_CENTER = { x: 3000, z: 0 };
@@ -102,6 +105,7 @@ async function preloadModels(): Promise<void> {
   // absent - this bench had been failing its own preload on that, before it measured
   // anything.
   installAssetShim();
+  installDocumentShim();
   try {
     await Promise.all([preloadTrailerModel(TRAILER_MODEL_FIT), preloadCarModels([TOW_MODEL_ID])]);
   } finally {
@@ -224,13 +228,14 @@ if (failures === 0) {
 
   const updateAt = (phase: string, center: { x: number; z: number }, expectedLoose: number, expectedTrailers: number): void => {
     reconcileVehicles(center);
-    loose.updateActive(center.x, center.z, LOAD_RADIUS, UNLOAD_RADIUS);
+    loose.updateActive(center.x, center.z, LOAD_RADIUS, UNLOAD_RADIUS, groundEverywhere);
     trailers.updateActive(
       center.x,
       center.z,
       (id) => activeVehicles.get(id) ?? null,
       LOAD_RADIUS,
       UNLOAD_RADIUS,
+      groundEverywhere,
     );
     check(`${phase}: loose live count`, loose.liveCount === expectedLoose, `${loose.liveCount}`);
     check(`${phase}: trailer live count`, trailers.liveCount === expectedTrailers, `${trailers.liveCount}`);
@@ -337,6 +342,7 @@ if (failures === 0) {
       (id) => activeVehicles.get(id) ?? null,
       LOAD_RADIUS,
       UNLOAD_RADIUS,
+      groundEverywhere,
     );
     tow = activeVehicles.get(TOW_CAR_ID) ?? null;
     const hitchedRuntime = trailers.get(hitchedState.id);
@@ -378,6 +384,7 @@ if (failures === 0) {
       (id) => activeVehicles.get(id) ?? null,
       LOAD_RADIUS,
       UNLOAD_RADIUS,
+      groundEverywhere,
     );
     tow = null;
     check('unhitched far towing car unloads', !activeVehicles.has(TOW_CAR_ID), `${activeVehicles.size} live cars`);

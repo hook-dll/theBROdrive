@@ -1,6 +1,7 @@
 import { TYRE_MODEL } from './vehicle/vehicletuning';
 import * as THREE from 'three';
 import { FrameProfiler } from './core/frameprofiler';
+import { PerfOverlay } from './ui/perfoverlay';
 import { installRetro, retroActive } from './render/retro';
 import { InputReader, emptyInput, type InputFrame } from './core/input';
 import { gamepads, PAD, type RumbleFrame } from './core/gamepad';
@@ -71,6 +72,12 @@ const LAMP_HANDOVER_S = 0.75;
 import { ContactPatchField } from './render/contactpatches';
 import { ChunkStreamer } from './world/chunks';
 import { DesertTileStreamer } from './world/deserttiles';
+import {
+  STATE_GROUND_PROBE_DOWN_M,
+  STATE_GROUND_PROBE_UP_M,
+  STATE_LOAD_RADIUS_M,
+  STATE_UNLOAD_RADIUS_M,
+} from './world/ranges';
 import { BoardableField, StartSiteProvider } from './story/sitebuild';
 import { createStartingCar, spawnStartingItems, storySite } from './story/site';
 import { TakeoffCutscene } from './story/takeoff';
@@ -166,14 +173,9 @@ const STICKER_WINK_PERIOD_S = 3.5;
  * one-second hitch covers 83 m; nothing but a teleport covers this.
  */
 const JUMP_REPROJECT_M = 250;
-/**
- * Objects enter the active physics/render world at the smaller radius and leave at
- * the larger one. The gap prevents lifetime churn at the streaming boundary.
- */
-const ACTIVE_LOAD_RADIUS = 800;
-const ACTIVE_UNLOAD_RADIUS = 1000;
-const ACTIVE_LOAD_RADIUS_SQUARED = ACTIVE_LOAD_RADIUS * ACTIVE_LOAD_RADIUS;
-const ACTIVE_UNLOAD_RADIUS_SQUARED = ACTIVE_UNLOAD_RADIUS * ACTIVE_UNLOAD_RADIUS;
+/** See STATE_LOAD_RADIUS_M in world/ranges.ts. */
+const ACTIVE_LOAD_RADIUS_SQUARED = STATE_LOAD_RADIUS_M * STATE_LOAD_RADIUS_M;
+const ACTIVE_UNLOAD_RADIUS_SQUARED = STATE_UNLOAD_RADIUS_M * STATE_UNLOAD_RADIUS_M;
 
 /** How often the record marker and player position are pushed into state. */
 const RECORD_INTERVAL = 2;
@@ -194,50 +196,17 @@ const MEDICINE_USE_SECONDS = 2;
 /** The lid leaves the held mesh here and continues as a world rigid body. */
 const MEDICINE_CAP_RELEASE_PROGRESS = 0.23;
 
-/* ---- controller rumble: how the car's telemetry becomes two motor strengths ---- */
+/* ---- controller rumble ---- */
 
 /**
- * Speed at which every rumble term is at full weight, m/s (72 km/h).
+ * A collision is full strong motor at this impact speed, m/s.
  *
- * The same signal is a different event at different speeds: a stone under the tyre at
- * a crawl is a click and at 100 km/h is a jolt, so the road-texture and bump terms
- * scale with speed and the collision terms do not — a crash is a crash.
+ * COLLISIONS ONLY. The pad used to carry the whole road: suspension bumps, the surface's
+ * texture under the tyres, slide, side slip and the steering going light. On these
+ * roads that is a motor running for the whole drive, and the player asked for the
+ * one event worth feeling in the hands — hitting something.
  */
-const RUMBLE_SPEED_FULL_MPS = 20;
-/**
- * Floor and ceiling of the suspension-bump channel, m/s of compression rate.
- *
- * The audio layer already publishes `bumpMps` as the fastest suspension compression
- * since it was last read, and it is the one signal that covers every road input from a
- * tar joint to a rock. The floor keeps the ordinary micro-bumps of a good road out of
- * the strong motor — that is what the weak motor is for — and the ceiling is a full
- * bump-stop strike.
- */
-const RUMBLE_BUMP_FLOOR_MPS = 0.35;
-const RUMBLE_BUMP_FULL_MPS = 2.2;
-/** A landing or a collision is full strong motor at these speeds, m/s. */
-const RUMBLE_LANDING_FULL_MPS = 3.5;
 const RUMBLE_IMPACT_FULL_MPS = 4;
-/**
- * Roughness (mean micro-bump amplitude under the loaded wheels, metres) at which the
- * road itself fills the weak motor; see `SURFACES[x].roughness`.
- */
-const RUMBLE_ROUGH_FULL_M = 0.02;
-/** Sideslip at which the tyres are howling, m/s, and the share of it the weak motor takes. */
-const RUMBLE_SLIP_FULL_MPS = 6;
-const RUMBLE_SLIP_SHARE = 0.7;
-/**
- * Share of the weak motor the steering going LIGHT claims (`Vehicle.steeringLightness`):
- * the front tyres past the peak of their aligning moment, the cue a real wheel gives in
- * the hands before the nose washes wide. Below the side-slip share, so a car already
- * sliding sideways still reads as sliding.
- */
-const RUMBLE_LIGHT_STEER_SHARE = 0.45;
-/**
- * How much of the strong motor a suspension bump claims on its own. Below one because
- * a bump and a landing can arrive together, and the landing should be what is felt.
- */
-const RUMBLE_BUMP_SHARE = 0.7;
 
 /** A rumble channel is a fraction of a motor's strength, so everything is clamped to 0..1. */
 function clamp01(x: number): number {
@@ -646,6 +615,22 @@ async function boot(): Promise<void> {
   );
   const frameProfiler = import.meta.env.DEV ? new FrameProfiler() : null;
   if (frameProfiler) (window as unknown as { __broSpikes: unknown }).__broSpikes = frameProfiler.spikes;
+  // The live graph (pause menu > Performance overlay); see ui/perfoverlay.ts.
+  const perfOverlay = frameProfiler
+    ? new PerfOverlay(uiRoot, {
+        profiler: frameProfiler,
+        gpuMs: () => renderer.latestGpuMs,
+        measuresGpu: () => renderer.measuresGpuTime,
+        frameCap: () => world.state.settings.frameRateLimit,
+        drawCalls: () => renderer.drawCalls,
+        triangles: () => renderer.drawnTriangles,
+        programs: () => renderer.renderer.info.programs?.length ?? 0,
+        textures: () => renderer.renderer.info.memory.textures,
+        geometries: () => renderer.renderer.info.memory.geometries,
+        bodies: () => physics.world.bodies.len(),
+        pixels: () => renderer.renderedPixels,
+      })
+    : null;
   let knownPrograms = 0;
 
   /**
@@ -835,6 +820,14 @@ async function boot(): Promise<void> {
   const race = new RivalRace(world.seed, road, traffic, loadCarModel, (text) => hud.setToast(text));
   /** Reused receiver for the HUD bead line; see `RivalRace.progress`. */
   const raceProgress = newRaceProgress();
+  /** Fixed ground somewhere under an ABSOLUTE point; see STATE_LOAD_RADIUS_M in world/ranges.ts. */
+  const groundUnder = (x: number, y: number, z: number): boolean =>
+    physics.hasFixedGroundBelow(
+      x - origin.x,
+      y + STATE_GROUND_PROBE_UP_M,
+      z - origin.z,
+      STATE_GROUND_PROBE_UP_M + STATE_GROUND_PROBE_DOWN_M,
+    );
   const reconcileActiveWorld = (anchorX: number, anchorZ: number): void => {
     const drivingId = world.state.player.drivingCarId;
     const cars = world.state.cars;
@@ -859,13 +852,13 @@ async function boot(): Promise<void> {
       if (vehicle) {
         if (id === drivingId || isTowingCar) continue;
         const position = vehicle.absoluteTranslation(originAnchor);
-        if (!withinRadius(
-          position.x,
-          position.z,
-          anchorX,
-          anchorZ,
-          ACTIVE_UNLOAD_RADIUS_SQUARED,
-        )) {
+        // Out of range, or the ground under it has been taken away (a desert tile
+        // demoted behind the player): back into state where it stands, rather than
+        // falling out of the world with nobody watching.
+        if (
+          !withinRadius(position.x, position.z, anchorX, anchorZ, ACTIVE_UNLOAD_RADIUS_SQUARED) ||
+          !groundUnder(position.x, position.y, position.z)
+        ) {
           vehicle.pushState();
           vehicle.dispose();
           vehicles.delete(id);
@@ -873,7 +866,7 @@ async function boot(): Promise<void> {
       } else if (
         id === drivingId ||
         isTowingCar ||
-        withinRadius(car.x, car.z, anchorX, anchorZ, ACTIVE_LOAD_RADIUS_SQUARED)
+        (withinRadius(car.x, car.z, anchorX, anchorZ, ACTIVE_LOAD_RADIUS_SQUARED) && groundUnder(car.x, car.y, car.z))
       ) {
         void materializeVehicle(car).catch((error: unknown) => {
           console.error(`failed to load car model "${car.modelId}"`, error);
@@ -885,13 +878,14 @@ async function boot(): Promise<void> {
       anchorX,
       anchorZ,
       trailerVehicleFor,
-      ACTIVE_LOAD_RADIUS,
-      ACTIVE_UNLOAD_RADIUS,
+      STATE_LOAD_RADIUS_M,
+      STATE_UNLOAD_RADIUS_M,
+      groundUnder,
     );
     // After the cars: a bar whose state says two cars are coupled gets its joint
     // back only when both have live bodies, so this must follow the loop above.
     carTowField.syncFromState();
-    loose.updateActive(anchorX, anchorZ, ACTIVE_LOAD_RADIUS, ACTIVE_UNLOAD_RADIUS);
+    loose.updateActive(anchorX, anchorZ, STATE_LOAD_RADIUS_M, STATE_UNLOAD_RADIUS_M, groundUnder);
   };
 
   /**
@@ -2172,49 +2166,12 @@ async function boot(): Promise<void> {
       return;
     }
 
-    // Read the car's telemetry BEFORE the audio layer consumes it: `bumpMps`,
-    // `landingImpactMps` and `impactMps` are event accumulators that whoever voices
-    // them zeroes on read, so this is the last place they can be seen.
-    const telemetry = driving.audio;
-    const wheels = driving.wheelSpray;
-    const rides = driving.wheelRide;
-    const speed = Math.abs(telemetry.forwardMps);
-    const speedWeight = clamp01(speed / RUMBLE_SPEED_FULL_MPS);
-
-    // Strong motor: what the chassis took. A landing and a collision are their own
-    // events; the suspension's compression rate covers everything else the road does.
-    const bump =
-      clamp01((telemetry.bumpMps - RUMBLE_BUMP_FLOOR_MPS) / (RUMBLE_BUMP_FULL_MPS - RUMBLE_BUMP_FLOOR_MPS))
-      * speedWeight;
-    const landing = clamp01(telemetry.landingImpactMps / RUMBLE_LANDING_FULL_MPS);
-    const impact = clamp01(telemetry.impactMps / RUMBLE_IMPACT_FULL_MPS);
-    rumbleFrame.strong = Math.max(landing, impact, bump * RUMBLE_BUMP_SHARE) * gain;
-
-    // Weak motor: what the tyres are doing to the ground — the road's own texture under
-    // the loaded wheels, a tyre dragged past the peak of its curve, side slip, and the
-    // front tyres' aligning moment collapsing (the steering going light).
-    const texture =
-      clamp01(telemetry.surfaceRoughness / RUMBLE_ROUGH_FULL_M)
-      * telemetry.wheelContactFraction
-      * speedWeight;
-    let slide = Math.max(telemetry.frontLockT, telemetry.rearLockT);
-    for (const wheel of wheels) if (wheel.slideSlip > slide) slide = wheel.slideSlip;
-    const sideslip = clamp01(telemetry.lateralSlipMps / RUMBLE_SLIP_FULL_MPS) * RUMBLE_SLIP_SHARE;
-    const light = driving.steeringLightness * speedWeight * RUMBLE_LIGHT_STEER_SHARE;
-    rumbleFrame.weak = clamp01(Math.max(texture, slide, sideslip, light)) * gain;
-
-    // Trigger motors, on the pads that have them: the front tyres' own slip, by side, so
-    // a wheelspin or a lock-up is felt in the trigger that axle steers with.
+    // Read BEFORE the audio layer consumes it: `impactMps` is an event accumulator that
+    // whoever voices it zeroes on read, so this is the last place it can be seen.
+    rumbleFrame.strong = clamp01(driving.audio.impactMps / RUMBLE_IMPACT_FULL_MPS) * gain;
+    rumbleFrame.weak = 0;
     rumbleFrame.leftTrigger = 0;
     rumbleFrame.rightTrigger = 0;
-    for (let i = 0; i < wheels.length; i++) {
-      const ride = rides[i];
-      const wheel = wheels[i];
-      if (ride === undefined || wheel === undefined || !ride.isFront) continue;
-      const slip = clamp01(wheel.slideSlip) * gain;
-      if (ride.sideSign < 0) rumbleFrame.leftTrigger = slip;
-      else rumbleFrame.rightTrigger = slip;
-    }
     pads.vibrate(rumbleFrame, performance.now());
   };
 
@@ -2823,6 +2780,7 @@ async function boot(): Promise<void> {
       frameProfiler.spikeNote = () => (fresh.length ? `new programs: ${fresh.join(', ')}` : undefined);
     }
     frameProfiler?.endFrame();
+    perfOverlay?.frame();
   };
 
   // The simulation is wrapped rather than instrumented from the inside: a tick is one
@@ -2848,6 +2806,7 @@ async function boot(): Promise<void> {
   const pauseHooks: PauseHooks = {
     settings: () => world.state.settings,
     frameReport,
+    perfOverlay: perfOverlay ?? undefined,
     viewport: () => renderer.viewport(),
     /**
      * Throw away the recorded verdict and measure this machine again.

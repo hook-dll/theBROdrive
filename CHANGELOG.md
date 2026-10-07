@@ -4,6 +4,39 @@
 
 ### Added
 
+- PERFORMANCE OVERLAY (dev builds, `ui/perfoverlay.ts`). Pause › Performance overlay
+  toggles a translucent graph across the top of the screen, remembered between
+  reloads: one column per presented frame (~8 s), main-thread CPU stacked by physics,
+  traffic, world streaming, the rest of the tick, draw submission and the rest of the
+  render; the remainder of the interval in grey; the GPU's own time per frame as a
+  line where the browser has a timer query; the budget line; long tasks in red. The
+  header names the limit over the last second (GPU, CPU main with its biggest
+  section, the frame cap, or vsync) beside draws, triangles, pixels, programs, JS heap,
+  three.js textures/geometries and physics bodies. Fed by `FrameProfiler.last` and
+  `Renderer.latestGpuMs`.
+- STUCK CARS START SMALL (`vehicle/autopilot.ts`, `RECOVERY_RUNG_*`). The escape ladder
+  goes from gentle to decisive instead of starting decisive: rung 0 backs 1.8 m at
+  1.1 m/s and 0.55 lock, then 3.2/5/7.5 m up to full lock; the reverse is measured in
+  metres, speed-capped, and a pull-out crawls at 2.5-4.5 m/s. The escape turns away
+  from an indexed prop within 6 m, but swings toward the opposing lane only with
+  160 m of it clear (`oncomingGap`). A car whose tail is boxed in waits up to 2.5 s
+  for room, and the cars behind give at most 2.5 m each at 0.8 m/s. Measured on the
+  real road at 150 km with a rock in one lane: 23 escapes in 2 min, rungs 10/8/3/2,
+  yielders gave at most 3.0 m (was 6.6 m).
+- SAVED OBJECTS ONLY LIVE ON GROUND. Parked and working cars, standing trailers, loose
+  parts and items get a body only with fixed ground under them
+  (`PhysicsWorld.hasFixedGroundBelow`, `STATE_*` in world/ranges.ts), and go back into
+  state where they stand when it is taken away. A car left 80 m off the road while
+  the player walked 700 m off went dormant at its parked height (340.52 m) and came
+  back to it; its desert tile had been demoted under it, which used to drop it out of
+  the world.
+- GAMEPAD RUMBLE ON COLLISIONS ONLY. Road texture, bumps, landings, slides and the
+  steering going light no longer drive the motors (`RUMBLE_IMPACT_FULL_MPS`, main.ts).
+- HEAT SHIMMER ON THE GROUND BOILS IN PLACE (`render/hazeshader.ts`, `strataLayer`).
+  The strata used to climb in elevation everywhere, and on flat ground a band of
+  constant elevation is a circle round the camera: a strong one read as a wide thin
+  ring running out to the horizon and vanishing. Rays meeting the ground steeper than
+  4 mrad now crossfade time slices in place; the horizon and sky keep the climb.
 - DASHBOARD TELLTALES AND INSETS (`ui/hud.ts`). A row under the steering strip carries
   the green indicator arrows (blinking in phase with the car's own lamps), the green
   dipped-beam and blue main-beam lamps; the headlight toasts are gone, the dash is the
