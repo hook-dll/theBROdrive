@@ -801,6 +801,8 @@ const VERGE_BEND_LOOK_MIN_M = 40;
 const VERGE_BEND_SAMPLES = 4;
 /** Going round something standing still with the body on the verge, m/s: 60 km/h. */
 const VERGE_BYPASS_STILL_MPS = 60 / 3.6;
+/** Braking a driver plans with to stop at a bottleneck hold line, m/s². */
+const HOLD_LINE_DECEL_MPS2 = 3;
 /**
  * A PASS ON THE VERGE HAS TO BE GAINING. The loose ground out there costs grip and
  * rolling drag the asphalt does not, and a car that could not find its advantage sat
@@ -914,6 +916,8 @@ const OFFROAD_LANE_TOLERANCE_M = 0.35;
 const OFFROAD_HEADING_TOLERANCE_RAD = 0.14;
 /** Loose sand has almost no lateral grip: turn at walking pace, not at 29 km/h. */
 const OFFROAD_SPEED_MPS = 3.5;
+/** Heading off the road beyond which a driver crawls; see its use. 35°. */
+const TURNED_AWAY_RAD = 0.6;
 const OFFROAD_BRAKE_MAX = 0.7;
 /** Brake a developing road departure before loose-surface momentum makes it unrecoverable. */
 const EDGE_STABILITY_LATERAL_M = 1.6;
@@ -1701,6 +1705,8 @@ export class Autopilot {
   private shelterArrived = false;
   /** The pedal share threshold braking allows this step; see `modulateBrake`. */
   private brakeScale = 1;
+  /** See `setHoldDistance`. */
+  private holdDistance = Infinity;
   /** Share of the mode's pace this driver uses; see `setPace`. */
   private paceValue = 1;
   /** Ambient traffic may use a per-driver following distance. */
@@ -2351,6 +2357,11 @@ export class Autopilot {
    */
   setSpeedCap(mps: number): void { this.speedCapValue = mps; }
   /**
+   * Metres to a line this driver must stop at, or Infinity. Set by the traffic
+   * coordinator every step it applies; see `assignBottleneckTurns` in traffic.ts.
+   */
+  setHoldDistance(metres: number): void { this.holdDistance = metres; }
+  /**
    * HOW MUCH OF THE AVAILABLE ROAD THIS DRIVER USES, as a fraction of its mode's pace.
    *
    * An absolute ceiling in km/h is not a character: on any road where the surface is
@@ -2671,6 +2682,8 @@ export class Autopilot {
   }
   /** Pulled over with the hazards on, waiting out a haboob's dust; see weatherpace.ts. */
   get sheltering(): boolean { return this.shelteringValue; }
+  /** The line the plan wants this step, driver frame; see `planLine`. */
+  get plannedLine(): number { return this.planLine; }
   /** Whether this driver's mode passes slower cars at all, across the crown or between lanes. */
   get overtakes(): boolean {
     const config = MODES[this.modeValue];
@@ -4842,6 +4855,14 @@ export class Autopilot {
       );
     }
     if (!plan.admissible) targetSpeed = 0;
+    // Held at a bottleneck so a car waiting there can go through (traffic.ts
+    // `assignBottleneckTurns`): stop at the line, gently, as at a give-way sign.
+    if (this.holdDistance < Infinity) {
+      targetSpeed = Math.min(
+        targetSpeed,
+        this.holdDistance <= 0 ? 0 : Math.sqrt(2 * HOLD_LINE_DECEL_MPS2 * this.holdDistance),
+      );
+    }
     // Sheltering: slow to a crawl while the body is still moving over to the edge,
     // then stop and wait there. Before the stall rule reads it, so a car waiting out
     // the dust on purpose is never taken for one that is stuck.
@@ -4854,6 +4875,11 @@ export class Autopilot {
     // departure limits below, which are a different problem with a different pedal.
     const obstacleLimitSpeed = targetSpeed;
     if (offRoad) targetSpeed = Math.min(targetSpeed, OFFROAD_SPEED_MPS);
+    // POINTED AWAY FROM THE ROAD, A CAR CRAWLS UNTIL IT IS POINTED ALONG IT. Measured at
+    // 31.27 km: a car handed back from a pull-out with its nose 40° off the road drove on
+    // at full throttle and full lock, slid across the loose verge instead of turning,
+    // and rolled on the slope beyond. At walking pace the tyres turn it.
+    if (Math.abs(headingError) > TURNED_AWAY_RAD) targetSpeed = Math.min(targetSpeed, OFFROAD_SPEED_MPS);
     if (edgeStability) targetSpeed = Math.min(targetSpeed, OFFROAD_SPEED_MPS);
     // What the driver WANTED before the bumper veto. A nose scan against scenery is
     // the very situation the stall rule exists for, so it must not be the thing

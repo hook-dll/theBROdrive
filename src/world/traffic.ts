@@ -245,6 +245,22 @@ const STUCK_SPEED_KMH = 2;
 const STUCK_RECYCLE_S = 18;
 /** Metres below the road surface at which a car has fallen out of the world. */
 const FELL_OUT_M = 30;
+/** A car standing below this, m/s, with its plan wanting this far across, is blocked. */
+const BOTTLENECK_STILL_MPS = 1;
+const BOTTLENECK_ACROSS_M = 0.8;
+/** Seconds blocked at the head before the road gives it a turn. */
+const BOTTLENECK_WAIT_S = 4;
+/** Length of the narrowing a turn clears, metres past where the car stood. */
+const BOTTLENECK_ZONE_M = 40;
+/** Held cars in its own direction stop this far behind where it stood. */
+const BOTTLENECK_BEHIND_M = 8;
+/** Cars within this of the needed line are in its way; how far ahead holds reach. */
+const BOTTLENECK_LANE_M = 2.6;
+const BOTTLENECK_REACH_M = 200;
+/** Braking a held car is asked for; nearer than that it goes through first. */
+const BOTTLENECK_DECEL_MPS2 = 3;
+/** A turn not used in this long is given up. */
+const BOTTLENECK_TURN_MAX_S = 20;
 /** Even samples keep the local density response cheap and free of profile chatter. */
 const DENSITY_PROFILE_SAMPLES = 5;
 const CLOCK_SYNC_S = 1;
@@ -504,6 +520,14 @@ interface TrafficCar {
   railsHoldoff: number;
   /** Driven for a race (see `RivalSpawn`): exempt from trim, recycle and the count. */
   rival: boolean;
+  /**
+   * Seconds this car has stood at the head of a bottleneck: stopped, and either wanting
+   * across (its plan's line is off its own) or held so someone else can go. The turn
+   * goes to the longest wait; see `assignBottleneckTurns`.
+   */
+  headWait: number;
+  /** Arclength of the line it is held at, or null; see `assignBottleneckTurns`. */
+  holdS: number | null;
 }
 
 const FORWARD_QUEUE_ORDER = (a: TrafficCar, b: TrafficCar): number =>
@@ -916,6 +940,78 @@ export class RoadTraffic {
   }
 
   /**
+   * TAKING TURNS AT A BOTTLENECK. A stone in one lane leaves the cars behind it needing
+   * the lane beside — the next lane over, or the oncoming one on a two-lane road — and
+   * that lane, on a busy road, never has a gap: measured at 100.48 km (seed 1337), the
+   * blocked side waited a median 47 s and up to three and a half minutes, while drivers
+   * that tried their luck wedged themselves against the stone.
+   *
+   * So the road takes turns, the way people do at a narrowing. The car that has stood
+   * at the head longest gets the turn: everything heading for the room it needs is held
+   * at a line — behind it in the same direction, before the far end of the narrowing
+   * coming the other way — except what is already too close to stop comfortably, which
+   * goes through first. The turn lasts until it has gone `BOTTLENECK_ZONE_M` past where
+   * it stood. A held car accumulates its own wait, so when the turn ends the other side
+   * is the longest-waiting and gets the next one: the turns alternate.
+   */
+  private readonly bottleneckTurns = new Map<string, { startS: number; age: number }>();
+  private assignBottleneckTurns(dt: number): void {
+    for (const car of this.carList) {
+      const wantsAcross = Math.abs(this.plannedRoadLine(car) - car.roadLateral) > BOTTLENECK_ACROSS_M;
+      const standing = !car.rails && car.settleFor <= 0 && Math.abs(car.forwardSpeed) < BOTTLENECK_STILL_MPS;
+      car.headWait = standing && (wantsAcross || car.holdS !== null) ? car.headWait + dt : 0;
+      car.holdS = null;
+    }
+    // Turns in progress keep their holds until the car is through, or gives up.
+    for (const [id, turn] of this.bottleneckTurns) {
+      const car = this.carList.find((c) => c.id === id);
+      turn.age += dt;
+      if (!car || turn.age > BOTTLENECK_TURN_MAX_S || (car.forwardS - turn.startS) * car.direction > BOTTLENECK_ZONE_M) {
+        this.bottleneckTurns.delete(id);
+      }
+    }
+    for (const car of this.carList) {
+      if (car.headWait < BOTTLENECK_WAIT_S || this.bottleneckTurns.has(car.id)) continue;
+      let taken = false;
+      for (const turn of this.bottleneckTurns.values()) {
+        if (Math.abs(turn.startS - car.forwardS) < BOTTLENECK_ZONE_M * 2) taken = true;
+      }
+      if (taken) continue;
+      // The longest wait in this neighbourhood takes it; the others are held by it.
+      let longest = true;
+      for (const other of this.carList) {
+        if (other !== car && other.headWait > car.headWait && Math.abs(other.forwardS - car.forwardS) < BOTTLENECK_ZONE_M * 2) {
+          longest = false;
+          break;
+        }
+      }
+      if (longest) this.bottleneckTurns.set(car.id, { startS: car.forwardS, age: 0 });
+    }
+    for (const [id, turn] of this.bottleneckTurns) {
+      const owner = this.carList.find((c) => c.id === id);
+      if (!owner) continue;
+      const line = this.plannedRoadLine(owner);
+      for (const car of this.carList) {
+        if (car === owner || car.rails) continue;
+        if (Math.abs(car.roadLateral - line) > BOTTLENECK_LANE_M) continue;
+        const stopS = car.direction === owner.direction
+          ? turn.startS - owner.direction * BOTTLENECK_BEHIND_M
+          : turn.startS + owner.direction * BOTTLENECK_ZONE_M;
+        const distance = (stopS - car.forwardS) * car.direction;
+        if (distance < 0 || distance > BOTTLENECK_REACH_M) continue;
+        const speed = Math.max(0, car.forwardSpeed * car.direction);
+        if (car.headWait === 0 && distance < (speed * speed) / (2 * BOTTLENECK_DECEL_MPS2) + 2) continue;
+        if (car.holdS === null || (car.holdS - car.forwardS) * car.direction > distance) car.holdS = stopS;
+      }
+    }
+  }
+
+  /** The line a car's plan wants, in the road frame (drivers plan in their own). */
+  private plannedRoadLine(car: TrafficCar): number {
+    return car.direction > 0 ? car.autopilot.plannedLine : -car.autopilot.plannedLine;
+  }
+
+  /**
    * WHEN THE HEAD OF A QUEUE HAS TO BACK UP, THE QUEUE BACKS UP WITH IT.
    *
    * A car wedged against a rock reverses out of it — and cannot, because the next
@@ -1175,6 +1271,7 @@ export class RoadTraffic {
       this.assignDeadlockPermissions();
       this.assignReverseRoom();
       this.assignPassPermissions();
+      this.assignBottleneckTurns(COORDINATION_INTERVAL_S);
     }
     for (let i = this.carList.length - 1; i >= 0; i--) {
       const car = this.carList[i]!;
@@ -1191,6 +1288,9 @@ export class RoadTraffic {
       if (coordinate) {
         car.autopilot.setOncomingGap(this.nearestOncomingDistance(car.forwardS, car.direction, car.id));
       }
+      car.autopilot.setHoldDistance(
+        car.holdS === null ? Infinity : (car.holdS - car.forwardS) * car.direction,
+      );
       car.lifetimeTimer -= dt;
       // A CAR THAT HAS BEEN STANDING STILL FOR HALF A MINUTE IS NOT TRAFFIC.
       //
@@ -1831,6 +1931,8 @@ export class RoadTraffic {
       rails: null,
       railsHoldoff: 0,
       rival: false,
+      headWait: 0,
+      holdS: null,
     };
     // The field reads the record's live arclength and direction, so it keeps working
     // as the car drives and, after a turnaround, as its direction flips.

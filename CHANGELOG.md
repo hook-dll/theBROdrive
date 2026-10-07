@@ -39,6 +39,16 @@
 - GHOST RIVALS WANDER: each has its own slow ±8% pace swell along the road and
   spells held up at 75% behind traffic, instead of closing on the finish metre for
   metre at one speed.
+- TRAFFIC STAYS ON THE GROUND. Every visual desert tile is solid now (5×5, was 3×3):
+  beyond ~400 m a car that touched the verge fell out of the world for good. A car
+  30 m below the road is removed. Measured at seed 1337, 100.5 km, 8 min on High:
+  flips 5 → 1, impacts 64 → 26.
+- AI DRIVING: verge speed set by the bend ahead (2.5 m/s² on loose stone) and 60 km/h
+  past anything standing; threshold braking instead of locked wheels; the racing
+  line's edge margin grows with speed; rolling spawns launch at a speed they can stop
+  from behind the queue ahead; a car turned more than 35° from the road crawls.
+- BOTTLENECKS TAKE TURNS: a car blocked at a stone for 4 s gets the turn and the
+  traffic in the lane it needs is held at a line; held cars earn the next turn.
 - XBOX CONTROLLER (`core/gamepad.ts`, see `CONTROLS.md`). Left stick steers as a
   position, RT/LT are analog throttle and brake, every driving and on-foot action has a
   button, the right stick looks. Menus, pause and settings work from the pad. The last
