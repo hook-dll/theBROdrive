@@ -527,9 +527,10 @@ const CLOUD_VERTEX_HOOK = /* glsl */ `#include <worldpos_vertex>
 /**
  * A DRY road shows other cars' headlamps too — the long soft sheen oncoming lights
  * lay on night asphalt — at this share of the wet streak's strength and this many
- * times its width.
+ * times its width. Dimmer than wet, as rough aggregate should be: at 2.2 it was
+ * brighter, and every oncoming car laid a burnt-white bar up the road at you.
  */
-const DRY_GLARE_SHARE = 2.2;
+const DRY_GLARE_SHARE = 0.85;
 const DRY_GLARE_SPREAD = 1.5;
 
 const CLOUD_FRAGMENT_HOOK = /* glsl */ `
@@ -590,7 +591,11 @@ const CLOUD_FRAGMENT_HOOK = /* glsl */ `
 				float aim = smoothstep( 0.0, 0.6, dot( normalize( lampFwd - gN * dot( lampFwd, gN ) ), pathDir ) );
 				glare += band * aim * uGlarePos[ i ].w / ( 1.0 + pathLen / 80.0 );
 			}
-		outgoingLight += vec3( 1.0, 0.93, 0.8 ) * glare * glareFresnel * glareGain;
+		// Saturating, not added flat: the scene pass has no tone-mapping shoulder, so a
+		// streak summed past 1 clipped to a white bar. x / (1 + x) keeps a faint sheen
+		// linear and rolls a strong one off below paper white.
+		vec3 glareLevel = glare * glareFresnel * glareGain;
+		outgoingLight += vec3( 1.0, 0.93, 0.8 ) * ( glareLevel / ( 1.0 + glareLevel ) );
 	}
 	#endif
 #include <opaque_fragment>`;

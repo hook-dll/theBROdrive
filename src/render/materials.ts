@@ -119,6 +119,22 @@ const CAR_BODY_PROGRAM_KEY = 'car-body-condition-v3';
 const CAR_STICKER_PROGRAM_KEY = 'car-sticker-decal-v1';
 
 /**
+ * NIGHT ROLL-OFF FOR LAMPLIT BODYWORK, 0 by day and 1 at night (main.ts drives it from
+ * `sky.artificialLightFactor`). The scene pass has no tone-mapping shoulder, and the
+ * headlamps are tuned for road met at a grazing angle: the back of a car 16 m ahead
+ * faces the lamp square on and takes nearly ten times that light, so it clipped to a
+ * flat block — a dusty one (sand albedo ~0.5 under a warm beam) to a glowing orange
+ * slab with no shape left. Above 0.7 each channel is rolled off towards 1 instead, so
+ * the panel keeps its shading. Shared by every car's paint and sticker decals.
+ */
+export const CAR_LAMP_KNEE = { value: 0 };
+const CAR_LAMP_KNEE_FRAGMENT = `if ( uLampKnee > 0.0 ) {
+  vec3 lampOver = max( outgoingLight - 0.7, 0.0 );
+  outgoingLight = mix( outgoingLight, outgoingLight - lampOver + lampOver / ( 1.0 + lampOver / 0.3 ), uLampKnee );
+}
+#include <opaque_fragment>`;
+
+/**
  * Name of the vertex attribute carrying each paint vertex's chassis-local position
  * (see `render/carmodel.ts`). Car bodies are several meshes, each with its own local
  * frame and a non-uniform fit scale, so neither the mesh-local nor the world position
@@ -248,6 +264,7 @@ vCarBodyPos = ${CAR_BODY_POSITION_ATTRIBUTE};`;
  * non-uniform control flow is undefined.
  */
 const CAR_WEAR_PARS = `uniform float uDirt;
+uniform float uLampKnee;
 uniform vec3 uDustLight;
 uniform vec3 uDustCrust;
 uniform vec3 uDustFilm;
@@ -527,6 +544,7 @@ function patchCarBodyShader(
   shader.uniforms.uPalettePaintColor = uniforms.paintColor;
   shader.uniforms.uPalettePaintCell = uniforms.paintCell;
   shader.uniforms.uHighlight = uniforms.highlight;
+  shader.uniforms.uLampKnee = CAR_LAMP_KNEE;
 
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', CAR_BODY_VERTEX_PARS)
@@ -538,6 +556,7 @@ function patchCarBodyShader(
   shader.fragmentShader = shader.fragmentShader
     .replace('#include <common>', unified ? CAR_BODY_PARS + CAR_ATLAS_FINISH : CAR_BODY_PARS)
     .replace('#include <map_fragment>', CAR_PAINT_MAP)
+    .replace('#include <opaque_fragment>', CAR_LAMP_KNEE_FRAGMENT)
     .replace(
       '#include <normal_fragment_maps>',
       (unified ? CAR_ATLAS_FINISH_PAINT + CAR_BODY_CONDITION : CAR_BODY_CONDITION) + CAR_HIGHLIGHT,
@@ -1024,6 +1043,7 @@ export function makeCarStickerMaterial(frame: CarGrimeFrame | null, opacity = 1)
   const print = { value: opacity };
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uOpacity = print;
+    shader.uniforms.uLampKnee = CAR_LAMP_KNEE;
     if (frame) {
       shader.uniforms.uDirt = frame.dirt;
       shader.uniforms.uScratch = frame.scratches;
@@ -1038,6 +1058,7 @@ export function makeCarStickerMaterial(frame: CarGrimeFrame | null, opacity = 1)
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', STICKER_DECAL_FRAGMENT_PARS)
       .replace('#include <map_fragment>', STICKER_DECAL_MAP)
+      .replace('#include <opaque_fragment>', CAR_LAMP_KNEE_FRAGMENT)
       .replace('#include <normal_fragment_maps>', STICKER_DECAL_WEAR)
       .replace(
         '#include <alphatest_fragment>',

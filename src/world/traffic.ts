@@ -179,6 +179,8 @@ const FRANTIC_ENGINE_ID = 'engine_bmw_m30';
 const PLATOON_MAX_CHAIN = 4;
 /** Floor under the headway-derived follow gap: body clearance, not a target distance. */
 const PLATOON_MIN_GAP_M = 15;
+/** Braking a rival put down behind a slower car is allowed to need, m/s²: a firm, ordinary stop. */
+const RIVAL_SPAWN_BRAKE_MPS2 = 3;
 const SPAWN_HAZARD_GAP_M = 18;
 /** Never materialize an opposing car inside a pass that was clear when committed. */
 const PASSING_SPAWN_EXCLUSION_M = 300;
@@ -1664,7 +1666,7 @@ export class RoadTraffic {
     ) {
       return;
     }
-    const record = this.placeCar(request, null, null);
+    const record = this.placeCar(request, null, null, false);
     if (record) this.queuePlatoonMate(record, request.platoonChain ?? PLATOON_MAX_CHAIN);
   }
 
@@ -1674,13 +1676,16 @@ export class RoadTraffic {
    * changed when it is not. `launchSpeed` null is the ordinary rolling start; `cargo`
    * goes into the boot before the body exists, so its mass is there from the first step.
    */
-  private placeCar(request: PendingSpawn, launchSpeed: number | null, cargo: Item | null): TrafficCar | null {
+  private placeCar(request: PendingSpawn, launchSpeed: number | null, cargo: Item | null, rival: boolean): TrafficCar | null {
     const offset = request.forwardS - this.playerS;
     const measure = carModelMeasure(request.modelId);
     const bodyRadius = Math.hypot(...measure.halfExtents);
     if (
       request.lane >= this.road.lanesPerSideAt(request.forwardS) ||
-      !this.spawnSiteClear(request.forwardS, request.direction, request.lane, measure.halfExtents[0], bodyRadius)
+      !this.spawnSiteClear(
+        request.forwardS, request.direction, request.lane, measure.halfExtents[0], bodyRadius,
+        null, rival ? (launchSpeed ?? 0) : -1,
+      )
     ) {
       return null;
     }
@@ -1841,7 +1846,7 @@ export class RoadTraffic {
       () => {
         if (request.generation !== this.generation) return false;
         if (this.carList.some((car) => car.id === spec.id)) return false;
-        const record = this.placeCar(request, spec.speed, spec.cargo);
+        const record = this.placeCar(request, spec.speed, spec.cargo, true);
         if (!record) return false;
         record.rival = true;
         return true;
@@ -2042,10 +2047,18 @@ export class RoadTraffic {
      * platoon mate sit close behind the specific leader it was placed for.
      */
     platoonLeaderId: string | null = null,
+    /**
+     * A race rival's launch speed, m/s, or -1 for an ordinary spawn: for a rival every
+     * car's gap is a following distance (with the room to shed any closing speed), not
+     * the flat spacing floor. The stream's even spacing is a look; a rival that could
+     * not appear because a car stood 60 m ahead of its site drove into view as an
+     * invisible ghost instead. A follower's stopping room is still required in full.
+     */
+    rivalSpeed = -1,
   ): boolean {
     const laneHalfWidth = laneHalfWidthFor(this.road.halfWidthAt(s), lane);
     if (laneHalfWidth < TRAFFIC_HALF_WIDTH_M) return false;
-    if (!this.roadGapClear(s, direction, lane, halfWidth, halfLength, platoonLeaderId)) return false;
+    if (!this.roadGapClear(s, direction, lane, halfWidth, halfLength, platoonLeaderId, rivalSpeed)) return false;
     const lateral = this.forwardLaneCentreAt(s, direction, lane);
     let clear = true;
     this.hazards.forEachAhead(
@@ -2066,6 +2079,7 @@ export class RoadTraffic {
     s: number, direction: TrafficDirection, lane: number,
     halfWidth = TRAFFIC_HALF_WIDTH_M, halfLength = NEIGHBOUR_HALF_LENGTH_M,
     platoonLeaderId: string | null = null,
+    rivalSpeed = -1,
   ): boolean {
     const sameDirectionGap =
       this.desiredCount > this.trafficCaps.narrow ? DENSE_SPAWN_ROAD_GAP_M : SPAWN_ROAD_GAP_M;
@@ -2074,7 +2088,11 @@ export class RoadTraffic {
       const gap = Math.abs(car.forwardS - s);
       if (car.direction === direction && Math.abs(car.roadLateral - lateral) <= car.roadHalfWidth + halfWidth) {
         const spawnIsAhead = (s - car.forwardS) * direction > 0;
-        let requiredGap = car.id === platoonLeaderId ? PLATOON_MIN_GAP_M : sameDirectionGap;
+        const rival = rivalSpeed >= 0;
+        const closing = Math.max(0, rivalSpeed - Math.max(0, car.forwardSpeed * direction));
+        let requiredGap = rival
+          ? PLATOON_MIN_GAP_M + (closing * closing) / (2 * RIVAL_SPAWN_BRAKE_MPS2)
+          : car.id === platoonLeaderId ? PLATOON_MIN_GAP_M : sameDirectionGap;
         if (spawnIsAhead) {
           // A stationary spawn must leave a moving follower room to stop. Its
           // recorded spawn lane is irrelevant after a merge, taper or overtake.
@@ -2089,7 +2107,7 @@ export class RoadTraffic {
             ? brake > 0 ? speed * speed / (2 * brake) : Infinity
             : 0;
           requiredGap = Math.max(
-            SPAWN_ROAD_GAP_M,
+            rival ? PLATOON_MIN_GAP_M : SPAWN_ROAD_GAP_M,
             car.bodyRadius + halfLength + config.brakeLead + speed * TRAFFIC_CONTROL_INTERVAL_S + stop,
           );
         }

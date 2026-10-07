@@ -88,11 +88,17 @@ const LIFT = 1.06;
 const BEND_STIFFNESS = 0.025;
 const ARM_BEND_STIFFNESS = 0.07;
 /** Velocity kept per step: fabric in air is damped, but not to a crawl. */
-const DAMPING = 0.99;
-/** Turbulence, m/s², at the open top of a fully inflated tube; grows as height^1.3. */
-const TURBULENCE = 45;
+const DAMPING = 0.986;
+/**
+ * Turbulence, m/s², at the open top of a fully inflated tube; grows as height^1.3.
+ * Slow and long on purpose: 45 with a ~1 Hz flutter and a kink every metre read as a
+ * twitching thing, not a tube in a blower's draught.
+ */
+const TURBULENCE = 26;
 const TURBULENCE_POW = 1.3;
-const ARM_TURBULENCE = 34;
+const ARM_TURBULENCE = 18;
+/** How bright the print glows after dark: seen, not lighting anything. */
+const NIGHT_GLOW = 0.55;
 /**
  * Lateral jostle of a deflating tube, m/s² at the top. A straight column losing its
  * pressure only pushes down on itself; this is the sag that lets it fold over.
@@ -117,6 +123,8 @@ const DROP_FLOW = 0.05;
 /** Beyond this the dancer is left as it is and not simulated, metres. */
 const ANIMATE_RANGE_M = 350;
 const ANIMATE_RANGE_SQ = ANIMATE_RANGE_M * ANIMATE_RANGE_M;
+/** Farthest a dancer is voiced from, metres: you hear it walking up to the courier. */
+const HEAR_M = 80;
 const DANCER_DOMAIN = 0x41495232; // 'AIR2'
 
 /** A car, as the tube feels it: a capsule along its heading, from the ground up. */
@@ -268,8 +276,15 @@ function buildTexture(): THREE.CanvasTexture {
  */
 let dancerMaterialValue: THREE.MeshStandardMaterial | null = null;
 function dancerMaterial(): THREE.MeshStandardMaterial {
-  return (dancerMaterialValue ??= new THREE.MeshStandardMaterial({
-    map: buildTexture(),
+  if (dancerMaterialValue) return dancerMaterialValue;
+  const texture = buildTexture();
+  return (dancerMaterialValue = new THREE.MeshStandardMaterial({
+    map: texture,
+    // The print glows faintly at night (`DancerField.update`): an emissive copy of the
+    // same sheet, so the face and the ribs read in the dark without lighting anything.
+    emissiveMap: texture,
+    emissive: new THREE.Color(1, 1, 1),
+    emissiveIntensity: 0,
     roughness: 0.78,
     metalness: 0,
     side: THREE.DoubleSide,
@@ -479,6 +494,15 @@ export interface DancerHandle {
   readonly root: THREE.Group;
 }
 
+/** The nearest dancer as the audio hears it; see `DancerField.heard`. */
+export interface DancerHeard {
+  x: number;
+  y: number;
+  z: number;
+  flapMps: number;
+  airRate: number;
+}
+
 /** A car near a dancer this frame, in that dancer's own frame. */
 interface CarProbe {
   ax: number;
@@ -518,6 +542,26 @@ class Dancer implements DancerHandle {
   readonly cars: CarProbe[] = Array.from({ length: MAX_CARS }, () => ({ ax: 0, az: 0, bx: 0, bz: 0, vx: 0, vz: 0 }));
   /** Leftover simulation time below one step. */
   accumulator = 0;
+  /** How fast the top is moving, m/s, and the pressure changing, 1/s: smoothed, for the sound. */
+  flapMps = 0;
+  airRate = 0;
+  private lastAir = 1;
+
+  /** Folds this frame's motion into `flapMps` and `airRate`. */
+  listen(dt: number): void {
+    if (dt <= 0) return;
+    const j = (BODY_POINTS - 1) * 3;
+    const speed = Math.hypot(
+      this.body[j]! - this.bodyPrev[j]!,
+      this.body[j + 1]! - this.bodyPrev[j + 1]!,
+      this.body[j + 2]! - this.bodyPrev[j + 2]!,
+    ) / STEP_S;
+    const rate = Math.abs(this.air - this.lastAir) / dt;
+    this.lastAir = this.air;
+    const k = Math.min(1, dt * 10);
+    this.flapMps += (speed - this.flapMps) * k;
+    this.airRate += (rate - this.airRate) * k;
+  }
 
   constructor(site: DancerSite, now: number) {
     this.absX = site.x;
@@ -675,11 +719,12 @@ export class DancerField {
   /**
    * Simulates and re-sweeps every dancer near enough to be seen, at a fixed step,
    * from the live weather wind. Absolute camera coordinates: the caller adds the
-   * floating origin.
+   * floating origin. `glow` is 0 by day and 1 at night (`sky.artificialLightFactor`).
    */
-  update(dt: number, cameraX: number, cameraZ: number): void {
+  update(dt: number, cameraX: number, cameraZ: number, glow: number): void {
     if (this.dancers.length === 0) return;
     this.time += dt;
+    dancerMaterial().emissiveIntensity = glow * NIGHT_GLOW;
     for (const dancer of this.dancers) {
       const dx = dancer.absX - cameraX;
       const dz = dancer.absZ - cameraZ;
@@ -703,7 +748,36 @@ export class DancerField {
       }
       dancer.carCount = 0;
       dancer.rebuildMesh();
+      dancer.listen(dt);
     }
+  }
+
+  /**
+   * The nearest dancer within earshot of absolute (x, z): writes the scene position of
+   * its top and its motion into `out` and returns true, or false when none is near.
+   */
+  heard(x: number, z: number, out: DancerHeard): boolean {
+    let best: Dancer | null = null;
+    let bestD2 = HEAR_M * HEAR_M;
+    for (const dancer of this.dancers) {
+      const dx = dancer.absX - x;
+      const dz = dancer.absZ - z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        best = dancer;
+      }
+    }
+    if (!best) return false;
+    const j = (BODY_POINTS - 1) * 3;
+    _p.set(best.body[j]!, best.body[j + 1]!, best.body[j + 2]!);
+    best.root.localToWorld(_p);
+    out.x = _p.x;
+    out.y = _p.y;
+    out.z = _p.z;
+    out.flapMps = best.flapMps;
+    out.airRate = best.airRate;
+    return true;
   }
 
   dispose(): void {
@@ -725,7 +799,7 @@ export class DancerField {
     if (t < dancer.chokeUntil) return DROP_FLOW;
     if (t >= dancer.dropStart) return DROP_FLOW;
     // A healthy blower still pulses a little.
-    return 0.9 + 0.1 * Math.sin(t * 5.3 + dancer.phase[0]!);
+    return 0.96 + 0.04 * Math.sin(t * 1.9 + dancer.phase[0]!);
   }
 
   private step(dancer: Dancer, t: number, windX: number, windZ: number): void {
@@ -746,14 +820,14 @@ export class DancerField {
       const slack = SLACK * (1 - air) * w;
       // Travelling waves up the tube plus a fast flutter at the top; the wind leans it.
       const ax =
-        turb * (Math.sin(t * 2.6 * r + ph[1]! - i * 0.55) + 0.6 * Math.sin(t * 6.1 * r + ph[2]! - i * 0.9) * w) +
+        turb * (Math.sin(t * 1.7 * r + ph[1]! - i * 0.3) + 0.25 * Math.sin(t * 3.1 * r + ph[2]! - i * 0.45) * w) +
         slack * Math.sin(t * 1.7 + ph[3]! + i * 0.7) +
         windX * (0.3 + 0.7 * w);
       const az =
-        turb * (Math.cos(t * 2.1 * r + ph[3]! - i * 0.5) + 0.6 * Math.sin(t * 7.3 * r + ph[4]! - i * 1.1) * w) +
+        turb * (Math.cos(t * 1.4 * r + ph[3]! - i * 0.28) + 0.25 * Math.sin(t * 3.7 * r + ph[4]! - i * 0.5) * w) +
         slack * Math.cos(t * 1.3 + ph[4]! + i * 0.6) +
         windZ * (0.3 + 0.7 * w);
-      const ay = GRAVITY * (LIFT * air - 1) + turb * 0.25 * Math.sin(t * 4.4 * r + ph[5]! + i);
+      const ay = GRAVITY * (LIFT * air - 1) + turb * 0.15 * Math.sin(t * 2.2 * r + ph[5]! + i * 0.2);
       integrate(body, prev, i, ax, ay, az, h);
     }
     for (let a = 0; a < 2; a++) {
@@ -764,9 +838,9 @@ export class DancerField {
         const w = i / (ARM_POINTS - 1);
         const turb = ARM_TURBULENCE * air * w;
         const q = ph[a + 1]! * 1.7;
-        const ax = turb * Math.sin(t * 3.4 * r + q - i * 0.8) + side * 4 * air + windX * 0.5;
-        const az = turb * Math.cos(t * 2.9 * r + q * 1.3 - i * 0.7) + windZ * 0.5;
-        const ay = GRAVITY * (LIFT * 0.92 * air - 1) + turb * 0.6 * Math.sin(t * 5.1 * r + q + i * 0.9);
+        const ax = turb * Math.sin(t * 2.1 * r + q - i * 0.35) + side * 4 * air + windX * 0.5;
+        const az = turb * Math.cos(t * 1.8 * r + q * 1.3 - i * 0.3) + windZ * 0.5;
+        const ay = GRAVITY * (LIFT * 0.92 * air - 1) + turb * 0.4 * Math.sin(t * 2.6 * r + q + i * 0.35);
         integrate(arm, armPrev, i, ax, ay, az, h);
       }
     }

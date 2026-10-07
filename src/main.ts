@@ -32,6 +32,7 @@ import { LoosePartField } from './parts/loose';
 import { oilCapacity } from './parts/registry';
 import { TouchControls } from './core/touch';
 import { loadCarModel } from './render/carmodel';
+import { CAR_LAMP_KNEE } from './render/materials';
 import { preloadTrailerModel } from './render/trailermodel';
 import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
 import { Interaction } from './player/interaction';
@@ -103,7 +104,7 @@ import { setGroundFadeWindow } from './render/groundfade';
 import { WreckTrunkField } from './world/wrecktrunks';
 import { CourierField, courierStop } from './world/couriers';
 import { GateField } from './world/gates';
-import { DancerField } from './world/props/airdancer';
+import { DancerField, type DancerHeard } from './world/props/airdancer';
 import { loadSpine } from './world/spinecache';
 import { RoadMeshProvider } from './world/roadmesh';
 import { RoadDistance } from './world/roaddistance';
@@ -457,6 +458,8 @@ async function boot(): Promise<void> {
   // the hidden anchor dancer it adds to the scene compiles their program under the
   // loading cover. See world/props/airdancer.ts.
   const dancers = new DancerField(renderer.scene);
+  /** Reused receiver for the nearest dancer's sound; see `DancerField.heard`. */
+  const dancerSound: DancerHeard = { x: 0, y: 0, z: 0, flapMps: 0, airRate: 0 };
   /**
    * Every live car near a dancer shoves its tube; one visitor, made once. Heading and
    * velocity are read only for a car that is actually near one.
@@ -2436,6 +2439,7 @@ async function boot(): Promise<void> {
     frameProfiler?.end('sky');
     loose.syncVisuals(s.timeOfDay, sky.dayFactor);
     const headlightVisibility = sky.artificialLightFactor;
+    CAR_LAMP_KNEE.value = headlightVisibility;
     for (const vehicle of vehicles.values()) {
       vehicle.setHeadlightEnvironmentFactor(headlightVisibility);
     }
@@ -2549,7 +2553,9 @@ async function boot(): Promise<void> {
       for (const [id, vehicle] of vehicles) knockDancers(id, vehicle);
       traffic.forEachVehicle(knockDancers);
     }
-    dancers.update(frameDt, cam.x + origin.x, cam.z + origin.z);
+    dancers.update(frameDt, cam.x + origin.x, cam.z + origin.z, headlightVisibility);
+    const dancerHeard = dancers.heard(cam.x + origin.x, cam.z + origin.z, dancerSound);
+    audio.updateDancer(dancerHeard, dancerSound.x, dancerSound.y, dancerSound.z, dancerSound.flapMps, dancerSound.airRate);
     frameProfiler?.end('effects');
     frameProfiler?.begin('vista');
     vista.update(cam.x, cam.z, activeS, frameDt);

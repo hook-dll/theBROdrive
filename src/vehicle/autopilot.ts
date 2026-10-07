@@ -4535,7 +4535,11 @@ export class Autopilot {
         RACING_UNSEEN_TRAFFIC_MPS + Math.sqrt(2 * sightBrake * Math.max(0, sight - FOLLOW_STANDOFF_M)),
       );
     }
-    targetSpeed = Math.max(3, targetSpeed);
+    // The 3 m/s floor is the road profile's (a hairpin never asks for a standstill),
+    // and it must not swallow a cap set from outside: an escort told to park and a race
+    // rival told to stop beside its courier were both held at 11 km/h by it, the rival
+    // creeping past the courier for good.
+    targetSpeed = Math.min(Math.max(3, targetSpeed), this.speedCapValue);
     // THE SPEED PLAN FOLLOWS THE CORRIDOR THAT WAS CHOSEN, AND NOTHING ELSE.
     //
     // This replaces four overlapping clamps — an approach crawl for a planned prop,

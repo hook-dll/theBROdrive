@@ -61,13 +61,18 @@ const AHEAD_NEAR_M = 560;
 const LATE_DEPARTURE_M = 560;
 /**
  * WHERE A GHOST BECOMES A CAR: the traffic stream's own bands, so nothing appears
- * where it can be seen. Ahead, `SPAWN_MIN_M` out to just inside the `PHYSICS_REACH_M`
- * support edge. Behind, the frantic traffic driver's rear band, and only while the rival is
- * closing: one put down behind a faster player only falls out of the window again,
- * and every such visit cost the ghost its speed (measured: the late rival spawned
- * standing at 560 m, was dropped at the edge 10 s later, twice in a minute).
+ * where it can be seen. Ahead, out to just inside the `PHYSICS_REACH_M` support edge;
+ * a ghost entering from beyond it is tried from there inward, every `SPAWN_RETRY_S`,
+ * down to `AHEAD_POPIN_MIN_M`: one the player is catching that could not appear in
+ * the stream's own 500 m band would otherwise be overtaken invisibly, and a car
+ * turning up at 250 m is the lesser evil. Behind, the frantic traffic driver's rear
+ * band, and only while the rival is closing: one put down behind a faster player only
+ * falls out of the window again, and every such visit cost the ghost its speed
+ * (measured: the late rival spawned standing at 560 m, was dropped at the edge 10 s
+ * later, twice in a minute). A ghost never comes closer behind than this band; see
+ * `advanceGhost`.
  */
-const AHEAD_BAND_MIN_M = 500;
+const AHEAD_POPIN_MIN_M = 250;
 const AHEAD_BAND_MAX_M = 760;
 const BEHIND_BAND_MIN_M = 450;
 const BEHIND_BAND_MAX_M = 600;
@@ -220,7 +225,7 @@ export class RivalRace {
         if (playerS - race.sourceS < LATE_DEPARTURE_M) continue;
         rival.phase = 'driving';
       }
-      if (!rival.live) this.advanceGhost(rival, race, dt);
+      if (!rival.live) this.advanceGhost(rival, race, dt, playerS);
       this.serviceStop(rival, race, dt);
       if (rival.live) {
         this.host.setRivalSpeedCap(rival.id, rival.phase === 'driving' ? this.stopCap(rival, race) : 0);
@@ -315,7 +320,7 @@ export class RivalRace {
     return Math.min(target, this.stopCurve(rival.s, stopS));
   }
 
-  private advanceGhost(rival: Rival, race: Race, dt: number): void {
+  private advanceGhost(rival: Rival, race: Race, dt: number, playerS: number): void {
     if (rival.phase !== 'driving') {
       rival.speed = 0;
       return;
@@ -323,7 +328,13 @@ export class RivalRace {
     const target = this.ghostTarget(rival, race.stopS);
     const delta = target - rival.speed;
     rival.speed = Math.max(0, rival.speed + Math.max(-GHOST_LOOK_DECEL_MPS2 * dt, Math.min(GHOST_ACCEL_MPS2 * dt, delta)));
-    rival.s = Math.min(race.stopS, rival.s + rival.speed * dt);
+    let s = Math.min(race.stopS, rival.s + rival.speed * dt);
+    // NOTHING ARRIVES UNSEEN. A ghost coming up behind the player stops at the edge of
+    // view and waits for its car there; it used to slip inside when the traffic refused
+    // its site, and "handed in" invisibly beside a player waiting at the courier.
+    const edge = playerS - BEHIND_BAND_MIN_M;
+    if (rival.s <= edge && s > edge) s = edge;
+    rival.s = s;
     // The ghost meets the mark exactly; it has no tyres to overshoot on.
     if (rival.s >= race.stopS) rival.speed = 0;
   }
@@ -363,7 +374,7 @@ export class RivalRace {
     if (rival.retryIn > 0) return;
     const offset = rival.s - playerS;
     const inBand = offset >= 0
-      ? offset >= AHEAD_BAND_MIN_M && offset <= AHEAD_BAND_MAX_M
+      ? offset >= AHEAD_POPIN_MIN_M && offset <= AHEAD_BAND_MAX_M
       : -offset >= BEHIND_BAND_MIN_M && -offset <= BEHIND_BAND_MAX_M &&
         rival.speed > this.playerSpeed + BEHIND_CLOSING_MPS;
     if (!inBand) return;

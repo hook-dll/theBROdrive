@@ -14,6 +14,7 @@ import type { VehicleAudioState } from '../vehicle/vehicle';
 import { AudioMixer, setListenerPose, sliderGain } from './mixer';
 import { VehicleAudio, type CarPose } from './vehicleaudio';
 import { TrafficAudio } from './trafficaudio';
+import { DancerVoice } from './dancervoice';
 import { Ambience, type AmbienceFrame } from './ambience';
 import { Foley, type BubbleGumAudioPhase, type FoleyContinuous, type FoleyEvent } from './foley';
 import { Radio, type RadioSpatialState } from './radio';
@@ -44,6 +45,8 @@ export class GameAudio {
   private readonly ambience = new Ambience(this.mixer);
   private readonly radios = new Map<string, Radio>();
   private readonly trafficVoices = new Map<string, TrafficAudio>();
+  /** The nearest courier air dancer, when one is near enough to hear; see `updateDancer`. */
+  private dancerVoice: DancerVoice | null = null;
   private readonly trafficCandidates: TrafficCandidate[] = [];
   private trafficCandidateCount = 0;
   private radioStationUrls: readonly string[] = ['https://streams.radiomast.io/nts1', 'https://streams.radiomast.io/nts2'];
@@ -246,6 +249,20 @@ export class GameAudio {
   }
 
   /**
+   * The nearest air dancer, or `heard` false when none is in earshot. Position is its
+   * top in the relative (listener) frame; see `DancerVoice.update`.
+   */
+  updateDancer(heard: boolean, x: number, y: number, z: number, flapMps: number, airRate: number): void {
+    if (!heard) {
+      this.dancerVoice?.release();
+      this.dancerVoice = null;
+      return;
+    }
+    this.dancerVoice ??= new DancerVoice(this.mixer);
+    this.dancerVoice.update(x, y, z, flapMps, airRate);
+  }
+
+  /**
    * Pose of the single AudioListener. Traffic engines need the same listener even
    * before a radio has ever been switched on.
    */
@@ -361,6 +378,8 @@ export class GameAudio {
     this.radios.clear();
     for (const voice of this.trafficVoices.values()) voice.dispose();
     this.trafficVoices.clear();
+    this.dancerVoice?.dispose();
+    this.dancerVoice = null;
     this.mixer.dispose();
   }
 }
