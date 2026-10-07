@@ -79,24 +79,29 @@ const STEP_S = 1 / 120;
 const MAX_STEPS = 8;
 const ITERATIONS = 6;
 const GRAVITY = 9.8;
-/** Lift per point while fully inflated, as a fraction of gravity: just over 1. */
-const LIFT = 1.06;
 /**
- * Straightening pull between neighbours while fully inflated, per iteration. Low on
- * purpose: at 0.11 the tube stood like a pole and the turbulence never showed.
+ * Lift per point while fully inflated, as a fraction of gravity. The airflow is what
+ * stands the tube up and keeps it under tension, the way a string pulled up stays
+ * straight; 1.8 leaves it 0.8 g of upward pull to stand against the turbulence.
  */
-const BEND_STIFFNESS = 0.025;
-const ARM_BEND_STIFFNESS = 0.07;
+const LIFT = 1.8;
+/**
+ * Bending stiffness while fully inflated, 1/s² (see `bendForces`): what keeps the tube
+ * a tube between the lift below and the turbulence above.
+ */
+const BEND_STIFFNESS = 600;
+const ARM_BEND_STIFFNESS = 500;
 /** Velocity kept per step: fabric in air is damped, but not to a crawl. */
 const DAMPING = 0.986;
 /**
  * Turbulence, m/s², at the open top of a fully inflated tube; grows as height^1.3.
- * Slow and long on purpose: 45 with a ~1 Hz flutter and a kink every metre read as a
- * twitching thing, not a tube in a blower's draught.
+ * Small against the lift on purpose: a turbulence bigger than the tube's own upward
+ * pull laid it over and whipped it about faster than a real one ever goes.
+ * Measured with this tune: the top turns about once a second.
  */
-const TURBULENCE = 26;
+const TURBULENCE = 8;
 const TURBULENCE_POW = 1.3;
-const ARM_TURBULENCE = 18;
+const ARM_TURBULENCE = 8;
 /** How bright the print glows after dark: seen, not lighting anything. */
 const NIGHT_GLOW = 0.55;
 /**
@@ -113,9 +118,9 @@ const WIND_PUSH = 1.1;
 /** How fast the tube loses and regains pressure, seconds. */
 const DEFLATE_S = 0.16;
 const INFLATE_S = 0.32;
-/** Flow dropouts: every few seconds the blower chokes for about a second. */
-const DROP_GAP_MIN_S = 3.2;
-const DROP_GAP_MAX_S = 7.5;
+/** Flow dropouts: now and then the blower chokes for about a second. */
+const DROP_GAP_MIN_S = 7;
+const DROP_GAP_MAX_S = 15;
 const DROP_LEN_MIN_S = 0.7;
 const DROP_LEN_MAX_S = 1.7;
 /** Flow left during a dropout: enough to twitch, not to stand. */
@@ -528,6 +533,9 @@ class Dancer implements DancerHandle {
   readonly bodyPrev = new Float32Array(BODY_POINTS * 3);
   readonly arms = [new Float32Array(ARM_POINTS * 3), new Float32Array(ARM_POINTS * 3)] as const;
   readonly armsPrev = [new Float32Array(ARM_POINTS * 3), new Float32Array(ARM_POINTS * 3)] as const;
+  /** This step's bending accelerations per chain point; see `bendForces`. */
+  readonly bodyBend = new Float32Array(BODY_POINTS * 3);
+  readonly armsBend = [new Float32Array(ARM_POINTS * 3), new Float32Array(ARM_POINTS * 3)] as const;
   /** Seeded character: turbulence phases and rates, so no two dance in step. */
   readonly seed: number;
   readonly phase: Float32Array = new Float32Array(6);
@@ -814,6 +822,8 @@ export class DancerField {
     // Body: integrate. Points 0 and 1 are held by the blower's outlet.
     const body = dancer.body;
     const prev = dancer.bodyPrev;
+    const bend = dancer.bodyBend;
+    bendForces(body, BODY_POINTS, BEND_STIFFNESS * air, bend);
     for (let i = 2; i < BODY_POINTS; i++) {
       const w = i / (BODY_POINTS - 1);
       const turb = TURBULENCE * air * Math.pow(w, TURBULENCE_POW);
@@ -828,12 +838,14 @@ export class DancerField {
         slack * Math.cos(t * 1.3 + ph[4]! + i * 0.6) +
         windZ * (0.3 + 0.7 * w);
       const ay = GRAVITY * (LIFT * air - 1) + turb * 0.15 * Math.sin(t * 2.2 * r + ph[5]! + i * 0.2);
-      integrate(body, prev, i, ax, ay, az, h);
+      integrate(body, prev, i, ax + bend[i * 3]!, ay + bend[i * 3 + 1]!, az + bend[i * 3 + 2]!, h);
     }
     for (let a = 0; a < 2; a++) {
       const arm = dancer.arms[a];
       const armPrev = dancer.armsPrev[a];
       const side = ARM_SIDE[a];
+      const armBend = dancer.armsBend[a];
+      bendForces(arm, ARM_POINTS, ARM_BEND_STIFFNESS * air, armBend);
       for (let i = 1; i < ARM_POINTS; i++) {
         const w = i / (ARM_POINTS - 1);
         const turb = ARM_TURBULENCE * air * w;
@@ -841,7 +853,7 @@ export class DancerField {
         const ax = turb * Math.sin(t * 2.1 * r + q - i * 0.35) + side * 4 * air + windX * 0.5;
         const az = turb * Math.cos(t * 1.8 * r + q * 1.3 - i * 0.3) + windZ * 0.5;
         const ay = GRAVITY * (LIFT * 0.92 * air - 1) + turb * 0.4 * Math.sin(t * 2.6 * r + q + i * 0.35);
-        integrate(arm, armPrev, i, ax, ay, az, h);
+        integrate(arm, armPrev, i, ax + armBend[i * 3]!, ay + armBend[i * 3 + 1]!, az + armBend[i * 3 + 2]!, h);
       }
     }
 
@@ -854,7 +866,6 @@ export class DancerField {
       body[3] = 0;
       body[4] = BLOWER_H + BODY_SEG_M;
       body[5] = 0;
-      straighten(body, BODY_POINTS, BODY_SEG_M, BEND_STIFFNESS * air, 2);
       lengths(body, BODY_POINTS, BODY_SEG_M, 2);
       for (let a = 0; a < 2; a++) {
         const arm = dancer.arms[a];
@@ -868,7 +879,6 @@ export class DancerField {
         arm[3] += (arm[0] + _side.x * ARM_SEG_M - arm[3]) * pull;
         arm[4] += (arm[1] + _side.y * ARM_SEG_M - arm[4]) * pull;
         arm[5] += (arm[2] + _side.z * ARM_SEG_M - arm[5]) * pull;
-        straighten(arm, ARM_POINTS, ARM_SEG_M, ARM_BEND_STIFFNESS * air, 1);
         lengths(arm, ARM_POINTS, ARM_SEG_M, 1);
       }
       if (dancer.carCount > 0) {
@@ -967,20 +977,24 @@ function lengths(p: Float32Array, count: number, seg: number, firstFree: number)
   }
 }
 
-/** Pressure: each point pulled toward the line its two predecessors set. */
-function straighten(p: Float32Array, count: number, seg: number, stiffness: number, firstFree: number): void {
+/**
+ * Pressure as a bending stiffness: each interior point is pushed towards the line
+ * through its neighbours and the neighbours back by half each — a discrete Laplacian,
+ * so the pushes sum to zero and the stiffness cannot pump energy into the tube. The
+ * first version pulled each point onto the line of the two below it, a one-sided
+ * correction that fed every swing: with the turbulence switched off the top still
+ * thrashed at 18 m/s, folding and unfolding ten times a second.
+ */
+function bendForces(p: Float32Array, count: number, stiffness: number, out: Float32Array): void {
+  out.fill(0);
   if (stiffness <= 0) return;
-  for (let i = Math.max(2, firstFree); i < count; i++) {
-    const a = (i - 2) * 3;
-    const b = (i - 1) * 3;
-    const c = i * 3;
-    const dx = p[b]! - p[a]!;
-    const dy = p[b + 1]! - p[a + 1]!;
-    const dz = p[b + 2]! - p[a + 2]!;
-    const inv = seg / (Math.hypot(dx, dy, dz) || 1e-6);
-    p[c] += (p[b]! + dx * inv - p[c]!) * stiffness;
-    p[c + 1] += (p[b + 1]! + dy * inv - p[c + 1]!) * stiffness;
-    p[c + 2] += (p[b + 2]! + dz * inv - p[c + 2]!) * stiffness;
+  for (let i = 1; i < count - 1; i++) {
+    for (let c = 0; c < 3; c++) {
+      const lap = p[(i - 1) * 3 + c]! - 2 * p[i * 3 + c]! + p[(i + 1) * 3 + c]!;
+      out[i * 3 + c] += stiffness * lap;
+      out[(i - 1) * 3 + c] -= 0.5 * stiffness * lap;
+      out[(i + 1) * 3 + c] -= 0.5 * stiffness * lap;
+    }
   }
 }
 
