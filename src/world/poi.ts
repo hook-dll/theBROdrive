@@ -46,7 +46,6 @@ import { COLD_SOAK_C } from '../vehicle/cooling';
 import type { TrailerField } from '../vehicle/trailer';
 import type { WreckTrunkField } from './wrecktrunks';
 import { courierDefaultStorage } from '../contracts/offers';
-import { photoSubjects } from '../contracts/photosubjects';
 import {
   courierId,
   courierParkingLateral,
@@ -1204,9 +1203,7 @@ function buildCourier(
     qz: rotation.z,
     qw: rotation.w,
     halfExtents: half,
-    defaultStorage: courierDefaultStorage(ctx.world.seed, stop.index, (fromS, toS) =>
-      photoSubjects(ctx.world.seed, fromS, toS, poisBetween(ctx.world.seed, fromS, toS)),
-    ),
+    defaultStorage: courierDefaultStorage(ctx.world.seed, stop.index),
   });
   registeredCouriers.push(id);
 

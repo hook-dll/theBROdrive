@@ -160,40 +160,11 @@ export interface CameraItem {
   framesRemaining: number;
 }
 
-/**
- * What the game made of the scene at the shutter, stored beside the JPEG.
- *
- * The pixels are never analysed: the frame test (contracts/photosubjects.ts) reads the
- * camera frustum, the known subjects' bounding spheres and the physics occluders ONCE,
- * at exposure, and this record is what the photo errand later checks. `subjects` holds
- * the stable ids of the subjects that were in frame at the ordinary bar; `subjectsClose`
- * is the subset shot close enough for an errand's signature framing (the share cannot be
- * re-measured from a JPEG). Old photos predate this and simply have none.
- */
-export interface PhotoEvidence {
-  /** Stable subject ids in frame at the shutter, in test order. */
-  readonly subjects: readonly string[];
-  /** The subset of `subjects` whose drawn radius filled the frame closely. */
-  readonly subjectsClose: readonly string[];
-  /** Road arclength of the player at the shutter, metres. */
-  readonly roadS: number;
-  /** Game-clock seconds within the day at the shutter. */
-  readonly timeOfDay: number;
-  /** `WorldState.playedSeconds` at the shutter; an errand needs a photo taken after it started. */
-  readonly playedS: number;
-  /** Absolute camera position at the shutter. */
-  readonly cameraPosition: { readonly x: number; readonly y: number; readonly z: number };
-  /** Unit view direction of the camera at the shutter. */
-  readonly cameraDirection: { readonly x: number; readonly y: number; readonly z: number };
-}
-
 export interface PhotographItem {
   readonly type: 'photograph';
   readonly id: string;
   /** Downscaled JPEG captured from the rendered frame; persisted with the item. */
   readonly imageDataUrl: string;
-  /** Semantic scene at the shutter; absent on photos taken before the frame test. */
-  readonly evidence?: PhotoEvidence;
 }
 
 export interface FootballItem {
@@ -226,7 +197,7 @@ export interface ContractCargoItem {
   readonly type: 'contract_cargo';
   readonly id: string;
   readonly sourceCourierIndex: number;
-  /** Which of the twenty catalog kinds this is; see contracts/types.ts. */
+  /** Which catalog kind this is; see contracts/types.ts. */
   readonly contractKind: ContractKind;
   readonly cargoName: string;
   /**

@@ -4,8 +4,9 @@
  *   bun tools/pedal-dose.ts
  *
  * A keyboard pedal is a switch, so the ONLY thing that turns it into a dose is the
- * shaping the input layer applies: a rate-limited rise while the key is down, and a
- * decay when it comes up. What that produces has to have two properties, and neither of
+ * shaping the input layer applies: a constant-rate rise while the key is down, and a
+ * faster fall when it comes up (`keyPedalStep`, `KEY_PEDAL_RAMPS`), throttle and brake
+ * each at their own speeds. What that produces has to have two properties, and neither of
  * them can be judged by reading the constants:
  *
  *   MONOTONIC. A longer press must deliver more pedal than a shorter one, all the way
@@ -26,14 +27,7 @@
  */
 
 import { FIXED_DT } from '../src/core/physics';
-
-/**
- * Mirrored from core/input.ts. Those constants are private to that module, so this
- * bench follows them by hand and fails loudly if the behaviour they produce changes.
- */
-const AXIS_RISE = 0.3;
-const AXIS_FALL = 0.12;
-const AXIS_SNAP = 1e-3;
+import { KEY_PEDAL_RAMPS, keyPedalStep } from '../src/core/input';
 
 /** Presses swept, seconds. A tap is 40-120 ms; a deliberate hold is a second. */
 const TAPS = [0.04, 0.06, 0.08, 0.12, 0.18, 0.25, 0.4, 0.7, 1.2];
@@ -49,7 +43,9 @@ interface Dose {
   readonly tailS: number;
 }
 
-function shape(pressS: number): Dose {
+type Ramp = (typeof KEY_PEDAL_RAMPS)[keyof typeof KEY_PEDAL_RAMPS];
+
+function shape(ramp: Ramp, pressS: number): Dose {
   let value = 0;
   let peak = 0;
   let dose = 0;
@@ -59,14 +55,11 @@ function shape(pressS: number): Dose {
   const totalS = pressS + 3;
   for (let t = 0; t < totalS; t += FIXED_DT) {
     const want = t < pressS ? 1 : 0;
-    value +=
-      (want - value) * Math.min(1, FIXED_DT / (want > 0 ? AXIS_RISE : AXIS_FALL));
-    if (Math.abs(want - value) <= AXIS_SNAP) value = want;
+    value = keyPedalStep(value, want, ramp, FIXED_DT);
+    dose += value * FIXED_DT;
     if (t < pressS) {
-      dose += value * FIXED_DT;
       if (value > peak) peak = value;
     } else {
-      dose += value * FIXED_DT;
       tailDose += value * FIXED_DT;
       if (value > 0.1) tailS += FIXED_DT;
     }
@@ -74,42 +67,9 @@ function shape(pressS: number): Dose {
   return { pressS, peak, doseS: dose, tailDoseS: tailDose, tailS };
 }
 
-const results = TAPS.map(shape);
-
-console.log('pedal key shaping: one press, then release');
-console.log('  press ms   peak   dose (axis·s)   after release   tail ms   tail/dose');
-
-let previous = 0;
-const failures: string[] = [];
-
-for (const r of results) {
-  console.log(
-    `${String(Math.round(r.pressS * 1000)).padStart(10)} ${r.peak.toFixed(3).padStart(6)} ` +
-      `${r.doseS.toFixed(3).padStart(15)} ${r.tailDoseS.toFixed(3).padStart(15)} ` +
-      `${String(Math.round(r.tailS * 1000)).padStart(8)} ` +
-      `${`${((r.tailDoseS / Math.max(1e-6, r.doseS)) * 100).toFixed(0)}%`.padStart(10)}`,
-  );
-  if (r.doseS <= previous) {
-    failures.push(
-      `dose is not monotonic: a ${Math.round(r.pressS * 1000)} ms press delivers ` +
-        `${r.doseS.toFixed(3)} against ${previous.toFixed(3)} for a shorter one`,
-    );
-  }
-  previous = r.doseS;
-}
-
 // THE TAIL IS THE DEFECT THIS BENCH EXISTS FOR. A press must be over shortly after the
 // key comes up, or the driver is not in control of how much pedal they applied.
 const MAX_TAIL_S = 0.35;
-for (const r of results) {
-  if (r.tailS > MAX_TAIL_S) {
-    failures.push(
-      `the pedal keeps falling for ${Math.round(r.tailS * 1000)} ms after a ` +
-        `${Math.round(r.pressS * 1000)} ms press was released (limit ${MAX_TAIL_S * 1000})`,
-    );
-  }
-}
-
 // AND THE RELEASE MAY NOT BE A SECOND PRESS. This is the defect the bench was written
 // for, and it is measured as an EQUIVALENT HOLD: the impulse delivered after the key
 // comes up, expressed as seconds of the pedal value the press reached. A release that
@@ -117,27 +77,55 @@ for (const r of results) {
 // be called a release; at the old 0.3 s decay a 40 ms tap delivered EIGHT times its own
 // press in the tail, which is why the brake felt like a switch with one setting.
 const MAX_TAIL_EQUIVALENT_S = 0.2;
-for (const r of results) {
-  const equivalent = r.tailDoseS / Math.max(1e-6, r.peak);
-  if (equivalent > MAX_TAIL_EQUIVALENT_S) {
+
+const failures: string[] = [];
+for (const [name, ramp] of Object.entries(KEY_PEDAL_RAMPS)) {
+  const results = TAPS.map((press) => shape(ramp, press));
+  console.log(`${name} key: one press, then release (${ramp.riseS} s up, ${ramp.fallS} s down)`);
+  console.log('  press ms   peak   dose (axis·s)   after release   tail ms   tail/dose');
+  let previous = 0;
+  for (const r of results) {
+    console.log(
+      `${String(Math.round(r.pressS * 1000)).padStart(10)} ${r.peak.toFixed(3).padStart(6)} ` +
+        `${r.doseS.toFixed(3).padStart(15)} ${r.tailDoseS.toFixed(3).padStart(15)} ` +
+        `${String(Math.round(r.tailS * 1000)).padStart(8)} ` +
+        `${`${((r.tailDoseS / Math.max(1e-6, r.doseS)) * 100).toFixed(0)}%`.padStart(10)}`,
+    );
+    if (r.doseS <= previous) {
+      failures.push(
+        `${name}: dose is not monotonic: a ${Math.round(r.pressS * 1000)} ms press delivers ` +
+          `${r.doseS.toFixed(3)} against ${previous.toFixed(3)} for a shorter one`,
+      );
+    }
+    previous = r.doseS;
+    if (r.tailS > MAX_TAIL_S) {
+      failures.push(
+        `${name}: the pedal keeps falling for ${Math.round(r.tailS * 1000)} ms after a ` +
+          `${Math.round(r.pressS * 1000)} ms press was released (limit ${MAX_TAIL_S * 1000})`,
+      );
+    }
+    const equivalent = r.tailDoseS / Math.max(1e-6, r.peak);
+    if (equivalent > MAX_TAIL_EQUIVALENT_S) {
+      failures.push(
+        `${name}: releasing a ${Math.round(r.pressS * 1000)} ms press adds ${equivalent.toFixed(2)} s of ` +
+          `pedal in the tail (limit ${MAX_TAIL_EQUIVALENT_S})`,
+      );
+    }
+  }
+  if (results[results.length - 1]!.peak < 1) failures.push(`${name}: a held key never reaches the floor`);
+
+  // A steady mid value has to be REACHABLE, which is the whole reason the rise is not
+  // instant: with the whole travel crossed in a couple of frames there is nowhere for a
+  // human to stop. Ten per cent of value per 20 ms of timing is the loose bound.
+  const jitter = shape(ramp, 0.1);
+  const jitterPlus = shape(ramp, 0.12);
+  const perFrame = (jitterPlus.doseS - jitter.doseS) / Math.max(1e-6, jitter.doseS);
+  if (perFrame > 0.5) {
     failures.push(
-      `releasing a ${Math.round(r.pressS * 1000)} ms press adds ${equivalent.toFixed(2)} s of ` +
-        `pedal in the tail (limit ${MAX_TAIL_EQUIVALENT_S})`,
+      `${name}: the mid range is too steep to hit: 20 ms of timing changes the dose by ` +
+        `${(perFrame * 100).toFixed(0)}%`,
     );
   }
-}
-
-// A steady mid value has to be REACHABLE, which is the whole reason the rise is not
-// instant: with the whole travel crossed in a couple of frames there is nowhere for a
-// human to stop. Ten per cent of value per 20 ms of timing is the loose bound.
-const jitter = shape(0.1);
-const jitterPlus = shape(0.12);
-const perFrame = (jitterPlus.doseS - jitter.doseS) / Math.max(1e-6, jitter.doseS);
-if (perFrame > 0.5) {
-  failures.push(
-    `the mid range is too steep to hit: 20 ms of timing changes the dose by ` +
-      `${(perFrame * 100).toFixed(0)}%`,
-  );
 }
 
 if (failures.length > 0) {

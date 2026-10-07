@@ -20,7 +20,6 @@ import {
   SPONGE_CAPACITY_MIN,
   type ContractCargoItem,
   type Item,
-  type PhotoEvidence,
 } from '../items/items';
 import { isStickerKind, STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
 import { isContractKind } from '../contracts/registry';
@@ -635,6 +634,11 @@ function migrateTrailer(raw: Record<string, unknown>): TrailerState {
     qz: numOr(raw.qz, 0),
     qw: numOr(raw.qw, 1),
   };
+  // Bounded rather than trusted, like the load below; the trailer clamps it again to
+  // what keeps the crate on the bed.
+  if (typeof raw.cargoZ === 'number' && Number.isFinite(raw.cargoZ)) {
+    trailer.cargoZ = Math.min(1, Math.max(-1, raw.cargoZ));
+  }
   const load = migrateTrailerLoad(raw.load);
   if (load !== null) trailer.load = load;
   return trailer;
@@ -809,6 +813,23 @@ const LEGACY_VARIANT_IDS: Readonly<Record<string, string>> = {
   radiator_copper: 'radiator',
 };
 
+/** Contract kinds dropped from the catalogue; their saved cargo loads as a parcel. */
+const LEGACY_REMOVED_CONTRACT_KINDS: Readonly<Record<string, true>> = {
+  urgent_film: true,
+  medical_thermo: true,
+  one_tank: true,
+  dont_overheat: true,
+  clean_delivery: true,
+  long_haul: true,
+  night_courier: true,
+  part_order: true,
+  convoy: true,
+  bald_tyres: true,
+  sand_route: true,
+  desert_slalom: true,
+  photo_errand: true,
+};
+
 /**
  * Throws on a variant the catalogue no longer has (the diesel engines went with the
  * fuel), so every caller drops that one part rather than the save: storage cells
@@ -891,72 +912,10 @@ function sanitizeContractProgress(raw: unknown): ContractProgress {
       : {};
   return {
     started: obj.started === true,
-    startedAtS: Math.max(0, numOr(obj.startedAtS, 0)),
-    deadlineS: Math.max(0, numOr(obj.deadlineS, 0)),
-    softDeadlineS: Math.max(0, numOr(obj.softDeadlineS, 0)),
     condition: clamp01(numOr(obj.condition, 1)),
     heat: Math.max(0, numOr(obj.heat, 0)),
-    exposureS: Math.max(0, numOr(obj.exposureS, 0)),
     violated: obj.violated === true,
-    late: obj.late === true,
-    gatesPassed: Math.max(0, Math.floor(numOr(obj.gatesPassed, 0))),
-    gateStartedAtS: Math.max(0, numOr(obj.gateStartedAtS, 0)),
-    gateFinishedAtS: Math.max(0, numOr(obj.gateFinishedAtS, 0)),
-    gateTimeLimitS: Math.max(0, numOr(obj.gateTimeLimitS, 0)),
-    gateReturned: obj.gateReturned === true,
     statusText: typeof obj.statusText === 'string' ? obj.statusText.slice(0, 40) : '',
-    subjectId: typeof obj.subjectId === 'string' ? obj.subjectId.slice(0, 48) : '',
-  };
-}
-
-/** Subject ids in a photo's evidence: short strings only, and only a handful. */
-function photoSubjectIds(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  const out: string[] = [];
-  for (const value of raw) {
-    if (typeof value === 'string' && value.length > 0 && value.length <= 48) out.push(value);
-    if (out.length >= 24) break;
-  }
-  return out;
-}
-
-function photoVec3(raw: unknown): { x: number; y: number; z: number } | undefined {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined;
-  const obj = raw as Record<string, unknown>;
-  const x = numOr(obj.x, NaN);
-  const y = numOr(obj.y, NaN);
-  const z = numOr(obj.z, NaN);
-  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return undefined;
-  return { x, y, z };
-}
-
-/**
- * Rebuilds a photograph's evidence, or drops it. A photo is never lost because its
- * evidence is corrupt — the pixels are the item and the evidence is only what the
- * errand reads — so an old photo (no evidence at all) or a hand-edited one loads
- * without it rather than failing the whole save.
- */
-function sanitizePhotoEvidence(raw: unknown): PhotoEvidence | undefined {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined;
-  const obj = raw as Record<string, unknown>;
-  const cameraPosition = photoVec3(obj.cameraPosition);
-  const cameraDirection = photoVec3(obj.cameraDirection);
-  const roadS = numOr(obj.roadS, NaN);
-  const timeOfDay = numOr(obj.timeOfDay, NaN);
-  const playedS = numOr(obj.playedS, NaN);
-  if (!cameraPosition || !cameraDirection) return undefined;
-  if (!Number.isFinite(roadS) || !Number.isFinite(timeOfDay) || !Number.isFinite(playedS)) {
-    return undefined;
-  }
-  const subjects = photoSubjectIds(obj.subjects);
-  return {
-    subjects,
-    subjectsClose: photoSubjectIds(obj.subjectsClose).filter((id) => subjects.includes(id)),
-    roadS: Math.max(0, roadS),
-    timeOfDay,
-    playedS: Math.max(0, playedS),
-    cameraPosition,
-    cameraDirection,
   };
 }
 
@@ -1070,12 +1029,7 @@ function migrateItem(raw: unknown, where: string): Item {
       ) {
         throw new Error(`Save data is malformed: photograph at ${where} has invalid image data`);
       }
-      // Old photos carry no evidence; a corrupt one is dropped rather than losing the
-      // picture.
-      const evidence = sanitizePhotoEvidence(obj.evidence);
-      return evidence === undefined
-        ? { type: 'photograph', id: obj.id, imageDataUrl }
-        : { type: 'photograph', id: obj.id, imageDataUrl, evidence };
+      return { type: 'photograph', id: obj.id, imageDataUrl };
     }
     case 'football':
       return { type: 'football', id: obj.id };
@@ -1088,9 +1042,14 @@ function migrateItem(raw: unknown, where: string): Item {
       return { type: 'postcard', id: obj.id };
     case 'contract_cargo': {
       const sourceCourierIndex = Math.trunc(numOr(obj.sourceCourierIndex, -1));
+      // A kind dropped from the catalogue comes back as an ordinary parcel, keeping
+      // its name, sticker and seed so the cargo survives the load.
+      const contractKind = LEGACY_REMOVED_CONTRACT_KINDS[String(obj.contractKind)] === true
+        ? 'parcel'
+        : obj.contractKind;
       if (
         sourceCourierIndex < 0
-        || !isContractKind(obj.contractKind)
+        || !isContractKind(contractKind)
         || typeof obj.cargoName !== 'string'
         || !isStickerKind(obj.rewardStickerKind)
       ) {
@@ -1100,7 +1059,7 @@ function migrateItem(raw: unknown, where: string): Item {
         type: 'contract_cargo',
         id: obj.id,
         sourceCourierIndex,
-        contractKind: obj.contractKind,
+        contractKind,
         cargoName: obj.cargoName,
         rewardStickerKind: obj.rewardStickerKind,
         generatedSeed: numOr(obj.generatedSeed, 0) >>> 0,

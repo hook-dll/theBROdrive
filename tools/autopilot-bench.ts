@@ -28,7 +28,9 @@ import { WorldOrigin } from '../src/world/origin';
 import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
 import { roadSurfaceY, SurfaceField } from '../src/world/roadsurface';
 import { installAssetShim } from './assetshim';
+import { installDocumentShim } from './domshim';
 import type { DriveRoad } from '../src/world/road';
+import { forceWeather, updateWeather, weather } from '../src/world/weather';
 
 class BunProgressEvent extends Event implements ProgressEvent {
   readonly lengthComputable: boolean;
@@ -43,8 +45,10 @@ class BunProgressEvent extends Event implements ProgressEvent {
 }
 if (globalThis.ProgressEvent === undefined) globalThis.ProgressEvent = BunProgressEvent;
 // Every catalogue model is an imported body now, so the bench loads real FBX files
-// off disk rather than building its car in code.
+// off disk rather than building its car in code. Constructing a `Vehicle` also paints
+// its boot's sticker decals, which needs a 2D canvas context to exist.
 installAssetShim();
+installDocumentShim();
 
 const MODEL_ID = new URL(import.meta.url).searchParams.get('model') ?? 'sv_vaz2105r';
 const START_S = 1_000;
@@ -190,8 +194,34 @@ function speed(vehicle: Vehicle): number {
 
 interface DriveMetrics { meanSpeed: number; peakSpeed: number; meanLateral: number; maxLateral: number; maxOverhang: number; rmsLateral: number; signChangesPerKm: number; lineCrossingsPerKm: number; lineRms: number; progress: number; monotonic: boolean; tightRadius: number; tightSpeed: number; }
 
-async function measureMode(mode: AutopilotMode, modelId = MODEL_ID): Promise<DriveMetrics> {
+/**
+ * A haboob across the road: the weather's own gusty wind (world/weather.ts) at the
+ * car, its mean turned square to the road each step so the whole route is a
+ * crosswind, blowing toward the road's right (`side` +1) or left (-1).
+ */
+const HABOOB_HOLD = 0.45;
+const blowAt = { x: 0, y: 0, z: 0 };
+function blowAcross(rig: Rig, clockS: number, s: number, side: number): void {
+  const at = rig.vehicle.absoluteTranslation(blowAt);
+  updateWeather(rig.road.seed, clockS, FIXED_DT, at.x, at.z);
+  const heading = rig.road.sampleAt(s).heading;
+  weather.windX = -side * Math.cos(heading);
+  weather.windZ = side * Math.sin(heading);
+}
+
+/** Still air again: a 'clear' frame, written at once (see `forceWeather`). */
+function calm(rig: Rig): void {
+  forceWeather('clear', 0.5);
+  updateWeather(rig.road.seed, 0, FIXED_DT, 0, 0);
+  forceWeather(null);
+}
+
+async function measureMode(mode: AutopilotMode, modelId = MODEL_ID, crosswind = 0): Promise<DriveMetrics> {
   const rig = await makeRig(START_S, ROUTE_METRES, undefined, modelId);
+  if (crosswind !== 0) {
+    updateWeather(rig.road.seed, 0, FIXED_DT, 0, 0);
+    forceWeather('haboob', HABOOB_HOLD, 1e6);
+  }
   rig.autopilot.setMode(mode);
   rig.autopilot.setEngaged(true);
   let previousS = -Infinity;
@@ -231,6 +261,7 @@ async function measureMode(mode: AutopilotMode, modelId = MODEL_ID): Promise<Dri
   let peakSpeed = 0;
   const maxSteps = Math.ceil(360 / FIXED_DT);
   for (let i = 0; i < maxSteps; i++) {
+    if (crosswind !== 0) blowAcross(rig, i * FIXED_DT, previousS < 0 ? START_S : previousS, crosswind);
     step(rig);
     const p = rig.road.project(rig.vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 }).x, rig.vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 }).z, previousS < 0 ? START_S : previousS);
     if (i === 0) startS = p.s;
@@ -257,6 +288,7 @@ async function measureMode(mode: AutopilotMode, modelId = MODEL_ID): Promise<Dri
     if (curvature > tightCurvature) { tightCurvature = curvature; tightSpeed = v; }
     if (p.s >= START_S + ROUTE_METRES) break;
   }
+  if (crosswind !== 0) calm(rig);
   const progress = previousS - startS;
   const lineKm = Math.max((previousS - lineFromS) / 1000, 0.001);
   return { meanSpeed: sumSpeed / samples, peakSpeed, meanLateral: sumLateral / samples, maxLateral, maxOverhang, rmsLateral: Math.sqrt(sumLateralSq / samples), signChangesPerKm: signChanges / Math.max(progress / 1000, 0.001), lineCrossingsPerKm: lineCrossings / lineKm, lineRms: Math.sqrt(lineSumSq / Math.max(lineSamples, 1)), progress, monotonic, tightRadius: 1 / Math.max(tightCurvature, 1e-9), tightSpeed };
@@ -280,6 +312,39 @@ function checkLineHold(label: string, result: DriveMetrics): void {
     result.lineCrossingsPerKm <= LINE_CROSSINGS_PER_KM_MAX && result.lineRms <= LINE_RMS_MAX_M,
     `${result.lineCrossingsPerKm.toFixed(1)} crossings/km, ${result.lineRms.toFixed(3)} m RMS off the commanded line`,
   );
+}
+
+/**
+ * Traffic in a haboob's crosswind: the same route with the weather's own gusty wind
+ * at full strength (17 m/s mean, gusts σ 20% of it), turned square to the road and
+ * blowing toward either side, for the default car and the slowest-yawing one. The
+ * side force and its yaw moment are real now (`Vehicle.applyAero`), so the driver
+ * has to hold a correction and answer the gusts.
+ *
+ * What it must still do is drive in its lane: every tyre on the asphalt, and no weave
+ * across its line. It is NOT held to the still-air RMS bound, and the RMS is printed
+ * instead. The sleeper and hurried drivers steer on their lateral error alone (no
+ * `curvatureTrim`), so a steady side force is held with a steady offset downwind, the
+ * way a driver without a correction already wound in holds it: measured, 0.13-0.14 m
+ * for the rally 2105 and 0.36-0.41 m for the GAZ-21, which needs the most steering.
+ */
+async function checkCrosswind(): Promise<void> {
+  for (const modelId of [MODEL_ID, SLOW_YAW_MODEL_ID]) {
+    for (const side of [1, -1]) {
+      const result = await measureMode('hurried', modelId, side);
+      const label = `${carModel(modelId).label} hurried, haboob from the ${side > 0 ? 'left' : 'right'}`;
+      check(
+        `${label}: stays on asphalt`,
+        result.maxOverhang <= carModel(modelId).factory.tyreWidth,
+        `worst lateral ${result.maxLateral.toFixed(2)} m, worst tyre past the asphalt ${result.maxOverhang.toFixed(3)} m`,
+      );
+      check(
+        `${label}: no weave`,
+        result.lineCrossingsPerKm <= LINE_CROSSINGS_PER_KM_MAX,
+        `${result.lineCrossingsPerKm.toFixed(1)} crossings/km, ${result.lineRms.toFixed(3)} m RMS off the commanded line`,
+      );
+    }
+  }
 }
 
 const LOOSE_START_S = 12_250;
@@ -1673,6 +1738,7 @@ async function run(): Promise<void> {
   for (const mode of ['sleeper', 'hurried'] as const) {
     checkLineHold(`${carModel(SLOW_YAW_MODEL_ID).label} ${mode}`, await measureMode(mode, SLOW_YAW_MODEL_ID));
   }
+  await checkCrosswind();
   const looseSleeper = await measureLooseSurface('sleeper');
   const looseFrantic = await measureLooseSurface('frantic');
   for (const [mode, result] of [

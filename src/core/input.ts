@@ -7,7 +7,25 @@
  */
 
 import type { TouchControls } from './touch';
+import { gamepads, PAD, type GamepadHub } from './gamepad';
 import { INVENTORY_ITEM_LIMIT } from '../items/items';
+
+/**
+ * What `InputFrame.steer` means, decided by the device that produced it.
+ *
+ *   keys          a keyboard or touch axis, ramped (`keySteerStep`). The vehicle's
+ *                 steering assist turns it into a share of the angle that puts the
+ *                 front tyres at their peak slip.
+ *   analogAssist  a position (a pad stick, the precise-control wheel) read against that
+ *                 same cap, proportionally: the stick's edge is the tyres' peak.
+ *   analog        a position read against the whole steering lock.
+ *   direct        a rack angle as a share of lock, for autonomy and anything else that
+ *                 has computed the angle it wants (`Vehicle.steeringInputForWheelAngle`).
+ *
+ * In the three player modes a steer of exactly 0 means no hand is on the wheel, and the
+ * tyres' own aligning moment turns it. `direct` always holds the rack where it is told.
+ */
+export type SteerMode = 'keys' | 'analogAssist' | 'analog' | 'direct';
 
 export interface InputFrame {
   /** 0..1 */
@@ -26,7 +44,6 @@ export interface InputFrame {
   toggleLeftIndicator: boolean;
   toggleRightIndicator: boolean;
   cycleCamera: boolean;
-  cycleTyres: boolean;
   /** Step the car radio: off → station 1 → station 2 → off. Tap, consumed by audio. */
   radioCycle: boolean;
   /** Re-centre the view (behind the car when driving, level horizon on foot): tap, consumed by CameraRig. */
@@ -71,8 +88,8 @@ export interface InputFrame {
   togglePreciseSteer: boolean;
   /** Cycles autopilot: sleeper -> hurried -> frantic -> off; edge-triggered. */
   toggleAutopilot: boolean;
-  /** Precise control owns a persistent, linear steering-wheel position this frame. */
-  preciseSteering: boolean;
+  /** How `steer` is to be read: see `SteerMode`. */
+  steerMode: SteerMode;
 }
 
 export function emptyInput(): InputFrame {
@@ -87,7 +104,6 @@ export function emptyInput(): InputFrame {
     toggleLeftIndicator: false,
     toggleRightIndicator: false,
     cycleCamera: false,
-    cycleTyres: false,
     radioCycle: false,
     recenterCamera: false,
     interact: false,
@@ -111,7 +127,8 @@ export function emptyInput(): InputFrame {
     stickerSize: 0,
     stickerReset: false,
     togglePreciseSteer: false,
-    preciseSteering: false,
+    // A synthetic frame is a computed command until a device says otherwise.
+    steerMode: 'direct',
   };
 }
 
@@ -142,7 +159,6 @@ export const BINDABLE_ACTIONS: readonly {
   { id: 'lights', label: 'Cycle headlights', defaultKeys: ['KeyL'] },
   { id: 'indicatorLeft', label: 'Left blinker', defaultKeys: ['Comma'] },
   { id: 'indicatorRight', label: 'Right blinker', defaultKeys: ['Period'] },
-  { id: 'tyres', label: 'Cycle tyre compound', defaultKeys: ['KeyO'] },
   { id: 'mouseSteer', label: 'Precise steering', defaultKeys: ['KeyM'] },
   { id: 'camera', label: 'Toggle hood / chase camera', defaultKeys: ['KeyC'] },
   { id: 'recenterCamera', label: 'Recenter camera', defaultKeys: ['KeyV'] },
@@ -198,48 +214,69 @@ function resolveKeys(
 }
 
 /**
- * Seconds for a digital key to ramp an analogue axis from 0 to 1, and to come back.
+ * A keyboard pedal is a quick FOOT: the key down moves the pedal toward the floor at a
+ * constant speed, the key up lifts it at a faster one. Seconds for the whole travel.
  *
- * THE RISE IS THE DOSE CONTROL AND THE FALL IS NOT, which is the whole of this pair.
- * A keyboard pedal is a switch, so the only thing that turns a press into a dose is
- * this shaping: how long the key is held selects the value, and everything that happens
- * after the key comes up is pedal the driver did NOT ask for.
+ * A foot moves a pedal at a speed, it does not approach the floor exponentially. The
+ * old shaping did: a first-order lag of 0.3 s, which put a held key at only 0.8 of the
+ * pedal after half a second and 0.95 after nine tenths, so "floored" was most of a
+ * second away. A constant rate reaches the floor at a definite moment: a throttle in a
+ * quarter of a second, and the brake, which a driver stamps on, in 0.15.
  *
- * The fall was 0.3 s, and at that decay a release was not a release — it was a second
- * press of the same size. Measured with `tools/pedal-dose.ts`, as an equivalent hold:
- * releasing added 0.28 SECONDS of pedal at every press length, so a 40 ms tap delivered
- * EIGHT times its own press in the tail. That is the brake the player describes as "an
- * anchor": a tap is not a light touch, it is an unmodulated heavy one, because the
- * driver's release keeps pushing the pedal down.
+ * THE RISE IS THE DOSE CONTROL AND THE FALL IS NOT. How long the key is held selects
+ * the value, and everything after the key comes up is pedal the driver did not ask for:
+ * a release of 0.3 s once turned a 40 ms brake tap into EIGHT times its own dose. Here
+ * the lift takes 0.1 s from a floored throttle and 0.08 from a floored brake, and less
+ * from a part pedal, so a tap ends almost when the key does (`tools/pedal-dose.ts`:
+ * monotonic in press length, mid-range reachable, the tail a fraction of the press).
  *
- * The rise was 0.18 s, which is 11 frames to cross the whole travel: the entire usable
- * band passed in less time than a human can time a release in, so there was nowhere in
- * the middle to stop. 0.3 s is three times the room, and a steady part-pedal becomes
- * something a player can actually hold.
- *
- * The rise is deliberately NOT slower than this. Pedal travel has to stay available
- * quickly — measured on this car, holding 1.0 rather than 0.8 is worth 33% of its
- * acceleration (0-100 in 22.4 s against 29.7) and 16 km/h of top speed — so the way to
- * dose a keyboard pedal is by TIMING the press, not by capping the top of it.
+ * A constant rate also lands exactly on 0 and 1, which matters downstream: the vehicle
+ * turns "any throttle at all" into a wheel drive torque, so off has to mean off.
  */
-const AXIS_RISE = 0.3;
-const AXIS_FALL = 0.12;
-/** A quick tap corrects a lane; a deliberate half-second hold approaches full lock. */
-const STEER_RISE = 0.45;
-/** Caster returns the input axis faster than it turns in, without snapping to centre. */
-const STEER_RETURN = 0.32;
-/**
- * Exponential smoothing only ever ASYMPTOTES to its target, so a released pedal
- * keeps a residue like 1e-9 forever and a floored one never quite reads 1. Both
- * matter downstream: the vehicle turns "any throttle at all" into a wheel engine
- * force, and Rapier's vehicle controller ignores a wheel's brake entirely on any
- * wheel whose engine force is non-zero. Snapping inside this window makes off
- * mean off and floored mean floored.
- */
-const AXIS_SNAP = 1e-3;
+export const KEY_PEDAL_RAMPS = {
+  throttle: { riseS: 0.25, fallS: 0.1 },
+  brake: { riseS: 0.15, fallS: 0.08 },
+} as const;
 
-function snapAxis(value: number, target: number): number {
-  return Math.abs(target - value) <= AXIS_SNAP ? target : value;
+/**
+ * One step of a keyboard (or touch) pedal toward `want`, 0..1, at the ramp's speeds.
+ * Exported so `tools/pedal-dose.ts` measures this function rather than a copy of it.
+ */
+export function keyPedalStep(
+  value: number,
+  want: number,
+  ramp: { readonly riseS: number; readonly fallS: number },
+  dt: number,
+): number {
+  const up = dt / ramp.riseS;
+  const down = dt / ramp.fallS;
+  const delta = want - value;
+  return value + (delta > up ? up : delta < -down ? -down : delta);
+}
+
+/**
+ * Time constant of a held steering key's wind-up. A key now asks for a share of the
+ * front tyres' peak slip rather than of the lock, so it has to reach the top of the
+ * travel sooner than the 0.45 s it used to take for the same yaw: 0.3 s puts a held key
+ * at the peak in about two thirds of a second, and a 40 ms tap still asks for a light
+ * correction. Tune in game.
+ */
+const STEER_RISE = 0.3;
+
+/**
+ * One step of the keyboard steering axis toward `want`, -1..1.
+ *
+ * A held key winds the axis up over `STEER_RISE`; a reversal winds it through zero the
+ * same way, the hand still on the wheel. Letting go is different: the axis drops to 0 at
+ * once, because 0 is how the frame says NO HAND IS ON THE WHEEL (`SteerMode`). The
+ * vehicle then lets the tyres' own aligning moment turn it back — at the rate the road
+ * gives, toward where the car is going — instead of this layer playing caster with a
+ * fixed 0.32 s decay that knew nothing about speed, grip or a slide. Exported so the
+ * benches drive the same ramp the game does.
+ */
+export function keySteerStep(value: number, want: number, dt: number): number {
+  if (want === 0) return 0;
+  return value + (want - value) * Math.min(1, dt / STEER_RISE);
 }
 
 /**
@@ -247,6 +284,21 @@ function snapAxis(value: number, target: number): number {
  * mouse sensitivity remains independent so camera preference cannot change steering.
  */
 const PRECISE_MOUSE_GAIN = 0.0011;
+/**
+ * Look/camera-orbit rate from a fully deflected right stick, radians per second.
+ *
+ * A rate rather than a displacement, because a stick is a held position: the same
+ * deflection has to keep turning the view for as long as it is held. Scaled by the
+ * player's mouse sensitivity relative to `PAD_LOOK_REFERENCE_SENSITIVITY`, so the one
+ * control decides how fast the view turns whichever device is turning it.
+ */
+const PAD_LOOK_RATE = 2.6;
+/**
+ * The mouse sensitivity at which `PAD_LOOK_RATE` is the stick's rate: the authored
+ * default, written as a bare number because settings.ts imports this module and the
+ * dependency must not run the other way.
+ */
+const PAD_LOOK_REFERENCE_SENSITIVITY = 0.0022;
 /**
  * Virtual-wheel travel per second while A or D is held in precise mode.
  *
@@ -281,6 +333,8 @@ export class InputReader {
   private rawDX = 0;
   /** Is precise control switched on AND applicable (set by the game, not the device)? */
   private preciseSteerEnabled = false;
+  /** Analog positions read against the assist's cap; see `setAnalogSteeringAssist`. */
+  private analogSteerAssist = true;
   /**
    * Linear steering-wheel position, -1..1. Mouse and keyboard add to the same value;
    * neither releasing a key nor stopping the mouse returns it toward centre.
@@ -300,6 +354,31 @@ export class InputReader {
    */
   private touch: TouchControls | null = null;
 
+  /** The shared pad hub; see core/gamepad.ts. */
+  private readonly pads: GamepadHub = gamepads();
+  /**
+   * Pad buttons as the last sample saw them. The pad is polled, not evented, so this
+   * is what turns "the button is down" into the press/release edges the action map
+   * wants — and `resyncPad` is what keeps a button held across a pause from firing
+   * an action the moment driving resumes.
+   */
+  private readonly padHeld = new Array<boolean>(PAD.DRight + 1).fill(false);
+  /**
+   * Press edges for this sample, index-matched to `padHeld`: computed once at the top
+   * of `sample` so every action below reads a plain boolean and nothing re-derives it.
+   */
+  private readonly padEdges = new Array<boolean>(PAD.DRight + 1).fill(false);
+  /**
+   * Which device last moved each axis, so a pad and the keyboard cannot fight for the
+   * same one. An axis belongs to whoever moved it most recently: a stick deflection
+   * takes it from the keys, and the first key to go down takes it back. Steering,
+   * throttle and brake are latched separately because a player may hold the pad's
+   * throttle with one hand and tap the brake key with the other.
+   */
+  private steerDevice: 'keyboard' | 'pad' | 'touch' = 'keyboard';
+  private throttleDevice: 'keyboard' | 'pad' | 'touch' = 'keyboard';
+  private brakeDevice: 'keyboard' | 'pad' | 'touch' = 'keyboard';
+
   constructor(
     private readonly canvas: HTMLCanvasElement,
     private mouseSensitivity = 0.0022,
@@ -313,6 +392,22 @@ export class InputReader {
     window.addEventListener('mousemove', this.onMouseMove);
     canvas.addEventListener('wheel', this.onWheel, { passive: false });
     canvas.addEventListener('contextmenu', this.onContextMenu);
+    // Seed the pad's buttons rather than starting from "all released": a pad that
+    // already had A down when this reader was built must not read as a press.
+    this.resyncPad();
+  }
+
+  /**
+   * Re-reads the pad's buttons without emitting any edges.
+   *
+   * Called after an overlay closes, because the menu consumes the same buttons while
+   * the loop is stopped: the press that activated "Resume" is still under the
+   * player's thumb when the first sample of the resumed drive runs, and without this
+   * it would land as a fresh handbrake toggle.
+   */
+  resyncPad(): void {
+    const pad = this.pads.read();
+    for (let i = 0; i < this.padHeld.length; i++) this.padHeld[i] = pad.buttons[i] === true;
   }
 
   /** Attaches the touch overlay's state as a second input source. */
@@ -333,6 +428,15 @@ export class InputReader {
   setPreciseSteering(enabled: boolean): void {
     if (!enabled) this.preciseWheel = 0;
     this.preciseSteerEnabled = enabled;
+  }
+
+  /**
+   * The settings' steering assist for ANALOG positions — the pad's stick and the
+   * precise-control wheel (`SteerMode`). The keyboard is always assisted: a key has no
+   * position to be read against the whole lock.
+   */
+  setAnalogSteeringAssist(enabled: boolean): void {
+    this.analogSteerAssist = enabled;
   }
 
   /**
@@ -443,6 +547,11 @@ export class InputReader {
     return false;
   }
 
+  /** A pad button's press edge for this sample; see `padEdges` in `sample`. */
+  private padPressed(index: number): boolean {
+    return this.padEdges[index] === true;
+  }
+
   /**
    * Replaces the effective bindings with the given overrides; actions without
    * an override keep their defaults. Called once at startup and whenever the
@@ -476,27 +585,40 @@ export class InputReader {
     const mouseBrake = preciseDrive && this.held.has('Mouse2');
     const touchForward = touch?.forward ?? 0;
     const touchBackward = touch?.backward ?? 0;
-    const wantThrottle = Math.max(
-      this.anyHeld(this.keys.throttle) ? 1 : 0,
-      touchForward,
-      mouseThrottle ? 1 : 0,
-    );
-    const wantBrake = Math.max(
-      this.anyHeld(this.keys.brake) ? 1 : 0,
-      touchBackward,
-      mouseBrake ? 1 : 0,
-    );
-    const reverseHeld = wantBrake > 0;
-    f.throttle = snapAxis(
-      f.throttle +
-        (wantThrottle - f.throttle) * Math.min(1, dt / (wantThrottle > 0 ? AXIS_RISE : AXIS_FALL)),
-      wantThrottle,
-    );
-    f.brake = snapAxis(
-      f.brake + (wantBrake - f.brake) * Math.min(1, dt / (wantBrake > 0 ? AXIS_RISE : AXIS_FALL)),
-      wantBrake,
-    );
-    f.reverse = reverseHeld;
+    // Gamepad: an analog pedal and a key are the same axis, and only one of them may
+    // hold it. The pad takes it as soon as its trigger moves; the first key down takes
+    // it back. See the device latch fields.
+    const pad = this.pads.read();
+    // Press edges, computed once: a polled device has no events, so "just pressed"
+    // is this sample's reading against the last one's.
+    for (let i = 0; i < this.padEdges.length; i++) {
+      this.padEdges[i] = this.padHeld[i] === false && pad.buttons[i] === true;
+    }
+    const keyThrottle = this.anyHeld(this.keys.throttle) ? 1 : 0;
+    const keyBrake = this.anyHeld(this.keys.brake) ? 1 : 0;
+    if (pad.rightTrigger > 0) this.throttleDevice = 'pad';
+    else if (keyThrottle > 0 || mouseThrottle) this.throttleDevice = 'keyboard';
+    else if (touchForward > 0) this.throttleDevice = 'touch';
+    if (pad.leftTrigger > 0) this.brakeDevice = 'pad';
+    else if (keyBrake > 0 || mouseBrake) this.brakeDevice = 'keyboard';
+    else if (touchBackward > 0) this.brakeDevice = 'touch';
+
+    // A trigger is a position, so it lands as one: no rise, no fall. A key is a switch,
+    // so it moves the pedal like a quick foot (`KEY_PEDAL_RAMPS`).
+    const wantThrottle = Math.max(keyThrottle, touchForward, mouseThrottle ? 1 : 0);
+    const wantBrake = Math.max(keyBrake, touchBackward, mouseBrake ? 1 : 0);
+    f.throttle =
+      this.throttleDevice === 'pad'
+        ? pad.rightTrigger
+        : keyPedalStep(f.throttle, wantThrottle, KEY_PEDAL_RAMPS.throttle, dt);
+    f.brake =
+      this.brakeDevice === 'pad'
+        ? pad.leftTrigger
+        : keyPedalStep(f.brake, wantBrake, KEY_PEDAL_RAMPS.brake, dt);
+    // Reverse is the HELD command, not the smoothed pedal: on the keyboard that is
+    // exactly the key's own state, so a release stops asking for reverse the same
+    // instant it did before, while the pedal tail decays.
+    f.reverse = this.brakeDevice === 'pad' ? pad.leftTrigger > 0 : wantBrake > 0;
 
     // Middle-button look suppresses only mouse travel. A/D still turns the wheel, so
     // looking into a bend never steals the keyboard half of the mixed control mode.
@@ -504,45 +626,75 @@ export class InputReader {
     const steerWithMouse = preciseDrive && !lookOverride;
     const keySteer =
       (this.anyHeld(this.keys.right) ? 1 : 0) - (this.anyHeld(this.keys.left) ? 1 : 0);
-    if (preciseDrive) {
+    if (pad.steer !== 0) this.steerDevice = 'pad';
+    else if (keySteer !== 0) this.steerDevice = 'keyboard';
+    else if (touch?.steeringActive === true) this.steerDevice = 'touch';
+    const analogMode = this.analogSteerAssist ? 'analogAssist' : 'analog';
+    if (this.steerDevice === 'pad') {
+      // An analog stick is already a position, held and released by the thumb; the
+      // keyboard's rise ramp would only put a lag between it and the wheels.
+      f.steer = pad.steer;
+      f.steerMode = analogMode;
+    } else if (preciseDrive) {
       const mouseDelta = steerWithMouse ? this.rawDX * PRECISE_MOUSE_GAIN : 0;
       const next = this.preciseWheel + mouseDelta + keySteer * PRECISE_KEY_RATE * dt;
       this.preciseWheel = next < -1 ? -1 : next > 1 ? 1 : next;
       f.steer = this.preciseWheel;
+      f.steerMode = analogMode;
     } else {
       // The touch wheel is already analogue, so it supplies the same target the
-      // normal steering smoothing follows.
+      // keyboard ramp follows, and lifting the thumb lets go of the wheel like a key.
       const wantSteer = keySteer !== 0 || !touch?.steeringActive ? keySteer : touch.steer;
-      f.steer +=
-        (wantSteer - f.steer) * Math.min(1, dt / (wantSteer === 0 ? STEER_RETURN : STEER_RISE));
+      f.steer = keySteerStep(f.steer, wantSteer, dt);
+      f.steerMode = 'keys';
     }
-    f.preciseSteering = preciseDrive;
 
     const taps = this.touch?.consumeTaps();
-    if (this.driving && (this.anyPressed(this.keys.handbrake) || taps?.handbrake === true)) {
+    if (
+      this.driving
+      && (this.anyPressed(this.keys.handbrake) || taps?.handbrake === true || this.padPressed(PAD.A))
+    ) {
       this.keyboardHandbrake = !this.keyboardHandbrake;
     }
     f.handbrake = this.keyboardHandbrake;
     f.shift =
-      (this.anyPressed(this.keys.shiftUp) ? 1 : 0) -
-      (this.anyPressed(this.keys.shiftDown) ? 1 : 0);
-    f.toggleLights = this.anyPressed(this.keys.lights) || taps?.lights === true;
-    f.toggleLeftIndicator = this.anyPressed(this.keys.indicatorLeft);
-    f.toggleRightIndicator = this.anyPressed(this.keys.indicatorRight);
-    f.cycleCamera = this.anyPressed(this.keys.camera) || taps?.camera === true;
-    f.cycleTyres = this.anyPressed(this.keys.tyres);
-    f.togglePreciseSteer = this.anyPressed(this.keys.mouseSteer);
+      (this.anyPressed(this.keys.shiftUp) || this.padPressed(PAD.RB) ? 1 : 0) -
+      (this.anyPressed(this.keys.shiftDown) || this.padPressed(PAD.LB) ? 1 : 0);
+    f.toggleLights =
+      this.anyPressed(this.keys.lights)
+      || taps?.lights === true
+      || (this.driving && this.padPressed(PAD.LS));
+    f.toggleLeftIndicator =
+      this.anyPressed(this.keys.indicatorLeft) || (this.driving && this.padPressed(PAD.DLeft));
+    f.toggleRightIndicator =
+      this.anyPressed(this.keys.indicatorRight) || (this.driving && this.padPressed(PAD.DRight));
+    f.cycleCamera =
+      this.anyPressed(this.keys.camera) || taps?.camera === true || this.padPressed(PAD.Y);
+    f.togglePreciseSteer = this.anyPressed(this.keys.mouseSteer) || this.padPressed(PAD.RS);
     f.toggleAutopilot =
-      this.anyPressed(this.keys.autopilot) || taps?.autopilot === true;
+      this.anyPressed(this.keys.autopilot)
+      || taps?.autopilot === true
+      || (this.driving && this.padPressed(PAD.Back));
     f.recenterCamera =
-      this.anyPressed(this.keys.recenterCamera) || taps?.recenter === true;
-    f.radioCycle = this.anyPressed(this.keys.radio);
-    f.interact = this.anyPressed(this.keys.interact) || taps?.interact === true;
-    f.mount = this.anyPressed(this.keys.mount) || taps?.mount === true;
-    f.useHeld = this.anyPressed(this.keys.useHeld) || taps?.useHeld === true;
-    f.dropItem = this.anyPressed(this.keys.drop) || taps?.drop === true;
+      this.anyPressed(this.keys.recenterCamera)
+      || taps?.recenter === true
+      || this.padPressed(PAD.DUp);
+    f.radioCycle =
+      this.anyPressed(this.keys.radio) || (this.driving && this.padPressed(PAD.DDown));
+    // X is the pad's F: it enters and leaves a car, picks things up and opens what is
+    // aimed at, exactly as the key does.
+    f.interact = this.anyPressed(this.keys.interact) || taps?.interact === true || this.padPressed(PAD.X);
+    f.mount = this.anyPressed(this.keys.mount) || taps?.mount === true || this.padPressed(PAD.X);
+    f.useHeld =
+      this.anyPressed(this.keys.useHeld) || taps?.useHeld === true || this.padPressed(PAD.B);
+    f.dropItem =
+      this.anyPressed(this.keys.drop)
+      || taps?.drop === true
+      || (!this.driving && this.padPressed(PAD.DDown));
     f.removeWearable =
-      this.anyPressed(this.keys.removeWearable) || taps?.removeWearable === true;
+      this.anyPressed(this.keys.removeWearable)
+      || taps?.removeWearable === true
+      || (!this.driving && this.padPressed(PAD.Back));
     // Both buttons are pedals while precise control is active, so they must not also
     // fire or aim the held item. The mode is enabled only while driving, so on foot
     // this is exactly the ordinary behavior.
@@ -551,6 +703,10 @@ export class InputReader {
     f.cycleItem =
       (this.anyPressed(this.keys.itemNext) ? 1 : 0) -
       (this.anyPressed(this.keys.itemPrev) ? 1 : 0);
+    if (!this.driving) {
+      if (this.padPressed(PAD.DRight)) f.cycleItem += 1;
+      if (this.padPressed(PAD.DLeft)) f.cycleItem -= 1;
+    }
 
     // Number row 1..3 picks an inventory slot directly. The numpad row is accepted
     // too so either hand works.
@@ -561,23 +717,37 @@ export class InputReader {
         break;
       }
     }
-    // On foot the pedals retain forward/backward movement while camera look moves to
-    // the left joystick. Digital keys remain authoritative on each movement axis.
+    // On foot the left stick walks and the right stick looks; the keyboard's pedals
+    // retain forward/backward movement, and digital keys remain authoritative on each
+    // movement axis. The pad is a position like the touch wheel, so it goes in whole.
     const keyMoveX =
       (this.anyHeld(this.keys.right) ? 1 : 0) - (this.anyHeld(this.keys.left) ? 1 : 0);
     const keyMoveZ =
       (this.anyHeld(this.keys.throttle) ? 1 : 0) -
       (this.anyHeld(this.keys.brake) ? 1 : 0);
-    f.moveX = keyMoveX !== 0 ? keyMoveX : touch?.steer ?? 0;
-    f.moveZ = keyMoveZ !== 0 ? keyMoveZ : touchForward - touchBackward;
-    f.jump = this.anyPressed(this.keys.jump);
-    f.sprint = this.anyHeld(this.keys.sprint);
+    f.moveX = keyMoveX !== 0 ? keyMoveX : pad.moveX !== 0 ? pad.moveX : touch?.steer ?? 0;
+    f.moveZ =
+      keyMoveZ !== 0
+        ? keyMoveZ
+        : pad.moveZ !== 0
+          ? pad.moveZ
+          : touchForward - touchBackward;
+    f.jump = this.anyPressed(this.keys.jump) || this.padPressed(PAD.A);
+    f.sprint = this.anyHeld(this.keys.sprint) || pad.buttons[PAD.LS] === true;
 
     const drag = this.touch?.consumeLook();
     // While the mouse is steering it is not looking: feeding both would spin the
-    // camera every time the driver corrected the car. Mouse2 gives the view back.
-    f.lookYaw = steerWithMouse ? drag?.yaw ?? 0 : this.yawDelta + (drag?.yaw ?? 0);
-    f.lookPitch = steerWithMouse ? drag?.pitch ?? 0 : this.pitchDelta + (drag?.pitch ?? 0);
+    // camera every time the driver corrected the car. Mouse2 gives the view back, and
+    // the right stick is never steering, so it looks in either mode.
+    const padLook =
+      PAD_LOOK_RATE *
+      Math.min(1, this.mouseSensitivity / PAD_LOOK_REFERENCE_SENSITIVITY) *
+      Math.min(dt, 0.1);
+    f.lookYaw =
+      (steerWithMouse ? drag?.yaw ?? 0 : this.yawDelta + (drag?.yaw ?? 0)) + pad.lookX * padLook;
+    f.lookPitch =
+      (steerWithMouse ? drag?.pitch ?? 0 : this.pitchDelta + (drag?.pitch ?? 0)) +
+      pad.lookY * padLook;
     f.zoomDelta = this.wheelDelta + (this.touch?.consumeZoom(dt) ?? 0);
     f.stickerTurn = taps?.stickerTurn ?? 0;
     f.stickerSize = taps?.stickerSize ?? 0;
@@ -587,6 +757,7 @@ export class InputReader {
     this.rawDX = 0;
     this.wheelDelta = 0;
     this.pressed.clear();
+    for (let i = 0; i < this.padHeld.length; i++) this.padHeld[i] = pad.buttons[i] === true;
     return f;
   }
 }

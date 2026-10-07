@@ -14,6 +14,11 @@
  * and a second hand-written stub would drift the moment a painter calls one more
  * context method.
  *
+ * `render/stickerart.ts` is the other painter, and it reaches for far more of the 2D
+ * API — arcs, ellipses, beziers, clipping, gradients, `drawImage`. It runs while a
+ * `Vehicle` is being built (the boot's sticker decals), so any bench that constructs
+ * one needs the whole surface present, even though every op stays a no-op.
+ *
  * Nothing here is part of the game bundle.
  */
 
@@ -23,29 +28,75 @@ interface ShimImageData {
   readonly height: number;
 }
 
+interface ShimGradient {
+  addColorStop(offset: number, color: string): void;
+}
+
+/** Gradients are never sampled here, so the stops are accepted and dropped. */
+class ShimGradientStub implements ShimGradient {
+  addColorStop(): void {}
+}
+
 interface ShimCanvasContext {
   filter: string;
-  fillStyle: string;
+  fillStyle: string | ShimGradient;
   font: string;
+  globalAlpha: number;
+  imageSmoothingEnabled: boolean;
   lineCap: CanvasLineCap;
   lineJoin: CanvasLineJoin;
   lineWidth: number;
-  strokeStyle: string;
+  shadowBlur: number;
+  shadowColor: string;
+  strokeStyle: string | ShimGradient;
   textAlign: CanvasTextAlign;
   textBaseline: CanvasTextBaseline;
   createImageData(width: number, height: number): ShimImageData;
   putImageData(imageData: ShimImageData, x: number, y: number): void;
   getImageData(x: number, y: number, width: number, height: number): ShimImageData;
+  createLinearGradient(x0: number, y0: number, x1: number, y1: number): ShimGradient;
+  createRadialGradient(
+    x0: number,
+    y0: number,
+    r0: number,
+    x1: number,
+    y1: number,
+    r1: number,
+  ): ShimGradient;
+  arc(x: number, y: number, r: number, start: number, end: number, ccw?: boolean): void;
+  arcTo(x1: number, y1: number, x2: number, y2: number, r: number): void;
   beginPath(): void;
-  moveTo(x: number, y: number): void;
+  bezierCurveTo(c1x: number, c1y: number, c2x: number, c2y: number, x: number, y: number): void;
+  clip(): void;
+  closePath(): void;
+  drawImage(image: unknown, x: number, y: number): void;
+  ellipse(
+    x: number,
+    y: number,
+    rx: number,
+    ry: number,
+    rotation: number,
+    start: number,
+    end: number,
+    ccw?: boolean,
+  ): void;
+  fill(): void;
+  fillRect(x: number, y: number, width: number, height: number): void;
+  fillText(text: string, x: number, y: number, maxWidth?: number): void;
   lineTo(x: number, y: number): void;
+  measureText(text: string): { width: number };
+  moveTo(x: number, y: number): void;
+  quadraticCurveTo(cx: number, cy: number, x: number, y: number): void;
+  rect(x: number, y: number, width: number, height: number): void;
+  restore(): void;
+  rotate(angle: number): void;
+  save(): void;
+  scale(x: number, y: number): void;
+  setLineDash(segments: readonly number[]): void;
   stroke(): void;
   strokeRect(x: number, y: number, width: number, height: number): void;
-  fillText(text: string, x: number, y: number, maxWidth?: number): void;
-  save(): void;
-  restore(): void;
+  strokeText(text: string, x: number, y: number, maxWidth?: number): void;
   translate(x: number, y: number): void;
-  fillRect(x: number, y: number, width: number, height: number): void;
 }
 
 class ShimCanvas {
@@ -57,12 +108,18 @@ class ShimCanvas {
     filter: 'none',
     fillStyle: '',
     font: '',
+    globalAlpha: 1,
+    imageSmoothingEnabled: true,
     lineCap: 'butt',
     lineJoin: 'miter',
     lineWidth: 1,
+    shadowBlur: 0,
+    shadowColor: '',
     strokeStyle: '',
     textAlign: 'start',
     textBaseline: 'alphabetic',
+    createLinearGradient: () => new ShimGradientStub(),
+    createRadialGradient: () => new ShimGradientStub(),
     createImageData: (width, height) => ({
       data: new Uint8ClampedArray(width * height * 4),
       width,
@@ -80,16 +137,31 @@ class ShimCanvas {
       }
       return { data: this.#pixels, width, height };
     },
+    arc: () => {},
+    arcTo: () => {},
     beginPath: () => {},
-    moveTo: () => {},
+    bezierCurveTo: () => {},
+    clip: () => {},
+    closePath: () => {},
+    drawImage: () => {},
+    ellipse: () => {},
+    fill: () => {},
+    fillRect: () => {},
+    fillText: () => {},
     lineTo: () => {},
+    measureText: (text) => ({ width: text.length * 8 }),
+    moveTo: () => {},
+    quadraticCurveTo: () => {},
+    rect: () => {},
+    restore: () => {},
+    rotate: () => {},
+    save: () => {},
+    scale: () => {},
+    setLineDash: () => {},
     stroke: () => {},
     strokeRect: () => {},
-    fillText: () => {},
-    save: () => {},
-    restore: () => {},
+    strokeText: () => {},
     translate: () => {},
-    fillRect: () => {},
   };
 
   getContext(contextId: string): ShimCanvasContext | null {

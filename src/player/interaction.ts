@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { PhysicsWorld } from '../core/physics';
-import { DAY_LENGTH } from '../game/state';
+
 import type { CarState, GameWorld, StickerState } from '../game/state';
 import { contractAcceptRefusal, contractDeliveryEffect, contractRewardSticker } from '../contracts/registry';
 import type { DeliveryContext, DeliveryProbe } from '../contracts/types';
@@ -316,8 +316,6 @@ interface MutableDeliveryProbe {
   courierX: number;
   courierZ: number;
   drivingCarId: string | null;
-  courierCells: readonly (Item | null)[];
-  carried: readonly Item[];
   readonly trailerPosition: DeliveryProbe['trailerPosition'];
   readonly carPosition: DeliveryProbe['carPosition'];
   readonly car: DeliveryProbe['car'];
@@ -433,10 +431,8 @@ export class Interaction {
     courierX: 0,
     courierZ: 0,
     drivingCarId: null,
-    courierCells: [],
-    carried: [],
     // Arrows, not values: they read the live world when the kind asks, and the
-    // fields above are only the courier and pack this call is about.
+    // fields above are only the courier this call is about.
     trailerPosition: (id) => this.trailerPositionOf(id),
     carPosition: (id) => this.carLookup.position(id),
     car: (id) => this.world.state.cars[id] ?? null,
@@ -734,14 +730,12 @@ export class Interaction {
    * and the commit both go through here, so what the sentence promises and what F
    * does are read from the same world at the same moment.
    */
-  private deliveryProbe(courier: CourierTrunk, cells: readonly (Item | null)[]): DeliveryProbe {
+  private deliveryProbe(courier: CourierTrunk): DeliveryProbe {
     const probe = this.deliveryProbeValue;
     probe.targetCourierIndex = courier.index;
     probe.courierX = courier.x;
     probe.courierZ = courier.z;
     probe.drivingCarId = this.world.state.player.drivingCarId;
-    probe.courierCells = cells;
-    probe.carried = this.inventory.all;
     return probe;
   }
 
@@ -1295,7 +1289,7 @@ export class Interaction {
       if (held?.type === 'contract_cargo' && t.owner === 'courier') {
         const courier = this.couriers.get(t.id);
         if (!courier) return null;
-        const refusal = contractAcceptRefusal(held, this.deliveryProbe(courier, cells));
+        const refusal = contractAcceptRefusal(held, this.deliveryProbe(courier));
         if (refusal) return refusal;
         return `[F] deliver ${itemLabel(held)} — receive signed envelope`;
       }
@@ -1685,7 +1679,7 @@ export class Interaction {
           this.sound = 'refused';
           return;
         }
-        const probe = this.deliveryProbe(courier, cells);
+        const probe = this.deliveryProbe(courier);
         if (contractAcceptRefusal(held, probe)) {
           this.sound = 'refused';
           return;
@@ -1693,32 +1687,18 @@ export class Interaction {
         // The kind decides the payout here: its signature sticker when its own
         // condition held, the offer's seed-random sticker otherwise. A delivery
         // never fails.
-        const delivery: DeliveryContext = {
-          item: held,
-          nowS: this.world.state.playedSeconds,
-          timeOfDay: this.world.state.timeOfDay,
-          dayLength: DAY_LENGTH,
-          probe,
-        };
+        const delivery: DeliveryContext = { item: held, probe };
         const envelope: StickerEnvelopeItem = {
           type: 'sticker_envelope',
           id: `${held.id}:signed:${courier.index}`,
           stickerKind: contractRewardSticker(held, delivery),
           completedContractId: held.id,
         };
-        // What the kind consumes besides the cargo: the trailer, car or part the
-        // contract named. Items leaving the courier's own cells go out in the SAME
-        // array as the envelope, and the world deltas follow the `courier_storage`
-        // delta that writes the completed id — so a crash between the halves cannot
-        // pay twice, and the pack edits are the last thing that happens.
+        // What the kind consumes besides the cargo: the trailer or car the contract
+        // named. The world deltas follow the `courier_storage` delta that writes the
+        // completed id, so a crash between the halves cannot pay twice.
         const effect = contractDeliveryEffect(held, probe, delivery);
         const nextCells = cells.slice();
-        if (effect?.consumeCourierItems) {
-          for (let cell = 0; cell < nextCells.length; cell++) {
-            const stored = nextCells[cell];
-            if (stored && effect.consumeCourierItems.includes(stored.id)) nextCells[cell] = null;
-          }
-        }
         nextCells[t.cell] = envelope;
         this.world.apply({
           t: 'courier_storage',
@@ -1729,9 +1709,6 @@ export class Interaction {
         });
         if (effect?.deltas) {
           for (const delta of effect.deltas) this.world.apply(delta);
-        }
-        if (effect?.consumeCarried) {
-          for (const id of effect.consumeCarried) this.inventory.remove(id);
         }
         this.inventory.remove(held.id);
         this.sound = 'mount';

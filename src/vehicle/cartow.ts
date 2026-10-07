@@ -486,7 +486,7 @@ export class CarTowField {
       -lock * CASTER_MAX_SHARE,
       Math.min(lock * CASTER_MAX_SHARE, Math.atan2(local.x, local.z)),
     );
-    return vehicle.steeringInputForWheelAngle(wanted, speed);
+    return vehicle.steeringInputForWheelAngle(wanted);
   }
 
   /**

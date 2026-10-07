@@ -36,23 +36,17 @@ import type { ContractKind, ContractPlace } from './types';
 /**
  * Kinds a rival can carry exactly as the player does: an item in the boot, accepted
  * by the very next courier. Not the ones that bring a trailer or a second car (a
- * rival cannot tow), need a part or a photograph found on the way, or refuse the
- * next courier (`long_haul`).
+ * rival cannot tow).
  */
-const RACEABLE_KINDS: ReadonlySet<ContractKind> = new Set<ContractKind>([
-  'parcel',
-  'heavy_crate',
-  'fragile_radio',
-  'urgent_film',
-  'medical_thermo',
-  'one_tank',
-  'dont_overheat',
-  'clean_delivery',
-  'bald_tyres',
-  'sand_route',
-  'desert_slalom',
-  'night_courier',
-]);
+const RACEABLE_KINDS: Readonly<Record<ContractKind, boolean>> = {
+  parcel: true,
+  heavy_crate: true,
+  fragile_radio: true,
+  trailer_equipment: false,
+  oversize: false,
+  towing: false,
+  car_transfer: false,
+};
 
 const RIVAL_COUNT = 3;
 const AHEAD_FAR_M = 1500;
@@ -187,7 +181,7 @@ export class RivalRace {
    */
   observe(item: ContractCargoItem, place: ContractPlace, playerS: number): void {
     if (this.race !== null || place === 'courier' || item.progress?.started) return;
-    if (!RACEABLE_KINDS.has(item.contractKind)) return;
+    if (RACEABLE_KINDS[item.contractKind] !== true) return;
     this.start(item, playerS);
   }
 

@@ -22,6 +22,7 @@ import { SurfaceType } from '../src/core/surfaces';
 import { installAssetShim } from './assetshim';
 import { addInclineGround, makeRig } from './handling-bench';
 import { preloadCarModels } from '../src/render/carmodel';
+import { keySteerStep } from '../src/core/input';
 import { FIXED_DT } from '../src/core/physics';
 
 installAssetShim();
@@ -31,13 +32,8 @@ const model = process.argv[2] ?? 'sv_vaz2101';
 const speedKmh = Number(process.argv[3] ?? 60);
 const speedMps = speedKmh / 3.6;
 
-/**
- * The keyboard input layer's own shaping, mirrored from core/input.ts: a binary key
- * target smoothed with an asymmetric time constant. Those two constants are private to
- * that module, so if they move this bench follows them by hand.
- */
-const STEER_RISE = 0.45;
-const STEER_RETURN = 0.32;
+// The keyboard input layer's own shaping (`keySteerStep`, core/input.ts): the bench
+// drives the same function the game does, so it cannot drift from it.
 
 /** Tap lengths swept, seconds. The short end is a real tap, not a minimum hold. */
 const TAPS = [0.04, 0.06, 0.08, 0.12, 0.16, 0.22, 0.3, 0.45, 0.7];
@@ -82,14 +78,14 @@ async function tap(tapS: number): Promise<TapResult> {
   for (let i = 0; i < steps; i++) {
     const t = i * FIXED_DT;
     const want = t >= 1 && t < 1 + tapS ? 1 : 0;
-    f += (want - f) * Math.min(1, FIXED_DT / (want === 0 ? STEER_RETURN : STEER_RISE));
+    f = keySteerStep(f, want, FIXED_DT);
 
     rig.input.throttle = t < 1 ? 0.25 : 0;
     rig.input.brake = 0;
     rig.input.reverse = false;
     rig.input.steer = f;
     rig.input.handbrake = false;
-    rig.input.preciseSteering = false;
+    rig.input.steerMode = 'keys';
 
     rig.vehicle.fixedUpdate(FIXED_DT, rig.input);
     rig.physics.step();

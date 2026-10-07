@@ -89,6 +89,13 @@ for (let cell = 0; cell < TRUNK_CELL_COUNT; cell++) {
 }
 check('aim ray selects all eight cells', selectedAll, selectedAll ? '0..7 exact' : `stopped at ${rayHit.cell}`);
 
+// The trunk is read from behind the car, looking along chassis +Z, so the player's
+// left is +X: cell 1 must sit there and each next cell further right (lower X).
+const trunkXs: number[] = [];
+for (let cell = 0; cell < TRUNK_CELL_COUNT; cell++) trunkXs.push(storageCellLocal(cell, half, 'trunk', centre).x);
+const leftToRight = [0, 1, 2, 4, 5, 6].every((cell) => trunkXs[cell]! > trunkXs[cell + 1]!);
+check('trunk cells count left to right from behind', leftToRight, trunkXs.map((x) => x.toFixed(2)).join(' '));
+
 const held: BubbleGumItem = { type: 'bubble_gum', id: 'held', charges: 5 };
 const storedA: BubbleGumItem = { type: 'bubble_gum', id: 'stored:a', charges: 4 };
 const storedB: BubbleGumItem = { type: 'bubble_gum', id: 'stored:b', charges: 3 };

@@ -1,4 +1,4 @@
-import { hash01 } from '../core/rng';
+import { hash01, hashUnit3 } from '../core/rng';
 import { SurfaceType } from '../core/surfaces';
 
 /**
@@ -29,9 +29,11 @@ import { SurfaceType } from '../core/surfaces';
  * afternoon is what most of it should look like.
  *
  * NEVER HOSTILE. Every channel's effect on play is bounded where it is applied: wet
- * asphalt keeps 84% of its grip, a haboob leaves a hundred-odd metres of sight, the
- * crosswind can be held with a small steering input. The point is to ask for a small
- * adaptation — lights on, a little slower, a hand on the wheel — never to punish.
+ * asphalt keeps 84% of its grip, a haboob leaves a hundred-odd metres of sight. The
+ * crosswind is the one that asks for a hand on the wheel: a steady correction of a
+ * fraction of a degree and an answer to the gusts (see `Vehicle.applyAero`). The point
+ * is to ask for a small adaptation — lights on, a little slower, a hand on the wheel —
+ * never to punish.
  */
 
 export type WeatherKind = 'clear' | 'haze' | 'wind' | 'haboob' | 'storm' | 'heat';
@@ -167,6 +169,7 @@ const TAG_SPAN = 0x57455232;
 const TAG_JITTER = 0x57455233;
 const TAG_WIND = 0x57455234;
 const TAG_GUST = 0x57455235;
+const TAG_GUST_ACROSS = 0x57455237;
 const TAG_BOLT = 0x57455236;
 
 function rawKind(seed: number, slot: number): number {
@@ -245,6 +248,104 @@ function sampleEpisode(kind: WeatherKind, t: number, out: WeatherChannels): void
 export const WIND_MAX_MPS = 17;
 
 /**
+ * GUSTS. The wind is a mean plus a turbulent field `windAt` samples at any point: a
+ * car feels the gusts it drives into, the camera hears the ones blowing past it, and
+ * two cars a kilometre apart are not shoved in step.
+ *
+ * The field is frozen turbulence (Taylor's hypothesis, the standard surface-layer
+ * model): a fixed pattern carried downwind. Standing still, the gusts come at the
+ * wind's own pace; driving through them, at the car's. Eddies near the ground are
+ * elongated along the wind, so the pattern is stretched that way.
+ *
+ *   intensity  σu/U = 1/ln(z/z0) for a car-height z ≈ 1 m over flat desert, z0 a few
+ *              millimetres: 0.15-0.18. 0.14 open, up to 0.20 under a storm's outflow
+ *              or a haboob's gust front. Peak 3 s gusts then run 1.3-1.5 × the mean,
+ *              the gust factor anemometers record at that height.
+ *   lateral    σv = 0.75 σu: the direction swings as well, which is what a car on a
+ *              road along the wind still feels.
+ *   scales     three octaves, 60, 24 and 10 m along the wind and 0.4 of that across,
+ *              their amplitudes ∝ λ^(1/3): the inertial-subrange −5/3 slope. Nothing
+ *              under 10 m either way: an eddy shorter than about two car lengths
+ *              pushes the nose and the tail opposite ways and averages out over the
+ *              body (the aerodynamic admittance), so the field is the wind a body
+ *              feels, not what an anemometer at a point would record.
+ *
+ * It travels at the episode's PEAK wind, not the moment's: a pure function of
+ * (seed, slot, clock) that way, where carrying it at the live speed would need the
+ * integral of that speed over the whole game. Only at an episode's edges does the
+ * difference show, and there the wind is light anyway.
+ */
+const GUST_INTENSITY_OPEN = 0.14;
+const GUST_INTENSITY_STORM = 0.06;
+const GUST_LATERAL = 0.75;
+const GUST_OCTAVES_M: readonly number[] = [60, 24, 10];
+const GUST_ACROSS_STRETCH = 0.4;
+const GUST_MIN_SCALE_M = 10;
+const GUST_AMPLITUDE: readonly number[] = GUST_OCTAVES_M.map((l) => Math.cbrt(l / GUST_OCTAVES_M[0]!));
+
+/**
+ * 1/σ of the octave sum, so `gustNoise` has unit standard deviation. One octave of
+ * value noise on uniform [-1, 1] lattice values has variance 1/3 times the square of
+ * the mean of (1-s)²+s² over a cell (s the interpolation weight), per axis.
+ */
+const GUST_NORM = ((): number => {
+  let shrink = 0;
+  const n = 1000;
+  for (let i = 0; i < n; i++) {
+    const s = smooth((i + 0.5) / n);
+    shrink += (1 - s) * (1 - s) + s * s;
+  }
+  shrink /= n;
+  let variance = 0;
+  for (const a of GUST_AMPLITUDE) variance += a * a * (1 / 3) * shrink * shrink;
+  return 1 / Math.sqrt(variance);
+})();
+
+/** Value noise on an integer lattice, in [-1, 1]. */
+function latticeNoise(seed: number, x: number, y: number): number {
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  const tx = smooth(x - ix);
+  const ty = smooth(y - iy);
+  const a = hashUnit3(seed, ix, iy);
+  const b = hashUnit3(seed, ix + 1, iy);
+  const c = hashUnit3(seed, ix, iy + 1);
+  const d = hashUnit3(seed, ix + 1, iy + 1);
+  const lower = a + (b - a) * tx;
+  const upper = c + (d - c) * tx;
+  return 2 * (lower + (upper - lower) * ty) - 1;
+}
+
+/** The gust pattern at (along, across) metres in its own frame: zero mean, unit σ. */
+function gustNoise(seed: number, along: number, across: number): number {
+  let sum = 0;
+  for (let o = 0; o < GUST_OCTAVES_M.length; o++) {
+    const l = GUST_OCTAVES_M[o]!;
+    const lAcross = Math.max(l * GUST_ACROSS_STRETCH, GUST_MIN_SCALE_M);
+    sum += GUST_AMPLITUDE[o]! * latticeNoise(seed + o * 0x9e37, along / l, across / lAcross);
+  }
+  return sum * GUST_NORM;
+}
+
+/** The live gust pattern's frame; set by `updateWeather`, read by `windAt`. */
+const gust = { seed: 0, axisX: 1, axisZ: 0, advectM: 0 };
+
+/** Highest `wind` each episode reaches: the speed its gust pattern is carried at. */
+const EPISODE_PEAK_WIND: Record<WeatherKind, number> = {
+  clear: 0,
+  haze: 0,
+  wind: 0,
+  haboob: 0,
+  storm: 0,
+  heat: 0,
+};
+for (const kind of KINDS) {
+  for (const [, key] of EPISODES[kind]) {
+    EPISODE_PEAK_WIND[kind] = Math.max(EPISODE_PEAK_WIND[kind], key.wind ?? 0);
+  }
+}
+
+/**
  * The frame's weather. One shared object, like the cloud-shadow uniforms: everything
  * that reads weather reads this, and `updateWeather` is the only writer.
  */
@@ -255,8 +356,15 @@ export interface WeatherFrame extends WeatherChannels {
   /** Unit horizontal direction the wind blows TOWARD. */
   windX: number;
   windZ: number;
-  /** Wind speed at this instant, gusts included, m/s. */
+  /**
+   * Wind speed at the listener (the position `updateWeather` was given), gusts
+   * included, m/s. Anything that needs the wind somewhere else asks `windAt`.
+   */
   windMps: number;
+  /** Mean wind, gusts excluded, m/s: `WIND_MAX_MPS` times the `wind` channel. */
+  windMeanMps: number;
+  /** Gust strength σu / mean wind (see GUST_INTENSITY_OPEN); 0 is a steady wind. */
+  gustIntensity: number;
   /**
    * Distance of an approaching haboob wall, metres upwind, or -1 when there is none
    * to draw. Only while it APPROACHES: once it has arrived the player is inside the
@@ -283,6 +391,8 @@ export const weather: WeatherFrame = {
   windX: 1,
   windZ: 0,
   windMps: 0,
+  windMeanMps: 0,
+  gustIntensity: 0,
   frontM: -1,
   airOffsetC: 0,
   flash: 0,
@@ -347,12 +457,19 @@ function clockNoise(seed: number, tag: number, x: number): number {
  * Advances the frame's weather. `clockS` is PLAYED time in seconds — real seconds of
  * play, saved with the game — not the day clock: the day length is a player setting,
  * and weather that ran two and a half times slower on a one-hour day would be a
- * different game. `dt` is the render frame's own delta.
+ * different game. `dt` is the render frame's own delta. (`atX`, `atZ`) is the
+ * listener, absolute world metres: where `windMps` is sampled.
  *
  * The schedule is already smooth; the only smoothing applied here is a short lag that
  * turns a clock JUMP (a dev time change, a load) into a quick fade instead of a cut.
  */
-export function updateWeather(seed: number, clockS: number, dt: number): WeatherFrame {
+export function updateWeather(
+  seed: number,
+  clockS: number,
+  dt: number,
+  atX: number,
+  atZ: number,
+): WeatherFrame {
   const jumped = Number.isFinite(lastClock) && Math.abs(clockS - lastClock) > 30;
   lastClock = clockS;
 
@@ -383,12 +500,19 @@ export function updateWeather(seed: number, clockS: number, dt: number): Weather
       ? FRONT_FAR_M * (1 - weather.front)
       : -1;
 
-  // Wind: the slot's bearing, wandering a little, with gusts that grow with it.
-  const angle = slotWindAngle(seed, slot) + (clockNoise(seed, TAG_WIND, clockS / 40) - 0.5) * 0.5;
+  // Wind: the slot's bearing, wandering a little, and the gust pattern carried along it.
+  const bearing = slotWindAngle(seed, slot);
+  const angle = bearing + (clockNoise(seed, TAG_WIND, clockS / 40) - 0.5) * 0.5;
   weather.windX = Math.cos(angle);
   weather.windZ = Math.sin(angle);
-  const gust = clockNoise(seed, TAG_GUST, clockS / 2.5) * 0.6 + clockNoise(seed, TAG_GUST ^ 7, clockS / 0.9) * 0.4;
-  weather.windMps = WIND_MAX_MPS * weather.wind * (0.78 + 0.5 * gust);
+  weather.windMeanMps = WIND_MAX_MPS * weather.wind;
+  weather.gustIntensity =
+    GUST_INTENSITY_OPEN + GUST_INTENSITY_STORM * Math.max(weather.front, weather.dust, weather.cloud);
+  gust.seed = Math.floor(hash01(seed, TAG_GUST, slot) * 4294967296) | 0;
+  gust.axisX = Math.cos(bearing);
+  gust.axisZ = Math.sin(bearing);
+  gust.advectM = WIND_MAX_MPS * EPISODE_PEAK_WIND[kind] * clockS;
+  weather.windMps = windAt(atX, atZ, listenerWind);
 
   weather.airOffsetC =
     7 * weather.heat + 2 * weather.haze - 4 * weather.dust
@@ -396,6 +520,33 @@ export function updateWeather(seed: number, clockS: number, dt: number): Weather
 
   updateLightning(seed, clockS);
   return weather;
+}
+
+const listenerWind = { x: 0, z: 0 };
+
+/**
+ * The wind at an absolute world point (x, z) this frame, gusts included: written to
+ * `out` as a velocity, m/s, the direction it blows TOWARD; returns its speed. The mean
+ * is the frame's (`windMeanMps` along `windX`/`windZ`); the gusts are the pattern
+ * described at GUST_INTENSITY_OPEN, as it stands at the clock `updateWeather` was last
+ * given. Pure in the frame, and allocates nothing: every vehicle asks once a step.
+ */
+export function windAt(x: number, z: number, out: { x: number; z: number }): number {
+  const mean = weather.windMeanMps;
+  let along = mean;
+  let across = 0;
+  const sigma = weather.gustIntensity * mean;
+  if (sigma > 0) {
+    const a = x * gust.axisX + z * gust.axisZ - gust.advectM;
+    const c = z * gust.axisX - x * gust.axisZ;
+    along += sigma * gustNoise(gust.seed, a, c);
+    across = sigma * GUST_LATERAL * gustNoise(gust.seed ^ TAG_GUST_ACROSS, a, c);
+    // A lull, never a reversal: the gusts ride on the mean wind.
+    if (along < 0) along = 0;
+  }
+  out.x = weather.windX * along - weather.windZ * across;
+  out.z = weather.windZ * along + weather.windX * across;
+  return Math.hypot(out.x, out.z);
 }
 
 /**

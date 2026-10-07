@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { FrameProfiler } from './core/frameprofiler';
 import { installRetro, retroActive } from './render/retro';
 import { InputReader, emptyInput, type InputFrame } from './core/input';
+import { gamepads, PAD, type RumbleFrame } from './core/gamepad';
 import { GameLoop } from './core/loop';
 import { installScreenWakeLock } from './core/wakelock';
 import { PhysicsWorld } from './core/physics';
@@ -36,14 +37,10 @@ import { CAR_LAMP_KNEE } from './render/materials';
 import { preloadTrailerModel } from './render/trailermodel';
 import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
 import { Interaction } from './player/interaction';
-import { sandRouteGates, slalomGates, type ContractGate } from './contracts/gates';
 import { ContractRuntime } from './contracts/runtime';
-import { photoEvidence } from './contracts/photosubjects';
-import { contractCarId, ensureContractWorldObjects, type ContractWorldDeps } from './contracts/world';
+import { ensureContractWorldObjects, type ContractWorldDeps } from './contracts/world';
 import type { ContractCarSnapshot, ContractCarTelemetry, ContractPlace } from './contracts/types';
 import { CarTowField } from './vehicle/cartow';
-import { ambientAirC } from './vehicle/cooling';
-import { SurfaceType } from './core/surfaces';
 import { Player } from './player/player';
 import { PlayerVitals } from './player/vitals';
 import { BirdFlock } from './agents/birds';
@@ -80,7 +77,7 @@ import { TakeoffCutscene } from './story/takeoff';
 import { StoryOverlay } from './story/overlay';
 import { playEnding } from './story/ending';
 import { TerminusPadProvider } from './world/terminuspad';
-import { PoiProvider, poisBetween } from './world/poi';
+import { PoiProvider } from './world/poi';
 import { DebrisField, type Impactor } from './world/debris';
 import { GroundCoverField } from './world/props/groundcover';
 import { hasEscapedWorld } from './world/landscape';
@@ -102,8 +99,7 @@ import { WeatherParticles } from './render/weatherparticles';
 import { setDesertDustArclength } from './render/desertdust';
 import { setGroundFadeWindow } from './render/groundfade';
 import { WreckTrunkField } from './world/wrecktrunks';
-import { CourierField, courierStop } from './world/couriers';
-import { GateField } from './world/gates';
+import { CourierField } from './world/couriers';
 import { DancerField, type DancerHeard } from './world/props/airdancer';
 import { loadSpine } from './world/spinecache';
 import { RoadMeshProvider } from './world/roadmesh';
@@ -179,19 +175,6 @@ const ACTIVE_UNLOAD_RADIUS = 1000;
 const ACTIVE_LOAD_RADIUS_SQUARED = ACTIVE_LOAD_RADIUS * ACTIVE_LOAD_RADIUS;
 const ACTIVE_UNLOAD_RADIUS_SQUARED = ACTIVE_UNLOAD_RADIUS * ACTIVE_UNLOAD_RADIUS;
 
-/**
- * Convoy escort pace policy, m/s. The escort is an ordinary road driver whose speed
- * cap is the only thing this registry decides: close on the car it escorts at a few
- * m/s above the leader's speed, keep a hint of creep when the leader is stopped so a
- * released handbrake is answered, and allow a full cruise once a bend or a jam has
- * opened a real gap, so it can catch up rather than fall out of the stream.
- */
-const CONVOY_HEADWAY_S = 2.0;
-const CONVOY_CLOSE_MARGIN_MPS = 3;
-const CONVOY_CREEP_MPS = 3;
-const CONVOY_RECOVER_GAP_M = 45;
-const CONVOY_CRUISE_MPS = 22;
-
 /** How often the record marker and player position are pushed into state. */
 const RECORD_INTERVAL = 2;
 /** Bubble gum is intentionally a cheap, readable rescue gag rather than a tool UI. */
@@ -210,6 +193,56 @@ const GUM_PACK_ANIM_SECONDS = 1;
 const MEDICINE_USE_SECONDS = 2;
 /** The lid leaves the held mesh here and continues as a world rigid body. */
 const MEDICINE_CAP_RELEASE_PROGRESS = 0.23;
+
+/* ---- controller rumble: how the car's telemetry becomes two motor strengths ---- */
+
+/**
+ * Speed at which every rumble term is at full weight, m/s (72 km/h).
+ *
+ * The same signal is a different event at different speeds: a stone under the tyre at
+ * a crawl is a click and at 100 km/h is a jolt, so the road-texture and bump terms
+ * scale with speed and the collision terms do not — a crash is a crash.
+ */
+const RUMBLE_SPEED_FULL_MPS = 20;
+/**
+ * Floor and ceiling of the suspension-bump channel, m/s of compression rate.
+ *
+ * The audio layer already publishes `bumpMps` as the fastest suspension compression
+ * since it was last read, and it is the one signal that covers every road input from a
+ * tar joint to a rock. The floor keeps the ordinary micro-bumps of a good road out of
+ * the strong motor — that is what the weak motor is for — and the ceiling is a full
+ * bump-stop strike.
+ */
+const RUMBLE_BUMP_FLOOR_MPS = 0.35;
+const RUMBLE_BUMP_FULL_MPS = 2.2;
+/** A landing or a collision is full strong motor at these speeds, m/s. */
+const RUMBLE_LANDING_FULL_MPS = 3.5;
+const RUMBLE_IMPACT_FULL_MPS = 4;
+/**
+ * Roughness (mean micro-bump amplitude under the loaded wheels, metres) at which the
+ * road itself fills the weak motor; see `SURFACES[x].roughness`.
+ */
+const RUMBLE_ROUGH_FULL_M = 0.02;
+/** Sideslip at which the tyres are howling, m/s, and the share of it the weak motor takes. */
+const RUMBLE_SLIP_FULL_MPS = 6;
+const RUMBLE_SLIP_SHARE = 0.7;
+/**
+ * Share of the weak motor the steering going LIGHT claims (`Vehicle.steeringLightness`):
+ * the front tyres past the peak of their aligning moment, the cue a real wheel gives in
+ * the hands before the nose washes wide. Below the side-slip share, so a car already
+ * sliding sideways still reads as sliding.
+ */
+const RUMBLE_LIGHT_STEER_SHARE = 0.45;
+/**
+ * How much of the strong motor a suspension bump claims on its own. Below one because
+ * a bump and a landing can arrive together, and the landing should be what is felt.
+ */
+const RUMBLE_BUMP_SHARE = 0.7;
+
+/** A rumble channel is a fraction of a motor's strength, so everything is clamped to 0..1. */
+function clamp01(x: number): number {
+  return x < 0 ? 0 : x > 1 ? 1 : x;
+}
 
 async function boot(): Promise<void> {
   const canvas = document.getElementById('game');
@@ -390,6 +423,12 @@ async function boot(): Promise<void> {
   const input = new InputReader(canvas);
   input.setKeyBindings(world.state.settings.keyBindings);
   input.setMouseSensitivity(world.state.settings.mouseSensitivity);
+  input.setAnalogSteeringAssist(world.state.settings.controllerSteerAssist);
+  // The pad's preferences are device-facing like the mouse's, so they are pushed at
+  // the same place and by the same code in `applySettings` below.
+  const pads = gamepads();
+  pads.setDeadzone(world.state.settings.controllerDeadzone);
+  pads.setSteeringSensitivity(world.state.settings.controllerSteerSensitivity);
   const hud = new Hud(uiRoot);
   hud.setDashboardScale(world.state.settings.dashboardScale);
   const vitals = new PlayerVitals(world.state.player.health, (health) => {
@@ -451,9 +490,6 @@ async function boot(): Promise<void> {
   const tumbleweeds = new TumbleweedField(renderer.scene, road, terrain, world.seed, origin, wheelSpray);
   // Tufts, shrubs and rosettes burst into the same spray ring; no Rapier colliders.
   const groundCover = new GroundCoverField(wheelSpray, origin);
-  // Gate posts for the sand route and the slalom (kinds 12/13). Constructed before the
-  // boot warm-up so its hidden anchors compile the shared post and flag programs then.
-  const gateField = new GateField(renderer.scene, terrain);
   // Cactus air dancers beside every courier. Built here, before the boot warm-up, so
   // the hidden anchor dancer it adds to the scene compiles their program under the
   // loading cover. See world/props/airdancer.ts.
@@ -766,10 +802,6 @@ async function boot(): Promise<void> {
     return dx * dx + dz * dz <= radiusSquared;
   };
   const trafficPosition = { x: 0, y: 0, z: 0 };
-  /** Reused receivers for the convoy escort's gap and absolute pose. */
-  const escortPosition = { x: 0, y: 0, z: 0 };
-  const escortChassis = { x: 0, y: 0, z: 0 };
-  const escortLeadChassis = { x: 0, y: 0, z: 0 };
   /** Reused receiver for interaction's car lookups; see `CarLookup`. */
   const interactionCarPosition = { x: 0, y: 0, z: 0 };
   const traffic = new RoadTraffic(
@@ -858,59 +890,6 @@ async function boot(): Promise<void> {
     // back only when both have live bodies, so this must follow the loop above.
     carTowField.syncFromState();
     loose.updateActive(anchorX, anchorZ, ACTIVE_LOAD_RADIUS, ACTIVE_UNLOAD_RADIUS);
-  };
-
-  /**
-   * AI-DRIVEN PERSISTENT CARS, BY CAR ID. Only the convoy escort (kind 16) for now.
-   *
-   * The escort is a real `CarState` in the world and a real `Vehicle` while it is
-   * near the player. What it is not is a driver: it gets its own `Autopilot` — the
-   * same planner ambient traffic uses — and follows the player's car by the ordinary
-   * means, because the player's chassis is a dynamic body in the corridor and the
-   * planner's own lead-following holds a headway behind whatever is there. That is
-   * the whole follow mode: match the leader's speed, brake when it brakes, stop when
-   * it stops, and accelerate back to the cap once the road ahead is clear again.
-   *
-   * This registry decides only the speed CEILING (see CONVOY_*) and whether the
-   * papers are aboard the car being driven. An escort with the papers elsewhere is
-   * capped at zero, which the planner brakes to, so an unattended escort parks
-   * under its own control instead of being pinned by `settle`.
-   */
-  interface EscortRuntime {
-    readonly carId: string;
-    readonly autopilot: Autopilot;
-    readonly input: InputFrame;
-    readonly seat: { forwardS: number; direction: 1 };
-    /** The convoy papers are aboard the car the player is driving right now. */
-    following: boolean;
-    engaged: boolean;
-  }
-  const escorts = new Map<string, EscortRuntime>();
-  const escortFor = (carId: string): EscortRuntime => {
-    const existing = escorts.get(carId);
-    if (existing) return existing;
-    const seat = { forwardS: 0, direction: 1 as const };
-    const autopilot = new Autopilot(road, hazards, physics);
-    autopilot.setMode('sleeper');
-    autopilot.setPace(1);
-    // An escort does not overtake the car it is escorting, and it must not treat
-    // that car as something to get past.
-    autopilot.setPassingEnabled(false);
-    autopilot.setFollowingHeadway(CONVOY_HEADWAY_S);
-    autopilot.setTrafficRecoveryPolicy(true);
-    // Its own seat in the stream's road-frame view, so the traffic coordinator
-    // knows where it is even though it is not one of the stream's own cars.
-    autopilot.setTrafficField(traffic.fieldFor(seat, carId));
-    const escort: EscortRuntime = {
-      carId,
-      autopilot,
-      input: emptyInput(),
-      seat,
-      following: false,
-      engaged: false,
-    };
-    escorts.set(carId, escort);
-    return escort;
   };
 
   /**
@@ -1005,7 +984,6 @@ async function boot(): Promise<void> {
       // The same order for a tow bar: its joint references the body, so the bar
       // goes before the body does. `remove` handles the car as either end.
       carTowField.remove(delta.carId);
-      escorts.delete(delta.carId);
       const vehicle = vehicles.get(delta.carId);
       if (vehicle) {
         vehicle.dispose();
@@ -1260,6 +1238,7 @@ async function boot(): Promise<void> {
   );
   camera.setMode('foot');
   camera.setShake(world.state.settings.cameraShake);
+  camera.setStyle(world.state.settings.cameraStyle);
   camera.setYaw(initialYaw);
 
   // Synthesises ordinary InputFrame commands, so every fuel, gearbox, tyre and
@@ -1313,6 +1292,8 @@ async function boot(): Promise<void> {
     surfaceRoughness: 0,
     wheelContact: 0,
     hoodOffset: [0, 0, 0],
+    velocityX: 0,
+    velocityZ: 0,
   };
 
   let lastInput: InputFrame = input.sample(0);
@@ -1491,75 +1472,33 @@ async function boot(): Promise<void> {
   };
   const playerImpacts = createPlayerImpacts({ physics, player, vitals, vehicles, traffic });
 
-  // Contract runtime. It reads the durable numbers (fuel, temperature) from
-  // `CarState` and the physics-only ones (impacts, rollover) from the live Vehicle,
-  // both through this provider; one scratch object is reused per call.
+  // Contract runtime. It reads the physics-only numbers (impacts, rollover) from the
+  // live Vehicle through this provider; one scratch object is reused per call.
   const contracts = new ContractRuntime(world);
   type MutableCarTelemetry = { -readonly [K in keyof ContractCarTelemetry]: ContractCarTelemetry[K] };
   const contractCarTelemetry: MutableCarTelemetry = {
-    fuelLitres: 0,
-    refuelled: false,
-    engineOverheating: false,
-    engineRunning: false,
     impactMps: 0,
     landingMps: 0,
     upsideDown: false,
-    absoluteX: 0,
-    absoluteZ: 0,
-    onRoad: false,
     trailerId: null,
     trailerImpactMps: 0,
     trailerUpsideDown: false,
   };
-  /** Reused receiver for a carrying car's absolute position. */
-  const contractCarPosition = { x: 0, y: 0, z: 0 };
-  /** Fuel seen at the previous tick, per car, for spotting a pour. */
-  const lastContractFuel = new Map<string, number>();
   const carTelemetryForContract = (carId: string): ContractCarTelemetry | null => {
     const car = world.state.cars[carId];
     if (!car) return null;
-    const previousFuel = lastContractFuel.get(carId);
-    const refuelled = previousFuel !== undefined && car.fuelLitres > previousFuel + 0.05;
-    lastContractFuel.set(carId, car.fuelLitres);
     const vehicle = vehicles.get(carId) ?? null;
     const impact = vehicle?.lastImpact ?? null;
     const q = vehicle?.chassis.rotation();
-    const position = vehicle?.absoluteTranslation(contractCarPosition) ?? null;
     // The trailer coupled to THIS car: a coupled trailer is always materialised, so
     // a live one is the only one that can be towing, and it is where the towed
     // load's own impacts live.
     const trailer = trailerField.hitchedTo(carId);
     const trailerRotation = trailer?.rigidBody.rotation();
-    contractCarTelemetry.fuelLitres = car.fuelLitres;
-    contractCarTelemetry.refuelled = refuelled;
-    contractCarTelemetry.engineOverheating = vehicle
-      ? vehicle.coolingState.overheating
-      : car.engineTempC >= 110;
-    contractCarTelemetry.engineRunning = vehicle?.engineRunning ?? false;
     contractCarTelemetry.impactMps = impact?.severityMps ?? 0;
     contractCarTelemetry.landingMps = vehicle?.audio.landingImpactMps ?? 0;
     // Y component of the chassis up-axis (0,1,0) for quaternion q.
     contractCarTelemetry.upsideDown = q !== undefined && 1 - 2 * (q.x * q.x + q.z * q.z) < 0.15;
-    contractCarTelemetry.absoluteX = position ? position.x : car.x;
-    contractCarTelemetry.absoluteZ = position ? position.z : car.z;
-    // At least one loaded wheel on the asphalt — sound or cracked, both are the road
-    // ribbon — from the same registered contact the tyre model and the spray use. No
-    // wheel at all (an engine-less wreck hull) is not on the road.
-    let onRoad = false;
-    if (vehicle) {
-      const wheels = vehicle.wheelSpray;
-      for (let i = 0; i < wheels.length; i++) {
-        const wheel = wheels[i]!;
-        if (
-          wheel.inContact
-          && (wheel.surface === SurfaceType.Asphalt || wheel.surface === SurfaceType.CrackedAsphalt)
-        ) {
-          onRoad = true;
-          break;
-        }
-      }
-    }
-    contractCarTelemetry.onRoad = onRoad;
     contractCarTelemetry.trailerId = trailer?.id ?? null;
     contractCarTelemetry.trailerImpactMps = trailer?.lastImpact?.severityMps ?? 0;
     contractCarTelemetry.trailerUpsideDown = trailerRotation !== undefined
@@ -1568,101 +1507,34 @@ async function boot(): Promise<void> {
   };
 
   /**
-   * A kind's look at a SECOND car it owns by id (a towed car, an escort), as opposed
-   * to the telemetry above, which is only ever the carrying car. Reused object: a
-   * kind reads it inside its own `step` and must not retain it.
+   * A kind's look at a SECOND car it owns by id (a towed car), as opposed to the
+   * telemetry above, which is only ever the carrying car. Reused object: a kind reads
+   * it inside its own `step` and must not retain it.
    */
   const contractCarSnapshot = {
-    absoluteX: 0,
-    absoluteZ: 0,
-    impactMps: 0,
     upsideDown: false,
-    scratches: 0,
     towedBy: null as string | null,
   };
   const carForContract = (carId: string): ContractCarSnapshot | null => {
     const car = world.state.cars[carId];
     if (!car) return null;
     const vehicle = vehicles.get(carId) ?? null;
-    const position = vehicle?.absoluteTranslation(contractCarPosition) ?? null;
     const q = vehicle?.chassis.rotation();
-    contractCarSnapshot.absoluteX = position ? position.x : car.x;
-    contractCarSnapshot.absoluteZ = position ? position.z : car.z;
-    contractCarSnapshot.impactMps = vehicle?.lastImpact?.severityMps ?? 0;
     contractCarSnapshot.upsideDown = q !== undefined && 1 - 2 * (q.x * q.x + q.z * q.z) < 0.15;
-    contractCarSnapshot.scratches = car.scratches;
     contractCarSnapshot.towedBy = car.towedBy ?? null;
     return contractCarSnapshot;
   };
 
   /**
    * The world objects the live contracts are about — a loaded trailer spawned at its
-   * source courier, or the car of a transfer, a tow or a convoy. Idempotent, and
-   * called from the tick for every cargo item, so a save that predates a kind heals
-   * on the next tick.
-   *
-   * The convoy escort's engagement is decided here too: the papers must be in the
-   * car the player is DRIVING, which is what "it starts following when the player
-   * drives off with the papers aboard" means in state rather than in time.
+   * source courier, or the car of a transfer or a tow. Idempotent, and called from the
+   * tick for every cargo item, so a save that predates a kind heals on the next tick.
    */
   const contractWorldDeps: ContractWorldDeps = { world, road, terrain, couriers };
-
-  /**
-   * Gate sequences for kinds 12/13, built once per cargo item from the offer seed and
-   * the source courier's arclength. Both the kind (crossing detection) and the gate
-   * field (the posts on screen) read the same list, so what the player drives at is
-   * exactly what is being counted.
-   */
-  const gatePlans = new Map<string, readonly ContractGate[]>();
-  const gatesForContract = (item: ContractCargoItem): readonly ContractGate[] | null => {
-    if (item.contractKind !== 'sand_route' && item.contractKind !== 'desert_slalom') return null;
-    let gates = gatePlans.get(item.id);
-    if (gates === undefined) {
-      const sourceS = courierStop(world.seed, item.sourceCourierIndex).s;
-      gates = item.contractKind === 'sand_route'
-        ? sandRouteGates(item.generatedSeed, sourceS, road, terrain)
-        : slalomGates(item.generatedSeed, sourceS, road, terrain);
-      gatePlans.set(item.id, gates);
-    }
-    return gates;
-  };
-  /** Cargo items whose gates are on screen this tick; refilled by `onContractItem`. */
-  const activeGateSets = new Map<string, readonly ContractGate[]>();
-
-  /** Cars that carried the bald-tyre crate this tick, and those already fitted. */
-  const baldCars = new Set<string>();
-  const baldFittedCars = new Set<string>();
-  /**
-   * Fits the bald compound to every carrying car and removes it from a car that no
-   * longer carries the crate. Run every tick, because a respawned Vehicle starts free
-   * and the contract re-claims it here; the driver's cycle key cannot undo it (see
-   * `Vehicle.tyreCompoundLocked`).
-   */
-  const applyBaldTyres = (): void => {
-    for (const carId of baldFittedCars) {
-      if (baldCars.has(carId)) continue;
-      vehicles.get(carId)?.setEnforcedTyreCompound(null);
-      baldFittedCars.delete(carId);
-    }
-    for (const carId of baldCars) {
-      vehicles.get(carId)?.setEnforcedTyreCompound(0);
-      baldFittedCars.add(carId);
-    }
-  };
 
   const onContractItem = (item: ContractCargoItem, place: ContractPlace, carId: string | null): void => {
     race.observe(item, place, activeS);
     ensureContractWorldObjects(contractWorldDeps, item, place);
-    if (item.contractKind === 'convoy') {
-      const escort = escortFor(contractCarId(item));
-      escort.following =
-        place === 'car' && carId !== null && carId === world.state.player.drivingCarId;
-    }
-    if (item.contractKind === 'bald_tyres' && place === 'car' && carId !== null) baldCars.add(carId);
-    if (place !== 'courier') {
-      const gates = gatesForContract(item);
-      if (gates !== null) activeGateSets.set(item.id, gates);
-    }
   };
 
   const fixedUpdate = (dt: number): void => {
@@ -1789,10 +1661,6 @@ async function boot(): Promise<void> {
       }
       if (f.toggleLeftIndicator) driving.toggleIndicator('left');
       if (f.toggleRightIndicator) driving.toggleIndicator('right');
-      if (f.cycleTyres) {
-        if (driving.cycleTyreCompound()) hud.setToast(`tyres: ${driving.tyreCompoundLabel}`);
-        else hud.setToast('bald tyres fitted — contract cargo aboard');
-      }
     } else {
       player.setEnabled(true);
       // Stepping out drops it. Re-entering a car and finding it drive itself is a
@@ -1807,59 +1675,16 @@ async function boot(): Promise<void> {
       if (f.cycleCamera) camera.setMode('foot');
     }
 
-    // Convoy escorts. A real driver, on the real road, behind the car the papers
-    // are in: the Autopilot's own lead-following finds the player's chassis in its
-    // corridor and holds the headway, so this loop only decides the speed CEILING —
-    // close when the papers are aboard the player's car, hurry back after a real
-    // gap, and stand still when they are not.
-    for (const escort of escorts.values()) {
-      const vehicle = vehicles.get(escort.carId);
-      if (!vehicle) {
-        if (escort.engaged) {
-          escort.autopilot.setEngaged(false);
-          escort.engaged = false;
-        }
-        continue;
-      }
-      if (!escort.engaged) {
-        // A fresh engagement resets the planner's held place on the road, which is
-        // what a car that has just been materialised (or just resumed following)
-        // needs; see `setEngaged`.
-        escort.autopilot.setEngaged(true);
-        escort.engaged = true;
-      }
-      const position = vehicle.absoluteTranslation(escortPosition);
-      escort.seat.forwardS = road.project(position.x, position.z, escort.seat.forwardS).s;
-      escort.autopilot.setOncomingGap(
-        traffic.nearestOncomingDistance(escort.seat.forwardS, 1, escort.carId),
-      );
-      if (!escort.following || !driving) {
-        escort.autopilot.setSpeedCap(0);
-      } else {
-        // Distance in Rapier's own frame: both bodies share it, so no origin is
-        // needed and the gap is exact even across an origin rebase.
-        const self = vehicle.chassis.translation(escortChassis);
-        const lead = driving.chassis.translation(escortLeadChassis);
-        const gap = Math.hypot(lead.x - self.x, lead.z - self.z);
-        const cap = gap > CONVOY_RECOVER_GAP_M
-          ? CONVOY_CRUISE_MPS
-          : Math.max(CONVOY_CREEP_MPS, driving.speedKmh / 3.6 + CONVOY_CLOSE_MARGIN_MPS);
-        escort.autopilot.setSpeedCap(cap);
-      }
-      escort.autopilot.drive(dt, vehicle, escort.input, origin.x, origin.z);
-      vehicle.fixedUpdate(dt, escort.input);
-    }
-
     // Every other car still needs its suspension solved, or it has no springs at
     // all: Rapier recomputes suspension force inside updateVehicle, so a vehicle
     // that is never stepped sinks onto its own chassis collider and its wheels end
     // up under the road. `settle` does the suspension and a holding brake only.
     //
-    // A towed car and an escort are the exceptions: `settle` PINS a car to the spot
-    // it is standing on, and both have to roll, so they are stepped by their own
-    // controllers above/below and left out of this loop.
+    // A towed car is the exception: `settle` PINS a car to the spot it is standing
+    // on, and a towed car has to roll, so it is stepped by the tow controller below
+    // and left out of this loop.
     for (const [id, vehicle] of vehicles) {
-      if (id === drivingId || carTowField.stepping(id) || escorts.has(id)) continue;
+      if (id === drivingId || carTowField.stepping(id)) continue;
       vehicle.settle(dt);
     }
 
@@ -1918,22 +1743,11 @@ async function boot(): Promise<void> {
     frameProfiler?.begin('contracts');
     contracts.tick({
       dt,
-      timeOfDay: s.timeOfDay,
-      dayLength: DAY_LENGTH,
-      ambientC: ambientAirC(s.timeOfDay, DAY_LENGTH),
       carTelemetry: carTelemetryForContract,
       carById: carForContract,
-      gatesFor: gatesForContract,
       onContractItem,
       onNotice: (text) => hud.setToast(text),
     });
-    // The tick filled the two per-contract collectors; act on them once, then reset.
-    // The gate field rebuilds only when a sequence appears or goes away, so this is a
-    // map walk on almost every tick.
-    applyBaldTyres();
-    gateField.setActive(activeGateSets);
-    activeGateSets.clear();
-    baldCars.clear();
     frameProfiler?.end('contracts');
 
     // Recover only after Rapier has produced the escaped pose, before the
@@ -2316,12 +2130,103 @@ async function boot(): Promise<void> {
    */
   let adaptationFrozen = true;
 
+  /**
+   * The pad buttons the RENDER frame owns, and the rumble it drives.
+   *
+   * Pause is a device event like Escape and arrives outside the fixed step in exactly
+   * the same way (see `openPause`), so Start has to be read here: while an overlay is
+   * up the loop is stopped, and a fixed-step reader would never see the button that
+   * closes it. The connect toast rides the same read.
+   */
+  const rumbleFrame: RumbleFrame = { strong: 0, weak: 0, leftTrigger: 0, rightTrigger: 0 };
+  let padStartHeld = false;
+  /**
+   * Whether this window has the player's attention.
+   *
+   * A pad is in the hand, not on the screen: a car left rumbling under an alt-tabbed
+   * window is a controller vibrating on a desk with nobody driving it, and the browser
+   * keeps running the frame loop for a blurred window. Rumble is therefore suppressed
+   * while unfocused, not merely stopped once on the event.
+   */
+  let padFocused = true;
+  window.addEventListener('blur', () => {
+    padFocused = false;
+    pads.stopRumble();
+  });
+  window.addEventListener('focus', () => {
+    padFocused = true;
+  });
+  const updatePad = (driving: Vehicle | null): void => {
+    const pad = pads.read();
+    const start = pad.buttons[PAD.Start] === true;
+    if (start && !padStartHeld && !dying && story === null && !endingStarted) openPause();
+    padStartHeld = start;
+    const notice = pads.takeConnectionNotice();
+    if (notice !== null) hud.setToast(`${notice} connected`);
+
+    const gain = world.state.settings.controllerVibration;
+    if (driving === null || gain <= 0 || !padFocused || paused) {
+      // Out of the car, the player asked for silence, nobody is looking, or Start has
+      // just opened the pause overlay in this very frame (the loop stops after it): STOP
+      // rather than fade, because an effect already running cannot be talked down by
+      // declining to issue the next one.
+      pads.stopRumble();
+      return;
+    }
+
+    // Read the car's telemetry BEFORE the audio layer consumes it: `bumpMps`,
+    // `landingImpactMps` and `impactMps` are event accumulators that whoever voices
+    // them zeroes on read, so this is the last place they can be seen.
+    const telemetry = driving.audio;
+    const wheels = driving.wheelSpray;
+    const rides = driving.wheelRide;
+    const speed = Math.abs(telemetry.forwardMps);
+    const speedWeight = clamp01(speed / RUMBLE_SPEED_FULL_MPS);
+
+    // Strong motor: what the chassis took. A landing and a collision are their own
+    // events; the suspension's compression rate covers everything else the road does.
+    const bump =
+      clamp01((telemetry.bumpMps - RUMBLE_BUMP_FLOOR_MPS) / (RUMBLE_BUMP_FULL_MPS - RUMBLE_BUMP_FLOOR_MPS))
+      * speedWeight;
+    const landing = clamp01(telemetry.landingImpactMps / RUMBLE_LANDING_FULL_MPS);
+    const impact = clamp01(telemetry.impactMps / RUMBLE_IMPACT_FULL_MPS);
+    rumbleFrame.strong = Math.max(landing, impact, bump * RUMBLE_BUMP_SHARE) * gain;
+
+    // Weak motor: what the tyres are doing to the ground — the road's own texture under
+    // the loaded wheels, a tyre dragged past the peak of its curve, side slip, and the
+    // front tyres' aligning moment collapsing (the steering going light).
+    const texture =
+      clamp01(telemetry.surfaceRoughness / RUMBLE_ROUGH_FULL_M)
+      * telemetry.wheelContactFraction
+      * speedWeight;
+    let slide = Math.max(telemetry.frontLockT, telemetry.rearLockT);
+    for (const wheel of wheels) if (wheel.slideSlip > slide) slide = wheel.slideSlip;
+    const sideslip = clamp01(telemetry.lateralSlipMps / RUMBLE_SLIP_FULL_MPS) * RUMBLE_SLIP_SHARE;
+    const light = driving.steeringLightness * speedWeight * RUMBLE_LIGHT_STEER_SHARE;
+    rumbleFrame.weak = clamp01(Math.max(texture, slide, sideslip, light)) * gain;
+
+    // Trigger motors, on the pads that have them: the front tyres' own slip, by side, so
+    // a wheelspin or a lock-up is felt in the trigger that axle steers with.
+    rumbleFrame.leftTrigger = 0;
+    rumbleFrame.rightTrigger = 0;
+    for (let i = 0; i < wheels.length; i++) {
+      const ride = rides[i];
+      const wheel = wheels[i];
+      if (ride === undefined || wheel === undefined || !ride.isFront) continue;
+      const slip = clamp01(wheel.slideSlip) * gain;
+      if (ride.sideSign < 0) rumbleFrame.leftTrigger = slip;
+      else rumbleFrame.rightTrigger = slip;
+    }
+    pads.vibrate(rumbleFrame, performance.now());
+  };
+
   const render = (alpha: number, frameDt: number): void => {
     frameId++;
     const s = world.state;
     frameProfiler?.beginFrame();
     const drivingId = s.player.drivingCarId;
     const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
+    updatePad(driving);
 
     frameProfiler?.begin('vehicles');
     for (const vehicle of vehicles.values()) vehicle.syncVisuals(alpha);
@@ -2353,6 +2258,11 @@ async function boot(): Promise<void> {
       target.surfaceRoughness = driving.audio.surfaceRoughness;
       target.wheelContact = driving.audio.wheelContactFraction;
       target.hoodOffset = driving.modelMeasure.hoodPoint;
+      // The dynamic camera's raw material: where the car is really going, not where it
+      // points. Body-frame speed and slip come from the same solver step.
+      const velocity = driving.chassis.linvel();
+      target.velocityX = velocity.x;
+      target.velocityZ = velocity.z;
     } else {
       const p = player.interpolatedPosition(alpha);
       // CameraRig's foot mode adds its own eye height, so hand it the FEET
@@ -2367,6 +2277,8 @@ async function boot(): Promise<void> {
       target.speedKmh = 0;
       target.surfaceRoughness = 0;
       target.wheelContact = 0;
+      target.velocityX = 0;
+      target.velocityZ = 0;
     }
 
     Object.assign(cameraInput, lastInput);
@@ -2421,8 +2333,9 @@ async function boot(): Promise<void> {
     const cam = renderer.camera.position;
     frameProfiler?.begin('sky');
     // Weather first: the sky, the fog, the lights and the ground all read it this
-    // frame (world/weather.ts). A function of played time, so it needs no saving.
-    updateWeather(world.seed, s.playedSeconds, frameDt);
+    // frame (world/weather.ts). A function of played time, so it needs no saving. The
+    // camera is where the wind's gusts are heard; each car samples its own.
+    updateWeather(world.seed, s.playedSeconds, frameDt, cam.x + origin.x, cam.z + origin.z);
     // Every dust colour follows the sand the road has reached (render/desertdust.ts),
     // and so do the ground's broad patches (world/terrainmesh.ts).
     setDesertDustArclength(activeS);
@@ -2544,8 +2457,6 @@ async function boot(): Promise<void> {
       vehicle.syncContactPatches(contactPatches, patchGain(vehicle.root.position));
     });
     contactPatches.endFrame();
-    // Gate posts are placed in absolute coordinates; the field follows the origin.
-    gateField.update(origin.x, origin.z);
     // The courier air dancers stand in the chunk frame; the field only needs the
     // camera in absolute metres to know which of them are near enough to simulate.
     // Any car that reaches one knocks it over first (its blower is not solid).
@@ -2873,48 +2784,11 @@ async function boot(): Promise<void> {
         hud.setToast('camera could not expose the frame');
       } else {
         const direction = camera.eyeDirection;
-        // The frame test reads the camera and the world once, here, and records which
-        // known subjects the frame contains. It is a reader: nothing it does changes
-        // the world or the picture.
-        const evidence = photoEvidence(
-          {
-            seed: world.seed,
-            road,
-            terrain,
-            camera: renderer.camera,
-            originX: origin.x,
-            originZ: origin.z,
-            dayFactor: sky.dayFactor,
-            pois: (fromS, toS) => poisBetween(world.seed, fromS, toS),
-            // At most one mirage encounter is on screen at a time (mirage-schedule.ts).
-            visibleMirage: mirage.visibleSubject() ?? mirageTableau.visibleSubject(),
-            // Occlusion in scene (origin-relative) coordinates. The driven chassis is
-            // excluded so the chase camera does not read its own car as a wall.
-            occluded: (fromX, fromY, fromZ, toX, toY, toZ, radius) => {
-              const dx = toX - fromX;
-              const dy = toY - fromY;
-              const dz = toZ - fromZ;
-              const length = Math.hypot(dx, dy, dz);
-              if (length <= radius + 1) return false;
-              const hit = physics.raycast(
-                { x: fromX, y: fromY, z: fromZ },
-                { x: dx / length, y: dy / length, z: dz / length },
-                length - radius,
-                driving?.chassis,
-              );
-              return hit !== null;
-            },
-          },
-          activeS,
-          s.timeOfDay,
-          s.playedSeconds,
-        );
         loose.spawnItem(
           {
             type: 'photograph',
             id: world.runtimePartId(),
             imageDataUrl,
-            evidence,
           },
           cam.x + origin.x + direction.x * 0.65,
           cam.y - 0.2,
@@ -3006,11 +2880,15 @@ async function boot(): Promise<void> {
       // Input and audio cache device-facing preferences; push them immediately.
       input.setKeyBindings(world.state.settings.keyBindings);
       input.setMouseSensitivity(world.state.settings.mouseSensitivity);
+      input.setAnalogSteeringAssist(world.state.settings.controllerSteerAssist);
+      pads.setDeadzone(world.state.settings.controllerDeadzone);
+      pads.setSteeringSensitivity(world.state.settings.controllerSteerSensitivity);
       audio.applySettings(world.state.settings);
       renderer.setMsaa(world.state.settings.msaa);
       renderer.setRenderScale(world.state.settings.renderScale);
       camera.setFieldOfView(world.state.settings.fieldOfView);
       camera.setShake(world.state.settings.cameraShake);
+      camera.setStyle(world.state.settings.cameraStyle);
       hud.setDashboardScale(world.state.settings.dashboardScale);
       // The tier owns four things that apply in place: the pixel ceiling, the shadow
       // pass, the sky's star depth and the presentation cap. The fifth — the visible-
@@ -3068,12 +2946,19 @@ async function boot(): Promise<void> {
     postcardView = 'down';
     loop.stop();
     // Silence everything behind the overlay, radio included: the loop is stopped,
-    // so nothing would update the voices and they would hold their last value.
+    // so nothing would update the voices and they would hold their last value. The pad
+    // is the same: nothing re-issues its effect either, but one already running has to
+    // be stopped, and the menu owns the buttons from here.
     audio.setPaused(true);
+    pads.stopRumble();
     void (async () => {
       const state = stateForSave();
       const action = await menu.showPause({ drive: summarizeDrive(state), seed: state.seed }, pauseHooks);
       menu.hidePause();
+      // The overlay read the same buttons while the loop was stopped: whatever is still
+      // under the player's thumb must not read as a fresh press on the first frame back.
+      input.resyncPad();
+      padStartHeld = pads.read().buttons[PAD.Start] === true;
       // Do this in the menu gesture's microtask: requestPointerLock needs the
       // transient user activation the Resume press carries.
       if (action !== 'quit' && shouldRestorePointerLock) {

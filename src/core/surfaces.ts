@@ -66,9 +66,8 @@ export const enum SurfaceType {
  *
  * So `mu` is the old lateral column, whose calibration the handling benches were read
  * at, and the tyre model uses it for drive, braking and cornering alike. What stays
- * directional is directional for a reason stated where it lives: the compound's own
- * split (`TYRE_COMPOUNDS`), the live rear axle (`REAR_AXLE_SIDE_GRIP`) and the handling
- * profile's cornering scale.
+ * directional is directional for a reason stated where it lives: the live rear axle
+ * (`REAR_AXLE_SIDE_GRIP`) and the handling profile's cornering scale.
  *
  * Sources for the relative figures, dry, car tyre:
  *  - dry asphalt and concrete mu 0.7-0.8; loose gravel drops from 0.8 to 0.35 and

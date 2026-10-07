@@ -2697,9 +2697,9 @@ export class Autopilot {
   drive(dt: number, vehicle: Vehicle, out: InputFrame, originX: number, originZ: number): void {
     if (!this.engagedValue) return;
     this.controlledVehicle = vehicle;
-    // Autonomy inverts the ordinary shaped steering path explicitly. Never let a
-    // player's precise-control preference change the physical command it computed.
-    out.preciseSteering = false;
+    // Autonomy computes the wheel angle it wants and commands the rack with it. Never
+    // let a player's device or assist setting reinterpret that command.
+    out.steerMode = 'direct';
     const firstProjection = !this.hintValid;
     this.updateAutomaticHeadlights(vehicle);
     const config = MODES[this.modeValue];
@@ -4399,7 +4399,7 @@ export class Autopilot {
       YAW_RATE_DAMPING * (pathCurvature - actualYawCurvature) +
       this.curvatureTrim;
     const wheelAngle = Math.atan(wheelbaseOf(vehicle) * controlledCurvature);
-    out.steer = vehicle.steeringInputForWheelAngle(wheelAngle, speed);
+    out.steer = vehicle.steeringInputForWheelAngle(wheelAngle);
 
     // Build a local speed profile rather than applying one worst bend to the whole
     // horizon. Every sample contributes its surface, decay, grade and curvature;
@@ -4536,9 +4536,8 @@ export class Autopilot {
       );
     }
     // The 3 m/s floor is the road profile's (a hairpin never asks for a standstill),
-    // and it must not swallow a cap set from outside: an escort told to park and a race
-    // rival told to stop beside its courier were both held at 11 km/h by it, the rival
-    // creeping past the courier for good.
+    // and it must not swallow a cap set from outside: a race rival told to stop beside
+    // its courier was held at 11 km/h by it, creeping past the courier for good.
     targetSpeed = Math.min(Math.max(3, targetSpeed), this.speedCapValue);
     // THE SPEED PLAN FOLLOWS THE CORRIDOR THAT WAS CHOSEN, AND NOTHING ELSE.
     //

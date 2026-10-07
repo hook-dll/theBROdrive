@@ -572,10 +572,16 @@ export async function benchOne(
   }
 
   // --- turning circle: full lock at a factory-figure pace ------------------
+  //
+  // A factory turning circle is driven at a crawl, where the tyres need next to no slip
+  // and the circle is the steering geometry's own. 10 km/h is as slow as this model
+  // honestly goes — below ~7 km/h the slip angle's denominator is floored
+  // (SLIP_ANGLE_REF_MPS) — while full lock at 15 km/h is already 0.4 g, enough
+  // understeer to put the circle 1.5-3% wider than the same lock draws at 10.
   {
     const rig = await makeRig(modelId, addGround, false, towKg);
     drive(rig, 15, (_, f) => {
-      f.throttle = rig.vehicle.speedKmh < 15 ? 1 : 0;
+      f.throttle = rig.vehicle.speedKmh < 10 ? 1 : 0;
       f.brake = 0;
       f.steer = 0;
     });
@@ -583,9 +589,9 @@ export async function benchOne(
     let samples = 0;
     drive(rig, 10, (t, f) => {
       const speedKmh = rig.vehicle.speedKmh;
-      // This narrow governor keeps the circle in the 12–18 km/h band: at higher
-      // speeds the steering limiter deliberately fades away some of the lock.
-      f.throttle = speedKmh < 14 ? 0.35 : speedKmh > 16 ? 0 : 0.15;
+      // A narrow governor holds the circle at 9–11 km/h, above the slip floor; the
+      // rig's frame is a 'direct' steer command, so `steer = 1` is the full lock.
+      f.throttle = speedKmh < 9 ? 0.35 : speedKmh > 11 ? 0 : 0.15;
       f.brake = 0;
       f.steer = 1;
       if (t > 3) {
@@ -688,8 +694,8 @@ export async function benchOne(
         slideSeconds = 0;
         // Actual body-frame acceleration, not `yawRate * speed`: that shortcut is
         // valid only in a perfectly steady circle and over-reports a live axle
-        // rotating into a slide. This is the same kinematic identity `Vehicle` uses
-        // to feed its roll couple: dv_lateral/dt + yawRate * v_forward.
+        // rotating into a slide. The kinematic identity is
+        // dv_lateral/dt + yawRate * v_forward.
         const lateralG = Math.abs(lateralAccel) / 9.81;
         lateralWindow.push(lateralG);
         lateralSum += lateralG;

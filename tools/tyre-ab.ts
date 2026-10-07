@@ -19,11 +19,13 @@
  */
 
 import { installAssetShim } from './assetshim';
+import { installDocumentShim } from './domshim';
 import { preloadCarModels } from '../src/render/carmodel';
 import { TYRE_MODEL } from '../src/vehicle/vehicletuning';
 import { makeRig, drive } from './handling-bench';
 
 installAssetShim();
+installDocumentShim();
 
 const ids = process.argv.slice(2);
 const models = ids.length > 0 ? ids : ['sv_gaz21', 'sv_vaz2101', 'sv_vaz2108', 'sv_niva', 'sa_uaz330364'];

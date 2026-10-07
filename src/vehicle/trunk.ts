@@ -44,6 +44,16 @@ export function storageGridColumns(side: StorageSide): number {
   return side === 'bonnet' ? BONNET_SLOT_COUNT : TRUNK_COLUMNS;
 }
 
+/**
+ * Sign that turns a column offset into chassis-local X. Cells count left to right
+ * as the player sees them. The trunk is read from behind the car, looking along
+ * +Z, so the player's left is +X; the bonnet is read from in front, where the
+ * player's left is -X.
+ */
+function columnSign(side: StorageSide): number {
+  return side === 'bonnet' ? 1 : -1;
+}
+
 /** Writes one cell centre in chassis-local space without allocating. */
 export function storageCellLocal(
   cell: number,
@@ -58,7 +68,7 @@ export function storageCellLocal(
   const row = Math.floor(cell / columns);
   const rows = storageGridRows(side);
   out.set(
-    (column - (columns - 1) * 0.5) * cellWidth,
+    columnSign(side) * (column - (columns - 1) * 0.5) * cellWidth,
     storageGridCentreY(halfExtents[1]) + ((rows - 1) * 0.5 - row) * TRUNK_CELL_HEIGHT,
     side === 'bonnet'
       ? halfExtents[2] + TRUNK_GRID_DEPTH
@@ -101,7 +111,8 @@ export function intersectStorageGrid(
   }
 
   const columns = storageGridColumns(side);
-  const column = Math.min(columns - 1, Math.floor(((x + width * 0.5) / width) * columns));
+  const across = columnSign(side) * x;
+  const column = Math.min(columns - 1, Math.floor(((across + width * 0.5) / width) * columns));
   const row = Math.min(rows - 1, Math.floor(((centreY + height * 0.5 - y) / height) * rows));
   out.cell = row * columns + column;
   out.distance = distance;

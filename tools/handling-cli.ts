@@ -25,6 +25,7 @@
 import { SurfaceType } from '../src/core/surfaces';
 import { MAX_SLOPE } from '../src/world/landscape';
 import { installAssetShim } from './assetshim';
+import { installDocumentShim } from './domshim';
 import {
   runAutomaticNeutralReverseCheck,
   runAutomaticRollbackCheck,
@@ -36,6 +37,9 @@ import {
 } from './handling-bench';
 
 installAssetShim();
+// Building a `Vehicle` paints its boot's sticker decals, which needs a 2D canvas
+// context to exist before any rig can be constructed headless.
+installDocumentShim();
 
 const ids = process.argv.slice(2);
 const DEFAULT_IDS = ['sv_vaz2101', 'gt_vaz2110', 'sv_vaz2105r', 'sa_uaz330364'];

@@ -4,6 +4,41 @@
 
 ### Added
 
+- XBOX CONTROLLER (`core/gamepad.ts`, see `CONTROLS.md`). Left stick steers as a
+  position, RT/LT are analog throttle and brake, every driving and on-foot action has a
+  button, the right stick looks. Menus, pause and settings work from the pad. The last
+  device touched owns each axis. Rumble: strong motor from bumps, landings and impacts;
+  weak motor from road texture, slides, lock-ups and the front tyres going light;
+  trigger rumble where Chrome supports it. Settings › Controller: vibration (70%),
+  stick dead-zone, steering sensitivity, steering assist.
+- CAMERA STYLE in Settings › Drive: Steady (as before, bit-identical) or Dynamic — the
+  chase camera follows the slip angle (40%, cap ~10°), leans out of the corner from
+  measured lateral acceleration (cap 0.35 m), the bonnet view rolls with the body and
+  looks into the corner at low speed.
+- DRIVING MODEL, all in `vehicle/` (details in `tools/vehicle-pipeline.md`):
+  - Real centre of mass: boot cargo, fuel, engine fluids and the pack are point masses
+    at their own places, so a boot load sits on the rear axle and a dry tank shifts
+    weight forward. A stock car is numerically the car it was.
+  - Honest roll: side forces act at each axle's roll-centre height, geometric and
+    elastic load transfer replace the calibrated roll torque (`applyRollCouple` and
+    `ROLL_COUPLE_GAIN` removed); per-axle bars, a damper low-speed bleed.
+  - Geometry: Ackermann, static camber and camber thrust, roll camber, toe, roll steer,
+    caster. Steer locks recut to the true turning-circle geometry.
+  - Combined slip both ways: drive and brake slip eat side grip and slip angle eats
+    traction; locked-wheel side grip is emergent. Longitudinal carcass relaxation.
+  - Engine braking goes through the gearbox and differentials to the tyres (lift-off
+    tuck-in, driven wheels can slide on sand); a four-state automatic clutch (open,
+    launch, sync, locked) in both gearbox modes, rev-matched auto downshifts, no stall.
+  - Steering: a held key asks for the front tyres' peak slip angle instead of a fixed
+    speed table, countersteer keeps full reach; self-aligning torque returns the wheel
+    when released; keyboard pedals ramp (throttle 0.25 s, brake 0.15 s).
+  - Aero: per-body lift at each axle, crosswind side force with a centre of pressure
+    (the nose goes downwind), the 0.18 g cap removed, deterministic gusts in the
+    weather wind.
+  - Trailers: the car's tyre law on trailer wheels, cargo position and tongue load,
+    emergent sway (a tail-heavy heavy rig snakes past ~128 km/h), trailer brakes sized
+    to the tow car. The yaw damping fake is gone.
+
 - CACTUS AIR DANCERS BESIDE EVERY COURIER (`world/props/airdancer.ts`). Each parked
   contract car advertises itself with a ~5.7 m inflatable on a blower box: a ribbed
   green cactus tube with white spines, a flower on top, two long open arms and a
@@ -139,8 +174,29 @@
 - THE STARTER HOMESTEAD (`world/house.ts`, `world/poi/starter.ts`, the `starter-homestead`
   POI variant) and its garage-shelf items. Saves from before keep their car where the old
   garage stood.
+- THIRTEEN CONTRACT KINDS: urgent film, medical thermo box, one tank, don't overheat,
+  clean delivery, long haul, night courier, part order, convoy, bald tyres, sand route,
+  desert slalom and photo errand. The courier race covers the "deliver it well and
+  fast" angle; what is left is parcel, heavy crate, fragile radio, equipment trailer,
+  oversize load, car transfer and towing (parcel, crate and radio are raceable). With
+  them went their machinery: the gate field (`world/gates.ts`, `contracts/gates.ts`),
+  photo subject recognition (`contracts/photosubjects.ts`, `PhotographItem.evidence`),
+  the convoy escort autopilot, enforced tyre compounds, the film-can and thermo-box
+  cargo meshes, and every progress/telemetry/probe field only they read. A saved cargo
+  of a removed kind loads as a parcel with its name and reward sticker. The towing
+  bench is now `tools/tow-bench.ts`.
+- TYRE COMPOUNDS. Every car runs the standard tyre (both multipliers were 1.0, so
+  nothing is baked in); the O key ("Cycle tyre compound") and its toast are gone. An
+  old save's `tyres` key binding is ignored.
 
 ### Changed
+
+- TRUNK CELLS COUNT LEFT TO RIGHT. Seen from behind the car, cell 1 used to be the
+  top-right one; it is now top-left, 1–4 across the top row and 5–8 across the bottom
+  (`columnSign` in `vehicle/trunk.ts`, shared by the drawn grid and the aim ray). Cell
+  indices and saves are unchanged, so an existing trunk shows its contents mirrored.
+  The bonnet already read left to right from the front. `tools/trunk-grid.ts` checks
+  the order.
 
 - TRAFFIC IS BACK TO ITS OLD SIZE ON THE 800 M ROAD. `TRAFFIC_CAPS` halved to
   low 4/8, medium 8/16, high 12/24 cars (two-lane/four-lane). The doubling that came
@@ -250,6 +306,21 @@
   (`src/render/held.ts`).
 
 ### Fixed
+
+- A LOADED CAR SITS LOWER INSTEAD OF GOING SOFT. `Vehicle.reloadSprings` re-derived
+  each spring's free length and travel from the load, which cancelled the sag exactly
+  (Rapier's force is rate × compression × live mass), so a 700 kg crate in the Oka left
+  the ride height at 779 mm and only dropped the ride frequency (1.30 → 0.90 Hz) and
+  damping (0.28 → 0.155). Roll in a fixed step steer grew 2.3×. The same edit moved
+  the bump stop's knee into a frame its compression never reached, so loaded cars hit
+  Rapier's rigid travel clamp instead of the rubber. Free length, travel, the stop's
+  knee and its crush force now come from the kerb design once in `rebuild()`; only the
+  rates and the sag follow the load. Oka +700 kg now sits 65 mm lower and rests on the
+  stop, rolls -3.2° where it rolled -11.4°, and an empty car is bit-identical.
+  `tools/cargo-load-bench.ts` checks sag = load / rate within the travel and no
+  airborne time over two humps; `--legacy` reproduces the old failure. The bench shim
+  (`tools/domshim.ts`) now paints enough canvas for the sticker atlas, so headless
+  `new Vehicle` works again (`tools/tow-bench.ts` runs).
 
 - THE COURIER'S FINISH STAYS ON THE COURIER. Under `?carstyle=unified` the turquoise rim
   shader turned up on the wheels of the Izh, the Oka and every car on the Soviet wheel

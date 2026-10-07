@@ -2016,32 +2016,6 @@ function buildContractRadioInto(b: MeshBuilder): void {
   b.box('contract_radio_handle', 0.16, 0.02, 0.02, metal, [0, 0.15, 0]);
 }
 
-/** A film can lying on its side, hub visible at the end. */
-function buildContractFilmCanInto(b: MeshBuilder): void {
-  const can = cond(0x9aa0a6, 0.7, 0.35);
-  const lid = cond(0xc9ccce, 0.6, 0.3);
-  const label = flat(0xd9c8a5, 0.9);
-  b.cylinder('contract_film_body', 0.108, 0.108, 0.16, 18, can, [0, 0, 0], AXIS_Z);
-  b.cylinder('contract_film_lid', 0.112, 0.112, 0.02, 18, lid, [0, 0, 0.09], AXIS_Z);
-  b.cylinder('contract_film_hub', 0.028, 0.028, 0.2, 12, can, [0, 0, 0], AXIS_Z);
-  b.box('contract_film_label', 0.14, 0.1, 0.006, label, [0, 0, 0.113]);
-}
-
-/** A medical thermo box: an insulated carrier with a lid and a red cross. */
-function buildContractThermoInto(b: MeshBuilder): void {
-  const shell = flat(0x2f6f8f, 0.85);
-  const lid = flat(0x3f88a8, 0.8);
-  const latch = cond(0xc9ccce, 0.6, 0.4);
-  const white = flat(0xf2f2f2, 0.7);
-  const red = flat(0xc0392b, 0.7);
-  b.box('contract_thermo_body', 0.42, 0.3, 0.3, shell, [0, 0, 0]);
-  b.box('contract_thermo_lid', 0.44, 0.06, 0.32, lid, [0, 0.175, 0]);
-  b.box('contract_thermo_handle', 0.16, 0.03, 0.03, latch, [0, 0.225, 0]);
-  b.box('contract_thermo_panel', 0.16, 0.16, 0.006, white, [0, 0, 0.151]);
-  b.box('contract_thermo_cross_v', 0.04, 0.13, 0.008, red, [0, 0, 0.153]);
-  b.box('contract_thermo_cross_h', 0.13, 0.04, 0.008, red, [0, 0, 0.153]);
-}
-
 function buildStickerEnvelopeInto(b: MeshBuilder): void {
   const paper = flat(0xd8c8ad, 0.9);
   const fold = flat(0xb9a78c, 0.92);
@@ -2206,17 +2180,13 @@ export function createItemMesh(item: Item): THREE.Object3D {
     case 'postcard':
       return createPostcardMesh();
     case 'contract_cargo': {
-      // The wave-1 kinds each get their own cheap primitive shape so the cargo is
-      // recognisable in the hand and the boot. Wave-2 kinds fall back to the parcel.
+      // The crate and the radio get their own cheap primitive shape so the cargo is
+      // recognisable in the hand and the boot; every other kind is the parcel.
       switch (item.contractKind) {
         case 'heavy_crate':
           return buildGroup(itemBlueprint('contract_crate', buildContractCrateInto).instructions);
         case 'fragile_radio':
           return buildGroup(itemBlueprint('contract_radio', buildContractRadioInto).instructions);
-        case 'urgent_film':
-          return buildGroup(itemBlueprint('contract_film_can', buildContractFilmCanInto).instructions);
-        case 'medical_thermo':
-          return buildGroup(itemBlueprint('contract_thermo_box', buildContractThermoInto).instructions);
         default:
           return buildGroup(itemBlueprint('contract_parcel', buildContractParcelInto).instructions);
       }

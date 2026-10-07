@@ -1,6 +1,7 @@
 import type { DriveSummary, SaveBackend, SaveListing, SaveMeta } from '../save/save';
 import type { WorldState } from '../game/state';
 import { BINDABLE_ACTIONS, isSystemControlCode } from '../core/input';
+import { gamepads, PAD } from '../core/gamepad';
 import {
   DAY_CYCLE_MAX_MINUTES,
   DAY_CYCLE_MIN_MINUTES,
@@ -8,6 +9,13 @@ import {
   DASHBOARD_SCALE_MAX,
   DASHBOARD_SCALE_MIN,
   DASHBOARD_SCALE_STEP,
+  CONTROLLER_DEADZONE_MAX,
+  CONTROLLER_DEADZONE_MIN,
+  CONTROLLER_DEADZONE_STEP,
+  CONTROLLER_STEER_MAX,
+  CONTROLLER_STEER_MIN,
+  CONTROLLER_STEER_STEP,
+  CONTROLLER_VIBRATION_STEP,
   FIELD_OF_VIEW_MAX,
   FIELD_OF_VIEW_MIN,
   MOUSE_SENSITIVITY_MAX,
@@ -179,6 +187,16 @@ const ICONS: Record<string, readonly string[]> = {
   /** A bouncing wave, for the Yaris-mode toggle. */
   bounce: ['M3 18c2-8 4-8 6 0s4-8 6 0 4-8 6 0'],
   back: ['M14.5 5.5 8 12l6.5 6.5'],
+  /** A game controller: two grips, a D-pad and two face buttons. */
+  gamepad: [
+    'M7.5 8h9a5 5 0 0 1 5 5.4l-.3 2.6a1.8 1.8 0 0 1-3.3.8L16 14H8l-1.9 2.8a1.8 1.8 0 0 1-3.3-.8L2.5 13.4A5 5 0 0 1 7.5 8z',
+    'M7 11.5v2M6 12.5h2M15.5 12h.01M17.5 13.5h.01',
+  ],
+  /**
+   * A camera path that curves: the axis of the camera-style control. Straight would be
+   * steady, so the glyph is the departure from it.
+   */
+  cameraStyle: ['M4 19c4 0 4-12 8-12s5 12 8 12', 'M12 7.5a1 1 0 1 0 0-2 1 1 0 0 0 0 2z'],
   trash: ['M4.5 7h15', 'M9.5 7V4.5h5V7', 'M6.5 7l1 12.5h9l1-12.5', 'M10.5 10.5v6M13.5 10.5v6'],
 };
 
@@ -492,6 +510,189 @@ async function copyText(text: string): Promise<boolean> {
 /** How long the pause sheet's save row says `Saved` before it reads `Save drive` again. */
 const SAVE_ANSWER_MS = 1600;
 
+/* ---- gamepad navigation for an open menu ---- */
+
+/**
+ * Everything the pad may land on inside a menu, in document order.
+ *
+ * Not `[data-nav]`: that attribute marks the rows of the LIST screens, and the
+ * settings panes are ordinary form controls — range sliders, text fields, buttons —
+ * which a player on a pad has exactly the same business with as one on a mouse.
+ */
+const FOCUSABLE_SELECTOR =
+  'button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])';
+
+/** Left-stick travel at which a menu counts the stick as a direction. */
+const NAV_STICK_THRESHOLD = 0.55;
+/** Hold delays for a held direction: move once, then repeat; see `moveFocus`. */
+const NAV_REPEAT_DELAY_MS = 380;
+const NAV_REPEAT_MS = 110;
+
+/**
+ * Moves focus one control in a direction, by GEOMETRY rather than document order.
+ *
+ * The menus are several layouts in one sheet — a vertical list of rows, a settings
+ * pane of rows that each hold a horizontal row of options, a rail down the left — and
+ * document order only describes one of them. Picking the nearest control whose centre
+ * lies in the direction of travel is the same rule for all of them: down walks the
+ * rows, left and right walk the options inside the focused row, and the rail is
+ * reachable by the same leftward step.
+ */
+function moveFocus(root: HTMLElement, dx: number, dy: number): void {
+  const items: HTMLElement[] = [];
+  for (const node of Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))) {
+    if (node.offsetParent !== null) items.push(node);
+  }
+  if (items.length === 0) return;
+  const current = document.activeElement;
+  if (!(current instanceof HTMLElement) || !items.includes(current)) {
+    items[0]?.focus();
+    return;
+  }
+  // A range input owns its own left and right: stepping the control is what the
+  // player is asking for, and moving focus away from it would make a slider the one
+  // thing a pad cannot change.
+  if (
+    (dx !== 0) &&
+    current instanceof HTMLInputElement &&
+    current.type === 'range'
+  ) {
+    if (dx < 0) current.stepDown();
+    else current.stepUp();
+    // The control's own listeners are on `input`, and only a real event runs them.
+    current.dispatchEvent(new Event('input', { bubbles: true }));
+    return;
+  }
+  const from = current.getBoundingClientRect();
+  const fx = from.left + from.width / 2;
+  const fy = from.top + from.height / 2;
+  let best: HTMLElement | null = null;
+  let bestScore = Infinity;
+  for (const item of items) {
+    if (item === current) continue;
+    const rect = item.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const along = dx !== 0 ? (cx - fx) * dx : (cy - fy) * dy;
+    if (along <= 1) continue;
+    const across = dx !== 0 ? Math.abs(cy - fy) : Math.abs(cx - fx);
+    // Nearest in the direction of travel wins, with the cross-axis distance as a
+    // penalty so a step never jumps a column sideways to reach a nearer row.
+    const score = along + across * 2;
+    if (score < bestScore) {
+      bestScore = score;
+      best = item;
+    }
+  }
+  (best ?? current).focus();
+}
+
+/**
+ * Drives an open menu with the pad: the D-pad and left stick move focus, A activates
+ * what is focused, B backs out and Start is the sheet's own key. Returns the function
+ * that detaches it, which the caller must run when the overlay closes.
+ *
+ * A poll, not events: the Gamepad API has no button events, and this loop is
+ * animation-framed like everything else the overlay does. `isCapturing` is the one
+ * exception the sheet needs — while the player is recording a new key binding the pad
+ * is switched off entirely, so a hand resting on a stick cannot navigate out from
+ * under the capture or bind itself to an action.
+ */
+function attachPadNavigation(
+  root: HTMLElement,
+  onBack: () => void,
+  onStart: (() => void) | null,
+  isCapturing: () => boolean,
+): () => void {
+  const hub = gamepads();
+  const held = { up: false, down: false, left: false, right: false, confirm: false, back: false, start: false };
+  const repeatAt = { up: 0, down: 0, left: 0, right: 0 };
+  let animation = 0;
+  let stopped = false;
+
+  // Defined once, not per frame: this holds the repeat state for one direction.
+  const step = (
+    active: boolean,
+    wasActive: boolean,
+    direction: 'up' | 'down' | 'left' | 'right',
+    dx: number,
+    dy: number,
+    nowMs: number,
+  ): void => {
+    if (!active) {
+      held[direction] = false;
+      return;
+    }
+    if (!wasActive) {
+      held[direction] = true;
+      repeatAt[direction] = nowMs + NAV_REPEAT_DELAY_MS;
+      moveFocus(root, dx, dy);
+      return;
+    }
+    if (nowMs >= repeatAt[direction]) {
+      repeatAt[direction] = nowMs + NAV_REPEAT_MS;
+      moveFocus(root, dx, dy);
+    }
+  };
+
+  const frame = (): void => {
+    if (stopped) return;
+    animation = window.requestAnimationFrame(frame);
+    const pad = hub.read();
+    const buttons = pad.buttons;
+    if (isCapturing()) {
+      // Capture mode: the pad is deliberately inert, and its buttons are latched so
+      // leaving capture does not read a held button as a fresh press.
+      held.up = pad.moveZ > NAV_STICK_THRESHOLD || buttons[PAD.DUp] === true;
+      held.down = pad.moveZ < -NAV_STICK_THRESHOLD || buttons[PAD.DDown] === true;
+      held.left = pad.moveX < -NAV_STICK_THRESHOLD;
+      held.right = pad.moveX > NAV_STICK_THRESHOLD;
+      held.confirm = buttons[PAD.A] === true;
+      held.back = buttons[PAD.B] === true;
+      held.start = buttons[PAD.Start] === true;
+      return;
+    }
+    const nowMs = performance.now();
+    const up = pad.moveZ > NAV_STICK_THRESHOLD || buttons[PAD.DUp] === true;
+    const down = pad.moveZ < -NAV_STICK_THRESHOLD || buttons[PAD.DDown] === true;
+    const left = pad.moveX < -NAV_STICK_THRESHOLD || buttons[PAD.DLeft] === true;
+    const right = pad.moveX > NAV_STICK_THRESHOLD || buttons[PAD.DRight] === true;
+    step(up, held.up, 'up', 0, -1, nowMs);
+    step(down, held.down, 'down', 0, 1, nowMs);
+    step(left, held.left, 'left', -1, 0, nowMs);
+    step(right, held.right, 'right', 1, 0, nowMs);
+
+    const confirm = buttons[PAD.A] === true;
+    if (confirm && !held.confirm) {
+      const focused = document.activeElement;
+      // Only a button is activated: clicking a text field or a slider would mean
+      // nothing, and the sheet's rows are all buttons.
+      if (focused instanceof HTMLButtonElement && !focused.disabled) focused.click();
+    }
+    held.confirm = confirm;
+
+    const back = buttons[PAD.B] === true;
+    if (back && !held.back) onBack();
+    held.back = back;
+
+    const start = buttons[PAD.Start] === true;
+    if (start && !held.start) onStart?.();
+    held.start = start;
+  };
+
+  // Seed the latches from the pad as it is now: a button already down when the sheet
+  // opens is not a press on it.
+  const pad = hub.read();
+  held.confirm = pad.buttons[PAD.A] === true;
+  held.back = pad.buttons[PAD.B] === true;
+  held.start = pad.buttons[PAD.Start] === true;
+  animation = window.requestAnimationFrame(frame);
+  return () => {
+    stopped = true;
+    window.cancelAnimationFrame(animation);
+  };
+}
+
 /** What the player chose on the pause overlay. */
 export type PauseAction = 'resume' | 'quit';
 
@@ -627,6 +828,7 @@ export class MainMenu {
     let view: 'front' | 'saves' = 'front';
     let errorLine: HTMLElement | null = null;
     let settled = false;
+    let detachPad: (() => void) | null = null;
 
     /** Back from the list lands on the row that opened it, not on Continue. */
     const backToFront = (): void => {
@@ -651,6 +853,8 @@ export class MainMenu {
     const finish = (state: WorldState | null): void => {
       if (settled) return;
       settled = true;
+      detachPad?.();
+      detachPad = null;
       window.removeEventListener('keydown', onKey);
       this.loading.classList.remove('is-hidden');
       overlay.remove();
@@ -827,6 +1031,17 @@ export class MainMenu {
       this.loading.classList.add('is-hidden');
       sheet.querySelector<HTMLButtonElement>('[data-nav]')?.focus();
       window.addEventListener('keydown', onKey);
+      // The title screen is a menu like any other: a pad moves focus, A activates and
+      // B backs out of the saved-drives list. Start does nothing here — there is no
+      // drive to pause.
+      detachPad = attachPadNavigation(
+        sheet,
+        () => {
+          if (view === 'saves') backToFront();
+        },
+        null,
+        () => false,
+      );
     });
     return promise;
   }
@@ -855,6 +1070,15 @@ export class MainMenu {
         resolve(action);
       };
 
+      // The pad gets the same three keys the overlay already answers to: A activates
+      // the focused control, B is Escape's back, and Start is Escape on the main screen
+      // — which is Resume, exactly as the keyboard's pause key is.
+      const back = (): void => {
+        if (screen === 'main') finish('resume');
+        else showScreen('main');
+      };
+      let detachPad: (() => void) | null = null;
+
       // Working copy of the player's settings. hooks.settings() hands out the
       // authoritative object: it is copied on entry, never mutated here, and
       // every change pushes a complete Settings object back through
@@ -865,6 +1089,11 @@ export class MainMenu {
         gearboxMode: base.gearboxMode,
         dayCycleMinutes: base.dayCycleMinutes,
         mouseSensitivity: base.mouseSensitivity,
+        cameraStyle: base.cameraStyle,
+        controllerVibration: base.controllerVibration,
+        controllerDeadzone: base.controllerDeadzone,
+        controllerSteerSensitivity: base.controllerSteerSensitivity,
+        controllerSteerAssist: base.controllerSteerAssist,
         masterVolume: base.masterVolume,
         carVolume: base.carVolume,
         worldVolume: base.worldVolume,
@@ -890,6 +1119,11 @@ export class MainMenu {
           gearboxMode: settings.gearboxMode,
           dayCycleMinutes: settings.dayCycleMinutes,
           mouseSensitivity: settings.mouseSensitivity,
+          cameraStyle: settings.cameraStyle,
+          controllerVibration: settings.controllerVibration,
+          controllerDeadzone: settings.controllerDeadzone,
+          controllerSteerSensitivity: settings.controllerSteerSensitivity,
+          controllerSteerAssist: settings.controllerSteerAssist,
           masterVolume: settings.masterVolume,
           carVolume: settings.carVolume,
           worldVolume: settings.worldVolume,
@@ -939,7 +1173,7 @@ export class MainMenu {
        * Settings section, remembered across visits: someone adjusting the horizon
        * comes back to the horizon, not to the top of a list.
        */
-      type SettingsTab = 'drive' | 'display' | 'compute' | 'gameplay' | 'sound' | 'controls';
+      type SettingsTab = 'drive' | 'display' | 'compute' | 'gameplay' | 'sound' | 'controls' | 'controller';
       let settingsTab: SettingsTab = 'drive';
       /** Action id waiting for a key in capture mode; only set on settings. */
       let capturingActionId: string | null = null;
@@ -1049,7 +1283,17 @@ export class MainMenu {
         if (screen === 'main') walkRows(panel, ev);
       };
       window.addEventListener('keydown', onKey);
-      this.pauseCleanup = () => window.removeEventListener('keydown', onKey);
+      detachPad = attachPadNavigation(
+        panel,
+        back,
+        () => finish('resume'),
+        () => screen === 'settings' && capturingActionId !== null,
+      );
+      this.pauseCleanup = () => {
+        window.removeEventListener('keydown', onKey);
+        detachPad?.();
+        detachPad = null;
+      };
 
       /**
        * The pause sheet: where you are, and the four things a pause is for.
@@ -1375,7 +1619,7 @@ export class MainMenu {
               {
                 label: 'Standard',
                 icon: 'keys',
-                hint: 'A and D steer normally and return toward centre when released.',
+                hint: 'A and D ask for as much steering as the front tyres can use at this speed. Let go and the wheel unwinds on its own.',
                 active: () => !settings.preciseSteering,
                 pick: () => {
                   settings.preciseSteering = false;
@@ -1411,6 +1655,28 @@ export class MainMenu {
                 active: () => !settings.cameraShake,
                 pick: () => {
                   settings.cameraShake = false;
+                  apply();
+                },
+              },
+            ]),
+            segmented('Camera style', [
+              {
+                label: 'Steady',
+                icon: 'drive',
+                hint: 'The camera as it has always been: it follows the car, holds a level horizon and points where you point it. Nothing about a slide moves the frame.',
+                active: () => settings.cameraStyle === 'steady',
+                pick: () => {
+                  settings.cameraStyle = 'steady';
+                  apply();
+                },
+              },
+              {
+                label: 'Dynamic',
+                icon: 'cameraStyle',
+                hint: 'The camera reads the car: it lags the slip angle so a slide is visible, leans out of corners with the body, rolls the bonnet view with the suspension and looks into the wheels at parking speed.',
+                active: () => settings.cameraStyle === 'dynamic',
+                pick: () => {
+                  settings.cameraStyle = 'dynamic';
                   apply();
                 },
               },
@@ -1897,6 +2163,131 @@ export class MainMenu {
           );
         };
 
+        /**
+         * The controller. Three controls and a line of state.
+         *
+         * A pad's preferences are the same kind of thing as the mouse's — how the
+         * device in your hand feels — so they are shaped the same way and applied at
+         * the same place. They exist at all because the stick, the trigger and the
+         * motors differ between pads and between hands: 8% dead-zone is right for a
+         * Hall-effect stick and wrong for a worn one, and a pad that buzzes a nylon
+         * desk mat is a pad nobody uses twice.
+         *
+         * The status line is read from the hub rather than written here, because "which
+         * pad is it using" is exactly the question a player asks when nothing moves.
+         */
+        const renderController = (): void => {
+          const hub = gamepads();
+          const padHint =
+            'An Xbox-style pad is used with the standard layout: left stick steers, '
+            + 'RT and LT are throttle and brake, A is the handbrake, X enters and leaves '
+            + 'the car, Y changes the camera view, the bumpers shift, the D-pad carries '
+            + 'the indicators, the radio and the camera re-centre, and Start pauses.';
+          const status = el('div', 'menu-field');
+          const statusHead = el('div', 'menu-field-head');
+          const statusLabel = el('span', 'menu-label');
+          statusLabel.textContent = 'Gamepad';
+          const statusChip = el('output', 'menu-chip');
+          const paintStatus = (): void => {
+            const pad = hub.read();
+            if (!pad.connected) {
+              statusChip.textContent = 'none detected';
+              return;
+            }
+            const attached = navigator.getGamepads?.() ?? [];
+            let name = 'connected';
+            for (const candidate of attached) {
+              if (candidate !== null && candidate.connected && candidate.mapping === 'standard') {
+                name = candidate.id.split(' (')[0] ?? 'connected';
+                break;
+              }
+            }
+            statusChip.textContent = name;
+          };
+          paintStatus();
+          statusHead.append(icon('gamepad'), statusLabel, statusChip);
+          status.append(statusHead);
+          // Focus re-reads the pad, which is how a player finds out that the pad he just
+          // picked up is the one being used.
+          statusChip.tabIndex = 0;
+          statusChip.addEventListener('focus', () => {
+            paintStatus();
+            setHint(padHint);
+          });
+          statusChip.addEventListener('pointerenter', () => {
+            paintStatus();
+            setHint(padHint);
+          });
+          pane.appendChild(status);
+
+          pane.append(
+            sliderField(
+              'Vibration',
+              'bounce',
+              'How hard the pad shakes. The strong motor carries the suspension and '
+              + 'collisions, the weak one the road under the tyres and a sliding wheel.',
+              0,
+              1,
+              CONTROLLER_VIBRATION_STEP,
+              () => settings.controllerVibration,
+              (value) => `${Math.round(value * 100)}%`,
+              (value) => {
+                settings.controllerVibration = value;
+              },
+            ),
+            sliderField(
+              'Stick dead-zone',
+              'gamepad',
+              'How far the left stick must move before the wheels see it. Raise it if a '
+              + 'well-used pad steers on its own with nobody touching it.',
+              CONTROLLER_DEADZONE_MIN,
+              CONTROLLER_DEADZONE_MAX,
+              CONTROLLER_DEADZONE_STEP,
+              () => settings.controllerDeadzone,
+              (value) => `${Math.round(value * 100)}%`,
+              (value) => {
+                settings.controllerDeadzone = value;
+              },
+            ),
+            sliderField(
+              'Steering sensitivity',
+              'keys',
+              'How much lock a given stick deflection asks for. Above 100% reaches full '
+              + 'lock earlier; below it leaves more of the stick for small corrections.',
+              CONTROLLER_STEER_MIN,
+              CONTROLLER_STEER_MAX,
+              CONTROLLER_STEER_STEP,
+              () => settings.controllerSteerSensitivity,
+              (value) => `${Math.round(value * 100)}%`,
+              (value) => {
+                settings.controllerSteerSensitivity = value;
+              },
+            ),
+            segmented('Steering assist', [
+              {
+                label: 'On',
+                icon: 'drive',
+                hint: 'Full stick is as much steering as the front tyres can use at this speed; the stick is proportional inside it. Precise mouse steering follows the same setting.',
+                active: () => settings.controllerSteerAssist,
+                pick: () => {
+                  settings.controllerSteerAssist = true;
+                  apply();
+                },
+              },
+              {
+                label: 'Off',
+                icon: 'keys',
+                hint: 'Full stick is full lock at any speed. The keyboard is always assisted.',
+                active: () => !settings.controllerSteerAssist,
+                pick: () => {
+                  settings.controllerSteerAssist = false;
+                  apply();
+                },
+              },
+            ]),
+          );
+        };
+
         const renderControls = (): void => {
           pane.appendChild(
             sliderField(
@@ -1979,8 +2370,15 @@ export class MainMenu {
             id: 'controls',
             label: 'Controls',
             icon: 'controls',
-            hint: 'The mouse, and every key.',
+            hint: 'The mouse, the pad and every key.',
             render: renderControls,
+          },
+          {
+            id: 'controller',
+            label: 'Controller',
+            icon: 'gamepad',
+            hint: 'How the gamepad feels: shake, stick and steering.',
+            render: renderController,
           },
         ];
 

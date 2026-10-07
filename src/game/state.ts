@@ -180,6 +180,14 @@ export interface TrailerState {
   hitchedTo: string | null;
   /** Mass on the bed, kg. Zero when empty. */
   cargoKg: number;
+  /**
+   * Where that mass sits along the bed, metres forward of the bed centre: the
+   * placement that decides how much of the rig's weight bears on the tow ball
+   * (`Trailer.tongueLoadN`). Absent is centred, 0.2 m ahead of the axle — 8% on the
+   * ball, an ordinary well-loaded trailer. Clamped by the trailer to keep a crate on
+   * the bed.
+   */
+  cargoZ?: number;
   /** Oversize load description, or absent for an ordinary flatbed. */
   load?: TrailerLoad;
   x: number;

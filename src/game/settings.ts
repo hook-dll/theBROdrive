@@ -11,7 +11,19 @@
 
 import { GAMEPLAY_CONFIG } from '../config';
 import { BINDABLE_ACTIONS } from '../core/input';
+import { DEFAULT_DEADZONE } from '../core/gamepad';
 export type GearboxMode = 'manual' | 'automatic';
+/**
+ * How the driving camera behaves.
+ *
+ * `steady` is the camera this game has always had: a world-space heading the player
+ * aims, an arm that lags the car by a speed term, and a level horizon. `dynamic`
+ * reads the car's own motion — its slip angle, its measured lateral acceleration and
+ * its body roll — and lets the view show them, so a slide is visible in the framing
+ * rather than only in the wheel. Steady is the default because it is the authored
+ * composition; see `CameraRig`.
+ */
+export type CameraStyle = 'steady' | 'dynamic';
 export type TimeOfDayPreset = 'morning' | 'noon' | 'evening' | 'midnight';
 /**
  * Rendering tier: the ONE ladder, and everything it owns.
@@ -388,6 +400,28 @@ export interface Settings {
    */
   mouseSensitivity: number;
   /**
+   * How the driving camera behaves. `steady` is the camera this game always had;
+   * `dynamic` adds the motion that makes a slide legible — see `CameraRig`.
+   */
+  cameraStyle: CameraStyle;
+  /** Controller rumble strength, 0..1. Zero silences the pad entirely. */
+  controllerVibration: number;
+  /** Left-stick dead-zone, as a fraction of travel; see core/gamepad.ts. */
+  controllerDeadzone: number;
+  /**
+   * Steering sensitivity for an analog stick: the stick's travel is multiplied by
+   * this before the response curve, so it is the whole range that moves rather than
+   * only its top.
+   */
+  controllerSteerSensitivity: number;
+  /**
+   * Steering assist for an ANALOG position — the pad's stick and precise control's
+   * linear wheel. On, the edge of the stick is the angle that puts the front tyres at
+   * their peak slip, at every speed, and the stick is proportional inside it; off, it is
+   * the whole lock. The keyboard is always assisted. See `SteerMode` in core/input.ts.
+   */
+  controllerSteerAssist: boolean;
+  /**
    * Master volume, 0..1: everything, the radio included (audio/mixer.ts). Car, World
    * and Radio are each a share of it.
    */
@@ -497,6 +531,20 @@ export const DEFAULT_MOUSE_SENSITIVITY = GAMEPLAY_CONFIG.defaultMouseSensitivity
 export const MOUSE_SENSITIVITY_MIN = GAMEPLAY_CONFIG.mouseSensitivityMin;
 export const MOUSE_SENSITIVITY_MAX = GAMEPLAY_CONFIG.mouseSensitivityMax;
 /**
+ * Controller defaults and bounds. Vibration at 70% is the authored feel rather than
+ * full: the motors are strongest at their bottom end, and a game that starts at 100
+ * leaves a player who finds it buzzing with nowhere down to go but off.
+ */
+export const DEFAULT_CONTROLLER_VIBRATION = 0.7;
+export const CONTROLLER_VIBRATION_STEP = 0.05;
+export const CONTROLLER_DEADZONE_MIN = 0;
+/** At 30% of travel the first third of steering becomes unusable, which is the point. */
+export const CONTROLLER_DEADZONE_MAX = 0.3;
+export const CONTROLLER_DEADZONE_STEP = 0.01;
+export const CONTROLLER_STEER_MIN = 0.5;
+export const CONTROLLER_STEER_MAX = 2;
+export const CONTROLLER_STEER_STEP = 0.05;
+/**
  * Resting vertical field of view, and how far a player may move it.
  *
  * FOV matters more than it sounds: it sets the apparent scale of the whole world, so a
@@ -528,6 +576,15 @@ export const DEFAULT_SETTINGS: Settings = {
   gearboxMode: 'automatic',
   dayCycleMinutes: DEFAULT_DAY_CYCLE_MINUTES,
   mouseSensitivity: DEFAULT_MOUSE_SENSITIVITY,
+  // Steady by default: it is the authored composition, and a player who wants the
+  // motion opts into it.
+  cameraStyle: 'steady',
+  controllerVibration: DEFAULT_CONTROLLER_VIBRATION,
+  // The pad module's own default, so the hub and the settings cannot disagree about
+  // what "as shipped" means before the first settings push.
+  controllerDeadzone: DEFAULT_DEADZONE,
+  controllerSteerSensitivity: 1,
+  controllerSteerAssist: true,
   masterVolume: DEFAULT_MASTER_VOLUME,
   carVolume: DEFAULT_CAR_VOLUME,
   worldVolume: DEFAULT_WORLD_VOLUME,
@@ -648,6 +705,31 @@ export function sanitizeSettings(raw: unknown): Settings {
     gearboxMode: obj.gearboxMode === 'automatic' ? 'automatic' : 'manual',
     dayCycleMinutes: Math.min(DAY_CYCLE_MAX_MINUTES, Math.max(DAY_CYCLE_MIN_MINUTES, dayCycleRaw)),
     mouseSensitivity: Math.min(MOUSE_SENSITIVITY_MAX, Math.max(MOUSE_SENSITIVITY_MIN, sensitivityRaw)),
+    // Missing means an older save, and every older save was played with the steady
+    // camera: anything that is not exactly the new word is the camera that came first.
+    cameraStyle: obj.cameraStyle === 'dynamic' ? 'dynamic' : 'steady',
+    controllerVibration: unitInterval(obj.controllerVibration, DEFAULT_CONTROLLER_VIBRATION),
+    controllerDeadzone: Math.min(
+      CONTROLLER_DEADZONE_MAX,
+      Math.max(
+        CONTROLLER_DEADZONE_MIN,
+        typeof obj.controllerDeadzone === 'number' && Number.isFinite(obj.controllerDeadzone)
+          ? obj.controllerDeadzone
+          : DEFAULT_DEADZONE,
+      ),
+    ),
+    controllerSteerSensitivity: Math.min(
+      CONTROLLER_STEER_MAX,
+      Math.max(
+        CONTROLLER_STEER_MIN,
+        typeof obj.controllerSteerSensitivity === 'number'
+          && Number.isFinite(obj.controllerSteerSensitivity)
+          ? obj.controllerSteerSensitivity
+          : 1,
+      ),
+    ),
+    // Missing means a save from before the option: on, like a new one.
+    controllerSteerAssist: obj.controllerSteerAssist !== false,
     masterVolume: unitInterval(obj.masterVolume, DEFAULT_MASTER_VOLUME),
     carVolume: unitInterval(obj.carVolume, DEFAULT_CAR_VOLUME),
     worldVolume: unitInterval(obj.worldVolume, DEFAULT_WORLD_VOLUME),

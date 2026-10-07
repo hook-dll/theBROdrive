@@ -74,10 +74,9 @@ import type { VehicleLightRig } from '../render/vehiclelights';
 import {
   AIR_DENSITY,
   ANTI_DIVE_FRACTION,
-  ANTI_ROLL_FRONT_FRACTION,
-  ANTI_ROLL_REAR_FRACTION,
   ANTI_SQUAT_FRACTION,
   AUTO_DIRECTION_RELEASE_MPS,
+  AXLE_ROLL_LIMIT_RAD,
   type AxleGeometry,
   BODY_CONDITION_EMIT_INTERVAL,
   BODY_DIRT_ROAD_FILM,
@@ -86,15 +85,19 @@ import {
   BOUNCE_HOP_HZ,
   BOUNCE_SQUASH_MAX,
   BUMP_STEER_FULL_ROUGHNESS,
+  BUMP_STEER_SUSTAINED_TAU,
   BUMP_STEER_TAU,
   BUMP_STOP_FRACTION,
   BUMP_STOP_PEAK,
+  CAMBER_GRIP_LOSS_PER_DEG,
+  CAMBER_STIFFNESS_CROSSPLY,
+  CAMBER_STIFFNESS_RADIAL,
   CARRIED_MASS_EPSILON_KG,
   CHASSIS_ANGULAR_DAMPING,
   COM_DROP_FRACTION,
   CONTACT_PATCH_M,
-  COUNTERSTEER_RELEASE_FULL_DEG,
-  COUNTERSTEER_RELEASE_START_DEG,
+  DAMPER_BLEED_GAIN,
+  DAMPER_BLEED_KNEE_MPS,
   DEFORMATION_DRAG_FULL_MPS,
   DEFORMATION_DRAG_START_MPS,
   DESTROYED_ENGINE_SPEED_CAP_MPS,
@@ -105,7 +108,6 @@ import {
   DIG_SURFACES,
   DRAG_CD,
   DRIVELINE_LAG_S,
-  ELLIPSE_LATERAL_FLOOR,
   FLUID_DENSITY_OIL,
   FOOT_BRAKE_GRIP_RATIO,
   FOOT_BRAKE_REAR_BIAS,
@@ -115,7 +117,10 @@ import {
   GRIP_REFERENCE_MASS,
   HANDLING_PROFILES,
   tyreCurve,
-  brushShape,
+  brushPeakTan,
+  combinedLateral,
+  combinedLongitudinal,
+  combinedLongitudinalSlope,
   TYRE_MODEL,
   type TyreCurve,
   type HandlingTuning,
@@ -123,12 +128,21 @@ import {
   INERTIA_PITCH_YAW_GAIN,
   INERTIA_ROLL_GAIN,
   LATERAL_STATIC_SPEED_MPS,
+  LOAD_BED_BEHIND_REAR_AXLE,
+  LOAD_BOOT_BEHIND_REAR_AXLE,
+  LOAD_CARGO_HALF_HEIGHT,
+  LOAD_ENGINE_ABOVE_FLOOR,
+  LOAD_FLOOR_FRACTION,
+  LOAD_SEAT_ABOVE_FLOOR,
+  LOAD_SEAT_BEHIND_FRONT_AXLE,
+  LOAD_TANK_AHEAD_OF_REAR_AXLE,
+  LOAD_TANK_BELOW_FLOOR,
   LOAD_SENSITIVITY,
   LOAD_SENSITIVITY_MAX,
   LOAD_SENSITIVITY_MIN,
-  LOCKED_SIDE_GRIP,
   LOCK_SLIP_RATIO,
   LONGITUDINAL_PEAK_U,
+  LONGITUDINAL_RELAXATION_FLOOR_MPS,
   LOW_RANGE_FULL_MPS,
   LOW_RANGE_GONE_MPS,
   LOW_RANGE_MU,
@@ -140,12 +154,9 @@ import {
   PARK_HOLD_MIN_LOAD_FRACTION,
   PARK_HOLD_SPEED_MPS,
   PNEUMATIC_TRAIL_M,
+  pneumaticTrailShape,
+  aligningMomentPeak,
   REAR_AXLE_SIDE_GRIP,
-  ROLL_ACCEL_MAX,
-  ROLL_ACCEL_TAU,
-  ROLL_COUPLE_GAIN,
-  ROLL_LIMIT_DEG,
-  ROLL_RATE_DAMPING,
   SCRATCH_IMPACT_THRESHOLD_MPS,
   SCRATCH_PER_IMPACT_CAP,
   SCRATCH_PER_SEVERITY_MPS,
@@ -154,26 +165,17 @@ import {
   SHOVE_RELEASE_SECONDS,
   SHOVE_SPEED_CAP,
   SLIDE_CONE_THRESHOLD,
-  SLIDE_CURVE_GAIN,
   SLIDE_MIN_MPS,
   SLIDE_ONSET_TAU,
   SLIDE_RECOVER_TAU,
-  SLIDING_GRIP_FRACTION,
   SLIP_ANGLE_REF_MPS,
-  SLIP_CURVE_SHARPNESS,
   SLIP_REFERENCE_MPS,
   STEERING_WHEEL_HALF_LOCK_RAD,
-  STEER_CASTER_RETURN_RAD_S,
-  STEER_FULL_LOCK_KMH,
-  STEER_PLAY_RAD,
-  STEER_RATE_CURVE,
-  STEER_REDUCED_KMH,
+  STEER_ASSIST_SLIP_MARGIN,
+  STEER_FREE_TAU_S,
   SUSPENSION_FORCE_HEADROOM,
-  TANH_SHARPNESS,
   TRANSFORM_EMIT_INTERVAL,
   TWO_PI,
-  TYRE_COMPOUND_DEFAULT,
-  TYRE_COMPOUNDS,
   TYRE_COOLING_AIRFLOW_GAIN,
   TYRE_COOLING_STILL_W_PER_K,
   TYRE_DAMPING_RATIO,
@@ -185,26 +187,30 @@ import {
   WHEEL_MASS_KG,
   WHEEL_REFERENCE_RADIUS,
   clamp,
-  cycleTyreCompoundState,
   FUEL_DENSITY,
   rotateVector,
-  setEnforcedTyreCompound,
   stockRadiatorWater,
-  type TyreCompoundState,
   tyreTemperatureGrip,
   tyreVerticalRate,
   unsprungMass,
 } from './vehicletuning';
 import { VehicleLamps, type BeamGroup, type HeadlightMode, type IndicatorSide } from './vehiclelamps';
-import { weather, weatherGrip, weatherSoftness } from '../world/weather';
+import { weather, weatherGrip, weatherSoftness, windAt } from '../world/weather';
 
 /**
- * Side-force coefficient of a saloon's flank in a crosswind. Wind-tunnel figures for
- * boxy cars sit around 0.8-1.0 per unit side area at small yaw.
+ * Crossflow drag coefficient of a body's flank, on its measured side box (length ×
+ * body height). A car broadside to the air is a bluff body: about 1.0 on the side
+ * profile, which fills some 85% of the box. It is the side force at large aerodynamic
+ * yaw (a crosswind at walking pace, a car sliding sideways); at small yaw the
+ * `AeroSpec.sideSlope` term dominates.
  */
-const SIDE_WIND_CY = 0.85;
-/** Most the wind may ever push, in g: about a quarter of what a dry tyre holds. */
-const WIND_FORCE_MAX_G = 0.18;
+const CROSSFLOW_CD = 0.85;
+/**
+ * Height of the aerodynamic centre (where the drag and the side force act) as a
+ * fraction of the body box above its floor: the frontal area's centroid sits a little
+ * below the box's middle, because the glasshouse is narrower than the body under it.
+ */
+const AERO_CENTRE_HEIGHT_FRACTION = 0.45;
 /** Read-only zero for Rapier setters; never written. */
 const ZERO_VECTOR: Readonly<{ x: number; y: number; z: number }> = { x: 0, y: 0, z: 0 };
 
@@ -214,10 +220,36 @@ interface WheelVisual {
   /** Sign of the wheel's chassis-local lateral position; left=-1, right=+1. */
   sideSign: number;
   radius: number;
-  /** Geometry this wheel was built with, metres (see `rebuild`). */
+  /**
+   * The suspension's GEOMETRY, metres (see `rebuild`).
+   *
+   * A spring does not grow longer because the boot is full: its free length is what it
+   * was cut to, and the travel is the gap between the top mount and the bump stop. Both
+   * are cut once from the KERB design and never re-derived from the load — what the
+   * load changes is only WHERE IN THAT TRAVEL the car settles. Re-deriving them per
+   * load is what used to cancel the sag and leave nothing but the softness.
+   */
   restLengthM: number;
   maxTravelM: number;
-  /** Static spring compression this corner settles at, metres. */
+  /** The sag the KERB load settles at, metres: the stance the geometry was cut for. */
+  designSagM: number;
+  /** Bump travel past that stance before the stop is fully crushed, metres. */
+  bumpTravelM: number;
+  /**
+   * What this corner's bump stop makes when fully crushed, newtons.
+   *
+   * A cut of the RUBBER, like the spring rate and the travel: `BUMP_STOP_PEAK` times
+   * the corner load the car was designed at. Multiplying the load it is carrying
+   * instead makes a heavy car's stop stronger than a light one's, which is what threw
+   * a loaded car at every bump it met.
+   */
+  bumpStopPeakN: number;
+  /**
+   * The static compression the load asks of the spring, metres: what this corner would
+   * settle at if the travel were long enough to allow it. Where it actually settles is
+   * `compressionM`, which is short of this whenever the bump stop is carrying part of
+   * the corner — which is what an overloaded corner does.
+   */
   sagM: number;
   /** What this corner carries when the car is parked and level, newtons. */
   staticLoadN: number;
@@ -246,11 +278,55 @@ interface WheelVisual {
   /** Progressive bump-stop force applied this step, newtons. */
   bumpStopN: number;
   /**
+   * The damper's low-speed bleed force this step (N), positive pushing the body up:
+   * what the damper makes beyond Rapier's linear part (see `DAMPER_BLEED_GAIN`).
+   */
+  bleedN: number;
+  /**
    * Anti-roll bar force on this corner (N), positive pushing the body up — the outer
    * wheel's share of the roll the bar resists. Applied to the body at the contact patch,
    * so the TYRE carries it too; see where it is added to `loadN`.
    */
   barN: number;
+  /** This axle's anti-roll bar, as a fraction of its wheel rate (see `SuspensionTuning`). */
+  barFraction: number;
+  /**
+   * This axle's ROLL CENTRE, as the chassis-local height the side force is handed to
+   * the body at, and as its height above the road (see `SuspensionTuning`). The first is
+   * the contact plane plus the second, fixed to the body, so the roll axis rolls with it.
+   */
+  rollCentreLocalY: number;
+  rollCentreM: number;
+  /** This axle's track, metres: the lever the link-borne transfer is spread across. */
+  axleTrackM: number;
+  /**
+   * The wheel's alignment, resolved to this corner from its axle's `SuspensionTuning`
+   * and expressed along the chassis' +X, so no left/right convention can flip it. A
+   * positive steer angle heads the wheel toward +X, and a positive axle roll is the body
+   * leaning toward +X (that side's springs compressed):
+   *
+   *   toeRad       static steer: the toe-in, in this side's sign
+   *   leanRad      static camber, as the top of the tyre leaning toward +X
+   *   rollCamber   share of the axle's roll the wheel leans with (0 for a beam)
+   *   rollSteer    steer per unit of axle roll, signed so a positive preset
+   *                coefficient understeers on either axle
+   */
+  toeRad: number;
+  leanRad: number;
+  rollCamber: number;
+  rollSteer: number;
+  /**
+   * Side force this tyre put through the links last step, newtons, resolved onto the
+   * body's own +X: the input to the axle's GEOMETRIC load transfer.
+   */
+  sideForceBodyXN: number;
+  /**
+   * The GEOMETRIC load transfer on this corner (N), positive loading the tyre: the share
+   * of the axle's cornering moment the links carry straight to the road without rolling
+   * the body, `side force · roll-centre height / track`. It loads the tyre and not the
+   * body, so it is added to `loadN` and never applied as an impulse.
+   */
+  linkN: number;
   /** This tyre's vertical carcass rate, N/m. Nothing to do with the springs. */
   tyreRateN: number;
   /**
@@ -304,6 +380,12 @@ interface WheelVisual {
   drawnSpin: number;
   /** Longitudinal slip ratio, (ωr - v)/max(|v|, ref). Negative under lock-up. */
   slipRatio: number;
+  /**
+   * The slip ratio the CARCASS has built, lagged behind `slipRatio` by the tyre's
+   * longitudinal relaxation length (LONGITUDINAL_RELAXATION_RATIO). The drive and brake
+   * force, and the longitudinal half of combined slip, are read at this.
+   */
+  carcassSlip: number;
   /** Low-passed normal load (N) reported by the suspension. */
   loadN: number;
   /** Spring compression from rest this step, metres; negative in droop. */
@@ -314,21 +396,46 @@ interface WheelVisual {
    */
   slipAngleRad: number;
   /**
-   * Share of this tyre's longitudinal capacity the last step spent, 0..1. Feeds the
-   * friction ellipse that decides what is left for cornering.
-   */
-  /**
-   * Lateral force capacity (N) and the fraction of it this tyre's built slip angle
-   * asks for, plus the wheel-plane right vector and the contact's sideways speed.
-   * Resolved in the setup pass and consumed by the tyre pass, so neither recomputes
-   * the other's geometry.
+   * Lateral force capacity (N), the wheel-plane right vector and the contact's sideways
+   * speed, plus the side-force curve as this tyre stands this step: its normalised side
+   * slip σy (`sideSlip`, tan of the built angle over the peak's tangent) and the curve
+   * arguments `combinedLateral` reads it with. Resolved in the setup pass and consumed
+   * by the tyre pass, so neither recomputes the other's geometry.
    */
   lateralCapacityN: number;
-  lateralShape: number;
+  sideSlip: number;
+  sidePeakTan: number;
+  sideFadePeakDeg: number;
+  sideFullDeg: number;
+  sidePlateau: number;
+  sideBrush: boolean;
   lateralRightX: number;
   lateralRightY: number;
   lateralRightZ: number;
   lateralSpeed: number;
+  /**
+   * The camber thrust's horizontal shift this step, as extra steer in the wheel's own
+   * sign (`camberStiffness · lean`): what the steering assist adds to the geometry to
+   * know which rack angle puts the tyre at its peak.
+   */
+  camberSteerRad: number;
+  /**
+   * The tyre's moment about its steering axis last step, N·m, in the rack's sign
+   * (positive turns the wheel toward +X): side force times pneumatic plus mechanical
+   * trail. Front wheels only; the steering sums it (`STEER_FREE_TAU_S`).
+   */
+  kingpinMomentNm: number;
+  /** Mechanical trail of a front wheel's caster, metres; 0 at the rear. */
+  casterTrailM: number;
+  /**
+   * Where this tyre's aligning moment peaks (`aligningMomentPeak`): the normalised
+   * slip, and the moment there as a share of capacity · PNEUMATIC_TRAIL_M. The
+   * steering-lightness cue measures the moment against it.
+   */
+  alignPeakZ: number;
+  alignPeakShape: number;
+  /** The patch's combined normalised slip σ last step: the trail collapses with it. */
+  alignSlip: number;
   /** Drive torque (N·m) commanded to this wheel this step. */
   driveTorqueNm: number;
   /** Brake force (N) commanded to this wheel this step. */
@@ -522,6 +629,36 @@ export interface WheelRideState {
   tyreGrip: number;
 }
 
+/**
+ * One mass that is not the kerb body, and where it sits. Chassis-local metres: x
+ * right, y up, z forward, origin at the measured body box centre.
+ *
+ * `massKg` is signed. Every load is a DELTA from the state `model.mass` describes —
+ * a complete car with its reservoirs full — so a half-empty tank is a negative mass
+ * at the tank, and one that still carries a full tank is no load at all.
+ */
+export interface LoadPoint {
+  /** What it is, for a bench or a readout: "fuel", "boot cargo", "engine bay". */
+  readonly label: string;
+  readonly massKg: number;
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+}
+
+/** Where each load anchor sits, all four cut once from the measured geometry. */
+interface LoadAnchors {
+  readonly tank: { readonly y: number; readonly z: number };
+  readonly engine: { readonly y: number; readonly z: number };
+  readonly hold: { readonly y: number; readonly z: number };
+  readonly seat: { readonly y: number; readonly z: number };
+}
+
+/** `CarStats` plus the load sheet: the masses outside the kerb body and where they are. */
+interface VehicleStats extends CarStats {
+  readonly loads: readonly LoadPoint[];
+}
+
 export class Vehicle implements Rebasable {
   private readonly physics: PhysicsWorld;
   private readonly world: GameWorld;
@@ -534,6 +671,8 @@ export class Vehicle implements Rebasable {
   private readonly measure: CarModelMeasure;
   /** Axle positions, wheel counts and weight distribution; measured once, in `measureAxles`. */
   private readonly axleGeometry: AxleGeometry;
+  /** Where fuel, cargo, the engine bay and the seat are; measured once, in `measureLoadAnchors`. */
+  private readonly loadAnchors: LoadAnchors;
   private readonly scene: THREE.Scene;
   private readonly origin: WorldOrigin;
   /** Removes this runtime from floating-origin notifications when it despawns. */
@@ -546,7 +685,14 @@ export class Vehicle implements Rebasable {
   private controller: RAPIER.DynamicRayCastVehicleController | null = null;
   private readonly drivetrain: Drivetrain;
 
-  private statsValue: CarStats;
+  private statsValue: VehicleStats;
+  /**
+   * Share of the parked weight on the FRONT axle at the car's real centre of mass,
+   * 0..1, as `applyChassisMass` last resolved it. Not the catalogue's kerb figure:
+   * that one is the design point the springs are cut against, and this one is what
+   * the car is actually carrying right now — a crate in the boot moves it.
+   */
+  private parkedFrontShare = 0;
   /**
    * Mass the driver is carrying, kg, pushed in by the composition root.
    *
@@ -590,16 +736,6 @@ export class Vehicle implements Rebasable {
   private steeringWheelRest = 0;
   /** This car's lamps: beam mode, indicator, lens materials and the beams they cast. */
   private readonly lamps: VehicleLamps;
-  /**
-   * One selected compound for every wheel, plus any force a contract has put on it.
-   * Standard preserves existing handling; the state object lets a kind's forced
-   * compound and the driver's own choice be told apart (see `vehicletuning.ts`).
-   */
-  private readonly tyres: TyreCompoundState = {
-    index: TYRE_COMPOUND_DEFAULT,
-    enforced: null,
-    chosen: TYRE_COMPOUND_DEFAULT,
-  };
   /** Measured full-pedal braking authority, m/s²; see `measuredBrakeDecel`. */
   private measuredBrakeDecelValue = 0;
 
@@ -608,12 +744,25 @@ export class Vehicle implements Rebasable {
    */
 
   private readonly dragCoeff: number;
-  /**
-   * Crosswind coefficient, ½·ρ·Cy·(side area − frontal box), N per (m/s)². The
-   * frontal part of a crosswind is already in `dragCoeff` once drag is taken against
-   * the air rather than the ground; this is what the long flank adds on top.
-   */
-  private readonly sideWindCoeff: number;
+  /** ½·ρ·A·CLf and ½·ρ·A·CLr, N per (m/s)²: each axle's lift, wind-tunnel split (`AeroSpec`). */
+  private readonly liftFrontCoeff: number;
+  private readonly liftRearCoeff: number;
+  /** ½·ρ·A·dCY/dβ, N per (m/s)² per radian: the side force's small-yaw slope. */
+  private readonly sideSlopeCoeff: number;
+  /** ½·ρ·CROSSFLOW_CD·side box, N per (m/s)²: the flank's drag at large yaw. */
+  private readonly crossflowCoeff: number;
+  /** How far ahead of the wheelbase's midpoint the small-yaw side force acts, metres. */
+  private readonly sideCentreAheadM: number;
+  /** Body-local height of the aerodynamic centre, metres (AERO_CENTRE_HEIGHT_FRACTION). */
+  private readonly aeroCentreY: number;
+  /** The wind at the car, m/s, from `windAt`. */
+  private readonly windScratch = { x: 0, z: 0 };
+  /** Body axes and an application point for `applyAero`; never allocated per tick. */
+  private readonly aeroForward = { x: 0, y: 0, z: 0 };
+  private readonly aeroRight = { x: 0, y: 0, z: 0 };
+  private readonly aeroUp = { x: 0, y: 0, z: 0 };
+  private readonly aeroPoint = { x: 0, y: 0, z: 0 };
+  private readonly aeroOrigin = { x: 0, y: 0, z: 0 };
 
   // Axle bookkeeping for torque splitting and the drivetrain input.
   private frontWheelCount = 0;
@@ -622,14 +771,33 @@ export class Vehicle implements Rebasable {
   private rearDrivenCount = 0;
   private drivenRadius = 0.35;
 
-  // Steering state. `steerCommand` is what the box has been turned to (rate
-  // limited); `steerAngle` is what the tyres are actually at, which lags it by the
-  // backlash in STEER_PLAY_RAD.
+  // Steering state. `steerCommand` is where the driver's hands have put the rack (rate
+  // limited to the rack speed); `steerAngle` is what the tyres are actually at, inside
+  // the backlash window around it, or anywhere at all when no hand is on the wheel.
   private steerCommand = 0;
   private steerAngle = 0;
   /** Load-sensitive front bump-steer disturbance, filtered in fixedUpdate. */
   private bumpSteerAngle = 0;
+  /** The front axle's sustained load difference, which is roll and not a bump. */
+  private sustainedImbalance = 0;
+  /**
+   * Each axle's roll against the road, radians, positive with the body leaning toward
+   * +X: the travel difference across the axle over its track (`updateAxleRoll`).
+   */
+  private frontRollRad = 0;
+  private rearRollRad = 0;
+  /** The suspension's share of true Ackermann, and the wheelbase it is drawn on. */
+  private ackermann = 0;
+  private wheelbaseM = 1;
+  /** This car's tyre camber stiffness over its cornering stiffness, per radian. */
+  private camberStiffness = CAMBER_STIFFNESS_RADIAL;
   private appliedDriveTorqueNm = 0;
+  /**
+   * Direction the driven wheels are PUSHING the car this step: the gear's direction
+   * while the engine drives through it, 0 while it coasts or engine-brakes. The dig
+   * and the low range answer to propulsion only.
+   */
+  private propulsionDirection = 0;
   /**
    * Parking hold is armed by the fixed update and applied after Rapier has stepped.
    * Freezing after the step removes the tiny gravity displacement that a ray-cast
@@ -749,7 +917,6 @@ export class Vehicle implements Rebasable {
   private impactThisStep = false;
   private readonly impactState = { severityMps: 0, localX: 0, localY: 0, localZ: 0 };
   private readonly rotationScratch = { x: 0, y: 0, z: 0, w: 1 };
-  private readonly windRightScratch = { x: 0, y: 0, z: 0 };
   /** Reused application point for the lateral impulse; see the note where it is used. */
   private readonly lateralPoint = { x: 0, y: 0, z: 0 };
   private readonly forwardScratch = { x: 0, y: 0, z: 0 };
@@ -777,21 +944,23 @@ export class Vehicle implements Rebasable {
   private readonly roadTexture: RoadTexture;
   private readonly invRotationScratch = { x: 0, y: 0, z: 0, w: 1 };
   private readonly localVelScratch = { x: 0, y: 0, z: 0 };
-  private readonly localAngScratch = { x: 0, y: 0, z: 0 };
-  private readonly leanScratch = { x: 0, y: 0, z: 0 };
+  private readonly bodyRightScratch = { x: 0, y: 0, z: 0 };
+  private readonly bodyUpScratch = { x: 0, y: 0, z: 0 };
   private readonly wheelRightScratch = { x: 0, y: 0, z: 0 };
+  /** Body forward axis in world space, for the steering assist's front-axle velocity. */
+  private readonly bodyForwardScratch = { x: 0, y: 0, z: 0 };
   /**
-   * Rear-axle slip angle (radians, unsigned) measured on the previous step. Read one
-   * tick later by the steering limiter, which runs before the wheels are looked at:
-   * at 60 Hz that is 17 ms of lag on a signal that takes tenths of a second to
-   * build, and it is what keeps this a single-pass update instead of two.
+   * How much of its linear aligning moment the front axle has lost, 0..1: see
+   * `steeringLightness`. Written by the steering step from the last tyre pass.
    */
-  private rearSlipRad = 0;
-  // Roll-couple state: low-passed lateral acceleration and its lever arm.
-  private prevLatVel = 0;
-  private rollAccel = 0;
-  private rollPrimed = false;
+  private steerLightnessValue = 0;
+  /**
+   * Height of the centre of mass above the contact plane, metres: the arm the
+   * longitudinal tyre forces pitch the body on (see `applyAntiPitch`).
+   */
   private rollLeverArm = 0.5;
+  /** The chassis' roll inertia about its centre of mass, kg·m² (`applyChassisMass`). */
+  private rollInertiaKgM2 = 1;
   /**
    * Total longitudinal tyre force applied to the chassis this step, newtons. Signed:
    * positive drives, negative brakes. Summed in `updateWheelDynamics` and consumed by
@@ -878,6 +1047,7 @@ export class Vehicle implements Rebasable {
     this.tyre = tyreCurve(this.model.tyre, this.handling);
     this.measure = carModelMeasure(carState.modelId);
     this.axleGeometry = this.measureAxles();
+    this.loadAnchors = this.measureLoadAnchors();
     this.lamps = new VehicleLamps({
       rootGroup: this.rootGroup,
       model: this.model,
@@ -897,8 +1067,16 @@ export class Vehicle implements Rebasable {
     // fallback was calibrated on; everything boxier than that came out too slippery.
     const dragArea = this.model.dragArea ?? DRAG_CD * (4 * half[0] * half[1]);
     this.dragCoeff = 0.5 * AIR_DENSITY * dragArea;
-    this.sideWindCoeff =
-      0.5 * AIR_DENSITY * SIDE_WIND_CY * Math.max(0, 4 * half[1] * half[2] - 4 * half[0] * half[1]);
+    // The rest of the body's aerodynamics (see `AeroSpec` and `applyAero`).
+    const aero = this.model.aero;
+    const q = 0.5 * AIR_DENSITY;
+    this.liftFrontCoeff = q * aero.frontalArea * aero.liftFront;
+    this.liftRearCoeff = q * aero.frontalArea * aero.liftRear;
+    this.sideSlopeCoeff = q * aero.frontalArea * aero.sideSlope;
+    this.crossflowCoeff = q * CROSSFLOW_CD * (4 * half[1] * half[2]);
+    const wheelbase = Math.max(0.5, this.axleGeometry.frontZ - this.axleGeometry.rearZ);
+    this.sideCentreAheadM = (aero.yawSlope / aero.sideSlope) * wheelbase;
+    this.aeroCentreY = -half[1] + AERO_CENTRE_HEIGHT_FRACTION * 2 * half[1];
 
     // `carState.x/z` are absolute (from the save); Rapier holds relative positions.
     const desc = RAPIER.RigidBodyDesc.dynamic()
@@ -1042,27 +1220,6 @@ export class Vehicle implements Rebasable {
     return this.drivetrain.gearLabel;
   }
 
-  get tyreCompoundLabel(): string {
-    return TYRE_COMPOUNDS[this.tyres.index].label;
-  }
-
-  /**
-   * True while a contract has forced the compound (bald tyres, kind 11): the driver
-   * cannot cycle it away, and the caller shows why.
-   */
-  get tyreCompoundLocked(): boolean {
-    return this.tyres.enforced !== null;
-  }
-
-  /**
-   * Applies the compound a contract demands, or clears it (null). Idempotent, because
-   * a respawned Vehicle is built without the force and the contract re-applies it on
-   * every tick.
-   */
-  setEnforcedTyreCompound(index: number | null): void {
-    setEnforcedTyreCompound(this.tyres, index);
-  }
-
   get speedKmh(): number {
     return Math.abs(this.forwardSpeedMps()) * 3.6;
   }
@@ -1083,14 +1240,26 @@ export class Vehicle implements Rebasable {
    *
    * Normalised by this model's own lock, so a car with a slow rack and a car with a
    * quick one both fill the indicator at full lock. Divided rather than clamped at the
-   * source: `targetSteer` is already bounded by `steerLock`, so the quotient lands in
-   * -1..1 on its own, and the clamp in `Hud.updateSteerStrip` is the only one needed.
+   * source: the rack is already bounded by `steerLock`, so the quotient lands in -1..1
+   * on its own, and the clamp in `Hud.updateSteerStrip` is the only one needed.
    *
-   * A front-driven car's power steer and this car's caster return both move it, which
-   * is the point — the driver is looking at a rubber band being stretched.
+   * With no hand on the wheel the rim turns with the tyres, so a released key shows the
+   * wheel unwinding under its own aligning moment — the point being that the driver is
+   * looking at the steering, not at the key.
    */
   get steeringFraction(): number {
     return this.model.steerLock > 0 ? this.steerCommand / this.model.steerLock : 0;
+  }
+
+  /**
+   * The steering going LIGHT, 0..1: the share of its linear aligning moment the front
+   * axle has lost while it is working, read off the last tyre pass. Near 0 in ordinary
+   * cornering; it climbs as the front tyres pass their peak and the pneumatic trail
+   * collapses, which is the cue a real wheel gives in the hands before the nose washes
+   * wide. The pad's rumble carries it (main.ts); nothing in the physics reads it.
+   */
+  get steeringLightness(): number {
+    return this.steerLightnessValue;
   }
   /**
    * Stable peak lateral acceleration available to an autonomous speed planner.
@@ -1104,14 +1273,12 @@ export class Vehicle implements Rebasable {
    * own car cannot take — which is exactly the state a long, hard drive puts it in.
    */
   estimatedLateralAccel(surfaceType: SurfaceType, _speedMps: number): number {
-    const compound = TYRE_COMPOUNDS[this.tyres.index];
     return (
       GRAVITY *
       SURFACES[surfaceType].mu *
       weatherGrip(surfaceType) *
       this.handling.tyreLateralScale *
       this.tyreCarGrip(this.statsValue.mass) *
-      compound.side *
       this.worstTyreTemperatureGrip() *
       this.handling.rearAxleSideGrip
     );
@@ -1131,22 +1298,20 @@ export class Vehicle implements Rebasable {
    * brakes, or the tyres where the tyres give out first.
    */
   estimatedBrakeDecel(surfaceType: SurfaceType): number {
-    const compound = TYRE_COMPOUNDS[this.tyres.index];
     return Math.min(
       this.model.brakeDecelG * GRAVITY,
       FOOT_BRAKE_GRIP_RATIO *
         SURFACES[surfaceType].mu *
         weatherGrip(surfaceType) *
         this.tyreCarGrip(this.statsValue.mass) *
-        compound.grip *
         this.worstTyreTemperatureGrip() *
         GRAVITY,
     );
   }
 
   /**
-   * What this car's tyres bring to every contact patch before the ground, the compound
-   * and the temperature do, in every direction alike: the catalogue `wheelGrip`, scaled
+   * What this car's tyres bring to every contact patch before the ground and the
+   * temperature do, in every direction alike: the catalogue `wheelGrip`, scaled
    * down for mass because road tyres are sized to the chassis rather than with it, so a
    * laden truck grips worse per kilogram than a hatchback.
    */
@@ -1166,36 +1331,21 @@ export class Vehicle implements Rebasable {
   }
 
   /**
-   * Inverts this vehicle's exact steering profile for the ordinary shaped input path.
-   * Autonomy uses it instead of maintaining a stale copy of each handling family.
+   * The `steer` that holds the road wheels at `wheelAngle` (the rack's bicycle-model
+   * angle, positive yawing the car left) in `SteerMode` 'direct': a share of this car's
+   * lock, with the backlash allowed for. Autonomy and the tow bar use it instead of
+   * keeping their own copy of the car's steering.
+   *
+   * The play is added because the tyres sit on the window's trailing edge while they
+   * carry a side force — their aligning moment pushes them back toward the way the car
+   * is going (`STEER_FREE_TAU_S`) — so a rack at `angle + play` holds them at `angle`.
+   * An angle inside a tenth of the play is no steering at all.
    */
-  steeringInputForWheelAngle(wheelAngle: number, speedMps: number): number {
+  steeringInputForWheelAngle(wheelAngle: number): number {
     const magnitude = Math.abs(wheelAngle);
-    const speedT = clamp(
-      (Math.abs(speedMps) * 3.6 - STEER_FULL_LOCK_KMH) /
-        (STEER_REDUCED_KMH - STEER_FULL_LOCK_KMH),
-      0,
-      1,
-    );
-    const slideRelease = clamp(
-      ((this.rearSlipRad * 180) / Math.PI - COUNTERSTEER_RELEASE_START_DEG) /
-        (COUNTERSTEER_RELEASE_FULL_DEG - COUNTERSTEER_RELEASE_START_DEG),
-      0,
-      1,
-    );
-    const speedFactor =
-      1 -
-      (1 - this.handling.steerHighSpeedFraction) *
-        Math.pow(speedT, this.handling.steerLockCurve);
-    const effectiveLock = Math.max(
-      this.model.steerLock * (speedFactor + (1 - speedFactor) * slideRelease),
-      0.1,
-    );
-    const play = this.handling.steerPlay * (1 - slideRelease);
+    const play = this.handling.steerPlay;
     if (magnitude <= play * 0.12) return 0;
-    const targetAngle = Math.min(magnitude + play, effectiveLock);
-    const normalized = Math.pow(targetAngle / effectiveLock, 1 / this.handling.steerInputExponent);
-    return clamp(-Math.sign(wheelAngle) * normalized, -1, 1);
+    return clamp((-Math.sign(wheelAngle) * (magnitude + play)) / this.model.steerLock, -1, 1);
   }
 
 
@@ -1278,14 +1428,6 @@ export class Vehicle implements Rebasable {
     this.lamps.setEnvironmentFactor(factor);
   }
 
-  /**
-   * Bald -> standard -> experimental -> experimental2 -> bald, applied to every wheel
-   * on the next step. Not persisted: a reload or a change of car is back on standard.
-   */
-  cycleTyreCompound(): boolean {
-    return cycleTyreCompoundState(this.tyres);
-  }
-
   /** Rebuilds stats, drivetrain, controller and meshes from the model and its parts. */
   rebuild(): void {
     if (this.controller) {
@@ -1297,6 +1439,9 @@ export class Vehicle implements Rebasable {
     this.steerCommand = 0;
     this.steerAngle = 0;
     this.bumpSteerAngle = 0;
+    this.sustainedImbalance = 0;
+    this.frontRollRad = 0;
+    this.rearRollRad = 0;
     this.frontWheelCount = 0;
     this.rearWheelCount = 0;
     this.frontDrivenCount = 0;
@@ -1336,7 +1481,7 @@ export class Vehicle implements Rebasable {
 
     // Fitted parts change the drivetrain AND the mass; the drivetrain is rebound just
     // above, and the load these figures represent goes onto the springs here.
-    this.applyChassisMass(stats.mass);
+    this.applyChassisMass(stats);
 
     const rapier = this.physics.rapier;
     this.controller = new rapier.DynamicRayCastVehicleController(
@@ -1360,31 +1505,72 @@ export class Vehicle implements Rebasable {
     const halfHeight = this.measure.halfExtents[1];
     const contactY = -halfHeight - this.model.factory.clearance;
 
-    // Roll lever: how far the centre of mass sits above the tyre contact plane. This
-    // is the arm the missing roll couple acts on (see applyRollCouple).
-    const comY = -COM_DROP_FRACTION * halfHeight;
-    this.rollLeverArm = Math.max(0.1, comY - contactY);
+    // The roll lever — how far the centre of mass sits above the contact plane — is
+    // resolved in `applyChassisMass` above, from the car's real centre of mass rather
+    // than the kerb one, so a load that raises it lengthens the arm too.
     this.contactPlaneY = contactY;
     this.buildVisuals();
 
     const weightN = stats.mass * GRAVITY;
+    // Each axle's roll geometry: the preset's, or the model's own where its linkage is
+    // not the preset family's (see `CarModelDef.rollCentre` and `antiRoll`).
+    const rollCentre = this.model.rollCentre ?? {
+      front: suspension.frontRollCentreM,
+      rear: suspension.rearRollCentreM,
+    };
+    const bars = this.model.antiRoll ?? { front: suspension.frontBar, rear: suspension.rearBar };
+    const trackOf = (front: boolean): number => {
+      let min = Infinity;
+      let max = -Infinity;
+      for (const w of this.measure.wheels) {
+        if (w.isFront !== front) continue;
+        min = Math.min(min, w.pos[0]);
+        max = Math.max(max, w.pos[0]);
+      }
+      return max > min ? max - min : 0;
+    };
+    const frontTrack = trackOf(true);
+    const rearTrack = trackOf(false);
+    // Steering and wheel geometry (see `SuspensionTuning.ackermann` on). The camber
+    // stiffness is the carcass': a cross-ply leans into a bend harder than a radial.
+    this.ackermann = clamp(suspension.ackermann, 0, 1);
+    this.wheelbaseM = Math.max(0.5, axles.frontZ - axles.rearZ);
+    this.camberStiffness =
+      this.model.tyre?.construction === 'crossply' ? CAMBER_STIFFNESS_CROSSPLY : CAMBER_STIFFNESS_RADIAL;
+    const degToRad = Math.PI / 180;
     for (const wheel of this.measure.wheels) {
       const index = this.controller.numWheels();
 
-      // This corner's share of the parked car's weight, from the weight distribution
-      // and the model's own axle geometry. Everything below is derived from it: the
-      // spring that gives this axle its frequency AT THIS LOAD, the damper that gives
-      // it its ratio, and the load the tyre model calls "normal".
-      const axleShare = wheel.isFront ? axles.frontWeightShare : 1 - axles.frontWeightShare;
+      // This corner's share of the parked car's weight. TWO shares, because there are
+      // two different questions behind it:
+      //
+      //   - the DESIGN share is the catalogue's kerb distribution, and it sizes the
+      //     spring, the damper and the bump stop. A spring is a cut of the car, so it
+      //     is cut against the car as it left the factory and never re-cut.
+      //   - the LIVE share is where the mass actually is now, from the real centre of
+      //     mass `applyChassisMass` resolved. It is the load the tyre model calls
+      //     "normal" and the figure the sag follows, so a crate in the boot shows up
+      //     as less on the nose and more on the tail.
+      //
+      // A stock car has them equal, and then everything below is exactly what it was.
+      const designShare = wheel.isFront ? axles.frontWeightShare : 1 - axles.frontWeightShare;
+      const liveShare = wheel.isFront ? this.parkedFrontShare : 1 - this.parkedFrontShare;
       const axleCount = wheel.isFront ? axles.frontCount : axles.rearCount;
-      const cornerShare = axleShare / Math.max(1, axleCount);
+      const cornerShare = liveShare / Math.max(1, axleCount);
       const staticLoadN = Math.max(1, weightN * cornerShare);
       const hz = wheel.isFront ? suspension.frontHz : suspension.rearHz;
-      // Sized at the KERB load so a stock car reproduces its preset exactly; the load
-      // it is actually carrying then decides the sag and the frequency (`reloadSprings`).
-      const designCornerMass = this.model.mass * cornerShare;
-      const sag = staticLoadN / wheelSpringRateAbs(hz, designCornerMass);
-      // Travel is sized around that sag so a soft spring gets the room it needs
+      // THE FREE LENGTH AND THE TRAVEL ARE THE CAR'S, NOT THE LOAD'S. A spring does
+      // not grow longer because the boot is full, so both are cut here from the KERB
+      // design and left alone for the life of the car — `reloadSprings` only re-scales
+      // the rates per kilogram. What the load decides is where in that travel the car
+      // settles: a heavier corner compresses the same spring further and sits lower,
+      // which is the whole point of an absolute rate. Sizing them from the load
+      // instead (as this did) makes the free length follow the load, which cancels the
+      // sag exactly and leaves only a car that is softer than it was.
+      const designCornerMass = this.model.mass * (designShare / Math.max(1, axleCount));
+      const designLoadN = Math.max(1, designCornerMass * GRAVITY);
+      const sag = designLoadN / wheelSpringRateAbs(hz, designCornerMass);
+      // Travel is sized around that stance so a soft spring gets the room it needs
       // instead of riding on Rapier's clamp (see the travel note in carmodels.ts). The
       // bump stop below catches the last of it progressively.
       const maxTravel = sag + suspension.bumpTravel;
@@ -1429,13 +1615,31 @@ export class Vehicle implements Rebasable {
       mesh.rotation.order = 'YXZ';
       this.rootGroup.add(mesh);
 
+      // Alignment along +X (see `toeRad`): toe-in heads each wheel toward the
+      // centreline, so the +X wheel steers toward -X; positive camber leans each tyre
+      // out over its own side. Roll steer is signed per axle so that, with the body
+      // leaning toward the outside of the bend, the front wheels steer out of it and
+      // the rear axle into it — understeer at both ends for a positive coefficient.
+      const side = Math.sign(wheel.pos[0]) || 1;
+      const toeDeg = wheel.isFront ? suspension.frontToeDeg : suspension.rearToeDeg;
+      const camberDeg = wheel.isFront ? suspension.frontCamberDeg : suspension.rearCamberDeg;
+      // The caster's mechanical trail: the patch sits this far behind where the steering
+      // axis meets the road (`SuspensionTuning.frontCasterDeg`), and with it the slip at
+      // which this tyre's aligning moment peaks (`aligningMomentPeak`).
+      const casterTrailM = wheel.isFront
+        ? wheel.radius * Math.tan((suspension.frontCasterDeg * Math.PI) / 180)
+        : 0;
+      const alignPeak = aligningMomentPeak(casterTrailM / PNEUMATIC_TRAIL_M);
       this.wheels.push({
         index,
         isFront: wheel.isFront,
-        sideSign: Math.sign(wheel.pos[0]) || 1,
+        sideSign: side,
         radius: wheel.radius,
         restLengthM: restLength,
         maxTravelM: maxTravel,
+        designSagM: sag,
+        bumpTravelM: suspension.bumpTravel,
+        bumpStopPeakN: BUMP_STOP_PEAK * designLoadN,
         sagM: sag,
         staticLoadN,
         springRateNPerM,
@@ -1445,7 +1649,18 @@ export class Vehicle implements Rebasable {
         tyreTempC: ambientAirC(this.world.state.timeOfDay, DAY_LENGTH),
         tyreGrip: 1,
         bumpStopN: 0,
+        bleedN: 0,
         barN: 0,
+        barFraction: wheel.isFront ? bars.front : bars.rear,
+        rollCentreLocalY: contactY + (wheel.isFront ? rollCentre.front : rollCentre.rear),
+        rollCentreM: wheel.isFront ? rollCentre.front : rollCentre.rear,
+        axleTrackM: wheel.isFront ? frontTrack : rearTrack,
+        toeRad: -side * toeDeg * degToRad,
+        leanRad: side * camberDeg * degToRad,
+        rollCamber: wheel.isFront ? suspension.frontRollCamber : suspension.rearRollCamber,
+        rollSteer: wheel.isFront ? suspension.frontRollSteer : -suspension.rearRollSteer,
+        sideForceBodyXN: 0,
+        linkN: 0,
         tyreRateN: tyreVerticalRate(wheel.radius),
         profileHeight: 0,
         profileRate: 0,
@@ -1465,14 +1680,26 @@ export class Vehicle implements Rebasable {
         spinRadS: 0,
         drawnSpin: 0,
         slipRatio: 0,
+        carcassSlip: 0,
         loadN: 0,
         compressionM: 0,
         lateralCapacityN: 0,
-        lateralShape: 0,
+        sideSlip: 0,
+        sidePeakTan: 1,
+        sideFadePeakDeg: 1,
+        sideFullDeg: 2,
+        sidePlateau: 1,
+        sideBrush: false,
         lateralRightX: 1,
         lateralRightY: 0,
         lateralRightZ: 0,
         lateralSpeed: 0,
+        camberSteerRad: 0,
+        kingpinMomentNm: 0,
+        casterTrailM,
+        alignPeakZ: alignPeak.z,
+        alignPeakShape: alignPeak.shape,
+        alignSlip: 0,
         driveTorqueNm: 0,
         brakeForceN: 0,
         cableLocked: false,
@@ -1590,6 +1817,7 @@ export class Vehicle implements Rebasable {
     for (const w of this.wheels) {
       w.spinRadS = speedMps / w.radius;
       w.slipRatio = 0;
+      w.carcassSlip = 0;
       w.locked = false;
       radius += w.radius;
     }
@@ -1750,14 +1978,13 @@ export class Vehicle implements Rebasable {
     // A parked car keeps the road-wheel angle it had when the driver stepped out.
     // Do not feed zero here: that would visually straighten the car on the first
     // parked tick and lose the driver's last steering position.
-    const parkedSteer = this.steerAngle;
     // Parking brake: same impulse units as the foot brake (see the braking note
     // above), spread over every wheel. Sized to hold, not to stop.
     const decel = shoved ? PARK_BRAKE_DECEL * SHOVE_BRAKE_FRACTION : PARK_BRAKE_DECEL;
     const impulse = (decel * this.statsValue.mass * dt) / n;
     for (const w of this.wheels) {
       controller.setWheelEngineForce(w.index, 0);
-      controller.setWheelSteering(w.index, w.isFront ? parkedSteer : 0);
+      controller.setWheelSteering(w.index, this.wheelSteerAngle(w));
       controller.setWheelBrake(w.index, impulse);
     }
     // Keep the controller's wheel pose aligned with the retained angle so the render
@@ -2262,93 +2489,29 @@ export class Vehicle implements Rebasable {
       }
     }
 
-    // Steering: precise control preserves its linear wheel axis; standard control
-    // uses the selected car's input curve. Both retain speed-scaled lock, the physical
-    // rack rate, steering-box play and caster return below.
-    //
-    // The negation converts our basis into Rapier's steering sign. Forward is +Z and
-    // the axle is set to (-1, 0, 0), and with that pairing a POSITIVE steering angle
-    // yaws the car left, while `input.steer` is positive for "the player pressed
-    // right". Measured: without this negation, holding right rotated the car +1.74
-    // rad (left) over two seconds.
+    // Steering: the driver's rack target, the rack speed, the backlash and the tyres'
+    // own aligning moment (`updateSteering`). Bump steer and axle roll first, because
+    // the assist reads the wheels' geometry off them.
     const speedKmh = Math.abs(fwd) * 3.6;
     this.updateBumpSteer(dt, speedKmh);
-    const steerT = clamp(
-      (speedKmh - STEER_FULL_LOCK_KMH) / (STEER_REDUCED_KMH - STEER_FULL_LOCK_KMH),
-      0,
-      1,
-    );
-    const steerInput = input.preciseSteering
-      ? input.steer
-      : Math.sign(input.steer) * Math.pow(Math.abs(input.steer), this.handling.steerInputExponent);
-    // How far out is the tail? (See the countersteer note above.) Both the lock
-    // ceiling and the rate limit are faded back toward their parking-speed values by
-    // this, so a driver catching a slide has the lock and the hand-speed the car
-    // physically has, and loses them again as the slide is gathered up.
-    const slideRelease = clamp(
-      ((this.rearSlipRad * 180) / Math.PI - COUNTERSTEER_RELEASE_START_DEG) /
-        (COUNTERSTEER_RELEASE_FULL_DEG - COUNTERSTEER_RELEASE_START_DEG),
-      0,
-      1,
-    );
-    // fraction = 1 - (1-floor) * t^k: full lock up to STEER_FULL_LOCK_KMH, then a
-    // fast collapse right above it and a gentle slide to the floor.
-    const speedFactor =
-      1 -
-      (1 - this.handling.steerHighSpeedFraction) *
-        Math.pow(steerT, this.handling.steerLockCurve);
-    const targetSteer =
-      -steerInput * this.model.steerLock * (speedFactor + (1 - speedFactor) * slideRelease);
-    const steerRate =
-      this.handling.steerRateHighway +
-      (this.handling.steerRatePark - this.handling.steerRateHighway) *
-        Math.max(Math.pow(1 - steerT, STEER_RATE_CURVE), slideRelease);
-    const maxDelta = steerRate * dt;
-    this.steerCommand += clamp(targetSteer - this.steerCommand, -maxDelta, maxDelta);
-
-    // Caster first, then backlash. Inside the window the tyres are not held by the
-    // box at all, so the road returns them toward straight
-    // (STEER_CASTER_RETURN_RAD_S); the backlash operator then drags them out of the
-    // window whenever the command has moved beyond it. Order matters: centring
-    // before the operator means a held input settles on the window's trailing edge
-    // (slack taken up in the direction of load) instead of drifting off it.
-    //
-    // THE PLAY FADES OUT DURING A SLIDE, on the same `slideRelease` the lock ceiling
-    // and the rate limit use — and it is the most honest of the three. Catching a
-    // slide is a sequence of REVERSALS, and every reversal crosses the whole window:
-    // 1.03 degrees each way, so 2.06 degrees of dead travel per correction, arriving
-    // late every single time. That is a driver-induced oscillation generator, and it
-    // is exactly the rocking left and right that ends in the scenery.
-    //
-    // Physically it is also what a real box does. Backlash is only there when the
-    // gear teeth are unloaded; a driver countersteering against a sliding rear is
-    // holding the wheel hard against the load, so the slack is already taken up on
-    // that side and there is nothing to cross. The vagueness belongs to cruising on
-    // centre, which is where it is left untouched.
-    const play = this.handling.steerPlay * (1 - slideRelease);
-    const caster = this.handling.casterReturn * dt;
-    this.steerAngle -= clamp(this.steerAngle, -caster, caster);
-    if (this.steerCommand > this.steerAngle + play) {
-      this.steerAngle = this.steerCommand - play;
-    } else if (this.steerCommand < this.steerAngle - play) {
-      this.steerAngle = this.steerCommand + play;
-    }
+    this.updateAxleRoll();
+    this.updateSteering(dt, input, fwd);
 
     // Driveline slack and compliance: torque arrives late (DRIVELINE_LAG_S). One
     // pole, so a stab of throttle builds over ~0.3 s instead of hitting the tyres
-    // on the same tick the pedal moved.
+    // on the same tick the pedal moved. Engine braking is the same torque with the
+    // other sign, so it takes the same path through the same slack.
     const driveBlend = dt / (this.handling.drivelineLag + dt);
     this.appliedDriveTorqueNm += (drive.driveTorqueNm - this.appliedDriveTorqueNm) * driveBlend;
-    // The brake pedal overrides what is left of the drive.
-    //
-    // With the throttle shut the drivetrain still hands out idle torque, and through
-    // a low gear that is hundreds of Nm at the wheel. Braking against it wrecked the
-    // stop: the driven axle's brake force was cancelled to the point that the RWD
-    // cars needed 86 m from 100 km/h instead of 60, and their rear tyres never even
-    // reached their friction limit, so a rear-biased brake could not step the tail
-    // out. Real cars do creep against the brakes at idle in gear, but not at speed
-    // and not against a firm pedal.
-    const appliedTorque = this.appliedDriveTorqueNm * (1 - brake);
+    const gearDirection = this.drivetrain.gearDirection;
+    this.propulsionDirection = this.appliedDriveTorqueNm * gearDirection > 0 ? gearDirection : 0;
+    // The brake pedal overrides what is left of the DRIVE. Braking against a driving
+    // torque through a low gear cancelled the driven axle's brake force: the RWD cars
+    // needed 86 m from 100 km/h instead of 60, and their rear tyres never reached
+    // their friction limit, so a rear-biased brake could not step the tail out. The
+    // overrun drag is not overridden: it adds to the brakes, as it does on a real car.
+    const appliedTorque =
+      this.propulsionDirection !== 0 ? this.appliedDriveTorqueNm * (1 - brake) : this.appliedDriveTorqueNm;
 
     // Brake FORCES (N) at the contact, distributed so the total matches the target
     // deceleration. They are demands: the tyre model decides what is delivered, and
@@ -2361,9 +2524,6 @@ export class Vehicle implements Rebasable {
     const brakeDenom =
       this.frontWheelCount * brakeFrontShare + this.rearWheelCount * brakeRearShare;
 
-    // Compound first: the pedal's demand is sized against the grip the tyres have,
-    // so it has to know which tyres are fitted before it can ask for anything.
-    const compound = TYRE_COMPOUNDS[this.tyres.index];
     // The tyre's own coefficient, shared by drive, braking and cornering: see
     // `tyreCarGrip`, and the note on `SurfaceProps.mu` for why there is one.
     const tyreCarGrip = this.tyreCarGrip(mass);
@@ -2385,7 +2545,6 @@ export class Vehicle implements Rebasable {
         SURFACES[w.groundSurface].mu *
         weatherGrip(w.groundSurface) *
         tyreCarGrip *
-        compound.grip *
         w.tyreGrip *
         w.loadN;
     }
@@ -2411,16 +2570,14 @@ export class Vehicle implements Rebasable {
     // still doing 5 m/s, and hit it.
     this.measuredBrakeDecelValue = mass > 0 ? footBrakeDemandN / mass : 0;
     const wheelCount = this.wheels.length;
-    const totalDrivenCount = this.frontDrivenCount + this.rearDrivenCount;
     let rollingResistanceSum = 0;
     let roughnessSum = 0;
     let contactCount = 0;
     this.surfaceVotes.fill(0);
-    let drivenContactCount = 0;
     // Same for every wheel. `gripBudgetFactor` sizes Rapier's own cone, which bounds
     // nothing the tyre model applies — its lateral and longitudinal channels are both
     // switched off — and is left for the parked hold, which brakes through it.
-    const gripBudgetFactor = tyreCarGrip * compound.grip * this.handling.lateralGripFraction;
+    const gripBudgetFactor = tyreCarGrip * this.handling.lateralGripFraction;
     // What the car brings to every contact patch sideways, before the ground does: the
     // tyre's own coefficient and the handling profile's cornering scale. The SURFACE's
     // own coefficient is applied per wheel below, because with four wheels on as many
@@ -2441,7 +2598,6 @@ export class Vehicle implements Rebasable {
     // step (updateWheelDynamics fills `contactVel`/`forwardDir`), so the whole
     // curve costs one dot product and one atan per wheel and no extra ray casts.
     this.chassisBody.rotation(this.rotationScratch);
-    let rearSlipMax = 0;
 
     for (const w of this.wheels) {
       // Surface under this wheel drives traction and rolling resistance. The type is
@@ -2451,8 +2607,11 @@ export class Vehicle implements Rebasable {
       const surfaceType = this.physics.surfaces.lookupType(ground ? ground.handle : null);
       const surface = SURFACES[surfaceType];
 
-      // A tyre spending its friction budget on stopping or accelerating has none
-      // left for cornering (see the friction-circle note above).
+      // A tyre spending its friction budget on stopping or accelerating has less left
+      // for cornering, and one spending it on cornering has less for the pedals (see
+      // COMBINED SLIP in vehicletuning.ts). Neither is applied here: the tyre pass
+      // splits the budget once it knows this step's slip ratio, and this pass hands
+      // it the side half — the built slip angle, normalised by its peak.
       //
       // THE HANDBRAKE LOCKS EVERY WHEEL, AND THAT IS ALL IT DOES. It used to be a 12 m/s²
       // brake force shared across the four wheels, which never locked anything: each
@@ -2460,18 +2619,10 @@ export class Vehicle implements Rebasable {
       // full steering, from 50 km/h in under two seconds. A cable holds the wheel still
       // whatever the tyre asks of it (`cableLocked`, applied in the wheel pass), so the
       // car slides on locked tyres instead, at their sliding grip, and steers like it.
+      // A locked tyre's side grip is no constant either: at a slip ratio of -1 combined
+      // slip leaves the side force a share that grows with slip angle, the way a
+      // sliding patch's force turns with its direction of travel.
       //
-      // Locked: the parking cable is immediate, because it is a cable pulling shoes
-      // onto drums. The foot brake earns its lock from the wheel's own rotation,
-      // measured by updateWheelDynamics after the step that delivered the torque.
-      //
-      // The friction ellipse is NOT applied here. It used to be — a cone reduction
-      // computed from last step's longitudinal usage, folded into the constraint gain
-      // — but the lateral force is now built in the tyre pass, which applies the
-      // ellipse against the force it is computing on the same tick. Leaving it here
-      // too charged a tyre twice for one shared budget.
-      const locked = input.handbrake || w.locked;
-      const lockGrip = locked ? LOCKED_SIDE_GRIP : 1;
       // The rear axle is a live axle on leaf springs and never had the front's
       // cornering power (REAR_AXLE_SIDE_GRIP).
       const axleGrip = w.isFront ? 1 : this.handling.rearAxleSideGrip;
@@ -2480,7 +2631,8 @@ export class Vehicle implements Rebasable {
       // and where the wheel is pointing. The wheel's own right-hand direction is the
       // chassis' +X yawed by this wheel's steering angle, so a steered front wheel is
       // measured in ITS plane, not the body's — which is the difference between
-      // "the car is sideways" and "the tyre is slipping".
+      // "the car is sideways" and "the tyre is slipping". The angle includes the
+      // wheel's geometry: Ackermann, toe and roll steer (`wheelSteerAngle`).
       const steer = this.wheelSteerAngle(w);
       rotateVector(
         this.wheelRightScratch,
@@ -2489,7 +2641,7 @@ export class Vehicle implements Rebasable {
         0,
         -Math.sin(steer),
       );
-      const latSpeed =
+      const wheelLatSpeed =
         w.contactVel.x * this.wheelRightScratch.x +
         w.contactVel.y * this.wheelRightScratch.y +
         w.contactVel.z * this.wheelRightScratch.z;
@@ -2497,6 +2649,23 @@ export class Vehicle implements Rebasable {
         w.contactVel.x * w.forwardDir.x +
         w.contactVel.y * w.forwardDir.y +
         w.contactVel.z * w.forwardDir.z;
+      // CAMBER, read the way the Magic Formula reads it: a horizontal shift of the
+      // curve by `ratio · camber` (CAMBER_STIFFNESS_*). The tyre's lean against the
+      // road is its static camber plus the share of its axle's roll the linkage lets
+      // it take. Leaning toward +X it pushes toward +X, which is what steering toward
+      // +X does to a tyre rolling forward, so the shift is that much extra steer in the
+      // direction of travel — the patch's sideways speed measured against the wheel
+      // turned by it. The curve, the friction budget and the stop cap below then all
+      // see one angle, and the force still acts along the wheel's own axis.
+      const lean = w.leanRad + w.rollCamber * (w.isFront ? this.frontRollRad : this.rearRollRad);
+      const camberSteer = this.camberStiffness * lean * Math.sign(fwdSpeed);
+      w.camberSteerRad = camberSteer;
+      const latSpeed = wheelLatSpeed * Math.cos(camberSteer) - fwdSpeed * Math.sin(camberSteer);
+      // A tyre tipped AWAY from the force it is making stands on its shoulder and
+      // loses some of its peak (CAMBER_GRIP_LOSS_PER_DEG). The force opposes `latSpeed`,
+      // so a lean along it is the adverse one.
+      const adverseLeanDeg = (lean * Math.sign(latSpeed) * 180) / Math.PI;
+      const camberGrip = 1 - CAMBER_GRIP_LOSS_PER_DEG * Math.max(0, adverseLeanDeg);
       const slipRad = Math.atan2(
         Math.abs(latSpeed),
         Math.max(Math.abs(fwdSpeed), SLIP_ANGLE_REF_MPS),
@@ -2507,15 +2676,13 @@ export class Vehicle implements Rebasable {
       w.slipAngleRad +=
         (slipRad - w.slipAngleRad) *
         (1 - Math.exp(-rollDistance / this.tyre.relaxationM));
-      // The limiter reads the BUILT angle, not the geometric one: countersteer has to
-      // respond to the slide the tyres are actually carrying.
-      if (!w.isFront && w.grounded) rearSlipMax = Math.max(rearSlipMax, w.slipAngleRad);
 
-      // The side-force CURVE, read at the built angle: rising as a quarter sine to a
-      // peak at the axle's peak angle, then fading to its plateau. This is the shape
-      // that decides how much slip the car runs, and it is why the number comes out
-      // where a period car's does — at 0.7 g a tyre needs 0.7/LATERAL_MU of its peak,
-      // which the sine reaches around five degrees.
+      // The side-force CURVE, read at the built angle: rising steeply to a peak at the
+      // axle's peak angle, then fading to its plateau (`sideForceShape`). This is the
+      // shape that decides how much slip the car runs, and it is why the number comes
+      // out where a period car's does. What is handed on is the curve and the slip
+      // measured in units of its peak; the tyre pass reads the force once it knows how
+      // much of the patch the slip ratio has taken (COMBINED SLIP).
       // μ(Fz). Exactly 1 at this wheel's static share of the car's weight, so the
       // calibrated straight-line figures stand and only TRANSFER changes anything.
       const loadFactor = clamp(
@@ -2527,23 +2694,15 @@ export class Vehicle implements Rebasable {
       const staticPeakDeg = w.isFront ? this.tyre.peakFrontDeg : this.tyre.peakRearDeg;
       const fullDeg = w.isFront ? this.tyre.fullFrontDeg : this.tyre.fullRearDeg;
       const plateau = w.isFront ? this.tyre.plateauFront : this.tyre.plateauRear;
-      const slipDeg = (w.slipAngleRad * 180) / Math.PI;
-      let peakDeg = staticPeakDeg;
-      let risen: number;
-      if (TYRE_MODEL.brush && this.model.tyre) {
-        const brush = brushShape(
-          w.slipAngleRad,
-          staticPeakDeg,
-          w.loadN / w.staticLoadN,
-          loadFactor,
-        );
-        risen = brush.shape;
-        peakDeg = Math.min(brush.peakDeg, fullDeg - 1);
-      } else {
-        risen = Math.tanh(SLIP_CURVE_SHARPNESS * Math.min(slipDeg / peakDeg, 1)) / TANH_SHARPNESS;
-      }
-      const fadeT = clamp((slipDeg - peakDeg) / (fullDeg - peakDeg), 0, 1);
-      const shape = risen * (1 - (1 - plateau) * fadeT * fadeT * (3 - 2 * fadeT));
+      // The brush tyre's peak moves with load (`brushPeakTan`); the curve's is fixed.
+      // The brush's own peak is held a degree short of the full angle for the fade.
+      const brush = TYRE_MODEL.brush && this.model.tyre !== undefined;
+      const peakTan = brush
+        ? brushPeakTan(staticPeakDeg, w.loadN / w.staticLoadN, loadFactor)
+        : Math.tan((staticPeakDeg * Math.PI) / 180);
+      const fadePeakDeg = brush
+        ? Math.min((Math.atan(peakTan) * 180) / Math.PI, fullDeg - 1)
+        : staticPeakDeg;
 
       const frictionSlip =
         surface.mu * weatherGrip(surfaceType) * gripBudgetFactor * loadFactor;
@@ -2559,13 +2718,17 @@ export class Vehicle implements Rebasable {
         surface.mu *
         weatherGrip(surfaceType) *
         lateralCarFactor *
-        compound.side *
         w.tyreGrip *
         axleGrip *
-        lockGrip *
+        camberGrip *
         loadFactor *
         w.loadN;
-      w.lateralShape = shape;
+      w.sideSlip = Math.tan(Math.min(w.slipAngleRad, 1.4)) / peakTan;
+      w.sidePeakTan = peakTan;
+      w.sideFadePeakDeg = fadePeakDeg;
+      w.sideFullDeg = fullDeg;
+      w.sidePlateau = plateau;
+      w.sideBrush = brush;
       w.lateralRightX = this.wheelRightScratch.x;
       w.lateralRightY = this.wheelRightScratch.y;
       w.lateralRightZ = this.wheelRightScratch.z;
@@ -2658,18 +2821,15 @@ export class Vehicle implements Rebasable {
           (surface.rollingResistance - DIG_FIRM_RR) * this.digWeightCar;
         roughnessSum += surface.roughness;
         this.surfaceVotes[surfaceType]++;
-        if (driven) drivenContactCount++;
       }
     }
-    // Handed to next step's steering limiter (see the countersteer note above).
-    this.rearSlipRad = rearSlipMax;
 
     controller.updateVehicle(dt);
 
     // Wheel rotation, before the telemetry pass that reads it: each wheel is
     // integrated from its own drive and brake torque against what its contact can
     // actually transmit, so lock-up and wheelspin are outcomes, not timers.
-    this.updateWheelDynamics(dt, tyreCarGrip * compound.grip, fwd, ambientC);
+    this.updateWheelDynamics(dt, tyreCarGrip, fwd, ambientC);
     this.refreshWheelSpray(fwd);
 
     // Each grounded wheel contributes its travelled tyre-track on its reported
@@ -2709,12 +2869,12 @@ export class Vehicle implements Rebasable {
     this.audioState.rearLockT = this.rearWheelCount > 0 ? rearSlideSum / this.rearWheelCount : 0;
 
     this.applyAntiRollBars(dt);
-    this.applyRollCouple(dt, mass, contactCount);
     this.applyAntiPitch(dt, contactCount);
 
-    // Rolling resistance (∝ weight) + quadratic aerodynamic drag, opposing
-    // horizontal motion. Drag always applies; rolling resistance fades with the
-    // fraction of wheels still on the ground.
+    // Rolling resistance (∝ weight) + quadratic aerodynamic drag in still air, opposing
+    // horizontal motion, at the centre of mass. Drag always applies; rolling resistance
+    // fades with the fraction of wheels still on the ground. `applyAero` then adds the
+    // wind's share, the drag's height, the lift and the side force.
     //
     // This MUST be an impulse, not `addForce`: Rapier's force accumulator is
     // persistent — a force added here would be re-applied on every subsequent step
@@ -2730,44 +2890,21 @@ export class Vehicle implements Rebasable {
         const rr = rollingResistanceSum / contactCount;
         retarding += rr * mass * GRAVITY * (contactCount / wheelCount);
       }
-      const dragRollingForce = retarding;
-
-      // Engine braking: closed-throttle crank drag carried through the gearbox
-      // to a wheel force, applied as a longitudinal chassis impulse — the same
-      // mechanism as the drag/rolling resistance above, so it never saturates at
-      // a tyre-lockup clamp the way setWheelBrake does.
-      //
-      // Only with the throttle shut, only while a gear is engaged (the drivetrain
-      // reports zero brake torque in neutral and mid-shift), and scaled by the
-      // fraction of driven wheels still in contact so airborne driven wheels
-      // don't brake the car through thin air.
-      if (
-        throttle <= 0 &&
-        drive.engineBrakeTorqueNm > 0 &&
-        totalDrivenCount > 0 &&
-        drivenContactCount > 0
-      ) {
-        retarding +=
-          (drive.engineBrakeTorqueNm / this.drivenRadius) *
-          (drivenContactCount / totalDrivenCount);
-      }
 
       // Never let one tick's retarding impulse reverse the car; cap it at the
       // impulse that would bring horizontal motion exactly to rest.
       const impulse = Math.min(retarding * dt, hSpeed * mass);
-      this.ownDragRollingDeltaMps = Math.min(dragRollingForce * dt, impulse) / mass;
+      this.ownDragRollingDeltaMps = impulse / mass;
       const inv = 1 / hSpeed;
       this.forceScratch.x = -impulse * this.linvel.x * inv;
       this.forceScratch.y = 0;
       this.forceScratch.z = -impulse * this.linvel.z * inv;
       this.chassisBody.applyImpulse(this.forceScratch, false);
     }
-    this.applyWind(dt, contactCount);
+    this.applyAero(dt, contactCount);
 
-    // Audio telemetry. Written after the vehicle step and the roll couple, so the
-    // slip and contact numbers describe the tick that just ran; `localVelScratch`
-    // holds the body-frame velocity applyRollCouple already computed, so the side
-    // slip costs nothing extra. A landing is however much downward speed the
+    // Audio telemetry. Written after the vehicle step, so the slip and contact numbers
+    // describe the tick that just ran. A landing is however much downward speed the
     // ground took away this step, which is exactly what should be heard as a thump.
     const audio = this.audioState;
     const engine = stats.engine;
@@ -2790,7 +2927,13 @@ export class Vehicle implements Rebasable {
     audio.gearLabel = this.drivetrain.gearLabel;
     audio.wheelContactFraction = wheelCount > 0 ? contactCount / wheelCount : 0;
     audio.surfaceRoughness = contactCount > 0 ? roughnessSum / contactCount : 0;
-    audio.lateralSlipMps = Math.abs(this.localVelScratch.x);
+    this.chassisBody.rotation(this.rotationScratch);
+    rotateVector(this.bodyRightScratch, this.rotationScratch, 1, 0, 0);
+    audio.lateralSlipMps = Math.abs(
+      this.linvel.x * this.bodyRightScratch.x +
+        this.linvel.y * this.bodyRightScratch.y +
+        this.linvel.z * this.bodyRightScratch.z,
+    );
     const vy = this.linvel.y;
     // Accumulated rather than overwritten: a render frame can see several fixed steps
     // or none, and the audio layer zeroes it once voiced, so a landing is heard once.
@@ -3087,6 +3230,7 @@ export class Vehicle implements Rebasable {
     for (const w of this.wheels) {
       w.spinRadS = 0;
       w.slipRatio = 0;
+      w.carcassSlip = 0;
       w.locked = false;
     }
     this.impactVelocityPrimed = false;
@@ -3287,7 +3431,7 @@ export class Vehicle implements Rebasable {
    */
   private updateWheelDynamics(
     dt: number,
-    /** The car's tyre coefficient with the compound's longitudinal grip applied. */
+    /** The car's own tyre coefficient, before the ground does. */
     tyreGrip: number,
     vehicleForwardSpeed: number,
     airC: number,
@@ -3299,6 +3443,12 @@ export class Vehicle implements Rebasable {
     let carDigWeight = 0;
 
     this.chassisBody.rotation(this.rotationScratch);
+    // The body's own axes and origin, for the roll-centre height and the side force's
+    // body-frame component (see the lateral force below).
+    rotateVector(this.bodyUpScratch, this.rotationScratch, 0, 1, 0);
+    rotateVector(this.bodyRightScratch, this.rotationScratch, 1, 0, 0);
+    const bodyOrigin = this.chassisBody.translation();
+    const bodyMass = this.chassisBody.mass();
     const loadBlend = dt / (WHEEL_LOAD_TAU + dt);
     // Grip leaves slowly and comes back quickly: see SLIDE_ONSET_TAU.
     const slideOnsetBlend = dt / (SLIDE_ONSET_TAU + dt);
@@ -3318,8 +3468,10 @@ export class Vehicle implements Rebasable {
 
     for (const w of this.wheels) {
       const driven = w.isFront ? this.frontDrivenCount > 0 : this.rearDrivenCount > 0;
-      const driveDirection = w.driveTorqueNm >= 0 ? 1 : -1;
-      const driveProgressSpeed = Math.max(0, vehicleForwardSpeed * driveDirection);
+      // Pushing the car, not holding it back on the overrun: the dig and the low range
+      // answer to propulsion only.
+      const propelled = driven && this.propulsionDirection !== 0 && w.driveTorqueNm !== 0;
+      const driveProgressSpeed = Math.max(0, vehicleForwardSpeed * this.propulsionDirection);
       const steer = controller.wheelSteering(w.index) ?? 0;
       // Wheel-plane forward: chassis +Z yawed by the steering angle — the same
       // basis the wheel mesh is drawn in — taken into world space.
@@ -3368,14 +3520,23 @@ export class Vehicle implements Rebasable {
       // Ray-cast suspension load spikes over trimesh seams, so it is low-passed
       // before it is allowed to size a friction budget.
       //
-      // The spring is not the only thing between body and road. The bump stop and the
-      // anti-roll bar push the body up at this contact patch as well, so the tyre
-      // carries their force too: a bar that resisted the roll without loading its outer
-      // tyre would take load transfer AWAY from its own axle — the balance lever
-      // backwards, measured as 44% front on a Zhiguli with a front bar twice the rear's
-      // (tools/roll-balance.ts). Both are last step's, which the low-pass hides.
+      // The spring is not the only thing between body and road. The bump stop, the
+      // damper's low-speed bleed and the anti-roll bar push the body up at this contact
+      // patch as well, so the tyre carries their force too: a bar that resisted the roll
+      // without loading its outer tyre would take load transfer AWAY from its own axle —
+      // the balance lever backwards, measured as 44% front on a Zhiguli with a front bar
+      // twice the rear's (tools/roll-balance.ts). And the links carry the GEOMETRIC
+      // transfer, the part of the cornering moment below the roll centre, straight to
+      // the tyre (`linkN`). All are last step's, which the low-pass hides.
       const rawLoad = inContact
-        ? Math.max(0, (controller.wheelSuspensionForce(w.index) ?? 0) + w.bumpStopN + w.barN)
+        ? Math.max(
+            0,
+            (controller.wheelSuspensionForce(w.index) ?? 0) +
+              w.bumpStopN +
+              w.bleedN +
+              w.barN +
+              w.linkN,
+          )
         : 0;
       w.loadN += (rawLoad - w.loadN) * loadBlend;
 
@@ -3411,7 +3572,7 @@ export class Vehicle implements Rebasable {
         // Gate on the CAR'S SPEED, not the wheel's. `driveProgressSpeed` is the car's
         // own speed along the intended direction of travel, floored at zero, so a car
         // being dragged backwards down a dune still counts as stopped and still digs.
-        if (driven && w.driveTorqueNm !== 0 && DIG_SURFACES.has(surfaceType)) {
+        if (propelled && DIG_SURFACES.has(surfaceType)) {
           const fadeT = clamp(
             (driveProgressSpeed - DIG_FULL_MPS) / (DIG_GONE_MPS - DIG_FULL_MPS),
             0,
@@ -3425,7 +3586,7 @@ export class Vehicle implements Rebasable {
         // THE LOW RANGE — see the block comment on `LOW_RANGE_MU`. The road deck only, and
         // driven wheels only. Applied AFTER the dig, and below its 1.6, so on loose ground
         // the dig's own figure still governs and sand is unchanged to the digit.
-        if (driven && w.driveTorqueNm !== 0 && LOW_RANGE_SURFACES.has(surfaceType)) {
+        if (propelled && LOW_RANGE_SURFACES.has(surfaceType)) {
           const fadeT = clamp(
             (driveProgressSpeed - LOW_RANGE_FULL_MPS) /
               (LOW_RANGE_GONE_MPS - LOW_RANGE_FULL_MPS),
@@ -3452,12 +3613,30 @@ export class Vehicle implements Rebasable {
       if (Math.abs(spin) <= brakeDelta) spin = 0;
       else spin -= Math.sign(spin) * brakeDelta;
 
+      // The slip ratio is measured against the road speed, floored so it stays finite
+      // at rest, and the force is read at the CARCASS's slip, not the wheel's: the
+      // carcass winds up over a rolling distance (`longitudinalRelaxationM`), wound by
+      // the faster of the road and the tread, floored so a car stood on its brakes
+      // still lets its tyre's force change (LONGITUDINAL_RELAXATION_FLOOR_MPS).
+      const reference = Math.max(Math.abs(contactSpeed), SLIP_REFERENCE_MPS);
+      const carcassBlend =
+        1 -
+        Math.exp(
+          -(
+            Math.max(Math.abs(contactSpeed), Math.abs(spin * w.radius), LONGITUDINAL_RELAXATION_FLOOR_MPS) *
+            dt
+          ) / this.tyre.longitudinalRelaxationM,
+        );
+      // COMBINED SLIP (vehicletuning.ts): the slip ratio in units of this surface's own
+      // peak, beside the side slip the setup pass measured in units of the tyre's.
+      const slipScale = 1 / (surface.optimalSlip * LONGITUDINAL_PEAK_U);
+      const sideSlip = inContact ? w.sideSlip : 0;
+
       let longitudinalForce = 0;
       let gripUsage = 0;
       if (capacityN > 0) {
-        const reference = Math.max(Math.abs(contactSpeed), SLIP_REFERENCE_MPS);
-
-        // Shape: a peak that decays to a SLIDING PLATEAU, not to nothing.
+        // Shape: a peak that decays to a SLIDING PLATEAU, not to nothing
+        // (`longitudinalShape`).
         //
         // The first version was the tidy 2u/(1+u²), which decays like 1/u. Measured,
         // that car could not pull away at all (0 km/h after 20 s of full throttle): a
@@ -3467,15 +3646,10 @@ export class Vehicle implements Rebasable {
         // The surface's OWN peak-slip ratio, not one constant for the world. On sand
         // that is 0.3 against asphalt's 0.12: the same tyre, shearing a material that
         // has to move a great deal further before it pushes back.
-        const optimalSlip = surface.optimalSlip;
-        const slipOf = (omega: number): number => (omega * w.radius - contactSpeed) / reference;
-        const forceOf = (slip: number): number => {
-          const u = slip / optimalSlip;
-          const peak = (2 * u) / (1 + u * u);
-          const slide = Math.tanh(SLIDE_CURVE_GAIN * u);
-          return capacityN * ((1 - SLIDING_GRIP_FRACTION) * peak + SLIDING_GRIP_FRACTION * slide);
-        };
-
+        //
+        // Under slip angle the same curve is read at the COMBINED slip and only the
+        // longitudinal share of it kept, so a tyre that is cornering has less to drive
+        // and brake with — and with no slip angle it is the pure curve to the digit.
         if (w.cableLocked) {
           // A WHEEL THE CABLE HOLDS DOES NOT TURN, so its force is the tyre's at zero
           // spin — the sliding plateau, or less once the patch is nearly still — and the
@@ -3485,25 +3659,63 @@ export class Vehicle implements Rebasable {
           // down 8 degrees used to keep rolling with the handbrake on. Bounded instead by
           // what brings this wheel's share of the car to rest within the step, so the
           // friction stops the slide and never reverses it.
+          const carcass = w.carcassSlip + (-contactSpeed / reference - w.carcassSlip) * carcassBlend;
           const stopN = ((w.loadN / GRAVITY) * Math.abs(contactSpeed)) / dt;
-          longitudinalForce = clamp(forceOf(slipOf(0)), -stopN, stopN);
+          longitudinalForce = clamp(
+            capacityN * combinedLongitudinal(carcass * slipScale, sideSlip),
+            -stopN,
+            stopN,
+          );
           spin = 0;
           gripUsage = Math.abs(longitudinalForce) / capacityN;
         } else {
+          // The wheel and its carcass are solved TOGETHER, implicitly: the carcass slip
+          // at the end of the step is where it would get to with the wheel unchanged,
+          // plus the blend's share of whatever the contact does to the wheel. That is
+          // the existing implicit wheel step with the tyre's stiffness scaled by the
+          // blend — at speed the blend is nearly 1 and nothing changes; at a crawl the
+          // carcass is the slow half and the wheel moves more freely against it. Solved
+          // any other way the wheel and the lagging carcass ring at ~20 Hz, which a
+          // 60 Hz step cannot carry.
+          //
           // Damping uses the curve's own slope, clamped to the rising side: past the
           // peak it goes negative, and feeding that back drives the wheel away from
           // equilibrium instead of toward it.
-          const u0 = slipOf(spin) / optimalSlip;
-          const th = Math.tanh(SLIDE_CURVE_GAIN * u0);
-          const slopeU =
-            (1 - SLIDING_GRIP_FRACTION) * ((2 * (1 - u0 * u0)) / ((1 + u0 * u0) * (1 + u0 * u0))) +
-            SLIDING_GRIP_FRACTION * SLIDE_CURVE_GAIN * (1 - th * th);
-          const stiffness =
-            (capacityN * Math.max(0, slopeU) * w.radius) / (optimalSlip * reference);
-
+          //
+          // The step is linearised where this tick's torques have put the wheel. A light
+          // wheel — one the clutch is slipping behind, with no crank geared to it — is
+          // kicked by its drive torque far past the tyre's peak in one tick (a launch's
+          // 650 N·m spins a 0.6 kg·m² wheel up 17 rad/s), where the slope is zero and the
+          // force is the sliding plateau: linearised there it can only ever pull back the
+          // plateau and spins up for good under a torque the tyre's peak holds easily.
+          // When the kick has crossed the peak from a tyre still on its rising side, the
+          // step is linearised where the tyre STARTED instead, which is where the solution
+          // is.
           const spin0 = spin;
-          const force0 = forceOf(slipOf(spin0));
-          let delta = -(dt * force0 * w.radius) / (inertia + dt * stiffness * w.radius);
+          const carcass0 =
+            w.carcassSlip + ((spin0 * w.radius - contactSpeed) / reference - w.carcassSlip) * carcassBlend;
+          const slope0 = combinedLongitudinalSlope(carcass0 * slipScale, sideSlip);
+          const carcassStart =
+            w.carcassSlip + ((w.spinRadS * w.radius - contactSpeed) / reference - w.carcassSlip) * carcassBlend;
+          const slopeStart = slope0 > 0 ? 0 : combinedLongitudinalSlope(carcassStart * slipScale, sideSlip);
+          const fromStart = slopeStart > 0;
+          const stiffness =
+            (capacityN *
+              Math.max(0, fromStart ? slopeStart : slope0) *
+              slipScale *
+              carcassBlend *
+              w.radius) /
+            reference;
+          let delta: number;
+          if (fromStart) {
+            const forceStart = capacityN * combinedLongitudinal(carcassStart * slipScale, sideSlip);
+            const kick = spin0 - w.spinRadS;
+            delta =
+              (inertia * kick - dt * forceStart * w.radius) / (inertia + dt * stiffness * w.radius) - kick;
+          } else {
+            const force0 = capacityN * combinedLongitudinal(carcass0 * slipScale, sideSlip);
+            delta = -(dt * force0 * w.radius) / (inertia + dt * stiffness * w.radius);
+          }
 
           // Friction reduces sliding; it never reverses it within one step. Without
           // this projection the wheel shot straight past synchronous speed every tick
@@ -3536,8 +3748,11 @@ export class Vehicle implements Rebasable {
       w.longitudinalCapacityN = capacityN;
       w.longitudinalForceN = longitudinalForce;
 
-      const reference = Math.max(Math.abs(contactSpeed), SLIP_REFERENCE_MPS);
       w.slipRatio = (spin * w.radius - contactSpeed) / reference;
+      // The carcass follows the wheel by the blend the solve assumed. A tyre carrying
+      // nothing is not wound up at all.
+      w.carcassSlip =
+        capacityN > 0 ? w.carcassSlip + (w.slipRatio - w.carcassSlip) * carcassBlend : 0;
       // Only a moving car can have a locked wheel; a stopped one is just stopped.
       w.locked = Math.abs(contactSpeed) > SLIDE_MIN_MPS && w.slipRatio <= LOCK_SLIP_RATIO;
 
@@ -3557,30 +3772,36 @@ export class Vehicle implements Rebasable {
 
       // LATERAL FORCE, ours now. Three things decide it: the capacity the setup pass
       // sized from load and surface, the slip-angle curve read at the BUILT angle, and
-      // what the longitudinal channel has left over — a real friction ellipse on this
-      // tyre's own usage, so drive and brake take their share of one budget.
+      // what the longitudinal slip has taken of the patch — COMBINED SLIP, read at the
+      // carcass slip ratio this SAME tick's longitudinal pass just left, so drive and
+      // brake take their share of one budget and the slip angle took its share of
+      // theirs above. With no slip ratio it is the pure side-force curve.
       //
-      // The ellipse is the real one, read against the force this SAME tick's
-      // longitudinal pass just computed — which is why `gripUsage` above is a local
-      // rather than the wheel's published field. Its lateral term is floored at
-      // ELLIPSE_LATERAL_FLOOR purely so a locked wheel is not a numerical castor; see
-      // the constant.
-      //
-      // Applied at the contact patch's POSITION but at the centre of mass' HEIGHT, and
-      // that is deliberate. The yaw geometry is what matters for balance and it is
-      // exact either way; the roll lever is not, because this suspension has almost no
-      // roll stiffness of its own — measured, the full moment at the patch rolled a
-      // 33 km/h turn to 81 degrees and laid the car on its side. Roll therefore stays
-      // with the calibrated couple in `applyRollCouple`, which exists for exactly this
-      // reason and is now the only thing supplying it.
+      // Applied at the contact patch's POSITION but at the axle's ROLL-CENTRE HEIGHT,
+      // because that is where the links hand it to the body. The body therefore feels
+      // the side force times the centre of mass' height above the roll axis — the
+      // ELASTIC transfer, which rolls it onto its springs and bars — and nothing of the
+      // part below the roll centre, which the links carry straight to the tyres
+      // (`linkN`, resolved per axle after this loop). The two add up to the whole
+      // `m · a · h`, and the split between them is set by the linkage, not by a gain.
       let lateralForceN = 0;
+      w.sideForceBodyXN = 0;
+      w.kingpinMomentNm = 0;
+      // The patch's combined slip σ (the COMBINED SLIP block): how much of it slides.
+      w.alignSlip = Math.hypot(w.sideSlip, w.carcassSlip * slipScale);
       if (inContact && w.lateralCapacityN > 0) {
-        const ellipse = Math.max(
-          ELLIPSE_LATERAL_FLOOR,
-          Math.sqrt(Math.max(0, 1 - gripUsage * gripUsage)),
-        );
-        const capacityImpulse = w.lateralCapacityN * ellipse * dt;
-        const curveImpulse = capacityImpulse * w.lateralShape;
+        const capacityImpulse = w.lateralCapacityN * dt;
+        const curveImpulse =
+          capacityImpulse *
+          combinedLateral(
+            w.sideSlip,
+            w.carcassSlip * slipScale,
+            w.sidePeakTan,
+            w.sideFadePeakDeg,
+            w.sideFullDeg,
+            w.sidePlateau,
+            w.sideBrush,
+          );
         // Friction opposes the slip and never reverses it inside one step: cap the
         // impulse at what brings this contact's sideways speed exactly to zero, with
         // the wheel's share of the mass taken from the load it is carrying. Without
@@ -3591,12 +3812,25 @@ export class Vehicle implements Rebasable {
         // walking pace is not rolling enough to have one: the angle collapses, the
         // curve asks for almost nothing, and the car creeps sideways down a camber —
         // which Rapier's velocity-cancelling constraint used to prevent for free.
-        // Below LATERAL_STATIC_SPEED_MPS the tyre is therefore allowed to spend its
-        // whole remaining capacity on simply stopping the slide, which is what static
-        // friction does. It is still bounded by that capacity, so a hard enough shove
-        // still slides the car.
+        // Below LATERAL_STATIC_SPEED_MPS the tyre is therefore allowed to spend what its
+        // longitudinal force has left of its capacity (the friction circle, in force,
+        // which is what static friction obeys) on simply stopping the slide. It is still
+        // bounded by that capacity, so a hard enough shove still slides the car.
+        //
+        // The hold is all four tyres stopping the same sideways motion in the same step,
+        // so its share is of the mass the PATCHES see together, which is less than the
+        // car's: the impulses go in at the roll centres, below the centre of mass, so
+        // they roll the body as well as shoving it, and the patches — further below
+        // again — move by both. Sized as the plain share the hold overshot by up to half
+        // every step, and a parked Oka sat buzzing on its tyres at ±2 kN a corner.
+        const arm = this.rollLeverArm;
+        const holdImpulse =
+          stopImpulse /
+          (1 + (bodyMass * (arm - w.rollCentreM) * arm) / this.rollInertiaKgM2);
         const staticBlend = clamp(1 - Math.abs(contactSpeed) / LATERAL_STATIC_SPEED_MPS, 0, 1);
-        const staticImpulse = Math.min(capacityImpulse, stopImpulse) * staticBlend;
+        const staticImpulse =
+          Math.min(capacityImpulse * Math.sqrt(Math.max(0, 1 - gripUsage * gripUsage)), holdImpulse) *
+          staticBlend;
         const magnitude = Math.min(stopImpulse, Math.max(curveImpulse, staticImpulse));
         lateralForceN = magnitude / dt;
         const impulse = -Math.sign(w.lateralSpeed) * magnitude;
@@ -3604,25 +3838,37 @@ export class Vehicle implements Rebasable {
           this.tyreImpulse.x = w.lateralRightX * impulse;
           this.tyreImpulse.y = w.lateralRightY * impulse;
           this.tyreImpulse.z = w.lateralRightZ * impulse;
-          this.lateralPoint.x = w.contactPoint.x;
-          // The CENTRE OF MASS' height, not the body origin's. `translation()` is the
-          // origin, which sits COM_DROP_FRACTION of the half-height ABOVE the centre of
-          // mass — so applying the side force there gave every corner a roll moment
-          // INTO the turn worth `m · a · 0.45 · halfHeight`, cancelling nearly half of
-          // the couple `applyRollCouple` had just been asked to restore. Measured: 2.6
-          // degrees of lean at 0.6 g where the roll stiffness says 5.8. At the centre
-          // of mass the side force carries no roll moment at all, which is the whole
-          // point of applying it here: the roll couple is then the only thing supplying
-          // one, and it is calibrated.
-          this.lateralPoint.y = this.chassisBody.worldCom().y;
-          this.lateralPoint.z = w.contactPoint.z;
+          // The roll centre is fixed to the body (`rollCentreLocalY`), so the point is
+          // the contact patch moved along the body's own up axis to that height. Body
+          // frame, not world: a rolled body carries its roll axis with it.
+          const up = this.bodyUpScratch;
+          const localY =
+            (w.contactPoint.x - bodyOrigin.x) * up.x +
+            (w.contactPoint.y - bodyOrigin.y) * up.y +
+            (w.contactPoint.z - bodyOrigin.z) * up.z;
+          const lift = w.rollCentreLocalY - localY;
+          this.lateralPoint.x = w.contactPoint.x + up.x * lift;
+          this.lateralPoint.y = w.contactPoint.y + up.y * lift;
+          this.lateralPoint.z = w.contactPoint.z + up.z * lift;
+          const right = this.bodyRightScratch;
+          w.sideForceBodyXN =
+            (this.tyreImpulse.x * right.x +
+              this.tyreImpulse.y * right.y +
+              this.tyreImpulse.z * right.z) /
+            dt;
           this.chassisBody.applyImpulseAtPoint(this.tyreImpulse, this.lateralPoint, false);
-          // Aligning moment. The force acts PNEUMATIC_TRAIL_M behind the contact
-          // centre, so it carries a moment about the vertical of exactly
-          // -trail * impulse — the cross product collapses to that because forward and
-          // right are orthogonal unit vectors in the ground plane. Summed over the
-          // wheels this is the car's yaw damping.
-          this.alignTorqueImpulse -= PNEUMATIC_TRAIL_M * impulse;
+          // ALIGNING MOMENT. The force acts the pneumatic trail behind the contact
+          // centre along the direction the tyre is ROLLING, so on the body it carries a
+          // moment about the vertical of exactly -trail * impulse (forward and right are
+          // orthogonal unit vectors in the ground plane, so the cross product collapses to
+          // that). The trail collapses as the patch slides (`pneumaticTrailShape`), so a
+          // sliding tyre's force acts where the patch is. The steering feels the same
+          // force about its own axis, which meets the road the caster's mechanical trail
+          // ahead of the patch whichever way the car is rolling (`STEER_FREE_TAU_S`).
+          const pneumaticTrail =
+            (contactSpeed < 0 ? -PNEUMATIC_TRAIL_M : PNEUMATIC_TRAIL_M) * pneumaticTrailShape(w.alignSlip);
+          this.alignTorqueImpulse -= pneumaticTrail * impulse;
+          w.kingpinMomentNm = (-(pneumaticTrail + w.casterTrailM) * impulse) / dt;
         }
 
         // LOOSE-SURFACE PLOUGHING. Cornering grip stays low on sand, but a tyre
@@ -3727,18 +3973,44 @@ export class Vehicle implements Rebasable {
         const joltMps = (w.compressionM - previousCompressionM) / dt;
         if (joltMps > this.audioState.bumpMps) this.audioState.bumpMps = joltMps;
       }
-      // The stop lives in the BUMP travel — the compression available past static sag
-      // — and not in the total. Measured against the total it sat below the sag of
-      // every soft car in the catalogue, so a parked Zhiguli rested on its bump stops
-      // and rang at 1.76 Hz instead of the 1.10 its springs were cut for.
-      const bumpTravel = w.maxTravelM - w.sagM;
-      const stopBegins = w.sagM + bumpTravel * (1 - BUMP_STOP_FRACTION);
+      // The stop lives in the BUMP travel — the compression available past the stance
+      // the geometry was cut for — and not in the total. Measured against the total it
+      // sat below the sag of every soft car in the catalogue, so a parked Zhiguli
+      // rested on its bump stops and rang at 1.76 Hz instead of the 1.10 its springs
+      // were cut for.
+      //
+      // Anchored on the KERB stance, like the travel it lives in: the rubber is bolted
+      // to the car and does not move because the boot is full. A loaded car settles
+      // further into the same stop, which is what "riding on the stops" means — and
+      // anchoring it on the load's own sag instead (as this did) pushed the knee past
+      // the end of the travel for any load that sagged more than 40% of the bump
+      // travel, so the stop never engaged at all and every big hit went to Rapier's
+      // rigid clamp instead.
+      const stopBegins = w.designSagM + w.bumpTravelM * (1 - BUMP_STOP_FRACTION);
       w.bumpStopN = 0;
       if (inContact && w.compressionM > stopBegins) {
         const into = Math.min(1, (w.compressionM - stopBegins) / (w.maxTravelM - stopBegins));
-        w.bumpStopN = BUMP_STOP_PEAK * w.staticLoadN * into * into;
+        w.bumpStopN = w.bumpStopPeakN * into * into;
         rotateVector(this.microUp, this.rotationScratch, 0, w.bumpStopN * dt, 0);
         this.chassisBody.applyImpulseAtPoint(this.microUp, w.contactPoint, false);
+      }
+
+      // THE DAMPER'S BLEED (see DAMPER_BLEED_GAIN): below the knee the damper is
+      // `gain` times its valve-stack rate, and Rapier has already applied the valve
+      // stack's. Read off the same compression the bump stop uses, so it is this step's
+      // piston speed, and pushed in at the contact patch like the stop.
+      w.bleedN = 0;
+      if (inContact && dt > 0) {
+        const pistonMps = (w.compressionM - previousCompressionM) / dt;
+        const rate = pistonMps > 0 ? w.compressionRateNsPerM : w.relaxationRateNsPerM;
+        w.bleedN =
+          (DAMPER_BLEED_GAIN - 1) *
+          rate *
+          clamp(pistonMps, -DAMPER_BLEED_KNEE_MPS, DAMPER_BLEED_KNEE_MPS);
+        if (w.bleedN !== 0) {
+          rotateVector(this.microUp, this.rotationScratch, 0, w.bleedN * dt, 0);
+          this.chassisBody.applyImpulseAtPoint(this.microUp, w.contactPoint, false);
+        }
       }
 
       // Friction-circle usage: how much of THIS tyre's force capacity the
@@ -3789,6 +4061,7 @@ export class Vehicle implements Rebasable {
     }
 
     this.digWeightCar = carDigWeight;
+    this.resolveLinkTransfer();
 
     // One torque impulse for the whole axle set. Applied after the loop so the four
     // aligning moments are summed rather than four separate solver touches, and about
@@ -3866,7 +4139,8 @@ export class Vehicle implements Rebasable {
   // ---------------------------------------------------------------------------
 
   /**
-   * The car's mass, as its own kerb weight plus everything that has since changed.
+   * The car's mass sheet: its own kerb weight, plus everything that has since changed,
+   * each item carrying where it SITS as well as what it weighs.
    *
    * `model.mass` IS the kerb weight: a complete car with its stock engine, radiator
    * and tank, ALL RESERVOIRS FULL. That is what a factory figure means, and taking it
@@ -3882,8 +4156,15 @@ export class Vehicle implements Rebasable {
    * Adding these outright instead would double-count the stock parts and the full
    * fluids, and every car would start life tens of kilograms above its own published
    * weight with its springs already part-compressed.
+   *
+   * A stock car therefore returns an EMPTY sheet, and the kerb body on its own is the
+   * whole car — which is what keeps an unloaded car exactly where it always was. Every
+   * delta that is not zero is a point mass at its own anchor (`measureLoadAnchors`),
+   * and `applyChassisMass` combines them with the kerb point. Without the positions a
+   * boot crate would be carried by the car's own centre of mass, and the nose of a
+   * front-drive hatchback would take 62% of a load that is sitting over its back axle.
    */
-  private computeStats(): CarStats {
+  private computeStats(): VehicleStats {
     const installedEngine = bonnetPart(this.car.bonnet, 0);
     const installedSpec = installedEngine ? variant(installedEngine.variantId).engine : undefined;
     const engine = installedSpec ?? modelEngine(this.model);
@@ -3893,28 +4174,51 @@ export class Vehicle implements Rebasable {
       this.model.bodyClass,
       this.model.tankLitres,
     );
+    const anchors = this.loadAnchors;
+    const loads: LoadPoint[] = [];
+    /** Records one load at its anchor and returns its mass, so the sum reads as one line. */
+    const load = (label: string, massKg: number, at: { y: number; z: number }): number => {
+      if (massKg !== 0) loads.push({ label, massKg, x: 0, y: at.y, z: at.z });
+      return massKg;
+    };
     let mass = this.model.mass;
 
     // Service parts, cell by cell against the factory fit. The turbocharger's factory
-    // state is EMPTY, so anything fitted there is pure addition.
+    // state is EMPTY, so anything fitted there is pure addition. Every cell is under
+    // the bonnet, so the whole delta is one load in the engine bay.
+    let parts = 0;
     for (let cell = 0; cell < BONNET_SLOT_COUNT; cell++) {
       const part = bonnetPart(this.car.bonnet, cell);
       const fitted = part ? variant(part.variantId).mass : 0;
       const stockId = stock[cell] ?? null;
-      mass += fitted - (stockId === null ? 0 : variant(stockId).mass);
+      parts += fitted - (stockId === null ? 0 : variant(stockId).mass);
     }
+    mass += load('engine bay', parts, anchors.engine);
 
-    // Fuel, water and oil, measured against full reservoirs.
-    mass += (this.car.fuelLitres - this.model.tankLitres) * FUEL_DENSITY;
-    mass += this.car.waterLitres - stockRadiatorWater(stock[2]!);
-    mass += (this.car.oilLitres - oilCapacity(engine)) * FLUID_DENSITY_OIL;
+    // Fuel, water and oil, measured against full reservoirs — and placed where each of
+    // them actually is: the tank under the rear seat, the fluids with the engine.
+    mass += load(
+      'fuel',
+      (this.car.fuelLitres - this.model.tankLitres) * FUEL_DENSITY,
+      anchors.tank,
+    );
+    mass += load('water', this.car.waterLitres - stockRadiatorWater(stock[2]!), anchors.engine);
+    mass += load(
+      'oil',
+      (this.car.oilLitres - oilCapacity(engine)) * FLUID_DENSITY_OIL,
+      anchors.engine,
+    );
 
-    // Cargo: the boot's own cells, and whatever the driver brought with them.
-    for (const item of this.car.storage) if (item) mass += itemMass(item);
-    mass += this.carriedMassKg;
+    // Cargo: the hold's own cells behind the rear axle, and what the driver is
+    // carrying, which rides in the seat with him.
+    let cargo = 0;
+    for (const item of this.car.storage) if (item) cargo += itemMass(item);
+    mass += load('cargo', cargo, anchors.hold);
+    mass += load('carried', this.carriedMassKg, anchors.seat);
 
     return {
       mass: Math.max(1, mass),
+      loads,
       engine,
       gearbox: this.gearboxFor(engine),
       tankCapacity: this.model.tankLitres,
@@ -3980,7 +4284,7 @@ export class Vehicle implements Rebasable {
     // would re-solve four springs and rewrite the chassis inertia on EVERY tick, for a
     // change no instrument could detect.
     if (Math.abs(this.statsValue.mass - previous) < CARRIED_MASS_EPSILON_KG) return;
-    this.applyChassisMass(this.statsValue.mass);
+    this.applyChassisMass(this.statsValue);
     this.reloadSprings();
   }
 
@@ -3996,6 +4300,12 @@ export class Vehicle implements Rebasable {
    * metre and divided by the mass here: the same spring, now carrying more, sits lower
    * and rings slower, and the bump stop arrives correspondingly sooner.
    *
+   * WHAT MAY NOT MOVE WITH THE LOAD IS THE GEOMETRY. The free length the wheel hangs
+   * on, the travel it is allowed and where the bump stop begins are all cuts of the
+   * car, made once against the KERB design in `rebuild`. Only the two things that
+   * depend on what the corner is carrying are re-derived here: the rates per kilogram,
+   * and the sag the load asks for. Those are the whole of what "loaded" means.
+   *
    * The rates themselves come from the ride frequency at the KERB mass, so a stock car
    * still sits and rides exactly where its preset says.
    */
@@ -4007,16 +4317,20 @@ export class Vehicle implements Rebasable {
     const axles = this.axleGeometry;
 
     for (const w of this.wheels) {
-      const axleShare = w.isFront ? axles.frontWeightShare : 1 - axles.frontWeightShare;
+      // The DESIGN share sizes the spring; the LIVE share is what the corner is
+      // carrying now. `applyChassisMass` resolved it from the car's real centre of
+      // mass, so a crate in the boot has already shifted it off the nose by the time
+      // these springs are asked to carry it — see `rebuild` for the full split.
+      const designShare = w.isFront ? axles.frontWeightShare : 1 - axles.frontWeightShare;
+      const liveShare = w.isFront ? this.parkedFrontShare : 1 - this.parkedFrontShare;
       const axleCount = w.isFront ? axles.frontCount : axles.rearCount;
-      const cornerShare = axleShare / Math.max(1, axleCount);
       const hz = w.isFront ? suspension.frontHz : suspension.rearHz;
       const compressionRatio = suspension.compressionRatio;
       const reboundRatio = suspension.reboundRatio;
 
       // Sized at the kerb load, then asked to carry the real one.
-      const designCornerMass = this.model.mass * cornerShare;
-      const staticLoadN = Math.max(1, weightN * cornerShare);
+      const designCornerMass = this.model.mass * (designShare / Math.max(1, axleCount));
+      const staticLoadN = Math.max(1, weightN * (liveShare / Math.max(1, axleCount)));
       w.staticLoadN = staticLoadN;
       w.springRateNPerM = wheelSpringRateAbs(hz, designCornerMass);
       w.compressionRateNsPerM = wheelDampingRateAbs(hz, compressionRatio, designCornerMass);
@@ -4026,8 +4340,17 @@ export class Vehicle implements Rebasable {
       // measured rather than assumed: this is what an instrument would read.
       const cornerMass = staticLoadN / GRAVITY;
       w.rideHz = Math.sqrt(w.springRateNPerM / Math.max(1, cornerMass)) / (2 * Math.PI);
+      // THE SAG IS A CONSEQUENCE, NOT A SETTING. The same spring, compressed by
+      // `load / rate`, settles this corner that far below its free length, so the car
+      // sits lower, rings slower and runs out of bump travel sooner. The geometry it
+      // compresses INTO — free length, travel and the bump stop — was cut once from the
+      // kerb design in `rebuild` and is not touched here; a corner whose load asks for
+      // more sag than it has travel rests on its stop, which is what an overloaded car
+      // does. Re-deriving the free length here instead is the bug this replaced: it
+      // moved the spring's free length with the load, which cancels the sag exactly
+      // (`rest - length` stays at the mount height whatever the load) and leaves a car
+      // that is only softer.
       w.sagM = staticLoadN / w.springRateNPerM;
-      w.maxTravelM = w.sagM + suspension.bumpTravel;
 
       this.controller.setWheelSuspensionStiffness(w.index, w.springRateNPerM / stats.mass);
       this.controller.setWheelSuspensionCompression(
@@ -4038,11 +4361,6 @@ export class Vehicle implements Rebasable {
         w.index,
         w.relaxationRateNsPerM / stats.mass,
       );
-      this.controller.setWheelMaxSuspensionTravel(w.index, w.maxTravelM);
-      this.controller.setWheelSuspensionRestLength(
-        w.index,
-        w.sagM + MOUNT_ABOVE_WHEEL_CENTRE,
-      );
       this.controller.setWheelMaxSuspensionForce(
         w.index,
         SUSPENSION_FORCE_HEADROOM * staticLoadN,
@@ -4051,19 +4369,236 @@ export class Vehicle implements Rebasable {
   }
 
   /**
-   * Returns the steering angle a wheel actually presents to the road. Bump-steer is
-   * asymmetric by wheel side; the rack angle remains the driver's commanded state.
+   * The steering for one step: where the driver's hands want the rack (`SteerMode`),
+   * the rack speed, the backlash, and the tyres' own aligning moment.
+   *
+   * WHERE THE FRONT TYRES ARE GOING. Each front tyre's patch is travelling in some
+   * direction; the rack angle at which that tyre would roll exactly along it is the
+   * patch's direction less what the tyre's geometry (Ackermann, toe, roll and bump
+   * steer) and camber thrust already add to the rack's. Weighted by load across the
+   * axle, that is the TRAVEL angle: no side force at all, and no aligning moment.
+   *
+   * THE ASSIST. A keyboard key asks for slip ON TOP of the travel angle, a share of the
+   * front tyres' own peak (`sidePeakTan`, their brush peak at their current load) plus
+   * `STEER_ASSIST_SLIP_MARGIN`, so a held key runs the front axle at its peak at any
+   * speed, and the key the tail is stepping toward reaches past where the front axle is
+   * going without a special case — that is a countersteer. It never asks for less than
+   * the same share of the KINEMATIC angle of the tightest circle the front axle's grip
+   * can hold at this speed, `atan(L · a / v²)`, which is the whole lock at parking
+   * speeds, where the slip angle cannot get near its peak. A stick with the assist on
+   * is a position against the same reach, measured from straight ahead, so the stick's
+   * edge is the peak. Backwards or airborne there is nothing to measure and the reach
+   * is the lock.
+   *
+   * HANDS ON AND OFF. A player's steer of exactly 0 is no hand on the wheel: the rack is
+   * free and the tyres swing toward their travel angle on their aligning moment
+   * (`STEER_FREE_TAU_S`), never past it, and the rim follows them. A hand on the wheel
+   * moves the rack at the rack speed, and only the backlash window is left to the
+   * moment.
+   *
+   * The negation converts our basis into Rapier's steering sign. Forward is +Z and the
+   * axle is set to (-1, 0, 0), and with that pairing a POSITIVE steering angle yaws the
+   * car left, while `input.steer` is positive for "the player pressed right". Measured:
+   * without this negation, holding right rotated the car +1.74 rad (left) over two
+   * seconds.
    */
-  private wheelSteerAngle(w: WheelVisual): number {
-    return w.isFront ? this.steerAngle + w.sideSign * this.bumpSteerAngle : 0;
+  private updateSteering(dt: number, input: InputFrame, fwd: number): void {
+    const lock = this.model.steerLock;
+    const steer = clamp(input.steer, -1, 1);
+    this.chassisBody.rotation(this.rotationScratch);
+    rotateVector(this.bodyRightScratch, this.rotationScratch, 1, 0, 0);
+    rotateVector(this.bodyForwardScratch, this.rotationScratch, 0, 0, 1);
+    const right = this.bodyRightScratch;
+    const forward = this.bodyForwardScratch;
+    const rolling = fwd < 0 ? -1 : 1;
+
+    // One pass over the front tyres as the last step left them: the moment about the
+    // steering axes and the one it is measured against (`STEER_FREE_TAU_S`), the travel
+    // angle and the peak, and the steering-lightness cue.
+    const staticCapacityPerN =
+      SURFACES[SurfaceType.Asphalt].mu * this.handling.tyreLateralScale * this.tyreCarGrip(this.statsValue.mass);
+    let moment = 0;
+    let referenceMoment = 0;
+    let travel = 0;
+    let peak = 0;
+    let lightness = 0;
+    let load = 0;
+    let capacity = 0;
+    let staticLoad = 0;
+    let rearSlide = 0;
+    let rearLoad = 0;
+    let rearForce = 0;
+    for (const w of this.wheels) {
+      if (!w.isFront) {
+        if (w.grounded && w.loadN > 0) {
+          rearSlide += w.loadN * w.sideSlip;
+          rearLoad += w.loadN;
+          rearForce += w.sideForceBodyXN;
+        }
+        continue;
+      }
+      moment += w.kingpinMomentNm;
+      referenceMoment += staticCapacityPerN * w.staticLoadN * PNEUMATIC_TRAIL_M;
+      if (!w.grounded || w.loadN <= 0) continue;
+      const along =
+        w.contactVel.x * right.x + w.contactVel.y * right.y + w.contactVel.z * right.z;
+      const ahead =
+        w.contactVel.x * forward.x + w.contactVel.y * forward.y + w.contactVel.z * forward.z;
+      // The patch's line of travel, either way along it, on the tyre model's own slip
+      // floor (`SLIP_ANGLE_REF_MPS`), less the steer the tyre's geometry adds.
+      travel +=
+        w.loadN *
+        (Math.atan2(along * rolling, Math.max(Math.abs(ahead), SLIP_ANGLE_REF_MPS)) -
+          (this.wheelSteerAngle(w) - this.steerAngle) -
+          w.camberSteerRad);
+      peak += w.loadN * Math.atan(w.sidePeakTan);
+      // Past the moment's own peak, the share of it the tyre has lost.
+      const peakMoment = w.lateralCapacityN * PNEUMATIC_TRAIL_M * w.alignPeakShape;
+      if (w.alignSlip > w.alignPeakZ && peakMoment > 0) {
+        lightness += w.loadN * clamp(1 - Math.abs(w.kingpinMomentNm) / peakMoment, 0, 1);
+      }
+      load += w.loadN;
+      capacity += w.lateralCapacityN;
+      staticLoad += w.staticLoadN;
+    }
+    this.steerLightnessValue = load > 0 ? lightness / load : 0;
+    const centre = load > 0 ? travel / load : this.steerAngle;
+    // How far the rear axle's side slip is past its own peak (σy = 1), 0..1: by twice
+    // the peak angle the tail is gone.
+    const tailOut = rearLoad > 0 ? clamp(rearSlide / rearLoad - 1, 0, 1) : 0;
+
+    // Positive rack is a left turn and positive input a right one.
+    const side = steer > 0 ? -1 : 1;
+    const magnitude = Math.abs(steer);
+    let target: number;
+    if (input.steerMode === 'keys' || input.steerMode === 'analogAssist') {
+      const share =
+        input.steerMode === 'keys' ? Math.pow(magnitude, this.handling.steerInputExponent) : magnitude;
+      let reach = share * lock;
+      if (load > 0 && fwd > 0) {
+        const tyrePeak = (peak / load) * (1 + STEER_ASSIST_SLIP_MARGIN);
+        const gripAccel = staticLoad > 0 ? (capacity * GRAVITY) / staticLoad : 0;
+        const kinematic = Math.atan((this.wheelbaseM * gripAccel) / (fwd * fwd));
+        // Keys: slip on top of the travel angle. Stick: a position against the reach.
+        const held =
+          input.steerMode === 'keys'
+            ? Math.max(side * centre + share * tyrePeak, share * kinematic)
+            : share * Math.max(side * centre + tyrePeak, kinematic);
+        // The rear's side force points into the bend the car is in. Asking the front for
+        // more force the same way, with that axle past its own peak, can only turn the
+        // car further about its sliding tail: so on the TURN side the demand gives way
+        // to the travel angle as the tail goes (`tailOut`), until the front wheels just
+        // follow the way the car is going. The countersteer side keeps all of it. The
+        // car's grip at the limit is the grip of the axle that runs out first.
+        const turning = side * rearForce > 0 ? 1 - tailOut : 1;
+        const follow = (input.steerMode === 'keys' ? 1 : share) * side * centre;
+        reach = turning * held + (1 - turning) * follow;
+      }
+      target = side * clamp(reach, -lock, lock);
+    } else {
+      target = -steer * lock;
+    }
+
+    // The tyres' own swing this step, toward the travel angle and never past it: the
+    // moment over the column's damping (`STEER_FREE_TAU_S`).
+    const gap = centre - this.steerAngle;
+    const swingLimit =
+      referenceMoment > 0 ? (Math.abs(moment) / (STEER_FREE_TAU_S * referenceMoment)) * dt : 0;
+    const swing = clamp(gap, -swingLimit, swingLimit);
+    if (input.steerMode !== 'direct' && steer === 0) {
+      this.steerAngle = clamp(this.steerAngle + swing, -lock, lock);
+      this.steerCommand = this.steerAngle;
+      return;
+    }
+    const maxDelta = this.handling.steerRackSpeed * dt;
+    this.steerCommand += clamp(target - this.steerCommand, -maxDelta, maxDelta);
+    const play = this.handling.steerPlay;
+    this.steerAngle = clamp(
+      clamp(this.steerAngle + swing, this.steerCommand - play, this.steerCommand + play),
+      -lock,
+      lock,
+    );
   }
 
   /**
-   * Lets the road talk through the worn front end. A load difference across the front
-   * axle means one wheel has climbed or dropped relative to the other. The disturbance
-   * is stronger on rough surfaces and at speed, where a small toe change becomes a
-   * visible lateral lurch. It is filtered in time, not replaced with random steering,
-   * so the same pothole produces the same correction and a smooth road stays calm.
+   * The steering angle a wheel actually presents to the road: the rack's angle shared
+   * out by the Ackermann geometry, the worn front end's bump disturbance, the static toe
+   * and the roll steer. The rear wheels get the last two. `steerAngle` stays the rack's
+   * — the bicycle-model angle of the axle's centreline, which is what `steerLock`, the
+   * HUD and the autopilot's inverse are written in.
+   */
+  private wheelSteerAngle(w: WheelVisual): number {
+    const roll = w.isFront ? this.frontRollRad : this.rearRollRad;
+    const geometry = w.toeRad + w.rollSteer * roll;
+    if (!w.isFront) return geometry;
+    return this.ackermannAngle(w) + w.sideSign * this.bumpSteerAngle + geometry;
+  }
+
+  /**
+   * ACKERMANN. Rolling without scrub needs both front wheels square to one centre on the
+   * rear axle's line, at `R = L / tan δ` for the rack's centreline angle δ, so the inner
+   * wheel turns to `atan(L / (R − t/2))` and the outer only to `atan(L / (R + t/2))`.
+   * The trapezoid delivers `ackermann` of that difference and the rest is parallel. The
+   * two straddle δ, so the car's centreline turns on the same circle as before and the
+   * factory turning circles `steerLock` was cut to stand; what goes is the inner tyre
+   * dragged sideways at full lock and the outer one under-steered beside it.
+   */
+  private ackermannAngle(w: WheelVisual): number {
+    const delta = this.steerAngle;
+    if (this.ackermann === 0 || delta === 0) return delta;
+    const L = this.wheelbaseM;
+    const tanDelta = Math.tan(Math.abs(delta));
+    // Steering toward +X puts the turn centre on the +X side: that wheel is the inner.
+    const halfTrack = (w.sideSign * delta > 0 ? -0.5 : 0.5) * w.axleTrackM;
+    const ideal = Math.atan2(L * tanDelta, L + halfTrack * tanDelta);
+    return Math.sign(delta) * (Math.abs(delta) + this.ackermann * (ideal - Math.abs(delta)));
+  }
+
+  /**
+   * Each axle's roll against the road: the difference in suspension travel across it
+   * over its track, positive with the +X side compressed (the body leaning toward +X).
+   * Read from last step's travel, which is the geometry the wheels are standing in
+   * now. It drives the roll steer and the roll camber, so it is the RELATIVE angle the
+   * links see — a beam axle's own tilt on a cambered road is not in it.
+   */
+  private updateAxleRoll(): void {
+    this.frontRollRad = this.axleRoll(true);
+    this.rearRollRad = this.axleRoll(false);
+  }
+
+  private axleRoll(front: boolean): number {
+    let plus = 0;
+    let plusCount = 0;
+    let minus = 0;
+    let minusCount = 0;
+    let track = 0;
+    for (const w of this.wheels) {
+      if (w.isFront !== front) continue;
+      track = w.axleTrackM;
+      if (w.sideSign > 0) {
+        plus += w.compressionM;
+        plusCount++;
+      } else {
+        minus += w.compressionM;
+        minusCount++;
+      }
+    }
+    if (plusCount === 0 || minusCount === 0 || track <= 0) return 0;
+    return clamp(
+      (plus / plusCount - minus / minusCount) / track,
+      -AXLE_ROLL_LIMIT_RAD,
+      AXLE_ROLL_LIMIT_RAD,
+    );
+  }
+
+  /**
+   * Lets the road talk through the worn front end. A CHANGE in the load difference
+   * across the front axle means one wheel has climbed or dropped relative to the other.
+   * The disturbance is stronger on rough surfaces and at speed, where a small toe change
+   * becomes a visible lateral lurch. It is filtered in time, not replaced with random
+   * steering, so the same pothole produces the same correction and a smooth road stays
+   * calm. The sustained difference of a steady bend is subtracted: that is roll, and the
+   * kinematic roll steer already answers it (BUMP_STEER_SUSTAINED_TAU).
    */
   private updateBumpSteer(dt: number, speedKmh: number): void {
     let leftLoad = 0;
@@ -4084,80 +4619,121 @@ export class Vehicle implements Rebasable {
     if (roughWheels > 0) {
       const staticWheelLoadN = Math.max(1, (this.statsValue.mass * GRAVITY) / this.wheels.length);
       const loadImbalance = clamp((rightLoad - leftLoad) / staticWheelLoadN, -1, 1);
+      this.sustainedImbalance +=
+        (loadImbalance - this.sustainedImbalance) * (1 - Math.exp(-dt / BUMP_STEER_SUSTAINED_TAU));
       const roughFactor = clamp(
         roughness / roughWheels / BUMP_STEER_FULL_ROUGHNESS,
         0.25,
         1.4,
       );
       const speedFactor = clamp((speedKmh - 12) / 73, 0, 1);
-      target = loadImbalance * this.handling.bumpSteer * roughFactor * speedFactor;
+      target =
+        (loadImbalance - this.sustainedImbalance) * this.handling.bumpSteer * roughFactor * speedFactor;
     }
     const blend = 1 - Math.exp(-dt / BUMP_STEER_TAU);
     this.bumpSteerAngle += (target - this.bumpSteerAngle) * blend;
   }
 
   /**
-   * The anti-roll bars (see ANTI_ROLL_FRONT_FRACTION).
+   * THE BODY IN THE AIR. Every force here is taken from the air's velocity relative to
+   * the car: the weather's wind where this car is (`windAt`, gusts and all) minus the
+   * car's own velocity, resolved on the body's axes — u_F along it (negative driving
+   * into still air), u_R across it. q = ½ρ(u_F² + u_R²).
    *
-   * A bar is a torsion spring between the two wheels of one axle, so it is loaded by
-   * their DIFFERENCE in travel and by nothing else: it adds roll stiffness without
-   * adding ride stiffness, which is exactly what a soft-sprung car needs to corner
-   * without running its outer springs into the bump stops.
+   *   drag      ½ρ·CdA·|u|·u_F along the body, acting at the aerodynamic centre's
+   *             height (AERO_CENTRE_HEIGHT_FRACTION). The step above applied the
+   *             still-air drag at the centre of mass; the difference — the wind's
+   *             share and the drag's pitching moment about the centre of mass — is
+   *             added here.
+   *   lift      q·A·CLf at the front axle and q·A·CLr at the rear, along body-up, so
+   *             speed unloads the springs and the tyres (load sensitivity reads the
+   *             lighter axle). The catalogue's split is the wind tunnel's, which holds
+   *             the car at the road and so already contains the drag's moment about
+   *             it; since the drag acts at its own height here, that moment is taken
+   *             back out of the split (`pitchShare`), or it would be counted twice.
+   *   side      ½ρ·A·dCY/dβ·|u_F|·u_R, the small-yaw side force (q·A·CY at yaw β,
+   *             since |u_F|·u_R = |u|²·sinβ·cosβ), acting `sideCentreAheadM` ahead of
+   *             the wheelbase's midpoint: a crosswind turns the nose downwind and
+   *             asks for a steady correction, as on every real car. Plus the flank's
+   *             crossflow drag ½ρ·CROSSFLOW_CD·side box·|u_R|·u_R at the box's middle,
+   *             which is second order at road speed and the whole of it broadside.
+   *             Both act at the aerodynamic centre's height, so a crosswind also
+   *             leans the body. The force is bounded by the physics, not a cap: the
+   *             strongest wind the weather makes is a haboob's gusts.
    *
-   * Implemented as the pair of equal and opposite vertical forces the real bar applies
-   * at the two wheels, so nothing about it is a torque fudge: the more compressed side
-   * is pushed down and the other pulled up, at the contact points, and the moment that
-   * results is the bar's own. It carries no damping, because a bar has none worth
-   * modelling.
-   *
-   * Runs after `updateWheelDynamics`, which is where `compressionM` is read off the
-   * controller. An axle with a wheel in the air contributes nothing — a bar needs both
-   * ends on the ground to have a difference worth resisting.
+   * Only with a wheel on the ground: an airborne car turned by a gust would only ever
+   * read as a physics bug, and the vertical terms matter only on the springs.
    */
-  /**
-   * The weather's wind on the body (world/weather.ts).
-   *
-   * Drag above is taken against the GROUND, which is right in still air. In wind the
-   * body moves through air that is itself moving, so the difference between the two
-   * — ½ρCdA·(|u|u + |v|v) with u = wind − velocity — is applied here: a headwind
-   * costs top speed, a tailwind gives a little back, and a crosswind leans on the
-   * frontal area. The long flank then adds its own side force on the crosswind
-   * component relative to the body. Horizontal only, at the centre of mass: the push
-   * a driver corrects with a small steady input, never a yaw kick.
-   *
-   * Only with a wheel on the ground: an airborne car in a gust is not a thing this
-   * game needs to model, and it would only ever read as a physics bug.
-   */
-  private applyWind(dt: number, contactCount: number): void {
-    const speed = weather.windMps;
-    if (speed < 0.5 || contactCount === 0) return;
-    const mass = this.chassisBody.mass();
-    this.chassisBody.linvel(this.linvel);
-    const ux = weather.windX * speed - this.linvel.x;
-    const uz = weather.windZ * speed - this.linvel.z;
-    const u = Math.hypot(ux, uz);
-    const v = Math.hypot(this.linvel.x, this.linvel.z);
-    let fx = this.dragCoeff * (u * ux + v * this.linvel.x);
-    let fz = this.dragCoeff * (u * uz + v * this.linvel.z);
-    this.chassisBody.rotation(this.rotationScratch);
-    rotateVector(this.windRightScratch, this.rotationScratch, 1, 0, 0);
-    const rx = this.windRightScratch.x;
-    const rz = this.windRightScratch.z;
-    const rl = Math.hypot(rx, rz);
-    if (rl > 1e-3) {
-      const across = (ux * rx + uz * rz) / rl;
-      const side = this.sideWindCoeff * Math.abs(across) * across;
-      fx += (side * rx) / rl;
-      fz += (side * rz) / rl;
+  private applyAero(dt: number, contactCount: number): void {
+    if (contactCount === 0) return;
+    const body = this.chassisBody;
+    body.linvel(this.linvel);
+    const origin = body.translation(this.aeroOrigin);
+    windAt(origin.x + this.origin.x, origin.z + this.origin.z, this.windScratch);
+    const ux = this.windScratch.x - this.linvel.x;
+    const uy = -this.linvel.y;
+    const uz = this.windScratch.z - this.linvel.z;
+    const rotation = body.rotation(this.rotationScratch);
+    const fwd = this.aeroForward;
+    const right = this.aeroRight;
+    const up = this.aeroUp;
+    rotateVector(fwd, rotation, 0, 0, 1);
+    rotateVector(right, rotation, 1, 0, 0);
+    rotateVector(up, rotation, 0, 1, 0);
+    const uF = ux * fwd.x + uy * fwd.y + uz * fwd.z;
+    const uR = ux * right.x + uy * right.y + uz * right.z;
+    const airSq = uF * uF + uR * uR;
+    if (airSq < 1) return;
+    const air = Math.sqrt(airSq);
+    const mass = body.mass();
+
+    const drag = this.dragCoeff * air * uF;
+    const slender = this.sideSlopeCoeff * Math.abs(uF) * uR;
+    const side = slender + this.crossflowCoeff * Math.abs(uR) * uR;
+    const axles = this.axleGeometry;
+    const wheelbase = axles.frontZ - axles.rearZ;
+    const roadY = -this.measure.halfExtents[1] - this.model.factory.clearance;
+    const pitchShare = (drag * (this.aeroCentreY - roadY)) / wheelbase;
+    const liftFront = this.liftFrontCoeff * airSq + pitchShare;
+    const liftRear = this.liftRearCoeff * airSq - pitchShare;
+
+    // Drag: what the still-air drag at the centre of mass left out, then its height.
+    const hSpeed = Math.hypot(this.linvel.x, this.linvel.z);
+    const impulse = this.forceScratch;
+    impulse.x = (drag * fwd.x + this.dragCoeff * hSpeed * this.linvel.x) * dt;
+    impulse.y = drag * fwd.y * dt;
+    impulse.z = (drag * fwd.z + this.dragCoeff * hSpeed * this.linvel.z) * dt;
+    let delivered = Math.hypot(impulse.x, impulse.y, impulse.z);
+    body.applyImpulse(impulse, false);
+    const comY = roadY + this.rollLeverArm;
+    rotateVector(impulse, rotation, (this.aeroCentreY - comY) * drag * dt, 0, 0);
+    body.applyTorqueImpulse(impulse, false);
+
+    // Side force, at the two terms' combined centre.
+    if (side !== 0) {
+      const ahead = (axles.frontZ + axles.rearZ) / 2 - Math.sign(uF) * this.sideCentreAheadM;
+      this.applyAeroAt(this.aeroCentreY, (slender / side) * ahead, right, side * dt);
+      delivered += Math.abs(side) * dt;
     }
-    // Bounded: a gust front is felt, never a shove the tyres cannot answer.
-    const f = Math.hypot(fx, fz);
-    const cap = WIND_FORCE_MAX_G * GRAVITY * mass;
-    const k = f > cap ? cap / f : 1;
-    this.forceScratch.x = fx * k * dt;
-    this.forceScratch.y = 0;
-    this.forceScratch.z = fz * k * dt;
-    this.chassisBody.applyImpulse(this.forceScratch, true);
+    // Lift, at each axle.
+    this.applyAeroAt(0, axles.frontZ, up, liftFront * dt);
+    this.applyAeroAt(0, axles.rearZ, up, liftRear * dt);
+    delivered += (Math.abs(liftFront) + Math.abs(liftRear)) * dt;
+    // The air's push is the car's own, not a blow (see `ownDragRollingDeltaMps`).
+    this.ownDragRollingDeltaMps += delivered / mass;
+  }
+
+  /** Impulse `amount` along world `axis` at body-local (0, y, z); `aeroOrigin` must be current. */
+  private applyAeroAt(y: number, z: number, axis: Vec3, amount: number): void {
+    const point = this.aeroPoint;
+    rotateVector(point, this.rotationScratch, 0, y, z);
+    point.x += this.aeroOrigin.x;
+    point.y += this.aeroOrigin.y;
+    point.z += this.aeroOrigin.z;
+    this.forceScratch.x = axis.x * amount;
+    this.forceScratch.y = axis.y * amount;
+    this.forceScratch.z = axis.z * amount;
+    this.chassisBody.applyImpulseAtPoint(this.forceScratch, point, false);
   }
 
   /**
@@ -4202,6 +4778,27 @@ export class Vehicle implements Rebasable {
     }
   }
 
+  /**
+   * The anti-roll bars, and every other roll stiffness an axle has beyond its ride
+   * springs (`barFraction`, from `SuspensionTuning.frontBar`/`rearBar`).
+   *
+   * A bar is a torsion spring between the two wheels of one axle, so it is loaded by
+   * their DIFFERENCE in travel and by nothing else: it adds roll stiffness without
+   * adding ride stiffness, which is exactly what a soft-sprung car needs to corner
+   * without running its outer springs into the bump stops. A negative fraction is the
+   * opposite case, a beam axle whose leaves sit inboard of its wheels and so resist
+   * roll less than their ride rate says.
+   *
+   * Implemented as the pair of equal and opposite vertical forces the real bar applies
+   * at the two wheels, so nothing about it is a torque fudge: the more compressed side
+   * is pushed down and the other pulled up, at the contact points, and the moment that
+   * results is the bar's own. It carries no damping, because a bar has none worth
+   * modelling: roll is damped by the dampers alone.
+   *
+   * Runs after `updateWheelDynamics`, which is where `compressionM` is read off the
+   * controller. An axle with a wheel in the air contributes nothing — a bar needs both
+   * ends on the ground to have a difference worth resisting.
+   */
   private applyAntiRollBars(dt: number): void {
     for (const w of this.wheels) w.barN = 0;
     for (let axle = 0; axle < 2; axle++) {
@@ -4212,6 +4809,7 @@ export class Vehicle implements Rebasable {
       let rightCount = 0;
       let groundedBoth = true;
       let rate = 0;
+      let fraction = 0;
       for (const w of this.wheels) {
         if (w.isFront !== front) continue;
         if (!w.grounded) groundedBoth = false;
@@ -4224,17 +4822,13 @@ export class Vehicle implements Rebasable {
         }
         // The bar is sized against its own axle's wheel rate, in N/m.
         rate = w.springRateNPerM;
+        fraction = w.barFraction;
       }
-      if (!groundedBoth || leftCount === 0 || rightCount === 0) continue;
+      if (fraction === 0 || !groundedBoth || leftCount === 0 || rightCount === 0) continue;
       const leftMean = leftSum / leftCount;
       const rightMean = rightSum / rightCount;
       if (leftMean === rightMean) continue;
 
-      const bars = this.model.antiRoll;
-      const fraction = front
-        ? (bars?.front ?? ANTI_ROLL_FRONT_FRACTION)
-        : (bars?.rear ?? ANTI_ROLL_REAR_FRACTION);
-      if (fraction <= 0) continue;
       // Each wheel is pushed by the bar in proportion to how much MORE compressed its
       // own side is than the other. The two are equal and opposite by construction, so
       // a bar can never lift or drop the car — only untwist it. Written this way rather
@@ -4254,82 +4848,41 @@ export class Vehicle implements Rebasable {
   }
 
   /**
-   * Puts the cornering roll couple back (see the ROLL_COUPLE_GAIN note above).
+   * The GEOMETRIC half of each axle's lateral load transfer (see `linkN`).
    *
-   * Lateral acceleration is measured in the car's own frame, and it needs BOTH
-   * terms: the change in body-frame sideways velocity *and* the centripetal term
-   * `yawRate * forwardSpeed`. Differencing alone reads ~0 in a steady circle —
-   * body-frame sideways velocity is constant there while the world velocity vector
-   * swings around — so a car would lean into a corner and then stand back up
-   * mid-bend. With the centripetal term it holds its lean as long as it holds the
-   * radius, which is what a real one does.
+   * The side force reaches the body at the roll centre, so the body only feels — and
+   * the springs and bars only carry — the moment of it ABOVE the roll axis. The rest,
+   * the axle's side force times the roll centre's height over its track, the links take
+   * straight from the tyres to the road: the outer tyre is loaded by it and the inner
+   * unloaded, and the body never rolls for it. Summed per axle rather than per wheel, so
+   * an axle whose outer tyre is doing most of the work does not jack the body up on top
+   * of it: a live axle on a Panhard rod does not, and the strut and wishbone axles here
+   * have roll centres too low for it to matter.
    *
-   * The result is low-passed, clamped, and applied as a torque impulse about the
-   * car's forward axis with the centre of mass' height above the contact plane as
-   * the lever. Sign follows the physics: accelerating towards +X (left) rolls the
-   * body to the right, a positive rotation about +Z.
-   *
-   * Skipped with no wheel on the ground — an airborne car has nothing to lean
-   * against.
+   * Sign: a side force towards body +X loads the wheels on the −X side.
    */
-  private applyRollCouple(dt: number, mass: number, contactCount: number): void {
-    this.chassisBody.linvel(this.linvel);
-    this.chassisBody.rotation(this.rotationScratch);
-
-    // Body-frame velocity: rotate the world velocity by the inverse rotation.
-    this.invRotationScratch.x = -this.rotationScratch.x;
-    this.invRotationScratch.y = -this.rotationScratch.y;
-    this.invRotationScratch.z = -this.rotationScratch.z;
-    this.invRotationScratch.w = this.rotationScratch.w;
-    rotateVector(
-      this.localVelScratch,
-      this.invRotationScratch,
-      this.linvel.x,
-      this.linvel.y,
-      this.linvel.z,
-    );
-    const latVel = this.localVelScratch.x;
-    const fwdVel = this.localVelScratch.z;
-
-    // Yaw rate in the body frame, for the centripetal term.
-    const angvel = this.chassisBody.angvel();
-    rotateVector(this.localAngScratch, this.invRotationScratch, angvel.x, angvel.y, angvel.z);
-    const yawRate = this.localAngScratch.y;
-
-    if (!this.rollPrimed) {
-      this.rollPrimed = true;
-      this.prevLatVel = latVel;
-      return;
+  private resolveLinkTransfer(): void {
+    for (let axle = 0; axle < 2; axle++) {
+      const front = axle === 0;
+      let force = 0;
+      let leftCount = 0;
+      let rightCount = 0;
+      let perNewton = 0;
+      for (const w of this.wheels) {
+        if (w.isFront !== front) continue;
+        force += w.sideForceBodyXN;
+        if (w.sideSign < 0) leftCount++;
+        else rightCount++;
+        perNewton = w.axleTrackM > 0 ? w.rollCentreM / w.axleTrackM : 0;
+      }
+      const ok = leftCount > 0 && rightCount > 0;
+      for (const w of this.wheels) {
+        if (w.isFront !== front) continue;
+        w.linkN = ok
+          ? (-w.sideSign * force * perNewton) / (w.sideSign < 0 ? leftCount : rightCount)
+          : 0;
+      }
     }
-    const rawAccel = (latVel - this.prevLatVel) / dt + yawRate * fwdVel;
-    this.prevLatVel = latVel;
-    const k = 1 - Math.exp(-dt / ROLL_ACCEL_TAU);
-    this.rollAccel += (rawAccel - this.rollAccel) * k;
-
-    if (contactCount === 0) return;
-
-    // Current lean: the body's own left axis tilted out of horizontal. Positive
-    // means the left side is up, i.e. the car is leaning right.
-    rotateVector(this.leanScratch, this.rotationScratch, 1, 0, 0);
-    const leanSin = clamp(this.leanScratch.y, -1, 1);
-    const limitSin = Math.sin((ROLL_LIMIT_DEG * Math.PI) / 180);
-    const accel = clamp(this.rollAccel, -ROLL_ACCEL_MAX * GRAVITY, ROLL_ACCEL_MAX * GRAVITY);
-
-    // Fade the couple out as the lean approaches the limit, but only in the
-    // direction that would deepen it: a car already leaning hard must still be able
-    // to be pushed back upright by the opposite corner.
-    const deepening = Math.sign(accel) === Math.sign(leanSin) || leanSin === 0;
-    const fade = deepening ? Math.max(0, 1 - Math.abs(leanSin) / limitSin) : 1;
-
-    const half = this.measure.halfExtents;
-    const rollInertia = INERTIA_ROLL_GAIN * (mass / 3) * (half[0] * half[0] + half[1] * half[1]);
-    const rollRate = this.localAngScratch.z;
-    const torque =
-      (mass * accel * this.rollLeverArm * ROLL_COUPLE_GAIN * fade -
-        rollInertia * ROLL_RATE_DAMPING * rollRate) *
-      dt;
-    rotateVector(this.forceScratch, this.rotationScratch, 0, 0, torque);
-    this.chassisBody.applyTorqueImpulse(this.forceScratch, true);
   }
 
   /**
@@ -4395,28 +4948,129 @@ export class Vehicle implements Rebasable {
     };
   }
 
-  private applyChassisMass(mass: number): void {
+  /**
+   * Where the loads that are not the kerb body sit, cut once from the measured
+   * geometry. See the `LOAD_*` block in vehicletuning.ts for what each anchor is and
+   * why it is derived rather than authored.
+   *
+   * The two axle lines and the length of the tail behind the rear one are the only
+   * inputs beyond the box itself, which is what lets one rule span the catalogue: a
+   * 3.2 m Oka's hold is 0.48 m of tail and a 4.5 m flatbed's bed is 0.93 m, and both
+   * come out of the same three numbers.
+   */
+  private measureLoadAnchors(): LoadAnchors {
+    const half = this.measure.halfExtents;
+    const axles = this.axleGeometry;
+    const wheelbase = Math.max(0.5, axles.frontZ - axles.rearZ);
+    // One floor pan for the cabin, the boot and a truck's bed: a fraction of the way
+    // up the measured box, which is the only floor line the geometry has.
+    const floorY = -half[1] + LOAD_FLOOR_FRACTION * 2 * half[1];
+    // How much car there is behind the rear axle line: exactly the region a boot or a
+    // bed occupies, measured rather than assumed, so a short hatch and a long saloon
+    // both put their cargo where they can actually carry it.
+    const tail = Math.max(0, half[2] + axles.rearZ);
+    const holdBehind = this.model.bodyClass === 'car'
+      ? LOAD_BOOT_BEHIND_REAR_AXLE
+      : LOAD_BED_BEHIND_REAR_AXLE;
+    return {
+      tank: {
+        y: floorY - LOAD_TANK_BELOW_FLOOR,
+        z: axles.rearZ + LOAD_TANK_AHEAD_OF_REAR_AXLE * wheelbase,
+      },
+      engine: {
+        y: floorY + LOAD_ENGINE_ABOVE_FLOOR,
+        z: axles.frontZ,
+      },
+      hold: {
+        y: floorY + LOAD_CARGO_HALF_HEIGHT,
+        z: axles.rearZ - holdBehind * tail,
+      },
+      seat: {
+        y: floorY + LOAD_SEAT_ABOVE_FLOOR,
+        z: axles.frontZ - LOAD_SEAT_BEHIND_FRONT_AXLE * wheelbase,
+      },
+    };
+  }
+
+  /**
+   * Puts the car's mass where it actually is: the kerb body at its factory point, plus
+   * every load since as a point mass at its own anchor, combined by mass.
+   *
+   * The kerb body is one rigid body with a tensor about its own centre — the solid box
+   * this always used, with the gains above, at the catalogue's weight distribution. Every
+   * load is a point with no inertia of its own, so it contributes nothing about its own
+   * centre and `m·d²` about the combined one: the parallel-axis theorem, which is the
+   * whole of what moves when a crate goes in the boot. The car's rotational feel therefore
+   * changes with the load as well as its stance — a crate behind the rear axle lengthens
+   * the yaw lever, and it is the yaw lever that decides how quickly the back steps out.
+   *
+   * A stock car at a full tank has NO loads: all six terms are deltas from the state
+   * `model.mass` already describes, so the combined centre of mass, the tensor and every
+   * static load come out exactly where they were before any of this existed.
+   */
+  private applyChassisMass(stats: VehicleStats): void {
     const half = this.measure.halfExtents;
     const hx = half[0];
     const hy = half[1];
     const hz = half[2];
-    // Solid-box principal inertias about the centre, scaled by mass and then by the
-    // gains above: x is pitch, y is yaw, z is roll.
-    const inertia = {
-      x: INERTIA_PITCH_YAW_GAIN * (mass / 3) * (hy * hy + hz * hz),
-      y: INERTIA_PITCH_YAW_GAIN * (mass / 3) * (hx * hx + hz * hz),
-      z: INERTIA_ROLL_GAIN * (mass / 3) * (hx * hx + hy * hy),
-    };
-    // WHERE THE MASS SITS ALONG THE CAR. A front weight fraction f puts the centre of
-    // mass f of the way from the rear axle to the front one, which is the definition
-    // of the fraction and the only placement that makes the axle loads come out at
-    // f and 1-f. Front-drive cars therefore genuinely carry their nose, and the
-    // static loads every grip calculation is referenced against are the real ones.
+    // WHERE THE KERB BODY SITS. A front weight fraction f puts the centre of mass f of
+    // the way from the rear axle to the front one, which is the definition of the
+    // fraction and the only placement that makes the axle loads come out at f and 1-f.
+    // Front-drive cars therefore genuinely carry their nose, and the static loads every
+    // grip calculation is referenced against are the real ones.
     const axles = this.axleGeometry;
-    const comZ = axles.rearZ + axles.frontWeightShare * (axles.frontZ - axles.rearZ);
+    const kerbZ = axles.rearZ + axles.frontWeightShare * (axles.frontZ - axles.rearZ);
+    const kerbY = -COM_DROP_FRACTION * hy;
+
+    let kerbMass = stats.mass;
+    let momentX = 0;
+    let momentY = 0;
+    let momentZ = 0;
+    for (const load of stats.loads) {
+      kerbMass -= load.massKg;
+      momentX += load.massKg * load.x;
+      momentY += load.massKg * load.y;
+      momentZ += load.massKg * load.z;
+    }
+    const mass = Math.max(1, stats.mass);
+    // All modelled loads are on the centreline, so x stays 0 by construction rather
+    // than by omission: an off-centre mass would move the combined centre of mass the
+    // same way the other two axes do.
+    const comX = momentX / mass;
+    const comY = (kerbMass * kerbY + momentY) / mass;
+    const comZ = (kerbMass * kerbZ + momentZ) / mass;
+
+    // Solid-box principal inertias of the kerb body about its own centre, x is pitch,
+    // y is yaw, z is roll — then each part moved to the combined centre of mass by the
+    // parallel-axis theorem. The gains apply to the box's OWN tensor, which is the term
+    // they were calibrated against; a displacement that is measured outright needs no
+    // correction, so the transfer terms are plain.
+    const dx = comX;
+    const dy = kerbY - comY;
+    const dz = kerbZ - comZ;
+    const inertia = {
+      x:
+        INERTIA_PITCH_YAW_GAIN * (kerbMass / 3) * (hy * hy + hz * hz) +
+        kerbMass * (dy * dy + dz * dz),
+      y:
+        INERTIA_PITCH_YAW_GAIN * (kerbMass / 3) * (hx * hx + hz * hz) +
+        kerbMass * (dx * dx + dz * dz),
+      z:
+        INERTIA_ROLL_GAIN * (kerbMass / 3) * (hx * hx + hy * hy) +
+        kerbMass * (dx * dx + dy * dy),
+    };
+    for (const load of stats.loads) {
+      const px = load.x - comX;
+      const py = load.y - comY;
+      const pz = load.z - comZ;
+      inertia.x += load.massKg * (py * py + pz * pz);
+      inertia.y += load.massKg * (px * px + pz * pz);
+      inertia.z += load.massKg * (px * px + py * py);
+    }
+
     this.chassisBody.setAdditionalMassProperties(
       mass,
-      { x: 0, y: -COM_DROP_FRACTION * hy, z: comZ },
+      { x: comX, y: comY, z: comZ },
       inertia,
       { x: 0, y: 0, z: 0, w: 1 },
       false,
@@ -4424,6 +5078,22 @@ export class Vehicle implements Rebasable {
     // Make mass() current immediately so the vehicle controller's suspension
     // (which reads chassis.mass() each step) sees the new value on the next tick.
     this.chassisBody.recomputeMassPropertiesFromColliders();
+
+    // The lever IS this centre of mass' height above the contact plane, so it follows
+    // the load: a crate that raises the centre of mass raises it above the roll axis
+    // and the pitch couple's arm with it, which is the whole reason a tall load leans.
+    const contactY = -hy - this.model.factory.clearance;
+    this.rollLeverArm = Math.max(0.1, comY - contactY);
+    this.rollInertiaKgM2 = inertia.z;
+
+    // And the parked weight split, which is what the springs are solved against. Taken
+    // as the catalogue figure plus the loads' own moment, so a stock car is bit-for-bit
+    // the number `frontWeightFraction` returned rather than a round trip through comZ.
+    const wheelbase = axles.frontZ - axles.rearZ;
+    this.parkedFrontShare =
+      wheelbase > 1e-3
+        ? clamp(axles.frontWeightShare + (comZ - kerbZ) / wheelbase, 0, 1)
+        : axles.frontWeightShare;
   }
 
   /**

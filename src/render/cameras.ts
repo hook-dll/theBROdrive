@@ -6,6 +6,7 @@ import {
   DEFAULT_FIELD_OF_VIEW,
   FIELD_OF_VIEW_MAX,
   FIELD_OF_VIEW_MIN,
+  type CameraStyle,
 } from '../game/settings';
 import { WorldOrigin, type RebaseShift } from '../world/origin';
 
@@ -26,6 +27,16 @@ export interface CameraTarget {
   wheelContact: number;
   /** Bonnet camera mount in chassis-local metres; see CarModelMeasure.hoodPoint. */
   hoodOffset: readonly [number, number, number];
+  /**
+   * Velocity in the float frame, X and Z, m/s. Zero on foot.
+   *
+   * Read only by the dynamic camera: its DIRECTION is what a slip angle is — the
+   * angle between where the car points and where it is actually going — and its rate
+   * of change, projected on the car's side axis, is the lateral acceleration the lean
+   * is built from.
+   */
+  velocityX: number;
+  velocityZ: number;
 }
 
 /* ---- tuning ---- */
@@ -192,6 +203,76 @@ const SHAKE_ROLL_RAD = 0.01664;
  */
 const SHAKE_SMOOTH_GAIN = 0.6;
 const SHAKE_ROUGH_FULL = 0.1;
+/* ---- dynamic camera: `CameraStyle.dynamic`; zero effect in steady ---- */
+
+/**
+ * Share of the slip angle the chase heading follows, and its cap.
+ *
+ * A share rather than the whole angle: the camera should LOOK along the direction of
+ * travel enough that oversteer reads in the frame, not so much that it becomes a
+ * velocity vector shot. 0.4 of a 20-degree slide moves the view 8 degrees, which is
+ * visible in the frame without the car leaving the third it occupies; the slip is
+ * capped at 26 degrees first, so a spin never swings the view past about 10.
+ */
+const SLIP_LOOK_SHARE = 0.4;
+const SLIP_LOOK_MAX_RAD = 0.45;
+/**
+ * Speed band over which the slip angle is trusted, m/s.
+ *
+ * Below `SLIP_MIN` the velocity heading is noise — a car creeping at 1 m/s has a
+ * direction that flickers with the last centimetre of steering — so the term fades in
+ * rather than switching on, and at a standstill it is exactly zero.
+ */
+const SLIP_MIN_SPEED_MPS = 2.5;
+const SLIP_FULL_SPEED_MPS = 10;
+/**
+ * Follow stiffness of the dynamic chase heading, rad/s.
+ *
+ * Faster than the steady camera's automatic recentre (2) so the view is tracking the
+ * car through the corner rather than arriving after it — the lag that makes the slide
+ * visible is this omega's, not a timer's. Still well under the position spring's 12,
+ * because a heading that snapped would show the slide as a cut.
+ */
+const DYNAMIC_FOLLOW_OMEGA = 3.4;
+/**
+ * Lateral eye offset per m/s² of measured lateral acceleration, metres, and its cap.
+ *
+ * The road's ordinary bends pull 1.5-2.5 m/s², so the gain is set for those: 0.05 m
+ * per m/s² is 0.1 m in a bend (about a degree of the car's place in the frame at the
+ * chase distance) and reaches the 0.35 m cap at 7 m/s², a hard corner. Less than that
+ * and the lean is only there in a slide; a lean you cannot see is not a lean.
+ */
+const LEAN_PER_MPS2 = 0.05;
+const LEAN_MAX_M = 0.35;
+/**
+ * The lean is a critically damped spring: position and velocity, closed form, so it is
+ * exact at any frame rate and can never overshoot into a wobble.
+ */
+const LEAN_OMEGA = 5;
+/** Measured accelerations past this are a crash or a teleport, not a corner. */
+const LEAN_ACCEL_CLAMP = 14;
+/**
+ * Share of the body's roll the bonnet view takes, and its cap, radians.
+ *
+ * The mount is rigid, so it already inherits the roll's TRANSLATION; this is the part
+ * of the rotation the steady view deliberately withholds (see `desiredHood`). Capped
+ * well under a real body-roll angle, because a bonnet camera bolted to a rolling
+ * chassis is nauseating at full fidelity.
+ */
+const HOOD_ROLL_SHARE = 0.6;
+const HOOD_ROLL_MAX_RAD = 0.1;
+/**
+ * Look-into-corner: radians of view yaw at full lock, and the speed at which it is
+ * gone (km/h).
+ *
+ * At walking pace the camera should point where the wheels point, because that is where
+ * the car is about to go and the driver is watching the parking space rather than the
+ * road. The moment the car is actually turning, the follow spring is doing that job, so
+ * this hands over by `STEER_LOOK_FADE_KMH`.
+ */
+const STEER_LOOK_MAX_RAD = 0.2;
+const STEER_LOOK_FADE_KMH = 40;
+
 /** Death first turns the existing view down, then lifts it while the screen fades. */
 const DEATH_LOOK_DOWN_SECONDS = 2.5;
 const DEATH_RISE_SECONDS = 6.5;
@@ -211,6 +292,26 @@ const _rayOrigin = { x: 0, y: 0, z: 0 };
 const _rayDir = { x: 0, y: 0, z: 0 };
 const _qB = new THREE.Quaternion();
 const _eA = new THREE.Euler();
+/** Output of `springStep`, written in place so the camera path allocates nothing. */
+const _spring = { position: 0, velocity: 0 };
+
+/**
+ * One step of a critically damped spring from (`position`, `velocity`) toward
+ * `target`, exact for any step because it is the closed form rather than an
+ * integration: it can neither overshoot nor change its own rate with the frame rate.
+ */
+function springStep(
+  position: number,
+  velocity: number,
+  target: number,
+  omega: number,
+  dt: number,
+): void {
+  const offset = position - target;
+  const decay = Math.exp(-omega * dt);
+  _spring.position = target + (offset + (velocity + omega * offset) * dt) * decay;
+  _spring.velocity = (velocity - omega * (velocity + omega * offset) * dt) * decay;
+}
 
 function clamp(x: number, lo: number, hi: number): number {
   return x < lo ? lo : x > hi ? hi : x;
@@ -278,6 +379,26 @@ export class CameraRig {
   private shakeTime = 0;
   /** `Settings.cameraShake`. */
   private shake = true;
+  /** `Settings.cameraStyle`. Steady is what this rig has always been. */
+  private style: CameraStyle = 'steady';
+  /** Slip angle the chase heading follows, radians; zero in steady. */
+  private slipAngle = 0;
+  /** Low-passed measured lateral acceleration, m/s², along the car's local +X (its left). */
+  private lateralAccel = 0;
+  /**
+   * Last solver velocity seen, m/s, and the render time since it changed, seconds; the
+   * measurement above is its rate of change. NaN until the first sample of a drive.
+   */
+  private lastVelX = Number.NaN;
+  private lastVelZ = Number.NaN;
+  private velAge = 0;
+  /** Lateral eye offset, metres (positive toward the car's local +X, its left), and its velocity. */
+  private leanOffset = 0;
+  private leanVelocity = 0;
+  /** Look-into-corner yaw, radians; zero in steady. */
+  private steerLook = 0;
+  /** Body roll carried into the bonnet view, radians; zero in steady. */
+  private hoodRoll = 0;
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
@@ -307,6 +428,29 @@ export class CameraRig {
   /** `Settings.cameraShake`: whether the driving view trembles at speed. */
   setShake(on: boolean): void {
     this.shake = on;
+  }
+
+  /**
+   * `Settings.cameraStyle`. Applied in place, and entering `steady` clears every
+   * dynamic term, so the steady camera is the camera this rig has always been rather
+   * than one that has just stopped moving.
+   */
+  setStyle(style: CameraStyle): void {
+    if (style === 'steady') this.resetDynamics();
+    this.style = style;
+  }
+
+  /** Every measured term back to rest; see `setStyle` and the snap points below. */
+  private resetDynamics(): void {
+    this.slipAngle = 0;
+    this.lateralAccel = 0;
+    this.lastVelX = Number.NaN;
+    this.lastVelZ = Number.NaN;
+    this.velAge = 0;
+    this.leanOffset = 0;
+    this.leanVelocity = 0;
+    this.steerLook = 0;
+    this.hoodRoll = 0;
   }
 
   /**
@@ -498,6 +642,10 @@ export class CameraRig {
 
     const inputMode: CameraMode = onFoot ? 'foot' : this._mode;
     if (!onFoot) this.updateVehicleYaw(target);
+    // The dynamic camera reads the car's own motion; steady leaves every term it
+    // writes at zero, which is what keeps that camera exactly what it was.
+    if (onFoot) this.resetDynamics();
+    else if (this.style === 'dynamic') this.updateDynamics(d, input, target);
 
     // The hood mount turns with the car, so its heading is stored as an OFFSET from
     // the chassis and rebuilt against the live heading every frame. Keeping the raw
@@ -532,13 +680,18 @@ export class CameraRig {
     // player; settling below RECENTER_EPSILON completes it. On foot yaw is the
     // movement basis (WASD is camera-relative, see player.ts), so there re-centre
     // only levels the horizon instead of spinning the player under them.
+    //
+    // The heading both paths follow is the car's own, plus the slip angle the dynamic
+    // style shows; in steady the second term is exactly zero.
+    const followYaw = wrapAngle(this.vehicleYaw + this.slipAngle);
+    const followOmega = this.style === 'dynamic' ? DYNAMIC_FOLLOW_OMEGA : CHASE_RECENTER_OMEGA;
     if (this.recentering && (input.lookYaw !== 0 || input.lookPitch !== 0)) {
       this.recentering = false;
     }
     if (input.recenterCamera) {
       this.recentering = true;
       // Capture once: even a re-centre in progress must not inherit a wreck's spin.
-      this.recenterYaw = onFoot ? 0 : this.vehicleYaw;
+      this.recenterYaw = onFoot ? 0 : followYaw;
     }
     if (this.recentering) {
       const k = 1 - Math.exp(-RECENTER_OMEGA * d);
@@ -560,11 +713,11 @@ export class CameraRig {
       !this.recentering &&
       this.chaseLookIdle >= CHASE_RECENTER_IDLE_SECONDS
     ) {
-      const yawError = wrapAngle(this.vehicleYaw - this.yawValue);
+      const yawError = wrapAngle(followYaw - this.yawValue);
       if (Math.abs(yawError) < RECENTER_EPSILON) {
-        this.yawValue = this.vehicleYaw;
+        this.yawValue = followYaw;
       } else {
-        const k = 1 - Math.exp(-CHASE_RECENTER_OMEGA * d);
+        const k = 1 - Math.exp(-followOmega * d);
         this.yawValue = wrapAngle(this.yawValue + yawError * k);
       }
     }
@@ -636,6 +789,12 @@ export class CameraRig {
 
     _mA.lookAt(this.eye, this.lookAt, _UP);
     this.camera.quaternion.setFromRotationMatrix(_mA);
+    // The dynamic style lets the bonnet view's horizon roll with the body, which is
+    // the one thing the steady mount deliberately refuses (see `desiredHood`). Applied
+    // about the view axis only, so the aim is untouched and just the frame turns.
+    if (mode === 'hood' && this.hoodRoll !== 0) {
+      this.camera.quaternion.multiply(_qB.setFromEuler(_eA.set(0, 0, this.hoodRoll, 'ZYX')));
+    }
     if (mode !== 'foot' && this.shake) this.applyShake(target);
     // The camera sits in the relative scene graph, so its position is the relative
     // eye verbatim — no origin arithmetic here or at any consumer. The eye is built
@@ -688,13 +847,103 @@ export class CameraRig {
     }
   }
 
+  /**
+   * The dynamic camera's read of the car: how far sideways it is really going, how
+   * hard the tyres are pushing it there, and how far the body has rolled.
+   *
+   * All three are measurements of the CHASSIS, not of the driver's hands. That is the
+   * point of the style: the framing shows what the car is doing, including the parts
+   * nobody asked for — a slide the steering did not request is exactly the thing a
+   * steady camera hides, because it holds the car's heading and not its path.
+   *
+   * The lateral acceleration is the world velocity's rate of change projected on the
+   * body's side axis and low-passed, which is what a real accelerometer under the seat
+   * would report; each sample is clamped first so a collision cannot fling the eye a
+   * metre sideways for a frame.
+   */
+  private updateDynamics(dt: number, input: InputFrame, target: CameraTarget): void {
+    const vx = target.velocityX;
+    const vz = target.velocityZ;
+    const speed = Math.hypot(vx, vz);
+    // A slip angle at walking pace is noise, so the term fades in with speed instead
+    // of switching on: the velocity heading of a car moving at 1 m/s is whichever way
+    // the last centimetre of steering left it.
+    const share = clamp(
+      (speed - SLIP_MIN_SPEED_MPS) / (SLIP_FULL_SPEED_MPS - SLIP_MIN_SPEED_MPS),
+      0,
+      1,
+    );
+    this.slipAngle =
+      clamp(wrapAngle(Math.atan2(vx, vz) - this.vehicleYaw), -SLIP_LOOK_MAX_RAD, SLIP_LOOK_MAX_RAD)
+      * share * SLIP_LOOK_SHARE;
+
+    // Body axes from the chassis quaternion. The car faces local +Z with +Y up, so its
+    // local +X is the driver's LEFT; the lean below lives on that same axis.
+    const qx = target.qx;
+    const qy = target.qy;
+    const qz = target.qz;
+    const qw = target.qw;
+    const sideX = 1 - 2 * (qy * qy + qz * qz);
+    const sideZ = 2 * (qx * qz - qy * qw);
+    // Acceleration is the WORLD velocity's rate of change projected on the side axis.
+    // Differentiating the body-frame sideways speed instead reads zero in a steady
+    // corner, because the centripetal part (speed × yaw rate) is exactly what turning
+    // the axis with the car cancels. The velocity is the solver's, which only moves on
+    // a physics step, so the difference is taken over the time since it last changed:
+    // a render frame between steps is no measurement, not a zero one, and the result
+    // is the same at any refresh rate.
+    this.velAge += dt;
+    if (Number.isNaN(this.lastVelX)) {
+      this.lastVelX = vx;
+      this.lastVelZ = vz;
+      this.velAge = 0;
+    } else if (vx !== this.lastVelX || vz !== this.lastVelZ) {
+      const measured = clamp(
+        ((vx - this.lastVelX) * sideX + (vz - this.lastVelZ) * sideZ) / this.velAge,
+        -LEAN_ACCEL_CLAMP,
+        LEAN_ACCEL_CLAMP,
+      );
+      this.lateralAccel += (measured - this.lateralAccel) * (1 - Math.exp(-LEAN_OMEGA * this.velAge));
+      this.lastVelX = vx;
+      this.lastVelZ = vz;
+      this.velAge = 0;
+    }
+
+    // The eye leans OUT of the corner: the tyres push the car toward the turn's
+    // centre, so the camera bolted to its outside edge travels the other way.
+    springStep(
+      this.leanOffset,
+      this.leanVelocity,
+      -clamp(this.lateralAccel * LEAN_PER_MPS2, -LEAN_MAX_M, LEAN_MAX_M),
+      LEAN_OMEGA,
+      dt,
+    );
+    this.leanOffset = _spring.position;
+    this.leanVelocity = _spring.velocity;
+
+    // Body roll against the horizon: the angle the car's own side axis makes with
+    // level, which is the roll a passenger sees through the windscreen.
+    const upY = 1 - 2 * (qx * qx + qz * qz);
+    const sideY = 2 * (qx * qy + qz * qw);
+    this.hoodRoll =
+      clamp(-Math.atan2(sideY, upY), -HOOD_ROLL_MAX_RAD, HOOD_ROLL_MAX_RAD) * HOOD_ROLL_SHARE;
+
+    this.steerLook =
+      input.steer * STEER_LOOK_MAX_RAD * (1 - clamp(target.speedKmh / STEER_LOOK_FADE_KMH, 0, 1));
+  }
+
   private desiredArm(target: CameraTarget): void {
     // External cameras use a WORLD-space view heading. The chassis contributes
     // position and speed only: yaw, pitch and roll can change arbitrarily during a
     // wreck without rotating the view. Mouse input is the sole continuous source
     // of external-camera orientation.
-    const viewX = Math.sin(this.yawValue);
-    const viewZ = Math.cos(this.yawValue);
+    //
+    // Look-into-corner adds a bounded offset to that heading at low speed only; it is
+    // exactly zero in steady and at any real speed, so the heading above is unchanged
+    // there.
+    const viewYaw = this.yawValue + this.steerLook;
+    const viewX = Math.sin(viewYaw);
+    const viewZ = Math.cos(viewYaw);
 
     // The chassis transform is the measured centre of the rendered model (see
     // render/carmodel.ts). Keep that point at the centre of the view at every
@@ -712,6 +961,14 @@ export class CameraRig {
 
     const stretch = clamp(this.surge * SURGE_STRETCH_PER_MPS2, -SURGE_PUSH_MAX, SURGE_PULL_MAX);
     _vA.copy(_vB).addScaledVector(_vD, Math.exp(this.logDistance) * (1 + stretch));
+
+    // The lean: sideways eye travel with the car's own body, out of the corner. The
+    // offset is along the view's local +X horizontal (its left, as the car's), the same
+    // axis the measurement was taken on; zero in steady and at rest.
+    if (this.leanOffset !== 0) {
+      _vA.x += this.leanOffset * Math.cos(viewYaw);
+      _vA.z -= this.leanOffset * Math.sin(viewYaw);
+    }
   }
 
   /** Turns the finished driving view by this frame's speed shake; see SHAKE_START_KMH. */
@@ -869,6 +1126,9 @@ export class CameraRig {
     this.fov = this.baseFov;
     this.surge = 0;
     this.surgeSpeedMps = 0;
+    // Stepping out ends the drive the dynamic terms were measuring; entering a car
+    // must not start from the last one's lean.
+    this.resetDynamics();
   }
 
   /** Snap into the remembered driving pose on entry, preserving its arm exactly. */
@@ -876,6 +1136,7 @@ export class CameraRig {
     this.updateVehicleYaw(target);
     this.surge = 0;
     this.surgeSpeedMps = target.speedKmh / 3.6;
+    this.resetDynamics();
     if (this._mode === 'hood') {
       this.yawValue = wrapAngle(this.vehicleYaw + this.hoodYawOffset);
       this.desiredHood(target);

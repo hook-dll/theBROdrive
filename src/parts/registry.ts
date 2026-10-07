@@ -175,6 +175,81 @@ export interface SuspensionTuning {
   readonly reboundRatio: number;
   /** Compression available past static sag before the bump stop shuts, metres. */
   readonly bumpTravel: number;
+  /**
+   * Each axle's ROLL CENTRE: the height above the road, at ride height, through which
+   * the links hand the tyres' side force to the body. It is set by the linkage, not the
+   * springs: a MacPherson strut or parallel wishbones put it 0.03-0.12 m off the road, a
+   * twist beam 0.10-0.25 m, a live axle on a Panhard rod or on leaf springs at the rod
+   * or the spring seat, 0.25-0.50 m.
+   *
+   * It splits the axle's lateral load transfer in two. `side force · height / track` goes
+   * straight through the links to the tyres and never rolls the body (the geometric
+   * part); the rest of the moment, the side force times the centre of mass' height ABOVE
+   * the roll axis, rolls the body until the springs and bars hold it (the elastic part).
+   * A high roll centre therefore means less lean AND more transfer on that axle.
+   */
+  readonly frontRollCentreM: number;
+  readonly rearRollCentreM: number;
+  /**
+   * Anti-roll bar on each axle, as a fraction of that axle's own wheel rate: a bar adds
+   * `fraction · rate` to each wheel's rate in roll and nothing in heave. 0 is no bar. A
+   * twist beam is its own bar (the beam twists), so its rear figure is the beam's. A
+   * beam axle on leaf springs set inboard of the wheels resists roll by only
+   * `(spring spacing / track)²` of its ride rate, which is written as a negative figure:
+   * `(spacing / track)² − 1`.
+   *
+   * With the roll centres, the bars are the balance lever: the axle with more roll
+   * stiffness takes more of the elastic transfer, loads its outer tyre harder and,
+   * through load sensitivity, runs out of grip first.
+   */
+  readonly frontBar: number;
+  readonly rearBar: number;
+  /**
+   * STEERING GEOMETRY. The share of true Ackermann the steering trapezoid gives, 0..1:
+   * 0 is parallel steer (both front wheels at the rack angle), 1 points both wheels at
+   * the one centre on the rear axle's line, the inner wheel steered more. Production
+   * cars run 0.5-0.8; the arms are bent to package the rack, not to the ideal.
+   */
+  readonly ackermann: number;
+  /**
+   * Static camber per wheel, degrees; positive is the top of the tyre leaning OUT of the
+   * car. The factory alignment figure (a Zhiguli +0°30′, a Samara or Volga 0°).
+   */
+  readonly frontCamberDeg: number;
+  readonly rearCamberDeg: number;
+  /**
+   * How much of the body's roll the wheel takes with it as camber against the ROAD: 1 is
+   * a wheel that stays parallel to the body (trailing arm, equal wishbones), 0 one that
+   * stays square to the road whatever the body does (any beam axle). A MacPherson strut
+   * is ~0.8, unequal wishbones ~0.6: their camber gain claws back the rest.
+   */
+  readonly frontRollCamber: number;
+  readonly rearRollCamber: number;
+  /**
+   * Static toe per wheel, degrees; positive is toe-IN (the front of the tyre toward the
+   * car's centreline). A factory total-toe figure in mm is `2 · d · tan(toe)` across the
+   * diameter `d` it is measured at.
+   */
+  readonly frontToeDeg: number;
+  readonly rearToeDeg: number;
+  /**
+   * ROLL STEER, degrees of steer per degree of body roll, positive for roll UNDERSTEER:
+   * the front wheels steering out of the turn as the body leans, the rear axle steering
+   * into it. It is the anti-symmetric half of the bump-steer curve (each wheel's toe
+   * against its own travel) for an independent axle, and the whole axle yawing on its
+   * links or leaves for a beam. Typical: 0.02-0.1 front, 0.05-0.15 for a live axle.
+   */
+  readonly frontRollSteer: number;
+  readonly rearRollSteer: number;
+  /**
+   * CASTER, degrees: the steering axis leaning back at the top. It puts the contact
+   * patch `wheelRadius · tan(caster)` behind where the axis meets the road — the
+   * MECHANICAL TRAIL — and that lever, with the tyre's own pneumatic trail, is what the
+   * side force turns the steering back with. Factory figures: a Zhiguli or Niva
+   * +3°30′, a UAZ +3°, the front-driven Samara family +1°30′, a Volga's kingpins
+   * +0°30′. Steering only; the body's yaw never sees it (see `PNEUMATIC_TRAIL_M`).
+   */
+  readonly frontCasterDeg: number;
 }
 
 /*

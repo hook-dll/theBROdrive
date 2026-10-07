@@ -1,5 +1,5 @@
 /**
- * Pure drivetrain simulation: crank, gears, engine braking and fuel.
+ * Pure drivetrain simulation: crank, clutch, gears, engine braking and fuel.
  *
  * No Three.js, no Rapier. It consumes numbers and produces numbers, so it is
  * testable in isolation and reusable by an AI driver or a replay without a
@@ -42,8 +42,8 @@ const GEAR_NEUTRAL = 0;
  * 800 rpm is running far below the speed its manifold and cam are tuned for; the
  * curve this replaced delivered 0.63 of peak net here, and the standing-start and
  * climb checks (handling-cli, climb-sweep) were built on that, so the net figure
- * keeps it. Launches do not depend on it: first gear slips the clutch at the torque
- * peak (see `update`).
+ * keeps it. Launches do not depend on it: a standing start slips the clutch at the
+ * torque peak (see the automatic clutch note).
  */
 const IDLE_TORQUE_FRACTION = 0.62;
 /**
@@ -102,12 +102,17 @@ const TURBO_SPOOL_DOWN_S = 0.35;
  *   about 43 Nm, the believable overrun figures the Soviet driveline note in
  *   parts/registry.ts is sized to.
  *
- * It MUST be applied only to the closed-throttle engine-braking branch. Scaling
- * the drive path instead would bleed engine friction out of the part-throttle
- * blend (`update`) and move every part-throttle response the traffic and the
- * autopilot are tuned on.
+ * It MUST be applied only to the closed-throttle end of the pedal. Scaling the
+ * drive path instead would bleed engine friction out of the part-throttle blend
+ * (`update`) and move every part-throttle response the traffic and the autopilot
+ * are tuned on. The closed-throttle pumping fades out over the first
+ * `PART_THROTTLE_PUMPING_FADE` of pedal (`crankTorqueNm`), so the overrun drag is
+ * continuous with the part-throttle blend instead of jumping at a pedal of zero, and
+ * from that pedal up the blend is exactly what it always was.
  */
 const CLOSED_THROTTLE_BRAKE_FACTOR = 2.5;
+/** Pedal over which the closed-throttle pumping fades into the open-throttle friction. */
+const PART_THROTTLE_PUMPING_FADE = 0.1;
 /**
  * Fraction of the over-redline crank speed that still contributes viscous
  * braking drag. Past the redline an engine's pumping work is throttled by valve
@@ -158,6 +163,65 @@ const AUTO_DIRECTION_CHANGE_MPS = 0.25;
 const FLYWHEEL_UP_TAU = 0.12;
 const FLYWHEEL_DOWN_TAU = 0.35;
 
+/*
+ * ---- the automatic clutch ----
+ *
+ * There is no clutch pedal; a controller works the clutch in both gearbox modes, the
+ * way a period automated manual does. The clutch is one of four states:
+ *
+ *   open     neutral or mid-shift: nothing crosses it, and the crank follows the
+ *            pedal (`freeRev`) or, mid-shift, the speed the next gear will take.
+ *   launch   the gearbox side would turn the crank below idle (pulling away, or
+ *            stopping in gear). The controller loads the engine to hold it at the
+ *            BITE speed, idle plus the pedal's share of the way to the torque peak,
+ *            so a standing start in any gear pulls at the torque the pedal asks for
+ *            and a stop never stalls the engine. It locks once the car catches up.
+ *   sync     closing after a shift (or after an overload broke it loose). The clutch
+ *            carries what the driver's pedal will deliver once locked and the engine
+ *            management brings the crank to the gearbox's speed: fuel is cut while the
+ *            crank is fast, and in the automatic mode the throttle is blipped while it
+ *            is slow. In the manual mode there is no blip — a downshift without the
+ *            driver's own blip closes the clutch over `MANUAL_SYNC_TAU_S` and the
+ *            gearbox drags the crank up through the wheels: a real shunt.
+ *   locked   crank and gearbox turn together; the crank's inertia rides on the driven
+ *            wheels (`drivenWheelInertiaKgM2`) and its torque, positive or the overrun
+ *            drag, goes straight through. It breaks loose into `sync` when holding it
+ *            would take more than `CLUTCH_CAPACITY_FACTOR` of peak torque.
+ *
+ * A slipping clutch only ever passes torque from the faster side to the slower one,
+ * which is what keeps the engine braking out of a launch and the drive out of a stop.
+ * The crank is a real state while it slips: torque in, clutch torque out, over the
+ * crank's own inertia (`crankInertiaKgM2`).
+ */
+/**
+ * Clutch torque capacity as a multiple of the engine's peak torque. Period clutches
+ * are sized at 1.3-1.6 times the engine they sit behind; a turbo's boost eats most of
+ * that margin, which is where "slips under extreme load" comes from.
+ */
+const CLUTCH_CAPACITY_FACTOR = 1.5;
+/** Seconds for the clutch to clamp from open to its full capacity. */
+const CLUTCH_ENGAGE_S = 0.12;
+/** Time constant the launch controller pulls the crank to the bite speed with, s. */
+const LAUNCH_SLIP_TAU_S = 0.15;
+/** Time constant of the engine management's rev-match while the clutch closes, s. */
+const SYNC_TAU_S = 0.12;
+/**
+ * Time constant the manual mode's clutch drags an unmatched crank up to the gearbox's
+ * speed with, s. Long enough that a sane downshift's shunt stays inside the rear
+ * tyres; a downshift that lands near the redline still chirps them.
+ */
+const MANUAL_SYNC_TAU_S = 0.3;
+/**
+ * The slowest a closing clutch's controller lets the slip shrink, rad/s² at the crank
+ * (about 2000 rpm a second): the exponential approach alone would leave a tail of
+ * slip that never quite closes.
+ */
+const CLUTCH_SYNC_MIN_ACCEL_RAD_S2 = 200;
+/** Slip at which a closing clutch counts as locked, rad/s at the crank (~20 rpm). */
+const CLUTCH_LOCK_SLIP_RAD_S = 2;
+
+type ClutchState = 'open' | 'launch' | 'sync' | 'locked';
+
 /**
  * Idle fuel burn fudge. The pumping-work estimate alone under-predicts real
  * idle consumption (~0.5–1 L/h for a small engine) because it ignores accessory
@@ -167,15 +231,13 @@ const IDLE_BURN_FACTOR = 6;
 
 export interface DrivetrainOutput {
   /**
-   * Net wheel torque the engine is *driving* with, Nm, signed by gear direction:
-   * positive in a forward gear, negative in reverse, zero when engine braking.
+   * Wheel torque through the clutch, Nm, summed over the driven wheels, in the wheel's
+   * own sense: positive pushes the car forward. Driving in a forward gear it is
+   * positive and in reverse negative; the engine's overrun drag (engine braking)
+   * comes out with the opposite sign of the gear, so it acts at the driven tyres like
+   * any other torque. Zero with the clutch open.
    */
   readonly driveTorqueNm: number;
-  /**
-   * Magnitude of retarding wheel torque from engine braking (closed-throttle
-   * pumping + viscous drag), Nm, always >= 0. Zero while the engine is driving.
-   */
-  readonly engineBrakeTorqueNm: number;
   /** Crank speed, RPM. */
   readonly rpm: number;
   /** Fuel consumed this tick, litres. Never negative. */
@@ -453,6 +515,12 @@ export class Drivetrain {
   private shiftTimer = 0;
   /** Litres/second burned while idling in neutral. */
   private idleBurnLps = 0;
+  /** See the automatic clutch note. */
+  private clutch: ClutchState = 'open';
+  /** How far the closing clutch has clamped, 0..1 of `CLUTCH_CAPACITY_FACTOR`. */
+  private engagement = 0;
+  /** Gearbox-side clutch speed last tick, rad/s at the crank, for the overload check. */
+  private lastInputRadS = 0;
 
   constructor(engine: EngineSpec | null, gearbox: GearboxSpec | null, rearDriveBias: number) {
     this.rearDriveBias = rearDriveBias;
@@ -478,6 +546,8 @@ export class Drivetrain {
     // Drop out of any gear the new gearbox no longer offers.
     this.gear = gearbox ? clamp(this.gear, GEAR_REVERSE, gearbox.ratios.length) : GEAR_NEUTRAL;
     this.shiftTimer = 0;
+    this.clutch = 'open';
+    this.engagement = 0;
   }
 
   get rpm(): number {
@@ -501,26 +571,42 @@ export class Drivetrain {
     return this.gear === GEAR_REVERSE && this.shiftTimer <= 0;
   }
 
+  /** Direction the selected gear drives the car: 1 forward, -1 reverse, 0 neutral. */
+  get gearDirection(): number {
+    return this.gearbox == null ? 0 : Math.sign(this.gear);
+  }
+
+  /** The clutch is locked: the crank turns with the driven wheels. */
+  private get coupled(): boolean {
+    return (
+      this.gearbox != null &&
+      this.engine != null &&
+      this.gear !== GEAR_NEUTRAL &&
+      this.shiftTimer <= 0 &&
+      this.clutch === 'locked'
+    );
+  }
+
   /**
    * Wheel speed (rad/s) the engaged gear allows before the engine would pass its
-   * redline, or Infinity when nothing is driving the wheel (neutral, mid-shift, no
-   * gearbox). A driven wheel is geared to the crank, so this is the hard ceiling on
-   * how fast it can be spun up no matter how little grip the tyre has — which is
-   * what bounds wheelspin instead of letting a slipping wheel run away.
+   * redline, or Infinity when the clutch is not locked (neutral, mid-shift, slipping,
+   * no gearbox). A driven wheel locked to the crank through the gears has this hard
+   * ceiling on how fast it can be spun up no matter how little grip the tyre has —
+   * which is what bounds wheelspin instead of letting a slipping wheel run away. A
+   * slipping clutch bounds it instead: a wheel that catches the crank locks it.
    */
   get maxDrivenWheelSpinRadS(): number {
     const gearbox = this.gearbox;
     const engine = this.engine;
-    if (gearbox == null || engine == null || this.gear === GEAR_NEUTRAL || this.shiftTimer > 0) {
-      return Infinity;
-    }
+    if (gearbox == null || engine == null || !this.coupled) return Infinity;
     const total = Math.abs(this.gearRatio() * gearbox.finalDrive);
     return total > 0 ? engine.redlineRpm / RPM_PER_RAD_PER_SEC / total : Infinity;
   }
 
   /**
    * Rotating inertia the CRANK adds to one driven wheel, kg·m², or 0 when the clutch
-   * is open (neutral, mid-shift, no gearbox).
+   * is not locked (neutral, mid-shift, slipping, no gearbox): a slipping clutch passes
+   * a torque set by its own friction, not by the crank's acceleration.
    *
    * This is the term whose absence made a bumpy road undriveable. A driven wheel is
    * not a free disc: it is bolted through the gears to a crankshaft and a flywheel,
@@ -543,10 +629,7 @@ export class Drivetrain {
   drivenWheelInertiaKgM2(drivenWheels: number): number {
     const gearbox = this.gearbox;
     const engine = this.engine;
-    if (gearbox == null || engine == null || this.gear === GEAR_NEUTRAL || this.shiftTimer > 0) {
-      return 0;
-    }
-    if (drivenWheels <= 0) return 0;
+    if (gearbox == null || engine == null || !this.coupled || drivenWheels <= 0) return 0;
     const total = Math.abs(this.gearRatio() * gearbox.finalDrive);
     return (crankInertiaKgM2(engine) * total * total) / (drivenWheels * drivenWheels);
   }
@@ -691,118 +774,186 @@ export class Drivetrain {
       );
     }
 
-    // --- Crank speed ---
-    let crankSpeed: number; // rad/s, signed: positive = natural crank rotation.
     if (engine == null) {
       this.rpmValue = 0;
-      crankSpeed = 0;
-    } else if (gearbox == null || this.gear === GEAR_NEUTRAL || this.shiftTimer > 0) {
-      // Clutch open (no gearbox, neutral, or mid-shift): crank free-revs.
-      this.rpmValue = this.freeRev(engine, dt, demand);
-      crankSpeed = this.rpmValue / RPM_PER_RAD_PER_SEC;
-    } else {
-      // In first/reverse, below the wheel speed corresponding to the requested crank
-      // speed, the clutch slips instead of dragging the engine down to idle. This is
-      // the hill-start behaviour a manual driver gets by raising the revs and feeding
-      // the clutch. Taller gears stay rigidly coupled; otherwise every upshift below
-      // the torque peak would silently ride the clutch.
-      const total = this.gearRatio() * gearbox.finalDrive;
-      crankSpeed = drivenWheelAngularSpeed * total;
-      const gearedRpm = Math.abs(crankSpeed) * RPM_PER_RAD_PER_SEC;
-      const launchGear = this.gear === 1 || this.gear === GEAR_REVERSE;
-      const clutchRpm = launchGear
-        ? engine.idleRpm + demand * Math.max(0, engine.torquePeakRpm - engine.idleRpm)
-        : gearedRpm;
-      this.rpmValue = clamp(
-        Math.max(gearedRpm, clutchRpm),
-        engine.idleRpm,
-        engine.redlineRpm,
-      );
+      this.clutch = 'open';
+      this.engagement = 0;
+      return { driveTorqueNm: 0, rpm: 0, fuelBurnLitres: 0 };
     }
-    const crankSpeedAbs = Math.max(
-      Math.abs(crankSpeed),
-      demand > 0 ? this.rpmValue / RPM_PER_RAD_PER_SEC : 0,
-    );
-    this.updateBoost(dt, demand, engine);
 
-    let driveTorqueNm = 0;
-    let engineBrakeTorqueNm = 0;
-    let fuelBurnLitres = 0;
+    const automated = gearbox != null && (gearbox.automatic || autoShift);
+    const total = gearbox == null ? 0 : this.gearRatio() * gearbox.finalDrive; // signed: reverse is -
+    // The clutch's gearbox side, at crank speed: the mean of the driven wheels, which is
+    // what an open differential turns the propshaft at.
+    const inputRad = drivenWheelAngularSpeed * total;
+    const lastInputRad = this.lastInputRadS;
+    this.lastInputRadS = inputRad;
+    // The crank speed a launch holds the engine at: idle, plus the pedal's share of the
+    // way to the torque peak.
+    const biteRpm = engine.idleRpm + demand * Math.max(0, engine.torquePeakRpm - engine.idleRpm);
 
-    if (
-      engine != null &&
-      gearbox != null &&
-      this.gear !== GEAR_NEUTRAL &&
-      this.shiftTimer <= 0
-    ) {
-      const total = this.gearRatio() * gearbox.finalDrive; // signed (reverse is -)
-
-      // Mechanical friction + pumping at OPEN throttle, from the TRUE geared crank
-      // speed. It is the base the closed-throttle engine braking is built from, and
-      // the part-throttle blend below runs through it: the catalogue curve is NET
-      // torque, so full throttle must return exactly that curve and a shut throttle
-      // exactly minus the friction,
-      //
-      //   net = (T_wot + friction) * demand - friction,
-      //
-      // which is the engine's gross torque scaled by the pedal and then charged its
-      // own losses — engine braking and part-throttle response as the traffic and
-      // the autopilot were tuned on.
-      const frictionCrank =
-        engine.brakingCoeff * crankSpeedAbs + PUMPING_LOSS_FRACTION * engine.peakTorqueNm;
-      // The limiter cuts FUEL, so it fades the gross torque, friction's share included:
-      // floored at the cut the net is minus the friction (the engine is motored and
-      // brakes), not zero, and there is no positive work left to burn fuel on.
-      const fuelled = fuelCutFade(this.rpmValue, engine.redlineRpm * this.thermalRevLimit);
-      const driveCrank =
-        (this.wotTorqueNm(this.rpmValue) + frictionCrank * fuelled) * demand; // >= 0
-
-      const netCrank = driveCrank - frictionCrank; // signed Nm at the crank
-
-      if (netCrank >= 0) {
-        // Driving: the gear carries the direction (forward or reverse), and the
-        // gearbox's efficiency is what the gears, bearings, propshafts and
-        // differentials take out of the crank's torque on the way to the hubs.
-        driveTorqueNm = netCrank * total * gearbox.efficiency;
-      } else {
-        // Engine braking, reported as a magnitude of retarding wheel torque
-        // (Nm). It is computed from the TRUE geared crank speed (unclamped), so
-        // an over-revving engine drags harder — the whole point of engine
-        // braking in too low a gear. The clamped `this.rpmValue` is only used
-        // for the fuelling curve above, so a 1st-gear over-rev cuts fuel yet
-        // still brakes far harder than 2nd.
-        //
-        // Past the redline the viscous contribution is soft-capped (see
-        // OVER_REV_BRAKE_GAIN) so the drag keeps rising but cannot runaway.
-        //
-        // No efficiency term here, deliberately. Driven backwards the driveline's
-        // own losses ADD to the drag instead of taking a share of it, so the
-        // physical correction would be a division, not a multiplication — and it
-        // would be a few per cent of an overrun drag whose factor
-        // (CLOSED_THROTTLE_BRAKE_FACTOR) is itself only known to that precision.
-        // Leaving it out keeps engine braking exactly where it was tuned.
-        const brakeCrankSpeed = this.brakeCrankSpeed(crankSpeedAbs, engine);
-        const brakeFriction =
-          engine.brakingCoeff * brakeCrankSpeed + PUMPING_LOSS_FRACTION * engine.peakTorqueNm;
-        engineBrakeTorqueNm = brakeFriction * CLOSED_THROTTLE_BRAKE_FACTOR * Math.abs(total);
+    if (gearbox == null || this.gear === GEAR_NEUTRAL || this.shiftTimer > 0) {
+      // Clutch open: the crank free-revs. It idles at a shut throttle and approaches
+      // (but never reaches) the redline at full — or the thermal ceiling, so a driver
+      // blipping a boiling engine cannot rev it past the limit the gears respect.
+      const ceilingRpm = engine.redlineRpm * this.thermalRevLimit * 0.95;
+      let targetRpm = engine.idleRpm + demand * Math.max(0, ceilingRpm - engine.idleRpm);
+      // Mid-shift the engine management steers the crank toward the speed the NEW gear
+      // will take: fuel is cut while the pedal would carry it past that (both modes —
+      // lifting for the change is what every driver does), and in the automatic mode
+      // the throttle is blipped up to it on a downshift. In the manual mode a
+      // downshift is matched by the driver's own blip or not at all. A gear going in
+      // below idle is a pull-away: the crank follows the pedal up to the bite the
+      // launch will hold it at, as a driver raises the revs with the clutch down.
+      if (this.gear !== GEAR_NEUTRAL) {
+        const gearboxRpm = inputRad * RPM_PER_RAD_PER_SEC;
+        if (gearboxRpm < engine.idleRpm) {
+          targetRpm = Math.min(targetRpm, biteRpm);
+        } else {
+          const matchedRpm = Math.min(gearboxRpm, ceilingRpm);
+          if (targetRpm > matchedRpm || automated) targetRpm = matchedRpm;
+        }
       }
-
-      // Fuel on positive mechanical work, via bsfc (litres per kWh).
-      const drivePowerKw = (driveCrank * crankSpeedAbs) / 1000;
-      fuelBurnLitres += (drivePowerKw * engine.bsfc) / 3600 * dt;
+      const tau = targetRpm > this.rpmValue ? FLYWHEEL_UP_TAU : FLYWHEEL_DOWN_TAU;
+      this.rpmValue += (targetRpm - this.rpmValue) * (1 - Math.exp(-dt / tau));
+      this.clutch = 'open';
+      this.engagement = 0;
+      this.updateBoost(dt, demand, engine);
+      // Idle burn: keeping the engine turning with no load in neutral.
+      const idling = this.gear === GEAR_NEUTRAL && this.shiftTimer <= 0;
+      return { driveTorqueNm: 0, rpm: this.rpmValue, fuelBurnLitres: idling ? this.idleBurnLps * dt : 0 };
     }
 
-    // Idle burn: keeping the engine turning with no load in neutral.
-    if (engine != null && this.gear === GEAR_NEUTRAL && this.shiftTimer <= 0 && this.rpmValue > 0) {
-      fuelBurnLitres += this.idleBurnLps * dt;
+    // A gear is in and the clutch is closing or closed. Below idle at the gearbox side
+    // the engine would stall, so the controller slips it as for a launch.
+    const idleRad = engine.idleRpm / RPM_PER_RAD_PER_SEC;
+    if (this.clutch === 'open') this.clutch = inputRad < idleRad ? 'launch' : 'sync';
+    else if (inputRad < idleRad) this.clutch = 'launch';
+
+    const inertia = crankInertiaKgM2(engine);
+    const capacity = CLUTCH_CAPACITY_FACTOR * engine.peakTorqueNm;
+    let crankRad = this.rpmValue / RPM_PER_RAD_PER_SEC;
+    let engineNm = 0;
+    let clutchNm = 0;
+
+    if (this.clutch === 'locked') {
+      this.rpmValue = clamp(inputRad * RPM_PER_RAD_PER_SEC, engine.idleRpm, engine.redlineRpm);
+      this.updateBoost(dt, demand, engine);
+      engineNm = this.crankTorqueNm(engine, inputRad, demand);
+      // What holding the lock takes: the engine's torque less what swings the crank at
+      // the rate the wheels are imposing. A landing on spinning wheels or a wheel
+      // snatched by a rut asks more than the clutch holds, and it slips.
+      const holdingNm = dt > 0 ? engineNm - (inertia * (inputRad - lastInputRad)) / dt : engineNm;
+      if (Math.abs(holdingNm) > capacity) {
+        this.clutch = 'sync';
+        this.engagement = 1;
+      } else {
+        clutchNm = engineNm;
+        crankRad = inputRad;
+      }
+    } else {
+      this.updateBoost(dt, demand, engine);
+      this.engagement = Math.min(1, this.engagement + dt / CLUTCH_ENGAGE_S);
     }
 
-    return {
-      driveTorqueNm,
-      engineBrakeTorqueNm,
-      rpm: this.rpmValue,
-      fuelBurnLitres: fuelBurnLitres < 0 ? 0 : fuelBurnLitres,
-    };
+    if (this.clutch !== 'locked') {
+      const slip = crankRad - inputRad;
+      const pedalNm = this.crankTorqueNm(engine, crankRad, demand);
+      // The torque that closes the slip over `tau`, never slower than
+      // CLUTCH_SYNC_MIN_ACCEL_RAD_S2 so the last of it closes in finite time and locks.
+      const syncNm = (tau: number): number =>
+        inertia * Math.sign(slip) * Math.max(Math.abs(slip) / tau, CLUTCH_SYNC_MIN_ACCEL_RAD_S2);
+      // The torque the controller asks the clutch for, before its friction decides.
+      let wantNm: number;
+      if (this.clutch === 'launch') {
+        engineNm = pedalNm;
+        wantNm = engineNm + (inertia * (crankRad - biteRpm / RPM_PER_RAD_PER_SEC)) / LAUNCH_SLIP_TAU_S;
+      } else if (slip > 0) {
+        // Crank fast (an upshift): carry what the pedal will deliver once locked and cut
+        // fuel to bring the crank down to it, never fuelling past the pedal.
+        wantNm = Math.max(0, this.crankTorqueNm(engine, inputRad, demand));
+        engineNm = clamp(wantNm - syncNm(SYNC_TAU_S), this.crankTorqueNm(engine, crankRad, 0), pedalNm);
+      } else if (automated) {
+        // Crank slow (a downshift), automatic: blip it up while the clutch carries the
+        // overrun drag the pedal will have once locked.
+        wantNm = Math.min(0, this.crankTorqueNm(engine, inputRad, demand));
+        engineNm = clamp(wantNm - syncNm(SYNC_TAU_S), pedalNm, this.crankTorqueNm(engine, crankRad, 1));
+      } else {
+        // Crank slow, manual: the gearbox drags it up through the clutch — the shunt.
+        engineNm = pedalNm;
+        wantNm = engineNm + syncNm(MANUAL_SYNC_TAU_S);
+      }
+      // A slipping clutch only passes torque from the faster side to the slower, and
+      // no more than it has clamped.
+      const capNm = this.engagement * capacity;
+      clutchNm = clamp(wantNm, slip > 0 ? 0 : -capNm, slip < 0 ? 0 : capNm);
+      crankRad += (dt * (engineNm - clutchNm)) / inertia;
+      const after = crankRad - inputRad;
+      const locks =
+        this.clutch === 'launch'
+          ? after <= 0 && inputRad >= idleRad
+          : after * slip <= 0 || Math.abs(after) < CLUTCH_LOCK_SLIP_RAD_S;
+      if (locks) {
+        this.clutch = 'locked';
+        this.engagement = 1;
+        crankRad = inputRad;
+      }
+      // The idle governor holds the floor; a gearbox dragging the crank over the
+      // redline is the one thing that can carry it past.
+      crankRad = clamp(crankRad, idleRad, Math.max(engine.redlineRpm / RPM_PER_RAD_PER_SEC, inputRad));
+      this.rpmValue = crankRad * RPM_PER_RAD_PER_SEC;
+    }
+
+    // Into the gears: their efficiency is what the gears, bearings, propshafts and
+    // differentials take out of a driving torque on the way to the hubs. Not out of the
+    // overrun drag, deliberately. Driven backwards the driveline's own losses ADD to the
+    // drag instead of taking a share of it, so the physical correction would be a
+    // division, not a multiplication — and it would be a few per cent of a drag whose
+    // factor (CLOSED_THROTTLE_BRAKE_FACTOR) is itself only known to that precision.
+    const driveTorqueNm = clutchNm * total * (clutchNm > 0 ? gearbox.efficiency : 1);
+
+    // Fuel on positive mechanical work, via bsfc (litres per kWh): the gross torque the
+    // engine made, which is its net plus its own friction.
+    const workRad = Math.abs(crankRad);
+    const grossNm =
+      engineNm + engine.brakingCoeff * workRad + PUMPING_LOSS_FRACTION * engine.peakTorqueNm;
+    const fuelBurnLitres = (((Math.max(0, grossNm) * workRad) / 1000) * engine.bsfc) / 3600 * dt;
+
+    return { driveTorqueNm, rpm: this.rpmValue, fuelBurnLitres };
+  }
+
+  /**
+   * NET crank torque at crank speed `crankRad` (rad/s) and pedal `demand`. The
+   * catalogue curve is net torque, so a full pedal returns exactly that curve and a
+   * part pedal the gross torque it opens up, charged the engine's own losses:
+   *
+   *   net = (T_wot + friction) * demand - friction,
+   *
+   * the part-throttle response the traffic and the autopilot were tuned on. Below
+   * `PART_THROTTLE_PUMPING_FADE` of pedal the friction grows into the closed-throttle
+   * overrun drag, `CLOSED_THROTTLE_BRAKE_FACTOR` times it: engine braking.
+   *
+   * Friction and drag are read at the TRUE crank speed, which a gear dragging the crank
+   * puts past its redline: an over-revving engine drags harder — the whole point of
+   * engine braking in too low a gear — with the over-rev share soft-capped
+   * (`OVER_REV_BRAKE_GAIN`) so it cannot run away. The fuelling reads the crank clamped
+   * to its rev range, so a 1st-gear over-rev cuts fuel yet still brakes far harder than
+   * 2nd.
+   */
+  private crankTorqueNm(engine: EngineSpec, crankRad: number, demand: number): number {
+    const rpm = clamp(crankRad * RPM_PER_RAD_PER_SEC, engine.idleRpm, engine.redlineRpm);
+    const pumping = PUMPING_LOSS_FRACTION * engine.peakTorqueNm;
+    const friction = engine.brakingCoeff * crankRad + pumping;
+    // The limiter cuts FUEL, so it fades the gross torque, friction's share included:
+    // floored at the cut the net is minus the friction (the engine is motored and
+    // brakes), not zero, and there is no positive work left to burn fuel on.
+    const fuelled = fuelCutFade(rpm, engine.redlineRpm * this.thermalRevLimit);
+    const drive = (this.wotTorqueNm(rpm) + friction * fuelled) * demand;
+    const overrun =
+      CLOSED_THROTTLE_BRAKE_FACTOR *
+      (engine.brakingCoeff * this.brakeCrankSpeed(crankRad, engine) + pumping);
+    const open = Math.min(1, demand / PART_THROTTLE_PUMPING_FADE);
+    return drive - (overrun + (friction - overrun) * open);
   }
 
   /**
@@ -826,6 +977,9 @@ export class Drivetrain {
     }
     this.gear = gear;
     this.shiftTimer = 0;
+    this.clutch = 'locked';
+    this.engagement = 1;
+    this.lastInputRadS = wheelAngularSpeed * gearbox.ratios[gear - 1] * gearbox.finalDrive;
     this.rpmValue = clamp(wheelRpm * Math.abs(gearbox.ratios[gear - 1]), engine.idleRpm, engine.redlineRpm);
   }
 
@@ -846,24 +1000,12 @@ export class Drivetrain {
    * the true geared speed (an over-revving engine drags harder); past the
    * redline the over-rev contributes at OVER_REV_BRAKE_GAIN so braking keeps
    * rising but cannot runaway in too low a gear. The fuelling path is separate
-   * and always uses the clamped `rpmValue`.
+   * and always reads the crank clamped to its rev range.
    */
   private brakeCrankSpeed(crankSpeedAbs: number, engine: EngineSpec): number {
     const redlineRad = engine.redlineRpm / RPM_PER_RAD_PER_SEC;
     if (crankSpeedAbs <= redlineRad) return crankSpeedAbs;
     return redlineRad + (crankSpeedAbs - redlineRad) * OVER_REV_BRAKE_GAIN;
-  }
-
-  private freeRev(engine: EngineSpec, dt: number, throttle: number): number {
-    // Target idles at closed throttle and approaches (but never reaches) the
-    // redline at full throttle — or the thermal ceiling, when one is imposed, so a
-    // driver blipping a boiling engine in neutral cannot rev it past the limit the
-    // gears already respect.
-    const ceiling = engine.redlineRpm * this.thermalRevLimit * 0.95;
-    const target = engine.idleRpm + throttle * Math.max(0, ceiling - engine.idleRpm);
-    const tau = target > this.rpmValue ? FLYWHEEL_UP_TAU : FLYWHEEL_DOWN_TAU;
-    this.rpmValue += (target - this.rpmValue) * (1 - Math.exp(-dt / tau));
-    return this.rpmValue;
   }
 
   /**

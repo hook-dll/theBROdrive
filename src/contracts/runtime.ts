@@ -16,7 +16,6 @@
 
 import type { GameWorld } from '../game/state';
 import type { ContractCargoItem, Item } from '../items/items';
-import type { ContractGate } from './gates';
 import { contractKindDef } from './registry';
 import {
   defaultProgress,
@@ -27,15 +26,11 @@ import {
 
 export interface ContractTickInput {
   readonly dt: number;
-  readonly timeOfDay: number;
-  readonly dayLength: number;
-  /** Air temperature now, degrees C (`ambientAirC`). */
-  readonly ambientC: number;
   /** Live telemetry for a car by id, or null when it has no Vehicle. */
   readonly carTelemetry: (carId: string) => ContractCarTelemetry | null;
   /**
-   * Live look at any car by id, for kinds that own a second car (a towed car, an
-   * escort). Optional so a bench can tick without a world.
+   * Live look at any car by id, for kinds that own a second car (a towed car).
+   * Optional so a bench can tick without a world.
    */
   readonly carById?: (carId: string) => ContractCarSnapshot | null;
   /**
@@ -51,11 +46,6 @@ export interface ContractTickInput {
   ) => void;
   /** Optional one-line notice when a contract crosses into a lost-bonus state. */
   readonly onNotice?: (text: string) => void;
-  /**
-   * The gate sequence of a gate contract, or null. Rebuilt by the composition root
-   * from the offer seed and the road geometry; see `ContractTickContext.gatesFor`.
-   */
-  readonly gatesFor?: (item: ContractCargoItem) => readonly ContractGate[] | null;
 }
 
 function isCargo(item: Item | null | undefined): item is ContractCargoItem {
@@ -65,16 +55,10 @@ function isCargo(item: Item | null | undefined): item is ContractCargoItem {
 /** `ContractTickContext` with writable fields, so one instance can be reused. */
 interface MutableTickContext {
   dt: number;
-  nowS: number;
   item: ContractCargoItem;
-  timeOfDay: number;
-  dayLength: number;
-  ambientC: number;
-  place: ContractPlace;
   car: ContractCarTelemetry | null;
   droppedThisTick: boolean;
   carById: ((carId: string) => ContractCarSnapshot | null) | undefined;
-  gatesFor: ((item: ContractCargoItem) => readonly ContractGate[] | null) | undefined;
 }
 
 /**
@@ -98,16 +82,10 @@ export class ContractRuntime {
   private readonly seen = new Set<string>();
   private readonly ctx: MutableTickContext = {
     dt: 0,
-    nowS: 0,
     item: IDLE_CARGO,
-    timeOfDay: 0,
-    dayLength: 0,
-    ambientC: 0,
-    place: 'courier',
     car: null,
     droppedThisTick: false,
     carById: undefined,
-    gatesFor: undefined,
   };
 
   constructor(private readonly world: GameWorld) {}
@@ -151,7 +129,6 @@ export class ContractRuntime {
     carId: string | null,
     input: ContractTickInput,
   ): void {
-    const state = this.world.state;
     this.seen.add(item.id);
     const previous = this.lastPlace.get(item.id);
     const droppedThisTick = previous !== undefined && previous !== 'loose' && place === 'loose';
@@ -166,32 +143,21 @@ export class ContractRuntime {
     const progress = item.progress;
     if (!progress.started && place !== 'courier') {
       progress.started = true;
-      progress.startedAtS = state.playedSeconds;
     }
     if (!progress.started) return;
 
     const ctx = this.ctx;
     ctx.dt = input.dt;
-    ctx.nowS = state.playedSeconds;
     ctx.item = item;
-    ctx.timeOfDay = input.timeOfDay;
-    ctx.dayLength = input.dayLength;
-    ctx.ambientC = input.ambientC;
-    ctx.place = place;
     ctx.droppedThisTick = droppedThisTick;
     ctx.car = carId ? input.carTelemetry(carId) : null;
     ctx.carById = input.carById;
-    ctx.gatesFor = input.gatesFor;
 
     const wasViolated = progress.violated;
-    const wasLate = progress.late;
     contractKindDef(item.contractKind).step(progress, ctx);
 
-    if (input.onNotice) {
-      if (!wasViolated && progress.violated) input.onNotice(`${item.cargoName} — bonus lost`);
-      else if (!wasLate && progress.late) {
-        input.onNotice(`${item.cargoName} — too late for the bonus`);
-      }
+    if (input.onNotice && !wasViolated && progress.violated) {
+      input.onNotice(`${item.cargoName} — bonus lost`);
     }
   }
 }

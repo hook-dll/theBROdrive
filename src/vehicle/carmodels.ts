@@ -166,6 +166,20 @@ const SUSP_CAR: SuspensionTuning = {
   compressionRatio: 0.26,
   reboundRatio: 0.42,
   bumpTravel: 0.09,
+  frontRollCentreM: 0.08,
+  rearRollCentreM: 0.3,
+  frontBar: 1,
+  rearBar: 0,
+  ackermann: 0.6,
+  frontCamberDeg: 0,
+  rearCamberDeg: 0,
+  frontRollCamber: 0.7,
+  rearRollCamber: 0,
+  frontToeDeg: 0.05,
+  rearToeDeg: 0,
+  frontRollSteer: 0.04,
+  rearRollSteer: 0.06,
+  frontCasterDeg: 2,
 };
 
 /* ---- the Soviet families ----
@@ -191,6 +205,51 @@ const SUSP_CAR: SuspensionTuning = {
  * too high.
  */
 
+/*
+ * ---- roll: roll centres and bars ----
+ *
+ * The roll centres are the linkage's, read off the layout rather than tuned: parallel
+ * wishbones (Volga, Zhiguli, Niva fronts) and MacPherson struts (Samara family) put the
+ * front one 0.07-0.12 m off the road; a live axle puts the rear one at its Panhard rod
+ * (Zhiguli, Niva, ~0.3-0.4 m) or its leaf-spring seats (Volga, the pickup, ~0.36-0.4 m);
+ * a twist beam sits between the two (Samara family, 0.12 m). A high rear roll centre
+ * sends that axle more of the transfer, which is why a live-axle car needs the
+ * front-heavy bar it has to stay an understeerer.
+ *
+ * The bars are the knob, and they are set so a saloon leans 3.5-5 degrees per g, the
+ * soft Volgas and the tall Niva and van more, and every car keeps the front-biased
+ * transfer that makes it run out of grip at the nose first (tools/roll-balance.ts).
+ * The Samara family's rear figure is its twist beam. A NEGATIVE figure is a beam axle
+ * on leaf springs: the leaves hang under the frame rails, well inboard of the wheels,
+ * so the axle resists roll by `(spring spacing / track)²` of its ride rate, not all of
+ * it.
+ */
+
+/*
+ * ---- steering and wheel geometry ----
+ *
+ * Alignment is the factory sheet's where one exists: a Zhiguli or Niva runs +0°30′ of
+ * camber and 2-4 mm of toe-in at the rim (VAZ-2101 manual, sec. 8.1.3), a Volga 0°±30′
+ * and 1.5-3 mm at the tyre (GAZ-24 manual), a Samara or 2110 0°±30′ and 0±1 mm. The
+ * toe figures below are the BOTTOM of each range, converted at the diameter it is
+ * measured across (`SuspensionTuning.frontToeDeg`): the top of it is set to cancel the
+ * toe-out rolling drag pulls through the bushes, and the model has no bushes.
+ *
+ * Roll camber and roll steer follow the linkage: a beam axle keeps its wheels square to
+ * the road (roll camber 0), unequal wishbones keep ~0.6 of the body's lean, a strut
+ * ~0.8, a twist beam with its cross member near the pivots ~0.75. Roll steer is the
+ * mild understeer every period chassis was given: ~0.04 °/° at the front from the
+ * tie-rod geometry, 0.05-0.06 from a live axle's four links, ~0.1 from leaf springs,
+ * whose eyes and shackles swing the axle as it rolls (Gillespie, Fundamentals of
+ * Vehicle Dynamics, ch. 8). Ackermann is the trapezoid's share of the ideal, 0.5-0.8:
+ * no maker in the catalogue published it, so these are the layout's usual figures.
+ *
+ * Caster is the factory sheet's too: +3°30′ on the Zhiguli and Niva wishbones, +1°30′
+ * on the Samara family's struts, about +0°30′ on the Volgas' kingpins, +3° on a beam
+ * front. It only reaches the steering (`SuspensionTuning.frontCasterDeg`): a Zhiguli's
+ * wheel pulls back to centre noticeably harder than a Volga's.
+ */
+
 /**
  * GAZ-21: 0.95 Hz front on 240 mm of sag, a LEAF-sprung rear at 1.15 Hz, and
  * lever-arm dampers that were marginal when new (0.18/0.30 of critical). It floats,
@@ -204,6 +263,21 @@ const SUSP_VOLGA_21: SuspensionTuning = {
   compressionRatio: 0.18,
   reboundRatio: 0.3,
   bumpTravel: 0.1,
+  frontRollCentreM: 0.1,
+  rearRollCentreM: 0.38,
+  frontBar: 1.6,
+  rearBar: -0.4,
+  ackermann: 0.7,
+  frontCamberDeg: 0,
+  rearCamberDeg: 0,
+  frontRollCamber: 0.6,
+  rearRollCamber: 0,
+  // 1.5 mm at a 6.70-15 tyre (0.72 m).
+  frontToeDeg: 0.06,
+  rearToeDeg: 0,
+  frontRollSteer: 0.04,
+  rearRollSteer: 0.1,
+  frontCasterDeg: 0.5,
 };
 
 /** GAZ-24: the same layout fifteen years later, with dampers that work. */
@@ -213,6 +287,20 @@ const SUSP_VOLGA_24: SuspensionTuning = {
   compressionRatio: 0.2,
   reboundRatio: 0.34,
   bumpTravel: 0.1,
+  frontRollCentreM: 0.1,
+  rearRollCentreM: 0.36,
+  frontBar: 1.4,
+  rearBar: -0.4,
+  ackermann: 0.7,
+  frontCamberDeg: 0,
+  rearCamberDeg: 0,
+  frontRollCamber: 0.6,
+  rearRollCamber: 0,
+  frontToeDeg: 0.06,
+  rearToeDeg: 0,
+  frontRollSteer: 0.04,
+  rearRollSteer: 0.1,
+  frontCasterDeg: 0.5,
 };
 
 /**
@@ -227,6 +315,21 @@ const SUSP_ZHIGULI: SuspensionTuning = {
   compressionRatio: 0.24,
   reboundRatio: 0.38,
   bumpTravel: 0.095,
+  frontRollCentreM: 0.08,
+  rearRollCentreM: 0.3,
+  frontBar: 1.5,
+  rearBar: 0,
+  ackermann: 0.6,
+  frontCamberDeg: 0.5,
+  rearCamberDeg: 0,
+  frontRollCamber: 0.6,
+  rearRollCamber: 0,
+  // 2 mm across a 13-inch rim's flanges (0.36 m).
+  frontToeDeg: 0.16,
+  rearToeDeg: 0,
+  frontRollSteer: 0.04,
+  rearRollSteer: 0.06,
+  frontCasterDeg: 3.5,
 };
 
 /**
@@ -241,6 +344,20 @@ const SUSP_ZHIGULI_ESTATE: SuspensionTuning = {
   compressionRatio: 0.24,
   reboundRatio: 0.4,
   bumpTravel: 0.09,
+  frontRollCentreM: 0.08,
+  rearRollCentreM: 0.3,
+  frontBar: 1.5,
+  rearBar: 0,
+  ackermann: 0.6,
+  frontCamberDeg: 0.5,
+  rearCamberDeg: 0,
+  frontRollCamber: 0.6,
+  rearRollCamber: 0,
+  frontToeDeg: 0.16,
+  rearToeDeg: 0,
+  frontRollSteer: 0.04,
+  rearRollSteer: 0.06,
+  frontCasterDeg: 3.5,
 };
 
 /**
@@ -255,6 +372,20 @@ const SUSP_SAMARA: SuspensionTuning = {
   compressionRatio: 0.28,
   reboundRatio: 0.42,
   bumpTravel: 0.085,
+  frontRollCentreM: 0.07,
+  rearRollCentreM: 0.12,
+  frontBar: 1.2,
+  rearBar: 0.6,
+  ackermann: 0.5,
+  frontCamberDeg: 0,
+  rearCamberDeg: 0,
+  frontRollCamber: 0.8,
+  rearRollCamber: 0.75,
+  frontToeDeg: 0,
+  rearToeDeg: 0,
+  frontRollSteer: 0.04,
+  rearRollSteer: 0.03,
+  frontCasterDeg: 1.5,
 };
 
 /**
@@ -270,6 +401,21 @@ const SUSP_NIVA: SuspensionTuning = {
   compressionRatio: 0.24,
   reboundRatio: 0.4,
   bumpTravel: 0.14,
+  frontRollCentreM: 0.12,
+  rearRollCentreM: 0.4,
+  frontBar: 1,
+  rearBar: 0,
+  ackermann: 0.6,
+  frontCamberDeg: 0.5,
+  rearCamberDeg: 0,
+  frontRollCamber: 0.6,
+  rearRollCamber: 0,
+  // 2 mm across a 16-inch rim's flanges (0.43 m).
+  frontToeDeg: 0.13,
+  rearToeDeg: 0,
+  frontRollSteer: 0.04,
+  rearRollSteer: 0.06,
+  frontCasterDeg: 3.5,
 };
 
 /**
@@ -282,6 +428,21 @@ const SUSP_LADA_RALLY: SuspensionTuning = {
   compressionRatio: 0.32,
   reboundRatio: 0.48,
   bumpTravel: 0.12,
+  frontRollCentreM: 0.08,
+  rearRollCentreM: 0.3,
+  frontBar: 1,
+  rearBar: 0,
+  // A gravel build: negative camber, no toe and less Ackermann than the road car.
+  ackermann: 0.4,
+  frontCamberDeg: -1,
+  rearCamberDeg: 0,
+  frontRollCamber: 0.6,
+  rearRollCamber: 0,
+  frontToeDeg: 0,
+  rearToeDeg: 0,
+  frontRollSteer: 0.03,
+  rearRollSteer: 0.05,
+  frontCasterDeg: 3.5,
 };
 
 /**
@@ -299,6 +460,20 @@ const SUSP_SOFT: SuspensionTuning = {
   compressionRatio: 0.22,
   reboundRatio: 0.36,
   bumpTravel: 0.1,
+  frontRollCentreM: 0.1,
+  rearRollCentreM: 0.2,
+  frontBar: 0.6,
+  rearBar: 0,
+  ackermann: 0.6,
+  frontCamberDeg: 0,
+  rearCamberDeg: 0,
+  frontRollCamber: 0.7,
+  rearRollCamber: 0.8,
+  frontToeDeg: 0.05,
+  rearToeDeg: 0,
+  frontRollSteer: 0.03,
+  rearRollSteer: 0,
+  frontCasterDeg: 2,
 };
 
 /** "Sport" in this era means a firm saloon on stiffer dampers, not a modern chassis. */
@@ -308,6 +483,20 @@ const SUSP_SPORT: SuspensionTuning = {
   compressionRatio: 0.3,
   reboundRatio: 0.46,
   bumpTravel: 0.08,
+  frontRollCentreM: 0.06,
+  rearRollCentreM: 0.25,
+  frontBar: 1.2,
+  rearBar: 0.3,
+  ackermann: 0.5,
+  frontCamberDeg: -0.5,
+  rearCamberDeg: 0,
+  frontRollCamber: 0.6,
+  rearRollCamber: 0,
+  frontToeDeg: 0,
+  rearToeDeg: 0,
+  frontRollSteer: 0.04,
+  rearRollSteer: 0.05,
+  frontCasterDeg: 3,
 };
 
 /**
@@ -321,6 +510,20 @@ const SUSP_TRUCK: SuspensionTuning = {
   compressionRatio: 0.24,
   reboundRatio: 0.38,
   bumpTravel: 0.11,
+  frontRollCentreM: 0.1,
+  rearRollCentreM: 0.4,
+  frontBar: 1,
+  rearBar: -0.4,
+  ackermann: 0.7,
+  frontCamberDeg: 0.5,
+  rearCamberDeg: 0,
+  frontRollCamber: 0.6,
+  rearRollCamber: 0,
+  frontToeDeg: 0.06,
+  rearToeDeg: 0,
+  frontRollSteer: 0.04,
+  rearRollSteer: 0.1,
+  frontCasterDeg: 3,
 };
 
 /* ---- weight distribution ----
@@ -455,6 +658,75 @@ export interface TyreSpec {
 /** Mechanical era shared by cars with the same steering and tyre construction. */
 export type HandlingProfile = 'classic' | 'road' | 'sport' | 'utility';
 
+/**
+ * A body's aerodynamics beyond its drag area: what the air does to it vertically and
+ * sideways. Every coefficient is on `frontalArea` and the dynamic pressure ½ρV² of the
+ * air relative to the car, in the wind-tunnel conventions the period literature quotes
+ * them in (Hucho, Aerodynamics of Road Vehicles), so a figure from a book goes in as
+ * printed. The vehicle turns them into forces in `Vehicle.applyAero`.
+ *
+ *   liftFront/Rear  the load each axle's wheel pads LOSE, over q·A, positive up; their
+ *                   sum is the car's CL. A tunnel's pads hold the car at the road, so
+ *                   the drag's own nose-up moment about the road is inside this split
+ *                   (the vehicle takes it back out, because it applies the drag at its
+ *                   own height). Period saloons run CL 0.3-0.45, the rear axle usually
+ *                   the lighter one; a squareback estate or van has little rear lift
+ *                   (the flow separates at the roof's end instead of curving down a
+ *                   tail), a blunt-nosed one more front lift.
+ *   sideSlope       dCY/dβ per radian of the side force's linear (slender-body) part,
+ *                   which `Vehicle.applyAero` scales by sinβ·cosβ. The flank's crossflow
+ *                   drag (CROSSFLOW_CD in vehicle.ts) adds the progressive part on top,
+ *                   so the slope is chosen for the SUM to land where tunnels measure it:
+ *                   CY ≈ 0.7 at β = 20° for a saloon (0.035 per degree, near enough
+ *                   linear), about 0.9 for a tall box. 1.25-1.55 for cars, 1.6-1.9 for
+ *                   estates, off-roaders and vans.
+ *   yawSlope        dCN/dβ per radian of that same linear part, on A times the
+ *                   wheelbase, about the wheelbase's midpoint; positive turns the nose
+ *                   DOWNWIND. yawSlope / sideSlope is how far ahead of the midpoint the
+ *                   linear part acts, in wheelbases: a third for cars (the reason a
+ *                   crosswind steers a car out of it), less for a squareback, whose
+ *                   tall rear flank draws it aft. The crossflow part acts at the body's
+ *                   middle, so the centre of pressure moves back as the yaw grows.
+ *
+ * No Soviet body has a published lift or crosswind figure. The values below are the
+ * literature's for the same SHAPE — notchback, fastback, squareback, two-box, van —
+ * scaled to frontal areas from AvtoVAZ's own figures where they exist (Samara 1.87 m²,
+ * Oka 1.69, Niva about 2.4) and from width × body height × 0.85 elsewhere.
+ */
+export interface AeroSpec {
+  /** Frontal area A, m²: the reference area of every coefficient here. */
+  readonly frontalArea: number;
+  readonly liftFront: number;
+  readonly liftRear: number;
+  readonly sideSlope: number;
+  readonly yawSlope: number;
+}
+
+/** GAZ-21: the rounded fifties saloon, its long tail curving down; the most lift. */
+const AERO_VOLGA_21: AeroSpec = { frontalArea: 2.1, liftFront: 0.2, liftRear: 0.25, sideSlope: 1.35, yawSlope: 0.5 };
+/** GAZ-24: a square three-box saloon. */
+const AERO_VOLGA_24: AeroSpec = { frontalArea: 2.15, liftFront: 0.14, liftRear: 0.2, sideSlope: 1.5, yawSlope: 0.45 };
+/** The Fiat-124 Zhiguli saloons, 2101 to 2107. */
+const AERO_ZHIGULI: AeroSpec = { frontalArea: 1.8, liftFront: 0.13, liftRear: 0.22, sideSlope: 1.4, yawSlope: 0.47 };
+/** The 2102/2104 estates: square back, so little rear lift and a centre of pressure further aft. */
+const AERO_ZHIGULI_ESTATE: AeroSpec = { frontalArea: 1.84, liftFront: 0.17, liftRear: 0.08, sideSlope: 1.6, yawSlope: 0.33 };
+/** Samara hatchbacks: the wedge nose holds the front down, the hatch lifts the rear. */
+const AERO_SAMARA_HATCH: AeroSpec = { frontalArea: 1.87, liftFront: 0.08, liftRear: 0.26, sideSlope: 1.25, yawSlope: 0.5 };
+/** 21099: the Samara nose on a short notched boot. */
+const AERO_SAMARA_SALOON: AeroSpec = { frontalArea: 1.87, liftFront: 0.09, liftRear: 0.21, sideSlope: 1.35, yawSlope: 0.47 };
+/** Niva: a blunt two-box off-roader, tall and short. */
+const AERO_NIVA: AeroSpec = { frontalArea: 2.4, liftFront: 0.2, liftRear: 0.12, sideSlope: 1.7, yawSlope: 0.37 };
+/** AZLK-2141: a liftback in the Simca 1307's shape. */
+const AERO_AZLK_2141: AeroSpec = { frontalArea: 1.95, liftFront: 0.1, liftRear: 0.24, sideSlope: 1.25, yawSlope: 0.5 };
+/** Oka: a short, tall two-box hatch. */
+const AERO_OKA: AeroSpec = { frontalArea: 1.69, liftFront: 0.14, liftRear: 0.16, sideSlope: 1.55, yawSlope: 0.47 };
+/** UAZ-330364: a cab-over flatbed; the flow leaves the flat cab front and roof, the bed sits in the wake. */
+const AERO_UAZ_330364: AeroSpec = { frontalArea: 3.8, liftFront: 0.25, liftRear: 0, sideSlope: 1.9, yawSlope: 0.2 };
+/** IZH-2715: a Moskvich nose on a square van box. */
+const AERO_IZH_2715: AeroSpec = { frontalArea: 2.35, liftFront: 0.2, liftRear: 0.02, sideSlope: 1.8, yawSlope: 0.27 };
+/** VAZ-2110: a nineties saloon shaped in the tunnel, Cd 0.33. */
+const AERO_VAZ_2110: AeroSpec = { frontalArea: 2.05, liftFront: 0.08, liftRear: 0.17, sideSlope: 1.35, yawSlope: 0.44 };
+
 
 
 
@@ -560,7 +832,11 @@ export interface CarModelDef {
    */
   readonly brakeDecelG: number;
   readonly suspension: SuspensionTuning;
-  /** Steering lock at the front axle, radians. */
+  /**
+   * Steering lock, radians: the rack's angle, the bicycle-model angle of the front
+   * axle's centreline. The inner wheel turns further and the outer less, by the
+   * suspension's Ackermann share (see the steering-lock note above the Soviet specs).
+   */
   readonly steerLock: number;
   /** Fraction of drive torque to the rear axle. 1 = RWD, 0 = FWD, 0.5 = 4WD. */
   readonly rearDriveBias: number;
@@ -573,11 +849,17 @@ export interface CarModelDef {
   readonly frontWeightShare?: number;
   /**
    * Anti-roll bars, each as a fraction of its own axle's wheel rate (0 = no bar), when
-   * the car's are not the period saloon's front-biased pair (`ANTI_ROLL_*_FRACTION` in
-   * vehicletuning.ts). The split is the handling balance: the axle with more roll
-   * stiffness takes more of the load transfer and runs out of grip first.
+   * the car's are not its suspension preset's (`SuspensionTuning.frontBar`/`rearBar`).
+   * The split is the handling balance: the axle with more roll stiffness takes more of
+   * the load transfer and runs out of grip first.
    */
   readonly antiRoll?: { readonly front: number; readonly rear: number };
+  /**
+   * Roll-centre heights above the road, metres, when the car's linkage is not its
+   * suspension preset's (`SuspensionTuning.frontRollCentreM`/`rearRollCentreM`): a beam
+   * front axle on a preset written for wishbones, say.
+   */
+  readonly rollCentre?: { readonly front: number; readonly rear: number };
   /** The factory tyre, when the car's own curve should replace the profile's. */
   readonly tyre?: TyreSpec;
   /**
@@ -592,6 +874,8 @@ export interface CarModelDef {
    * only lands for a mid-seventies saloon shape (see `Vehicle`'s constructor).
    */
   readonly dragArea?: number;
+  /** Lift and crosswind: see `AeroSpec`. */
+  readonly aero: AeroSpec;
   /** Authored lenses whose per-instance materials mirror the vehicle's live controls. */
   readonly lights?: VehicleLightsDef;
   /** Every car body carries the shared 4x2 trunk. */
@@ -717,6 +1001,7 @@ interface SovietSpec {
   readonly frontWeightShare: number;
   /** Drag area, Cd·A in m²: see the note above on how it is calibrated. */
   readonly dragArea: number;
+  readonly aero: AeroSpec;
   readonly suspension: SuspensionTuning;
   /** The factory tyre (see `TyreSpec`). */
   readonly tyre: TyreSpec;
@@ -751,14 +1036,16 @@ interface SovietSpec {
  *
  * ---- steering lock ----
  *
- * Every `steerLock` is derived, not chosen: a factory turning radius is measured by
- * the OUTER FRONT WHEEL, so the path radius of the car's centreline is that figure
- * less half a track, and the bicycle-model lock that produces it at this body's own
- * (now life-size) wheelbase is `atan(wheelbase / R) + steerPlay`. The play term is
- * there because the classic profile's 0.024 rad of backlash is subtracted from the
- * rack command before it reaches the tyre. The Niva's tyres scrub wider than that
- * bicycle model, so its lock is the one that puts tools/reality.ts on its factory
- * 5.5 m; the same holds for the working vehicles and the Moskvich below.
+ * Every `steerLock` is derived, not chosen. It is the RACK's angle — the bicycle-model
+ * angle of the axle's centreline, which the Ackermann geometry shares out as more on
+ * the inner wheel and less on the outer (`SuspensionTuning.ackermann`). A factory
+ * turning radius is swept by the OUTER FRONT WHEEL, a wheelbase ahead of a turn centre
+ * that sits on the rear axle's line, so the turn centre lies `sqrt(turn² − L²) − t/2`
+ * to the side of the car, and the lock that puts it there is `atan(L / R) + steerPlay`
+ * (the play is subtracted from the rack command before it reaches the tyre). At the
+ * 10 km/h tools/reality.ts takes the circle at, the tyres still run a little slip, more
+ * on a front-driven or soft-tyred car, so each lock is the one that puts reality.ts on
+ * the factory figure: 0.01-0.04 rad over the pure geometry.
  */
 const SOVIET_SPECS: readonly SovietSpec[] = [
   {
@@ -784,6 +1071,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     rearDriveBias: 1,
     frontWeightShare: 0.48,
     dragArea: 1.12,
+    aero: AERO_VOLGA_21,
     suspension: SUSP_VOLGA_21,
   },
   {
@@ -805,10 +1093,11 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     tankLitres: 55,
     wheelGrip: 0.6,
     brakeDecelG: 0.47,
-    steerLock: 0.598,
+    steerLock: 0.638,
     rearDriveBias: 1,
     frontWeightShare: 0.49,
     dragArea: 1.37,
+    aero: AERO_VOLGA_24,
     suspension: SUSP_VOLGA_24,
   },
   {
@@ -828,10 +1117,11 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     tankLitres: 39,
     wheelGrip: 0.558,
     brakeDecelG: 0.5,
-    steerLock: 0.52,
+    steerLock: 0.529,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
     dragArea: 0.95,
+    aero: AERO_ZHIGULI,
     suspension: SUSP_ZHIGULI,
   },
   {
@@ -850,10 +1140,11 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     tankLitres: 39,
     wheelGrip: 0.551,
     brakeDecelG: 0.49,
-    steerLock: 0.522,
+    steerLock: 0.531,
     rearDriveBias: 1,
     frontWeightShare: 0.5,
     dragArea: 1.07,
+    aero: AERO_ZHIGULI_ESTATE,
     suspension: SUSP_ZHIGULI_ESTATE,
     storageCells: 5,
   },
@@ -872,10 +1163,11 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     tankLitres: 39,
     wheelGrip: 0.574,
     brakeDecelG: 0.5,
-    steerLock: 0.525,
+    steerLock: 0.53,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
     dragArea: 0.95,
+    aero: AERO_ZHIGULI,
     suspension: SUSP_ZHIGULI,
   },
   {
@@ -893,10 +1185,11 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     tankLitres: 39,
     wheelGrip: 0.56,
     brakeDecelG: 0.49,
-    steerLock: 0.521,
+    steerLock: 0.53,
     rearDriveBias: 1,
     frontWeightShare: 0.5,
     dragArea: 1.07,
+    aero: AERO_ZHIGULI_ESTATE,
     suspension: SUSP_ZHIGULI_ESTATE,
     storageCells: 5,
   },
@@ -916,10 +1209,11 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     tankLitres: 39,
     wheelGrip: 0.57,
     brakeDecelG: 0.5,
-    steerLock: 0.522,
+    steerLock: 0.53,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
     dragArea: 0.92,
+    aero: AERO_ZHIGULI,
     suspension: SUSP_ZHIGULI,
   },
   {
@@ -941,11 +1235,12 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     wheelGrip: 0.615,
     // Rally brakes: pads, harder linings and a servo the road car never had.
     brakeDecelG: 0.75,
-    steerLock: 0.508,
+    steerLock: 0.526,
     rearDriveBias: 1,
     handlingProfile: 'sport',
     frontWeightShare: 0.52,
     dragArea: 0.9,
+    aero: AERO_ZHIGULI,
     suspension: SUSP_LADA_RALLY,
     storageCells: 1,
   },
@@ -964,10 +1259,11 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     tankLitres: 39,
     wheelGrip: 0.58,
     brakeDecelG: 0.5,
-    steerLock: 0.52,
+    steerLock: 0.53,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
     dragArea: 0.95,
+    aero: AERO_ZHIGULI,
     suspension: SUSP_ZHIGULI,
   },
   {
@@ -985,10 +1281,11 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     tankLitres: 39,
     wheelGrip: 0.582,
     brakeDecelG: 0.5,
-    steerLock: 0.521,
+    steerLock: 0.53,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
     dragArea: 0.92,
+    aero: AERO_ZHIGULI,
     suspension: SUSP_ZHIGULI,
   },
   {
@@ -1009,11 +1306,12 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     tankLitres: 43,
     wheelGrip: 0.65,
     brakeDecelG: 0.57,
-    steerLock: 0.56,
+    steerLock: 0.59,
     rearDriveBias: 0,
     handlingProfile: 'road',
     frontWeightShare: 0.62,
     dragArea: 0.88,
+    aero: AERO_SAMARA_HATCH,
     suspension: SUSP_SAMARA,
     storageCells: 2,
   },
@@ -1031,11 +1329,12 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     tankLitres: 43,
     wheelGrip: 0.65,
     brakeDecelG: 0.57,
-    steerLock: 0.56,
+    steerLock: 0.59,
     rearDriveBias: 0,
     handlingProfile: 'road',
     frontWeightShare: 0.615,
     dragArea: 0.88,
+    aero: AERO_SAMARA_HATCH,
     suspension: SUSP_SAMARA,
     storageCells: 3,
   },
@@ -1055,11 +1354,12 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     tankLitres: 43,
     wheelGrip: 0.65,
     brakeDecelG: 0.57,
-    steerLock: 0.56,
+    steerLock: 0.589,
     rearDriveBias: 0,
     handlingProfile: 'road',
     frontWeightShare: 0.6,
     dragArea: 0.84,
+    aero: AERO_SAMARA_SALOON,
     suspension: SUSP_SAMARA,
   },
   {
@@ -1081,11 +1381,12 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     tankLitres: 42,
     wheelGrip: 0.576,
     brakeDecelG: 0.48,
-    steerLock: 0.496,
+    steerLock: 0.499,
     rearDriveBias: 0.5,
     handlingProfile: 'utility',
     frontWeightShare: 0.53,
     dragArea: 1.3,
+    aero: AERO_NIVA,
     suspension: SUSP_NIVA,
     storageCells: 4,
   },
@@ -1102,11 +1403,12 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     tankLitres: 42,
     wheelGrip: 0.574,
     brakeDecelG: 0.47,
-    steerLock: 0.498,
+    steerLock: 0.522,
     rearDriveBias: 0.5,
     handlingProfile: 'utility',
     frontWeightShare: 0.52,
     dragArea: 1.3,
+    aero: AERO_NIVA,
     suspension: SUSP_NIVA,
     storageCells: 6,
   },
@@ -1232,6 +1534,7 @@ const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
   handlingProfile: spec.handlingProfile,
   frontWeightShare: spec.frontWeightShare,
   dragArea: spec.dragArea,
+  aero: spec.aero,
   tyre: spec.tyre,
 }));
 
@@ -1261,11 +1564,12 @@ const SAAS_SPECS: readonly Entry[] = [
     wheelGrip: 0.65,
     brakeDecelG: 0.59,
     suspension: SUSP_SAMARA,
-    steerLock: 0.617,
+    steerLock: 0.658,
     rearDriveBias: 0,
     handlingProfile: 'road',
     frontWeightShare: 0.62,
     dragArea: 0.86,
+    aero: AERO_AZLK_2141,
     wheelSetPool: SOVIET_WHEEL_SET_POOL,
   },
   {
@@ -1285,11 +1589,12 @@ const SAAS_SPECS: readonly Entry[] = [
     tankLitres: 43,
     wheelGrip: 0.65,
     brakeDecelG: 0.57,
-    steerLock: 0.56,
+    steerLock: 0.59,
     rearDriveBias: 0,
     handlingProfile: 'road',
     frontWeightShare: 0.62,
     dragArea: 0.88,
+    aero: AERO_SAMARA_HATCH,
     suspension: SUSP_SAMARA,
     storageCells: 3,
     paintStyle: 'solid-paint',
@@ -1336,12 +1641,13 @@ const SAAS_SPECS: readonly Entry[] = [
     // MacPherson struts in front, trailing arms on an elastic cross-beam behind:
     // the Samara's layout, and its preset.
     suspension: SUSP_SAMARA,
-    steerLock: 0.54,
+    steerLock: 0.557,
     rearDriveBias: 0,
     handlingProfile: 'road',
     // No factory axle loads are published; transverse front-drive default.
     frontWeightShare: 0.62,
     dragArea: 0.68,
+    aero: AERO_OKA,
     lights: {
       // Headlamps carry the position lamps inside them. Amber indicators sit in the
       // bumper and on each front wing. The OSVAR 43.3716 rear lamp stacks a clear
@@ -1371,8 +1677,22 @@ const SAAS_SPECS: readonly Entry[] = [
     tankLitres: 56,
     wheelGrip: 0.59,
     brakeDecelG: 0.53,
-    suspension: SUSP_TRUCK,
-    steerLock: 0.482,
+    // The front is a beam too, on kingpins: its wheels stay square to the road in roll,
+    // with the factory +1° of camber, and the axle yaws on its leaves as it rolls.
+    suspension: {
+      ...SUSP_TRUCK,
+      ackermann: 0.8,
+      frontCamberDeg: 1,
+      frontRollCamber: 0,
+      frontRollSteer: 0.06,
+    },
+    // Beam axles on leaf springs at BOTH ends and no anti-roll bars: the roll centre
+    // sits at the spring seats on top of each axle, not at a pickup's front wishbones,
+    // and the leaves hang under the frame rails well inboard of the wheels, which takes
+    // roll stiffness away rather than adding it (see `SuspensionTuning.frontBar`).
+    rollCentre: { front: 0.45, rear: 0.48 },
+    antiRoll: { front: -0.25, rear: -0.25 },
+    steerLock: 0.487,
     rearDriveBias: 0.5,
     handlingProfile: 'utility',
     // Factory kerb axle loads: 1180 kg front, 665 kg rear. Boxy cab-over body:
@@ -1381,6 +1701,7 @@ const SAAS_SPECS: readonly Entry[] = [
     // UAZ-2206's 6.3 m (autoopt.ru, the same chassis).
     frontWeightShare: 1180 / 1845,
     dragArea: 3.45,
+    aero: AERO_UAZ_330364,
     // This working 4x4 keeps its authored heavy-duty wheels. It neither borrows
     // from the shared road-wheel pool nor donates its set to that pool.
     wheelSetPool: [],
@@ -1423,10 +1744,9 @@ const SAAS_SPECS: readonly Entry[] = [
     brakeDecelG: 0.51,
     // Rear leaf springs carrying a 500 kg payload; not the Zhiguli coil-sprung estate.
     suspension: SUSP_TRUCK,
-    // Factory outer-front turning radius is 5.25 m (autoopt.ru, IZH-2715); the
-    // leaf-sprung pickup scrubs wider than the bicycle model, so the lock is the one
-    // that measures 5.25 on tools/reality.ts rather than atan(2.4 / 4.615) + play.
-    steerLock: 0.533,
+    // Factory outer-front turning radius is 5.25 m (autoopt.ru, IZH-2715); the lock is
+    // the one that measures it on tools/reality.ts, like every other.
+    steerLock: 0.557,
     rearDriveBias: 1,
     handlingProfile: 'classic',
     // Factory unladen axle loads: 550 kg front, 465 kg rear.
@@ -1434,6 +1754,7 @@ const SAAS_SPECS: readonly Entry[] = [
     // No factory Cd is published. CdA 1.42 m² is derived from the factory
     // 125 km/h maximum with this engine, gearing, efficiency and tyre.
     dragArea: 1.42,
+    aero: AERO_IZH_2715,
     lights: {
       // Late PF10 front units: amber upper indicators and clear lower position
       // lenses. UP112 triangular rear indicators are independent of the FP112 /
@@ -1517,11 +1838,12 @@ const GTAV_SPECS: readonly Entry[] = [
     wheelGrip: 0.66,
     brakeDecelG: 0.6,
     suspension: SUSP_SAMARA,
-    steerLock: 0.58,
+    steerLock: 0.604,
     rearDriveBias: 0,
     wheelSetPool: SOVIET_WHEEL_SET_POOL,
     frontWeightShare: 0.62,
     dragArea: 0.68,
+    aero: AERO_VAZ_2110,
   },
 ];
 
@@ -1597,10 +1919,12 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   handlingProfile: e.handlingProfile ?? 'classic',
   frontWeightShare: e.frontWeightShare,
   antiRoll: e.antiRoll,
+  rollCentre: e.rollCentre,
   tyre: e.tyre,
   frontDiff: e.frontDiff,
   rearDiff: e.rearDiff,
   dragArea: e.dragArea,
+  aero: e.aero,
   lights: e.lights,
   storageCells: TRUNK_CELL_COUNT,
 }));

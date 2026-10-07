@@ -1,6 +1,6 @@
 /**
- * The world objects a contract is about: the loaded trailer of the equipment and
- * oversize kinds, and the car of the transfer kind.
+ * The world objects a contract is about: the loaded trailer of the trailer-equipment
+ * and oversize kinds, and the car of the transfer and towing kinds.
  *
  * A contract names its object after the offer (`generatedSeed`), so the same trailer
  * or car is the same object across a session, a save and a reload, with nothing
@@ -24,6 +24,7 @@ import type { CarState, GameWorld, TrailerLoad, TrailerState } from '../game/sta
 import { createServiceableCarState, poseOnGround } from '../game/spawn';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
 import { CAR_MODELS } from '../vehicle/carmodels';
+import { TRAILER_BALL_Z } from '../vehicle/trailer';
 import type { ContractCargoItem } from '../items/items';
 import type { Road } from '../world/road';
 import type { Terrain } from '../world/terrain';
@@ -38,10 +39,11 @@ const CAR_MODEL_DOMAIN = 0x43544331;
 /** Where a contract car is staggered around its courier, so two do not coincide. */
 const CAR_STAGGER_DOMAIN = 0x43545331;
 
-/** Equipment on the trailer of kind 6, kg: a real load, light enough to tow. */
+/** Equipment on the trailer of the trailer-equipment kind, kg: a real load, light
+ *  enough to tow. */
 const EQUIPMENT_MIN_KG = 180;
 const EQUIPMENT_RANGE_KG = 241;
-/** Pipes or beams on the trailer of kind 7, kg. Well under the 700 kg bed limit. */
+/** Pipes or beams on the oversize trailer, kg. Well under the 700 kg bed limit. */
 const OVERSIZE_MIN_KG = 320;
 const OVERSIZE_RANGE_KG = 141;
 
@@ -90,6 +92,15 @@ export function oversizeLoad(seed: number): TrailerLoad {
     ? { kind: 'pipes', halfExtents: [0.6, 0.19, 1.85] }
     : { kind: 'beams', halfExtents: [0.5, 0.3, 1.95] };
 }
+
+/**
+ * Where an oversize load sits along the bed: its front end this far behind the tow
+ * ball, the room the drawbar needs to swing under the overhang. So the 3.7 m pipes
+ * ride centred (8% of the rig's weight on the ball) and the 3.9 m beams 0.1 m further
+ * back, about 6% — a longer load is a lighter tongue, which is the real reason a long
+ * load is the more nervous tow (vehicle/trailer.ts, `tongueLoadN`).
+ */
+const OVERSIZE_BALL_CLEARANCE_M = 0.45;
 
 /** Mass on the bed of a contract trailer, kg. */
 export function contractTrailerCargoKg(item: ContractCargoItem): number {
@@ -161,8 +172,7 @@ export function ensureContractWorldObjects(
     kind !== 'trailer_equipment' &&
     kind !== 'oversize' &&
     kind !== 'car_transfer' &&
-    kind !== 'towing' &&
-    kind !== 'convoy'
+    kind !== 'towing'
   ) {
     return;
   }
@@ -198,7 +208,11 @@ function spawnContractTrailer(
     qz: 0,
     qw: Math.cos(yaw / 2),
   };
-  if (item.contractKind === 'oversize') trailer.load = oversizeLoad(item.generatedSeed);
+  if (item.contractKind === 'oversize') {
+    const load = oversizeLoad(item.generatedSeed);
+    trailer.load = load;
+    trailer.cargoZ = TRAILER_BALL_Z - OVERSIZE_BALL_CLEARANCE_M - load.halfExtents[2];
+  }
   deps.world.apply({ t: 'trailer_add', trailer });
 }
 
@@ -238,7 +252,7 @@ function spawnContractCar(
     car.qz = plane.qz;
     car.qw = plane.qw;
   }
-  // The towed car of kind 17 leaves the works with NO ENGINE: it cannot idle, it
+  // The towed car of the towing kind leaves the works with NO ENGINE: it cannot idle, it
   // cannot be driven, and the papers commission a tow rather than a drive. Removing
   // the part rather than destroying it is the honest state — there is nothing in
   // the engine bay to fail, and the car's own mass drops by the engine's.

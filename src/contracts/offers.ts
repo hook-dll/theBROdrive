@@ -22,7 +22,6 @@ import { courierId } from '../world/couriers';
 import { TRUNK_CELL_COUNT, TRUNK_COLUMNS } from '../vehicle/trunk';
 import { CONTRACT_KINDS } from './registry';
 import type { ContractKindDef } from './types';
-import type { PhotoSubjectsProvider } from './photosubjects';
 
 /** Offer draws stay on the courier domain the base system already used. */
 const OFFER_DOMAIN = 0x4f464631; // 'OFF1'
@@ -38,8 +37,8 @@ const COURIER_SPONGE_CHANCE = 0.35;
  * here through a kind module: reading the table in this module's BODY made the loop
  * an evaluation-order trap — `Cannot access 'CONTRACT_KINDS' before initialization`
  * whenever an entry point reached the registry first (measured with
- * tools/tow-convoy-bench.ts, whose own imports land in that order). A lazy sum is a
- * few additions per generated offer and cannot be observed.
+ * tools/tow-bench.ts, whose own imports land in that order). A lazy sum is a few
+ * additions per generated offer and cannot be observed.
  */
 function totalWeight(): number {
   let total = 0;
@@ -60,7 +59,6 @@ export function generateContractOffer(
   seed: number,
   courierIndex: number,
   slot: number,
-  photoSubjects?: PhotoSubjectsProvider,
 ): ContractCargoItem {
   const def = pickKind(seed, courierIndex, slot);
   const generatedSeed = hash(seed, OFFER_DOMAIN, courierIndex, slot);
@@ -74,21 +72,11 @@ export function generateContractOffer(
     cargoName: def.offerNames[nameIndex]!,
     rewardStickerKind: stickerKindForSeed(generatedSeed),
     generatedSeed,
-    progress: def.initialProgress(generatedSeed, {
-      seed,
-      courierIndex,
-      // A kind that names something on the road ahead (the photo errand) asks for it
-      // here; the provider comes from the caller so this module never imports the
-      // world's POI placement.
-      photoSubjects: photoSubjects ?? EMPTY_SUBJECTS,
-    }),
+    progress: def.initialProgress(generatedSeed),
   };
   if (massKg !== undefined) item.massKg = massKg;
   return item;
 }
-
-/** A world with no photo subjects (a bench, or a caller that supplies none). */
-const EMPTY_SUBJECTS: PhotoSubjectsProvider = () => [];
 
 /**
  * What an untouched courier keeps in its boot: four offers on the top row, a pack of
@@ -99,11 +87,10 @@ const EMPTY_SUBJECTS: PhotoSubjectsProvider = () => [];
 export function courierDefaultStorage(
   seed: number,
   index: number,
-  photoSubjects?: PhotoSubjectsProvider,
 ): readonly (Item | null)[] {
   const cells: (Item | null)[] = new Array(TRUNK_CELL_COUNT).fill(null);
   for (let slot = 0; slot < 4; slot++) {
-    cells[slot] = generateContractOffer(seed, index, slot, photoSubjects);
+    cells[slot] = generateContractOffer(seed, index, slot);
   }
   const bottom = TRUNK_CELL_COUNT - TRUNK_COLUMNS;
   const gumCell = bottom + Math.floor(hash01(seed, OFFER_DOMAIN, index, 10) * TRUNK_COLUMNS);

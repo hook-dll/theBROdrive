@@ -16,8 +16,9 @@
  *   top        flat-out on level asphalt, at the test load
  *   0-100      at the test load, measured the way a factory measures it: a manual
  *              box changed at the power-optimal point, not the automatic
- *   turn       full-lock radius, converted to the outer-front-wheel figure a factory
- *              turning circle quotes (centreline + half the real track)
+ *   turn       full-lock radius of the turn centre off the centreline, against the
+ *              factory outer-front-wheel figure brought to the same terms
+ *              (`sqrt(turn² − wheelbase²) − track/2`, the real car's geometry)
  *   brake      100-0 km/h, against period road tests (see the manifest note)
  *   lat, ride  printed beside their period figures, not held to them
  *
@@ -33,6 +34,7 @@
  */
 
 import { installAssetShim } from './assetshim';
+import { installDocumentShim } from './domshim';
 import { FIXED_DT, type PhysicsWorld } from '../src/core/physics';
 import { SurfaceType } from '../src/core/surfaces';
 import { CAR_MODELS, carModel, modelEngine, modelGearbox } from '../src/vehicle/carmodels';
@@ -43,6 +45,7 @@ import { engineTorqueNm, fullThrottleUpshiftDue } from '../src/vehicle/drivetrai
 import { benchOne, drive, driveUntil, makeRig, measureTopSpeed, type Rig } from './handling-bench';
 
 installAssetShim();
+installDocumentShim();
 
 /** Tolerances, as fractions of the factory figure. */
 const TOLERANCE = {
@@ -59,6 +62,8 @@ const TOLERANCE = {
  * and has to be looked at and re-accepted, not absorbed.
  */
 const KNOWN_DRIFT = 0.03;
+/** Seconds of full throttle against the brake before a 0-100's clock starts. */
+const PRE_REV_S = 0.6;
 
 /** A 0-100 deviation the owner has accepted: its cause and its size when accepted. */
 interface KnownDeviation {
@@ -122,6 +127,11 @@ interface Target {
  * wheels: a tyre working at 2-5% slip now turns the engine that much faster than road
  * speed, and this bench's manual changes, decided on road speed, reach the fuel cut a
  * little before they change up. That cost the front-drive cars 1.5-2%.
+ *
+ * The automatic clutch then took 1-2% off every launch: a slipping clutch no longer
+ * charges the car for the crank's inertia, which it used to carry geared to the wheels
+ * through the whole of first gear. The 2106 (6.6%) and the 2107 (7.8%) came inside
+ * tolerance with it and lost their notes; the rest stayed within `KNOWN_DRIFT`.
  *
  * CATALOGUE_OPTIMISTIC. A point-mass run from the catalogue's own net kW, kerb mass
  * plus the stated 150 kg, the gearbox's ratios and efficiency and the Cd·A that fits
@@ -216,13 +226,11 @@ const TARGETS: Readonly<Record<string, Target>> = {
     wheelbase: 2.424, track: 1.365, radius: 0.288, top: 150, to100: 16,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, brake: 74, lat: 0.72, hz: 1.1,
     source: 'AO vaz-2106',
-    known0to100: { reason: CLASSIC_LAUNCH, dev: 0.08 },
   },
   sv_vaz2107: {
     wheelbase: 2.424, track: 1.365, radius: 0.288, top: 150, to100: 17,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, brake: 74, lat: 0.72, hz: 1.1,
     source: 'AO vaz-2107 (VAZ-2103 engine)',
-    known0to100: { reason: CLASSIC_LAUNCH, dev: 0.093 },
   },
   sv_vaz2108: {
     wheelbase: 2.46, track: 1.4, radius: 0.281, top: 148, to100: 16,
@@ -375,11 +383,15 @@ function drivenRadiusOf(modelId: string): number {
 
 /**
  * 0-100 km/h through a manual box driven the way a factory test driver drives it:
- * first gear engaged before the clock starts, full throttle, and each change made at
- * the power-optimal point (`fullThrottleUpshiftDue`, the same definition the
- * automatic uses at wide-open throttle) — decided on the crank speed the road speed
- * implies in the engaged gear, so a free-revving crank mid-change cannot trigger a
- * second one.
+ * first gear engaged before the clock starts, the revs raised against the brake, then
+ * full throttle, and each change made at the power-optimal point
+ * (`fullThrottleUpshiftDue`, the same definition the automatic uses at wide-open
+ * throttle) — decided on the crank speed the road speed implies in the engaged gear,
+ * so a free-revving crank mid-change cannot trigger a second one.
+ *
+ * The revs are raised first because a test driver does not let the clutch up at idle:
+ * the crank's own inertia takes a third of a second of full torque to spin up from
+ * idle to the bite (vehicle/drivetrain.ts), and no 0-100 was ever measured that way.
  */
 function manualZeroToHundred(rig: Rig, modelId: string): number | null {
   const engine = modelEngine(carModel(modelId));
@@ -392,13 +404,17 @@ function manualZeroToHundred(rig: Rig, modelId: string): number | null {
     settings: { ...rig.world.state.settings, gearboxMode: 'manual' },
   });
 
-  // Select first and let the change complete, on the brake.
+  // Select first and let the change complete, on the brake; then the revs up against it.
   drive(rig, gearbox.shiftTime + 0.3, (t, f) => {
     f.shift = t === 0 ? 1 : 0;
     f.brake = 1;
     f.throttle = 0;
   });
   if (rig.vehicle.gearLabel !== '1') throw new Error(`${modelId}: could not select first gear`);
+  drive(rig, PRE_REV_S, (_, f) => {
+    f.brake = 1;
+    f.throttle = 1;
+  });
 
   let reached: number | null = null;
   let t = 0;
@@ -601,11 +617,16 @@ for (const id of ids) {
 
   // Turning, braking, grip and ride come from the shared sheet, at kerb mass.
   const sheet = await benchOne(id);
-  // A factory turning radius is swept by the OUTER FRONT WHEEL, and the bench
-  // measures the path of the centre of mass, so the two differ by half a track. The
-  // conversion uses the REAL track, so a steering-lock error cannot hide inside a
-  // geometry error.
-  const realCentre = real.turn - real.track / 2;
+  // A factory turning radius is swept by the OUTER FRONT WHEEL. The bench measures
+  // forward speed over yaw rate, which is how far the turn centre sits to the side of
+  // the car — on the rear axle's line, at the low speed this is taken at. The outer
+  // front wheel is a wheelbase ahead of that line and half a track further out, so its
+  // radius is the hypotenuse, `sqrt((R + t/2)² + L²)`, and the factory figure in the
+  // bench's terms is `sqrt(turn² − L²) − t/2`. (Subtracting only the half track, as this
+  // did, put the target ~0.5 m wide, which a front axle with no Ackermann scrubbing its
+  // tyres against each other happened to meet.) The REAL track and wheelbase are used,
+  // so a steering-lock error cannot hide inside a geometry error.
+  const realCentre = Math.sqrt(real.turn * real.turn - real.wheelbase * real.wheelbase) - real.track / 2;
 
   console.log(
     `${id.padEnd(16)} ${pad(top.plateauKmh.toFixed(0), 4)} ${pad(real.top, 5)} ` +
