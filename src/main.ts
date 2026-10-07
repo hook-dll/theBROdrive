@@ -290,8 +290,9 @@ async function boot(): Promise<void> {
           graphicsQualitySource: 'device',
           msaa: false,
           // A phone core is the slowest processor this game runs on: the lightest stream
-          // and the 1.5 km horizon, as the phone's graphics default always gave it.
-          cpuLoad: 'very_low',
+          // and the 2 km horizon, as the phone's graphics default always gave it.
+          viewDistance: 'very_low',
+          trafficDensity: 'very_low',
         },
       });
     }
@@ -453,14 +454,24 @@ async function boot(): Promise<void> {
   // boot warm-up so its hidden anchors compile the shared post and flag programs then.
   const gateField = new GateField(renderer.scene, terrain);
   // Cactus air dancers beside every courier. Built here, before the boot warm-up, so
-  // the hidden anchor rig it adds to the scene compiles their skinned program under
-  // the loading cover. See world/props/airdancer.ts.
+  // the hidden anchor dancer it adds to the scene compiles their program under the
+  // loading cover. See world/props/airdancer.ts.
   const dancers = new DancerField(renderer.scene);
-  /** Every live car knocks the dancers it reaches; one visitor, made once. */
+  /**
+   * Every live car near a dancer shoves its tube; one visitor, made once. Heading and
+   * velocity are read only for a car that is actually near one.
+   */
   const knockPosition = { x: 0, y: 0, z: 0 };
   const knockDancers = (_id: string, vehicle: Vehicle): void => {
     const p = vehicle.absoluteTranslation(knockPosition);
-    dancers.knock(p.x, p.z, vehicle.speedKmh / 3.6);
+    if (!dancers.near(p.x, p.z)) return;
+    const q = vehicle.chassis.rotation();
+    // The chassis' +Z on the ground plane.
+    const fx = 2 * (q.x * q.z + q.w * q.y);
+    const fz = 1 - 2 * (q.x * q.x + q.y * q.y);
+    const f = Math.hypot(fx, fz) || 1;
+    const v = vehicle.chassis.linvel();
+    dancers.knock(p.x, p.z, fx / f, fz / f, v.x, v.z);
   };
 
   // Shared exact nearest-road field: the tile streamer uses it to grade the open
@@ -491,7 +502,7 @@ async function boot(): Promise<void> {
   // A save carries the tier it was played at, so apply it before the first frame
   // rather than waiting for someone to open the pause menu.
   {
-    const metres = viewDistanceFor(world.state.settings.cpuLoad, mobilePresentation);
+    const metres = viewDistanceFor(world.state.settings.viewDistance, mobilePresentation);
     renderer.setViewDistance(metres);
     vista.setViewDistance(metres);
   }
@@ -3004,7 +3015,7 @@ async function boot(): Promise<void> {
       const tier = world.state.settings.graphicsQuality;
       renderer.setQuality(tier);
       sky.setQuality(tier, mobilePresentation);
-      const horizon = viewDistanceFor(world.state.settings.cpuLoad, mobilePresentation);
+      const horizon = viewDistanceFor(world.state.settings.viewDistance, mobilePresentation);
       renderer.setViewDistance(horizon);
       vista.setViewDistance(horizon);
       loop.setRenderFps(

@@ -26,7 +26,7 @@ import type { RoadConditionBuffer } from './gradient';
 /**
  * THE STREAM'S SIZE COMES FROM THE CARRIAGEWAY, scaled by what the processor can carry.
  *
- * A two-lane road replenishes up to `TRAFFIC_CAPS[cpuLoad].narrow` cars; a four-lane
+ * A two-lane road replenishes up to `TRAFFIC_CAPS[trafficDensity].narrow` cars; a four-lane
  * road up to `.wide`. In between the ceiling follows the widening. Existing visible
  * cars drain naturally rather than disappearing at a profile step. The density
  * samples the entire spawn band, not one point (see `refreshRoadCap`).
@@ -558,7 +558,7 @@ export interface TrafficStatus {
    */
   readonly target: number;
   /**
-   * Replenishment ceiling from the carriageway: `TRAFFIC_CAPS[cpuLoad].narrow` on two
+   * Replenishment ceiling from the carriageway: `TRAFFIC_CAPS[trafficDensity].narrow` on two
    * lanes and `.wide` on four. Existing visible cars can exceed it while a narrowing
    * drains naturally; it is not a hard limit on the live count.
    */
@@ -2226,12 +2226,12 @@ export class RoadTraffic {
   }
 
   /**
-   * This machine's traffic ceilings; see `CpuLoad`. Read live so the menu applies at
+   * This machine's traffic ceilings; see `TRAFFIC_CAPS`. Read live so the menu applies at
    * once. Above `.narrow` the stream packs tighter (`DENSE_SPAWN_*`): a stream busier
    * than a full two-lane road's worth is a busy road and queues up.
    */
   private get trafficCaps(): { readonly narrow: number; readonly wide: number } {
-    return TRAFFIC_CAPS[this.sourceWorld.state.settings.cpuLoad];
+    return TRAFFIC_CAPS[this.sourceWorld.state.settings.trafficDensity];
   }
 
   /**

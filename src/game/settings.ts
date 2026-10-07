@@ -238,16 +238,17 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
  * A CPU figure, not a graphics one. The vista costs terrain sampling, set by RADIUS
  * rather than by pixels: measured on a 5950X, a cell rebuild costs 13.0 ms at 1.5 km,
  * 17.3 ms at 8 km and 31.9 ms at 25 km, and the mesa vertex count goes from 897 to
- * 16 419 — a hitch on every cell crossing for a processor that cannot keep up.
+ * 16 419 — a hitch on every cell crossing for a processor that cannot keep up. 32 km
+ * is past the last measured point: for a processor with room to spare.
  */
-const HORIZON_M: Record<CpuLoad, number> = { very_low: 1500, low: 8000, medium: 25000, high: 25000 };
+const HORIZON_M: Record<ComputeLevel, number> = { very_low: 2000, low: 8000, medium: 16000, high: 32000 };
 
 /**
- * The horizon this presentation draws. A phone never gets the 25 km map: a phone core
- * is slower than the 5950X above, so that radius is a multi-frame hitch per cell.
+ * The horizon this presentation draws. A phone never gets past 8 km: a phone core is
+ * slower than the 5950X above, so a wider radius is a multi-frame hitch per cell.
  */
-export function viewDistanceFor(cpuLoad: CpuLoad, mobilePresentation: boolean): number {
-  return mobilePresentation ? Math.min(HORIZON_M[cpuLoad], HORIZON_M.low) : HORIZON_M[cpuLoad];
+export function viewDistanceFor(level: ComputeLevel, mobilePresentation: boolean): number {
+  return mobilePresentation ? Math.min(HORIZON_M[level], HORIZON_M.low) : HORIZON_M[level];
 }
 
 /** Spotlight budget for vehicle lamps, as this presentation will compile it. */
@@ -292,30 +293,35 @@ export function presentationFpsFor(frameRateLimit: number | null): number | null
 }
 
 /**
- * Processor budget, separate from the graphics rung because it is a different chip.
- * The graphics rung is pixels and shader cost; this is work the processor pays for
- * whatever the screen is: how many ambient traffic cars are live, each a full physical
- * vehicle with its own autopilot and pairwise coordination that grows with the square
- * of the count, and how far the desert is drawn (`viewDistanceFor`). Both apply live:
- * surplus cars drain behind the player, the horizon moves in place.
+ * The Compute settings: two processor budgets, separate from the graphics rung because
+ * they are a different chip, and separate from each other because they cost different
+ * things. The view distance is terrain sampling for the far desert (`viewDistanceFor`);
+ * the traffic is how many ambient cars are live, each a full physical vehicle with its
+ * own autopilot and pairwise coordination that grows with the square of the count
+ * (`TRAFFIC_CAPS`). Both apply live: surplus cars drain behind the player, the horizon
+ * moves in place.
  */
-export type CpuLoad = 'very_low' | 'low' | 'medium' | 'high';
+export type ComputeLevel = 'very_low' | 'low' | 'medium' | 'high';
 
 /**
- * Traffic replenishment ceilings per CPU level: two-lane and four-lane road.
+ * Traffic replenishment ceilings per level: two-lane and four-lane road.
  *
  * Medium is the 12/24 the stream had when it lived in 400 m either side of the player.
  * Doubling it with the 800 m reach was meant to hold the density per metre, but the
  * cars do not spread over the window: receding cars behind are recycled and the budget
  * lives on the road ahead, so the doubled count read as twice the traffic. High is
- * half as much again, 18/36: a busy road for a processor that can carry it.
+ * 20/40: a busy road for a processor that can carry it.
  */
-export const TRAFFIC_CAPS: Record<CpuLoad, { readonly narrow: number; readonly wide: number }> = {
+export const TRAFFIC_CAPS: Record<ComputeLevel, { readonly narrow: number; readonly wide: number }> = {
   very_low: { narrow: 4, wide: 8 },
   low: { narrow: 8, wide: 16 },
   medium: { narrow: 12, wide: 24 },
-  high: { narrow: 18, wide: 36 },
+  high: { narrow: 20, wide: 40 },
 };
+
+function computeLevel(value: unknown): ComputeLevel | null {
+  return value === 'very_low' || value === 'low' || value === 'medium' || value === 'high' ? value : null;
+}
 
 /**
  * The frame rates the player may choose, and `null` for no cap.
@@ -472,8 +478,10 @@ export interface Settings {
    * number means "a bit bigger" on both.
    */
   dashboardScale: number;
-  /** Processor budget; see `CpuLoad`. */
-  cpuLoad: CpuLoad;
+  /** How far the desert is drawn; see `viewDistanceFor`. */
+  viewDistance: ComputeLevel;
+  /** How many ambient cars the stream holds; see `TRAFFIC_CAPS`. */
+  trafficDensity: ComputeLevel;
 }
 
 export const DAY_CYCLE_MIN_MINUTES = GAMEPLAY_CONFIG.dayCycleMinutesMin;
@@ -551,8 +559,9 @@ export const DEFAULT_SETTINGS: Settings = {
   // Off by default; a joke should be opted into, not discovered mid-drive.
   bouncyCars: false,
   dashboardScale: 1,
-  // The 12/24 stream; High is for a processor that has room beyond it.
-  cpuLoad: 'medium',
+  // 16 km of desert and the 12/24 stream; High is for a processor with room beyond them.
+  viewDistance: 'medium',
+  trafficDensity: 'medium',
 };
 
 /**
@@ -703,9 +712,9 @@ export function sanitizeSettings(raw: unknown): Settings {
               DASHBOARD_SCALE_STEP,
           ) * DASHBOARD_SCALE_STEP
         : 1,
-    cpuLoad: obj.cpuLoad === 'very_low' || obj.cpuLoad === 'low' || obj.cpuLoad === 'high'
-      ? obj.cpuLoad
-      : 'medium',
+    // A save from before the split had one `cpuLoad` for both; it seeds each.
+    viewDistance: computeLevel(obj.viewDistance) ?? computeLevel(obj.cpuLoad) ?? 'medium',
+    trafficDensity: computeLevel(obj.trafficDensity) ?? computeLevel(obj.cpuLoad) ?? 'medium',
   };
 
   const rawBindings = obj.keyBindings;

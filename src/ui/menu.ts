@@ -16,7 +16,7 @@ import {
   TIME_OF_DAY_PRESETS,
 } from '../game/settings';
 import type {
-  CpuLoad,
+  ComputeLevel,
   GraphicsQuality,
   GraphicsQualitySource,
   Settings,
@@ -45,13 +45,25 @@ import { ALL_VARIANTS } from '../parts/registry';
 import { CAMERA_FRAME_LIMIT, type FluidKind, type ShadeTint } from '../items/items';
 import { STICKERS, type StickerKind } from '../items/stickercatalog';
 
-/** The CPU row's buttons, lightest first; see `CpuLoad`. */
-const TRAFFIC_LEVELS: readonly { load: CpuLoad; label: string; icon: string }[] = [
-  { load: 'very_low', label: 'Very Low', icon: 'retro' },
-  { load: 'low', label: 'Low', icon: 'gfx1' },
-  { load: 'medium', label: 'Medium', icon: 'gfx2' },
-  { load: 'high', label: 'High', icon: 'gfx3' },
+/** The Compute rows' buttons, lightest first; see `ComputeLevel`. */
+const COMPUTE_LEVELS: readonly { level: ComputeLevel; label: string }[] = [
+  { level: 'very_low', label: 'Very Low' },
+  { level: 'low', label: 'Low' },
+  { level: 'medium', label: 'Medium' },
+  { level: 'high', label: 'High' },
 ];
+const HORIZON_ICONS: Record<ComputeLevel, string> = {
+  very_low: 'horizon1',
+  low: 'horizon2',
+  medium: 'horizon3',
+  high: 'horizon4',
+};
+const TRAFFIC_ICONS: Record<ComputeLevel, string> = {
+  very_low: 'retro',
+  low: 'gfx1',
+  medium: 'gfx2',
+  high: 'gfx3',
+};
 
 /**
  * Title screen and pause overlay. Plain DOM, no framework. Each call owns the
@@ -153,6 +165,9 @@ const ICONS: Record<string, readonly string[]> = {
   horizon1: ['M3 16h18'],
   horizon2: ['M3 16h18M6 12h12'],
   horizon3: ['M3 16h18M6 12h12M9 8h6'],
+  horizon4: ['M3 16h18M6 12h12M9 8h6M11 4h2'],
+  /** A processor die, for the Compute tab. */
+  compute: ['M7 7h10v10H7z', 'M10 10h4v4h-4z', 'M9 4v3M15 4v3M9 17v3M15 17v3M4 9h3M4 15h3M17 9h3M17 15h3'],
   morning: ['M15 15a3 3 0 1 0-6 0', 'M3 18h18', 'M12 7v3M9.5 9.5 11 11M14.5 9.5 13 11'],
   noon: ['M15.5 12a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0z', 'M12 3v2M12 19v2M3 12h2M19 12h2'],
   evening: ['M15 15a3 3 0 1 0-6 0', 'M3 18h18', 'M12 10V7M10.5 8.5 12 10l1.5-1.5'],
@@ -867,7 +882,8 @@ export class MainMenu {
         cameraShake: base.cameraShake,
         bouncyCars: base.bouncyCars,
         dashboardScale: base.dashboardScale,
-        cpuLoad: base.cpuLoad,
+        viewDistance: base.viewDistance,
+        trafficDensity: base.trafficDensity,
       };
       const apply = (): void => {
         hooks.applySettings({
@@ -891,7 +907,8 @@ export class MainMenu {
           cameraShake: settings.cameraShake,
           bouncyCars: settings.bouncyCars,
           dashboardScale: settings.dashboardScale,
-          cpuLoad: settings.cpuLoad,
+          viewDistance: settings.viewDistance,
+          trafficDensity: settings.trafficDensity,
         });
       };
 
@@ -922,7 +939,7 @@ export class MainMenu {
        * Settings section, remembered across visits: someone adjusting the horizon
        * comes back to the horizon, not to the top of a list.
        */
-      type SettingsTab = 'drive' | 'display' | 'gameplay' | 'sound' | 'controls';
+      type SettingsTab = 'drive' | 'display' | 'compute' | 'gameplay' | 'sound' | 'controls';
       let settingsTab: SettingsTab = 'drive';
       /** Action id waiting for a key in capture mode; only set on settings. */
       let capturingActionId: string | null = null;
@@ -1661,25 +1678,6 @@ export class MainMenu {
                 },
               },
             ]),
-            // A DIFFERENT CHIP FROM EVERY ROW ABOVE. Those are the graphics card's bill;
-            // this is the processor's: the traffic, every car a full physical vehicle with
-            // its own driver, and the horizon, rebuilt cell by cell as you drive. Live.
-            segmented('CPU', TRAFFIC_LEVELS.map((level) => ({
-              label: level.label,
-              icon: level.icon,
-              hint:
-                `${formatHorizon(viewDistanceFor(level.load, mobilePresentation))} of desert, `
-                + `up to ${TRAFFIC_CAPS[level.load].narrow} cars on a two-lane road and `
-                + `${TRAFFIC_CAPS[level.load].wide} on a four-lane one. `
-                + 'Both are paid for by the processor, not the graphics card: the far '
-                + 'desert is rebuilt as you drive, and every car is fully simulated with '
-                + 'its own driver. Applies at once.',
-              active: () => settings.cpuLoad === level.load,
-              pick: () => {
-                settings.cpuLoad = level.load;
-                apply();
-              },
-            }))),
             segmented('Smooth Edges', [
               {
                 label: 'On',
@@ -1718,6 +1716,43 @@ export class MainMenu {
                 settings.fieldOfView = value;
               },
             ),
+          );
+        };
+
+        // THE PROCESSOR'S BILL, a different chip from every Display row: the far desert,
+        // rebuilt cell by cell as you drive, and the traffic, every car a full physical
+        // vehicle with its own driver. Two rows because they cost different things and a
+        // machine may afford one and not the other. Both apply live.
+        const renderCompute = (): void => {
+          pane.append(
+            segmented('View Distance', COMPUTE_LEVELS.map(({ level, label }) => ({
+              label,
+              icon: HORIZON_ICONS[level],
+              hint:
+                `${formatHorizon(viewDistanceFor(level, mobilePresentation))} of desert before the haze. `
+                + 'The far desert is rebuilt by the processor as you drive; the farther it '
+                + 'reaches, the bigger that rebuild, and a slow processor feels it as a '
+                + 'stutter every few hundred metres.',
+              active: () => settings.viewDistance === level,
+              pick: () => {
+                settings.viewDistance = level;
+                apply();
+              },
+            }))),
+            segmented('Traffic', COMPUTE_LEVELS.map(({ level, label }) => ({
+              label,
+              icon: TRAFFIC_ICONS[level],
+              hint:
+                `Up to ${TRAFFIC_CAPS[level].narrow} cars on a two-lane road and `
+                + `${TRAFFIC_CAPS[level].wide} on a four-lane one. Every one is fully `
+                + 'simulated with its own driver, so this is the processor\'s, not the '
+                + 'graphics card\'s.',
+              active: () => settings.trafficDensity === level,
+              pick: () => {
+                settings.trafficDensity = level;
+                apply();
+              },
+            }))),
           );
         };
 
@@ -1916,8 +1951,15 @@ export class MainMenu {
             id: 'display',
             label: 'Display',
             icon: 'display',
-            hint: 'What is drawn, and how far into the desert it reaches.',
+            hint: 'What is drawn, and how sharply.',
             render: renderDisplay,
+          },
+          {
+            id: 'compute',
+            label: 'Compute',
+            icon: 'compute',
+            hint: 'How far the desert reaches and how busy the road is: the processor\'s bill.',
+            render: renderCompute,
           },
           {
             id: 'gameplay',
