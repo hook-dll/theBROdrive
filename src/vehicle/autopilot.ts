@@ -11,6 +11,7 @@ import type { Vehicle } from './vehicle';
 import { evaluateCorridorLine, planCorridor, type CorridorObstacle } from './corridor';
 import type { TrafficField, TrafficNeighbour } from './trafficfield';
 import { RacingLine, type RacingLineBand } from './racingline';
+import { shouldShelter } from './weatherpace';
 
 /**
  * How far ahead the corridor is planned: three seconds of travel, bounded so a
@@ -550,6 +551,14 @@ const CURVATURE_TRIM_LEAK = 0.3;
  * differ between cars for no gain, and being slightly pessimistic is free.
  */
 const CAR_HALF_WIDTH_M = 1.05;
+/** Asphalt left between a sheltering car's flank and the road edge, metres. */
+const SHELTER_EDGE_MARGIN_M = 0.3;
+/** A sheltering car is at the edge once its body is this close to the line, metres. */
+const SHELTER_ARRIVED_M = 0.4;
+/** Pace a sheltering car moves over to the edge at, m/s: 30 km/h. */
+const SHELTER_PULL_MPS = 30 / 3.6;
+/** Below this a sheltering car at its spot pulls the handbrake, m/s. */
+const SHELTER_PARK_MPS = 0.5;
 /** Keeps the avoidance line until the whole vehicle has cleared the prop. */
 const CAR_HALF_LENGTH_M = 3;
 /** A standing person is narrow, but remains a physical body the whole car must clear. */
@@ -1658,6 +1667,10 @@ export class Autopilot {
   private lastRecoveryAt = -Infinity;
   private recoveryAttempts = 0;
   private speedCapValue = Infinity;
+  /** See `sheltering`. */
+  private shelteringValue = false;
+  /** A sheltering car has reached its spot at the edge and stays stopped there. */
+  private shelterArrived = false;
   /** Share of the mode's pace this driver uses; see `setPace`. */
   private paceValue = 1;
   /** Ambient traffic may use a per-driver following distance. */
@@ -2626,6 +2639,8 @@ export class Autopilot {
   get cruisePace(): number {
     return Math.min(MODES[this.modeValue].cruiseMps * this.paceValue, this.speedCapValue) * this.widePaceValue;
   }
+  /** Pulled over with the hazards on, waiting out a haboob's dust; see weatherpace.ts. */
+  get sheltering(): boolean { return this.shelteringValue; }
   /** Whether this driver's mode passes slower cars at all, across the crown or between lanes. */
   get overtakes(): boolean {
     const config = MODES[this.modeValue];
@@ -2759,6 +2774,8 @@ export class Autopilot {
     const widePaceTarget = lanesPerSide > 1 && lanesAhead > 1 ? WIDE_ROAD_PACE : 1;
     const widePaceStep = ((WIDE_ROAD_PACE - 1) / WIDE_PACE_RAMP_S) * Math.max(dt, 0);
     this.widePaceValue += clamp(widePaceTarget - this.widePaceValue, -widePaceStep, widePaceStep);
+    this.shelteringValue = shouldShelter(this.shelteringValue);
+    if (!this.shelteringValue) this.shelterArrived = false;
     const desiredSpeed = ownPace * this.widePaceValue;
     const homeLane =
       ownPace >= INNER_LANE_PACE_MPS ? 0 : Math.min(lanesPerSide, lanesAhead) - 1;
@@ -3978,11 +3995,22 @@ export class Autopilot {
         : Math.sign(projection.lateral || 1) * offRoadRecoveryLine
       : recovering || this.travelled < this.recoveryBiasUntil
         ? clamp(ownLaneOffset + this.recoveryBias, -recoveryLineLimit, recoveryLineLimit)
-        : committedLine;
+        : this.shelteringValue
+          // SHELTERING: the outer edge of the asphalt on this driver's own side, the
+          // wheels still on it — the verge is where props and soft sand are.
+          ? Math.sign(ownLaneOffset || 1) * Math.max(
+              Math.abs(ownLaneOffset),
+              this.asphaltHalfWidth - CAR_HALF_WIDTH_M - SHELTER_EDGE_MARGIN_M,
+            )
+          : committedLine;
     // Recovery retains its existing verge allowance, but never bypasses traffic
     // entry constraints. Evaluate whichever override will actually steer the car.
     if (offRoad || recovering || this.travelled < this.recoveryBiasUntil) {
       corridorRequest.edgeLimit = Math.max(staticAvoidLine, recoveryLineLimit, Math.abs(desiredLine));
+      corridorRequest.lateralFreedom = Number.POSITIVE_INFINITY;
+    } else if (this.shelteringValue) {
+      // Pulling over is a move to the edge of its own side, not a lane change.
+      corridorRequest.edgeLimit = Math.max(corridorRequest.edgeLimit, Math.abs(desiredLine));
       corridorRequest.lateralFreedom = Number.POSITIVE_INFINITY;
     }
     // Reconcile the commitment/override once. Both it and the search proposal
@@ -4215,11 +4243,13 @@ export class Autopilot {
     // A car on its racing line is not changing lanes, however far it moves across; and
     // a racer tells nobody anything.
     vehicle.setIndicator(
-      config.racer || this.racingActive || Math.abs(indicatorDelta) < threshold
-        ? 'off'
-        : indicatorDelta > 0
-          ? 'left'
-          : 'right',
+      this.shelteringValue
+        ? 'hazard'
+        : config.racer || this.racingActive || Math.abs(indicatorDelta) < threshold
+          ? 'off'
+          : indicatorDelta > 0
+            ? 'left'
+            : 'right',
     );
 
 
@@ -4738,6 +4768,14 @@ export class Autopilot {
       targetSpeed = Math.min(targetSpeed, this.shoulderLeaderSpeed + MIDDLE_PASS_ADVANTAGE_MPS);
     }
     if (!plan.admissible) targetSpeed = 0;
+    // Sheltering: slow to a crawl while the body is still moving over to the edge,
+    // then stop and wait there. Before the stall rule reads it, so a car waiting out
+    // the dust on purpose is never taken for one that is stuck.
+    if (this.shelteringValue) {
+      // Latched: a body the gusts rock across the arrival band must not start and stop.
+      if (Math.abs(projection.lateral - desiredLine) <= SHELTER_ARRIVED_M) this.shelterArrived = true;
+      targetSpeed = Math.min(targetSpeed, this.shelterArrived ? 0 : SHELTER_PULL_MPS);
+    }
     // Everything priced as being in the way has now been applied. Taken BEFORE the
     // departure limits below, which are a different problem with a different pedal.
     const obstacleLimitSpeed = targetSpeed;
@@ -4894,7 +4932,9 @@ export class Autopilot {
 
     const speedError = targetSpeed - speed;
     out.reverse = false;
-    out.handbrake = false;
+    // Parked at the edge to wait out the dust: the lever goes on, as a driver's would.
+    // On the foot brake alone a stopped car crept downwind a centimetre a second.
+    out.handbrake = this.shelterArrived && speed < SHELTER_PARK_MPS;
     // The floor exists to break stiction when a small speed is genuinely wanted. It
     // must not apply when the target is zero: 20% throttle against a stopped car's
     // own brakes is a creep into whatever it stopped for, and it walked the car up to

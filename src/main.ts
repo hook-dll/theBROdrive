@@ -1183,6 +1183,7 @@ async function boot(): Promise<void> {
     },
     origin,
     boardable,
+    (itemId) => race.winCoins(itemId),
   );
   interaction.attachPlayer(player);
 
@@ -2591,8 +2592,8 @@ async function boot(): Promise<void> {
         engineDestroyed: driving.engineDestroyed,
         checkEngine,
         handbrake: lastInput.handbrake,
-        blinkerLeft: blinkerLit && indicator === 'left',
-        blinkerRight: blinkerLit && indicator === 'right',
+        blinkerLeft: blinkerLit && (indicator === 'left' || indicator === 'hazard'),
+        blinkerRight: blinkerLit && (indicator === 'right' || indicator === 'hazard'),
         headlights: driving.headlights,
         grade: driving.groundGrade,
         windRightMps: -dashWind.x * cosH + dashWind.z * sinH,

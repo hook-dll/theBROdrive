@@ -2025,6 +2025,14 @@ function buildStickerEnvelopeInto(b: MeshBuilder): void {
   b.cylinder('sticker_envelope_seal', 0.027, 0.027, 0.008, 14, seal, [0, -0.005, 0.011], AXIS_Z);
 }
 
+/** A brass token, oversized against a real coin so it reads in a boot cell. */
+function buildCoinInto(b: MeshBuilder): void {
+  const brass = flat(0xc9a43a, 0.45);
+  const rim = flat(0x9c7d26, 0.5);
+  b.cylinder('coin_face', 0.05, 0.05, 0.008, 20, brass, [0, 0, 0], AXIS_Z);
+  b.torus('coin_rim', 0.047, 0.004, 6, 20, rim, [0, 0, 0.004]);
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -2179,6 +2187,8 @@ export function createItemMesh(item: Item): THREE.Object3D {
       return createPocketWatchMesh();
     case 'postcard':
       return createPostcardMesh();
+    case 'coin':
+      return buildGroup(itemBlueprint('coin', buildCoinInto).instructions);
     case 'contract_cargo': {
       // The crate and the radio get their own cheap primitive shape so the cargo is
       // recognisable in the hand and the boot; every other kind is the parcel.

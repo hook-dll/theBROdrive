@@ -1,13 +1,15 @@
 /**
- * THE RACE: three hurried rivals carry the same cargo to the next courier.
+ * THE RACE: three hurried rivals carry the same cargo to the race offer's finish,
+ * the next courier or the one after (`ContractCargoItem.raceLegs`).
  *
- * Taking a raceable cargo out of a courier starts it. Two rivals already left (one
+ * Taking a race offer out of a courier starts it. Two rivals already left (one
  * `AHEAD_FAR_M`, one `AHEAD_NEAR_M` up the road), and the third leaves the courier
  * once the player is `LATE_DEPARTURE_M` gone, so it is behind him from the start.
- * Whoever hands the cargo in at the next courier first wins; a rival "hands in" by
+ * Whoever hands the cargo in at the finish first wins; a rival "hands in" by
  * stopping in its lane alongside that courier and standing there `LOAD_S`, the time
- * the player spends walking his own parcel to the boot. Slice rules: no save (a
- * reload forgets the race), win or lose only.
+ * the player spends walking his own parcel to the boot. The delivery always pays its
+ * sticker; winning adds one coin per leg (`winCoins`). Slice rules: no save (a reload
+ * forgets the race).
  *
  * A RIVAL IS A GHOST UNTIL IT IS NEAR. Physics exists only `PHYSICS_REACH_M` either
  * side of the player, so a rival out there is an arclength and a speed advanced
@@ -22,7 +24,8 @@
  * the autopilot as its speed cap, and the hand-in counts wherever it comes to rest
  * past `ARRIVE_WINDOW_M` short of the mark; there is never a reverse.
  */
-import { hash01 } from '../core/rng';
+import { hash, hash01 } from '../core/rng';
+import { shouldShelter } from '../vehicle/weatherpace';
 import type { ContractCargoItem } from '../items/items';
 import { AUTOPILOT_MODES, roadPaceCeiling } from '../vehicle/autopilot';
 import { CAR_MODELS } from '../vehicle/carmodels';
@@ -31,22 +34,8 @@ import type { RoadConditionBuffer } from '../world/gradient';
 import type { DriveRoad } from '../world/road';
 import type { RivalPose, RivalSpawn } from '../world/traffic';
 import { SurfaceType } from '../core/surfaces';
-import type { ContractKind, ContractPlace } from './types';
+import type { ContractPlace } from './types';
 
-/**
- * Kinds a rival can carry exactly as the player does: an item in the boot, accepted
- * by the very next courier. Not the ones that bring a trailer or a second car (a
- * rival cannot tow).
- */
-const RACEABLE_KINDS: Readonly<Record<ContractKind, boolean>> = {
-  parcel: true,
-  heavy_crate: true,
-  fragile_radio: true,
-  trailer_equipment: false,
-  oversize: false,
-  towing: false,
-  car_transfer: false,
-};
 
 const RIVAL_COUNT = 3;
 const AHEAD_FAR_M = 1500;
@@ -82,6 +71,13 @@ const ARRIVE_SPEED_MPS = 1;
 /** A rival's hand-in: about the player's walk round to his own boot and back. */
 const LOAD_S = 20;
 /**
+ * How far past the receiving courier the player may drive before the race is called
+ * lost. Enough to brake from speed, or to overshoot and turn back; beyond it he has
+ * driven on, and a bead line pinned at the finish with nobody around was a race that
+ * never ended. The cargo itself is untouched: any later courier still takes it.
+ */
+const FORFEIT_PAST_M = 600;
+/**
  * The ghost's own driving. Acceleration is a stock catalogue car's on the flat; the
  * curve lookahead uses the rails' comfortable deceleration. Not yet calibrated against
  * the live driver; if a ghost visibly gains or loses on a live rival, this is the number.
@@ -98,6 +94,19 @@ const GHOST_LOOK_SAMPLES = 4;
 const RIVAL_MODE = 'hurried';
 const CAP_MIN_KMH = 95;
 const CAP_SPAN_KMH = 20;
+/**
+ * A GHOST IS NOT A METRONOME. Every live driver's pace wanders — the road, the traffic
+ * in front, the driver — and a ghost holding exactly its target was the rival nobody
+ * could believe in: it closed on the finish at the same speed, metre for metre. So
+ * each rival has its own pattern along the road: a slow swell of ±`GHOST_SWELL` over
+ * `GHOST_SWELL_M`, and spells, about one stretch in six of `GHOST_HELD_M`, stuck behind
+ * slower traffic at `GHOST_HELD_SHARE` of its pace.
+ */
+const GHOST_SWELL = 0.08;
+const GHOST_SWELL_M = 1500;
+const GHOST_HELD_M = 2500;
+const GHOST_HELD_ABOVE = 0.55;
+const GHOST_HELD_SHARE = 0.75;
 
 /** Everyone's place on the race line, 0 at the source courier and 1 at the finish. */
 export interface RaceProgress {
@@ -123,6 +132,8 @@ interface Rival {
   live: boolean;
   spawning: boolean;
   retryIn: number;
+  /** Seed of this rival's own pace pattern; see `ghostPaceShare`. */
+  readonly paceSeed: number;
 }
 
 interface Race {
@@ -132,6 +143,8 @@ interface Race {
   readonly stopS: number;
   readonly rivals: Rival[];
   delivered: number;
+  /** Couriers to the finish, 1 or 2: also the coins a win pays. */
+  readonly legs: 1 | 2;
 }
 
 /** The traffic stream's side of a rival: see `RoadTraffic`. */
@@ -163,6 +176,8 @@ export class RivalRace {
   /** Smoothed player pace along the road, m/s; a rear rival spawns only when closing. */
   private playerSpeed = 0;
   private playerS = 0;
+  /** Whether the ghosts are waiting out the dust; see weatherpace.ts. */
+  private ghostSheltering = false;
   private readonly condition: RoadConditionBuffer = {
     surface: SurfaceType.Asphalt, decay: 0, sandCover: 0, markings: 0,
   };
@@ -181,8 +196,17 @@ export class RivalRace {
    */
   observe(item: ContractCargoItem, place: ContractPlace, playerS: number): void {
     if (this.race !== null || place === 'courier' || item.progress?.started) return;
-    if (RACEABLE_KINDS[item.contractKind] !== true) return;
+    if (item.raceLegs === undefined) return;
     this.start(item, playerS);
+  }
+
+  /**
+   * Coins the player wins by handing `itemId` in now: the race's legs while no rival
+   * has handed in, else 0. Asked by the delivery before `playerDelivered` ends it.
+   */
+  winCoins(itemId: string): number {
+    const race = this.race;
+    return race !== null && race.itemId === itemId && race.delivered === 0 ? race.legs : 0;
   }
 
   /** The player handed `itemId` in: the race is decided by how many rivals already did. */
@@ -190,9 +214,11 @@ export class RivalRace {
     const race = this.race;
     if (race === null || race.itemId !== itemId) return;
     const place = race.delivered + 1;
-    this.notify(place === 1 ? 'race won — you delivered first' : `race lost — you delivered ${ordinal(place)}`);
-    for (const rival of race.rivals) if (rival.live) this.host.releaseRival(rival.id);
-    this.race = null;
+    this.end(
+      place === 1
+        ? `race won — ${race.legs === 1 ? 'a coin' : 'two coins'} in the courier's boot`
+        : `race lost — you delivered ${ordinal(place)}`,
+    );
   }
 
   fixedUpdate(dt: number, playerS: number): void {
@@ -202,6 +228,8 @@ export class RivalRace {
       ? this.playerSpeed * 0.9 + (advance / dt) * 0.1
       : 0;
     this.playerS = playerS;
+    // The weather stops a ghost exactly as it stops the live driver it stands for.
+    this.ghostSheltering = shouldShelter(this.ghostSheltering);
     const race = this.race;
     if (race === null) return;
     for (const rival of race.rivals) {
@@ -227,6 +255,22 @@ export class RivalRace {
         this.trySpawn(rival, playerS, dt);
       }
     }
+    // The race is decided without a hand-in from the player once every rival has
+    // handed in, or once he has driven on past the finish.
+    if (race.delivered >= RIVAL_COUNT) {
+      this.end('race lost — all three rivals handed in first');
+    } else if (playerS > race.stopS + FORFEIT_PAST_M) {
+      this.end('race lost — you drove past the courier');
+    }
+  }
+
+  /** Announces the result and hands every rival car back to the traffic stream. */
+  private end(text: string): void {
+    const race = this.race;
+    if (race === null) return;
+    this.notify(text);
+    for (const rival of race.rivals) if (rival.live) this.host.releaseRival(rival.id);
+    this.race = null;
   }
 
   /**
@@ -268,7 +312,8 @@ export class RivalRace {
 
   private start(item: ContractCargoItem, playerS: number): void {
     const sourceS = courierStop(this.seed, item.sourceCourierIndex).s;
-    const stopS = courierStop(this.seed, item.sourceCourierIndex + 1).s + STOP_PAST_COURIER_M;
+    const legs = item.raceLegs ?? 1;
+    const stopS = courierStop(this.seed, item.sourceCourierIndex + legs).s + STOP_PAST_COURIER_M;
     const raceKey = this.serial++;
     const rivals: Rival[] = [];
     const starts = [playerS + AHEAD_FAR_M, playerS + AHEAD_NEAR_M, sourceS];
@@ -290,19 +335,26 @@ export class RivalRace {
         live: false,
         spawning: false,
         retryIn: 0,
+        paceSeed: hash(item.generatedSeed, 0x52495632, i),
       };
       if (!waiting) rival.speed = this.ghostTarget(rival, stopS);
       rivals.push(rival);
       // Loaded now, so the stream can put the car down the step it is in the band.
       void this.prepareModel(model.id).catch(() => {});
     }
-    this.race = { itemId: item.id, cargo: item, sourceS, stopS, rivals, delivered: 0 };
-    this.notify(`race on — three rivals carry the same ${item.cargoName} to the next courier`);
+    this.race = { itemId: item.id, cargo: item, sourceS, stopS, rivals, delivered: 0, legs };
+    this.notify(
+      `race on — three rivals carry the same ${item.cargoName} to ${legs === 1 ? 'the next courier' : 'the courier after next'}`,
+    );
   }
 
-  /** The pace `RIVAL_MODE` gets from this road, under the rival's cap and the stop. */
+  /**
+   * The pace `RIVAL_MODE` gets from this road, under the rival's cap and the stop, at
+   * this rival's own share of it here.
+   */
   private ghostTarget(rival: Rival, stopS: number): number {
-    let target = Math.min(rival.capMps, AUTOPILOT_MODES[RIVAL_MODE].cruiseMps);
+    let target = Math.min(rival.capMps, AUTOPILOT_MODES[RIVAL_MODE].cruiseMps)
+      * ghostPaceShare(rival.paceSeed, rival.s);
     const look = Math.max(GHOST_LOOK_MIN_M, rival.speed * GHOST_LOOK_S);
     for (let k = 0; k < GHOST_LOOK_SAMPLES; k++) {
       const distance = (look * k) / (GHOST_LOOK_SAMPLES - 1);
@@ -319,7 +371,8 @@ export class RivalRace {
       rival.speed = 0;
       return;
     }
-    const target = this.ghostTarget(rival, race.stopS);
+    // Sheltering from the dust: brakes to a stop wherever it is and waits.
+    const target = this.ghostSheltering ? 0 : this.ghostTarget(rival, race.stopS);
     const delta = target - rival.speed;
     rival.speed = Math.max(0, rival.speed + Math.max(-GHOST_LOOK_DECEL_MPS2 * dt, Math.min(GHOST_ACCEL_MPS2 * dt, delta)));
     let s = Math.min(race.stopS, rival.s + rival.speed * dt);
@@ -398,6 +451,24 @@ export class RivalRace {
         else if (placed) rival.live = true;
       });
   }
+}
+
+/** Smooth 1-D value noise in [-1, 1] at `x`, lattice spacing 1. */
+function smoothNoise(seed: number, x: number): number {
+  const i = Math.floor(x);
+  const t = x - i;
+  const u = t * t * (3 - 2 * t);
+  const a = hash01(seed, i) * 2 - 1;
+  const b = hash01(seed, i + 1) * 2 - 1;
+  return a + (b - a) * u;
+}
+
+/** This rival's share of its pace at arclength `s`; see GHOST_SWELL. */
+function ghostPaceShare(seed: number, s: number): number {
+  const share = 1 + GHOST_SWELL * smoothNoise(seed, s / GHOST_SWELL_M);
+  return smoothNoise(seed ^ 0x48454c44, s / GHOST_HELD_M) > GHOST_HELD_ABOVE
+    ? Math.min(share, GHOST_HELD_SHARE)
+    : share;
 }
 
 function ordinal(place: number): string {

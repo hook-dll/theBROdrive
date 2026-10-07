@@ -190,6 +190,17 @@ export interface PostcardItem {
   readonly id: string;
 }
 
+/**
+ * A race prize. Coins STACK: one meeting another — picked up into a pack that holds
+ * one, or taken from a cell while holding one — becomes a single coin carrying the
+ * sum, so `value` is what it is worth and a pile never costs more than one slot.
+ */
+export interface CoinItem {
+  readonly type: 'coin';
+  readonly id: string;
+  readonly value: number;
+}
+
 export type { StickerKind } from './stickercatalog';
 
 /** A physical task object. Its source index is the complete delivery contract. */
@@ -208,6 +219,12 @@ export interface ContractCargoItem {
   readonly generatedSeed: number;
   /** Cargo mass, kg, when the kind carries more than the usual 12 (heavy crate). */
   massKg?: number;
+  /**
+   * A race offer: how many couriers on its destination is, 1 or 2. The cargo is
+   * signed only from there on, three rivals carry the same thing there, and the
+   * player handing in first wins this many coins. Absent on an ordinary trip.
+   */
+  raceLegs?: 1 | 2;
   /**
    * Live contract state, saved on the item so it travels with every physical move.
    * The contract runtime (`contracts/runtime.ts`) is its only writer.
@@ -241,6 +258,7 @@ export type Item =
   | FootballItem
   | PocketWatchItem
   | PostcardItem
+  | CoinItem
   | ContractCargoItem
   | StickerEnvelopeItem;
 
@@ -269,6 +287,30 @@ export const FLUID_DENSITY: Record<FluidKind, number> = {
  */
 export function litreText(litres: number): string {
   return `${litres.toFixed(1)} L`;
+}
+
+/** Kinds that bring a trailer or a second car: the courier's fourth, "big haul" offer. */
+const HAUL_KINDS: Readonly<Partial<Record<ContractKind, true>>> = {
+  trailer_equipment: true,
+  oversize: true,
+  towing: true,
+  car_transfer: true,
+};
+
+/** True for a kind that is a haul rather than something carried in a boot. */
+export function isHaulKind(kind: ContractKind): boolean {
+  return HAUL_KINDS[kind] === true;
+}
+
+/**
+ * The short title a courier's boot shows before the cargo's name, so the four offers
+ * read at a glance: a sticker run, a race to the next courier (a coin to the winner),
+ * a race two couriers on (two coins), and a haul with a trailer or a car in tow.
+ */
+export function contractTier(item: ContractCargoItem): string {
+  if (item.raceLegs === 1) return 'race · 1 stop';
+  if (item.raceLegs === 2) return 'race · 2 stops';
+  return isHaulKind(item.contractKind) ? 'big haul' : 'easy run';
 }
 
 /** Display name for the HUD and interaction prompts. */
@@ -321,11 +363,14 @@ export function itemLabel(item: Item): string {
       return 'pocket watch';
     case 'postcard':
       return 'postcard from home';
+    case 'coin':
+      return item.value === 1 ? 'coin' : `coin · ${item.value}`;
     case 'contract_cargo': {
       // The contract's own progress writes a short status ("82%", "3:12 left"),
       // so the trunk, the hand and the prompt all read the live condition.
       const note = item.progress?.statusText;
-      return note ? `${item.cargoName} · ${note}` : item.cargoName;
+      const title = `${contractTier(item)}: ${item.cargoName}`;
+      return note ? `${title} · ${note}` : title;
     }
     case 'sticker_envelope':
       // The name is on the envelope; the picture is seen when it is tried on.
@@ -380,6 +425,8 @@ export function itemMass(item: Item): number {
     case 'postcard':
       // One printed card, and you carry that without noticing.
       return 0.008;
+    case 'coin':
+      return 0.008 * item.value;
     case 'contract_cargo':
       // A heavy crate carries its own mass; every other contract is a parcel.
       return item.massKg ?? 12;
@@ -447,6 +494,11 @@ export class Inventory {
     return this.items[this.selected] ?? null;
   }
 
+  /** Everything carried, in slot order. */
+  get contents(): readonly Item[] {
+    return this.items;
+  }
+
   /**
    * Fails when all three slots are occupied or the item would exceed the mass limit,
    * so the caller can explain why.
@@ -456,8 +508,20 @@ export class Inventory {
    * 118-402 kg against a 95 kg limit, so without this you could never carry an engine
    * to the car and the game would be unfinishable. Hauling one is deliberately
    * miserable instead — `carriedMass` saturates the movement penalty.
+   *
+   * A coin joining a pack that already holds one merges into it (see `CoinItem`),
+   * so it never needs a free slot.
    */
   add(item: Item): boolean {
+    if (item.type === 'coin') {
+      const index = this.items.findIndex((held) => held.type === 'coin');
+      const pile = this.items[index];
+      if (pile?.type === 'coin') {
+        this.items[index] = { ...pile, value: pile.value + item.value };
+        this.listener?.();
+        return true;
+      }
+    }
     if (this.items.length >= INVENTORY_ITEM_LIMIT) return false;
     const mass = itemMass(item);
     const soleHeavyHaul = this.items.length === 0 && mass > this.massLimit;

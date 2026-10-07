@@ -116,7 +116,8 @@ const HEADLIGHT_HIGH: HeadlightBeam = {
 export type HeadlightMode = 'off' | 'low' | 'high';
 
 type EmissiveMaterial = THREE.MeshStandardMaterial | THREE.MeshPhongMaterial;
-export type IndicatorSide = 'off' | 'left' | 'right';
+/** Which blinkers run: one side for a turn or a lane change, both for the hazards. */
+export type IndicatorSide = 'off' | 'left' | 'right' | 'hazard';
 
 /** One flash of a key-fob wink, seconds; a wink is two flashes with a gap between. */
 const WINK_FLASH_S = 0.2;
@@ -285,7 +286,7 @@ export class VehicleLamps {
     this.applyIndicatorState(side !== 'off');
   }
 
-  toggleIndicator(side: Exclude<IndicatorSide, 'off'>): void {
+  toggleIndicator(side: 'left' | 'right'): void {
     this.setIndicator(this.indicatorSide === side ? 'off' : side);
   }
 
@@ -785,8 +786,9 @@ export class VehicleLamps {
         material.emissiveIntensity = active ? 5 : 0;
       }
     };
-    apply(this.leftBlinkerMaterials, lit && this.indicatorSide === 'left');
-    apply(this.rightBlinkerMaterials, lit && this.indicatorSide === 'right');
+    const hazard = this.indicatorSide === 'hazard';
+    apply(this.leftBlinkerMaterials, lit && (hazard || this.indicatorSide === 'left'));
+    apply(this.rightBlinkerMaterials, lit && (hazard || this.indicatorSide === 'right'));
   }
 
   /** Releases this car's per-instance lamp materials and forgets every mount. */

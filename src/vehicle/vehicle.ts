@@ -1416,7 +1416,7 @@ export class Vehicle implements Rebasable {
     this.lamps.setIndicator(side);
   }
 
-  toggleIndicator(side: Exclude<IndicatorSide, 'off'>): void {
+  toggleIndicator(side: 'left' | 'right'): void {
     this.lamps.toggleIndicator(side);
   }
 

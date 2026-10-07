@@ -1,7 +1,8 @@
 /**
  * Courier offer generation: four per courier, drawn deterministically from the world
- * seed. Parcel carries weight 4 against 1 for each other kind, so the common case
- * stays common and the special ones are a find rather than the norm.
+ * seed, ONE OF EACH TIER by slot (see `contractTier`): slot 0 an easy run, slot 1 a
+ * race to the next courier, slot 2 a race two couriers on, slot 3 a big haul with a
+ * trailer or a car. The kind is drawn by weight among the kinds the tier can carry.
  *
  * The offer is a plain `contract_cargo` item with its kind, name, seed-random
  * fallback reward and initial progress already on it; the courier code only decides
@@ -16,7 +17,7 @@
  */
 
 import { hash, hash01 } from '../core/rng';
-import { makeSponge, type ContractCargoItem, type Item } from '../items/items';
+import { isHaulKind, makeSponge, type ContractCargoItem, type Item } from '../items/items';
 import { stickerKindForSeed } from '../items/stickercatalog';
 import { courierId } from '../world/couriers';
 import { TRUNK_CELL_COUNT, TRUNK_COLUMNS } from '../vehicle/trunk';
@@ -40,27 +41,33 @@ const COURIER_SPONGE_CHANCE = 0.35;
  * tools/tow-bench.ts, whose own imports land in that order). A lazy sum is a few
  * additions per generated offer and cannot be observed.
  */
-function totalWeight(): number {
+function totalWeight(haul: boolean): number {
   let total = 0;
-  for (const def of CONTRACT_KINDS) total += def.weight;
+  for (const def of CONTRACT_KINDS) if (isHaulKind(def.kind) === haul) total += def.weight;
   return total;
 }
 
-function pickKind(seed: number, courierIndex: number, slot: number): ContractKindDef {
-  let roll = hash01(seed, KIND_DOMAIN, courierIndex, slot) * totalWeight();
+function pickKind(seed: number, courierIndex: number, slot: number, haul: boolean): ContractKindDef {
+  let roll = hash01(seed, KIND_DOMAIN, courierIndex, slot) * totalWeight(haul);
+  let last: ContractKindDef | null = null;
   for (const def of CONTRACT_KINDS) {
+    if (isHaulKind(def.kind) !== haul) continue;
+    last = def;
     roll -= def.weight;
     if (roll < 0) return def;
   }
-  return CONTRACT_KINDS[0]!;
+  return last ?? CONTRACT_KINDS[0]!;
 }
+
+/** The race each slot is: none, one courier on, two couriers on, none (the haul). */
+const SLOT_RACE_LEGS: readonly (1 | 2 | undefined)[] = [undefined, 1, 2, undefined];
 
 export function generateContractOffer(
   seed: number,
   courierIndex: number,
   slot: number,
 ): ContractCargoItem {
-  const def = pickKind(seed, courierIndex, slot);
+  const def = pickKind(seed, courierIndex, slot, slot === 3);
   const generatedSeed = hash(seed, OFFER_DOMAIN, courierIndex, slot);
   const nameIndex = Math.floor(hash01(seed, NAME_DOMAIN, courierIndex, slot) * def.offerNames.length);
   const massKg = def.massKg?.(generatedSeed);
@@ -75,6 +82,8 @@ export function generateContractOffer(
     progress: def.initialProgress(generatedSeed),
   };
   if (massKg !== undefined) item.massKg = massKg;
+  const raceLegs = SLOT_RACE_LEGS[slot];
+  if (raceLegs !== undefined) item.raceLegs = raceLegs;
   return item;
 }
 

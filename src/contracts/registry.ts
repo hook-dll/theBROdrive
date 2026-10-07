@@ -67,6 +67,11 @@ export function contractAcceptRefusal(
   if (probe.targetCourierIndex <= item.sourceCourierIndex) {
     return 'this courier cannot sign its own parcel';
   }
+  // A two-stop race is signed from its finish on: handing it in at the first stop
+  // would end a two-coin race at the distance of a one-coin one.
+  if (item.raceLegs !== undefined && probe.targetCourierIndex < item.sourceCourierIndex + item.raceLegs) {
+    return 'this one races on to the next courier';
+  }
   return contractKindDef(item.contractKind).acceptRefusal?.(item, probe) ?? null;
 }
 

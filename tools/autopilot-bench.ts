@@ -195,9 +195,11 @@ function speed(vehicle: Vehicle): number {
 interface DriveMetrics { meanSpeed: number; peakSpeed: number; meanLateral: number; maxLateral: number; maxOverhang: number; rmsLateral: number; signChangesPerKm: number; lineCrossingsPerKm: number; lineRms: number; progress: number; monotonic: boolean; tightRadius: number; tightSpeed: number; }
 
 /**
- * A haboob across the road: the weather's own gusty wind (world/weather.ts) at the
- * car, its mean turned square to the road each step so the whole route is a
- * crosswind, blowing toward the road's right (`side` +1) or left (-1).
+ * A haboob's WIND across the road: the weather's own gusty wind (world/weather.ts) at
+ * the car, its mean turned square to the road each step so the whole route is a
+ * crosswind, blowing toward the road's right (`side` +1) or left (-1). The dust is
+ * cleared: in it the driver shelters (vehicle/weatherpace.ts), and this is about the
+ * wind; `checkShelter` is about the dust.
  */
 const HABOOB_HOLD = 0.45;
 const blowAt = { x: 0, y: 0, z: 0 };
@@ -207,6 +209,7 @@ function blowAcross(rig: Rig, clockS: number, s: number, side: number): void {
   const heading = rig.road.sampleAt(s).heading;
   weather.windX = -side * Math.cos(heading);
   weather.windZ = side * Math.sin(heading);
+  weather.dust = 0;
 }
 
 /** Still air again: a 'clear' frame, written at once (see `forceWeather`). */
@@ -345,6 +348,45 @@ async function checkCrosswind(): Promise<void> {
       );
     }
   }
+}
+
+/**
+ * Inside the dust: the driver pulls to the edge of the asphalt on its own side, stops
+ * with the hazards on and stays there (vehicle/weatherpace.ts). Every mode does; hurried
+ * is the race rivals' mode, so the ghosts' shelter has a live counterpart.
+ */
+async function checkShelter(): Promise<void> {
+  const rig = await makeRig(START_S, ROUTE_METRES, undefined, MODEL_ID);
+  updateWeather(rig.road.seed, 0, FIXED_DT, 0, 0);
+  forceWeather('haboob', HABOOB_HOLD, 1e6);
+  rig.autopilot.setMode('hurried');
+  rig.autopilot.setEngaged(true);
+  const at = { x: 0, y: 0, z: 0 };
+  let s = START_S;
+  let maxOverhang = -Infinity;
+  const steps = Math.round(60 / FIXED_DT);
+  for (let i = 0; i < steps; i++) {
+    rig.vehicle.absoluteTranslation(at);
+    updateWeather(rig.road.seed, i * FIXED_DT, FIXED_DT, at.x, at.z);
+    step(rig);
+    const p = rig.road.project(rig.vehicle.absoluteTranslation(at).x, at.z, s);
+    s = p.s;
+    maxOverhang = Math.max(maxOverhang, Math.abs(p.lateral) + WHEEL_HALF_TRACK_M - rig.road.halfWidthAt(p.s));
+  }
+  const p = rig.road.project(rig.vehicle.absoluteTranslation(at).x, at.z, s);
+  const edgeGap = rig.road.halfWidthAt(p.s) - Math.abs(p.lateral) - 1.05;
+  calm(rig);
+  const label = `${carModel(MODEL_ID).label} hurried, in a haboob's dust`;
+  check(
+    `${label}: shelters`,
+    rig.autopilot.sheltering && speed(rig.vehicle) < 0.3 && rig.vehicle.indicator === 'hazard',
+    `${(speed(rig.vehicle) * 3.6).toFixed(1)} km/h after 60 s, indicator ${rig.vehicle.indicator}`,
+  );
+  check(
+    `${label}: at the edge, on the asphalt`,
+    edgeGap < 0.8 && maxOverhang <= carModel(MODEL_ID).factory.tyreWidth,
+    `flank ${edgeGap.toFixed(2)} m inside the edge, worst tyre past it ${maxOverhang.toFixed(3)} m`,
+  );
 }
 
 const LOOSE_START_S = 12_250;
@@ -1702,6 +1744,12 @@ async function run(): Promise<void> {
     if (failures) process.exitCode = 1;
     return;
   }
+  if (typeof process !== 'undefined' && process.argv.includes('--weather')) {
+    await checkCrosswind();
+    await checkShelter();
+    if (failures) process.exitCode = 1;
+    return;
+  }
   if (typeof process !== 'undefined' && process.argv.includes('--traffic-behavior')) {
     await checkOvertake();
     await checkHazards();
@@ -1739,6 +1787,7 @@ async function run(): Promise<void> {
     checkLineHold(`${carModel(SLOW_YAW_MODEL_ID).label} ${mode}`, await measureMode(mode, SLOW_YAW_MODEL_ID));
   }
   await checkCrosswind();
+  await checkShelter();
   const looseSleeper = await measureLooseSurface('sleeper');
   const looseFrantic = await measureLooseSurface('frantic');
   for (const [mode, result] of [

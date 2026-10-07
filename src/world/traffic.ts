@@ -1201,6 +1201,8 @@ export class RoadTraffic {
         const offset = car.forwardS - playerS;
         if (
           !car.rival &&
+          // Waiting out the dust is not stuck: the car is where its driver chose to be.
+          !car.autopilot.sheltering &&
           car.stoppedFor > STUCK_RECYCLE_S &&
           Math.abs(offset) > UNSEEN_M &&
           car.settleFor <= 0

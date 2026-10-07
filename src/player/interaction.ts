@@ -8,6 +8,7 @@ import { TOW_COUPLE_RANGE_M, towEyeWorld, type CarTowField } from '../vehicle/ca
 import type { InputFrame } from '../core/input';
 import type {
   Inventory,
+  CoinItem,
   Item,
   PartItem,
   FluidCanItem,
@@ -16,7 +17,7 @@ import type {
   StickerEnvelopeItem,
   ToolItem,
 } from '../items/items';
-import { itemLabel, litreText, spongeSpent } from '../items/items';
+import { itemLabel, itemMass, litreText, spongeSpent } from '../items/items';
 import type { CarStats, PartInstance } from '../parts/registry';
 import {
   applySponge,
@@ -81,6 +82,17 @@ const VEHICLE_RANGE = 3.5;
 const EXIT_SPEED_LIMIT_KMH = 5;
 /** Refusal shown while the driver holds interact above the exit speed. */
 const EXIT_REFUSED_PROMPT = 'slow down to step out';
+/**
+ * Heaviest single thing a player can take into the cabin, kg: what fits on a lap or
+ * the back seat. An engine (118 kg and up) is carried to a car, not ridden with.
+ */
+const CABIN_ITEM_LIMIT_KG = 40;
+/**
+ * How far from the join between two cars the player stands to work a tow bar, metres.
+ * Without it the bar was offered from anywhere the two coupled cars were the nearest
+ * pair, and since it wins the F key, it took entering either car away entirely.
+ */
+const TOW_WORK_RANGE_M = 2;
 /** Condition deltas are throttled; the visual updates every tick regardless. */
 const CONDITION_EMIT_INTERVAL = 0.25;
 /** The sponge shifts a car's dirt as fast as it does a part's. */
@@ -468,6 +480,8 @@ export class Interaction {
     private readonly origin: WorldOrigin,
     /** Colliders that mean "this is the parked plane"; boarding is offered here. */
     private readonly boardable: BoardableField,
+    /** Coins a race win pays for handing this cargo in now; see `RivalRace.winCoins`. */
+    private readonly raceCoins: (itemId: string) => number,
   ) {}
 
   /** Gives interaction a handle on the on-foot character, so enter/exit can move it. */
@@ -776,29 +790,38 @@ export class Interaction {
     const first = this.towNearest[0];
     const second = this.towNearest[1];
     if (!first || !second) return null;
-    // On a bar already: the action is to drop it, and it reads from either end.
-    for (const towedId of [first, second]) {
-      const towerId = this.world.state.cars[towedId]?.towedBy ?? null;
-      if (towerId !== null) return { towerId, towedId, hitch: false };
-    }
     const a = this.carLookup.vehicle(first);
     const b = this.carLookup.vehicle(second);
     if (!a || !b) return null;
+    const aRear = towEyeWorld(a, 'rear', this.towEyeA);
+    const bFront = towEyeWorld(b, 'front', this.towEyeB);
+    const aFront = towEyeWorld(a, 'front', this.towEyeC);
+    const bRear = towEyeWorld(b, 'rear', this.towEyeD);
+    // Standing at the join: the player is within reach of the midpoint between one
+    // car's tail and the other's nose. Holds for dropping a bar as much as hitching.
+    const atJoin = (rear: { x: number; z: number }, front: { x: number; z: number }): boolean =>
+      Math.hypot((rear.x + front.x) / 2 - p.x, (rear.z + front.z) / 2 - p.z) <= TOW_WORK_RANGE_M;
+    // On a bar already: the action is to drop it, and it reads from either end.
+    const towerOfFirst = this.world.state.cars[first]?.towedBy ?? null;
+    if (towerOfFirst === second) {
+      return atJoin(bRear, aFront) ? { towerId: second, towedId: first, hitch: false } : null;
+    }
+    const towerOfSecond = this.world.state.cars[second]?.towedBy ?? null;
+    if (towerOfSecond === first) {
+      return atJoin(aRear, bFront) ? { towerId: first, towedId: second, hitch: false } : null;
+    }
+    if (towerOfFirst !== null || towerOfSecond !== null) return null;
     const qa = a.chassis.rotation();
     const qb = b.chassis.rotation();
     const aligned =
       (2 * (qa.x * qa.z + qa.w * qa.y)) * (2 * (qb.x * qb.z + qb.w * qb.y)) +
       (1 - 2 * (qa.x * qa.x + qa.y * qa.y)) * (1 - 2 * (qb.x * qb.x + qb.y * qb.y));
     if (aligned < 0.5) return null;
-    const aRear = towEyeWorld(a, 'rear', this.towEyeA);
-    const bFront = towEyeWorld(b, 'front', this.towEyeB);
-    const aFront = towEyeWorld(a, 'front', this.towEyeC);
-    const bRear = towEyeWorld(b, 'rear', this.towEyeD);
     // `first` may be either end of the pair; the tower is the driveable one.
-    if (Math.hypot(aRear.x - bFront.x, aRear.z - bFront.z) <= TOW_COUPLE_RANGE_M) {
+    if (Math.hypot(aRear.x - bFront.x, aRear.z - bFront.z) <= TOW_COUPLE_RANGE_M && atJoin(aRear, bFront)) {
       return this.towOrder(first, second);
     }
-    if (Math.hypot(bRear.x - aFront.x, bRear.z - aFront.z) <= TOW_COUPLE_RANGE_M) {
+    if (Math.hypot(bRear.x - aFront.x, bRear.z - aFront.z) <= TOW_COUPLE_RANGE_M && atJoin(bRear, aFront)) {
       return this.towOrder(second, first);
     }
     return null;
@@ -1333,7 +1356,8 @@ export class Interaction {
       resolved.vehicleDist < VEHICLE_RANGE
     ) {
       const car = this.world.state.cars[resolved.carId];
-      return car ? `[F] enter ${carModel(car.modelId).label}` : '[F] enter vehicle';
+      return this.cabinRefusal()
+        ?? (car ? `[F] enter ${carModel(car.modelId).label}` : '[F] enter vehicle');
     }
     return null;
   }
@@ -1700,6 +1724,16 @@ export class Interaction {
         const effect = contractDeliveryEffect(held, probe, delivery);
         const nextCells = cells.slice();
         nextCells[t.cell] = envelope;
+        // A race won pays its coins beside the envelope, or into the pack when the
+        // courier's boot is full (they stack onto a coin already carried).
+        const coins = this.raceCoins(held.id);
+        let coinToPack: CoinItem | null = null;
+        if (coins > 0) {
+          const coin: CoinItem = { type: 'coin', id: `${held.id}:coin`, value: coins };
+          const free = nextCells.findIndex((cell) => cell === null);
+          if (free >= 0) nextCells[free] = coin;
+          else coinToPack = coin;
+        }
         this.world.apply({
           t: 'courier_storage',
           courierId: t.id,
@@ -1711,6 +1745,7 @@ export class Interaction {
           for (const delta of effect.deltas) this.world.apply(delta);
         }
         this.inventory.remove(held.id);
+        if (coinToPack) this.inventory.add(coinToPack);
         this.sound = 'mount';
         return;
       }
@@ -1819,9 +1854,26 @@ export class Interaction {
       target.carId !== resolved.carId ||
       resolved.vehicleDist >= VEHICLE_RANGE
     ) return;
+    if (this.cabinRefusal() !== null) {
+      this.sound = 'refused';
+      return;
+    }
     this.world.apply({ t: 'enter_car', carId: resolved.carId });
     this.player?.setEnabled(false);
     this.sound = 'enter-car';
+  }
+
+  /**
+   * Why the player cannot sit down with what they carry, else null. The pack rides in
+   * the cabin, so a contract parcel in it was a second parcel aboard past the boot's
+   * one-parcel rule; a parcel goes in the boot. And an engine does not fit on a lap.
+   */
+  private cabinRefusal(): string | null {
+    for (const item of this.inventory.contents) {
+      if (item.type === 'contract_cargo') return `stow the ${itemLabel(item)} in the boot first`;
+      if (itemMass(item) > CABIN_ITEM_LIMIT_KG) return `the ${itemLabel(item)} won't fit in the cabin`;
+    }
+    return null;
   }
 
   /**

@@ -1040,6 +1040,11 @@ function migrateItem(raw: unknown, where: string): Item {
       // so an old save's sheet loads as the postcard, under its own id.
     case 'postcard':
       return { type: 'postcard', id: obj.id };
+    case 'coin': {
+      const value = Math.trunc(numOr(obj.value, 0));
+      if (value < 1) throw new Error(`Save data is malformed: coin at ${where} has no value`);
+      return { type: 'coin', id: obj.id, value };
+    }
     case 'contract_cargo': {
       const sourceCourierIndex = Math.trunc(numOr(obj.sourceCourierIndex, -1));
       // A kind dropped from the catalogue comes back as an ordinary parcel, keeping
@@ -1068,6 +1073,7 @@ function migrateItem(raw: unknown, where: string): Item {
       if (typeof obj.massKg === 'number' && Number.isFinite(obj.massKg) && obj.massKg > 0) {
         item.massKg = obj.massKg;
       }
+      if (obj.raceLegs === 1 || obj.raceLegs === 2) item.raceLegs = obj.raceLegs;
       return item;
     }
     case 'sticker_envelope':

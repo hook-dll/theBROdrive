@@ -12,6 +12,33 @@
   wheels' contact normals, ×3, ticks at ±10%); the speedometer's holds a wind gauge (the
   wind at the car in its own frame, gusts included, alarm-coloured from 10 m/s).
 - HIGH TRAFFIC is 24/48 cars (two-lane/four-lane), was 20/40.
+- HEAVY CRATE weighs 80-200 kg, was 300-700 kg: the old range sat a 2106 on its rear
+  bump stops. A crate already taken keeps the mass it was offered with.
+- NO PARCELS OR ENGINES IN THE CABIN. A contract parcel in the pack, or any single
+  item over 40 kg, refuses entering a car with a prompt: the pack rode in the cabin,
+  so a second parcel travelled past the boot's one-parcel rule.
+- TOW BAR is worked only within 2 m of the join between the two cars. It was offered
+  from anywhere the coupled pair were the nearest cars and won the F key, so neither
+  car could be entered once hitched.
+- THE RACE ENDS when the player drives 600 m past the receiving courier ("race lost —
+  you drove past the courier") or once all three rivals have handed in. It used to
+  run on with the bead line pinned at the finish and no rivals in sight. The cargo is
+  untouched and any later courier still takes it.
+- COURIER OFFERS BY TIER, titled in the cargo name: "easy run" (a sticker), "race · 1
+  stop" and "race · 2 stops" (a sticker always, plus 1 or 2 coins to the winner, left
+  in the courier's boot), "big haul" (trailer, oversize, tow or transfer; a sticker).
+  A two-stop race is signed only at its finish. COINS are a new item that stacks: one
+  meeting another in the pack becomes one coin with the sum. Offers already in an
+  opened courier boot or in hand keep their old kind and do not race.
+- EVERYONE STOPS IN A HABOOB (`vehicle/weatherpace.ts`). When the dust of a full
+  haboob reaches the road, every AI driver alike — sleeper to frantic, live traffic and
+  the race's ghost rivals — pulls to the edge of the asphalt on its own side, stops,
+  pulls the handbrake and runs the hazards (a new `hazard` indicator state, shown on
+  the dash too) until the dust thins. Nothing short of that changes a driver's pace.
+  `tools/autopilot-bench.ts --weather` checks it.
+- GHOST RIVALS WANDER: each has its own slow ±8% pace swell along the road and
+  spells held up at 75% behind traffic, instead of closing on the finish metre for
+  metre at one speed.
 - XBOX CONTROLLER (`core/gamepad.ts`, see `CONTROLS.md`). Left stick steers as a
   position, RT/LT are analog throttle and brake, every driving and on-foot action has a
   button, the right stick looks. Menus, pause and settings work from the pad. The last
