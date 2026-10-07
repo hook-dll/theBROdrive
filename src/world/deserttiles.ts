@@ -45,8 +45,8 @@ import {
  * Unlike road chunks, tiles are keyed only by absolute X/Z. Their geometry is therefore
  * a pure function of (seed, tileX, tileZ), may be discarded at any time, and rebuilds
  * identically when the player returns. The theoretical size of the desert never enters
- * the memory or draw budget: five by five visual tiles and three by three physical tiles
- * are the complete live set.
+ * the memory or draw budget: five by five tiles, visual and physical, are the complete
+ * live set.
  *
  * Invariants:
  *  - neighbouring tiles sample the same absolute edge coordinates, so render and
@@ -61,7 +61,15 @@ import {
 export { DESERT_TILE_CELLS, DESERT_TILE_SIZE } from './deserttiledata';
 
 const VISUAL_RADIUS = 2;
-const PHYSICS_RADIUS = 1;
+/**
+ * Every visual tile is solid. Traffic is live out to `PHYSICS_REACH_M` (800 m) of
+ * road, and with one physical ring the ground beside the road ended 360-600 m from
+ * the player: measured at 30.6 km, every car that touched the verge further out than
+ * that dropped off the end of the world and fell for good — the cars seen "flying"
+ * off the road past a bend. Two rings put solid desert under the verge to 480 m at
+ * the least.
+ */
+const PHYSICS_RADIUS = 2;
 /** Past this player-to-road distance no live tile can intersect the corridor. */
 const ROAD_QUERY_CUTOFF = 900;
 const PROP_TAG = 0x44535254;

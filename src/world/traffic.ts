@@ -229,6 +229,11 @@ const DROP_SETTLE_S = 0.8;
 const ROLLING_START_MAX_MPS = 75 / 3.6;
 const ROLLING_START_LOOK_M = 120;
 const ROLLING_START_LATERAL_MPS2 = 2.5;
+/** How far ahead a rolling start looks for a car it would have to stop behind, metres. */
+const ROLLING_START_CLEAR_M = 300;
+/** Gap a rolling start keeps in hand behind it, and the braking it plans with. */
+const ROLLING_START_STANDOFF_M = 25;
+const ROLLING_START_DECEL_MPS2 = 3.5;
 /** Traffic starts at its fitted wheel-contact height; settle mode handles road grade. */
 const TRAFFIC_SPAWN_DROP_M = 0;
 const SPAWN_GROUND_PROBE_UP_M = 2;
@@ -238,6 +243,8 @@ const LIFETIME_SAMPLE_S = 0.5;
 const STUCK_SPEED_KMH = 2;
 /** Seconds of standing still after which a car out of sight (`UNSEEN_M`) is recycled. */
 const STUCK_RECYCLE_S = 18;
+/** Metres below the road surface at which a car has fallen out of the world. */
+const FELL_OUT_M = 30;
 /** Even samples keep the local density response cheap and free of profile chatter. */
 const DENSITY_PROFILE_SAMPLES = 5;
 const CLOCK_SYNC_S = 1;
@@ -1210,6 +1217,17 @@ export class RoadTraffic {
           this.removeAt(i);
           continue;
         }
+        // A CAR BELOW THE GROUND HAS LEFT THE WORLD. Off the verge past the solid desert
+        // there is nothing to land on, and such a car used to fall for ever as "live"
+        // traffic, a kilometre a minute, counted against the stream's budget. Out of
+        // sight by definition; a rival's ghost carries on from its last pose.
+        if (!car.rails) {
+          const t = car.vehicle.chassis.translation();
+          if (t.y < this.road.offsetPoint(car.forwardS, car.roadLateral, this.railPoint).y - FELL_OUT_M) {
+            this.removeAt(i);
+            continue;
+          }
+        }
       }
       if (car.railsHoldoff > 0) car.railsHoldoff -= dt;
       if (car.rails) {
@@ -1803,6 +1821,7 @@ export class RoadTraffic {
         request.mode,
         request.speedCap,
         request.pace,
+        request.lane,
       ),
       wasPassing: false,
       controlAccumulator:
@@ -2208,6 +2227,7 @@ export class RoadTraffic {
     mode: AutopilotMode,
     speedCap: number,
     pace: number,
+    lane: number,
   ): number {
     // A frantic driver is launched at its own pace, bends permitting: capped at the
     // ordinary 75 km/h it was put behind a faster player already losing ground, and
@@ -2217,6 +2237,20 @@ export class RoadTraffic {
     for (let d = 0; d <= ROLLING_START_LOOK_M; d += 10) {
       const curvature = Math.abs(this.road.curvatureAt(s + direction * d));
       if (curvature > 1e-4) speed = Math.min(speed, Math.sqrt(ROLLING_START_LATERAL_MPS2 / curvature));
+    }
+    // AND AT A SPEED IT CAN STOP FROM BEHIND WHAT IS ALREADY THERE. Measured at the far
+    // edge of the band: frantic spawns put down at 130 km/h a hundred metres behind a
+    // queue went into it before their wheels had settled, rolled, and became the next
+    // obstacle for the next spawn.
+    const laneLateral = this.forwardLaneCentreAt(s, direction, lane);
+    for (const car of this.carList) {
+      if (car.direction !== direction) continue;
+      const gap = (car.forwardS - s) * direction;
+      if (gap <= 0 || gap > ROLLING_START_CLEAR_M) continue;
+      if (Math.abs(car.roadLateral - laneLateral) > TRAFFIC_HALF_WIDTH_M * 2) continue;
+      const lead = Math.max(0, car.forwardSpeed * direction);
+      const room = Math.max(0, gap - ROLLING_START_STANDOFF_M);
+      speed = Math.min(speed, Math.sqrt(lead * lead + 2 * ROLLING_START_DECEL_MPS2 * room));
     }
     return speed;
   }

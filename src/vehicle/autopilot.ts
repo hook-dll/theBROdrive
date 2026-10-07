@@ -31,8 +31,15 @@ const RACING_WINDOW_SECONDS = 6;
 const RACING_WINDOW_BASE_M = 120;
 const RACING_WINDOW_MIN_M = 200;
 const RACING_WINDOW_MAX_M = 600;
-/** Body kept this far inside the asphalt edge, and off the crown when the far half is not free. */
+/**
+ * Body kept this far inside the asphalt edge, and off the crown when the far half is
+ * not free. The edge margin grows with speed by `RACING_EDGE_MARGIN_S`: the line is
+ * tracked, not ridden, and the miss grows with speed — measured at 30.85 km, a frantic
+ * 2108 at 100 km/h swept 1.4 m past a line laid 0.2 m inside the edge of a 150 m bend
+ * and rolled in the desert.
+ */
 const RACING_EDGE_MARGIN_M = 0.2;
+const RACING_EDGE_MARGIN_S = 0.035;
 const RACING_CROWN_MARGIN_M = 0.3;
 /**
  * THE OTHER HALF OF THE ROAD IS USED ONLY WHERE THE DRIVER CAN VOUCH FOR IT: in
@@ -563,6 +570,13 @@ const SHELTER_PARK_MPS = 0.5;
 const CAR_HALF_LENGTH_M = 3;
 /** A standing person is narrow, but remains a physical body the whole car must clear. */
 const PEDESTRIAN_RADIUS_M = 0.42;
+/** Threshold braking (`modulateBrake`): only above this speed does a lock matter. */
+const ABS_MIN_KMH = 8;
+/** Pedal scale applied per control step while a wheel is locked, and its floor. */
+const ABS_RELEASE = 0.7;
+const ABS_MIN_SCALE = 0.35;
+/** Seconds for the scaled pedal to come all the way back once the wheels turn. */
+const ABS_RECOVER_S = 0.4;
 const PEDESTRIAN_QUERY_RANGE_M = CORRIDOR_MAX_HORIZON_M + 20;
 /**
  * Extra metres the middle avoidance rung asks for beyond bare body clearance, and the
@@ -775,6 +789,18 @@ const SHOULDER_PASS_EDGE_MARGIN_M = 0.9;
 const SHOULDER_PASS_GAP_M = 0.25;
 const SHOULDER_PASS_ADVANTAGE_MPS = 6;
 const SHOULDER_PASS_MAX_MPS = 100 / 3.6;
+/**
+ * Cornering a car can do with its body over the loose shoulder, m/s²: about a third of
+ * the asphalt's, for stone that rolls and an edge that drops. At 220 m that is 84 km/h,
+ * at 120 m 62 km/h; on a straight the verge passes keep their own cap above.
+ */
+const VERGE_LATERAL_ACCEL = 2.5;
+/** How far ahead the verge speed reads the bend: seconds of travel, with a floor. */
+const VERGE_BEND_LOOK_S = 3;
+const VERGE_BEND_LOOK_MIN_M = 40;
+const VERGE_BEND_SAMPLES = 4;
+/** Going round something standing still with the body on the verge, m/s: 60 km/h. */
+const VERGE_BYPASS_STILL_MPS = 60 / 3.6;
 /**
  * A PASS ON THE VERGE HAS TO BE GAINING. The loose ground out there costs grip and
  * rolling drag the asphalt does not, and a car that could not find its advantage sat
@@ -1546,6 +1572,8 @@ export class Autopilot {
   private racingHazardM = Number.POSITIVE_INFINITY;
   private racingOwnSign = -1;
   private racingBodyHalfWidth = CAR_HALF_WIDTH_M;
+  /** Edge margin for this step's solve: `RACING_EDGE_MARGIN_M` plus the speed's share. */
+  private racingEdgeMargin = RACING_EDGE_MARGIN_M;
   private racingHomeLane = 0;
   private racingOwnCarriageway = false;
   /** Seconds of plain cruising since anything else; see `RACING_REARM_S`. */
@@ -1560,7 +1588,7 @@ export class Autopilot {
     const lanes = this.road.lanesPerSideAt(s);
     const home = this.road.laneCentreAt(s, Math.min(this.racingHomeLane, lanes - 1));
     out[2] = home;
-    const edge = Math.max(0, this.road.halfWidthAt(s) - this.racingBodyHalfWidth - RACING_EDGE_MARGIN_M);
+    const edge = Math.max(0, this.road.halfWidthAt(s) - this.racingBodyHalfWidth - this.racingEdgeMargin);
     const crown = this.racingBodyHalfWidth + RACING_CROWN_MARGIN_M;
     if (distance >= this.racingHazardM || edge <= crown) {
       out[0] = home;
@@ -1671,6 +1699,8 @@ export class Autopilot {
   private shelteringValue = false;
   /** A sheltering car has reached its spot at the edge and stays stopped there. */
   private shelterArrived = false;
+  /** The pedal share threshold braking allows this step; see `modulateBrake`. */
+  private brakeScale = 1;
   /** Share of the mode's pace this driver uses; see `setPace`. */
   private paceValue = 1;
   /** Ambient traffic may use a per-driver following distance. */
@@ -2711,6 +2741,28 @@ export class Autopilot {
   /** Writes controls in-place using a geometric pure-pursuit waypoint. */
   drive(dt: number, vehicle: Vehicle, out: InputFrame, originX: number, originZ: number): void {
     if (!this.engagedValue) return;
+    this.driveControls(dt, vehicle, out, originX, originZ);
+    this.modulateBrake(dt, vehicle, out);
+  }
+
+  /**
+   * THRESHOLD BRAKING. None of these cars has ABS, and a pedal held past the tyres'
+   * peak locks the wheels: a locked front cannot steer and a locked rear cannot hold
+   * the tail. Measured at 30.6 km, cars braking at 0.9 pedal from 140 km/h for the
+   * queue at the rock drifted off the asphalt on a 1000 m bend with the wheel turned
+   * against the drift. A driver who can feel the lock lets the pedal up until the
+   * wheels turn again and squeezes it back on: the pedal is scaled down while any
+   * wheel is locked and returns over `ABS_RECOVER_S`.
+   */
+  private modulateBrake(dt: number, vehicle: Vehicle, out: InputFrame): void {
+    const sliding = out.brake > 0 && !out.handbrake && vehicle.speedKmh > ABS_MIN_KMH && vehicle.wheelLocked;
+    this.brakeScale = sliding
+      ? Math.max(ABS_MIN_SCALE, this.brakeScale * ABS_RELEASE)
+      : Math.min(1, this.brakeScale + dt / ABS_RECOVER_S);
+    out.brake *= this.brakeScale;
+  }
+
+  private driveControls(dt: number, vehicle: Vehicle, out: InputFrame, originX: number, originZ: number): void {
     this.controlledVehicle = vehicle;
     // Autonomy computes the wheel angle it wants and commands the rack with it. Never
     // let a player's device or assist setting reinterpret that command.
@@ -4095,6 +4147,7 @@ export class Autopilot {
       );
       this.racingOwnSign = Math.sign(ownLaneOffset) || -1;
       this.racingBodyHalfWidth = vehicle.modelMeasure.halfExtents[0];
+      this.racingEdgeMargin = RACING_EDGE_MARGIN_M + speed * RACING_EDGE_MARGIN_S;
       this.racingHomeLane = homeLane;
       this.racingOwnCarriageway = true;
       for (const obstacle of obstacles) {
@@ -4766,6 +4819,27 @@ export class Autopilot {
     }
     if (this.middlePassingValue) {
       targetSpeed = Math.min(targetSpeed, this.shoulderLeaderSpeed + MIDDLE_PASS_ADVANTAGE_MPS);
+    }
+    // ON THE VERGE THE ROBOT SLOWS FOR WHAT THE VERGE IS. Any line that puts the body
+    // past the asphalt — a pass on the shoulder, a bypass, an escape — is taken at a
+    // speed loose stone can carry through the bend it is in, and going past something
+    // STANDING there at a speed it could stop from. Measured at 30.6 km: frantic
+    // drivers went round a queue on the verge at 130 km/h and hit what stood on it, and
+    // took the verge at 85 km/h through a 220 m bend. Braked for as soon as the line
+    // is out there, so the speed comes off while the body is still crossing over.
+    const vergeOverhang = Math.max(Math.abs(desiredLine), Math.abs(projection.lateral))
+      + CAR_HALF_WIDTH_M - this.asphaltHalfWidth;
+    if (vergeOverhang > 0) {
+      const reach = Math.max(VERGE_BEND_LOOK_MIN_M, speed * VERGE_BEND_LOOK_S);
+      let bend = 0;
+      for (let k = 0; k <= VERGE_BEND_SAMPLES; k++) {
+        bend = Math.max(bend, Math.abs(this.road.curvatureAt(this.hintS + (reach * k) / VERGE_BEND_SAMPLES)));
+      }
+      targetSpeed = Math.min(
+        targetSpeed,
+        Math.sqrt(VERGE_LATERAL_ACCEL / Math.max(bend, 1e-4)),
+        this.detouring && this.corridorBlockSpeed <= CRAWL_SPEED_MPS ? VERGE_BYPASS_STILL_MPS : Infinity,
+      );
     }
     if (!plan.admissible) targetSpeed = 0;
     // Sheltering: slow to a crawl while the body is still moving over to the edge,

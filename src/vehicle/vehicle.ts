@@ -1429,6 +1429,12 @@ export class Vehicle implements Rebasable {
     return this.lamps.blinkerLit;
   }
 
+  /** Whether any wheel on the ground is locked and sliding this step. */
+  get wheelLocked(): boolean {
+    for (const w of this.wheels) if (w.grounded && w.locked) return true;
+    return false;
+  }
+
   /** Yaw of the chassis' forward axis about world up, radians: `atan2(forward.x, forward.z)`. */
   get heading(): number {
     this.chassisBody.rotation(this.rotationScratch);
