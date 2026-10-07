@@ -1094,6 +1094,7 @@ export class MainMenu {
         controllerDeadzone: base.controllerDeadzone,
         controllerSteerSensitivity: base.controllerSteerSensitivity,
         controllerSteerAssist: base.controllerSteerAssist,
+        keyboardSteerAssist: base.keyboardSteerAssist,
         masterVolume: base.masterVolume,
         carVolume: base.carVolume,
         worldVolume: base.worldVolume,
@@ -1124,6 +1125,7 @@ export class MainMenu {
           controllerDeadzone: settings.controllerDeadzone,
           controllerSteerSensitivity: settings.controllerSteerSensitivity,
           controllerSteerAssist: settings.controllerSteerAssist,
+          keyboardSteerAssist: settings.keyboardSteerAssist,
           masterVolume: settings.masterVolume,
           carVolume: settings.carVolume,
           worldVolume: settings.worldVolume,
@@ -2277,7 +2279,7 @@ export class MainMenu {
               {
                 label: 'Off',
                 icon: 'keys',
-                hint: 'Full stick is full lock at any speed. The keyboard is always assisted.',
+                hint: 'Full stick is full lock at any speed.',
                 active: () => !settings.controllerSteerAssist,
                 pick: () => {
                   settings.controllerSteerAssist = false;
@@ -2289,6 +2291,30 @@ export class MainMenu {
         };
 
         const renderControls = (): void => {
+          pane.appendChild(
+            segmented('Keyboard steering assist', [
+              {
+                label: 'On',
+                icon: 'drive',
+                hint: 'A held key asks for as much steering as the front tyres can use at this speed.',
+                active: () => settings.keyboardSteerAssist,
+                pick: () => {
+                  settings.keyboardSteerAssist = true;
+                  apply();
+                },
+              },
+              {
+                label: 'Off',
+                icon: 'keys',
+                hint: 'A held key winds the wheel toward full lock at any speed: quick hands needed at speed.',
+                active: () => !settings.keyboardSteerAssist,
+                pick: () => {
+                  settings.keyboardSteerAssist = false;
+                  apply();
+                },
+              },
+            ]),
+          );
           pane.appendChild(
             sliderField(
               'Mouse Look',

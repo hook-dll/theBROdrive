@@ -4537,6 +4537,9 @@ export class Vehicle implements Rebasable {
         reach = turning * held + (1 - turning) * follow;
       }
       target = side * clamp(reach, -lock, lock);
+    } else if (input.steerMode === 'keysFull') {
+      // Keys without the assist: the keyboard's own curve, against the whole lock.
+      target = side * Math.pow(magnitude, this.handling.steerInputExponent) * lock;
     } else {
       target = -steer * lock;
     }

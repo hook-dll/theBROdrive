@@ -424,6 +424,7 @@ async function boot(): Promise<void> {
   input.setKeyBindings(world.state.settings.keyBindings);
   input.setMouseSensitivity(world.state.settings.mouseSensitivity);
   input.setAnalogSteeringAssist(world.state.settings.controllerSteerAssist);
+  input.setKeyboardSteeringAssist(world.state.settings.keyboardSteerAssist);
   // The pad's preferences are device-facing like the mouse's, so they are pushed at
   // the same place and by the same code in `applySettings` below.
   const pads = gamepads();
@@ -2892,6 +2893,7 @@ async function boot(): Promise<void> {
       input.setKeyBindings(world.state.settings.keyBindings);
       input.setMouseSensitivity(world.state.settings.mouseSensitivity);
       input.setAnalogSteeringAssist(world.state.settings.controllerSteerAssist);
+      input.setKeyboardSteeringAssist(world.state.settings.keyboardSteerAssist);
       pads.setDeadzone(world.state.settings.controllerDeadzone);
       pads.setSteeringSensitivity(world.state.settings.controllerSteerSensitivity);
       audio.applySettings(world.state.settings);

@@ -49,6 +49,9 @@
   from behind the queue ahead; a car turned more than 35° from the road crawls.
 - BOTTLENECKS TAKE TURNS: a car blocked at a stone for 4 s gets the turn and the
   traffic in the lane it needs is held at a line; held cars earn the next turn.
+- KEYBOARD STEERING ASSIST is a setting (Settings › Controls, on by default). Off, a
+  held key winds the wheel toward full lock at any speed (`SteerMode` 'keysFull')
+  instead of the front tyres' peak.
 - XBOX CONTROLLER (`core/gamepad.ts`, see `CONTROLS.md`). Left stick steers as a
   position, RT/LT are analog throttle and brake, every driving and on-foot action has a
   button, the right stick looks. Menus, pause and settings work from the pad. The last

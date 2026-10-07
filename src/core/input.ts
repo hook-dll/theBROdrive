@@ -16,6 +16,8 @@ import { INVENTORY_ITEM_LIMIT } from '../items/items';
  *   keys          a keyboard or touch axis, ramped (`keySteerStep`). The vehicle's
  *                 steering assist turns it into a share of the angle that puts the
  *                 front tyres at their peak slip.
+ *   keysFull      the same axis with the keyboard's assist off: its curve against the
+ *                 whole lock, at any speed.
  *   analogAssist  a position (a pad stick, the precise-control wheel) read against that
  *                 same cap, proportionally: the stick's edge is the tyres' peak.
  *   analog        a position read against the whole steering lock.
@@ -25,7 +27,7 @@ import { INVENTORY_ITEM_LIMIT } from '../items/items';
  * In the three player modes a steer of exactly 0 means no hand is on the wheel, and the
  * tyres' own aligning moment turns it. `direct` always holds the rack where it is told.
  */
-export type SteerMode = 'keys' | 'analogAssist' | 'analog' | 'direct';
+export type SteerMode = 'keys' | 'keysFull' | 'analogAssist' | 'analog' | 'direct';
 
 export interface InputFrame {
   /** 0..1 */
@@ -335,6 +337,7 @@ export class InputReader {
   private preciseSteerEnabled = false;
   /** Analog positions read against the assist's cap; see `setAnalogSteeringAssist`. */
   private analogSteerAssist = true;
+  private keyboardSteerAssist = true;
   /**
    * Linear steering-wheel position, -1..1. Mouse and keyboard add to the same value;
    * neither releasing a key nor stopping the mouse returns it toward centre.
@@ -432,11 +435,19 @@ export class InputReader {
 
   /**
    * The settings' steering assist for ANALOG positions — the pad's stick and the
-   * precise-control wheel (`SteerMode`). The keyboard is always assisted: a key has no
-   * position to be read against the whole lock.
+   * precise-control wheel (`SteerMode`).
    */
   setAnalogSteeringAssist(enabled: boolean): void {
     this.analogSteerAssist = enabled;
+  }
+
+  /**
+   * The settings' steering assist for the KEYBOARD (and the touch wheel, which follows
+   * the same ramp): on, a held key asks for the tyres' peak at this speed (`keys`);
+   * off, it winds toward the whole lock along the keyboard curve (`keysFull`).
+   */
+  setKeyboardSteeringAssist(enabled: boolean): void {
+    this.keyboardSteerAssist = enabled;
   }
 
   /**
@@ -646,7 +657,7 @@ export class InputReader {
       // keyboard ramp follows, and lifting the thumb lets go of the wheel like a key.
       const wantSteer = keySteer !== 0 || !touch?.steeringActive ? keySteer : touch.steer;
       f.steer = keySteerStep(f.steer, wantSteer, dt);
-      f.steerMode = 'keys';
+      f.steerMode = this.keyboardSteerAssist ? 'keys' : 'keysFull';
     }
 
     const taps = this.touch?.consumeTaps();
