@@ -29,6 +29,15 @@ import { INVENTORY_ITEM_LIMIT } from '../items/items';
  */
 export type SteerMode = 'keys' | 'keysFull' | 'analogAssist' | 'analog' | 'direct';
 
+/**
+ * What a released steering key does (`keySteerStep`), a player setting:
+ *
+ *   letGo  the hand leaves the wheel the moment the key comes up, and the tyres'
+ *          aligning moment turns it toward where the car is going, at once.
+ *   ease   the hand eases off over `STEER_EASE` first, and lets go near the centre.
+ */
+export type KeySteerRelease = 'letGo' | 'ease';
+
 export interface InputFrame {
   /** 0..1 */
   throttle: number;
@@ -266,18 +275,39 @@ export function keyPedalStep(
 const STEER_RISE = 0.3;
 
 /**
+ * Time constant of the hand easing off after a steering key comes up. Measured with the
+ * old instant release (80 km/h, Zhiguli): half the road-wheel angle was gone in one
+ * physics step and the yaw in about 0.2 s, two to four times faster than before the
+ * driving overhaul, so every correction was taken back the moment the key rose and
+ * steering became a fight. 0.25 s halves the slip a key asked for in about 0.14 s,
+ * which is what the old 0.32 s axis decay gave through its steeper curve.
+ */
+const STEER_EASE = 0.25;
+/** Below this the easing hand lets go of the wheel: the axis reads exactly 0. */
+const STEER_LET_GO = 0.03;
+
+/**
  * One step of the keyboard steering axis toward `want`, -1..1.
  *
  * A held key winds the axis up over `STEER_RISE`; a reversal winds it through zero the
- * same way, the hand still on the wheel. Letting go is different: the axis drops to 0 at
- * once, because 0 is how the frame says NO HAND IS ON THE WHEEL (`SteerMode`). The
- * vehicle then lets the tyres' own aligning moment turn it back — at the rate the road
- * gives, toward where the car is going — instead of this layer playing caster with a
- * fixed 0.32 s decay that knew nothing about speed, grip or a slide. Exported so the
- * benches drive the same ramp the game does.
+ * same way, the hand still on the wheel. A released key depends on `release`
+ * (`KeySteerRelease`). With `letGo` the axis drops to 0 at once, because 0 is how the
+ * frame says NO HAND IS ON THE WHEEL (`SteerMode`): the vehicle then lets the tyres'
+ * own aligning moment turn it back, at the rate the road gives. With `ease` the axis
+ * decays over `STEER_EASE` with the hand still on, and reads 0 — let go — only below
+ * `STEER_LET_GO`. Exported so the benches drive the same ramp the game does.
  */
-export function keySteerStep(value: number, want: number, dt: number): number {
-  if (want === 0) return 0;
+export function keySteerStep(
+  value: number,
+  want: number,
+  dt: number,
+  release: KeySteerRelease,
+): number {
+  if (want === 0) {
+    if (release === 'letGo') return 0;
+    const eased = value - value * Math.min(1, dt / STEER_EASE);
+    return Math.abs(eased) < STEER_LET_GO ? 0 : eased;
+  }
   return value + (want - value) * Math.min(1, dt / STEER_RISE);
 }
 
@@ -338,6 +368,7 @@ export class InputReader {
   /** Analog positions read against the assist's cap; see `setAnalogSteeringAssist`. */
   private analogSteerAssist = true;
   private keyboardSteerAssist = true;
+  private keyboardSteerRelease: KeySteerRelease = 'letGo';
   /**
    * Linear steering-wheel position, -1..1. Mouse and keyboard add to the same value;
    * neither releasing a key nor stopping the mouse returns it toward centre.
@@ -448,6 +479,11 @@ export class InputReader {
    */
   setKeyboardSteeringAssist(enabled: boolean): void {
     this.keyboardSteerAssist = enabled;
+  }
+
+  /** The settings' `KeySteerRelease` for the keyboard and the touch wheel. */
+  setKeyboardSteerRelease(release: KeySteerRelease): void {
+    this.keyboardSteerRelease = release;
   }
 
   /**
@@ -656,7 +692,7 @@ export class InputReader {
       // The touch wheel is already analogue, so it supplies the same target the
       // keyboard ramp follows, and lifting the thumb lets go of the wheel like a key.
       const wantSteer = keySteer !== 0 || !touch?.steeringActive ? keySteer : touch.steer;
-      f.steer = keySteerStep(f.steer, wantSteer, dt);
+      f.steer = keySteerStep(f.steer, wantSteer, dt, this.keyboardSteerRelease);
       f.steerMode = this.keyboardSteerAssist ? 'keys' : 'keysFull';
     }
 

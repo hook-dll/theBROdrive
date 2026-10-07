@@ -52,6 +52,14 @@
 - KEYBOARD STEERING ASSIST is a setting (Settings › Controls, on by default). Off, a
   held key winds the wheel toward full lock at any speed (`SteerMode` 'keysFull')
   instead of the front tyres' peak.
+- STEERING KEY RELEASE is a setting (Settings › Controls, Let go by default). Let go
+  is the hands-off release: the wheel snaps to the car's line of travel within a
+  physics step. Ease off decays the key over 0.25 s with the hand still on and lets go
+  near the centre (`KeySteerRelease` in core/input.ts). Measured on the Zhiguli at 80
+  km/h, half the wheel angle returns in 0-17 ms on Let go and 117-250 ms on Ease off
+  (133-150 ms before the driving overhaul). `tools/tap-response.ts` and
+  `tools/steer-feel.ts` report both; tap-response now drives forward on the flat 8 km
+  ground (it was reversing off a 30 m ramp).
 - XBOX CONTROLLER (`core/gamepad.ts`, see `CONTROLS.md`). Left stick steers as a
   position, RT/LT are analog throttle and brake, every driving and on-foot action has a
   button, the right stick looks. Menus, pause and settings work from the pad. The last

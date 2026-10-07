@@ -77,18 +77,22 @@ Levels come from `RUMBLE_*` in `src/main.ts`.
 
 `InputFrame.steerMode` says what `steer` means (`SteerMode` in `src/core/input.ts`):
 
-- **Keyboard (and the touch wheel): always assisted.** A held A/D asks for the
+- **Keyboard (and the touch wheel).** Settings → Controls → **Keyboard steering
+  assist** On (default): a held A/D asks for the
   steering that runs the front tyres at their own peak slip angle (+10%), measured
   from the way the front axle is actually travelling — full lock when parking, a few
   degrees at 100 km/h. The key winds up over ~0.3 s; partial wind-up is a share of
   that slip. If the tail slides past its own peak, the key toward the bend gives way
   until the front wheels simply follow the car's direction; the opposite key is the
-  countersteer and reaches past the direction of travel.
-- **Letting go is letting go of the wheel.** A released key (or a centred stick)
-  means no hand on the wheel: the tyres' aligning moment (pneumatic trail plus the
-  caster's mechanical trail) swings the wheel back toward where the car is going.
-  Mid-corner it unwinds and the car straightens; with the tail out it countersteers
-  on its own; parked it stays put.
+  countersteer and reaches past the direction of travel. Off: the key winds toward
+  full lock at any speed.
+- **Letting go is letting go of the wheel.** A centred stick, and a released key with
+  **Steering key release** on Let go (default), means no hand on the wheel at once:
+  the tyres' aligning moment (pneumatic trail plus the caster's mechanical trail)
+  swings the wheel back toward where the car is going. Mid-corner it unwinds and the
+  car straightens; with the tail out it countersteers on its own; parked it stays put.
+  On Ease off, a released key first eases the hand off (0.25 s time constant) and lets
+  go near the centre, so a tap's correction is not taken back in one physics step.
 - **Pad stick / precise mouse wheel: a position.** Settings → Controller →
   **Steering assist** On (default): full stick is the same tyre-peak reach as the
   keyboard, proportional inside it. Off: full stick is full lock at any speed.

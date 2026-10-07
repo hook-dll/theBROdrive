@@ -13,14 +13,14 @@
  *    a plough.
  * 2. STEP: the time from the key going down to 63% and 90% of the yaw rate the hold
  *    settles at, 60 and 100 km/h.
- * 3. RELEASE: from that hold at 60 km/h the key comes up. Time for the rack to come back
- *    to a tenth of its held angle, and for the yaw rate to fall to a tenth: with the
- *    hands off, the tyres' aligning moment is what returns the wheel.
+ * 3. RELEASE: from that hold at 60 km/h the key comes up, once per `KeySteerRelease`.
+ *    Time for the rack to come back to a tenth of its held angle, and for the yaw rate
+ *    to fall to a tenth: once the hand lets go, the tyres' aligning moment returns it.
  * 4. YAW KICK: straight at 70 km/h, the body is given 1.2 rad/s of yaw (a clipped kerb,
  *    a shove) and either nobody touches the keys (`hands off`) or a keyboard driver
- *    steers back to the original heading with the keys alone (`keys`). Peak heading
- *    error, peak rear slip, and the time until the heading is back within 3° and the
- *    yaw rate under 3°/s, or `spun`.
+ *    steers back to the original heading with the keys alone (`keys`, once per
+ *    `KeySteerRelease`). Peak heading error, peak rear slip, and the time until the
+ *    heading is back within 3° and the yaw rate under 3°/s, or `spun`.
  * 5. PAD at 100 km/h: the stick held full over, with the steering assist and without.
  *
  * Nothing here is part of the game bundle.
@@ -31,7 +31,7 @@ import { installDocumentShim } from './domshim';
 import { preloadCarModels } from '../src/render/carmodel';
 import { FIXED_DT } from '../src/core/physics';
 import { makeRig, drive, type Rig } from './handling-bench';
-import { keySteerStep, type SteerMode } from '../src/core/input';
+import { keySteerStep, type KeySteerRelease, type SteerMode } from '../src/core/input';
 
 installAssetShim();
 installDocumentShim();
@@ -143,7 +143,7 @@ function hold(rig: Rig, kmh: number, mode: SteerMode, holdS: number): Hold {
   let n = 0;
   drive(rig, holdS, (t, f) => {
     f.steerMode = mode;
-    f.steer = mode === 'keys' ? keySteerStep(f.steer, 1, FIXED_DT) : 1;
+    f.steer = mode === 'keys' ? keySteerStep(f.steer, 1, FIXED_DT, 'letGo') : 1;
     f.throttle = governor(rig, kmh);
     f.brake = 0;
     const yaw = Math.abs(rig.vehicle.chassis.angvel().y);
@@ -176,14 +176,14 @@ function hold(rig: Rig, kmh: number, mode: SteerMode, holdS: number): Hold {
   };
 }
 
-function release(rig: Rig, kmh: number, mode: SteerMode): { rackS: number; yawS: number } {
+function release(rig: Rig, kmh: number, mode: SteerMode, style: KeySteerRelease): { rackS: number; yawS: number } {
   const held = Math.abs(internals(rig).steerAngle);
   const heldYaw = Math.abs(rig.vehicle.chassis.angvel().y);
   let rackS = -1;
   let yawS = -1;
   drive(rig, 4, (t, f) => {
     f.steerMode = mode;
-    f.steer = mode === 'keys' ? keySteerStep(f.steer, 0, FIXED_DT) : 0;
+    f.steer = mode === 'keys' ? keySteerStep(f.steer, 0, FIXED_DT, style) : 0;
     f.throttle = governor(rig, kmh);
     if (rackS < 0 && Math.abs(internals(rig).steerAngle) < 0.1 * held) rackS = t;
     if (yawS < 0 && Math.abs(rig.vehicle.chassis.angvel().y) < 0.1 * heldYaw) yawS = t;
@@ -197,8 +197,8 @@ interface Kick {
   recoverS: number;
 }
 
-/** Straight at 70 km/h, a yaw kick, then hands off or a keyboard driver. */
-async function kick(modelId: string, driver: boolean): Promise<Kick> {
+/** Straight at 70 km/h, a yaw kick, then hands off (`style` null) or a keyboard driver. */
+async function kick(modelId: string, style: KeySteerRelease | null): Promise<Kick> {
   const kmh = 70;
   const rig = await rolling(modelId, kmh);
   drive(rig, 0.5, (_, f) => {
@@ -225,11 +225,11 @@ async function kick(modelId: string, driver: boolean): Promise<Kick> {
     // inside a dead band, with the key ramp the input layer gives every key. Positive
     // heading is a left turn, and a positive key is right.
     let want = 0;
-    if (driver) {
+    if (style !== null) {
       const demand = err + 0.35 * r;
       want = demand > 2 / DEG ? 1 : demand < -2 / DEG ? -1 : 0;
     }
-    f.steer = keySteerStep(f.steer, want, FIXED_DT);
+    f.steer = keySteerStep(f.steer, want, FIXED_DT, style ?? 'letGo');
     f.throttle = 0;
     f.brake = 0;
   });
@@ -252,15 +252,20 @@ for (const id of models) {
         `${h.rearDeg.toFixed(1).padStart(10)} ${h.t63.toFixed(2).padStart(7)} ${h.t90.toFixed(2).padStart(7)}`,
     );
     if (kmh === 60) {
-      const r = release(rig, kmh, 'keys');
-      console.log(`  release from 60: rack to 10% in ${fmt(r.rackS)} s, yaw to 10% in ${fmt(r.yawS)} s`);
+      for (const style of ['letGo', 'ease'] as const) {
+        const fresh = await rolling(id, kmh);
+        hold(fresh, kmh, 'keys', 3);
+        const r = release(fresh, kmh, 'keys', style);
+        console.log(`  release from 60 (${style}): rack to 10% in ${fmt(r.rackS)} s, yaw to 10% in ${fmt(r.yawS)} s`);
+        fresh.vehicle.dispose();
+      }
     }
     rig.vehicle.dispose();
   }
-  for (const driver of [false, true]) {
-    const k = await kick(id, driver);
+  for (const style of [null, 'letGo', 'ease'] as const) {
+    const k = await kick(id, style);
     console.log(
-      `  yaw kick, ${driver ? 'keys    ' : 'hands off'}: peak heading ${k.peakErrDeg.toFixed(1)} deg, ` +
+      `  yaw kick, ${style === null ? 'hands off  ' : `keys ${style.padEnd(6)}`}: peak heading ${k.peakErrDeg.toFixed(1)} deg, ` +
         `peak rear slip ${k.peakRearDeg.toFixed(1)} deg, recovered ${fmt(k.recoverS)} s`,
     );
   }

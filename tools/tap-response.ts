@@ -20,12 +20,14 @@
 
 import { SurfaceType } from '../src/core/surfaces';
 import { installAssetShim } from './assetshim';
-import { addInclineGround, makeRig } from './handling-bench';
+import { installDocumentShim } from './domshim';
+import { addGround, makeRig } from './handling-bench';
 import { preloadCarModels } from '../src/render/carmodel';
-import { keySteerStep } from '../src/core/input';
+import { keySteerStep, type KeySteerRelease } from '../src/core/input';
 import { FIXED_DT } from '../src/core/physics';
 
 installAssetShim();
+installDocumentShim();
 
 const DEG = 180 / Math.PI;
 const model = process.argv[2] ?? 'sv_vaz2101';
@@ -58,14 +60,12 @@ await preloadCarModels([model]);
  * and report a car that cannot turn. Coasting for the second a tap lasts costs about
  * 3 km/h to rolling resistance, which is far smaller than the effect being measured.
  */
-async function tap(tapS: number): Promise<TapResult> {
-  const rig = await makeRig(
-    model,
-    (physics) => addInclineGround(physics, 0, SurfaceType.Asphalt),
-    false,
-  );
+async function tap(tapS: number, release: KeySteerRelease): Promise<TapResult> {
+  // The flat 8 km ground: the old 30 m ramp ran out under the car within the run.
+  const rig = await makeRig(model, (physics) => addGround(physics, SurfaceType.Asphalt), false);
   const body = rig.vehicle.chassis;
-  body.setLinvel({ x: 0, y: 0, z: -speedMps }, true);
+  // Body forward is +Z (vehicle.ts `updateSteering`); -Z is a car reversing at speed.
+  body.setLinvel({ x: 0, y: 0, z: speedMps }, true);
   body.setAngvel({ x: 0, y: 0, z: 0 }, true);
 
   let f = 0;
@@ -78,7 +78,7 @@ async function tap(tapS: number): Promise<TapResult> {
   for (let i = 0; i < steps; i++) {
     const t = i * FIXED_DT;
     const want = t >= 1 && t < 1 + tapS ? 1 : 0;
-    f = keySteerStep(f, want, FIXED_DT);
+    f = keySteerStep(f, want, FIXED_DT, release);
 
     rig.input.throttle = t < 1 ? 0.25 : 0;
     rig.input.brake = 0;
@@ -111,64 +111,65 @@ async function tap(tapS: number): Promise<TapResult> {
   };
 }
 
-const results: TapResult[] = [];
-for (const t of TAPS) results.push(await tap(t));
-
-console.log(`${model} at ${speedKmh} km/h on asphalt: one steering tap, held for the given time`);
-console.log('  tap ms   input   steer deg   yaw deg/s    lat g   x previous');
-
-let previous = 0;
-for (const r of results) {
-  const ratio = previous > 0 ? r.steerDeg / previous : 0;
-  console.log(
-    `${String(Math.round(r.tapS * 1000)).padStart(7)} ${r.input.toFixed(3).padStart(8)} ` +
-      `${r.steerDeg.toFixed(2).padStart(11)} ${r.yawDegS.toFixed(1).padStart(11)} ` +
-      `${r.latG.toFixed(3).padStart(8)} ${ratio.toFixed(2).padStart(11)}`,
-  );
-  previous = r.steerDeg;
-}
-
 const failures: string[] = [];
+for (const release of ['letGo', 'ease'] as const satisfies readonly KeySteerRelease[]) {
+  const results: TapResult[] = [];
+  for (const t of TAPS) results.push(await tap(t, release));
 
-// A FINE TAP MUST DO SOMETHING. This is the assertion the dead zone used to fail: with
-// 0.024 rad of free play, a 40 ms tap produced 0.00 degrees of road-wheel angle and the
-// car did not deviate at all.
-for (const r of results) {
-  if (!FINE_TAPS.includes(r.tapS)) continue;
-  if (r.steerDeg < 0.25) {
-    failures.push(`a ${Math.round(r.tapS * 1000)} ms tap steers ${r.steerDeg.toFixed(2)} deg (expected at least 0.25)`);
-  }
-  if (r.steerDeg > 6) {
-    failures.push(`a ${Math.round(r.tapS * 1000)} ms tap steers ${r.steerDeg.toFixed(2)} deg — too much for a fine correction`);
-  }
-}
+  console.log(`\n${model} at ${speedKmh} km/h on asphalt, key release '${release}': one steering tap, held for the given time`);
+  console.log('  tap ms   input   steer deg   yaw deg/s    lat g   x previous');
 
-// AND A LONGER TAP MUST DO MORE, all the way up. A response that is not monotonic in tap
-// length cannot be learned, whatever its absolute size.
-for (let i = 1; i < results.length; i++) {
-  const previousResult = results[i - 1]!;
-  const current = results[i]!;
-  if (current.steerDeg < previousResult.steerDeg * 0.98) {
-    failures.push(
-      `the response is not monotonic: ${Math.round(previousResult.tapS * 1000)} ms gives ` +
-        `${previousResult.steerDeg.toFixed(2)} deg but a longer ` +
-        `${Math.round(current.tapS * 1000)} ms gives ${current.steerDeg.toFixed(2)}`,
+  let previous = 0;
+  for (const r of results) {
+    const ratio = previous > 0 ? r.steerDeg / previous : 0;
+    console.log(
+      `${String(Math.round(r.tapS * 1000)).padStart(7)} ${r.input.toFixed(3).padStart(8)} ` +
+        `${r.steerDeg.toFixed(2).padStart(11)} ${r.yawDegS.toFixed(1).padStart(11)} ` +
+        `${r.latG.toFixed(3).padStart(8)} ${ratio.toFixed(2).padStart(11)}`,
     );
+    previous = r.steerDeg;
   }
-}
 
-// AND THERE MUST BE NO CLIFF: no single step of the sweep may multiply the response by
-// more than three, or the finest correction available to the player lands on the wrong
-// side of a discontinuity. Ratios are around 1.3-1.9 when the chain is healthy.
-for (let i = 1; i < results.length; i++) {
-  const previousResult = results[i - 1]!;
-  const current = results[i]!;
-  if (previousResult.steerDeg > 0.1 && current.steerDeg > previousResult.steerDeg * 3) {
-    failures.push(
-      `cliff between ${Math.round(previousResult.tapS * 1000)} ms and ` +
-        `${Math.round(current.tapS * 1000)} ms: ${previousResult.steerDeg.toFixed(2)} to ` +
-        `${current.steerDeg.toFixed(2)} deg`,
-    );
+  // A FINE TAP MUST DO SOMETHING. This is the assertion the dead zone used to fail: with
+  // 0.024 rad of free play, a 40 ms tap produced 0.00 degrees of road-wheel angle and the
+  // car did not deviate at all.
+  for (const r of results) {
+    if (!FINE_TAPS.includes(r.tapS)) continue;
+    if (r.steerDeg < 0.25) {
+      failures.push(`${release}: a ${Math.round(r.tapS * 1000)} ms tap steers ${r.steerDeg.toFixed(2)} deg (expected at least 0.25)`);
+    }
+    if (r.steerDeg > 6) {
+      failures.push(`${release}: a ${Math.round(r.tapS * 1000)} ms tap steers ${r.steerDeg.toFixed(2)} deg — too much for a fine correction`);
+    }
+  }
+
+  // AND A LONGER TAP MUST DO MORE, all the way up. A response that is not monotonic in tap
+  // length cannot be learned, whatever its absolute size.
+  for (let i = 1; i < results.length; i++) {
+    const previousResult = results[i - 1]!;
+    const current = results[i]!;
+    if (current.steerDeg < previousResult.steerDeg * 0.98) {
+      failures.push(
+        `${release}: the response is not monotonic: ${Math.round(previousResult.tapS * 1000)} ms gives ` +
+          `${previousResult.steerDeg.toFixed(2)} deg but a longer ` +
+          `${Math.round(current.tapS * 1000)} ms gives ${current.steerDeg.toFixed(2)}`,
+      );
+    }
+  }
+
+  // AND THERE MUST BE NO CLIFF: no single step of the sweep may multiply the response by
+  // more than three, or the finest correction available to the player lands on the wrong
+  // side of a discontinuity. Ratios are around 1.3-1.9 when the chain is healthy.
+  for (let i = 1; i < results.length; i++) {
+    const previousResult = results[i - 1]!;
+    const current = results[i]!;
+    if (previousResult.steerDeg > 0.1 && current.steerDeg > previousResult.steerDeg * 3) {
+      failures.push(
+        `${release}: cliff between ${Math.round(previousResult.tapS * 1000)} ms and ` +
+          `${Math.round(current.tapS * 1000)} ms: ${previousResult.steerDeg.toFixed(2)} to ` +
+          `${current.steerDeg.toFixed(2)} deg`,
+      );
+    }
   }
 }
 

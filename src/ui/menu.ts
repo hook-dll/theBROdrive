@@ -1095,6 +1095,7 @@ export class MainMenu {
         controllerSteerSensitivity: base.controllerSteerSensitivity,
         controllerSteerAssist: base.controllerSteerAssist,
         keyboardSteerAssist: base.keyboardSteerAssist,
+        keyboardSteerRelease: base.keyboardSteerRelease,
         masterVolume: base.masterVolume,
         carVolume: base.carVolume,
         worldVolume: base.worldVolume,
@@ -1126,6 +1127,7 @@ export class MainMenu {
           controllerSteerSensitivity: settings.controllerSteerSensitivity,
           controllerSteerAssist: settings.controllerSteerAssist,
           keyboardSteerAssist: settings.keyboardSteerAssist,
+          keyboardSteerRelease: settings.keyboardSteerRelease,
           masterVolume: settings.masterVolume,
           carVolume: settings.carVolume,
           worldVolume: settings.worldVolume,
@@ -2310,6 +2312,30 @@ export class MainMenu {
                 active: () => !settings.keyboardSteerAssist,
                 pick: () => {
                   settings.keyboardSteerAssist = false;
+                  apply();
+                },
+              },
+            ]),
+          );
+          pane.appendChild(
+            segmented('Steering key release', [
+              {
+                label: 'Let go',
+                icon: 'keys',
+                hint: 'Releasing the key lets go of the wheel: the tyres turn it back toward where the car is going at once.',
+                active: () => settings.keyboardSteerRelease === 'letGo',
+                pick: () => {
+                  settings.keyboardSteerRelease = 'letGo';
+                  apply();
+                },
+              },
+              {
+                label: 'Ease off',
+                icon: 'drive',
+                hint: 'Releasing the key eases the hand off over a quarter second before letting go: a correction holds a little longer.',
+                active: () => settings.keyboardSteerRelease === 'ease',
+                pick: () => {
+                  settings.keyboardSteerRelease = 'ease';
                   apply();
                 },
               },
