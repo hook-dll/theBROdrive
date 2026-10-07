@@ -14,7 +14,8 @@
 
 import * as THREE from 'three';
 
-import { CHUNK_LENGTH, type ChunkContext } from '../src/world/chunks';
+import { type ChunkContext } from '../src/world/chunks';
+import { CHUNK_LENGTH } from '../src/world/ranges';
 import { Road } from '../src/world/road';
 import { RoadDistance } from '../src/world/roaddistance';
 import { Terrain } from '../src/world/terrain';

@@ -235,7 +235,7 @@ function forEachDelineator(
  *
  * The cost is bounded by the streaming radii and nothing else. Colliders are built
  * only where `ctx.hasPhysics` is true — on the road, the whole 2.6 km streamed
- * window (see PHYSICS_RADIUS in world/chunks.ts) — so a 40-60 m spacing puts at most
+ * window (see ROAD_PHYSICS_CHUNKS in world/ranges.ts) — so a 40-60 m spacing puts at most
  * a few dozen of them in the world at once, against the hundreds the scatter field
  * carries over the same road. A run built out of that window is instanced scenery and
  * nothing more.

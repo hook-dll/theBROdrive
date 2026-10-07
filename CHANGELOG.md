@@ -53,6 +53,11 @@
   within 0.03 m of the drawn ground on average, 0.18 m at worst. A wreck (up-axis
   under 0.5) still for 18 s is recycled past 300 m, not only past 500 m.
   `tools/traffic-bench.ts` loads its cars again (document shim).
+- WORLD RANGES IN ONE PLACE (`world/ranges.ts`). Road chunks, desert tiles, traffic
+  reach, spawn bands and the rails' wake/sleep distances are authored or derived there
+  (traffic reach = min(road physics, verge ground)), and `worldRangeFailures` checks
+  their relations when the module loads: a figure that breaks one fails the first boot
+  or bench. `CHUNK_LENGTH` moved there; `PHYSICS_REACH_M` is `ROAD_PHYSICS_REACH_M`.
 - AI DRIVING: verge speed set by the bend ahead (2.5 m/s² on loose stone) and 60 km/h
   past anything standing; threshold braking instead of locked wheels; the racing
   line's edge margin grows with speed; rolling spawns launch at a speed they can stop

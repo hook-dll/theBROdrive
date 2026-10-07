@@ -6,6 +6,7 @@ import type { Road } from './road';
 import type { Terrain } from './terrain';
 import type { WorldOrigin } from './origin';
 import { WorldWorkScheduler } from './workqueue';
+import { CHUNK_LENGTH, ROAD_PHYSICS_CHUNKS, ROAD_VISUAL_CHUNKS } from './ranges';
 
 /**
  * World streaming spine.
@@ -18,38 +19,6 @@ import { WorldWorkScheduler } from './workqueue';
  * after unloading reproduces it exactly.
  */
 
-/** Metres of arclength per chunk. Must divide NODE_SPACING for watertight road seams. */
-export const CHUNK_LENGTH = 200;
-
-/** Chunks of scenery kept alive either side of the player. */
-const VISUAL_RADIUS = 6;
-/**
- * Chunks that MUST carry physics colliders either side of the player.
- *
- * Not the chunks that do: while the player is on the road every chunk is built with
- * its colliders from the start, the whole visual window, so steady travel never has
- * to turn a finished visual-only chunk into a physical one. That conversion is a full
- * synchronous rebuild — no provider can add just its colliders — and it cost 35-50 ms
- * of main thread twice per 200 m chunk (one chunk gaining physics ahead, one losing it
- * behind): measured in a browser trace as every stutter of a 60 fps drive. This band
- * is now only the floor that is repaired on the spot when it is ever found without
- * physics — after a return from the open desert, or a teleport.
- *
- * Four, not two: ambient traffic lives inside `PHYSICS_REACH_M`, and 400 m of it
- * either side was too short a stretch of road to look down. On the road this costs
- * nothing (every chunk out to VISUAL_RADIUS is physical already); the price is a
- * larger synchronous repair after a teleport or a return from the desert.
- */
-const PHYSICS_RADIUS = 4;
-/**
- * Road arclength either side of the player that is GUARANTEED to carry collision.
- *
- * The guaranteed set is `playerChunk ± PHYSICS_RADIUS`, so the supported reach
- * runs from `CHUNK_LENGTH * PHYSICS_RADIUS` (player at a chunk boundary) to one
- * chunk more (player at its far edge). Anything that needs ground under it at a
- * distance — traffic spawning, in particular — must use the guaranteed figure.
- */
-export const PHYSICS_REACH_M = CHUNK_LENGTH * PHYSICS_RADIUS;
 /** Past this lateral distance NEW road content is built without physics or prop colliders. */
 const ROAD_PHYSICS_REACH = 1200;
 
@@ -224,8 +193,8 @@ export class ChunkStreamer {
   get readiness(): { readonly ready: number; readonly wanted: number } {
     const clamped = Math.min(Math.max(this.previousPlayerS ?? 0, 0), this.road.length);
     const playerChunk = Math.min(Math.floor(clamped / CHUNK_LENGTH), this.lastChunkIndex);
-    const min = Math.max(0, playerChunk - VISUAL_RADIUS);
-    const max = Math.min(this.lastChunkIndex, playerChunk + VISUAL_RADIUS);
+    const min = Math.max(0, playerChunk - ROAD_VISUAL_CHUNKS);
+    const max = Math.min(this.lastChunkIndex, playerChunk + ROAD_VISUAL_CHUNKS);
     let ready = 0;
     for (let index = min; index <= max; index++) {
       if (this.built.get(index)?.complete) ready++;
@@ -273,16 +242,16 @@ export class ChunkStreamer {
     const playerChunk = Math.min(Math.floor(clamped / CHUNK_LENGTH), this.lastChunkIndex);
     // Chunks may leave the road's own range: every road-owned provider sees an empty
     // range and contributes nothing, while the independent desert tiles continue.
-    const min = playerChunk - VISUAL_RADIUS;
-    const max = playerChunk + VISUAL_RADIUS;
+    const min = playerChunk - ROAD_VISUAL_CHUNKS;
+    const max = playerChunk + ROAD_VISUAL_CHUNKS;
     const prefetch =
-      this.travelDirection === 0 ? null : playerChunk + this.travelDirection * (VISUAL_RADIUS + 1);
+      this.travelDirection === 0 ? null : playerChunk + this.travelDirection * (ROAD_VISUAL_CHUNKS + 1);
 
     // Tear down anything that left the visual window and is not the one directional
     // lookahead.
     //
     // PHYSICS ONLY EVER GOES ON IN PLACE, NEVER OFF. On the road every chunk is built
-    // physical (see PHYSICS_RADIUS), so a physical chunk keeps its colliders until it
+    // physical (see ROAD_PHYSICS_CHUNKS), so a physical chunk keeps its colliders until it
     // leaves the window, and the player walking off into the desert leaves them where
     // they are rather than rebuilding thirteen chunks to take them away.
     //
@@ -300,7 +269,7 @@ export class ChunkStreamer {
     const onRoad = Math.abs(playerLateral) < ROAD_PHYSICS_REACH;
     for (const [index, chunk] of this.built) {
       const wanted = (index >= min && index <= max) || index === prefetch;
-      const needsPhysics = onRoad && Math.abs(index - playerChunk) <= PHYSICS_RADIUS;
+      const needsPhysics = onRoad && Math.abs(index - playerChunk) <= ROAD_PHYSICS_CHUNKS;
       if (!wanted) {
         this.teardown(chunk);
         this.built.delete(index);
@@ -324,7 +293,7 @@ export class ChunkStreamer {
       const current = this.built.get(playerChunk);
       if (!current || !current.complete) this.buildQueue.push(playerChunk);
     }
-    for (let d = 1; d <= PHYSICS_RADIUS; d++) {
+    for (let d = 1; d <= ROAD_PHYSICS_CHUNKS; d++) {
       const back = playerChunk - d;
       const front = playerChunk + d;
       const first = this.travelDirection < 0 ? back : front;
@@ -340,7 +309,7 @@ export class ChunkStreamer {
       const lookahead = this.built.get(prefetch);
       if (!lookahead || !lookahead.complete) this.buildQueue.push(prefetch);
     }
-    for (let d = PHYSICS_RADIUS + 1; d <= VISUAL_RADIUS; d++) {
+    for (let d = ROAD_PHYSICS_CHUNKS + 1; d <= ROAD_VISUAL_CHUNKS; d++) {
       const back = playerChunk - d;
       const front = playerChunk + d;
       const first = this.travelDirection < 0 ? back : front;
@@ -362,7 +331,7 @@ export class ChunkStreamer {
     // A collider the player is about to need takes precedence over cosmetic refresh
     // work. The road mesh is the first provider, so this also gets a newly physical
     // chunk back under the player as soon as the shared frame budget admits a unit.
-    const urgent = index !== null && onRoad && Math.abs(index - playerChunk) <= PHYSICS_RADIUS;
+    const urgent = index !== null && onRoad && Math.abs(index - playerChunk) <= ROAD_PHYSICS_CHUNKS;
     const refresh = urgent ? null : this.nextRefresh();
     if (refresh) {
       this.scheduler.tryRun(frameId, `road:refresh:${refresh.index}:${refresh.providerId}`, () => {

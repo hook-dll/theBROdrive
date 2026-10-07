@@ -23,7 +23,8 @@
 import * as THREE from 'three';
 import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
 import { GameWorld, newWorldState } from '../src/game/state';
-import { CHUNK_LENGTH, type ChunkContext, type ChunkContent } from '../src/world/chunks';
+import { type ChunkContext, type ChunkContent } from '../src/world/chunks';
+import { CHUNK_LENGTH } from '../src/world/ranges';
 import { DebrisField, type Impactor } from '../src/world/debris';
 import { WorldOrigin } from '../src/world/origin';
 import { propPieces, type BreakableProp } from '../src/world/props/forms';

@@ -11,7 +11,7 @@
  * sticker; winning adds one coin per leg (`winCoins`). Slice rules: no save (a reload
  * forgets the race).
  *
- * A RIVAL IS A GHOST UNTIL IT IS NEAR. Physics exists only `PHYSICS_REACH_M` either
+ * A RIVAL IS A GHOST UNTIL IT IS NEAR. Physics exists only `ROAD_PHYSICS_REACH_M` (world/ranges.ts) either
  * side of the player, so a rival out there is an arclength and a speed advanced
  * here, at the pace the autopilot's own `roadPaceCeiling` allows `RIVAL_MODE` on
  * that road. Inside the spawn band it is handed to the traffic stream as a real car
@@ -44,7 +44,7 @@ const AHEAD_NEAR_M = 560;
 const LATE_DEPARTURE_M = 560;
 /**
  * WHERE A GHOST BECOMES A CAR: the traffic stream's own bands, so nothing appears
- * where it can be seen. Ahead, out to just inside the `PHYSICS_REACH_M` support edge;
+ * where it can be seen. Ahead, out to just inside the `ROAD_PHYSICS_REACH_M` (world/ranges.ts) support edge;
  * a ghost entering from beyond it is tried from there inward, every `SPAWN_RETRY_S`,
  * down to `AHEAD_POPIN_MIN_M`: one the player is catching that could not appear in
  * the stream's own 500 m band would otherwise be overtaken invisibly, and a car

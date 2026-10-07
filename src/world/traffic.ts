@@ -20,7 +20,17 @@ import { laneHalfWidthFor, widenessAt } from './roadprofile';
 import type { DriveRoad } from './road';
 import { ReversedRoad } from './reversedroad';
 import { TurnaroundRoad, TURNAROUND_ENTRY_S } from './turnaround';
-import { PHYSICS_REACH_M } from './chunks';
+import {
+  RAILS_SLEEP_M,
+  RAILS_WAKE_M,
+  TRAFFIC_FRANTIC_REAR_SPAWN_MAX_M,
+  TRAFFIC_FRANTIC_REAR_SPAWN_MIN_M,
+  TRAFFIC_REACH_M,
+  TRAFFIC_REAR_SPAWN_MAX_M,
+  TRAFFIC_REAR_SPAWN_MIN_M,
+  TRAFFIC_SPAWN_MAX_M,
+  TRAFFIC_UNSEEN_M,
+} from './ranges';
 import type { RoadConditionBuffer } from './gradient';
 
 /**
@@ -48,46 +58,8 @@ import type { RoadConditionBuffer } from './gradient';
  * for minutes at a time, which is what a fifth of twelve means in practice.
  */
 const DENSITY_FLOOR = 0.5;
-/**
- * Nearest a car may be created ahead of the player. 140 m was "behind a crest or a
- * bend", which on an open desert road is nothing: cars were watched appearing and
- * pulling away a few hundred metres up the road. With 800 m of guaranteed support
- * the band can start past where a car still reads as one.
- */
-const SPAWN_MIN_M = 500;
-/**
- * THE BAND ENDS WHERE THE GROUND DOES.
- *
- * A spawn needs a fixed collider under it (`spawnSiteClear` -> `hasSpawnGround`),
- * and the streamer only builds colliders within `PHYSICS_REACH_M`. The band used to
- * run to 700 m, so two sites in three passed selection, held the single `pending`
- * slot through a model load, and were then thrown away on arrival — measured at 207
- * of 300 attempts, a refill rate of 0.38 cars/s against the 2/s the cooldown allows.
- * The stream sagged to half its target after every density change for no other
- * reason. Sites are now drawn only where a car can actually stand.
- */
-const SPAWN_MAX_M = PHYSICS_REACH_M;
-/**
- * TRAFFIC ALSO COMES UP FROM BEHIND.
- *
- * Spawning only ahead makes the mirror a graveyard: the player overtakes nearly
- * everything (ambient caps are 42-105 km/h), and every overtaken car then holds a
- * slot out of sight until the rear despawn. A driver whose cap genuinely beats the
- * player's current speed is instead put behind, closes, and arrives in view — the
- * only way a car can populate the road AHEAD of the spawn band.
- */
-const REAR_SPAWN_MIN_M = 500;
-const REAR_SPAWN_MAX_M = 720;
 /** Speed advantage over the player that makes a rear spawn worth its slot. */
 const REAR_SPAWN_CLOSING_MPS = 2.5;
-/**
- * A frantic driver's rear band, closer than everyone else's. It is the car the player
- * is meant to meet coming up his mirror; started at the far edge of the rear band it
- * sits within a few seconds of the 800 m support edge, and any lag on the launch gets
- * it collected before it ever closes.
- */
-const FRANTIC_REAR_SPAWN_MIN_M = 450;
-const FRANTIC_REAR_SPAWN_MAX_M = 600;
 /**
  * Road the player may have covered between a spawn being chosen and its model
  * finishing loading. See `finishSpawn`.
@@ -96,22 +68,11 @@ const SPAWN_ARRIVAL_SLACK_M = 60;
 /** Extra room for numerical drift/acceleration beyond one step's measured travel. */
 const PHYSICS_EDGE_SLACK_M = 1;
 /**
- * NOTHING APPEARS OR DISAPPEARS WHERE IT CAN BE SEEN.
- *
- * A car is created no nearer than `SPAWN_MIN_M`, and the same distance is the nearest
- * one may be taken out by anything but the physics edge: a density trim, a recycled
- * receding car, a stuck car. Removals used to start 90 m (trim) and 200 m (recycle)
- * behind a moving player, on the theory that a car he had passed would not be looked
- * at again; on an open desert road a player who looked back watched the cars he had
- * just met blink out of the world. Moving or standing, he sees the same distance.
- */
-const UNSEEN_M = SPAWN_MIN_M;
-/**
  * THE BUDGET IS SPENT ON ROAD THE PLAYER CAN SEE.
  *
  * Every car he overtakes and every oncoming car he meets ends up behind him, and used
  * to hold its slot until it fell out of the support window — a minute for a car
- * overtaken at 25 km/h more — while the road ahead stayed empty. A car past `UNSEEN_M`
+ * overtaken at 25 km/h more — while the road ahead stayed empty. A car past `TRAFFIC_UNSEEN_M`
  * behind that is getting FARTHER away (oncoming, or same-direction and slower than him)
  * will never be seen again, so its slot is handed back to a spawn when the stream is
  * full.
@@ -241,7 +202,7 @@ const SPAWN_GROUND_PROBE_DEPTH_M = 4;
 const LIFETIME_SAMPLE_S = 0.5;
 /** Below this the car is standing, not crawling. */
 const STUCK_SPEED_KMH = 2;
-/** Seconds of standing still after which a car out of sight (`UNSEEN_M`) is recycled. */
+/** Seconds of standing still after which a car out of sight (`TRAFFIC_UNSEEN_M`) is recycled. */
 const STUCK_RECYCLE_S = 18;
 /** Metres below the road surface at which a car has fallen out of the world. */
 const FELL_OUT_M = 30;
@@ -314,25 +275,6 @@ const TRAFFIC_CONTROL_INTERVAL_S = 1 / 45;
  * a tenth of a second is not a staleness anybody can drive into.
  */
 const COORDINATION_INTERVAL_S = 0.1;
-/**
- * DISTANT TRAFFIC RIDES ON RAILS (see `Vehicle.enterRails`).
- *
- * Measured with 28 cars in the stream, a driven traffic car cost about 65 µs a step —
- * two thirds of it its driver's lane model and speed plan, the rest the ray-cast
- * suspension and the tyre model — and the stream was four fifths of the simulation
- * step. Past a few hundred metres none of that can be seen: at 300 m a car is six
- * pixels wide on a 1080-line screen and its springs move it by a tenth of one, and the
- * player is too far away to be part of anything its driver decides — the widest
- * window a driver reasons about him in is the 260 m opposing-pass exclusion. So a car
- * that is simply cruising in its lane more than `RAILS_SLEEP_M` of road from the
- * player is moved along that lane by a car-following law, and handed back to its
- * springs and its driver, at the speed it is doing, the moment it is nearer than
- * `RAILS_WAKE_M`. The gap between the two is hysteresis: a car pacing the player at
- * the boundary does not change hands every step. Measured on the same 28-car stream:
- * the traffic step fell from 1.87 ms to 0.97 ms.
- */
-const RAILS_WAKE_M = 300;
-const RAILS_SLEEP_M = 360;
 /**
  * How often a car on rails re-reads the road ahead, seconds. Anything only a driver can
  * deal with wakes it: the lane it holds ending, a prop in it, the turning circle, or
@@ -555,8 +497,8 @@ function franticEngine(bodyClass: BodyClass): string {
 /** Rear spawn band `[min, max]` in metres behind the player for a driver of this style. */
 function rearSpawnBand(style: TrafficDriverStyle): readonly [number, number] {
   return style === 'frantic'
-    ? [FRANTIC_REAR_SPAWN_MIN_M, FRANTIC_REAR_SPAWN_MAX_M]
-    : [REAR_SPAWN_MIN_M, REAR_SPAWN_MAX_M];
+    ? [TRAFFIC_FRANTIC_REAR_SPAWN_MIN_M, TRAFFIC_FRANTIC_REAR_SPAWN_MAX_M]
+    : [TRAFFIC_REAR_SPAWN_MIN_M, TRAFFIC_REAR_SPAWN_MAX_M];
 }
 
 interface PendingSpawn {
@@ -1236,7 +1178,7 @@ export class RoadTraffic {
       const velocity = car.vehicle.chassis.linvel();
       const half = car.halfExtents;
       const travelMargin = Math.hypot(velocity.x, velocity.z) * dt + this.playerStepTravel;
-      if (Math.abs(car.forwardS - playerS) + car.bodyRadius + travelMargin + PHYSICS_EDGE_SLACK_M >= PHYSICS_REACH_M) {
+      if (Math.abs(car.forwardS - playerS) + car.bodyRadius + travelMargin + PHYSICS_EDGE_SLACK_M >= TRAFFIC_REACH_M) {
         this.removeAt(i);
         continue;
       }
@@ -1313,7 +1255,7 @@ export class RoadTraffic {
           // Waiting out the dust is not stuck: the car is where its driver chose to be.
           !car.autopilot.sheltering &&
           car.stoppedFor > STUCK_RECYCLE_S &&
-          Math.abs(offset) > UNSEEN_M &&
+          Math.abs(offset) > TRAFFIC_UNSEEN_M &&
           car.settleFor <= 0
         ) {
           this.removeAt(i);
@@ -1772,7 +1714,7 @@ export class RoadTraffic {
   private finishSpawn(request: PendingSpawn): void {
     // THE PLAYER MOVES WHILE THE MODEL LOADS.
     //
-    // The site was picked at least `SPAWN_MIN_M` ahead, and this runs when
+    // The site was picked at least `TRAFFIC_UNSEEN_M` ahead, and this runs when
     // the car's model finishes loading — several ticks later, and a whole load if
     // that model has never been used this session. At 90 km/h the player covers 25
     // metres a second, so the band check failed by one or two metres and the spawn
@@ -1791,7 +1733,7 @@ export class RoadTraffic {
     const [rearMin, rearMax] = rearSpawnBand(request.style);
     const arrivalOk = request.rear
       ? -offset >= rearMin - SPAWN_ARRIVAL_SLACK_M && -offset <= rearMax
-      : offset >= SPAWN_MIN_M - SPAWN_ARRIVAL_SLACK_M && offset <= SPAWN_MAX_M;
+      : offset >= TRAFFIC_UNSEEN_M - SPAWN_ARRIVAL_SLACK_M && offset <= TRAFFIC_SPAWN_MAX_M;
     if (
       this.desiredCount === 0 ||
       this.ambientCount() >= this.desiredCount ||
@@ -1824,7 +1766,7 @@ export class RoadTraffic {
     ) {
       return null;
     }
-    if (Math.abs(offset) + bodyRadius + this.playerStepTravel + PHYSICS_EDGE_SLACK_M >= PHYSICS_REACH_M) return null;
+    if (Math.abs(offset) + bodyRadius + this.playerStepTravel + PHYSICS_EDGE_SLACK_M >= TRAFFIC_REACH_M) return null;
 
     const roadPoint = this.road.sampleAt(request.forwardS);
     const forwardLateral = this.forwardLaneCentreAt(
@@ -2140,14 +2082,14 @@ export class RoadTraffic {
       const behind = fromBehind && attempt < 6;
       const distance = behind
         ? -(rearMin + this.random() * (rearMax - rearMin))
-        // Skewed toward SPAWN_MAX_M: `sqrt(u)` for `u` uniform on [0,1] has CDF `x^2`,
+        // Skewed toward TRAFFIC_SPAWN_MAX_M: `sqrt(u)` for `u` uniform on [0,1] has CDF `x^2`,
         // so it under-samples near 0 and over-samples near 1. A flat draw put half its
         // mass inside the first 130 m of this 260 m band, so the median spawn sat
         // close enough that "a car appears" was a distinct, watched event rather than
-        // something resolving out of the fog. SPAWN_MAX_M is exactly PHYSICS_REACH_M,
+        // something resolving out of the fog. TRAFFIC_SPAWN_MAX_M is exactly TRAFFIC_REACH_M,
         // the edge of the road's guaranteed collision support, past which
         // `hasSpawnGround` has nothing to raycast against.
-        : SPAWN_MIN_M + Math.sqrt(this.random()) * (SPAWN_MAX_M - SPAWN_MIN_M);
+        : TRAFFIC_UNSEEN_M + Math.sqrt(this.random()) * (TRAFFIC_SPAWN_MAX_M - TRAFFIC_UNSEEN_M);
       const s = this.playerS + distance;
       if (s < END_MARGIN_M || s > this.road.length - END_MARGIN_M) continue;
       const lane = this.pickSpawnLane(s, style);
@@ -2387,7 +2329,7 @@ export class RoadTraffic {
       const t = i / (DENSITY_PROFILE_SAMPLES - 1);
       const s = Math.max(
         0,
-        Math.min(this.road.length, this.playerS + SPAWN_MIN_M + (SPAWN_MAX_M - SPAWN_MIN_M) * t),
+        Math.min(this.road.length, this.playerS + TRAFFIC_UNSEEN_M + (TRAFFIC_SPAWN_MAX_M - TRAFFIC_UNSEEN_M) * t),
       );
       wideness += widenessAt(this.sourceWorld.seed, s);
     }
@@ -2468,7 +2410,7 @@ export class RoadTraffic {
    */
   private pickTrimIndex(): number {
     let best = -1;
-    let bestBehind = UNSEEN_M;
+    let bestBehind = TRAFFIC_UNSEEN_M;
     for (let i = 0; i < this.carList.length; i++) {
       const car = this.carList[i]!;
       // A frantic driver behind is on its way to being seen: it was put there to come
@@ -2483,10 +2425,10 @@ export class RoadTraffic {
     return best;
   }
 
-  /** Farthest car past `UNSEEN_M` behind the player that is receding from him. */
+  /** Farthest car past `TRAFFIC_UNSEEN_M` behind the player that is receding from him. */
   private pickRecycleIndex(): number {
     let best = -1;
-    let bestBehind = UNSEEN_M;
+    let bestBehind = TRAFFIC_UNSEEN_M;
     for (let i = 0; i < this.carList.length; i++) {
       const car = this.carList[i]!;
       const behind = this.playerS - car.forwardS;

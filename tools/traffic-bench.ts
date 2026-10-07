@@ -14,7 +14,7 @@ import { RoadTraffic } from '../src/world/traffic';
 import { Terrain } from '../src/world/terrain';
 import { TERMINUS_CENTRE_M, TERMINUS_PAD_M } from '../src/world/terminus';
 import { widenessAt } from '../src/world/roadprofile';
-import { PHYSICS_REACH_M } from '../src/world/chunks';
+import { ROAD_PHYSICS_REACH_M } from '../src/world/ranges';
 import { installAssetShim } from './assetshim';
 import { installDocumentShim } from './domshim';
 
@@ -52,9 +52,9 @@ function check(label: string, ok: boolean, detail: string): void {
 
 /** Select a uniform density band, not just a narrow/wide point under the player. */
 function findUniformS(road: Road, wideness: 0 | 1): number {
-  for (let s = PLAYER_S; s < Math.min(road.length - PHYSICS_REACH_M, 400_000); s += 100) {
+  for (let s = PLAYER_S; s < Math.min(road.length - ROAD_PHYSICS_REACH_M, 400_000); s += 100) {
     let uniform = true;
-    for (let offset = 0; offset <= PHYSICS_REACH_M; offset += 10) {
+    for (let offset = 0; offset <= ROAD_PHYSICS_REACH_M; offset += 10) {
       if (widenessAt(SEED, s + offset) !== wideness) {
         uniform = false;
         break;
@@ -167,7 +167,7 @@ function sampleTrafficSupport(playerS: number): void {
     car.vehicle.absoluteTranslation(position);
     const s = road.project(position.x, position.z, car.forwardS).s;
     const half = carModelMeasure(car.modelId).halfExtents;
-    if (Math.abs(s - playerS) + Math.hypot(...half) >= PHYSICS_REACH_M) unsupportedSamples++;
+    if (Math.abs(s - playerS) + Math.hypot(...half) >= ROAD_PHYSICS_REACH_M) unsupportedSamples++;
     supportSamples++;
   }
 }

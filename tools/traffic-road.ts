@@ -59,7 +59,8 @@ import { TerrainMeshProvider } from '../src/world/terrainmesh';
 import { roadSurfaceY, SurfaceField } from '../src/world/roadsurface';
 import { ScatterProvider } from '../src/world/props/scatter';
 import { Terrain } from '../src/world/terrain';
-import { CHUNK_LENGTH, type ChunkContext } from '../src/world/chunks';
+import { type ChunkContext } from '../src/world/chunks';
+import { CHUNK_LENGTH } from '../src/world/ranges';
 import { installDocumentShim } from './domshim';
 import { PLAYER_FIELD_ID, RoadTraffic } from '../src/world/traffic';
 class BunProgressEvent extends Event implements ProgressEvent {

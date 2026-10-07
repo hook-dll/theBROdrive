@@ -23,7 +23,8 @@ import * as THREE from 'three';
 
 import { PhysicsWorld } from '../src/core/physics';
 import { GameWorld, newWorldState } from '../src/game/state';
-import { CHUNK_LENGTH, ChunkStreamer } from '../src/world/chunks';
+import { ChunkStreamer } from '../src/world/chunks';
+import { ROAD_PHYSICS_REACH_M } from '../src/world/ranges';
 import { DesertTileStreamer } from '../src/world/deserttiles';
 import { BoardableField, StartSiteProvider } from '../src/story/sitebuild';
 import { WorldOrigin } from '../src/world/origin';
@@ -41,8 +42,6 @@ import { installDocumentShim } from './domshim';
 const SEED = 1337;
 /** Far enough along that the drive is ordinary road rather than the homestead. */
 const START_S = 12_000;
-/** Chunks either side of the player carry colliders; see PHYSICS_RADIUS in chunks.ts. */
-const PHYSICS_REACH_M = 4 * CHUNK_LENGTH;
 const SAMPLE_STEP_M = 25;
 /** The production boot budget and its ceiling (see src/app/bootwarmup.ts BOOT_STREAM_*). */
 const BOOT_BUDGET_MS = 12;
@@ -98,7 +97,7 @@ streamer.register(new MonumentProvider());
 function unsupportedRoadSamples(): number {
   physics.step();
   let missing = 0;
-  for (let ds = -PHYSICS_REACH_M; ds <= PHYSICS_REACH_M; ds += SAMPLE_STEP_M) {
+  for (let ds = -ROAD_PHYSICS_REACH_M; ds <= ROAD_PHYSICS_REACH_M; ds += SAMPLE_STEP_M) {
     const point = road.sampleAt(START_S + ds);
     const hit = physics.raycast(
       { x: point.x - origin.x, y: point.y + 6, z: point.z - origin.z },

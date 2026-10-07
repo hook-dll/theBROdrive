@@ -30,7 +30,7 @@ import type { RoadConditionBuffer } from '../src/world/gradient';
 import { SURFACES, SurfaceType } from '../src/core/surfaces';
 import { surfacePaceFactor } from '../src/vehicle/autopilot';
 import { ROAD_LENGTH } from '../src/world/road';
-import { CHUNK_LENGTH } from '../src/world/chunks';
+import { CHUNK_LENGTH } from '../src/world/ranges';
 
 /** Metres between census samples. Fine enough to catch every surface flip. */
 const CENSUS_STEP_M = 100;

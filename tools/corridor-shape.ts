@@ -32,7 +32,7 @@
 import type { BufferGeometry } from 'three';
 import { SurfaceType } from '../src/core/surfaces';
 import type { ChunkContext } from '../src/world/chunks';
-import { CHUNK_LENGTH } from '../src/world/chunks';
+import { CHUNK_LENGTH } from '../src/world/ranges';
 import { CORRIDOR_KEEP_M, CORRIDOR_REACH_M } from '../src/world/corridorshape';
 import { varietyEventsBetween, type VarietyEvent, type VarietyKind } from '../src/world/director';
 import { Road } from '../src/world/road';

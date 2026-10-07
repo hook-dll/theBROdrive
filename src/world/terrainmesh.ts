@@ -14,7 +14,8 @@ import {
   DETAIL_REACH,
   type Terrain,
 } from './terrain';
-import { CHUNK_LENGTH, type ChunkContent, type ChunkContext, type ChunkProvider } from './chunks';
+import { type ChunkContent, type ChunkContext, type ChunkProvider } from './chunks';
+import { CHUNK_LENGTH } from './ranges';
 import { desertPaletteAt } from './gradient';
 import { DESERT_TILE_SIZE } from './deserttiledata';
 

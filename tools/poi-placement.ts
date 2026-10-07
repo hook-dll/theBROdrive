@@ -23,7 +23,8 @@
 
 import * as THREE from 'three';
 import { GameWorld, newWorldState } from '../src/game/state';
-import { CHUNK_LENGTH, type ChunkContext } from '../src/world/chunks';
+import { type ChunkContext } from '../src/world/chunks';
+import { CHUNK_LENGTH } from '../src/world/ranges';
 import { Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
 import { POI_SPACING, PoiProvider, desertPoiClearOfRoad, desertPoisBetween, poisBetween, type PoiStock } from '../src/world/poi';

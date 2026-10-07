@@ -26,7 +26,8 @@
 
 import type { BufferGeometry } from 'three';
 import { SURFACES, SurfaceType } from '../src/core/surfaces';
-import { CHUNK_LENGTH, type ChunkContext } from '../src/world/chunks';
+import { type ChunkContext } from '../src/world/chunks';
+import { CHUNK_LENGTH } from '../src/world/ranges';
 import { Road } from '../src/world/road';
 import { RoadDistance } from '../src/world/roaddistance';
 import { CORRIDOR_INNER, DETAIL_REACH, Terrain } from '../src/world/terrain';

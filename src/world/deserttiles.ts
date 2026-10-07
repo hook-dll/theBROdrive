@@ -38,6 +38,7 @@ import {
   DESERT_TILE_MATERIAL,
   TERRAIN_COLLIDER_SURFACE,
 } from './terrainmesh';
+import { DESERT_PHYSICS_TILES, DESERT_VISUAL_TILES } from './ranges';
 
 /**
  * Player-centred open desert.
@@ -45,7 +46,7 @@ import {
  * Unlike road chunks, tiles are keyed only by absolute X/Z. Their geometry is therefore
  * a pure function of (seed, tileX, tileZ), may be discarded at any time, and rebuilds
  * identically when the player returns. The theoretical size of the desert never enters
- * the memory or draw budget: five by five tiles, visual and physical, are the complete
+ * the memory or draw budget: the squares in world/ranges.ts (5x5, all solid) are the complete
  * live set.
  *
  * Invariants:
@@ -60,17 +61,6 @@ import {
 
 export { DESERT_TILE_CELLS, DESERT_TILE_SIZE } from './deserttiledata';
 
-const VISUAL_RADIUS = 2;
-/**
- * Every visual tile is solid. Traffic is live out to `PHYSICS_REACH_M` (800 m) of
- * road, and with one physical ring the ground beside the road ended 360-600 m from
- * the player: measured at 30.6 km, every car that touched the verge further out than
- * that dropped off the end of the world and fell for good — the cars seen "flying"
- * off the road past a bend. Two rings put solid desert under the verge to 480 m at
- * the least; past that the road chunks' own verge skirt (`SKIRT_ACROSS_M` in
- * world/roadmesh.ts) carries it to the end of road physics.
- */
-const PHYSICS_RADIUS = 2;
 /** Past this player-to-road distance no live tile can intersect the corridor. */
 const ROAD_QUERY_CUTOFF = 900;
 const PROP_TAG = 0x44535254;
@@ -289,8 +279,8 @@ export class DesertTileStreamer {
       this.farFromRoad = nextFarFromRoad;
       this.invalidateGenerationMode(centreTx, centreTz);
     }
-    for (let dz = -PHYSICS_RADIUS; dz <= PHYSICS_RADIUS; dz++) {
-      for (let dx = -PHYSICS_RADIUS; dx <= PHYSICS_RADIUS; dx++) {
+    for (let dz = -DESERT_PHYSICS_TILES; dz <= DESERT_PHYSICS_TILES; dz++) {
+      for (let dx = -DESERT_PHYSICS_TILES; dx <= DESERT_PHYSICS_TILES; dx++) {
         this.buildSynchronously(centreTx + dx, centreTz + dz, true);
       }
     }
@@ -300,7 +290,7 @@ export class DesertTileStreamer {
   }
 
   /**
-   * Keeps the physical three-by-three square complete immediately, while visual data
+   * Keeps the physical square (`DESERT_PHYSICS_TILES`) complete immediately, while visual data
    * and non-current physics are attached only from staged worker results.
    */
   update(x: number, z: number, roadLateral: number, frameId: number): void {
@@ -332,10 +322,10 @@ export class DesertTileStreamer {
     for (const [key, tile] of this.tiles) {
       const dx = Math.abs(tile.tx - centreTx);
       const dz = Math.abs(tile.tz - centreTz);
-      if (dx > VISUAL_RADIUS || dz > VISUAL_RADIUS) {
+      if (dx > DESERT_VISUAL_TILES || dz > DESERT_VISUAL_TILES) {
         this.teardown(tile);
         this.tiles.delete(key);
-      } else if (tile.hasPhysics && (dx > PHYSICS_RADIUS || dz > PHYSICS_RADIUS)) {
+      } else if (tile.hasPhysics && (dx > DESERT_PHYSICS_TILES || dz > DESERT_PHYSICS_TILES)) {
         this.demote(tile);
       }
     }
@@ -685,7 +675,7 @@ export class DesertTileStreamer {
       if (tile.farFromRoad === desired) continue;
       const dx = Math.abs(tile.tx - centreTx);
       const dz = Math.abs(tile.tz - centreTz);
-      if (dx > VISUAL_RADIUS || dz > VISUAL_RADIUS) continue;
+      if (dx > DESERT_VISUAL_TILES || dz > DESERT_VISUAL_TILES) continue;
       this.teardown(tile);
       this.tiles.delete(key);
     }
@@ -759,9 +749,9 @@ export class DesertTileStreamer {
 
   private buildWantedSet(centreTx: number, centreTz: number, dirX: number, dirZ: number): void {
     this.wanted.clear();
-    for (let dz = -VISUAL_RADIUS; dz <= VISUAL_RADIUS; dz++) {
-      for (let dx = -VISUAL_RADIUS; dx <= VISUAL_RADIUS; dx++) {
-        const physics = Math.abs(dx) <= PHYSICS_RADIUS && Math.abs(dz) <= PHYSICS_RADIUS;
+    for (let dz = -DESERT_VISUAL_TILES; dz <= DESERT_VISUAL_TILES; dz++) {
+      for (let dx = -DESERT_VISUAL_TILES; dx <= DESERT_VISUAL_TILES; dx++) {
+        const physics = Math.abs(dx) <= DESERT_PHYSICS_TILES && Math.abs(dz) <= DESERT_PHYSICS_TILES;
         const ahead = dx * dirX + dz * dirZ;
         this.addWanted(
           centreTx + dx,
@@ -777,9 +767,9 @@ export class DesertTileStreamer {
     // still selects only its dominant cardinal component, so prefetch remains bounded.
     if (Math.abs(dirX) >= Math.abs(dirZ) && Math.abs(dirX) > 1e-6) {
       const step = dirX < 0 ? -1 : 1;
-      for (let dz = -VISUAL_RADIUS; dz <= VISUAL_RADIUS; dz++) {
+      for (let dz = -DESERT_VISUAL_TILES; dz <= DESERT_VISUAL_TILES; dz++) {
         this.addWanted(
-          centreTx + step * (VISUAL_RADIUS + 1),
+          centreTx + step * (DESERT_VISUAL_TILES + 1),
           centreTz + dz,
           false,
           false,
@@ -788,10 +778,10 @@ export class DesertTileStreamer {
       }
     } else if (Math.abs(dirZ) > 1e-6) {
       const step = dirZ < 0 ? -1 : 1;
-      for (let dx = -VISUAL_RADIUS; dx <= VISUAL_RADIUS; dx++) {
+      for (let dx = -DESERT_VISUAL_TILES; dx <= DESERT_VISUAL_TILES; dx++) {
         this.addWanted(
           centreTx + dx,
-          centreTz + step * (VISUAL_RADIUS + 1),
+          centreTz + step * (DESERT_VISUAL_TILES + 1),
           false,
           false,
           -50 + dx * dx,

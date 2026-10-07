@@ -7,7 +7,7 @@
  * how many of each form, where they sit laterally, how many triangles they add per
  * chunk and across the streamer's whole visual window, and how many static colliders
  * that window carries (on the road every streamed chunk is physical; see
- * PHYSICS_RADIUS in chunks.ts). Physics is captured rather than simulated, so this runs in
+ * ROAD_PHYSICS_CHUNKS in ranges.ts). Physics is captured rather than simulated, so this runs in
  * Node with no wasm.
  *
  *   npx tsx tools/scatter-census.ts
@@ -20,7 +20,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { PhysicsWorld } from '../src/core/physics';
 import { SurfaceType } from '../src/core/surfaces';
 import type { ChunkContext } from '../src/world/chunks';
-import { CHUNK_LENGTH } from '../src/world/chunks';
+import { CHUNK_LENGTH } from '../src/world/ranges';
 import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
 import { ScatterProvider } from '../src/world/props/scatter';

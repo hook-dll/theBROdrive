@@ -433,7 +433,7 @@ function smoothstep(lo: number, hi: number, v: number): number {
  *
  * Solid ground beside the road used to be the desert streamer's business alone, and
  * its physical tiles end 480-720 m from the player while road chunks — and the traffic
- * on them — carry physics to `PHYSICS_REACH_M` (800 m). In between, a car that put a
+ * on them — carry physics to `ROAD_PHYSICS_REACH_M` (world/ranges.ts) (800 m). In between, a car that put a
  * wheel a metre past the shoulder fell off the world, hung nose-down on the shoulder's
  * edge and was found standing on end with the desert built through it. The skirt makes
  * "ground beside the road" part of the road chunk, so it exists exactly as far as the

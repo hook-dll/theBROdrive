@@ -38,7 +38,8 @@ import type RAPIER from '@dimforge/rapier3d-compat';
 
 import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
 import type { GameWorld } from '../src/game/state';
-import { CHUNK_LENGTH, type ChunkContent, type ChunkContext } from '../src/world/chunks';
+import { type ChunkContent, type ChunkContext } from '../src/world/chunks';
+import { CHUNK_LENGTH } from '../src/world/ranges';
 import { DebrisField } from '../src/world/debris';
 import { WorldOrigin } from '../src/world/origin';
 import { varietyEventOfKindAt, varietyEventsBetween } from '../src/world/director';
@@ -430,7 +431,7 @@ console.log('\n=== a post is solid, and it comes apart ===\n');
 
   // The tool's own context helper, with a physics world behind it. `hasPhysics` is
   // true for a band of chunks around the run and false outside it, which is what the
-  // streamer does (PHYSICS_RADIUS), so the two cases are measured against each other
+  // streamer does (ROAD_PHYSICS_CHUNKS), so the two cases are measured against each other
   // rather than against a constant typed twice.
   const physicsContext = (chunkIndex: number, hasPhysics: boolean): ChunkContext =>
     ({
