@@ -616,8 +616,8 @@ export class Interaction {
 
   /**
    * STICKER MODE: an envelope in hand is the editing tool. Aimed at a car's paint or
-   * glass, the sticker is printed there live, see-through, exactly as it will be —
-   * trimmed by the shader to the panels that can carry it, on top of every sticker
+   * glass, the sticker is shown there live, see-through, exactly as it will be —
+   * a decal clipped to the panels that can carry it, on top of every sticker
    * already there — and follows the crosshair. The wheel turns it, Shift+wheel sizes
    * it, E mirrors it, right click puts it back upright at catalogue size, F or click
    * sticks it. Returns null when the crosshair is not on a car, so the rest of the
@@ -1180,8 +1180,8 @@ export class Interaction {
       this.hits.length = 0;
       return {
         distance,
-        // Any aimed point on paint or glass is valid: the print is trimmed to what can
-        // carry it by the paint shader, so nothing overhangs an edge.
+        // Any aimed point on paint or glass is valid: the decal is clipped to what can
+        // carry it (render/stickerdecals.ts), so nothing overhangs an edge.
         valid: true,
         local: { point: this.stickerPoint, normal: this.stickerNormal },
       };

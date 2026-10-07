@@ -972,10 +972,11 @@ vDecal = aDecal;`;
 /**
  * Reads the sticker atlas un-premultiplied, so the material can blend it the ordinary
  * way: three premultiplies a texture on upload (`stickerart.ts`), and the standard
- * alpha blend would then multiply the ink by its own alpha a second time.
+ * alpha blend would then multiply the ink by its own alpha a second time. This
+ * REPLACES the stock `map_fragment`: kept in front of it, the atlas was applied twice
+ * (ink squared, edges thinned to alpha squared).
  */
-const STICKER_DECAL_MAP = `#include <map_fragment>
-#ifdef USE_MAP
+const STICKER_DECAL_MAP = `#ifdef USE_MAP
 vec4 stickerInk = texture2D( map, vMapUv );
 diffuseColor *= vec4( stickerInk.rgb / max( stickerInk.a, 1e-4 ), stickerInk.a );
 #endif`;

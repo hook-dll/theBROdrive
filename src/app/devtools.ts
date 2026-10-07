@@ -46,6 +46,7 @@ import type { DevSpawnItemRequest } from '../ui/menu';
 import type { Autopilot } from '../vehicle/autopilot';
 import type { ChunkStreamer } from '../world/chunks';
 import type { CourierField } from '../world/couriers';
+import type { DancerField } from '../world/props/airdancer';
 import type { DebrisField } from '../world/debris';
 import type { DesertTileStreamer } from '../world/deserttiles';
 import type { WorldOrigin } from '../world/origin';
@@ -93,6 +94,7 @@ export interface DevToolsContext {
   readonly loose: LoosePartField;
   readonly debris: DebrisField;
   readonly couriers: CourierField;
+  readonly dancers: DancerField;
   readonly sky: Sky;
   readonly trailers: TrailerField;
   readonly road: Road;
@@ -559,6 +561,7 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     loose: ctx.loose,
     debris: ctx.debris,
     couriers: ctx.couriers,
+    dancers: ctx.dancers,
     sky: ctx.sky,
     trailers: ctx.trailers,
     road: ctx.road,

@@ -11,9 +11,9 @@ import { maxAnisotropy } from './texturequality';
  * rim runs round the shape, which is what makes a sticker read as a sticker on any
  * paint. The few printed on clear film (bullet holes, TURBO, the chevrons) have none.
  *
- * The atlas is stored premultiplied: the paint shader (materials.ts, CAR_STICKERS)
- * blends `paint * (1 - a) + rgb`, so the transparent border of every design filters
- * to nothing instead of to a dark fringe.
+ * The atlas is stored premultiplied, so the transparent border of every design
+ * filters to nothing instead of to a dark fringe; the decal material
+ * (materials.ts, STICKER_DECAL_MAP) un-premultiplies it before the ordinary blend.
  */
 
 /** Print resolution, pixels per metre of sticker: ~0.75 mm a pixel. */

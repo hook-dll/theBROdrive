@@ -4,6 +4,23 @@
 
 ### Added
 
+- CACTUS AIR DANCERS BESIDE EVERY COURIER (`world/props/airdancer.ts`). Each parked
+  contract car now advertises itself with a 4.4 m inflatable on a blower box: a green
+  cactus-shaped tube with two arms and a face, standing a couple of metres off the car's
+  flank on the POI side and turned to the road. It behaves like one — a whip travels up
+  a chain of eleven body bones plus two 2-bone arms, the weather's own wind leans it,
+  and every few seconds it CHOKES: the airflow cuts, the tube buckles at a seeded
+  height, folds over toward the ground, writhes there, then re-inflates and snaps back
+  up with the overshoot a real blower gives. Phase, choke clock, buckle height and fold
+  direction all come from the courier's appearance seed, so no two pump in step. One
+  mesh per dancer (578 verts, skinned to 15 bones, one program), built into the courier's
+  chunk group and forgotten with it; a hidden anchor rig in the scene compiles the
+  skinned program during the boot warm-up, so a courier arriving in view links nothing
+  (measured: every program that arrived with the first courier belonged to its car
+  model — the dancer's program was already in `renderer.info.programs` when the loading
+  cover lifted). Animating one costs 3.9 µs of `update` plus 0.6 µs of skeleton per
+  frame; past 700 m it is left standing but not simulated.
+
 - STICKERS ARE DECAL GEOMETRY NOW, AND A CAR CAN CARRY HUNDREDS. They used to be
   printed inside the paint and glass shaders out of a fixed 24-slot uniform array, so a
   car with more kept the extras in its save and never drew them. Each sticker is

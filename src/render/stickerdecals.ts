@@ -81,10 +81,11 @@ export interface StickerDecalSurface {
   readonly accepts: (slot: number, triangle: number) => boolean;
 }
 
+/** Decal meshes are drawn, never picked; see `CarStickerDecals`. */
+function noRaycast(): void {}
+
 /** The sticker's frame in chassis metres, plus where its design sits in the atlas. */
 const _stickerQ = new THREE.Quaternion();
-const _stickerN = new THREE.Vector3();
-const _stickerT = new THREE.Vector3();
 const STICKER_FORWARD = new THREE.Vector3(0, 0, 1);
 /** The sticker's normal, tangent and bitangent: its frame, reused for a whole sticker. */
 const _n = new THREE.Vector3();
@@ -130,13 +131,14 @@ class StickerDecalSource {
   private readonly visited: Int32Array;
   private query = 0;
 
-  constructor(body: THREE.Object3D, surfaces: readonly StickerDecalSurface[]) {
+  constructor(body: THREE.Object3D, toBody: THREE.Matrix4, surfaces: readonly StickerDecalSurface[]) {
     // The decal mesh is a child of the body node, and `carBodyPos` is the chassis frame
     // the body's own fit transform maps into: the decal geometry is built in the body's
     // local frame, so it follows the body (and the suspension squash) like the paint.
-    body.updateMatrix();
-    this.toBody = body.matrix.clone().invert();
-    const collected = collectTriangles(surfaces, this.toBody);
+    // `toBody` is the REST inverse, captured when the car was cloned: read live, it
+    // carried whatever bouncy-car squash the body had at the first sticker.
+    this.toBody = toBody;
+    const collected = collectTriangles(surfaces, body);
     this.corners = collected.corners;
     this.normals = collected.normals;
     this.triangles = this.corners.length / 9;
@@ -242,7 +244,7 @@ class StickerDecalSource {
  * frame, so the source needs no matrix maths at all. The stamp covers exactly the
  * meshes the sticker rule accepts, so a mesh without it is not a sticker surface.
  */
-function collectTriangles(surfaces: readonly StickerDecalSurface[], toBody: THREE.Matrix4): {
+function collectTriangles(surfaces: readonly StickerDecalSurface[], body: THREE.Object3D): {
   corners: Float32Array;
   normals: Float32Array;
   min: THREE.Vector3;
@@ -250,6 +252,11 @@ function collectTriangles(surfaces: readonly StickerDecalSurface[], toBody: THRE
 } {
   const taken: { bodyPos: THREE.BufferAttribute; normal: THREE.BufferAttribute | null; index: THREE.BufferAttribute | null; triangles: Int32Array; used: number; toBodyNormal: THREE.Matrix3 | null }[] = [];
   let total = 0;
+  // Normals go from each mesh's own frame into the body's, a RELATIVE transform: the
+  // car's world pose cancels out of it, so a car that gets its first sticker facing
+  // anywhere is lit right (it used to bake in the yaw it had at that moment).
+  body.updateWorldMatrix(true, true);
+  const bodyInverse = body.matrixWorld.clone().invert();
   for (const { mesh, accepts } of surfaces) {
     const geometry = mesh.geometry;
     const position = geometry.getAttribute('position');
@@ -269,7 +276,7 @@ function collectTriangles(surfaces: readonly StickerDecalSurface[], toBody: THRE
     // transform its positions take, which is the mesh's chassis frame then the body's.
     const toBodyNormal = normal
       ? new THREE.Matrix3()
-          .setFromMatrix4(new THREE.Matrix4().multiplyMatrices(toBody, mesh.matrixWorld))
+          .setFromMatrix4(new THREE.Matrix4().multiplyMatrices(bodyInverse, mesh.matrixWorld))
           .invert()
           .transpose()
       : null;
@@ -499,17 +506,30 @@ export class CarStickerDecals {
   private placedStickers: readonly StickerState[] | null = null;
   /** The rebuild in flight: which list, and how far through it this frame got. */
   private build: { readonly stickers: readonly StickerState[]; next: number } | null = null;
+  /** A slice is already booked for the next frame; a restart must not book a second. */
+  private buildScheduled = false;
   /** rAF target for the next slice of a rebuild; one function, made once. */
-  private readonly continueBuild = (): void => this.advance();
+  private readonly continueBuild = (): void => {
+    this.buildScheduled = false;
+    this.advance();
+  };
+  /** Chassis into the body node's REST frame, taken before anything animates the body. */
+  private readonly restToBody: THREE.Matrix4;
 
   constructor(
     private readonly body: THREE.Object3D,
     private readonly surfaces: readonly StickerDecalSurface[],
     frame: CarGrimeFrame | null,
   ) {
+    body.updateMatrix();
+    this.restToBody = body.matrix.clone().invert();
     this.material = makeCarStickerMaterial(frame);
     this.previewMaterial = makeCarStickerMaterial(frame, STICKER_PREVIEW_ALPHA);
     this.placedMesh = new THREE.Mesh(this.placed.geometry, this.material);
+    // Decals are not a surface to aim at: the placement ray takes the nearest face, and
+    // a decal (or the hidden preview's stale geometry) has no sticker rule, so it used
+    // to refuse the paint right under it and make the try-on flicker out.
+    this.placedMesh.raycast = noRaycast;
     this.placedMesh.name = 'stickers';
     this.placedMesh.visible = false;
     this.placedMesh.castShadow = false;
@@ -522,6 +542,7 @@ export class CarStickerDecals {
     this.previewMesh.castShadow = false;
     this.previewMesh.receiveShadow = false;
     this.previewMesh.renderOrder = 1;
+    this.previewMesh.raycast = noRaycast;
     body.add(this.placedMesh, this.previewMesh);
   }
 
@@ -535,14 +556,27 @@ export class CarStickerDecals {
    */
   setStickers(stickers: readonly StickerState[], preview: StickerState | null = null): void {
     if (stickers !== this.placedStickers || stickers.length !== this.placedLength) {
+      // The list is append-only in play: a sticker added to the same array extends the
+      // build from where it stood instead of blanking every placed one to start over.
+      const builtUpTo = this.placedLength;
+      const appended = stickers === this.placedStickers && stickers.length > builtUpTo
+        && (this.build === null || this.build.stickers === stickers);
       this.placedStickers = stickers;
       this.placedLength = stickers.length;
-      this.source ??= new StickerDecalSource(this.body, this.surfaces);
-      this.placed.reset();
-      this.build = { stickers, next: 0 };
-      this.advance();
+      this.source ??= this.makeSource();
+      if (!appended) {
+        this.placed.reset();
+        this.build = { stickers, next: 0 };
+      } else {
+        // A build in flight on this list just runs on to the new length.
+        this.build ??= { stickers, next: builtUpTo };
+      }
+      if (!this.buildScheduled) this.advance();
     }
     if (!preview) {
+      // Forget the pose too, or the same sticker coming back at the same aim would be
+      // judged unchanged and stay hidden.
+      this.lastPreview.kind = '';
       if (this.previewMesh.visible) {
         this.preview.reset();
         this.preview.commit(this.previewMesh);
@@ -550,10 +584,14 @@ export class CarStickerDecals {
       return;
     }
     if (!this.poseChanged(preview)) return;
-    this.source ??= new StickerDecalSource(this.body, this.surfaces);
+    this.source ??= this.makeSource();
     this.preview.reset();
     this.project(preview, this.preview);
     this.preview.commit(this.previewMesh);
+  }
+
+  private makeSource(): StickerDecalSource {
+    return new StickerDecalSource(this.body, this.restToBody, this.surfaces);
   }
 
   /**
@@ -575,6 +613,7 @@ export class CarStickerDecals {
     build.next = next;
     this.placed.commit(this.placedMesh);
     if (next < build.stickers.length) {
+      this.buildScheduled = true;
       requestAnimationFrame(this.continueBuild);
       return;
     }

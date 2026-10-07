@@ -1175,8 +1175,8 @@ async function boot(): Promise<void> {
       vehicles.get(carId)?.refreshStickers();
     },
     (carId, sticker) => {
-      // The preview is printed by the car's own paint shader, trimmed and layered
-      // exactly as the placed sticker will be (render/materials.ts CAR_STICKERS).
+      // The preview is a decal projected and trimmed exactly as the placed sticker
+      // will be (render/stickerdecals.ts).
       if (stickerPreviewCarId && stickerPreviewCarId !== carId) {
         vehicles.get(stickerPreviewCarId)?.previewSticker(null);
       }

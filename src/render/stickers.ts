@@ -3,9 +3,9 @@ import * as THREE from 'three';
 /**
  * Sticker placement helpers.
  *
- * Stickers are not meshes: placed ones and the one being tried on are both printed
- * into the car's paint and glass shaders (materials.ts CAR_STICKERS), under scratches
- * and dust, trimmed to the parts that can carry them. What is left here is the
+ * Placed stickers and the one being tried on are projected decal geometry
+ * (render/stickerdecals.ts), worn by the same dirt and scratches as the panel under
+ * them and trimmed to the parts that can carry them. What is left here is the
  * orientation a new sticker starts in.
  */
 

@@ -56,6 +56,12 @@ import {
   type CourierStop,
 } from './couriers';
 import { fitGround, type GroundPlane } from './footprint';
+import {
+  DANCER_ALONG_M,
+  DANCER_OUT_M,
+  DancerField,
+  type DancerHandle,
+} from './props/airdancer';
 import { halfWidthAt } from './roadprofile';
 import { BASIN_OUTER_M, lakeSites, type LakeSite } from './lakes';
 import type { RoadDistance } from './roaddistance';
@@ -1128,6 +1134,8 @@ function buildCourier(
   colliders: RAPIER.Collider[],
   courierField: CourierField,
   registeredCouriers: string[],
+  dancers: DancerField,
+  registeredDancers: DancerHandle[],
   deferredVisuals: Array<() => void>,
 ): void {
   const def = pick(COURIER_MODELS, stop.appearanceSeed);
@@ -1201,7 +1209,46 @@ function buildCourier(
     ),
   });
   registeredCouriers.push(id);
+
+  // The air dancer advertising the stop. It stands on the POI side of the car, a
+  // couple of metres off its flank so it is visible from the lane and never in it,
+  // and is turned to face the road. Its ground is the LOWEST of the blower's own
+  // footprint, so no corner of the box floats on ground that is only nearly flat.
+  const side = stop.lateral < 0 ? -1 : 1;
+  const dancerS = stop.s + DANCER_ALONG_M;
+  const dancerPoint = ctx.road.offsetPoint(dancerS, stop.lateral + side * DANCER_OUT_M);
+  let dancerY = ctx.terrain.heightAt(dancerPoint.x, dancerPoint.z, dancerS);
+  for (const corner of DANCER_FOOTPRINT_CORNERS) {
+    const h = ctx.terrain.heightAt(
+      dancerPoint.x + corner[0],
+      dancerPoint.z + corner[1],
+      dancerS,
+    );
+    if (h < dancerY) dancerY = h;
+  }
+  const roadCentre = ctx.road.offsetPoint(dancerS, 0);
+  registeredDancers.push(
+    dancers.spawn(group, {
+      x: dancerPoint.x,
+      y: dancerY - DANCER_SINK_M,
+      z: dancerPoint.z,
+      yaw: Math.atan2(roadCentre.x - dancerPoint.x, roadCentre.z - dancerPoint.z),
+      seed: stop.appearanceSeed,
+      originX: ctx.originX,
+      originZ: ctx.originZ,
+    }),
+  );
 }
+
+/** Blower-box corners, metres from its centre, the dancer is planted on. */
+const DANCER_FOOTPRINT_CORNERS: readonly (readonly [number, number])[] = [
+  [-0.4, -0.4],
+  [0.4, -0.4],
+  [-0.4, 0.4],
+  [0.4, 0.4],
+];
+/** Sunk this far under that lowest corner, so the seam never shows air. */
+const DANCER_SINK_M = 0.03;
 /**
  * Fraction of roadside wreck fields containing one working car. The roll is per
  * field, not per shell: most stops are wrecks only, while roughly one in three has
@@ -1752,6 +1799,7 @@ export class PoiProvider implements ChunkProvider {
     private readonly wreckTrunks: WreckTrunkField,
     private readonly couriers: CourierField,
     private readonly roadDistance: RoadDistance,
+    private readonly dancers: DancerField,
   ) {}
 
   build(ctx: ChunkContext): ChunkContent | null {
@@ -1770,6 +1818,7 @@ export class PoiProvider implements ChunkProvider {
     const deferredVisuals: Array<() => void> = [];
     const registeredWrecks: string[] = [];
     const registeredCouriers: string[] = [];
+    const registeredDancers: DancerHandle[] = [];
 
     for (const poi of [...pois, ...desert]) {
       buildPoi(
@@ -1799,6 +1848,8 @@ export class PoiProvider implements ChunkProvider {
         colliders,
         this.couriers,
         registeredCouriers,
+        this.dancers,
+        registeredDancers,
         deferredVisuals,
       );
     }
@@ -1810,6 +1861,7 @@ export class PoiProvider implements ChunkProvider {
       dispose: () => {
         this.wreckTrunks.forget(registeredWrecks);
         this.couriers.forget(registeredCouriers);
+        this.dancers.forget(registeredDancers);
         for (const cancel of deferredVisuals) cancel();
       },
     };

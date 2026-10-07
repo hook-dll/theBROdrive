@@ -263,8 +263,11 @@ function buildScrub(): THREE.BufferGeometry {
  * vertex-coloured geometry, because the renderer writes the working colour space
  * straight to the canvas (see the two-pass note in `core/renderer.ts`). Authored any
  * other way a tree comes out a gamma darker than the props standing beside it.
+ *
+ * Shared with the courier air dancers (props/airdancer.ts), whose blower, tube and
+ * face are three display colours on one skinned material.
  */
-function paint(geometry: THREE.BufferGeometry, hex: number): THREE.BufferGeometry {
+export function paint(geometry: THREE.BufferGeometry, hex: number): THREE.BufferGeometry {
   const colour = new THREE.Color().setHex(hex, THREE.LinearSRGBColorSpace);
   const count = geometry.getAttribute('position').count;
   const colours = new Float32Array(count * 3);
