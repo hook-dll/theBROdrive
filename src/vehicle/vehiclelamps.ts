@@ -293,6 +293,11 @@ export class VehicleLamps {
     return this.indicatorSide;
   }
 
+  /** Whether the indicator lamps are lit at this instant of their blink. */
+  get blinkerLit(): boolean {
+    return this.indicatorLit;
+  }
+
   setEnvironmentFactor(factor: number): void {
     const next = clamp(factor, 0, 1);
     if (next === this.headlightEnvironmentFactor) return;

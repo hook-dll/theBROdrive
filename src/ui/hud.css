@@ -15,6 +15,11 @@
   --hud-alarm-strong: #d4552f;
   /* Amber: the check-engine lamp and the touch controls' accents. */
   --hud-amber: #c9a227;
+  /* Telltales by convention: parking brake red, indicators and dipped beam green, main
+     beam blue. The rust alarm stays for faults; a parked car is not a fault. */
+  --hud-red: #ff3b2f;
+  --hud-telltale-green: #4fd86a;
+  --hud-telltale-blue: #4b8dff;
   --hud-lcd-off: rgba(224, 122, 74, 0.1);
   /* INSTRUMENT FACES, as properties rather than fills, because the autopilot paints
      them: black is the player's own car and a coloured face is a car driving itself.
@@ -531,6 +536,96 @@ body.is-cinematic #ui {
   font-variant-numeric: tabular-nums;
 }
 
+.hud-gear.is-parked {
+  color: var(--hud-red);
+  text-shadow: 0 0 6px color-mix(in srgb, var(--hud-red) 70%, transparent);
+}
+
+/* The telltale row under the steering strip: arrows at its ends, beams in the middle. */
+.hud-telltale-row {
+  display: flex;
+  width: 100%;
+  margin-top: 2px;
+  padding: 0 34px;
+  box-sizing: border-box;
+  justify-content: space-between;
+}
+
+.hud-telltale-beams {
+  display: flex;
+  gap: 4px;
+}
+
+.hud-turn {
+  color: var(--hud-telltale-green);
+}
+
+.hud-turn.is-active path {
+  fill: currentColor;
+}
+
+.hud-dipped-beam {
+  color: var(--hud-telltale-green);
+}
+
+.hud-main-beam {
+  color: var(--hud-telltale-blue);
+}
+
+.hud-turn.is-active,
+.hud-dipped-beam.is-active {
+  background: rgba(22, 74, 34, 0.78);
+}
+
+.hud-main-beam.is-active {
+  background: rgba(20, 42, 104, 0.8);
+}
+
+/* The insets in the main dials' lower wedge: inclinometer (tachometer) and wind
+   (speedometer). Drawn in the dial's own ink so the autopilot faces carry them too. */
+.hud-inset-ring {
+  fill: none;
+  stroke: var(--hud-dial-ink);
+  stroke-width: 0.7;
+  opacity: 0.6;
+}
+
+.hud-inset-tick {
+  stroke: var(--hud-dial-ink);
+  stroke-width: 0.8;
+}
+
+.hud-inset-tick.is-level {
+  stroke: var(--hud-dial-ink-strong);
+  stroke-width: 1.2;
+}
+
+.hud-inset-car {
+  fill: var(--hud-dial-needle);
+}
+
+.hud-wind-arrow line {
+  stroke: var(--hud-dial-needle);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.hud-wind-arrow path {
+  fill: var(--hud-dial-needle);
+}
+
+.hud-wind-arrow.is-calm {
+  opacity: 0;
+}
+
+.hud-wind-arrow.is-strong line {
+  stroke: var(--hud-alarm-strong);
+}
+
+.hud-wind-arrow.is-strong path {
+  fill: var(--hud-alarm-strong);
+}
+
 /*
  * Tyre temperature: two dots each side of the gear digit, front on top. The left
  * column is the left of the car, so the digit reads as the car itself. Deliberately
@@ -555,15 +650,15 @@ body.is-cinematic #ui {
 }
 
 .hud-handbrake {
-  color: var(--hud-alarm);
+  color: var(--hud-red);
   font-size: 15px;
   opacity: 0.16;
 }
 
 .hud-handbrake.is-active {
   opacity: 1;
-  background: rgba(106, 32, 22, 0.72);
-  text-shadow: 0 0 6px color-mix(in srgb, var(--hud-alarm) 75%, transparent);
+  background: rgba(120, 14, 10, 0.78);
+  text-shadow: 0 0 6px color-mix(in srgb, var(--hud-red) 75%, transparent);
 }
 
 .hud-fuel.is-alarm .hud-aux-needle,

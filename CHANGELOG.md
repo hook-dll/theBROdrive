@@ -4,6 +4,14 @@
 
 ### Added
 
+- DASHBOARD TELLTALES AND INSETS (`ui/hud.ts`). A row under the steering strip carries
+  the green indicator arrows (blinking in phase with the car's own lamps), the green
+  dipped-beam and blue main-beam lamps; the headlight toasts are gone, the dash is the
+  only report. The parking brake's P is red, and with the brake on the gear cell reads
+  P. The tachometer's lower wedge holds an inclinometer (side-view car, grade from the
+  wheels' contact normals, ×3, ticks at ±10%); the speedometer's holds a wind gauge (the
+  wind at the car in its own frame, gusts included, alarm-coloured from 10 m/s).
+- HIGH TRAFFIC is 24/48 cars (two-lane/four-lane), was 20/40.
 - XBOX CONTROLLER (`core/gamepad.ts`, see `CONTROLS.md`). Left stick steers as a
   position, RT/LT are analog throttle and brake, every driving and on-foot action has a
   button, the right stick looks. Menus, pause and settings work from the pad. The last

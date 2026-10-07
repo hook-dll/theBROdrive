@@ -1424,6 +1424,42 @@ export class Vehicle implements Rebasable {
     return this.lamps.indicator;
   }
 
+  /** Whether the indicator lamps are lit at this instant of their blink: the dash's arrow. */
+  get indicatorLit(): boolean {
+    return this.lamps.blinkerLit;
+  }
+
+  /** Yaw of the chassis' forward axis about world up, radians: `atan2(forward.x, forward.z)`. */
+  get heading(): number {
+    this.chassisBody.rotation(this.rotationScratch);
+    rotateVector(this.forwardScratch, this.rotationScratch, 0, 0, 1);
+    return Math.atan2(this.forwardScratch.x, this.forwardScratch.z);
+  }
+
+  /**
+   * Grade of the ground under the wheels along the car's heading, rise over run,
+   * positive uphill; null while no wheel touches anything.
+   *
+   * From the CONTACT NORMALS, not the body's pitch: the body dives under braking and
+   * squats under power, and an inclinometer that read those would call a hard stop on
+   * the flat a descent.
+   */
+  get groundGrade(): number | null {
+    let nx = 0;
+    let ny = 0;
+    let nz = 0;
+    for (const w of this.wheels) {
+      if (!w.grounded) continue;
+      nx += w.contactNormal.x;
+      ny += w.contactNormal.y;
+      nz += w.contactNormal.z;
+    }
+    if (ny <= 1e-6) return null;
+    const heading = this.heading;
+    // Ground rising ahead tilts its normal back against the heading.
+    return -(nx * Math.sin(heading) + nz * Math.cos(heading)) / ny;
+  }
+
   setHeadlightEnvironmentFactor(factor: number): void {
     this.lamps.setEnvironmentFactor(factor);
   }

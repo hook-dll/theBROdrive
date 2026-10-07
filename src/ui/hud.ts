@@ -33,8 +33,26 @@ export interface DrivingReadout {
    */
   waterFraction: number;
   oilFraction: number;
-  /** Parking brake state. Keyboard and touch controls both latch it. */
+  /**
+   * Parking brake state. Keyboard and touch controls both latch it. Lights the red P
+   * lamp and puts a P in the gear cell, where a driver about to pull away looks.
+   */
   handbrake: boolean;
+  /** Each indicator's dash arrow, lit at this instant of the car's own blink. */
+  blinkerLeft: boolean;
+  blinkerRight: boolean;
+  /** The beam selected. The dash is the only place it is reported: there is no toast. */
+  headlights: 'off' | 'low' | 'high';
+  /** Ground grade along the heading, rise over run, positive uphill; null in the air. */
+  grade: number | null;
+  /**
+   * The wind at the car in the car's own frame, m/s, the direction it blows TOWARD:
+   * `windRightMps` to the right, `windForwardMps` along the nose. The true wind, not
+   * the airflow the car's own speed makes: that is a headwind on every drive and says
+   * nothing, while the crosswind share is the same in both and is what pushes the car.
+   */
+  windRightMps: number;
+  windForwardMps: number;
   /**
    * Where the steering RIM is, as a fraction of full lock, positive to the left.
    *
@@ -166,6 +184,39 @@ const STEER_STRIP_X1 = STEER_STRIP_W - 9;
 const STEER_STRIP_Y = 5;
 const STEER_STRIP_CX = (STEER_STRIP_X0 + STEER_STRIP_X1) / 2;
 const STEER_STRIP_HALF_SPAN = (STEER_STRIP_X1 - STEER_STRIP_X0) / 2;
+/**
+ * THE TWO INSET INSTRUMENTS — the inclinometer in the tachometer, the wind gauge in the
+ * speedometer — sit in the wedge under each hub. The needles sweep 270° over the top
+ * and never enter it, and it was empty face. Centre and radius in dial units: the ring
+ * clears the face's chord (y 98) and the needle's zero line (x + y = 120) by 1 and 4.
+ */
+const INSET_CX = CX;
+const INSET_CY = 84;
+const INSET_R = 13;
+/**
+ * The inclinometer's exaggeration. This world's roads climb at most 22%, which is 12°:
+ * drawn true, an ordinary 5% hill is a 3° tilt nobody sees at this size. Three times,
+ * clamped, makes a hill a hill. The face ticks are at ±10% so the size can be read.
+ */
+const GRADE_GAIN = 3;
+const GRADE_MAX_DEG = 40;
+const GRADE_TICK = 0.1;
+/** Below this the wind arrow goes dark: a direction for a breath of air is noise. */
+const WIND_CALM_MPS = 0.8;
+/** At and above this the arrow is full strength and alarm-coloured: it moves the car. */
+const WIND_STRONG_MPS = 10;
+/**
+ * Smoothing time constant of both insets, seconds. The grade comes off contact normals
+ * that chatter over every pebble and the wind carries its gusts; a needle that jitters
+ * is read as noise, and both readings matter over seconds, not frames.
+ */
+const INSET_SMOOTH_S = 0.4;
+const TURN_LEFT_PATH = 'M 2.5 9 L 10 2.5 V 6.2 H 21 V 11.8 H 10 V 15.5 Z';
+const TURN_RIGHT_PATH = 'M 21.5 9 L 14 2.5 V 6.2 H 3 V 11.8 H 14 V 15.5 Z';
+const HEADLAMP_PATH = 'M 13 3.5 C 19.5 3.5 21.5 6.5 21.5 9 C 21.5 11.5 19.5 14.5 13 14.5 Z';
+/** ISO 7000 symbols: the dipped beam's rays slant down, the main beam's run level. */
+const DIPPED_BEAM_PATH = `${HEADLAMP_PATH} M 10 4.5 L 3 7 M 10 8.5 L 3 11 M 10 12.5 L 3 15`;
+const MAIN_BEAM_PATH = `${HEADLAMP_PATH} M 10 5 H 3 M 10 9 H 3 M 10 13 H 3`;
 const LCD_STEP_MS = 180;
 const LCD_INITIAL_PAUSE_STEPS = 4;
 const RADIO_OFF_MESSAGE = 'RADIO OFF';
@@ -281,6 +332,14 @@ export class Hud {
   private readonly temperatureEl: SVGSVGElement;
   private readonly temperatureNeedle: SVGLineElement;
   private readonly handbrakeEl: HTMLElement;
+  private readonly turnLeftEl: HTMLElement;
+  private readonly turnRightEl: HTMLElement;
+  private readonly dippedBeamEl: HTMLElement;
+  private readonly mainBeamEl: HTMLElement;
+  /** The inclinometer's car, rotated to the grade. */
+  private readonly gradeCar: SVGGElement;
+  /** The wind gauge's arrow, rotated to the wind. */
+  private readonly windArrow: SVGGElement;
   private readonly invMassEl: HTMLElement;
   private readonly invSlotsEl: HTMLElement;
   private readonly toastEl: HTMLElement;
@@ -311,6 +370,15 @@ export class Hud {
   private speedDeg = -1;
   private fuelDeg = -1;
   private temperatureDeg = -1;
+  /** Smoothed inset readings, and the clock they were last advanced at (-1 never). */
+  private gradeSmooth = 0;
+  private windRightSmooth = 0;
+  private windForwardSmooth = 0;
+  private insetClockMs = -1;
+  /** Last written rotations and wind strength; NaN forces a write. */
+  private gradeRotation = Number.NaN;
+  private windRotation = Number.NaN;
+  private windStrength = Number.NaN;
   private warningsSignature = '';
   /**
    * The mode the faces are currently painted for, so the class writes happen on a
@@ -347,9 +415,11 @@ export class Hud {
 
     const tach = this.buildMainDial('hud-tach', TACHOMETER_SCALE);
     this.tachNeedle = tach.needle;
+    this.gradeCar = this.buildInclinometer(tach.svg, tach.needle);
 
     const speed = this.buildMainDial('hud-speedometer', SPEEDOMETER_SCALE);
     this.speedNeedle = speed.needle;
+    this.windArrow = this.buildWindGauge(speed.svg, speed.needle);
 
 
     const fuel = this.buildAuxDial('hud-fuel', 'fuel');
@@ -385,6 +455,10 @@ export class Hud {
       'Oil low',
       'M 3 8 H 14 L 18 11 V 15 H 7 Q 3 15 3 11 Z M 14 8 L 18 5 H 21 M 20 12 Q 23 14 20 16',
     );
+    this.turnLeftEl = this.buildIconLamp('hud-turn hud-turn-left', 'Left indicator', TURN_LEFT_PATH);
+    this.turnRightEl = this.buildIconLamp('hud-turn hud-turn-right', 'Right indicator', TURN_RIGHT_PATH);
+    this.dippedBeamEl = this.buildIconLamp('hud-dipped-beam', 'Dipped beam', DIPPED_BEAM_PATH);
+    this.mainBeamEl = this.buildIconLamp('hud-main-beam', 'Main beam', MAIN_BEAM_PATH);
 
     const indicatorTop = el('div', 'hud-indicator-row');
     indicatorTop.append(this.checkEngineEl, this.oilWarningEl, this.handbrakeEl);
@@ -409,7 +483,13 @@ export class Hud {
     const centreTop = el('div', 'hud-centre-top');
     centreTop.append(this.temperatureCluster, indicators, fuelCluster);
     const centreBlock = el('div', 'hud-centre-block');
-    centreBlock.append(centreTop, this.lcdEl, this.steerStripEl);
+    // The telltale row under the steering strip: the arrows wide apart at its ends so
+    // left and right are read by where they are, the beam lamps between them.
+    const beams = el('div', 'hud-telltale-beams');
+    beams.append(this.dippedBeamEl, this.mainBeamEl);
+    const telltales = el('div', 'hud-telltale-row');
+    telltales.append(this.turnLeftEl, beams, this.turnRightEl);
+    centreBlock.append(centreTop, this.lcdEl, this.steerStripEl, telltales);
 
     const gaugeRow = el('div', 'hud-gauge-row');
     gaugeRow.append(tach.svg, centreBlock, speed.svg);
@@ -457,6 +537,142 @@ export class Hud {
     svg.appendChild(path);
     lamp.appendChild(svg);
     return lamp;
+  }
+
+  /** The ring an inset instrument is drawn in, placed under the dial's needle. */
+  private buildInset(dial: SVGSVGElement, needle: SVGElement, className: string, label: string): SVGGElement {
+    const group = svgEl('g');
+    group.setAttribute('class', `hud-inset ${className}`);
+    group.setAttribute('role', 'img');
+    group.setAttribute('aria-label', label);
+    const ring = svgEl('circle');
+    ring.setAttribute('class', 'hud-inset-ring');
+    ring.setAttribute('cx', String(INSET_CX));
+    ring.setAttribute('cy', String(INSET_CY));
+    ring.setAttribute('r', String(INSET_R));
+    group.appendChild(ring);
+    dial.insertBefore(group, needle);
+    return group;
+  }
+
+  /**
+   * The inclinometer: a car in side view, nose to the right, tilted with the ground
+   * under it. Ticks on the ring mark level and ±10% at both ends of the car.
+   */
+  private buildInclinometer(dial: SVGSVGElement, needle: SVGElement): SVGGElement {
+    const inset = this.buildInset(dial, needle, 'hud-inclinometer', 'Slope');
+    const tickDeg = (Math.atan(GRADE_TICK) * GRADE_GAIN * 180) / Math.PI;
+    for (const [deg, level] of [
+      [0, true], [180, true],
+      [-tickDeg, false], [tickDeg, false], [180 - tickDeg, false], [180 + tickDeg, false],
+    ] as const) {
+      const inner = polar(INSET_CX, INSET_CY, level ? INSET_R - 4 : INSET_R - 2.5, deg);
+      const outer = polar(INSET_CX, INSET_CY, INSET_R, deg);
+      const tick = svgEl('line');
+      tick.setAttribute('class', `hud-inset-tick${level ? ' is-level' : ''}`);
+      tick.setAttribute('x1', inner.x.toFixed(2));
+      tick.setAttribute('y1', inner.y.toFixed(2));
+      tick.setAttribute('x2', outer.x.toFixed(2));
+      tick.setAttribute('y2', outer.y.toFixed(2));
+      inset.appendChild(tick);
+    }
+    const car = svgEl('g');
+    car.setAttribute('class', 'hud-inset-car');
+    const body = svgEl('path');
+    // Hatch at the back (left), bonnet lower than the roof at the front (right).
+    body.setAttribute(
+      'd',
+      `M ${INSET_CX - 8} ${INSET_CY + 2} V ${INSET_CY - 1} L ${INSET_CX - 5.5} ${INSET_CY - 4.5} `
+        + `H ${INSET_CX + 2.5} L ${INSET_CX + 5} ${INSET_CY - 1.5} L ${INSET_CX + 8} ${INSET_CY - 0.8} `
+        + `V ${INSET_CY + 2} Z`,
+    );
+    car.appendChild(body);
+    for (const x of [INSET_CX - 4.5, INSET_CX + 4.5]) {
+      const wheel = svgEl('circle');
+      wheel.setAttribute('cx', String(x));
+      wheel.setAttribute('cy', String(INSET_CY + 2.4));
+      wheel.setAttribute('r', '1.9');
+      car.appendChild(wheel);
+    }
+    inset.appendChild(car);
+    return car;
+  }
+
+  /**
+   * The wind gauge: the car from above, nose up, and an arrow coming at it from where
+   * the wind comes from. The arrow is built as a headwind — tail at the top of the
+   * ring, head toward the car — and turned to the wind.
+   */
+  private buildWindGauge(dial: SVGSVGElement, needle: SVGElement): SVGGElement {
+    const inset = this.buildInset(dial, needle, 'hud-wind', 'Wind');
+    const car = svgEl('path');
+    car.setAttribute('class', 'hud-inset-car');
+    car.setAttribute(
+      'd',
+      `M ${INSET_CX - 2.2} ${INSET_CY + 4} V ${INSET_CY - 2} Q ${INSET_CX} ${INSET_CY - 4.6} `
+        + `${INSET_CX + 2.2} ${INSET_CY - 2} V ${INSET_CY + 4} Z`,
+    );
+    inset.appendChild(car);
+    const arrow = svgEl('g');
+    arrow.setAttribute('class', 'hud-wind-arrow');
+    const shaft = svgEl('line');
+    shaft.setAttribute('x1', String(INSET_CX));
+    shaft.setAttribute('y1', String(INSET_CY - INSET_R + 1));
+    shaft.setAttribute('x2', String(INSET_CX));
+    shaft.setAttribute('y2', String(INSET_CY - 8));
+    arrow.appendChild(shaft);
+    const head = svgEl('path');
+    head.setAttribute(
+      'd',
+      `M ${INSET_CX - 3} ${INSET_CY - 8.6} L ${INSET_CX} ${INSET_CY - 5.2} L ${INSET_CX + 3} ${INSET_CY - 8.6} Z`,
+    );
+    arrow.appendChild(head);
+    inset.appendChild(arrow);
+    return arrow;
+  }
+
+  /** Advances both insets' smoothing and writes their pose when it visibly changed. */
+  private updateInsets(readout: DrivingReadout): void {
+    const now = performance.now();
+    // A first frame, or the first after the cluster was hidden, snaps to the reading.
+    const dt = this.insetClockMs < 0 ? Infinity : (now - this.insetClockMs) / 1000;
+    this.insetClockMs = now;
+    const k = 1 - Math.exp(-dt / INSET_SMOOTH_S);
+
+    // In the air there is no ground to read; the car keeps its last tilt.
+    if (readout.grade !== null) this.gradeSmooth += (readout.grade - this.gradeSmooth) * k;
+    const tilt = Math.min(
+      GRADE_MAX_DEG,
+      Math.max(-GRADE_MAX_DEG, (Math.atan(this.gradeSmooth) * GRADE_GAIN * 180) / Math.PI),
+    );
+    // Nose up is anticlockwise on screen, which is a negative SVG rotation.
+    const gradeRotation = Math.round(-tilt * 2) / 2;
+    if (gradeRotation !== this.gradeRotation) {
+      this.gradeRotation = gradeRotation;
+      this.gradeCar.setAttribute('transform', `rotate(${gradeRotation} ${INSET_CX} ${INSET_CY})`);
+    }
+
+    this.windRightSmooth += (readout.windRightMps - this.windRightSmooth) * k;
+    this.windForwardSmooth += (readout.windForwardMps - this.windForwardSmooth) * k;
+    const speed = Math.hypot(this.windRightSmooth, this.windForwardSmooth);
+    // Strength in twentieths, so a steady wind writes nothing.
+    const strength = speed < WIND_CALM_MPS ? 0 : Math.max(1, Math.round(Math.min(1, speed / WIND_STRONG_MPS) * 20));
+    if (strength !== this.windStrength) {
+      this.windStrength = strength;
+      this.windArrow.classList.toggle('is-calm', strength === 0);
+      this.windArrow.classList.toggle('is-strong', strength === 20);
+      this.windArrow.style.opacity = strength === 0 ? '' : String(0.4 + 0.6 * (strength / 20));
+    }
+    if (strength === 0) return;
+    // The arrow is built pointing down the screen; on screen the wind blows toward
+    // (right, -forward).
+    const windRotation = Math.round(
+      (Math.atan2(-this.windForwardSmooth, this.windRightSmooth) * 180) / Math.PI - 90,
+    );
+    if (windRotation !== this.windRotation) {
+      this.windRotation = windRotation;
+      this.windArrow.setAttribute('transform', `rotate(${windRotation} ${INSET_CX} ${INSET_CY})`);
+    }
   }
 
   private buildMainDial(
@@ -659,6 +875,7 @@ export class Hud {
     if (readout === null) {
       this.setVisible(this.drivingCluster, false);
       this.setVisible(this.crosshairEl, true);
+      this.insetClockMs = -1;
       return;
     }
     this.setVisible(this.drivingCluster, true);
@@ -689,7 +906,10 @@ export class Hud {
       this.speedNeedle,
     );
 
-    this.setText(this.gearEl, readout.gearLabel);
+    // The parking brake owns the gear cell: a lever in first with the brake on is a car
+    // that will not move, and the digit is where a driver looks before pulling away.
+    this.setText(this.gearEl, readout.handbrake ? 'P' : readout.gearLabel);
+    this.gearEl.classList.toggle('is-parked', readout.handbrake);
     this.updateTyreDots(readout.tyres);
 
     const fuelFraction = readout.tankCapacity > 0 ? readout.fuelLitres / readout.tankCapacity : 0;
@@ -737,7 +957,12 @@ export class Hud {
     this.oilWarningEl.classList.toggle('is-active', readout.oilFraction < FLUID_ALARM_FRACTION);
     this.refreshSegmentDisplay();
     this.handbrakeEl.classList.toggle('is-active', readout.handbrake);
+    this.turnLeftEl.classList.toggle('is-active', readout.blinkerLeft);
+    this.turnRightEl.classList.toggle('is-active', readout.blinkerRight);
+    this.dippedBeamEl.classList.toggle('is-active', readout.headlights === 'low');
+    this.mainBeamEl.classList.toggle('is-active', readout.headlights === 'high');
     this.updateSteerStrip(readout.steering);
+    this.updateInsets(readout);
   }
 
   /** Player's dashboard size (Settings.dashboardScale), on top of the presentation's own. */

@@ -86,7 +86,7 @@ import { MonumentProvider } from './world/props/monuments';
 import { PoleProvider } from './world/props/poles';
 import { ScatterProvider } from './world/props/scatter';
 import { SidetrackProvider } from './world/sidetrack';
-import { updateWeather, weather } from './world/weather';
+import { updateWeather, weather, windAt } from './world/weather';
 import { Road, ROAD_LENGTH } from './world/road';
 import { WorldOrigin } from './world/origin';
 import { HazardIndex } from './world/hazards';
@@ -1456,6 +1456,8 @@ async function boot(): Promise<void> {
   };
   // Per-frame audio inputs, written in place.
   const carAudioPose: CarPose = { x: 0, y: 0, z: 0, forwardX: 0, forwardZ: 1, airMps: 0, wet: 0 };
+  /** The wind at the driven car, for the dash's wind gauge; written in place. */
+  const dashWind = { x: 0, z: 0 };
   const ambienceFrame: AmbienceFrame = {
     windMps: 0,
     rain: 0,
@@ -1651,13 +1653,6 @@ async function boot(): Promise<void> {
         // The switch is the driver's from here: an engaged autopilot's automatic
         // lamps otherwise rewrote this on the next fixed step, so L did nothing.
         autopilot.releaseAutomaticHeadlights();
-        hud.setToast(
-          driving.headlights === 'off'
-            ? 'headlights off'
-            : driving.headlights === 'low'
-              ? 'headlights: dipped beam'
-              : 'headlights: main beam',
-        );
       }
       if (f.toggleLeftIndicator) driving.toggleIndicator('left');
       if (f.toggleRightIndicator) driving.toggleIndicator('right');
@@ -2572,6 +2567,15 @@ async function boot(): Promise<void> {
         || (car?.oilLitres ?? 0) <= 0
         || filter === null
         || (filter.clog ?? 0) >= AIR_FILTER_DUE_CLOG;
+      // The dash's wind gauge reads the wind at the car itself, gusts included, in the
+      // car's frame: forward (sin h, cos h), right (-cos h, sin h).
+      const at = driving.root.position;
+      windAt(at.x + origin.x, at.z + origin.z, dashWind);
+      const heading = driving.heading;
+      const sinH = Math.sin(heading);
+      const cosH = Math.cos(heading);
+      const indicator = driving.indicator;
+      const blinkerLit = driving.indicatorLit;
       hud.setDriving({
         speedKmh: driving.speedKmh,
         rpm: driving.rpm,
@@ -2587,6 +2591,12 @@ async function boot(): Promise<void> {
         engineDestroyed: driving.engineDestroyed,
         checkEngine,
         handbrake: lastInput.handbrake,
+        blinkerLeft: blinkerLit && indicator === 'left',
+        blinkerRight: blinkerLit && indicator === 'right',
+        headlights: driving.headlights,
+        grade: driving.groundGrade,
+        windRightMps: -dashWind.x * cosH + dashWind.z * sinH,
+        windForwardMps: dashWind.x * sinH + dashWind.z * cosH,
         steering: driving.steeringFraction,
         tyres: driving.wheelRide,
         // Null while the player steers, which is what keeps the faces black: the dash

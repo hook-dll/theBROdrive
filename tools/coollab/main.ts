@@ -87,6 +87,12 @@ function paint(): void {
     engineDestroyed: false,
     checkEngine: false,
     handbrake: false,
+    blinkerLeft: false,
+    blinkerRight: false,
+    headlights: 'off',
+    grade: 0,
+    windRightMps: 0,
+    windForwardMps: 0,
     steering: 0,
     // This bench exercises the temperature gauge, so the rest of the dash is given the
     // quietest truthful state: no tyre dots, and the player's own black faces.

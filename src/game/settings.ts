@@ -322,13 +322,13 @@ export type ComputeLevel = 'very_low' | 'low' | 'medium' | 'high';
  * Doubling it with the 800 m reach was meant to hold the density per metre, but the
  * cars do not spread over the window: receding cars behind are recycled and the budget
  * lives on the road ahead, so the doubled count read as twice the traffic. High is
- * 20/40: a busy road for a processor that can carry it.
+ * 24/48: a busy road for a processor that can carry it.
  */
 export const TRAFFIC_CAPS: Record<ComputeLevel, { readonly narrow: number; readonly wide: number }> = {
   very_low: { narrow: 4, wide: 8 },
   low: { narrow: 8, wide: 16 },
   medium: { narrow: 12, wide: 24 },
-  high: { narrow: 20, wide: 40 },
+  high: { narrow: 24, wide: 48 },
 };
 
 function computeLevel(value: unknown): ComputeLevel | null {
