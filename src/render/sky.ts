@@ -269,11 +269,22 @@ const HAZE_VISIBILITY_M = 2_500;
 const RAIN_VISIBILITY_M = 4_000;
 const STORM_VISIBILITY_M = 8_000;
 /**
- * The dust storm keeps the scene's `FogExp2`, and is its only density: a haboob IS a
- * wall, clear up to it and blind inside, and the wall pass (render/hazeshader.ts)
- * shares this law. 1 - exp(-(d·k)²) leaves ~150 m of sight.
+ * The dust storm is the scene's `FogExp2`, the same law the wall pass uses
+ * (render/hazeshader.ts): 1 - exp(-(d·k)²), in two strengths.
+ *
+ * FOG_DUST is the WALL seen from outside, k = 0.0125: ~100 m of sight across its face,
+ * so the wall reads as a wall that hides the land behind it. It is the wall pass's
+ * own uniform and stays as it is.
+ *
+ * FOG_DUST_SIGHT is INSIDE the storm, k = 0.17: 50 % fog at ~5 m, 94 % at 10 m. Cars
+ * standing with hazards on appear out of the dust at a few metres, as they do inside
+ * a real haboob. The scene fog takes this one; `dustSightFogDensity` ramps it with
+ * the dust and hands over from the wall at the front.
  */
 const FOG_DUST = 0.0125;
+const FOG_DUST_SIGHT = 0.17;
+/** How much darker the land's fog grows at full dust: the storm's light, not the sky's. */
+const DUST_FOG_SHADE = 0.4;
 
 /**
  * How bright the far LAND's fog is against the sky's own horizon band, at night (by
@@ -946,8 +957,10 @@ export class Sky {
   private readonly uBoltAz = { value: 0 };
   private readonly uBoltTop = { value: 0.1 };
   private readonly uBoltSeed = { value: 0 };
-  /** A haboob's FogExp2 density, the scene fog's only one (see FOG_DUST). */
+  /** The wall's FogExp2 density, uniform in the wall pass (see FOG_DUST). */
   private dustFog = 0;
+  /** The scene fog's dust density inside the storm (FOG_DUST_SIGHT), per metre. */
+  private dustSightFog = 0;
   private readonly _weatherTint = new THREE.Color();
   private readonly _airSky = new THREE.Color();
   private readonly _airDusk = new THREE.Color();
@@ -1235,7 +1248,11 @@ export class Sky {
     // ...at the land's own light level once the sun is low (see LAND_FOG_NIGHT). The
     // gradient's top is the dome's own, `mix(uHorizon, uZenith, 1 - uDomeFlat)`, so the
     // land fog climbs with elevation exactly as the sky does (render/airfog.ts).
-    const landFog = LAND_FOG_NIGHT + (1 - LAND_FOG_NIGHT) * day;
+    // Inside the storm the land's fog is the wall's own colour: the dust's light is
+    // the wall's (render/hazeshader.ts), a few tens of percent darker than the sky
+    // horizon it is lit from. Only the land fog and the air's sky colour take this;
+    // the dome above stays the storm's horizon.
+    const landFog = (LAND_FOG_NIGHT + (1 - LAND_FOG_NIGHT) * day) * (1 - DUST_FOG_SHADE * weather.dust);
     this.fog.color.copy(this._horizon).multiplyScalar(landFog);
     setAirFogSky(
       this._airSky.copy(this._horizon).lerp(this._zenith, 1 - this.uDomeFlat.value).multiplyScalar(landFog),
@@ -1256,6 +1273,10 @@ export class Sky {
             weather.cloud / STORM_VISIBILITY_M),
     );
     this.dustFog = FOG_DUST * Math.max(weather.dust, 0.2 * smoothstep(0.88, 1, weather.front));
+    // Inside, the scene fog is the short-sight law. It ramps with the dust, and at the
+    // front (wind-driven wall at the car) it is already full, so the crossing does not
+    // jump from the wall's face to a clear sight.
+    this.dustSightFog = FOG_DUST_SIGHT * Math.max(weather.dust, smoothstep(0.95, 1, weather.front));
 
     // --- Dome uniforms ---
     this.uSunDir.copy(celestial.sun.direction);
@@ -1518,6 +1539,14 @@ export class Sky {
   /** The dust storm's FogExp2 density, per metre: all the scene fog carries. */
   get dustFogDensity(): number {
     return this.dustFog;
+  }
+
+  /**
+   * The scene fog's dust density per metre: the short sight inside the storm
+   * (FOG_DUST_SIGHT), ramped with the dust and full at the front.
+   */
+  get dustSightFogDensity(): number {
+    return this.dustSightFog;
   }
 
   /**

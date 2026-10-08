@@ -29,7 +29,7 @@ import { SurfaceType } from '../core/surfaces';
  * afternoon is what most of it should look like.
  *
  * NEVER HOSTILE. Every channel's effect on play is bounded where it is applied: wet
- * asphalt keeps 84% of its grip, a haboob leaves a hundred-odd metres of sight. The
+ * asphalt keeps 84% of its grip, a haboob inside its dust sees a few metres ahead. The
  * crosswind is the one that asks for a hand on the wheel: a steady correction of a
  * fraction of a degree and an answer to the gusts (see `Vehicle.applyAero`). The point
  * is to ask for a small adaptation — lights on, a little slower, a hand on the wheel —
