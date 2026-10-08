@@ -1,0 +1,320 @@
+{
+ "id": "bmwe46x",
+ "source": "Ported from the old silhouette schema and affinely scaled to the E46 sedan: 4471 x 1739 x 1415 mm, wheelbase 2725, track 1471/1478, tyre radius 315. Plan.low is the body width, plan.high the old roof half-width scaled; belt and glass_top are estimates.",
+ "side": {
+  "top": [
+   [
+    -820,
+    800
+   ],
+   [
+    -365,
+    882
+   ],
+   [
+    -33,
+    1056
+   ],
+   [
+    670,
+    1374
+   ],
+   [
+    2099,
+    1415
+   ],
+   [
+    3082,
+    1066
+   ],
+   [
+    3651,
+    851
+   ]
+  ],
+  "bottom": [
+   [
+    -820,
+    205
+   ],
+   [
+    3651,
+    205
+   ]
+  ],
+  "shoulder": [
+   [
+    -820,
+    738
+   ],
+   [
+    29,
+    820
+   ],
+   [
+    2099,
+    841
+   ],
+   [
+    3082,
+    820
+   ],
+   [
+    3651,
+    779
+   ]
+  ]
+ },
+ "plan": {
+  "low": [
+   [
+    -820,
+    800
+   ],
+   [
+    29,
+    870
+   ],
+   [
+    2099,
+    870
+   ],
+   [
+    3082,
+    860
+   ],
+   [
+    3651,
+    820
+   ]
+  ],
+  "high": [
+   [
+    -820,
+    594
+   ],
+   [
+    -33,
+    699
+   ],
+   [
+    670,
+    712
+   ],
+   [
+    2099,
+    726
+   ],
+   [
+    3082,
+    679
+   ],
+   [
+    3651,
+    594
+   ]
+  ]
+ },
+ "tumblehome": [
+  [
+   900,
+   1.0
+  ],
+  [
+   1265,
+   0.97
+  ],
+  [
+   1415,
+   0.93
+  ]
+ ],
+ "belt": 900,
+ "glass_top": 1265,
+ "windscreen": [
+  -365,
+  670
+ ],
+ "backlight": [
+  2099,
+  3082
+ ],
+ "windows": [
+  {
+   "y": [
+    -33,
+    670
+   ]
+  },
+  {
+   "y": [
+    712,
+    2099
+   ]
+  },
+  {
+   "y": [
+    2140,
+    3082
+   ]
+  }
+ ],
+ "wheels": {
+  "radius": 315,
+  "width": 205,
+  "track_front": 1471,
+  "track_rear": 1478,
+  "wheelbase": 2725,
+  "arch_front": 378,
+  "arch_rear": 378
+ },
+ "bumpers": [
+  {
+   "y": [
+    -820,
+    -706
+   ],
+   "z": [
+    287,
+    410
+   ],
+   "half_width": 785,
+   "cell": "black",
+   "chamfer": 20
+  },
+  {
+   "y": [
+    3548,
+    3651
+   ],
+   "z": [
+    297,
+    420
+   ],
+   "half_width": 785,
+   "cell": "black",
+   "chamfer": 20
+  }
+ ],
+ "plates": [
+  {
+   "face": "front",
+   "x": [
+    -445,
+    445
+   ],
+   "z": [
+    482,
+    574
+   ],
+   "cell": "black",
+   "single": true
+  }
+ ],
+ "lamps": [
+  {
+   "role": "headlights",
+   "face": "front",
+   "x": [
+    467,
+    679
+   ],
+   "z": [
+    574,
+    636
+   ],
+   "single": true
+  },
+  {
+   "role": "headlights",
+   "face": "front",
+   "x": [
+    -679,
+    -467
+   ],
+   "z": [
+    574,
+    636
+   ],
+   "single": true
+  },
+  {
+   "role": "leftblinkers",
+   "face": "front",
+   "x": [
+    594,
+    721
+   ],
+   "z": [
+    461,
+    502
+   ],
+   "single": true
+  },
+  {
+   "role": "rightblinkers",
+   "face": "front",
+   "x": [
+    -721,
+    -594
+   ],
+   "z": [
+    461,
+    502
+   ],
+   "single": true
+  },
+  {
+   "role": "taillights",
+   "face": "rear",
+   "x": [
+    509,
+    700
+   ],
+   "z": [
+    554,
+    615
+   ],
+   "single": true
+  },
+  {
+   "role": "taillights",
+   "face": "rear",
+   "x": [
+    -700,
+    -509
+   ],
+   "z": [
+    554,
+    615
+   ],
+   "single": true
+  },
+  {
+   "role": "reverselights",
+   "face": "rear",
+   "x": [
+    276,
+    424
+   ],
+   "z": [
+    492,
+    533
+   ],
+   "single": true
+  },
+  {
+   "role": "reverselights",
+   "face": "rear",
+   "x": [
+    -424,
+    -276
+   ],
+   "z": [
+    492,
+    533
+   ],
+   "single": true
+  }
+ ]
+}

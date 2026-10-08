@@ -1,0 +1,324 @@
+{
+ "id": "vaz2101x",
+ "source": "Ported from the old silhouette schema. Old file had no body half-width, belt or glass top: plan.low uses the VAZ-2101 body width (1620 mm) with end taper, plan.high is the old roof half-width, belt is the mean of the old beltline, glass_top is an estimate.",
+ "side": {
+  "top": [
+   [
+    -780,
+    790
+   ],
+   [
+    -300,
+    860
+   ],
+   [
+    -50,
+    890
+   ],
+   [
+    450,
+    1380
+   ],
+   [
+    1900,
+    1400
+   ],
+   [
+    2600,
+    1000
+   ],
+   [
+    2950,
+    960
+   ],
+   [
+    3293,
+    940
+   ]
+  ],
+  "bottom": [
+   [
+    -780,
+    170
+   ],
+   [
+    3293,
+    170
+   ]
+  ],
+  "shoulder": [
+   [
+    -780,
+    700
+   ],
+   [
+    -300,
+    740
+   ],
+   [
+    450,
+    790
+   ],
+   [
+    2000,
+    800
+   ],
+   [
+    2900,
+    780
+   ],
+   [
+    3293,
+    700
+   ]
+  ]
+ },
+ "plan": {
+  "low": [
+   [
+    -780,
+    760
+   ],
+   [
+    -300,
+    800
+   ],
+   [
+    450,
+    810
+   ],
+   [
+    2900,
+    810
+   ],
+   [
+    3293,
+    770
+   ]
+  ],
+  "high": [
+   [
+    -780,
+    560
+   ],
+   [
+    -300,
+    600
+   ],
+   [
+    450,
+    650
+   ],
+   [
+    2000,
+    660
+   ],
+   [
+    2600,
+    600
+   ],
+   [
+    3293,
+    520
+   ]
+  ]
+ },
+ "tumblehome": [
+  [
+   880,
+   1.0
+  ],
+  [
+   1200,
+   1.0
+  ]
+ ],
+ "belt": 880,
+ "glass_top": 1200,
+ "windscreen": [
+  -50,
+  450
+ ],
+ "backlight": [
+  1900,
+  2600
+ ],
+ "windows": [
+  {
+   "y": [
+    0,
+    450
+   ]
+  },
+  {
+   "y": [
+    480,
+    2200
+   ]
+  },
+  {
+   "y": [
+    2230,
+    2930
+   ]
+  }
+ ],
+ "wheels": {
+  "radius": 297,
+  "width": 155,
+  "track_front": 1349,
+  "track_rear": 1305,
+  "wheelbase": 2424,
+  "arch_front": 356,
+  "arch_rear": 356
+ },
+ "bumpers": [
+  {
+   "y": [
+    -780,
+    -660
+   ],
+   "z": [
+    230,
+    380
+   ],
+   "half_width": 680,
+   "cell": "black",
+   "chamfer": 20
+  },
+  {
+   "y": [
+    3183,
+    3293
+   ],
+   "z": [
+    260,
+    380
+   ],
+   "half_width": 700,
+   "cell": "black",
+   "chamfer": 20
+  }
+ ],
+ "plates": [
+  {
+   "face": "front",
+   "x": [
+    -350,
+    350
+   ],
+   "z": [
+    400,
+    480
+   ],
+   "cell": "steel",
+   "single": true
+  }
+ ],
+ "lamps": [
+  {
+   "role": "headlights",
+   "face": "front",
+   "x": [
+    400,
+    640
+   ],
+   "z": [
+    600,
+    660
+   ],
+   "single": true
+  },
+  {
+   "role": "headlights",
+   "face": "front",
+   "x": [
+    -640,
+    -400
+   ],
+   "z": [
+    600,
+    660
+   ],
+   "single": true
+  },
+  {
+   "role": "leftblinkers",
+   "face": "front",
+   "x": [
+    520,
+    640
+   ],
+   "z": [
+    470,
+    520
+   ],
+   "single": true
+  },
+  {
+   "role": "rightblinkers",
+   "face": "front",
+   "x": [
+    -640,
+    -520
+   ],
+   "z": [
+    470,
+    520
+   ],
+   "single": true
+  },
+  {
+   "role": "taillights",
+   "face": "rear",
+   "x": [
+    480,
+    640
+   ],
+   "z": [
+    560,
+    640
+   ],
+   "single": true
+  },
+  {
+   "role": "taillights",
+   "face": "rear",
+   "x": [
+    -640,
+    -480
+   ],
+   "z": [
+    560,
+    640
+   ],
+   "single": true
+  },
+  {
+   "role": "reverselights",
+   "face": "rear",
+   "x": [
+    250,
+    400
+   ],
+   "z": [
+    420,
+    470
+   ],
+   "single": true
+  },
+  {
+   "role": "reverselights",
+   "face": "rear",
+   "x": [
+    -400,
+    -250
+   ],
+   "z": [
+    420,
+    470
+   ],
+   "single": true
+  }
+ ]
+}
