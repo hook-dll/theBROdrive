@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+
 - THE DRIVEN CAR'S HEADLAMPS CAST SHADOWS (`render/vehiclelights.ts`,
   `VehicleLightRig.addShadowBeam`, `HEADLAMP_SHADOW_RANGE_M`). On every rung that
   draws the sun's shadow, one spotlight of the rig is created casting a shadow and
@@ -15,7 +16,6 @@
   off or the day hides them, as the sun's does at night. Measured on an M2 Pro: 16-17
   depth draws a frame with the lamps on, no GPU change beyond noise. A car stopped in
   the beam now throws its shadow down the road ahead.
-
 - PERFORMANCE OVERLAY (dev builds, `ui/perfoverlay.ts`). Pause › Performance overlay
   toggles a translucent graph across the top of the screen, remembered between
   reloads: one column per presented frame (~8 s), main-thread CPU stacked by physics,
