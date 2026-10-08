@@ -4,6 +4,11 @@
 
 ### Added
 
+- DEFAULT VIEW 50° AND A BIGGER DASHBOARD. The field of view starts at 50° (was 58°;
+  `config/gameplay.json`). The dashboard's old 140% is the new 100% default on desktop
+  (`Settings.dashboardSize`, range 55-120%); a save's old `dashboardScale` is carried
+  over by dividing by 1.4, so nobody's dashboard changes size. The phone cluster is
+  unchanged.
 - INSIDE A HABOOB THE WORLD IS THE WALL SEEN UP CLOSE. The short sight inside the storm
   is applied in the finishing pass (`uDustInside` in `render/hazeshader.ts`,
   `FOG_DUST_SIGHT` in `render/sky.ts`, k = 0.056 from the camera: half gone at 15 m,

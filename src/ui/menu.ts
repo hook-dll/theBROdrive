@@ -6,9 +6,9 @@ import {
   DAY_CYCLE_MAX_MINUTES,
   DAY_CYCLE_MIN_MINUTES,
   DEFAULT_MOUSE_SENSITIVITY,
-  DASHBOARD_SCALE_MAX,
-  DASHBOARD_SCALE_MIN,
-  DASHBOARD_SCALE_STEP,
+  DASHBOARD_SIZE_MAX,
+  DASHBOARD_SIZE_MIN,
+  DASHBOARD_SIZE_STEP,
   CONTROLLER_DEADZONE_MAX,
   CONTROLLER_DEADZONE_MIN,
   CONTROLLER_DEADZONE_STEP,
@@ -1123,7 +1123,7 @@ export class MainMenu {
         preciseSteering: base.preciseSteering,
         cameraShake: base.cameraShake,
         bouncyCars: base.bouncyCars,
-        dashboardScale: base.dashboardScale,
+        dashboardSize: base.dashboardSize,
         viewDistance: base.viewDistance,
         trafficDensity: base.trafficDensity,
       };
@@ -1156,7 +1156,7 @@ export class MainMenu {
           preciseSteering: settings.preciseSteering,
           cameraShake: settings.cameraShake,
           bouncyCars: settings.bouncyCars,
-          dashboardScale: settings.dashboardScale,
+          dashboardSize: settings.dashboardSize,
           viewDistance: settings.viewDistance,
           trafficDensity: settings.trafficDensity,
         });
@@ -2094,14 +2094,14 @@ export class MainMenu {
             sliderField(
               'Dashboard Size',
               'gameplay',
-              'How big the driving dashboard is drawn. 100% is the authored size.',
-              DASHBOARD_SCALE_MIN,
-              DASHBOARD_SCALE_MAX,
-              DASHBOARD_SCALE_STEP,
-              () => settings.dashboardScale,
+              'How big the driving dashboard is drawn. 100% is the default size.',
+              DASHBOARD_SIZE_MIN,
+              DASHBOARD_SIZE_MAX,
+              DASHBOARD_SIZE_STEP,
+              () => settings.dashboardSize,
               (value) => `${Math.round(value * 100)}%`,
               (value) => {
-                settings.dashboardScale = value;
+                settings.dashboardSize = value;
               },
             ),
           );

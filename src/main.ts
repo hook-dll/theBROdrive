@@ -403,7 +403,7 @@ async function boot(): Promise<void> {
   pads.setDeadzone(world.state.settings.controllerDeadzone);
   pads.setSteeringSensitivity(world.state.settings.controllerSteerSensitivity);
   const hud = new Hud(uiRoot);
-  hud.setDashboardScale(world.state.settings.dashboardScale);
+  hud.setDashboardScale(world.state.settings.dashboardSize);
   const vitals = new PlayerVitals(world.state.player.health, (health) => {
     world.apply({ t: 'player_health', health });
   });
@@ -2928,7 +2928,7 @@ async function boot(): Promise<void> {
       camera.setFieldOfView(world.state.settings.fieldOfView);
       camera.setShake(world.state.settings.cameraShake);
       camera.setStyle(world.state.settings.cameraStyle);
-      hud.setDashboardScale(world.state.settings.dashboardScale);
+      hud.setDashboardScale(world.state.settings.dashboardSize);
       // The tier owns four things that apply in place: the pixel ceiling, the shadow
       // pass, the sky's star depth and the presentation cap. The fifth — the visible-
       // light count — cannot, because it is compiled into every lit material as an

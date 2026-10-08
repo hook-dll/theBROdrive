@@ -274,9 +274,10 @@ body.is-cinematic #ui {
   align-items: center;
   gap: 6px;
   pointer-events: none;
-  /* The old desktop cluster rendered at 75%; 93.75% is exactly 25% larger. The
-     player's Dashboard Size (--hud-dash-scale) multiplies on top. */
-  transform: translateX(-50%) scale(calc(0.9375 * var(--hud-dash-scale, 1)));
+  /* The desktop cluster's default is 131.25% of the authored size: what Dashboard Size
+     140% drew before it became the 100% default. The player's Dashboard Size
+     (--hud-dash-scale) multiplies on top. */
+  transform: translateX(-50%) scale(calc(1.3125 * var(--hud-dash-scale, 1)));
   transform-origin: bottom center;
 }
 

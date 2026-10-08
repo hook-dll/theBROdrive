@@ -552,11 +552,11 @@ export interface Settings {
    */
   bouncyCars: boolean;
   /**
-   * Size of the driving dashboard against its authored size, 1 = as designed. Applied
-   * on top of the presentation's own scale (desktop and phone differ), so the same
-   * number means "a bit bigger" on both.
+   * Size of the driving dashboard, 1 = the default (what was 140% of the authored
+   * cluster before 0.20). Applied on top of the presentation's own scale (desktop and
+   * phone differ), so the same number means "a bit bigger" on both.
    */
-  dashboardScale: number;
+  dashboardSize: number;
   /** How far the desert is drawn; see `viewDistanceFor`. */
   viewDistance: ComputeLevel;
   /** How many ambient cars the stream holds; see `TRAFFIC_CAPS`. */
@@ -606,10 +606,12 @@ export const CONTROLLER_STEER_STEP = 0.05;
 export const DEFAULT_FIELD_OF_VIEW = GAMEPLAY_CONFIG.fieldOfViewDegrees;
 export const FIELD_OF_VIEW_MIN = GAMEPLAY_CONFIG.fieldOfViewMinDegrees;
 export const FIELD_OF_VIEW_MAX = GAMEPLAY_CONFIG.fieldOfViewMaxDegrees;
-/** Dashboard size range: a little smaller, somewhat bigger, never covering the road. */
-export const DASHBOARD_SCALE_MIN = 0.75;
-export const DASHBOARD_SCALE_MAX = 1.4;
-export const DASHBOARD_SCALE_STEP = 0.05;
+/** Dashboard size range: a good deal smaller, a little bigger, never covering the road. */
+export const DASHBOARD_SIZE_MIN = 0.55;
+export const DASHBOARD_SIZE_MAX = 1.2;
+/** The old `dashboardScale` measured against the authored cluster; 1.4 of it is now 1. */
+const LEGACY_DASHBOARD_SCALE_PER_SIZE = 1.4;
+export const DASHBOARD_SIZE_STEP = 0.05;
 
 /** Default day length in real minutes. */
 const DEFAULT_DAY_CYCLE_MINUTES = GAMEPLAY_CONFIG.dayCycleMinutes;
@@ -663,7 +665,7 @@ export const DEFAULT_SETTINGS: Settings = {
   cameraShake: true,
   // Off by default; a joke should be opted into, not discovered mid-drive.
   bouncyCars: false,
-  dashboardScale: 1,
+  dashboardSize: 1,
   // 16 km of desert and the 12/24 stream; High is for a processor with room beyond them.
   viewDistance: 'medium',
   trafficDensity: 'medium',
@@ -837,14 +839,20 @@ export function sanitizeSettings(raw: unknown): Settings {
     // Missing means an older save: on, like every new drive.
     cameraShake: obj.cameraShake !== false,
     bouncyCars: obj.bouncyCars === true,
-    // Snapped to the slider's step, clamped to its range; missing means the authored size.
-    dashboardScale:
-      typeof obj.dashboardScale === 'number' && Number.isFinite(obj.dashboardScale)
-        ? Math.round(
-            Math.min(DASHBOARD_SCALE_MAX, Math.max(DASHBOARD_SCALE_MIN, obj.dashboardScale)) /
-              DASHBOARD_SCALE_STEP,
-          ) * DASHBOARD_SCALE_STEP
-        : 1,
+    // Snapped to the slider's step, clamped to its range; missing means the default. A
+    // save from before 0.20 has `dashboardScale` against the authored cluster instead.
+    dashboardSize: (() => {
+      const raw =
+        typeof obj.dashboardSize === 'number' && Number.isFinite(obj.dashboardSize)
+          ? obj.dashboardSize
+          : typeof obj.dashboardScale === 'number' && Number.isFinite(obj.dashboardScale)
+            ? obj.dashboardScale / LEGACY_DASHBOARD_SCALE_PER_SIZE
+            : 1;
+      return (
+        Math.round(Math.min(DASHBOARD_SIZE_MAX, Math.max(DASHBOARD_SIZE_MIN, raw)) / DASHBOARD_SIZE_STEP) *
+        DASHBOARD_SIZE_STEP
+      );
+    })(),
     // A save from before the split had one `cpuLoad` for both; it seeds each.
     viewDistance: computeLevel(obj.viewDistance) ?? computeLevel(obj.cpuLoad) ?? 'medium',
     trafficDensity: computeLevel(obj.trafficDensity) ?? computeLevel(obj.cpuLoad) ?? 'medium',

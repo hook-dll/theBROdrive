@@ -990,7 +990,7 @@ export class Hud {
     this.updateInsets(readout);
   }
 
-  /** Player's dashboard size (Settings.dashboardScale), on top of the presentation's own. */
+  /** Player's dashboard size (Settings.dashboardSize), on top of the presentation's own. */
   setDashboardScale(scale: number): void {
     this.drivingCluster.style.setProperty('--hud-dash-scale', String(scale));
   }
