@@ -4,6 +4,21 @@
 
 ### Added
 
+- DELIVERY ROUTE LINE (`Hud.setRouteProgress`, `world/couriers.ts` `nextCourierIndex`).
+  With contract cargo in hand or in the driven car and no race on, the top bead line
+  shows the player alone, from the last courier behind to the nearest one ahead that
+  will sign for it (amber pin), with the distance beside it. The line is now a dark
+  pill with edged marks so it reads on sky, night and storm; a race ends in a
+  chequered flag.
+- DASHBOARD: the tachometer and speedometer are larger (134 px boxes). The panel is
+  opaque (the scene no longer tints it unevenly), rounded, and laid out on one margin:
+  ~10 px from the main faces to the top, side and bottom edges, the half-moons level
+  with the main faces' tops and the steering strip's foot on their chord line. The indicator
+  arrows and beam lamps moved from under the steering strip into the gaps between the
+  big dials and the half-moon gauges (left arrow and dipped beam by the tachometer,
+  right arrow and main beam by the speedometer). The wind gauge is now a windsock: it
+  streams the way the wind blows, the car's nose marked at the top of the ring, and
+  fills one of five orange-and-white bands per fifth of 10 m/s.
 - THE DRIVEN CAR'S HEADLAMPS CAST SHADOWS (`render/vehiclelights.ts`,
   `VehicleLightRig.addShadowBeam`, `HEADLAMP_SHADOW_RANGE_M`). On every rung that
   draws the sun's shadow, one spotlight of the rig is created casting a shadow and

@@ -201,10 +201,12 @@ const INSET_R = 13;
 const GRADE_GAIN = 3;
 const GRADE_MAX_DEG = 40;
 const GRADE_TICK = 0.1;
-/** Below this the wind arrow goes dark: a direction for a breath of air is noise. */
+/** Below this the windsock is gone: a direction for a breath of air is noise. */
 const WIND_CALM_MPS = 0.8;
-/** At and above this the arrow is full strength and alarm-coloured: it moves the car. */
+/** At and above this all five bands fill and turn alarm-coloured: it moves the car. */
 const WIND_STRONG_MPS = 10;
+/** Windsock bands; each lights at another fifth of WIND_STRONG_MPS, as on an airfield. */
+const WIND_SOCK_BANDS = 5;
 /**
  * Smoothing time constant of both insets, seconds. The grade comes off contact normals
  * that chatter over every pebble and the wind carries its gusts; a needle that jitters
@@ -338,18 +340,21 @@ export class Hud {
   private readonly mainBeamEl: HTMLElement;
   /** The inclinometer's car, rotated to the grade. */
   private readonly gradeCar: SVGGElement;
-  /** The wind gauge's arrow, rotated to the wind. */
-  private readonly windArrow: SVGGElement;
+  /** The windsock, rotated to the wind, and its five bands, root first. */
+  private readonly windSock: SVGGElement;
+  private readonly windBands: SVGPathElement[] = [];
   private readonly invMassEl: HTMLElement;
   private readonly invSlotsEl: HTMLElement;
   private readonly toastEl: HTMLElement;
-  /** Race bead line at the top; see `setRaceProgress`. */
+  /** Route bead line at the top; see `setRouteProgress`. */
   private readonly raceEl: HTMLElement;
+  private readonly raceTrackEl: HTMLElement;
+  private readonly raceLabelEl: HTMLElement;
   /** Player's bead first, then the rivals'. */
   private readonly raceBeads: HTMLElement[] = [];
   /** Last written x per bead, px; NaN forces a write. */
   private readonly raceBeadX: number[] = [];
-  private raceShown = false;
+  private raceKind: 'race' | 'delivery' | null = null;
   private readonly checkEngineEl: HTMLElement;
   private readonly oilWarningEl: HTMLElement;
   private readonly lcdEl: SVGSVGElement;
@@ -375,10 +380,12 @@ export class Hud {
   private windRightSmooth = 0;
   private windForwardSmooth = 0;
   private insetClockMs = -1;
-  /** Last written rotations and wind strength; NaN forces a write. */
+  /** Last written rotations and lit windsock bands; NaN forces a write. */
   private gradeRotation = Number.NaN;
   private windRotation = Number.NaN;
   private windStrength = Number.NaN;
+  /** Delivery distance in tens of metres last written to the route label. */
+  private raceLabelKey = Number.NaN;
   private warningsSignature = '';
   /**
    * The mode the faces are currently painted for, so the class writes happen on a
@@ -419,7 +426,7 @@ export class Hud {
 
     const speed = this.buildMainDial('hud-speedometer', SPEEDOMETER_SCALE);
     this.speedNeedle = speed.needle;
-    this.windArrow = this.buildWindGauge(speed.svg, speed.needle);
+    this.windSock = this.buildWindGauge(speed.svg, speed.needle);
 
 
     const fuel = this.buildAuxDial('hud-fuel', 'fuel');
@@ -483,16 +490,17 @@ export class Hud {
     const centreTop = el('div', 'hud-centre-top');
     centreTop.append(this.temperatureCluster, indicators, fuelCluster);
     const centreBlock = el('div', 'hud-centre-block');
-    // The telltale row under the steering strip: the arrows wide apart at its ends so
-    // left and right are read by where they are, the beam lamps between them.
-    const beams = el('div', 'hud-telltale-beams');
-    beams.append(this.dippedBeamEl, this.mainBeamEl);
-    const telltales = el('div', 'hud-telltale-row');
-    telltales.append(this.turnLeftEl, beams, this.turnRightEl);
-    centreBlock.append(centreTop, this.lcdEl, this.steerStripEl, telltales);
+    centreBlock.append(centreTop, this.lcdEl, this.steerStripEl);
+    // The telltales stand in the gaps between the big dials and the half-moons: the
+    // left arrow and the dipped beam by the tachometer, the right arrow and the main
+    // beam by the speedometer, so left and right are read by where they are.
+    const telltalesLeft = el('div', 'hud-telltale-column');
+    telltalesLeft.append(this.turnLeftEl, this.dippedBeamEl);
+    const telltalesRight = el('div', 'hud-telltale-column');
+    telltalesRight.append(this.turnRightEl, this.mainBeamEl);
 
     const gaugeRow = el('div', 'hud-gauge-row');
-    gaugeRow.append(tach.svg, centreBlock, speed.svg);
+    gaugeRow.append(tach.svg, telltalesLeft, centreBlock, telltalesRight, speed.svg);
 
     const dashboard = el('div', 'hud-dashboard-shell');
     dashboard.append(gaugeRow);
@@ -506,7 +514,10 @@ export class Hud {
 
     this.toastEl = el('div', 'hud-toasts');
     this.raceEl = el('div', 'hud-race is-hidden');
-    this.raceEl.append(el('div', 'hud-race-line'), el('div', 'hud-race-finish'));
+    this.raceTrackEl = el('div', 'hud-race-track');
+    this.raceTrackEl.append(el('div', 'hud-race-line'), el('div', 'hud-race-start'), el('div', 'hud-race-finish'));
+    this.raceLabelEl = el('div', 'hud-race-label');
+    this.raceEl.append(this.raceTrackEl, this.raceLabelEl);
     this.gumBubbleEl = el('div', 'hud-gum-bubble is-hidden');
     this.damageVignetteEl = el('div', 'hud-damage-vignette');
     this.deathFadeEl = el('div', 'hud-death-fade');
@@ -599,36 +610,48 @@ export class Hud {
   }
 
   /**
-   * The wind gauge: the car from above, nose up, and an arrow coming at it from where
-   * the wind comes from. The arrow is built as a headwind — tail at the top of the
-   * ring, head toward the car — and turned to the wind.
+   * The wind gauge: an airfield windsock seen from above, the car's nose at the top of
+   * the ring. The mast is the hub; the sock streams the way the wind blows, and like
+   * a real one it fills band by band — five orange-and-white bands, one per fifth of
+   * WIND_STRONG_MPS — so a glance gives both the direction and the strength. Built
+   * streaming down the screen (a tailwind) and turned to the wind.
    */
   private buildWindGauge(dial: SVGSVGElement, needle: SVGElement): SVGGElement {
     const inset = this.buildInset(dial, needle, 'hud-wind', 'Wind');
-    const car = svgEl('path');
-    car.setAttribute('class', 'hud-inset-car');
-    car.setAttribute(
+    const nose = svgEl('path');
+    nose.setAttribute('class', 'hud-inset-car');
+    nose.setAttribute(
       'd',
-      `M ${INSET_CX - 2.2} ${INSET_CY + 4} V ${INSET_CY - 2} Q ${INSET_CX} ${INSET_CY - 4.6} `
-        + `${INSET_CX + 2.2} ${INSET_CY - 2} V ${INSET_CY + 4} Z`,
+      `M ${INSET_CX} ${INSET_CY - INSET_R + 0.6} L ${INSET_CX + 2} ${INSET_CY - INSET_R + 3.6} `
+        + `H ${INSET_CX - 2} Z`,
     );
-    inset.appendChild(car);
-    const arrow = svgEl('g');
-    arrow.setAttribute('class', 'hud-wind-arrow');
-    const shaft = svgEl('line');
-    shaft.setAttribute('x1', String(INSET_CX));
-    shaft.setAttribute('y1', String(INSET_CY - INSET_R + 1));
-    shaft.setAttribute('x2', String(INSET_CX));
-    shaft.setAttribute('y2', String(INSET_CY - 8));
-    arrow.appendChild(shaft);
-    const head = svgEl('path');
-    head.setAttribute(
-      'd',
-      `M ${INSET_CX - 3} ${INSET_CY - 8.6} L ${INSET_CX} ${INSET_CY - 5.2} L ${INSET_CX + 3} ${INSET_CY - 8.6} Z`,
-    );
-    arrow.appendChild(head);
-    inset.appendChild(arrow);
-    return arrow;
+    inset.appendChild(nose);
+    const sock = svgEl('g');
+    sock.setAttribute('class', 'hud-wind-sock');
+    const y0 = INSET_CY + 1.4;
+    const bandLength = 2.2;
+    const halfWidth = (y: number): number => 3.1 - ((y - y0) / (bandLength * WIND_SOCK_BANDS)) * 1.8;
+    for (let i = 0; i < WIND_SOCK_BANDS; i++) {
+      const a = y0 + i * bandLength;
+      const b = a + bandLength;
+      const band = svgEl('path');
+      band.setAttribute('class', `hud-wind-band${i % 2 === 0 ? ' is-orange' : ''}`);
+      band.setAttribute(
+        'd',
+        `M ${(INSET_CX - halfWidth(a)).toFixed(2)} ${a.toFixed(2)} H ${(INSET_CX + halfWidth(a)).toFixed(2)} `
+          + `L ${(INSET_CX + halfWidth(b)).toFixed(2)} ${b.toFixed(2)} H ${(INSET_CX - halfWidth(b)).toFixed(2)} Z`,
+      );
+      sock.appendChild(band);
+      this.windBands.push(band);
+    }
+    inset.appendChild(sock);
+    const mast = svgEl('circle');
+    mast.setAttribute('class', 'hud-wind-mast');
+    mast.setAttribute('cx', String(INSET_CX));
+    mast.setAttribute('cy', String(INSET_CY));
+    mast.setAttribute('r', '1.5');
+    inset.appendChild(mast);
+    return sock;
   }
 
   /** Advances both insets' smoothing and writes their pose when it visibly changed. */
@@ -655,13 +678,15 @@ export class Hud {
     this.windRightSmooth += (readout.windRightMps - this.windRightSmooth) * k;
     this.windForwardSmooth += (readout.windForwardMps - this.windForwardSmooth) * k;
     const speed = Math.hypot(this.windRightSmooth, this.windForwardSmooth);
-    // Strength in twentieths, so a steady wind writes nothing.
-    const strength = speed < WIND_CALM_MPS ? 0 : Math.max(1, Math.round(Math.min(1, speed / WIND_STRONG_MPS) * 20));
+    // Lit bands, one per fifth of a strong wind, so a steady wind writes nothing.
+    const strength = speed < WIND_CALM_MPS
+      ? 0
+      : Math.max(1, Math.min(WIND_SOCK_BANDS, Math.ceil((speed / WIND_STRONG_MPS) * WIND_SOCK_BANDS)));
     if (strength !== this.windStrength) {
       this.windStrength = strength;
-      this.windArrow.classList.toggle('is-calm', strength === 0);
-      this.windArrow.classList.toggle('is-strong', strength === 20);
-      this.windArrow.style.opacity = strength === 0 ? '' : String(0.4 + 0.6 * (strength / 20));
+      this.windSock.classList.toggle('is-calm', strength === 0);
+      this.windSock.classList.toggle('is-strong', strength === WIND_SOCK_BANDS);
+      for (let i = 0; i < WIND_SOCK_BANDS; i++) this.windBands[i]!.classList.toggle('is-limp', i >= strength);
     }
     if (strength === 0) return;
     // The arrow is built pointing down the screen; on screen the wind blows toward
@@ -671,7 +696,7 @@ export class Hud {
     );
     if (windRotation !== this.windRotation) {
       this.windRotation = windRotation;
-      this.windArrow.setAttribute('transform', `rotate(${windRotation} ${INSET_CX} ${INSET_CY})`);
+      this.windSock.setAttribute('transform', `rotate(${windRotation} ${INSET_CX} ${INSET_CY})`);
     }
   }
 
@@ -1220,24 +1245,44 @@ export class Hud {
 
 
   /**
-   * The race bead line: `player` and each of `rivals` as 0 (source courier) .. 1
-   * (finish), or null to hide it. A bead is moved only when it shifts half a pixel.
+   * The route bead line at the top. `race`: the player and each rival as 0 (source
+   * courier) .. 1 (finish). `delivery`: the player alone, 0 at the last courier behind
+   * and 1 at the nearest one ahead that will sign for the cargo, `remainingM` away.
+   * Null hides it. A bead is moved only when it shifts half a pixel.
    */
-  setRaceProgress(player: number, rivals: readonly number[] | null): void {
+  setRouteProgress(
+    kind: 'race' | 'delivery' | null,
+    player: number,
+    rivals: readonly number[],
+    remainingM: number,
+  ): void {
     if (this.disposed) return;
-    const shown = rivals !== null;
-    if (shown !== this.raceShown) {
-      this.raceShown = shown;
-      this.setVisible(this.raceEl, shown);
+    if (kind !== this.raceKind) {
+      this.raceKind = kind;
+      this.setVisible(this.raceEl, kind !== null);
+      this.raceEl.classList.toggle('is-race', kind === 'race');
+      this.raceEl.classList.toggle('is-delivery', kind === 'delivery');
+      this.raceLabelKey = Number.NaN;
     }
-    if (!rivals) return;
-    const count = rivals.length + 1;
+    if (kind === null) return;
+    // Tenths of a kilometre out, tens of metres within one: the label is rebuilt only
+    // when that reading changes, not every tick.
+    const near = remainingM < 1000;
+    const key = kind === 'race' ? -1 : near ? Math.round(remainingM / 10) : 1e6 + Math.round(remainingM / 100);
+    if (key !== this.raceLabelKey) {
+      this.raceLabelKey = key;
+      this.raceLabelEl.textContent = kind === 'race'
+        ? 'RACE'
+        : near ? `COURIER ${key * 10} M` : `COURIER ${((key - 1e6) / 10).toFixed(1)} KM`;
+    }
+    const count = kind === 'race' ? rivals.length + 1 : 1;
     while (this.raceBeads.length < count) {
       const bead = el('div', this.raceBeads.length === 0 ? 'hud-race-bead is-player' : 'hud-race-bead');
-      this.raceEl.append(bead);
+      this.raceTrackEl.append(bead);
       this.raceBeads.push(bead);
       this.raceBeadX.push(Number.NaN);
     }
+    for (let i = 0; i < this.raceBeads.length; i++) this.setVisible(this.raceBeads[i]!, i < count);
     for (let i = 0; i < count; i++) {
       const x = Math.round((i === 0 ? player : rivals[i - 1]!) * RACE_LINE_PX * 2) / 2;
       if (x === this.raceBeadX[i]) continue;
@@ -1245,6 +1290,7 @@ export class Hud {
       this.raceBeads[i]!.style.transform = `translateX(${x}px)`;
     }
   }
+
   setToast(text: string): void {
     if (this.disposed) return;
     const toast = el('div', 'hud-toast');

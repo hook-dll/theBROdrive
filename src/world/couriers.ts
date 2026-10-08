@@ -108,6 +108,23 @@ export function couriersBetween(
   return out;
 }
 
+/**
+ * Index of the first courier at or past `fromS` whose index is at least `minIndex`.
+ * Courier arclengths grow with the index (the jitter is under half a period), so the
+ * walk starts one band short of the estimate and stops at the first match.
+ */
+export function nextCourierIndex(
+  seed: number,
+  fromS: number,
+  minIndex: number,
+  poiSpacing = DEFAULT_POI_SPACING_M,
+): number {
+  const estimate = Math.floor((fromS - FIRST_COURIER_M - COURIER_JITTER_M) / COURIER_PERIOD_M) - 1;
+  let index = Math.max(0, minIndex, estimate);
+  while (courierSlotIndex(seed, index, poiSpacing) * poiSpacing < fromS) index++;
+  return index;
+}
+
 
 /** Live registrations follow streamed physics chunks; save data owns edited contents. */
 export class CourierField {

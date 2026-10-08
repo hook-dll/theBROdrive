@@ -280,28 +280,42 @@ body.is-cinematic #ui {
   transform-origin: bottom center;
 }
 
+/* THE PANEL IS OPAQUE. It used to be translucent, and the world behind it — sky on
+   one side of the screen, sand or a dark verge on the other — tinted it unevenly,
+   which read as a gradient on the panel and as lopsided margins.
+   The layout is one margin, kept everywhere: the main faces' circle stands about
+   10 px from the top and side edges, and their flat chord about 10 px from the bottom
+   (the dial's own empty wedge is taken out by its negative bottom margin). */
 .hud-dashboard-shell {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 6px 10px 0;
-  background: var(--hud-panel);
-  border: 1px solid var(--hud-border);
+  padding: 3px 4px 8px;
+  background: #1b1915;
+  border: 1px solid rgba(232, 221, 196, 0.22);
+  border-radius: 10px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 2px 12px rgba(0, 0, 0, 0.35);
 }
 
 .hud-gauge-row {
   display: flex;
-  align-items: flex-start;
-  gap: 5px;
+  align-items: stretch;
+  gap: 6px;
 }
 
+/* The half-moons on top, level with the main faces' tops; the display and the
+   steering strip at the bottom, the strip's foot on the main faces' chord line. */
 .hud-centre-block {
   display: flex;
   width: 254px;
-  margin-top: 0;
+  padding: 7px 0 2px;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
+}
+
+.hud-centre-block .hud-lcd {
+  margin-top: auto;
 }
 
 .hud-centre-top {
@@ -317,9 +331,13 @@ body.is-cinematic #ui {
   overflow: visible;
 }
 
+/* The face's flat chord sits at 98/120 of the box; the negative bottom margin pulls the
+   empty wedge under it out of the layout, so the chord rests just above the shell's
+   lower edge and the dials can be larger without growing the panel. */
 .hud-main-dial {
-  width: 124px;
-  height: 124px;
+  width: 134px;
+  height: 134px;
+  margin-bottom: -22px;
 }
 
 
@@ -541,19 +559,23 @@ body.is-cinematic #ui {
   text-shadow: 0 0 6px color-mix(in srgb, var(--hud-red) 70%, transparent);
 }
 
-/* The telltale row under the steering strip: arrows at its ends, beams in the middle. */
-.hud-telltale-row {
+/* The telltale columns between the big dials and the half-moons, centred on the
+   half-moons' height. They tuck 6 px into the empty top corner of the dial's square
+   box; the round face still clears the lower lamp by the row gap. */
+.hud-telltale-column {
   display: flex;
-  width: 100%;
-  margin-top: 2px;
-  padding: 0 34px;
-  box-sizing: border-box;
-  justify-content: space-between;
+  align-self: flex-start;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
 }
 
-.hud-telltale-beams {
-  display: flex;
-  gap: 4px;
+.hud-telltale-column:first-of-type {
+  margin-left: -6px;
+}
+
+.hud-telltale-column:last-of-type {
+  margin-right: -6px;
 }
 
 .hud-turn {
@@ -604,26 +626,32 @@ body.is-cinematic #ui {
   fill: var(--hud-dial-needle);
 }
 
-.hud-wind-arrow line {
-  stroke: var(--hud-dial-needle);
-  stroke-width: 1.6;
-  stroke-linecap: round;
+.hud-wind-band {
+  fill: #f2eee4;
 }
 
-.hud-wind-arrow path {
-  fill: var(--hud-dial-needle);
+.hud-wind-band.is-orange {
+  fill: #ff7a1a;
 }
 
-.hud-wind-arrow.is-calm {
+/* A band the wind is not strong enough to fill hangs as a faint outline. */
+.hud-wind-band.is-limp {
+  fill: none;
+  stroke: var(--hud-dial-ink);
+  stroke-width: 0.4;
+  opacity: 0.35;
+}
+
+.hud-wind-sock.is-calm {
   opacity: 0;
 }
 
-.hud-wind-arrow.is-strong line {
-  stroke: var(--hud-alarm-strong);
+.hud-wind-sock.is-strong .hud-wind-band.is-orange {
+  fill: var(--hud-alarm-strong);
 }
 
-.hud-wind-arrow.is-strong path {
-  fill: var(--hud-alarm-strong);
+.hud-wind-mast {
+  fill: var(--hud-dial-needle);
 }
 
 /*
@@ -844,49 +872,96 @@ body.is-cinematic #ui {
 
 
 
-/* Race progress: a line from the source courier to the finish tick, the player a
-   filled bead and each rival a hollow one. Beads move by transform only. */
+/* Route progress: a pill from the last courier to the next one. The sky behind it is
+   anything from noon sand to storm to night, so it carries its own dark plate and
+   every mark has a dark edge. Race: the player a filled amber bead, each rival a
+   hollow one, a chequered flag at the finish. Delivery: the player alone, the
+   receiving courier as an amber pin, the distance beside it. Beads move by transform. */
 .hud-race {
   position: absolute;
-  top: 18px;
+  top: 14px;
   left: 50%;
-  width: 260px;
-  height: 12px;
-  margin-left: -130px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 12px 7px 16px;
+  transform: translateX(-50%);
+  background: var(--hud-panel-strong);
+  border: 1px solid var(--hud-border);
+  border-radius: 14px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
   pointer-events: none;
+}
+.hud-race-track {
+  position: relative;
+  width: 260px;
+  height: 14px;
 }
 .hud-race-line {
   position: absolute;
   left: 0;
   right: 0;
-  top: 5px;
+  top: 6px;
   height: 2px;
-  background: var(--hud-fg);
-  opacity: 0.55;
+  border-radius: 1px;
+  background: rgba(232, 221, 196, 0.5);
+}
+.hud-race-start {
+  position: absolute;
+  left: -3px;
+  top: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--hud-fg-dim);
 }
 .hud-race-finish {
   position: absolute;
-  right: -1px;
-  top: -1px;
-  width: 2px;
-  height: 14px;
-  background: var(--hud-fg);
+  right: -6px;
+  top: 1px;
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border: 1px solid rgba(0, 0, 0, 0.7);
+}
+.hud-race.is-race .hud-race-finish {
+  background: repeating-conic-gradient(#f2eee4 0 25%, #141412 0 50%) 0 0 / 6px 6px;
+}
+.hud-race.is-delivery .hud-race-finish {
+  border-radius: 50%;
+  background: var(--hud-amber);
+  box-shadow: 0 0 0 2px rgba(201, 162, 39, 0.35), 0 0 8px rgba(201, 162, 39, 0.6);
 }
 .hud-race-bead {
   position: absolute;
-  left: -5px;
+  left: -6px;
   top: 1px;
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   box-sizing: border-box;
   border-radius: 50%;
   border: 2px solid var(--hud-fg);
-  background: var(--hud-panel);
+  background: var(--hud-panel-strong);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7);
   will-change: transform;
 }
 .hud-race-bead.is-player {
+  border-color: #fffaf0;
   background: var(--hud-fg);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.8), 0 0 6px rgba(255, 250, 240, 0.6);
   z-index: 1;
+}
+.hud-race-label {
+  min-width: 92px;
+  color: var(--hud-fg);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.hud-race.is-delivery .hud-race-label {
+  color: var(--hud-amber);
 }
 .hud-toasts {
   position: absolute;

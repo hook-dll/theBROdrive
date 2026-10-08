@@ -106,7 +106,7 @@ import { WeatherParticles } from './render/weatherparticles';
 import { setDesertDustArclength } from './render/desertdust';
 import { setGroundFadeWindow } from './render/groundfade';
 import { WreckTrunkField } from './world/wrecktrunks';
-import { CourierField } from './world/couriers';
+import { CourierField, courierStop, nextCourierIndex } from './world/couriers';
 import { DancerField, type DancerHeard } from './world/props/airdancer';
 import { loadSpine } from './world/spinecache';
 import { RoadMeshProvider } from './world/roadmesh';
@@ -822,6 +822,9 @@ async function boot(): Promise<void> {
   const race = new RivalRace(world.seed, road, traffic, loadCarModel, (text) => hud.setToast(text));
   /** Reused receiver for the HUD bead line; see `RivalRace.progress`. */
   const raceProgress = newRaceProgress();
+  const NO_RIVALS: readonly number[] = [];
+  /** How far past a receiving courier's arclength it stays the delivery target, m. */
+  const DELIVERY_PAST_COURIER_M = 40;
   /** Fixed ground somewhere under an ABSOLUTE point; see STATE_LOAD_RADIUS_M in world/ranges.ts. */
   const groundUnder = (x: number, y: number, z: number): boolean =>
     physics.hasFixedGroundBelow(
@@ -1533,9 +1536,19 @@ async function boot(): Promise<void> {
    */
   const contractWorldDeps: ContractWorldDeps = { world, road, terrain, couriers };
 
+  /**
+   * The lowest courier index any cargo the player has on them (in hand or in the car
+   * being driven) may be handed in at, gathered during one contracts tick and read by
+   * the next one's HUD line; Infinity with nothing aboard.
+   */
+  let deliveryMinIndexNext = Infinity;
+  let deliveryMinIndex = Infinity;
   const onContractItem = (item: ContractCargoItem, place: ContractPlace, carId: string | null): void => {
     race.observe(item, place, activeS);
     ensureContractWorldObjects(contractWorldDeps, item, place);
+    if (place === 'hand' || (place === 'car' && carId !== null && carId === world.state.player.drivingCarId)) {
+      deliveryMinIndexNext = Math.min(deliveryMinIndexNext, item.sourceCourierIndex + (item.raceLegs ?? 1));
+    }
   };
 
   const fixedUpdate = (dt: number): void => {
@@ -1616,8 +1629,20 @@ async function boot(): Promise<void> {
     frameProfiler?.begin('traffic');
     traffic.fixedUpdate(dt, activeS, activeLateral, origin.x, origin.z);
     race.fixedUpdate(dt, activeS);
-    if (race.progress(activeS, raceProgress)) hud.setRaceProgress(raceProgress.player, raceProgress.rivals);
-    else hud.setRaceProgress(0, null);
+    if (race.progress(activeS, raceProgress)) {
+      hud.setRouteProgress('race', raceProgress.player, raceProgress.rivals, 0);
+    } else if (deliveryMinIndex !== Infinity) {
+      // No race: the bead line runs from the last courier behind to the nearest one
+      // ahead that will sign for the cargo. It stays the target until the car is
+      // past its stand, so stopping alongside does not flip it to the next one.
+      const target = nextCourierIndex(world.seed, activeS - DELIVERY_PAST_COURIER_M, deliveryMinIndex);
+      const targetS = courierStop(world.seed, target).s;
+      const fromS = target > 0 ? Math.min(activeS, courierStop(world.seed, target - 1).s) : 0;
+      const player = Math.min(1, Math.max(0, (activeS - fromS) / Math.max(1, targetS - fromS)));
+      hud.setRouteProgress('delivery', player, NO_RIVALS, Math.max(0, targetS - activeS));
+    } else {
+      hud.setRouteProgress(null, 0, NO_RIVALS, 0);
+    }
     frameProfiler?.end('traffic');
 
     if (driving) {
@@ -1735,6 +1760,7 @@ async function boot(): Promise<void> {
     // and landings the kinds read are this tick's. `s` is the live state; its clock
     // was advanced at the top of this step.
     frameProfiler?.begin('contracts');
+    deliveryMinIndexNext = Infinity;
     contracts.tick({
       dt,
       carTelemetry: carTelemetryForContract,
@@ -1742,6 +1768,7 @@ async function boot(): Promise<void> {
       onContractItem,
       onNotice: (text) => hud.setToast(text),
     });
+    deliveryMinIndex = deliveryMinIndexNext;
     frameProfiler?.end('contracts');
 
     // Recover only after Rapier has produced the escaped pose, before the
