@@ -596,10 +596,13 @@ function prepareMaterials(root: THREE.Object3D, bodywork: boolean, lenses: Reado
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
     const materials = materialsOf(child);
-    // Glass is the one surface that must not cast: a window throws a pane-shaped
-    // black slab across the ground, which is the shadow of a wall, not of a window.
+    // Glass casts like the body round it. The sun is high, so its shadow of a car was
+    // a solid silhouette whatever the windows did; the driven car's headlamps are low
+    // and level (render/vehiclelights.ts), and with the glass left out they shone
+    // straight through the cars ahead and drew them on the road with see-through
+    // windows. A car's shadow is its silhouette, windows included.
     const lens = lenses.has(child.name) || materials.every((material) => lenses.has(material.name));
-    child.castShadow = !lens && !materials.includes(carGlassMaterial());
+    child.castShadow = !lens;
     child.receiveShadow = !bodywork;
     // Wheels are closed solids, so their lit face is culled from the depth map and
     // the depth stored under them is metres away: they can receive safely, and a

@@ -459,6 +459,20 @@
 
 ### Fixed
 
+- NO FREEZES AT NIGHT FROM THE HEADLAMP SHADOW (`Renderer.compileForScenePass`,
+  `compileShadowDepth`). Three links a shadow caster's depth program the first time a
+  shadow pass draws it, and `compile` never touches those. A drive resumed at night has
+  no sun pass, so the headlamp shadow linked each depth variant as it first came into
+  the beam: on ANGLE a freeze of seconds (reported as 1.9-2.7 s keyboard input delays).
+  Every caster's depth program is now compiled with its lit ones, under the loading
+  cover and with every car model's anchors, the way the shadow pass will draw it: no
+  fog (fog is in a depth program's key), the source's shadow side, alpha test and maps.
+  Long-lived holder materials keep the programs linked. Checked on a night resume:
+  two depth programs linked mid-drive in the first 40 s before, none in 90 s after.
+- CAR WINDOWS CAST SHADOWS (`prepareMaterials`). The headlamps are low and level, and
+  with the glass left out of the shadow pass they shone through the cars ahead, which
+  lay on the road with see-through windows. A car's shadow is its silhouette now under
+  the headlamps as under the sun.
 - A LOADED CAR SITS LOWER INSTEAD OF GOING SOFT. `Vehicle.reloadSprings` re-derived
   each spring's free length and travel from the load, which cancelled the sag exactly
   (Rapier's force is rate × compression × live mass), so a 700 kg crate in the Oka left

@@ -332,6 +332,13 @@ function drawPhotoMileage(
 
 const MAX_PENDING_GPU_QUERIES = 8;
 
+/** The face a PCF shadow pass draws of a material with no `shadowSide` (three's WebGLShadowMap). */
+const PCF_SHADOW_SIDE: Readonly<Record<THREE.Side, THREE.Side>> = {
+  [THREE.FrontSide]: THREE.BackSide,
+  [THREE.BackSide]: THREE.FrontSide,
+  [THREE.DoubleSide]: THREE.DoubleSide,
+};
+
 interface GpuTimerQueryExtension {
   readonly TIME_ELAPSED_EXT: number;
   readonly GPU_DISJOINT_EXT: number;
@@ -610,23 +617,118 @@ export class Renderer {
   }
 
   /**
-   * Compiles `object`'s programs exactly as the scene pass will draw them — against
-   * this scene's lights, fog and environment, into `hazeTarget` — and resolves when
-   * every one has linked. `object` need not be in the scene.
+   * Compiles `object`'s programs exactly as the frame will draw them — the scene pass
+   * against this scene's lights, fog and environment, into `hazeTarget`, and, where
+   * shadows are on, the depth programs its casters take in the shadow passes — and
+   * resolves when every one has linked. `object` need not be in the scene.
    *
    * The target is the point. The scene pass renders into `hazeTarget`, where Three
    * disables renderer tone mapping and uses the working colour space; compiled with
    * the default target, the same material builds a canvas-output program the frame
    * never draws, and the real one still links on first draw, on the main thread —
    * on a cold driver cache, after the loading cover had gone.
+   *
+   * The depth programs are the other half. Three links a caster's depth program the
+   * first time a shadow pass draws it, and `compile` never touches them. By day the
+   * sun's pass meets most of them under the loading cover; a drive resumed at night
+   * has no sun pass, and the headlamp shadow (render/vehiclelights.ts) then linked
+   * each depth variant as it first came into the beam — on ANGLE, a freeze.
    */
   compileForScenePass(object: THREE.Object3D): Promise<unknown> {
     const previousTarget = this.renderer.getRenderTarget();
     this.renderer.setRenderTarget(this.hazeTarget);
     try {
-      return this.renderer.compileAsync(object, this.camera, this.scene);
+      const scene = this.renderer.compileAsync(object, this.camera, this.scene);
+      if (!this.renderer.shadowMap.enabled) return scene;
+      return Promise.all([scene, this.compileShadowDepth(object)]);
     } finally {
       this.renderer.setRenderTarget(previousTarget);
+    }
+  }
+
+  /**
+   * Long-lived depth materials, one per depth-program shape, that hold the shadow
+   * depth programs compiled by `compileShadowDepth`. Three's shadow pass uses its own
+   * private depth material; the program is shared by cache key, so these only have to
+   * exist for the program to stay linked when the content that first needed it unloads.
+   */
+  private readonly shadowDepthHolders = new Map<string, THREE.MeshDepthMaterial>();
+
+  /**
+   * Links the depth program each caster in `object` will draw with in a shadow pass.
+   *
+   * The materials are the ones `WebGLShadowMap.getDepthMaterial` (three r185) would
+   * hand the pass: the object's `customDepthMaterial`, or a depth material carrying the
+   * source's shadow side (flipped, for PCF), alpha test and its maps, displacement. Each
+   * caster wears its depth material for the one synchronous `compile` and gets its own
+   * back before this returns, so no frame ever draws it so dressed. The object itself
+   * stays the one compiled — instancing, skinning and morphs are in the program key.
+   */
+  private compileShadowDepth(object: THREE.Object3D): Promise<unknown> {
+    const dressed: { mesh: THREE.Mesh; material: THREE.Mesh['material'] }[] = [];
+    const depthFor = (material: THREE.Material): THREE.MeshDepthMaterial => {
+      const alphaTest = material.alphaToCoverage ? 0.5 : material.alphaTest;
+      const tested = alphaTest > 0;
+      const source = material as THREE.Material & {
+        map?: THREE.Texture | null;
+        alphaMap?: THREE.Texture | null;
+        displacementMap?: THREE.Texture | null;
+        displacementScale?: number;
+      };
+      const map = tested ? (source.map ?? null) : null;
+      const alphaMap = tested ? (source.alphaMap ?? null) : null;
+      const displacementMap = source.displacementMap && source.displacementScale !== 0 ? source.displacementMap : null;
+      const side = material.shadowSide ?? PCF_SHADOW_SIDE[material.side];
+      const key = `${side}|${tested}|${map?.channel ?? '-'}|${alphaMap?.channel ?? '-'}|${displacementMap?.channel ?? '-'}`;
+      let depth = this.shadowDepthHolders.get(key);
+      if (!depth) {
+        depth = new THREE.MeshDepthMaterial();
+        this.shadowDepthHolders.set(key, depth);
+      }
+      depth.side = side;
+      depth.alphaTest = alphaTest;
+      depth.map = map;
+      depth.alphaMap = alphaMap;
+      depth.displacementMap = displacementMap;
+      return depth;
+    };
+    // Everything else in `object` is blanked for the call (`compile` skips a drawable
+    // with no material): its scene-pass programs are compiled above, and compiling them
+    // again here, fogless, would link variants the frame never draws.
+    let casters = 0;
+    object.traverse((child) => {
+      const drawable = child as THREE.Mesh;
+      if (!drawable.isMesh && !(child as THREE.Points).isPoints && !(child as THREE.Line).isLine && !(child as THREE.Sprite).isSprite) return;
+      dressed.push({ mesh: drawable, material: drawable.material });
+      if (!drawable.isMesh || !drawable.castShadow) {
+        drawable.material = null as unknown as THREE.Material;
+        return;
+      }
+      casters++;
+      if (drawable.customDepthMaterial) drawable.material = drawable.customDepthMaterial;
+      else drawable.material = Array.isArray(drawable.material) ? drawable.material.map(depthFor) : depthFor(drawable.material);
+    });
+    if (casters === 0) {
+      for (const { mesh, material } of dressed) mesh.material = material;
+      return Promise.resolve();
+    }
+    // The shadow pass draws with an empty scene: no fog. Fog is in the program key
+    // (`fogExp2` and the fog flag) even for a depth material, so a depth program
+    // compiled under this scene's fog is one the pass never uses. The lights stay:
+    // the pass keeps the frame's light state, and the key carries the counts.
+    const fog = this.scene.fog;
+    this.scene.fog = null;
+    try {
+      return this.renderer.compileAsync(object, this.camera, this.scene);
+    } finally {
+      this.scene.fog = fog;
+      for (const { mesh, material } of dressed) mesh.material = material;
+      // The holders keep their programs, not the textures they were compiled with.
+      for (const depth of this.shadowDepthHolders.values()) {
+        depth.map = null;
+        depth.alphaMap = null;
+        depth.displacementMap = null;
+      }
     }
   }
 
