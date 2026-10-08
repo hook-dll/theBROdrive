@@ -2473,11 +2473,11 @@ async function boot(): Promise<void> {
     frameProfiler?.begin('vista');
     vista.update(cam.x, cam.z, activeS, frameDt);
     frameProfiler?.end('vista');
-    // The scene fog is the dust storm's alone. Outside it carries nothing; inside, the
-    // short-sight law (sky.dustSightFogDensity: a few metres at peak), so the land, the
-    // vista and the far ridges all go under the same dust. The clear air, the lighter
-    // weathers' veil and the fade at the edge of the draw distance are render/airfog.ts's.
-    renderer.fog.density = sky.dustSightFogDensity;
+    // The scene fog is the dust storm's alone: the wall's own law. Inside the storm the
+    // short sight is the finishing pass's (`dustInside`), which also hides the sky and
+    // the far ridges no scene fog reaches. The clear air, the lighter weathers' veil and
+    // the fade at the edge of the draw distance are render/airfog.ts's.
+    renderer.fog.density = sky.dustFogDensity;
     renderer.setWeather({
       wallM: weather.frontM,
       windX: weather.windX,
@@ -2494,6 +2494,7 @@ async function boot(): Promise<void> {
         (1 - 0.18 * weather.cloud),
       veil: Math.min(0.6, 0.45 * weather.haze + 0.3 * weather.rain + 0.12 * weather.cloud) * (1 - weather.dust),
       weatherFog: sky.dustFogDensity,
+      dustInside: sky.dustSightFogDensity,
       airThick: Math.min(1, weather.dust + weather.haze * 0.6 + weather.front * weather.front * 0.7),
     });
 

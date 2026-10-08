@@ -432,6 +432,8 @@ export const HAZE_FRAGMENT = /* glsl */ `
   // --- Weather (world/weather.ts) ---
   /** Distance to an approaching haboob wall, metres upwind; negative when none. */
   uniform float uWallM;
+  /** Inside a haboob: the dust's density per metre from the camera; 0 outside. */
+  uniform float uDustInside;
   /** Unit horizontal direction the wind blows toward (world x, z). */
   uniform vec2 uWindDir;
   /** The camera's absolute position along the wall, reduced to one noise period. */
@@ -816,11 +818,23 @@ export const HAZE_FRAGMENT = /* glsl */ `
     // it compiles the real pass with this one define and the rest skipped.
     #ifndef HAZE_MEASURE_SOURCE
 
-    if (uWallM >= 0.0) {
+    if (uWallM >= 0.0 || uDustInside > 0.0) {
       vec3 wallView = cameraRay(vUv);
       float sceneD = -ownViewZ >= uCameraFar * 0.999 ? 1e7 : rayDistance(ownViewZ, wallView);
-      vec4 wall = dustWall(normalize(uCameraRotation * wallView), sceneD);
-      color.rgb = mix(color.rgb, wall.rgb, wall.a);
+      if (uWallM >= 0.0) {
+        vec4 wall = dustWall(normalize(uCameraRotation * wallView), sceneD);
+        color.rgb = mix(color.rgb, wall.rgb, wall.a);
+      }
+      // Inside the storm: the wall's own dust, lit as its foot is (low on the face, so
+      // little of the sun), hiding every pixel by its distance. The sky counts as 2 km,
+      // so it goes under in the thick of it and comes back as the storm thins.
+      if (uDustInside > 0.0) {
+        vec2 sunFlat = uSunDirW.xz / max(1e-3, length(uSunDirW.xz));
+        float frontLit = clamp(0.5 + 0.5 * dot(uWindDir, sunFlat), 0.0, 1.0);
+        vec3 inside = uDustAlbedo * (uWallAir * 0.45 + uSunCol * (0.15 + 0.8 * frontLit) * 0.25);
+        float k = uDustInside * min(sceneD, 2000.0);
+        color.rgb = mix(color.rgb, inside, 1.0 - exp(-k * k));
+      }
     }
 
     // ACES' toe is intentionally cinematic, but in a sunlit desert it crushed

@@ -422,7 +422,7 @@ export class Renderer {
   private daylight = 0;
   private shimmerStrength = 0;
   private mirageStrength = 0;
-  /** A haboob wall is being drawn, which needs the resolved depth. */
+  /** A haboob wall or the dust inside one is being drawn, which needs the resolved depth. */
   private wallActive = false;
   /** Hand torch projected from the rendered eye; disabled rather than recreated. */
   private readonly torchLight: THREE.SpotLight;
@@ -581,6 +581,7 @@ export class Renderer {
         uBinoculars: { value: 0 },
         uCameraViewfinder: { value: 0 },
         uWallM: { value: -1 },
+        uDustInside: { value: 0 },
         uWindDir: { value: new THREE.Vector2(1, 0) },
         uWallPan: { value: 0 },
         uWallTime: { value: 0 },
@@ -1115,11 +1116,14 @@ export class Renderer {
     airThick: number;
     /** The dust storm's own fog density (sky.dustFogDensity). */
     weatherFog: number;
+    /** Inside the storm: the dust's density per metre from the camera (sky.dustSightFogDensity). */
+    dustInside: number;
   }): void {
     const u = this.hazeMaterial.uniforms;
     u.uWallM.value = frame.wallM;
+    u.uDustInside.value = frame.dustInside;
     const wallWas = this.wallActive;
-    this.wallActive = frame.wallM >= 0;
+    this.wallActive = frame.wallM >= 0 || frame.dustInside > 0;
     if (wallWas !== this.wallActive) this.updateDepthResolve();
     (u.uWindDir.value as THREE.Vector2).set(frame.windX, frame.windZ);
     // One period of the crest noise (1100 m cells, 48 of them) so the uniform never

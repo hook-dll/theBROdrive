@@ -4,11 +4,14 @@
 
 ### Added
 
-- INSIDE A HABOOB YOU SEE A FEW METRES. The scene fog inside the storm has its own law
-  (`FOG_DUST_SIGHT` in `render/sky.ts`, k = 0.17: half gone at 5 m, 94% at 10 m),
-  ramped with the dust and already full when the wall reaches the car, so crossing the
-  front no longer opens onto kilometres of sight; the land's fog and the air darken by up
-  to 40% with the dust to the wall's own tone. The wall seen from outside is unchanged.
+- INSIDE A HABOOB THE WORLD IS THE WALL SEEN UP CLOSE. The short sight inside the storm
+  is applied in the finishing pass (`uDustInside` in `render/hazeshader.ts`,
+  `FOG_DUST_SIGHT` in `render/sky.ts`, k = 0.056 from the camera: half gone at 15 m,
+  94% at 30 m), in the colour of the wall's foot, and it covers the sky and the far
+  ridges too: as scene fog it reached the land only, so the moment the front passed
+  the sky and the horizon stood out bright. It ramps with the square of the dust and is
+  full when the wall reaches the car, so the sight opens back out to hundreds of metres
+  and the sky returns as the storm thins. The wall seen from outside is unchanged.
 - VERY LOW HAS A SHARPNESS ROW: 360 OR 540 LINES (`Settings.retroLines`,
   `retroPixelRatio`). Still whole display pixels per frame pixel — two instead of three on
   a 1080-line screen — so the squares stay crisp, only finer. 360 stays the default.

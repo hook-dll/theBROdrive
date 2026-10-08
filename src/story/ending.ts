@@ -1164,6 +1164,7 @@ export async function playEnding(opts: EndingOptions): Promise<void> {
     veil: 0.04,
     airThick: 0.12,
     weatherFog: FOG_DENSITY,
+    dustInside: 0,
   });
 
   const rig = new ShotRig();
