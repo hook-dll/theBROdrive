@@ -2355,13 +2355,18 @@ async function boot(): Promise<void> {
       litGains[i] = vehicle === driving ? 1 : ambientBeamGain(vehicle.root.position.distanceTo(cam));
     }
     // Merged (`g === 0 && vehicle !== driving`): one beam per headlamp pair, for traffic
-    // only — far down the road two cones read as one. The driven car's headlamps are how
-    // the road is read, so they stay two. Tail and reversing lamps are never merged: one
-    // pool on the centreline read wrongly in play on every car, its own included.
+    // only — far down the road two cones read as one. Tail and reversing lamps are never
+    // merged: one pool on the centreline read wrongly in play on every car, its own
+    // included. The driven car's headlamps, where the tier draws shadows, take the rig's
+    // one shadow-casting beam (render/vehiclelights.ts) as one beam from between the
+    // lamps — a second shadowed spot measured ten times dearer — and ask the pool for
+    // nothing; elsewhere they stay two pool beams.
+    const shadowedHeadlamps = vehicleLights.hasShadowBeam;
     beamPool.begin();
     if (driving && driving.hasLitLamps) {
       for (let g = 0; g < BEAM_GROUPS.length; g++) {
-        beamPool.request(driving, g, driving.beamCount(BEAM_GROUPS[g], false), true);
+        const slots = g === 0 && shadowedHeadlamps ? 0 : driving.beamCount(BEAM_GROUPS[g], false);
+        beamPool.request(driving, g, slots, true);
       }
     }
     for (let g = 0; g < BEAM_GROUPS.length; g++) {
@@ -2375,12 +2380,15 @@ async function boot(): Promise<void> {
     }
     beamPool.resolve(frameDt);
     vehicleLights.beginFrame();
+    if (driving && driving.hasLitLamps && shadowedHeadlamps) {
+      driving.syncProjectedLights(vehicleLights, 'front', 1, true, true);
+    }
     for (let i = 0; i < litVehicles.length; i++) {
       const vehicle = litVehicles[i];
       for (let g = 0; g < BEAM_GROUPS.length; g++) {
         const share = beamPool.share(vehicle, g);
         if (share > 0) {
-          vehicle.syncProjectedLights(vehicleLights, BEAM_GROUPS[g], litGains[i] * share, g === 0 && vehicle !== driving);
+          vehicle.syncProjectedLights(vehicleLights, BEAM_GROUPS[g], litGains[i] * share, g === 0 && vehicle !== driving, false);
         }
       }
     }

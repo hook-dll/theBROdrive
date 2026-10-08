@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
   GRAPHICS_TIERS,
+  shadowsFor,
   vehicleLightSlotsFor,
   type GraphicsQuality,
 } from '../game/settings';
@@ -85,9 +86,51 @@ export function ambientBeamGain(distanceM: number): number {
   return AMBIENT_BEAM_GAIN * (1 - t * t * (3 - 2 * t));
 }
 
+/**
+ * How far the driven car's headlamp shadow reaches, metres.
+ *
+ * Not the beam's own reach: the beam's `distance` is a light cutoff (432-780 m on the
+ * top rung), and three takes the shadow camera's far plane from it, which put the
+ * whole road ahead in the depth pass — 156 draws a frame in the prototype. The beam
+ * is still about half as bright at 100-200 m as at 10 m (decay 0.26-0.3), so a short
+ * shadow would leave lit posts with none; 160 m covers where a post's streak can be
+ * told from the sand, and the 2048 map keeps a texel near 0.2 m out there.
+ */
+const HEADLAMP_SHADOW_RANGE_M = 160;
+const HEADLAMP_SHADOW_MAP = 2048;
+
+/**
+ * Gives `light` a shadow whose far plane is `HEADLAMP_SHADOW_RANGE_M`, not the light's
+ * cutoff. `SpotLightShadow.updateMatrices` reads the far plane from `light.distance`
+ * (three does not export the class to subclass), so the distance is lent a shorter
+ * value for that one call and given back.
+ */
+function limitShadowRange(light: THREE.SpotLight): void {
+  const shadow = light.shadow;
+  const update = shadow.updateMatrices.bind(shadow);
+  shadow.updateMatrices = (target: THREE.Light): void => {
+    const distance = light.distance;
+    light.distance = distance > 0 ? Math.min(distance, HEADLAMP_SHADOW_RANGE_M) : HEADLAMP_SHADOW_RANGE_M;
+    update(target);
+    light.distance = distance;
+  };
+}
+
 export class VehicleLightRig {
   readonly headlightDistanceScale: number;
   private readonly lights: THREE.SpotLight[] = [];
+  /**
+   * The one spotlight that casts a shadow: the driven car's headlamps, as one beam
+   * from between them. Null where the tier draws no sun shadow either.
+   *
+   * Its own light, not a pool slot, and taken OUT of the slot budget: the count of
+   * spots and of shadowed spots is compiled into every lit program, so both are
+   * fixed here, and the total stays the tier's. Measured in the prototype on an M2
+   * Pro: one shadowed headlamp +0.4 ms GPU and ~16 depth draws at night; two cost
+   * +4 ms, which is why the pair is merged rather than shadowed lamp by lamp.
+   */
+  private readonly shadowLight: THREE.SpotLight | null;
+  private shadowClaimed = false;
   private readonly scene: THREE.Scene;
   /** Slots claimed so far this frame; also the next free index. */
   private used = 0;
@@ -100,7 +143,21 @@ export class VehicleLightRig {
     this.headlightDistanceScale = HEADLIGHT_DISTANCE_SCALE[quality];
     // The count is compiled into every lit material, so it is decided here and never
     // again: see `mobileVehicleLightSlots` for what it costs per pixel.
-    const slots = vehicleLightSlotsFor(quality, mobilePresentation);
+    let slots = vehicleLightSlotsFor(quality, mobilePresentation);
+    if (shadowsFor(quality, mobilePresentation) && slots > 1) {
+      const light = new THREE.SpotLight(0xffffff, DORMANT_INTENSITY);
+      limitShadowRange(light);
+      light.shadow.mapSize.set(HEADLAMP_SHADOW_MAP, HEADLAMP_SHADOW_MAP);
+      light.shadow.camera.near = 0.3;
+      light.shadow.bias = -0.0004;
+      light.shadow.normalBias = 0.03;
+      light.castShadow = true;
+      scene.add(light, light.target);
+      this.shadowLight = light;
+      slots -= 1;
+    } else {
+      this.shadowLight = null;
+    }
     for (let i = 0; i < slots; i++) {
       const light = new THREE.SpotLight(0xffffff, DORMANT_INTENSITY);
       light.castShadow = false;
@@ -110,9 +167,14 @@ export class VehicleLightRig {
     this.scene = scene;
   }
 
-  /** Persistent spotlights in the scene. Fixed for the session; see the note above. */
+  /** Persistent pool spotlights in the scene. Fixed for the session; see the note above. */
   get lightCount(): number {
     return this.lights.length;
+  }
+
+  /** Whether the driven car's headlamps go to the shadowed beam instead of the pool. */
+  get hasShadowBeam(): boolean {
+    return this.shadowLight !== null;
   }
 
   /** Beams projected in the frame just assembled. */
@@ -123,6 +185,35 @@ export class VehicleLightRig {
   /** Starts a frame's collection. Nothing is darkened until `endFrame`. */
   beginFrame(): void {
     this.used = 0;
+    this.shadowClaimed = false;
+  }
+
+  /**
+   * Projects the driven car's headlamps into the shadowed beam. Same arguments as
+   * `addBeam`. @returns whether the beam was taken (false on a tier without it).
+   */
+  addShadowBeam(
+    sourceWorld: THREE.Vector3,
+    targetWorld: THREE.Vector3,
+    color: THREE.ColorRepresentation,
+    intensity: number,
+    distance: number,
+    angle: number,
+    penumbra: number,
+    decay: number,
+  ): boolean {
+    const light = this.shadowLight;
+    if (light === null || !(intensity > 0)) return false;
+    this.shadowClaimed = true;
+    light.position.copy(sourceWorld);
+    light.target.position.copy(targetWorld);
+    light.color.set(color);
+    light.intensity = intensity;
+    light.distance = distance;
+    light.angle = angle;
+    light.penumbra = penumbra;
+    light.decay = decay;
+    return true;
   }
 
   /**
@@ -156,15 +247,27 @@ export class VehicleLightRig {
     return true;
   }
 
-  /** Makes every unclaimed slot visually dark without returning to exact zero. */
+  /**
+   * Makes every unclaimed slot visually dark without returning to exact zero. An
+   * unclaimed shadowed beam also stops re-rendering its map (as the sun's does at
+   * night, render/sky.ts): `castShadow` stays on, since it is compiled into every
+   * lit program. One pass is still drawn before the map exists, so its allocation
+   * never waits for the first dark drive.
+   */
   endFrame(): void {
     for (let i = this.used; i < this.lights.length; i++) {
       this.lights[i].intensity = DORMANT_INTENSITY;
+    }
+    const shadowLight = this.shadowLight;
+    if (shadowLight !== null) {
+      if (!this.shadowClaimed) shadowLight.intensity = DORMANT_INTENSITY;
+      shadowLight.shadow.autoUpdate = this.shadowClaimed || shadowLight.shadow.map === null;
     }
   }
 
   clear(): void {
     this.used = 0;
+    this.shadowClaimed = false;
     this.endFrame();
   }
 
@@ -174,6 +277,10 @@ export class VehicleLightRig {
       this.scene.remove(light, light.target);
     }
     this.lights.length = 0;
+    if (this.shadowLight !== null) {
+      this.scene.remove(this.shadowLight, this.shadowLight.target);
+      this.shadowLight.shadow.dispose();
+    }
   }
 
 }

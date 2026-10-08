@@ -153,7 +153,7 @@ async function run(): Promise<void> {
     for (const vehicle of vehicles) {
       for (let g = 0; g < BEAM_GROUPS.length; g++) {
         const share = pool.share(vehicle, g);
-        if (share > 0) vehicle.syncProjectedLights(activeRig, BEAM_GROUPS[g], gain * share, merged);
+        if (share > 0) vehicle.syncProjectedLights(activeRig, BEAM_GROUPS[g], gain * share, merged, false);
       }
     }
     activeRig.endFrame();

@@ -443,8 +443,18 @@ export class VehicleLamps {
    * both lamps' light. Other cars are drawn that way: at the range their pools are
    * seen from, two cones a metre apart are one pool of light, and the pool then
    * carries twice as many cars as it would lamps.
+   *
+   * `shadowed` sends the (merged) beam to the rig's one shadow-casting spotlight
+   * (`VehicleLightRig.addShadowBeam`) instead of a pool slot: the driven car's
+   * headlamps, where the tier draws shadows.
    */
-  syncProjectedLights(rig: VehicleLightRig, group: BeamGroup, gain: number, merged: boolean): void {
+  syncProjectedLights(
+    rig: VehicleLightRig,
+    group: BeamGroup,
+    gain: number,
+    merged: boolean,
+    shadowed: boolean,
+  ): void {
     if (!(gain > 0)) return;
     const { mounts, intensity } = this.beamGroup(group);
     if (mounts.length === 0 || !(intensity > 0)) return;
@@ -459,12 +469,12 @@ export class VehicleLamps {
     const color =
       group === 'front' ? HEADLIGHT_BEAM_TINT : group === 'tail' ? TAILLIGHT_EMISSIVE : REVERSE_LIGHT_EMISSIVE;
     const distanceScale = group === 'front' ? rig.headlightDistanceScale : 1;
-    if (merged) {
-      this.projectBeam(rig, mounts, color, intensity * gain * mounts.length, shape, distanceScale);
+    if (merged || shadowed) {
+      this.projectBeam(rig, mounts, color, intensity * gain * mounts.length, shape, distanceScale, shadowed);
       return;
     }
     for (const mount of mounts) {
-      this.projectBeam(rig, mount, color, intensity * gain, shape, distanceScale);
+      this.projectBeam(rig, mount, color, intensity * gain, shape, distanceScale, false);
     }
   }
 
@@ -515,6 +525,7 @@ export class VehicleLamps {
     intensity: number,
     shape: ProjectedBeamShape,
     distanceScale: number,
+    shadowed: boolean,
   ): void {
     const sourceWorld = this.projectedLightSource;
     const targetWorld = this.projectedLightTarget;
@@ -534,7 +545,8 @@ export class VehicleLamps {
     }
     sourceWorld.applyQuaternion(this.ctx.rootGroup.quaternion).add(this.ctx.rootGroup.position);
     targetWorld.applyQuaternion(this.ctx.rootGroup.quaternion).add(this.ctx.rootGroup.position);
-    rig.addBeam(
+    (shadowed ? rig.addShadowBeam : rig.addBeam).call(
+      rig,
       sourceWorld,
       targetWorld,
       color,

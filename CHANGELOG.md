@@ -3,6 +3,18 @@
 ## Unreleased
 
 ### Added
+- THE DRIVEN CAR'S HEADLAMPS CAST SHADOWS (`render/vehiclelights.ts`,
+  `VehicleLightRig.addShadowBeam`, `HEADLAMP_SHADOW_RANGE_M`). On every rung that
+  draws the sun's shadow, one spotlight of the rig is created casting a shadow and
+  taken out of the pool budget, so the count of spots compiled into every lit program
+  is unchanged and nothing recompiles at dusk or when the lamps come on (checked: 65
+  programs by day, 65 at night with main beam). The driven car's headlamp pair goes to
+  it as one beam from between the lamps (traffic already merges its pairs); a second
+  shadowed spot measured ten times dearer. The shadow reaches 160 m, not the beam's
+  432-780 m cutoff, on a 2048 map; the map stops re-rendering whenever the lamps are
+  off or the day hides them, as the sun's does at night. Measured on an M2 Pro: 16-17
+  depth draws a frame with the lamps on, no GPU change beyond noise. A car stopped in
+  the beam now throws its shadow down the road ahead.
 
 - PERFORMANCE OVERLAY (dev builds, `ui/perfoverlay.ts`). Pause › Performance overlay
   toggles a translucent graph across the top of the screen, remembered between
