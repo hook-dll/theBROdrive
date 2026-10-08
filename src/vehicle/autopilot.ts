@@ -856,6 +856,12 @@ const SHOULDER_PASS_MIN_GAIN_MPS = 1.5;
 const SHOULDER_PASS_STALL_S = 3;
 const SHOULDER_PASS_YIELD_MPS = 3;
 const SHOULDER_PASS_RETRY_M = 200;
+/**
+ * Least acceleration the engine must still have at the passed car's speed for a verge
+ * pass to be started: the minimum gain over the stall clock, 1.5 m/s in 3 s, with the
+ * verge's own drag on top.
+ */
+const SHOULDER_PASS_MIN_ACCEL_MPS2 = 0.6;
 /** The body within this of the pass line counts as out on the verge; the gain clock starts there. */
 const SHOULDER_PASS_OUT_M = 0.5;
 /**
@@ -966,6 +972,8 @@ const OFFROAD_BRAKE_MAX = 0.7;
 /** Brake a developing road departure before loose-surface momentum makes it unrecoverable. */
 const EDGE_STABILITY_LATERAL_M = 1.6;
 const EDGE_STABILITY_LATERAL_SPEED_MPS = 0.4;
+/** How far outside its own commanded line a body has to be for that to be a departure. */
+const EDGE_STABILITY_OVERSHOOT_M = 0.4;
 /** Road recovery needs the decisive pedal that already lets frantic escape loose sand. */
 const OFFROAD_THROTTLE_BAND = 1.2;
 
@@ -3038,10 +3046,21 @@ export class Autopilot {
       currentSurface === SurfaceType.Gravel ||
       currentSurface === SurfaceType.Sand ||
       currentSurface === SurfaceType.Rock;
+    // A DEPARTURE IS THE BODY GOING PAST WHERE IT WAS SENT, NOT PAST A FIXED LATERAL.
+    // At a fixed 1.6 m every planned move outward on a loose road read as one — the
+    // lane centre itself is 1.75 — so on gravel a verge pass, an overtake across the
+    // crown and a racing line easing out were all braked to walking pace the moment the
+    // body moved over at the rate the move was planned at. Reported from play as
+    // frantic drivers that went out onto the verge, dithered there and came back. The
+    // threshold is the commanded line plus `EDGE_STABILITY_OVERSHOOT_M` when the line
+    // is on the body's side, and never nearer than the old 1.6 m: a car sent there and
+    // getting there is driving, a car running wide of it is the departure this brakes.
+    const commandedOut = projection.lateral * this.appliedLateral > 0 ? Math.abs(this.appliedLateral) : 0;
     const edgeStability =
       looseSurface &&
       !offRoad &&
-      Math.abs(projection.lateral) > EDGE_STABILITY_LATERAL_M &&
+      Math.abs(projection.lateral) >
+        Math.max(EDGE_STABILITY_LATERAL_M, commandedOut + EDGE_STABILITY_OVERSHOOT_M) &&
       projection.lateral * lateralSpeed > 0 &&
       Math.abs(lateralSpeed) > EDGE_STABILITY_LATERAL_SPEED_MPS;
     // A plain road departure remains capped at walking speed until the whole car is
@@ -3331,7 +3350,15 @@ export class Autopilot {
       if (
         this.shoulderLeaderGap < Infinity &&
         overhang <= overhangLimit &&
-        this.straightAhead(this.hintS, sightM, config.passCurvature)
+        this.straightAhead(this.hintS, sightM, config.passCurvature) &&
+        // A PASS THIS CAR CAN WIN, OR NONE. The grant used to ask only for room; the
+        // gain clock then gave up, after three seconds out on the verge, every pass the
+        // car could not have won from the start — the verge's own bend speed
+        // (`VERGE_LATERAL_ACCEL`: 60 km/h on the 110 m radius `passCurvature` allows)
+        // or its cap no faster than the car being passed, or an engine with nothing
+        // left at that speed. Entry only: one already out there is judged by its gain.
+        (this.lateral.shoulderPassing ||
+          this.vergePassWinnable(vehicle, currentRoad.grade, sightM))
       ) {
         this.shoulderVergeBlocked = false;
         this.shoulderPassOverhang = overhangLimit;
@@ -5285,6 +5312,23 @@ export class Autopilot {
   /** Surrenders the light switch to the driver until this autopilot is re-engaged. */
   releaseAutomaticHeadlights(): void {
     this.automaticLightsOwned = false;
+  }
+
+  /**
+   * Can this car take the verge past the leader found this step at all: the verge's
+   * bend speed over `sightM` and `SHOULDER_PASS_MAX_MPS` both clear the leader by the
+   * least gain a pass has to show (`SHOULDER_PASS_MIN_GAIN_MPS`), and the engine still
+   * pulls `SHOULDER_PASS_MIN_ACCEL_MPS2` at the leader's speed on this grade.
+   */
+  private vergePassWinnable(vehicle: Vehicle, grade: number, sightM: number): boolean {
+    const need = this.shoulderLeaderSpeed + SHOULDER_PASS_MIN_GAIN_MPS;
+    if (need > SHOULDER_PASS_MAX_MPS) return false;
+    let bend = 0;
+    for (let k = 0; k <= VERGE_BEND_SAMPLES; k++) {
+      bend = Math.max(bend, Math.abs(this.road.curvatureAt(this.hintS + (sightM * k) / VERGE_BEND_SAMPLES)));
+    }
+    if (Math.sqrt(VERGE_LATERAL_ACCEL / Math.max(bend, 1e-4)) < need) return false;
+    return this.accelerationAt(vehicle, this.shoulderLeaderSpeed, grade) >= SHOULDER_PASS_MIN_ACCEL_MPS2;
   }
 
   /**

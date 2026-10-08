@@ -532,6 +532,17 @@
 
 ### Fixed
 
+- FRANTIC VERGE PASSES WORK ON GRAVEL ROADS, AND ARE NOT STARTED WHEN THEY CANNOT BE WON.
+  The loose-road departure brake (`edgeStability`) fired on any body past 1.6 m moving
+  outward at 0.4 m/s — inside the lane, whose centre is 1.75 m — so on gravel, which is
+  much of the road, every planned move outward was braked to walking pace as it began:
+  the verge pass went out, dithered and came back, and crossings and racing lines easing
+  out were braked the same way. A departure is now the body outside its own commanded
+  line by `EDGE_STABILITY_OVERSHOOT_M`, never nearer than the old 1.6 m. And the verge is
+  granted only for a pass the car can win (`vergePassWinnable`): the verge's bend speed
+  and its cap clear the leader by the least gain, and the engine still pulls 0.6 m/s² at
+  the leader's speed on this grade; otherwise the stall clock gave it up after three
+  seconds out there.
 - TRAFFIC PULLS AWAY UP A HILL. At walking pace the pedal was the speed error over the
   mode's band with a 0.2 floor, and through the engine model's part-throttle losses that
   is a few percent of the torque: on the 2110, 0.2 holds a 2.7% grade and 0.33 a 6.6%
