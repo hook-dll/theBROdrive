@@ -188,8 +188,6 @@ interface RigOptions {
   readonly boulderS?: number;
   /** Coordinator grant for the chosen head of an opposing queue. */
   readonly deadlockPermission?: boolean;
-  /** Applies the narrower recovery policy used by ambient road traffic. */
-  readonly trafficRecoveryPolicy?: boolean;
 }
 
 /** Radius and lane of that boulder. Small enough that the escape bias clears it. */
@@ -238,7 +236,6 @@ async function makeRig(options: RigOptions): Promise<Rig> {
   const vehicle = new Vehicle(physics, world, state, scene, origin);
   const autopilot = new Autopilot(road, hazards, physics);
   autopilot.setMode(mode);
-  if (options.trafficRecoveryPolicy) autopilot.setTrafficRecoveryPolicy(true);
   const input = emptyInput();
   const others =
     traffic === null
@@ -762,7 +759,6 @@ const queuedAtBoulder = await measure(
       { s: BOULDER_S + 25, oncoming: true, mode: 'sleeper' },
     ],
     deadlockPermission: true,
-    trafficRecoveryPolicy: true,
     boulderS: BOULDER_S,
   },
   1,
@@ -808,7 +804,6 @@ const offroadGridlock = await measure(
       },
     ],
     deadlockPermission: true,
-    trafficRecoveryPolicy: true,
   },
   1,
   45,

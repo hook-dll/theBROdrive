@@ -116,9 +116,8 @@ const PLATOON_CHANCE = 0.32;
  * own direction — measured on the real road at one in fourteen either way, a frantic
  * driver overtook the player once in twenty minutes. Still an event, not a pack.
  */
-// TEST: raised from 0.14 / 0.03 to see many frantic drivers; revert after testing.
-const FRANTIC_SAME_DIRECTION_SHARE = 0.5;
-const FRANTIC_ONCOMING_SHARE = 0.25;
+const FRANTIC_SAME_DIRECTION_SHARE = 0.14;
+const FRANTIC_ONCOMING_SHARE = 0.03;
 /**
  * WHAT A FRANTIC DRIVER DRIVES, AND WHAT IS UNDER ITS BONNET. Any car the stream can
  * spawn, exactly as it is drawn for every other driver — a man in a hurry is a man in
@@ -230,6 +229,8 @@ const CLOCK_SYNC_S = 1;
 const END_MARGIN_M = 80;
 const TRAFFIC_ID_PREFIX = 'traffic:';
 const DEADLOCK_ROAD_GAP_M = 18;
+/** Two lanes each way: opposing heads further apart across the road than this are not a standoff. */
+const DEADLOCK_WIDE_LATERAL_M = 2 * TRAFFIC_HALF_WIDTH_M + 0.6;
 /**
  * How far an opposing head may have drawn PAST this one and still count as part of
  * the same standoff.
@@ -860,6 +861,17 @@ export class RoadTraffic {
       if (
         Math.hypot(opposingVelocity.x, opposingVelocity.z) >=
         DEADLOCK_STOP_SPEED_MPS
+      ) {
+        continue;
+      }
+      // ON A ROAD WITH TWO LANES EACH WAY THE OPPOSING HEAD IS NOT IN THE WAY by being
+      // level: nobody's bypass there uses the other carriageway, so two cars stopped in
+      // their own carriageways — a queue each side of a jam — are two queues, not a
+      // standoff, and granting one an escape sent it reversing out of a queue. There it
+      // takes bodies that actually meet across the road.
+      if (
+        this.road.lanesPerSideAt(candidate.forwardS) > 1 &&
+        Math.abs(candidate.roadLateral - opposing.roadLateral) > DEADLOCK_WIDE_LATERAL_M
       ) {
         continue;
       }
@@ -1848,7 +1860,6 @@ export class RoadTraffic {
     autopilot.setMode(request.mode);
     autopilot.setSpeedCap(request.speedCap);
     autopilot.setPace(request.pace);
-    autopilot.setTrafficRecoveryPolicy(true);
     autopilot.setEngaged(true);
     const record: TrafficCar = {
       id: request.id,

@@ -363,6 +363,13 @@ const LEFT_PASS_COST = 34;
  */
 const STANDING_SPEED_MPS = 1.5;
 const STANDING_REACH_M = 2;
+/**
+ * How deep into a still obstacle's band the body may already be and still turn out of
+ * it from rest: the planner's own avoidance inflation and a little — a graze, not a
+ * wall. Plus what full lock buys over the remaining road, on this turning radius.
+ */
+const STANDING_SHIFT_M = 0.6;
+const STANDING_TURN_RADIUS_M = 5.5;
 
 function overlaps(
   obstacle: CorridorObstacle,
@@ -408,13 +415,31 @@ function sweptOverlap(
   // Below walking pace, against something that is not moving either, only the
   // destination matters: the wheels are turned before the car rolls, and there is no
   // closing speed left to run out of.
+  //
+  // …AS LONG AS TURNED WHEELS CAN ACTUALLY TAKE THE BODY OUT OF IT. From a standstill
+  // `s` metres short of the thing, full lock moves the nose sideways by about
+  // `s² / 2R` before it gets there; a pile the body only grazes (the planner's own
+  // inflation, `STANDING_SHIFT_M`) is driven off, a fat boulder square in front is
+  // not. Granting the escape for that one told a car with its bumper on a rock that
+  // the line beside it was feasible: it stood on the throttle into the rock, the stall
+  // rule's gentle first rung backed it a metre and a half — still inside the reach —
+  // and it did it again until the ladder ran out. Refused, the corridor is infeasible,
+  // the car is held, and the recovery ladder backs it far enough to turn.
   if (
     speed <= STANDING_SPEED_MPS &&
     obstacle.speed <= SHOULDER_BYPASS_MAX_SPEED &&
     obstacle.s <= STANDING_REACH_M &&
     overlaps(obstacle, from, halfWidth)
   ) {
-    return overlaps(obstacle, to, halfWidth);
+    // Cars are left to the old answer: a dynamic body at the bumper already cuts the
+    // pedal (`bodyScanGap` in the autopilot), and a stopped car is "occupied", not a
+    // wall, so refusing the escape there would only park a queue behind it.
+    const penetration = obstacle.halfWidth + halfWidth - Math.abs(obstacle.lateral - from);
+    const s = Math.max(0, obstacle.s);
+    if (obstacle.movable || penetration <= STANDING_SHIFT_M + (s * s) / (2 * STANDING_TURN_RADIUS_M)) {
+      return overlaps(obstacle, to, halfWidth);
+    }
+    return true;
   }
   const closingShare =
     speed > 0.1 ? Math.min(1, Math.max(0, (speed - obstacle.speed) / speed)) : 1;

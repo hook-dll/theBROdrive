@@ -224,7 +224,6 @@ const turn = new TurnaroundRoad(road, (x, z) => terrain.heightAt(x, z, 0));
   const vehicle = new Vehicle(physics, world, state, new THREE.Scene(), new WorldOrigin());
   const autopilot = new Autopilot(turn, new HazardIndex(), physics);
   autopilot.setMode('sleeper');
-  autopilot.setTrafficRecoveryPolicy(true);
   autopilot.setEngaged(true);
   const input = emptyInput();
   input.brake = 1;

@@ -514,7 +514,6 @@ async function driveHazard(
   const chunk = 'autopilot-bench-hazards';
   hazards.add(chunk, hazard);
   const rig = await makeRig(startS, ROUTE_METRES, hazards);
-  rig.autopilot.setTrafficRecoveryPolicy(true);
   rig.autopilot.setEngaged(true);
   const removeCollider = addHazardCollider(rig, hazard);
   let minDistance = Infinity;
@@ -1390,7 +1389,6 @@ async function checkSideBySide(): Promise<void> {
   pilots[1].setMode('sleeper');
   pilots[2].setMode('sleeper');
   for (const pilot of pilots) {
-    pilot.setTrafficRecoveryPolicy(true);
     pilot.setEngaged(true);
   }
 
@@ -1508,8 +1506,6 @@ async function checkBoxedInHazard(): Promise<void> {
   neighbourInput.handbrake = false;
   driverPilot.setMode('sleeper');
   neighbourPilot.setMode('sleeper');
-  driverPilot.setTrafficRecoveryPolicy(true);
-  neighbourPilot.setTrafficRecoveryPolicy(true);
   driverPilot.setEngaged(true);
   neighbourPilot.setEngaged(true);
 
@@ -1590,7 +1586,6 @@ async function checkWedgedOnRoad(): Promise<void> {
   world.state.cars[state.id] = state;
   const vehicle = new Vehicle(physics, world, state, new THREE.Scene(), new WorldOrigin());
   const autopilot = new Autopilot(road, hazards, physics);
-  autopilot.setTrafficRecoveryPolicy(true);
   const input = emptyInput();
   const point = road.offsetPoint(hazard.s, hazard.lateral);
   const body = physics.world.createRigidBody(

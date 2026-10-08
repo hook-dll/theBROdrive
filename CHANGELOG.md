@@ -347,6 +347,26 @@
 
 ### Changed
 
+- THE TRAFFIC DRIVER SAYS WHAT IT IS DOING AND WHAT HOLDS IT BACK (`vehicle/manoeuvre.ts`).
+  One manoeuvre a step — recover, make-room, offroad, shelter, yield, pass-oncoming,
+  pass-shoulder, pass-middle, bypass, follow, cruise — is decided from the committed plan,
+  and pedal rules read it instead of re-deriving it from their own signal. Every cap on
+  the target speed and on the throttle goes through one arbiter that records the binding
+  rule: `Autopilot.manoeuvre`, `bindingSpeedLimit`, `bindingThrottleLimit`. Behaviour is
+  unchanged apart from the verge-pass fix under Fixed.
+- HURRIED DRIVERS SIZE THE OVERTAKE ON THEIR OWN CAR (`sizePass`, `LEGAL_*`). The legal
+  pass was a constant-speed sum with no acceleration in it and a 1.3 guess on top; it is
+  now the racer's simulation of the real car against the real queue, with a driver's
+  manners: back in 8 m ahead of the car passed, into a gap 8 m plus a second long, 2.5 s
+  of closing to spare. A pass that stops fitting while out there is abandoned the same way
+  a racer's is. Sight of the road for the crossing is still required.
+- EVERY DRIVER LEANS ON THE WHEEL AGAINST WIND AND CAMBER (`laneTrim`, `LANE_TRIM_*`). The
+  lane hold was proportional only, so a steady side push left a steady offset downwind;
+  an integral of the cross-track error, learned only while the line is still and bounded
+  to 3 m/s² of lateral authority, now takes it out in about a second and a half.
+- `Autopilot.setTrafficRecoveryPolicy` is gone: it was written by every caller and read
+  by nothing.
+
 - FRANTIC DRIVERS LIFT FOR A PASS AND FEED THE POWER BACK (`RACER_LIFT_SLEW_FREE`,
   `RACER_SLIP_*`, `RACER_FEED_PER_S` in `vehicle/autopilot.ts`). The friction-circle
   cap answered a steady bend; through a lane change the yaw rate crosses zero and it
@@ -504,6 +524,39 @@
   (`src/render/held.ts`).
 
 ### Fixed
+
+- A CAR WITH ITS BUMPER ON A BOULDER NO LONGER STANDS ON THE THROTTLE INTO IT. At walking
+  pace the planner judged a line round a still obstacle by its destination alone ("the
+  wheels turn before the car rolls"), so a fat rock square in front read as a feasible
+  line beside it: full pedal into the rock, the stall rule's gentle first rung backed
+  the car under two metres — still inside that reach — and it went again until the
+  ladder ran out. The escape now needs the turn to be possible: the body only grazing the
+  obstacle's band (`STANDING_SHIFT_M`) plus what full lock buys over the road left
+  (`s²/2R`, `STANDING_TURN_RADIUS_M`). Otherwise the corridor is infeasible, the car is
+  held, and the recovery ladder backs it far enough to go round. Stopped cars keep the
+  old answer. The `?apdebug` panel shows the manoeuvre and the rules holding speed and
+  pedal.
+- FRANTIC PASSES ON THE VERGE AGAIN. The racer's lift for a lane change (keyed on the
+  line moving across the road) took the power away through the move out onto the verge,
+  while the pass's gain clock (`SHOULDER_PASS_MIN_GAIN_MPS`, 3 s) was already running
+  from the grant, with the car still tucked in at the leader's speed: the pass gave
+  itself up every time and was barred for 200 m. A pass now keeps the slip lift only,
+  and the gain clock starts once the car is out on its line or beside the car it passes
+  (`SHOULDER_PASS_OUT_M`). Opposing-lane passes by frantic drivers get their power back
+  the same way.
+- The frantic stream share is back to 0.14 / 0.03 from a test value of 0.5 / 0.25.
+- AN OPPOSING-QUEUE STANDOFF IS BROKEN AT ONCE, NOT AFTER THIRTY SECONDS. The
+  coordinator's deadlock grant was inert while the head was "yielding" to the very car
+  it was facing, so every standoff waited out `YIELD_PATIENCE_S` first. On a road with
+  two lanes each way the grant now also needs the two heads to actually meet across the
+  road (`DEADLOCK_WIDE_LATERAL_M`): two queues stopped in their own carriageways are not
+  a standoff, and one of them was being sent reversing out of its queue.
+- THE CROSSING GATE PRICES THE CAR IT CAN SEE. The oncoming gap was the nearest of the
+  field, the lane probe and the caller's figure, but its closing speed always came from
+  the field — another car's speed for a probe hit such as a parked trailer. The speed
+  now comes from the same body as the gap.
+- A middle pass keeps its line while it threads (`MIDDLE_PASS_KEEP_M`) instead of
+  swapping with the search's choice when both are clear to the horizon.
 
 - NO MID-DRIVE SHADER LINKS AT THE 20 KM MARKS, SIDETRACKS OR KNOCKED-DOWN PROPS. A
   headed 10-minute drive through a day found a 283 ms and a 237 ms frame before dawn,

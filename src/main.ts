@@ -2616,10 +2616,11 @@ async function boot(): Promise<void> {
     if (autopilotDebug !== null) {
       const laneGap = autopilot.laneBlockDistance;
       autopilotDebug.textContent = autopilot.engaged
-        ? `autopilot ${autopilot.mode} — ${autopilot.activity}\n` +
+        ? `autopilot ${autopilot.mode} — ${autopilot.activity} / ${autopilot.manoeuvre}\n` +
           `lane      home ${autopilot.homeLane}, line ${autopilot.commandedLine.toFixed(2)} m\n` +
           `speed     want ${(autopilot.targetSpeed * 3.6).toFixed(0)}, ` +
             `manoeuvre limit ${(autopilot.manoeuvreSpeed * 3.6).toFixed(0)} km/h\n` +
+          `held by   speed ${autopilot.bindingSpeedLimit}, pedal ${autopilot.bindingThrottleLimit}\n` +
           `own lane  ${
             laneGap < Infinity
               ? `${laneGap.toFixed(0)} m at ${(autopilot.laneBlockSpeed * 3.6).toFixed(0)} km/h`
