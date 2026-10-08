@@ -1220,6 +1220,16 @@ export class Vehicle implements Rebasable {
     return this.drivetrain.gearLabel;
   }
 
+  /** A forward pull cannot come from the gears right now (N, R or mid-shift); see `Drivetrain`. */
+  get forwardDriveInterrupted(): boolean {
+    return this.drivetrain.isForwardDriveInterrupted;
+  }
+
+  /** Pedal for `forceN` of drive at the wheels at the current speed; see `Drivetrain.throttleForWheelForce`. */
+  throttleForDriveForce(forceN: number, reverse = false): number {
+    return this.drivetrain.throttleForWheelForce(forceN, this.forwardSpeedMps(), this.drivenRadius, reverse);
+  }
+
   get speedKmh(): number {
     return Math.abs(this.forwardSpeedMps()) * 3.6;
   }

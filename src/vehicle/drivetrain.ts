@@ -571,6 +571,42 @@ export class Drivetrain {
     return this.gear === GEAR_REVERSE && this.shiftTimer <= 0;
   }
 
+  /**
+   * A forward pull cannot come from the gears right now: neutral or reverse is in, or a
+   * shift is under way. False with no gearbox at all, which has nothing to interrupt.
+   */
+  get isForwardDriveInterrupted(): boolean {
+    return this.gearbox != null && (this.gear < 1 || this.shiftTimer > 0);
+  }
+
+  /**
+   * THE PEDAL THAT PUTS `forceN` ON THE ROAD at `roadSpeed`, in the gear a car pulling
+   * away uses: the engaged forward gear, first from neutral, reverse, or mid-shift, and
+   * reverse when `reverse` is asked. The inverse of `crankTorqueNm` above its pumping
+   * fade, through the gearbox's efficiency, read at the crank speed the wheels give or
+   * idle, whichever is higher: a launch holds the crank at or above idle, so this is
+   * what the pedal needs at most. 1 when no pedal is enough.
+   *
+   * For the traffic driver's hill starts: a proportional pedal at walking pace asks for
+   * a fifth of the pedal, and through `net = (T + friction)·pedal − friction` that is a
+   * few percent of the engine — less than a 5% grade takes to stand still on.
+   */
+  throttleForWheelForce(forceN: number, roadSpeed: number, wheelRadius: number, reverse: boolean): number {
+    const engine = this.engine;
+    const gearbox = this.gearbox;
+    if (engine == null || gearbox == null || forceN <= 0 || !(wheelRadius > 0)) return 0;
+    const ratio = reverse
+      ? Math.abs(gearbox.reverse)
+      : this.ratioOfGear(this.gear >= 1 ? this.gear : 1);
+    const total = ratio * gearbox.finalDrive;
+    if (!(total > 0)) return 1;
+    const crankRad = Math.max(engine.idleRpm / RPM_PER_RAD_PER_SEC, (Math.abs(roadSpeed) / wheelRadius) * total);
+    const rpm = clamp(crankRad * RPM_PER_RAD_PER_SEC, engine.idleRpm, engine.redlineRpm);
+    const netNm = (forceN * wheelRadius) / (total * gearbox.efficiency);
+    const friction = engine.brakingCoeff * crankRad + PUMPING_LOSS_FRACTION * engine.peakTorqueNm;
+    return clamp((netNm + friction) / (this.wotTorqueNm(rpm) + friction), 0, 1);
+  }
+
   /** Direction the selected gear drives the car: 1 forward, -1 reverse, 0 neutral. */
   get gearDirection(): number {
     return this.gearbox == null ? 0 : Math.sign(this.gear);

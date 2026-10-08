@@ -532,6 +532,24 @@
 
 ### Fixed
 
+- TRAFFIC PULLS AWAY UP A HILL. At walking pace the pedal was the speed error over the
+  mode's band with a 0.2 floor, and through the engine model's part-throttle losses that
+  is a few percent of the torque: on the 2110, 0.2 holds a 2.7% grade and 0.33 a 6.6%
+  one. Reported from play as two cars at a mound on a climb rolling back, caught by the
+  rollback brake, lurching, rolling back — until the stall rule had them reverse, and
+  every failed escape a rung further back. Below 6 m/s the pedal is now at least the one
+  that holds the grade and rolling resistance plus a pull of up to 1.2 m/s² toward the
+  target, on the signed speed, through the car's own engine and gearing
+  (`Vehicle.throttleForDriveForce`, `Drivetrain.throttleForWheelForce`); the recovery's
+  reverse and pull-out use the same. And a car whose gears cannot pull yet — coming out
+  of reverse, 0.36 s of shift on the Samara box — is held on the brake instead of
+  released to roll back for it (`Vehicle.forwardDriveInterrupted`).
+- AN ESCAPE ROUND A KNOWN PROP TAKES THE LINE THAT CLEARS IT, UNTIL IT IS PASSED. The
+  escape held a line 3.2 m off the lane for 50 m whatever it had hit: on a narrow road a
+  line past the asphalt, crawled along at walking pace by the departure rule, for fifty
+  metres after a mound a few metres long. With the prop indexed the line is its radius,
+  the body and the planner's margins away from it (`RECOVERY_CLEAR_MARGIN_M`), a rung
+  wider per failed attempt, and it ends when the body is past the prop's far edge.
 - A CROSSING GIVEN UP NEXT TO SOMETHING STOPPED IS NO LONGER BARRED FOR GOOD. The barrier
   after an abandoned crossing ran out only on road covered, and a car that gave way and
   pulled up behind a parked lorry covered none: the opposing lane stayed shut to it until

@@ -1401,6 +1401,16 @@ const THROTTLE_FLOOR = 0.2;
 const HOLD_TARGET_MPS = 1;
 const HOLD_BRAKE = 0.6;
 /**
+ * The launch pedal (see where the throttle is built): below this speed the pedal holds
+ * the grade and pulls toward the target at up to `LAUNCH_ACCEL_MPS2`, closing the gap
+ * over `LAUNCH_TAU_S`. An eighth of a g is a brisk but ordinary pull-away.
+ */
+const LAUNCH_ASSIST_BELOW_MPS = 6;
+const LAUNCH_ACCEL_MPS2 = 1.2;
+const LAUNCH_TAU_S = 1.5;
+/** Below this forward speed a car whose gears cannot pull yet is held on the brake. */
+const LAUNCH_HOLD_MPS = 0.5;
+/**
  * MOST OF THE PEDAL THAT BRAKING FOR SOMETHING IN THE WAY MAY USE.
  *
  * The mode's own `brakeCeiling` is a personality — sleeper 0.55, hurried 0.8, frantic
@@ -1476,6 +1486,8 @@ const RECOVERY_RUNG_CRAWL_MPS = [2.5, 3.2, 4, 4.5] as const;
 const RECOVERY_REVERSE_SLACK_S = 2.5;
 const RECOVERY_PULLOUT_S = 1.6;
 const RECOVERY_REVERSE_BRAKE = 0.72;
+/** The pull-out's least pedal; the launch pedal raises it on a grade. */
+const RECOVERY_PULLOUT_THROTTLE = 0.45;
 /**
  * A car whose tail is boxed in waits this long, in reverse, for the queue behind to
  * ease back (`needsReverseRoom`), before it gives up the reverse and pulls out.
@@ -1515,6 +1527,12 @@ const RECOVERY_REARM_S = 30;
  * overlapped that corridor and drove the first attempt back into the obstruction.
  */
 const RECOVERY_BIAS_M = 3.2;
+/**
+ * With the prop known, the escape line clears it by this much over the planner's own
+ * clearance (radius, body, `AVOID_HYSTERESIS_M`): the wedged-on-road bench's 1.2 m rock
+ * needed 2.8 m of line from its centre, and this puts the line at 3.0.
+ */
+const RECOVERY_CLEAR_MARGIN_M = 0.35;
 /**
  * A MANOEUVRE THAT DID NOT WORK IS NOT WORTH REPEATING UNCHANGED.
  *
@@ -1625,6 +1643,9 @@ export class Autopilot {
   private hazardContactDistance = Infinity;
   /** Road lateral of the prop `hazardDistance` measured: which side it blocks. */
   private hazardLateral = 0;
+  /** Its radius, and the road arclength its far edge reaches. */
+  private hazardRadius = 0;
+  private hazardEndS = 0;
   /** Nearest dynamic body in the driving corridor, metres, from either scan. */
   private obstacleGapValue = Infinity;
   /** Signed along-road speed of the same observed body. */
@@ -1782,6 +1803,8 @@ export class Autopilot {
   private recoveryOffRoad = false;
   private recoveryBias = 0;
   private recoveryBiasUntil = 0;
+  /** Road arclength the escape's prop ends at, plus a body; NaN when no prop was known. */
+  private recoveryPropEndS = Number.NaN;
   /**
    * Rungs of escalation the manoeuvre in progress is using: 0 for a first attempt at
    * a place, one more for each attempt that follows a failed one. Getting away resets
@@ -1999,6 +2022,8 @@ export class Autopilot {
     if (Math.abs(hazard.lateral - this.scanLateral) >= reach) return;
     this.hazardDistance = distance;
     this.hazardLateral = hazard.lateral;
+    this.hazardRadius = hazard.radius;
+    this.hazardEndS = hazard.s + hazard.radius;
     // AND "MY BUMPER IS AGAINST IT" IS A DIFFERENT QUESTION TO "IT IS NEAR MY LINE".
     //
     // The reach above carries the avoidance margin, which is planning slack, not
@@ -4970,6 +4995,7 @@ export class Autopilot {
         vehicle,
         config,
         projection.lateral,
+        ownLaneOffset,
         originX,
         originZ,
         opposingDeadlock,
@@ -4986,6 +5012,7 @@ export class Autopilot {
         dt,
         out,
         forwardSpeed,
+        currentRoad.grade,
         projection.lateral,
         this.recoveryCommitted ? Infinity : gap,
         vehicle,
@@ -5027,12 +5054,36 @@ export class Autopilot {
     // own brakes is a creep into whatever it stopped for, and it walked the car up to
     // a parked obstacle a metre at a time.
     const floor = targetSpeed > 1 ? THROTTLE_FLOOR : 0;
-    out.throttle = this.throttleLimit.reset(
+    let pedal =
       speedError > 0
         ? clamp(speedError / (offRoad ? OFFROAD_THROTTLE_BAND : config.throttleBand), floor, 1)
-        : 0,
-      'speed-error',
-    );
+        : 0;
+    // PULLING AWAY IS A FORCE, NOT A SPEED ERROR. The proportional pedal above is a
+    // fifth of the travel at walking pace, and the engine's net torque at a fifth of the
+    // pedal is a few percent of its curve — less than a 5% grade takes to stand still
+    // on. Reported from play: two cars at a mound on a climb rolled back, were caught by
+    // the rollback brake, lurched, and rolled back again until the stall rule had them
+    // reverse. And the error is read on the speedometer's magnitude, so a car rolling
+    // back asked for LESS pedal the faster it rolled.
+    //
+    // So below `LAUNCH_ASSIST_BELOW_MPS` the pedal is at least the one that holds the
+    // grade and rolling resistance and adds a gentle pull toward the target, read on
+    // the SIGNED speed, through the car's own engine and first gear
+    // (`Vehicle.throttleForDriveForce`). Never less than the proportional answer, and
+    // only when the driver means to move — a target at the hold speed is waited out on
+    // the brake below.
+    if (targetSpeed > HOLD_TARGET_MPS && forwardSpeed < LAUNCH_ASSIST_BELOW_MPS && vehicle.engineRunning) {
+      // Signed, so the term fades continuously through the target instead of holding
+      // the grade against the brake once the car is a little over it.
+      const want = clamp((targetSpeed - forwardSpeed) / LAUNCH_TAU_S, -LAUNCH_ACCEL_MPS2, LAUNCH_ACCEL_MPS2);
+      pedal = Math.max(
+        pedal,
+        vehicle.throttleForDriveForce(
+          vehicle.stats.mass * (GRAVITY * currentRoad.grade + ROLLING_DECEL_MPS2 + want),
+        ),
+      );
+    }
+    out.throttle = this.throttleLimit.reset(pedal, 'speed-error');
     // A RACING DRIVER FEEDS THE THROTTLE IN AS THE CAR STRAIGHTENS. At the limit of
     // the tyres there is no longitudinal grip left for the driven wheels; the pedals-as-
     // switches habit put full power down at the apex of an uphill bend and spun the
@@ -5201,6 +5252,14 @@ export class Autopilot {
       out.throttle = this.throttleLimit.limit(0, 'engine-off');
       out.brake = Math.max(out.brake, speed < CRAWL_SPEED_MPS ? HOLD_BRAKE : out.brake);
     }
+    // A HILL START HOLDS THE BRAKE UNTIL THE GEAR PULLS. Out of reverse or neutral the
+    // gearbox spends its shift time with the clutch open, and a car released for it on a
+    // grade rolls back the whole time before first gear delivers a newton — the lurch
+    // the rollback brake then catches. The brake costs nothing while there is no drive
+    // to fight it, and it comes off the step the gear is in.
+    if (out.throttle > 0 && forwardSpeed < LAUNCH_HOLD_MPS && vehicle.forwardDriveInterrupted) {
+      out.brake = Math.max(out.brake, HOLD_BRAKE);
+    }
     this.racerThrottle = out.throttle;
     this.activityValue = offRoad
       ? 'offroad'
@@ -5293,6 +5352,8 @@ export class Autopilot {
     vehicle: Vehicle,
     config: ModeConfig,
     lateral: number,
+    /** Centre of the lane the driver holds, road lateral; the escape line is measured from it. */
+    ownLaneOffset: number,
     originX: number,
     originZ: number,
     committedDeadlock: boolean,
@@ -5383,8 +5444,30 @@ export class Autopilot {
     // reached 3.55 of them, wedged a second time, and only the SECOND escape — which
     // inherited the bias from the first — got round. A driver winds the wheel while
     // it is backing up.
-    this.recoveryBias =
-      this.recoverySide * (RECOVERY_BIAS_M + this.recoveryEscalation * RECOVERY_BIAS_STEP_M);
+    //
+    // AND IT IS THE LINE THAT CLEARS THE PROP, HELD UNTIL THE PROP IS BEHIND. A fixed
+    // 3.2 m from the lane centre, held for 50 m, was sized for a 1.2 m rock sitting in
+    // the middle of the lane, and for everything else it was either more road than the
+    // prop takes — on a narrow road, a line past the asphalt, which the departure rule
+    // then crawled along at walking pace — or the same detour fifty metres after the
+    // prop had gone by. Reported from play as escapes that got round and then drove on
+    // slowly and carefully, holding up everybody behind. With a prop known, the line is
+    // the planner's own clearance from it (`RECOVERY_CLEAR_MARGIN_M` over the radius,
+    // the body and the avoidance margin), never back across the lane, a rung wider
+    // for each failed attempt, and it lasts until the body is past the prop's far edge.
+    // With nothing known it is the old fixed escape.
+    const escapeStep = this.recoveryEscalation * RECOVERY_BIAS_STEP_M;
+    if (propSide !== 0 && this.recoverySide === propSide) {
+      const clearLine =
+        this.hazardLateral +
+        this.recoverySide * (this.hazardRadius + CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M + RECOVERY_CLEAR_MARGIN_M);
+      this.recoveryBias =
+        this.recoverySide * (Math.max(0, (clearLine - ownLaneOffset) * this.recoverySide) + escapeStep);
+      this.recoveryPropEndS = this.hazardEndS + CAR_HALF_LENGTH_M * 2;
+    } else {
+      this.recoveryBias = this.recoverySide * (RECOVERY_BIAS_M + escapeStep);
+      this.recoveryPropEndS = Number.NaN;
+    }
     this.recoveryBiasUntil = this.travelled + RECOVERY_BIAS_METRES;
     // A boxed-in tail no longer skips the reverse outright: the leg starts and WAITS
     // (`RECOVERY_ROOM_WAIT_S`), and because a reversing car asks for room
@@ -5510,6 +5593,8 @@ export class Autopilot {
     dt: number,
     out: InputFrame,
     forwardSpeed: number,
+    /** Road grade along the driver's direction, rise over run; uphill positive. */
+    grade: number,
     lateral: number,
     gap: number,
     vehicle: Vehicle,
@@ -5546,7 +5631,19 @@ export class Autopilot {
       // reverse is a crawl, not a lunge.
       const back = Math.max(0, -forwardSpeed);
       const cap = RECOVERY_RUNG_REVERSE_MPS[rung]!;
-      out.brake = RECOVERY_REVERSE_BRAKE * clamp((cap - back) / cap, 0, 1) * 0.6;
+      // Never less than what backs the car up the grade behind it, when there is one:
+      // the old pedal alone stalled a nose-down reverse and ended the leg with no room
+      // gained. See the launch pedal in `driveControls`.
+      out.brake = Math.max(
+        RECOVERY_REVERSE_BRAKE * clamp((cap - back) / cap, 0, 1) * 0.6,
+        back < cap
+          ? vehicle.throttleForDriveForce(
+              vehicle.stats.mass *
+                (ROLLING_DECEL_MPS2 - GRAVITY * grade + clamp((cap - back) / LAUNCH_TAU_S, 0, LAUNCH_ACCEL_MPS2)),
+              true,
+            )
+          : 0,
+      );
       this.recoveryReversed += back * dt;
       this.recoveryLegStalled =
         this.recoveryLegElapsed > RECOVERY_LEG_GRACE_S &&
@@ -5593,8 +5690,22 @@ export class Autopilot {
 
     this.recoveryTimer -= dt;
     out.steer = clamp(-this.recoverySide * lock, -1, 1);
-    out.brake = 0;
-    out.throttle = forwardSpeed < RECOVERY_RUNG_CRAWL_MPS[rung]! ? 0.45 : 0;
+    // The same launch pedal as ordinary driving, never less than the old fixed 0.45, and
+    // held on the brake while the gearbox comes out of reverse: released for the shift,
+    // a car on a climb rolled back the whole shift time, was caught by the backward-roll
+    // brake above, and lurched — the rocking reported from play at a mound on a grade.
+    const crawl = RECOVERY_RUNG_CRAWL_MPS[rung]!;
+    out.throttle =
+      forwardSpeed < crawl
+        ? Math.max(
+            RECOVERY_PULLOUT_THROTTLE,
+            vehicle.throttleForDriveForce(
+              vehicle.stats.mass *
+                (GRAVITY * grade + ROLLING_DECEL_MPS2 + clamp((crawl - forwardSpeed) / LAUNCH_TAU_S, 0, LAUNCH_ACCEL_MPS2)),
+            ),
+          )
+        : 0;
+    out.brake = out.throttle > 0 && forwardSpeed < LAUNCH_HOLD_MPS && vehicle.forwardDriveInterrupted ? HOLD_BRAKE : 0;
     // The pull-out is what brings a car back from where the reverse put it, so its
     // own end condition cannot be the indexed prop or the line limit the reverse
     // just crossed. Both ended the manoeuvre on its first tick. A dynamic body still
@@ -5618,7 +5729,12 @@ export class Autopilot {
       // back into the obstacle it just reversed away from — the loop this manoeuvre
       // exists to break. The side itself was committed at `beginRecovery`, so the
       // line has been winding out for the whole manoeuvre rather than starting now.
-      this.recoveryBiasUntil = this.travelled + RECOVERY_BIAS_METRES;
+      // A known prop is held for exactly as far as it lasts; see `beginRecovery`.
+      this.recoveryBiasUntil =
+        this.travelled +
+        (Number.isFinite(this.recoveryPropEndS)
+          ? Math.max(0, this.recoveryPropEndS - this.hintS)
+          : RECOVERY_BIAS_METRES);
     }
   }
 
