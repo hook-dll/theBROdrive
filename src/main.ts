@@ -2617,7 +2617,8 @@ async function boot(): Promise<void> {
       const laneGap = autopilot.laneBlockDistance;
       autopilotDebug.textContent = autopilot.engaged
         ? `autopilot ${autopilot.mode} — ${autopilot.activity} / ${autopilot.manoeuvre}\n` +
-          `lane      home ${autopilot.homeLane}, line ${autopilot.commandedLine.toFixed(2)} m\n` +
+          `lane      home ${autopilot.homeLane}, line ${autopilot.commandedLine.toFixed(2)} m, ` +
+            `committed ${autopilot.lateralCommitment ?? 'none'}\n` +
           `speed     want ${(autopilot.targetSpeed * 3.6).toFixed(0)}, ` +
             `manoeuvre limit ${(autopilot.manoeuvreSpeed * 3.6).toFixed(0)} km/h\n` +
           `held by   speed ${autopilot.bindingSpeedLimit}, pedal ${autopilot.bindingThrottleLimit}\n` +

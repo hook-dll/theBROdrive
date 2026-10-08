@@ -347,6 +347,13 @@
 
 ### Changed
 
+- THE LATERAL MANOEUVRE HAS ONE OWNER (`vehicle/lateral.ts`, `LateralCommitment`). The
+  detour/crossing latch (`commitLane`), the crossing barrier and the verge pass's state
+  (passing, gain clock, giving up, barrier) were a dozen fields written from four places;
+  they are now one state with a kind (`detour`, `crossing`, `shoulder`, `middle`),
+  entered and left in one function. Checked against the old latch on 1.6 million random
+  steps: the same line and the same barrier on every one. The `?apdebug` panel shows the
+  commitment.
 - THE TRAFFIC DRIVER SAYS WHAT IT IS DOING AND WHAT HOLDS IT BACK (`vehicle/manoeuvre.ts`).
   One manoeuvre a step — recover, make-room, offroad, shelter, yield, pass-oncoming,
   pass-shoulder, pass-middle, bypass, follow, cruise — is decided from the committed plan,
@@ -525,6 +532,17 @@
 
 ### Fixed
 
+- A CROSSING GIVEN UP NEXT TO SOMETHING STOPPED IS NO LONGER BARRED FOR GOOD. The barrier
+  after an abandoned crossing ran out only on road covered, and a car that gave way and
+  pulled up behind a parked lorry covered none: the opposing lane stayed shut to it until
+  the stall rule had it reverse out. It now lifts on road or seconds, whichever comes
+  first (`CROSSING_RETRY_S` 3 s, racer 1.5 s); at road speed the distance still decides.
+- A VERGE PASS IS NOT REVOKED BY SOMETHING BEYOND ITS END. The grant asked for five
+  seconds of straight, prop-free verge on every step, so a bend or a prop coming into view
+  at the far end revoked it with the car out beside the leader, where every line back is
+  vetoed by the car alongside. Continuing now asks only for the road the pass still needs
+  — what is left to pass at the current gain, plus the return (`SHOULDER_PASS_RETURN_M`)
+  — never more than the entry figure.
 - A CAR WITH ITS BUMPER ON A BOULDER NO LONGER STANDS ON THE THROTTLE INTO IT. At walking
   pace the planner judged a line round a still obstacle by its destination alone ("the
   wheels turn before the car rolls"), so a fat rock square in front read as a feasible

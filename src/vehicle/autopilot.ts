@@ -17,6 +17,7 @@ import {
   type SpeedLimitSource,
   type ThrottleLimitSource,
 } from './manoeuvre';
+import { LateralCommitment, type LateralKind } from './lateral';
 import type { TrafficField, TrafficNeighbour } from './trafficfield';
 import { RacingLine, type RacingLineBand } from './racingline';
 import { shouldShelter } from './weatherpace';
@@ -730,7 +731,7 @@ const DETOUR_MIN_M = 0.8;
 /**
  * FLOOR on how close a blocker in the driver's own lane must be before the lane is
  * left for it. The real trigger is the CLOSING distance the move itself needs at this
- * rate; see `manoeuvreRoom` in `commitLane`. A few car lengths, because that is the
+ * rate; see `room` in `LateralCommitment.step`. A few car lengths, because that is the
  * only case the sum leaves unanswered — a driver barely closing at all, where the
  * arithmetic says a couple of metres and a driver would still have started moving.
  */
@@ -1206,7 +1207,7 @@ const PASS_APPROACH_REACH = 2;
  * the headway reach, so the headway answer stands; at 20 m/s it is 127 m, and the
  * driver starts reading the queue while it is still seven seconds away from the
  * follower envelope rather than inside it. Planning only, never the lateral move
- * (`passReach` in `commitLane` still times that on the move's own length): it decides
+ * (`passReach` in `LateralCommitment.step` still times that on the move's own length): it decides
  * when the line is looked for, not when the wheel is turned.
  */
 const PASS_APPROACH_CLOSING_S = 6;
@@ -1269,8 +1270,9 @@ const RACER_SLOT_SECONDS = 0.3;
 const RACER_PASS_MARGIN_S = 1;
 /** Opposing line that has to be clear of props beyond the pass itself. */
 const RACER_CROSSING_CLEAR_M = 30;
-/** Road after a given-up pass before a racer tries again; see `CROSSING_RETRY_METRES`. */
+/** Road, or seconds, after a given-up pass before a racer tries again; see `CROSSING_RETRY_METRES`. */
 const RACER_CROSSING_RETRY_M = 20;
+const RACER_CROSSING_RETRY_S = 1.5;
 /**
  * THE LEGAL PASS IS MEASURED TOO, on the same simulation of the driver's own car
  * (`sizePass`), only with a driver's manners: back in a few car lengths ahead of the
@@ -1357,8 +1359,16 @@ const YIELD_PATIENCE_S = 30;
  * Road covered after a crossing has been abandoned before another may be started.
  * Long enough that the car that caused the abandonment is genuinely past, short enough
  * that a driver held up by one oncoming car does not then wait out the whole queue.
+ *
+ * OR SECONDS, WHICHEVER RUNS OUT FIRST (`CROSSING_RETRY_S`). Distance alone never runs
+ * out for a car that has stopped: one that gave up a crossing round a parked lorry and
+ * pulled up behind it covered no road, the opposing lane stayed shut to it for good, and
+ * the stall rule eventually had it reverse out of a perfectly passable situation. The
+ * oncoming car it gave way to is past in a few seconds at any speed; the flicker the
+ * barrier exists for is step to step.
  */
 const CROSSING_RETRY_METRES = 60;
+const CROSSING_RETRY_S = 3;
 /** Recovery is forbidden while any physical traffic occupies this local envelope. */
 const DYNAMIC_BLOCKER_NEARBY_M = 12;
 /** Move this far after losing a dynamic lead before a stop can be called unexplained. */
@@ -1734,18 +1744,27 @@ export class Autopilot {
    * had no commitment at all and any cost wobble flipped it.
    */
   private planLine = 0;
-  /** The manoeuvre in progress: are we out of our lane, on which line, and until when. */
-  private detouring = false;
-  private detourLine = 0;
-  private detourUntilS = 0;
+  /** The lateral manoeuvre committed to, its barriers and the verge pass; see lateral.ts. */
+  private readonly lateral = new LateralCommitment({
+    carHalfWidth: CAR_HALF_WIDTH_M,
+    carHalfLength: CAR_HALF_LENGTH_M,
+    detourMin: DETOUR_MIN_M,
+    triggerFloor: DETOUR_TRIGGER_FLOOR_M,
+    holdMax: DETOUR_MAX_M,
+    releaseMargin: DETOUR_RELEASE_MARGIN_M,
+    minClosing: MIN_CLOSING_MPS,
+    crawl: CRAWL_SPEED_MPS,
+    passAdvantage: PASS_ADVANTAGE_MPS,
+    shoulderMinGain: SHOULDER_PASS_MIN_GAIN_MPS,
+    shoulderStallS: SHOULDER_PASS_STALL_S,
+    shoulderRetryM: SHOULDER_PASS_RETRY_M,
+  });
   private recoveryPhase: 'none' | 'reverse' | 'pullout' = 'none';
   private recoveryTimer = 0;
   /** A deterministic right-of-way escape through an opposing-traffic deadlock. */
   private recoveryCommitted = false;
   /** Seconds this driver has been held at an obstruction by traffic coming the other way. */
   private yieldingFor = 0;
-  /** Road, in metres travelled, before an abandoned crossing may be re-attempted. */
-  private crossingBarredUntil = 0;
   /** Last step's crown-crossing inputs, kept for dev telemetry and the road benches. */
   private lastOncomingGap = Infinity;
   private lastRearClear = false;
@@ -1823,19 +1842,12 @@ export class Autopilot {
    * there is no grant. See SHOULDER_PASS_EDGE_MARGIN_M.
    */
   private shoulderPassOverhang = 0;
-  /** The chosen line is that pass, on the verge beside a moving car. */
-  private shoulderPassing = false;
   /** Road-frame lateral and half width of the car being passed, from the field. */
   private shoulderLeaderLateral = 0;
   private shoulderLeaderHalfWidth = 0;
+  private shoulderLeaderHalfLength = 0;
   private shoulderLeaderGap = Infinity;
   private shoulderLeaderSpeed = 0;
-  /** Speed of the car being passed on the verge, held while it is alongside. */
-  private shoulderPassSpeed = 0;
-  /** A verge pass that stopped gaining; see SHOULDER_PASS_MIN_GAIN_MPS. */
-  private shoulderStallFor = 0;
-  private shoulderYielding = false;
-  private shoulderBarredUntil = 0;
   /** Road, in metres travelled, a body the plan put on the verge is still coming back from it. */
   private vergeReturnUntil = 0;
   /** Last step: the car being passed on the verge was still alongside. */
@@ -1914,6 +1926,7 @@ export class Autopilot {
     this.shoulderLeaderSpeed = neighbour.speed;
     this.shoulderLeaderLateral = neighbour.lateral;
     this.shoulderLeaderHalfWidth = neighbour.halfWidth;
+    this.shoulderLeaderHalfLength = neighbour.halfLength;
   };
   /** Any prop on this side beyond the asphalt, out to where the pass would put the body. */
   private readonly visitShoulderHazard = (hazard: RoadHazard): void => {
@@ -2495,224 +2508,14 @@ export class Autopilot {
   setPassingEnabled(enabled: boolean): void {
     this.passingEnabled = enabled;
   }
+  /** The lateral manoeuvre committed to, or null while the lane is held; see lateral.ts. */
+  get lateralCommitment(): LateralKind | null {
+    return this.lateral.kind;
+  }
   /** True while a racer is threading the middle, between the cars on either side. */
   get middlePassing(): boolean {
     return this.middlePassingValue;
   }
-  /**
-   * The lateral manoeuvre, as a state with an entry and an exit.
-   *
-   * Holding the lane returns the lane centre itself rather than whatever the cost search
-   * preferred this tick, which is the whole point: with nothing in the lane there is no
-   * decision to make and therefore nothing to oscillate. Leaving the lane takes a blocker
-   * in it, close enough to act on, and a line the planner genuinely wants; from then on
-   * the chosen line is held while that blocker is still ahead, and the lane is taken back
-   * once it is behind.
-   *
-   * `laneBlockDistance` is the nearest thing in the driver's OWN lane, which is exactly
-   * the thing a detour or an overtake exists to get past — so it is also the right thing
-   * to end the manoeuvre on. A driver that gets back as soon as its lane is clear may
-   * well meet the next obstacle and move out again, and that is a road with props on it
-   * rather than a fault: the manoeuvre cap bounds how long it can be strung along.
-   */
-  private commitLane(
-    proposed: number,
-    ownLateral: number,
-    laneOffset: number,
-    hintS: number,
-    laneBlockDistance: number,
-    laneBlockSpeed: number,
-    desiredSpeed: number,
-    speed: number,
-    /** Lateral acceleration the commanded line will really be moved with. */
-    lineAccel: number,
-    crossingRefused: boolean,
-    /**
-     * A REAL body, physically probed on the line this driver is actually using, is
-     * closing faster than `HEAD_ON_MARGIN_MPS` right now. This is what a driver
-     * reacts to, not the pre-commit room estimate `crossingRefused` is sized from:
-     * that estimate is deliberately pessimistic while this car is still ABEAM the
-     * one it is passing (see the corridor's own comment on `PASS_ENTRY_MARGIN`), so
-     * gating the abort on it re-asked "should I have started this" of a driver who
-     * cannot currently undo it, and produced a dead stop astride the centre line —
-     * fixed by no longer asking that question of a crossing already under way. But
-     * a crossing already under way still needs to end EARLY when the one thing that
-     * actually matters — a car really coming, really close — shows up, rather than
-     * waiting out `laneIsClear`'s ordinary, unhurried comfort margin below. Measured
-     * in play as passes that no longer stopped dead, but then held the opposing lane
-     * through a real closing car because nothing woke the latch until the passed
-     * leader was a full `manoeuvreRoom + DETOUR_RELEASE_MARGIN_M` behind.
-     */
-    headOn: boolean,
-    /** Outermost line the road allows HERE. A latched one was planned somewhere else. */
-    edgeLimit: number,
-    /**
-     * How far back a racer starts a pass the planner has already approved: from where
-     * a follower would begin to brake, not from the leader's bumper. Carrying its own
-     * speed out is the whole of a momentum pass; measured on seed 545124, waiting for
-     * the ordinary trigger turned an approach at 90 km/h on a car doing 57, with the
-     * opposing lane empty, into two hundred metres of braking to its speed first. Zero
-     * keeps the trigger the move itself decides.
-     */
-    passReach: number,
-  ): number {
-    // COMING HOME IS A MANOEUVRE TOO, so it goes through the search rather than round it.
-    //
-    // Every exit below used to return the lane centre outright, and that was a no-op:
-    // the driver's lane was the one beside the crown and the car was always in it, so
-    // "hold the lane" and "stay where you are" were the same number. With every driver
-    // keeping to the OUTERMOST lane, a car that has just finished a pass — or been
-    // handed a new home lane by a taper — is somewhere else, and returning the centre
-    // outright is a lane change the corridor search never approved: it walks straight
-    // through the refusal to steer into a car alongside. Measured on the boxed-in
-    // bench: the driver commanded the outer lane with a car level in it, and while it
-    // was being dragged over there it crept into the rock it had stopped for.
-    //
-    // So the lane centre is the answer while the body is in that lane, and the PRICED
-    // line is the answer while it is not. This cannot oscillate: the search's own lane
-    // cost pulls every candidate toward home, and the only thing that keeps the car
-    // out is something in the way.
-    const held = Math.abs(ownLateral - laneOffset) > CAR_HALF_WIDTH_M ? proposed : laneOffset;
-    // ROAD THE MANOEUVRE NEEDS, and one number for both ends of the state.
-    //
-    // CLOSE ENOUGH TO ACT ON IS A DISTANCE THE MOVE DECIDES, NOT A CONSTANT.
-    // `DETOUR_TRIGGER_M` is 45 m, and a lateral move of `d` metres at `a` needs
-    // `v · 2·sqrt(d/a)` metres of road: at 20 m/s and the comfortable rate that is
-    // seventy-odd, and at 30 m/s it is over a hundred. So the trigger fired with less
-    // road left than the manoeuvre takes — by construction, at every road speed. The
-    // planner had already proposed the line that clears the obstruction, and this threw
-    // it away until it was too late to use, at which point the swept test correctly
-    // reported that no line could be reached and the driver braked at the thing as
-    // though it were a wall. Reported from play as cars driving into an obstruction and
-    // laying siege to it before eventually getting round.
-    //
-    // A driver starts moving over when the obstruction is as far ahead as the move is
-    // long, plus a body length so the line arrives before the bumper does.
-    //
-    // AND "AS FAR AHEAD AS THE MOVE IS LONG" IS MEASURED IN CLOSING DISTANCE. A rock
-    // closes at the speed the car is doing and a slower car closes at the difference,
-    // so timing both on the speedometer made every overtake begin a lifetime early:
-    // sixty-odd metres behind a leader four metres a second slower, where the gap is
-    // fifteen seconds of closing. Reported from play — on the two-lane road the pass
-    // starts a long way back, and the driver never does the closing-up it is told to.
-    //
-    // The floor is a few car lengths rather than the old forty-five for the same
-    // reason: forty-five metres of gap to a slower car is not "close enough to act on",
-    // it is a comfortable following distance, and a floor that large simply reinstated
-    // the defect for every moving leader.
-    //
-    // The RELEASE is the same distance plus a margin, and it has to be: with a fixed
-    // 55 m release against a trigger that can now fire at a hundred, a manoeuvre begun
-    // in good time would have been abandoned on the very next step for being begun too
-    // early. The shift is taken from whichever line the state owns, so neither end of
-    // the manoeuvre moves while it is in progress.
-    const manoeuvreShift = Math.abs((this.detouring ? this.detourLine : proposed) - laneOffset);
-    const manoeuvreClosing = Math.max(speed - Math.max(0, laneBlockSpeed), MIN_CLOSING_MPS);
-    const manoeuvreRoom = Math.max(
-      DETOUR_TRIGGER_FLOOR_M,
-      passReach,
-      manoeuvreClosing * 2 * Math.sqrt(manoeuvreShift / Math.max(lineAccel, 1e-3)) +
-        CAR_HALF_LENGTH_M * 2,
-    );
-    const committedCrossesCrown =
-      this.detouring && this.detourLine * Math.sign(laneOffset || -1) < -CAR_HALF_WIDTH_M * 0.5;
-    if (!this.detouring) {
-      const wantsOut = Math.abs(proposed - laneOffset) >= DETOUR_MIN_M;
-      const blockerClose = laneBlockDistance < manoeuvreRoom;
-      if (wantsOut && blockerClose) {
-        this.detouring = true;
-        this.detourLine = proposed;
-        this.detourUntilS = hintS + DETOUR_MAX_M;
-      }
-      return this.detouring ? this.detourLine : held;
-    }
-    // A LATCHED LINE BELONGS TO THE ROAD IT WAS CHOSEN ON.
-    //
-    // The commitment is a number of metres from the centreline, and the road it was
-    // chosen on can be twice as wide as the road the car is on a hundred metres later:
-    // a line 5.5 m out is the outer lane of a dual carriageway and the desert beside a
-    // single one. Measured on the real road: cars holding lines their current asphalt
-    // does not reach, ending up twenty-four metres out in the sand. The manoeuvre is
-    // re-decided rather than clamped — a detour that no longer fits is not a detour.
-    if (Math.abs(this.detourLine) > edgeLimit) {
-      this.detouring = false;
-      return held;
-    }
-    // A MANOEUVRE ON THE WRONG SIDE OF THE ROAD IS NEVER LATCHED.
-    //
-    // The latch exists so a detour is not re-argued every fixed step, and for a
-    // manoeuvre inside this driver's own carriageway that is exactly right. On the
-    // OPPOSING side it is a way to hold a decision after its reason has expired: the
-    // crossing gate is re-checked every step against the car coming the other way, and
-    // while the latch held, the answer changing from "clear" to "here it comes" had no
-    // effect at all. Measured on the real road: two opposing drivers each committed to
-    // a crossing while the other was far away, both kept it as they converged, and met.
-    //
-    // So a crossing survives while the planner still offers one, AND while nothing on
-    // the line it is using is actually closing. Coming back is handled by the
-    // ordinary line rate, with the head-on escape floor doing the last, urgent part
-    // of it — but the escape floor only speeds up a return already under way; it
-    // cannot start one, which is what `headOn` is for here.
-    //
-    // COMING HOME IS NOT AN ABANDONMENT, AND IT DOES NOT NEED ITS OWN GATE.
-    //
-    // Every exit below asks a QUESTION about the manoeuvre — is it refused, is
-    // something closing, is the lane clear — and only then hands the answer to the
-    // latch. But the search this driver is latched OVER already answers all of
-    // those every single step: `proposed` is its cheapest admissible line, chosen
-    // fresh, with no memory of the crossing at all. If that fresh answer is already
-    // this driver's own lane, every reason to be out here has already gone —
-    // whatever combination of "the passed car cleared the abeam window" and "the
-    // lane ahead reads clear" made it so — and there is nothing left for a separate
-    // gate to re-confirm. Waiting for `laneIsClear` below to notice independently
-    // only adds its own margin on top of a decision the search already made,
-    // measured in play as a car that had plainly finished a pass coasting the
-    // crown for several car-lengths before the line so much as started home.
-    if (committedCrossesCrown && proposed === laneOffset) {
-      this.detouring = false;
-      return held;
-    }
-    if (committedCrossesCrown && (crossingRefused || headOn)) {
-      this.detouring = false;
-      // AND IT STAYS ABANDONED FOR A WHILE. The gate is re-asked every fixed step, so
-      // a car coming the other way that is only just too close flickers the answer —
-      // and each flicker was a fresh crossing, a fresh commitment and a fresh
-      // indicator. Measured on the overtake bench: eighty indicator changes in one
-      // manoeuvre where the driver should have signalled twice.
-      this.crossingBarredUntil =
-        this.travelled + (MODES[this.modeValue].racer ? RACER_CROSSING_RETRY_M : CROSSING_RETRY_METRES);
-      return held;
-    }
-    // COMING BACK IS "THE LANE I LEFT IS NO LONGER HOLDING ME UP", NOT "IT IS EMPTY
-    // FOR FIFTY METRES".
-    //
-    // On a single-lane road those are the same sentence. On a four-lane one they are
-    // not: a driver that has just passed one slow car with another one sixty metres
-    // further on returns to its lane, closes on it, and goes straight back out. That
-    // is the weave a real dual carriageway does not have — drivers sort themselves by
-    // speed and stay sorted. So a manoeuvre inside the driver's OWN carriageway is
-    // held while the lane it came from still holds something materially slower than
-    // this driver: the passing lane is being USED, not borrowed, and the cap is
-    // renewed for as long as that stays true.
-    //
-    // A crossing is never held on this. The opposing lane belongs to somebody coming
-    // the other way, and the same rule there is a driver sitting in it through a whole
-    // queue.
-    const laneStillSlow =
-      !committedCrossesCrown &&
-      laneBlockDistance < Number.POSITIVE_INFINITY &&
-      laneBlockSpeed > CRAWL_SPEED_MPS &&
-      laneBlockSpeed < desiredSpeed - PASS_ADVANTAGE_MPS;
-    if (laneStillSlow) this.detourUntilS = hintS + DETOUR_MAX_M;
-    const laneIsClear =
-      !(laneBlockDistance < manoeuvreRoom + DETOUR_RELEASE_MARGIN_M) && !laneStillSlow;
-    if (laneIsClear || hintS > this.detourUntilS) {
-      this.detouring = false;
-      return held;
-    }
-    return this.detourLine;
-  }
-
   /** Supplies the road distance to the nearest approaching vehicle. */
   setOncomingGap(oncomingGap: number): void {
     this.oncomingGap = oncomingGap >= 0 ? oncomingGap : Infinity;
@@ -2844,9 +2647,7 @@ export class Autopilot {
     if (!engaged) {
       this.appliedLateral = 0;
       this.planLine = 0;
-      this.detouring = false;
-      this.detourLine = 0;
-      this.detourUntilS = 0;
+      this.lateral.reset(0);
     }
   }
 
@@ -2894,11 +2695,10 @@ export class Autopilot {
       this.planLine = projection.lateral;
       // A fresh engagement has no manoeuvre behind it; inheriting one from a previous
       // drive would have the car commit to a detour chosen for another road position.
-      this.detouring = false;
-      this.detourLine = projection.lateral;
-      this.detourUntilS = 0;
+      this.lateral.reset(projection.lateral);
       this.planOverridden = false;
     }
+    this.lateral.tick(dt);
     this.hintS = projection.s;
     this.hintValid = true;
     this.asphaltHalfWidth = this.road.halfWidthAt(this.hintS);
@@ -3293,7 +3093,7 @@ export class Autopilot {
     /**
      * A REAL body on the line this driver is actually using, closing faster than a
      * driver would read as "going the same way as a slightly slower car". Computed
-     * here — before the corridor plan, not after it — because `commitLane` needs it
+     * here — before the corridor plan, not after it — because the lateral commitment needs it
      * to know when to give up a crossing already in progress; see its own comment.
      */
     const headOn =
@@ -3455,9 +3255,9 @@ export class Autopilot {
       this.passingEnabled &&
       !offRoad &&
       !recovering &&
-      (passUrge || this.shoulderPassing) &&
+      (passUrge || this.lateral.shoulderPassing) &&
       // A given-up pass keeps the verge only until it is out from alongside.
-      (this.shoulderYielding ? this.shoulderAlongside : this.travelled >= this.shoulderBarredUntil) &&
+      (this.lateral.shoulderYielding ? this.shoulderAlongside : !this.lateral.shoulderBarred(this.travelled)) &&
       // The sand is not a lane and rock is not a verge; the grader's spoil on a gravel
       // road IS the road's own material, and the room test below sizes the pass on its
       // 1.1 m strip anyway, so only the two surfaces that are genuinely unfit are barred.
@@ -3469,11 +3269,32 @@ export class Autopilot {
       this.shoulderSideSign = Math.sign(ownLaneOffset) || -1;
       this.shoulderLeaderGap = Infinity;
       this.trafficField.forEachNear(horizon, 0, this.visitShoulderLeader);
-      const sightM = clamp(
+      // THE DECISION TO GO ASKS FOR FIVE SECONDS OF VERGE; THE DECISION TO KEEP GOING
+      // ONLY FOR WHAT IS LEFT OF THE PASS. Re-asked at the full figure every step, a
+      // prop or a bend coming into view at the far end of the window revoked the grant
+      // with the car out beside the leader: the verge line went inadmissible, every line
+      // back was vetoed by the car alongside, and nothing admissible is a full stop — on
+      // loose ground, beside a moving car, for something a hundred metres beyond where
+      // the pass would have ended.
+      const entrySightM = clamp(
         speed * SHOULDER_PASS_SIGHT_S,
         SHOULDER_PASS_SIGHT_MIN_M,
         SHOULDER_PASS_SIGHT_MAX_M,
       );
+      let sightM = entrySightM;
+      if (this.lateral.shoulderPassing && this.shoulderLeaderGap < Infinity) {
+        const leftToPass =
+          this.shoulderLeaderGap +
+          2 * this.shoulderLeaderHalfLength +
+          vehicle.modelMeasure.halfExtents[2] +
+          RACER_CUT_IN_M;
+        const gain = Math.max(speed - this.shoulderLeaderSpeed, SHOULDER_PASS_MIN_GAIN_MPS);
+        sightM = clamp(
+          (speed * leftToPass) / gain + SHOULDER_PASS_RETURN_M,
+          SHOULDER_PASS_SIGHT_MIN_M,
+          entrySightM,
+        );
+      }
       // The line that clears the leader's real flank, and the verge this road has to
       // fit it on.
       const overhangLimit = shoulderWidthM(currentSurface) + SHOULDER_PASS_EDGE_MARGIN_M;
@@ -3726,14 +3547,14 @@ export class Autopilot {
      *
      * The reference shift is a lane's worth rather than the line the planner has not
      * proposed yet; being a little conservative here asks for a slightly brisker rate
-     * than the real shift needs, and the trigger in `commitLane` uses the real one.
+     * than the real shift needs, and the trigger in `LateralCommitment.step` uses the real one.
      *
      * AND THE DEADLINE IS SET BY CLOSING SPEED, NOT BY THE SPEEDOMETER. A rock is
      * arriving at the speed the car is doing; a car in the lane ahead is arriving at
      * the DIFFERENCE, which behind a leader four metres a second slower is a sixth of
      * it. Priced on the speedometer, a forty-metre gap to a moving leader asked for
      * 4.5 m/s² — the whole grip share — so an overtake was steered like an escape and,
-     * worse, the trigger in `commitLane` sized on that rate fired sixty-odd metres
+     * worse, the trigger in `LateralCommitment.step` sized on that rate fired sixty-odd metres
      * back. Reported from play: on a two-lane road the pass starts a long way behind
      * the car it is passing, with none of the closing-up that was asked for.
      */
@@ -3777,7 +3598,7 @@ export class Autopilot {
       config.lanePasses ||
       (lanesPerSide === 1 && config.overtakes) ||
       ownLaneObstructed ||
-      this.detouring;
+      this.lateral.active;
     const lateralFreedom = entitledToLeaveLane
       ? Number.POSITIVE_INFINITY
       : Math.max(LANE_KEEP_FREEDOM_M, Math.abs(projection.lateral - ownLaneOffset));
@@ -3874,7 +3695,7 @@ export class Autopilot {
     const mayCrossCrown =
       this.passingEnabled &&
       lanesPerSide === 1 &&
-      this.travelled >= this.crossingBarredUntil &&
+      !this.lateral.crossingBarred(this.travelled) &&
       (config.overtakes || stillBlocker) &&
       (stillBlocker ||
         !this.corridorFeasible ||
@@ -4138,31 +3959,42 @@ export class Autopilot {
       }
     }
     // The manoeuvre decides the line; the search offers only a proposal to it, and the
-    // commitment it hands back is what the car actually steers to. See `commitLane`.
+    // commitment it hands back is what the car actually steers to. See lateral.ts.
     // A pass through the middle follows the room as it is made: the line is re-measured
     // every step from where the two cars actually are.
-    if (this.middlePassAllowed && this.detouring && proposal.line === this.middleLine) {
-      this.detourLine = this.middleLine;
-    }
-    const committedLine = this.commitLane(
-      proposal.line,
-      projection.lateral,
-      ownLaneOffset,
-      this.hintS,
-      proposal.laneBlockDistance,
-      proposal.laneBlockSpeed,
+    const proposalIsMiddle = this.middlePassAllowed && proposal.line === this.middleLine;
+    if (proposalIsMiddle && this.lateral.active) this.lateral.retarget(this.middleLine, 'middle');
+    const proposedKind: LateralKind = proposal.usesOncomingLane
+      ? 'crossing'
+      : proposal.usesShoulder && this.shoulderPassAllowed && proposal.laneBlockSpeed > CRAWL_SPEED_MPS
+        ? 'shoulder'
+        : proposalIsMiddle
+          ? 'middle'
+          : 'detour';
+    const committedLine = this.lateral.step({
+      proposed: proposal.line,
+      proposedKind,
+      ownLateral: projection.lateral,
+      laneOffset: ownLaneOffset,
+      hintS: this.hintS,
+      travelled: this.travelled,
+      laneBlockDistance: proposal.laneBlockDistance,
+      laneBlockSpeed: proposal.laneBlockSpeed,
       desiredSpeed,
       speed,
       lineAccel,
-      proposal.crossingRefused || proposal.crossingAbandoned || !mayCrossCrown,
+      crossingRefused: proposal.crossingRefused || proposal.crossingAbandoned || !mayCrossCrown,
       headOn,
-      staticAvoidLine,
+      edgeLimit: staticAvoidLine,
       // A pass on the verge closes up first: it is a squeeze past the car, not a
       // momentum pass begun from where a follower would brake.
-      config.racer && passUrge && !proposal.usesShoulder
-        ? PASS_APPROACH_REACH * (FOLLOW_STANDOFF_M + speed * comfortHeadwayS)
-        : 0,
-    );
+      passReach:
+        config.racer && passUrge && !proposal.usesShoulder
+          ? PASS_APPROACH_REACH * (FOLLOW_STANDOFF_M + speed * comfortHeadwayS)
+          : 0,
+      retryM: config.racer ? RACER_CROSSING_RETRY_M : CROSSING_RETRY_METRES,
+      retryS: config.racer ? RACER_CROSSING_RETRY_S : CROSSING_RETRY_S,
+    });
     // An escape that has already failed here is allowed off the asphalt, a rung at a
     // time: the ordinary clamp is the asphalt, which is also the width the thing it
     // is escaping blocks. See RECOVERY_BIAS_STEP_M.
@@ -4215,7 +4047,7 @@ export class Autopilot {
     }
     this.planOverridden = plan.admissible && !commitmentHolds && searchFeasible;
     if (!plan.admissible || this.planOverridden) {
-      this.detouring = false;
+      this.lateral.release();
       plan = proposal;
       desiredLine = plan.line;
     }
@@ -4345,34 +4177,17 @@ export class Autopilot {
       if ((obstacle.lateral - projection.lateral) * this.shoulderSideSign >= 0) continue;
       passedAlongside = Math.min(passedAlongside, obstacle.speed);
     }
-    if (this.shoulderPassAllowed && plan.laneBlockSpeed > CRAWL_SPEED_MPS && this.planUsesShoulder) {
-      this.shoulderPassing = true;
-      this.shoulderPassSpeed = plan.laneBlockSpeed;
-    } else if (this.shoulderPassing && this.planUsesShoulder && passedAlongside < Infinity) {
-      this.shoulderPassSpeed = passedAlongside;
-    } else {
-      this.shoulderPassing = false;
-    }
     this.shoulderAlongside = passedAlongside < Infinity;
-    if (this.shoulderPassing) {
-      // The gain is judged from the moment the car is out there to gain it — on its
-      // line or already beside the car it passes — not from the grant. At the grant it
-      // is tucked in behind at the leader's own speed, the move out takes a couple of
-      // seconds, and counting those spent most of the clock before a pass could start.
-      const outOnVerge =
-        this.shoulderAlongside || Math.abs(projection.lateral - desiredLine) <= SHOULDER_PASS_OUT_M;
-      this.shoulderStallFor =
-        outOnVerge && speed - this.shoulderPassSpeed < SHOULDER_PASS_MIN_GAIN_MPS
-          ? this.shoulderStallFor + dt
-          : outOnVerge ? 0 : this.shoulderStallFor;
-      if (!this.shoulderYielding && this.shoulderStallFor > SHOULDER_PASS_STALL_S) {
-        this.shoulderYielding = true;
-        this.shoulderBarredUntil = this.travelled + SHOULDER_PASS_RETRY_M;
-      }
-    } else {
-      this.shoulderStallFor = 0;
-      this.shoulderYielding = false;
-    }
+    this.lateral.stepShoulder(
+      this.shoulderPassAllowed,
+      this.planUsesShoulder,
+      plan.laneBlockSpeed,
+      passedAlongside,
+      this.shoulderAlongside || Math.abs(projection.lateral - desiredLine) <= SHOULDER_PASS_OUT_M,
+      speed,
+      dt,
+      this.travelled,
+    );
     // Through the middle for as long as the car being passed is still alongside or
     // ahead on the line the planner chose; see MIDDLE_PASS_*.
     let middleAlongside = false;
@@ -4959,13 +4774,14 @@ export class Autopilot {
     }
     targetSpeed = this.speedLimit.limit(this.corridorSqueezeSpeed, 'squeeze');
     // A pass on the verge is a squeeze past a moving car, taken at a modest advantage.
-    if (this.shoulderPassing) {
+    const lateral = this.lateral;
+    if (lateral.shoulderPassing) {
       targetSpeed = this.speedLimit.limit(
         Math.min(
           SHOULDER_PASS_MAX_MPS,
-          this.shoulderYielding
-            ? Math.max(0, this.shoulderPassSpeed - SHOULDER_PASS_YIELD_MPS)
-            : this.shoulderPassSpeed + SHOULDER_PASS_ADVANTAGE_MPS,
+          lateral.shoulderYielding
+            ? Math.max(0, lateral.shoulderPassSpeed - SHOULDER_PASS_YIELD_MPS)
+            : lateral.shoulderPassSpeed + SHOULDER_PASS_ADVANTAGE_MPS,
         ),
         'pass-shoulder',
       );
@@ -4991,7 +4807,7 @@ export class Autopilot {
       targetSpeed = this.speedLimit.limit(
         Math.min(
           Math.sqrt(VERGE_LATERAL_ACCEL / Math.max(bend, 1e-4)),
-          this.detouring && this.corridorBlockSpeed <= CRAWL_SPEED_MPS ? VERGE_BYPASS_STILL_MPS : Infinity,
+          this.lateral.active && this.corridorBlockSpeed <= CRAWL_SPEED_MPS ? VERGE_BYPASS_STILL_MPS : Infinity,
         ),
         'verge',
       );
@@ -5038,7 +4854,7 @@ export class Autopilot {
       offRoad,
       sheltering: this.shelteringValue,
       yielding: this.yielding,
-      shoulderPassing: this.shoulderPassing,
+      shoulderPassing: this.lateral.shoulderPassing,
       middlePassing: this.middlePassingValue,
       oncomingPassing:
         this.planUsesOncomingLane || (plan.usesOncomingLane && plan.laneBlockSpeed > CRAWL_SPEED_MPS),
