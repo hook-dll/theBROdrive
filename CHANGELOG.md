@@ -295,6 +295,17 @@
 
 ### Changed
 
+- CAR LAMP LENSES CAST NO SHADOW, AND WHEELS SHARE ONE MATERIAL (`render/carmodel.ts`,
+  `prepareMaterials`, `lensNames`, `shareWheelMaterials`). A lens is a skin on the
+  bodywork, so its shadow fell inside the body's own, yet each one was a draw of its
+  own in the sun's depth pass: 10.4 of 27.8 shadow draws a frame, over a third. Every
+  lens named by `CarModelDef.lights`, plus the unswitched `rear_passive` and
+  `front_auxiliary`, now stays out of it; a multi-slot mesh that also carries paint
+  keeps casting. Wheels came with a material per wheel node, four identical copies per
+  set, and the Soviet sets all paint from one palette: they now share one material
+  per distinct finish (36 copies on 16 cars became 1). Measured with 19 cars in view:
+  100 of 340 car meshes cast (was 357 of 430 with 21), 13.8 materials per car (was 16),
+  no lens in the depth pass.
 - TRUNK CELLS COUNT LEFT TO RIGHT. Seen from behind the car, cell 1 used to be the
   top-right one; it is now top-left, 1–4 across the top row and 5–8 across the bottom
   (`columnSign` in `vehicle/trunk.ts`, shared by the drawn grid and the aim ray). Cell

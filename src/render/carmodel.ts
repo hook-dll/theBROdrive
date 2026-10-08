@@ -585,18 +585,85 @@ function boundsOf(object: THREE.Object3D): THREE.Box3 {
  * `bodywork` is a caller's fact, not a mesh-name test: `buildTemplate` passes the
  * body scene and `takeOwnWheels` the wheel wrappers, so no pack or mesh name can
  * slip past it.
+ *
+ * Lamp lenses cast nothing either. A lens is a skin on the bodywork, so its shadow
+ * falls inside the body's own and changes no pixel — but each one was a draw of its
+ * own in the sun's depth pass, which made lenses over a third of that pass. `lenses`
+ * names them (`lensNames`); a mesh that carries a lens AND paint in one buffer (a
+ * multi-slot body) keeps casting, because its paint must.
  */
-function prepareMaterials(root: THREE.Object3D, bodywork: boolean): void {
+function prepareMaterials(root: THREE.Object3D, bodywork: boolean, lenses: ReadonlySet<string>): void {
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
+    const materials = materialsOf(child);
     // Glass is the one surface that must not cast: a window throws a pane-shaped
     // black slab across the ground, which is the shadow of a wall, not of a window.
-    child.castShadow = !materialsOf(child).includes(carGlassMaterial());
+    const lens = lenses.has(child.name) || materials.every((material) => lenses.has(material.name));
+    child.castShadow = !lens && !materials.includes(carGlassMaterial());
     child.receiveShadow = !bodywork;
     // Wheels are closed solids, so their lit face is culled from the depth map and
     // the depth stored under them is metres away: they can receive safely, and a
     // wheel darkening under its own arch is worth having.
-    for (const material of materialsOf(child)) material.shadowSide = THREE.BackSide;
+    for (const material of materials) material.shadowSide = THREE.BackSide;
+  });
+}
+
+/**
+ * Lenses no control ever switches: the SAAS pack's red rear fog lamp and its front
+ * auxiliary lamps. They are lenses all the same, so they cast no shadow either.
+ */
+const UNSWITCHED_LENS_NODES: readonly string[] = ['rear_passive', 'front_auxiliary'];
+
+/** Every node or material name that is a lamp lens on `def`: bound ones and unswitched. */
+function lensNames(def: CarModelDef): Set<string> {
+  const names = lampNames(def);
+  for (const name of UNSWITCHED_LENS_NODES) names.add(name);
+  return names;
+}
+
+/**
+ * One material per distinct wheel finish, shared by every wheel of every model.
+ *
+ * A pack exports a material per wheel NODE, so four identical copies came with each
+ * set, and the Soviet sets all paint their wheels from the one palette. Nothing about
+ * a wheel's material is ever written per car — no dirt, no paint, no lamp — so the
+ * copies bought nothing and cost a material switch on every wheel draw.
+ */
+const sharedWheelMaterials = new Map<string, THREE.Material>();
+
+/**
+ * What makes two materials draw identically: every own property except identity,
+ * with textures compared by object. Null when the material carries its own shader
+ * hooks, which no signature can compare.
+ */
+function materialSignature(material: THREE.Material): string | null {
+  const parts: string[] = [material.type];
+  for (const key of Object.keys(material).sort()) {
+    if (key === 'uuid' || key === 'id' || key === 'name' || key === 'version' || key.startsWith('_')) continue;
+    const value: unknown = (material as unknown as Record<string, unknown>)[key];
+    if (typeof value === 'function') return null;
+    let text: string;
+    if (value instanceof THREE.Texture) text = `tex:${value.uuid}`;
+    else if (value instanceof THREE.Color) text = `#${value.getHexString()}`;
+    else if (value !== null && typeof value === 'object') text = JSON.stringify(value);
+    else text = String(value);
+    parts.push(`${key}=${text}`);
+  }
+  return parts.join(';');
+}
+
+function shareWheelMaterials(root: THREE.Object3D): void {
+  const share = (material: THREE.Material): THREE.Material => {
+    const signature = materialSignature(material);
+    if (signature === null) return material;
+    const shared = sharedWheelMaterials.get(signature);
+    if (shared) return shared;
+    sharedWheelMaterials.set(signature, material);
+    return material;
+  };
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    child.material = Array.isArray(child.material) ? child.material.map(share) : share(child.material);
   });
 }
 
@@ -1133,7 +1200,8 @@ function takeOwnWheels(
     // rim-face depth are independent of the corrected outside diameter.
     wrapper.scale.set(s, s * wheelScale, s * wheelScale);
     wrapper.add(align);
-    prepareMaterials(wrapper, false);
+    prepareMaterials(wrapper, false, new Set());
+    shareWheelMaterials(wrapper);
     objects.set(id, wrapper);
   }
 
@@ -1454,7 +1522,7 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   // this replaces.
   creaseCarBodyNormals(scene);
 
-  prepareMaterials(scene, true);
+  prepareMaterials(scene, true, lensNames(def));
   stampCarBodyPositions(scene, def);
 
   // Geometry is now expressed directly in chassis-local metres; keeping the source
@@ -1885,4 +1953,5 @@ export function disposeCarModelCache(): void {
   gltf = null;
   fbx = null;
   glassMaterial = null;
+  sharedWheelMaterials.clear();
 }
