@@ -295,6 +295,16 @@
 
 ### Changed
 
+- SUN SHADOWS REACH TWO TO FOUR TIMES FURTHER AHEAD (`render/sky.ts`,
+  `SHADOW_BEHIND_M`, `applyShadowBox`; `GraphicsTier.sunShadowMapSize`). The shadow
+  box was centred on the camera, so half of it covered road already driven and the
+  shadows ahead ended 62-80 m out: a pole, a car or a house further on stood on bare
+  ground. The box now leans the way the camera looks and keeps 16 m behind it, and the
+  top rung's map is 4096 with the box grown to match, so the texel is still 7 cm.
+  Measured from the chase camera at a 21-degree sun: 154 m ahead on `standard`
+  (2048), 302 m on `blessing` (4096). The larger box draws more casters: 18-36 sun
+  depth draws a frame at 2048 against 24-67 at 4096 on the same stretch, and no GPU
+  difference measured on an M2 Pro.
 - CAR LAMP LENSES CAST NO SHADOW, AND WHEELS SHARE ONE MATERIAL (`render/carmodel.ts`,
   `prepareMaterials`, `lensNames`, `shareWheelMaterials`). A lens is a skin on the
   bodywork, so its shadow fell inside the body's own, yet each one was a draw of its

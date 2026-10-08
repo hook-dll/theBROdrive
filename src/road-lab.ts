@@ -182,6 +182,8 @@ class RoadLookLab {
   private readonly look = { yaw: 0, pitch: 0 };
   private readonly scratchTarget = new THREE.Vector3();
   private readonly scratchOffset = new THREE.Vector3();
+  /** The camera's facing, for the sun shadow box to lean along (render/sky.ts). */
+  private readonly view = new THREE.Vector3();
   private onReadout: (text: string) => void = () => undefined;
 
   constructor(renderer: Renderer, sky: Sky, state: LabState) {
@@ -386,7 +388,8 @@ class RoadLookLab {
     // so handing it an absolute coordinate puts the eye 18 km outside its own sky at
     // the arclengths this lab is pointed at, and the dome renders as nothing at all.
     const eye = this.renderer.camera.position;
-    this.sky.update(CALENDAR, daySeconds, 0, s, eye.x, eye.y, eye.z);
+    const view = this.renderer.camera.getWorldDirection(this.view);
+    this.sky.update(CALENDAR, daySeconds, 0, s, eye.x, eye.y, eye.z, view.x, view.z);
     this.renderer.render();
 
     const condition = roadConditionAt(s);

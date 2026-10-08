@@ -83,6 +83,16 @@ export interface GraphicsTier {
   readonly supersample: number;
   /** Sun shadow map. The one per-frame pass a weak machine cannot afford at any size. */
   readonly shadows: boolean;
+  /**
+   * Side of the sun's shadow map, texels. The box grows with it at a fixed 7 cm texel
+   * (`GRAPHICS_CONFIG`, render/sky.ts `applyShadowBox`), so a bigger map is REACH, not
+   * sharpness: 2048 throws shadows at least 128 m ahead of the camera, 4096 at least
+   * 272 m, and further when the sun stands ahead or behind (the box's ground print
+   * stretches along the sun).
+   * The extra cost is the casters inside the larger box, drawn once more each frame,
+   * and 64 MB of depth instead of 16. Ignored where `shadows` is off.
+   */
+  readonly sunShadowMapSize: number;
   /** Default for `Settings.msaa`; a player may still choose otherwise. */
   readonly msaa: boolean;
   /**
@@ -163,6 +173,7 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     mobileMinPixels: 640 * 360,
     supersample: 1,
     shadows: false,
+    sunShadowMapSize: 2048,
     msaa: false,
     mobileShadows: false,
     starMagnitude: 6,
@@ -180,6 +191,7 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     mobileMinPixels: 640 * 360,
     supersample: 1,
     shadows: false,
+    sunShadowMapSize: 2048,
     msaa: false,
     mobileShadows: false,
     starMagnitude: 7,
@@ -196,6 +208,7 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     mobileMinPixels: 960 * 540,
     supersample: 1,
     shadows: true,
+    sunShadowMapSize: 2048,
     msaa: true,
     mobileShadows: false,
     starMagnitude: 8,
@@ -217,6 +230,7 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     mobileMinPixels: 1280 * 720,
     supersample: 1.25,
     shadows: true,
+    sunShadowMapSize: 4096,
     msaa: true,
     mobileShadows: false,
     starMagnitude: 8.5,

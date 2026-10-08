@@ -317,10 +317,12 @@ export async function bootCarLab(): Promise<void> {
     for (const car of cars) car.instance?.surface.setCondition(state.dirt, state.scratches);
   };
 
+  const view = new THREE.Vector3();
   const renderFrame = (): void => {
     controls.update();
     const cam = renderer.camera.position;
-    sky.update(CALENDAR, (state.timeHours / 24) * DAY_LENGTH, 0, 0, cam.x, cam.y, cam.z);
+    renderer.camera.getWorldDirection(view);
+    sky.update(CALENDAR, (state.timeHours / 24) * DAY_LENGTH, 0, 0, cam.x, cam.y, cam.z, view.x, view.z);
     renderer.setDaylight(sky.dayFactor);
     renderer.render();
   };

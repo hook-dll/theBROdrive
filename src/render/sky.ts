@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { maxAnisotropy } from './texturequality';
 import { GRAPHICS_CONFIG } from '../config';
-import type { GraphicsQuality } from '../game/settings';
+import { GRAPHICS_TIERS, type GraphicsQuality } from '../game/settings';
 import { DAY_LENGTH } from '../game/state';
 import { skyGradientAt } from '../world/gradient';
 import { hash01 } from '../core/rng';
@@ -80,6 +80,19 @@ const SHADOW_FADE_ELEVATION = 0.035;
  */
 const SHADOW_KEY_SHARE_GONE = 0.02;
 const SHADOW_KEY_SHARE_FULL = 0.05;
+/**
+ * How much of the sun's shadow box stays BEHIND the camera, metres.
+ *
+ * The box used to be centred on the camera, so half of it covered road already
+ * driven past and the shadows ahead ended 62-80 m out (measured from the chase
+ * camera at a 21-degree sun): a pole, a car or a house further on stood on bare
+ * ground. Leaning the box forward by all but this margin spends those texels ahead
+ * instead, at the same map size and the same sharpness. The margin keeps the car's
+ * own shadow, the camera's surroundings and a room's rafters overhead covered when
+ * the camera looks along a wall or turns round; 16 m is the chase arm (6 m) with a
+ * car length and a lane to spare.
+ */
+const SHADOW_BEHIND_M = 16;
 
 
 /** Deliberate presentation scale: physical lunar disc is too small in play. */
@@ -946,6 +959,8 @@ export class Sky {
   /** Light direction with its elevation clamped, for the shadow camera only. */
   private readonly _shadowDir = new THREE.Vector3();
   private readonly _targetPos = new THREE.Vector3();
+  /** Half the sun shadow box's side, metres; set by `setQuality` with the map size. */
+  private shadowHalfSize = GRAPHICS_CONFIG.shadowFrustumHalfSize;
   /** Orthonormal basis perpendicular to `_shadowDir`, rebuilt each frame it changes. */
   private readonly _shadowRight = new THREE.Vector3();
   private readonly _shadowUp = new THREE.Vector3();
@@ -1065,18 +1080,13 @@ export class Sky {
     const shadow = this.sunLight.shadow;
     // The shadow map follows the camera, so a tighter frustum spends its texels on
     // the road, car and nearby props instead of wasting resolution on empty desert.
-    shadow.mapSize.set(GRAPHICS_CONFIG.shadowMapSize, GRAPHICS_CONFIG.shadowMapSize);
+    // The box's size and map are the tier's (`setQuality`); this is the base rung.
+    this.applyShadowBox(GRAPHICS_CONFIG.shadowMapSize);
     shadow.camera.near = GRAPHICS_CONFIG.shadowNear;
     shadow.camera.far = GRAPHICS_CONFIG.shadowFar;
-    const shadowHalfSize = GRAPHICS_CONFIG.shadowFrustumHalfSize;
-    shadow.camera.left = -shadowHalfSize;
-    shadow.camera.right = shadowHalfSize;
-    shadow.camera.top = shadowHalfSize;
-    shadow.camera.bottom = -shadowHalfSize;
     // Small bias preserves contact shadows without acne on the terrain.
     shadow.bias = GRAPHICS_CONFIG.shadowBias;
     shadow.normalBias = GRAPHICS_CONFIG.shadowNormalBias;
-    shadow.camera.updateProjectionMatrix();
     scene.add(this.sunLight);
     // The target must be in the scene graph for its matrixWorld to update.
     scene.add(this.sunLight.target);
@@ -1107,13 +1117,15 @@ export class Sky {
     cameraX: number,
     cameraY: number,
     cameraZ: number,
+    viewX: number,
+    viewZ: number,
   ): void {
     this.didBakeEnvironment = false;
     if (this.envTarget === null) {
-      this.compose(calendarEpoch, ENVIRONMENT_BAKE_TIME, dayIndex, s, cameraX, cameraY, cameraZ);
+      this.compose(calendarEpoch, ENVIRONMENT_BAKE_TIME, dayIndex, s, cameraX, cameraY, cameraZ, viewX, viewZ);
       this.bakeEnvironment();
     }
-    this.compose(calendarEpoch, timeOfDay, dayIndex, s, cameraX, cameraY, cameraZ);
+    this.compose(calendarEpoch, timeOfDay, dayIndex, s, cameraX, cameraY, cameraZ, viewX, viewZ);
   }
 
   private compose(
@@ -1124,6 +1136,8 @@ export class Sky {
     cameraX: number,
     cameraY: number,
     cameraZ: number,
+    viewX: number,
+    viewZ: number,
   ): void {
     const g = skyGradientAt(s);
     const celestial = this.astronomy.update(calendarEpoch, dayIndex, timeOfDay);
@@ -1384,8 +1398,17 @@ export class Sky {
     // The classic shadow bug: a DirectionalLight's shadow frustum is defined
     // around its target, which defaults to the origin. Drive a few hundred
     // metres away and the shadow camera no longer looks at you, so shadows
-    // vanish. Follow the camera every frame to keep shadows alive anywhere.
+    // vanish. Follow the camera every frame to keep shadows alive anywhere, and
+    // lean the box the way the camera looks (`SHADOW_BEHIND_M`). `view` is the
+    // camera's facing on the ground; looking straight down it has no length and
+    // the box stays centred, which is right for a view that sees all round.
     this._targetPos.set(cameraX, cameraY, cameraZ);
+    const viewLength = Math.hypot(viewX, viewZ);
+    if (viewLength > 1e-3) {
+      const lean = (this.shadowHalfSize - SHADOW_BEHIND_M) / viewLength;
+      this._targetPos.x += viewX * lean;
+      this._targetPos.z += viewZ * lean;
+    }
 
     // Shadow direction: the light's own direction, with its elevation lifted to
     // SHADOW_MIN_ELEVATION so a horizon sun cannot stretch every shadow across the
@@ -1508,7 +1531,7 @@ export class Sky {
     this._shadowRight.crossVectors(reference, this._shadowDir).normalize();
     this._shadowUp.crossVectors(this._shadowDir, this._shadowRight).normalize();
 
-    const texel = (2 * GRAPHICS_CONFIG.shadowFrustumHalfSize) / GRAPHICS_CONFIG.shadowMapSize;
+    const texel = (2 * this.shadowHalfSize) / this.sunLight.shadow.mapSize.x;
     const right = this._targetPos.dot(this._shadowRight);
     const up = this._targetPos.dot(this._shadowUp);
     const snappedRight = Math.round(right / texel) * texel;
@@ -1545,9 +1568,32 @@ export class Sky {
     this.didBakeEnvironment = true;
   }
 
-  /** Applies the rendering tier to the catalogue star depth. */
+  /** Applies the rendering tier to the catalogue star depth and the sun's shadow map. */
   setQuality(quality: GraphicsQuality, mobilePresentation?: boolean): void {
     this.starField.setQuality(quality, mobilePresentation);
+    this.applyShadowBox(GRAPHICS_TIERS[quality].sunShadowMapSize);
+  }
+
+  /**
+   * Sizes the sun's shadow map and its box together, so the texel stays what
+   * `GRAPHICS_CONFIG` says it is (72 m over 2048 texels, 7 cm) and a bigger map
+   * buys reach rather than sharpness. A changed size drops the map; three allocates
+   * the new one on the next shadow pass, and `compose` forces that pass even at
+   * night (`shadow.map === null`). No program changes: the map size is a uniform.
+   */
+  private applyShadowBox(mapSize: number): void {
+    const shadow = this.sunLight.shadow;
+    if (shadow.mapSize.x === mapSize && shadow.map !== null) return;
+    const half = (GRAPHICS_CONFIG.shadowFrustumHalfSize * mapSize) / GRAPHICS_CONFIG.shadowMapSize;
+    this.shadowHalfSize = half;
+    shadow.mapSize.set(mapSize, mapSize);
+    shadow.camera.left = -half;
+    shadow.camera.right = half;
+    shadow.camera.top = half;
+    shadow.camera.bottom = -half;
+    shadow.camera.updateProjectionMatrix();
+    shadow.map?.dispose();
+    shadow.map = null;
   }
 
   get didBakeEnvironmentThisFrame(): boolean {

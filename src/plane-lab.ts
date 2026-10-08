@@ -53,6 +53,7 @@ export async function bootPlaneLab(): Promise<void> {
   let spin = 0;
   let last = performance.now();
 
+  const view = new THREE.Vector3();
   const renderFrame = (): void => {
     const now = performance.now();
     const dt = Math.min(0.05, (now - last) / 1000);
@@ -60,7 +61,8 @@ export async function bootPlaneLab(): Promise<void> {
     plane.spin(dt, spin);
     controls.update();
     const cam = renderer.camera.position;
-    sky.update(CALENDAR, (hours / 24) * DAY_LENGTH, 0, 0, cam.x, cam.y, cam.z);
+    renderer.camera.getWorldDirection(view);
+    sky.update(CALENDAR, (hours / 24) * DAY_LENGTH, 0, 0, cam.x, cam.y, cam.z, view.x, view.z);
     renderer.setDaylight(sky.dayFactor);
     renderer.render();
   };

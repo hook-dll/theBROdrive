@@ -416,6 +416,8 @@ async function boot(): Promise<void> {
     mobilePresentation,
   );
   const sky = new Sky(renderer.scene, renderer.fog, renderer.renderer, starField);
+  // The sun's shadow map is sized by the tier (`GraphicsTier.sunShadowMapSize`).
+  sky.setQuality(world.state.settings.graphicsQuality, mobilePresentation);
   await sky.waitForAssets();
   // Warm every POI building: building one costs 3.7 ms on a 5950X — more than the
   // whole 3 ms streaming budget — and a first use happens while the player is driving
@@ -2105,6 +2107,8 @@ async function boot(): Promise<void> {
   // Reused for the interpolated chassis pose handed to the camera each frame.
   const targetPos = new THREE.Vector3();
   const targetQuat = new THREE.Quaternion();
+  /** The camera's facing, for the sun shadow box to lean along (render/sky.ts). */
+  const cameraView = new THREE.Vector3();
 
   const wheelEffects = createWheelEffects({
     spray: wheelSpray,
@@ -2295,6 +2299,7 @@ async function boot(): Promise<void> {
     // and so do the ground's broad patches (world/terrainmesh.ts).
     setDesertDustArclength(activeS);
     setDesertGroundArclength(activeS);
+    renderer.camera.getWorldDirection(cameraView);
     sky.update(
       s.calendarEpoch,
       s.timeOfDay,
@@ -2303,6 +2308,8 @@ async function boot(): Promise<void> {
       cam.x,
       cam.y,
       cam.z,
+      cameraView.x,
+      cameraView.z,
     );
     frameProfiler?.end('sky');
     loose.syncVisuals(s.timeOfDay, sky.dayFactor);

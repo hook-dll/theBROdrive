@@ -467,6 +467,8 @@ export async function bootMirageLab(): Promise<void> {
   };
   const targetPosition = new THREE.Vector3();
   const targetRotation = new THREE.Quaternion();
+  /** The camera's facing, for the sun shadow box to lean along (render/sky.ts). */
+  const view = new THREE.Vector3();
   const cameraInput = emptyInput();
   let lastInput: InputFrame = emptyInput();
   let lookYaw = 0;
@@ -517,6 +519,7 @@ export async function bootMirageLab(): Promise<void> {
     const projection = road.project(target.x + origin.x, target.z + origin.z, activeS);
     activeS = projection.s;
     const cam = renderer.camera.position;
+    renderer.camera.getWorldDirection(view);
     const daySeconds = (state.timeHours / 24) * DAY_LENGTH;
     sky.update(
       CALENDAR,
@@ -526,6 +529,8 @@ export async function bootMirageLab(): Promise<void> {
       cam.x,
       cam.y,
       cam.z,
+      view.x,
+      view.z,
     );
     vehicle.setHeadlightEnvironmentFactor(sky.artificialLightFactor);
     distant.setPreviewDayFactor(sky.dayFactor);

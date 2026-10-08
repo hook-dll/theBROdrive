@@ -107,10 +107,12 @@ export async function bootArtifactGallery(): Promise<void> {
   };
   overview();
 
+  const view = new THREE.Vector3();
   const renderFrame = (): void => {
     controls.update();
     const cam = renderer.camera.position;
-    sky.update(calendar, (hours / 24) * DAY_LENGTH, 0, 0, cam.x, cam.y, cam.z);
+    renderer.camera.getWorldDirection(view);
+    sky.update(calendar, (hours / 24) * DAY_LENGTH, 0, 0, cam.x, cam.y, cam.z, view.x, view.z);
     renderer.setDaylight(sky.dayFactor);
     renderer.render();
   };
