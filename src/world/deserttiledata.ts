@@ -31,7 +31,7 @@ export interface DesertTileGenerationContext {
   readonly terrain: Terrain;
   readonly roadDistance: RoadDistance;
   /**
-   * Draw open desert at half the lattice (the retro rung, render/retro.ts). Heights,
+   * Draw open desert at half the lattice (Very Low and Low, render/retro.ts). Heights,
    * normals and physics keep the full lattice; only the drawn triangles change.
    */
   readonly coarseAway?: boolean;
@@ -152,7 +152,7 @@ const COARSE_CLEAR_M = EXACT_DISTANCE_GATE + DESERT_TILE_STEP * 1.5;
 const BLOCKS = DESERT_TILE_CELLS / 2;
 
 /**
- * The retro rung's terrain: 2x2 cells merged into one block wherever the block is clear
+ * Very Low's and Low's terrain: 2x2 cells merged into one block wherever the block is clear
  * of the road, a quarter of the triangles over open sand.
  *
  * WITHOUT A CRACK. A coarse block's side skips the lattice vertex in its middle, and a

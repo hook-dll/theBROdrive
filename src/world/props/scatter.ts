@@ -11,7 +11,7 @@
  * rate.
  */
 
-import { retroActive } from '../../render/retro';
+import { lightGeometryActive } from '../../render/retro';
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { hash01 } from '../../core/rng';
@@ -128,8 +128,10 @@ const GROUND_COVER_NEAR = 0.085;
 const GROUND_COVER_FAR = 0.04;
 const GROUND_COVER_LAT = 320;
 /**
- * The retro rung's cover stops here instead. At 360 lines a tuft past it is a single
- * pixel that pops between two colours as the car moves, which is noise, not ground.
+ * Very Low and Low stop the cover here instead (`lightGeometryActive`). At 360 lines a
+ * tuft past it is a single pixel that pops between two colours as the car moves, which
+ * is noise, not ground; at Low's 900 it is a few pixels, and the cover was most of the
+ * frame's triangles (render/retro.ts).
  */
 const RETRO_GROUND_COVER_LAT = 140;
 /** Nearest a tuft grows to the asphalt edge, metres: past the shoulder strip. */
@@ -473,7 +475,7 @@ export class ScatterProvider implements ChunkProvider {
       const coverSStart = Math.floor(ctx.sStart / GROUND_COVER_CELL);
       const coverSEnd = Math.ceil(ctx.sEnd / GROUND_COVER_CELL);
       const coverLMax = Math.ceil(
-        (retroActive() ? RETRO_GROUND_COVER_LAT : GROUND_COVER_LAT) / GROUND_COVER_CELL,
+        (lightGeometryActive() ? RETRO_GROUND_COVER_LAT : GROUND_COVER_LAT) / GROUND_COVER_CELL,
       );
       for (let cs = coverSStart; cs < coverSEnd; cs++) {
         for (let cl = -coverLMax; cl < coverLMax; cl++) {

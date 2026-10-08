@@ -14,7 +14,7 @@ export interface DesertTileWorkerInit {
   readonly type: 'init';
   readonly seed: number;
   readonly spine: RoadSpine;
-  /** The retro rung's coarse open desert; see `DesertTileGenerationContext`. */
+  /** Very Low's and Low's coarse open desert; see `DesertTileGenerationContext`. */
   readonly coarseAway: boolean;
 }
 

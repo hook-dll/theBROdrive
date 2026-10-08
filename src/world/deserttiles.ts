@@ -1,4 +1,4 @@
-import { retroActive } from '../render/retro';
+import { lightGeometryActive } from '../render/retro';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 
@@ -442,7 +442,7 @@ export class DesertTileStreamer {
         road: this.road,
         terrain: this.terrain,
         roadDistance: this.roadDistance,
-        coarseAway: retroActive(),
+        coarseAway: lightGeometryActive(),
       },
       tx,
       tz,
@@ -699,7 +699,7 @@ export class DesertTileStreamer {
         type: 'init',
         seed: this.seed,
         spine: this.road.spine,
-        coarseAway: retroActive(),
+        coarseAway: lightGeometryActive(),
       };
       candidate.postMessage(request);
       return candidate;
@@ -882,7 +882,7 @@ export class DesertTileStreamer {
             road: this.road,
             terrain: this.terrain,
             roadDistance: this.roadDistance,
-            coarseAway: retroActive(),
+            coarseAway: lightGeometryActive(),
           },
           work.tx,
           work.tz,

@@ -21,6 +21,7 @@ import {
   MOUSE_SENSITIVITY_MAX,
   MOUSE_SENSITIVITY_MIN,
   FRAME_RATE_LIMITS,
+  RETRO_LINE_CHOICES,
   TIME_OF_DAY_PRESETS,
 } from '../game/settings';
 import type {
@@ -46,6 +47,7 @@ import {
   prefersMobilePresentation,
   renderScaleFor,
 } from '../core/renderer';
+import { buildProfileFor, retroPixelRatio } from '../render/retro';
 import type { SpawnRequest } from '../game/spawn';
 import { CAR_MODELS } from '../vehicle/carmodels';
 import { CAR_PAINTS } from '../vehicle/carpaint';
@@ -110,11 +112,17 @@ function describeTier(quality: GraphicsQuality, mobilePresentation: boolean): st
   // quoting the desktop column at a phone would be describing a rung nobody is on.
   const shadows = mobilePresentation ? tier.mobileShadows : tier.shadows;
   const spots = mobilePresentation ? tier.mobileVehicleLightSlots : tier.vehicleLightSlots;
+  const light = buildProfileFor(quality) === 'light';
   return (
     `${shadows ? 'Sun shadows' : 'No sun shadows'}, ` +
     `${spots} lights shaded on every lit pixel. ` +
     `Stars to magnitude ${mobilePresentation ? tier.mobileStarMagnitude : tier.starMagnitude}. ` +
-    'The light count is compiled into the world, so it changes on the next load.'
+    (light
+      ? 'Lighter ground cover, plants and open desert, as on Very Low: under half the '
+        + 'triangles of Medium. Switching between Low and Medium or High saves the drive '
+        + 'and reloads it.'
+      : 'Full ground cover. The light count is compiled into the world, so between Medium '
+        + 'and High it changes on the next load.')
   );
 }
 
@@ -1108,6 +1116,7 @@ export class MainMenu {
         graphicsQuality: base.graphicsQuality,
         graphicsQualitySource: base.graphicsQualitySource,
         renderScale: base.renderScale,
+        retroLines: base.retroLines,
         msaa: base.msaa,
         frameRateLimit: base.frameRateLimit,
         fieldOfView: base.fieldOfView,
@@ -1140,6 +1149,7 @@ export class MainMenu {
           graphicsQuality: settings.graphicsQuality,
           graphicsQualitySource: settings.graphicsQualitySource,
           renderScale: settings.renderScale,
+          retroLines: settings.retroLines,
           msaa: settings.msaa,
           frameRateLimit: settings.frameRateLimit,
           fieldOfView: settings.fieldOfView,
@@ -1811,8 +1821,8 @@ export class MainMenu {
                 icon: 'retro',
                 hint: () =>
                   'For weak mini-PCs and old laptops. The world is drawn at about 360 lines '
-                  + 'and shown as crisp square pixels, like a late-90s game, with lighter '
-                  + 'ground cover and no sun shadows. '
+                  + '(540 under Sharpness) and shown as crisp square pixels, like a late-90s '
+                  + 'game, with lighter ground cover and no sun shadows. '
                   + (settings.graphicsQuality === 'retro'
                     ? ''
                     : 'Switching to it or away from it saves the drive and reloads it.'),
@@ -1868,9 +1878,25 @@ export class MainMenu {
             // points were the whole of the choice there. Both directions are offered:
             // down for the machine between two levels, up for the one with headroom that
             // does not want a 25 km vista and eighteen headlamps to go with it.
-            // Not offered on the retro rung: its resolution IS the look, fixed at whole
-            // pixels (render/retro.ts), so a sharpness choice there would do nothing.
-            ...(settings.graphicsQuality === 'retro' ? [] : [segmented('Sharpness', [
+            // On the retro rung the row offers whole-pixel line counts instead: its
+            // resolution IS the look (render/retro.ts), so the choice is how coarse the
+            // squares are, never a fraction the compositor would smear.
+            ...(settings.graphicsQuality === 'retro' ? [segmented('Sharpness', RETRO_LINE_CHOICES.map((lines) => ({
+              label: `${lines} lines`,
+              icon: 'pixels',
+              hint: () =>
+                `${pixelsAt(retroPixelRatio(viewport.cssHeight, window.devicePixelRatio, lines))}, `
+                + 'each pixel a crisp square. '
+                + (lines === 360
+                  ? 'The level\'s own look, and the lightest on the graphics chip.'
+                  : 'Finer squares, a little sharper. Costs the chip about a third more, '
+                    + 'most of it the pixels; still far below Low.'),
+              active: () => settings.retroLines === lines,
+              pick: () => {
+                settings.retroLines = lines;
+                apply();
+              },
+            })))] : [segmented('Sharpness', [
               {
                 label: 'Auto',
                 icon: 'display',

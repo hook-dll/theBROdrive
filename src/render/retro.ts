@@ -13,22 +13,56 @@
  * It is decided ONCE, at load, and switching to or from it reloads the drive. Two things
  * it changes are baked at build time and cannot be swapped in place: the ground-cover
  * geometry (cached forms, instanced per chunk) and the finishing pass's program variant.
+ *
+ * THE LIGHT GEOMETRY IS SHARED WITH `acceptable` (Low). Measured in the real game
+ * (tools/look/gpucost.mjs, a crest with 30 live cars at 1080p), Low drew exactly the
+ * triangles and draw calls Medium drew — 2.1 million and 400-800 — and saved only on
+ * pixels, the sun's shadow and lamp slots; the ground cover alone was 1.7 million of
+ * those triangles. So the build is chosen by a PROFILE, not by the rung: `full` for
+ * Medium and High, `light` for Low (this rung's ground cover, plants and coarse open
+ * desert), and `retro`, which is `light` plus this rung's own look (the cheap specular,
+ * the dither, the one-pixel wires). Crossing between profiles reloads the drive.
  */
 
 import * as THREE from 'three';
+import type { GraphicsQuality } from '../game/settings';
 
-let active = false;
+/** What a load's world is built from; see the note above. */
+export type BuildProfile = 'full' | 'light' | 'retro';
+
+/** The profile a rung is built with. */
+export function buildProfileFor(quality: GraphicsQuality): BuildProfile {
+  return quality === 'retro' ? 'retro' : quality === 'acceptable' ? 'light' : 'full';
+}
+
+let profile: BuildProfile = 'full';
+
+/** The profile this load was built with. Fixed for the page's lifetime. */
+export function activeBuildProfile(): BuildProfile {
+  return profile;
+}
 
 /** Whether this load was built for the retro rung. Fixed for the page's lifetime. */
 export function retroActive(): boolean {
-  return active;
+  return profile === 'retro';
 }
 
+/**
+ * Whether this load builds the light ground cover, plants and open desert: Very Low and
+ * Low. Fixed for the page's lifetime.
+ */
+export function lightGeometryActive(): boolean {
+  return profile !== 'full';
+}
+
+let installed = false;
+
 /** Called once from main.ts, before any world geometry or material is built. */
-export function installRetro(): void {
-  if (active) return;
-  active = true;
-  installCheapSpecular();
+export function installBuildProfile(quality: GraphicsQuality): void {
+  if (installed) return;
+  installed = true;
+  profile = buildProfileFor(quality);
+  if (profile === 'retro') installCheapSpecular();
 }
 
 /**
@@ -73,20 +107,18 @@ function installCheapSpecular(): void {
 }
 
 /**
- * Target line count. 360 is 1080p divided by three, 1440p by four, 720p by two and 4K by
- * six — every common panel lands on it exactly, so the pixels are square and even.
- */
-const RETRO_LINES = 360;
-
-/**
  * The drawing-buffer ratio for a canvas `cssHeight` CSS pixels tall on a display of
- * `devicePixelRatio`: the display's own pixels divided by a WHOLE number, so the
- * compositor's nearest-neighbour upscale gives every source pixel the same size. A
- * fractional factor would leave some rows and columns doubled and others not, which
- * shimmers in motion.
+ * `devicePixelRatio`, drawn at about `lines` lines (`Settings.retroLines`): the
+ * display's own pixels divided by a WHOLE number, so the compositor's nearest-neighbour
+ * upscale gives every source pixel the same size. A fractional factor would leave some
+ * rows and columns doubled and others not, which shimmers in motion.
+ *
+ * 360 is 1080p divided by three, 1440p by four, 720p by two and 4K by six — every
+ * common panel lands on it exactly, so the pixels are square and even. 540 is 1080p
+ * and 4K by two and four; on a 1440p panel it rounds to a factor of three (480 lines).
  */
-export function retroPixelRatio(cssHeight: number, devicePixelRatio: number): number {
+export function retroPixelRatio(cssHeight: number, devicePixelRatio: number, lines: number): number {
   const deviceLines = Math.max(1, cssHeight) * devicePixelRatio;
-  const factor = Math.max(1, Math.round(deviceLines / RETRO_LINES));
+  const factor = Math.max(1, Math.round(deviceLines / lines));
   return devicePixelRatio / factor;
 }

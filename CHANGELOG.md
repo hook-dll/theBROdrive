@@ -4,6 +4,18 @@
 
 ### Added
 
+- VERY LOW HAS A SHARPNESS ROW: 360 OR 540 LINES (`Settings.retroLines`,
+  `retroPixelRatio`). Still whole display pixels per frame pixel — two instead of three on
+  a 1080-line screen — so the squares stay crisp, only finer. 360 stays the default.
+  Measured on an M2 Pro on the heaviest scenes: +0.7-0.9 ms of GPU on 2.4-3.6 ms; the
+  rung's frame is mostly geometry, not fill.
+- `tools/look/gpucost.mjs`: where the GPU's time goes in the real game. Drives into a
+  scene with the traffic at its densest (an ordinary stretch, a courier ahead, a mirage, a
+  crest over the longest drop), noon, night or storm, freezes the world there
+  (`__bro.loop.stop()`), and measures interleaved against the frozen frame: the noise
+  floor, the shadow passes, MSAA, the render scale, and every part of the world hidden in
+  turn, in GPU and in CPU submission time. Dev hooks `__bro.loop`, `mirageSchedule`,
+  `courierAt(index)`.
 - OTHER CARS' CRASHES ARE HEARD (`GameAudio.trafficCrash`, `playCrash` in
   `audio/vehicleaudio.ts`). A traffic car's impact detector already measured every hit;
   its voice threw the number away. Now every traffic car within earshot (380 m), not only
@@ -342,8 +354,20 @@
   while its line moves across the road (0.3-1.5 m/s, down to 15% pedal) and while the
   body slips past 1.5-4°, and the pedal comes back at most 1.2 a second. Speeds are
   unchanged (ambient frantic cap 125-160 km/h). Real stream, 6 min each, same seed and
-  start, `franticstats.mjs`: slides 1.74 → 0.44 a minute, weaves 1.07 → 0.22, off-road
-  29 s → 0, worst sideslip 30.7° → 13.4° (different cars each run: one run apiece).
+  start, `franticstats.mjs`: slides 1.74 → 0.43 a minute, weaves 1.07 → 0.60, worst
+  sideslip 30.7° → 16.5°; off-road 29 s → 50 s (different cars each run, one run
+  apiece; an earlier figure of 0 s was measured on a stale preview server).
+- LOW BUILDS VERY LOW'S LIGHT GEOMETRY (`BuildProfile` in `render/retro.ts`,
+  `lightGeometryActive`). Measured in the real game with `tools/look/gpucost.mjs` (a
+  crest with ~30 live cars, 1080p), Low drew exactly Medium's triangles and draw calls
+  — 2.1 million and 400-800 — and saved only pixels, the sun's shadow and lamp slots;
+  the ground cover was 1.7 million of those triangles. Low now builds the light ground
+  cover (140 m out instead of 320), the lighter trees and bushes and the coarse open
+  desert: 2.1 → 0.8-0.9 million triangles, and the scatter's own interleaved cost on an
+  M2 Pro 2.4 → 0.2 ms at noon, 1.2 → 0 in a storm. The build is a profile — full
+  (Medium, High), light (Low), retro (Very Low) — and switching across profiles saves and
+  reloads the drive, as Very Low did; Medium ↔ High still applies in place. A rung the
+  launch measurement picks takes its profile on the next load.
 - SUN SHADOWS REACH TWO TO FOUR TIMES FURTHER AHEAD (`render/sky.ts`,
   `SHADOW_BEHIND_M`, `applyShadowBox`; `GraphicsTier.sunShadowMapSize`). The shadow
   box was centred on the camera, so half of it covered road already driven and the

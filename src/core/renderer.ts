@@ -25,6 +25,7 @@ import {
   shadowsFor,
   type GraphicsQuality,
   type RenderScale,
+  type RetroLines,
   type RenderScaleFraction,
 } from '../game/settings';
 import type { ShadeTint } from '../items/items';
@@ -847,7 +848,9 @@ export class Renderer {
     const cssPixels = canvas.clientWidth * canvas.clientHeight;
     // The retro rung's pixels are its look, so neither the player's render scale nor
     // the adaptive controller may move them (see render/retro.ts).
-    if (quality === 'retro') return retroPixelRatio(canvas.clientHeight, window.devicePixelRatio);
+    if (quality === 'retro') {
+      return retroPixelRatio(canvas.clientHeight, window.devicePixelRatio, this.retroLines);
+    }
     if (this.renderScale !== null) {
       return manualRenderScale(
         cssPixels,
@@ -1373,6 +1376,19 @@ export class Renderer {
     this.disposeGpuQueries();
     this.basePixelRatio = this.pixelRatioFor(this.quality);
     this.updateAdaptiveFloor();
+    this.renderer.setPixelRatio(this.basePixelRatio);
+    this.resizeHazeTarget();
+  }
+
+  /** Very Low's frame height, lines (`Settings.retroLines`); no effect on other rungs. */
+  private retroLines: RetroLines = 360;
+
+  /** Installs the player's Very Low line count; applies at once on that rung. */
+  setRetroLines(lines: RetroLines): void {
+    if (lines === this.retroLines) return;
+    this.retroLines = lines;
+    if (this.quality !== 'retro') return;
+    this.basePixelRatio = this.pixelRatioFor(this.quality);
     this.renderer.setPixelRatio(this.basePixelRatio);
     this.resizeHazeTarget();
   }

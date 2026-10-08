@@ -145,10 +145,13 @@ export interface GraphicsTier {
  * The rungs, weakest first. Read them as machines, not presets:
  *
  *  - `retro` — a mini-PC or an old laptop that cannot hold `acceptable`. A fixed
- *    low-resolution frame in whole pixels and cheaper ground cover; switching to or
- *    from it reloads the drive, because it changes what the world is built from.
+ *    low-resolution frame in whole pixels (360 or 540 lines, `retroLines`) and the light
+ *    geometry; switching to or from it reloads the drive, because it changes what the
+ *    world is built from (render/retro.ts).
  *  - `acceptable` — a phone, or a mini-PC on a television. No shadow pass, because it is
- *    the one cost that cannot be paid in pixels.
+ *    the one cost that cannot be paid in pixels, and the light geometry — the ground
+ *    cover, plants and open desert of `retro` — because the cover alone was most of the
+ *    frame's triangles. Switching to or from it reloads the drive too.
  *  - `standard` — an ordinary desktop with a discrete GPU or a good integrated one.
  *    Native on a 1440p display, shadows on.
  *  - `blessing` — a machine with headroom to spare. Supersamples,
@@ -390,6 +393,22 @@ export function renderScaleFrom(raw: unknown): RenderScale {
 }
 
 /**
+ * Lines the Very Low rung's frame is drawn at, before it is blown up by a whole factor
+ * (render/retro.ts). 360 is the rung's own look and its budget; 540 is two display
+ * pixels per frame pixel on a 1080-line screen instead of three — visibly finer, and
+ * measured on an M2 Pro at the heaviest scenes as +0.7-0.9 ms of GPU on 2.4-3.6 (the
+ * rung's frame is mostly geometry, not fill). Offered in the Sharpness row; never moved
+ * by the game, because the pixels are the look.
+ */
+export const RETRO_LINE_CHOICES = [360, 540] as const;
+export type RetroLines = (typeof RETRO_LINE_CHOICES)[number];
+
+/** An offered line count; anything else is the rung's own 360. */
+export function retroLinesFrom(raw: unknown): RetroLines {
+  return RETRO_LINE_CHOICES.find((lines) => lines === raw) ?? 360;
+}
+
+/**
  * WHO chose the graphics rung, which is the difference between a verdict and a taste.
  *
  *  - `default`  — nobody has answered. The one state that lets a launch measure.
@@ -487,6 +506,8 @@ export interface Settings {
    * that still drifts is not a fixed number.
    */
   renderScale: RenderScale;
+  /** Very Low's frame height, lines; see `RETRO_LINE_CHOICES`. Ignored on every other rung. */
+  retroLines: RetroLines;
   /**
    * Resting vertical field of view, degrees.
    *
@@ -631,6 +652,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // Automatic: the rung's own ceiling, walked down by GPU measurement if the machine
   // cannot hold it. A player who would rather name the number picks one in the menu.
   renderScale: null,
+  retroLines: 360,
   msaa: true,
   // Uncapped by default on every device, phones included: a cap is the player's choice
   // to make (heat, noise), not a default to discover.
@@ -786,6 +808,7 @@ export function sanitizeSettings(raw: unknown): Settings {
     // Snapped to an offered fraction rather than clamped, so a hand-edited 0.33 cannot
     // become a resolution the menu has no button for and the player cannot get back to.
     renderScale: renderScaleFrom(obj.renderScale),
+    retroLines: retroLinesFrom(obj.retroLines),
     // Whole degrees: the slider steps in ones, and a stored 64.7 would paint as 65 and
     // then render as something else.
     fieldOfView: Math.round(
