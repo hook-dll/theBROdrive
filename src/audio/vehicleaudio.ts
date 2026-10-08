@@ -956,37 +956,8 @@ export class VehicleAudio {
     this.mixer.blip(this.impacts, { gain: 0.05 * strength, frequency: 420, endFrequency: 300, decay: 0.15, type: 'sine', delay: 0.01 });
   }
 
-  /**
-   * A collision. Sheet steel does three things when it is hit: the body takes a
-   * low blow, the panel crumples (a spray of short mid-band crunches, not one), and
-   * the undamaged metal around it rings at inharmonic plate modes. A hard enough hit
-   * breaks glass.
-   */
   private crash(severityMps: number): void {
-    const s = clamp01(severityMps / 8);
-    const gain = IMPACT_GAIN * (0.25 + 0.75 * s);
-    // The body's own blow, low and short, under whichever crunch is recorded.
-    this.mixer.burst(this.impacts, {
-      gain: gain * 0.5,
-      frequency: 140,
-      endFrequency: 55,
-      q: 0.7,
-      decay: 0.14 + 0.16 * s,
-      type: 'lowpass',
-      colour: 'brown',
-    });
-    // A knock is the light take, dulled; a real crash the heavier ones, with glass.
-    const takes: SampleName[] = s < 0.35 ? ['crash-3'] : s < 0.7 ? ['crash-1', 'crash-3'] : ['crash-1', 'crash-2'];
-    const choices = takes.length > 1 ? takes.filter((t) => t !== this.lastCrash) : takes;
-    const take = choices[Math.floor(Math.random() * choices.length)]!;
-    this.lastCrash = take;
-    playOnce(this.mixer, this.mixer.samples, take, this.impacts, {
-      gain: CRASH_GAIN * (0.2 + 0.8 * s),
-      rate: 1.08 - 0.12 * s,
-      spread: 0.04,
-      lowpass: 2500 + 14000 * s,
-      send: 0.15,
-    });
+    this.lastCrash = playCrash(this.mixer, this.impacts, severityMps, this.lastCrash);
   }
 
   /** Lever through the gate, then the driveline taking up the slack. */
@@ -1016,4 +987,44 @@ export class VehicleAudio {
     this.out.disconnect();
     this.engineOut.disconnect();
   }
+}
+
+/**
+ * A collision, into `destination`, which places it. Sheet steel does three things when
+ * it is hit: the body takes a low blow, the panel crumples (a spray of short mid-band
+ * crunches, not one), and the undamaged metal around it rings at inharmonic plate
+ * modes. A hard enough hit breaks glass. The driven car voices its own through its
+ * body panner; a traffic car through its own (trafficaudio.ts). Returns the take
+ * played, so the next crash of the same car picks a different one.
+ */
+export function playCrash(
+  mixer: AudioMixer,
+  destination: AudioNode,
+  severityMps: number,
+  lastTake: SampleName | null,
+): SampleName {
+  const s = clamp01(severityMps / 8);
+  const gain = IMPACT_GAIN * (0.25 + 0.75 * s);
+  // The body's own blow, low and short, under whichever crunch is recorded.
+  mixer.burst(destination, {
+    gain: gain * 0.5,
+    frequency: 140,
+    endFrequency: 55,
+    q: 0.7,
+    decay: 0.14 + 0.16 * s,
+    type: 'lowpass',
+    colour: 'brown',
+  });
+  // A knock is the light take, dulled; a real crash the heavier ones, with glass.
+  const takes: SampleName[] = s < 0.35 ? ['crash-3'] : s < 0.7 ? ['crash-1', 'crash-3'] : ['crash-1', 'crash-2'];
+  const choices = takes.length > 1 ? takes.filter((t) => t !== lastTake) : takes;
+  const take = choices[Math.floor(Math.random() * choices.length)]!;
+  playOnce(mixer, mixer.samples, take, destination, {
+    gain: CRASH_GAIN * (0.2 + 0.8 * s),
+    rate: 1.08 - 0.12 * s,
+    spread: 0.04,
+    lowpass: 2500 + 14000 * s,
+    send: 0.15,
+  });
+  return take;
 }

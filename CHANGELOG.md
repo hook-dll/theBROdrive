@@ -4,6 +4,19 @@
 
 ### Added
 
+- OTHER CARS' CRASHES ARE HEARD (`GameAudio.trafficCrash`, `playCrash` in
+  `audio/vehicleaudio.ts`). A traffic car's impact detector already measured every hit;
+  its voice threw the number away. Now every traffic car within earshot (380 m), not only
+  the six nearest that have an engine voice, plays the driven car's own crash where it
+  happened: a panner of its own, the air dulling it with distance, on the world bus.
+  Above 1.2 m/s of unexplained velocity change, once per 0.35 s per car. Checked in the
+  real stream: a pile-up 6-10 m away fired at 3-14 m/s.
+- `tools/look/franticstats.mjs`: the ambient frantic drivers in the real game, sampled
+  every frame — top speed, worst sideslip, slides past 6°, yaw weaves, seconds off the
+  road. `tools/look/hitch.mjs` takes `DAY` (the day cycle in minutes), `HOUR` and
+  `HEADED=1` (a visible window, `boot.mjs`), and prints frame pacing (p50/p99/worst,
+  frames past 25 and 50 ms), the resolution scale, which shadow maps were drawn and the
+  programs linked mid-draw for every 30 s of driving.
 - DELIVERY ROUTE LINE (`Hud.setRouteProgress`, `world/couriers.ts` `nextCourierIndex`).
   With contract cargo in hand or in the driven car and no race on, the top bead line
   shows the player alone, from the last courier behind to the nearest one ahead that
@@ -322,6 +335,15 @@
 
 ### Changed
 
+- FRANTIC DRIVERS LIFT FOR A PASS AND FEED THE POWER BACK (`RACER_LIFT_SLEW_FREE`,
+  `RACER_SLIP_*`, `RACER_FEED_PER_S` in `vehicle/autopilot.ts`). The friction-circle
+  cap answered a steady bend; through a lane change the yaw rate crosses zero and it
+  opened to full power as the rear was swinging back. A racing-line driver now lifts
+  while its line moves across the road (0.3-1.5 m/s, down to 15% pedal) and while the
+  body slips past 1.5-4°, and the pedal comes back at most 1.2 a second. Speeds are
+  unchanged (ambient frantic cap 125-160 km/h). Real stream, 6 min each, same seed and
+  start, `franticstats.mjs`: slides 1.74 → 0.44 a minute, weaves 1.07 → 0.22, off-road
+  29 s → 0, worst sideslip 30.7° → 13.4° (different cars each run: one run apiece).
 - SUN SHADOWS REACH TWO TO FOUR TIMES FURTHER AHEAD (`render/sky.ts`,
   `SHADOW_BEHIND_M`, `applyShadowBox`; `GraphicsTier.sunShadowMapSize`). The shadow
   box was centred on the camera, so half of it covered road already driven and the
@@ -459,6 +481,20 @@
 
 ### Fixed
 
+- NO MID-DRIVE SHADER LINKS AT THE 20 KM MARKS, SIDETRACKS OR KNOCKED-DOWN PROPS. A
+  headed 10-minute drive through a day found a 283 ms and a 237 ms frame before dawn,
+  both programs linked in the draw: the artefacts' materials at the 40 km mark (262 ms
+  on an M2 Pro), a sidetrack's decal (12 ms), a delineator's piece program, and a
+  mapped double-sided caster's depth program. On ANGLE each is several times that.
+  The artefacts, the distance sign and the sidetrack now have hidden boot anchors
+  (`monumentProgramAnchor`, `sidetrackProgramAnchor`); the debris piece anchors receive
+  shadows as the pieces do (the anchor compiled a variant no piece drew); and
+  `waitForFrameShaders` compiles every plain shadow-depth shape (three sides, mesh and
+  instanced, no map / map / alpha-tested), into the scene target — the depth samples
+  were first compiled for the canvas, which no shadow pass uses. Depth materials now
+  carry the source's map whether or not it tests alpha, as three's own do.
+- `tools/look` TIER runs drive again: the stored preferences they wrote had no
+  `gearboxMode`, which reads as manual, and the player's autopilot sat in neutral.
 - NO FREEZES AT NIGHT FROM THE HEADLAMP SHADOW (`Renderer.compileForScenePass`,
   `compileShadowDepth`). Three links a shadow caster's depth program the first time a
   shadow pass draws it, and `compile` never touches those. A drive resumed at night has

@@ -11,9 +11,10 @@
 import type { SurfaceType } from '../core/surfaces';
 import type { Settings } from '../game/settings';
 import type { VehicleAudioState } from '../vehicle/vehicle';
-import { AudioMixer, setListenerPose, sliderGain } from './mixer';
-import { VehicleAudio, type CarPose } from './vehicleaudio';
+import { AudioMixer, setListenerPose, setPannerPosition, sliderGain } from './mixer';
+import { playCrash, VehicleAudio, type CarPose } from './vehicleaudio';
 import { TrafficAudio } from './trafficaudio';
+import type { SampleName } from './samples';
 import { DancerVoice } from './dancervoice';
 import { Ambience, type AmbienceFrame } from './ambience';
 import { Foley, type BubbleGumAudioPhase, type FoleyContinuous, type FoleyEvent } from './foley';
@@ -28,6 +29,16 @@ export type { PropellerVoice, SurfVoice } from './storyaudio';
 const TRAFFIC_VOICES = 6;
 /** Beyond this a traffic car is not voiced at all, metres. */
 const TRAFFIC_HEAR_M = 380;
+/**
+ * A traffic car's impact, m/s of unexplained velocity change (the `Vehicle` impact
+ * detector), heard as a crash. Higher than the driven car's 0.3: a nudge in a jam is
+ * felt through the seat, but from another car it would be noise.
+ */
+const TRAFFIC_CRASH_MIN_MPS = 1.2;
+/** One crash per hit and car: the detector reports every step of a scrape. */
+const TRAFFIC_CRASH_REPEAT_S = 0.35;
+/** How long a crash's own panner lives: the longest take plus its reverb tail. */
+const TRAFFIC_CRASH_LIFE_MS = 4000;
 
 interface TrafficCandidate {
   id: string;
@@ -49,6 +60,9 @@ export class GameAudio {
   private dancerVoice: DancerVoice | null = null;
   private readonly trafficCandidates: TrafficCandidate[] = [];
   private trafficCandidateCount = 0;
+  /** Per traffic car, when its last crash was heard; pruned to the cars still offered. */
+  private readonly trafficCrashAt = new Map<string, number>();
+  private lastTrafficCrash: SampleName | null = null;
   private radioStationUrls: readonly string[] = ['https://streams.radiomast.io/nts1', 'https://streams.radiomast.io/nts2'];
   private activeRadioId: string | null = null;
   /** Last pose written to the context listener; NaN so the first frame always writes. */
@@ -228,6 +242,20 @@ export class GameAudio {
       }
     }
     const hearD2 = TRAFFIC_HEAR_M * TRAFFIC_HEAR_M;
+    // Crashes first, for EVERY car offered, not only the voiced few: a car hitting a
+    // pole beside the road is rarely among the nearest six, and its impact would
+    // otherwise wait in its state until it next got a voice, which drops it.
+    for (let i = 0; i < count; i++) {
+      const c = list[i]!;
+      const impact = c.state.impactMps;
+      c.state.impactMps = 0;
+      if (impact > TRAFFIC_CRASH_MIN_MPS && c.d2 <= hearD2) this.trafficCrash(c, impact);
+    }
+    if (this.trafficCrashAt.size > 0) {
+      const offered = new Set<string>();
+      for (let i = 0; i < count; i++) offered.add(list[i]!.id);
+      for (const id of this.trafficCrashAt.keys()) if (!offered.has(id)) this.trafficCrashAt.delete(id);
+    }
     const keep = new Set<string>();
     for (let i = 0; i < Math.min(count, TRAFFIC_VOICES); i++) {
       const c = list[i]!;
@@ -246,6 +274,38 @@ export class GameAudio {
         this.trafficVoices.delete(id);
       }
     }
+  }
+
+  /**
+   * Another car's crash, where it happened: a panner of its own for the one take, on
+   * the world bus rather than the traffic bus, because a crash is no quieter for being
+   * someone else's — only further away. Air takes the top off with distance, as it
+   * does off a traffic car's engine (trafficaudio.ts).
+   */
+  private trafficCrash(c: TrafficCandidate, impactMps: number): void {
+    if (!this.mixer.running) return;
+    const now = this.mixer.now;
+    if (now - (this.trafficCrashAt.get(c.id) ?? -Infinity) < TRAFFIC_CRASH_REPEAT_S) return;
+    this.trafficCrashAt.set(c.id, now);
+    const ctx = this.mixer.ctx;
+    const panner = new PannerNode(ctx, {
+      panningModel: 'HRTF',
+      distanceModel: 'inverse',
+      refDistance: 10,
+      rolloffFactor: 1,
+      maxDistance: TRAFFIC_HEAR_M,
+    });
+    setPannerPosition(panner, c.x, c.y, c.z, now, 0.001);
+    const air = ctx.createBiquadFilter();
+    air.type = 'lowpass';
+    air.frequency.value = Math.max(1800, 14000 / (1 + Math.sqrt(c.d2) / 70));
+    air.Q.value = 0.6;
+    air.connect(panner).connect(this.mixer.world);
+    this.lastTrafficCrash = playCrash(this.mixer, air, impactMps, this.lastTrafficCrash);
+    window.setTimeout(() => {
+      air.disconnect();
+      panner.disconnect();
+    }, TRAFFIC_CRASH_LIFE_MS);
   }
 
   /**

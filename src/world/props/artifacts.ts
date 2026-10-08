@@ -235,6 +235,40 @@ function mesh(parent: THREE.Object3D, geo: THREE.BufferGeometry, mat: THREE.Mate
   return m;
 }
 
+/**
+ * Hidden meshes in every artefact material, for the scene at boot: `waitForFrameShaders`
+ * links their programs (scene pass and shadow depth) behind the loading cover, and the
+ * anchors keep them linked. The artefacts stand only at the 20 km marks, so the first
+ * one in view used to link half a dozen lit programs at once — measured on an M2 Pro,
+ * a 262 ms frame as a gate came over the horizon at night; on ANGLE over D3D11 a lit
+ * program alone is hundreds of milliseconds.
+ *
+ * Each material is anchored with the shadow flags its builders give it (`mesh`'s
+ * `shadow`), because receiving a shadow is in the program key and casting one decides
+ * the depth program. The gate's lamps are clones of `glowLamp` and share its program.
+ */
+export function artifactProgramAnchor(): THREE.Object3D {
+  const group = new THREE.Group();
+  group.name = 'artifact-anchor';
+  group.visible = false;
+  const anchors: readonly (readonly [THREE.BufferGeometry, THREE.Material, boolean])[] = [
+    [scorchGeo, matScorch, false],
+    [discGeo, matGlassFused, true],
+    [groundRingGeo, glowRing, false],
+    [slabGeo, matObsidian, true],
+    [seamGeo, glowSeam, false],
+    [pebbleGeo, matStone, true],
+    [coreGeo, glowCore, false],
+    ...crystalMats.map((material) => [crystalBodyGeo, material, true] as const),
+    [coreGeo, crystalMats[3]!, false],
+    [gateRingGeo, matRingMetal, true],
+    [gateLampGeo, glowLamp, false],
+    [membraneGeo, matMembrane, false],
+  ];
+  for (const [geometry, material, shadow] of anchors) mesh(group, geometry, material, shadow);
+  return group;
+}
+
 function buildMonolith(b: ArtifactBuild): void {
   const phase = hash01(b.seed, 1) * 10;
   const g = root(b, hash01(b.seed, 0) * Math.PI * 2);

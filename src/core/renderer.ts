@@ -339,6 +339,40 @@ const PCF_SHADOW_SIDE: Readonly<Record<THREE.Side, THREE.Side>> = {
   [THREE.DoubleSide]: THREE.DoubleSide,
 };
 
+/**
+ * One caster of every plain shadow-depth shape: each face a pass can draw (front, back,
+ * both), as a mesh and as an instanced mesh, without a map, with one, and alpha-tested
+ * through one (three hands the depth material the source's map whether or not it
+ * tests alpha, and the map is in the key). A depth program's key is little more than
+ * that, so these cover any caster whose lit material is not more exotic (displacement,
+ * skinning, morphs, an alpha map), whatever that lit material is — including content
+ * first built far down the road, which the boot scene never held (measured: a mapped
+ * double-sided caster's depth program linked mid-drive at 38 km). Compiled once at
+ * boot (`waitForFrameShaders`); the holders keep the programs.
+ */
+function depthVariantSamples(): THREE.Object3D {
+  const group = new THREE.Group();
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0], 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 0, 0, 1], 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1], 2));
+  const map = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+  map.needsUpdate = true;
+  for (const side of [THREE.FrontSide, THREE.BackSide, THREE.DoubleSide]) {
+    for (const instanced of [false, true]) {
+      for (const shape of ['plain', 'mapped', 'tested'] as const) {
+        const material = new THREE.MeshBasicMaterial(
+          shape === 'plain' ? { side } : shape === 'mapped' ? { side, map } : { side, map, alphaTest: 0.5 },
+        );
+        const mesh = instanced ? new THREE.InstancedMesh(geometry, material, 1) : new THREE.Mesh(geometry, material);
+        mesh.castShadow = true;
+        group.add(mesh);
+      }
+    }
+  }
+  return group;
+}
+
 interface GpuTimerQueryExtension {
   readonly TIME_ELAPSED_EXT: number;
   readonly GPU_DISJOINT_EXT: number;
@@ -602,15 +636,19 @@ export class Renderer {
   }
 
   /**
-   * Waits until both program variants used by the live two-pass frame are ready.
+   * Waits until both program variants used by the live two-pass frame are ready, and
+   * the plain shadow depth variants (`depthVariantSamples`) with them.
    */
   async waitForFrameShaders(): Promise<void> {
     const sceneReady = this.compileForScenePass(this.scene);
+    const depthReady = this.renderer.shadowMap.enabled
+      ? this.compileShadowDepth(depthVariantSamples())
+      : Promise.resolve();
     const previousTarget = this.renderer.getRenderTarget();
     try {
       this.renderer.setRenderTarget(null);
       const postReady = this.renderer.compileAsync(this.hazeScene, this.hazeCamera);
-      await Promise.all([sceneReady, postReady]);
+      await Promise.all([sceneReady, depthReady, postReady]);
     } finally {
       this.renderer.setRenderTarget(previousTarget);
     }
@@ -659,27 +697,28 @@ export class Renderer {
    *
    * The materials are the ones `WebGLShadowMap.getDepthMaterial` (three r185) would
    * hand the pass: the object's `customDepthMaterial`, or a depth material carrying the
-   * source's shadow side (flipped, for PCF), alpha test and its maps, displacement. Each
-   * caster wears its depth material for the one synchronous `compile` and gets its own
-   * back before this returns, so no frame ever draws it so dressed. The object itself
-   * stays the one compiled — instancing, skinning and morphs are in the program key.
+   * source's shadow side (flipped, for PCF), alpha test, map and alpha map (handed over
+   * whether or not alpha is tested), displacement. Each caster wears its depth material
+   * for the one synchronous `compile` and gets its own back before this returns, so no
+   * frame ever draws it so dressed. The object itself stays the one compiled —
+   * instancing, skinning and morphs are in the program key. Compiled into `hazeTarget`:
+   * like a shadow map, a render target, so no tone mapping and the working colour space.
    */
   private compileShadowDepth(object: THREE.Object3D): Promise<unknown> {
     const dressed: { mesh: THREE.Mesh; material: THREE.Mesh['material'] }[] = [];
     const depthFor = (material: THREE.Material): THREE.MeshDepthMaterial => {
       const alphaTest = material.alphaToCoverage ? 0.5 : material.alphaTest;
-      const tested = alphaTest > 0;
       const source = material as THREE.Material & {
         map?: THREE.Texture | null;
         alphaMap?: THREE.Texture | null;
         displacementMap?: THREE.Texture | null;
         displacementScale?: number;
       };
-      const map = tested ? (source.map ?? null) : null;
-      const alphaMap = tested ? (source.alphaMap ?? null) : null;
+      const map = source.map ?? null;
+      const alphaMap = source.alphaMap ?? null;
       const displacementMap = source.displacementMap && source.displacementScale !== 0 ? source.displacementMap : null;
       const side = material.shadowSide ?? PCF_SHADOW_SIDE[material.side];
-      const key = `${side}|${tested}|${map?.channel ?? '-'}|${alphaMap?.channel ?? '-'}|${displacementMap?.channel ?? '-'}`;
+      const key = `${side}|${alphaTest > 0}|${map?.channel ?? '-'}|${alphaMap?.channel ?? '-'}|${displacementMap?.channel ?? '-'}`;
       let depth = this.shadowDepthHolders.get(key);
       if (!depth) {
         depth = new THREE.MeshDepthMaterial();
@@ -718,9 +757,12 @@ export class Renderer {
     // the pass keeps the frame's light state, and the key carries the counts.
     const fog = this.scene.fog;
     this.scene.fog = null;
+    const previousTarget = this.renderer.getRenderTarget();
+    this.renderer.setRenderTarget(this.hazeTarget);
     try {
       return this.renderer.compileAsync(object, this.camera, this.scene);
     } finally {
+      this.renderer.setRenderTarget(previousTarget);
       this.scene.fog = fog;
       for (const { mesh, material } of dressed) mesh.material = material;
       // The holders keep their programs, not the textures they were compiled with.

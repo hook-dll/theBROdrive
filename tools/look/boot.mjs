@@ -20,10 +20,16 @@ export async function until(page, fn, arg, timeoutMs, what) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
+/**
+ * Real Chrome on Metal. `HEADED=1` in the environment opens a visible window instead of
+ * headless: a headless page is never throttled and never composited to a display, so a
+ * stutter hunt that should see what the player sees runs headed.
+ */
 export async function launch({ W, H }) {
   return puppeteer.launch({
     executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    headless: 'new',
+    headless: process.env.HEADED === '1' ? false : 'new',
+    defaultViewport: process.env.HEADED === '1' ? null : undefined,
     args: [
       '--use-angle=metal',
       '--ignore-gpu-blocklist',
@@ -55,7 +61,11 @@ export async function bootIntoCar(browser, { URL, W, H, DPR = 1, SEED = 'flick',
       const key = 'brodrive-settings-v1';
       let stored = {};
       try { stored = JSON.parse(localStorage.getItem(key) ?? '{}') ?? {}; } catch { /* fresh */ }
+      // A partial record is read field by field, and a missing `gearboxMode` reads as
+      // MANUAL (settings.ts: an old save's mode). The player's autopilot then sat in
+      // neutral at the start of every TIER run; the game's own default is automatic.
       localStorage.setItem(key, JSON.stringify({
+        gearboxMode: 'automatic',
         ...stored,
         graphicsQuality: tier,
         graphicsQualitySource: 'chosen',

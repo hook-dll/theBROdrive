@@ -207,6 +207,10 @@ export class DebrisField {
       if (seen.has(key)) continue;
       seen.add(key);
       const anchor = new THREE.Mesh(def.geometry, def.material);
+      // As `spawnPiece` makes them: receiving a shadow is in the program key, and an
+      // anchor without it compiled a variant no piece draws (measured: a delineator
+      // knocked down mid-drive still linked its piece program on the spot).
+      anchor.receiveShadow = true;
       anchor.visible = false;
       this.pieceWarmup.add(anchor);
     }

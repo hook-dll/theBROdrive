@@ -24,4 +24,6 @@ A variant is the program cache key, not the material object. These all make a ne
 
 In the dev build, wrap `__bro.renderer.renderer.render` and count `info.programs.length` growth inside the call while you exercise the new content. Anything above zero mid-drive is a freeze on Windows. `__broSpikes` also notes `new programs: …` on a hitch.
 
-Known one-offs still compiled on first draw: the sidetrack decal (world/sidetrack.ts), POI kit materials (world/poi/kit.ts), the distance sign and the artefact membrane at the 20 km marks (world/props/monuments.ts, artifacts.ts).
+Known one-offs still compiled on first draw: POI kit materials (world/poi/kit.ts). The sidetrack decal and everything at the 20 km marks have boot anchors now (`sidetrackProgramAnchor`, `monumentProgramAnchor`).
+
+Shadow depth programs count too. `compileForScenePass` compiles each caster's depth program with its lit ones (no fog, render target bound), and `waitForFrameShaders` compiles every plain depth shape (front/back/double side, mesh/instanced, no map/map/alpha-tested). An anchor must copy the real mesh's `receiveShadow` and `castShadow`: receiving is in the lit program key, casting decides the depth program. The `hitch.mjs` night drive (`DAY=8 HEADED=1`) reports `programs=` per 30 s; anything above zero after the first window is a freeze on Windows.

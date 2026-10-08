@@ -20,7 +20,7 @@ import type { ChunkContext, ChunkContent, ChunkProvider } from '../chunks';
 
 import { addStatic, yawRotation } from './scatter';
 import { matSignPost } from './poles';
-import { ARTIFACT_EXTRA_SETBACK_M, buildArtifact } from './artifacts';
+import { ARTIFACT_EXTRA_SETBACK_M, artifactProgramAnchor, buildArtifact } from './artifacts';
 
 // Signs.
 const SIGN_WIDTH = 2.4;
@@ -112,6 +112,30 @@ function buildDistanceSign(b: MonumentBuild): void {
       yawRotation(b.heading + Math.PI),
     );
   }
+}
+
+/**
+ * Hidden meshes holding the programs of everything at the 20 km marks, for the scene
+ * at boot: the artefacts (`artifactProgramAnchor`) and the distance sign. The sign's
+ * material is made per sign, for its own text, and disposed with the chunk, so on its
+ * own its program was linked as each sign came into view and released when it left.
+ * The anchor's material has the same shape — a map, the same finish, no shadows — on a
+ * one-pixel texture, so the program is linked once under the loading cover and kept.
+ */
+export function monumentProgramAnchor(): THREE.Object3D {
+  const group = new THREE.Group();
+  group.name = 'monument-anchor';
+  group.visible = false;
+  const texture = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  const sign = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.MeshStandardMaterial({ map: texture, roughness: 0.6, metalness: 0.1 }),
+  );
+  const post = new THREE.Mesh(new THREE.BoxGeometry(0.09, 1, 0.09), matSignPost);
+  group.add(sign, post, artifactProgramAnchor());
+  return group;
 }
 
 export class MonumentProvider implements ChunkProvider {

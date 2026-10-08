@@ -386,6 +386,25 @@ const matSidetrack = new THREE.MeshStandardMaterial({
   metalness: 0,
 });
 
+/**
+ * A hidden mesh in `matSidetrack`, for the scene at boot: `waitForFrameShaders` links
+ * its program behind the loading cover, and the anchor keeps it linked. A track is
+ * only built where the variety director puts one, so its first appearance used to
+ * link the program on the spot (12 ms of draw on an M2 Pro; on ANGLE over D3D11 a
+ * lit program is hundreds). The geometry only has to match the ribbon's layout: position,
+ * normal and an RGBA colour (`vertexAlphas` is in the program key).
+ */
+export function sidetrackProgramAnchor(): THREE.Object3D {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0.01, 0.01, 0, 0], 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute([0, 1, 0, 0, 1, 0, 0, 1, 0], 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(new Array(12).fill(0), 4));
+  const anchor = new THREE.Mesh(geometry, matSidetrack);
+  anchor.name = 'sidetrack-anchor';
+  anchor.visible = false;
+  return anchor;
+}
+
 export class SidetrackProvider implements ChunkProvider {
   readonly id = 'sidetrack';
 

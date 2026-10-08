@@ -70,6 +70,32 @@ const RACING_SIGHT_BRAKE_SHARE = 0.4;
 const RACING_THROTTLE_FREE_SHARE = 0.6;
 const RACING_THROTTLE_MIN = 0.12;
 /**
+ * THE RACING DRIVER'S RIGHT FOOT: OFF FOR A MANOEUVRE, BACK DOWN GENTLY.
+ *
+ * The friction-circle cap above answers a steady bend, where the yaw rate is the
+ * cornering load. It is blind to a TRANSIENT: a lane change at 140 km/h is a quick
+ * flick and a flick back, the yaw rate crosses zero between them, and the cap opened
+ * to full power right as the rear tyres were swinging the body back. Seen in play as
+ * frantic cars sliding out of a pass and swaying for seconds after it.
+ *
+ * A driver lifts for the flick and feeds the power back as the car settles. Three
+ * terms, for `racingLine` modes only:
+ *  - the line moving across the road (`lineSlewRate`): zero while the car holds its
+ *    lane or its racing line along a straight, 0.4-2.2 m/s through a pass, measured
+ *    in the real stream. Past `RACER_LIFT_SLEW_FREE` the foot starts coming off and
+ *    by `RACER_LIFT_SLEW_FULL` it is at `RACER_LIFT_MIN`. Steering lock is no measure
+ *    at this speed — a pass at 140 km/h is a hundredth of lock;
+ *  - the body's sideslip: past `RACER_SLIP_FREE_RAD` the car is no longer going where
+ *    it points, and by `RACER_SLIP_LIFT_RAD` the foot is off;
+ *  - the pedal comes back at most `RACER_FEED_PER_S` a second, whatever asked for it.
+ */
+const RACER_LIFT_SLEW_FREE = 0.3;
+const RACER_LIFT_SLEW_FULL = 1.5;
+const RACER_LIFT_MIN = 0.15;
+const RACER_SLIP_FREE_RAD = (1.5 * Math.PI) / 180;
+const RACER_SLIP_LIFT_RAD = (4 * Math.PI) / 180;
+const RACER_FEED_PER_S = 1.2;
+/**
  * What the opposing lane costs a driver that is willing to use it, before its
  * mode's `passNerve` scales it. This single number replaces the old page of
  * passing thresholds: at 16 an overtake pays for itself once the car ahead is
@@ -1592,6 +1618,8 @@ export class Autopilot {
   private asphaltHalfWidth = 0;
   /** Steering curvature trim, rad/m; see `ModeConfig.curvatureTrim`. */
   private curvatureTrim = 0;
+  /** The pedal as it was last left, so it can only be fed back in; see RACER_FEED_PER_S. */
+  private racerThrottle = 0;
   /** The least-curved line a racing driver is on; see `ModeConfig.racingLine`. */
   private readonly racingLine = new RacingLine();
   private racingActive = false;
@@ -5096,6 +5124,18 @@ export class Autopilot {
         out.throttle,
         clamp((1 - cornering * cornering) / (1 - RACING_THROTTLE_FREE_SHARE ** 2), RACING_THROTTLE_MIN, 1),
       );
+      // The lift for a manoeuvre and for a slide; see RACER_LIFT_SLEW_FREE.
+      const bodyLateral = velocity.x * forwardZ - velocity.z * forwardX;
+      const slip = forwardSpeed > 5 ? Math.atan2(Math.abs(bodyLateral), forwardSpeed) : 0;
+      const lift = Math.max(
+        clamp((Math.abs(this.lineSlewRate) - RACER_LIFT_SLEW_FREE) / (RACER_LIFT_SLEW_FULL - RACER_LIFT_SLEW_FREE), 0, 1),
+        clamp((slip - RACER_SLIP_FREE_RAD) / (RACER_SLIP_LIFT_RAD - RACER_SLIP_FREE_RAD), 0, 1),
+      );
+      out.throttle = Math.min(
+        out.throttle,
+        1 - (1 - RACER_LIFT_MIN) * lift,
+        this.racerThrottle + RACER_FEED_PER_S * dt,
+      );
     }
     // BRAKING FOR SOMETHING IN THE WAY IS NOT DONE AT FULL PEDAL. The mode's ceiling is
     // a personality and stays the cap for braking at the road itself — a bend, a surface,
@@ -5237,6 +5277,7 @@ export class Autopilot {
       out.throttle = 0;
       out.brake = Math.max(out.brake, speed < CRAWL_SPEED_MPS ? HOLD_BRAKE : out.brake);
     }
+    this.racerThrottle = out.throttle;
     this.activityValue = offRoad
       ? 'offroad'
       : this.planUsesOncomingLane || this.middlePassingValue

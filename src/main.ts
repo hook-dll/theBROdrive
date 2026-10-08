@@ -89,10 +89,10 @@ import { DebrisField, type Impactor } from './world/debris';
 import { GroundCoverField } from './world/props/groundcover';
 import { hasEscapedWorld } from './world/landscape';
 import { DelineatorProvider } from './world/props/delineators';
-import { MonumentProvider } from './world/props/monuments';
+import { MonumentProvider, monumentProgramAnchor } from './world/props/monuments';
 import { PoleProvider } from './world/props/poles';
 import { ScatterProvider } from './world/props/scatter';
-import { SidetrackProvider } from './world/sidetrack';
+import { SidetrackProvider, sidetrackProgramAnchor } from './world/sidetrack';
 import { updateWeather, weather, windAt } from './world/weather';
 import { Road, ROAD_LENGTH } from './world/road';
 import { WorldOrigin } from './world/origin';
@@ -467,6 +467,9 @@ async function boot(): Promise<void> {
   // the hidden anchor dancer it adds to the scene compiles their program under the
   // loading cover. See world/props/airdancer.ts.
   const dancers = new DancerField(renderer.scene);
+  // The 20 km marks and the sidetracks are built only where they stand; their hidden
+  // program anchors are in the scene from boot for the same reason as the dancer's.
+  renderer.scene.add(monumentProgramAnchor(), sidetrackProgramAnchor());
   /** Reused receiver for the nearest dancer's sound; see `DancerField.heard`. */
   const dancerSound: DancerHeard = { x: 0, y: 0, z: 0, flapMps: 0, airRate: 0 };
   /**
