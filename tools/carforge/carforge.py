@@ -75,6 +75,7 @@ ARCH_SEGMENTS = 12       # segments of a default (semicircle) arch outline
 ARCH_LIP = 45.0          # mm the arch lip reaches out over the side from the opening
 ARCH_FLARE = 25.0        # mm the arch lip stands proud of the side at the opening
 ARCH_SNAP = 5.0          # mm: vertices the arch and window cuts leave this close are welded
+ARCH_LIP_TAPER = 80.0    # mm over which an arch lip's flare runs out at its ends
 ARCH_FAIR_TOL = 6.0      # mm: tolerance of `simplify` on a traced outline (keeps rounded corners)
 BEZEL_DEPTH = 25.0       # mm a lamp bezel pocket goes into its face (spec lamps[].bezel_depth)
 GLASS_INSET = 12.0       # mm side glass sits inside the greenhouse side
@@ -84,14 +85,15 @@ GLASS_CLEAR = 5.0        # mm: a traced window stays this far inside the belt an
 ROUND_SEGMENTS = 3       # segments of a rounded corner
 WINDOW_MIN_HEIGHT = 80.0  # mm: a default window ends where less glass than this is left
 RECESS_DEPTH = 15.0       # mm a recess (glass, grille) goes into its face (spec recesses[].depth)
-GROOVE_WIDTH = 10.0       # mm width of a panel gap (grooves[].width)
-GROOVE_DEPTH = 10.0       # mm depth of a panel gap (grooves[].depth)
+GROOVE_WIDTH = 18.0       # mm width of a panel gap at the surface (grooves[].width)
+GROOVE_DEPTH = 12.0       # mm depth of a panel gap's V (grooves[].depth)
+GROOVE_SILL_CLEAR = 10.0  # mm a side gap stops above the sill chamfer
 LINE_WIDTH = 12.0         # mm width of a drawn line (lines[].width)
 LINE_PROUD = 3.0          # mm a drawn line stands off its face
 BUMPER_LIP = 40.0         # mm height of a channel bumper's lips (bumpers[].lip)
 SEAM_TOL = 1.5            # mm a line or groove may stray from its face between probes
 SEAM_MIN = 8.0            # mm between a line's probes of its face
-LAMP_MAX_GAP = 0.030     # m: every lamp vertex must lie within this of the body surface
+LAMP_MAX_GAP = 0.060     # m: every lamp vertex must lie within this of the body surface (domes included)
 
 
 def fail(msg):
@@ -570,14 +572,19 @@ def clip_above(pts, floor):
 def add_arch_lips(spec, s, body, bvh):
     """A lip around each arch opening: a band from the body side, `lip` mm out from the
     opening's edge, rising to stand `flare` mm proud at the edge, and turning back into the
-    well. Probed on the uncut body (`bvh`), so it sits on the side wherever that curves."""
+    well. Probed on the uncut body (`bvh`), so it sits on the side wherever that curves. It
+    stops above the sill chamfer and its flare runs out over ARCH_LIP_TAPER mm at both ends,
+    so it meets the sill flush instead of ending in a jagged stub."""
     bm = bmesh.new()
     bm.from_mesh(body.data)
     uvl = bm.loops.layers.uv["UVMap"]
     for _, _, full, lip, flare in arch_specs(spec):
-        outline = clip_above(full, lambda y: s.bottom(y) + 1.0)
+        outline = clip_above(full, lambda y: s.bottom(y) + SILL_CHAMFER + 2.0)
         n = len(outline)
-        rows = []  # per outline point: (edge, out) points (y, z, x) on the left, None off the body
+        arc = [0.0]
+        for (ya, za), (yb, zb) in zip(outline, outline[1:]):
+            arc.append(arc[-1] + math.hypot(yb - ya, zb - za))
+        rows = []  # per outline point: (edge, out, flare) points (y, z, x) on the left, None off the body
         for i, (y, z) in enumerate(outline):
             (ya, za), (yb, zb) = outline[max(i - 1, 0)], outline[min(i + 1, n - 1)]
             ty, tz = yb - ya, zb - za
@@ -585,15 +592,16 @@ def add_arch_lips(spec, s, body, bvh):
             ny, nz = -tz / tl, ty / tl  # away from the opening
             qy, qz = y + ny * lip, z + nz * lip
             xe, xq = side_x(bvh, y, z), side_x(bvh, qy, qz)
-            rows.append(None if xe is None or xq is None else ((y, z, xe), (qy, qz, xq)))
+            f = flare * min(1.0, min(arc[i], arc[-1] - arc[i]) / ARCH_LIP_TAPER)
+            rows.append(None if xe is None or xq is None else ((y, z, xe), (qy, qz, xq), f))
         for sign in (1.0, -1.0):
             def v(y, z, x):
                 return bm.verts.new(Vector((sign * x, y, z)) * MM)
             for a, b in zip(rows, rows[1:]):
                 if a is None or b is None:
                     continue
-                (ea, qa), (eb, qb) = a, b
-                tip_a, tip_b = v(ea[0], ea[1], ea[2] + flare), v(eb[0], eb[1], eb[2] + flare)
+                (ea, qa, fa), (eb, qb, fb) = a, b
+                tip_a, tip_b = v(ea[0], ea[1], ea[2] + fa), v(eb[0], eb[1], eb[2] + fb)
                 base_a, base_b = v(*qa[:2], qa[2] + 1.0), v(*qb[:2], qb[2] + 1.0)
                 back_a, back_b = v(ea[0], ea[1], ea[2] - 10.0), v(eb[0], eb[1], eb[2] - 10.0)
                 out = Vector((sign, 0, 0))
@@ -898,11 +906,14 @@ def cut_recesses(spec, body):
     apply_cut(body, finish(bm, "cutter_recesses"))
 
 
-def probe_line(bvh, face, line, tol, step):
-    """Points (u, v, 3D mm) along a polyline on a face, split where the face bends away from a
-    straight piece by more than `tol` (sampled every `step` mm, faired with `simplify`).
-    Samples off the body are dropped, so a line drawn past the body's edge stops at it."""
+def probe_line(bvh, face, line, tol, step, keep_if=None):
+    """Points (u, v, 3D mm, surface normal) along a polyline on a face, split where the face
+    bends away from a straight piece by more than `tol` (sampled every `step` mm, faired with
+    `simplify`). A point's normal averages the samples on both sides of it, so at a crease it
+    is the crease's bisector. Samples off the body, or failing `keep_if(point, normal)`, are
+    dropped, so a line drawn past the body's edge stops at it."""
     ax = AXIS_INDEX[face]
+    out_axis = FACE_AXIS[face]
     out = []
     for a, b in zip(line, line[1:]):
         length = math.hypot(b[0] - a[0], b[1] - a[1])
@@ -910,13 +921,18 @@ def probe_line(bvh, face, line, tol, step):
         prof = []
         for k in range(n + 1):
             u, v = a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n
-            p = face_hit(bvh, face, u, v)
-            if p is not None:
-                prof.append((length * k / n, p[ax], u, v, p))
+            loc, nrm, _, _ = bvh.ray_cast(face_point(face, u, v) * MM + out_axis * 9.0, -out_axis)
+            if loc is None or (keep_if and not keep_if(loc / MM, nrm)):
+                continue
+            prof.append((length * k / n, loc[ax] / MM, u, v, loc / MM, nrm))
         if len(prof) < 2:
             continue
         keep = {round(sv, 6) for sv, _ in simplify([(q[0], q[1]) for q in prof], tol)}
-        pts = [(q[2], q[3], q[4]) for q in prof if round(q[0], 6) in keep]
+        pts = []
+        for i, q in enumerate(prof):
+            if round(q[0], 6) in keep:
+                nb = prof[max(i - 1, 0)][5] + prof[min(i + 1, len(prof) - 1)][5]
+                pts.append((q[2], q[3], q[4], nb.normalized()))
         out += pts if not out else pts[1:]
     return out
 
@@ -951,8 +967,8 @@ def add_lines(spec, body, bvh):
             pts = probe_line(bvh, face, line, SEAM_TOL, SEAM_MIN)
             out = flip(FACE_AXIS[face], sign)
             rows = []
-            for i, (u, v, _) in enumerate(pts):
-                (ua, va, _), (ub, vb, _) = pts[max(i - 1, 0)], pts[min(i + 1, len(pts) - 1)]
+            for i, (u, v, _, _) in enumerate(pts):
+                (ua, va, _, _), (ub, vb, _, _) = pts[max(i - 1, 0)], pts[min(i + 1, len(pts) - 1)]
                 tl = math.hypot(ub - ua, vb - va) or 1.0
                 du, dv = -(vb - va) / tl * half, (ub - ua) / tl * half
                 pair = [face_hit(bvh, face, u + k * du, v + k * dv) for k in (1, -1)]
@@ -966,48 +982,63 @@ def add_lines(spec, body, bvh):
     body.data.update()
 
 
-def cut_grooves(spec, body, bvh):
-    """Panel gaps (`grooves`, side `seams`): channels `width` (GROOVE_WIDTH) wide and `depth`
-    (GROOVE_DEPTH) deep, cut into the body like the pack's door gaps. Each piece between probes
-    (on the uncut `bvh`) is a box standing on the face, overlapping its neighbours."""
+def cut_grooves(spec, s, body, bvh):
+    """Panel gaps (`grooves`, side `seams`): V channels `width` (GROOVE_WIDTH) wide at the
+    surface and `depth` (GROOVE_DEPTH) deep, in the paint, as the pack folds its door gaps
+    into the shell. One swept wedge per line (probed on the uncut `bvh`), its cross-section
+    square to the surface at every probe, so neighbouring pieces share their ends and leave
+    no slivers. Side lines stop short of the sill chamfer, so a gap never cuts the body's edge."""
     bm, uvl = new_bm()
-    pieces = 0
+    cell = CELLS["paint"]
+    lines = 0
+
+    def above_sill(p, _n):
+        return p.z > s.bottom(p.y) + SILL_CHAMFER + GROOVE_SILL_CLEAR
+
     for kind, it in line_items(spec):
         if kind != "grooves":
             continue
         face = it["face"]
         half = float(it.get("width", GROOVE_WIDTH)) / 2
         depth = float(it.get("depth", GROOVE_DEPTH))
+        rise = 30.0  # the wedge's top stands this far off the surface
+        top_half = half * (depth + rise) / depth
+        loop = bool(it.get("closed"))
         for line, sign in halves(it, closed(it)):
-            pts = probe_line(bvh, face, line, SEAM_TOL, SEAM_MIN)
+            pts = probe_line(bvh, face, line, SEAM_TOL, SEAM_MIN, above_sill if face == "side" else None)
+            if loop and len(pts) > 2:
+                pts = pts[:-1]
+            if len(pts) < 2:
+                continue
             axis = flip(FACE_AXIS[face], sign)
-            for (_, _, pa), (_, _, pb) in zip(pts, pts[1:]):
-                # the box stands on the surface (its floor parallel to it), not on the face axis:
-                # a floor square to the axis on a tilted panel reads as a dent beside the gap
-                nrm = Vector()
-                for p in (pa, pb):
-                    _, n, _, _ = bvh.find_nearest(p * MM)
-                    nrm += n if n is not None else FACE_AXIS[face]
-                out = flip(nrm, sign).normalized()
+            rings = []
+            m = len(pts)
+            P = [flip(q[2], sign) for q in pts]
+            for i, (_, _, _, nrm) in enumerate(pts):
+                p, out = P[i], flip(nrm, sign)
                 if out.dot(axis) < 0:
                     out = -out
-                pa, pb = flip(pa, sign), flip(pb, sign)
-                along = pb - pa
-                if along.length < 1e-6:
+                prev = P[(i - 1) % m] if loop or i > 0 else p
+                nxt = P[(i + 1) % m] if loop or i < m - 1 else p
+                t = nxt - prev
+                if t.length < 1e-6:
                     continue
-                t = along.normalized()
-                across = t.cross(out).normalized() * half
-                ends = (pa - t * half, pb + t * half)
-                corners = ((ends[0], 1), (ends[1], 1), (ends[1], -1), (ends[0], -1))
-                top = [bm.verts.new((p + across * k + out * 40.0) * MM) for p, k in corners]
-                bot = [bm.verts.new((p + across * k - out * depth) * MM) for p, k in corners]
-                add_face(bm, uvl, top, CELLS["black"])
-                add_face(bm, uvl, bot[::-1], CELLS["black"])
-                for i in range(4):
-                    j = (i + 1) % 4
-                    add_face(bm, uvl, [top[i], bot[i], bot[j], top[j]], CELLS["black"])
-                pieces += 1
-    if not pieces:
+                across = t.normalized().cross(out).normalized()
+                rings.append([bm.verts.new((p + across * top_half + out * rise) * MM),
+                              bm.verts.new((p - across * top_half + out * rise) * MM),
+                              bm.verts.new((p - out * depth) * MM)])
+            if len(rings) < 2:
+                continue
+            pairs = list(zip(rings, rings[1:])) + ([(rings[-1], rings[0])] if loop else [])
+            for a, b in pairs:
+                for i in range(3):
+                    j = (i + 1) % 3
+                    add_face(bm, uvl, [a[i], a[j], b[j], b[i]], cell)
+            if not loop:
+                add_face(bm, uvl, rings[0], cell)
+                add_face(bm, uvl, rings[-1][::-1], cell)
+            lines += 1
+    if not lines:
         bm.free()
         return
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
@@ -1048,9 +1079,67 @@ def add_details(spec, body):
     for p in spec.get("plates", []):
         for pts, sign in halves(p, item_outline(p)):
             add_plate(bm, uvl, bvh, p, p.get("cell", "black"), pts, sign)
+    for r in spec.get("recesses", []):
+        if r.get("bars"):
+            add_bars(bm, uvl, bvh, r)
     bm.to_mesh(body.data)
     bm.free()
     body.data.update()
+
+
+def add_bars(bm, uvl, bvh, r):
+    """Grille bars across a stadium or rectangular recess on the front or rear face:
+    `bars.count` vertical bars `bars.width` (25) mm wide in `bars.cell` (trim), standing on the
+    recess floor and reaching to `bars.inset` (3) mm under the face, trimmed to the rounded ends."""
+    b = r["bars"]
+    n, w = int(b["count"]), float(b.get("width", 25.0))
+    x0, x1 = min(r["x"]), max(r["x"])
+    z0, z1 = min(r["z"]), max(r["z"])
+    rad = min(float(r.get("radius", 0.0)), (z1 - z0) / 2, (x1 - x0) / 2)
+    depth = float(r.get("depth", RECESS_DEPTH))
+    for k in range(n):
+        cx = x0 + (x1 - x0) * (k + 1) / (n + 1)
+        edge = min(cx - x0, x1 - cx)
+        trim = rad - math.sqrt(max(0.0, rad * rad - (rad - edge) ** 2)) if edge < rad else 0.0
+        bar = {"face": r["face"], "x": [cx - w / 2, cx + w / 2], "z": [z0 + trim + 4, z1 - trim - 4],
+               "proud": depth - float(b.get("inset", 3.0)), "single": True}
+        if bar["z"][1] - bar["z"][0] > 10:
+            add_plate(bm, uvl, bvh, bar, b.get("cell", "trim"))
+
+
+def add_dome(bm, uvl, bvh, item, cell, pts, sign):
+    """A round lamp as the pack builds its headlamps: a rim `rim` (8) mm proud in `rim_cell`
+    (chrome) around a lens bulging `dome` mm further in the lamp's cell, on the face it is
+    probed onto. Rings: base (inside the face), rim, rim inner edge, lens shoulder, lens centre."""
+    face = item["face"]
+    out = flip(FACE_AXIS[face], sign)
+    rim, dome = float(item.get("rim", 8.0)), float(item["dome"])
+    base = []
+    for u, v in pts:
+        p = face_hit(bvh, face, u, v)
+        if p is None:
+            fail(f"{item['role']} at {face} ({u:.0f}, {v:.0f}) has no face behind it")
+        base.append(flip(p, sign))
+    c = sum(base, Vector()) / len(base)
+    rings = [[p - out * 5.0 for p in base],
+             [p + out * rim for p in base],
+             [c + (p - c) * 0.82 + out * rim for p in base],
+             [c + (p - c) * 0.5 + out * (rim + dome * 0.8) for p in base]]
+    vs = [[bm.verts.new(p * MM) for p in ring] for ring in rings]
+    tip = bm.verts.new((c + out * (rim + dome)) * MM)
+    cells = [CELLS[item.get("rim_cell", "chrome")]] * 2 + [CELLS[cell]]
+    n = len(base)
+    centre = (c + out * rim) * MM
+    for ring_a, ring_b, fc in zip(vs, vs[1:], cells):
+        for i in range(n):
+            j = (i + 1) % n
+            q = [ring_a[i], ring_a[j], ring_b[j], ring_b[i]]
+            mid = sum((v.co for v in q), Vector()) / 4
+            add_face(bm, uvl, q, fc, mid - centre + out * 1e-3)
+    for i in range(n):
+        j = (i + 1) % n
+        add_face(bm, uvl, [vs[-1][i], vs[-1][j], tip], CELLS[cell], out)
+    add_face(bm, uvl, vs[0][::-1], CELLS[cell], -out)
 
 
 def add_spare(spec, body, tmpl, pts, pack_w, pack_r):
@@ -1095,7 +1184,10 @@ def build_lamps(spec, cid, body, objs):
             if role not in per_role:
                 per_role[role] = new_bm()
             bm, uvl = per_role[role]
-            add_plate(bm, uvl, bvh, lamp, lamp.get("cell", LAMP_CELL[role]), pts, sign)
+            if lamp.get("dome"):
+                add_dome(bm, uvl, bvh, lamp, lamp.get("cell", LAMP_CELL[role]), pts, sign)
+            else:
+                add_plate(bm, uvl, bvh, lamp, lamp.get("cell", LAMP_CELL[role]), pts, sign)
     for role, (bm, _) in per_role.items():
         for v in bm.verts:
             hit = bvh.find_nearest(v.co)
@@ -1113,7 +1205,7 @@ def build_body(spec, cid):
     cut_arches(spec, s, body)
     cut_windows(spec, s, body)
     cut_recesses(spec, body)
-    cut_grooves(spec, body, uncut)
+    cut_grooves(spec, s, body, uncut)
     weld_cuts(body)
     add_arch_lips(spec, s, body, uncut)
     add_lines(spec, body, uncut)

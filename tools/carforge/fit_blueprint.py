@@ -112,7 +112,7 @@ def main():
     lamps = []
     for lp in bp.get("lamps", []):
         out = {"role": lp["role"], "face": lp["face"]}
-        for flag in ("round", "segments", "single", "bezel", "bezel_depth", "bezel_cell"):
+        for flag in ("round", "segments", "single", "bezel", "bezel_depth", "bezel_cell", "dome", "rim", "rim_cell"):
             if flag in lp:
                 out[flag] = lp[flag]
         if "circle" in lp:
