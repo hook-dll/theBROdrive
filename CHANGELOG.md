@@ -12,6 +12,12 @@
   the drive then loads).
 
 ### Changed
+- NO LONG STEEP CLIMBS. The felt relief bands in `world/landscape.ts` are lower (hills
+  +-175 / +-60 m, rolls +-30 / +-8 m, from +-290 / +-90 and +-90 / +-14), wavelengths
+  unchanged, so long climbs stay but are gentle. Over 1000 km on seeds 1337 and 90210:
+  |grade| p90 12% -> 6%, p99 17% -> 10%, max 22% -> 14%; a run at 10% or more lasted up
+  to 2 km and now at most 160 m; 500 m stretches averaging 6% or more went from 32-35
+  to 2-3 per 100 km. The 225 km and 50 km altitude bands and the mountains are untouched.
 - FRANTIC VERGE PASSES. A frantic car can use the shoulder up to 130 km/h, so the
   previous 100 km/h cap no longer rejects most 95-115 km/h leaders. The pass target is
   now a speed floor above the corridor's follow/squeeze target, so a frantic car must

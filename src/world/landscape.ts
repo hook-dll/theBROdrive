@@ -103,7 +103,7 @@ function band(seed: number, x: number, z: number): number {
  * altitude at almost no cost in steepness.
  *
  * TEMPO, and why the two long bands do not have it. `RELIEF_SCALE` multiplies every
- * amplitude AND every wavelength, and that is what buys the world its +-1430 m of
+ * amplitude AND every wavelength, and that is what buys the world its +-1255 m of
  * range — of which +-1050 m lives in the 225 km and 50 km bands. Those two are the
  * mountains, the basins and the far horizon, and nothing here touches them.
  *
@@ -114,12 +114,22 @@ function band(seed: number, x: number, z: number): number {
  * SHORT alternative and a regional tempo field crossfades between them:
  *
  *   band    long tempo             short tempo          slope long/short
- *   hills   +-290 m / 12.5 km      +-90 m / 6 km         6.96% / 4.50%
- *   rolls   +- 90 m /  2.1 km      +-14 m / 250 m       12.86% / 16.80%
+ *   hills   +-175 m / 12.5 km      +-60 m / 6 km         4.20% / 3.00%
+ *   rolls   +- 30 m /  2.1 km      +- 8 m / 250 m        4.29% / 9.60%
  *
  * A pair contributes `(1 - w) * long + w * short` with ONE shared `w`, so the two
  * tempos never mix their worst cases and the field's bound is the worse of the two
- * endpoints — 22.9% at the long end, 24.3% at the short one.
+ * endpoints — 11.5% at the long end, 15.6% at the short one.
+ *
+ * STEEP IS ONLY ALLOWED SHORT (owner, 2026-10-10). A long pitch is fine when it is
+ * gentle; a long STEEP one is a slow crawl in a weak car and no fun at all. The felt
+ * bands used to be +-290 / +-90 m long-tempo and +-90 / +-14 m short-tempo, and on
+ * seed 1337 that gave a 2 km run at 10% or more and 1.3 km at 7% or more almost every
+ * kilometre of hills. At these amplitudes (1000 km, seeds 1337 and 90210): |grade|
+ * p50 2.2%, p90 6.0-6.4%, p99 9.4-9.9%, max 13.9%; a run at 10% or more lasts at most
+ * 160 m, a 500 m stretch averaging 6% or more comes up two or three times per 100 km,
+ * and the steepest 2 km average is 7.3%. The short-tempo rolls keep their brief 9.6%
+ * ramps because a crest you feel is the point of them.
  *
  * LATTICE SPACING IS NOT FEATURE LENGTH, and this is the whole reason the numbers
  * look small. Value noise with +-1 lattice values gives neighbouring cells the same
@@ -129,7 +139,7 @@ function band(seed: number, x: number, z: number): number {
  *   +-40 m / 700 m  ->  1574 m (63 s at road speed)
  *   +-30 m / 500 m  ->  1205 m (48 s)
  *   +-22 m / 350 m  ->   881 m (35 s)
- *   +-14 m / 250 m  ->   690 m (28 s)   <- chosen
+ *   +-14 m / 250 m  ->   690 m (28 s)   <- chosen (now +-8 m, see above)
  *
  * WHY NOT KEEP THE HEIGHT AT THE SHORT WAVELENGTH. +-90 m over 700 m is a 38% grade,
  * and even the +-55 m compromise is 23.6%; band bounds ADD, and this field really does
@@ -164,19 +174,19 @@ const BANDS: readonly Band[] = [
   { amplitude: 70 * RELIEF_SCALE, wavelength: 10_000 * RELIEF_SCALE, hilliness: false, home: false },
   /** Hills: a climb or descent that lasts long enough to choose a gear. */
   {
-    amplitude: 58 * RELIEF_SCALE,
+    amplitude: 35 * RELIEF_SCALE,
     wavelength: 2500 * RELIEF_SCALE,
     hilliness: true,
     home: true,
-    short: { amplitude: 90, wavelength: 6000 },
+    short: { amplitude: 60, wavelength: 6000 },
   },
   /** Rolls: the crest-and-dip rhythm under the bonnet. */
   {
-    amplitude: 18 * RELIEF_SCALE,
+    amplitude: 6 * RELIEF_SCALE,
     wavelength: 420 * RELIEF_SCALE,
     hilliness: false,
     home: true,
-    short: { amplitude: 14, wavelength: 250 },
+    short: { amplitude: 8, wavelength: 250 },
   },
 ];
 
@@ -254,7 +264,7 @@ export const MAX_RELIEF = Math.max(sumOverBands(0, reliefAtTempo), sumOverBands(
  * How far BELOW THE GROUND a body has to be to count as having escaped the world.
  *
  * An ABSOLUTE altitude cannot express this. The field's half-range is `MAX_RELIEF`
- * (+-1430 m), so whole basins — over a hundred kilometres of road at a time on
+ * (+-1255 m), so whole basins — over a hundred kilometres of road at a time on
  * ordinary seeds — sit below any fixed line drawn for the purpose. A car driving down
  * into one then satisfies the test on solid asphalt, is "rescued" onto the road, and
  * satisfies it again on the next step, for good.
