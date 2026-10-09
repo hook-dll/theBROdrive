@@ -5,15 +5,14 @@ import { defineConfig } from 'vite';
  * Development and preview servers use plain HTTP by default: the shipped local package
  * serves only on 127.0.0.1, and the headless tools (tools/look) drive http URLs.
  *
- * `HTTPS=1` (`npm run dev:https`) serves over a self-signed certificate instead, for a
- * phone on the LAN: `AudioWorklet` — the engines and the limiter — exists only in a
- * secure context, and http://192.168.… is not one. The phone shows a certificate
- * warning once; accept it.
+ * `npm run dev:https` (`vite --mode https`) serves over a self-signed certificate
+ * instead, for a phone on the LAN: `AudioWorklet` — the engines and the limiter — exists
+ * only in a secure context, and http://192.168.… is not one. The phone shows a
+ * certificate warning once; accept it. A mode rather than an environment variable, so
+ * the script runs the same in cmd, PowerShell and a POSIX shell.
  */
-const https = process.env.HTTPS === '1';
-
 export default defineConfig(({ mode }) => ({
-  plugins: https ? [basicSsl()] : [],
+  plugins: mode === 'https' ? [basicSsl()] : [],
   /**
    * `vite build` hardcodes `process.env.NODE_ENV` to `"production"` regardless of
    * `--mode`, so `import.meta.env.DEV` (the flag every dev-menu button and the

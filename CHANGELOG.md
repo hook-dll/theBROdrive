@@ -9,7 +9,7 @@
   localhost), and New drive failed with "Cannot read properties of undefined (reading
   'addModule')". The mixer now treats a missing worklet as a failed load
   (`Mixer.loadWorklet`): the game runs, the mix goes out unlimited and the engines are
-  silent. Full sound on a phone: `npm run dev:https` (`HTTPS=1`, a self-signed
+  silent. Full sound on a phone: `npm run dev:https` (`vite --mode https`, a self-signed
   certificate from `@vitejs/plugin-basic-ssl`; accept the warning once on the phone).
 - THE SVYATOGOR AND THE VAZ-2110 KEEP THEIR TRIM. The lamp-and-trim merge
   (`mergeStaticBodyMeshes`) baked each piece's transform into its geometry in place, and
