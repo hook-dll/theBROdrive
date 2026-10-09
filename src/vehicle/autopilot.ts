@@ -4825,17 +4825,20 @@ export class Autopilot {
       );
     }
     targetSpeed = this.speedLimit.limit(this.corridorSqueezeSpeed, 'squeeze');
-    // A pass on the verge is a squeeze past a moving car, taken at a modest advantage.
+    // A verge pass is a speed floor, not another upper limit. The corridor may still
+    // carry the moving leader's follow/squeeze target after the shoulder line has been
+    // selected; using `limit` here preserved that lower target, so frantic cars moved
+    // onto the verge and then simply matched the leader. Raise the target to the
+    // leader-plus-advantage speed, while the later verge and road limits remain caps.
     const lateral = this.lateral;
     if (lateral.shoulderPassing) {
-      targetSpeed = this.speedLimit.limit(
+      targetSpeed = this.speedLimit.atLeast(
         Math.min(
           SHOULDER_PASS_MAX_MPS,
           lateral.shoulderYielding
             ? Math.max(0, lateral.shoulderPassSpeed - SHOULDER_PASS_YIELD_MPS)
             : lateral.shoulderPassSpeed + SHOULDER_PASS_ADVANTAGE_MPS,
         ),
-        'pass-shoulder',
       );
     }
     if (this.middlePassingValue) {

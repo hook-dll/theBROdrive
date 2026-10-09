@@ -13,7 +13,9 @@
 
 ### Changed
 - FRANTIC VERGE PASSES. A frantic car can use the shoulder up to 130 km/h, so the
-  previous 100 km/h cap no longer rejects most 95-115 km/h leaders. Road hazards remain
+  previous 100 km/h cap no longer rejects most 95-115 km/h leaders. The pass target is
+  now a speed floor above the corridor's follow/squeeze target, so a frantic car must
+  actually gain on the leader after moving onto the shoulder. Road hazards remain
   disabled: only a stuck or overturned traffic car can obstruct the clean carriageway.
 
 - DEFAULT VIEW 65°, MAXIMUM 85° (`config/gameplay.json`), the rectilinear range the
