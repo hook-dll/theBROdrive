@@ -404,11 +404,18 @@ export const HAZE_FRAGMENT = /* glsl */ `
   uniform mat3 uCameraRotation;
   uniform float uTanHalfFov;
   /**
-   * Panini projection strength d (0 = the plain rectilinear frame). The scene is
-   * rendered rectilinear; this pass shows it through a Panini lens fitted to the same
-   * horizontal coverage, so the edges stop stretching and the centre comes up larger.
+   * The lens on the finishing pass, 0 = the plain rectilinear frame, 1 = Panini,
+   * 2 = cylindrical. The scene is rendered rectilinear; the lens shows it fitted to the
+   * same horizontal coverage, so the edges stop stretching and the centre comes up
+   * larger. A uniform, not a define: switching lens never recompiles a program.
    */
+  uniform float uLensMode;
+  /** Panini projection strength d (only read when uLensMode is 1). */
   uniform float uPanini;
+  /** 1 when the scene is sampled Catmull-Rom filtered (a lens is on, not the retro rung). */
+  uniform float uLensFilter;
+  /** Size of tDiffuse in texels: the scene target, which a lens makes larger than the frame. */
+  uniform vec2 uSceneResolution;
   uniform float uCameraNear;
   uniform float uCameraFar;
   uniform float uInkStrength;
@@ -518,6 +525,53 @@ export const HAZE_FRAGMENT = /* glsl */ `
     float lat = atan(y, s);
     vec2 plane = vec2(tan(lon), tan(lat) / cos(lon));
     return clamp(vec2(plane.x / tx, plane.y / uTanHalfFov) * 0.5 + 0.5, 0.0, 1.0);
+  }
+
+  /**
+   * Where in the scene a cylindrically projected pixel looks. Only the horizontal axis
+   * is warped: x becomes the view angle, so the edges keep the full rectilinear
+   * coverage with the rays spread evenly in angle, while y is the rectilinear tangent
+   * unchanged. Verticals and horizons both stay straight, every column keeps the full
+   * height, and nothing is cropped vertically. The centre is magnified by tx / atan(tx),
+   * and the edges are minified: that is the price of keeping their coverage.
+   */
+  vec2 cylinderSource(vec2 uv) {
+    float aspect = uResolution.x / uResolution.y;
+    float tx = uTanHalfFov * aspect;
+    float lon = (uv.x * 2.0 - 1.0) * atan(tx);
+    return vec2(tan(lon) / tx * 0.5 + 0.5, uv.y);
+  }
+
+  /**
+   * Catmull-Rom bicubic sample of the scene in nine bilinear taps. A lens magnifies the
+   * centre past the scene target's own texel grid, and a bilinear tap there is the soft
+   * look the lens used to have.
+   */
+  vec4 sceneSample(sampler2D tex, vec2 uv) {
+    vec2 samplePos = uv * uSceneResolution;
+    vec2 texPos1 = floor(samplePos - 0.5) + 0.5;
+    vec2 f = samplePos - texPos1;
+    vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    vec2 w3 = f * f * (-0.5 + 0.5 * f);
+    vec2 w12 = w1 + w2;
+    vec2 offset12 = w2 / w12;
+    vec2 texPos0 = (texPos1 - 1.0) / uSceneResolution;
+    vec2 texPos3 = (texPos1 + 2.0) / uSceneResolution;
+    vec2 texPos12 = (texPos1 + offset12) / uSceneResolution;
+    vec4 result = vec4(0.0);
+    result += texture2D(tex, vec2(texPos0.x, texPos0.y)) * w0.x * w0.y;
+    result += texture2D(tex, vec2(texPos12.x, texPos0.y)) * w12.x * w0.y;
+    result += texture2D(tex, vec2(texPos3.x, texPos0.y)) * w3.x * w0.y;
+    result += texture2D(tex, vec2(texPos0.x, texPos12.y)) * w0.x * w12.y;
+    result += texture2D(tex, vec2(texPos12.x, texPos12.y)) * w12.x * w12.y;
+    result += texture2D(tex, vec2(texPos3.x, texPos12.y)) * w3.x * w12.y;
+    result += texture2D(tex, vec2(texPos0.x, texPos3.y)) * w0.x * w3.y;
+    result += texture2D(tex, vec2(texPos12.x, texPos3.y)) * w12.x * w3.y;
+    result += texture2D(tex, vec2(texPos3.x, texPos3.y)) * w3.x * w3.y;
+    // Catmull-Rom overshoots at high-contrast edges; a negative colour channel is meaningless.
+    return max(result, vec4(0.0));
   }
 
   /** Perspective depth-buffer value converted to negative view-space Z. */
@@ -758,7 +812,8 @@ export const HAZE_FRAGMENT = /* glsl */ `
     // The scene image's coordinate this screen pixel shows: itself, or through the
     // Panini lens. Everything that reads the scene uses it; the screen overlays
     // (binocular eyes, viewfinder) stay on vUv.
-    vec2 sceneUv = uPanini > 0.0 ? paniniSource(vUv) : vUv;
+    vec2 sceneUv = uLensMode > 1.5 ? cylinderSource(vUv)
+      : uLensMode > 0.5 ? paniniSource(vUv) : vUv;
     vec2 uv = sceneUv;
     // One depth tap every pixel pays whatever happens: the veil, the ink gate and
     // the warp all read it.
@@ -845,9 +900,12 @@ export const HAZE_FRAGMENT = /* glsl */ `
           * step(distance, mirrored);
       }
     }
-    vec4 color = texture2D(tDiffuse, uv);
+    vec4 color = uLensFilter > 0.5 ? sceneSample(tDiffuse, uv) : texture2D(tDiffuse, uv);
     if (mirageWeight > 0.0) {
-      color.rgb = mix(color.rgb, texture2D(tDiffuse, mirrorUv).rgb, mirageWeight);
+      vec4 mirrored = uLensFilter > 0.5
+        ? sceneSample(tDiffuse, mirrorUv)
+        : texture2D(tDiffuse, mirrorUv);
+      color.rgb = mix(color.rgb, mirrored.rgb, mirageWeight);
     }
 
     // Everything from here on is colour, not refraction. tools/haze-probe.ts reads the

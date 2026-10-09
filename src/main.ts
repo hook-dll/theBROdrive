@@ -8,7 +8,7 @@ import { gamepads, PAD, type RumbleFrame } from './core/gamepad';
 import { GameLoop } from './core/loop';
 import { installScreenWakeLock } from './core/wakelock';
 import { PhysicsWorld } from './core/physics';
-import { prefersMobilePresentation, Renderer } from './core/renderer';
+import { prefersMobilePresentation, Renderer, type LensMode } from './core/renderer';
 import { FIXED_DT } from './core/physics';
 import { DAY_LENGTH, GameWorld, newWorldState, type CarState } from './game/state';
 import { parseCalendarEpoch } from './game/calendar';
@@ -2861,23 +2861,43 @@ async function boot(): Promise<void> {
     });
   }
 
-  // DEV: the Panini lens A/B (render/hazeshader.ts `paniniSource`), kept across reloads.
-  const PANINI_STEPS = [0, 0.1, 0.3, 0.5, 0.7, 1];
-  const PANINI_KEY = 'bro.panini';
-  const devPanini = {
-    get strength(): number {
-      return renderer.panini;
+  // DEV: the lens A/B on the finishing pass (render/hazeshader.ts), kept across reloads.
+  type LensStep = {
+    readonly id: string;
+    readonly label: string;
+    readonly mode: LensMode;
+    readonly strength: number;
+  };
+  const LENS_STEPS: readonly LensStep[] = [
+    { id: 'off', label: 'off', mode: 'rectilinear', strength: 0 },
+    { id: 'panini-0.10', label: 'Panini 0.10', mode: 'panini', strength: 0.1 },
+    { id: 'panini-0.30', label: 'Panini 0.30', mode: 'panini', strength: 0.3 },
+    { id: 'panini-0.50', label: 'Panini 0.50', mode: 'panini', strength: 0.5 },
+    { id: 'panini-0.70', label: 'Panini 0.70', mode: 'panini', strength: 0.7 },
+    { id: 'panini-1.00', label: 'Panini 1.00', mode: 'panini', strength: 1 },
+    { id: 'cylinder', label: 'cylinder', mode: 'cylinder', strength: 0 },
+  ];
+  const LENS_KEY = 'bro.lens';
+  let lensAt = LENS_STEPS.findIndex((step) => step.id === 'panini-0.30');
+  const applyLens = (): void => {
+    const step = LENS_STEPS[lensAt];
+    if (step) renderer.setLens(step.mode, step.strength);
+  };
+  const devLens = {
+    get label(): string {
+      return LENS_STEPS[lensAt]?.label ?? '';
     },
     cycle(): void {
-      const at = PANINI_STEPS.indexOf(renderer.panini);
-      const next = PANINI_STEPS[(at + 1) % PANINI_STEPS.length] ?? 0;
-      renderer.setPanini(next);
-      localStorage.setItem(PANINI_KEY, String(next));
+      lensAt = (lensAt + 1) % LENS_STEPS.length;
+      applyLens();
+      localStorage.setItem(LENS_KEY, LENS_STEPS[lensAt]?.id ?? '');
     },
   };
   if (import.meta.env.DEV) {
-    const stored = localStorage.getItem(PANINI_KEY);
-    if (stored !== null) renderer.setPanini(Number(stored) || 0);
+    const stored = localStorage.getItem(LENS_KEY);
+    const found = LENS_STEPS.findIndex((step) => step.id === stored);
+    if (found >= 0) lensAt = found;
+    applyLens();
   }
 
   /**
@@ -2889,7 +2909,7 @@ async function boot(): Promise<void> {
     settings: () => world.state.settings,
     frameReport,
     perfOverlay: perfOverlay ?? undefined,
-    panini: import.meta.env.DEV ? devPanini : undefined,
+    lens: import.meta.env.DEV ? devLens : undefined,
     viewport: () => renderer.viewport(),
     /**
      * Throw away the recorded verdict and measure this machine again.

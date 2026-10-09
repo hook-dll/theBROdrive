@@ -745,8 +745,8 @@ export interface PauseHooks {
   frameReport?: () => string;
   /** The live performance graph across the top of the screen (ui/perfoverlay.ts). Dev only. */
   perfOverlay?: { readonly enabled: boolean; setEnabled(on: boolean): void };
-  /** Panini lens strength on the finishing pass, 0 = off (render/hazeshader.ts). Dev only. */
-  panini?: { readonly strength: number; cycle(): void };
+  /** The lens on the finishing pass (render/hazeshader.ts). Dev only. */
+  lens?: { readonly label: string; cycle(): void };
   /**
    * Record a fully fuelled car into the world.
    *
@@ -1428,12 +1428,11 @@ export class MainMenu {
             if (btn) btn.textContent = label();
           });
         }
-        // Cycles the lens through its strengths; the FOV slider stays as it is, so the
-        // two combine (e.g. 75° at 0.7 against 85° plain).
-        if (import.meta.env.DEV && hooks.panini) {
-          const lens = hooks.panini;
-          const label = (): string =>
-            `Panini lens: ${lens.strength > 0 ? lens.strength.toFixed(2) : 'off'}`;
+        // Cycles the lens through its modes and strengths; the FOV slider stays as it is,
+        // so the two combine (e.g. 75° at Panini 0.7 against 85° plain).
+        if (import.meta.env.DEV && hooks.lens) {
+          const lens = hooks.lens;
+          const label = (): string => `Lens: ${lens.label}`;
           const index = devTools.length;
           devButton(label(), () => {
             lens.cycle();
