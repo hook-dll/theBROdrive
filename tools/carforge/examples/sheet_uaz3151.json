@@ -22,17 +22,9 @@
   ],
   "spare": {"y": 3252, "z": 1013},
   "plates": [
-   {"face": "side", "y": [1168, 1336], "z": [1094, 1133], "cell": "steel", "proud": 20, "radius": 15},
-   {"face": "side", "y": [1957, 2124], "z": [1094, 1133], "cell": "steel", "proud": 20, "radius": 15},
-   {"face": "side", "y": [1407, 1484], "z": [1070, 1128], "cell": "paint", "proud": 12, "straddle": true},
-   {"face": "side", "y": [1407, 1484], "z": [578, 640], "cell": "paint", "proud": 12, "straddle": true},
-   {"face": "side", "y": [686, 762], "z": [1070, 1128], "cell": "paint", "proud": 12, "straddle": true},
-   {"face": "side", "y": [686, 762], "z": [578, 640], "cell": "paint", "proud": 12, "straddle": true},
    {"face": "rear", "x": [420, 540], "z": [1190, 1230], "cell": "steel", "proud": 20, "radius": 15, "single": true}
   ],
   "lamps": [
-   {"role": "headlights", "face": "front", "round": true, "segments": 12, "dome": 30, "x": [442, 658], "z": [836, 1052]},
-   {"role": "leftblinkers", "face": "front", "round": true, "segments": 8, "x": [561, 657], "z": [721, 817]},
    {"role": "taillights", "face": "rear", "x": [640, 740], "z": [760, 900]},
    {"role": "leftblinkers", "face": "rear", "x": [640, 740], "z": [910, 968]},
    {"role": "leftblinkers", "face": "side", "round": true, "segments": 8, "y": [415, 485], "z": [1131, 1201]},
