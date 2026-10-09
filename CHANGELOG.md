@@ -17,8 +17,12 @@
   coordinate past ±1 was clamped: the Svyatogor's bumpers and underbody shrank into a
   2 m box over the bonnet and the 2110's blinkers left its corners. The pieces are
   copied to Float32 first (`floatGeometry`); both cars render as before the merge.
-- DEFAULT VIEW 50° AND A BIGGER DASHBOARD. The field of view starts at 50° (was 58°;
-  `config/gameplay.json`). The dashboard's old 140% is the new 100% default on desktop
+- A WIDE VIEW THROUGH A PANINI LENS, AND A BIGGER DASHBOARD. The field of view starts at
+  85° (was 58°) and goes up to 120° (was 85°; `config/gameplay.json`), seen through a
+  light Panini lens (`DEFAULT_PANINI` 0.3, `paniniSource` in `render/hazeshader.ts`):
+  the wide coverage keeps the sense of speed, the lens keeps the edges from stretching
+  and brings the middle of the frame up. Dev menu: Panini lens off/0.1/0.3/0.5/0.7/1.
+  The dashboard's old 140% is the new 100% default on desktop
   (`Settings.dashboardSize`, range 55-120%); a save's old `dashboardScale` is carried
   over by dividing by 1.4, so nobody's dashboard changes size. The phone cluster is
   unchanged.

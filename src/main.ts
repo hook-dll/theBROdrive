@@ -2862,7 +2862,7 @@ async function boot(): Promise<void> {
   }
 
   // DEV: the Panini lens A/B (render/hazeshader.ts `paniniSource`), kept across reloads.
-  const PANINI_STEPS = [0, 0.3, 0.5, 0.7, 1];
+  const PANINI_STEPS = [0, 0.1, 0.3, 0.5, 0.7, 1];
   const PANINI_KEY = 'bro.panini';
   const devPanini = {
     get strength(): number {
@@ -2875,7 +2875,10 @@ async function boot(): Promise<void> {
       localStorage.setItem(PANINI_KEY, String(next));
     },
   };
-  if (import.meta.env.DEV) renderer.setPanini(Number(localStorage.getItem(PANINI_KEY)) || 0);
+  if (import.meta.env.DEV) {
+    const stored = localStorage.getItem(PANINI_KEY);
+    if (stored !== null) renderer.setPanini(Number(stored) || 0);
+  }
 
   /**
    * The pause overlay's window on the game. Settings live in world state (so a save

@@ -48,6 +48,12 @@ import type { ShadeTint } from '../items/items';
 const WALL_DUST = new SandColor(new THREE.Color(0.72, 0.42, 0.2));
 /** The distant sand veil over the horizon, likewise. */
 const SAND_VEIL = new SandColor(new THREE.Color(0.78, 0.69, 0.56));
+/**
+ * Panini lens strength of the finishing pass by default (render/hazeshader.ts
+ * `paniniSource`). With the 85° default FOV it keeps the edges from stretching while
+ * the wide coverage keeps the sense of speed. The dev menu cycles it.
+ */
+const DEFAULT_PANINI = 0.3;
 
 export const CAMERA_FAR = 4000;
 /**
@@ -572,7 +578,8 @@ export class Renderer {
         uHorizon: { value: 0.5 },
         uCameraRotation: { value: new THREE.Matrix3() },
         uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(fieldOfView) / 2) },
-        uPanini: { value: 0 },
+        // The default lens: a light Panini keeps the wide default FOV from stretching.
+        uPanini: { value: DEFAULT_PANINI },
         uCameraNear: { value: CAMERA_NEAR },
         uCameraFar: { value: CAMERA_FAR },
         uInkStrength: { value: Math.min(1, Math.max(0, inkStrength)) },
