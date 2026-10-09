@@ -83,10 +83,14 @@ WINDOW_ROUND = 40.0      # mm default window corner radius (spec windows[].round
 GLASS_CLEAR = 5.0        # mm: a traced window stays this far inside the belt and the glass top
 ROUND_SEGMENTS = 3       # segments of a rounded corner
 WINDOW_MIN_HEIGHT = 80.0  # mm: a default window ends where less glass than this is left
-SEAM_WIDTH = 12.0        # mm width of a door/panel seam line
-SEAM_PROUD = 4.0         # mm a seam line stands off the side
-SEAM_TOL = 1.5           # mm a seam may stray from the side between its probes
-SEAM_MIN = 8.0           # mm: the shortest piece a seam is split into
+RECESS_DEPTH = 15.0       # mm a recess (glass, grille) goes into its face (spec recesses[].depth)
+GROOVE_WIDTH = 10.0       # mm width of a panel gap (grooves[].width)
+GROOVE_DEPTH = 10.0       # mm depth of a panel gap (grooves[].depth)
+LINE_WIDTH = 12.0         # mm width of a drawn line (lines[].width)
+LINE_PROUD = 3.0          # mm a drawn line stands off its face
+BUMPER_LIP = 40.0         # mm height of a channel bumper's lips (bumpers[].lip)
+SEAM_TOL = 1.5            # mm a line or groove may stray from its face between probes
+SEAM_MIN = 8.0            # mm between a line's probes of its face
 LAMP_MAX_GAP = 0.030     # m: every lamp vertex must lie within this of the body surface
 
 
@@ -113,8 +117,8 @@ def validate(spec):
     for lamp in spec.get("lamps", []):
         if lamp["role"] not in LAMP_CELL:
             fail(f"unknown lamp role {lamp['role']}")
-        if lamp.get("face") not in ("front", "rear"):
-            fail(f"{lamp['role']} lamp needs face front|rear")
+        if lamp.get("face") not in ("front", "rear", "side"):
+            fail(f"{lamp['role']} lamp needs face front|rear|side")
     return spec
 
 
@@ -686,10 +690,13 @@ def greenhouse_x(s, y, z):
     return min(s.high(y), s.low(y)) * s.tumble(z)
 
 
-def apply_cut(body, cutter):
+def apply_cut(body, cutter, self_intersect=False):
+    """Subtract `cutter` from the body (EXACT boolean); `self_intersect` when the cutter is
+    built of overlapping pieces. The cutter's faces become the cut's walls, cells included."""
     mod = body.modifiers.new("cut", "BOOLEAN")
     mod.operation = "DIFFERENCE"
     mod.solver = "EXACT"
+    mod.use_self = self_intersect
     mod.object = cutter
     bpy.context.view_layer.objects.active = body
     bpy.ops.object.modifier_apply(modifier=mod.name)
@@ -736,99 +743,87 @@ def cut_windows(spec, s, body):
     apply_cut(body, finish(bm, "cutter_windows"))
 
 
-def add_seams(spec, body, bvh):
-    """Door and panel seams: dark ribbons SEAM_WIDTH wide, SEAM_PROUD off the (uncut) side,
-    along each `seams` polyline [(y, z)] (both sides). A run is split wherever the side bends
-    away from the straight ribbon by more than SEAM_TOL (over the belt lip, along the
-    tumblehome), so the ribbon neither sinks into the body nor floats off a flat panel."""
-    bm = bmesh.new()
-    bm.from_mesh(body.data)
-    uvl = bm.loops.layers.uv["UVMap"]
-    half = SEAM_WIDTH / 2
+# ---------------------------------------------------------------- face details
+#
+# Every detail is placed on one of four faces, in that face's own 2D coordinates (mm):
+#   front / rear: (x, z), seen along +y / -y      side: (y, z), the left side, seen along -x
+#   top: (y, x), seen from above
+# and probed onto the body along the face's axis, so it sits wherever the face curves.
 
-    def bends(a, b):
-        """The points after a along a-b where the side bends away from a straight ribbon by
-        more than SEAM_TOL: the side sampled every SEAM_MIN mm, faired with `simplify`."""
-        length = math.hypot(b[0] - a[0], b[1] - a[1])
-        n = max(1, int(length // SEAM_MIN))
-        prof = []
-        for k in range(n + 1):
-            x = side_x(bvh, a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n)
-            if x is not None:
-                prof.append((length * k / n, x))
-        keep = [sv for sv, _ in simplify(prof, SEAM_TOL)] if len(prof) > 1 else [length]
-        return [(a[0] + (b[0] - a[0]) * sv / length, a[1] + (b[1] - a[1]) * sv / length)
-                for sv in keep if sv > 0] if length > 0 else []
-
-    def onto_body(a, b):
-        """b, or the point nearest it on a-b that still hits the side (a seam drawn to the
-        body's bottom edge would otherwise lose its last run)."""
-        if side_x(bvh, *b) is not None or side_x(bvh, *a) is None:
-            return b
-        lo, hi = 0.0, 1.0  # fraction from a: lo hits, hi misses
-        for _ in range(12):
-            t = (lo + hi) / 2
-            lo, hi = (t, hi) if side_x(bvh, a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t) is not None else (lo, t)
-        return (a[0] + (b[0] - a[0]) * lo, a[1] + (b[1] - a[1]) * lo)
-
-    for line in spec.get("seams", []):
-        line = [tuple(p) for p in line]
-        line[0], line[-1] = onto_body(line[1], line[0]), onto_body(line[-2], line[-1])
-        pts = [line[0]]
-        for a, b in zip(line, line[1:]):
-            pts += bends(a, b)
-        rows = []
-        for i, (y, z) in enumerate(pts):
-            (ya, za), (yb, zb) = pts[max(i - 1, 0)], pts[min(i + 1, len(pts) - 1)]
-            tl = math.hypot(yb - ya, zb - za) or 1.0
-            ny, nz = -(zb - za) / tl * half, (yb - ya) / tl * half
-            ends = [(y + ny, z + nz), (y - ny, z - nz)]
-            xs = [side_x(bvh, ey, ez) for ey, ez in ends]
-            rows.append(None if None in xs else [(ey, ez, ex + SEAM_PROUD) for (ey, ez), ex in zip(ends, xs)])
-        for sign in (1.0, -1.0):
-            def v(p):
-                return bm.verts.new(Vector((sign * p[2], p[0], p[1])) * MM)
-            for a, b in zip(rows, rows[1:]):
-                if a is None or b is None:
-                    continue
-                add_face(bm, uvl, [v(a[0]), v(a[1]), v(b[1]), v(b[0])], CELLS["black"], Vector((sign, 0, 0)))
-    bm.to_mesh(body.data)
-    bm.free()
-    body.data.update()
+FACE_AXIS = {"front": Vector((0, -1, 0)), "rear": Vector((0, 1, 0)), "side": Vector((1, 0, 0)),
+             "top": Vector((0, 0, 1))}  # outward
+AXIS_INDEX = {"front": 1, "rear": 1, "side": 0, "top": 2}
 
 
-
-# ---------------------------------------------------------------- probed details
-
-def probe(bvh, x, z, face):
-    """Body surface y at (x, z), hit from the front (face 'front') or the rear."""
-    s = -1.0 if face == "front" else 1.0
-    loc, _, _, _ = bvh.ray_cast(Vector((x * MM, s * 9.0, z * MM)), Vector((0, -s, 0)))
-    return None if loc is None else loc.y / MM
-
-
-def outline_pts(item):
-    x0, x1 = min(item["x"]), max(item["x"])
-    z0, z1 = min(item["z"]), max(item["z"])
-    if item.get("round"):
-        cx, cz, rx, rz = (x0 + x1) / 2, (z0 + z1) / 2, (x1 - x0) / 2, (z1 - z0) / 2
-        n = int(item.get("segments", 10))
-        return [(cx + rx * math.cos(2 * math.pi * i / n), cz + rz * math.sin(2 * math.pi * i / n)) for i in range(n)]
-    return [(x0, z0), (x1, z0), (x1, z1), (x0, z1)]
+def face_point(face, u, v):
+    """The 3D point (mm, on the axis' zero plane) of face coordinates (u, v)."""
+    if face in ("front", "rear"):
+        return Vector((u, 0.0, v))
+    if face == "side":
+        return Vector((0.0, u, v))
+    return Vector((v, u, 0.0))
 
 
-def add_plate(bm, uvl, bvh, item, cell):
-    """A flat block on the nose or tail face: its outer face PROUD of the body at every
-    corner, its back 5 mm inside, so it is attached wherever the face curves."""
+def face_hit(bvh, face, u, v):
+    """Body surface point (mm) at face coordinates (u, v), hit from outside along the face axis."""
+    out = FACE_AXIS[face]
+    origin = (face_point(face, u, v) * MM) + out * 9.0
+    loc, _, _, _ = bvh.ray_cast(origin, -out)
+    return None if loc is None else loc / MM
+
+
+def mirror_uv(face, pts):
+    """The same 2D points on the car's other half: x flipped (front, rear, top); the side's
+    points are the same (the right side is reached by flipping the 3D result)."""
+    if face in ("front", "rear"):
+        return [(-u, v) for u, v in pts]
+    if face == "top":
+        return [(u, -v) for u, v in pts]
+    return list(pts)
+
+
+def halves(item, pts):
+    """[(pts, sign)] of an item: sign -1 flips the 3D result to the right side (side face).
+    Unless `single`, the mirror half is added."""
+    out = [(pts, 1.0)]
+    if not item.get("single"):
+        out.append((mirror_uv(item["face"], pts), -1.0 if item["face"] == "side" else 1.0))
+    return out
+
+
+def flip(p, sign):
+    return Vector((p.x * sign, p.y, p.z))
+
+
+def item_outline(item):
+    """Closed outline of an item in its face's coordinates. Rect from `x`/`z` (front, rear),
+    `y`/`z` (side) or `y`/`x` (top); `round` makes it an ellipse, `radius` rounds its
+    corners (a radius of half the height is a stadium)."""
     face = item["face"]
-    s = -1.0 if face == "front" else 1.0
+    ku, kv = {"front": ("x", "z"), "rear": ("x", "z"), "side": ("y", "z"), "top": ("y", "x")}[face]
+    u0, u1 = min(item[ku]), max(item[ku])
+    v0, v1 = min(item[kv]), max(item[kv])
+    if item.get("round"):
+        cu, cv, ru, rv = (u0 + u1) / 2, (v0 + v1) / 2, (u1 - u0) / 2, (v1 - v0) / 2
+        n = int(item.get("segments", 10))
+        return [(cu + ru * math.cos(2 * math.pi * i / n), cv + rv * math.sin(2 * math.pi * i / n)) for i in range(n)]
+    rect = [(u0, v0), (u1, v0), (u1, v1), (u0, v1)]
+    return rounded(rect, float(item.get("radius", 0.0)))
+
+
+def add_plate(bm, uvl, bvh, item, cell, pts=None, sign=1.0):
+    """A flat block on a face: its outer face `proud` (PROUD) off the body at every corner
+    (along the face axis), its back 5 mm inside, so it is attached wherever the face curves."""
+    face = item["face"]
+    out = flip(FACE_AXIS[face], sign)
     outer, inner = [], []
-    for x, z in outline_pts(item):
-        y = probe(bvh, x, z, face)
-        if y is None:
-            fail(f"{item.get('role', 'plate')} at x={x:.0f} z={z:.0f} has no {face} face behind it")
-        outer.append(Vector((x, y + s * PROUD, z)) * MM)
-        inner.append(Vector((x, y - s * 5.0, z)) * MM)
+    for u, v in (pts or item_outline(item)):
+        p = face_hit(bvh, face, u, v)
+        if p is None:
+            fail(f"{item.get('role', 'plate')} at {face} ({u:.0f}, {v:.0f}) has no face behind it")
+        p = flip(p, sign)
+        outer.append((p + out * float(item.get("proud", PROUD))) * MM)
+        inner.append((p - out * 5.0) * MM)
     n = len(outer)
     c = [bm.verts.new(p) for p in outer] + [bm.verts.new(p) for p in inner]
     centre = sum((v.co for v in c), Vector()) / (2 * n)
@@ -840,15 +835,6 @@ def add_plate(bm, uvl, bvh, item, cell):
         add_face(bm, uvl, vs, CELLS[cell], mid - centre)
 
 
-def mirrored(item):
-    """The item and, unless `single`, its mirror across x = 0."""
-    yield item
-    if not item.get("single"):
-        m = dict(item)
-        m["x"] = [-v for v in item["x"]]
-        yield m
-
-
 def body_bvh(obj):
     bm = bmesh.new()
     bm.from_mesh(obj.data)
@@ -857,53 +843,211 @@ def body_bvh(obj):
     return bvh
 
 
-def cut_bezels(spec, body):
-    """A lamp with `bezel` (mm) sits in a pocket that much wider than the lamp all round and
-    `bezel_depth` (BEZEL_DEPTH) deep in its face, floor parallel to the face: the recessed
-    headlamp surround. The lamp itself is probed onto the floor later (build_lamps)."""
-    items = [it for lamp in spec.get("lamps", []) if lamp.get("bezel") for it in mirrored(lamp)]
+def recess_items(spec):
+    """Recesses: spec `recesses`, plus a bezel pocket for every lamp with `bezel`."""
+    out = list(spec.get("recesses", []))
+    for lamp in spec.get("lamps", []):
+        if lamp.get("bezel"):
+            m = float(lamp["bezel"])
+            ku = "y" if lamp["face"] == "side" else "x"
+            out.append(dict(lamp, **{ku: [min(lamp[ku]) - m, max(lamp[ku]) + m],
+                                     "z": [min(lamp["z"]) - m, max(lamp["z"]) + m]},
+                            depth=lamp.get("bezel_depth", BEZEL_DEPTH), cell=lamp.get("bezel_cell", "paint")))
+    return out
+
+
+def cut_recesses(spec, body):
+    """Pockets `depth` (RECESS_DEPTH) mm into a face: windscreen and back light glass, grille
+    openings, lamp bezels. The floor (cell `cell`) is one plane, the face's best fit over the
+    outline set back so it stands at least `depth` inside it everywhere: a floor that followed
+    the face would crease. The walls are the same cell."""
+    items = recess_items(spec)
     if not items:
         return
     bvh = body_bvh(body)
     bm, uvl = new_bm()
     for it in items:
-        m, depth = float(it["bezel"]), float(it.get("bezel_depth", BEZEL_DEPTH))
-        grown = dict(it, x=[min(it["x"]) - m, max(it["x"]) + m], z=[min(it["z"]) - m, max(it["z"]) + m])
-        s = -1.0 if it["face"] == "front" else 1.0
-        floor, outer = [], []
-        for x, z in outline_pts(grown):
-            y = probe(bvh, x, z, it["face"])
-            if y is None:
-                fail(f"{it['role']} bezel at x={x:.0f} z={z:.0f} has no {it['face']} face behind it")
-            floor.append(bm.verts.new(Vector((x, y - s * depth, z)) * MM))
-            outer.append(bm.verts.new(Vector((x, y + s * 200.0, z)) * MM))
-        cell = CELLS[it.get("bezel_cell", "paint")]
-        add_face(bm, uvl, floor, cell, Vector((0, -s, 0)))
-        add_face(bm, uvl, outer, cell, Vector((0, s, 0)))
-        n = len(floor)
-        for i in range(n):
-            j = (i + 1) % n
-            add_face(bm, uvl, [floor[i], floor[j], outer[j], outer[i]], cell)
+        face, depth = it["face"], float(it.get("depth", RECESS_DEPTH))
+        cell = CELLS[it.get("cell", "black")]
+        ax = AXIS_INDEX[face]
+        outward = FACE_AXIS[face][ax]  # +1 or -1: which way along the axis is outside
+        for pts, sign in halves(it, item_outline(it)):
+            hits = []
+            for u, v in pts:
+                p = face_hit(bvh, face, u, v)
+                if p is None:
+                    fail(f"recess at {face} ({u:.0f}, {v:.0f}) has no face behind it")
+                hits.append(((u, v), p))
+            plane = side_plane([(u, v, p[ax]) for (u, v), p in hits])
+            proud = max((p[ax] - plane(u, v)) * outward for (u, v), p in hits)
+            floor, outer = [], []
+            for (u, v), p in hits:
+                a, b = p.copy(), p.copy()
+                a[ax] = plane(u, v) + outward * (proud - depth)
+                b[ax] = plane(u, v) + outward * (proud + 200.0)
+                floor.append(bm.verts.new(flip(a, sign) * MM))
+                outer.append(bm.verts.new(flip(b, sign) * MM))
+            o = flip(FACE_AXIS[face], sign)
+            add_face(bm, uvl, floor, cell, -o)
+            add_face(bm, uvl, outer, cell, o)
+            n = len(floor)
+            for i in range(n):
+                j = (i + 1) % n
+                add_face(bm, uvl, [floor[i], floor[j], outer[j], outer[i]], cell)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-    apply_cut(body, finish(bm, "cutter_bezels"))
+    apply_cut(body, finish(bm, "cutter_recesses"))
+
+
+def probe_line(bvh, face, line, tol, step):
+    """Points (u, v, 3D mm) along a polyline on a face, split where the face bends away from a
+    straight piece by more than `tol` (sampled every `step` mm, faired with `simplify`).
+    Samples off the body are dropped, so a line drawn past the body's edge stops at it."""
+    ax = AXIS_INDEX[face]
+    out = []
+    for a, b in zip(line, line[1:]):
+        length = math.hypot(b[0] - a[0], b[1] - a[1])
+        n = max(1, int(length // step))
+        prof = []
+        for k in range(n + 1):
+            u, v = a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n
+            p = face_hit(bvh, face, u, v)
+            if p is not None:
+                prof.append((length * k / n, p[ax], u, v, p))
+        if len(prof) < 2:
+            continue
+        keep = {round(sv, 6) for sv, _ in simplify([(q[0], q[1]) for q in prof], tol)}
+        pts = [(q[2], q[3], q[4]) for q in prof if round(q[0], 6) in keep]
+        out += pts if not out else pts[1:]
+    return out
+
+
+def line_items(spec):
+    """(kind, item) of `lines` and `grooves`; side `seams` [(y, z)] polylines are grooves."""
+    for key in ("lines", "grooves"):
+        for it in spec.get(key, []):
+            yield key, it
+    for line in spec.get("seams", []):
+        yield "grooves", {"face": "side", "line": line}
+
+
+def closed(it):
+    line = [tuple(p) for p in it["line"]]
+    return line + [line[0]] if it.get("closed") else line
+
+
+def add_lines(spec, body, bvh):
+    """Drawn lines (`lines`): dark ribbons `width` (LINE_WIDTH) wide, LINE_PROUD off the face,
+    for what is painted on rather than cut: bonnet ribs, a fuel flap's outline."""
+    bm = bmesh.new()
+    bm.from_mesh(body.data)
+    uvl = bm.loops.layers.uv["UVMap"]
+    for kind, it in line_items(spec):
+        if kind != "lines":
+            continue
+        face = it["face"]
+        half = float(it.get("width", LINE_WIDTH)) / 2
+        cell = CELLS[it.get("cell", "black")]
+        for line, sign in halves(it, closed(it)):
+            pts = probe_line(bvh, face, line, SEAM_TOL, SEAM_MIN)
+            out = flip(FACE_AXIS[face], sign)
+            rows = []
+            for i, (u, v, _) in enumerate(pts):
+                (ua, va, _), (ub, vb, _) = pts[max(i - 1, 0)], pts[min(i + 1, len(pts) - 1)]
+                tl = math.hypot(ub - ua, vb - va) or 1.0
+                du, dv = -(vb - va) / tl * half, (ub - ua) / tl * half
+                pair = [face_hit(bvh, face, u + k * du, v + k * dv) for k in (1, -1)]
+                rows.append(None if None in pair else
+                            [bm.verts.new((flip(p, sign) + out * LINE_PROUD) * MM) for p in pair])
+            for a, b in zip(rows, rows[1:]):
+                if a is not None and b is not None:
+                    add_face(bm, uvl, [a[0], a[1], b[1], b[0]], cell, out)
+    bm.to_mesh(body.data)
+    bm.free()
+    body.data.update()
+
+
+def cut_grooves(spec, body, bvh):
+    """Panel gaps (`grooves`, side `seams`): channels `width` (GROOVE_WIDTH) wide and `depth`
+    (GROOVE_DEPTH) deep, cut into the body like the pack's door gaps. Each piece between probes
+    (on the uncut `bvh`) is a box standing on the face, overlapping its neighbours."""
+    bm, uvl = new_bm()
+    pieces = 0
+    for kind, it in line_items(spec):
+        if kind != "grooves":
+            continue
+        face = it["face"]
+        half = float(it.get("width", GROOVE_WIDTH)) / 2
+        depth = float(it.get("depth", GROOVE_DEPTH))
+        for line, sign in halves(it, closed(it)):
+            pts = probe_line(bvh, face, line, SEAM_TOL, SEAM_MIN)
+            axis = flip(FACE_AXIS[face], sign)
+            for (_, _, pa), (_, _, pb) in zip(pts, pts[1:]):
+                # the box stands on the surface (its floor parallel to it), not on the face axis:
+                # a floor square to the axis on a tilted panel reads as a dent beside the gap
+                nrm = Vector()
+                for p in (pa, pb):
+                    _, n, _, _ = bvh.find_nearest(p * MM)
+                    nrm += n if n is not None else FACE_AXIS[face]
+                out = flip(nrm, sign).normalized()
+                if out.dot(axis) < 0:
+                    out = -out
+                pa, pb = flip(pa, sign), flip(pb, sign)
+                along = pb - pa
+                if along.length < 1e-6:
+                    continue
+                t = along.normalized()
+                across = t.cross(out).normalized() * half
+                ends = (pa - t * half, pb + t * half)
+                corners = ((ends[0], 1), (ends[1], 1), (ends[1], -1), (ends[0], -1))
+                top = [bm.verts.new((p + across * k + out * 40.0) * MM) for p, k in corners]
+                bot = [bm.verts.new((p + across * k - out * depth) * MM) for p, k in corners]
+                add_face(bm, uvl, top, CELLS["black"])
+                add_face(bm, uvl, bot[::-1], CELLS["black"])
+                for i in range(4):
+                    j = (i + 1) % 4
+                    add_face(bm, uvl, [top[i], bot[i], bot[j], top[j]], CELLS["black"])
+                pieces += 1
+    if not pieces:
+        bm.free()
+        return
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    apply_cut(body, finish(bm, "cutter_grooves"), self_intersect=True)
+
+
+def add_bumper(bm, uvl, b):
+    """A bumper box; with `channel` (mm) its outer face is a channel that deep between a top and
+    a bottom lip `lip` (BUMPER_LIP) mm tall: the UAZ's pressed-steel section."""
+    hw, (y0, y1), (z0, z1) = b["half_width"], b["y"], b["z"]
+    cell, ch = b.get("cell", "steel"), b.get("chamfer", 30.0)
+    c = float(b.get("channel", 0.0))
+    if c <= 0:
+        add_box(bm, uvl, (-hw, y0, z0), (hw, y1, z1), cell, ch)
+        return
+    lip = float(b.get("lip", BUMPER_LIP))
+    front = y1 < 0
+    core = (y0 + c, y1) if front else (y0, y1 - c)
+    lips = (y0, y0 + c) if front else (y1 - c, y1)
+    add_box(bm, uvl, (-hw, core[0], z0), (hw, core[1], z1), cell, ch)
+    for za, zb in ((z0, z0 + lip), (z1 - lip, z1)):
+        add_box(bm, uvl, (-hw, lips[0], za), (hw, lips[1], zb), cell, min(ch, lip / 2 - 1))
 
 
 def add_details(spec, body):
-    """Bumpers, mirrors, grille and window plates, joined into the body mesh."""
+    """Bumpers, mirrors and plates (any face: grille panels, handles, hinges), joined in."""
     bvh = body_bvh(body)
     bm = bmesh.new()
     bm.from_mesh(body.data)
     uvl = bm.loops.layers.uv["UVMap"]
     for b in spec.get("bumpers", []):
-        add_box(bm, uvl, (-b["half_width"], b["y"][0], b["z"][0]), (b["half_width"], b["y"][1], b["z"][1]),
-                b.get("cell", "steel"), b.get("chamfer", 30.0))
+        add_bumper(bm, uvl, b)
     for m in spec.get("mirrors", []):
-        for it in mirrored(m):
-            x0, x1 = sorted(it["x"])
-            add_box(bm, uvl, (x0, it["y"][0], it["z"][0]), (x1, it["y"][1], it["z"][1]), it.get("cell", "black"))
+        for sign in ((1.0,) if m.get("single") else (1.0, -1.0)):
+            x0, x1 = sorted(v * sign for v in m["x"])
+            add_box(bm, uvl, (x0, m["y"][0], m["z"][0]), (x1, m["y"][1], m["z"][1]),
+                    m.get("cell", "black"), m.get("chamfer", 0.0))
     for p in spec.get("plates", []):
-        for it in mirrored(p):
-            add_plate(bm, uvl, bvh, it, it.get("cell", "black"))
+        for pts, sign in halves(p, item_outline(p)):
+            add_plate(bm, uvl, bvh, p, p.get("cell", "black"), pts, sign)
     bm.to_mesh(body.data)
     bm.free()
     body.data.update()
@@ -943,14 +1087,15 @@ def build_lamps(spec, cid, body, objs):
     bvh = body_bvh(body)
     per_role = {}
     for lamp in spec.get("lamps", []):
-        for it in mirrored(lamp):
-            role = it["role"]
+        for pts, sign in halves(lamp, item_outline(lamp)):
+            role = lamp["role"]
             if role in ("leftblinkers", "rightblinkers") and not lamp.get("single"):
-                role = "leftblinkers" if min(it["x"]) > 0 else "rightblinkers"
+                left = sign > 0 if lamp["face"] == "side" else min(u for u, _ in pts) > 0
+                role = "leftblinkers" if left else "rightblinkers"
             if role not in per_role:
                 per_role[role] = new_bm()
             bm, uvl = per_role[role]
-            add_plate(bm, uvl, bvh, it, it.get("cell", LAMP_CELL[role]))
+            add_plate(bm, uvl, bvh, lamp, lamp.get("cell", LAMP_CELL[role]), pts, sign)
     for role, (bm, _) in per_role.items():
         for v in bm.verts:
             hit = bvh.find_nearest(v.co)
@@ -967,10 +1112,11 @@ def build_body(spec, cid):
     uncut = body_bvh(body)
     cut_arches(spec, s, body)
     cut_windows(spec, s, body)
-    cut_bezels(spec, body)
+    cut_recesses(spec, body)
+    cut_grooves(spec, body, uncut)
     weld_cuts(body)
     add_arch_lips(spec, s, body, uncut)
-    add_seams(spec, body, uncut)
+    add_lines(spec, body, uncut)
     add_details(spec, body)
     bm = bmesh.new()
     bm.from_mesh(body.data)
@@ -1011,11 +1157,19 @@ def load_pack_wheel(path):
 
 
 def build_wheel(name, hub, tmpl, pts, pack_w, pack_r, w):
+    """The pack's left wheel scaled to the spec; at -x (the right side) mirrored, so every
+    wheel shows its rim outward."""
     me = tmpl.copy()
-    sx = w["width"] * MM / pack_w
+    sx = w["width"] * MM / pack_w * (1.0 if hub[0] >= 0 else -1.0)
     sr = w["radius"] * MM / pack_r
     for v, p in zip(me.vertices, pts):
         v.co = Vector((p.x * sx, p.y * sr, p.z * sr))
+    if sx < 0:  # a mirror turns the faces inside out: turn them back
+        bm = bmesh.new()
+        bm.from_mesh(me)
+        bmesh.ops.reverse_faces(bm, faces=bm.faces[:], flip_multires=False)
+        bm.to_mesh(me)
+        bm.free()
     me.update()
     obj = bpy.data.objects.new(name, me)
     bpy.context.scene.collection.objects.link(obj)

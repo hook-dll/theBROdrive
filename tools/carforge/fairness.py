@@ -196,10 +196,14 @@ def islands(bm):
 
 def ripples(bm):
     """A ripple is a gentle bend reversed by the next bend along the same profile within
-    RIPPLE_SPAN_MM. A designed crease (sharper than RIPPLE_MAX_DEG) separates runs."""
+    RIPPLE_SPAN_MM. A designed crease (sharper than RIPPLE_MAX_DEG) separates runs, and so does
+    a change of atlas cell: a panel gap's dark walls or a pocket's glass are designed edges."""
     found = []
     normals = [f.normal.copy() for f in bm.faces]
-    island = islands(bm)
+    uvl = bm.loops.layers.uv.active
+    cells = [(int(sum(l[uvl].uv.x for l in f.loops) / len(f.loops) * ATLAS[0]),
+              int(sum(l[uvl].uv.y for l in f.loops) / len(f.loops) * ATLAS[1])) for f in bm.faces]
+    island = [(i, c) for i, c in zip(islands(bm), cells)]
     for label, c, travel, samples in sections(bm):
         ks = kinks(samples, travel, normals, island)
         for a, b in zip(ks, ks[1:]):

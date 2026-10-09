@@ -42,17 +42,22 @@ Run Blender jobs one at a time, under `nice -n 15`:
 | `windscreen` | [y0, y1] | mm | Windscreen span along y. |
 | `backlight` | [y0, y1] | mm | Rear window span along y. |
 | `windows` | [{y:[a,b], outline?, round?}, …] | mm | Side windows, each a pocket cut 12 mm into the greenhouse side (glass floor, dark seal walls). `outline`: traced [[y,z], …] corners (slanted pillars); without it the window runs belt→glass top and drops under the rail. `round`: corner radius (default 40). |
-| `seams` | [[[y,z], …], …] | mm | Door/panel seam polylines, dark ribbons following the side. |
+| `seams` | [[[y,z], …], …] | mm | Side panel gaps: same as `grooves` with face `side`. |
+| `grooves` | [{face, line, closed?, width?, depth?, single?}] | face coords (below) | Panel gaps cut into the body, 10×10 mm dark channels (the pack's door gaps): door outlines, the tail door. |
+| `lines` | [{face, line, closed?, width?, cell?, single?}] | face coords | Drawn ribbons 3 mm proud, for what is painted rather than cut: bonnet ribs, fuel flaps. |
+| `recesses` | [{face, x\|y, z, radius?, round?, depth?, cell, single?}] | face coords | Pockets with a flat floor in `cell`: windscreen and back-light glass, grille openings. `radius` rounds the corners (half the height = stadium). |
 | `arches` | {front\|rear: {outline, lip?, flare?}} | mm | Arch opening edge in side view (default: semicircle of `arch_front`/`arch_rear`), with a lip `lip` mm wide standing `flare` mm proud. |
 | `nose` / `tail` | {bulge, inset} | mm | Bulged end: the last station stands `bulge` inside the end, a band rolls in by `inset` to the end face. |
 | `fair_tol` | number | mm, default 12 | Trace noise below this is dropped from the side/plan curves (Douglas-Peucker). |
-| `bumpers` | [{y, z, half_width, cell, chamfer}] | y, z: [lo,hi] mm; half_width mm; cell: atlas material name; chamfer mm | Bumper boxes at the nose/tail. |
-| `mirrors` | [{x, y, z, cell}] | mm, mirror centre | Wing mirrors. |
-| `plates` | [{face, x, z, cell, round, single}] | face: `front`/`rear`; x, z: [lo,hi] mm | Number plate or grille panels. |
-| `lamps` | [{role, face, x, z, round, segments, single, bezel?, bezel_depth?}] | face: `front`/`rear`; x, z: [lo,hi] mm | Lamp boxes. `role` must be a key of `LAMP_CELL` in carforge.py (`headlights`, `leftblinkers`, `rightblinkers`, `taillights`, `reverselights`). `bezel`: the lamp sits in a pocket that much wider, `bezel_depth` (25) deep. |
+| `bumpers` | [{y, z, half_width, cell, chamfer, channel?, lip?}] | y, z: [lo,hi] mm; half_width mm; cell: atlas material name; chamfer mm | Bumper boxes at the nose/tail. `channel`: the outer face is a channel that deep between `lip`-tall lips. |
+| `mirrors` | [{x, y, z, cell, chamfer?}] | mm boxes, mirrored to the right | Wing mirror heads and arms. |
+| `plates` | [{face, x\|y, z, cell, round, radius, proud?, single}] | face coords | Blocks standing on a face: number plate, door handles, hinges. |
+| `lamps` | [{role, face, x\|y, z, round, segments, single, bezel?, bezel_depth?}] | face coords; face `front`/`rear`/`side` | Lamp boxes. `role` must be a key of `LAMP_CELL` in carforge.py (`headlights`, `leftblinkers`, `rightblinkers`, `taillights`, `reverselights`); a side blinker becomes left/right by its side. `bezel`: the lamp sits in a pocket that much wider, `bezel_depth` (25) deep. |
 | `spare` | {y, z} | mm | Spare-wheel position (optional). |
 
-`validate()` in carforge.py rejects specs missing `id`, `wheels` (radius, width, track_front, track_rear, wheelbase), `side.top/bottom/shoulder` (≥ 2 points), `plan.low/high` (≥ 2 points), `belt`, `glass_top`, unknown lamp roles, and faces other than `front`/`rear`.
+Face coordinates (mm): `front`/`rear` (x, z); `side` (y, z) on the left side, mirrored to the right; `top` (y, x). Items are mirrored across the car unless `single`; every item is probed onto the body along its face's axis.
+
+`validate()` in carforge.py rejects specs missing `id`, `wheels` (radius, width, track_front, track_rear, wheelbase), `side.top/bottom/shoulder` (≥ 2 points), `plan.low/high` (≥ 2 points), `belt`, `glass_top`, unknown lamp roles, and lamp faces other than `front`/`rear`/`side`.
 
 ## Blueprint input (`fit_blueprint.py`)
 

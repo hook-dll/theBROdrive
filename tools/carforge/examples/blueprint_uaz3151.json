@@ -181,10 +181,6 @@
  ],
  "belt": 275.001,
  "glass_top": 186.07,
- "windscreen": [
-  371.324,
-  417.987
- ],
  "windows": [
   {
    "outline": [
@@ -460,7 +456,9 @@
    ],
    "half_width": 846,
    "cell": "black",
-   "chamfer": 25
+   "chamfer": 25,
+   "channel": 22,
+   "lip": 38
   },
   {
    "y": [
@@ -473,80 +471,122 @@
    ],
    "half_width": 812,
    "cell": "black",
-   "chamfer": 25
+   "chamfer": 25,
+   "channel": 18,
+   "lip": 40
   }
  ],
  "mirrors": [
   {
    "x": [
-    889,
+    898,
     1027
    ],
    "y": [
-    609,
-    648
+    800,
+    840
    ],
    "z": [
     1190,
-    1415
+    1414
    ],
-   "cell": "black"
+   "cell": "black",
+   "chamfer": 12
   },
   {
    "x": [
-    812,
-    889
+    820,
+    900
    ],
    "y": [
-    619,
-    638
+    808,
+    832
    ],
    "z": [
-    1247,
-    1286
+    1250,
+    1280
    ],
    "cell": "black"
   }
  ],
  "plates": [
   {
-   "face": "front",
-   "x": [
-    -311,
-    311
+   "face": "side",
+   "y": [
+    1168,
+    1336
    ],
    "z": [
-    975,
-    1070
+    1094,
+    1133
    ],
-   "cell": "black",
-   "single": true
+   "cell": "chrome",
+   "proud": 12
   },
   {
-   "face": "front",
-   "x": [
-    -358,
-    358
+   "face": "side",
+   "y": [
+    1957,
+    2124
    ],
    "z": [
-    817,
-    908
+    1094,
+    1133
    ],
-   "cell": "black",
-   "single": true
+   "cell": "chrome",
+   "proud": 12
   },
   {
-   "face": "rear",
-   "x": [
-    -560,
-    560
+   "face": "side",
+   "y": [
+    1407,
+    1484
    ],
    "z": [
-    1438,
-    1773
+    1070,
+    1128
    ],
-   "cell": "glass",
-   "single": true
+   "cell": "steel",
+   "proud": 10
+  },
+  {
+   "face": "side",
+   "y": [
+    1407,
+    1484
+   ],
+   "z": [
+    578,
+    640
+   ],
+   "cell": "steel",
+   "proud": 10
+  },
+  {
+   "face": "side",
+   "y": [
+    686,
+    762
+   ],
+   "z": [
+    1070,
+    1128
+   ],
+   "cell": "steel",
+   "proud": 10
+  },
+  {
+   "face": "side",
+   "y": [
+    686,
+    762
+   ],
+   "z": [
+    578,
+    640
+   ],
+   "cell": "steel",
+   "proud": 10
   }
  ],
  "nose": {
@@ -603,6 +643,188 @@
     900,
     960
    ]
+  },
+  {
+   "role": "leftblinkers",
+   "face": "side",
+   "round": true,
+   "segments": 8,
+   "y": [
+    415,
+    485
+   ],
+   "z": [
+    1131,
+    1201
+   ]
+  },
+  {
+   "role": "reverselights",
+   "face": "rear",
+   "x": [
+    -740,
+    -660
+   ],
+   "z": [
+    690,
+    745
+   ],
+   "single": true
+  }
+ ],
+ "recesses": [
+  {
+   "face": "front",
+   "x": [
+    -720,
+    720
+   ],
+   "z": [
+    1330,
+    1735
+   ],
+   "radius": 70,
+   "depth": 14,
+   "cell": "glass",
+   "single": true
+  },
+  {
+   "face": "front",
+   "x": [
+    -311,
+    311
+   ],
+   "z": [
+    975,
+    1070
+   ],
+   "radius": 47,
+   "depth": 20,
+   "cell": "black",
+   "single": true
+  },
+  {
+   "face": "front",
+   "x": [
+    -358,
+    358
+   ],
+   "z": [
+    817,
+    908
+   ],
+   "radius": 45,
+   "depth": 20,
+   "cell": "black",
+   "single": true
+  },
+  {
+   "face": "rear",
+   "x": [
+    -470,
+    470
+   ],
+   "z": [
+    1420,
+    1610
+   ],
+   "radius": 50,
+   "depth": 12,
+   "cell": "glass",
+   "single": true
+  }
+ ],
+ "grooves": [
+  {
+   "face": "rear",
+   "line": [
+    [
+     -650,
+     560
+    ],
+    [
+     650,
+     560
+    ],
+    [
+     650,
+     1640
+    ],
+    [
+     -650,
+     1640
+    ]
+   ],
+   "closed": true,
+   "single": true
+  }
+ ],
+ "lines": [
+  {
+   "face": "top",
+   "line": [
+    [
+     -342,
+     153
+    ],
+    [
+     380,
+     153
+    ]
+   ],
+   "width": 10
+  },
+  {
+   "face": "top",
+   "line": [
+    [
+     -342,
+     306
+    ],
+    [
+     380,
+     306
+    ]
+   ],
+   "width": 10
+  },
+  {
+   "face": "top",
+   "line": [
+    [
+     -342,
+     0
+    ],
+    [
+     380,
+     0
+    ]
+   ],
+   "width": 10,
+   "single": true
+  },
+  {
+   "face": "side",
+   "line": [
+    [
+     1269,
+     698
+    ],
+    [
+     1436,
+     698
+    ],
+    [
+     1436,
+     918
+    ],
+    [
+     1269,
+     918
+    ]
+   ],
+   "closed": true,
+   "width": 8
   }
  ]
 }

@@ -26,7 +26,8 @@ share one scale and one ground row (z0_px) so that z means the same thing in bot
                           segments?, single?, bezel?, bezel_depth?, bezel_cell?, circle: [cx, cy, r] |
                           rect: [x0, y0, x1, y1]} (px; bezel, bezel_depth: mm); rear-face lamps are
                           given in mm: {role, face: "rear", x, z, ...}
-  wheels, bumpers, mirrors, plates, spare, nose, tail: mm, copied through unchanged (not traced in px)
+  wheels, bumpers, mirrors, plates, spare, nose, tail, recesses, grooves, lines: mm, copied through
+                          unchanged (not traced in px; see the face coordinates in README.md)
 
 Output keys follow the carforge schema (see tools/carforge/README.md).
 """
@@ -104,7 +105,7 @@ def main():
     if "arches" in bp:
         spec["arches"] = {tag: {**{k: v for k, v in arch.items() if k != "outline"},
                                 "outline": side_line(arch["outline"])} for tag, arch in bp["arches"].items()}
-    for key in ("bumpers", "mirrors", "plates", "nose", "tail"):
+    for key in ("bumpers", "mirrors", "plates", "nose", "tail", "recesses", "grooves", "lines"):
         if key in bp:
             spec[key] = bp[key]
 
@@ -122,8 +123,12 @@ def main():
             px0, py0, px1, py1 = lp["rect"]
             xa, xb = xz_of(px0), xz_of(px1)
             za, zb = z_of(py1), z_of(py0)
-        else:
-            xa, xb, za, zb = lp["x"][0], lp["x"][1], lp["z"][0], lp["z"][1]
+        else:  # given in mm: a rear lamp (x, z) or a side lamp (y, z)
+            for k in ("x", "y", "z"):
+                if k in lp:
+                    out[k] = sorted(lp[k])
+            lamps.append(out)
+            continue
         out["x"] = [min(xa, xb), max(xa, xb)]
         out["z"] = [min(za, zb), max(za, zb)]
         lamps.append(out)
