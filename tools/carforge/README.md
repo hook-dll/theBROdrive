@@ -6,6 +6,8 @@ Builds a low-poly car FBX from a compact spec. Pipeline entry points:
 - `render.py` — FBX → PNG views (`-- --fbx <file> --albedo <png> --prefix <path> --size W H`; writes `_side`, `_front`, `_q`, `_qrear`, `_wire`; prints `EXTENT x y z`).
 - `fit_blueprint.py` — traced pixel blueprint → spec (plain Python).
 - `fit_mesh.py` — existing FBX/GLB → spec (Blender script; `-- --in <fbx> --out <json> --id <id>`).
+- `fairness.py` — surface check of a built body (Blender script; `-- --fbx <file> [--prefix <path>] [--json <file>]`): counts folds (non-planar quads), ripples (a gentle bend reversed within 700 mm along a section profile) and slivers; writes a defect map (`_fair_*`) and a glossy matcap render (`_shine_*`). A body is clean at 0 folds, 0 ripples.
+- `compare.py` — side render over the traced drawing at the blueprint's scale (plain Python + Pillow; `--blueprint <json> --drawing <img> --render <render.py prefix> --out <png>`).
 - `examples/` — hand-written specs (`uaz3151.json`, `vaz2101.json`, `bmw_e46.json`) and `blueprint_uaz3151.json` (pixel input for `fit_blueprint.py`).
 
 Run Blender jobs one at a time, under `nice -n 15`:
@@ -39,11 +41,15 @@ Run Blender jobs one at a time, under `nice -n 15`:
 | `glass_top` | number | mm, z of top of side glass | Required. |
 | `windscreen` | [y0, y1] | mm | Windscreen span along y. |
 | `backlight` | [y0, y1] | mm | Rear window span along y. |
-| `windows` | [{y:[a,b]}, …] | mm | Side window spans. |
+| `windows` | [{y:[a,b], outline?, round?}, …] | mm | Side windows, each a pocket cut 12 mm into the greenhouse side (glass floor, dark seal walls). `outline`: traced [[y,z], …] corners (slanted pillars); without it the window runs belt→glass top and drops under the rail. `round`: corner radius (default 40). |
+| `seams` | [[[y,z], …], …] | mm | Door/panel seam polylines, dark ribbons following the side. |
+| `arches` | {front\|rear: {outline, lip?, flare?}} | mm | Arch opening edge in side view (default: semicircle of `arch_front`/`arch_rear`), with a lip `lip` mm wide standing `flare` mm proud. |
+| `nose` / `tail` | {bulge, inset} | mm | Bulged end: the last station stands `bulge` inside the end, a band rolls in by `inset` to the end face. |
+| `fair_tol` | number | mm, default 12 | Trace noise below this is dropped from the side/plan curves (Douglas-Peucker). |
 | `bumpers` | [{y, z, half_width, cell, chamfer}] | y, z: [lo,hi] mm; half_width mm; cell: atlas material name; chamfer mm | Bumper boxes at the nose/tail. |
 | `mirrors` | [{x, y, z, cell}] | mm, mirror centre | Wing mirrors. |
 | `plates` | [{face, x, z, cell, round, single}] | face: `front`/`rear`; x, z: [lo,hi] mm | Number plate or grille panels. |
-| `lamps` | [{role, face, x, z, round, segments, single}] | face: `front`/`rear`; x, z: [lo,hi] mm | Lamp boxes. `role` must be a key of `LAMP_CELL` in carforge.py (`headlights`, `leftblinkers`, `rightblinkers`, `taillights`, `reverselights`). |
+| `lamps` | [{role, face, x, z, round, segments, single, bezel?, bezel_depth?}] | face: `front`/`rear`; x, z: [lo,hi] mm | Lamp boxes. `role` must be a key of `LAMP_CELL` in carforge.py (`headlights`, `leftblinkers`, `rightblinkers`, `taillights`, `reverselights`). `bezel`: the lamp sits in a pocket that much wider, `bezel_depth` (25) deep. |
 | `spare` | {y, z} | mm | Spare-wheel position (optional). |
 
 `validate()` in carforge.py rejects specs missing `id`, `wheels` (radius, width, track_front, track_rear, wheelbase), `side.top/bottom/shoulder` (≥ 2 points), `plan.low/high` (≥ 2 points), `belt`, `glass_top`, unknown lamp roles, and faces other than `front`/`rear`.
@@ -79,42 +85,51 @@ Mapping: y = (px − y0)·mm_per_px; z = (z0 − py)·mm_per_px; x = (px − x0)
 1. Wheels: exactly four objects whose name contains "wheel". Lamps: objects tagged by `lamp_role`. Body: the rest.
 2. Glass: atlas cell (3,1) in the packed texture, or material name matching `glass|window` for glTF.
 3. Spec frame: y rearward from front-axle centre, z above wheel ground; x sign chosen so the front is at −y.
-4. 41 stations along y, inset 1% of length at each end. Shoulder is the largest 20 mm inward half-width step between 25% and 85% of height (else the belt); profiles median-smoothed.
-5. Windows: runs of side glass faces (40 mm gap merge, 100 mm minimum). `belt`/`glass_top`: medians of side glass z-min/z-max.
-6. Windscreen/backlight: roof-slope glass (normal z > 0.2), envelope ± 60 mm.
-7. Lamps → `single: true` boxes at their measured position.
+4. End trim (neither paint nor glass, outer 12% of length) grouped by connectivity: low wide groups reaching the end → `bumpers` (excluded from slicing), end-facing groups → `plates`.
+5. 41 stations along y, 0.5% inside the ends, the end stations moved to the true ends. Shoulder is the largest 20 mm inward half-width step between 25% and 85% of height (else the belt), median-smoothed; on bonnet/boot slices `plan.high` is measured at the rail height; widths median-of-3.
+6. Windows: each connected pane of left side glass (overlapping panes merged), outline = its hull in side view. `belt`/`glass_top`: medians of side glass z-min/z-max.
+7. Windscreen/backlight: roof-slope glass (normal z > 0.2), envelope ± 60 mm.
+8. Lamps → `single: true` boxes at their measured position. `fair_tol` 15.
 
-Prints `FIT {...}` with length, width, height, wheelbase, track, belt, glass_top, window count.
+Prints `FIT {...}` with length, width, height, wheelbase, track, belt, glass_top, window/bumper/plate counts.
 
 ## Known limits
 
 - VAZ-2101 and BMW E46 ports are approximations: the old schema had no per-y body half-width, belt or glass top. Those values are estimates (noted in each file's `source`).
 - Rear-face lamps in the UAZ blueprint are given in mm (rear view not traced).
-- Generated mesh-fit paint is flat; glass is coarse (one window per run).
+- Generated mesh-fit paint is flat; a window outline is the convex hull of its glass.
 - Fitted widths: vz01 about 3% and vz21 about 3% under the original (mirrors and trim are not in the body).
-- Fitted ends taper: the 1% inset leaves small wedge ends on vz01 and gz24 (length ~2% short).
 - No per-y belt in the schema: belt is a single value.
 - Grille depth is lost (plates are flat).
 
+## Surface fairness (why the old bodies rippled)
+
+Waves and accordion folds came from the station grid, not the trace:
+- rows the station did not reach were pressed onto the roof line at a jump, so a row popped out
+  between two stations and the quad between them folded (A/C pillars, bonnet edge);
+- filler stations every 260 mm plus pixel noise in the trace gave many slightly twisted strips,
+  and the game triangulates a twisted quad along an arbitrary diagonal → alternating creases;
+- the belt lip faded in and out under the bonnet; face hint normals were tested before being computed.
+
+Fixes: the ring is monotone (pressed rows move continuously, greenhouse rows stay on the
+tumblehome), stations go exactly where a row emerges or the lip ends, no filler stations,
+curves faired by `fair_tol`, every non-planar quad split along its convex diagonal.
+`fairness.py` on the three examples: UAZ 18 folds / 59 ripples → 0 / 0; VAZ-2101 10 / 6 → 0 / 1
+(one 2-6° bend pair at the C-pillar base); BMW 34 / 16 → 0 / 0.
+
 ## Status (2026-10-09) and what is next
 
-Where it stands: the three-view core (`carforge.py`) builds a body with the pack's
-construction (13-point station ring, quad grid, glass rows, boolean arches, probed lamps
-and plates). `examples/uaz3151.json`, traced by hand from the factory drawing
-`build/carforge/refs/uaz_blueprint.gif` (4.779 mm/px, isotropic), overlays the drawing's
-side view within a few pixels (`build/carforge/renders/uaz3151_overlay.png`); body 2288
-tris. FBX nodes carry rotation 0 like the pack. The owner's verdict: about half way —
-the outline is right, the detail is coarse.
+Done: fair shell (above); traced UAZ arches (flat-topped trapezoids) with a flared lip; side
+windows as recessed pockets with traced slanted pillars and rounded corners; door seams; nose
+bulge and recessed headlamp bezels. `fit_mesh.py` now finds bumpers (boxes, left out of the
+slices), grille plates, window outlines (glass hull per pane) and keeps the true end length.
+UAZ body ~3100 tris.
 
-Next, in order:
-1. Arches following the traced fender line (the UAZ's are trapezoid with a flat top), with a
-   flared lip; per-arch shape in the spec instead of a circle.
-2. Door seams and window frames/pillars from the traced openings (slanted A/B pillars, rounded
-   window corners), glass recessed 10-15 mm.
-3. Front-view shape: the grille panel's bulge, wings rounded into the bonnet, headlamps in
-   recessed bezels; the same for the tail.
-4. `fit_mesh.py`: windows come out as stripes, no lamps/bumpers, wedge ends (see Known limits).
-5. A tracer that takes the side/top/front outlines from a drawing automatically
-   (`trace_blueprint.py` is UAZ-specific and its plan/front traces are unreliable), and a
-   compare tool that overlays render and drawing (done by hand in a Python cell so far).
-6. Game integration: a `carmodels.ts` def for a generated car (scale, wheel nodes, lights).
+Next:
+1. `fit_mesh.py` bodies still ripple (vz01 59, gz24 53, vz21 146 by `fairness.py`): facet noise in
+   the slices; the shoulder detector flips between the belt and a step on vz21.
+2. An automatic tracer for side/top/front outlines (`trace_blueprint.py` is UAZ-specific); the
+   overlay check is `compare.py` (`build/carforge/renders/uaz3151_overlay.png`).
+3. Rear face detail (tail lamp bezels, door seam), grille relief.
+4. Game integration: a `carmodels.ts` def for the generated UAZ (drivetrain can reuse
+   `engine_umz_4213` / `gearbox_uaz_4`).

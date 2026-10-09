@@ -17,11 +17,16 @@ share one scale and one ground row (z0_px) so that z means the same thing in bot
   tumblehome            [[py, factor], ...] greenhouse half-width factor, relative to the belt width
   belt, glass_top       side-view rows (py)
   windscreen            [px0, px1] y-range of the windscreen (px)
-  windows               [[px0, px1], ...] side-glass y-ranges (px)
+  windows               [[px0, px1] | {outline: [[px, py], ...], round?}, ...] side windows: a y-range
+                          (px), or the glass edge's corners traced in the side view (round: mm)
+  seams                 [[[px, py], ...], ...] door and panel seam polylines in the side view
+  arches                {front|rear: {outline: [[px, py], ...], lip?, flare?}}: the arch opening's
+                          edge in the side view, front to rear (lip/flare in mm, copied)
   lamps                 front-face lamps traced in the front view: {role, face: "front", round?,
-                          segments?, single?, circle: [cx, cy, r] | rect: [x0, y0, x1, y1]} (px);
-                          rear-face lamps are given in mm: {role, face: "rear", x, z, ...}
-  wheels, bumpers, mirrors, plates, spare: mm, copied through unchanged (not traced in px)
+                          segments?, single?, bezel?, bezel_depth?, bezel_cell?, circle: [cx, cy, r] |
+                          rect: [x0, y0, x1, y1]} (px; bezel, bezel_depth: mm); rear-face lamps are
+                          given in mm: {role, face: "rear", x, z, ...}
+  wheels, bumpers, mirrors, plates, spare, nose, tail: mm, copied through unchanged (not traced in px)
 
 Output keys follow the carforge schema (see tools/carforge/README.md).
 """
@@ -82,16 +87,31 @@ def main():
         spec["windscreen"] = [y_of(v) for v in bp["windscreen"]]
     if "backlight" in bp:
         spec["backlight"] = [y_of(v) for v in bp["backlight"]]
-    spec["windows"] = [{"y": [y_of(a0), y_of(b0)]} for a0, b0 in bp["windows"]]
+    windows = []
+    for w in bp["windows"]:
+        if isinstance(w, dict):
+            out = {"y": [y_of(min(p[0] for p in w["outline"])), y_of(max(p[0] for p in w["outline"]))],
+                   "outline": side_line(w["outline"])}
+            if "round" in w:
+                out["round"] = w["round"]
+            windows.append(out)
+        else:
+            windows.append({"y": [y_of(w[0]), y_of(w[1])]})
+    spec["windows"] = windows
+    if "seams" in bp:
+        spec["seams"] = [side_line(line) for line in bp["seams"]]
     spec["wheels"] = bp["wheels"]
-    for key in ("bumpers", "mirrors", "plates"):
+    if "arches" in bp:
+        spec["arches"] = {tag: {**{k: v for k, v in arch.items() if k != "outline"},
+                                "outline": side_line(arch["outline"])} for tag, arch in bp["arches"].items()}
+    for key in ("bumpers", "mirrors", "plates", "nose", "tail"):
         if key in bp:
             spec[key] = bp[key]
 
     lamps = []
     for lp in bp.get("lamps", []):
         out = {"role": lp["role"], "face": lp["face"]}
-        for flag in ("round", "segments", "single"):
+        for flag in ("round", "segments", "single", "bezel", "bezel_depth", "bezel_cell"):
             if flag in lp:
                 out[flag] = lp[flag]
         if "circle" in lp:

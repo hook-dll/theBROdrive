@@ -4,11 +4,13 @@
       --fbx car.fbx --albedo public/models/soviet/albedo.png --prefix build/carforge/renders/name
 
 Writes <prefix>_side.png (from +X, left side), <prefix>_front.png (from -Y), <prefix>_q.png (front-left
-3/4, perspective), <prefix>_qrear.png (rear-left 3/4), <prefix>_wire.png (wireframe over shaded body).
+3/4, perspective), <prefix>_qrear.png (rear-left 3/4), <prefix>_wire.png (wireframe over shaded body),
+and <prefix>_side.json (the side view's mm per pixel and centre, for compare.py).
 Textures use the same atlas the game ships; no lights are needed for Workbench studio shading.
 """
 
 import argparse
+import json
 import math
 import os
 import sys
@@ -108,12 +110,16 @@ def main():
         ("wire", Vector((0.85, -0.85, 0.42)), None, True),
     ]
     for label, d, extent, wire in views:
-        place_camera("cam_" + label, d, centre, size, extent, aspect)
+        cam = place_camera("cam_" + label, d, centre, size, extent, aspect)
         for o in meshes:
             o.show_wire = wire
             o.display_type = "WIRE" if wire else "TEXTURED"
         render_to(f"{a.prefix}_{label}.png", a.size)
         print("RENDER " + f"{a.prefix}_{label}.png")
+        if label == "side":  # image right = +Y (rearward), up = +Z; centre pixel = world (y, z) below
+            with open(f"{a.prefix}_side.json", "w") as fh:
+                json.dump({"mm_per_px": cam.data.ortho_scale * 1000 / a.size[0],
+                           "centre_mm": [centre.y * 1000, centre.z * 1000], "size": a.size}, fh)
 
 
 if __name__ == "__main__":

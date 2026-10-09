@@ -59,14 +59,34 @@ RING_ROWS = 13
 SILL_CHAMFER = 45.0      # mm the underbody edge is bevelled
 SHOULDER_ROLL = 35.0     # mm the shoulder edge is rolled
 BELT_CREASE = 15.0       # mm the side steps in at the beltline crease
+LIP_CLEAR = 100.0        # mm the rail must stand above the belt for the belt lip to show
+LIP_TAPER = 40.0         # mm along the car over which the belt lip ends
 RAIL = 55.0              # mm roof-rail chamfer
 CROWN = 25.0             # mm the roof/bonnet centre stands above its edges
-MAX_STATION_STEP = 260.0  # mm between stations
 MIN_STATION_GAP = 25.0   # mm: closer breakpoints are merged
 FRAME = 60.0             # mm paint frame around windscreen and back light
 WELD = 0.002             # m: vertices this close are welded
+FAIR_TOL = 12.0          # mm: trace wiggles within this of a straight run are dropped (spec "fair_tol")
+FOLD_SPLIT_DEG = 0.25    # quads folded more than this are split along their convex diagonal
 
 PROUD = 8.0              # mm lamps and plates stand proud of their face
+SLIVER_MM = 12.0         # mm: the narrowest face a generated box or chamfer may leave
+ARCH_SEGMENTS = 12       # segments of a default (semicircle) arch outline
+ARCH_LIP = 45.0          # mm the arch lip reaches out over the side from the opening
+ARCH_FLARE = 25.0        # mm the arch lip stands proud of the side at the opening
+ARCH_SNAP = 5.0          # mm: vertices the arch and window cuts leave this close are welded
+ARCH_FAIR_TOL = 6.0      # mm: tolerance of `simplify` on a traced outline (keeps rounded corners)
+BEZEL_DEPTH = 25.0       # mm a lamp bezel pocket goes into its face (spec lamps[].bezel_depth)
+GLASS_INSET = 12.0       # mm side glass sits inside the greenhouse side
+WINDOW_FRAME = 20.0      # mm paint a default (y-only) window leaves over the belt and under the glass top
+WINDOW_ROUND = 40.0      # mm default window corner radius (spec windows[].round)
+GLASS_CLEAR = 5.0        # mm: a traced window stays this far inside the belt and the glass top
+ROUND_SEGMENTS = 3       # segments of a rounded corner
+WINDOW_MIN_HEIGHT = 80.0  # mm: a default window ends where less glass than this is left
+SEAM_WIDTH = 12.0        # mm width of a door/panel seam line
+SEAM_PROUD = 4.0         # mm a seam line stands off the side
+SEAM_TOL = 1.5           # mm a seam may stray from the side between its probes
+SEAM_MIN = 8.0           # mm: the shortest piece a seam is split into
 LAMP_MAX_GAP = 0.030     # m: every lamp vertex must lie within this of the body surface
 
 
@@ -98,11 +118,33 @@ def validate(spec):
     return spec
 
 
-class Curve:
-    """Piecewise-linear y -> value, clamped at the ends."""
+def simplify(pts, tol):
+    """Douglas-Peucker: drop points within `tol` mm (perpendicular) of the chord of their
+    neighbours. A traced outline carries pixel noise; every kept breakpoint becomes a station
+    edge, so a 2 px zig-zag in the trace would shade as a ripple across the whole body."""
+    if len(pts) < 3:
+        return pts
+    (ay, av), (by, bv) = pts[0], pts[-1]
+    dy, dv = by - ay, bv - av
+    span = math.hypot(dy, dv)
+    worst, at = -1.0, 0
+    for i in range(1, len(pts) - 1):
+        y, v = pts[i]
+        d = abs(dy * (v - av) - dv * (y - ay)) / span if span > 0 else math.hypot(y - ay, v - av)
+        if d > worst:
+            worst, at = d, i
+    if worst <= tol:
+        return [pts[0], pts[-1]]
+    return simplify(pts[:at + 1], tol)[:-1] + simplify(pts[at:], tol)
 
-    def __init__(self, pts):
+
+class Curve:
+    """Piecewise-linear y -> value, clamped at the ends; with `tol`, faired by `simplify`."""
+
+    def __init__(self, pts, tol=0.0):
         pts = sorted((float(a), float(b)) for a, b in pts)
+        if tol > 0:
+            pts = simplify(pts, tol)
         self.ys = [p[0] for p in pts]
         self.vs = [p[1] for p in pts]
 
@@ -128,6 +170,7 @@ def add_face(bm, uvl, verts, cell, hint=None):
         f = bm.faces.new(verts)
     except ValueError:
         return None
+    f.normal_update()  # a new face's normal is not computed until asked
     if hint is not None and f.normal.dot(hint) < 0:
         f.normal_flip()
     uv = uv_of_cell(cell)
@@ -140,7 +183,8 @@ def add_box(bm, uvl, lo, hi, cell, chamfer=0.0):
     """Axis box in mm, its x-faces octagonal when `chamfer` > 0 (bumpers wrap their ends)."""
     x0, y0, z0 = lo
     x1, y1, z1 = hi
-    c = max(0.0, min(chamfer, (y1 - y0) / 2 - 1, (z1 - z0) / 2 - 1))
+    # keep every face of the octagon at least SLIVER_MM wide: a thinner one shades as a streak
+    c = max(0.0, min(chamfer, (y1 - y0 - SLIVER_MM) / 2, (z1 - z0 - SLIVER_MM) / 2))
     if c > 0:
         outline = [(y0, z0 + c), (y0, z1 - c), (y0 + c, z1), (y1 - c, z1),
                    (y1, z1 - c), (y1, z0 + c), (y1 - c, z0), (y0 + c, z0)]
@@ -185,96 +229,171 @@ class Shape:
 
     def __init__(self, spec):
         side, plan = spec["side"], spec["plan"]
-        self.top = Curve(side["top"])
-        self.bottom = Curve(side["bottom"])
-        self.shoulder = Curve(side["shoulder"])
-        self.low = Curve(plan["low"])
-        self.high = Curve(plan["high"])
+        tol = float(spec.get("fair_tol", FAIR_TOL))
+        self.top = Curve(side["top"], tol)
+        self.bottom = Curve(side["bottom"], tol)
+        self.shoulder = Curve(side["shoulder"], tol)
+        self.low = Curve(plan["low"], tol)
+        self.high = Curve(plan["high"], tol)
         # Front view: half-width factor of the greenhouse against its width at the belt.
         self.tumble = Curve(spec.get("tumblehome", [[0, 1.0], [1, 1.0]]))
         self.belt = float(spec["belt"])
         self.glass_top = float(spec["glass_top"])
         self.front = max(self.top.ys[0], self.bottom.ys[0])
         self.rear = min(self.top.ys[-1], self.bottom.ys[-1])
+        # The belt lip runs where a greenhouse stands: the rail LIP_CLEAR or more above the belt.
+        cuts = self.crossings(lambda y: self.rail_z(y) - self.belt - LIP_CLEAR)
+        edges = [self.front] + cuts + [self.rear]
+        self.lip_spans = [(a, b) for a, b in zip(edges, edges[1:])
+                          if self.rail_z((a + b) / 2) - self.belt > LIP_CLEAR]
+
+    def rail_z(self, y):
+        """Height where the side ends and the roof (or bonnet) rail begins."""
+        return max(self.bottom(y) + SILL_CHAMFER, self.top(y) - RAIL - CROWN)
+
+    def crossings(self, fn, step=5.0):
+        """ys where fn changes sign, scanned every `step` mm and interpolated."""
+        out = []
+        y, a = self.front, fn(self.front)
+        while y < self.rear:
+            y1 = min(y + step, self.rear)
+            b = fn(y1)
+            if (a < 0) != (b < 0):
+                out.append(y + (y1 - y) * a / (a - b))
+            y, a = y1, b
+        return out
+
+    def lip(self, y):
+        """Belt lip depth at y: full inside a greenhouse span, tapered over LIP_TAPER mm at a
+        span end inside the body (a short taper reads as the lip's end, a long one as a wave)."""
+        for a, b in self.lip_spans:
+            if a <= y <= b:
+                da = math.inf if a <= self.front else y - a
+                db = math.inf if b >= self.rear else b - y
+                return BELT_CREASE * min(1.0, min(da, db) / LIP_TAPER)
+        return 0.0
+
+    def lip_stations(self):
+        out = []
+        for a, b in self.lip_spans:
+            if a > self.front:
+                out += [a, a + LIP_TAPER]
+            if b < self.rear:
+                out += [b - LIP_TAPER, b]
+        return out
 
 
 def station_ring(s, y):
     """The 13 right-side ring points (x, z) of the station at y, bottom centre to roof centre.
-    Every station has all 13; a row above the station's top is pressed onto it."""
+
+    Every station has all 13 and the ring never doubles back: going up from the sill, z
+    never falls and x never grows (the belt lip excepted), so neighbouring stations' quads
+    cannot fold into each other. The side ends at the rail (RAIL + CROWN below the top). A side
+    row the station does not reach (the bonnet is below the belt and glass) is pressed down to
+    the rail height, keeping its x: pressed rows lie on one flat line, and a row emerging from
+    under the rail moves continuously, so the faces around it neither jump nor fold."""
     zt, zb = s.top(y), s.bottom(y)
-    zs = min(s.shoulder(y), zt)
     lo, hi = s.low(y), min(s.high(y), s.low(y))
+    z_rail = s.rail_z(y)
+    zs = min(s.shoulder(y), z_rail)
 
     def gh(z):  # greenhouse half-width at height z
         return hi * s.tumble(z)
 
-    belt = min(max(s.belt, zs), zt)
-    gtop = min(s.glass_top, zt)
-    roof_x = gh(zt)
-    pts = [
-        (0.0, zb),
-        (lo - SILL_CHAMFER, zb),
+    # The belt lip runs only under a greenhouse (Shape.lip) and fades where the belt meets
+    # the shoulder. Under a bonnet or boot that stays near the belt it would be a strip fading
+    # in and out along the side.
+    crease = max(0.0, min(s.lip(y), s.belt - zs))
+    # (x, z); x None: a greenhouse row, x = gh(z) + the offset, taken at z AFTER pressing, so
+    # a pressed row stays on the tumblehome. The panel between the belt and a rising pressed
+    # row (the A and C pillars) then lies in the tumblehome surface instead of twisting.
+    side = [
         (lo, zb + SILL_CHAMFER),
         (lo, (zb + zs) / 2),
         (lo, zs - SHOULDER_ROLL),
         (max(hi, lo - SHOULDER_ROLL), zs),
         (hi, zs),
-        (gh(belt) + BELT_CREASE * (belt > zs), belt - BELT_CREASE * (belt > zs)),
-        (gh(belt), belt),
-        (gh(gtop), gtop),
-        (roof_x, zt - RAIL - CROWN),
-        (roof_x - RAIL, zt - CROWN),
+        (None, s.belt - crease, crease),  # the belt lip: the one row allowed to stand out
+        (None, s.belt, 0.0),
+        (None, s.glass_top, 0.0),
+        (None, z_rail, 0.0),
+        (None, zt - CROWN, -RAIL),
         (0.0, zt),
     ]
+    out = [(0.0, zb), (lo - SILL_CHAMFER, zb)]
+    px, pz = lo, zb
+    rail_x = gh(z_rail)
+    for row, (x, z, *off) in enumerate(side, start=R_SILL_UP):
+        z = min(max(z, pz), z_rail if row <= R_RAIL else zt)
+        if x is None:
+            x = (gh(z) if row <= R_RAIL else rail_x) + off[0]
+        if row == R_BELT_LO:
+            out.append((max(0.0, min(x, lo)), z))
+            pz = z
+            continue
+        px, pz = max(0.0, min(x, px)), z
+        out.append((px, pz))
+    return out
+
+
+def emergences(s):
+    """ys where the rail height crosses a side row's height. On one side of such a y the row
+    is pressed down to the rail height, on the other it is free; a station exactly there lets
+    the row leave the rail at a vertex, not across a face (which shades as a ripple)."""
     out = []
-    for x, z in pts:  # press everything the station does not reach onto its top
-        out.append((max(0.0, min(x, lo)), min(max(z, zb), zt)))
+    for h in (lambda y: s.shoulder(y) - SHOULDER_ROLL, s.shoulder, lambda y: s.belt, lambda y: s.glass_top):
+        out += s.crossings(lambda y, h=h: s.rail_z(y) - h(y))
     return out
 
 
 def stations(spec, s):
-    """Station ys: every breakpoint of every view, window edges, frame offsets, then
-    gaps filled to MAX_STATION_STEP and near-duplicates merged."""
-    ys = set()
-    for c in (s.top, s.bottom, s.shoulder, s.low, s.high):
-        ys.update(c.ys)
-    for w in spec.get("windows", []):
-        ys.update(w["y"])
+    """Station ys. Candidates by priority: the ends, then the rows' emergence points and the
+    belt lip's ends, then every breakpoint of the (faired) views and the windscreen/back light
+    edges, then their frame offsets and the arch outline's corners. Candidates closer than
+    MIN_STATION_GAP keep the higher priority one (the first on a tie). Side windows need no
+    stations (they are pockets cut afterwards). No filler stations: between breakpoints every
+    row is straight, so a filler adds no shape; where a strip is twisted it only multiplies
+    the alternating creases of its triangulation."""
+    cand = {}
+
+    def put(y, prio):
+        if s.front <= y <= s.rear:
+            cand[y] = max(cand.get(y, -1), prio)
+
     for key in ("windscreen", "backlight"):
         if key in spec:
             a, b = spec[key]
-            ys.update((a, b, a + FRAME, b - FRAME))
-    ys = sorted(y for y in ys if s.front <= y <= s.rear)
-    if ys[0] > s.front:
-        ys.insert(0, s.front)
-    if ys[-1] < s.rear:
-        ys.append(s.rear)
-    filled = [ys[0]]
-    for y in ys[1:]:
-        gap = y - filled[-1]
-        n = int(gap // MAX_STATION_STEP)
-        for k in range(1, n + 1):
-            filled.append(filled[-1] + gap / (n + 1) if k == 1 else filled[-1] + gap / (n + 1))
-        filled.append(y)
-    merged = [filled[0]]
-    for y in filled[1:]:
-        if y - merged[-1] >= MIN_STATION_GAP:
-            merged.append(y)
-        elif y == filled[-1]:
-            merged[-1] = y
-    return merged
+            put(a, 2)
+            put(b, 2)
+            put(a + FRAME, 1)
+            put(b - FRAME, 1)
+    for c in (s.top, s.bottom, s.shoulder, s.low, s.high):
+        for y in c.ys:
+            put(y, 2)
+    for _, _, outline, _, _ in arch_specs(spec):
+        for y, _ in outline:  # the cut lands on station columns where no view breaks nearby
+            put(y, 1)
+    for y in emergences(s) + s.lip_stations():
+        put(y, 3)
+    put(s.front, 4)
+    put(s.rear, 4)
+    merged = []
+    for y, prio in sorted(cand.items()):
+        if merged and y - merged[-1][0] < MIN_STATION_GAP:
+            if prio > merged[-1][1]:
+                merged[-1] = (y, prio)
+            continue
+        merged.append((y, prio))
+    return [y for y, _ in merged]
 
 
 def face_cell(spec, s, row_a, row_b, y0, y1):
-    """Cell of the quad between ring rows row_a..row_b over stations y0..y1."""
+    """Cell of the quad between ring rows row_a..row_b over stations y0..y1. Side glass is not
+    a shell cell: it is the floor of a pocket cut into the side (cut_windows)."""
     ym = (y0 + y1) / 2
     lo_row = min(row_a, row_b)
     if lo_row == R_BOTTOM:
         return "black"
-    if lo_row == R_BELT:  # the glass row, belt to glass top
-        for w in spec.get("windows", []):
-            if w["y"][0] <= ym <= w["y"][1]:
-                return "glass"
     if lo_row >= R_RAIL:  # roof rows: windscreen and back light on the slopes
         for key in ("windscreen", "backlight"):
             if key in spec:
@@ -286,6 +405,13 @@ def face_cell(spec, s, row_a, row_b, y0, y1):
 
 def build_shell(spec, s, bm, uvl):
     ys = stations(spec, s)
+    # A bulged cap: the last ring stands `bulge` inside the end, the cap's face at the end.
+    nose = float(spec.get("nose", {}).get("bulge", 0.0))
+    tail = float(spec.get("tail", {}).get("bulge", 0.0))
+    ys = ([s.front + nose] if nose > 0 else []) + \
+         [y for y in ys if s.front + nose + (MIN_STATION_GAP if nose > 0 else 0) <= y
+          <= s.rear - tail - (MIN_STATION_GAP if tail > 0 else 0)] + \
+         ([s.rear - tail] if tail > 0 else [])
     rings = []
     for y in ys:
         right = station_ring(s, y)
@@ -309,58 +435,367 @@ def build_shell(spec, s, bm, uvl):
             add_face(bm, uvl, vs, cell,
                      Vector((mid_l.x, 0, mid_l.z - centre.z)) if mid_l.x < -1e-4 else Vector((0, 0, mid_l.z - centre.z)))
     # nose and tail caps
-    for idx, sign in ((0, -1.0), (len(ys) - 1, 1.0)):
+    for idx, sign, key, end in ((0, -1.0, "nose", s.front), (len(ys) - 1, 1.0, "tail", s.rear)):
         ring, left = rings[idx]
-        loop = ring + list(reversed(left))
-        add_face(bm, uvl, loop, CELLS["paint"], Vector((0, sign, 0)))
+        add_cap(bm, uvl, ring + list(reversed(left)), end, sign, float(spec.get(key, {}).get("inset", 0.0)))
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=WELD)
     bmesh.ops.dissolve_degenerate(bm, edges=bm.edges, dist=WELD)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    split_folded(bm)
     return ys
 
 
-# ---------------------------------------------------------------- arches (boolean)
+def add_cap(bm, uvl, loop, y_end, sign, inset):
+    """Close the end ring `loop`. When it stands inside the end (a bulged nose or tail), the
+    cap is a band out to a face at y_end: the ring scaled about its centre to stand `inset` mm
+    inside it. Scaled edges stay parallel, so every band quad is flat."""
+    y_ring = loop[0].co.y / MM
+    if abs(y_ring - y_end) < 0.5:
+        add_face(bm, uvl, loop, CELLS["paint"], Vector((0, sign, 0)))
+        return
+    zs = [v.co.z for v in loop]
+    cz = (min(zs) + max(zs)) / 2
+    radius = sum(math.hypot(v.co.x, v.co.z - cz) for v in loop) / len(loop)
+    f = max(0.3, 1.0 - inset * MM / radius)
+    inner = [bm.verts.new(Vector((v.co.x * f, y_end * MM, cz + (v.co.z - cz) * f))) for v in loop]
+    n = len(loop)
+    for i in range(n):
+        j = (i + 1) % n
+        add_face(bm, uvl, [loop[i], loop[j], inner[j], inner[i]], CELLS["paint"], Vector((0, sign, 0)))
+    add_face(bm, uvl, inner, CELLS["paint"], Vector((0, sign, 0)))
 
-def arch_cutter(spec, s, hub_y, radius, name):
-    """Cylinder along x through both sides' outer bands: the arch opening and its well.
-    The well's inner wall stands `well` mm inside the body side."""
+
+def split_folded(bm):
+    """Split every non-planar quad along the diagonal that makes its fold convex. Left whole,
+    the game splits it along whichever diagonal comes first, and a concave split shades as a
+    dent: the accordion look. Normals must point outward."""
+    for f in list(bm.faces):
+        if len(f.verts) != 4:
+            continue
+        a, b, c, d = f.verts
+        n1 = (b.co - a.co).cross(c.co - a.co)
+        n2 = (c.co - a.co).cross(d.co - a.co)
+        if n1.length < 1e-12 or n2.length < 1e-12 or n1.angle(n2) < math.radians(FOLD_SPLIT_DEG):
+            continue
+        if (d.co - a.co).dot(n1) < 0:  # d lies inside the plane of abc: a-c is a convex crease
+            bmesh.utils.face_split(f, a, c)
+        else:
+            bmesh.utils.face_split(f, b, d)
+
+
+# ---------------------------------------------------------------- arches
+
+def arch_specs(spec):
+    """[(tag, hub_y, outline, lip, flare)] for the front and rear arch. The outline is the
+    opening's edge in side view, [(y, z)] mm front to rear, from the spec's `arches.<tag>.outline`
+    (traced: the UAZ's are trapezoids with a flat top) or, without one, a semicircle of
+    `wheels.arch_front|arch_rear` radius about the hub. Its ends reach below the body's bottom."""
     w = spec["wheels"]
-    well = float(w.get("well", 260.0))
     hub_z = float(w["radius"])
-    lo = s.low(hub_y)
+    out = []
+    for tag, hub_y, key in (("front", 0.0, "arch_front"), ("rear", float(w["wheelbase"]), "arch_rear")):
+        a = spec.get("arches", {}).get(tag, {})
+        if "outline" in a:  # faired like the views: a pixel zig-zag would kink the lip
+            pts = simplify([(float(y), float(z)) for y, z in a["outline"]], ARCH_FAIR_TOL)
+        else:
+            r = float(w.get(key, hub_z * 1.2))
+            ts = [math.pi * i / ARCH_SEGMENTS for i in range(-1, ARCH_SEGMENTS + 2)]
+            pts = [(hub_y - r * math.cos(t), hub_z + r * math.sin(t)) for t in ts]
+        out.append((tag, hub_y, pts, float(a.get("lip", ARCH_LIP)), float(a.get("flare", ARCH_FLARE))))
+    return out
+
+
+def arch_cutter(spec, s, hub_y, outline, name):
+    """Prism along x through both sides' outer bands: the outline closed below the ground.
+    Its faces inside the body become the dark well; the inner wall stands `well` mm inside."""
+    well = float(spec["wheels"].get("well", 260.0))
+    lo = max(s.low(y) for y, _ in outline)
+    poly = [(outline[0][0], -100.0)] + outline + [(outline[-1][0], -100.0)]
     bm, uvl = new_bm()
-    seg = 16
     for sign in (1.0, -1.0):
-        x_in, x_out = sign * (lo - well), sign * (lo + 300.0)
-        ring_in, ring_out = [], []
-        for i in range(seg):
-            a = 2 * math.pi * i / seg
-            y = hub_y + radius * math.cos(a)
-            z = hub_z + radius * math.sin(a)
-            ring_in.append(bm.verts.new(Vector((x_in, y, z)) * MM))
-            ring_out.append(bm.verts.new(Vector((x_out, y, z)) * MM))
+        x_in, x_out = sign * (s.low(hub_y) - well), sign * (lo + 300.0)
+        ring_in = [bm.verts.new(Vector((x_in, y, z)) * MM) for y, z in poly]
+        ring_out = [bm.verts.new(Vector((x_out, y, z)) * MM) for y, z in poly]
         add_face(bm, uvl, ring_in, CELLS["black"])
         add_face(bm, uvl, ring_out, CELLS["black"])
-        for i in range(seg):
-            j = (i + 1) % seg
+        n = len(poly)
+        for i in range(n):
+            j = (i + 1) % n
             add_face(bm, uvl, [ring_in[i], ring_in[j], ring_out[j], ring_out[i]], CELLS["black"])
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     return finish(bm, name)
 
 
 def cut_arches(spec, s, body):
-    w = spec["wheels"]
-    r_front = float(w.get("arch_front", w["radius"] * 1.2))
-    r_rear = float(w.get("arch_rear", w["radius"] * 1.2))
-    for hub_y, r, tag in ((0.0, r_front, "f"), (float(w["wheelbase"]), r_rear, "r")):
-        cutter = arch_cutter(spec, s, hub_y, r, f"cutter_{tag}")
-        mod = body.modifiers.new(f"arch_{tag}", "BOOLEAN")
-        mod.operation = "DIFFERENCE"
-        mod.solver = "EXACT"
-        mod.object = cutter
-        bpy.context.view_layer.objects.active = body
-        bpy.ops.object.modifier_apply(modifier=mod.name)
-        bpy.data.objects.remove(cutter, do_unlink=True)
+    for tag, hub_y, outline, _, _ in arch_specs(spec):
+        apply_cut(body, arch_cutter(spec, s, hub_y, outline, f"cutter_{tag}"))
+
+
+def weld_cuts(body):
+    """The cuts leave vertices a hair from the grid's (slivers that shade as streaks): weld."""
+    bm = bmesh.new()
+    bm.from_mesh(body.data)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=ARCH_SNAP * MM)
+    bmesh.ops.dissolve_degenerate(bm, edges=bm.edges, dist=ARCH_SNAP * MM)
+    bm.to_mesh(body.data)
+    bm.free()
+    body.data.update()
+
+
+def side_x(bvh, y, z):
+    """Half-width of the (uncut) body surface at (y, z), hit from the left; None off the body."""
+    loc, _, _, _ = bvh.ray_cast(Vector((9.0, y * MM, z * MM)), Vector((-1.0, 0, 0)))
+    return None if loc is None or loc.x <= 0 else loc.x / MM
+
+
+def clip_above(pts, floor):
+    """The run of polyline `pts` that lies above floor(y), with the crossings inserted."""
+    out = []
+    for (ya, za), (yb, zb) in zip(pts, pts[1:]):
+        da, db = za - floor(ya), zb - floor(yb)
+        if da >= 0:
+            out.append((ya, za))
+        if (da < 0) != (db < 0):
+            t = da / (da - db)
+            out.append((ya + t * (yb - ya), za + t * (zb - za)))
+    if pts and pts[-1][1] >= floor(pts[-1][0]):
+        out.append(pts[-1])
+    return out
+
+
+def add_arch_lips(spec, s, body, bvh):
+    """A lip around each arch opening: a band from the body side, `lip` mm out from the
+    opening's edge, rising to stand `flare` mm proud at the edge, and turning back into the
+    well. Probed on the uncut body (`bvh`), so it sits on the side wherever that curves."""
+    bm = bmesh.new()
+    bm.from_mesh(body.data)
+    uvl = bm.loops.layers.uv["UVMap"]
+    for _, _, full, lip, flare in arch_specs(spec):
+        outline = clip_above(full, lambda y: s.bottom(y) + 1.0)
+        n = len(outline)
+        rows = []  # per outline point: (edge, out) points (y, z, x) on the left, None off the body
+        for i, (y, z) in enumerate(outline):
+            (ya, za), (yb, zb) = outline[max(i - 1, 0)], outline[min(i + 1, n - 1)]
+            ty, tz = yb - ya, zb - za
+            tl = math.hypot(ty, tz) or 1.0
+            ny, nz = -tz / tl, ty / tl  # away from the opening
+            qy, qz = y + ny * lip, z + nz * lip
+            xe, xq = side_x(bvh, y, z), side_x(bvh, qy, qz)
+            rows.append(None if xe is None or xq is None else ((y, z, xe), (qy, qz, xq)))
+        for sign in (1.0, -1.0):
+            def v(y, z, x):
+                return bm.verts.new(Vector((sign * x, y, z)) * MM)
+            for a, b in zip(rows, rows[1:]):
+                if a is None or b is None:
+                    continue
+                (ea, qa), (eb, qb) = a, b
+                tip_a, tip_b = v(ea[0], ea[1], ea[2] + flare), v(eb[0], eb[1], eb[2] + flare)
+                base_a, base_b = v(*qa[:2], qa[2] + 1.0), v(*qb[:2], qb[2] + 1.0)
+                back_a, back_b = v(ea[0], ea[1], ea[2] - 10.0), v(eb[0], eb[1], eb[2] - 10.0)
+                out = Vector((sign, 0, 0))
+                add_face(bm, uvl, [base_a, base_b, tip_b, tip_a], CELLS["paint"], out)
+                # the turn into the well faces the wheel: away from the outline's outward side
+                mid = Vector((0, (ea[0] + eb[0]) / 2 - (qa[0] + qb[0]) / 2, (ea[1] + eb[1]) / 2 - (qa[1] + qb[1]) / 2))
+                add_face(bm, uvl, [tip_a, tip_b, back_b, back_a], CELLS["paint"], mid)
+    bm.to_mesh(body.data)
+    bm.free()
+    body.data.update()
+
+# ---------------------------------------------------------------- side glass and seams
+
+def rounded(poly, r):
+    """Closed polygon [(y, z)] with each corner replaced by a ROUND_SEGMENTS curve (a quadratic
+    Bezier through the corner's tangent points, r mm from it, at most 45% of either edge)."""
+    if r <= 0:
+        return list(poly)
+    out, n = [], len(poly)
+    for i in range(n):
+        (ay, az), (cy, cz), (by, bz) = poly[i - 1], poly[i], poly[(i + 1) % n]
+        la, lb = math.hypot(ay - cy, az - cz), math.hypot(by - cy, bz - cz)
+        t = min(r, 0.45 * la, 0.45 * lb)
+        if t <= 0:
+            out.append((cy, cz))
+            continue
+        pa = (cy + (ay - cy) * t / la, cz + (az - cz) * t / la)
+        pb = (cy + (by - cy) * t / lb, cz + (bz - cz) * t / lb)
+        for k in range(ROUND_SEGMENTS + 1):
+            u = k / ROUND_SEGMENTS
+            out.append(tuple((1 - u) ** 2 * pa[j] + 2 * u * (1 - u) * (cy, cz)[j] + u ** 2 * pb[j] for j in (0, 1)))
+    return out
+
+
+def clip_band(poly, z0, z1):
+    """Closed polygon [(y, z)] clipped to z0 <= z <= z1 (Sutherland-Hodgman, two edges)."""
+    def clip(pts, inside, cross):
+        out = []
+        for i in range(len(pts)):
+            a, b = pts[i - 1], pts[i]
+            if inside(b):
+                if not inside(a):
+                    out.append(cross(a, b))
+                out.append(b)
+            elif inside(a):
+                out.append(cross(a, b))
+        return out
+
+    def at(zc):
+        return lambda a, b: (a[0] + (b[0] - a[0]) * (zc - a[1]) / (b[1] - a[1]), zc)
+
+    poly = clip(poly, lambda p: p[1] >= z0, at(z0))
+    return clip(poly, lambda p: p[1] <= z1, at(z1)) if poly else poly
+
+
+def window_outlines(spec, s):
+    """Each side window's glass edge in side view, [(y, z)] mm, corners rounded. A window
+    with an `outline` (traced corners) uses it. One with only `y` runs from the belt to the
+    glass top, WINDOW_FRAME inside both, its top edge dropping under the rail where the
+    windscreen or back light slope comes down (a slanted A or C pillar), and ending where
+    less than WINDOW_MIN_HEIGHT of glass is left."""
+    out = []
+    for w in spec.get("windows", []):
+        if "outline" in w:  # kept inside the glass band, where the side is the tumblehome surface
+            poly = clip_band([(float(y), float(z)) for y, z in w["outline"]],
+                             s.belt + GLASS_CLEAR, s.glass_top - GLASS_CLEAR)
+            if len(poly) < 3:
+                continue
+        else:
+            a, b = w["y"]
+            z0 = s.belt + WINDOW_FRAME
+            n = max(1, int((b - a) // 10.0))
+            tops = [(a + (b - a) * k / n, min(s.glass_top, s.rail_z(a + (b - a) * k / n)) - WINDOW_FRAME)
+                    for k in range(n + 1)]
+            runs, run = [], []
+            for y, zt in tops:
+                if zt - z0 >= WINDOW_MIN_HEIGHT:
+                    run.append((y, zt))
+                elif run:
+                    runs.append(run)
+                    run = []
+            if run:
+                runs.append(run)
+            if not runs:
+                continue
+            top = simplify(max(runs, key=len), 3.0)
+            poly = [(top[0][0], z0), (top[-1][0], z0)] + top[::-1]
+        out.append(rounded(poly, float(w.get("round", WINDOW_ROUND))))
+    return out
+
+
+def greenhouse_x(s, y, z):
+    """Half-width of the greenhouse side (the tumblehome surface) at (y, z)."""
+    return min(s.high(y), s.low(y)) * s.tumble(z)
+
+
+def apply_cut(body, cutter):
+    mod = body.modifiers.new("cut", "BOOLEAN")
+    mod.operation = "DIFFERENCE"
+    mod.solver = "EXACT"
+    mod.object = cutter
+    bpy.context.view_layer.objects.active = body
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+    bpy.data.objects.remove(cutter, do_unlink=True)
+
+
+def side_plane(pts):
+    """Least-squares plane x = a + b*y + c*z through [(y, z, x)]."""
+    n = len(pts)
+    sy = sum(p[0] for p in pts); sz = sum(p[1] for p in pts); sx = sum(p[2] for p in pts)
+    syy = sum(p[0] * p[0] for p in pts); szz = sum(p[1] * p[1] for p in pts); syz = sum(p[0] * p[1] for p in pts)
+    sxy = sum(p[2] * p[0] for p in pts); sxz = sum(p[2] * p[1] for p in pts)
+    m = Matrix(((n, sy, sz), (sy, syy, syz), (sz, syz, szz)))
+    if abs(m.determinant()) < 1e-6:
+        return lambda y, z: sx / n
+    a, b, c = m.inverted() @ Vector((sx, sxy, sxz))
+    return lambda y, z: a + b * y + c * z
+
+
+def cut_windows(spec, s, body):
+    """Every side window is a pocket in the greenhouse side, its floor the glass, its walls the
+    dark rubber seal. The floor is one plane (the side's best fit over the outline, set back so
+    it stands at least GLASS_INSET inside the side everywhere): a floor that followed a twisted
+    side would be a fan of creased triangles. Pillars and frames are what is left of the paint
+    around the pockets, so slanted pillars and rounded corners come from the outline."""
+    polys = window_outlines(spec, s)
+    if not polys:
+        return
+    bm, uvl = new_bm()
+    for poly in polys:
+        pts = [(y, z, greenhouse_x(s, y, z)) for y, z in poly]
+        plane = side_plane(pts)
+        back = max(plane(y, z) - x for y, z, x in pts) + GLASS_INSET
+        for sign in (1.0, -1.0):
+            inner = [bm.verts.new(Vector((sign * (plane(y, z) - back), y, z)) * MM) for y, z in poly]
+            outer = [bm.verts.new(Vector((sign * (plane(y, z) + 200.0), y, z)) * MM) for y, z in poly]
+            add_face(bm, uvl, inner, CELLS["glass"], Vector((-sign, 0, 0)))
+            add_face(bm, uvl, outer, CELLS["black"], Vector((sign, 0, 0)))
+            n = len(poly)
+            for i in range(n):
+                j = (i + 1) % n
+                add_face(bm, uvl, [inner[i], inner[j], outer[j], outer[i]], CELLS["black"])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    apply_cut(body, finish(bm, "cutter_windows"))
+
+
+def add_seams(spec, body, bvh):
+    """Door and panel seams: dark ribbons SEAM_WIDTH wide, SEAM_PROUD off the (uncut) side,
+    along each `seams` polyline [(y, z)] (both sides). A run is split wherever the side bends
+    away from the straight ribbon by more than SEAM_TOL (over the belt lip, along the
+    tumblehome), so the ribbon neither sinks into the body nor floats off a flat panel."""
+    bm = bmesh.new()
+    bm.from_mesh(body.data)
+    uvl = bm.loops.layers.uv["UVMap"]
+    half = SEAM_WIDTH / 2
+
+    def bends(a, b):
+        """The points after a along a-b where the side bends away from a straight ribbon by
+        more than SEAM_TOL: the side sampled every SEAM_MIN mm, faired with `simplify`."""
+        length = math.hypot(b[0] - a[0], b[1] - a[1])
+        n = max(1, int(length // SEAM_MIN))
+        prof = []
+        for k in range(n + 1):
+            x = side_x(bvh, a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n)
+            if x is not None:
+                prof.append((length * k / n, x))
+        keep = [sv for sv, _ in simplify(prof, SEAM_TOL)] if len(prof) > 1 else [length]
+        return [(a[0] + (b[0] - a[0]) * sv / length, a[1] + (b[1] - a[1]) * sv / length)
+                for sv in keep if sv > 0] if length > 0 else []
+
+    def onto_body(a, b):
+        """b, or the point nearest it on a-b that still hits the side (a seam drawn to the
+        body's bottom edge would otherwise lose its last run)."""
+        if side_x(bvh, *b) is not None or side_x(bvh, *a) is None:
+            return b
+        lo, hi = 0.0, 1.0  # fraction from a: lo hits, hi misses
+        for _ in range(12):
+            t = (lo + hi) / 2
+            lo, hi = (t, hi) if side_x(bvh, a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t) is not None else (lo, t)
+        return (a[0] + (b[0] - a[0]) * lo, a[1] + (b[1] - a[1]) * lo)
+
+    for line in spec.get("seams", []):
+        line = [tuple(p) for p in line]
+        line[0], line[-1] = onto_body(line[1], line[0]), onto_body(line[-2], line[-1])
+        pts = [line[0]]
+        for a, b in zip(line, line[1:]):
+            pts += bends(a, b)
+        rows = []
+        for i, (y, z) in enumerate(pts):
+            (ya, za), (yb, zb) = pts[max(i - 1, 0)], pts[min(i + 1, len(pts) - 1)]
+            tl = math.hypot(yb - ya, zb - za) or 1.0
+            ny, nz = -(zb - za) / tl * half, (yb - ya) / tl * half
+            ends = [(y + ny, z + nz), (y - ny, z - nz)]
+            xs = [side_x(bvh, ey, ez) for ey, ez in ends]
+            rows.append(None if None in xs else [(ey, ez, ex + SEAM_PROUD) for (ey, ez), ex in zip(ends, xs)])
+        for sign in (1.0, -1.0):
+            def v(p):
+                return bm.verts.new(Vector((sign * p[2], p[0], p[1])) * MM)
+            for a, b in zip(rows, rows[1:]):
+                if a is None or b is None:
+                    continue
+                add_face(bm, uvl, [v(a[0]), v(a[1]), v(b[1]), v(b[0])], CELLS["black"], Vector((sign, 0, 0)))
+    bm.to_mesh(body.data)
+    bm.free()
+    body.data.update()
+
 
 
 # ---------------------------------------------------------------- probed details
@@ -420,6 +855,37 @@ def body_bvh(obj):
     bvh = BVHTree.FromBMesh(bm)
     bm.free()
     return bvh
+
+
+def cut_bezels(spec, body):
+    """A lamp with `bezel` (mm) sits in a pocket that much wider than the lamp all round and
+    `bezel_depth` (BEZEL_DEPTH) deep in its face, floor parallel to the face: the recessed
+    headlamp surround. The lamp itself is probed onto the floor later (build_lamps)."""
+    items = [it for lamp in spec.get("lamps", []) if lamp.get("bezel") for it in mirrored(lamp)]
+    if not items:
+        return
+    bvh = body_bvh(body)
+    bm, uvl = new_bm()
+    for it in items:
+        m, depth = float(it["bezel"]), float(it.get("bezel_depth", BEZEL_DEPTH))
+        grown = dict(it, x=[min(it["x"]) - m, max(it["x"]) + m], z=[min(it["z"]) - m, max(it["z"]) + m])
+        s = -1.0 if it["face"] == "front" else 1.0
+        floor, outer = [], []
+        for x, z in outline_pts(grown):
+            y = probe(bvh, x, z, it["face"])
+            if y is None:
+                fail(f"{it['role']} bezel at x={x:.0f} z={z:.0f} has no {it['face']} face behind it")
+            floor.append(bm.verts.new(Vector((x, y - s * depth, z)) * MM))
+            outer.append(bm.verts.new(Vector((x, y + s * 200.0, z)) * MM))
+        cell = CELLS[it.get("bezel_cell", "paint")]
+        add_face(bm, uvl, floor, cell, Vector((0, -s, 0)))
+        add_face(bm, uvl, outer, cell, Vector((0, s, 0)))
+        n = len(floor)
+        for i in range(n):
+            j = (i + 1) % n
+            add_face(bm, uvl, [floor[i], floor[j], outer[j], outer[i]], cell)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    apply_cut(body, finish(bm, "cutter_bezels"))
 
 
 def add_details(spec, body):
@@ -498,10 +964,18 @@ def build_body(spec, cid):
     bm, uvl = new_bm()
     build_shell(spec, s, bm, uvl)
     body = finish(bm, f"{cid}.body")
+    uncut = body_bvh(body)
     cut_arches(spec, s, body)
+    cut_windows(spec, s, body)
+    cut_bezels(spec, body)
+    weld_cuts(body)
+    add_arch_lips(spec, s, body, uncut)
+    add_seams(spec, body, uncut)
     add_details(spec, body)
     bm = bmesh.new()
     bm.from_mesh(body.data)
+    bm.normal_update()
+    split_folded(bm)
     bmesh.ops.triangulate(bm, faces=[f for f in bm.faces if len(f.verts) > 4])
     bm.to_mesh(body.data)
     bm.free()
