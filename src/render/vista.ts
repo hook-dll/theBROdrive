@@ -349,6 +349,12 @@ export class VistaMesh {
   /** Scratch field values for the synchronous path; sized with the disc. */
   private horizonScratch: Float32Array | null = null;
   private baseScratch: Float32Array | null = null;
+  /**
+   * The camera's arclength when the current cell was loaded: the hint the roadside
+   * landforms are looked up by (`Terrain.horizonHeight`). Their window is kilometres
+   * wide, so a prefetch sent a cell later gets the same ground.
+   */
+  private groundHintS = 0;
   private readonly dissolvingMesas = new Map<string, number>();
   private readonly retiredMesas = new Set<string>();
   private mesaVisibleOuter = 0;
@@ -470,6 +476,7 @@ export class VistaMesh {
         cornerZ: next.cornerZ,
         originX: ox,
         originZ: oz,
+        hintS: this.groundHintS,
       };
       this.worker.postMessage(request);
       return;
@@ -973,6 +980,7 @@ export class VistaMesh {
 
   private loadGroundCell(cellX: number, cellZ: number, s: number): void {
     const x0 = cellX * SAMPLE_CELL_SIZE;
+    this.groundHintS = s;
     const z0 = cellZ * SAMPLE_CELL_SIZE;
     const palette = desertPaletteAt(s);
     sandLinear.setHex(palette.sand);
@@ -1038,7 +1046,7 @@ export class VistaMesh {
         const vi = i * 3;
         const absoluteX = cx + this.groundLocalPositions[vi]! + ox;
         const absoluteZ = cz + this.groundLocalPositions[vi + 2]! + oz;
-        horizon[i] = this.terrain.horizonHeight(absoluteX, absoluteZ, reliefWeight);
+        horizon[i] = this.terrain.horizonHeight(absoluteX, absoluteZ, reliefWeight, this.groundHintS);
         base[i] = this.terrain.baseHeight(absoluteX, absoluteZ, radius);
       }
     }

@@ -27,7 +27,7 @@ import { hashUnit2, hashUnit3 } from '../core/rng';
  * and the weighted draw below simulates at 15.4 (p90 27) — so some 220 km of road at
  * `DISTRICT_NOMINAL_M`, home district included. Shorter than about 10 km and a district
  * stops being a place: the 1.2 km crossfades at both ends become a fifth of it, and a
- * pan district holds only two or three of its 4 km corner sections.
+ * pan district holds only two or three of its 4 km corners.
  *
  * Everything here is a pure function of (seed, s), like every other road property: no
  * state, no tables, and the same road after a reload.
@@ -57,24 +57,47 @@ const HOME_DISTRICT_LENGTH_M = 30_000;
 /**
  * One kind of road.
  *
- * `cornerSpacing` is how much road one corner event owns, so it sets cadence; the
+ * `cornerSpacing` is how much road one corner owns ON AVERAGE, so it sets cadence; the
  * radius range sets what that corner is; `deviation` scales the slow route noise
  * that wanders the whole road, and it is what separates "straight" from "sweeping".
- * How much of a section is held straight is NOT a field: it is whatever the
- * character's own corners leave of their sections (a pan road's take a quarter, a
- * switchback's all of it), which is the same reason a section can no longer turn
- * less than the gap to its own bearing — see `turnAt` in roadcurve.ts.
+ *
+ * Corners do not arrive one per `cornerSpacing` like a metronome. They come in
+ * PHRASES — `phraseMin`-`phraseMax` corners linked by `linkMin`-`linkMax` metres of
+ * straight, then the rest of the phrase held straight as a breather — and the phrase
+ * owns `cornerSpacing` times its mean corner count, so the district's density is
+ * unchanged while its rhythm is not. How much is held straight is still NOT a field:
+ * it is whatever the phrase's own corners leave of it. See `turnAt` in roadcurve.ts.
  */
 export interface RoadCharacter {
   readonly name: string;
-  /** Metres of road per corner event. */
+  /** Mean metres of road per corner; a phrase owns this times its mean corner count. */
   readonly cornerSpacing: number;
+  /**
+   * Corners per phrase, drawn uniformly per phrase, inclusive. At most 4 (the phrase
+   * layout's fixed storage in roadcurve.ts). One is a lone corner, not a phrase.
+   */
+  readonly phraseMin: number;
+  readonly phraseMax: number;
+  /**
+   * Straight before each corner of a phrase, metres. This is the LINK: short and the
+   * corners run into each other, long and they are separate events. The breather at a
+   * phrase's end is not drawn from it — it is the remainder of the phrase.
+   */
+  readonly linkMin: number;
+  readonly linkMax: number;
+  /**
+   * Chance a phrase's first corner is coupled to a crest: moved later, by at most
+   * `CREST_SHIFT_MAX` (roadcurve.ts), so it turns in just past a brow. A chance per
+   * PHRASE, and only phrases that find a brow in reach actually move.
+   */
+  readonly crestChance: number;
   /** Peak corner radius drawn per event, metres. */
   readonly radiusMin: number;
   readonly radiusMax: number;
   /**
-   * Magnitude of the bearing an event turns TO, radians; the sign alternates between
-   * events, so a section turns the gap between two of them — up to twice this.
+   * Magnitude of the bearing a corner turns TO, radians. The sign mostly alternates,
+   * so a corner turns the gap between two of them — up to twice this; a phrase's one
+   * same-sign step (a corner that tightens or opens) turns less. See `phraseShape`.
    */
   readonly headingMin: number;
   readonly headingMax: number;
@@ -131,6 +154,13 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     weight: 0.22,
     designSpeedKmh: 110,
     cornerSpacing: 4_000,
+    // A lone kink or a dog-leg, kilometres apart. Never a crest coupling: a pan road
+    // runs straight over whatever the ground does.
+    phraseMin: 1,
+    phraseMax: 2,
+    linkMin: 300,
+    linkMax: 900,
+    crestChance: 0,
     radiusMin: 600,
     radiusMax: 1_400,
     headingMin: 0.1,
@@ -144,6 +174,13 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     weight: 0.22,
     designSpeedKmh: 110,
     cornerSpacing: 2_200,
+    // One to three sweepers a few hundred metres apart, then kilometres of breather.
+    // A surveyed highway rarely hides a bend behind a brow, so the coupling is rare.
+    phraseMin: 1,
+    phraseMax: 3,
+    linkMin: 150,
+    linkMax: 500,
+    crestChance: 0.35,
     radiusMin: 320,
     radiusMax: 800,
     headingMin: 0.18,
@@ -158,6 +195,14 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     weight: 0.24,
     designSpeedKmh: 80,
     cornerSpacing: 1_100,
+    // Mixed: a pair or a trio a short straight apart, then a breather of about a
+    // kilometre and a half. Country road over country ground, so every phrase looks
+    // for a brow to start behind.
+    phraseMin: 2,
+    phraseMax: 3,
+    linkMin: 40,
+    linkMax: 220,
+    crestChance: 1,
     radiusMin: 140,
     radiusMax: 320,
     headingMin: 0.22,
@@ -189,6 +234,15 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     // through 0.85 rad needs is about 250 m, so the straight between corners is a
     // breath rather than a rest.
     cornerSpacing: 380,
+    // Mostly linked: the transitions take nearly all of the 380 m anyway, so phrasing
+    // here mostly decides where the one breath falls. A brow before a hairpin is a
+    // mountain road's signature, but the stream is already at its envelope here, so it
+    // is only a sometimes.
+    phraseMin: 2,
+    phraseMax: 4,
+    linkMin: 0,
+    linkMax: 40,
+    crestChance: 0.4,
     radiusMin: 110,
     radiusMax: 200,
     headingMin: 0.45,
@@ -202,8 +256,14 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     name: 'esses',
     weight: 0.14,
     designSpeedKmh: 70,
+    // Three or four corners run into each other, then one breath.
+    phraseMin: 3,
+    phraseMax: 4,
+    linkMin: 0,
+    linkMax: 60,
+    crestChance: 1,
     // One size up from the switchbacks and with less angle: a 200 m radius through
-    // 0.8 rad winds on over about 300 m, so 500 m of section is a continuous rhythm
+    // 0.8 rad winds on over about 300 m, so 500 m per corner is a continuous rhythm
     // rather than a sequence of events.
     cornerSpacing: 500,
     radiusMin: 150,
@@ -220,6 +280,14 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     weight: 0.08,
     designSpeedKmh: 60,
     cornerSpacing: 1_600,
+    // Irregular on purpose: anything from a lone kink to four corners, joined by
+    // anything from a car length to half a kilometre. Bulldozed along the ground, so
+    // it goes over brows and turns where it lands.
+    phraseMin: 1,
+    phraseMax: 4,
+    linkMin: 20,
+    linkMax: 600,
+    crestChance: 1,
     radiusMin: 80,
     radiusMax: 180,
     headingMin: 0.4,
@@ -258,14 +326,14 @@ function districtIndex(seed: number, s: number): number {
 /**
  * The district an arclength falls in, with its bounds, written into caller storage.
  *
- * Exported because the CORNER SEQUENCE has to be quantised to it. Sections cannot be
+ * Exported because the CORNER SEQUENCE has to be quantised to it. Phrases cannot be
  * laid out on a continuously blended cadence: blending `cornerSpacing` moves every
- * section boundary as the character crossfades, the bearing a section is turning
+ * phrase boundary as the character crossfades, the bearing a corner is turning
  * towards jumps when the boundary slides past, and the heading field acquires a step.
  * Measured on seed 1337 over 2500 km with a blended cadence: a p1 corner radius of
- * five metres, which is a corner no road has. Sections belong to a district, a
- * district boundary IS a section boundary, and continuity is then carried by each
- * section starting from its predecessor's bearing.
+ * five metres, which is a corner no road has. Phrases belong to a district, a
+ * district boundary IS a phrase boundary, and continuity is then carried by each
+ * phrase starting from its predecessor's last bearing.
  */
 export interface DistrictSpan {
   index: number;

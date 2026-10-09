@@ -19,7 +19,7 @@
  *    show as a seam — and rock must stay clearly darker than sand at
  *    every phase, so the two never merge into one flat colour.
  *
- *   npx tsx tools/road-condition.ts
+ *   npx tsx tools/road-condition.ts [seed]
  *
  * Nothing here is part of the game bundle.
  */
@@ -32,6 +32,9 @@ import { surfacePaceFactor } from '../src/vehicle/autopilot';
 import { ROAD_LENGTH } from '../src/world/road';
 import { CHUNK_LENGTH } from '../src/world/ranges';
 
+/** World seed: material districts are biased by the seeded road character. */
+const SEED = Number(process.argv[2] ?? 1337) >>> 0;
+
 /** Metres between census samples. Fine enough to catch every surface flip. */
 const CENSUS_STEP_M = 100;
 
@@ -40,7 +43,7 @@ function meanDecay(fromM: number, toM: number): number {
   let sum = 0;
   let n = 0;
   for (let s = fromM; s < toM; s += CENSUS_STEP_M) {
-    sum += roadConditionAt(s).decay;
+    sum += roadConditionAt(SEED, s).decay;
     n++;
   }
   return n === 0 ? 0 : sum / n;
@@ -64,7 +67,7 @@ console.log('   km    decay  envelope  surface            sandCov  markings');
 const tableEndKm = Math.min(1000, ROAD_LENGTH / 1000);
 for (let km0 = 0; km0 < tableEndKm; km0 += 20) {
   const s = km0 * 1000;
-  const cond = roadConditionAt(s);
+  const cond = roadConditionAt(SEED, s);
   // Envelope estimate: mean decay over this 20 km block. The patch noise averages
   // out over a multi-km window, leaving the slow regional envelope.
   const env = meanDecay(s, Math.min(s + 20_000, ROAD_LENGTH));
@@ -84,10 +87,10 @@ interface CensusEntry {
 }
 
 const census = new Map<SurfaceType, CensusEntry>();
-let cur = roadConditionAt(0).surface;
+let cur = roadConditionAt(SEED, 0).surface;
 let runStart = 0;
 for (let s = CENSUS_STEP_M; s <= ROAD_LENGTH; s += CENSUS_STEP_M) {
-  const surf = roadConditionAt(s).surface;
+  const surf = roadConditionAt(SEED, s).surface;
   if (surf !== cur) {
     const lenKm = (s - runStart) / 1000;
     const e = census.get(cur) ?? { stretches: 0, totalKm: 0, lengths: [] };
@@ -147,7 +150,7 @@ console.log('pace the surface allows (share of a mode cruise, sleeper, 100 m res
   };
   const unsorted: number[] = [];
   for (let s = 0; s < ROAD_LENGTH; s += CENSUS_STEP_M) {
-    roadConditionAt(s, condition);
+    roadConditionAt(SEED, s, condition);
     unsorted.push(surfacePaceFactor('sleeper', condition));
   }
   const factors = unsorted.slice().sort((a, b) => a - b);
@@ -224,7 +227,7 @@ let sumD = 0;
 let sumSD = 0;
 let sumSS = 0;
 for (let s = 0; s < ROAD_LENGTH; s += REG_STEP) {
-  const d = roadConditionAt(s).decay;
+  const d = roadConditionAt(SEED, s).decay;
   n++;
   sumS += s;
   sumD += d;
@@ -260,7 +263,7 @@ console.log(`  decay drift: ${(slopePerM * 10_000_000).toFixed(4)} per 10 000 km
 console.log('');
 console.log('garage ramp decay');
 for (const s of [0, 500, 1500, 3000, 5000]) {
-  console.log(`  s=${s.toString().padStart(5)} m   decay=${roadConditionAt(s).decay.toFixed(3)}`);
+  console.log(`  s=${s.toString().padStart(5)} m   decay=${roadConditionAt(SEED, s).decay.toFixed(3)}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -276,11 +279,11 @@ for (const s of [0, 500, 1500, 3000, 5000]) {
 console.log('');
 console.log('first surface changes (10 m resolution)');
 {
-  let previous = roadConditionAt(0).surface;
+  let previous = roadConditionAt(SEED, 0).surface;
   let start = 0;
   let shown = 0;
   for (let s = 10; s < 200_000 && shown < 12; s += 10) {
-    const surf = roadConditionAt(s).surface;
+    const surf = roadConditionAt(SEED, s).surface;
     if (surf === previous) continue;
     console.log(
       `  ${(start / 1000).toFixed(2).padStart(7)} - ${(s / 1000).toFixed(2).padStart(7)} km   ` +

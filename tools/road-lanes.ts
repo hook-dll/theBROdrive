@@ -130,7 +130,7 @@ function findChunk(lanes: number, from: number, to: number): number {
     const sStart = chunk * CHUNK_LENGTH;
     let all = true;
     for (let s = sStart; s <= sStart + CHUNK_LENGTH; s += 10) {
-      if (lanesPerSideAt(SEED, s) !== lanes || roadConditionAt(s).markings < 0.3) {
+      if (lanesPerSideAt(SEED, s) !== lanes || roadConditionAt(SEED, s).markings < 0.3) {
         all = false;
         break;
       }

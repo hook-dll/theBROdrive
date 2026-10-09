@@ -1,6 +1,7 @@
 import { hash01, Noise1D } from '../core/rng';
 import { SurfaceType } from '../core/surfaces';
 import { ROAD_LENGTH } from './road';
+import { characterOf, districtAt, newDistrictBuffer } from './roadcharacter';
 
 /**
  * Every property that changes over a long drive is a function of arclength and
@@ -185,11 +186,12 @@ export function roadWearLevelAt(s: number): number {
  * jitter(k)`, i.e. 5-7 km and never a round number, and any `s` lies in district
  * `floor(s / NOMINAL)` plus or minus one, so the lookup is three hashes and no search.
  *
- * The DRAW is weighted by the region, so a maintained district is probably sealed and
- * an abandoned one is probably gravel — the regional character survives — but no
- * region can suppress turnover, because every district draws again from a deck that
- * EXCLUDES its predecessor's material. Adjacent districts therefore differ and a run
- * of one surface is one district long.
+ * The DRAW is weighted by the KIND OF ROAD the district lies on (`SURFACE_BIAS`), so a
+ * highway is probably sealed and a derelict track probably broken, but no kind can
+ * suppress turnover, because every district draws again from a deck that EXCLUDES its
+ * predecessor's material. Adjacent districts therefore differ and a run of one surface
+ * is one district long — except on a pan or a highway, which may keep their material
+ * for the length of one road district and no further.
  *
  * The chain has to start somewhere, and walking it back to the garage would make a
  * height query O(distance). So districts are drawn in BLOCKS of four: inside a block
@@ -287,20 +289,88 @@ function districtIndex(s: number): number {
 const DISTRICT_MIX = 0.45;
 
 /**
- * One weighted draw for district `k`, with `exclude` removed from the deck (-1 for
- * none). District 0 and anything before it is always sealed asphalt: it holds the
- * garage opening, and it terminates the chain.
+ * THE ROAD'S KIND BIASES ITS MATERIAL. A highway that comes up gravel and a bulldozed
+ * derelict track that comes up fresh motorway concrete are both possible under a flat
+ * deck, and both read as the world not knowing what it built. So each surface district
+ * multiplies the deck by the character of the road district (`roadcharacter.ts`) its
+ * middle falls in. A bias and not a mapping: every kind keeps every material, the
+ * predecessor is still excluded, and the boundaries are the surface districts' own, so
+ * transitions are exactly as soft as before (`SURFACE_JOIN_BLEND_M`).
+ *
+ * `weights` are multipliers in `DISTRICT_SURFACES` order (asphalt, cracked, gravel,
+ * concrete). `repeat` is how much of its weight the PREDECESSOR'S material keeps, and
+ * only when the predecessor lies in the same road district: a pan may hold its asphalt
+ * or its gravel for the whole 10-15 km of it, and a highway its good asphalt, but no
+ * surface can run on across a change of road. Everywhere else the predecessor is
+ * excluded outright, as it always was.
+ *
+ * Estimated with a Markov model of the two district chains (not measured on the road;
+ * `tools/road-condition.ts` is the census): overall asphalt 37%, cracked 28%, gravel
+ * 26%, concrete 8.6% — against 35/31/26/8.4 for the flat deck, so the hard-going share
+ * and the concrete share are where they were. Per kind, roughly:
+ *
+ *   pan         asphalt 45  cracked 16  gravel 37  concrete  3
+ *   highway     asphalt 52  cracked 20  gravel  4  concrete 24
+ *   rolling     asphalt 34  cracked 32  gravel 26  concrete  8
+ *   switchback  asphalt 20  cracked 40  gravel 37  concrete  2
+ *   esses       asphalt 35  cracked 35  gravel 24  concrete  6
+ *   derelict    asphalt 12  cracked 43  gravel 44  concrete  1
+ *
+ * Longest single-surface run in that model: 19 km (p99 12.5 km), against 6.5 km for
+ * the flat deck — the pan's long gravel, which is the point of it.
  */
-function drawDistrict(k: number, regional: number, exclude: number): SurfaceType {
-  if (k <= 0) return SurfaceType.Asphalt;
-  let total = weighDistrict(regional);
-  if (exclude >= 0) {
-    for (let i = 0; i < DISTRICT_SURFACES.length; i++) {
-      if (DISTRICT_SURFACES[i] === exclude) {
-        total -= districtWeights[i]!;
-        districtWeights[i] = 0;
-      }
-    }
+interface SurfaceBias {
+  readonly weights: readonly [number, number, number, number];
+  readonly repeat: number;
+}
+const SURFACE_BIAS: Readonly<Record<string, SurfaceBias>> = {
+  pan: { weights: [1.3, 0.45, 1.5, 0.35], repeat: 0.7 },
+  highway: { weights: [1.6, 0.5, 0.12, 2.8], repeat: 0.5 },
+  rolling: { weights: [1, 1, 1, 0.9], repeat: 0 },
+  switchback: { weights: [0.45, 1.5, 1.6, 0.25], repeat: 0 },
+  esses: { weights: [1, 1.15, 0.9, 0.7], repeat: 0 },
+  derelict: { weights: [0.25, 1.4, 2.1, 0.1], repeat: 0 },
+};
+
+function surfaceBiasOf(name: string): SurfaceBias {
+  const bias = SURFACE_BIAS[name];
+  if (!bias) throw new Error(`gradient.ts has no surface bias for road character '${name}'`);
+  return bias;
+}
+
+/** Scratch for the road-district lookup; the block fill asks once per district. */
+const characterSpan = newDistrictBuffer();
+
+/** The road-character district holding the middle of surface district `k`. */
+function characterDistrictOf(seed: number, k: number): number {
+  districtAt(seed, 0.5 * (districtStart(k) + districtStart(k + 1)), characterSpan);
+  return characterSpan.index;
+}
+
+/**
+ * The material of district 0, for every seed: the garage opening is sealed asphalt
+ * and the chain starts from it. Exported so the start-of-road builders (the terminus
+ * pad, the story site's runway) can ask without a seed.
+ */
+export const ROAD_START_SURFACE = SurfaceType.Asphalt;
+
+/**
+ * One weighted draw for district `k`, with `exclude` removed from the deck (-1 for
+ * none) unless it lies in the same road district `excludeCharacter` and that road's
+ * bias lets it repeat. District 0 and anything before it is always sealed asphalt: it
+ * holds the garage opening, and it terminates the chain.
+ */
+function drawDistrict(seed: number, k: number, exclude: number, excludeCharacter: number): SurfaceType {
+  if (k <= 0) return ROAD_START_SURFACE;
+  weighDistrict(DISTRICT_MIX);
+  const character = characterDistrictOf(seed, k);
+  const bias = surfaceBiasOf(characterOf(seed, character).name);
+  let total = 0;
+  for (let i = 0; i < DISTRICT_SURFACES.length; i++) {
+    let weight = districtWeights[i]! * bias.weights[i]!;
+    if (DISTRICT_SURFACES[i] === exclude) weight *= excludeCharacter === character ? bias.repeat : 0;
+    districtWeights[i] = weight;
+    total += weight;
   }
   let pick = hash01(DISTRICT_TAG, k) * total;
   for (let i = 0; i < DISTRICT_SURFACES.length; i++) {
@@ -310,30 +380,20 @@ function drawDistrict(k: number, regional: number, exclude: number): SurfaceType
   return SurfaceType.CrackedAsphalt;
 }
 
-/** Districts per drawn block. Four keeps the fill to four draws and one envelope. */
+/** Districts per drawn block. Four keeps the fill to four draws. */
 const DISTRICTS_PER_BLOCK = 4;
-
-/**
- * The regional weighting is sampled ONCE per block, at its centre, not once per
- * district. The envelope's wavelength is 300 km and a block is 24 km, so the two
- * differ by under a hundredth — and it turns four fbm evaluations into one.
- */
-function blockRegional(_b: number): number {
-  return DISTRICT_MIX;
-}
 
 /**
  * The last material of block `b`, drawn WITHOUT knowing what came before the block.
  * This is the truncation that keeps the chain O(1): it is what the next block's first
  * district rejects, and it is why one boundary in four can still repeat a material.
  */
-function blockTail(b: number): SurfaceType {
-  const regional = blockRegional(b);
+function blockTail(seed: number, b: number): SurfaceType {
   const first = b * DISTRICTS_PER_BLOCK;
   let prev = -1;
   let material = SurfaceType.Asphalt;
   for (let i = 0; i < DISTRICTS_PER_BLOCK; i++) {
-    material = drawDistrict(first + i, regional, prev);
+    material = drawDistrict(seed, first + i, prev, characterDistrictOf(seed, first + i - 1));
     prev = material;
   }
   return material;
@@ -345,35 +405,36 @@ function blockTail(b: number): SurfaceType {
  * The cache is not an optimisation of a slow function so much as of a REPEATED one:
  * every road-mesh vertex row, every collider row and every terrain query near the road
  * asks about the same block, and a two-slot cache makes all but the first free. It is
- * safe to cache because a block is a pure function of its index — same seedless
- * hashes, same answer, in the worker and on the main thread alike.
+ * safe to cache because a block is a pure function of (seed, index) — same hashes,
+ * same answer, in the worker and on the main thread alike.
  */
 const blockCache: [Int8Array, Int8Array] = [new Int8Array(4), new Int8Array(4)];
 const blockCacheIndex: [number, number] = [Number.NaN, Number.NaN];
+const blockCacheSeed: [number, number] = [Number.NaN, Number.NaN];
 let blockCacheNext = 0;
 
-function blockMaterials(b: number): Int8Array {
-  if (blockCacheIndex[0] === b) return blockCache[0];
-  if (blockCacheIndex[1] === b) return blockCache[1];
+function blockMaterials(seed: number, b: number): Int8Array {
+  if (blockCacheIndex[0] === b && blockCacheSeed[0] === seed) return blockCache[0];
+  if (blockCacheIndex[1] === b && blockCacheSeed[1] === seed) return blockCache[1];
   const slot = blockCacheNext;
   blockCacheNext = 1 - blockCacheNext;
   const out = blockCache[slot]!;
-  const regional = blockRegional(b);
   const first = b * DISTRICTS_PER_BLOCK;
-  let prev: number = b <= 0 ? SurfaceType.Asphalt : blockTail(b - 1);
+  let prev: number = b <= 0 ? ROAD_START_SURFACE : blockTail(seed, b - 1);
   for (let i = 0; i < DISTRICTS_PER_BLOCK; i++) {
-    const material = drawDistrict(first + i, regional, prev);
+    const material = drawDistrict(seed, first + i, prev, characterDistrictOf(seed, first + i - 1));
     out[i] = material;
     prev = material;
   }
   blockCacheIndex[slot] = b;
+  blockCacheSeed[slot] = seed;
   return out;
 }
 
 /** The material of district `k`. */
-function districtSurface(k: number): SurfaceType {
+function districtSurface(seed: number, k: number): SurfaceType {
   const b = Math.floor(k / DISTRICTS_PER_BLOCK);
-  return blockMaterials(b)[k - b * DISTRICTS_PER_BLOCK]! as SurfaceType;
+  return blockMaterials(seed, b)[k - b * DISTRICTS_PER_BLOCK]! as SurfaceType;
 }
 
 /**
@@ -403,13 +464,13 @@ export interface SurfaceJoinBuffer {
  * District 0 has asphalt on both sides (it IS asphalt), so the road's beginning is not
  * a join.
  */
-export function surfaceJoinAt(s: number, out: SurfaceJoinBuffer): void {
+export function surfaceJoinAt(seed: number, s: number, out: SurfaceJoinBuffer): void {
   const k = districtIndex(s);
   const start = k > 0 ? districtStart(k) : 0;
   const end = districtStart(k + 1);
   const distance = Math.min(s - start, end - s);
   if (distance >= SURFACE_JOIN_BLEND_M) {
-    out.neighbour = districtSurface(k);
+    out.neighbour = districtSurface(seed, k);
     out.t = 0;
     return;
   }
@@ -418,9 +479,9 @@ export function surfaceJoinAt(s: number, out: SurfaceJoinBuffer): void {
   out.neighbour =
     s - start <= end - s
       ? k > 0
-        ? districtSurface(k - 1)
-        : districtSurface(0)
-      : districtSurface(k + 1);
+        ? districtSurface(seed, k - 1)
+        : districtSurface(seed, 0)
+      : districtSurface(seed, k + 1);
 }
 
 /**
@@ -428,7 +489,8 @@ export function surfaceJoinAt(s: number, out: SurfaceJoinBuffer): void {
  *
  * Two independent things, and keeping them independent is the point:
  *
- *  - MATERIAL comes from the 5-7 km surface districts above, weighted by the region.
+ *  - MATERIAL comes from the 5-7 km surface districts above, biased by the kind of road
+ *    (`SURFACE_BIAS`), which is why this takes the world seed.
  *  - DECAY alternates in wear bands (see WEAR_LEVELS): fresh, tired and abandoned
  *    stretches take turns along the whole road, with a small patch noise on top. The
  *    first band is always fresh.
@@ -442,11 +504,11 @@ export function surfaceJoinAt(s: number, out: SurfaceJoinBuffer): void {
  * high decay is a worn one; both are things a desert road actually is, and neither
  * was reachable while the material WAS a threshold on the decay.
  */
-export function roadConditionAt(s: number, out?: RoadConditionBuffer): RoadCondition {
+export function roadConditionAt(seed: number, s: number, out?: RoadConditionBuffer): RoadCondition {
   // The band's level, then the fine patch: how broken this particular stretch is.
   const patch = decayNoise.fbm(s / DECAY_PATCH_WAVELENGTH, 3, 2.1, 0.45) * 0.12;
   const decay = Math.min(MAX_WEAR, Math.max(0, roadWearLevelAt(s) + patch));
-  const surface = districtSurface(districtIndex(s));
+  const surface = districtSurface(seed, districtIndex(s));
   const condition = out ?? { surface, decay, sandCover: 0, markings: 0 };
   condition.surface = surface;
   condition.decay = decay;

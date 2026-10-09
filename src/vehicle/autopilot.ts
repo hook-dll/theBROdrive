@@ -4930,7 +4930,14 @@ export class Autopilot {
       targetSpeed = this.speedLimit.limit(
         Math.min(
           Math.sqrt(VERGE_LATERAL_ACCEL / Math.max(bend, 1e-4)),
-          this.lateral.active && this.corridorBlockSpeed <= CRAWL_SPEED_MPS ? VERGE_BYPASS_STILL_MPS : Infinity,
+          // Only round something that IS there: with nothing in the chosen corridor the
+          // planner reports a block speed of 0 at Infinity, and reading that as "still"
+          // held every verge pass to 60 km/h, at or below the car being passed.
+          this.lateral.active &&
+            this.corridorBlockDistance < Infinity &&
+            this.corridorBlockSpeed <= CRAWL_SPEED_MPS
+            ? VERGE_BYPASS_STILL_MPS
+            : Infinity,
         ),
         'verge',
       );

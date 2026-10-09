@@ -99,7 +99,7 @@ function measureBand(seed: number, s0: number, surface?: SurfaceType): Ride {
     const h: number[] = [];
     for (let i = 0; i <= count; i++) {
       const s = s0 + i * SURFACE_STEP;
-      const cond = roadConditionAt(s);
+      const cond = roadConditionAt(seed, s);
       // The bump layer is 2D world noise; the road is locally straight enough over
       // 3 km that walking x with s is a faithful stand-in for offsetPoint here, and
       // it keeps the bench independent of the road's curvature.

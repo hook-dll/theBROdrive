@@ -32,8 +32,8 @@
  * Nothing here is part of the game bundle.
  */
 
-import { NODE_SPACING, RoadHeading, stepNode, type NodeState } from '../src/world/roadcurve';
-import { buildSpine, CHECKPOINT_NODES, CHECKPOINT_SPACING, COARSE_SPACING } from '../src/world/roadspine';
+import { CHECKPOINT_SPACING, NODE_SPACING, RoadHeading, stepNode, type NodeState } from '../src/world/roadcurve';
+import { buildSpine, CHECKPOINT_NODES, COARSE_SPACING } from '../src/world/roadspine';
 import { ROAD_LENGTH, Road } from '../src/world/road';
 import { REBASE_RADIUS } from '../src/world/origin';
 

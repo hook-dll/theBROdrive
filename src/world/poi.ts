@@ -64,6 +64,7 @@ import {
 import { halfWidthAt } from './roadprofile';
 import { BASIN_OUTER_M, lakeSites, type LakeSite } from './lakes';
 import type { RoadDistance } from './roaddistance';
+import type { Terrain } from './terrain';
 import type { VariantInstance } from './poivariantbuild';
 import { createStructureInstance, structureCount, structureDef } from './poistructures';
 
@@ -373,6 +374,16 @@ export function desertPoiClearOfRoad(poi: Poi, road: Road, roadDistance: RoadDis
   const nearest = road.project(point.x, point.z, owner);
   const clearance = Math.abs(nearest.lateral) - road.halfWidthAt(nearest.s) - radiusStructure(poi.structure);
   return clearance >= DESERT_ROAD_CLEARANCE_M;
+}
+
+/**
+ * Whether a desert POI's spot is off every roadside landform (`landforms.ts`). A
+ * building wants level ground, and a basin wall or the flank of a gap is a quarter
+ * of slope; like a lake basin, it simply has no building on it.
+ */
+function desertPoiClearOfLandforms(poi: Poi, road: Road, terrain: Terrain): boolean {
+  const point = road.offsetPoint(poi.s, poi.lateral);
+  return !terrain.landforms.covers(point.x, point.z, poi.s, radiusStructure(poi.structure));
 }
 
 /**
@@ -1805,6 +1816,7 @@ export class PoiProvider implements ChunkProvider {
     const desert = desertPoisBetween(ctx.world.seed, ctx.sStart, ctx.sEnd, spacing).filter(
       (poi) =>
         desertPoiClearOfRoad(poi, ctx.road, this.roadDistance) &&
+        desertPoiClearOfLandforms(poi, ctx.road, ctx.terrain) &&
         desertPoiClearOfNeighbours(poi, ctx.world.seed, spacing, ctx.road),
     );
 

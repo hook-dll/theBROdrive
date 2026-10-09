@@ -44,7 +44,7 @@ import {
   type VarietyKind,
 } from '../src/world/director';
 import { SURFACES } from '../src/core/surfaces';
-import { MAX_WEAR, desertPaletteAt, roadConditionAt } from '../src/world/gradient';
+import { MAX_WEAR, ROAD_START_SURFACE, desertPaletteAt, roadConditionAt } from '../src/world/gradient';
 import { Road } from '../src/world/road';
 import { RoadMeshProvider, roadAsphaltVertexColorAtStart } from '../src/world/roadmesh';
 import { laneOffsetFor } from '../src/world/roadprofile';
@@ -346,7 +346,7 @@ check(
 // `roadAsphaltVertexColorAtStart` is the provider's own gain-corrected colour for the
 // opening district, so dividing it by that district's raw albedo recovers the gain
 // without the road mesh having to export it.
-const startAlbedo = new THREE.Color(SURFACES[roadConditionAt(0).surface].color);
+const startAlbedo = new THREE.Color(SURFACES[ROAD_START_SURFACE].color);
 const textureGain = roadAsphaltVertexColorAtStart(new THREE.Color()).r / startAlbedo.r;
 /** DUST_LIGHTEN and MOTTLE_AMOUNT in roadmesh.ts, at the deepest wear the world shows. */
 const WEATHER_LIFT = (1 + 0.11 * (0.5 + MAX_WEAR)) * (1 + 0.07 * (0.7 + MAX_WEAR));
@@ -794,7 +794,7 @@ console.log("'markings': the changed pattern, row by row, against its snapped sp
 
 /** The variant a marking event runs, decided the way roadmesh.ts decides it. */
 function markingVariant(event: VarietyEvent): 'double' | 'none' | 'rumble' | 'ghost' {
-  if (roadConditionAt(event.s).markings < PAINT_EFFECTIVE) return 'ghost';
+  if (roadConditionAt(SEED, event.s).markings < PAINT_EFFECTIVE) return 'ghost';
   return event.draw < 0.34 ? 'double' : event.draw < 0.67 ? 'none' : 'rumble';
 }
 
@@ -815,7 +815,7 @@ function markingsShow(event: VarietyEvent): boolean {
   // painted one to change.
   const wantPaint = markingVariant(event) !== 'ghost';
   for (let s = from - 260; s <= to + 260; s += 20) {
-    if ((roadConditionAt(s).markings >= PAINT_EFFECTIVE) !== wantPaint) return false;
+    if ((roadConditionAt(SEED, s).markings >= PAINT_EFFECTIVE) !== wantPaint) return false;
   }
   return true;
 }

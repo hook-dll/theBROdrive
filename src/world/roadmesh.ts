@@ -7,7 +7,7 @@ import { applyGroundSpotlightNormals } from '../render/comic';
 import { applyCloudShadow } from '../render/cloudshadow';
 import { varietyEventOfKindAt, varietyWeightAt, type VarietyEvent } from './director';
 import { tileGroundSampler, type DrawnGroundSample } from './deserttiledata';
-import { desertPaletteAt, roadConditionAt } from './gradient';
+import { desertPaletteAt, roadConditionAt, ROAD_START_SURFACE } from './gradient';
 import { ROAD_HALF_WIDTH, type Road } from './road';
 import type { RoadDistance } from './roaddistance';
 import { LANE_WIDTH, laneHalfWidthFor, laneOffsetFor, shoulderWidthM } from './roadprofile';
@@ -510,7 +510,7 @@ export function roadAsphaltMaterial(): THREE.MeshStandardMaterial {
 /** Texture-brightness-corrected vertex colour for the road's start condition. */
 export function roadAsphaltVertexColorAtStart(out: THREE.Color): THREE.Color {
   attachRoadTextures();
-  return out.copy(SURFACE_LINEAR[roadConditionAt(0).surface]!).multiplyScalar(textureGain);
+  return out.copy(SURFACE_LINEAR[ROAD_START_SURFACE]!).multiplyScalar(textureGain);
 }
 
 const markingMaterial = applyCloudShadow(
@@ -728,7 +728,7 @@ export class RoadMeshProvider implements ChunkProvider {
     for (let si = 0; si < sCount; si++) {
       const s = sStart + (si * (sEnd - sStart)) / (sCount - 1);
       const halfWidth = road.halfWidthAt(s);
-      const cond = roadConditionAt(s);
+      const cond = roadConditionAt(this.seed, s);
       const style = SHOULDER_STYLE[cond.surface] ?? DEFAULT_SHOULDER_STYLE;
       const palette = desertPaletteAt(s);
       shoulderSand.setHex(palette.sand);
@@ -913,7 +913,7 @@ export class RoadMeshProvider implements ChunkProvider {
     const latCount = SECTION_LATERALS.length;
     // One surface type per chunk drives the collider friction profile. Visual colour
     // is sampled per row below because a material-district boundary can cross a chunk.
-    const surface = roadConditionAt((sStart + sEnd) / 2).surface;
+    const surface = roadConditionAt(this.seed, (sStart + sEnd) / 2).surface;
 
     const sCount = Math.round((sEnd - sStart) / SURFACE_STEP) + 1;
     const vertexCount = sCount * latCount;
@@ -949,7 +949,7 @@ export class RoadMeshProvider implements ChunkProvider {
         // Every consumer of this row gets this one local width. In particular the
         // collider is indexed from these same fixed-count rows as the visible mat.
         const halfWidth = road.halfWidthAt(s);
-        const cond = roadConditionAt(s);
+        const cond = roadConditionAt(this.seed, s);
         const laneBase = SURFACE_LINEAR[cond.surface] ?? null;
         // Palette colour is a function of arclength alone: sample once per row, so
         // neighbouring chunks share the seam row and a rebuild is identical.
@@ -1451,7 +1451,7 @@ export class RoadMeshProvider implements ChunkProvider {
       // feature promises exactly one. Measured as 53% of a 'none' span with 217 m of
       // slop at its edge (tools/surface-paint.ts).
       markingModeValue =
-        roadConditionAt(event.s).markings < PAINT_EFFECTIVE
+        roadConditionAt(this.seed, event.s).markings < PAINT_EFFECTIVE
           ? MarkingMode.Ghost
           : event.draw < 0.34
             ? MarkingMode.DoubleSolid
@@ -1484,7 +1484,7 @@ export class RoadMeshProvider implements ChunkProvider {
       for (let si = 0; si < sCount - 1; si++) {
         const s = sStart + (si * (sEnd - sStart)) / (sCount - 1);
         const s1 = s + SURFACE_STEP;
-        const condition = roadConditionAt(s);
+        const condition = roadConditionAt(this.seed, s);
         const laneBase = SURFACE_LINEAR[condition.surface];
         const mode = this.markingModeAt(s);
         const halfWidth0 = road.halfWidthAt(s);

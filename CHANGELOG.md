@@ -12,6 +12,51 @@
   the drive then loads).
 
 ### Changed
+- THE DESERT SOMETIMES OPENS A VIEW BESIDE THE ROAD (`world/landforms.ts`). About three
+  times per 100 km (one candidate slot per 22 km from 32 km, three tries each) the ground
+  beside the road does something big: a RIM, where one side falls 10-18 m into a hollow
+  that climbs back out by 344 m, so the road runs along the lip; a RIDGE, both sides
+  8-14 m down; a GAP, both sides 8-14 m up within 144 m. 300-1 800 m at full height (the
+  gap 200-700 m), with 250 m smoothstep ramps in and out. Nothing changes inside 64 m of
+  the centreline (`EDGE_M`): road elevation, verge, graded corridor, director cuts and
+  embankments, poles, delineators and sidetracks keep their ground. Steepest face 25%;
+  falling kinds take 40-50% of the dune relief out of the hollow so a dune does not fill
+  it. The shape is a function of world position (nearest point on the event's own
+  centreline polyline), in the base field like a lake basin, so tiles, the vista,
+  `Terrain.heightAt` and the scatter agree and nothing steps at a join; the caller's
+  arclength is only the lookup hint, and the vista now passes the camera's
+  (`horizonHeight(x, z, reliefWeight, hintS)`). A candidate is refused if a bend whose
+  inside faces a shaped side is tighter than 424 m, if another pass of the road comes
+  within 200 m of the footprint, or if a lake is within reach; desert POIs are not built
+  on one. Not driven or measured: no bench was run.
+- THE KIND OF ROAD BIASES ITS SURFACE (`SURFACE_BIAS` in `world/gradient.ts`). Each 5-7 km
+  surface district weighs its material deck by the road character its middle falls in:
+  a highway is mostly asphalt and concrete (gravel 4%), a pan asphalt or long gravel, a
+  switchback or derelict road mostly cracked and gravel, rolling and esses mixed. A pan
+  may keep its material (and a highway its asphalt) across one road district; nothing
+  repeats across a change of road. Boundaries and the 40 m join feathering are
+  unchanged. Estimated overall shares (Markov model, not the census): asphalt 37%,
+  cracked 28%, gravel 26%, concrete 8.6% (was 35/31/26/8.4). `roadConditionAt` and
+  `surfaceJoinAt` take the world seed first; `ROAD_START_SURFACE` names district 0.
+- CORNERS COME IN PHRASES, AND SOME START JUST PAST A CREST. A district no longer lays
+  one corner per `cornerSpacing`, evenly. It is cut into phrases of `phraseMin`-
+  `phraseMax` corners joined by `linkMin`-`linkMax` m of straight, then a breather (the
+  rest of the phrase, which owns one `cornerSpacing` per corner, so density is
+  unchanged). Esses run 3-4 corners 0-60 m apart, switchbacks 2-4 at 0-40 m, rolling
+  country 2-3 at 40-220 m, highways 1-3 at 150-500 m, pans 1-2 at 300-900 m, derelict
+  1-4 at 20-600 m. Each phrase tightens or opens: radii drift by 60% of the district's
+  range across it, and an even-count phrase holds one same-side step (a corner that
+  turns further, or unwinds). Phrases alternate side, so every phrase join is a full
+  turn. A phrase's start can also be delayed, by at most 240 m and half its breather,
+  so its first corner turns in 25 m past the biggest brow in reach (a high point
+  followed by at least 1.5 m of fall in 96 m), read from the landscape along the
+  road's own held bearing. Every phrase in rolling, esses and derelict country tries,
+  switchbacks 40%, highways 35%, pans never; phrases that find no brow stay put. The
+  decision is made by scouting the 10 km checkpoint interval from its checkpoint, so it
+  is the same in the spine worker, a block replay and a tool's walk; a phrase whose
+  possible span crosses a checkpoint is never moved. Bearings, radii and the heading
+  budget are untouched, so the no-crossing bound holds as before. `CHECKPOINT_SPACING`
+  now lives in `world/roadcurve.ts`; `SPINE_FORMAT` 8. Not measured: no bench was run.
 - NO LONG STEEP CLIMBS. The felt relief bands in `world/landscape.ts` are lower (hills
   +-175 / +-60 m, rolls +-30 / +-8 m, from +-290 / +-90 and +-90 / +-14), wavelengths
   unchanged, so long climbs stay but are gentle. Over 1000 km on seeds 1337 and 90210:

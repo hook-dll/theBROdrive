@@ -21,9 +21,9 @@
  * Nothing here is part of the game bundle.
  */
 
-import { NODE_SPACING, RoadHeading, stepNode, type NodeState } from '../src/world/roadcurve';
+import { CHECKPOINT_SPACING, NODE_SPACING, RoadHeading, stepNode, type NodeState } from '../src/world/roadcurve';
 import { Road, ROAD_LENGTH } from '../src/world/road';
-import { buildSpine, CHECKPOINT_NODES, CHECKPOINT_SPACING, COARSE_SPACING } from '../src/world/roadspine';
+import { buildSpine, CHECKPOINT_NODES, COARSE_SPACING } from '../src/world/roadspine';
 
 const seed = Number(process.argv[2] ?? 1337);
 const spine = buildSpine(seed, ROAD_LENGTH);

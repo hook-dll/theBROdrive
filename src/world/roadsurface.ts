@@ -307,7 +307,7 @@ export class SurfaceField {
     // arclength. Feathering the amplitude across the join is what stops the deck
     // stepping there; see SURFACE_JOIN_BLEND_M. Away from a join `t` is 0 and this is
     // exactly `BUMP_AMP[surface]`.
-    surfaceJoinAt(s, this.join);
+    surfaceJoinAt(this.seed, s, this.join);
     const amp =
       BUMP_AMP[surface]! +
       (BUMP_AMP[this.join.neighbour]! - BUMP_AMP[surface]!) * this.join.t;
@@ -341,7 +341,7 @@ export function roadSurfaceY(
   z: number,
 ): number {
   const sample = road.sampleAt(s);
-  const cond = roadConditionAt(s);
+  const cond = roadConditionAt(road.seed, s);
   // Banking is the cross-slope times the queried lateral: widening changes where the
   // edge is, not the banking law of a given point on the mat.
   return (

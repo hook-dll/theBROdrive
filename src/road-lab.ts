@@ -114,22 +114,22 @@ const SCANS: readonly Scan[] = [
     // third of the road sits at exactly the ceiling, so without it the scan would
     // always answer with the first plateau rather than the emptiest one.
     score: (s) => {
-      const c = roadConditionAt(s);
+      const c = roadConditionAt(SEED, s);
       const sealed = c.surface === SurfaceType.Asphalt || c.surface === SurfaceType.CrackedAsphalt;
       return c.decay + (sealed ? 0.25 : 0) + c.sandCover * 0.05;
     },
   },
-  { key: 'sand', label: 'Максимум песка', score: (s) => roadConditionAt(s).sandCover },
-  { key: 'paint', label: 'Живая разметка', score: (s) => roadConditionAt(s).markings },
+  { key: 'sand', label: 'Максимум песка', score: (s) => roadConditionAt(SEED, s).sandCover },
+  { key: 'paint', label: 'Живая разметка', score: (s) => roadConditionAt(SEED, s).markings },
   {
     key: 'gravel',
     label: 'Гравий',
-    score: (s) => (roadConditionAt(s).surface === SurfaceType.Gravel ? roadConditionAt(s).decay : -1),
+    score: (s) => (roadConditionAt(SEED, s).surface === SurfaceType.Gravel ? roadConditionAt(SEED, s).decay : -1),
   },
   {
     key: 'concrete',
     label: 'Бетон',
-    score: (s) => (roadConditionAt(s).surface === SurfaceType.Concrete ? roadConditionAt(s).decay : -1),
+    score: (s) => (roadConditionAt(SEED, s).surface === SurfaceType.Concrete ? roadConditionAt(SEED, s).decay : -1),
   },
 ];
 
@@ -400,7 +400,7 @@ class RoadLookLab {
     this.sky.update(CALENDAR, daySeconds, 0, s, eye.x, eye.y, eye.z, view.x, view.z);
     this.renderer.render();
 
-    const condition = roadConditionAt(s);
+    const condition = roadConditionAt(SEED, s);
     this.onReadout(
       `${(s / 1000).toFixed(3)} км · ${SURFACES[condition.surface].label}`
       + ` · износ ${condition.decay.toFixed(2)} (потолок ${MAX_WEAR.toFixed(2)})`

@@ -1,6 +1,12 @@
 import { Noise2D } from '../core/rng';
 import { LakeBasins } from './lakes';
 import { corridorBatterAt, outcropBeltAt } from './corridorshape';
+import {
+  LANDFORM_HINT_WINDOW_M,
+  LANDFORM_VISTA_WINDOW_M,
+  newLandformSample,
+  RoadsideLandforms,
+} from './landforms';
 import { SurfaceType } from '../core/surfaces';
 import { ROAD_HALF_WIDTH, ROAD_MAX_HALF_WIDTH, type Road } from './road';
 import { RoadDistance } from './roaddistance';
@@ -26,6 +32,12 @@ import { onTerminusPad, terminusWeight } from './terminus';
  * terrain flush; from there to `CORRIDOR_OUTER` the ground smoothsteps into the open
  * field. The road's own elevation is that field's, so the blend differs only by
  * camber and centimetre-scale surface detail.
+ *
+ * Two scheduled shapes are cut into the open field beyond that corridor, both as
+ * functions of world position so every mesh and worker agrees on them: the lake
+ * basins (`lakes.ts`, 520 m out and further) and the roadside landforms
+ * (`landforms.ts`: a basin rim, a ridge, a gap between walls), which never come
+ * nearer the centreline than `EDGE_M` = 64 m and so never touch the road's edge.
  */
 
 /** Narrow-road reference edge; local corridor edges come from `Road.halfWidthAt(s)`. */
@@ -347,10 +359,16 @@ export class Terrain {
     // rather than letting `LakeBasins` call back into `openBase` is what keeps the
     // two from recursing.
     this.basins.setGradeReader((x, z) => this.undugOpen(x, z, RELIEF_FULL, 0));
+    // After the basins: a landform refuses any stretch a lake is dug beside.
+    this.landforms = new RoadsideLandforms(road, seed, this.basins);
   }
 
   /** Lake basins dug into this terrain, and the schedule they come from. */
   readonly basins: LakeBasins;
+  /** Basins, ridges and gaps beside the road; see `landforms.ts`. */
+  readonly landforms: RoadsideLandforms;
+  /** Scratch for one landform sample: `undugOpen` and `horizonHeight` are per vertex. */
+  private readonly landform = newLandformSample();
   /** Whole-road distance for the mountain gate; built on first vista sample. */
   private mountainDistance: RoadDistance | null = null;
 
@@ -566,9 +584,19 @@ export class Terrain {
     return this.basins.shape(x, z, open, s);
   }
 
-  /** The open desert before any basin is cut into it. */
+  /**
+   * The open desert before any basin is cut into it: the landscape, the dune relief,
+   * and the roadside landforms (`landforms.ts`) — a basin the road runs along the rim
+   * of, a ridge, a gap between walls. Those take part of the relief away where the
+   * ground falls, so a hollow is not refilled by the dune standing in it. `s` is only
+   * the landforms' lookup hint; their shape is a function of (x, z).
+   */
   private undugOpen(x: number, z: number, dist: number, s: number): number {
-    return this.road.landscape.heightAt(x, z) + this.relief(x, z, dist, this.road.halfWidthAt(s));
+    const relief = this.relief(x, z, dist, this.road.halfWidthAt(s));
+    this.landforms.sample(x, z, s, LANDFORM_HINT_WINDOW_M, this.landform);
+    return (
+      this.road.landscape.heightAt(x, z) + relief * (1 - this.landform.flatten) + this.landform.lift
+    );
   }
 
   /** Legacy road-fan height, retaining its finite detail seam for tooling. */
@@ -720,12 +748,22 @@ export class Terrain {
   /**
    * Distant vista height. `reliefWeight` is a continuous camera-distance fade of the
    * dunes; a boolean cutoff would turn a tall dune into a ring cliff.
+   *
+   * `hintS` is the CAMERA's arclength. The roadside landforms are in the vista too, or
+   * a basin would be flat ground in the occluding part of the disc (past 480 m) and
+   * the hollow would end in a ledge there; the vista asks with a wide window
+   * (`LANDFORM_VISTA_WINDOW_M`) because its samples are kilometres from the camera.
    */
-  horizonHeight(x: number, z: number, reliefWeight: number): number {
+  horizonHeight(x: number, z: number, reliefWeight: number, hintS: number): number {
     let h = this.road.landscape.heightAt(x, z);
+    this.landforms.sample(x, z, hintS, LANDFORM_VISTA_WINDOW_M, this.landform);
     if (reliefWeight > 0) {
-      h += this.relief(x, z, RELIEF_FULL, ROAD_MAX_HALF_WIDTH) * Math.min(1, reliefWeight);
+      h +=
+        this.relief(x, z, RELIEF_FULL, ROAD_MAX_HALF_WIDTH) *
+        Math.min(1, reliefWeight) *
+        (1 - this.landform.flatten);
     }
+    h += this.landform.lift;
     h += this.horizonMountainHeight(x, z);
     return h;
   }

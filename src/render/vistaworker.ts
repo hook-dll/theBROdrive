@@ -38,6 +38,8 @@ export interface VistaWorkerSampleRequest {
   readonly cornerZ: number;
   readonly originX: number;
   readonly originZ: number;
+  /** Camera arclength: the lookup hint for the roadside landforms (`Terrain.horizonHeight`). */
+  readonly hintS: number;
 }
 
 export type VistaWorkerRequest =
@@ -123,7 +125,7 @@ scope.onmessage = (event: MessageEvent<VistaWorkerRequest>) => {
       const vi = i * 3;
       const absoluteX = request.cornerX + positions[vi]! + request.originX;
       const absoluteZ = request.cornerZ + positions[vi + 2]! + request.originZ;
-      horizon[i] = terrain.horizonHeight(absoluteX, absoluteZ, reliefWeight);
+      horizon[i] = terrain.horizonHeight(absoluteX, absoluteZ, reliefWeight, request.hintS);
       base[i] = terrain.baseHeight(absoluteX, absoluteZ, radius);
     }
   }

@@ -1,4 +1,4 @@
-import { NODE_SPACING, RoadHeading, stepNode, type NodeState } from './roadcurve';
+import { CHECKPOINT_SPACING, NODE_SPACING, RoadHeading, stepNode, type NodeState } from './roadcurve';
 
 /**
  * The road spine: two small tables that make an arbitrarily long road affordable.
@@ -24,10 +24,13 @@ import { NODE_SPACING, RoadHeading, stepNode, type NodeState } from './roadcurve
  * same doubles as a walk from zero. `stepNode` is the only recurrence and heading
  * is analytic, so the replay has exactly the same inputs and IEEE operations. A
  * copied or divergent recurrence would show up as a step across a chunk seam.
+ *
+ * The heading's crest decisions (see `RoadHeading`) read the road's position, so they
+ * are made by scouting one interval from its checkpoint. The checkpoints are this
+ * table's — the walk hands them over as it records them — and a decision never spans
+ * two intervals, so the walk never needs a checkpoint it has not reached yet.
  */
 
-/** Metres between checkpoints. 10 km = 2500 nodes to replay, ~0.5 ms. */
-export const CHECKPOINT_SPACING = 10_000;
 /** Metres between coarse position samples. Matches `RoadDistance`'s own coarse step. */
 export const COARSE_SPACING = 200;
 
@@ -39,8 +42,9 @@ export const COARSE_SPACING = 200;
  * 5: replace gated corner noise with guaranteed, seeded turn sequences.
  * 6: shorten turn sections and their entry window for more frequent curves.
  * 7: a section's turn always reaches its own bearing, so no join steps (see `turnAt`).
+ * 8: corners come in phrases, and a phrase's start can move onto a crest.
  */
-export const SPINE_FORMAT = 7;
+export const SPINE_FORMAT = 8;
 
 export interface RoadSpine {
   /** Road length the tables were built for, metres. */
@@ -66,7 +70,6 @@ export const CHECKPOINT_NODES = CHECKPOINT_SPACING / NODE_SPACING;
  * `NODE_SPACING`, so those are exact multiples already and need no interpolation.
  */
 export function buildSpine(seed: number, length: number): RoadSpine {
-  const heading = new RoadHeading(seed);
   const lastNode = Math.floor(length / NODE_SPACING);
   const coarseStride = COARSE_SPACING / NODE_SPACING;
 
@@ -78,6 +81,14 @@ export function buildSpine(seed: number, length: number): RoadSpine {
   const coarseX = new Float64Array(coarseCount);
   const coarseZ = new Float64Array(coarseCount);
 
+  // Checkpoints recorded so far, handed to the heading so its crest scouts start from
+  // them instead of chaining a second walk. Asked for once per interval at most.
+  let recorded = 1;
+  const heading = new RoadHeading(seed, () => ({
+    checkpointX: checkpointX.subarray(0, recorded),
+    checkpointZ: checkpointZ.subarray(0, recorded),
+  }));
+
   const node: NodeState = { x: 0, z: 0 };
   // Node 0 is the origin, and it is both checkpoint 0 and coarse sample 0.
   for (let i = 1; i <= lastNode; i++) {
@@ -86,6 +97,7 @@ export function buildSpine(seed: number, length: number): RoadSpine {
       const k = i / CHECKPOINT_NODES;
       checkpointX[k] = node.x;
       checkpointZ[k] = node.z;
+      recorded = k + 1;
     }
     if (i % coarseStride === 0) {
       const k = i / coarseStride;

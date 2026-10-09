@@ -21,7 +21,7 @@ import { curveWidening, halfWidthAt, lanesPerSideAt, laneOffsetFor, LANE_WIDTH }
  *  - the heading stays below 90 degrees from the trunk bearing, so the road's +Z
  *    projection is strictly increasing and it cannot self-intersect
  *  - route-scale noise supplies broad sweepers; seeded turn sequences guarantee
- *    regular 25-60 degree corners with straights between them
+ *    real corners, in phrases of linked corners with breathers between them
  *  - the road's grade is whatever the landscape does along its tangent; there is
  *    no grade noise and no elevation state that could drift
  *  - the road has a real end at `length`, reached only after a very long drive
@@ -224,7 +224,9 @@ export class Road {
   constructor(seed: number, spine?: RoadSpine) {
     this.seed = seed >>> 0;
     this.landscape = new Landscape(this.seed);
-    this.headingField = new RoadHeading(this.seed);
+    // The heading's crest scouts replay from the spine's checkpoints, so a decision
+    // deep in the road costs one interval rather than a walk from the house.
+    this.headingField = new RoadHeading(this.seed, () => this.spine);
     this.lastNode = Math.floor(this.length / NODE_SPACING);
     if (spine && spine.length !== this.length) {
       throw new Error(`Road spine is for a ${spine.length} m road, not ${this.length} m`);
@@ -239,7 +241,7 @@ export class Road {
   }
   /** Surface, decay and sand cover at arclength `s`, without allocating a sample. */
   conditionAt(s: number, out: RoadConditionBuffer): void {
-    roadConditionAt(Math.min(Math.max(s, 0), this.length), out);
+    roadConditionAt(this.seed, Math.min(Math.max(s, 0), this.length), out);
   }
 
 
