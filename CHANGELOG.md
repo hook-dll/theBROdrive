@@ -12,6 +12,10 @@
   the drive then loads).
 
 ### Changed
+- FRANTIC VERGE PASSES AND ROAD OBSTACLES. A frantic car can use the shoulder up to 130 km/h,
+  so the previous 100 km/h cap no longer rejects most 95-115 km/h leaders; deterministic
+  scrub and rock obstacles are spawned on the carriageway again instead of leaving only
+  stopped traffic as a road obstruction.
 
 - DEFAULT VIEW 65°, MAXIMUM 85° (`config/gameplay.json`), the rectilinear range the
   frame stays sane in (`FIELD_OF_VIEW_MAX` in `game/settings.ts`). A save keeps the FOV

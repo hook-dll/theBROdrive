@@ -828,7 +828,7 @@ const PASSING_VERGE_M = 1.2;
 const SHOULDER_PASS_EDGE_MARGIN_M = 0.9;
 const SHOULDER_PASS_GAP_M = 0.25;
 const SHOULDER_PASS_ADVANTAGE_MPS = 6;
-const SHOULDER_PASS_MAX_MPS = 100 / 3.6;
+const SHOULDER_PASS_MAX_MPS = 130 / 3.6;
 /**
  * Cornering a car can do with its body over the loose shoulder, m/s²: about a third of
  * the asphalt's, for stone that rolls and an edge that drops. At 220 m that is 84 km/h,
