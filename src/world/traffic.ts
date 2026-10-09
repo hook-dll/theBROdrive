@@ -111,10 +111,10 @@ const PLATOON_CHANCE = 0.32;
  *
  * Half of the cars in the player's direction and a quarter of the oncoming ones: the
  * owner's call (2026-10-09). This is an endless desert with no cameras or police, so the
- * traffic drives as it likes alongside the sparse road-hazard streams. Calm drivers still
- * come first in every direction (`directionCount === 0`), and the second car of a direction
- * is still the hurried one, so the road keeps its slow cars to pass. 0.14 / 0.03 was the
- * calm setting: one frantic pass in twenty minutes.
+ * traffic drives as it likes on a clean road. Calm drivers still come first in every
+ * direction (`directionCount === 0`), and the second car of a direction is still the
+ * hurried one, so the road keeps its slow cars to pass. 0.14 / 0.03 was the calm setting:
+ * one frantic pass in twenty minutes.
  */
 const FRANTIC_SAME_DIRECTION_SHARE = 0.5;
 const FRANTIC_ONCOMING_SHARE = 0.25;
@@ -2268,7 +2268,7 @@ export class RoadTraffic {
         headwayS: 0.9 + this.random() * 0.4,
         mode: 'frantic',
         // 137-172 km/h (was 125-160): the fast ones remain visibly faster than hurried
-        // traffic (95-115) while the road hazards provide non-traffic obstructions too.
+        // traffic (95-115); the carriageway itself has no spawned obstacles.
         speedCap: (137 + this.random() * 35) / 3.6,
         pace: 1,
       };

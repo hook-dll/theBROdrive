@@ -70,10 +70,10 @@ const ROAD_HAZARD_CYCLE = ROAD_HAZARD_GAP_MIN + ROAD_HAZARD_GAP_MAX;
 /** Keep the story start and the player's first few bends clear. */
 const ROAD_HAZARD_START = 600;
 /**
- * Roadside obstacles are part of the drive again: deterministic scrub and rock streams
- * remain sparse, but the road must not contain traffic cars as its only obstruction.
+ * EXPERIMENT (owner, 2026-10-09): no rocks or scrub on the carriageway; a stuck or
+ * overturned traffic car is the only dynamic road obstruction.
  */
-const ROAD_HAZARDS_SPAWN = true;
+const ROAD_HAZARDS_SPAWN = false;
 const ROAD_HAZARD_EDGE_CLEARANCE = 0.15;
 const CELL_S = 6; // metres between candidate cells along the road
 const CELL_L = 6; // metres between candidate cells laterally
