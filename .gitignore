@@ -65,3 +65,4 @@ pnpm-debug.log*
 /prbr*.jpg
 /prbr*.png
 tools/sound/.cache/
+__pycache__/

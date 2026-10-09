@@ -865,7 +865,7 @@ def side_details(sh, c, report):
     discs = np.zeros((H, W), bool)
     for cx, cy, r in c["wheels"]:
         discs |= (xx - cx) ** 2 + (yy - cy) ** 2 <= (1.05 * r) ** 2
-    body = sil & (yy <= sill[None, :] + U.lw) & ~discs & (xx >= c["body_f"]) & (xx <= c["body_r"])
+    body = sil & (yy <= sill[None, :] + INK_GAP_LW * U.lw) & ~discs & (xx >= c["body_f"]) & (xx <= c["body_r"])
     region = body & ~glass
     belt, shoulder = c["belt"], c["shoulder_row"]
 
@@ -976,10 +976,16 @@ def side_details(sh, c, report):
                               for y, x in rim[::2]]))
 
     def crossed(sp):
-        """A gap line runs through the shape (at any of its rows)."""
+        """A gap line runs through the shape itself (its filled outline, not its bounding box: a
+        slanted gap may pass a rounded corner of the box)."""
         xa, ya, xb, yb = sp["box"]
-        return any(x is not None and xa < x < xb for g in gap_lines
-                   for x in (poly_x_at(g, r) for r in np.linspace(ya + 1, yb - 1, 7)))
+        f = sp["f"]
+        for g in gap_lines:
+            for r in range(ya, yb + 1):
+                x = poly_x_at(g, r)
+                if x is not None and xa <= x <= xb and f[r - ya, int(round(x)) - xa]:
+                    return True
+        return False
 
     hinge_lo, hinge_hi = HINGE_WB[0] * U.wb, HINGE_WB[1] * U.wb
     (hl_lo, hl_hi), (hh_lo, hh_hi) = [(a * U.wb, b * U.wb) for a, b in HANDLE_WB]
@@ -1209,7 +1215,7 @@ def front_details(sh, c, report):
     """Grille openings and round lamps in the front view (see README.md). Returns (recesses in mm,
     lamps in px circle form)."""
     mm, ground, x0p = c["mm"], c["ground"], c["x0_px"]
-    MIRROR_PX = 3 * NEAR_LW * U.lw  # noqa: N806 (a mirrored pair's centre may sit this far off the axis)
+    MIRROR_PX = NEAR_LW * U.lw  # noqa: N806 (a mirrored pair's centre may sit this far off the axis)
     box = sh.boxes["front"]
     belt = c["belt"]
     bumper_row = ground - max((max(b["z"]) for b in c["bumpers"] if max(b["y"]) <= 0), default=0) / mm
