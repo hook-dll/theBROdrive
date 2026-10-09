@@ -163,8 +163,7 @@ export class AudioMixer {
     this.output = this.ctx.createGain();
     this.output.connect(this.ctx.destination);
     this.master.connect(this.output);
-    void this.ctx.audioWorklet
-      .addModule(limiterWorkletUrl)
+    void this.loadWorklet(limiterWorkletUrl)
       .then(() => {
         if (this.disposed) return;
         const limiter = new AudioWorkletNode(this.ctx, 'bro-limiter', {
@@ -203,8 +202,7 @@ export class AudioMixer {
     // The reverb is the open country itself, so it answers to the World volume.
     this.reverb.connect(convolver).connect(reverbReturn).connect(this.world);
 
-    void this.ctx.audioWorklet
-      .addModule(engineWorkletUrl)
+    void this.loadWorklet(engineWorkletUrl)
       .then(() => {
         this.engineWorkletReady = true;
         for (const waiter of this.engineWorkletWaiters.splice(0)) waiter();
@@ -215,6 +213,19 @@ export class AudioMixer {
 
     window.addEventListener('pointerdown', this.unlock);
     window.addEventListener('keydown', this.unlock);
+  }
+
+  /**
+   * `audioWorklet` exists only in a secure context (https or localhost). A phone opening
+   * the dev server by its LAN address (http://192.168.…) has none, and touching it
+   * threw out of the constructor: "Cannot read properties of undefined (reading
+   * 'addModule')" on New drive. Rejecting instead lets each caller's fallback run: an
+   * unlimited mix and silent engines, the game itself unaffected.
+   */
+  private loadWorklet(url: string): Promise<void> {
+    const worklet = this.ctx.audioWorklet as AudioWorklet | undefined;
+    if (!worklet) return Promise.reject(new Error('AudioWorklet needs a secure context (https or localhost)'));
+    return worklet.addModule(url);
   }
 
   /** Resumes the context on the first user gesture; a no-op afterwards. */

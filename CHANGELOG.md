@@ -4,6 +4,12 @@
 
 ### Added
 
+- THE GAME STARTS OVER A PLAIN-HTTP ADDRESS. A phone opening the game by the computer's
+  LAN address (http://192.168.…) has no `AudioWorklet` (it exists only on https and
+  localhost), and New drive failed with "Cannot read properties of undefined (reading
+  'addModule')". The mixer now treats a missing worklet as a failed load
+  (`Mixer.loadWorklet`): the game runs, the mix goes out unlimited and the engines are
+  silent. Full sound on a phone still needs https.
 - DEFAULT VIEW 50° AND A BIGGER DASHBOARD. The field of view starts at 50° (was 58°;
   `config/gameplay.json`). The dashboard's old 140% is the new 100% default on desktop
   (`Settings.dashboardSize`, range 55-120%); a save's old `dashboardScale` is carried
