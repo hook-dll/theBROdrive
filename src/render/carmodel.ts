@@ -757,7 +757,7 @@ function mergeStaticBodyMeshes(scene: THREE.Group, def: CarModelDef): void {
     if (members.length < 2) continue;
     const geometries = members.map((mesh) => {
       mesh.updateMatrix();
-      return mesh.geometry.clone().applyMatrix4(mesh.matrix);
+      return floatGeometry(mesh.geometry).applyMatrix4(mesh.matrix);
     });
     const merged = mergeGeometries(geometries, false);
     if (!merged) continue;
@@ -772,6 +772,28 @@ function mergeStaticBodyMeshes(scene: THREE.Group, def: CarModelDef): void {
     for (const mesh of rest) mesh.removeFromParent();
   }
   scene.updateMatrixWorld(true);
+}
+
+/**
+ * A copy of `geometry` with every attribute in plain Float32.
+ *
+ * The meshopt-packed GLBs store positions and normals QUANTIZED (KHR_mesh_quantization:
+ * normalized Int16/Int8, the node's scale undoing it). Baking a transform into such an
+ * attribute writes metres back through the normalization, so every coordinate beyond ±1
+ * was clamped: the merged trim of the Svyatogor shrank into a 2 m box and the VAZ-2110's
+ * blinkers left their corners.
+ */
+function floatGeometry(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+  const out = new THREE.BufferGeometry();
+  for (const [name, attribute] of Object.entries(geometry.attributes)) {
+    const values = new Float32Array(attribute.count * attribute.itemSize);
+    for (let i = 0; i < attribute.count; i++) {
+      for (let c = 0; c < attribute.itemSize; c++) values[i * attribute.itemSize + c] = attribute.getComponent(i, c);
+    }
+    out.setAttribute(name, new THREE.BufferAttribute(values, attribute.itemSize));
+  }
+  if (geometry.index) out.setIndex(geometry.index.clone());
+  return out;
 }
 
 /**

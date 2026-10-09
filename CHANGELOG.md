@@ -9,7 +9,14 @@
   localhost), and New drive failed with "Cannot read properties of undefined (reading
   'addModule')". The mixer now treats a missing worklet as a failed load
   (`Mixer.loadWorklet`): the game runs, the mix goes out unlimited and the engines are
-  silent. Full sound on a phone still needs https.
+  silent. Full sound on a phone: `npm run dev:https` (`HTTPS=1`, a self-signed
+  certificate from `@vitejs/plugin-basic-ssl`; accept the warning once on the phone).
+- THE SVYATOGOR AND THE VAZ-2110 KEEP THEIR TRIM. The lamp-and-trim merge
+  (`mergeStaticBodyMeshes`) baked each piece's transform into its geometry in place, and
+  the meshopt-packed GLBs store positions quantized (normalized Int16), so every
+  coordinate past ±1 was clamped: the Svyatogor's bumpers and underbody shrank into a
+  2 m box over the bonnet and the 2110's blinkers left its corners. The pieces are
+  copied to Float32 first (`floatGeometry`); both cars render as before the merge.
 - DEFAULT VIEW 50° AND A BIGGER DASHBOARD. The field of view starts at 50° (was 58°;
   `config/gameplay.json`). The dashboard's old 140% is the new 100% default on desktop
   (`Settings.dashboardSize`, range 55-120%); a save's old `dashboardScale` is carried
