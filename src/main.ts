@@ -2861,6 +2861,22 @@ async function boot(): Promise<void> {
     });
   }
 
+  // DEV: the Panini lens A/B (render/hazeshader.ts `paniniSource`), kept across reloads.
+  const PANINI_STEPS = [0, 0.3, 0.5, 0.7, 1];
+  const PANINI_KEY = 'bro.panini';
+  const devPanini = {
+    get strength(): number {
+      return renderer.panini;
+    },
+    cycle(): void {
+      const at = PANINI_STEPS.indexOf(renderer.panini);
+      const next = PANINI_STEPS[(at + 1) % PANINI_STEPS.length] ?? 0;
+      renderer.setPanini(next);
+      localStorage.setItem(PANINI_KEY, String(next));
+    },
+  };
+  if (import.meta.env.DEV) renderer.setPanini(Number(localStorage.getItem(PANINI_KEY)) || 0);
+
   /**
    * The pause overlay's window on the game. Settings live in world state (so a save
    * carries them), which is why every mutation routes through `world.apply` here
@@ -2870,6 +2886,7 @@ async function boot(): Promise<void> {
     settings: () => world.state.settings,
     frameReport,
     perfOverlay: perfOverlay ?? undefined,
+    panini: import.meta.env.DEV ? devPanini : undefined,
     viewport: () => renderer.viewport(),
     /**
      * Throw away the recorded verdict and measure this machine again.

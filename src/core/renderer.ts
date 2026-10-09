@@ -572,6 +572,7 @@ export class Renderer {
         uHorizon: { value: 0.5 },
         uCameraRotation: { value: new THREE.Matrix3() },
         uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(fieldOfView) / 2) },
+        uPanini: { value: 0 },
         uCameraNear: { value: CAMERA_NEAR },
         uCameraFar: { value: CAMERA_FAR },
         uInkStrength: { value: Math.min(1, Math.max(0, inkStrength)) },
@@ -1095,6 +1096,15 @@ export class Renderer {
     this.hazeEyeHeight = frame.eyeAboveM;
     this.hazeMaterial.uniforms.uGroundSlope.value = frame.groundSlope;
     this.updateDepthResolve();
+  }
+
+  /** Panini lens strength on the finishing pass, 0 = the plain rectilinear frame. */
+  setPanini(strength: number): void {
+    this.hazeMaterial.uniforms.uPanini.value = Math.max(0, strength);
+  }
+
+  get panini(): number {
+    return this.hazeMaterial.uniforms.uPanini.value as number;
   }
 
   /**
