@@ -13,27 +13,34 @@ import { hashUnit2, hashUnit3 } from '../core/rng';
  * A NOISE FIELD CANNOT FIX THAT, and this is the reason for the shape of this file.
  * Blending the parameters continuously would give the road a gradient of averages: a
  * bit twistier here, a bit straighter there, and never a stretch with a name. What a
- * drive needs is places — forty kilometres of mountain switchbacks, then a hundred of
+ * drive needs is places — ten kilometres of mountain switchbacks, then a dozen of
  * dead-straight pan, then rolling sweepers — so the character is a DISTRICT, drawn
  * once, held for its whole length, and crossfaded only over the join.
  *
- * THE LENGTH IS SET BY COVERAGE, and that is arithmetic rather than taste. The
- * requirement is that a player meets every kind of road inside two to three thousand
- * kilometres. Drawing one of `CHARACTERS.length` kinds per district, with the
- * predecessor excluded, the expected distance to have seen them all is the coupon
- * collector's `n * H(n)` districts — about 15 for six kinds. At `DISTRICT_NOMINAL_M`
- * that is some 750 km for the full set, so a 2500 km drive sees everything and sees
- * most of it three or four times. Making districts twice as long would still cover it
- * but leave no repeats; half as long and a district stops being a place.
+ * THE LENGTH IS SET BY PACE OF CHANGE. Fifty-kilometre districts covered every kind
+ * inside some 800 km but held one road for half an hour at highway pace, and the owner
+ * asked for the road to change more often. A district of 10-15 km is eight to twelve
+ * minutes at 80 km/h — long enough to be a place with a name, short enough that the
+ * next one arrives inside a sitting. Coverage then comes almost free: drawing one of
+ * `CHARACTERS.length` kinds per district, with the predecessor excluded, the expected
+ * count to see them all is the coupon collector's `n * H(n)` — about 15 for six kinds,
+ * and the weighted draw below simulates at 15.4 (p90 27) — so some 220 km of road at
+ * `DISTRICT_NOMINAL_M`, home district included. Shorter than about 10 km and a district
+ * stops being a place: the 1.2 km crossfades at both ends become a fifth of it, and a
+ * pan district holds only two or three of its 4 km corner sections.
  *
  * Everything here is a pure function of (seed, s), like every other road property: no
  * state, no tables, and the same road after a reload.
  */
 
-/** Nominal district length, metres. See the coverage arithmetic above. */
-const DISTRICT_NOMINAL_M = 50_000;
-/** Peak-to-peak jitter of a boundary, metres, so a length is never a round number. */
-const DISTRICT_JITTER_M = 12_000;
+/** Nominal district length, metres. See the arithmetic above. */
+const DISTRICT_NOMINAL_M = 12_500;
+/**
+ * Peak-to-peak jitter of a boundary, metres, so a length is never a round number.
+ * Each boundary moves by at most half of it, so a district is the nominal ± this:
+ * 10-15 km, never shorter than four crossfades.
+ */
+const DISTRICT_JITTER_M = 2_500;
 /** Metres the character crossfades over at a join, so no geometry steps. */
 const BLEND_M = 1_200;
 /** Hash domains, kept apart from every other `hash` use in the world. */
@@ -96,7 +103,7 @@ export interface RoadCharacter {
    * for it to be a place you remember and few enough that it is not the road.
    *
    * Coverage survives it: the rarest kind at 0.08 of the deck is expected inside a
-   * dozen districts, which is some 600 km — well inside the drive this world is
+   * dozen districts, which is some 180 km — well inside the drive this world is
    * supposed to show everything in.
    */
   readonly weight: number;
@@ -281,7 +288,7 @@ export function newDistrictBuffer(): DistrictSpan {
  * Which character district `k` drew.
  *
  * THE PREDECESSOR IS EXCLUDED, which is what turns a coin toss into a sequence: two
- * identical districts in a row is a hundred kilometres of the same road, and at six
+ * identical districts in a row is twenty-five kilometres of the same road, and at six
  * kinds that would happen at every sixth boundary. Excluding it is also what bounds
  * the coverage argument above, because every boundary is then guaranteed to be a
  * change.
@@ -373,8 +380,8 @@ export function characterAt(seed: number, s: number, out: MutableCharacter): voi
   const here = characterOf(seed, k);
   const start = districtStart(k, seed);
   const end = districtStart(k + 1, seed);
-  // Only one join can be inside the blend at a time: the blend is two orders of
-  // magnitude shorter than a district.
+  // Only one join can be inside the blend at a time: a district is at least 10 km and
+  // the blend reaches 1.2 km into it from each end.
   const fromStart = (s - start) / BLEND_M;
   const toEnd = (end - s) / BLEND_M;
   if (fromStart >= 1 && toEnd >= 1) {

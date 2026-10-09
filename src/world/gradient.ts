@@ -38,11 +38,12 @@ export function drift(s: number): number {
  *
  * It was 4 000 km, which is the one figure in this file that nobody could ever have
  * reached: it meant a 2 500 km drive saw five eighths of the palette and never the
- * rest. 2 000 km is one full turn inside a drive of that length, so every colour the
- * desert has is somewhere on it — and it is still long enough that consecutive hours
- * look like the same country rather than a slideshow.
+ * rest. Then 2 000 km, one full turn inside a drive of that length. It is 1 000 km
+ * now, with twice as many deserts on the ring: a long drive goes round it more than
+ * twice, and a desert still holds pure for 16-25 km, ten to fifteen minutes at road
+ * speed, so consecutive stretches look like the same country rather than a slideshow.
  */
-export const PALETTE_CYCLE_M = 2_000_000;
+export const PALETTE_CYCLE_M = 1_000_000;
 
 // ---------------------------------------------------------------------------
 // Road decay
@@ -780,11 +781,13 @@ function mixOklab(a: Lab, b: Lab, w: number): Rgb {
  * forgives a saturated warm ground and not a saturated cool one, which is why the
  * strange hues further round are the pale ones.
  *
- * Kilometres are relative weights: they are scaled together to fill PALETTE_CYCLE_M.
+ * Kilometres are relative weights: they are scaled together to fill PALETTE_CYCLE_M,
+ * and they sum to exactly 1 000 so they read as kilometres of the cycle.
  * A BLEND IS SIZED TO ITS DISTANCE. tools/road-condition.ts holds every channel to
  * one 8-bit step per 200 m chunk, and smootherstep's peak slope is 1.875 times the
- * mean, so a blend across `d` channel levels needs at least 0.375·d km; the long ones
- * below are the big jumps into and out of the black.
+ * mean, so a blend across `d` channel levels needs at least 0.375·d km; the accent is
+ * held to the same step. The long ones below are the big jumps into and out of the
+ * black and across the pale-to-saturated edges of the cool deserts.
  */
 interface Desert {
   readonly sand: number;
@@ -795,34 +798,62 @@ interface Desert {
 
 const DESERTS: readonly Desert[] = [
   // The opening ochre. Accent: sunlit crests.
-  { sand: 0xd29459, accent: 0xdfaa70, holdKm: 90, blendKm: 60 },
+  { sand: 0xd29459, accent: 0xdfaa70, holdKm: 25, blendKm: 19 },
   // Golden erg — the Sahara of postcards. Accent: the shadowed troughs between dunes.
-  { sand: 0xd9ad6b, accent: 0xc9975a, holdKm: 80, blendKm: 55 },
+  { sand: 0xd9ad6b, accent: 0xc9975a, holdKm: 18, blendKm: 21 },
+  // Saffron dunes, a paler butter-gold. Accent: cream wind-sorted crests.
+  { sand: 0xdcbb7e, accent: 0xe2cc98, holdKm: 18, blendKm: 15 },
   // Gypsum flats. Accent: fresh white crust.
-  { sand: 0xd4c9ad, accent: 0xe6dfcb, holdKm: 90, blendKm: 60 },
+  { sand: 0xd4c9ad, accent: 0xe6dfcb, holdKm: 20, blendKm: 11 },
+  // Peach-blush sand. Accent: pale shell-pink crust.
+  { sand: 0xdcae96, accent: 0xe8c6b2, holdKm: 18, blendKm: 11 },
   // Coral-pink dunes. Accent: paler wind-sorted crests.
-  { sand: 0xd6937a, accent: 0xe3ae98, holdKm: 80, blendKm: 60 },
+  { sand: 0xd6937a, accent: 0xe3ae98, holdKm: 18, blendKm: 17 },
+  // Apricot erg. Accent: lighter sunlit ripples.
+  { sand: 0xcc7a52, accent: 0xdc9670, holdKm: 18, blendKm: 26 },
   // Namib / Wadi Rum red. Accent: darker iron-rich streaks.
-  { sand: 0xc0673f, accent: 0xa85534, holdKm: 90, blendKm: 55 },
+  { sand: 0xc0673f, accent: 0xa85534, holdKm: 20, blendKm: 21 },
+  // Madder-rose canyon floor. Accent: a softer pink dust.
+  { sand: 0xb06450, accent: 0xc47c66, holdKm: 18, blendKm: 14 },
   // Mars: rust plains under a butterscotch dust. Accent: that dust, drifted.
-  { sand: 0x9e4d2e, accent: 0xbf7a52, holdKm: 110, blendKm: 90 },
+  { sand: 0x9e4d2e, accent: 0xbf7a52, holdKm: 25, blendKm: 24 },
+  // Plum cinder, the oxidised rim of the lava field. Accent: rosier scoria.
+  { sand: 0x683c3e, accent: 0x86524c, holdKm: 18, blendKm: 22 },
   // Black lava — cooled magma, glassy and faintly violet. Accent: grey ash drifts.
-  { sand: 0x34313a, accent: 0x57514f, holdKm: 110, blendKm: 110 },
+  { sand: 0x34313a, accent: 0x57514f, holdKm: 25, blendKm: 19 },
+  // Indigo slate tuff. Accent: paler blue-grey ash.
+  { sand: 0x4a4a5e, accent: 0x63637a, holdKm: 18, blendKm: 17 },
   // Weathered basalt. Accent: darker gravel pans.
-  { sand: 0x6c6762, accent: 0x5a5551, holdKm: 70, blendKm: 70 },
+  { sand: 0x6c6762, accent: 0x5a5551, holdKm: 16, blendKm: 17 },
+  // Lilac pumice. Accent: darker vesicled grit.
+  { sand: 0x857d88, accent: 0x746c78, holdKm: 18, blendKm: 9 },
   // The Moon: regolith, a faintly warm grey — a neutral one read as snow under the
   // blue sky fill. Accent: dark mare dust.
-  { sand: 0x969088, accent: 0x77726b, holdKm: 110, blendKm: 70 },
+  { sand: 0x969088, accent: 0x77726b, holdKm: 25, blendKm: 13 },
+  // Lichen sage. Accent: darker crusted soil.
+  { sand: 0x9fa286, accent: 0x8a8d70, holdKm: 18, blendKm: 16 },
   // Olivine sand. Accent: darker, greener grains.
-  { sand: 0x9b9760, accent: 0x868550, holdKm: 80, blendKm: 60 },
+  { sand: 0x9b9760, accent: 0x868550, holdKm: 18, blendKm: 16 },
+  // Pistachio flats. Accent: deeper green grit.
+  { sand: 0xa9b77e, accent: 0x96a468, holdKm: 18, blendKm: 28 },
   // The strange ones out on the cycle: mint...
-  { sand: 0x9dba9f, accent: 0xb5ccb3, holdKm: 80, blendKm: 60 },
+  { sand: 0x9dba9f, accent: 0xb5ccb3, holdKm: 18, blendKm: 11 },
+  // ...seafoam...
+  { sand: 0x8fb8b4, accent: 0xa9cbc6, holdKm: 18, blendKm: 13 },
   // ...pale sky...
-  { sand: 0xa0b5c9, accent: 0xbccad8, holdKm: 80, blendKm: 60 },
+  { sand: 0xa0b5c9, accent: 0xbccad8, holdKm: 18, blendKm: 9 },
+  // ...periwinkle...
+  { sand: 0xa5a8d0, accent: 0xbcbedd, holdKm: 18, blendKm: 11 },
   // ...lavender...
-  { sand: 0xb3a0c8, accent: 0xc8b9d8, holdKm: 80, blendKm: 60 },
-  // ...and rose brick, which closes the ring back onto the ochre.
-  { sand: 0xc98170, accent: 0xb66a5a, holdKm: 80, blendKm: 70 },
+  { sand: 0xb3a0c8, accent: 0xc8b9d8, holdKm: 18, blendKm: 9 },
+  // ...orchid...
+  { sand: 0xc49cbd, accent: 0xd5b4cf, holdKm: 18, blendKm: 23 },
+  // ...dusty rose...
+  { sand: 0xcf9a9c, accent: 0xcf9e98, holdKm: 18, blendKm: 24 },
+  // ...rose brick...
+  { sand: 0xc98170, accent: 0xb66a5a, holdKm: 18, blendKm: 23 },
+  // ...and salmon apricot, which closes the ring back onto the ochre.
+  { sand: 0xd08a62, accent: 0xdea27c, holdKm: 18, blendKm: 7 },
 ];
 
 const DESERT_SAND_LAB = DESERTS.map((d) => hexToOklab(d.sand));

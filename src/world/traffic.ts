@@ -7,7 +7,7 @@ import { hash01, mulberry32 } from '../core/rng';
 import { createServiceableCarState, poseOnGround } from '../game/spawn';
 import { GameWorld, newWorldState } from '../game/state';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
-import { Autopilot, AUTOPILOT_MODES, roadPaceCeiling, type AutopilotMode } from '../vehicle/autopilot';
+import { Autopilot, AUTOPILOT_MODES, bendSpeed, roadPaceCeiling, type AutopilotMode } from '../vehicle/autopilot';
 import type { TrafficField, TrafficNeighbour } from '../vehicle/trafficfield';
 import { TRAFFIC_CAPS, type Settings } from '../game/settings';
 import type { Item } from '../items/items';
@@ -1628,16 +1628,29 @@ export class RoadTraffic {
    */
   private railCruise(car: TrafficCar, s: number, speed: number): number {
     const reach = Math.max(RAILS_SURVEY_MIN_M, speed * RAILS_SURVEY_HORIZON_S);
+    const mode = car.autopilot.mode;
+    const config = AUTOPILOT_MODES[mode];
     let cruise = car.autopilot.cruisePace;
     for (let k = 0; k <= 2; k++) {
       const distance = reach * k * 0.5;
       const sampleS = s + car.direction * distance;
       this.road.conditionAt(sampleS, this.railCondition);
-      const ceiling = roadPaceCeiling(
-        car.autopilot.mode,
-        this.railCondition,
-        this.road.curvatureAt(sampleS),
-      );
+      const curvature = this.road.curvatureAt(sampleS);
+      let ceiling = roadPaceCeiling(mode, this.railCondition, curvature);
+      // A RACING MODE HAS NO CORNERING BUDGET OF ITS OWN: its `lateralAccel` is out of
+      // every car's reach, so the ceiling above let a frantic car ride a hairpin on
+      // rails at a speed its driver never plans, and a car woken there — at
+      // `RAILS_WAKE_M`, in sight — would be handed a bend it cannot hold. On rails it
+      // takes a bend at the speed its own driver plans on: its share of the tyres, on
+      // the road's curvature, with the tight-bend caution, and no credit for the bank.
+      if (config.racingLine) {
+        const tyreLateral = Math.min(
+          config.lateralAccel,
+          car.vehicle.estimatedLateralAccel(this.railCondition.surface, speed) * config.gripReserve,
+        );
+        const roadCurvature = Math.abs(curvature);
+        ceiling = Math.min(ceiling, bendSpeed(mode, tyreLateral, 0, roadCurvature, roadCurvature));
+      }
       cruise = Math.min(
         cruise,
         Math.sqrt(ceiling * ceiling + 2 * RAILS_COMFORT_DECEL_MPS2 * distance),

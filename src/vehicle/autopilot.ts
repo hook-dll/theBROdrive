@@ -262,7 +262,8 @@ interface ModeConfig {
   /**
    * Drives the least-curved line through a bend (`vehicle/racingline.ts`) instead of
    * the lane's own arc, using the whole asphalt where the opposing half is seen to be
-   * clear, and plans every corner's speed on that line's curvature.
+   * clear, and plans a corner's speed on that line's curvature — except a tight bend,
+   * which is planned on the road's (`tightBendShare`).
    */
   readonly racingLine: boolean;
   /**
@@ -276,6 +277,16 @@ interface ModeConfig {
    * car happens to have. Zero is no trim: the careful drivers never go near the limit.
    */
   readonly curvatureTrim: number;
+  /**
+   * Share of the planned cornering budget a TIGHT bend is taken on: one whose own corner
+   * speed is under `TIGHT_BEND_FREE_MPS`, fully so by `TIGHT_BEND_FULL_MPS`. In such a
+   * bend the speed is also planned on the ROAD's curvature rather than the racing
+   * line's, so the line's extra width is margin, not speed. See `bendSpeed`.
+   *
+   * 1 is no change, and the careful drivers keep it: their own `lateralAccel` is
+   * already well inside the tyres.
+   */
+  readonly tightBendShare: number;
   /**
    * THE RACER: a driver who breaks every rule of the road and none of physics.
    *
@@ -341,6 +352,7 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     brakingDistanceShare: 0.4,
     racingLine: false,
     curvatureTrim: 0,
+    tightBendShare: 1,
     racer: false,
   },
   /**
@@ -377,6 +389,7 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     brakingDistanceShare: 0.4,
     racingLine: false,
     curvatureTrim: 0,
+    tightBendShare: 1,
     racer: false,
   },
   frantic: {
@@ -430,6 +443,17 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     brakingDistanceShare: 0.8,
     racingLine: true,
     curvatureTrim: 1,
+    // A TIGHT BEND IS NOT A FAST BEND TAKEN SLOWLY. The racing line's gain is a fifth
+    // more speed in a 60 m bend, and it was planned at full value — but the line is
+    // laid 0.2 m + 0.035 s·v inside the edge and the car tracks it rather than rides
+    // it, so in a bend whose road speed is double digits the line's width was spent on
+    // speed and nothing was left for the miss on the exit. Such a bend is now planned
+    // toward the road's own curvature and this share of the tyres: by the arithmetic of
+    // `bendSpeed`, a bend whose road speed is 80 km/h, which the line (at the measured
+    // 0.665 of the road's curvature in racingline.ts) put at about 98, is planned at
+    // about 78, and the line's width becomes margin. Sweepers whose road speed is above
+    // `TIGHT_BEND_FREE_MPS` are untouched.
+    tightBendShare: 0.82,
     racer: true,
   },
 };
@@ -579,6 +603,46 @@ export function roadPaceCeiling(
     config.cruiseMps * surfacePaceFactor(mode, condition),
     Math.sqrt(config.lateralAccel / Math.max(Math.abs(curvature), 1e-4)),
   );
+}
+/**
+ * Road corner speed, m/s, above which a bend is taken on the mode's whole plan and
+ * below which `ModeConfig.tightBendShare` fades in, completely by the second figure:
+ * 110 and 70 km/h, so a bend whose speed is double digits is a tight one.
+ */
+const TIGHT_BEND_FREE_MPS = 110 / 3.6;
+const TIGHT_BEND_FULL_MPS = 70 / 3.6;
+/**
+ * THE SPEED A BEND IS PLANNED AT: `tyreLateral` is the share of the tyres this mode
+ * corners on (m/s²), `bankLateral` what the cross-slope gives for free, `pathCurvature`
+ * the curvature of the line the car will drive and `roadCurvature` the road's own.
+ *
+ * For a mode whose `tightBendShare` is 1 this is `sqrt(lateral / curvature)` on the
+ * path, exactly what it always was. For the racing driver, a bend whose ROAD speed is
+ * under `TIGHT_BEND_FREE_MPS` fades from the line's curvature to the road's and from the
+ * whole tyre share to `tightBendShare` of it; the bank is gravity, not grip, and is
+ * never discounted. Everything is continuous in curvature, so the plan has no step at
+ * either threshold.
+ *
+ * Exported so a car on rails is held to the bend speed its own driver plans on.
+ */
+export function bendSpeed(
+  mode: AutopilotMode,
+  tyreLateral: number,
+  bankLateral: number,
+  pathCurvature: number,
+  roadCurvature: number,
+): number {
+  const share = MODES[mode].tightBendShare;
+  if (share >= 1) return Math.sqrt((tyreLateral + bankLateral) / Math.max(pathCurvature, 1e-4));
+  const roadSpeed = Math.sqrt((tyreLateral + bankLateral) / Math.max(roadCurvature, 1e-4));
+  const tight = clamp(
+    (TIGHT_BEND_FREE_MPS - roadSpeed) / (TIGHT_BEND_FREE_MPS - TIGHT_BEND_FULL_MPS),
+    0,
+    1,
+  );
+  const curvature = pathCurvature + Math.max(0, roadCurvature - pathCurvature) * tight;
+  const lateral = tyreLateral * (1 - (1 - share) * tight) + bankLateral;
+  return Math.sqrt(lateral / Math.max(curvature, 1e-4));
 }
 const MIN_PLANNED_BRAKE_MPS2 = 0.75;
 /** Chassis yaw feedback removes weave energy without weakening steady cornering. */
@@ -4567,7 +4631,8 @@ export class Autopilot {
             Math.sqrt(Math.max(0.35, 1 - sampleGradeLoad * sampleGradeLoad)),
         ) * manoeuvreShare;
       // On the racing line a bend is taken at the LINE's curvature, which is the
-      // whole point of it; past the solved window, at the road's.
+      // whole point of it; past the solved window, at the road's. A tight bend is the
+      // exception, and `bendSpeed` says how.
       const curvature =
         this.racingActive && this.racingLine.covers(sample.s)
           ? Math.abs(this.racingLine.pathCurvatureAt(sample.s))
@@ -4584,9 +4649,12 @@ export class Autopilot {
       // it is a force from gravity, not more friction, and only its magnitude counts:
       // a corner is banked INTO the bend whichever way the bend goes.
       const bank = Math.abs(this.road.bankingAt(sample.s));
+      // `bendSpeed` is `sqrt((lateral + bank) / curvature)` for the careful modes; for
+      // the racer it also takes a tight bend on the road's curvature and its
+      // `tightBendShare` of the tyres.
       const localLimit = Math.min(
         straightLimit,
-        Math.sqrt((lateralAccel + GRAVITY * bank) / Math.max(curvature, 1e-4)),
+        bendSpeed(this.modeValue, lateralAccel, GRAVITY * bank, curvature, Math.abs(sample.curvature)),
       );
       const sampleBrake = Math.max(
         MIN_PLANNED_BRAKE_MPS2,

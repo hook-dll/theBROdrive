@@ -19,6 +19,29 @@
   disabled: only a stuck or overturned traffic car can obstruct the clean carriageway.
 - AMBIENT TRAFFIC MIX. After the first two stream positions, both directions use 40%
   frantic, 30% sleeper, and 30% hurried drivers.
+- ROAD DISTRICTS ARE 10-15 KM (`DISTRICT_NOMINAL_M` 12 500, `DISTRICT_JITTER_M`
+  2 500 in `world/roadcharacter.ts`), down from 38-62 km, so the kind of road changes
+  every eight to twelve minutes at 80 km/h and every kind turns up within about 220 km
+  on average (p90 about 370 km), against some 800 km before.
+  The calm 30 km home district and the 1.2 km crossfade at every join are unchanged.
+- FRANTIC DRIVERS SLOW FOR TIGHT BENDS. A bend whose road speed is under 110 km/h is
+  planned on the road's own curvature rather than the racing line's, on a share of the
+  tyres that falls to 0.82 by 70 km/h (`tightBendShare`, `bendSpeed` in
+  `vehicle/autopilot.ts`), so the line's width is kept as margin for the exit instead
+  of being spent on speed. Faster sweepers, sleeper and hurried drivers are unchanged.
+  A frantic car on rails takes bends at that same speed (`railCruise` in
+  `world/traffic.ts`) instead of its unbounded 14 m/s² ceiling, so one woken in sight
+  is not handed a bend it cannot hold.
+- THE DESERT RING HAS TWENTY-EIGHT DESERTS AND TURNS IN 1 000 KM (`DESERTS`,
+  `PALETTE_CYCLE_M` in `world/gradient.ts`), down from fourteen over 2 000 km. The
+  fourteen new ones sit between the old neighbours so each blend has less to cross:
+  saffron, peach blush, apricot, madder rose, plum cinder, indigo slate, lilac pumice,
+  lichen sage, pistachio, seafoam, periwinkle, orchid, dusty rose and salmon apricot,
+  each with its own accent. Holds are 16-25 km (were about 65-100) and blends 7-28 km
+  (were about 50-100), sized to the colour distance they cross. The opening ochre is
+  unchanged at s = 0; every channel, the accent included, still moves at most one
+  8-bit step per 200 m chunk, and sand stays at least 45.7 RGB from rock. The cyclic
+  sky channels (dust, haze, sky tint) follow the shorter period.
 
 - DEFAULT VIEW 65°, MAXIMUM 85° (`config/gameplay.json`), the rectilinear range the
   frame stays sane in (`FIELD_OF_VIEW_MAX` in `game/settings.ts`). A save keeps the FOV
