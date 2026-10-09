@@ -17,6 +17,8 @@
   now a speed floor above the corridor's follow/squeeze target, so a frantic car must
   actually gain on the leader after moving onto the shoulder. Road hazards remain
   disabled: only a stuck or overturned traffic car can obstruct the clean carriageway.
+- AMBIENT TRAFFIC MIX. After the first two stream positions, both directions use 40%
+  frantic, 30% sleeper, and 30% hurried drivers.
 
 - DEFAULT VIEW 65°, MAXIMUM 85° (`config/gameplay.json`), the rectilinear range the
   frame stays sane in (`FIELD_OF_VIEW_MAX` in `game/settings.ts`). A save keeps the FOV

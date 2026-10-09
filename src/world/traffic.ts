@@ -107,17 +107,13 @@ const DENSE_SPAWN_ROAD_GAP_M = 32;
  */
 const PLATOON_CHANCE = 0.32;
 /**
- * Share of ambient drivers drawn FRANTIC (`drawDriver`), by direction.
- *
- * Half of the cars in the player's direction and a quarter of the oncoming ones: the
- * owner's call (2026-10-09). This is an endless desert with no cameras or police, so the
- * traffic drives as it likes on a clean road. Calm drivers still come first in every
- * direction (`directionCount === 0`), and the second car of a direction is still the
- * hurried one, so the road keeps its slow cars to pass. 0.14 / 0.03 was the calm setting:
- * one frantic pass in twenty minutes.
+ * Ambient distribution after the first two stream positions: 40% frantic, 30% sleeper,
+ * and 30% hurried in both directions. The first car remains cautious/sleeper and the
+ * second remains hurried so a stream still has a slower car to pass.
  */
-const FRANTIC_SAME_DIRECTION_SHARE = 0.5;
-const FRANTIC_ONCOMING_SHARE = 0.25;
+const FRANTIC_SHARE = 0.4;
+const SLEEPER_SHARE = 0.3;
+const HURRIED_SHARE = 1 - FRANTIC_SHARE - SLEEPER_SHARE;
 /**
  * WHAT A FRANTIC DRIVER DRIVES, AND WHAT IS UNDER ITS BONNET. Any car the stream can
  * spawn, exactly as it is drawn for every other driver — a man in a hurry is a man in
@@ -2248,7 +2244,7 @@ export class RoadTraffic {
       0,
     );
     const styleRoll = this.random();
-    if (directionCount === 0 || styleRoll < 0.2) {
+    if (directionCount === 0) {
       return {
         style: 'cautious',
         headwayS: 2.2 + this.random() * 0.8,
@@ -2257,26 +2253,17 @@ export class RoadTraffic {
         pace: 0.68 + this.random() * 0.1,
       };
     }
-    // A few are out of time: the FRANTIC mode, the player's own fastest autopilot —
-    // the smaller gap, the racing line, the pass on the shoulder when the opposing
-    // lane is taken. Rare on purpose: one of them is an event on the road, a stream of
-    // them is a race. Never the second car of a direction, which is the hurried one.
-    const franticShare = direction === 1 ? FRANTIC_SAME_DIRECTION_SHARE : FRANTIC_ONCOMING_SHARE;
-    if (directionCount !== 2 && styleRoll >= 1 - franticShare) {
+    if (directionCount !== 2 && styleRoll < SLEEPER_SHARE) {
       return {
-        style: 'frantic',
-        headwayS: 0.9 + this.random() * 0.4,
-        mode: 'frantic',
-        // 137-172 km/h (was 125-160): the fast ones remain visibly faster than hurried
-        // traffic (95-115); the carriageway itself has no spawned obstacles.
-        speedCap: (137 + this.random() * 35) / 3.6,
-        pace: 1,
+        style: 'normal',
+        headwayS: 1.5 + this.random() * 0.9,
+        mode: 'sleeper',
+        speedCap: (72 + this.random() * 12) / 3.6,
+        pace: 0.9 + this.random() * 0.1,
       };
     }
-    // One car in five is in a hurry, and it drives the HURRIED mode: ambient traffic
-    // that overtakes into windows it would take itself.
-    // The frantic share comes out of the ordinary drivers, not the hurried ones.
-    if (directionCount === 2 || styleRoll >= 0.8 - franticShare) {
+    // The second car remains hurried, never frantic, so a stream keeps a slower car to pass.
+    if (directionCount === 2 || styleRoll < SLEEPER_SHARE + HURRIED_SHARE) {
       return {
         style: 'hurried',
         headwayS: 1.0 + this.random() * 0.6,
@@ -2286,11 +2273,12 @@ export class RoadTraffic {
       };
     }
     return {
-      style: 'normal',
-      headwayS: 1.5 + this.random() * 0.9,
-      mode: 'sleeper',
-      speedCap: (72 + this.random() * 12) / 3.6,
-      pace: 0.9 + this.random() * 0.1,
+      style: 'frantic',
+      headwayS: 0.9 + this.random() * 0.4,
+      mode: 'frantic',
+      // 137-172 km/h: the fast ones remain visibly faster than hurried traffic (95-115).
+      speedCap: (137 + this.random() * 35) / 3.6,
+      pace: 1,
     };
   }
   private rollingStartSpeed(
