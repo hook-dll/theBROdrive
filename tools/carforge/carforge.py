@@ -91,6 +91,7 @@ GROOVE_SILL_CLEAR = 10.0  # mm a side gap stops above the sill chamfer
 LINE_WIDTH = 12.0         # mm width of a drawn line (lines[].width)
 LINE_PROUD = 3.0          # mm a drawn line stands off its face
 BUMPER_LIP = 40.0         # mm height of a channel bumper's lips (bumpers[].lip)
+LAYOUT_CLEAR = 8.0        # mm a detail keeps from a panel gap or another detail (check_layout)
 SEAM_TOL = 1.5            # mm a line or groove may stray from its face between probes
 SEAM_MIN = 8.0            # mm between a line's probes of its face
 LAMP_MAX_GAP = 0.060     # m: every lamp vertex must lie within this of the body surface (domes included)
@@ -657,18 +658,44 @@ def clip_band(poly, z0, z1):
     return clip(poly, lambda p: p[1] <= z1, at(z1)) if poly else poly
 
 
-def window_outlines(spec, s):
-    """Each side window's glass edge in side view, [(y, z)] mm, corners rounded. A window
-    with an `outline` (traced corners) uses it. One with only `y` runs from the belt to the
-    glass top, WINDOW_FRAME inside both, its top edge dropping under the rail where the
-    windscreen or back light slope comes down (a slanted A or C pillar), and ending where
-    less than WINDOW_MIN_HEIGHT of glass is left."""
+def pillar_slope(s, key):
+    """dy/dz of the body's A pillar (`a`: where the top line first rises through the glass band)
+    or C pillar (`c`: where it last falls through it), from the traced side silhouette."""
+    z0, z1 = s.belt + 50.0, s.glass_top
+
+    def y_at(z):
+        ys = s.crossings(lambda y: s.top(y) - z)
+        return (ys[0] if key == "a" else ys[-1]) if ys else None
+
+    ya, yb = y_at(z0), y_at(z1)
+    return None if ya is None or yb is None else (yb - ya) / (z1 - z0)
+
+
+def corner_pair(poly, which):
+    """(bottom, top) corners of a window outline's front or rear edge."""
+    mid = (min(z for _, z in poly) + max(z for _, z in poly)) / 2
+    pick = min if which == "front" else max
+    bot = pick((p for p in poly if p[1] < mid), key=lambda p: p[0])
+    top = pick((p for p in poly if p[1] >= mid), key=lambda p: p[0])
+    return bot, top
+
+
+def window_polys(spec, s):
+    """Each side window's glass edge in side view, [(y, z)] mm, before its corners are rounded
+    (None for a window that leaves no glass). A window with an `outline` (traced corners)
+    uses it. One with only `y` runs from the belt to the glass top, WINDOW_FRAME inside both,
+    its top edge dropping under the rail where the windscreen or back light slope comes down
+    (a slanted A or C pillar), and ending where less than WINDOW_MIN_HEIGHT of glass is left.
+
+    Rule: `pillar: "a"` (front edge) or `"c"` (rear edge) makes that edge parallel to the
+    body's A or C pillar, pivoting on its bottom corner: glass beside a pillar follows it."""
     out = []
     for w in spec.get("windows", []):
         if "outline" in w:  # kept inside the glass band, where the side is the tumblehome surface
             poly = clip_band([(float(y), float(z)) for y, z in w["outline"]],
                              s.belt + GLASS_CLEAR, s.glass_top - GLASS_CLEAR)
             if len(poly) < 3:
+                out.append(None)
                 continue
         else:
             a, b = w["y"]
@@ -686,10 +713,42 @@ def window_outlines(spec, s):
             if run:
                 runs.append(run)
             if not runs:
+                out.append(None)
                 continue
             top = simplify(max(runs, key=len), 3.0)
             poly = [(top[0][0], z0), (top[-1][0], z0)] + top[::-1]
-        out.append(rounded(poly, float(w.get("round", WINDOW_ROUND))))
+        for key, which in (("a", "front"), ("c", "rear")):
+            if w.get("pillar") == key and (k := pillar_slope(s, key)) is not None:
+                bot, top = corner_pair(poly, which)
+                moved = (bot[0] + (top[1] - bot[1]) * k, top[1])
+                poly = [moved if p == top else p for p in poly]
+        out.append(poly)
+    return out
+
+
+def window_outlines(spec, s):
+    """The side windows' outlines (window_polys) with their corners rounded by `round`."""
+    return [rounded(poly, float(w.get("round", WINDOW_ROUND)))
+            for w, poly in zip(spec.get("windows", []), window_polys(spec, s)) if poly]
+
+
+def expand_line(spec, s, line):
+    """A line's points, with each `{edge: [window, "front"|"rear"], offset, z: [lo, hi]}` entry
+    replaced by the two ends of a line parallel to that window edge, `offset` mm along y from
+    it, spanning z (in the order given). Rule: a door's edge follows the glass it frames."""
+    polys = window_polys(spec, s) if any(isinstance(p, dict) for p in line) else []
+    out = []
+    for p in line:
+        if not isinstance(p, dict):
+            out.append(tuple(p))
+            continue
+        i, which = p["edge"]
+        if polys[i] is None:
+            fail(f"line follows window {i}, which has no glass")
+        (yb, zb), (yt, zt) = corner_pair(polys[i], which)
+        k = (yt - yb) / (zt - zb)
+        for z in p["z"]:
+            out.append((yb + (z - zb) * k + float(p.get("offset", 0.0)), float(z)))
     return out
 
 
@@ -937,13 +996,14 @@ def probe_line(bvh, face, line, tol, step, keep_if=None):
     return out
 
 
-def line_items(spec):
-    """(kind, item) of `lines` and `grooves`; side `seams` [(y, z)] polylines are grooves."""
+def line_items(spec, s):
+    """(kind, item) of `lines` and `grooves`, their lines expanded (expand_line); side `seams`
+    [(y, z)] polylines are grooves."""
     for key in ("lines", "grooves"):
         for it in spec.get(key, []):
-            yield key, it
+            yield key, dict(it, line=expand_line(spec, s, it["line"]))
     for line in spec.get("seams", []):
-        yield "grooves", {"face": "side", "line": line}
+        yield "grooves", {"face": "side", "line": expand_line(spec, s, line)}
 
 
 def closed(it):
@@ -951,13 +1011,13 @@ def closed(it):
     return line + [line[0]] if it.get("closed") else line
 
 
-def add_lines(spec, body, bvh):
+def add_lines(spec, s, body, bvh):
     """Drawn lines (`lines`): dark ribbons `width` (LINE_WIDTH) wide, LINE_PROUD off the face,
-    for what is painted on rather than cut: bonnet ribs, a fuel flap's outline."""
+    for what is painted on rather than cut: bonnet ribs."""
     bm = bmesh.new()
     bm.from_mesh(body.data)
     uvl = bm.loops.layers.uv["UVMap"]
-    for kind, it in line_items(spec):
+    for kind, it in line_items(spec, s):
         if kind != "lines":
             continue
         face = it["face"]
@@ -995,7 +1055,7 @@ def cut_grooves(spec, s, body, bvh):
     def above_sill(p, _n):
         return p.z > s.bottom(p.y) + SILL_CHAMFER + GROOVE_SILL_CLEAR
 
-    for kind, it in line_items(spec):
+    for kind, it in line_items(spec, s):
         if kind != "grooves":
             continue
         face = it["face"]
@@ -1196,8 +1256,82 @@ def build_lamps(spec, cid, body, objs):
         objs.append(finish(bm, f"{cid}.body.{role}"))
 
 
+def _sample(poly, closed_loop, step=5.0):
+    pts = list(poly) + ([poly[0]] if closed_loop else [])
+    out = []
+    for a, b in zip(pts, pts[1:]):
+        n = max(1, int(math.hypot(b[0] - a[0], b[1] - a[1]) // step))
+        out += [(a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n) for k in range(n)]
+    return out + [pts[-1]]
+
+
+def _inside(p, poly):
+    x, y = p
+    hit = False
+    for (ax, ay), (bx, by) in zip(poly, poly[1:] + poly[:1]):
+        if (ay > y) != (by > y) and x < ax + (y - ay) * (bx - ax) / (by - ay):
+            hit = not hit
+    return hit
+
+
+def _seg_dist(p, a, b):
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    t = max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / ((dx * dx + dy * dy) or 1.0)))
+    return math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy)
+
+
+def check_layout(spec, s):
+    """Rule: details do not sit on each other. On every face, a lamp, plate, recess or side
+    window keeps LAYOUT_CLEAR mm (plus the gap's half width) from every panel gap, and does not
+    overlap another such detail; a closed gap (a flap) keeps that clearance from every other
+    gap. Being inside a closed gap (a handle on a door) is fine. A plate with `straddle` (a
+    hinge) may cross gaps. Fails with every clash listed, so a spec is fixed once."""
+    shapes, gaps = [], []
+    for key in ("lamps", "plates", "recesses"):
+        for it in spec.get(key, []):
+            ku = "y" if it["face"] in ("side", "top") else "x"
+            shapes.append((f"{key[:-1]} {it.get('role', '')} {ku}={it[ku]}".replace("  ", " "),
+                           it["face"], item_outline(it), bool(it.get("straddle"))))
+    for i, poly in enumerate(window_polys(spec, s)):
+        if poly:
+            shapes.append((f"window {i}", "side", poly, False))
+    for kind, it in line_items(spec, s):
+        if kind == "grooves":
+            line = [tuple(p) for p in it["line"]]
+            loop = bool(it.get("closed"))
+            pts = line + ([line[0]] if loop else [])
+            gaps.append((it["face"], line, loop, float(it.get("width", GROOVE_WIDTH)) / 2, list(zip(pts, pts[1:]))))
+
+    def where(line):
+        return [tuple(round(v) for v in q) for q in line[:2]]
+
+    clashes = []
+    for name, face, poly, straddle in shapes:
+        edge = _sample(poly, True)
+        if not straddle:
+            for gface, line, loop, half, segs in gaps:
+                if gface == face and (any(_seg_dist(p, a, b) < half + LAYOUT_CLEAR for p in edge for a, b in segs)
+                                      or any(_inside(q, poly) for q in _sample(line, loop))):
+                    clashes.append(f"{name} on {face} meets the panel gap {where(line)}…")
+        for other, oface, opoly, _ in shapes:
+            if oface == face and other > name and (any(_inside(p, opoly) for p in edge)
+                                                   or any(_inside(q, poly) for q in _sample(opoly, True))):
+                clashes.append(f"{name} and {other} overlap on {face}")
+    for gi, (face, line, loop, half, _) in enumerate(gaps):
+        if not loop:
+            continue
+        edge = _sample(line, True)
+        for gj, (oface, oline, _, ohalf, osegs) in enumerate(gaps):
+            if gj != gi and oface == face and any(_seg_dist(p, a, b) < half + ohalf + LAYOUT_CLEAR
+                                                  for p in edge for a, b in osegs):
+                clashes.append(f"flap {where(line)} on {face} meets the panel gap {where(oline)}…")
+    if clashes:
+        fail("layout clashes:\n  " + "\n  ".join(clashes))
+
+
 def build_body(spec, cid):
     s = Shape(spec)
+    check_layout(spec, s)
     bm, uvl = new_bm()
     build_shell(spec, s, bm, uvl)
     body = finish(bm, f"{cid}.body")
@@ -1208,7 +1342,7 @@ def build_body(spec, cid):
     cut_grooves(spec, s, body, uncut)
     weld_cuts(body)
     add_arch_lips(spec, s, body, uncut)
-    add_lines(spec, body, uncut)
+    add_lines(spec, s, body, uncut)
     add_details(spec, body)
     bm = bmesh.new()
     bm.from_mesh(body.data)

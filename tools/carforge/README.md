@@ -59,6 +59,15 @@ Face coordinates (mm): `front`/`rear` (x, z); `side` (y, z) on the left side, mi
 
 `validate()` in carforge.py rejects specs missing `id`, `wheels` (radius, width, track_front, track_rear, wheelbase), `side.top/bottom/shoulder` (≥ 2 points), `plan.low/high` (≥ 2 points), `belt`, `glass_top`, unknown lamp roles, and lamp faces other than `front`/`rear`/`side`.
 
+## Rules the generator enforces
+
+Taken from the owner's reviews, so the next car does not need the same corrections by hand:
+
+1. **Glass follows its pillar.** `windows[].pillar: "a"|"c"` turns the window's front (rear) edge parallel to the body's A (C) pillar from the traced silhouette, pivoting on its bottom corner.
+2. **A door edge follows the glass it frames.** A line point `{edge: [window, "front"|"rear"], offset, z}` expands to a segment parallel to that window edge, `offset` mm along y (the frame's width).
+3. **Details do not sit on each other** (`check_layout`, run before the build): lamps, plates, recesses and side windows keep 8 mm plus the gap's half width from every panel gap and do not overlap each other; a closed gap (a fuel flap) keeps clear of every other gap; being inside a door outline is fine; a `straddle` plate (a hinge) may cross gaps. The build fails with every clash listed.
+4. **Panel gaps never cut the body's edge:** side gaps stop above the sill chamfer; arch lips end above it with their flare run out.
+
 ## Blueprint input (`fit_blueprint.py`)
 
 Input is a traced side (and optionally front) blueprint in pixels. Keys:
