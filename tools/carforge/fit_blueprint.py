@@ -7,18 +7,23 @@ Input (JSON). Pixel coordinates are image pixels; rows grow downward; the front 
 share one scale and one ground row (z0_px) so that z means the same thing in both.
 
   id, source            spec id and provenance text (copied to the output)
-  scale                 {mm_per_px, y0_px, z0_px, x0_px}
+  scale                 {mm_per_px, y0_px, z0_px, x0_px, top_x0_px?, rear_x0_px?, deskew?}
                           y = (px - y0_px) * mm_per_px      side x-px of the front axle is y0_px
                           z = (z0_px - py) * mm_per_px      ground row is z0_px
                           x = (px - x0_px) * mm_per_px      front view, car left = +x
+                        top_x0_px (top view centre row; the top view's columns are the side view's),
+                        rear_x0_px (rear view centre column) and deskew {deg, centre} (the rotation
+                        trace.py applied to the scan) only place renders for compare.py; the spec
+                        does not use them
   side                  {top, bottom, shoulder}: [[px, py], ...] side-view polylines (mm: y, z)
   plan                  {low, high}: [[px, hw_px], ...] plan half-widths, px along the side x-axis
                           (low = below the shoulder, high = above it)
   tumblehome            [[py, factor], ...] greenhouse half-width factor, relative to the belt width
   belt, glass_top       side-view rows (py)
   windscreen            [px0, px1] y-range of the windscreen (px)
-  windows               [[px0, px1] | {outline: [[px, py], ...], round?}, ...] side windows: a y-range
-                          (px), or the glass edge's corners traced in the side view (round: mm)
+  windows               [[px0, px1] | {outline: [[px, py], ...], round?, pillar?}, ...] side windows: a
+                          y-range (px), or the glass edge's corners traced in the side view (round: mm;
+                          pillar "a"|"c": that edge follows the A or C pillar), flags copied
   seams                 [[[px, py], ...], ...] door and panel seam polylines in the side view
   arches                {front|rear: {outline: [[px, py], ...], lip?, flare?}}: the arch opening's
                           edge in the side view, front to rear (lip/flare in mm, copied)
@@ -93,8 +98,9 @@ def main():
         if isinstance(w, dict):
             out = {"y": [y_of(min(p[0] for p in w["outline"])), y_of(max(p[0] for p in w["outline"]))],
                    "outline": side_line(w["outline"])}
-            if "round" in w:
-                out["round"] = w["round"]
+            for k in ("round", "pillar"):
+                if k in w:
+                    out[k] = w[k]
             windows.append(out)
         else:
             windows.append({"y": [y_of(w[0]), y_of(w[1])]})

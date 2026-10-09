@@ -3,9 +3,13 @@
   blender --background --factory-startup --python tools/carforge/render.py -- \
       --fbx car.fbx --albedo public/models/soviet/albedo.png --prefix build/carforge/renders/name
 
-Writes <prefix>_side.png (from +X, left side), <prefix>_front.png (from -Y), <prefix>_q.png (front-left
-3/4, perspective), <prefix>_qrear.png (rear-left 3/4), <prefix>_wire.png (wireframe over shaded body),
-and <prefix>_side.json (the side view's mm per pixel and centre, for compare.py).
+Writes <prefix>_side.png (from +X, left side), <prefix>_front.png (from -Y), <prefix>_rear.png (from +Y),
+<prefix>_top.png (from +Z), <prefix>_q.png (front-left 3/4, perspective), <prefix>_qrear.png (rear-left
+3/4), <prefix>_wire.png (wireframe over shaded body), and for every orthographic view a <prefix>_<view>.json
+for compare.py: {mm_per_px, centre_mm, axes, size}. `axes` names the world axis along image right and
+image up: side [+y, +z], front [+x, +z], rear [-x, +z], top [+y, -x] (the top view has the nose left and
+the car's left side at the bottom, under the side view); centre_mm holds the world coordinates (mm, unsigned)
+of the image-centre pixel on those two axes.
 Textures use the same atlas the game ships; no lights are needed for Workbench studio shading.
 """
 
@@ -48,14 +52,17 @@ def bbox_centre_and_size(objs):
     return (lo + hi) / 2, hi - lo
 
 
-def place_camera(name, direction, centre, size, ortho_extent, aspect):
+def place_camera(name, direction, centre, size, ortho_extent, aspect, rotation=None):
     cam_data = bpy.data.cameras.new(name)
     cam = bpy.data.objects.new(name, cam_data)
     bpy.context.scene.collection.objects.link(cam)
     d = direction.normalized()
     radius = max(size) * 3.0
     cam.location = centre + d * radius
-    cam.rotation_euler = (centre - cam.location).to_track_quat("-Z", "Y").to_euler()
+    if rotation is None:
+        cam.rotation_euler = (centre - cam.location).to_track_quat("-Z", "Y").to_euler()
+    else:
+        cam.rotation_euler = rotation
     if ortho_extent is not None:
         cam_data.type = "ORTHO"
         hx, hz = ortho_extent
@@ -102,24 +109,30 @@ def main():
     print("EXTENT " + " ".join(f"{v:.4f}" for v in size) + f" centre={tuple(round(c, 4) for c in centre)}")
     os.makedirs(os.path.dirname(os.path.abspath(a.prefix)), exist_ok=True)
     aspect = a.size[0] / a.size[1]
+    # (label, direction, ortho extent (image width, height) or None, wire, camera rotation, axes)
     views = [
-        ("side", Vector((1, 0, 0.0)), (size.y, size.z), False),
-        ("front", Vector((0, -1, 0.0)), (size.x, size.z), False),
-        ("q", Vector((0.85, -0.85, 0.42)), None, False),
-        ("qrear", Vector((-0.85, 0.85, 0.42)), None, False),
-        ("wire", Vector((0.85, -0.85, 0.42)), None, True),
+        ("side", Vector((1, 0, 0.0)), (size.y, size.z), False, None, ("+y", "+z")),
+        ("front", Vector((0, -1, 0.0)), (size.x, size.z), False, None, ("+x", "+z")),
+        ("rear", Vector((0, 1, 0.0)), (size.x, size.z), False, None, ("-x", "+z")),
+        # looking down, image right = +Y (rearward), image up = -X: camera local X -> world Y
+        ("top", Vector((0, 0, 1.0)), (size.y, size.x), False, (0.0, 0.0, math.pi / 2), ("+y", "-x")),
+        ("q", Vector((0.85, -0.85, 0.42)), None, False, None, None),
+        ("qrear", Vector((-0.85, 0.85, 0.42)), None, False, None, None),
+        ("wire", Vector((0.85, -0.85, 0.42)), None, True, None, None),
     ]
-    for label, d, extent, wire in views:
-        cam = place_camera("cam_" + label, d, centre, size, extent, aspect)
+    world = {"x": centre.x, "y": centre.y, "z": centre.z}
+    for label, d, extent, wire, rotation, axes in views:
+        cam = place_camera("cam_" + label, d, centre, size, extent, aspect, rotation)
         for o in meshes:
             o.show_wire = wire
             o.display_type = "WIRE" if wire else "TEXTURED"
         render_to(f"{a.prefix}_{label}.png", a.size)
         print("RENDER " + f"{a.prefix}_{label}.png")
-        if label == "side":  # image right = +Y (rearward), up = +Z; centre pixel = world (y, z) below
-            with open(f"{a.prefix}_side.json", "w") as fh:
+        if axes:  # the image centre pixel is this world point along the image's (right, up) axes
+            with open(f"{a.prefix}_{label}.json", "w") as fh:
                 json.dump({"mm_per_px": cam.data.ortho_scale * 1000 / a.size[0],
-                           "centre_mm": [centre.y * 1000, centre.z * 1000], "size": a.size}, fh)
+                           "centre_mm": [world[ax[1]] * 1000 for ax in axes], "axes": list(axes),
+                           "size": a.size}, fh)
 
 
 if __name__ == "__main__":
