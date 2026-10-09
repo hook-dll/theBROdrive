@@ -399,6 +399,14 @@ export class CameraRig {
   private steerLook = 0;
   /** Body roll carried into the bonnet view, radians; zero in steady. */
   private hoodRoll = 0;
+  /**
+   * Lens shift of the driving views (DEV), as a fraction of the frame height: the
+   * frustum slides down by this much while the camera's orientation stays put, so more
+   * of the near road is in the frame with verticals still vertical. Applied to the
+   * chase and bonnet views only; on foot, through the binoculars, in a death or a
+   * scripted shot the frame stays centred.
+   */
+  private lensShift = 0;
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
@@ -423,6 +431,11 @@ export class CameraRig {
     this.fov += next - this.baseFov;
     this.baseFov = next;
     this.baseHalfTan = Math.tan((next * Math.PI) / 360);
+  }
+
+  /** Lens shift of the driving views, a fraction of the frame height; see `lensShift`. */
+  setLensShift(fraction: number): void {
+    this.lensShift = Math.max(0, fraction);
   }
 
   /** `Settings.cameraShake`: whether the driving view trembles at speed. */
@@ -557,7 +570,7 @@ export class CameraRig {
     this.camera.position.copy(this.eye);
     _vD.set(0, 0, -LOOK_AHEAD).applyQuaternion(this.camera.quaternion);
     this.lookAt.copy(this.eye).add(_vD);
-    this.updateFov(0, d);
+    this.updateFov(0, d, 0);
     return riseSmooth;
   }
 
@@ -593,17 +606,7 @@ export class CameraRig {
     this.camera.position.copy(this.eye);
 
     this.fov += (fovDeg - this.fov) * (1 - Math.exp(-FOV_OMEGA * d));
-    const targetNear = nearPlaneForFarPlane(this.camera.far);
-    let projectionChanged = false;
-    if (Math.abs(this.fov - this.camera.fov) > FOV_EPSILON) {
-      this.camera.fov = this.fov;
-      projectionChanged = true;
-    }
-    if (this.camera.near !== targetNear) {
-      this.camera.near = targetNear;
-      projectionChanged = true;
-    }
-    if (projectionChanged) this.camera.updateProjectionMatrix();
+    this.updateProjection(0);
   }
 
   /**
@@ -805,7 +808,8 @@ export class CameraRig {
     // which also live in the relative frame, so no absolute accessor is needed.
     this.camera.position.copy(this.eye);
 
-    this.updateFov(target.speedKmh, d);
+    const shift = mode !== 'foot' && !this.binoculars ? this.lensShift : 0;
+    this.updateFov(target.speedKmh, d, shift);
   }
 
   /* ---- desired pose per mode; each writes _vA = eye, _vB = look-at ---- */
@@ -1087,11 +1091,20 @@ export class CameraRig {
     if (_vA.y < floor) _vA.y = floor;
   }
 
-  private updateFov(speedKmh: number, dt: number): void {
+  private updateFov(speedKmh: number, dt: number, shift: number): void {
     const normalFov =
       this.baseFov + FOV_SPEED_WIDENING * clamp(speedKmh / FOV_FULL_SPEED, 0, 1);
     const targetFov = this.binoculars ? this.baseFov / BINOCULAR_POWER : normalFov;
     this.fov += (targetFov - this.fov) * (1 - Math.exp(-FOV_OMEGA * dt));
+    this.updateProjection(shift);
+  }
+
+  /**
+   * Hands the live FOV, the near plane kept in step with the far one, and the frustum's
+   * vertical shift (a fraction of the frame height, 0 = centred) to the camera, and
+   * rebuilds its projection only when one of them changed.
+   */
+  private updateProjection(shift: number): void {
     const targetNear = nearPlaneForFarPlane(this.camera.far);
     let projectionChanged = false;
     if (Math.abs(this.fov - this.camera.fov) > FOV_EPSILON) {
@@ -1102,7 +1115,16 @@ export class CameraRig {
       this.camera.near = targetNear;
       projectionChanged = true;
     }
-    if (projectionChanged) this.camera.updateProjectionMatrix();
+    const view = this.camera.view;
+    const appliedShift = view !== null && view.enabled ? view.offsetY : 0;
+    if (shift !== appliedShift) {
+      // Both rebuild the projection matrix themselves. A unit full frame: three reads
+      // the offset as a share of it, so the shift is independent of the canvas size.
+      if (shift > 0) this.camera.setViewOffset(1, 1, 0, shift, 1, 1);
+      else this.camera.clearViewOffset();
+    } else if (projectionChanged) {
+      this.camera.updateProjectionMatrix();
+    }
   }
 
   /** Local-space look vector from yaw/pitch: 0 -> +Z, +pitch -> up, +yaw -> +X. */

@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Removed
+
+- THE PANINI AND CYLINDER LENSES. Both made the owner motion-sick. The finishing pass
+  samples the scene 1:1 again (no lens uniforms, no Catmull-Rom sampling, no 1.25x
+  scene target), and the dev menu's Lens button and its `bro.lens` storage are gone.
+
+### Changed
+
+- DEFAULT VIEW 65°, MAXIMUM 85° (`config/gameplay.json`), the rectilinear range the
+  frame stays sane in (`FIELD_OF_VIEW_MAX` in `game/settings.ts`). A save keeps the FOV
+  it stored: a 0.21.0 save that was left at that release's 85° default still has 85°
+  and is moved back with the Field of View slider; one above 85° is clamped to 85°.
+
+### Added
+
+- LENS SHIFT (dev builds). Pause › Lens shift: 0% / 10% / 20% / 30% slides the driving
+  views' frustum down by that share of the frame height (`CameraRig.setLensShift`,
+  three's `setViewOffset`): the camera stays level, more of the near road is in the
+  frame, verticals stay vertical. Chase and bonnet only; on foot, through the
+  binoculars and in scripted shots the frame stays centred. The finishing pass
+  reconstructs its view rays and the horizon row through the same shift
+  (`uLensShift` in `render/hazeshader.ts`), so haze, the dust wall and the sand veil
+  stay on the world. A uniform, not a program variant. Remembered as `bro.lensShift`.
+
 ## 0.21.0 — 2026-10-09
 
 A wide view through a Panini lens, a dense haboob you can barely see out of, fewer draw calls (shared prop batches, instanced poles, merged lamps), smoothly turning wheels, the game starting from a phone over the LAN, and the first commit of carforge, a low-poly car generator built like the Soviet pack.

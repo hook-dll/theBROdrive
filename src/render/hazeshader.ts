@@ -404,18 +404,11 @@ export const HAZE_FRAGMENT = /* glsl */ `
   uniform mat3 uCameraRotation;
   uniform float uTanHalfFov;
   /**
-   * The lens on the finishing pass, 0 = the plain rectilinear frame, 1 = Panini,
-   * 2 = cylindrical. The scene is rendered rectilinear; the lens shows it fitted to the
-   * same horizontal coverage, so the edges stop stretching and the centre comes up
-   * larger. A uniform, not a define: switching lens never recompiles a program.
+   * The frustum's vertical shift in NDC (minus the projection's elements[9]): a screen
+   * row at NDC y looks along the ray the centred frustum has at y - uLensShift.
+   * 0 unless the DEV lens shift is on (render/cameras.ts \`lensShift\`).
    */
-  uniform float uLensMode;
-  /** Panini projection strength d (only read when uLensMode is 1). */
-  uniform float uPanini;
-  /** 1 when the scene is sampled Catmull-Rom filtered (a lens is on, not the retro rung). */
-  uniform float uLensFilter;
-  /** Size of tDiffuse in texels: the scene target, which a lens makes larger than the frame. */
-  uniform vec2 uSceneResolution;
+  uniform float uLensShift;
   uniform float uCameraNear;
   uniform float uCameraFar;
   uniform float uInkStrength;
@@ -488,90 +481,15 @@ export const HAZE_FRAGMENT = /* glsl */ `
   const float BOIL_SLICE_SHIFT = 37.0;
   const float TURN = 6.28318530718;
 
-  /** Unit view-space direction for a pixel. */
+  /** Unit view-space direction for a pixel, through the shifted frustum. */
   vec3 cameraRay(vec2 uv) {
     vec2 ndc = uv * 2.0 - 1.0;
     float aspect = uResolution.x / uResolution.y;
     return normalize(vec3(
       ndc.x * aspect * uTanHalfFov,
-      ndc.y * uTanHalfFov,
+      (ndc.y - uLensShift) * uTanHalfFov,
       -1.0
     ));
-  }
-
-  /**
-   * Where in the rectilinear scene image a Panini-projected screen pixel looks.
-   *
-   * The output keeps the frame's full horizontal coverage (the rectilinear edge maps to
-   * the screen edge), with one scale for both axes, so the middle of the frame is
-   * magnified and the top and bottom lose a little. Inverse of Sharpless' Panini:
-   * screen (x, y) -> longitude, latitude -> rectilinear tangent plane.
-   */
-  vec2 paniniSource(vec2 uv) {
-    float aspect = uResolution.x / uResolution.y;
-    float tx = uTanHalfFov * aspect;
-    float d = uPanini;
-    float edge = atan(tx);
-    float xMax = (d + 1.0) * sin(edge) / (d + cos(edge));
-    float scale = xMax / tx;
-    vec2 ndc = uv * 2.0 - 1.0;
-    float x = ndc.x * tx * scale;
-    float y = ndc.y * uTanHalfFov * scale;
-    float k = x * x / ((d + 1.0) * (d + 1.0));
-    float dscr = max(0.0, k * k * d * d - (k + 1.0) * (k * d * d - 1.0));
-    float clon = (-k * d + sqrt(dscr)) / (k + 1.0);
-    float s = (d + 1.0) / (d + clon);
-    float lon = atan(x, s * clon);
-    float lat = atan(y, s);
-    vec2 plane = vec2(tan(lon), tan(lat) / cos(lon));
-    return clamp(vec2(plane.x / tx, plane.y / uTanHalfFov) * 0.5 + 0.5, 0.0, 1.0);
-  }
-
-  /**
-   * Where in the scene a cylindrically projected pixel looks. Only the horizontal axis
-   * is warped: x becomes the view angle, so the edges keep the full rectilinear
-   * coverage with the rays spread evenly in angle, while y is the rectilinear tangent
-   * unchanged. Verticals and horizons both stay straight, every column keeps the full
-   * height, and nothing is cropped vertically. The centre is magnified by tx / atan(tx),
-   * and the edges are minified: that is the price of keeping their coverage.
-   */
-  vec2 cylinderSource(vec2 uv) {
-    float aspect = uResolution.x / uResolution.y;
-    float tx = uTanHalfFov * aspect;
-    float lon = (uv.x * 2.0 - 1.0) * atan(tx);
-    return vec2(tan(lon) / tx * 0.5 + 0.5, uv.y);
-  }
-
-  /**
-   * Catmull-Rom bicubic sample of the scene in nine bilinear taps. A lens magnifies the
-   * centre past the scene target's own texel grid, and a bilinear tap there is the soft
-   * look the lens used to have.
-   */
-  vec4 sceneSample(sampler2D tex, vec2 uv) {
-    vec2 samplePos = uv * uSceneResolution;
-    vec2 texPos1 = floor(samplePos - 0.5) + 0.5;
-    vec2 f = samplePos - texPos1;
-    vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
-    vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
-    vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
-    vec2 w3 = f * f * (-0.5 + 0.5 * f);
-    vec2 w12 = w1 + w2;
-    vec2 offset12 = w2 / w12;
-    vec2 texPos0 = (texPos1 - 1.0) / uSceneResolution;
-    vec2 texPos3 = (texPos1 + 2.0) / uSceneResolution;
-    vec2 texPos12 = (texPos1 + offset12) / uSceneResolution;
-    vec4 result = vec4(0.0);
-    result += texture2D(tex, vec2(texPos0.x, texPos0.y)) * w0.x * w0.y;
-    result += texture2D(tex, vec2(texPos12.x, texPos0.y)) * w12.x * w0.y;
-    result += texture2D(tex, vec2(texPos3.x, texPos0.y)) * w3.x * w0.y;
-    result += texture2D(tex, vec2(texPos0.x, texPos12.y)) * w0.x * w12.y;
-    result += texture2D(tex, vec2(texPos12.x, texPos12.y)) * w12.x * w12.y;
-    result += texture2D(tex, vec2(texPos3.x, texPos12.y)) * w3.x * w12.y;
-    result += texture2D(tex, vec2(texPos0.x, texPos3.y)) * w0.x * w3.y;
-    result += texture2D(tex, vec2(texPos12.x, texPos3.y)) * w12.x * w3.y;
-    result += texture2D(tex, vec2(texPos3.x, texPos3.y)) * w3.x * w3.y;
-    // Catmull-Rom overshoots at high-contrast edges; a negative colour channel is meaningless.
-    return max(result, vec4(0.0));
   }
 
   /** Perspective depth-buffer value converted to negative view-space Z. */
@@ -809,22 +727,17 @@ export const HAZE_FRAGMENT = /* glsl */ `
   }
 
   void main() {
-    // The scene image's coordinate this screen pixel shows: itself, or through the
-    // Panini lens. Everything that reads the scene uses it; the screen overlays
-    // (binocular eyes, viewfinder) stay on vUv.
-    vec2 sceneUv = uLensMode > 1.5 ? cylinderSource(vUv)
-      : uLensMode > 0.5 ? paniniSource(vUv) : vUv;
-    vec2 uv = sceneUv;
+    vec2 uv = vUv;
     // One depth tap every pixel pays whatever happens: the veil, the ink gate and
     // the warp all read it.
-    float ownViewZ = perspectiveDepthToViewZ(texture2D(tDepth, sceneUv).x);
+    float ownViewZ = perspectiveDepthToViewZ(texture2D(tDepth, vUv).x);
     float airViewZ = ownViewZ;
     float mirageWeight = 0.0;
-    vec2 mirrorUv = sceneUv;
+    vec2 mirrorUv = vUv;
     // A uniform branch, so every fragment takes the same side: at night and on the
     // cheapest tier nothing below is evaluated at all.
     if (uStrength > 0.0 || uMirage > 0.0) {
-      vec3 viewDir = cameraRay(sceneUv);
+      vec3 viewDir = cameraRay(vUv);
       vec3 dir = normalize(uCameraRotation * viewDir);
       float distance = rayDistance(ownViewZ, viewDir);
       // The ray's climb over the grazed-ground line, per metre of ray: what decides
@@ -862,7 +775,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
         // car cannot have come from the car, so a displaced sample that lands on
         // anything the near gate keeps rigid is not taken: the pixel keeps its own
         // colour instead of a wobbling fringe of somebody's paint.
-        vec2 candidate = clamp(sceneUv + offset, 0.0, 1.0);
+        vec2 candidate = clamp(vUv + offset, 0.0, 1.0);
         float candidateViewZ = perspectiveDepthToViewZ(texture2D(tDepth, candidate).x);
         float keep = smoothstep(
           NEAR_CLEAR_M,
@@ -870,7 +783,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
           rayDistance(candidateViewZ, viewDir)
         );
         offset *= keep;
-        uv = clamp(sceneUv + offset, 0.0, 1.0);
+        uv = clamp(vUv + offset, 0.0, 1.0);
         airViewZ = keep > 0.5 ? candidateViewZ : ownViewZ;
       }
 
@@ -888,7 +801,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
         // direction is 2·graze up it.
         vec3 up = vec3(uCameraRotation[0][1], uCameraRotation[1][1], uCameraRotation[2][1]);
         vec2 upScreen = vec2(up.x / aspect, up.y) / max(1e-3, length(up.xy));
-        mirrorUv = clamp(sceneUv + upScreen * (2.0 * graze * perRadian) + offset, 0.0, 1.0);
+        mirrorUv = clamp(vUv + upScreen * (2.0 * graze * perRadian) + offset, 0.0, 1.0);
         // What is mirrored must stand beyond the point of reflection: a car between the
         // eye and the hot patch is not in its reflection.
         float mirrored = rayDistance(
@@ -900,12 +813,9 @@ export const HAZE_FRAGMENT = /* glsl */ `
           * step(distance, mirrored);
       }
     }
-    vec4 color = uLensFilter > 0.5 ? sceneSample(tDiffuse, uv) : texture2D(tDiffuse, uv);
+    vec4 color = texture2D(tDiffuse, uv);
     if (mirageWeight > 0.0) {
-      vec4 mirrored = uLensFilter > 0.5
-        ? sceneSample(tDiffuse, mirrorUv)
-        : texture2D(tDiffuse, mirrorUv);
-      color.rgb = mix(color.rgb, mirrored.rgb, mirageWeight);
+      color.rgb = mix(color.rgb, texture2D(tDiffuse, mirrorUv).rgb, mirageWeight);
     }
 
     // Everything from here on is colour, not refraction. tools/haze-probe.ts reads the
@@ -915,7 +825,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
     #ifndef HAZE_MEASURE_SOURCE
 
     if (uWallM >= 0.0 || uDustInside > 0.0) {
-      vec3 wallView = cameraRay(sceneUv);
+      vec3 wallView = cameraRay(vUv);
       float sceneD = -ownViewZ >= uCameraFar * 0.999 ? 1e7 : rayDistance(ownViewZ, wallView);
       if (uWallM >= 0.0) {
         vec4 wall = dustWall(normalize(uCameraRotation * wallView), sceneD);
@@ -948,7 +858,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
     // than replacing it, so regional haze and view-distance settings remain sovereign.
     float airDistance = -airViewZ;
     float horizonAir =
-      1.0 - smoothstep(uHorizon + 0.015, uHorizon + 0.14, sceneUv.y);
+      1.0 - smoothstep(uHorizon + 0.015, uHorizon + 0.14, vUv.y);
     float sandVeil =
       smoothstep(220.0, 1800.0, airDistance) * horizonAir * uDaylight * 0.032;
     // In thick air the veil is that air, or it draws a pale band along the skyline.

@@ -745,8 +745,8 @@ export interface PauseHooks {
   frameReport?: () => string;
   /** The live performance graph across the top of the screen (ui/perfoverlay.ts). Dev only. */
   perfOverlay?: { readonly enabled: boolean; setEnabled(on: boolean): void };
-  /** The lens on the finishing pass (render/hazeshader.ts). Dev only. */
-  lens?: { readonly label: string; cycle(): void };
+  /** The lens shift of the driving views (render/cameras.ts `lensShift`). Dev only. */
+  lensShift?: { readonly label: string; cycle(): void };
   /**
    * Record a fully fuelled car into the world.
    *
@@ -1428,11 +1428,11 @@ export class MainMenu {
             if (btn) btn.textContent = label();
           });
         }
-        // Cycles the lens through its modes and strengths; the FOV slider stays as it is,
-        // so the two combine (e.g. 75° at Panini 0.7 against 85° plain).
-        if (import.meta.env.DEV && hooks.lens) {
-          const lens = hooks.lens;
-          const label = (): string => `Lens: ${lens.label}`;
+        // Cycles the driving views' lens shift; the FOV slider stays as it is, so the
+        // two combine.
+        if (import.meta.env.DEV && hooks.lensShift) {
+          const lens = hooks.lensShift;
+          const label = (): string => `Lens shift: ${lens.label}`;
           const index = devTools.length;
           devButton(label(), () => {
             lens.cycle();

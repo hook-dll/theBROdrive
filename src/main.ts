@@ -8,7 +8,7 @@ import { gamepads, PAD, type RumbleFrame } from './core/gamepad';
 import { GameLoop } from './core/loop';
 import { installScreenWakeLock } from './core/wakelock';
 import { PhysicsWorld } from './core/physics';
-import { prefersMobilePresentation, Renderer, type LensMode } from './core/renderer';
+import { prefersMobilePresentation, Renderer } from './core/renderer';
 import { FIXED_DT } from './core/physics';
 import { DAY_LENGTH, GameWorld, newWorldState, type CarState } from './game/state';
 import { parseCalendarEpoch } from './game/calendar';
@@ -2861,43 +2861,25 @@ async function boot(): Promise<void> {
     });
   }
 
-  // DEV: the lens A/B on the finishing pass (render/hazeshader.ts), kept across reloads.
-  type LensStep = {
-    readonly id: string;
-    readonly label: string;
-    readonly mode: LensMode;
-    readonly strength: number;
-  };
-  const LENS_STEPS: readonly LensStep[] = [
-    { id: 'off', label: 'off', mode: 'rectilinear', strength: 0 },
-    { id: 'panini-0.10', label: 'Panini 0.10', mode: 'panini', strength: 0.1 },
-    { id: 'panini-0.30', label: 'Panini 0.30', mode: 'panini', strength: 0.3 },
-    { id: 'panini-0.50', label: 'Panini 0.50', mode: 'panini', strength: 0.5 },
-    { id: 'panini-0.70', label: 'Panini 0.70', mode: 'panini', strength: 0.7 },
-    { id: 'panini-1.00', label: 'Panini 1.00', mode: 'panini', strength: 1 },
-    { id: 'cylinder', label: 'cylinder', mode: 'cylinder', strength: 0 },
-  ];
-  const LENS_KEY = 'bro.lens';
-  let lensAt = LENS_STEPS.findIndex((step) => step.id === 'panini-0.30');
-  const applyLens = (): void => {
-    const step = LENS_STEPS[lensAt];
-    if (step) renderer.setLens(step.mode, step.strength);
-  };
-  const devLens = {
+  // DEV: the lens shift A/B of the driving views (render/cameras.ts `lensShift`), as a
+  // fraction of the frame height, kept across reloads.
+  const LENS_SHIFT_STEPS = [0, 0.1, 0.2, 0.3];
+  const LENS_SHIFT_KEY = 'bro.lensShift';
+  let lensShiftAt = 0;
+  const devLensShift = {
     get label(): string {
-      return LENS_STEPS[lensAt]?.label ?? '';
+      return `${Math.round((LENS_SHIFT_STEPS[lensShiftAt] ?? 0) * 100)}%`;
     },
     cycle(): void {
-      lensAt = (lensAt + 1) % LENS_STEPS.length;
-      applyLens();
-      localStorage.setItem(LENS_KEY, LENS_STEPS[lensAt]?.id ?? '');
+      lensShiftAt = (lensShiftAt + 1) % LENS_SHIFT_STEPS.length;
+      const shift = LENS_SHIFT_STEPS[lensShiftAt] ?? 0;
+      camera.setLensShift(shift);
+      localStorage.setItem(LENS_SHIFT_KEY, String(shift));
     },
   };
   if (import.meta.env.DEV) {
-    const stored = localStorage.getItem(LENS_KEY);
-    const found = LENS_STEPS.findIndex((step) => step.id === stored);
-    if (found >= 0) lensAt = found;
-    applyLens();
+    lensShiftAt = Math.max(0, LENS_SHIFT_STEPS.indexOf(Number(localStorage.getItem(LENS_SHIFT_KEY))));
+    camera.setLensShift(LENS_SHIFT_STEPS[lensShiftAt] ?? 0);
   }
 
   /**
@@ -2909,7 +2891,7 @@ async function boot(): Promise<void> {
     settings: () => world.state.settings,
     frameReport,
     perfOverlay: perfOverlay ?? undefined,
-    lens: import.meta.env.DEV ? devLens : undefined,
+    lensShift: import.meta.env.DEV ? devLensShift : undefined,
     viewport: () => renderer.viewport(),
     /**
      * Throw away the recorded verdict and measure this machine again.

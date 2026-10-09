@@ -48,37 +48,6 @@ import type { ShadeTint } from '../items/items';
 const WALL_DUST = new SandColor(new THREE.Color(0.72, 0.42, 0.2));
 /** The distant sand veil over the horizon, likewise. */
 const SAND_VEIL = new SandColor(new THREE.Color(0.78, 0.69, 0.56));
-/**
- * The lens on the finishing pass (render/hazeshader.ts `paniniSource`, `cylinderSource`).
- * `rectilinear` is the plain frame; `panini` keeps the wide coverage without stretching
- * the edges; `cylinder` keeps verticals and horizons straight with only the horizontal
- * warped. `strength` is the Panini d and is ignored by the other two.
- */
-export type LensMode = 'rectilinear' | 'panini' | 'cylinder';
-
-export interface LensSetting {
-  readonly mode: LensMode;
-  readonly strength: number;
-}
-
-/** The lens every player sees unless the dev menu changes it. */
-const DEFAULT_LENS: LensSetting = { mode: 'panini', strength: 0.3 };
-
-const LENS_MODE_UNIFORM: Record<LensMode, number> = { rectilinear: 0, panini: 1, cylinder: 2 };
-
-/**
- * Magnification the scene target carries while a lens is on, per axis. The lens
- * magnifies the centre about 1.2× (Panini at 85°) or 1.6× (cylinder at 85° horizontal),
- * and the target supplies up to 1.25× of that, so the filtered sample only has the rest
- * to resample. Fixed rather than fitted to the FOV: the target never has to be
- * reallocated mid-drive as speed widens the view. The cylinder warps only x, so it
- * takes no extra rows.
- */
-const LENS_TARGET_SCALE: Record<LensMode, { readonly x: number; readonly y: number }> = {
-  rectilinear: { x: 1, y: 1 },
-  panini: { x: 1.25, y: 1.25 },
-  cylinder: { x: 1.25, y: 1 },
-};
 
 export const CAMERA_FAR = 4000;
 /**
@@ -425,8 +394,6 @@ export class Renderer {
   // --- Heat-haze post pass ---
   /** Scene-pass target sampled by the fullscreen haze/ink pass on every tier. */
   private readonly hazeTarget: THREE.WebGLRenderTarget;
-  /** The lens the finishing pass shows; set through `setLens`. */
-  private lens: LensSetting = DEFAULT_LENS;
   /** Tiny scene holding the fullscreen triangle. */
   private readonly hazeScene = new THREE.Scene();
   /** Dummy camera for the fullscreen pass; the vertex shader ignores its matrices. */
@@ -605,11 +572,7 @@ export class Renderer {
         uHorizon: { value: 0.5 },
         uCameraRotation: { value: new THREE.Matrix3() },
         uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(fieldOfView) / 2) },
-        // The default lens (Panini): the wide default FOV keeps its edges from stretching.
-        uLensMode: { value: LENS_MODE_UNIFORM[DEFAULT_LENS.mode] },
-        uPanini: { value: DEFAULT_LENS.strength },
-        uLensFilter: { value: 1 },
-        uSceneResolution: { value: new THREE.Vector2(1, 1) },
+        uLensShift: { value: 0 },
         uCameraNear: { value: CAMERA_NEAR },
         uCameraFar: { value: CAMERA_FAR },
         uInkStrength: { value: Math.min(1, Math.max(0, inkStrength)) },
@@ -1036,6 +999,7 @@ export class Renderer {
     this.hazeMaterial.uniforms.uTanHalfFov.value = Math.tan(
       THREE.MathUtils.degToRad(camera.fov) / 2,
     );
+    this.hazeMaterial.uniforms.uLensShift.value = -camera.projectionMatrix.elements[9];
     this.hazeMaterial.uniforms.uCameraNear.value = camera.near;
     this.hazeMaterial.uniforms.uCameraFar.value = camera.far;
     // TWO PASSES ON EVERY TIER, and the reason is colour, not shimmer.
@@ -1082,17 +1046,19 @@ export class Renderer {
    * the INK pass only — the shimmer works in world rays and needs no such row.
    *
    * A horizontal sight-line lands at NDC y = -tan(pitch) / tan(fovY / 2): look up
-   * and the horizon slides down the frame, look down and it climbs. Reading it off
-   * the camera's own forward vector rather than tracking pitch separately keeps it
-   * correct through the camera rig's roll and spring, and clamping a little way
-   * outside the frame keeps the falloff sensible when the horizon is off-screen.
+   * and the horizon slides down the frame, look down and it climbs. A lens shift
+   * (the projection's `elements[9]`, see render/cameras.ts `lensShift`) moves every row
+   * up the frame by the same NDC amount. Reading it off the camera's own forward vector
+   * rather than tracking pitch separately keeps it correct through the camera rig's
+   * roll and spring, and clamping a little way outside the frame keeps the falloff
+   * sensible when the horizon is off-screen.
    */
   private horizonScreenY(camera: THREE.PerspectiveCamera = this.camera): number {
     camera.getWorldDirection(this._forward);
     const horizontal = Math.hypot(this._forward.x, this._forward.z);
     const pitch = Math.atan2(this._forward.y, horizontal);
     const halfFov = THREE.MathUtils.degToRad(camera.fov) / 2;
-    const ndc = -Math.tan(pitch) / Math.tan(halfFov);
+    const ndc = -Math.tan(pitch) / Math.tan(halfFov) - camera.projectionMatrix.elements[9];
     return Math.min(1.6, Math.max(-0.6, 0.5 + 0.5 * ndc));
   }
 
@@ -1133,12 +1099,6 @@ export class Renderer {
     this.hazeEyeHeight = frame.eyeAboveM;
     this.hazeMaterial.uniforms.uGroundSlope.value = frame.groundSlope;
     this.updateDepthResolve();
-  }
-
-  /** The lens on the finishing pass; see `LensSetting`. Reallocates the scene target once. */
-  setLens(mode: LensMode, strength: number = DEFAULT_LENS.strength): void {
-    this.lens = { mode, strength: Math.max(0, strength) };
-    this.resizeHazeTarget();
   }
 
   /**
@@ -1206,25 +1166,11 @@ export class Renderer {
       this.wallActive;
   }
 
-  /**
-   * Size the scene-pass target to the drawing buffer (CSS size × pixel ratio), times
-   * the lens's magnification when a lens is on, and hand the lens uniforms over. On the
-   * retro rung the lens still warps, but the target and the filter stay at the drawing
-   * size: its pixels are the look.
-   */
+  /** Size the scene-pass target to the actual drawing buffer (CSS size × pixel ratio). */
   private resizeHazeTarget(): void {
     this.renderer.getDrawingBufferSize(this._drawSize);
-    const uniforms = this.hazeMaterial.uniforms;
-    const retro = this.quality === 'retro';
-    const scale = retro ? LENS_TARGET_SCALE.rectilinear : LENS_TARGET_SCALE[this.lens.mode];
-    const width = Math.round(this._drawSize.x * scale.x);
-    const height = Math.round(this._drawSize.y * scale.y);
-    this.hazeTarget.setSize(width, height);
-    uniforms.uSceneResolution.value.set(width, height);
-    uniforms.uResolution.value.set(this._drawSize.x, this._drawSize.y);
-    uniforms.uLensMode.value = LENS_MODE_UNIFORM[this.lens.mode];
-    uniforms.uPanini.value = this.lens.strength;
-    uniforms.uLensFilter.value = this.lens.mode !== 'rectilinear' && !retro ? 1 : 0;
+    this.hazeTarget.setSize(this._drawSize.x, this._drawSize.y);
+    this.hazeMaterial.uniforms.uResolution.value.set(this._drawSize.x, this._drawSize.y);
   }
 
 
