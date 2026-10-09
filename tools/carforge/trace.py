@@ -542,27 +542,59 @@ def find_arch(sheet, wheel, bottom_of):
 # Every detail is accepted on strong evidence only (see README.md, "Details"); everything else that
 # looked like one is dropped into the trace report with the reason.
 
-LINE_SEED_MM = 60      # line_pieces(): shortest Hough seed of a straight drawn line
-INK_GAP_PX = 3         # a drawn line may break this much (the scan dithers thin lines)
-BRIDGE_MM = 80         # collinear pieces this far apart are one line (a hinge box interrupts a door gap)
-JOIN_MM = 100          # side_gaps(): a gap bends onto a line that ends within half this of the bend
-SILL_MM = 25           # side_gaps(): a gap's lower end lies this close to the sill line
-END_MM = 100           # side_gaps(): gaps keep this far inside the body's ends (end lines are its corners)
-HINGE_MM = (30, 110)   # side of a hinge box
-HANDLE_MM = ((100, 300), (20, 80))  # handle length, height
-FLAP_MM = (100, 350)   # side of a fuel flap
-SHAPE_MM = (20, 350)   # closed shapes considered at all: largest side within this
+# Every rule is relative, so it holds for any drawing: sizes and distances are fractions of the
+# wheelbase (*_WB; the one dimension every sheet gives) or multiples of the drawing's own line
+# width (*_LW, measured by stroke_width(): what a scan's dithering and line weight blur). Positions
+# are taken against traced features: belt, shoulder, sill, windows, wheels, arches, centre lines.
+LINE_SEED_WB = 0.025   # line_pieces(): shortest Hough seed of a straight drawn line
+BRIDGE_WB = 0.034      # collinear steep pieces this far apart are one line (a hinge box interrupts a gap)
+JOIN_WB = 0.042        # side gaps: a gap bends onto a line that ends within half this of the bend
+SILL_WB = 0.0105       # side gaps: a gap's lower end lies this close to the sill line
+END_WB = 0.042         # side gaps: gaps keep this far inside the body's ends (end lines are its corners)
+ARCH_NEAR_WB = 0.042   # a line ending this close to an arch outline is the fender's lip line
+FRAME_NEAR_WB = 0.0126  # a line with both ends this close to a window outline is its frame
+LONG_LINE_WB = 0.063   # a "long line" (gap, crease) that a panel strip is bounded by
+HINGE_WB = (0.0126, 0.046)   # side of a hinge box
+HANDLE_WB = ((0.042, 0.126), (0.0084, 0.034))  # handle length, height
+FLAP_WB = (0.042, 0.147)     # side of a flap
+SHAPE_WB = (0.0084, 0.147)   # closed shapes considered at all: largest side within this
+LAMP_WB = (0.0105, 0.084)    # lamp radius
+HATCH_CELL_WB = 0.007  # grille hatching: an enclosed cell of at most this squared is "tiny"
+HATCH_WINDOW_WB = 0.018  # the window the hatching's cell share and ink density are taken over
+HATCH_AREA_WB2 = 0.0017  # a grille's hatched area, in wheelbase squared
+RIB_WB = (0.126, 0.0126)  # bonnet rib: shortest length, widest
+SHIFT_WB = 0.017       # a flap may be moved this far along the car to clear the gaps' grooves
+INK_GAP_LW = 1.5       # a drawn line may break this much
+NEAR_LW = 1.0          # a mirrored partner, a collinear end, a row match: this close
+RIM_LW = 1.25          # a shape's rim point this close to a long line lies on it
 LAMP_COVER = 0.95      # a lamp ring is inked round at least this much of it
-LAMP_MM = (25, 200)    # lamp radius
 HATCH_CELLS = 0.12     # grille hatching: share of tiny enclosed cells around a pixel
-HATCH_MIN_MM2 = 10000  # a grille's hatched area
-RIB_MM = (300, 30)     # bonnet rib: shortest length, widest
-MIRROR_PX = 2.0        # a mirrored partner sits this close to the mirror image
-GAP_HALF_MM = 9.0      # carforge GROOVE_WIDTH / 2: half the width of a traced gap's groove
-LAYOUT_CLEAR_MM = 8    # carforge LAYOUT_CLEAR: paint kept between a flap's groove and a gap's
 FLAP_SHRINK = 0.85     # a flap may be shrunk to this to clear the gaps' grooves (see side_details())
-ARCH_LIP_MM = 45.0     # carforge ARCH_LIP / ARCH_FLARE: the arch lip a sheet's extras do not size
+# carforge's own sizes (mm), so the trace emits what carforge will build round
+GAP_HALF_MM = 9.0      # GROOVE_WIDTH / 2: half the width of a traced gap's groove
+LAYOUT_CLEAR_MM = 8    # LAYOUT_CLEAR: paint kept between a flap's groove and a gap's
+ARCH_LIP_MM = 45.0     # ARCH_LIP / ARCH_FLARE: the arch lip a sheet's extras do not size
 ARCH_FLARE_MM = 25.0
+
+
+class U:
+    """The drawing's units for the relative rules: wb = px per wheelbase, lw = line width px."""
+    wb = 1.0
+    lw = 1.0
+
+
+def stroke_width(ink, box):
+    """The drawing's line width (px): the median length of the ink runs across rows and columns.
+    A dithered thin line gives runs of 1 and 2 px about equally often, so the commonest length
+    flips between them; the median does not (the few long runs of filled areas do not move it)."""
+    x0, y0, x1, y1 = box
+    sub = ink[y0:y1, x0:x1]
+    lens = []
+    for a in (sub, sub.T):
+        d = np.diff(np.pad(a.astype(np.int8), ((0, 0), (1, 1))), axis=1)
+        lens.append(np.flatnonzero(d.ravel() == -1) - np.flatnonzero(d.ravel() == 1))
+    lens = np.concatenate(lens)
+    return float(max(1.0, np.median(lens))) if lens.size else 1.0
 
 # What a line drawing cannot say: the look of each kind (copied from examples/uaz3151.json).
 HANDLE_STYLE = {"cell": "steel", "proud": 20, "radius": 15}
@@ -644,10 +676,12 @@ def refit(ink, a, b):
 
 def walk(inkd, region, p, d):
     """How far the drawn line through p runs along d: the last inked sample before a break longer
-    than INK_GAP_PX or the edge of `region`."""
+    than INK_GAP_LW line widths or the edge of `region`."""
     h, w = inkd.shape
+    if not np.all(np.isfinite(d)) or float(np.hypot(*d)) < 1e-6:
+        return 0.0  # a degenerate fit: no direction to follow
     t = last = miss = 0.0
-    while True:
+    while t < h + w:  # a ray crosses the image in at most h + w px
         t += 0.5
         x, y = int(round(p[0] + d[0] * t)), int(round(p[1] + d[1] * t))
         if not (0 <= y < h and 0 <= x < w) or not region[y, x]:
@@ -656,15 +690,16 @@ def walk(inkd, region, p, d):
             last, miss = t, 0.0
         else:
             miss += 0.5
-            if miss > INK_GAP_PX:
+            if miss > INK_GAP_LW * U.lw:
                 return last
+    return last
 
 
 def merge_pieces(pieces, bridge):
     """Collinear pieces that overlap or lie at most `bridge` px apart become one (on the longer one's
-    line); level pieces bridge only INK_GAP_PX (a handle's and a hinge's top edges on one row are
-    not one line). Collinear: both ends of the shorter within 2 px of the longer's line, which on a
-    short piece allows the tilt a dithered pixel or two gives it (at most 10 degrees)."""
+    line); level pieces bridge only INK_GAP_LW line widths (a handle's and a hinge's top edges on one
+    row are not one line). Collinear: both ends of the shorter within NEAR_LW line widths of the
+    longer's line, and at most 10 degrees apart (a short piece tilts by a dithered pixel)."""
     pieces = sorted(pieces, key=lambda p: -p.len)
     cos10 = math.cos(math.radians(10))
     changed = True
@@ -673,10 +708,11 @@ def merge_pieces(pieces, bridge):
         out = []
         for p in pieces:
             for i, q in enumerate(out):
-                if abs(float(p.d @ q.d)) < cos10 or q.off(p.a) > 2.0 or q.off(p.b) > 2.0:
+                near = NEAR_LW * U.lw
+                if abs(float(p.d @ q.d)) < cos10 or q.off(p.a) > near or q.off(p.b) > near:
                     continue
                 ts = sorted((q.along(p.a), q.along(p.b)))
-                reach = bridge if q.steep else INK_GAP_PX
+                reach = bridge if q.steep else INK_GAP_LW * U.lw
                 if ts[0] - q.len > reach or -ts[1] > reach:
                     continue
                 lo, hi = min(0.0, ts[0]), max(q.len, ts[1])
@@ -689,11 +725,11 @@ def merge_pieces(pieces, bridge):
     return pieces
 
 
-def line_pieces(sh, region, mm):
+def line_pieces(sh, region):
     """Maximal straight drawn lines inside `region` (image-sized mask): Hough seeds, each refitted
     to its ink and followed both ways while ink continues, then collinear pieces merged."""
     seeds = cv2.HoughLinesP((sh.ink & region).astype(np.uint8) * 255, 1, np.pi / 360, 15,
-                            minLineLength=int(LINE_SEED_MM / mm), maxLineGap=INK_GAP_PX)
+                            minLineLength=int(LINE_SEED_WB * U.wb), maxLineGap=int(round(INK_GAP_LW * U.lw)))
     if seeds is None:
         return []
     inkd = ndi.binary_dilation(sh.ink, iterations=1)
@@ -701,7 +737,7 @@ def line_pieces(sh, region, mm):
     for xa, ya, xb, yb in seeds.reshape(-1, 4):
         m, d = refit(sh.ink, (xa, ya), (xb, yb))
         out.append(Piece(m - d * walk(inkd, region, m, -d), m + d * walk(inkd, region, m, d)))
-    return merge_pieces([p for p in out if p.len > 2], BRIDGE_MM / mm)
+    return merge_pieces([p for p in out if p.len > U.lw], BRIDGE_WB * U.wb)
 
 
 def meet(p, q):
@@ -731,7 +767,8 @@ def climb(s, steep, join, depth=0, seen=()):
             continue
         verts, used = climb(t, steep, join, depth + 1, seen + (s,))
         up = (verts + [x], used + [s])
-        if up[0][0][1] < best[0][0][1] - 3 or (abs(up[0][0][1] - best[0][0][1]) <= 3 and len(up[0]) < len(best[0])):
+        tie = INK_GAP_LW * U.lw
+        if up[0][0][1] < best[0][0][1] - tie or (abs(up[0][0][1] - best[0][0][1]) <= tie and len(up[0]) < len(best[0])):
             best = up
     return best
 
@@ -803,9 +840,10 @@ def corner_radius(filled):
 
 
 def side_details(sh, c, report):
-    """Door and panel gaps, hinges, handles and the fuel flap in the side view (see README.md).
-    `c` holds the trace so far (scale, silhouette, windows, sill, wheels, arches). Returns
-    (seams [[px, py], ...] list, plates in mm, grooves in mm)."""
+    """Door and panel gaps, hinges, handles and flaps in the side view (see README.md, "Details").
+    `c` holds the trace so far (scale, silhouette, windows, sill, wheels, arches). Every size is a
+    fraction of the wheelbase or a multiple of the line width (U). Returns (seams [[px, py], ...]
+    list, plates in mm, grooves in mm)."""
     mm, ground, y0p = c["mm"], c["ground"], c["y0_px"]
     H, W = sh.ink.shape
     yy, xx = np.mgrid[0:H, 0:W]
@@ -827,14 +865,15 @@ def side_details(sh, c, report):
     discs = np.zeros((H, W), bool)
     for cx, cy, r in c["wheels"]:
         discs |= (xx - cx) ** 2 + (yy - cy) ** 2 <= (1.05 * r) ** 2
-    body = sil & (yy <= sill[None, :] + 3) & ~discs & (xx >= c["body_f"]) & (xx <= c["body_r"])
+    body = sil & (yy <= sill[None, :] + U.lw) & ~discs & (xx >= c["body_f"]) & (xx <= c["body_r"])
     region = body & ~glass
     belt, shoulder = c["belt"], c["shoulder_row"]
 
     # ---- gaps: chains of straight lines from the belt (or higher) down to the sill
-    pieces = line_pieces(sh, region, mm)
+    pieces = line_pieces(sh, region)
     steep = [p for p in pieces if p.tilt() >= 45]
-    join, sill_tol, end = JOIN_MM / mm, SILL_MM / mm, END_MM / mm
+    join, sill_tol, end = JOIN_WB * U.wb, SILL_WB * U.wb, END_WB * U.wb
+    near_lw = NEAR_LW * U.lw
     lower = float(np.median(sill[cols])) - belt   # sill to belt, px
     gaps, used = [], set()
     for s in sorted(steep, key=lambda p: p.b[0]):
@@ -845,13 +884,13 @@ def side_details(sh, c, report):
         top, bot = verts[0], verts[-1]
         where = at(min(v[0] for v in verts), top[1], max(v[0] for v in verts), bot[1])
         if top[1] > belt + 0.15 * lower:
-            near = [t for t, o in c["arches"].items() if min(poly_dist(s.a, o), poly_dist(s.b, o)) * mm < 100]
+            near = [t for t, o in c["arches"].items() if min(poly_dist(s.a, o), poly_dist(s.b, o)) < ARCH_NEAR_WB * U.wb]
             why = (f"follows the {near[0]} arch (the fender lip)" if near else
                    f"rises only to z={where['z'][1]}, under the belt: does not cross the side")
             report.drop("side", "gap", where, why)
             continue
         if min(v[0] for v in verts) < c["body_f"] + end or max(v[0] for v in verts) > c["body_r"] - end:
-            report.drop("side", "gap", where, f"within {END_MM} mm of the body's end: its corner line")
+            report.drop("side", "gap", where, f"within {END_WB:.3f} wheelbase of the body's end: its corner line")
             continue
         gaps.append(verts)
         used |= {id(t) for t in chain}
@@ -859,11 +898,11 @@ def side_details(sh, c, report):
     evid = [[f"{round(sum(np.hypot(*(np.asarray(b) - np.asarray(a))) for a, b in zip(g, g[1:])) * mm)} mm "
              f"of drawn line from z={round((ground - g[0][1]) * mm)} (belt or higher) to the sill, "
              f"{len(g) - 2} bend(s), outside the glass"] for g in gap_lines]
-    for i, g in enumerate(gap_lines):  # the other edge of a pillar: a parallel gap a few px away
+    for i, g in enumerate(gap_lines):  # the other edge of a pillar: a parallel gap a few line widths away
         pts = [(a[0] + (b[0] - a[0]) * k / 20, a[1] + (b[1] - a[1]) * k / 20) for a, b in zip(g, g[1:]) for k in range(20)]
         for j, h in enumerate(gap_lines):
             if i != j:
-                d = [v for v in (poly_dist(p, h) for p in pts) if 2 < v < 12]
+                d = [v for v in (poly_dist(p, h) for p in pts) if near_lw < v < 6 * near_lw]
                 if len(d) >= 0.25 * len(pts):
                     evid[i].append(f"paired with gap {j} over {len(d) / len(pts):.0%} of it "
                                    f"({min(d) * mm:.0f}-{max(d) * mm:.0f} mm away)")
@@ -873,17 +912,18 @@ def side_details(sh, c, report):
             continue
         where = at(p.a[0], p.a[1], p.b[0], p.b[1])
         if p.tilt() >= 45 and p.len >= 0.35 * lower:
-            if any(poly_dist(p.a, g) < 2 and poly_dist(p.b, g) < 2 for g in gap_lines):
+            if any(poly_dist(p.a, g) < near_lw and poly_dist(p.b, g) < near_lw for g in gap_lines):
                 continue
             if abs(p.b[1] - c["bottom_of"](p.b[0])) > sill_tol:
-                frame = [i for i, wd in enumerate(c["windows"]) if poly_dist(p.a, wd["outline"] + wd["outline"][:1]) < 30 / mm
-                         and poly_dist(p.b, wd["outline"] + wd["outline"][:1]) < 30 / mm]
+                fr = FRAME_NEAR_WB * U.wb
+                frame = [i for i, wd in enumerate(c["windows"]) if poly_dist(p.a, wd["outline"] + wd["outline"][:1]) < fr
+                         and poly_dist(p.b, wd["outline"] + wd["outline"][:1]) < fr]
                 why = (f"window {frame[0]}'s frame" if frame else
                        f"ends at z={where['z'][0]}, {round((c['bottom_of'](p.b[0]) - p.b[1]) * mm)} mm above the sill")
                 report.drop("side", "gap", where, why)
         elif p.tilt() <= 20 and p.len >= 0.4 * (c["body_r"] - c["body_f"]):
             row = (p.a[1] + p.b[1]) / 2
-            if abs(row - c["bottom_of"]((p.a[0] + p.b[0]) / 2)) < 4:
+            if abs(row - c["bottom_of"]((p.a[0] + p.b[0]) / 2)) < 2 * near_lw:
                 continue  # the sill line itself
             report.drop("side", "gap", where, f"level line along the body at z={round((ground - row) * mm)} (belt "
                         f"{round((ground - belt) * mm)}, shoulder {round((ground - shoulder) * mm)}): a crease, "
@@ -893,10 +933,10 @@ def side_details(sh, c, report):
     bx0, by0, bx1, by1 = sh.boxes["side"]
     shapes = []
     in_glass = 0
-    lo_mm, hi_mm = SHAPE_MM
+    lo, hi = SHAPE_WB[0] * U.wb, SHAPE_WB[1] * U.wb
     for kind, xa, ya, xb, yb, m, f in closed_shapes(sh.ink, (bx0, by0, bx1, by1)):
         w, h = xb - xa + 1, yb - ya + 1
-        if max(w, h) * mm < lo_mm or max(w, h) * mm > hi_mm:
+        if max(w, h) < lo or max(w, h) > hi:
             continue
         inside = body[ya:yb + 1, xa:xb + 1][m].mean()
         if inside < 0.9:
@@ -917,23 +957,32 @@ def side_details(sh, c, report):
             return None
         return max(front)[1], min(rear)[1]
 
-    long_lines = [[tuple(p.a), tuple(p.b)] for p in pieces if p.len * mm >= 150]
-    off_gaps = [g for g in long_lines if not any(poly_dist(g[0], h) < 2 and poly_dist(g[1], h) < 2 for h in gap_lines)]
+    long_lines = [[tuple(p.a), tuple(p.b)] for p in pieces if p.len >= LONG_LINE_WB * U.wb]
+    off_gaps = [g for g in long_lines
+                if not any(poly_dist(g[0], h) < near_lw and poly_dist(g[1], h) < near_lw for h in gap_lines)]
 
     def own_outline(sp, hinge=False):
         """Share of the shape's rim that lies off every long drawn line running on past the shape
         (a hinge or a flap has its own outline; a panel strip bounded by gaps and creases does not).
         A hinge sits on its gap, so for one the gap lines do not count."""
         xa, ya, xb, yb = sp["box"]
+        pad = 2 * near_lw
         past = [g for g in (off_gaps if hinge else long_lines + gap_lines)
-                if any(not (xa - 4 <= x <= xb + 4 and ya - 4 <= y <= yb + 4) for x, y in g)]
+                if any(not (xa - pad <= x <= xb + pad and ya - pad <= y <= yb + pad) for x, y in g)]
         rim = np.argwhere(sp["f"] & ~ndi.binary_erosion(sp["f"]))
         if rim.size == 0:
             return 0.0
-        return float(np.mean([min((poly_dist((x + xa, y + ya), g) for g in past), default=99) > 2.5
+        return float(np.mean([min((poly_dist((x + xa, y + ya), g) for g in past), default=math.inf) > RIM_LW * U.lw
                               for y, x in rim[::2]]))
 
-    hinge_lo, hinge_hi = HINGE_MM[0] / mm, HINGE_MM[1] / mm
+    def crossed(sp):
+        """A gap line runs through the shape (at any of its rows)."""
+        xa, ya, xb, yb = sp["box"]
+        return any(x is not None and xa < x < xb for g in gap_lines
+                   for x in (poly_x_at(g, r) for r in np.linspace(ya + 1, yb - 1, 7)))
+
+    hinge_lo, hinge_hi = HINGE_WB[0] * U.wb, HINGE_WB[1] * U.wb
+    (hl_lo, hl_hi), (hh_lo, hh_hi) = [(a * U.wb, b * U.wb) for a, b in HANDLE_WB]
     hinges, handles, flaps = {}, [], []
     plates, grooves = [], []
     leftover, taken = [], []   # shapes that fit no kind; (kind, box) of every detail taken
@@ -945,7 +994,7 @@ def side_details(sh, c, report):
         if sp["kind"] == "hole" and hinge_lo <= min(sp["w"], sp["h"]) and max(sp["w"], sp["h"]) <= hinge_hi:
             # the gap line passes through the box (a hinge straddles its door's edge)
             on = sorted((poly_dist((sp["cx"], sp["cy"]), g), i) for i, g in enumerate(gap_lines)
-                        if (lambda x: x is not None and xa - 2 <= x <= xb + 2)(poly_x_at(g, sp["cy"])))
+                        if (lambda x: x is not None and xa - near_lw <= x <= xb + near_lw)(poly_x_at(g, sp["cy"])))
             own = own_outline(sp, hinge=True)
             if fill < 0.75 or max(sp["w"], sp["h"]) > 2 * min(sp["w"], sp["h"]):
                 report.drop("side", "hinge", where, f"{size}, not a box (fills {fill:.0%} of its bounds)")
@@ -958,12 +1007,11 @@ def side_details(sh, c, report):
             else:
                 hinges.setdefault(on[0][1], []).append((sp, on[0][0]))
             continue
-        if sp["kind"] == "blob" and sp["w"] >= sp["h"] and HANDLE_MM[0][0] / mm <= sp["w"] <= HANDLE_MM[0][1] / mm \
-                and HANDLE_MM[1][0] / mm <= sp["h"] <= HANDLE_MM[1][1] / mm:
+        if sp["kind"] == "blob" and sp["w"] >= sp["h"] and hl_lo <= sp["w"] <= hl_hi and hh_lo <= sp["h"] <= hh_hi:
             door = door_of(sp)
             if sp["w"] < 2.5 * sp["h"]:
                 report.drop("side", "handle", where, f"{size}, not elongated")
-            elif (sp["f"].sum() - sp["m"].sum()) < 6:
+            elif (sp["f"].sum() - sp["m"].sum()) < 3 * U.lw:
                 report.drop("side", "handle", where, f"{size}, not a closed outline")
             elif not (belt < sp["cy"] < shoulder + 0.5 * (shoulder - belt)):
                 report.drop("side", "handle", where, f"{size}, not at belt height")
@@ -972,18 +1020,21 @@ def side_details(sh, c, report):
             else:
                 handles.append((sp, door))
             continue
-        if sp["kind"] == "hole" and FLAP_MM[0] / mm <= min(sp["w"], sp["h"]) and max(sp["w"], sp["h"]) <= FLAP_MM[1] / mm:
-            door = door_of(sp)
+        if sp["kind"] == "hole" and FLAP_WB[0] * U.wb <= min(sp["w"], sp["h"]) and max(sp["w"], sp["h"]) <= FLAP_WB[1] * U.wb:
+            # a flap: a closed rounded shape of its own inside the side, under the belt, clear of the
+            # windows (only body pixels count), the wheels and every gap
             own = own_outline(sp)
             rad = corner_radius(sp["f"]) * mm
             if own < 0.7:
-                report.drop("side", "flap", where, f"{size} panel bounded by gap lines ({own:.0%} own outline)")
+                report.drop("side", "flap", where, f"{size} panel bounded by long lines ({own:.0%} own outline)")
             elif fill < 0.75 or rad < 0.1 * min(sp["w"], sp["h"]) * mm:
                 report.drop("side", "flap", where, f"{size}, not a rounded closed shape (fill {fill:.0%}, corner {rad:.0f} mm)")
-            elif door is None or sp["cy"] < belt:
-                report.drop("side", "flap", where, f"{size} rounded shape not between two door gaps under the belt")
+            elif sp["cy"] < belt:
+                report.drop("side", "flap", where, f"{size} rounded shape above the belt")
+            elif crossed(sp):
+                report.drop("side", "flap", where, f"{size} rounded shape crossed by a gap")
             else:
-                flaps.append((sp, door, own, rad))
+                flaps.append((sp, own, rad))
             continue
         what = "round" if sp["kind"] == "blob" and 0.8 < sp["w"] / sp["h"] < 1.25 else sp["kind"]
         sheet = [it.get("role", key[:-1]) for key in ("lamps", "plates") for it in c["extras"].get(key, [])
@@ -1007,18 +1058,20 @@ def side_details(sh, c, report):
     for sp, door in handles:
         xa, ya, xb, yb = sp["box"]
         where = at(xa, ya, xb, yb)
-        mates = [o for o, d in handles if o is not sp and d != door and abs(o["cy"] - sp["cy"]) <= 2
+        mates = [o for o, d in handles if o is not sp and d != door and abs(o["cy"] - sp["cy"]) <= near_lw
                  and abs(o["w"] - sp["w"]) <= 0.15 * sp["w"]]
-        if not mates:
-            report.drop("side", "handle", where, "no handle at the same height on another door")
+        if len(handles) > 1 and not mates:
+            report.drop("side", "handle", where, "other handle candidates, none on its row on another door")
             continue
         plates.append({"face": "side", **where, **HANDLE_STYLE})
         taken.append(("handle", sp["box"]))
         report.take("side", "handle", where, f"isolated closed outline {round(sp['w'] * mm)} x {round(sp['h'] * mm)} mm "
-                    f"between gaps {door[0]} and {door[1]}; the other door's handle on the same row")
+                    f"between gaps {door[0]} and {door[1]}; "
+                    + (f"{len(mates)} handle(s) on other doors on the same row" if mates else "the only handle candidate"))
     gaps_mm = [[((x - y0p) * mm, (ground - y) * mm) for x, y in g] for g in gap_lines]
     need = FLAP_STYLE["width"] / 2 + GAP_HALF_MM + LAYOUT_CLEAR_MM + 1.0
-    for sp, door, own, rad in flaps:
+    reach = int(round(SHIFT_WB * U.wb * mm))
+    for sp, own, rad in flaps:
         xa, ya = sp["box"][:2]
         cs, _ = cv2.findContours(ndi.binary_dilation(np.pad(sp["f"], 1), iterations=1).astype(np.uint8),
                                  cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
@@ -1035,14 +1088,14 @@ def side_details(sh, c, report):
         fit = None
         for scale in np.arange(1.0, FLAP_SHRINK - 1e-9, -0.01):
             Q = ctr + (P - ctr) * scale
-            shift = next((s for s in sorted(range(-40, 41), key=abs)
+            shift = next((s for s in sorted(range(-reach, reach + 1), key=abs)
                           if clearance(Q + [s, 0], gaps_mm) >= need), None)
             if shift is not None:
                 fit = (float(scale), shift)
                 break
         if fit is None:
             report.drop("side", "flap", where, f"drawn {drawn:.0f} mm from a gap's centre line; no shift within "
-                        f"40 mm or shrink to {FLAP_SHRINK:.0%} keeps {need - 1:.0f} mm from every gap")
+                        f"{reach} mm or shrink to {FLAP_SHRINK:.0%} keeps {need - 1:.0f} mm from every gap")
             continue
         scale, shift = fit
         grooves.append({"face": "side", "line": [[round(ctr[0] + (y - ctr[0]) * scale + shift),
@@ -1054,7 +1107,8 @@ def side_details(sh, c, report):
             + (f" and shrunk to {scale:.0%}" if scale < 1.0 else "")
             + f" to keep carforge's {LAYOUT_CLEAR_MM} mm paint between its groove and the gaps'")
         report.take("side", "flap", where, f"closed rounded outline {round(sp['w'] * mm)} x {round(sp['h'] * mm)} mm "
-                    f"(corner {rad:.0f} mm, {own:.0%} its own line) between gaps {door[0]} and {door[1]}" + moved)
+                    f"(corner {rad:.0f} mm, {own:.0%} its own line) under the belt, clear of windows, wheels and gaps"
+                    + moved)
     for sp, where, why in leftover:
         xa, ya, xb, yb = sp["box"]
         part = [k for k, (ta, tb, tc, td) in taken if ta <= xa and xb <= tc and tb <= ya and yb <= td]
@@ -1073,8 +1127,9 @@ def lamp_rings(sh, box):
     map; kept when inked round LAMP_COVER of it; per centre the outermost ring. [(cx, cy, r)] px."""
     x0, y0, x1, y1 = box
     sub = np.where(sh.ink[y0:y1, x0:x1], 0, 255).astype(np.uint8)
+    r_lo, r_hi = LAMP_WB[0] * U.wb, LAMP_WB[1] * U.wb
     found = cv2.HoughCircles(cv2.GaussianBlur(sub, (3, 3), 0.8), cv2.HOUGH_GRADIENT_ALT, dp=1, minDist=2,
-                             param1=150, param2=0.6, minRadius=4, maxRadius=int(LAMP_MM[1] / sh.mm))
+                             param1=150, param2=0.6, minRadius=max(2, int(r_lo / 2)), maxRadius=int(r_hi))
     seeds = [(cx + x0, cy + y0, r) for cx, cy, r in ([] if found is None else found[0])]
     for kind, xa, ya, xb, yb, m, f in closed_shapes(sh.ink, box):
         w, h = xb - xa + 1, yb - ya + 1
@@ -1087,7 +1142,7 @@ def lamp_rings(sh, box):
         rs = [rr for rr in np.arange(f[2], 1.6 * f[2], 0.5) if ring_cover(sh.dist, f[0], f[1], rr) >= LAMP_COVER]
         if rs:
             f = fit_ring(sh.dist, f[0], f[1], max(rs))
-        if LAMP_MM[0] / sh.mm <= f[2] <= LAMP_MM[1] / sh.mm and ring_cover(sh.dist, *f) >= LAMP_COVER \
+        if r_lo <= f[2] <= r_hi and ring_cover(sh.dist, *f) >= LAMP_COVER \
                 and ring_cost(sh.dist, *f) <= 0.25:
             rings.append(f)
     out = []
@@ -1099,15 +1154,17 @@ def lamp_rings(sh, box):
 
 def hatched(sh, box):
     """Hatched closed shapes in `box` (grille openings): regions where the ink is dense and full of
-    tiny enclosed cells. [(x_left, x_right, row_top, row_bottom, corner radius px, cell share)]: the
-    extents run out to the shape's outline through the hatching."""
+    tiny enclosed cells (at most HATCH_CELL_WB of the wheelbase squared, over a window HATCH_WINDOW_WB
+    wide). [(x_left, x_right, row_top, row_bottom, corner radius px, cell share)]: the extents run out
+    to the shape's outline through the hatching."""
     x0, y0, x1, y1 = box
     sub = sh.ink[y0:y1, x0:x1]
     lab, n = ndi.label(~sub)
     size = ndi.sum(np.ones_like(lab), lab, index=np.arange(n + 1))
-    tiny = (size[lab] <= 12) & (lab > 0)
-    cells = ndi.uniform_filter(tiny.astype(float), size=9)
-    dense = ndi.uniform_filter(sub.astype(float), size=9)
+    tiny = (size[lab] <= (HATCH_CELL_WB * U.wb) ** 2) & (lab > 0)
+    win = max(3, int(round(HATCH_WINDOW_WB * U.wb)))
+    cells = ndi.uniform_filter(tiny.astype(float), size=win)
+    dense = ndi.uniform_filter(sub.astype(float), size=win)
     hl, hn = ndi.label((cells >= HATCH_CELLS) & (dense >= 0.35))
     M = sub | tiny
 
@@ -1119,14 +1176,14 @@ def hatched(sh, box):
                 last, miss = k, 0
             else:
                 miss += 1
-                if miss > 1:
+                if miss > INK_GAP_LW * U.lw / 2:
                     break
         return last
 
     out = []
     for i in range(1, hn + 1):
         comp = hl == i
-        if comp.sum() * sh.mm ** 2 < HATCH_MIN_MM2:
+        if comp.sum() < HATCH_AREA_WB2 * U.wb ** 2:
             continue
         rows = np.flatnonzero(comp.any(axis=1))
         cols = np.flatnonzero(comp.any(axis=0))
@@ -1152,6 +1209,7 @@ def front_details(sh, c, report):
     """Grille openings and round lamps in the front view (see README.md). Returns (recesses in mm,
     lamps in px circle form)."""
     mm, ground, x0p = c["mm"], c["ground"], c["x0_px"]
+    MIRROR_PX = 3 * NEAR_LW * U.lw  # noqa: N806 (a mirrored pair's centre may sit this far off the axis)
     box = sh.boxes["front"]
     belt = c["belt"]
     bumper_row = ground - max((max(b["z"]) for b in c["bumpers"] if max(b["y"]) <= 0), default=0) / mm
@@ -1253,16 +1311,18 @@ def top_ribs(sh, c, report):
     """Bonnet ribs in the top view (see README.md). Returns `lines` in mm (face top)."""
     mm, top_x0, y0p = c["mm"], c["top_x0"], c["y0_px"]
     box = sh.boxes["top"]
+    rib_len, rib_wide = RIB_WB[0] * U.wb, RIB_WB[1] * U.wb   # px: shortest length, widest
+    near = NEAR_LW * U.lw                                   # a mirrored partner, a matching end
     cowl = min(min(p[0] for p in c["windows"][0]["outline"]), c["body_r"])
     # thin level holes; a rib's inside is cut by every axis or dimension line crossing it, so holes
-    # on one row (1 px) with at most 4 px (a crossing line) between them are one
+    # on one row (half a line width) with at most two line widths (a crossing line) between them are one
     thin = sorted((xa, xb, ya, yb, int(m.sum())) for kind, xa, ya, xb, yb, m, f in closed_shapes(sh.ink, box, close=False)
-                  if kind == "hole" and (yb - ya + 1) * mm <= RIB_MM[1] * 2 and xb >= c["body_f"] and xa <= cowl
+                  if kind == "hole" and (yb - ya + 1) <= rib_wide * 2 and xb >= c["body_f"] and xa <= cowl
                   and xb - xa + 1 >= 3 * (yb - ya + 1))
     runs_ = []  # [x0, x1, row0, row1, inside area, inside length]
     for xa, xb, ya, yb, area in thin:
         for r in runs_:
-            if abs((r[2] + r[3]) / 2 - (ya + yb) / 2) <= 1 and 0 <= xa - r[1] <= 5:
+            if abs((r[2] + r[3]) / 2 - (ya + yb) / 2) <= near / 2 and 0 <= xa - r[1] <= 2.5 * near:
                 r[1], r[2], r[3] = xb, min(r[2], ya), max(r[3], yb)
                 r[4] += area
                 r[5] += xb - xa + 1
@@ -1272,11 +1332,11 @@ def top_ribs(sh, c, report):
     cands = []
     for xa, xb, ya, yb, area, length in runs_:
         w, h = xb - xa + 1, yb - ya + 1
-        if w * mm < SHAPE_MM[0]:
+        if w < SHAPE_WB[0] * U.wb:
             continue
         where = {"y": [round((xa - y0p) * mm), round((xb - y0p) * mm)],
                  "x": [round((ya - top_x0) * mm), round((yb - top_x0) * mm)]}
-        if w * mm < RIB_MM[0] or h * mm > RIB_MM[1]:
+        if w < rib_len or h > rib_wide:
             report.drop("top", "rib", where, f"{round(w * mm)} x {round(h * mm)} mm: not a long thin rib")
             continue
         if xb > cowl:
@@ -1288,10 +1348,10 @@ def top_ribs(sh, c, report):
         for j, b in enumerate(cands):
             if j <= i or i in taken or j in taken:
                 continue
-            if abs((a[2] + b[2]) / 2 - top_x0) <= MIRROR_PX and abs(a[0] - b[0]) <= 3 and abs(a[1] - b[1]) <= 3:
+            if abs((a[2] + b[2]) / 2 - top_x0) <= near and abs(a[0] - b[0]) <= 1.5 * near and abs(a[1] - b[1]) <= 1.5 * near:
                 taken |= {i, j}
                 low = a if a[2] > b[2] else b
-                width = round((low[3] + 2) * mm)  # between the two drawn edges' centres
+                width = round((low[3] + U.lw) * mm)  # between the two drawn edges' centres
                 x = round((low[2] - top_x0) * mm)
                 lines.append({"face": "top", "line": [[round((low[0] - y0p) * mm), x], [round((low[1] - y0p) * mm), x]],
                               "width": width})
@@ -1314,10 +1374,10 @@ def top_ribs(sh, c, report):
             return np.array(out)
 
         on = thick(range(xa, xb + 1))
-        beyond = thick([x for x in range(xb + 5, xb + 25)])   # behind the ribs: the bare centre line
-        span = np.flatnonzero(on >= 4)
+        beyond = thick(range(xb + int(2.5 * near), xb + int(12.5 * near)))   # behind the ribs: the bare centre line
+        span = np.flatnonzero(on >= 2 * near)
         where = {"y": [round((xa - y0p) * mm), round((xb - y0p) * mm)], "x": [0, 0]}
-        if span.size >= 0.9 * on.size and np.median(on) <= RIB_MM[1] / mm and np.median(beyond) <= 3:
+        if span.size >= 0.9 * on.size and np.median(on) <= rib_wide and np.median(beyond) <= 1.5 * near:
             lines.append({"face": "top", "line": [[where["y"][0], 0], [where["y"][1], 0]],
                           "width": int(np.median([ln["width"] for ln in lines])), "single": True})
             report.take("top", "rib", where, f"band {np.median(on) * mm:.0f} mm thick on the centre row over "
@@ -1546,6 +1606,9 @@ def main():
 
     # 7. details drawn on the views (side gaps, hinges, handles, flap; front grilles and lamps;
     # top bonnet ribs), on strong evidence only; the rest goes to the trace report
+    # the drawing's own units for the relative detail rules: px per wheelbase, line width px
+    U.wb = float(np.hypot(wheels[1][0] - wheels[0][0], wheels[1][1] - wheels[0][1]))
+    U.lw = stroke_width(sh.ink, sh.boxes["side"])
     found = Report()
     ctx = {"mm": mm, "ground": ground, "y0_px": y0_px, "x0_px": x0_px, "top_x0": top_x0,
            "s_org": s_org, "S_raw": S_raw, "windows": windows, "wheels": wheels, "bottom_of": bottom_of,

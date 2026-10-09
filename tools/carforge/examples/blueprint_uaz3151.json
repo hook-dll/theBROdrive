@@ -437,11 +437,23 @@
     554,
     698
    ],
-   "half_width": 846,
+   "half_width": 884,
    "cell": "black",
-   "chamfer": 25,
-   "channel": 22,
-   "lip": 38
+   "chamfer": 20,
+   "channel": 30,
+   "lip": 40,
+   "ends": {
+    "width": 190,
+    "y": [
+     -705,
+     -560
+    ],
+    "z": [
+     425,
+     698
+    ],
+    "chamfer": 45
+   }
   },
   {
    "y": [
@@ -454,9 +466,21 @@
    ],
    "half_width": 812,
    "cell": "black",
-   "chamfer": 25,
-   "channel": 18,
-   "lip": 40
+   "chamfer": 30,
+   "channel": 25,
+   "lip": 45,
+   "ends": {
+    "width": 160,
+    "y": [
+     3089,
+     3160
+    ],
+    "z": [
+     406,
+     690
+    ],
+    "chamfer": 40
+   }
   }
  ],
  "mirrors": [

@@ -1139,9 +1139,19 @@ def cut_grooves(spec, s, body, bvh):
 
 def add_bumper(bm, uvl, b):
     """A bumper box; with `channel` (mm) its outer face is a channel that deep between a top and
-    a bottom lip `lip` (BUMPER_LIP) mm tall: the UAZ's pressed-steel section."""
+    a bottom lip `lip` (BUMPER_LIP) mm tall: the UAZ's pressed-steel section. With `ends`
+    ({width, y, z}) each end is a heavier block `width` mm wide spanning its own y and z (the
+    side view's bumper profile), so a beam that is slim in the middle reads fat from the side."""
     hw, (y0, y1), (z0, z1) = b["half_width"], b["y"], b["z"]
     cell, ch = b.get("cell", "steel"), b.get("chamfer", 30.0)
+    e = b.get("ends")
+    if e:
+        w = float(e["width"])
+        (ey0, ey1), (ez0, ez1) = e.get("y", b["y"]), e.get("z", b["z"])
+        for sx in (1.0, -1.0):
+            xa, xb = sorted((sx * hw, sx * (hw - w)))
+            add_box(bm, uvl, (xa, ey0, ez0), (xb, ey1, ez1), cell, float(e.get("chamfer", ch)))
+        hw -= w - 1.0  # the beam runs between the blocks, overlapping them by 1 mm
     c = float(b.get("channel", 0.0))
     if c <= 0:
         add_box(bm, uvl, (-hw, y0, z0), (hw, y1, z1), cell, ch)
