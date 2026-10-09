@@ -464,6 +464,8 @@ export async function bootMirageLab(): Promise<void> {
     hoodOffset: vehicle.modelMeasure.hoodPoint,
     velocityX: 0,
     velocityZ: 0,
+    velocityY: 0,
+    gearLabel: '',
   };
   const targetPosition = new THREE.Vector3();
   const targetRotation = new THREE.Quaternion();

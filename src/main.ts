@@ -46,7 +46,7 @@ import { Player } from './player/player';
 import { PlayerVitals } from './player/vitals';
 import { BirdFlock } from './agents/birds';
 import { TumbleweedField } from './agents/tumbleweed';
-import { CameraRig, type CameraTarget } from './render/cameras';
+import { CameraRig, type CameraTarget, type ChasePreset, type FovCue } from './render/cameras';
 import { HeldItemView } from './render/held';
 import { TrunkView } from './render/trunkview';
 import { Sky } from './render/sky';
@@ -1302,6 +1302,8 @@ async function boot(): Promise<void> {
     hoodOffset: [0, 0, 0],
     velocityX: 0,
     velocityZ: 0,
+    velocityY: 0,
+    gearLabel: '',
   };
 
   let lastInput: InputFrame = input.sample(0);
@@ -2255,6 +2257,8 @@ async function boot(): Promise<void> {
       const velocity = driving.chassis.linvel();
       target.velocityX = velocity.x;
       target.velocityZ = velocity.z;
+      target.velocityY = velocity.y;
+      target.gearLabel = driving.gearLabel;
     } else {
       const p = player.interpolatedPosition(alpha);
       // CameraRig's foot mode adds its own eye height, so hand it the FEET
@@ -2271,6 +2275,8 @@ async function boot(): Promise<void> {
       target.wheelContact = 0;
       target.velocityX = 0;
       target.velocityZ = 0;
+      target.velocityY = 0;
+      target.gearLabel = '';
     }
 
     Object.assign(cameraInput, lastInput);
@@ -2882,6 +2888,28 @@ async function boot(): Promise<void> {
     camera.setLensShift(LENS_SHIFT_STEPS[lensShiftAt] ?? 0);
   }
 
+  // DEV: the speed-feel A/B of the driving camera (render/cameras.ts FovCue, ChasePreset,
+  // KICK_OMEGA), each kept across reloads.
+  function devCycle<T extends string>(key: string, steps: readonly T[], apply: (value: T) => void) {
+    let at = Math.max(0, steps.indexOf(localStorage.getItem(key) as T));
+    if (import.meta.env.DEV) apply(steps[at]!);
+    return {
+      get label(): string {
+        return steps[at]!;
+      },
+      cycle(): void {
+        at = (at + 1) % steps.length;
+        apply(steps[at]!);
+        localStorage.setItem(key, steps[at]!);
+      },
+    };
+  }
+  const devFovCue = devCycle<FovCue>('bro.fovCue', ['speed', 'accel', 'mix'], (v) => camera.setFovCue(v));
+  const devChasePreset = devCycle<ChasePreset>('bro.chasePreset', ['mid', 'near', 'far'], (v) =>
+    camera.setChasePreset(v),
+  );
+  const devShakeKicks = devCycle('bro.shakeKicks', ['off', 'on'], (v) => camera.setShakeKicks(v === 'on'));
+
   /**
    * The pause overlay's window on the game. Settings live in world state (so a save
    * carries them), which is why every mutation routes through `world.apply` here
@@ -2892,6 +2920,9 @@ async function boot(): Promise<void> {
     frameReport,
     perfOverlay: perfOverlay ?? undefined,
     lensShift: import.meta.env.DEV ? devLensShift : undefined,
+    fovCue: import.meta.env.DEV ? devFovCue : undefined,
+    chasePreset: import.meta.env.DEV ? devChasePreset : undefined,
+    shakeKicks: import.meta.env.DEV ? devShakeKicks : undefined,
     viewport: () => renderer.viewport(),
     /**
      * Throw away the recorded verdict and measure this machine again.

@@ -747,6 +747,10 @@ export interface PauseHooks {
   perfOverlay?: { readonly enabled: boolean; setEnabled(on: boolean): void };
   /** The lens shift of the driving views (render/cameras.ts `lensShift`). Dev only. */
   lensShift?: { readonly label: string; cycle(): void };
+  /** Speed-feel A/B of the chase camera (render/cameras.ts FovCue, ChasePreset, kicks). Dev only. */
+  fovCue?: { readonly label: string; cycle(): void };
+  chasePreset?: { readonly label: string; cycle(): void };
+  shakeKicks?: { readonly label: string; cycle(): void };
   /**
    * Record a fully fuelled car into the world.
    *
@@ -1439,6 +1443,23 @@ export class MainMenu {
             const btn = devTools[index];
             if (btn) btn.textContent = label();
           });
+        }
+        if (import.meta.env.DEV) {
+          const cycles = [
+            ['FOV cue', hooks.fovCue],
+            ['Chase', hooks.chasePreset],
+            ['Shake kicks', hooks.shakeKicks],
+          ] as const;
+          for (const [name, hook] of cycles) {
+            if (!hook) continue;
+            const label = (): string => `${name}: ${hook.label}`;
+            const index = devTools.length;
+            devButton(label(), () => {
+              hook.cycle();
+              const btn = devTools[index];
+              if (btn) btn.textContent = label();
+            });
+          }
         }
         if (import.meta.env.DEV && hooks.jumpToLake) {
           // Cycles through the first sites on each press rather than opening a screen
