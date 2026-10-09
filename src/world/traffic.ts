@@ -109,15 +109,16 @@ const PLATOON_CHANCE = 0.32;
 /**
  * Share of ambient drivers drawn FRANTIC (`drawDriver`), by direction.
  *
- * The one the player MEETS is the one coming up behind him: it is started in the
- * mirror (`REAR_SPAWN_*`), closes, goes past and weaves off through the traffic ahead,
- * and that is a car he can see and try to follow. One coming the other way is past in
- * a second and reads as any other car, so most of the share is spent on the player's
- * own direction — measured on the real road at one in fourteen either way, a frantic
- * driver overtook the player once in twenty minutes. Still an event, not a pack.
+ * Half of the cars in the player's direction and a quarter of the oncoming ones: the
+ * owner's call (2026-10-09). This is an endless desert with no cameras and no police,
+ * so the traffic drives as it likes, and with the road hazards off it is the traffic that
+ * is the obstacle. Calm drivers still come first in every direction (`directionCount
+ * === 0`), and the second car of a direction is still the hurried one, so the road keeps
+ * its slow cars to pass. 0.14 / 0.03 was the calm setting: one frantic pass in twenty
+ * minutes.
  */
-const FRANTIC_SAME_DIRECTION_SHARE = 0.14;
-const FRANTIC_ONCOMING_SHARE = 0.03;
+const FRANTIC_SAME_DIRECTION_SHARE = 0.5;
+const FRANTIC_ONCOMING_SHARE = 0.25;
 /**
  * WHAT A FRANTIC DRIVER DRIVES, AND WHAT IS UNDER ITS BONNET. Any car the stream can
  * spawn, exactly as it is drawn for every other driver — a man in a hurry is a man in
@@ -2267,7 +2268,9 @@ export class RoadTraffic {
         style: 'frantic',
         headwayS: 0.9 + this.random() * 0.4,
         mode: 'frantic',
-        speedCap: (125 + this.random() * 35) / 3.6,
+        // 137-172 km/h (was 125-160): EXPERIMENT with the road hazards off, traffic as the
+        // obstacle, the fast ones visibly faster than the hurried 95-115.
+        speedCap: (137 + this.random() * 35) / 3.6,
         pace: 1,
       };
     }

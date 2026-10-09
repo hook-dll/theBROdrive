@@ -69,6 +69,11 @@ const ROAD_HAZARD_GAP_MAX = 4200;
 const ROAD_HAZARD_CYCLE = ROAD_HAZARD_GAP_MIN + ROAD_HAZARD_GAP_MAX;
 /** Keep the story start and the player's first few bends clear. */
 const ROAD_HAZARD_START = 600;
+/**
+ * EXPERIMENT (owner, 2026-10-09): no rocks or scrub on the carriageway, so traffic is the
+ * obstacle. The streams and everything that handles a hazard stay; flip back to bring them.
+ */
+const ROAD_HAZARDS_SPAWN = false;
 const ROAD_HAZARD_EDGE_CLEARANCE = 0.15;
 const CELL_S = 6; // metres between candidate cells along the road
 const CELL_L = 6; // metres between candidate cells laterally
@@ -399,7 +404,7 @@ export class ScatterProvider implements ChunkProvider {
     // Dirt piles, fallen trunks and solid rocks have independent deterministic
     // streams. Complementary gaps keep hazards irregular without walking every
     // previous placement to locate an arbitrary streamed chunk.
-    for (let kind = 0; kind < 2; kind++) {
+    for (let kind = 0; ROAD_HAZARDS_SPAWN && kind < 2; kind++) {
       const tag = kind === 0 ? TAG_ROAD_PILE : TAG_ROAD_ROCK;
       const streamStart =
         ROAD_HAZARD_START + hash01(seed, tag, 0x51a47) * ROAD_HAZARD_GAP_MAX;
