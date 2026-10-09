@@ -13,7 +13,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
-import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { mergeGeometries, toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import {
   CAR_BODY_POSITION_ATTRIBUTE,
   CAR_SURFACE_FINISH,
@@ -690,6 +690,88 @@ function lampNames(def: CarModelDef): Set<string> {
     for (const name of selectors ?? []) names.add(name);
   }
   return names;
+}
+
+/** The only non-lamp material merged: every GTA-SA pack's bodywork trim. */
+const MERGED_TRIM_MATERIAL = 'car_trim';
+
+/** The six lamp role selectors on `def`, in the bit order `mergeStaticBodyMeshes` uses. */
+function lampRoleSelectors(def: CarModelDef): readonly (readonly string[])[] {
+  const lights = def.lights;
+  if (!lights) return [];
+  return [
+    lights.headlights,
+    lights.taillights,
+    lights.brakeLights,
+    lights.reverseLights,
+    lights.leftBlinkers,
+    lights.rightBlinkers,
+  ].map((selectors) => selectors ?? []);
+}
+
+/**
+ * Draw-call merge for the static body. Lamp lenses sharing a parent, material and lamp
+ * role become one mesh, and so do `car_trim` meshes sharing a parent. The merged mesh
+ * keeps the first member's name and transform is baked into its geometry, so bounds,
+ * selectors and role bindings resolve to the same lenses as before. Paint, glass,
+ * wheels, the steering wheel, unswitched lenses and anything carrying userData stay
+ * separate. Runs after the chassis stamp, which only writes paint and glass.
+ */
+function mergeStaticBodyMeshes(scene: THREE.Group, def: CarModelDef): void {
+  const roles = lampRoleSelectors(def);
+  const lenses = lensNames(def);
+  const groups = new Map<string, THREE.Mesh[]>();
+  scene.traverse((object) => {
+    if (!(object instanceof THREE.Mesh) || !object.parent) return;
+    // glTF copies a node's name into userData; anything beyond it is a runtime tag.
+    if (object.children.length > 0 || Object.keys(object.userData).some((key) => key !== 'name')) return;
+    if (Array.isArray(object.material) || object.name === STEERING_WHEEL_NODE) return;
+    const material = object.material;
+    if (isPaintSlot(material, def) && isRandomPaintMesh(object, def)) return;
+    let role = 0;
+    roles.forEach((selectors, bit) => {
+      if (selectors.includes(object.name) || selectors.includes(material.name)) {
+        role |= 1 << bit;
+      }
+    });
+    if (role === 0) {
+      if (material.name !== MERGED_TRIM_MATERIAL || isPaintSlot(material, def)) return;
+      if (lenses.has(object.name)) return;
+    }
+    const attributes = Object.keys(object.geometry.attributes).sort().join(',');
+    const key = [
+      object.parent.uuid,
+      // By what the material draws, not by identity: a pack exports one per node.
+      `${material.name}#${materialSignature(material) ?? material.uuid}`,
+      role,
+      object.castShadow,
+      object.receiveShadow,
+      object.geometry.index ? 'indexed' : 'flat',
+      attributes,
+    ].join('|');
+    const members = groups.get(key);
+    if (members) members.push(object);
+    else groups.set(key, [object]);
+  });
+  for (const members of groups.values()) {
+    if (members.length < 2) continue;
+    const geometries = members.map((mesh) => {
+      mesh.updateMatrix();
+      return mesh.geometry.clone().applyMatrix4(mesh.matrix);
+    });
+    const merged = mergeGeometries(geometries, false);
+    if (!merged) continue;
+    merged.computeBoundingBox();
+    merged.computeBoundingSphere();
+    const [first, ...rest] = members;
+    if (!first) continue;
+    first.geometry = merged;
+    first.position.set(0, 0, 0);
+    first.quaternion.identity();
+    first.scale.set(1, 1, 1);
+    for (const mesh of rest) mesh.removeFromParent();
+  }
+  scene.updateMatrixWorld(true);
 }
 
 /**
@@ -1527,6 +1609,7 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
 
   prepareMaterials(scene, true, lensNames(def));
   stampCarBodyPositions(scene, def);
+  mergeStaticBodyMeshes(scene, def);
 
   // Geometry is now expressed directly in chassis-local metres; keeping the source
   // origin offset in the fit manifest remains useful for asset diagnostics.

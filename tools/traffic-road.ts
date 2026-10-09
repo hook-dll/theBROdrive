@@ -60,6 +60,7 @@ import { roadSurfaceY, SurfaceField } from '../src/world/roadsurface';
 import { ScatterProvider } from '../src/world/props/scatter';
 import { Terrain } from '../src/world/terrain';
 import { type ChunkContext } from '../src/world/chunks';
+import { InstanceBatches } from '../src/world/props/instancebatch';
 import { CHUNK_LENGTH } from '../src/world/ranges';
 import { installDocumentShim } from './domshim';
 import { PLAYER_FIELD_ID, RoadTraffic } from '../src/world/traffic';
@@ -242,6 +243,7 @@ const scatter = new ScatterProvider(undefined, hazards);
       hasPhysics: true,
       originX: 0,
       originZ: 0,
+      batches: new InstanceBatches({ x: 0, z: 0 }),
     };
     for (const provider of [terrainProvider, roadProvider, scatter]) {
       const content = provider.build(context);

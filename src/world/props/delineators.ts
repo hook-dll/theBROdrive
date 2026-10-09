@@ -19,6 +19,7 @@ import type { ChunkContext, ChunkContent, ChunkProvider } from '../chunks';
 
 import { propPieces, type BreakableSink } from './forms';
 import { addStatic, yawRotation } from './scatter';
+import type { BatchKind, BatchSlot } from './instancebatch';
 
 // ---------------------------------------------------------------------------
 // Scratch objects reused across the per-chunk build loops (never per-frame).
@@ -302,7 +303,8 @@ export class DelineatorProvider implements ChunkProvider {
     if (posts.length === 0) return null;
 
     const group = new THREE.Group();
-    const shafts = new THREE.InstancedMesh(delineatorPost(), DELINEATOR_MATERIALS, posts.length);
+    const slots: BatchSlot[] = [];
+    const kind: BatchKind = { geometry: delineatorPost(), material: DELINEATOR_MATERIALS };
 
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
@@ -317,7 +319,8 @@ export class DelineatorProvider implements ChunkProvider {
       _dummy.rotation.set(0, post.yaw, 0);
       _dummy.scale.setScalar(1);
       _dummy.updateMatrix();
-      shafts.setMatrixAt(i, _dummy.matrix);
+      const slot = ctx.batches.allocate(ctx, kind, _dummy.matrix);
+      slots.push(slot);
 
       if (!ctx.hasPhysics) continue;
       // A cuboid, not a capsule: the blade is 12 cm of face and 4 cm of thickness, and
@@ -348,25 +351,20 @@ export class DelineatorProvider implements ChunkProvider {
           scale: 1,
           radius: DELINEATOR_FACE_W * 0.5,
           height: DELINEATOR_HEIGHT - DELINEATOR_EMBED,
-          mesh: shafts,
-          instance: i,
+          mesh: slot.mesh,
+          instance: slot.instance,
           collider,
         });
       }
     }
-    shafts.instanceMatrix.needsUpdate = true;
-    // Culled on its instances' own bounds, for the scatter's reasons (see `buildSteps`):
-    // computed once over the standing run; a broken post is only ever blanked smaller.
-    shafts.computeBoundingSphere();
-    group.add(shafts);
 
     return {
       group,
       bodies,
       colliders,
       dispose: () => {
-        shafts.dispose();
         if (registered.length > 0) this.breakables?.forget(registered);
+        for (const slot of slots) ctx.batches.release(slot);
       },
       /**
        * The reflector material is shared by every run in the world, so this is one

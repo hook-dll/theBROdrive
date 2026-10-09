@@ -39,6 +39,7 @@ import type RAPIER from '@dimforge/rapier3d-compat';
 import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
 import type { GameWorld } from '../src/game/state';
 import { type ChunkContent, type ChunkContext } from '../src/world/chunks';
+import { InstanceBatches } from '../src/world/props/instancebatch';
 import { CHUNK_LENGTH } from '../src/world/ranges';
 import { DebrisField } from '../src/world/debris';
 import { WorldOrigin } from '../src/world/origin';
@@ -154,6 +155,7 @@ function contextFor(world: World, chunkIndex: number): ChunkContext {
     hasPhysics: false,
     originX: 0,
     originZ: 0,
+    batches: new InstanceBatches({ x: 0, z: 0 }),
   } as unknown as ChunkContext;
 }
 
@@ -445,6 +447,7 @@ console.log('\n=== a post is solid, and it comes apart ===\n');
       hasPhysics,
       originX: 0,
       originZ: 0,
+      batches: new InstanceBatches({ x: 0, z: 0 }),
     }) as unknown as ChunkContext;
 
   // Find a run to hit by asking the director, so nothing here depends on a hand-picked

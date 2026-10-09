@@ -15,6 +15,7 @@
 import * as THREE from 'three';
 
 import { type ChunkContext } from '../src/world/chunks';
+import { InstanceBatches } from '../src/world/props/instancebatch';
 import { CHUNK_LENGTH } from '../src/world/ranges';
 import { Road } from '../src/world/road';
 import { RoadDistance } from '../src/world/roaddistance';
@@ -54,6 +55,7 @@ function contextFor(chunkIndex: number): ChunkContext {
     hasPhysics: false,
     originX: 0,
     originZ: 0,
+    batches: new InstanceBatches({ x: 0, z: 0 }),
   } as unknown as ChunkContext;
 }
 

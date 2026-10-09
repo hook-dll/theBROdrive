@@ -12,6 +12,7 @@
  */
 
 import * as THREE from 'three';
+import type { BatchChunk, BatchSlot, InstanceBatches } from './instancebatch';
 
 /** Disc radius: the prop's footprint times this, plus a fixed reach past its foot. */
 export const CONTACT_SHADOW_SPREAD = 1.5;
@@ -139,4 +140,27 @@ export function buildContactShadows(spots: readonly ContactShadowSpot[]): THREE.
   mesh.receiveShadow = false;
   mesh.renderOrder = 1;
   return mesh;
+}
+
+/**
+ * The same discs as `buildContactShadows`, taken as slots in the shared batches of the
+ * chunk's band (see `instancebatch.ts`). One slot per spot, in `spots` order.
+ */
+export function allocateContactShadows(
+  spots: readonly ContactShadowSpot[],
+  batches: InstanceBatches,
+  chunk: BatchChunk,
+): BatchSlot[] {
+  const slots: BatchSlot[] = [];
+  const m = new THREE.Matrix4();
+  // Drawn after the opaque ground it lies on, and never shadowing anything itself.
+  const kind = {
+    geometry: contactShadowGeometry(),
+    material,
+    castShadow: false,
+    receiveShadow: false,
+    renderOrder: 1,
+  };
+  for (const spot of spots) slots.push(batches.allocate(chunk, kind, contactShadowMatrix(spot, 1, m)));
+  return slots;
 }

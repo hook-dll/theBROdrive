@@ -40,6 +40,9 @@ import { addStatic, leanRotation } from './scatter';
 // ---------------------------------------------------------------------------
 const _q1 = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
+const _poleQuat = new THREE.Quaternion();
+const _poleAt = new THREE.Vector3();
+const _unitScale = new THREE.Vector3(1, 1, 1);
 const _axis = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
 const _v = new THREE.Vector3();
@@ -691,6 +694,8 @@ export class PoleProvider implements ChunkProvider {
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
     const poses: { pose: PolePose; section: PoleSection }[] = [];
+    // Pole bodies by design geometry, drawn as one InstancedMesh each below.
+    const bodyMatrices = new Map<THREE.BufferGeometry, THREE.Matrix4[]>();
 
     const seed = ctx.world.seed;
     const ox = ctx.originX;
@@ -700,11 +705,19 @@ export class PoleProvider implements ChunkProvider {
       const pose = describePole(ctx.road, ctx.terrain, this.roadDistance, seed, s, index, section);
       poses.push({ pose, section });
 
+      poleQuaternion(pose.twist, pose.leanAngle, pose.leanAz, _poleQuat);
+      _poleAt.set(pose.baseX - ox, pose.baseY, pose.baseZ - oz);
+      const body = pose.fitted ? pose.design.full : pose.design.mast;
+      const matrix = new THREE.Matrix4().compose(_poleAt, _poleQuat, _unitScale);
+      const list = bodyMatrices.get(body);
+      if (list) list.push(matrix);
+      else bodyMatrices.set(body, [matrix]);
+
       const poleGroup = new THREE.Group();
-      poleGroup.position.set(pose.baseX - ox, pose.baseY, pose.baseZ - oz);
-      poleQuaternion(pose.twist, pose.leanAngle, pose.leanAz, poleGroup.quaternion);
-      addPoleMeshes(poleGroup, pose);
-      group.add(poleGroup);
+      poleGroup.position.copy(_poleAt);
+      poleGroup.quaternion.copy(_poleQuat);
+      addAnomalyMeshes(poleGroup, pose);
+      if (poleGroup.children.length > 0) group.add(poleGroup);
 
       // Every pole is a solid obstacle, including a scheduled 'down' one: the
       // colliders are built from the pose's own lean, so a mast lying in the sand is
@@ -714,6 +727,20 @@ export class PoleProvider implements ChunkProvider {
         addLegColliders(ctx, bodies, colliders, pose.design, pose.baseX, pose.baseY, pose.baseZ, pose.twist, pose.leanAngle, pose.leanAz);
       }
     });
+
+    // One InstancedMesh per design geometry: a chunk of poles is one draw per design.
+    const bodyMeshes: THREE.InstancedMesh[] = [];
+    for (const [geometry, matrices] of bodyMatrices) {
+      const mesh = new THREE.InstancedMesh(geometry, poleMaterial(), matrices.length);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      matrices.forEach((matrix, i) => mesh.setMatrixAt(i, matrix));
+      mesh.instanceMatrix.needsUpdate = true;
+      // Culled on its instances' bounds: the design's own sphere sits at the pole root.
+      mesh.computeBoundingSphere();
+      group.add(mesh);
+      bodyMeshes.push(mesh);
+    }
 
     // Wires. The span may land in the next chunk, so its far end is recomputed from
     // the same pure function rather than read from a neighbour's content — otherwise
@@ -775,7 +802,29 @@ export class PoleProvider implements ChunkProvider {
       group,
       bodies,
       colliders,
-      dispose: () => wireGeometry?.dispose(),
+      dispose: () => {
+        wireGeometry?.dispose();
+        for (const mesh of bodyMeshes) mesh.dispose();
+      },
     };
   }
+}
+
+/**
+ * Compiles the instanced pole program at boot. A chunk's pole bodies are InstancedMeshes,
+ * a different program from a plain Mesh, and linking it on first draw would hitch on
+ * Windows. The anchor is never drawn: its group stays invisible.
+ */
+export function poleProgramAnchor(): THREE.Object3D {
+  const group = new THREE.Group();
+  group.name = 'pole-anchor';
+  group.visible = false;
+  const geometry = new THREE.BoxGeometry(0.01, 0.01, 0.01);
+  const count = geometry.getAttribute('position').count;
+  geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 3).fill(1), 3));
+  const anchor = new THREE.InstancedMesh(geometry, poleMaterial(), 1);
+  anchor.castShadow = true;
+  anchor.receiveShadow = true;
+  group.add(anchor);
+  return group;
 }

@@ -17,6 +17,7 @@ import { RoadDistance } from './world/roaddistance';
 import { roadSurfaceY, SurfaceField } from './world/roadsurface';
 import { Terrain } from './world/terrain';
 import { TerrainMeshProvider } from './world/terrainmesh';
+import { InstanceBatches } from './world/props/instancebatch';
 
 /**
  * ROAD LOOK LABORATORY.
@@ -177,6 +178,8 @@ class RoadLookLab {
   private originZ = 0;
   private windowCentre = Number.NaN;
   private built: ChunkContent[] = [];
+  /** One registry per window: its origin is fixed while the window lives. */
+  private batches = new InstanceBatches({ x: 0, z: 0 });
   private grid: THREE.LineSegments | null = null;
   /** Camera orbit from the drag handler, radians, applied on top of the preset. */
   private readonly look = { yaw: 0, pitch: 0 };
@@ -226,6 +229,7 @@ class RoadLookLab {
       hasPhysics: false,
       originX: this.originX,
       originZ: this.originZ,
+      batches: this.batches,
     };
   }
 
@@ -241,6 +245,7 @@ class RoadLookLab {
       content.dispose?.();
     }
     this.built = [];
+    this.batches.dispose();
 
     // The origin is frozen at the window's midpoint, so a chunk at either end is still
     // within a few hundred metres of zero — the same f32 argument the game's streamer
@@ -249,6 +254,9 @@ class RoadLookLab {
     const at = this.road.offsetPoint(centreS, 0);
     this.originX = at.x;
     this.originZ = at.z;
+    this.batches.root.removeFromParent();
+    this.batches = new InstanceBatches({ x: this.originX, z: this.originZ });
+    this.root.add(this.batches.root);
 
     for (let i = centre - WINDOW_RADIUS; i <= centre + WINDOW_RADIUS; i++) {
       const terrain = this.terrainProvider.build(this.context(i));

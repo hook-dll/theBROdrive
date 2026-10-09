@@ -90,7 +90,7 @@ import { GroundCoverField } from './world/props/groundcover';
 import { hasEscapedWorld } from './world/landscape';
 import { DelineatorProvider } from './world/props/delineators';
 import { MonumentProvider, monumentProgramAnchor } from './world/props/monuments';
-import { PoleProvider } from './world/props/poles';
+import { PoleProvider, poleProgramAnchor } from './world/props/poles';
 import { ScatterProvider } from './world/props/scatter';
 import { SidetrackProvider, sidetrackProgramAnchor } from './world/sidetrack';
 import { updateWeather, weather, windAt } from './world/weather';
@@ -471,7 +471,8 @@ async function boot(): Promise<void> {
   const dancers = new DancerField(renderer.scene);
   // The 20 km marks and the sidetracks are built only where they stand; their hidden
   // program anchors are in the scene from boot for the same reason as the dancer's.
-  renderer.scene.add(monumentProgramAnchor(), sidetrackProgramAnchor());
+  // Telegraph poles are drawn per chunk as InstancedMeshes: their program is linked here too.
+  renderer.scene.add(monumentProgramAnchor(), sidetrackProgramAnchor(), poleProgramAnchor());
   /** Reused receiver for the nearest dancer's sound; see `DancerField.heard`. */
   const dancerSound: DancerHeard = { x: 0, y: 0, z: 0, flapMps: 0, airRate: 0 };
   /**

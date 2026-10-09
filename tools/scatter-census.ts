@@ -24,6 +24,7 @@ import { CHUNK_LENGTH } from '../src/world/ranges';
 import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
 import { ScatterProvider } from '../src/world/props/scatter';
+import { InstanceBatches } from '../src/world/props/instancebatch';
 
 /** Chunks kept alive either side of the player, from chunks.ts VISUAL_RADIUS. */
 const VISUAL_RADIUS = 6;
@@ -119,6 +120,7 @@ for (let chunkIndex = FROM_CHUNK; chunkIndex <= TO_CHUNK; chunkIndex++) {
     hasPhysics: true,
     originX: 0,
     originZ: 0,
+    batches: new InstanceBatches({ x: 0, z: 0 }),
   } as unknown as ChunkContext;
 
   const t0 = performance.now();

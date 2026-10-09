@@ -378,6 +378,18 @@ interface WheelVisual {
   spinRadS: number;
   /** Accumulated spin (radians) for rendering. A stalled wheel stops accumulating. */
   drawnSpin: number;
+  /**
+   * The wheel's drawn pose (spin, suspension length, steer) at the last two fixed
+   * steps, interpolated at render like the chassis. Drawn raw at 100 fps over a 60 Hz
+   * step, a wheel advanced by one step on one frame, two on the next and none on the
+   * third: a visible stutter on every car alongside.
+   */
+  spinPrev: number;
+  spinStep: number;
+  suspPrev: number;
+  suspStep: number;
+  steerPrev: number;
+  steerStep: number;
   /** Longitudinal slip ratio, (ωr - v)/max(|v|, ref). Negative under lock-up. */
   slipRatio: number;
   /**
@@ -1731,6 +1743,12 @@ export class Vehicle implements Rebasable {
         locked: false,
         spinRadS: 0,
         drawnSpin: 0,
+        spinPrev: 0,
+        spinStep: 0,
+        suspPrev: 0,
+        suspStep: 0,
+        steerPrev: 0,
+        steerStep: 0,
         slipRatio: 0,
         carcassSlip: 0,
         loadN: 0,
@@ -3193,6 +3211,23 @@ export class Vehicle implements Rebasable {
     this.prevQuat.copy(this.stepQuat);
     this.chassisBody.translation(this.stepPos);
     this.chassisBody.rotation(this.stepQuat);
+    this.latchWheelPoses(false);
+  }
+
+  /** Shifts the wheels' drawn poses one step on (or primes both ends to now). */
+  private latchWheelPoses(prime: boolean): void {
+    const controller = this.controller;
+    if (!controller) return;
+    for (const w of this.wheels) {
+      const susp = controller.wheelSuspensionLength(w.index) ?? 0;
+      const steer = controller.wheelSteering(w.index) ?? 0;
+      w.spinPrev = prime ? w.drawnSpin : w.spinStep;
+      w.suspPrev = prime ? susp : w.suspStep;
+      w.steerPrev = prime ? steer : w.steerStep;
+      w.spinStep = w.drawnSpin;
+      w.suspStep = susp;
+      w.steerStep = steer;
+    }
   }
 
   /**
@@ -3218,6 +3253,7 @@ export class Vehicle implements Rebasable {
     this.prevQuat.copy(this.stepQuat);
     this.rootGroup.position.copy(this.stepPos);
     this.rootGroup.quaternion.copy(this.stepQuat);
+    this.latchWheelPoses(true);
   }
 
   interpolatedTransform(alpha: number, outPos: THREE.Vector3, outQuat: THREE.Quaternion): void {
@@ -3370,14 +3406,15 @@ export class Vehicle implements Rebasable {
 
     this.lamps.applyRearLightState();
 
-    // Wheels are chassis-local: suspension travel and spin are small, smooth and
-    // already snapped to the same step, so they need no second interpolation.
+    // Wheels are chassis-local, and interpolated between the last two steps exactly as
+    // the chassis is (see `spinPrev`).
     for (const w of this.wheels) {
       const cp = controller.wheelChassisConnectionPointCs(w.index, w.scratchCp);
-      const susp = controller.wheelSuspensionLength(w.index);
-      const steer = controller.wheelSteering(w.index);
-      if (cp) w.mesh.position.set(cp.x, cp.y - (susp ?? 0), cp.z);
-      w.mesh.rotation.set(w.drawnSpin % TWO_PI, steer ?? 0, 0);
+      const susp = w.suspPrev + (w.suspStep - w.suspPrev) * alpha;
+      const steer = w.steerPrev + (w.steerStep - w.steerPrev) * alpha;
+      const spin = w.spinPrev + (w.spinStep - w.spinPrev) * alpha;
+      if (cp) w.mesh.position.set(cp.x, cp.y - susp, cp.z);
+      w.mesh.rotation.set(spin % TWO_PI, steer, 0);
     }
 
     // The rim follows the steering-box command, before rack backlash: the driver

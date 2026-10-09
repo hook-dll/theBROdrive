@@ -7,6 +7,7 @@ import type { Terrain } from './terrain';
 import type { WorldOrigin } from './origin';
 import { WorldWorkScheduler } from './workqueue';
 import { CHUNK_LENGTH, ROAD_PHYSICS_CHUNKS, ROAD_VISUAL_CHUNKS } from './ranges';
+import { InstanceBatches } from './props/instancebatch';
 
 /**
  * World streaming spine.
@@ -64,6 +65,8 @@ export interface ChunkContext {
    */
   originX: number;
   originZ: number;
+  /** The shared instance batches that prop geometry takes slots in (`props/instancebatch.ts`). */
+  batches: InstanceBatches;
 }
 
 export interface ChunkContent {
@@ -161,6 +164,7 @@ export class ChunkStreamer {
   private readonly lastChunkIndex: number;
   private previousPlayerS: number | null = null;
   private travelDirection: -1 | 0 | 1 = 0;
+  private readonly batches: InstanceBatches;
 
   constructor(
     private readonly road: Road,
@@ -172,6 +176,8 @@ export class ChunkStreamer {
     private readonly scheduler: WorldWorkScheduler,
   ) {
     this.lastChunkIndex = Math.floor((road.length - 1) / CHUNK_LENGTH);
+    this.batches = new InstanceBatches(origin);
+    this.scene.add(this.batches.root);
   }
 
   register(provider: ChunkProvider): void {
@@ -608,6 +614,9 @@ export class ChunkStreamer {
         group.updateMatrix();
       }
     }
+    // The batches hold their instances in the origin frame of the page's anchor, so
+    // only their own offsets move (see `props/instancebatch.ts`).
+    this.batches.rebase();
   }
 
   private context(chunk: BuiltChunk): ChunkContext {
@@ -622,6 +631,7 @@ export class ChunkStreamer {
       hasPhysics: chunk.hasPhysics,
       originX: chunk.originX,
       originZ: chunk.originZ,
+      batches: this.batches,
     };
   }
 
@@ -674,5 +684,7 @@ export class ChunkStreamer {
     this.buildQueue.length = 0;
     this.refreshQueue.length = 0;
     this.scheduler.setPending('road', false);
+    this.batches.dispose();
+    this.scene.remove(this.batches.root);
   }
 }

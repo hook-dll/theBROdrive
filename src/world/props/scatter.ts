@@ -31,7 +31,8 @@ import {
   type BreakableSink,
   type PropForm,
 } from './forms';
-import { buildContactShadows, type ContactShadowSpot } from './contactshadow';
+import { allocateContactShadows, type ContactShadowSpot } from './contactshadow';
+import type { BatchSlot } from './instancebatch';
 import {
   groundCoverDensity,
   type GroundCoverField,
@@ -277,7 +278,7 @@ export class ScatterProvider implements ChunkProvider {
     const group = new THREE.Group();
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
-    const meshes: THREE.InstancedMesh[] = [];
+    const slots: BatchSlot[] = [];
     const hazardChunkKey = `scatter:${ctx.chunkIndex}`;
     const placements: ScatterPlacement[] = [];
     const registered: number[] = [];
@@ -541,27 +542,19 @@ export class ScatterProvider implements ChunkProvider {
       list.push(pl);
     }
     for (const [form, list] of byForm) {
-      const mesh = new THREE.InstancedMesh(form.geometry, form.material, list.length);
+      const kind = { geometry: form.geometry, material: form.material };
       for (let i = 0; i < list.length; i++) {
         const pl = list[i]!;
         _dummy.position.set(pl.x - ox, pl.y, pl.z - oz);
         _dummy.rotation.set(pl.rx, pl.ry, pl.rz);
         _dummy.scale.setScalar(pl.scale);
         _dummy.updateMatrix();
-        mesh.setMatrixAt(i, _dummy.matrix);
-        pl.mesh = mesh;
-        pl.instance = i;
+        // Shared with other chunks of the band; culling is by slot, see instancebatch.ts.
+        const slot = ctx.batches.allocate(ctx, kind, _dummy.matrix);
+        pl.mesh = slot.mesh;
+        pl.instance = slot.instance;
+        slots.push(slot);
       }
-      mesh.instanceMatrix.needsUpdate = true;
-      // Culled on the bounds of its INSTANCES, which three computes over every instance
-      // matrix — not on the form's own geometry sphere, which sits at the mesh origin
-      // and would pop a whole chunk's scatter out while half of it was still on screen.
-      // Computed here, once, at full scale: the only later writes are a break's zero-
-      // scale blank, which only ever shrinks what the sphere has to hold. A rebase moves
-      // the chunk GROUP, and the sphere is local to it, so it never needs redoing.
-      mesh.computeBoundingSphere();
-      group.add(mesh);
-      meshes.push(mesh);
       yield;
     }
 
@@ -581,11 +574,9 @@ export class ScatterProvider implements ChunkProvider {
       coverShadow[i] = spots.length;
       spots.push({ x: pl.x - ox, groundY: pl.groundY, z: pl.z - oz, radius: pl.radius * 0.6, height: pl.form.height * pl.scale });
     }
-    const shadows = buildContactShadows(spots);
-    if (shadows) {
-      group.add(shadows);
-      meshes.push(shadows);
-    }
+    // Slots of the contact shadows, in `spots` order: a cover prop's shadow is its index.
+    const shadowSlots = allocateContactShadows(spots, ctx.batches, ctx);
+    slots.push(...shadowSlots);
 
     if (this.groundCover && cover.length > 0) {
       const coverSpots: GroundCoverSpot[] = [];
@@ -601,8 +592,8 @@ export class ScatterProvider implements ChunkProvider {
           radius: pl.radius * GROUND_COVER_HIT_SHARE,
           mesh: pl.mesh,
           instance: pl.instance,
-          shadow: shadows && shadowIndex >= 0 ? shadows : null,
-          shadowInstance: shadowIndex,
+          shadow: shadowIndex >= 0 ? shadowSlots[shadowIndex]!.mesh : null,
+          shadowInstance: shadowIndex >= 0 ? shadowSlots[shadowIndex]!.instance : -1,
         });
       }
       coverHandle = this.groundCover.add(coverSpots);
@@ -701,19 +692,19 @@ export class ScatterProvider implements ChunkProvider {
       bodies,
       colliders,
       dispose: () => {
-        for (const m of meshes) m.dispose();
         if (registered.length > 0) this.breakables?.forget(registered);
         this.groundCover?.forget(coverHandle);
         this.hazards?.forget(hazardChunkKey);
+        for (const slot of slots) ctx.batches.release(slot);
       },
     };
   } finally {
     if (!completed) {
       for (const body of bodies) ctx.physics.removeBody(body);
-      for (const m of meshes) m.dispose();
       if (registered.length > 0) this.breakables?.forget(registered);
       this.groundCover?.forget(coverHandle);
       this.hazards?.forget(hazardChunkKey);
+      for (const slot of slots) ctx.batches.release(slot);
       group.clear();
     }
   }

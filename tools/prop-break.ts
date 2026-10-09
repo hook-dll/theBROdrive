@@ -24,6 +24,7 @@ import * as THREE from 'three';
 import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
 import { GameWorld, newWorldState } from '../src/game/state';
 import { type ChunkContext, type ChunkContent } from '../src/world/chunks';
+import { InstanceBatches } from '../src/world/props/instancebatch';
 import { CHUNK_LENGTH } from '../src/world/ranges';
 import { DebrisField, type Impactor } from '../src/world/debris';
 import { WorldOrigin } from '../src/world/origin';
@@ -57,6 +58,7 @@ function buildChunk(hasPhysics: boolean): ChunkContent {
     hasPhysics,
     originX: 0,
     originZ: 0,
+    batches: new InstanceBatches({ x: 0, z: 0 }),
   } as unknown as ChunkContext;
   return provider.build(ctx);
 }
@@ -90,6 +92,7 @@ let registeredIds: number[] = [];
       hasPhysics,
       originX: 0,
       originZ: 0,
+      batches: new InstanceBatches({ x: 0, z: 0 }),
     }) as unknown as ChunkContext;
 
   const withPhysics = spyProvider.build(ctx(true));
@@ -136,6 +139,7 @@ let target: BreakableProp | null = null;
     hasPhysics: true,
     originX: 0,
     originZ: 0,
+    batches: new InstanceBatches({ x: 0, z: 0 }),
   } as unknown as ChunkContext);
   // Hand the captured prop to the real field, then throw the duplicate chunk's bodies
   // away — the prop's own collider is the one being tested, so it must stay.
@@ -352,6 +356,7 @@ if (!target) {
     hasPhysics: true,
     originX: 0,
     originZ: 0,
+    batches: new InstanceBatches({ x: 0, z: 0 }),
   } as unknown as ChunkContext);
   for (const body of rebuilt.bodies) physics.world.removeRigidBody(body);
   rebuilt.dispose?.();

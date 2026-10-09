@@ -9,6 +9,11 @@
   (`Settings.dashboardSize`, range 55-120%); a save's old `dashboardScale` is carried
   over by dividing by 1.4, so nobody's dashboard changes size. The phone cluster is
   unchanged.
+- WHEELS TURN SMOOTHLY ABOVE 60 FPS. A wheel's spin, suspension travel and steer are
+  interpolated between the last two physics steps like the chassis (`spinPrev`/`spinStep`
+  in `vehicle/vehicle.ts`). Drawn raw over the 60 Hz step at about 100 fps, a wheel
+  turned one step on one frame, two on the next and none on the third: a stutter on
+  every car alongside, read in play as the traffic moving in micro-jerks.
 - INSIDE A HABOOB THE WORLD IS THE WALL SEEN UP CLOSE. The short sight inside the storm
   is applied in the finishing pass (`uDustInside` in `render/hazeshader.ts`,
   `FOG_DUST_SIGHT` in `render/sky.ts`, k = 0.056 from the camera: half gone at 15 m,
@@ -359,6 +364,31 @@
   old save's `tyres` key binding is ignored.
 
 ### Changed
+
+- FEWER DRAW CALLS FROM THE CHUNK PROPS. Scatter forms, ground cover, contact shadows and
+  delineator posts no longer each own an `InstancedMesh` per chunk. They take slots in
+  shared batches (`world/props/instancebatch.ts`), one per geometry and material pair and
+  per band of four chunks, in pages of 256 instances. A chunk's slots are released when
+  the chunk tears down, and a released slot draws nothing. Pages move with the floating
+  origin, so a rebase moves pages and never rewrites instances. Every prop keeps its
+  shader, shadow flags and render order, so the look is unchanged. Measured on seed
+  `flick`, instanced prop draws per frame: 136 → 62 at 69.3 km, 144 → 63 at 40 km,
+  91 → 60 at 12 km; pole draws 43 → 18 at 69.3 km; shader programs constant through the
+  drive.
+
+- FEWER DRAW CALLS FROM THE CARS AND THE POLES. A car model's lamp lenses that share a
+  parent, material and lamp role (the headlight, tail, reverse and indicator clusters) are
+  merged into one mesh at template load, and so are the `car_trim` panels under one
+  parent (`mergeStaticBodyMeshes` in `render/carmodel.ts`). Paint, glass, wheels, the
+  steering wheel and anything carrying stickers stay separate. Every merged mesh keeps its
+  first member's name, so the lamp bindings, the lamp bounds and the wheel and paint
+  lookups resolve as before. Telegraph pole bodies are one `InstancedMesh` per design
+  geometry per chunk (`PoleProvider.build` in `world/props/poles.ts`), with shadows and
+  vertex colour unchanged. The instanced variant is linked at boot by `poleProgramAnchor`,
+  so no pole program is compiled mid-drive. Wires and anomaly fittings (wrapped tarp,
+  nest, gear) are unchanged. Measured, meshes per car: IZh-2715 55 → 12, VAZ-2109 (SA)
+  51 → 40, Oka 19 → 15; Soviet pack unchanged (11). Lamp states (headlights, tail,
+  brake, reverse, indicators) read identical before and after on the IZh.
 
 - THE LATERAL MANOEUVRE HAS ONE OWNER (`vehicle/lateral.ts`, `LateralCommitment`). The
   detour/crossing latch (`commitLane`), the crossing barrier and the verge pass's state
