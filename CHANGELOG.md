@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.21.0 — 2026-10-09
+
+A wide view through a Panini lens, a dense haboob you can barely see out of, fewer draw calls (shared prop batches, instanced poles, merged lamps), smoothly turning wheels, the game starting from a phone over the LAN, and the first commit of carforge, a low-poly car generator built like the Soviet pack.
 
 ### Added
 
