@@ -88,6 +88,7 @@ RECESS_DEPTH = 15.0       # mm a recess (glass, grille) goes into its face (spec
 GROOVE_WIDTH = 18.0       # mm width of a panel gap at the surface (grooves[].width)
 GROOVE_DEPTH = 12.0       # mm depth of a panel gap's V (grooves[].depth)
 GROOVE_SILL_CLEAR = 10.0  # mm a side gap stops above the sill chamfer
+GROOVE_RAIL_CLEAR = 20.0  # mm a side gap stops below the roof / bonnet crown line (it may cross the rail chamfer)
 LINE_WIDTH = 12.0         # mm width of a drawn line (lines[].width)
 LINE_PROUD = 3.0          # mm a drawn line stands off its face
 BUMPER_LIP = 40.0         # mm height of a channel bumper's lips (bumpers[].lip)
@@ -966,33 +967,52 @@ def cut_recesses(spec, body):
 
 
 def probe_line(bvh, face, line, tol, step, keep_if=None):
-    """Points (u, v, 3D mm, surface normal) along a polyline on a face, split where the face
-    bends away from a straight piece by more than `tol` (sampled every `step` mm, faired with
-    `simplify`). A point's normal averages the samples on both sides of it, so at a crease it
-    is the crease's bisector. Samples off the body, or failing `keep_if(point, normal)`, are
-    dropped, so a line drawn past the body's edge stops at it."""
+    """Runs of points (u, v, 3D mm, surface normal) along a polyline on a face, each run split
+    where the face bends away from a straight piece by more than `tol` (sampled every `step`
+    mm, faired with `simplify`; the polyline's own corners are kept). A point's normal
+    averages the samples on both sides of it, so at a crease it is the crease's bisector.
+    Samples off the body, or failing `keep_if(point, normal)`, end a run: a line drawn past
+    the body's edge stops at it and starts again where it comes back, never bridging the gap."""
     ax = AXIS_INDEX[face]
     out_axis = FACE_AXIS[face]
-    out = []
-    for a, b in zip(line, line[1:]):
+    samples = []  # (segment, arc length, depth, u, v, point, normal) or None
+    arc0 = 0.0
+    for si, (a, b) in enumerate(zip(line, line[1:])):
         length = math.hypot(b[0] - a[0], b[1] - a[1])
         n = max(1, int(length // step))
-        prof = []
-        for k in range(n + 1):
+        for k in range(0 if si == 0 else 1, n + 1):
             u, v = a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n
             loc, nrm, _, _ = bvh.ray_cast(face_point(face, u, v) * MM + out_axis * 9.0, -out_axis)
             if loc is None or (keep_if and not keep_if(loc / MM, nrm)):
+                samples.append(None)
                 continue
-            prof.append((length * k / n, loc[ax] / MM, u, v, loc / MM, nrm))
-        if len(prof) < 2:
+            samples.append((si, arc0 + length * k / n, loc[ax] / MM, u, v, loc / MM, nrm))
+        arc0 += length
+    runs, run = [], []
+    for q in samples + [None]:
+        if q is not None:
+            run.append(q)
             continue
-        keep = {round(sv, 6) for sv, _ in simplify([(q[0], q[1]) for q in prof], tol)}
+        if len(run) >= 2:
+            runs.append(run)
+        run = []
+    out = []
+    for run in runs:
+        keep = set()
+        start = 0
+        for i in range(1, len(run) + 1):  # pieces of one polyline segment each
+            if i == len(run) or run[i][0] != run[start][0]:
+                piece = run[start:i] if start == 0 else run[start - 1:i]
+                ids = list(range(start if start == 0 else start - 1, i))
+                kept = {round(sv, 6) for sv, _ in simplify([(q[1], q[2]) for q in piece], tol)}
+                keep.update(j for j, q in zip(ids, piece) if round(q[1], 6) in kept)
+                keep.update((ids[0], ids[-1]))
+                start = i
         pts = []
-        for i, q in enumerate(prof):
-            if round(q[0], 6) in keep:
-                nb = prof[max(i - 1, 0)][5] + prof[min(i + 1, len(prof) - 1)][5]
-                pts.append((q[2], q[3], q[4], nb.normalized()))
-        out += pts if not out else pts[1:]
+        for i in sorted(keep):
+            nb = run[max(i - 1, 0)][6] + run[min(i + 1, len(run) - 1)][6]
+            pts.append((run[i][3], run[i][4], run[i][5], nb.normalized()))
+        out.append(pts)
     return out
 
 
@@ -1024,22 +1044,60 @@ def add_lines(spec, s, body, bvh):
         half = float(it.get("width", LINE_WIDTH)) / 2
         cell = CELLS[it.get("cell", "black")]
         for line, sign in halves(it, closed(it)):
-            pts = probe_line(bvh, face, line, SEAM_TOL, SEAM_MIN)
-            out = flip(FACE_AXIS[face], sign)
-            rows = []
-            for i, (u, v, _, _) in enumerate(pts):
-                (ua, va, _, _), (ub, vb, _, _) = pts[max(i - 1, 0)], pts[min(i + 1, len(pts) - 1)]
-                tl = math.hypot(ub - ua, vb - va) or 1.0
-                du, dv = -(vb - va) / tl * half, (ub - ua) / tl * half
-                pair = [face_hit(bvh, face, u + k * du, v + k * dv) for k in (1, -1)]
-                rows.append(None if None in pair else
-                            [bm.verts.new((flip(p, sign) + out * LINE_PROUD) * MM) for p in pair])
-            for a, b in zip(rows, rows[1:]):
-                if a is not None and b is not None:
-                    add_face(bm, uvl, [a[0], a[1], b[1], b[0]], cell, out)
+            for pts in probe_line(bvh, face, line, SEAM_TOL, SEAM_MIN):
+                out = flip(FACE_AXIS[face], sign)
+                rows = []
+                for i, (u, v, _, _) in enumerate(pts):
+                    (ua, va, _, _), (ub, vb, _, _) = pts[max(i - 1, 0)], pts[min(i + 1, len(pts) - 1)]
+                    tl = math.hypot(ub - ua, vb - va) or 1.0
+                    du, dv = -(vb - va) / tl * half, (ub - ua) / tl * half
+                    pair = [face_hit(bvh, face, u + k * du, v + k * dv) for k in (1, -1)]
+                    rows.append(None if None in pair else
+                                [bm.verts.new((flip(p, sign) + out * LINE_PROUD) * MM) for p in pair])
+                for a, b in zip(rows, rows[1:]):
+                    if a is not None and b is not None:
+                        add_face(bm, uvl, [a[0], a[1], b[1], b[0]], cell, out)
     bm.to_mesh(body.data)
     bm.free()
     body.data.update()
+
+
+def add_wedge(bm, uvl, pts, sign, face, loop, half, depth, cell):
+    """One swept V wedge (the cutter of a panel gap) along probed points; 1 if built, else 0.
+    Cross-sections stand square to the surface (the probe's normal) and across the line's
+    direction; the wedge's top stands `rise` off the surface, so the V is `2 half` wide there."""
+    if len(pts) < 2:
+        return 0
+    rise = 30.0
+    top_half = half * (depth + rise) / depth
+    axis = flip(FACE_AXIS[face], sign)
+    m = len(pts)
+    P = [flip(q[2], sign) for q in pts]
+    rings = []
+    for i, (_, _, _, nrm) in enumerate(pts):
+        p, out = P[i], flip(nrm, sign)
+        if out.dot(axis) < 0:
+            out = -out
+        prev = P[(i - 1) % m] if loop or i > 0 else p
+        nxt = P[(i + 1) % m] if loop or i < m - 1 else p
+        t = nxt - prev
+        if t.length < 1e-6:
+            continue
+        across = t.normalized().cross(out).normalized()
+        rings.append([bm.verts.new((p + across * top_half + out * rise) * MM),
+                      bm.verts.new((p - across * top_half + out * rise) * MM),
+                      bm.verts.new((p - out * depth) * MM)])
+    if len(rings) < 2:
+        return 0
+    pairs = list(zip(rings, rings[1:])) + ([(rings[-1], rings[0])] if loop else [])
+    for a, b in pairs:
+        for i in range(3):
+            j = (i + 1) % 3
+            add_face(bm, uvl, [a[i], a[j], b[j], b[i]], cell)
+    if not loop:
+        add_face(bm, uvl, rings[0], cell)
+        add_face(bm, uvl, rings[-1][::-1], cell)
+    return 1
 
 
 def cut_grooves(spec, s, body, bvh):
@@ -1047,13 +1105,15 @@ def cut_grooves(spec, s, body, bvh):
     surface and `depth` (GROOVE_DEPTH) deep, in the paint, as the pack folds its door gaps
     into the shell. One swept wedge per line (probed on the uncut `bvh`), its cross-section
     square to the surface at every probe, so neighbouring pieces share their ends and leave
-    no slivers. Side lines stop short of the sill chamfer, so a gap never cuts the body's edge."""
+    no slivers. Side lines stay on the side: they stop short of the sill chamfer below and of
+    the roof (or bonnet) top above, so a gap never cuts the body's edge or runs up the
+    windscreen pillar into the roof."""
     bm, uvl = new_bm()
     cell = CELLS["paint"]
     lines = 0
 
-    def above_sill(p, _n):
-        return p.z > s.bottom(p.y) + SILL_CHAMFER + GROOVE_SILL_CLEAR
+    def on_side(p, _n):
+        return s.bottom(p.y) + SILL_CHAMFER + GROOVE_SILL_CLEAR < p.z < s.top(p.y) - CROWN - GROOVE_RAIL_CLEAR
 
     for kind, it in line_items(spec, s):
         if kind != "grooves":
@@ -1061,43 +1121,15 @@ def cut_grooves(spec, s, body, bvh):
         face = it["face"]
         half = float(it.get("width", GROOVE_WIDTH)) / 2
         depth = float(it.get("depth", GROOVE_DEPTH))
-        rise = 30.0  # the wedge's top stands this far off the surface
-        top_half = half * (depth + rise) / depth
         loop = bool(it.get("closed"))
         for line, sign in halves(it, closed(it)):
-            pts = probe_line(bvh, face, line, SEAM_TOL, SEAM_MIN, above_sill if face == "side" else None)
-            if loop and len(pts) > 2:
-                pts = pts[:-1]
-            if len(pts) < 2:
-                continue
-            axis = flip(FACE_AXIS[face], sign)
-            rings = []
-            m = len(pts)
-            P = [flip(q[2], sign) for q in pts]
-            for i, (_, _, _, nrm) in enumerate(pts):
-                p, out = P[i], flip(nrm, sign)
-                if out.dot(axis) < 0:
-                    out = -out
-                prev = P[(i - 1) % m] if loop or i > 0 else p
-                nxt = P[(i + 1) % m] if loop or i < m - 1 else p
-                t = nxt - prev
-                if t.length < 1e-6:
-                    continue
-                across = t.normalized().cross(out).normalized()
-                rings.append([bm.verts.new((p + across * top_half + out * rise) * MM),
-                              bm.verts.new((p - across * top_half + out * rise) * MM),
-                              bm.verts.new((p - out * depth) * MM)])
-            if len(rings) < 2:
-                continue
-            pairs = list(zip(rings, rings[1:])) + ([(rings[-1], rings[0])] if loop else [])
-            for a, b in pairs:
-                for i in range(3):
-                    j = (i + 1) % 3
-                    add_face(bm, uvl, [a[i], a[j], b[j], b[i]], cell)
-            if not loop:
-                add_face(bm, uvl, rings[0], cell)
-                add_face(bm, uvl, rings[-1][::-1], cell)
-            lines += 1
+            runs = probe_line(bvh, face, line, SEAM_TOL, SEAM_MIN, on_side if face == "side" else None)
+            # a closed line that stayed whole is a loop; one broken by a dropped stretch is not
+            whole = loop and len(runs) == 1
+            for pts in runs:
+                if whole and len(pts) > 2:
+                    pts = pts[:-1]
+                lines += add_wedge(bm, uvl, pts, sign, face, whole, half, depth, cell)
     if not lines:
         bm.free()
         return
@@ -1339,8 +1371,8 @@ def build_body(spec, cid):
     cut_arches(spec, s, body)
     cut_windows(spec, s, body)
     cut_recesses(spec, body)
+    weld_cuts(body)  # before the gaps: welding would drag a gap's edges onto the station grid
     cut_grooves(spec, s, body, uncut)
-    weld_cuts(body)
     add_arch_lips(spec, s, body, uncut)
     add_lines(spec, s, body, uncut)
     add_details(spec, body)
