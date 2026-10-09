@@ -266,8 +266,8 @@
 /* The title's front is three rows at most, and a first launch has one: a full panel
    behind a single button is an empty room. So the front stands bare on the darkened
    scene, low on the right across from the name, and the panel appears only for the
-   list of saved drives, which is a document and wants one. */
-.menu-title-screen .menu-sheet:not(.is-list) {
+   list of saved drives and the settings, which are documents and want one. */
+.menu-title-screen .menu-sheet:not(.is-list):not(.is-settings) {
   background: none;
   border-left-color: transparent;
   box-shadow: none;
@@ -276,8 +276,13 @@
   padding-bottom: clamp(24px, 7vh, 80px);
 }
 
-.menu-title-screen .menu-sheet:not(.is-list) > :last-child {
+.menu-title-screen .menu-sheet:not(.is-list):not(.is-settings) > :last-child {
   margin-bottom: 0;
+}
+
+/* The settings sheet is wider than the room the name leaves beside the front. */
+.menu-title-screen.is-settings .menu-hero {
+  display: none;
 }
 
 @keyframes menu-sheet-in {
@@ -901,6 +906,15 @@
   padding-right: 10px;
   scrollbar-width: thin;
   scrollbar-color: var(--m-line-2) transparent;
+}
+
+/* Quality's Advanced rows: set in under their toggle, so they read as belonging to it. */
+.menu-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(20px, 3.4vh, 30px);
+  padding-left: 16px;
+  border-left: 1px solid var(--m-line-2);
 }
 
 .menu-field {

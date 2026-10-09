@@ -13,7 +13,11 @@ import type { Renderer } from '../core/renderer';
 import {
   GRAPHICS_TIERS,
   presentationFpsFor,
+  qualityPresetForDetail,
+  qualityPresetOf,
   storeSettings,
+  viewDistanceFor,
+  withQualityPreset,
   type GraphicsQuality,
 } from '../game/settings';
 import type { GameWorld } from '../game/state';
@@ -231,17 +235,23 @@ export async function warmUpBoot(ctx: BootWarmupContext): Promise<void> {
     // screen to learn nothing. Observed happening, which is why the guard exists.
     if (!ctx.renderer.resolutionSettled) return;
     const ladder: GraphicsQuality[] = ['blessing', 'standard', 'acceptable'];
+    // Each step moves the whole QUALITY PRESET when the settings are on one (a first
+    // launch is: the defaults are Medium), so the verdict lands on Low, Medium or High
+    // with the view distance and traffic that go with the rung. Settings already off a preset
+    // were set by hand, and only the rung moves under them.
     const adopt = async (index: number): Promise<void> => {
       const tier = ladder[index]!;
-      const settings = {
-        ...ctx.world.state.settings,
-        graphicsQuality: tier,
-        msaa: GRAPHICS_TIERS[tier].msaa,
-      };
+      const current = ctx.world.state.settings;
+      const settings = qualityPresetOf(current) !== null
+        ? withQualityPreset(current, qualityPresetForDetail(tier), current.graphicsQualitySource)
+        : { ...current, graphicsQuality: tier, msaa: GRAPHICS_TIERS[tier].msaa };
       ctx.world.apply({ t: 'settings', settings });
       ctx.renderer.setMsaa(settings.msaa);
       ctx.renderer.setQuality(tier);
       ctx.sky.setQuality(tier, ctx.mobilePresentation);
+      const horizon = viewDistanceFor(settings.viewDistance, ctx.mobilePresentation);
+      ctx.renderer.setViewDistance(horizon);
+      ctx.vista.setViewDistance(horizon);
       ctx.loop.setRenderFps(presentationFpsFor(ctx.world.state.settings.frameRateLimit));
       await settleLaunchResolution();
     };

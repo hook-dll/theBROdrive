@@ -81,7 +81,7 @@ const CHASE_LOOK_ACTIVITY_EPSILON = 1e-3;
 const ZOOM_SENSITIVITY = 0.25;
 const DIST_MIN = 1.5;
 /** Furthest the chase arm may stand from the car, metres. */
-const DIST_MAX = 8;
+const DIST_MAX = 7;
 /**
  * Elevation of the arm over the car's centre, radians.
  *
@@ -95,18 +95,6 @@ const DIST_MAX = 8;
  * and holds the band this sits in.
  */
 const ARM_PITCH_BASE = 0.189;
-/**
- * DEV chase presets (pause menu 'Chase: near / mid / far'): arm length, metres, and the
- * arm's elevation. A nearer arm stands higher so the road beyond the car stays in the
- * frame above its roof; a farther one lowers to keep the car from shrinking to a dot.
- * `mid` is the shipped default (6 m at ARM_PITCH_BASE).
- */
-export type ChasePreset = 'near' | 'mid' | 'far';
-const CHASE_PRESETS: Record<ChasePreset, { distance: number; pitch: number }> = {
-  near: { distance: 4.5, pitch: 0.235 },
-  mid: { distance: 6, pitch: ARM_PITCH_BASE },
-  far: { distance: 7.5, pitch: 0.165 },
-};
 /** How far short of an occluder to stop the chase camera, metres. */
 const OCCLUSION_SKIN = 0.3;
 /**
@@ -122,39 +110,25 @@ const GROUND_CLEARANCE = 0.45;
 const GROUND_PROBE_UP = 0.5;
 const GROUND_PROBE_DOWN = 40;
 /**
- * Speed widening, degrees added to the resting FOV at `FOV_FULL_SPEED`.
+ * Acceleration widening, degrees added to the resting FOV per m/s² of the smoothed
+ * surge (`surge`, SURGE_OMEGA), capped at FOV_ACCEL_MAX: +7.5° at a 3 m/s² pull. It
+ * follows the speed's rate of change, not the speed, so the view widens while the car
+ * gains speed and returns to rest once the speed holds — a cruise at any speed rests at
+ * the player's own FOV. Driving views only; on foot, in a death and through the
+ * binoculars the view rests.
  *
- * This was an absolute ceiling of 70 — `BASE_FOV + 14` before that, which is 79 degrees
- * vertical, 111 horizontal at 16:9, wider than the chase view of any racing game, and a
- * rectilinear projection stretches the picture along the frame's radius by
- * `1 / cos²(angle)`: 3.15x at the frame edge against the authored 65's 2.28x. Five
- * degrees is what carries the speed cue without the outer frame turning into a fisheye.
- * Measured: the car shrinks from 17% of the frame height at rest to 9% at 130 km/h with
- * the old ceiling and to ~10% with five — the widening and the arm's own speed lag
- * together, and this bounds the widening's share of it.
- *
- * RELATIVE rather than absolute now that the resting view is a player setting: an
- * absolute 70 would silently mean fourteen degrees of widening for someone at 56 and
- * none at all for someone at 85, so the speed cue would depend on a taste it has
- * nothing to do with.
+ * RELATIVE to the resting view, which is a player setting: the cue then means the same
+ * whatever FOV he picked. The cap bounds the rectilinear stretch at the frame edge
+ * (`1 / cos²(angle)`, 2.28x at the authored 65) during the short time it is reached.
  */
-const FOV_SPEED_WIDENING = 5;
+const FOV_ACCEL_DEG_PER_MPS2 = 2.5;
+const FOV_ACCEL_MAX = 10;
 /**
- * Speed (km/h) at which the speed-FOV widening is fully applied. 160 rather than the 130
- * it was, because most cars top out between 130 and 170: at 130 the view stopped
- * changing for the whole top of the range.
+ * Braking narrows the view by FOV_BRAKE_DEG_PER_MPS2 per m/s² of deceleration, at most
+ * FOV_BRAKE_MAX degrees: a third of the old 2°/m/s² widening rate, so a stamp on the
+ * brakes reads as a lurch forward without the frame zooming in.
  */
-const FOV_FULL_SPEED = 160;
-/**
- * DEV FOV cue (pause menu 'FOV cue'). `speed` is the shipped widening above. `accel`
- * widens with the smoothed surge instead (FOV_ACCEL_DEG_PER_MPS2 per m/s², so +6 deg at a
- * 3 m/s² pull), which returns to rest once the speed holds; braking narrows by a third of
- * that rate. `mix` is half of each.
- */
-export type FovCue = 'speed' | 'accel' | 'mix';
-const FOV_ACCEL_DEG_PER_MPS2 = 2;
-const FOV_BRAKE_SHARE = 1 / 3;
-const FOV_ACCEL_MAX = 8;
+const FOV_BRAKE_DEG_PER_MPS2 = 2 / 3;
 const FOV_BRAKE_MAX = 2;
 const FOV_OMEGA = 6;
 /** Ten-power binoculars: the view is the resting FOV divided by this. */
@@ -189,23 +163,54 @@ const SURGE_OMEGA = 2.5;
 /** Measured accelerations past this (m/s²) are a crash or a teleport, not a surge. */
 const SURGE_ACCEL_CLAMP = 12;
 /**
- * SHAKE KICKS (DEV toggle): a short damped rotation of the driving view on an event — a
- * hard throttle or brake onset, a gear change, a landing or a hard bump. Each is an
- * impulse into a damped spring per axis (pitch, roll): KICK_OMEGA with KICK_ZETA rings
- * out in about 0.25 s with one small overshoot. Amplitudes are peak angles in radians.
+ * SHAKE KICKS (DEV toggle `bro.shakeKicks`, on by default in dev): a short damped jolt
+ * of the driving view on an event — a hard throttle or brake onset, a gear change, a
+ * landing or a hard bump. Each is an impulse into a damped spring per axis (pitch, roll,
+ * and the eye's drop): KICK_OMEGA with KICK_ZETA rings out in about 0.25 s with one small
+ * overshoot. Amplitudes are peak angles in radians, peak drops in metres.
  */
 const KICK_OMEGA = 24;
 const KICK_ZETA = 0.5;
-/** Peak of the spring's impulse response per unit initial velocity is ~0.6 / KICK_OMEGA. */
-const KICK_PEAK_GAIN = 0.6 / KICK_OMEGA;
+/**
+ * Peak of the spring's impulse response per unit initial velocity: the damped sine's
+ * first crest, `exp(-ζ/√(1-ζ²) · atan(√(1-ζ²)/ζ)) / ω`, 0.546 / KICK_OMEGA at ζ = 0.5.
+ */
+const KICK_PEAK_GAIN =
+  Math.exp((-KICK_ZETA / Math.sqrt(1 - KICK_ZETA ** 2)) * Math.atan(Math.sqrt(1 - KICK_ZETA ** 2) / KICK_ZETA))
+  / KICK_OMEGA;
 const DEG = Math.PI / 180;
-const KICK_MIN = 0.2 * DEG;
-const KICK_MAX = 0.6 * DEG;
-/** Fast-follow acceleration (rad/s) the onset detector reads; the surge is too slow. */
-const KICK_ACCEL_OMEGA = 10;
+const KICK_MIN = 0.4 * DEG;
+const KICK_MAX = 1.2 * DEG;
+/**
+ * Extra kick per m/s² past the onset threshold (accel/brake) or the bump threshold:
+ * KICK_MIN at 3.5 m/s², KICK_MAX at 6 — a Lada's hard stop is ~5.5, its launch ~4.4.
+ */
+const KICK_PER_MPS2 = 0.32 * DEG;
+/** A throttle kick's share of a brake kick at the same |accel|: the head is pressed back less than it is thrown. */
+const KICK_THROTTLE_SHARE = 0.8;
+/** Kick on a shift: an upshift nods the view down, a downshift tips it up. */
+const KICK_UPSHIFT = -0.5 * DEG;
+const KICK_DOWNSHIFT = 0.4 * DEG;
+/** Eye drop at a landing, metres: KICK_DROP_MIN at 2 m/s sink, KICK_DROP_MAX at 8. */
+const KICK_DROP_MIN = 0.025;
+const KICK_DROP_MAX = 0.06;
+/** Eye drop at a hard brake onset, metres, from KICK_DROP_MIN up by the brake's strength. */
+const KICK_DROP_BRAKE_MAX = 0.04;
+/**
+ * Fast-follow acceleration (rad/s, tau 50 ms) the onset detector reads; the surge is too
+ * slow. Still slow enough to smooth the speed's fixed-step staircase at 120 Hz.
+ */
+const KICK_ACCEL_OMEGA = 20;
 /** Onset: |accel| crosses this, m/s², re-arming only below KICK_ACCEL_REARM. */
 const KICK_ACCEL_ON = 3.5;
 const KICK_ACCEL_REARM = 1.5;
+/**
+ * Seconds after an onset during which a still-rising acceleration tops the kick up. The
+ * fast-follow value crosses the threshold before it reaches the event's own strength, so
+ * a kick sized at the crossing alone was always the minimum; the top-ups land inside a
+ * quarter of the spring's period, so they add to the same crest rather than a second one.
+ */
+const KICK_ONSET_WINDOW = 0.12;
 /** Touchdown after at least this long airborne counts as a landing, seconds. */
 const KICK_AIR_MIN = 0.12;
 /** Vertical speed change in one frame on the ground that counts as a bump, m/s. */
@@ -448,18 +453,6 @@ export class CameraRig {
   private steerLook = 0;
   /** Body roll carried into the bonnet view, radians; zero in steady. */
   private hoodRoll = 0;
-  /**
-   * Lens shift of the driving views (DEV), as a fraction of the frame height: the
-   * frustum slides down by this much while the camera's orientation stays put, so more
-   * of the near road is in the frame with verticals still vertical. Applied to the
-   * chase and bonnet views only; on foot, through the binoculars, in a death or a
-   * scripted shot the frame stays centred.
-   */
-  private lensShift = 0;
-  /** DEV FOV cue; see FovCue. */
-  private fovCue: FovCue = 'speed';
-  /** DEV chase preset's arm elevation, radians; see CHASE_PRESETS. */
-  private armPitchBase = ARM_PITCH_BASE;
   /** DEV shake kicks; see KICK_OMEGA. */
   private kicks = false;
   /** Kick springs, radians and rad/s, about the view's pitch and roll axes. */
@@ -467,9 +460,19 @@ export class CameraRig {
   private kickPitchVel = 0;
   private kickRoll = 0;
   private kickRollVel = 0;
+  /** Kick spring of the eye's drop, metres (positive = down) and m/s. */
+  private kickDrop = 0;
+  private kickDropVel = 0;
   /** Fast-follow acceleration for the onset detector, m/s², and its re-arm latch. */
   private kickAccel = 0;
   private kickAccelArmed = true;
+  /**
+   * The open onset: seconds left in its top-up window (KICK_ONSET_WINDOW), and the pitch
+   * (signed, radians) and drop (metres) it has delivered so far.
+   */
+  private kickOnsetLeft = 0;
+  private kickOnsetPitch = 0;
+  private kickOnsetDrop = 0;
   /** Last frame's gear label, vertical speed, and seconds without any wheel on the ground. */
   private kickGear = '';
   private kickVelY = Number.NaN;
@@ -491,9 +494,9 @@ export class CameraRig {
    * Sets the resting vertical FOV, from the pause menu, with no reload.
    *
    * The live `fov` follows it by the same difference rather than snapping, so a slider
-   * drag moves the view it is describing instead of jumping to rest: the speed widening
-   * and the binocular view are both derived from the resting value, and a player
-   * dragging this at 100 km/h keeps his widening while he does it.
+   * drag moves the view it is describing instead of jumping to rest: the acceleration
+   * widening and the binocular view are both derived from the resting value, and a
+   * player dragging this while pulling away keeps his widening while he does it.
    */
   setFieldOfView(degrees: number): void {
     const next = Math.min(FIELD_OF_VIEW_MAX, Math.max(FIELD_OF_VIEW_MIN, degrees));
@@ -502,26 +505,9 @@ export class CameraRig {
     this.baseHalfTan = Math.tan((next * Math.PI) / 360);
   }
 
-  /** Lens shift of the driving views, a fraction of the frame height; see `lensShift`. */
-  setLensShift(fraction: number): void {
-    this.lensShift = Math.max(0, fraction);
-  }
-
   /** `Settings.cameraShake`: whether the driving view trembles at speed. */
   setShake(on: boolean): void {
     this.shake = on;
-  }
-
-  /** DEV: what the FOV widening follows; see FovCue. */
-  setFovCue(cue: FovCue): void {
-    this.fovCue = cue;
-  }
-
-  /** DEV: chase arm preset; sets the arm length (the wheel zooms on from it) and elevation. */
-  setChasePreset(preset: ChasePreset): void {
-    const p = CHASE_PRESETS[preset];
-    this.logDistance = clamp(Math.log(p.distance), LOG_MIN, LOG_MAX);
-    this.armPitchBase = p.pitch;
   }
 
   /** DEV: event kicks on top of the speed sway; still gated by `setShake`. */
@@ -535,8 +521,11 @@ export class CameraRig {
     this.kickPitchVel = 0;
     this.kickRoll = 0;
     this.kickRollVel = 0;
+    this.kickDrop = 0;
+    this.kickDropVel = 0;
     this.kickAccel = 0;
     this.kickAccelArmed = true;
+    this.kickOnsetLeft = 0;
     this.kickGear = '';
     this.kickVelY = Number.NaN;
     this.kickAir = 0;
@@ -670,7 +659,7 @@ export class CameraRig {
     this.camera.position.copy(this.eye);
     _vD.set(0, 0, -LOOK_AHEAD).applyQuaternion(this.camera.quaternion);
     this.lookAt.copy(this.eye).add(_vD);
-    this.updateFov(0, d, 0);
+    this.updateFov(d, false);
     return riseSmooth;
   }
 
@@ -706,7 +695,7 @@ export class CameraRig {
     this.camera.position.copy(this.eye);
 
     this.fov += (fovDeg - this.fov) * (1 - Math.exp(-FOV_OMEGA * d));
-    this.updateProjection(0);
+    this.updateProjection();
   }
 
   /**
@@ -899,7 +888,8 @@ export class CameraRig {
     if (mode === 'hood' && this.hoodRoll !== 0) {
       this.camera.quaternion.multiply(_qB.setFromEuler(_eA.set(0, 0, this.hoodRoll, 'ZYX')));
     }
-    if (mode !== 'foot' && this.kicks && this.shake) this.applyKicks(d);
+    const kicking = mode !== 'foot' && this.kicks && this.shake;
+    if (kicking) this.applyKicks(d);
     if (mode !== 'foot' && this.shake) this.applyShake(target);
     // The camera sits in the relative scene graph, so its position is the relative
     // eye verbatim — no origin arithmetic here or at any consumer. The eye is built
@@ -909,9 +899,11 @@ export class CameraRig {
     // `eyeDirection` expose that same relative eye to interaction and spawn code,
     // which also live in the relative frame, so no absolute accessor is needed.
     this.camera.position.copy(this.eye);
+    // The kicks' drop moves the rendered eye only, like their rotation: interaction rays
+    // keep the steady eye.
+    if (kicking && this.kickDrop !== 0) this.camera.position.y -= this.kickDrop;
 
-    const shift = mode !== 'foot' && !this.binoculars ? this.lensShift : 0;
-    this.updateFov(target.speedKmh, d, shift);
+    this.updateFov(d, mode !== 'foot');
   }
 
   /* ---- desired pose per mode; each writes _vA = eye, _vB = look-at ---- */
@@ -1096,10 +1088,14 @@ export class CameraRig {
     this.camera.quaternion.multiply(_qB.setFromEuler(_eA));
   }
 
-  /** Kick: adds a peak of `pitch`/`roll` radians to the springs; see KICK_OMEGA. */
-  private kick(pitch: number, roll: number): void {
+  /**
+   * Kick: adds a peak of `pitch`/`roll` radians and an eye drop of `drop` metres to the
+   * springs; see KICK_OMEGA.
+   */
+  private kick(pitch: number, roll: number, drop = 0): void {
     this.kickPitchVel += pitch / KICK_PEAK_GAIN;
     this.kickRollVel += roll / KICK_PEAK_GAIN;
+    this.kickDropVel += drop / KICK_PEAK_GAIN;
   }
 
   /**
@@ -1112,11 +1108,25 @@ export class CameraRig {
     const a = Math.abs(this.kickAccel);
     if (this.kickAccelArmed && a > KICK_ACCEL_ON) {
       this.kickAccelArmed = false;
-      // Throttle tips the view up (the head pressed back); a brake nods it down, harder.
-      const amp = clamp(KICK_MIN + (a - KICK_ACCEL_ON) * 0.1 * DEG, KICK_MIN, KICK_MAX);
-      this.kick(this.kickAccel > 0 ? Math.max(KICK_MIN, amp * 0.7) : -amp, 0);
+      this.kickOnsetLeft = KICK_ONSET_WINDOW;
+      this.kickOnsetPitch = 0;
+      this.kickOnsetDrop = 0;
     } else if (!this.kickAccelArmed && a < KICK_ACCEL_REARM) {
       this.kickAccelArmed = true;
+    }
+    if (this.kickOnsetLeft > 0) {
+      this.kickOnsetLeft -= d;
+      // Throttle tips the view up (the head pressed back); a brake nods it down, harder,
+      // and drops the eye as the nose dives. Sized by the strongest |accel| of the window.
+      const amp = clamp(KICK_MIN + (a - KICK_ACCEL_ON) * KICK_PER_MPS2, KICK_MIN, KICK_MAX);
+      const share = (amp - KICK_MIN) / (KICK_MAX - KICK_MIN);
+      const pitch = this.kickAccel > 0 ? Math.max(KICK_MIN, amp * KICK_THROTTLE_SHARE) : -amp;
+      const drop = this.kickAccel > 0 ? 0 : KICK_DROP_MIN + share * (KICK_DROP_BRAKE_MAX - KICK_DROP_MIN);
+      if (Math.abs(pitch) > Math.abs(this.kickOnsetPitch)) {
+        this.kick(pitch - this.kickOnsetPitch, 0, Math.max(0, drop - this.kickOnsetDrop));
+        this.kickOnsetPitch = pitch;
+        this.kickOnsetDrop = Math.max(drop, this.kickOnsetDrop);
+      }
     }
 
     const gear = target.gearLabel;
@@ -1125,7 +1135,7 @@ export class CameraRig {
       const to = Number(gear);
       // Forward gears only, and moving: N/R selections at a standstill are not shifts.
       if (from > 0 && to > 0 && target.speedKmh > 5) {
-        this.kick(to > from ? -0.25 * DEG : 0.2 * DEG, 0);
+        this.kick(to > from ? KICK_UPSHIFT : KICK_DOWNSHIFT, 0);
       }
       this.kickGear = gear;
     }
@@ -1137,12 +1147,13 @@ export class CameraRig {
       if (this.kickAir >= KICK_AIR_MIN && !Number.isNaN(this.kickVelY)) {
         // Landing: sink speed at touchdown, 2 m/s for the minimum kick, 8 for the most.
         const sink = Math.max(0, -this.kickVelY);
-        const amp = clamp(KICK_MIN + ((sink - 2) / 6) * (KICK_MAX - KICK_MIN), KICK_MIN, KICK_MAX);
+        const share = clamp((sink - 2) / 6, 0, 1);
+        const amp = KICK_MIN + share * (KICK_MAX - KICK_MIN);
         this.kickSide = -this.kickSide;
-        this.kick(-amp, amp * 0.35 * this.kickSide);
+        this.kick(-amp, amp * 0.35 * this.kickSide, KICK_DROP_MIN + share * (KICK_DROP_MAX - KICK_DROP_MIN));
       } else if (!Number.isNaN(this.kickVelY) && Math.abs(vy - this.kickVelY) > KICK_BUMP_DVY) {
         const dv = Math.abs(vy - this.kickVelY);
-        const amp = clamp(KICK_MIN + (dv - KICK_BUMP_DVY) * 0.1 * DEG, KICK_MIN, KICK_MAX * 0.7);
+        const amp = clamp(KICK_MIN + (dv - KICK_BUMP_DVY) * KICK_PER_MPS2, KICK_MIN, KICK_MAX * 0.7);
         this.kickSide = -this.kickSide;
         this.kick(amp * 0.6, amp * this.kickSide);
       }
@@ -1163,7 +1174,10 @@ export class CameraRig {
       this.kickPitch += this.kickPitchVel * h;
       this.kickRollVel += (-w2 * this.kickRoll - c * this.kickRollVel) * h;
       this.kickRoll += this.kickRollVel * h;
+      this.kickDropVel += (-w2 * this.kickDrop - c * this.kickDropVel) * h;
+      this.kickDrop += this.kickDropVel * h;
     }
+    if (Math.abs(this.kickDrop) < 1e-5) this.kickDrop = 0;
     if (Math.abs(this.kickPitch) < 1e-6 && Math.abs(this.kickRoll) < 1e-6) return;
     _eA.set(this.kickPitch, 0, this.kickRoll, 'YXZ');
     this.camera.quaternion.multiply(_qB.setFromEuler(_eA));
@@ -1185,9 +1199,9 @@ export class CameraRig {
    * that effect exactly as it was; above it the FOV ceiling is the only bound.
    */
   private armPitchForWidening(): number {
-    if (this.fov <= this.baseFov) return this.armPitchBase;
+    if (this.fov <= this.baseFov) return ARM_PITCH_BASE;
     const halfTan = Math.tan(THREE.MathUtils.degToRad(this.fov) / 2);
-    return Math.atan(Math.tan(this.armPitchBase) * (halfTan / this.baseHalfTan));
+    return Math.atan(Math.tan(ARM_PITCH_BASE) * (halfTan / this.baseHalfTan));
   }
 
   /**
@@ -1266,26 +1280,25 @@ export class CameraRig {
     if (_vA.y < floor) _vA.y = floor;
   }
 
-  private updateFov(speedKmh: number, dt: number, shift: number): void {
-    const speedWiden = FOV_SPEED_WIDENING * clamp(speedKmh / FOV_FULL_SPEED, 0, 1);
-    const s = this.surge * FOV_ACCEL_DEG_PER_MPS2;
-    const accelWiden = s >= 0 ? Math.min(s, FOV_ACCEL_MAX) : Math.max(s * FOV_BRAKE_SHARE, -FOV_BRAKE_MAX);
-    const widen =
-      this.fovCue === 'speed' ? speedWiden
-      : this.fovCue === 'accel' ? accelWiden
-      : 0.5 * (speedWiden + accelWiden);
-    const normalFov = this.baseFov + widen;
-    const targetFov = this.binoculars ? this.baseFov / BINOCULAR_POWER : normalFov;
+  /**
+   * Steps the live FOV toward its target: the resting view plus the acceleration
+   * widening when `widen` (FOV_ACCEL_DEG_PER_MPS2), a tenth of it through the binoculars.
+   */
+  private updateFov(dt: number, widen: boolean): void {
+    const s = this.surge;
+    const cue = !widen ? 0
+      : s >= 0 ? Math.min(s * FOV_ACCEL_DEG_PER_MPS2, FOV_ACCEL_MAX)
+      : Math.max(s * FOV_BRAKE_DEG_PER_MPS2, -FOV_BRAKE_MAX);
+    const targetFov = this.binoculars ? this.baseFov / BINOCULAR_POWER : this.baseFov + cue;
     this.fov += (targetFov - this.fov) * (1 - Math.exp(-FOV_OMEGA * dt));
-    this.updateProjection(shift);
+    this.updateProjection();
   }
 
   /**
-   * Hands the live FOV, the near plane kept in step with the far one, and the frustum's
-   * vertical shift (a fraction of the frame height, 0 = centred) to the camera, and
-   * rebuilds its projection only when one of them changed.
+   * Hands the live FOV and the near plane kept in step with the far one to the camera,
+   * and rebuilds its projection only when one of them changed.
    */
-  private updateProjection(shift: number): void {
+  private updateProjection(): void {
     const targetNear = nearPlaneForFarPlane(this.camera.far);
     let projectionChanged = false;
     if (Math.abs(this.fov - this.camera.fov) > FOV_EPSILON) {
@@ -1296,16 +1309,7 @@ export class CameraRig {
       this.camera.near = targetNear;
       projectionChanged = true;
     }
-    const view = this.camera.view;
-    const appliedShift = view !== null && view.enabled ? view.offsetY : 0;
-    if (shift !== appliedShift) {
-      // Both rebuild the projection matrix themselves. A unit full frame: three reads
-      // the offset as a share of it, so the shift is independent of the canvas size.
-      if (shift > 0) this.camera.setViewOffset(1, 1, 0, shift, 1, 1);
-      else this.camera.clearViewOffset();
-    } else if (projectionChanged) {
-      this.camera.updateProjectionMatrix();
-    }
+    if (projectionChanged) this.camera.updateProjectionMatrix();
   }
 
   /** Local-space look vector from yaw/pitch: 0 -> +Z, +pitch -> up, +yaw -> +X. */

@@ -7,6 +7,9 @@
 - THE PANINI AND CYLINDER LENSES. Both made the owner motion-sick. The finishing pass
   samples the scene 1:1 again (no lens uniforms, no Catmull-Rom sampling, no 1.25x
   scene target), and the dev menu's Lens button and its `bro.lens` storage are gone.
+- THE GRAPHICS ROW ON THE TITLE SCREEN. The title has a Settings button instead, which
+  opens the same settings screen as the pause menu (writing to the stored preferences
+  the drive then loads).
 
 ### Changed
 
@@ -14,17 +17,37 @@
   frame stays sane in (`FIELD_OF_VIEW_MAX` in `game/settings.ts`). A save keeps the FOV
   it stored: a 0.21.0 save that was left at that release's 85° default still has 85°
   and is moved back with the Field of View slider; one above 85° is clamped to 85°.
+- THE VIEW WIDENS WITH ACCELERATION, NOT SPEED. The driving views add 2.5° per m/s²
+  of the smoothed surge (at most +10°) and return to the resting FOV once the speed
+  holds, so a cruise at any speed rests at the player's own view; braking narrows it
+  as before (2/3° per m/s², at most -2°). The old five degrees at 160 km/h is gone
+  (`FOV_ACCEL_DEG_PER_MPS2` in `render/cameras.ts`).
+- SETTINGS REGROUPED BY MEANING: Quality, Camera & view, Gameplay, Controls,
+  Controller, Audio. Display and Compute are one QUALITY section with ONE preset (Very
+  Low / Low / Medium / High) that sets the detail level, the view distance and the
+  traffic at once, plus what picking a level always brought (its own antialiasing,
+  automatic render scale, no frame cap) — `withQualityPreset` in `game/settings.ts`.
+  The preset is not stored: it is read back off those values (`qualityPresetOf`), so
+  saved preferences load unchanged and any Advanced change shows `Custom`. Advanced
+  (folded) holds Detail, View distance, Traffic, Render scale (was Sharpness), Frame
+  rate and Antialiasing (was Smooth Edges). Field of view, camera style, camera shake
+  and dashboard size are under Camera & view; Steering moved to Controls; Gearbox and
+  Yaris mode to Gameplay; Sound is Audio.
+- THE LAUNCH MEASUREMENT FEEDS THE PRESET. When the settings are on a preset (a first
+  launch is: the defaults are Medium) each rung it walks to brings that preset's view
+  distance and traffic with it; settings already off a preset only have their rung moved.
+  `Let the game pick` from Very Low restarts it from the Low preset (`withRemeasure`).
 
 ### Added
 
-- LENS SHIFT (dev builds). Pause › Lens shift: 0% / 10% / 20% / 30% slides the driving
-  views' frustum down by that share of the frame height (`CameraRig.setLensShift`,
-  three's `setViewOffset`): the camera stays level, more of the near road is in the
-  frame, verticals stay vertical. Chase and bonnet only; on foot, through the
-  binoculars and in scripted shots the frame stays centred. The finishing pass
-  reconstructs its view rays and the horizon row through the same shift
-  (`uLensShift` in `render/hazeshader.ts`), so haze, the dust wall and the sand veil
-  stay on the world. A uniform, not a program variant. Remembered as `bro.lensShift`.
+- SHAKE KICKS (dev builds, on by default; Pause › Shake kicks, remembered as
+  `bro.shakeKicks`). A short damped jolt of the driving view on a hard throttle or
+  brake onset, a gear change, a landing or a hard bump: 0.4–1.2° of pitch (and roll on
+  landings and bumps), plus a 2.5–4 cm drop of the eye on hard braking and 2.5–6 cm on
+  landings. The onset kick is sized by the strongest acceleration in its first 0.12 s,
+  not by the threshold crossing, so a hard stop reads harder than a gentle one.
+  Rings out in about a quarter of a second, on top of the speed sway; off with Camera
+  Shake.
 
 ## 0.21.0 — 2026-10-09
 

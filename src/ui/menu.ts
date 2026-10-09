@@ -28,17 +28,22 @@ import type {
   ComputeLevel,
   GraphicsQuality,
   GraphicsQualitySource,
+  QualityPreset,
   Settings,
   TimeOfDayPreset,
 } from '../game/settings';
 import {
   GRAPHICS_TIERS,
   DEFAULT_SETTINGS,
+  PHONE_FIRST_LAUNCH,
+  QUALITY_PRESET_DETAIL,
   TRAFFIC_CAPS,
+  qualityPresetOf,
   viewDistanceFor,
   loadStoredSettings,
   storeSettings,
-  withTierDefaults,
+  withQualityPreset,
+  withRemeasure,
 } from '../game/settings';
 import { RADIO_RECOMMENDATIONS } from '../audio/radio';
 import {
@@ -100,12 +105,12 @@ function el(tag: string, cls?: string): HTMLElement {
  * waited for the next load: two halves of one rung described in two places, and only
  * one of them true.
  *
- * PIXELS ARE DELIBERATELY ABSENT. The rung still carries a ceiling, but `Sharpness` is
+ * PIXELS ARE DELIBERATELY ABSENT. The rung still carries a ceiling, but `Render scale` is
  * the control that names a resolution and quotes it as one — and two rows quoting the
- * same number is the same drift in a new place: a manual sharpness makes the rung's
+ * same number is the same drift in a new place: a manual render scale makes the rung's
  * ceiling irrelevant, and this line would go on claiming it.
  */
-function describeTier(quality: GraphicsQuality, mobilePresentation: boolean): string {
+function describeTier(quality: GraphicsQuality, mobilePresentation: boolean, inDrive: boolean): string {
   const tier = GRAPHICS_TIERS[quality];
   // Read as the presentation in front of the player will actually get it. A phone is
   // handed different numbers for the shadow pass and the light slots, and a label
@@ -119,10 +124,13 @@ function describeTier(quality: GraphicsQuality, mobilePresentation: boolean): st
     `Stars to magnitude ${mobilePresentation ? tier.mobileStarMagnitude : tier.starMagnitude}. ` +
     (light
       ? 'Lighter ground cover, plants and open desert, as on Very Low: under half the '
-        + 'triangles of Medium. Switching between Low and Medium or High saves the drive '
-        + 'and reloads it.'
-      : 'Full ground cover. The light count is compiled into the world, so between Medium '
-        + 'and High it changes on the next load.')
+        + 'triangles of Medium.'
+        + (inDrive ? ' Switching between Low and Medium or High saves the drive and reloads it.' : '')
+      : 'Full ground cover.'
+        + (inDrive
+          ? ' The light count is compiled into the world, so between Medium and High it '
+            + 'changes on the next load.'
+          : ''))
   );
 }
 
@@ -745,11 +753,7 @@ export interface PauseHooks {
   frameReport?: () => string;
   /** The live performance graph across the top of the screen (ui/perfoverlay.ts). Dev only. */
   perfOverlay?: { readonly enabled: boolean; setEnabled(on: boolean): void };
-  /** The lens shift of the driving views (render/cameras.ts `lensShift`). Dev only. */
-  lensShift?: { readonly label: string; cycle(): void };
-  /** Speed-feel A/B of the chase camera (render/cameras.ts FovCue, ChasePreset, kicks). Dev only. */
-  fovCue?: { readonly label: string; cycle(): void };
-  chasePreset?: { readonly label: string; cycle(): void };
+  /** The camera's shake kicks (render/cameras.ts KICK_OMEGA). Dev only. */
   shakeKicks?: { readonly label: string; cycle(): void };
   /**
    * Record a fully fuelled car into the world.
@@ -810,6 +814,1304 @@ function formatKey(code: string): string {
   return code.replace(/([a-z])([A-Z])/g, '$1 $2');
 }
 
+/** What the settings screen needs from the sheet that opens it: the title or the pause. */
+interface SettingsHost {
+  /** Working copy of the player's settings: the screen mutates it, then calls `apply`. */
+  readonly settings: Settings;
+  /** Pushes the working copy whole: through world.apply in a drive, to storage on the title. */
+  readonly apply: () => void;
+  /** The canvas CSS size the render-scale rows quote pixels for; see `PauseHooks.viewport`. */
+  readonly viewport: () => { readonly cssWidth: number; readonly cssHeight: number };
+  /** Hands the detail level back to the launch measurement; see `PauseHooks.remeasureGraphics`. */
+  readonly remeasureGraphics: () => void;
+  /**
+   * Present in a drive only. It also tells the screen where it is: on the title there is
+   * no sun to move, and no drive a Very Low switch would save and reload.
+   */
+  readonly applyTimePreset?: (preset: TimeOfDayPreset) => void;
+  /** Back out of the screen. */
+  readonly back: () => void;
+}
+
+/** The open settings screen, as the sheet that holds it sees it. */
+interface SettingsScreen {
+  /** True while a key binding waits for its key; the pad is switched off meanwhile. */
+  readonly capturing: boolean;
+  /** Offers a window keydown to the binding capture; true when the capture took it. */
+  handleKey(ev: KeyboardEvent): boolean;
+}
+
+type SettingsTab = 'quality' | 'camera' | 'gameplay' | 'controls' | 'controller' | 'audio';
+/**
+ * Settings section, remembered across visits — and between the title and the pause, which
+ * open the same screen: someone adjusting the horizon comes back to the horizon, not to
+ * the top of a list.
+ */
+let settingsTab: SettingsTab = 'quality';
+/** Whether Quality's Advanced rows are open, remembered the same way. */
+let qualityAdvancedOpen = false;
+
+/**
+ * Settings, as six short sections behind an icon rail: the same screen from the title
+ * (before a drive, writing to stored preferences) and from the pause (in one).
+ *
+ * What this replaces was one flat column: nine controls and twenty key bindings
+ * in a single scroll, every row the same shape, and every option's explanatory
+ * sentence on screen at once. It could only be read, never scanned.
+ *
+ * Three rules do the work here:
+ *  - Sections by meaning, so driving settings are not adjacent to volume sliders.
+ *  - ONE hint line, at a fixed height, describing whatever is hovered, focused
+ *    or selected. Nine sentences become one, and the layout never jumps when it
+ *    changes.
+ *  - A glyph per option, carrying the axis (bars for quality, receding ridges
+ *    for a horizon, the sun's height for time) so the row is scannable.
+ *
+ * Nothing here previews live. The whole loop — simulation and renderer — is
+ * stopped while the overlay is up, so a graphics or horizon change cannot be
+ * seen until Resume. An earlier version faded the panel to "show" the effect,
+ * which showed a frozen frame and taught the player nothing.
+ */
+function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
+  const settings = host.settings;
+  const apply = host.apply;
+  const mobilePresentation = prefersMobilePresentation();
+  const inDrive = host.applyTimePreset !== undefined;
+  /** Action id waiting for a key in capture mode. */
+  let capturingActionId: string | null = null;
+  /** The hint line, which doubles as the rebinding conflict line. */
+  let note: HTMLElement | null = null;
+  /** Bindings list while the Controls section is open, else null. */
+  let bindingsList: HTMLElement | null = null;
+
+  const clearNote = (): void => {
+    if (!note) return;
+    note.textContent = '';
+    note.classList.remove('is-alarm');
+  };
+
+  const renderBindings = (): void => {
+    if (!bindingsList) return;
+    bindingsList.textContent = '';
+    for (const action of BINDABLE_ACTIONS) {
+      const row = button('menu-binding', '');
+      const labelSpan = el('span', 'menu-binding-label');
+      labelSpan.textContent = action.label;
+      const keysSpan = el('span', 'menu-binding-keys');
+      if (capturingActionId === action.id) {
+        row.classList.add('is-capturing');
+        const waiting = el('span', 'menu-keycap is-waiting');
+        waiting.textContent = 'press a key';
+        keysSpan.appendChild(waiting);
+      } else {
+        // One cap per key, not a slash-joined string: a boxed glyph is read as a
+        // key without being parsed as a sentence, which is the whole point of a
+        // twenty-row list nobody wants to read.
+        for (const code of settings.keyBindings[action.id] ?? action.defaultKeys) {
+          const cap = el('kbd', 'menu-keycap');
+          cap.textContent = formatKey(code);
+          keysSpan.appendChild(cap);
+        }
+      }
+      row.append(labelSpan, keysSpan);
+      row.addEventListener('click', () => {
+        // Clicking the armed row again disarms it; clicking any other row
+        // moves capture there.
+        capturingActionId = capturingActionId === action.id ? null : action.id;
+        clearNote();
+        renderBindings();
+      });
+      bindingsList.appendChild(row);
+    }
+  };
+
+  /**
+   * Label of the first other action bound to `code`, or null. Two actions may
+   * deliberately share a key only when both declare it as a default; F uses
+   * that context-sensitive exception for world manipulation and vehicle entry.
+   */
+  const holderOf = (code: string, exceptActionId: string): string | null => {
+    const except = BINDABLE_ACTIONS.find((action) => action.id === exceptActionId);
+    for (const action of BINDABLE_ACTIONS) {
+      const intentionalSharedDefault =
+        except?.defaultKeys.includes(code) === true && action.defaultKeys.includes(code);
+      if (
+        action.id !== exceptActionId &&
+        !intentionalSharedDefault &&
+        (settings.keyBindings[action.id] ?? action.defaultKeys).includes(code)
+      ) {
+        return action.label;
+      }
+    }
+    return null;
+  };
+
+  panel.textContent = '';
+
+  const { head, back: backBtn } = screenHead('Settings', host.back);
+  panel.appendChild(head);
+
+  const layout = el('div', 'menu-settings');
+  const rail = el('div', 'menu-rail');
+  const pane = el('div', 'menu-pane');
+  layout.append(rail, pane);
+  panel.appendChild(layout);
+
+  // The hint line doubles as the rebinding conflict line (`note`), so a
+  // rejected key lands where the player is already looking.
+  note = el('div', 'menu-note menu-hint');
+  panel.appendChild(note);
+
+  const setHint = (text: string): void => {
+    if (!note) return;
+    note.textContent = text;
+    note.classList.remove('is-alarm');
+  };
+
+  /**
+   * One option of a segmented control. `active`/`pick` rather than a generic
+   * value type: some rows select persisted state, and the time-of-day row
+   * selects nothing at all (it fires and forgets), and both are the same widget.
+   */
+  interface SegOption {
+    readonly label: string;
+    readonly icon: string;
+    /**
+     * The hint line, or a function for one that depends on state the row does not
+     * own: the render-scale row quotes the pixel count the CURRENT rung would give,
+     * and a string captured at build time would keep quoting the rung just left.
+     */
+    readonly hint: string | (() => string);
+    readonly active: () => boolean;
+    readonly pick: () => void;
+  }
+
+  /** Four call sites below need this resolution in lockstep; see `SegOption.hint`. */
+  const hintOf = (option: SegOption): string =>
+    typeof option.hint === 'string' ? option.hint : option.hint();
+
+  /**
+   * `head` is for state and actions that belong to THIS row rather than beside it:
+   * the detail row carries who picked it and the button that hands the choice back
+   * to the game, and a separate field for those was a row whose label had to name
+   * a concept ("rung source") the player had never met.
+   */
+  const segmented = (
+    labelText: string,
+    options: readonly SegOption[],
+    head: readonly HTMLElement[] = [],
+  ): HTMLElement => {
+    const field = el('div', 'menu-field');
+    const fieldHead = el('div', 'menu-field-head');
+    const label = el('span', 'menu-label');
+    label.textContent = labelText;
+    fieldHead.append(label, ...head);
+    const row = el('div', 'menu-seg');
+    const buttons = options.map((option) => {
+      const btn = button('menu-seg-btn', '');
+      // Names the button across a redraw, so Quality can put focus back on it.
+      btn.dataset.key = `${labelText}/${option.label}`;
+      const text = el('span', 'menu-seg-label');
+      text.textContent = option.label;
+      btn.append(icon(option.icon), text);
+      row.appendChild(btn);
+      return { option, btn };
+    });
+    const selectedHint = (): string => {
+      const selected = options.find((o) => o.active()) ?? options[0];
+      return selected === undefined ? '' : hintOf(selected);
+    };
+    const paint = (): void => {
+      for (const { option, btn } of buttons) {
+        btn.classList.toggle('is-selected', option.active());
+      }
+    };
+    for (const [index, entry] of buttons.entries()) {
+      entry.btn.addEventListener('click', () => {
+        entry.option.pick();
+        paint();
+        setHint(hintOf(entry.option));
+      });
+      // Hover and focus preview their own option's hint; leaving restores the
+      // selected one, so the line always describes something real.
+      entry.btn.addEventListener('pointerenter', () => setHint(hintOf(entry.option)));
+      entry.btn.addEventListener('focus', () => setHint(hintOf(entry.option)));
+      entry.btn.addEventListener('blur', () => setHint(selectedHint()));
+      entry.btn.addEventListener('keydown', (ev) => {
+        // Left/right walks the row, the way a segmented control should: the
+        // whole screen is reachable without a mouse.
+        const step = ev.key === 'ArrowRight' ? 1 : ev.key === 'ArrowLeft' ? -1 : 0;
+        if (step === 0) return;
+        ev.preventDefault();
+        const next = buttons[(index + step + buttons.length) % buttons.length];
+        next.btn.focus();
+      });
+    }
+    paint();
+    row.addEventListener('pointerleave', () => setHint(selectedHint()));
+    field.append(fieldHead, row);
+    return field;
+  };
+
+  const sliderField = (
+    labelText: string,
+    iconName: string,
+    hint: string,
+    min: number,
+    max: number,
+    step: number,
+    get: () => number,
+    format: (value: number) => string,
+    set: (value: number) => void,
+  ): HTMLElement => {
+    const field = el('div', 'menu-field');
+    const fieldHead = el('div', 'menu-field-head');
+    const sliderId = `settings-${labelText.toLowerCase().replaceAll(' ', '-')}`;
+    const label = el('label', 'menu-label');
+    label.textContent = labelText;
+    label.setAttribute('for', sliderId);
+    // The value rides in the head as a chip instead of taking its own column,
+    // which is what let four sliders become four scannable rows.
+    const chip = el('output', 'menu-chip');
+    fieldHead.append(icon(iconName), label, chip);
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.id = sliderId;
+    slider.className = 'menu-slider';
+    slider.min = String(min);
+    slider.max = String(max);
+    slider.step = String(step);
+    const paint = (): void => {
+      slider.value = String(get());
+      chip.textContent = format(get());
+      // The filled part of the track, which a range input cannot style natively.
+      slider.style.setProperty('--fill', `${((get() - min) / (max - min)) * 100}%`);
+    };
+    slider.addEventListener('input', () => {
+      set(slider.valueAsNumber);
+      paint();
+      apply();
+    });
+    slider.addEventListener('pointerenter', () => setHint(hint));
+    slider.addEventListener('focus', () => setHint(hint));
+    paint();
+    field.append(fieldHead, slider);
+    return field;
+  };
+
+  /** CAMERA & VIEW: how the world is framed, and the dashboard laid over it. */
+  const renderCamera = (): void => {
+    pane.append(
+      sliderField(
+        'Field of View',
+        'fov',
+        'How wide a view the camera has. Only the up-and-down angle is set here — a '
+          + 'wider window then shows MORE desert to the sides rather than squeezing '
+          + 'it. 65 is the authored view; the binoculars and the widening as you '
+          + 'accelerate both '
+          + 'follow whatever you set.',
+        FIELD_OF_VIEW_MIN,
+        FIELD_OF_VIEW_MAX,
+        1,
+        () => settings.fieldOfView,
+        (value) => `${Math.round(value)}\u00b0`,
+        (value) => {
+          settings.fieldOfView = value;
+        },
+      ),
+      segmented('Camera style', [
+        {
+          label: 'Steady',
+          icon: 'drive',
+          hint: 'The camera as it has always been: it follows the car, holds a level horizon and points where you point it. Nothing about a slide moves the frame.',
+          active: () => settings.cameraStyle === 'steady',
+          pick: () => {
+            settings.cameraStyle = 'steady';
+            apply();
+          },
+        },
+        {
+          label: 'Dynamic',
+          icon: 'cameraStyle',
+          hint: 'The camera reads the car: it lags the slip angle so a slide is visible, leans out of corners with the body, rolls the bonnet view with the suspension and looks into the wheels at parking speed.',
+          active: () => settings.cameraStyle === 'dynamic',
+          pick: () => {
+            settings.cameraStyle = 'dynamic';
+            apply();
+          },
+        },
+      ]),
+      segmented('Camera shake', [
+        {
+          label: 'On',
+          icon: 'drive',
+          hint: 'Past 60 km/h the view sways slowly, barely at all, growing with speed and more on gravel and sand than on smooth tarmac.',
+          active: () => settings.cameraShake,
+          pick: () => {
+            settings.cameraShake = true;
+            apply();
+          },
+        },
+        {
+          label: 'Off',
+          icon: 'fov',
+          hint: 'The view stays steady at any speed.',
+          active: () => !settings.cameraShake,
+          pick: () => {
+            settings.cameraShake = false;
+            apply();
+          },
+        },
+      ]),
+      sliderField(
+        'Dashboard Size',
+        'gameplay',
+        'How big the driving dashboard is drawn. 100% is the default size.',
+        DASHBOARD_SIZE_MIN,
+        DASHBOARD_SIZE_MAX,
+        DASHBOARD_SIZE_STEP,
+        () => settings.dashboardSize,
+        (value) => `${Math.round(value * 100)}%`,
+        (value) => {
+          settings.dashboardSize = value;
+        },
+      ),
+    );
+  };
+
+  /** GAMEPLAY: the car's gearbox, the day, and the one joke. */
+  const renderGameplay = (): void => {
+    pane.appendChild(
+      segmented('Gearbox', [
+        {
+          label: 'Manual',
+          icon: 'manual',
+          hint: 'Four speeds and a clutch you do not have to think about. X and Z shift.',
+          active: () => settings.gearboxMode === 'manual',
+          pick: () => {
+            settings.gearboxMode = 'manual';
+            apply();
+          },
+        },
+        {
+          label: 'Automatic',
+          icon: 'auto',
+          hint: 'The box shifts for you. X and Z still override it.',
+          active: () => settings.gearboxMode === 'automatic',
+          pick: () => {
+            settings.gearboxMode = 'automatic';
+            apply();
+          },
+        },
+      ]),
+    );
+    // The sun moves only in a drive; on the title there is no sky to move yet.
+    const applyTimePreset = host.applyTimePreset;
+    if (applyTimePreset) {
+      pane.appendChild(
+        segmented(
+          'Time of Day',
+          (Object.keys(TIME_OF_DAY_PRESETS) as TimeOfDayPreset[]).map((preset) => ({
+            label: preset.charAt(0).toUpperCase() + preset.slice(1),
+            icon: preset,
+            hint: `Move the sun to ${preset}. The clock keeps running from there.`,
+            active: () => false,
+            pick: () => applyTimePreset(preset),
+          })),
+        ),
+      );
+    }
+    pane.append(
+      sliderField(
+        'Day Length',
+        'clock',
+        'Real minutes for one full day and night.',
+        DAY_CYCLE_MIN_MINUTES,
+        DAY_CYCLE_MAX_MINUTES,
+        1,
+        () => settings.dayCycleMinutes,
+        (value) => `${Math.round(value)} min`,
+        (value) => {
+          settings.dayCycleMinutes = value;
+        },
+      ),
+      segmented('Yaris mode', [
+        {
+          label: 'Off',
+          icon: 'drive',
+          hint: 'Cars sit still on their springs, same as any other drive.',
+          active: () => !settings.bouncyCars,
+          pick: () => {
+            settings.bouncyCars = false;
+            apply();
+          },
+        },
+        {
+          label: 'On',
+          icon: 'bounce',
+          hint: 'Every car on the road — yours and traffic — hops in place like the viral bouncing Yaris. Purely visual: handling, suspension and collisions are untouched.',
+          active: () => settings.bouncyCars,
+          pick: () => {
+            settings.bouncyCars = true;
+            apply();
+          },
+        },
+      ]),
+    );
+  };
+
+  /**
+   * WHO PICKED THE DETAIL LEVEL, in the player's words.
+   *
+   * A measured verdict and a chosen preference used to look identical — the rung
+   * was a bare string and the only record of who set it was that stored
+   * preferences existed at all — so one unlucky measurement was permanent and
+   * nothing could ask again. These are the four answers to "picked by", which is
+   * the only form the distinction survives in: `measured` and `chosen` are exact
+   * words for the code and mean nothing to the person reading a menu.
+   */
+  const PICKED_BY: Record<GraphicsQualitySource, string> = {
+    default: 'not picked yet',
+    device: 'phone default',
+    measured: 'picked by the game',
+    chosen: 'picked by you',
+  };
+  const PICKED_NOTES: Record<GraphicsQualitySource, string> = {
+    default: 'Nobody has picked yet. The next launch times your graphics chip and picks.',
+    device: 'Phones start on the lightest level so they stay cool.',
+    measured:
+      'The game timed your graphics chip while the game was loading, and picked this. '
+      + 'It will not change it again.',
+    chosen: 'You picked this. Nothing will change it unless you do.',
+  };
+  const PICK_FOR_ME_HINT = inDrive
+    ? 'Let the game time your graphics chip and pick the level again. Restarts the game, '
+      + 'because the timing happens behind the loading screen: it throws away the first '
+      + 'thirty frames and can take up to twenty seconds, with nobody driving.'
+    : 'Let the game time your graphics chip and pick the level when the drive starts. The '
+      + 'timing happens behind the loading screen: it throws away the first thirty frames '
+      + 'and can take up to twenty seconds.';
+
+  /**
+   * Whether picking `quality` from here saves the drive and reloads it: a rung on another
+   * build profile (render/retro.ts) is built into the world. Never on the title, where
+   * there is no world yet.
+   */
+  const reloadsFor = (quality: GraphicsQuality): boolean =>
+    inDrive && buildProfileFor(quality) !== buildProfileFor(settings.graphicsQuality);
+
+  /**
+   * Quality is drawn from its values every time one of them changes, because they depend
+   * on each other: the preset row reads `Custom` the moment an Advanced value leaves it,
+   * a preset moves every Advanced row at once, and the render-scale row is a different
+   * row on Very Low. Focus is carried across by the control's key.
+   */
+  const rerenderQuality = (): void => {
+    const focused = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.key : undefined;
+    pane.textContent = '';
+    renderQuality();
+    if (focused !== undefined) {
+      pane.querySelector<HTMLElement>(`[data-key="${CSS.escape(focused)}"]`)?.focus();
+    }
+  };
+  const changed = (): void => {
+    apply();
+    rerenderQuality();
+  };
+
+  /**
+   * QUALITY: one preset for what this machine can afford, and the separate controls
+   * under Advanced.
+   *
+   * There used to be a Display section (detail, sharpness, frame rate, smooth edges) and a
+   * Compute section (view distance, traffic), split by which chip pays. That is the
+   * engineer's axis; the player's question is one — how good can it look and still run —
+   * so the preset answers it in one row (settings.ts `withQualityPreset`) and the chips'
+   * split survives only in the hints. A preset is read back off the values it sets
+   * (`qualityPresetOf`), so moving any Advanced row shows `Custom` rather than a preset
+   * the picture is no longer on.
+   *
+   * Nothing here previews: the simulation and the renderer are both stopped while the
+   * pause overlay is up, so changes are only seen after Resume.
+   */
+  const renderQuality = (): void => {
+    const preset = qualityPresetOf(settings);
+    // `Render scale` quotes PIXELS, not a percentage of something unstated, and reads
+    // them from the canvas rather than the window: cinema mode shortens the canvas
+    // by two 90-pixel bars and leaves the window alone, and a row that names a
+    // resolution the game is not rendering is the drift this control exists to end.
+    const viewport = host.viewport();
+    const cssPixels = viewport.cssWidth * viewport.cssHeight;
+    const pixelsAt = (ratio: number): string => {
+      const width = Math.floor(viewport.cssWidth * ratio);
+      const height = Math.floor(viewport.cssHeight * ratio);
+      return `${width}x${height}, ${((width * height) / 1_000_000).toFixed(2)} Mpx`;
+    };
+
+    // WHO PICKED IT rides in the preset row's own head, next to the thing it
+    // describes, with the one action on it — shaped like the key-bindings field,
+    // which is the same kind of row: a piece of state and a button that resets it.
+    const pickedChip = el('output', 'menu-chip');
+    pickedChip.textContent = PICKED_BY[settings.graphicsQualitySource];
+    pickedChip.addEventListener('pointerenter', () =>
+      setHint(PICKED_NOTES[settings.graphicsQualitySource]),
+    );
+    const presetHead: HTMLElement[] = [pickedChip];
+    // A phone is never timed: it is put on the lightest level, which is the floor,
+    // and the only direction a measurement could move it is up — which is the heat
+    // that level exists to refuse. Offering the button there would promise a
+    // measurement the launch declines to make.
+    if (!mobilePresentation) {
+      const pickBtn = button('menu-button menu-reset', 'Let the game pick');
+      pickBtn.dataset.key = 'quality/pick';
+      pickBtn.addEventListener('click', () => {
+        host.remeasureGraphics();
+        rerenderQuality();
+      });
+      pickBtn.addEventListener('pointerenter', () => setHint(PICK_FOR_ME_HINT));
+      pickBtn.addEventListener('focus', () => setHint(PICK_FOR_ME_HINT));
+      presetHead.push(pickBtn);
+    }
+
+    const PRESET_ICONS: Record<QualityPreset, string> = {
+      very_low: 'retro',
+      low: 'gfx1',
+      medium: 'gfx2',
+      high: 'gfx3',
+    };
+    const presetHint = (level: QualityPreset): string => {
+      const quality = QUALITY_PRESET_DETAIL[level];
+      const caps = TRAFFIC_CAPS[level];
+      return (
+        `${formatHorizon(viewDistanceFor(level, mobilePresentation))} of desert, up to `
+        + `${caps.narrow} cars on a two-lane road. `
+        + (quality === 'retro'
+          ? 'For weak mini-PCs and old laptops: the world drawn at about 360 lines as crisp '
+            + 'square pixels, like a late-90s game, with lighter ground cover and no sun shadows.'
+            + (reloadsFor('retro') ? ' Switching to it or away from it saves the drive and reloads it.' : '')
+          : describeTier(quality, mobilePresentation, inDrive))
+      );
+    };
+
+    pane.append(
+      // ONE ROW FOR THE MACHINE. The labels used to name machines (`Phone`, `Desktop`,
+      // `Workstation`), which asked the player to classify his own computer and then
+      // guess which class he was in; the measurement answers that now, and says so in
+      // the head, so the levels can describe the picture instead.
+      segmented('Quality', [
+        ...COMPUTE_LEVELS.map(({ level, label }) => ({
+          label,
+          icon: PRESET_ICONS[level],
+          hint: () => presetHint(level),
+          active: () => preset === level,
+          pick: () => {
+            Object.assign(settings, withQualityPreset(settings, level, 'chosen'));
+            changed();
+          },
+        })),
+        {
+          label: 'Custom',
+          icon: 'controls',
+          hint: 'Your own mix, set under Advanced. Pick a level to go back to one.',
+          active: () => preset === null,
+          pick: () => {
+            qualityAdvancedOpen = true;
+            rerenderQuality();
+          },
+        },
+      ], presetHead),
+    );
+
+    // ADVANCED: every value the preset sets, one row each, for the player who wants
+    // one of them without the rest. Folded by default — the preset is the answer for
+    // most — and remembered open once opened.
+    const toggleField = el('div', 'menu-field');
+    const toggleHead = el('div', 'menu-field-head');
+    const toggleLabel = el('span', 'menu-label');
+    toggleLabel.textContent = 'Advanced';
+    const toggleBtn = button('menu-button menu-reset', qualityAdvancedOpen ? 'Hide' : 'Show');
+    toggleBtn.dataset.key = 'quality/advanced';
+    toggleBtn.setAttribute('aria-expanded', String(qualityAdvancedOpen));
+    const toggleHint =
+      'Detail, view distance, traffic, render scale, frame rate and antialiasing, each on '
+      + 'its own. Changing one makes the preset Custom.';
+    toggleBtn.addEventListener('click', () => {
+      qualityAdvancedOpen = !qualityAdvancedOpen;
+      rerenderQuality();
+    });
+    toggleBtn.addEventListener('pointerenter', () => setHint(toggleHint));
+    toggleBtn.addEventListener('focus', () => setHint(toggleHint));
+    toggleHead.append(icon('controls'), toggleLabel, toggleBtn);
+    toggleField.appendChild(toggleHead);
+    pane.appendChild(toggleField);
+    if (!qualityAdvancedOpen) return;
+
+    const advanced = el('div', 'menu-advanced');
+    pane.appendChild(advanced);
+    const pickDetail = (quality: GraphicsQuality): void => {
+      settings.graphicsQuality = quality;
+      settings.graphicsQualitySource = 'chosen';
+      changed();
+    };
+    advanced.append(
+      // HOW MUCH WORLD there is — whether the sun casts, how many lamps are shaded, how
+      // deep the sky goes. `Render scale` below owns the resolution.
+      segmented('Detail', [
+        {
+          label: 'Very Low',
+          icon: 'retro',
+          hint: () =>
+            'For weak mini-PCs and old laptops. The world is drawn at about 360 lines '
+            + '(540 under Render scale) and shown as crisp square pixels, like a late-90s '
+            + 'game, with lighter ground cover and no sun shadows. '
+            + (reloadsFor('retro') ? 'Switching to it or away from it saves the drive and reloads it.' : ''),
+          active: () => settings.graphicsQuality === 'retro',
+          pick: () => pickDetail('retro'),
+        },
+        ...(['acceptable', 'standard', 'blessing'] as const).map((quality, index) => ({
+          label: ['Low', 'Medium', 'High'][index]!,
+          icon: ['gfx1', 'gfx2', 'gfx3'][index]!,
+          hint: describeTier(quality, mobilePresentation, inDrive),
+          active: () => settings.graphicsQuality === quality,
+          pick: () => pickDetail(quality),
+        })),
+      ]),
+      // THE PROCESSOR'S BILL, a different chip from the rest: the far desert, rebuilt
+      // cell by cell as you drive, and the traffic, every car a full physical vehicle
+      // with its own driver. Two rows because they cost different things and a machine
+      // may afford one and not the other. Both apply live.
+      segmented('View distance', COMPUTE_LEVELS.map(({ level, label }) => ({
+        label,
+        icon: HORIZON_ICONS[level],
+        hint:
+          `${formatHorizon(viewDistanceFor(level, mobilePresentation))} of desert before the haze. `
+          + 'The far desert is rebuilt by the processor as you drive; the farther it '
+          + 'reaches, the bigger that rebuild, and a slow processor feels it as a '
+          + 'stutter every few hundred metres.',
+        active: () => settings.viewDistance === level,
+        pick: () => {
+          settings.viewDistance = level;
+          changed();
+        },
+      }))),
+      segmented('Traffic', COMPUTE_LEVELS.map(({ level, label }) => ({
+        label,
+        icon: TRAFFIC_ICONS[level],
+        hint:
+          `Up to ${TRAFFIC_CAPS[level].narrow} cars on a two-lane road and `
+          + `${TRAFFIC_CAPS[level].wide} on a four-lane one. Every one is fully `
+          + 'simulated with its own driver, so this is the processor\'s, not the '
+          + 'graphics card\'s.',
+        active: () => settings.trafficDensity === level,
+        pick: () => {
+          settings.trafficDensity = level;
+          changed();
+        },
+      }))),
+      // THE AXIS THE LEVEL CANNOT EXPRESS. A level is three points — on a 4K
+      // television 1.44, 3.69 and 12.96 megapixels — and a machine is not three
+      // machines; worse, `Auto` is a GPU timer query, so a browser without
+      // `EXT_disjoint_timer_query_webgl2` cannot move the scale at all and three
+      // points were the whole of the choice there. Both directions are offered:
+      // down for the machine between two levels, up for the one with headroom that
+      // does not want a 25 km vista and eighteen headlamps to go with it.
+      // On the retro rung the row offers whole-pixel line counts instead: its
+      // resolution IS the look (render/retro.ts), so the choice is how coarse the
+      // squares are, never a fraction the compositor would smear.
+      ...(settings.graphicsQuality === 'retro' ? [segmented('Render scale', RETRO_LINE_CHOICES.map((lines) => ({
+        label: `${lines} lines`,
+        icon: 'pixels',
+        hint: () =>
+          `${pixelsAt(retroPixelRatio(viewport.cssHeight, window.devicePixelRatio, lines))}, `
+          + 'each pixel a crisp square. '
+          + (lines === 360
+            ? 'The level\'s own look, and the lightest on the graphics chip.'
+            : 'Finer squares, a little sharper. Costs the chip about a third more, '
+              + 'most of it the pixels; still far below Low.'),
+        active: () => settings.retroLines === lines,
+        pick: () => {
+          settings.retroLines = lines;
+          changed();
+        },
+      })))] : [segmented('Render scale', [
+        {
+          label: 'Auto',
+          icon: 'display',
+          hint: () =>
+            'The game watches your graphics chip and picks, lowering this if the '
+            + 'machine cannot keep up. Full resolution here is '
+            + `${pixelsAt(
+              renderScaleFor(
+                settings.graphicsQuality,
+                cssPixels,
+                window.devicePixelRatio,
+                mobilePresentation,
+              ),
+            )}. `
+            + 'Some browsers will not let the game time the chip — Safari, and most '
+            + 'phones inside an app. There it cannot watch, so pick a number yourself.',
+          active: () => settings.renderScale === null,
+          pick: () => {
+            settings.renderScale = null;
+            changed();
+          },
+        },
+        // Built from the display, not from the list: the absolute bound flattens
+        // the top of the row on a large screen, and two buttons with one outcome
+        // is the menu promising pixels it will not draw.
+        ...offeredRenderScales(
+          cssPixels,
+          window.devicePixelRatio,
+          mobilePresentation,
+          settings.renderScale,
+        ).map((scale) => ({
+          label: `${Math.round(scale * 100)}%`,
+          icon: 'pixels',
+          hint: () =>
+            `${Math.round(scale * 100)}% of this display: `
+            + `${pixelsAt(
+              manualRenderScale(
+                cssPixels,
+                window.devicePixelRatio,
+                mobilePresentation,
+                scale,
+              ),
+            )}. `
+            + (scale > 1
+              ? 'Drawn bigger than the screen and shrunk down, which smooths every '
+                + 'edge. Capped at what the game will ever draw. '
+              : '')
+            + 'Fixed: the game will not lower it for you.',
+          active: () => settings.renderScale === scale,
+          pick: () => {
+            settings.renderScale = scale;
+            changed();
+          },
+        })),
+      ])]),
+      // THE ONE LEVER THAT WORKS ON EVERY DEVICE, for opposite reasons, so it is
+      // offered on both. On a phone it is a thermal control and has to be the
+      // player's: no browser reports thermal state, battery temperature or clock
+      // speed, so the device cannot say it is hot — only the person holding it can.
+      // On a desktop it is noise and power, which the game cannot see either.
+      //
+      // It is also the largest lever there is: half the frames is half the render
+      // work and half the presenting, while the simulation keeps its fixed rate, so
+      // the car handles identically at every setting here. And its floor is that
+      // simulation — nothing below the fixed rate can be saved by presenting less.
+      segmented('Frame rate', [
+        ...FRAME_RATE_LIMITS.map((rate) => ({
+          label: String(rate),
+          icon: 'gfx3',
+          hint:
+            `${rate} FPS. Simulation is unaffected — the car handles the same at ` +
+            'every rate here. Half the frames is half the render work and half the presenting.',
+          active: () => settings.frameRateLimit === rate,
+          pick: () => {
+            settings.frameRateLimit = rate;
+            changed();
+          },
+        })),
+        {
+          label: 'Max',
+          icon: 'gfx1',
+          hint:
+            'No cap. The right choice when the GPU is already the constraint, ' +
+            'because a cap there only costs smoothness.',
+          active: () => settings.frameRateLimit === null,
+          pick: () => {
+            settings.frameRateLimit = null;
+            changed();
+          },
+        },
+      ]),
+      segmented('Antialiasing', [
+        {
+          label: 'On',
+          icon: 'gfx3',
+          hint: 'Softens the jagged steps along edges. Costs a lot on a weak chip.',
+          active: () => settings.msaa,
+          pick: () => {
+            settings.msaa = true;
+            changed();
+          },
+        },
+        {
+          label: 'Off',
+          icon: 'gfx1',
+          hint: 'Jagged edges left as they are. Render scale and the drawn outlines still apply.',
+          active: () => !settings.msaa,
+          pick: () => {
+            settings.msaa = false;
+            changed();
+          },
+        },
+      ]),
+    );
+  };
+
+  const radioStationField = (
+    labelText: string,
+    get: () => string,
+    set: (value: string) => void,
+  ): HTMLElement => {
+    const field = el('div', 'menu-field');
+    const label = el('div', 'menu-label');
+    label.textContent = labelText;
+    const input = document.createElement('input');
+    input.type = 'url';
+    input.value = get();
+    input.placeholder = 'https://…';
+    input.autocomplete = 'off';
+    input.className = 'menu-radio-url';
+    input.style.width = '100%';
+    input.addEventListener('change', () => {
+      set(input.value.trim());
+      apply();
+    });
+    const recommended = document.createElement('select');
+    recommended.className = 'menu-radio-recommendations';
+    recommended.style.width = '100%';
+    recommended.add(new Option('Recommended streams…', ''));
+    for (const station of RADIO_RECOMMENDATIONS) {
+      recommended.add(new Option(`${station.label} — ${station.url}`, station.url));
+    }
+    recommended.addEventListener('change', () => {
+      if (!recommended.value) return;
+      input.value = recommended.value;
+      set(recommended.value);
+      apply();
+      recommended.value = '';
+    });
+    field.append(label, input, recommended);
+    return field;
+  };
+
+  const renderAudio = (): void => {
+    pane.append(
+      sliderField(
+        'Master',
+        'sound',
+        'Everything you hear: the car, the world, your own footsteps and the radio. The three below set their share of it.',
+        0,
+        1,
+        0.01,
+        () => settings.masterVolume,
+        (value) => `${Math.round(value * 100)}%`,
+        (value) => {
+          settings.masterVolume = value;
+        },
+      ),
+      sliderField(
+        'Car',
+        'drive',
+        'Your car: engine, gearbox, tyres, wind over the body, knocks and clunks.',
+        0,
+        1,
+        0.01,
+        () => settings.carVolume,
+        (value) => `${Math.round(value * 100)}%`,
+        (value) => {
+          settings.carVolume = value;
+        },
+      ),
+      sliderField(
+        'World',
+        'world',
+        'Everything around you: air, rain, thunder, birds and insects, other traffic.',
+        0,
+        1,
+        0.01,
+        () => settings.worldVolume,
+        (value) => `${Math.round(value * 100)}%`,
+        (value) => {
+          settings.worldVolume = value;
+        },
+      ),
+      sliderField(
+        'Radio',
+        'radio',
+        'The car radio, levelled to sit with the game sound at the same setting.',
+        0,
+        1,
+        0.01,
+        () => settings.radioVolume,
+        (value) => `${Math.round(value * 100)}%`,
+        (value) => {
+          settings.radioVolume = value;
+        },
+      ),
+      radioStationField('Radio station 1 URL', () => settings.radioStation1Url, (value) => {
+        settings.radioStation1Url = value;
+      }),
+      radioStationField('Radio station 2 URL', () => settings.radioStation2Url, (value) => {
+        settings.radioStation2Url = value;
+      }),
+    );
+  };
+
+  /**
+   * The controller. Three controls and a line of state.
+   *
+   * A pad's preferences are the same kind of thing as the mouse's — how the
+   * device in your hand feels — so they are shaped the same way and applied at
+   * the same place. They exist at all because the stick, the trigger and the
+   * motors differ between pads and between hands: 8% dead-zone is right for a
+   * Hall-effect stick and wrong for a worn one, and a pad that buzzes a nylon
+   * desk mat is a pad nobody uses twice.
+   *
+   * The status line is read from the hub rather than written here, because "which
+   * pad is it using" is exactly the question a player asks when nothing moves.
+   */
+  const renderController = (): void => {
+    const hub = gamepads();
+    const padHint =
+      'An Xbox-style pad is used with the standard layout: left stick steers, '
+      + 'RT and LT are throttle and brake, A is the handbrake, X enters and leaves '
+      + 'the car, Y changes the camera view, the bumpers shift, the D-pad carries '
+      + 'the indicators, the radio and the camera re-centre, and Start pauses.';
+    const status = el('div', 'menu-field');
+    const statusHead = el('div', 'menu-field-head');
+    const statusLabel = el('span', 'menu-label');
+    statusLabel.textContent = 'Gamepad';
+    const statusChip = el('output', 'menu-chip');
+    const paintStatus = (): void => {
+      const pad = hub.read();
+      if (!pad.connected) {
+        statusChip.textContent = 'none detected';
+        return;
+      }
+      const attached = navigator.getGamepads?.() ?? [];
+      let name = 'connected';
+      for (const candidate of attached) {
+        if (candidate !== null && candidate.connected && candidate.mapping === 'standard') {
+          name = candidate.id.split(' (')[0] ?? 'connected';
+          break;
+        }
+      }
+      statusChip.textContent = name;
+    };
+    paintStatus();
+    statusHead.append(icon('gamepad'), statusLabel, statusChip);
+    status.append(statusHead);
+    // Focus re-reads the pad, which is how a player finds out that the pad he just
+    // picked up is the one being used.
+    statusChip.tabIndex = 0;
+    statusChip.addEventListener('focus', () => {
+      paintStatus();
+      setHint(padHint);
+    });
+    statusChip.addEventListener('pointerenter', () => {
+      paintStatus();
+      setHint(padHint);
+    });
+    pane.appendChild(status);
+
+    pane.append(
+      sliderField(
+        'Vibration',
+        'bounce',
+        'How hard the pad shakes. The strong motor carries the suspension and '
+        + 'collisions, the weak one the road under the tyres and a sliding wheel.',
+        0,
+        1,
+        CONTROLLER_VIBRATION_STEP,
+        () => settings.controllerVibration,
+        (value) => `${Math.round(value * 100)}%`,
+        (value) => {
+          settings.controllerVibration = value;
+        },
+      ),
+      sliderField(
+        'Stick dead-zone',
+        'gamepad',
+        'How far the left stick must move before the wheels see it. Raise it if a '
+        + 'well-used pad steers on its own with nobody touching it.',
+        CONTROLLER_DEADZONE_MIN,
+        CONTROLLER_DEADZONE_MAX,
+        CONTROLLER_DEADZONE_STEP,
+        () => settings.controllerDeadzone,
+        (value) => `${Math.round(value * 100)}%`,
+        (value) => {
+          settings.controllerDeadzone = value;
+        },
+      ),
+      sliderField(
+        'Steering sensitivity',
+        'keys',
+        'How much lock a given stick deflection asks for. Above 100% reaches full '
+        + 'lock earlier; below it leaves more of the stick for small corrections.',
+        CONTROLLER_STEER_MIN,
+        CONTROLLER_STEER_MAX,
+        CONTROLLER_STEER_STEP,
+        () => settings.controllerSteerSensitivity,
+        (value) => `${Math.round(value * 100)}%`,
+        (value) => {
+          settings.controllerSteerSensitivity = value;
+        },
+      ),
+      segmented('Steering assist', [
+        {
+          label: 'On',
+          icon: 'drive',
+          hint: 'Full stick is as much steering as the front tyres can use at this speed; the stick is proportional inside it. Precise mouse steering follows the same setting.',
+          active: () => settings.controllerSteerAssist,
+          pick: () => {
+            settings.controllerSteerAssist = true;
+            apply();
+          },
+        },
+        {
+          label: 'Off',
+          icon: 'keys',
+          hint: 'Full stick is full lock at any speed.',
+          active: () => !settings.controllerSteerAssist,
+          pick: () => {
+            settings.controllerSteerAssist = false;
+            apply();
+          },
+        },
+      ]),
+    );
+  };
+
+  const renderControls = (): void => {
+    pane.appendChild(
+      segmented('Steering', [
+        {
+          label: 'Standard',
+          icon: 'keys',
+          hint: 'A and D ask for as much steering as the front tyres can use at this speed. Let go and the wheel unwinds on its own.',
+          active: () => !settings.preciseSteering,
+          pick: () => {
+            settings.preciseSteering = false;
+            apply();
+          },
+        },
+        {
+          label: 'Precise',
+          icon: 'mouse',
+          hint: 'Mouse and A/D wind one linear wheel that stays put. Tap a key to trim; hold it to keep turning.',
+          active: () => settings.preciseSteering,
+          pick: () => {
+            settings.preciseSteering = true;
+            apply();
+          },
+        },
+      ]),
+    );
+    pane.appendChild(
+      segmented('Keyboard steering assist', [
+        {
+          label: 'On',
+          icon: 'drive',
+          hint: 'A held key asks for as much steering as the front tyres can use at this speed.',
+          active: () => settings.keyboardSteerAssist,
+          pick: () => {
+            settings.keyboardSteerAssist = true;
+            apply();
+          },
+        },
+        {
+          label: 'Off',
+          icon: 'keys',
+          hint: 'A held key winds the wheel toward full lock at any speed: quick hands needed at speed.',
+          active: () => !settings.keyboardSteerAssist,
+          pick: () => {
+            settings.keyboardSteerAssist = false;
+            apply();
+          },
+        },
+      ]),
+    );
+    pane.appendChild(
+      segmented('Steering key release', [
+        {
+          label: 'Let go',
+          icon: 'keys',
+          hint: 'Releasing the key lets go of the wheel: the tyres turn it back toward where the car is going at once.',
+          active: () => settings.keyboardSteerRelease === 'letGo',
+          pick: () => {
+            settings.keyboardSteerRelease = 'letGo';
+            apply();
+          },
+        },
+        {
+          label: 'Ease off',
+          icon: 'drive',
+          hint: 'Releasing the key eases the hand off over a quarter second before letting go: a correction holds a little longer.',
+          active: () => settings.keyboardSteerRelease === 'ease',
+          pick: () => {
+            settings.keyboardSteerRelease = 'ease';
+            apply();
+          },
+        },
+      ]),
+    );
+    pane.appendChild(
+      sliderField(
+        'Mouse Look',
+        'mouse',
+        'Pointer sensitivity for looking around. Precise control uses a fixed steering gain.',
+        MOUSE_SENSITIVITY_MIN,
+        MOUSE_SENSITIVITY_MAX,
+        0.0001,
+        () => settings.mouseSensitivity,
+        (value) => `${Math.round((value / DEFAULT_MOUSE_SENSITIVITY) * 100)}%`,
+        (value) => {
+          settings.mouseSensitivity = value;
+        },
+      ),
+    );
+
+    const bindField = el('div', 'menu-field');
+    const bindHead = el('div', 'menu-field-head');
+    const bindLabel = el('span', 'menu-label');
+    bindLabel.textContent = 'Key Bindings';
+    const resetBtn = button('menu-button menu-reset', 'Reset');
+    resetBtn.addEventListener('click', () => {
+      settings.keyBindings = {};
+      apply();
+      setHint('Every binding is back to its default.');
+      renderBindings();
+    });
+    bindHead.append(icon('controls'), bindLabel, resetBtn);
+    // Two columns: the list is 5% of the visits and was 70% of the height.
+    bindingsList = el('div', 'menu-bindings');
+    bindField.append(bindHead, bindingsList);
+    pane.appendChild(bindField);
+    renderBindings();
+  };
+
+  const TABS: readonly {
+    readonly id: SettingsTab;
+    readonly label: string;
+    readonly icon: string;
+    readonly hint: string;
+    readonly render: () => void;
+  }[] = [
+    {
+      id: 'quality',
+      label: 'Quality',
+      icon: 'display',
+      hint: 'How good it looks and how much it asks of this machine: one preset, or each part under Advanced.',
+      render: renderQuality,
+    },
+    {
+      id: 'camera',
+      label: 'Camera & view',
+      icon: 'fov',
+      hint: 'How wide the view is, how the camera moves, and the dashboard over it.',
+      render: renderCamera,
+    },
+    {
+      id: 'gameplay',
+      label: 'Gameplay',
+      icon: 'gameplay',
+      hint: 'The gearbox, the time of day and how long a day lasts.',
+      render: renderGameplay,
+    },
+    {
+      id: 'controls',
+      label: 'Controls',
+      icon: 'controls',
+      hint: 'Steering on the keyboard and mouse, and every key.',
+      render: renderControls,
+    },
+    {
+      id: 'controller',
+      label: 'Controller',
+      icon: 'gamepad',
+      hint: 'How the gamepad feels: shake, stick and steering.',
+      render: renderController,
+    },
+    {
+      id: 'audio',
+      label: 'Audio',
+      icon: 'sound',
+      hint: 'Levels for the car, the world and the radio, and the radio\'s stations.',
+      render: renderAudio,
+    },
+  ];
+
+  const railButtons = TABS.map((tab) => {
+    const btn = button('menu-rail-btn', '');
+    const text = el('span', 'menu-rail-label');
+    text.textContent = tab.label;
+    btn.append(icon(tab.icon), text);
+    rail.appendChild(btn);
+    return { tab, btn };
+  });
+
+  const showTab = (id: SettingsTab): void => {
+    settingsTab = id;
+    // Capture cannot survive leaving the section that owns it.
+    capturingActionId = null;
+    bindingsList = null;
+    pane.textContent = '';
+    for (const { tab, btn } of railButtons) {
+      btn.classList.toggle('is-selected', tab.id === id);
+    }
+    const active = TABS.find((t) => t.id === id) ?? TABS[0];
+    active.render();
+    setHint(active.hint);
+  };
+
+  for (const [index, entry] of railButtons.entries()) {
+    entry.btn.addEventListener('click', () => showTab(entry.tab.id));
+    entry.btn.addEventListener('keydown', (ev) => {
+      const step = ev.key === 'ArrowDown' ? 1 : ev.key === 'ArrowUp' ? -1 : 0;
+      if (step === 0) return;
+      ev.preventDefault();
+      const next = railButtons[(index + step + railButtons.length) % railButtons.length];
+      next.btn.focus();
+      showTab(next.tab.id);
+    });
+  }
+
+  showTab(settingsTab);
+  backBtn.focus();
+
+  /** Capture mode: the next keydown becomes the binding. */
+  const handleKey = (ev: KeyboardEvent): boolean => {
+    if (capturingActionId === null) return false;
+    // Capture mode: the next keydown becomes the binding. Modifier chords
+    // stay with the browser, while fixed system controls cancel capture.
+    if (ev.ctrlKey || ev.metaKey || ev.altKey) return true;
+    ev.preventDefault();
+    if (isSystemControlCode(ev.code)) {
+      capturingActionId = null;
+      clearNote();
+      renderBindings();
+      return true;
+    }
+    const action = BINDABLE_ACTIONS.find((a) => a.id === capturingActionId);
+    if (!action) return true;
+    const holder = holderOf(ev.code, action.id);
+    if (holder) {
+      // Reject rather than clobber: say who already owns the key.
+      if (note) {
+        note.textContent = `"${formatKey(ev.code)}" is bound to ${holder}`;
+        note.classList.add('is-alarm');
+      }
+      return true;
+    }
+    settings.keyBindings[action.id] = [ev.code];
+    apply();
+    capturingActionId = null;
+    clearNote();
+    renderBindings();
+    return true;
+  };
+
+  return {
+    get capturing(): boolean {
+      return capturingActionId !== null;
+    },
+    handleKey,
+  };
+}
+
 export class MainMenu {
   private pauseOverlay: HTMLElement | null = null;
   private pauseCleanup: (() => void) | null = null;
@@ -841,16 +2143,18 @@ export class MainMenu {
 
     let listings: SaveListing[] = [];
     let listFailed = false;
-    let view: 'front' | 'saves' = 'front';
+    let view: 'front' | 'saves' | 'settings' = 'front';
+    /** The settings screen while `view` is `settings`; see `openSettings`. */
+    let settingsScreen: SettingsScreen | null = null;
     let errorLine: HTMLElement | null = null;
     let settled = false;
     let detachPad: (() => void) | null = null;
 
-    /** Back from the list lands on the row that opened it, not on Continue. */
-    const backToFront = (): void => {
+    /** Back from the list or the settings lands on the row that opened it, not on Continue. */
+    const backToFront = (from: 'saves' | 'settings'): void => {
       view = 'front';
       render();
-      sheet.querySelector<HTMLButtonElement>('.menu-actions > :last-child')?.focus();
+      sheet.querySelector<HTMLButtonElement>(`[data-key="${from}"]`)?.focus();
     };
 
     const showError = (message: string): void => {
@@ -858,12 +2162,13 @@ export class MainMenu {
     };
 
     const onKey = (ev: KeyboardEvent): void => {
-      if (ev.code === 'Escape' && view === 'saves') {
+      if (settingsScreen?.handleKey(ev)) return;
+      if (ev.code === 'Escape' && view !== 'front') {
         ev.preventDefault();
-        backToFront();
+        backToFront(view);
         return;
       }
-      walkRows(sheet, ev);
+      if (view !== 'settings') walkRows(sheet, ev);
     };
 
     const finish = (state: WorldState | null): void => {
@@ -967,62 +2272,54 @@ export class MainMenu {
       if (latest) {
         const count = listings.length === 1 ? '1 drive' : `${listings.length} drives`;
         const all = actionButton('Saved drives', count, false);
+        all.dataset.key = 'saves';
         all.addEventListener('click', () => {
           view = 'saves';
           render();
         });
         nav.appendChild(all);
       }
+      // The same settings screen as the pause, before the drive. Very Low is built into
+      // the world at load, so this is where it is picked without a reload.
+      const settingsBtn = actionButton('Settings', null, false);
+      settingsBtn.dataset.key = 'settings';
+      settingsBtn.addEventListener('click', () => {
+        view = 'settings';
+        render();
+      });
+      nav.appendChild(settingsBtn);
       sheet.appendChild(nav);
-      sheet.appendChild(graphicsLevel());
     };
 
     /**
-     * The graphics level, and only the level: it is the one display choice a player has
-     * to make before the first frame, because Very Low is built into the world at load
-     * and cannot be switched to afterwards without a reload. Picking one stores it with
-     * its own defaults (settings.ts, `withTierDefaults`); everything finer is the pause
-     * menu's. Untouched, a first launch still measures the machine and picks for itself.
+     * The settings screen, writing to the stored preferences the drive is about to load
+     * (main.ts applies them over the save). Nothing stored yet is the first launch: a
+     * phone starts from its own defaults, as main would give it, so changing the volume
+     * here does not hand a phone the desktop's graphics.
      */
-    const graphicsLevel = (): HTMLElement => {
-      const field = el('div', 'menu-field menu-title-graphics');
-      const head = el('div', 'menu-field-head');
-      const label = el('span', 'menu-label');
-      label.textContent = 'Graphics';
-      head.appendChild(label);
-      const row = el('div', 'menu-seg');
-      const current = (): GraphicsQuality =>
-        (loadStoredSettings() ?? DEFAULT_SETTINGS).graphicsQuality;
-      const levels: readonly { quality: GraphicsQuality; label: string; icon: string }[] = [
-        { quality: 'retro', label: 'Very Low', icon: 'retro' },
-        { quality: 'acceptable', label: 'Low', icon: 'gfx1' },
-        { quality: 'standard', label: 'Medium', icon: 'gfx2' },
-        { quality: 'blessing', label: 'High', icon: 'gfx3' },
-      ];
-      const buttons = levels.map((level) => {
-        const btn = button('menu-seg-btn', '');
-        btn.dataset.nav = '';
-        btn.append(icon(level.icon), text(level.label, 'menu-seg-label'));
-        row.appendChild(btn);
-        return { level, btn };
-      });
-      const paint = (): void => {
-        const quality = current();
-        for (const { level, btn } of buttons) btn.classList.toggle('is-selected', level.quality === quality);
+    const renderSettings = (): void => {
+      const stored = loadStoredSettings();
+      const settings: Settings = stored ?? {
+        ...DEFAULT_SETTINGS,
+        keyBindings: {},
+        ...(prefersMobilePresentation() ? PHONE_FIRST_LAUNCH : {}),
       };
-      for (const { level, btn } of buttons) {
-        btn.addEventListener('click', () => {
-          storeSettings(withTierDefaults(loadStoredSettings() ?? DEFAULT_SETTINGS, level.quality));
-          paint();
-        });
-      }
-      paint();
-      field.append(head, row);
-      return field;
+      const apply = (): void => storeSettings(settings);
+      settingsScreen = openSettings(sheet, {
+        settings,
+        apply,
+        viewport: () => ({ cssWidth: window.innerWidth, cssHeight: window.innerHeight }),
+        // The launch the player is about to start is the one that measures.
+        remeasureGraphics: () => {
+          Object.assign(settings, withRemeasure(settings));
+          apply();
+        },
+        back: () => backToFront('settings'),
+      });
     };
 
     const renderSaves = (): void => {
-      const { head } = screenHead('Saved drives', backToFront);
+      const { head } = screenHead('Saved drives', () => backToFront('saves'));
       const list = el('div', 'menu-drives');
       for (const listing of listings) list.appendChild(driveCard(listing));
       sheet.append(head, list);
@@ -1030,7 +2327,14 @@ export class MainMenu {
 
     const render = (): void => {
       sheet.textContent = '';
+      settingsScreen = null;
       sheet.classList.toggle('is-list', view === 'saves');
+      sheet.classList.toggle('is-settings', view === 'settings');
+      overlay.classList.toggle('is-settings', view === 'settings');
+      if (view === 'settings') {
+        renderSettings();
+        return;
+      }
       if (view === 'front') renderFront();
       else renderSaves();
       errorLine = el('div', 'menu-error');
@@ -1048,15 +2352,15 @@ export class MainMenu {
       sheet.querySelector<HTMLButtonElement>('[data-nav]')?.focus();
       window.addEventListener('keydown', onKey);
       // The title screen is a menu like any other: a pad moves focus, A activates and
-      // B backs out of the saved-drives list. Start does nothing here — there is no
-      // drive to pause.
+      // B backs out of the saved drives or the settings. Start does nothing here — there
+      // is no drive to pause.
       detachPad = attachPadNavigation(
         sheet,
         () => {
-          if (view === 'saves') backToFront();
+          if (view !== 'front') backToFront(view);
         },
         null,
-        () => false,
+        () => settingsScreen?.capturing === true,
       );
     });
     return promise;
@@ -1099,7 +2403,6 @@ export class MainMenu {
       // authoritative object: it is copied on entry, never mutated here, and
       // every change pushes a complete Settings object back through
       // hooks.applySettings (keyBindings re-copied so the applied map is ours).
-      const mobilePresentation = prefersMobilePresentation();
       const base = hooks.settings();
       const settings: Settings = {
         gearboxMode: base.gearboxMode,
@@ -1168,98 +2471,31 @@ export class MainMenu {
         });
       };
 
-      /**
-       * Label of the first other action bound to `code`, or null. Two actions may
-       * deliberately share a key only when both declare it as a default; F uses
-       * that context-sensitive exception for world manipulation and vehicle entry.
-       */
-      const holderOf = (code: string, exceptActionId: string): string | null => {
-        const except = BINDABLE_ACTIONS.find((action) => action.id === exceptActionId);
-        for (const action of BINDABLE_ACTIONS) {
-          const intentionalSharedDefault =
-            except?.defaultKeys.includes(code) === true && action.defaultKeys.includes(code);
-          if (
-            action.id !== exceptActionId &&
-            !intentionalSharedDefault &&
-            (settings.keyBindings[action.id] ?? action.defaultKeys).includes(code)
-          ) {
-            return action.label;
-          }
-        }
-        return null;
-      };
-
       type Screen = 'main' | 'settings' | 'spawn' | 'item' | 'part' | 'perf';
       let screen: Screen = 'main';
-      /**
-       * Settings section, remembered across visits: someone adjusting the horizon
-       * comes back to the horizon, not to the top of a list.
-       */
-      type SettingsTab = 'drive' | 'display' | 'compute' | 'gameplay' | 'sound' | 'controls' | 'controller';
-      let settingsTab: SettingsTab = 'drive';
-      /** Action id waiting for a key in capture mode; only set on settings. */
-      let capturingActionId: string | null = null;
-      /** Feedback line on the settings screen; null while not on settings. */
-      let note: HTMLElement | null = null;
-      /** Bindings list on the settings screen; null while not on settings. */
-      let bindingsList: HTMLElement | null = null;
-
-      const clearNote = (): void => {
-        if (!note) return;
-        note.textContent = '';
-        note.classList.remove('is-alarm');
-      };
-
-      const renderBindings = (): void => {
-        if (!bindingsList) return;
-        bindingsList.textContent = '';
-        for (const action of BINDABLE_ACTIONS) {
-          const row = button('menu-binding', '');
-          const labelSpan = el('span', 'menu-binding-label');
-          labelSpan.textContent = action.label;
-          const keysSpan = el('span', 'menu-binding-keys');
-          if (capturingActionId === action.id) {
-            row.classList.add('is-capturing');
-            const waiting = el('span', 'menu-keycap is-waiting');
-            waiting.textContent = 'press a key';
-            keysSpan.appendChild(waiting);
-          } else {
-            // One cap per key, not a slash-joined string: a boxed glyph is read as a
-            // key without being parsed as a sentence, which is the whole point of a
-            // twenty-row list nobody wants to read.
-            for (const code of settings.keyBindings[action.id] ?? action.defaultKeys) {
-              const cap = el('kbd', 'menu-keycap');
-              cap.textContent = formatKey(code);
-              keysSpan.appendChild(cap);
-            }
-          }
-          row.append(labelSpan, keysSpan);
-          row.addEventListener('click', () => {
-            // Clicking the armed row again disarms it; clicking any other row
-            // moves capture there.
-            capturingActionId = capturingActionId === action.id ? null : action.id;
-            clearNote();
-            renderBindings();
-          });
-          bindingsList.appendChild(row);
-        }
-      };
+      /** The settings screen while it is open; see `openSettings`. */
+      let settingsScreen: SettingsScreen | null = null;
 
       const showScreen = (next: Screen): void => {
         screen = next;
-        if (next !== 'settings') {
-          // Leaving settings disarms capture and drops the references to its
-          // elements; both are rebuilt from scratch on the next visit.
-          capturingActionId = null;
-          note = null;
-          bindingsList = null;
-        }
+        // Leaving settings drops the screen, and with it any binding capture: it is
+        // rebuilt from scratch on the next visit.
+        if (next !== 'settings') settingsScreen = null;
         // Settings is the one screen that needs nearly the whole width; the dev pickers
         // are lists and want more than the main column.
         panel.classList.toggle('is-wide', next !== 'main' && next !== 'settings');
         panel.classList.toggle('is-settings', next === 'settings');
         if (next === 'main') renderMain();
-        else if (next === 'settings') renderSettings();
+        else if (next === 'settings') {
+          settingsScreen = openSettings(panel, {
+            settings,
+            apply,
+            viewport: hooks.viewport,
+            remeasureGraphics: hooks.remeasureGraphics,
+            applyTimePreset: hooks.applyTimePreset,
+            back: () => showScreen('main'),
+          });
+        }
         else if (next === 'item') renderItem?.();
         else if (next === 'perf') renderPerf();
         else if (next === 'part') renderPart?.();
@@ -1267,35 +2503,7 @@ export class MainMenu {
       };
 
       const onKey = (ev: KeyboardEvent): void => {
-        if (screen === 'settings' && capturingActionId !== null) {
-          // Capture mode: the next keydown becomes the binding. Modifier chords
-          // stay with the browser, while fixed system controls cancel capture.
-          if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
-          ev.preventDefault();
-          if (isSystemControlCode(ev.code)) {
-            capturingActionId = null;
-            clearNote();
-            renderBindings();
-            return;
-          }
-          const action = BINDABLE_ACTIONS.find((a) => a.id === capturingActionId);
-          if (!action) return;
-          const holder = holderOf(ev.code, action.id);
-          if (holder) {
-            // Reject rather than clobber: say who already owns the key.
-            if (note) {
-              note.textContent = `"${formatKey(ev.code)}" is bound to ${holder}`;
-              note.classList.add('is-alarm');
-            }
-            return;
-          }
-          settings.keyBindings[action.id] = [ev.code];
-          apply();
-          capturingActionId = null;
-          clearNote();
-          renderBindings();
-          return;
-        }
+        if (settingsScreen?.handleKey(ev)) return;
         if (ev.code === 'Escape' || ev.code === 'Backquote') {
           ev.preventDefault();
           if (screen === 'main') finish('resume');
@@ -1309,7 +2517,7 @@ export class MainMenu {
         panel,
         back,
         () => finish('resume'),
-        () => screen === 'settings' && capturingActionId !== null,
+        () => settingsScreen?.capturing === true,
       );
       this.pauseCleanup = () => {
         window.removeEventListener('keydown', onKey);
@@ -1432,34 +2640,16 @@ export class MainMenu {
             if (btn) btn.textContent = label();
           });
         }
-        // Cycles the driving views' lens shift; the FOV slider stays as it is, so the
-        // two combine.
-        if (import.meta.env.DEV && hooks.lensShift) {
-          const lens = hooks.lensShift;
-          const label = (): string => `Lens shift: ${lens.label}`;
+        // The camera's event kicks (render/cameras.ts KICK_OMEGA) on top of the sway.
+        if (import.meta.env.DEV && hooks.shakeKicks) {
+          const kicks = hooks.shakeKicks;
+          const label = (): string => `Shake kicks: ${kicks.label}`;
           const index = devTools.length;
           devButton(label(), () => {
-            lens.cycle();
+            kicks.cycle();
             const btn = devTools[index];
             if (btn) btn.textContent = label();
           });
-        }
-        if (import.meta.env.DEV) {
-          const cycles = [
-            ['FOV cue', hooks.fovCue],
-            ['Chase', hooks.chasePreset],
-            ['Shake kicks', hooks.shakeKicks],
-          ] as const;
-          for (const [name, hook] of cycles) {
-            if (!hook) continue;
-            const label = (): string => `${name}: ${hook.label}`;
-            const index = devTools.length;
-            devButton(label(), () => {
-              hook.cycle();
-              const btn = devTools[index];
-              if (btn) btn.textContent = label();
-            });
-          }
         }
         if (import.meta.env.DEV && hooks.jumpToLake) {
           // Cycles through the first sites on each press rather than opening a screen
@@ -1481,1072 +2671,6 @@ export class MainMenu {
         resumeBtn.focus();
       };
 
-
-      /**
-       * Settings, as four short sections behind an icon rail.
-       *
-       * What this replaces was one flat column: nine controls and twenty key bindings
-       * in a single scroll, every row the same shape, and every option's explanatory
-       * sentence on screen at once. It could only be read, never scanned.
-       *
-       * Three rules do the work here:
-       *  - Sections, so driving settings are not adjacent to volume sliders.
-       *  - ONE hint line, at a fixed height, describing whatever is hovered, focused
-       *    or selected. Nine sentences become one, and the layout never jumps when it
-       *    changes.
-       *  - A glyph per option, carrying the axis (bars for quality, receding ridges
-       *    for a horizon, the sun's height for time) so the row is scannable.
-       *
-       * Nothing here previews live. The whole loop — simulation and renderer — is
-       * stopped while the overlay is up, so a graphics or horizon change cannot be
-       * seen until Resume. An earlier version faded the panel to "show" the effect,
-       * which showed a frozen frame and taught the player nothing.
-       */
-      const renderSettings = (): void => {
-        panel.textContent = '';
-
-        const { head, back: backBtn } = screenHead('Settings', () => showScreen('main'));
-        panel.appendChild(head);
-
-        const layout = el('div', 'menu-settings');
-        const rail = el('div', 'menu-rail');
-        const pane = el('div', 'menu-pane');
-        layout.append(rail, pane);
-        panel.appendChild(layout);
-
-        // The hint line doubles as the rebinding conflict line (`note`), so a
-        // rejected key lands where the player is already looking.
-        note = el('div', 'menu-note menu-hint');
-        panel.appendChild(note);
-
-        const setHint = (text: string): void => {
-          if (!note) return;
-          note.textContent = text;
-          note.classList.remove('is-alarm');
-        };
-
-        /**
-         * One option of a segmented control. `active`/`pick` rather than a generic
-         * value type: some rows select persisted state, and the time-of-day row
-         * selects nothing at all (it fires and forgets), and both are the same widget.
-         */
-        interface SegOption {
-          readonly label: string;
-          readonly icon: string;
-          /**
-           * The hint line, or a function for one that depends on state the row does not
-           * own: the render-scale row quotes the pixel count the CURRENT rung would give,
-           * and a string captured at build time would keep quoting the rung just left.
-           */
-          readonly hint: string | (() => string);
-          readonly active: () => boolean;
-          readonly pick: () => void;
-        }
-
-        /** Four call sites below need this resolution in lockstep; see `SegOption.hint`. */
-        const hintOf = (option: SegOption): string =>
-          typeof option.hint === 'string' ? option.hint : option.hint();
-
-        /**
-         * `head` is for state and actions that belong to THIS row rather than beside it:
-         * the detail row carries who picked it and the button that hands the choice back
-         * to the game, and a separate field for those was a row whose label had to name
-         * a concept ("rung source") the player had never met.
-         */
-        const segmented = (
-          labelText: string,
-          options: readonly SegOption[],
-          head: readonly HTMLElement[] = [],
-        ): HTMLElement => {
-          const field = el('div', 'menu-field');
-          const fieldHead = el('div', 'menu-field-head');
-          const label = el('span', 'menu-label');
-          label.textContent = labelText;
-          fieldHead.append(label, ...head);
-          const row = el('div', 'menu-seg');
-          const buttons = options.map((option) => {
-            const btn = button('menu-seg-btn', '');
-            const text = el('span', 'menu-seg-label');
-            text.textContent = option.label;
-            btn.append(icon(option.icon), text);
-            row.appendChild(btn);
-            return { option, btn };
-          });
-          const selectedHint = (): string => {
-            const selected = options.find((o) => o.active()) ?? options[0];
-            return selected === undefined ? '' : hintOf(selected);
-          };
-          const paint = (): void => {
-            for (const { option, btn } of buttons) {
-              btn.classList.toggle('is-selected', option.active());
-            }
-          };
-          for (const [index, entry] of buttons.entries()) {
-            entry.btn.addEventListener('click', () => {
-              entry.option.pick();
-              paint();
-              setHint(hintOf(entry.option));
-            });
-            // Hover and focus preview their own option's hint; leaving restores the
-            // selected one, so the line always describes something real.
-            entry.btn.addEventListener('pointerenter', () => setHint(hintOf(entry.option)));
-            entry.btn.addEventListener('focus', () => setHint(hintOf(entry.option)));
-            entry.btn.addEventListener('blur', () => setHint(selectedHint()));
-            entry.btn.addEventListener('keydown', (ev) => {
-              // Left/right walks the row, the way a segmented control should: the
-              // whole screen is reachable without a mouse.
-              const step = ev.key === 'ArrowRight' ? 1 : ev.key === 'ArrowLeft' ? -1 : 0;
-              if (step === 0) return;
-              ev.preventDefault();
-              const next = buttons[(index + step + buttons.length) % buttons.length];
-              next.btn.focus();
-            });
-          }
-          paint();
-          row.addEventListener('pointerleave', () => setHint(selectedHint()));
-          field.append(fieldHead, row);
-          return field;
-        };
-
-        const sliderField = (
-          labelText: string,
-          iconName: string,
-          hint: string,
-          min: number,
-          max: number,
-          step: number,
-          get: () => number,
-          format: (value: number) => string,
-          set: (value: number) => void,
-        ): HTMLElement => {
-          const field = el('div', 'menu-field');
-          const fieldHead = el('div', 'menu-field-head');
-          const sliderId = `settings-${labelText.toLowerCase().replaceAll(' ', '-')}`;
-          const label = el('label', 'menu-label');
-          label.textContent = labelText;
-          label.setAttribute('for', sliderId);
-          // The value rides in the head as a chip instead of taking its own column,
-          // which is what let four sliders become four scannable rows.
-          const chip = el('output', 'menu-chip');
-          fieldHead.append(icon(iconName), label, chip);
-          const slider = document.createElement('input');
-          slider.type = 'range';
-          slider.id = sliderId;
-          slider.className = 'menu-slider';
-          slider.min = String(min);
-          slider.max = String(max);
-          slider.step = String(step);
-          const paint = (): void => {
-            slider.value = String(get());
-            chip.textContent = format(get());
-            // The filled part of the track, which a range input cannot style natively.
-            slider.style.setProperty('--fill', `${((get() - min) / (max - min)) * 100}%`);
-          };
-          slider.addEventListener('input', () => {
-            set(slider.valueAsNumber);
-            paint();
-            apply();
-          });
-          slider.addEventListener('pointerenter', () => setHint(hint));
-          slider.addEventListener('focus', () => setHint(hint));
-          paint();
-          field.append(fieldHead, slider);
-          return field;
-        };
-
-        const renderDrive = (): void => {
-          pane.append(
-            segmented('Gearbox', [
-              {
-                label: 'Manual',
-                icon: 'manual',
-                hint: 'Four speeds and a clutch you do not have to think about. X and Z shift.',
-                active: () => settings.gearboxMode === 'manual',
-                pick: () => {
-                  settings.gearboxMode = 'manual';
-                  apply();
-                },
-              },
-              {
-                label: 'Automatic',
-                icon: 'auto',
-                hint: 'The box shifts for you. X and Z still override it.',
-                active: () => settings.gearboxMode === 'automatic',
-                pick: () => {
-                  settings.gearboxMode = 'automatic';
-                  apply();
-                },
-              },
-            ]),
-            segmented('Steering', [
-              {
-                label: 'Standard',
-                icon: 'keys',
-                hint: 'A and D ask for as much steering as the front tyres can use at this speed. Let go and the wheel unwinds on its own.',
-                active: () => !settings.preciseSteering,
-                pick: () => {
-                  settings.preciseSteering = false;
-                  apply();
-                },
-              },
-              {
-                label: 'Precise',
-                icon: 'mouse',
-                hint: 'Mouse and A/D wind one linear wheel that stays put. Tap a key to trim; hold it to keep turning.',
-                active: () => settings.preciseSteering,
-                pick: () => {
-                  settings.preciseSteering = true;
-                  apply();
-                },
-              },
-            ]),
-            segmented('Camera shake', [
-              {
-                label: 'On',
-                icon: 'drive',
-                hint: 'Past 60 km/h the view sways slowly, barely at all, growing with speed and more on gravel and sand than on smooth tarmac.',
-                active: () => settings.cameraShake,
-                pick: () => {
-                  settings.cameraShake = true;
-                  apply();
-                },
-              },
-              {
-                label: 'Off',
-                icon: 'fov',
-                hint: 'The view stays steady at any speed.',
-                active: () => !settings.cameraShake,
-                pick: () => {
-                  settings.cameraShake = false;
-                  apply();
-                },
-              },
-            ]),
-            segmented('Camera style', [
-              {
-                label: 'Steady',
-                icon: 'drive',
-                hint: 'The camera as it has always been: it follows the car, holds a level horizon and points where you point it. Nothing about a slide moves the frame.',
-                active: () => settings.cameraStyle === 'steady',
-                pick: () => {
-                  settings.cameraStyle = 'steady';
-                  apply();
-                },
-              },
-              {
-                label: 'Dynamic',
-                icon: 'cameraStyle',
-                hint: 'The camera reads the car: it lags the slip angle so a slide is visible, leans out of corners with the body, rolls the bonnet view with the suspension and looks into the wheels at parking speed.',
-                active: () => settings.cameraStyle === 'dynamic',
-                pick: () => {
-                  settings.cameraStyle = 'dynamic';
-                  apply();
-                },
-              },
-            ]),
-            segmented('Yaris mode', [
-              {
-                label: 'Off',
-                icon: 'drive',
-                hint: 'Cars sit still on their springs, same as any other drive.',
-                active: () => !settings.bouncyCars,
-                pick: () => {
-                  settings.bouncyCars = false;
-                  apply();
-                },
-              },
-              {
-                label: 'On',
-                icon: 'bounce',
-                hint: 'Every car on the road — yours and traffic — hops in place like the viral bouncing Yaris. Purely visual: handling, suspension and collisions are untouched.',
-                active: () => settings.bouncyCars,
-                pick: () => {
-                  settings.bouncyCars = true;
-                  apply();
-                },
-              },
-            ]),
-          );
-        };
-
-        /**
-         * WHO PICKED THE DETAIL LEVEL, in the player's words.
-         *
-         * A measured verdict and a chosen preference used to look identical — the rung
-         * was a bare string and the only record of who set it was that stored
-         * preferences existed at all — so one unlucky measurement was permanent and
-         * nothing could ask again. These are the four answers to "picked by", which is
-         * the only form the distinction survives in: `measured` and `chosen` are exact
-         * words for the code and mean nothing to the person reading a menu.
-         */
-        const PICKED_BY: Record<GraphicsQualitySource, string> = {
-          default: 'not picked yet',
-          device: 'phone default',
-          measured: 'picked by the game',
-          chosen: 'picked by you',
-        };
-        const PICKED_NOTES: Record<GraphicsQualitySource, string> = {
-          default: 'Nobody has picked yet. The next launch times your graphics chip and picks.',
-          device: 'Phones start on the lightest level so they stay cool.',
-          measured:
-            'The game timed your graphics chip while the game was loading, and picked this. '
-            + 'It will not change it again.',
-          chosen: 'You picked this. Nothing will change it unless you do.',
-        };
-        const PICK_FOR_ME_HINT =
-          'Let the game time your graphics chip and pick the level again. Restarts the game, '
-          + 'because the timing happens behind the loading screen: it throws away the first '
-          + 'thirty frames and can take up to twenty seconds, with nobody driving.';
-
-        const renderDisplay = (): void => {
-          // Nothing here previews: the simulation and the renderer are both stopped
-          // while the pause overlay is up, so graphics and horizon changes are only
-          // seen after Resume. Saying so in the hint is honest; fading the panel to
-          // show a frozen frame was not.
-          //
-          // `Sharpness` quotes PIXELS, not a percentage of something unstated, and reads
-          // them from the canvas rather than the window: cinema mode shortens the canvas
-          // by two 90-pixel bars and leaves the window alone, and a row that names a
-          // resolution the game is not rendering is the drift this control exists to end.
-          const viewport = hooks.viewport();
-          const cssPixels = viewport.cssWidth * viewport.cssHeight;
-          const pixelsAt = (ratio: number): string => {
-            const width = Math.floor(viewport.cssWidth * ratio);
-            const height = Math.floor(viewport.cssHeight * ratio);
-            return `${width}x${height}, ${((width * height) / 1_000_000).toFixed(2)} Mpx`;
-          };
-
-          // WHO PICKED IT rides in the detail row's own head, next to the thing it
-          // describes, with the one action on it — shaped like the key-bindings field,
-          // which is the same kind of row: a piece of state and a button that resets it.
-          // It was a row of its own, and a row needs a label: that label had to name a
-          // concept ("rung source") the player had never met and could not guess.
-          const pickedChip = el('output', 'menu-chip');
-          const paintSource = (): void => {
-            pickedChip.textContent = PICKED_BY[settings.graphicsQualitySource];
-          };
-          paintSource();
-          pickedChip.addEventListener('pointerenter', () =>
-            setHint(PICKED_NOTES[settings.graphicsQualitySource]),
-          );
-          const detailHead: HTMLElement[] = [pickedChip];
-          // A phone is never timed: it is put on the lightest level, which is the floor,
-          // and the only direction a measurement could move it is up — which is the heat
-          // that level exists to refuse. Offering the button there would promise a
-          // measurement the launch declines to make.
-          if (!mobilePresentation) {
-            const pickBtn = button('menu-button menu-reset', 'Let the game pick');
-            pickBtn.addEventListener('click', () => hooks.remeasureGraphics());
-            pickBtn.addEventListener('pointerenter', () => setHint(PICK_FOR_ME_HINT));
-            pickBtn.addEventListener('focus', () => setHint(PICK_FOR_ME_HINT));
-            detailHead.push(pickBtn);
-          }
-
-          pane.append(
-            // ONE LADDER, AND IT IS NOT ABOUT PIXELS ANY MORE. `Sharpness` below owns the
-            // resolution; what is left here is how much WORLD there is — how far the
-            // desert is drawn, whether the sun casts, how many lamps are shaded, how deep
-            // the sky goes. The labels used to name machines (`Phone`, `Desktop`,
-            // `Workstation`), which asked the player to classify his own computer and
-            // then guess which class he was in; the measurement answers that now, and
-            // says so in the head, so the levels can describe the picture instead.
-            segmented('Detail', [
-              {
-                label: 'Very Low',
-                icon: 'retro',
-                hint: () =>
-                  'For weak mini-PCs and old laptops. The world is drawn at about 360 lines '
-                  + '(540 under Sharpness) and shown as crisp square pixels, like a late-90s '
-                  + 'game, with lighter ground cover and no sun shadows. '
-                  + (settings.graphicsQuality === 'retro'
-                    ? ''
-                    : 'Switching to it or away from it saves the drive and reloads it.'),
-                active: () => settings.graphicsQuality === 'retro',
-                pick: () => {
-                  settings.graphicsQuality = 'retro';
-                  settings.graphicsQualitySource = 'chosen';
-                  paintSource();
-                  apply();
-                },
-              },
-              {
-                label: 'Low',
-                icon: 'gfx1',
-                hint: describeTier('acceptable', mobilePresentation),
-                active: () => settings.graphicsQuality === 'acceptable',
-                pick: () => {
-                  settings.graphicsQuality = 'acceptable';
-                  settings.graphicsQualitySource = 'chosen';
-                  paintSource();
-                  apply();
-                },
-              },
-              {
-                label: 'Medium',
-                icon: 'gfx2',
-                hint: describeTier('standard', mobilePresentation),
-                active: () => settings.graphicsQuality === 'standard',
-                pick: () => {
-                  settings.graphicsQuality = 'standard';
-                  settings.graphicsQualitySource = 'chosen';
-                  paintSource();
-                  apply();
-                },
-              },
-              {
-                label: 'High',
-                icon: 'gfx3',
-                hint: describeTier('blessing', mobilePresentation),
-                active: () => settings.graphicsQuality === 'blessing',
-                pick: () => {
-                  settings.graphicsQuality = 'blessing';
-                  settings.graphicsQualitySource = 'chosen';
-                  paintSource();
-                  apply();
-                },
-              },
-            ], detailHead),
-            // THE AXIS THE LEVEL CANNOT EXPRESS. A level is three points — on a 4K
-            // television 1.44, 3.69 and 12.96 megapixels — and a machine is not three
-            // machines; worse, `Auto` is a GPU timer query, so a browser without
-            // `EXT_disjoint_timer_query_webgl2` cannot move the scale at all and three
-            // points were the whole of the choice there. Both directions are offered:
-            // down for the machine between two levels, up for the one with headroom that
-            // does not want a 25 km vista and eighteen headlamps to go with it.
-            // On the retro rung the row offers whole-pixel line counts instead: its
-            // resolution IS the look (render/retro.ts), so the choice is how coarse the
-            // squares are, never a fraction the compositor would smear.
-            ...(settings.graphicsQuality === 'retro' ? [segmented('Sharpness', RETRO_LINE_CHOICES.map((lines) => ({
-              label: `${lines} lines`,
-              icon: 'pixels',
-              hint: () =>
-                `${pixelsAt(retroPixelRatio(viewport.cssHeight, window.devicePixelRatio, lines))}, `
-                + 'each pixel a crisp square. '
-                + (lines === 360
-                  ? 'The level\'s own look, and the lightest on the graphics chip.'
-                  : 'Finer squares, a little sharper. Costs the chip about a third more, '
-                    + 'most of it the pixels; still far below Low.'),
-              active: () => settings.retroLines === lines,
-              pick: () => {
-                settings.retroLines = lines;
-                apply();
-              },
-            })))] : [segmented('Sharpness', [
-              {
-                label: 'Auto',
-                icon: 'display',
-                hint: () =>
-                  'The game watches your graphics chip and picks, lowering this if the '
-                  + 'machine cannot keep up. Full sharpness here is '
-                  + `${pixelsAt(
-                    renderScaleFor(
-                      settings.graphicsQuality,
-                      cssPixels,
-                      window.devicePixelRatio,
-                      mobilePresentation,
-                    ),
-                  )}. `
-                  + 'Some browsers will not let the game time the chip — Safari, and most '
-                  + 'phones inside an app. There it cannot watch, so pick a number yourself.',
-                active: () => settings.renderScale === null,
-                pick: () => {
-                  settings.renderScale = null;
-                  apply();
-                },
-              },
-              // Built from the display, not from the list: the absolute bound flattens
-              // the top of the row on a large screen, and two buttons with one outcome
-              // is the menu promising pixels it will not draw.
-              ...offeredRenderScales(
-                cssPixels,
-                window.devicePixelRatio,
-                mobilePresentation,
-                settings.renderScale,
-              ).map((scale) => ({
-                label: `${Math.round(scale * 100)}%`,
-                icon: 'pixels',
-                hint: () =>
-                  `${Math.round(scale * 100)}% of this display: `
-                  + `${pixelsAt(
-                    manualRenderScale(
-                      cssPixels,
-                      window.devicePixelRatio,
-                      mobilePresentation,
-                      scale,
-                    ),
-                  )}. `
-                  + (scale > 1
-                    ? 'Drawn bigger than the screen and shrunk down, which smooths every '
-                      + 'edge. Capped at what the game will ever draw. '
-                    : '')
-                  + 'Fixed: the game will not lower it for you.',
-                active: () => settings.renderScale === scale,
-                pick: () => {
-                  settings.renderScale = scale;
-                  apply();
-                },
-              })),
-            ])]),
-            // THE ONE LEVER THAT WORKS ON EVERY DEVICE, for opposite reasons, so it is
-            // offered on both. On a phone it is a thermal control and has to be the
-            // player's: no browser reports thermal state, battery temperature or clock
-            // speed, so the device cannot say it is hot — only the person holding it can.
-            // On a desktop it is noise and power, which the game cannot see either.
-            //
-            // It is also the largest lever there is: half the frames is half the render
-            // work and half the presenting, while the simulation keeps its fixed rate, so
-            // the car handles identically at every setting here. And its floor is that
-            // simulation — nothing below the fixed rate can be saved by presenting less.
-            segmented('Frame Rate', [
-              ...FRAME_RATE_LIMITS.map((rate) => ({
-                label: String(rate),
-                icon: 'gfx3',
-                hint:
-                  `${rate} FPS. Simulation is unaffected — the car handles the same at ` +
-                  'every rate here. Half the frames is half the render work and half the presenting.',
-                active: () => settings.frameRateLimit === rate,
-                pick: () => {
-                  settings.frameRateLimit = rate;
-                  apply();
-                },
-              })),
-              {
-                label: 'Max',
-                icon: 'gfx1',
-                hint:
-                  'No cap. The right choice when the GPU is already the constraint, ' +
-                  'because a cap there only costs smoothness.',
-                active: () => settings.frameRateLimit === null,
-                pick: () => {
-                  settings.frameRateLimit = null;
-                  apply();
-                },
-              },
-            ]),
-            segmented('Smooth Edges', [
-              {
-                label: 'On',
-                icon: 'gfx3',
-                hint: 'Softens the jagged steps along edges. Costs a lot on a weak chip.',
-                active: () => settings.msaa,
-                pick: () => {
-                  settings.msaa = true;
-                  apply();
-                },
-              },
-              {
-                label: 'Off',
-                icon: 'gfx1',
-                hint: 'Jagged edges left as they are. Sharpness and the drawn outlines still apply.',
-                active: () => !settings.msaa,
-                pick: () => {
-                  settings.msaa = false;
-                  apply();
-                },
-              },
-            ]),
-            sliderField(
-              'Field of View',
-              'fov',
-              'How wide a view the camera has. Only the up-and-down angle is set here — a '
-                + 'wider window then shows MORE desert to the sides rather than squeezing '
-                + 'it. 65 is the authored view; the binoculars and the speed widening both '
-                + 'follow whatever you set.',
-              FIELD_OF_VIEW_MIN,
-              FIELD_OF_VIEW_MAX,
-              1,
-              () => settings.fieldOfView,
-              (value) => `${Math.round(value)}\u00b0`,
-              (value) => {
-                settings.fieldOfView = value;
-              },
-            ),
-          );
-        };
-
-        // THE PROCESSOR'S BILL, a different chip from every Display row: the far desert,
-        // rebuilt cell by cell as you drive, and the traffic, every car a full physical
-        // vehicle with its own driver. Two rows because they cost different things and a
-        // machine may afford one and not the other. Both apply live.
-        const renderCompute = (): void => {
-          pane.append(
-            segmented('View Distance', COMPUTE_LEVELS.map(({ level, label }) => ({
-              label,
-              icon: HORIZON_ICONS[level],
-              hint:
-                `${formatHorizon(viewDistanceFor(level, mobilePresentation))} of desert before the haze. `
-                + 'The far desert is rebuilt by the processor as you drive; the farther it '
-                + 'reaches, the bigger that rebuild, and a slow processor feels it as a '
-                + 'stutter every few hundred metres.',
-              active: () => settings.viewDistance === level,
-              pick: () => {
-                settings.viewDistance = level;
-                apply();
-              },
-            }))),
-            segmented('Traffic', COMPUTE_LEVELS.map(({ level, label }) => ({
-              label,
-              icon: TRAFFIC_ICONS[level],
-              hint:
-                `Up to ${TRAFFIC_CAPS[level].narrow} cars on a two-lane road and `
-                + `${TRAFFIC_CAPS[level].wide} on a four-lane one. Every one is fully `
-                + 'simulated with its own driver, so this is the processor\'s, not the '
-                + 'graphics card\'s.',
-              active: () => settings.trafficDensity === level,
-              pick: () => {
-                settings.trafficDensity = level;
-                apply();
-              },
-            }))),
-          );
-        };
-
-        const renderGameplay = (): void => {
-          pane.append(
-            segmented(
-              'Time of Day',
-              (Object.keys(TIME_OF_DAY_PRESETS) as TimeOfDayPreset[]).map((preset) => ({
-                label: preset.charAt(0).toUpperCase() + preset.slice(1),
-                icon: preset,
-                hint: `Move the sun to ${preset}. The clock keeps running from there.`,
-                active: () => false,
-                pick: () => hooks.applyTimePreset(preset),
-              })),
-            ),
-            sliderField(
-              'Day Length',
-              'clock',
-              'Real minutes for one full day and night.',
-              DAY_CYCLE_MIN_MINUTES,
-              DAY_CYCLE_MAX_MINUTES,
-              1,
-              () => settings.dayCycleMinutes,
-              (value) => `${Math.round(value)} min`,
-              (value) => {
-                settings.dayCycleMinutes = value;
-              },
-            ),
-            sliderField(
-              'Dashboard Size',
-              'gameplay',
-              'How big the driving dashboard is drawn. 100% is the default size.',
-              DASHBOARD_SIZE_MIN,
-              DASHBOARD_SIZE_MAX,
-              DASHBOARD_SIZE_STEP,
-              () => settings.dashboardSize,
-              (value) => `${Math.round(value * 100)}%`,
-              (value) => {
-                settings.dashboardSize = value;
-              },
-            ),
-          );
-        };
-
-        const radioStationField = (
-          labelText: string,
-          get: () => string,
-          set: (value: string) => void,
-        ): HTMLElement => {
-          const field = el('div', 'menu-field');
-          const label = el('div', 'menu-label');
-          label.textContent = labelText;
-          const input = document.createElement('input');
-          input.type = 'url';
-          input.value = get();
-          input.placeholder = 'https://…';
-          input.autocomplete = 'off';
-          input.className = 'menu-radio-url';
-          input.style.width = '100%';
-          input.addEventListener('change', () => {
-            set(input.value.trim());
-            apply();
-          });
-          const recommended = document.createElement('select');
-          recommended.className = 'menu-radio-recommendations';
-          recommended.style.width = '100%';
-          recommended.add(new Option('Recommended streams…', ''));
-          for (const station of RADIO_RECOMMENDATIONS) {
-            recommended.add(new Option(`${station.label} — ${station.url}`, station.url));
-          }
-          recommended.addEventListener('change', () => {
-            if (!recommended.value) return;
-            input.value = recommended.value;
-            set(recommended.value);
-            apply();
-            recommended.value = '';
-          });
-          field.append(label, input, recommended);
-          return field;
-        };
-
-        const renderSound = (): void => {
-          pane.append(
-            sliderField(
-              'Master',
-              'sound',
-              'Everything you hear: the car, the world, your own footsteps and the radio. The three below set their share of it.',
-              0,
-              1,
-              0.01,
-              () => settings.masterVolume,
-              (value) => `${Math.round(value * 100)}%`,
-              (value) => {
-                settings.masterVolume = value;
-              },
-            ),
-            sliderField(
-              'Car',
-              'drive',
-              'Your car: engine, gearbox, tyres, wind over the body, knocks and clunks.',
-              0,
-              1,
-              0.01,
-              () => settings.carVolume,
-              (value) => `${Math.round(value * 100)}%`,
-              (value) => {
-                settings.carVolume = value;
-              },
-            ),
-            sliderField(
-              'World',
-              'world',
-              'Everything around you: air, rain, thunder, birds and insects, other traffic.',
-              0,
-              1,
-              0.01,
-              () => settings.worldVolume,
-              (value) => `${Math.round(value * 100)}%`,
-              (value) => {
-                settings.worldVolume = value;
-              },
-            ),
-            sliderField(
-              'Radio',
-              'radio',
-              'The car radio, levelled to sit with the game sound at the same setting.',
-              0,
-              1,
-              0.01,
-              () => settings.radioVolume,
-              (value) => `${Math.round(value * 100)}%`,
-              (value) => {
-                settings.radioVolume = value;
-              },
-            ),
-            radioStationField('Radio station 1 URL', () => settings.radioStation1Url, (value) => {
-              settings.radioStation1Url = value;
-            }),
-            radioStationField('Radio station 2 URL', () => settings.radioStation2Url, (value) => {
-              settings.radioStation2Url = value;
-            }),
-          );
-        };
-
-        /**
-         * The controller. Three controls and a line of state.
-         *
-         * A pad's preferences are the same kind of thing as the mouse's — how the
-         * device in your hand feels — so they are shaped the same way and applied at
-         * the same place. They exist at all because the stick, the trigger and the
-         * motors differ between pads and between hands: 8% dead-zone is right for a
-         * Hall-effect stick and wrong for a worn one, and a pad that buzzes a nylon
-         * desk mat is a pad nobody uses twice.
-         *
-         * The status line is read from the hub rather than written here, because "which
-         * pad is it using" is exactly the question a player asks when nothing moves.
-         */
-        const renderController = (): void => {
-          const hub = gamepads();
-          const padHint =
-            'An Xbox-style pad is used with the standard layout: left stick steers, '
-            + 'RT and LT are throttle and brake, A is the handbrake, X enters and leaves '
-            + 'the car, Y changes the camera view, the bumpers shift, the D-pad carries '
-            + 'the indicators, the radio and the camera re-centre, and Start pauses.';
-          const status = el('div', 'menu-field');
-          const statusHead = el('div', 'menu-field-head');
-          const statusLabel = el('span', 'menu-label');
-          statusLabel.textContent = 'Gamepad';
-          const statusChip = el('output', 'menu-chip');
-          const paintStatus = (): void => {
-            const pad = hub.read();
-            if (!pad.connected) {
-              statusChip.textContent = 'none detected';
-              return;
-            }
-            const attached = navigator.getGamepads?.() ?? [];
-            let name = 'connected';
-            for (const candidate of attached) {
-              if (candidate !== null && candidate.connected && candidate.mapping === 'standard') {
-                name = candidate.id.split(' (')[0] ?? 'connected';
-                break;
-              }
-            }
-            statusChip.textContent = name;
-          };
-          paintStatus();
-          statusHead.append(icon('gamepad'), statusLabel, statusChip);
-          status.append(statusHead);
-          // Focus re-reads the pad, which is how a player finds out that the pad he just
-          // picked up is the one being used.
-          statusChip.tabIndex = 0;
-          statusChip.addEventListener('focus', () => {
-            paintStatus();
-            setHint(padHint);
-          });
-          statusChip.addEventListener('pointerenter', () => {
-            paintStatus();
-            setHint(padHint);
-          });
-          pane.appendChild(status);
-
-          pane.append(
-            sliderField(
-              'Vibration',
-              'bounce',
-              'How hard the pad shakes. The strong motor carries the suspension and '
-              + 'collisions, the weak one the road under the tyres and a sliding wheel.',
-              0,
-              1,
-              CONTROLLER_VIBRATION_STEP,
-              () => settings.controllerVibration,
-              (value) => `${Math.round(value * 100)}%`,
-              (value) => {
-                settings.controllerVibration = value;
-              },
-            ),
-            sliderField(
-              'Stick dead-zone',
-              'gamepad',
-              'How far the left stick must move before the wheels see it. Raise it if a '
-              + 'well-used pad steers on its own with nobody touching it.',
-              CONTROLLER_DEADZONE_MIN,
-              CONTROLLER_DEADZONE_MAX,
-              CONTROLLER_DEADZONE_STEP,
-              () => settings.controllerDeadzone,
-              (value) => `${Math.round(value * 100)}%`,
-              (value) => {
-                settings.controllerDeadzone = value;
-              },
-            ),
-            sliderField(
-              'Steering sensitivity',
-              'keys',
-              'How much lock a given stick deflection asks for. Above 100% reaches full '
-              + 'lock earlier; below it leaves more of the stick for small corrections.',
-              CONTROLLER_STEER_MIN,
-              CONTROLLER_STEER_MAX,
-              CONTROLLER_STEER_STEP,
-              () => settings.controllerSteerSensitivity,
-              (value) => `${Math.round(value * 100)}%`,
-              (value) => {
-                settings.controllerSteerSensitivity = value;
-              },
-            ),
-            segmented('Steering assist', [
-              {
-                label: 'On',
-                icon: 'drive',
-                hint: 'Full stick is as much steering as the front tyres can use at this speed; the stick is proportional inside it. Precise mouse steering follows the same setting.',
-                active: () => settings.controllerSteerAssist,
-                pick: () => {
-                  settings.controllerSteerAssist = true;
-                  apply();
-                },
-              },
-              {
-                label: 'Off',
-                icon: 'keys',
-                hint: 'Full stick is full lock at any speed.',
-                active: () => !settings.controllerSteerAssist,
-                pick: () => {
-                  settings.controllerSteerAssist = false;
-                  apply();
-                },
-              },
-            ]),
-          );
-        };
-
-        const renderControls = (): void => {
-          pane.appendChild(
-            segmented('Keyboard steering assist', [
-              {
-                label: 'On',
-                icon: 'drive',
-                hint: 'A held key asks for as much steering as the front tyres can use at this speed.',
-                active: () => settings.keyboardSteerAssist,
-                pick: () => {
-                  settings.keyboardSteerAssist = true;
-                  apply();
-                },
-              },
-              {
-                label: 'Off',
-                icon: 'keys',
-                hint: 'A held key winds the wheel toward full lock at any speed: quick hands needed at speed.',
-                active: () => !settings.keyboardSteerAssist,
-                pick: () => {
-                  settings.keyboardSteerAssist = false;
-                  apply();
-                },
-              },
-            ]),
-          );
-          pane.appendChild(
-            segmented('Steering key release', [
-              {
-                label: 'Let go',
-                icon: 'keys',
-                hint: 'Releasing the key lets go of the wheel: the tyres turn it back toward where the car is going at once.',
-                active: () => settings.keyboardSteerRelease === 'letGo',
-                pick: () => {
-                  settings.keyboardSteerRelease = 'letGo';
-                  apply();
-                },
-              },
-              {
-                label: 'Ease off',
-                icon: 'drive',
-                hint: 'Releasing the key eases the hand off over a quarter second before letting go: a correction holds a little longer.',
-                active: () => settings.keyboardSteerRelease === 'ease',
-                pick: () => {
-                  settings.keyboardSteerRelease = 'ease';
-                  apply();
-                },
-              },
-            ]),
-          );
-          pane.appendChild(
-            sliderField(
-              'Mouse Look',
-              'mouse',
-              'Pointer sensitivity for looking around. Precise control uses a fixed steering gain.',
-              MOUSE_SENSITIVITY_MIN,
-              MOUSE_SENSITIVITY_MAX,
-              0.0001,
-              () => settings.mouseSensitivity,
-              (value) => `${Math.round((value / DEFAULT_MOUSE_SENSITIVITY) * 100)}%`,
-              (value) => {
-                settings.mouseSensitivity = value;
-              },
-            ),
-          );
-
-          const bindField = el('div', 'menu-field');
-          const bindHead = el('div', 'menu-field-head');
-          const bindLabel = el('span', 'menu-label');
-          bindLabel.textContent = 'Key Bindings';
-          const resetBtn = button('menu-button menu-reset', 'Reset');
-          resetBtn.addEventListener('click', () => {
-            settings.keyBindings = {};
-            apply();
-            setHint('Every binding is back to its default.');
-            renderBindings();
-          });
-          bindHead.append(icon('controls'), bindLabel, resetBtn);
-          // Two columns: the list is 5% of the visits and was 70% of the height.
-          bindingsList = el('div', 'menu-bindings');
-          bindField.append(bindHead, bindingsList);
-          pane.appendChild(bindField);
-          renderBindings();
-        };
-
-        const TABS: readonly {
-          readonly id: SettingsTab;
-          readonly label: string;
-          readonly icon: string;
-          readonly hint: string;
-          readonly render: () => void;
-        }[] = [
-          {
-            id: 'drive',
-            label: 'Drive',
-            icon: 'drive',
-            hint: 'How the car is driven.',
-            render: renderDrive,
-          },
-          {
-            id: 'display',
-            label: 'Display',
-            icon: 'display',
-            hint: 'What is drawn, and how sharply.',
-            render: renderDisplay,
-          },
-          {
-            id: 'compute',
-            label: 'Compute',
-            icon: 'compute',
-            hint: 'How far the desert reaches and how busy the road is: the processor\'s bill.',
-            render: renderCompute,
-          },
-          {
-            id: 'gameplay',
-            label: 'Gameplay',
-            icon: 'gameplay',
-            hint: 'Time flow and the spacing between roadside stops.',
-            render: renderGameplay,
-          },
-          {
-            id: 'sound',
-            label: 'Sound',
-            icon: 'sound',
-            hint: 'Levels for the car and the radio.',
-            render: renderSound,
-          },
-          {
-            id: 'controls',
-            label: 'Controls',
-            icon: 'controls',
-            hint: 'The mouse, the pad and every key.',
-            render: renderControls,
-          },
-          {
-            id: 'controller',
-            label: 'Controller',
-            icon: 'gamepad',
-            hint: 'How the gamepad feels: shake, stick and steering.',
-            render: renderController,
-          },
-        ];
-
-        const railButtons = TABS.map((tab) => {
-          const btn = button('menu-rail-btn', '');
-          const text = el('span', 'menu-rail-label');
-          text.textContent = tab.label;
-          btn.append(icon(tab.icon), text);
-          rail.appendChild(btn);
-          return { tab, btn };
-        });
-
-        const showTab = (id: SettingsTab): void => {
-          settingsTab = id;
-          // Capture cannot survive leaving the section that owns it.
-          capturingActionId = null;
-          bindingsList = null;
-          pane.textContent = '';
-          for (const { tab, btn } of railButtons) {
-            btn.classList.toggle('is-selected', tab.id === id);
-          }
-          const active = TABS.find((t) => t.id === id) ?? TABS[0];
-          active.render();
-          setHint(active.hint);
-        };
-
-        for (const [index, entry] of railButtons.entries()) {
-          entry.btn.addEventListener('click', () => showTab(entry.tab.id));
-          entry.btn.addEventListener('keydown', (ev) => {
-            const step = ev.key === 'ArrowDown' ? 1 : ev.key === 'ArrowUp' ? -1 : 0;
-            if (step === 0) return;
-            ev.preventDefault();
-            const next = railButtons[(index + step + railButtons.length) % railButtons.length];
-            next.btn.focus();
-            showTab(next.tab.id);
-          });
-        }
-
-        showTab(settingsTab);
-        backBtn.focus();
-      };
 
       /**
        * What the frame costs, printed rather than graphed.

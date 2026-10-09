@@ -403,12 +403,6 @@ export const HAZE_FRAGMENT = /* glsl */ `
   uniform float uHorizon;
   uniform mat3 uCameraRotation;
   uniform float uTanHalfFov;
-  /**
-   * The frustum's vertical shift in NDC (minus the projection's elements[9]): a screen
-   * row at NDC y looks along the ray the centred frustum has at y - uLensShift.
-   * 0 unless the DEV lens shift is on (render/cameras.ts \`lensShift\`).
-   */
-  uniform float uLensShift;
   uniform float uCameraNear;
   uniform float uCameraFar;
   uniform float uInkStrength;
@@ -481,13 +475,13 @@ export const HAZE_FRAGMENT = /* glsl */ `
   const float BOIL_SLICE_SHIFT = 37.0;
   const float TURN = 6.28318530718;
 
-  /** Unit view-space direction for a pixel, through the shifted frustum. */
+  /** Unit view-space direction for a pixel. */
   vec3 cameraRay(vec2 uv) {
     vec2 ndc = uv * 2.0 - 1.0;
     float aspect = uResolution.x / uResolution.y;
     return normalize(vec3(
       ndc.x * aspect * uTanHalfFov,
-      (ndc.y - uLensShift) * uTanHalfFov,
+      ndc.y * uTanHalfFov,
       -1.0
     ));
   }

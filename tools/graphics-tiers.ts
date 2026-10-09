@@ -19,16 +19,21 @@
  */
 
 import {
+  DEFAULT_SETTINGS,
   FRAME_RATE_LIMITS,
   frameRateLimitFrom,
   GRAPHICS_TIERS,
   presentationFpsFor,
+  qualityPresetOf,
   RENDER_SCALES,
   renderScaleFrom,
+  sanitizeSettings,
   starMagnitudeFor,
   vehicleLightSlotsFor,
   viewDistanceFor,
+  withQualityPreset,
   type GraphicsQuality,
+  type Settings,
 } from '../src/game/settings';
 import { FIXED_DT } from '../src/core/physics';
 import { MAX_STEPS_PER_FRAME } from '../src/core/loop';
@@ -432,11 +437,41 @@ console.log('\ndisplay                       offered   scale     Mpx       ratio
   }
 }
 
+// --- 4. the quality preset ------------------------------------------------------
+//
+// The preset is not stored: it is read back off the values it sets. So every preset must
+// read back as itself, the shipped defaults must be one (Medium), any one Advanced value
+// moved off it must read as Custom, and an old stored preference must keep its values.
+{
+  for (const preset of ['very_low', 'low', 'medium', 'high'] as const) {
+    const on = withQualityPreset(DEFAULT_SETTINGS, preset, 'chosen');
+    if (qualityPresetOf(on) !== preset) failures.push(`the ${preset} preset does not read back as itself`);
+    const offs: Partial<Settings>[] = [
+      { viewDistance: preset === 'high' ? 'low' : 'high' },
+      { trafficDensity: preset === 'high' ? 'low' : 'high' },
+      { msaa: !on.msaa },
+      { frameRateLimit: 60 },
+      on.graphicsQuality === 'retro' ? { retroLines: 540 } : { renderScale: 0.85 },
+    ];
+    for (const off of offs) {
+      if (qualityPresetOf({ ...on, ...off }) !== null) {
+        failures.push(`${preset} with ${JSON.stringify(off)} still reads as the preset, not Custom`);
+      }
+    }
+  }
+  if (qualityPresetOf(DEFAULT_SETTINGS) !== 'medium') failures.push('the shipped defaults are not the Medium preset');
+  const old = sanitizeSettings({ graphicsQuality: 'blessing', viewDistance: 'low', trafficDensity: 'high', msaa: false });
+  if (old.graphicsQuality !== 'blessing' || old.viewDistance !== 'low' || old.trafficDensity !== 'high' || old.msaa) {
+    failures.push('a stored mix of quality values was not kept as it was');
+  }
+  if (qualityPresetOf(old) !== null) failures.push('a stored mix of quality values reads as a preset');
+}
+
 if (failures.length > 0) {
   for (const failure of failures) console.log(`  FAIL  ${failure}`);
   throw new Error(`${failures.length} graphics-tier checks failed`);
 }
 console.log(
   '\nthe ladder climbs at every rung, no display can talk a rung past its budget, and '
-    + 'every render scale the menu offers is a different picture',
+    + 'every render scale the menu offers is a different picture; every quality preset reads back',
 );

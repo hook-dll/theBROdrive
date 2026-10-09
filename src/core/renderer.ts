@@ -572,7 +572,6 @@ export class Renderer {
         uHorizon: { value: 0.5 },
         uCameraRotation: { value: new THREE.Matrix3() },
         uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(fieldOfView) / 2) },
-        uLensShift: { value: 0 },
         uCameraNear: { value: CAMERA_NEAR },
         uCameraFar: { value: CAMERA_FAR },
         uInkStrength: { value: Math.min(1, Math.max(0, inkStrength)) },
@@ -999,7 +998,6 @@ export class Renderer {
     this.hazeMaterial.uniforms.uTanHalfFov.value = Math.tan(
       THREE.MathUtils.degToRad(camera.fov) / 2,
     );
-    this.hazeMaterial.uniforms.uLensShift.value = -camera.projectionMatrix.elements[9];
     this.hazeMaterial.uniforms.uCameraNear.value = camera.near;
     this.hazeMaterial.uniforms.uCameraFar.value = camera.far;
     // TWO PASSES ON EVERY TIER, and the reason is colour, not shimmer.
@@ -1046,19 +1044,17 @@ export class Renderer {
    * the INK pass only — the shimmer works in world rays and needs no such row.
    *
    * A horizontal sight-line lands at NDC y = -tan(pitch) / tan(fovY / 2): look up
-   * and the horizon slides down the frame, look down and it climbs. A lens shift
-   * (the projection's `elements[9]`, see render/cameras.ts `lensShift`) moves every row
-   * up the frame by the same NDC amount. Reading it off the camera's own forward vector
-   * rather than tracking pitch separately keeps it correct through the camera rig's
-   * roll and spring, and clamping a little way outside the frame keeps the falloff
-   * sensible when the horizon is off-screen.
+   * and the horizon slides down the frame, look down and it climbs. Reading it off
+   * the camera's own forward vector rather than tracking pitch separately keeps it
+   * correct through the camera rig's roll and spring, and clamping a little way
+   * outside the frame keeps the falloff sensible when the horizon is off-screen.
    */
   private horizonScreenY(camera: THREE.PerspectiveCamera = this.camera): number {
     camera.getWorldDirection(this._forward);
     const horizontal = Math.hypot(this._forward.x, this._forward.z);
     const pitch = Math.atan2(this._forward.y, horizontal);
     const halfFov = THREE.MathUtils.degToRad(camera.fov) / 2;
-    const ndc = -Math.tan(pitch) / Math.tan(halfFov) - camera.projectionMatrix.elements[9];
+    const ndc = -Math.tan(pitch) / Math.tan(halfFov);
     return Math.min(1.6, Math.max(-0.6, 0.5 + 0.5 * ndc));
   }
 

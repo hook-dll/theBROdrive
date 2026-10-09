@@ -14,6 +14,7 @@ import { DAY_LENGTH, GameWorld, newWorldState, type CarState } from './game/stat
 import { parseCalendarEpoch } from './game/calendar';
 import {
   DEFAULT_INK_STRENGTH,
+  PHONE_FIRST_LAUNCH,
   TIME_OF_DAY_PRESETS,
   loadStoredSettings,
   presentationFpsFor,
@@ -22,6 +23,7 @@ import {
   storeSettings,
   vehicleLightSlotsFor,
   viewDistanceFor,
+  withRemeasure,
 } from './game/settings';
 import { warmPoiStructures } from './world/poistructures';
 import {
@@ -46,7 +48,7 @@ import { Player } from './player/player';
 import { PlayerVitals } from './player/vitals';
 import { BirdFlock } from './agents/birds';
 import { TumbleweedField } from './agents/tumbleweed';
-import { CameraRig, type CameraTarget, type ChasePreset, type FovCue } from './render/cameras';
+import { CameraRig, type CameraTarget } from './render/cameras';
 import { HeldItemView } from './render/held';
 import { TrunkView } from './render/trunkview';
 import { Sky } from './render/sky';
@@ -281,23 +283,7 @@ async function boot(): Promise<void> {
       world.apply({ t: 'settings', settings: stored });
     }
     if (!stored && mobilePresentation) {
-      // A phone's first launch must not inherit desktop DPR, MSAA and refresh costs.
-      // Once the player changes a display setting, the stored machine preference wins.
-      world.apply({
-        t: 'settings',
-        settings: {
-          ...world.state.settings,
-          graphicsQuality: 'acceptable',
-          // Authored for the presentation, not measured and not chosen — so the menu can
-          // say which of those it is, and a `Measure again` can still be offered.
-          graphicsQualitySource: 'device',
-          msaa: false,
-          // A phone core is the slowest processor this game runs on: the lightest stream
-          // and the 2 km horizon, as the phone's graphics default always gave it.
-          viewDistance: 'very_low',
-          trafficDensity: 'very_low',
-        },
-      });
+      world.apply({ t: 'settings', settings: { ...world.state.settings, ...PHONE_FIRST_LAUNCH } });
     }
     tierUndetected =
       world.state.settings.graphicsQualitySource === 'default' && !mobilePresentation;
@@ -2867,48 +2853,21 @@ async function boot(): Promise<void> {
     });
   }
 
-  // DEV: the lens shift A/B of the driving views (render/cameras.ts `lensShift`), as a
-  // fraction of the frame height, kept across reloads.
-  const LENS_SHIFT_STEPS = [0, 0.1, 0.2, 0.3];
-  const LENS_SHIFT_KEY = 'bro.lensShift';
-  let lensShiftAt = 0;
-  const devLensShift = {
+  // DEV: the shake kicks of the driving camera (render/cameras.ts KICK_OMEGA), on unless
+  // switched off from the pause menu, kept across reloads.
+  const SHAKE_KICKS_KEY = 'bro.shakeKicks';
+  let shakeKicksOn = localStorage.getItem(SHAKE_KICKS_KEY) !== 'off';
+  if (import.meta.env.DEV) camera.setShakeKicks(shakeKicksOn);
+  const devShakeKicks = {
     get label(): string {
-      return `${Math.round((LENS_SHIFT_STEPS[lensShiftAt] ?? 0) * 100)}%`;
+      return shakeKicksOn ? 'on' : 'off';
     },
     cycle(): void {
-      lensShiftAt = (lensShiftAt + 1) % LENS_SHIFT_STEPS.length;
-      const shift = LENS_SHIFT_STEPS[lensShiftAt] ?? 0;
-      camera.setLensShift(shift);
-      localStorage.setItem(LENS_SHIFT_KEY, String(shift));
+      shakeKicksOn = !shakeKicksOn;
+      camera.setShakeKicks(shakeKicksOn);
+      localStorage.setItem(SHAKE_KICKS_KEY, shakeKicksOn ? 'on' : 'off');
     },
   };
-  if (import.meta.env.DEV) {
-    lensShiftAt = Math.max(0, LENS_SHIFT_STEPS.indexOf(Number(localStorage.getItem(LENS_SHIFT_KEY))));
-    camera.setLensShift(LENS_SHIFT_STEPS[lensShiftAt] ?? 0);
-  }
-
-  // DEV: the speed-feel A/B of the driving camera (render/cameras.ts FovCue, ChasePreset,
-  // KICK_OMEGA), each kept across reloads.
-  function devCycle<T extends string>(key: string, steps: readonly T[], apply: (value: T) => void) {
-    let at = Math.max(0, steps.indexOf(localStorage.getItem(key) as T));
-    if (import.meta.env.DEV) apply(steps[at]!);
-    return {
-      get label(): string {
-        return steps[at]!;
-      },
-      cycle(): void {
-        at = (at + 1) % steps.length;
-        apply(steps[at]!);
-        localStorage.setItem(key, steps[at]!);
-      },
-    };
-  }
-  const devFovCue = devCycle<FovCue>('bro.fovCue', ['speed', 'accel', 'mix'], (v) => camera.setFovCue(v));
-  const devChasePreset = devCycle<ChasePreset>('bro.chasePreset', ['mid', 'near', 'far'], (v) =>
-    camera.setChasePreset(v),
-  );
-  const devShakeKicks = devCycle('bro.shakeKicks', ['off', 'on'], (v) => camera.setShakeKicks(v === 'on'));
 
   /**
    * The pause overlay's window on the game. Settings live in world state (so a save
@@ -2919,9 +2878,6 @@ async function boot(): Promise<void> {
     settings: () => world.state.settings,
     frameReport,
     perfOverlay: perfOverlay ?? undefined,
-    lensShift: import.meta.env.DEV ? devLensShift : undefined,
-    fovCue: import.meta.env.DEV ? devFovCue : undefined,
-    chasePreset: import.meta.env.DEV ? devChasePreset : undefined,
     shakeKicks: import.meta.env.DEV ? devShakeKicks : undefined,
     viewport: () => renderer.viewport(),
     /**
@@ -2935,15 +2891,7 @@ async function boot(): Promise<void> {
      * reload lands in is the one that asks the question.
      */
     remeasureGraphics: () => {
-      // The measurement walks the ordinary ladder only; the retro rung is a choice, and
-      // a load built for it cannot step to another rung in place.
-      const settings = {
-        ...world.state.settings,
-        graphicsQuality: world.state.settings.graphicsQuality === 'retro'
-          ? 'acceptable' as const
-          : world.state.settings.graphicsQuality,
-        graphicsQualitySource: 'default' as const,
-      };
+      const settings = withRemeasure(world.state.settings);
       world.apply({ t: 'settings', settings });
       storeSettings(settings);
       window.location.reload();

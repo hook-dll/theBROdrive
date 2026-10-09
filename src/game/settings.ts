@@ -397,7 +397,7 @@ export function renderScaleFrom(raw: unknown): RenderScale {
  * (render/retro.ts). 360 is the rung's own look and its budget; 540 is two display
  * pixels per frame pixel on a 1080-line screen instead of three — visibly finer, and
  * measured on an M2 Pro at the heaviest scenes as +0.7-0.9 ms of GPU on 2.4-3.6 (the
- * rung's frame is mostly geometry, not fill). Offered in the Sharpness row; never moved
+ * rung's frame is mostly geometry, not fill). Offered in the Render scale row; never moved
  * by the game, because the pixels are the look.
  */
 export const RETRO_LINE_CHOICES = [360, 540] as const;
@@ -514,7 +514,7 @@ export interface Settings {
    * A real setting rather than a constant because the projection is Hor+: the vertical
    * angle is fixed and the aspect decides the horizontal one, so a 21:9 window shows
    * MORE world than a 16:9 one and a portrait phone shows almost nothing sideways.
-   * The speed widening and the ten-power binoculars are both derived from this, so
+   * The acceleration widening and the ten-power binoculars are both derived from this, so
    * changing it moves the resting composition and nothing else.
    */
   fieldOfView: number;
@@ -594,7 +594,7 @@ export const CONTROLLER_STEER_STEP = 0.05;
  *
  * FOV matters more than it sounds: it sets the apparent scale of the whole world, so a
  * couple of degrees changes how big the car feels and how fast the road appears to
- * move. Every camera mode rests here, and the speed widening and the ten-power
+ * move. Every camera mode rests here, and the acceleration widening and the ten-power
  * binoculars are both measured from it.
  *
  * The bounds are the rectilinear projection's, not a taste: it stretches the picture
@@ -672,21 +672,94 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 /**
- * A level picked on the title screen, with the defaults that come with it: the level's
- * own multisampling, automatic resolution and no frame cap. The title offers the level
- * and nothing else, so everything else it implies is reset here rather than inherited
- * from whatever the pause menu was last set to.
+ * THE QUALITY PRESET: one choice (Very Low / Low / Medium / High) for the three ladders
+ * that each answer part of "what can this machine afford" — the graphics rung, the view
+ * distance and the traffic — set at once, rung for rung. Not stored: it is read back off
+ * the values it sets (`qualityPresetOf`), so a save keeps exactly the values it had and
+ * a player who moves one of them in Advanced sees `Custom`.
+ *
+ * A preset also brings what picking a rung always brought: the rung's own
+ * multisampling, automatic resolution (Very Low: its own 360 lines) and no frame cap.
  */
-export function withTierDefaults(settings: Settings, quality: GraphicsQuality): Settings {
+export type QualityPreset = ComputeLevel;
+
+/** The graphics rung each preset puts the picture on. */
+export const QUALITY_PRESET_DETAIL: Record<QualityPreset, GraphicsQuality> = {
+  very_low: 'retro',
+  low: 'acceptable',
+  medium: 'standard',
+  high: 'blessing',
+};
+
+/** The preset whose rung this is, rung for rung. */
+export function qualityPresetForDetail(quality: GraphicsQuality): QualityPreset {
+  return quality === 'retro' ? 'very_low'
+    : quality === 'acceptable' ? 'low'
+    : quality === 'standard' ? 'medium'
+    : 'high';
+}
+
+/** `settings` with every value the preset owns set from it; the source is the caller's. */
+export function withQualityPreset(
+  settings: Settings,
+  preset: QualityPreset,
+  source: GraphicsQualitySource,
+): Settings {
+  const quality = QUALITY_PRESET_DETAIL[preset];
   return {
     ...settings,
     graphicsQuality: quality,
-    graphicsQualitySource: 'chosen',
+    graphicsQualitySource: source,
+    viewDistance: preset,
+    trafficDensity: preset,
     renderScale: null,
+    retroLines: 360,
     msaa: GRAPHICS_TIERS[quality].msaa,
     frameRateLimit: null,
   };
 }
+
+/**
+ * The preset these settings are exactly on, or null for `Custom`. The render scale is
+ * compared off Very Low and its line count on it, because each rung offers only the one.
+ */
+export function qualityPresetOf(settings: Settings): QualityPreset | null {
+  const preset = qualityPresetForDetail(settings.graphicsQuality);
+  const onPreset =
+    settings.viewDistance === preset
+    && settings.trafficDensity === preset
+    && settings.msaa === GRAPHICS_TIERS[settings.graphicsQuality].msaa
+    && settings.frameRateLimit === null
+    && (settings.graphicsQuality === 'retro' ? settings.retroLines === 360 : settings.renderScale === null);
+  return onPreset ? preset : null;
+}
+
+/**
+ * `settings` handed back to the launch measurement (source `default`). The measurement
+ * walks the ordinary ladder only — the retro rung is a choice, and a load built for it
+ * cannot step to another rung in place — so Very Low starts it from Low: the Low preset
+ * when the settings were on a preset, the Low rung alone when they were not.
+ */
+export function withRemeasure(settings: Settings): Settings {
+  if (settings.graphicsQuality !== 'retro') return { ...settings, graphicsQualitySource: 'default' };
+  return qualityPresetOf(settings) !== null
+    ? withQualityPreset(settings, 'low', 'default')
+    : { ...settings, graphicsQuality: 'acceptable', graphicsQualitySource: 'default' };
+}
+
+/**
+ * A phone's first launch: it must not inherit desktop DPR, MSAA and refresh costs. The
+ * rung is authored for the presentation, not measured and not chosen (`device`), and a
+ * phone core is the slowest processor this game runs on, so it gets the lightest stream
+ * and the 2 km horizon. Once the player stores preferences, they win.
+ */
+export const PHONE_FIRST_LAUNCH = {
+  graphicsQuality: 'acceptable',
+  graphicsQualitySource: 'device',
+  msaa: false,
+  viewDistance: 'very_low',
+  trafficDensity: 'very_low',
+} as const satisfies Partial<Settings>;
 
 /**
  * Fractions of the local mean-solar game clock. Astronomy is date-dependent, so

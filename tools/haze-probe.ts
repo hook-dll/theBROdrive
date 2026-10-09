@@ -218,7 +218,6 @@ function makeProbe(): Probe {
       uHorizon: { value: 0.5 },
       uCameraRotation: { value: new THREE.Matrix3() },
       uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(BASE_FOV) / 2) },
-      uLensShift: { value: 0 },
       uCameraNear: { value: PROBE_NEAR },
       uCameraFar: { value: PROBE_FAR },
       uInkStrength: { value: 0 },
