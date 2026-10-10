@@ -11,51 +11,39 @@ import { desertPaletteAt, roadConditionAt, ROAD_START_SURFACE } from './gradient
 import { ROAD_HALF_WIDTH, type Road } from './road';
 import type { RoadDistance } from './roaddistance';
 import { LANE_WIDTH, laneHalfWidthFor, laneOffsetFor, shoulderWidthM } from './roadprofile';
-import { SUB_DIVISIONS, SURFACE_STEP, SurfaceField, roadSurfaceY } from './roadsurface';
+import {
+  EVENT_MAX_KNOTS,
+  RoadEventTint,
+  SECTION_COLUMNS,
+  SUB_DIVISIONS,
+  SURFACE_STEP,
+  SurfaceField,
+  roadSurfaceY,
+  sectionLateral,
+} from './roadsurface';
 import { terminusWeight } from './terminus';
 import { DESERT_SHOULDER_MATERIAL, TERRAIN_COLLIDER_SURFACE } from './terrainmesh';
 import type { ChunkContent, ChunkContext, ChunkProvider } from './chunks';
 
 /**
  * The asphalt ribbon, banked into corners and displaced by a layered surface field —
- * broad undulation, wheel-scale bumps, broken edges and discrete potholes. The desert
- * terrain begins directly beneath each asphalt edge, and a shoulder strip (SHOULDER_STYLE)
- * brings the edge down onto it. Surface type owns ordinary bump
- * amplitude; decay increases undulation, edge breakup and pothole occurrence. The
+ * broad undulation, wheel-scale bumps, broken edges, discrete potholes and the road
+ * events (humps, rimmed holes, cracks, patches, heaves, joints). The desert terrain
+ * begins directly beneath each asphalt edge, and a shoulder strip (SHOULDER_STYLE)
+ * brings the edge down onto it. Surface type owns ordinary bump amplitude and the event
+ * mix; decay increases undulation, edge breakup, pothole and event occurrence. The
  * same vertices feed the visible mesh and trimesh collider, so the car feels the
  * shape the driver sees.
+ *
+ * ROWS. The base rows are SURFACE_STEP apart and come first in the vertex buffer, in
+ * the layout the ribbon has always had (the shoulder, the bed skirt and the tools read
+ * them by index). A gap holding a road event gets its extra rows APPENDED after them
+ * (`SurfaceField.eventRows`); the gap's quads are split through those rows, in the
+ * mesh and in every collider slab alike. An extra row is its gap's base quad,
+ * interpolated, plus the event — so it is the same plane wherever the event is zero.
  */
 
 const HW = ROAD_HALF_WIDTH;
-
-/**
- * Cross-section lateral offsets, left to right. The narrow and open templates have
- * exactly the same count, so quad strips and collider slabs cannot tear in a taper.
- * The narrow literals preserve the old ribbon bit-for-bit; the wide literals retain
- * dense wheel/edge samples and hit the outer pothole catalogue's fixed laterals.
- */
-const SECTION_LATERALS: readonly number[] = [
-  -HW, -2.45, -2, -1.65, -1.2, -0.85, -0.4,
-  0,
-  0.4, 0.85, 1.2, 1.65, 2, 2.45, HW,
-];
-const WIDE_SECTION_LATERALS: readonly number[] = [
-  -5.8, -5.25, -4.85, -4.05, -3.25, -2.45, -0.85,
-  0,
-  0.85, 2.45, 3.25, 4.05, 4.85, 5.25, 5.8,
-];
-
-function sectionLateral(halfWidth: number, column: number): number {
-  const narrowLateral = SECTION_LATERALS[column]!;
-  if (halfWidth === HW) return narrowLateral;
-  const wideLateral = WIDE_SECTION_LATERALS[column]!;
-  if (halfWidth === HW * 2) return wideLateral;
-  // The outer lane's own half-width is the added asphalt. Interpolating its
-  // lane-defined taper between fixed endpoint templates preserves the column count
-  // while letting terrain's outer-lane potholes land on real mesh vertices.
-  const widening = laneHalfWidthFor(halfWidth, 1) / laneHalfWidthFor(HW * 2, 1);
-  return narrowLateral + (wideLateral - narrowLateral) * widening;
-}
 
 /**
  * Longitudinal rows of quads per collider slab.
@@ -63,9 +51,48 @@ function sectionLateral(halfWidth: number, column: number): number {
  * The visible ribbon is one mesh, but its collider is built in slabs so no single
  * `RAPIER.ColliderDesc.trimesh` call — an uninterruptible native BVH build — can
  * own a frame. Fifteen rows is ~540 triangles, about a millisecond, which fits
- * inside the streaming scheduler's slice with room for the surrounding work.
+ * inside the streaming scheduler's slice with room for the surrounding work. Road
+ * events add their rows to the slab they sit in: a slab of broken road averages two
+ * or three events, a concrete one a joint every four rows, so the worst slabs carry
+ * about twice the base count.
  */
 const COLLIDER_SLAB_QUADS = 15;
+
+/**
+ * The quads of base gap `si`, split through its road-event rows, from index `at`;
+ * returns the next index. Base row `r` is vertex row `r - baseShift`, extra row `e` is
+ * vertex row `extraRow0 + e - extraShift`, so one routine serves the whole ribbon and
+ * every collider slab. Two triangles per column, wound as the ribbon always was.
+ */
+function gapQuads(
+  out: Uint32Array,
+  at: number,
+  si: number,
+  gapRows: Int32Array,
+  latCount: number,
+  baseShift: number,
+  extraRow0: number,
+  extraShift: number,
+): number {
+  let rowA = si - baseShift;
+  const last = gapRows[si + 1]!;
+  for (let e = gapRows[si]!; e <= last; e++) {
+    const rowB = e < last ? extraRow0 + e - extraShift : si + 1 - baseShift;
+    for (let li = 0; li < latCount - 1; li++) {
+      const a = rowA * latCount + li;
+      const b = rowB * latCount + li;
+      out[at++] = a;
+      out[at++] = b;
+      out[at++] = a + 1;
+      out[at++] = b;
+      out[at++] = b + 1;
+      out[at++] = a + 1;
+    }
+    rowA = rowB;
+  }
+  return at;
+}
+
 /**
  * Rendered depth of the sealed mat. The terrain overlaps the upper edge, while this
  * skirt continues well below it so low viewpoints never expose a zero-thickness sheet.
@@ -245,6 +272,18 @@ const PATCH_LINEAR = new THREE.Color(0x2b2925);
 const PATCH_MIX = 0.62;
 /** Extra multiplicative darkening at full coverage: new binder looks wet. */
 const PATCH_GLOSS = 0.1;
+/**
+ * ROAD EVENT PAINT. A road event (roadsurface.ts) is geometry first; this makes it
+ * readable from the seat, and it costs only its own extra rows' vertex colours — no
+ * texture, no decal mesh, no new program. A hole's floor goes towards the palette's
+ * gravel (broken base course and blown sand) in the shade of its rim; a patch is the
+ * repair bitumen above; a crack, a sealed seam or a joint is a dark line.
+ */
+const HOLE_MIX = 0.55;
+const HOLE_SHADE = 0.72;
+const EVENT_LINE_DARKEN = 0.45;
+/** Scratch: the tint target of the event row being coloured. */
+const eventTintColor = new THREE.Color();
 /** Wavelength of the blob field, metres: shovel-and-rake sized repairs. */
 const PATCH_BLOB_WAVELENGTH = 3.4;
 /**
@@ -910,18 +949,35 @@ export class RoadMeshProvider implements ChunkProvider {
     // happens only where a coordinate is about to live in f32.
     const ox = ctx.originX;
     const oz = ctx.originZ;
-    const latCount = SECTION_LATERALS.length;
+    const latCount = SECTION_COLUMNS;
     // One surface type per chunk drives the collider friction profile. Visual colour
     // is sampled per row below because a material-district boundary can cross a chunk.
     const surface = roadConditionAt(this.seed, (sStart + sEnd) / 2).surface;
 
     const sCount = Math.round((sEnd - sStart) / SURFACE_STEP) + 1;
-    const vertexCount = sCount * latCount;
+    // The road events' extra rows, gap by gap: `eventS` holds their arclengths and
+    // gap `si`'s run is eventS[gapRows[si] .. gapRows[si + 1]). Their vertices follow
+    // the base rows, extra row `e` at vertex row `sCount + e`.
+    const gapRows = new Int32Array(sCount);
+    const eventS = new Float64Array((sCount - 1) * EVENT_MAX_KNOTS);
+    let extraCount = 0;
+    for (let si = 0; si < sCount - 1; si++) {
+      gapRows[si] = extraCount;
+      const sA = sStart + (si * (sEnd - sStart)) / (sCount - 1);
+      const sB = sStart + ((si + 1) * (sEnd - sStart)) / (sCount - 1);
+      const n = this.field.eventRows(sA, eventS, extraCount);
+      // Chunks are whole multiples of the step, so a gap is always the field's own; a
+      // gap that somehow is not keeps its plain quad rather than fold over itself.
+      if (n > 0 && eventS[extraCount]! > sA && eventS[extraCount + n - 1]! < sB) extraCount += n;
+    }
+    gapRows[sCount - 1] = extraCount;
+    const rowCount = sCount + extraCount;
+    const vertexCount = rowCount * latCount;
 
     const positions = new Float32Array(vertexCount * 3);
     const colors = new Float32Array(vertexCount * 3);
     const uvs = new Float32Array(vertexCount * 2);
-    const indices = new Uint32Array((sCount - 1) * (latCount - 1) * 6);
+    const indices = new Uint32Array((rowCount - 1) * (latCount - 1) * 6);
 
     const group = new THREE.Group();
     const bodies: RAPIER.RigidBody[] = [];
@@ -1033,20 +1089,59 @@ export class RoadMeshProvider implements ChunkProvider {
         yield;
       }
 
+      // The road events' extra rows: each is its gap's base quad interpolated, plus the
+      // event and its paint (see ROWS above). Base rows are complete, so both ends of
+      // every gap are already written.
+      for (let si = 0; si < sCount - 1; si++) {
+        const e1 = gapRows[si + 1]!;
+        let e = gapRows[si]!;
+        if (e === e1) continue;
+        const sA = sStart + (si * (sEnd - sStart)) / (sCount - 1);
+        const sB = sStart + ((si + 1) * (sEnd - sStart)) / (sCount - 1);
+        const tint = this.field.eventTint(eventS[e]!);
+        if (tint === RoadEventTint.Hole) {
+          eventTintColor.setHex(desertPaletteAt(sA).gravel).multiplyScalar(HOLE_SHADE * textureGain);
+        } else if (tint === RoadEventTint.Patch) {
+          eventTintColor.copy(PATCH_LINEAR).multiplyScalar(textureGain);
+        }
+        for (; e < e1; e++) {
+          const sx = eventS[e]!;
+          const t = (sx - sA) / (sB - sA);
+          const height = this.field.eventHeight(sx);
+          const paint = this.field.eventTintStrength(sx);
+          for (let li = 0; li < latCount; li++) {
+            const a = si * latCount + li;
+            const b = a + latCount;
+            const v = (sCount + e) * latCount + li;
+            for (let k = 0; k < 3; k++) {
+              positions[v * 3 + k] = positions[a * 3 + k]! + (positions[b * 3 + k]! - positions[a * 3 + k]!) * t;
+              colors[v * 3 + k] = colors[a * 3 + k]! + (colors[b * 3 + k]! - colors[a * 3 + k]!) * t;
+            }
+            uvs[v * 2] = uvs[a * 2]! + (uvs[b * 2]! - uvs[a * 2]!) * t;
+            uvs[v * 2 + 1] = uvs[a * 2 + 1]! + (uvs[b * 2 + 1]! - uvs[a * 2 + 1]!) * t;
+            const weight = this.field.eventColumnWeight(sx, li);
+            if (weight === 0) continue;
+            positions[v * 3 + 1] += height * weight;
+            const ink = paint * weight;
+            if (ink <= 0 || tint === RoadEventTint.None) continue;
+            if (tint === RoadEventTint.Line) {
+              const dark = 1 - EVENT_LINE_DARKEN * ink;
+              for (let k = 0; k < 3; k++) colors[v * 3 + k] = colors[v * 3 + k]! * dark;
+              continue;
+            }
+            const mix = (tint === RoadEventTint.Hole ? HOLE_MIX : PATCH_MIX) * ink;
+            const gloss = tint === RoadEventTint.Patch ? 1 - PATCH_GLOSS * ink : 1;
+            colors[v * 3] = (colors[v * 3]! + (eventTintColor.r - colors[v * 3]!) * mix) * gloss;
+            colors[v * 3 + 1] = (colors[v * 3 + 1]! + (eventTintColor.g - colors[v * 3 + 1]!) * mix) * gloss;
+            colors[v * 3 + 2] = (colors[v * 3 + 2]! + (eventTintColor.b - colors[v * 3 + 2]!) * mix) * gloss;
+          }
+        }
+        yield;
+      }
+
       let ii = 0;
       for (let si = 0; si < sCount - 1; si++) {
-        for (let li = 0; li < latCount - 1; li++) {
-          const a = si * latCount + li;
-          const b = a + latCount;
-          const c = a + 1;
-          const d = b + 1;
-          indices[ii++] = a;
-          indices[ii++] = b;
-          indices[ii++] = c;
-          indices[ii++] = b;
-          indices[ii++] = d;
-          indices[ii++] = c;
-        }
+        ii = gapQuads(indices, ii, si, gapRows, latCount, 0, sCount, 0);
         yield;
       }
 
@@ -1158,29 +1253,32 @@ export class RoadMeshProvider implements ChunkProvider {
         // 10-50 ms native call no generator yield can interrupt — measured as the
         // last remaining streaming hitch. Row slabs are the same vertices in the
         // same order, so the collided surface is bit-identical; adjacent slabs share
-        // their boundary row, so there is no seam to fall through.
+        // their boundary row, so there is no seam to fall through. A slab whose gaps
+        // hold road events carries their extra rows after its base rows, split the
+        // same way as the mesh.
         //
         // `positions` is already origin-relative (subtracted at the write site
         // above); subtracting again here would double-apply the offset and drop the
         // collider a whole chunk's origin away from the mesh.
         for (let q0 = 0; q0 < sCount - 1; q0 += COLLIDER_SLAB_QUADS) {
           const q1 = Math.min(q0 + COLLIDER_SLAB_QUADS, sCount - 1);
-          const slabVertices = positions.subarray(q0 * latCount * 3, (q1 + 1) * latCount * 3);
-          const slabIndices = new Uint32Array((q1 - q0) * (latCount - 1) * 6);
+          const e0 = gapRows[q0]!;
+          const e1 = gapRows[q1]!;
+          const baseRows = q1 - q0 + 1;
+          const baseVertices = positions.subarray(q0 * latCount * 3, (q1 + 1) * latCount * 3);
+          let slabVertices = baseVertices;
+          if (e1 > e0) {
+            slabVertices = new Float32Array((baseRows + e1 - e0) * latCount * 3);
+            slabVertices.set(baseVertices, 0);
+            slabVertices.set(
+              positions.subarray((sCount + e0) * latCount * 3, (sCount + e1) * latCount * 3),
+              baseRows * latCount * 3,
+            );
+          }
+          const slabIndices = new Uint32Array((q1 - q0 + e1 - e0) * (latCount - 1) * 6);
           let si2 = 0;
           for (let si = q0; si < q1; si++) {
-            for (let li = 0; li < latCount - 1; li++) {
-              const a = (si - q0) * latCount + li;
-              const b = a + latCount;
-              const c = a + 1;
-              const d = b + 1;
-              slabIndices[si2++] = a;
-              slabIndices[si2++] = b;
-              slabIndices[si2++] = c;
-              slabIndices[si2++] = b;
-              slabIndices[si2++] = d;
-              slabIndices[si2++] = c;
-            }
+            si2 = gapQuads(slabIndices, si2, si, gapRows, latCount, q0, baseRows, e0);
           }
           const collider = physics.addStaticTrimesh(slabVertices, slabIndices, surface);
           collider.setEnabled(false);
@@ -1192,7 +1290,7 @@ export class RoadMeshProvider implements ChunkProvider {
       }
 
       const markings = yield* this.buildMarkingsSteps(
-        road, sStart, sEnd, sCount, ox, oz,
+        road, sStart, sEnd, sCount, gapRows, eventS, ox, oz,
       );
       if (markings) {
         disposables.push(markings.geometry);
@@ -1467,6 +1565,8 @@ export class RoadMeshProvider implements ChunkProvider {
     sStart: number,
     sEnd: number,
     sCount: number,
+    gapRows: Int32Array,
+    eventS: Float64Array,
     ox: number,
     oz: number,
   ): Generator<void, THREE.Mesh | null> {
@@ -1480,10 +1580,14 @@ export class RoadMeshProvider implements ChunkProvider {
       const color = new THREE.Color();
 
       // Marking quads are emitted per surface step so their corners coincide with
-      // mesh vertices rather than floating across a bump or pothole.
+      // mesh vertices rather than floating across a bump or pothole — and split at a
+      // gap's road-event rows, so a line runs down into a hole and over a hump with
+      // the mat instead of bridging it.
       for (let si = 0; si < sCount - 1; si++) {
         const s = sStart + (si * (sEnd - sStart)) / (sCount - 1);
         const s1 = s + SURFACE_STEP;
+        const e0 = gapRows[si]!;
+        const e1 = gapRows[si + 1]!;
         const condition = roadConditionAt(this.seed, s);
         const laneBase = SURFACE_LINEAR[condition.surface];
         const mode = this.markingModeAt(s);
@@ -1496,7 +1600,7 @@ export class RoadMeshProvider implements ChunkProvider {
           const base = laneBase ?? paintBase.setHex(desertPaletteAt(s).gravel);
           color.lerpColors(base, PAINT_LINEAR, GHOST_COVERAGE);
           this.emitMarkingQuad(
-            road, 0, 0, s, s1, MARKING_HALF_WIDTH,
+            road, 0, 0, s, s1, MARKING_HALF_WIDTH, eventS, e0, e1,
             ox, oz, point, color, positions, colors,
           );
         } else if (mode !== MarkingMode.None && condition.markings >= MARKING_MIN && laneBase) {
@@ -1540,7 +1644,7 @@ export class RoadMeshProvider implements ChunkProvider {
               if (coverage < PAINT_GONE) continue;
               color.lerpColors(laneBase, PAINT_LINEAR, Math.min(1, coverage));
               this.emitMarkingQuad(
-                road, lateral0, lateral1, s, s1, MARKING_HALF_WIDTH,
+                road, lateral0, lateral1, s, s1, MARKING_HALF_WIDTH, eventS, e0, e1,
                 ox, oz, point, color, positions, colors,
               );
             }
@@ -1558,7 +1662,7 @@ export class RoadMeshProvider implements ChunkProvider {
                 road,
                 sign * (halfWidth0 - RUMBLE_INSET),
                 sign * (halfWidth1 - RUMBLE_INSET),
-                s, s1, RUMBLE_HALF_WIDTH,
+                s, s1, RUMBLE_HALF_WIDTH, eventS, e0, e1,
                 ox, oz, point, color, positions, colors,
               );
             }
@@ -1587,6 +1691,10 @@ export class RoadMeshProvider implements ChunkProvider {
     }
   }
 
+  /**
+   * One stripe across the gap `s0`..`s1`, as one quad per stretch between the gap's
+   * rows: the base rows at its ends and the road-event rows `eventS[e0..e1)` inside.
+   */
   private emitMarkingQuad(
     road: Road,
     lateral0: number,
@@ -1595,6 +1703,9 @@ export class RoadMeshProvider implements ChunkProvider {
     s1: number,
     /** Half-width of this stripe. A painted line and a rumble band differ only here. */
     half: number,
+    eventS: Float64Array,
+    e0: number,
+    e1: number,
     ox: number,
     oz: number,
     point: { x: number; y: number; z: number },
@@ -1602,44 +1713,69 @@ export class RoadMeshProvider implements ChunkProvider {
     positions: number[],
     colors: number[],
   ): void {
-    const l00 = lateral0 - half;
-    const l01 = lateral0 + half;
-    const l10 = lateral1 - half;
-    const l11 = lateral1 + half;
-    // Four corners [c00, c01, c10, c11]; emit triangles c00,c10,c01 and c10,c11,c01.
-    this.markingCorner(road, s0, l00, ox, oz, point);
-    const x00 = point.x; const y00 = point.y; const z00 = point.z;
-    this.markingCorner(road, s0, l01, ox, oz, point);
-    const x01 = point.x; const y01 = point.y; const z01 = point.z;
-    this.markingCorner(road, s1, l10, ox, oz, point);
-    const x10 = point.x; const y10 = point.y; const z10 = point.z;
-    this.markingCorner(road, s1, l11, ox, oz, point);
-    const x11 = point.x; const y11 = point.y; const z11 = point.z;
+    let sa = s0;
+    let la = lateral0;
+    for (let e = e0; e <= e1; e++) {
+      const sb = e < e1 ? eventS[e]! : s1;
+      const lb = lateral0 + ((lateral1 - lateral0) * (sb - s0)) / (s1 - s0);
+      // Four corners [c00, c01, c10, c11]; emit triangles c00,c10,c01 and c10,c11,c01.
+      this.markingCorner(road, sa, la - half, s0, s1, ox, oz, point);
+      const x00 = point.x; const y00 = point.y; const z00 = point.z;
+      this.markingCorner(road, sa, la + half, s0, s1, ox, oz, point);
+      const x01 = point.x; const y01 = point.y; const z01 = point.z;
+      this.markingCorner(road, sb, lb - half, s0, s1, ox, oz, point);
+      const x10 = point.x; const y10 = point.y; const z10 = point.z;
+      this.markingCorner(road, sb, lb + half, s0, s1, ox, oz, point);
+      const x11 = point.x; const y11 = point.y; const z11 = point.z;
 
-    const order = [0, 2, 1, 2, 3, 1];
-    const xs = [x00, x01, x10, x11];
-    const ys = [y00, y01, y10, y11];
-    const zs = [z00, z01, z10, z11];
-    for (const i of order) {
-      positions.push(xs[i]!, ys[i]!, zs[i]!);
-      colors.push(color.r, color.g, color.b);
+      const order = [0, 2, 1, 2, 3, 1];
+      const xs = [x00, x01, x10, x11];
+      const ys = [y00, y01, y10, y11];
+      const zs = [z00, z01, z10, z11];
+      for (const i of order) {
+        positions.push(xs[i]!, ys[i]!, zs[i]!);
+        colors.push(color.r, color.g, color.b);
+      }
+      sa = sb;
+      la = lb;
     }
   }
 
+  /**
+   * A marking corner at (s, lateral), in the gap `gapA`..`gapB`. On a base row it is
+   * the shared surface; between them it is what the ribbon's extra row there is — the
+   * gap's two base rows interpolated, plus the road event — so paint and mat agree.
+   */
   private markingCorner(
     road: Road,
     s: number,
     lateral: number,
+    gapA: number,
+    gapB: number,
     ox: number,
     oz: number,
     out: { x: number; y: number; z: number },
   ): void {
-    // Absolute in, relative out: `roadSurfaceY` feeds the surface field's 2D bump
+    // Absolute in, relative out: `roadSurfaceY` feeds the surface field's 2D edge
     // noise with this point's world position, so it must see the absolute x/z. The
     // subtraction happens only after the height is resolved, on the way into the
     // marking's Float32Array.
-    road.offsetPoint(s, lateral, out);
-    out.y = roadSurfaceY(road, this.field, s, lateral, out.x, out.z) + MARKING_LIFT;
+    if (s === gapA || s === gapB) {
+      road.offsetPoint(s, lateral, out);
+      out.y = roadSurfaceY(road, this.field, s, lateral, out.x, out.z) + MARKING_LIFT;
+    } else {
+      const t = (s - gapA) / (gapB - gapA);
+      road.offsetPoint(gapA, lateral, out);
+      const ax = out.x;
+      const az = out.z;
+      const ay = roadSurfaceY(road, this.field, gapA, lateral, ax, az);
+      road.offsetPoint(gapB, lateral, out);
+      const by = roadSurfaceY(road, this.field, gapB, lateral, out.x, out.z);
+      out.x = ax + (out.x - ax) * t;
+      out.z = az + (out.z - az) * t;
+      out.y =
+        ay + (by - ay) * t + this.field.eventAt(s, lateral, road.halfWidthAt(s)) + MARKING_LIFT;
+    }
     out.x -= ox;
     out.z -= oz;
   }

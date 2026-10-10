@@ -61,8 +61,8 @@ export const enum SurfaceType {
  * as a column. With the car's `wheelGrip` calibrated to the period cornering figures,
  * it left a Zhiguli tyre at 0.95 sideways and 0.55 forwards, which is a tyre that
  * corners on dry asphalt and spins on it in first gear. The lower column was only
- * ever right for BRAKING, and braking is now held by the car's own brakes
- * (`CarModelDef.brakeDecelG`), which is what held those cars to it.
+ * ever right for BRAKING, and braking is held by the tyre too: the car's brakes
+ * (`CarModelDef.brakeDecelG`) out-pull it, so a floored pedal locks.
  *
  * So `mu` is the old lateral column, whose calibration the handling benches were read
  * at, and the tyre model uses it for drive, braking and cornering alike. What stays
@@ -160,6 +160,12 @@ export interface SurfaceProps {
    *
    * Sealed surfaces carry a little of it too, below gravel's: an old desert road has
    * settled and heaved under its own traffic, and without it the road felt like glass.
+   * Only a little, though. It is value noise, white below its 5.5 m lattice, so on a
+   * road it was also the second-largest source of 10-40 m swell — the band a body on
+   * 1.1-1.3 Hz springs floats on at 60-100 km/h (tools/ride-bench.ts: 3 cm put 6 mm RMS
+   * there, as much as the collider's own bump layer). The road's feel now comes from its
+   * discrete events (world/roadsurface.ts, ROAD EVENTS), and this is the settle beneath
+   * them: 1-1.6 cm on the sealed decks, and gravel's whoops a little down from 5 cm.
    */
   readonly hummock: number;
   /**
@@ -173,7 +179,10 @@ export interface SurfaceProps {
    * shortest bump octave is 3.33 m, so what it actually carries is the road's
    * WAVINESS. Between those rows the road was glass, and the measured result was a
    * heave of 0.000 g on flat asphalt: nothing at all under the tyres. Every real road
-   * has a broadband roughness spectrum, and this is the short end of it.
+   * has a broadband roughness spectrum, and this is the short end of it — the
+   * continuous end. The discrete one (a hump, a rimmed hole, a seam, a joint) is real
+   * geometry now, on extra collider rows where it sits (world/roadsurface.ts, ROAD
+   * EVENTS), because a thing a wheel hits once must also be a thing the driver sees.
    */
   readonly texture: number;
   /** Base albedo for the surface material. */
@@ -206,7 +215,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     deformationDrag: 0,
     roughness: 0.012,
     microRelief: 0.012,
-    hummock: 0.03,
+    hummock: 0.012,
     // Sun-aged neutral asphalt: light enough to read as an old dry road rather than
     // freshly laid wet bitumen. Fine aggregate and bleaching vary this base in the map.
     texture: 0.009,
@@ -224,7 +233,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     deformationDrag: 0,
     roughness: 0.06,
     microRelief: 0.016,
-    hummock: 0.036,
+    hummock: 0.016,
     // Older cracked districts stay distinct, but no longer collapse back to wet black.
     texture: 0.014,
     color: 0x888482,
@@ -252,7 +261,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     // washboard is the thing gravel is famous for — and stones do not deform under a
     // tyre the way sand does.
     microRelief: 0.029,
-    hummock: 0.05,
+    hummock: 0.035,
     texture: 0.012,
     color: 0x7a6c56,
     dust: 0.6,
@@ -326,7 +335,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     deformationDrag: 0,
     roughness: 0.006,
     microRelief: 0.01,
-    hummock: 0.028,
+    hummock: 0.01,
     // Slabs are smoother than asphalt between their joints, and the joints are in
     // the collider's own rows rather than here.
     texture: 0.007,

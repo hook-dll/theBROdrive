@@ -1156,14 +1156,21 @@ export async function runInclineLaunchCheck(
  * being able to tell those surfaces apart, and the thing that still must is the domain the
  * concession never touches — speed. What a surface is worth at 100 km/h is its own
  * coefficient, and this measures it with the real car rather than restating the table.
+ *
+ * `carriedKg` loads the car (a factory brake test is at gross mass), and `threshold`
+ * brakes at `Vehicle.thresholdBrakePedal` instead of a floored pedal: the stop a test
+ * driver without ABS makes, short of locking a wheel.
  */
 export async function brakeDistanceOn(
   modelId: string,
   surface: SurfaceType,
   fromKmh = 100,
+  carriedKg = 0,
+  threshold = false,
 ): Promise<number> {
   await preloadCarModels([modelId]);
   const rig = await makeRig(modelId, (physics) => addGround(physics, surface), false);
+  if (carriedKg > 0) rig.vehicle.setCarriedMass(carriedKg);
   const body = rig.vehicle.chassis;
   // Run up to the entry speed, then stop the clock and the pedals both.
   drive(rig, 25, (_, f) => {
@@ -1176,7 +1183,7 @@ export async function brakeDistanceOn(
   let enteredKmh = 0;
   drive(rig, 15, (_, f) => {
     f.throttle = 0;
-    f.brake = 1;
+    f.brake = threshold ? rig.vehicle.thresholdBrakePedal : 1;
     f.steer = 0;
     f.handbrake = false;
     if (enteredKmh === 0) enteredKmh = rig.vehicle.speedKmh;
@@ -1184,7 +1191,7 @@ export async function brakeDistanceOn(
   const end = body.translation();
   const distance = Math.hypot(end.x - start.x, end.z - start.z);
   rig.vehicle.dispose();
-  if (enteredKmh < 80) {
+  if (enteredKmh < fromKmh * 0.8) {
     throw new Error(`only reached ${enteredKmh.toFixed(0)} km/h before braking`);
   }
   return +distance.toFixed(1);

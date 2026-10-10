@@ -61,10 +61,14 @@ const CAPTURE = process.argv.includes('--capture');
 const road = new Road(SEED);
 const provider = new RoadMeshProvider(SEED);
 
-/** Rows and columns the ribbon has had since long before these features existed. */
+/**
+ * Base rows and columns the ribbon has had since long before these features existed.
+ * A gap holding a road event (world/roadsurface.ts) appends its extra rows AFTER the
+ * base rows, so the base rows keep this layout and are what the sweep reads; the
+ * index count grows by the extra rows' quads.
+ */
 const EXPECT_ROWS = Math.round(CHUNK_LENGTH / SURFACE_STEP) + 1;
 const EXPECT_COLUMNS = 15;
-const EXPECT_INDICES = (EXPECT_ROWS - 1) * (EXPECT_COLUMNS - 1) * 6;
 
 /** Chunks the additivity sweep covers: 50 km, which holds dozens of every kind. */
 const SWEEP_CHUNKS = 250;
@@ -126,6 +130,8 @@ interface Mark {
 interface BuiltChunk {
   readonly sStart: number;
   readonly rows: number;
+  /** Road-event rows appended after the base rows. */
+  readonly extraRows: number;
   readonly columns: number;
   readonly indexCount: number;
   /** Row-major per-vertex luminance. */
@@ -183,10 +189,11 @@ function buildChunk(chunkIndex: number, withLateral: boolean): BuiltChunk {
   const colorAttr = surface.geometry.getAttribute('color');
   const positionAttr = surface.geometry.getAttribute('position');
   const columns = EXPECT_COLUMNS;
-  const rows = colorAttr.count / columns;
-  const lum = new Float64Array(colorAttr.count);
-  const warm = new Float64Array(colorAttr.count);
-  const lateral = withLateral ? new Float64Array(colorAttr.count) : null;
+  const rows = Math.min(EXPECT_ROWS, colorAttr.count / columns);
+  const extraRows = colorAttr.count / columns - rows;
+  const lum = new Float64Array(rows * columns);
+  const warm = new Float64Array(rows * columns);
+  const lateral = withLateral ? new Float64Array(rows * columns) : null;
   const rowSum = new Float64Array(rows);
   const rowMin = new Float64Array(rows);
   const rowMax = new Float64Array(rows);
@@ -245,6 +252,7 @@ function buildChunk(chunkIndex: number, withLateral: boolean): BuiltChunk {
   return {
     sStart,
     rows,
+    extraRows,
     columns,
     indexCount: surface.geometry.getIndex()?.count ?? 0,
     lum,
@@ -289,7 +297,7 @@ for (let chunk = 0; chunk < SWEEP_CHUNKS; chunk++) {
   if (
     built.rows !== EXPECT_ROWS ||
     built.columns !== EXPECT_COLUMNS ||
-    built.indexCount !== EXPECT_INDICES
+    built.indexCount !== (EXPECT_ROWS + built.extraRows - 1) * (EXPECT_COLUMNS - 1) * 6
   ) layoutWrong++;
   sweepNonFinite += built.nonFinite;
   for (let si = 0; si < built.rows; si++) {
@@ -323,7 +331,7 @@ console.log('the ribbon itself');
 check(
   'every chunk has the rows and columns it always had',
   layoutWrong === 0,
-  `${EXPECT_ROWS} x ${EXPECT_COLUMNS} verts, ${EXPECT_INDICES} indices, ${layoutWrong} chunks wrong`,
+  `${EXPECT_ROWS} base rows x ${EXPECT_COLUMNS} columns, quads split through event rows, ${layoutWrong} chunks wrong`,
 );
 check(
   'no vertex colour is NaN',

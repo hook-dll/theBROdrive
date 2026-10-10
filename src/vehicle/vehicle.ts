@@ -141,6 +141,7 @@ import {
   LOAD_SENSITIVITY_MAX,
   LOAD_SENSITIVITY_MIN,
   LOCK_SLIP_RATIO,
+  LONGITUDINAL_PEAK_FORCE,
   LONGITUDINAL_PEAK_U,
   LONGITUDINAL_RELAXATION_FLOOR_MPS,
   LOW_RANGE_FULL_MPS,
@@ -222,6 +223,27 @@ const CROSSFLOW_CD = 0.85;
 const AERO_CENTRE_HEIGHT_FRACTION = 0.45;
 /** Read-only zero for Rapier setters; never written. */
 const ZERO_VECTOR: Readonly<{ x: number; y: number; z: number }> = { x: 0, y: 0, z: 0 };
+
+/**
+ * Deceleration, in g, at which one axle's brakes reach its tyres' peak in a straight
+ * stop: `share · a = μ · n(a) · (1 − S·(n(a)/n0 − 1))`, with the axle's load share
+ * `n(a) = n0 + sign·χ·a` (χ = CoM height / wheelbase; sign +1 front, −1 rear) and S
+ * the tyre's LOAD_SENSITIVITY. A quadratic in `a` with one positive root.
+ */
+function axleBrakeLimitG(
+  peakMu: number,
+  transfer: number,
+  share: number,
+  n0: number,
+  sign: number,
+): number {
+  if (share <= 0 || n0 <= 0) return Infinity;
+  const quadratic = (peakMu * LOAD_SENSITIVITY * transfer * transfer) / n0;
+  const linear = share - sign * peakMu * transfer * (1 - LOAD_SENSITIVITY);
+  const constant = -peakMu * n0;
+  if (quadratic < 1e-9) return linear > 0 ? -constant / linear : Infinity;
+  return (-linear + Math.sqrt(linear * linear - 4 * quadratic * constant)) / (2 * quadratic);
+}
 
 interface WheelVisual {
   index: number;
@@ -757,8 +779,10 @@ export class Vehicle implements Rebasable {
   private steeringWheelRest = 0;
   /** This car's lamps: beam mode, indicator, lens materials and the beams they cast. */
   private readonly lamps: VehicleLamps;
-  /** Measured full-pedal braking authority, m/s²; see `measuredBrakeDecel`. */
+  /** Threshold-pedal braking authority, m/s²; see `measuredBrakeDecel`. */
   private measuredBrakeDecelValue = 0;
+  /** Pedal share at which the first axle reaches its tyres' peak; see `thresholdBrakePedal`. */
+  private thresholdBrakePedalValue = 1;
 
   /**
    * Seconds the dashboard's warning lamp still owes the player.
@@ -1327,28 +1351,57 @@ export class Vehicle implements Rebasable {
   }
 
   /**
-   * Deceleration a floored foot brake really produced authority for on the last
-   * physics step, m/s². Zero until the first wheel pass has run, so a caller with no
-   * measurement yet falls back to `estimatedBrakeDecel`.
+   * Deceleration the THRESHOLD pedal (`thresholdBrakePedal`) produced authority for on
+   * the last physics step, m/s²: the most the car stops at without locking a wheel.
+   * Zero until the first wheel pass has run, so a caller with no measurement yet falls
+   * back to `estimatedBrakeDecel`.
    */
   get measuredBrakeDecel(): number {
     return this.measuredBrakeDecelValue;
   }
 
   /**
-   * Stable straight-line braking capacity on a named surface, in m/s²: the car's own
-   * brakes, or the tyres where the tyres give out first.
+   * The share of a floored pedal, 0..1, at which the first axle reached its tyres'
+   * longitudinal peak on the last step: past it, a wheel locks. 1 where the brakes
+   * give out before the tyres do. Only the autopilot reads it — it is a driver who
+   * brakes at the threshold — and the player's pedal is never scaled by it.
+   */
+  get thresholdBrakePedal(): number {
+    return this.thresholdBrakePedalValue;
+  }
+
+  /**
+   * Stable straight-line THRESHOLD braking on a named surface, in m/s²: the most the
+   * car stops at without locking a wheel, which is what `thresholdBrakePedal` asks for
+   * and the autopilot brakes on. The car's own brakes where they give out first.
+   *
+   * The bias is fixed (FOOT_BRAKE_REAR_BIAS) and braking moves weight forward, so the
+   * axle that limits is usually the light rear one: summing the four tyres' grip, as
+   * this used to, promised a front-driven Samara 1.1 g where a threshold stop holds
+   * 0.7. Each axle's limit is solved here with the steady load transfer `h/L · a`
+   * and the tyre's load sensitivity, which makes it a quadratic in `a`; the lower of
+   * the two axles' roots is the threshold.
    */
   estimatedBrakeDecel(surfaceType: SurfaceType): number {
-    return Math.min(
-      this.model.brakeDecelG * GRAVITY,
+    const peakMu =
       FOOT_BRAKE_GRIP_RATIO *
-        SURFACES[surfaceType].mu *
-        weatherGrip(surfaceType) *
-        this.tyreCarGrip(this.statsValue.mass) *
-        this.worstTyreTemperatureGrip() *
-        GRAVITY,
+      LONGITUDINAL_PEAK_FORCE *
+      SURFACES[surfaceType].mu *
+      weatherGrip(surfaceType) *
+      this.tyreCarGrip(this.statsValue.mass) *
+      this.worstTyreTemperatureGrip();
+    const transfer = this.rollLeverArm / this.wheelbaseM;
+    const front0 = this.parkedFrontShare;
+    const rear0 = 1 - front0;
+    const brakeDenom =
+      this.frontWheelCount * (1 - FOOT_BRAKE_REAR_BIAS) + this.rearWheelCount * FOOT_BRAKE_REAR_BIAS;
+    const frontBrakeShare = (this.frontWheelCount * (1 - FOOT_BRAKE_REAR_BIAS)) / brakeDenom;
+    const rearBrakeShare = (this.rearWheelCount * FOOT_BRAKE_REAR_BIAS) / brakeDenom;
+    const thresholdG = Math.min(
+      axleBrakeLimitG(peakMu, transfer, frontBrakeShare, front0, 1),
+      axleBrakeLimitG(peakMu, transfer, rearBrakeShare, rear0, -1),
     );
+    return Math.min(this.model.brakeDecelG, thresholdG) * GRAVITY;
   }
 
   /**
@@ -2651,47 +2704,75 @@ export class Vehicle implements Rebasable {
     // `tyreCarGrip`, and the note on `SurfaceProps.mu` for why there is one.
     const tyreCarGrip = this.tyreCarGrip(mass);
 
-    // Total longitudinal capacity the vehicle is standing on, in newtons: the same
-    // per-wheel capacity the tyre model uses in updateWheelDynamics, summed.
+    // THE PEDAL ASKS THE BRAKES, AND ONLY THE BRAKES. A floored pedal is
+    // `brakeDecelG` of the car's own drums and discs, split on the fixed bias; the
+    // tyre then delivers what its contact can carry, and a demand past its peak locks
+    // the wheel. It used to be `min(brakeDecelG, 0.99 × the summed tyre capacity)`,
+    // which was two faults at once: on dry asphalt `brakeDecelG` (sized to 0.42-0.6 g)
+    // sat below the tyres, so a held pedal never reached them — 74 m from 100 km/h in
+    // a Zhiguli with no wheel locking, 0.52 g, where the factory norm is 43.2 m from 80
+    // fully laden — and where the tyres gave out first the cap made the pedal an
+    // aggregate anti-lock brake. None of these cars had one.
+    const footBrakeDemandN = this.model.brakeDecelG * GRAVITY * mass;
+    const footBrakeForce = brakeDenom > 0 ? footBrakeDemandN / brakeDenom : 0;
+
+    // THE THRESHOLD PEDAL: the share of a floored pedal at which the first axle reaches
+    // its tyres' longitudinal peak (less `FOOT_BRAKE_GRIP_RATIO`), from the same
+    // per-wheel capacity and load sensitivity the tyre pass uses. It is what a driver
+    // who feels the lock coming would press, and the autopilot brakes on it
+    // (`Autopilot.modulateBrake`); the player's pedal is never scaled by it.
     //
     // Both inputs are one step old — `loadN` is the low-passed suspension force from
-    // the last step and `groundSurface` was resolved in the last wheel pass — which is
-    // 16 ms of lag on a quantity that barely moves (the sum is near mg whatever the
-    // car is doing). Reading it here rather than mid-pass keeps ONE demand for the
-    // whole vehicle, which is what preserves the brake bias as the thing that decides
-    // which axle lets go. Airborne wheels contribute nothing, so a car with its wheels
-    // off the ground has no brakes to over-ask with.
-    let brakeCapacityN = 0;
+    // the last step and `groundSurface` was resolved in the last wheel pass. Per AXLE,
+    // not summed, because the bias is fixed: the axle asked for more than its share of
+    // the grip is the one that locks, whatever the other one has left. Airborne wheels
+    // contribute nothing.
+    let frontCapacityN = 0;
+    let rearCapacityN = 0;
     for (const w of this.wheels) {
-      if (!w.grounded) continue;
-      brakeCapacityN +=
+      if (!w.grounded || w.loadN <= 0) continue;
+      const loadFactor = clamp(
+        1 - LOAD_SENSITIVITY * (w.loadN / w.staticLoadN - 1),
+        LOAD_SENSITIVITY_MIN,
+        LOAD_SENSITIVITY_MAX,
+      );
+      const capacityN =
         SURFACES[w.groundSurface].mu *
         weatherGrip(w.groundSurface) *
         tyreCarGrip *
         w.tyreGrip *
+        loadFactor *
         w.loadN;
+      if (w.isFront) frontCapacityN += capacityN;
+      else rearCapacityN += capacityN;
     }
-    // The pedal asks for what the BRAKES can do (`brakeDecelG`, the car's own drums and
-    // discs at full pedal), or for what the tyres can take where they give out first.
-    // On dry asphalt it is the brakes, as it was on the real cars; on loose ground, in
-    // the wet or on bald tyres it is the tyres, and the rear bias decides which axle
-    // lets go.
-    const footBrakeDemandN = Math.min(
-      this.model.brakeDecelG * GRAVITY * mass,
-      FOOT_BRAKE_GRIP_RATIO * brakeCapacityN,
+    // The engine's overrun drag reaches the driven wheels through the same contact and
+    // is not overridden by the pedal (see `appliedTorque`), so what it already takes is
+    // not there for the brakes: without it a rear-driven car on the threshold still
+    // locked its rears for a quarter of a stop (a VAZ-2104, 28%) and a UAZ for 63%.
+    const overrunN =
+      appliedTorque * fwd < 0 && this.drivenRadius > 0 ? Math.abs(appliedTorque) / this.drivenRadius : 0;
+    const peakShare = FOOT_BRAKE_GRIP_RATIO * LONGITUDINAL_PEAK_FORCE;
+    const frontAvailableN = Math.max(0, peakShare * frontCapacityN - overrunN * frontShare);
+    const rearAvailableN = Math.max(0, peakShare * rearCapacityN - overrunN * rearShare);
+    const frontAxleDemandN = footBrakeForce * brakeFrontShare * this.frontWheelCount;
+    const rearAxleDemandN = footBrakeForce * brakeRearShare * this.rearWheelCount;
+    this.thresholdBrakePedalValue = Math.min(
+      1,
+      frontAxleDemandN > 0 ? frontAvailableN / frontAxleDemandN : 1,
+      rearAxleDemandN > 0 ? rearAvailableN / rearAxleDemandN : 1,
     );
-    const footBrakeForce = brakeDenom > 0 ? footBrakeDemandN / brakeDenom : 0;
-    // WHAT A FLOORED PEDAL WILL REALLY PRODUCE, as an acceleration, published for the
-    // autonomous speed planner.
+    // WHAT THE THRESHOLD PEDAL WILL REALLY PRODUCE, as an acceleration, published for
+    // the autonomous speed planner.
     //
     // `estimatedBrakeDecel` is an idealisation: nominal grip, nominal mass, no load
-    // history. This is the demand the pedal is actually scaled against this step, over
-    // the mass it has to stop, so it carries the low-passed wheel loads, the surface
-    // each wheel is standing on, an airborne wheel contributing nothing, and the tyre
-    // fitted. Measured on the boxed-in bench: the planner believed 4.0 m/s² of capped
-    // pedal and the car delivered 2.46, arrived at a rock it had braked for from 34 m
-    // still doing 5 m/s, and hit it.
-    this.measuredBrakeDecelValue = mass > 0 ? footBrakeDemandN / mass : 0;
+    // history. This carries the low-passed wheel loads, the surface each wheel is
+    // standing on, an airborne wheel contributing nothing, and the tyre fitted.
+    // Measured on the boxed-in bench: the planner believed 4.0 m/s² of capped pedal and
+    // the car delivered 2.46, arrived at a rock it had braked for from 34 m still doing
+    // 5 m/s, and hit it.
+    this.measuredBrakeDecelValue =
+      mass > 0 ? (this.thresholdBrakePedalValue * footBrakeDemandN) / mass : 0;
     const wheelCount = this.wheels.length;
     let rollingResistanceSum = 0;
     let roughnessSum = 0;

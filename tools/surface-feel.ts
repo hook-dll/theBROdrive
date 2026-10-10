@@ -13,15 +13,25 @@
  *   - traction control, which turns lost grip into a torque cut.
  *
  * So this drives a REAL `Vehicle` at the simulation's own fixed timestep over the
- * REAL road ribbon and the REAL desert chunk colliders, on the same route, with one
- * controller, and reports what the seat reports:
+ * REAL road chunks (`RoadMeshProvider`, the same rows, event rows and collider slabs
+ * the game streams) and the REAL desert chunk colliders, with one controller, in the
+ * right lane, and reports what the seat reports:
  *
  *   heave      RMS vertical acceleration of the chassis, in g. Comfort.
- *   jolt       99th-percentile vertical acceleration. The hits inside the comfort.
+ *   floatg/sharpg  the same split at ~2 Hz: body motion against jolts and buzz.
+ *   boatmm/pitch°  body heave over the road centreline and body pitch, 0.3-2.5 Hz,
+ *              RMS: the slow rise and fall that reads as floating.
+ *   jolt99/maxg    99th-percentile and worst vertical acceleration.
+ *   load99/loadmx  most-loaded wheel over its static load: the spikes a hit makes.
+ *   bump99/bumpmx  suspension compression speed, m/s (the audio bump channel).
+ *   hit/km     compressions over 0.5 m/s: discrete things the wheels struck.
  *   contact    mean fraction of wheels touching the ground. Grip stability.
  *   speed      mean speed held, against the speed asked for.
  *
- *   npx tsx tools/surface-feel.ts [speedKmh]
+ * The road rows are the home stretch (chunks 120-126), then one six-chunk stretch of
+ * each district surface — straight-ish, narrow, the first one this seed has.
+ *
+ *   bun tools/surface-feel.ts [speedKmh]     NO_DESERT=1 / NO_SPRINT=1 skip those runs
  *
  * Nothing here is part of the game bundle.
  */
@@ -37,12 +47,14 @@ import { Vehicle } from '../src/vehicle/vehicle';
 import { type ChunkContext, type ChunkContent } from '../src/world/chunks';
 import { CHUNK_LENGTH } from '../src/world/ranges';
 import { WorldOrigin } from '../src/world/origin';
+import { roadConditionAt } from '../src/world/gradient';
 import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
 import { RoadDistance } from '../src/world/roaddistance';
-import { roadSurfaceY, SURFACE_STEP, SurfaceField } from '../src/world/roadsurface';
+import { RoadMeshProvider } from '../src/world/roadmesh';
 import { Terrain } from '../src/world/terrain';
 import { TerrainMeshProvider } from '../src/world/terrainmesh';
 import { installAssetShim } from './assetshim';
+import { installDocumentShim } from './domshim';
 
 class BunProgressEvent extends Event implements ProgressEvent {
   readonly lengthComputable: boolean;
@@ -59,76 +71,110 @@ if (globalThis.ProgressEvent === undefined) globalThis.ProgressEvent = BunProgre
 // Every catalogue model is an imported body now, so the bench loads real FBX files
 // off disk rather than building its car in code.
 installAssetShim();
+// Building a `Vehicle` paints its boot's sticker decals, which needs a 2D canvas
+// context to exist before any rig can be constructed headless.
+installDocumentShim();
 
 const SEED = 42;
 const MODEL_ID = 'sv_vaz2105r';
 /** Chunk span driven. Matches desert-ride.ts so the two benches describe one place. */
 const FROM_CHUNK = 120;
 const TO_CHUNK = 126;
-const START_S = FROM_CHUNK * CHUNK_LENGTH + 60;
-const END_S = TO_CHUNK * CHUNK_LENGTH - 60;
 /** Lateral offset of the desert run, metres: outside the corridor, inside the detail field. */
 const DESERT_LATERAL = 34;
+/**
+ * Lateral of the road runs: the right lane's centre, where a driver and the traffic
+ * actually are, so the wheels run down the worn wheel paths (0.85 and 2.45 m) rather
+ * than astride the crown.
+ */
+const LANE_LATERAL = 1.65;
 /** Metres ahead the steering controller aims. */
 const LOOKAHEAD = 8;
 /** Settling steps before measurement starts. */
 const SETTLE_STEPS = 240;
+/** Chunks in a per-surface road run. */
+const SURFACE_RUN_CHUNKS = 6;
 
 const speedKmh = Number(process.argv[2] ?? 60);
 const targetSpeed = speedKmh / 3.6;
 
-/**
- * The real asphalt ribbon, at the real cross-section.
- *
- * The lateral columns MUST match roadmesh.ts's own, because the pothole lattice is
- * anchored on them: a ribbon built from two edge vertices interpolates straight
- * across every hole in the road and measures a surface the game does not have.
- */
-const RIBBON_LATERALS: readonly number[] = [
-  -ROAD_HALF_WIDTH, -2.45, -2.0, -1.65, -1.2, -0.85, -0.4,
-  0,
-  0.4, 0.85, 1.2, 1.65, 2.0, 2.45, ROAD_HALF_WIDTH,
-];
+/** Where a run happens: a chunk range of the real road, and the metres driven inside it. */
+interface Span {
+  label: string;
+  fromChunk: number;
+  toChunk: number;
+  startS: number;
+  endS: number;
+  /** Mean road decay over the driven metres. */
+  decay: number;
+}
 
-function addRoadCollider(physics: PhysicsWorld, road: Road): void {
-  const field = new SurfaceField(road.seed);
-  const step = SURFACE_STEP;
-  const from = START_S - 40;
-  const to = END_S + 40;
-  const rows = Math.ceil((to - from) / step) + 1;
-  const cols = RIBBON_LATERALS.length;
-  const vertices = new Float32Array(rows * cols * 3);
-  const point = { x: 0, y: 0, z: 0 };
-  for (let row = 0; row < rows; row++) {
-    const s = Math.min(to, from + row * step);
-    for (let col = 0; col < cols; col++) {
-      const lateral = RIBBON_LATERALS[col]!;
-      road.offsetPoint(s, lateral, point);
-      const i = (row * cols + col) * 3;
-      vertices[i] = point.x;
-      vertices[i + 1] = roadSurfaceY(road, field, s, lateral, point.x, point.z);
-      vertices[i + 2] = point.z;
+function spanOf(label: string, fromChunk: number, toChunk: number): Span {
+  const startS = fromChunk * CHUNK_LENGTH + 60;
+  const endS = toChunk * CHUNK_LENGTH - 60;
+  let decay = 0;
+  let n = 0;
+  for (let s = startS; s <= endS; s += 10, n++) decay += roadConditionAt(SEED, s).decay;
+  return { label, fromChunk, toChunk, startS, endS, decay: decay / n };
+}
+
+/** Tightest corner a per-surface run may contain, 1/m: the bench measures ride, not cornering. */
+const SURFACE_RUN_MAX_CURVATURE = 1 / 400;
+
+/**
+ * The first stretch of this seed's road that is `surface` for SURFACE_RUN_CHUNKS whole
+ * chunks — the real district, built by the real provider, rather than a material forced
+ * over somebody else's geometry. Narrow and gentle, so the wheel paths are the
+ * catalogue's and the controller is not what is being measured.
+ */
+function surfaceSpan(road: Road, surface: SurfaceType, label: string): Span | null {
+  let run = 0;
+  for (let chunk = 2; chunk < 20_000; chunk++) {
+    let pure = true;
+    for (let s = chunk * CHUNK_LENGTH; s <= (chunk + 1) * CHUNK_LENGTH; s += 20) {
+      if (
+        roadConditionAt(SEED, s).surface !== surface ||
+        road.halfWidthAt(s) > ROAD_HALF_WIDTH + 0.05 ||
+        Math.abs(road.curvatureAt(s)) > SURFACE_RUN_MAX_CURVATURE
+      ) {
+        pure = false;
+        break;
+      }
     }
+    run = pure ? run + 1 : 0;
+    if (run === SURFACE_RUN_CHUNKS) return spanOf(label, chunk - run + 1, chunk + 1);
   }
-  const indices = new Uint32Array((rows - 1) * (cols - 1) * 6);
-  for (let row = 0, i = 0; row < rows - 1; row++) {
-    for (let col = 0; col < cols - 1; col++) {
-      const a = row * cols + col;
-      const b = a + 1;
-      const c = a + cols;
-      const d = c + 1;
-      indices[i++] = a; indices[i++] = c; indices[i++] = b;
-      indices[i++] = b; indices[i++] = c; indices[i++] = d;
-    }
+  return null;
+}
+
+/**
+ * The real road, built by the real provider: the same rows, columns, event rows and
+ * collider slabs the game streams, so the bench drives exactly what a player does.
+ */
+function addRoadColliders(physics: PhysicsWorld, road: Road, span: Span): void {
+  const provider = new RoadMeshProvider(SEED);
+  for (let chunkIndex = span.fromChunk - 1; chunkIndex <= span.toChunk; chunkIndex++) {
+    const ctx = {
+      chunkIndex,
+      sStart: chunkIndex * CHUNK_LENGTH,
+      sEnd: (chunkIndex + 1) * CHUNK_LENGTH,
+      road,
+      physics,
+      hasPhysics: true,
+      originX: 0,
+      originZ: 0,
+    } as unknown as ChunkContext;
+    const content = provider.build(ctx);
+    if (!content) continue;
+    for (const collider of content.colliders) collider.setEnabled(true);
   }
-  physics.addStaticTrimesh(vertices, indices, SurfaceType.Asphalt);
 }
 
 /** The real desert, built by the real provider straight into the real physics world. */
-function addDesertColliders(physics: PhysicsWorld, road: Road, terrain: Terrain): ChunkContent[] {
+function addDesertColliders(physics: PhysicsWorld, road: Road, terrain: Terrain, span: Span): ChunkContent[] {
   const provider = new TerrainMeshProvider(new RoadDistance(road));
   const built: ChunkContent[] = [];
-  for (let chunkIndex = FROM_CHUNK - 1; chunkIndex <= TO_CHUNK + 1; chunkIndex++) {
+  for (let chunkIndex = span.fromChunk - 1; chunkIndex <= span.toChunk; chunkIndex++) {
     const ctx = {
       chunkIndex,
       sStart: chunkIndex * CHUNK_LENGTH,
@@ -152,8 +198,8 @@ function addDesertColliders(physics: PhysicsWorld, road: Road, terrain: Terrain)
  * A perfectly flat asphalt plane at the route's own elevation. The control: any
  * behaviour that survives here belongs to the car, not to the ground.
  */
-function addFlatCollider(physics: PhysicsWorld, road: Road, groundY: number): void {
-  const p = road.sampleAt(START_S);
+function addFlatCollider(physics: PhysicsWorld, road: Road, groundY: number, span: Span): void {
+  const p = road.sampleAt(span.startS);
   const half = 3000;
   const vertices = new Float32Array([
     p.x - half, groundY, p.z - half,
@@ -170,6 +216,7 @@ interface Rig {
   road: Road;
   input: InputFrame;
   lateral: number;
+  span: Span;
   /** Mean absolute lateral offset held, so a run that slid onto the road is visible. */
   lateralSum: number;
   lateralN: number;
@@ -177,31 +224,31 @@ interface Rig {
 
 type Ground = 'road' | 'desert' | 'flat';
 
-async function makeRig(lateral: number, ground: Ground): Promise<Rig> {
+async function makeRig(lateral: number, ground: Ground, span: Span): Promise<Rig> {
   const road = new Road(SEED);
   const terrain = new Terrain(SEED, road);
   const physics = await PhysicsWorld.create();
-  const start = road.sampleAt(START_S);
-  const spawnGroundY = terrain.heightAt(start.x, start.z, START_S);
-  if (ground === 'flat') addFlatCollider(physics, road, spawnGroundY);
+  const start = road.sampleAt(span.startS);
+  const spawnGroundY = terrain.heightAt(start.x, start.z, span.startS);
+  if (ground === 'flat') addFlatCollider(physics, road, spawnGroundY, span);
   else {
     // The desert rig gets the road as well. Without it the corridor the terrain fan
     // deliberately leaves empty (CORRIDOR_INNER, filled by the road mesh in the game)
     // is a hole, and a car that wanders into it falls out of the world.
-    addRoadCollider(physics, road);
-    if (ground === 'desert') addDesertColliders(physics, road, terrain);
+    addRoadColliders(physics, road, span);
+    if (ground === 'desert') addDesertColliders(physics, road, terrain, span);
   }
   const world = new GameWorld(newWorldState(SEED));
   const scene = new THREE.Scene();
   const origin = new WorldOrigin();
   const spawn = { x: 0, y: 0, z: 0 };
-  road.offsetPoint(START_S, lateral, spawn);
+  road.offsetPoint(span.startS, lateral, spawn);
   const state = benchCarState(MODEL_ID, {
     id: 'surface-feel',
     x: spawn.x,
-    y: (ground === 'flat' ? spawnGroundY : terrain.heightAt(spawn.x, spawn.z, START_S)) + 2,
+    y: (ground === 'flat' ? spawnGroundY : terrain.heightAt(spawn.x, spawn.z, span.startS)) + 2,
     z: spawn.z,
-    heading: road.sampleAt(START_S).heading,
+    heading: road.sampleAt(span.startS).heading,
   });
   world.state.cars[state.id] = state;
   const vehicle = new Vehicle(physics, world, state, scene, origin);
@@ -211,7 +258,7 @@ async function makeRig(lateral: number, ground: Ground): Promise<Rig> {
     physics.step();
     vehicle.postStep();
   }
-  return { physics, vehicle, road, input, lateral, lateralSum: 0, lateralN: 0 };
+  return { physics, vehicle, road, input, lateral, span, lateralSum: 0, lateralN: 0 };
 }
 
 /** Arclength of the car's current position, walked forward from the last one. */
@@ -235,11 +282,48 @@ interface Result {
   metres: number;
   meanSpeed: number;
   heaveG: number;
+  /**
+   * RMS of the vertical acceleration below ~2 Hz (a 0.4 s centred mean), g, and what
+   * is left above it: the jolts and the buzz.
+   */
+  floatG: number;
+  sharpG: number;
+  /**
+   * THE BOAT: body heave relative to the road's own centreline, band-passed to
+   * 0.3-2.5 Hz (a 0.4 s mean minus a 3 s mean), RMS in mm — the slow rise and fall a
+   * car does on its springs, with the road's grade taken out. And the same band of
+   * body pitch, RMS in degrees.
+   */
+  floatMm: number;
+  pitchDeg: number;
   joltG: number;
+  /** Worst single step of vertical acceleration, g. */
+  maxG: number;
+  /** Wheel load over its static load: 99th percentile and worst, of the most-loaded wheel. */
+  loadP99: number;
+  loadMax: number;
+  /** Suspension compression speed: 99th percentile and worst, m/s (audio's bump channel). */
+  bumpP99: number;
+  bumpMax: number;
+  /** Compression hits over BUMP_HIT_MPS, per km: discrete jolts the springs took. */
+  hitsPerKm: number;
   contact: number;
   heldLateral: number;
   maxSpeed: number;
 }
+
+/**
+ * A compression faster than this, m/s, counts as one discrete hit (see `hitsPerKm`).
+ * Above the continuous wash a wavy road gives the springs (its p99 is 0.4-0.7 m/s at
+ * 60 km/h), so what it counts is a thing the wheel HIT rather than rode over.
+ */
+const BUMP_HIT_MPS = 0.5;
+/** Steps a discrete hit must be clear of the last one to count again. */
+const BUMP_HIT_GAP_STEPS = 12;
+/** Centred-mean half window, steps, that splits the float band from the jolts. */
+const FLOAT_HALF_WINDOW = 12;
+/** Centred-mean half window, steps, of the slow trend the float band is measured against. */
+const TREND_HALF_WINDOW = 90;
 
 /**
  * Drives the route and measures. One controller for both surfaces: aim at a point
@@ -250,21 +334,31 @@ interface Result {
 function drive(rig: Rig, label: string): Result {
   const { vehicle, road, input } = rig;
   const aim = { x: 0, y: 0, z: 0 };
-  let s = START_S;
+  let s = rig.span.startS;
   let integral = 0;
   let steps = 0;
   let speedSum = 0;
   let maxSpeed = 0;
   let metres = 0;
   let lastVy = vehicle.chassis.linvel().y;
+  // The settle's landing is still sitting in the audio bump channel; it is not road.
+  vehicle.audio.bumpMps = 0;
   const accels: number[] = [];
+  const signedAccels: number[] = [];
+  const loads: number[] = [];
+  const bumps: number[] = [];
+  /** Body height over the road centreline, and body pitch (rad), per step. */
+  const relHeight: number[] = [];
+  const pitch: number[] = [];
+  let hits = 0;
+  let lastHit = -BUMP_HIT_GAP_STEPS;
   let contactSum = 0;
 
   // A stall guard, because a car that spins out in the desert would otherwise sit at
   // full lock and full throttle until the step cap and report a meaningless mean.
   let stalledSteps = 0;
 
-  const routeMetres = END_S - START_S;
+  const routeMetres = rig.span.endS - rig.span.startS;
   while (metres < routeMetres && steps < 120_000 && stalledSteps < 600) {
     const t = vehicle.chassis.translation();
     // Lookahead grows with speed: a fixed one oversteers at speed and understeers at
@@ -305,6 +399,24 @@ function drive(rig: Rig, label: string): Result {
     const az = (after.y - lastVy) / FIXED_DT / 9.81;
     lastVy = after.y;
     accels.push(Math.abs(az));
+    signedAccels.push(az);
+    let load = 0;
+    for (const w of vehicle.wheelRide) {
+      if (w.staticLoadN > 0) load = Math.max(load, w.loadN / w.staticLoadN);
+    }
+    loads.push(load);
+    // The bench is the consumer of the audio bump channel: read it and zero it.
+    const bump = vehicle.audio.bumpMps;
+    vehicle.audio.bumpMps = 0;
+    bumps.push(bump);
+    const body = vehicle.chassis.translation();
+    relHeight.push(body.y - road.sampleAt(s).y);
+    const pose = vehicle.chassis.rotation();
+    pitch.push(Math.asin(Math.max(-1, Math.min(1, 2 * (pose.y * pose.z - pose.w * pose.x)))));
+    if (bump > BUMP_HIT_MPS && steps - lastHit >= BUMP_HIT_GAP_STEPS) {
+      hits++;
+      lastHit = steps;
+    }
     contactSum += vehicle.audio.wheelContactFraction;
     speedSum += speed;
     metres += speed * FIXED_DT;
@@ -317,13 +429,53 @@ function drive(rig: Rig, label: string): Result {
   const heldLateral = rig.lateralSum / Math.max(1, rig.lateralN);
   const sorted = [...accels].sort((a, b) => a - b);
   const jolt = sorted[Math.floor(sorted.length * 0.99)] ?? 0;
+  let floatSq = 0;
+  let sharpSq = 0;
+  let bandN = 0;
+  for (let i = FLOAT_HALF_WINDOW; i < signedAccels.length - FLOAT_HALF_WINDOW; i++) {
+    let mean = 0;
+    for (let j = i - FLOAT_HALF_WINDOW; j <= i + FLOAT_HALF_WINDOW; j++) mean += signedAccels[j]!;
+    mean /= 2 * FLOAT_HALF_WINDOW + 1;
+    floatSq += mean * mean;
+    sharpSq += (signedAccels[i]! - mean) ** 2;
+    bandN++;
+  }
+  const pct = (values: number[], p: number): number => {
+    const s = [...values].sort((a, b) => a - b);
+    return s[Math.min(s.length - 1, Math.floor(s.length * p))] ?? 0;
+  };
+  /** RMS of a series' 0.3-2.5 Hz band: its short centred mean minus its long one. */
+  const floatBand = (series: number[]): number => {
+    let sq = 0;
+    let n = 0;
+    for (let i = TREND_HALF_WINDOW; i < series.length - TREND_HALF_WINDOW; i++) {
+      let short = 0;
+      for (let j = i - FLOAT_HALF_WINDOW; j <= i + FLOAT_HALF_WINDOW; j++) short += series[j]!;
+      let long = 0;
+      for (let j = i - TREND_HALF_WINDOW; j <= i + TREND_HALF_WINDOW; j++) long += series[j]!;
+      const band = short / (2 * FLOAT_HALF_WINDOW + 1) - long / (2 * TREND_HALF_WINDOW + 1);
+      sq += band * band;
+      n++;
+    }
+    return Math.sqrt(sq / Math.max(1, n));
+  };
 
   return {
     label,
     metres,
     meanSpeed: (speedSum / Math.max(1, steps)) * 3.6,
     heaveG: rms,
+    floatG: Math.sqrt(floatSq / Math.max(1, bandN)),
+    sharpG: Math.sqrt(sharpSq / Math.max(1, bandN)),
+    floatMm: floatBand(relHeight) * 1000,
+    pitchDeg: (floatBand(pitch) * 180) / Math.PI,
     joltG: jolt,
+    maxG: sorted[sorted.length - 1] ?? 0,
+    loadP99: pct(loads, 0.99),
+    loadMax: pct(loads, 1),
+    bumpP99: pct(bumps, 0.99),
+    bumpMax: pct(bumps, 1),
+    hitsPerKm: hits / Math.max(0.001, metres / 1000),
     contact: contactSum / Math.max(1, steps),
     heldLateral,
     maxSpeed: maxSpeed * 3.6,
@@ -334,7 +486,7 @@ function drive(rig: Rig, label: string): Result {
 function flatOut(rig: Rig, seconds: number): { to100s: number | null; topKmh: number } {
   const { vehicle, road, input } = rig;
   const aim = { x: 0, y: 0, z: 0 };
-  let s = START_S;
+  let s = rig.span.startS;
   let to100: number | null = null;
   let top = 0;
   const steps = Math.round(seconds / FIXED_DT);
@@ -363,30 +515,66 @@ function flatOut(rig: Rig, seconds: number): { to100s: number | null; topKmh: nu
 
 function row(r: Result): string {
   return [
-    r.label.padEnd(12),
-    `${r.meanSpeed.toFixed(1)}`.padStart(7),
-    `${r.heaveG.toFixed(3)}`.padStart(8),
+    r.label.padEnd(15),
+    `${r.meanSpeed.toFixed(1)}`.padStart(6),
+    `${r.heaveG.toFixed(3)}`.padStart(7),
+    `${r.floatG.toFixed(3)}`.padStart(7),
+    `${r.sharpG.toFixed(3)}`.padStart(7),
+    `${r.floatMm.toFixed(1)}`.padStart(6),
+    `${r.pitchDeg.toFixed(2)}`.padStart(6),
     `${r.joltG.toFixed(3)}`.padStart(7),
-    `${(r.contact * 100).toFixed(1)}%`.padStart(8),
-    `${r.heldLateral.toFixed(0)}m`.padStart(6),
-    `${r.metres.toFixed(0)} m`.padStart(9),
+    `${r.maxG.toFixed(2)}`.padStart(6),
+    `${r.loadP99.toFixed(2)}`.padStart(6),
+    `${r.loadMax.toFixed(2)}`.padStart(6),
+    `${r.bumpP99.toFixed(2)}`.padStart(6),
+    `${r.bumpMax.toFixed(2)}`.padStart(6),
+    `${r.hitsPerKm.toFixed(1)}`.padStart(6),
+    `${(r.contact * 100).toFixed(1)}%`.padStart(7),
+    `${r.heldLateral.toFixed(1)}m`.padStart(6),
+    `${r.metres.toFixed(0)} m`.padStart(8),
   ].join(' ');
 }
 
+/** The district surfaces, each driven on its own first stretch of this seed's road. */
+const DISTRICTS: readonly [SurfaceType, string][] = [
+  [SurfaceType.Asphalt, 'asphalt'],
+  [SurfaceType.CrackedAsphalt, 'cracked'],
+  [SurfaceType.Gravel, 'gravel'],
+  [SurfaceType.Concrete, 'concrete'],
+];
+
 async function run(): Promise<void> {
   await preloadCarModels([MODEL_ID]);
+  const home = spanOf('road', FROM_CHUNK, TO_CHUNK);
   console.log(
-    `surface feel @ ${speedKmh} km/h asked, ${MODEL_ID}, seed ${SEED}, s ${START_S}..${END_S}`,
+    `surface feel @ ${speedKmh} km/h asked, ${MODEL_ID}, seed ${SEED}; road runs in the right lane (${LANE_LATERAL} m)`,
   );
-  console.log('surface        speed    heave    jolt   contact   line  distance');
+  console.log(
+    'surface          speed   heave  floatg  sharpg  boatmm pitch°  jolt99   maxg  load99 loadmx bump99 bumpmx hit/km contact  line  distance  where',
+  );
+  const where = (span: Span): string =>
+    `  s ${span.startS}..${span.endS}, decay ${span.decay.toFixed(2)}`;
 
-  console.log(row(drive(await makeRig(0, 'flat'), 'flat')));
-  console.log(row(drive(await makeRig(0, 'road'), 'road')));
-  console.log(row(drive(await makeRig(DESERT_LATERAL, 'desert'), `desert ${DESERT_LATERAL}m`)));
+  console.log(row(drive(await makeRig(0, 'flat', home), 'flat')));
+  console.log(row(drive(await makeRig(LANE_LATERAL, 'road', home), 'road')) + where(home));
+  for (const [surface, name] of DISTRICTS) {
+    const span = surfaceSpan(new Road(SEED), surface, name);
+    if (!span) {
+      console.log(`${name.padEnd(15)} no ${SURFACE_RUN_CHUNKS}-chunk stretch on seed ${SEED}`);
+      continue;
+    }
+    console.log(row(drive(await makeRig(LANE_LATERAL, 'road', span), `road ${name}`)) + where(span));
+  }
+  if (!process.env.NO_DESERT) {
+    console.log(
+      row(drive(await makeRig(DESERT_LATERAL, 'desert', home), `desert ${DESERT_LATERAL}m`)),
+    );
+  }
+  if (process.env.NO_SPRINT) return;
 
   console.log('\nflat out from rest, 30 s:');
   for (const ground of ['flat', 'road'] as const) {
-    const sprint = flatOut(await makeRig(0, ground), 30);
+    const sprint = flatOut(await makeRig(ground === 'road' ? LANE_LATERAL : 0, ground, home), 30);
     console.log(
       `  ${ground.padEnd(7)} 0-100 ${
         sprint.to100s === null ? '  never' : `${sprint.to100s.toFixed(1)} s`

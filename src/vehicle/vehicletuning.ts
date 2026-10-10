@@ -927,38 +927,24 @@ export const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>
 // ---------------------------------------------------------------------------
 
 /**
- * Fraction of the vehicle's MEASURED total longitudinal capacity that a floored
- * pedal asks for, where the tyres rather than the car's own brakes (`brakeDecelG`)
- * are the limit — loose ground, the wet, bald tyres. On dry asphalt the brakes give
- * out first, as they did on the real cars.
+ * Share of the tyres' longitudinal PEAK that a threshold stop asks for: the most a
+ * driver who can feel the lock coming gets out of the car without locking anything.
  *
- * What this replaces: a flat 9.6 m/s² demand, identical on every surface, every
- * compound and every load. That one number could only be right for one case, and
- * the case it was tuned for was a standard-tyre car on asphalt. Everywhere else it
- * was wrong in a way the player felt as an absence of control:
+ * It is NOT a cap on the pedal. It used to be one: the floored pedal asked for
+ * `min(brakeDecelG, 0.99 × summed tyre capacity)`, so on any surface where the tyres
+ * gave out first the pedal could never over-ask the car as a whole — an aggregate
+ * anti-lock brake the era never had. On dry asphalt `brakeDecelG` (0.42-0.6 g) was
+ * below that, so the pedal never reached the tyres at all; on gravel the two limits
+ * met at the same 0.5 g, which is why gravel braked as well as asphalt.
  *
- *  - Gravel (capacity 0.51 g) and sand (0.36 g) were asked for 0.98 g, so the wheels
- *    locked on contact with the pedal. Braking off-road was lock or nothing, with no
- *    modulation in between.
- *  - Sport tyres were a cornering upgrade only: the pedal never asked for more than
- *    standard already delivered, so the extra 35% of longitudinal grip was unusable.
- *  - Load was ignored. A laden truck stopped no better than an empty one, and a wheel
- *    unloading over a crest was asked for exactly as much as one carrying the corner.
- *
- * The pedal's own ceiling is the car's `brakeDecelG`. It used to be a single fleet
- * constant, while the thing that really held these cars to their period stops — the
- * drums themselves — lived inside the tyre's coefficient, and made every tyre spin in
- * first gear on dry asphalt to keep the stopping distances right.
- *
- * It is deliberately an AGGREGATE, summed over the vehicle, not a per-wheel
- * allocation. Per-wheel negotiation would be an anti-lock brake the era never had:
- * no wheel would ever be over-asked, so nothing would ever lock, and cadence braking
- * would stop being a mechanism. Sized against the total and then split on the fixed
- * FOOT_BRAKE_REAR_BIAS below, the light rear axle is still asked for more than its
- * own share of the grip, so the rears still fill their cone first and the tail still
- * comes round. That is the whole character of the brake, and it survives.
+ * The pedal now asks the brakes for `brakeDecelG` and nothing else, and the tyre
+ * decides what it gets: past its peak the wheel locks. This ratio only sizes what a
+ * careful driver would get, for the three readers that want that number rather than
+ * the pedal's: the planner's `estimatedBrakeDecel`, the published threshold pedal
+ * (`Vehicle.thresholdBrakePedal`, which the autopilot brakes on) and a coupled
+ * trailer's brakes.
  */
-export const FOOT_BRAKE_GRIP_RATIO = 0.99;
+export const FOOT_BRAKE_GRIP_RATIO = 0.97;
 /**
  * Rear bias for the foot brake (0..1).
  *
@@ -1113,6 +1099,11 @@ export const LONGITUDINAL_PEAK_U = ((): number => {
   }
   return best;
 })();
+/**
+ * The longitudinal curve's value at its peak, as a fraction of capacity (about 0.96):
+ * the most braking or drive force a tyre can make before it starts to lock or spin.
+ */
+export const LONGITUDINAL_PEAK_FORCE = longitudinalShape(LONGITUDINAL_PEAK_U);
 
 /**
  * Relaxation length: how far the tyre must ROLL before its carcass has built the

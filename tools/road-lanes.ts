@@ -165,10 +165,17 @@ check(
   Math.abs(wide.maxLateral - LANE_WIDTH * 2) < 0.02 && Math.abs(wide.minLateral + LANE_WIDTH * 2) < 0.02,
   `${wide.minLateral.toFixed(2)}..${wide.maxLateral.toFixed(2)} m`,
 );
+// Every chunk has the same base rows of 15 columns; a gap holding a road event
+// (world/roadsurface.ts) appends whole extra rows after them, so the count differs
+// by whole rows and never drops below the base.
+const BASE_SURFACE_VERTS = 2265;
 check(
-  'both carry the same number of surface vertices',
-  narrow.surfaceVerts === wide.surfaceVerts,
-  `${narrow.surfaceVerts} narrow, ${wide.surfaceVerts} wide`,
+  'both carry the base rows, and only whole extra rows',
+  narrow.surfaceVerts >= BASE_SURFACE_VERTS &&
+    wide.surfaceVerts >= BASE_SURFACE_VERTS &&
+    narrow.surfaceVerts % 15 === 0 &&
+    wide.surfaceVerts % 15 === 0,
+  `${narrow.surfaceVerts} narrow, ${wide.surfaceVerts} wide (base ${BASE_SURFACE_VERTS})`,
 );
 check(
   'the edge line follows the edge it is on',
@@ -216,7 +223,8 @@ check(
   Math.abs(taper.maxLateral - taperSpan) < 0.02 &&
     Math.abs(taper.minLateral + taperSpan) < 0.02 &&
     taper.nonFinite === 0 &&
-    taper.surfaceVerts === narrow.surfaceVerts,
+    taper.surfaceVerts >= BASE_SURFACE_VERTS &&
+    taper.surfaceVerts % 15 === 0,
   `chunk ${taperChunk}: reaches ${taper.maxLateral.toFixed(2)} m against a claimed ${taperSpan.toFixed(2)} m`,
 );
 

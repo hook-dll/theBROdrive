@@ -19,7 +19,8 @@
  *   turn       full-lock radius of the turn centre off the centreline, against the
  *              factory outer-front-wheel figure brought to the same terms
  *              (`sqrt(turn² − wheelbase²) − track/2`, the real car's geometry)
- *   brake      100-0 km/h, against period road tests (see the manifest note)
+ *   brake      80-0 km/h at gross mass against the factory ceiling, and a threshold
+ *              100-0 against a measured road test (see the manifest note)
  *   lat, ride  printed beside their period figures, not held to them
  *
  * A column with no credible factory figure prints a dash and is not judged: a
@@ -42,7 +43,15 @@ import { carModelMeasure, preloadCarModels } from '../src/render/carmodel';
 import { createPartMesh } from '../src/render/partmesh';
 import { variantsOfKind } from '../src/parts/registry';
 import { engineTorqueNm, fullThrottleUpshiftDue } from '../src/vehicle/drivetrain';
-import { benchOne, drive, driveUntil, makeRig, measureTopSpeed, type Rig } from './handling-bench';
+import {
+  benchOne,
+  brakeDistanceOn,
+  drive,
+  driveUntil,
+  makeRig,
+  measureTopSpeed,
+  type Rig,
+} from './handling-bench';
 
 installAssetShim();
 installDocumentShim();
@@ -89,8 +98,19 @@ interface Target {
   readonly load: string;
   /** Turning radius by the outer front wheel, m. */
   readonly turn: number;
-  /** 100-0 km/h braking distance, m, where a period road test is known. */
-  readonly brake: number | null;
+  /**
+   * Factory stopping distance from 80 km/h at GROSS mass, m: a type-approval ceiling
+   * ("не более"), so a car is judged only on exceeding it. Null where none was found.
+   */
+  readonly brake80: number | null;
+  /** Gross (permitted maximum) mass, kg: the condition `brake80` is stated at. */
+  readonly grossKg: number;
+  /**
+   * A measured 100-0 km/h road test, m, held to TOLERANCE.brake against the threshold
+   * stop at the test load. `judged: false` for a figure only found second-hand: it is
+   * printed beside the car, not held against it.
+   */
+  readonly brakeTest?: { readonly m: number; readonly judged: boolean; readonly source: string };
   /** Steady-state lateral acceleration, g, where a period test is known. */
   readonly lat: number | null;
   /** Design front heave frequency, Hz. */
@@ -165,12 +185,28 @@ const ASSUMED = 'driver + passenger (assumed: the VAZ manuals\' condition)';
  * GEOMETRY is the published wheelbase and front track; the rolling radius is the
  * catalogue tyre size's, as `FACTORY_GEOMETRY` in vehicle/carmodels.ts derives it.
  *
- * BRAKING is not the catalogue's "38 m from 80 km/h": that is a type-approval
- * ceiling at full mass with a response allowance, not a measurement. The figures here
- * are 100-0 equivalents of period road tests on these cars' drums and cross-plies —
- * 0.5 g for the GAZ-21 to 0.66 g for a Samara — carried over from the pack's first
- * reality table, where each was converted from its 80 km/h figure. Cars with no such
- * test are not judged on braking.
+ * BRAKING is held to what the sources actually print, in two columns.
+ *
+ *   80 lad  the factory stopping distance from 80 km/h at GROSS mass, a type-approval
+ *           CEILING ("не более"), with a floored pedal: the car fails only by stopping
+ *           LONGER. 43.2 m is the GOST 22895-77 figure the early cars carry, 38 m the
+ *           later VAZ manuals', 40 m the Niva's. None says whether the brakes' response
+ *           time is in it; a figure that includes it is only easier to meet.
+ *   100 thr a measured 100-0 road test against the THRESHOLD stop
+ *           (`Vehicle.thresholdBrakePedal`) at the test load, since a test driver
+ *           without ABS brakes at the threshold rather than on locked wheels. Only one
+ *           was read first-hand (Za Rulem's VAZ-21102); the Autoreview figures quoted
+ *           in a forum post are printed and not judged.
+ *
+ * What this replaces were "100-0 equivalents of period road tests", 0.5 g for the
+ * GAZ-21 to 0.66 g for a Samara, carried over from the pack's first reality table with
+ * no source for any of them; sized to them, the brakes could not lock a wheel and
+ * every road car failed its own 80 km/h figure.
+ *
+ * Brake sources, abbreviated as above plus:
+ *   AP    autoprospect.ru factory manual tables
+ *   ZRW   wiki.zr.ru/Технические_характеристики_автомобилей2108 (Samara family)
+ *   AR    Autoreview 100-0, second-hand: forum.ixbt.com/post.cgi?id=print%3A70%3A872
  *
  * 0-100 LOAD. The Samara, Niva and Oka manuals state their 0-100 and top speed
  * "with driver and one passenger"; the 2103 catalogue says the same of its top speed.
@@ -179,121 +215,148 @@ const ASSUMED = 'driver + passenger (assumed: the VAZ manuals\' condition)';
 const TARGETS: Readonly<Record<string, Target>> = {
   sv_gaz21: {
     wheelbase: 2.7, track: 1.41, radius: 0.365, top: 130, to100: null,
-    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 6.3, brake: 87, lat: 0.6, hz: 0.95,
-    source: 'AO gaz-21; man. garage-m21.narod.ru/garage/texnxar.htm (no factory 0-100)',
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 6.3, lat: 0.6, hz: 0.95,
+    // igorkalinin.com/volga/data.ru.html prints a braking-distance row and leaves it empty.
+    brake80: null, grossKg: 1885,
+    source: 'AO gaz-21; man. garage-m21.narod.ru/garage/texnxar.htm (no factory 0-100); gross igorkalinin.com/volga/data.ru.html',
   },
   sv_gaz24: {
     wheelbase: 2.8, track: 1.476, radius: 0.354, top: 145, to100: null,
-    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.5, brake: 78, lat: 0.64, hz: 1.0,
-    source: 'man. long-vehicle.narod.ru/gaz24/book24/24_tech.htm (no factory 0-100)',
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.5, lat: 0.64, hz: 1.0,
+    brake80: 43.2, grossKg: 1820,
+    source: 'man. long-vehicle.narod.ru/gaz24/book24/24_tech.htm (no factory 0-100); brake AO gaz-24-10 (no figure found for the 1970 car); gross igorkalinin.com/volga/data.ru.html',
   },
   sv_vaz2101: {
     wheelbase: 2.424, track: 1.349, radius: 0.297, top: 142, to100: 20,
-    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, brake: 75, lat: 0.7, hz: 1.1,
-    source: 'AO vaz-2101 (1982 catalogue)',
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, lat: 0.7, hz: 1.1,
+    brake80: 43.2, grossKg: 1355,
+    source: 'AO vaz-2101 (1982 catalogue); brake, gross AP vaz/2101-zhiguli/1-4-tekhnicheskaya-kharakteristika-avtomobilejj.html',
   },
   sv_vaz2102: {
     wheelbase: 2.424, track: 1.365, radius: 0.297, top: 138, to100: 23,
-    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, brake: 76, lat: 0.68, hz: 1.1,
-    source: 'wiki VAZ-2102 (AO has no table); turn as VAZ-2101',
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, lat: 0.68, hz: 1.1,
+    brake80: 43.2, grossKg: 1440,
+    source: 'wiki VAZ-2102 (AO has no table); turn as VAZ-2101; brake, gross (kerb + 430 kg) AP vaz/2101-zhiguli/1-4-tekhnicheskaya-kharakteristika-avtomobilejj.html',
   },
   sv_vaz2103: {
     wheelbase: 2.424, track: 1.365, radius: 0.288, top: 152, to100: 17,
-    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.6, brake: 74, lat: 0.71, hz: 1.1,
-    source: 'AO vaz-2103',
+    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.6, lat: 0.71, hz: 1.1,
+    brake80: 43.2, grossKg: 1430,
+    source: 'AO vaz-2103 (brake, and gross as kerb + 400 kg)',
   },
   sv_vaz2104: {
     wheelbase: 2.424, track: 1.365, radius: 0.288, top: 137, to100: 18.5,
-    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, brake: 76, lat: 0.69, hz: 1.1,
-    source: 'AO vaz-2104 (base 2104, 1.3); turn per AO vaz-2105',
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, lat: 0.69, hz: 1.1,
+    brake80: 38, grossKg: 1475,
+    brakeTest: { m: 49.4, judged: false, source: 'AR' },
+    source: 'AO vaz-2104 (base 2104, 1.3; gross); turn and brake per AO vaz-2105',
     known0to100: { reason: CLASSIC_LAUNCH, dev: 0.147 },
   },
   sv_vaz2105: {
     wheelbase: 2.424, track: 1.365, radius: 0.288, top: 145, to100: 18,
-    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, brake: 74, lat: 0.71, hz: 1.1,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, lat: 0.71, hz: 1.1,
+    brake80: 38, grossKg: 1395,
     source: 'AO vaz-2105',
     known0to100: { reason: CLASSIC_LAUNCH, dev: 0.121 },
   },
   // Not a catalogue car: the pack's own rally build, held to the targets it was
-  // built to rather than to any factory's.
+  // built to rather than to any factory's. No braking figure exists for it.
   sv_vaz2105r: {
     wheelbase: 2.424, track: 1.365, radius: 0.3, top: 170, to100: 11,
-    loadKg: 75, load: 'driver only (build target)', turn: 5.6, brake: 51, lat: 0.85, hz: 1.55,
+    loadKg: 75, load: 'driver only (build target)', turn: 5.6, lat: 0.85, hz: 1.55,
+    brake80: null, grossKg: 1035,
     source: 'pack build targets, not factory',
     known0to100: { reason: CLASSIC_LAUNCH, dev: 0.117 },
   },
   sv_vaz2106: {
     wheelbase: 2.424, track: 1.365, radius: 0.288, top: 150, to100: 16,
-    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, brake: 74, lat: 0.72, hz: 1.1,
-    source: 'AO vaz-2106',
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, lat: 0.72, hz: 1.1,
+    brake80: 43.2, grossKg: 1435,
+    source: 'AO vaz-2106; brake man. welove2106.narod.ru/objie/ob_1.htm',
   },
   sv_vaz2107: {
     wheelbase: 2.424, track: 1.365, radius: 0.288, top: 150, to100: 17,
-    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, brake: 74, lat: 0.72, hz: 1.1,
-    source: 'AO vaz-2107 (VAZ-2103 engine)',
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, lat: 0.72, hz: 1.1,
+    brake80: 38, grossKg: 1430,
+    source: 'AO vaz-2107 (VAZ-2103 engine); brake, gross man. vazbook.ru/07/2107/main/manual/osnovnye-ekspluatacionnye-parametry-i-razmery',
   },
   sv_vaz2108: {
     wheelbase: 2.46, track: 1.4, radius: 0.281, top: 148, to100: 16,
-    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, brake: 66, lat: 0.78, hz: 1.3,
-    source: 'AO vaz-2108; man. vaz-sputnik.ru/2109/1-4.html',
+    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, lat: 0.78, hz: 1.3,
+    brake80: 38, grossKg: 1370,
+    source: 'AO vaz-2108; man. vaz-sputnik.ru/2109/1-4.html; brake, gross ZRW',
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.126 },
   },
   sa_vaz2109: {
     wheelbase: 2.46, track: 1.4, radius: 0.281, top: 148, to100: 16,
-    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, brake: 66, lat: 0.78, hz: 1.3,
-    source: 'AO vaz-2109; man. vaz-sputnik.ru/2109/1-4.html',
+    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, lat: 0.78, hz: 1.3,
+    brake80: 38, grossKg: 1370,
+    brakeTest: { m: 44.7, judged: false, source: 'AR' },
+    source: 'AO vaz-2109; man. vaz-sputnik.ru/2109/1-4.html; brake, gross ZRW',
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.141 },
   },
   sv_vaz2109: {
     wheelbase: 2.46, track: 1.4, radius: 0.281, top: 148, to100: 16,
-    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, brake: 66, lat: 0.78, hz: 1.3,
-    source: 'AO vaz-2109; man. vaz-sputnik.ru/2109/1-4.html',
+    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, lat: 0.78, hz: 1.3,
+    brake80: 38, grossKg: 1370,
+    brakeTest: { m: 44.7, judged: false, source: 'AR' },
+    source: 'AO vaz-2109; man. vaz-sputnik.ru/2109/1-4.html; brake, gross ZRW',
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.141 },
   },
   sv_vaz21099: {
     wheelbase: 2.46, track: 1.4, radius: 0.281, top: 154, to100: 13.5,
-    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, brake: 66, lat: 0.78, hz: 1.3,
-    source: 'man. vaz-sputnik.ru/21099/1.html',
+    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, lat: 0.78, hz: 1.3,
+    brake80: 38, grossKg: 1395,
+    source: 'man. vaz-sputnik.ru/21099/1.html; brake, gross ZRW',
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.248 },
   },
   sv_niva: {
     wheelbase: 2.2, track: 1.43, radius: 0.343, top: 132, to100: 23,
-    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.5, brake: 75, lat: 0.66, hz: 1.15,
-    source: 'AO vaz-2121; lada-niva.ru/niva/soobschenie-s-harakteristikami.html',
+    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.5, lat: 0.66, hz: 1.15,
+    brake80: 40, grossKg: 1550,
+    source: 'AO vaz-2121 (brake, gross); lada-niva.ru/niva/soobschenie-s-harakteristikami.html',
     known0to100: { reason: NIVA_LOSSES, dev: -0.106 },
   },
   sv_niva_long: {
     wheelbase: 2.7, track: 1.44, radius: 0.343, top: 132, to100: 25,
-    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 6.3, brake: 78, lat: 0.64, hz: 1.15,
-    source: 'AO vaz-2131; lada-niva.ru/vid-img/sravnenie.jpg',
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 6.3, lat: 0.64, hz: 1.15,
+    brake80: 40, grossKg: 1870,
+    source: 'AO vaz-2131; lada-niva.ru/vid-img/sravnenie.jpg; brake (the 2121x family table), gross niva-faq.msk.ru/tehnika/obsch/tehdann/213_312.htm',
     known0to100: { reason: NIVA_LOSSES, dev: -0.131 },
   },
   sa_azlk2141: {
     wheelbase: 2.58, track: 1.44, radius: 0.31, top: 158, to100: 14.9,
-    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.0, brake: null, lat: null, hz: 1.15,
-    source: 'AO moskvich-2141 (2141-01, VAZ-2106-70 engine)',
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.0, lat: null, hz: 1.15,
+    brake80: 43.2, grossKg: 1455,
+    source: 'AO moskvich-2141 (2141-01, VAZ-2106-70 engine; brake, gross); AP azlk/2141-moskvich/1-2-tekhnicheskie-dannye-i-kharakteristiki-avtomobilejj-moskvich.html',
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.109 },
   },
   sa_oka: {
     wheelbase: 2.18, track: 1.214, radius: 0.26, top: 120, to100: 30,
-    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 4.8, brake: null, lat: null, hz: 1.3,
-    source: 'man. autoprospect.ru/vaz/1111-oka/1-4-tekhnicheskie-kharakteristiki.html (no Oka brake test; the manual quotes the Samara norm)',
+    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 4.8, lat: null, hz: 1.3,
+    brake80: 38, grossKg: 975,
+    source: 'man. autoprospect.ru/vaz/1111-oka/1-4-tekhnicheskie-kharakteristiki.html; brake, gross AO vaz-1111',
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.146 },
   },
   sa_uaz330364: {
     wheelbase: 2.55, track: 1.445, radius: 0.372, top: 105, to100: null,
-    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 6.3, brake: null, lat: null, hz: 1.3,
-    source: 'truck-and-bus.ru/brands/uaz/uaz-330364 (top); AO uaz-2206 (turn, same chassis)',
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 6.3, lat: null, hz: 1.3,
+    // The factory manual's table has no braking row.
+    brake80: null, grossKg: 3050,
+    source: 'truck-and-bus.ru/brands/uaz/uaz-330364 (top); AO uaz-2206 (turn, same chassis); gross UAZ manual 05808600.104-2006 (uaz-business.ru)',
   },
   sa_izh2715: {
     wheelbase: 2.4, track: 1.27, radius: 0.305, top: 125, to100: null,
-    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.25, brake: null, lat: null, hz: 1.3,
-    source: 'AO ij-2715 (no factory 0-100)',
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.25, lat: null, hz: 1.3,
+    brake80: 43.2, grossKg: 1615,
+    source: 'AO ij-2715 (no factory 0-100); brake nashi-avto.ru/ru/iz/s/иж-2715.html (first-generation 2715; none found for the -01); gross ru.wikipedia Иж-2715',
   },
   gt_vaz2110: {
     wheelbase: 2.492, track: 1.41, radius: 0.288, top: 162, to100: 15,
-    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.2, brake: null, lat: null, hz: 1.3,
-    source: 'man. autoprospect.ru/vaz/2110-zhiguli/1-obshhie-svedeniya.html (2110, carburettor)',
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.2, lat: null, hz: 1.3,
+    brake80: 38, grossKg: 1480,
+    brakeTest: { m: 55.0, judged: true, source: 'Za Rulem 2004, VAZ-21102: zr.ru/content/articles/10785-kak_popast_v_desatku/' },
+    source: 'man. autoprospect.ru/vaz/2110-zhiguli/1-obshhie-svedeniya.html (2110, carburettor); brake, gross manual.countryauto.ru/vaz/2110/1-obwie-svedenija.html',
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.138 },
   },
 };
@@ -468,6 +531,17 @@ function judged(label: string, id: string, dev: number | null, tolerance: number
   return `${pad(`${(dev * 100).toFixed(1)}%`, 6)}${bad ? '!' : ' '}`;
 }
 
+/** `judged` for a ceiling ("не более"): only a value ABOVE the target fails. */
+function judgedCeiling(label: string, id: string, dev: number | null): string {
+  if (dev === null) return pad('-', 6);
+  const bad = dev > 0;
+  if (bad) {
+    failures++;
+    failed.push(`${id} ${label} ${(dev * 100).toFixed(1)}% over the factory ceiling`);
+  }
+  return `${pad(`${(dev * 100).toFixed(1)}%`, 6)}${bad ? '!' : ' '}`;
+}
+
 /**
  * `judged`, for a column the manifest has an accepted deviation on. Out of tolerance
  * it is listed as KNOWN while it stays within `KNOWN_DRIFT` of the accepted size;
@@ -592,7 +666,7 @@ for (const id of ids) {
 console.log('\n--- behaviour: measured against the factory (load: see below) ---');
 console.log(
   'model              top  real    dev     0-100  real    dev      turn  real    dev    ' +
-    'brake  real    dev      lat  real   ride  real',
+    '80lad  ceil    dev    100thr  test    dev      lat  real   ride  real',
 );
 for (const id of ids) {
   const real = TARGETS[id]!;
@@ -615,8 +689,18 @@ for (const id of ids) {
     failed.push(`${id} 0-100: never reached 100 km/h`);
   }
 
-  // Turning, braking, grip and ride come from the shared sheet, at kerb mass.
+  // Turning, braking, grip and ride come from the shared sheet, at kerb mass. The
+  // factory brake figure is at gross mass with a floored pedal, and a road test is a
+  // threshold stop at the test load.
   const sheet = await benchOne(id);
+  const kerbKg = carModel(id).mass;
+  const laden80 =
+    real.brake80 === null
+      ? null
+      : await brakeDistanceOn(id, SurfaceType.Asphalt, 80, Math.max(0, real.grossKg - kerbKg));
+  const test = real.brakeTest;
+  const threshold100 =
+    test === undefined ? null : await brakeDistanceOn(id, SurfaceType.Asphalt, 100, real.loadKg, true);
   // A factory turning radius is swept by the OUTER FRONT WHEEL. The bench measures
   // forward speed over yaw rate, which is how far the turn centre sits to the side of
   // the car — on the rear axle's line, at the low speed this is taken at. The outer
@@ -635,8 +719,10 @@ for (const id of ids) {
       `${judgedKnown('0-100', id, deviation(to100, real.to100), TOLERANCE.to100, real.known0to100)}  ` +
       `${pad(sheet.turnRadiusM.toFixed(2), 5)} ${pad(realCentre.toFixed(2), 5)} ` +
       `${judged('turn', id, deviation(sheet.turnRadiusM, realCentre), TOLERANCE.turn)}  ` +
-      `${pad(sheet.brakeDistM.toFixed(1), 5)} ${pad(real.brake ?? '-', 5)} ` +
-      `${judged('brake', id, deviation(sheet.brakeDistM, real.brake), TOLERANCE.brake)}  ` +
+      `${pad(laden80?.toFixed(1) ?? '-', 5)} ${pad(real.brake80 ?? '-', 5)} ` +
+      `${judgedCeiling('80 laden', id, deviation(laden80, real.brake80))}  ` +
+      `${pad(threshold100?.toFixed(1) ?? '-', 6)} ${pad(test?.m ?? '-', 5)} ` +
+      `${test?.judged ? judged('100 threshold', id, deviation(threshold100, test.m), TOLERANCE.brake) : pad(test ? 'info' : '-', 6) + ' '}  ` +
       `${pad(sheet.skidpadG.toFixed(2), 5)} ${pad(real.lat?.toFixed(2) ?? '-', 5)}  ` +
       `${pad(sheet.bounceHz.toFixed(2), 4)} ${pad(real.hz.toFixed(2), 5)}`,
   );

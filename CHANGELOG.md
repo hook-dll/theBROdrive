@@ -12,6 +12,77 @@
   the drive then loads).
 
 ### Changed
+- A FLOORED BRAKE PEDAL REACHES THE TYRES, AND LOCKS THEM (`vehicle/vehicle.ts`,
+  `vehicle/carmodels.ts`, `vehicle/vehicletuning.ts`, `vehicle/autopilot.ts`). Held flat,
+  the pedal stopped a VAZ-2101 from 100 km/h in 74 m at 0.52 g with no wheel locking.
+  Two causes. `brakeDecelG` was a stopping-distance target dressed as the brakes (0.42-
+  0.6 g, sized to unsourced "period 100-0" figures in tools/reality.ts) and capped the
+  whole pedal below the tyres; at it every road car failed its own factory figure (43.2 m
+  from 80 km/h at gross mass, GOST 22895-77, or 38 m in the later VAZ manuals). And the
+  pedal asked `min(brakes, 0.99 × summed tyre capacity)`, an anti-lock brake on any
+  surface where the tyres gave out first; on gravel both limits met at 0.5 g, which is
+  why gravel stopped as short as asphalt (the failing handling-cli check).
+  - `brakeDecelG` is now the brake hardware at a floored pedal: 1.0 g unassisted
+    (GAZ-21, VAZ-2101/2102), 1.2 g with a servo, 1.4 g for the rally 2105 — above every
+    tyre, so the pedal locks and the tyre sets the stop. The demand has no grip cap.
+  - Measured, floored pedal from 100 km/h: Zhigulis 46-50 m (was 74), Samaras and the
+    2110 42-43 m (66), GAZ-21 57 m (86), GAZ-24 49 m (78), Nivas 48-50 m (76-78), UAZ 53 m
+    (73). Laden from 80 km/h every car is under its factory ceiling. Gravel 62.9 m
+    against asphalt 47.5 m for the VAZ-2106 (the check passes).
+  - `Vehicle.thresholdBrakePedal`: the pedal share at which the first axle reaches its
+    tyres' peak, per axle (fixed bias, load sensitivity, the engine's overrun drag on the
+    driven axle). The autopilot scales its pedal by it, so its 1.0 is a threshold stop
+    that does not lock; `measuredBrakeDecel` is that stop's deceleration.
+    `estimatedBrakeDecel` solves the same per-axle limit with steady load transfer
+    (it used to sum four tyres and promise a Samara 1.1 g where the rear-limited
+    threshold is 0.7). VAZ-2110 threshold stop from 100 km/h with a passenger: 54.8 m
+    against Za Rulem's 55.0 m for the 21102.
+  - The autopilot's bend brake share now leaves the mode's `gripReserve` free: the old
+    brakes left that margin by being weak.
+  - tools/reality.ts judges braking on the sourced figures: the factory 80-0 at gross mass
+    as a ceiling, and a threshold 100-0 against a measured road test. Every model's
+    passport figures and their sources are in its carmodels.ts comment.
+- THE ROAD STOPS FLOATING AND STARTS HITTING (`world/roadsurface.ts`, `world/roadmesh.ts`,
+  `core/surfaces.ts`). Measured (tools/ride-bench.ts, wheel path, asphalt): 15.6 mm RMS
+  of 10-40 m swell against 6.1 mm at 3-10 m and 0.7 mm under 3 m — the band a body on
+  1.1-1.3 Hz springs is driven at resonance by between 60 and 100 km/h, and almost
+  nothing a wheel could strike. Causes: the bump layer's 6.7 m value-noise octave (value
+  noise is white below its lattice, so most of its energy was 13-20 m waves), the
+  undulation's second octave (25-30 m), and the sealed decks' 3 cm sub-collider hummock.
+  - Bump layer: one 3.33 m octave as a first difference over 1 m, in the road frame
+    (`ROUGH_COMB`, `BUMP_AMP` asphalt 0.03, cracked 0.038, gravel 0.05, concrete
+    0.025). Undulation: one 30 m octave (`UND_AMP` 0.05). `hummock`: asphalt 0.012,
+    cracked 0.016, concrete 0.01, gravel 0.035.
+  - ROAD EVENTS: humps, rimmed potholes, transverse cracks, sealed ridges, patches
+    (proud or sunk, with a seam step at each end), frost heaves, and a concrete joint
+    every 5.33 m. A pure function of (seed, gap, column); each sits inside one gap
+    between base rows, 0.25-1.25 m long, mostly in the wheel tracks, with rates per km
+    from new to worn by surface (`EVENT_MIX`: asphalt 3-30, cracked 30-90, gravel
+    50-130, concrete 3-20 plus joints), clustered. Height is clamped so the steepest
+    climb minus the steepest descent is at most 0.1 (`EVENT_MAX_SWING`, 2.5 m/s at
+    90 km/h, under the 2.75 m/s pothole cap); no event in reach of an old pothole.
+  - The collider carries them: the gap gets extra rows at the event's knots, appended
+    after the base rows in the mesh and in each collider slab (`gapQuads`). Base rows,
+    colours, shoulder, terrain edge and chunk seams are unchanged; probed with
+    raycasts, the collider matches base-interpolation-plus-event to 0.45 mm. Holes
+    tint towards broken base course, patches to repair bitumen, cracks and joints
+    dark, all in vertex colour (no new material or program). Markings follow the
+    event rows.
+  - Before → after (tools/surface-feel.ts, 2105r, right lane, 60 / 100 km/h): body
+    float (heave over the road, 0.3-2.5 Hz) asphalt 16.2 → 8.2 / 18.2 → 11.9 mm,
+    cracked 17.5 → 6.9 / 16.5 → 10.0, gravel 22.0 → 10.6 / 24.8 → 14.3, concrete
+    17.7 → 7.3 / 19.0 → 10.5; pitch at 60 km/h 0.26-0.40° → 0.10-0.19°. Hits
+    (compression over 0.5 m/s) per km at 60: cracked 12 → 20, gravel 30 → 48, worst wheel load ≤ 2.2x
+    static, all four wheels on the ground throughout. 0-100 on the road 11.3 → 11.1 s.
+    Traffic pace on one stretch (traffic-road seed 42, s 40 km) unchanged: normal 70 →
+    71, hurried 89 → 87, frantic 118 → 115 km/h, ego 79 → 79. Profile (ride-bench,
+    all bands averaged, 10-40 m mm RMS): asphalt 15.6 → 4.7, cracked 17.1 → 5.7, gravel
+    20.4 → 7.1, concrete 14.5 → 4.2; events per km of one wheel path 3.4 / 17.6 / 16.4
+    / 190 (joints); worst damper step at 90 km/h 2.50 m/s sealed, 2.75 gravel.
+  - Benches: ride-bench reports RMS per wavelength band, 60 Hz-sampled damper steps,
+    a quarter car and events/km; surface-feel drives the real road chunks
+    (`RoadMeshProvider`) per district surface and reports float, pitch, wheel load and
+    hits. surface-paint and road-lanes read the base rows and allow whole extra rows.
 - THE HANDBRAKE LOCKS THE REAR WHEELS ONLY (`cableLocked` in `vehicle/vehicle.ts`). It
   locked all four, which stopped the car straight; every car in the catalogue has its
   cable on the rear drums (the UAZ's transmission brake holds the rear propshaft). At

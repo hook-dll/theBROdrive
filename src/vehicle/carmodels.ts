@@ -825,10 +825,24 @@ export interface CarModelDef {
   /** Tyre grip multiplier on the surface's friction, in every direction alike. */
   readonly wheelGrip: number;
   /**
-   * What the car's own brakes deliver at full pedal on a surface that does not limit
-   * them, in g: the drums and discs, not the tyres. Sized to the period 100-0 stops
-   * `tools/reality.ts` holds each car to. Where the tyres give out first — loose
-   * ground, the wet, bald tyres — they are the limit instead.
+   * What the car's own brakes deliver at a FLOORED pedal (a panic stamp) on a surface
+   * that does not limit them, in g: the drums, discs and servo, not the tyres. Every
+   * car here could lock its wheels on dry asphalt, so every figure is above its tyres'
+   * peak and a floored pedal locks; the stopping distance is then the tyre's
+   * (`wheelGrip`, the surface, the sliding plateau), as it was on the real cars.
+   *
+   * The floor under these figures is the Soviet type approval: GOST 22895-77 held a
+   * passenger car to 43.2 m from 80 km/h at gross mass with a 50 kgf pedal
+   * (https://poznayka.org/s80171t2.html), i.e. at least 0.58 g at half a panic stamp's
+   * force even before the brakes' response time is taken off. A floored pedal is
+   * about twice that force, so the hydraulics alone reach past 1 g; a vacuum servo
+   * takes it further. Unassisted cars are 1.0, servo cars 1.2: the exact figure
+   * decides only where on the pedal the lock begins, not how far the car stops.
+   *
+   * It used to be a stopping-distance target in disguise, 0.42-0.6 g, sized to unsourced
+   * "period 100-0 tests" in `tools/reality.ts`: below the tyres, so a held pedal never
+   * locked anything (74 m from 100 km/h in a Zhiguli) and every road car failed its
+   * own type approval.
    */
   readonly brakeDecelG: number;
   readonly suspension: SuspensionTuning;
@@ -1025,10 +1039,10 @@ interface SovietSpec {
  *   rally 2105                         0.85 g   the only one built to corner
  *
  * The old ladder ran 0.88-1.04, which measured 0.89-1.04 g on the bench: a 1956
- * Volga cornering like a modern hatchback. The stopping distance is NOT set here: it
- * is `brakeDecelG`, the car's own brakes, sized to the period 100-0 test. Sizing it
- * through the tyre is what used to leave every classic spinning its rear wheels in
- * first gear on dry asphalt.
+ * Volga cornering like a modern hatchback. The stopping distance on dry asphalt IS set
+ * here now: every car's brakes (`brakeDecelG`) out-pull its tyres, so a hard stop ends
+ * at this tyre's peak and a floored pedal at its sliding plateau. What it used to be —
+ * the brakes capped below the tyres to hit a distance — never let a pedal lock a wheel.
  *
  * The ORDER is unchanged and it still runs backwards from every other pack: these
  * are the oldest cars in the catalogue, and the Samaras are the only ones with a
@@ -1047,6 +1061,24 @@ interface SovietSpec {
  * on a front-driven or soft-tyred car, so each lock is the one that puts reality.ts on
  * the factory figure: 0.01-0.04 rad over the pure geometry.
  */
+/**
+ * Floored-pedal brake hardware, g (see `CarModelDef.brakeDecelG`). Both are above
+ * every tyre in the catalogue, so a floored pedal locks; they differ only in where on
+ * the pedal the lock begins.
+ *
+ * UNASSISTED: the leg alone on the master cylinder — drums all round on the GAZ-21
+ * (igorkalinin.com/volga/data.ru.html), discs and drums with no vacuum servo on the
+ * VAZ-2101 and its 2102 estate (the 2101's manifold has no servo take-off; the 2103 was
+ * the first with one: gogermetik.com/ustanovka-vakuumnogo-usilitelja-tormozov-na-vaz.html).
+ * SERVO: a vacuum (or the GAZ-24's hydro-vacuum) servo, every later car. The Oka's
+ * and the IZh-2715-01's servo is not confirmed by a source read here; for them the
+ * figure is an assumption, and it moves only the pedal position at which they lock.
+ * RALLY: competition pads and linings on the servo car.
+ */
+const BRAKES_UNASSISTED_G = 1.0;
+const BRAKES_SERVO_G = 1.2;
+const BRAKES_RALLY_G = 1.4;
+
 const SOVIET_SPECS: readonly SovietSpec[] = [
   {
     // GAZ-21 Volga: 2.445 litre, 70 hp at 4000, three speeds on the column, and
@@ -1055,6 +1087,9 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     // Nothing about this car is quick, and its 0.48 rearward weight bias plus a
     // 0.95 Hz front end is why it heaves onto its outside front tyre and stays
     // there.
+    // PASSPORT: 130 km/h (autoopt.ru/auto/encyclopedia/car/gaz/mark/gaz-21). No factory
+    // 0-100 for the 70 hp car: wiki.zr.ru/ГАЗ-21 prints 34 s for the 65 hp first series.
+    // No factory brake figure: igorkalinin.com/volga/data.ru.html leaves the row empty.
     id: 'sv_gaz21',
     label: 'GAZ-21 Volga',
     file: 'gz21.fbx',
@@ -1066,7 +1101,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_gaz_3',
     tankLitres: 60,
     wheelGrip: 0.522,
-    brakeDecelG: 0.42,
+    brakeDecelG: BRAKES_UNASSISTED_G,
     steerLock: 0.519,
     rearDriveBias: 1,
     frontWeightShare: 0.48,
@@ -1081,6 +1116,9 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     // factory 145 km/h, i.e. Cd ~0.65 on ~2.1 m²: well above ru.wikipedia's unsourced
     // 0.45, which is what 95 hp would need to be a gross rather than a net figure to
     // explain. The catalogue power is used as printed; the drag area carries it.
+    // PASSPORT: 145 km/h (igorkalinin.com/volga/data.ru.html). No factory 0-100 for the
+    // 95 hp car; secondary sources print 19-22 s (wroom.ru/cars/gaz/24/spec/1: 22 s).
+    // Brake: 43.2 m from 80 km/h, for the GAZ-24-10 (autoopt.ru, gaz-24-10).
     id: 'sv_gaz24',
     label: 'GAZ-24 Volga',
     file: 'gz24.fbx',
@@ -1092,7 +1130,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_gaz_4',
     tankLitres: 55,
     wheelGrip: 0.6,
-    brakeDecelG: 0.47,
+    brakeDecelG: BRAKES_SERVO_G,
     steerLock: 0.638,
     rearDriveBias: 1,
     frontWeightShare: 0.49,
@@ -1105,6 +1143,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     // fourth on a 4.30 axle, 0-100 in 20 s (1982 catalogue). The default car, and
     // the one everything else in this table is judged against. Cd·A 0.95 is the
     // 2101/2103/2106 shell's, fitted to the three cars' top speeds together.
+    // PASSPORT (driver + passenger): 0-100 20 s, 142 km/h; 43.2 m from 80 km/h at gross
+    // mass, 1355 kg (autoprospect.ru/vaz/2101-zhiguli/1-4-tekhnicheskaya-kharakteristika-avtomobilejj.html).
     id: 'sv_vaz2101',
     label: 'VAZ-2101 Zhiguli',
     file: 'vz01.fbx',
@@ -1116,7 +1156,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_lada_4',
     tankLitres: 39,
     wheelGrip: 0.558,
-    brakeDecelG: 0.5,
+    brakeDecelG: BRAKES_UNASSISTED_G,
     steerLock: 0.529,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
@@ -1128,6 +1168,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     // VAZ-2102: the 2101 as an estate. Same engine on a shorter 4.44 axle, 430 kg
     // of payload rating in the back, and the empty-estate rear end that comes with
     // it. Cd·A 1.07 is the estate shell's, shared with the 2104.
+    // PASSPORT (driver + passenger): 0-100 23 s, 137 km/h; 43.2 m from 80 km/h at gross
+    // mass (autoprospect.ru/vaz/2101-zhiguli/1-4-tekhnicheskaya-kharakteristika-avtomobilejj.html).
     id: 'sv_vaz2102',
     label: 'VAZ-2102 estate',
     file: 'vz02.fbx',
@@ -1139,7 +1181,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_lada_4_2102',
     tankLitres: 39,
     wheelGrip: 0.551,
-    brakeDecelG: 0.49,
+    brakeDecelG: BRAKES_UNASSISTED_G,
     steerLock: 0.531,
     rearDriveBias: 1,
     frontWeightShare: 0.5,
@@ -1151,6 +1193,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
   {
     // VAZ-2103: 1.452 litre, 71 hp, twin headlights, a tachometer and the 4.10 axle
     // behind the close-ratio box. The fastest of the early saloons at 152 km/h.
+    // PASSPORT: 0-100 17 s, 152 km/h; 43.2 m from 80 km/h fully laden
+    // (autoopt.ru/auto/encyclopedia/car/vaz/mark/vaz-2103).
     id: 'sv_vaz2103',
     label: 'VAZ-2103',
     file: 'vz03.fbx',
@@ -1162,7 +1206,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_lada_4_tall',
     tankLitres: 39,
     wheelGrip: 0.574,
-    brakeDecelG: 0.5,
+    brakeDecelG: BRAKES_SERVO_G,
     steerLock: 0.53,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
@@ -1173,6 +1217,9 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
   {
     // VAZ-2104: the 2105's estate, in its base form with the 2105's 1.3 and 4.3
     // axle (autoopt.ru: 1020 kg, 137 km/h, 18.5 s). The workhorse of the line.
+    // PASSPORT: 0-100 18.5 s, 137 km/h (autoopt.ru, vaz-2104); 38 m from 80 km/h laden
+    // by its reference to the 2105. Autoreview's 100-0 of 49.4 m is known only second-hand
+    // (forum.ixbt.com/post.cgi?id=print%3A70%3A872).
     id: 'sv_vaz2104',
     label: 'VAZ-2104 estate',
     file: 'vz04.fbx',
@@ -1184,7 +1231,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_lada_4_2105',
     tankLitres: 39,
     wheelGrip: 0.56,
-    brakeDecelG: 0.49,
+    brakeDecelG: BRAKES_SERVO_G,
     steerLock: 0.53,
     rearDriveBias: 1,
     frontWeightShare: 0.5,
@@ -1197,6 +1244,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     // VAZ-2105: square lights, the belt-cam 1.3, 47 kW, the close-ratio box on a
     // 4.3 axle. The one everyone's uncle had, and mechanically the plainest car here.
     // Cd·A 0.92 is the 2105/2107 shell's.
+    // PASSPORT: 0-100 18 s, 145 km/h; 38 m from 80 km/h (autoopt.ru, vaz-2105).
     id: 'sv_vaz2105',
     label: 'VAZ-2105',
     file: 'vz05.fbx',
@@ -1208,7 +1256,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_lada_4_2105',
     tankLitres: 39,
     wheelGrip: 0.57,
-    brakeDecelG: 0.5,
+    brakeDecelG: BRAKES_SERVO_G,
     steerLock: 0.53,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
@@ -1222,6 +1270,10 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     // below 3000 rpm and everything above it; the springs are the stiffest in the
     // pack and it is the only Soviet body on the sport steering profile, because
     // somebody rebuilt this one to be driven hard.
+    // NO PASSPORT: a private build. The works VFTS (160 hp, 8.4 s, 190 km/h:
+    // zr.ru/content/articles/933434-dvesti-ne-predel-10-samykh-bys/) is a different
+    // engine; this one is held to its own 100 ps engine and the 2107 box: 11 s, 170 km/h,
+    // and its stops are its tyres'.
     id: 'sv_vaz2105r',
     label: 'VAZ-2105 rally',
     file: 'vz05r.fbx',
@@ -1233,8 +1285,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_lada_5',
     tankLitres: 39,
     wheelGrip: 0.615,
-    // Rally brakes: pads, harder linings and a servo the road car never had.
-    brakeDecelG: 0.75,
+    // Rally brakes: competition pads and linings on the 2105's servo.
+    brakeDecelG: BRAKES_RALLY_G,
     steerLock: 0.526,
     rearDriveBias: 1,
     handlingProfile: 'sport',
@@ -1247,6 +1299,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
   {
     // VAZ-2106: 1.569 litre, 75 hp, and the 3.90 axle. 152 km/h, and the strongest
     // pull of the classic saloons.
+    // PASSPORT (driver + passenger): 0-100 16 s, 152 km/h; 43.2 m from 80 km/h fully
+    // laden (welove2106.narod.ru/objie/ob_1.htm; autoopt.ru prints 38 m).
     id: 'sv_vaz2106',
     label: 'VAZ-2106',
     file: 'vz06.fbx',
@@ -1258,7 +1312,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_lada_4_1600',
     tankLitres: 39,
     wheelGrip: 0.58,
-    brakeDecelG: 0.5,
+    brakeDecelG: BRAKES_SERVO_G,
     steerLock: 0.53,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
@@ -1269,6 +1323,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
   {
     // VAZ-2107: the 2105 with a grille that thinks it is a Mercedes, the 1.5 and
     // the five-speed. Fifth is an 0.82 overdrive, so it is the relaxed one.
+    // PASSPORT (driver + passenger): 0-100 17 s, 150 km/h; 38 m from 80 km/h at the
+    // greatest load (vazbook.ru/07/2107/main/manual/osnovnye-ekspluatacionnye-parametry-i-razmery).
     id: 'sv_vaz2107',
     label: 'VAZ-2107',
     file: 'vz07.fbx',
@@ -1280,7 +1336,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_lada_5',
     tankLitres: 39,
     wheelGrip: 0.582,
-    brakeDecelG: 0.5,
+    brakeDecelG: BRAKES_SERVO_G,
     steerLock: 0.53,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
@@ -1294,6 +1350,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     // and 62% of it over the front axle. It steers like a different decade because
     // it is one, so it is the first Soviet body on the `road` profile. Cd·A 0.88 from
     // its 148 km/h, which is AvtoVAZ's own wind-tunnel Cd of 0.47 on 1.87 m².
+    // PASSPORT (driver + passenger): 0-100 16 s, 148 km/h; 38 m from 80 km/h at gross mass
+    // (wiki.zr.ru/Технические_характеристики_автомобилей2108).
     id: 'sv_vaz2108',
     label: 'VAZ-2108 Sputnik',
     file: 'vz08.fbx',
@@ -1305,7 +1363,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
     wheelGrip: 0.65,
-    brakeDecelG: 0.57,
+    brakeDecelG: BRAKES_SERVO_G,
     steerLock: 0.59,
     rearDriveBias: 0,
     handlingProfile: 'road',
@@ -1317,6 +1375,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
   },
   {
     // VAZ-2109: the five-door Samara. Same running gear, 20 kg and a longer roof.
+    // PASSPORT: as the 2108 (wiki.zr.ru); Autoreview's 100-0 of 44.7 m is known only
+    // second-hand (forum.ixbt.com/post.cgi?id=print%3A70%3A872).
     id: 'sv_vaz2109',
     label: 'VAZ-2109 Samara',
     file: 'vz09.fbx',
@@ -1328,7 +1388,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
     wheelGrip: 0.65,
-    brakeDecelG: 0.57,
+    brakeDecelG: BRAKES_SERVO_G,
     steerLock: 0.59,
     rearDriveBias: 0,
     handlingProfile: 'road',
@@ -1342,6 +1402,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     // VAZ-21099: the Samara with a boot grafted on, the 1.5, and the manual's 3.9-
     // class axle (it lists 3.7 or 3.9). 154 km/h makes it the fastest thing in the
     // pack that was sold as one. Cd·A 0.84: AvtoVAZ's Cd 0.45 on 1.87 m².
+    // PASSPORT (driver + passenger): 0-100 13.5 s, 154 km/h; 38 m from 80 km/h at gross
+    // mass (wiki.zr.ru/Технические_характеристики_автомобилей2108).
     id: 'sv_vaz21099',
     label: 'VAZ-21099',
     file: 'vz099.fbx',
@@ -1353,7 +1415,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
     wheelGrip: 0.65,
-    brakeDecelG: 0.57,
+    brakeDecelG: BRAKES_SERVO_G,
     steerLock: 0.589,
     rearDriveBias: 0,
     handlingProfile: 'road',
@@ -1369,6 +1431,9 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     // geared a fifth shorter than the 2106 it shares a block with: 132 km/h flat
     // out, and it will pull away from anything here on a surface. Cd·A 1.30 from that
     // 132, Cd 0.536 (ru.wikipedia) on about 2.4 m²; the 2131 shares the nose.
+    // PASSPORT (driver + passenger): 0-100 23 s, 132 km/h
+    // (lada-niva.ru/niva/soobschenie-s-harakteristikami.html); 40 m from 80 km/h at gross
+    // mass (niva-faq.msk.ru/tehnika/obsch/tehdann/213_312.htm).
     id: 'sv_niva',
     label: 'VAZ-2121 Niva',
     file: 'vz21.fbx',
@@ -1380,7 +1445,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_niva_4',
     tankLitres: 42,
     wheelGrip: 0.576,
-    brakeDecelG: 0.48,
+    brakeDecelG: BRAKES_SERVO_G,
     steerLock: 0.499,
     rearDriveBias: 0.5,
     handlingProfile: 'utility',
@@ -1391,6 +1456,8 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     storageCells: 4,
   },
   {
+    // PASSPORT: 0-100 25 s, 132 km/h; 40 m from 80 km/h at gross mass, the family's
+    // figure (niva-faq.msk.ru/tehnika/obsch/tehdann/213_312.htm).
     id: 'sv_niva_long',
     label: 'VAZ-2131 Niva',
     file: 'vz31.fbx',
@@ -1402,7 +1469,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     gearboxId: 'gearbox_niva_5',
     tankLitres: 42,
     wheelGrip: 0.574,
-    brakeDecelG: 0.47,
+    brakeDecelG: BRAKES_SERVO_G,
     steerLock: 0.522,
     rearDriveBias: 0.5,
     handlingProfile: 'utility',
@@ -1549,6 +1616,11 @@ const SAAS_SPECS: readonly Entry[] = [
     // 5.0 m turning radius. Cd·A 0.86 from that 158: the period literature's Cd of
     // 0.35-0.38 on 1.89 m² would give 172 km/h from this engine, so either figure
     // is optimistic and the top speed, the one the catalogue stands behind, wins.
+    // PASSPORT (2141-01): 0-100 14.9 s, 158 km/h (autoopt.ru, moskvich-2141; the repair
+    // manual says at most 15.5 s and 155 km/h); 43.2 m from 80 km/h laden. THIS IS NOT THE
+    // SVYATOGOR'S: the 21415 "Svyatogor" had the Renault F3R 2.0, 113 hp, 1090 kg, 0-100
+    // 11.5 s, 175 km/h (wiki.zr.ru/Москвич-2141_«Святогор»; alekohistory.narod.ru/m2141tec.htm).
+    // The label names the Svyatogor and every figure below is the 2141-01.
     id: 'sa_azlk2141',
     label: 'AZLK-2141 Svyatogor',
     dir: SAAS,
@@ -1562,7 +1634,7 @@ const SAAS_SPECS: readonly Entry[] = [
     gearboxId: 'gearbox_manual5',
     tankLitres: 55,
     wheelGrip: 0.65,
-    brakeDecelG: 0.59,
+    brakeDecelG: BRAKES_SERVO_G,
     suspension: SUSP_SAMARA,
     steerLock: 0.658,
     rearDriveBias: 0,
@@ -1575,6 +1647,7 @@ const SAAS_SPECS: readonly Entry[] = [
   {
     // VAZ-2109, 1991, 1.3 L carburettor, five-speed FWD.
     // This personal-use conversion is kept local to the application catalogue.
+    // PASSPORT: as the 2108/2109 (wiki.zr.ru/Технические_характеристики_автомобилей2108).
     id: 'sa_vaz2109',
     label: 'VAZ-2109',
     dir: SAAS,
@@ -1588,7 +1661,7 @@ const SAAS_SPECS: readonly Entry[] = [
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
     wheelGrip: 0.65,
-    brakeDecelG: 0.57,
+    brakeDecelG: BRAKES_SERVO_G,
     steerLock: 0.59,
     rearDriveBias: 0,
     handlingProfile: 'road',
@@ -1620,6 +1693,8 @@ const SAAS_SPECS: readonly Entry[] = [
     // litre tank, a 4.8 m turning radius by the outer wheel's track, and 120 km/h
     // and 0-100 in 30 s with a driver and one passenger aboard. Cd·A 0.68: Za
     // Rulyom's Cd 0.40 on the textbook's 1.69 m².
+    // PASSPORT (driver + passenger): 0-100 30 s, 120 km/h; 38 m from 80 km/h
+    // (autoopt.ru/auto/encyclopedia/car/vaz/mark/vaz-1111).
     id: 'sa_oka',
     label: 'VAZ-1111 Oka',
     dir: SAAS,
@@ -1637,7 +1712,7 @@ const SAAS_SPECS: readonly Entry[] = [
     gearboxId: 'gearbox_oka_4',
     tankLitres: 30,
     wheelGrip: 0.61,
-    brakeDecelG: 0.55,
+    brakeDecelG: BRAKES_SERVO_G,
     // MacPherson struts in front, trailing arms on an elastic cross-beam behind:
     // the Samara's layout, and its preset.
     suspension: SUSP_SAMARA,
@@ -1663,6 +1738,8 @@ const SAAS_SPECS: readonly Entry[] = [
     wheelSetPool: SOVIET_WHEEL_SET_POOL,
   },
   {
+    // PASSPORT: 110 km/h in the factory manual (РЭ 05808600.104-2006, uaz-business.ru),
+    // 105 at truck-and-bus.ru; no 0-100 and no braking row is published.
     id: 'sa_uaz330364',
     label: 'UAZ-330364',
     dir: SAAS,
@@ -1676,7 +1753,7 @@ const SAAS_SPECS: readonly Entry[] = [
     gearboxId: 'gearbox_uaz_4',
     tankLitres: 56,
     wheelGrip: 0.59,
-    brakeDecelG: 0.53,
+    brakeDecelG: BRAKES_SERVO_G,
     // The front is a beam too, on kingpins: its wheels stay square to the road in roll,
     // with the factory +1° of camber, and the axle yaws on its leaves as it rolls.
     suspension: {
@@ -1724,6 +1801,9 @@ const SAAS_SPECS: readonly Entry[] = [
     },
   },
   {
+    // PASSPORT: 125 km/h (truck-and-bus.ru/brands/izh/izh-2715/). No factory 0-100: 19 s
+    // in ru.wikipedia Иж-2715 is unsourced. 43.2 m from 80 km/h is the first-generation
+    // 2715's (nashi-avto.ru); none was found for the -01.
     id: 'sa_izh2715',
     label: 'IZH-2715-01',
     dir: SAAS,
@@ -1741,7 +1821,7 @@ const SAAS_SPECS: readonly Entry[] = [
     tankLitres: 46,
     // 175/80 R13 period road tyre; same dry-road calibration as the 2104 estate.
     wheelGrip: 0.56,
-    brakeDecelG: 0.51,
+    brakeDecelG: BRAKES_SERVO_G,
     // Rear leaf springs carrying a 500 kg payload; not the Zhiguli coil-sprung estate.
     suspension: SUSP_TRUCK,
     // Factory outer-front turning radius is 5.25 m (autoopt.ru, IZH-2715); the lock is
@@ -1823,6 +1903,9 @@ const SAAS_CARS: readonly Entry[] = SAAS_SPECS.map((spec) => ({
  */
 const GTAV_SPECS: readonly Entry[] = [
   {
+    // PASSPORT (driver + passenger): 0-100 15 s, 162 km/h; 38 m from 80 km/h at gross mass
+    // (manual.countryauto.ru/vaz/2110/1-obwie-svedenija.html). Za Rulem measured the
+    // VAZ-21102 at 55.0 m from 100 km/h (zr.ru/content/articles/10785-kak_popast_v_desatku/).
     id: 'gt_vaz2110',
     label: 'VAZ-2110',
     dir: GTAV,
@@ -1836,7 +1919,7 @@ const GTAV_SPECS: readonly Entry[] = [
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
     wheelGrip: 0.66,
-    brakeDecelG: 0.6,
+    brakeDecelG: BRAKES_SERVO_G,
     suspension: SUSP_SAMARA,
     steerLock: 0.604,
     rearDriveBias: 0,

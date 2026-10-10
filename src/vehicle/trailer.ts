@@ -937,10 +937,12 @@ export class Trailer implements Rebasable {
     const body = this.body;
     const rotation = body.rotation(this.rotationScratch);
     const parked = !this.coupled;
-    // The car's brake law (FOOT_BRAKE_GRIP_RATIO): the pedal asks for the brakes'
-    // deceleration or for what the tyres can take, summed over the axle on last step's
-    // loads, whichever gives out first, shared equally — so a straight stop on sand does
-    // not lock both wheels, while an inside wheel unloaded in a bend still can.
+    // An overrun brake's law, not the car's: the pedal asks for the towing car's brake
+    // deceleration or for what the trailer's tyres can take at their threshold
+    // (FOOT_BRAKE_GRIP_RATIO), summed over the axle on last step's loads, whichever
+    // gives out first, shared equally — the drawbar works these brakes, not a foot, so
+    // a straight stop on sand does not lock both wheels, while an inside wheel unloaded
+    // in a bend still can. The car's own pedal has no such cap and locks.
     let gripN = 0;
     for (const w of this.wheels) {
       gripN += SURFACES[w.surface].mu * weatherGrip(w.surface) * TRAILER_TYRE_GRIP * w.loadN;

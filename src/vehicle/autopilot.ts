@@ -2864,11 +2864,21 @@ export class Autopilot {
    * peak locks the wheels: a locked front cannot steer and a locked rear cannot hold
    * the tail. Measured at 30.6 km, cars braking at 0.9 pedal from 140 km/h for the
    * queue at the rock drifted off the asphalt on a 1000 m bend with the wheel turned
-   * against the drift. A driver who can feel the lock lets the pedal up until the
-   * wheels turn again and squeezes it back on: the pedal is scaled down while any
-   * wheel is locked and returns over `ABS_RECOVER_S`.
+   * against the drift.
+   *
+   * Two things stand between this driver's pedal and the lock. First, the pedal this
+   * controller computes is a share of the THRESHOLD, not of the brakes: it is scaled
+   * by `vehicle.thresholdBrakePedal`, the share of a floored pedal at which the first
+   * axle reaches its tyres' peak on the surface it is on. The brakes can lock every car
+   * here on dry asphalt, so an unscaled 1.0 would lock, and a 0.5 would brake twice as
+   * hard as the 0.5 the bands and ceilings were tuned on; scaled, 1.0 is the threshold
+   * stop `measuredBrakeDecel` and `estimatedBrakeDecel` plan on. Not while reversing:
+   * there the pedal is reverse throttle. Second, what the threshold misses — a bend's
+   * side slip, a bump — is caught by feel: the pedal is scaled down while any wheel is
+   * locked and returns over `ABS_RECOVER_S`.
    */
   private modulateBrake(dt: number, vehicle: Vehicle, out: InputFrame): void {
+    if (!out.reverse) out.brake *= vehicle.thresholdBrakePedal;
     const sliding = out.brake > 0 && !out.handbrake && vehicle.speedKmh > ABS_MIN_KMH && vehicle.wheelLocked;
     this.brakeScale = sliding
       ? Math.max(ABS_MIN_SCALE, this.brakeScale * ABS_RELEASE)
@@ -5504,12 +5514,20 @@ export class Autopilot {
     // this cap exists to prevent and those two are the brakes that prevent it.
     // What the tyres have left for stopping once the bend they are in has been paid
     // for. See BEND_BRAKE_SHARE_FLOOR: the lateral demand is the car's OWN yaw rate,
-    // against the tyres' own cornering CAPACITY rather than the reserved plan budget.
+    // against the tyres' own cornering capacity LESS the mode's `gripReserve`. The
+    // reserve was not here while a floored pedal could only reach about half the tyre
+    // (the brakes were capped at 0.42-0.6 g): the cap left the margin. With the pedal
+    // scaled to the threshold (`modulateBrake`), a share sized to the bare capacity
+    // spends the whole friction circle and leaves nothing to steer with. Measured on
+    // seed 42's esses at a 0.5 frantic share, four 5-minute runs each: without the
+    // reserve frantic drivers left the road 0.31 times per car-minute against 0.14
+    // before the brake change, and with it 0.16, slides 0.05 and contacts 0.04 per
+    // car-minute against 0.23 and 0.15.
     const lateralUse = Math.abs(vehicle.chassis.angvel().y) * speed;
     const bendBrakeShare = Math.max(
       BEND_BRAKE_SHARE_FLOOR,
       Math.sqrt(
-        Math.max(0, 1 - Math.min(1, (lateralUse / physicalLateralAccel) ** 2)),
+        Math.max(0, 1 - Math.min(1, (lateralUse / (physicalLateralAccel * config.gripReserve)) ** 2)),
       ),
     );
     // …UNLESS HALF A PEDAL CANNOT LOSE THE SPEED IN THE ROOM THERE IS. Behind a MOVING
