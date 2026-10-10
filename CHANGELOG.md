@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.22.0 — 2026-10-10
+
+Brakes that reach the tyres and lock them, a road that hits instead of floating (humps, potholes, cracks, patches and joints), one keyboard steering scheme, a rear-only handbrake, calmer and smarter traffic, more corners and a twisty road from the first kilometre, the Panini lens removed, and settings regrouped with a Settings button on the title screen.
 
 ### Removed
 
