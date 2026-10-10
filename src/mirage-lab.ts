@@ -459,6 +459,7 @@ export async function bootMirageLab(): Promise<void> {
     qz: carState.qz,
     qw: carState.qw,
     speedKmh: 0,
+    steering: 0,
     surfaceRoughness: 0,
     wheelContact: 0,
     hoodOffset: vehicle.modelMeasure.hoodPoint,
@@ -506,6 +507,7 @@ export async function bootMirageLab(): Promise<void> {
     target.qz = targetRotation.z;
     target.qw = targetRotation.w;
     target.speedKmh = vehicle.speedKmh;
+    target.steering = vehicle.steeringFraction;
 
     Object.assign(cameraInput, lastInput);
     cameraInput.lookYaw = lookYaw;

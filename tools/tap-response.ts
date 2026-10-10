@@ -6,9 +6,10 @@
  * The keyboard is how most players steer this game: they hold a key for a fraction of a
  * second, let go, and hold the other one to take it back. That makes the mapping from
  * TAP LENGTH to ROAD-WHEEL ANGLE the whole of the control system that matters most, and
- * it is not something that can be judged by reading the code — two soft-centre terms sit
- * in series (the input layer's smoothing and the vehicle's shaping exponent), and whether
- * they add up to a usable curve or a dead zone is only visible by measurement.
+ * it is not something that can be judged by reading the code — the vehicle's keyboard
+ * hold (`KEY_STEER_WIND_S`), the reach it winds toward and the steering box's free play
+ * sit in series, and whether they add up to a usable curve or a dead zone is only
+ * visible by measurement.
  *
  * WHAT THIS DEFENDS. A tap has to do something, and a longer tap has to do more. Those
  * two properties are what "light taps to correct the car" means, and both of them have
@@ -23,7 +24,6 @@ import { installAssetShim } from './assetshim';
 import { installDocumentShim } from './domshim';
 import { addGround, makeRig } from './handling-bench';
 import { preloadCarModels } from '../src/render/carmodel';
-import { keySteerStep, type KeySteerRelease } from '../src/core/input';
 import { FIXED_DT } from '../src/core/physics';
 
 installAssetShim();
@@ -34,8 +34,8 @@ const model = process.argv[2] ?? 'sv_vaz2101';
 const speedKmh = Number(process.argv[3] ?? 60);
 const speedMps = speedKmh / 3.6;
 
-// The keyboard input layer's own shaping (`keySteerStep`, core/input.ts): the bench
-// drives the same function the game does, so it cannot drift from it.
+// The keyboard sends a direction, -1/0/1, and the vehicle winds its own hold toward it
+// (`SteerMode` 'keys'): the bench sends the same frames the game does.
 
 /** Tap lengths swept, seconds. The short end is a real tap, not a minimum hold. */
 const TAPS = [0.04, 0.06, 0.08, 0.12, 0.16, 0.22, 0.3, 0.45, 0.7];
@@ -44,7 +44,8 @@ const FINE_TAPS = [0.04, 0.06, 0.08];
 
 interface TapResult {
   readonly tapS: number;
-  readonly input: number;
+  /** The vehicle's keyboard hold at its peak, 0..1 (`KEY_STEER_WIND_S`). */
+  readonly hold: number;
   readonly steerDeg: number;
   readonly yawDegS: number;
   readonly latG: number;
@@ -60,7 +61,7 @@ await preloadCarModels([model]);
  * and report a car that cannot turn. Coasting for the second a tap lasts costs about
  * 3 km/h to rolling resistance, which is far smaller than the effect being measured.
  */
-async function tap(tapS: number, release: KeySteerRelease): Promise<TapResult> {
+async function tap(tapS: number): Promise<TapResult> {
   // The flat 8 km ground: the old 30 m ramp ran out under the car within the run.
   const rig = await makeRig(model, (physics) => addGround(physics, SurfaceType.Asphalt), false);
   const body = rig.vehicle.chassis;
@@ -68,22 +69,20 @@ async function tap(tapS: number, release: KeySteerRelease): Promise<TapResult> {
   body.setLinvel({ x: 0, y: 0, z: speedMps }, true);
   body.setAngvel({ x: 0, y: 0, z: 0 }, true);
 
-  let f = 0;
   let steerDeg = 0;
   let yawDegS = 0;
   let latG = 0;
-  let input = 0;
+  let hold = 0;
 
   const steps = Math.round(3 / FIXED_DT);
   for (let i = 0; i < steps; i++) {
     const t = i * FIXED_DT;
     const want = t >= 1 && t < 1 + tapS ? 1 : 0;
-    f = keySteerStep(f, want, FIXED_DT, release);
 
     rig.input.throttle = t < 1 ? 0.25 : 0;
     rig.input.brake = 0;
     rig.input.reverse = false;
-    rig.input.steer = f;
+    rig.input.steer = want;
     rig.input.handbrake = false;
     rig.input.steerMode = 'keys';
 
@@ -99,12 +98,14 @@ async function tap(tapS: number, release: KeySteerRelease): Promise<TapResult> {
     const vel = body.linvel();
     const g = (Math.abs(vel.x) * 9.81) / Math.max(0.1, Math.abs(vel.z));
     if (g > latG) latG = g;
-    if (Math.abs(f) > input) input = Math.abs(f);
+    // The vehicle's private hold, read for the report.
+    const vehicle: object = rig.vehicle;
+    if ('keySteerHold' in vehicle && typeof vehicle.keySteerHold === 'number') hold = Math.max(hold, vehicle.keySteerHold);
   }
   rig.vehicle.dispose();
   return {
     tapS,
-    input,
+    hold,
     steerDeg: steerDeg * DEG,
     yawDegS,
     latG,
@@ -112,64 +113,62 @@ async function tap(tapS: number, release: KeySteerRelease): Promise<TapResult> {
 }
 
 const failures: string[] = [];
-for (const release of ['letGo', 'ease'] as const satisfies readonly KeySteerRelease[]) {
-  const results: TapResult[] = [];
-  for (const t of TAPS) results.push(await tap(t, release));
+const results: TapResult[] = [];
+for (const t of TAPS) results.push(await tap(t));
 
-  console.log(`\n${model} at ${speedKmh} km/h on asphalt, key release '${release}': one steering tap, held for the given time`);
-  console.log('  tap ms   input   steer deg   yaw deg/s    lat g   x previous');
+console.log(`\n${model} at ${speedKmh} km/h on asphalt: one steering tap, held for the given time`);
+console.log('  tap ms    hold   steer deg   yaw deg/s    lat g   x previous');
 
-  let previous = 0;
-  for (const r of results) {
-    const ratio = previous > 0 ? r.steerDeg / previous : 0;
-    console.log(
-      `${String(Math.round(r.tapS * 1000)).padStart(7)} ${r.input.toFixed(3).padStart(8)} ` +
-        `${r.steerDeg.toFixed(2).padStart(11)} ${r.yawDegS.toFixed(1).padStart(11)} ` +
-        `${r.latG.toFixed(3).padStart(8)} ${ratio.toFixed(2).padStart(11)}`,
+let previous = 0;
+for (const r of results) {
+  const ratio = previous > 0 ? r.steerDeg / previous : 0;
+  console.log(
+    `${String(Math.round(r.tapS * 1000)).padStart(7)} ${r.hold.toFixed(3).padStart(8)} ` +
+      `${r.steerDeg.toFixed(2).padStart(11)} ${r.yawDegS.toFixed(1).padStart(11)} ` +
+      `${r.latG.toFixed(3).padStart(8)} ${ratio.toFixed(2).padStart(11)}`,
+  );
+  previous = r.steerDeg;
+}
+
+// A FINE TAP MUST DO SOMETHING. This is the assertion the dead zone used to fail: with
+// 0.024 rad of free play, a 40 ms tap produced 0.00 degrees of road-wheel angle and the
+// car did not deviate at all.
+for (const r of results) {
+  if (!FINE_TAPS.includes(r.tapS)) continue;
+  if (r.steerDeg < 0.25) {
+    failures.push(`a ${Math.round(r.tapS * 1000)} ms tap steers ${r.steerDeg.toFixed(2)} deg (expected at least 0.25)`);
+  }
+  if (r.steerDeg > 6) {
+    failures.push(`a ${Math.round(r.tapS * 1000)} ms tap steers ${r.steerDeg.toFixed(2)} deg — too much for a fine correction`);
+  }
+}
+
+// AND A LONGER TAP MUST DO MORE, all the way up. A response that is not monotonic in tap
+// length cannot be learned, whatever its absolute size.
+for (let i = 1; i < results.length; i++) {
+  const previousResult = results[i - 1]!;
+  const current = results[i]!;
+  if (current.steerDeg < previousResult.steerDeg * 0.98) {
+    failures.push(
+      `the response is not monotonic: ${Math.round(previousResult.tapS * 1000)} ms gives ` +
+        `${previousResult.steerDeg.toFixed(2)} deg but a longer ` +
+        `${Math.round(current.tapS * 1000)} ms gives ${current.steerDeg.toFixed(2)}`,
     );
-    previous = r.steerDeg;
   }
+}
 
-  // A FINE TAP MUST DO SOMETHING. This is the assertion the dead zone used to fail: with
-  // 0.024 rad of free play, a 40 ms tap produced 0.00 degrees of road-wheel angle and the
-  // car did not deviate at all.
-  for (const r of results) {
-    if (!FINE_TAPS.includes(r.tapS)) continue;
-    if (r.steerDeg < 0.25) {
-      failures.push(`${release}: a ${Math.round(r.tapS * 1000)} ms tap steers ${r.steerDeg.toFixed(2)} deg (expected at least 0.25)`);
-    }
-    if (r.steerDeg > 6) {
-      failures.push(`${release}: a ${Math.round(r.tapS * 1000)} ms tap steers ${r.steerDeg.toFixed(2)} deg — too much for a fine correction`);
-    }
-  }
-
-  // AND A LONGER TAP MUST DO MORE, all the way up. A response that is not monotonic in tap
-  // length cannot be learned, whatever its absolute size.
-  for (let i = 1; i < results.length; i++) {
-    const previousResult = results[i - 1]!;
-    const current = results[i]!;
-    if (current.steerDeg < previousResult.steerDeg * 0.98) {
-      failures.push(
-        `${release}: the response is not monotonic: ${Math.round(previousResult.tapS * 1000)} ms gives ` +
-          `${previousResult.steerDeg.toFixed(2)} deg but a longer ` +
-          `${Math.round(current.tapS * 1000)} ms gives ${current.steerDeg.toFixed(2)}`,
-      );
-    }
-  }
-
-  // AND THERE MUST BE NO CLIFF: no single step of the sweep may multiply the response by
-  // more than three, or the finest correction available to the player lands on the wrong
-  // side of a discontinuity. Ratios are around 1.3-1.9 when the chain is healthy.
-  for (let i = 1; i < results.length; i++) {
-    const previousResult = results[i - 1]!;
-    const current = results[i]!;
-    if (previousResult.steerDeg > 0.1 && current.steerDeg > previousResult.steerDeg * 3) {
-      failures.push(
-        `${release}: cliff between ${Math.round(previousResult.tapS * 1000)} ms and ` +
-          `${Math.round(current.tapS * 1000)} ms: ${previousResult.steerDeg.toFixed(2)} to ` +
-          `${current.steerDeg.toFixed(2)} deg`,
-      );
-    }
+// AND THERE MUST BE NO CLIFF: no single step of the sweep may multiply the response by
+// more than three, or the finest correction available to the player lands on the wrong
+// side of a discontinuity. Ratios are around 1.3-1.9 when the chain is healthy.
+for (let i = 1; i < results.length; i++) {
+  const previousResult = results[i - 1]!;
+  const current = results[i]!;
+  if (previousResult.steerDeg > 0.1 && current.steerDeg > previousResult.steerDeg * 3) {
+    failures.push(
+      `cliff between ${Math.round(previousResult.tapS * 1000)} ms and ` +
+        `${Math.round(current.tapS * 1000)} ms: ${previousResult.steerDeg.toFixed(2)} to ` +
+        `${current.steerDeg.toFixed(2)} deg`,
+    );
   }
 }
 

@@ -13,30 +13,24 @@ import { INVENTORY_ITEM_LIMIT } from '../items/items';
 /**
  * What `InputFrame.steer` means, decided by the device that produced it.
  *
- *   keys          a keyboard or touch axis, ramped (`keySteerStep`). The vehicle's
- *                 steering assist turns it into a share of the angle that puts the
- *                 front tyres at their peak slip.
- *   keysFull      the same axis with the keyboard's assist off: its curve against the
- *                 whole lock, at any speed.
- *   analogAssist  a position (a pad stick, the precise-control wheel) read against that
- *                 same cap, proportionally: the stick's edge is the tyres' peak.
+ *   keys          a keyboard or touch DIRECTION: -1, 0 or 1 from the keys, the touch
+ *                 wheel's deflection from the thumb. Not a position: the vehicle winds
+ *                 its own hold toward it, so how long a key is down is how much wheel
+ *                 (`Vehicle.updateSteering`, `KEY_STEER_WIND_S` in vehicletuning.ts).
+ *                 Near walking pace the hold turns the wheels about the car's axis up
+ *                 to the whole lock; at speed it asks for slip on top of where the front
+ *                 tyres are travelling, up to their peak.
+ *   analogAssist  a position (a pad stick, the precise-control wheel) read against the
+ *                 tyres' peak at speed, proportionally: the stick's edge is the peak.
  *   analog        a position read against the whole steering lock.
  *   direct        a rack angle as a share of lock, for autonomy and anything else that
  *                 has computed the angle it wants (`Vehicle.steeringInputForWheelAngle`).
  *
- * In the three player modes a steer of exactly 0 means no hand is on the wheel, and the
- * tyres' own aligning moment turns it. `direct` always holds the rack where it is told.
+ * In the analogue modes a steer of exactly 0 means no hand is on the wheel, and the
+ * tyres' own aligning moment turns it; with keys it means so once the hold has been
+ * given back. `direct` always holds the rack where it is told.
  */
-export type SteerMode = 'keys' | 'keysFull' | 'analogAssist' | 'analog' | 'direct';
-
-/**
- * What a released steering key does (`keySteerStep`), a player setting:
- *
- *   letGo  the hand leaves the wheel the moment the key comes up, and the tyres'
- *          aligning moment turns it toward where the car is going, at once.
- *   ease   the hand eases off over `STEER_EASE` first, and lets go near the centre.
- */
-export type KeySteerRelease = 'letGo' | 'ease';
+export type SteerMode = 'keys' | 'analogAssist' | 'analog' | 'direct';
 
 export interface InputFrame {
   /** 0..1 */
@@ -266,52 +260,6 @@ export function keyPedalStep(
 }
 
 /**
- * Time constant of a held steering key's wind-up. A key now asks for a share of the
- * front tyres' peak slip rather than of the lock, so it has to reach the top of the
- * travel sooner than the 0.45 s it used to take for the same yaw: 0.3 s puts a held key
- * at the peak in about two thirds of a second, and a 40 ms tap still asks for a light
- * correction. Tune in game.
- */
-const STEER_RISE = 0.3;
-
-/**
- * Time constant of the hand easing off after a steering key comes up. Measured with the
- * old instant release (80 km/h, Zhiguli): half the road-wheel angle was gone in one
- * physics step and the yaw in about 0.2 s, two to four times faster than before the
- * driving overhaul, so every correction was taken back the moment the key rose and
- * steering became a fight. 0.25 s halves the slip a key asked for in about 0.14 s,
- * which is what the old 0.32 s axis decay gave through its steeper curve.
- */
-const STEER_EASE = 0.25;
-/** Below this the easing hand lets go of the wheel: the axis reads exactly 0. */
-const STEER_LET_GO = 0.03;
-
-/**
- * One step of the keyboard steering axis toward `want`, -1..1.
- *
- * A held key winds the axis up over `STEER_RISE`; a reversal winds it through zero the
- * same way, the hand still on the wheel. A released key depends on `release`
- * (`KeySteerRelease`). With `letGo` the axis drops to 0 at once, because 0 is how the
- * frame says NO HAND IS ON THE WHEEL (`SteerMode`): the vehicle then lets the tyres'
- * own aligning moment turn it back, at the rate the road gives. With `ease` the axis
- * decays over `STEER_EASE` with the hand still on, and reads 0 — let go — only below
- * `STEER_LET_GO`. Exported so the benches drive the same ramp the game does.
- */
-export function keySteerStep(
-  value: number,
-  want: number,
-  dt: number,
-  release: KeySteerRelease,
-): number {
-  if (want === 0) {
-    if (release === 'letGo') return 0;
-    const eased = value - value * Math.min(1, dt / STEER_EASE);
-    return Math.abs(eased) < STEER_LET_GO ? 0 : eased;
-  }
-  return value + (want - value) * Math.min(1, dt / STEER_RISE);
-}
-
-/**
  * Precise-control wheel travel per CSS pixel. Roughly 900 px reaches full lock;
  * mouse sensitivity remains independent so camera preference cannot change steering.
  */
@@ -367,8 +315,6 @@ export class InputReader {
   private preciseSteerEnabled = false;
   /** Analog positions read against the assist's cap; see `setAnalogSteeringAssist`. */
   private analogSteerAssist = true;
-  private keyboardSteerAssist = true;
-  private keyboardSteerRelease: KeySteerRelease = 'letGo';
   /**
    * Linear steering-wheel position, -1..1. Mouse and keyboard add to the same value;
    * neither releasing a key nor stopping the mouse returns it toward centre.
@@ -470,20 +416,6 @@ export class InputReader {
    */
   setAnalogSteeringAssist(enabled: boolean): void {
     this.analogSteerAssist = enabled;
-  }
-
-  /**
-   * The settings' steering assist for the KEYBOARD (and the touch wheel, which follows
-   * the same ramp): on, a held key asks for the tyres' peak at this speed (`keys`);
-   * off, it winds toward the whole lock along the keyboard curve (`keysFull`).
-   */
-  setKeyboardSteeringAssist(enabled: boolean): void {
-    this.keyboardSteerAssist = enabled;
-  }
-
-  /** The settings' `KeySteerRelease` for the keyboard and the touch wheel. */
-  setKeyboardSteerRelease(release: KeySteerRelease): void {
-    this.keyboardSteerRelease = release;
   }
 
   /**
@@ -679,7 +611,7 @@ export class InputReader {
     const analogMode = this.analogSteerAssist ? 'analogAssist' : 'analog';
     if (this.steerDevice === 'pad') {
       // An analog stick is already a position, held and released by the thumb; the
-      // keyboard's rise ramp would only put a lag between it and the wheels.
+      // keyboard's wind-up would only put a lag between it and the wheels.
       f.steer = pad.steer;
       f.steerMode = analogMode;
     } else if (preciseDrive) {
@@ -689,11 +621,11 @@ export class InputReader {
       f.steer = this.preciseWheel;
       f.steerMode = analogMode;
     } else {
-      // The touch wheel is already analogue, so it supplies the same target the
-      // keyboard ramp follows, and lifting the thumb lets go of the wheel like a key.
-      const wantSteer = keySteer !== 0 || !touch?.steeringActive ? keySteer : touch.steer;
-      f.steer = keySteerStep(f.steer, wantSteer, dt, this.keyboardSteerRelease);
-      f.steerMode = this.keyboardSteerAssist ? 'keys' : 'keysFull';
+      // Keys and the touch wheel give a direction, and the vehicle winds the wheel
+      // toward it for as long as it is held (`SteerMode` 'keys'). The touch wheel's
+      // deflection is how far it may wind; lifting the thumb is releasing a key.
+      f.steer = keySteer !== 0 || !touch?.steeringActive ? keySteer : touch.steer;
+      f.steerMode = 'keys';
     }
 
     const taps = this.touch?.consumeTaps();

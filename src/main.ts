@@ -382,8 +382,6 @@ async function boot(): Promise<void> {
   input.setKeyBindings(world.state.settings.keyBindings);
   input.setMouseSensitivity(world.state.settings.mouseSensitivity);
   input.setAnalogSteeringAssist(world.state.settings.controllerSteerAssist);
-  input.setKeyboardSteeringAssist(world.state.settings.keyboardSteerAssist);
-  input.setKeyboardSteerRelease(world.state.settings.keyboardSteerRelease);
   // The pad's preferences are device-facing like the mouse's, so they are pushed at
   // the same place and by the same code in `applySettings` below.
   const pads = gamepads();
@@ -1290,6 +1288,7 @@ async function boot(): Promise<void> {
     qz: 0,
     qw: 1,
     speedKmh: 0,
+    steering: 0,
     surfaceRoughness: 0,
     wheelContact: 0,
     hoodOffset: [0, 0, 0],
@@ -2242,6 +2241,7 @@ async function boot(): Promise<void> {
       target.qz = targetQuat.z;
       target.qw = targetQuat.w;
       target.speedKmh = driving.speedKmh;
+      target.steering = driving.steeringFraction;
       target.surfaceRoughness = driving.audio.surfaceRoughness;
       target.wheelContact = driving.audio.wheelContactFraction;
       target.hoodOffset = driving.modelMeasure.hoodPoint;
@@ -2264,6 +2264,7 @@ async function boot(): Promise<void> {
       target.qz = 0;
       target.qw = 1;
       target.speedKmh = 0;
+      target.steering = 0;
       target.surfaceRoughness = 0;
       target.wheelContact = 0;
       target.velocityX = 0;
@@ -2926,8 +2927,6 @@ async function boot(): Promise<void> {
       input.setKeyBindings(world.state.settings.keyBindings);
       input.setMouseSensitivity(world.state.settings.mouseSensitivity);
       input.setAnalogSteeringAssist(world.state.settings.controllerSteerAssist);
-      input.setKeyboardSteeringAssist(world.state.settings.keyboardSteerAssist);
-      input.setKeyboardSteerRelease(world.state.settings.keyboardSteerRelease);
       pads.setDeadzone(world.state.settings.controllerDeadzone);
       pads.setSteeringSensitivity(world.state.settings.controllerSteerSensitivity);
       audio.applySettings(world.state.settings);

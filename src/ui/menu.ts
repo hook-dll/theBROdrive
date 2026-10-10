@@ -1881,7 +1881,7 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
         {
           label: 'Standard',
           icon: 'keys',
-          hint: 'A and D ask for as much steering as the front tyres can use at this speed. Let go and the wheel unwinds on its own.',
+          hint: 'Hold A or D longer for more steering, up to what the tyres can use. Let go and the wheel comes back: slowly when crawling, so taps add up, quickly at speed.',
           active: () => !settings.preciseSteering,
           pick: () => {
             settings.preciseSteering = false;
@@ -1895,54 +1895,6 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           active: () => settings.preciseSteering,
           pick: () => {
             settings.preciseSteering = true;
-            apply();
-          },
-        },
-      ]),
-    );
-    pane.appendChild(
-      segmented('Keyboard steering assist', [
-        {
-          label: 'On',
-          icon: 'drive',
-          hint: 'A held key asks for as much steering as the front tyres can use at this speed.',
-          active: () => settings.keyboardSteerAssist,
-          pick: () => {
-            settings.keyboardSteerAssist = true;
-            apply();
-          },
-        },
-        {
-          label: 'Off',
-          icon: 'keys',
-          hint: 'A held key winds the wheel toward full lock at any speed: quick hands needed at speed.',
-          active: () => !settings.keyboardSteerAssist,
-          pick: () => {
-            settings.keyboardSteerAssist = false;
-            apply();
-          },
-        },
-      ]),
-    );
-    pane.appendChild(
-      segmented('Steering key release', [
-        {
-          label: 'Let go',
-          icon: 'keys',
-          hint: 'Releasing the key lets go of the wheel: the tyres turn it back toward where the car is going at once.',
-          active: () => settings.keyboardSteerRelease === 'letGo',
-          pick: () => {
-            settings.keyboardSteerRelease = 'letGo';
-            apply();
-          },
-        },
-        {
-          label: 'Ease off',
-          icon: 'drive',
-          hint: 'Releasing the key eases the hand off over a quarter second before letting go: a correction holds a little longer.',
-          active: () => settings.keyboardSteerRelease === 'ease',
-          pick: () => {
-            settings.keyboardSteerRelease = 'ease';
             apply();
           },
         },
@@ -2413,8 +2365,6 @@ export class MainMenu {
         controllerDeadzone: base.controllerDeadzone,
         controllerSteerSensitivity: base.controllerSteerSensitivity,
         controllerSteerAssist: base.controllerSteerAssist,
-        keyboardSteerAssist: base.keyboardSteerAssist,
-        keyboardSteerRelease: base.keyboardSteerRelease,
         masterVolume: base.masterVolume,
         carVolume: base.carVolume,
         worldVolume: base.worldVolume,
@@ -2446,8 +2396,6 @@ export class MainMenu {
           controllerDeadzone: settings.controllerDeadzone,
           controllerSteerSensitivity: settings.controllerSteerSensitivity,
           controllerSteerAssist: settings.controllerSteerAssist,
-          keyboardSteerAssist: settings.keyboardSteerAssist,
-          keyboardSteerRelease: settings.keyboardSteerRelease,
           masterVolume: settings.masterVolume,
           carVolume: settings.carVolume,
           worldVolume: settings.worldVolume,

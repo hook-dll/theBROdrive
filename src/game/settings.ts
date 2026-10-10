@@ -10,7 +10,7 @@
  */
 
 import { GAMEPLAY_CONFIG } from '../config';
-import { BINDABLE_ACTIONS, type KeySteerRelease } from '../core/input';
+import { BINDABLE_ACTIONS } from '../core/input';
 import { DEFAULT_DEADZONE } from '../core/gamepad';
 export type GearboxMode = 'manual' | 'automatic';
 /**
@@ -455,16 +455,6 @@ export interface Settings {
    */
   controllerSteerAssist: boolean;
   /**
-   * The same assist for the keyboard (and touch wheel): on, a held key asks for the
-   * front tyres' peak at this speed; off, the key winds toward the whole lock.
-   */
-  keyboardSteerAssist: boolean;
-  /**
-   * What a released steering key does (`KeySteerRelease` in core/input.ts): the hand
-   * lets go at once, or eases off and lets go near the centre.
-   */
-  keyboardSteerRelease: KeySteerRelease;
-  /**
    * Master volume, 0..1: everything, the radio included (audio/mixer.ts). Car, World
    * and Radio are each a share of it.
    */
@@ -632,8 +622,6 @@ export const DEFAULT_SETTINGS: Settings = {
   controllerDeadzone: DEFAULT_DEADZONE,
   controllerSteerSensitivity: 1,
   controllerSteerAssist: true,
-  keyboardSteerAssist: true,
-  keyboardSteerRelease: 'letGo',
   masterVolume: DEFAULT_MASTER_VOLUME,
   carVolume: DEFAULT_CAR_VOLUME,
   worldVolume: DEFAULT_WORLD_VOLUME,
@@ -853,8 +841,6 @@ export function sanitizeSettings(raw: unknown): Settings {
     ),
     // Missing means a save from before the option: on, like a new one.
     controllerSteerAssist: obj.controllerSteerAssist !== false,
-    keyboardSteerAssist: obj.keyboardSteerAssist !== false,
-    keyboardSteerRelease: obj.keyboardSteerRelease === 'ease' ? 'ease' : 'letGo',
     masterVolume: unitInterval(obj.masterVolume, DEFAULT_MASTER_VOLUME),
     carVolume: unitInterval(obj.carVolume, DEFAULT_CAR_VOLUME),
     worldVolume: unitInterval(obj.worldVolume, DEFAULT_WORLD_VOLUME),

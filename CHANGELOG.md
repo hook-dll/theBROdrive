@@ -12,6 +12,34 @@
   the drive then loads).
 
 ### Changed
+- ONE KEYBOARD STEERING: HOW LONG YOU HOLD THE KEY IS HOW MUCH WHEEL. The Keyboard
+  steering assist and Steering key release settings are gone (old saved values are
+  ignored), and with them `SteerMode` 'keysFull', `KeySteerRelease`, `keySteerStep`, the
+  input setters and `steerInputExponent`. A key (or the touch wheel) is now a direction;
+  the vehicle winds its own hold toward it (`Vehicle.updateSteering`, constants
+  `KEY_STEER_*` in vehicletuning.ts):
+  - Walking pace to 20 km/h (blended to 40 km/h): the hold turns the wheels about the
+    CAR'S AXIS to full lock, whatever the slide; release gives it back over 2.5 s, so
+    taps add up. Owner's report: sliding sideways down a sand dune, the key to turn
+    back uphill did nothing. Measured in game on a 23° sand slope at 8 km/h: the old
+    assist steered relative to the travel angle and its tail-out give-way held the
+    wheels at 18-27° DOWNHILL with the uphill key held; the hold now puts them at full
+    uphill lock (29.5 of 30.4°) in 1.0 s and the nose turns 27° back uphill in 5 s.
+  - At speed: the hold winds in (time constant 0.35 s) to the old assist cap, the
+    front tyres' peak on top of the travel angle, and returns at a rate proportional
+    to the hold plus a floor, starting 0.25 s after the key comes up: a row of taps
+    holds a bend with no snap to centre (100 km/h, 55 ms taps every 200 ms: hold
+    0.24-0.37, never zero; 40/55/70 ms taps hold 0.9/1.6/1.9° of steer), and a whole
+    hold is back in about 0.6 s, against Ease off's 0.9 s.
+  - The opposite key unwinds the hold 2.5x faster and stops at straight; past it, the
+    ordinary rate, so one short tap after a few too many is a small correction (in
+    game: 0.86° right to 0.88° left and back). In a slide (`tailOut`) the countersteer
+    side winds up to 2.5x faster and a released hold comes back at once.
+  - The tail-out give-way now needs the body to be rotating (yaw rate against the
+    a/v the grip holds), so a car pushed sideways by a slope is not handed to its
+    travel angle. The chase camera's look into a corner reads the steering rim
+    (`CameraTarget.steering`) instead of the input. `tools/tap-response.ts` and
+    `tools/steer-feel.ts` drive the new frames.
 - TRAFFIC BRAKES FOR WHAT IS ACROSS THE CROWN, DOES NOT HOLD A LINE INTO IT, AND WAKES LEVEL.
   Frantic contacts on the ten-stretch bench, classified from the new partner detail in
   `--events`: the commonest and fastest (15-25 m/s) was a detour, middle thread or pass

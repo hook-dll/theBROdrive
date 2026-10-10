@@ -21,6 +21,12 @@ export interface CameraTarget {
   qz: number;
   qw: number;
   speedKmh: number;
+  /**
+   * The steering rim's share of lock, positive LEFT (`Vehicle.steeringFraction`); 0 on
+   * foot. The look into a corner reads the wheel and not the input, because a key is
+   * only a direction: the wheel it has wound in is the thing to look along.
+   */
+  steering: number;
   /** Mean micro-bump amplitude under the loaded wheels, metres; 0 on foot. */
   surfaceRoughness: number;
   /** Fraction of the wheels on the ground, 0..1; 0 on foot. */
@@ -1027,7 +1033,7 @@ export class CameraRig {
       clamp(-Math.atan2(sideY, upY), -HOOD_ROLL_MAX_RAD, HOOD_ROLL_MAX_RAD) * HOOD_ROLL_SHARE;
 
     this.steerLook =
-      input.steer * STEER_LOOK_MAX_RAD * (1 - clamp(target.speedKmh / STEER_LOOK_FADE_KMH, 0, 1));
+      -target.steering * STEER_LOOK_MAX_RAD * (1 - clamp(target.speedKmh / STEER_LOOK_FADE_KMH, 0, 1));
   }
 
   private desiredArm(target: CameraTarget): void {

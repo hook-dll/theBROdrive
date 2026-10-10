@@ -172,6 +172,15 @@ import {
   SLIP_REFERENCE_MPS,
   STEERING_WHEEL_HALF_LOCK_RAD,
   STEER_ASSIST_SLIP_MARGIN,
+  KEY_STEER_AXIS_KMH,
+  KEY_STEER_COUNTER,
+  KEY_STEER_RETURN_S,
+  KEY_STEER_RETURN_FLOOR,
+  KEY_STEER_RETURN_SLOW_S,
+  KEY_STEER_RELEASE_S,
+  KEY_STEER_TYRE_KMH,
+  KEY_STEER_WIND_S,
+  KEY_STEER_WIND_SLOW_S,
   STEER_FREE_TAU_S,
   SUSPENSION_FORCE_HEADROOM,
   TRANSFORM_EMIT_INTERVAL,
@@ -788,6 +797,14 @@ export class Vehicle implements Rebasable {
   // the backlash window around it, or anywhere at all when no hand is on the wheel.
   private steerCommand = 0;
   private steerAngle = 0;
+  /**
+   * The keyboard's hold, -1..1 with positive RIGHT like `InputFrame.steer`: how much
+   * wheel the steering keys have wound in so far (`SteerMode` 'keys', see
+   * `KEY_STEER_WIND_S`). Zero, with no key down, is no hand on the wheel.
+   */
+  private keySteerHold = 0;
+  /** Seconds since the steering keys last went up: see `KEY_STEER_RELEASE_S`. */
+  private keySteerReleasedS = 0;
   /** Load-sensitive front bump-steer disturbance, filtered in fixedUpdate. */
   private bumpSteerAngle = 0;
   /** The front axle's sustained load difference, which is roll and not a bump. */
@@ -958,6 +975,8 @@ export class Vehicle implements Rebasable {
   private readonly invRotationScratch = { x: 0, y: 0, z: 0, w: 1 };
   private readonly localVelScratch = { x: 0, y: 0, z: 0 };
   private readonly bodyRightScratch = { x: 0, y: 0, z: 0 };
+  /** The chassis' angular velocity, for the keyboard's tail-out give-way. */
+  private readonly angvelScratch = { x: 0, y: 0, z: 0 };
   private readonly bodyUpScratch = { x: 0, y: 0, z: 0 };
   private readonly wheelRightScratch = { x: 0, y: 0, z: 0 };
   /** Body forward axis in world space, for the steering assist's front-axle velocity. */
@@ -1503,6 +1522,7 @@ export class Vehicle implements Rebasable {
     this.wheels = [];
     this.steerCommand = 0;
     this.steerAngle = 0;
+    this.keySteerHold = 0;
     this.bumpSteerAngle = 0;
     this.sustainedImbalance = 0;
     this.frontRollRad = 0;
@@ -4596,38 +4616,102 @@ export class Vehicle implements Rebasable {
     const tailOut = rearLoad > 0 ? clamp(rearSlide / rearLoad - 1, 0, 1) : 0;
 
     // Positive rack is a left turn and positive input a right one.
-    const side = steer > 0 ? -1 : 1;
-    const magnitude = Math.abs(steer);
     let target: number;
-    if (input.steerMode === 'keys' || input.steerMode === 'analogAssist') {
-      const share =
-        input.steerMode === 'keys' ? Math.pow(magnitude, this.handling.steerInputExponent) : magnitude;
-      let reach = share * lock;
+    let handsOff = steer === 0 && input.steerMode !== 'direct';
+    if (input.steerMode === 'keys') {
+      // How far along the band from the car's axis to the tyres' travel the speed is.
+      const band = clamp(
+        (fwd * 3.6 - KEY_STEER_AXIS_KMH) / (KEY_STEER_TYRE_KMH - KEY_STEER_AXIS_KMH),
+        0,
+        1,
+      );
+      const tyreShare = band * band * (3 - 2 * band);
+      // The body's yaw rate about its own up axis, positive LEFT like the rack.
+      const angvel = this.chassisBody.angvel(this.angvelScratch);
+      const yawRate =
+        angvel.x * (forward.y * right.z - forward.z * right.y) +
+        angvel.y * (forward.z * right.x - forward.x * right.z) +
+        angvel.z * (forward.x * right.y - forward.y * right.x);
+      // The hold: wound in by a held key (an approach, quick off the centre and slowing
+      // toward the full reach), faster by the opposite one until it is back through
+      // straight, and given back on release, slowly at walking pace and quickly at
+      // speed. With grip, it comes back from nothing at the moment the key comes up to
+      // the full rate `KEY_STEER_RELEASE_S` later, so taps hold a bend; with the tail out
+      // (`tailOut`) it comes back at the full rate at once, the way a driver lets the
+      // wheel unwind out of a slide.
+      this.keySteerReleasedS = steer === 0 ? this.keySteerReleasedS + dt : 0;
+      const held = this.keySteerHold;
+      const wind = 1 / KEY_STEER_WIND_SLOW_S + tyreShare * (1 / KEY_STEER_WIND_S - 1 / KEY_STEER_WIND_SLOW_S);
+      const relaxed = steer !== 0 ? 1 : Math.max(tailOut, Math.min(1, this.keySteerReleasedS / KEY_STEER_RELEASE_S));
+      let hold: number;
+      if (steer !== 0 && held * steer < 0) {
+        // The opposite key unwinds quickly, and stops at straight.
+        const step = KEY_STEER_COUNTER * wind * dt;
+        hold = held > 0 ? Math.max(0, held - step) : Math.min(0, held + step);
+      } else if (Math.abs(steer) > Math.abs(held)) {
+        // Winding in, as a fresh press; on the countersteer side of a slide (the rear's
+        // side force pointing away from the key's turn) up to `KEY_STEER_COUNTER` faster.
+        const countersteer = (steer > 0 ? -1 : 1) * rearForce < 0;
+        const boost = countersteer ? 1 + (KEY_STEER_COUNTER - 1) * tailOut : 1;
+        hold = held + (steer - held) * Math.min(1, wind * boost * dt);
+      } else {
+        const rate =
+          (1 / KEY_STEER_RETURN_SLOW_S + tyreShare * (1 / KEY_STEER_RETURN_S - 1 / KEY_STEER_RETURN_SLOW_S)) *
+          (Math.abs(held) + KEY_STEER_RETURN_FLOOR) *
+          relaxed;
+        hold = held + clamp(steer - held, -rate * dt, rate * dt);
+      }
+      this.keySteerHold = hold;
+      handsOff = steer === 0 && hold === 0;
+      // About the car's axis: a share of the whole lock, wherever the car is going.
+      const axisTarget = -hold * lock;
+      let tyreTarget = axisTarget;
       if (load > 0 && fwd > 0) {
+        // About the travel angle: a share of the reach past it, which is the front
+        // tyres' peak or the kinematic angle of the tightest circle their grip holds,
+        // whichever goes further, so a whole hold is today's assist cap.
+        const side = hold > 0 ? -1 : 1;
         const tyrePeak = (peak / load) * (1 + STEER_ASSIST_SLIP_MARGIN);
         const gripAccel = staticLoad > 0 ? (capacity * GRAVITY) / staticLoad : 0;
         const kinematic = Math.atan((this.wheelbaseM * gripAccel) / (fwd * fwd));
-        // Keys: slip on top of the travel angle. Stick: a position against the reach.
-        const held =
-          input.steerMode === 'keys'
-            ? Math.max(side * centre + share * tyrePeak, share * kinematic)
-            : share * Math.max(side * centre + tyrePeak, kinematic);
         // The rear's side force points into the bend the car is in. Asking the front for
         // more force the same way, with that axle past its own peak, can only turn the
         // car further about its sliding tail: so on the TURN side the demand gives way
         // to the travel angle as the tail goes (`tailOut`), until the front wheels just
         // follow the way the car is going. The countersteer side keeps all of it. The
         // car's grip at the limit is the grip of the axle that runs out first.
-        const turning = side * rearForce > 0 ? 1 - tailOut : 1;
-        const follow = (input.steerMode === 'keys' ? 1 : share) * side * centre;
-        reach = turning * held + (1 - turning) * follow;
+        //
+        // Only while the body is ROTATING, though, by as much of the yaw rate the grip
+        // can hold on a circle (a / v) as it is turning at, either way: a tail swinging
+        // out, or swinging back after a catch. A car sliding sideways down a dune has the
+        // same rear force, pointing uphill, with no spin in it: there the key that turns
+        // the nose back uphill is obeyed, not handed to the travel angle, which points
+        // downhill.
+        const spin = gripAccel > 0 ? clamp((Math.abs(yawRate) * fwd) / gripAccel, 0, 1) : 1;
+        const turning = side * rearForce > 0 ? 1 - tailOut * spin : 1;
+        const reach = Math.max(tyrePeak, kinematic - side * centre);
+        tyreTarget = centre + side * Math.abs(hold) * turning * reach;
       }
-      target = side * clamp(reach, -lock, lock);
-    } else if (input.steerMode === 'keysFull') {
-      // Keys without the assist: the keyboard's own curve, against the whole lock.
-      target = side * Math.pow(magnitude, this.handling.steerInputExponent) * lock;
+      target = clamp(axisTarget + tyreShare * (tyreTarget - axisTarget), -lock, lock);
     } else {
-      target = -steer * lock;
+      this.keySteerHold = 0;
+      if (input.steerMode === 'analogAssist') {
+        const side = steer > 0 ? -1 : 1;
+        const share = Math.abs(steer);
+        let reach = share * lock;
+        if (load > 0 && fwd > 0) {
+          const tyrePeak = (peak / load) * (1 + STEER_ASSIST_SLIP_MARGIN);
+          const gripAccel = staticLoad > 0 ? (capacity * GRAVITY) / staticLoad : 0;
+          const kinematic = Math.atan((this.wheelbaseM * gripAccel) / (fwd * fwd));
+          // A position against the reach, and the same tail-out give as the keys'.
+          const held = share * Math.max(side * centre + tyrePeak, kinematic);
+          const turning = side * rearForce > 0 ? 1 - tailOut : 1;
+          reach = turning * held + (1 - turning) * share * side * centre;
+        }
+        target = side * clamp(reach, -lock, lock);
+      } else {
+        target = -steer * lock;
+      }
     }
 
     // The tyres' own swing this step, toward the travel angle and never past it: the
@@ -4636,7 +4720,7 @@ export class Vehicle implements Rebasable {
     const swingLimit =
       referenceMoment > 0 ? (Math.abs(moment) / (STEER_FREE_TAU_S * referenceMoment)) * dt : 0;
     const swing = clamp(gap, -swingLimit, swingLimit);
-    if (input.steerMode !== 'direct' && steer === 0) {
+    if (handsOff) {
       this.steerAngle = clamp(this.steerAngle + swing, -lock, lock);
       this.steerCommand = this.steerAngle;
       return;

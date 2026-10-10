@@ -148,6 +148,7 @@ const target: CameraTarget = {
   qz: 0,
   qw: 1,
   speedKmh: 0,
+  steering: 0,
   surfaceRoughness: 0,
   wheelContact: 0,
   hoodOffset: [0, 0, 0],
