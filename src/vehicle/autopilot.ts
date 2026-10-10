@@ -653,8 +653,26 @@ export function bendSpeed(
   return Math.sqrt(lateral / Math.max(curvature, 1e-4));
 }
 const MIN_PLANNED_BRAKE_MPS2 = 0.75;
-/** Chassis yaw feedback removes weave energy without weakening steady cornering. */
+/**
+ * Chassis yaw feedback removes weave energy without weakening steady cornering: in a
+ * settled bend the car's yaw curvature equals the path's and the term is zero.
+ *
+ * ITS GAIN HAS TO GROW WITH SPEED. The term asks for wheel angle in proportion to the
+ * yaw error, and what a wheel angle buys in yaw falls as speed rises (an understeering
+ * car's curvature per radian of steer is `1 / (L + K·v²)`), while the tyres' and the
+ * rack's lag stays a fixed time. At the town figure the loop was lightly damped above
+ * about 130 km/h: measured on the real-road bench, a frantic driver in 230-250 m S-bends
+ * on seed 42 and 1337 swung its yaw rate ±0.3 rad/s on ±0.05 of steering, the swing grew
+ * every half period, and five bodies of six left the road (8-31% of the run off it).
+ * Zeroing the worn front end's bump steer and free play did not change that; this gain
+ * at 3 did: 0% off the road on all twelve runs, and 10-40 km/h more pace, because the
+ * car is no longer spending its tyres on its own oscillation. Below the ramp the old
+ * figure holds, so a hairpin and a recovery turn exactly as they did.
+ */
 const YAW_RATE_DAMPING = 0.8;
+const YAW_RATE_DAMPING_FAST = 3;
+const YAW_DAMPING_RAMP_FROM_MPS = 15;
+const YAW_DAMPING_RAMP_TO_MPS = 30;
 /** Curvature trim bounds and leak, per second; see `ModeConfig.curvatureTrim`. */
 const CURVATURE_TRIM_SHARE = 0.4;
 const CURVATURE_TRIM_FLOOR = 0.0015;
@@ -4580,9 +4598,15 @@ export class Autopilot {
     } else {
       this.curvatureTrim = 0;
     }
+    // See YAW_RATE_DAMPING: the damping grows with speed from the town figure to the
+    // highway one.
+    const yawDamping =
+      YAW_RATE_DAMPING +
+      (YAW_RATE_DAMPING_FAST - YAW_RATE_DAMPING) *
+        clamp((speed - YAW_DAMPING_RAMP_FROM_MPS) / (YAW_DAMPING_RAMP_TO_MPS - YAW_DAMPING_RAMP_FROM_MPS), 0, 1);
     const controlledCurvature =
       pathCurvature * config.steeringGain +
-      YAW_RATE_DAMPING * (pathCurvature - actualYawCurvature) +
+      yawDamping * (pathCurvature - actualYawCurvature) +
       this.curvatureTrim;
     const wheelAngle = Math.atan(wheelbaseOf(vehicle) * controlledCurvature);
     out.steer = vehicle.steeringInputForWheelAngle(wheelAngle);

@@ -12,6 +12,18 @@
   the drive then loads).
 
 ### Changed
+- TRAFFIC NO LONGER WEAVES OFF THE ROAD AT SPEED. The autopilot's yaw-rate damping was one
+  figure (0.8) for every speed, and what a wheel angle buys in yaw falls as speed rises:
+  above about 130 km/h a frantic car in 230-250 m S-bends swung its yaw rate ±0.3 rad/s on
+  ±0.05 of steering, the swing grew every half period, and the car left the road. Zeroing
+  the worn front ends' bump steer and free play did not change it, so the cars keep their
+  wear. The damping now ramps from 0.8 below 54 km/h to 3 above 108 km/h
+  (`YAW_RATE_DAMPING_FAST`). Solo frantic runs on seed 42's and 1337's esses, six bodies:
+  8-31% of the run off the road on ten of twelve runs → 0% on all twelve, and 10-40 km/h
+  faster. Ten-stretch stream bench, per driven car-minute, before → after: frantic
+  departures 0.63 → 0.52, slides 1.26 → 0.77, airborne 0.18 → 0.08, contacts 0.45 → 0.36;
+  open-road pace 107 → 111 km/h; hurried and normal no worse. What remains of frantic
+  departures and slides is detours and passes on the verge, not the weave.
 - TRAFFIC NO LONGER PLANS BRAKING THE TYRES CANNOT GIVE, OR WAKES UP IN THE AIR. Measured
   with the real-road bench's new loss-of-control tally (tools/traffic-road.ts `--frantic-share
   0.5 --events`, ten stretches on seeds 1337/7/42), two causes, both fixed:
@@ -29,9 +41,8 @@
     banking, and a wake hands back the bend's yaw rate and the steering that holds it:
     0 of 769.
   Per driven car-minute, before → after: frantic airborne 0.52 → 0.18, contacts 0.55 →
-  0.45; normal airborne 0.11 → 0.04; frantic open-road pace 107 → 107 km/h. Still open:
-  frantic cars above ~135 km/h in 230-250 m S-bends on cracked asphalt weave and leave
-  the road (departures 0.74 → 0.63, slides unchanged); see the report.
+  0.45; normal airborne 0.11 → 0.04; frantic open-road pace 107 → 107 km/h. The weave
+  that remained above ~135 km/h is the entry above.
 - MORE CORNERS, AND A NEW GAME OPENS ON A TWISTY ROAD. Corner spacing: pan 1.4 km (was
   2.2), highway 1.3 km (2.2), rolling 750 m (1.1 km), derelict 1 km (1.6); angles and
   radii unchanged, so the no-crossing budget is untouched. The district after the 4 km
