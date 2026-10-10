@@ -5,24 +5,39 @@
  * Taking a race offer out of a courier starts it. Two rivals already left (one
  * `AHEAD_FAR_M`, one `AHEAD_NEAR_M` up the road), and the third leaves the courier
  * once the player is `LATE_DEPARTURE_M` gone, so it is behind him from the start.
- * Whoever hands the cargo in at the finish first wins; a rival "hands in" by
- * stopping in its lane alongside that courier and standing there `LOAD_S`, the time
- * the player spends walking his own parcel to the boot. The delivery always pays its
- * sticker; winning adds one coin per leg (`winCoins`). Slice rules: no save (a reload
- * forgets the race).
+ * Whoever hands the cargo in at the finish first wins; a rival "hands in" by pulling
+ * into the courier's lay-by, standing beside the courier car for `HAND_IN_S` — a parcel
+ * passed through a window, not the player's walk to his boot — and pulling back out.
+ * The delivery always pays its sticker; winning adds one coin per leg (`winCoins`).
+ * Slice rules: no save (a reload forgets the race).
  *
  * A RIVAL IS A GHOST UNTIL IT IS NEAR. Physics exists only `ROAD_PHYSICS_REACH_M` (world/ranges.ts) either
  * side of the player, so a rival out there is an arclength and a speed advanced
  * here, at the pace the autopilot's own `roadPaceCeiling` allows `RIVAL_MODE` on
  * that road. Inside the spawn band it is handed to the traffic stream as a real car
  * (`RoadTraffic.spawnRival`) driven by that autopilot mode; when the stream drops
- * it at the support edge, the ghost resumes from its last pose.
+ * it at the support edge, the ghost resumes from its last pose. A ghost's hand-in is
+ * the same `HAND_IN_S` standing at the finish mark.
  *
- * NO MANOEUVRE AT THE COURIER. A rival never leaves the asphalt: the courier stands
- * 9.5 m off the axis and the poles at 6 m, so a car that stops in its own lane and
- * drives straight on cannot wedge against either. The stop is a braking curve fed to
- * the autopilot as its speed cap, and the hand-in counts wherever it comes to rest
- * past `ARRIVE_WINDOW_M` short of the mark; there is never a reverse.
+ * THE HAND-IN IS THE STREAM'S LAY-BY STOP (`RoadTraffic.rivalHandIn`), asked for while
+ * the entry slip is `HAND_IN_ASK_*_M` ahead: in from its own side, or across the
+ * oncoming lanes when the courier stands on the far side — held in its lane until they
+ * are clear, and waiting for them again on the way out. Its place is beside the
+ * courier on the parking line, a car's width inside it; the lay-by is reserved while a
+ * race finishes there (`reserveHandIn`), so nobody else parks in its way. A car held up
+ * on the pad short of its place — the player's car left on the line — hands in from
+ * where it stands and waits behind that car to leave. A courier with no lay-by, or a
+ * rival that came into the physical window too late to pull in, stops in its lane
+ * alongside the mark instead: a braking curve fed to the autopilot as its speed cap.
+ * There is never a reverse.
+ *
+ * THE RIVALS FINISH THEIR RUN. The race is decided by the player's hand-in, by all
+ * three rivals', or by his driving on past the finish; the rivals still on the road
+ * then carry on to the courier, hand in (their place is announced, nothing is paid)
+ * and only then go back to the stream. Those runs are kept apart from the race, so a
+ * new race can be taken meanwhile; a run ends when its last rival has handed in, a
+ * ghost of it more than `FINISHING_DROP_M` behind the player is dropped unseen, and
+ * after `FINISHING_MAX_S` whatever is left goes back to the stream as it is.
  */
 import { hash, hash01 } from '../core/rng';
 import { shouldShelter } from '../vehicle/weatherpace';
@@ -31,8 +46,9 @@ import { AUTOPILOT_MODES, roadPaceCeiling } from '../vehicle/autopilot';
 import { CAR_MODELS } from '../vehicle/carmodels';
 import { courierStop } from '../world/couriers';
 import type { RoadConditionBuffer } from '../world/gradient';
+import { laybyNear, type Layby } from '../world/layby';
 import type { DriveRoad } from '../world/road';
-import type { RivalPose, RivalSpawn } from '../world/traffic';
+import type { RivalHandIn, RivalPose, RivalSpawn } from '../world/traffic';
 import { SurfaceType } from '../core/surfaces';
 import type { ContractPlace } from './types';
 
@@ -68,8 +84,18 @@ const STOP_DECEL_MPS2 = 2.5;
 const STOP_CREEP_MPS = 1.5;
 const ARRIVE_WINDOW_M = 25;
 const ARRIVE_SPEED_MPS = 1;
-/** A rival's hand-in: about the player's walk round to his own boot and back. */
-const LOAD_S = 20;
+/** A rival's hand-in: the parcel through the courier's window, seconds. */
+const HAND_IN_S = 2;
+/**
+ * Road before the lay-by's entry slip over which a live rival asks to pull in. Nearer
+ * than the minimum it cannot (across the road it has to be held short of the crossing),
+ * and stops in its lane instead.
+ */
+const HAND_IN_ASK_MAX_M = 450;
+const HAND_IN_ASK_MIN_M = 70;
+/** See THE RIVALS FINISH THEIR RUN. */
+const FINISHING_DROP_M = 2000;
+const FINISHING_MAX_S = 600;
 /**
  * How far past the receiving courier the player may drive before the race is called
  * lost. Enough to brake from speed, or to overshoot and turn back; beyond it he has
@@ -118,7 +144,11 @@ export function newRaceProgress(): RaceProgress {
   return { player: 0, rivals: new Array<number>(RIVAL_COUNT).fill(0) };
 }
 
-type RivalPhase = 'waiting' | 'driving' | 'loading' | 'done';
+/**
+ * `pulling-in` is the stream's lay-by stop (live only); `loading` the stand in the lane
+ * or as a ghost; `leaving` a live car that has handed in and is pulling back out.
+ */
+type RivalPhase = 'waiting' | 'driving' | 'pulling-in' | 'loading' | 'leaving' | 'done';
 
 interface Rival {
   readonly id: string;
@@ -132,6 +162,8 @@ interface Rival {
   live: boolean;
   spawning: boolean;
   retryIn: number;
+  /** It asked for the lay-by, or came too late to: either way, it does not ask again. */
+  handInAsked: boolean;
   /** Seed of this rival's own pace pattern; see `ghostPaceShare`. */
   readonly paceSeed: number;
 }
@@ -140,9 +172,19 @@ interface Race {
   readonly itemId: string;
   readonly cargo: ContractCargoItem;
   readonly sourceS: number;
+  /** The receiving courier, and its lay-by (null without one). */
+  readonly courierS: number;
+  readonly layby: Layby | null;
   readonly stopS: number;
   readonly rivals: Rival[];
+  /** Rivals handed in while the race was open: the player's place is one more. */
   delivered: number;
+  /** Everyone handed in so far, the player included: the place of the next one. */
+  finishers: number;
+  /** Decided (see `end`); its rivals are finishing their run. */
+  decided: boolean;
+  /** Seconds since it was decided; see FINISHING_MAX_S. */
+  decidedFor: number;
   /** Couriers to the finish, 1 or 2: also the coins a win pays. */
   readonly legs: 1 | 2;
 }
@@ -153,6 +195,8 @@ export interface RivalHost {
   rivalPose(id: string, out: RivalPose): boolean;
   setRivalSpeedCap(id: string, mps: number): void;
   releaseRival(id: string): void;
+  rivalHandIn(id: string, courierS: number, standS: number, parkS: number): boolean;
+  reserveHandIn(courierS: number, reserved: boolean): void;
 }
 
 export interface RaceSnapshot {
@@ -171,8 +215,10 @@ export interface RaceSnapshot {
 
 export class RivalRace {
   private race: Race | null = null;
+  /** Decided races whose rivals are still on their way to hand in; see `end`. */
+  private readonly finishing: Race[] = [];
   private serial = 0;
-  private readonly pose: RivalPose = { s: 0, speed: 0 };
+  private readonly pose: RivalPose = { s: 0, speed: 0, handIn: 'none' };
   /** Smoothed player pace along the road, m/s; a rear rival spawns only when closing. */
   private playerSpeed = 0;
   private playerS = 0;
@@ -214,6 +260,7 @@ export class RivalRace {
     const race = this.race;
     if (race === null || race.itemId !== itemId) return;
     const place = race.delivered + 1;
+    race.finishers++;
     this.end(
       place === 1
         ? `race won — ${race.legs === 1 ? 'a coin' : 'two coins'} in the courier's boot`
@@ -230,31 +277,24 @@ export class RivalRace {
     this.playerS = playerS;
     // The weather stops a ghost exactly as it stops the live driver it stands for.
     this.ghostSheltering = shouldShelter(this.ghostSheltering);
-    const race = this.race;
-    if (race === null) return;
-    for (const rival of race.rivals) {
-      if (rival.phase === 'done') continue;
-      if (rival.live) {
-        if (this.host.rivalPose(rival.id, this.pose)) {
-          rival.s = this.pose.s;
-          rival.speed = Math.max(0, this.pose.speed);
-        } else {
-          // Dropped at the support edge: the ghost carries on from its last pose.
-          rival.live = false;
+    for (let i = this.finishing.length - 1; i >= 0; i--) {
+      const race = this.finishing[i]!;
+      race.decidedFor += dt;
+      this.runRivals(race, dt, playerS);
+      for (const rival of race.rivals) {
+        // Out of sight behind him for good: nobody is watching that hand-in.
+        if (rival.phase !== 'done' && !rival.live && !rival.spawning && playerS - rival.s > FINISHING_DROP_M) {
+          rival.phase = 'done';
         }
       }
-      if (rival.phase === 'waiting') {
-        if (playerS - race.sourceS < LATE_DEPARTURE_M) continue;
-        rival.phase = 'driving';
-      }
-      if (!rival.live) this.advanceGhost(rival, race, dt, playerS);
-      this.serviceStop(rival, race, dt);
-      if (rival.live) {
-        this.host.setRivalSpeedCap(rival.id, rival.phase === 'driving' ? this.stopCap(rival, race) : 0);
-      } else {
-        this.trySpawn(rival, playerS, dt);
+      if (race.decidedFor > FINISHING_MAX_S || race.rivals.every((rival) => rival.phase === 'done')) {
+        this.retire(race);
+        this.finishing.splice(i, 1);
       }
     }
+    const race = this.race;
+    if (race === null) return;
+    this.runRivals(race, dt, playerS);
     // The race is decided without a hand-in from the player once every rival has
     // handed in, or once he has driven on past the finish.
     if (race.delivered >= RIVAL_COUNT) {
@@ -264,13 +304,66 @@ export class RivalRace {
     }
   }
 
-  /** Announces the result and hands every rival car back to the traffic stream. */
+  private runRivals(race: Race, dt: number, playerS: number): void {
+    for (const rival of race.rivals) {
+      if (rival.phase === 'done') continue;
+      let handIn: RivalHandIn = 'none';
+      if (rival.live) {
+        if (this.host.rivalPose(rival.id, this.pose)) {
+          rival.s = this.pose.s;
+          rival.speed = Math.max(0, this.pose.speed);
+          handIn = this.pose.handIn;
+        } else {
+          // Dropped at the support edge: the ghost carries on from its last pose. One
+          // that had handed in is done; one on its way in stands at the mark instead.
+          rival.live = false;
+          if (rival.phase === 'leaving') rival.phase = 'done';
+          else if (rival.phase === 'pulling-in') rival.phase = 'driving';
+          if (rival.phase === 'done') continue;
+        }
+      }
+      if (rival.phase === 'waiting') {
+        if (playerS - race.sourceS < LATE_DEPARTURE_M) continue;
+        rival.phase = 'driving';
+      }
+      if (!rival.live) this.advanceGhost(rival, race, dt, playerS);
+      this.serviceStop(rival, race, dt, handIn);
+      // `serviceStop` may have finished it.
+      if ((rival.phase as RivalPhase) === 'done') continue;
+      if (rival.live) {
+        this.host.setRivalSpeedCap(
+          rival.id,
+          rival.phase === 'driving'
+            ? this.stopCap(rival, race)
+            : rival.phase === 'loading' ? 0 : rival.capMps,
+        );
+      } else {
+        this.trySpawn(rival, race, playerS, dt);
+      }
+    }
+  }
+
+  /**
+   * Announces the result. The rivals still on the road finish their run (see THE RIVALS
+   * FINISH THEIR RUN), apart from any race the player takes next.
+   */
   private end(text: string): void {
     const race = this.race;
     if (race === null) return;
     this.notify(text);
-    for (const rival of race.rivals) if (rival.live) this.host.releaseRival(rival.id);
     this.race = null;
+    race.decided = true;
+    if (race.rivals.every((rival) => rival.phase === 'done')) this.retire(race);
+    else this.finishing.push(race);
+  }
+
+  /** Hands whatever of a race is still live back to the stream, and frees its lay-by. */
+  private retire(race: Race): void {
+    for (const rival of race.rivals) {
+      if (rival.phase !== 'done' && rival.live) this.host.releaseRival(rival.id);
+      rival.phase = 'done';
+    }
+    this.host.reserveHandIn(race.courierS, false);
   }
 
   /**
@@ -287,7 +380,9 @@ export class RivalRace {
     out.player = Math.min(1, Math.max(0, (playerS - race.sourceS) / span));
     for (let i = 0; i < RIVAL_COUNT; i++) {
       const rival = race.rivals[i]!;
-      out.rivals[i] = rival.phase === 'done' ? 1 : Math.min(1, Math.max(0, (rival.s - race.sourceS) / span));
+      out.rivals[i] = rival.phase === 'done' || rival.phase === 'leaving'
+        ? 1
+        : Math.min(1, Math.max(0, (rival.s - race.sourceS) / span));
     }
     return true;
   }
@@ -313,7 +408,10 @@ export class RivalRace {
   private start(item: ContractCargoItem, playerS: number): void {
     const sourceS = courierStop(this.seed, item.sourceCourierIndex).s;
     const legs = item.raceLegs ?? 1;
-    const stopS = courierStop(this.seed, item.sourceCourierIndex + legs).s + STOP_PAST_COURIER_M;
+    const courierS = courierStop(this.seed, item.sourceCourierIndex + legs).s;
+    const stopS = courierS + STOP_PAST_COURIER_M;
+    const nearby = laybyNear(this.seed, courierS);
+    const layby = nearby && Math.abs(nearby.s - courierS) < 1 ? nearby : null;
     const raceKey = this.serial++;
     const rivals: Rival[] = [];
     const starts = [playerS + AHEAD_FAR_M, playerS + AHEAD_NEAR_M, sourceS];
@@ -331,10 +429,11 @@ export class RivalRace {
         s,
         speed: 0,
         phase: waiting ? 'waiting' : 'driving',
-        loadLeft: LOAD_S,
+        loadLeft: HAND_IN_S,
         live: false,
         spawning: false,
         retryIn: 0,
+        handInAsked: false,
         paceSeed: hash(item.generatedSeed, 0x52495632, i),
       };
       if (!waiting) rival.speed = this.ghostTarget(rival, stopS);
@@ -342,7 +441,21 @@ export class RivalRace {
       // Loaded now, so the stream can put the car down the step it is in the band.
       void this.prepareModel(model.id).catch(() => {});
     }
-    this.race = { itemId: item.id, cargo: item, sourceS, stopS, rivals, delivered: 0, legs };
+    this.race = {
+      itemId: item.id,
+      cargo: item,
+      sourceS,
+      courierS,
+      layby,
+      stopS,
+      rivals,
+      delivered: 0,
+      finishers: 0,
+      decided: false,
+      decidedFor: 0,
+      legs,
+    };
+    this.host.reserveHandIn(courierS, true);
     this.notify(
       `race on — three rivals carry the same ${item.cargoName} to ${legs === 1 ? 'the next courier' : 'the courier after next'}`,
     );
@@ -386,22 +499,70 @@ export class RivalRace {
     if (rival.s >= race.stopS) rival.speed = 0;
   }
 
-  /** Arrival, the stand while it loads, and the hand-in. */
-  private serviceStop(rival: Rival, race: Race, dt: number): void {
-    if (rival.phase === 'driving') {
-      if (rival.s >= race.stopS - ARRIVE_WINDOW_M && rival.speed < ARRIVE_SPEED_MPS) {
-        rival.phase = 'loading';
-        rival.loadLeft = LOAD_S;
+  /**
+   * The way in, the stand, the hand-in and the way back out. `handIn` is the stream's
+   * account of a live rival's lay-by stop (`RivalHandIn`).
+   */
+  private serviceStop(rival: Rival, race: Race, dt: number, handIn: RivalHandIn): void {
+    switch (rival.phase) {
+      case 'driving': {
+        const layby = race.layby;
+        if (rival.live && layby !== null && !rival.handInAsked) {
+          const ahead = Math.min(layby.sEntry, layby.sExit) - rival.s;
+          if (ahead < HAND_IN_ASK_MIN_M) {
+            rival.handInAsked = true;
+          } else if (
+            ahead <= HAND_IN_ASK_MAX_M &&
+            this.host.rivalHandIn(rival.id, race.courierS, layby.s, HAND_IN_S)
+          ) {
+            rival.handInAsked = true;
+            rival.phase = 'pulling-in';
+            return;
+          }
+        }
+        if (rival.s >= race.stopS - ARRIVE_WINDOW_M && rival.speed < ARRIVE_SPEED_MPS) {
+          rival.phase = 'loading';
+          rival.loadLeft = HAND_IN_S;
+        }
+        return;
       }
+      case 'pulling-in':
+        // Given up on the way in (`RoadTraffic.endLayby`): it stops in its lane instead.
+        if (handIn === 'none') rival.phase = 'driving';
+        else if (handIn !== 'stopping') {
+          this.handIn(rival, race);
+          rival.phase = 'leaving';
+          this.serviceStop(rival, race, dt, handIn);
+        }
+        return;
+      case 'leaving':
+        if (handIn === 'clear' || handIn === 'none') this.finish(rival);
+        return;
+      case 'loading':
+        rival.loadLeft -= dt;
+        if (rival.loadLeft > 0) return;
+        this.handIn(rival, race);
+        this.finish(rival);
+        return;
+      default:
+        return;
+    }
+  }
+
+  /** A rival's hand-in, counted and announced; see `Race.finishers`. */
+  private handIn(rival: Rival, race: Race): void {
+    race.finishers++;
+    if (race.decided) {
+      this.notify(`${rival.label} handed in — ${ordinal(race.finishers)}`);
       return;
     }
-    if (rival.phase !== 'loading') return;
-    rival.loadLeft -= dt;
-    if (rival.loadLeft > 0) return;
-    rival.phase = 'done';
     race.delivered++;
     this.notify(`${rival.label} handed in the ${race.cargo.cargoName} — rival ${race.delivered} of ${RIVAL_COUNT} done`);
-    // Its race is over; it drives on as ordinary traffic, or vanishes as a ghost.
+  }
+
+  /** Its run is over; it drives on as ordinary traffic, or vanishes as a ghost. */
+  private finish(rival: Rival): void {
+    rival.phase = 'done';
     if (rival.live) this.host.releaseRival(rival.id);
   }
 
@@ -415,7 +576,7 @@ export class RivalRace {
     return Math.min(rival.capMps, this.stopCurve(rival.s, race.stopS));
   }
 
-  private trySpawn(rival: Rival, playerS: number, dt: number): void {
+  private trySpawn(rival: Rival, race: Race, playerS: number, dt: number): void {
     if (rival.spawning) return;
     rival.retryIn -= dt;
     if (rival.retryIn > 0) return;
@@ -427,7 +588,6 @@ export class RivalRace {
     if (!inBand) return;
     rival.retryIn = SPAWN_RETRY_S;
     rival.spawning = true;
-    const race = this.race!;
     const cargo: ContractCargoItem = {
       ...race.cargo,
       id: `${race.cargo.id}:${rival.id}`,
@@ -446,8 +606,9 @@ export class RivalRace {
       })
       .then((placed) => {
         rival.spawning = false;
-        // A race decided while the model loaded hands the car straight back.
-        if (placed && (this.race !== race || rival.phase === 'done')) this.host.releaseRival(rival.id);
+        // A run that ended while the model loaded hands the car straight back.
+        const tracked = this.race === race || this.finishing.includes(race);
+        if (placed && (!tracked || rival.phase === 'done')) this.host.releaseRival(rival.id);
         else if (placed) rival.live = true;
       });
   }

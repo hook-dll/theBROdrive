@@ -17,7 +17,10 @@ import {
 import { WorldOrigin } from '../src/world/origin';
 import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
 import { roadSurfaceY, SurfaceField } from '../src/world/roadsurface';
-import { RoadTraffic } from '../src/world/traffic';
+import { RoadTraffic, type RivalPose } from '../src/world/traffic';
+import { RivalRace } from '../src/contracts/race';
+import type { ContractCargoItem } from '../src/items/items';
+import { couriersBetween } from '../src/world/couriers';
 import { Terrain } from '../src/world/terrain';
 import { TERMINUS_CENTRE_M, TERMINUS_PAD_M } from '../src/world/terminus';
 import { widenessAt } from '../src/world/roadprofile';
@@ -803,6 +806,162 @@ check(
     `${status.impacts - impactsBefore} impact(s)`,
   );
   stops.dispose();
+}
+// A RIVAL HANDS IN AT THE COURIER'S LAY-BY, AND FINISHES ITS RUN AFTER THE RACE.
+//
+// A race to the courier at a lay-by on each side of the road (the rivals drive the
+// road forward, so a left-hand lay-by is across the oncoming lane). The player stands
+// just past the finish. Every live rival must pull in, stand beside the courier car for
+// its short hand-in, pull out and be back in its lane before the race hands it back to
+// the stream, touching nothing — the courier car is a fixed body here. On the right-hand
+// lay-by the player wins at once, so the rivals measured there all finish after the
+// race was decided.
+{
+  const paved = new Set<number>([laybysBetween(SEED, ROAD_TO + LAYBY_ROAD_REACH_M, ROAD_TO + 100_000)[0]!.poiIndex]);
+  for (const side of [-1, 1] as const) {
+    const layby = laybysBetween(SEED, ROAD_TO + LAYBY_ROAD_REACH_M, ROAD_TO + 100_000).find(
+      (candidate) => candidate.side === side && couriersBetween(SEED, candidate.s - 1, candidate.s + 1).length > 0,
+    );
+    if (!layby) throw new Error(`no courier lay-by on side ${side} on this seed`);
+    const courier = couriersBetween(SEED, layby.s - 1, layby.s + 1)[0]!;
+    if (!paved.has(layby.poiIndex)) addLaybyCollider(physics, road, layby);
+    paved.add(layby.poiIndex);
+    const courierPoint = road.offsetPoint(layby.s, laybyCourierLateral(layby));
+    const heading = road.headingAt(layby.s);
+    const courierBody = physics.world.createRigidBody(
+      physics.rapier.RigidBodyDesc.fixed()
+        .setTranslation(courierPoint.x, courierPoint.y + 0.75, courierPoint.z)
+        .setRotation({ x: 0, y: Math.sin(heading / 2), z: 0, w: Math.cos(heading / 2) }),
+    );
+    physics.world.createCollider(physics.rapier.ColliderDesc.cuboid(0.9, 0.75, 2.2), courierBody);
+    const stream = new RoadTraffic(
+      physics,
+      new GameWorld(newWorldState(SEED)),
+      new THREE.Scene(),
+      new WorldOrigin(),
+      road,
+      new HazardIndex(),
+      loadCarModel,
+      () => true,
+    );
+    const pose: RivalPose = { s: 0, speed: 0, handIn: 'none' };
+    const toasts: string[] = [];
+    let releasedEarly = 0;
+    const released = new Set<string>();
+    const race = new RivalRace(
+      SEED,
+      road,
+      {
+        spawnRival: (spec) => stream.spawnRival(spec),
+        rivalPose: (id, out) => stream.rivalPose(id, out),
+        setRivalSpeedCap: (id, mps) => stream.setRivalSpeedCap(id, mps),
+        rivalHandIn: (id, courierS, standS, parkS) => stream.rivalHandIn(id, courierS, standS, parkS),
+        reserveHandIn: (courierS, reserved) => stream.reserveHandIn(courierS, reserved),
+        releaseRival: (id) => {
+          // Back to the stream only once it is back in its lane.
+          if (!stream.rivalPose(id, pose) || pose.handIn !== 'clear') releasedEarly++;
+          released.add(id);
+          stream.releaseRival(id);
+        },
+      },
+      loadCarModel,
+      (text) => toasts.push(text),
+    );
+    const item = {
+      id: `bench-race-${side}`,
+      sourceCourierIndex: courier.index - 1,
+      raceLegs: 1,
+      generatedSeed: 7 + side,
+      cargoName: 'parcel',
+      type: 'contract_cargo',
+      contractKind: 'parcel',
+      massKg: 6,
+      progress: {},
+    } as unknown as ContractCargoItem;
+    race.observe(item, 'hand', layby.s - 2200);
+    const playerS = layby.s + 150;
+    if (side === -1) {
+      race.winCoins(item.id);
+      race.playerDelivered(item.id);
+    }
+    type RivalCar = {
+      id: string;
+      rival: boolean;
+      forwardS: number;
+      roadLateral: number;
+      vehicle: Vehicle;
+      handIn: string;
+      layby: { phase: string; enterS: number } | null;
+    };
+    const cars = stream as unknown as { carList: RivalCar[] };
+    const parkedFrom = new Map<string, number>();
+    const stands: string[] = [];
+    const badStands: string[] = [];
+    const cleared = new Set<string>();
+    const parkLateral = laybyParkLateral(layby);
+    const impactsBefore = stream.status.impacts;
+    let crossedWhileOncoming = 0;
+    for (let i = 0; i < Math.ceil(300 / FIXED_DT); i++) {
+      const t = i * FIXED_DT;
+      race.fixedUpdate(FIXED_DT, playerS);
+      stream.fixedUpdate(FIXED_DT, playerS, 0, 0, 0);
+      physics.step();
+      stream.postStep();
+      for (const car of cars.carList) {
+        if (!car.id.startsWith('rival:')) continue;
+        const phase = car.layby?.phase;
+        if (phase === 'parked' && !parkedFrom.has(car.id)) parkedFrom.set(car.id, t);
+        if (phase === 'out' && parkedFrom.has(car.id) && !stands.some((s) => s.startsWith(car.id))) {
+          const stood = t - parkedFrom.get(car.id)!;
+          const along = car.forwardS - layby.s;
+          const across = car.roadLateral - parkLateral;
+          const line = `${car.id} ${stood.toFixed(2)} s at ${along.toFixed(1)} m along, ${across.toFixed(2)} m off the line`;
+          stands.push(line);
+          if (stood < 1.5 || stood > 3 || Math.abs(along) > 3 || Math.abs(across) > 1) badStands.push(line);
+        }
+        if (car.handIn === 'clear') {
+          const lane = road.laneCentreAt(car.forwardS, road.lanesPerSideAt(car.forwardS) - 1);
+          if (Math.abs(car.roadLateral - lane) < 1) cleared.add(car.id);
+        }
+        // Across the oncoming lane on the way in: nobody coming the other way within 60 m.
+        if (side === 1 && phase === 'in' && car.roadLateral > 0 && car.roadLateral < road.halfWidthAt(car.forwardS)) {
+          for (const other of cars.carList) {
+            const ahead = other.forwardS - car.forwardS;
+            if (other !== car && other.roadLateral > 0 && ahead > 0 && ahead < 60 && other.vehicle.speedKmh > 10) {
+              crossedWhileOncoming++;
+            }
+          }
+        }
+      }
+      if (i % 12 === 0) await Bun.sleep(0);
+    }
+    const where = side === -1 ? 'own-side' : 'far-side';
+    console.log(`  ${where} courier lay-by at ${layby.s.toFixed(0)} m: ${toasts.slice(1).join(' | ')}`);
+    check(
+      `${where}: rivals stand beside the courier 1.5-3 s`,
+      stands.length >= 2 && badStands.length === 0,
+      stands.join('; ') || 'no stand',
+    );
+    check(
+      `${where}: every rival that pulled in is back in its lane before it is released`,
+      released.size >= 2 && releasedEarly === 0 && [...parkedFrom.keys()].every((id) => cleared.has(id) && released.has(id)),
+      `${parkedFrom.size} pulled in, ${cleared.size} back in the lane, ${released.size} released, ${releasedEarly} released early`,
+    );
+    check(
+      `${where}: hand-ins cost no collisions`,
+      stream.status.impacts === impactsBefore && crossedWhileOncoming === 0,
+      `${stream.status.impacts - impactsBefore} impact(s), ${crossedWhileOncoming} sample(s) crossing ahead of oncoming traffic`,
+    );
+    if (side === -1) {
+      check(
+        'after a player win the rivals still hand in, and are placed',
+        toasts.filter((text) => /handed in — (2nd|3rd|4th)/.test(text)).length >= 2,
+        toasts.join(' | '),
+      );
+    }
+    stream.dispose();
+    physics.world.removeRigidBody(courierBody);
+  }
 }
 traffic.dispose();
 

@@ -68,6 +68,38 @@
     are parked 25-30 s later, and are back in the lane at 40-44 km/h about 10 s after
     leaving the pad.
 
+### Changed
+
+- A RACE RIVAL HANDS IN AT THE COURIER'S LAY-BY, IN TWO SECONDS (`contracts/race.ts`,
+  `world/traffic.ts`). Instead of standing 20 s in its lane beside the courier, a live
+  rival asks the stream for a hand-in (`RoadTraffic.rivalHandIn`) while the entry slip
+  is 70-450 m ahead: it pulls in, stops on the parking line beside the courier car (a
+  car's width inside it) for `HAND_IN_S` = 2 s, and pulls out by the exit slip; the
+  hand-in counts when that stop ends. A courier lay-by on the far side is reached
+  across the oncoming lane: the rival holds in its own lane until nothing coming the
+  other way would reach the crossing within 11 s, and waits for the same gap (and the
+  ordinary one in its own lane) to cross back. A ghost rival, a courier with no
+  lay-by, or a rival that comes into the physical window too late to pull in stands at
+  the old in-lane mark for 2 s. Rivals never reverse.
+  - While a race finishes at a stop its lay-by is reserved (`reserveHandIn`): ordinary
+    traffic does not pull in or get seeded there, and a car already parked leaves
+    within 3 s, so the place beside the courier and the pad out to the exit are free.
+    A rival held up on the pad short of its place (the player's car left on the line)
+    hands in from where it stands after 3 s and waits behind that car to leave.
+  - Rivals finish their run after the race is decided — by the player's hand-in, all
+    three rivals', or the player driving past. The decided race is kept apart from
+    `RivalRace.race`, so a new offer can be taken meanwhile; each later hand-in is
+    announced with its place ("VAZ-2104 estate handed in — 2nd") and pays nothing, and
+    a rival goes back to the stream only once it is back in its lane. The run ends when
+    its last rival has handed in; a ghost of it more than 2 km behind the player is
+    dropped unseen, and after 600 s whatever is left is released as it is.
+  - `tools/traffic-bench.ts` races to seed 42's courier lay-bys at 30.8 km (own side,
+    player wins at once) and 23.1 km (far side), with the courier car as a fixed body:
+    every live rival (2 each) stood 2.02 s within 1.6 m along and 0.06 m across of its
+    place beside the courier, was back in its lane before release (0 released early),
+    0 impacts and 0 samples crossing ahead of oncoming traffic; after the win both
+    handed in, placed 2nd and 3rd.
+
 ## 0.22.0 — 2026-10-10
 
 Brakes that reach the tyres and lock them, a road that hits instead of floating (humps, potholes, cracks, patches and joints), one keyboard steering scheme, a rear-only handbrake, calmer and smarter traffic, more corners and a twisty road from the first kilometre, the Panini lens removed, and settings regrouped with a Settings button on the title screen.
