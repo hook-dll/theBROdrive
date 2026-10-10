@@ -12,6 +12,13 @@
   the drive then loads).
 
 ### Changed
+- TRAFFIC DRIVERS COME FROM THEIR CARS (`DRIVER_ODDS` in `world/traffic.ts`). GAZ-21,
+  UAZ, Oka, IZh and VAZ-2101..2104 are always sleepers; 2105-2109, 21099, GAZ-24 and both
+  Nivas are 40% sleeper, 40% hurried, 20% frantic; 2105 rally, Svyatogor and 2110 are
+  half hurried, half frantic. With the bodies drawn evenly the stream comes out about
+  57% sleeper, 26% hurried, 17% frantic (was a flat 30/30/40). The first car in a
+  direction is still the cautious one if it drew a sleeper; the forced hurried second
+  car is gone. Frantic drivers keep the BMW M30 engine and its gearbox.
 - A NEW GAME NO LONGER OPENS ON 30 KM OF STRAIGHT. The calm home district is 4 km
   (`HOME_DISTRICT_LENGTH_M`), and the pan road is rarer (weight 0.12 from 0.22) with a
   kink every 2.2 km instead of 4. Seed 1337, first 300 km: pan 9% of the drive (was 22%),

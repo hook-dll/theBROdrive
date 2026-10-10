@@ -107,13 +107,41 @@ const DENSE_SPAWN_ROAD_GAP_M = 32;
  */
 const PLATOON_CHANCE = 0.32;
 /**
- * Ambient distribution after the first two stream positions: 40% frantic, 30% sleeper,
- * and 30% hurried in both directions. The first car remains cautious/sleeper and the
- * second remains hurried so a stream still has a slower car to pass.
+ * WHO DRIVES WHAT: the driver's character comes from the car (owner, 2026-10-10), not
+ * from one share for the whole stream. `[sleeper, hurried, frantic]` odds per model:
+ *
+ *  - the old and the slow are always sleepers: the GAZ-21, the UAZ, the Oka, the IZh
+ *    and the first four Zhigulis;
+ *  - the later Zhigulis, the Samaras, the GAZ-24 and the Nivas are mostly calm, 40%
+ *    sleeper, 40% hurried and 20% frantic;
+ *  - everything else (the 2105 rally, the Svyatogor, the 2110) is a car somebody
+ *    bought to go fast: half hurried, half frantic.
+ *
+ * A frantic driver still gets the BMW engine and its gearbox (`franticEngine`).
  */
-const FRANTIC_SHARE = 0.4;
-const SLEEPER_SHARE = 0.3;
-const HURRIED_SHARE = 1 - FRANTIC_SHARE - SLEEPER_SHARE;
+const SLOW_CAR: readonly [number, number, number] = [1, 0, 0];
+const CALM_CAR: readonly [number, number, number] = [0.4, 0.4, 0.2];
+const FAST_CAR: readonly [number, number, number] = [0, 0.5, 0.5];
+const DRIVER_ODDS: Readonly<Record<string, readonly [number, number, number]>> = {
+  sv_gaz21: SLOW_CAR,
+  sa_uaz330364: SLOW_CAR,
+  sa_oka: SLOW_CAR,
+  sa_izh2715: SLOW_CAR,
+  sv_vaz2101: SLOW_CAR,
+  sv_vaz2102: SLOW_CAR,
+  sv_vaz2103: SLOW_CAR,
+  sv_vaz2104: SLOW_CAR,
+  sv_vaz2105: CALM_CAR,
+  sv_vaz2106: CALM_CAR,
+  sv_vaz2107: CALM_CAR,
+  sv_vaz2108: CALM_CAR,
+  sv_vaz2109: CALM_CAR,
+  sa_vaz2109: CALM_CAR,
+  sv_vaz21099: CALM_CAR,
+  sv_gaz24: CALM_CAR,
+  sv_niva: CALM_CAR,
+  sv_niva_long: CALM_CAR,
+};
 /**
  * WHAT A FRANTIC DRIVER DRIVES, AND WHAT IS UNDER ITS BONNET. Any car the stream can
  * spawn, exactly as it is drawn for every other driver — a man in a hurry is a man in
@@ -1701,12 +1729,13 @@ export class RoadTraffic {
     // behind him is a car he will never see: it only falls further back until the
     // rear despawn collects it. Oncoming traffic behind him is worse still — it
     // drives away from the moment it exists.
-    const driver = this.drawDriver(direction);
+    // The body comes first: the driver's character is drawn from it (`DRIVER_ODDS`).
+    const model = CAR_MODELS[Math.floor(this.random() * CAR_MODELS.length)]!;
+    const driver = this.drawDriver(direction, model.id);
     const fromBehind =
       direction === 1 && driver.speedCap > this.playerSpeed + REAR_SPAWN_CLOSING_MPS;
     const spawn = this.findSpawnS(direction, fromBehind, driver.style);
     if (spawn === null) return;
-    const model = CAR_MODELS[Math.floor(this.random() * CAR_MODELS.length)]!;
     const request: PendingSpawn = {
       generation: this.generation,
       direction,
@@ -2225,9 +2254,9 @@ export class RoadTraffic {
   }
 
   /**
-   * Draws behaviour independently of body choice. The first six in each direction
-   * deliberately include one cautious and one hurried driver; otherwise a random
-   * twelve-car sample can contain no vehicle capable of creating an overtake at all.
+   * Draws the driver from the body's odds (`DRIVER_ODDS`). The first car in a
+   * direction, if it drew a sleeper, is the cautious one, so an empty stream usually
+   * opens with something slow enough to pass.
    *
    * WHY THESE SPEEDS.
    *
@@ -2245,28 +2274,26 @@ export class RoadTraffic {
    * so it binds everywhere: on clean asphalt, on gravel, uphill. The cap stays as an
    * absolute ceiling for the few stretches good enough for one to matter.
    */
-  private drawDriver(direction: TrafficDirection): {
+  private drawDriver(direction: TrafficDirection, modelId: string): {
     style: TrafficDriverStyle;
     headwayS: number;
     mode: AutopilotMode;
     speedCap: number;
     pace: number;
   } {
-    const directionCount = this.carList.reduce(
-      (count, car) => count + Number(!car.rival && car.direction === direction),
-      0,
-    );
+    const [sleeperOdds, hurriedOdds] = DRIVER_ODDS[modelId] ?? FAST_CAR;
     const styleRoll = this.random();
-    if (directionCount === 0) {
-      return {
-        style: 'cautious',
-        headwayS: 2.2 + this.random() * 0.8,
-        mode: 'sleeper',
-        speedCap: (58 + this.random() * 12) / 3.6,
-        pace: 0.68 + this.random() * 0.1,
-      };
-    }
-    if (directionCount !== 2 && styleRoll < SLEEPER_SHARE) {
+    if (styleRoll < sleeperOdds) {
+      const first = !this.carList.some((car) => !car.rival && car.direction === direction);
+      if (first) {
+        return {
+          style: 'cautious',
+          headwayS: 2.2 + this.random() * 0.8,
+          mode: 'sleeper',
+          speedCap: (58 + this.random() * 12) / 3.6,
+          pace: 0.68 + this.random() * 0.1,
+        };
+      }
       return {
         style: 'normal',
         headwayS: 1.5 + this.random() * 0.9,
@@ -2275,8 +2302,7 @@ export class RoadTraffic {
         pace: 0.9 + this.random() * 0.1,
       };
     }
-    // The second car remains hurried, never frantic, so a stream keeps a slower car to pass.
-    if (directionCount === 2 || styleRoll < SLEEPER_SHARE + HURRIED_SHARE) {
+    if (styleRoll < sleeperOdds + hurriedOdds) {
       return {
         style: 'hurried',
         headwayS: 1.0 + this.random() * 0.6,
