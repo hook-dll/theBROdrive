@@ -51,8 +51,13 @@ const DRAW_TAG = 0x52434832; // 'RCH2'
  * The first district is always the calm one. The homestead, its driveway and the
  * player's first minutes are authored against a straight road, and a switchback
  * district rolled onto kilometre zero would put a hairpin in the garage exit.
+ *
+ * 4 km, not the 30 it was: a new game opened on 30 km of near-straight pan, which the
+ * owner drove as "twelve kilometres without a corner" (2026-10-10). Four is the
+ * garage exit and a couple of minutes to settle; the first jittered boundary still
+ * lands at least 2.75 km out, past everything the homestead authors.
  */
-const HOME_DISTRICT_LENGTH_M = 30_000;
+const HOME_DISTRICT_LENGTH_M = 4_000;
 
 /**
  * One kind of road.
@@ -151,9 +156,12 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     // The pan: a horizon-to-horizon straight with a kink every few kilometres. This is
     // the one that makes the others mean something.
     name: 'pan',
-    weight: 0.22,
+    // 0.12, from 0.22: a fifth of the road as 10-15 km of near-straight was too much
+    // of the easy kind. It stays the breather between the twisty districts.
+    weight: 0.12,
     designSpeedKmh: 110,
-    cornerSpacing: 4_000,
+    // A kink every 2.2 km rather than 4: still the straightest road, no longer dead.
+    cornerSpacing: 2_200,
     // A lone kink or a dog-leg, kilometres apart. Never a crest coupling: a pan road
     // runs straight over whatever the ground does.
     phraseMin: 1,

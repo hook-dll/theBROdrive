@@ -12,6 +12,10 @@
   the drive then loads).
 
 ### Changed
+- A NEW GAME NO LONGER OPENS ON 30 KM OF STRAIGHT. The calm home district is 4 km
+  (`HOME_DISTRICT_LENGTH_M`), and the pan road is rarer (weight 0.12 from 0.22) with a
+  kink every 2.2 km instead of 4. Seed 1337, first 300 km: pan 9% of the drive (was 22%),
+  first districts pan 5 km, rolling 12 km, derelict 12 km. `SPINE_FORMAT` 9.
 - THE DESERT SOMETIMES OPENS A VIEW BESIDE THE ROAD (`world/landforms.ts`). About three
   times per 100 km (one candidate slot per 22 km from 32 km, three tries each) the ground
   beside the road does something big: a RIM, where one side falls 10-18 m into a hollow

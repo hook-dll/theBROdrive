@@ -43,8 +43,9 @@ export const COARSE_SPACING = 200;
  * 6: shorten turn sections and their entry window for more frequent curves.
  * 7: a section's turn always reaches its own bearing, so no join steps (see `turnAt`).
  * 8: corners come in phrases, and a phrase's start can move onto a crest.
+ * 9: a 4 km home district instead of 30, and a rarer, less straight pan road.
  */
-export const SPINE_FORMAT = 8;
+export const SPINE_FORMAT = 9;
 
 export interface RoadSpine {
   /** Road length the tables were built for, metres. */
