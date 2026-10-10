@@ -7,6 +7,13 @@ import { CAR_MODELS } from '../src/vehicle/carmodels';
 import type { Autopilot } from '../src/vehicle/autopilot';
 import type { Vehicle } from '../src/vehicle/vehicle';
 import { HazardIndex, type RoadHazard } from '../src/world/hazards';
+import {
+  laybyCourierLateral,
+  laybyLevel,
+  laybyParkLateral,
+  laybysBetween,
+  type Layby,
+} from '../src/world/layby';
 import { WorldOrigin } from '../src/world/origin';
 import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
 import { roadSurfaceY, SurfaceField } from '../src/world/roadsurface';
@@ -43,6 +50,10 @@ const ROAD_TO = 7_000;
 const PLAYER_MPS = 25;
 const ROAD_STEP = 2;
 const RIBBON_HALF_WIDTH = ROAD_HALF_WIDTH + 3;
+/** Road paved either side of the lay-by scenario's stop: past the stream's whole reach. */
+const LAYBY_ROAD_REACH_M = 900;
+/** How long the lay-by scenario watches: a stop is a quarter of the cars passing, one at a time. */
+const LAYBY_WATCH_S = 600;
 let failures = 0;
 
 function check(label: string, ok: boolean, detail: string): void {
@@ -90,6 +101,55 @@ function addRoadCollider(physics: PhysicsWorld, road: Road): void {
     indices[index++] = a + 2;
     indices[index++] = a + 3;
     indices[index++] = a + 1;
+  }
+  physics.addStaticTrimesh(vertices, indices, SurfaceType.Asphalt);
+}
+
+/**
+ * The road round one lay-by, paved out over its pad: the road's own surface to the
+ * asphalt edge and the pad's level (`laybyLevel`) past it on the lay-by's side, so the
+ * slips meet the road with no step. Wider than the lay-by along the road, so the stream
+ * that drives past it has its lane.
+ */
+function addLaybyCollider(physics: PhysicsWorld, road: Road, layby: Layby): void {
+  const surface = new SurfaceField(road.seed);
+  const from = layby.s - LAYBY_ROAD_REACH_M;
+  const rows = Math.ceil((2 * LAYBY_ROAD_REACH_M) / ROAD_STEP) + 1;
+  const columns: number[] = [];
+  for (let u = -(ROAD_HALF_WIDTH + 6); u <= layby.padOuter + 3; u += 1) columns.push(u);
+  const vertices = new Float32Array(rows * columns.length * 3);
+  const point = { x: 0, y: 0, z: 0 };
+  for (let row = 0; row < rows; row++) {
+    const s = from + row * ROAD_STEP;
+    const halfWidth = road.halfWidthAt(s);
+    road.offsetPoint(s, layby.side * halfWidth, point);
+    const edgeY = roadSurfaceY(road, surface, s, layby.side * halfWidth, point.x, point.z);
+    for (let column = 0; column < columns.length; column++) {
+      const u = columns[column]!;
+      road.offsetPoint(s, layby.side * u, point);
+      const index = (row * columns.length + column) * 3;
+      vertices[index] = point.x;
+      vertices[index + 1] = u <= halfWidth
+        ? roadSurfaceY(road, surface, s, layby.side * u, point.x, point.z)
+        : laybyLevel(edgeY, u, halfWidth);
+      vertices[index + 2] = point.z;
+    }
+  }
+  const indices = new Uint32Array((rows - 1) * (columns.length - 1) * 6);
+  // The columns run out from the lay-by's side, so for a lay-by on the right they run
+  // the opposite way to `addRoadCollider`'s and the winding turns with them.
+  const flip = layby.side < 0;
+  for (let row = 0, index = 0; row < rows - 1; row++) {
+    for (let column = 0; column < columns.length - 1; column++) {
+      const a = row * columns.length + column;
+      const b = a + columns.length;
+      indices[index++] = a;
+      indices[index++] = flip ? a + 1 : b;
+      indices[index++] = flip ? b : a + 1;
+      indices[index++] = b;
+      indices[index++] = flip ? a + 1 : b + 1;
+      indices[index++] = flip ? b + 1 : a + 1;
+    }
   }
   physics.addStaticTrimesh(vertices, indices, SurfaceType.Asphalt);
 }
@@ -664,6 +724,85 @@ check(
     `${ending.status.impacts - impactsBefore} impact(s) while turning`,
   );
   ending.dispose();
+}
+// A ROADSIDE STOP'S LAY-BY IS USED, AND LEFT, WITHOUT TOUCHING ANYTHING.
+//
+// Now and then a car passing a lay-by on its own side pulls in, parks on the pad and
+// rejoins (`assignLaybyStops` in world/traffic.ts). The player stands at the stop, so
+// the whole stream drives past it; this counts the stops that reach their place and
+// come back out into the lane, and holds them to the pad and to the bodies round them.
+{
+  const layby = laybysBetween(SEED, ROAD_TO + LAYBY_ROAD_REACH_M, ROAD_TO + 100_000).find(
+    (candidate) => !candidate.courier || Math.abs(laybyCourierLateral(candidate) - laybyParkLateral(candidate)) >= 2.8,
+  );
+  if (!layby) throw new Error('no usable lay-by on this seed');
+  addLaybyCollider(physics, road, layby);
+  const stops = new RoadTraffic(
+    physics,
+    new GameWorld(newWorldState(SEED)),
+    new THREE.Scene(),
+    new WorldOrigin(),
+    road,
+    new HazardIndex(),
+    loadCarModel,
+    () => true,
+  );
+  // Bench-only access to the live records, to follow each stop through its phases.
+  type StopCar = { id: string; roadLateral: number; vehicle: Vehicle; layby: { phase: string } | null };
+  const stopCars = stops as unknown as { carList: StopCar[] };
+  const lastPhase = new Map<string, string>();
+  const parkLateral = laybyParkLateral(layby);
+  let ended = 0;
+  let parkedSamples = 0;
+  let parkedAstray = 0;
+  let worstParkedOffset = 0;
+  const impactsBefore = stops.status.impacts;
+  for (let i = 0; i < Math.ceil(LAYBY_WATCH_S / FIXED_DT); i++) {
+    stops.fixedUpdate(FIXED_DT, layby.s, 0, 0, 0);
+    physics.step();
+    stops.postStep();
+    for (const car of stopCars.carList) {
+      const phase = car.layby?.phase;
+      if (phase === undefined) {
+        if (lastPhase.delete(car.id)) ended++;
+        continue;
+      }
+      // Settled on its place: on the parking line and standing (the stuck speed, 2 km/h).
+      if (phase === 'parked' && lastPhase.get(car.id) === 'parked') {
+        parkedSamples++;
+        const offset = Math.abs(car.roadLateral - parkLateral);
+        worstParkedOffset = Math.max(worstParkedOffset, offset);
+        if (offset > 1 || car.vehicle.speedKmh > 2) parkedAstray++;
+      }
+      lastPhase.set(car.id, phase);
+    }
+    if (i % 12 === 0) await Bun.sleep(0);
+  }
+  const status = stops.status;
+  console.log(
+    `  lay-by at ${layby.s.toFixed(0)} m (side ${layby.side}, pad ${layby.padInner.toFixed(1)}-${layby.padOuter.toFixed(1)} m)`,
+  );
+  check(
+    'traffic pulls into a lay-by, parks and rejoins the road',
+    status.laybyStops >= 2 && status.laybyRejoins >= 2,
+    `${status.laybyStops} stop(s) parked, ${status.laybyRejoins} back in the lane in ${LAYBY_WATCH_S} s`,
+  );
+  check(
+    'a parked car stands on the pad, on its line',
+    parkedSamples > 0 && parkedAstray === 0,
+    `${parkedAstray} astray of ${parkedSamples} parked samples, worst ${worstParkedOffset.toFixed(2)} m off the line`,
+  );
+  check(
+    'every stop that ends, ends back in the lane',
+    ended === status.laybyRejoins,
+    `${ended} ended, ${status.laybyRejoins} rejoined`,
+  );
+  check(
+    'lay-by stops cost no collisions',
+    status.impacts === impactsBefore,
+    `${status.impacts - impactsBefore} impact(s)`,
+  );
+  stops.dispose();
 }
 traffic.dispose();
 

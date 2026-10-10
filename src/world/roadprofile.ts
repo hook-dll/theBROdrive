@@ -127,7 +127,7 @@ export function widenessAt(seed: number, s: number): number {
  * without becoming a collision, and it disappears by the radius at which the steering
  * stops working for it.
  */
-const CURVE_WIDENING_M = 0.7;
+export const CURVE_WIDENING_M = 0.7;
 const CURVE_WIDENING_FULL_RADIUS = 120;
 const CURVE_WIDENING_NONE_RADIUS = 320;
 

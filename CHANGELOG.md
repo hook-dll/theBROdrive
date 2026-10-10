@@ -1,5 +1,73 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- EVERY ROADSIDE DWELLING HAS A PAVED LAY-BY (`world/layby.ts`, `world/laybymesh.ts`,
+  `world/terrain.ts`). In front of each petrol station, shop, house, salvage yard and
+  scrap stop (not the masts) the asphalt leaves the road edge, eases out over a 36 m
+  slip to a pad 44 m long and at most 8.5 m wide past the road edge, stopping 2 m short
+  of the building's front wall, and eases back over a mirror-image 36 m slip: 116 m of
+  real asphalt on the building's side. It is attached to the existing stops, so
+  `Poi.index`, loot and saves are untouched.
+  - The roll is shared: the roadside slot roll moved out of `world/poi.ts` into
+    `world/poislots.ts` (with `POI_SPACING`, `PoiStock`, `rollStructure`, `MAST_IDS`),
+    and the dwelling catalogue's data into `world/dwellings/list.ts`, so the lay-by can
+    be computed in the desert tile and vista workers without three.js.
+  - The terrain levels the whole site, pad and building alike, to the road's own edge
+    height carried out with a 1% crossfall (`laybyFlattenWeight`, `laybyLevel`, in
+    `Terrain.baseFromFrame`, so `heightAt`, the tiles and `drawnGroundY` all see it),
+    easing back to the desert over 12 m; the detail layers are faded by the same
+    weight. Measured on seed 1337's first seven lay-bys: the ground across the road
+    edge steps at most 1.3 mm, `heightAt` on the pad matches the pad's level to
+    0.0000 m, and the building's fitted plane has 0.015-0.028 m of residual.
+  - The pad is drawn with the road's own material object and attribute set (no new
+    shader program) on the road's own rows, so it shares the ribbon's edge vertex for
+    vertex; its collider is Asphalt trimesh slabs, and `Terrain.surfaceAt` reads
+    Asphalt on it. The desert tiles sink the ground 0.1 m under and round it, and the
+    pad's outer lip goes down into the sand. In the game (seed 'flick', 7.7 km): the
+    collider steps at most 1.2 mm across the road-edge joint (448 raycast pairs), a
+    car driven in, parked on the pad and out had all four wheels on Asphalt on the pad,
+    its vertical-velocity jolt crossing the entry slip was 0.028 m/s per 16 ms against
+    0.027 on the plain road before it, and the lay-by mesh drew with the road ribbon's
+    own program (0 new programs while it streamed in and was driven).
+  - The verge makes room: the shoulder strip folds under the edge along a lay-by, and
+    rocks, ground cover, reflector posts and sidetracks keep off it; a pole that would
+    stand on it is left out and the line spans the pad. A stop's wreck field lays out
+    clear of the asphalt (`tools/wreck-spacing.ts` checks it: 0 bodies on a lay-by in
+    396 fields), and a courier parks on the pad's building side.
+- TRAFFIC STOPS AT THE LAY-BYS (`world/traffic.ts`, `vehicle/autopilot.ts`). A driven
+  car coming up to a lay-by on its own side of the road (forward traffic the right-hand
+  ones, the other stream the left) rolls once, from its id and the stop, while the
+  entry is 140-280 m ahead: a quarter of them signal right, ease down to 30 km/h for
+  the slip, drive up it and along the pad at 15 km/h, and park on the pad's parking
+  line for 20-90 s with the handbrake on. Then they signal left, pull up to the end of
+  the pad, wait until nothing in the lane they join would reach the end of the exit
+  slip within 7 s (plus 40 m, the player included), and rejoin; racers never stop.
+  - The driver follows the stop on its own branch (`Autopilot.setLaybyCourse`,
+    activity `layby`): the road controller's pursuit, lane hold and yaw damping on the
+    course's line, the hold-line braking curve to its place, the road's bends, and a
+    stop behind any dynamic body, prop or pedestrian on the line — the car parked in
+    front, or the player's own car left on the pad. Handing the road back is a fresh
+    engagement, as after the rails.
+  - Two places per pad, 10 m apart; a car only takes the place behind every car
+    already there and only one car is on its way in at a time, so nobody drives through
+    a parked car. A pad with a courier too near its parking line, or with no collider
+    under it yet, is not stopped at.
+  - A car on a stop is out of the deadlock, bottleneck, reverse-room and passing rules,
+    never goes on the rails, and is not recycled as stuck while it waits; one that
+    stands still for 30 s on its way in or out gives the stop up to the road's driver.
+  - A lay-by coming into the spawn band ahead sometimes (35%, rolled per stop) has a
+    car already parked at it when the player arrives.
+  - `tools/traffic-bench.ts` paves the road and pad round seed 42's lay-by at 23.1 km
+    and watches it for 600 s with the player standing there: 4 cars parked and 4 back
+    in the lane, 0 impacts, the parked cars within 0.10 m of the parking line over
+    14 364 samples. The right-hand lay-by at 30.8 km (forward traffic): 3 parked, 2
+    back out in 600 s, 0 impacts. Cars commit 190-270 m before the slip at 54-72 km/h,
+    are parked 25-30 s later, and are back in the lane at 40-44 km/h about 10 s after
+    leaving the pad.
+
 ## 0.22.0 — 2026-10-10
 
 Brakes that reach the tyres and lock them, a road that hits instead of floating (humps, potholes, cracks, patches and joints), one keyboard steering scheme, a rear-only handbrake, calmer and smarter traffic, more corners and a twisty road from the first kilometre, the Panini lens removed, and settings regrouped with a Settings button on the title screen.

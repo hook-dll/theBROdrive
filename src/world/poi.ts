@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import { hash, hash01, pick } from '../core/rng';
-import { GAMEPLAY_CONFIG } from '../config';
 import { SurfaceType } from '../core/surfaces';
 import { ROAD_LENGTH, type Road } from './road';
 import type { CarState, GameWorld } from '../game/state';
@@ -50,7 +49,6 @@ import {
   courierId,
   courierParkingLateral,
   couriersBetween,
-  isCourierPoiSlot,
   type CourierField,
   type CourierStop,
 } from './couriers';
@@ -66,7 +64,9 @@ import { BASIN_OUTER_M, lakeSites, type LakeSite } from './lakes';
 import type { RoadDistance } from './roaddistance';
 import type { Terrain } from './terrain';
 import type { VariantInstance } from './poivariantbuild';
-import { createStructureInstance, structureCount, structureDef } from './poistructures';
+import { createStructureInstance, structureDef } from './poistructures';
+import { POI_SPACING, roadsideSlot, rollStructure, type PoiStock } from './poislots';
+import { laybyCourierLateral, laybyNear, laybyOuterAt } from './layby';
 
 const COURIER_MODELS = CAR_MODELS.filter((def) => def.paintStyle !== undefined);
 
@@ -95,16 +95,6 @@ const COURIER_MODELS = CAR_MODELS.filter((def) => def.paintStyle !== undefined);
  * already took is simply absent.
  */
 
-/**
- * Metres of arclength between POI slots: 7.7 km, from `config/gameplay.json`. Not a
- * player setting any more; a slider that re-rolled every stop on the road was a debug
- * knob, and it moved `Poi.index`, which the looted flags are keyed by.
- */
-export const POI_SPACING = GAMEPLAY_CONFIG.poiSpacingMetres;
-/** Fraction of roadside slots that contain a POI; the rest read as empty desert. */
-const POI_OCCUPANCY = 0.55;
-/** Domain tag for the POI hash stream, distinct from every other subsystem. */
-const POI_DOMAIN = 0x504f4931; // 'POI1'
 /** Domain tag for the desert slots. */
 const DESERT_DOMAIN = 0x44534b31; // 'DSK1'
 /** Chance that one side of one desert slot has a building on it. */
@@ -130,50 +120,16 @@ const DESERT_NEIGHBOUR_CLEARANCE_M = 12;
 const DESERT_END_CLEARANCE_M = 2_500;
 
 /**
- * Where the two populations' identities live in `lootedPois`.
+ * Where the desert population's identities live in `lootedPois` (the roadside one's
+ * base is in world/poislots.ts).
  *
  * Both are offset past anything a save written before the dwellings could hold: those
  * saves recorded the old buildings' slot indices, and the loot they left behind was laid
  * INSIDE buildings that now stand as closed shells. A fresh index gives every stop in an
  * old save its loot again, outside, instead of none.
  */
-const ROADSIDE_INDEX_BASE = 50_000_000;
 const DESERT_INDEX_BASE = 60_000_000;
 
-/**
- * Clear verge between the ASPHALT EDGE and a building's nearest wall, metres.
- *
- * Measured from the edge rather than from the centreline because the road widens: one
- * fixed offset from the crown is 12 m of clearance on a two-lane stretch and 6 m on a
- * four-lane one, which is how a kiosk ends up at the paint. `halfWidthAt` is usable
- * here because it is a pure function of the seed and the arclength — no road sampling —
- * so the placement below stays as pure and as cheap as it was.
- */
-const VARIANT_SETBACK_MIN_M = 10;
-const VARIANT_SETBACK_SPAN_M = 12;
-
-/**
- * What a stop leaves outside for the player, in the terms the world used when every
- * building was one of them: a forecourt's `fuel`, a shop's `store` of tools, a `home`'s
- * medicine, a scrapyard's `salvage` field of cars, a wreck's `scrap` and a mast's
- * maintenance kit.
- */
-export type PoiStock = 'fuel' | 'store' | 'home' | 'salvage' | 'scrap' | 'mast';
-
-/**
- * A dwelling's stock, by weight. The weights are the old catalogue's building counts
- * per kind — five petrol stations, five shops, six houses, three container yards, four
- * wrecks — so a stop pays out, on average, exactly what a stop paid out before the
- * buildings were replaced. Masts keep the mast stock.
- */
-const DWELLING_STOCK: readonly { readonly stock: PoiStock; readonly weight: number }[] = [
-  { stock: 'fuel', weight: 5 },
-  { stock: 'store', weight: 5 },
-  { stock: 'home', weight: 6 },
-  { stock: 'salvage', weight: 3 },
-  { stock: 'scrap', weight: 4 },
-];
-const DWELLING_STOCK_TOTAL = DWELLING_STOCK.reduce((sum, entry) => sum + entry.weight, 0);
 
 export interface Poi {
   /** Identity in `WorldState.lootedPois` and in every generated item id. Stable forever. */
@@ -208,60 +164,25 @@ function radiusStructure(structure: number): number {
 }
 
 /**
- * Which building, and what it holds. There is deliberately no progression to learn:
- * both are hashes of the slot, so having seen fuel outside one izba tells a player
- * nothing about the next one.
+ * One roadside slot, resolved: null when it is empty desert. The roll itself is
+ * world/poislots.ts, shared with the lay-bys; what is added here is the offset this
+ * PARTICULAR building needs: the asphalt half width at this arclength, plus the verge,
+ * plus the building's own half-extent. The AUTHORED footprint is used rather than a
+ * measured one because this is pure and cheap by contract — `poisBetween` resolves a
+ * stretch of road without building a single triangle.
  */
-function rollStructure(seed: number, domain: number, key: number): { structure: number; stock: PoiStock } {
-  const structure = Math.min(
-    structureCount() - 1,
-    Math.floor(hash01(seed, domain, key, 1) * structureCount()),
-  );
-  if (structureDef(structure).kind === 'mast') return { structure, stock: 'mast' };
-  let cursor = hash01(seed, domain, key, 5) * DWELLING_STOCK_TOTAL;
-  for (const entry of DWELLING_STOCK) {
-    cursor -= entry.weight;
-    if (cursor < 0) return { structure, stock: entry.stock };
-  }
-  return { structure, stock: DWELLING_STOCK[DWELLING_STOCK.length - 1]!.stock };
-}
-
-/**
- * One roadside slot, resolved: null when it is empty desert. A courier slot always
- * has a building, because the courier parks beside it.
- *
- * The offset is what this PARTICULAR building needs: the asphalt half width at this
- * arclength, plus a verge, plus the building's own half-extent. The AUTHORED footprint
- * is used rather than a measured one because this is pure and cheap by contract —
- * `poisBetween` resolves a stretch of road without building a single triangle.
- */
-function roadsideOccupied(seed: number, slot: number, spacing: number): boolean {
-  return hash01(seed, POI_DOMAIN, slot) < POI_OCCUPANCY || isCourierPoiSlot(seed, slot, spacing);
-}
-
-/** Stops of the drive whose car field always has a car to take (see `Poi.guaranteedCar`). */
-const GUARANTEED_CAR_STOPS = 2;
-
 function roadsidePoi(seed: number, slot: number, spacing: number): Poi | null {
-  const s = slot * spacing;
-  if (slot < 1 || s > ROAD_LENGTH) return null;
-  if (!roadsideOccupied(seed, slot, spacing)) return null;
-  let earlier = 0;
-  for (let k = 1; k < slot && earlier < GUARANTEED_CAR_STOPS; k++) {
-    if (roadsideOccupied(seed, k, spacing)) earlier++;
-  }
-  const { structure, stock } = rollStructure(seed, POI_DOMAIN, slot);
-  const side = hash01(seed, POI_DOMAIN, slot, 2) < 0.5 ? -1 : 1;
-  const verge = VARIANT_SETBACK_MIN_M + hash01(seed, POI_DOMAIN, slot, 3) * VARIANT_SETBACK_SPAN_M;
+  const roll = roadsideSlot(seed, slot, spacing);
+  if (!roll) return null;
   return {
-    index: ROADSIDE_INDEX_BASE + slot,
-    s,
-    lateral: side * (halfWidthAt(seed, s) + verge + halfStructure(structure)),
-    structure,
-    stock,
+    index: roll.index,
+    s: roll.s,
+    lateral: roll.side * (halfWidthAt(seed, roll.s) + roll.verge + halfStructure(roll.structure)),
+    structure: roll.structure,
+    stock: roll.stock,
     desert: false,
-    variantSeed: hash(seed, POI_DOMAIN, slot, 4),
-    guaranteedCar: earlier < GUARANTEED_CAR_STOPS,
+    variantSeed: roll.variantSeed,
+    guaranteedCar: roll.guaranteedCar,
   };
 }
 
@@ -1414,6 +1335,9 @@ export function layOutWreckField(poi: Poi, road: Road, keepOut?: WreckKeepOut): 
   // A scrapyard strings 1..3 bodies round its yard; any other stop 1..2.
   const count = 1 + Math.floor(hash01(poi.variantSeed, 10) * (poi.stock === 'salvage' ? 3 : 2));
   const slots: WreckSlot[] = [];
+  // The stop's lay-by, if it has one: no body is parked on its asphalt.
+  const nearLayby = poi.desert ? null : laybyNear(road.seed, poi.s);
+  const layby = nearLayby?.poiIndex === poi.index ? nearLayby : null;
 
   for (let w = 0; w < count; w++) {
     const def: CarModelDef = pick(CAR_MODELS, poi.variantSeed, w, 10);
@@ -1440,6 +1364,16 @@ export function layOutWreckField(poi: Poi, road: Road, keepOut?: WreckKeepOut): 
             Math.max(Math.abs(lx) - keepOut.halfX, 0),
             Math.max(Math.abs(lz) - keepOut.halfZ, 0),
           ) - radius;
+      }
+      if (layby) {
+        // Gap off the lay-by's asphalt outline, in the road frame; zero and below
+        // (only the radius left) anywhere on it.
+        const s = poi.s + sDelta;
+        const sc = Math.min(layby.sExit, Math.max(layby.sEntry, s));
+        const u = (poi.lateral + latDelta) * layby.side;
+        const gap =
+          Math.hypot(Math.max(0, u - laybyOuterAt(layby, sc, road.halfWidthAt(sc))), s - sc) - radius;
+        if (gap < margin) margin = gap;
       }
       for (const other of slots) {
         const gap =
@@ -1846,11 +1780,18 @@ export class PoiProvider implements ChunkProvider {
     for (const stop of couriersBetween(ctx.world.seed, ctx.sStart, ctx.sEnd, POI_SPACING)) {
       const courierPoi = pois.find((poi) => poi.s === stop.s);
       if (!courierPoi) continue;
+      // On the stop's lay-by when it has one, on its building side so the parking line
+      // beside it stays free (world/layby.ts); a mast has none, and the car stands on
+      // the verge as it always did.
+      const layby = laybyNear(ctx.world.seed, stop.s);
       buildCourier(
         ctx,
         {
           ...stop,
-          lateral: courierParkingLateral(courierPoi.lateral),
+          lateral:
+            layby?.poiIndex === courierPoi.index
+              ? laybyCourierLateral(layby)
+              : courierParkingLateral(courierPoi.lateral),
         },
         group,
         bodies,

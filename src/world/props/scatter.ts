@@ -19,6 +19,7 @@ import { SurfaceType } from '../../core/surfaces';
 import { HazardIndex } from '../hazards';
 import { ROAD_HALF_WIDTH } from '../road';
 import { storyKeepsClear } from '../../story/site';
+import { laybyKeepsClear } from '../layby';
 import type { ChunkContext, ChunkContent, ChunkProvider } from '../chunks';
 
 import {
@@ -142,6 +143,8 @@ const GROUND_COVER_LAT = 320;
 const RETRO_GROUND_COVER_LAT = 140;
 /** Nearest a tuft grows to the asphalt edge, metres: past the shoulder strip. */
 const GROUND_COVER_SETBACK_M = 2.2;
+/** Clear sand kept round a lay-by's asphalt by rocks and tufts alike, metres. */
+const LAYBY_CLEAR_M = 2;
 /**
  * Hit radius as a share of the form's placed radius: a tuft's blades splay past the
  * part a bumper would actually flatten.
@@ -326,6 +329,8 @@ export class ScatterProvider implements ChunkProvider {
           // narrow-road filter; this is the one that keeps a prop off a widened verge,
           // and it costs three hashes rather than a road projection.
           if (absLateral < ctx.road.halfWidthAt(s) + SCATTER_SETBACK_M) break cell;
+          // Nor on a lay-by's pad or its slips (world/layby.ts).
+          if (laybyKeepsClear(seed, s, lateral, ctx.road.halfWidthAt(s), LAYBY_CLEAR_M)) break cell;
 
           // Thin out towards the far edge so the scatter ends in a fringe rather than a
           // fence line. Still only arithmetic: no sampling yet.
@@ -496,6 +501,7 @@ export class ScatterProvider implements ChunkProvider {
           if (past < GROUND_COVER_SETBACK_M) continue;
           // Same keep-clear the scatter uses: no tufts through the yard or the strip.
           if (storyKeepsClear(s, lateral)) continue;
+          if (laybyKeepsClear(seed, s, lateral, ctx.road.halfWidthAt(s), LAYBY_CLEAR_M)) continue;
           // A little thicker along the verge, then an even spread over the open desert.
           const near = 1 - Math.min(1, past / GROUND_COVER_LAT);
           const density = GROUND_COVER_FAR + (GROUND_COVER_NEAR - GROUND_COVER_FAR) * near * near;

@@ -22,6 +22,7 @@ import {
   sectionLateral,
 } from './roadsurface';
 import { terminusWeight } from './terminus';
+import { laybyNear } from './layby';
 import { DESERT_SHOULDER_MATERIAL, TERRAIN_COLLIDER_SURFACE } from './terrainmesh';
 import type { ChunkContent, ChunkContext, ChunkProvider } from './chunks';
 
@@ -552,6 +553,20 @@ export function roadAsphaltVertexColorAtStart(out: THREE.Color): THREE.Color {
   return out.copy(SURFACE_LINEAR[ROAD_START_SURFACE]!).multiplyScalar(textureGain);
 }
 
+/** The same for asphalt proper, whatever the road beside it is laid in (lay-bys). */
+export function roadAsphaltVertexColor(out: THREE.Color): THREE.Color {
+  return out.copy(SURFACE_LINEAR[SurfaceType.Asphalt]!).multiplyScalar(roadVertexColorGain());
+}
+
+/**
+ * The factor every road vertex colour is multiplied by, so the albedo texture's mean
+ * does not darken it: a colour mixed into the asphalt (sand on a lay-by) takes it too.
+ */
+export function roadVertexColorGain(): number {
+  attachRoadTextures();
+  return textureGain;
+}
+
 const markingMaterial = applyCloudShadow(
   applyGroundSpotlightNormals(
     new THREE.MeshStandardMaterial({
@@ -782,7 +797,10 @@ export class RoadMeshProvider implements ChunkProvider {
       const edgeTone = 1 - (1 - style.edgeTone) * (1 - 0.4 * wear);
       // The strip's own width, from the road's cross-section rather than this table.
       const stripWidth = shoulderWidthM(cond.surface) * (1 - 0.2 * wear);
-
+      // A lay-by's asphalt abuts this edge from its entry slip to its exit slip
+      // (world/laybymesh.ts), so the strip on that side folds under the edge there.
+      const layby = laybyNear(this.seed, s);
+      const laybySide = layby && s > layby.sEntry && s < layby.sExit ? layby.side : 0;
       for (let side = 0; side < 2; side++) {
         const sign = side === 0 ? -1 : 1;
         // How far the sand on the asphalt reaches in from THIS edge (see sandFactor):
@@ -806,7 +824,10 @@ export class RoadMeshProvider implements ChunkProvider {
         const edgeGround = g.height;
         const drop = ey - edgeGround;
         const collapsed =
-          drop > SHOULDER_MAX_DROP || drop < -SHOULDER_MAX_RISE || terminusWeight(ex + ox, ez + oz) > 0;
+          drop > SHOULDER_MAX_DROP ||
+          drop < -SHOULDER_MAX_RISE ||
+          terminusWeight(ex + ox, ez + oz) > 0 ||
+          sign === laybySide;
 
         for (let c = 0; c < cols; c++) {
           const t = SHOULDER_ACROSS[c]!;

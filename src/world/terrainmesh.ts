@@ -841,7 +841,7 @@ export function drawnGroundY(
   }
 
   const p = road.offsetPoint(s, lateral);
-  return near + (far - near) * along + terrain.detailAt(p.x, p.z, absLateral, s);
+  return near + (far - near) * along + terrain.detailAt(p.x, p.z, lateral, s);
 }
 
 export class TerrainMeshProvider implements ChunkProvider {
@@ -1083,7 +1083,7 @@ export class TerrainMeshProvider implements ChunkProvider {
         // The height alone carries the detail layer, and it is added AFTER the
         // interpolation: interpolating a coarsely sampled detail term is what aliases
         // it, which is the whole reason this grid exists.
-        positions[vi * 3 + 1] = y + terrain.detailAt(px, pz, Math.abs(lateral), frameS);
+        positions[vi * 3 + 1] = y + terrain.detailAt(px, pz, lateral, frameS);
         positions[vi * 3 + 2] = z;
         lateralOf[vi] = lateral;
 

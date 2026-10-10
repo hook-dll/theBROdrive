@@ -34,13 +34,14 @@
 import { installAssetShim } from './assetshim';
 import { carModelMeasure, preloadCarModels } from '../src/render/carmodel';
 import {
-  POI_SPACING,
   layOutWreckField,
   poiAt,
   salvageKeepOut,
   type WreckKeepOut,
   type WreckSlot,
 } from '../src/world/poi';
+import { POI_SPACING } from '../src/world/poislots';
+import { laybyNear, laybyOuterAt } from '../src/world/layby';
 import { createStructureInstance } from '../src/world/poistructures';
 import { Road } from '../src/world/road';
 import { CAR_MODELS } from '../src/vehicle/carmodels';
@@ -184,6 +185,10 @@ const blindFields: WorldPlaced[][] = [];
 /** The shipped layout: rejection sampling plus the building's keep-out. */
 const afterFields: WorldPlaced[][] = [];
 const sites: WreckKeepOut[] = [];
+/** Fields at stops with a lay-by, and the deepest any body reaches onto its asphalt. */
+let laybyFields = 0;
+let laybyBodiesOn = 0;
+let laybyWorstM = 0;
 
 for (const seed of SEEDS) {
   const road = new Road(seed);
@@ -213,6 +218,26 @@ for (const seed of SEEDS) {
     oldFields.push(oldLayout(poi.variantSeed));
     blindFields.push(inWorld(layOutWreckField(poi, road)));
     afterFields.push(inWorld(layOutWreckField(poi, road, building)));
+
+    // The stop's lay-by (world/layby.ts): no body may stand on its asphalt. Measured by
+    // walking the asphalt outline a metre at a time, in the road frame the layout uses.
+    const layby = laybyNear(seed >>> 0, poi.s);
+    if (layby?.poiIndex === poi.index) {
+      laybyFields++;
+      for (const slot of layOutWreckField(poi, road, building)) {
+        const s = poi.s + slot.sDelta;
+        const u = (poi.lateral + slot.latDelta) * layby.side;
+        let nearest = Infinity;
+        for (let sa = layby.sEntry; sa <= layby.sExit; sa += 1) {
+          const halfWidth = road.halfWidthAt(sa);
+          const across = Math.max(0, u - laybyOuterAt(layby, sa, halfWidth), halfWidth - u);
+          nearest = Math.min(nearest, Math.hypot(across, s - sa));
+        }
+        const depth = slot.radius - nearest;
+        if (depth > 0.05) laybyBodiesOn++;
+        laybyWorstM = Math.max(laybyWorstM, depth);
+      }
+    }
   }
 }
 
@@ -294,6 +319,12 @@ check(
   'no body stands inside the building anywhere',
   afterBuilding.fieldsWithBodyInside === 0,
   `${afterBuilding.fieldsWithBodyInside} bodies inside in ${afterBuilding.fields} fields`,
+);
+// A lay-by is where a car pulls in; a shell standing on it blocks the pad.
+check(
+  'no body stands on a lay-by',
+  laybyFields > 0 && laybyBodiesOn === 0,
+  `${laybyBodiesOn} bodies on the asphalt in ${laybyFields} fields with a lay-by, deepest ${laybyWorstM.toFixed(2)} m`,
 );
 
 console.log(failures === 0 ? 'all checks passed' : `${failures} CHECK(S) FAILED`);

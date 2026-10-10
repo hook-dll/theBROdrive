@@ -20,7 +20,7 @@ import { hash01, pick } from '../core/rng';
 import type { Road } from '../world/road';
 import type { Terrain } from '../world/terrain';
 import { fitGround } from '../world/footprint';
-import { DWELLINGS } from '../world/dwellings/catalogue';
+import { DWELLINGS } from '../world/dwellings/list';
 import {
   createStructureInstance,
   structureCount,

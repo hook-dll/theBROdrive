@@ -15,6 +15,7 @@ import { SurfaceType } from '../../core/surfaces';
 import { varietyEventsBetween, type VarietyEvent } from '../director';
 import { drawnGroundY } from '../terrainmesh';
 import type { RoadDistance } from '../roaddistance';
+import { laybyKeepsClear } from '../layby';
 import type { ChunkContext, ChunkContent, ChunkProvider } from '../chunks';
 
 import { propPieces, type BreakableSink } from './forms';
@@ -42,6 +43,8 @@ const TAG_DELINEATOR = 0xde11a7;
  * two share the band the way a bird and a fence post share a fence post.
  */
 export const DELINEATOR_SETBACK_M = 1.2;
+/** Clear sand a post keeps from a lay-by's asphalt, metres. */
+const DELINEATOR_LAYBY_CLEAR_M = 1;
 /**
  * Station spacing, metres. Every consecutive gap lands in this exact range: the
  * gaps are drawn per station rather than fixed, because a perfectly even run reads
@@ -279,7 +282,10 @@ export class DelineatorProvider implements ChunkProvider {
         // Outward from the LOCAL asphalt edge: the carriageway widens and narrows
         // (`roadprofile.ts`), and a run authored at a fixed lateral would walk onto
         // the paint of every widened stretch it crossed.
-        const lateral = side * (ctx.road.halfWidthAt(s) + DELINEATOR_SETBACK_M);
+        const halfWidth = ctx.road.halfWidthAt(s);
+        const lateral = side * (halfWidth + DELINEATOR_SETBACK_M);
+        // No post on a lay-by: its edge is the pad's now, not the road's.
+        if (laybyKeepsClear(seed, s, lateral, halfWidth, DELINEATOR_LAYBY_CLEAR_M)) return;
         const p = ctx.road.offsetPoint(s, lateral);
         const sample = ctx.road.sampleAt(s);
         // `heading + PI` turns the face back DOWN the road at traffic that has not

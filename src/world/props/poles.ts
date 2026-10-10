@@ -29,6 +29,7 @@ import { ROAD_LENGTH, type Road } from '../road';
 import type { Terrain } from '../terrain';
 import { drawnGroundY } from '../terrainmesh';
 import type { RoadDistance } from '../roaddistance';
+import { laybyKeepsClear } from '../layby';
 import type { ChunkContext, ChunkContent, ChunkProvider } from '../chunks';
 
 import { deformIcosahedron, matDeadStick } from './forms';
@@ -70,6 +71,18 @@ const POLE_SETBACK_M = 3.1;
  * design's own root (`POLE_ROOT_M`) carries the body on down.
  */
 const POLE_SINK_M = 0.1;
+/** Clear sand a pole keeps from a lay-by's asphalt, metres. */
+const POLE_LAYBY_CLEAR_M = 1.5;
+
+/**
+ * Whether the pole at `s` would stand on a lay-by (world/layby.ts). It is left out and
+ * the line spans the pad: a pole in a pull-in is the one place a parked car is sure to
+ * meet it.
+ */
+function onLayby(road: Road, seed: number, s: number): boolean {
+  const halfWidth = road.halfWidthAt(s);
+  return laybyKeepsClear(seed, s, -(halfWidth + POLE_SETBACK_M), halfWidth, POLE_LAYBY_CLEAR_M);
+}
 
 /**
  * SECTIONS: the line is rebuilt in stretches of one design.
@@ -702,6 +715,7 @@ export class PoleProvider implements ChunkProvider {
     const oz = ctx.originZ;
 
     forEachPole(ctx.sStart, ctx.sEnd, (s, index, section) => {
+      if (onLayby(ctx.road, seed, s)) return;
       const pose = describePole(ctx.road, ctx.terrain, this.roadDistance, seed, s, index, section);
       poses.push({ pose, section });
 
@@ -756,10 +770,16 @@ export class PoleProvider implements ChunkProvider {
     const lineColours: number[] = [];
     let wireCount = 0;
     for (const { pose, section } of poses) {
-      const nextIndex = pose.index + 1;
+      // The next pole that stands: one on a lay-by's pad is left out (`onLayby`), and
+      // the line spans the pad to the pole beyond it.
+      let nextIndex = pose.index + 1;
+      let nextS = section.start + (nextIndex - section.firstIndex + 0.5) * section.spacing;
+      while (onLayby(ctx.road, seed, nextS)) {
+        nextIndex++;
+        nextS += section.spacing;
+      }
       // No span across a section boundary: the next design ties on elsewhere.
       if (nextIndex >= section.firstIndex + section.count || !pose.fitted) continue;
-      const nextS = section.start + (nextIndex - section.firstIndex + 0.5) * section.spacing;
       const next = describePole(ctx.road, ctx.terrain, this.roadDistance, seed, nextS, nextIndex, section);
       if (!next.fitted) continue;
       // Either end being down makes the span slack, and a line that came down stays

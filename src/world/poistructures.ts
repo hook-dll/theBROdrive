@@ -1,8 +1,10 @@
 import * as THREE from 'three';
 import { dwellingGroup } from './dwellings/builder';
-import { buildDwellingGeometry, DWELLINGS } from './dwellings/catalogue';
+import { buildDwellingGeometry } from './dwellings/catalogue';
+import { DWELLINGS } from './dwellings/list';
 import { POI_VARIANTS, poiVariantIndex } from './poi-variants';
 import { createVariantInstance, warmVariantAssets, type VariantInstance } from './poivariantbuild';
+import { MAST_IDS } from './poislots';
 
 /**
  * Every building the world scatters: the three masts built from the POI kit, then the
@@ -23,8 +25,6 @@ export interface PoiStructure {
   /** Authored `[x, z]` extent, metres: what the pure placement keeps clear by. */
   readonly footprint: readonly [number, number];
 }
-
-const MAST_IDS = ['standing-tower', 'fallen-tower', 'relay-cluster'] as const;
 
 export const POI_STRUCTURES: readonly PoiStructure[] = [
   ...MAST_IDS.map((id): PoiStructure => {

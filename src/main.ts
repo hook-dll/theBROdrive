@@ -87,6 +87,7 @@ import { TakeoffCutscene } from './story/takeoff';
 import { StoryOverlay } from './story/overlay';
 import { playEnding } from './story/ending';
 import { TerminusPadProvider } from './world/terminuspad';
+import { LaybyMeshProvider } from './world/laybymesh';
 import { PoiProvider } from './world/poi';
 import { DebrisField, type Impactor } from './world/debris';
 import { GroundCoverField } from './world/props/groundcover';
@@ -571,6 +572,9 @@ async function boot(): Promise<void> {
     worldWork,
   );
   streamer.register(new RoadMeshProvider(world.seed, roadDistance));
+  // The paved lay-bys in front of the roadside stops (world/layby.ts), hung off the
+  // ribbon's edge rows, so they build right after it.
+  streamer.register(new LaybyMeshProvider());
   const startSite = new StartSiteProvider(boardable);
   streamer.register(startSite);
   streamer.register(new TerminusPadProvider());

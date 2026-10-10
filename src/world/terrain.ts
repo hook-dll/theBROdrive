@@ -12,6 +12,7 @@ import { ROAD_HALF_WIDTH, ROAD_MAX_HALF_WIDTH, type Road } from './road';
 import { RoadDistance } from './roaddistance';
 import { SurfaceField, roadSurfaceY } from './roadsurface';
 import { onTerminusPad, terminusWeight } from './terminus';
+import { laybyFlattenWeight, laybyLevel, laybyNear, onLaybyAsphalt } from './layby';
 
 /**
  * Terrain height is the `Landscape` field plus bounded dune relief. The road is not
@@ -498,12 +499,18 @@ export class Terrain {
    * The fine band for the legacy road-aligned refined grid, plus the corridor
    * landform. It fades to exactly zero at both of that mesh's seams; large-scale dune
    * shape remains in `relief`.
+   *
+   * `lateral` is signed (a lay-by is on one side only); a caller that only knows a
+   * distance well outside the corridor may pass it as is.
    */
-  detailAt(x: number, z: number, dist: number, s: number): number {
+  detailAt(x: number, z: number, lateral: number, s: number): number {
+    const dist = Math.abs(lateral);
     const inner = this.road.halfWidthAt(s);
     if (dist <= inner || dist >= DETAIL_REACH) return 0;
     const paved = terminusWeight(x, z);
     if (paved >= 1) return 0;
+    const level = this.laybyWeight(s, lateral, inner);
+    if (level >= 1) return 0;
     const fade =
       smoothstep01((dist - inner) / (DETAIL_FADE_IN - inner)) *
       (1 - smoothstep01((dist - DETAIL_HOLD) / (DETAIL_REACH - DETAIL_HOLD)));
@@ -514,21 +521,32 @@ export class Terrain {
     // seven-metre crest by it would have thinned the crest over exactly the twenty
     // metres it is supposed to climb, and cut its outer flank off at 62 m mid-air.
     return (
-      (this.fineRelief(x, z) * fade + this.corridorShape(x, z, dist, s, inner)) * (1 - paved)
+      (this.fineRelief(x, z) * fade + this.corridorShape(x, z, dist, s, inner)) *
+      (1 - paved) *
+      (1 - level)
     );
   }
 
-  /** Fine band and corridor landform for the player-centred tile lattice. */
-  explorationDetailAt(x: number, z: number, dist: number, s: number): number {
+  /**
+   * Fine band and corridor landform for the player-centred tile lattice. `lateral` is
+   * signed, as in `detailAt`.
+   */
+  explorationDetailAt(x: number, z: number, lateral: number, s: number): number {
+    const dist = Math.abs(lateral);
     const inner = this.road.halfWidthAt(s);
     if (dist <= inner) return 0;
-    // Wheel-scale relief is faded out under the turning circle's paving, so the pad is
-    // a pad rather than a flat height with sand ripples standing on it.
+    // Wheel-scale relief is faded out under the turning circle's paving and under a
+    // lay-by's levelled site, so a pad is a pad rather than a flat height with sand
+    // ripples standing on it.
     const paved = terminusWeight(x, z);
     if (paved >= 1) return 0;
+    const level = this.laybyWeight(s, lateral, inner);
+    if (level >= 1) return 0;
     const fade = smoothstep01((dist - inner) / (DETAIL_FADE_IN - inner));
     return (
-      (this.fineRelief(x, z) * fade + this.corridorShape(x, z, dist, s, inner)) * (1 - paved)
+      (this.fineRelief(x, z) * fade + this.corridorShape(x, z, dist, s, inner)) *
+      (1 - paved) *
+      (1 - level)
     );
   }
 
@@ -600,13 +618,13 @@ export class Terrain {
   }
 
   /** Legacy road-fan height, retaining its finite detail seam for tooling. */
-  openHeight(x: number, z: number, dist: number, s: number): number {
-    return this.openBase(x, z, dist, s) + this.detailAt(x, z, dist, s);
+  openHeight(x: number, z: number, lateral: number, s: number): number {
+    return this.openBase(x, z, Math.abs(lateral), s) + this.detailAt(x, z, lateral, s);
   }
 
   /** Fine open terrain used by the player-centred desert tiles. */
-  explorationHeight(x: number, z: number, dist: number, s: number): number {
-    return this.openBase(x, z, dist, s) + this.explorationDetailAt(x, z, dist, s);
+  explorationHeight(x: number, z: number, lateral: number, s: number): number {
+    return this.openBase(x, z, Math.abs(lateral), s) + this.explorationDetailAt(x, z, lateral, s);
   }
 
   /** Base landscape for distant meshes that deliberately omit dune relief. */
@@ -658,12 +676,7 @@ export class Terrain {
    */
   heightAt(x: number, z: number, hintS?: number): number {
     const p = this.road.project(x, z, hintS);
-    const dist = Math.abs(p.lateral);
-    const base =
-      dist <= this.road.halfWidthAt(p.s)
-        ? roadSurfaceY(this.road, this.field, p.s, p.lateral, x, z)
-        : this.gradedBase(x, z, dist, p.s, Math.sign(p.lateral));
-    return this.levelForTerminus(x, z, base) + this.explorationDetailAt(x, z, dist, p.s);
+    return this.baseFromFrame(x, z, p.lateral, p.s) + this.explorationDetailAt(x, z, p.lateral, p.s);
   }
 
   /**
@@ -680,11 +693,12 @@ export class Terrain {
    */
   baseFromFrame(x: number, z: number, lateral: number, s: number): number {
     const dist = Math.abs(lateral);
-    const base =
-      dist <= this.road.halfWidthAt(s)
-        ? roadSurfaceY(this.road, this.field, s, lateral, x, z)
-        : this.gradedBase(x, z, dist, s, Math.sign(lateral));
-    return this.levelForTerminus(x, z, base);
+    const halfWidth = this.road.halfWidthAt(s);
+    if (dist <= halfWidth) {
+      return this.levelForTerminus(x, z, roadSurfaceY(this.road, this.field, s, lateral, x, z));
+    }
+    const graded = this.gradedBase(x, z, dist, s, Math.sign(lateral));
+    return this.levelForTerminus(x, z, this.levelForLayby(s, lateral, halfWidth, graded));
   }
 
   /**
@@ -701,6 +715,38 @@ export class Terrain {
     const w = terminusWeight(x, z);
     if (w === 0) return height;
     return height + (this.terminusSurfaceY(x, z) - height) * w;
+  }
+
+  /**
+   * A lay-by's site is LEVEL too (world/layby.ts), by the same construction as the
+   * terminus: one weight, applied once at the base, with the detail layers faded by it.
+   * The level is the road's own edge height at this arclength carried outward with the
+   * lay-by's crossfall, so at the edge it IS the graded corridor's anchor and the slips
+   * meet the road with no step. `world/laybymesh.ts` builds the pad from `laybySurfaceY`,
+   * the same number, so the drawn asphalt, its collider and `heightAt` agree, and a
+   * building fitted with `fitGround` stands on the ground the pad lies on.
+   */
+  private levelForLayby(s: number, lateral: number, halfWidth: number, height: number): number {
+    const layby = laybyNear(this.seed, s);
+    if (!layby) return height;
+    const w = laybyFlattenWeight(layby, s, lateral, halfWidth);
+    if (w === 0) return height;
+    const target = laybyLevel(this.roadEdgeHeight(s, layby.side), Math.abs(lateral), halfWidth);
+    return height + (target - height) * w;
+  }
+
+  /** The lay-by's levelling weight at a road-frame point off the asphalt, 0..1. */
+  private laybyWeight(s: number, lateral: number, halfWidth: number): number {
+    const layby = laybyNear(this.seed, s);
+    return layby ? laybyFlattenWeight(layby, s, lateral, halfWidth) : 0;
+  }
+
+  /**
+   * Height of a lay-by's asphalt at a road-frame point on its side of the road: the
+   * level `levelForLayby` blends the ground to, read directly.
+   */
+  laybySurfaceY(s: number, lateral: number, side: 1 | -1): number {
+    return laybyLevel(this.roadEdgeHeight(s, side), Math.abs(lateral), this.road.halfWidthAt(s));
   }
 
   /**
@@ -722,12 +768,12 @@ export class Terrain {
 
   /** Fine driveable height for a caller that already owns the exact road frame. */
   explorationHeightFromFrame(x: number, z: number, lateral: number, s: number): number {
-    return this.baseFromFrame(x, z, lateral, s) + this.explorationDetailAt(x, z, Math.abs(lateral), s);
+    return this.baseFromFrame(x, z, lateral, s) + this.explorationDetailAt(x, z, lateral, s);
   }
 
   /** Legacy finite-detail frame sample used by road-fan tooling. */
   heightFromFrame(x: number, z: number, lateral: number, s: number): number {
-    return this.baseFromFrame(x, z, lateral, s) + this.detailAt(x, z, Math.abs(lateral), s);
+    return this.baseFromFrame(x, z, lateral, s) + this.detailAt(x, z, lateral, s);
   }
 
   /**
@@ -788,6 +834,10 @@ export class Terrain {
     // material as a harmless default. Outside it is the shoulder, and past that the
     // open desert.
     if (toEdge <= 0) return SurfaceType.Gravel;
+    // A lay-by is paved, and the terrain agrees with its collider about that for the
+    // same reason it agrees with the terminus pad's.
+    const layby = laybyNear(this.seed, s);
+    if (layby && onLaybyAsphalt(layby, s, lateral, inner)) return SurfaceType.Asphalt;
     if (toEdge <= VERGE_WIDTH) return VERGE_SURFACE;
     // An outcrop belt lowers the rock threshold by exactly what it lowers it by in
     // `corridorShape`, so a shelf the belt stood up is rock under the wheels and not
@@ -814,14 +864,7 @@ export class Terrain {
     // collider about that or a wheel that crosses the seam changes surface twice.
     if (onTerminusPad(x, z)) return SurfaceType.Asphalt;
     const p = this.road.project(x, z, hintS);
-    const inner = this.road.halfWidthAt(p.s);
-    const dist = Math.abs(p.lateral);
-    const toEdge = dist - inner;
-    if (toEdge <= 0) return SurfaceType.Gravel;
-    if (toEdge <= VERGE_WIDTH) return VERGE_SURFACE;
-    const belt = outcropBeltAt(this.seed, p.s, dist, inner);
-    const threshold = belt > 0 ? beltRockThreshold(belt) : OUTCROP_THRESHOLD;
-    return this.outcropAt(x, z) > threshold ? SurfaceType.Rock : SurfaceType.Sand;
+    return this.surfaceFromFrame(x, z, p.lateral, p.s);
   }
 
   /**

@@ -27,7 +27,8 @@ import { type ChunkContext } from '../src/world/chunks';
 import { CHUNK_LENGTH } from '../src/world/ranges';
 import { Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
-import { POI_SPACING, PoiProvider, desertPoiClearOfRoad, desertPoisBetween, poisBetween, type PoiStock } from '../src/world/poi';
+import { PoiProvider, desertPoiClearOfRoad, desertPoisBetween, poisBetween } from '../src/world/poi';
+import { POI_SPACING, type PoiStock } from '../src/world/poislots';
 import { createVariantInstance, variantCount, variantDef } from '../src/world/poivariantbuild';
 import {
   POI_STRUCTURES,

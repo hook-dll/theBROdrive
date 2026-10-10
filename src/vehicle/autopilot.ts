@@ -8,6 +8,7 @@ import { type DriveRoad } from '../world/road';
 import { type HazardField, type RoadHazard } from '../world/hazards';
 import { shoulderWidthM } from '../world/roadprofile';
 import type { Vehicle } from './vehicle';
+import type { IndicatorSide } from './vehiclelamps';
 import { evaluateCorridorLine, planCorridor, type CorridorObstacle } from './corridor';
 import {
   classifyManoeuvre,
@@ -164,7 +165,24 @@ export type AutopilotActivity =
   | 'pass'
   | 'avoid'
   | 'recover'
-  | 'offroad';
+  | 'offroad'
+  | 'layby';
+
+/**
+ * A LINE OFF THE CARRIAGEWAY, handed to a driver by the traffic coordinator: up to a
+ * lay-by, along its slip and pad, and back out (`world/layby.ts`, the visit in
+ * `world/traffic.ts`). The driver only follows it. Where it stops is the hold
+ * distance, exactly as at a bottleneck; the coordinator rewrites `speed` and
+ * `indicator` as the visit moves through its phases.
+ */
+export interface LaybyCourse {
+  /** Lateral wanted at arclength `s`, both in this driver's own road frame. */
+  lineAt(s: number): number;
+  /** Fastest the line is driven at here, m/s. */
+  speed: number;
+  /** What the lamps tell the cars round it. */
+  indicator: IndicatorSide;
+}
 
 interface ModeConfig {
   /** Speed asked for on a clear straight, m/s. */
@@ -953,6 +971,22 @@ const VERGE_BEND_SAMPLES = 4;
 const VERGE_BYPASS_STILL_MPS = 60 / 3.6;
 /** Braking a driver plans with to stop at a bottleneck hold line, m/s². */
 const HOLD_LINE_DECEL_MPS2 = 3;
+/**
+ * DRIVING A LAY-BY (`Autopilot.setLaybyCourse`). The preview is the road controller's
+ * own, capped so a slip's taper is not previewed past; the pedals are softer than any
+ * mode's, because pulling in is never a race; and anything on the line ahead — the
+ * car parked in front, a prop — is stopped behind at a standoff.
+ */
+const LAYBY_LOOKAHEAD_MAX_M = 24;
+const LAYBY_LOOK_M = 60;
+const LAYBY_LINE_CLEARANCE_M = 0.4;
+const LAYBY_OWN_HALF_LENGTH_M = 2.3;
+const LAYBY_STANDOFF_M = 2.5;
+const LAYBY_DECEL_MPS2 = 2.5;
+const LAYBY_THROTTLE_BAND_MPS = 4;
+const LAYBY_BRAKE_BAND_MPS = 4;
+const LAYBY_BEND_LOOK_M = 80;
+const LAYBY_BEND_STEP_M = 10;
 /**
  * A PASS ON THE VERGE HAS TO BE GAINING. The loose ground out there costs grip and
  * rolling drag the asphalt does not, and a car that could not find its advantage sat
@@ -1976,6 +2010,17 @@ export class Autopilot {
   private brakeScale = 1;
   /** See `setHoldDistance`. */
   private holdDistance = Infinity;
+  /** See `setLaybyCourse`; null on the road. */
+  private laybyCourse: LaybyCourse | null = null;
+  private readonly laybyAim = { x: 0, y: 0, z: 0 };
+  /** One step's scan along the lay-by line, in fields so the visitors allocate nothing. */
+  private laybyScanCourse: LaybyCourse | null = null;
+  private laybyScanS = 0;
+  private laybyScanGap = Infinity;
+  private laybyScanSpeed = 0;
+  private readonly visitLaybyHazard = (hazard: RoadHazard): void => {
+    this.noteLaybyObstacle(hazard.s - this.laybyScanS, hazard.lateral, hazard.radius, hazard.radius, 0);
+  };
   /** Share of the mode's pace this driver uses; see `setPace`. */
   private paceValue = 1;
   /** Ambient traffic may use a per-driver following distance. */
@@ -2666,6 +2711,19 @@ export class Autopilot {
    */
   setHoldDistance(metres: number): void { this.holdDistance = metres; }
   /**
+   * Hands this driver a lay-by course to follow instead of the road, or takes it back
+   * (`LaybyCourse`). Handing it back is a fresh engagement, as at a wake or a
+   * retarget: the planner, the line and the recovery state all belong to the road the
+   * car left, and the driver projects itself onto the road from where it now is.
+   */
+  setLaybyCourse(course: LaybyCourse | null): void {
+    if (course === this.laybyCourse) return;
+    const leaving = this.laybyCourse !== null && course === null;
+    this.laybyCourse = course;
+    if (leaving) this.setEngaged(this.engagedValue);
+  }
+  get onLaybyCourse(): boolean { return this.laybyCourse !== null; }
+  /**
    * HOW MUCH OF THE AVAILABLE ROAD THIS DRIVER USES, as a fraction of its mode's pace.
    *
    * An absolute ceiling in km/h is not a character: on any road where the surface is
@@ -2855,8 +2913,202 @@ export class Autopilot {
   /** Writes controls in-place using a geometric pure-pursuit waypoint. */
   drive(dt: number, vehicle: Vehicle, out: InputFrame, originX: number, originZ: number): void {
     if (!this.engagedValue) return;
-    this.driveControls(dt, vehicle, out, originX, originZ);
+    if (this.laybyCourse) this.driveLayby(dt, vehicle, out, this.laybyCourse, originX, originZ);
+    else this.driveControls(dt, vehicle, out, originX, originZ);
     this.modulateBrake(dt, vehicle, out);
+  }
+
+  /**
+   * DRIVING A LAY-BY IS NOT DRIVING THE ROAD. The planner's whole world is the
+   * carriageway and its verge: a body ten metres past the paint is, to it, a car that
+   * has left the road, and the recovery it would start is exactly wrong on a pad paved
+   * for it. So while a course is set the driver does only what pulling in takes: pure
+   * pursuit along the course's line with the road controller's lane hold and yaw
+   * damping, no faster than the course allows, on the braking curve to its hold line,
+   * and stopping behind whatever stands on the line ahead — the car parked in front,
+   * the car it is following in, a prop.
+   */
+  private driveLayby(
+    dt: number,
+    vehicle: Vehicle,
+    out: InputFrame,
+    course: LaybyCourse,
+    originX: number,
+    originZ: number,
+  ): void {
+    this.controlledVehicle = vehicle;
+    out.steerMode = 'direct';
+    this.updateAutomaticHeadlights(vehicle);
+    const config = MODES[this.modeValue];
+    vehicle.absoluteTranslation(this.position);
+    const projection = this.road.project(
+      this.position.x,
+      this.position.z,
+      this.hintValid ? this.hintS : undefined,
+    );
+    this.hintS = projection.s;
+    this.hintValid = true;
+    const velocity = vehicle.chassis.linvel();
+    const speed = Math.hypot(velocity.x, velocity.z);
+    const rotation = vehicle.chassis.rotation();
+    const forwardX = 2 * (rotation.x * rotation.z + rotation.w * rotation.y);
+    const forwardZ = 1 - 2 * (rotation.x * rotation.x + rotation.y * rotation.y);
+    const forwardSpeed = velocity.x * forwardX + velocity.z * forwardZ;
+    const currentRoad = this.road.sampleAt(projection.s);
+    const roadForwardX = Math.sin(currentRoad.heading);
+    const roadForwardZ = Math.cos(currentRoad.heading);
+
+    // Steering: the road controller's pursuit, hold and damping, on the course's line.
+    const line = course.lineAt(projection.s);
+    const lineSlope = (course.lineAt(projection.s + 1) - course.lineAt(projection.s - 1)) * 0.5;
+    const lookahead = clamp(
+      config.lookaheadBase + speed * config.lookaheadSpeed,
+      MIN_LOOKAHEAD_M,
+      LAYBY_LOOKAHEAD_MAX_M,
+    );
+    const aimS = projection.s + lookahead;
+    const aim = this.road.offsetPoint(aimS, course.lineAt(aimS), this.laybyAim);
+    const relativeX = aim.x - this.position.x;
+    const relativeZ = aim.z - this.position.z;
+    const waypointRight = relativeX * forwardZ - relativeZ * forwardX;
+    const pursuitCurvature =
+      (2 * waypointRight) / Math.max(relativeX * relativeX + relativeZ * relativeZ, MIN_PURSUIT_DISTANCE_SQ);
+    const lateralAccel = Math.min(
+      config.lateralAccel,
+      Math.max(1e-3, vehicle.estimatedLateralAccel(SurfaceType.Asphalt, speed) * config.gripReserve),
+    );
+    const holdDistance = Math.max(LANE_HOLD_MIN_DISTANCE_M, speed * config.holdSeconds);
+    const holdCap = Math.min(
+      LANE_HOLD_CURVATURE_MAX,
+      (config.holdShare * lateralAccel) / Math.max(speed * speed, 1),
+    );
+    const lateralRate = velocity.x * roadForwardZ - velocity.z * roadForwardX;
+    const holdError = line - projection.lateral + (lineSlope * speed - lateralRate) * LANE_HOLD_LEAD_S;
+    const pathCurvature =
+      pursuitCurvature + clamp((2 * holdError) / (holdDistance * holdDistance), -holdCap, holdCap);
+    const actualYawCurvature = vehicle.chassis.angvel().y / Math.max(speed, 3);
+    const yawDamping =
+      YAW_RATE_DAMPING +
+      (YAW_RATE_DAMPING_FAST - YAW_RATE_DAMPING) *
+        clamp((speed - YAW_DAMPING_RAMP_FROM_MPS) / (YAW_DAMPING_RAMP_TO_MPS - YAW_DAMPING_RAMP_FROM_MPS), 0, 1);
+    const controlledCurvature =
+      pathCurvature * config.steeringGain + yawDamping * (pathCurvature - actualYawCurvature);
+    out.steer = vehicle.steeringInputForWheelAngle(Math.atan(wheelbaseOf(vehicle) * controlledCurvature));
+
+    // Speed: the course's, the hold line's braking curve, and whatever is on the line.
+    let targetSpeed = course.speed;
+    if (this.holdDistance < Infinity) {
+      targetSpeed = Math.min(
+        targetSpeed,
+        this.holdDistance <= 0 ? 0 : Math.sqrt(2 * HOLD_LINE_DECEL_MPS2 * this.holdDistance),
+      );
+    }
+    // The road's own bends on the way to the slip, on the mode's cornering budget.
+    for (let d = 0; d <= LAYBY_BEND_LOOK_M; d += LAYBY_BEND_STEP_M) {
+      const curvature = Math.abs(this.road.curvatureAt(projection.s + d));
+      if (curvature > 1e-4) {
+        targetSpeed = Math.min(targetSpeed, Math.sqrt(lateralAccel / curvature + 2 * LAYBY_DECEL_MPS2 * d));
+      }
+    }
+    // Every dynamic body in reach — the car parked in front, the one it is following in,
+    // the player's own car left on the pad — every indexed prop, and the player on foot.
+    this.laybyScanCourse = course;
+    this.laybyScanS = projection.s;
+    this.laybyScanGap = Infinity;
+    this.laybyScanSpeed = 0;
+    this.collectRoadBodies(vehicle, originX, originZ, LAYBY_LOOK_M);
+    for (let i = 0; i < this.roadBodyCount; i++) {
+      const body = this.roadBodies[i]!;
+      this.noteLaybyObstacle(body.s, body.lateral, body.halfAlong, body.halfAcross, body.speed);
+    }
+    this.hazards.forEachAhead(projection.s, LAYBY_LOOK_M, this.visitLaybyHazard);
+    if (this.pedestrianActive) {
+      const dx = this.pedestrianX - this.position.x;
+      const dz = this.pedestrianZ - this.position.z;
+      if (dx * dx + dz * dz <= LAYBY_LOOK_M * LAYBY_LOOK_M) {
+        const pedestrian = this.road.project(this.pedestrianX, this.pedestrianZ, projection.s);
+        this.noteLaybyObstacle(
+          pedestrian.s - projection.s,
+          pedestrian.lateral,
+          PEDESTRIAN_RADIUS_M,
+          PEDESTRIAN_RADIUS_M,
+          0,
+        );
+      }
+    }
+    this.laybyScanCourse = null;
+    if (this.laybyScanGap < Infinity) {
+      const room = Math.max(0, this.laybyScanGap - LAYBY_STANDOFF_M);
+      targetSpeed = Math.min(
+        targetSpeed,
+        room <= 0 ? 0 : Math.sqrt(this.laybyScanSpeed * this.laybyScanSpeed + 2 * LAYBY_DECEL_MPS2 * room),
+      );
+    }
+    this.obstacleGapValue = this.laybyScanGap;
+    this.obstacleSpeedValue = this.laybyScanSpeed;
+
+    out.reverse = false;
+    const speedError = targetSpeed - forwardSpeed;
+    let pedal =
+      speedError > 0
+        ? clamp(speedError / LAYBY_THROTTLE_BAND_MPS, targetSpeed > HOLD_TARGET_MPS ? THROTTLE_FLOOR : 0, 1)
+        : 0;
+    // Pulling away from the pad is a force, as it is everywhere; see the road controller.
+    if (targetSpeed > HOLD_TARGET_MPS && forwardSpeed < LAUNCH_ASSIST_BELOW_MPS && vehicle.engineRunning) {
+      const want = clamp((targetSpeed - forwardSpeed) / LAUNCH_TAU_S, -LAUNCH_ACCEL_MPS2, LAUNCH_ACCEL_MPS2);
+      pedal = Math.max(
+        pedal,
+        vehicle.throttleForDriveForce(
+          vehicle.stats.mass * (GRAVITY * currentRoad.grade + ROLLING_DECEL_MPS2 + want),
+        ),
+      );
+    }
+    out.throttle = this.throttleLimit.reset(pedal, 'speed-error');
+    out.brake = speedError < 0 ? clamp(-speedError / LAYBY_BRAKE_BAND_MPS, 0, config.brakeCeiling) : 0;
+    if (targetSpeed < HOLD_TARGET_MPS && speed < CRAWL_SPEED_MPS) {
+      out.throttle = this.throttleLimit.limit(0, 'hold');
+      out.brake = Math.max(out.brake, HOLD_BRAKE);
+    }
+    if (forwardSpeed < -ROLLBACK_MPS) {
+      out.throttle = this.throttleLimit.limit(0, 'rollback');
+      out.brake = 1;
+    }
+    if (!vehicle.engineRunning) out.throttle = this.throttleLimit.limit(0, 'engine-off');
+    if (out.throttle > 0 && forwardSpeed < LAUNCH_HOLD_MPS && vehicle.forwardDriveInterrupted) {
+      out.brake = Math.max(out.brake, HOLD_BRAKE);
+    }
+    // Parked is parked: the lever goes on, as it does for a car waiting out the dust.
+    out.handbrake = targetSpeed < HOLD_TARGET_MPS && speed < SHELTER_PARK_MPS;
+    vehicle.setIndicator(course.indicator);
+
+    this.racerThrottle = out.throttle;
+    this.planLine = line;
+    this.appliedLateral = line;
+    this.lineSlewRate = 0;
+    this.targetSpeedValue = targetSpeed;
+    this.activityValue = 'layby';
+  }
+
+  /**
+   * Something whose centre is `ahead` road metres in front of this car's, at `lateral`:
+   * in the way when it overlaps the course's line where it stands, and then its near
+   * face is a gap to stop behind. What is level or behind is somebody else's business.
+   */
+  private noteLaybyObstacle(
+    ahead: number,
+    lateral: number,
+    halfAlong: number,
+    halfAcross: number,
+    speed: number,
+  ): void {
+    if (ahead <= 0) return;
+    const across = Math.abs(lateral - this.laybyScanCourse!.lineAt(this.laybyScanS + ahead));
+    if (across > CAR_HALF_WIDTH_M + halfAcross + LAYBY_LINE_CLEARANCE_M) return;
+    const gap = ahead - halfAlong - LAYBY_OWN_HALF_LENGTH_M;
+    if (gap < this.laybyScanGap) {
+      this.laybyScanGap = gap;
+      this.laybyScanSpeed = Math.max(0, speed);
+    }
   }
 
   /**

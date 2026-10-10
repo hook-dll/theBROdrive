@@ -6,6 +6,7 @@ import { ROAD_MAX_HALF_WIDTH, type Road } from './road';
 import type { RoadDistance } from './roaddistance';
 import { CORRIDOR_OUTER, type Terrain } from './terrain';
 import { terminusWeight } from './terminus';
+import { laybyAsphaltCover, laybyNear } from './layby';
 
 
 /** Side length of one absolute, deterministic desert tile. */
@@ -18,6 +19,8 @@ const DIST_LATTICE = 20;
 const EXACT_DISTANCE_GATE = Math.max(CORRIDOR_OUTER, ROAD_MAX_HALF_WIDTH) + DIST_LATTICE * 2;
 const FULL_RELIEF_DISTANCE = 200;
 const PROP_TAG = 0x44535254;
+/** How far the drawn ground sits under the road's asphalt at its edge, metres. */
+const UNDER_ROAD_M = 0.1;
 const MAX_TILE_PROPS = 5;
 
 /**
@@ -104,14 +107,23 @@ export function sampleGroundHeight(
   const hint = context.roadDistance.ownerAt(x, z, DIST_LATTICE);
   const projection = context.road.project(x, z, hint);
   const dist = Math.abs(projection.lateral);
-  const detail = context.terrain.explorationDetailAt(x, z, dist, projection.s);
+  const detail = context.terrain.explorationDetailAt(x, z, projection.lateral, projection.s);
   const halfWidth = context.road.halfWidthAt(projection.s);
   const transitionInput = (dist - halfWidth) / (CORRIDOR_OUTER - halfWidth);
   const transition =
     transitionInput < 0 ? 0 : transitionInput > 1 ? 1 : transitionInput;
   // The road ribbon owns the contact surface in the corridor. This small offset avoids
   // z-fighting while the fade leaves no ledge at the edge of the graded verge.
-  const underRoad = 0.1 * (1 - transition * transition * (3 - 2 * transition));
+  let underRoad = UNDER_ROAD_M * (1 - transition * transition * (3 - 2 * transition));
+  // A lay-by's pad (world/laybymesh.ts) lies on the levelled ground out where the fade
+  // has almost gone, so the ground under it and just round it takes the full offset.
+  const layby = laybyNear(context.seed, projection.s);
+  if (layby) {
+    underRoad = Math.max(
+      underRoad,
+      UNDER_ROAD_M * laybyAsphaltCover(layby, projection.s, projection.lateral, halfWidth),
+    );
+  }
   out.height = context.terrain.baseFromFrame(x, z, projection.lateral, projection.s) + detail - underRoad;
   // `detail` carries the corridor landform (world/corridorshape.ts) as well as the
   // fine band, because everything that draws the corridor has to get it. What the

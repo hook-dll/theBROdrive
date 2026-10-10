@@ -6,6 +6,7 @@ import { varietyEventsBetween, type VarietyEvent } from './director';
 import { drawnGroundY } from './terrainmesh';
 import type { Road } from './road';
 import type { RoadDistance } from './roaddistance';
+import { laybysBetween } from './layby';
 import type { Terrain } from './terrain';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 
@@ -436,6 +437,10 @@ export class SidetrackProvider implements ChunkProvider {
       // pure function of it. Building it in every chunk the ribbon touched would draw
       // the same track two or three times over.
       if (event.s < ctx.sStart || event.s >= ctx.sEnd) continue;
+      // A track does not leave the road through a lay-by or run across its building's
+      // yard: one that would is not laid.
+      const reach = event.s + SIDETRACK_MAX_LENGTH + SIDETRACK_ROW_M;
+      if (laybysBetween(seed, event.s - SIDETRACK_ROW_M, reach).some((l) => l.side === event.side)) continue;
       const plan = sidetrackPlan(seed, ctx.road, event);
       const geometry = yield* buildSidetrackGeometry(
         ctx.road,
