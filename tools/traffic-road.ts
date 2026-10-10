@@ -103,6 +103,14 @@ const SOLO = args.includes('--solo');
 const EGO_LOG = args.includes('--ego-log');
 let egoLogTicks = 0;
 /**
+ * `--frantic-share X`: re-roll that share of the stream's driver draws until the draw
+ * comes up frantic (a body whose catalogue odds never make one stays as drawn). The
+ * frantic driver is rare in the shipped draw, and the loss-of-control tally below
+ * needs car-minutes of it to say anything. `--events` prints every such event.
+ */
+const FRANTIC_SHARE = flag('frantic-share', 0);
+const EVENTS_LOG = args.includes('--events');
+/**
  * The ego driver's character. It is the player's own autopilot, at its middle setting
  * unless `--ego` asks for another one — `frantic` is the racer the player races against,
  * and the `racer:` line below is what it is judged on.
@@ -116,7 +124,8 @@ const EGO_MODE: AutopilotMode = (() => {
   }
   return value;
 })();
-const EGO_MODEL = 'sv_vaz2105r';
+/** `--ego-model <id>` drives another catalogue body; the default is the bench's own. */
+const EGO_MODEL = args.includes('--ego-model') ? args[args.indexOf('--ego-model') + 1]! : 'sv_vaz2105r';
 /** Room the ribbon keeps past the widest carriageway, for verges and excursions. */
 const RIBBON_HALF_WIDTH = ROAD_HALF_WIDTH * 2 + 4;
 /**
@@ -389,8 +398,30 @@ interface StreamCar {
   settleFor: number;
   vehicle: Vehicle;
   autopilot: Autopilot;
+  /** Non-null while the car rides on rails, away from the ego. */
+  rails: { speed: number } | null;
+  rival: boolean;
+  turnS: number;
+  input: InputFrame;
 }
 const cars = (traffic as unknown as { carList: readonly StreamCar[] }).carList;
+if (FRANTIC_SHARE > 0) {
+  type Draw = (direction: number, modelId: string) => { style: string };
+  const shaped = traffic as unknown as { drawDriver: Draw };
+  const draw = shaped.drawDriver.bind(traffic);
+  let roll = 0;
+  shaped.drawDriver = (direction, modelId) => {
+    // A deterministic share, so a run stays the seed's own.
+    roll = (roll + FRANTIC_SHARE) % 1;
+    if (roll < FRANTIC_SHARE) {
+      for (let k = 0; k < 8; k++) {
+        const drawn = draw(direction, modelId);
+        if (drawn.style === 'frantic') return drawn;
+      }
+    }
+    return draw(direction, modelId);
+  };
+}
 
 // ---------------------------------------------------------------- measurement
 /**
@@ -1032,6 +1063,177 @@ function sampleCar(
   if (localLateral > 0.55) crownExposureSeconds += FIXED_DT;
 }
 
+// ---------------------------------------------------------------- losing the car
+/**
+ * LOSS OF CONTROL, PER DRIVEN CAR-MINUTE AND BY DRIVER STYLE: the events a player sees
+ * as chaos, each counted once on the step it begins.
+ *
+ *   airborne   the springs carry under a tenth of the car's parked load for 0.1 s
+ *   departure  the body's centre 0.3 m past the asphalt, or the driver says `offroad`,
+ *              with no verge pass planned; `verge` is the same with one planned
+ *   slide      body sideslip over 8 degrees above 10 m/s
+ *   contact    an impact over 1.8 m/s (the stream's own threshold)
+ *
+ * Only DRIVEN time counts: a car on rails is a scripted body, and the tally says how many
+ * cars woke (`woke`) and what they did in their first seconds after. `open` is frantic
+ * pace where nothing is in the way: cruising, no bend under 400 m in the next 150 m.
+ */
+const CONTROL_AIRBORNE_LOAD = 0.1;
+const CONTROL_AIRBORNE_STEPS = 6;
+const CONTROL_DEPARTURE_M = 0.3;
+const CONTROL_SLIDE_DEG = 8;
+const CONTROL_OPEN_RADIUS_M = 400;
+const CONTROL_OPEN_LOOK_M = 150;
+/**
+ * A car's first driven seconds are its spawn landing and its rolling start, which is
+ * the stream's spawn work happening out of sight, not a driver's. Tallied as `spawn`.
+ */
+const CONTROL_SPAWN_S = 1.5;
+interface ControlTally {
+  seconds: number;
+  metres: number;
+  openSeconds: number;
+  openMetres: number;
+  woke: number;
+  airborne: number;
+  departure: number;
+  verge: number;
+  slide: number;
+  contact: number;
+  spawn: number;
+}
+interface ControlCar {
+  wasRails: boolean;
+  sinceWake: number;
+  /** Seconds this car has been driven, rails time excluded. */
+  driven: number;
+  airSteps: number;
+  airborne: boolean;
+  departed: boolean;
+  offroad: boolean;
+  sliding: boolean;
+  /** Snapshots every quarter second over the last two: v>target pedal steer lat load. */
+  trail: string[];
+  trailClock: number;
+}
+const controlTally = new Map<string, ControlTally>();
+const controlCars = new Map<string, ControlCar>();
+const controlEvents: string[] = [];
+function controlEvent(kind: string, car: StreamCar, state: ControlCar, speed: number, detail: string): void {
+  const tally = controlTally.get(car.style)!;
+  const spawning = state.driven < CONTROL_SPAWN_S;
+  if (spawning) tally.spawn++;
+  else if (kind === 'airborne') tally.airborne++;
+  else if (kind === 'departure') tally.departure++;
+  else if (kind === 'verge') tally.verge++;
+  else if (kind === 'slide') tally.slide++;
+  else tally.contact++;
+  if (spawning) kind = `spawn-${kind}`;
+  if (!EVENTS_LOG) return;
+  const s = car.forwardS;
+  const crest = (road.sampleAt(s + 16).grade - road.sampleAt(s - 16).grade) / 32;
+  let tightest = 0;
+  for (let d = 0; d <= CONTROL_OPEN_LOOK_M; d += 10) {
+    tightest = Math.max(tightest, Math.abs(road.curvatureAt(s + car.direction * d)));
+  }
+  road.conditionAt(s, paceCondition);
+  const autopilot = car.autopilot;
+  controlEvents.push(
+    `${kind.padEnd(9)} ${car.style.padEnd(8)} ${car.id} ${car.modelId} s ${(s - START_S).toFixed(0)} dir ${car.direction > 0 ? '+' : '-'} ` +
+      `${(speed * 3.6).toFixed(0)}>${(autopilot.targetSpeed * 3.6).toFixed(0)} km/h ${autopilot.bindingSpeedLimit} ` +
+      `${autopilot.activity}/${autopilot.lateralCommitment ?? '-'}${autopilot.onRacingLine ? ' racing' : ''} ` +
+      `lat ${car.roadLateral.toFixed(1)} of ${road.halfWidthAt(s).toFixed(1)}, R ${(1 / Math.max(Math.abs(road.curvatureAt(s)), 1e-5)).toFixed(0)} ` +
+      `(${(1 / Math.max(tightest, 1e-5)).toFixed(0)} within ${CONTROL_OPEN_LOOK_M} m), grade ${(road.sampleAt(s).grade * car.direction * 100).toFixed(1)}% ` +
+      `crest unload ${((-speed * speed * crest) / 9.81).toFixed(2)}g, surface ${paceCondition.surface}, ` +
+      `woke ${state.sinceWake < 60 ? `${state.sinceWake.toFixed(1)} s ago` : '-'}, ${detail}` +
+      `\n            before: ${state.trail.join(' | ')}`,
+  );
+}
+const paceCondition: RoadConditionBuffer = { surface: SurfaceType.Asphalt, decay: 0, sandCover: 0, markings: 1 };
+function trackControl(car: StreamCar): void {
+  let tally = controlTally.get(car.style);
+  if (!tally) {
+    tally = { seconds: 0, metres: 0, openSeconds: 0, openMetres: 0, woke: 0, airborne: 0, departure: 0, verge: 0, slide: 0, contact: 0, spawn: 0 };
+    controlTally.set(car.style, tally);
+  }
+  let state = controlCars.get(car.id);
+  if (!state) {
+    state = { wasRails: false, sinceWake: Infinity, driven: 0, airSteps: 0, airborne: false, departed: false, offroad: false, sliding: false, trail: [], trailClock: 0 };
+    controlCars.set(car.id, state);
+  }
+  state.sinceWake += FIXED_DT;
+  if (car.rails !== null) {
+    state.wasRails = true;
+    return;
+  }
+  if (state.wasRails) {
+    state.wasRails = false;
+    state.sinceWake = 0;
+    tally.woke++;
+  }
+  if (car.rival || car.turnS >= 0) return;
+  state.driven += FIXED_DT;
+  const vehicle = car.vehicle;
+  const velocity = vehicle.chassis.linvel();
+  const heading = bodyHeading(vehicle);
+  const along = velocity.x * Math.sin(heading) + velocity.z * Math.cos(heading);
+  const across = velocity.x * Math.cos(heading) - velocity.z * Math.sin(heading);
+  const speed = Math.hypot(velocity.x, velocity.z);
+  let load = 0;
+  let parked = 0;
+  for (const wheel of vehicle.wheelRide) {
+    load += wheel.loadN;
+    parked += wheel.staticLoadN;
+  }
+  const loadShare = parked > 0 ? load / parked : 1;
+  const autopilot = car.autopilot;
+  state.trailClock += FIXED_DT;
+  if (EVENTS_LOG && state.trailClock >= 0.25) {
+    state.trailClock = 0;
+    state.trail.push(
+      `${(speed * 3.6).toFixed(0)}>${(autopilot.targetSpeed * 3.6).toFixed(0)} ` +
+        `${car.input.brake > 0 ? `b${car.input.brake.toFixed(2)}` : `t${car.input.throttle.toFixed(2)}`} ` +
+        `s${car.input.steer.toFixed(2)} lat${car.roadLateral.toFixed(1)} L${loadShare.toFixed(2)}`,
+    );
+    if (state.trail.length > 8) state.trail.shift();
+  }
+  tally.seconds += FIXED_DT;
+  tally.metres += Math.max(0, along) * FIXED_DT;
+  if (car.style === 'frantic' && autopilot.activity === 'cruise' && !(autopilot.obstacleGap < CONTROL_OPEN_LOOK_M)) {
+    let open = true;
+    for (let d = 0; d <= CONTROL_OPEN_LOOK_M && open; d += 25) {
+      open = Math.abs(road.curvatureAt(car.forwardS + car.direction * d)) < 1 / CONTROL_OPEN_RADIUS_M;
+    }
+    if (open) {
+      tally.openSeconds += FIXED_DT;
+      tally.openMetres += Math.max(0, along) * FIXED_DT;
+    }
+  }
+  state.airSteps = loadShare < CONTROL_AIRBORNE_LOAD ? state.airSteps + 1 : 0;
+  if (state.airSteps >= CONTROL_AIRBORNE_STEPS && !state.airborne) {
+    state.airborne = true;
+    controlEvent('airborne', car, state, speed, `vertical ${velocity.y.toFixed(1)} m/s`);
+  }
+  if (loadShare > 0.5) state.airborne = false;
+  const over = Math.abs(car.roadLateral) - road.halfWidthAt(car.forwardS);
+  const offroad = autopilot.activity === 'offroad';
+  if ((over > CONTROL_DEPARTURE_M || (offroad && !state.offroad)) && !state.departed) {
+    state.departed = true;
+    const planned = autopilot.lateralCommitment === 'shoulder' && !offroad;
+    controlEvent(planned ? 'verge' : 'departure', car, state, speed, `${over.toFixed(1)} m past the edge`);
+  }
+  state.offroad = offroad;
+  if (over < -0.5 && !offroad) state.departed = false;
+  const slipDeg = speed > 10 && along > 0 ? (Math.atan2(Math.abs(across), along) * 180) / Math.PI : 0;
+  if (slipDeg > CONTROL_SLIDE_DEG && !state.sliding) {
+    state.sliding = true;
+    controlEvent('slide', car, state, speed, `slip ${slipDeg.toFixed(1)} deg`);
+  }
+  if (slipDeg < CONTROL_SLIDE_DEG / 2) state.sliding = false;
+  const impact = vehicle.lastImpact;
+  if (impact && impact.severityMps > 1.8) controlEvent('contact', car, state, speed, `${impact.severityMps.toFixed(1)} m/s`);
+}
+
 let ticks = 0;
 async function tick(): Promise<void> {
   egoFieldSeat.forwardS = egoS;
@@ -1083,6 +1285,7 @@ async function run(seconds: number, record: boolean): Promise<void> {
         car.forwardS,
         car.roadLateral,
       );
+      trackControl(car);
       if (car.forwardS >= PASS_LINE_M && car.direction === 1) passedTheLine.add(car.id);
     }
     if (!(nearestAhead <= 300)) anyDirectionEmpty += FIXED_DT;
@@ -1260,6 +1463,19 @@ console.log(
       .map(([name, seconds]) => `${name} ${((seconds / Math.max(carSeconds, 1e-3)) * 100).toFixed(0)}%`)
       .join('  '),
 );
+for (const style of ['cautious', 'normal', 'hurried', 'frantic']) {
+  const tally = controlTally.get(style);
+  if (!tally || tally.seconds < 1) continue;
+  const minutes = tally.seconds / 60;
+  const rate = (count: number) => `${count} (${(count / minutes).toFixed(2)})`;
+  console.log(
+    `  control ${style.padEnd(8)} ${minutes.toFixed(1)} driven car-min ${((tally.metres / tally.seconds) * 3.6).toFixed(0)} km/h` +
+      `${style === 'frantic' ? `, open road ${(tally.openSeconds / 60).toFixed(1)} min at ${((tally.openMetres / Math.max(tally.openSeconds, 1e-3)) * 3.6).toFixed(0)} km/h` : ''}` +
+      ` | per car-min: airborne ${rate(tally.airborne)} departure ${rate(tally.departure)} verge ${rate(tally.verge)}` +
+      ` slide ${rate(tally.slide)} contact ${rate(tally.contact)} | woke ${tally.woke}, spawn events ${tally.spawn}`,
+  );
+}
+if (EVENTS_LOG) for (const line of controlEvents) console.log(`    ${line}`);
 console.log(
   `  ego:       ${((egoTrack.progress / Math.max(egoTrack.seconds, 1e-3)) * 3.6).toFixed(0)} km/h mean over ` +
     `${(egoTrack.progress / 1000).toFixed(1)} km, ` +

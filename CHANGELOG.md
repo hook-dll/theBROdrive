@@ -12,6 +12,26 @@
   the drive then loads).
 
 ### Changed
+- TRAFFIC NO LONGER PLANS BRAKING THE TYRES CANNOT GIVE, OR WAKES UP IN THE AIR. Measured
+  with the real-road bench's new loss-of-control tally (tools/traffic-road.ts `--frantic-share
+  0.5 --events`, ten stretches on seeds 1337/7/42), two causes, both fixed:
+  - The speed plan braked toward a bend at full capacity right up to its limit point,
+    while the pedal is held to the friction ellipse (`BEND_BRAKE_SHARE_FLOOR`) once the bend
+    builds: frantic cars arrived 30-40 km/h over a corner, braked at 0.8 of the pedal at
+    0.65 of their grip on a descent, and spun. The profile is now carried back segment by
+    segment on what the tyres have left after that segment's bend, the lookahead covers the
+    whole braking distance at `brakingDistanceShare`, and crests unload both grip and
+    braking (`g - v²·kv`), never more than `CREST_UNLOAD_MAX` (0.5) of the weight.
+  - Cars on rails rode at the ride height they happened to have when put on rails
+    (0.76-1.15 m on one model), level on banked decks and not turning in bends, so a car
+    woken near the player threw itself off its springs: 34 of 769 wakes went airborne
+    within a second. Rails now ride at the car's resting clearance, rolled to the deck's
+    banking, and a wake hands back the bend's yaw rate and the steering that holds it:
+    0 of 769.
+  Per driven car-minute, before → after: frantic airborne 0.52 → 0.18, contacts 0.55 →
+  0.45; normal airborne 0.11 → 0.04; frantic open-road pace 107 → 107 km/h. Still open:
+  frantic cars above ~135 km/h in 230-250 m S-bends on cracked asphalt weave and leave
+  the road (departures 0.74 → 0.63, slides unchanged); see the report.
 - MORE CORNERS, AND A NEW GAME OPENS ON A TWISTY ROAD. Corner spacing: pan 1.4 km (was
   2.2), highway 1.3 km (2.2), rolling 750 m (1.1 km), derelict 1 km (1.6); angles and
   radii unchanged, so the no-crossing budget is untouched. The district after the 4 km

@@ -413,7 +413,14 @@ interface TrafficRails {
   speed: number;
   /** The lane held, numbered in its own direction; the car wakes before it ends. */
   readonly lane: number;
-  /** Chassis height above the ground under it when it was put on rails, metres. */
+  /**
+   * Chassis height above the ground it rides over, metres: the car's own RESTING
+   * height (`Vehicle.contactPlaneLocalY`), not the one it happened to have when it was
+   * put on rails. That snapshot caught the springs mid-stroke — measured on one model
+   * from 0.76 to 1.15 m — and the car rode the rails that far off its rest, so it woke
+   * with its springs wound up or hanging and threw itself off them: four times its
+   * weight on the wheels, then none, at highway pace.
+   */
   readonly clearance: number;
   /** Chassis height above the centreline elevation, and the value it is slewing to. */
   rise: number;
@@ -1428,15 +1435,18 @@ export class RoadTraffic {
     const t = car.vehicle.chassis.translation();
     const ground = this.railGroundUnder(car, t.x, t.y, t.z);
     if (ground === null) return false;
-    const rise = t.y - this.road.offsetPoint(car.forwardS, car.roadLateral, this.railPoint).y;
+    const centreY = this.road.offsetPoint(car.forwardS, car.roadLateral, this.railPoint).y;
+    const rise = t.y - centreY;
+    const clearance = -car.vehicle.contactPlaneLocalY;
     car.rails = {
       s: car.forwardS,
       lateral: car.roadLateral,
       speed,
       lane,
-      clearance: t.y - ground,
+      clearance,
+      // From where the body is now to where it rests, at the rails' own slew.
       rise,
-      riseTarget: rise,
+      riseTarget: ground + clearance - centreY,
       cruise: this.railCruise(car, car.forwardS, speed),
       // Spread over the interval, so the stream's surveys do not land on one step.
       survey: RAILS_SURVEY_S * ((car.forwardS / 37) % 1),
@@ -1452,7 +1462,9 @@ export class RoadTraffic {
     const rails = car.rails!;
     car.rails = null;
     this.railBodies.delete(car.vehicle.chassis.handle);
-    car.vehicle.leaveRails(rails.speed);
+    // Turning as the lane turns: the road's curvature against the arclength the car
+    // covers, which runs backwards for a car driving the road the other way.
+    car.vehicle.leaveRails(rails.speed, this.road.curvatureAt(rails.s) * rails.speed * car.direction);
     // A fresh engagement, as at a spawn: the driver projects itself onto the road and
     // plans its line from where it is, rather than from where it last decided anything.
     // It decides on this very step, over the one step it has been driving.
@@ -1537,6 +1549,9 @@ export class RoadTraffic {
       point.z,
       this.road.headingAt(rails.s) + (direction === -1 ? Math.PI : 0),
       ((aheadY - behindY) / (2 * RAILS_GRADE_BASE_M)) * direction,
+      // The deck falls `banking` per metre of lateral, and lateral is to the road's
+      // left: toward a forward car's right it rises, toward a reversed one's it falls.
+      this.road.bankingAt(rails.s) * direction,
       rails.speed,
       accel < -RAILS_BRAKE_LAMP_MPS2,
     );

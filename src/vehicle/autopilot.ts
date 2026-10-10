@@ -492,7 +492,9 @@ const MIN_LOOKAHEAD_M = 6;
  * budget the car is ACTUALLY using right now — its own yaw rate against the same
  * per-surface budget the speed plan was built from — is share the pedal does not get.
  * The floor keeps enough authority to slow down while already at the lateral limit,
- * which is the one situation where a driver still has to.
+ * which is the one situation where a driver still has to. The speed plan brakes on the
+ * same ellipse (see the profile march in `drive`), so it never plans a braking zone the
+ * pedal will then not be allowed to deliver.
  *
  * Deliberately NOT applied to the brakes that exist to prevent a departure
  * (`edgeStability`, the off-road brake) or to the imminent-contact reflex: those are
@@ -500,6 +502,12 @@ const MIN_LOOKAHEAD_M = 6;
  * pedal.
  */
 const BEND_BRAKE_SHARE_FLOOR = 0.35;
+/**
+ * Most of the car's weight a crest may take off its wheels at the planned speed: over a
+ * vertical curvature `kv` at `v` the tyres carry `g - v²·kv`. The plan never goes faster
+ * than leaves this share unloaded, and plans the grip it does use on what is left.
+ */
+const CREST_UNLOAD_MAX = 0.5;
 const GRAVITY = 9.81;
 /**
  * Straight-line pace by surface. Personality still sets the absolute speed: the
@@ -2067,6 +2075,18 @@ export class Autopilot {
     sandCover: 0,
     markings: 1,
   };
+  /**
+   * The speed profile's samples, one slot per `ROAD_PROFILE_SAMPLES` point: where it
+   * is, the speed the point itself allows, the braking and the cornering capacity the
+   * tyres have there, the curvature it is driven at and the grade. Filled forward and
+   * read backward by the march in `drive`; preallocated, so planning allocates nothing.
+   */
+  private readonly profileDistance = new Float64Array(ROAD_PROFILE_SAMPLES + 1);
+  private readonly profileLimit = new Float64Array(ROAD_PROFILE_SAMPLES + 1);
+  private readonly profileBrake = new Float64Array(ROAD_PROFILE_SAMPLES + 1);
+  private readonly profileGrip = new Float64Array(ROAD_PROFILE_SAMPLES + 1);
+  private readonly profileCurvature = new Float64Array(ROAD_PROFILE_SAMPLES + 1);
+  private readonly profileGrade = new Float64Array(ROAD_PROFILE_SAMPLES + 1);
   /** Car lateral at the time of the scan; a hazard off to one side is not a hazard. */
   private scanLateral = 0;
   private readonly visitHazard = (hazard: RoadHazard): void => {
@@ -4589,16 +4609,26 @@ export class Autopilot {
     // being spent on a pending lateral move rather than entirely on the bend.
     const manoeuvreShare =
       plan.manoeuvreSpeed < desiredSpeed - 0.1 ? 1 - MANOEUVRE_LATERAL_SHARE : 1;
+    // Long enough to shed the whole speed on the share of the distance the plan brakes
+    // over (`brakingDistanceShare`): a bend whose limit needs that much road has to be in
+    // the profile when the braking for it starts, not when it is already late.
     const turnLookahead = Math.max(
       lookahead,
       config.curveLead +
         config.brakeLead +
-        (speed * speed) / (2 * currentBrakeAccel),
+        (speed * speed) / (2 * currentBrakeAccel * config.brakingDistanceShare),
     );
     let targetSpeed = this.speedLimit.reset(clearRoadSpeed, 'road');
     let upcomingCurvature = Math.abs(currentRoad.curvature);
-    for (let i = 0; i <= ROAD_PROFILE_SAMPLES; i++) {
-      const distance = (turnLookahead * i) / ROAD_PROFILE_SAMPLES;
+    const samples = ROAD_PROFILE_SAMPLES;
+    const profileDistance = this.profileDistance;
+    const profileLimit = this.profileLimit;
+    const profileBrake = this.profileBrake;
+    const profileGrip = this.profileGrip;
+    const profileCurvature = this.profileCurvature;
+    const profileGrade = this.profileGrade;
+    for (let i = 0; i <= samples; i++) {
+      const distance = (turnLookahead * i) / samples;
       const sample = i === 0 ? currentRoad : this.road.sampleAt(this.hintS + distance);
       this.road.conditionAt(sample.s, this.condition);
       const surface = this.condition.surface;
@@ -4623,20 +4653,19 @@ export class Autopilot {
       //
       // `estimatedLateralAccel` and `sampleGradeLoad` already carry the surface and
       // the gradient, so nothing here needs to know about either.
+      const physicalLateral =
+        vehicle.estimatedLateralAccel(surface, Math.max(speed, clearRoadSpeed)) *
+        Math.sqrt(Math.max(0.35, 1 - sampleGradeLoad * sampleGradeLoad));
       const lateralAccel =
-        Math.min(
-          config.lateralAccel,
-          vehicle.estimatedLateralAccel(surface, Math.max(speed, clearRoadSpeed)) *
-            config.gripReserve *
-            Math.sqrt(Math.max(0.35, 1 - sampleGradeLoad * sampleGradeLoad)),
-        ) * manoeuvreShare;
+        Math.min(config.lateralAccel, physicalLateral * config.gripReserve) * manoeuvreShare;
       // On the racing line a bend is taken at the LINE's curvature, which is the
       // whole point of it; past the solved window, at the road's. A tight bend is the
       // exception, and `bendSpeed` says how.
+      const roadCurvature = Math.abs(sample.curvature);
       const curvature =
         this.racingActive && this.racingLine.covers(sample.s)
           ? Math.abs(this.racingLine.pathCurvatureAt(sample.s))
-          : Math.abs(sample.curvature);
+          : roadCurvature;
       upcomingCurvature = Math.max(upcomingCurvature, curvature);
       // THE CORNER IS BANKED, AND THE BANK IS LATERAL ACCELERATION THE TYRES DO NOT
       // HAVE TO FIND.
@@ -4648,26 +4677,81 @@ export class Autopilot {
       // is no way for the two to disagree. It is added rather than multiplied because
       // it is a force from gravity, not more friction, and only its magnitude counts:
       // a corner is banked INTO the bend whichever way the bend goes.
-      const bank = Math.abs(this.road.bankingAt(sample.s));
+      const bank = GRAVITY * Math.abs(this.road.bankingAt(sample.s));
       // `bendSpeed` is `sqrt((lateral + bank) / curvature)` for the careful modes; for
       // the racer it also takes a tight bend on the road's curvature and its
       // `tightBendShare` of the tyres.
-      const localLimit = Math.min(
+      let localLimit = Math.min(
         straightLimit,
-        bendSpeed(this.modeValue, lateralAccel, GRAVITY * bank, curvature, Math.abs(sample.curvature)),
+        bendSpeed(this.modeValue, lateralAccel, bank, curvature, roadCurvature),
       );
-      const sampleBrake = Math.max(
-        MIN_PLANNED_BRAKE_MPS2,
-        Math.min(config.brakeAccel, physicalBrake * config.brakeReserve) +
-          sample.grade * GRAVITY,
-      );
-      const brakingDistance =
-        Math.max(0, distance - config.curveLead) * config.brakingDistanceShare;
-      targetSpeed = this.speedLimit.limit(
-        Math.sqrt(localLimit * localLimit + 2 * sampleBrake * brakingDistance),
-        'road',
-      );
+      // OVER A CREST THE TYRES PRESS WITH LESS THAN THE CAR'S WEIGHT.
+      //
+      // Driven at `v` over a vertical curvature `kv`, the body is accelerating DOWN at
+      // `v²·kv`, so the wheels carry `g - v²·kv` of it, and every grip figure above —
+      // cornering and braking alike — scales with that load. The road's crests are
+      // 560 m of radius at their sharpest: at 160 km/h that is 0.35 g gone, which is a
+      // bend after a crest taken on two thirds of the tyres it was planned on, or a
+      // car that leaves the road. The curvature is the profile's own: the change of
+      // grade from the sample before this one, positive over a crest.
+      const crest = i === 0 ? 0 : -(sample.grade - profileGrade[i - 1]!) / (distance - profileDistance[i - 1]!);
+      profileGrade[i] = sample.grade;
+      profileDistance[i] = distance;
+      if (crest > 0) {
+        // Never so fast that the crest takes more than `CREST_UNLOAD_MAX` of the
+        // weight, and through a bend on the crest at the grip the load leaves.
+        localLimit = Math.min(localLimit, Math.sqrt((CREST_UNLOAD_MAX * GRAVITY) / crest));
+        const load = 1 - (localLimit * localLimit * crest) / GRAVITY;
+        localLimit = Math.min(
+          localLimit,
+          bendSpeed(this.modeValue, lateralAccel * load, bank, curvature, roadCurvature),
+        );
+      }
+      profileLimit[i] = localLimit;
+      profileGrip[i] = physicalLateral;
+      profileCurvature[i] = curvature;
+      profileBrake[i] = Math.min(config.brakeAccel, physicalBrake * config.brakeReserve);
     }
+    // THE BRAKING ZONE IS PLANNED ON WHAT THE TYRES HAVE LEFT FOR IT.
+    //
+    // Each point's own limit is carried back toward the car one segment at a time, and
+    // a segment brakes on the friction ellipse: the share of the braking capacity left
+    // once the bend it is in has taken `v²·curvature` of the cornering capacity, never
+    // less than `BEND_BRAKE_SHARE_FLOOR` — the same split the pedal is held to below,
+    // so the plan never asks the pedal for a deceleration it will not be allowed. The
+    // old envelope braked at full capacity right up to a bend's own limit point, while
+    // a road's bends ramp in over tens of metres: measured on seed 42's esses, a frantic
+    // car arrived 40 km/h over the corner's speed with the curve already building, stood
+    // on 0.8 of the pedal at 0.65 of its cornering grip on a 3% descent, and spun.
+    //
+    // The crest takes its share here too, at the speed the segment is entered at.
+    let reach = profileLimit[samples]!;
+    for (let i = samples - 1; i >= 0; i--) {
+      const near = Math.max(0, profileDistance[i]! - config.curveLead);
+      const far = Math.max(0, profileDistance[i + 1]! - config.curveLead);
+      const run = (far - near) * config.brakingDistanceShare;
+      const exit = reach;
+      if (run > 0) {
+        const curvature = Math.max(profileCurvature[i]!, profileCurvature[i + 1]!);
+        const grip = Math.min(profileGrip[i]!, profileGrip[i + 1]!);
+        const friction = Math.min(profileBrake[i]!, profileBrake[i + 1]!);
+        const grade = (profileGrade[i]! + profileGrade[i + 1]!) * 0.5;
+        const crest = Math.max(0, -(profileGrade[i + 1]! - profileGrade[i]!) / Math.max(profileDistance[i + 1]! - profileDistance[i]!, 1));
+        // Twice: the entry speed found with the exit's load is a better guess at the
+        // load the entry has, and the second answer is the lower one.
+        let entry = exit;
+        for (let pass = 0; pass < 2; pass++) {
+          const load = Math.max(1 - CREST_UNLOAD_MAX, 1 - (entry * entry * crest) / GRAVITY);
+          const cornering = (entry * entry * curvature) / Math.max(grip * load, 1e-3);
+          const share = Math.max(BEND_BRAKE_SHARE_FLOOR, Math.sqrt(Math.max(0, 1 - cornering * cornering)));
+          const decel = Math.max(MIN_PLANNED_BRAKE_MPS2, friction * load * share + grade * GRAVITY);
+          entry = Math.sqrt(exit * exit + 2 * decel * run);
+        }
+        reach = entry;
+      }
+      reach = Math.min(reach, profileLimit[i]!);
+    }
+    targetSpeed = this.speedLimit.limit(reach, 'road');
     // WHAT THE DRIVER CAN SEE IS NOT YET A SPEED LIMIT HERE, AND THAT IS DELIBERATE.
     //
     // `DriveRoad.sightDistanceAt` exists and is honest — measured on seed 1337, a

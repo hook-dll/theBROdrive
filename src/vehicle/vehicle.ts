@@ -822,6 +822,7 @@ export class Vehicle implements Rebasable {
   private readonly railTranslation = { x: 0, y: 0, z: 0 };
   private readonly railVelocity = { x: 0, y: 0, z: 0 };
   private readonly railRotation = { x: 0, y: 0, z: 0, w: 1 };
+  private readonly railAngvel = { x: 0, y: 0, z: 0 };
   /**
    * Seconds of shove left before the parking hold re-latches. Counted down in `settle`,
    * so it only ever matters on a car nobody is driving.
@@ -1930,8 +1931,9 @@ export class Vehicle implements Rebasable {
 
   /**
    * One fixed step on rails: the chassis is sent to the absolute pose given, yawed to
-   * `heading` and pitched to `grade` (rise over run along it), by the velocity that
-   * lands it there at the end of the coming physics step.
+   * `heading`, pitched to `grade` (rise over run along it) and rolled to `crossfall`
+   * (rise over run toward the car's right: the deck's banking under it), by the
+   * velocity that lands it there at the end of the coming physics step.
    */
   railStep(
     dt: number,
@@ -1940,6 +1942,7 @@ export class Vehicle implements Rebasable {
     z: number,
     heading: number,
     grade: number,
+    crossfall: number,
     speedMps: number,
     braking: boolean,
   ): void {
@@ -1950,18 +1953,28 @@ export class Vehicle implements Rebasable {
     v.y = (y - t.y) / dt;
     v.z = (z - this.origin.z - t.z) / dt;
     this.chassisBody.setLinvel(v, true);
-    // Yaw about world up, then pitch about the car's own right axis; see `rescueTo`.
+    // Yaw about world up, then pitch about the car's own right axis (see `rescueTo`),
+    // then roll about its own forward axis, so the body sits square to a banked deck:
+    // level on rails it woke with one side's springs a bank's height short and threw
+    // itself off them.
     const halfYaw = heading / 2;
     const halfPitch = -Math.atan(grade) / 2;
+    const halfRoll = Math.atan(crossfall) / 2;
     const cy = Math.cos(halfYaw);
     const sy = Math.sin(halfYaw);
     const cp = Math.cos(halfPitch);
     const sp = Math.sin(halfPitch);
+    const cr = Math.cos(halfRoll);
+    const sr = Math.sin(halfRoll);
+    const ax = cy * sp;
+    const ay = sy * cp;
+    const az = -sy * sp;
+    const aw = cy * cp;
     const q = this.railRotation;
-    q.x = cy * sp;
-    q.y = sy * cp;
-    q.z = -sy * sp;
-    q.w = cy * cp;
+    q.x = ax * cr + ay * sr;
+    q.y = ay * cr - ax * sr;
+    q.z = aw * sr + az * cr;
+    q.w = aw * cr - az * sr;
     this.chassisBody.setRotation(q, true);
     this.chassisBody.setAngvel(ZERO_VECTOR, true);
     for (const w of this.wheels) {
@@ -1984,16 +1997,30 @@ export class Vehicle implements Rebasable {
   }
 
   /**
-   * Hands the car back to its springs and its driver at `speedMps`. The body keeps the
-   * velocity the rails gave it, which already follows the road's grade; only gravity,
-   * the wheels' spin and the gear are restored.
+   * Hands the car back to its springs and its driver at `speedMps`, turning at
+   * `yawRate` (rad/s about world up, positive to the left) — the rate the road it was
+   * riding bends at. The body keeps the velocity the rails gave it, which already
+   * follows the road's grade; gravity, the wheels' spin, the gear, the yaw and the
+   * steering that holds that yaw are restored together. Woken straight in a bend, the
+   * body went on in a line while the road turned away: the tyres had to find the whole
+   * corner's side force from nothing in the first steps, and a car woken at 105 km/h in
+   * a 128 m bend loaded its outer springs to three times their weight and slid.
    */
-  leaveRails(speedMps: number): void {
+  leaveRails(speedMps: number, yawRate: number): void {
     if (!this.railsActive) return;
     this.railsActive = false;
     this.chassisBody.setGravityScale(1, true);
-    this.chassisBody.setAngvel(ZERO_VECTOR, true);
+    this.railAngvel.y = yawRate;
+    this.chassisBody.setAngvel(this.railAngvel, true);
     this.brakeLightCommand = 0;
+    // The rack at the angle that holds the bend (positive rack is a left turn), so the
+    // front tyres carry their share of the corner from the first step.
+    const lock = this.model.steerLock;
+    const rack = speedMps > 1 ? clamp(Math.atan((this.wheelbaseM * yawRate) / speedMps), -lock, lock) : 0;
+    this.steerAngle = rack;
+    this.steerCommand = rack;
+    const controller = this.controller;
+    if (controller) for (const w of this.wheels) controller.setWheelSteering(w.index, this.wheelSteerAngle(w));
     this.rollWheelsAt(speedMps);
   }
 
