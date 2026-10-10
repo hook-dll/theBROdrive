@@ -14,9 +14,9 @@
 ### Changed
 - TRAFFIC DRIVERS COME FROM THEIR CARS (`DRIVER_ODDS` in `world/traffic.ts`). GAZ-21,
   UAZ, Oka, IZh and VAZ-2101..2104 are always sleepers; 2105-2109, 21099, GAZ-24 and both
-  Nivas are 40% sleeper, 40% hurried, 20% frantic; 2105 rally, Svyatogor and 2110 are
+  Nivas are 25% sleeper, 25% hurried, 50% frantic; 2105 rally, Svyatogor and 2110 are
   half hurried, half frantic. With the bodies drawn evenly the stream comes out about
-  57% sleeper, 26% hurried, 17% frantic (was a flat 30/30/40). The first car in a
+  50% sleeper, 19% hurried, 31% frantic (was a flat 30/30/40). The first car in a
   direction is still the cautious one if it drew a sleeper; the forced hurried second
   car is gone. Frantic drivers keep the BMW M30 engine and its gearbox.
 - A NEW GAME NO LONGER OPENS ON 30 KM OF STRAIGHT. The calm home district is 4 km

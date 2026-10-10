@@ -112,15 +112,15 @@ const PLATOON_CHANCE = 0.32;
  *
  *  - the old and the slow are always sleepers: the GAZ-21, the UAZ, the Oka, the IZh
  *    and the first four Zhigulis;
- *  - the later Zhigulis, the Samaras, the GAZ-24 and the Nivas are mostly calm, 40%
- *    sleeper, 40% hurried and 20% frantic;
+ *  - the later Zhigulis, the Samaras, the GAZ-24 and the Nivas: 25% sleeper, 25%
+ *    hurried and 50% frantic (20% frantic read as no frantic at all, owner 2026-10-10);
  *  - everything else (the 2105 rally, the Svyatogor, the 2110) is a car somebody
  *    bought to go fast: half hurried, half frantic.
  *
  * A frantic driver still gets the BMW engine and its gearbox (`franticEngine`).
  */
 const SLOW_CAR: readonly [number, number, number] = [1, 0, 0];
-const CALM_CAR: readonly [number, number, number] = [0.4, 0.4, 0.2];
+const CALM_CAR: readonly [number, number, number] = [0.25, 0.25, 0.5];
 const FAST_CAR: readonly [number, number, number] = [0, 0.5, 0.5];
 const DRIVER_ODDS: Readonly<Record<string, readonly [number, number, number]>> = {
   sv_gaz21: SLOW_CAR,
