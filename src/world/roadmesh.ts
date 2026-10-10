@@ -22,7 +22,7 @@ import {
   sectionLateral,
 } from './roadsurface';
 import { terminusWeight } from './terminus';
-import { laybyNear } from './layby';
+import { laybyNear, laybyOuterAt } from './layby';
 import { DESERT_SHOULDER_MATERIAL, TERRAIN_COLLIDER_SURFACE } from './terrainmesh';
 import type { ChunkContent, ChunkContext, ChunkProvider } from './chunks';
 
@@ -797,10 +797,11 @@ export class RoadMeshProvider implements ChunkProvider {
       const edgeTone = 1 - (1 - style.edgeTone) * (1 - 0.4 * wear);
       // The strip's own width, from the road's cross-section rather than this table.
       const stripWidth = shoulderWidthM(cond.surface) * (1 - 0.2 * wear);
-      // A lay-by's asphalt abuts this edge from its entry slip to its exit slip
-      // (world/laybymesh.ts), so the strip on that side folds under the edge there.
+      // A lay-by's asphalt widens this edge from its entry slip to its exit slip
+      // (world/laybymesh.ts). The strip on that side hangs off the lay-by's OUTER edge
+      // instead, so it walks out with the slip and back: one verge round the whole
+      // outline, with nothing between the asphalt and the sand at the slip's thin end.
       const layby = laybyNear(this.seed, s);
-      const laybySide = layby && s > layby.sEntry && s < layby.sExit ? layby.side : 0;
       for (let side = 0; side < 2; side++) {
         const sign = side === 0 ? -1 : 1;
         // How far the sand on the asphalt reaches in from THIS edge (see sandFactor):
@@ -816,18 +817,29 @@ export class RoadMeshProvider implements ChunkProvider {
         const wander = 1 + 0.14 * Math.sin(s / 23 + k) + 0.08 * Math.sin(s / 7.3 + 2.1 * k);
         const width = stripWidth * wander;
         const ragged = (hash01(this.seed, 0x5d, rowBase + si, side) - 0.5) * SHOULDER_RAGGED;
-        const edge = (si * latCount + (side === 0 ? 0 : latCount - 1)) * 3;
-        const ex = positions[edge]!;
-        const ey = positions[edge + 1]!;
-        const ez = positions[edge + 2]!;
+        // The asphalt's outer edge on this side: the ribbon's own edge vertex, or the
+        // lay-by's where it has widened the asphalt (the same point and height its mesh
+        // has, `Terrain.laybySurfaceY`).
+        const inner = layby?.side === sign ? laybyOuterAt(layby, s, halfWidth) : halfWidth;
+        let ex: number;
+        let ey: number;
+        let ez: number;
+        if (inner > halfWidth) {
+          road.offsetPoint(s, sign * inner, point);
+          ex = point.x - ox;
+          ey = ctx.terrain.laybySurfaceY(s, sign * inner, sign);
+          ez = point.z - oz;
+        } else {
+          const edge = (si * latCount + (side === 0 ? 0 : latCount - 1)) * 3;
+          ex = positions[edge]!;
+          ey = positions[edge + 1]!;
+          ez = positions[edge + 2]!;
+        }
         ground(ex + ox, ez + oz, g);
         const edgeGround = g.height;
         const drop = ey - edgeGround;
         const collapsed =
-          drop > SHOULDER_MAX_DROP ||
-          drop < -SHOULDER_MAX_RISE ||
-          terminusWeight(ex + ox, ez + oz) > 0 ||
-          sign === laybySide;
+          drop > SHOULDER_MAX_DROP || drop < -SHOULDER_MAX_RISE || terminusWeight(ex + ox, ez + oz) > 0;
 
         for (let c = 0; c < cols; c++) {
           const t = SHOULDER_ACROSS[c]!;
@@ -842,7 +854,7 @@ export class RoadMeshProvider implements ChunkProvider {
             nor[vi * 3 + 1] = 1;
             detail[vi] = 0;
           } else {
-            road.offsetPoint(s, sign * (halfWidth + t * (width + ragged * t)), point);
+            road.offsetPoint(s, sign * (inner + t * (width + ragged * t)), point);
             ground(point.x, point.z, g);
             ramp = Math.max(0, 1 - t / SHOULDER_RAMP);
             const settle = ramp * ramp;
@@ -892,7 +904,7 @@ export class RoadMeshProvider implements ChunkProvider {
         }
         // The skirt starts on the strip's own outer vertex, so the two share an edge.
         const outer = ((si * 2 + side) * cols + cols - 1) * 3;
-        const outerLateral = halfWidth + width + ragged;
+        const outerLateral = inner + width + ragged;
         for (let c = 0; c < skirtCols; c++) {
           const k = ((si * 2 + side) * skirtCols + c) * 3;
           if (c === 0) {

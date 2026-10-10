@@ -100,6 +100,32 @@
     0 impacts and 0 samples crossing ahead of oncoming traffic; after the win both
     handed in, placed 2nd and 3rd.
 
+### Fixed
+
+- A LAY-BY'S SLIPS GROW OUT OF THE ROAD EDGE CLEANLY (`world/roadmesh.ts`,
+  `world/laybymesh.ts`). At every entry and exit the verge showed a black slit, a grey
+  wedge, a hard edge of sand and a flickering sliver. Three causes. The shoulder strip
+  folded away on the whole lay-by span at once, while the slip there is centimetres wide
+  (its smoothstep reaches 0.7 m only 6 m in), so for several metres nothing covered the
+  verge and the road bed's dark skirt stood above the sunk sand. The strip's fold from a
+  full row to a collapsed one in one 1.33 m step was the wedge, and its edge against the
+  sand the hard step. And the lay-by's own 0.35 m lip, dropping into the sand, began full
+  size at the slip's very tip and crossed the strip's folded triangles at grazing depth.
+  - The shoulder strip now hangs off the lay-by's OUTER edge wherever the asphalt has
+    widened (`laybyOuterAt`, at `Terrain.laybySurfaceY`, the lay-by's own vertex), so one
+    strip runs along the road, out round the slip and pad and back, sharing the
+    asphalt's edge vertex for vertex. Its LooseShoulder collider and verge skirt follow
+    it.
+  - The lay-by mesh has no lip (the strip takes it into the sand as it does the road)
+    and is drawn from the last row with no width, so the slip starts from a point on the
+    road edge; its Asphalt collider still skips rows under 2 cm. Same material object,
+    same attributes: no new program.
+  - Measured at seed 'flick' 7.7 km (right side) and 30.8 km (left side): the drawn
+    ground lies at least 0.099 m under every point of the lay-by asphalt, the collider
+    steps at most 1.24 mm across the road-edge joint (442 raycast pairs), and screenshots
+    from the same viewpoints at both slips before and after, with the camera nudged
+    between frames, show the strip continuous and no slit, wedge or flicker.
+
 ## 0.22.0 — 2026-10-10
 
 Brakes that reach the tyres and lock them, a road that hits instead of floating (humps, potholes, cracks, patches and joints), one keyboard steering scheme, a rear-only handbrake, calmer and smarter traffic, more corners and a twisty road from the first kilometre, the Panini lens removed, and settings regrouped with a Settings button on the title screen.

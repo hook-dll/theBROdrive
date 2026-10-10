@@ -10,24 +10,18 @@ import { SURFACE_STEP } from './roadsurface';
 
 /**
  * Columns across the lay-by's asphalt, road edge to outer edge. The surface is planar
- * across (world/layby.ts `laybyLevel`), so these carry colour, not shape.
+ * across (world/layby.ts `laybyLevel`), so these carry colour, not shape. There is no
+ * lip: the road's shoulder strip hangs off the outer edge (roadmesh.ts), exactly as it
+ * hangs off the ribbon's, and takes the asphalt down into the sand.
  */
-const TOP_COLUMNS = 5;
-/**
- * The outer lip: one more column this far out and this far down, so the pad's edge
- * goes INTO the sand (which the desert tiles sink under and round it,
- * deserttiledata `laybyAsphaltCover`) instead of standing on it as a mat.
- */
-const LIP_OUT_M = 0.35;
-const LIP_DROP_M = 0.16;
-const COLUMNS = TOP_COLUMNS + 1;
-/** Rows narrower than this are left out: the slips start from nothing. */
-const MIN_WIDTH_M = 0.02;
+const COLUMNS = 5;
+/** Collider rows narrower than this are left out: the road edge's own carries a wheel there. */
+const MIN_COLLIDER_WIDTH_M = 0.02;
 /** Rows of quads per collider trimesh (as roadmesh.ts's `COLLIDER_SLAB_QUADS`). */
 const COLLIDER_SLAB_QUADS = 15;
 /**
  * Wind-blown dust, towards the sand: some over the whole pad, which nobody sweeps, and
- * more on the outer column and the lip, where the desert meets it.
+ * more on the outer column, where the desert and its shoulder strip meet it.
  */
 const DUST = 0.14;
 const EDGE_DUST = 0.4;
@@ -77,18 +71,33 @@ export class LaybyMeshProvider implements ChunkProvider {
     roadAsphaltVertexColor(asphalt);
 
     for (const layby of laybys) {
+      // Drawn from the last row with no width at all to the first, so the slip grows out
+      // of the road edge from a point and meets the shoulder strip's inner edge on every
+      // row; collided only where it is wide enough to matter.
       let first = -1;
       let last = -1;
+      let colliderFirst = -1;
+      let colliderLast = -1;
       for (let si = 0; si < sCount; si++) {
         const s = sStart + (si * (sEnd - sStart)) / (sCount - 1);
         const halfWidth = ctx.road.halfWidthAt(s);
-        if (laybyOuterAt(layby, s, halfWidth) - halfWidth < MIN_WIDTH_M) continue;
+        const width = laybyOuterAt(layby, s, halfWidth) - halfWidth;
+        if (width <= 0) continue;
         if (first < 0) first = si;
         last = si;
+        if (width < MIN_COLLIDER_WIDTH_M) continue;
+        if (colliderFirst < 0) colliderFirst = si;
+        colliderLast = si;
       }
-      if (first < 0 || last <= first) continue;
-      const geometry = this.buildLayby(ctx, layby, sCount, first, last, group, bodies, colliders);
+      if (first < 0) continue;
+      first = Math.max(0, first - 1);
+      last = Math.min(sCount - 1, last + 1);
+      if (last <= first) continue;
+      const geometry = this.buildLayby(ctx, layby, sCount, first, last, group);
       geometries.push(geometry);
+      if (ctx.hasPhysics && colliderFirst >= 0 && colliderLast > colliderFirst) {
+        this.addColliders(ctx, geometry, colliderFirst - first, colliderLast - first, bodies, colliders);
+      }
     }
     if (geometries.length === 0) return null;
     return {
@@ -108,8 +117,6 @@ export class LaybyMeshProvider implements ChunkProvider {
     first: number,
     last: number,
     group: THREE.Group,
-    bodies: RAPIER.RigidBody[],
-    colliders: RAPIER.Collider[],
   ): THREE.BufferGeometry {
     const { sStart, sEnd, road, terrain } = ctx;
     const ox = ctx.originX;
@@ -123,29 +130,32 @@ export class LaybyMeshProvider implements ChunkProvider {
     // runs on across the joint.
     const textureVStart =
       (((sStart % ROAD_TILE_METRES) + ROAD_TILE_METRES) % ROAD_TILE_METRES) / ROAD_TILE_METRES;
+    // The widest row, for the winding test below.
+    let widest = 0;
+    let widestWidth = -1;
 
     for (let r = 0; r < rows; r++) {
       const si = first + r;
       const s = sStart + (si * (sEnd - sStart)) / (sCount - 1);
       const halfWidth = road.halfWidthAt(s);
       const outer = laybyOuterAt(layby, s, halfWidth);
+      if (outer - halfWidth > widestWidth) {
+        widestWidth = outer - halfWidth;
+        widest = r;
+      }
       sand.setHex(desertPaletteAt(s).sand).multiplyScalar(roadVertexColorGain());
       const mottle = 1 + MOTTLE * Math.sin(s / 9.7) * Math.sin(s / 3.3 + 1.3);
       for (let c = 0; c < COLUMNS; c++) {
-        const lip = c === TOP_COLUMNS;
-        const u = lip ? outer + LIP_OUT_M : halfWidth + ((outer - halfWidth) * c) / (TOP_COLUMNS - 1);
-        const lateral = layby.side * u;
+        const lateral = layby.side * (halfWidth + ((outer - halfWidth) * c) / (COLUMNS - 1));
         road.offsetPoint(s, lateral, point);
         const vi = r * COLUMNS + c;
         positions[vi * 3] = point.x - ox;
-        positions[vi * 3 + 1] = lip
-          ? terrain.laybySurfaceY(s, layby.side * outer, layby.side) - LIP_DROP_M
-          : terrain.laybySurfaceY(s, lateral, layby.side);
+        positions[vi * 3 + 1] = terrain.laybySurfaceY(s, lateral, layby.side);
         positions[vi * 3 + 2] = point.z - oz;
         normals[vi * 3 + 1] = 1;
         uvs[vi * 2] = lateral / ROAD_TILE_METRES;
         uvs[vi * 2 + 1] = textureVStart + (s - sStart) / ROAD_TILE_METRES;
-        tone.copy(asphalt).multiplyScalar(mottle).lerp(sand, c >= TOP_COLUMNS - 1 ? EDGE_DUST : DUST);
+        tone.copy(asphalt).multiplyScalar(mottle).lerp(sand, c === COLUMNS - 1 ? EDGE_DUST : DUST);
         colors[vi * 3] = tone.r;
         colors[vi * 3 + 1] = tone.g;
         colors[vi * 3 + 2] = tone.b;
@@ -154,26 +164,22 @@ export class LaybyMeshProvider implements ChunkProvider {
 
     // Which diagonal order faces up depends on which side of the road the lay-by is
     // on; ask the geometry rather than the sign convention. Across is measured on the
-    // middle row (the widest the chunk has), along down the inner column.
-    const mid = (rows >> 1) * COLUMNS;
-    const acrossX = positions[(mid + TOP_COLUMNS - 1) * 3]! - positions[mid * 3]!;
-    const acrossZ = positions[(mid + TOP_COLUMNS - 1) * 3 + 2]! - positions[mid * 3 + 2]!;
+    // widest row, along down the inner column.
+    const across = widest * COLUMNS;
+    const acrossX = positions[(across + COLUMNS - 1) * 3]! - positions[across * 3]!;
+    const acrossZ = positions[(across + COLUMNS - 1) * 3 + 2]! - positions[across * 3 + 2]!;
     const alongX = positions[(rows - 1) * COLUMNS * 3]! - positions[0]!;
     const alongZ = positions[(rows - 1) * COLUMNS * 3 + 2]! - positions[2]!;
     const upward = acrossZ * alongX - acrossX * alongZ > 0;
-    const quad = (out: Uint32Array, at: number, v: number, rowStride: number): number => {
-      const b = v + 1;
-      const d = v + rowStride;
-      const e = d + 1;
-      if (upward) out.set([v, b, d, b, e, d], at);
-      else out.set([v, d, b, b, d, e], at);
-      return at + 6;
-    };
-
     const indices = new Uint32Array((rows - 1) * (COLUMNS - 1) * 6);
     let w = 0;
     for (let r = 0; r < rows - 1; r++) {
-      for (let c = 0; c < COLUMNS - 1; c++) w = quad(indices, w, r * COLUMNS + c, COLUMNS);
+      for (let c = 0; c < COLUMNS - 1; c++) {
+        const v = r * COLUMNS + c;
+        const d = v + COLUMNS;
+        indices.set(upward ? [v, v + 1, d, v + 1, d + 1, d] : [v, d, v + 1, v + 1, d, d + 1], w);
+        w += 6;
+      }
     }
 
     const geometry = new THREE.BufferGeometry();
@@ -186,31 +192,35 @@ export class LaybyMeshProvider implements ChunkProvider {
     // As the road ribbon: receives the vehicle contact shadow, casts nothing.
     mesh.receiveShadow = true;
     group.add(mesh);
-
-    if (ctx.hasPhysics) {
-      // The top surface only, in slabs sharing their boundary rows.
-      for (let q0 = 0; q0 < rows - 1; q0 += COLLIDER_SLAB_QUADS) {
-        const q1 = Math.min(q0 + COLLIDER_SLAB_QUADS, rows - 1);
-        const slabRows = q1 - q0 + 1;
-        const vertices = new Float32Array(slabRows * TOP_COLUMNS * 3);
-        for (let r = 0; r < slabRows; r++) {
-          vertices.set(
-            positions.subarray((q0 + r) * COLUMNS * 3, ((q0 + r) * COLUMNS + TOP_COLUMNS) * 3),
-            r * TOP_COLUMNS * 3,
-          );
-        }
-        const slabIndices = new Uint32Array((slabRows - 1) * (TOP_COLUMNS - 1) * 6);
-        let k = 0;
-        for (let r = 0; r < slabRows - 1; r++) {
-          for (let c = 0; c < TOP_COLUMNS - 1; c++) k = quad(slabIndices, k, r * TOP_COLUMNS + c, TOP_COLUMNS);
-        }
-        const collider = ctx.physics.addStaticTrimesh(vertices, slabIndices, SurfaceType.Asphalt);
-        collider.setEnabled(false);
-        colliders.push(collider);
-        const body = collider.parent();
-        if (body) bodies.push(body);
-      }
-    }
     return geometry;
+  }
+
+  /**
+   * Asphalt trimesh slabs over rows `r0..r1` of a built lay-by: the drawn vertices and
+   * triangles themselves, in slabs sharing their boundary rows, as the road's.
+   */
+  private addColliders(
+    ctx: ChunkContext,
+    geometry: THREE.BufferGeometry,
+    r0: number,
+    r1: number,
+    bodies: RAPIER.RigidBody[],
+    colliders: RAPIER.Collider[],
+  ): void {
+    const positions = geometry.getAttribute('position').array as Float32Array;
+    const indices = geometry.getIndex()!.array as Uint32Array;
+    const rowIndices = (COLUMNS - 1) * 6;
+    for (let q0 = r0; q0 < r1; q0 += COLLIDER_SLAB_QUADS) {
+      const q1 = Math.min(q0 + COLLIDER_SLAB_QUADS, r1);
+      const vertices = positions.subarray(q0 * COLUMNS * 3, (q1 + 1) * COLUMNS * 3);
+      const slabIndices = indices.slice(q0 * rowIndices, q1 * rowIndices);
+      const rebase = q0 * COLUMNS;
+      for (let i = 0; i < slabIndices.length; i++) slabIndices[i] = slabIndices[i]! - rebase;
+      const collider = ctx.physics.addStaticTrimesh(vertices, slabIndices, SurfaceType.Asphalt);
+      collider.setEnabled(false);
+      colliders.push(collider);
+      const body = collider.parent();
+      if (body) bodies.push(body);
+    }
   }
 }
