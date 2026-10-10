@@ -125,6 +125,13 @@ export interface CorridorRequest {
    * prices the manoeuvre with.
    */
   readonly lineAccel: number;
+  /**
+   * The same, for a move that starts or ends with the body over the paint: the verge's
+   * own grip, which is about half the asphalt's (`SHOULDER_CROSS_FALL` in the
+   * autopilot). A line onto the shoulder sized on the asphalt's rate was a line the
+   * tyres could not stop at. Defaults to `lineAccel`.
+   */
+  readonly vergeLineAccel?: number;
   /** Outermost line that keeps the body on asphalt, and on the graded verge. */
   readonly asphaltLimit: number;
   readonly edgeLimit: number;
@@ -156,7 +163,7 @@ export interface CorridorRequest {
    * How far past the asphalt the body's edge may go on THIS driver's side to pass a
    * MOVING car on the right, metres; 0 (the default) is no such pass. The caller grants
    * it only where the verge is fit for it, and only as far as the road's own graded
-   * shoulder reaches — see `SHOULDER_PASS_EDGE_MARGIN_M` and `shoulderWidthM` in the
+   * shoulder reaches — see `SHOULDER_PASS_GAP_M` and `shoulderWidthM` in the
    * autopilot. It is priced at `SHOULDER_PASS_COST_PER_M`, so a crossing that is open
    * stays the cheaper way past.
    */
@@ -478,7 +485,8 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
     desiredSpeed,
     halfWidth,
     horizon,
-    lineAccel,
+    lineAccel: roadLineAccel,
+    vergeLineAccel = roadLineAccel,
     asphaltLimit,
     edgeLimit,
     oncomingLaneCost,
@@ -584,6 +592,12 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
     }
     if (!admissible && !captureRejected) return;
     const shift = Math.abs(line - ownLateral);
+    // A move that starts or ends with the body over the paint is driven on the
+    // verge's grip; see `vergeLineAccel`.
+    const lineAccel =
+      Math.max(Math.abs(line), Math.abs(ownLateral)) + halfWidth > asphaltLimit
+        ? Math.min(roadLineAccel, vergeLineAccel)
+        : roadLineAccel;
     // Road covered while the line is being moved there, from the manoeuvre's own arc.
     // A car that is barely moving covers almost none of it, which is what the old
     // slope needed a standstill special case for.

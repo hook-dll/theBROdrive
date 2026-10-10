@@ -312,6 +312,18 @@ const RAILS_SURVEY_HORIZON_S = 3;
 /** A slower car is standing or queueing for a reason only its driver knows. */
 const RAILS_MIN_SPEED_MPS = 4;
 /**
+ * Share of its driver's own cornering budget a racing car rides a bend at on rails.
+ *
+ * A car woken in a bend has its yaw and its steering handed back (`leaveRails`), but not
+ * the tyres' slip or the body's roll: the corner's whole side force has to build from
+ * nothing, and while it does the car runs wide. Measured on the real-road bench with the
+ * game's shoulder, 15 of 231 frantic slides and departures over two ten-stretch runs
+ * began within three seconds of a wake in a 110-330 m bend, at 80-145 km/h. At half
+ * the lateral load the build is short enough to hold, and the driver takes the rest of
+ * the pace back itself.
+ */
+const RAILS_WAKE_GRIP_SHARE = 0.5;
+/**
  * A driver held up behind a car this much slower than its own pace, within twice its
  * following distance, for this long, wants past: it wakes to decide whether it can,
  * and stays driven for the holdoff whether or not it does. The advantage is the one a
@@ -1683,15 +1695,20 @@ export class RoadTraffic {
       // every car's reach, so the ceiling above let a frantic car ride a hairpin on
       // rails at a speed its driver never plans, and a car woken there — at
       // `RAILS_WAKE_M`, in sight — would be handed a bend it cannot hold. On rails it
-      // takes a bend at the speed its own driver plans on: its share of the tyres, on
-      // the road's curvature, with the tight-bend caution, and no credit for the bank.
+      // takes a bend at its share of the tyres, on the road's curvature, with the
+      // tight-bend caution, and no credit for the bank — and only `RAILS_WAKE_GRIP_SHARE`
+      // of that share, because the car it hands back has to find the corner's side force
+      // from tyres that carried none on the rails.
       if (config.racingLine) {
         const tyreLateral = Math.min(
           config.lateralAccel,
           car.vehicle.estimatedLateralAccel(this.railCondition.surface, speed) * config.gripReserve,
         );
         const roadCurvature = Math.abs(curvature);
-        ceiling = Math.min(ceiling, bendSpeed(mode, tyreLateral, 0, roadCurvature, roadCurvature));
+        ceiling = Math.min(
+          ceiling,
+          bendSpeed(mode, tyreLateral * RAILS_WAKE_GRIP_SHARE, 0, roadCurvature, roadCurvature),
+        );
       }
       cruise = Math.min(
         cruise,

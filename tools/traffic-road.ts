@@ -32,6 +32,7 @@
  *                             [--ego sleeper|hurried|frantic] [--ego-log]
  */
 
+import type RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 
 import { emptyInput, type InputFrame } from '../src/core/input';
@@ -55,7 +56,8 @@ import { WorldOrigin } from '../src/world/origin';
 import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
 import { RoadMeshProvider } from '../src/world/roadmesh';
 import { RoadDistance } from '../src/world/roaddistance';
-import { TerrainMeshProvider } from '../src/world/terrainmesh';
+import { DesertTileStreamer, DESERT_TILE_SIZE } from '../src/world/deserttiles';
+import { WorldWorkScheduler } from '../src/world/workqueue';
 import { roadSurfaceY, SurfaceField } from '../src/world/roadsurface';
 import { ScatterProvider } from '../src/world/props/scatter';
 import { Terrain } from '../src/world/terrain';
@@ -227,15 +229,38 @@ const lastS = START_S + REACH_M;
 //   - the road's own crown, camber and edge came from a two-column strip rather than
 //     from the mesh the game builds.
 //
-// `RoadMeshProvider` and `TerrainMeshProvider` are the shipped providers. They build
-// their colliders disabled, exactly as the streamer requires, so the bench enables
-// them itself — the one thing `ChunkStreamer` would otherwise do here.
+// `RoadMeshProvider` is the shipped provider. It builds its colliders disabled, exactly
+// as the streamer requires, so the bench enables them itself — the one thing
+// `ChunkStreamer` would otherwise do here.
+//
+// THE GROUND IS THE GAME'S OWN: the road mesh gets the road-distance field as it does
+// in `main.ts`, which is what builds the graded shoulder strip (`LooseShoulder`, about
+// two metres of it), and the desert is `DesertTileStreamer`, the game's terrain, kept
+// physical round the ego the way it is kept round the player. The bench used to build
+// no strip and lay `TerrainMeshProvider`'s heightfield instead, which sits a few
+// centimetres ABOVE where the strip goes: measured by ray, every wheel past the paint
+// stood on sand, so every verge pass and detour was driven on ground the game does not
+// have there.
 const hazards = new HazardIndex();
 /** Colliders of the scatter props: what a bumper against scenery is touching. */
 const propColliders = new Set<number>();
-const roadProvider = new RoadMeshProvider(SEED);
-const terrainProvider = new TerrainMeshProvider(new RoadDistance(road));
+const roadDistance = new RoadDistance(road);
+const roadProvider = new RoadMeshProvider(SEED, roadDistance);
 const scatter = new ScatterProvider(undefined, hazards);
+const scene = new THREE.Scene();
+const origin = new WorldOrigin();
+// No worker: every tile is built on the bench's own thread, synchronously, by `prime`.
+const desert = new DesertTileStreamer(SEED, road, terrain, roadDistance, physics, scene, origin, undefined, new WorldWorkScheduler(3), () => null);
+let desertFrame = 1;
+let desertTile = '';
+/** Keeps the desert's physical square round the ego, as `main.ts` keeps it round the player. */
+function keepDesert(x: number, z: number, lateral: number): void {
+  const tile = `${Math.floor(x / DESERT_TILE_SIZE)},${Math.floor(z / DESERT_TILE_SIZE)}`;
+  if (tile === desertTile) return;
+  desertTile = tile;
+  desert.prime(x, z, lateral);
+  desert.update(x, z, lateral, desertFrame++);
+}
 {
   const first = Math.floor((START_S - 400) / CHUNK_LENGTH);
   const last = Math.ceil(lastS / CHUNK_LENGTH);
@@ -254,7 +279,7 @@ const scatter = new ScatterProvider(undefined, hazards);
       originZ: 0,
       batches: new InstanceBatches({ x: 0, z: 0 }),
     };
-    for (const provider of [terrainProvider, roadProvider, scatter]) {
+    for (const provider of [roadProvider, scatter]) {
       const content = provider.build(context);
       if (!content) continue;
       for (const collider of content.colliders) {
@@ -263,6 +288,10 @@ const scatter = new ScatterProvider(undefined, hazards);
       }
     }
   }
+}
+{
+  const start = road.sampleAt(START_S);
+  keepDesert(start.x, start.z, 0);
 }
 settle();
 
@@ -345,8 +374,6 @@ if (egoPose) {
 // measures a stream that cannot see the thing it is supposed to be driving around.
 
 world.state.cars[egoCarState.id] = egoCarState;
-const scene = new THREE.Scene();
-const origin = new WorldOrigin();
 const ego = new Vehicle(physics, world, egoCarState, scene, origin);
 const egoAutopilot = new Autopilot(road, hazards, physics);
 world.state.player.drivingCarId = egoCarState.id;
@@ -1081,6 +1108,13 @@ function sampleCar(
 const CONTROL_AIRBORNE_LOAD = 0.1;
 const CONTROL_AIRBORNE_STEPS = 6;
 const CONTROL_DEPARTURE_M = 0.3;
+/**
+ * A departure whose body is within this of the line its driver commanded, measured
+ * outward, is the plan's own line past the paint (a detour, a lane line at the verge's
+ * edge), not a car that got away from its driver; it is still a departure, and the
+ * summary says how many of them were of that kind.
+ */
+const CONTROL_ON_LINE_M = 0.4;
 const CONTROL_SLIDE_DEG = 8;
 const CONTROL_OPEN_RADIUS_M = 400;
 const CONTROL_OPEN_LOOK_M = 150;
@@ -1097,6 +1131,8 @@ interface ControlTally {
   woke: number;
   airborne: number;
   departure: number;
+  /** Of `departure`, those with the body within `CONTROL_ON_LINE_M` of its commanded line. */
+  departureOnLine: number;
   verge: number;
   slide: number;
   contact: number;
@@ -1119,6 +1155,61 @@ interface ControlCar {
 const controlTally = new Map<string, ControlTally>();
 const controlCars = new Map<string, ControlCar>();
 const controlEvents: string[] = [];
+/** `Vehicle.controller` is private; the bench reads the ray hit nothing in the game publishes. */
+interface WithController {
+  readonly controller: RAPIER.DynamicRayCastVehicleController | null;
+}
+/**
+ * What each wheel stands on, one character per wheel in the controller's order: `a` in
+ * the air, a digit for the `SurfaceType` of the road mesh or the terrain under it, `P`
+ * a scatter prop, `C` another car, `X` any other collider. Read off Rapier's own ray
+ * hit, so it is the ground the tyre forces were computed on.
+ */
+function wheelCode(vehicle: Vehicle): string {
+  const exposed: WithController = vehicle as unknown as WithController;
+  const controller = exposed.controller;
+  if (!controller) return '?';
+  let out = '';
+  for (let i = 0; i < vehicle.wheelRide.length; i++) {
+    if (!controller.wheelIsInContact(i)) {
+      out += 'a';
+      continue;
+    }
+    const ground = controller.wheelGroundObject(i);
+    if (!ground) out += 'n';
+    else if (propColliders.has(ground.handle)) out += 'P';
+    else if (chassisOwner(ground) !== null) out += 'C';
+    else if (ground.shape.type === physics.rapier.ShapeType.TriMesh || ground.shape.type === physics.rapier.ShapeType.HeightField) {
+      out += String(physics.surfaces.lookupType(ground.handle));
+    } else out += 'X';
+  }
+  return out;
+}
+function chassisOwner(collider: RAPIER.Collider): string | null {
+  const body = collider.parent();
+  if (!body) return null;
+  if (body.handle === ego.chassis.handle) return 'ego';
+  for (const other of cars) if (other.vehicle.chassis.handle === body.handle) return other.id;
+  return null;
+}
+/** Everything the chassis is touching this step: other cars by id, `prop`, `ground`. */
+function partnersOf(vehicle: Vehicle): string {
+  let out = '';
+  const body = vehicle.chassis;
+  for (let i = 0; i < body.numColliders(); i++) {
+    const own = body.collider(i);
+    physics.world.contactPairsWith(own, (other) => {
+      let touching = false;
+      physics.world.contactPair(own, other, (manifold) => {
+        if (manifold.numContacts() > 0) touching = true;
+      });
+      if (!touching) return;
+      const name = chassisOwner(other) ?? (propColliders.has(other.handle) ? 'prop' : 'ground');
+      if (!out.includes(name)) out += (out ? ',' : '') + name;
+    });
+  }
+  return out;
+}
 function controlEvent(kind: string, car: StreamCar, state: ControlCar, speed: number, detail: string): void {
   const tally = controlTally.get(car.style)!;
   const spawning = state.driven < CONTROL_SPAWN_S;
@@ -1145,7 +1236,9 @@ function controlEvent(kind: string, car: StreamCar, state: ControlCar, speed: nu
       `lat ${car.roadLateral.toFixed(1)} of ${road.halfWidthAt(s).toFixed(1)}, R ${(1 / Math.max(Math.abs(road.curvatureAt(s)), 1e-5)).toFixed(0)} ` +
       `(${(1 / Math.max(tightest, 1e-5)).toFixed(0)} within ${CONTROL_OPEN_LOOK_M} m), grade ${(road.sampleAt(s).grade * car.direction * 100).toFixed(1)}% ` +
       `crest unload ${((-speed * speed * crest) / 9.81).toFixed(2)}g, surface ${paceCondition.surface}, ` +
-      `woke ${state.sinceWake < 60 ? `${state.sinceWake.toFixed(1)} s ago` : '-'}, ${detail}` +
+      `woke ${state.sinceWake < 60 ? `${state.sinceWake.toFixed(1)} s ago` : '-'}, ` +
+      `line ${(autopilot.commandedLine * car.direction).toFixed(1)}, wheels ${wheelCode(car.vehicle)}, ` +
+      `touching ${partnersOf(car.vehicle) || '-'}, ${detail}` +
       `\n            before: ${state.trail.join(' | ')}`,
   );
 }
@@ -1153,7 +1246,7 @@ const paceCondition: RoadConditionBuffer = { surface: SurfaceType.Asphalt, decay
 function trackControl(car: StreamCar): void {
   let tally = controlTally.get(car.style);
   if (!tally) {
-    tally = { seconds: 0, metres: 0, openSeconds: 0, openMetres: 0, woke: 0, airborne: 0, departure: 0, verge: 0, slide: 0, contact: 0, spawn: 0 };
+    tally = { seconds: 0, metres: 0, openSeconds: 0, openMetres: 0, woke: 0, airborne: 0, departure: 0, departureOnLine: 0, verge: 0, slide: 0, contact: 0, spawn: 0 };
     controlTally.set(car.style, tally);
   }
   let state = controlCars.get(car.id);
@@ -1190,10 +1283,13 @@ function trackControl(car: StreamCar): void {
   state.trailClock += FIXED_DT;
   if (EVENTS_LOG && state.trailClock >= 0.25) {
     state.trailClock = 0;
+    const touching = partnersOf(vehicle);
     state.trail.push(
-      `${(speed * 3.6).toFixed(0)}>${(autopilot.targetSpeed * 3.6).toFixed(0)} ` +
+      `${(speed * 3.6).toFixed(0)}>${(autopilot.targetSpeed * 3.6).toFixed(0)} ${autopilot.bindingSpeedLimit} ` +
         `${car.input.brake > 0 ? `b${car.input.brake.toFixed(2)}` : `t${car.input.throttle.toFixed(2)}`} ` +
-        `s${car.input.steer.toFixed(2)} lat${car.roadLateral.toFixed(1)} L${loadShare.toFixed(2)}`,
+        `s${car.input.steer.toFixed(2)} lat${car.roadLateral.toFixed(1)} ln${(autopilot.commandedLine * car.direction).toFixed(1)} ` +
+        `L${loadShare.toFixed(2)} ${autopilot.activity}/${autopilot.lateralCommitment ?? '-'} w${wheelCode(vehicle)}` +
+        (touching === '' ? '' : ` T${touching}`),
     );
     if (state.trail.length > 8) state.trail.shift();
   }
@@ -1220,7 +1316,11 @@ function trackControl(car: StreamCar): void {
   if ((over > CONTROL_DEPARTURE_M || (offroad && !state.offroad)) && !state.departed) {
     state.departed = true;
     const planned = autopilot.lateralCommitment === 'shoulder' && !offroad;
-    controlEvent(planned ? 'verge' : 'departure', car, state, speed, `${over.toFixed(1)} m past the edge`);
+    // How far outside the line its own driver commanded the body is, measured outward.
+    const line = autopilot.commandedLine * car.direction;
+    const outside = (car.roadLateral - line) * Math.sign(car.roadLateral);
+    if (!planned && !offroad && outside < CONTROL_ON_LINE_M && state.driven >= CONTROL_SPAWN_S) tally.departureOnLine++;
+    controlEvent(planned ? 'verge' : 'departure', car, state, speed, `${over.toFixed(1)} m past the edge, ${outside.toFixed(1)} m outside its line`);
   }
   state.offroad = offroad;
   if (over < -0.5 && !offroad) state.departed = false;
@@ -1252,6 +1352,7 @@ async function tick(): Promise<void> {
   const projection = road.project(egoPosition.x, egoPosition.z, egoS);
   egoS = projection.s;
   egoLateral = projection.lateral;
+  keepDesert(egoPosition.x, egoPosition.z, egoLateral);
   // A spawn waits on a model-load promise, so a fully synchronous loop never lets
   // `finishSpawn` run and measures a road that cannot fill.
   if (++ticks % 6 === 0) await Bun.sleep(0);
@@ -1471,7 +1572,7 @@ for (const style of ['cautious', 'normal', 'hurried', 'frantic']) {
   console.log(
     `  control ${style.padEnd(8)} ${minutes.toFixed(1)} driven car-min ${((tally.metres / tally.seconds) * 3.6).toFixed(0)} km/h` +
       `${style === 'frantic' ? `, open road ${(tally.openSeconds / 60).toFixed(1)} min at ${((tally.openMetres / Math.max(tally.openSeconds, 1e-3)) * 3.6).toFixed(0)} km/h` : ''}` +
-      ` | per car-min: airborne ${rate(tally.airborne)} departure ${rate(tally.departure)} verge ${rate(tally.verge)}` +
+      ` | per car-min: airborne ${rate(tally.airborne)} departure ${rate(tally.departure)} [${tally.departureOnLine} on its line] verge ${rate(tally.verge)}` +
       ` slide ${rate(tally.slide)} contact ${rate(tally.contact)} | woke ${tally.woke}, spawn events ${tally.spawn}`,
   );
 }

@@ -890,41 +890,55 @@ const PASSING_VERGE_M = 1.2;
  * the opposing lane free the pass is still taken there.
  *
  * THE VERGE IS THE ROAD'S OWN SHOULDER, and it is the road that says how much of it
- * there is: `EDGE_MARGIN` is what the body's outer edge may reach PAST the graded strip
- * (`roadprofile.shoulderWidthM` for the surface here). The strip exists to carry the
- * WHEELS, and the budget is the two gaps between the planner's body edge and the ground
- * it is allowed to put a wheel on: about 0.4 m, because `CAR_HALF_WIDTH_M` is a
- * generous body half-width and the outer wheel sits that much further in, and half a
- * metre of that wheel in the sand beyond the strip — which is drivable ground, flush
- * with the verge (`PASSING_VERGE_M`), just slower to be on, and the pass gives itself
- * up if it stops gaining (`SHOULDER_PASS_MIN_GAIN_MPS`).
+ * there is: the body's outer edge may reach as far past the paint as the graded strip
+ * goes (`roadprofile.shoulderWidthM` for the surface here), and no further. The strip
+ * exists to carry the WHEELS, and the outer wheel sits about 0.4 m inside the
+ * planner's body edge (`CAR_HALF_WIDTH_M` is a generous half-width): that 0.4 m is the
+ * room the body has to run wide of its line while it is stopped there.
  *
- * On a highway's 1.35 m of crush that is 2.25 m of body edge, on cracked asphalt's
- * 1.05 m 1.95 — exactly the line the pass needs past a car holding its lane centre to
- * the centimetre, so a worn road is the boundary case and the measurement decides it:
- * a car sitting a little further out in its lane is passed and one sitting in is not —
- * a concrete road's wider verge grants 2.5, and the grader's spoil on a gravel road
- * 2.0, which lets the pass happen there at all. The point of measuring it is that a
- * pass is sized on the verge the road actually has, instead of a highway's on every
- * road.
+ * It used to grant another 0.9 m of body edge — half a metre of wheel in the sand,
+ * argued drivable. Measured with the game's own strip under the real-road bench, it
+ * is where the slides were: the line sat with the outer wheels at the strip's edge,
+ * the body ran 0.3-0.6 m wide of it as it arrived, and on sand (mu 0.51 against the
+ * strip's 0.8) under one side the car slid — 22 of 119 frantic slides over two
+ * ten-stretch runs, with lines out to 2.1 m past the paint behind a leader that was
+ * itself wide.
+ *
+ * On a highway's 2.1 m strip that is the line the pass needs past a car holding its
+ * lane centre with half a metre to spare, on cracked asphalt's 1.8 m with 0.15, on a
+ * gravel road's 1.6 m only past a leader sitting a little in: the pass is sized on the
+ * verge the road actually has.
  *
  * `GAP` is the room kept to the passed car's real flank, on top of the planner's own
  * body margin. The speed is the leader's plus `ADVANTAGE`, never above `MAX`: a pass
- * on the verge is a squeeze, not a sprint. The wheels end up on the shoulder, whose own
- * grip the speed profile already carries (`SURFACE_SPEED_FACTOR[LooseShoulder]`): the
- * surface under the car is what the plan is built from, and it changes to the shoulder
- * the moment a wheel is on it.
+ * on the verge is a squeeze, not a sprint. Its bend and its line are sized on the
+ * strip's own grip; see SHOULDER_CROSS_FALL.
  */
-const SHOULDER_PASS_EDGE_MARGIN_M = 0.9;
 const SHOULDER_PASS_GAP_M = 0.25;
 const SHOULDER_PASS_ADVANTAGE_MPS = 6;
 const SHOULDER_PASS_MAX_MPS = 130 / 3.6;
 /**
- * Cornering a car can do with its body over the loose shoulder, m/s²: about a third of
- * the asphalt's, for stone that rolls and an edge that drops. At 220 m that is 84 km/h,
- * at 120 m 62 km/h; on a straight the verge passes keep their own cap above.
+ * THE VERGE IS DRIVEN ON THE VERGE'S OWN GRIP, and that is one budget for three things:
+ * how fast the line may move sideways while any of the body is out there, the bend the
+ * car is in while it is, and whether a pass out there can be won at all.
+ *
+ * The budget is the car's own cornering on `LooseShoulder` (`estimatedLateralAccel`,
+ * mu 0.8 against asphalt's 1.7), less the strip's fall away from the road
+ * (`SHOULDER_CROSS_FALL`: graded spoil laid on the desert, measured by ray at 6-12%
+ * outward on seed 1337's esses), at the mode's own grip reserve. The line takes at most
+ * `MANOEUVRE_LATERAL_SHARE` of it (`vergeLineAccel`), and the bend the rest.
+ *
+ * It used to be a constant 2.5 m/s² for the bend and nothing for the line: the line
+ * moved onto the shoulder at the rate the ASPHALT allows, 3-4 m/s² on a frantic
+ * driver, and had to be stopped on stone that gives a little over half that. Measured
+ * on the real-road bench with the game's own shoulder under it: the body sailed
+ * 0.5-0.9 m past its line, the outer wheels went off the strip into the sand, and the
+ * car slid (59 of 93 frantic slides), or ran on into the desert at road speed and
+ * bounced there.
  */
-const VERGE_LATERAL_ACCEL = 2.5;
+const SHOULDER_CROSS_FALL = 0.1;
+/** Least verge budget a car is ever planned on, m/s²: a crawl round a parked car still turns. */
+const VERGE_LATERAL_ACCEL_FLOOR = 1;
 /** How far ahead the verge speed reads the bend: seconds of travel, with a floor. */
 const VERGE_BEND_LOOK_S = 3;
 const VERGE_BEND_LOOK_MIN_M = 40;
@@ -1960,9 +1974,11 @@ export class Autopilot {
   private shoulderPassAllowed = false;
   /**
    * The verge this road has for that pass, metres of body edge past the asphalt; 0 when
-   * there is no grant. See SHOULDER_PASS_EDGE_MARGIN_M.
+   * there is no grant. See SHOULDER_PASS_GAP_M.
    */
   private shoulderPassOverhang = 0;
+  /** This step's cornering budget with the body on the graded verge, m/s²; see SHOULDER_CROSS_FALL. */
+  private vergeLateralAccel = VERGE_LATERAL_ACCEL_FLOOR;
   /** Road-frame lateral and half width of the car being passed, from the field. */
   private shoulderLeaderLateral = 0;
   private shoulderLeaderHalfWidth = 0;
@@ -3039,6 +3055,18 @@ export class Autopilot {
       config.lateralAccel,
       physicalLateralAccel * config.gripReserve,
     );
+    // The same, on the graded strip past the paint. See SHOULDER_CROSS_FALL.
+    this.vergeLateralAccel = Math.max(
+      VERGE_LATERAL_ACCEL_FLOOR,
+      Math.min(
+        config.lateralAccel,
+        (vehicle.estimatedLateralAccel(SurfaceType.LooseShoulder, speed) *
+          Math.sqrt(Math.max(0.35, 1 - gradeLoad * gradeLoad)) -
+          GRAVITY * SHOULDER_CROSS_FALL) *
+          config.gripReserve,
+      ),
+    );
+    const vergeLineAccel = this.vergeLateralAccel * MANOEUVRE_LATERAL_SHARE;
     const rotation = vehicle.chassis.rotation();
     const forwardX = 2 * (rotation.x * rotation.z + rotation.w * rotation.y);
     const forwardZ = 1 - 2 * (rotation.x * rotation.x + rotation.y * rotation.y);
@@ -3392,7 +3420,7 @@ export class Autopilot {
      */
     const passAttempt = passUrge && this.passShopping;
     this.passUrgeValue = passUrge;
-    // MAY THIS DRIVER PASS ON THE RIGHT THIS STEP? See SHOULDER_PASS_EDGE_MARGIN_M.
+    // MAY THIS DRIVER PASS ON THE RIGHT THIS STEP? See SHOULDER_PASS_GAP_M.
     this.shoulderPassAllowed = false;
     this.shoulderPassOverhang = 0;
     if (
@@ -3443,7 +3471,7 @@ export class Autopilot {
       }
       // The line that clears the leader's real flank, and the verge this road has to
       // fit it on.
-      const overhangLimit = shoulderWidthM(currentSurface) + SHOULDER_PASS_EDGE_MARGIN_M;
+      const overhangLimit = shoulderWidthM(currentSurface);
       const passLine =
         this.shoulderLeaderLateral +
         this.shoulderSideSign *
@@ -3456,7 +3484,7 @@ export class Autopilot {
         // A PASS THIS CAR CAN WIN, OR NONE. The grant used to ask only for room; the
         // gain clock then gave up, after three seconds out on the verge, every pass the
         // car could not have won from the start — the verge's own bend speed
-        // (`VERGE_LATERAL_ACCEL`: 60 km/h on the 110 m radius `passCurvature` allows)
+        // (`vergeBendSpeed`, on the verge's own grip; see SHOULDER_CROSS_FALL)
         // or its cap no faster than the car being passed, or an engine with nothing
         // left at that speed. Entry only: one already out there is judged by its gain.
         (this.lateral.shoulderPassing ||
@@ -3944,6 +3972,7 @@ export class Autopilot {
       // waited for good. Seen in play: a queue stopped at a rock with nobody going
       // round it, the player's car at the back of it, indefinitely.
       lineAccel,
+      vergeLineAccel,
       laneCentres: this.laneCentres,
       oncomingBoundary: 0,
       asphaltLimit: this.asphaltHalfWidth,
@@ -4461,12 +4490,24 @@ export class Autopilot {
       0,
       1,
     );
-    const slewAccel = comingHome
-      ? Math.max(
-          lineAccel,
-          currentLateralAccel * RETURN_GRIP_SHARE * (1 - smoothReturn) + lineAccel * smoothReturn,
-        )
-      : lineAccel;
+    // ON THE VERGE THE LINE MOVES AT WHAT THE VERGE GIVES (`vergeLineAccel`, see
+    // SHOULDER_CROSS_FALL): whenever the move starts, ends or passes with any of the body
+    // over the paint, which is where it has to be stopped or started. The planner sized
+    // the same line on the same rate (`CorridorRequest.vergeLineAccel`). An escape from a
+    // head-on keeps its own rate.
+    const vergeEdge = this.asphaltHalfWidth - CAR_HALF_WIDTH_M;
+    const lineOnVerge =
+      Math.max(Math.abs(desiredLine), Math.abs(this.appliedLateral), Math.abs(projection.lateral)) > vergeEdge &&
+      !(onWrongSide && headOn);
+    const slewAccel = Math.min(
+      comingHome
+        ? Math.max(
+            lineAccel,
+            currentLateralAccel * RETURN_GRIP_SHARE * (1 - smoothReturn) + lineAccel * smoothReturn,
+          )
+        : lineAccel,
+      lineOnVerge ? vergeLineAccel : Infinity,
+    );
     const headingCeiling = comingHome
       ? RETURN_HEADING_SLOPE + (LINE_SHIFT_PER_METRE - RETURN_HEADING_SLOPE) * smoothReturn
       : LINE_SHIFT_PER_METRE;
@@ -5001,21 +5042,23 @@ export class Autopilot {
       );
     }
     targetSpeed = this.speedLimit.limit(this.corridorSqueezeSpeed, 'squeeze');
-    // A verge pass is a speed floor, not another upper limit. The corridor may still
-    // carry the moving leader's follow/squeeze target after the shoulder line has been
-    // selected; using `limit` here preserved that lower target, so frantic cars moved
-    // onto the verge and then simply matched the leader. Raise the target to the
-    // leader-plus-advantage speed, while the later verge and road limits remain caps.
+    // A verge pass is a speed floor AND a ceiling. The corridor may still carry the
+    // moving leader's follow/squeeze target after the shoulder line has been selected;
+    // using `limit` alone preserved that lower target, so frantic cars moved onto the
+    // verge and then simply matched the leader. A floor alone let the road's own pace
+    // through instead: measured with the game's shoulder under the bench, a pass begun
+    // at 65 km/h behind a 60 km/h leader asked for 121 and went out on the stone at full
+    // throttle, and the tyres had nothing left to stop the body at its line. A pass on
+    // the verge is a squeeze, not a sprint: leader plus `ADVANTAGE`, and no more.
     const lateral = this.lateral;
     if (lateral.shoulderPassing) {
-      targetSpeed = this.speedLimit.atLeast(
-        Math.min(
-          SHOULDER_PASS_MAX_MPS,
-          lateral.shoulderYielding
-            ? Math.max(0, lateral.shoulderPassSpeed - SHOULDER_PASS_YIELD_MPS)
-            : lateral.shoulderPassSpeed + SHOULDER_PASS_ADVANTAGE_MPS,
-        ),
+      const passSpeed = Math.min(
+        SHOULDER_PASS_MAX_MPS,
+        lateral.shoulderYielding
+          ? Math.max(0, lateral.shoulderPassSpeed - SHOULDER_PASS_YIELD_MPS)
+          : lateral.shoulderPassSpeed + SHOULDER_PASS_ADVANTAGE_MPS,
       );
+      targetSpeed = this.speedLimit.reset(passSpeed, 'pass-shoulder');
     }
     if (this.middlePassingValue) {
       targetSpeed = this.speedLimit.limit(this.shoulderLeaderSpeed + MIDDLE_PASS_ADVANTAGE_MPS, 'pass-middle');
@@ -5037,7 +5080,7 @@ export class Autopilot {
       }
       targetSpeed = this.speedLimit.limit(
         Math.min(
-          Math.sqrt(VERGE_LATERAL_ACCEL / Math.max(bend, 1e-4)),
+          this.vergeBendSpeed(bend),
           // Only round something that IS there: with nothing in the chosen corridor the
           // planner reports a block speed of 0 at Infinity, and reading that as "still"
           // held every verge pass to 60 km/h, at or below the car being passed.
@@ -5513,8 +5556,16 @@ export class Autopilot {
     for (let k = 0; k <= VERGE_BEND_SAMPLES; k++) {
       bend = Math.max(bend, Math.abs(this.road.curvatureAt(this.hintS + (sightM * k) / VERGE_BEND_SAMPLES)));
     }
-    if (Math.sqrt(VERGE_LATERAL_ACCEL / Math.max(bend, 1e-4)) < need) return false;
+    if (this.vergeBendSpeed(bend) < need) return false;
     return this.accelerationAt(vehicle, this.shoulderLeaderSpeed, grade) >= SHOULDER_PASS_MIN_ACCEL_MPS2;
+  }
+
+  /**
+   * Fastest a body over the verge can take a bend of this curvature: what the strip's
+   * grip leaves once the line has had its share for moving sideways (SHOULDER_CROSS_FALL).
+   */
+  private vergeBendSpeed(bend: number): number {
+    return Math.sqrt((this.vergeLateralAccel * (1 - MANOEUVRE_LATERAL_SHARE)) / Math.max(bend, 1e-4));
   }
 
   /**

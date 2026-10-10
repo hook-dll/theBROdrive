@@ -12,6 +12,32 @@
   the drive then loads).
 
 ### Changed
+- TRAFFIC DRIVES THE VERGE ON THE VERGE'S GRIP, AND THE BENCH DRIVES ON THE GAME'S GROUND.
+  - The real-road bench (tools/traffic-road.ts) built no shoulder strip and laid
+    `TerrainMeshProvider`'s heightfield a few centimetres above where the strip goes, so
+    every wheel past the paint stood on sand. It now builds the road mesh with the
+    road-distance field and keeps `DesertTileStreamer`'s physical square round the ego, as
+    `main.ts` does. Events now print the commanded line, what each wheel stands on, what
+    the chassis touches and the 2 s trail with both; departures say how far outside their
+    own line they are (`[N on its line]`).
+  - Lines onto, along and off the verge move at the verge's own lateral budget
+    (`estimatedLateralAccel(LooseShoulder)` less a 10% cross fall, `SHOULDER_CROSS_FALL`,
+    at the mode's reserve; the line takes `MANOEUVRE_LATERAL_SHARE` of it), in the corridor
+    planner (`CorridorRequest.vergeLineAccel`) and in the line slew alike, and the verge's
+    bend speed is what is left (`vergeBendSpeed`, was a constant 2.5 m/s²). A pass on the
+    verge is held to leader + 6 m/s as a ceiling as well as a floor (it asked for the
+    road's 121 km/h at full throttle on the stone), and its body edge stays on the graded
+    strip (the 0.9 m of wheel-in-sand `SHOULDER_PASS_EDGE_MARGIN_M` is gone).
+  - Racing cars ride bends on rails at half their cornering budget
+    (`RAILS_WAKE_GRIP_SHARE`): a car woken in a fast bend has to build the corner's side
+    force from nothing, and 15 of 231 frantic slides and departures began within 3 s of
+    such a wake.
+  Ten-stretch bench on the game's ground, frantic share 0.5, two runs each, per driven
+  frantic car-minute, before → after: airborne 0.06/0.05 → 0.04/0.03, departures
+  0.53/0.44 → 0.22/0.33 (off their own line 26/25 → 11/17), planned verge passes
+  0.84/0.71 → 0.46/0.44, slides 0.53/0.48 → 0.15/0.23, contacts 0.39/0.42 → 0.27/0.26;
+  open-road pace 112/109 → 111/112 km/h. Hurried and normal unchanged within noise.
+  What airborne remains on the bench is crash aftermath and cars already in the desert.
 - TRAFFIC NO LONGER WEAVES OFF THE ROAD AT SPEED. The autopilot's yaw-rate damping was one
   figure (0.8) for every speed, and what a wheel angle buys in yaw falls as speed rises:
   above about 130 km/h a frantic car in 230-250 m S-bends swung its yaw rate ±0.3 rad/s on
