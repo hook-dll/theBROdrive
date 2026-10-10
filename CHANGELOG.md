@@ -12,6 +12,11 @@
   the drive then loads).
 
 ### Changed
+- THE HANDBRAKE LOCKS THE REAR WHEELS ONLY (`cableLocked` in `vehicle/vehicle.ts`). It
+  locked all four, which stopped the car straight; every car in the catalogue has its
+  cable on the rear drums (the UAZ's transmission brake holds the rear propshaft). At
+  60 km/h with a quarter of lock: rear lock 1.0, front 0.0, peak yaw 60°/s (2106), 70°/s
+  (2108), 44°/s (UAZ). A stopped car is still held by the parking hold.
 - ONE KEYBOARD STEERING: HOW LONG YOU HOLD THE KEY IS HOW MUCH WHEEL. The Keyboard
   steering assist and Steering key release settings are gone (old saved values are
   ignored), and with them `SteerMode` 'keysFull', `KeySteerRelease`, `keySteerStep`, the

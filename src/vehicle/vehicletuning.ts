@@ -1505,7 +1505,7 @@ export const SUSPENSION_FORCE_HEADROOM = 9;
 /**
  * Static holding deceleration for a parked car nobody is driving, m/s². Applied
  * across all four wheels so it remains at rest on any drivable road grade. A driven
- * car's handbrake is a cable lock on every wheel instead (`cableLocked` in vehicle.ts).
+ * car's handbrake is a cable lock on the rear wheels instead (`cableLocked` in vehicle.ts).
  */
 export const PARK_BRAKE_DECEL = 12.0;
 /**

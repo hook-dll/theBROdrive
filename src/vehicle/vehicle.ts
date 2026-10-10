@@ -2736,12 +2736,16 @@ export class Vehicle implements Rebasable {
       // splits the budget once it knows this step's slip ratio, and this pass hands
       // it the side half — the built slip angle, normalised by its peak.
       //
-      // THE HANDBRAKE LOCKS EVERY WHEEL, AND THAT IS ALL IT DOES. It used to be a 12 m/s²
-      // brake force shared across the four wheels, which never locked anything: each
-      // tyre sat at its peak slip, so pulling it was a perfect ABS stop at 0.95 g with
-      // full steering, from 50 km/h in under two seconds. A cable holds the wheel still
-      // whatever the tyre asks of it (`cableLocked`, applied in the wheel pass), so the
-      // car slides on locked tyres instead, at their sliding grip, and steers like it.
+      // THE HANDBRAKE LOCKS THE REAR WHEELS, AND THAT IS ALL IT DOES. It used to be a
+      // 12 m/s² brake force shared across the four wheels, which never locked anything:
+      // each tyre sat at its peak slip, so pulling it was a perfect ABS stop at 0.95 g
+      // with full steering, from 50 km/h in under two seconds. A cable holds the wheel
+      // still whatever the tyre asks of it (`cableLocked`, applied in the wheel pass), so
+      // the rear slides on locked tyres, at their sliding grip, while the fronts still
+      // roll and steer. Rear only, because every car in the catalogue has its cable on
+      // the rear drums (the UAZ's transmission brake holds the rear propshaft): it was a
+      // lock on all four, which stopped the car straight instead of turning it.
+      // A stopped car is held by the parking hold (`parkingHoldRequested`), not by this.
       // A locked tyre's side grip is no constant either: at a slip ratio of -1 combined
       // slip leaves the side force a share that grows with slip angle, the way a
       // sliding patch's force turns with its direction of travel.
@@ -2919,7 +2923,7 @@ export class Vehicle implements Rebasable {
 
       w.driveTorqueNm = driven ? (appliedTorque * axleShare) / axleCount : 0;
       w.brakeForceN = brakeForce;
-      w.cableLocked = input.handbrake;
+      w.cableLocked = input.handbrake && !w.isFront;
       w.frictionSlip = frictionSlip;
       w.groundSurface = surfaceType;
       w.grounded = ground !== null;
