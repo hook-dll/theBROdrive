@@ -44,8 +44,10 @@ export const COARSE_SPACING = 200;
  * 7: a section's turn always reaches its own bearing, so no join steps (see `turnAt`).
  * 8: corners come in phrases, and a phrase's start can move onto a crest.
  * 9: a 4 km home district instead of 30, and a rarer, less straight pan road.
+ * 10: corners closer together on pan/highway/rolling/derelict; the first district
+ *     after the homestead is rolling or esses.
  */
-export const SPINE_FORMAT = 9;
+export const SPINE_FORMAT = 10;
 
 export interface RoadSpine {
   /** Road length the tables were built for, metres. */

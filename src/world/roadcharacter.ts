@@ -160,8 +160,9 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     // of the easy kind. It stays the breather between the twisty districts.
     weight: 0.12,
     designSpeedKmh: 110,
-    // A kink every 2.2 km rather than 4: still the straightest road, no longer dead.
-    cornerSpacing: 2_200,
+    // A kink every 1.4 km (4 km, then 2.2): still the straightest road, but the owner
+    // drove 2.2 as "no corners at all" (2026-10-10).
+    cornerSpacing: 1_400,
     // A lone kink or a dog-leg, kilometres apart. Never a crest coupling: a pan road
     // runs straight over whatever the ground does.
     phraseMin: 1,
@@ -181,7 +182,8 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     name: 'highway',
     weight: 0.22,
     designSpeedKmh: 110,
-    cornerSpacing: 2_200,
+    // 1.3 km, from 2.2: at 2.2 a highway district read as a straight with two arcs.
+    cornerSpacing: 1_300,
     // One to three sweepers a few hundred metres apart, then kilometres of breather.
     // A surveyed highway rarely hides a bend behind a brow, so the coupling is rare.
     phraseMin: 1,
@@ -202,7 +204,10 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     name: 'rolling',
     weight: 0.24,
     designSpeedKmh: 80,
-    cornerSpacing: 1_100,
+    // 750 m, from 1.1 km: one corner a kilometre at 15-30 degrees was driven as
+    // "almost no corners". The heading budget is spent on angle, not cadence, so this
+    // is free of the no-crossing bound.
+    cornerSpacing: 750,
     // Mixed: a pair or a trio a short straight apart, then a breather of about a
     // kilometre and a half. Country road over country ground, so every phrase looks
     // for a brow to start behind.
@@ -287,7 +292,8 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     name: 'derelict',
     weight: 0.08,
     designSpeedKmh: 60,
-    cornerSpacing: 1_600,
+    // 1 km, from 1.6: same reasoning as the rolling road above.
+    cornerSpacing: 1_000,
     // Irregular on purpose: anything from a lone kink to four corners, joined by
     // anything from a car length to half a kilometre. Bulldozed along the ground, so
     // it goes over brows and turns where it lands.
@@ -378,8 +384,21 @@ export function newDistrictBuffer(): DistrictSpan {
  */
 const DISTRICTS_PER_BLOCK = 4;
 
+/**
+ * The district after the homestead's: rolling or esses, never another easy one. A new
+ * game opened on pan or highway read as twenty kilometres of straight, on every seed
+ * the owner tried (2026-10-10); the first real district is what the game is judged on.
+ */
+const OPENING_KINDS = [
+  CHARACTERS.findIndex((c) => c.name === 'rolling'),
+  CHARACTERS.findIndex((c) => c.name === 'esses'),
+];
+
 function drawCharacter(seed: number, k: number, exclude: number): number {
   if (k <= 0) return 0;
+  if (k === 1) {
+    return OPENING_KINDS[Math.floor(hashUnit2(seed ^ DRAW_TAG, k) * OPENING_KINDS.length)]!;
+  }
   let total = 0;
   for (let i = 0; i < CHARACTERS.length; i++) {
     if (i !== exclude) total += CHARACTERS[i]!.weight;

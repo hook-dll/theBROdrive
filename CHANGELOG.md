@@ -12,6 +12,12 @@
   the drive then loads).
 
 ### Changed
+- MORE CORNERS, AND A NEW GAME OPENS ON A TWISTY ROAD. Corner spacing: pan 1.4 km (was
+  2.2), highway 1.3 km (2.2), rolling 750 m (1.1 km), derelict 1 km (1.6); angles and
+  radii unchanged, so the no-crossing budget is untouched. The district after the 4 km
+  homestead stretch is always rolling or esses. First 40 km over six seeds: 6-12 corners
+  tighter than 1 km radius per 5 km once past the homestead (was 2-6 on rolling/highway
+  openings). 2500 km on seed 1337: tightest p1 radius 133 m. `SPINE_FORMAT` 10.
 - TRAFFIC HOLDS 70-100% OF ITS CAP (`DENSITY_FLOOR` 0.7, was 0.5). On medium a two-lane
   road keeps 8-12 cars, a four-lane one 17-24; the target is still re-rolled every
   36-72 s.
