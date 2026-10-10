@@ -51,13 +51,12 @@ import type { RoadConditionBuffer } from './gradient';
  * every 36-72 s, and the retained FRACTION is held between re-rolls — which is what lets
  * a widening fill smoothly instead of stepping at a profile boundary.
  *
- * A third, against the two thirds this started at and the fifth it was briefly set to.
- * The range is a rotation between "you own the road" and "you are in company", and both
- * ends have to be reachable to be worth having; a fifth was measured to reach the quiet
- * end too hard, leaving a narrow road with two or three cars and the player alone on it
- * for minutes at a time, which is what a fifth of twelve means in practice.
+ * 0.7 (owner, 2026-10-10), after a fifth, a third and a half. At half the cap a
+ * narrow road on medium could sit at six cars for a minute and read as empty; 0.7 keeps
+ * the quiet end quieter than the busy one (8-9 of 12) without the road ever emptying.
+ * A fifth was measured to leave the player alone for minutes at a time.
  */
-const DENSITY_FLOOR = 0.5;
+const DENSITY_FLOOR = 0.7;
 /** Speed advantage over the player that makes a rear spawn worth its slot. */
 const REAR_SPAWN_CLOSING_MPS = 2.5;
 /**

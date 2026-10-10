@@ -12,6 +12,9 @@
   the drive then loads).
 
 ### Changed
+- TRAFFIC HOLDS 70-100% OF ITS CAP (`DENSITY_FLOOR` 0.7, was 0.5). On medium a two-lane
+  road keeps 8-12 cars, a four-lane one 17-24; the target is still re-rolled every
+  36-72 s.
 - TRAFFIC DRIVERS COME FROM THEIR CARS (`DRIVER_ODDS` in `world/traffic.ts`). GAZ-21,
   UAZ, Oka, IZh and VAZ-2101..2104 are always sleepers; 2105-2109, 21099, GAZ-24 and both
   Nivas are 25% sleeper, 25% hurried, 50% frantic; 2105 rally, Svyatogor and 2110 are
