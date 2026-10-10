@@ -12,6 +12,64 @@
   the drive then loads).
 
 ### Changed
+- TRAFFIC BRAKES FOR WHAT IS ACROSS THE CROWN, DOES NOT HOLD A LINE INTO IT, AND WAKES LEVEL.
+  Frantic contacts on the ten-stretch bench, classified from the new partner detail in
+  `--events`: the commonest and fastest (15-25 m/s) was a detour, middle thread or pass
+  return held 0.3-0.7 m past the crown while a car came the other way in its own lane,
+  often slow (recovering, detouring at 7-11 km/h, or just woken and braking); then passes
+  into a slow or detouring car in the far lane; then verge passes and detours braking at
+  0.35-0.5 of the pedal; the rest were pile-ups behind a first crash.
+  - Bodies past the crown that are stopped, crawling or slower than `CROWN_SLOW_MPS`
+    (18 km/h toward us, any speed our way) are corridor obstacles at their real lateral
+    for every line on a two-lane road, not only through the middle; faster oncoming
+    traffic stays the crossing gate's. A corridor block coming toward the car is braked
+    for on the car's share of the gap, `v / (v + u)`.
+  - A committed line whose own evaluation is `crossingAbandoned` (straddle or crossing
+    permission withdrawn) or has something coming down it is released when the search has
+    a line that is neither; the middle line is no longer forced over the search when it is
+    abandoned or has an oncoming block. On the wrong side with a head-on probe hit, the
+    rear-entry veto is lifted for the way home and the drop-back applies.
+  - The middle-pass gate looks for stopped and crawling bodies past the queue too, and
+    the crossing gate counts a slow body going our way in the far lane as standing. The
+    gate reads the field's oncoming speed out to `ONCOMING_FIELD_LOOK_M` (1000 m) instead
+    of assuming 20 m/s past the 220 m corridor horizon.
+  - The pedal is `min(decision cap, ceiling × friction share)`, not their product, and the
+    obstacle cap grows as `OBSTACLE_BRAKE_MAX · (v / limit)²` when the car is above its
+    obstacle limit (woken at 150 km/h with something in the lane, put out on the verge at
+    145): a car behind its plan gets the brake the plan needs.
+  - For `WAKE_CAUTION_S` (3 s) after an engagement (a rails wake, mostly) no discretionary
+    pass or crossing, and a new lateral move starts only at its own planned speed (verge
+    moves at the verge's) plus 1 m/s: slow first, then move.
+  - Rails rolled the body the wrong way on banked decks (`Vehicle.railStep`: +x is the
+    car's left), so one side rode 6-15 cm inside the road and the other as far above it;
+    46 of 823 wakes in one ten-stretch run loaded the springs past 1.8× in the first half
+    second. A wake now also sets the body at its resting clearance over the ground probed
+    under it. The bench tallies wake landings (`hard`/`light`) and prints each bad one with
+    per-wheel ground gaps; `--trace-car <id>` prints one car's plan every 0.1 s.
+  Ten stretches, frantic share 0.5, per driven car-minute, three runs before → two after:
+  frantic contacts 0.21/0.40/0.44 → 0.13/0.18, airborne 0.07/0.05/0.06 → 0.02/0.01,
+  departures 0.29/0.35/0.35 → 0.16/0.20, slides 0.09/0.18/0.18 → 0.08/0.13, planned verge
+  passes 0.37/0.36/0.41 → 0.42/0.40; open road 112/111/107 → 116/116 km/h. Normal contacts
+  0.15/0.10/0.09 → 0.03/0.05; hurried 0/0/0.16 → 0/0.18 (7 contacts in 39 car-min, noisy).
+  Hard wake landings: normal 17 → 0/2, frantic 28 → 24/20; what remains is frantic only,
+  at 70-150 km/h with the wheels within 5 cm of the ground, cause not found. Still
+  present: head-ons with a line over the crown (fewer, not gone), verge pass returns into
+  the car passed, and pile-ups. Not checked in the game.
+- LOOSE ITEMS NO LONGER LINK SHADER PROGRAMS MID-DRIVE. Seed 1337 at km 44 linked two
+  programs a minute into the drive: the medicine bottle lying on a home's step, whose amber
+  glass (`glass()` in render/partmesh.ts: transparent and double-sided, so three draws it
+  back face then front with a program for each) existed nowhere at boot. Items lie in the
+  world only where a POI, a story site or a wreck put them, and nothing held their programs
+  before the first one came into view. It predates today's traffic work: at 6c47c58 the same
+  drive linked the same two, and also the condition program for a spray tin, since that
+  boot held no part. `itemProgramAnchor()` (render/partmesh.ts) is a hidden group in the
+  scene from boot with every material shape a world item uses: the bottle itself (flat and
+  glass, unshadowed as a loose item is), a condition material and the football (mapped,
+  bumped leather and seam lines). The postcard and photographs are left out, since only the
+  player drops them. With the anchor in place, 0 programs were linked after the first
+  settled frame on seed 1337 km 44 (3.5 min) and km 105 (3 min) and on seed 42 km 6
+  (3 min), all driven by the hurried autopilot. The POI kit materials (the known one-off)
+  were not the cause.
 - TRAFFIC DRIVES THE VERGE ON THE VERGE'S GRIP, AND THE BENCH DRIVES ON THE GAME'S GROUND.
   - The real-road bench (tools/traffic-road.ts) built no shoulder strip and laid
     `TerrainMeshProvider`'s heightfield a few centimetres above where the strip goes, so

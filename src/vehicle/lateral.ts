@@ -104,6 +104,12 @@ export interface LateralFacts {
   /** Barrier after a given-up crossing: road and seconds, whichever runs out first. */
   readonly retryM: number;
   readonly retryS: number;
+  /**
+   * May a NEW move begin this step? False holds the lane (a move under way is not
+   * touched): the caller's way of saying "slow first, then move" — see
+   * `WAKE_CAUTION_S` in autopilot.ts.
+   */
+  readonly mayEnter: boolean;
 }
 
 export class LateralCommitment {
@@ -195,7 +201,7 @@ export class LateralCommitment {
     );
 
     if (this.kind === null) {
-      if (Math.abs(f.proposed - f.laneOffset) >= g.detourMin && f.laneBlockDistance < room) {
+      if (f.mayEnter && Math.abs(f.proposed - f.laneOffset) >= g.detourMin && f.laneBlockDistance < room) {
         this.kind = f.proposedKind;
         this.line = f.proposed;
         this.untilS = f.hintS + g.holdMax;

@@ -1957,9 +1957,15 @@ export class Vehicle implements Rebasable {
     // then roll about its own forward axis, so the body sits square to a banked deck:
     // level on rails it woke with one side's springs a bank's height short and threw
     // itself off them.
+    //
+    // The body's +x is its LEFT (up × forward), and a positive turn about forward lifts
+    // +x, so a deck that rises to the right is a NEGATIVE roll. Rolled the other way,
+    // every car on rails on a banked deck rode with one side 6-15 cm inside the road and
+    // the other as far above it, and 46 of 823 wakes over a ten-stretch bench run loaded
+    // their springs to 2-3 times their weight in the first half second.
     const halfYaw = heading / 2;
     const halfPitch = -Math.atan(grade) / 2;
-    const halfRoll = Math.atan(crossfall) / 2;
+    const halfRoll = -Math.atan(crossfall) / 2;
     const cy = Math.cos(halfYaw);
     const sy = Math.sin(halfYaw);
     const cp = Math.cos(halfPitch);

@@ -126,6 +126,12 @@ const ONCOMING_LANE_COST = 16;
 const STILL_BYPASS_NERVE = 1.4;
 /** Speed an unseen car coming the other way is assumed to be doing. */
 const ONCOMING_ASSUMED_MPS = 20;
+/**
+ * How far up the opposing lane the traffic field is read for the crossing gate's
+ * nearest body and its real speed, metres: past any pass window the gate sizes, so the
+ * assumed figure above is left for road nobody is on.
+ */
+const ONCOMING_FIELD_LOOK_M = 1000;
 /** Opposing lane must be clear this far BEHIND before crossing into it. */
 const ONCOMING_REAR_GAP_M = 20;
 /**
@@ -1013,6 +1019,22 @@ const MIDDLE_PASS_MIN_SHIFT_M = 0.3;
 const STRADDLE_LOOK_S = 4;
 const STRADDLE_LOOK_MIN_M = 30;
 const STRADDLE_GAP_M = 0.3;
+/**
+ * PAST THE CROWN, what comes at the driver faster than this is the crossing gate's to
+ * time: a pass is sized to be home before it arrives. Anything slower — stopped,
+ * crawling, detouring round something at walking pace, a car out there going our way —
+ * is a corridor obstacle at its real lateral, braked for and priced like a car in the
+ * lane, and the crossing gate reads it as standing (`visitOncoming`). 18 km/h.
+ */
+const CROWN_SLOW_MPS = 5;
+/**
+ * THE FIRST SECONDS OF A FRESH ENGAGEMENT — a spawn, or far more often a car woken off
+ * the rails at the rails' speed because something has come into its lane. For this
+ * long no discretionary pass is wanted or granted, and a new lateral move begins only
+ * at its own planned speed (within the slack): the driver slows first, then moves.
+ */
+const WAKE_CAUTION_S = 3;
+const WAKE_ENTRY_SLACK_MPS = 1;
 /** Verge proven clear of props ahead: this many seconds of travel, within bounds. */
 const SHOULDER_PASS_SIGHT_S = 5;
 const SHOULDER_PASS_SIGHT_MIN_M = 60;
@@ -1544,6 +1566,11 @@ const LAUNCH_HOLD_MPS = 0.5;
  * which exist to prevent exactly the "flew off the road" outcome and are raised with
  * `Math.max` after this. Nor the `HOLD_BRAKE` that keeps a waiting car from rolling back
  * down a grade, which is a standstill, not a manoeuvre.
+ *
+ * IT IS THE CAP FOR A CAR ON ITS PLAN. A car above an obstacle limit needs `(v / limit)²`
+ * of the planned deceleration to make the same point, and the cap grows with that up to
+ * the mode's ceiling; the friction circle (`BEND_BRAKE_SHARE_FLOOR`) bounds the pedal
+ * alongside it, never multiplied into it. See the pedal in `drive`.
  */
 const OBSTACLE_BRAKE_MAX = 0.5;
 /** Speed difference, m/s, below which two limits are the same limit. */
@@ -1741,6 +1768,8 @@ export class Autopilot {
   private stallAnchorZ = 0;
   /** Seconds since the last recovery attempt, which is what re-arms a given-up one. */
   private sinceRecovery = 0;
+  /** Seconds since this driver was last engaged — a spawn, a rails wake; see WAKE_CAUTION_S. */
+  private engagedFor = 0;
   /**
    * Latched after a full departure. Merely crossing the verge again is not enough:
    * acceleration stays inhibited until the chassis is centred on its recovery line
@@ -2005,20 +2034,35 @@ export class Autopilot {
     if (Math.abs(neighbour.lateral - this.shoulderLaneOffset) > neighbour.halfWidth + CAR_HALF_WIDTH_M) return;
     this.middleQueueEdge = Math.min(this.middleQueueEdge, neighbour.lateral * this.shoulderSideSign);
   };
-  /** Obstacles the thread line has to clear, and the band each is given. See MIDDLE_PASS_*. */
-  private middleObstacles: CorridorObstacle[] | null = null;
-  private middleObstacleHalf = 0;
-  private readonly visitMiddleOncoming = (neighbour: TrafficNeighbour): void => {
-    // Everything ahead on the crown side of the line, whichever way it is going.
-    if (neighbour.s <= 0) return;
-    if ((neighbour.lateral - this.middleLine) * this.shoulderSideSign >= 0) return;
-    this.middleObstacles?.push({
-      s: neighbour.s,
-      lateral: neighbour.lateral,
-      halfWidth: this.middleObstacleHalf,
-      speed: neighbour.speed,
-      movable: true,
-    });
+  /**
+   * Obstacles a line toward or over the crown has to clear, the band each is given, and
+   * which of them count; see CROWN_SLOW_MPS and MIDDLE_PASS_*. Pooled: the entries are
+   * rewritten every step, so the visit allocates nothing.
+   */
+  private crownObstacles: CorridorObstacle[] | null = null;
+  private readonly crownPool: { s: number; lateral: number; halfWidth: number; speed: number; movable: boolean }[] = [];
+  private crownPoolUsed = 0;
+  private crownBandHalf = 0;
+  private crownSide = -1;
+  /** In `crownSide`'s sign: a body nearer the crown than this is on the crown side. */
+  private crownEdge = 0;
+  /** Through the middle everything counts; past the crown only what is not coming fast. */
+  private crownAll = false;
+  private readonly visitCrownTraffic = (neighbour: TrafficNeighbour): void => {
+    if (neighbour.s <= 0 || !this.crownObstacles) return;
+    if (neighbour.lateral * this.crownSide >= this.crownEdge) return;
+    if (!this.crownAll && neighbour.speed < -CROWN_SLOW_MPS) return;
+    let entry = this.crownPool[this.crownPoolUsed];
+    if (!entry) {
+      entry = { s: 0, lateral: 0, halfWidth: 0, speed: 0, movable: true };
+      this.crownPool.push(entry);
+    }
+    this.crownPoolUsed++;
+    entry.s = neighbour.s;
+    entry.lateral = neighbour.lateral;
+    entry.halfWidth = this.crownBandHalf;
+    entry.speed = neighbour.speed;
+    this.crownObstacles.push(entry);
   };
   /** Laterals of the traffic a line over the crown could meet; see STRADDLE_LOOK_S. */
   private readonly straddleLaterals: number[] = [];
@@ -2044,7 +2088,10 @@ export class Autopilot {
   private readonly visitMiddleNeighbour = (neighbour: TrafficNeighbour): void => {
     if (!this.middleClear) return;
     // Something going our way far enough up the road is room to come back in ahead of.
-    if (neighbour.speed > -CRAWL_SPEED_MPS && neighbour.s > this.middleQueueLimit) return;
+    // Something STANDING there is not: it is what the line runs into at the full pass
+    // speed, and skipped as "going our way" because its speed was not negative, a
+    // stopped car past the queue was never looked for at all.
+    if (neighbour.speed > CROWN_SLOW_MPS && neighbour.s > this.middleQueueLimit) return;
     if (
       Math.abs(neighbour.lateral - this.middleLine) <
       MIDDLE_PASS_BODY_HALF_M + MIDDLE_PASS_GAP_M + this.middleOwnHalf - 1e-3
@@ -2293,14 +2340,16 @@ export class Autopilot {
   /**
    * Nearest body ahead or longitudinally overlapping whose lateral overlaps the opposing
    * line, with its speed along this driver's direction. Anything travelling with us is not oncoming
-   * traffic — it is the queue we are trying to overtake — and is priced elsewhere.
+   * traffic — it is the queue we are trying to overtake — and is priced elsewhere; but
+   * one out there at walking pace, going our way round something of its own, is in the
+   * lane the pass needs as surely as a parked car, and is measured as one (`CROWN_SLOW_MPS`).
    */
   private readonly visitOncoming = (neighbour: TrafficNeighbour): void => {
     if (neighbour.s < 0 || neighbour.s >= this.oncomingFieldGap) return;
     if (Math.abs(neighbour.lateral - this.oncomingScanLine) > neighbour.halfWidth + CAR_HALF_WIDTH_M) {
       return;
     }
-    if (neighbour.speed > CRAWL_SPEED_MPS) return;
+    if (neighbour.speed > CROWN_SLOW_MPS) return;
     this.oncomingFieldGap = neighbour.s;
     this.oncomingFieldSpeed = neighbour.speed;
   };
@@ -2790,6 +2839,7 @@ export class Autopilot {
     this.recoveryCommitted = false;
     this.deadlockPermission = false;
     this.yieldReverse = false;
+    this.engagedFor = 0;
     this.dynamicBlockerKnown = false;
     this.obstacleGapValue = Infinity;
     this.obstacleSpeedValue = 0;
@@ -2947,6 +2997,10 @@ export class Autopilot {
     }
     this.travelled += speed * dt;
     this.sinceRecovery += dt;
+    // Just engaged — woken off the rails, mostly, at the speed the rails were doing and
+    // often because something has come into the lane. See WAKE_CAUTION_S.
+    const freshlyEngaged = this.engagedFor < WAKE_CAUTION_S;
+    this.engagedFor += dt;
     const wasRoadRecoveryActive = this.roadRecoveryActive;
     // A car out on the graded shoulder because its corridor goes round something is
     // not a car that has left the road: the planner put it there and will bring it
@@ -3403,6 +3457,7 @@ export class Autopilot {
     );
     const passUrge =
       (config.overtakes || config.lanePasses) &&
+      !freshlyEngaged &&
       this.corridorLaneBlockSpeed > PASS_MIN_SPEED_MPS &&
       this.corridorLaneBlockSpeed < desiredSpeed - PASS_ADVANTAGE_MPS &&
       this.corridorLaneBlockDistance <= passReachM;
@@ -3579,11 +3634,25 @@ export class Autopilot {
     // single measured gap, it would be a head-on the moment that gap closed. At its
     // real lateral it is a body to be steered clear of, like every other, and a gap
     // that closes is braked for, not driven into.
-    if ((this.middlePassAllowed || this.middlePassingValue) && this.trafficField) {
-      this.middleObstacles = obstacles;
-      this.middleObstacleHalf = middleBandHalf;
-      this.trafficField.forEachNear(horizon, 0, this.visitMiddleOncoming);
-      this.middleObstacles = null;
+    //
+    // AND SO IS WHAT STANDS OR CRAWLS PAST THE CROWN, for every line, not only through
+    // the middle. The far lane used to be priced by the crossing gate's one gap and by
+    // nothing else, so a crossing, a detour reaching over the crown or a pass coming
+    // home met a car in it that was stopped, crawling round something or detouring at
+    // 7-11 km/h with no corridor block and no braking at all: the bench's commonest
+    // frantic contact, at 15-25 m/s. What is coming at speed stays the gate's
+    // (`CROWN_SLOW_MPS`): a pass is timed to be home before it arrives, and braking
+    // for it out there only makes the pass longer.
+    if (lanesPerSide === 1 && this.trafficField) {
+      const threading = this.middlePassAllowed || this.middlePassingValue;
+      this.crownObstacles = obstacles;
+      this.crownPoolUsed = 0;
+      this.crownSide = middleSide;
+      this.crownEdge = threading ? Math.max(this.middleLine * middleSide, 0) : 0;
+      this.crownAll = threading;
+      this.crownBandHalf = middleBandHalf;
+      this.trafficField.forEachNear(horizon, 0, this.visitCrownTraffic);
+      this.crownObstacles = null;
     }
     /**
      * The kickdown, and it is the SAME number the crossing gate sizes the manoeuvre
@@ -3878,7 +3947,7 @@ export class Autopilot {
       this.passingEnabled &&
       lanesPerSide === 1 &&
       !this.lateral.crossingBarred(this.travelled) &&
-      (config.overtakes || stillBlocker) &&
+      ((config.overtakes && !freshlyEngaged) || stillBlocker) &&
       (stillBlocker ||
         !this.corridorFeasible ||
         (config.racer
@@ -3907,10 +3976,15 @@ export class Autopilot {
     // doing along this driver's direction (negative when it is coming at us). The
     // probe adds the bodies the coordinator does not know about — a parked car, a
     // trailer — and the shorter of the two answers wins.
+    //
+    // AT ANY RANGE IS WHAT IT SAYS (`ONCOMING_FIELD_LOOK_M`). Read only to the corridor
+    // horizon, a car further off than 220 m was priced at the assumed 20 m/s whatever it
+    // was doing, while a racing pass's window reaches 400 m and more and the stream's
+    // frantic cars ride at 140-150 km/h, twice that figure.
     this.oncomingScanLine = oncomingLine;
     this.oncomingFieldGap = Infinity;
     this.oncomingFieldSpeed = 0;
-    this.trafficField?.forEachNear(horizon, 0, this.visitOncoming);
+    this.trafficField?.forEachNear(Math.max(horizon, ONCOMING_FIELD_LOOK_M), 0, this.visitOncoming);
     const oncomingProbeGap = this.laneProbe(oncomingLine, horizon);
     const oncomingProbeSpeed = this.probeHitSpeed;
     const crossingOncomingGap = Math.min(this.oncomingGap, this.oncomingFieldGap, oncomingProbeGap);
@@ -3956,6 +4030,15 @@ export class Autopilot {
     this.straddleOwnHalf = vehicle.modelMeasure.halfExtents[0];
     this.straddleSide = Math.sign(ownLaneOffset) || -1;
     this.trafficField?.forEachNear(horizon, 0, this.visitStraddle);
+    // CAUGHT ON THE WRONG SIDE BY SOMETHING COMING, THE WAY HOME IS TAKEN. The rear-entry
+    // rule refuses a line that would make a follower brake harder than a stranger may be
+    // asked to, and a car out over the crown with a car coming at it in that lane is the
+    // one case where that braking is the lesser harm. (Measured on the bench, a frantic
+    // car held a line 0.7 m past the crown for two seconds, on the 1.4 s reflex brake
+    // alone, and met the car coming the other way at 21 m/s.) The abeam veto still holds
+    // — that is a car beside us, not behind — and the drop-back below opens it.
+    const escapeHome =
+      headOn && projection.lateral * Math.sign(ownLaneOffset || -1) < -CAR_HALF_WIDTH_M * 0.5;
     const corridorRequest = {
       ownLateral: projection.lateral,
       previousLine: this.planLine,
@@ -3981,7 +4064,7 @@ export class Autopilot {
       mayCrossCrown,
       shoulderPassOverhang: this.shoulderPassAllowed ? this.shoulderPassOverhang : 0,
       straddleAllowed: this.trafficField && lanesPerSide === 1 ? this.straddleAllowed : undefined,
-      lineAllowed: this.lineEntryAllowed,
+      lineAllowed: escapeHome ? undefined : this.lineEntryAllowed,
       // The mode's whole appetite for the opposing lane, in one number — and a
       // dearer one for a driver that is only there because something is parked in
       // its way, so it prefers the shoulder and its own lane while either works.
@@ -4040,12 +4123,19 @@ export class Autopilot {
     // is threading, it stays the answer unless the search finds materially clearer road
     // (`MIDDLE_PASS_KEEP_M`): two lines both clear to the horizon used to be decided by
     // the search's own preference each step, and the car swapped between them.
+    //
+    // NEVER A LINE WITH SOMETHING COMING DOWN IT. "Clearer" compared distances only, so
+    // a car coming the other way 150 m up the middle line read as clearer road than a
+    // leader 20 m up the lane, and a line the straddle gate had just withdrawn
+    // (`crossingAbandoned`) was forced back over the search that had priced it out.
     if (this.middlePassAllowed && !proposal.usesOncomingLane) {
       const middle = evaluateCorridorLine(corridorRequest, this.middleLine);
       const keep = this.middlePassingValue ? MIDDLE_PASS_KEEP_M : 0;
       if (
         middle.admissible &&
         middle.feasible &&
+        !middle.crossingAbandoned &&
+        !(middle.blockDistance < Infinity && middle.blockSpeed < -CRAWL_SPEED_MPS) &&
         (middle.blockDistance > proposal.blockDistance ||
           (keep > 0 && middle.blockDistance >= proposal.blockDistance - keep))
       ) {
@@ -4154,6 +4244,17 @@ export class Autopilot {
         : proposalIsMiddle
           ? 'middle'
           : 'detour';
+    // FRESHLY ENGAGED, A MOVE WAITS FOR ITS SPEED. A car handed back by the rails is
+    // doing the rails' speed, often because something has just come into its lane, with
+    // tyres that carried no side force a step ago: measured on the bench, a frantic car
+    // woken at 152 km/h put its line out onto the verge at 145 and left the road, and
+    // another slid within three seconds of its wake. For `WAKE_CAUTION_S` a new move
+    // begins only at the speed it is planned at — the manoeuvre's own, and the verge's
+    // when the line is out there — and the corridor's braking gets it there first.
+    const entrySpeed = proposal.usesShoulder
+      ? Math.min(proposal.manoeuvreSpeed, VERGE_BYPASS_STILL_MPS, this.vergeBendSpeed(Math.abs(currentRoad.curvature)))
+      : proposal.manoeuvreSpeed;
+    const mayEnter = !freshlyEngaged || speed <= entrySpeed + WAKE_ENTRY_SLACK_MPS;
     const committedLine = this.lateral.step({
       proposed: proposal.line,
       proposedKind,
@@ -4177,6 +4278,7 @@ export class Autopilot {
           : 0,
       retryM: config.racer ? RACER_CROSSING_RETRY_M : CROSSING_RETRY_METRES,
       retryS: config.racer ? RACER_CROSSING_RETRY_S : CROSSING_RETRY_S,
+      mayEnter,
     });
     // An escape that has already failed here is allowed off the asphalt, a rung at a
     // time: the ordinary clamp is the asphalt, which is also the width the thing it
@@ -4222,6 +4324,24 @@ export class Autopilot {
     // `DETOUR_RELEASE_MARGIN_M` to spare: the same order of thresholds the latch keeps.
     const searchFeasible = proposal.admissible && proposal.feasible;
     let commitmentHolds = plan.feasible;
+    // NOR IS A COMMITTED LINE HELD ONCE ITS PERMISSION HAS GONE OR SOMETHING IS COMING
+    // DOWN IT. A line over or astride the crown that the straddle or crossing gate has
+    // withdrawn is `crossingAbandoned` — priced as a wall but still admissible — and the
+    // commitment kept steering it: frantic cars held a detour or a middle line 0.3-0.5 m
+    // past the crown at 100-120 km/h while a car came the other way in its own lane,
+    // braked only by the 1.4 s reflex, and met it at 15-25 m/s. The bench's commonest
+    // frantic contact by count and by speed. When the search has a line that is neither,
+    // the search drives.
+    if (
+      commitmentHolds &&
+      searchFeasible &&
+      proposal.line !== desiredLine &&
+      (plan.crossingAbandoned || (plan.blockDistance < Infinity && plan.blockSpeed < -CRAWL_SPEED_MPS)) &&
+      !proposal.crossingAbandoned &&
+      !(proposal.blockDistance < Infinity && proposal.blockSpeed < -CRAWL_SPEED_MPS)
+    ) {
+      commitmentHolds = false;
+    }
     if (commitmentHolds && this.planOverridden && searchFeasible && proposal.line !== desiredLine) {
       const stopRoom = corridorRequest.stopRoom;
       corridorRequest.stopRoom = stopRoom + DETOUR_RELEASE_MARGIN_M;
@@ -4884,7 +5004,7 @@ export class Autopilot {
     // Dropping a little under its speed opens the lane behind it in a second or two,
     // and the planner takes it the moment it opens.
     let dropBackSpeed = Number.POSITIVE_INFINITY;
-    if (plan.crossingAbandoned) {
+    if (plan.crossingAbandoned || escapeHome) {
       for (const obstacle of obstacles) {
         if (!obstacle.abeam || obstacle.trailing || obstacle.speed <= CRAWL_SPEED_MPS) continue;
         if (Math.abs(obstacle.lateral - ownLaneOffset) >= obstacle.halfWidth + CAR_HALF_WIDTH_M) continue;
@@ -4905,9 +5025,16 @@ export class Autopilot {
     // stopped thing in it is braked to a crawl and then gone round — and once the
     // corridor moves off it, it stops being braked for at all.
     if (this.corridorBlockDistance < Infinity) {
+      // SOMETHING COMING DOWN THE CORRIDOR CLOSES THE ROAD FROM ITS END TOO: a car
+      // detouring toward us at walking pace, or one crawling round its own obstruction in
+      // the lane a pass is using. The road this car has to stop in is its own share of
+      // the gap, `v / (v + u)`, not all of it.
+      const blockDistance = this.corridorBlockSpeed < -CRAWL_SPEED_MPS
+        ? (this.corridorBlockDistance * speed) / Math.max(speed - this.corridorBlockSpeed, 1e-3)
+        : this.corridorBlockDistance;
       const room = Math.max(
         0,
-        this.corridorBlockDistance -
+        blockDistance -
           (this.corridorBlockSpeed > CRAWL_SPEED_MPS
             ? FOLLOW_STANDOFF_M
             : Math.max(FOLLOW_STANDOFF_M, config.brakeLead)),
@@ -4964,7 +5091,7 @@ export class Autopilot {
       // short — metres, outside the stopping room — where the corridor read as open,
       // the stall was never seen, and on the bench's boulder across the whole road the
       // car waited in front of it for good instead of backing out and trying again.
-      const standoffRoom = this.corridorBlockDistance - STILL_BLOCK_STANDOFF_M;
+      const standoffRoom = blockDistance - STILL_BLOCK_STANDOFF_M;
       const approachGain = obstacleBrakeAccel / (4 * OBSTACLE_BRAKE_MAX * config.brakeBand);
       const stillLimit = standoffRoom > 0
         ? Math.min(
@@ -5404,10 +5531,24 @@ export class Autopilot {
           : !this.corridorFeasible
             ? (speed * speed) / (2 * Math.max(1, this.corridorBlockDistance - STILL_BLOCK_STANDOFF_M))
             : 0;
-    const brakeCeiling =
-      (obstacleLimitSpeed < roadLimitSpeed - BRAKE_LIMIT_EPSILON && followNeed <= obstacleBrakeAccel
-        ? Math.min(config.brakeCeiling, OBSTACLE_BRAKE_MAX)
-        : config.brakeCeiling) * bendBrakeShare;
+    // THE CAP IS A DECISION AND THE SHARE IS THE TYRES, so the pedal gets the lower of
+    // the two, never their product. Multiplied, a car steering a detour round a stopped
+    // car was held to 0.35 of the pedal at the friction circle's 0.7 — a cap on a cap —
+    // while the stopping envelope it was driving to had been planned on the whole half
+    // pedal (`obstacleBrakeAccel`), and it rolled into what it was braking for.
+    //
+    // AND A CAR BEHIND ITS OWN PLAN IS NOT TAKING A DECISION ANY MORE. Every obstacle limit
+    // is a speed the capped pedal can hold the car to if the car is at it; a car above
+    // it — woken off the rails at 150 km/h with something in the lane, a line put out on
+    // the verge at 145, a block that came into the corridor late — needs `(v / limit)²`
+    // of that deceleration to make the same point, and the cap grows with it up to the
+    // mode's ceiling. On its envelope the ratio is one and the cap is the half pedal.
+    const obstacleLimited = obstacleLimitSpeed < roadLimitSpeed - BRAKE_LIMIT_EPSILON;
+    const behindPlan = (speed / Math.max(obstacleLimitSpeed, HOLD_TARGET_MPS)) ** 2;
+    const decisionCap = obstacleLimited && followNeed <= obstacleBrakeAccel
+      ? Math.min(config.brakeCeiling, OBSTACLE_BRAKE_MAX * Math.max(1, behindPlan))
+      : config.brakeCeiling;
+    const brakeCeiling = Math.min(decisionCap, config.brakeCeiling * bendBrakeShare);
     out.brake = speedError < 0 ? clamp(-speedError / config.brakeBand, 0, brakeCeiling) : 0;
     // AN IMMINENT CONTACT IS NOT AN OBSTACLE DECISION, AND IT DOES NOT SHARE ITS PEDAL.
     //

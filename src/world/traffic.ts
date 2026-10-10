@@ -356,6 +356,8 @@ const RAILS_GRADE_BASE_M = 2;
 const RAILS_RISE_SLEW_MPS = 0.3;
 /** How far below the chassis the rails ground probe reaches, metres. */
 const RAILS_GROUND_PROBE_M = 4;
+/** The wake's ground probe starts this far above the chassis, metres: a body riding low is still above it. */
+const RAILS_WAKE_PROBE_LIFT_M = 0.5;
 /** The survey's box for bodies in the lane: half its width and height, and how far it reaches under the surface, metres. */
 const RAILS_PROBE_HALF_WIDTH_M = 1.3;
 const RAILS_PROBE_HALF_HEIGHT_M = 1.5;
@@ -1474,6 +1476,18 @@ export class RoadTraffic {
     const rails = car.rails!;
     car.rails = null;
     this.railBodies.delete(car.vehicle.chassis.handle);
+    // AT ITS RESTING HEIGHT OVER THE GROUND UNDER IT NOW. The ride height follows the
+    // ground at `RAILS_RISE_SLEW_MPS` from a survey up to a quarter second old, so a body
+    // woken where the grade changes stood up to 9 cm off its springs' rest and dropped
+    // onto them or was thrown off them.
+    const t = car.vehicle.chassis.translation();
+    const ground = this.railGroundUnder(car, t.x, t.y + RAILS_WAKE_PROBE_LIFT_M, t.z);
+    if (ground !== null) {
+      this.railPoint.x = t.x;
+      this.railPoint.y = ground + rails.clearance;
+      this.railPoint.z = t.z;
+      car.vehicle.chassis.setTranslation(this.railPoint, true);
+    }
     // Turning as the lane turns: the road's curvature against the arclength the car
     // covers, which runs backwards for a car driving the road the other way.
     car.vehicle.leaveRails(rails.speed, this.road.curvatureAt(rails.s) * rails.speed * car.direction);

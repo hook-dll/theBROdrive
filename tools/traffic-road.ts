@@ -113,6 +113,13 @@ let egoLogTicks = 0;
 const FRANTIC_SHARE = flag('frantic-share', 0);
 const EVENTS_LOG = args.includes('--events');
 /**
+ * `--trace-car <id>`: every tenth of a second of that stream car's driving, with the
+ * plan's own state, between `--trace-from` and `--trace-to` (metres of s past the start).
+ */
+const TRACE_CAR = args.includes('--trace-car') ? args[args.indexOf('--trace-car') + 1]! : null;
+const TRACE_FROM = flag('trace-from', -Infinity);
+const TRACE_TO = flag('trace-to', Infinity);
+/**
  * The ego driver's character. It is the player's own autopilot, at its middle setting
  * unless `--ego` asks for another one — `frantic` is the racer the player races against,
  * and the `racer:` line below is what it is judged on.
@@ -432,6 +439,42 @@ interface StreamCar {
   input: InputFrame;
 }
 const cars = (traffic as unknown as { carList: readonly StreamCar[] }).carList;
+/**
+ * Where each woken body stood against its resting clearance at the moment of the wake,
+ * metres (positive is high), and its vertical speed: what the landing check prints.
+ */
+const wakePose = new Map<string, { error: number; vy: number; wheels: string }>();
+const wakeErrors: number[] = [];
+{
+  type Wake = (car: StreamCar & { rails: { clearance: number } }) => void;
+  type Ground = (car: StreamCar, x: number, y: number, z: number) => number | null;
+  const exposed = traffic as unknown as { wake: Wake; railGroundUnder: Ground };
+  const wake = exposed.wake.bind(traffic);
+  const ground = exposed.railGroundUnder.bind(traffic);
+  const point = new THREE.Vector3();
+  const rotation = new THREE.Quaternion();
+  exposed.wake = (car) => {
+    const clearance = car.rails.clearance;
+    const t = car.vehicle.chassis.translation();
+    const under = ground(car, t.x, t.y + 0.5, t.z);
+    // Each wheel's contact point at the resting clearance against the ground under it,
+    // centimetres: positive is a wheel held above its ground, negative one inside it.
+    const q = car.vehicle.chassis.rotation();
+    rotation.set(q.x, q.y, q.z, q.w);
+    let wheels = '';
+    for (const wheel of car.vehicle.modelMeasure.wheels) {
+      point.set(wheel.pos[0], car.vehicle.contactPlaneLocalY, wheel.pos[2]).applyQuaternion(rotation);
+      const below = ground(car, t.x + point.x, t.y + point.y + 0.5, t.z + point.z);
+      wheels += `${wheel.isFront ? 'F' : 'R'}${wheel.pos[0] > 0 ? 'l' : 'r'}${below === null ? '?' : ((t.y + point.y - below) * 100).toFixed(0)} `;
+    }
+    wake(car);
+    if (under !== null) {
+      const now = car.vehicle.chassis.translation();
+      wakePose.set(car.id, { error: now.y - under - clearance, vy: car.vehicle.chassis.linvel().y, wheels });
+      wakeErrors.push(now.y - under - clearance);
+    }
+  };
+}
 if (FRANTIC_SHARE > 0) {
   type Draw = (direction: number, modelId: string) => { style: string };
   const shaped = traffic as unknown as { drawDriver: Draw };
@@ -1137,6 +1180,10 @@ interface ControlTally {
   slide: number;
   contact: number;
   spawn: number;
+  /** Wakes whose springs carried over `WAKE_HARD_LOAD` of the parked load in their first `WAKE_CHECK_S`. */
+  wakeHard: number;
+  /** And wakes whose springs dropped under `CONTROL_AIRBORNE_LOAD` in that window. */
+  wakeLight: number;
 }
 interface ControlCar {
   wasRails: boolean;
@@ -1151,7 +1198,20 @@ interface ControlCar {
   /** Snapshots every quarter second over the last two: v>target pedal steer lat load. */
   trail: string[];
   trailClock: number;
+  /** Seconds left of the landing check after a wake, and the load extremes in it. */
+  wakeCheck: number;
+  wakeMax: number;
+  wakeMin: number;
+  /** Every other step of that half second: load share, and the pedal the driver gave. */
+  wakeLog: string;
 }
+/**
+ * A WAKE THAT LANDS. The rails hand the body back at its resting clearance; a wake whose
+ * springs carry more than twice the parked load in the first half second started with
+ * the wheels inside the ground, and one under a tenth started above it.
+ */
+const WAKE_CHECK_S = 0.5;
+const WAKE_HARD_LOAD = 1.8;
 const controlTally = new Map<string, ControlTally>();
 const controlCars = new Map<string, ControlCar>();
 const controlEvents: string[] = [];
@@ -1246,12 +1306,12 @@ const paceCondition: RoadConditionBuffer = { surface: SurfaceType.Asphalt, decay
 function trackControl(car: StreamCar): void {
   let tally = controlTally.get(car.style);
   if (!tally) {
-    tally = { seconds: 0, metres: 0, openSeconds: 0, openMetres: 0, woke: 0, airborne: 0, departure: 0, departureOnLine: 0, verge: 0, slide: 0, contact: 0, spawn: 0 };
+    tally = { seconds: 0, metres: 0, openSeconds: 0, openMetres: 0, woke: 0, airborne: 0, departure: 0, departureOnLine: 0, verge: 0, slide: 0, contact: 0, spawn: 0, wakeHard: 0, wakeLight: 0 };
     controlTally.set(car.style, tally);
   }
   let state = controlCars.get(car.id);
   if (!state) {
-    state = { wasRails: false, sinceWake: Infinity, driven: 0, airSteps: 0, airborne: false, departed: false, offroad: false, sliding: false, trail: [], trailClock: 0 };
+    state = { wasRails: false, sinceWake: Infinity, driven: 0, airSteps: 0, airborne: false, departed: false, offroad: false, sliding: false, trail: [], trailClock: 0, wakeCheck: 0, wakeMax: 0, wakeMin: Infinity, wakeLog: '' };
     controlCars.set(car.id, state);
   }
   state.sinceWake += FIXED_DT;
@@ -1263,9 +1323,29 @@ function trackControl(car: StreamCar): void {
     state.wasRails = false;
     state.sinceWake = 0;
     tally.woke++;
+    state.wakeCheck = WAKE_CHECK_S;
+    state.wakeMax = 0;
+    state.wakeMin = Infinity;
+    state.wakeLog = '';
   }
   if (car.rival || car.turnS >= 0) return;
   state.driven += FIXED_DT;
+  if (TRACE_CAR === car.id && ticks % 6 === 0 && car.forwardS - START_S >= TRACE_FROM && car.forwardS - START_S <= TRACE_TO) {
+    const a = car.autopilot;
+    const p = a as unknown as Record<string, number | boolean>;
+    const v = car.vehicle.chassis.linvel();
+    console.log(
+      `trace ${car.id} t ${(ticks * FIXED_DT).toFixed(1)} s ${(car.forwardS - START_S).toFixed(0)} ` +
+        `${(Math.hypot(v.x, v.z) * 3.6).toFixed(0)}>${(a.targetSpeed * 3.6).toFixed(0)} ${a.bindingSpeedLimit} ` +
+        `${car.input.brake > 0 ? `b${car.input.brake.toFixed(2)}` : `t${car.input.throttle.toFixed(2)}`} ` +
+        `lat ${car.roadLateral.toFixed(2)} ln ${(a.commandedLine * car.direction).toFixed(2)} plan ${(a.plannedLine * car.direction).toFixed(2)} ` +
+        `${a.activity}/${a.lateralCommitment ?? '-'} ${a.manoeuvre} ` +
+        `block ${(p.corridorBlockDistance as number).toFixed(0)}@${((p.corridorBlockSpeed as number) * 3.6).toFixed(0)} ` +
+        `laneblock ${a.laneBlockDistance.toFixed(0)}@${(a.laneBlockSpeed * 3.6).toFixed(0)} feasible ${p.corridorFeasible} overridden ${p.planOverridden} ` +
+        `mayCross ${p.lastMayCross} refused ${p.lastCrossingRefused} oncoming ${(p.lastOncomingGap as number).toFixed(0)} ` +
+        `urge ${a.passUrge} middle ${a.middlePassing} obstacle ${a.obstacleGap.toFixed(0)}@${(a.obstacleSpeed * 3.6).toFixed(0)}`,
+    );
+  }
   const vehicle = car.vehicle;
   const velocity = vehicle.chassis.linvel();
   const heading = bodyHeading(vehicle);
@@ -1279,6 +1359,30 @@ function trackControl(car: StreamCar): void {
     parked += wheel.staticLoadN;
   }
   const loadShare = parked > 0 ? load / parked : 1;
+  if (state.wakeCheck > 0) {
+    state.wakeMax = Math.max(state.wakeMax, loadShare);
+    state.wakeMin = Math.min(state.wakeMin, loadShare);
+    if (Math.round(state.wakeCheck / FIXED_DT) % 2 === 0) {
+      state.wakeLog += ` ${loadShare.toFixed(2)}${car.input.brake > 0 ? `b${car.input.brake.toFixed(1)}` : `t${car.input.throttle.toFixed(1)}`}`;
+    }
+    state.wakeCheck -= FIXED_DT;
+    if (state.wakeCheck <= 0 && (state.wakeMax > WAKE_HARD_LOAD || state.wakeMin < CONTROL_AIRBORNE_LOAD)) {
+      if (state.wakeMax > WAKE_HARD_LOAD) tally.wakeHard++;
+      if (state.wakeMin < CONTROL_AIRBORNE_LOAD) tally.wakeLight++;
+      if (EVENTS_LOG) {
+        controlEvents.push(
+          `wake      ${car.style.padEnd(8)} ${car.id} ${car.modelId} s ${(car.forwardS - START_S).toFixed(0)} dir ${car.direction > 0 ? '+' : '-'} ` +
+            `${(speed * 3.6).toFixed(0)} km/h, load ${state.wakeMin.toFixed(2)}..${state.wakeMax.toFixed(2)} in its first ${WAKE_CHECK_S} s, ` +
+            `lat ${car.roadLateral.toFixed(1)}, R ${(1 / Math.max(Math.abs(road.curvatureAt(car.forwardS)), 1e-5)).toFixed(0)}, ` +
+            `grade ${(road.sampleAt(car.forwardS).grade * car.direction * 100).toFixed(1)}%, bank ${(road.bankingAt(car.forwardS) * 100).toFixed(1)}%, wheels ${wheelCode(vehicle)}` +
+            (wakePose.has(car.id)
+              ? `, woke ${(wakePose.get(car.id)!.error * 100).toFixed(0)} cm off its rest height, vertical ${wakePose.get(car.id)!.vy.toFixed(2)} m/s, wheel gaps cm ${wakePose.get(car.id)!.wheels}`
+              : '') +
+            `, load/pedal:${state.wakeLog}`,
+        );
+      }
+    }
+  }
   const autopilot = car.autopilot;
   state.trailClock += FIXED_DT;
   if (EVENTS_LOG && state.trailClock >= 0.25) {
@@ -1331,7 +1435,56 @@ function trackControl(car: StreamCar): void {
   }
   if (slipDeg < CONTROL_SLIDE_DEG / 2) state.sliding = false;
   const impact = vehicle.lastImpact;
-  if (impact && impact.severityMps > 1.8) controlEvent('contact', car, state, speed, `${impact.severityMps.toFixed(1)} m/s`);
+  if (impact && impact.severityMps > 1.8) controlEvent('contact', car, state, speed, contactDetail(car, impact.severityMps));
+}
+/** What a car was closing on when it struck, and what its partner was doing: whose move it was. */
+function describeBody(id: string, autopilot: Autopilot, vehicle: Vehicle, s: number, lateral: number, direction: number, from: StreamCar): string {
+  const v = vehicle.chassis.linvel();
+  const other = cars.find((c) => c.id === id);
+  const trail = controlCars.get(id)?.trail;
+  return (
+    `with ${id} ${other?.style ?? 'ego'} dir ${direction > 0 ? '+' : '-'} ${(Math.hypot(v.x, v.z) * 3.6).toFixed(0)} km/h ` +
+    `${other?.rails ? 'RAILS ' : ''}${autopilot.activity}/${autopilot.lateralCommitment ?? '-'}${autopilot.middlePassing ? ' middle' : ''} ` +
+    `lat ${lateral.toFixed(1)} ln ${(autopilot.commandedLine * direction).toFixed(1)} ahead by ${((s - from.forwardS) * from.direction).toFixed(1)} m` +
+    (trail && trail.length > 0 ? `\n            partner ${id}: ${trail.join(' | ')}` : '')
+  );
+}
+function contactDetail(car: StreamCar, severity: number): string {
+  const autopilot = car.autopilot;
+  let out =
+    `${severity.toFixed(1)} m/s; ${autopilot.manoeuvre}${autopilot.middlePassing ? ' middle' : ''}${autopilot.passAttempt ? ' attempt' : ''}, ` +
+    `obstacle ${autopilot.obstacleGap < 1e4 ? autopilot.obstacleGap.toFixed(0) : '-'} m @ ${(autopilot.obstacleSpeed * 3.6).toFixed(0)}, ` +
+    `lane block ${autopilot.laneBlockDistance < 1e4 ? autopilot.laneBlockDistance.toFixed(0) : '-'} m @ ${(autopilot.laneBlockSpeed * 3.6).toFixed(0)}`;
+  const touching = partnersOf(car.vehicle).split(',');
+  let named = false;
+  for (const name of touching) {
+    if (name === 'ego') {
+      out += `; ${describeBody('ego', egoAutopilot, ego, egoS, egoLateral, 1, car)}`;
+      named = true;
+      continue;
+    }
+    const other = cars.find((c) => c.id === name);
+    if (!other) continue;
+    out += `; ${describeBody(other.id, other.autopilot, other.vehicle, other.forwardS, other.roadLateral, other.direction, car)}`;
+    named = true;
+  }
+  if (!named) {
+    // Already apart on the step the impact is read: the nearest body within a car length.
+    let nearest: StreamCar | null = null;
+    let best = 7;
+    for (const other of cars) {
+      if (other === car) continue;
+      const d = Math.hypot(other.forwardS - car.forwardS, other.roadLateral - car.roadLateral);
+      if (d < best) {
+        best = d;
+        nearest = other;
+      }
+    }
+    const egoD = Math.hypot(egoS - car.forwardS, egoLateral - car.roadLateral);
+    if (egoD < best) out += `; near ${describeBody('ego', egoAutopilot, ego, egoS, egoLateral, 1, car)}`;
+    else if (nearest) out += `; near ${describeBody(nearest.id, nearest.autopilot, nearest.vehicle, nearest.forwardS, nearest.roadLateral, nearest.direction, car)}`;
+  }
+  return out;
 }
 
 let ticks = 0;
@@ -1573,7 +1726,15 @@ for (const style of ['cautious', 'normal', 'hurried', 'frantic']) {
     `  control ${style.padEnd(8)} ${minutes.toFixed(1)} driven car-min ${((tally.metres / tally.seconds) * 3.6).toFixed(0)} km/h` +
       `${style === 'frantic' ? `, open road ${(tally.openSeconds / 60).toFixed(1)} min at ${((tally.openMetres / Math.max(tally.openSeconds, 1e-3)) * 3.6).toFixed(0)} km/h` : ''}` +
       ` | per car-min: airborne ${rate(tally.airborne)} departure ${rate(tally.departure)} [${tally.departureOnLine} on its line] verge ${rate(tally.verge)}` +
-      ` slide ${rate(tally.slide)} contact ${rate(tally.contact)} | woke ${tally.woke}, spawn events ${tally.spawn}`,
+      ` slide ${rate(tally.slide)} contact ${rate(tally.contact)} | woke ${tally.woke}` +
+      ` (${tally.wakeHard} hard, ${tally.wakeLight} light landings), spawn events ${tally.spawn}`,
+  );
+}
+if (wakeErrors.length > 0) {
+  const cm = (p: number) => (per(wakeErrors, p) * 100).toFixed(0);
+  console.log(
+    `  wakes:     ${wakeErrors.length} bodies handed back, height off rest p05 ${cm(0.05)} p50 ${cm(0.5)} p95 ${cm(0.95)} cm` +
+      ` (min ${cm(0)} max ${cm(1)})`,
   );
 }
 if (EVENTS_LOG) for (const line of controlEvents) console.log(`    ${line}`);
