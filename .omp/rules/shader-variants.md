@@ -13,7 +13,7 @@ A variant is the program cache key, not the material object. These all make a ne
 
 - Compile through `Renderer.compileForScenePass(object)`, never `renderer.compileAsync` with the default target. The scene pass draws into `hazeTarget`. A canvas-target compile builds a program the frame never uses.
 - Anything in the scene graph at boot is compiled by `waitForFrameShaders`. Three's `compile` uses `traverse`, not `traverseVisible`, so a `visible = false` mesh counts. Content that only exists later needs one of these:
-  - a hidden anchor mesh in a group that is in the scene at boot (`DebrisField`, `TrailerField`, `NoveltyField`);
+  - a hidden anchor mesh in a group that is in the scene at boot (`DebrisField`, `TrailerField`, `NoveltyField`; loose world items: `itemProgramAnchor` in render/partmesh.ts, which a new item material shape must join);
   - for car models, `loadCarModel`, which compiles the model's program anchor before it resolves (render/carmodel.ts).
 - An `InstancedMesh` that will ever call `setColorAt` must create `instanceColor` in its constructor (birds.ts, lakewater.ts, mirage*.ts). The first `setColorAt` otherwise changes the program mid-drive.
 - Never change a light's `visible` or `castShadow`, or the number of lights, at runtime. The renderer's light slots are fixed and lit by intensity only (render/vehiclelights.ts). One count change recompiles every lit material at once.

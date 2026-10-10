@@ -38,6 +38,7 @@ import { TouchControls } from './core/touch';
 import { loadCarModel } from './render/carmodel';
 import { CAR_LAMP_KNEE } from './render/materials';
 import { preloadTrailerModel } from './render/trailermodel';
+import { itemProgramAnchor } from './render/partmesh';
 import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
 import { Interaction } from './player/interaction';
 import { ContractRuntime } from './contracts/runtime';
@@ -455,10 +456,16 @@ async function boot(): Promise<void> {
   // the hidden anchor dancer it adds to the scene compiles their program under the
   // loading cover. See world/props/airdancer.ts.
   const dancers = new DancerField(renderer.scene);
-  // The 20 km marks and the sidetracks are built only where they stand; their hidden
-  // program anchors are in the scene from boot for the same reason as the dancer's.
-  // Telegraph poles are drawn per chunk as InstancedMeshes: their program is linked here too.
-  renderer.scene.add(monumentProgramAnchor(), sidetrackProgramAnchor(), poleProgramAnchor());
+  // The 20 km marks, the sidetracks and the loose items are built only where they stand;
+  // their hidden program anchors are in the scene from boot for the same reason as the
+  // dancer's. Telegraph poles are drawn per chunk as InstancedMeshes: their program is
+  // linked here too.
+  renderer.scene.add(
+    monumentProgramAnchor(),
+    sidetrackProgramAnchor(),
+    poleProgramAnchor(),
+    itemProgramAnchor(),
+  );
   /** Reused receiver for the nearest dancer's sound; see `DancerField.heard`. */
   const dancerSound: DancerHeard = { x: 0, y: 0, z: 0, flapMps: 0, airRate: 0 };
   /**

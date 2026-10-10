@@ -2133,6 +2133,35 @@ export function createMedicineRemnantMesh(kind: MedicineRemnantKind): THREE.Obje
   return root;
 }
 
+/**
+ * Hidden meshes in every material shape a world item is drawn with, for the scene at
+ * boot: `waitForFrameShaders` links their programs behind the loading cover, and the
+ * anchor keeps them linked. Items lie in the world only where a POI, a story site or a
+ * wreck put them, so the first one in view used to link its programs on the spot —
+ * measured at seed 1337 km 44, the medicine bottle on a home's step linked both faces
+ * of its amber glass (transparent and double-sided, drawn back face then front: two
+ * programs) mid-drive, and a spray tin the condition program on a boot that held no
+ * part. The shapes: flat and glass (the bottle itself, its meshes as a loose item has
+ * them, no shadows), condition (parts, cans, tins: one program for every condition
+ * material), and the football's mapped and bumped leather and its seam lines. Every
+ * other world item is built from these. The postcard and photographs are left out:
+ * only the player puts them on the ground, and the postcard's faces are two painted
+ * 2048-px canvases.
+ */
+export function itemProgramAnchor(): THREE.Object3D {
+  const group = new THREE.Group();
+  group.name = 'item-anchor';
+  group.visible = false;
+  const condition = new MeshBuilder();
+  condition.box('item_anchor_condition', 0.01, 0.01, 0.01, cond(0xffffff), ZERO);
+  group.add(
+    buildGroup(itemBlueprint('medicine_bottle', buildMedicineBottleInto).instructions),
+    buildGroup(condition.instructions),
+    createFootballMesh(),
+  );
+  return group;
+}
+
 /** A held/carried item mesh. Parts reuse createPartMesh; other items build from primitives. */
 export function createItemMesh(item: Item): THREE.Object3D {
   switch (item.type) {
