@@ -226,7 +226,7 @@ export interface ContractCargoItem {
    */
   raceLegs?: 1 | 2;
   /**
-   * Live contract state, saved on the item so it travels with every physical move.
+   * Contract state, saved on the item so it travels with every physical move.
    * The contract runtime (`contracts/runtime.ts`) is its only writer.
    */
   progress: ContractProgress;
@@ -365,13 +365,8 @@ export function itemLabel(item: Item): string {
       return 'postcard from home';
     case 'coin':
       return item.value === 1 ? 'coin' : `coin · ${item.value}`;
-    case 'contract_cargo': {
-      // The contract's own progress writes a short status ("82%", "3:12 left"),
-      // so the trunk, the hand and the prompt all read the live condition.
-      const note = item.progress?.statusText;
-      const title = `${contractTier(item)}: ${item.cargoName}`;
-      return note ? `${title} · ${note}` : title;
-    }
+    case 'contract_cargo':
+      return `${contractTier(item)}: ${item.cargoName}`;
     case 'sticker_envelope':
       // The name is on the envelope; the picture is seen when it is tried on.
       return `sticker envelope · ${stickerDef(item.stickerKind).label}`;

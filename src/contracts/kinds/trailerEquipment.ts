@@ -8,18 +8,15 @@
  * ordinary trailer — hitch it, tow it, drop it. The courier only signs when it is
  * standing within `DELIVERY_RANGE_M` of the target, and the delivery consumes it.
  *
- * The special reward has ONE condition: the trailer arrived undamaged — never hit
- * hard and never tipped. Its impacts are the same measure the car's own are
- * (`Trailer.lastImpact`), read through the carrying car's coupled trailer.
+ * How it got there is not judged: a hit or tipped trailer still counts, and every
+ * delivery pays its signature sticker.
  */
 
 import { contractTrailerId } from '../world';
-import { defaultProgress, type ContractKindDef } from '../types';
+import type { ContractKindDef } from '../types';
 
 /** The parked trailer counts as delivered inside this radius of the courier, m. */
 const DELIVERY_RANGE_M = 25;
-/** A genuine shunt on the drawbar or the bed, m/s of unexplained speed loss. */
-const IMPACT_LIMIT_MPS = 3.5;
 
 export const trailerEquipmentKind: ContractKindDef = {
   kind: 'trailer_equipment',
@@ -31,7 +28,6 @@ export const trailerEquipmentKind: ContractKindDef = {
     'trailer logbook',
   ],
   signatureSticker: 'su-oval',
-  initialProgress: defaultProgress,
   acceptRefusal: (item, probe) => {
     const at = probe.trailerPosition(contractTrailerId(item));
     if (!at) return 'its equipment trailer is not here';
@@ -42,21 +38,6 @@ export const trailerEquipmentKind: ContractKindDef = {
     }
     return null;
   },
-  step: (p, ctx) => {
-    const trailerId = contractTrailerId(ctx.item);
-    const car = ctx.car;
-    const hooked = car !== null && car.trailerId === trailerId;
-    p.statusText = hooked ? 'trailer hooked' : '';
-    if (p.violated || !hooked || car === null) return;
-    if (car.trailerUpsideDown) {
-      p.violated = true;
-      p.statusText = 'trailer tipped — bonus lost';
-    } else if (car.trailerImpactMps > IMPACT_LIMIT_MPS) {
-      p.violated = true;
-      p.statusText = 'trailer hit — bonus lost';
-    }
-  },
-  conditionMet: (p) => !p.violated,
   onDelivered: (item) => ({
     deltas: [{ t: 'trailer_remove', trailerId: contractTrailerId(item) }],
   }),

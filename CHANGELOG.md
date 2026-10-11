@@ -94,6 +94,32 @@
 
 ### Changed
 
+- CONTRACTS SCORE NOTHING ON THE WAY (`contracts/`). Carry it to a later courier and it
+  pays: every kind with a signature sticker always pays it, parcel its seed-random one.
+  Gone: the fragile radio's condition, the trailer and oversize hit/tip checks, the tow
+  bar latch and rollover check, the transfer/tow scratch limit, the "bonus lost"
+  toasts and the status after the cargo name. With them went the car telemetry the
+  composition root built for the kinds (`ContractCarTelemetry`, `ContractCarSnapshot`)
+  and `DeliveryContext`. `ContractProgress` is just `started` (the race reads it);
+  older saves load with the rest dropped. Delivery rules stay: distance to the
+  courier, parked, boot empty.
+- THE SPONGE POLISHES SCRATCHES OFF COMPLETELY (`player/interaction.ts`). It used to stop
+  at 8%, so "body clean and polished" was shown over visible scratches.
+
+- A TURN ACROSS THE ONCOMING LANES IS LET THROUGH, NOT WAITED OUT (`world/traffic.ts`).
+  Reported from play: the car letting a rival across to a courier crept to a stop 65 m
+  short of the turn, after the rival had stood three seconds before even asking. Now
+  the rival asks as soon as it is within 40 m of the turn (out: once its own lane is
+  clear), and each oncoming car is held only to the speed that gets it to 3 m short
+  of the turn no sooner than the rival is across (its remaining turn at 16 km/h, plus
+  1 s from a standstill and 1 s margin). A car already slower than that is not touched,
+  and one stops only if the rival stalls in the turn. The gap check counts a car so
+  held as clear, so the rival goes at once. The free-road gap is 4 s plus 10 m (was
+  6 s plus 40 m, so a car standing anywhere within 40 m blocked the turn).
+  `traffic-bench` far side: nearest oncoming car while a rival crosses 10.2 m
+  bumper to bumper (was 35.2), no impacts. Its crossing check now flags only a car
+  that could not stop short at 4 m/s², not any moving car within 60 m.
+
 - THE UAZ-31512, SECOND PASS FROM THE OWNER'S REVIEW (`tools/carforge`,
   `public/models/carforge/uaz31512.fbx`, `render/carmodel.ts`).
   - The spare on the tail is a wheel of the set the car is shod with: carforge exports it

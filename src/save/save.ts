@@ -901,22 +901,12 @@ function isRemovedLegacyItem(raw: unknown): boolean {
 }
 
 /**
- * Rebuilds a contract's saved progress from known keys only, clamping every
- * number. A missing record (an older save, or a hand-edited one) loads as a fresh,
- * unstarted contract rather than as a NaN that would poison the reward test.
+ * Rebuilds a contract's saved progress. Older saves also carry condition, heat,
+ * violated and status fields from when deliveries were scored; they are dropped.
  */
 function sanitizeContractProgress(raw: unknown): ContractProgress {
-  const obj =
-    typeof raw === 'object' && raw !== null && !Array.isArray(raw)
-      ? (raw as Record<string, unknown>)
-      : {};
-  return {
-    started: obj.started === true,
-    condition: clamp01(numOr(obj.condition, 1)),
-    heat: Math.max(0, numOr(obj.heat, 0)),
-    violated: obj.violated === true,
-    statusText: typeof obj.statusText === 'string' ? obj.statusText.slice(0, 40) : '',
-  };
+  const started = typeof raw === 'object' && raw !== null && (raw as Record<string, unknown>).started === true;
+  return { started };
 }
 
 function migrateItem(raw: unknown, where: string): Item {

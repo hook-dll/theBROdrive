@@ -43,7 +43,7 @@ import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
 import { Interaction } from './player/interaction';
 import { ContractRuntime } from './contracts/runtime';
 import { ensureContractWorldObjects, type ContractWorldDeps } from './contracts/world';
-import type { ContractCarSnapshot, ContractCarTelemetry, ContractPlace } from './contracts/types';
+import type { ContractPlace } from './contracts/types';
 import { CarTowField } from './vehicle/cartow';
 import { Player } from './player/player';
 import { PlayerVitals } from './player/vitals';
@@ -1480,58 +1480,9 @@ async function boot(): Promise<void> {
   };
   const playerImpacts = createPlayerImpacts({ physics, player, vitals, vehicles, traffic });
 
-  // Contract runtime. It reads the physics-only numbers (impacts, rollover) from the
-  // live Vehicle through this provider; one scratch object is reused per call.
+  // Contract walk: keeps each contract's world objects, the race and the delivery
+  // target in step with where its cargo is. Nothing on the way is scored.
   const contracts = new ContractRuntime(world);
-  type MutableCarTelemetry = { -readonly [K in keyof ContractCarTelemetry]: ContractCarTelemetry[K] };
-  const contractCarTelemetry: MutableCarTelemetry = {
-    impactMps: 0,
-    landingMps: 0,
-    upsideDown: false,
-    trailerId: null,
-    trailerImpactMps: 0,
-    trailerUpsideDown: false,
-  };
-  const carTelemetryForContract = (carId: string): ContractCarTelemetry | null => {
-    const car = world.state.cars[carId];
-    if (!car) return null;
-    const vehicle = vehicles.get(carId) ?? null;
-    const impact = vehicle?.lastImpact ?? null;
-    const q = vehicle?.chassis.rotation();
-    // The trailer coupled to THIS car: a coupled trailer is always materialised, so
-    // a live one is the only one that can be towing, and it is where the towed
-    // load's own impacts live.
-    const trailer = trailerField.hitchedTo(carId);
-    const trailerRotation = trailer?.rigidBody.rotation();
-    contractCarTelemetry.impactMps = impact?.severityMps ?? 0;
-    contractCarTelemetry.landingMps = vehicle?.audio.landingImpactMps ?? 0;
-    // Y component of the chassis up-axis (0,1,0) for quaternion q.
-    contractCarTelemetry.upsideDown = q !== undefined && 1 - 2 * (q.x * q.x + q.z * q.z) < 0.15;
-    contractCarTelemetry.trailerId = trailer?.id ?? null;
-    contractCarTelemetry.trailerImpactMps = trailer?.lastImpact?.severityMps ?? 0;
-    contractCarTelemetry.trailerUpsideDown = trailerRotation !== undefined
-      && 1 - 2 * (trailerRotation.x * trailerRotation.x + trailerRotation.z * trailerRotation.z) < 0.15;
-    return contractCarTelemetry;
-  };
-
-  /**
-   * A kind's look at a SECOND car it owns by id (a towed car), as opposed to the
-   * telemetry above, which is only ever the carrying car. Reused object: a kind reads
-   * it inside its own `step` and must not retain it.
-   */
-  const contractCarSnapshot = {
-    upsideDown: false,
-    towedBy: null as string | null,
-  };
-  const carForContract = (carId: string): ContractCarSnapshot | null => {
-    const car = world.state.cars[carId];
-    if (!car) return null;
-    const vehicle = vehicles.get(carId) ?? null;
-    const q = vehicle?.chassis.rotation();
-    contractCarSnapshot.upsideDown = q !== undefined && 1 - 2 * (q.x * q.x + q.z * q.z) < 0.15;
-    contractCarSnapshot.towedBy = car.towedBy ?? null;
-    return contractCarSnapshot;
-  };
 
   /**
    * The world objects the live contracts are about — a loaded trailer spawned at its
@@ -1760,18 +1711,11 @@ async function boot(): Promise<void> {
     if (injury > 0 && vitals.dead) beginDeathSequence();
     loose.fixedUpdate(dt);
 
-    // Contracts advance after every controller and the physics step, so the impacts
-    // and landings the kinds read are this tick's. `s` is the live state; its clock
-    // was advanced at the top of this step.
+    // Contracts walk after every controller and the physics step. `s` is the live
+    // state; its clock was advanced at the top of this step.
     frameProfiler?.begin('contracts');
     deliveryMinIndexNext = Infinity;
-    contracts.tick({
-      dt,
-      carTelemetry: carTelemetryForContract,
-      carById: carForContract,
-      onContractItem,
-      onNotice: (text) => hud.setToast(text),
-    });
+    contracts.tick(onContractItem);
     deliveryMinIndex = deliveryMinIndexNext;
     frameProfiler?.end('contracts');
 

@@ -3,7 +3,7 @@ import type { PhysicsWorld } from '../core/physics';
 
 import type { CarState, GameWorld, StickerState } from '../game/state';
 import { contractAcceptRefusal, contractDeliveryEffect, contractRewardSticker } from '../contracts/registry';
-import type { DeliveryContext, DeliveryProbe } from '../contracts/types';
+import type { DeliveryProbe } from '../contracts/types';
 import { TOW_COUPLE_RANGE_M, towEyeWorld, type CarTowField } from '../vehicle/cartow';
 import type { InputFrame } from '../core/input';
 import type {
@@ -99,11 +99,10 @@ const CONDITION_EMIT_INTERVAL = 0.25;
 const BODY_SPONGE_DIRT_RATE = 0.7;
 /**
  * Polishing removes 12 percentage points of visible scuffing per second, slow enough
- * that a battered 55% shell takes nearly four seconds to improve. It stops at 8%:
- * wax hides surface marks but cannot repaint worn paint.
+ * that a battered 55% shell takes nearly four seconds to improve. It goes all the
+ * way to zero.
  */
 const BODY_SPONGE_SCRATCH_RATE = 0.12;
-const BODY_SCRATCH_FLOOR = 0.08;
 /** Fuel poured per second from a held can. */
 const FUEL_POUR_RATE = 1.2;
 /**
@@ -1440,7 +1439,7 @@ export class Interaction {
     const scratchFraction = Math.min(1, Math.max(0, car.scratches));
     const dirt = Math.round(dirtFraction * 100);
     const scratches = Math.round(scratchFraction * 100);
-    if (dirtFraction <= 0 && scratchFraction <= BODY_SCRATCH_FLOOR) {
+    if (dirtFraction <= 0 && scratchFraction <= 0) {
       return 'body clean and polished';
     }
     return `[LMB] sponge — body ${dirt}% dirt, ${scratches}% scratched`;
@@ -1543,7 +1542,7 @@ export class Interaction {
     const dirt = Math.min(1, Math.max(0, car.dirt));
     const scratches = Math.min(1, Math.max(0, car.scratches));
     const dirtStep = Math.min(dirt, BODY_SPONGE_DIRT_RATE * dt);
-    const scratchStep = Math.max(0, Math.min(scratches - BODY_SCRATCH_FLOOR, BODY_SPONGE_SCRATCH_RATE * dt));
+    const scratchStep = Math.min(scratches, BODY_SPONGE_SCRATCH_RATE * dt);
     const total = dirtStep + scratchStep;
     if (total <= 0) return;
     const k = Math.min(1, (sponge.capacity * sponge.integrity) / total);
@@ -1708,20 +1707,18 @@ export class Interaction {
           this.sound = 'refused';
           return;
         }
-        // The kind decides the payout here: its signature sticker when its own
-        // condition held, the offer's seed-random sticker otherwise. A delivery
-        // never fails.
-        const delivery: DeliveryContext = { item: held, probe };
+        // The kind's signature sticker, or the offer's seed-random one for a kind
+        // without a signature. Nothing on the way is scored; a delivery never fails.
         const envelope: StickerEnvelopeItem = {
           type: 'sticker_envelope',
           id: `${held.id}:signed:${courier.index}`,
-          stickerKind: contractRewardSticker(held, delivery),
+          stickerKind: contractRewardSticker(held),
           completedContractId: held.id,
         };
         // What the kind consumes besides the cargo: the trailer or car the contract
         // named. The world deltas follow the `courier_storage` delta that writes the
         // completed id, so a crash between the halves cannot pay twice.
-        const effect = contractDeliveryEffect(held, probe, delivery);
+        const effect = contractDeliveryEffect(held, probe);
         const nextCells = cells.slice();
         nextCells[t.cell] = envelope;
         // A race won pays its coins beside the envelope, or into the pack when the

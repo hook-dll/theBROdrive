@@ -14,14 +14,7 @@ import { oversizeKind } from './kinds/oversize';
 import { parcelKind } from './kinds/parcel';
 import { towingKind } from './kinds/towing';
 import { trailerEquipmentKind } from './kinds/trailerEquipment';
-import {
-  CONTRACT_KIND_IDS,
-  type ContractKind,
-  type ContractKindDef,
-  type DeliveryContext,
-  type DeliveryEffect,
-  type DeliveryProbe,
-} from './types';
+import { CONTRACT_KIND_IDS, type ContractKind, type ContractKindDef, type DeliveryEffect, type DeliveryProbe } from './types';
 
 /** Order matters: offers walk this list against their weights. */
 export const CONTRACT_KINDS: readonly ContractKindDef[] = [
@@ -76,19 +69,11 @@ export function contractAcceptRefusal(
 }
 
 /**
- * The sticker a delivery pays. A kind with a signature pays it when its own
- * condition held, and the offer's seed-random reward otherwise: a delivery never
- * fails, it just pays the ordinary sticker.
+ * The sticker a delivery pays: the kind's signature sticker, or the offer's
+ * seed-random reward for a kind without one. Nothing on the way is scored.
  */
-export function contractRewardSticker(
-  item: ContractCargoItem,
-  delivery: DeliveryContext,
-): StickerKind {
-  const def = contractKindDef(item.contractKind);
-  if (def.signatureSticker && def.conditionMet(item.progress, delivery)) {
-    return def.signatureSticker;
-  }
-  return item.rewardStickerKind;
+export function contractRewardSticker(item: ContractCargoItem): StickerKind {
+  return contractKindDef(item.contractKind).signatureSticker ?? item.rewardStickerKind;
 }
 
 /**
@@ -97,10 +82,6 @@ export function contractRewardSticker(
  * `courier_storage` delta that writes the envelope and the completed id, so a crash
  * between the two halves leaves the cargo delivered and cannot pay twice.
  */
-export function contractDeliveryEffect(
-  item: ContractCargoItem,
-  probe: DeliveryProbe,
-  delivery: DeliveryContext,
-): DeliveryEffect | null {
-  return contractKindDef(item.contractKind).onDelivered?.(item, probe, delivery) ?? null;
+export function contractDeliveryEffect(item: ContractCargoItem, probe: DeliveryProbe): DeliveryEffect | null {
+  return contractKindDef(item.contractKind).onDelivered?.(item, probe) ?? null;
 }

@@ -6,22 +6,15 @@
  * The load is physical, not a label: the trailer carries an extra collider the size
  * of the overhang (`TrailerState.load`, vehicle/trailer.ts), so traffic, rocks and
  * gateposts hit the load itself, and its mass rides the ordinary bed payload path.
- * The special reward needs the load to arrive untouched — the same unexplained
- * speed-loss measure kind 6 uses, plus the tip check that matters most on a long,
- * high load.
+ * How it got there is not judged: a struck or tipped load still counts, and every
+ * delivery pays its signature sticker.
  */
 
 import { contractTrailerId } from '../world';
-import { defaultProgress, type ContractKindDef } from '../types';
+import type { ContractKindDef } from '../types';
 
 /** The parked trailer counts as delivered inside this radius of the courier, m. */
 const DELIVERY_RANGE_M = 25;
-/**
- * Lower than the equipment trailer's bar, because this is the dimension the kind
- * exists for: the overhang clips things the bed would clear, so the player is
- * asked to keep it clean and a 3 m/s scrape is already a real one.
- */
-const IMPACT_LIMIT_MPS = 3;
 
 export const oversizeKind: ContractKindDef = {
   kind: 'oversize',
@@ -33,7 +26,6 @@ export const oversizeKind: ContractKindDef = {
     'long pipes job sheet',
   ],
   signatureSticker: 'not-sure',
-  initialProgress: defaultProgress,
   acceptRefusal: (item, probe) => {
     const at = probe.trailerPosition(contractTrailerId(item));
     if (!at) return 'its oversize trailer is not here';
@@ -44,21 +36,6 @@ export const oversizeKind: ContractKindDef = {
     }
     return null;
   },
-  step: (p, ctx) => {
-    const trailerId = contractTrailerId(ctx.item);
-    const car = ctx.car;
-    const hooked = car !== null && car.trailerId === trailerId;
-    p.statusText = hooked ? 'load on the bed' : '';
-    if (p.violated || !hooked || car === null) return;
-    if (car.trailerUpsideDown) {
-      p.violated = true;
-      p.statusText = 'load tipped — bonus lost';
-    } else if (car.trailerImpactMps > IMPACT_LIMIT_MPS) {
-      p.violated = true;
-      p.statusText = 'load struck — bonus lost';
-    }
-  },
-  conditionMet: (p) => !p.violated,
   onDelivered: (item) => ({
     deltas: [{ t: 'trailer_remove', trailerId: contractTrailerId(item) }],
   }),

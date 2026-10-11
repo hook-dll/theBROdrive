@@ -110,9 +110,9 @@ export interface CarState {
    *
    * `dirt` is raised by driving — how fast depends on what the tyres are throwing
    * up (see `SURFACES[].dust`) — and taken off with the brush and sponge that
-   * already clean parts. `scratches` are raised by impacts and never fully undone:
-   * polishing takes them back to a floor, not to zero. A respray (`paint`) changes
-   * the colour under them, not their amount.
+   * already clean parts. `scratches` are raised by impacts and polished off with
+   * the sponge, all the way to zero. A respray (`paint`) changes the colour under
+   * them, not their amount.
    */
   dirt: number;
   scratches: number;

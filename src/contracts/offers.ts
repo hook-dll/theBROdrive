@@ -5,8 +5,8 @@
  * trailer or a car. The kind is drawn by weight among the kinds the tier can carry.
  *
  * The offer is a plain `contract_cargo` item with its kind, name, seed-random
- * fallback reward and initial progress already on it; the courier code only decides
- * the slot id.
+ * reward (paid by kinds without a signature sticker) and fresh progress already on
+ * it; the courier code only decides the slot id.
  *
  * `courierDefaultStorage` — the four offers plus what else a courier keeps in the
  * boot — lives here rather than in `world/couriers.ts` on purpose: it is contract
@@ -22,7 +22,7 @@ import { stickerKindForSeed } from '../items/stickercatalog';
 import { courierId } from '../world/couriers';
 import { TRUNK_CELL_COUNT, TRUNK_COLUMNS } from '../vehicle/trunk';
 import { CONTRACT_KINDS } from './registry';
-import type { ContractKindDef } from './types';
+import { defaultProgress, type ContractKindDef } from './types';
 
 /** Offer draws stay on the courier domain the base system already used. */
 const OFFER_DOMAIN = 0x4f464631; // 'OFF1'
@@ -79,7 +79,7 @@ export function generateContractOffer(
     cargoName: def.offerNames[nameIndex]!,
     rewardStickerKind: stickerKindForSeed(generatedSeed),
     generatedSeed,
-    progress: def.initialProgress(generatedSeed),
+    progress: defaultProgress(),
   };
   if (massKg !== undefined) item.massKg = massKg;
   const raceLegs = SLOT_RACE_LEGS[slot];
