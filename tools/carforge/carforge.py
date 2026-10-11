@@ -43,9 +43,11 @@ ATLAS_ROWS = 2
 # glassUvCell (src/vehicle/carmodels.ts).
 CELLS = {
     "paint": (0, 0), "steel": (0, 1), "trim": (1, 1), "black": (2, 1), "glass": (3, 1),
-    "chrome": (4, 1), "lamp_head": (8, 1), "lamp_tail": (5, 1), "blinker": (7, 1), "reverse": (8, 1),
+    "chrome": (4, 1), "lamp_head": (4, 1), "lamp_tail": (5, 1), "blinker": (7, 1), "reverse": (8, 1),
     "white": (8, 1),
 }
+# A headlamp lens is the pack's: the chrome cell (vz07, gz24, vz21), grey until the game lights
+# it. The white cell read as a lamp already burning.
 LAMP_CELL = {
     "headlights": "lamp_head", "taillights": "lamp_tail", "reverselights": "reverse",
     "leftblinkers": "blinker", "rightblinkers": "blinker",
@@ -78,6 +80,7 @@ ARCH_FLARE = 25.0        # mm the arch lip stands proud of the side at the openi
 ARCH_SNAP = 5.0          # mm: vertices the arch and window cuts leave this close are welded
 ARCH_LIP_TAPER = 80.0    # mm over which an arch lip's flare runs out at its ends
 ARCH_FAIR_TOL = 6.0      # mm: tolerance of `simplify` on a traced outline (keeps rounded corners)
+ARCH_LIP_OFFSET = 2.0    # mm the arch lip's turn into the well stands in front of the well wall
 BEZEL_DEPTH = 25.0       # mm a lamp bezel pocket goes into its face (spec lamps[].bezel_depth)
 GLASS_INSET = 12.0       # mm side glass sits inside the greenhouse side
 WINDOW_FRAME = 20.0      # mm paint a default (y-only) window leaves over the belt and under the glass top
@@ -232,6 +235,21 @@ def tri_count(obj):
 
 
 # ---------------------------------------------------------------- body grammar
+
+def apply_chords(spec):
+    """`chords: {top|bottom|shoulder: [[y0, y1], …]}`: the side view's line runs straight from
+    y0 to y1, its traced points in between dropped (the line's own values at y0 and y1 are
+    kept). For what a drawing shows and the car does not: the UAZ sheet draws a 24 mm step
+    across the bonnet 260 mm behind its nose that the factory bonnet does not have."""
+    for key, spans in spec.get("chords", {}).items():
+        pts = sorted((float(y), float(z)) for y, z in spec["side"][key])
+        line = Curve(pts)
+        for y0, y1 in spans:
+            ends = [(float(y0), line(float(y0))), (float(y1), line(float(y1)))]
+            pts = sorted([p for p in pts if not y0 <= p[0] <= y1] + ends)
+        spec["side"][key] = [list(p) for p in pts]
+    return spec
+
 
 class Shape:
     """The spec's three views as functions of y (and z for the tumblehome)."""
@@ -596,7 +614,10 @@ def add_arch_lips(spec, s, body, bvh):
             qy, qz = y + ny * lip, z + nz * lip
             xe, xq = side_x(bvh, y, z), side_x(bvh, qy, qz)
             f = flare * min(1.0, min(arc[i], arc[-1] - arc[i]) / ARCH_LIP_TAPER)
-            rows.append(None if xe is None or xq is None else ((y, z, xe), (qy, qz, xq), f))
+            # the turn into the well stands ARCH_LIP_OFFSET in front of the well wall, which the
+            # cut lays along the same outline: coplanar, the two fought in depth
+            ey, ez = y - ny * ARCH_LIP_OFFSET, z - nz * ARCH_LIP_OFFSET
+            rows.append(None if xe is None or xq is None else ((ey, ez, xe), (qy, qz, xq), f))
         for sign in (1.0, -1.0):
             def v(y, z, x):
                 return bm.verts.new(Vector((sign * x, y, z)) * MM)
@@ -880,19 +901,24 @@ def item_outline(item):
     return rounded(rect, float(item.get("radius", 0.0)))
 
 
-def add_plate(bm, uvl, bvh, item, cell, pts=None, sign=1.0):
+def add_plate(bm, uvl, bvh, item, cell, pts=None, sign=1.0, flat=False):
     """A flat block on a face: its outer face `proud` (PROUD) off the body at every corner
-    (along the face axis), its back 5 mm inside, so it is attached wherever the face curves."""
+    (along the face axis), its back 5 mm inside, so it is attached wherever the face curves.
+    `flat` (lamps): the outer face is one plane, `proud` off the outermost corner, so a lens
+    laid over a crease stands clear of it instead of folding over it and letting the crease's
+    edge show through between its corners."""
     face = item["face"]
     out = flip(FACE_AXIS[face], sign)
-    outer, inner = [], []
+    hits = []
     for u, v in (pts or item_outline(item)):
         p = face_hit(bvh, face, u, v)
         if p is None:
             fail(f"{item.get('role', 'plate')} at {face} ({u:.0f}, {v:.0f}) has no face behind it")
-        p = flip(p, sign)
-        outer.append((p + out * float(item.get("proud", PROUD))) * MM)
-        inner.append((p - out * 5.0) * MM)
+        hits.append(flip(p, sign))
+    top = max(p.dot(out) for p in hits)
+    proud = float(item.get("proud", PROUD))
+    outer = [(p + out * ((top - p.dot(out) if flat else 0.0) + proud)) * MM for p in hits]
+    inner = [(p - out * 5.0) * MM for p in hits]
     n = len(outer)
     c = [bm.verts.new(p) for p in outer] + [bm.verts.new(p) for p in inner]
     centre = sum((v.co for v in c), Vector()) / (2 * n)
@@ -1210,10 +1236,12 @@ def add_bars(bm, uvl, bvh, r):
             add_plate(bm, uvl, bvh, bar, b.get("cell", "trim"))
 
 
-def add_dome(bm, uvl, bvh, item, cell, pts, sign):
+def add_dome(bm, uvl, rim_bm, rim_uvl, bvh, item, cell, pts, sign):
     """A round lamp as the pack builds its headlamps: a rim `rim` (8) mm proud in `rim_cell`
     (chrome) around a lens bulging `dome` mm further in the lamp's cell, on the face it is
-    probed onto. Rings: base (inside the face), rim, rim inner edge, lens shoulder, lens centre."""
+    probed onto. Rings: base (inside the face), rim, rim inner edge, lens shoulder, lens centre.
+    The rim goes into `rim_bm` (the body): the game lights a lamp's whole mesh, and a rim in
+    the lamp's mesh glowed with the lens."""
     face = item["face"]
     out = flip(FACE_AXIS[face], sign)
     rim, dome = float(item.get("rim", 8.0)), float(item["dome"])
@@ -1228,25 +1256,33 @@ def add_dome(bm, uvl, bvh, item, cell, pts, sign):
              [p + out * rim for p in base],
              [c + (p - c) * 0.82 + out * rim for p in base],
              [c + (p - c) * 0.5 + out * (rim + dome * 0.8) for p in base]]
-    vs = [[bm.verts.new(p * MM) for p in ring] for ring in rings]
-    tip = bm.verts.new((c + out * (rim + dome)) * MM)
-    cells = [CELLS[item.get("rim_cell", "chrome")]] * 2 + [CELLS[cell]]
     n = len(base)
     centre = (c + out * rim) * MM
-    for ring_a, ring_b, fc in zip(vs, vs[1:], cells):
+    rim_cell = CELLS[item.get("rim_cell", "chrome")]
+    rim_vs = [[rim_bm.verts.new(p * MM) for p in ring] for ring in rings[:3]]
+    for ring_a, ring_b in zip(rim_vs, rim_vs[1:]):
         for i in range(n):
             j = (i + 1) % n
             q = [ring_a[i], ring_a[j], ring_b[j], ring_b[i]]
             mid = sum((v.co for v in q), Vector()) / 4
-            add_face(bm, uvl, q, fc, mid - centre + out * 1e-3)
+            add_face(rim_bm, rim_uvl, q, rim_cell, mid - centre + out * 1e-3)
+    vs = [[bm.verts.new(p * MM) for p in ring] for ring in rings[2:]]
+    tip = bm.verts.new((c + out * (rim + dome)) * MM)
+    for i in range(n):
+        j = (i + 1) % n
+        q = [vs[0][i], vs[0][j], vs[1][j], vs[1][i]]
+        mid = sum((v.co for v in q), Vector()) / 4
+        add_face(bm, uvl, q, CELLS[cell], mid - centre + out * 1e-3)
     for i in range(n):
         j = (i + 1) % n
         add_face(bm, uvl, [vs[-1][i], vs[-1][j], tip], CELLS[cell], out)
     add_face(bm, uvl, vs[0][::-1], CELLS[cell], -out)
 
 
-def add_spare(spec, body, tmpl, pts, pack_w, pack_r):
-    """A spare wheel on the tail, axis along the car, joined into the body mesh."""
+def build_spare(spec, cid, objs, tmpl, pts, pack_w, pack_r):
+    """A spare wheel on the tail, axis along the car: its own object `<id>.spare`, origin at
+    the hub. The game puts the wheel set the car is shod with in its place (`spareNode` in
+    src/vehicle/carmodels.ts); this pack wheel is what any other viewer shows."""
     sp = spec.get("spare")
     if not sp:
         return
@@ -1254,29 +1290,21 @@ def add_spare(spec, body, tmpl, pts, pack_w, pack_r):
     sx = w["width"] * MM / pack_w
     sr = w["radius"] * MM / pack_r
     rot = Matrix.Rotation(math.pi / 2, 3, "Z")
-    hub = Vector((0.0, sp["y"], sp["z"])) * MM
-    bm = bmesh.new()
-    bm.from_mesh(body.data)
-    uvl = bm.loops.layers.uv["UVMap"]
-    tm = bmesh.new()
-    tm.from_mesh(tmpl)
-    tuvl = tm.loops.layers.uv.active
-    vmap = {}
-    for v, p in zip(tm.verts, pts):
-        q = rot @ Vector((p.x * sx, p.y * sr, p.z * sr))
-        vmap[v.index] = bm.verts.new(hub + q)
-    for f in tm.faces:
-        nf = bm.faces.new([vmap[v.index] for v in f.verts])
-        for l_new, l_old in zip(nf.loops, f.loops):
-            l_new[uvl].uv = l_old[tuvl].uv
-    tm.free()
-    bm.to_mesh(body.data)
-    bm.free()
-    body.data.update()
+    me = tmpl.copy()
+    for v, p in zip(me.vertices, pts):
+        v.co = rot @ Vector((p.x * sx, p.y * sr, p.z * sr))
+    me.update()
+    obj = bpy.data.objects.new(f"{cid}.spare", me)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.location = Vector((0.0, sp["y"], sp["z"])) * MM
+    objs.append(obj)
 
 
 def build_lamps(spec, cid, body, objs):
     bvh = body_bvh(body)
+    body_bm = bmesh.new()
+    body_bm.from_mesh(body.data)
+    body_uvl = body_bm.loops.layers.uv["UVMap"]
     per_role = {}
     for lamp in spec.get("lamps", []):
         for pts, sign in halves(lamp, item_outline(lamp)):
@@ -1288,9 +1316,12 @@ def build_lamps(spec, cid, body, objs):
                 per_role[role] = new_bm()
             bm, uvl = per_role[role]
             if lamp.get("dome"):
-                add_dome(bm, uvl, bvh, lamp, lamp.get("cell", LAMP_CELL[role]), pts, sign)
+                add_dome(bm, uvl, body_bm, body_uvl, bvh, lamp, lamp.get("cell", LAMP_CELL[role]), pts, sign)
             else:
-                add_plate(bm, uvl, bvh, lamp, lamp.get("cell", LAMP_CELL[role]), pts, sign)
+                add_plate(bm, uvl, bvh, lamp, lamp.get("cell", LAMP_CELL[role]), pts, sign, flat=True)
+    body_bm.to_mesh(body.data)
+    body_bm.free()
+    body.data.update()
     for role, (bm, _) in per_role.items():
         for v in bm.verts:
             hit = bvh.find_nearest(v.co)
@@ -1468,9 +1499,9 @@ def build_car(spec, wheel_fbx):
     cid = spec["id"]
     tmpl, pts, pack_w, pack_r = load_pack_wheel(wheel_fbx)
     body = build_body(spec, cid)
-    add_spare(spec, body, tmpl, pts, pack_w, pack_r)
     objs = [body]
     build_lamps(spec, cid, body, objs)
+    build_spare(spec, cid, objs, tmpl, pts, pack_w, pack_r)
     build_wheels(spec, cid, objs, tmpl, pts, pack_w, pack_r)
     bpy.data.meshes.remove(tmpl)
     return objs
@@ -1504,7 +1535,7 @@ def main():
     ap.add_argument("--summary")
     args = ap.parse_args(argv)
     with open(args.spec) as fh:
-        spec = validate(json.load(fh))
+        spec = apply_chords(validate(json.load(fh)))
     clear_scene()
     objs = build_car(spec, args.wheel_fbx)
     export(objs, args.out)

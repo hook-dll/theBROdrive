@@ -94,6 +94,28 @@
 
 ### Changed
 
+- THE UAZ-31512, SECOND PASS FROM THE OWNER'S REVIEW (`tools/carforge`,
+  `public/models/carforge/uaz31512.fbx`, `render/carmodel.ts`).
+  - The spare on the tail is a wheel of the set the car is shod with: carforge exports it
+    as its own node (`<id>.spare`), and the loader measures it with the body (it is in the
+    factory length), takes it out and mounts the left rear wheel `cloneWheels` made for
+    this car there, rim out of the tail (`CarModelDef.spareNode`, `addSpareWheel`).
+  - The front bumper stands on two brackets off the frame rails; the rails run into the
+    rear bumper (they stopped 9 mm short of it).
+  - The step the drawing puts across the bonnet 260 mm behind its nose is gone: a new
+    spec key, `chords`, runs the side line straight over a span.
+  - Lamps have flat lenses, proud of the highest point under them: the crease under the
+    wing blinker showed through its folded lens. The tail, rear blinker and reverse lamps
+    stand 22 mm proud; the reverse lamp moved up off the bumper end, where its corners
+    hit the bumper's top and laid it down like a card.
+  - Headlamps: the lens is the pack's grey (the white cell looked lit when off), and the
+    chrome rim is part of the body, so lighting the lamp lights the lens alone.
+  - Door gaps along the tops of both doors, along their bottoms, and up the A pillar on
+    the front door.
+  - No number plate on the tail.
+  - The arch lip's turn into the well lay in the plane of the well wall the cut leaves
+    (z-fighting inside every arch); it stands 2 mm in front of it (`ARCH_LIP_OFFSET`).
+
 - BOTH UAZS RUN ON THE NIVAS' WHEELS (`OFFROAD_WHEEL_SET_POOL` in `vehicle/carmodels.ts`).
   The UAZ-330364's own wheel from the SAAS pack is 18-20 segments to the circle against
   the Soviet pack's 30-32 and showed its edges; the UAZ-31512 had its own set too. Each

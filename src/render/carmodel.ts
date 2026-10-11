@@ -176,6 +176,14 @@ interface Template {
   readonly wheels: ReadonlyMap<string, THREE.Object3D>;
   /** Where the road reaches this body, for the paint's dirt placement. */
   readonly frame: CarBodyFrame;
+  /** The spare wheel's mount (`CarModelDef.spareNode`), chassis-local, or null. */
+  readonly spare: SpareMount | null;
+}
+
+interface SpareMount {
+  readonly centre: THREE.Vector3;
+  /** Turn about Y that faces a left wheel's rim (+X) out of the tail. */
+  readonly yaw: number;
 }
 
 const templates = new Map<string, Template>();
@@ -1574,6 +1582,17 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   }
   applyLoadedRideDrop(scene, wheels, def.loadedRideDrop ?? 0);
 
+  // The spare is measured as part of the body (it is in the factory length) and then
+  // taken out: every car carries a wheel of its own set there instead (`addSpareWheel`).
+  let spare: SpareMount | null = null;
+  if (def.spareNode) {
+    const node = scene.getObjectByName(def.spareNode);
+    if (!node) throw new Error(`Car model "${def.id}" has no spare node "${def.spareNode}"`);
+    scene.updateMatrixWorld(true);
+    spare = { centre: boundsOf(node).getCenter(new THREE.Vector3()), yaw: frontDirection * Math.PI * 0.5 };
+    node.removeFromParent();
+  }
+
   // The one window a pack drew as trim rather than glass becomes glass here, while the
   // car is fitted but before the wear's chassis stamp reads the geometry.
   const rearAxleZ = (wheels[2]!.pos[2] + wheels[3]!.pos[2]) * 0.5;
@@ -1649,7 +1668,7 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     wheelCentreY: wheels.reduce((sum, wheel) => sum + wheel.pos[1], 0) / wheels.length,
     wheelRadius: wheels.reduce((sum, wheel) => sum + wheel.radius, 0) / wheels.length,
   };
-  return { def, measure, body: scene, wheels: parts.objects, frame };
+  return { def, measure, body: scene, wheels: parts.objects, frame, spare };
 }
 
 /** One shared palette per pack, loaded once and pointed at by every body in it. */
@@ -1911,7 +1930,31 @@ function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInsta
     paint.length > 0 ? carPaintGrimeFrame(paint[0]!) : null,
   );
   const surface = new CarBodySurface(paint, glass, decals);
+  addSpareWheel(body, t, wheels);
   return { body, wheels, surface };
+}
+
+const _spareMatrix = new THREE.Matrix4();
+const _bodyInverse = new THREE.Matrix4();
+
+/**
+ * The spare on the tail (`CarModelDef.spareNode`): a left rear wheel of the set this car
+ * is shod with, as `cloneWheels` sized it, its rim turned out of the tail, in the body so
+ * it rides with it. The body is scaled unevenly; the mount carries the inverse of that, and
+ * the quarter turn about Y swaps axes without shearing, so the wheel keeps its shape.
+ */
+function addSpareWheel(body: THREE.Object3D, t: Template, wheels: ReadonlyMap<string, THREE.Object3D>): void {
+  if (!t.spare) return;
+  const wheel = wheels.get('wheel_rl')!.clone(true);
+  wheel.position.set(0, 0, 0);
+  const mount = new THREE.Group();
+  mount.name = 'spare';
+  body.updateMatrix();
+  _spareMatrix.makeRotationY(t.spare.yaw).setPosition(t.spare.centre);
+  _spareMatrix.premultiply(_bodyInverse.copy(body.matrix).invert());
+  _spareMatrix.decompose(mount.position, mount.quaternion, mount.scale);
+  mount.add(wheel);
+  body.add(mount);
 }
 
 /**
@@ -1954,8 +1997,9 @@ function cloneStaticModel(t: Template, appearanceKey = t.def.id): StaticCarInsta
   const paint = cloneCarBodyPaintMaterials(body, t, appearanceKey);
   const glass = cloneCarGlass(body, paint);
   applyRandomPaint(body, t.def, appearanceKey);
-  group.add(body);
   const wheels = cloneWheels(t, appearanceKey);
+  addSpareWheel(body, t, wheels);
+  group.add(body);
   for (const wheel of t.measure.wheels) {
     const mesh = wheels.get(wheel.id)!;
     mesh.position.set(wheel.pos[0], wheel.pos[1], wheel.pos[2]);

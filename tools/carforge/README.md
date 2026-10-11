@@ -50,12 +50,13 @@ Run Blender jobs one at a time, under `nice -n 15`:
 | `arches` | {front\|rear: {outline, lip?, flare?}} | mm | Arch opening edge in side view (default: semicircle of `arch_front`/`arch_rear`), with a lip `lip` mm wide standing `flare` mm proud. |
 | `nose` / `tail` | {bulge, inset} | mm | Bulged end: the last station stands `bulge` inside the end, a band rolls in by `inset` to the end face. |
 | `fair_tol` | number | mm, default 12 | Trace noise below this is dropped from the side/plan curves (Douglas-Peucker). |
+| `chords` | {top\|bottom\|shoulder: [[y0, y1], …]} | mm | The side line runs straight from y0 to y1, the traced points between dropped: for what the drawing shows and the car does not (the UAZ sheet's step across the bonnet). |
 | `bumpers` | [{y, z, half_width, cell, chamfer, channel?, lip?}] | y, z: [lo,hi] mm; half_width mm; cell: atlas material name; chamfer mm | Bumper boxes at the nose/tail. `channel`: the outer face is a channel that deep between `lip`-tall lips. |
 | `mirrors` | [{x, y, z, cell, chamfer?}] | mm boxes, mirrored to the right | Wing mirror heads and arms. |
 | `chassis` | [{x, y, z, cell?, chamfer?, single?}] | mm boxes, mirrored to the right unless `single` | Running gear seen under the body: frame rails, axle beams, differential housings. The lowest one sets the body's ground clearance in the game (the loader fits the body box between `clearance` and `height`), so a body without an underbody of its own needs them. |
 | `plates` | [{face, x\|y, z, cell, round, radius, proud?, single}] | face coords | Blocks standing on a face: number plate, door handles, hinges. |
-| `lamps` | [{role, face, x\|y, z, round, segments, single, bezel?, dome?, rim?}] | face coords; face `front`/`rear`/`side` | Lamp boxes. `role` must be a key of `LAMP_CELL` in carforge.py (`headlights`, `leftblinkers`, `rightblinkers`, `taillights`, `reverselights`); a side blinker becomes left/right by its side. `dome`: a chrome rim (`rim` mm proud) round a lens bulging `dome` mm, like the pack's headlamps. `bezel`: the lamp sits in a pocket that much wider. |
-| `spare` | {y, z} | mm | Spare-wheel position (optional). |
+| `lamps` | [{role, face, x\|y, z, round, segments, single, bezel?, dome?, rim?, proud?}] | face coords; face `front`/`rear`/`side` | Lamp boxes. `role` must be a key of `LAMP_CELL` in carforge.py (`headlights`, `leftblinkers`, `rightblinkers`, `taillights`, `reverselights`); a side blinker becomes left/right by its side. A lamp's lens is flat, `proud` (8) mm off the outermost point of the face under it, so a crease under a lamp never shows through it. `dome`: a chrome rim (`rim` mm proud) round a lens bulging `dome` mm, like the pack's headlamps; the rim is built into the body, the lens alone is the lamp object, because the game lights a lamp object whole. `bezel`: the lamp sits in a pocket that much wider. |
+| `spare` | {y, z} | mm | Spare-wheel hub (optional): its own object `<id>.spare` (the pack wheel), which the game replaces with a wheel of the car's own set (`spareNode` in `src/vehicle/carmodels.ts`). |
 
 Face coordinates (mm): `front`/`rear` (x, z); `side` (y, z) on the left side, mirrored to the right; `top` (y, x). Items are mirrored across the car unless `single`; every item is probed onto the body along its face's axis.
 
@@ -121,7 +122,7 @@ The sheet is the only manual input:
 | `image` | The drawing: dark lines on a light ground, one scale for every view. |
 | `wheelbase_mm` | The one known dimension; sets the scale. |
 | `views` | `{side, front?, top?, rear?}`: `[x0, y0, x1, y1]` px box of each view in the image. One view per box; keep dimension lines that would close a loop with the car (an arrowed height dimension beside the roof) outside it. The top view must sit under the side view with its columns aligned. A top view is required (plan widths); without a front view the track must come from `extras.wheels`. |
-| `extras` | Values the drawing does not give, copied into the blueprint after the traced items: `wheels` (`width`, `well`; anything here overrides the traced wheel values), `arches.front/rear` (`lip`, `flare`), `bumpers`, `mirrors`, `chassis`, `plates`, `lamps` (mm form), `nose`, `tail`, `spare`, `recesses` (windscreen and back-light glass), `grooves`, `lines`, `seams`. The UAZ sheet keeps only what the trace cannot find: bumpers, mirrors, the chassis under the body, spare, nose, the rear face (rear door outline and hinges, number plate, handle, lamps, back light), the windscreen and the side blinker; door gaps, hinges, handles, the fuel flap, the grille, the front lamps and the bonnet ribs come from the drawing (see "Details"). |
+| `extras` | Values the drawing does not give, copied into the blueprint after the traced items: `wheels` (`width`, `well`; anything here overrides the traced wheel values), `arches.front/rear` (`lip`, `flare`), `bumpers`, `mirrors`, `chassis`, `plates`, `lamps` (mm form), `nose`, `tail`, `spare`, `recesses` (windscreen and back-light glass), `grooves`, `lines`, `seams`, `chords`. The UAZ sheet keeps only what the trace cannot find: bumpers, mirrors, the chassis under the body (with the brackets that carry the front bumper), spare, nose, the chord over the bonnet, the rear face (rear door outline and hinges, handle, lamps, back light), the doors' tops and bottoms and the front door's edge up the A pillar (door tops along the roof are level lines the trace drops), the windscreen and the side blinker; door gaps, hinges, handles, the fuel flap, the grille, the front lamps and the bonnet ribs come from the drawing (see "Details"). |
 
 What is measured, in order (the module docstring and each function's docstring hold the exact rules):
 
@@ -188,8 +189,8 @@ Known limits of the trace:
 - Output is in metres: the spec's mm × 0.001 (Blender units ×1000 = mm).
 - Axis: `axis_forward` −Z, up Y in the exported file; node rotation 0.
 - Nose at −Y (spec frame), so the car faces −Y in the scene.
-- Wheels named `wheel_fl`, `wheel_fr`, `wheel_bl`, `wheel_br` (use `--wheel-fbx` to export separately).
-- Lamp objects named `<id>.body.<role>`; glass is atlas cell (3,1); lamp atlas cells: head (8,1), tail (5,1), blinker (7,1), reverse (8,1).
+- Wheels named `wheel_fl`, `wheel_fr`, `wheel_bl`, `wheel_br` (use `--wheel-fbx` to export separately); the spare `<id>.spare`.
+- Lamp objects named `<id>.body.<role>`; glass is atlas cell (3,1); lamp atlas cells: head (4,1) (the pack's grey lens: the white cell read as lit), tail (5,1), blinker (7,1), reverse (8,1).
 - Atlas: 9 × 2 cells.
 
 ## Mesh fitting (`fit_mesh.py`)

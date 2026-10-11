@@ -795,6 +795,12 @@ export interface CarModelDef {
    */
   readonly wheelSetPool?: readonly string[];
   /**
+   * The node of a spare wheel carried on the body. The loader takes it out and the car
+   * carries a wheel of the set it is shod with there (`wheelSetPool`), at its own rear
+   * wheel's size, rim facing out of the tail: a spare that matches what it is shod with.
+   */
+  readonly spareNode?: string;
+  /**
    * Loaded visual settle in metres. Applied only to the sprung body; axle centres
    * stay fixed and connected suspension geometry deforms continuously.
    */
@@ -2003,6 +2009,7 @@ const CARFORGE_CARS: readonly Entry[] = [
     },
     // Off-road wheels from the Nivas, as the UAZ-330364 (OFFROAD_WHEEL_SET_POOL).
     wheelSetPool: OFFROAD_WHEEL_SET_POOL,
+    spareNode: 'uaz31512spare',
     bodyClass: 'car',
     scale: 0.01,
     mass: 1750,
@@ -2084,6 +2091,7 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   rearScreenMaterial: e.rearScreenMaterial,
   factory: factoryGeometry(e.id),
   wheelSetPool: e.wheelSetPool,
+  spareNode: e.spareNode,
   loadedRideDrop: e.loadedRideDrop,
   wheelNodes: e.wheelNodes,
   bodyClass: e.bodyClass,
