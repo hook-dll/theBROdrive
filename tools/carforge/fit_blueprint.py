@@ -111,7 +111,7 @@ def main():
     if "arches" in bp:
         spec["arches"] = {tag: {**{k: v for k, v in arch.items() if k != "outline"},
                                 "outline": side_line(arch["outline"])} for tag, arch in bp["arches"].items()}
-    for key in ("bumpers", "mirrors", "chassis", "plates", "nose", "tail", "recesses", "grooves", "lines", "redraw"):
+    for key in ("bumpers", "mirrors", "chassis", "plates", "nose", "tail", "recesses", "grooves", "lines", "redraw", "rail"):
         if key in bp:
             spec[key] = bp[key]
 

@@ -91,7 +91,6 @@ WINDOW_MIN_HEIGHT = 80.0  # mm: a default window ends where less glass than this
 RECESS_DEPTH = 15.0       # mm a recess (glass, grille) goes into its face (spec recesses[].depth)
 GROOVE_WIDTH = 10.0       # mm width of a panel gap at the surface (grooves[].width); 18 and 14 read coarse (owner)
 GROOVE_DEPTH = 8.0        # mm depth of a panel gap's V (grooves[].depth)
-GROOVE_CELL = "trim"      # the gap's walls: a dark line, as a gap reads; paint walls caught the light as a pale stripe
 GROOVE_SILL_CLEAR = 10.0  # mm a side gap stops above the sill chamfer
 GROOVE_RAIL_CLEAR = 8.0   # mm a side gap stops below the rail chamfer (Shape.rail_z), on the side surface
 LINE_WIDTH = 12.0         # mm width of a drawn line (lines[].width)
@@ -273,6 +272,9 @@ class Shape:
         self.shoulder = Curve(side["shoulder"], tol, kept.get("shoulder", ()))
         self.low = Curve(plan["low"], tol)
         self.high = Curve(plan["high"], tol)
+        # The rail chamfer between the side and the roof, bonnet or pillar: RAIL, or the
+        # spec's `rail` [[y, mm], …] (the UAZ's A pillar has none: its door frame needs the side).
+        self.rail = Curve(spec.get("rail", [[0.0, RAIL]]))
         # Front view: half-width factor of the greenhouse against its width at the belt.
         self.tumble = Curve(spec.get("tumblehome", [[0, 1.0], [1, 1.0]]))
         self.belt = float(spec["belt"])
@@ -287,7 +289,7 @@ class Shape:
 
     def rail_z(self, y):
         """Height where the side ends and the roof (or bonnet) rail begins."""
-        return max(self.bottom(y) + SILL_CHAMFER, self.top(y) - RAIL - CROWN)
+        return max(self.bottom(y) + SILL_CHAMFER, self.top(y) - self.rail(y) - CROWN)
 
     def crossings(self, fn, step=5.0):
         """ys where fn changes sign, scanned every `step` mm and interpolated."""
@@ -355,7 +357,7 @@ def station_ring(s, y):
         (None, s.belt, 0.0),
         (None, s.glass_top, 0.0),
         (None, z_rail, 0.0),
-        (None, zt - CROWN, -RAIL),
+        (None, zt - CROWN, -s.rail(y)),
         (0.0, zt),
     ]
     out = [(0.0, zb), (lo - SILL_CHAMFER, zb)]
@@ -405,7 +407,7 @@ def stations(spec, s):
             put(b, 2)
             put(a + FRAME, 1)
             put(b - FRAME, 1)
-    for c in (s.top, s.bottom, s.shoulder, s.low, s.high):
+    for c in (s.top, s.bottom, s.shoulder, s.low, s.high, s.rail):
         for y in c.ys:
             put(y, 2)
     for _, _, outline, _, _ in arch_specs(spec):
@@ -1140,14 +1142,14 @@ def add_wedge(bm, uvl, pts, sign, face, loop, half, depth, cell):
 
 def cut_grooves(spec, s, body, bvh):
     """Panel gaps (`grooves`, side `seams`): V channels `width` (GROOVE_WIDTH) wide at the
-    surface and `depth` (GROOVE_DEPTH) deep, their walls GROOVE_CELL, as the pack folds its door
+    surface and `depth` (GROOVE_DEPTH) deep, in the paint, as the pack folds its door
     gaps into the shell. One swept wedge per line (probed on the uncut `bvh`), its cross-section
     square to the surface at every probe, so neighbouring pieces share their ends and leave
     no slivers. Side lines stay on the side surface: they stop short of the sill chamfer below
     and of the rail (where the side turns into the roof, bonnet or pillar) above, so a gap
     never cuts the body's edge or runs over a chamfer."""
     bm, uvl = new_bm()
-    cell = CELLS[GROOVE_CELL]
+    cell = CELLS["paint"]
     lines = 0
 
     def on_side(p, _n):

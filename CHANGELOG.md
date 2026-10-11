@@ -122,13 +122,15 @@
     bottom line by the arches are chorded out (`redraw.bottom`).
   - Both UAZs take only the VAZ-2121's wheels: the 2131's rim is the pack's dark trim
     cell and read as a black disc.
-  - Panel gaps are 10 mm wide and 8 mm deep with dark walls (the trim cell): paint walls
-    caught the light as a pale stripe and read coarse at 18 and 14 mm. Side gaps keep to
-    the side surface, between the sill chamfer and the rail; they used to run up over the
-    rail chamfer. The front door's edge runs on unbroken from the sill up the A pillar,
-    40 mm behind the screen's edge. The bonnet is a panel of its own as on the factory
-    drawing: full width, wrapping down the sides, its gaps along both sides above the
-    shoulder, across the front face over the grille and across the top at the cowl.
+  - Panel gaps are 10 mm wide and 8 mm deep, in the paint (they read coarse at 18 and
+    14 mm). Side gaps keep to the side surface, between the sill chamfer and the rail;
+    they used to run up over the rail chamfer. The A pillar lost its 55 mm rail chamfer
+    (a third plane between the side and the screen frame; new spec key `rail`), so the
+    whole front door is outlined: its front edge runs on unbroken from the sill up the
+    pillar, 40 mm behind the screen's edge, and along the top. The bonnet is a panel of
+    its own as on the factory drawing: full width, wrapping down the sides, its gaps along
+    both sides above the shoulder, across the front face over the grille and across the
+    top at the cowl.
 
 - BOTH UAZS RUN ON THE NIVAS' WHEELS (`OFFROAD_WHEEL_SET_POOL` in `vehicle/carmodels.ts`).
   The UAZ-330364's own wheel from the SAAS pack is 18-20 segments to the circle against
