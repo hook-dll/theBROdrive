@@ -115,6 +115,10 @@
   - No number plate on the tail.
   - The arch lip's turn into the well lay in the plane of the well wall the cut leaves
     (z-fighting inside every arch); it stands 2 mm in front of it (`ARCH_LIP_OFFSET`).
+  - No notch in the sill ahead of the rear arch: the trace's 30-40 mm bumps in the
+    bottom line by the arches are chorded out (`chords.bottom`).
+  - Both UAZs take only the VAZ-2121's wheels: the 2131's rim is the pack's dark trim
+    cell and read as a black disc.
 
 - BOTH UAZS RUN ON THE NIVAS' WHEELS (`OFFROAD_WHEEL_SET_POOL` in `vehicle/carmodels.ts`).
   The UAZ-330364's own wheel from the SAAS pack is 18-20 segments to the circle against

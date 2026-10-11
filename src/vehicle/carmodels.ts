@@ -1555,12 +1555,12 @@ function sovietLights(file: string): VehicleLightsDef {
 }
 
 /**
- * The UAZs' pool: the Nivas' off-road sets, scaled to each UAZ's own tyre (`cloneWheels`).
+ * The UAZs' pool: the VAZ-2121's wheel set, scaled to each UAZ's own tyre (`cloneWheels`).
  * The SAAS UAZ-330364's own wheel is 18-20 segments to the circle and reads as a
  * polygon beside the Soviet pack's 30-32 (owner, 2026-10-11); a borrowed set is also one
- * model fewer to load.
+ * model fewer to load. Not the 2131's: its rim is the dark trim cell, a black disc.
  */
-const OFFROAD_WHEEL_SET_POOL = ['sv_niva', 'sv_niva_long'];
+const OFFROAD_WHEEL_SET_POOL = ['sv_niva'];
 /** Shared pool: road Soviet sets only, excluding rally and both Niva sets. */
 const SOVIET_WHEEL_SET_POOL = [
   'sv_gaz21',
