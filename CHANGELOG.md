@@ -124,7 +124,9 @@
     caught the light as a pale stripe and read coarse at 18 and 14 mm. Side gaps keep to
     the side surface, between the sill chamfer and the rail; they used to run up over the
     rail chamfer. The front door's edge runs on unbroken from the sill up the A pillar,
-    40 mm behind the screen's edge; the bonnet is outlined by its own gap.
+    40 mm behind the screen's edge. The bonnet is a panel of its own as on the factory
+    drawing: full width, wrapping down the sides, its gaps along both sides above the
+    shoulder, across the front face over the grille and across the top at the cowl.
 
 - BOTH UAZS RUN ON THE NIVAS' WHEELS (`OFFROAD_WHEEL_SET_POOL` in `vehicle/carmodels.ts`).
   The UAZ-330364's own wheel from the SAAS pack is 18-20 segments to the circle against
