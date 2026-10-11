@@ -94,6 +94,12 @@
 
 ### Changed
 
+- BOTH UAZS RUN ON THE NIVAS' WHEELS (`OFFROAD_WHEEL_SET_POOL` in `vehicle/carmodels.ts`).
+  The UAZ-330364's own wheel from the SAAS pack is 18-20 segments to the circle against
+  the Soviet pack's 30-32 and showed its edges; the UAZ-31512 had its own set too. Each
+  now takes the VAZ-2121 or 2131 set by its appearance key, scaled to its own tyre
+  (0.744 m, 225 and 215 mm), and its own wheel mesh is no longer drawn.
+
 - A RACE RIVAL HANDS IN AT THE COURIER'S LAY-BY, IN TWO SECONDS (`contracts/race.ts`,
   `world/traffic.ts`). Instead of standing 20 s in its lane beside the courier, a live
   rival asks the stream for a hand-in (`RoadTraffic.rivalHandIn`) while the entry slip

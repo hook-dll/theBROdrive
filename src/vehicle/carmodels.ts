@@ -1548,6 +1548,13 @@ function sovietLights(file: string): VehicleLightsDef {
   };
 }
 
+/**
+ * The UAZs' pool: the Nivas' off-road sets, scaled to each UAZ's own tyre (`cloneWheels`).
+ * The SAAS UAZ-330364's own wheel is 18-20 segments to the circle and reads as a
+ * polygon beside the Soviet pack's 30-32 (owner, 2026-10-11); a borrowed set is also one
+ * model fewer to load.
+ */
+const OFFROAD_WHEEL_SET_POOL = ['sv_niva', 'sv_niva_long'];
 /** Shared pool: road Soviet sets only, excluding rally and both Niva sets. */
 const SOVIET_WHEEL_SET_POOL = [
   'sv_gaz21',
@@ -1792,9 +1799,8 @@ const SAAS_SPECS: readonly Entry[] = [
     frontWeightShare: 1180 / 1845,
     dragArea: 3.45,
     aero: AERO_UAZ_330364,
-    // This working 4x4 keeps its authored heavy-duty wheels. It neither borrows
-    // from the shared road-wheel pool nor donates its set to that pool.
-    wheelSetPool: [],
+    // A working 4x4 on off-road wheels: the Nivas' (OFFROAD_WHEEL_SET_POOL).
+    wheelSetPool: OFFROAD_WHEEL_SET_POOL,
     loadedRideDrop: 0.037,
     secondaryPaintMaterial: 'car_bed_paint',
     wheelNodes: {
@@ -1995,8 +2001,8 @@ const CARFORGE_CARS: readonly Entry[] = [
       wheel_rl: ['uaz31512wheel_bl'],
       wheel_rr: ['uaz31512wheel_br'],
     },
-    // Its own wheels: neither borrowed from nor lent to the road-wheel pool.
-    wheelSetPool: [],
+    // Off-road wheels from the Nivas, as the UAZ-330364 (OFFROAD_WHEEL_SET_POOL).
+    wheelSetPool: OFFROAD_WHEEL_SET_POOL,
     bodyClass: 'car',
     scale: 0.01,
     mass: 1750,
