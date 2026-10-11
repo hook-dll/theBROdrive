@@ -89,10 +89,11 @@ GLASS_CLEAR = 5.0        # mm: a traced window stays this far inside the belt an
 ROUND_SEGMENTS = 3       # segments of a rounded corner
 WINDOW_MIN_HEIGHT = 80.0  # mm: a default window ends where less glass than this is left
 RECESS_DEPTH = 15.0       # mm a recess (glass, grille) goes into its face (spec recesses[].depth)
-GROOVE_WIDTH = 14.0       # mm width of a panel gap at the surface (grooves[].width); 18 read heavy (owner)
-GROOVE_DEPTH = 10.0       # mm depth of a panel gap's V (grooves[].depth)
+GROOVE_WIDTH = 10.0       # mm width of a panel gap at the surface (grooves[].width); 18 and 14 read coarse (owner)
+GROOVE_DEPTH = 8.0        # mm depth of a panel gap's V (grooves[].depth)
+GROOVE_CELL = "trim"      # the gap's walls: a dark line, as a gap reads; paint walls caught the light as a pale stripe
 GROOVE_SILL_CLEAR = 10.0  # mm a side gap stops above the sill chamfer
-GROOVE_RAIL_CLEAR = 20.0  # mm a side gap stops below the roof / bonnet crown line (it may cross the rail chamfer)
+GROOVE_RAIL_CLEAR = 8.0   # mm a side gap stops below the rail chamfer (Shape.rail_z), on the side surface
 LINE_WIDTH = 12.0         # mm width of a drawn line (lines[].width)
 LINE_PROUD = 3.0          # mm a drawn line stands off its face
 BUMPER_LIP = 40.0         # mm height of a channel bumper's lips (bumpers[].lip)
@@ -236,17 +237,19 @@ def tri_count(obj):
 
 # ---------------------------------------------------------------- body grammar
 
-def apply_chords(spec):
-    """`chords: {top|bottom|shoulder: [[y0, y1], …]}`: the side view's line runs straight from
-    y0 to y1, its traced points in between dropped (the line's own values at y0 and y1 are
-    kept). For what a drawing shows and the car does not: the UAZ sheet draws a 24 mm step
-    across the bonnet 260 mm behind its nose that the factory bonnet does not have."""
-    for key, spans in spec.get("chords", {}).items():
+def apply_redraw(spec):
+    """`redraw: {top|bottom|shoulder: [[[y, z|null], …], …]}`: each polyline replaces the side
+    view's line over its own span, the traced points there dropped; a null z is the traced
+    line's own height at that y (two nulls: a straight chord). For what a drawing shows and the
+    car does not: the UAZ sheet's bonnet rises 80 mm to the cowl with a step across it, where
+    the factory bonnet is flat; its sill has 30-40 mm bumps by the arches."""
+    for key, polys in spec.get("redraw", {}).items():
         pts = sorted((float(y), float(z)) for y, z in spec["side"][key])
-        line = Curve(pts)
-        for y0, y1 in spans:
-            ends = [(float(y0), line(float(y0))), (float(y1), line(float(y1)))]
-            pts = sorted([p for p in pts if not y0 <= p[0] <= y1] + ends)
+        for poly in polys:
+            line = Curve(pts)
+            new = [(float(y), line(float(y)) if z is None else float(z)) for y, z in poly]
+            y0, y1 = min(y for y, _ in new), max(y for y, _ in new)
+            pts = sorted([p for p in pts if not y0 <= p[0] <= y1] + new)
         spec["side"][key] = [list(p) for p in pts]
     return spec
 
@@ -1129,18 +1132,18 @@ def add_wedge(bm, uvl, pts, sign, face, loop, half, depth, cell):
 
 def cut_grooves(spec, s, body, bvh):
     """Panel gaps (`grooves`, side `seams`): V channels `width` (GROOVE_WIDTH) wide at the
-    surface and `depth` (GROOVE_DEPTH) deep, in the paint, as the pack folds its door gaps
-    into the shell. One swept wedge per line (probed on the uncut `bvh`), its cross-section
+    surface and `depth` (GROOVE_DEPTH) deep, their walls GROOVE_CELL, as the pack folds its door
+    gaps into the shell. One swept wedge per line (probed on the uncut `bvh`), its cross-section
     square to the surface at every probe, so neighbouring pieces share their ends and leave
-    no slivers. Side lines stay on the side: they stop short of the sill chamfer below and of
-    the roof (or bonnet) top above, so a gap never cuts the body's edge or runs up the
-    windscreen pillar into the roof."""
+    no slivers. Side lines stay on the side surface: they stop short of the sill chamfer below
+    and of the rail (where the side turns into the roof, bonnet or pillar) above, so a gap
+    never cuts the body's edge or runs over a chamfer."""
     bm, uvl = new_bm()
-    cell = CELLS["paint"]
+    cell = CELLS[GROOVE_CELL]
     lines = 0
 
     def on_side(p, _n):
-        return s.bottom(p.y) + SILL_CHAMFER + GROOVE_SILL_CLEAR < p.z < s.top(p.y) - CROWN - GROOVE_RAIL_CLEAR
+        return s.bottom(p.y) + SILL_CHAMFER + GROOVE_SILL_CLEAR < p.z < s.rail_z(p.y) - GROOVE_RAIL_CLEAR
 
     for kind, it in line_items(spec, s):
         if kind != "grooves":
@@ -1535,7 +1538,7 @@ def main():
     ap.add_argument("--summary")
     args = ap.parse_args(argv)
     with open(args.spec) as fh:
-        spec = apply_chords(validate(json.load(fh)))
+        spec = apply_redraw(validate(json.load(fh)))
     clear_scene()
     objs = build_car(spec, args.wheel_fbx)
     export(objs, args.out)

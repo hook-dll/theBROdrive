@@ -102,8 +102,9 @@
     this car there, rim out of the tail (`CarModelDef.spareNode`, `addSpareWheel`).
   - The front bumper stands on two brackets off the frame rails; the rails run into the
     rear bumper (they stopped 9 mm short of it).
-  - The step the drawing puts across the bonnet 260 mm behind its nose is gone: a new
-    spec key, `chords`, runs the side line straight over a span.
+  - The bonnet is flat: the drawing's bonnet rose 80 mm to the cowl with a step across
+    it. A new spec key, `redraw`, replaces a stretch of a side line with given points (a
+    null height keeps the traced one, so two nulls make a straight chord).
   - Lamps have flat lenses, proud of the highest point under them: the crease under the
     wing blinker showed through its folded lens. The tail, rear blinker and reverse lamps
     stand 22 mm proud; the reverse lamp moved up off the bumper end, where its corners
@@ -116,12 +117,14 @@
   - The arch lip's turn into the well lay in the plane of the well wall the cut leaves
     (z-fighting inside every arch); it stands 2 mm in front of it (`ARCH_LIP_OFFSET`).
   - No notch in the sill ahead of the rear arch: the trace's 30-40 mm bumps in the
-    bottom line by the arches are chorded out (`chords.bottom`).
+    bottom line by the arches are chorded out (`redraw.bottom`).
   - Both UAZs take only the VAZ-2121's wheels: the 2131's rim is the pack's dark trim
     cell and read as a black disc.
-  - Panel gaps are 14 mm wide and 10 mm deep (were 18 and 12), and the front door's edge
-    runs on unbroken from the sill up the A pillar, 40 mm behind the screen's edge: it
-    stopped at the belt, where the cowl line clipped it.
+  - Panel gaps are 10 mm wide and 8 mm deep with dark walls (the trim cell): paint walls
+    caught the light as a pale stripe and read coarse at 18 and 14 mm. Side gaps keep to
+    the side surface, between the sill chamfer and the rail; they used to run up over the
+    rail chamfer. The front door's edge runs on unbroken from the sill up the A pillar,
+    40 mm behind the screen's edge; the bonnet is outlined by its own gap.
 
 - BOTH UAZS RUN ON THE NIVAS' WHEELS (`OFFROAD_WHEEL_SET_POOL` in `vehicle/carmodels.ts`).
   The UAZ-330364's own wheel from the SAAS pack is 18-20 segments to the circle against
