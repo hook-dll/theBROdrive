@@ -71,7 +71,7 @@ import type { RoadConditionBuffer } from './gradient';
  * the quiet end quieter than the busy one (8-9 of 12) without the road ever emptying.
  * A fifth was measured to leave the player alone for minutes at a time.
  */
-const DENSITY_FLOOR = 0.7;
+export const DENSITY_FLOOR = 0.7;
 /** Speed advantage over the player that makes a rear spawn worth its slot. */
 const REAR_SPAWN_CLOSING_MPS = 2.5;
 /**
@@ -3191,9 +3191,15 @@ export class RoadTraffic {
         }
         if (gap < requiredGap) return false;
       }
+      // An opposing car in a pass, over the crown, or with its BODY in the spawn lane
+      // (its centre need not be over the crown: a frantic car left 0.45 m over it after
+      // a pass reaches the oncoming lane's centre, and a car was spawned 38 m in front
+      // of it at 75 km/h — head-on in the traffic bench).
       if (
         car.direction !== direction &&
-        (car.autopilot.activity === 'pass' || this.isAcrossCrown(car)) &&
+        (car.autopilot.activity === 'pass' ||
+          this.isAcrossCrown(car) ||
+          Math.abs(car.roadLateral - lateral) <= car.roadHalfWidth + halfWidth) &&
         gap < PASSING_SPAWN_EXCLUSION_M
       ) {
         return false;

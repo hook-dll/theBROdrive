@@ -17,7 +17,7 @@ import {
 import { WorldOrigin } from '../src/world/origin';
 import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
 import { roadSurfaceY, SurfaceField } from '../src/world/roadsurface';
-import { RoadTraffic, type RivalPose } from '../src/world/traffic';
+import { DENSITY_FLOOR, RoadTraffic, type RivalPose } from '../src/world/traffic';
 import { RivalRace } from '../src/contracts/race';
 import type { ContractCargoItem } from '../src/items/items';
 import { couriersBetween } from '../src/world/couriers';
@@ -157,6 +157,11 @@ function addLaybyCollider(physics: PhysicsWorld, road: Road, layby: Layby): void
   physics.addStaticTrimesh(vertices, indices, SurfaceType.Asphalt);
 }
 
+// Every catalogue model loaded up front. A spawn waits on its model's load (an
+// FBX read and parse, real milliseconds), while the simulated 30 s below pass in a
+// fraction of a real second: without this the first spawn was still pending when the
+// phase ended and every populate check read an empty road.
+await Promise.all(CAR_MODELS.map((model) => loadCarModel(model.id)));
 console.log('world traffic bench: bounded, transient physical cars on the real road');
 const road = new Road(SEED);
 const physics = await PhysicsWorld.create();
@@ -529,9 +534,10 @@ check(
 // THE DENSITY ACTUALLY ROTATES, AND THE ROTATION IS THE POINT.
 //
 // A single draw held for 36-72 s means the range has to be wide enough to reach both
-// "you own the road" and "you are in company" within a drive, which is what the old
-// two-thirds floor prevented. Sampled over many re-rolls rather than one, because one
-// draw proves nothing about a distribution.
+// its quiet and its busy end within a drive. The range is `[DENSITY_FLOOR * cap, cap]`
+// (0.7, the owner's call), so a long drive must come within a car of each end. Sampled
+// over many re-rolls rather than one, because one draw proves nothing about a
+// distribution.
 {
   const rotating = new RoadTraffic(
     physics,
@@ -556,11 +562,12 @@ check(
       highest = Math.max(highest, target);
     }
   }
-  const cap = rotating.status.cap;
+  const cap = Math.round(rotating.status.cap);
+  const floor = Math.ceil(cap * DENSITY_FLOOR);
   check(
     'the density rotates over a long drive',
-    lowest <= cap * 0.6 && highest >= cap * 0.8,
-    `${lowest}-${highest} against a cap of ${cap.toFixed(0)}`,
+    lowest <= floor + 1 && highest >= cap - 1,
+    `${lowest}-${highest} against a range of ${floor}-${cap}`,
   );
   rotating.dispose();
 }

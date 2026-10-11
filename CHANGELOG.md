@@ -120,6 +120,17 @@
   bumper to bumper (was 35.2), no impacts. Its crossing check now flags only a car
   that could not stop short at 4 m/s², not any moving car within 60 m.
 
+- `tools/traffic-bench.ts` POPULATES ITS FIRST PHASE. A spawn waits on its model's load,
+  and the simulated 30 s pass in a fifth of a real second, so the first spawn was still
+  pending when the phase ended: six populate checks read an empty road. Every catalogue
+  model is loaded before the phase now. The density-rotation check follows
+  `DENSITY_FLOOR` (0.7, now exported) instead of asking for 0.6 of the cap.
+- A CAR IS NOT SPAWNED IN FRONT OF AN OPPOSING CAR WHOSE BODY IS IN ITS LANE
+  (`world/traffic.ts`, `roadGapClear`). The 300 m exclusion asked only whether the
+  opposing car's centre was over the crown; a frantic car left 0.45 m over it after a
+  pass reached the oncoming lane's centre, and a car was spawned 38 m in front of it at
+  75 km/h (head-on in the bench).
+
 - THE UAZ-31512, SECOND PASS FROM THE OWNER'S REVIEW (`tools/carforge`,
   `public/models/carforge/uaz31512.fbx`, `render/carmodel.ts`).
   - The spare on the tail is a wheel of the set the car is shod with: carforge exports it
