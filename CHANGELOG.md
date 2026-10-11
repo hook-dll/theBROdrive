@@ -119,6 +119,9 @@
     bottom line by the arches are chorded out (`chords.bottom`).
   - Both UAZs take only the VAZ-2121's wheels: the 2131's rim is the pack's dark trim
     cell and read as a black disc.
+  - Panel gaps are 14 mm wide and 10 mm deep (were 18 and 12), and the front door's edge
+    runs on unbroken from the sill up the A pillar, 40 mm behind the screen's edge: it
+    stopped at the belt, where the cowl line clipped it.
 
 - BOTH UAZS RUN ON THE NIVAS' WHEELS (`OFFROAD_WHEEL_SET_POOL` in `vehicle/carmodels.ts`).
   The UAZ-330364's own wheel from the SAAS pack is 18-20 segments to the circle against
