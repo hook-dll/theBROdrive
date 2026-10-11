@@ -87,12 +87,11 @@ const ARRIVE_SPEED_MPS = 1;
 /** A rival's hand-in: the parcel through the courier's window, seconds. */
 const HAND_IN_S = 2;
 /**
- * Road before the lay-by's entry slip over which a live rival asks to pull in. Nearer
- * than the minimum it cannot (across the road it has to be held short of the crossing),
- * and stops in its lane instead.
+ * Road before the lay-by's entry slip from which a live rival asks to pull in. It asks
+ * until it is past the pad's start; the stream says when it is too late
+ * (`RoadTraffic.rivalHandIn`), and it then stops in its lane instead.
  */
 const HAND_IN_ASK_MAX_M = 450;
-const HAND_IN_ASK_MIN_M = 70;
 /** See THE RIVALS FINISH THEIR RUN. */
 const FINISHING_DROP_M = 2000;
 const FINISHING_MAX_S = 600;
@@ -509,7 +508,7 @@ export class RivalRace {
         const layby = race.layby;
         if (rival.live && layby !== null && !rival.handInAsked) {
           const ahead = Math.min(layby.sEntry, layby.sExit) - rival.s;
-          if (ahead < HAND_IN_ASK_MIN_M) {
+          if (rival.s > Math.min(layby.sPadStart, layby.sPadEnd)) {
             rival.handInAsked = true;
           } else if (
             ahead <= HAND_IN_ASK_MAX_M &&

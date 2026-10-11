@@ -126,6 +126,29 @@
 
 ### Fixed
 
+- RIVALS NO LONGER STAND FOR MINUTES WAITING TO CROSS TO A COURIER ACROSS THE ROAD
+  (`world/traffic.ts`, `vehicle/autopilot.ts`, `contracts/race.ts`). Reported from play:
+  three rivals stood in their lane with the left indicator on for 3-4 minutes, a queue
+  behind them, with light oncoming traffic.
+  - The crossing was a 30 m drift from the edge lane to the slip. From a standstill the
+    slowest car (VAZ-1111 Oka) needed 8.6 s, and the gap asked for was 11 s: half a
+    kilometre of empty road at 150 km/h. Now the car keeps to its lane nearest the crown
+    up to where the pad reaches full width, waits there, and turns across on two 5 m arcs
+    and a straight (`CrossTurn`), straight onto the parking line. Out, it waits at the
+    pad's far end, which leaves its place to the next rival, and turns back the same way.
+    Measured from a standstill on the Oka: clear in 4.0 s in and 5.1 s out over one
+    oncoming lane, 4.6 and 5.4 s over two, 0.9-1.7 s of it on the oncoming lanes. The gap
+    is 6 s.
+  - The pursuit on a lay-by course aims along the line, not along the road, and the
+    course can cap its preview (`LaybyCourse.lookahead`): a car waiting short of the turn
+    no longer stands with its nose 1.1-1.5 m over the crown.
+  - A car that has waited 3 s asks the oncoming traffic to give way
+    (`assignCrossYields`). Cars that could not slow at 2 m/s² drive on; every one
+    further out, in every oncoming lane, is held to the pace that keeps it the gap out
+    until the crossing is done. Several cars at one lay-by are served in turn.
+  - The stream, not the race, decides when a rival is too near to pull in: 70 m before it
+    leaves its lane (`LAYBY_HANDIN_ROOM_M`), the slip or the turn.
+
 - A LAY-BY'S SLIPS GROW OUT OF THE ROAD EDGE CLEANLY (`world/roadmesh.ts`,
   `world/laybymesh.ts`). At every entry and exit the verge showed a black slit, a grey
   wedge, a hard edge of sand and a flickering sliver. Three causes. The shoulder strip

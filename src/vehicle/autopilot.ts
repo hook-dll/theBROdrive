@@ -182,6 +182,13 @@ export interface LaybyCourse {
   speed: number;
   /** What the lamps tell the cars round it. */
   indicator: IndicatorSide;
+  /**
+   * Longest preview the pursuit may take along the line, metres, or Infinity for the
+   * mode's own. A turn across the road is driven on a short one, and the coordinator
+   * grows it with the distance to the turn so a car waiting short of it does not aim
+   * into it and stand with its nose over the crown.
+   */
+  lookahead: number;
 }
 
 interface ModeConfig {
@@ -978,6 +985,8 @@ const HOLD_LINE_DECEL_MPS2 = 3;
  * car parked in front, a prop — is stopped behind at a standoff.
  */
 const LAYBY_LOOKAHEAD_MAX_M = 24;
+/** Road metres per step of the walk along a lay-by line to its preview point. */
+const LAYBY_AIM_STEP_M = 0.5;
 const LAYBY_LOOK_M = 60;
 const LAYBY_LINE_CLEARANCE_M = 0.4;
 const LAYBY_OWN_HALF_LENGTH_M = 2.3;
@@ -2961,13 +2970,21 @@ export class Autopilot {
     // Steering: the road controller's pursuit, hold and damping, on the course's line.
     const line = course.lineAt(projection.s);
     const lineSlope = (course.lineAt(projection.s + 1) - course.lineAt(projection.s - 1)) * 0.5;
-    const lookahead = clamp(
-      config.lookaheadBase + speed * config.lookaheadSpeed,
-      MIN_LOOKAHEAD_M,
-      LAYBY_LOOKAHEAD_MAX_M,
+    const lookahead = Math.min(
+      course.lookahead,
+      clamp(config.lookaheadBase + speed * config.lookaheadSpeed, MIN_LOOKAHEAD_M, LAYBY_LOOKAHEAD_MAX_M),
     );
-    const aimS = projection.s + lookahead;
-    const aim = this.road.offsetPoint(aimS, course.lineAt(aimS), this.laybyAim);
+    // The preview is measured ALONG the line, not along the road: across a turn the line
+    // runs steeply over the road, and a preview of road metres aimed past the whole turn.
+    let aimS = projection.s;
+    let aimLateral = line;
+    for (let walked = 0; walked < lookahead; ) {
+      const nextLateral = course.lineAt(aimS + LAYBY_AIM_STEP_M);
+      walked += Math.hypot(LAYBY_AIM_STEP_M, nextLateral - aimLateral);
+      aimS += LAYBY_AIM_STEP_M;
+      aimLateral = nextLateral;
+    }
+    const aim = this.road.offsetPoint(aimS, aimLateral, this.laybyAim);
     const relativeX = aim.x - this.position.x;
     const relativeZ = aim.z - this.position.z;
     const waypointRight = relativeX * forwardZ - relativeZ * forwardX;

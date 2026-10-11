@@ -429,26 +429,64 @@ const LAYBY_COURIER_CLEAR_M = 2.8;
  */
 const LAYBY_EDGE_BLEND_M = 20;
 /**
- * A RIVAL'S HAND-IN AT A LAY-BY ACROSS THE ROAD (`rivalHandIn`). Its line crosses the
- * oncoming carriageway over `LAYBY_CROSS_BLEND_M` before the entry slip and after the
- * exit slip. On the way in it holds in its own lane, short of where the line starts to
- * turn (the preview at a standstill, `LAYBY_CROSS_HOLD_M`, further back), until nothing
- * coming the other way would reach the crossing within `LAYBY_CROSS_GAP_S`; it asks from
- * `LAYBY_CROSS_DECIDE_M` before that hold, so a clear road is crossed without stopping.
- * The way out waits at the pad's end for the same gap in the oncoming lanes and the
- * ordinary gap in its own.
+ * A RIVAL'S HAND-IN AT A LAY-BY ACROSS THE ROAD (`rivalHandIn`). It turns across the
+ * oncoming carriageway the way a driver turns into a gateway, not by drifting over it:
+ * along its own lane (the one nearest the crown) to the turn, then two arcs of
+ * `LAYBY_TURN_RADIUS_M` with a straight between them at up to `LAYBY_TURN_MAX_RAD` to
+ * the road (`CrossTurn`), landing on the pad's parking line where the pad reaches full
+ * width, at `LAYBY_TURN_MPS`. Out, the same turn from its place back to its edge lane.
+ * Each way it waits `LAYBY_CROSS_HOLD_M` short of the turn, still in its own lane (out:
+ * where it stands), until nothing coming the other way would reach the crossing within
+ * `LAYBY_CROSS_GAP_S`; on the way in it asks from `LAYBY_CROSS_DECIDE_M` before that
+ * hold, so a clear road is crossed without stopping.
+ *
+ * It was a 30 m smoothstep from the edge lane to the slip, and the slowest car in the
+ * fleet (VAZ-1111 Oka, sleeper) took 8.6 s from a standstill to clear it — 5.8 s of
+ * that drifting over its own lane at 19-32° — so the gap was eleven seconds, and with a
+ * frantic car at 150 km/h that was half a kilometre of empty oncoming road: three rivals
+ * stood at a courier with their indicators on for minutes. Round the turn, from a
+ * standstill at the hold, the same Oka is clear in 4.0 s in and 5.1 s out over one
+ * oncoming lane, 4.6 s and 5.4 s over two, and on the oncoming lanes for 0.9-1.7 s of
+ * it; a GAZ-24 and the UAZ-330364 truck are quicker. The car's own path meets the road
+ * at 32-39°: the pursuit rounds the line's corners. Six seconds, plus the
+ * `LAYBY_MERGE_BUFFER_M` the gap check adds, is that and a margin.
  */
-const LAYBY_CROSS_BLEND_M = 30;
-const LAYBY_CROSS_HOLD_M = 12;
+const LAYBY_TURN_RADIUS_M = 5;
+const LAYBY_TURN_MAX_RAD = (80 * Math.PI) / 180;
+const LAYBY_TURN_MPS = 16 / 3.6;
+/**
+ * The pursuit's preview through the turn (`LaybyCourse.lookahead`), and the hold short
+ * of it: a car standing there aims at the turn's first metre, not into it.
+ */
+const LAYBY_TURN_LOOKAHEAD_M = 4.5;
+const LAYBY_CROSS_HOLD_M = LAYBY_TURN_LOOKAHEAD_M;
 const LAYBY_CROSS_DECIDE_M = 40;
-const LAYBY_CROSS_GAP_S = 11;
+const LAYBY_CROSS_GAP_S = 6;
+/**
+ * A CROSSING THAT CANNOT FIND ITS GAP ASKS FOR ONE (`assignCrossYields`). A car that
+ * has stood wanting across the oncoming lanes for `LAYBY_YIELD_ASK_S` joins a queue;
+ * the first in it at each lay-by is the one asked for, the rest wait their turn.
+ * Oncoming cars that could not slow at `LAYBY_YIELD_DECEL_MPS2` before the crossing
+ * drive on; every one further out, in every oncoming lane, is held to the pace that
+ * keeps it `LAYBY_CROSS_GAP_S` (and a second more) out — a lift for the far ones, a
+ * real slowing only for one that is close. Those behind follow it. The ordinary gap
+ * check still decides when to go; the yield only makes the gap. It holds until the
+ * asker is off the oncoming lanes.
+ */
+const LAYBY_YIELD_ASK_S = 3;
+const LAYBY_YIELD_DECEL_MPS2 = 2;
 /**
  * A rival held up on the pad short of its place — the player's own car left on the
  * parking line — for this long hands in from where it stands, seconds. It never
  * reverses: on the way out it waits behind that car until it moves.
  */
 const LAYBY_HANDIN_BLOCKED_S = 3;
-/** Metres of slip next to the carriageway a crossing keeps clear along with the road. */
+/**
+ * Least road a rival must still have before it leaves its lane (the slip, or across
+ * the road the turn) for a hand-in to be planned; nearer, it stops in its lane.
+ */
+const LAYBY_HANDIN_ROOM_M = 70;
+/** Metres past a crossing's end that are kept clear along with the road it crosses. */
 const LAYBY_SLIP_MOUTH_M = 10;
 /** What is left of an ordinary stop at a lay-by a race is about to finish at, seconds. */
 const LAYBY_RESERVED_PARK_S = 3;
@@ -556,6 +594,47 @@ interface TrafficRails {
 }
 
 /**
+ * A turn across the road (see LAYBY_TURN_RADIUS_M): an arc off the line it was on, a
+ * straight at `slope` (tan of the angle to the road), an arc back onto the line it
+ * joins. Metres along the lay-by from `startU`; laterally it covers `rise`.
+ */
+interface CrossTurn {
+  readonly startU: number;
+  readonly endU: number;
+  /** Along the road, and across it, of each arc. */
+  readonly arcU: number;
+  readonly arcRise: number;
+  readonly slope: number;
+  readonly rise: number;
+}
+
+function crossTurn(startU: number, rise: number): CrossTurn {
+  const radius = LAYBY_TURN_RADIUS_M;
+  const angle = Math.min(LAYBY_TURN_MAX_RAD, Math.acos(Math.max(-1, 1 - rise / (2 * radius))));
+  const arcRise = radius * (1 - Math.cos(angle));
+  const arcU = radius * Math.sin(angle);
+  const slope = Math.tan(angle);
+  const straightU = Math.max(0, rise - 2 * arcRise) / slope;
+  return { startU, endU: startU + 2 * arcU + straightU, arcU, arcRise, slope, rise };
+}
+
+/** How far through its turn the line is at `u`: 0 before it, 1 past it. */
+function crossTurnShare(turn: CrossTurn, u: number): number {
+  const x = u - turn.startU;
+  if (x <= 0 || turn.rise <= 0) return x <= 0 ? 0 : 1;
+  if (u >= turn.endU) return 1;
+  const radius = LAYBY_TURN_RADIUS_M;
+  const back = turn.endU - u;
+  const across =
+    x < turn.arcU
+      ? radius - Math.sqrt(radius * radius - x * x)
+      : back < turn.arcU
+        ? turn.rise - (radius - Math.sqrt(radius * radius - back * back))
+        : turn.arcRise + (x - turn.arcU) * turn.slope;
+  return across / turn.rise;
+}
+
+/**
  * A car's stop at a lay-by, from the decision to pull in until it is back in its lane;
  * see `assignLaybyStops` and `serviceLayby`. Every `…U` is metres along the lay-by in
  * the car's own direction of travel from where its entry slip leaves the lane, which is
@@ -586,6 +665,12 @@ interface LaybyVisit {
   readonly far: boolean;
   /** The oncoming lanes were clear and it has gone across: nothing holds it. */
   crossing: boolean;
+  /** Seconds stood wanting across the oncoming lanes, this phase; see LAYBY_YIELD_ASK_S. */
+  crossWaitS: number;
+  /** Across the road (`far`): the turn in, from its own lane to its place... */
+  readonly turnIn: CrossTurn | null;
+  /** ...and the turn out, from its place to its edge lane. */
+  readonly turnOut: CrossTurn | null;
   /** Its driver's line, in the driver's own frame; see `Autopilot.setLaybyCourse`. */
   readonly course: LaybyCourse;
 }
@@ -668,6 +753,8 @@ interface TrafficCar {
   laybyRolled: number;
   /** This car's own share of every stop roll, from its id; see LAYBY_STOP_CHANCE. */
   readonly laybyKey: number;
+  /** Held under its own pace for somebody crossing to a lay-by; see `assignCrossYields`. */
+  crossYield: boolean;
 }
 
 const FORWARD_QUEUE_ORDER = (a: TrafficCar, b: TrafficCar): number =>
@@ -853,6 +940,8 @@ export class RoadTraffic {
    * so the place beside the courier and the pad out to the exit are the rival's.
    */
   private readonly laybyReserved = new Map<number, number>();
+  /** Cars waiting to cross the oncoming lanes to or from a lay-by, first come first; see `assignCrossYields`. */
+  private readonly crossQueue: TrafficCar[] = [];
   /**
    * The lay-bys within reach of the player, re-read as he moves (`refreshLaybys`): one
    * every few kilometres, so this is nearly always empty or one long.
@@ -1422,6 +1511,21 @@ export class RoadTraffic {
     if (!this.hasSpawnGround(place.x, place.y, place.z)) return null;
     const road = this.road;
     const far = layby.side === direction;
+    // Across the road: in where the pad reaches full width; out from the pad's far end,
+    // half the turn still on the pad, so the car waiting for its gap has left its place
+    // to the next (a rival behind it hands in at the same courier).
+    let turnIn: CrossTurn | null = null;
+    let turnOut: CrossTurn | null = null;
+    if (far) {
+      const park = laybyParkLateral(layby);
+      const inS = enterS + direction * padStartU;
+      const riseIn = Math.abs(park - this.forwardLaneCentreAt(inS, direction, 0));
+      turnIn = crossTurn(padStartU - crossTurn(0, riseIn).endU, riseIn);
+      const outS = enterS + direction * padEndU;
+      const outLane = this.forwardLaneCentreAt(outS, direction, this.road.lanesPerSideAt(outS) - 1);
+      const riseOut = Math.abs(outLane - park);
+      turnOut = crossTurn(Math.max(parkU + LAYBY_CROSS_HOLD_M, padEndU - crossTurn(0, riseOut).endU * 0.5), riseOut);
+    }
     const course: LaybyCourse = {
       // The driver asks in its own frame: the reversed road runs s backwards and
       // mirrors lateral (`ReversedRoad`).
@@ -1431,6 +1535,7 @@ export class RoadTraffic {
           : -this.laybyLine(visit, road.length - ownS),
       speed: 0,
       indicator: phase === 'parked' ? 'off' : far ? 'left' : 'right',
+      lookahead: Infinity,
     };
     const visit: LaybyVisit = {
       layby,
@@ -1450,6 +1555,9 @@ export class RoadTraffic {
       handIn: handIn !== null,
       far,
       crossing: false,
+      crossWaitS: 0,
+      turnIn,
+      turnOut,
       course,
     };
     return visit;
@@ -1459,28 +1567,37 @@ export class RoadTraffic {
    * The line of a stop, in the forward frame at forward arclength `s`: the lay-by's
    * drive line from slip to slip (`laybyDriveLateral`, which runs along the parking line
    * on the pad), and outside it the lane, drifting over `LAYBY_EDGE_BLEND_M` to the edge
-   * lane the slips leave from and rejoin — or, for a lay-by across the road, over
-   * `LAYBY_CROSS_BLEND_M` across the oncoming lanes to the far edge lane.
+   * lane the slips leave from and rejoin. Across the road, no slip: its own lane nearest
+   * the crown, the turn in (`turnIn`) to the parking line, and from its place the turn
+   * out (`turnOut`) to its edge lane.
    */
   private laybyLine(visit: LaybyVisit, s: number): number {
     const u = (s - visit.enterS) * visit.direction;
+    if (visit.far) {
+      const park = laybyParkLateral(visit.layby);
+      if (visit.phase === 'out') {
+        const lane = this.forwardLaneCentreAt(s, visit.direction, this.road.lanesPerSideAt(s) - 1);
+        return park + (lane - park) * crossTurnShare(visit.turnOut!, u);
+      }
+      const lane = this.forwardLaneCentreAt(s, visit.direction, 0);
+      return lane + (park - lane) * crossTurnShare(visit.turnIn!, u);
+    }
     if (u > 0 && u < visit.length) return laybyDriveLateral(visit.layby, s, this.road.halfWidthAt(s));
     const lane = this.forwardLaneCentreAt(s, visit.direction, this.road.lanesPerSideAt(s) - 1);
     const edgeS = u <= 0 ? visit.enterS : visit.enterS + visit.direction * visit.length;
     const edge = laybyDriveLateral(visit.layby, edgeS, this.road.halfWidthAt(edgeS));
-    const blend = visit.far ? LAYBY_CROSS_BLEND_M : LAYBY_EDGE_BLEND_M;
-    const t = Math.max(0, 1 - (u <= 0 ? -u : u - visit.length) / blend);
+    const t = Math.max(0, 1 - (u <= 0 ? -u : u - visit.length) / LAYBY_EDGE_BLEND_M);
     return lane + (edge - lane) * t * t * (3 - 2 * t);
   }
 
   /**
    * Moves one stop along: the speeds and lamps of each phase, the hold line its driver
    * stops at, and the hand-back to the road. In: down to the slip's speed in the lane
-   * (across the road: held short of the crossing until the oncoming lanes are clear),
-   * up the slip, along the pad to its place. Parked: on the lever until its time is up
-   * and nobody parked in front of it is still there. Out: to the end of the pad, wait
-   * for the gap (`LAYBY_MERGE_*`, and `LAYBY_CROSS_*` across), up the slip and back
-   * into the lane.
+   * (across the road: down to the turn's, held short of the turn until the oncoming
+   * lanes are clear), up the slip, along the pad to its place. Parked: on the lever
+   * until its time is up and nobody parked in front of it is still there. Out: to the
+   * end of the pad (across: where it stands), wait for the gap (`LAYBY_MERGE_*`, and
+   * `LAYBY_CROSS_*` across), up the slip or round the turn, back into the lane.
    */
   private serviceLayby(car: TrafficCar, dt: number, coordinate: boolean): void {
     const visit = car.layby!;
@@ -1489,15 +1606,26 @@ export class RoadTraffic {
     let holdU = Infinity;
     if (visit.phase === 'in') {
       course.indicator = visit.far ? 'left' : 'right';
-      course.speed = u < 0
-        ? Math.min(
-            car.autopilot.cruisePace,
-            Math.sqrt(LAYBY_SLIP_MPS * LAYBY_SLIP_MPS - 2 * LAYBY_APPROACH_DECEL_MPS2 * u),
-          )
-        : u < visit.padStartU ? LAYBY_SLIP_MPS : LAYBY_PAD_MPS;
+      const turnIn = visit.turnIn;
+      if (turnIn) {
+        course.lookahead = u < turnIn.endU ? Math.max(LAYBY_TURN_LOOKAHEAD_M, turnIn.startU - u) : Infinity;
+        course.speed = u < turnIn.startU
+          ? Math.min(
+              car.autopilot.cruisePace,
+              Math.sqrt(LAYBY_TURN_MPS * LAYBY_TURN_MPS + 2 * LAYBY_APPROACH_DECEL_MPS2 * (turnIn.startU - u)),
+            )
+          : u < visit.padStartU ? LAYBY_TURN_MPS : LAYBY_PAD_MPS;
+      } else {
+        course.speed = u < 0
+          ? Math.min(
+              car.autopilot.cruisePace,
+              Math.sqrt(LAYBY_SLIP_MPS * LAYBY_SLIP_MPS - 2 * LAYBY_APPROACH_DECEL_MPS2 * u),
+            )
+          : u < visit.padStartU ? LAYBY_SLIP_MPS : LAYBY_PAD_MPS;
+      }
       holdU = visit.parkU;
-      if (visit.far && !visit.crossing) {
-        const crossU = -(LAYBY_CROSS_BLEND_M + LAYBY_CROSS_HOLD_M);
+      if (turnIn && !visit.crossing) {
+        const crossU = turnIn.startU - LAYBY_CROSS_HOLD_M;
         if (coordinate && u > crossU - LAYBY_CROSS_DECIDE_M && this.laybyCrossClear(car, visit, true)) {
           visit.crossing = true;
         } else {
@@ -1527,24 +1655,32 @@ export class RoadTraffic {
       visit.parkFor -= dt;
       if (visit.parkFor <= 0 && !this.laybyCarInFront(car, visit)) {
         visit.phase = 'out';
+        visit.crossWaitS = 0;
         if (visit.handIn) car.handIn = 'handed';
       }
     } else {
-      course.indicator = u < visit.length ? (visit.far ? 'right' : 'left') : 'off';
+      const turnOut = visit.turnOut;
+      if (turnOut) {
+        course.lookahead = u < turnOut.endU ? Math.max(LAYBY_TURN_LOOKAHEAD_M, turnOut.startU - u) : Infinity;
+      }
+      const landedU = turnOut ? turnOut.endU : visit.length;
+      course.indicator = u < landedU ? (turnOut ? 'right' : 'left') : 'off';
       course.speed = Math.min(
         car.autopilot.cruisePace,
-        Math.sqrt(LAYBY_PAD_MPS * LAYBY_PAD_MPS + 2 * LAYBY_EXIT_ACCEL_MPS2 * Math.max(0, u - visit.padEndU)),
+        turnOut
+          ? Math.sqrt(LAYBY_TURN_MPS * LAYBY_TURN_MPS + 2 * LAYBY_EXIT_ACCEL_MPS2 * Math.max(0, u - turnOut.endU))
+          : Math.sqrt(LAYBY_PAD_MPS * LAYBY_PAD_MPS + 2 * LAYBY_EXIT_ACCEL_MPS2 * Math.max(0, u - visit.padEndU)),
       );
       if (!visit.merging) {
         if (coordinate && this.laybyMergeClear(car, visit)) visit.merging = true;
-        else holdU = Math.max(u, visit.padEndU);
+        else holdU = Math.max(u, turnOut ? turnOut.startU - LAYBY_CROSS_HOLD_M : visit.padEndU);
       }
       const laneCentre = this.forwardLaneCentreAt(
         car.forwardS,
         visit.direction,
         this.road.lanesPerSideAt(car.forwardS) - 1,
       );
-      const rejoinU = visit.length + (visit.far ? LAYBY_CROSS_BLEND_M : 0) + LAYBY_REJOIN_M;
+      const rejoinU = landedU + LAYBY_REJOIN_M;
       if (u > rejoinU && Math.abs(car.roadLateral - laneCentre) < LAYBY_LANE_TOLERANCE_M) {
         this.endLayby(car);
         this.laybyRejoinCount++;
@@ -1559,6 +1695,12 @@ export class RoadTraffic {
       (visit.phase === 'out' && !visit.merging) ||
       (visit.phase === 'in' && visit.far && !visit.crossing);
     visit.stalledFor = !waiting && car.vehicle.speedKmh < STUCK_SPEED_KMH ? visit.stalledFor + dt : 0;
+    const wantsAcross =
+      visit.far && ((visit.phase === 'in' && !visit.crossing) || (visit.phase === 'out' && !visit.merging));
+    if (wantsAcross && car.vehicle.speedKmh < STUCK_SPEED_KMH) {
+      visit.crossWaitS += dt;
+      if (visit.crossWaitS > LAYBY_YIELD_ASK_S && !this.crossQueue.includes(car)) this.crossQueue.push(car);
+    }
     if (visit.stalledFor > LAYBY_STALL_S) {
       this.endLayby(car);
       return;
@@ -1591,30 +1733,32 @@ export class RoadTraffic {
    */
   private laybyMergeClear(car: TrafficCar, visit: LaybyVisit): boolean {
     const direction = visit.direction;
-    const mergeS = visit.enterS + direction * visit.length;
-    const lane = this.forwardLaneCentreAt(mergeS, direction, this.road.lanesPerSideAt(mergeS) - 1);
-    if (!visit.far) return this.laybyZoneClear(car, mergeS, mergeS, direction, lane, LAYBY_MERGE_GAP_S);
-    const landS = mergeS + direction * LAYBY_CROSS_BLEND_M;
+    const turnOut = visit.turnOut;
+    if (!turnOut) {
+      const mergeS = visit.enterS + direction * visit.length;
+      const lane = this.forwardLaneCentreAt(mergeS, direction, this.road.lanesPerSideAt(mergeS) - 1);
+      return this.laybyZoneClear(car, mergeS, mergeS, direction, lane, LAYBY_MERGE_GAP_S);
+    }
+    const landS = visit.enterS + direction * turnOut.endU;
+    const lane = this.forwardLaneCentreAt(landS, direction, this.road.lanesPerSideAt(landS) - 1);
+    const fromS = landS - direction * LAYBY_SLIP_MOUTH_M;
+    const toS = landS + direction * LAYBY_SLIP_MOUTH_M;
     return (
       this.laybyCrossClear(car, visit, false) &&
-      this.laybyZoneClear(car, Math.min(mergeS, landS), Math.max(mergeS, landS), direction, lane, LAYBY_MERGE_GAP_S)
+      this.laybyZoneClear(car, Math.min(fromS, toS), Math.max(fromS, toS), direction, lane, LAYBY_MERGE_GAP_S)
     );
   }
 
   /**
-   * Whether the oncoming lanes are clear of a crossing to a lay-by across the road: in
-   * (`entering`), the stretch the line crosses before the entry slip and the slip's
-   * mouth; out, the exit slip's mouth and the stretch it crosses back over.
+   * Whether the oncoming lanes are clear of a turn across them to or from a lay-by
+   * across the road (`turnIn` when `entering`, else `turnOut`): the stretch the turn
+   * covers and `LAYBY_SLIP_MOUTH_M` past it, the side the oncoming cars come from.
    */
   private laybyCrossClear(car: TrafficCar, visit: LaybyVisit, entering: boolean): boolean {
-    const direction = visit.direction;
-    const fromS = entering
-      ? visit.enterS - direction * LAYBY_CROSS_BLEND_M
-      : visit.enterS + direction * (visit.length - LAYBY_SLIP_MOUTH_M);
-    const toS = entering
-      ? visit.enterS + direction * LAYBY_SLIP_MOUTH_M
-      : visit.enterS + direction * (visit.length + LAYBY_CROSS_BLEND_M);
-    const oncoming: TrafficDirection = direction === 1 ? -1 : 1;
+    const turn = (entering ? visit.turnIn : visit.turnOut)!;
+    const fromS = visit.enterS + visit.direction * turn.startU;
+    const toS = visit.enterS + visit.direction * (turn.endU + LAYBY_SLIP_MOUTH_M);
+    const oncoming: TrafficDirection = visit.direction === 1 ? -1 : 1;
     return this.laybyZoneClear(car, Math.min(fromS, toS), Math.max(fromS, toS), oncoming, null, LAYBY_CROSS_GAP_S);
   }
 
@@ -1667,18 +1811,83 @@ export class RoadTraffic {
   }
 
   /**
+   * The oncoming cars give way to the first car queued at each lay-by (see
+   * LAYBY_YIELD_ASK_S): each is held to the pace that keeps it the crossing gap out, or
+   * given its own pace back once nobody is asking.
+   */
+  private assignCrossYields(): void {
+    for (let i = this.crossQueue.length - 1; i >= 0; i--) {
+      const car = this.crossQueue[i]!;
+      if (!this.carList.includes(car) || !this.stillCrossing(car)) this.crossQueue.splice(i, 1);
+    }
+    for (const car of this.carList) {
+      let cap = Infinity;
+      for (let i = 0; i < this.crossQueue.length; i++) {
+        const visit = this.crossQueue[i]!.layby!;
+        let queued = false;
+        for (let j = 0; j < i && !queued; j++) {
+          queued = this.crossQueue[j]!.layby!.layby.poiIndex === visit.layby.poiIndex;
+        }
+        if (!queued) cap = Math.min(cap, this.crossYieldCap(car, visit));
+      }
+      if (cap < Infinity) {
+        car.crossYield = true;
+        car.autopilot.setSpeedCap(Math.min(car.speedCap, cap));
+      } else if (car.crossYield) {
+        car.crossYield = false;
+        car.autopilot.setSpeedCap(car.speedCap);
+      }
+    }
+  }
+
+  /** A queued car is still to get across, or still on the oncoming lanes. */
+  private stillCrossing(car: TrafficCar): boolean {
+    const visit = car.layby;
+    if (!visit?.far) return false;
+    const u = (car.forwardS - visit.enterS) * visit.direction;
+    if (visit.phase === 'in') return !visit.crossing || u < visit.turnIn!.endU;
+    if (visit.phase === 'out') return !visit.merging || u < visit.turnOut!.endU;
+    return false;
+  }
+
+  /**
+   * The pace an oncoming car is held to for a crossing (`laybyCrossClear`'s stretch), or
+   * Infinity: not in the oncoming carriageway, past it, or too close to slow at
+   * LAYBY_YIELD_DECEL_MPS2 when it was first asked — that one drives on.
+   */
+  private crossYieldCap(car: TrafficCar, visit: LaybyVisit): number {
+    if (car.rival || car.layby || car.turnS >= 0 || car.direction !== -visit.direction) return Infinity;
+    if (Math.abs(car.roadLateral) > this.road.halfWidthAt(car.forwardS) + LAYBY_LANE_TOLERANCE_M) return Infinity;
+    const turn = (visit.phase === 'in' ? visit.turnIn : visit.turnOut)!;
+    const entryS = visit.enterS + visit.direction * (turn.endU + LAYBY_SLIP_MOUTH_M);
+    const distance = (car.forwardS - entryS) * visit.direction;
+    if (distance <= 0) return Infinity;
+    const room = distance - LAYBY_MERGE_BUFFER_M;
+    const speed = Math.max(0, -car.forwardSpeed * visit.direction);
+    if (!car.crossYield && room <= (speed * speed) / (2 * LAYBY_YIELD_DECEL_MPS2)) return Infinity;
+    return Math.max(0, room) / (LAYBY_CROSS_GAP_S + 1);
+  }
+
+  /**
    * A RIVAL HANDS ITS CARGO IN AT THE COURIER'S LAY-BY (`contracts/race.ts`): it pulls
    * in — across the road when the lay-by is on the far side — stops at `standS` beside
    * the courier for `parkS`, and pulls back out. False with nothing changed when there
-   * is no lay-by at `courierS`, the car is not a live rival driving the road, or its pad
-   * has no ground yet; the race then asks again, or stops it in its lane.
+   * is no lay-by at `courierS`, the car is not a live rival driving the road, its pad
+   * has no ground yet, or it is nearer than `LAYBY_HANDIN_ROOM_M` to where it would
+   * leave its lane (the slip, or across the road the turn); the race then asks again,
+   * or stops it in its lane.
    */
   rivalHandIn(id: string, courierS: number, standS: number, parkS: number): boolean {
     const car = this.rivalCar(id);
     const layby = laybyNear(this.sourceWorld.seed, courierS);
     if (!car || !layby || car.layby || car.rails || car.turnS >= 0 || car.settleFor > 0) return false;
+    // The pad's start is past any place it leaves its lane: past that bound, too late
+    // without planning a visit.
+    const enterS = car.direction === 1 ? Math.min(layby.sEntry, layby.sExit) : Math.max(layby.sEntry, layby.sExit);
+    const u = (car.forwardS - enterS) * car.direction;
+    if (Math.abs(layby.sPadStart - layby.sEntry) - u < LAYBY_HANDIN_ROOM_M) return false;
     const visit = this.planLaybyVisit(car.direction, car.laybyKey, layby, 'in', { standS, parkS });
-    if (!visit) return false;
+    if (!visit || (visit.turnIn ? visit.turnIn.startU : 0) - u < LAYBY_HANDIN_ROOM_M) return false;
     car.layby = visit;
     car.handIn = 'stopping';
     car.laybyRolled = layby.poiIndex;
@@ -1864,6 +2073,7 @@ export class RoadTraffic {
       this.assignBottleneckTurns(COORDINATION_INTERVAL_S);
       this.refreshLaybys();
       this.assignLaybyStops();
+      this.assignCrossYields();
     }
     for (let i = this.carList.length - 1; i >= 0; i--) {
       const car = this.carList[i]!;
@@ -2593,6 +2803,7 @@ export class RoadTraffic {
       layby: parked,
       laybyRolled: parked ? parked.layby.poiIndex : -1,
       laybyKey,
+      crossYield: false,
     };
     if (parked) this.laybySeeded = parked.layby.poiIndex;
     // The field reads the record's live arclength and direction, so it keeps working
