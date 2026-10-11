@@ -333,6 +333,30 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
+    // UMZ-4178, the UAZ-31512's standard engine from about 1989: 2.445 litres, the
+    // Volga block at a compression of 7.0 for A-76, 55.9 kW (76 hp) at 4000 and
+    // 159.8 Nm (16.3 kgf·m) at 2200-2500, NET to GOST 14846, idle 700-750 (UAZ manual
+    // RE 05808600.072-2000, pp. 11-12; the 1993 catalogue's 90 hp and 171.6 Nm are the
+    // gross rating). Mass with clutch 165 kg (1993 catalogue). No red zone is published:
+    // cut at the rated speed plus 7%. Friction is the Volga 2.4's, the same block.
+    id: 'engine_umz_4178',
+    kind: 'engine',
+    label: '2.4 UMZ-4178 inline-four',
+    mass: 165,
+    fits: ['car', 'truck'],
+    engine: {
+      peakPowerKw: 55.9,
+      powerPeakRpm: 4000,
+      peakTorqueNm: 159.8,
+      torquePeakRpm: 2400,
+      redlineRpm: 4300,
+      idleRpm: 725,
+      bsfc: 0.34,
+      brakingCoeff: 0.037,
+      cylinders: 4,
+    },
+  },
+  {
     // Nissan L28E, the fuel-injected 2.8 of the 1979-80 Datsun 280ZX: 2.753 litres,
     // 135 hp (100.7 kW) SAE net at 5200 and 144 lb-ft (195 Nm) at 4400, per the
     // Nissan factory service manual figures quoted by xenonzcar.com.

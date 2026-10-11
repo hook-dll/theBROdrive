@@ -31,7 +31,7 @@ share one scale and one ground row (z0_px) so that z means the same thing in bot
                           segments?, single?, bezel?, bezel_depth?, bezel_cell?, circle: [cx, cy, r] |
                           rect: [x0, y0, x1, y1]} (px; bezel, bezel_depth: mm); rear-face lamps are
                           given in mm: {role, face: "rear", x, z, ...}
-  wheels, bumpers, mirrors, plates, spare, nose, tail, recesses, grooves, lines: mm, copied through
+  wheels, bumpers, mirrors, chassis, plates, spare, nose, tail, recesses, grooves, lines: mm, copied through
                           unchanged (not traced in px; see the face coordinates in README.md)
 
 Output keys follow the carforge schema (see tools/carforge/README.md).
@@ -111,7 +111,7 @@ def main():
     if "arches" in bp:
         spec["arches"] = {tag: {**{k: v for k, v in arch.items() if k != "outline"},
                                 "outline": side_line(arch["outline"])} for tag, arch in bp["arches"].items()}
-    for key in ("bumpers", "mirrors", "plates", "nose", "tail", "recesses", "grooves", "lines"):
+    for key in ("bumpers", "mirrors", "chassis", "plates", "nose", "tail", "recesses", "grooves", "lines"):
         if key in bp:
             spec[key] = bp[key]
 

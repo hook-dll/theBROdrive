@@ -359,6 +359,12 @@ const TARGETS: Readonly<Record<string, Target>> = {
     source: 'man. autoprospect.ru/vaz/2110-zhiguli/1-obshhie-svedeniya.html (2110, carburettor); brake, gross manual.countryauto.ru/vaz/2110/1-obwie-svedenija.html',
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.138 },
   },
+  cf_uaz31512: {
+    wheelbase: 2.38, track: 1.445, radius: 0.372, top: 110, to100: null,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 6.3, lat: null, hz: 1.3,
+    brake80: 43.2, grossKg: 2500,
+    source: 'man. UAZ RE 05808600.072-2000 pp. 10-11 (top, turn; gross of the 31514 hard top; no factory 0-100); brake AO uaz-3151 (1993 catalogue, 31512 column)',
+  },
 };
 
 /*
@@ -388,6 +394,7 @@ const FACTORY_ENGINES: Readonly<Record<string, MakerEngine>> = {
   engine_i4_1600: { power: { kw: 56.3 }, powerRpm: 5400, torque: { nm: 121 }, torqueRpm: 3000, source: 'VAZ-2106-70; AO AZLK-2141 1998 catalogue' },
   engine_uzam_412de: { power: { kw: 49 }, powerRpm: 5800, torque: { nm: 102 }, torqueRpm: [3000, 3800], source: 'UZAM-412DE; AO Moskvich-412 catalogue' },
   engine_umz_4213: { power: { ps: 99 }, powerRpm: 4000, torque: { nm: 201 }, torqueRpm: 3000, source: 'UMZ-4213.10-10; truck-and-bus.ru UAZ-330364 sheet' },
+  engine_umz_4178: { power: { kw: 55.9 }, powerRpm: 4000, torque: { kgfm: 16.3 }, torqueRpm: [2200, 2500], source: 'UMZ-4178, GOST 14846 net; UAZ manual RE 05808600.072-2000 pp. 11-12' },
   engine_i6_2800: { power: { hp: 135 }, powerRpm: 5200, torque: { lbft: 144 }, torqueRpm: 4400, source: 'Nissan L28E, SAE net; 280ZX factory service manual' },
   engine_bmw_m30: { power: { ps: 180 }, powerRpm: 6000, torque: { nm: 255 }, torqueRpm: 3700, source: 'BMW M30B30 (E3 3.0 S / E9 3.0 CS); BMW Group Classic E9 technical data' },
   engine_ford_cologne_v6: { power: { ps: 160 }, powerRpm: 5700, torque: { nm: 221 }, torqueRpm: 4300, source: 'Ford Cologne 2.8i (Capri 2.8 Injection); Ford of Europe press data, 1981' },

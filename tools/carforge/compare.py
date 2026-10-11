@@ -1,7 +1,7 @@
 """Overlay a carforge render on the traced drawing, in any orthographic view (plain Python + Pillow).
 
     python3 tools/carforge/compare.py --blueprint tools/carforge/examples/blueprint_uaz3151.json \
-        --drawing build/carforge/refs/uaz_blueprint.gif --render build/carforge/renders/uaz3151 \
+        --drawing tools/carforge/examples/uaz3151_drawing.gif --render build/carforge/renders/uaz3151 \
         --out build/carforge/renders/uaz3151_overlay.png [--view side|front|top|rear]
 
 --render is the prefix render.py was given: it reads <prefix>_<view>.png and <prefix>_<view>.json.

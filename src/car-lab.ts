@@ -91,6 +91,7 @@ function packOf(def: CarModelDef): string {
   if (def.id.startsWith('sv_')) return 'Soviet FBX';
   if (def.id.startsWith('sa_')) return 'GTA SA';
   if (def.id.startsWith('gt_')) return 'GTA V';
+  if (def.id.startsWith('cf_')) return 'carforge';
   return 'other';
 }
 

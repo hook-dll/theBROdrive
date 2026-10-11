@@ -261,9 +261,11 @@ function buildEngine(b: MeshBuilder, v: PartVariant): void {
     case 'engine_lada_rally':
     case 'engine_niva_1600': return buildInline(b, spec, 1.0);
     case 'engine_niva_1700': return buildInline(b, spec, 1.02);
-    // The Volga 2.4: a tall, long-stroke four, so a taller block than the 1.6.
+    // The Volga 2.4: a tall, long-stroke four, so a taller block than the 1.6. The UAZ's
+    // UMZ-4178 is the same block.
     case 'engine_zmz_21':
-    case 'engine_zmz_24': return buildInline(b, spec, 1.09);
+    case 'engine_zmz_24':
+    case 'engine_umz_4178': return buildInline(b, spec, 1.09);
     default: throw new Error(`unhandled engine variant: ${v.id}`);
   }
 }

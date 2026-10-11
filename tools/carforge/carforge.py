@@ -44,6 +44,7 @@ ATLAS_ROWS = 2
 CELLS = {
     "paint": (0, 0), "steel": (0, 1), "trim": (1, 1), "black": (2, 1), "glass": (3, 1),
     "chrome": (4, 1), "lamp_head": (8, 1), "lamp_tail": (5, 1), "blinker": (7, 1), "reverse": (8, 1),
+    "white": (8, 1),
 }
 LAMP_CELL = {
     "headlights": "lamp_head", "taillights": "lamp_tail", "reverselights": "reverse",
@@ -1166,14 +1167,14 @@ def add_bumper(bm, uvl, b):
 
 
 def add_details(spec, body):
-    """Bumpers, mirrors and plates (any face: grille panels, handles, hinges), joined in."""
+    """Bumpers, mirrors, chassis and plates (any face: grille panels, handles, hinges), joined in."""
     bvh = body_bvh(body)
     bm = bmesh.new()
     bm.from_mesh(body.data)
     uvl = bm.loops.layers.uv["UVMap"]
     for b in spec.get("bumpers", []):
         add_bumper(bm, uvl, b)
-    for m in spec.get("mirrors", []):
+    for m in spec.get("mirrors", []) + spec.get("chassis", []):
         for sign in ((1.0,) if m.get("single") else (1.0, -1.0)):
             x0, x1 = sorted(v * sign for v in m["x"])
             add_box(bm, uvl, (x0, m["y"][0], m["z"][0]), (x1, m["y"][1], m["z"][1]),

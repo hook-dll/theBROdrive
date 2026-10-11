@@ -40,7 +40,8 @@ Every other value is measured from the image (see README.md, "Automatic trace"):
               capped at the front view's half-width at the belt (the gutter stands out past the glass).
               Under each arch the top view's outline is the arch lip's edge, so low there is the
               outline less the lip's flare profile (lip_flare(): carforge stands the lip that far
-              proud of plan.low).
+              proud of plan.low), but never inside the body line bridged across the arch: the side
+              is one wall up to the shoulder, so a deeper cut would dent the wing above the lip.
   front view  half-width per row of the run through the centre column (mirror heads cut off by the
               opening, arms and brackets by an 80 mm grey opening). tumblehome = half-width / half-width
               at the belt, from the belt up to where it falls under 0.9 (the roof's corner radius).
@@ -1640,6 +1641,7 @@ def main():
         for col, v in fl.items():
             lip_cut[col] = max(lip_cut.get(col, 0.0), v)
     proud = {}  # how far the drawn outline stands past the body line bridged across each arch
+    bridges = []  # (columns under the arch, that body line there)
     if plan_low is not None:
         for tag, arch in arches.items():
             xs = [p[0] for p in arch["outline"]]
@@ -1649,9 +1651,16 @@ def main():
             sel = (plan_low[0] >= min(xs)) & (plan_low[0] <= max(xs))
             bridge = la + (plan_low[0][sel] - a_) * (lb - la) / (b_ - a_)
             proud[tag] = round(float(np.max(plan_low[1][sel] - bridge)) * mm) if sel.any() else 0
+            bridges.append((sel, bridge))
     if plan_low is not None and lip_cut:
         cut = np.array([lip_cut.get(int(col), 0.0) for col in plan_low[0]]) / mm
-        plan_low = (plan_low[0], plan_low[1] - cut)
+        low = plan_low[1] - cut
+        # The cut stops at the body line bridged across the arch. The schema's side is one wall
+        # from sill to shoulder, so cutting past that line (a lip flare prouder than the drawn
+        # one) takes the whole wing above the lip in: a dent over every arch.
+        for sel, bridge in bridges:
+            low[sel] = np.maximum(low[sel], np.minimum(plan_low[1][sel], bridge))
+        plan_low = (plan_low[0], low)
         plan_high = (plan_high[0], np.minimum(plan_high[1], plan_low[1]))
 
     # 8. blueprint

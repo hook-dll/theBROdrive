@@ -1007,6 +1007,7 @@ Reject при любом из признаков:
 - traffic, world lifecycle, save, dirt/damage/light benches;
 - настоящий Autopilot bench и повторяемый playground circuit;
 - dev spawn и визуальные labs.
+- `tools/carforge`: кузов по заводскому чертежу без исходного архива, сразу в форме Soviet-пака (FBX, атлас `albedo.png`, стекло в ячейке (3, 1), узел на каждую функцию фонаря); этапы A–D и G для него не нужны, H и дальше те же (пример: `cf_uaz31512`, команды в `tools/carforge/README.md`).
 
 ### Разрывы автоматизации
 

@@ -124,7 +124,7 @@ const PLATOON_CHANCE = 0.32;
  * WHO DRIVES WHAT: the driver's character comes from the car (owner, 2026-10-10), not
  * from one share for the whole stream. `[sleeper, hurried, frantic]` odds per model:
  *
- *  - the old and the slow are always sleepers: the GAZ-21, the UAZ, the Oka, the IZh
+ *  - the old and the slow are always sleepers: the GAZ-21, both UAZs, the Oka, the IZh
  *    and the first four Zhigulis;
  *  - the later Zhigulis, the Samaras, the GAZ-24 and the Nivas: 25% sleeper, 25%
  *    hurried and 50% frantic (20% frantic read as no frantic at all, owner 2026-10-10);
@@ -139,6 +139,7 @@ const FAST_CAR: readonly [number, number, number] = [0, 0.5, 0.5];
 const DRIVER_ODDS: Readonly<Record<string, readonly [number, number, number]>> = {
   sv_gaz21: SLOW_CAR,
   sa_uaz330364: SLOW_CAR,
+  cf_uaz31512: SLOW_CAR,
   sa_oka: SLOW_CAR,
   sa_izh2715: SLOW_CAR,
   sv_vaz2101: SLOW_CAR,

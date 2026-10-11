@@ -19,10 +19,13 @@
 
 import * as THREE from 'three';
 import { installAssetShim } from './assetshim';
+import { installDocumentShim } from './domshim';
 import { CAR_MODELS } from '../src/vehicle/carmodels';
 import { carModelMeasure, createCarModel, preloadCarModels } from '../src/render/carmodel';
 
 installAssetShim();
+// A driven copy builds its sticker atlas on a 2D canvas.
+installDocumentShim();
 
 /** Ray origin lifted off a surface so it cannot start inside the triangle it sits on. */
 const SURFACE_EPSILON_M = 0.001;

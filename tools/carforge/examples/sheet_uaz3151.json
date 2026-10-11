@@ -1,7 +1,7 @@
 {
- "id": "uaz3151t",
- "image": "build/carforge/refs/uaz_blueprint.gif",
- "source": "build/carforge/refs/uaz_blueprint.gif, factory drawing of the UAZ-3151 hard top, traced by trace.py",
+ "id": "uaz31512",
+ "image": "tools/carforge/examples/uaz3151_drawing.gif",
+ "source": "tools/carforge/examples/uaz3151_drawing.gif, factory drawing of the UAZ-3151 hard top, traced by trace.py; built for the game as cf_uaz31512",
  "wheelbase_mm": 2380,
  "views": {
   "side": [
@@ -131,6 +131,13 @@
     "cell": "black"
    }
   ],
+  "chassis": [
+   {"x": [400, 480], "y": [-560, 3080], "z": [395, 480], "cell": "black"},
+   {"x": [-560, 560], "y": [-45, 45], "z": [335, 425], "cell": "black", "single": true},
+   {"x": [-150, 150], "y": [-120, 120], "z": [220, 450], "cell": "black", "chamfer": 40, "single": true},
+   {"x": [-560, 560], "y": [2335, 2425], "z": [335, 425], "cell": "black", "single": true},
+   {"x": [-150, 150], "y": [2260, 2500], "z": [220, 450], "cell": "black", "chamfer": 40, "single": true}
+  ],
   "spare": {
    "y": 3252,
    "z": 1013
@@ -150,7 +157,13 @@
     "proud": 20,
     "radius": 15,
     "single": true
-   }
+   },
+   {"face": "rear", "x": [30, 540], "z": [660, 772], "cell": "white", "proud": 6, "single": true},
+   {"face": "rear", "x": [-635, -565], "z": [860, 920], "cell": "paint", "proud": 12, "straddle": true, "single": true},
+   {"face": "rear", "x": [-635, -565], "z": [1460, 1520], "cell": "paint", "proud": 12, "straddle": true, "single": true}
+  ],
+  "grooves": [
+   {"face": "rear", "line": [[-600, 680], [-600, 1700], [-560, 1740], [560, 1740], [600, 1700], [600, 680], [560, 640], [-560, 640]], "closed": true, "single": true}
   ],
   "lamps": [
    {

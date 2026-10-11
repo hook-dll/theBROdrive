@@ -52,6 +52,7 @@ Run Blender jobs one at a time, under `nice -n 15`:
 | `fair_tol` | number | mm, default 12 | Trace noise below this is dropped from the side/plan curves (Douglas-Peucker). |
 | `bumpers` | [{y, z, half_width, cell, chamfer, channel?, lip?}] | y, z: [lo,hi] mm; half_width mm; cell: atlas material name; chamfer mm | Bumper boxes at the nose/tail. `channel`: the outer face is a channel that deep between `lip`-tall lips. |
 | `mirrors` | [{x, y, z, cell, chamfer?}] | mm boxes, mirrored to the right | Wing mirror heads and arms. |
+| `chassis` | [{x, y, z, cell?, chamfer?, single?}] | mm boxes, mirrored to the right unless `single` | Running gear seen under the body: frame rails, axle beams, differential housings. The lowest one sets the body's ground clearance in the game (the loader fits the body box between `clearance` and `height`), so a body without an underbody of its own needs them. |
 | `plates` | [{face, x\|y, z, cell, round, radius, proud?, single}] | face coords | Blocks standing on a face: number plate, door handles, hinges. |
 | `lamps` | [{role, face, x\|y, z, round, segments, single, bezel?, dome?, rim?}] | face coords; face `front`/`rear`/`side` | Lamp boxes. `role` must be a key of `LAMP_CELL` in carforge.py (`headlights`, `leftblinkers`, `rightblinkers`, `taillights`, `reverselights`); a side blinker becomes left/right by its side. `dome`: a chrome rim (`rim` mm proud) round a lens bulging `dome` mm, like the pack's headlamps. `bezel`: the lamp sits in a pocket that much wider. |
 | `spare` | {y, z} | mm | Spare-wheel position (optional). |
@@ -94,9 +95,23 @@ python3 tools/carforge/fit_blueprint.py --in build/carforge/trace/blueprint.json
 nice -n 15 $BLENDER --background --factory-startup --python tools/carforge/carforge.py -- build/carforge/trace/spec.json build/carforge/trace/car.fbx
 nice -n 15 $BLENDER --background --factory-startup --python tools/carforge/render.py -- --fbx build/carforge/trace/car.fbx --prefix build/carforge/trace/render
 for v in side front top; do python3 tools/carforge/compare.py --blueprint build/carforge/trace/blueprint.json \
-    --drawing build/carforge/refs/uaz_blueprint.gif --render build/carforge/trace/render --view $v \
+    --drawing tools/carforge/examples/uaz3151_drawing.gif --render build/carforge/trace/render --view $v \
     --out build/carforge/trace/overlay_$v.png; done
 ```
+
+The same build is the game's UAZ-31512 (`cf_uaz31512` in `src/vehicle/carmodels.ts`). To ship a
+change to it, copy the FBX over the game's and re-measure its fit:
+
+```
+cp build/carforge/trace/car.fbx public/models/carforge/uaz31512.fbx
+bun tools/fit-models.ts cf_uaz31512
+bun tools/reality.ts cf_uaz31512
+```
+
+The game loads it the way it loads the Soviet pack (FBX, the pack's `albedo.png` atlas, glass in
+cell (3, 1), paint in (0, 0)); the node names come from the sheet's `id` (`uaz31512body`,
+`uaz31512bodyheadlights`, `uaz31512wheel_fl`, …), so renaming the sheet renames them in the
+catalogue entry too.
 
 The sheet is the only manual input:
 
@@ -106,7 +121,7 @@ The sheet is the only manual input:
 | `image` | The drawing: dark lines on a light ground, one scale for every view. |
 | `wheelbase_mm` | The one known dimension; sets the scale. |
 | `views` | `{side, front?, top?, rear?}`: `[x0, y0, x1, y1]` px box of each view in the image. One view per box; keep dimension lines that would close a loop with the car (an arrowed height dimension beside the roof) outside it. The top view must sit under the side view with its columns aligned. A top view is required (plan widths); without a front view the track must come from `extras.wheels`. |
-| `extras` | Values the drawing does not give, copied into the blueprint after the traced items: `wheels` (`width`, `well`; anything here overrides the traced wheel values), `arches.front/rear` (`lip`, `flare`), `bumpers`, `mirrors`, `plates`, `lamps` (mm form), `nose`, `tail`, `spare`, `recesses` (windscreen and back-light glass), `grooves`, `lines`, `seams`. The UAZ sheet keeps only what the trace cannot find: bumpers, mirrors, spare, nose, the rear face (plate, lamps, back light), the windscreen and the side blinker; door gaps, hinges, handles, the fuel flap, the grille, the front lamps and the bonnet ribs come from the drawing (see "Details"). |
+| `extras` | Values the drawing does not give, copied into the blueprint after the traced items: `wheels` (`width`, `well`; anything here overrides the traced wheel values), `arches.front/rear` (`lip`, `flare`), `bumpers`, `mirrors`, `chassis`, `plates`, `lamps` (mm form), `nose`, `tail`, `spare`, `recesses` (windscreen and back-light glass), `grooves`, `lines`, `seams`. The UAZ sheet keeps only what the trace cannot find: bumpers, mirrors, the chassis under the body, spare, nose, the rear face (rear door outline and hinges, number plate, handle, lamps, back light), the windscreen and the side blinker; door gaps, hinges, handles, the fuel flap, the grille, the front lamps and the bonnet ribs come from the drawing (see "Details"). |
 
 What is measured, in order (the module docstring and each function's docstring hold the exact rules):
 
@@ -116,7 +131,7 @@ What is measured, in order (the module docstring and each function's docstring h
 4. **Body ends.** The columns where the side silhouette stands ≥ 50 % of the car's height (drops a low bumper) and the top view is ≥ 60 % of its widest (drops a spare wheel carried behind), trimmed to stop where an extras bumper box begins.
 5. **`side.top`**: the silhouette's first row per column, spikes narrower than 60 mm opened away.
 6. **`side.bottom`**: down each column outside the wheel discs, the lowest clear (ink-free) run ≥ 70 mm tall is body side and the ink band under it is the sill; its lower edge is the underside. Chassis parts (frame rails, springs, exhaust) are lines with short gaps, so they are skipped. A 21-column median per stretch (front overhang, between the wheels, rear overhang); nothing hangs more than 1 px below the median sill between the wheels; within 200 mm of an extras bumper box an underside still below the box's top is put at the box's top (the bumper hides the body there).
-7. **Plan (top view)**: centre row = median mid-point of the silhouette columns (`top_x0_px`). `plan.low` = half-width of the filled run through the centre row, both sides averaged, with a 250 mm grey opening that removes the mirrors. `plan.high` = the outermost line drawn symmetrically about the centre row, 6 px or more inside `low` and outside 60 % of it (bonnet edge, roof gutter), opened the same way, capped at the front view's half-width at the belt (the gutter stands out past the glass). Under each arch the top view's outline is the arch lip's edge, and carforge stands the lip `flare` mm proud of `plan.low`; so `plan.low` there is the outline less the lip's flare profile (`lip_flare()`: full flare over the opening, run out over 80 mm of the outline at its ends and across the `lip` band, as carforge builds it). `TRACE` prints the cut (`arch_lip_cut_mm`) and how far the drawn outline stands past the body line bridged across the arch (`arch_drawn_proud_mm`).
+7. **Plan (top view)**: centre row = median mid-point of the silhouette columns (`top_x0_px`). `plan.low` = half-width of the filled run through the centre row, both sides averaged, with a 250 mm grey opening that removes the mirrors. `plan.high` = the outermost line drawn symmetrically about the centre row, 6 px or more inside `low` and outside 60 % of it (bonnet edge, roof gutter), opened the same way, capped at the front view's half-width at the belt (the gutter stands out past the glass). Under each arch the top view's outline is the arch lip's edge, and carforge stands the lip `flare` mm proud of `plan.low`; so `plan.low` there is the outline less the lip's flare profile (`lip_flare()`: full flare over the opening, run out over 80 mm of the outline at its ends and across the `lip` band, as carforge builds it), but no further in than the body line bridged across the arch (see "Known limits"). `TRACE` prints the cut (`arch_lip_cut_mm`) and how far the drawn outline stands past the body line bridged across the arch (`arch_drawn_proud_mm`).
 8. **Front view**: the track and the centre column from the tyres (under the axle, clusters of vertical lines spanning 0.3-1.2 tyre radii; lone extension and centre lines are not tyres). Half-width per row of the run through the centre column, mirror arms and brackets removed by an 80 mm grey opening. `tumblehome` = half-width / half-width at the belt, from the belt up to where it falls under 0.9. `shoulder` = the first row under the belt where the half-width is past half-way from the belt's to the body's widest.
 9. **Windows**: background regions inside the side silhouette that are ≥ 120 mm thick, ≥ 12 % of the car's height tall, end above roof + 55 % of the height and have holes of at most a quarter of their area; regions under 50 mm apart (a divider, a seat or wiper line) merge. Each window's frame is the ink within 4 px of its glass; what that encloses is the window. Its four sides are supporting lines through the outermost pixels (a seat or box against the frame only pushes points inward), front and rear fitted on the rows 12-55 % down the glass, where no dash or seat is. `round` = median corner radius from the gap between the sharp corner and the glass; the first window gets `pillar: "a"` when its front edge leans back, the last `pillar: "c"` when its rear edge leans forward. `belt`/`glass_top` = median window bottom/top.
 10. **Arches**: the non-ink gap between the tyre and the fender (the region hugging the tyre's upper half, outside the disc, above the underside line); the first ink above it per column is the arch edge. Where the gap pinches shut, the end segment's slope runs on to 3 px below the underside. `wheels.arch_front/rear` = the edge's height over the hub.
@@ -154,7 +169,7 @@ What a drawing must give for the details: one line weight for body lines (the li
 
 Known limits of the trace:
 
-- Body side is a vertical wall below the shoulder in the schema, so the body under an arch can only be cut for the whole height: from sill to shoulder it stands the lip's flare inside the drawn outline. With the sheet's `flare` 30 and the drawing's lip only `arch_drawn_proud_mm` (UAZ: front 14, rear 19 mm) proud of the doors, the wing above the lip is 11-16 mm inside the door line; set `extras.arches.*.flare` to the drawn proudness to make it flush.
+- Body side is a vertical wall below the shoulder in the schema, so the body under an arch can only be cut for the whole height. `plan.low` under an arch is therefore the drawn outline less the lip's flare, but never inside the body line bridged across the arch from either side: a deeper cut (the sheet's `flare` 30 against a drawn lip only `arch_drawn_proud_mm` proud, UAZ front 14, rear 19 mm) took the whole wing above the lip in and left a dent over each arch. The lip then stands its full `flare` proud of the door line, 11-16 mm prouder than drawn on the UAZ; set `extras.arches.*.flare` to the drawn proudness to match it exactly.
 - Door gaps are taken from the belt down; a gap that runs on up a window frame (the UAZ front door's front edge up the A pillar) stops where its line crosses another one instead of ending in a corner. Door tops along the roof are level lines and are not taken.
 - Only the side blinker, rear face and windscreen are still hand items on the UAZ sheet; a rear view is not traced.
 - A hinge is a box drawn on its gap; one drawn beside a gap, or a door with one hinge, is dropped. Of several handle candidates only those with a partner on another door on the same row are taken.
@@ -214,21 +229,23 @@ curves faired by `fair_tol`, every non-planar quad split along its convex diagon
 `fairness.py` on the three examples: UAZ 18 folds / 59 ripples → 0 / 0; VAZ-2101 10 / 6 → 0 / 1
 (one 2-6° bend pair at the C-pillar base); BMW 34 / 16 → 0 / 0.
 
-## Status (2026-10-09) and what is next
+## Status (2026-10-11) and what is next
 
 Done: fair shell (above); traced UAZ arches (flat-topped trapezoids) with a flared lip; side
 windows as recessed pockets with traced slanted pillars and rounded corners; door seams; nose
 bulge and recessed headlamp bezels. `fit_mesh.py` now finds bumpers (boxes, left out of the
 slices), grille plates, window outlines (glass hull per pane) and keeps the true end length.
-UAZ body ~3100 tris.
+The traced UAZ is in the game as the UAZ-31512 (`cf_uaz31512`, ~5400 tris): rear door outline,
+its hinges and the number plate on the rear face, frame rails, axles and differentials under the
+body (`chassis`).
 
 Next:
 1. `fit_mesh.py` bodies still ripple (vz01 59, gz24 53, vz21 146 by `fairness.py`): facet noise in
    the slices; the shoulder detector flips between the belt and a step on vz21.
-2. `trace.py` traces outlines, windows, arches and the small details (door gaps, hinges, handles,
-   fuel flap, grille, front lamps, bonnet ribs; see "Details") without hand work; the traced UAZ
-   body is ~5300 tris. Still hand-only: the side blinker and the rear face (no rear view is traced).
-   Overlays: `build/carforge/trace/overlay_{side,front,top}.png`.
-3. Rear face detail (tail lamp bezels, door seam), grille relief.
-4. Game integration: a `carmodels.ts` def for the generated UAZ (drivetrain can reuse
-   `engine_umz_4213` / `gearbox_uaz_4`).
+2. The traced UAZ keeps 18 ripples by `fairness.py` (the hand spec has none): the roof rail at the
+   A pillar and at the rear corner, and the sill corner ahead of the front door.
+3. `trace.py` is tested on one drawing; a second line drawing is the check that its relative rules
+   hold. Still hand-only on the UAZ: the side blinker and the rear face (no rear view is traced).
+4. The drawing's scan is about 4% short vertically (roof 1956 mm against the manual's 2020): the
+   game stretches the body 3.7% in height to the factory figure.
+5. Grille relief.
