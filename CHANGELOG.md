@@ -132,6 +132,17 @@
 
 ### Fixed
 
+- A RIVAL QUEUED BEHIND ANOTHER AT THE TURN NO LONGER DRIVES ROUND IT AND ON PAST THE
+  COURIER (`world/traffic.ts`). Reported from play. Standing behind the rival still
+  waiting at the turn, the second had already decided to cross, so its stop's 30 s
+  "going nowhere" clock ran; it was handed back to the road, whose driver overtook the
+  car in front. A car standing within 15 m of another on its way in to the same lay-by
+  is queued, not stalled (`LAYBY_QUEUE_M`).
+  - Oncoming cars giving way stop 15 m short of the gap check's 40 m buffer
+    (`LAYBY_YIELD_MARGIN_M`). Held to the buffer itself they crept up to it, stood
+    there, and kept the crossing they were yielding for shut: on the bench two rivals
+    stood at the turn behind a row of stopped oncoming cars.
+
 - RIVALS NO LONGER STAND FOR MINUTES WAITING TO CROSS TO A COURIER ACROSS THE ROAD
   (`world/traffic.ts`, `vehicle/autopilot.ts`, `contracts/race.ts`). Reported from play:
   three rivals stood in their lane with the left indicator on for 3-4 minutes, a queue
