@@ -476,6 +476,13 @@ const LAYBY_CROSS_GAP_S = 6;
 const LAYBY_YIELD_ASK_S = 3;
 const LAYBY_YIELD_DECEL_MPS2 = 2;
 /**
+ * Past `LAYBY_MERGE_BUFFER_M`, the road a yielding car keeps from the crossing even at a
+ * standstill. The gap check refuses anything inside that buffer, so a yielder held to
+ * the buffer itself crept up to it, stopped there, and closed the gap it was making:
+ * two rivals stood at the turn behind a row of oncoming cars waiting for them.
+ */
+const LAYBY_YIELD_MARGIN_M = 15;
+/**
  * A rival held up on the pad short of its place — the player's own car left on the
  * parking line — for this long hands in from where it stands, seconds. It never
  * reverses: on the way out it waits behind that car until it moves.
@@ -506,6 +513,8 @@ const LAYBY_REJOIN_M = 25;
 const LAYBY_LANE_TOLERANCE_M = 1;
 /** A car going nowhere on its way in or out for this long gives the stop up, seconds. */
 const LAYBY_STALL_S = 30;
+/** Another car on its way in to the same lay-by this near ahead is a queue, metres. */
+const LAYBY_QUEUE_M = 15;
 /** Road kept clear of the turning circle and the world's ends. */
 const LAYBY_END_MARGIN_M = 300;
 /** The id the player's own car is excluded by when it asks for a field of its own. */
@@ -1687,13 +1696,17 @@ export class RoadTraffic {
         return;
       }
     }
-    // Going nowhere on the way in or out — not parked, not waiting for the gap — is a
-    // stop gone wrong; the road's own driver takes the car back from wherever it is.
+    // Going nowhere on the way in or out — not parked, not waiting for the gap, not
+    // queued behind another car making the same stop — is a stop gone wrong; the road's
+    // own driver takes the car back from wherever it is. A queue is not: a rival that
+    // had decided to cross stood behind the one still waiting at the turn, ran out this
+    // clock, was handed back to the road and drove round it, parcel and all.
     // Its own clock, not `stoppedFor`, which has been running all the time it was parked.
     const waiting =
       visit.phase === 'parked' ||
       (visit.phase === 'out' && !visit.merging) ||
-      (visit.phase === 'in' && visit.far && !visit.crossing);
+      (visit.phase === 'in' && visit.far && !visit.crossing) ||
+      (visit.phase === 'in' && this.laybyQueued(car, visit, u));
     visit.stalledFor = !waiting && car.vehicle.speedKmh < STUCK_SPEED_KMH ? visit.stalledFor + dt : 0;
     const wantsAcross =
       visit.far && ((visit.phase === 'in' && !visit.crossing) || (visit.phase === 'out' && !visit.merging));
@@ -1713,6 +1726,17 @@ export class RoadTraffic {
     car.layby = null;
     car.autopilot.setLaybyCourse(null);
     car.autopilot.setHoldDistance(Infinity);
+  }
+
+  /** Whether another car on its way in to the same lay-by stands just ahead of this one. */
+  private laybyQueued(car: TrafficCar, visit: LaybyVisit, u: number): boolean {
+    for (const other of this.carList) {
+      const ahead = other.layby;
+      if (other === car || !ahead || ahead.layby.poiIndex !== visit.layby.poiIndex || ahead.phase === 'out') continue;
+      const gap = (other.forwardS - visit.enterS) * visit.direction - u;
+      if (gap > 0 && gap < LAYBY_QUEUE_M) return true;
+    }
+    return false;
   }
 
   /** Whether a car parked in front of this one, on the same pad, has not left yet. */
@@ -1862,7 +1886,7 @@ export class RoadTraffic {
     const entryS = visit.enterS + visit.direction * (turn.endU + LAYBY_SLIP_MOUTH_M);
     const distance = (car.forwardS - entryS) * visit.direction;
     if (distance <= 0) return Infinity;
-    const room = distance - LAYBY_MERGE_BUFFER_M;
+    const room = distance - LAYBY_MERGE_BUFFER_M - LAYBY_YIELD_MARGIN_M;
     const speed = Math.max(0, -car.forwardSpeed * visit.direction);
     if (!car.crossYield && room <= (speed * speed) / (2 * LAYBY_YIELD_DECEL_MPS2)) return Infinity;
     return Math.max(0, room) / (LAYBY_CROSS_GAP_S + 1);
