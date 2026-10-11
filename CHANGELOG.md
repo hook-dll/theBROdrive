@@ -102,9 +102,11 @@
     this car there, rim out of the tail (`CarModelDef.spareNode`, `addSpareWheel`).
   - The front bumper stands on two brackets off the frame rails; the rails run into the
     rear bumper (they stopped 9 mm short of it).
-  - The bonnet is flat: the drawing's bonnet rose 80 mm to the cowl with a step across
+  - The bonnet is flat, and its front edge rolls over on a ~150 mm radius into the grille
+    panel, as on the drawing: the traced bonnet rose 80 mm to the cowl with a step across
     it. A new spec key, `redraw`, replaces a stretch of a side line with given points (a
-    null height keeps the traced one, so two nulls make a straight chord).
+    null height keeps the traced one, so two nulls make a straight chord); its points are
+    never faired away by `fair_tol`, which had cut the roll to two facets.
   - Lamps have flat lenses, proud of the highest point under them: the crease under the
     wing blinker showed through its folded lens. The tail, rear blinker and reverse lamps
     stand 22 mm proud; the reverse lamp moved up off the bumper end, where its corners

@@ -152,12 +152,18 @@ def simplify(pts, tol):
 
 
 class Curve:
-    """Piecewise-linear y -> value, clamped at the ends; with `tol`, faired by `simplify`."""
+    """Piecewise-linear y -> value, clamped at the ends; with `tol`, faired by `simplify`.
+    Points at a y in `keep` (drawn by hand: `redraw`) are never faired away: the stretches
+    between them are faired on their own."""
 
-    def __init__(self, pts, tol=0.0):
+    def __init__(self, pts, tol=0.0, keep=()):
         pts = sorted((float(a), float(b)) for a, b in pts)
         if tol > 0:
-            pts = simplify(pts, tol)
+            cuts = [0] + [i for i, p in enumerate(pts) if p[0] in keep and 0 < i < len(pts) - 1] + [len(pts) - 1]
+            out = [pts[0]]
+            for a, b in zip(cuts, cuts[1:]):
+                out += simplify(pts[a:b + 1], tol)[1:]
+            pts = out
         self.ys = [p[0] for p in pts]
         self.vs = [p[1] for p in pts]
 
@@ -251,6 +257,7 @@ def apply_redraw(spec):
             y0, y1 = min(y for y, _ in new), max(y for y, _ in new)
             pts = sorted([p for p in pts if not y0 <= p[0] <= y1] + new)
         spec["side"][key] = [list(p) for p in pts]
+        spec.setdefault("_redrawn", {})[key] = sorted({float(y) for poly in polys for y, _ in poly})
     return spec
 
 
@@ -260,9 +267,10 @@ class Shape:
     def __init__(self, spec):
         side, plan = spec["side"], spec["plan"]
         tol = float(spec.get("fair_tol", FAIR_TOL))
-        self.top = Curve(side["top"], tol)
-        self.bottom = Curve(side["bottom"], tol)
-        self.shoulder = Curve(side["shoulder"], tol)
+        kept = spec.get("_redrawn", {})
+        self.top = Curve(side["top"], tol, kept.get("top", ()))
+        self.bottom = Curve(side["bottom"], tol, kept.get("bottom", ()))
+        self.shoulder = Curve(side["shoulder"], tol, kept.get("shoulder", ()))
         self.low = Curve(plan["low"], tol)
         self.high = Curve(plan["high"], tol)
         # Front view: half-width factor of the greenhouse against its width at the belt.
