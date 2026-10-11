@@ -900,6 +900,7 @@ check(
       handIn: string;
       layby: { phase: string; enterS: number } | null;
       crossYield: boolean;
+      direction: 1 | -1;
     };
     const cars = stream as unknown as { carList: RivalCar[] };
     const parkedFrom = new Map<string, number>();
@@ -933,14 +934,15 @@ check(
           const lane = road.laneCentreAt(car.forwardS, road.lanesPerSideAt(car.forwardS) - 1);
           if (Math.abs(car.roadLateral - lane) < 1) cleared.add(car.id);
         }
-        // Across the oncoming lane on the way in: nobody coming the other way who could
-        // not stop short of it on a firm 4 m/s² with 3 m to spare (centre to centre less
-        // two half-lengths). A car that lets it through rolls up close; that is allowed.
+        // Across the oncoming lane on the way in: no ONCOMING car (driving -1; the rivals
+        // drive +1) that could not stop short of it on a firm 4 m/s² with 3 m to spare
+        // (centre to centre less two half-lengths). A car that lets it through rolls up
+        // close; that is allowed. A same-direction car ahead is not in the way.
         if (side === 1 && phase === 'in' && car.roadLateral > 0 && car.roadLateral < road.halfWidthAt(car.forwardS)) {
           for (const other of cars.carList) {
             if (other.crossYield) yielders.add(other.id);
             const ahead = other.forwardS - car.forwardS;
-            if (other === car || other.roadLateral <= 0 || ahead <= 0) continue;
+            if (other === car || other.direction !== -1 || other.roadLateral <= 0 || ahead <= 0) continue;
             const gap = ahead - 5;
             if (ahead < 120) nearestOncomingWhileCrossing = Math.min(nearestOncomingWhileCrossing, gap);
             const mps = other.vehicle.speedKmh / 3.6;

@@ -131,6 +131,16 @@
   pass reached the oncoming lane's centre, and a car was spawned 38 m in front of it at
   75 km/h (head-on in the bench).
 
+- `tools/traffic-seeds.ts`: the traffic bench over several seeds (42, 7, 1337, 2024,
+  99 by default, or any given), with the impact checks summed. One seed is one random
+  stream and any driving change reshuffles it: the same build gives 0-5 impacts in the
+  mixed queue depending on the seed, so a driving change is judged on these totals.
+  Baseline at this commit: 9 queue, 4 turnaround, 2 lay-by, 0 + 2 hand-in impacts; the
+  rock check over 22 s on seed 99.
+- `traffic-bench` far-side hand-in check counts only ONCOMING cars. It counted any car
+  ahead with a positive lateral, and on seed 99 flagged a same-direction car 37-54 m
+  ahead and pulling away (58 false samples).
+
 - THE UAZ-31512, SECOND PASS FROM THE OWNER'S REVIEW (`tools/carforge`,
   `public/models/carforge/uaz31512.fbx`, `render/carmodel.ts`).
   - The spare on the tail is a wheel of the set the car is shod with: carforge exports it
