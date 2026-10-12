@@ -8,11 +8,11 @@
   gone from the catalogue, its `oka.glb`, `tools/oka-author.py` and the trim-plate rear screen
   cut `glassOverTailOpening` / `rearScreenMaterial` with it; a save holding an `sa_oka` loads
   it as `cf_vaz1111`). `public/models/carforge/vaz1111.fbx` is built by `carforge.py` from
-  `examples/vaz1111.json` (profile and plan read off the GTA model with `refgrid.py`, details
-  from the photographs and the the-blueprints.com preview, `sheet_vaz1111.json`), loaded as the
+  `examples/vaz1111.json`, a clean parametric rebuild from the VAZ-1111 blueprint proportions;
+  GTA geometry is used only as a comparison reference, not as the generated surface source.
   carforge cars are: the pack's atlas, glass in its (3, 1) cell, one node per lamp role.
-  Watertight by construction (`holes.py`: 0 px in every view). Its rules from the owner's
-  reviews are in the carforge README (one wing edge, an A pillar of constant width, the
+  The current build is checked by `holes.py` and the pack's fit/reality tools. Its rules from
+  the owner's reviews are in the carforge README (one wing edge, an A pillar of constant width,
   windscreen stopping at the cowl). The front follows the reference: a painted panel round the
   lamps (it was black across), the offset grille's three slots between painted bars, its badge,
   the bumper's blinkers lower, vent slots and plate area.
@@ -33,6 +33,9 @@
   The shell now supports explicit `join_bands`: the Oka keeps stable cross-section rows through
   the front and rear corner transitions, so side-to-face seams are broad transition surfaces
   instead of folded-ring diagonals. The existing generated UAZ/GAZ rules remain unchanged.
+  The Oka shell was then rebuilt from simplified blueprint curves: the bonnet, roof, sill and
+  rear corner no longer inherit the dense GTA trace, and the body joins are generated from the
+  same explicit surface bands used for the Soviet VAZ wire references.
   - The GTA model reduced by `reduce.py` (`examples/reduce_vaz1111.json`) was shipped for a
     while and taken out: its shape was closer, but a reduced game mesh keeps that mesh's stray
     triangles (dirty creases, a chewed rear bumper, glass unlike the pack's) and slits between
