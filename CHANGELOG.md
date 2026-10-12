@@ -25,6 +25,11 @@
   recessed. carforge: `recesses[].top` (a trapezoid outline), `nose.rake` / `tail.rake` (a
   raked end face; flat lenses and frames on it lean with it), `lean` on flat items. The GAZ
   builds vertex-identical.
+  The generator now has reusable `edge_roll` end bands for a clean bonnet corner, explicit
+  per-corner `outline` radii and conforming lamps: the Oka's rear lenses follow the rounded
+  tail surface in three bands instead of floating blocks; `lean` lays flat lenses into a
+  sloping face. Its front/rear plastic panel and grille now use the bumper's dark trim cell,
+  and the rear glass outline follows the tailgate's tapered roof contour.
   - The GTA model reduced by `reduce.py` (`examples/reduce_vaz1111.json`) was shipped for a
     while and taken out: its shape was closer, but a reduced game mesh keeps that mesh's stray
     triangles (dirty creases, a chewed rear bumper, glass unlike the pack's) and slits between
@@ -305,6 +310,24 @@
     handed in, placed 2nd and 3rd.
 
 ### Fixed
+
+- A LAY-BY IS LAID IN WHAT THE ROAD IS LAID IN (`world/layby.ts`, `world/laybymesh.ts`,
+  `world/terrain.ts`, `world/roadmesh.ts`). Reported from play: the pull-in at every
+  roadside stop was asphalt on a gravel, concrete or cracked-asphalt road. `Layby.surface`
+  is the road's own surface at the stop (`roadConditionAt` at `Layby.s`), one value for
+  the whole lay-by, and the pad uses it everywhere: its colour (`roadLaneVertexColor`, the
+  ribbon's undecorated lane colour, the regional gravel on a gravel road), its collider's
+  registered surface (grip, rumble) and the terrain's `surfaceFromFrame` (`onLaybyAsphalt`
+  renamed `onLaybyPad`). On seeds 1337, 7, 42, 2024 and 31337, the 163 lay-bys of the first
+  300 km (54 asphalt, 47 cracked asphalt, 50 gravel, 12 concrete) all match the road at
+  their stop in mesh colour, collider and terrain.
+- KEYBOARD STEERING NO LONGER FIGHTS A HELD KEY ON SAND (`src/vehicle/vehicle.ts`,
+  `src/vehicle/vehicletuning.ts`). The assist still winds a short tap and the first part of a
+  hold to the tyre's usable reach, preserving precise asphalt corrections; once a key is held
+  past that reach it continues toward the car's physical lock instead of giving the steering
+  back to the travel direction. On the headless Zhiguli probe at 80 km/h, asphalt and sand
+  both reached 29.9° of a 30.4° lock (98%); sand front slip rose to 52.5° while the wheel
+  stayed at lock, so the car ploughs/slides instead of refusing the input.
 
 - A RIVAL QUEUED BEHIND ANOTHER AT THE TURN NO LONGER DRIVES ROUND IT AND ON PAST THE
   COURIER (`world/traffic.ts`). Reported from play. Standing behind the rival still

@@ -12,7 +12,7 @@ import { ROAD_HALF_WIDTH, ROAD_MAX_HALF_WIDTH, type Road } from './road';
 import { RoadDistance } from './roaddistance';
 import { SurfaceField, roadSurfaceY } from './roadsurface';
 import { onTerminusPad, terminusWeight } from './terminus';
-import { laybyFlattenWeight, laybyLevel, laybyNear, onLaybyAsphalt } from './layby';
+import { laybyFlattenWeight, laybyLevel, laybyNear, onLaybyPad } from './layby';
 
 /**
  * Terrain height is the `Landscape` field plus bounded dune relief. The road is not
@@ -834,10 +834,10 @@ export class Terrain {
     // material as a harmless default. Outside it is the shoulder, and past that the
     // open desert.
     if (toEdge <= 0) return SurfaceType.Gravel;
-    // A lay-by is paved, and the terrain agrees with its collider about that for the
-    // same reason it agrees with the terminus pad's.
+    // A lay-by is laid in the road's own surface at its stop, and the terrain agrees
+    // with its collider about that for the same reason it agrees with the terminus pad's.
     const layby = laybyNear(this.seed, s);
-    if (layby && onLaybyAsphalt(layby, s, lateral, inner)) return SurfaceType.Asphalt;
+    if (layby && onLaybyPad(layby, s, lateral, inner)) return layby.surface;
     if (toEdge <= VERGE_WIDTH) return VERGE_SURFACE;
     // An outcrop belt lowers the rock threshold by exactly what it lowers it by in
     // `corridorShape`, so a shelf the belt stood up is rock under the wheels and not

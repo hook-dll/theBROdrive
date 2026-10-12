@@ -28,7 +28,7 @@ import sys
 
 import bmesh
 import bpy
-from mathutils import Matrix, Vector
+from mathutils import Matrix, Vector, geometry
 from mathutils.bvhtree import BVHTree
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -128,6 +128,13 @@ def validate(spec):
             fail(f"unknown lamp role {lamp['role']}")
         if lamp.get("face") not in ("front", "rear", "side"):
             fail(f"{lamp['role']} lamp needs face front|rear|side")
+    # an item drawn as an `outline` ([[u, v], …]) also has its box, which layout checks use
+    for group in ("lamps", "recesses", "plates"):
+        for it in spec.get(group, []):
+            if it.get("outline"):
+                ku, kv = FACE_UV[it["face"]]
+                it.setdefault(ku, [min(p[0] for p in it["outline"]), max(p[0] for p in it["outline"])])
+                it.setdefault(kv, [min(p[1] for p in it["outline"]), max(p[1] for p in it["outline"])])
     return spec
 
 
@@ -497,6 +504,21 @@ def build_shell(spec, s, bm, uvl):
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=WELD)
     bmesh.ops.dissolve_degenerate(bm, edges=bm.edges, dist=WELD)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    # Round only the requested end-edge band, before cutting details. Unlike enlarging
+    # the rail chamfer, this preserves the adjacent panel planes and shares the corner.
+    for key, end in (("nose", s.front), ("tail", s.rear)):
+        roll = spec.get(key, {}).get("edge_roll")
+        if not roll:
+            continue
+        z0, z1 = roll["z"]
+        reach = float(roll.get("reach", 70.0))
+        edges = [e for e in bm.edges if len(e.link_faces) == 2
+                 and all(abs(v.co.y / MM - end) <= reach and z0 <= v.co.z / MM <= z1
+                         for v in e.verts)
+                 and e.calc_face_angle() > math.radians(20)]
+        bmesh.ops.bevel(bm, geom=edges, offset=float(roll["radius"]) * MM,
+                        segments=2, affect="EDGES", clamp_overlap=True)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     split_folded(bm)
     return ys
 
@@ -714,16 +736,17 @@ def add_arch_lips(spec, s, body, bvh):
 
 # ---------------------------------------------------------------- side glass and seams
 
-def rounded(poly, r):
+def rounded(poly, r, radii=None):
     """Closed polygon [(y, z)] with each corner replaced by a ROUND_SEGMENTS curve (a quadratic
-    Bezier through the corner's tangent points, r mm from it, at most 45% of either edge)."""
-    if r <= 0:
+    Bezier through the corner's tangent points, r mm from it, at most 45% of either edge).
+    `radii`: a radius per corner instead (None or 0 keeps that corner sharp)."""
+    if r <= 0 and not radii:
         return list(poly)
     out, n = [], len(poly)
     for i in range(n):
         (ay, az), (cy, cz), (by, bz) = poly[i - 1], poly[i], poly[(i + 1) % n]
         la, lb = math.hypot(ay - cy, az - cz), math.hypot(by - cy, bz - cz)
-        t = min(r, 0.45 * la, 0.45 * lb)
+        t = min((radii[i] or 0.0) if radii else r, 0.45 * la, 0.45 * lb)
         if t <= 0:
             out.append((cy, cz))
             continue
@@ -952,6 +975,7 @@ def cut_windows(spec, s, body):
 FACE_AXIS = {"front": Vector((0, -1, 0)), "rear": Vector((0, 1, 0)), "side": Vector((1, 0, 0)),
              "top": Vector((0, 0, 1))}  # outward
 AXIS_INDEX = {"front": 1, "rear": 1, "side": 0, "top": 2}
+FACE_UV = {"front": ("x", "z"), "rear": ("x", "z"), "side": ("y", "z"), "top": ("y", "x")}  # spec keys
 
 
 def face_point(face, u, v):
@@ -999,12 +1023,11 @@ def flip(p, sign):
 
 def grown_item(item, w):
     """The item `w` mm larger all round, its corner radius grown with it (a sharp corner stays
-    sharp, so the outlines keep the same points)."""
-    face = item["face"]
-    ku, kv = {"front": ("x", "z"), "rear": ("x", "z"), "side": ("y", "z"), "top": ("y", "x")}[face]
+    sharp, so the outlines keep the same points). An `outline` item grows as its box."""
+    ku, kv = FACE_UV[item["face"]]
     rad = float(item.get("radius", 0.0))
     grown = {ku: [min(item[ku]) - w, max(item[ku]) + w], kv: [min(item[kv]) - w, max(item[kv]) + w],
-             "radius": rad + w if rad > 0 else 0.0}
+             "radius": rad + w if rad > 0 else 0.0, "outline": None}
     if item.get("top"):
         grown["top"] = [min(item["top"]) - w, max(item["top"]) + w]
     return dict(item, **grown)
@@ -1014,9 +1037,14 @@ def item_outline(item):
     """Closed outline of an item in its face's coordinates. Rect from `x`/`z` (front, rear),
     `y`/`z` (side) or `y`/`x` (top); `top` gives the first axis's span at the top edge instead
     (a trapezoid: the VAZ-1111's back light, wider at its foot); `round` makes it an ellipse,
-    `radius` rounds its corners (a radius of half the height is a stadium)."""
-    face = item["face"]
-    ku, kv = {"front": ("x", "z"), "rear": ("x", "z"), "side": ("y", "z"), "top": ("y", "x")}[face]
+    `radius` rounds its corners (a radius of half the height is a stadium); `outline` gives the
+    corners themselves ([[u, v], …] or [u, v, r] with that corner's own radius; `radius`
+    rounds the rest): a shape no box is, the VAZ-1111's tail lamp with its rounded inner top."""
+    if item.get("outline"):
+        pts = [(float(p[0]), float(p[1])) for p in item["outline"]]
+        r = float(item.get("radius", 0.0))
+        return rounded(pts, r, [float(p[2]) if len(p) > 2 else r for p in item["outline"]])
+    ku, kv = FACE_UV[item["face"]]
     u0, u1 = min(item[ku]), max(item[ku])
     v0, v1 = min(item[kv]), max(item[kv])
     if item.get("round"):
@@ -1608,6 +1636,103 @@ def add_wrap_lamp(bm, uvl, bvh, item, cell, pts, segments=12):
         add_face(bm, uvl, outer[k] + inner[k][::-1], c, hint)
 
 
+CONFORM_STEP = 12.0  # mm between a conform lamp's samples (a 60 mm corner sags 0.3 mm between)
+CONFORM_GRAZE = 0.25  # cos of the steepest body face a conform lamp's ray may land on
+CONFORM_DEPTH = 120.0  # mm behind the lens's middle a conform lamp's ray may land
+
+
+def add_conform_lamp(bm, uvl, bvh, item, cell, pts, sign):
+    """A lens that is the body's own surface under its outline, lifted `proud` (3) mm along the
+    surface: set into the body and following it round a corner, as the VAZ-1111's tail lamps
+    are (a flat block on its rounded tail corner stood off it, stuck on). The outline is cast
+    onto the body along the face axis on a CONFORM_STEP grid; where it runs past the body's edge
+    seen from that face, or onto faces steeper than CONFORM_GRAZE to the rays, it stops at the
+    edge, so an outline drawn wider than the car ends where the body turns away (the lens wraps
+    the corner as far as it shows from behind), and so does a ray that passes the body's end
+    and lands more than CONFORM_DEPTH behind the lens's middle (the wheel arch's back). Its
+    edge walls go 4 mm into the body."""
+    face = item["face"]
+    out = FACE_AXIS[face]
+    proud = float(item.get("proud", 3.0))
+    poly = [Vector(p) for p in pts]
+    if sum(a.x * b.y - b.x * a.y for a, b in zip(poly, poly[1:] + poly[:1])) < 0:
+        poly.reverse()  # CCW for the triangulation
+    centre = sum(poly, Vector((0.0, 0.0))) / len(poly)
+    ref = None
+
+    def hit(u, v):
+        origin = face_point(face, u, v) * MM + out * 9.0
+        loc, n, _, _ = bvh.ray_cast(origin, -out)
+        if loc is None or n.dot(out) < CONFORM_GRAZE:
+            return None
+        p = loc / MM
+        if ref is not None and (ref - p).dot(out) > CONFORM_DEPTH:
+            return None
+        return flip(p, sign), flip(n, sign)
+
+    h = hit(centre.x, centre.y)
+    if h is None:
+        fail(f"{item['role']} conform lamp: no body under its middle")
+    ref = flip(h[0], sign)
+    dense = []
+    for a, b in zip(poly, poly[1:] + poly[:1]):
+        n = max(1, int(math.ceil((b - a).length / CONFORM_STEP)))
+        dense += [a.lerp(b, k / n) for k in range(n)]
+    boundary = []
+    for p in dense:
+        if hit(p.x, p.y) is None:  # past the body's edge: back towards the middle to the last hit
+            lo, hi = 0.0, 1.0  # fraction of the way to the centre: hi hits
+            if hit(*p.lerp(centre, hi)) is None:
+                continue
+            for _ in range(14):
+                mid = (lo + hi) / 2
+                lo, hi = (lo, mid) if hit(*p.lerp(centre, mid)) else (mid, hi)
+            p = p.lerp(centre, hi)
+        if not boundary or (p - boundary[-1]).length > 2.0:
+            boundary.append(p)
+    if len(boundary) < 3:
+        fail(f"{item['role']} conform lamp meets no body")
+    u0, u1 = min(p.x for p in boundary), max(p.x for p in boundary)
+    v0, v1 = min(p.y for p in boundary), max(p.y for p in boundary)
+    inner = []
+    for i in range(1, int((u1 - u0) / CONFORM_STEP) + 1):
+        for j in range(1, int((v1 - v0) / CONFORM_STEP) + 1):
+            q = Vector((u0 + i * CONFORM_STEP, v0 + j * CONFORM_STEP))
+            if _inside((q.x, q.y), [(b.x, b.y) for b in boundary]) and hit(q.x, q.y) is not None and \
+                    min((q - b).length for b in boundary) > CONFORM_STEP / 2:
+                inner.append(q)
+    nb = len(boundary)
+    verts, _, tris, _, _, _ = geometry.delaunay_2d_cdt(boundary + inner, [], [list(range(nb))], 1, 0.01)
+    lens, foot = {}, {}
+    for i, q in enumerate(verts):
+        h = hit(q.x, q.y)
+        k = 0
+        while h is None and k < 20:  # a vertex the triangulation nudged off the edge
+            q = q.lerp(centre, 0.02)
+            h = hit(q.x, q.y)
+            k += 1
+        if h is None:
+            fail(f"{item['role']} conform lamp vertex at ({q.x:.0f}, {q.y:.0f}) meets no body")
+        p, n = h
+        lens[i] = bm.verts.new((p + n * proud) * MM)
+        foot[i] = (bm.verts.new((p - n * 4.0) * MM), n)
+    c = CELLS[cell]
+    edges = {}
+    for t in tris:
+        n = sum((foot[i][1] for i in t), Vector()).normalized()
+        add_face(bm, uvl, [lens[i] for i in t], c, n)
+        for a, b in zip(t, t[1:] + t[:1]):
+            edges[frozenset((a, b))] = edges.get(frozenset((a, b)), 0) + 1
+    for e, count in edges.items():
+        if count == 1:  # the lens's edge: a wall into the body
+            a, b = tuple(e)
+            mid_n = (foot[a][1] + foot[b][1]).normalized()
+            wall_mid = (lens[a].co + lens[b].co) / 2 / MM
+            ctr = sum((v.co for v in lens.values()), Vector()) / len(lens) / MM
+            add_face(bm, uvl, [lens[a], lens[b], foot[b][0], foot[a][0]], c,
+                     (wall_mid - ctr) - mid_n * (wall_mid - ctr).dot(mid_n))
+
+
 def build_lamps(spec, cid, body, objs):
     bvh = body_bvh(body)
     body_bm = bmesh.new()
@@ -1623,7 +1748,9 @@ def build_lamps(spec, cid, body, objs):
             if role not in per_role:
                 per_role[role] = new_bm()
             bm, uvl = per_role[role]
-            if lamp.get("wrap") is not None:
+            if lamp.get("conform"):
+                add_conform_lamp(bm, uvl, bvh, lamp, lamp.get("cell", LAMP_CELL[role]), pts, sign)
+            elif lamp.get("wrap") is not None:
                 add_wrap_lamp(bm, uvl, bvh, lamp, lamp.get("cell", LAMP_CELL[role]), pts)
             elif lamp.get("dome"):
                 add_dome(bm, uvl, body_bm, body_uvl, bvh, lamp, lamp.get("cell", LAMP_CELL[role]), pts, sign)

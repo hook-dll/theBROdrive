@@ -103,6 +103,21 @@ export const KEY_STEER_WIND_SLOW_S = 0.25;
  */
 export const KEY_STEER_WIND_S = 0.35;
 /**
+ * PAST THE PEAK: a key held on once the hold has wound to its reach (|hold| at least
+ * `KEY_STEER_PAST_FROM`, about a second at speed) goes on winding the wheel, from the
+ * front tyres' peak toward the whole lock about the car's axis over `KEY_STEER_PAST_S`
+ * further seconds. This applies to turning and countersteering alike.
+ * player asks for the wheel and gets it, at any speed and on any ground; where that is
+ * more than the tyres can use, the front ploughs (on sand into its own bank,
+ * `deformationDrag`) instead of the key being refused. Owner's report: at speed on sand
+ * the held key would not turn the wheel, the car crawled sideways and the wheel was
+ * pulled back. A tap, or any hold short of the reach, never gets here, so taps and a
+ * held key's first second are the assist's as before; the hold's return, or the other
+ * key, takes the extra wheel back with it (it never exceeds the hold).
+ */
+export const KEY_STEER_PAST_FROM = 0.95;
+export const KEY_STEER_PAST_S = 1;
+/**
  * The opposite key UNWINDS the hold back toward straight at this many times the
  * wind-up's rate off the centre (1 / `KEY_STEER_WIND_S`), linearly, and stops at
  * straight: taking back a correction is quicker than making one, and one short tap of

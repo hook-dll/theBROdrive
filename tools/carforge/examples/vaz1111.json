@@ -254,15 +254,15 @@
    ],
    [
     2570,
-    666
+    655
    ],
    [
-    2605,
-    660
+    2600,
+    640
    ],
    [
     2618,
-    648
+    615
    ]
   ],
   "high": [
@@ -316,19 +316,19 @@
    ],
    [
     2500,
-    660
+    658
    ],
    [
     2570,
-    662
+    645
    ],
    [
-    2605,
-    656
+    2600,
+    630
    ],
    [
     2618,
-    645
+    605
    ]
   ]
  },
@@ -764,7 +764,7 @@
     505
    ],
    "half_width": 690,
-   "cell": "black",
+   "cell": "trim",
    "wrap": {
     "to": -315,
     "radius": 150,
@@ -819,7 +819,7 @@
     498
    ],
    "half_width": 690,
-   "cell": "black",
+   "cell": "trim",
    "wrap": {
     "to": 2525,
     "radius": 120,
@@ -928,7 +928,7 @@
    "frame": {
     "width": 8,
     "proud": 4,
-    "cell": "black"
+    "cell": "trim"
    }
   },
   {
@@ -949,7 +949,7 @@
     {
      "count": 2,
      "width": 24,
-     "cell": "paint",
+     "cell": "trim",
      "orientation": "horizontal",
      "inset": 0
     }
@@ -957,21 +957,31 @@
   },
   {
    "face": "rear",
-   "x": [
-    -530,
-    530
-   ],
-   "z": [
-    894,
-    1317
-   ],
    "radius": 35,
    "depth": 12,
    "cell": "glass",
    "single": true,
-   "top": [
-    -465,
-    465
+   "outline": [
+    [
+     -530,
+     894,
+     28
+    ],
+    [
+     530,
+     894,
+     28
+    ],
+    [
+     465,
+     1317,
+     42
+    ],
+    [
+     -465,
+     1317,
+     42
+    ]
    ]
   },
   {
@@ -1073,92 +1083,154 @@
   {
    "role": "taillights",
    "face": "rear",
-   "x": [
-    505,
-    640
-   ],
-   "z": [
-    515,
-    638
-   ],
-   "proud": 3,
    "single": true,
-   "lean": 9
+   "outline": [
+    [
+     505,
+     515
+    ],
+    [
+     740,
+     515
+    ],
+    [
+     740,
+     638
+    ],
+    [
+     505,
+     638
+    ]
+   ],
+   "conform": true,
+   "proud": 3
   },
   {
    "role": "leftblinkers",
    "face": "rear",
-   "x": [
-    505,
-    640
-   ],
-   "z": [
-    640,
-    688
-   ],
-   "proud": 3,
    "single": true,
-   "lean": 9
+   "outline": [
+    [
+     505,
+     640
+    ],
+    [
+     740,
+     640
+    ],
+    [
+     740,
+     688
+    ],
+    [
+     505,
+     688
+    ]
+   ],
+   "conform": true,
+   "proud": 3
   },
   {
    "role": "reverselights",
    "face": "rear",
-   "x": [
-    505,
-    640
-   ],
-   "z": [
-    690,
-    775
-   ],
-   "proud": 3,
    "single": true,
-   "lean": 9
+   "outline": [
+    [
+     505,
+     690
+    ],
+    [
+     740,
+     690
+    ],
+    [
+     740,
+     775
+    ],
+    [
+     505,
+     775,
+     40
+    ]
+   ],
+   "conform": true,
+   "proud": 3
   },
   {
    "role": "taillights",
    "face": "rear",
-   "x": [
-    -640,
-    -505
-   ],
-   "z": [
-    515,
-    638
-   ],
-   "proud": 3,
    "single": true,
-   "lean": 9
+   "outline": [
+    [
+     -505,
+     515
+    ],
+    [
+     -740,
+     515
+    ],
+    [
+     -740,
+     638
+    ],
+    [
+     -505,
+     638
+    ]
+   ],
+   "conform": true,
+   "proud": 3
   },
   {
    "role": "rightblinkers",
    "face": "rear",
-   "x": [
-    -640,
-    -505
-   ],
-   "z": [
-    640,
-    688
-   ],
-   "proud": 3,
    "single": true,
-   "lean": 9
+   "outline": [
+    [
+     -505,
+     640
+    ],
+    [
+     -740,
+     640
+    ],
+    [
+     -740,
+     688
+    ],
+    [
+     -505,
+     688
+    ]
+   ],
+   "conform": true,
+   "proud": 3
   },
   {
    "role": "reverselights",
    "face": "rear",
-   "x": [
-    -640,
-    -505
-   ],
-   "z": [
-    690,
-    775
-   ],
-   "proud": 3,
    "single": true,
-   "lean": 9
+   "outline": [
+    [
+     -505,
+     690
+    ],
+    [
+     -740,
+     690
+    ],
+    [
+     -740,
+     775
+    ],
+    [
+     -505,
+     775,
+     40
+    ]
+   ],
+   "conform": true,
+   "proud": 3
   }
  ],
  "plates": [
@@ -1201,7 +1273,7 @@
     232,
     314
    ],
-   "cell": "trim",
+   "cell": "black",
    "radius": 4,
    "proud": 5,
    "single": true
@@ -1216,7 +1288,7 @@
     340,
     364
    ],
-   "cell": "trim",
+   "cell": "black",
    "radius": 3,
    "proud": 5,
    "single": true
@@ -1231,7 +1303,7 @@
     340,
     364
    ],
-   "cell": "trim",
+   "cell": "black",
    "radius": 3,
    "proud": 5,
    "single": true
@@ -1246,7 +1318,7 @@
     340,
     364
    ],
-   "cell": "trim",
+   "cell": "black",
    "radius": 3,
    "proud": 5,
    "single": true
@@ -1261,7 +1333,7 @@
     290,
     412
    ],
-   "cell": "trim",
+   "cell": "black",
    "radius": 6,
    "proud": 5,
    "single": true
@@ -1318,13 +1390,33 @@
    55
   ]
  ],
- "cells": [],
+ "cells": [
+  {
+   "y": [
+    -440,
+    -436
+   ],
+   "z": [
+    505,
+    712
+   ],
+   "cell": "trim"
+  }
+ ],
  "nose": {
   "rake": {
    "deg": 13,
    "pivot_z": 690,
    "from_z": 505,
    "span": 150
+  },
+  "edge_roll": {
+   "z": [
+    505,
+    690
+   ],
+   "reach": 85,
+   "radius": 18
   }
  }
 }

@@ -553,9 +553,16 @@ export function roadAsphaltVertexColorAtStart(out: THREE.Color): THREE.Color {
   return out.copy(SURFACE_LINEAR[ROAD_START_SURFACE]!).multiplyScalar(textureGain);
 }
 
-/** The same for asphalt proper, whatever the road beside it is laid in (lay-bys). */
-export function roadAsphaltVertexColor(out: THREE.Color): THREE.Color {
-  return out.copy(SURFACE_LINEAR[SurfaceType.Asphalt]!).multiplyScalar(roadVertexColorGain());
+/**
+ * The road ribbon's undecorated lane colour for `surface` at arclength `s`, texture
+ * gain included: the sealed surfaces' static albedo, or the regional palette's gravel
+ * for a gravel road, exactly as the ribbon's row at `s` starts from (lay-bys).
+ */
+export function roadLaneVertexColor(out: THREE.Color, surface: SurfaceType, s: number): THREE.Color {
+  const base = SURFACE_LINEAR[surface];
+  if (base) out.copy(base);
+  else out.setHex(desertPaletteAt(s).gravel);
+  return out.multiplyScalar(roadVertexColorGain());
 }
 
 /**

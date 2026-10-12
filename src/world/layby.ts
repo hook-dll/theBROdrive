@@ -1,11 +1,14 @@
+import type { SurfaceType } from '../core/surfaces';
 import { isCourierPoiSlot } from './couriers';
+import { roadConditionAt } from './gradient';
 import { dwellingFootprint, POI_SPACING, roadsideSlot } from './poislots';
 import { CURVE_WIDENING_M, halfWidthAt, LANE_WIDTH } from './roadprofile';
 
 /**
  * LAY-BYS: the paved pull-in in front of every roadside dwelling.
  *
- * A lay-by is a widening of the asphalt on the building's side of the road. From
+ * A lay-by is a widening of the carriageway on the building's side of the road, laid
+ * in whatever the road is laid in at the stop (`surface`). From
  * `sEntry` the asphalt's outer edge leaves the road edge and eases out (`LAYBY_TAPER_M`)
  * to the pad's full width at `sPadStart`, holds it to `sPadEnd` across the building's
  * front, and eases back to the road edge at `sExit`. Both slips are the same shape, so
@@ -57,6 +60,14 @@ export interface Layby {
   readonly siteHalfAlong: number;
   /** Whether a courier car parks on this pad (`laybyCourierLateral`, at `s`). */
   readonly courier: boolean;
+  /**
+   * What the pad is laid in: the road's own surface at the stop (`roadConditionAt` at
+   * `s`), so a gravel road's lay-by is gravel and a concrete road's is concrete, in the
+   * drawn mesh (world/laybymesh.ts), its collider and the terrain's answer alike. One
+   * value for the whole lay-by: a district boundary falling across a slip does not
+   * split it.
+   */
+  readonly surface: SurfaceType;
 }
 
 /** Arclength of the pad at full width either side of the stop, metres. */
@@ -134,6 +145,7 @@ function laybyAtSlot(seed: number, slot: number): Layby | null {
       siteOuter: front + 2 * half,
       siteHalfAlong: half,
       courier: isCourierPoiSlot(seed, roll.slot, POI_SPACING),
+      surface: roadConditionAt(seed, roll.s).surface,
     };
   }
   bySlot.set(slot, layby);
@@ -206,8 +218,8 @@ export function laybyCourierLateral(l: Layby): number {
   return l.side * (l.padOuter - COURIER_INSET_M);
 }
 
-/** Whether a road-frame point is on the lay-by's own asphalt (not the road's). */
-export function onLaybyAsphalt(l: Layby, s: number, lateral: number, halfWidth: number): boolean {
+/** Whether a road-frame point is on the lay-by's own pad (not the road's carriageway). */
+export function onLaybyPad(l: Layby, s: number, lateral: number, halfWidth: number): boolean {
   const u = lateral * l.side;
   return u > halfWidth && u <= laybyOuterAt(l, s, halfWidth);
 }

@@ -1,18 +1,18 @@
 import type RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
-import { SurfaceType } from '../core/surfaces';
+import type { SurfaceType } from '../core/surfaces';
 import { ROAD_TILE_METRES } from '../render/roadtexture';
 import type { ChunkContent, ChunkContext, ChunkProvider } from './chunks';
 import { desertPaletteAt } from './gradient';
 import { laybyOuterAt, laybysBetween, type Layby } from './layby';
-import { roadAsphaltMaterial, roadAsphaltVertexColor, roadVertexColorGain } from './roadmesh';
+import { roadAsphaltMaterial, roadLaneVertexColor, roadVertexColorGain } from './roadmesh';
 import { SURFACE_STEP } from './roadsurface';
 
 /**
- * Columns across the lay-by's asphalt, road edge to outer edge. The surface is planar
+ * Columns across the lay-by's pad, road edge to outer edge. The surface is planar
  * across (world/layby.ts `laybyLevel`), so these carry colour, not shape. There is no
  * lip: the road's shoulder strip hangs off the outer edge (roadmesh.ts), exactly as it
- * hangs off the ribbon's, and takes the asphalt down into the sand.
+ * hangs off the ribbon's, and takes the pad down into the sand.
  */
 const COLUMNS = 5;
 /** Collider rows narrower than this are left out: the road edge's own carries a wheel there. */
@@ -28,14 +28,15 @@ const EDGE_DUST = 0.4;
 /** Brightness swing of a slow mottle along the pad, so it is not one flat tone. */
 const MOTTLE = 0.05;
 
-const asphalt = new THREE.Color();
+const lane = new THREE.Color();
 const sand = new THREE.Color();
 const tone = new THREE.Color();
 const point = { x: 0, y: 0, z: 0 };
 
 /**
- * The lay-bys' asphalt: one ribbon per lay-by from its entry slip to its exit slip,
- * hung off the road's own edge and laid on the level the terrain was flattened to.
+ * The lay-bys' pads: one ribbon per lay-by from its entry slip to its exit slip, laid
+ * in the road's own surface at the stop (`Layby.surface`), hung off the road's own edge
+ * and laid on the level the terrain was flattened to.
  *
  * ROWS ARE THE ROAD'S ROWS. Row `si` is at exactly the arclength roadmesh.ts gives
  * its row `si` (`sStart + si * (sEnd - sStart) / (sCount - 1)`), and the inner column
@@ -50,8 +51,8 @@ const point = { x: 0, y: 0, z: 0 };
  * link. Changing any of those would be a new program variant mid-drive (see the
  * shader-variant rules) and would need a boot anchor.
  *
- * Colliders are Asphalt trimesh slabs of the top surface only, built disabled and
- * switched on by the streamer, like the road's.
+ * Colliders are trimesh slabs of the top surface only, registered as the lay-by's
+ * surface and built disabled and switched on by the streamer, like the road's.
  */
 export class LaybyMeshProvider implements ChunkProvider {
   readonly id = 'layby';
@@ -68,7 +69,6 @@ export class LaybyMeshProvider implements ChunkProvider {
     const colliders: RAPIER.Collider[] = [];
     const geometries: THREE.BufferGeometry[] = [];
     const sCount = Math.round((sEnd - sStart) / SURFACE_STEP) + 1;
-    roadAsphaltVertexColor(asphalt);
 
     for (const layby of laybys) {
       // Drawn from the last row with no width at all to the first, so the slip grows out
@@ -96,7 +96,7 @@ export class LaybyMeshProvider implements ChunkProvider {
       const geometry = this.buildLayby(ctx, layby, sCount, first, last, group);
       geometries.push(geometry);
       if (ctx.hasPhysics && colliderFirst >= 0 && colliderLast > colliderFirst) {
-        this.addColliders(ctx, geometry, colliderFirst - first, colliderLast - first, bodies, colliders);
+        this.addColliders(ctx, geometry, colliderFirst - first, colliderLast - first, layby.surface, bodies, colliders);
       }
     }
     if (geometries.length === 0) return null;
@@ -143,6 +143,7 @@ export class LaybyMeshProvider implements ChunkProvider {
         widestWidth = outer - halfWidth;
         widest = r;
       }
+      roadLaneVertexColor(lane, layby.surface, s);
       sand.setHex(desertPaletteAt(s).sand).multiplyScalar(roadVertexColorGain());
       const mottle = 1 + MOTTLE * Math.sin(s / 9.7) * Math.sin(s / 3.3 + 1.3);
       for (let c = 0; c < COLUMNS; c++) {
@@ -155,7 +156,7 @@ export class LaybyMeshProvider implements ChunkProvider {
         normals[vi * 3 + 1] = 1;
         uvs[vi * 2] = lateral / ROAD_TILE_METRES;
         uvs[vi * 2 + 1] = textureVStart + (s - sStart) / ROAD_TILE_METRES;
-        tone.copy(asphalt).multiplyScalar(mottle).lerp(sand, c === COLUMNS - 1 ? EDGE_DUST : DUST);
+        tone.copy(lane).multiplyScalar(mottle).lerp(sand, c === COLUMNS - 1 ? EDGE_DUST : DUST);
         colors[vi * 3] = tone.r;
         colors[vi * 3 + 1] = tone.g;
         colors[vi * 3 + 2] = tone.b;
@@ -196,7 +197,7 @@ export class LaybyMeshProvider implements ChunkProvider {
   }
 
   /**
-   * Asphalt trimesh slabs over rows `r0..r1` of a built lay-by: the drawn vertices and
+   * `surface` trimesh slabs over rows `r0..r1` of a built lay-by: the drawn vertices and
    * triangles themselves, in slabs sharing their boundary rows, as the road's.
    */
   private addColliders(
@@ -204,6 +205,7 @@ export class LaybyMeshProvider implements ChunkProvider {
     geometry: THREE.BufferGeometry,
     r0: number,
     r1: number,
+    surface: SurfaceType,
     bodies: RAPIER.RigidBody[],
     colliders: RAPIER.Collider[],
   ): void {
@@ -216,7 +218,7 @@ export class LaybyMeshProvider implements ChunkProvider {
       const slabIndices = indices.slice(q0 * rowIndices, q1 * rowIndices);
       const rebase = q0 * COLUMNS;
       for (let i = 0; i < slabIndices.length; i++) slabIndices[i] = slabIndices[i]! - rebase;
-      const collider = ctx.physics.addStaticTrimesh(vertices, slabIndices, SurfaceType.Asphalt);
+      const collider = ctx.physics.addStaticTrimesh(vertices, slabIndices, surface);
       collider.setEnabled(false);
       colliders.push(collider);
       const body = collider.parent();
