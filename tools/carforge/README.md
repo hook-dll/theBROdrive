@@ -178,6 +178,30 @@ route that worked, in order, and every mistake that cost a round, so the next ca
 - **Panel gaps as the only way to show parts.** The boot lid, bonnet front, fuel flap and doors
   are all `grooves`; a closed groove is a flap.
 
+
+## Oka repair contract (current owner acceptance)
+
+The previous Oka shell failed the close-up review. Do not treat a build as finished until all
+of these are true:
+
+- `side glass → belt`: one straight, narrow painted shoulder strip; no triangular wedge, folded
+  fan, or second bevel under the rear window;
+- `C-pillar`: one continuous broad panel from roof rail to belt, with the side glass ending
+  against it; the tail lamp must not create or hide this join;
+- `side → rear`: one intentional corner band followed by the rear face; no diagonal face
+  crossing the lamp pocket or the rear quarter;
+- bonnet: one shallow, nearly planar panel with two clean longitudinal shut lines and a short
+  front return; no X, V, or station-grid diagonals visible in a 2× close-up;
+- bonnet → wing → front lamp: the wing top is one plane/edge, the lamp housing follows the
+  front corner, and the grille panel is not used to cover a body gap;
+- rear glass: a single tapered trapezoid with an even painted border, following the tailgate
+  outline rather than an inset polygon floating inside it;
+- rear lamps: three simple shaped sections seated in the rear corner, with no faceted blocks
+  or unsupported outer faces;
+- reference checks: side/front/top overlays against the VAZ-1111 blueprint, GTA geometry as
+  comparison only, and close renders against at least `vz07`, `vz09`, `vz21`, `vz31`;
+- ship gate: `holes.py` zero, no `same` coplanar pairs, fit/reality pass, and a car-lab close
+  view with no owner-visible crease or floating detail. A failed gate is not a release.
 ### What cost a round, and the rule that prevents it
 
 | Mistake | Why it happened | Rule |

@@ -341,7 +341,7 @@ class Shape:
         return out
 
 
-def _station_ring_raw(s, y):
+def _station_ring_raw(s, y, apply_cap=True):
     """The 13 right-side ring points (x, z) of the station at y, bottom centre to roof centre.
 
     Every station has all 13 and the ring never doubles back: going up from the sill, z
@@ -391,15 +391,21 @@ def _station_ring_raw(s, y):
             continue
         px, pz = max(0.0, min(x, px)), z
         out.append((px, pz))
-    for a, b in getattr(s, "cap_bands", ()):
-        if a <= y <= b:
-            edge = out[R_SHOULDER]
-            centre = out[R_CENTRE]
-            for row in range(R_BELT_LO, R_CENTRE):
-                t = (row - R_SHOULDER) / (R_CENTRE - R_SHOULDER)
-                out[row] = (edge[0] + (centre[0] - edge[0]) * t,
-                            edge[1] + (centre[1] - edge[1]) * t)
-            break
+    if apply_cap:
+        for a, b in getattr(s, "cap_bands", ()):
+            if a <= y <= b:
+                u = (y - a) / (b - a)
+                at = _station_ring_raw(s, a, False)
+                bt = _station_ring_raw(s, b, False)
+                edge = (at[R_SHOULDER][0] + (bt[R_SHOULDER][0] - at[R_SHOULDER][0]) * u,
+                        at[R_SHOULDER][1] + (bt[R_SHOULDER][1] - at[R_SHOULDER][1]) * u)
+                centre = (at[R_CENTRE][0] + (bt[R_CENTRE][0] - at[R_CENTRE][0]) * u,
+                          at[R_CENTRE][1] + (bt[R_CENTRE][1] - at[R_CENTRE][1]) * u)
+                for row in range(R_BELT_LO, R_CENTRE):
+                    t = (row - R_SHOULDER) / (R_CENTRE - R_SHOULDER)
+                    out[row] = (edge[0] + (centre[0] - edge[0]) * t,
+                                edge[1] + (centre[1] - edge[1]) * t)
+                break
     return out
 
 def station_ring(s, y):
