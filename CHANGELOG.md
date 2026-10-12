@@ -15,9 +15,12 @@
   reviews are in the carforge README (one wing edge, an A pillar of constant width, the
   windscreen stopping at the cowl). The front follows the reference: a painted panel round the
   lamps (it was black across), the offset grille's three slots between painted bars, its badge,
-  the bumper's blinkers lower, vent slots and plate area, the bonnet's front corners softer.
+  the bumper's blinkers lower, vent slots and plate area.
   The rear too: the back light a trapezoid wider at its foot, set lower, as the reference's,
-  and the bumper's plate area. carforge: `recesses[].top` (a trapezoid outline).
+  and the bumper's plate area. The front panel leans back 13° as the reference's (it stood
+  upright), lamps, frames and grille with it; the bonnet's front shut line runs straight
+  across. carforge: `recesses[].top` (a trapezoid outline), `nose.rake` / `tail.rake` (a raked
+  end face; flat lenses and frames on it lean with it). The GAZ builds vertex-identical.
   - The GTA model reduced by `reduce.py` (`examples/reduce_vaz1111.json`) was shipped for a
     while and taken out: its shape was closer, but a reduced game mesh keeps that mesh's stray
     triangles (dirty creases, a chewed rear bumper, glass unlike the pack's) and slits between

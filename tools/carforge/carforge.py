@@ -493,11 +493,57 @@ def build_shell(spec, s, bm, uvl):
         mid = sum((v.co for v in loop), Vector()) / len(loop)
         cell = CELLS[shell_cell(spec, Vector((0.0, end, mid.z / MM))) or "paint"]
         add_cap(bm, uvl, loop, end, sign, float(spec.get(key, {}).get("inset", 0.0)), cell)
+    rake_ends(bm, spec, s)
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=WELD)
     bmesh.ops.dissolve_degenerate(bm, edges=bm.edges, dist=WELD)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     split_folded(bm)
     return ys
+
+
+def rake_ends(bm, spec, s):
+    """`nose.rake` / `tail.rake`: {deg, pivot_z, from_z, span}: the end face between `from_z`
+    and `pivot_z` leans back `deg` from upright, hinged at `pivot_z` (its top edge, where the
+    bonnet starts, stays put; its foot comes out). Under `from_z` (the bumper's top, where the
+    face is hidden in the bumper) it stands upright again where the lean left it: carried on
+    down, the VAZ-1111's face came out through the bumper's foot. The cap is cut at `from_z`
+    first, so each part stays one plane. The shear fades to nothing `span` (150) mm into the
+    body so the stations behind follow it. The VAZ-1111's front panel, lamps and grille lean
+    back about 13°; built upright, the nose read as a box. The lamps, plates and recesses
+    above the end's bumper are marked to lean with it (`_lean`: their flat faces are laid in
+    the face's plane, not upright)."""
+    for key, end, sign, face in (("nose", s.front, 1.0, "front"), ("tail", s.rear, -1.0, "rear")):
+        r = spec.get(key, {}).get("rake")
+        if not r:
+            continue
+        k = math.tan(math.radians(float(r["deg"])))
+        z0, span = float(r["pivot_z"]), float(r.get("span", 150.0))
+        z1 = float(r.get("from_z", -math.inf))
+        if z1 > -math.inf:
+            caps = [f for f in bm.faces if all(abs(v.co.y / MM - end) < 0.5 for v in f.verts)]
+            geom = caps + list({e for f in caps for e in f.edges}) + list({v for f in caps for v in f.verts})
+            bmesh.ops.bisect_plane(bm, geom=geom, dist=WELD, plane_co=Vector((0.0, 0.0, z1 * MM)),
+                                   plane_no=Vector((0.0, 0.0, 1.0)))
+        for v in bm.verts:
+            w = 1.0 - abs(v.co.y / MM - end) / span
+            if w > 0:
+                v.co.y += sign * k * (min(max(v.co.z / MM, z1), z0) - z0) * w * MM
+        # items above the bumper are on the raked face; a blinker or plate on the bumper is not
+        near = [b for b in spec.get("bumpers", []) if abs(sum(b["y"]) / 2 - end) < 200]
+        above = max((max(b["z"]) for b in near), default=-math.inf)
+        for group in ("lamps", "recesses", "plates"):
+            for it in spec.get(group, []):
+                if it["face"] == face and min(it["z"]) >= above:
+                    it["_lean"] = float(r["deg"])
+
+
+def face_plane(item, out):
+    """Normal of the plane a flat lens or frame is laid in: `out` (upright), or leaned back with
+    a raked end face (`_lean`, rake_ends)."""
+    a = math.radians(float(item.get("_lean", 0.0)))
+    if not a:
+        return out
+    return Vector((0.0, out.y * math.cos(a), math.sin(a)))
 
 
 def add_cap(bm, uvl, loop, y_end, sign, inset, cell):
@@ -995,9 +1041,10 @@ def add_plate(bm, uvl, bvh, item, cell, pts=None, sign=1.0, flat=False):
         if p is None:
             fail(f"{item.get('role', 'plate')} at {face} ({u:.0f}, {v:.0f}) has no face behind it")
         hits.append(flip(p, sign))
-    top = max(p.dot(out) for p in hits)
+    pn = face_plane(item, out)  # upright, or leaned with a raked end
+    top = max(p.dot(pn) for p in hits)
     proud = float(item.get("proud", PROUD))
-    outer = [(p + out * ((top - p.dot(out) if flat else 0.0) + proud)) * MM for p in hits]
+    outer = [(p + out * (((top - p.dot(pn)) / out.dot(pn) if flat else 0.0) + proud)) * MM for p in hits]
     inner = [(p - out * 5.0) * MM for p in hits]
     n = len(outer)
     c = [bm.verts.new(p) for p in outer] + [bm.verts.new(p) for p in inner]
@@ -1412,10 +1459,11 @@ def add_frame(bm, uvl, bvh, r):
             if mid is None or o is None:
                 fail(f"grille frame at {face} ({uo:.0f}, {vo:.0f}) has no face behind it")
             hits.append((flip(mid, sign), flip(o, sign), (ui, vi), (uo, vo)))
-        top = max(max(m.dot(out), o.dot(out)) for m, o, _, _ in hits) + proud
+        pn = face_plane(r, out)  # upright, or leaned with a raked end
+        top = max(max(m.dot(pn), o.dot(pn)) for m, o, _, _ in hits) + proud
 
         def on_plane(p):
-            return p + out * (top - p.dot(out))
+            return p + out * ((top - p.dot(pn)) / out.dot(pn))
 
         # outer wall foot, outer edge, inner edge, inner wall foot. The inner wall stops at the
         # face: carried on into the opening it lay on the pocket's own wall and z-fought it.
