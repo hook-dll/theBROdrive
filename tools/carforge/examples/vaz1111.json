@@ -14,6 +14,9 @@
   {"name": "front_corner", "y": [-438, -335]},
   {"name": "rear_corner", "y": [2300, 2618]}
  ],
+"cap_bands": [
+  {"name": "bonnet", "y": [-438, 330]}
+ ],
  "side": {
   "top": [
    [

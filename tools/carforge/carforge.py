@@ -290,6 +290,11 @@ class Shape:
             for b in spec.get("join_bands", [])
             if b.get("y") and b["y"][1] > b["y"][0]
         )
+        self.cap_bands = tuple(
+            (float(b["y"][0]), float(b["y"][1]))
+            for b in spec.get("cap_bands", [])
+            if b.get("y") and b["y"][1] > b["y"][0]
+        )
         self.belt = float(spec["belt"])
         self.glass_top = float(spec["glass_top"])
         self.front = max(self.top.ys[0], self.bottom.ys[0])
@@ -386,6 +391,15 @@ def _station_ring_raw(s, y):
             continue
         px, pz = max(0.0, min(x, px)), z
         out.append((px, pz))
+    for a, b in getattr(s, "cap_bands", ()):
+        if a <= y <= b:
+            edge = out[R_SHOULDER]
+            centre = out[R_CENTRE]
+            for row in range(R_BELT_LO, R_CENTRE):
+                t = (row - R_SHOULDER) / (R_CENTRE - R_SHOULDER)
+                out[row] = (edge[0] + (centre[0] - edge[0]) * t,
+                            edge[1] + (centre[1] - edge[1]) * t)
+            break
     return out
 
 def station_ring(s, y):
