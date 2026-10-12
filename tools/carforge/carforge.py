@@ -428,6 +428,17 @@ def stations(spec, s, screens):
     return [y for y, _ in merged]
 
 
+def shell_cell(spec, p):
+    """Cell of a shell quad centred at `p` (mm) from the spec's `cells` boxes, [{y, z, x?,
+    cell}] with |x| for x: a part of the shell that is not paint, as the VAZ-1111's black
+    front panel between the bumper and the bonnet. None: the row's own cell."""
+    for b in spec.get("cells", []):
+        if (b["y"][0] <= p.y <= b["y"][1] and b["z"][0] <= p.z <= b["z"][1]
+                and ("x" not in b or b["x"][0] <= abs(p.x) <= b["x"][1])):
+            return b["cell"]
+    return None
+
+
 def face_cell(screens, row_a, row_b, y0, y1):
     """Cell of the quad between ring rows row_a..row_b over stations y0..y1. Side glass is not
     a shell cell: it is the floor of a pocket cut into the side (cut_windows)."""
@@ -464,8 +475,8 @@ def build_shell(spec, s, bm, uvl):
     for i in range(len(ys) - 1):
         (ra, la), (rb, lb) = rings[i], rings[i + 1]
         for k in range(RING_ROWS - 1):
-            cell = CELLS[face_cell(screens, k, k + 1, ys[i], ys[i + 1])]
             mid_r = (ra[k].co + ra[k + 1].co + rb[k].co + rb[k + 1].co) / 4
+            cell = CELLS[shell_cell(spec, mid_r / MM) or face_cell(screens, k, k + 1, ys[i], ys[i + 1])]
             add_face(bm, uvl, [ra[k], ra[k + 1], rb[k + 1], rb[k]], cell,
                      Vector((mid_r.x, 0, mid_r.z - centre.z)) if mid_r.x > 1e-4 else Vector((0, 0, mid_r.z - centre.z)))
             # mirrored quad: row k on the left is la[k-1] (row 0 and 12 are shared centre points)
@@ -478,7 +489,10 @@ def build_shell(spec, s, bm, uvl):
     # nose and tail caps
     for idx, sign, key, end in ((0, -1.0, "nose", s.front), (len(ys) - 1, 1.0, "tail", s.rear)):
         ring, left = rings[idx]
-        add_cap(bm, uvl, ring + list(reversed(left)), end, sign, float(spec.get(key, {}).get("inset", 0.0)))
+        loop = ring + list(reversed(left))
+        mid = sum((v.co for v in loop), Vector()) / len(loop)
+        cell = CELLS[shell_cell(spec, Vector((0.0, end, mid.z / MM))) or "paint"]
+        add_cap(bm, uvl, loop, end, sign, float(spec.get(key, {}).get("inset", 0.0)), cell)
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=WELD)
     bmesh.ops.dissolve_degenerate(bm, edges=bm.edges, dist=WELD)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
@@ -486,13 +500,13 @@ def build_shell(spec, s, bm, uvl):
     return ys
 
 
-def add_cap(bm, uvl, loop, y_end, sign, inset):
-    """Close the end ring `loop`. When it stands inside the end (a bulged nose or tail), the
-    cap is a band out to a face at y_end: the ring scaled about its centre to stand `inset` mm
-    inside it. Scaled edges stay parallel, so every band quad is flat."""
+def add_cap(bm, uvl, loop, y_end, sign, inset, cell):
+    """Close the end ring `loop` in `cell`. When it stands inside the end (a bulged nose or
+    tail), the cap is a band out to a face at y_end: the ring scaled about its centre to stand
+    `inset` mm inside it. Scaled edges stay parallel, so every band quad is flat."""
     y_ring = loop[0].co.y / MM
     if abs(y_ring - y_end) < 0.5:
-        add_face(bm, uvl, loop, CELLS["paint"], Vector((0, sign, 0)))
+        add_face(bm, uvl, loop, cell, Vector((0, sign, 0)))
         return
     zs = [v.co.z for v in loop]
     cz = (min(zs) + max(zs)) / 2
@@ -502,8 +516,8 @@ def add_cap(bm, uvl, loop, y_end, sign, inset):
     n = len(loop)
     for i in range(n):
         j = (i + 1) % n
-        add_face(bm, uvl, [loop[i], loop[j], inner[j], inner[i]], CELLS["paint"], Vector((0, sign, 0)))
-    add_face(bm, uvl, inner, CELLS["paint"], Vector((0, sign, 0)))
+        add_face(bm, uvl, [loop[i], loop[j], inner[j], inner[i]], cell, Vector((0, sign, 0)))
+    add_face(bm, uvl, inner, cell, Vector((0, sign, 0)))
 
 
 def split_folded(bm):
@@ -922,7 +936,10 @@ def mirror_uv(face, pts):
 
 def halves(item, pts):
     """[(pts, sign)] of an item: sign -1 flips the 3D result to the right side (side face).
-    Unless `single`, the mirror half is added."""
+    Unless `single`, the mirror half is added. A `single` side item stands on the left, or on
+    the right with `right` (the VAZ-1111's fuel filler)."""
+    if item.get("single") and item.get("right") and item["face"] == "side":
+        return [(pts, -1.0)]
     out = [(pts, 1.0)]
     if not item.get("single"):
         out.append((mirror_uv(item["face"], pts), -1.0 if item["face"] == "side" else 1.0))
@@ -1230,7 +1247,10 @@ def add_wrap_bumper(bm, uvl, b):
     GAZ-31029's black bumpers do. The section is `y`'s depth thick (the face's outer edge at the
     y further out), `z` tall, its outer edges chamfered `chamfer`; `wrap.groove` ({z, width,
     depth}) is a V notch along the face (the moulding line of a plastic bumper). The returns'
-    outer face stands at x = ±`half_width`; the inside is buried in the body."""
+    outer face stands at x = ±`half_width`; the inside is buried in the body. `wrap.profile`
+    [[in, z], …] (bottom to top, `in` mm back from the outer face) replaces the chamfered box
+    face with the reference's section: the VAZ-1111's bumper bulges at its middle, its foot
+    tucks back and its top is a shelf running back to the body."""
     w = b["wrap"]
     hw, (z0, z1) = float(b["half_width"]), b["z"]
     front = max(b["y"]) <= 0
@@ -1239,12 +1259,16 @@ def add_wrap_bumper(bm, uvl, b):
     t = abs(b["y"][1] - b["y"][0])
     r = max(float(w.get("radius", 100.0)), t + 1.0)
     c = max(0.0, min(float(b.get("chamfer", 20.0)), (z1 - z0 - SLIVER_MM) / 2, t - SLIVER_MM))
-    prof = [(0.0, z0 + c)]
-    g = w.get("groove")
-    if g:
-        gz, gw, gd = float(g["z"]), float(g.get("width", 16.0)), float(g.get("depth", 8.0))
-        prof += [(0.0, gz - gw / 2), (gd, gz), (0.0, gz + gw / 2)]
-    prof += [(0.0, z1 - c), (c, z1), (t, z1), (t, z0), (c, z0)]
+    if "profile" in w:
+        prof = [(float(d), float(z)) for d, z in w["profile"]]
+        prof += [(t, prof[-1][1]), (t, prof[0][1])]
+    else:
+        prof = [(0.0, z0 + c)]
+        g = w.get("groove")
+        if g:
+            gz, gw, gd = float(g["z"]), float(g.get("width", 16.0)), float(g.get("depth", 8.0))
+            prof += [(0.0, gz - gw / 2), (gd, gz), (0.0, gz + gw / 2)]
+        prof += [(0.0, z1 - c), (c, z1), (t, z1), (t, z0), (c, z0)]
     # the U's outer edge in plan: (x, y) and the inward normal, left return end first
     path = [((hw, float(w["to"])), (-1.0, 0.0))]
     cx, cy = hw - r, y_out - sy * r
@@ -1301,13 +1325,16 @@ def add_bumper(bm, uvl, b):
 
 
 def add_details(spec, body):
-    """Bumpers, mirrors, chassis and plates (any face: grille panels, handles, hinges), joined in."""
+    """Bumpers, mirrors, chassis and plates (any face: grille panels, handles, hinges), joined in.
+    Plates are probed onto the body with its bumpers: one on a bumper (the VAZ-1111's rear fog
+    lamp) would otherwise stand on the face buried inside it."""
     bvh = body_bvh(body)
     bm = bmesh.new()
     bm.from_mesh(body.data)
     uvl = bm.loops.layers.uv["UVMap"]
     for b in spec.get("bumpers", []):
         (add_wrap_bumper if b.get("wrap") else add_bumper)(bm, uvl, b)
+    plate_bvh = BVHTree.FromBMesh(bm)
     for m in spec.get("mirrors", []) + spec.get("chassis", []):
         for sign in ((1.0,) if m.get("single") else (1.0, -1.0)):
             x0, x1 = sorted(v * sign for v in m["x"])
@@ -1315,7 +1342,7 @@ def add_details(spec, body):
                     m.get("cell", "black"), m.get("chamfer", 0.0))
     for p in spec.get("plates", []):
         for pts, sign in halves(p, item_outline(p)):
-            add_plate(bm, uvl, bvh, p, p.get("cell", "black"), pts, sign)
+            add_plate(bm, uvl, plate_bvh, p, p.get("cell", "black"), pts, sign)
     for r in spec.get("recesses", []):
         bars = r.get("bars")
         for b in (bars if isinstance(bars, list) else [bars] if bars else []):
@@ -1331,9 +1358,11 @@ def add_bars(bm, uvl, bvh, r, b):
     """Grille bars across a stadium or rectangular recess on the front or rear face:
     `b.count` vertical bars `b.width` (25) mm wide in `b.cell` (trim), standing on the
     recess floor and reaching to `b.inset` (3) mm under the face, trimmed to the rounded ends.
-    A recess's `bars` may be a list: horizontal and vertical sets make a grid."""
+    A recess's `bars` may be a list: horizontal and vertical sets make a grid. A set's own
+    `x` ([lo, hi]) keeps it to that part of the recess: the VAZ-1111's grille is the middle of
+    one black panel that also holds the headlamps, with a single bar (count 1) between them."""
     n, w = int(b["count"]), float(b.get("width", 25.0))
-    x0, x1 = min(r["x"]), max(r["x"])
+    x0, x1 = min(b.get("x", r["x"])), max(b.get("x", r["x"]))
     z0, z1 = min(r["z"]), max(r["z"])
     rad = min(float(r.get("radius", 0.0)), (z1 - z0) / 2, (x1 - x0) / 2)
     depth = float(r.get("depth", RECESS_DEPTH))

@@ -55,7 +55,7 @@ const ids = args.filter((a) => !a.startsWith('--'));
 const models =
   ids.length > 0
     ? ids
-    : ['sa_oka', 'sv_vaz2101', 'sv_vaz2106', 'gt_vaz2110', 'sa_uaz330364', 'sa_izh2715'];
+    : ['cf_vaz1111', 'sv_vaz2101', 'sv_vaz2106', 'gt_vaz2110', 'sa_uaz330364', 'sa_izh2715'];
 const RADIUS = flag('radius', 50);
 const LEVELS_G = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95];
 const LINEAR_MAX_G = 0.45;

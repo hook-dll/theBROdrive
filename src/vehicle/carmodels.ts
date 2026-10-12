@@ -775,18 +775,6 @@ export interface CarModelDef {
    */
   readonly glassMaterial?: string;
   readonly glassUvCell?: readonly [number, number];
-  /**
-   * Material this body's REAR SCREEN is drawn with when the pack did not draw it as
-   * glass: GTA SA models often leave the tailgate's opening empty and author the piece
-   * behind it as a trim plate, which reads as a window and is aimed at like one but is
-   * neither glass nor paint anywhere downstream. `sa_oka` is one, on `car_trim`.
-   *
-   * `buildTemplate` then cuts the plate that closes the opening out of that material's
-   * mesh into the glass (`glassOverTailOpening` in render/carmodel.ts), so the window
-   * mirrors, gathers dust and takes stickers like every other window. The pack's own
-   * contract is that windows ship as `car_glass` — see `tools/dff-pack-import.md`.
-   */
-  readonly rearScreenMaterial?: string;
   /** Factory geometry used to fit body, axles and tyres at load time. */
   readonly factory: FactoryGeometry;
   /**
@@ -958,7 +946,6 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   sv_niva_long:   { length: 4.240, width: 1.680, height: 1.640, clearance: 0.220, wheelbase: 2.700, frontTrack: 1.440, rearTrack: 1.420, wheelRadius: 0.343, tyreWidth: 0.175 },
   sa_azlk2141:   { length: 4.350, width: 1.690, height: 1.400, clearance: 0.140, wheelbase: 2.580, frontTrack: 1.440, rearTrack: 1.420, wheelRadius: 0.310, tyreWidth: 0.165 },
   sa_vaz2109:   { length: 4.006, width: 1.650, height: 1.402, clearance: 0.160, wheelbase: 2.460, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.281, tyreWidth: 0.165 },
-  sa_oka:         { length: 3.200, width: 1.420, height: 1.400, clearance: 0.150, wheelbase: 2.180, frontTrack: 1.214, rearTrack: 1.204, wheelRadius: 0.260, tyreWidth: 0.135 },
   sa_uaz330364:   { length: 4.535, width: 1.974, height: 2.355, clearance: 0.205, wheelbase: 2.550, frontTrack: 1.445, rearTrack: 1.445, wheelRadius: 0.372, tyreWidth: 0.225, frontOverhang: 1.054 },
   sa_izh2715:     { length: 4.130, width: 1.590, height: 1.825, clearance: 0.185, wheelbase: 2.400, frontTrack: 1.270, rearTrack: 1.270, wheelRadius: 0.305, tyreWidth: 0.175 },
   gt_vaz2110:     { length: 4.265, width: 1.680, height: 1.420, clearance: 0.170, wheelbase: 2.492, frontTrack: 1.410, rearTrack: 1.380, wheelRadius: 0.288, tyreWidth: 0.175 },
@@ -971,6 +958,9 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   // factory sheet, 3dcar.ru: the sill over the ground; same body): the passport's 156 is under the
   // rear axle, which this body has no part for. 205/70R14 radial: 0.321 m free radius.
   cf_gaz31029:    { length: 4.885, width: 1.800, height: 1.476, clearance: 0.220, wheelbase: 2.800, frontTrack: 1.495, rearTrack: 1.425, wheelRadius: 0.321, tyreWidth: 0.205 },
+  // VAZ-1111 (the factory sheet and the 1111 manual): 3200 × 1420 × 1400, 2180 wheelbase,
+  // 1214/1204 tracks, 150 under the subframe; 135/80R12 radial, 0.260 m free radius.
+  cf_vaz1111:     { length: 3.200, width: 1.420, height: 1.400, clearance: 0.150, wheelbase: 2.180, frontTrack: 1.214, rearTrack: 1.204, wheelRadius: 0.260, tyreWidth: 0.135 },
 };
 
 function factoryGeometry(id: string): FactoryGeometry {
@@ -1719,56 +1709,6 @@ const SAAS_SPECS: readonly Entry[] = [
     },
   },
   {
-    // VAZ-1111, 1988-1996, per its factory manual: 635 kg kerb, 0.65 litre twin,
-    // four-speed transaxle on a 4.54 final drive, 135/80 R12 on 4B-12 rims, 30
-    // litre tank, a 4.8 m turning radius by the outer wheel's track, and 120 km/h
-    // and 0-100 in 30 s with a driver and one passenger aboard. Cd·A 0.68: Za
-    // Rulyom's Cd 0.40 on the textbook's 1.69 m².
-    // PASSPORT (driver + passenger): 0-100 30 s, 120 km/h; 38 m from 80 km/h
-    // (autoopt.ru/auto/encyclopedia/car/vaz/mark/vaz-1111).
-    id: 'sa_oka',
-    label: 'VAZ-1111 Oka',
-    dir: SAAS,
-    glb: 'oka.glb',
-    // The pack drew this body's rear screen as a `car_trim` plate filling the tailgate's
-    // opening instead of glass, the one window in the fleet that is not `car_glass`:
-    // render/carmodel.ts cuts that plate into the glass at load (CarModelDef.rearScreenMaterial).
-    rearScreenMaterial: 'car_trim',
-    bodyClass: 'car',
-    scale: 0.97465,
-    mass: 635,
-    // 135/80 R12.
-    tyre: { construction: 'radial', aspect: 0.8 },
-    engineId: 'engine_vaz_1111',
-    gearboxId: 'gearbox_oka_4',
-    tankLitres: 30,
-    wheelGrip: 0.61,
-    brakeDecelG: BRAKES_SERVO_G,
-    // MacPherson struts in front, trailing arms on an elastic cross-beam behind:
-    // the Samara's layout, and its preset.
-    suspension: SUSP_SAMARA,
-    steerLock: 0.557,
-    rearDriveBias: 0,
-    handlingProfile: 'road',
-    // No factory axle loads are published; transverse front-drive default.
-    frontWeightShare: 0.62,
-    dragArea: 0.68,
-    aero: AERO_OKA,
-    lights: {
-      // Headlamps carry the position lamps inside them. Amber indicators sit in the
-      // bumper and on each front wing. The OSVAR 43.3716 rear lamp stacks a clear
-      // reversing block, an amber indicator and red running/stop on one 21/5 W
-      // bulb. The red fog lamp in the left of the rear bumper is `rear_passive`:
-      // nothing in the game switches it.
-      headlights: ['headlights'],
-      taillights: ['taillights'],
-      reverseLights: ['reverse_lights'],
-      leftBlinkers: ['front_blinker_left', 'rear_blinker_left'],
-      rightBlinkers: ['front_blinker_right', 'rear_blinker_right'],
-    },
-    wheelSetPool: SOVIET_WHEEL_SET_POOL,
-  },
-  {
     // PASSPORT: 110 km/h in the factory manual (РЭ 05808600.104-2006, uaz-business.ru),
     // 105 at truck-and-bus.ru; no 0-100 and no braking row is published.
     id: 'sa_uaz330364',
@@ -2112,6 +2052,65 @@ const CARFORGE_CARS: readonly Entry[] = [
       rightBlinkers: ['gaz31029bodyrightblinkers'],
     },
   },
+  {
+    // VAZ-1111 Oka, 1988-1996, per its factory manual: 635 kg kerb, 0.65 litre twin,
+    // four-speed transaxle on a 4.54 final drive, 135/80 R12 on 4B-12 rims, 30 litre tank,
+    // a 4.8 m turning radius by the outer wheel's track, and 120 km/h and 0-100 in 30 s with
+    // a driver and one passenger aboard. Cd·A 0.68: Za Rulyom's Cd 0.40 on the textbook's
+    // 1.69 m².
+    // PASSPORT (driver + passenger): 0-100 30 s, 120 km/h; 38 m from 80 km/h
+    // (autoopt.ru/auto/encyclopedia/car/vaz/mark/vaz-1111).
+    // Generated by carforge.py from examples/vaz1111.json: the profile, glass and arches
+    // measured on the GTA SA Oka the game used to ship, at the factory 2180 wheelbase,
+    // checked against the the-blueprints.com preview (sheet_vaz1111.json) and photographs.
+    id: 'cf_vaz1111',
+    label: 'VAZ-1111 Oka',
+    bodyClass: 'car',
+    mass: 635,
+    // 135/80 R12.
+    tyre: { construction: 'radial', aspect: 0.8 },
+    engineId: 'engine_vaz_1111',
+    gearboxId: 'gearbox_oka_4',
+    tankLitres: 30,
+    wheelGrip: 0.61,
+    brakeDecelG: BRAKES_SERVO_G,
+    // MacPherson struts in front, trailing arms on an elastic cross-beam behind:
+    // the Samara's layout, and its preset.
+    suspension: SUSP_SAMARA,
+    steerLock: 0.557,
+    rearDriveBias: 0,
+    handlingProfile: 'road',
+    // No factory axle loads are published; transverse front-drive default.
+    frontWeightShare: 0.62,
+    dragArea: 0.68,
+    aero: AERO_OKA,
+    wheelSetPool: SOVIET_WHEEL_SET_POOL,
+    dir: CARFORGE,
+    glb: 'vaz1111.fbx',
+    textureFile: `${SOVIET}/albedo.png`,
+    paintStyle: 'soviet-atlas',
+    paintUvCell: [0, 0],
+    glassUvCell: [3, 1],
+    detectWheels: false,
+    wheelNodes: {
+      wheel_fl: ['vaz1111wheel_fl'],
+      wheel_fr: ['vaz1111wheel_fr'],
+      wheel_rl: ['vaz1111wheel_bl'],
+      wheel_rr: ['vaz1111wheel_br'],
+    },
+    scale: 0.01,
+    lights: {
+      // Rectangular headlamps in a black surround; amber indicators in the bumper's ends
+      // and on each front wing. At the rear one unit per corner turning onto the side,
+      // red under amber under clear reversing, as the OSVAR 43.3716 is stacked; the red
+      // fog lamp in the left of the rear bumper is a lens on the body: nothing switches it.
+      headlights: ['vaz1111bodyheadlights'],
+      taillights: ['vaz1111bodytaillights'],
+      reverseLights: ['vaz1111bodyreverselights'],
+      leftBlinkers: ['vaz1111bodyleftblinkers'],
+      rightBlinkers: ['vaz1111bodyrightblinkers'],
+    },
+  },
 ];
 
 const ENTRIES: readonly Entry[] = [
@@ -2150,7 +2149,6 @@ export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map((e) => ({
   paintUvCell: e.paintUvCell ?? (e.dir === SOVIET ? SOVIET_PAINT_CELLS[e.glb] : undefined),
   glassMaterial: e.glassMaterial,
   glassUvCell: e.glassUvCell,
-  rearScreenMaterial: e.rearScreenMaterial,
   factory: factoryGeometry(e.id),
   wheelSetPool: e.wheelSetPool,
   spareNode: e.spareNode,

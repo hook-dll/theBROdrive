@@ -30,6 +30,10 @@ def parse():
     ap.add_argument("--albedo", default="public/models/soviet/albedo.png")
     ap.add_argument("--prefix", required=True)
     ap.add_argument("--size", type=int, nargs=2, default=[1100, 640])
+    # a colour no car part has (1 0 1, magenta) shows every hole the sky would show through
+    ap.add_argument("--bg", type=float, nargs=3, default=[0.55, 0.57, 0.6])
+    # objects whose name holds any of these are left out (`wheel`: the body alone, for holes.py)
+    ap.add_argument("--hide", nargs="*", default=[])
     return ap.parse_args(argv)
 
 
@@ -89,6 +93,9 @@ def main():
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.ops.import_scene.fbx(filepath=os.path.abspath(a.fbx))
     meshes = [o for o in bpy.context.scene.objects if o.type == "MESH"]
+    for o in [o for o in meshes if any(h in o.name for h in a.hide)]:
+        bpy.data.objects.remove(o, do_unlink=True)
+    meshes = [o for o in bpy.context.scene.objects if o.type == "MESH"]
     image = bpy.data.images.load(os.path.abspath(a.albedo))
     mat = textured_material(image)
     for o in meshes:
@@ -101,9 +108,11 @@ def main():
     shading = scene.display.shading
     shading.light = "STUDIO"
     shading.color_type = "TEXTURE"
+    # the game draws front faces only (three.js FrontSide): a face seen from behind is a hole
+    shading.show_backface_culling = True
     shading.background_type = "WORLD"
     scene.world = bpy.data.worlds.new("bg")
-    scene.world.color = (0.55, 0.57, 0.6)
+    scene.world.color = tuple(a.bg)
     scene.render.film_transparent = False
 
     print("EXTENT " + " ".join(f"{v:.4f}" for v in size) + f" centre={tuple(round(c, 4) for c in centre)}")

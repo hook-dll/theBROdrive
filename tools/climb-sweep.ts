@@ -200,7 +200,7 @@ const WEAKEST_RWD = 'sv_gaz21';
  */
 const WEAKEST_RWD_MARGIN_DEG = 1.2;
 
-const models = ALL ? CAR_MODELS.map((m) => m.id) : ['sv_gaz21', 'sv_vaz2101', 'sa_oka'];
+const models = ALL ? CAR_MODELS.map((m) => m.id) : ['sv_gaz21', 'sv_vaz2101', 'cf_vaz1111'];
 console.log(
   `world's steepest grade: ${WORLD_MAX_GRADE_DEG.toFixed(1)} deg ` +
     `(MAX_SLOPE ${MAX_SLOPE})   window ${WINDOW_S} s   ${models.length} bodies   ` +

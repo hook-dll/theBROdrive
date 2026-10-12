@@ -1,0 +1,269 @@
+{
+ "id": "vaz1111",
+ "src": "build/vehicles/vaz1111/00-references/gta-oka.glb",
+ "hubs": {
+  "front": "wheel_fl",
+  "rear": "wheel_rl"
+ },
+ "wheels": {
+  "radius": 260,
+  "width": 135,
+  "track_front": 1214,
+  "track_rear": 1204,
+  "wheelbase": 2180
+ },
+ "flat": true,
+ "parts": {
+  "paint": {
+   "cell": "paint",
+   "tris": 2600,
+   "drop": {
+    "min_mm": 80,
+    "boxes": [
+     [
+      -260,
+      -620,
+      200,
+      260,
+      -470,
+      420
+     ],
+     [
+      -260,
+      2600,
+      290,
+      260,
+      2720,
+      420
+     ],
+     {
+      "box": [
+       -450,
+       2500,
+       540,
+       -120,
+       2700,
+       760
+      ],
+      "max_mm": 200
+     },
+     [
+      -700,
+      2480,
+      60,
+      700,
+      2800,
+      262
+     ]
+    ]
+   },
+   "panel": 6
+  },
+  "glass": {
+   "cell": "glass",
+   "tris": 160,
+   "panel": 3
+  },
+  "mirrors": {
+   "cell": "black",
+   "tris": 60,
+   "panel": 10
+  },
+  "rear_passive": {
+   "cell": "lamp_tail",
+   "tris": 12,
+   "panel": 10
+  }
+ },
+ "trim": {
+  "mesh": "trim",
+  "cell": "black",
+  "tris": 1600,
+  "drop": {
+   "min_mm": 25,
+   "boxes": [
+    {
+     "box": [
+      -650,
+      150,
+      860,
+      650,
+      950,
+      1360
+     ],
+     "max_mm": 700
+    },
+    [
+     -260,
+     -620,
+     200,
+     260,
+     -480,
+     420
+    ],
+    [
+     -260,
+     2630,
+     240,
+     260,
+     2740,
+     430
+    ],
+    [
+     -500,
+     2480,
+     240,
+     -380,
+     2700,
+     270
+    ],
+    [
+     -700,
+     2500,
+     80,
+     700,
+     2800,
+     240
+    ],
+    {
+     "box": [
+      -430,
+      2450,
+      560,
+      430,
+      2720,
+      720
+     ],
+     "max_mm": 220
+    },
+    [
+     -480,
+     700,
+     1100,
+     480,
+     2300,
+     1385
+    ],
+    {
+     "box": [
+      -480,
+      500,
+      850,
+      480,
+      2420,
+      1300
+     ],
+     "max_mm": 500
+    },
+    {
+     "box": [
+      -320,
+      2480,
+      820,
+      320,
+      2640,
+      960
+     ],
+     "max_mm": 450
+    }
+   ]
+  },
+  "panel": 6
+ },
+ "lamps": [
+  {
+   "mesh": "headlights",
+   "role": "headlights",
+   "tris": 60,
+   "panel": 8
+  },
+  {
+   "mesh": "taillights",
+   "role": "taillights",
+   "tris": 40,
+   "panel": 8
+  },
+  {
+   "mesh": "reverse_lights",
+   "role": "reverselights",
+   "tris": 40,
+   "panel": 8
+  },
+  {
+   "mesh": "front_blinker_left",
+   "role": "leftblinkers",
+   "tris": 40,
+   "panel": 8
+  },
+  {
+   "mesh": "rear_blinker_left",
+   "role": "leftblinkers",
+   "tris": 20,
+   "panel": 8
+  },
+  {
+   "mesh": "front_blinker_right",
+   "role": "rightblinkers",
+   "tris": 40,
+   "panel": 8
+  },
+  {
+   "mesh": "rear_blinker_right",
+   "role": "rightblinkers",
+   "tris": 20,
+   "panel": 8
+  }
+ ],
+ "cells": [
+  {
+   "box": [
+    -330,
+    -620,
+    120,
+    330,
+    400,
+    500
+   ],
+   "cell": "black"
+  },
+  {
+   "box": [
+    -330,
+    -560,
+    450,
+    330,
+    450,
+    720
+   ],
+   "cell": "black"
+  },
+  {
+   "box": [
+    380,
+    2600,
+    310,
+    520,
+    2660,
+    400
+   ],
+   "cell": "black"
+  },
+  {
+   "box": [
+    -470,
+    2380,
+    885,
+    470,
+    2740,
+    1340
+   ],
+   "cell": "glass"
+  }
+ ],
+ "skin": {
+  "voxel_mm": 10,
+  "close_mm": 20,
+  "inset_mm": 8,
+  "tris": 2500
+ }
+}

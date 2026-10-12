@@ -3,18 +3,22 @@
 Builds a low-poly car FBX from a compact spec. Pipeline entry points:
 
 - `carforge.py` — spec → FBX (`-- <spec.json> <out.fbx> [--wheel-fbx] [--summary <file>]`).
-- `render.py` — FBX → PNG views (`-- --fbx <file> --albedo <png> --prefix <path> --size W H`; writes `_side`, `_front`, `_rear`, `_top` (orthographic, each with a `.json`: mm per px, centre, image axes), `_q`, `_qrear`, `_wire`; prints `EXTENT x y z`). Render at `--size 3000 1760` when the views are for cropping details.
+- `render.py` — FBX → PNG views (`-- --fbx <file> --albedo <png> --prefix <path> --size W H [--bg R G B] [--hide <name part>...]`; writes `_side`, `_front`, `_rear`, `_top` (orthographic, each with a `.json`: mm per px, centre, image axes), `_q`, `_qrear`, `_wire`; prints `EXTENT x y z`). Back faces are culled, as the game draws them, so a face turned inward shows as a hole. Render at `--size 3000 1760` when the views are for cropping details.
+- `holes.py` — watertightness check (plain Python + Pillow/SciPy, runs `render.py`; `<car.fbx> [--prefix <path>] [--max <px>]`): the body without its wheels on magenta, and per view the background pixels inside the silhouette (`HOLES {...}`; `<prefix>_<view>_holes.png` marks them yellow; exit 1 above `--max`). Wheels are hidden because the arches are open to the road.
+- `solid.py` — a reference's panels closed into one solid (plain Python + SciPy; run by `reduce.py`'s `skin`): surface voxels, a closing of `--close` mm fills slits, and the outside flood stops between the two sides and between nose and tail, so an open underbody or cabin is shut.
 - `coplanar.py` — faces lying on top of each other, the cause of z-fighting (Blender script; `-- --fbx <file> [--box x0,y0,z0 x1,y1,z1] [--only <name>] [--gap <mm>]`): pairs closer than the gap that overlap, `same` (both show: a fight) or `opposite` (back to back: harmless).
 - `trace.py` — line drawing → pixel blueprint, no hand tracing (plain Python + OpenCV; `<sheet.json> <blueprint.json>`; also writes `<blueprint>.trace_report.json`, the details taken and the candidates dropped; see "Automatic trace").
 - `lines.py` — filled, watermarked colour blueprint (a the-blueprints.com preview) → line drawing for `trace.py` (plain Python + OpenCV; `<drawing> <out.png>`): the watermark inpainted, every colour boundary an edge, each view's outer border drawn so its silhouette is closed; 2 px lines.
-- `reduce.py` — a detailed reference model (glTF) → a pack-style car FBX (Blender script; `-- <reduce.json> <out.fbx>`): see "Reducing a reference model".
+- `reduce.py` — a detailed reference model (glTF) → a pack-style car FBX (Blender script; `-- <reduce.json> <out.fbx>`): the shipped VAZ-1111; see "Reducing a reference model".
 - `fit_blueprint.py` — traced pixel blueprint → spec (plain Python).
 - `fit_mesh.py` — existing FBX/GLB → spec (Blender script; `-- --in <fbx> --out <json> --id <id>`).
 - `fairness.py` — surface check of a built body (Blender script; `-- --fbx <file> [--prefix <path>] [--json <file>]`): counts folds (non-planar quads), ripples (a gentle bend reversed within 700 mm along a section profile) and slivers; writes a defect map (`_fair_*`) and a glossy matcap render (`_shine_*`). A body is clean at 0 folds, 0 ripples.
 - `compare.py` — a render over the traced drawing at the blueprint's scale, in one view (plain Python + Pillow; `--blueprint <json> --drawing <img> --render <render.py prefix> --out <png> [--view side|front|top|rear]`, default side).
+- `refgrid.py` — a glTF reference car normalised to the spec frame by its wheel objects and the factory wheelbase, and measured with rays (Blender script; `-- --in <glb> --wheelbase <mm> [--fbx <out>] [--grid <json>]`): the normalised FBX for `render.py`, and a grid of half-widths per (y, z), heights per (y, x) from above and below, and end-face y per (x, z), glass on its own. The numbers the VAZ-1111's spec was read from.
 - `examples/` — hand-written specs (`uaz3151.json`, `vaz2101.json`, `bmw_e46.json`), the UAZ
-  blueprint input, `sheet_gaz31029.json` (GAZ trace input), and `gaz31029.json` (the reviewed
-  generated shell spec).
+  blueprint input, `sheet_gaz31029.json` (GAZ trace input), `gaz31029.json` (the reviewed
+  generated shell spec), `reduce_vaz1111.json` (the shipped VAZ-1111), and `sheet_vaz1111.json`
+  with `vaz1111.json` (the Oka's carforge spec, built and reviewed but not shipped).
 
 Run Blender jobs one at a time, under `nice -n 15`:
 `nice -n 15 /Applications/Blender.app/Contents/MacOS/Blender --background --factory-startup --python SCRIPT -- args`
@@ -53,6 +57,53 @@ The final spec deliberately keeps the AKROM comparison separate from generation.
 the earlier hybrid failure: importing its open trim and collapsing it into one triangle budget
 destroyed the grille and bumper. The generated model stays closed and owns its details; AKROM
 only supplies the comparison views and measured shape corrections.
+
+## VAZ-1111: generated, the GTA model as the reference only
+
+The shipped Oka (`cf_vaz1111`) is built by `carforge.py` from `examples/vaz1111.json`, numbers
+from `refgrid.py`'s ray grid over the GTA SA Oka the game used to ship (`sa_oka`, retired;
+`git show 8f5a795:public/models/saas/oka.glb`). The GTA model is the reference for renders and
+measurements only; none of its geometry ships.
+
+```
+nice -n 15 $BLENDER --background --factory-startup --python tools/carforge/carforge.py -- \
+    tools/carforge/examples/vaz1111.json build/carforge/vaz1111/car.fbx
+nice -n 15 python3 tools/carforge/holes.py build/carforge/vaz1111/car.fbx
+cp build/carforge/vaz1111/car.fbx public/models/carforge/vaz1111.fbx
+bun tools/fit-models.ts cf_vaz1111
+bun tools/reality.ts cf_vaz1111
+```
+
+Still off against the reference: the front (a black panel across the lamps where the real car
+has a painted panel round them and a narrow barred grille between; a thick bumper where it has
+a thin band with a plate recess) and the bonnet's front corners. They are fixed in the
+generator, one at a time, each checked against the reference (silhouette rows, close crops,
+`holes.py`).
+
+The GTA model reduced by `reduce.py` (`examples/reduce_vaz1111.json`) was shipped for a while
+and taken out: closer in shape, but a reduced game mesh keeps its stray triangles (dirty
+creases, a chewed rear bumper, glass unlike the pack's) and the slits between its panels.
+Rules the generated Oka added for carforge specs:
+
+- **The nose must carry its lamps.** The front face is the first station's ring, its top
+  corners cut by the rail chamfer and its top edge crowned 25 mm: the nose top goes up to the
+  bonnet lip and `rail` drops to 15 mm there, so the face is flat behind the lamps.
+- **A mirror stays above 55% of the body's height**: the loader measures the published width
+  below that, and a mirror under it widens the measured shell and squeezes the car.
+- **The wing top is one edge** (owner's review, twice). Under the bonnet `shoulder` stands
+  above the rail and `plan.high` equals `plan.low`, so the side runs straight up into one
+  rail chamfer of constant width. A shoulder under the rail left a vertical strip between two
+  bevels, `high` inside `low` a step, a rail changing along the bonnet twisted facets.
+- **An A pillar is a strip of constant width, not a triangle** (owner's review): the door
+  glass's front edge parallel to the windscreen line ~110 mm under it, the screen's `rail`
+  15 mm, back to 30 only past the roof's front roll.
+- **The windscreen starts at the cowl's knee**: the bonnet's rear stays under the side glass's
+  bottom up to the knee, or the screen's glass (rule 5) runs onto the bonnet.
+
+A projection of the station grid onto the reference (rings and end grids moved onto a solid
+built from five ray height fields) was tried twice and dropped: the fields disagree at the
+ends, so the end grids fell into the lamp and number-plate pockets, and rows at the spec's
+heights cut across the reference's folds.
 
 ## How the GAZ-31029 was made: what to repeat, what to avoid
 
@@ -147,12 +198,38 @@ catalogue entry against a sibling car and the sources in the entry's comment.
 
 ## Reducing a reference model (`reduce.py`)
 
-`reduce.py` remains a general experiment for cases where a detailed reference must supply loose
-parts, but it is not part of the GAZ-31029 build. Do not use `reduce_gaz31029.json` for the
-shipped car: its open reference trim is intentionally not the generator result.
+The VAZ-1111's route (above). The config's keys beyond the module docstring:
 
-The GAZ reference is AKROM's GTA V model from the `carimport` branch, kept locally as
-`build/vehicles/gaz31029/00-references/akrom-gaz31029.glb`.
+- `parts.<mesh>.panel`, `trim.panel`, `lamps[].panel` (degrees): after the collapse to `tris`,
+  neighbouring faces within that angle are dissolved into one panel and triangulated across
+  it (BEAUTY), so a panel shades as one flat face instead of a crumple of small triangles. A
+  panel whose triangles or corners stand off the collapsed surface by more than
+  `PANEL_OFF_SURFACE` (a seal bending round a window, the bonnet's lip) gets its faces back:
+  across itself it showed as dark shapes over the glass. Flattening the panels onto planes as
+  well tore the tailgate open and is not done.
+- `trim.drop`, `parts.<mesh>.drop`: `{min_mm, boxes}`: loose pieces smaller than `min_mm`, or
+  centred in a box (`[x0,y0,z0,x1,y1,z1]` mm, or `{box, max_mm}` for only pieces up to that
+  size) are dropped: wipers, number plates, badges, the tow hook, the headliner and the cabin
+  seen through the glass. A box must not reach a panel of the body: the GTA tailgate is one
+  piece with its wiper's base, and dropping that cut a hole in it.
+- `flat`: every face flat shaded, as the pack's are (no edge split).
+- Every piece is turned to face away from the car's centre line; a face that ends up glass is
+  judged on its own, turned out if it faces in (the GTA back light is a trim plate drawn inside
+  out) and dropped if it stands across (a pane's edge, a dark triangle over the glass).
+- `cells` boxes paint the engine bay seen through the grille and the number-plate opening
+  black, and the back light's plate glass.
+- `skin: {voxel_mm, close_mm, inset_mm, tris}`: a reference built of panels has slits between
+  them and the sky shows through the car. The kept surface is closed into a solid
+  (`solid.py`, `voxel_mm` 10, `close_mm` 20), its voxel boundary Taubin-smoothed, reduced to
+  `tris` and laid `inset_mm` under the reference face each vertex looks at (at most 0.4 of the
+  solid's thickness there, so a bumper's wing is not crossed). Each face takes the colour of
+  the reference face nearest it (majority over its neighbours), carried through the collapse
+  as a UV, so a slit shows the panel's own paint. Check with `holes.py`. Making this skin the
+  body itself, reduced to panels, lost the window frames' crisp edges to the voxels and
+  dented where it was laid back on the reference; it stays under the panels.
+
+`reduce_gaz31029.json` is a comparison experiment only, not the shipped Volga. Its reference is
+AKROM's GTA V model, kept locally as `build/vehicles/gaz31029/00-references/akrom-gaz31029.glb`.
 
 ## Frame and units
 
@@ -187,19 +264,20 @@ The GAZ reference is AKROM's GTA V model from the `carimport` branch, kept local
 | `grooves` | [{face, line, closed?, width?, depth?, single?}] | face coords (below) | Panel gaps: a V 10 mm wide, 8 mm deep folded into the paint, as the pack does its door gaps (one swept wedge per line, square to the surface). Side gaps stay on the side surface: above the sill chamfer and below the rail (`Shape.rail_z`), never over the roof, bonnet or pillar chamfer. The UAZ's bonnet, full width and wrapping down the sides as on the drawing, is three gaps: along each side, across the front face and across the top at the cowl. |
 | `rail` | [[y, mm], …] | mm, default 55 everywhere | The chamfer between the side and the roof, bonnet or pillar top, per y. The UAZ's A pillar has almost none (8 mm): the 55 mm one was a third plane between the side and the screen frame, and left the front door's frame no side to be cut in. |
 | `lines` | [{face, line, closed?, width?, cell?, single?}] | face coords | Drawn ribbons 3 mm proud, for what is painted rather than cut: bonnet ribs, fuel flaps. |
-| `recesses` | [{face, x\|y, z, radius?, round?, depth?, cell, bars?, frame?, housing?, single?}] | face coords | Pockets with a flat floor in `cell`: windscreen and back-light glass, grille openings, lamp housings. `radius` rounds the corners (half the height = stadium). `bars: {count, width, cell, orientation?, inset?}`: grille bars standing in the pocket; a list of them (horizontal and vertical) is a grid. `frame: {width, proud, cell}`: a flat surround round the opening (the GAZ-31029 grille's chrome). `housing`: a lamp cluster's dark body; lamps may sit in it (rule 3). |
+| `recesses` | [{face, x\|y, z, radius?, round?, depth?, cell, bars?, frame?, housing?, single?}] | face coords | Pockets with a flat floor in `cell`: windscreen and back-light glass, grille openings, lamp housings. `radius` rounds the corners (half the height = stadium). `bars: {count, width, cell, orientation?, inset?, x?}`: grille bars standing in the pocket, over `x` only when given; a list of them (horizontal and vertical) is a grid. `frame: {width, proud, cell}`: a flat surround round the opening (the GAZ-31029 grille's chrome). `housing`: a lamp cluster's dark body; lamps may sit in it (rule 3). |
 | `arches` | {front\|rear: {outline, lip?, flare?}} | mm | Arch opening edge in side view (default: semicircle of `arch_front`/`arch_rear`), with a lip `lip` mm wide standing `flare` mm proud. |
 | `nose` / `tail` | {bulge, inset} | mm | Bulged end: the last station stands `bulge` inside the end, a band rolls in by `inset` to the end face. |
 | `fair_tol` | number | mm, default 12 | Trace noise below this is dropped from the side/plan curves (Douglas-Peucker). A sheet's `extras.fair_tol` reaches the spec. |
 | `redraw` | {top\|bottom\|shoulder: [[[y, z\|null], …], …]} | mm | Each polyline replaces the side line over its own span, the traced points there dropped; a null z keeps the traced height (two nulls: a straight chord). Its points are kept as given (`fair_tol` fairs only the traced stretches between them), so a hand-drawn curve keeps its segments. For what the drawing shows and the car does not: the UAZ sheet's bonnet rising 80 mm with a step across it (the factory bonnet is flat, rolling over at the front on a ~150 mm radius), its sill's bumps by the arches. |
-| `bumpers` | [{y, z, half_width, cell, chamfer, channel?, lip?, ends?, wrap?}] | y, z: [lo,hi] mm; half_width mm; cell: atlas material name; chamfer mm | Bumper boxes at the nose/tail. `channel`: the outer face is a channel that deep between `lip`-tall lips. `wrap: {to, radius, groove?: {z, width, depth}}`: one section (`y`'s depth thick, `z` tall, edges chamfered) swept across the end, round both corners on `radius` and back along the sides to y = `to`, its outer face at ±`half_width`; `groove` is a V moulding line along it (the GAZ-31029's plastic bumpers). |
-| `mirrors` | [{x, y, z, cell, chamfer?}] | mm boxes, mirrored to the right | Wing mirror heads and their bases (the GAZ-31029: a head over the door top by the A pillar, a short base into the window corner). |
+| `bumpers` | [{y, z, half_width, cell, chamfer, channel?, lip?, ends?, wrap?}] | y, z: [lo,hi] mm; half_width mm; cell: atlas material name; chamfer mm | Bumper boxes at the nose/tail. `channel`: the outer face is a channel that deep between `lip`-tall lips. `wrap: {to, radius, segments?, groove?: {z, width, depth}, profile?}`: one section (`y`'s depth thick, `z` tall, edges chamfered) swept across the end, round both corners on `radius` and back along the sides to y = `to`, its outer face at ±`half_width`; `groove` is a V moulding line along it (the GAZ-31029's plastic bumpers). `profile` [[in, z], …] bottom to top, mm back from the outer face, replaces the chamfered face with a measured section (the VAZ-1111's: the foot tucked in 40, the face bulging, the top a shelf back to the body). |
+| `cells` | [{y, z, x?, cell}] | mm boxes, \|x\| | Shell quads whose centre falls in a box take its cell instead of paint: the VAZ-1111's front panel between the bumper and the bonnet is black plastic in the body's own skin. |
+| `mirrors` | [{x, y, z, cell, chamfer?, single?}] | mm boxes, mirrored to the right unless `single` | Wing mirror heads and their bases (the GAZ-31029: a head over the door top by the A pillar, a short base into the window corner; the VAZ-1111: one, `single`, on the driver's door). |
 | `chassis` | [{x, y, z, cell?, chamfer?, single?}] | mm boxes, mirrored to the right unless `single` | Running gear seen under the body: frame rails, axle beams, differential housings. The lowest one sets the body's ground clearance in the game (the loader fits the body box between `clearance` and `height`), so a body without an underbody of its own needs them. |
-| `plates` | [{face, x\|y, z, cell, round, radius, proud?, single}] | face coords | Blocks standing on a face: number plate, door handles, hinges. |
+| `plates` | [{face, x\|y, z, cell, round, radius, proud?, single}] | face coords | Blocks standing on a face: number plate, door handles, hinges. Probed onto the body with its bumpers, so a plate on a bumper (the VAZ-1111's rear fog lamp, cell `lamp_tail`) stands on the bumper. |
 | `lamps` | [{role, face, x\|y, z, round, segments, single, bezel?, dome?, rim?, proud?, wrap?}] | face coords; face `front`/`rear`/`side` | Lamp boxes. `role` must be a key of `LAMP_CELL` in carforge.py (`headlights`, `leftblinkers`, `rightblinkers`, `taillights`, `reverselights`); a side blinker becomes left/right by its side. A lamp's lens is flat, `proud` (8) mm off the outermost point of the face under it, so a crease under a lamp never shows through it. `dome`: a chrome rim (`rim` mm proud) round a lens bulging `dome` mm, like the pack's headlamps; the rim is built into the body, the lens alone is the lamp object, because the game lights a lamp object whole. `bezel`: the lamp sits in a pocket that much wider. `wrap` (front/rear lamps): the y the lens reaches back to along the side; it turns the corner as one piece (rays fanned in plan from the inner edge `x` and `wrap`, `proud` along each), so `x` gives only the inner edge. `wrap: [y bottom, y top]` slants that edge seen from the side (the GAZ-31029's front indicators lean back towards the bonnet, the rear ones forward towards the boot: front −745/−700, rear 3780/3825). |
 | `spare` | {y, z} | mm | Spare-wheel hub (optional): its own object `<id>.spare` (the pack wheel), which the game replaces with a wheel of the car's own set (`spareNode` in `src/vehicle/carmodels.ts`). |
 
-Face coordinates (mm): `front`/`rear` (x, z); `side` (y, z) on the left side, mirrored to the right; `top` (y, x). Items are mirrored across the car unless `single`; every item is probed onto the body along its face's axis.
+Face coordinates (mm): `front`/`rear` (x, z); `side` (y, z) on the left side, mirrored to the right; `top` (y, x). Items are mirrored across the car unless `single`; a `single` side item stands on the left, or on the right with `right: true` (the VAZ-1111's fuel filler); every item is probed onto the body along its face's axis.
 
 `validate()` in carforge.py rejects specs missing `id`, `wheels` (radius, width, track_front, track_rear, wheelbase), `side.top/bottom/shoulder` (≥ 2 points), `plan.low/high` (≥ 2 points), `belt`, `glass_top`, unknown lamp roles, and lamp faces other than `front`/`rear`/`side`.
 
@@ -385,7 +463,8 @@ slices), grille plates, window outlines (glass hull per pane) and keeps the true
 The traced UAZ is in the game as the UAZ-31512 (`cf_uaz31512`, ~5400 tris): rear door outline,
 its hinges and the number plate on the rear face, frame rails, axles and differentials under
 the body, the spare on a door carrier. The GAZ-31029 (`cf_gaz31029`, ~6100 tris) is the second
-and the reference for the next ones: see "How the GAZ-31029 was made" above.
+and the reference for the next ones: see "How the GAZ-31029 was made" above. The VAZ-1111
+(`cf_vaz1111`, ~4000 tris) is the third, reduced from the GTA SA Oka it replaced: see "VAZ-1111".
 
 Next:
 1. `fit_mesh.py` bodies still ripple (vz01 59, gz24 53, vz21 146 by `fairness.py`): facet noise in

@@ -41,7 +41,7 @@ import sys
 
 import bmesh
 import bpy
-from mathutils import Matrix, Vector
+from mathutils import Matrix, Vector, geometry
 from mathutils.bvhtree import BVHTree
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -52,6 +52,9 @@ SHELL_SKIN_MM = 25.0   # a trim vertex this close to the shell, or outside it, i
 SHELL_OUTSIDE = 0.6    # share of a trim piece's vertices that must be on or outside the shell
 RAY_MM = 12.0        # spacing of the visibility rays
 MIN_HITS = 6         # a trim part seen by fewer rays than this is hidden (inside the body)
+CAR_AXIS_Z = 650.0   # mm: the height of the car's middle line a piece's faces should face away from
+PANE_EDGE_COS = 0.35  # a glass face within ~70° of square to the line from the car's centre is an edge
+PANEL_OFF_SURFACE = 4.0  # mm a panel's triangle or corner may stand off the surface it came from
 # directions the car is looked at from (towards the car): all round at three elevations, and
 # from straight above; never from below (the pack has no underside detail)
 VIEW_DIRS = [(math.cos(a) * math.cos(e), math.sin(a) * math.cos(e), -math.sin(e))
@@ -138,8 +141,15 @@ def visibility(groups):
     return hits
 
 
-def decimate_to(bm, tris):
-    """Collapse-decimate a bmesh to about `tris` triangles (through a temporary object)."""
+def decimate_to(bm, tris, panel=None):
+    """Reduce a bmesh to about `tris` triangles, then, with `panel` (degrees), in the pack's
+    construction: neighbouring faces within that angle are dissolved into one polygon (a panel)
+    and re-triangulated across it, so the surface is a few large triangles per panel meeting at
+    folds and flat shading shows a panel as one shade, not a crumpled fan of small triangles each
+    tilted a little. Collapse first: it keeps the silhouette, then the panels. (Flattening each
+    panel onto a plane as well tore the tailgate open where neighbouring panels pulled a shared
+    vertex two ways.)"""
+    bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=0.5)  # the source's triangles are loose
     bmesh.ops.triangulate(bm, faces=bm.faces[:])
     now = len(bm.faces)
     if now > tris > 0:
@@ -157,24 +167,277 @@ def decimate_to(bm, tris):
         bpy.data.meshes.remove(me)
     bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=0.5)
     bmesh.ops.dissolve_degenerate(bm, edges=bm.edges[:], dist=0.5)
-    bmesh.ops.triangulate(bm, faces=bm.faces[:])
+    if panel:
+        before = bm.copy()  # the collapsed surface, which a panel's triangles must stay on
+        tree = BVHTree.FromBMesh(before)
+        bmesh.ops.dissolve_limit(bm, angle_limit=math.radians(panel), use_dissolve_boundaries=False,
+                                 verts=bm.verts[:], edges=bm.edges[:], delimit={"NORMAL"})
+        restore_off_surface_panels(bm, before, tree)
+        before.free()
+    # BEAUTY: a concave panel ear-clipped left slivers that shade as stray dark shapes
+    bmesh.ops.triangulate(bm, faces=bm.faces[:], quad_method="BEAUTY", ngon_method="BEAUTY")
     return bm
 
 
-def append(dst, uvl, src, cell_of):
-    """Copy src's faces into dst; each face's UV is its cell's centre (cell_of(face centre))."""
+def restore_off_surface_panels(bm, before, tree):
+    """Rule: a panel's triangles lie on the surface it was dissolved from. A dissolved ngon that
+    is not flat (a seal bending round a window, the bonnet's lip over the grille) triangulates
+    across itself: triangles spanning the opening, which flat shading shows as dark shapes over
+    the glass or a spike off the bonnet. Each panel is triangulated on a copy; if any triangle's
+    centre stands more than PANEL_OFF_SURFACE mm off the surface, the panel is replaced by the
+    faces it was made of (dissolving removes vertices but moves none, so they are found by
+    position)."""
+    bad = []
+    for f in bm.faces:
+        if len(f.verts) <= 3:
+            continue
+        pts = [v.co.copy() for v in f.verts]
+        f.normal_update()
+        c = f.calc_center_median()
+        flat = max(abs((p - c).dot(f.normal)) for p in pts) <= PANEL_OFF_SURFACE
+        tris = geometry.tessellate_polygon([pts])
+        if not flat or any(tree.find_nearest(sum((pts[i] for i in t), Vector()) / 3)[3] > PANEL_OFF_SURFACE
+                           for t in tris):
+            bad.append(f)
+    if not bad:
+        return
+    after = BVHTree.FromBMesh(bm)
+    owner = {}
+    for g in before.faces:  # which dissolved panel each collapsed face became part of
+        idx = after.find_nearest(g.calc_center_median())[2]
+        owner.setdefault(idx, []).append(g)
+    bm.faces.ensure_lookup_table()
+    lookup = {tuple(round(c, 2) for c in v.co): v for v in bm.verts}
+    restore = [g for f in bad for g in owner.get(f.index, [])]
+    bmesh.ops.delete(bm, geom=bad, context="FACES_ONLY")
+    for g in restore:
+        vs = []
+        for v in g.verts:
+            key = tuple(round(c, 2) for c in v.co)
+            if key not in lookup:  # a vertex the dissolve removed: back it comes
+                lookup[key] = bm.verts.new(v.co)
+            vs.append(lookup[key])
+        try:
+            bm.faces.new(vs)
+        except ValueError:
+            pass
+    bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=0.01)
+
+
+def append(dst, uvl, src, cell_of, axis):
+    """Copy src's faces into dst; each face's UV is its cell's centre (cell_of(face centre)).
+    Each connected piece is first made consistent and turned outward: a piece whose faces mostly
+    face the car's axis is flipped. A face that ends up glass is judged on its own against the
+    axis (`axis`: the segment [(y0), (y1)] at CAR_AXIS_Z it faces away from): facing in, it is
+    turned out (the GTA Oka's back light is a trim plate drawn inside out); standing across that
+    direction it is a pane's edge, which flat shading shows as a dark triangle over the glass,
+    and it is dropped. Faces are flat shaded, as the pack's are."""
+    def away(c):
+        y = min(max(c.y, axis[0]), axis[1])
+        return c - Vector((0.0, y, CAR_AXIS_Z))
+
+    bmesh.ops.recalc_face_normals(src, faces=src.faces[:])
+    src.faces.index_update()
+    for faces in loose_parts(src):
+        total = sum(f.calc_area() for f in faces)
+        if sum(f.calc_area() for f in faces if f.normal.dot(away(f.calc_center_median())) < 0) > 0.5 * total:
+            bmesh.ops.reverse_faces(src, faces=faces)
+    src.normal_update()
+    cells, flip, edges = {}, [], []
+    for f in src.faces:
+        c = f.calc_center_median()
+        cells[f] = cell_of(c)
+        if cells[f] == "glass":
+            d = f.normal.dot(away(c).normalized())
+            (edges if abs(d) < PANE_EDGE_COS else flip if d < 0 else []).append(f)
+    bmesh.ops.reverse_faces(src, faces=flip)
+    gone = set(edges)
     vmap = {}
     for v in src.verts:
         vmap[v] = dst.verts.new(v.co * cf.MM)  # the frame is mm, carforge's meshes are metres
     for f in src.faces:
+        if f in gone:
+            continue
         try:
             g = dst.faces.new([vmap[v] for v in f.verts])
         except ValueError:
             continue
-        g.smooth = True
-        uv = cf.uv_of_cell(cf.CELLS[cell_of(f.calc_center_median())])
+        g.smooth = False
+        uv = cf.uv_of_cell(cf.CELLS[cells[f]])
         for loop in g.loops:
             loop[uvl].uv = uv
+
+
+def sample_points(bm, step):
+    """Points on every face of `bm` (frame mm), no two further apart than about `step`: each
+    triangle's barycentric grid."""
+    bmesh.ops.triangulate(bm, faces=bm.faces[:])
+    out = []
+    for f in bm.faces:
+        a, b, c = (v.co for v in f.verts)
+        n = max(1, int(math.ceil(max((a - b).length, (b - c).length, (c - a).length) / step)))
+        for i in range(n + 1):
+            for j in range(n + 1 - i):
+                p = a + (b - a) * (i / n) + (c - a) * (j / n)
+                out.append((p.x, p.y, p.z))
+    return out
+
+
+def voxel_surface(solid, origin, voxel):
+    """The boundary of a voxel solid as quads (frame mm): one per face between a solid voxel and
+    an empty one, corners on the voxel lattice. The skin is closed, so the caller makes the
+    winding consistent (recalc_face_normals)."""
+    import numpy as np
+    pad = np.pad(solid, 1)
+    corner0 = np.asarray(origin, float) - voxel * 1.5  # lattice corner 0 of the padded grid
+    verts, index, faces = [], {}, []
+
+    def vid(k):
+        if k not in index:
+            index[k] = len(verts)
+            verts.append(tuple(corner0 + voxel * np.asarray(k, float)))
+        return index[k]
+
+    for axis in range(3):
+        lo = np.take(pad, range(0, pad.shape[axis] - 1), axis=axis)
+        hi = np.take(pad, range(1, pad.shape[axis]), axis=axis)
+        u, w = [d for d in range(3) if d != axis]
+        for p in np.argwhere(lo != hi):
+            quad = []
+            for du, dw in ((0, 0), (1, 0), (1, 1), (0, 1)):
+                c = [int(p[0]), int(p[1]), int(p[2])]
+                c[axis] += 1
+                c[u] += du
+                c[w] += dw
+                quad.append(vid(tuple(c)))
+            faces.append(quad)
+    return verts, faces
+
+
+def add_skin(cfg, source, body_bm, uvl):
+    """A closed skin under the panels (`skin: {voxel_mm, close_mm, inset_mm, tris}`). A game
+    reference is a set of panels (doors, bonnet, wings, bumpers, the seals round the glass) with
+    slits between them and nothing underneath, so the sky shows through the car. The kept
+    surface (`source`: [(bm in frame mm, cell_of)], before decimation) is closed into a solid by
+    `solid.py` (slits filled, cabin and underbody shut), its voxel boundary smoothed, moved
+    `inset_mm` in along its normals and reduced to `tris`: the car's inner panels. Each face
+    takes the cell of the reference face nearest it, so through a slit the eye meets the colour
+    of the panels round it. The skin is closed whatever the panels do, so the body is
+    watertight. (Making the skin the body itself, reduced to panels, lost the window frames'
+    crisp edges to the voxels and dented where it was laid back on the reference.)"""
+    import subprocess
+    import tempfile
+    import numpy as np
+    voxel = float(cfg.get("voxel_mm", 10.0))
+    close = float(cfg.get("close_mm", 20.0))
+    src = bmesh.new()
+    cell_layer = src.faces.layers.int.new("cell")
+    names = []
+    for bm, cell_of in source:
+        me = bpy.data.meshes.new("src")
+        bm.to_mesh(me)
+        part = bmesh.new()
+        part.from_mesh(me)
+        bpy.data.meshes.remove(me)
+        for f in part.faces:
+            name = cell_of(f.calc_center_median())
+            if name not in names:
+                names.append(name)
+            vs = [src.verts.new(v.co) for v in f.verts]
+            try:
+                g = src.faces.new(vs)
+            except ValueError:
+                continue
+            g[cell_layer] = names.index(name)
+        part.free()
+    bmesh.ops.remove_doubles(src, verts=src.verts[:], dist=0.5)
+    tree = BVHTree.FromBMesh(src)
+    src.faces.ensure_lookup_table()
+    cells = [names[f[cell_layer]] for f in src.faces]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        surf, out = os.path.join(tmp, "surface.npz"), os.path.join(tmp, "solid.npz")
+        np.savez_compressed(surf, points=np.asarray(sample_points(src.copy(), voxel / 3), float))
+        run = subprocess.run(["python3", os.path.join(os.path.dirname(os.path.abspath(__file__)), "solid.py"),
+                              surf, out, "--voxel", str(voxel), "--close", str(close)],
+                             capture_output=True, text=True)
+        if run.returncode:
+            fail("solid.py: " + run.stderr.strip().splitlines()[-1])
+        print(run.stdout.strip())
+        data = np.load(out)
+        verts, faces = voxel_surface(data["solid"], data["origin"], float(data["voxel"]))
+
+    me = bpy.data.meshes.new("solid")
+    me.from_pydata(verts, [], faces)
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bpy.data.meshes.remove(me)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    for _ in range(int(cfg.get("smooth", 8))):  # Taubin: the staircase rounded off, not shrunk
+        for k in (0.5, -0.53):
+            avg = {v: sum((e.other_vert(v).co for e in v.link_edges), Vector()) / len(v.link_edges)
+                   for v in bm.verts}
+            for v, c in avg.items():
+                v.co += (c - v.co) * k
+    bmesh.ops.triangulate(bm, faces=bm.faces[:])
+    bm.normal_update()
+
+    # each face's cell from the reference face nearest it, then a majority over its neighbours
+    # (a seal's sliver or a slit's floor is not a panel), carried through decimation as its UV
+    tag = {f: cells[tree.find_nearest(f.calc_center_median())[2]] for f in bm.faces}
+    for _ in range(int(cfg.get("cell_smooth", 3))):
+        new = {}
+        for f, c in tag.items():
+            votes = {}
+            for e in f.edges:
+                for g in e.link_faces:
+                    votes[tag[g]] = votes.get(tag[g], 0) + 1
+            new[f] = max(votes, key=votes.get)
+        tag = new
+    order = sorted(set(tag.values()))
+    cl = bm.loops.layers.uv.new("cell")
+    for f, c in tag.items():
+        for loop in f.loops:
+            loop[cl].uv = (order.index(c) + 0.5, 0.5)
+    decimate_to(bm, int(cfg.get("tris", 2000)))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    bm.normal_update()
+    # in by `inset_mm`, under the reference everywhere: the closing laid the skin over recesses
+    # (a pane set in its frame) and decimation cut chords out of hollows, so a vertex goes to
+    # `inset` under the reference face it looks at, or along its own normal where none faces it.
+    # A thin part (a bumper's wing, a sill) is not crossed: at most 0.4 of its thickness.
+    inset = float(cfg.get("inset_mm", 8.0))
+    own = BVHTree.FromBMesh(bm)
+    moves = {}
+    for v in bm.verts:
+        _, _, _, t = own.ray_cast(v.co - v.normal * 0.1, -v.normal)
+        want = inset if t is None else min(inset, 0.4 * t)
+        loc, normal, _, _ = tree.find_nearest(v.co)
+        if loc is None or abs(normal.dot(v.normal)) < 0.7:
+            moves[v] = -v.normal * want
+            continue
+        n = normal if normal.dot(v.normal) > 0 else -normal
+        moves[v] = n * ((loc - v.co).dot(n) - want)
+    for v, d in moves.items():
+        v.co += d
+
+    cl = bm.loops.layers.uv["cell"]
+    vmap = {v: body_bm.verts.new(v.co * cf.MM) for v in bm.verts}  # mm to carforge's metres
+    n = 0
+    for f in bm.faces:
+        try:
+            g = body_bm.faces.new([vmap[v] for v in f.verts])
+        except ValueError:
+            continue
+        g.smooth = False
+        idx = sorted(int(loop[cl].uv.x) for loop in f.loops)[1]  # the corners' majority
+        uv = cf.uv_of_cell(cf.CELLS[order[min(max(idx, 0), len(order) - 1)]])
+        for loop in g.loops:
+            loop[uvl].uv = uv
+        n += 1
+    bm.free()
+    src.free()
+    return n
 
 
 def in_box(p, box):
@@ -268,34 +531,77 @@ def main():
             f.smooth = False
     kept_trim = bmesh.new()
     stats = {}
+    def dropped(bm, drop):
+        """A detail the pack does not have: a piece smaller than `drop.min_mm` every way (bolts,
+        badges) or centred in a `drop.boxes` box (wipers, the number plates, a tow hook, the
+        headliner seen through the glass); a box given as {box, max_mm} takes only pieces no
+        larger than that (a wiper over the glass, not the seal round it). `drop` is the trim's
+        (`trim.drop`) or a whole part's own (`parts.<name>.drop`)."""
+        if not bm.verts:
+            return True
+        lo = Vector([min(v.co[i] for v in bm.verts) for i in range(3)])
+        hi = Vector([max(v.co[i] for v in bm.verts) for i in range(3)])
+        size = max(hi - lo)
+        if size < float(drop.get("min_mm", 0.0)):
+            return True
+        for b in drop.get("boxes", []):
+            box, cap = (b["box"], float(b["max_mm"])) if isinstance(b, dict) else (b, math.inf)
+            if size <= cap and in_box((lo + hi) / 2, box):
+                return True
+        return False
+
+    # the line the body's faces face away from: the car's centre line between the axles
+    axis = (0.0, float(cfg["wheels"]["wheelbase"]))
+    source = []  # `skin`: the kept surface with its cells, before decimation
     for (kind, key), bm, h in zip(names, groups, hits):
         if kind == "trim":
-            if sum(h) >= MIN_HITS and (shell is None or outside(bm) >= SHELL_OUTSIDE):
+            if (sum(h) >= MIN_HITS and not dropped(bm, cfg["trim"].get("drop", {}))
+                    and (shell is None or outside(bm) >= SHELL_OUTSIDE)):
                 tmp = bm.copy()
                 tmp.to_mesh(me := bpy.data.meshes.new("t"))
                 kept_trim.from_mesh(me)
                 bpy.data.meshes.remove(me)
             continue
-        # a whole part: drop the faces no ray reached
+        # a whole part: drop the faces no ray reached, and the loose pieces its `drop` names
+        spec = cfg["parts"][key]
         bm.faces.ensure_lookup_table()
         hidden = [f for f, n in zip(bm.faces, h) if n == 0]
         bmesh.ops.delete(bm, geom=hidden, context="FACES")
-        spec = cfg["parts"][key]
-        decimate_to(bm, spec["tris"])
+        if spec.get("drop"):  # welded first: the source's triangles are loose
+            bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=0.5)
+            bm.faces.index_update()
+            for faces in loose_parts(bm):
+                piece = bmesh.new()
+                for v in {v for f in faces for v in f.verts}:
+                    piece.verts.new(v.co)
+                if dropped(piece, spec["drop"]):
+                    bmesh.ops.delete(bm, geom=faces, context="FACES")
+                piece.free()
+        if "skin" in cfg:  # the closed skin under the panels is made of the full surface
+            source.append((bm.copy(), lambda p, c=spec["cell"]: override(p, c)))
+        decimate_to(bm, spec["tris"], spec.get("panel"))
         stats[key] = len(bm.faces)
-        append(body_bm, uvl, bm, lambda p, c=spec["cell"]: override(p, c))
+        append(body_bm, uvl, bm, lambda p, c=spec["cell"]: override(p, c), axis)
     tc = cfg["trim"]
-    decimate_to(kept_trim, tc["tris"])
-    stats["trim"] = len(kept_trim.faces)
     chrome = tc.get("chrome", [])
-    append(body_bm, uvl, kept_trim,
-           lambda p: override(p, "chrome" if any(in_box(p, b) for b in chrome) else tc["cell"]))
+
+    def trim_cell(p):
+        return override(p, "chrome" if any(in_box(p, b) for b in chrome) else tc["cell"])
+
+    if "skin" in cfg:
+        source.append((kept_trim.copy(), trim_cell))
+    decimate_to(kept_trim, tc["tris"], tc.get("panel"))
+    stats["trim"] = len(kept_trim.faces)
+    append(body_bm, uvl, kept_trim, trim_cell, axis)
+    if "skin" in cfg:
+        stats["skin"] = add_skin(cfg["skin"], source, body_bm, uvl)
+        for bm, _ in source:
+            bm.free()
 
     body = cf.finish(body_bm, f"{cid}.body")
-    # panels shade smooth, creases (angle over SHARP_DEG) and cell borders stay sharp: the decimated
-    # surface is many small triangles, which flat shading turns into crumpled noise
-    split = body.modifiers.new("split", "EDGE_SPLIT")  # flat shell faces stay flat (all edges split)
-    split.split_angle = math.radians(SHARP_DEG)
+    if not cfg.get("flat"):  # smooth panels, sharp creases; `flat`: the pack's flat panels
+        split = body.modifiers.new("split", "EDGE_SPLIT")
+        split.split_angle = math.radians(SHARP_DEG)
     out_objs = [body]
     for lp in cfg.get("lamps", []):
         bm = to_bm(objs[lp["mesh"]], m)
@@ -304,9 +610,9 @@ def main():
             bmesh.ops.delete(bm, geom=gone, context="FACES")
         if not bm.faces:
             fail(f"lamp {lp['role']}: no faces of {lp['mesh']} in its box")
-        decimate_to(bm, lp.get("tris", 40))
+        decimate_to(bm, lp.get("tris", 40), lp.get("panel"))
         lbm, luvl = cf.new_bm()
-        append(lbm, luvl, bm, lambda p, c=cf.LAMP_CELL[lp["role"]]: c)
+        append(lbm, luvl, bm, lambda p, c=cf.LAMP_CELL[lp["role"]]: c, axis)
         out_objs.append(cf.finish(lbm, f"{cid}.body.{lp['role']}"))
     # several sources for one role join into one object (the game lights a role's object whole)
     by_role = {}

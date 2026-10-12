@@ -105,7 +105,7 @@ const HUMP_B: Hump = { z: 140, h: 0.09, len: 1.6 };
 
 /** Model ids are the bare arguments; `--debug` and friends are not model ids. */
 const MODELS = process.argv.slice(2).filter((argument) => !argument.startsWith('--'));
-const DEFAULT_MODELS = ['sa_oka', 'gt_vaz2110'];
+const DEFAULT_MODELS = ['cf_vaz1111', 'gt_vaz2110'];
 
 /* ---------------------------------------------------------------------------
  * Section 1: the law, on a bare controller.

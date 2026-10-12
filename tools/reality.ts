@@ -331,13 +331,6 @@ const TARGETS: Readonly<Record<string, Target>> = {
     source: 'AO moskvich-2141 (2141-01, VAZ-2106-70 engine; brake, gross); AP azlk/2141-moskvich/1-2-tekhnicheskie-dannye-i-kharakteristiki-avtomobilejj-moskvich.html',
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.109 },
   },
-  sa_oka: {
-    wheelbase: 2.18, track: 1.214, radius: 0.26, top: 120, to100: 30,
-    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 4.8, lat: null, hz: 1.3,
-    brake80: 38, grossKg: 975,
-    source: 'man. autoprospect.ru/vaz/1111-oka/1-4-tekhnicheskie-kharakteristiki.html; brake, gross AO vaz-1111',
-    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.146 },
-  },
   sa_uaz330364: {
     wheelbase: 2.55, track: 1.445, radius: 0.372, top: 105, to100: null,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 6.3, lat: null, hz: 1.3,
@@ -370,6 +363,13 @@ const TARGETS: Readonly<Record<string, Target>> = {
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, lat: null, hz: 1.0,
     brake80: 43.2, grossKg: 1800,
     source: 'drom.ru/catalog/gaz/31029_volga/83566 (tracks, turn, 4-speed ratios); top: ru.wikipedia ГАЗ-31029 145, avto-russia.ru 150 (no factory 0-100: 19-20 s in secondary sources); gross 110km.ru; brake: the GAZ-24-10 ceiling (same chassis and brakes)',
+  },
+  cf_vaz1111: {
+    wheelbase: 2.18, track: 1.214, radius: 0.26, top: 120, to100: 30,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 4.8, lat: null, hz: 1.3,
+    brake80: 38, grossKg: 975,
+    source: 'man. autoprospect.ru/vaz/1111-oka/1-4-tekhnicheskie-kharakteristiki.html; brake, gross AO vaz-1111',
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.146 },
   },
 };
 

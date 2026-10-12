@@ -692,6 +692,14 @@ function migrateCarPaint(raw: unknown): CarPaint | null {
   return { base, coat, cover: clamp01(numOr(obj.cover, 1)) };
 }
 
+/**
+ * Bodies the catalogue dropped for a new body of the same car: the save keeps the car,
+ * running gear and all, on the body that replaced it. The GTA SA Oka gave way to the
+ * carforge one (2026-10-12).
+ */
+const RETIRED_MODEL_IDS: Readonly<Record<string, string>> = {
+  sa_oka: 'cf_vaz1111',
+};
 
 function migrateCar(raw: Record<string, unknown>): CarState {
   if (typeof raw.id !== 'string') throw new Error('Save data is malformed: car is missing an id');
@@ -702,9 +710,10 @@ function migrateCar(raw: Record<string, unknown>): CarState {
   // mechanic — the anchors and the mounting interaction are gone, so there is
   // nowhere for those parts to be, and inventing loose parts for them would put
   // scrap in the world the player never dropped.
-  const modelId = typeof raw.modelId === 'string' && hasCarModel(raw.modelId)
-    ? raw.modelId
-    : DEFAULT_CAR_MODEL_ID;
+  const savedId = typeof raw.modelId === 'string'
+    ? RETIRED_MODEL_IDS[raw.modelId] ?? raw.modelId
+    : undefined;
+  const modelId = savedId !== undefined && hasCarModel(savedId) ? savedId : DEFAULT_CAR_MODEL_ID;
 
   // Stickers are the car's whole history, so a malformed one is dropped rather than
   // failing the load: losing a mark is bad, losing the save is worse.

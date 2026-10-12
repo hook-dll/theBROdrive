@@ -141,7 +141,7 @@ const DRIVER_ODDS: Readonly<Record<string, readonly [number, number, number]>> =
   sv_gaz21: SLOW_CAR,
   sa_uaz330364: SLOW_CAR,
   cf_uaz31512: SLOW_CAR,
-  sa_oka: SLOW_CAR,
+  cf_vaz1111: SLOW_CAR,
   sa_izh2715: SLOW_CAR,
   sv_vaz2101: SLOW_CAR,
   sv_vaz2102: SLOW_CAR,

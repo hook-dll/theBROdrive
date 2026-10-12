@@ -499,8 +499,8 @@ function gusts(): void {
 
 // ---------------------------------------------------------------------------
 
-const LOAD_MODELS = ['sv_gaz21', 'sv_vaz2106', 'sv_vaz2102', 'sv_vaz2108', 'sv_niva', 'sa_oka', 'sa_uaz330364', 'sa_izh2715', 'gt_vaz2110'];
-const CROSS_MODELS = ['sv_gaz21', 'sv_vaz2106', 'sv_vaz2108', 'sa_oka', 'sa_uaz330364', 'sa_izh2715', 'gt_vaz2110'];
+const LOAD_MODELS = ['sv_gaz21', 'sv_vaz2106', 'sv_vaz2102', 'sv_vaz2108', 'sv_niva', 'cf_vaz1111', 'sa_uaz330364', 'sa_izh2715', 'gt_vaz2110'];
+const CROSS_MODELS = ['sv_gaz21', 'sv_vaz2106', 'sv_vaz2108', 'cf_vaz1111', 'sa_uaz330364', 'sa_izh2715', 'gt_vaz2110'];
 
 const loadModels = ids.length > 0 ? ids : LOAD_MODELS;
 const crossModels = ids.length > 0 ? ids : CROSS_MODELS;
