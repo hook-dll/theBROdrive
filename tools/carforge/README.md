@@ -79,7 +79,8 @@ cropped by their `.json` to the same mm box, a 100 mm grid over both): a painted
 the lamps (no black `cells` box over the face), the grille offset as the real car's, three dark
 slots between two painted bars (`bars` count 2, width 24, no frame), the badge as its own small
 recess, the bumper's blinkers at z 351-406 and its three vent slots and plate area as `trim`
-plates. Still off: the bonnet's front corners (the reference rounds them down into the wings).
+plates. The bonnet's front corners are softened by `rail` 40 at the nose (the lamps' outer top
+corners still clear the chamfer); the reference rounds them further down into the wings.
 
 The GTA model reduced by `reduce.py` (`examples/reduce_vaz1111.json`) was shipped for a while
 and taken out: closer in shape, but a reduced game mesh keeps its stray triangles (dirty
