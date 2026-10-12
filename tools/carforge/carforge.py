@@ -1647,8 +1647,8 @@ def build_body(spec, cid):
     uncut = body_bvh(body)
     cut_arches(spec, s, body)
     cut_windows(spec, s, body)
-    cut_recesses(spec, body)
     weld_cuts(body)  # before the gaps: welding would drag a gap's edges onto the station grid
+    cut_recesses(spec, body)  # after the weld too: a 5 mm lamp housing is within ARCH_SNAP
     cut_grooves(spec, s, body, uncut)
     add_arch_lips(spec, s, body, uncut)
     add_lines(spec, s, body, uncut)
