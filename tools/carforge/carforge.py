@@ -956,15 +956,18 @@ def grown_item(item, w):
     face = item["face"]
     ku, kv = {"front": ("x", "z"), "rear": ("x", "z"), "side": ("y", "z"), "top": ("y", "x")}[face]
     rad = float(item.get("radius", 0.0))
-    return dict(item, **{ku: [min(item[ku]) - w, max(item[ku]) + w],
-                         kv: [min(item[kv]) - w, max(item[kv]) + w],
-                         "radius": rad + w if rad > 0 else 0.0})
+    grown = {ku: [min(item[ku]) - w, max(item[ku]) + w], kv: [min(item[kv]) - w, max(item[kv]) + w],
+             "radius": rad + w if rad > 0 else 0.0}
+    if item.get("top"):
+        grown["top"] = [min(item["top"]) - w, max(item["top"]) + w]
+    return dict(item, **grown)
 
 
 def item_outline(item):
     """Closed outline of an item in its face's coordinates. Rect from `x`/`z` (front, rear),
-    `y`/`z` (side) or `y`/`x` (top); `round` makes it an ellipse, `radius` rounds its
-    corners (a radius of half the height is a stadium)."""
+    `y`/`z` (side) or `y`/`x` (top); `top` gives the first axis's span at the top edge instead
+    (a trapezoid: the VAZ-1111's back light, wider at its foot); `round` makes it an ellipse,
+    `radius` rounds its corners (a radius of half the height is a stadium)."""
     face = item["face"]
     ku, kv = {"front": ("x", "z"), "rear": ("x", "z"), "side": ("y", "z"), "top": ("y", "x")}[face]
     u0, u1 = min(item[ku]), max(item[ku])
@@ -973,7 +976,8 @@ def item_outline(item):
         cu, cv, ru, rv = (u0 + u1) / 2, (v0 + v1) / 2, (u1 - u0) / 2, (v1 - v0) / 2
         n = int(item.get("segments", 10))
         return [(cu + ru * math.cos(2 * math.pi * i / n), cv + rv * math.sin(2 * math.pi * i / n)) for i in range(n)]
-    rect = [(u0, v0), (u1, v0), (u1, v1), (u0, v1)]
+    t0, t1 = (min(item["top"]), max(item["top"])) if item.get("top") else (u0, u1)
+    rect = [(u0, v0), (u1, v0), (t1, v1), (t0, v1)]
     return rounded(rect, float(item.get("radius", 0.0)))
 
 

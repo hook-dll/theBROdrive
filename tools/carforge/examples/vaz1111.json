@@ -966,17 +966,21 @@
   {
    "face": "rear",
    "x": [
-    -455,
-    455
+    -530,
+    530
    ],
    "z": [
-    918,
-    1325
+    894,
+    1317
    ],
-   "radius": 70,
+   "radius": 35,
    "depth": 12,
    "cell": "glass",
-   "single": true
+   "single": true,
+   "top": [
+    -465,
+    465
+   ]
   },
   {
    "face": "front",
@@ -1210,7 +1214,7 @@
    ],
    "cell": "trim",
    "radius": 4,
-   "proud": 2,
+   "proud": 5,
    "single": true
   },
   {
@@ -1225,7 +1229,7 @@
    ],
    "cell": "trim",
    "radius": 3,
-   "proud": 2,
+   "proud": 5,
    "single": true
   },
   {
@@ -1240,7 +1244,7 @@
    ],
    "cell": "trim",
    "radius": 3,
-   "proud": 2,
+   "proud": 5,
    "single": true
   },
   {
@@ -1255,7 +1259,22 @@
    ],
    "cell": "trim",
    "radius": 3,
-   "proud": 2,
+   "proud": 5,
+   "single": true
+  },
+  {
+   "face": "rear",
+   "x": [
+    -240,
+    240
+   ],
+   "z": [
+    290,
+    412
+   ],
+   "cell": "trim",
+   "radius": 6,
+   "proud": 5,
    "single": true
   }
  ],

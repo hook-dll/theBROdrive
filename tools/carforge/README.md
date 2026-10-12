@@ -82,6 +82,11 @@ recess, the bumper's blinkers at z 351-406 and its three vent slots and plate ar
 plates. The bonnet's front corners are softened by `rail` 40 at the nose (the lamps' outer top
 corners still clear the chamfer); the reference rounds them further down into the wings.
 
+The rear the same way: the back light a trapezoid (`recesses[].top`: the first axis's span at
+the top edge; 1060 mm at its foot, z 894, narrowing to 930 at the top, inside the tailgate's
+shut line) and the bumper's plate area a `trim` plate. Plates on a bumper stand 5 mm proud:
+at 2 mm the rear one fought the bumper's face (`coplanar.py`: six `same` pairs).
+
 The GTA model reduced by `reduce.py` (`examples/reduce_vaz1111.json`) was shipped for a while
 and taken out: closer in shape, but a reduced game mesh keeps its stray triangles (dirty
 creases, a chewed rear bumper, glass unlike the pack's) and the slits between its panels.
