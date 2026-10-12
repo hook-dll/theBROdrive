@@ -1476,7 +1476,9 @@ def add_wrap_lamp(bm, uvl, bvh, item, cell, pts, segments=12):
     with the corner between them. Rays fan out in plan from (the lamp's inner edge, `wrap`), at
     its bottom and top heights, from along the face's axis round to straight out sideways;
     where each first meets the body is the lens's back, and `proud` (PROUD) further along the
-    ray its face. `x` gives only the inner edge; the corner and the side give the rest."""
+    ray its face. `x` gives only the inner edge; the corner and the side give the rest.
+    `wrap: [y at the bottom, y at the top]` slants the lens's edge on the side, as the GAZ's
+    indicators lean seen from the side."""
     face = item["face"]
     if face not in ("front", "rear"):
         fail(f"{item['role']}: a wrapped lamp is on the front or rear face, not {face}")
@@ -1484,30 +1486,44 @@ def add_wrap_lamp(bm, uvl, bvh, item, cell, pts, segments=12):
     s = 1.0 if sum(us) > 0 else -1.0
     x0 = min(abs(u) for u in us)
     z0, z1 = min(v for _, v in pts), max(v for _, v in pts)
+    w = item["wrap"]
+    yb, yt = (float(w[0]), float(w[1])) if isinstance(w, list) else (float(w), float(w))
     sy = FACE_AXIS[face].y
     proud = float(item.get("proud", PROUD))
-    cols = []
+    # Rows up the lens. Every ray of the fan leaves one point (the middle of the slant); only
+    # the last column, which looks straight out sideways, slides along the side to the
+    # slant's y for its row, so the edge leans and the lens face stays smooth (a fan from a
+    # different point per row broke the lens into steps).
+    rows = 4 if yb != yt else 1
+    zs = [z0 + (z1 - z0) * r / rows for r in range(rows + 1)]
+    y_mid = (yb + yt) / 2
+    outer, inner = [], []  # [column][row]
     for k in range(segments + 1):
         a = math.pi / 2 * k / segments
         d = Vector((s * math.sin(a), sy * math.cos(a), 0.0))
-        col = []
-        for z in (z0, z1):
-            loc, _, _, _ = bvh.ray_cast(Vector((s * x0, float(item["wrap"]), z)) * MM, d)
+        oc, ic = [], []
+        for z in zs:
+            y = yb + (yt - yb) * (z - z0) / (z1 - z0) if k == segments else y_mid
+            loc, _, _, _ = bvh.ray_cast(Vector((s * x0, y, z)) * MM, d)
             if loc is None:
-                fail(f"{item['role']} wrapped from x={x0:.0f}, y={item['wrap']} meets no body at z={z:.0f}")
+                fail(f"{item['role']} wrapped from x={x0:.0f}, y={y:.0f} meets no body at z={z:.0f}")
             p = loc / MM
-            col.append((p + d * proud, p - d * 5.0))
-        cols.append([bm.verts.new(v * MM) for v in (col[0][0], col[1][0], col[1][1], col[0][1])])
-    # per column: outer bottom, outer top, inner top, inner bottom
+            oc.append(bm.verts.new((p + d * proud) * MM))
+            ic.append(bm.verts.new((p - d * 5.0) * MM))
+        outer.append(oc)
+        inner.append(ic)
+    c = CELLS[cell]
+    up, down = Vector((0, 0, 1.0)), Vector((0, 0, -1.0))
     for k in range(segments):
         a = math.pi / 2 * (k + 0.5) / segments
         d = Vector((s * math.sin(a), sy * math.cos(a), 0.0))
-        ca, cb = cols[k], cols[k + 1]
-        for i, hint in ((0, d), (1, Vector((0, 0, 1.0))), (2, -d), (3, Vector((0, 0, -1.0)))):
-            j = (i + 1) % 4
-            add_face(bm, uvl, [ca[i], ca[j], cb[j], cb[i]], CELLS[cell], hint)
-    add_face(bm, uvl, cols[0], CELLS[cell], Vector((-s, 0.0, 0.0)))
-    add_face(bm, uvl, cols[-1], CELLS[cell], Vector((0.0, -sy, 0.0)))
+        for r in range(rows):  # the lens face and the back
+            add_face(bm, uvl, [outer[k][r], outer[k][r + 1], outer[k + 1][r + 1], outer[k + 1][r]], c, d)
+            add_face(bm, uvl, [inner[k][r], inner[k][r + 1], inner[k + 1][r + 1], inner[k + 1][r]], c, -d)
+        add_face(bm, uvl, [outer[k][-1], inner[k][-1], inner[k + 1][-1], outer[k + 1][-1]], c, up)
+        add_face(bm, uvl, [outer[k][0], inner[k][0], inner[k + 1][0], outer[k + 1][0]], c, down)
+    for k, hint in ((0, Vector((-s, 0.0, 0.0))), (segments, Vector((0.0, -sy, 0.0)))):
+        add_face(bm, uvl, outer[k] + inner[k][::-1], c, hint)
 
 
 def build_lamps(spec, cid, body, objs):

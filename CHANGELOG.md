@@ -26,7 +26,7 @@
   - carforge: the windscreen and back light glass span the slope between the side glass's
     lowest and highest edges (`screen_glass`, replacing the fixed 60 mm frame); `bumpers[].wrap`
     sweeps one section round the corners and back along the sides; `lamps[].wrap` turns a
-    front or rear lens round the corner as one piece; `recesses[].frame` (a chrome surround),
+    front or rear lens round the corner as one piece, `wrap: [bottom, top]` slanting its edge on the side (the GAZ's indicators lean as on a side photo); `recesses[].frame` (a chrome surround),
     `bars` as a list (a grid) and `housing` (a lamp cluster's dark body that lamps may sit
     in, for `check_layout`).
   - No z-fighting in the grille: carforge's recess `frame` no longer runs its inner wall on into
