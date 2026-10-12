@@ -934,7 +934,7 @@
    "cell": "black",
    "housing": true,
    "frame": {
-    "width": 16,
+    "width": 8,
     "proud": 22,
     "cell": "black"
    }
@@ -942,29 +942,24 @@
   {
    "face": "front",
    "x": [
-    -195,
-    295
+    -168,
+    289
    ],
    "z": [
-    540,
-    650
+    513,
+    651
    ],
    "radius": 6,
-   "depth": 40,
+   "depth": 25,
    "cell": "black",
    "single": true,
-   "frame": {
-    "width": 14,
-    "proud": 14,
-    "cell": "black"
-   },
    "bars": [
     {
-     "count": 1,
-     "width": 22,
-     "cell": "black",
+     "count": 2,
+     "width": 24,
+     "cell": "paint",
      "orientation": "horizontal",
-     "inset": 2
+     "inset": 0
     }
    ]
   },
@@ -982,6 +977,26 @@
    "depth": 12,
    "cell": "glass",
    "single": true
+  },
+  {
+   "face": "front",
+   "x": [
+    -278,
+    -223
+   ],
+   "z": [
+    540,
+    610
+   ],
+   "radius": 4,
+   "depth": 6,
+   "cell": "black",
+   "single": true,
+   "frame": {
+    "width": 5,
+    "proud": 4,
+    "cell": "black"
+   }
   }
  ],
  "lamps": [
@@ -1004,12 +1019,12 @@
    "role": "leftblinkers",
    "face": "front",
    "x": [
-    440,
-    560
+    416,
+    508
    ],
    "z": [
-    400,
-    438
+    351,
+    406
    ],
    "radius": 6,
    "proud": 3,
@@ -1019,12 +1034,12 @@
    "role": "rightblinkers",
    "face": "front",
    "x": [
-    -560,
-    -440
+    -508,
+    -416
    ],
    "z": [
-    400,
-    438
+    351,
+    406
    ],
    "radius": 6,
    "proud": 3,
@@ -1182,6 +1197,66 @@
    "radius": 4,
    "proud": 3,
    "single": true
+  },
+  {
+   "face": "front",
+   "x": [
+    -213,
+    219
+   ],
+   "z": [
+    232,
+    314
+   ],
+   "cell": "trim",
+   "radius": 4,
+   "proud": 2,
+   "single": true
+  },
+  {
+   "face": "front",
+   "x": [
+    -241,
+    -94
+   ],
+   "z": [
+    340,
+    364
+   ],
+   "cell": "trim",
+   "radius": 3,
+   "proud": 2,
+   "single": true
+  },
+  {
+   "face": "front",
+   "x": [
+    -83,
+    81
+   ],
+   "z": [
+    340,
+    364
+   ],
+   "cell": "trim",
+   "radius": 3,
+   "proud": 2,
+   "single": true
+  },
+  {
+   "face": "front",
+   "x": [
+    94,
+    241
+   ],
+   "z": [
+    340,
+    364
+   ],
+   "cell": "trim",
+   "radius": 3,
+   "proud": 2,
+   "single": true
   }
  ],
  "lines": [
@@ -1235,17 +1310,5 @@
    55
   ]
  ],
- "cells": [
-  {
-   "y": [
-    -440,
-    -436
-   ],
-   "z": [
-    505,
-    712
-   ],
-   "cell": "black"
-  }
- ]
+ "cells": []
 }

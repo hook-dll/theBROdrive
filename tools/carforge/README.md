@@ -74,11 +74,12 @@ bun tools/fit-models.ts cf_vaz1111
 bun tools/reality.ts cf_vaz1111
 ```
 
-Still off against the reference: the front (a black panel across the lamps where the real car
-has a painted panel round them and a narrow barred grille between; a thick bumper where it has
-a thin band with a plate recess) and the bonnet's front corners. They are fixed in the
-generator, one at a time, each checked against the reference (silhouette rows, close crops,
-`holes.py`).
+The front was matched to the reference in the front view at one scale (`render.py` views
+cropped by their `.json` to the same mm box, a 100 mm grid over both): a painted panel round
+the lamps (no black `cells` box over the face), the grille offset as the real car's, three dark
+slots between two painted bars (`bars` count 2, width 24, no frame), the badge as its own small
+recess, the bumper's blinkers at z 351-406 and its three vent slots and plate area as `trim`
+plates. Still off: the bonnet's front corners (the reference rounds them down into the wings).
 
 The GTA model reduced by `reduce.py` (`examples/reduce_vaz1111.json`) was shipped for a while
 and taken out: closer in shape, but a reduced game mesh keeps its stray triangles (dirty

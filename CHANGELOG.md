@@ -13,9 +13,9 @@
   carforge cars are: the pack's atlas, glass in its (3, 1) cell, one node per lamp role.
   Watertight by construction (`holes.py`: 0 px in every view). Its rules from the owner's
   reviews are in the carforge README (one wing edge, an A pillar of constant width, the
-  windscreen stopping at the cowl). Still off against the GTA model: the front (a black panel
-  across the lamps where the real car has a painted one round them and a narrow grille, a
-  thick bumper) and the bonnet's front corners.
+  windscreen stopping at the cowl). The front follows the reference: a painted panel round the
+  lamps (it was black across), the offset grille's three slots between painted bars, its badge,
+  the bumper's blinkers lower, vent slots and plate area. Still off: the bonnet's front corners.
   - The GTA model reduced by `reduce.py` (`examples/reduce_vaz1111.json`) was shipped for a
     while and taken out: its shape was closer, but a reduced game mesh keeps that mesh's stray
     triangles (dirty creases, a chewed rear bumper, glass unlike the pack's) and slits between
