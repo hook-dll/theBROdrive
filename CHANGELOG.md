@@ -30,6 +30,9 @@
   tail surface in three bands instead of floating blocks; `lean` lays flat lenses into a
   sloping face. Its front/rear plastic panel and grille now use the bumper's dark trim cell,
   and the rear glass outline follows the tailgate's tapered roof contour.
+  The shell now supports explicit `join_bands`: the Oka keeps stable cross-section rows through
+  the front and rear corner transitions, so side-to-face seams are broad transition surfaces
+  instead of folded-ring diagonals. The existing generated UAZ/GAZ rules remain unchanged.
   - The GTA model reduced by `reduce.py` (`examples/reduce_vaz1111.json`) was shipped for a
     while and taken out: its shape was closer, but a reduced game mesh keeps that mesh's stray
     triangles (dirty creases, a chewed rear bumper, glass unlike the pack's) and slits between

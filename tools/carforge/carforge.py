@@ -285,6 +285,11 @@ class Shape:
         self.rail = Curve(spec.get("rail", [[0.0, RAIL]]))
         # Front view: half-width factor of the greenhouse against its width at the belt.
         self.tumble = Curve(spec.get("tumblehome", [[0, 1.0], [1, 1.0]]))
+        self.join_bands = tuple(
+            (float(b["y"][0]), float(b["y"][1]))
+            for b in spec.get("join_bands", [])
+            if b.get("y") and b["y"][1] > b["y"][0]
+        )
         self.belt = float(spec["belt"])
         self.glass_top = float(spec["glass_top"])
         self.front = max(self.top.ys[0], self.bottom.ys[0])
@@ -331,7 +336,7 @@ class Shape:
         return out
 
 
-def station_ring(s, y):
+def _station_ring_raw(s, y):
     """The 13 right-side ring points (x, z) of the station at y, bottom centre to roof centre.
 
     Every station has all 13 and the ring never doubles back: going up from the sill, z
@@ -382,6 +387,19 @@ def station_ring(s, y):
         px, pz = max(0.0, min(x, px)), z
         out.append((px, pz))
     return out
+
+def station_ring(s, y):
+    """Cross-section with explicit end transition bands. A band keeps the row identities
+    stable while the side ring travels from the last full side section to the end section;
+    it prevents a rapidly collapsing C-pillar from becoming a diagonal fan."""
+    for a, b in getattr(s, "join_bands", ()):
+        if a < y < b:
+            t = (y - a) / (b - a)
+            left = _station_ring_raw(s, a)
+            right = _station_ring_raw(s, b)
+            return [(x0 + (x1 - x0) * t, z0 + (z1 - z0) * t)
+                    for (x0, z0), (x1, z1) in zip(left, right)]
+    return _station_ring_raw(s, y)
 
 
 def emergences(s):

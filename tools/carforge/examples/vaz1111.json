@@ -10,6 +10,10 @@
   "well": 180
  },
  "fair_tol": 8,
+"join_bands": [
+  {"name": "front_corner", "y": [-438, -335]},
+  {"name": "rear_corner", "y": [2300, 2618]}
+ ],
  "side": {
   "top": [
    [
