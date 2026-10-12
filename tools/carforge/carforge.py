@@ -510,8 +510,7 @@ def rake_ends(bm, spec, s):
     first, so each part stays one plane. The shear fades to nothing `span` (150) mm into the
     body so the stations behind follow it. The VAZ-1111's front panel, lamps and grille lean
     back about 13°; built upright, the nose read as a box. The lamps, plates and recesses
-    above the end's bumper are marked to lean with it (`_lean`: their flat faces are laid in
-    the face's plane, not upright)."""
+    above the end's bumper lean with it (`lean`, unless the item gives its own)."""
     for key, end, sign, face in (("nose", s.front, 1.0, "front"), ("tail", s.rear, -1.0, "rear")):
         r = spec.get(key, {}).get("rake")
         if not r:
@@ -534,13 +533,15 @@ def rake_ends(bm, spec, s):
         for group in ("lamps", "recesses", "plates"):
             for it in spec.get(group, []):
                 if it["face"] == face and min(it["z"]) >= above:
-                    it["_lean"] = float(r["deg"])
+                    it.setdefault("lean", float(r["deg"]))
 
 
 def face_plane(item, out):
-    """Normal of the plane a flat lens or frame is laid in: `out` (upright), or leaned back with
-    a raked end face (`_lean`, rake_ends)."""
-    a = math.radians(float(item.get("_lean", 0.0)))
+    """Normal of the plane a flat lens or frame is laid in: `out` (upright), or leaned back
+    `lean` degrees, the top further in (a raked end face, rake_ends; the VAZ-1111's tail lamps
+    on its sloping tail: laid upright, each lens of a cluster stood out further at its foot
+    than the next one up, a stack of separate blocks)."""
+    a = math.radians(float(item.get("lean", 0.0)))
     if not a:
         return out
     return Vector((0.0, out.y * math.cos(a), math.sin(a)))

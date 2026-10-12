@@ -19,8 +19,12 @@
   The rear too: the back light a trapezoid wider at its foot, set lower, as the reference's,
   and the bumper's plate area. The front panel leans back 13° as the reference's (it stood
   upright), lamps, frames and grille with it; the bonnet's front shut line runs straight
-  across. carforge: `recesses[].top` (a trapezoid outline), `nose.rake` / `tail.rake` (a raked
-  end face; flat lenses and frames on it lean with it). The GAZ builds vertex-identical.
+  across. The tail lamps sit in the rear face, flush and leaning with the tail, instead of
+  wrapping the corner 12 mm proud as upright blocks; the tail runs out square behind them and
+  the rear corner no longer folds where the shoulder met the C pillar; the lower tailgate is
+  recessed. carforge: `recesses[].top` (a trapezoid outline), `nose.rake` / `tail.rake` (a
+  raked end face; flat lenses and frames on it lean with it), `lean` on flat items. The GAZ
+  builds vertex-identical.
   - The GTA model reduced by `reduce.py` (`examples/reduce_vaz1111.json`) was shipped for a
     while and taken out: its shape was closer, but a reduced game mesh keeps that mesh's stray
     triangles (dirty creases, a chewed rear bumper, glass unlike the pack's) and slits between

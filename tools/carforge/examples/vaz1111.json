@@ -254,15 +254,15 @@
    ],
    [
     2570,
-    655
+    666
    ],
    [
-    2600,
-    640
+    2605,
+    660
    ],
    [
     2618,
-    615
+    648
    ]
   ],
   "high": [
@@ -311,16 +311,24 @@
     645
    ],
    [
-    2450,
-    635
+    2420,
+    648
    ],
    [
-    2550,
-    615
+    2500,
+    660
+   ],
+   [
+    2570,
+    662
+   ],
+   [
+    2605,
+    656
    ],
    [
     2618,
-    590
+    645
    ]
   ]
  },
@@ -985,6 +993,21 @@
     "proud": 4,
     "cell": "black"
    }
+  },
+  {
+   "face": "rear",
+   "x": [
+    -465,
+    465
+   ],
+   "z": [
+    530,
+    770
+   ],
+   "radius": 25,
+   "depth": 12,
+   "cell": "paint",
+   "single": true
   }
  ],
  "lamps": [
@@ -1051,109 +1074,91 @@
    "role": "taillights",
    "face": "rear",
    "x": [
-    500,
-    660
+    505,
+    640
    ],
    "z": [
     515,
     638
    ],
-   "wrap": [
-    2552,
-    2545
-   ],
-   "proud": 12,
-   "single": true
+   "proud": 3,
+   "single": true,
+   "lean": 9
   },
   {
    "role": "leftblinkers",
    "face": "rear",
    "x": [
-    500,
-    660
+    505,
+    640
    ],
    "z": [
     640,
     688
    ],
-   "wrap": [
-    2545,
-    2540
-   ],
-   "proud": 12,
-   "single": true
+   "proud": 3,
+   "single": true,
+   "lean": 9
   },
   {
    "role": "reverselights",
    "face": "rear",
    "x": [
-    500,
-    660
+    505,
+    640
    ],
    "z": [
     690,
     775
    ],
-   "wrap": [
-    2540,
-    2530
-   ],
-   "proud": 12,
-   "single": true
+   "proud": 3,
+   "single": true,
+   "lean": 9
   },
   {
    "role": "taillights",
    "face": "rear",
    "x": [
-    -660,
-    -500
+    -640,
+    -505
    ],
    "z": [
     515,
     638
    ],
-   "wrap": [
-    2552,
-    2545
-   ],
-   "proud": 12,
-   "single": true
+   "proud": 3,
+   "single": true,
+   "lean": 9
   },
   {
    "role": "rightblinkers",
    "face": "rear",
    "x": [
-    -660,
-    -500
+    -640,
+    -505
    ],
    "z": [
     640,
     688
    ],
-   "wrap": [
-    2545,
-    2540
-   ],
-   "proud": 12,
-   "single": true
+   "proud": 3,
+   "single": true,
+   "lean": 9
   },
   {
    "role": "reverselights",
    "face": "rear",
    "x": [
-    -660,
-    -500
+    -640,
+    -505
    ],
    "z": [
     690,
     775
    ],
-   "wrap": [
-    2540,
-    2530
-   ],
-   "proud": 12,
-   "single": true
+   "proud": 3,
+   "single": true,
+   "lean": 9
   }
  ],
  "plates": [
