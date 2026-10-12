@@ -1,0 +1,133 @@
+{
+ "id": "gaz31029",
+ "src": "build/vehicles/gaz31029/00-references/akrom-gaz31029.glb",
+ "hubs": {
+  "front": "wheel_fl",
+  "rear": "wheel_rl"
+ },
+ "wheels": {
+  "radius": 322,
+  "width": 205,
+  "track_front": 1495,
+  "track_rear": 1425,
+  "wheelbase": 2800
+ },
+ "parts": {},
+ "trim": {
+  "mesh": "chassis_trim",
+  "cell": "black",
+  "tris": 2400
+ },
+ "lamps": [
+  {
+   "mesh": "headlights",
+   "role": "headlights",
+   "box": [
+    -2000,
+    -2000,
+    0,
+    2000,
+    -500,
+    2000
+   ],
+   "tris": 60
+  },
+  {
+   "mesh": "chassis_trim",
+   "role": "leftblinkers",
+   "box": [
+    740,
+    -680,
+    560,
+    850,
+    -500,
+    745
+   ],
+   "tris": 40
+  },
+  {
+   "mesh": "chassis_trim",
+   "role": "rightblinkers",
+   "box": [
+    -850,
+    -680,
+    560,
+    -740,
+    -500,
+    745
+   ],
+   "tris": 40
+  },
+  {
+   "mesh": "front_blinker_left",
+   "role": "leftblinkers",
+   "tris": 20
+  },
+  {
+   "mesh": "front_blinker_right",
+   "role": "rightblinkers",
+   "tris": 20
+  },
+  {
+   "mesh": "rear_blinker_left",
+   "role": "leftblinkers",
+   "tris": 20
+  },
+  {
+   "mesh": "rear_blinker_right",
+   "role": "rightblinkers",
+   "tris": 20
+  },
+  {
+   "mesh": "taillights",
+   "role": "taillights",
+   "tris": 24
+  },
+  {
+   "mesh": "brake_lights",
+   "role": "taillights",
+   "tris": 40
+  },
+  {
+   "mesh": "reverse_lights",
+   "role": "reverselights",
+   "tris": 40
+  }
+ ],
+ "cells": [
+  {
+   "box": [
+    -430,
+    -900,
+    520,
+    430,
+    -560,
+    760
+   ],
+   "cell": "black"
+  },
+  {
+   "box": [
+    -1100,
+    -1000,
+    100,
+    1100,
+    -600,
+    560
+   ],
+   "cell": "black"
+  },
+  {
+   "box": [
+    -1100,
+    3780,
+    100,
+    1100,
+    4100,
+    500
+   ],
+   "cell": "black"
+  }
+ ],
+ "shell": "build/carforge/gaz31029/shell.fbx"
+}

@@ -262,9 +262,10 @@ function buildEngine(b: MeshBuilder, v: PartVariant): void {
     case 'engine_niva_1600': return buildInline(b, spec, 1.0);
     case 'engine_niva_1700': return buildInline(b, spec, 1.02);
     // The Volga 2.4: a tall, long-stroke four, so a taller block than the 1.6. The UAZ's
-    // UMZ-4178 is the same block.
+    // UMZ-4178 and the GAZ-31029's ZMZ-402 are the same block.
     case 'engine_zmz_21':
     case 'engine_zmz_24':
+    case 'engine_zmz_402':
     case 'engine_umz_4178': return buildInline(b, spec, 1.09);
     default: throw new Error(`unhandled engine variant: ${v.id}`);
   }
@@ -375,7 +376,8 @@ function buildGearbox(b: MeshBuilder, v: PartVariant): void {
     case 'gearbox_lada_4_1600': scale = 0.92; manual = true; fins = false; break;
     case 'gearbox_lada_5': scale = 1.0; manual = true; fins = false; break;
     case 'gearbox_gaz_3': scale = 1.05; manual = true; fins = false; break;
-    case 'gearbox_gaz_4': scale = 1.1; manual = true; fins = false; break;
+    case 'gearbox_gaz_4':
+    case 'gearbox_gaz_4_31029': scale = 1.1; manual = true; fins = false; break;
     case 'gearbox_samara_5':
     case 'gearbox_samara_5_tall': scale = 1.08; manual = true; fins = true; break;
     // The Oka's transaxle: the Samara layout at a smaller scale, final drive included.

@@ -365,6 +365,12 @@ const TARGETS: Readonly<Record<string, Target>> = {
     brake80: 43.2, grossKg: 2500,
     source: 'man. UAZ RE 05808600.072-2000 pp. 10-11 (top, turn; gross of the 31514 hard top; no factory 0-100); brake AO uaz-3151 (1993 catalogue, 31512 column)',
   },
+  cf_gaz31029: {
+    wheelbase: 2.8, track: 1.495, radius: 0.321, top: 147, to100: null,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, lat: null, hz: 1.0,
+    brake80: 43.2, grossKg: 1800,
+    source: 'drom.ru/catalog/gaz/31029_volga/83566 (tracks, turn, 4-speed ratios); top: ru.wikipedia ГАЗ-31029 145, avto-russia.ru 150 (no factory 0-100: 19-20 s in secondary sources); gross 110km.ru; brake: the GAZ-24-10 ceiling (same chassis and brakes)',
+  },
 };
 
 /*
@@ -405,6 +411,7 @@ const FACTORY_ENGINES: Readonly<Record<string, MakerEngine>> = {
   engine_lada_1200: { power: { ps: 64 }, powerRpm: 5600, torque: { kgfm: 8.9 }, torqueRpm: 3400, source: 'VAZ-2101; AO 1982 AvtoVAZ catalogue' },
   engine_zmz_21: { power: { ps: 70 }, powerRpm: 4000, torque: { kgfm: 17 }, torqueRpm: 2200, source: 'ZMZ-21A; GAZ-21 manual (rpm: ru.wikipedia)' },
   engine_zmz_24: { power: { ps: 95 }, powerRpm: 4500, torque: { kgfm: 19 }, torqueRpm: [2200, 2400], source: 'ZMZ-24D; GAZ-24 manual' },
+  engine_zmz_402: { power: { ps: 100 }, powerRpm: 4500, torque: { nm: 182 }, torqueRpm: 2500, source: 'ZMZ-402.10 (GAZ-31029); wiki.zr.ru GAZ-31029' },
   engine_lada_1300: { power: { kw: 47 }, powerRpm: 5600, torque: { kgfm: 9.4 }, torqueRpm: 3400, source: 'VAZ-2105; AO VAZ-2105 catalogue' },
   engine_lada_1500: { power: { kw: 53.3 }, powerRpm: 5600, torque: { nm: 104 }, torqueRpm: 3400, source: 'VAZ-2103, GOST 14846-81; AO VAZ-2103 and VAZ-2107 catalogues' },
   engine_lada_1600: { power: { kw: 55.5 }, powerRpm: 5400, torque: { kgfm: 11.8 }, torqueRpm: 3000, source: 'VAZ-2106; AO VAZ-2106 catalogue' },

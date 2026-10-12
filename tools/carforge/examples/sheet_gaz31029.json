@@ -1,0 +1,18 @@
+{
+  "id": "gaz31029",
+  "image": "build/vehicles/gaz31029/lines.png",
+  "source": "the-blueprints.com GAZ-31029 factory-style preview, cleaned to line art by tools/carforge/lines.py; AKROM used only as the shape reference",
+  "wheelbase_mm": 2800,
+  "views": {
+    "side": [5, 65, 860, 337],
+    "front": [880, 65, 1222, 336],
+    "top": [5, 462, 860, 792]
+  },
+  "extras": {
+    "wheels": {"width": 195, "well": 40, "track_front": 1495, "track_rear": 1425},
+    "arches": {
+      "front": {"lip": 40, "flare": 20},
+      "rear": {"lip": 40, "flare": 20}
+    }
+  }
+}

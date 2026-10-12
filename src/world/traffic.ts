@@ -128,8 +128,9 @@ const PLATOON_CHANCE = 0.32;
  *    and the first four Zhigulis;
  *  - the later Zhigulis, the Samaras, the GAZ-24 and the Nivas: 25% sleeper, 25%
  *    hurried and 50% frantic (20% frantic read as no frantic at all, owner 2026-10-10);
- *  - everything else (the 2105 rally, the Svyatogor, the 2110) is a car somebody
- *    bought to go fast: half hurried, half frantic.
+ *  - everything else (the 2105 rally, the Svyatogor, the 2110, the GAZ-31029, an official's
+ *    or a taxi driver's car, owner 2026-10-12) is a car somebody drives to get somewhere
+ *    fast: half hurried, half frantic.
  *
  * A frantic driver still gets the BMW engine and its gearbox (`franticEngine`).
  */

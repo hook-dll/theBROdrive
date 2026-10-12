@@ -67,7 +67,6 @@ LIP_TAPER = 40.0         # mm along the car over which the belt lip ends
 RAIL = 55.0              # mm roof-rail chamfer
 CROWN = 25.0             # mm the roof/bonnet centre stands above its edges
 MIN_STATION_GAP = 25.0   # mm: closer breakpoints are merged
-FRAME = 60.0             # mm paint frame around windscreen and back light
 WELD = 0.002             # m: vertices this close are welded
 FAIR_TOL = 12.0          # mm: trace wiggles within this of a straight run are dropped (spec "fair_tol")
 FOLD_SPLIT_DEG = 0.25    # quads folded more than this are split along their convex diagonal
@@ -96,6 +95,8 @@ GROOVE_RAIL_CLEAR = 8.0   # mm a side gap stops below the rail chamfer (Shape.ra
 LINE_WIDTH = 12.0         # mm width of a drawn line (lines[].width)
 LINE_PROUD = 3.0          # mm a drawn line stands off its face
 BUMPER_LIP = 40.0         # mm height of a channel bumper's lips (bumpers[].lip)
+FRAME_WIDTH = 15.0        # mm width of a recess surround (recesses[].frame.width)
+FRAME_PROUD = 4.0         # mm a recess surround stands off its face (recesses[].frame.proud)
 LAYOUT_CLEAR = 8.0        # mm a detail keeps from a panel gap or another detail (check_layout)
 SEAM_TOL = 1.5            # mm a line or groove may stray from its face between probes
 SEAM_MIN = 8.0            # mm between a line's probes of its face
@@ -386,14 +387,14 @@ def emergences(s):
     return out
 
 
-def stations(spec, s):
+def stations(spec, s, screens):
     """Station ys. Candidates by priority: the ends, then the rows' emergence points and the
     belt lip's ends, then every breakpoint of the (faired) views and the windscreen/back light
-    edges, then their frame offsets and the arch outline's corners. Candidates closer than
-    MIN_STATION_GAP keep the higher priority one (the first on a tie). Side windows need no
-    stations (they are pockets cut afterwards). No filler stations: between breakpoints every
-    row is straight, so a filler adds no shape; where a strip is twisted it only multiplies
-    the alternating creases of its triangulation."""
+    spans and glass edges (`screens`, screen_glass), then the arch outline's corners. Candidates
+    closer than MIN_STATION_GAP keep the higher priority one (the first on a tie). Side windows
+    need no stations (they are pockets cut afterwards). No filler stations: between breakpoints
+    every row is straight, so a filler adds no shape; where a strip is twisted it only
+    multiplies the alternating creases of its triangulation."""
     cand = {}
 
     def put(y, prio):
@@ -402,11 +403,11 @@ def stations(spec, s):
 
     for key in ("windscreen", "backlight"):
         if key in spec:
-            a, b = spec[key]
-            put(a, 2)
-            put(b, 2)
-            put(a + FRAME, 1)
-            put(b - FRAME, 1)
+            for y in spec[key]:
+                put(y, 2)
+    for y0, y1 in screens.values():  # the glass edges: a face ends exactly there
+        put(y0, 3)
+        put(y1, 3)
     for c in (s.top, s.bottom, s.shoulder, s.low, s.high, s.rail):
         for y in c.ys:
             put(y, 2)
@@ -427,24 +428,24 @@ def stations(spec, s):
     return [y for y, _ in merged]
 
 
-def face_cell(spec, s, row_a, row_b, y0, y1):
+def face_cell(screens, row_a, row_b, y0, y1):
     """Cell of the quad between ring rows row_a..row_b over stations y0..y1. Side glass is not
     a shell cell: it is the floor of a pocket cut into the side (cut_windows)."""
     ym = (y0 + y1) / 2
     lo_row = min(row_a, row_b)
     if lo_row == R_BOTTOM:
         return "black"
-    if lo_row >= R_RAIL:  # roof rows: windscreen and back light on the slopes
-        for key in ("windscreen", "backlight"):
-            if key in spec:
-                a, b = spec[key]
-                if a + FRAME <= ym <= b - FRAME:
-                    return "glass"
+    # roof rows: windscreen and back light on the slopes (screen_glass). Not the rail chamfer
+    # between the side and the top (row R_RAIL to R_ROOF_EDGE): that is the A or C pillar's own
+    # face, paint; glass on it wraps the screen round onto the side.
+    if lo_row >= R_ROOF_EDGE and any(a <= ym <= b for a, b in screens.values()):
+        return "glass"
     return "paint"
 
 
 def build_shell(spec, s, bm, uvl):
-    ys = stations(spec, s)
+    screens = screen_glass(spec, s)
+    ys = stations(spec, s, screens)
     # A bulged cap: the last ring stands `bulge` inside the end, the cap's face at the end.
     nose = float(spec.get("nose", {}).get("bulge", 0.0))
     tail = float(spec.get("tail", {}).get("bulge", 0.0))
@@ -463,7 +464,7 @@ def build_shell(spec, s, bm, uvl):
     for i in range(len(ys) - 1):
         (ra, la), (rb, lb) = rings[i], rings[i + 1]
         for k in range(RING_ROWS - 1):
-            cell = CELLS[face_cell(spec, s, k, k + 1, ys[i], ys[i + 1])]
+            cell = CELLS[face_cell(screens, k, k + 1, ys[i], ys[i + 1])]
             mid_r = (ra[k].co + ra[k + 1].co + rb[k].co + rb[k + 1].co) / 4
             add_face(bm, uvl, [ra[k], ra[k + 1], rb[k + 1], rb[k]], cell,
                      Vector((mid_r.x, 0, mid_r.z - centre.z)) if mid_r.x > 1e-4 else Vector((0, 0, mid_r.z - centre.z)))
@@ -768,6 +769,40 @@ def window_outlines(spec, s):
             for w, poly in zip(spec.get("windows", []), window_polys(spec, s)) if poly]
 
 
+def screen_glass(spec, s):
+    """{key: (y0, y1)}: the stretch of the windscreen and back light slopes that is glass.
+
+    Rule: the front and rear glass end where the side glass does. Along the slope through
+    `spec[key]` ([y0, y1], the slope's span), the glass is the run where its side edge (the
+    roof edge row, top − CROWN) stands between the side windows' lowest and highest glass
+    (the belt and glass top without windows), so the screens' bottom and top edges line up
+    with the side glass's. The run may leave the span where the slope rolls into the roof."""
+    polys = [p for p in window_polys(spec, s) if p]
+    z_lo = min(z for p in polys for _, z in p) if polys else s.belt + GLASS_CLEAR
+    z_hi = max(z for p in polys for _, z in p) if polys else s.glass_top - GLASS_CLEAR
+    out = {}
+    for key in ("windscreen", "backlight"):
+        if key not in spec:
+            continue
+        a, b = spec[key]
+
+        def glass(y):
+            return z_lo <= s.top(y) - CROWN <= z_hi
+
+        mid = (a + b) / 2
+        if not glass(mid):
+            fail(f"{key} {spec[key]}: the slope at y={mid:.0f} is not between the side glass "
+                 f"heights {z_lo:.0f}-{z_hi:.0f}")
+        ends = []
+        for step in (-1.0, 1.0):  # walk out from the middle until the edge leaves the band
+            y = mid
+            while s.front < y < s.rear and glass(y + step):
+                y += step
+            ends.append(y)
+        out[key] = tuple(ends)
+    return out
+
+
 def expand_line(spec, s, line):
     """A line's points, with each `{edge: [window, "front"|"rear"], offset, z: [lo, hi]}` entry
     replaced by the two ends of a line parallel to that window edge, `offset` mm along y from
@@ -896,6 +931,17 @@ def halves(item, pts):
 
 def flip(p, sign):
     return Vector((p.x * sign, p.y, p.z))
+
+
+def grown_item(item, w):
+    """The item `w` mm larger all round, its corner radius grown with it (a sharp corner stays
+    sharp, so the outlines keep the same points)."""
+    face = item["face"]
+    ku, kv = {"front": ("x", "z"), "rear": ("x", "z"), "side": ("y", "z"), "top": ("y", "x")}[face]
+    rad = float(item.get("radius", 0.0))
+    return dict(item, **{ku: [min(item[ku]) - w, max(item[ku]) + w],
+                         kv: [min(item[kv]) - w, max(item[kv]) + w],
+                         "radius": rad + w if rad > 0 else 0.0})
 
 
 def item_outline(item):
@@ -1177,6 +1223,55 @@ def cut_grooves(spec, s, body, bvh):
     apply_cut(body, finish(bm, "cutter_grooves"), self_intersect=True)
 
 
+def add_wrap_bumper(bm, uvl, b):
+    """A bumper wrapped round the body's corners (`wrap`): one section swept along a U in plan,
+    across the end face and round both corners on a `wrap.radius` arc, then back along each side
+    to y = `wrap.to`, so the side view shows its return running towards the arch, as the
+    GAZ-31029's black bumpers do. The section is `y`'s depth thick (the face's outer edge at the
+    y further out), `z` tall, its outer edges chamfered `chamfer`; `wrap.groove` ({z, width,
+    depth}) is a V notch along the face (the moulding line of a plastic bumper). The returns'
+    outer face stands at x = ±`half_width`; the inside is buried in the body."""
+    w = b["wrap"]
+    hw, (z0, z1) = float(b["half_width"]), b["z"]
+    front = max(b["y"]) <= 0
+    sy = -1.0 if front else 1.0  # outward along y
+    y_out = min(b["y"]) if front else max(b["y"])
+    t = abs(b["y"][1] - b["y"][0])
+    r = max(float(w.get("radius", 100.0)), t + 1.0)
+    c = max(0.0, min(float(b.get("chamfer", 20.0)), (z1 - z0 - SLIVER_MM) / 2, t - SLIVER_MM))
+    prof = [(0.0, z0 + c)]
+    g = w.get("groove")
+    if g:
+        gz, gw, gd = float(g["z"]), float(g.get("width", 16.0)), float(g.get("depth", 8.0))
+        prof += [(0.0, gz - gw / 2), (gd, gz), (0.0, gz + gw / 2)]
+    prof += [(0.0, z1 - c), (c, z1), (t, z1), (t, z0), (c, z0)]
+    # the U's outer edge in plan: (x, y) and the inward normal, left return end first
+    path = [((hw, float(w["to"])), (-1.0, 0.0))]
+    cx, cy = hw - r, y_out - sy * r
+    n = int(w.get("segments", 4))
+    for k in range(n + 1):
+        a = math.pi / 2 * k / n
+        d = (math.cos(a), sy * math.sin(a))
+        path.append(((cx + r * d[0], cy + r * d[1]), (-d[0], -d[1])))
+    path += [((-x, y), (-nx, ny)) for (x, y), (nx, ny) in reversed(path)]
+    rings = []
+    for (x, y), (nx, ny) in path:
+        ring = [bm.verts.new(Vector((x + nx * o, y + ny * o, z)) * MM) for o, z in prof]
+        mid = Vector((x + nx * t / 2, y + ny * t / 2, (z0 + z1) / 2)) * MM
+        rings.append((ring, mid))
+    cell = CELLS[b.get("cell", "black")]
+    m = len(prof)
+    for (ra, ma), (rb, mb) in zip(rings, rings[1:]):
+        if (ma - mb).length < 1e-6:  # the doubled point where the two halves meet
+            continue
+        for i in range(m):
+            j = (i + 1) % m
+            q = [ra[i], ra[j], rb[j], rb[i]]
+            add_face(bm, uvl, q, cell, sum((v.co for v in q), Vector()) / 4 - (ma + mb) / 2)
+    for (ring, mid), nxt in ((rings[0], rings[1][1]), (rings[-1], rings[-2][1])):
+        add_face(bm, uvl, ring, cell, mid - nxt)
+
+
 def add_bumper(bm, uvl, b):
     """A bumper box; with `channel` (mm) its outer face is a channel that deep between a top and
     a bottom lip `lip` (BUMPER_LIP) mm tall: the UAZ's pressed-steel section. With `ends`
@@ -1212,7 +1307,7 @@ def add_details(spec, body):
     bm.from_mesh(body.data)
     uvl = bm.loops.layers.uv["UVMap"]
     for b in spec.get("bumpers", []):
-        add_bumper(bm, uvl, b)
+        (add_wrap_bumper if b.get("wrap") else add_bumper)(bm, uvl, b)
     for m in spec.get("mirrors", []) + spec.get("chassis", []):
         for sign in ((1.0,) if m.get("single") else (1.0, -1.0)):
             x0, x1 = sorted(v * sign for v in m["x"])
@@ -1222,31 +1317,93 @@ def add_details(spec, body):
         for pts, sign in halves(p, item_outline(p)):
             add_plate(bm, uvl, bvh, p, p.get("cell", "black"), pts, sign)
     for r in spec.get("recesses", []):
-        if r.get("bars"):
-            add_bars(bm, uvl, bvh, r)
+        bars = r.get("bars")
+        for b in (bars if isinstance(bars, list) else [bars] if bars else []):
+            add_bars(bm, uvl, bvh, r, b)
+        if r.get("frame"):
+            add_frame(bm, uvl, bvh, r)
     bm.to_mesh(body.data)
     bm.free()
     body.data.update()
 
 
-def add_bars(bm, uvl, bvh, r):
+def add_bars(bm, uvl, bvh, r, b):
     """Grille bars across a stadium or rectangular recess on the front or rear face:
-    `bars.count` vertical bars `bars.width` (25) mm wide in `bars.cell` (trim), standing on the
-    recess floor and reaching to `bars.inset` (3) mm under the face, trimmed to the rounded ends."""
-    b = r["bars"]
+    `b.count` vertical bars `b.width` (25) mm wide in `b.cell` (trim), standing on the
+    recess floor and reaching to `b.inset` (3) mm under the face, trimmed to the rounded ends.
+    A recess's `bars` may be a list: horizontal and vertical sets make a grid."""
     n, w = int(b["count"]), float(b.get("width", 25.0))
     x0, x1 = min(r["x"]), max(r["x"])
     z0, z1 = min(r["z"]), max(r["z"])
     rad = min(float(r.get("radius", 0.0)), (z1 - z0) / 2, (x1 - x0) / 2)
     depth = float(r.get("depth", RECESS_DEPTH))
+    horizontal = b.get("orientation") == "horizontal"
     for k in range(n):
-        cx = x0 + (x1 - x0) * (k + 1) / (n + 1)
-        edge = min(cx - x0, x1 - cx)
-        trim = rad - math.sqrt(max(0.0, rad * rad - (rad - edge) ** 2)) if edge < rad else 0.0
-        bar = {"face": r["face"], "x": [cx - w / 2, cx + w / 2], "z": [z0 + trim + 4, z1 - trim - 4],
-               "proud": depth - float(b.get("inset", 3.0)), "single": True}
-        if bar["z"][1] - bar["z"][0] > 10:
+        t = (k + 1) / (n + 1)
+        if horizontal:
+            cz = z0 + (z1 - z0) * t
+            edge = min(cz - z0, z1 - cz)
+            trim = rad - math.sqrt(max(0.0, rad * rad - (rad - edge) ** 2)) if edge < rad else 0.0
+            bar = {"face": r["face"], "x": [x0 + trim + 4, x1 - trim - 4],
+                   "z": [cz - w / 2, cz + w / 2], "proud": depth - float(b.get("inset", 3.0)),
+                   "single": True}
+        else:
+            cx = x0 + (x1 - x0) * t
+            edge = min(cx - x0, x1 - cx)
+            trim = rad - math.sqrt(max(0.0, rad * rad - (rad - edge) ** 2)) if edge < rad else 0.0
+            bar = {"face": r["face"], "x": [cx - w / 2, cx + w / 2],
+                   "z": [z0 + trim + 4, z1 - trim - 4],
+                   "proud": depth - float(b.get("inset", 3.0)), "single": True}
+        if bar["z"][1] - bar["z"][0] > 10 and bar["x"][1] - bar["x"][0] > 10:
             add_plate(bm, uvl, bvh, bar, b.get("cell", "trim"))
+
+
+def add_frame(bm, uvl, bvh, r):
+    """A surround round a recess's opening (`frame: {width, proud, cell}`): a flat ring `width`
+    mm wide whose face stands `proud` mm off the outermost point of the face under it (as a lamp
+    lens does), its outer wall reaching 5 mm into the face and its inner wall into the pocket:
+    the chrome surround of the GAZ-31029's grille."""
+    f = r["frame"]
+    w = float(f.get("width", FRAME_WIDTH))
+    proud, cell = float(f.get("proud", FRAME_PROUD)), CELLS[f.get("cell", "chrome")]
+    face = r["face"]
+    grown = grown_item(r, w)
+    depth = float(r.get("depth", RECESS_DEPTH))
+    for (inner, sign), (outer, _) in zip(halves(r, item_outline(r)), halves(r, item_outline(grown))):
+        out = flip(FACE_AXIS[face], sign)
+        hits = []
+        for (ui, vi), (uo, vo) in zip(inner, outer):
+            # the face under the ring (the opening's own edge is already cut away)
+            mid = face_hit(bvh, face, (ui + uo) / 2, (vi + vo) / 2)
+            o = face_hit(bvh, face, uo, vo)
+            if mid is None or o is None:
+                fail(f"grille frame at {face} ({uo:.0f}, {vo:.0f}) has no face behind it")
+            hits.append((flip(mid, sign), flip(o, sign), (ui, vi), (uo, vo)))
+        top = max(max(m.dot(out), o.dot(out)) for m, o, _, _ in hits) + proud
+
+        def on_plane(p):
+            return p + out * (top - p.dot(out))
+
+        # outer wall foot, outer edge, inner edge, inner wall foot. The inner wall stops at the
+        # face: carried on into the opening it lay on the pocket's own wall and z-fought it.
+        rings = [[], [], [], []]
+        for _, o, (ui, vi), _ in hits:
+            pi = on_plane(flip(face_point(face, ui, vi), sign))
+            rings[0].append(bm.verts.new((o - out * 5.0) * MM))
+            rings[1].append(bm.verts.new(on_plane(o) * MM))
+            rings[2].append(bm.verts.new(pi * MM))
+            rings[3].append(bm.verts.new((pi - out * proud) * MM))
+        n = len(hits)
+        centre = sum((v.co for v in rings[2]), Vector()) / n
+        # outward hints: the outer wall away from the opening, the face along `out`, the inner
+        # wall towards the opening's middle
+        for k, (ra, rb) in enumerate(zip(rings, rings[1:])):
+            for i in range(n):
+                j = (i + 1) % n
+                q = [ra[i], ra[j], rb[j], rb[i]]
+                mid = sum((v.co for v in q), Vector()) / 4
+                hint = (mid - centre, out, centre - mid)[k]
+                add_face(bm, uvl, q, cell, hint)
 
 
 def add_dome(bm, uvl, rim_bm, rim_uvl, bvh, item, cell, pts, sign):
@@ -1313,6 +1470,46 @@ def build_spare(spec, cid, objs, tmpl, pts, pack_w, pack_r):
     objs.append(obj)
 
 
+def add_wrap_lamp(bm, uvl, bvh, item, cell, pts, segments=12):
+    """A front or rear lamp whose lens turns the body's corner (`wrap`: the y it reaches back to
+    along the side), as the GAZ-31029's indicators do: one lens, not a front and a side piece
+    with the corner between them. Rays fan out in plan from (the lamp's inner edge, `wrap`), at
+    its bottom and top heights, from along the face's axis round to straight out sideways;
+    where each first meets the body is the lens's back, and `proud` (PROUD) further along the
+    ray its face. `x` gives only the inner edge; the corner and the side give the rest."""
+    face = item["face"]
+    if face not in ("front", "rear"):
+        fail(f"{item['role']}: a wrapped lamp is on the front or rear face, not {face}")
+    us = [u for u, _ in pts]
+    s = 1.0 if sum(us) > 0 else -1.0
+    x0 = min(abs(u) for u in us)
+    z0, z1 = min(v for _, v in pts), max(v for _, v in pts)
+    sy = FACE_AXIS[face].y
+    proud = float(item.get("proud", PROUD))
+    cols = []
+    for k in range(segments + 1):
+        a = math.pi / 2 * k / segments
+        d = Vector((s * math.sin(a), sy * math.cos(a), 0.0))
+        col = []
+        for z in (z0, z1):
+            loc, _, _, _ = bvh.ray_cast(Vector((s * x0, float(item["wrap"]), z)) * MM, d)
+            if loc is None:
+                fail(f"{item['role']} wrapped from x={x0:.0f}, y={item['wrap']} meets no body at z={z:.0f}")
+            p = loc / MM
+            col.append((p + d * proud, p - d * 5.0))
+        cols.append([bm.verts.new(v * MM) for v in (col[0][0], col[1][0], col[1][1], col[0][1])])
+    # per column: outer bottom, outer top, inner top, inner bottom
+    for k in range(segments):
+        a = math.pi / 2 * (k + 0.5) / segments
+        d = Vector((s * math.sin(a), sy * math.cos(a), 0.0))
+        ca, cb = cols[k], cols[k + 1]
+        for i, hint in ((0, d), (1, Vector((0, 0, 1.0))), (2, -d), (3, Vector((0, 0, -1.0)))):
+            j = (i + 1) % 4
+            add_face(bm, uvl, [ca[i], ca[j], cb[j], cb[i]], CELLS[cell], hint)
+    add_face(bm, uvl, cols[0], CELLS[cell], Vector((-s, 0.0, 0.0)))
+    add_face(bm, uvl, cols[-1], CELLS[cell], Vector((0.0, -sy, 0.0)))
+
+
 def build_lamps(spec, cid, body, objs):
     bvh = body_bvh(body)
     body_bm = bmesh.new()
@@ -1328,7 +1525,9 @@ def build_lamps(spec, cid, body, objs):
             if role not in per_role:
                 per_role[role] = new_bm()
             bm, uvl = per_role[role]
-            if lamp.get("dome"):
+            if lamp.get("wrap") is not None:
+                add_wrap_lamp(bm, uvl, bvh, lamp, lamp.get("cell", LAMP_CELL[role]), pts)
+            elif lamp.get("dome"):
                 add_dome(bm, uvl, body_bm, body_uvl, bvh, lamp, lamp.get("cell", LAMP_CELL[role]), pts, sign)
             else:
                 add_plate(bm, uvl, bvh, lamp, lamp.get("cell", LAMP_CELL[role]), pts, sign, flat=True)
@@ -1372,16 +1571,21 @@ def check_layout(spec, s):
     window keeps LAYOUT_CLEAR mm (plus the gap's half width) from every panel gap, and does not
     overlap another such detail; a closed gap (a flap) keeps that clearance from every other
     gap. Being inside a closed gap (a handle on a door) is fine. A plate with `straddle` (a
-    hinge) may cross gaps. Fails with every clash listed, so a spec is fixed once."""
+    hinge) may cross gaps. A recess with `housing` is a lamp cluster's dark body: lamps sit in
+    it. A recess's `frame` counts as part of it. Fails with every clash listed, so a spec is
+    fixed once."""
     shapes, gaps = [], []
     for key in ("lamps", "plates", "recesses"):
         for it in spec.get(key, []):
             ku = "y" if it["face"] in ("side", "top") else "x"
+            kind = "housing" if key == "recesses" and it.get("housing") else key
+            outline = item_outline(grown_item(it, float(it["frame"].get("width", FRAME_WIDTH)))
+                                   if it.get("frame") else it)
             shapes.append((f"{key[:-1]} {it.get('role', '')} {ku}={it[ku]}".replace("  ", " "),
-                           it["face"], item_outline(it), bool(it.get("straddle"))))
+                           it["face"], outline, bool(it.get("straddle")), kind))
     for i, poly in enumerate(window_polys(spec, s)):
         if poly:
-            shapes.append((f"window {i}", "side", poly, False))
+            shapes.append((f"window {i}", "side", poly, False, "windows"))
     for kind, it in line_items(spec, s):
         if kind == "grooves":
             line = [tuple(p) for p in it["line"]]
@@ -1393,14 +1597,16 @@ def check_layout(spec, s):
         return [tuple(round(v) for v in q) for q in line[:2]]
 
     clashes = []
-    for name, face, poly, straddle in shapes:
+    for name, face, poly, straddle, kind in shapes:
         edge = _sample(poly, True)
         if not straddle:
             for gface, line, loop, half, segs in gaps:
                 if gface == face and (any(_seg_dist(p, a, b) < half + LAYOUT_CLEAR for p in edge for a, b in segs)
                                       or any(_inside(q, poly) for q in _sample(line, loop))):
                     clashes.append(f"{name} on {face} meets the panel gap {where(line)}…")
-        for other, oface, opoly, _ in shapes:
+        for other, oface, opoly, _, okind in shapes:
+            if {kind, okind} == {"lamps", "housing"}:
+                continue
             if oface == face and other > name and (any(_inside(p, opoly) for p in edge)
                                                    or any(_inside(q, poly) for q in _sample(opoly, True))):
                 clashes.append(f"{name} and {other} overlap on {face}")

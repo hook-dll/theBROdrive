@@ -71,11 +71,15 @@ from scipy import optimize
 
 INK = 160            # grey level below which a pixel is ink
 TYRE_COVER = 0.85    # fraction of a ring that must be inked to count as the tyre's outline
+GLASS_SLOPE_KEEP = 0.3  # a raked screen runs on while the roof line climbs this fraction as steeply
+GLASS_RAKE = 0.8     # a windscreen or back light runs along the car at least this times its rise
 SIMPLIFY = 1.2       # px, Douglas-Peucker tolerance of every emitted polyline
 OPEN_PX = 3          # px radius of the opening that removes thin lines from a silhouette
 MIRROR_MM = 250      # plan features narrower than this along the car are mirrors (top view)
+PLAN_NOTCH_MM = 120  # plan.high dips narrower than this along the car are line crossings, closed
 SPIKE_MM = 60        # side-view top spikes narrower than this are aerials/lamps
 FRONT_SPIKE_MM = 80  # front-view half-width bumps shorter than this are mirror arms and brackets
+GREENHOUSE_STEP_MM = 150  # tumblehome: a wing/cowl step this far above the belt is not the glass
 CLEAR_MM = 70        # bottom_line(): a clear panel run at least this tall is body side, not chassis
 WINDOW_DT_MM = 60    # find_windows(): a glass region is at least twice this thick (a door frame strip is not)
 MERGE_MM = 25        # find_windows(): regions twice this close (one drawn line apart) are one window
@@ -217,6 +221,42 @@ def fit_ring(dist, cx, cy, r):
     return tuple(float(v) for v in res.x)
 
 
+# A tyre is judged on its whole ring; failing that, on the half under the hub alone: drawings that
+# shade the wheel well as dark as the tyre (the-blueprints.com previews) lose the tyre's top in the
+# arch, never its bottom.
+LOW = SIN > 0
+
+
+def arc_samples(dist, cx, cy, r, sel):
+    return ndi.map_coordinates(dist, [cy + r * SIN[sel], cx + r * COS[sel]], order=1, mode="nearest")
+
+
+def tyre_ring(dist, cx, cy, r):
+    """The outermost well-inked ring about this centre (inner rings are rims and hubs), refitted
+    on the arc it was judged on, or None. A lower-half ring wins over the whole-ring one only when
+    it is clearly larger (the whole ring found was the rim inside a tyre whose top is hidden); it is
+    looked for out to 2 radii, as a rim is little more than half its tyre."""
+    found = []
+    for sel, reach in ((slice(None), 1.6), (LOW, 2.0)):
+        rs = [rr for rr in np.arange(0.5 * r, reach * r, 0.5) if (arc_samples(dist, cx, cy, rr, sel) <= 1.0).mean() >= TYRE_COVER]
+        if not rs:
+            found.append(None)
+            continue
+        if sel is LOW:
+            res = optimize.minimize(lambda p: np.minimum(arc_samples(dist, *p, LOW), 3.0).mean(), (cx, cy, max(rs)),
+                                    method="Nelder-Mead", options={"xatol": 0.05, "fatol": 1e-4, "maxiter": 400})
+            fx, fy, fr = (float(v) for v in res.x)
+        else:
+            fx, fy, fr = fit_ring(dist, cx, cy, max(rs))
+        v = arc_samples(dist, fx, fy, fr, sel)
+        ok = (v <= 1.0).mean() >= TYRE_COVER and np.minimum(v, 3.0).mean() <= 0.25
+        found.append((fx, fy, fr) if ok else None)
+    whole, low = found
+    if low and (whole is None or low[2] > 1.15 * whole[2]):
+        return low
+    return whole
+
+
 def find_wheels(sheet):
     """The side view's two tyre circles: [(cx, cy, r), (cx, cy, r)] front (left) to rear."""
     x0, y0, x1, y1 = sheet.boxes["side"]
@@ -229,18 +269,15 @@ def find_wheels(sheet):
     centres = []
     for cx, cy, r in found[0]:
         cx, cy = cx + x0, cy + y0
-        if any(math.hypot(cx - a, cy - b) < 4 for a, b, _ in centres):
+        # a rim and its tyre share a centre: a repeat is the same centre at about the same radius
+        if any(math.hypot(cx - a, cy - b) < 4 and abs(r - rr) < 0.15 * rr for a, b, rr in centres):
             continue
         centres.append(fit_ring(sheet.dist, float(cx), float(cy), float(r)))
     rings = []
     for cx, cy, r in centres:
-        # the outermost well-inked ring about this centre is the tyre (inner rings are rims and hubs)
-        rs = [rr for rr in np.arange(0.5 * r, 1.6 * r, 0.5) if ring_cover(sheet.dist, cx, cy, rr) >= TYRE_COVER]
-        if not rs:
-            continue
-        fx, fy, fr = fit_ring(sheet.dist, cx, cy, max(rs))
-        if ring_cover(sheet.dist, fx, fy, fr) >= TYRE_COVER and ring_cost(sheet.dist, fx, fy, fr) <= 0.25:
-            rings.append((fx, fy, fr))
+        ring = tyre_ring(sheet.dist, cx, cy, r)
+        if ring:
+            rings.append(ring)
     # one ring per wheel: concentric rings collapse onto the largest
     wheels = []
     for ring in sorted(rings, key=lambda t: -t[2]):
@@ -421,6 +458,13 @@ def find_windows(sheet, S, origin, roof_row, ground):
         mask = ndi.binary_erosion(ndi.binary_fill_holes(ring | glass), iterations=1)
         quad = fit_quad(mask)
         if quad is None:
+            continue
+        # a triangle (the back light's edge seen past the C pillar) has no fourth side: its fitted
+        # corners run off far past the glass
+        my, mx = np.nonzero(mask)
+        slack = 0.25 * max(np.ptp(mx), np.ptp(my))
+        if any(not (mx.min() - slack <= p[0] <= mx.max() + slack and my.min() - slack <= p[1] <= my.max() + slack)
+               for p in quad):
             continue
         dist = ndi.distance_transform_edt(~mask)
         radii = []
@@ -1490,7 +1534,10 @@ def main():
                 continue
             ds = [d for d in range(int(0.6 * low[j]), int(low[j] - 6) + 1) if sym[d, j]]
             high[j] = max(ds) if ds else low[j]
-        high = np.minimum(grey_open(high, MIRROR_MM / mm), low)
+        # a pillar or door line crossing the glass's edge leaves a notch where a line further in was
+        # the outermost one found: notches narrower than PLAN_NOTCH_MM are closed
+        high = ndi.grey_closing(grey_open(high, MIRROR_MM / mm), size=max(1, int(round(PLAN_NOTCH_MM / mm))))
+        high = np.minimum(high, low)
         plan_cols = np.arange(T.shape[1]) + t_org[0]
         plan_low, plan_high = (plan_cols, low), (plan_cols, high)
 
@@ -1547,6 +1594,36 @@ def main():
         elif i == len(windows) - 1 and rb - rt > 3:
             wd["pillar"] = "c"
 
+    # raked windscreen and back light: the steep stretch of the roof line where it crosses half-way
+    # between the belt and the roof, first from the front (windscreen) and from the rear (back light),
+    # grown while it climbs at least GLASS_SLOPE_KEEP as steeply as there (the line smoothed over
+    # ~50 mm, so a wiper or a gutter step does not end it); taken when it runs along the car at least
+    # GLASS_RAKE times as far as it rises (an upright screen, the UAZ's, is a front-face recess in the
+    # sheet's extras)
+    rows = ground - h_body
+    climb = -np.gradient(ndi.uniform_filter1d(rows, max(3, int(round(50 / mm)) | 1)))
+    mid = (belt + roof_row) / 2
+    glass_slopes = {}
+    above = np.flatnonzero(rows <= mid)
+    for key, seed, sign in (("windscreen", above[0] if above.size else None, 1),
+                            ("backlight", above[-1] if above.size else None, -1)):
+        if seed is None or sign * climb[seed] <= 0:
+            continue
+        steep = sign * climb >= GLASS_SLOPE_KEEP * sign * climb[seed]
+        i0 = i1 = seed
+        while i0 > 0 and steep[i0 - 1]:
+            i0 -= 1
+        while i1 < len(cols) - 1 and steep[i1 + 1]:
+            i1 += 1
+        if cols[i1] - cols[i0] >= GLASS_RAKE * abs(rows[i0] - rows[i1]):
+            glass_slopes[key] = (float(cols[i0]), float(cols[i1]))
+    # behind a raked screen the side glass's own drawn edge is the frame: the pillar rule would lay it
+    # flat along the screen's slope (the A pillar of a saloon is the screen's edge, not the door's)
+    if "windscreen" in glass_slopes and windows[0].get("pillar") == "a":
+        del windows[0]["pillar"]
+    if "backlight" in glass_slopes and windows[-1].get("pillar") == "c":
+        del windows[-1]["pillar"]
+
     # 5. front view: centre, track, tumblehome, shoulder
     x0_px = None
     track = None
@@ -1570,26 +1647,63 @@ def main():
             if rr:
                 fhw[i] = ((cc - rr[0]) + (rr[1] - cc)) / 2
         fhw = grey_open(fhw, FRONT_SPIKE_MM / mm)
+        # the sheet's mirrors stand out past the body at the belt, too tall for the opening: over
+        # their rows (20 mm either side) the half-width is capped at the body's just under them, so
+        # a step from the wings to the glass inside those rows survives
+        hidden = np.zeros(len(fhw), bool)
+        rows_f = np.arange(len(fhw)) + f_org[1]
+        for mi in extras.get("mirrors", []):
+            hidden |= (rows_f >= ground - (max(mi["z"]) + 20) / mm) & (rows_f <= ground - (min(mi["z"]) - 20) / mm)
+        under = np.flatnonzero(~hidden & (np.arange(len(fhw)) > (np.flatnonzero(hidden).max() if hidden.any() else len(fhw))))
+        if hidden.any() and under.size:
+            fhw[hidden] = np.minimum(fhw[hidden], fhw[under[0]])
 
         def fhw_at(row):
             return float(np.interp(row - f_org[1], np.arange(len(fhw)), fhw))
 
         hb = fhw_at(belt)
-        prof = []
+        # tumblehome: the greenhouse's half-width against its width at its base. On a saloon the front
+        # view shows the wings and cowl standing past the glass just above the side windows' bottom
+        # edge: the base is then the first row, within GREENHOUSE_STEP_MM over the belt, already 5 %
+        # narrower than the belt, and the taper runs from there to the glass top (where the roof
+        # rounds over). Without that step (the UAZ's upright cab) it runs from the belt until it has
+        # narrowed by 10 %.
+        base = None
         row = belt
-        while row > roof_row:
-            f = fhw_at(row) / hb
-            if f < 0.9:
+        while row > belt - GREENHOUSE_STEP_MM / mm:
+            if fhw_at(row) < 0.95 * hb:
+                while fhw_at(row - 2) < 0.98 * fhw_at(row):  # to the foot of the step
+                    row -= 2
+                base = row
                 break
-            prof.append((row, fhw_at(row)))
             row -= 2
+        if base is None:
+            prof = []
+            row = belt
+            while row > roof_row:
+                if fhw_at(row) / hb < 0.9:
+                    break
+                prof.append((row, fhw_at(row)))
+                row -= 2
+            hg = hb
+        else:
+            hg = fhw_at(base)
+            prof = [(belt, hg)] + [(r, fhw_at(r)) for r in np.arange(base, glass_top - 1e-6, -2.0)]
+            # the pillars run on above the glass to the roof rail at the same lean: the taper goes on
+            # while each 2 px narrows it by no more than 3x the glass's mean, and stops where the
+            # roof rounds over (a vertical stretch there reads as a roof standing out past them)
+            step = 3 * 2 * (hg - fhw_at(glass_top)) / max(base - glass_top, 2.0)
+            row = prof[-1][0]
+            while row - 2 > roof_row and fhw_at(row) - fhw_at(row - 2) <= step:
+                row -= 2
+                prof.append((row, fhw_at(row)))
         prof = simplify(prof, 0.8)
-        tumble = [[r1(p[0]), round(p[1] / hb, 3)] for p in prof]
+        tumble = [[r1(p[0]), round(p[1] / hg, 3)] for p in prof]
         below = [(r, fhw_at(r)) for r in np.arange(belt, clip, 1.0)]
         widest = max(v for _, v in below)
         shoulder_row = next(r for r, v in below if v >= hb + 0.5 * (widest - hb))
         if plan_high is not None:  # the top view sees the roof gutter, which stands out past the glass
-            plan_high = (plan_high[0], np.minimum(plan_high[1], hb))
+            plan_high = (plan_high[0], np.minimum(plan_high[1], hg))
         front_check = {"belt_hw_mm": round(hb * mm), "widest_hw_mm": round(widest * mm),
                        "roof_row": r1(f_org[1] + np.flatnonzero(fhw > 0)[0])}
 
@@ -1607,9 +1721,13 @@ def main():
     # 6. arches
     arches = {}
     for tag, wheel in (("front", wheels[0]), ("rear", wheels[1])):
-        pts = find_arch(sh, wheel, bottom_of)
+        given = dict(extras.get("arches", {}).get(tag, {}))
+        if "outline" in given:  # the sheet's own outline, side view mm: where the arch gap is unreadable
+            pts = [(y0_px + y / mm, ground - z / mm) for y, z in given["outline"]]
+        else:
+            pts = find_arch(sh, wheel, bottom_of)
         if pts:
-            arches[tag] = {**extras.get("arches", {}).get(tag, {}), "outline": [[r1(x), r1(y)] for x, y in pts]}
+            arches[tag] = {**given, "outline": [[r1(x), r1(y)] for x, y in pts]}
 
     # 7. details drawn on the views (side gaps, hinges, handles, flap; front grilles and lamps;
     # top bonnet ribs), on strong evidence only; the rest goes to the trace report
@@ -1622,13 +1740,17 @@ def main():
            "body_f": body_f, "body_r": body_r, "belt": belt, "shoulder_row": shoulder_row,
            "arches": {t: a_["outline"] for t, a_ in arches.items()}, "bumpers": extras.get("bumpers", []),
            "extras": extras}
-    seams, plates, grooves = side_details(sh, ctx, found)
-    recesses, lamps, lines = [], [], []
-    if "front" in sh.boxes and x0_px is not None:
-        ctx.update(F_raw=F_raw, f_org=f_org)
-        recesses, lamps = front_details(sh, ctx, found)
-    if "top" in sh.boxes:
-        lines = top_ribs(sh, ctx, found)
+    seams, plates, grooves, recesses, lamps, lines = [], [], [], [], [], []
+    # `details: false`: the drawing's detail lines are not clean enough for the rules (a filled
+    # preview through lines.py draws every line as two edges, and the watermark leaves smears), so the
+    # sheet's extras give them all
+    if sd.get("details", True):
+        seams, plates, grooves = side_details(sh, ctx, found)
+        if "front" in sh.boxes and x0_px is not None:
+            ctx.update(F_raw=F_raw, f_org=f_org)
+            recesses, lamps = front_details(sh, ctx, found)
+        if "top" in sh.boxes:
+            lines = top_ribs(sh, ctx, found)
 
     # plan.low under the arches: the top view's outline there is the arch lip's edge, and carforge
     # stands the lip `flare` proud of plan.low, so the body side under it is the outline less the
@@ -1698,6 +1820,8 @@ def main():
     bp["tumblehome"] = tumble
     bp["belt"] = r1(belt)
     bp["glass_top"] = r1(glass_top)
+    for key, (g0, g1) in glass_slopes.items():
+        bp[key] = [r1(g0), r1(g1)]
     bp["windows"] = []
     for wd in windows:
         out = {"outline": pl(wd["outline"]), "round": round(wd["round"])}
@@ -1735,6 +1859,7 @@ def main():
         "max_half_width_mm": round(float(np.max(bp_low_vals(bp))) * mm),
         "belt_row": r1(belt), "glass_top_row": r1(glass_top), "shoulder_row": r1(shoulder_row),
         "windows_px": [[r1(min(p[0] for p in w["outline"])), r1(max(p[0] for p in w["outline"]))] for w in windows],
+        "glass_slopes_px": {k: [r1(g0), r1(g1)] for k, (g0, g1) in glass_slopes.items()},
         "arch_top_rows": {t: r1(min(p[1] for p in a_["outline"])) for t, a_ in arches.items()},
         "front": front_check,
         "arch_lip_cut_mm": lip_max, "arch_drawn_proud_mm": proud,

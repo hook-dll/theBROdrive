@@ -142,7 +142,10 @@
    {"x": [-560, 560], "y": [-45, 45], "z": [335, 425], "cell": "black", "single": true},
    {"x": [-150, 150], "y": [-120, 120], "z": [220, 450], "cell": "black", "chamfer": 40, "single": true},
    {"x": [-560, 560], "y": [2335, 2425], "z": [335, 425], "cell": "black", "single": true},
-   {"x": [-150, 150], "y": [2260, 2500], "z": [220, 450], "cell": "black", "chamfer": 40, "single": true}
+   {"x": [-150, 150], "y": [2260, 2500], "z": [220, 450], "cell": "black", "chamfer": 40, "single": true},
+   {"x": [-170, 170], "y": [3125, 3185], "z": [985, 1041], "cell": "black", "chamfer": 8, "single": true},
+   {"x": [-30, 30], "y": [3125, 3185], "z": [600, 1440], "cell": "black", "chamfer": 8, "single": true},
+   {"x": [-60, 60], "y": [3180, 3310], "z": [953, 1073], "cell": "steel", "chamfer": 20, "single": true}
   ],
   "spare": {
    "y": 3252,

@@ -776,6 +776,29 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
+    // ZMZ-402.10, GAZ-31029: the ZMZ-24D bottom end with the 402 head and inlet, 100 hp
+    // (73.5 kW) at 4500 and 182 Nm at 2500 (wiki.zr.ru GAZ-31029; ru.wikipedia ZMZ-402
+    // puts the torque at 1800-2200, avto-russia.ru at 2600). No idle or mass found for
+    // the 402 itself: both are the ZMZ-24D's. Cut at the rated speed plus 7%.
+    id: 'engine_zmz_402',
+    kind: 'engine',
+    label: '2.4 ZMZ-402 four',
+    mass: 170,
+    fits: ['car'],
+    engine: {
+      peakPowerKw: 73.5,
+      powerPeakRpm: 4500,
+      peakTorqueNm: 182,
+      torquePeakRpm: 2500,
+      redlineRpm: 4800,
+      idleRpm: 600,
+      bsfc: 0.34,
+      brakingCoeff: 0.0376,
+      cylinders: 4,
+      heat: { operatingC: 85 },
+    },
+  },
+  {
     // VAZ-2105: 1.29 litre, the belt-driven cam version of the 2101 unit, 47.0 kW at
     // 5600 and 92 Nm (9.4 kgf·m) at 3400 (autoopt.ru, VAZ-2105 catalogue).
     id: 'engine_lada_1300',
@@ -1030,6 +1053,24 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
       ratios: [3.5, 2.26, 1.45, 1.0],
       reverse: 3.54,
       finalDrive: 4.1,
+      shiftTime: 0.45,
+      automatic: false,
+      efficiency: 0.9,
+    },
+  },
+  {
+    // GAZ-31029: the 24's four-speed (3.5 / 2.26 / 1.45 / 1.0, reverse 3.54, drom.ru
+    // catalogue) on the one-piece rear axle's 3.9 pair (autocentre.ua, "GAZ-31029: Russian
+    // size"). The 24's 4.1 cannot reach the car's 145-150 km/h: 141 km/h at the cut.
+    id: 'gearbox_gaz_4_31029',
+    kind: 'gearbox',
+    label: '4-speed Volga (3.9 axle)',
+    mass: 46,
+    fits: ['car'],
+    gearbox: {
+      ratios: [3.5, 2.26, 1.45, 1.0],
+      reverse: 3.54,
+      finalDrive: 3.9,
       shiftTime: 0.45,
       automatic: false,
       efficiency: 0.9,
