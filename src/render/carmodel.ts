@@ -44,6 +44,7 @@ import {
   secondaryFactoryPaintHex,
 } from '../vehicle/carpaint';
 import { lampLensAnchors } from '../vehicle/vehiclelamps';
+import { buildKitCar } from '../carkit/kit';
 
 /**
  * DEV-only A/B switch for the unified car style: `?carstyle=unified`, alongside any
@@ -351,7 +352,7 @@ function stampCarBodyPositions(scene: THREE.Group, def: CarModelDef): void {
   scene.traverse((mesh) => {
     if (!(mesh instanceof THREE.Mesh)) return;
     // Window glass takes the stamp too: its dust is the paint's, laid in the same frame.
-    const glass = materialsOf(mesh).includes(carGlassMaterial());
+    const glass = materialsOf(mesh).some((material) => material === carGlassMaterial() || material === carClearGlassMaterial());
     if (!glass && !isRandomPaintMesh(mesh, def)) return;
     if (!glass && !materialsOf(mesh).some((material) => isPaintSlot(material, def))) return;
     const owner = stamped.get(mesh.geometry);
@@ -611,7 +612,9 @@ function prepareMaterials(root: THREE.Object3D, bodywork: boolean, lenses: Reado
     // windows. A car's shadow is its silhouette, windows included.
     const lens = lenses.has(child.name) || materials.every((material) => lenses.has(material.name));
     child.castShadow = !lens;
-    child.receiveShadow = !bodywork;
+    // Bodywork receives none, but a kit cabin does: it is the roof's shadow that tells
+    // a seat seen through the glass from one standing in the sun.
+    child.receiveShadow = !bodywork || child.userData.kitShadowed === true;
     // Wheels are closed solids, so their lit face is culled from the depth map and
     // the depth stored under them is metres away: they can receive safely, and a
     // wheel darkening under its own arch is worth having.
@@ -873,14 +876,14 @@ let glassMaterial: THREE.MeshStandardMaterial | null = null;
  * window of a car is as dirty as the rest. Returns the copies (none if no glass).
  */
 function cloneCarGlass(root: THREE.Object3D, paint: readonly THREE.Material[]): THREE.Material[] {
-  const shared = carGlassMaterial();
+  const shared: readonly THREE.Material[] = [carGlassMaterial(), carClearGlassMaterial()];
   // The panes lay the paint's dust in the paint's chassis frame (materials.ts
   // GLASS_GRIME_BODY); a car with no condition paint gets the lens's even film.
   const frame = paint.length > 0 ? carPaintGrimeFrame(paint[0]!) : null;
   let own: THREE.MeshStandardMaterial | null = null;
   const swap = (material: THREE.Material): THREE.Material => {
-    if (material !== shared) return material;
-    own ??= makeCarGrimeMaterial(shared.clone(), frame);
+    if (!shared.includes(material)) return material;
+    own ??= makeCarGrimeMaterial((material as THREE.MeshStandardMaterial).clone(), frame);
     return own;
   };
   root.traverse((mesh) => {
@@ -901,6 +904,28 @@ function carGlassMaterial(): THREE.MeshStandardMaterial {
   return glassMaterial;
 }
 
+let clearGlassMaterial: THREE.MeshStandardMaterial | null = null;
+
+/**
+ * The see-through pane of a body with a cabin (`CarModelDef.clearGlass`): the same tint,
+ * thin enough to show the seats, still reflecting the sky at a glancing angle. Its dust
+ * turns it opaque where it settles (materials.ts GLASS_GRIME_BODY).
+ */
+function carClearGlassMaterial(): THREE.MeshStandardMaterial {
+  clearGlassMaterial ??= new THREE.MeshStandardMaterial({
+    name: 'car-glass-clear',
+    color: TINTED_GLASS.color,
+    roughness: 0.06,
+    metalness: 0.1,
+    envMapIntensity: 1.2,
+    transparent: true,
+    opacity: 0.28,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  return clearGlassMaterial;
+}
+
 /**
  * Separates a body's windows into the shared opaque tint, whichever way its pack
  * drew them.
@@ -912,12 +937,13 @@ function carGlassMaterial(): THREE.MeshStandardMaterial {
  * host is left drawing everything else.
  */
 function isolateGlass(scene: THREE.Group, def: CarModelDef): void {
+  const paneMaterial = def.clearGlass ? carClearGlassMaterial() : carGlassMaterial();
   if (def.glassMaterial) {
     const wanted = def.glassMaterial;
     scene.traverse((mesh) => {
       if (!(mesh instanceof THREE.Mesh)) return;
       const swap = (source: THREE.Material): THREE.Material =>
-        source.name === wanted ? carGlassMaterial() : source;
+        source.name === wanted ? paneMaterial : source;
       mesh.material = Array.isArray(mesh.material)
         ? mesh.material.map(swap)
         : swap(mesh.material);
@@ -942,7 +968,7 @@ function isolateGlass(scene: THREE.Group, def: CarModelDef): void {
     const glass = triangleRuns(mesh.geometry, (tri) => uvCellOf(mesh.geometry, tri, cell));
     if (glass.matched.length === 0) continue;
 
-    const pane = new THREE.Mesh(subGeometry(mesh.geometry, glass.matched), carGlassMaterial());
+    const pane = new THREE.Mesh(subGeometry(mesh.geometry, glass.matched), paneMaterial);
     pane.name = 'glass';
     pane.position.copy(mesh.position);
     pane.quaternion.copy(mesh.quaternion);
@@ -1568,7 +1594,7 @@ function loadModel(def: CarModelDef): Promise<void> {
   // of 25-40 ms per new model — so each step after the parse takes a frame of its own.
   const load = (async () => {
     if (def.textureFile) await loadPalette(def.textureFile);
-    const scene = await loadScene(def.file);
+    const scene = def.kit ? buildKitCar(def.kit) : await loadScene(def.file);
     await onOwnFrame(() => {
       if (def.textureFile) {
         applyTexture(scene, paletteTextures.get(def.textureFile)!);

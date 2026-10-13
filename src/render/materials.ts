@@ -1233,6 +1233,8 @@ if ( uGrime > 0.0005 ) {
   grimeFilm = saturate( max( crust, film ) );
   vec3 dust = mix( uDustLight, uDustCrust, crust );
   diffuseColor.rgb = mix( diffuseColor.rgb, dust, grimeFilm * ( 0.6 + 0.35 * crust ) );
+  // Dust on a clear pane is what you stop seeing through (a no-op on the opaque tint).
+  diffuseColor.a = mix( diffuseColor.a, 1.0, saturate( grimeFilm * 1.2 ) );
   roughnessFactor = mix( roughnessFactor, 0.96, grimeFilm );
   metalnessFactor = mix( metalnessFactor, 0.0, saturate( grimeFilm * 1.7 ) );
 }`;

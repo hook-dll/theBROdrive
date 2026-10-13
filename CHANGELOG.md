@@ -4,6 +4,21 @@
 
 ### Added
 
+- KIT CARS (`src/carkit`, lab only): low-poly VAZ bodies built at load from a spec instead of
+  read from a file, with a cabin you can see through clear glass and work. `kit_vaz2106` and
+  `kit_vaz2108` (`LAB_CAR_MODELS`, `?car-lab&pack=Kit`) take their proportions from the factory
+  drawings in `build/carshape/_refs/bp/img` and their running gear from `sv_vaz2106` /
+  `sv_vaz2108`. The shell is a lofted tub plus a greenhouse of slanted pillar columns; doors at
+  full size (a rear door reaches over its wheel with the arch cut out), bonnet, boot or
+  tailgate and the fuel flap are cut out of it with shut gaps, jambs and inner skins and
+  swing on hinges. Inside: dash with live gauges, wheel, stalks, pedals, gear lever, handbrake,
+  sliding and reclining seats, glovebox, ashtray, radio, visors, window cranks and vent windows;
+  an engine bay per platform, the boot and the underbody. They go through `buildTemplate` like
+  any model, so paint, dirt, scratches, glass dust and lamps work as on every car;
+  `CarModelDef.clearGlass` gives them see-through panes whose dust turns opaque. In the lab a
+  click works a part (`KitRig`), a panel drives the cabin's inputs, and beyond 25 m a kit car
+  drops its cabin, bay, boot and underbody and its glass goes back to a tinted mirror.
+
 - THE VAZ-1111 OKA IN THE PACK'S STYLE (`cf_vaz1111`) REPLACES the GTA SA Oka (`sa_oka` is
   gone from the catalogue, its `oka.glb`, `tools/oka-author.py` and the trim-plate rear screen
   cut `glassOverTailOpening` / `rearScreenMaterial` with it; a save holding an `sa_oka` loads

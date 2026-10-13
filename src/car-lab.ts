@@ -41,7 +41,8 @@ import {
 import { makeFlatMaterial } from './render/materials';
 import { Sky } from './render/sky';
 import { loadStarField } from './render/starcatalog';
-import { CAR_MODELS, type CarModelDef } from './vehicle/carmodels';
+import { KitRig, type KitControl, type KitPicked } from './carkit/rig';
+import { CAR_MODELS, LAB_CAR_MODELS, type CarModelDef } from './vehicle/carmodels';
 
 const CALENDAR = newWorldState(1337).calendarEpoch;
 const CELL_X = 6.5;
@@ -75,19 +76,30 @@ interface LabCar {
   readonly anchor: THREE.Group;
   readonly label: THREE.Sprite;
   instance: CarModelInstance | null;
+  /** Kit cars only: their doors, lamps and controls. */
+  rig: KitRig | null;
 }
 
 /** What `window.__carLab` exposes. */
 export interface CarLabApi {
   set(values: Partial<Pick<LabState, 'dirt' | 'scratches' | 'timeHours' | 'factory'>>): void;
   /** Frames one car from `azimuth` radians around it, or the whole grid with no id. */
-  focus(modelId?: string, azimuth?: number): void;
+  focus(modelId?: string, azimuth?: number, elevation?: number, distance?: number): void;
+  /** Puts the camera at `position` looking at `target`, both relative to a car's anchor. */
+  look(modelId: string, position: readonly [number, number, number], target: readonly [number, number, number]): void;
+  /** A kit car's rig: set a channel, click a control by id, list the controls. */
+  kit(modelId: string): {
+    set(channel: string, value: number): void;
+    activate(controlId: string): void;
+    controls(): string[];
+  } | null;
   /** Renders a frame now and returns the canvas as a PNG data URL. */
   capture(): string;
   readonly models: readonly string[];
 }
 
 function packOf(def: CarModelDef): string {
+  if (def.kit) return 'Kit';
   if (def.id.startsWith('sv_')) return 'Soviet FBX';
   if (def.id.startsWith('sa_')) return 'GTA SA';
   if (def.id.startsWith('gt_')) return 'GTA V';
@@ -217,6 +229,61 @@ function createInterface(
   return root;
 }
 
+/** Beyond this a kit car draws no cabin and its glass goes back to a tinted mirror. */
+const KIT_DETAIL_DISTANCE = 25;
+
+/** Driving inputs the kit panel offers as sliders: channel, label, range, step. */
+const KIT_DRIVE_SLIDERS: readonly [string, string, number, number, number][] = [
+  ['steer', 'Руль', -1, 1, 0.01],
+  ['throttle', 'Газ', 0, 1, 0.01],
+  ['brake', 'Тормоз', 0, 1, 0.01],
+  ['clutch', 'Сцепление', 0, 1, 0.01],
+  ['handbrake', 'Ручник', 0, 1, 0.01],
+  ['gear', 'Передача', -1, 5, 1],
+  ['speed', 'Скорость', 0, 180, 1],
+  ['rpm', 'Обороты', 0, 7000, 50],
+  ['fuel', 'Топливо', 0, 1, 0.01],
+  ['temp', 'Температура', 0, 1, 0.01],
+];
+
+/**
+ * The focused kit car's panel: a button per clickable part (the same thing a click on
+ * the car does) and sliders for the driving inputs the cabin shows.
+ */
+function fillKitPanel(panel: HTMLElement, rig: KitRig, body: THREE.Object3D): void {
+  const controls: KitControl[] = [];
+  const seen = new Set<string>();
+  body.traverse((node) => {
+    const found = KitRig.controlOf(node);
+    if (!found || found.node !== node || seen.has(found.control.id)) return;
+    seen.add(found.control.id);
+    controls.push(found.control);
+  });
+  panel.innerHTML = `
+    <h1>КАБИНА</h1>
+    ${KIT_DRIVE_SLIDERS.map(([channel, label, min, max, step]) =>
+      `<label><span>${label}</span><input data-kit-channel="${channel}" type="range" min="${min}" max="${max}" step="${step}" value="${rig.get(channel)}"><output>${rig.get(channel)}</output></label>`).join('')}
+    <div class="buttons">${controls.map((control, i) => `<button data-kit-control="${i}">${control.label}</button>`).join('')}</div>`;
+  panel.oninput = (event) => {
+    const input = event.target;
+    if (!(input instanceof HTMLInputElement) || !input.dataset.kitChannel) return;
+    rig.set(input.dataset.kitChannel, Number(input.value));
+    const output = input.parentElement?.querySelector('output');
+    if (output) output.textContent = input.value;
+  };
+  panel.onclick = (event) => {
+    const button = event.target;
+    if (!(button instanceof HTMLButtonElement) || button.dataset.kitControl === undefined) return;
+    const control = controls[Number(button.dataset.kitControl)];
+    if (control?.action?.type === 'press') {
+      rig.activate(control);
+      setTimeout(() => rig.release(control), 400);
+    } else if (control) {
+      rig.activate(control);
+    }
+  };
+}
+
 export async function bootCarLab(): Promise<void> {
   const canvas = document.getElementById('game');
   const loading = document.getElementById('launch-loading');
@@ -227,6 +294,9 @@ export async function bootCarLab(): Promise<void> {
   document.title = 'Car condition lab · Voyage Mirage';
 
   const query = new URLSearchParams(window.location.search);
+  // `?pack=Kit` (or any pack name) keeps one row: a quick lab for the cars being built.
+  const onlyPack = query.get('pack');
+  const labModels = [...LAB_CAR_MODELS, ...CAR_MODELS].filter((def) => onlyPack === null || packOf(def) === onlyPack);
   const state: LabState = {
     dirt: queryNumber(query, 'dirt', 0),
     scratches: queryNumber(query, 'scratches', 0),
@@ -237,7 +307,7 @@ export async function bootCarLab(): Promise<void> {
   const renderer = new Renderer(canvas, state.quality, true, DEFAULT_INK_STRENGTH);
   const [starField] = await Promise.all([
     loadStarField(new Date(parseCalendarEpoch(CALENDAR)), state.quality, prefersMobilePresentation()),
-    preloadCarModels(),
+    preloadCarModels(labModels.map((def) => def.id)),
   ]);
   const sky = new Sky(renderer.scene, renderer.fog, renderer.renderer, starField);
   await sky.waitForAssets();
@@ -250,10 +320,10 @@ export async function bootCarLab(): Promise<void> {
 
   // Rows by pack, so one screenshot row compares like with like.
   const cars: LabCar[] = [];
-  const packs = [...new Set(CAR_MODELS.map(packOf))];
+  const packs = [...new Set(labModels.map(packOf))];
   let row = 0;
   for (const pack of packs) {
-    const defs = CAR_MODELS.filter((def) => packOf(def) === pack);
+    const defs = labModels.filter((def) => packOf(def) === pack);
     defs.forEach((def, index) => {
       const anchor = new THREE.Group();
       anchor.position.set(
@@ -266,7 +336,7 @@ export async function bootCarLab(): Promise<void> {
       label.position.set(0, 2.7, 0);
       anchor.add(label);
       renderer.scene.add(anchor);
-      cars.push({ def, pack, anchor, label, instance: null });
+      cars.push({ def, pack, anchor, label, instance: null, rig: null });
     });
     row += Math.ceil(defs.length / COLUMNS);
   }
@@ -279,6 +349,7 @@ export async function bootCarLab(): Promise<void> {
       for (const wheel of car.instance.wheels.values()) car.anchor.remove(wheel);
     }
     const instance = CAR_FACTORIES[state.factory]!.create(car.def.id, `${car.def.id}:car-lab`);
+    car.rig = car.def.kit ? new KitRig(instance.body) : null;
     const measure = carModelMeasure(car.def.id);
     const rideY = carSpawnYAboveGround(measure, 0, 0);
     instance.body.position.y += rideY;
@@ -318,8 +389,78 @@ export async function bootCarLab(): Promise<void> {
     for (const car of cars) car.instance?.surface.setCondition(state.dirt, state.scratches);
   };
 
+  // Kit cars: hover names a part, a click works it (a door, a switch, a window crank).
+  const tooltip = document.createElement('div');
+  tooltip.style.cssText =
+    'position:fixed;z-index:60;pointer-events:none;padding:3px 7px;font:12px Consolas,monospace;color:#f2d59b;background:rgba(19,17,13,.85);border:1px solid #82735b;display:none';
+  document.body.appendChild(tooltip);
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+  const pick = (event: PointerEvent): { car: LabCar; control: KitPicked | null } | null => {
+    const rect = canvas.getBoundingClientRect();
+    pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+    raycaster.setFromCamera(pointer, renderer.camera);
+    const kitCars = cars.filter((car) => car.rig && car.instance);
+    const hits = raycaster.intersectObjects(kitCars.map((car) => car.instance!.body), true);
+    // Panes are see-through: a click lands on what is behind them unless they open.
+    for (const hit of hits) {
+      const control = KitRig.controlOf(hit.object);
+      const glass = (hit.object as THREE.Mesh).material instanceof THREE.Material && /glass/.test(((hit.object as THREE.Mesh).material as THREE.Material).name);
+      if (glass && !control) continue;
+      const car = kitCars.find((c) => {
+        let node: THREE.Object3D | null = hit.object;
+        while (node && node !== c.instance!.body) node = node.parent;
+        return node !== null;
+      });
+      return car ? { car, control } : null;
+    }
+    return null;
+  };
+  let downAt: { x: number; y: number } | null = null;
+  let pressed: { car: LabCar; control: KitPicked } | null = null;
+  canvas.addEventListener('pointermove', (event) => {
+    const hit = pick(event);
+    const label = hit?.control?.control.label;
+    tooltip.style.display = label ? 'block' : 'none';
+    canvas.style.cursor = label ? 'pointer' : '';
+    if (label) {
+      tooltip.textContent = label;
+      tooltip.style.left = `${event.clientX + 14}px`;
+      tooltip.style.top = `${event.clientY + 10}px`;
+    }
+  });
+  canvas.addEventListener('pointerdown', (event) => {
+    downAt = { x: event.clientX, y: event.clientY };
+    const hit = pick(event);
+    if (hit?.control?.control.action?.type === 'press') {
+      pressed = { car: hit.car, control: hit.control };
+      hit.car.rig!.activate(hit.control.control);
+    }
+  });
+  canvas.addEventListener('pointerup', (event) => {
+    if (pressed) {
+      pressed.car.rig!.release(pressed.control.control);
+      pressed = null;
+      return;
+    }
+    // A drag is the orbit, not a click.
+    if (!downAt || Math.hypot(event.clientX - downAt.x, event.clientY - downAt.y) > 4) return;
+    const hit = pick(event);
+    if (hit?.control) hit.car.rig!.activate(hit.control.control);
+  });
+
   const view = new THREE.Vector3();
+  let lastFrame = performance.now();
   const renderFrame = (): void => {
+    const now = performance.now();
+    const dt = Math.min(0.1, (now - lastFrame) / 1000);
+    lastFrame = now;
+    const eye = renderer.camera.position;
+    for (const car of cars) {
+      if (!car.rig) continue;
+      car.rig.setDetail(car.anchor.position.distanceTo(eye) < KIT_DETAIL_DISTANCE);
+      car.rig.update(dt);
+    }
     controls.update();
     const cam = renderer.camera.position;
     renderer.camera.getWorldDirection(view);
@@ -337,10 +478,12 @@ export async function bootCarLab(): Promise<void> {
         if (key === 'dirt' || key === 'scratches' || key === 'timeHours') input.value = String(state[key]);
       });
     },
-    focus(modelId, azimuth = 0.9) {
+    focus(modelId, azimuth = 0.9, elevation = 0.18, distance) {
       const car = cars.find((candidate) => candidate.def.id === modelId);
       // Name boards help find a car in the grid and only get in the way of a close-up.
       for (const other of cars) other.label.visible = !car;
+      kitPanel.style.display = car?.rig && car.instance ? 'block' : 'none';
+      if (car?.rig && car.instance) fillKitPanel(kitPanel, car.rig, car.instance.body);
       if (!car) {
         frame(gridCentre, 44, 0.35, 0.5);
         return;
@@ -348,7 +491,38 @@ export async function bootCarLab(): Promise<void> {
       const half = carModelMeasure(car.def.id).halfExtents;
       const target = car.anchor.position.clone();
       target.y = half[1] * 0.9;
-      frame(target, Math.max(half[2], half[0]) * 2.6, CAR_YAW + azimuth, 0.18);
+      frame(target, distance ?? Math.max(half[2], half[0]) * 2.6, CAR_YAW + azimuth, elevation);
+    },
+    look(modelId, position, target) {
+      const car = cars.find((candidate) => candidate.def.id === modelId);
+      if (!car) return;
+      for (const other of cars) other.label.visible = false;
+      car.anchor.updateMatrixWorld(true);
+      controls.target.copy(car.anchor.localToWorld(new THREE.Vector3(...target)));
+      renderer.camera.position.copy(car.anchor.localToWorld(new THREE.Vector3(...position)));
+      controls.update();
+    },
+    kit(modelId) {
+      const car = cars.find((candidate) => candidate.def.id === modelId);
+      const rig = car?.rig;
+      const body = car?.instance?.body;
+      if (!rig || !body) return null;
+      const all = (): KitControl[] => {
+        const out: KitControl[] = [];
+        body.traverse((node) => {
+          const found = KitRig.controlOf(node);
+          if (found && found.node === node) out.push(found.control);
+        });
+        return out;
+      };
+      return {
+        set: (channel, value) => rig.set(channel, value),
+        activate: (controlId) => {
+          const found = all().find((control) => control.id === controlId);
+          if (found) rig.activate(found);
+        },
+        controls: () => all().map((control) => control.id),
+      };
     },
     capture() {
       renderFrame();
@@ -357,6 +531,10 @@ export async function bootCarLab(): Promise<void> {
     models: cars.map((car) => car.def.id),
   };
   const interfaceRoot = createInterface(state, cars, apply, api);
+  const kitPanel = document.createElement('aside');
+  kitPanel.className = 'car-lab';
+  kitPanel.style.cssText = 'left:auto;right:14px;display:none;max-height:calc(100vh - 28px);overflow:auto';
+  document.body.appendChild(kitPanel);
   Object.assign(window, { __carLab: api });
 
   api.focus(query.get('focus') ?? undefined);
