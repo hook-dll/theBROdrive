@@ -138,7 +138,7 @@ Format of an entry: **Problem** → **Cause** → **Fix** → *Code* (commit).
   back so the car's length is unchanged. Proved: 2101–21099 hashes identical against
   c86627d; 2115 11 738 → 12 092 triangles. Left: the high brake lamp also glows with the
   tail lamps and the fog lamps never light (no roles for them; STATUS.md). *spec.ts,
-  exterior.ts, samaras.ts `LOOK_2115`* (uncommitted at the time of writing).
+  exterior.ts, samaras.ts `LOOK_2115`* (8620a22).
 
 ## Failed approaches (do not retry)
 

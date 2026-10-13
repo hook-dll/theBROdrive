@@ -4,8 +4,7 @@ What the owner wants, what is done, what is left. How to work: [`README.md`](REA
 Why things are the way they are: [`HISTORY.md`](HISTORY.md). Keep this file current with
 every change (update the car's row and the gaps).
 
-Last updated: 2026-10-13, after commit c86627d plus the 2115 details (in the working tree,
-not yet committed).
+Last updated: 2026-10-13, after commit 8620a22 (the 2115 details).
 
 ## The owner's goal
 
@@ -85,7 +84,7 @@ body work; wheels from `DISTINCT_SOVIET_WHEEL_SETS`. Triangle counts in README.
 | 2131 | – | – | **not started** | sibling `sv_niva_long`; derive from the 2121 shell |
 | 1111 | – | – | **not started** | no `sv_` sibling (`KIT_CARS` requires one from `SOVIET_CARS`): a decision for the owner. The owner's own carforge Oka (`cf_vaz1111`, uncommitted files) is separate work; don't touch it |
 
-**2115 details — done** (agent Car2115; uncommitted in the tree at the time of writing):
+**2115 details — done** (commit 8620a22):
 late-face head lamps and indicators (chamfered `lens` outlines), the slot under the bonnet
 lip, rectangular front fog lamps in black housings (`panel` spans), grey door mouldings
 (`waist`, finish `grey`) in line with a grey band round both bumpers (moulded bumper
