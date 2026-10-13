@@ -41,6 +41,13 @@ export interface TubStation {
    * to the pillar row and rises straight to the edge there — an estate's tailgate sill.
    */
   readonly flat?: number;
+  /**
+   * A boot lid that comes down between two lamp corners (the 2115's): the deck lies
+   * level at `deck` out to just short of this half width, rises there in a short wall to
+   * the corners' top (the deck edge) and stays level out to the side. The lid is cut
+   * along this line instead of the pillar row; between stations it moves linearly.
+   */
+  readonly notch?: number;
 }
 
 /** Who owns one strip of the greenhouse side, between a column and the next. */
@@ -165,6 +172,11 @@ export interface FaceLook {
   readonly bumper: BumperLook;
   /** Drawn in order; later items stand on earlier ones (a lamp on its surround). */
   readonly items: readonly FaceItem[];
+  /**
+   * Items on the boot lid or tailgate where it comes down to the end face (the 2115's
+   * lamp bar), placed on the end face like `items` but riding on the lid as it opens.
+   */
+  readonly lid?: readonly FaceItem[];
 }
 
 export type BumperLook =
@@ -195,6 +207,8 @@ export type BumperLook =
       /** Its foot under the sill's bevel, and its height. */
       readonly drop: number;
       readonly height: number;
+      /** Its finish (the 2115's is body colour); dark plastic when absent. */
+      readonly finish?: Finish;
     };
 
 /**

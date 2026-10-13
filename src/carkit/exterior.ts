@@ -354,8 +354,9 @@ function buildBumpers(ctx: KitContext, b: PartBuilder): void {
       const depth = reach + 0.01;
       // As wide as the face at its widest, which on a leaning nose is low down.
       const half = Math.min(Math.max(sec.r1[0], sec.r2[0]) + 0.03, widest - depth * 0.35);
-      b.color(0x232427);
-      sweep(b, 'trim', bumperPath(half, zFace - end * 0.01, end, depth, 0, 0.2), [
+      const shell = bumper.finish ? finishSlot(bumper.finish) : { slot: 'trim' as const, color: 0x232427 };
+      b.color(shell.color);
+      sweep(b, shell.slot, bumperPath(half, zFace - end * 0.01, end, depth, 0, 0.2), [
         [0, y0 + 0.02],
         [0.7, y0],
         [0.92, y0 + 0.03],
@@ -366,8 +367,10 @@ function buildBumpers(ctx: KitContext, b: PartBuilder): void {
         [0, y1],
       ]);
       const g = y0 + 0.11;
-      b.color(0x34363a);
-      sweep(b, 'trim', bumperPath(half + 0.003, zFace - end * 0.01, end, depth + 0.006, 0, 0.19), [[0.97, g - 0.012], [1, g - 0.012], [1, g + 0.012], [0.97, g + 0.012]]);
+      // A painted bumper's groove is a ridge in its own colour.
+      const groove = bumper.finish ? shell : { slot: 'trim' as const, color: 0x34363a };
+      b.color(groove.color);
+      sweep(b, groove.slot, bumperPath(half + 0.003, zFace - end * 0.01, end, depth + 0.006, 0, 0.19), [[0.97, g - 0.012], [1, g - 0.012], [1, g + 0.012], [0.97, g + 0.012]]);
     }
   }
 }
@@ -543,6 +546,21 @@ function buildFiller(ctx: KitContext): void {
   addBuilt(ctx.root, b, [0, 0, 0], 'filler');
 }
 
+/**
+ * The rear face's `lid` items (spec.ts `FaceLook.lid`), built on the end face like the
+ * rest but hung on the boot lid or tailgate, so they lift with it.
+ */
+function buildLidFace(ctx: KitContext): void {
+  const items = ctx.frame.spec.look.rear.lid;
+  if (!items) return;
+  const lid = ctx.nodes.get('boot') ?? ctx.nodes.get('tailgate');
+  if (!lid) throw new Error(`Kit car "${ctx.frame.spec.id}" has lid items but no boot lid or tailgate`);
+  const b = new PartBuilder();
+  const face = new EndFace(ctx.frame, -1);
+  for (const item of items) buildFaceItem(face, item, b);
+  addBuilt(lid.node, b, lid.pivot, 'lid_face');
+}
+
 export function buildExterior(ctx: KitContext): void {
   const body = new PartBuilder();
   buildFace(ctx.frame, ctx.frame.spec.look.front, 1, body);
@@ -552,6 +570,7 @@ export function buildExterior(ctx: KitContext): void {
   buildWaist(ctx, body);
   buildRepeaters(ctx, body);
   addBuilt(ctx.root, body, [0, 0, 0], 'exterior');
+  buildLidFace(ctx);
   buildDoorHardware(ctx);
   buildWipers(ctx);
   buildFiller(ctx);

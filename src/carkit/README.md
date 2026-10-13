@@ -5,7 +5,8 @@ loader would return. From there the car goes through the usual pipeline in
 `render/carmodel.ts` (`buildTemplate`), so it gets paint, dust, scratches, stickers, glass
 dirt, lamps and fitting to the factory dimensions on the same terms as every other model.
 
-Status: stage 3 under way. Eight cars — `kit_vaz2101` … `kit_vaz2107` and `kit_vaz2108` —
+Status: stage 3 under way. Eleven cars — `kit_vaz2101` … `kit_vaz2108`, `kit_vaz2109`,
+`kit_vaz21099` and `kit_vaz2115` —
 are shown in the car lab only:
 `/?car-lab&pack=Kit`. They are absent from traffic, the garage, spawns and POIs.
 
@@ -38,7 +39,7 @@ are shown in the car lab only:
 2. A "Get in" button in car-lab: camera at the driver's seat, keys turn the wheel and press
    the pedals, clicks on fittings from inside.
 3. The remaining cars from specs. ✅ Looks as descriptions, five wheel styles, the 2101,
-   2102, 2103, 2104, 2105 and 2107. Left: 2109/21099/2115, 2110/2112, 2121/2131, 1111.
+   2102, 2103, 2104, 2105, 2107, 2109, 21099 and 2115. Left: 2110/2112, 2121/2131, 1111.
 4. Driving for real on the playground with the running gear of the existing VAZ models;
    catalogue entries for 2112 and 2115.
 5. Owner's call: replace the old models in the world, rearrange the bonnet grid, transfer
@@ -60,9 +61,10 @@ are shown in the car lab only:
 | File | What it does |
 |---|---|
 | `spec.ts` | Spec types: `KitCarSpec`, `TubStation`, `CabinSpec`, `CabinColumn`, `WheelSpec`, `KitLook` and the face/bumper descriptions (`FaceItem`, `BumperLook`). |
-| `specs.ts` | Car numbers (`KIT_SPECS`): body families (`BODY_124`, `BODY_05`) placed per car with `onBody`, one `LOOK_*` per car, each with a comment saying where it was measured. |
-| `measurements-classics.md`, `measurements-estates.md` | Measurement reports: every figure with its drawing or photo and scale. |
+| `specs.ts` | Car numbers (`KIT_SPECS`): body families (`BODY_124`, `BODY_05`, the Samara shells) placed per car with `onBody`, one `LOOK_*` per car, each with a comment saying where it was measured. |
+| `measurements-classics.md`, `measurements-estates.md`, `measurements-samara.md` | Measurement reports: every figure with its drawing or photo and scale. |
 | `estates.ts` | The 2102/2104 bodies and backs (`BODY_2102`, `BODY_2104`, `REAR_*`); their fronts and sides are their saloons'. |
+| `samaras.ts` | The Samara family: `BODY_2108` and its looks, and the 2109, 21099 and 2115 bodies and looks built on it. |
 | `builder.ts` | `PartBuilder`: flat triangles per material slot, transform stack, primitives (`box`, `bevelBox`, `extrude`, `cylinderX/Y/Z`, `torusY`, `bridge`), vertex colours. |
 | `body.ts` | `BodyFrame` (cross-section and height lookups) and `buildShell`: tub, greenhouse and roof as one face list, then cut into parts. |
 | `exterior.ts` | Bumpers (swept round the corners), grille, lamps, mirrors, handles, wipers, filler neck. |
@@ -87,7 +89,7 @@ Integration outside the folder:
   see-through. On opaque glass this changes nothing.
 - `car-lab.ts`: the Kit row, the `?pack=` filter, hover and click, the "КАБИНА" panel, LOD at
   25 m, `__carLab.look(...)` / `__carLab.kit(id)`.
-- `vehicle/model-fits.json`: rows for `kit_vaz2106` / `kit_vaz2108` (`bun tools/fit-models.ts <id>`).
+- `vehicle/model-fits.json`: a row for every kit car (`bun tools/fit-models.ts <id>`).
 
 ## How the body is built
 
@@ -215,7 +217,8 @@ crossing the LOD distance triggers no shader compile.
 ## Where the numbers come from
 
 Proportions come from the factory four-view drawings in `build/carshape/_refs/bp/img`
-(`vaz2101.jpg`, `vaz2108.jpg`; there are also `niva.jpg`, `fiat124.jpg`, …), photos from
+(`vaz2101.jpg`, `vaz2108.jpg`, `vaz_21099.jpg`, `vaz_2109.jpg`; there are also `niva.jpg`,
+`fiat124.jpg`, …), photos from
 `build/carshape/_refs/photos`.
 
 Method:
@@ -285,6 +288,16 @@ upright sides between the corner lamps. The filler is on the left (`flap.side`).
 bench is pulled forward with `cabinLayout.bench`, and the load floor starts at the bench
 (`loadSpaceStart`) and never sinks below the floor pan.
 
+The Samaras share the 2108's shell from the nose to the B pillar and all its heights
+(numbers in `measurements-samara.md`). The 2109 changes only the greenhouse columns: a
+shorter front door, a full-size rear door (`door2`) raked along the C pillar and a smaller
+fixed quarter light behind it. The 21099 adds a saloon tail: a raked back light, a boot
+lid (`bootEnd`) and its own lamps. The 2115 is the 21099 moved back 45 mm by its longer
+front bumper, with body-colour bumpers (`finish: 'paint'` on a moulded bumper) and a boot
+lid that comes down between the corner lamps: its last station carries `notch`, so the
+deck there lies level at the lid's foot between two lamp corners and the lid is cut along
+the notch, and the lamp bar is in `rear.lid`, face items that ride on the lid.
+
 ## Refactoring without breaking a car
 
 When the generator changes shape but should not change a car, prove it on geometry:
@@ -297,9 +310,10 @@ deliberately corrected to the measurements.
 
 ## Wheels: the Soviet pack's sets
 
-A kit car is shod as the Soviet pack's cars are: from `SOVIET_WHEEL_SET_POOL` (its
-sibling's `wheelSetPool`), each instance wearing one set on all four, picked by its
-appearance key, rescaled by `cloneWheels` to the kit's own tyre size and width. The kit's
+A kit car is shod as the Soviet pack's cars are, but from `DISTINCT_SOVIET_WHEEL_SETS`
+(the pack's six wheel designs once each; the shared pool repeats them), each instance
+wearing one set on all four, picked by its appearance key, rescaled by `cloneWheels` to
+the kit's own tyre size and width. The kit's
 own wheel (`buildWheel` in `wheels.ts`, a tyre on a plain steel disc) only sets where the
 wheels stand and how big they are. In the lab, `Экземпляр` (and `?variant=`) steps the
 appearance key: paint and wheels change together.
@@ -314,9 +328,13 @@ appearance key: paint and wheels change together.
 | 2106 | 13.1k | 6.0k | 3.1k | 1.05k | 0.3k | 0.75k | 1.8k | 7.9k |
 | 2107 | 12.7k | 5.2k | 3.6k | 1.07k | 0.3k | 0.75k | 1.8k | 7.1k |
 | 2108 | 10.8k | 3.8k | 3.2k | 1.25k | 0.04k | 0.6k | 1.8k | 5.7k |
+| 2109 | 11.4k | 4.7k | 3.4k | 1.25k | 0.04k | 0.6k | 1.3k | 6.0k |
+| 21099 | 11.7k | 4.9k | 3.5k | 1.25k | 0.07k | 0.6k | 1.3k | 6.3k |
+| 2115 | 11.8k | 5.0k | 3.5k | 1.25k | 0.07k | 0.6k | 1.3k | 6.3k |
 
-Wheels are counted in the steel-cap style (the heaviest, about 450 per wheel). Lowest
-point of the body: 0.170 m, the factory ground clearance.
+Wheels are counted in the steel-cap style (the heaviest, about 450 per wheel); the 2109,
+21099 and 2115 rows count the kit's own plain wheel (336 per wheel) that the pack's sets
+replace. Lowest point of the body: 0.170 m, the factory ground clearance.
 
 ## Known gaps
 
@@ -329,6 +347,10 @@ point of the body: 0.170 m, the factory ground clearance.
 - The 2108's plastic bumper looks heavy. The 2103's arch chrome, the C-pillar vents of the
   classics and the 2105/2107 mirror sail are not modelled; the 2107's bonnet is not notched
   round its grille.
+- The Samaras' greenhouse is the 2108 drawing's, about 60 mm shallower relative to the body
+  than on the 21099 drawing. The 2115's boot spoiler with its high brake lamp, rear plate
+  recess, fog lamps and door mouldings are not modelled, and its head lamps keep the 2108's
+  trapezoids.
 - The 2105/2107 hubs are as drawn (0.635 / 3.048), 20–30 mm off the drawing's dimension
   line; the arches and doors are drawn round the drawn hubs.
 - No ink outline. That was the agreement; the reference has one.

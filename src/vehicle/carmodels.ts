@@ -974,7 +974,8 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   // 1214/1204 tracks, 150 under the subframe; 135/80R12 radial, 0.260 m free radius.
   cf_vaz1111:     { length: 3.200, width: 1.420, height: 1.400, clearance: 0.150, wheelbase: 2.180, frontTrack: 1.214, rearTrack: 1.204, wheelRadius: 0.260, tyreWidth: 0.135 },
   // Kit bodies: their siblings' factory figures (the same cars); the 2107 is the 4145 its
-  // dimensioned drawing and the period literature give.
+  // dimensioned drawing and the period literature give. The 2115 has no sibling: AvtoVAZ's
+  // 4330 × 1650 × 1402 (vaz.ru, drom.ru), 170 clearance, the 21099's wheelbase and tracks.
   kit_vaz2101:    { length: 4.073, width: 1.611, height: 1.382, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.349, rearTrack: 1.305, wheelRadius: 0.297, tyreWidth: 0.155 },
   kit_vaz2102:    { length: 4.059, width: 1.611, height: 1.458, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.297, tyreWidth: 0.165 },
   kit_vaz2103:    { length: 4.116, width: 1.611, height: 1.446, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288, tyreWidth: 0.165 },
@@ -983,6 +984,9 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   kit_vaz2106:    { length: 4.166, width: 1.611, height: 1.444, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288, tyreWidth: 0.165 },
   kit_vaz2107:    { length: 4.145, width: 1.620, height: 1.435, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288, tyreWidth: 0.165 },
   kit_vaz2108:    { length: 4.006, width: 1.650, height: 1.402, clearance: 0.170, wheelbase: 2.460, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.281, tyreWidth: 0.165 },
+  kit_vaz2109:    { length: 4.006, width: 1.650, height: 1.402, clearance: 0.160, wheelbase: 2.460, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.281, tyreWidth: 0.165 },
+  kit_vaz21099:   { length: 4.205, width: 1.650, height: 1.402, clearance: 0.160, wheelbase: 2.460, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.281, tyreWidth: 0.165 },
+  kit_vaz2115:    { length: 4.330, width: 1.650, height: 1.402, clearance: 0.170, wheelbase: 2.460, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.281, tyreWidth: 0.165 },
 };
 
 function factoryGeometry(id: string): FactoryGeometry {
@@ -1594,6 +1598,13 @@ const SOVIET_WHEEL_SET_POOL = [
   'sv_vaz21099',
 ] as const;
 
+/**
+ * The same sets with each design once: in the shared pool the 2104/2105/2106/2107 carry
+ * one wheel, the 2108/2109/21099 another and the 2101/2102 a third, so half its draws
+ * repeat a design. Each of the six designs is drawn equally here.
+ */
+const DISTINCT_SOVIET_WHEEL_SETS = ['sv_gaz21', 'sv_gaz24', 'sv_vaz2101', 'sv_vaz2103', 'sv_vaz2106', 'sv_vaz2108'] as const;
+
 function sovietWheelNodes(file: string): WheelNodeNames {
   const stem = file.slice(0, -4);
   const prefix = stem.startsWith('gz') ? `g${stem.slice(2)}` : stem.slice(2);
@@ -2162,7 +2173,8 @@ const ENTRIES: readonly Entry[] = [
 ];
 /**
  * Kit bodies (src/carkit), each on the running gear of the pack body it is modelled
- * on: the same engine, gearbox, springs and masses, only a different scene.
+ * on: the same engine, gearbox, springs and masses, only a different scene. A label
+ * names a kit car the pack has no body for.
  */
 const KIT_CARS: readonly Entry[] = (
   [
@@ -2174,14 +2186,18 @@ const KIT_CARS: readonly Entry[] = (
     ['kit_vaz2106', 'sv_vaz2106', 'vaz2106'],
     ['kit_vaz2107', 'sv_vaz2107', 'vaz2107'],
     ['kit_vaz2108', 'sv_vaz2108', 'vaz2108'],
-  ] as const
-).map(([id, sibling, kit]) => {
+    ['kit_vaz2109', 'sv_vaz2109', 'vaz2109'],
+    ['kit_vaz21099', 'sv_vaz21099', 'vaz21099'],
+    // The facelifted 21099: the 21099's running gear under it.
+    ['kit_vaz2115', 'sv_vaz21099', 'vaz2115', 'VAZ-2115 Samara'],
+  ] satisfies readonly (readonly [id: string, sibling: string, kit: string, label?: string])[]
+).map(([id, sibling, kit, label]) => {
   const base = SOVIET_CARS.find((e) => e.id === sibling);
   if (!base) throw new Error(`Kit car "${id}" names a missing sibling "${sibling}"`);
   return {
     ...base,
     id,
-    label: `${base.label} (kit)`,
+    label: `${label ?? base.label} (kit)`,
     dir: KIT,
     glb: kit,
     kit,
@@ -2191,8 +2207,9 @@ const KIT_CARS: readonly Entry[] = (
     clearGlass: true,
     paintStyle: 'solid-paint',
     wheelNodes: KIT_WHEEL_NODES,
-    // Shod from the Soviet pack, as its sibling is: rescaled to the kit's own tyre.
-    wheelSetPool: base.wheelSetPool ?? SOVIET_WHEEL_SET_POOL,
+    // Shod from the Soviet pack's sets, each design equally likely, rescaled to the kit's
+    // own tyre; a Niva-family sibling keeps its own off-road pool.
+    wheelSetPool: base.wheelSetPool === OFFROAD_WHEEL_SET_POOL ? OFFROAD_WHEEL_SET_POOL : DISTINCT_SOVIET_WHEEL_SETS,
     lights: KIT_LIGHTS,
     scale: 1,
   };

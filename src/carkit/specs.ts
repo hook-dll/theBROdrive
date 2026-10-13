@@ -14,11 +14,13 @@
  * A body family shares one shell (`KitBody`); each car is that shell moved to its own
  * bumper tip (`onBody`) and its own face, tail and trim. Face heights measured on a
  * drawing of a taller car are brought to the shell's drawing by the ratio of the two
- * cars' heights.
+ * cars' heights. The estates live in estates.ts and the Samara family (2108, 2109, 21099,
+ * 2115) in samaras.ts, each with its measurement report.
  */
 
 import { BODY_2102, BODY_2104, REAR_2102, REAR_2104 } from './estates';
 import { CABIN_2101, CABIN_2103, CABIN_2105, CABIN_2107 } from './interior';
+import { BODY_2108, BODY_2109, BODY_21099, BODY_2115, LOOK_2108, LOOK_2109, LOOK_21099, LOOK_2115 } from './samaras';
 import type { KitCarSpec, KitLook } from './spec';
 
 /** The shape of a car: everything a spec holds but its id, its looks and its cabin. */
@@ -45,10 +47,6 @@ function onBody(body: KitBody, ds: number, length: number): KitBody {
     flap: { ...body.flap, s0: body.flap.s0 + ds, s1: body.flap.s1 + ds },
   };
 }
-
-/** The Samara's deep moulded bumpers, the front one taller. */
-const SAMARA_FRONT_BUMPER = { kind: 'moulded', drop: 0.03, height: 0.26 } as const;
-const SAMARA_REAR_BUMPER = { kind: 'moulded', drop: 0.03, height: 0.22 } as const;
 
 /**
  * The Fiat 124 shell of the 2101, 2103 and 2106, in the 2106's frame (its bumpers stand
@@ -463,121 +461,6 @@ const LOOK_2107: KitLook = {
   },
 };
 
-/**
- * VAZ-2108, 3.826 mm/px: overhangs 785 / 761 over a 2460 wheelbase. A plastic bumper to
- * s 100, the face raked back to the bonnet's lip at s 164, 803 high; the bonnet climbs
- * to 937 at the cowl (s 1232); a raked screen to the roof's front at s 1760; roof
- * 1335 to s 3190; the tailgate's glass down to its knee at s 3930, 884 high, and a
- * short upright panel over the lamps. Sill 264, door bottom 302, belt 911 rising to
- * 922 over the quarter; door 1278 to 2552, its glass ending at 2460; quarter glass 2605
- * to 3570 at its foot and 3120 at its head.
- */
-const VAZ2108: KitCarSpec = {
-  id: 'vaz2108',
-  length: 4.006,
-  platform: 'samara',
-  stations: [
-    // The wing's top leans in more and more from the door to the lamps, whose outer edges
-    // it meets at the nose; the crease below it stays nearly full width all the way.
-    { s: 0.11, sill: 0.36, crease: 0.6, belt: 0.775, deck: 0.79, wSill: 0.775, wCrease: 0.785, wBelt: 0.69 },
-    { s: 0.17, sill: 0.33, crease: 0.6, belt: 0.8, deck: 0.815, wSill: 0.785, wCrease: 0.8, wBelt: 0.71 },
-    { s: 0.5, sill: 0.285, crease: 0.6, belt: 0.83, deck: 0.85, wSill: 0.795, wCrease: 0.815, wBelt: 0.75 },
-    { s: 1.232, sill: 0.264, crease: 0.63, belt: 0.9, deck: 0.92, wSill: 0.8, wCrease: 0.825, wBelt: 0.81 },
-    { s: 2.55, sill: 0.264, crease: 0.64, belt: 0.911, deck: 0.93, wSill: 0.8, wCrease: 0.825, wBelt: 0.81 },
-    { s: 3.6, sill: 0.28, crease: 0.64, belt: 0.92, deck: 0.94, wSill: 0.795, wCrease: 0.82, wBelt: 0.805 },
-    { s: 3.86, sill: 0.33, crease: 0.63, belt: 0.79, deck: 0.81, wSill: 0.78, wCrease: 0.81, wBelt: 0.79 },
-    { s: 3.95, sill: 0.36, crease: 0.62, belt: 0.75, deck: 0.77, wSill: 0.765, wCrease: 0.795, wBelt: 0.775 },
-  ],
-  shoulder: { inset: 0.025, rise: 0.015 },
-  cabin: {
-    columns: [
-      { s: 1.232, top: 1.76, upper: 'body' },
-      { s: 1.278, top: 1.8, upper: 'door1' },
-      { s: 1.303, top: 1.825, upper: 'door1', glass: 'drop' },
-      { s: 2.46, top: 2.46, upper: 'door1' },
-      { s: 2.552, top: 2.552, upper: 'body', lower: 'body' },
-      { s: 2.605, top: 2.605, upper: 'body', glass: 'fixed' },
-      { s: 3.57, top: 3.12, upper: 'body' },
-      { s: 3.93, top: 3.19 },
-    ],
-    rail: 1.295,
-    railHalf: 0.64,
-    crown: 0.025,
-    railInset: 0.035,
-    railRise: 0.015,
-    glassBottom: 0.012,
-    glassTop: 0.04,
-    screenBottom: 0.025,
-    screenHeader: 0.045,
-    rearBottom: 0.025,
-    rearHeader: 0.05,
-    rearKnee: { s: 3.9, y: 0.884 },
-    pillar: 0.07,
-  },
-  wheels: {
-    front: 0.785,
-    rear: 3.245,
-    radius: 0.281,
-    width: 0.165,
-    frontHalfTrack: 0.7,
-    rearHalfTrack: 0.685,
-    arch: 1.28,
-  },
-  doorBottom: 0.302,
-  bonnetFront: 0.17,
-  flap: { s0: 3.62, s1: 3.73, y0: 0.73, y1: 0.83 },
-  look: {
-    label: 'VAZ-2108',
-    upholstery: 0x3d3f44,
-    dash: 0x202224,
-    headrests: true,
-    brightwork: 'black',
-    sill: null,
-    waist: null,
-    repeater: null,
-    // Rectangular lamps leaning in at their outer edges, standing on the bumper, the
-    // indicators their outer cells; no grille: a body-colour panel between the lamps with
-    // two rows of three dark slots.
-    front: {
-      bumper: SAMARA_FRONT_BUMPER,
-      items: [
-        // Front view (4.63 mm/px from the 1750 width): the slotted panel runs to ±0.34, the unit
-        // to ±0.69 with the indicator its outer 70 mm; the outer edge leans in at the top.
-        { kind: 'lens', role: 'head', x: { from: { centre: 0.36 }, to: { centre: 0.62 } }, y: { from: ['bumperTop', 0.015], to: ['deck', -0.025] }, depth: 0.01, proud: 0.012, slant: { outer: 0.035, inner: 0 } },
-        { kind: 'lens', role: 'blinker', x: { from: { centre: 0.625 }, to: { centre: 0.69 } }, y: { from: ['bumperTop', 0.015], to: ['deck', -0.025] }, depth: 0.01, proud: 0.012, slant: { outer: 0.04, inner: 0.035 } },
-        // Dark slots with a body-colour bar across their middle...
-        {
-          kind: 'grille',
-          x: { centre: 0.32 },
-          y: { from: ['bumperTop', 0.025], to: ['deck', -0.035] },
-          back: true,
-          bars: { dir: 'horizontal', count: 1, finish: 'paint', margin: 0, width: 0.045, depth: 0.03, proud: 0.03 },
-        },
-        // ...and two body-colour posts splitting each row in three, edges included.
-        {
-          kind: 'grille',
-          x: { centre: 0.32 },
-          y: { from: ['bumperTop', 0.025], to: ['deck', -0.035] },
-          back: false,
-          bars: { dir: 'vertical', count: 4, finish: 'paint', margin: 0.012, width: 0.024, depth: 0.03, proud: 0.03 },
-        },
-      ],
-    },
-    // Tall units standing on the bumper.
-    rear: {
-      bumper: SAMARA_REAR_BUMPER,
-      items: [
-        {
-          kind: 'cluster',
-          x: { from: { inset: 0.035 }, to: { inset: 0.42 } },
-          y: { from: ['bumperTop', 0.015], to: ['belt', -0.02] },
-          columns: [['blinker'], ['tail', 'brake'], ['reverse', 'inert']],
-        },
-      ],
-    },
-  },
-};
-
 export const KIT_SPECS: Readonly<Record<string, KitCarSpec>> = {
   vaz2101: { id: 'vaz2101', ...onBody(BODY_124, -0.045, 4.073), look: LOOK_2101, cabinLayout: CABIN_2101 },
   // The estates' rear bench stands where the saloons' does, not off their longer tail.
@@ -597,5 +480,9 @@ export const KIT_SPECS: Readonly<Record<string, KitCarSpec>> = {
   vaz2105: { id: 'vaz2105', ...BODY_05, look: LOOK_2105, cabinLayout: CABIN_2105 },
   vaz2106: { id: 'vaz2106', ...BODY_124, look: LOOK_2106 },
   vaz2107: { id: 'vaz2107', ...onBody(BODY_05, 0.012, 4.145), look: LOOK_2107, cabinLayout: CABIN_2107 },
-  vaz2108: VAZ2108,
+  vaz2108: { id: 'vaz2108', ...BODY_2108, look: LOOK_2108 },
+  vaz2109: { id: 'vaz2109', ...BODY_2109, look: LOOK_2109 },
+  vaz21099: { id: 'vaz21099', ...BODY_21099, look: LOOK_21099 },
+  // The 2115's longer front bumper moves the 21099-frame body 45 mm back from its tip.
+  vaz2115: { id: 'vaz2115', ...onBody(BODY_2115, 0.045, 4.33), look: LOOK_2115 },
 };

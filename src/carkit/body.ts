@@ -30,6 +30,8 @@ export const DOOR_THICKNESS = 0.075;
 const LID_THICKNESS = 0.035;
 /** How far a pane sits behind its frame. */
 const GLASS_INSET = 0.012;
+/** Width of the wall a notched deck (`TubStation.notch`) rises in, just inside the notch. */
+const NOTCH_WALL = 0.025;
 
 export const SHELL_COLOURS = {
   dark: 0x18191a,
@@ -71,6 +73,8 @@ export class BodyFrame {
   readonly zNose: number;
   readonly cowl: number;
   readonly rearBase: number;
+  /** Some station carries a `notch`: the lid's cut line and the deck's rows follow it. */
+  private readonly notched: boolean;
 
   constructor(spec: KitCarSpec) {
     this.spec = spec;
@@ -78,6 +82,7 @@ export class BodyFrame {
     const cols = spec.cabin.columns;
     this.cowl = cols[0]!.s;
     this.rearBase = cols[cols.length - 1]!.s;
+    this.notched = spec.stations.some((st) => st.notch !== undefined);
   }
 
   /** Car-frame Z of a position along the car. */
@@ -87,7 +92,7 @@ export class BodyFrame {
 
   station(s: number): TubStation {
     const st = this.spec.stations;
-    const pick = (key: Exclude<keyof TubStation, 'flat'>): number => table(st.map((x) => [x.s, x[key]] as const), s);
+    const pick = (key: Exclude<keyof TubStation, 'flat' | 'notch'>): number => table(st.map((x) => [x.s, x[key]] as const), s);
     return {
       s,
       sill: pick('sill'),
@@ -132,7 +137,9 @@ export class BodyFrame {
   /**
    * Deck height at half-width x: a parabolic crown from the edge to the centre line, or,
    * where the station is `flat`, level out to the pillar row and straight up to the edge
-   * from there (an estate's tailgate sill with its upright sides).
+   * from there (an estate's tailgate sill with its upright sides), or, where it has a
+   * `notch`, level out to the notch's wall and at the edge's height beyond it (a boot lid
+   * coming down between lamp corners).
    */
   deckY(s: number, x: number): number {
     const sec = this.section(s);
@@ -140,16 +147,40 @@ export class BodyFrame {
     const t = Math.min(1, Math.abs(x) / edge[0]);
     const crowned = lerp(sec.st.deck, edge[1], t * t);
     const flat = sec.st.flat ?? 0;
-    if (flat <= 0) return crowned;
-    const pillarX = edge[0] - this.spec.cabin.pillar;
-    const u = Math.min(1, Math.max(0, (Math.abs(x) - pillarX) / (edge[0] - pillarX)));
-    return lerp(crowned, lerp(sec.st.deck, edge[1], u), flat);
+    let level = crowned;
+    if (flat > 0) {
+      const pillarX = edge[0] - this.spec.cabin.pillar;
+      const u = Math.min(1, Math.max(0, (Math.abs(x) - pillarX) / (edge[0] - pillarX)));
+      level = lerp(crowned, lerp(sec.st.deck, edge[1], u), flat);
+    }
+    const n = this.notchWeight(s);
+    if (n <= 0) return level;
+    // Level out to the wall, up it to the corners' top, level again out to the edge.
+    const notch = this.lidX(s);
+    const u = Math.min(1, Math.max(0, (Math.abs(x) - (notch - NOTCH_WALL)) / NOTCH_WALL));
+    return lerp(level, lerp(sec.st.deck, edge[1], u), n);
   }
 
   /** The tub's deck rows at s: fractions of the deck edge's half width. */
   deckFracs(s: number): number[] {
     const edge = this.section(s).r4[0];
-    return [0, 0.5, (edge - this.spec.cabin.pillar) / edge, 1];
+    if (!this.notched) return [0, 0.5, (edge - this.spec.cabin.pillar) / edge, 1];
+    // On a notched station the half row moves out to the wall's foot.
+    const lid = this.lidX(s);
+    return [0, lerp(0.5, (lid - NOTCH_WALL) / edge, this.notchWeight(s)), lid / edge, 1];
+  }
+
+  /** Half width the boot lid or tailgate is cut along at s: the pillar row, or the stations' `notch`. */
+  lidX(s: number): number {
+    const pillar = this.spec.cabin.pillar;
+    if (!this.notched) return this.section(s).r4[0] - pillar;
+    return table(this.spec.stations.map((st) => [st.s, st.notch ?? st.wBelt - this.spec.shoulder.inset - pillar] as const), s);
+  }
+
+  /** 0 away from notched stations, 1 on one, linear between. */
+  private notchWeight(s: number): number {
+    if (!this.notched) return 0;
+    return table(this.spec.stations.map((st) => [st.s, st.notch === undefined ? 0 : 1] as const), s);
   }
 
   /** Arch top at s for either axle, or -Infinity outside both arches. */

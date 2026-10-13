@@ -134,11 +134,6 @@ function ceiling(frame: BodyFrame, s0: number, s1: number, x: number): number {
   return y - LID_ROOM;
 }
 
-/** Half width of a lid's edge at s: the deck row the bonnet or boot lid is cut along. */
-function lidEdge(frame: BodyFrame, s: number): number {
-  return frame.section(s).r4[0] - frame.spec.cabin.pillar;
-}
-
 /** Half-section rings sampled along s, mirrored to `side`, joined by quads. */
 function loft(b: PartBuilder, slot: KitSlot, frame: BodyFrame, ss: readonly number[], side: number, ring: (s: number) => Pt[]): void {
   let prev: Vec3[] | undefined;
@@ -233,7 +228,7 @@ function coil(b: PartBuilder, base: Vec3, height: number, radius: number, turns:
  * its foot when `rail`.
  */
 function wingWall(frame: BodyFrame, s: number, inner: number, shelf: number, floor: number, rail: boolean): Pt[] {
-  const x = lidEdge(frame, s) + JAMB_STEP;
+  const x = frame.lidX(s) + JAMB_STEP;
   const top = Math.max(frame.deckY(s, x) - LID_ROOM, shelf + 0.02);
   const pts: Pt[] = [[x, top], [x, shelf], [inner, shelf]];
   if (rail) pts.push([inner, floor + RAIL_H], [inner - RAIL_W, floor + RAIL_H], [inner - RAIL_W, floor]);
@@ -244,7 +239,7 @@ function wingWall(frame: BodyFrame, s: number, inner: number, shelf: number, flo
 /** A painted wall across the car at s, filling the wing walls' section up to the lid. */
 function bulkhead(b: PartBuilder, frame: BodyFrame, s: number, inner: number, shelf: number, floor: number): void {
   const z = frame.z(s);
-  const edge = lidEdge(frame, s) + JAMB_STEP;
+  const edge = frame.lidX(s) + JAMB_STEP;
   const top = (x: number): number => Math.max(frame.deckY(s, x) - LID_ROOM, shelf + 0.02);
   const xs = [inner, inner / 2, 0, -inner / 2, -inner];
   b.poly('paint', [[-inner, floor, z], [inner, floor, z], ...xs.map((x): Vec3 => [x, top(x), z])]);
@@ -407,10 +402,10 @@ function buildEngineBay(frame: BodyFrame, b: PartBuilder, classic: boolean): Bay
   for (const side of [1, -1]) loft(b, 'paint', frame, ss, side, (s) => wingWall(frame, s, inner, shelf, floorY(frame, s), true));
   bulkhead(b, frame, cowl, inner, shelf, floorY(frame, cowl));
   // Scuttle: the plenum under the screen's foot, a black grille on top.
-  const scuttleTop = ceiling(frame, cowl - 0.1, cowl, lidEdge(frame, cowl));
+  const scuttleTop = ceiling(frame, cowl - 0.1, cowl, frame.lidX(cowl));
   const scuttle: Pt[] = [[cowl, scuttleTop - 0.09], [cowl, scuttleTop], [cowl - 0.1, scuttleTop - 0.005], [cowl - 0.1, scuttleTop - 0.05]];
   b.color(COLOURS.black);
-  across(b, frame, 'trim', scuttle, -lidEdge(frame, cowl), lidEdge(frame, cowl));
+  across(b, frame, 'trim', scuttle, -frame.lidX(cowl), frame.lidX(cowl));
 
   // ---- radiator support: slam panel, posts and lower member framing the radiator ----
   const radHalf = 0.29;
@@ -653,7 +648,8 @@ function buildSaloonBoot(frame: BodyFrame, b: PartBuilder, classic: boolean): vo
   const spec = frame.spec;
   const w = spec.wheels;
   const s0 = frame.rearBase + 0.01;
-  const s1 = spec.bootEnd! + 0.008;
+  // Under the lid's rear edge, but inside the tail face where the lid comes down to it.
+  const s1 = Math.min(spec.bootEnd! + 0.008, spec.stations[spec.stations.length - 1]!.s - 0.005);
   const inner = frame.wellX(w.rear) - WELL_GAP;
   const shelf = w.radius * (1 + w.arch) + WELL_GAP;
   // Flat floor at the highest point of the shell's floor under it.
@@ -695,7 +691,7 @@ function buildSaloonBoot(frame: BodyFrame, b: PartBuilder, classic: boolean): vo
   const t0 = s0 + 0.03;
   const t1 = Math.min(s1 - 0.05, s0 + 0.45);
   let edge = Infinity;
-  for (const s of stationsBetween(frame, t0, t1)) edge = Math.min(edge, lidEdge(frame, s));
+  for (const s of stationsBetween(frame, t0, t1)) edge = Math.min(edge, frame.lidX(s));
   const tankTop = Math.min(shelf + 0.2, ceiling(frame, t0, t1, edge) - 0.01);
   b.color(COLOURS.fuelTank);
   bevelS(b, frame, 'trim', [-edge, shelf, t0], [-(inner + 0.004), tankTop, t1], 0.03);
