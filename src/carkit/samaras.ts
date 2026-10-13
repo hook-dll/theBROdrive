@@ -191,10 +191,14 @@ const SALOON_BOOT: readonly TubStation[] = [
 
 /**
  * VAZ-21099 (vaz_21099.jpg, 4.036 mm/px from the drawn 2460 wheelbase; heights by the
- * 2108's belt and sill): the 2109's front door and B pillar, a rear door whose frame
- * rakes back further, a small quarter light, a raked back light from the roof's end at
- * 3.14 to its foot at 3.58, 0.995 high, and a boot lid falling to 0.935 at its trailing
- * edge (4.10) and down its short rear face to the lamps' top. Bumper tip 4.205.
+ * 2108's belt and sill; photo "2003 VAZ 21099 blue rear"): the 2109's front door and B
+ * pillar; a rear door whose drop glass ends at a raked channel with a fixed glass behind
+ * it, its frame's rear edge running parallel to the back light, so the body's C pillar
+ * between them is of even width; below the belt the door ends at 3.12, in line with the
+ * channel's foot, and its frame reaches back over the wing above it. A raked back light
+ * from the roof's end at 3.14 to its foot at 3.58, 0.995 high, and a boot lid falling to
+ * 0.935 at its trailing edge (4.10) and down its short rear face to the lamps' top.
+ * Bumper tip 4.205.
  */
 export const BODY_21099: KitBody = {
   ...BODY_2108,
@@ -211,11 +215,14 @@ export const BODY_21099: KitBody = {
     columns: [
       ...FRONT_COLUMNS,
       ...B_PILLAR,
-      { s: 3.011, top: 2.757, upper: 'door2' },
-      { s: 3.12, top: 2.849, upper: 'body', lower: 'body' },
-      { s: 3.14, top: 2.946, upper: 'body', glass: 'fixed' },
-      // Its rear edge runs parallel to the back light, a C pillar of even width behind it.
-      { s: 3.44, top: 3.0, upper: 'body' },
+      // The drop glass's raked rear edge, then the channel to the fixed glass.
+      { s: 3.07, top: 2.8, upper: 'door2' },
+      { s: 3.1, top: 2.83, upper: 'door2', glass: 'fixed' },
+      // The door's shut line below the belt; above it the fixed glass goes on.
+      { s: 3.12, top: 2.84, upper: 'door2', glass: 'fixed', lower: 'body' },
+      // The door frame's rear edge, parallel to the back light 0.2 ahead of it.
+      { s: 3.36, top: 2.92, upper: 'door2', lower: 'body' },
+      { s: 3.385, top: 2.945, upper: 'body' },
       { s: 3.58, top: 3.14 },
     ],
     rearKnee: undefined,

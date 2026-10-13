@@ -329,8 +329,8 @@ appearance key: paint and wheels change together.
 | 2107 | 12.7k | 5.2k | 3.6k | 1.07k | 0.3k | 0.75k | 1.8k | 7.1k |
 | 2108 | 10.8k | 3.8k | 3.2k | 1.25k | 0.04k | 0.6k | 1.8k | 5.7k |
 | 2109 | 11.4k | 4.7k | 3.4k | 1.25k | 0.04k | 0.6k | 1.3k | 6.0k |
-| 21099 | 11.7k | 4.9k | 3.5k | 1.25k | 0.07k | 0.6k | 1.3k | 6.3k |
-| 2115 | 11.8k | 5.0k | 3.5k | 1.25k | 0.07k | 0.6k | 1.3k | 6.3k |
+| 21099 | 11.8k | 5.0k | 3.5k | 1.25k | 0.07k | 0.6k | 1.3k | 6.4k |
+| 2115 | 11.9k | 5.1k | 3.5k | 1.25k | 0.07k | 0.6k | 1.3k | 6.4k |
 
 Wheels are counted in the steel-cap style (the heaviest, about 450 per wheel); the 2109,
 21099 and 2115 rows count the kit's own plain wheel (336 per wheel) that the pack's sets

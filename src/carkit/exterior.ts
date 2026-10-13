@@ -475,10 +475,12 @@ function buildDoorHardware(ctx: KitContext): void {
     const front = owner.startsWith('door_f');
     const b = new PartBuilder();
     // The door's rear edge at the belt, from its pivot (front edge) and the cabin columns.
+    // A rear door's is its last strip below the belt: its frame may reach further back
+    // above the belt (the 21099's, round its fixed glass).
     const cols = spec.cabin.columns;
     const rearS = front
       ? cols.find((c) => c.lower === 'door1' && c.upper === 'body')?.s ?? cols.filter((c) => c.upper === 'door1').at(-1)!.s
-      : cols.filter((c) => c.upper === 'door2').at(-1)!.s;
+      : cols.filter((c) => (c.lower ?? c.upper) === 'door2').at(-1)!.s;
     const handleS = rearS - 0.13;
     const beltY = frame.station(handleS).belt;
     const y = beltY - (chrome ? 0.07 : 0.09);
