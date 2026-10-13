@@ -65,7 +65,9 @@ export const BODY_2102: KitBody = {
     rearHeader: 0.1,
     // fold at the belt strip, glass base on the outline 3.833–3.84 / 0.845–0.85 raw [D];
     // the glass ends ~0.05 higher [P]; the lower panel's top stands 85 mm further back [D]
-    rearKnee: { s: 3.84, y: 0.86 },
+    // Kept upright over the sill so the tailgate lies flush with the lamp corners beside
+    // it (the drawn panel leans ~12° under a ledge; flush corners read truer at this scale).
+    rearKnee: { s: 4.0, y: 0.86 },
     pillar: 0.07, // BODY_124
   },
   wheels: { front: 0.648, rear: 3.072, radius: 0.288, width: 0.165, frontHalfTrack: 0.6825, rearHalfTrack: 0.6605, arch: 1.13 }, // BODY_124; tracks 1365/1321 [D]
@@ -153,7 +155,8 @@ export const BODY_2104: KitBody = {
     // tailgate glass top 1.30–1.33 (rear view) against rail + crown 1.423 [D]
     rearHeader: 0.11,
     // fold at the lip under the glass [D]; the glass itself ends at 0.89–0.93 [D rear][P]
-    rearKnee: { s: 3.8, y: 0.85 },
+    // Upright over the sill, flush with the lamp corners (see the 2102).
+    rearKnee: { s: 3.99, y: 0.85 },
     pillar: 0.07, // BODY_05
   },
   wheels: { front: 0.635, rear: 3.048, radius: 0.288, width: 0.165, frontHalfTrack: 0.6825, rearHalfTrack: 0.6605, arch: 1.15 }, // BODY_05

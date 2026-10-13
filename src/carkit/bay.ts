@@ -719,7 +719,8 @@ function buildHatchBoot(frame: BodyFrame, b: PartBuilder): void {
   const w = spec.wheels;
   const st = spec.stations;
   const s0 = loadSpaceStart(frame);
-  const s1 = st[st.length - 1]!.s - 0.008;
+  // Inside the closed tailgate, which stands on the rear base, not out at the tail.
+  const s1 = Math.min(st[st.length - 1]!.s - 0.008, frame.rearBase - 0.03);
   const inner = frame.wellX(w.rear) - WELL_GAP;
   // Under the tailgate's sill, but never under the floor pan: an estate's sill is low.
   const floor = Math.max(frame.deckY(frame.rearBase, 0) - HATCH_SILL_DROP, frame.station(frame.rearBase).sill + LOAD_FLOOR_RISE);

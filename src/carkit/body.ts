@@ -13,6 +13,7 @@
  *  - sets every pane back from its frame on a dark rubber return.
  */
 
+import * as THREE from 'three';
 import { PartBuilder, lerp, table, type Vec3 } from './builder';
 import type { CabinColumn, KitCarSpec, TubStation } from './spec';
 
@@ -487,7 +488,10 @@ export function buildShell(frame: BodyFrame): ShellResult {
     for (const [x, y] of half) ring.push(P(x, y, s));
     ring.push(P(0, sec.st.deck, s));
     for (let i = half.length - 1; i >= 0; i--) ring.push(P(-half[i]![0], half[i]![1], s));
-    shell.face(ring, 'body', 'paint');
+    // An end face is concave where an estate's deck dips to its tailgate sill: a fan would
+    // span the notch, so the face is cut into triangles that keep to its outline.
+    const tris = THREE.ShapeUtils.triangulateShape(ring.map((p) => new THREE.Vector2(p[0], p[1])), []);
+    for (const [a, b, c] of tris) shell.face([ring[a]!, ring[b]!, ring[c]!], 'body', 'paint');
   }
 
   // ---- underbody ----
@@ -551,9 +555,16 @@ export function buildShell(frame: BodyFrame): ShellResult {
       const sec = frame.section(column.s);
       const b: Vec3 = P(side * sec.r4[0], sec.r4[1], column.s);
       const t: Vec3 = P(side * cabin.railHalf, cabin.rail, column.top);
-      const k = along(b, t, b[1] + cabin.glassBottom);
-      const q = along(b, t, t[1] - cabin.glassTop);
       const last = i === cabin.columns.length - 1;
+      let k = along(b, t, b[1] + cabin.glassBottom);
+      let q = along(b, t, t[1] - cabin.glassTop);
+      if (last && cabin.rearKnee) {
+        // The rear corner folds where the tailgate does, so the D pillar lies flush with
+        // the tailgate's glass instead of standing out behind it.
+        const kt = Math.max(0, (cabin.rearKnee.y - b[1]) / (t[1] - b[1]));
+        k = [lerp(b[0], t[0], kt), lerp(b[1], t[1], kt), frame.z(cabin.rearKnee.s)];
+        q = along(k, t, t[1] - cabin.glassTop);
+      }
       const inset = i === 0 ? cabin.railInset : last ? -cabin.railInset : 0;
       const u: Vec3 = P(side * (cabin.railHalf - cabin.railInset), cabin.rail + cabin.railRise, column.top + inset);
       ring.push({ b, k, q, t, u, kind: 'side', frac: 1, column });
