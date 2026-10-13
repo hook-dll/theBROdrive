@@ -157,8 +157,8 @@ export interface KitLook {
   readonly repeater: { readonly s0: number; readonly s1: number; readonly y0: number; readonly y1: number } | null;
 }
 
-/** Surface finishes trim is made in: bright metal, black plastic, bare aluminium, rubber. */
-export type Finish = 'chrome' | 'black' | 'alloy' | 'rubber';
+/** Surface finishes trim is made in: bright metal, black plastic, bare aluminium, rubber, or the body's paint. */
+export type Finish = 'chrome' | 'black' | 'alloy' | 'rubber' | 'paint';
 
 /** One end of the car: its bumper and what stands on its face. */
 export interface FaceLook {

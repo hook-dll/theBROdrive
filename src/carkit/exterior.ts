@@ -119,6 +119,9 @@ function finishSlot(finish: Finish | 'dark'): { slot: KitSlot; color: number } {
       return { slot: 'trim', color: RUBBER };
     case 'black':
       return { slot: 'trim', color: BLACK };
+    case 'paint':
+      // Body colour: drawn in the paint slot, so it takes the car's colour, dust and scratches.
+      return { slot: 'paint', color: 0xffffff };
     case 'dark':
       return { slot: 'trim', color: GRILLE_DARK };
   }
@@ -349,7 +352,8 @@ function buildBumpers(ctx: KitContext, b: PartBuilder): void {
       // Moulded plastic bumper: deep, wrapping the corners, its face bevelled top and
       // bottom and its foot drawn in, with a moulding groove along it.
       const depth = reach + 0.01;
-      const half = Math.min(sec.r2[0] + 0.015, widest - depth * 0.35);
+      // As wide as the face at its widest, which on a leaning nose is low down.
+      const half = Math.min(Math.max(sec.r1[0], sec.r2[0]) + 0.03, widest - depth * 0.35);
       b.color(0x232427);
       sweep(b, 'trim', bumperPath(half, zFace - end * 0.01, end, depth, 0, 0.2), [
         [0, y0 + 0.02],

@@ -472,8 +472,10 @@ const VAZ2108: KitCarSpec = {
   length: 4.006,
   platform: 'samara',
   stations: [
-    { s: 0.11, sill: 0.36, crease: 0.56, belt: 0.775, deck: 0.79, wSill: 0.76, wCrease: 0.79, wBelt: 0.775 },
-    { s: 0.17, sill: 0.33, crease: 0.58, belt: 0.8, deck: 0.815, wSill: 0.78, wCrease: 0.805, wBelt: 0.79 },
+    // The face's corners lean in over the bumper as the lamps' outer edges do: widest at the
+    // bumper's top (crease), 45 mm in at the bonnet's lip.
+    { s: 0.11, sill: 0.36, crease: 0.6, belt: 0.775, deck: 0.79, wSill: 0.76, wCrease: 0.76, wBelt: 0.69 },
+    { s: 0.17, sill: 0.33, crease: 0.6, belt: 0.8, deck: 0.815, wSill: 0.78, wCrease: 0.78, wBelt: 0.75 },
     { s: 0.5, sill: 0.285, crease: 0.6, belt: 0.83, deck: 0.85, wSill: 0.795, wCrease: 0.82, wBelt: 0.805 },
     { s: 1.232, sill: 0.264, crease: 0.63, belt: 0.9, deck: 0.92, wSill: 0.8, wCrease: 0.825, wBelt: 0.81 },
     { s: 2.55, sill: 0.264, crease: 0.64, belt: 0.911, deck: 0.93, wSill: 0.8, wCrease: 0.825, wBelt: 0.81 },
@@ -528,22 +530,31 @@ const VAZ2108: KitCarSpec = {
     sill: null,
     waist: null,
     repeater: null,
-    // Tall rectangular lamps standing on the bumper, indicators at their outer ends, a
-    // black panel with three slots between them under the bonnet's lip.
+    // Rectangular lamps leaning in at their outer edges, standing on the bumper, the
+    // indicators their outer cells; no grille: a body-colour panel between the lamps with
+    // two rows of three dark slots.
     front: {
       bumper: SAMARA_FRONT_BUMPER,
       items: [
-        { kind: 'panel', x: { inset: 0.03 }, y: { from: ['bumperTop', 0.003], to: ['deck', -0.013] }, finish: 'black', proud: 0.006 },
-        // Front view (4.63 mm/px from the 1750 width): the grille panel runs to ±0.34, the unit
+        // Front view (4.63 mm/px from the 1750 width): the slotted panel runs to ±0.34, the unit
         // to ±0.69 with the indicator its outer 70 mm; the outer edge leans in at the top.
         { kind: 'lens', role: 'head', x: { from: { centre: 0.36 }, to: { centre: 0.62 } }, y: { from: ['bumperTop', 0.015], to: ['deck', -0.025] }, depth: 0.01, proud: 0.012, slant: { outer: 0.035, inner: 0 } },
         { kind: 'lens', role: 'blinker', x: { from: { centre: 0.625 }, to: { centre: 0.69 } }, y: { from: ['bumperTop', 0.015], to: ['deck', -0.025] }, depth: 0.01, proud: 0.012, slant: { outer: 0.04, inner: 0.035 } },
+        // Dark slots with a body-colour bar across their middle...
         {
           kind: 'grille',
-          x: { centre: 0.3 },
-          y: { from: ['bumperTop', 0.015], to: ['deck', -0.025] },
+          x: { centre: 0.32 },
+          y: { from: ['bumperTop', 0.025], to: ['deck', -0.035] },
+          back: true,
+          bars: { dir: 'horizontal', count: 1, finish: 'paint', margin: 0, width: 0.045, depth: 0.03, proud: 0.03 },
+        },
+        // ...and two body-colour posts splitting each row in three, edges included.
+        {
+          kind: 'grille',
+          x: { centre: 0.32 },
+          y: { from: ['bumperTop', 0.025], to: ['deck', -0.035] },
           back: false,
-          bars: { dir: 'horizontal', count: 3, finish: 'dark', margin: 0.02, width: 0.014, depth: 0.01, proud: 0.016 },
+          bars: { dir: 'vertical', count: 4, finish: 'paint', margin: 0.012, width: 0.024, depth: 0.03, proud: 0.03 },
         },
       ],
     },
