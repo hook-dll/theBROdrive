@@ -17,7 +17,8 @@
  *    of the tyres;
  *  - the shell's dark floor at sill height closes every space from below, so what is
  *    meant to be seen from under the car hangs below it, and the lowest of it (the
- *    classic's differential, both cars' silencer) stands at exactly CLEARANCE.
+ *    classic's differential, the Samara's fuel tank) stands at exactly CLEARANCE; the
+ *    silencers are tucked up SILENCER_TUCK above it.
  */
 
 import * as THREE from 'three';
@@ -28,6 +29,8 @@ import { loadSpaceStart } from './interior';
 
 /** Ground clearance of the lowest part under the car: the factory figure the body was fitted to. */
 const CLEARANCE = 0.17;
+/** The silencer hangs this far above the lowest point, tucked up under the floor. */
+const SILENCER_TUCK = 0.025;
 /** Room under a lid's deck line: its 0.035 inner skin plus a hair, so nothing shows through. */
 const LID_ROOM = 0.045;
 /** Inner panels stand this far inside the wheel wells' walls. */
@@ -669,31 +672,24 @@ function buildSaloonBoot(frame: BodyFrame, b: PartBuilder, classic: boolean): vo
     return;
   }
 
-  // Spare: upright against the right side, as far forward as the bulkhead allows.
+  // Spare: lying flat in the right front corner of the floor. It is taller than the boot
+  // is deep, so upright it needed a well that hung under the car as a painted box.
   const R = w.radius;
   const half = w.width / 2;
-  const spareX = -(inner - half - 0.012);
+  const spareX = -(inner - R - 0.01);
   const spareS = s0 + 0.02 + R;
-  const spareTop = ceiling(frame, spareS - R, spareS + R, inner) - 0.01;
-  const spareY = Math.max(CLEARANCE + 0.008 + R, spareTop - R);
-  b.push(new THREE.Matrix4().makeTranslation(spareX, spareY, frame.z(spareS)).multiply(new THREE.Matrix4().makeRotationZ(Math.PI / 2)));
+  b.push(new THREE.Matrix4().makeTranslation(spareX, floor + half + 0.004, frame.z(spareS)));
   b.push(new THREE.Matrix4().makeScale(1, half / 0.07, 1));
   b.color(COLOURS.black).torusY('tyre', R - 0.068, 0.068, 12, 6);
   b.pop();
   b.color(COLOURS.spareRim).cylinderY('trim', [0, 0, 0], R * 0.62, half * 0.7, 10);
   b.cylinderY('chrome', [0, half * 0.7, 0], 0.05, 0.012, 6);
   b.pop();
-  // Its well: open at the floor, closed below it.
-  const wellIn = spareX + half + 0.012;
-  const well0 = spareS - R - 0.01;
-  const well1 = spareS + R + 0.01;
-  boxS(b, frame, 'paint', [-inner, spareY - R - 0.006, well0], [wellIn, floor, well1], 0b111011);
-  floorQuad(wellIn, inner, s0, s1);
-  floorQuad(-inner, wellIn, s0, well0);
-  floorQuad(-inner, wellIn, well1, s1);
-  // A rubber mat over the empty middle, where the luggage stands.
+  floorQuad(-inner, inner, s0, s1);
+  // A rubber mat over the empty rest, where the luggage stands.
+  const matIn = spareX + R + 0.03;
   b.color(COLOURS.black);
-  b.quad('trim', at(frame, wellIn + 0.03, floor + 0.004, s0 + 0.03), at(frame, inner - 0.03, floor + 0.004, s0 + 0.03), at(frame, inner - 0.03, floor + 0.004, s1 - 0.03), at(frame, wellIn + 0.03, floor + 0.004, s1 - 0.03));
+  b.quad('trim', at(frame, matIn, floor + 0.004, s0 + 0.03), at(frame, inner - 0.03, floor + 0.004, s0 + 0.03), at(frame, inner - 0.03, floor + 0.004, s1 - 0.03), at(frame, matIn, floor + 0.004, s1 - 0.03));
 
   // Fuel tank on the right wing's shelf over the arch, its neck out to the filler.
   const t0 = s0 + 0.03;
@@ -775,7 +771,7 @@ function exhaust(frame: BodyFrame, b: PartBuilder, down: readonly Vec3[], x: num
   tube(b, 'trim', [...down, at(frame, x, y, resonator[0])], 0.022, 6);
   bevelS(b, frame, 'trim', [x - 0.075, CLEARANCE + 0.006, resonator[0]], [x + 0.075, y + 0.04, resonator[1]], 0.025);
   tube(b, 'trim', [at(frame, x, y, resonator[1]), at(frame, x, y, silencer[0] - 0.25), at(frame, silencerX, y, silencer[0])], 0.022, 6);
-  bevelS(b, frame, 'trim', [silencerX - 0.13, CLEARANCE, silencer[0]], [silencerX + 0.13, CLEARANCE + 0.085, silencer[1]], 0.035);
+  bevelS(b, frame, 'trim', [silencerX - 0.13, CLEARANCE + SILENCER_TUCK, silencer[0]], [silencerX + 0.13, CLEARANCE + SILENCER_TUCK + 0.085, silencer[1]], 0.035);
   const tail = spec.stations[spec.stations.length - 1]!.s;
   tube(b, 'trim', [at(frame, silencerX - 0.03, y + 0.007, silencer[1]), at(frame, silencerX - 0.08, y + 0.03, tail - 0.05), at(frame, -0.45, y + 0.045, spec.length - 0.03)], 0.022, 6);
 }
@@ -885,9 +881,9 @@ function samaraChassis(frame: BodyFrame, b: PartBuilder, route: BayRoute): void 
   const t1 = w.rear - 0.5;
   const tf = Math.min(floorY(frame, t0), floorY(frame, t1));
   b.color(COLOURS.fuelTank);
-  bevelS(b, frame, 'trim', [-0.45, CLEARANCE + 0.03, t0], [-0.04, tf - 0.002, t1], 0.03);
+  bevelS(b, frame, 'trim', [-0.45, CLEARANCE, t0], [-0.04, tf - 0.002, t1], 0.03);
   b.color(COLOURS.underseal);
-  for (const s of [t0 + 0.07, t1 - 0.07]) boxS(b, frame, 'trim', [-0.47, CLEARANCE + 0.024, s - 0.015], [-0.02, CLEARANCE + 0.03, s + 0.015]);
+  for (const s of [t0 + 0.07, t1 - 0.07]) boxS(b, frame, 'trim', [-0.47, CLEARANCE, s - 0.015], [-0.02, CLEARANCE + 0.006, s + 0.015]);
 
   // Twist beam: trailing arms from their pivots to the hubs, the beam across them, a
   // spring and damper on each arm.
