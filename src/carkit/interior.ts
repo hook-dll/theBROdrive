@@ -37,6 +37,8 @@ const SIDE_CLEAR = 0.08;
 const GLASS_CLEAR = 0.075;
 /** Pillar trims in from the greenhouse: about level with a door frame's inner skin. */
 const PILLAR_IN = 0.065;
+/** Side trim stops this far ahead of a tailgate's opening. */
+const HATCH_TRIM_CLEAR = 0.06;
 /** Firewall lining behind the cowl. */
 const FIREWALL = 0.02;
 /** Floor pan above the sill's underside (the shell's flat underbody). */
@@ -839,10 +841,13 @@ class Cabin {
       // Side points come in; end points move along the car into the cabin. Nothing may
       // reach the cowl's plane, where the bay's scuttle stands.
       const front = this.frame.z(this.fw);
+      // Behind a tailgate the jamb is deep and on an estate the back leans over it
+      // (rearLean), so side trim keeps a hand's width ahead of the opening.
+      const back = this.hatch ? this.frame.z(this.frame.rearBase) + HATCH_TRIM_CLEAR : -Infinity;
       const ring = this.ring(side).map((p) => {
         const move = (q: Vec3): Vec3 =>
           p.kind === 'side'
-            ? [q[0] - side * PILLAR_IN, q[1], Math.min(q[2], front)]
+            ? [q[0] - side * PILLAR_IN, q[1], Math.max(back, Math.min(q[2], front))]
             : [q[0], q[1], q[2] + (p.kind === 'front' ? -0.03 : rearIn)];
         return { ...p, b: move(p.b), k: p.k && move(p.k), t: move(p.t) };
       });
