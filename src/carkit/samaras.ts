@@ -214,7 +214,8 @@ export const BODY_21099: KitBody = {
       { s: 3.011, top: 2.757, upper: 'door2' },
       { s: 3.12, top: 2.849, upper: 'body', lower: 'body' },
       { s: 3.14, top: 2.946, upper: 'body', glass: 'fixed' },
-      { s: 3.334, top: 3.072, upper: 'body' },
+      // Its rear edge runs parallel to the back light, a C pillar of even width behind it.
+      { s: 3.44, top: 3.0, upper: 'body' },
       { s: 3.58, top: 3.14 },
     ],
     rearKnee: undefined,
