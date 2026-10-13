@@ -126,8 +126,9 @@ export const BODY_2104: KitBody = {
   cabin: {
     columns: [
       { s: 1.0, top: 1.41, upper: 'body' }, // BODY_05 from here to 2.975
-      { s: 1.17, top: 1.44, upper: 'door1' },
-      { s: 1.22, top: 1.48, upper: 'door1', glass: 'drop' },
+      { s: 1.035, top: 1.445, upper: 'door1', lower: 'body' },
+      { s: 1.06, top: 1.47, upper: 'door1', glass: 'drop', lower: 'body' },
+      { s: 1.17, top: 1.58, upper: 'door1', glass: 'drop' },
       { s: 2.055, top: 2.062, upper: 'door1' },
       { s: 2.075, top: 2.08, upper: 'body', lower: 'door1' },
       { s: 2.09, top: 2.095, upper: 'body', lower: 'door2' },

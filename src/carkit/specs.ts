@@ -148,9 +148,12 @@ const BODY_05: KitBody = {
   shoulder: { inset: 0.03, rise: 0.02 },
   cabin: {
     columns: [
+      // A slim A pillar, as on the 124: the door's frame runs up it, its glass raked
+      // behind it; below the belt the wing reaches back to the door's drawn front at 1.17.
       { s: 1.0, top: 1.41, upper: 'body' },
-      { s: 1.17, top: 1.44, upper: 'door1' },
-      { s: 1.22, top: 1.48, upper: 'door1', glass: 'drop' },
+      { s: 1.035, top: 1.445, upper: 'door1', lower: 'body' },
+      { s: 1.06, top: 1.47, upper: 'door1', glass: 'drop', lower: 'body' },
+      { s: 1.17, top: 1.58, upper: 'door1', glass: 'drop' },
       { s: 2.055, top: 2.062, upper: 'door1' },
       { s: 2.075, top: 2.08, upper: 'body', lower: 'door1' },
       { s: 2.09, top: 2.095, upper: 'body', lower: 'door2' },
