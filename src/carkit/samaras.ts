@@ -191,14 +191,13 @@ const SALOON_BOOT: readonly TubStation[] = [
 
 /**
  * VAZ-21099 (vaz_21099.jpg, 4.036 mm/px from the drawn 2460 wheelbase; heights by the
- * 2108's belt and sill; photo "2003 VAZ 21099 blue rear"): the 2109's front door and B
- * pillar; a rear door whose drop glass ends at a raked channel with a fixed glass behind
- * it, its frame's rear edge running parallel to the back light, so the body's C pillar
- * between them is of even width; below the belt the door ends at 3.12, in line with the
- * channel's foot, and its frame reaches back over the wing above it. A raked back light
- * from the roof's end at 3.14 to its foot at 3.58, 0.995 high, and a boot lid falling to
- * 0.935 at its trailing edge (4.10) and down its short rear face to the lamps' top.
- * Bumper tip 4.205.
+ * 2108's belt and sill; photo "2003 VAZ 21099 blue rear" and a 2115's rear 3/4): the
+ * 2109's front door and B pillar; a rear door whose frame ends at its drop glass's
+ * raked channel, its shut line one line from the sill to the rail (3.12 at the belt);
+ * behind it a small fixed quarter light in the body, then a C pillar of even width
+ * parallel to the back light. A raked back light from the roof's end at 3.14 to its
+ * foot at 3.58, 0.995 high, and a boot lid falling to 0.935 at its trailing edge (4.10)
+ * and down its short rear face to the lamps' top. Bumper tip 4.205.
  */
 export const BODY_21099: KitBody = {
   ...BODY_2108,
@@ -215,13 +214,13 @@ export const BODY_21099: KitBody = {
     columns: [
       ...FRONT_COLUMNS,
       ...B_PILLAR,
-      // The drop glass's raked rear edge, then the channel to the fixed glass.
-      { s: 3.07, top: 2.8, upper: 'door2' },
-      { s: 3.1, top: 2.83, upper: 'door2', glass: 'fixed' },
-      // The door's shut line below the belt; above it the fixed glass goes on.
-      { s: 3.12, top: 2.84, upper: 'door2', glass: 'fixed', lower: 'body' },
-      // The door frame's rear edge, parallel to the back light 0.2 ahead of it.
-      { s: 3.36, top: 2.92, upper: 'door2', lower: 'body' },
+      // The drop glass's raked rear edge, then the door frame's channel.
+      { s: 3.095, top: 2.825, upper: 'door2' },
+      // The door's shut line, the same line below and above the belt.
+      { s: 3.12, top: 2.85, upper: 'body' },
+      // The quarter light in the body, its rear edge on the C pillar's front.
+      { s: 3.14, top: 2.87, upper: 'body', glass: 'fixed' },
+      // The C pillar, parallel to the back light 0.195 ahead of it.
       { s: 3.385, top: 2.945, upper: 'body' },
       { s: 3.58, top: 3.14 },
     ],

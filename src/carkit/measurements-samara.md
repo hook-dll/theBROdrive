@@ -55,37 +55,36 @@ The brief said 1680 for the 2115's width. No source gives it; every factory sour
 | Front door glass, rear edge | 2330 | 2191 | – | **2.19** |
 | Front/rear door shut line at the belt | 2363 | 2240 | **2230** | **2.225 / 2.235** (front door ends, rear door starts) |
 | Rear door glass, front edge | 2393 | 2313 | – | **2.29** (frame strip from 2.265) |
-| Rear door shut line at the belt / at the rail | 3218 / 2967 | **3120 / 2849** | **3129 / 2881** | 2109: **3.125 / 2.875** (drawing shape −0.093, onto the photo); 21099: below the belt **3.12** [D], above it see §1.1 |
-| Rear door glass, rear edge foot / head | 3109 / 2931 | 3015 / 2833 | – | 2109: **3.016 / 2.838**; 21099: §1.1 |
-| Quarter light, front edge foot / head | 3231 / 3008 | – | 3116 / 2893 | 2109: **3.145 / 2.915** (in the body) |
-| Quarter light, rear edge foot / head | 3513 / 3144 | – | – | 2109: the 2108's **3.57 / 3.12** (same panel) |
-| Handles (centre) | 2.05 / 3.08 | – | 2.08 / 2.99 | the generator's rule, 0.13 ahead of each door's rear edge below the belt: 2.095; rear 2.886 (2109), 2.97 (21099) |
+| Rear door shut line at the belt / at the rail | 3218 / 2967 | **3120 / 2849** | **3129 / 2881** | 2109: **3.125 / 2.875** (drawing shape −0.093, onto the photo); 21099: **3.12 / 2.85**, one line from sill to rail (§1.1) |
+| Rear door glass, rear edge foot / head | 3109 / 2931 | 3015 / 2833 | – | 2109: **3.016 / 2.838**; 21099: **3.095 / 2.825** |
+| Quarter light, front edge foot / head | 3231 / 3008 | 3168 / 2902 | 3116 / 2893 | 2109: **3.145 / 2.915**; 21099: **3.14 / 2.87** (both in the body) |
+| Quarter light, rear edge foot / head | 3513 / 3144 | 3414 / 2993 | – | 2109: the 2108's **3.57 / 3.12** (same panel); 21099: **3.385 / 2.945**, the C pillar's front edge |
+| Handles (centre) | 2.05 / 3.08 | – | 2.08 / 2.99 | the generator's rule, 0.13 ahead of each door's rear frame: 2.095; rear 2.886 (2109), 2.965 (21099) |
 
 - The B pillar above the belt is body between the two door frames: 2.225–2.265, with 30 / 25 mm frame strips on the doors. Below the belt the doors meet on one shut line.
 - The rear door reaches over the rear arch (front of the arch 2.885); the generator cuts it round the arch's lip.
 - The rear door's glass is a drop glass; its rear edge rakes with the frame and turns vertical in the last 30 px of the 2109 drawing (a channel). It is modelled as one raked pane; lowered, it stays inside the door (checked in the lab).
 - Overlay checks (`/tmp/samara/ov_2109ps.png`, `ov_2109s.png`): the model's B and rear shut lines fall on the photo's within a few mm at its scale; on the 2109 drawing they stand ~0.1 m ahead of its lines, as the table says.
 
-### 1.1 The 21099's rear door glazing and C pillar
+### 1.1 The 21099's rear door, quarter light and C pillar
 
-The 21099 has no quarter light in the body. Its rear door carries the drop glass, a raked channel and a **fixed glass** behind it. The door frame's rear edge runs parallel to the back light, and the body's C pillar between them is of even width [P p18, D]. Below the belt the door ends at 3.12, in line with the channel's foot; above the belt its frame reaches back over the wing round the fixed glass. In the spec that is a strip with `upper: 'door2'`, `lower: 'body'`.
+The rear door's frame ends at its drop glass's channel. Its rear edge is the door's shut line carried on up, so the shut line is one raked line from the sill to the rail. Behind the door the body carries a small fixed quarter light, and behind that a C pillar of even width, parallel to the back light [P p18, a 2115's rear 3/4 (silver, supplied by the owner), D].
 
 Readings: each line of the 21099 drawing is carried to the belt (y 187) and to the rail (y 89), the heights a cabin column's `s` and `top` stand at.
 
 | Line | Drawing (px) | At the belt / at the rail | Spec column (s / top) |
 |---|---|---|---|
-| Drop glass, rear edge | (1270, 99) → (1309, 165), then vertical | 3.015 / 2.833 | **3.07 / 2.80** |
-| Channel's rear edge = fixed glass's front | double line (1274, 95) → (1340, 210); glass edge (1290, 102) → (1340, 176) | 3.088–3.168 / 2.857–2.902 | **3.10 / 2.83** |
-| Door shut line below the belt | vertical at x 1340 | 3.14 | **3.12** (a column inside the fixed glass, `lower: 'body'`) |
-| Fixed glass, rear edge | (1316, 102) → (1390, 170) | 3.414 / 2.993 | frame **3.36 / 2.92**, shut line **3.385 / 2.945** |
+| Drop glass, rear edge | (1270, 99) → (1309, 165), then vertical | 3.015 / 2.833 | **3.095 / 2.825** |
+| Door shut line (and the door frame's rear edge above the belt) | double line (1274, 95) → (1340, 210), vertical at x 1340 below the belt | 3.088–3.14 / 2.857 | **3.12 / 2.85** |
+| Quarter light, front edge | (1290, 102) → (1340, 176) | 3.168 / 2.902 | **3.14 / 2.87** |
+| Quarter light, rear edge = C pillar's front | (1316, 102) → (1390, 170) | 3.414 / 2.993 | **3.385 / 2.945** |
 | Back light's edge (C pillar's rear) | (1340, 82) → (1445, 170) | 3.645 / 3.172 | the last column, **3.58 / 3.14** |
-| C pillar, horizontal width | fixed glass to back light: 0.19 at the glass top, 0.22 at its foot | – | **0.195**, the same at the belt and the rail (parallel) |
-| Fixed glass width, foot / top | 0.20 / 0.105 | – | 0.26 / 0.09 |
+| C pillar, horizontal width | quarter light to back light: 0.19 at its top, 0.22 at its foot | – | **0.195**, the same at the belt and the rail (parallel) |
+| Quarter light width, foot / top | 0.20 / 0.105 | – | 0.245 / 0.075 |
 
-- The drop glass's rear edge and the channel stand 50–60 mm further back at the belt than drawn and rake 30 mm less at the top. The drawing's channel and frame strip are 0.15 m wide at the belt; this way the drop glass stays a full pane and the fixed glass a tall trapezoid, as `p18` shows them.
-- The fixed glass's rear edge is made exactly parallel to the generated back-light edge (Δs 0.44 from the belt to the rail) instead of the drawing's slightly steeper line, so the C pillar is of even width.
-- The handle rule now takes a rear door's rear edge below the belt (its last strip with `lower` door2), so the handle stays on the door's lower shell: 3.10 − 0.13 = 2.97.
-- Lab: closed from the user's rear 3/4 angle and straight from the side; the rear door opens with its frame and fixed glass and closes flush; the lowered drop glass stays inside the door.
+- The drop glass's rear edge stands 80 mm further back at the belt than drawn. The drawing's channel and frame strip are 0.15 m wide at the belt; this way the drop glass stays a full pane and the door's frame a 25 mm strip on the shut line, as on the photos.
+- The quarter light's rear edge is made exactly parallel to the generated back-light edge (Δs 0.44 from the belt to the rail) instead of the drawing's slightly steeper line, so the C pillar is of even width.
+- Lab: closed from the owner's rear 3/4 angle and straight from the side; the rear door opens with its frame and drop glass only, the quarter light and the C pillar stay on the body; it closes flush; the lowered drop glass stays inside the door.
 
 ## 2. VAZ-21099 tail (2108 frame; 21099 drawing)
 
@@ -148,9 +147,8 @@ Lamps across the back [P p12, plate scale 1.5 mm/px; p13]:
 2. **`FaceLook.lid`** (exterior.ts `buildLidFace`): face items built on the end face but hung on the boot lid or tailgate node, so the 2115's lamp bar lifts with the lid. Their lens meshes keep the lamp names, so the rig and `VehicleLamps` light them as any other.
 3. **Moulded bumper `finish`** (exterior.ts): absent keeps the dark plastic colours as they were; `paint` makes a body-colour bumper whose groove is a ridge in the same paint.
 4. **Saloon boot end** (bay.ts `buildSaloonBoot`): the boot's rear bulkhead stays 5 mm inside the tail face when the lid comes down to it (`bootEnd` = the last station).
-5. **Rear door handle** (exterior.ts `buildDoorHardware`): placed ahead of the door's last strip below the belt (`lower ?? upper` is door2), so it stays on the door where its frame reaches further back above the belt (the 21099's). The same column as before on every other car.
 
-**Proof that nothing else moved.** Every existing kit car (2101–2108) was built from the committed code in a `git worktree` and from the working tree; all triangles in the car frame were sorted and hashed. All eight hashes, triangle counts and bounds are identical. The 2108: 10 226 triangles, bounds ±0.970 × 0…1.335 × ±2.009 m, before and after. After the 21099 rear-door rework (§1.1) the same check against commit 8dd994c: 2101–2109 identical; only the 21099 (11 839 triangles) and the 2115 (11 870) changed.
+**Proof that nothing else moved.** Every existing kit car (2101–2108) was built from the committed code in a `git worktree` and from the working tree; all triangles in the car frame were sorted and hashed. All eight hashes, triangle counts and bounds are identical. The 2108: 10 226 triangles, bounds ±0.970 × 0…1.335 × ±2.009 m, before and after. After the 21099 rear-door rework (§1.1) the same check against commit d85752e: 2101–2109 identical; only the 21099 (11 707 triangles) and the 2115 (11 738) changed.
 
 ## 5. Gaps
 
@@ -158,7 +156,7 @@ Lamps across the back [P p12, plate scale 1.5 mm/px; p13]:
 - **2109 drawing.** It is undimensioned, and its door lines disagree with the photo and the 21099 drawing by 0.1 m; the photo was used. Its quarter light's rear edge (3.513 / 3.144) disagrees with the 2108's panel (3.57 / 3.12) by 57 mm; the 2108's is kept.
 - **Front door's front edge.** The photo (1.239) and the 21099 drawing (1.251) put it 27–39 mm ahead of the 2108's 1.278, which is kept so the shared front stays identical.
 - **2115 not modelled:** the boot-lid spoiler with its high-mounted brake lamp, the plate recess in the rear bumper, the front fog lamps, the grey door mouldings (`p19`), the side repeaters. The head lamps keep the 2108's trapezoids rather than the 2115's rounded "eyes".
-- **Rear door handles** come from the generator's rule (0.13 ahead of the door's rear edge below the belt): 2.886 on the 2109 against its photo's 2.99.
-- **21099 drawing vs the rear door glazing.** The drop glass and channel are moved off the drawn lines for the reasons in §1.1. The door's horizontal shut line along the belt between 3.12 and 3.385 is not visible on the photos; it is where the generator puts it.
+- **Rear door handles** come from the generator's rule (0.13 ahead of the door's rear frame): 2.886 on the 2109 against its photo's 2.99.
+- **21099 drawing vs the rear door.** The drop glass's rear edge is moved off the drawn line for the reasons in §1.1.
 - **Tail-lamp roles.** Colours are measured; which red cell is tail and which is stop is [INFERENCE] on the 21099 and the 2115.
 - **2115 overhang split** rests on one near-orthographic photo corrected for depth (±20 mm); the factory gives only the 4330 total.
