@@ -4,7 +4,7 @@ What the owner wants, what is done, what is left. How to work: [`README.md`](REA
 Why things are the way they are: [`HISTORY.md`](HISTORY.md). Keep this file current with
 every change (update the car's row and the gaps).
 
-Last updated: 2026-10-13, the 2110 added and the 2115/2110 third-review fixes (lid corners, flush wrapping head lamps, the 2110's bumper), committed after cfff462.
+Last updated: 2026-10-13, the fourth review: solid amber 2110 indicators, the 2110/2115 tail lamps wrapping onto the wings, the Samaras' raked face (`frontLean`).
 
 ## The owner's goal
 
@@ -85,7 +85,7 @@ body work; wheels from `DISTINCT_SOVIET_WHEEL_SETS`. Triangle counts in README.
 | 1111 | – | – | **not started** | no `sv_` sibling (`KIT_CARS` requires one from `SOVIET_CARS`): a decision for the owner. The owner's own carforge Oka (`cf_vaz1111`, uncommitted files) is separate work; don't touch it |
 
 **2115 details — done** (commit 8620a22):
-late-face head lamps and indicators (since the third review a `cornerLamps` unit, flush and wrapping round the corner), the slot under the bonnet
+late-face head lamps and indicators (since the third review a `cornerLamps` unit, flush and wrapping round the corner; since the fourth the tail lamps too, and the Samaras' face rakes back, `frontLean`), the slot under the bonnet
 lip, rectangular front fog lamps in black housings (`panel` spans), grey door mouldings
 (`waist`, finish `grey`) in line with a grey band round both bumpers (moulded bumper
 `moulding`), and a boot-lid `spoiler` with the high brake lamp that lifts with the lid. New
@@ -109,25 +109,26 @@ spec fields are in README's Spec reference; 12 092 triangles (README budget tabl
 
 **2110 — done**: its own shell on the `samara` platform with its own dash
 (`CABIN_2110`), sibling `sv_vaz21099` with the label "VAZ-2110" (the 2115 precedent), the
-base early (1996–2003) car: slot grille, no spoiler, no door mouldings. 14 799 triangles.
+base early (1996–2003) car: slot grille, no spoiler, no door mouldings. 14 823 triangles.
 After the owner's reviews: the rear door's edge rakes forward to the sill with rounded turns
 (`CabinColumn.foot`, `round`) and the body behind it has cabin trim, the rear arch is a
 low half ellipse covering the tyre (`rearArchRise`), the bonnet covers the whole top with
 its shut lines along the wings' top edge and its nose comes down between the head lamps
 carrying the slot (`bonnet`, front `lid`; the earlier narrow bonnet was a misreading of
 the bonnet's raised centre, HISTORY.md), the head-lamp unit lies flush and wraps round the
-corner, its indicator clear with the amber behind (`cornerLamps`), one lid reflector
+corner, its indicator solid amber (`cornerLamps`), the tail lamps wrapping onto the wings
+below the tail's belt (`cornerLamps` with `end: 'rear'`), one lid reflector
 across the centre line, a feature line under the windows (`featureLine`), a nose rounded
 in plan and a front bumper whose sides lie on the wings back to the arch, its foot in line
 with the sill (bumper `corner`, `wrapTo`), the boot lid's rear corners on a clean shut line
-(`BodyFrame.lidFace`). Proved: 2101–21099 identical against cfff462, the 2115 moved on its
-lid and lamps only. Lab: side overlay on the drawing, all opening parts, lamps at night,
-no program linked after boot.
+(`BodyFrame.lidFace`). Proved: 2101–2107 identical against cfff462, the Samaras moved by
+design only (lamps, face lean). Lab: side overlay on the drawing, all opening parts, lamps
+at night, no program linked after boot.
 
 2110 gaps left (`measurements-2110.md` §7):
-- The indicator's clear part shows a small fold of its own where the nose's skin twists
-  between the face station and the next; the rear fog lamp not modelled; the lid's side on
-  the tail face is the generator's 25 mm wall, not the drawing's 82 mm slant.
+- The nose's skin twists slightly between the face station and the next; the rear fog
+  lamp not modelled; the lid's side on the tail face is the generator's 25 mm wall, not the
+  drawing's 82 mm slant.
 - A 40 mm strip of wing top (the model's shoulder) shows beside the bonnet; the car has
   almost none. The nose's sides are straight.
 - Dash: heights hung from the Samara's cluster (no side photo), one section across the

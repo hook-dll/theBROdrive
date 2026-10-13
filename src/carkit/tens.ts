@@ -140,19 +140,40 @@ export const LOOK_2110: KitLook = {
   sill: null,
   waist: null,
   repeater: { s0: 1.14, s1: 1.215, y0: 0.696, y1: 0.728 },
-  // The head-lamp unit, flush with the body, wrapping round the corner: the head lamp
-  // from its leaning inner end [D front view: 0.283 / 0.303] across the face to the
-  // corner, then the indicator round the corner and back along the flank to s 0.33 [D side
-  // view: the unit's rear edge s 0.303 at its foot, 0.356 at its top]: a clear lens over a
-  // bright reflector with the amber bulb showing in its rear part [P f1, f3].
+  // The lamp units, flush with the body and wrapping round its corners.
   cornerLamps: [
+    // Front: the head lamp from its leaning inner end [D front view: 0.283 / 0.303] across
+    // the face to the corner; the indicator, solid amber, round the corner and back along
+    // the flank to s 0.33 [D side view: the unit's rear edge s 0.303 at its foot, 0.356 at
+    // its top].
     {
       points: [
         { x: [0.283, 0.303], y: [0.606, 0.7], role: 'head' },
-        { y: [0.606, 0.7], finish: 'chrome' },
-        { s: 0.15, y: [0.603, 0.708], role: 'blinker' },
-        { s: 0.3, y: [0.592, 0.718], finish: 'chrome' },
+        { y: [0.606, 0.7], role: 'blinker' },
         { s: 0.33, y: [0.59, 0.72] },
+      ],
+    },
+    // Tail, from the lid's slanted edge (0.495 at its foot to 0.52 at the lamps' top, 10 mm
+    // clear of it) round the corner and 0.14 forward along the wing [P s1: 123 px at 1.085
+    // mm/px, its front edge leaning 16 mm back at the foot], up to the tail's belt (0.815)
+    // so the lens stays on the flat side and face and the corner's shoulder above it is a
+    // straight cut; the indicator over the top 45 %, the stop and tail lamps below it [P
+    // s1: smoked 76 px over red 62 px; r4].
+    {
+      end: 'rear',
+      points: [
+        { x: [0.518, 0.528], y: [0.743, 0.815], role: 'blinker' },
+        { y: [0.743, 0.815], role: 'blinker' },
+        { s: 4.06, y: [0.743, 0.815] },
+      ],
+    },
+    {
+      end: 'rear',
+      points: [
+        { x: [0.505, 0.518], y: [0.655, 0.743], role: 'brake' },
+        { x: 0.6, y: [0.655, 0.743], role: 'tail' },
+        { y: [0.655, 0.743], role: 'tail' },
+        { s: 4.075, y: [0.655, 0.743] },
       ],
     },
   ],
@@ -200,22 +221,14 @@ export const LOOK_2110: KitLook = {
   },
   rear: {
     bumper: { kind: 'moulded', drop: 0.055, height: 0.34, finish: 'paint' },
-    items: [
-      // Corner lamps on the body from the lid's edge out: the indicator over the tail and
-      // the stop lamp.
-      {
-        kind: 'cluster',
-        x: { from: { inset: 0.005 }, to: { centre: 0.53 } },
-        y: { from: ['bumperTop', 0.005], to: ['deck', -0.003] },
-        columns: [['blinker', 'tail'], ['blinker', 'brake']],
-      },
-    ],
+    // The corner lamps are `cornerLamps`, wrapping onto the wings.
+    items: [],
     lid: [
-      // On the lid: a smoked reversing lamp at each end and one red reflector across the
-      // middle between them [P r4, r2].
+      // On the lid: a smoked reversing lamp at each end, inside the lid's edge (0.495 at
+      // its foot), and one red reflector across the middle between them [P r4, r2].
       {
         kind: 'cluster',
-        x: { from: { centre: 0.51 }, to: { centre: 0.4 } },
+        x: { from: { centre: 0.49 }, to: { centre: 0.4 } },
         y: { from: ['bumperTop', 0.008], to: ['deck', -0.008] },
         columns: [['reverse']],
       },

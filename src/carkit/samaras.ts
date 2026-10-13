@@ -79,6 +79,9 @@ export const BODY_2108: KitBody = {
   },
   doorBottom: 0.302,
   bonnetFront: 0.17,
+  // The face rakes back from the bumper's top (s 0.10, 0.625) to the bonnet's lip (s 0.164,
+  // 0.803) [D]: 0.36 m per m above the bumper, faded out over 0.15 behind the lip.
+  frontLean: { base: 0.625, lean: 0.36, blend: 0.15 },
   flap: { s0: 3.62, s1: 3.73, y0: 0.73, y1: 0.83 },
 };
 
@@ -314,6 +317,34 @@ export const LOOK_2115: KitLook = {
         { s: 0.205, y: [0.68, 0.735] },
       ],
     },
+    // Tail lamps on the body's corners, from just outside the lid's edge (0.575) out and
+    // round onto the wing, 0.11 forward along it [P p19: 40 px at 2.78 mm/px from the
+    // hubs]: the amber indicator the outer cell (0.09 on the face, then the wrap); inside
+    // it the tail lamp over the stop lamp [P p12, p13]. Heights: the bumper's top + 0.01 up
+    // to the tail's belt (0.611–0.75), so the lens stays on the flat side and face and the
+    // corner's shoulder above it is a straight cut.
+    {
+      end: 'rear',
+      points: [
+        { x: 0.69, y: [0.611, 0.75], role: 'blinker' },
+        { y: [0.611, 0.75], role: 'blinker' },
+        { s: 4.085, y: [0.611, 0.75] },
+      ],
+    },
+    {
+      end: 'rear',
+      points: [
+        { x: 0.585, y: [0.68, 0.75], role: 'tail' },
+        { x: 0.69, y: [0.68, 0.75] },
+      ],
+    },
+    {
+      end: 'rear',
+      points: [
+        { x: 0.585, y: [0.611, 0.68], role: 'brake' },
+        { x: 0.69, y: [0.611, 0.68] },
+      ],
+    },
   ],
   front: {
     bumper: { kind: 'moulded', drop: 0.07, height: 0.3, finish: 'paint', moulding: { y: 0.52, height: 0.075, finish: 'grey' } },
@@ -344,14 +375,8 @@ export const LOOK_2115: KitLook = {
   },
   rear: {
     bumper: { kind: 'moulded', drop: 0.04, height: 0.306, finish: 'paint', moulding: { y: 0.478, height: 0.08, finish: 'grey' } },
-    items: [
-      {
-        kind: 'cluster',
-        x: { from: { inset: 0.01 }, to: { centre: 0.585 } },
-        y: { from: ['bumperTop', 0.01], to: ['deck', -0.008] },
-        columns: [['blinker'], ['tail', 'brake']],
-      },
-    ],
+    // The corner lamps are `cornerLamps`, wrapping onto the wings.
+    items: [],
     lid: [
       {
         kind: 'cluster',

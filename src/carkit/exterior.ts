@@ -572,18 +572,21 @@ const CORNER_LAMP_OUT = 0.004;
 const CORNER_LAMP_STEP = 0.02;
 
 /**
- * Lamp units wrapping round the front corners (`KitLook.cornerLamps`): a thin lens lying
- * on the face from its inner end to the corner and on along the flank, every stretch
- * between two points in its role's slot (or its finish), with a rim down to the body.
+ * Lamp units wrapping round the corners of an end face (`KitLook.cornerLamps`): a thin
+ * lens lying on the face from its inner end to the corner and on along the flank, every
+ * stretch between two points in its role's slot, with a rim down to the body.
  */
 function buildCornerLamps(ctx: KitContext, body: PartBuilder): void {
   const { frame } = ctx;
   const lamps = frame.spec.look.cornerLamps;
   if (!lamps) return;
-  const sFace = frame.spec.stations[0]!.s;
-  const zFace = frame.z(sFace);
+  const stations = frame.spec.stations;
   const diag = CORNER_LAMP_OUT * Math.SQRT1_2;
   for (const lamp of lamps) {
+    // The face it starts on, and which way that face looks along the car.
+    const facing = lamp.end === 'rear' ? -1 : 1;
+    const sFace = (facing > 0 ? stations[0]! : stations[stations.length - 1]!).s;
+    const zFace = frame.z(sFace);
     for (const side of [1, -1]) {
       // A column across the lamp at a point, bottom, middle and top: [on the body, on the lens].
       const column = (p: CornerLampPoint): [Vec3, Vec3][] =>
@@ -591,20 +594,21 @@ function buildCornerLamps(ctx: KitContext, body: PartBuilder): void {
           if (p.x !== undefined) {
             const [xb, xt] = typeof p.x === 'number' ? [p.x, p.x] : p.x;
             const x = side * lerp(xb, xt, (y - p.y[0]) / (p.y[1] - p.y[0]));
-            return [[x, y, zFace], [x, y, zFace + CORNER_LAMP_OUT]];
+            return [[x, y, zFace], [x, y, zFace + facing * CORNER_LAMP_OUT]];
           }
           if (p.s !== undefined) {
             const x = skinX(frame, p.s, y);
             return [[side * x, y, frame.z(p.s)], [side * (x + CORNER_LAMP_OUT), y, frame.z(p.s)]];
           }
           const x = skinX(frame, sFace, y);
-          return [[side * x, y, zFace], [side * (x + diag), y, zFace + diag]];
+          return [[side * x, y, zFace], [side * (x + diag), y, zFace + facing * diag]];
         });
       const points = lamp.points;
       for (let i = 0; i + 1 < points.length; i++) {
         const a = points[i]!;
         const c = points[i + 1]!;
-        const { slot, color } = a.role ? { slot: lampSlot(a.role, side), color: 0xffffff } : finishSlot(a.finish ?? 'chrome');
+        if (!a.role) throw new Error(`Kit car "${frame.spec.id}": a corner lamp's point before its last has no role`);
+        const slot = lampSlot(a.role, side);
         // Off the face, the stretch steps along the flank so it keeps to the curving side.
         const sa = a.s ?? sFace;
         const sc = c.s ?? sFace;
@@ -615,7 +619,7 @@ function buildCornerLamps(ctx: KitContext, body: PartBuilder): void {
           const t = k / steps;
           return column({ s: lerp(sa, sc, t), y: [lerp(a.y[0], c.y[0], t), lerp(a.y[1], c.y[1], t)] });
         });
-        body.color(color);
+        body.color(0xffffff);
         for (let k = 0; k < steps; k++) {
           const p = columns[k]!;
           const q = columns[k + 1]!;

@@ -88,14 +88,20 @@
   lamps carrying the slot (`KitCarSpec.bonnet`, front `FaceLook.lid`), a feature line
   under the windows (`featureLine`), a nose rounded in plan and a front bumper whose sides
   lie on the wings back to the wheel arch, its foot in line with the sill (moulded
-  `corner`, `wrapTo`), one lid reflector across the centre line. 14 799 triangles; the
+  `corner`, `wrapTo`), one lid reflector across the centre line. 14 823 triangles; the
   other kit cars were proved unchanged by per-triangle hashes.
 - Kit 2115 and 2110: the boot lid's rear corners meet the wings on a clean shut line with
   flat faces (the lid's top turns down to a line across at the lamps' top and its rear
   panel lies in the tail face between the lamps, `BodyFrame.lidFace`), and the head-lamp
   units lie flush on the body and wrap round its corners onto the flanks
   (`KitLook.cornerLamps`, laid on the skin as built, `skinX`); lens `chamfer` and
-  `flankLamps` are gone.
+  `flankLamps` are gone. The 2110's front indicators are solid amber, and both cars' tail
+  lamps now wrap round the rear corners onto the wings too (`CornerLamp.end`), ending at
+  the tail's belt so the corner's shoulder above them is a straight cut with no body
+  showing through the lens.
+- Kit Samaras (2108, 2109, 21099, 2115): the face and head lamps rake back from the
+  bumper's top to the bonnet's lip as on the cars, instead of the bonnet overhanging the
+  lamps (`KitCarSpec.frontLean`, the estates' tail lean at the nose).
 - Kit documentation for agents: `src/carkit/README.md` (working rules, spec reference,
   adding a car end to end, proving refactors), `STATUS.md` (goal, roadmap, per-car status,
   gaps) and `HISTORY.md` (fix log and approaches not to retry).

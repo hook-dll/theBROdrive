@@ -20,6 +20,18 @@ the garage, spawns and POIs.
 
 These are the owner's. Break none of them.
 
+**Principle: a schematic parody, not a precise copy.** Simpler is better. Straight lines
+are fine as long as they are cut in the right places. Prefer the simplest geometry that
+reads correctly (a flat piece bent once round a corner, a straight chop, a straight lean)
+over new generator features or curves; if something half-built is more complex than
+needed, drop it for the simple version.
+
+**Workflow: screenshots first, docs at acceptance.** As soon as a shape is visible in the
+lab, send the owner (through the main agent) draft screenshots from his angles, before
+hash proofs and docs. Iterate on his feedback. Only when he accepts the model: run the
+full checks (tsc, hashes, lamps at night, shader programs, fit rows), write the docs
+(this file, STATUS, HISTORY, CHANGELOG, measurements) and commit.
+
 **Machine and processes** (full text: `.omp/rules/process-hygiene.md`, untracked):
 - Run your own Vite: `npx vite --port 5199 --strictPort`. Port 5173 is the owner's own
   `npm run dev`: never stop it, never measure while it runs without asking.
@@ -102,7 +114,7 @@ from the angle he complained about; changes are judged there, not in code.
 | `materials.ts` | One shared material per slot. |
 | `names.ts` | Node names the catalogue selects by (wheels, lamps, glass). No imports, so the catalogue can include it. |
 | `context.ts` | `KitContext`, `addBuilt`, `pivotGroup`, `attach`: how modules put geometry into the scene. |
-| `kit.ts` | `buildKitCar(id)`: assembles everything; hinge motions of the shell's parts (`shellMotion`); `leanRear`. |
+| `kit.ts` | `buildKitCar(id)`: assembles everything; hinge motions of the shell's parts (`shellMotion`); `leanEnd` (`rearLean`, `frontLean`). |
 | `rig.ts` | `KitRig`: runtime channels, controls, lamps, LOD. |
 
 Integration outside the folder:
@@ -155,7 +167,7 @@ Integration outside the folder:
    (`window_*`, `vent_*`, `quarter_*`) ride inside their door. Opening angles are in
    `shellMotion` (kit.ts).
 7. **Exterior, interior, bay** are added (`buildExterior`, `buildInterior`, `buildBay`).
-8. **`rearLean`**, if set, warps the finished back (kit.ts `leanRear`).
+8. **`rearLean`** and **`frontLean`**, if set, warp the finished back or nose (kit.ts `leanEnd`).
 9. **Wheels** (`kit_wheel_*`) are added last and never warped.
 
 ## Spec reference
@@ -180,6 +192,7 @@ author.
 | `bonnet?` | `{ inset, nose? }`: the bonnet's side cut `inset` in from the deck's edge instead of at the pillar row (the 2110's covers the whole top, its shut lines along the wings' top edge); it ends 12 mm (`SCUTTLE`) short of the cowl and the bay's inner wings stand under the cut. `nose: { y, half: [bottom, top] }`: the bonnet comes down the front face between the head lamps to height `y` (set `bonnetFront` to the first station); `front.lid` items ride on it. Absent: the pillar-row bonnet. |
 | `bootEnd` | `s` where a boot lid ends (it runs from the back light's foot). **Absent = a tailgate** hinged at the roof. Equal to the last station's `s` with a `notch` there, the lid comes down the tail face (2115, 2110): its top turns down to a line across at the corners' top and its rear panel lies in the tail face between the corner lamps (`BodyFrame.lidFace`). |
 | `rearLean` | `{ base, lean, blend }`: above height `base`, every point behind the rear base moves forward `lean` m per m of height, faded in over `blend` m ahead of it. Makes an estate's tailgate, lamp corners and lamps one raked plane. Built (closed) pose is warped, so parts still close flush. |
+| `frontLean` | The same at the nose (kit.ts `leanEnd`): above `base`, every point ahead of the bonnet's front edge moves back `lean` m per m of height, faded out over `blend` m behind it. The Samaras' face and lamps rake back from the bumper's top to the bonnet's lip (`BODY_2108`: base 0.625, lean 0.36, blend 0.15). |
 | `flap` | Fuel flap: `s0..s1`, `y0..y1`, `side` (`'right'` default; the classic estates' is `'left'`). |
 
 **`TubStation`** — one half-section; values interpolate linearly between stations.
@@ -283,7 +296,7 @@ cabin: … }`) share everything not overridden. Current families:
 | `waist` | `{ y, height, finish }`: a moulding along the flank, broken at the shut lines (each piece riding on its door) and stopping `MOULDING_ARCH_GAP` (30 mm) short of a wheel arch it would run into (the 2115's low door mouldings; the classics' strips sit above their arches and are not cut); or `null`. |
 | `repeater` | `{ s0, s1, y0, y1 }`: the amber side repeater on each front wing, or `null`. |
 | `spoiler?` | `SpoilerLook`: a body-colour boot-lid wing with the high brake lamp, hung on the boot node so it lifts with the lid (exterior.ts `buildSpoiler`). Fields: `half` (half span), `plate` (end-plate width), `s0`/`s1` (wing leading/trailing edge, car frame like `repeater`), `top0`/`top1` (its top at each), `thickness`, `foot` (`s` where the end plates meet the lid), `pedestal: { half, s0, s1 }` (under the wing's middle), `lamp: { half, y0, y1 }` (the brake lens on the pedestal's back). The lens is a `lamp_brake` mesh, so it lights with every other brake lamp. The 2115's. |
-| `cornerLamps?` | `CornerLamp[]`: a lamp unit lying flush on the body (4 mm off it) from its inner end on the front face round the corner and back along the flank (exterior.ts `buildCornerLamps`, laid on the skin as built, body.ts `skinX`). `points`: `{ x }` on the face (half width, or `[bottom, top]` for a leaning edge), `{ s }` on the flank (car frame), or neither for the corner itself; `y: [bottom, top]` there; the stretch after a point is a lens in its `role`'s slot, or `finish` for an unlit part (`chrome`: a clear lens over a reflector). The 2115's and 2110's head lamps and indicators. |
+| `cornerLamps?` | `CornerLamp[]`: a lamp unit lying flush on the body (4 mm off it) from its inner end on an end face round the corner and along the flank (exterior.ts `buildCornerLamps`, laid on the skin as built, body.ts `skinX`). `end`: `'front'` (default) or `'rear'`. `points`: `{ x }` on the face (half width, or `[bottom, top]` for a leaning edge), `{ s }` on the flank (car frame), or neither for the corner itself; `y: [bottom, top]` there; the stretch after a point is a lens in its `role`'s slot. Stacked lamps (an indicator over a tail lamp) are separate units. Keep a unit below the end station's belt so it stays on the flat face and side (the shoulder above it is the corner's straight cut). The 2115's and 2110's head lamps and indicators (solid amber) and their tail lamps. |
 | `featureLine?` | `{ points: [s, y][], height }`: a pressed line along each flank, a 5 mm painted ridge through the points, broken at the shut lines and riding on the doors like the waist. The 2110's line under the windows. |
 
 **`FaceLook`** — `{ bumper, items, lid? }`. `items` are drawn in order (later ones stand on
@@ -492,7 +505,7 @@ Working files (crops, grids, overlays) go in `/tmp/<family>/`; only the report i
   `panel` spans, finish `grey`, `rearArch`, `rearArchRise`, `CabinColumn.foot` (and its
   `round`), `bonnet` (and its `nose`, with front `lid` items), `cornerLamps`,
   `featureLine`, moulded `corner` and `wrapTo`, the centre-line lens, the dash's `heater`
-  and vent `half`.
+  and vent `half`, rear `cornerLamps` (`end`), `frontLean`.
 - Register it in `KIT_SPECS` (specs.ts): `vaz2110: { id: 'vaz2110', ...BODY_2110, look:
   LOOK_2110, cabinLayout: CABIN_2110 }` (via `onBody` if the family frame differs).
 
@@ -562,7 +575,10 @@ identical), `rearArch` for the 2110 (2101–2115 identical against cfff462), the
 review fixes (`foot` and its `round`, `rearArchRise`, `bonnet` and its `nose`, feature
 line, bumper `corner`, centre-line lens, `heater`, vent `half`: 2101–21099 identical), and
 the third review's lid face, corner lamps and bumper `wrapTo` (2101–21099 identical; the
-2115 moved on its lid and lamps, 12 092 → 12 136 triangles, bounds unchanged).
+2115 moved on its lid and lamps, 12 092 → 12 136 triangles, bounds unchanged), and the
+fourth review's rear corner lamps and `frontLean` (2101–2107 identical, the estates'
+`rearLean` through the shared `leanEnd` included; the Samaras moved by design, same
+triangle counts and bounds).
 
 ## Budget and current figures
 
@@ -583,8 +599,8 @@ groups.
 | 2108 | 10 226 | 3 782 | 3 195 | 1 247 | 38 | 620 | 1 344 | 5 126 |
 | 2109 | 11 350 | 4 666 | 3 435 | 1 247 | 38 | 620 | 1 344 | 6 010 |
 | 21099 | 11 707 | 4 909 | 3 519 | 1 247 | 68 | 620 | 1 344 | 6 253 |
-| 2115 | 12 136 | 5 338 | 3 519 | 1 247 | 68 | 620 | 1 344 | 6 682 |
-| 2110 | 14 799 | 7 533 | 3 927 | 1 307 | 56 | 632 | 1 344 | 8 877 |
+| 2115 | 12 112 | 5 314 | 3 519 | 1 247 | 68 | 620 | 1 344 | 6 658 |
+| 2110 | 14 823 | 7 557 | 3 927 | 1 307 | 56 | 632 | 1 344 | 8 901 |
 
 The owner set the budget aside for the 2110 (its rounded rear shut line adds side rows to
 every tub column).
@@ -618,7 +634,8 @@ the left (`flap.side`). The rear bench is pulled forward with `cabinLayout.bench
 load floor starts at the bench (`loadSpaceStart`) and never sinks below the floor pan.
 
 The Samaras share the 2108's shell from the nose to the B pillar and all its heights
-(numbers in `measurements-samara.md`). The 2108's face is a body-colour slotted panel
+(numbers in `measurements-samara.md`), and a face raking back from the bumper's top to the
+bonnet's lip (`frontLean`). The 2108's face is a body-colour slotted panel
 between trapezoid (`slant`) headlamps. The 2109 changes only the greenhouse columns: a
 shorter front door, a full-size rear door (`door2`) raked along the C pillar and a smaller
 fixed quarter light behind it. The 21099 adds a saloon tail: a raked back light, a boot lid
@@ -629,8 +646,9 @@ front bumper, with body-colour bumpers (moulded, `finish: 'paint'`) wearing a gr
 `moulding` band in line with grey door mouldings (`waist`, `finish: 'grey'`), the late
 face (a `cornerLamps` unit: head lamps whose top slopes down at the inner end, the indicator wrapping round the corner; a slot under the bonnet lip; fog lamps in
 black housings), a boot lid that comes down between the corner lamps (`notch` on its last
-station) carrying the lamp bar (`rear.lid`), and a boot-lid `spoiler` with the high brake
-lamp.
+station) carrying the lamp bar (`rear.lid`), corner tail lamps wrapping onto the wings
+(`cornerLamps`, the amber outer cell round the corner), and a boot-lid `spoiler` with the
+high brake lamp.
 
 The 2110 (`tens.ts`, `measurements-2110.md`, the base early car without spoiler or
 mouldings) is its own shell on the `samara` platform with its own dash (`CABIN_2110`): a
@@ -645,5 +663,6 @@ from the 2110): the boot lid comes down between corner lamps (`notch`) carrying 
 (`rear.lid`: reversing lamps at its ends, one red reflector across the middle); a nose
 rounded in plan with a rounded body-colour bumper whose sides lie on the wings back to the
 wheel arch (`corner`, `wrapTo`), carrying a dark intake and fog-lamp recesses; narrow head
-lamps flush with the body with a dark slot between them, the indicators wrapping round the
-corners (`cornerLamps`).
+lamps flush with the body with a dark slot between them, the solid amber indicators
+wrapping round the corners, and the tail lamps (indicator over the tail and stop lamps)
+wrapping onto the wings (`cornerLamps`).

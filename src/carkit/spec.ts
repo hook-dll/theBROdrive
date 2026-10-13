@@ -161,6 +161,12 @@ export interface KitCarSpec {
    * over `blend` metres ahead of the rear base: an estate whose lamps lie on the slope.
    */
   readonly rearLean?: { readonly base: number; readonly lean: number; readonly blend: number };
+  /**
+   * The front face leaning back as one plane above `base` (m per m of height), in full
+   * ahead of the bonnet's front edge and blended out over `blend` metres behind it: a nose
+   * whose lamps and face rake back from the bumper to the bonnet's lip (the Samaras').
+   */
+  readonly frontLean?: { readonly base: number; readonly lean: number; readonly blend: number };
   /** Fuel flap on a rear wing (the right one unless `side` says left): s and height ranges. */
   readonly flap: { readonly s0: number; readonly s1: number; readonly y0: number; readonly y1: number; readonly side?: 'left' | 'right' };
   readonly look: KitLook;
@@ -194,7 +200,10 @@ export interface KitLook {
   readonly repeater: { readonly s0: number; readonly s1: number; readonly y0: number; readonly y1: number } | null;
   /** A body-colour wing on the boot lid's trailing edge with the high brake lamp, or none. */
   readonly spoiler?: SpoilerLook;
-  /** Lamp units wrapping round the front corners, flush with the body (the 2110's, the 2115's). */
+  /**
+   * Lamp units wrapping round the corners of the front or tail face onto the flanks, flush
+   * with the body (the 2110's and 2115's head lamps and indicators, and their tail lamps).
+   */
   readonly cornerLamps?: readonly CornerLamp[];
   /**
    * A pressed feature line along the flank: a narrow painted ridge through `points`
@@ -205,15 +214,17 @@ export interface KitLook {
 }
 
 /**
- * A lamp unit on the front face wrapping round the body's corner onto each flank
+ * A lamp unit on an end face wrapping round the body's corner onto each flank
  * (`KitLook.cornerLamps`), lying flush on the surface: points from its inner end on the
  * face round the corner to its end on the flank. A point is on the face at half width `x`
  * ([bottom, top] for a leaning edge), on the flank at `s` (car frame), or, with neither,
  * on the corner itself (the face's edge); `y` its bottom and top there, straight between
- * points. The stretch after a point is a lens in `role`'s slot, or `finish` for a part
- * that never lights (a clear lens over a bright reflector: `chrome`).
+ * points. The stretch after a point is a lens in its `role`'s slot. `end` is the face it
+ * starts on, the front (default) or the tail; lamps stacked one over another are separate
+ * units.
  */
 export interface CornerLamp {
+  readonly end?: 'front' | 'rear';
   readonly points: readonly CornerLampPoint[];
 }
 
@@ -221,8 +232,8 @@ export interface CornerLampPoint {
   readonly x?: number | readonly [number, number];
   readonly s?: number;
   readonly y: readonly [number, number];
+  /** The lens from this point to the next; absent on the last point. */
   readonly role?: LampRole;
-  readonly finish?: Finish;
 }
 
 /**

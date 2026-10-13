@@ -174,6 +174,31 @@ Format of an entry: **Problem** → **Cause** → **Fix** → *Code* (commit).
   and the indicator round it: clear (chrome reflector) at the corner, amber behind, clear
   at its end (photos f1, f3). Lens `chamfer` and `flankLamps` are gone (no users left).
   *spec.ts, exterior.ts `buildCornerLamps`, body.ts `skinX`, samaras.ts, tens.ts*.
+- **Samara front (2108, 2115 and the rest): at the bonnet and indicator corner the top
+  overhangs the bottom; on the cars the lower part is forward and the face leans back.**
+  → The face was one upright plane at the first station, and the lip of the bonnet stood
+  right over it. The 2108 drawing has the bumper's top at s 0.10 (0.625 m) and the bonnet's
+  lip at s 0.164 (0.803 m). → `KitCarSpec.frontLean` on `BODY_2108` { base 0.625, lean
+  0.36, blend 0.15 }: the estates' tail lean (kit.ts `leanRear`, now `leanEnd` for either
+  end) applied at the nose. Everything above the bumper ahead of the bonnet's front edge
+  shears back in one straight plane, lamps and grille with it. No new geometry. Proved:
+  2101–2107 identical against cfff462 (the estates' `rearLean` included). *spec.ts, kit.ts
+  `leanEnd`, samaras.ts*.
+- **2110 and 2115 rear indicators: the body shows through the wrap cells at the corner.**
+  → The lamps ran up past the tail's belt onto the corner's sloping shoulder, where the
+  skin turns in. The lens followed it and pinched into a V, and the body poked through.
+  → The rear units end at the tail station's belt (2110 0.815, 2115 0.75), so the lens
+  lies on the flat face and side and the shoulder above is a straight cut. Spec only.
+  *tens.ts, samaras.ts*.
+- **2110 front indicators: solid amber, no clear or chrome parts** (the owner's reference
+  photo). → The corner unit is amber from the head lamp round the corner; the clear
+  `finish` stretches are gone from the language (`CornerLampPoint` has only `role`).
+  *spec.ts, exterior.ts, tens.ts*.
+- **2110 and 2115 tail lamps should wrap onto the wings like the head lamps.** → They
+  were face clusters. → `CornerLamp.end: 'rear'` builds a unit on the tail face. 2110:
+  the indicator over the stop and tail lamps, round the corner to s 4.06–4.075; 2115: the
+  amber outer cell round the corner to s 4.085, tail over stop inside it. *spec.ts,
+  exterior.ts `buildCornerLamps`, tens.ts, samaras.ts*.
 
 ## Tens (2110)
 

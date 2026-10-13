@@ -86,7 +86,8 @@ export function buildKitCar(id: string): THREE.Group {
   buildExterior(ctx);
   buildInterior(ctx);
   buildBay(ctx);
-  if (spec.rearLean) leanRear(root, frame, spec.rearLean);
+  if (spec.rearLean) leanEnd(root, frame.z(frame.rearBase), -1, spec.rearLean);
+  if (spec.frontLean) leanEnd(root, frame.z(spec.bonnetFront), 1, spec.frontLean);
 
   // The car's own wheels, named for its `wheelNodes`: they set the wheels' places and
   // size; the loader shods the car from the Soviet pack's sets (`wheelSetPool`).
@@ -112,16 +113,16 @@ const _p = new THREE.Vector3();
 const _inv = new THREE.Matrix4();
 
 /**
- * Leans the back of the car (`KitCarSpec.rearLean`): above `base`, every point moves
- * forward by `lean` per metre of height, in full behind the rear base and fading to
- * nothing over `blend` ahead of it. The whole back — tailgate, the lamp corners beside
- * it, the lamps on them — then lies in one raked plane, as on the estates, while the
- * bumper below stays upright. Moving parts are warped in their built (closed) pose, so
- * they still close flush; wheels are added afterwards and never touched.
+ * Leans one end of the car (`KitCarSpec.rearLean`, `frontLean`): above `base`, every
+ * point moves towards the car's middle by `lean` per metre of height, in full beyond
+ * `zFull` (the rear base, or the bonnet's front edge) and fading to nothing over `blend`
+ * inside it. That end — tailgate or face, the lamp corners beside it, the lamps on them —
+ * then lies in one raked plane, while the bumper below stays upright. Moving parts are
+ * warped in their built (closed) pose, so they still close flush; wheels are added
+ * afterwards and never touched. `end` is +1 at the front, −1 at the tail.
  */
-function leanRear(root: THREE.Object3D, frame: BodyFrame, lean: { readonly base: number; readonly lean: number; readonly blend: number }): void {
-  const zFull = frame.z(frame.rearBase);
-  const zStart = zFull + lean.blend;
+function leanEnd(root: THREE.Object3D, zFull: number, end: 1 | -1, lean: { readonly base: number; readonly lean: number; readonly blend: number }): void {
+  const zStart = zFull - end * lean.blend;
   root.updateMatrixWorld(true);
   root.traverse((node) => {
     const mesh = node as THREE.Mesh;
@@ -131,9 +132,10 @@ function leanRear(root: THREE.Object3D, frame: BodyFrame, lean: { readonly base:
     let moved = false;
     for (let i = 0; i < position.count; i++) {
       _p.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld);
-      if (_p.z >= zStart || _p.y <= lean.base) continue;
-      const w = Math.min(1, (zStart - _p.z) / lean.blend);
-      _p.z += w * w * (3 - 2 * w) * lean.lean * (_p.y - lean.base);
+      const into = end * (_p.z - zStart);
+      if (into <= 0 || _p.y <= lean.base) continue;
+      const w = Math.min(1, into / lean.blend);
+      _p.z -= end * (w * w * (3 - 2 * w) * lean.lean * (_p.y - lean.base));
       _p.applyMatrix4(_inv);
       position.setXYZ(i, _p.x, _p.y, _p.z);
       moved = true;
