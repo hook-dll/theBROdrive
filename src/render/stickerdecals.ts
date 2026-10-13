@@ -29,6 +29,11 @@
  * STICKER_DECAL_WEAR). A decal is drawn as a transparent overlay that does not write
  * depth, so where two of them land on one spot the newer one, written later in the
  * buffer, stays on top: the order the printed decals were laid in.
+ *
+ * A part that moves on the body (a kit car's door, bonnet, boot lid, flap or drop glass)
+ * gets decal meshes of its own, hung under the part: a sticker across a shut line is cut
+ * along it, and each piece swings or winds down with what it is stuck to. The stamp is
+ * the shut pose, so every piece is built in its part's shut frame (`StickerDecalCarrier`).
  */
 
 import * as THREE from 'three';
@@ -79,6 +84,19 @@ export interface StickerDecalSurface {
   readonly mesh: THREE.Mesh;
   /** Whether the triangle `triangle` of material slot `slot` may carry stickers. */
   readonly accepts: (slot: number, triangle: number) => boolean;
+  /** The moving part the mesh rides (a kit door, lid or drop glass), or null on the body. */
+  readonly carrier: StickerDecalCarrier | null;
+}
+
+/**
+ * A part that moves on the body (a node with `userData.kitMotion`, carkit/rig.ts) and the
+ * decals printed on it: they hang under the part, not the body, so a sticker on a door
+ * swings open with it. `restInBody` is the part's frame in the body node's, taken when
+ * the car was cloned, shut: the chassis stamp the decals are cut from is that pose.
+ */
+export interface StickerDecalCarrier {
+  readonly node: THREE.Object3D;
+  readonly restInBody: THREE.Matrix4;
 }
 
 /** Decal meshes are drawn, never picked; see `CarStickerDecals`. */
@@ -113,11 +131,17 @@ const _normalScratch = new THREE.Vector3();
 class StickerDecalSource {
   /** Nine floats a triangle: its three corners in the chassis frame. */
   readonly corners: Float32Array;
-  /** The same triangles' vertex normals, in the body node's frame. */
+  /** The same triangles' vertex normals, in the frame of the node their decal hangs under. */
   readonly normals: Float32Array;
   readonly triangles: number;
-  /** Chassis into the body node's frame: decal geometry is built in the body's own. */
-  readonly toBody: THREE.Matrix4;
+  /**
+   * The node each triangle's decal hangs under, by index into `layerNodes`: 0 is the
+   * body node itself, the rest are the moving parts (`StickerDecalCarrier`).
+   */
+  readonly layerOf: Uint16Array;
+  readonly layerNodes: readonly THREE.Object3D[];
+  /** Chassis into each layer node's own frame, shut: decal geometry is built there. */
+  readonly toLayer: readonly THREE.Matrix4[];
 
   private readonly cellStart: Int32Array;
   private readonly cellOrder: Int32Array;
@@ -136,11 +160,17 @@ class StickerDecalSource {
     // the body's own fit transform maps into: the decal geometry is built in the body's
     // local frame, so it follows the body (and the suspension squash) like the paint.
     // `toBody` is the REST inverse, captured when the car was cloned: read live, it
-    // carried whatever bouncy-car squash the body had at the first sticker.
-    this.toBody = toBody;
+    // carried whatever bouncy-car squash the body had at the first sticker. A decal on
+    // a moving part is built one step further, in that part's shut frame.
     const collected = collectTriangles(surfaces, body);
     this.corners = collected.corners;
     this.normals = collected.normals;
+    this.layerOf = collected.layerOf;
+    this.layerNodes = [body, ...collected.carriers.map((carrier) => carrier.node)];
+    this.toLayer = [
+      toBody,
+      ...collected.carriers.map((carrier) => carrier.restInBody.clone().invert().multiply(toBody)),
+    ];
     this.triangles = this.corners.length / 9;
     const min = collected.min;
     const max = collected.max;
@@ -247,17 +277,22 @@ class StickerDecalSource {
 function collectTriangles(surfaces: readonly StickerDecalSurface[], body: THREE.Object3D): {
   corners: Float32Array;
   normals: Float32Array;
+  layerOf: Uint16Array;
+  carriers: StickerDecalCarrier[];
   min: THREE.Vector3;
   max: THREE.Vector3;
 } {
-  const taken: { bodyPos: THREE.BufferAttribute; normal: THREE.BufferAttribute | null; index: THREE.BufferAttribute | null; triangles: Int32Array; used: number; toBodyNormal: THREE.Matrix3 | null }[] = [];
+  const taken: { bodyPos: THREE.BufferAttribute; normal: THREE.BufferAttribute | null; index: THREE.BufferAttribute | null; triangles: Int32Array; used: number; toLayerNormal: THREE.Matrix3 | null; layer: number }[] = [];
+  const carriers: StickerDecalCarrier[] = [];
   let total = 0;
   // Normals go from each mesh's own frame into the body's, a RELATIVE transform: the
   // car's world pose cancels out of it, so a car that gets its first sticker facing
-  // anywhere is lit right (it used to bake in the yaw it had at that moment).
+  // anywhere is lit right (it used to bake in the yaw it had at that moment). A mesh on
+  // a moving part goes into that part's frame instead; nothing between the two moves,
+  // so the part may stand open while this runs.
   body.updateWorldMatrix(true, true);
   const bodyInverse = body.matrixWorld.clone().invert();
-  for (const { mesh, accepts } of surfaces) {
+  for (const { mesh, accepts, carrier } of surfaces) {
     const geometry = mesh.geometry;
     const position = geometry.getAttribute('position');
     const bodyPos = geometry.getAttribute(CAR_BODY_POSITION_ATTRIBUTE) as THREE.BufferAttribute | undefined;
@@ -272,24 +307,32 @@ function collectTriangles(surfaces: readonly StickerDecalSurface[], body: THREE.
       if (accepts(slots ? slots[tri]! : 0, tri)) list[used++] = tri;
     }
     if (used === 0) continue;
+    let layer = 0;
+    if (carrier) {
+      layer = carriers.indexOf(carrier) + 1;
+      if (layer === 0) layer = carriers.push(carrier);
+    }
     // A normal has to arrive in the decal's own frame: the inverse transpose of the
-    // transform its positions take, which is the mesh's chassis frame then the body's.
-    const toBodyNormal = normal
+    // transform its positions take, which is the mesh's chassis frame then the layer's.
+    const layerInverse = carrier ? carrier.node.matrixWorld.clone().invert() : bodyInverse;
+    const toLayerNormal = normal
       ? new THREE.Matrix3()
-          .setFromMatrix4(new THREE.Matrix4().multiplyMatrices(bodyInverse, mesh.matrixWorld))
+          .setFromMatrix4(new THREE.Matrix4().multiplyMatrices(layerInverse, mesh.matrixWorld))
           .invert()
           .transpose()
       : null;
-    taken.push({ bodyPos, normal, index, triangles: list, used, toBodyNormal });
+    taken.push({ bodyPos, normal, index, triangles: list, used, toLayerNormal, layer });
     total += used * 9;
   }
 
   const corners = new Float32Array(total);
   const normals = new Float32Array(total);
+  const layerOf = new Uint16Array(total / 9);
   const min = new THREE.Vector3(Infinity, Infinity, Infinity);
   const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
   let out = 0;
-  for (const { bodyPos, normal, index, triangles, used, toBodyNormal } of taken) {
+  for (const { bodyPos, normal, index, triangles, used, toLayerNormal, layer } of taken) {
+    layerOf.fill(layer, out / 9, out / 9 + used);
     for (let i = 0; i < used; i++) {
       const tri = triangles[i]!;
       for (let c = 0; c < 3; c++) {
@@ -300,8 +343,8 @@ function collectTriangles(surfaces: readonly StickerDecalSurface[], body: THREE.
         corners[out] = x;
         corners[out + 1] = y;
         corners[out + 2] = z;
-        if (normal && toBodyNormal) {
-          _normalScratch.set(normal.getX(vertex), normal.getY(vertex), normal.getZ(vertex)).applyMatrix3(toBodyNormal).normalize();
+        if (normal && toLayerNormal) {
+          _normalScratch.set(normal.getX(vertex), normal.getY(vertex), normal.getZ(vertex)).applyMatrix3(toLayerNormal).normalize();
           normals[out] = _normalScratch.x;
           normals[out + 1] = _normalScratch.y;
           normals[out + 2] = _normalScratch.z;
@@ -320,7 +363,7 @@ function collectTriangles(surfaces: readonly StickerDecalSurface[], body: THREE.
     min.set(0, 0, 0);
     max.set(0, 0, 0);
   }
-  return { corners, normals, min, max };
+  return { corners, normals, layerOf, carriers, min, max };
 }
 
 /** Material slot of every triangle of a multi-slot mesh; null when there is only one. */
@@ -485,22 +528,64 @@ interface PreviewPose {
 }
 
 /**
- * One car's stickers, drawn as merged decal geometry under its body node.
+ * The decal meshes (placed, preview) under one node: the body, or a moving part its
+ * decals ride (`StickerDecalCarrier`). Every layer draws with the car's two sticker
+ * materials, so a door's layer links no program of its own.
+ */
+class DecalLayer {
+  readonly placed = new DecalBuffer();
+  readonly preview = new DecalBuffer();
+  readonly placedMesh: THREE.Mesh;
+  readonly previewMesh: THREE.Mesh;
+
+  constructor(parent: THREE.Object3D, material: THREE.Material, previewMaterial: THREE.Material) {
+    this.placedMesh = new THREE.Mesh(this.placed.geometry, material);
+    // Decals are not a surface to aim at: the placement ray takes the nearest face, and
+    // a decal (or the hidden preview's stale geometry) has no sticker rule, so it used
+    // to refuse the paint right under it and make the try-on flicker out.
+    this.placedMesh.raycast = noRaycast;
+    this.placedMesh.name = 'stickers';
+    this.placedMesh.visible = false;
+    this.placedMesh.castShadow = false;
+    this.placedMesh.receiveShadow = false;
+    // The preview draws after the placed decals whatever the depth sort says: it is the
+    // thing under the crosshair and has to read over what is already stuck on.
+    this.previewMesh = new THREE.Mesh(this.preview.geometry, previewMaterial);
+    this.previewMesh.name = 'sticker-preview';
+    this.previewMesh.visible = false;
+    this.previewMesh.castShadow = false;
+    this.previewMesh.receiveShadow = false;
+    this.previewMesh.renderOrder = 1;
+    this.previewMesh.raycast = noRaycast;
+    parent.add(this.placedMesh, this.previewMesh);
+  }
+
+  dispose(): void {
+    this.placedMesh.removeFromParent();
+    this.previewMesh.removeFromParent();
+    this.placed.dispose();
+    this.preview.dispose();
+  }
+}
+
+/**
+ * One car's stickers, drawn as merged decal geometry under its body node, and under
+ * each moving part (a kit car's doors, lids, drop glass) for the stickers on it.
  *
  * Created per car instance by render/carmodel.ts, handed the paint material whose dirt
  * and scratches its decals wear. Nothing here runs until the car actually has a sticker
  * — or until one is being tried on it.
  */
 export class CarStickerDecals {
-  private readonly placed = new DecalBuffer();
-  private readonly preview = new DecalBuffer();
-  private readonly placedMesh: THREE.Mesh;
-  private readonly previewMesh: THREE.Mesh;
+  /** Index 0 is the body's; a moving part's is made the first time a decal lands on it. */
+  private readonly layers: (DecalLayer | undefined)[];
   private readonly material: THREE.MeshStandardMaterial;
   private readonly previewMaterial: THREE.MeshStandardMaterial;
   private readonly lastPreview: PreviewPose = {
     x: NaN, y: NaN, z: NaN, nx: NaN, ny: NaN, nz: NaN, roll: NaN, scale: NaN, kind: '', mirror: false,
   };
+  /** A preview is drawn somewhere, so clearing it has work to do. */
+  private previewShown = false;
   private source: StickerDecalSource | null = null;
   private placedLength = -1;
   private placedStickers: readonly StickerState[] | null = null;
@@ -525,25 +610,7 @@ export class CarStickerDecals {
     this.restToBody = body.matrix.clone().invert();
     this.material = makeCarStickerMaterial(frame);
     this.previewMaterial = makeCarStickerMaterial(frame, STICKER_PREVIEW_ALPHA);
-    this.placedMesh = new THREE.Mesh(this.placed.geometry, this.material);
-    // Decals are not a surface to aim at: the placement ray takes the nearest face, and
-    // a decal (or the hidden preview's stale geometry) has no sticker rule, so it used
-    // to refuse the paint right under it and make the try-on flicker out.
-    this.placedMesh.raycast = noRaycast;
-    this.placedMesh.name = 'stickers';
-    this.placedMesh.visible = false;
-    this.placedMesh.castShadow = false;
-    this.placedMesh.receiveShadow = false;
-    // The preview draws after the placed decals whatever the depth sort says: it is the
-    // thing under the crosshair and has to read over what is already stuck on.
-    this.previewMesh = new THREE.Mesh(this.preview.geometry, this.previewMaterial);
-    this.previewMesh.name = 'sticker-preview';
-    this.previewMesh.visible = false;
-    this.previewMesh.castShadow = false;
-    this.previewMesh.receiveShadow = false;
-    this.previewMesh.renderOrder = 1;
-    this.previewMesh.raycast = noRaycast;
-    body.add(this.placedMesh, this.previewMesh);
+    this.layers = [new DecalLayer(body, this.material, this.previewMaterial)];
   }
 
   /**
@@ -565,7 +632,7 @@ export class CarStickerDecals {
       this.placedLength = stickers.length;
       this.source ??= this.makeSource();
       if (!appended) {
-        this.placed.reset();
+        for (const layer of this.layers) layer?.placed.reset();
         this.build = { stickers, next: 0 };
       } else {
         // A build in flight on this list just runs on to the new length.
@@ -577,21 +644,36 @@ export class CarStickerDecals {
       // Forget the pose too, or the same sticker coming back at the same aim would be
       // judged unchanged and stay hidden.
       this.lastPreview.kind = '';
-      if (this.previewMesh.visible) {
-        this.preview.reset();
-        this.preview.commit(this.previewMesh);
+      if (this.previewShown) {
+        this.previewShown = false;
+        for (const layer of this.layers) {
+          if (!layer) continue;
+          layer.preview.reset();
+          layer.preview.commit(layer.previewMesh);
+        }
       }
       return;
     }
     if (!this.poseChanged(preview)) return;
     this.source ??= this.makeSource();
-    this.preview.reset();
-    this.project(preview, this.preview);
-    this.preview.commit(this.previewMesh);
+    for (const layer of this.layers) layer?.preview.reset();
+    this.project(preview, true);
+    for (const layer of this.layers) layer?.preview.commit(layer.previewMesh);
+    this.previewShown = true;
   }
 
   private makeSource(): StickerDecalSource {
     return new StickerDecalSource(this.body, this.restToBody, this.surfaces);
+  }
+
+  /** The decal meshes under layer node `index` of the source, made on first use. */
+  private layer(index: number): DecalLayer {
+    let layer = this.layers[index];
+    if (!layer) {
+      layer = new DecalLayer(this.source!.layerNodes[index]!, this.material, this.previewMaterial);
+      this.layers[index] = layer;
+    }
+    return layer;
   }
 
   /**
@@ -606,12 +688,12 @@ export class CarStickerDecals {
     const until = performance.now() + REBUILD_BUDGET_MS;
     let next = build.next;
     while (next < build.stickers.length) {
-      this.project(build.stickers[next]!, this.placed);
+      this.project(build.stickers[next]!, false);
       next++;
       if (next % REBUILD_CHECK_STRIDE === 0 && performance.now() >= until) break;
     }
     build.next = next;
-    this.placed.commit(this.placedMesh);
+    for (const layer of this.layers) layer?.placed.commit(layer.placedMesh);
     if (next < build.stickers.length) {
       this.buildScheduled = true;
       requestAnimationFrame(this.continueBuild);
@@ -623,10 +705,8 @@ export class CarStickerDecals {
   /** Releases this car's decal geometry and materials (the atlas itself is shared). */
   dispose(): void {
     this.build = null;
-    this.placedMesh.removeFromParent();
-    this.previewMesh.removeFromParent();
-    this.placed.dispose();
-    this.preview.dispose();
+    for (const layer of this.layers) layer?.dispose();
+    this.layers.length = 0;
     this.material.dispose();
     this.previewMaterial.dispose();
     this.source = null;
@@ -671,7 +751,7 @@ export class CarStickerDecals {
    * crosses a thin edge to the panel behind it, as it always did), and what a taken
    * triangle contributes is the part of it inside the sticker's slab and rectangle.
    */
-  private project(sticker: StickerState, out: DecalBuffer): void {
+  private project(sticker: StickerState, preview: boolean): void {
     const source = this.source;
     const rect = stickerAtlas().rects.get(sticker.kind);
     if (!source || !rect) return;
@@ -707,7 +787,7 @@ export class CarStickerDecals {
     const flip = sticker.mirror ? -1 : 1;
     source.queryBox(
       cx - reachX, cy - reachY, cz - reachZ, cx + reachX, cy + reachY, cz + reachZ,
-      (base) => this.emitClipped(base, flip, halfW, halfH, rect, out),
+      (base) => this.emitClipped(base, flip, halfW, halfH, rect, preview),
     );
   }
 
@@ -718,10 +798,11 @@ export class CarStickerDecals {
     halfW: number,
     halfH: number,
     rect: AtlasRect,
-    out: DecalBuffer,
+    preview: boolean,
   ): void {
-    const corners = this.source!.corners;
-    const normals = this.source!.normals;
+    const source = this.source!;
+    const corners = source.corners;
+    const normals = source.normals;
     const ax = corners[base]!;
     const ay = corners[base + 1]!;
     const az = corners[base + 2]!;
@@ -801,10 +882,15 @@ export class CarStickerDecals {
       if (vertices < 3) return;
     }
 
+    // The piece hangs under the node its triangle rides, in that node's shut frame.
+    const layerIndex = source.layerOf[base / 9]!;
+    const layer = this.layer(layerIndex);
+    const out = preview ? layer.preview : layer.placed;
+    const toLayer = source.toLayer[layerIndex]!;
     for (let i = 2; i < vertices; i++) {
-      this.emitVertex(src, srcNormals, 0, flip, halfW, halfH, rect, alpha, out);
-      this.emitVertex(src, srcNormals, i - 1, flip, halfW, halfH, rect, alpha, out);
-      this.emitVertex(src, srcNormals, i, flip, halfW, halfH, rect, alpha, out);
+      this.emitVertex(src, srcNormals, 0, flip, halfW, halfH, rect, alpha, out, toLayer);
+      this.emitVertex(src, srcNormals, i - 1, flip, halfW, halfH, rect, alpha, out, toLayer);
+      this.emitVertex(src, srcNormals, i, flip, halfW, halfH, rect, alpha, out, toLayer);
     }
   }
 
@@ -819,6 +905,7 @@ export class CarStickerDecals {
     rect: AtlasRect,
     alpha: number,
     out: DecalBuffer,
+    toLayer: THREE.Matrix4,
   ): void {
     const px = src[index * 3]!;
     const py = src[index * 3 + 1]!;
@@ -829,7 +916,7 @@ export class CarStickerDecals {
     const u = 0.5 + ((flip * (dx * _t.x + dy * _t.y + dz * _t.z)) / halfW) * 0.5;
     const v = 0.5 + ((dx * _b.x + dy * _b.y + dz * _b.z) / halfH) * 0.5;
     _point.set(px + _n.x * DECAL_LIFT_M, py + _n.y * DECAL_LIFT_M, pz + _n.z * DECAL_LIFT_M);
-    _point.applyMatrix4(this.source!.toBody);
+    _point.applyMatrix4(toLayer);
     out.push(
       _point.x,
       _point.y,

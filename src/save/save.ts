@@ -31,7 +31,7 @@ import {
   normalizeBonnetStorage,
   BONNET_SLOT_COUNT,
 } from '../vehicle/bonnet';
-import { carModel, DEFAULT_CAR_MODEL_ID, hasCarModel } from '../vehicle/carmodels';
+import { CAR_MODELS, carModel, DEFAULT_CAR_MODEL_ID, hasCarModel } from '../vehicle/carmodels';
 import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
 import { carPaintSwatch, visiblePaintHex, type CarPaint } from '../vehicle/carpaint';
 
@@ -104,11 +104,12 @@ export function summarizeDrive(state: WorldState): DriveSummary {
       }
     }
   }
-  const shown = car !== undefined && hasCarModel(car.modelId) ? car : null;
+  // The body the save will load on (`worldModelId`), not the one it names.
+  const modelId = car !== undefined ? worldModelId(car.modelId) : null;
   return {
     km: numOr(player.s, 0) / 1000,
-    carLabel: shown ? carModel(shown.modelId).label : null,
-    paintHex: shown ? visiblePaintHex(migrateCarPaint(shown.paint), shown.modelId, shown.id) : null,
+    carLabel: modelId !== null ? carModel(modelId).label : null,
+    paintHex: car !== undefined && modelId !== null ? visiblePaintHex(migrateCarPaint(car.paint), modelId, car.id) : null,
     dayIndex: Math.max(0, Math.trunc(numOr(state.dayIndex, 0))),
     dayFraction: (((numOr(state.timeOfDay, 0) / DAY_LENGTH) % 1) + 1) % 1,
   };
@@ -695,11 +696,26 @@ function migrateCarPaint(raw: unknown): CarPaint | null {
 /**
  * Bodies the catalogue dropped for a new body of the same car: the save keeps the car,
  * running gear and all, on the body that replaced it. The GTA SA Oka gave way to the
- * carforge one (2026-10-12).
+ * carforge one (2026-10-12); the 2105 rally car has no kit body and becomes the kit 2105.
  */
 const RETIRED_MODEL_IDS: Readonly<Record<string, string>> = {
   sa_oka: 'cf_vaz1111',
+  sv_vaz2105r: 'kit_vaz2105',
 };
+
+/**
+ * The world's body for a saved model id. Only kit bodies drive in the world now
+ * (2026-10-13, `CAR_MODELS`): a car saved on a pack body (`sv_vaz2101`, `sa_vaz2109`,
+ * `gt_vaz2110`, …) loads on the kit body of the same car (`kit_vaz2101`, …), and one
+ * with no kit twin (the Volgas, the Nivas, the Oka, …) on the default.
+ */
+function worldModelId(saved: unknown): string {
+  if (typeof saved !== 'string') return DEFAULT_CAR_MODEL_ID;
+  const id = RETIRED_MODEL_IDS[saved] ?? saved;
+  if (CAR_MODELS.some((model) => model.id === id)) return id;
+  const twin = `kit_${id.slice(id.indexOf('_') + 1)}`;
+  return CAR_MODELS.some((model) => model.id === twin) ? twin : DEFAULT_CAR_MODEL_ID;
+}
 
 function migrateCar(raw: Record<string, unknown>): CarState {
   if (typeof raw.id !== 'string') throw new Error('Save data is malformed: car is missing an id');
@@ -710,10 +726,7 @@ function migrateCar(raw: Record<string, unknown>): CarState {
   // mechanic — the anchors and the mounting interaction are gone, so there is
   // nowhere for those parts to be, and inventing loose parts for them would put
   // scrap in the world the player never dropped.
-  const savedId = typeof raw.modelId === 'string'
-    ? RETIRED_MODEL_IDS[raw.modelId] ?? raw.modelId
-    : undefined;
-  const modelId = savedId !== undefined && hasCarModel(savedId) ? savedId : DEFAULT_CAR_MODEL_ID;
+  const modelId = worldModelId(raw.modelId);
 
   // Stickers are the car's whole history, so a malformed one is dropped rather than
   // failing the load: losing a mark is bad, losing the save is worse.

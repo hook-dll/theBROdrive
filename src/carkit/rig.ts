@@ -75,6 +75,8 @@ interface Driven {
   readonly restPosition: THREE.Vector3;
   readonly restQuaternion: THREE.Quaternion;
   readonly axis: THREE.Vector3;
+  /** The channel value the node was last posed at: a still part is not posed again. */
+  applied: number;
 }
 
 interface Channel {
@@ -109,6 +111,20 @@ const GLASS_FAR_OPACITY = 0.9;
 
 const _q = new THREE.Quaternion();
 
+/**
+ * A kit body nobody drives or opens (a wreck, a courier: render/carmodel.ts
+ * `cloneStaticModel`) is built once in the far pose of `KitRig.setDetail`: no cabin,
+ * bay, boot or underbody, glass a tinted mirror. Same materials, so no new program.
+ */
+export function poseKitStatic(root: THREE.Object3D): void {
+  root.traverse((node) => {
+    if (DETAIL_GROUPS.has(node.name)) node.visible = false;
+    if (node instanceof THREE.Mesh && node.material instanceof THREE.MeshStandardMaterial && node.material.name === 'car-glass-clear') {
+      node.material.opacity = GLASS_FAR_OPACITY;
+    }
+  });
+}
+
 export class KitRig {
   private readonly driven: Driven[] = [];
   private readonly channels = new Map<string, Channel>();
@@ -133,6 +149,7 @@ export class KitRig {
         restPosition: node.position.clone(),
         restQuaternion: node.quaternion.clone(),
         axis: new THREE.Vector3(...motion.axis).normalize(),
+        applied: Number.NaN,
       });
       this.channel(motion.channel);
     });
@@ -178,6 +195,15 @@ export class KitRig {
     const c = this.channel(name);
     c.target = value;
     if (immediate || INSTANT.has(name)) c.value = value;
+  }
+
+  /**
+   * Takes over another rig's channels (a Vehicle rebuilding its visuals after a part
+   * swap): an open bonnet stays open, the lights stay on. Parts are posed next update.
+   */
+  adopt(other: KitRig): void {
+    for (const [name, c] of other.channels) this.channels.set(name, { value: c.value, target: c.target });
+    this.time = other.time;
   }
 
   /** The control a picked object belongs to, if any. */
@@ -244,6 +270,8 @@ export class KitRig {
 
     for (const d of this.driven) {
       const v = this.channels.get(d.motion.channel)?.value ?? 0;
+      if (v === d.applied) continue;
+      d.applied = v;
       if (d.motion.kind === 'rot') {
         d.node.quaternion.copy(d.restQuaternion).multiply(_q.setFromAxisAngle(d.axis, d.motion.amount * v));
       } else {

@@ -463,6 +463,7 @@ export async function bootMirageLab(): Promise<void> {
     surfaceRoughness: 0,
     wheelContact: 0,
     hoodOffset: vehicle.modelMeasure.hoodPoint,
+    cabinOffset: vehicle.modelMeasure.cabinEye ?? vehicle.modelMeasure.hoodPoint,
     velocityX: 0,
     velocityZ: 0,
     velocityY: 0,

@@ -7,6 +7,42 @@ are `BINDABLE_ACTIONS` in `src/core/input.ts` and the authoritative list is that
 array plus `Settings.keyBindings` in `src/game/settings.ts`. Fixed, non-remappable
 controls: `Escape`/`` ` `` pause, `+` fullscreen, `-` the cinema viewport.
 
+## Cars: doors with E, getting in and out with F
+
+The kit cars (`src/carkit`) are worked part by part (`src/player/interaction.ts`,
+`aimKit` and the `kit*` methods beside it):
+
+- **E works the part in the crosshair**: the doors, the bonnet, the boot lid or tailgate,
+  the fuel flap, the windows and quarter vents, and the cabin fittings (glovebox,
+  ashtray, radio, wipers, light switch, hazard button, indicator stalk, the horn pad,
+  which only moves: the game has no horn sound). The prompt names it: `[E] open front left
+  door`, `[E] lower front left window`, `[E] switch wipers`. Picking is against the car's
+  render mesh with the car lab's rule: clear glass is looked through unless the pane
+  itself moves. On foot a cabin fitting is reached only through an opening (an open door
+  or a lowered window), never through glass. The light switch, hazards and stalk work the
+  car's own lamps. The handbrake lever and the pedals follow the driving controls and are
+  not offered. A sticker envelope in hand keeps E (it mirrors the sticker); any other
+  held item gives E up while a part is in the crosshair.
+- **F gets in only through an open front door.** The player stands at a front door (the
+  side door whose shut outline is nearest the eye is a front one, on the player's side),
+  that door is open, and the look goes into the cabin through it: the eye ray's first
+  opaque hit is the cabin (seat, dash, floor, the far door's card), not through glass,
+  and the ray crosses the door's plane inside the shut door's outline. Then the prompt
+  is `[F] get in <car>`; the seat is the driver's, whichever front door it was. With the
+  door shut F only refuses, and the prompt says to open the door. The boot and bonnet
+  storage grids keep F as before; the cabin carry limits still apply.
+- **Seated, the ray runs from the camera that is drawing** (chase, hood or cabin), so the
+  driver looks at a door, or at a fitting in the cabin view, and presses E. Doors, lids
+  and the flap are offered only below the exit speed (5 km/h); fittings any time.
+- **F gets out only through an open front door** (and below 5 km/h). With both shut it
+  refuses: `the doors are shut · look at a front door, [E] to open it`. The player steps
+  out beside the door used (the aimed open front door, else the driver's, else the
+  passenger's), on that door's side, ground-checked.
+
+Cars without a kit body keep the old rule: F at the car's body enters, and exits on the
+left. The touch overlay's E button is on-foot only, so from the seat parts are worked
+with the keyboard or the pad's B.
+
 ## Gamepad (Xbox-style, W3C "standard" mapping)
 
 `src/core/gamepad.ts` owns the Gamepad API and hands out a plain snapshot; nothing
@@ -23,7 +59,7 @@ own layout would otherwise drive the car with its triggers as its steering.
 | A | handbrake (toggle) | jump |
 | B | use held item (`E`) | use held item (`E`) |
 | X | enter/exit car, pick up/mount (`F`) | same |
-| Y | hood / chase camera (`C`) | camera mode |
+| Y | camera: chase → hood → cabin (`C`) | camera mode |
 | RB / LB | shift up / down (manual or override) | — |
 | D-pad ↑ | recentre camera (`V`) | recentre camera |
 | D-pad ↓ | radio station (`R`) | drop item (`Q`) |
@@ -96,6 +132,42 @@ Levels come from `RUMBLE_*` in `src/main.ts`.
   for the Soviet cars, quicker for later racks), whatever the device.
 - Autopilot, traffic and the tow bar send `direct`: a rack angle as a share of lock,
   held, never reinterpreted (`Vehicle.steeringInputForWheelAngle`).
+
+## Driving views and the cabin camera
+
+`C` cycles the driving view: **chase** (the follow arm) → **hood** (the bonnet mount)
+→ **cabin** (the driver's seat) → chase. Entering hood or cabin faces down the car.
+The cabin eye is rigid with the chassis and so is its horizon; the mouse turns the
+driver's head against the car (to look at a door, say), there is no zoom, no
+occlusion pull-in, and neither the speed sway nor the shake kicks reach it.
+
+The eye is per car model, chassis-local metres (+X the car's left, +Y up, +Z
+forward), first match wins (`src/vehicle/cabincamera.ts`):
+
+1. this browser's override (`localStorage` `bro.cabinCameras`), written only when J
+   could not write the config file;
+2. `config/cabin-cameras.json`, `{ "<modelId>": [x, y, z] }`;
+3. the kit seat: `CarModelMeasure.cabinEye`, an anchor at the driver's cushion plus a
+   seated eye height (`KIT_DRIVER_EYE_NODE`, `src/carkit/interior.ts`) carried through
+   the body fit. A body without a kit cabin uses its bonnet mount.
+
+**Editor (driving).** `O` opens it (switching to the cabin view) and steps the axis:
+X → Y → Z → closed. While it is open the pedal and steering keys move the eye and
+drive nothing (throttle, brake and steering read zero; the handbrake still toggles):
+
+| Axis | A / ← | D / → | W / ↑ | S / ↓ |
+|---|---|---|---|---|
+| X | car's left | car's right | — | — |
+| Y | — | — | up | down |
+| Z | — | — | forward | back |
+
+0.15 m/s, Shift ×4. The HUD shows the axis and the eye to the millimetre. Mouse look
+stays live. `C` away from the cabin view closes the editor.
+
+**Save (`J`, cabin view, editor open or not).** On the dev server the game POSTs
+`/__dev/cabin-camera` and `vite.config.ts` rewrites `config/cabin-cameras.json` (one
+line per car, keys sorted); the page does not reload on that file. In any other build, or
+if the POST fails, the eye goes to `localStorage` and the toast says so.
 
 ## Camera style
 

@@ -254,7 +254,9 @@ function buildEngine(b: MeshBuilder, v: PartVariant): void {
     case 'engine_lada_1300':
     case 'engine_samara_1300': return buildInline(b, spec, 0.91);
     case 'engine_lada_1500':
-    case 'engine_samara_1500': return buildInline(b, spec, 0.96);
+    case 'engine_samara_1500':
+    // The 2111 is the 21083's block on injection.
+    case 'engine_vaz_2111': return buildInline(b, spec, 0.96);
     // Half a 2108: the 1.3's 76 mm bore and block section, two cylinders long.
     case 'engine_vaz_1111': return buildInline(b, spec, 0.91);
     case 'engine_lada_1600':

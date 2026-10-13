@@ -245,6 +245,19 @@ body.is-cinematic #ui {
   pointer-events: none;
 }
 
+.hud-cabin-editor {
+  position: absolute;
+  left: 16px;
+  top: 16px;
+  font: 13px/1.4 ui-monospace, monospace;
+  white-space: pre;
+  color: var(--hud-fg);
+  background: var(--hud-panel);
+  border: 1px solid var(--hud-border);
+  padding: 6px 12px;
+  pointer-events: none;
+}
+
 .hud-gum-bubble {
   --gum-grow: 0;
   position: absolute;

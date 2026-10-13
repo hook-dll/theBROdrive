@@ -50,6 +50,7 @@ import { PlayerVitals } from './player/vitals';
 import { BirdFlock } from './agents/birds';
 import { TumbleweedField } from './agents/tumbleweed';
 import { CameraRig, type CameraTarget } from './render/cameras';
+import { CabinCamera } from './vehicle/cabincamera';
 import { HeldItemView } from './render/held';
 import { TrunkView } from './render/trunkview';
 import { Sky } from './render/sky';
@@ -1243,6 +1244,8 @@ async function boot(): Promise<void> {
   camera.setShake(world.state.settings.cameraShake);
   camera.setStyle(world.state.settings.cameraStyle);
   camera.setYaw(initialYaw);
+  /** Driver's-seat eye per car model, and its O/J editor; see vehicle/cabincamera.ts. */
+  const cabinCamera = new CabinCamera(input, camera, (text) => hud.setToast(text));
 
   // Synthesises ordinary InputFrame commands, so every fuel, gearbox, tyre and
   // steering rule the human drives under applies to it unchanged.
@@ -1296,6 +1299,7 @@ async function boot(): Promise<void> {
     surfaceRoughness: 0,
     wheelContact: 0,
     hoodOffset: [0, 0, 0],
+    cabinOffset: [0, 0, 0],
     velocityX: 0,
     velocityZ: 0,
     velocityY: 0,
@@ -1600,6 +1604,7 @@ async function boot(): Promise<void> {
     }
     frameProfiler?.end('traffic');
 
+    cabinCamera.step(dt, f, driving ? (s.cars[drivingId!]?.modelId ?? null) : null);
     if (driving) {
       // setEnabled early-returns when unchanged, so calling it every tick is free.
       player.setEnabled(false);
@@ -1752,14 +1757,16 @@ async function boot(): Promise<void> {
       else if (f.cycleItem !== 0) inventory.cycle(f.cycleItem);
     }
 
-    // E owns held-item toggles/equipping. F remains the physical world action,
-    // including vehicle entry, so using an item can never also touch the aimed car.
+    // E owns held-item toggles/equipping, unless the aim is on a kit car's working part
+    // (a door, a lid, a fitting): then E works that part (`Interaction.claimsUseHeld`).
+    // F remains the physical world action, including vehicle entry.
+    const useHeld = f.useHeld && !interaction.claimsUseHeld;
     const heldAfterSelection = inventory.held;
     if (driving !== null || heldAfterSelection?.type !== 'binoculars') binocularsActive = false;
     if (driving !== null || heldAfterSelection?.type !== 'torchlight') torchlightActive = false;
     if (driving !== null || heldAfterSelection?.type !== 'camera') cameraActive = false;
     if (driving !== null || dying || heldAfterSelection?.type !== 'postcard') postcardView = 'down';
-    if (driving === null && !dying && !medicineActive && f.useHeld && heldAfterSelection !== null) {
+    if (driving === null && !dying && !medicineActive && useHeld && heldAfterSelection !== null) {
       if (heldAfterSelection.type === 'medicine') {
         // Health and inventory change in one turn before the autosave microtask.
         // The removed item's viewmodel remains owned by the timed animation below.
@@ -1792,7 +1799,7 @@ async function boot(): Promise<void> {
         postcardView = postcardView === 'down' ? 'text' : postcardView === 'text' ? 'photo' : 'down';
       }
     }
-    if (!medicineActive && f.useHeld && heldAfterSelection?.type === 'sun_shades') {
+    if (!medicineActive && useHeld && heldAfterSelection?.type === 'sun_shades') {
       const previous = s.player.wornSunShades;
       const next = inventory.remove(heldAfterSelection.id);
       if (next?.type === 'sun_shades') {
@@ -2163,6 +2170,7 @@ async function boot(): Promise<void> {
     updatePad(driving);
 
     frameProfiler?.begin('vehicles');
+    Vehicle.viewFrom(renderer.camera.position, frameDt);
     for (const vehicle of vehicles.values()) vehicle.syncVisuals(alpha);
     traffic.syncVisuals(alpha);
     // Trailer physics advances and snapshots in the fixed step exactly like cars,
@@ -2193,6 +2201,8 @@ async function boot(): Promise<void> {
       target.surfaceRoughness = driving.audio.surfaceRoughness;
       target.wheelContact = driving.audio.wheelContactFraction;
       target.hoodOffset = driving.modelMeasure.hoodPoint;
+      const drivenModel = s.cars[drivingId!]?.modelId;
+      if (drivenModel) target.cabinOffset = cabinCamera.eyeFor(drivenModel);
       // The dynamic camera's raw material: where the car is really going, not where it
       // points. Body-frame speed and slip come from the same solver step.
       const velocity = driving.chassis.linvel();
@@ -2620,7 +2630,7 @@ async function boot(): Promise<void> {
     radioSpatial.listenerQy = renderer.camera.quaternion.y;
     radioSpatial.listenerQz = renderer.camera.quaternion.z;
     radioSpatial.listenerQw = renderer.camera.quaternion.w;
-    const cabinView = driving !== null && camera.mode === 'hood';
+    const cabinView = driving !== null && (camera.mode === 'hood' || camera.mode === 'cabin');
     if (driving) {
       // Chassis local +Z is forward.
       const q = driving.root.quaternion;
@@ -2676,6 +2686,7 @@ async function boot(): Promise<void> {
     hud.setRadio(audio.radioReadout);
 
     hud.setPrompt(prompt);
+    hud.setCabinEditor(cabinCamera.hud);
     trunkView.update(
       boot,
       boot?.owner === 'car' ? (vehicles.get(boot.id) ?? null) : null,

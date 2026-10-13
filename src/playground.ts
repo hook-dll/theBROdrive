@@ -44,16 +44,16 @@ import { PlaygroundTraffic, type TrafficState } from './playground/traffic';
  */
 
 const SEED = 1337;
-const MODEL_ID = 'sv_vaz2105r';
+const MODEL_ID = 'kit_vaz2105';
 /**
- * The body the traffic uses. It is the rally car for a measured reason: this lap
- * holds 28% gradients, worse than anything the real road does, and the ordinary
- * catalogue saloons cannot climb them. Filling the circuit with GAZ-24s and 2101s
- * for variety was tried, and produced a scene of cars stranded on hillsides at full
- * throttle: 18-24 off-road events per 90 s of traffic, against the rally car's
- * clean lap.
+ * The body the traffic uses. It was the 2105 rally car for a measured reason: this
+ * lap holds 28% gradients, worse than anything the real road does, and the ordinary
+ * catalogue saloons could not climb them (GAZ-24s and 2101s stranded on hillsides,
+ * 18-24 off-road events per 90 s). The world has only kit cars now and none of them
+ * is a rally car, so the lap runs the kit 2105; how it copes with the steepest sectors
+ * has not been measured.
  */
-const TRAFFIC_MODEL_ID = 'sv_vaz2105r';
+const TRAFFIC_MODEL_ID = 'kit_vaz2105';
 const TRAFFIC_STATES: readonly TrafficState[] = ['rolling', 'parked', 'stowed'];
 /** Mirrors the game's 'acceptable' tier budget: 1600x900 rendered pixels. */
 const MAX_RENDER_PIXELS = 1600 * 900;
@@ -360,6 +360,7 @@ export async function bootPlayground(): Promise<void> {
       }
     }
 
+    Vehicle.viewFrom(camera.position, frameDt);
     vehicle.syncVisuals(1);
     traffic.syncVisuals(1);
     vehicle.absoluteTranslation(position);

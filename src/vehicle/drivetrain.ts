@@ -612,6 +612,23 @@ export class Drivetrain {
     return this.gearbox == null ? 0 : Math.sign(this.gear);
   }
 
+  /** The selected gear: -1 reverse, 0 neutral (or no gearbox), 1..n forward. */
+  get gearIndex(): number {
+    return this.gearbox == null ? 0 : this.gear;
+  }
+
+  /**
+   * How far down a driver's foot would hold the clutch pedal, 0..1: all the way through
+   * a shift, easing up as a slipping clutch bites, off in neutral, when locked, and on an
+   * automatic. What a kit car's clutch pedal shows (vehicle.ts `driveKit`).
+   */
+  get clutchPedal(): number {
+    if (this.gearbox == null || this.gearbox.automatic === true) return 0;
+    if (this.shiftTimer > 0) return 1;
+    if (this.gear === GEAR_NEUTRAL || this.clutch === 'locked') return 0;
+    return 1 - this.engagement;
+  }
+
   /** The clutch is locked: the crank turns with the driven wheels. */
   private get coupled(): boolean {
     return (

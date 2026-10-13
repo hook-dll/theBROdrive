@@ -492,6 +492,19 @@ export const CABIN_2110: CabinLayoutOverride = {
   wheel: { ...LAYOUTS.samara.wheel, rim: 0.011, spokes: [-40, 220] },
 };
 
+/**
+ * Name of an empty node at the driver's eye, in the kit frame. render/carmodel.ts reads
+ * it after the body fit as the default cabin camera (`CarModelMeasure.cabinEye`) and
+ * takes it out of the template.
+ */
+export const KIT_DRIVER_EYE_NODE = 'kit_driver_eye';
+/** Seated eye over the driver's cushion top, metres: a mid-size adult sitting upright. */
+const SEATED_EYE = 0.74;
+/** The eye's run behind the hip: the torso leans back with the backrest. */
+const EYE_BEHIND_HIP = 0.1;
+/** Least room between the eye and the headliner over it. */
+const EYE_HEADROOM = 0.13;
+
 export function buildInterior(ctx: KitContext): void {
   new Cabin(ctx).build();
 }
@@ -726,9 +739,19 @@ class Cabin {
     this.levers();
     for (const side of [1, -1]) this.frontSeat(side);
     this.bench();
+    this.driverEye();
     addBuilt(this.group, this.fixed, ORIGIN, 'cabin', true);
     this.ctx.root.add(this.group);
     this.doors();
+  }
+
+  /** The empty `KIT_DRIVER_EYE_NODE` over the driver's cushion, kept under the headliner. */
+  private driverEye(): void {
+    const eye = new THREE.Object3D();
+    eye.name = KIT_DRIVER_EYE_NODE;
+    const y = Math.min(this.floorY + this.lay.cushion + SEATED_EYE, this.dome(this.x0) - EYE_HEADROOM);
+    eye.position.set(...this.P(this.x0, y, this.hipS + EYE_BEHIND_HIP));
+    this.ctx.root.add(eye);
   }
 
   // ---- lookups ----

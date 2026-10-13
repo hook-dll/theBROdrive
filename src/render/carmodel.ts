@@ -31,7 +31,7 @@ import {
   type CarSurfaceFinish,
 } from './materials';
 import { CarBodySurface, GLASS_DIRT_SHARE } from './carsurface';
-import { CarStickerDecals, type StickerDecalSurface } from './stickerdecals';
+import { CarStickerDecals, type StickerDecalCarrier, type StickerDecalSurface } from './stickerdecals';
 import {
   CAR_MODELS,
   carModel,
@@ -45,6 +45,8 @@ import {
 } from '../vehicle/carpaint';
 import { lampLensAnchors } from '../vehicle/vehiclelamps';
 import { buildKitCar } from '../carkit/kit';
+import { poseKitStatic } from '../carkit/rig';
+import { KIT_DRIVER_EYE_NODE } from '../carkit/interior';
 
 /**
  * DEV-only A/B switch for the unified car style: `?carstyle=unified`, alongside any
@@ -166,6 +168,12 @@ export interface CarModelMeasure {
   readonly hoodPoint: readonly [number, number, number];
   /** Where the model's own origin sits inside the chassis group. */
   readonly visualOffset: readonly [number, number, number];
+  /**
+   * Driver's eye in chassis-local metres (the frame of `hoodPoint`): the kit's seat
+   * anchor (`KIT_DRIVER_EYE_NODE`) after the body fit. Absent on non-kit bodies and in
+   * the fit manifest; the cabin camera then falls back to `hoodPoint`.
+   */
+  readonly cabinEye?: readonly [number, number, number];
 }
 
 interface Template {
@@ -1483,6 +1491,17 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     (hoodFrontZ + hoodRearZ) * 0.5,
   ];
 
+  // The kit's driver-eye anchor, through the same fit as every sample above and settled
+  // by the loaded ride drop like the cabin around it (far from both axles, so in full).
+  // It is an empty node: it leaves the template so no instance clones it.
+  const eyeNode = scene.getObjectByName(KIT_DRIVER_EYE_NODE);
+  let cabinEye: [number, number, number] | undefined;
+  if (eyeNode) {
+    eyeNode.getWorldPosition(_sample);
+    cabinEye = [_sample.x, _sample.y - centre.y - (def.loadedRideDrop ?? 0), _sample.z - centre.z];
+    eyeNode.removeFromParent();
+  }
+
   // The unified style's normals, before the chassis stamp below reads the buffers
   // this replaces.
   creaseCarBodyNormals(scene);
@@ -1498,6 +1517,7 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     wheels,
     hoodPoint,
     visualOffset: [-centre.x, -centre.y, -centre.z],
+    cabinEye,
   };
   const [fl, fr, rl, rr] = wheels;
   const frame: CarBodyFrame = {
@@ -1592,9 +1612,11 @@ function loadModel(def: CarModelDef): Promise<void> {
   // the file, preparing its materials and measuring its body are each several
   // milliseconds of main thread and used to run as one task — a single dropped frame
   // of 25-40 ms per new model — so each step after the parse takes a frame of its own.
+  // A kit body is generated rather than parsed (15-50 ms on the M2 Pro), on its own too.
   const load = (async () => {
     if (def.textureFile) await loadPalette(def.textureFile);
-    const scene = def.kit ? buildKitCar(def.kit) : await loadScene(def.file);
+    const kit = def.kit;
+    const scene = kit ? await onOwnFrame(() => buildKitCar(kit)) : await loadScene(def.file);
     await onOwnFrame(() => {
       if (def.textureFile) {
         applyTexture(scene, paletteTextures.get(def.textureFile)!);
@@ -1802,23 +1824,45 @@ function addSpareWheel(body: THREE.Object3D, t: Template, wheels: ReadonlyMap<st
 
 /**
  * The triangles of a fitted body a sticker may be printed on: each mesh's sticker slots
- * (`markStickerSurfaces`), narrowed on a palette atlas body to the paint cell.
+ * (`markStickerSurfaces`), narrowed on a palette atlas body to the paint cell, and the
+ * moving part each one rides (a kit car's door, lid or drop glass: the nearest node with
+ * `userData.kitMotion`), so its decals swing with it.
  *
- * The decal path reads this once per car, lazily, the first time the car has a sticker —
- * a traffic car with none never pays for it.
+ * Runs as the car is cloned, while every part still stands shut: that is the pose the
+ * chassis stamp holds and the part's `restInBody` must match. The triangles themselves
+ * are read lazily, the first time the car has a sticker — a traffic car with none never
+ * pays for them.
  */
 function stickerDecalSurfaces(root: THREE.Object3D, def: CarModelDef): StickerDecalSurface[] {
   const surfaces: StickerDecalSurface[] = [];
+  const carriers = new Map<THREE.Object3D, StickerDecalCarrier>();
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
     const indices = child.userData.stickerMaterialIndices as number[] | undefined;
     if (!indices || indices.length === 0) return;
     const geometry = child.geometry;
     const cell = child.userData.stickerPaintCell as readonly [number, number] | undefined;
+    let part: THREE.Object3D | null = child;
+    while (part && part !== root && !part.userData.kitMotion) part = part.parent;
+    let carrier: StickerDecalCarrier | null = null;
+    if (part && part !== root) {
+      carrier = carriers.get(part) ?? null;
+      if (!carrier) {
+        // The part's frame in the body node's, composed down the chain from its pose.
+        const restInBody = new THREE.Matrix4();
+        for (let node: THREE.Object3D | null = part; node && node !== root; node = node.parent) {
+          node.updateMatrix();
+          restInBody.premultiply(node.matrix);
+        }
+        carrier = { node: part, restInBody };
+        carriers.set(part, carrier);
+      }
+    }
     surfaces.push({
       mesh: child,
       accepts: (slot, triangle) =>
         indices.includes(slot) && (cell === undefined || uvCellOf(geometry, triangle, cell)),
+      carrier,
     });
   });
   return surfaces;
@@ -1831,7 +1875,8 @@ export function createCarModel(id: string, appearanceKey = id): CarModelInstance
 
 /**
  * A static, non-driven copy of a whole vehicle, with its wheels placed at the same
- * factory track, wheelbase and clearance used by the driven chassis.
+ * factory track, wheelbase and clearance used by the driven chassis. A kit body comes
+ * shut and in its far pose (`poseKitStatic`): nobody opens a wreck's doors.
  */
 function cloneStaticModel(t: Template, appearanceKey = t.def.id): StaticCarInstance {
   const group = new THREE.Group();
@@ -1840,6 +1885,7 @@ function cloneStaticModel(t: Template, appearanceKey = t.def.id): StaticCarInsta
   const paint = cloneCarBodyPaintMaterials(body, t, appearanceKey);
   const glass = cloneCarGlass(body, paint);
   applyRandomPaint(body, t.def, appearanceKey);
+  if (t.def.kit) poseKitStatic(body);
   const wheels = cloneWheels(t, appearanceKey);
   addSpareWheel(body, t, wheels);
   group.add(body);

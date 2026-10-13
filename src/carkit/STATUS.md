@@ -4,7 +4,7 @@ What the owner wants, what is done, what is left. How to work: [`README.md`](REA
 Why things are the way they are: [`HISTORY.md`](HISTORY.md). Keep this file current with
 every change (update the car's row and the gaps).
 
-Last updated: 2026-10-14, the 2112 added; the owner's review round on the tens and Samaras (flush bumpers, A pillars rounding into the roof, the 2110 nose, the 2115's wide face, rear-quarter slits closed).
+Last updated: 2026-10-13, the kit cars became the world's only cars (traffic, start car, rivals, couriers, wrecks, saves); stickers ride the doors.
 
 ## The owner's goal
 
@@ -53,17 +53,19 @@ stage 4 = driving):
 - **Cockpit view ("Сесть" / "Get in")**: a button in the car lab puts the camera in the
   driver's seat; keys turn the wheel and press the pedals (`KitRig` channels `steer`,
   `throttle`, `brake`, `clutch`, `gear`, …); fittings clickable from inside. Not started.
-- **Driving in the world**: today the kit cars exist only in the lab
-  (`/?car-lab&pack=Kit`, `LAB_CAR_MODELS`). Driving them on the playground with the running
-  gear of their `sv_*` siblings (already wired in `KIT_CARS`), catalogue entries for 2110,
-  2112 and 2115. Before that: the sticker-on-door gap and the shader check below. Not started.
-- **Owner's call, later**: replace the old pack models in the world, rearrange the bonnet
-  item grid, transfer stickers to doors.
+- **Driving in the world**: done (2026-10-13). `CAR_MODELS` is `KIT_CARS`: traffic, rivals,
+  contract cars, the start car, couriers, wrecks and the dev spawn menu are kit cars on the
+  running gear of their `sv_*` siblings; the pack bodies are lab-only (`LAB_CAR_MODELS`)
+  and a save naming one loads on its kit twin. Every world `Vehicle` of a kit model has a
+  live rig (`vehicle.kit`): doors, lids and flap open in the world, and the wheel, pedals,
+  lever, handbrake, needles, light switch, stalk and hazard button follow the car.
+- **Owner's call, later**: rearrange the bonnet item grid.
 
 ## Per-car status
 
-All cars: lab only; interior, opening parts, lamps, LOD, dust/scratches/stickers on the
-body work; wheels from `DISTINCT_SOVIET_WHEEL_SETS`. Triangle counts in README.
+All cars: in the world and the lab; interior, opening parts, lamps, LOD, dust/scratches/
+stickers on the body and on the opening parts work; wheels from `DISTINCT_SOVIET_WHEEL_SETS`.
+Triangle counts in README.
 
 | Car | Spec | Measured on | Status | Left / known gaps |
 |---|---|---|---|---|
@@ -181,12 +183,14 @@ slot (as on the 2115).
 ## Known gaps
 
 **Global**
-- **Stickers on doors**: `stampCarBodyPositions` stamps vertices in the closed pose and the
-  decal is attached to the body, so a sticker on a door stays where the closed door was
-  when the door opens. Fix before going into the world.
-- **Shaders**: a kit car's program warm-up anchor comes from the general loader. Clear glass
-  (`car-glass-clear`) is a new variant: when the cars go into the world, check
-  `info.programs` stays flat during play (`.omp/rules/shader-variants.md`).
+- **Stickers on doors**: fixed (2026-10-13). A decal on a moving part hangs under it in its
+  shut frame (`render/stickerdecals.ts` `StickerDecalCarrier`), and placement reads the
+  chassis stamp under the aim, so a sticker on a door, lid, flap or drop glass moves with
+  it and one aimed at an open door lands on the door.
+- **Shaders**: checked in the world (2026-10-13), see the CHANGELOG entry for the counts.
+  A kit car's anchor (`buildProgramAnchor`) holds its driving clone, a wreck and a
+  courier; LOD, opening parts and a door's sticker layer change only visibility, uniforms
+  and transforms.
 - **No ink outline** (agreed).
 - The bonnet item grid is not rearranged yet (engine central).
 - **Lamp roles**: only head, tail, brake, reverse, blinkers (and never-lit `inert`). Every
@@ -203,3 +207,165 @@ the drawing (HISTORY.md).
 60 mm shallower relative to the body than on the 21099 drawing; the front door's leading
 edge is 27–39 mm behind the photo/21099 drawing (the 2108's kept so the shared front is
 identical); tail-lamp tail/stop split is [INFERENCE].
+
+## Running gear and performance
+
+Audit of 2026-10-13 for the kit-only rollout (the kit cars are the game's only cars). Every
+figure below is read from the source named with it; a figure that no source prints is
+marked [E] and says where it comes from. Running gear lives in `vehicle/carmodels.ts`
+(`KIT_CARS`, `GEAR_VAZ_*`, the `sv_*` siblings in `SOVIET_SPECS`), targets and sources in
+`tools/reality.ts` (`TARGETS`, `kit_*`), engines in `parts/registry.ts`.
+
+### What each car runs on
+
+| Car | Version | Kerb kg | Engine (net) | Box, final drive | Tyre | Tank | Front share | Brakes | Lock rad | Cd·A m² | Springs, aero |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2101 | 2101 1.2 | 955 | `engine_lada_1200` 47 kW/5600, 87.3 Nm/3400 | 3.75/2.30/1.49/1.00, 4.3 | 165/80 R13 | 39 | 0.51 [E] | unassisted 1.0 g | 0.529 | 0.95 | `SUSP_ZHIGULI`, `AERO_ZHIGULI` |
+| 2102 | 2102 1.2 | 1010 | `engine_lada_1200` | 2101 box, 4.44 | 165/80 R13 | 39 | 0.50 [E] | unassisted | 0.531 | 1.07 | `SUSP_ZHIGULI_ESTATE`, `AERO_ZHIGULI_ESTATE` |
+| 2103 | 2103 1.5 | 1030 | `engine_lada_1500` 53.3 kW/5600, 104 Nm/3400 | 2101 box, 4.1 | 175/70 R13 (0.288) | 39 | 0.51 [E] | servo 1.2 g | 0.53 | 0.95 | Zhiguli |
+| 2104 | 2104 1.3 | 1020 | `engine_lada_1300` 47 kW/5600, 92 Nm/3400 | 3.67/2.10/1.36/1.00, 4.3 | 175/70 R13 (0.288) | 39 | 0.50 [E] | servo | 0.53 | 1.07 | Zhiguli estate |
+| 2105 | 2105 1.3 | 995 | `engine_lada_1300` | 2105 box, 4.3 | 175/70 R13 (0.288) | 39 | **0.548** | servo | 0.53 | 0.92 | Zhiguli |
+| 2106 | 2106 1.6 | 1035 | `engine_lada_1600` 55.5 kW/5400, 116 Nm/3000 | 3.67/2.10/1.36/1.00, 3.9 | 175/70 R13 (0.288) | 39 | 0.51 [E] | servo | 0.53 | 0.95 | Zhiguli |
+| 2107 | 2107 1.5 | 1030 | `engine_lada_1500` | five-speed …/0.82, 3.9 | 175/70 R13 (0.288) | 39 | 0.51 [E] | servo | 0.53 | 0.92 | Zhiguli |
+| 2108 | 2108 1.3 | 900 | `engine_samara_1300` 47 kW/5600, 94 Nm/3400 | 3.636/1.95/1.357/0.941/0.784, 3.94 | 165/70 R13 | 43 | 0.62 [E] | servo | 0.59 | 0.88 | `SUSP_SAMARA`, `AERO_SAMARA_HATCH` |
+| 2109 | 2109 1.3 | 915 | `engine_samara_1300` | Samara box, 3.94 | 165/70 R13 | 43 | 0.615 (AO kerb split 0.607) | servo | 0.59 | 0.88 | Samara hatch |
+| 21099 | 21099 1.5 carb. | 970 | `engine_samara_1500` 51.5 kW/5600, 106.4 Nm/3400 | Samara box, 3.94 | 165/70 R13 | 43 | 0.60 [E] | servo | 0.589 | 0.84 | Samara, `AERO_SAMARA_SALOON` |
+| **2115** | **2115 1.5i** | **985** | **`engine_vaz_2111` 57.2 kW/5400, 115.7 Nm/3000** | **Samara box, 3.706** (`gearbox_samara_5_tall`) | 165/70 R13 | 43 | 0.60 [E] | servo | 0.589 | 0.84 | Samara, saloon |
+| **2110** | **21102** | **1020** | **`engine_vaz_2111`** | **Samara box, 3.706** | 175/70 R13 | 43 | 0.62 [E] | servo | 0.604 | **0.67** | Samara, `AERO_VAZ_2110` |
+| **2112** | **21122** | **1020** | **`engine_vaz_2111`** | **Samara box, 3.706** | 175/70 R13 | 43 | 0.62 [E] | servo | 0.604 | **0.67** | Samara, `AERO_VAZ_2110` |
+
+Bold: changed in this audit. Before it, the 2110, 2112 and 2115 drove the 21099 entire:
+970 kg, the 1.5 carburettor, the 3.94 axle and the 21099's shape.
+
+### Measured against the factory (`bun tools/reality.ts`, 2026-10-13, all 13 pass)
+
+Test load: driver and passenger (+150 kg) for top and 0-100; the 80-0 at gross mass with
+a floored pedal against the type-approval ceiling (pass = shorter); turning: the factory
+outer-front-wheel radius, which the bench compares as the turn centre's offset
+(`sqrt(R² − L²) − t/2`, the "bench" column). Tolerances: top ±5%, 0-100 ±8% (or an accepted
+known deviation held within 3 points), turn ±3%, wheelbase/track/radius ±0.5%.
+
+| Car | Mass kg | Wheelbase m | Tracks m | Top km/h target / measured | 0-100 s target / measured | 80-0 m ceiling / measured | Turn: factory R / bench target / measured |
+|---|---|---|---|---|---|---|---|
+| 2101 | 955 | 2.424 | 1.349 / 1.305 | 142 / 142 | 20 / 19.7 | 43.2 / 35.3 | 5.6 / 4.37 / 4.38 |
+| 2102 | 1010 | 2.424 | 1.365 / 1.321 | 138 / 136 | 23 / 22.6 | 43.2 / 35.3 | 5.6 / 4.37 / 4.37 |
+| 2103 | 1030 | 2.424 | 1.365 / 1.321 | 152 / 148 | 17 / 17.6 | 43.2 / 35.8 | 5.6 / 4.37 / 4.37 |
+| 2104 | 1020 | 2.424 | 1.365 / 1.321 | 137 / 136 | 18.5 / 20.9 ~ | 38 / 35.8 | 5.6 / 4.37 / 4.37 |
+| 2105 | 995 | 2.424 | 1.365 / 1.321 | 145 / 143 | 18 / 20.0 ~ | 38 / 34.8 | 5.6 / 4.37 / 4.38 |
+| 2106 | 1035 | 2.424 | 1.365 / 1.321 | 150 / 150 | 16 / 17.0 | 43.2 / 34.7 | 5.6 / 4.37 / 4.37 |
+| 2107 | 1030 | 2.424 | 1.365 / 1.321 | 150 / 150 | 17 / 18.3 | 38 / 34.4 | 5.6 / 4.37 / 4.37 |
+| 2108 | 900 | 2.460 | 1.400 / 1.370 | 148 / 147 | 16 / 17.8 ~ | 38 / 32.5 | 5.2 / 3.88 / 3.90 |
+| 2109 | 915 | 2.460 | 1.400 / 1.370 | 148 / 146 | 16 / 18.0 ~ | 38 / 32.5 | 5.2 / 3.88 / 3.90 |
+| 21099 | 970 | 2.460 | 1.400 / 1.370 | 154 / 154 | 13.5 / 16.6 ~ | 38 / 33.2 | 5.2 / 3.88 / 3.90 |
+| 2115 | 985 | 2.460 | 1.400 / 1.370 | 158 / 160 | 13.2 / 15.4 ~ | 38 / 33.2 | 5.2 / 3.88 / 3.91 |
+| 2110 | 1020 | 2.492 | 1.400 / 1.370 | 167 / 171 | 14 / 15.5 ~ | 38 / 33.2 | 5.2 / 3.86 / 3.84 |
+| 2112 | 1020 | 2.492 | 1.400 / 1.370 | 167 / 171 | 14 / 15.5 ~ | 38 / 33.3 | 5.2 / 3.86 / 3.84 |
+
+Loaded wheelbase, front track and rolling radius equal the factory figures on all 13
+(0.0%). Threshold 100-0 against a road test: 2110 54.6 m against Za Rulem's 55.0 m for a
+21102 (judged, −0.7%); the 2112 55.0 m, the 2104 51.5 m against Autoreview's 49.4 m and the
+2109 53.2 m against 44.7 m are printed only (second-hand figures, or another body's).
+
+`~` = a known 0-100 deviation, accepted with its cause in `tools/reality.ts`:
+- **Catalogue optimistic** (2108, 2109, 21099, 2115, 2110, 2112: +11 to +23%). A point-mass
+  run from the engine's own net curve, ratios, efficiency, Cd·A and the stated load, with
+  the crank's inertia geared to the wheels, is already slower than the printed time (21102
+  15.1 s against 14, 2115 15.0 against 13.2, 21099 16.5 against 13.5); the bench is within
+  ~3% of that bound. The model uses the GOST net figure as printed. The tens' other printed
+  axle, 3.937, was tried: 8.9% on the 21102, still outside, so the 3.706 the sources name for
+  the 2112 and 2115 stays.
+- **Classic launch** (2104 +13%, 2105 +11%): the 1.3 rear-drive cars from rest; the cause is
+  not identified (traction was ruled out, see `tools/reality.ts`). The 2106 and 2107 pass.
+
+Top speed on the 2110/2112 is 171 against the manual's 167 (+2.7%, in tolerance) with the
+Dmitrov tunnel's Cd·A 0.670 m² kept as measured; the repair manual prints 170 for the same
+21102. The 2115 is 160 against 158 with the 21099's AvtoVAZ Cd·A (no 2115 figure exists).
+
+### Proportions (`bun tools/kit-proportions.ts`)
+
+Hard gates pass on all 13: the `model-fits.json` rows equal a fresh `carModelMeasure`
+(0 mm) and the factory box, wheelbase, tracks, radius and clearance (0.0%); no hub moves
+more than 8 mm in its arch when the loader lays the factory wheelbase over the generated
+axles. Advisories (the generated body before the loader fits it):
+- **Height.** The drawings stand lower than the passports, and the loader grows the bodies
+  by: 2101 8.8%, 2102 10.4%, 2103 9.3%, 2106 9.2% (the `BODY_124` roof is 1.337), Samaras and
+  2115 5.8–6.6% (roof 1.335); the 05 shell (2104/2105/2107) and the tens under 1%. The
+  pipeline (`tools/vehicle-pipeline.md` §9) calls more than 2–3% a sign the source is wrong:
+  the `BODY_124` and `BODY_2108` roofs are the first thing to re-measure against a photo.
+- **Width.** Generated shells are 1.2–1.5% wider than the passport (the tens 1.8% narrower,
+  the passport's 1680 including the mouldings); fitted out.
+- **Tracks and tyre.** The 2101 is built on the `BODY_124` half tracks (1.365 / 1.321 against
+  its 1.349 / 1.305) and a 0.288 tyre (165/80 R13 is 0.297); the 2102 the same tyre. The
+  loader places and sizes the wheels to the factory, so this is inside the arches only.
+
+### Changes in this audit, with sources
+
+- **2110 / 2112 / 2115 own running gear** (`GEAR_VAZ_21102`, `GEAR_VAZ_21122`, `GEAR_VAZ_2115`)
+  and a new engine **`engine_vaz_2111`** (57.2 kW at 5400, 115.7 Nm at 3000, GOST 14846-81
+  net, idle 800): the VAZ-2110 manual's tables
+  (autoprospect.ru/vaz/2110-zhiguli/1-obshhie-svedeniya.html): kerb 1010/1020/1020 kg for
+  the 2110/21102/21122, 167 km/h and 14.0 s for the 21102 and 21122, ratios 3.636 / 1.950 /
+  1.357 / 0.941 / 0.784, final drive "3,706 или 3,937", 175/70 R13, 5.2 m outer-wheel radius,
+  38 m from 80 km/h at full mass. Dynamics "with driver and passenger", gross 1480 kg:
+  vaz-rukovodstvo.ru/2110/1-110vaz.htm. Cx 0.347 on 1.931 m²: vaz-rukovodstvo.ru/2110/aerodinamika.html.
+  Tank 43 l: drom.ru/catalog/lada/2110/specs/tank. The 2115 1.5i: 985 kg, 158 km/h, 13.2 s,
+  final drive 3.7, 165/70 or 175/70 R13, 5.2 m, 38 m laden (ladaonline.ru catalogue,
+  SECTION_ID=358 ELEMENT_ID=12598; carexpert.ru/models/vaz/2115/tech/vaz15s.htm, gross 1410).
+- **2101 height 1382 → 1440** (`FACTORY_GEOMETRY.kit_vaz2101`): njcar.ru/dimensions/vaz/2101,
+  wroom.ru; the 2106 on the same shell is 1440–1444 (carexpert.ru, drom.ru). Tyre width to
+  0.165, the 165/80 R13 its radius already was (the 2101 manual,
+  remkomplekt.org/vaz-2101/tehnicheskie-harakteristiki.html).
+- **2107 height 1435 → 1446**: drom.ru/catalog/lada/frame/2107 (njcar.ru prints 1440; no
+  source prints 1435); the 2105 on the same shell is 1446.
+- **2105 front share 0.51 → 0.548** (`sv_vaz2105`, so also the pack car): kerb 995 kg "в том
+  числе на переднюю ось 545, на заднюю 450" (autoopt.ru, vaz-2105). The pack 2105's 0-100
+  moved from +12.1% to +11.1%, inside its accepted note.
+- Fit rows of `kit_vaz2101` and `kit_vaz2107` regenerated (`tools/fit-models.ts`).
+
+### Left open (known drift and conflicts)
+
+- **Axle splits are [E]** for every car but the 2105 (and the 2109's 555/360 = 0.607, which
+  the game's 0.615 is within a point of). The 2104/2107 share the 2105's shell and are
+  probably nearer 0.55 than 0.51; the 2108's 0.62 is unsourced (autoopt prints only its
+  laden split). Not changed without a source.
+- **Final drives**: the 2108/2109 manual prints 3.9 against the game's 3.94 (autoopt.ru); the
+  21099 manual prints "3,7 или 3,9" against 3.94. Kept: a 1% difference, and the 21099's
+  shorter choice is the quicker one.
+- **Source conflicts**, kept as stated: 2115 kerb 970 (drom.ru) / 985; 2115 0-100 14 s and
+  155 km/h (drom.ru) / 13.2 s, 158; 21102 top 167 (manual) / 170 (repair manual); 2110
+  wheelbase 2492 / 2490 (autoopt.ru); 2105 length 4130 / 4145 (drom.ru, most trims); 2106
+  length 4166 / 4116 (njcar.ru, most trims); 2104 tank 42 l (drom.ru) / 39; 2101 80-0 ceiling
+  43.2 m (autoprospect.ru) / 38 m (remkomplekt.org); 2106 top 150 (autoopt.ru) / 154
+  (carexpert.ru). No primary factory text prints the classics' overall dimensions (the
+  manuals carry them as drawings): those rest on catalogue aggregators.
+- **Tyre profile on the 2103–2107**: the rolling radius is 175/70 R13's (0.288; the catalogues
+  list 165/80 or 175/70 R13), but the tyre curve is the 80-series one (`tyre.aspect` 0.8, the
+  comments say 165/80). One of the two should follow the other; left for a handling pass
+  since either moves grip and the accepted launch figures.
+- Not printed anywhere read: the 2111 engine's red line and mass (the Samara 1.5's kept),
+  a 2112 or 2115 road-test 100-0, any 2115 Cd.
+- The pack rows `sv_vaz2101` (1382) and `sv_vaz2107` (1435) carry the same heights the kit
+  rows had; the pack cars are lab-only now and were left.
+
+### What a car is checked on before it enters the game
+
+`tools/vehicle-pipeline.md` is the full route; for a kit car the checks are:
+1. **Sources**: one exact factory version; every figure below with its source (§2, §22).
+2. **Geometry** (`FACTORY_GEOMETRY`): length, width, height, clearance, wheelbase, front and
+   rear track, tyre radius and width; `tools/kit-proportions.ts` holds the fit row to the
+   fresh measure and the factory, hub moves in the arches, and reports the loader's stretch.
+3. **Running gear** (`CarModelDef`): kerb mass, front weight share, engine (net power and
+   torque with their rpm, red line, idle; every engine held to its maker's figures within
+   1% by `tools/reality.ts`), gearbox ratios, reverse, final drive, shift time, tank, tyre
+   construction and profile, grip, brakes, steering lock, drive layout, handling profile,
+   suspension preset (ride frequencies, damping, roll centres, bars, camber, toe, caster),
+   Cd·A and the aero preset (lift, crosswind).
+4. **Behaviour** (`tools/reality.ts`): loaded wheelbase, track and radius; top speed; 0-100
+   through a manual box; turning radius by the outer wheel; 80-0 at gross mass against the
+   type-approval ceiling; a measured 100-0 road test where one exists; lateral g and ride
+   frequency printed beside their period figures.
+5. **Driveline and cooling** for a new engine: `tools/driveline.ts`, `tools/cooling.ts`
+   (every engine held in band by the one radiator), `tools/part-mesh-coverage.ts` (the loose
+   engine has a mesh).
+6. **World** (§16 gates 5–8): traffic, wrecks, trunk grid, save/load, shader programs
+   flat during play, `npm run check` and `npm run build`; then by hand in the game.

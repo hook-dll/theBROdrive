@@ -48,8 +48,8 @@ function modelFit(id: string): CarModelFit {
  *    Soviet pack's own form: FBX in centimetres, nose down +Z, colour by UV from the
  *    pack's 9x2 atlas, glass in its (3, 1) cell, one node per lamp role.
  *  - KIT: no file at all. src/carkit builds the scene at load from a spec, with a
- *    full interior and hinged panels; these are the lab's (LAB_CAR_MODELS) until they
- *    replace the pack bodies they are modelled on.
+ *    full interior and hinged panels. These are the game's cars (`CAR_MODELS`); every
+ *    other pack is the lab's (`LAB_CAR_MODELS`).
  */
 const SOVIET = '/models/soviet';
 const SAAS = '/models/saas';
@@ -973,16 +973,22 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   // VAZ-1111 (the factory sheet and the 1111 manual): 3200 × 1420 × 1400, 2180 wheelbase,
   // 1214/1204 tracks, 150 under the subframe; 135/80R12 radial, 0.260 m free radius.
   cf_vaz1111:     { length: 3.200, width: 1.420, height: 1.400, clearance: 0.150, wheelbase: 2.180, frontTrack: 1.214, rearTrack: 1.204, wheelRadius: 0.260, tyreWidth: 0.135 },
-  // Kit bodies: their siblings' factory figures (the same cars); the 2107 is the 4145 its
-  // dimensioned drawing and the period literature give. The 2115 has no sibling: AvtoVAZ's
-  // 4330 × 1650 × 1402 (vaz.ru, drom.ru), 170 clearance, the 21099's wheelbase and tracks.
-  kit_vaz2101:    { length: 4.073, width: 1.611, height: 1.382, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.349, rearTrack: 1.305, wheelRadius: 0.297, tyreWidth: 0.155 },
+  // Kit bodies: their siblings' factory figures (the same cars), re-checked for the kit
+  // rollout (src/carkit/STATUS.md, "Running gear and performance"). The 2101 is 1440 high,
+  // not the pack row's 1382 (njcar.ru/dimensions/vaz/2101, wroom.ru; the 2106 on the same
+  // shell is 1440-1444, drom.ru, carexpert.ru) on 165/80 R13 (its factory manual,
+  // remkomplekt.org/vaz-2101/tehnicheskie-harakteristiki.html). The 2107 is 4145 long (its
+  // dimensioned drawing, the period literature) and 1446 high like the 2105 on the same
+  // shell (drom.ru/catalog/lada/frame/2107; njcar.ru prints 1440, nothing prints 1435). The
+  // 2115 has no sibling: AvtoVAZ's 4330 × 1650 × 1402 (vaz.ru, drom.ru, ladaonline.ru),
+  // 170 clearance, the 21099's wheelbase and tracks, 165/70 R13 (ladaonline.ru).
+  kit_vaz2101:    { length: 4.073, width: 1.611, height: 1.440, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.349, rearTrack: 1.305, wheelRadius: 0.297, tyreWidth: 0.165 },
   kit_vaz2102:    { length: 4.059, width: 1.611, height: 1.458, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.297, tyreWidth: 0.165 },
   kit_vaz2103:    { length: 4.116, width: 1.611, height: 1.446, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288, tyreWidth: 0.165 },
   kit_vaz2104:    { length: 4.115, width: 1.620, height: 1.443, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288, tyreWidth: 0.165 },
   kit_vaz2105:    { length: 4.130, width: 1.620, height: 1.446, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288, tyreWidth: 0.165 },
   kit_vaz2106:    { length: 4.166, width: 1.611, height: 1.444, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288, tyreWidth: 0.165 },
-  kit_vaz2107:    { length: 4.145, width: 1.620, height: 1.435, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288, tyreWidth: 0.165 },
+  kit_vaz2107:    { length: 4.145, width: 1.620, height: 1.446, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288, tyreWidth: 0.165 },
   kit_vaz2108:    { length: 4.006, width: 1.650, height: 1.402, clearance: 0.170, wheelbase: 2.460, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.281, tyreWidth: 0.165 },
   kit_vaz2109:    { length: 4.006, width: 1.650, height: 1.402, clearance: 0.160, wheelbase: 2.460, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.281, tyreWidth: 0.165 },
   kit_vaz21099:   { length: 4.205, width: 1.650, height: 1.402, clearance: 0.160, wheelbase: 2.460, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.281, tyreWidth: 0.165 },
@@ -1306,7 +1312,9 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     brakeDecelG: BRAKES_SERVO_G,
     steerLock: 0.53,
     rearDriveBias: 1,
-    frontWeightShare: 0.51,
+    // Kerb 995 kg "в том числе на переднюю ось 545, на заднюю 450" (autoopt.ru, vaz-2105):
+    // the one classic whose catalogue prints its kerb axle split.
+    frontWeightShare: 0.548,
     dragArea: 0.92,
     aero: AERO_ZHIGULI,
     suspension: SUSP_ZHIGULI,
@@ -2178,10 +2186,90 @@ const ENTRIES: readonly Entry[] = [
   // -------------------------------------------------------------------------
   ...CARFORGE_CARS,
 ];
+/** What a kit car carries of its own when its pack sibling is not the same car. */
+type KitRunningGear = Pick<
+  Entry,
+  | 'mass'
+  | 'tyre'
+  | 'engineId'
+  | 'gearboxId'
+  | 'tankLitres'
+  | 'wheelGrip'
+  | 'brakeDecelG'
+  | 'steerLock'
+  | 'frontWeightShare'
+  | 'dragArea'
+  | 'aero'
+>;
+
+/*
+ * The pack has no 2110, 2112 or 2115, so these three are their own cars, not the 21099:
+ * one version each, the volume one of the early 2000s, all three on the VAZ-2111 1.5
+ * injection engine and the Samara transaxle on the 3.706 axle (`gearbox_samara_5_tall`:
+ * the 2110 manual prints "3,706 или 3,937", ladaonline.ru 3.7 for the 2115). They keep the
+ * 21099's front-drive layout, `road` profile and Samara springs (the 2110 is the Samara's
+ * suspension: struts and a trailing-arm beam, the 2110 manual).
+ *
+ * Sources: VAZ-2110 manual technical tables
+ * (autoprospect.ru/vaz/2110-zhiguli/1-obshhie-svedeniya.html, the same text as
+ * countryauto.ru/vaz/2110/1-obwie-svedenija), its dynamics table "замеряются по специальной
+ * методике" with driver and passenger (vaz-rukovodstvo.ru/2110/1-110vaz.htm); AvtoVAZ's
+ * Dmitrov tunnel for the 2110's Cx, 0.347 on 1.931 m² (vaz-rukovodstvo.ru/2110/aerodinamika.html);
+ * the 2115: ladaonline.ru (catalog SECTION_ID=358 ELEMENT_ID=12598), carexpert.ru
+ * (models/vaz/2115/tech/vaz15s.htm), wiki.zr.ru (ВАЗ-2113-2115), drom.ru (catalog/lada/2115/77754).
+ * No source prints an axle split for any of them: the front shares are the 2110 GTA body's
+ * and the 21099's [E].
+ */
 /**
- * Kit bodies (src/carkit), each on the running gear of the pack body it is modelled
- * on: the same engine, gearbox, springs and masses, only a different scene. A label
- * names a kit car the pack has no body for.
+ * VAZ-21102: kerb 1020 kg, 175/70 R13, 2111 engine, 167 km/h and 14.0 s (2110 manual).
+ * Tank 43 l (drom.ru/catalog/lada/2110/specs/tank). Grip and lock are `gt_vaz2110`'s, set
+ * on Za Rulem's 55.0 m 100-0 of a 21102 and the manual's 5.2 m outer-wheel radius. Cd·A is
+ * the tunnel's, 0.347 × 1.931 = 0.670 m², which puts the car at 171 km/h on the bench
+ * (tools/reality.ts): 2.7% over the manual's 167, 0.6% over the repair manual's 170.
+ */
+const GEAR_VAZ_21102: KitRunningGear = {
+  mass: 1020,
+  tyre: { construction: 'radial', aspect: 0.7 },
+  engineId: 'engine_vaz_2111',
+  gearboxId: 'gearbox_samara_5_tall',
+  tankLitres: 43,
+  wheelGrip: 0.66,
+  brakeDecelG: BRAKES_SERVO_G,
+  steerLock: 0.604,
+  frontWeightShare: 0.62,
+  dragArea: 0.67,
+  aero: AERO_VAZ_2110,
+};
+/**
+ * VAZ-21122, the 2112 with the 2111 engine: kerb 1020 kg, 167 km/h and 14.0 s, the same
+ * as the 21102 (2110 manual), so the same Cd·A; everything else the 21102's.
+ */
+const GEAR_VAZ_21122: KitRunningGear = GEAR_VAZ_21102;
+/**
+ * VAZ-2115 1.5i (2111 engine): kerb 985 kg (carexpert.ru, ladaonline.ru, wiki.zr.ru;
+ * drom.ru prints 970), 165/70 R13 (ladaonline.ru: 165/70 or 175/70 R13), 3.7 axle, tank
+ * 43 l, 158 km/h and 13.2 s (ladaonline.ru, carexpert.ru), 5.2 m turning radius. Grip,
+ * lock and shape the 21099's (the same cabin and doors on a new nose and tail), and its Cd·A,
+ * AvtoVAZ's 0.45 on 1.87 m² (no 2115 figure was found): 160 km/h on the bench, 1.3% over.
+ */
+const GEAR_VAZ_2115: KitRunningGear = {
+  mass: 985,
+  tyre: { construction: 'radial', aspect: 0.7 },
+  engineId: 'engine_vaz_2111',
+  gearboxId: 'gearbox_samara_5_tall',
+  tankLitres: 43,
+  wheelGrip: 0.65,
+  brakeDecelG: BRAKES_SERVO_G,
+  steerLock: 0.589,
+  frontWeightShare: 0.6,
+  dragArea: 0.84,
+  aero: AERO_SAMARA_SALOON,
+};
+
+/**
+ * Kit bodies (src/carkit), the game's cars. Each takes the running gear of the pack body
+ * it is modelled on (the same engine, gearbox, springs and masses), and a car the pack has
+ * no body for takes a label and its own running gear over the nearest sibling's.
  */
 const KIT_CARS: readonly Entry[] = (
   [
@@ -2195,20 +2283,18 @@ const KIT_CARS: readonly Entry[] = (
     ['kit_vaz2108', 'sv_vaz2108', 'vaz2108'],
     ['kit_vaz2109', 'sv_vaz2109', 'vaz2109'],
     ['kit_vaz21099', 'sv_vaz21099', 'vaz21099'],
-    // The facelifted 21099: the 21099's running gear under it.
-    ['kit_vaz2115', 'sv_vaz21099', 'vaz2115', 'VAZ-2115 Samara'],
-    // The pack has no 2110 either: the 21099's running gear under it, as for the 2115.
-    ['kit_vaz2110', 'sv_vaz21099', 'vaz2110', 'VAZ-2110'],
-    // Its hatch, on the same running gear.
-    ['kit_vaz2112', 'sv_vaz21099', 'vaz2112', 'VAZ-2112'],
-  ] satisfies readonly (readonly [id: string, sibling: string, kit: string, label?: string])[]
-).map(([id, sibling, kit, label]) => {
+    ['kit_vaz2115', 'sv_vaz21099', 'vaz2115', 'VAZ-2115 Samara', GEAR_VAZ_2115],
+    ['kit_vaz2110', 'sv_vaz21099', 'vaz2110', 'VAZ-2110', GEAR_VAZ_21102],
+    ['kit_vaz2112', 'sv_vaz21099', 'vaz2112', 'VAZ-2112', GEAR_VAZ_21122],
+  ] satisfies readonly (readonly [id: string, sibling: string, kit: string, label?: string, gear?: KitRunningGear])[]
+).map(([id, sibling, kit, label, gear]) => {
   const base = SOVIET_CARS.find((e) => e.id === sibling);
   if (!base) throw new Error(`Kit car "${id}" names a missing sibling "${sibling}"`);
   return {
     ...base,
+    ...gear,
     id,
-    label: `${label ?? base.label} (kit)`,
+    label: label ?? base.label,
     dir: KIT,
     glb: kit,
     kit,
@@ -2271,12 +2357,18 @@ function catalogueDef(e: Entry): CarModelDef {
   };
 }
 
-export const CAR_MODELS: readonly CarModelDef[] = ENTRIES.map(catalogueDef);
 /**
- * Bodies only the car lab shows (`?car-lab`): resolvable by id, but in no list the
- * game draws traffic, rivals, wrecks or spawns from.
+ * The cars of the world: traffic, rivals, wrecks, couriers, contract cars, the start car
+ * and the spawn menu draw from this list. Kit bodies only (src/carkit): each opens its
+ * doors and lids and has a cabin.
  */
-export const LAB_CAR_MODELS: readonly CarModelDef[] = KIT_CARS.map(catalogueDef);
+export const CAR_MODELS: readonly CarModelDef[] = KIT_CARS.map(catalogueDef);
+/**
+ * Bodies only the car lab shows (`?car-lab`): the vendored packs and the carforge cars.
+ * Resolvable by id (a kit car wears the Soviet pack's wheel sets) but in no list the
+ * game draws from, and a save naming one loads as its kit twin (save.ts).
+ */
+export const LAB_CAR_MODELS: readonly CarModelDef[] = ENTRIES.map(catalogueDef);
 
 const BY_ID = new Map([...CAR_MODELS, ...LAB_CAR_MODELS].map((m) => [m.id, m]));
 
@@ -2285,7 +2377,7 @@ const BY_ID = new Map([...CAR_MODELS, ...LAB_CAR_MODELS].map((m) => [m.id, m]));
  * Zhiguli: the cheapest, softest, most ordinary thing in the catalogue, and the
  * one car this game is most about.
  */
-export const DEFAULT_CAR_MODEL_ID = 'sv_vaz2101';
+export const DEFAULT_CAR_MODEL_ID = 'kit_vaz2101';
 
 export function carModel(id: string): CarModelDef {
   const m = BY_ID.get(id);

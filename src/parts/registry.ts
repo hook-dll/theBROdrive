@@ -901,6 +901,30 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
+    // VAZ-2111: the 21083's 1.5 block (82 x 71 mm, 1.499 l) on distributed injection,
+    // 57.2 kW at 5400 and 115.7 Nm at 3000, GOST 14846-81 net; idle 800 (the VAZ-2110
+    // manual's engine table: autoprospect.ru/vaz/2110-zhiguli/1-obshhie-svedeniya.html;
+    // its 54.6 kW is the later Euro-2 rating). The 21102, 21122 and the 1.5i 2115 carry
+    // it. No 2110 source gives a red line or a bare-engine mass: the Samara family's 6000
+    // (2108 manual) and the 21083's mass are kept.
+    id: 'engine_vaz_2111',
+    kind: 'engine',
+    label: '1.5i VAZ-2111 four',
+    mass: 118,
+    fits: ['car'],
+    engine: {
+      peakPowerKw: 57.2,
+      powerPeakRpm: 5400,
+      peakTorqueNm: 115.7,
+      torquePeakRpm: 3000,
+      redlineRpm: 6000,
+      idleRpm: 800,
+      bsfc: 0.3,
+      brakingCoeff: 0.0191,
+      cylinders: 4,
+    },
+  },
+  {
     // VAZ-1111: the 2108 engine cut in half — two cylinders, 76 x 71 mm, 0.649 litre.
     // AvtoVAZ's 1998 catalogue gives 21.5 kW (29.3 hp) at 5600 and 44.1 Nm at 3400
     // (autoopt.ru, VAZ-1111; the manual's later GOST 14846-88 rating is 20.7 kW at

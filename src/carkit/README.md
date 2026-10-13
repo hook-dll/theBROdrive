@@ -5,8 +5,10 @@ loader would return. From there the car goes through the usual pipeline in
 `render/carmodel.ts` (`buildTemplate`), so it gets paint, dust, scratches, stickers, glass
 dirt, lamps and fitting to the factory dimensions on the same terms as every other model.
 
-The cars are shown in the car lab only (`/?car-lab&pack=Kit`); they are absent from traffic,
-the garage, spawns and POIs.
+Since 2026-10-13 the kit cars are the game's only cars (`CAR_MODELS`): traffic, rivals, the
+start car, contract cars, couriers, wrecks and the dev spawn menu draw from them, and a save
+naming a pack body loads on its kit twin. The car lab (`/?car-lab&pack=Kit`) still shows
+them beside the other packs.
 
 **Reading order for a new agent:**
 1. this file: how the kit works, the spec language, how to add a car, the working rules;
@@ -121,12 +123,28 @@ Integration outside the folder:
 
 - `vehicle/carmodels.ts`: `CarModelDef.kit` (build from a spec instead of reading `file`),
   `CarModelDef.clearGlass`, `FACTORY_GEOMETRY` rows `kit_*`, the `KIT_CARS` list (each kit
-  car on the running gear of an `sv_*` sibling), `DISTINCT_SOVIET_WHEEL_SETS`, and
-  `LAB_CAR_MODELS` (resolvable through `carModel(id)` but absent from `CAR_MODELS`, which
-  feeds traffic and spawns).
-- `render/carmodel.ts`: `loadModel` calls `buildKitCar`. Clear glass comes from
-  `carClearGlassMaterial`. A cabin mesh with `userData.kitShadowed` receives shadows.
-  `cloneWheels` rescales the pack's wheel sets to the kit tyre.
+  car on the running gear of an `sv_*` sibling), `DISTINCT_SOVIET_WHEEL_SETS`, `CAR_MODELS`
+  (= `KIT_CARS`: the world's cars) and `LAB_CAR_MODELS` (every other pack: resolvable
+  through `carModel(id)` for the lab and the wheel sets, in no list the game draws from).
+- `save/save.ts` `worldModelId`: a saved `sv_*`/`sa_*`/`gt_*` id loads as `kit_<same car>`
+  (`sv_vaz2105r` as `kit_vaz2105`), one with no kit twin as `DEFAULT_CAR_MODEL_ID`
+  (`kit_vaz2101`).
+- `vehicle/vehicle.ts`: every `Vehicle` of a kit model owns a `KitRig` (`vehicle.kit`),
+  built with its visuals (lenses left to `VehicleLamps`) and handed over on `rebuild`.
+  Each rendered frame `driveKit` writes the driving channels (`steer`, `throttle`, `brake`,
+  `clutch`, `handbrake`, `gear`, `speed`, `rpm`, `fuel`, `temp`, `lights`, `blinker`,
+  `hazard`: the Vehicle owns these, so a script must not write them) and runs
+  `setDetail` (25 m from `Vehicle.viewFrom`'s eye, which main.ts gives once a frame) and
+  `update`. The rig, not the `STEERING_WHEEL_NODE` path, turns a kit car's wheel.
+- `render/carmodel.ts`: `loadModel` calls `buildKitCar` on a frame of its own. Clear glass
+  comes from `carClearGlassMaterial`. A cabin mesh with `userData.kitShadowed` receives
+  shadows. `cloneWheels` rescales the pack's wheel sets to the kit tyre. Static clones
+  (wrecks, couriers: `cloneStaticModel`) are posed far once (`poseKitStatic`: no cabin,
+  bay, boot or underbody, mirror glass).
+- `render/stickerdecals.ts`: decals on a moving part (`StickerDecalCarrier`: the nearest
+  node with `kitMotion`) hang under that part in its shut frame, so a sticker on a door
+  swings with it; `player/interaction.ts` `pickBody` places a sticker from the chassis
+  stamp under the hit, so one aimed at an open door lands on the door.
 - `render/materials.ts`: dust on glass raises opacity, so dirty clear glass is not
   see-through. On opaque glass this changes nothing.
 - `car-lab.ts`: the Kit row, the `?pack=` filter, hover and click, the "КАБИНА" panel, LOD at

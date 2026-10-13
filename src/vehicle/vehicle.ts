@@ -70,6 +70,7 @@ import { carPaintColor, type CarPaint } from './carpaint';
 import type { ContactPatchField } from '../render/contactpatches';
 import { patchOpacity } from '../render/contactpatches';
 import type { VehicleLightRig } from '../render/vehiclelights';
+import { KitRig } from '../carkit/rig';
 
 import {
   AIR_DENSITY,
@@ -704,6 +705,17 @@ interface VehicleStats extends CarStats {
   readonly loads: readonly LoadPoint[];
 }
 
+/**
+ * A kit car (`CarModelDef.kit`) beyond this many metres of the eye draws no cabin, bay,
+ * boot or underbody and its glass goes back to a tinted mirror (`KitRig.setDetail`); the
+ * car lab's distance. The car the player sits in is always inside it.
+ */
+const KIT_DETAIL_DISTANCE_SQ = 25 * 25;
+/** Where this frame is seen from (scene frame) and its length; see `Vehicle.viewFrom`. */
+const kitEye = new THREE.Vector3();
+let kitEyeKnown = false;
+let kitFrameDt = 1 / 60;
+
 export class Vehicle implements Rebasable {
   private readonly physics: PhysicsWorld;
   private readonly world: GameWorld;
@@ -779,6 +791,15 @@ export class Vehicle implements Rebasable {
    */
   private steeringWheel: THREE.Object3D | null = null;
   private steeringWheelRest = 0;
+  /**
+   * A kit body's moving parts (doors, lids, wheel, pedals, needles): built with the
+   * visuals, posed every rendered frame from the driving state (`driveKit`). Its lenses
+   * are left to `lamps`, which binds them like any other model's.
+   */
+  private kitRig: KitRig | null = null;
+  /** The pedals as the driver's feet hold them, latched in the fixed step for `driveKit`. */
+  private kitThrottle = 0;
+  private kitHandbrake = 0;
   /** This car's lamps: beam mode, indicator, lens materials and the beams they cast. */
   private readonly lamps: VehicleLamps;
   /** Threshold-pedal braking authority, m/s²; see `measuredBrakeDecel`. */
@@ -1253,6 +1274,29 @@ export class Vehicle implements Rebasable {
     return this.model;
   }
 
+  /**
+   * This car's kit rig (`carkit/rig.ts`): its doors, bonnet, boot or tailgate, flap and
+   * cabin fittings as channels (`door_fl` … 0 shut, 1 open; `kit.get` reads the target,
+   * `KitRig.controlOf` + `kit.activate` work a picked part). Null for a model that is not
+   * a kit body. A new rig on every `rebuild` takes over the old one's channels. The
+   * vehicle poses it every rendered frame (`syncVisuals`), driving inputs included.
+   */
+  get kit(): KitRig | null {
+    return this.kitRig;
+  }
+
+  /**
+   * Where this frame is seen from (the camera, scene frame) and its length in seconds,
+   * given once per rendered frame before the vehicles' `syncVisuals`: kit cars ease
+   * their parts by it and draw their cabins only near it. Never given (a lab), every kit
+   * car counts as near and frames as 1/60 s.
+   */
+  static viewFrom(eye: THREE.Vector3, frameDt: number): void {
+    kitEye.copy(eye);
+    kitEyeKnown = true;
+    kitFrameDt = Math.min(Math.max(frameDt, 0), 0.1);
+  }
+
   /** Measurements taken off the model's GLB (chassis-local metres). */
   get modelMeasure(): CarModelMeasure {
     return this.measure;
@@ -1576,6 +1620,7 @@ export class Vehicle implements Rebasable {
       this.controller.free();
       this.controller = null;
     }
+    const previousKit = this.kitRig;
     this.clearVisuals();
     this.wheels = [];
     this.steerCommand = 0;
@@ -1653,7 +1698,7 @@ export class Vehicle implements Rebasable {
     // resolved in `applyChassisMass` above, from the car's real centre of mass rather
     // than the kerb one, so a load that raises it lengthens the arm too.
     this.contactPlaneY = contactY;
-    this.buildVisuals();
+    this.buildVisuals(previousKit);
 
     const weightN = stats.mass * GRAVITY;
     // Each axle's roll geometry: the preset's, or the model's own where its linkage is
@@ -2515,6 +2560,8 @@ export class Vehicle implements Rebasable {
         ? 0
         : input.throttle;
     const throttle = this.engineRunning ? throttleInput : 0;
+    this.kitThrottle = throttleInput;
+    this.kitHandbrake = input.handbrake ? 1 : 0;
     // The crank turns with the DRIVEN wheels (their mean, which is what an open
     // differential gives it), so a tyre breaking loose revs the engine towards its
     // cut, loses torque there and is bounded by it, and the driver hears it. The
@@ -3574,6 +3621,33 @@ export class Vehicle implements Rebasable {
         this.steeringWheelRest +
         (this.steerCommand / this.model.steerLock) * STEERING_WHEEL_HALF_LOCK_RAD;
     }
+    if (this.kitRig) this.driveKit(this.kitRig);
+  }
+
+  /**
+   * Poses a kit body from the driving state: wheel, pedals, gear lever, handbrake,
+   * needles, light switch, stalk and hazard button follow the car, then the rig eases
+   * everything (doors included) by this frame's length and draws its cabin only near
+   * the eye (`viewFrom`). The rig's own lenses stay dark: `lamps` lights this car.
+   */
+  private driveKit(kit: KitRig): void {
+    kit.set('steer', this.model.steerLock > 0 ? this.steerCommand / this.model.steerLock : 0);
+    kit.set('throttle', this.kitThrottle);
+    kit.set('brake', this.serviceBrakeCommand);
+    kit.set('clutch', this.drivetrain.clutchPedal);
+    kit.set('handbrake', this.kitHandbrake);
+    kit.set('gear', this.drivetrain.gearIndex);
+    kit.set('speed', this.speedKmh);
+    kit.set('rpm', this.drivetrain.rpm);
+    kit.set('fuel', this.model.tankLitres > 0 ? this.localFuel / this.model.tankLitres : 0);
+    kit.set('temp', this.cooling.gaugeFraction);
+    const beam = this.lamps.mode;
+    kit.set('lights', beam === 'high' ? 2 : beam === 'low' ? 1 : 0);
+    const side = this.lamps.indicator;
+    kit.set('blinker', side === 'left' ? -1 : side === 'right' ? 1 : 0);
+    kit.set('hazard', side === 'hazard' ? 1 : 0);
+    kit.setDetail(!kitEyeKnown || this.rootGroup.position.distanceToSquared(kitEye) < KIT_DETAIL_DISTANCE_SQ);
+    kit.update(kitFrameDt);
   }
 
   /**
@@ -5403,18 +5477,26 @@ export class Vehicle implements Rebasable {
 
   /**
    * Instantiates the model: body into the chassis group, wheels held aside for
-   * `rebuild` to register with the controller.
+   * `rebuild` to register with the controller. A kit body's new rig takes over
+   * `previousKit`'s channels, so a rebuild leaves an open door open.
    */
-  private buildVisuals(): void {
+  private buildVisuals(previousKit: KitRig | null): void {
     const instance = createCarModel(this.model.id, this.car.id);
     this.rootGroup.add(instance.body);
     this.bodyGroup = instance.body;
     this.bodyRestScale.copy(instance.body.scale);
 
-    // The body subtree is cloned per vehicle, so this node belongs to this car and
-    // turning it cannot turn anybody else's wheel.
-    this.steeringWheel = instance.body.getObjectByName(STEERING_WHEEL_NODE) ?? null;
-    this.steeringWheelRest = this.steeringWheel?.rotation.y ?? 0;
+    if (this.model.kit) {
+      // The rig turns a kit body's wheel itself (channel `steer`, `driveKit`); its node
+      // carries the same name, and two writers would fight over it.
+      this.kitRig = new KitRig(instance.body, false);
+      if (previousKit) this.kitRig.adopt(previousKit);
+    } else {
+      // The body subtree is cloned per vehicle, so this node belongs to this car and
+      // turning it cannot turn anybody else's wheel.
+      this.steeringWheel = instance.body.getObjectByName(STEERING_WHEEL_NODE) ?? null;
+      this.steeringWheelRest = this.steeringWheel?.rotation.y ?? 0;
+    }
 
     this.wheelMeshes.clear();
     for (const [id, mesh] of instance.wheels) this.wheelMeshes.set(id, mesh);
@@ -5459,6 +5541,7 @@ export class Vehicle implements Rebasable {
     this.wheelMeshes.clear();
     this.steeringWheel = null;
     this.steeringWheelRest = 0;
+    this.kitRig = null;
   }
 
   /** Writes the air filter wear driven since the last write into the fitted filter. */

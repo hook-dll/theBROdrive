@@ -4,6 +4,35 @@
 
 ### Added
 
+- KIT CARS IN THE WORLD: the kit bodies (`src/carkit`, `kit_vaz2101` … `kit_vaz2112`, 13
+  cars) are now the game's only cars. `CAR_MODELS` is `KIT_CARS`, so traffic (driver odds
+  per kit model in `DRIVER_ODDS`), race rivals, contract cars, the story's start car,
+  couriers, POI wrecks and the dev spawn menu are kit cars; the new-drive default is
+  `kit_vaz2101`. The pack, GTA and carforge bodies stay in the car lab (`LAB_CAR_MODELS`).
+  A save naming one loads on its kit twin (`sv_vaz2101` → `kit_vaz2101`, `sa_vaz2109` →
+  `kit_vaz2109`, `gt_vaz2110` → `kit_vaz2110`, `sv_vaz2105r` → `kit_vaz2105`), one with no
+  twin (Volgas, Nivas, UAZs, the Oka) on `kit_vaz2101`; the saved-drive list shows the body
+  it will load on. Every world `Vehicle` of a kit model has a live rig, `vehicle.kit`
+  (doors, bonnet, boot or tailgate, flap and cabin fittings as channels), fed every frame
+  with the wheel, pedals, gear, handbrake, speed, revs, fuel, temperature, light switch,
+  stalk and hazard button from the car, and drawing its cabin only within 25 m of the
+  camera (`Vehicle.viewFrom`). Wrecks and couriers come shut and in the far pose. Checked
+  in a dev build on the M2 Pro (seed 1337): a new drive starts at a kit 2108, the traffic
+  was ten different kit models, `vehicle.kit.set('door_fl', 1)` swung the door; driving at
+  55-70 km/h among 9-12 kit cars for 80 s, then with the driven car's doors, bonnet, boot,
+  flap and a window open, linked no shader program (90 throughout), frames held 16.7 ms
+  (p99 16.8, worst 25 ms) with no long task; a far kit car draws 6-9.5k triangles, a near
+  one 14-15.5k. A save with an `sv_vaz21099` car and two `sv_gaz24` cars reloaded as
+  `kit_vaz21099` and `kit_vaz2101`. A kit body is generated on a frame of its own when
+  first needed (15-50 ms, measured headless).
+- KIT CARS' RUNNING GEAR AND PROPORTIONS (`vehicle/carmodels.ts`, `parts/`): the kit 2110,
+  2112 and 2115 have their own running gear instead of the 21099's: VAZ-21102 / 21122 /
+  2115 1.5i on a new engine `engine_vaz_2111` (57.2 kW, 115.7 Nm) and
+  `gearbox_samara_5_tall` (final drive 3.706), masses 1020 / 1020 / 985 kg. The kit 2101
+  stands at its passport height 1.440 m (was 1.382) and the kit 2107 at 1.446 (was 1.435),
+  fit rows regenerated. `sv_vaz2105`'s front weight share 0.51 → 0.548 (autoopt.ru kerb
+  split 545/450 kg), which the kit 2105 inherits. `tools/reality.ts` has targets for every
+  `kit_*` car (all 13 pass, per KitSpecs' run); new `tools/kit-proportions.ts`.
 - KIT CARS (`src/carkit`, lab only): low-poly VAZ bodies built at load from a spec instead of
   read from a file, with a cabin you can see through clear glass and work. `kit_vaz2106` and
   `kit_vaz2108` (`LAB_CAR_MODELS`, `?car-lab&pack=Kit`) take their proportions from the factory
@@ -439,6 +468,17 @@
     handed in, placed 2nd and 3rd.
 
 ### Fixed
+
+- STICKERS ON OPENING PARTS: a sticker on a kit car's door, bonnet, boot lid, flap or drop
+  glass stayed where the shut part was when it opened (all of a car's decals were one mesh
+  under the body). Decals cut from a moving part now hang under that part in its shut
+  frame (`render/stickerdecals.ts` `StickerDecalCarrier`), so they swing with it, and a
+  sticker aimed at an open door is placed from the chassis stamp under the aim, so it
+  lands on the door. Checked on a kit 2108 with 30 stickers: its decals split into layers
+  under the bonnet, both doors, both front windows, the tailgate and the body, the door's
+  decal moved 0.7 m with the door, and no program was linked. A sticker placed through
+  `pickBody` on the front-left door, open and then shut, went into the door's decal layer
+  with its centre 3 mm from the aimed point on the panel both times.
 
 - A LAY-BY IS LAID IN WHAT THE ROAD IS LAID IN (`world/layby.ts`, `world/laybymesh.ts`,
   `world/terrain.ts`, `world/roadmesh.ts`). Reported from play: the pull-in at every

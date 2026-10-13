@@ -290,6 +290,27 @@ Format of an entry: **Problem** → **Cause** → **Fix** → *Code* (commit).
   the indicator is part of the corner lamp (previous entry). *spec.ts, exterior.ts,
   tens.ts*.
 
+## World (2026-10-13)
+
+- **Stickers on doors stayed where the closed door was when it opened.** → The decals of a
+  car were one merged mesh under the body node, cut from the chassis stamp (`carBodyPos`,
+  the shut pose), so nothing tied a decal to the part it was printed on; placement also
+  read the live hit, so a sticker aimed at an open door landed in the air. → Each sticker
+  surface records the moving part it rides (nearest node with `kitMotion`) and that part's
+  shut frame at clone time; the decal pieces cut from its triangles go into a decal mesh
+  of their own under that part, in that frame, so a sticker across a shut line splits and
+  each piece swings (or winds down, on a drop glass) with its part. `pickBody` takes the
+  aimed point and normal from the stamp under the hit (`hit.barycoord`). Same sticker
+  materials, so no new program. *render/stickerdecals.ts `StickerDecalCarrier`,
+  `DecalLayer`; render/carmodel.ts `stickerDecalSurfaces`; player/interaction.ts
+  `pickBody`*.
+- **Into the world**: a kit car as a driven `Vehicle` and in traffic. Its own rig
+  (`vehicle.kit`, lenses left to `VehicleLamps`) is fed the driving channels every frame;
+  the rig, not the `STEERING_WHEEL_NODE` path, turns its wheel (both would have written
+  the same node). Wrecks and couriers are posed far once (`poseKitStatic`). A rig skips
+  parts whose channel did not move (`Driven.applied`), so a parked kit car costs a
+  comparison per part. *vehicle/vehicle.ts `driveKit`, carkit/rig.ts*.
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent

@@ -157,9 +157,14 @@ interface Target {
  * plus the stated 150 kg, the gearbox's ratios and efficiency and the Cd·A that fits
  * the top speed is already slower than the printed time, before any tyre is involved
  * (2108 17.4 s against 16, 21099 16.5 against 13.5, Oka 33 against 30, 2110 16.6
- * against 15, 2141 15.8 against 14.9). Those times were measured on engines rated
- * before GOST 14846-81's net standard, or lighter than the stated load; the model
- * uses the net figure as printed and does not make it up.
+ * against 15, 2141 15.8 against 14.9; the kit 21102 and 21122 on the 2111 injection
+ * engine 15.1 against 14, the kit 2115 1.5i 15.0 against 13.2, with the crank's inertia
+ * geared to the wheels and changes at the power-optimal point). Those times were measured
+ * on engines rated before GOST 14846-81's net standard, or lighter than the stated load;
+ * the model uses the net figure as printed and does not make it up. The 2110 family's
+ * shorter 3.937 axle (its manual prints "3,706 или 3,937") was tried: 8.9% on the
+ * 21102, 14.5% on the 2115, still outside, so the axle the sources name for the 2115 and
+ * the 2112 stays.
  *
  * NIVA_LOSSES. Both Nivas are 11-14% QUICKER than their catalogues: the point-mass run
  * gives 20.6 and 21.8 s against 23 and 25. What the model leaves out is the Niva's
@@ -371,6 +376,109 @@ const TARGETS: Readonly<Record<string, Target>> = {
     source: 'man. autoprospect.ru/vaz/1111-oka/1-4-tekhnicheskie-kharakteristiki.html; brake, gross AO vaz-1111',
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.146 },
   },
+  // ---- the kit bodies (src/carkit): the game's cars ----
+  //
+  // The first ten ride on their pack sibling's running gear (vehicle/carmodels.ts
+  // `KIT_CARS`), so they are held to the sibling's factory figures and sources above,
+  // re-read for this audit (src/carkit/STATUS.md, "Running gear and performance"):
+  //   RK    the 2101/2102 factory manual: remkomplekt.org/vaz-2101/tehnicheskie-harakteristiki.html
+  //   VS    the 2109/21099 manuals: vaz-sputnik.ru/2109/1-4.html, vaz-sputnik.ru/21099/1.html
+  // The 2110, 2112 and 2115 are their own cars (`GEAR_VAZ_*`): the 21102, the 21122 and
+  // the 2115 1.5i, all on the 2111 injection engine.
+  //   M110  VAZ-2110 manual, technical tables: autoprospect.ru/vaz/2110-zhiguli/1-obshhie-svedeniya.html
+  //   R110  its repair-manual twin, mass and dynamics (driver + passenger): vaz-rukovodstvo.ru/2110/1-110vaz.htm, 1-010vaz.htm
+  //   LO    ladaonline.ru 2115 (2111 engine): ladaonline.ru/catalog/index.php?SECTION_ID=358&ELEMENT_ID=12598
+  //   CE    carexpert.ru/models/vaz/2115/tech/vaz15s.htm
+  kit_vaz2101: {
+    wheelbase: 2.424, track: 1.349, radius: 0.297, top: 142, to100: 20,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.6, lat: 0.7, hz: 1.1,
+    brake80: 43.2, grossKg: 1355,
+    source: 'as sv_vaz2101: AO vaz-2101 (1982 catalogue; 0-100 with driver and passenger, turn by the outer wheel); brake, gross AP; RK agrees on 955/1355 kg, 20 s, 165/80R13 (it prints 38 m and 140 km/h at full mass)',
+  },
+  kit_vaz2102: {
+    wheelbase: 2.424, track: 1.365, radius: 0.297, top: 138, to100: 23,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.6, lat: 0.68, hz: 1.1,
+    brake80: 43.2, grossKg: 1440,
+    source: 'as sv_vaz2102: wiki VAZ-2102 (top); RK (1010/1440 kg, 23 s with driver and passenger; 135 km/h at full mass); turn as VAZ-2101; brake AP',
+  },
+  kit_vaz2103: {
+    wheelbase: 2.424, track: 1.365, radius: 0.288, top: 152, to100: 17,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.6, lat: 0.71, hz: 1.1,
+    brake80: 43.2, grossKg: 1430,
+    source: 'as sv_vaz2103: AO vaz-2103 (brake, and gross as kerb + 400 kg)',
+  },
+  kit_vaz2104: {
+    wheelbase: 2.424, track: 1.365, radius: 0.288, top: 137, to100: 18.5,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, lat: 0.69, hz: 1.1,
+    brake80: 38, grossKg: 1475,
+    brakeTest: { m: 49.4, judged: false, source: 'AR' },
+    source: 'as sv_vaz2104: AO vaz-2104 (base 2104, 1.3; gross); turn and brake per AO vaz-2105',
+    known0to100: { reason: CLASSIC_LAUNCH, dev: 0.132 },
+  },
+  kit_vaz2105: {
+    wheelbase: 2.424, track: 1.365, radius: 0.288, top: 145, to100: 18,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, lat: 0.71, hz: 1.1,
+    brake80: 38, grossKg: 1395,
+    source: 'as sv_vaz2105: AO vaz-2105 (also the kerb axle split 545/450 kg)',
+    known0to100: { reason: CLASSIC_LAUNCH, dev: 0.111 },
+  },
+  kit_vaz2106: {
+    wheelbase: 2.424, track: 1.365, radius: 0.288, top: 150, to100: 16,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, lat: 0.72, hz: 1.1,
+    brake80: 43.2, grossKg: 1435,
+    source: 'as sv_vaz2106: AO vaz-2106; brake man. welove2106.narod.ru/objie/ob_1.htm (carexpert.ru vaz060s prints 154 km/h)',
+  },
+  kit_vaz2107: {
+    wheelbase: 2.424, track: 1.365, radius: 0.288, top: 150, to100: 17,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, lat: 0.72, hz: 1.1,
+    brake80: 38, grossKg: 1430,
+    source: 'as sv_vaz2107: AO vaz-2107 (VAZ-2103 engine); brake, gross man. vazbook.ru/07/2107/main/manual/osnovnye-ekspluatacionnye-parametry-i-razmery',
+  },
+  kit_vaz2108: {
+    wheelbase: 2.46, track: 1.4, radius: 0.281, top: 148, to100: 16,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, lat: 0.78, hz: 1.3,
+    brake80: 38, grossKg: 1370,
+    source: 'as sv_vaz2108: AO vaz-2108; man. vaz-sputnik.ru/2109/1-4.html; brake, gross ZRW (AO prints 1325)',
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.115 },
+  },
+  kit_vaz2109: {
+    wheelbase: 2.46, track: 1.4, radius: 0.281, top: 148, to100: 16,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, lat: 0.78, hz: 1.3,
+    brake80: 38, grossKg: 1370,
+    brakeTest: { m: 44.7, judged: false, source: 'AR' },
+    source: 'as sv_vaz2109: AO vaz-2109 (kerb split 555/360 kg); VS; brake, gross ZRW (AO prints 1340)',
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.127 },
+  },
+  kit_vaz21099: {
+    wheelbase: 2.46, track: 1.4, radius: 0.281, top: 154, to100: 13.5,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, lat: 0.78, hz: 1.3,
+    brake80: 38, grossKg: 1395,
+    source: 'as sv_vaz21099: VS (970 kg, 154 km/h, 13.5 s with driver and passenger, 5.2 m, 38 m); gross ZRW',
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.231 },
+  },
+  kit_vaz2110: {
+    wheelbase: 2.492, track: 1.4, radius: 0.288, top: 167, to100: 14,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, lat: null, hz: 1.3,
+    brake80: 38, grossKg: 1480,
+    brakeTest: { m: 55.0, judged: true, source: 'Za Rulem 2004, VAZ-21102: zr.ru/content/articles/10785-kak_popast_v_desatku/' },
+    source: 'VAZ-21102 (2111 engine): M110 (top, 0-100, turn, brake ceiling); R110 (load condition, gross 1480); geometry kit_vaz2110 row',
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.108 },
+  },
+  kit_vaz2112: {
+    wheelbase: 2.492, track: 1.4, radius: 0.288, top: 167, to100: 14,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, lat: null, hz: 1.3,
+    brake80: 38, grossKg: 1495,
+    brakeTest: { m: 55.0, judged: false, source: 'the 21102 saloon\'s (Za Rulem 2004), same brakes and tyres' },
+    source: 'VAZ-21122 (2111 engine): M110 (top, 0-100, turn, brake ceiling; gross as kerb 1020 + payload 475); R110 (load condition); geometry kit_vaz2112 row (autoopt.ru vaz-2112)',
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.11 },
+  },
+  kit_vaz2115: {
+    wheelbase: 2.46, track: 1.4, radius: 0.281, top: 158, to100: 13.2,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.2, lat: null, hz: 1.3,
+    brake80: 38, grossKg: 1410,
+    source: 'VAZ-2115 1.5i (2111 engine): LO (top, 0-100, turn, brake ceiling "груженого"), CE (top, 0-100, gross 1410); drom.ru/catalog/lada/2115/77754 prints 155 km/h and 14 s',
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.167 },
+  },
 };
 
 /*
@@ -417,6 +525,7 @@ const FACTORY_ENGINES: Readonly<Record<string, MakerEngine>> = {
   engine_lada_1600: { power: { kw: 55.5 }, powerRpm: 5400, torque: { kgfm: 11.8 }, torqueRpm: 3000, source: 'VAZ-2106; AO VAZ-2106 catalogue' },
   engine_samara_1300: { power: { kw: 47 }, powerRpm: 5600, torque: { nm: 94 }, torqueRpm: [3400, 3500], source: 'VAZ-2108; AO VAZ-2109 1991 catalogue (the 2108 page: 3500)' },
   engine_samara_1500: { power: { kw: 51.5 }, powerRpm: 5600, torque: { nm: 106.4 }, torqueRpm: 3400, source: 'VAZ-21083; AO VAZ-2109 catalogue' },
+  engine_vaz_2111: { power: { kw: 57.2 }, powerRpm: 5400, torque: { nm: 115.7 }, torqueRpm: 3000, source: 'VAZ-2111, GOST 14846-81 net; VAZ-2110 manual (autoprospect.ru/vaz/2110-zhiguli/1-obshhie-svedeniya.html)' },
   engine_vaz_1111: { power: { kw: 21.5 }, powerRpm: 5600, torque: { nm: 44.1 }, torqueRpm: 3400, source: 'VAZ-1111; AO 1998 AvtoVAZ catalogue' },
   engine_niva_1600: { power: { kw: 53.7 }, powerRpm: 5400, torque: { kgfm: 11.6 }, torqueRpm: 3400, source: 'VAZ-2121; AO VAZ-2121 catalogue' },
   engine_niva_1700: { power: { kw: 58 }, powerRpm: 5200, torque: { nm: 127 }, torqueRpm: 3000, source: 'VAZ-21213, GOST 14846-81; 21213 manual (lada-niva.ru)' },

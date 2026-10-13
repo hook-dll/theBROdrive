@@ -53,6 +53,10 @@ export interface InputFrame {
   radioCycle: boolean;
   /** Re-centre the view (behind the car when driving, level horizon on foot): tap, consumed by CameraRig. */
   recenterCamera: boolean;
+  /** O: step the cabin-camera editor X → Y → Z → off; tap, consumed by the cabin camera. */
+  cabinEdit: boolean;
+  /** J: save the cabin camera's eye for this car model; tap, consumed by the cabin camera. */
+  cabinSave: boolean;
   /** Enter/exit the car (entry needs an open or removed door): tap, consumed once by interaction. */
   interact: boolean;
   /** Pick up a loose part/item, or fit/remove a part at the aimed slot: tap, consumed once by interaction. */
@@ -111,6 +115,8 @@ export function emptyInput(): InputFrame {
     cycleCamera: false,
     radioCycle: false,
     recenterCamera: false,
+    cabinEdit: false,
+    cabinSave: false,
     interact: false,
     mount: false,
     useHeld: false,
@@ -165,8 +171,12 @@ export const BINDABLE_ACTIONS: readonly {
   { id: 'indicatorLeft', label: 'Left blinker', defaultKeys: ['Comma'] },
   { id: 'indicatorRight', label: 'Right blinker', defaultKeys: ['Period'] },
   { id: 'mouseSteer', label: 'Precise steering', defaultKeys: ['KeyM'] },
-  { id: 'camera', label: 'Toggle hood / chase camera', defaultKeys: ['KeyC'] },
+  { id: 'camera', label: 'Cycle camera: chase / hood / cabin', defaultKeys: ['KeyC'] },
   { id: 'recenterCamera', label: 'Recenter camera', defaultKeys: ['KeyV'] },
+  // The cabin-camera editor: O steps the axis being moved (X, Y, Z, off) and WASD/arrows
+  // move the eye instead of driving; J saves the eye for this model.
+  { id: 'cabinEdit', label: 'Cabin camera editor: X / Y / Z / off', defaultKeys: ['KeyO'] },
+  { id: 'cabinSave', label: 'Save cabin camera position', defaultKeys: ['KeyJ'] },
   // The radio is a car fitting, so it sits on the driving hand's side of the board.
   { id: 'radio', label: 'Radio: station 1 / station 2 / off', defaultKeys: ['KeyR'] },
   { id: 'autopilot', label: 'Autopilot: sleeper / hurried / frantic / off', defaultKeys: ['KeyP'] },
@@ -306,6 +316,8 @@ export class InputReader {
   private keyboardHandbrake = false;
   /** Whether the player is in a driver's seat; set by the game, like precise steering. */
   private driving = false;
+  /** The cabin-camera editor is open; see `setCabinEditing`. */
+  private cabinEditing = false;
   /**
    * Raw horizontal mouse travel in CSS pixels since the last sample, kept apart from
    * `yawDelta` because steering must not inherit the look sensitivity.
@@ -428,6 +440,15 @@ export class InputReader {
    */
   setDriving(driving: boolean): void {
     this.driving = driving;
+  }
+
+  /**
+   * While the cabin-camera editor is open the pedal and steering keys move the eye
+   * (through `moveX`/`moveZ`) instead of the car: throttle, brake and steer read zero
+   * from every device. The GAME owns this, like `setDriving`.
+   */
+  setCabinEditing(editing: boolean): void {
+    this.cabinEditing = editing;
   }
 
   dispose(): void {
@@ -602,9 +623,12 @@ export class InputReader {
     // Middle-button look suppresses only mouse travel. A/D still turns the wheel, so
     // looking into a bend never steals the keyboard half of the mixed control mode.
     const lookOverride = this.held.has('Mouse1');
-    const steerWithMouse = preciseDrive && !lookOverride;
-    const keySteer =
-      (this.anyHeld(this.keys.right) ? 1 : 0) - (this.anyHeld(this.keys.left) ? 1 : 0);
+    // The cabin editor hands the mouse back to the look and the keys to the eye.
+    const editing = this.cabinEditing;
+    const steerWithMouse = preciseDrive && !lookOverride && !editing;
+    const keySteer = editing
+      ? 0
+      : (this.anyHeld(this.keys.right) ? 1 : 0) - (this.anyHeld(this.keys.left) ? 1 : 0);
     if (pad.steer !== 0) this.steerDevice = 'pad';
     else if (keySteer !== 0) this.steerDevice = 'keyboard';
     else if (touch?.steeringActive === true) this.steerDevice = 'touch';
@@ -626,6 +650,12 @@ export class InputReader {
       // deflection is how far it may wind; lifting the thumb is releasing a key.
       f.steer = keySteer !== 0 || !touch?.steeringActive ? keySteer : touch.steer;
       f.steerMode = 'keys';
+    }
+    if (editing) {
+      f.throttle = 0;
+      f.brake = 0;
+      f.reverse = false;
+      f.steer = 0;
     }
 
     const taps = this.touch?.consumeTaps();
@@ -658,6 +688,8 @@ export class InputReader {
       this.anyPressed(this.keys.recenterCamera)
       || taps?.recenter === true
       || this.padPressed(PAD.DUp);
+    f.cabinEdit = this.anyPressed(this.keys.cabinEdit);
+    f.cabinSave = this.anyPressed(this.keys.cabinSave);
     f.radioCycle =
       this.anyPressed(this.keys.radio) || (this.driving && this.padPressed(PAD.DDown));
     // X is the pad's F: it enters and leaves a car, picks things up and opens what is

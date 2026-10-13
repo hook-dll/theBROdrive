@@ -10,7 +10,7 @@ import {
 } from '../game/settings';
 import { WorldOrigin, type RebaseShift } from '../world/origin';
 
-export type CameraMode = 'foot' | 'hood' | 'chase';
+export type CameraMode = 'foot' | 'hood' | 'cabin' | 'chase';
 
 export interface CameraTarget {
   x: number;
@@ -33,6 +33,8 @@ export interface CameraTarget {
   wheelContact: number;
   /** Bonnet camera mount in chassis-local metres; see CarModelMeasure.hoodPoint. */
   hoodOffset: readonly [number, number, number];
+  /** Driver's eye in chassis-local metres, the cabin view's mount; see vehicle/cabincamera.ts. */
+  cabinOffset: readonly [number, number, number];
   /**
    * Velocity in the float frame, X and Z, m/s. Zero on foot.
    *
@@ -348,6 +350,8 @@ const _qA = new THREE.Quaternion();
 const _mA = new THREE.Matrix4();
 const _UP = new THREE.Vector3(0, 1, 0);
 const _FORWARD = new THREE.Vector3(0, 0, 1);
+/** The cabin view's up: the chassis's own, so the horizon rolls with the car around the driver. */
+const _cabinUp = new THREE.Vector3(0, 1, 0);
 const _rayOrigin = { x: 0, y: 0, z: 0 };
 const _rayDir = { x: 0, y: 0, z: 0 };
 const _qB = new THREE.Quaternion();
@@ -424,6 +428,8 @@ export class CameraRig {
   private chaseLookIdle = 0;
   /** Hood view heading relative to the car; the mount turns with the chassis. */
   private hoodYawOffset = 0;
+  /** Cabin view heading relative to the car: where the driver has turned his head. */
+  private cabinYawOffset = 0;
   /** Ten-power binocular view: a held-item effect, independent of the camera mode. */
   private binoculars = false;
   private deathActive = false;
@@ -705,15 +711,31 @@ export class CameraRig {
   }
 
   /**
-   * C swaps the two driving views: the bonnet mount and the follow arm.
+   * C cycles the driving views: the follow arm, the bonnet mount, the driver's seat.
    *
-   * Entering the hood view aims it down the car, because a bonnet camera left
+   * Entering the hood or cabin view aims it down the car, because a mounted camera left
    * pointing wherever the chase arm happened to be is disorienting: the mount is
    * rigid, so the mismatch reads as the car having spun rather than the view.
    */
   cycleDriving(): void {
-    this._mode = this._mode === 'chase' ? 'hood' : 'chase';
-    if (this._mode === 'hood') this.yawValue = this.vehicleYaw;
+    if (this._mode === 'chase') {
+      this._mode = 'hood';
+      this.hoodYawOffset = 0;
+      this.yawValue = this.vehicleYaw;
+    } else if (this._mode === 'hood') {
+      this.showCabin();
+    } else {
+      this._mode = 'chase';
+    }
+  }
+
+  /** Switches to the cabin view looking straight ahead, unless it is already showing. */
+  showCabin(): void {
+    if (this._mode === 'cabin') return;
+    this._mode = 'cabin';
+    this.cabinYawOffset = 0;
+    this.pitch = 0;
+    this.yawValue = this.vehicleYaw;
   }
 
   update(dt: number, input: InputFrame, target: CameraTarget, onFoot: boolean): void {
@@ -745,12 +767,14 @@ export class CameraRig {
     if (onFoot) this.resetDynamics();
     else if (this.style === 'dynamic') this.updateDynamics(d, input, target);
 
-    // The hood mount turns with the car, so its heading is stored as an OFFSET from
-    // the chassis and rebuilt against the live heading every frame. Keeping the raw
-    // world yaw instead would leave the view pointing at the horizon it started on
-    // while the car drove around underneath it.
+    // The hood and cabin mounts turn with the car, so their heading is stored as an
+    // OFFSET from the chassis and rebuilt against the live heading every frame. Keeping
+    // the raw world yaw instead would leave the view pointing at the horizon it started
+    // on while the car drove around underneath it.
     if (inputMode === 'hood') {
       this.yawValue = wrapAngle(this.vehicleYaw + this.hoodYawOffset);
+    } else if (inputMode === 'cabin') {
+      this.yawValue = wrapAngle(this.vehicleYaw + this.cabinYawOffset);
     }
 
     // `input.lookYaw` is rightward mouse motion. Forward is (sin y, cos y) and up is
@@ -820,11 +844,13 @@ export class CameraRig {
       }
     }
 
-    // Whatever look, re-centre or snap did to the world yaw this frame is the hood
+    // Whatever look, re-centre or snap did to the world yaw this frame is the mounted
     // view's new offset from the car. Recording it here, once, is what keeps the two
     // representations from disagreeing on the next frame.
     if (inputMode === 'hood') {
       this.hoodYawOffset = wrapAngle(this.yawValue - this.vehicleYaw);
+    } else if (inputMode === 'cabin') {
+      this.cabinYawOffset = wrapAngle(this.yawValue - this.vehicleYaw);
     }
 
     // Wobble phases. Bob only advances while moving, so it freezes at rest.
@@ -862,6 +888,9 @@ export class CameraRig {
       case 'hood':
         this.desiredHood(target);
         break;
+      case 'cabin':
+        this.desiredCabin(target);
+        break;
       case 'chase':
         this.desiredArm(target);
         this.applyOcclusion(target);
@@ -875,9 +904,10 @@ export class CameraRig {
     // The foot camera springs both ends of its view ray.
     //
     // The hood camera springs NEITHER. It is bolted to the bonnet, so any lag turns
-    // into the mount sliding around on a panel it is supposed to be bolted to.
+    // into the mount sliding around on a panel it is supposed to be bolted to. The
+    // cabin eye is the driver's head in his seat, rigid with the car for the same reason.
     const k = 1 - Math.exp(-SPRING_OMEGA * d);
-    if (mode === 'hood') {
+    if (mode === 'hood' || mode === 'cabin') {
       this.eye.copy(_vA);
       this.lookAt.copy(_vB);
     } else {
@@ -886,7 +916,7 @@ export class CameraRig {
       else this.lookAt.lerp(_vB, k);
     }
 
-    _mA.lookAt(this.eye, this.lookAt, _UP);
+    _mA.lookAt(this.eye, this.lookAt, mode === 'cabin' ? _cabinUp : _UP);
     this.camera.quaternion.setFromRotationMatrix(_mA);
     // The dynamic style lets the bonnet view's horizon roll with the body, which is
     // the one thing the steady mount deliberately refuses (see `desiredHood`). Applied
@@ -894,9 +924,11 @@ export class CameraRig {
     if (mode === 'hood' && this.hoodRoll !== 0) {
       this.camera.quaternion.multiply(_qB.setFromEuler(_eA.set(0, 0, this.hoodRoll, 'ZYX')));
     }
-    const kicking = mode !== 'foot' && this.kicks && this.shake;
+    // The kicks and the sway shake a camera hung off the car; from the driver's seat the
+    // cabin around the eye would visibly swim, so the cabin view takes neither.
+    const kicking = mode !== 'foot' && mode !== 'cabin' && this.kicks && this.shake;
     if (kicking) this.applyKicks(d);
-    if (mode !== 'foot' && this.shake) this.applyShake(target);
+    if (mode !== 'foot' && mode !== 'cabin' && this.shake) this.applyShake(target);
     // The camera sits in the relative scene graph, so its position is the relative
     // eye verbatim — no origin arithmetic here or at any consumer. The eye is built
     // from `target` (the car's or player's transform, already relative), and on a
@@ -936,6 +968,23 @@ export class CameraRig {
     _vA.set(target.x + _vC.x, target.y + _vC.y, target.z + _vC.z);
     this.lookVector(_vD);
     _vB.copy(_vA).addScaledVector(_vD, LOOK_AHEAD);
+  }
+
+  /**
+   * Driver's seat: the eye and the whole view ride the chassis. Unlike the bonnet mount
+   * the view DIRECTION is the car's too — yaw and pitch are the driver's head turned
+   * against the car, and up is the car's up — because the cabin fills the frame: a
+   * horizon held level while the dashboard rolls round it reads as the car coming apart.
+   */
+  private desiredCabin(target: CameraTarget): void {
+    _qA.set(target.qx, target.qy, target.qz, target.qw);
+    _vC.set(target.cabinOffset[0], target.cabinOffset[1], target.cabinOffset[2]).applyQuaternion(_qA);
+    _vA.set(target.x + _vC.x, target.y + _vC.y, target.z + _vC.z);
+    const cp = Math.cos(this.pitch);
+    _vD.set(Math.sin(this.cabinYawOffset) * cp, Math.sin(this.pitch), Math.cos(this.cabinYawOffset) * cp)
+      .applyQuaternion(_qA);
+    _vB.copy(_vA).addScaledVector(_vD, LOOK_AHEAD);
+    _cabinUp.copy(_UP).applyQuaternion(_qA);
   }
 
 
@@ -1353,6 +1402,12 @@ export class CameraRig {
     if (this._mode === 'hood') {
       this.yawValue = wrapAngle(this.vehicleYaw + this.hoodYawOffset);
       this.desiredHood(target);
+    } else if (this._mode === 'cabin') {
+      // Sitting down faces the windscreen, whatever the walk-up looked at.
+      this.cabinYawOffset = 0;
+      this.pitch = 0;
+      this.yawValue = this.vehicleYaw;
+      this.desiredCabin(target);
     } else {
       this.desiredArm(target);
       this.applyOcclusion(target);

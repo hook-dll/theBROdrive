@@ -124,13 +124,15 @@ const PLATOON_CHANCE = 0.32;
  * WHO DRIVES WHAT: the driver's character comes from the car (owner, 2026-10-10), not
  * from one share for the whole stream. `[sleeper, hurried, frantic]` odds per model:
  *
- *  - the old and the slow are always sleepers: the GAZ-21, both UAZs, the Oka, the IZh
- *    and the first four Zhigulis;
- *  - the later Zhigulis, the Samaras, the GAZ-24 and the Nivas: 25% sleeper, 25%
- *    hurried and 50% frantic (20% frantic read as no frantic at all, owner 2026-10-10);
- *  - everything else (the 2105 rally, the Svyatogor, the 2110, the GAZ-31029, an official's
- *    or a taxi driver's car, owner 2026-10-12) is a car somebody drives to get somewhere
- *    fast: half hurried, half frantic.
+ *  - the old and the slow are always sleepers: the first four Zhigulis;
+ *  - the later Zhigulis and the Samaras (the 2115 among them): 25% sleeper, 25% hurried
+ *    and 50% frantic (20% frantic read as no frantic at all, owner 2026-10-10);
+ *  - everything else (the 2110 and the 2112: an official's or a taxi driver's car, owner
+ *    2026-10-12) is a car somebody drives to get somewhere fast: half hurried, half
+ *    frantic.
+ *
+ * The world's cars are the kit bodies (`CAR_MODELS`, 2026-10-13); the rows the pack
+ * bodies had (the Volgas, UAZs, Oka, IZh and Nivas) left with them.
  *
  * A frantic driver still gets the BMW engine and its gearbox (`franticEngine`).
  */
@@ -138,25 +140,17 @@ const SLOW_CAR: readonly [number, number, number] = [1, 0, 0];
 const CALM_CAR: readonly [number, number, number] = [0.25, 0.25, 0.5];
 const FAST_CAR: readonly [number, number, number] = [0, 0.5, 0.5];
 const DRIVER_ODDS: Readonly<Record<string, readonly [number, number, number]>> = {
-  sv_gaz21: SLOW_CAR,
-  sa_uaz330364: SLOW_CAR,
-  cf_uaz31512: SLOW_CAR,
-  cf_vaz1111: SLOW_CAR,
-  sa_izh2715: SLOW_CAR,
-  sv_vaz2101: SLOW_CAR,
-  sv_vaz2102: SLOW_CAR,
-  sv_vaz2103: SLOW_CAR,
-  sv_vaz2104: SLOW_CAR,
-  sv_vaz2105: CALM_CAR,
-  sv_vaz2106: CALM_CAR,
-  sv_vaz2107: CALM_CAR,
-  sv_vaz2108: CALM_CAR,
-  sv_vaz2109: CALM_CAR,
-  sa_vaz2109: CALM_CAR,
-  sv_vaz21099: CALM_CAR,
-  sv_gaz24: CALM_CAR,
-  sv_niva: CALM_CAR,
-  sv_niva_long: CALM_CAR,
+  kit_vaz2101: SLOW_CAR,
+  kit_vaz2102: SLOW_CAR,
+  kit_vaz2103: SLOW_CAR,
+  kit_vaz2104: SLOW_CAR,
+  kit_vaz2105: CALM_CAR,
+  kit_vaz2106: CALM_CAR,
+  kit_vaz2107: CALM_CAR,
+  kit_vaz2108: CALM_CAR,
+  kit_vaz2109: CALM_CAR,
+  kit_vaz21099: CALM_CAR,
+  kit_vaz2115: CALM_CAR,
 };
 /**
  * WHAT A FRANTIC DRIVER DRIVES, AND WHAT IS UNDER ITS BONNET. Any car the stream can

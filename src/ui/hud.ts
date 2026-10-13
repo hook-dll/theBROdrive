@@ -321,6 +321,8 @@ export class Hud {
 
   private readonly crosshairEl: HTMLElement;
   private readonly promptEl: HTMLElement;
+  /** The cabin-camera editor's axis and eye readout; see vehicle/cabincamera.ts. */
+  private readonly cabinEditorEl: HTMLElement;
   private readonly drivingCluster: HTMLElement;
   private readonly tachNeedle: SVGLineElement;
   private readonly speedNeedle: SVGLineElement;
@@ -417,6 +419,7 @@ export class Hud {
     this.crosshairEl = el('div', 'hud-crosshair');
 
     this.promptEl = el('div', 'hud-prompt is-hidden');
+    this.cabinEditorEl = el('div', 'hud-cabin-editor is-hidden');
 
     this.drivingCluster = el('div', 'hud-driving is-hidden');
 
@@ -525,6 +528,7 @@ export class Hud {
     this.tops = [
       this.crosshairEl,
       this.promptEl,
+      this.cabinEditorEl,
       this.drivingCluster,
       inventoryEl,
       this.toastEl,
@@ -1170,6 +1174,12 @@ export class Hud {
     this.setVisible(this.promptEl, text !== null);
     this.crosshairEl.classList.toggle('is-dim', text === null);
     if (text !== null) this.setText(this.promptEl, text);
+  }
+
+  /** The cabin-camera editor's line, or null to hide it. */
+  setCabinEditor(text: string | null): void {
+    this.setVisible(this.cabinEditorEl, text !== null);
+    if (text !== null) this.setText(this.cabinEditorEl, text);
   }
 
   setInventory(items: readonly Item[], selected: number, carriedMass: number, massLimit: number): void {

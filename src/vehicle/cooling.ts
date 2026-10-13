@@ -549,4 +549,10 @@ export class EngineCoolingSystem {
       warning: ZONE_WARNING[zone],
     };
   }
+
+  /** `readout().fraction` without the object, 0 with no engine: a kit car's needle reads it every frame. */
+  get gaugeFraction(): number {
+    const heat = this.heat;
+    return heat === null ? 0 : tempGaugeFraction(heat, this.temperatureC);
+  }
 }

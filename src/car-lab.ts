@@ -302,7 +302,7 @@ export async function bootCarLab(): Promise<void> {
   const query = new URLSearchParams(window.location.search);
   // `?pack=Kit` (or any pack name) keeps one row: a quick lab for the cars being built.
   const onlyPack = query.get('pack');
-  const labModels = [...LAB_CAR_MODELS, ...CAR_MODELS].filter((def) => onlyPack === null || packOf(def) === onlyPack);
+  const labModels = [...CAR_MODELS, ...LAB_CAR_MODELS].filter((def) => onlyPack === null || packOf(def) === onlyPack);
   const state: LabState = {
     dirt: queryNumber(query, 'dirt', 0),
     scratches: queryNumber(query, 'scratches', 0),
