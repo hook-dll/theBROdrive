@@ -86,10 +86,49 @@ export function buildKitCar(id: string): THREE.Group {
   buildExterior(ctx);
   buildInterior(ctx);
   buildBay(ctx);
+  if (spec.rearLean) leanRear(root, frame, spec.rearLean);
 
   // The scene carries the first style; the loader adds the rest (`buildKitWheelSet`).
   for (const wheel of buildKitWheelSet(id, KIT_WHEEL_STYLES[0]!).children.slice()) root.add(wheel);
   return root;
+}
+
+const _p = new THREE.Vector3();
+const _inv = new THREE.Matrix4();
+
+/**
+ * Leans the back of the car (`KitCarSpec.rearLean`): above `base`, every point moves
+ * forward by `lean` per metre of height, in full behind the rear base and fading to
+ * nothing over `blend` ahead of it. The whole back — tailgate, the lamp corners beside
+ * it, the lamps on them — then lies in one raked plane, as on the estates, while the
+ * bumper below stays upright. Moving parts are warped in their built (closed) pose, so
+ * they still close flush; wheels are added afterwards and never touched.
+ */
+function leanRear(root: THREE.Object3D, frame: BodyFrame, lean: { readonly base: number; readonly lean: number; readonly blend: number }): void {
+  const zFull = frame.z(frame.rearBase);
+  const zStart = zFull + lean.blend;
+  root.updateMatrixWorld(true);
+  root.traverse((node) => {
+    const mesh = node as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const position = mesh.geometry.getAttribute('position');
+    _inv.copy(mesh.matrixWorld).invert();
+    let moved = false;
+    for (let i = 0; i < position.count; i++) {
+      _p.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld);
+      if (_p.z >= zStart || _p.y <= lean.base) continue;
+      const w = Math.min(1, (zStart - _p.z) / lean.blend);
+      _p.z += w * w * (3 - 2 * w) * lean.lean * (_p.y - lean.base);
+      _p.applyMatrix4(_inv);
+      position.setXYZ(i, _p.x, _p.y, _p.z);
+      moved = true;
+    }
+    if (!moved) return;
+    position.needsUpdate = true;
+    mesh.geometry.computeVertexNormals();
+    mesh.geometry.computeBoundingBox();
+    mesh.geometry.computeBoundingSphere();
+  });
 }
 
 /**

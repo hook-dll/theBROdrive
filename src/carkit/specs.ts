@@ -534,11 +534,13 @@ const VAZ2108: KitCarSpec = {
       bumper: SAMARA_FRONT_BUMPER,
       items: [
         { kind: 'panel', x: { inset: 0.03 }, y: { from: ['bumperTop', 0.003], to: ['deck', -0.013] }, finish: 'black', proud: 0.006 },
-        { kind: 'lens', role: 'head', x: { from: { centre: 0.26 }, to: { inset: 0.1 } }, y: { from: ['bumperTop', 0.015], to: ['deck', -0.025] }, depth: 0.01, proud: 0.012 },
-        { kind: 'lens', role: 'blinker', x: { at: { inset: 0.065 }, half: 0.032 }, y: { from: ['bumperTop', 0.015], to: ['deck', -0.025] }, depth: 0.01, proud: 0.01 },
+        // Front view (4.63 mm/px from the 1750 width): the grille panel runs to ±0.34, the unit
+        // to ±0.69 with the indicator its outer 70 mm; the outer edge leans in at the top.
+        { kind: 'lens', role: 'head', x: { from: { centre: 0.36 }, to: { centre: 0.62 } }, y: { from: ['bumperTop', 0.015], to: ['deck', -0.025] }, depth: 0.01, proud: 0.012, slant: { outer: 0.035, inner: 0 } },
+        { kind: 'lens', role: 'blinker', x: { from: { centre: 0.625 }, to: { centre: 0.69 } }, y: { from: ['bumperTop', 0.015], to: ['deck', -0.025] }, depth: 0.01, proud: 0.012, slant: { outer: 0.04, inner: 0.035 } },
         {
           kind: 'grille',
-          x: { centre: 0.22 },
+          x: { centre: 0.3 },
           y: { from: ['bumperTop', 0.015], to: ['deck', -0.025] },
           back: false,
           bars: { dir: 'horizontal', count: 3, finish: 'dark', margin: 0.02, width: 0.014, depth: 0.01, proud: 0.016 },

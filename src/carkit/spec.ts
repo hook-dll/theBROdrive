@@ -122,6 +122,11 @@ export interface KitCarSpec {
   readonly bonnetFront: number;
   /** Boot lid from the back light's base to this s; a tailgate when absent. */
   readonly bootEnd?: number;
+  /**
+   * The back leaning forward as one plane above `base` (m per m of height), blended in
+   * over `blend` metres ahead of the rear base: an estate whose lamps lie on the slope.
+   */
+  readonly rearLean?: { readonly base: number; readonly lean: number; readonly blend: number };
   /** Fuel flap on a rear wing (the right one unless `side` says left): s and height ranges. */
   readonly flap: { readonly s0: number; readonly s1: number; readonly y0: number; readonly y1: number; readonly side?: 'left' | 'right' };
   readonly look: KitLook;
@@ -219,8 +224,19 @@ export type FaceItem =
   | { readonly kind: 'panel'; readonly x: FaceX; readonly y: Span<FaceY>; readonly finish: Finish; readonly proud: number }
   /** A round lamp in a chrome ring. */
   | { readonly kind: 'round'; readonly role: LampRole; readonly x: FaceX; readonly y: FaceY; readonly radius: number }
-  /** A rectangular lens. */
-  | { readonly kind: 'lens'; readonly role: LampRole; readonly x: Span<FaceX>; readonly y: Span<FaceY>; readonly depth: number; readonly proud: number }
+  /**
+   * A lens, rectangular unless `slant`: how far its top edge's outer and inner ends stand
+   * inboard of the bottom's (a trapezoid, or a parallelogram when both move).
+   */
+  | {
+      readonly kind: 'lens';
+      readonly role: LampRole;
+      readonly x: Span<FaceX>;
+      readonly y: Span<FaceY>;
+      readonly depth: number;
+      readonly proud: number;
+      readonly slant?: { readonly outer: number; readonly inner: number };
+    }
   /** A grille on the centre line out to `x`: an optional frame and back, and bars across it. */
   | {
       readonly kind: 'grille';

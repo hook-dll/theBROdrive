@@ -199,7 +199,27 @@ function buildFaceItem(face: EndFace, item: FaceItem, b: PartBuilder): void {
     case 'lens': {
       const [x, hx] = face.spanX(item.x);
       const [y, hy] = face.spanY(item.y);
-      for (const side of [1, -1]) lens(b, lampSlot(item.role, side), [side * x, y, face.out(item.proud)], [hx, hy, item.depth]);
+      for (const side of [1, -1]) {
+        const slot = lampSlot(item.role, side);
+        if (!item.slant) {
+          lens(b, slot, [side * x, y, face.out(item.proud)], [hx, hy, item.depth]);
+          continue;
+        }
+        // A slab on the face whose top edge stands inboard: outline in (x, y), extruded out.
+        const o = x + hx;
+        const i = x - hx;
+        const outline: [number, number][] = [
+          [side * i, y - hy],
+          [side * o, y - hy],
+          [side * (o - item.slant.outer), y + hy],
+          [side * (i - item.slant.inner), y + hy],
+        ];
+        // Counter-clockwise seen from outside the face, whichever side and end.
+        if (side * face.facing < 0) outline.reverse();
+        const z0 = face.out(item.proud - item.depth);
+        const z1 = face.out(item.proud + item.depth);
+        b.extrude(slot, outline, Math.min(z0, z1), Math.max(z0, z1));
+      }
       return;
     }
     case 'grille': {

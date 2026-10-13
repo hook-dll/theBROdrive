@@ -76,6 +76,8 @@ export const BODY_2102: KitBody = {
   // no bootEnd: the rear ring is a tailgate hinged at the roof
   // REAL FLAP IS ON THE LEFT: s 3.517–3.695, y 0.659–0.771 raw → 0.67–0.785 [D]
   flap: { s0: 3.517, s1: 3.695, y0: 0.67, y1: 0.785, side: 'left' },
+  // The back leans as one plane over the bumper, lamps and all [P: rear 3/4 photos].
+  rearLean: { base: 0.46, lean: 0.25, blend: 0.3 },
 };
 
 /** VAZ-2102's back: vertical tail lamps on the corners, the 2101's rear bumper. */
@@ -165,6 +167,8 @@ export const BODY_2104: KitBody = {
   // no bootEnd: the rear ring is a tailgate hinged at the roof
   // REAL FLAP IS ON THE LEFT [P p04_side_l]
   flap: { s0: 3.51, s1: 3.69, y0: 0.745, y1: 0.85, side: 'left' },
+  // The back leans as one plane over the bumper, lamps and all [P: rear 3/4 photos].
+  rearLean: { base: 0.49, lean: 0.25, blend: 0.3 },
 };
 
 /** VAZ-2104's back: vertical corner lamps, the 21043's plastic rear bumper. */
