@@ -474,11 +474,11 @@ const VAZ2108: KitCarSpec = {
   length: 4.006,
   platform: 'samara',
   stations: [
-    // The face's corners lean in over the bumper as the lamps' outer edges do: widest at the
-    // bumper's top (crease), 45 mm in at the bonnet's lip.
-    { s: 0.11, sill: 0.36, crease: 0.6, belt: 0.775, deck: 0.79, wSill: 0.76, wCrease: 0.76, wBelt: 0.69 },
-    { s: 0.17, sill: 0.33, crease: 0.6, belt: 0.8, deck: 0.815, wSill: 0.78, wCrease: 0.78, wBelt: 0.75 },
-    { s: 0.5, sill: 0.285, crease: 0.6, belt: 0.83, deck: 0.85, wSill: 0.795, wCrease: 0.82, wBelt: 0.805 },
+    // The wing's top leans in more and more from the door to the lamps, whose outer edges
+    // it meets at the nose; the crease below it stays nearly full width all the way.
+    { s: 0.11, sill: 0.36, crease: 0.6, belt: 0.775, deck: 0.79, wSill: 0.775, wCrease: 0.785, wBelt: 0.69 },
+    { s: 0.17, sill: 0.33, crease: 0.6, belt: 0.8, deck: 0.815, wSill: 0.785, wCrease: 0.8, wBelt: 0.71 },
+    { s: 0.5, sill: 0.285, crease: 0.6, belt: 0.83, deck: 0.85, wSill: 0.795, wCrease: 0.815, wBelt: 0.75 },
     { s: 1.232, sill: 0.264, crease: 0.63, belt: 0.9, deck: 0.92, wSill: 0.8, wCrease: 0.825, wBelt: 0.81 },
     { s: 2.55, sill: 0.264, crease: 0.64, belt: 0.911, deck: 0.93, wSill: 0.8, wCrease: 0.825, wBelt: 0.81 },
     { s: 3.6, sill: 0.28, crease: 0.64, belt: 0.92, deck: 0.94, wSill: 0.795, wCrease: 0.82, wBelt: 0.805 },
