@@ -16,7 +16,7 @@ import { addBuilt, pivotGroup, type KitContext, type KitNode } from './context';
 import { buildExterior } from './exterior';
 import { buildInterior } from './interior';
 import { KIT_SPECS } from './specs';
-import { KIT_WHEEL_STYLES, buildWheel, type WheelStyle } from './wheels';
+import { buildWheel } from './wheels';
 import type { KitMotion } from './rig';
 
 /** Russian names for the shell's moving parts, shown on hover. */
@@ -88,8 +88,23 @@ export function buildKitCar(id: string): THREE.Group {
   buildBay(ctx);
   if (spec.rearLean) leanRear(root, frame, spec.rearLean);
 
-  // The scene carries the first style; the loader adds the rest (`buildKitWheelSet`).
-  for (const wheel of buildKitWheelSet(id, KIT_WHEEL_STYLES[0]!).children.slice()) root.add(wheel);
+  // The car's own wheels, named for its `wheelNodes`: they set the wheels' places and
+  // size; the loader shods the car from the Soviet pack's sets (`wheelSetPool`).
+  const w = spec.wheels;
+  const wheels: [string, number, number][] = [
+    ['kit_wheel_fl', w.front, w.frontHalfTrack],
+    ['kit_wheel_fr', w.front, -w.frontHalfTrack],
+    ['kit_wheel_rl', w.rear, w.rearHalfTrack],
+    ['kit_wheel_rr', w.rear, -w.rearHalfTrack],
+  ];
+  for (const [name, s, x] of wheels) {
+    const wheel = buildWheel(w.radius, w.width);
+    wheel.name = name;
+    wheel.position.set(x, w.radius, frame.z(s));
+    // Built with the outer face to +X (the left side): the right wheels turn round.
+    if (x < 0) wheel.rotation.y = Math.PI;
+    root.add(wheel);
+  }
   return root;
 }
 
@@ -131,29 +146,3 @@ function leanRear(root: THREE.Object3D, frame: BodyFrame, lean: { readonly base:
   });
 }
 
-/**
- * The four wheels of a kit car in one style, standing where the car's spec puts them and
- * named for its `wheelNodes`: what the loader takes a car's wheels from, once per style.
- */
-export function buildKitWheelSet(id: string, style: WheelStyle): THREE.Group {
-  const spec = KIT_SPECS[id];
-  if (!spec) throw new Error(`Unknown kit car "${id}"`);
-  const frame = new BodyFrame(spec);
-  const set = new THREE.Group();
-  const w = spec.wheels;
-  const wheels: [string, number, number][] = [
-    ['kit_wheel_fl', w.front, w.frontHalfTrack],
-    ['kit_wheel_fr', w.front, -w.frontHalfTrack],
-    ['kit_wheel_rl', w.rear, w.rearHalfTrack],
-    ['kit_wheel_rr', w.rear, -w.rearHalfTrack],
-  ];
-  for (const [name, s, x] of wheels) {
-    const wheel = buildWheel(w.radius, w.width, style);
-    wheel.name = name;
-    wheel.position.set(x, w.radius, frame.z(s));
-    // Built with the outer face to +X (the left side): the right wheels turn round.
-    if (x < 0) wheel.rotation.y = Math.PI;
-    set.add(wheel);
-  }
-  return set;
-}

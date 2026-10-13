@@ -295,18 +295,14 @@ was checked this way: the 2108 came out identical; the 2106 differed only in its
 bars, 0.29 mm (their spacing is now a rounded margin), before its looks were then
 deliberately corrected to the measurements.
 
-## Wheels: five interchangeable styles
+## Wheels: the Soviet pack's sets
 
-`KIT_WHEEL_STYLES` in `wheels.ts`: stamped steel with a small cap, chrome dome, dome with
-a chrome ring on a dark-painted rim, full plastic cover, cast "daisy". Each is a
-description (face steel/alloy, paint, cover, ring), not a model. Every style fits every
-kit car: the loader builds each car's wheels in every style (`buildKitWheelSet`, through
-the same `takeOwnWheels` pass as a model's own wheels, kept as `Template.wheelStyles`),
-and each instance wears one style on all four, picked by its appearance key — so two cars
-of one model are met on different wheels, and one car keeps its wheels across saves. All
-styles draw from the same four wheel slots (tyre, rim, chrome, trim), so they cost no
-shader program; the program anchor carries every style anyway. In the lab, `Экземпляр`
-(and `?variant=`) steps the appearance key: paint and wheels change together.
+A kit car is shod as the Soviet pack's cars are: from `SOVIET_WHEEL_SET_POOL` (its
+sibling's `wheelSetPool`), each instance wearing one set on all four, picked by its
+appearance key, rescaled by `cloneWheels` to the kit's own tyre size and width. The kit's
+own wheel (`buildWheel` in `wheels.ts`, a tyre on a plain steel disc) only sets where the
+wheels stand and how big they are. In the lab, `Экземпляр` (and `?variant=`) steps the
+appearance key: paint and wheels change together.
 
 ## Budget and current figures
 

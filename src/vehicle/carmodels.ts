@@ -2191,7 +2191,8 @@ const KIT_CARS: readonly Entry[] = (
     clearGlass: true,
     paintStyle: 'solid-paint',
     wheelNodes: KIT_WHEEL_NODES,
-    wheelSetPool: undefined,
+    // Shod from the Soviet pack, as its sibling is: rescaled to the kit's own tyre.
+    wheelSetPool: base.wheelSetPool ?? SOVIET_WHEEL_SET_POOL,
     lights: KIT_LIGHTS,
     scale: 1,
   };
