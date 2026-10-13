@@ -271,27 +271,68 @@ export const BODY_2115: KitBody = {
 
 /**
  * The 2115's look (photos "2010 Lada 211540 dark green rear view", "VAZ-2115",
- * "2008 Lada Samara 211540 rear"): eye-shaped head lamps with the amber indicator at
- * their outer ends and a narrow slot under the bonnet's lip between them; corner lamps
- * (amber outside, red) on the body and a lamp bar across the lid between them, a white
- * reversing lamp in each end of it; body-colour bumpers, the rear one deep.
+ * "2008 Lada Samara 211540 rear", "2010 Lada 211540 silver front", "2005 Lada 21150
+ * purple side"; measurements-samara.md §3): the late face — head lamps narrower than the
+ * 2108's, their top sloping down at the inner end to the bonnet's lip, which comes down
+ * between them over a narrow slot, the amber indicator rounding off their outer ends —
+ * and rectangular fog lamps in a body-colour front bumper; grey mouldings along the doors
+ * in line with a grey band round both bumpers; corner lamps (amber outside, red) on the
+ * body and a lamp bar across the lid between them, a white reversing lamp in each end of
+ * it; a wing on the boot lid with the high brake lamp under its middle.
  */
 export const LOOK_2115: KitLook = {
   ...LOOK_2108,
   label: 'VAZ-2115',
   upholstery: 0x34363b,
+  waist: { y: 0.4875, height: 0.095, finish: 'grey' },
+  spoiler: {
+    half: 0.62,
+    plate: 0.05,
+    s0: 4.015,
+    s1: 4.177,
+    top0: 0.998,
+    top1: 1.026,
+    thickness: 0.035,
+    foot: 3.87,
+    pedestal: { half: 0.13, s0: 4.06, s1: 4.145 },
+    lamp: { half: 0.105, y0: 0.947, y1: 0.982 },
+  },
   front: {
-    bumper: { kind: 'moulded', drop: 0.07, height: 0.3, finish: 'paint' },
+    bumper: { kind: 'moulded', drop: 0.07, height: 0.3, finish: 'paint', moulding: { y: 0.52, height: 0.075, finish: 'grey' } },
     items: [
-      { kind: 'lens', role: 'head', x: { from: { centre: 0.33 }, to: { centre: 0.6 } }, y: { from: ['bumperTop', 0.015], to: ['deck', -0.025] }, depth: 0.01, proud: 0.012, slant: { outer: 0.03, inner: 0.02 } },
-      { kind: 'lens', role: 'blinker', x: { from: { centre: 0.605 }, to: { centre: 0.69 } }, y: { from: ['bumperTop', 0.015], to: ['deck', -0.025] }, depth: 0.01, proud: 0.012, slant: { outer: 0.04, inner: 0.03 } },
+      {
+        kind: 'lens',
+        role: 'head',
+        x: { from: { centre: 0.3 }, to: { centre: 0.549 } },
+        y: { from: ['bumperTop', 0.03], to: ['deck', -0.03] },
+        depth: 0.01,
+        proud: 0.012,
+        slant: { outer: -0.031, inner: 0 },
+        chamfer: { innerTop: [0.068, 0.045], innerBottom: [0.02, 0.014] },
+      },
+      {
+        kind: 'lens',
+        role: 'blinker',
+        x: { from: { centre: 0.552 }, to: { centre: 0.69 } },
+        y: { from: ['bumperTop', 0.03], to: ['deck', -0.03] },
+        depth: 0.01,
+        proud: 0.012,
+        slant: { outer: 0, inner: -0.031 },
+        chamfer: { outerTop: [0.025, 0.024], outerBottom: [0.031, 0.035] },
+      },
+      // The slot under the bonnet's lip, between the lamps' inner ends, with a bright bar.
       {
         kind: 'grille',
-        x: { centre: 0.27 },
-        y: { from: ['bumperTop', 0.03], to: ['bumperTop', 0.08] },
+        x: { centre: 0.285 },
+        y: { from: ['deck', -0.095], to: ['deck', -0.07] },
         back: true,
-        bars: { dir: 'horizontal', count: 1, finish: 'alloy', margin: 0, width: 0.01, depth: 0.01, proud: 0.022 },
+        bars: { dir: 'horizontal', count: 1, finish: 'alloy', margin: 0, width: 0.008, depth: 0.01, proud: 0.022 },
       },
+      // Rectangular fog lamps in black housings on the bumper's face, outboard of the
+      // intake, standing no further out than the bumper's moulding; never lit (no fog-lamp
+      // channel), so the lens is a bright unlit finish.
+      { kind: 'panel', x: { from: { centre: 0.37 }, to: { centre: 0.58 } }, y: { from: ['bumperBottom', 0.035], to: ['bumperBottom', 0.135] }, finish: 'black', proud: 0.153 },
+      { kind: 'panel', x: { from: { centre: 0.41 }, to: { centre: 0.54 } }, y: { from: ['bumperBottom', 0.045], to: ['bumperBottom', 0.125] }, finish: 'chrome', proud: 0.157 },
       // The bumper's dark lower intake, standing out of the face to the bumper's front.
       {
         kind: 'grille',
@@ -304,7 +345,7 @@ export const LOOK_2115: KitLook = {
     ],
   },
   rear: {
-    bumper: { kind: 'moulded', drop: 0.04, height: 0.306, finish: 'paint' },
+    bumper: { kind: 'moulded', drop: 0.04, height: 0.306, finish: 'paint', moulding: { y: 0.478, height: 0.08, finish: 'grey' } },
     items: [
       {
         kind: 'cluster',

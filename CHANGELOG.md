@@ -32,15 +32,49 @@
   2108 is identical, the 2106 differed by 0.29 mm in its grille bars before its trim was
   corrected to the measurements (black-insert waist moulding, repeaters, black rear panel
   in a chrome outline, 3×3 tail cells, end caps).
-- Kit cars come on five interchangeable wheel styles (stamped with a cap, chrome dome, dome
-  with a ring, full plastic cover, cast "daisy"), one per car instance on all four wheels,
-  picked by its appearance key (`Template.wheelStyles`). The lab's `Экземпляр` slider and
-  `?variant=` step through instances.
+- Kit cars wear the Soviet pack's wheel sets (`DISTINCT_SOVIET_WHEEL_SETS`: the pack's six
+  designs once each, so every design is equally likely; the shared pool repeats some), one
+  set on all four wheels per car instance, picked by its appearance key and
+  rescaled to the kit's tyre by `cloneWheels`. The kit's own wheel is a plain steel disc
+  that only sets the wheels' places and size; the five generated styles and
+  `Template.wheelStyles` are gone. The lab's `Экземпляр` slider and `?variant=` step
+  through instances (paint and wheels together).
 - Kit estates `kit_vaz2102` and `kit_vaz2104` (`src/carkit/estates.ts`, measured in
   `measurements-estates.md`): their saloons' fronts on a roof run to the tail, quarter glass,
   a roof-hinged tailgate with a flat sill (`TubStation.flat`) between corner lamps, the
   filler on the left (`flap.side`), and a load floor from the rear bench back
   (`loadSpaceStart`).
+- Kit Samaras `kit_vaz2109`, `kit_vaz21099` and `kit_vaz2115` (`src/carkit/samaras.ts`,
+  measured in `measurements-samara.md`): the 2108's shell from the nose to the B pillar
+  with their own doors; the 21099's saloon tail with a boot lid; the 2115 (on the 21099's
+  running gear) with body-colour bumpers and a boot lid that comes down between the corner
+  lamps carrying the lamp bar. The 21099/2115 rear door's shut line runs unbroken from sill
+  to roof rail, with a fixed quarter glass in the body behind it and a C pillar of even width
+  parallel to the back light. New spec language: `TubStation.notch`, `FaceLook.lid` (face
+  items riding on the lid), a moulded bumper `finish`. The other kit cars were proved
+  unchanged by per-triangle hashes.
+- Kit cars after the owner's review (`src/carkit/HISTORY.md` has cause and code for each):
+  the estates' tailgate closes flush with nothing through the opening (end faces earcut, D
+  pillar folded at the knee) and their back leans as one plane, lamps and all
+  (`KitCarSpec.rearLean`), with the pillar trim stopping short of the opening; no
+  spare-wheel box under the classic saloons and silencers tucked up; the 2108's face is a
+  slotted body-colour panel (`'paint'` finish) between narrower trapezoid headlamps
+  (`slant`), its wing tapering to the lamps; the 05 shell's bonnet nose is flatter and its A
+  pillar slim, the door frame running up it (2104/2105/2107); the 2104/2105 share the 2107's
+  headlamp units and black surround.
+- Kit 2115 details (`src/carkit/samaras.ts`, measured on photos in
+  `measurements-samara.md`): the late face's head lamps and indicators with cut corners
+  (lens `chamfer`, negative `slant`), the slot under the bonnet's lip, rectangular fog lamps
+  in black housings (a `panel` whose `x` is a span builds one block each side), grey door
+  mouldings in line with a grey band round both bumpers (finish `'grey'`, moulded bumper
+  `moulding`; a waist moulding now stops 30 mm short of a wheel arch), and a boot-lid
+  spoiler with the high brake lamp that lifts with the lid (`KitLook.spoiler`). 12 092
+  triangles; the other kit cars were proved unchanged by per-triangle hashes. The high brake
+  lamp shares the brake slot, so it also glows with the tail lamps, and the fog lamps never
+  light: the lamps have no role for either.
+- Kit documentation for agents: `src/carkit/README.md` (working rules, spec reference,
+  adding a car end to end, proving refactors), `STATUS.md` (goal, roadmap, per-car status,
+  gaps) and `HISTORY.md` (fix log and approaches not to retry).
 
 - THE VAZ-1111 OKA IN THE PACK'S STYLE (`cf_vaz1111`) REPLACES the GTA SA Oka (`sa_oka` is
   gone from the catalogue, its `oka.glb`, `tools/oka-author.py` and the trim-plate rear screen

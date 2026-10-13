@@ -158,14 +158,48 @@ export interface KitLook {
   readonly brightwork: Finish;
   /** A strip along the sill between the arches, or none. */
   readonly sill: Finish | null;
-  /** A strip along the flank at `y`, nose to tail, broken at the shut lines; or none. */
+  /**
+   * A strip along the flank at `y`, nose to tail, broken at the shut lines and where it
+   * meets a wheel arch; or none.
+   */
   readonly waist: { readonly y: number; readonly height: number; readonly finish: Finish } | null;
   /** The amber side repeater on each front wing (s and y ranges), or none. */
   readonly repeater: { readonly s0: number; readonly s1: number; readonly y0: number; readonly y1: number } | null;
+  /** A body-colour wing on the boot lid's trailing edge with the high brake lamp, or none. */
+  readonly spoiler?: SpoilerLook;
 }
 
-/** Surface finishes trim is made in: bright metal, black plastic, bare aluminium, rubber, or the body's paint. */
-export type Finish = 'chrome' | 'black' | 'alloy' | 'rubber' | 'paint';
+/**
+ * A boot-lid spoiler (the 2115's), hung on the lid so it lifts with it: a wing across the
+ * lid's trailing edge whose ends come down to the lid as end plates running forward, and
+ * a pedestal under its middle carrying the high-mounted brake lamp on its back. `s` in
+ * the car's frame (as `repeater`), heights above the ground.
+ */
+export interface SpoilerLook {
+  /** Half span, and the width of each end plate inside it. */
+  readonly half: number;
+  readonly plate: number;
+  /** The wing's leading and trailing edges, and its top at each. */
+  readonly s0: number;
+  readonly s1: number;
+  readonly top0: number;
+  readonly top1: number;
+  readonly thickness: number;
+  /** Where the end plates' lower edge meets the lid, ahead of the wing. */
+  readonly foot: number;
+  /**
+   * The pedestal under the wing's middle (half width, s from its front to its back) and
+   * the brake lamp's lens on its back (half width, bottom and top heights).
+   */
+  readonly pedestal: { readonly half: number; readonly s0: number; readonly s1: number };
+  readonly lamp: { readonly half: number; readonly y0: number; readonly y1: number };
+}
+
+/**
+ * Surface finishes trim is made in: bright metal, black plastic, bare aluminium, rubber,
+ * unpainted grey plastic (the 2115's mouldings), or the body's paint.
+ */
+export type Finish = 'chrome' | 'black' | 'alloy' | 'rubber' | 'grey' | 'paint';
 
 /** One end of the car: its bumper and what stands on its face. */
 export interface FaceLook {
@@ -209,6 +243,11 @@ export type BumperLook =
       readonly height: number;
       /** Its finish (the 2115's is body colour); dark plastic when absent. */
       readonly finish?: Finish;
+      /**
+       * A moulding band round it instead of the groove: centre height above the ground,
+       * height and finish (the 2115's grey band, in line with its door mouldings).
+       */
+      readonly moulding?: { readonly y: number; readonly height: number; readonly finish: Finish };
     };
 
 /**
@@ -234,13 +273,19 @@ export type LampRole = 'head' | 'tail' | 'brake' | 'reverse' | 'blinker' | 'iner
  * `proud` is how far it stands out of the face.
  */
 export type FaceItem =
-  /** A flat surround from one side to the other. */
-  | { readonly kind: 'panel'; readonly x: FaceX; readonly y: Span<FaceY>; readonly finish: Finish; readonly proud: number }
+  /**
+   * A flat surround: from one side to the other when `x` is a distance from the centre
+   * line, or a pair of blocks (one each side) when `x` is a span.
+   */
+  | { readonly kind: 'panel'; readonly x: FaceX | Span<FaceX>; readonly y: Span<FaceY>; readonly finish: Finish; readonly proud: number }
   /** A round lamp in a chrome ring. */
   | { readonly kind: 'round'; readonly role: LampRole; readonly x: FaceX; readonly y: FaceY; readonly radius: number }
   /**
    * A lens, rectangular unless `slant`: how far its top edge's outer and inner ends stand
-   * inboard of the bottom's (a trapezoid, or a parallelogram when both move).
+   * inboard of the bottom's (a trapezoid, or a parallelogram when both move; negative
+   * leans out). `chamfer` cuts its corners: [across, up] taken off each corner along the
+   * top or bottom edge and along the end edge (the 2115's head lamp, whose top slopes
+   * down to its inner end).
    */
   | {
       readonly kind: 'lens';
@@ -250,6 +295,7 @@ export type FaceItem =
       readonly depth: number;
       readonly proud: number;
       readonly slant?: { readonly outer: number; readonly inner: number };
+      readonly chamfer?: LensChamfer;
     }
   /** A grille on the centre line out to `x`: an optional frame and back, and bars across it. */
   | {
@@ -280,3 +326,11 @@ export type FaceItem =
   | { readonly kind: 'cluster'; readonly x: Span<FaceX>; readonly y: Span<FaceY>; readonly columns: readonly (readonly LampRole[])[] }
   /** A rectangular outline of `width` bars (a chrome surround); both sides unless centred. */
   | { readonly kind: 'frame'; readonly x: Span<FaceX>; readonly y: Span<FaceY>; readonly width: number; readonly finish: Finish; readonly proud: number };
+
+/** Corner cuts of a lens, each [along the top or bottom edge, along the end edge]. */
+export interface LensChamfer {
+  readonly innerTop?: readonly [number, number];
+  readonly innerBottom?: readonly [number, number];
+  readonly outerTop?: readonly [number, number];
+  readonly outerBottom?: readonly [number, number];
+}

@@ -1,6 +1,6 @@
 # VAZ Samara family: measured numbers for 2109 / 21099 / 2115
 
-Crops, gridded readings, photos, overlays and lab captures are in `/tmp/samara/`. Only this file, the code and the drawings in `build/carshape/_refs/bp/img/` were written.
+Crops, gridded readings, photos, overlays and lab captures are in `/tmp/samara/` (the 2115 details of §3.3–3.6: photos in `/tmp/samara/ph2/`, crops and lab captures in `/tmp/k2115/`). Only this file, the code and the drawings in `build/carshape/_refs/bp/img/` were written.
 
 Frame and tags as in `measurements-classics.md`:
 - **Body:** `s` rearward from the tip of the front bumper, `y` above the ground; mm in the tables, metres in the spec.
@@ -41,7 +41,8 @@ The brief said 1680 for the 2115's width. No source gives it; every factory sour
 | `p19` | 2005 Lada 21150 purple side.jpg | CC0 | **2115 left side**, near-orthographic. Hubs x 371 / 1456, y 541 → **2.267 mm/px** on the side plane, ground y 665. s = 3.29 + (x − 1456)·0.002267, y = (665 − y_px)·0.002267. |
 | `p12` | 2008 Lada Samara 211540 rear.jpg | CC0 | 2115 rear: lamp layout, lid shut line, plate scale (520 mm = 346 px). |
 | `p13` | 2010 Lada Samara 211540 dark green rear view.jpg | CC0 | 2115 rear 3/4: lamp height against the bumper's. |
-| `p15`, `p20` | 2010 Lada Samara 211540 dark green front view.jpg, VAZ-2115.jpg | CC0, PD | 2115 face. |
+| `p15`, `p20` | 2010 Lada Samara 211540 dark green front view.jpg, VAZ-2115.jpg | CC0, PD | 2115 face; `p20` (front left 3/4, plate 520 mm) also the fog lamps. |
+| `f1`–`f5` (`ph2/`) | 2010 Lada 211540 blue front.jpg, 2004 Lada Samara 21150 blue front.jpg, 2005 Lada 21150 silver front.jpg, 2004 Lada 21150 dark green front.jpg, 2010 Lada 211540 silver front.jpg | Commons (licences not checked; used for reading only) | 2115 front 3/4s. `f5` is the nearest to frontal: the head lamp's outline. `f2`–`f4` and `p19`: grey mouldings on the doors and a grey band round both bumpers; `f1`: the same in body colour. |
 | `p17`, `p18` | 1999 VAZ 21099 white rear.jpg, 2003 VAZ 21099 blue rear.jpg | CC0 | 21099 lamp cells; `p18` (left rear 3/4) also the rear door's channel, fixed glass and the C pillar, about as wide as the fixed glass and even along its length. |
 | `p11` | VAZ-2115 "Pyatnashka" (4936805781).jpg | CC BY-SA 2.0 | 2115 right side: the fuel flap is on the **right** rear wing. |
 
@@ -128,18 +129,54 @@ Overlay check (`/tmp/samara/ov_21099.png`): below the belt the model lies on the
 | Lid's foot between the lamps | 0.61 [P p12, p13] | deck **0.61** on the last station |
 | Lid's side edge between lid and corner lamp | slants from ±0.58 at the lamps' top to ±0.54 at the foot [P p12] | `notch` **0.575**, wall 25 mm (`NOTCH_WALL`) |
 | Rear bumper | y 400–535 → 0.601–0.295; body colour | moulded, finish paint, drop **0.04**, height **0.306**, tail sill 0.30 |
-| Spoiler | tip 4.183, 1.03 high | not modelled (§5) |
+| Spoiler | tip 4.177–4.183, 1.026–1.03 high | §3.5 |
 
 Lamps across the back [P p12, plate scale 1.5 mm/px; p13]:
 - corner units on the body, from ±0.56–0.58 out to the corner: amber outer cell (~0.09), red. Spec: cluster `centre 0.585` → `inset 0.01`, columns `blinker`, `tail`/`brake`;
 - on the lid, ±(0.38..0.56): red with a white square in its middle. Spec: lid cluster `centre 0.4` → `0.565`, columns `tail`, `reverse`, `tail`;
 - between them, the dark red bar ±0.38 (reflector). Spec: lid lens `inert`, `centre 0` → `0.39`.
 
-### 3.3 Face [P p15, p20]
+### 3.3 Face [P f5, p20, p15, p19]
 
-- Head lamps on the 2108's footprint (±0.33..0.60) with the amber indicator at their outer end (±0.605..0.69).
-- A narrow slot under the bonnet's lip between them: ±0.27, bumper top + 0.03..0.08, one bright bar.
-- Body-colour front bumper, deeper than the 2108's: drop 0.07, height 0.30 (0.325–0.625); a dark lower intake ±0.30 at bumper bottom + 0.085..0.15.
+No drawing of the 2113–2115 face exists on 3dcar.ru (the 2114 / 2113 / 2115 names return 404), so the face is read off front 3/4 photos. Across the face, a 1-D projective map (u = (pX + q)/(rX + 1)) was fitted per photo to symmetric pairs of edges, with the outer end of the unit on the wing's ±0.69 (the 2108's, the same stamping):
+
+| Feature | `f5` | `p20` | Spec (half width) |
+|---|---|---|---|
+| Head lamp, inner end | 0.312 | 0.294 | **0.30** |
+| Head lamp / indicator joint (mean of bottom 0.549 and top 0.58, `f5` close-up at 0.283 mm/px) | 0.580 | 0.585 | bottom **0.549**, top **0.58** (the joint leans out 31 mm at the top) |
+| Unit's outer end | 0.69 (fixed) | 0.69 (fixed) | **0.69** |
+| Slot ends | – | ±0.272 / 0.267 | **±0.285**, reaching the lamps' inner ends |
+
+Heights (`p19` side, 2.267 mm/px; `f5` close-up 0.284 mm/px vertically):
+- the unit 0.655–0.76 (105 mm): `bumperTop` + 0.03 to `deck` − 0.03 (face lines 0.625 / 0.79);
+- the head lamp's top is level from the joint to 0.068 short of its inner end, then slopes **45 mm down** to the inner end, where it meets the bonnet's lip (`f5`: the lip runs into the lamp 46 % down its height). The inner end is upright below that, its bottom corner cut 20 × 14 mm. Spec: `chamfer.innerTop` [0.068, 0.045], `innerBottom` [0.02, 0.014];
+- the indicator rounds off the outer end: top corner cut 25 × 24 mm, bottom corner 31 × 35 mm (`chamfer.outerTop`, `outerBottom`);
+- the slot lies under the bonnet's lip at mid-height of the lamps: 0.70–0.72 [`p20`: 0.702–0.733; `f5` lip 0.714]. Spec: `deck` − 0.095 to − 0.07, dark back, one bright bar. Below it the face is body colour down to the bumper.
+
+Body-colour front bumper, deeper than the 2108's: drop 0.07, height 0.30 (0.325–0.625); a dark lower intake ±0.30 at bumper bottom + 0.085..0.15 [P p20: 0.425–0.47 under the plate].
+
+### 3.4 Fog lamps [P p20, f2–f5]
+
+Rectangular, in black housings in the bumper's face outboard of the intake (some cars have blanks; the photos with lamps are used). On `p20`, the same projective fit on the plate's edges (±0.26) and the lamps' edges: lens **±0.41..0.54**, housing **±0.37..0.58** (residuals up to 30 px: ±20 mm). Heights by the bumper's band (0.325–0.625 ≈ 300 px at the lamp, 1 mm/px): lens 0.37–0.45, housing 0.36–0.46. Spec: `panel` pairs (a span `x`), housing black at bumper bottom + 0.035..0.135, lens + 0.045..0.125; standing 153 / 157 mm out of the face, at most a few mm proud of the bumper and inside its tip (the car's length is unchanged). There is no fog-lamp channel in `vehiclelamps.ts` / the rig, and the `inert` slot is the red rear reflector colour, so the lens is an unlit bright finish (`chrome`) rather than a lamp role.
+
+### 3.5 Boot-lid spoiler and high brake lamp [P p19, p12]
+
+Side `p19` (2.267 mm/px, s = 3.29 + (x − 1456)·0.002267, y = (665 − y_px)·0.002267):
+
+| Feature | Reading (px) | s, y | Spec |
+|---|---|---|---|
+| End plate's foot on the lid | (1712, 236) | 3.871, 0.973 | `foot` **3.87** |
+| Wing's trailing top | (1847, 212) | 4.177, 1.026 | `s1` **4.177**, `top1` **1.026** |
+| Under the trailing edge, on the lid's edge | (1837, 249) | 4.155, 0.944 | the plates and pedestal end at **4.145**, just ahead of the lid's trailing edge (station 4.15) |
+| Top line, foot → tip | – | 0.973 → 1.026 | `s0` **4.015** at `top0` **0.998**, on that line |
+
+Rear `p12` (projective fit on the lid's trailing corners ±0.69, the lamp's ends and the wing's ends; residuals ≤ 16 px): wing **±0.62**; the lamp **±0.105**. Thicknesses at the middle against the plate scale (1.5 mm/px at the plate, ~0.77 px per crop px): the wing's back ~35 mm, under it a ~50 mm gap to the lid filled in the middle by a pedestal carrying the red lamp (~38 mm tall). Spec: `thickness` **0.035**; pedestal ±0.13 from s 4.06 to 4.145; lamp 0.947–0.982, on the pedestal's back in a black surround.
+
+The wing's ends come down to the lid as end plates 50 mm wide, running forward to the foot; the plates' and pedestal's lower edges follow the lid through its stations and sink 8 mm into it. The whole spoiler is built in the boot lid's node, so it lifts with the lid (lab: lid open, no poke-through), and is body colour (`paint` slot). The lamp's lens is in the `lamp_brake` slot, so its mesh is one more `kit_brake` and it lights with the brake lamps (lab: night, `brake` 1 with lights off, it lights with the corner stop cells; both off, dark).
+
+### 3.6 Mouldings [P p19, f2–f4]
+
+`p19` columns through the doors (the grey band is bluer than the paint): top **0.528–0.537**, bottom 0.435–0.44 (front door 0.542 / 0.435 by eye; rear door 0.533 / 0.442). Spec: `waist` y **0.4875**, height **0.095**, finish **`grey`** (unpainted grey plastic, a trim vertex colour; `f1` shows body-colour ones). It runs from nose to tail, broken at the shut lines and stopping 30 mm short of each wheel arch (the band passes below the arches' tops at 0.64); under the bumpers' wraps it is hidden. The bumpers carry the same band in place of their groove (moulded bumper `moulding`): front 0.483–0.558 (`p19` front crop) → y **0.52**, height **0.075**; rear 0.438–0.519 (`p19` x 1800) → y **0.478**, height **0.08**.
 
 ## 4. Generator changes
 
@@ -147,15 +184,21 @@ Lamps across the back [P p12, plate scale 1.5 mm/px; p13]:
 2. **`FaceLook.lid`** (exterior.ts `buildLidFace`): face items built on the end face but hung on the boot lid or tailgate node, so the 2115's lamp bar lifts with the lid. Their lens meshes keep the lamp names, so the rig and `VehicleLamps` light them as any other.
 3. **Moulded bumper `finish`** (exterior.ts): absent keeps the dark plastic colours as they were; `paint` makes a body-colour bumper whose groove is a ridge in the same paint.
 4. **Saloon boot end** (bay.ts `buildSaloonBoot`): the boot's rear bulkhead stays 5 mm inside the tail face when the lid comes down to it (`bootEnd` = the last station).
+5. **Lens `chamfer`** (spec.ts `LensChamfer`, exterior.ts `lensOutline`): each corner of a lens can be cut by [along the top or bottom edge, along the end edge]; with `slant` (now also negative, leaning out) this draws the 2115's head lamp and indicator. Without it a lens is built exactly as before.
+6. **`panel` with a span `x`** (exterior.ts): a block on each side instead of one across the centre line (the fog lamps and their housings).
+7. **`Finish 'grey'`**: unpainted grey plastic, the trim slot with a vertex colour (no new material).
+8. **Moulded bumper `moulding`** `{ y, height, finish }`: a band round the bumper in place of the groove.
+9. **`waist` stops at the wheel arches**: a strip low enough to meet an arch (grown by 30 mm) is cut there. The classics' waists run above their arches, so they get no new cut.
+10. **`KitLook.spoiler`** (spec.ts `SpoilerLook`, exterior.ts `buildSpoiler`): wing, end plates and pedestal in the paint slot and the lamp in `lamp_brake`, built into the boot lid's node.
 
-**Proof that nothing else moved.** Every existing kit car (2101–2108) was built from the committed code in a `git worktree` and from the working tree; all triangles in the car frame were sorted and hashed. All eight hashes, triangle counts and bounds are identical. The 2108: 10 226 triangles, bounds ±0.970 × 0…1.335 × ±2.009 m, before and after. After the 21099 rear-door rework (§1.1) the same check against commit d85752e: 2101–2109 identical; only the 21099 (11 707 triangles) and the 2115 (11 738) changed.
+**Proof that nothing else moved.** Every existing kit car (2101–2108) was built from the committed code in a `git worktree` and from the working tree; all triangles in the car frame were sorted and hashed. All eight hashes, triangle counts and bounds are identical. The 2108: 10 226 triangles, bounds ±0.970 × 0…1.335 × ±2.009 m, before and after. After the 21099 rear-door rework (§1.1) the same check against commit d85752e: 2101–2109 identical; only the 21099 (11 707 triangles) and the 2115 (11 738) changed. After the 2115 details (§3.3–3.6, changes 5–10) the same check against commit c86627d: 2101–21099 identical (hash, count, bounds); only the 2115 changed, 11 738 → **12 092** triangles, bounds unchanged (±0.970 × 0…1.335 × −2.171…2.171 m), so its fit row comes out the same.
 
 ## 5. Gaps
 
 - **Greenhouse heights.** All four share the 2108 drawing's greenhouse (roof 1.335). The 21099 drawing, scaled on the 2108's belt and sill, has its roof at 1.402. The loader fits every body to the passport height (1402), so the shell grows 5 % as a whole; the glass stays ~60 mm shallower relative to the body than on the 21099 drawing.
 - **2109 drawing.** It is undimensioned, and its door lines disagree with the photo and the 21099 drawing by 0.1 m; the photo was used. Its quarter light's rear edge (3.513 / 3.144) disagrees with the 2108's panel (3.57 / 3.12) by 57 mm; the 2108's is kept.
 - **Front door's front edge.** The photo (1.239) and the 21099 drawing (1.251) put it 27–39 mm ahead of the 2108's 1.278, which is kept so the shared front stays identical.
-- **2115 not modelled:** the boot-lid spoiler with its high-mounted brake lamp, the plate recess in the rear bumper, the front fog lamps, the grey door mouldings (`p19`), the side repeaters. The head lamps keep the 2108's trapezoids rather than the 2115's rounded "eyes".
+- **2115 not modelled:** the plate recess in the rear bumper, the side repeaters (`p19`: s 1.14–1.21, y 0.676–0.703 on the front wing), the bonnet's lip as a separate part (it is the painted face). The fog lamps never light (no fog-lamp channel). The high brake lamp is in the brake slot, so like every kit brake cell it also glows at tail level when the lights are on; a real one lights with the brake only.
 - **Rear door handles** come from the generator's rule (0.13 ahead of the door's rear frame): 2.886 on the 2109 against its photo's 2.99.
 - **21099 drawing vs the rear door.** The drop glass's rear edge is moved off the drawn line for the reasons in §1.1.
 - **Tail-lamp roles.** Colours are measured; which red cell is tail and which is stop is [INFERENCE] on the 21099 and the 2115.
