@@ -73,6 +73,12 @@ export interface CabinColumn {
    * slope) and lower corner (slope to the door's bottom edge). Absent: upright.
    */
   readonly foot?: { readonly y: number; readonly s: number; readonly round?: readonly [number, number] };
+  /**
+   * The column's top point stands this far below the rail: one straight chamfer of the
+   * rail's front corner from the A pillar up to the next column's top (the Samaras' and
+   * the tens' A pillar rounding into the roof). Absent: at the rail.
+   */
+  readonly drop?: number;
 }
 
 export interface CabinSpec {
@@ -95,6 +101,12 @@ export interface CabinSpec {
   /** Windscreen: base strip above the cowl and header below the rail. */
   readonly screenBottom: number;
   readonly screenHeader: number;
+  /**
+   * A windscreen curved in plan: how far its foot stands ahead of the cowl on the centre
+   * line, fading to nothing at the corners (by 1 − frac²); the bonnet ends that far
+   * forward. Absent: the screen's foot straight across at the cowl.
+   */
+  readonly screenFoot?: number;
   /** Back light: base strip above the deck and header below the rail. */
   readonly rearBottom: number;
   readonly rearHeader: number;
@@ -163,10 +175,12 @@ export interface KitCarSpec {
   readonly rearLean?: { readonly base: number; readonly lean: number; readonly blend: number };
   /**
    * The front face leaning back as one plane above `base` (m per m of height), in full
-   * ahead of the bonnet's front edge and blended out over `blend` metres behind it: a nose
-   * whose lamps and face rake back from the bumper to the bonnet's lip (the Samaras').
+   * ahead of `full` (default the bonnet's front edge) and blended out over `blend` metres
+   * behind it: a nose whose lamps and face rake back from the bumper to the bonnet's lip
+   * (the Samaras', the tens'). Corner lamps must lie where it is in full, so they lean
+   * with the body's faces exactly; `base` on a row of the face (its crease) for the same.
    */
-  readonly frontLean?: { readonly base: number; readonly lean: number; readonly blend: number };
+  readonly frontLean?: { readonly base: number; readonly lean: number; readonly blend: number; readonly full?: number };
   /** Fuel flap on a rear wing (the right one unless `side` says left): s and height ranges. */
   readonly flap: { readonly s0: number; readonly s1: number; readonly y0: number; readonly y1: number; readonly side?: 'left' | 'right' };
   readonly look: KitLook;
@@ -198,7 +212,7 @@ export interface KitLook {
   readonly waist: { readonly y: number; readonly height: number; readonly finish: Finish } | null;
   /** The amber side repeater on each front wing (s and y ranges), or none. */
   readonly repeater: { readonly s0: number; readonly s1: number; readonly y0: number; readonly y1: number } | null;
-  /** A body-colour wing on the boot lid's trailing edge with the high brake lamp, or none. */
+  /** A body-colour wing on the boot lid or tailgate with the high brake lamp, or none. */
   readonly spoiler?: SpoilerLook;
   /**
    * Lamp units wrapping round the corners of the front or tail face onto the flanks, flush
@@ -237,10 +251,10 @@ export interface CornerLampPoint {
 }
 
 /**
- * A boot-lid spoiler (the 2115's), hung on the lid so it lifts with it: a wing across the
- * lid's trailing edge whose ends come down to the lid as end plates running forward, and
- * a pedestal under its middle carrying the high-mounted brake lamp on its back. `s` in
- * the car's frame (as `repeater`), heights above the ground.
+ * A spoiler (the 2115's on its boot lid, the 2112's on its tailgate glass), hung on the
+ * lid so it lifts with it: a wing whose ends come down to the lid as end plates running
+ * forward, and a pedestal under its middle carrying the high-mounted brake lamp on its
+ * back. `s` in the car's frame (as `repeater`), heights above the ground.
  */
 export interface SpoilerLook {
   /** Half span, and the width of each end plate inside it. */
@@ -327,6 +341,12 @@ export type BumperLook =
        * the wheel arch). Absent: a short wrap standing off the corner.
        */
       readonly wrapTo?: number;
+      /**
+       * The bumper continues the body: its top runs out of the end face and the flanks
+       * with no ledge, rounding out to its face below (the 2110's and 2112's). Absent: a
+       * flat top standing out of the face.
+       */
+      readonly flush?: boolean;
     };
 
 /**

@@ -922,10 +922,10 @@ class Cabin {
     const f = this.frame;
     const cab = this.spec.cabin;
     const end = (kind: 'front' | 'rear'): RingPoint => {
-      const s = kind === 'front' ? f.cowl : f.rearBase;
-      const top = kind === 'front' ? cab.columns[0]!.top : cab.columns[cab.columns.length - 1]!.top;
-      const x = f.deckFracs(s)[2]! * f.section(s).r4[0];
       const frac = f.deckFracs(f.cowl)[2]!;
+      const s = kind === 'front' ? f.screenFoot(frac) : f.rearBase;
+      const top = kind === 'front' ? cab.columns[0]!.top : cab.columns[cab.columns.length - 1]!.top;
+      const x = f.deckFracs(kind === 'front' ? f.cowl : s)[2]! * f.section(kind === 'front' ? f.cowl : s).r4[0];
       const b = this.P(side * x, f.deckY(s, x), s);
       const t = this.P(side * frac * cab.railHalf, cab.rail + cab.crown * (1 - frac * frac), top);
       if (kind === 'rear' && cab.rearKnee) {
@@ -937,7 +937,7 @@ class Cabin {
     };
     const sides = cab.columns.map((column): RingPoint => {
       const sec = f.section(column.s);
-      return { b: this.P(side * sec.r4[0], sec.r4[1], column.s), t: this.P(side * cab.railHalf, cab.rail, column.top), kind: 'side', column };
+      return { b: this.P(side * sec.r4[0], sec.r4[1], column.s), t: this.P(side * cab.railHalf, cab.rail - (column.drop ?? 0), column.top), kind: 'side', column };
     });
     return [end('front'), ...sides, end('rear')];
   }
@@ -998,8 +998,8 @@ class Cabin {
     const glass = (x: number, kind: 'front' | 'rear'): [P2, P2] => {
       const frac = Math.abs(x) / cab.railHalf;
       const yt = cab.rail + cab.crown * (1 - frac * frac);
-      const s = kind === 'front' ? f.cowl : f.rearBase;
-      const yb = f.deckY(s, frac * f.section(s).r4[0]);
+      const s = kind === 'front' ? f.screenFoot(frac) : f.rearBase;
+      const yb = f.deckY(s, frac * f.section(kind === 'front' ? f.cowl : s).r4[0]);
       if (kind === 'rear' && cab.rearKnee) {
         const cb = f.deckY(s, 0);
         const kt = (cab.rearKnee.y - cb) / (cab.rail + cab.crown - cb);

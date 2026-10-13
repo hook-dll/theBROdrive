@@ -45,9 +45,12 @@ export const BODY_2108: KitBody = {
   shoulder: { inset: 0.025, rise: 0.015 },
   cabin: {
     columns: [
-      { s: 1.232, top: 1.76, upper: 'body' },
-      { s: 1.278, top: 1.8, upper: 'door1' },
-      { s: 1.303, top: 1.825, upper: 'door1', glass: 'drop' },
+      // The A pillar, its top chamfered into the rail as the drawn line rounds into the
+      // roof [D: 1.27 at 1.71 to the roof's 1.32 at 1.77]; the door's frame and glass run up
+      // behind it to that rounded corner.
+      { s: 1.232, top: 1.76, upper: 'body', drop: 0.03 },
+      { s: 1.278, top: 1.84, upper: 'door1' },
+      { s: 1.303, top: 1.865, upper: 'door1', glass: 'drop' },
       { s: 2.46, top: 2.46, upper: 'door1' },
       { s: 2.552, top: 2.552, upper: 'body', lower: 'body' },
       { s: 2.605, top: 2.605, upper: 'body', glass: 'fixed' },
@@ -63,6 +66,8 @@ export const BODY_2108: KitBody = {
     glassTop: 0.04,
     screenBottom: 0.025,
     screenHeader: 0.045,
+    // The screen's foot on the centre line at s 1.08 on the bonnet [D side view].
+    screenFoot: 0.15,
     rearBottom: 0.025,
     rearHeader: 0.05,
     rearKnee: { s: 3.9, y: 0.884 },
@@ -258,17 +263,28 @@ export const LOOK_21099: KitLook = { ...LOOK_2108, label: 'VAZ-21099', rear: REA
  * wheelbase): the 21099's cabin and boot side, a boot lid with its trailing edge at
  * 4.105 and 0.94 high whose rear face comes down to 0.61 between the corner lamps, and
  * deep body-colour bumpers.
+ *
+ * Its own nose: the late face is nearly the body's full width at the lamps (the units
+ * reach the wings' edge [P owner's front photo: lamps from 0.41 to 0.97 of the half
+ * width]) and stands forward over the bumper's top, so the bumper is a shallow band under
+ * it, not a shelf.
  */
 export const BODY_2115: KitBody = {
   ...BODY_21099,
   length: 4.285,
   stations: [
-    ...SALOON_FRONT,
+    { s: 0.0, sill: 0.36, crease: 0.6, belt: 0.775, deck: 0.79, wSill: 0.77, wCrease: 0.78, wBelt: 0.77 },
+    { s: 0.17, sill: 0.33, crease: 0.6, belt: 0.8, deck: 0.815, wSill: 0.785, wCrease: 0.8, wBelt: 0.785 },
+    { s: 0.5, sill: 0.285, crease: 0.6, belt: 0.83, deck: 0.85, wSill: 0.795, wCrease: 0.815, wBelt: 0.79 },
+    ...SALOON_FRONT.slice(3),
     ...SALOON_BOOT,
     { s: 4.105, sill: 0.3, crease: 0.63, belt: 0.915, deck: 0.94, wSill: 0.775, wCrease: 0.8, wBelt: 0.785 },
     // The tail face: the lid's foot 0.61 between corners topped at 0.765, cut at ±0.575.
     { s: 4.15, sill: 0.3, crease: 0.62, belt: 0.75, deck: 0.61, notch: 0.575, wSill: 0.76, wCrease: 0.785, wBelt: 0.77 },
   ],
+  // The bonnet's lip 0.1 behind the face; the face and lamps lean back from 0.625 as on
+  // the 2108, in full ahead of it.
+  bonnetFront: 0.1,
   bootEnd: 4.15,
 };
 
@@ -287,7 +303,9 @@ export const LOOK_2115: KitLook = {
   ...LOOK_2108,
   label: 'VAZ-2115',
   upholstery: 0x34363b,
-  waist: { y: 0.4875, height: 0.095, finish: 'grey' },
+  // At the front bumper's band height (owner's front photo: the band level with the
+  // plate's top half), within the doors' measured 0.435–0.537 [P p19].
+  waist: { y: 0.505, height: 0.09, finish: 'grey' },
   spoiler: {
     half: 0.62,
     plate: 0.05,
@@ -302,19 +320,20 @@ export const LOOK_2115: KitLook = {
   },
   // The head-lamp unit, flush with the body, wrapping round the corner (measurements §3.3):
   // the head lamp from its inner end (0.30, its top 45 mm lower, sloping up over 68 mm;
-  // its bottom corner cut 20 × 14 mm) to the joint leaning out from 0.549 to 0.58, then the
-  // amber indicator to the corner and round it onto the flank, rounding off its rear end
-  // [P p19, f2: it shows from the side back to s 0.205].
+  // its bottom corner cut 20 × 14 mm) out to the joint, then the amber indicator, the
+  // unit's outer quarter, to the corner at the wing's edge and a little round it [P
+  // owner's front photo: lamps from 0.41 to 0.97 of the half width, the indicator the
+  // outer 25 %].
   cornerLamps: [
     {
       points: [
-        { x: 0.3, y: [0.669, 0.715], role: 'head' },
-        { x: 0.32, y: [0.655, 0.728], role: 'head' },
-        { x: 0.368, y: [0.655, 0.76], role: 'head' },
-        { x: [0.549, 0.58], y: [0.655, 0.76], role: 'blinker' },
-        { y: [0.655, 0.76], role: 'blinker' },
-        { s: 0.19, y: [0.665, 0.75], role: 'blinker' },
-        { s: 0.205, y: [0.68, 0.735] },
+        { x: 0.3, y: [0.66, 0.72], role: 'head' },
+        { x: 0.32, y: [0.645, 0.735], role: 'head' },
+        { x: 0.368, y: [0.645, 0.772], role: 'head' },
+        { x: [0.65, 0.68], y: [0.645, 0.772], role: 'blinker' },
+        { y: [0.645, 0.772], role: 'blinker' },
+        { s: 0.11, y: [0.655, 0.76], role: 'blinker' },
+        { s: 0.125, y: [0.67, 0.745] },
       ],
     },
     // Tail lamps on the body's corners, from just outside the lid's edge (0.575) out and
@@ -347,7 +366,11 @@ export const LOOK_2115: KitLook = {
     },
   ],
   front: {
-    bumper: { kind: 'moulded', drop: 0.07, height: 0.3, finish: 'paint', moulding: { y: 0.52, height: 0.075, finish: 'grey' } },
+    // A band under the lamps, flush with the body, 0.27 deep from just below them [owner's
+    // front photo: 75 px at 3.59 mm/px from the plate]: its top grows out of the face, its
+    // sides lie on the wings back to the front arch (0.47), its grey band runs on as the
+    // door mouldings, and below it a dark intake strip over a short apron.
+    bumper: { kind: 'moulded', drop: 0, height: 0.27, finish: 'paint', moulding: { y: 0.505, height: 0.09, finish: 'grey' }, wrapTo: 0.45, flush: true },
     items: [
       // The slot under the bonnet's lip, between the lamps' inner ends, with a bright bar.
       {
@@ -357,19 +380,19 @@ export const LOOK_2115: KitLook = {
         back: true,
         bars: { dir: 'horizontal', count: 1, finish: 'alloy', margin: 0, width: 0.008, depth: 0.01, proud: 0.022 },
       },
-      // Rectangular fog lamps in black housings on the bumper's face, outboard of the
-      // intake, standing no further out than the bumper's moulding; never lit (no fog-lamp
-      // channel), so the lens is a bright unlit finish.
-      { kind: 'panel', x: { from: { centre: 0.37 }, to: { centre: 0.58 } }, y: { from: ['bumperBottom', 0.035], to: ['bumperBottom', 0.135] }, finish: 'black', proud: 0.153 },
-      { kind: 'panel', x: { from: { centre: 0.41 }, to: { centre: 0.54 } }, y: { from: ['bumperBottom', 0.045], to: ['bumperBottom', 0.125] }, finish: 'chrome', proud: 0.157 },
-      // The bumper's dark lower intake, standing out of the face to the bumper's front.
+      // Rectangular fog lamps in black housings low at the bumper's corners [P owner's 3/4
+      // photo]; never lit (no fog-lamp channel), so the lens is a bright unlit finish.
+      { kind: 'panel', x: { from: { centre: 0.52 }, to: { centre: 0.69 } }, y: { from: ['bumperBottom', 0.02], to: ['bumperBottom', 0.1] }, finish: 'black', proud: 0.047 },
+      { kind: 'panel', x: { from: { centre: 0.55 }, to: { centre: 0.66 } }, y: { from: ['bumperBottom', 0.03], to: ['bumperBottom', 0.09] }, finish: 'chrome', proud: 0.05 },
+      // The dark recessed intake strip between them, under the band [owner's front photo:
+      // 0.18–0.22 below the bumper's top].
       {
         kind: 'grille',
-        x: { centre: 0.3 },
-        y: { from: ['bumperBottom', 0.085], to: ['bumperBottom', 0.15] },
-        standOut: 0.13,
+        x: { centre: 0.5 },
+        y: { from: ['bumperBottom', 0.045], to: ['bumperBottom', 0.09] },
+        standOut: 0.027,
         back: true,
-        bars: { dir: 'horizontal', count: 1, finish: 'black', margin: 0, width: 0.012, depth: 0.01, proud: 0.03 },
+        bars: { dir: 'horizontal', count: 1, finish: 'black', margin: 0, width: 0.012, depth: 0.01, proud: 0.004 },
       },
     ],
   },

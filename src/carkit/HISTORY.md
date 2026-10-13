@@ -199,8 +199,59 @@ Format of an entry: **Problem** → **Cause** → **Fix** → *Code* (commit).
   the indicator over the stop and tail lamps, round the corner to s 4.06–4.075; 2115: the
   amber outer cell round the corner to s 4.085, tail over stop inside it. *spec.ts,
   exterior.ts `buildCornerLamps`, tens.ts, samaras.ts*.
+- **Samaras and tens: the A pillar meets the roof at a sharp angle in profile; it should
+  be more raked and round into the roof.** → The pillar ran straight to the rail at its
+  top column, and the screen's foot stood at the cowl straight across, so the profile
+  had one knee. → The screen's foot comes forward on the centre line
+  (`CabinSpec.screenFoot`, the drawings: 2108 0.15, 2110 0.156; the bonnet ends there),
+  and the A pillar's top point drops below the rail (`CabinColumn.drop`, 0.03 / 0.037),
+  one straight chamfer up to the door frame's top, which moved back to meet it (2110 tops
+  1.77 / 1.85 / 1.89 on the drawn pillar line and its rounding). The roof is untouched.
+  The first attempt, a cut into the roof's front, is under failed approaches. *spec.ts,
+  body.ts, interior.ts, exterior.ts `buildWipers`, samaras.ts, tens.ts*.
+- **2115 front: the face too narrow, the lamps close together, the bumper a bloated shelf,
+  the side moulding torn where it meets the bumper, fog lamps too high; then: lamps taller,
+  the lower front lighter.** → It wore the 2108's nose, whose wing top leans in to ±0.69
+  at the lamps, behind a bumper filling the 0.155 from the tip to the face. → Its own
+  nose stations (the face at s 0, 0.77 wide at the lamps; photo: lamps 0.41–0.97 of the
+  half width), the lamp unit out to the wing's edge with the indicator the outer quarter,
+  0.645–0.772 tall; a `flush` bumper 0.27 deep from just under the lamps, its sides on the
+  wings to the arch, its grey band at plate height and the door mouldings moved to the
+  same 0.505 / 0.09 so the strip runs straight on; a dark intake strip under the band; fog
+  lamps low at the corners. The 2108/2109/21099 keep their nose (it matches the 2108
+  drawing). *samaras.ts*.
+- **Hatchbacks and estates: dark slits along the rear quarter, between the greenhouse
+  side and the wing below it.** → The greenhouse's foot ran straight between its columns
+  while the tub's top edge bends at the stations between them (the 2112's at s 3.95 by
+  72 mm, the 2108/2109's at 3.6 by 14 mm, the estates' by up to 11 mm): an open seam. →
+  The side ring gets a point at every such station, its foot on the tub's edge (only where
+  the edge bends by over 1 mm, so the classic saloons stay identical). *body.ts*.
 
-## Tens (2110)
+## Tens (2110, 2112)
+
+- **2112 rear bumper a bulging box proud of the body; the tens' bumpers are known for
+  sitting in the body's lines.** → The moulded bumper's top was a flat shelf standing out
+  of the face, its sides outside the wings. → Moulded bumper `flush`: its top grows out of
+  the body's surface over its top 60 mm; the rear bumpers follow the wings to the arch
+  (`wrapTo` 3.63) as the front one does. *spec.ts, exterior.ts, tens.ts*.
+- **2110/2112 nose: the bonnet overhangs the bumper; the face should lean back from the
+  bumper to the bonnet; the indicators wrap too far and are too big.** → The face was
+  upright at s 0.09. → The face at the bumper's top (s 0.04) leaning back to the drawn lip
+  (`frontLean` 0.586 m per m), the indicator ending at s 0.2. *tens.ts*.
+- **The head lamp notched and the indicator torn after the nose lean.** → The lamps lay
+  partly in the lean's fade, where the body's flat faces and the lens bend differently,
+  and face triangles spanning the lean's base bent at it. → `frontLean.full` (0.2, the
+  indicator's end) keeps the lean in full under the lamps, `base` on the crease row, and
+  the nose face is cut along the base line (body.ts), so everything above leans as one
+  plane. *spec.ts, kit.ts, body.ts, tens.ts*.
+- **A raised shape on the bonnet's nose, then a crease across the bonnet; the bumper
+  covering the lamps' bottom ("a Nexia").** → The lean faded out over 0.15 m behind its
+  full zone and folded the bonnet; the drawn deck at s 0.6 stood 17 mm over the line to the
+  cowl; the bumper's top (0.6) stood at the lamps' bottom. → Blend 0.6; the deck and wing
+  top at s 0.6 on the straight line (0.873 / 0.83); the bumper's top at the drawn 0.565.
+  *tens.ts*.
+
+### 2110
 
 - **2110 gaps after the first build, on owner review**: rear door edge upright, rear arch
   too high, full-width bonnet, lamps not wrapping, the lid reflector two lenses, no feature
@@ -247,6 +298,11 @@ Format of an entry: **Problem** → **Cause** → **Fix** → *Code* (commit).
   as one band from its top to the stepped notch contour): it folds wherever the contour
   steps. Turn the lid down to a straight line at the corners' top first and lay its rear
   panel in the tail plane (`BodyFrame.lidFace`).
+- **A soft windscreen header cut into the roof** (`screen.drop/back`: the screen's top
+  lowered and the roof's front edge pulled back towards the centre line, the rows ahead of
+  it clamped onto it): read as a chunk licked off the roof's front, and in profile the
+  pillar was unchanged. Round the corner on the side instead: the screen's foot and the A
+  pillar's top (`screenFoot`, column `drop`).
 - **The 21099/2115 fixed quarter glass in the rear door** (`glass: 'fixed'` in a `door2`
   strip, riding with the door): wrong for these cars; on the real car the quarter glass is
   in the body and the door's shut line is one line from sill to rail. (On the 2105/2107 the

@@ -398,16 +398,12 @@ function buildBumpers(ctx: KitContext, b: PartBuilder): void {
           : flankBumperPath(frame, sEnd, end, y1, d, grow, wrapTo, bumper.corner ?? 0.09);
       const shell = bumper.finish ? finishSlot(bumper.finish) : { slot: 'trim' as const, color: 0x232427 };
       b.color(shell.color);
-      sweep(b, shell.slot, pathOf(0, depth, 0.2), [
-        [0, y0 + 0.02],
-        [0.7, y0],
-        [0.92, y0 + 0.03],
-        [1, y0 + 0.08],
-        [1, y1 - 0.05],
-        [0.9, y1 - 0.005],
-        [0.55, y1],
-        [0, y1],
-      ]);
+      // A flush bumper's top starts inside the body's skin and rounds out to its face in
+      // its top 60 mm, so it grows out of the end face and the flanks with no ledge.
+      const top: [number, number][] = bumper.flush
+        ? [[1, y1 - 0.06], [0.5, y1 - 0.015], [0, y1]]
+        : [[1, y1 - 0.05], [0.9, y1 - 0.005], [0.55, y1], [0, y1]];
+      sweep(b, shell.slot, pathOf(0, depth, 0.2), [[0, y0 + 0.02], [0.7, y0], [0.92, y0 + 0.03], [1, y0 + 0.08], ...top]);
       const path = pathOf(0.003, depth + 0.006, 0.19);
       if (bumper.moulding) {
         // A moulding band round the bumper in its own finish, in place of the groove.
@@ -679,7 +675,8 @@ function buildWipers(ctx: KitContext): void {
   const { frame, root } = ctx;
   const spec = frame.spec;
   const cabin = spec.cabin;
-  const base: Vec3 = [0, frame.deckY(frame.cowl, 0), frame.z(frame.cowl)];
+  const foot = frame.screenFoot(0);
+  const base: Vec3 = [0, frame.deckY(foot, 0), frame.z(foot)];
   const head: Vec3 = [0, cabin.rail + cabin.crown, frame.z(cabin.columns[0]!.top)];
   const up = new THREE.Vector3(head[0] - base[0], head[1] - base[1], head[2] - base[2]).normalize();
   const across = new THREE.Vector3(1, 0, 0);
@@ -740,19 +737,29 @@ function buildLidFace(ctx: KitContext): void {
 const SPOILER_SINK = 0.008;
 
 /**
- * The boot-lid spoiler (`KitLook.spoiler`), hung on the boot lid so it lifts with it: a
+ * The spoiler (`KitLook.spoiler`), hung on the boot lid or tailgate so it lifts with it: a
  * wing between two end plates that run forward down to the lid, and a pedestal under the
  * wing's middle with the high brake lamp on its back, in the brake lamps' slot (so it is
- * one more `kit_brake` lens and lights with the others).
+ * one more `kit_brake` lens and lights with the others). On a tailgate the plates and the
+ * pedestal stand on its glass, straight from the knee to the roof's rear end (the 2112's).
  */
 function buildSpoiler(ctx: KitContext): void {
   const { frame, nodes } = ctx;
   const sp = frame.spec.look.spoiler;
   if (!sp) return;
-  const lid = nodes.get('boot');
-  if (!lid) throw new Error(`Kit car "${frame.spec.id}" has a spoiler but no boot lid`);
+  const lid = nodes.get('boot') ?? nodes.get('tailgate');
+  if (!lid) throw new Error(`Kit car "${frame.spec.id}" has a spoiler but no boot lid or tailgate`);
+  const cabin = frame.spec.cabin;
+  const knee = cabin.rearKnee;
+  const roofRear = cabin.columns[cabin.columns.length - 1]!.top;
+  // The tailgate's glass: the centre line from the knee to the roof, lower by the roof's
+  // crown towards the rails.
+  const lidY = (s: number, x: number): number =>
+    frame.spec.bootEnd !== undefined || !knee
+      ? frame.deckY(s, x)
+      : lerp(knee.y, cabin.rail + cabin.crown, (knee.s - s) / (knee.s - roofRear)) - cabin.crown * Math.min(1, (x / cabin.railHalf) ** 2);
   const P = (x: number, y: number, s: number): Vec3 => [x, y, frame.z(s)];
-  const onLid = (s: number, x: number): Vec3 => P(x, frame.deckY(s, x) - SPOILER_SINK, s);
+  const onLid = (s: number, x: number): Vec3 => P(x, lidY(s, x) - SPOILER_SINK, s);
   const top = (s: number): number => lerp(sp.top0, sp.top1, (s - sp.s0) / (sp.s1 - sp.s0));
   const t = sp.thickness;
   const nose = sp.s0 + 0.04;

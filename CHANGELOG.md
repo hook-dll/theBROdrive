@@ -88,8 +88,15 @@
   lamps carrying the slot (`KitCarSpec.bonnet`, front `FaceLook.lid`), a feature line
   under the windows (`featureLine`), a nose rounded in plan and a front bumper whose sides
   lie on the wings back to the wheel arch, its foot in line with the sill (moulded
-  `corner`, `wrapTo`), one lid reflector across the centre line. 14 823 triangles; the
+  `corner`, `wrapTo`), one lid reflector across the centre line. 14 775 triangles; the
   other kit cars were proved unchanged by per-triangle hashes.
+- Kit VAZ-2112 `kit_vaz2112` (`src/carkit/tens.ts`, `measurements-2110.md` §8, on
+  3dcar.ru's `vaz_2112.jpg`, Commons photos and autoopt.ru's 4170 × 1676 × 1430): the
+  2110's hatch on the same running gear, its own tail from the rear door — a quarter glass
+  and wide D pillar, a tailgate folding at the knee over the lamps and coming down to the
+  bumper between corner lamps that wrap onto the wings, reversing lamps and a red bar on
+  the tailgate, a wing with the high brake lamp on the tailgate's glass (the spoiler now
+  fits a tailgate as well as a boot lid). 14 705 triangles.
 - Kit 2115 and 2110: the boot lid's rear corners meet the wings on a clean shut line with
   flat faces (the lid's top turns down to a line across at the lamps' top and its rear
   panel lies in the tail face between the lamps, `BodyFrame.lidFace`), and the head-lamp
@@ -102,6 +109,20 @@
 - Kit Samaras (2108, 2109, 21099, 2115): the face and head lamps rake back from the
   bumper's top to the bonnet's lip as on the cars, instead of the bonnet overhanging the
   lamps (`KitCarSpec.frontLean`, the estates' tail lean at the nose).
+- Kit 2110/2112, the owner's review round: bumpers sit in the body's lines (moulded
+  `flush`, the rear ones on the wings to the arch), the face leans back from the crease to
+  the bonnet's lip over a bumper whose top stays below the lamps (`frontLean` gains
+  `full`; the nose face is cut along the lean's base so lamps and faces lean as one
+  plane), shorter indicators, one straight bonnet slope.
+- Kit Samaras and tens: the windscreen is curved in plan and more raked
+  (`CabinSpec.screenFoot`, the bonnet ending at its foot) and the A pillar rounds into the
+  roof with one chamfer (`CabinColumn.drop`), the door frames meeting it.
+- Kit 2115: its own late nose — the face nearly the body's full width at the lamps, tall
+  head lamps, a shallow flush bumper with its grey band at plate height continuing as the
+  door mouldings, a dark intake strip under it and fog lamps low at the corners.
+- Kit hatchbacks and estates (2108, 2109, 2112, 2102, 2104): no more slits along the rear
+  quarter between the greenhouse and the wing (the greenhouse's foot now bends with the
+  tub's edge at the stations between its columns). The classic saloons are unchanged.
 - Kit documentation for agents: `src/carkit/README.md` (working rules, spec reference,
   adding a car end to end, proving refactors), `STATUS.md` (goal, roadmap, per-car status,
   gaps) and `HISTORY.md` (fix log and approaches not to retry).

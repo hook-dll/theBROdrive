@@ -87,7 +87,7 @@ export function buildKitCar(id: string): THREE.Group {
   buildInterior(ctx);
   buildBay(ctx);
   if (spec.rearLean) leanEnd(root, frame.z(frame.rearBase), -1, spec.rearLean);
-  if (spec.frontLean) leanEnd(root, frame.z(spec.bonnetFront), 1, spec.frontLean);
+  if (spec.frontLean) leanEnd(root, frame.z(spec.frontLean.full ?? spec.bonnetFront), 1, spec.frontLean);
 
   // The car's own wheels, named for its `wheelNodes`: they set the wheels' places and
   // size; the loader shods the car from the Soviet pack's sets (`wheelSetPool`).

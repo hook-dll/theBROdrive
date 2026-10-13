@@ -203,11 +203,20 @@ export class BodyFrame {
   }
 
   /**
-   * Where the bonnet ends: the cowl, or with a `KitCarSpec.bonnet` `SCUTTLE` short of it,
-   * the deck between narrowing to the windscreen's base.
+   * Where the bonnet ends: the cowl, or with a `KitCarSpec.bonnet` or a curved screen
+   * (`CabinSpec.screenFoot`) `SCUTTLE` short of the screen's foot on the centre line, the
+   * deck between narrowing to the windscreen's base.
    */
   get bonnetRear(): number {
+    const foot = this.spec.cabin.screenFoot;
+    if (foot !== undefined) return this.cowl - foot - SCUTTLE;
     return this.spec.bonnet ? this.cowl - SCUTTLE : this.cowl;
+  }
+
+  /** s of the windscreen's foot at a fraction across the roof (0 centre line, 1 rail). */
+  screenFoot(frac: number): number {
+    const foot = this.spec.cabin.screenFoot;
+    return foot === undefined ? this.cowl : this.cowl - foot * (1 - frac * frac);
   }
 
   /**
@@ -412,7 +421,7 @@ function tubColumns(frame: BodyFrame): number[] {
   for (const st of spec.stations) s.add(st.s);
   for (const c of spec.cabin.columns) s.add(c.s);
   s.add(spec.bonnetFront);
-  if (spec.bonnet) s.add(frame.bonnetRear);
+  if (spec.bonnet || spec.cabin.screenFoot !== undefined) s.add(frame.bonnetRear);
   if (spec.bootEnd !== undefined) s.add(spec.bootEnd);
   s.add(spec.flap.s0);
   s.add(spec.flap.s1);
@@ -701,7 +710,20 @@ export function buildShell(frame: BodyFrame): ShellResult {
     // An end face is concave where an estate's deck dips to its tailgate sill: a fan would
     // span the notch, so the face is cut into triangles that keep to its outline.
     const tris = THREE.ShapeUtils.triangulateShape(ring.map((p) => new THREE.Vector2(p[0], p[1])), []);
-    for (const [a, b, c] of tris) shell.face([ring[a]!, ring[b]!, ring[c]!], 'body', 'paint');
+    // A leaning nose (`frontLean`) is cut along its base, so above it every face has its
+    // corners there or higher and leans as one plane, the lamps on it included.
+    const cut = s === cols[0] ? spec.frontLean?.base : undefined;
+    for (const [a, b, c] of tris) {
+      const tri = [ring[a]!, ring[b]!, ring[c]!];
+      if (cut === undefined) {
+        shell.face(tri, 'body', 'paint');
+        continue;
+      }
+      for (const sign of [1, -1] as const) {
+        const piece = clipPolygon(tri, (p) => p[1] - cut, sign);
+        if (piece.length >= 3) shell.face(piece, 'body', 'paint');
+      }
+    }
     if (nose) {
       shell.face([P(nose.half[0], nose.y, s), P(top[0], top[1], s), P(0, sec.st.deck, s), P(-top[0], top[1], s), P(-nose.half[0], nose.y, s)], 'bonnet', 'paint');
     }
@@ -752,8 +774,10 @@ export function buildShell(frame: BodyFrame): ShellResult {
       return [0, 1, 2].map((index) => {
         const x = local[index]! * sec.r4[0];
         const frac = cowlFracs[index]!;
-        const b: Vec3 = P(side * x, frame.deckY(s, x), s);
         const crownY = cabin.rail + cabin.crown * (1 - frac * frac);
+        // A curved screen's foot stands ahead of the cowl towards the centre line.
+        const sb = kind === 'front' ? frame.screenFoot(frac) : s;
+        const b: Vec3 = P(side * x, frame.deckY(sb, x), sb);
         const t: Vec3 = P(side * frac * cabin.railHalf, crownY, top);
         let k: Vec3;
         let q: Vec3;
@@ -776,10 +800,11 @@ export function buildShell(frame: BodyFrame): ShellResult {
       });
     };
     ring.push(...end('front'));
-    cabin.columns.forEach((column, i) => {
+    const sideRing: Ring[] = cabin.columns.map((column, i) => {
       const sec = frame.section(column.s);
       const b: Vec3 = P(side * sec.r4[0], sec.r4[1], column.s);
-      const t: Vec3 = P(side * cabin.railHalf, cabin.rail, column.top);
+      // A column's `drop` chamfers the rail's corner: its top point stands below the rail.
+      const t: Vec3 = P(side * cabin.railHalf, cabin.rail - (column.drop ?? 0), column.top);
       const last = i === cabin.columns.length - 1;
       let k = along(b, t, b[1] + cabin.glassBottom);
       let q = along(b, t, t[1] - cabin.glassTop);
@@ -792,7 +817,28 @@ export function buildShell(frame: BodyFrame): ShellResult {
       }
       const inset = i === 0 ? cabin.railInset : last ? -cabin.railInset : 0;
       const u: Vec3 = P(side * (cabin.railHalf - cabin.railInset), cabin.rail + cabin.railRise, column.top + inset);
-      ring.push({ b, k, q, t, u, kind: 'side', frac: 1, column });
+      return { b, k, q, t, u, kind: 'side', frac: 1, column };
+    });
+    sideRing.forEach((a, i) => {
+      ring.push(a);
+      const next = sideRing[i + 1];
+      if (!next) return;
+      // Where a station between two columns bends the tub's top edge (a hatch's D pillar
+      // over the lamp corners), the strip's foot bends with it, so the two meet there.
+      const s0 = a.column!.s;
+      const s1 = next.column!.s;
+      for (const st of spec.stations) {
+        if (st.s <= s0 || st.s >= s1) continue;
+        const f = (st.s - s0) / (s1 - s0);
+        const at = (p: Vec3, q: Vec3): Vec3 => [lerp(p[0], q[0], f), lerp(p[1], q[1], f), lerp(p[2], q[2], f)];
+        const sec = frame.section(st.s);
+        const b: Vec3 = P(side * sec.r4[0], sec.r4[1], st.s);
+        const straight = at(a.b, next.b);
+        if (Math.hypot(b[0] - straight[0], b[1] - straight[1]) <= 0.001) continue;
+        const kl = at(a.k, next.k);
+        const k: Vec3 = [kl[0] + b[0] - straight[0], kl[1] + b[1] - straight[1], kl[2] + b[2] - straight[2]];
+        ring.push({ b, k, q: at(a.q, next.q), t: at(a.t, next.t), u: at(a.u, next.u), kind: 'side', frac: 1, column: a.column });
+      }
     });
     ring.push(...end('rear').reverse());
 

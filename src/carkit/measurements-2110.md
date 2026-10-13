@@ -1,4 +1,4 @@
-# VAZ-2110: measured numbers
+# VAZ-2110 and VAZ-2112: measured numbers
 
 Crops, gridded readings, photos, overlays and lab captures are in `/tmp/vaz2110/` (photos in `ph/`, lab captures in `lab/`). Only this file, the code and the drawing in `build/carshape/_refs/bp/img/` were written.
 
@@ -189,13 +189,19 @@ All optional; absent, a car builds exactly as before.
 
 ## 6. Result
 
-`kit_vaz2110`: **14 823 triangles** (body + trim 7 557, cabin 3 927, bay 1 307, boot 56, underbody 632, wheels 1 344; 8 901 beyond 25 m); the rounded shut line's points are side rows on every tub column (nine in place of one). The owner set the triangle budget aside for this car. Bounds ±0.935 (mirrors) × 0.170…1.424 × ±2.138 m. Lowest point 0.170 (the fuel tank); the front floor under the engine is 0.275 so the sump clears it.
+`kit_vaz2110`: **14 775 triangles** (body + trim 7 509, cabin 3 927, bay 1 307, boot 56, underbody 632, wheels 1 344; 8 853 beyond 25 m); the rounded shut line's points are side rows on every tub column (nine in place of one). The owner set the triangle budget aside for this car. Bounds ±0.935 (mirrors) × 0.170…1.424 × ±2.138 m. Lowest point 0.170 (the fuel tank); the front floor under the engine is 0.275 so the sump clears it.
 
 Lab after the third review (`/tmp/vaz2110/lab4/`): the lid corners from the owner's angles (`lid_2110_left_c.png`, `lid_2115_right_c.png`), the boot open (`boot_open_2110_c.png`, `boot_open_2115_c.png`), the lamps flush and wrapping (`corner_close_c.png`, `corner_close_2115_c.png`, `front34_2110_c.png`, `front34_2115_c.png`, `front_2110_left_c.png`), the side on the drawing (`ov_side.png`, `ov_front.png`: the bumper's side runs to the arch on the drawn line), lamps at night with the hazards (`night_kit_vaz2110.png`, `night_kit_vaz2115.png`); 15 WebGL programs linked after boot and still 15 after showing, opening and lighting both cars.
 
 Lab after the fourth review (`/tmp/vaz2110/lab6/`): rear corners of the 2110 and 2115 (`rear_kit_vaz2110.png`, `rear_kit_vaz2115.png`, `after_rear.png` against `before_rear.png`), the Samaras' raked faces (`after_front.png`), lamps at night with hazards, brake and reverse on the 2108, 2110 and 2115 (`night.png`); 15 programs after boot and still 15 after opening every part and lighting the three cars.
 
 Lab (`/tmp/vaz2110/lab2/`, and `/tmp/vaz2110/lab3/` for the bonnet and the rounded door edge): the side capture overlaid on the drawing (`lab3/ov_side.png`, `lab3/rdoor_vs_drawing.png`) lies on its lines from bumper to bumper, the rear door's rounded raked edge and the lowered rear arch included; front 3/4 (`lab3/f34_c.png`, `lab3/f34_right_c.png`), rear 3/4 (`lab2/r34_c.png`); the bonnet whole-width, its nose with the slot lifting with it and the bay under it (`lab3/bonnet_open_c.png`, `lab3/bonnet_open_front_c.png`, `lab3/bonnet_closed_front_c.png`); the rear door closed and open with the trim behind its edge (`lab3/rdoor_closed_c.png`, `lab3/rdoor_open_c.png`); every door, boot and flap open and close (`lab2/open_*`); the dash (`lab2/dash.png`); lamps at night (`lab2/night_hz.png`); the 2115/2110 lid before and after (`lab2/lid_compare_*.png`). No WebGL program linked when the 2110 is focused, opened, lit and dirtied after boot (15 links before and after).
+
+Owner's review round with the 2112 (`/tmp/vaz2112/draft2/` … `draft4/`):
+- **Screen and A pillar [D side view].** The screen's foot on the centre line at (1154, 0.994): `screenFoot` **0.156** ahead of the cowl (1.31). The drawn pillar runs from 1.32 at the belt to 1.338 high at 1.768 and rounds into the roof by 1.85 at the rail's 1.379: the A pillar column top **1.77** with `drop` **0.037** (its top point 1.342), the door frame's and glass's tops moved back to **1.85 / 1.89** to meet the chamfer (overlay `draft3/ov_apillar.png`).
+- **Nose.** The face at the bumper's top: first station **s 0.04** (was 0.09), `bonnetFront` 0.04, `frontLean` base **0.58** (the crease row) lean **0.586** (to the drawn lip 0.708 at s 0.115) blend **0.6** full **0.2** (the indicator's end). The bumper's top at the drawn **0.565** (height 0.345), below the lamps' 0.606; `flush`. The indicator ends at s **0.2**, 0.62–0.70 there. Fog recesses `proud` 0.045 and intake `standOut` 0.02 so they stay inside the tip.
+- **Bonnet.** Deck and wing top at s 0.6 put on the straight line from s 0.34 to the cowl: **0.873 / 0.83** (drawn 0.89 / 0.85); the bonnet reads as one slope.
+- **Rear bumper** `flush`, `wrapTo` **3.63** (the rear arch's front 3.605).
 
 ## 7. Gaps
 
@@ -204,5 +210,43 @@ Lab (`/tmp/vaz2110/lab2/`, and `/tmp/vaz2110/lab3/` for the bonnet and the round
 - **Bonnet:** the cut follows the deck's edge 10 mm in, but the model's shoulder (40 mm) stays on the body, so a narrow strip of wing top shows beside the bonnet that the car does not have; the nose's sides are straight.
 - **Rear door:** the trim behind the raked edge is a flat lining, no pocket or speaker.
 - **Dash:** heights hung from the Samara's cluster (no side view of the dash), one section across the width (the passenger side goes lower), the left of the cluster placed by symmetry, the wheel's size unmeasured; not drawn: the vent pod's frame and slider, the clock panel, the ignition-lock boss.
-- **Triangles:** 14 823, above the 8–13k of the other cars (set aside by the owner).
+- **Triangles:** 14 775, above the 8–13k of the other cars (set aside by the owner).
 - Licences of the photos are as listed; the CC BY-SA ones were used for reading only.
+
+## 8. VAZ-2112 (`BODY_2112`, `LOOK_2112`)
+
+### Sources
+
+| Source | Use |
+|---|---|
+| autoopt.ru (encyclopedia, VAZ-2112) [F] | 4170 × 1676 × 1430, base 2490, tracks 1400 / 1370, 175/70 R13 – 175/65 R14. Spec row `kit_vaz2112` = 4.170 × 1.680 × 1.430 with the 2110's width, wheelbase (2.492), clearance and tyre (same stampings and running gear). |
+| 3dcar.ru `vaz_2112.jpg` (1700 × 1000, saved) [D] | Side view, **3.98 mm/px** from the drawn wheelbase: hubs x 815 / 1441, ground y 410. Its nose and doors lie on the 2110 drawing's when overlaid on the wheels. |
+| Commons "LADA 112 in Togliatti rear" (CC0) [P] | Straight rear view: lamps ±0.50..0.68, reversing cells ±0.32..0.50, red bar ±0.32 (plate 520 mm). |
+| Commons "2008 Lada 211240 dark purple rear" (CC0) [P] | Rear 3/4: the D pillar, the lamps wrapping onto the wing, the wing on the tailgate's glass. |
+| Commons, other 2112 rears (CC0 / CC BY) [P] | `2005 Lada 21121 dark blue rear`, `2005 VAZ 21124 purple rear`, `2006 Lada 21124 grey rear`, `2007 Lada 21124 blue rear`, `2007 VAZ 21124 beige rear`: the spoiler on most, the same lamp layout. |
+
+### Tail [D side view; P rear]
+
+| Feature | Reading | Spec |
+|---|---|---|
+| Body to the rear door | the 2110's | `BODY_2110.stations.slice(0, 9)`, columns `slice(0, 11)` |
+| Quarter glass's rear corner on the belt | x 1540, y 148 | column **3.71** (top 3.26) |
+| Roof's rear end | x 1433, 1.333 on the outline | last column top **3.285** |
+| D pillar's foot | – | station **3.95**: belt 0.99, deck 1.0 |
+| Tail face / tailgate's foot | lamps y 232.5–192.5 → 0.71–0.865 | station **4.1** `flat`: belt 0.865, deck 0.71; tailgate cut ±0.545 (photo ±0.50) |
+| Knee | over the lamps | `rearKnee` **{ s 4.095, y 1.0 }**; `rearLean` base 0.71, lean 0.2, blend 0.3 |
+| Corner lamps | 0.715–0.86 | blinker 0.79–0.86 over tail/brake 0.715–0.79, from x 0.555 round to s 3.92 |
+| Tailgate lamps | reversing ±0.36..0.535, red bar ±0.355 | `rear.lid` at the belt − 0.15 … − 0.005 |
+| Spoiler | leading edge on the glass at s 3.858, 1.095; top 1.07 | `spoiler` half 0.56, s 3.915–4.155, top 1.095 → 1.075, lamp 1.008–1.032 |
+| Rear bumper | tall, body colour | moulded drop 0.055, height 0.39, `flush`, `wrapTo` 3.63 |
+| Flap | x 1473–1520, y 200–232 | s **3.45–3.64**, y 0.71–0.83 |
+
+### Result
+
+`kit_vaz2112`: **14 705 triangles** (body + trim 7 539, cabin 3 833, bay 1 307, boot 50, underbody 632, wheels 1 344; 8 883 beyond 25 m), bounds ±0.935 × 0.170…1.424 × ±2.091. Lab (`/tmp/vaz2112/draft*/`, `final/`): the side overlay on the drawing, front and rear 3/4, the tailgate and spoiler open and closed, lamps at night (`final/night.png`), 15 programs after boot and after exercising.
+
+### Gaps
+
+- The tailgate's opening between the lamps is ±0.545 (photo ±0.50): the narrowest the flat tail cut gives without a new field.
+- The flap stands where the drawing has it; not checked on a right-side photo.
+- The reversing cells are white, not smoked; the high brake lamp shares the brake slot.

@@ -991,6 +991,9 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   // whobycar.com), 1400/1370 tracks (autoopt.ru, cartechnic.ru), 165 clearance (catalog-vaz.ru,
   // infocar.ua); 175/70R13 (autoopt.ru): 0.288 m free radius.
   kit_vaz2110:    { length: 4.265, width: 1.680, height: 1.420, clearance: 0.165, wheelbase: 2.492, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.288, tyreWidth: 0.175 },
+  // The 2112, the 2110's hatch: 4170 × 1676 × 1430, 2490 wheelbase, 1400/1370 tracks,
+  // 175/70R13 (autoopt.ru); the 2110's width, wheelbase and clearance kept (same stampings).
+  kit_vaz2112:    { length: 4.170, width: 1.680, height: 1.430, clearance: 0.165, wheelbase: 2.492, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.288, tyreWidth: 0.175 },
 };
 
 function factoryGeometry(id: string): FactoryGeometry {
@@ -2196,6 +2199,8 @@ const KIT_CARS: readonly Entry[] = (
     ['kit_vaz2115', 'sv_vaz21099', 'vaz2115', 'VAZ-2115 Samara'],
     // The pack has no 2110 either: the 21099's running gear under it, as for the 2115.
     ['kit_vaz2110', 'sv_vaz21099', 'vaz2110', 'VAZ-2110'],
+    // Its hatch, on the same running gear.
+    ['kit_vaz2112', 'sv_vaz21099', 'vaz2112', 'VAZ-2112'],
   ] satisfies readonly (readonly [id: string, sibling: string, kit: string, label?: string])[]
 ).map(([id, sibling, kit, label]) => {
   const base = SOVIET_CARS.find((e) => e.id === sibling);
