@@ -223,12 +223,12 @@ function coil(b: PartBuilder, base: Vec3, height: number, radius: number, turns:
 }
 
 /**
- * Inner wing (or boot side) half-section at s: from under the lid's edge down to a shelf
- * over the wheel arch, in to `inner` and down to the floor, with a chassis rail along
- * its foot when `rail`.
+ * Inner wing (or boot side) half-section at s: from under the lid's edge (or a
+ * `KitCarSpec.bonnet`'s cut) down to a shelf over the wheel arch, in to `inner` and down
+ * to the floor, with a chassis rail along its foot when `rail`.
  */
 function wingWall(frame: BodyFrame, s: number, inner: number, shelf: number, floor: number, rail: boolean): Pt[] {
-  const x = frame.lidX(s) + JAMB_STEP;
+  const x = (frame.bonnetX(s) ?? frame.lidX(s)) + JAMB_STEP;
   const top = Math.max(frame.deckY(s, x) - LID_ROOM, shelf + 0.02);
   const pts: Pt[] = [[x, top], [x, shelf], [inner, shelf]];
   if (rail) pts.push([inner, floor + RAIL_H], [inner - RAIL_W, floor + RAIL_H], [inner - RAIL_W, floor]);
@@ -393,7 +393,7 @@ function buildEngineBay(frame: BodyFrame, b: PartBuilder, classic: boolean): Bay
   const spec = frame.spec;
   const w = spec.wheels;
   const inner = frame.wellX(w.front) - WELL_GAP;
-  const shelf = w.radius * (1 + w.arch) + WELL_GAP;
+  const shelf = w.radius * (1 + frame.archFactor(w.front)) + WELL_GAP;
   const support = spec.bonnetFront + SUPPORT_BACK;
   const cowl = frame.cowl;
 
@@ -651,7 +651,7 @@ function buildSaloonBoot(frame: BodyFrame, b: PartBuilder, classic: boolean): vo
   // Under the lid's rear edge, but inside the tail face where the lid comes down to it.
   const s1 = Math.min(spec.bootEnd! + 0.008, spec.stations[spec.stations.length - 1]!.s - 0.005);
   const inner = frame.wellX(w.rear) - WELL_GAP;
-  const shelf = w.radius * (1 + w.arch) + WELL_GAP;
+  const shelf = w.radius * (1 + frame.archFactor(w.rear)) + WELL_GAP;
   // Flat floor at the highest point of the shell's floor under it.
   let floor = 0;
   for (const s of stationsBetween(frame, s0, s1)) floor = Math.max(floor, floorY(frame, s) + 0.015);
@@ -716,7 +716,7 @@ function buildHatchBoot(frame: BodyFrame, b: PartBuilder): void {
   const inner = frame.wellX(w.rear) - WELL_GAP;
   // Under the tailgate's sill, but never under the floor pan: an estate's sill is low.
   const floor = Math.max(frame.deckY(frame.rearBase, 0) - HATCH_SILL_DROP, frame.station(frame.rearBase).sill + LOAD_FLOOR_RISE);
-  const shelf = Math.max(w.radius * (1 + w.arch) + WELL_GAP, floor + 0.05);
+  const shelf = Math.max(w.radius * (1 + frame.archFactor(w.rear)) + WELL_GAP, floor + 0.05);
   b.color(COLOURS.bootTrim);
   b.quad('trim', at(frame, -inner, floor, s0), at(frame, inner, floor, s0), at(frame, inner, floor, s1), at(frame, -inner, floor, s1));
   for (const side of [1, -1]) {

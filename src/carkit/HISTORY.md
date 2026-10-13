@@ -18,9 +18,11 @@ Format of an entry: **Problem** → **Cause** → **Fix** → *Code* (commit).
   (0131dc7, `measurements-samara.md` §0).
 - **A drawing can disagree with photos**: the 2109 drawing's door lines stand 0.1 m behind
   both the photo and the 21099 drawing; the 2102 drawing's C pillar is 37 mm forward; the
-  2107 drawing's dimension lines disagree with its drawn hubs. → Undimensioned or coarse
-  drawings. → Cross-check every drawing against a second source; prefer the photo for lines,
-  the drawn hubs for arches and doors (they are drawn round the hubs). *measurements files*.
+  2107 drawing's dimension lines disagree with its drawn hubs; the 2110 drawing has no rear
+  quarter glass, a flat-topped rear arch and its flap on the wrong side (mirrored). →
+  Undimensioned or coarse drawings. → Cross-check every drawing against a second source;
+  prefer the photo for lines, the drawn hubs for arches and doors (they are drawn round the
+  hubs). *measurements files*.
 
 ## Generator
 
@@ -139,11 +141,87 @@ Format of an entry: **Problem** → **Cause** → **Fix** → *Code* (commit).
   c86627d; 2115 11 738 → 12 092 triangles. Left: the high brake lamp also glows with the
   tail lamps and the fog lamps never light (no roles for them; STATUS.md). *spec.ts,
   exterior.ts, samaras.ts `LOOK_2115`* (8620a22).
+- **2115 (and 2110) boot lid: a superfluous diagonal face on the lid's rear face**, from the
+  trailing corner by the spoiler down toward the lamp bar. First fix (superseded below):
+  the half row moved to the notch wall's foot on the trailing station too
+  (`lidFaceWeight`); the strip from it to the cut still bridged a flat 25 mm strip on top
+  to the 175 mm wall at the tail, and the lid's rear face still folded.
+- **2115 and 2110 boot lid: folds and a twisted sliver at the lid's rear corners, between
+  the lid and the wing beside the tail lamps.** → The real cause: the lid's rear face was
+  one bridge from the trailing-edge station (the lid's top) to the notched tail station's
+  outline, which steps down the notch wall from the corners' top to the lid's foot. A
+  sloped face from a horizontal top edge cannot meet a stepped bottom edge in the vertical
+  tail plane, so every quad touching the wall twisted (the fold), and the jamb along its
+  edges twisted with it (the sliver). → Where the lid comes down the tail
+  (`BodyFrame.lidFace`), the tub's deck rows on the tail station all stand at the
+  corners' top, so the lid's top turns down to a straight line across at the lamps' top
+  (flat faces, every edge horizontal at both ends); below that line the lid's rear panel
+  is a flat face in the tail plane between the lamps, sharing its edges with the tail
+  face, so the shut line runs clean from the lid's top corner down to the lamps and along
+  the notch wall to the foot. On the 2115 that line runs from the trailing corner (±0.69)
+  diagonally in to the lamps' top (±0.575), as on its photos. `lidFaceWeight` is gone.
+  Proved: 2101–21099 identical against cfff462. *body.ts `lidFace`, `buildShell`*;
+  `/tmp/vaz2110/lab4/lid_*_c.png`.
+- **2115 and 2110 head lamps stuck out of the body and did not wrap round it**: a lens slab
+  standing 22 mm proud of the face (`lens`, proud 0.012 + depth 0.01), its outer end
+  stopping at the face's edge (2115) or a separate slab on the flank (2110). → Lenses were
+  face items only. → `KitLook.cornerLamps` (`CornerLamp`): a thin lens 4 mm off the body
+  from its inner end across the face, round the corner and back along the flank, every
+  stretch in its role's slot or an unlit finish, stepping every 20 mm along the flank on
+  the skin as built (`skinX`, the outer of a face's two diagonal splits, so it never
+  sinks in). The 2115's chamfered head lamp and indicator are points on it (the indicator
+  rounding off on the flank at s 0.205, photo p19); the 2110's head lamp runs to the corner
+  and the indicator round it: clear (chrome reflector) at the corner, amber behind, clear
+  at its end (photos f1, f3). Lens `chamfer` and `flankLamps` are gone (no users left).
+  *spec.ts, exterior.ts `buildCornerLamps`, body.ts `skinX`, samaras.ts, tens.ts*.
+
+## Tens (2110)
+
+- **2110 gaps after the first build, on owner review**: rear door edge upright, rear arch
+  too high, full-width bonnet, lamps not wrapping, the lid reflector two lenses, no feature
+  line, Samara dash, a boxy nose. → The language could not say them. → Optional fields,
+  absent on every other car (proved 2101–21099 identical against cfff462): `CabinColumn.foot`
+  (a shut line raked below the belt; side faces are clipped along it, `clipPolygon`),
+  `WheelSpec.rearArchRise` (a half-ellipse rear arch, skin and liner only), a narrow bonnet
+  (`bonnetX`, replaced below),
+  `KitLook.flankLamps` (replaced by `cornerLamps`), `KitLook.featureLine` (a painted ridge on the waist's strip
+  builder, `buildFlankStrip`), moulded bumper `corner`, and a lens centred on the centre
+  line built once. The nose was re-measured in plan and rounded. Numbers in
+  `measurements-2110.md`. *spec.ts, body.ts, exterior.ts, tens.ts*.
+- **2110 bonnet: should reach out along the screen's base, its nose down between the
+  lamps**; **rear door's raked edge: corners should be rounded, trim behind it.** → The
+  narrow bonnet was a misreading: the drawing's ±0.29–0.34 lines on top are the bonnet's
+  raised centre running down into its nose, not shut lines; photos `f2`, `f3` show the
+  shut lines along the wings' top edge from the lamps' outer ends to the A pillar's foot
+  (the drawing's line 0.035 inside the outline). The raked edge was two straight lines. →
+  `KitCarSpec.bonnet { inset, nose }` replaces `bonnetX`: the cut 10 mm in from the deck's
+  edge, the nose a bonnet face on the front face between ±0.278 at 0.60 and ±0.298 at the
+  lip, the slot on it via the front `FaceLook.lid` (`buildLidFace` now serves both ends),
+  the bay's inner wings under the cut. `CabinColumn.foot.round` [0.17, 0.03] (photo `s1`)
+  rounds the shut line's turns (`BodyFrame.shutLine`, every point a side row); interior
+  `rakeTrim` lines the body's piece behind it. Proved: 2101–21099 identical, the 2115 as
+  after its lid fix. *spec.ts, body.ts, bay.ts `wingWall`, exterior.ts, interior.ts,
+  tens.ts*.
+- **2110 front: the bumper's corner hung lower than the wing and stood out as a separate
+  box; the indicator should follow the body round the corner, mostly clear lens with an
+  amber part.** → The moulded bumper wrapped only 0.2 m back along a straight line at a
+  fixed half width, standing 30 mm off the flank, its foot 25–45 mm below the wing's
+  bottom edge, and stopped there; on the real car (drawing side view, photos f1, f3) it
+  runs back to the wheel arch flush with the wing, its foot the line the sill continues.
+  → Moulded bumper `wrapTo`: its sides follow the flank (`flankBumperPath`, five points
+  along each side 6 mm outside the body at the bumper's top height) back to s 0.47, just
+  ahead of the arch, its foot at the band's bottom (0.255) in line with the sill (0.258);
+  the indicator is part of the corner lamp (previous entry). *spec.ts, exterior.ts,
+  tens.ts*.
 
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent
   the pillars. Reverted. The warp works on the built geometry as is.
+- **Bridging a sloped boot lid straight to a notched tail outline** (the lid's rear face
+  as one band from its top to the stepped notch contour): it folds wherever the contour
+  steps. Turn the lid down to a straight line at the corners' top first and lay its rear
+  panel in the tail plane (`BodyFrame.lidFace`).
 - **The 21099/2115 fixed quarter glass in the rear door** (`glass: 'fixed'` in a `door2`
   strip, riding with the door): wrong for these cars; on the real car the quarter glass is
   in the body and the door's shut line is one line from sill to rail. (On the 2105/2107 the

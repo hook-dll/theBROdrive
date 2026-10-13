@@ -149,8 +149,9 @@ No drawing of the 2113–2115 face exists on 3dcar.ru (the 2114 / 2113 / 2115 na
 
 Heights (`p19` side, 2.267 mm/px; `f5` close-up 0.284 mm/px vertically):
 - the unit 0.655–0.76 (105 mm): `bumperTop` + 0.03 to `deck` − 0.03 (face lines 0.625 / 0.79);
-- the head lamp's top is level from the joint to 0.068 short of its inner end, then slopes **45 mm down** to the inner end, where it meets the bonnet's lip (`f5`: the lip runs into the lamp 46 % down its height). The inner end is upright below that, its bottom corner cut 20 × 14 mm. Spec: `chamfer.innerTop` [0.068, 0.045], `innerBottom` [0.02, 0.014];
-- the indicator rounds off the outer end: top corner cut 25 × 24 mm, bottom corner 31 × 35 mm (`chamfer.outerTop`, `outerBottom`);
+- the head lamp's top is level from the joint to 0.068 short of its inner end, then slopes **45 mm down** to the inner end, where it meets the bonnet's lip (`f5`: the lip runs into the lamp 46 % down its height). The inner end is upright below that, its bottom corner cut 20 × 14 mm;
+- the indicator rounds off the outer end: top corner cut 25 × 24 mm, bottom corner 31 × 35 mm; it wraps round the wing's corner and shows from the side back to s **0.205** (`p19`: x 60–107 at 2.78 mm/px from the hubs, 0.60–0.71 high on that photo's perspective);
+- spec (since the third review, the unit flush with the body and wrapping): `cornerLamps` points (2115 frame) head at x 0.30 (0.669–0.715), x 0.32 (0.655–0.728), x 0.368 (0.655–0.76), the joint [0.549, 0.58]; blinker from there to the corner and along the flank to s 0.19 (0.665–0.75), ending rounded at s 0.205 (0.68–0.735). Before, two face `lens` items with `chamfer` and negative `slant`, standing 22 mm proud of the face and stopping at its edge;
 - the slot lies under the bonnet's lip at mid-height of the lamps: 0.70–0.72 [`p20`: 0.702–0.733; `f5` lip 0.714]. Spec: `deck` − 0.095 to − 0.07, dark back, one bright bar. Below it the face is body colour down to the bumper.
 
 Body-colour front bumper, deeper than the 2108's: drop 0.07, height 0.30 (0.325–0.625); a dark lower intake ±0.30 at bumper bottom + 0.085..0.15 [P p20: 0.425–0.47 under the plate].
@@ -184,7 +185,7 @@ The wing's ends come down to the lid as end plates 50 mm wide, running forward t
 2. **`FaceLook.lid`** (exterior.ts `buildLidFace`): face items built on the end face but hung on the boot lid or tailgate node, so the 2115's lamp bar lifts with the lid. Their lens meshes keep the lamp names, so the rig and `VehicleLamps` light them as any other.
 3. **Moulded bumper `finish`** (exterior.ts): absent keeps the dark plastic colours as they were; `paint` makes a body-colour bumper whose groove is a ridge in the same paint.
 4. **Saloon boot end** (bay.ts `buildSaloonBoot`): the boot's rear bulkhead stays 5 mm inside the tail face when the lid comes down to it (`bootEnd` = the last station).
-5. **Lens `chamfer`** (spec.ts `LensChamfer`, exterior.ts `lensOutline`): each corner of a lens can be cut by [along the top or bottom edge, along the end edge]; with `slant` (now also negative, leaning out) this draws the 2115's head lamp and indicator. Without it a lens is built exactly as before.
+5. **Lens `chamfer`** (removed at the third review, when the 2115's lamps became a `cornerLamps` unit; no other car used it): each corner of a lens could be cut by [along the top or bottom edge, along the end edge].
 6. **`panel` with a span `x`** (exterior.ts): a block on each side instead of one across the centre line (the fog lamps and their housings).
 7. **`Finish 'grey'`**: unpainted grey plastic, the trim slot with a vertex colour (no new material).
 8. **Moulded bumper `moulding`** `{ y, height, finish }`: a band round the bumper in place of the groove.
@@ -192,6 +193,8 @@ The wing's ends come down to the lid as end plates 50 mm wide, running forward t
 10. **`KitLook.spoiler`** (spec.ts `SpoilerLook`, exterior.ts `buildSpoiler`): wing, end plates and pedestal in the paint slot and the lamp in `lamp_brake`, built into the boot lid's node.
 
 **Proof that nothing else moved.** Every existing kit car (2101–2108) was built from the committed code in a `git worktree` and from the working tree; all triangles in the car frame were sorted and hashed. All eight hashes, triangle counts and bounds are identical. The 2108: 10 226 triangles, bounds ±0.970 × 0…1.335 × ±2.009 m, before and after. After the 21099 rear-door rework (§1.1) the same check against commit d85752e: 2101–2109 identical; only the 21099 (11 707 triangles) and the 2115 (11 738) changed. After the 2115 details (§3.3–3.6, changes 5–10) the same check against commit c86627d: 2101–21099 identical (hash, count, bounds); only the 2115 changed, 11 738 → **12 092** triangles, bounds unchanged (±0.970 × 0…1.335 × −2.171…2.171 m), so its fit row comes out the same.
+
+**After the third owner review (with the 2110).** 11. The boot lid where it comes down the tail (`BodyFrame.lidFace`): its top turns down to a line across at the corner lamps' top (0.765, 2115 frame) and its rear panel lies in the tail face between the lamps; the shut line runs from the trailing corner (±0.69, 4.15) diagonally to the lamps' top (±0.575) and down the notch wall, as on `p12`. 12. The head-lamp unit is a `cornerLamps` unit (§3.3). Proved: 2101–21099 identical against cfff462; the 2115 12 092 → **12 136** triangles, bounds unchanged.
 
 ## 5. Gaps
 

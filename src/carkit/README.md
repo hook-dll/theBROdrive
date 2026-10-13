@@ -91,11 +91,12 @@ from the angle he complained about; changes are judged there, not in code.
 | `specs.ts` | `KIT_SPECS` (the registry), `KitBody`, `onBody`, the classic shells `BODY_124` / `BODY_05` and the classics' `LOOK_*`. |
 | `estates.ts` | The 2102/2104 bodies and backs (`BODY_2102`, `BODY_2104`, `REAR_*`); their fronts and sides are their saloons'. |
 | `samaras.ts` | The Samara family: `BODY_2108` / `LOOK_2108` and the 2109, 21099 and 2115 bodies and looks built on it. |
-| `measurements-classics.md`, `measurements-estates.md`, `measurements-samara.md` | Measurement reports: every figure with its drawing or photo, scale and tag. |
+| `tens.ts` | The "tens": `BODY_2110` / `LOOK_2110` (the 2112 and 2111 are to derive from it). |
+| `measurements-classics.md`, `measurements-estates.md`, `measurements-samara.md`, `measurements-2110.md` | Measurement reports: every figure with its drawing or photo, scale and tag. |
 | `builder.ts` | `PartBuilder`: flat triangles per material slot, transform stack, primitives (`box`, `bevelBox`, `extrude`, `cylinderX/Y/Z`, `torusY`, `bridge`, `poly`), vertex colours. |
 | `body.ts` | `BodyFrame` (cross-section, deck and lid lookups) and `buildShell`: tub, greenhouse and roof as one face list, then cut into parts. Shell constants (`SHUT_GAP`, `JAMB_DEPTH`, `DOOR_THICKNESS`, `NOTCH_WALL`, …). |
-| `exterior.ts` | End faces (`FaceLook.items` / `.lid`), bumpers swept round the corners, sill strip, waist moulding, repeaters, mirrors, handles, wipers, filler neck. |
-| `interior.ts` | Trim, dashboard, gauges, wheel, pedals, levers, seats, door cards. Per-platform layout table `LAYOUTS`, per-car overrides `CABIN_2101/2103/2105/2107`. |
+| `exterior.ts` | End faces (`FaceLook.items` / `.lid`), bumpers swept round the corners, sill strip, flank strips (waist moulding, feature line: `buildFlankStrip`), repeaters, flank lamps, mirrors, handles, wipers, filler neck. |
+| `interior.ts` | Trim, dashboard, gauges, wheel, pedals, levers, seats, door cards. Per-platform layout table `LAYOUTS`, per-car overrides `CABIN_2101/2103/2105/2107/2110`. |
 | `bay.ts` | Engine bay (`kit_bay`), boot (`kit_boot`), underbody (`kit_under`). |
 | `wheels.ts` | The kit's own placeholder wheel (tyre on a plain steel disc): sets where the wheels stand and their size. |
 | `materials.ts` | One shared material per slot. |
@@ -128,10 +129,10 @@ Integration outside the folder:
    corners). Every column has the same set of rows (sill, the cut lines for the door and
    flap, crease, belt), so neighbouring columns pair up row by row and the shut lines come
    out straight.
-2. **Arches.** The radius is `wheels.radius × wheels.arch`. The bottom row of the side sits
-   on the arch. Rows below the **arch lip** (`ARCH_LIP` above the arch) are raised onto it,
-   so a door that reaches over the wheel gets its cut-out automatically. The wheel arch
-   liners are dark.
+2. **Arches.** The radius is `wheels.radius × wheels.arch` (at the rear `wheels.rearArch`
+   if set: `BodyFrame.archFactor`). The bottom row of the side sits on the arch. Rows below
+   the **arch lip** (`ARCH_LIP` above the arch) are raised onto it, so a door that reaches
+   over the wheel gets its cut-out automatically. The wheel arch liners are dark.
 3. **Greenhouse.** `cabin.columns` are side columns from the windscreen corner to the back
    light corner, each describing the strip after it (who owns it above and below the belt,
    which glass it has). The windscreen and back light sit between the deck's edge and the
@@ -176,7 +177,8 @@ author.
 | `shoulder` | `{ inset, rise }`: the belt turns in by `inset` and up by `rise` to the deck's edge. |
 | `doorBottom` | Height of the doors' bottom edge (top of the sill under them). |
 | `bonnetFront` | `s` where the bonnet starts; it runs to the cowl. |
-| `bootEnd` | `s` where a boot lid ends (it runs from the back light's foot). **Absent = a tailgate** hinged at the roof. Equal to the last station's `s`, the lid comes down the tail face (2115). |
+| `bonnet?` | `{ inset, nose? }`: the bonnet's side cut `inset` in from the deck's edge instead of at the pillar row (the 2110's covers the whole top, its shut lines along the wings' top edge); it ends 12 mm (`SCUTTLE`) short of the cowl and the bay's inner wings stand under the cut. `nose: { y, half: [bottom, top] }`: the bonnet comes down the front face between the head lamps to height `y` (set `bonnetFront` to the first station); `front.lid` items ride on it. Absent: the pillar-row bonnet. |
+| `bootEnd` | `s` where a boot lid ends (it runs from the back light's foot). **Absent = a tailgate** hinged at the roof. Equal to the last station's `s` with a `notch` there, the lid comes down the tail face (2115, 2110): its top turns down to a line across at the corners' top and its rear panel lies in the tail face between the corner lamps (`BodyFrame.lidFace`). |
 | `rearLean` | `{ base, lean, blend }`: above height `base`, every point behind the rear base moves forward `lean` m per m of height, faded in over `blend` m ahead of it. Makes an estate's tailgate, lamp corners and lamps one raked plane. Built (closed) pose is warped, so parts still close flush. |
 | `flap` | Fuel flap: `s0..s1`, `y0..y1`, `side` (`'right'` default; the classic estates' is `'left'`). |
 
@@ -213,7 +215,12 @@ belt, `top` where it meets the rail (`top ≠ s` = raked pillar). The rest descr
 (`'body'`, `'door1'` = front door, `'door2'` = rear door; `lower` defaults to `upper`, and
 below the belt a door may overlap a pillar), `glass` is `'none'`, `'drop'` (wind-down, `window_*`), `'vent'` (quarter light,
 `vent_*`) or `'fixed'` (a fixed pane: in the body if `upper: 'body'`, else it rides with the
-door as `quarter_*`). A door's frame strips are short strips with `glass` absent. Example —
+door as `quarter_*`). `foot?: { y, s, round? }` rakes the shut line on this column below
+the belt: upright down to `y`, then straight to `s` at the doors' bottom (the 2110's rear
+door, whose edge runs forward to the sill in front of the arch); `round: [upper, lower]` are
+the radii of its two turns (`BodyFrame.shutLine`). The side faces it crosses are clipped
+along it, and the body's piece behind it gets cabin trim. A door's frame strips are short
+strips with `glass` absent. Example —
 the five-door Samara B pillar (`B_PILLAR` in samaras.ts):
 
 ```ts
@@ -239,7 +246,11 @@ Without those strips the body fills the triangle between the pillar's foot and t
 front edge at the belt, and the A pillar looks far too wide (HISTORY.md).
 
 **`WheelSpec`** — `front`, `rear` (axle `s`), `radius`, `width` (tyre), `frontHalfTrack`,
-`rearHalfTrack` (tyre centres), `arch` (arch radius over tyre radius, 1.13–1.15 so far).
+`rearHalfTrack` (tyre centres), `arch` (arch radius over tyre radius, 1.13–1.28 so far),
+`rearArch?` (the rear arch's own factor where it is tighter than the front's: the 2110's
+1.0 is as wide as the tyre; absent, the rear takes `arch`), `rearArchRise?` (the rear
+arch's top over the hub, over the tyre radius, where it is lower than a circle: its skin
+and liner become a half ellipse; the 2110's 0.81 covers the tyre's top).
 
 ### Families and `onBody`
 
@@ -257,6 +268,7 @@ cabin: … }`) share everything not overridden. Current families:
 | `BODY_2104` | `BODY_05`'s | 2104 |
 | `BODY_2108` | 2108 drawing | 2108; 2109 (`BODY_2109`: other columns); 21099 (`BODY_21099`: columns, tail, `bootEnd`) |
 | `BODY_2115` | 2108 frame | 2115 (`+0.045`, length 4.33) |
+| `BODY_2110` | 2110 drawing (`tens.ts`) | 2110 |
 
 ### Look (`KitLook`)
 
@@ -271,10 +283,13 @@ cabin: … }`) share everything not overridden. Current families:
 | `waist` | `{ y, height, finish }`: a moulding along the flank, broken at the shut lines (each piece riding on its door) and stopping `MOULDING_ARCH_GAP` (30 mm) short of a wheel arch it would run into (the 2115's low door mouldings; the classics' strips sit above their arches and are not cut); or `null`. |
 | `repeater` | `{ s0, s1, y0, y1 }`: the amber side repeater on each front wing, or `null`. |
 | `spoiler?` | `SpoilerLook`: a body-colour boot-lid wing with the high brake lamp, hung on the boot node so it lifts with the lid (exterior.ts `buildSpoiler`). Fields: `half` (half span), `plate` (end-plate width), `s0`/`s1` (wing leading/trailing edge, car frame like `repeater`), `top0`/`top1` (its top at each), `thickness`, `foot` (`s` where the end plates meet the lid), `pedestal: { half, s0, s1 }` (under the wing's middle), `lamp: { half, y0, y1 }` (the brake lens on the pedestal's back). The lens is a `lamp_brake` mesh, so it lights with every other brake lamp. The 2115's. |
+| `cornerLamps?` | `CornerLamp[]`: a lamp unit lying flush on the body (4 mm off it) from its inner end on the front face round the corner and back along the flank (exterior.ts `buildCornerLamps`, laid on the skin as built, body.ts `skinX`). `points`: `{ x }` on the face (half width, or `[bottom, top]` for a leaning edge), `{ s }` on the flank (car frame), or neither for the corner itself; `y: [bottom, top]` there; the stretch after a point is a lens in its `role`'s slot, or `finish` for an unlit part (`chrome`: a clear lens over a reflector). The 2115's and 2110's head lamps and indicators. |
+| `featureLine?` | `{ points: [s, y][], height }`: a pressed line along each flank, a 5 mm painted ridge through the points, broken at the shut lines and riding on the doors like the waist. The 2110's line under the windows. |
 
 **`FaceLook`** — `{ bumper, items, lid? }`. `items` are drawn in order (later ones stand on
 earlier ones: a lamp on its surround). `lid` items are placed on the end face like `items`
-but hang on the boot lid or tailgate and move with it (the 2115's lamp bar); their lens
+but hang on the part that comes down to it and move with it: at the tail the boot lid or
+tailgate (the 2115's lamp bar), at the nose a `bonnet.nose` (the 2110's slot); their lens
 meshes keep the lamp names, so lamps still work.
 
 **Placing on an end face.** Every item not on the centre line is built on both sides.
@@ -293,7 +308,7 @@ meshes keep the lamp names, so lamps still work.
 |---|---|---|
 | `panel` | `x: FaceX \| Span<FaceX>`, `y: Span<FaceY>`, `finish`, `proud` | A flat surround: from side to side when `x` is a `FaceX` (black lamp band, the 2108's slotted body-colour panel with `finish: 'paint'`), or one block on each side when `x` is a span (the 2115's fog-lamp housings). |
 | `round` | `role`, `x`, `y: FaceY`, `radius` | A round lamp in a chrome ring (classics). |
-| `lens` | `role`, `x: Span<FaceX>`, `y: Span<FaceY>`, `depth`, `proud`, `slant?`, `chamfer?` | A lamp lens (outline from `lensOutline`). `slant: { outer, inner }` moves the top edge's outer/inner ends inboard of the bottom's: a trapezoid (2108 headlamps) or a parallelogram; negative values lean out. `chamfer: LensChamfer` cuts corners: `innerTop`, `innerBottom`, `outerTop`, `outerBottom`, each `[along the top/bottom edge, along the end edge]` (the 2115's head lamp, whose top slopes down to its inner end, and its indicators). |
+| `lens` | `role`, `x: Span<FaceX>`, `y: Span<FaceY>`, `depth`, `proud`, `slant?` | A lamp lens; one centred on the centre line (`x: { at: { centre: 0 }, half }`) is built once across it (the 2110's lid reflector). `slant: { outer, inner }` moves the top edge's outer/inner ends inboard of the bottom's: a trapezoid (2108 headlamps) or a parallelogram; negative values lean out. A lamp that wraps round the body's corner is a `cornerLamps` unit, not a face lens. |
 | `grille` | `x: FaceX` (half width), `y`, `standOut?`, `frame?: { finish, margin }`, `back`, `bars: { dir, count, finish, margin, width, depth, proud }` | Grille or slot; `standOut` lifts the whole grille out of the face (the 2107's; the 2115's lower intake). |
 | `cluster` | `x: Span<FaceX>`, `y: Span<FaceY>`, `columns: LampRole[][]` | Tail-lamp cluster in a black housing: columns from the outer edge in, each column's roles top to bottom. |
 | `frame` | `x`, `y`, `width`, `finish`, `proud` | A rectangular outline (chrome surround). |
@@ -313,7 +328,10 @@ the paint slot, so it takes the car's colour, dust, scratches and stickers).
 - `moulded`: `drop` (foot under the sill's bevel), `height`, `finish?` (absent = dark
   plastic; `'paint'` = body colour, its groove a painted ridge), `moulding?: { y, height,
   finish }` (a band round the bumper instead of the groove: centre height above the
-  ground; the 2115's grey band, in line with its door mouldings).
+  ground; the 2115's grey band, in line with its door mouldings), `corner?` (plan radius
+  where it turns round to the flanks, 0.09 by default; the 2110's front 0.28), `wrapTo?`
+  (`s` its sides follow the flanks back to, lying on them with its foot in line with the
+  sill; the 2110's front runs to its wheel arch).
 
 ### Cabin override (`cabinLayout`)
 
@@ -322,12 +340,14 @@ the paint slot, so it takes the car's colour, dust, scratches and stickers).
 `cushion`/`benchCushion`, `recline`, `bolsters`, `seatX`, toe board, `tunnel`, `console`,
 the `dash` and `fascia` sections, `wood` band, `binnacle` and `cluster`, `gauges` (round or
 ribbon), steering `wheel` (position, rake, radius, spokes, hub), `pedals`, `gear`,
-`handbrake`, `glovebox`, `radio`, `ashtray`, `hazard`, `lights` switch, `vents`,
-`eyeballs`, `clusterFace`, `lamps` (telltales), `rockers`, `stack`, `carpet`,
+`handbrake`, `glovebox`, `radio`, `ashtray`, `hazard`, `lights` switch, `vents` (each with
+an optional opening size `half`), `eyeballs`, `clusterFace`, `lamps` (telltales), `rockers`,
+`stack`, `heater?` (a heater panel with knobs: `{ dy, half, knobs, radius }`), `carpet`,
 `headliner`. In `Layout`, `ds` is metres behind the cowl and `dy` an offset from the belt
 at the cowl. Existing dashes: `CABIN_2101` (ribbon speedometer), `CABIN_2103` (five dials on
-wood), `CABIN_2105` (own pod), `CABIN_2107` (one-piece "euro" panel); the Samaras use the
-`samara` platform's layout as is.
+wood), `CABIN_2105` (own pod), `CABIN_2107` (one-piece "euro" panel), `CABIN_2110` (tall
+face, hood over swapped big dials, two big centre vents, heater panel, radio low in the
+stack); the Samaras use the `samara` platform's layout as is.
 
 ## Scene contract
 
@@ -411,16 +431,20 @@ appearance key: paint and wheels change together.
 
 ## Adding a car end to end
 
-Worked example: the next car, the VAZ-2110. Follow the steps in order.
+Worked example: the VAZ-2110, done this way (`tens.ts`, `measurements-2110.md`); the 2112
+is next. Follow the steps in order.
 
 ### 1. Sources
 
 - **Drawing.** Try `https://3dcar.ru/media/blueprints/full/vaz/<name>.jpg` (names seen:
-  `vaz_2101` … `vaz_2107_1982`, `vaz_2109`, `vaz_21099`; guess `vaz_2110`, `vaz_2112`, …).
-  Save under `build/carshape/_refs/bp/img/` (gitignored, local only) and run `file` on it:
-  a missing drawing comes back as an HTML 404 page with a `.jpg` name (`vaz_2115.jpg` there
-  is one). Factory four-views already there: `vaz2101.jpg`, `vaz2108.jpg`, `niva.jpg`,
-  `uaz469.jpg`, `uaz2.jpg`, `gaz21.jpg`, `moskvich412.jpg`, `zaz968.jpg`, …
+  `vaz_2101` … `vaz_2107_1982`, `vaz_2109`, `vaz_21099`, `vaz_2110`, `vaz_2111`,
+  `vaz_2112`, all three saved). Save under `build/carshape/_refs/bp/img/` (gitignored, local
+  only) and run `file` on it: a missing drawing comes back as an HTML 404 page with a
+  `.jpg` name (`vaz_2115.jpg` there is one). Factory four-views already there:
+  `vaz2101.jpg`, `vaz2108.jpg`, `niva.jpg`, `uaz469.jpg`, `uaz2.jpg`, `gaz21.jpg`,
+  `moskvich412.jpg`, `zaz968.jpg`, …
+- **Check the drawing against photos**: the 2110 drawing leaves out the rear quarter glass,
+  flattens the rear arch and is mirrored (its flap on the wrong side).
 - **Photos.** Wikimedia Commons, via the API, 1280–2400 px renditions; record title and
   licence. Near-orthographic side, front and rear shots are the useful ones; scale them by
   the hubs (wheelbase) or the 520 mm number plate.
@@ -464,10 +488,13 @@ Working files (crops, grids, overlays) go in `/tmp/<family>/`; only the report i
 - If the car needs something the language cannot say, add an optional field to `spec.ts`
   whose absence keeps every existing car identical, document it here, and prove it
   ([Proving a refactor](#proving-a-refactor)). Prior examples: `notch`, `FaceLook.lid`,
-  moulded `finish` and `moulding`, `rearLean`, `slant`, `chamfer`, `flat`, `spoiler`,
-  `panel` spans, finish `grey`.
+  moulded `finish` and `moulding`, `rearLean`, `slant`, `flat`, `spoiler`,
+  `panel` spans, finish `grey`, `rearArch`, `rearArchRise`, `CabinColumn.foot` (and its
+  `round`), `bonnet` (and its `nose`, with front `lid` items), `cornerLamps`,
+  `featureLine`, moulded `corner` and `wrapTo`, the centre-line lens, the dash's `heater`
+  and vent `half`.
 - Register it in `KIT_SPECS` (specs.ts): `vaz2110: { id: 'vaz2110', ...BODY_2110, look:
-  LOOK_2110 }` (via `onBody` if the family frame differs).
+  LOOK_2110, cabinLayout: CABIN_2110 }` (via `onBody` if the family frame differs).
 
 ### 4. Register in the catalogue (`vehicle/carmodels.ts`)
 
@@ -531,7 +558,11 @@ When the generator changes but should not change a car, prove it on geometry, no
 
 Done so far: the descriptions refactor (2108 identical; 2106 0.29 mm in its grille bars),
 the Samara generator pieces (2101–2108 identical), the 21099 rear-door rework (2101–2109
-identical).
+identical), `rearArch` for the 2110 (2101–2115 identical against cfff462), the 2110's
+review fixes (`foot` and its `round`, `rearArchRise`, `bonnet` and its `nose`, feature
+line, bumper `corner`, centre-line lens, `heater`, vent `half`: 2101–21099 identical), and
+the third review's lid face, corner lamps and bumper `wrapTo` (2101–21099 identical; the
+2115 moved on its lid and lamps, 12 092 → 12 136 triangles, bounds unchanged).
 
 ## Budget and current figures
 
@@ -552,7 +583,11 @@ groups.
 | 2108 | 10 226 | 3 782 | 3 195 | 1 247 | 38 | 620 | 1 344 | 5 126 |
 | 2109 | 11 350 | 4 666 | 3 435 | 1 247 | 38 | 620 | 1 344 | 6 010 |
 | 21099 | 11 707 | 4 909 | 3 519 | 1 247 | 68 | 620 | 1 344 | 6 253 |
-| 2115 | 12 092 | 5 294 | 3 519 | 1 247 | 68 | 620 | 1 344 | 6 638 |
+| 2115 | 12 136 | 5 338 | 3 519 | 1 247 | 68 | 620 | 1 344 | 6 682 |
+| 2110 | 14 799 | 7 533 | 3 927 | 1 307 | 56 | 632 | 1 344 | 8 877 |
+
+The owner set the budget aside for the 2110 (its rounded rear shut line adds side rows to
+every tub column).
 
 Lowest point of the body: 0.170 m, the factory ground clearance (the classic's diff, the
 Samara's fuel tank; silencers 25 mm above it).
@@ -592,7 +627,23 @@ sill to the rail) the body carries a small fixed quarter glass and a C pillar of
 width parallel to the back light. The 2115 is the 21099 moved back 45 mm by its longer
 front bumper, with body-colour bumpers (moulded, `finish: 'paint'`) wearing a grey
 `moulding` band in line with grey door mouldings (`waist`, `finish: 'grey'`), the late
-face (chamfered `lens` head lamps and indicators, a slot under the bonnet lip, fog lamps in
+face (a `cornerLamps` unit: head lamps whose top slopes down at the inner end, the indicator wrapping round the corner; a slot under the bonnet lip; fog lamps in
 black housings), a boot lid that comes down between the corner lamps (`notch` on its last
 station) carrying the lamp bar (`rear.lid`), and a boot-lid `spoiler` with the high brake
 lamp.
+
+The 2110 (`tens.ts`, `measurements-2110.md`, the base early car without spoiler or
+mouldings) is its own shell on the `samara` platform with its own dash (`CABIN_2110`): a
+2492 wheelbase, a waist rising 60 mm from the A to the C pillar with a pressed feature line
+under the windows (`featureLine`), a narrower greenhouse (rail ±0.53), the rear door's shut
+line raked back along the C pillar and, below the belt, forward to the sill in front of the
+arch with rounded turns (`foot`, `round`), a fixed quarter glass in the body behind it, a
+front arch clear of the tyre and a low rear arch covering its top (`rearArch` 1.0,
+`rearArchRise` 0.81), a bonnet over the whole top whose nose comes down between the head
+lamps carrying the slot (`bonnet`, front `lid`). Its tail is the 2115's arrangement (the 2115 took it
+from the 2110): the boot lid comes down between corner lamps (`notch`) carrying the lamp bar
+(`rear.lid`: reversing lamps at its ends, one red reflector across the middle); a nose
+rounded in plan with a rounded body-colour bumper whose sides lie on the wings back to the
+wheel arch (`corner`, `wrapTo`), carrying a dark intake and fog-lamp recesses; narrow head
+lamps flush with the body with a dark slot between them, the indicators wrapping round the
+corners (`cornerLamps`).

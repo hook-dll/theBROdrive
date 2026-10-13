@@ -66,6 +66,13 @@ export interface CabinColumn {
   /** Owner of the same strip below the belt (doors overlap a pillar there). */
   readonly lower?: CabinOwner;
   readonly glass?: CabinGlass;
+  /**
+   * Below the belt the shut line on this column runs upright down to height `y`, then
+   * straight to `s` at the doors' bottom (the 2110's rear door, whose edge runs forward to
+   * the sill in front of the rear arch). `round`: radii of its upper corner (upright to
+   * slope) and lower corner (slope to the door's bottom edge). Absent: upright.
+   */
+  readonly foot?: { readonly y: number; readonly s: number; readonly round?: readonly [number, number] };
 }
 
 export interface CabinSpec {
@@ -111,6 +118,18 @@ export interface WheelSpec {
   readonly rearHalfTrack: number;
   /** Arch radius over the tyre radius. */
   readonly arch: number;
+  /**
+   * The rear arch's radius over the tyre radius where it differs from the front's (the
+   * 2110's rear arch hugs the tyre); absent, the rear takes `arch`.
+   */
+  readonly rearArch?: number;
+  /**
+   * The rear arch's top over the hub, over the tyre radius, where it is lower than a
+   * circle: the arch's outline becomes a half ellipse `rearArch` wide and this high (the
+   * 2110's rear arch covers the tyre's top). Absent: a circle. Only the skin's arch and
+   * its liner follow it; the wells and humps inside keep the circle, clear of the tyre.
+   */
+  readonly rearArchRise?: number;
 }
 
 /** Everything the builder needs for one car. */
@@ -127,6 +146,14 @@ export interface KitCarSpec {
   readonly doorBottom: number;
   /** Bonnet from this s to the cowl. */
   readonly bonnetFront: number;
+  /**
+   * A bonnet whose side cut stands `inset` in from the deck's edge (the 2110's runs along
+   * the top of the wings, almost at the edge) instead of at the pillar row; it ends
+   * `SCUTTLE` short of the cowl. `nose`: the bonnet comes down the front face between the
+   * head lamps to height `y`, its half width `half` at the bottom and at the top; its
+   * front face items hang on it (`FaceLook.lid`). Absent: the pillar-row bonnet.
+   */
+  readonly bonnet?: { readonly inset: number; readonly nose?: { readonly y: number; readonly half: readonly [number, number] } };
   /** Boot lid from the back light's base to this s; a tailgate when absent. */
   readonly bootEnd?: number;
   /**
@@ -167,6 +194,35 @@ export interface KitLook {
   readonly repeater: { readonly s0: number; readonly s1: number; readonly y0: number; readonly y1: number } | null;
   /** A body-colour wing on the boot lid's trailing edge with the high brake lamp, or none. */
   readonly spoiler?: SpoilerLook;
+  /** Lamp units wrapping round the front corners, flush with the body (the 2110's, the 2115's). */
+  readonly cornerLamps?: readonly CornerLamp[];
+  /**
+   * A pressed feature line along the flank: a narrow painted ridge through `points`
+   * ([s, y], linear between), broken at the shut lines like the waist (the 2110's line
+   * under the windows).
+   */
+  readonly featureLine?: { readonly points: readonly (readonly [number, number])[]; readonly height: number };
+}
+
+/**
+ * A lamp unit on the front face wrapping round the body's corner onto each flank
+ * (`KitLook.cornerLamps`), lying flush on the surface: points from its inner end on the
+ * face round the corner to its end on the flank. A point is on the face at half width `x`
+ * ([bottom, top] for a leaning edge), on the flank at `s` (car frame), or, with neither,
+ * on the corner itself (the face's edge); `y` its bottom and top there, straight between
+ * points. The stretch after a point is a lens in `role`'s slot, or `finish` for a part
+ * that never lights (a clear lens over a bright reflector: `chrome`).
+ */
+export interface CornerLamp {
+  readonly points: readonly CornerLampPoint[];
+}
+
+export interface CornerLampPoint {
+  readonly x?: number | readonly [number, number];
+  readonly s?: number;
+  readonly y: readonly [number, number];
+  readonly role?: LampRole;
+  readonly finish?: Finish;
 }
 
 /**
@@ -207,8 +263,9 @@ export interface FaceLook {
   /** Drawn in order; later items stand on earlier ones (a lamp on its surround). */
   readonly items: readonly FaceItem[];
   /**
-   * Items on the boot lid or tailgate where it comes down to the end face (the 2115's
-   * lamp bar), placed on the end face like `items` but riding on the lid as it opens.
+   * Items on a part that comes down to the end face, placed on the end face like `items`
+   * but riding on that part as it opens: at the tail the boot lid or tailgate (the 2115's
+   * lamp bar), at the nose the bonnet's nose (the 2110's slot).
    */
   readonly lid?: readonly FaceItem[];
 }
@@ -248,6 +305,17 @@ export type BumperLook =
        * height and finish (the 2115's grey band, in line with its door mouldings).
        */
       readonly moulding?: { readonly y: number; readonly height: number; readonly finish: Finish };
+      /**
+       * Plan radius of its corners where they turn round to the flanks (the 2110's
+       * rounded front bumper); absent, 0.09 as on the other cars.
+       */
+      readonly corner?: number;
+      /**
+       * Its sides follow the flanks back to this `s` (car frame), flush with the body, its
+       * bottom in one line with the sill behind (the 2110's front bumper, running back to
+       * the wheel arch). Absent: a short wrap standing off the corner.
+       */
+      readonly wrapTo?: number;
     };
 
 /**
@@ -283,9 +351,7 @@ export type FaceItem =
   /**
    * A lens, rectangular unless `slant`: how far its top edge's outer and inner ends stand
    * inboard of the bottom's (a trapezoid, or a parallelogram when both move; negative
-   * leans out). `chamfer` cuts its corners: [across, up] taken off each corner along the
-   * top or bottom edge and along the end edge (the 2115's head lamp, whose top slopes
-   * down to its inner end).
+   * leans out).
    */
   | {
       readonly kind: 'lens';
@@ -295,7 +361,6 @@ export type FaceItem =
       readonly depth: number;
       readonly proud: number;
       readonly slant?: { readonly outer: number; readonly inner: number };
-      readonly chamfer?: LensChamfer;
     }
   /** A grille on the centre line out to `x`: an optional frame and back, and bars across it. */
   | {
@@ -326,11 +391,3 @@ export type FaceItem =
   | { readonly kind: 'cluster'; readonly x: Span<FaceX>; readonly y: Span<FaceY>; readonly columns: readonly (readonly LampRole[])[] }
   /** A rectangular outline of `width` bars (a chrome surround); both sides unless centred. */
   | { readonly kind: 'frame'; readonly x: Span<FaceX>; readonly y: Span<FaceY>; readonly width: number; readonly finish: Finish; readonly proud: number };
-
-/** Corner cuts of a lens, each [along the top or bottom edge, along the end edge]. */
-export interface LensChamfer {
-  readonly innerTop?: readonly [number, number];
-  readonly innerBottom?: readonly [number, number];
-  readonly outerTop?: readonly [number, number];
-  readonly outerBottom?: readonly [number, number];
-}

@@ -32,6 +32,10 @@ const LID_THICKNESS = 0.035;
 const GLASS_INSET = 0.012;
 /** Width of the wall a notched deck (`TubStation.notch`) rises in, just inside the notch. */
 const NOTCH_WALL = 0.025;
+/** Deck left between a `KitCarSpec.bonnet`'s rear edge and the cowl (the scuttle). */
+const SCUTTLE = 0.012;
+/** Segments per rounded corner of a raked shut line (`CabinColumn.foot.round`). */
+const CORNER_STEPS = 4;
 
 export const SHELL_COLOURS = {
   dark: 0x18191a,
@@ -164,10 +168,61 @@ export class BodyFrame {
   /** The tub's deck rows at s: fractions of the deck edge's half width. */
   deckFracs(s: number): number[] {
     const edge = this.section(s).r4[0];
+    const bonnet = this.bonnetX(s);
+    if (bonnet !== undefined) {
+      // The bonnet's cut is the pillar row; on the nose face the half row is where the
+      // bonnet's nose comes down, elsewhere it halves the bonnet.
+      const nose = this.spec.bonnet?.nose;
+      const half = nose && s <= this.spec.stations[0]!.s ? nose.half[1] : bonnet / 2;
+      return [0, half / edge, bonnet / edge, 1];
+    }
     if (!this.notched) return [0, 0.5, (edge - this.spec.cabin.pillar) / edge, 1];
     // On a notched station the half row moves out to the wall's foot.
     const lid = this.lidX(s);
     return [0, lerp(0.5, (lid - NOTCH_WALL) / edge, this.notchWeight(s)), lid / edge, 1];
+  }
+
+  /**
+   * The tail station a boot lid comes down (`bootEnd` on the last station, which carries a
+   * `notch`), or undefined. There the lid's top turns down to a line across at the corner
+   * lamps' top, and below that line its rear panel lies in the tail face between the lamps.
+   */
+  get lidFace(): number | undefined {
+    const last = this.spec.stations[this.spec.stations.length - 1]!;
+    return last.notch !== undefined && this.spec.bootEnd === last.s ? last.s : undefined;
+  }
+
+  /**
+   * Half width a `KitCarSpec.bonnet` is cut along at s, `inset` in from the deck's edge,
+   * from the bonnet's front to just short of the cowl; undefined elsewhere or without one.
+   */
+  bonnetX(s: number): number | undefined {
+    const b = this.spec.bonnet;
+    if (!b || s < this.spec.bonnetFront || s > this.bonnetRear) return undefined;
+    return this.section(s).r4[0] - b.inset;
+  }
+
+  /**
+   * Where the bonnet ends: the cowl, or with a `KitCarSpec.bonnet` `SCUTTLE` short of it,
+   * the deck between narrowing to the windscreen's base.
+   */
+  get bonnetRear(): number {
+    return this.spec.bonnet ? this.cowl - SCUTTLE : this.cowl;
+  }
+
+  /**
+   * A raked shut line below the belt (`CabinColumn.foot`) as [s, y] points from the belt
+   * down to the doors' bottom: upright on the column, straight to the foot, its two
+   * corners rounded by `foot.round`. Heights fall monotonically along it.
+   */
+  shutLine(column: CabinColumn): [number, number][] {
+    const foot = column.foot!;
+    const bottom = this.spec.doorBottom;
+    const [upper, lower] = foot.round ?? [0, 0];
+    const top: [number, number] = [column.s, this.station(column.s).belt];
+    const corner: [number, number] = [column.s, foot.y];
+    const base: [number, number] = [foot.s, bottom];
+    return [top, ...fillet(top, corner, base, upper), ...fillet(corner, base, [foot.s - 1, bottom], lower)];
   }
 
   /** Half width the boot lid or tailgate is cut along at s: the pillar row, or the stations' `notch`. */
@@ -183,14 +238,24 @@ export class BodyFrame {
     return table(this.spec.stations.map((st) => [st.s, st.notch === undefined ? 0 : 1] as const), s);
   }
 
+  /** Arch radius over the tyre radius at an axle: the rear's `rearArch` if set, else `arch`. */
+  archFactor(axle: number): number {
+    const w = this.spec.wheels;
+    return axle === w.rear ? (w.rearArch ?? w.arch) : w.arch;
+  }
+
   /** Arch top at s for either axle, or -Infinity outside both arches. */
   archY(s: number): number {
     const w = this.spec.wheels;
     let best = -Infinity;
     for (const axle of [w.front, w.rear]) {
-      const r = w.radius * w.arch;
+      const r = w.radius * this.archFactor(axle);
       const d = s - axle;
-      if (Math.abs(d) <= r) best = Math.max(best, w.radius + Math.sqrt(r * r - d * d));
+      if (Math.abs(d) > r) continue;
+      // A low rear arch is a half ellipse; every other arch a circle on the hub.
+      const rise = axle === w.rear ? w.rearArchRise : undefined;
+      const y = rise === undefined ? w.radius + Math.sqrt(r * r - d * d) : w.radius + w.radius * rise * Math.sqrt(Math.max(0, 1 - (d / r) ** 2));
+      best = Math.max(best, y);
     }
     return best;
   }
@@ -292,6 +357,54 @@ function centroid(points: readonly Vec3[]): Vec3 {
   return scale(c, 1 / points.length);
 }
 
+/** The part of a convex polygon where `sign × g` is not negative, cut where g crosses 0. */
+function clipPolygon(points: readonly Vec3[], g: (p: Vec3) => number, sign: 1 | -1): Vec3[] {
+  const out: Vec3[] = [];
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i]!;
+    const q = points[(i + 1) % points.length]!;
+    const gp = sign * g(p);
+    const gq = sign * g(q);
+    if (gp >= 0) out.push(p);
+    if ((gp > 0 && gq < 0) || (gp < 0 && gq > 0)) {
+      const t = gp / (gp - gq);
+      out.push([lerp(p[0], q[0], t), lerp(p[1], q[1], t), lerp(p[2], q[2], t)]);
+    }
+  }
+  return out;
+}
+
+/**
+ * The corner at `corner` of the path prev → corner → next, rounded with radius r: points
+ * along the arc from the first straight to the second; just the corner when r is 0.
+ */
+function fillet(prev: readonly [number, number], corner: readonly [number, number], next: readonly [number, number], r: number): [number, number][] {
+  if (r <= 0) return [[corner[0], corner[1]]];
+  const unit = (a: readonly [number, number], b: readonly [number, number]): [number, number] => {
+    const l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    return [(b[0] - a[0]) / l, (b[1] - a[1]) / l];
+  };
+  const d1 = unit(prev, corner);
+  const d2 = unit(corner, next);
+  const along = d1[0] * d2[0] + d1[1] * d2[1];
+  const t = r * Math.tan(Math.acos(Math.min(1, along)) / 2);
+  const p1: [number, number] = [corner[0] - d1[0] * t, corner[1] - d1[1] * t];
+  const p2: [number, number] = [corner[0] + d2[0] * t, corner[1] + d2[1] * t];
+  // The centre lies off the first straight, toward the side the path turns to.
+  const n = unit([0, 0], [d2[0] - along * d1[0], d2[1] - along * d1[1]]);
+  const c: [number, number] = [p1[0] + n[0] * r, p1[1] + n[1] * r];
+  const a1 = Math.atan2(p1[1] - c[1], p1[0] - c[0]);
+  let da = Math.atan2(p2[1] - c[1], p2[0] - c[0]) - a1;
+  if (da > Math.PI) da -= 2 * Math.PI;
+  if (da < -Math.PI) da += 2 * Math.PI;
+  const out: [number, number][] = [];
+  for (let k = 0; k <= CORNER_STEPS; k++) {
+    const a = a1 + (da * k) / CORNER_STEPS;
+    out.push([c[0] + r * Math.cos(a), c[1] + r * Math.sin(a)]);
+  }
+  return out;
+}
+
 /** Tub columns: stations, cabin columns, arch subdivisions and every cut line. */
 function tubColumns(frame: BodyFrame): number[] {
   const spec = frame.spec;
@@ -299,12 +412,13 @@ function tubColumns(frame: BodyFrame): number[] {
   for (const st of spec.stations) s.add(st.s);
   for (const c of spec.cabin.columns) s.add(c.s);
   s.add(spec.bonnetFront);
+  if (spec.bonnet) s.add(frame.bonnetRear);
   if (spec.bootEnd !== undefined) s.add(spec.bootEnd);
   s.add(spec.flap.s0);
   s.add(spec.flap.s1);
   const w = spec.wheels;
-  const r = w.radius * w.arch;
   for (const axle of [w.front, w.rear]) {
+    const r = w.radius * frame.archFactor(axle);
     const n = 12;
     for (let i = 0; i <= n; i++) {
       // Cosine spacing: short facets where the arch turns down.
@@ -337,7 +451,7 @@ function tubColumns(frame: BodyFrame): number[] {
 function sideColumn(frame: BodyFrame, s: number): [number, number][] {
   const spec = frame.spec;
   const sec = frame.section(s);
-  const { below, above } = sideCutRows(spec);
+  const { below, above } = sideCutRows(frame);
   const at = (y: number, lo: number, hi: number): [number, number] => {
     const c = Math.min(hi, Math.max(lo, y));
     return [frame.sideX(s, c), c];
@@ -362,16 +476,55 @@ function sideColumn(frame: BodyFrame, s: number): [number, number][] {
   return rows;
 }
 
-/** The side's cut lines, split by which side of the crease they fall on. */
-function sideCutRows(spec: KitCarSpec): { below: number[]; above: number[] } {
+/**
+ * Outer half width of the side as built at (s, y): on the flat faces the shell lays
+ * between neighbouring tub columns and side rows (up to the shoulder), where `sideX`
+ * interpolates the sections smoothly. A face between two columns is split along one of
+ * its diagonals; this takes the outer of the two, so trim laid on it never sinks in.
+ */
+export function skinX(frame: BodyFrame, s: number, y: number): number {
+  const cols = tubColumns(frame);
+  const next = cols.findIndex((c) => c > s);
+  const j = next < 0 ? cols.length - 2 : Math.max(0, next - 1);
+  const sa = cols[j]!;
+  const sb = cols[j + 1]!;
+  const t = Math.min(1, Math.max(0, (s - sa) / (sb - sa)));
+  const rowsAt = (sc: number): [number, number][] => [...sideColumn(frame, sc), frame.section(sc).r4];
+  const a = rowsAt(sa);
+  const b = rowsAt(sb);
+  // The band whose rows, interpolated to s, hold y.
+  let i = 0;
+  while (i + 2 < a.length && lerp(a[i + 1]![1], b[i + 1]![1], t) < y) i++;
+  // Corners as (t, y, x): a0, b0 below, a1, b1 above.
+  const corners = [a[i]!, b[i]!, a[i + 1]!, b[i + 1]!].map(([x, cy], k): Vec3 => [k % 2, cy, x]);
+  const [a0, b0, a1, b1] = corners as [Vec3, Vec3, Vec3, Vec3];
+  // x on the plane of a triangle at (t, y), or undefined outside it.
+  const onTriangle = (p: Vec3, q: Vec3, r: Vec3): number | undefined => {
+    const det = (q[0] - p[0]) * (r[1] - p[1]) - (r[0] - p[0]) * (q[1] - p[1]);
+    if (Math.abs(det) < 1e-12) return undefined;
+    const u = ((t - p[0]) * (r[1] - p[1]) - (r[0] - p[0]) * (y - p[1])) / det;
+    const v = ((q[0] - p[0]) * (y - p[1]) - (t - p[0]) * (q[1] - p[1])) / det;
+    if (u < -1e-6 || v < -1e-6 || u + v > 1 + 1e-6) return undefined;
+    return p[2] + u * (q[2] - p[2]) + v * (r[2] - p[2]);
+  };
+  const xs = [onTriangle(a0, b0, b1) ?? onTriangle(a0, b1, a1), onTriangle(a0, b0, a1) ?? onTriangle(b0, b1, a1)].filter((x): x is number => x !== undefined);
+  return xs.length > 0 ? Math.max(...xs) : frame.sideX(s, y);
+}
+
+/** The side's cut lines (door bottoms, the flap, the turns of a raked shut line), split by which side of the crease they fall on. */
+function sideCutRows(frame: BodyFrame): { below: number[]; above: number[] } {
+  const spec = frame.spec;
   const meanCrease = spec.stations.reduce((sum, st) => sum + st.crease, 0) / spec.stations.length;
-  const cuts = [spec.doorBottom, spec.flap.y0, spec.flap.y1].sort((a, b) => a - b);
+  // Every point of a raked shut line between the belt and the doors' bottom is a row, so
+  // each band it crosses is cut along a straight piece of it.
+  const feet = spec.cabin.columns.flatMap((c) => (c.foot ? frame.shutLine(c).slice(1).map(([, y]) => y).filter((y) => y > spec.doorBottom + 1e-6) : []));
+  const cuts = [spec.doorBottom, spec.flap.y0, spec.flap.y1, ...feet].sort((a, b) => a - b);
   return { below: cuts.filter((y) => y < meanCrease), above: cuts.filter((y) => y >= meanCrease) };
 }
 
 /** Index of the side row a cut line becomes (see `sideColumn`). */
-function sideRowIndex(spec: KitCarSpec, y: number): number {
-  const { below, above } = sideCutRows(spec);
+function sideRowIndex(frame: BodyFrame, y: number): number {
+  const { below, above } = sideCutRows(frame);
   const b = below.indexOf(y);
   return b >= 0 ? 2 + b : 3 + below.length + above.indexOf(y);
 }
@@ -400,6 +553,16 @@ export function buildShell(frame: BodyFrame): ShellResult {
   const P = (x: number, y: number, s: number): Vec3 => [x, y, frame.z(s)];
   const cols = tubColumns(frame);
   const hatch = spec.bootEnd === undefined;
+  // Raked shut lines (`CabinColumn.foot`): s along the line at height y (clamped: the
+  // column above it, the foot's end below it), down from where its upper turn begins.
+  const rakes = cabin.columns.flatMap((c, index) => {
+    if (!c.foot) return [];
+    const line = frame.shutLine(c);
+    const bySY = line.map(([s, y]) => [y, s] as const).reverse();
+    const lineS = (y: number): number => table(bySY, y);
+    const prev = cabin.columns[index - 1]!;
+    return [{ top: line[1]![1], at: c.s, lineS, from: line[line.length - 1]![0], reach: c.s, nearLower: prev.lower ?? prev.upper ?? 'body', farLower: c.lower ?? c.upper ?? 'body' }];
+  });
 
   for (const side of [1, -1]) {
     // ---- tub sides, shoulder and deck ----
@@ -407,9 +570,12 @@ export function buildShell(frame: BodyFrame): ShellResult {
       const sec = frame.section(s);
       const sideRows = sideColumn(frame, s);
       const fr = frame.deckFracs(s);
+      // Where the boot lid comes down the tail, the lid's top meets its rear panel along a
+      // line across at the corners' top (the rear panel is the tail face's, below).
+      const lidTop = s === frame.lidFace ? sec.r4[1] : undefined;
       const deck = fr.slice(1).reverse().concat([0]).map((f) => {
         const x = f * sec.r4[0];
-        return [x, frame.deckY(s, x)] as [number, number];
+        return [x, lidTop ?? frame.deckY(s, x)] as [number, number];
       });
       // deck: r4 (edge), pillar row, half, centre
       return { s, rows: [...sideRows, ...deck] };
@@ -426,23 +592,32 @@ export function buildShell(frame: BodyFrame): ShellResult {
       // bands pair by index and every side face is a quad or a collapsed triangle.
       const aSide = a.rows.slice(0, sideCount(j) + 1);
       const bSide = b.rows.slice(0, sideCount(j + 1) + 1);
-      const doorRow = sideRowIndex(spec, spec.doorBottom);
-      const flapRows = [sideRowIndex(spec, spec.flap.y0), sideRowIndex(spec, spec.flap.y1)];
+      const doorRow = sideRowIndex(frame, spec.doorBottom);
+      const flapRows = [sideRowIndex(frame, spec.flap.y0), sideRowIndex(frame, spec.flap.y1)];
+      const sideOwner = (stripLower: string, i: number, sm: number): string => {
+        if (side === (spec.flap.side === 'left' ? 1 : -1) && sm > spec.flap.s0 && sm < spec.flap.s1 && i >= flapRows[0]! && i < flapRows[1]!) return 'flap';
+        return stripLower !== 'body' && i >= doorRow ? doorName(stripLower, side) : 'body';
+      };
       for (let i = 0; i + 1 < aSide.length; i++) {
         const pa0 = aSide[i]!;
         const pa1 = aSide[i + 1]!;
         const pb0 = bSide[i]!;
         const pb1 = bSide[i + 1]!;
-        let owner = 'body';
-        if (lower !== 'body' && i >= doorRow) owner = doorName(lower, side);
-        if (side === (spec.flap.side === 'left' ? 1 : -1) && sMid > spec.flap.s0 && sMid < spec.flap.s1 && i >= flapRows[0]! && i < flapRows[1]!) {
-          owner = 'flap';
+        const quad = [P(side * pa0[0], pa0[1], a.s), P(side * pb0[0], pb0[1], b.s), P(side * pb1[0], pb1[1], b.s), P(side * pa1[0], pa1[1], a.s)];
+        const rake = rakes.find((r) => i >= doorRow && Math.max(pa1[1], pb1[1]) <= r.top + 1e-9 && Math.min(a.s, b.s) < r.reach && Math.max(a.s, b.s) > r.from);
+        if (!rake) {
+          shell.face(quad, sideOwner(lower, i, sMid), 'paint');
+          continue;
         }
-        shell.face(
-          [P(side * pa0[0], pa0[1], a.s), P(side * pb0[0], pb0[1], b.s), P(side * pb1[0], pb1[1], b.s), P(side * pa1[0], pa1[1], a.s)],
-          owner,
-          'paint',
-        );
+        // A raked shut line crosses the band: each side of it takes the owner of the strip
+        // on that side of its column.
+        const g = (p: Vec3): number => frame.zNose - p[2] - rake.lineS(p[1]);
+        const before = sMid < rake.at ? lower : rake.nearLower;
+        const after = sMid >= rake.at ? lower : rake.farLower;
+        for (const [piece, stripLower] of [[clipPolygon(quad, g, -1), before], [clipPolygon(quad, g, 1), after]] as const) {
+          if (piece.length < 3) continue;
+          shell.face(piece, sideOwner(stripLower, i, frame.zNose - centroid(piece)[2]), 'paint');
+        }
       }
       // The shoulder (belt -> deck edge) belongs to the door along the cabin.
       const aBelt = a.rows[sideCount(j)]!;
@@ -460,7 +635,7 @@ export function buildShell(frame: BodyFrame): ShellResult {
       for (let i = 0; i + 1 < aDeck.length; i++) {
         let owner = 'body';
         if (i >= 1) {
-          if (sMid > spec.bonnetFront && sMid < frame.cowl) owner = 'bonnet';
+          if (sMid > spec.bonnetFront && sMid < frame.bonnetRear) owner = 'bonnet';
           if (spec.bootEnd !== undefined && sMid > frame.rearBase && sMid < spec.bootEnd) owner = 'boot';
         }
         shell.face(
@@ -479,7 +654,7 @@ export function buildShell(frame: BodyFrame): ShellResult {
     // ---- wheel wells ----
     const w = spec.wheels;
     for (const axle of [w.front, w.rear]) {
-      const r = w.radius * w.arch;
+      const r = w.radius * frame.archFactor(axle);
       const archCols = cols.filter((s) => Math.abs(s - axle) <= r);
       const inner = (s: number): number => side * frame.wellX(s);
       const edge = archCols.map((s) => {
@@ -516,13 +691,32 @@ export function buildShell(frame: BodyFrame): ShellResult {
       return [x, frame.deckY(s, x)] as [number, number];
     });
     const half = [...sideRows, ...deck];
+    // A bonnet's nose comes down the front face between the lamps: the body's face goes
+    // round it, from its top corners down to its bottom, and the nose is the bonnet's.
+    const nose = s === cols[0] ? spec.bonnet?.nose : undefined;
+    const top = half[half.length - 1]!;
     for (const [x, y] of half) ring.push(P(x, y, s));
-    ring.push(P(0, sec.st.deck, s));
+    ring.push(...(nose ? [P(nose.half[0], nose.y, s), P(-nose.half[0], nose.y, s)] : [P(0, sec.st.deck, s)]));
     for (let i = half.length - 1; i >= 0; i--) ring.push(P(-half[i]![0], half[i]![1], s));
     // An end face is concave where an estate's deck dips to its tailgate sill: a fan would
     // span the notch, so the face is cut into triangles that keep to its outline.
     const tris = THREE.ShapeUtils.triangulateShape(ring.map((p) => new THREE.Vector2(p[0], p[1])), []);
     for (const [a, b, c] of tris) shell.face([ring[a]!, ring[b]!, ring[c]!], 'body', 'paint');
+    if (nose) {
+      shell.face([P(nose.half[0], nose.y, s), P(top[0], top[1], s), P(0, sec.st.deck, s), P(-top[0], top[1], s), P(-nose.half[0], nose.y, s)], 'bonnet', 'paint');
+    }
+    if (s === frame.lidFace) {
+      // The lid's rear panel in the tail face: from the line across at the corners' top
+      // down the notch wall to its foot, flat, every point shared with the tail face or
+      // the lid's top, so the shut line round it is clean.
+      const [, foot, cut] = frame.deckFracs(s).map((f) => f * sec.r4[0]);
+      const yTop = sec.r4[1];
+      const yFoot = sec.st.deck;
+      for (const side of [1, -1]) {
+        shell.face([P(side * cut!, yTop, s), P(side * foot!, yTop, s), P(side * foot!, yFoot, s)], 'boot', 'paint');
+        shell.face([P(side * foot!, yTop, s), P(0, yTop, s), P(0, yFoot, s), P(side * foot!, yFoot, s)], 'boot', 'paint');
+      }
+    }
   }
 
   // ---- underbody ----

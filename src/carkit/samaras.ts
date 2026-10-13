@@ -297,29 +297,27 @@ export const LOOK_2115: KitLook = {
     pedestal: { half: 0.13, s0: 4.06, s1: 4.145 },
     lamp: { half: 0.105, y0: 0.947, y1: 0.982 },
   },
+  // The head-lamp unit, flush with the body, wrapping round the corner (measurements §3.3):
+  // the head lamp from its inner end (0.30, its top 45 mm lower, sloping up over 68 mm;
+  // its bottom corner cut 20 × 14 mm) to the joint leaning out from 0.549 to 0.58, then the
+  // amber indicator to the corner and round it onto the flank, rounding off its rear end
+  // [P p19, f2: it shows from the side back to s 0.205].
+  cornerLamps: [
+    {
+      points: [
+        { x: 0.3, y: [0.669, 0.715], role: 'head' },
+        { x: 0.32, y: [0.655, 0.728], role: 'head' },
+        { x: 0.368, y: [0.655, 0.76], role: 'head' },
+        { x: [0.549, 0.58], y: [0.655, 0.76], role: 'blinker' },
+        { y: [0.655, 0.76], role: 'blinker' },
+        { s: 0.19, y: [0.665, 0.75], role: 'blinker' },
+        { s: 0.205, y: [0.68, 0.735] },
+      ],
+    },
+  ],
   front: {
     bumper: { kind: 'moulded', drop: 0.07, height: 0.3, finish: 'paint', moulding: { y: 0.52, height: 0.075, finish: 'grey' } },
     items: [
-      {
-        kind: 'lens',
-        role: 'head',
-        x: { from: { centre: 0.3 }, to: { centre: 0.549 } },
-        y: { from: ['bumperTop', 0.03], to: ['deck', -0.03] },
-        depth: 0.01,
-        proud: 0.012,
-        slant: { outer: -0.031, inner: 0 },
-        chamfer: { innerTop: [0.068, 0.045], innerBottom: [0.02, 0.014] },
-      },
-      {
-        kind: 'lens',
-        role: 'blinker',
-        x: { from: { centre: 0.552 }, to: { centre: 0.69 } },
-        y: { from: ['bumperTop', 0.03], to: ['deck', -0.03] },
-        depth: 0.01,
-        proud: 0.012,
-        slant: { outer: 0, inner: -0.031 },
-        chamfer: { outerTop: [0.025, 0.024], outerBottom: [0.031, 0.035] },
-      },
       // The slot under the bonnet's lip, between the lamps' inner ends, with a bright bar.
       {
         kind: 'grille',

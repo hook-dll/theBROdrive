@@ -14,14 +14,15 @@
  * A body family shares one shell (`KitBody`); each car is that shell moved to its own
  * bumper tip (`onBody`) and its own face, tail and trim. Face heights measured on a
  * drawing of a taller car are brought to the shell's drawing by the ratio of the two
- * cars' heights. The estates live in estates.ts and the Samara family (2108, 2109, 21099,
- * 2115) in samaras.ts, each with its measurement report.
+ * cars' heights. The estates live in estates.ts, the Samara family (2108, 2109, 21099,
+ * 2115) in samaras.ts and the 2110 in tens.ts, each with its measurement report.
  */
 
 import { BODY_2102, BODY_2104, REAR_2102, REAR_2104 } from './estates';
-import { CABIN_2101, CABIN_2103, CABIN_2105, CABIN_2107 } from './interior';
+import { CABIN_2101, CABIN_2103, CABIN_2105, CABIN_2107, CABIN_2110 } from './interior';
 import { BODY_2108, BODY_2109, BODY_21099, BODY_2115, LOOK_2108, LOOK_2109, LOOK_21099, LOOK_2115 } from './samaras';
 import type { KitCarSpec, KitLook } from './spec';
+import { BODY_2110, LOOK_2110 } from './tens';
 
 /** The shape of a car: everything a spec holds but its id, its looks and its cabin. */
 export type KitBody = Omit<KitCarSpec, 'id' | 'look' | 'cabinLayout'>;
@@ -488,4 +489,5 @@ export const KIT_SPECS: Readonly<Record<string, KitCarSpec>> = {
   vaz21099: { id: 'vaz21099', ...BODY_21099, look: LOOK_21099 },
   // The 2115's longer front bumper moves the 21099-frame body 45 mm back from its tip.
   vaz2115: { id: 'vaz2115', ...onBody(BODY_2115, 0.045, 4.33), look: LOOK_2115 },
+  vaz2110: { id: 'vaz2110', ...BODY_2110, look: LOOK_2110, cabinLayout: CABIN_2110 },
 };

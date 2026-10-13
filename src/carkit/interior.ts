@@ -181,8 +181,11 @@ interface Layout {
   readonly hazard: P2;
   /** The light switch; on the cluster face its `dy` is a height like a gauge's `up`. */
   readonly lights: { readonly right: number; readonly dy: number; readonly kind: 'knob' | 'rocker'; readonly on?: 'fascia' | 'cluster' };
-  /** Slatted face vents on the fascia at [x, dy]; without `x`, a pair at the dash's ends. */
-  readonly vents?: readonly { readonly dy: number; readonly x?: number }[];
+  /**
+   * Slatted face vents on the fascia at [x, dy]; without `x`, a pair at the dash's ends.
+   * `half` is the opening's half size (default 0.035 x 0.024); slats fill it 0.012 apart.
+   */
+  readonly vents?: readonly { readonly dy: number; readonly x?: number; readonly half?: P2 }[];
   /** Round eyeball vents on the fascia at [x, dy]. */
   readonly eyeballs?: { readonly radius: number; readonly at: readonly P2[] };
   /** A framed panel on the cluster face behind the gauges: centre (right, up), half size, colour and frame. */
@@ -191,6 +194,11 @@ interface Layout {
   readonly lamps?: { readonly right: number; readonly up: number; readonly cols: number; readonly rows: number; readonly pitch: number };
   /** Switches with no channel: [x, dy] on the fascia, or [right, up] on the cluster face as the gauges. */
   readonly rockers?: { readonly on: 'fascia' | 'cluster'; readonly at: readonly P2[] };
+  /**
+   * Heater controls: a dark panel centred on the car's centre line at `dy` (on the stack
+   * below the fascia's foot), half size `half`, with round knobs of `radius` at each `knobs` x.
+   */
+  readonly heater?: { readonly dy: number; readonly half: P2; readonly knobs: readonly number[]; readonly radius: number };
   /**
    * Centre stack from the fascia's foot down to the tunnel, its face continuing the
    * fascia's line: fittings placed below the fascia's foot stand on it.
@@ -406,6 +414,84 @@ export const CABIN_2107: CabinLayoutOverride = {
   wheel: { ...LAYOUTS.classic.wheel, hub: 'pad' },
 };
 
+// The VAZ-2110 on the Samara platform, read off two Wikimedia Commons photos (no
+// drawing of the dash was found): "Sporty Lada - Flickr - SergeyRod (3).jpg" (CC BY-SA
+// 2.0, a 2004 Lada 112 Cup car: the whole dash from behind the driver's seat, radio
+// out) and "2005Lada111Interior.JPG" (CC BY-SA 3.0, a 2005 Lada 111: cluster hood,
+// vents, heater and stack close up). Scale: the stack's radio bays are 1-DIN (ISO 7736,
+// 182 mm wide = 215 px in the first photo), 0.85 mm/px across and 0.9 mm/px up the
+// stack; the dash's planes stand at about the same distance from that camera, so the
+// same scale is used for the cluster (about ±15%). Heights are hung from the Samara
+// cluster's height (dials 0.015 over the belt, the wheel is the Samara's), photo y px
+// below the dials' centres (y 215) at 0.9 mm/px. Pixels (x, y) are on the first photo's
+// 1600 x 1200 original; the readings are in measurements-2110.md ("Dashboard").
+
+/**
+ * VAZ-2110: a tall fascia leaning back to a long sloping top, a deep hood over the
+ * cluster (tachometer left, speedometer right, a small dial outboard of each) with two
+ * big rockers on its right flank, two large vents side by side over the heater panel's
+ * two knobs and the hazard button, the radio low in a stack running down to the
+ * tunnel, a big glovebox lid and a two-spoke wheel with a wide pad.
+ */
+export const CABIN_2110: CabinLayoutOverride = {
+  // A tall face leaning back 13.5 degrees as the stack does, from under the top's rounded
+  // edge down to -0.34: between the driver's knee panel's foot (y 555, -0.29) and the
+  // glovebox lid's (y 690, -0.41), since one section serves the whole width. The top
+  // falls to it from the screen, as the large top seen past the stack does.
+  dash: [
+    [0.22, -0.005], [0.33, 0.008], [0.365, 0.002], [0.378, -0.02], [0.455, -0.34],
+    [0.42, -0.37], [0.15, -0.38], [0.045, -0.33], [0.045, -0.12],
+  ],
+  fascia: [[0.378, -0.02], [0.455, -0.34]],
+  // Hood over the cluster, standing proud of the face. Half width: the cluster's centre
+  // (x 802) to the switch pod's outer edge (x 1010), 208 px. Its lip 0.11 over the dials
+  // (hood top y 92); the cluster face from 0.05 under them (y 270) up to 0.08 over (y 130),
+  // here 0.095 to take the kit's taller rockers.
+  binnacle: [[0.25, -0.01], [0.275, 0.115], [0.43, 0.14], [0.5, 0.13], [0.505, 0.115], [0.472, 0.11], [0.472, -0.035], [0.4, -0.03]],
+  binnacleHalf: 0.175,
+  clusterFace: { right: 0, up: 0.035, half: [0.125, 0.065], colour: COLOURS.cluster, frame: 'black' },
+  gauges: [
+    // Dial centres 105 px apart (x 750, 855), numerals' ring 45 px in radius.
+    { channel: 'rpm', right: -0.044, up: 0.015, radius: 0.037, full: 8000, ...BIG },
+    { channel: 'speed', right: 0.044, up: 0.015, radius: 0.037, full: 180, ...BIG },
+    // Right small dial 82 px outboard of the speedometer and 25 px lower (x 937, y 242),
+    // about 22 px in radius. Its left twin is hidden by the wheel in both photos and is
+    // placed by symmetry; which dial reads fuel and which temperature is not legible.
+    { channel: 'temp', right: -0.11, up: -0.01, radius: 0.0185, ...SMALL },
+    { channel: 'fuel', right: 0.11, up: -0.01, radius: 0.0185, ...SMALL },
+  ],
+  // Two square rockers on the hood's right flank, 170 px right of the cluster's centre,
+  // 60 and 18 px over the dials (fog lamps and rear screen heater in the 2005 photo);
+  // set 0.056 apart, not 0.038, since the kit's rocker is taller than the 40 mm square one.
+  // The light switch mirrors the top one on the left flank: no photo shows that flank.
+  rockers: { on: 'cluster', at: [[0.15, 0.078], [0.15, 0.022]] },
+  lights: { right: -0.15, dy: 0.078, kind: 'rocker', on: 'cluster' },
+  // End vents: the driver's (x 500, y 300) about 0.08 square, lowered 8 mm to clear the
+  // hood. The centre pair 0.1 x 0.075 each, 130 px apart (x 1126, 1255; y 311).
+  vents: [
+    { dy: -0.07, half: [0.04, 0.04] },
+    { x: 0.056, dy: -0.07, half: [0.05, 0.038] },
+    { x: -0.056, dy: -0.07, half: [0.05, 0.038] },
+  ],
+  // Heater panel 250 x 102 px (x 1015-1265, y 418-520), knobs 83 px apart at y 472,
+  // their rings 30 px in radius; the hazard button at its top right (x 1243, y 457).
+  heater: { dy: -0.215, half: [0.105, 0.046], knobs: [0.035, -0.035], radius: 0.025 },
+  hazard: [-0.085, -0.2],
+  // Stack 275 px wide (x 1000-1275); the radio in the lower of its two bays (y 620, the
+  // 2005 photo); a pocket at its foot (y 700) is taken as the ashtray.
+  stack: { half: 0.115 },
+  radio: [0, -0.35],
+  ashtray: [0, -0.42],
+  // Lid from 258 px right of the stack's centre (x 1400) outwards, its top at y 440 just
+  // under the heater panel's. It reaches lower in the photo (y 690) than the face may go
+  // (above); its outer end is out of the photo.
+  glovebox: { x: -0.41, dy: -0.26, half: [0.17, 0.075] },
+  // Spokes 100 degrees apart either side of six o'clock (the 2004 wheel stands turned a
+  // quarter); the rim's tube 30 px across on a 250 px radius. Size is the Samara's: no
+  // photo scales the wheel.
+  wheel: { ...LAYOUTS.samara.wheel, rim: 0.011, spokes: [-40, 220] },
+};
+
 export function buildInterior(ctx: KitContext): void {
   new Cabin(ctx).build();
 }
@@ -610,7 +696,7 @@ class Cabin {
     const w = this.spec.wheels;
     this.fw = f.cowl + FIREWALL;
     this.floorY = f.station(f.cowl + 0.5).sill + FLOOR_RISE;
-    this.floorEnd = w.rear - w.radius * w.arch - 0.01;
+    this.floorEnd = w.rear - w.radius * f.archFactor(w.rear) - 0.01;
     this.belt = f.station(f.cowl).belt;
     this.hipS = f.cowl + this.lay.hip;
     this.benchS = benchHip(f, this.lay);
@@ -733,7 +819,7 @@ class Cabin {
   private sidePanels(): void {
     const cols = this.spec.cabin.columns;
     const w = this.spec.wheels;
-    const r = w.radius * w.arch;
+    const r = w.radius * this.frame.archFactor(w.rear);
     for (let i = 0; i + 1 < cols.length; i++) {
       const c = cols[i]!;
       if ((c.lower ?? c.upper ?? 'body') !== 'body') continue;
@@ -757,6 +843,34 @@ class Cabin {
         for (let k = 0; k + 1 < columns.length; k++) this.fixed.bridge('trim', columns[k]!, columns[k + 1]!);
       }
     }
+    this.rakeTrim();
+  }
+
+  /**
+   * Trim on the body's piece behind a raked shut line (`CabinColumn.foot`), between the
+   * line and its column, from the floor or the arch hump up to the line: the door opening
+   * shows it.
+   */
+  private rakeTrim(): void {
+    for (const c of this.spec.cabin.columns) {
+      if (!c.foot) continue;
+      // The line below where it leaves its column, by s (it falls as s does).
+      const byS = this.frame.shutLine(c).slice(1).reverse();
+      const bottom = (s: number): number => Math.max(this.floorAt(s) - 0.005, this.frame.archY(s) + HUMP_RISE);
+      const ss = byS.map(([s]) => s).filter((s) => s < c.s && table(byS, s) > bottom(s) + 0.005);
+      if (ss.length === 0) continue;
+      ss.push(c.s);
+      for (const side of [1, -1]) {
+        const x = (s: number, y: number): number => side * (this.frame.sideX(s, y) - SIDE_CLEAR);
+        const columns = ss.map((s) => {
+          const yb = bottom(s);
+          const yt = Math.max(yb, table(byS, s));
+          return [this.P(x(s, yb), yb, s), this.P(x(s, yt), yt, s)];
+        });
+        this.fixed.color(this.spec.look.upholstery);
+        for (let k = 0; k + 1 < columns.length; k++) this.fixed.bridge('trim', columns[k]!, columns[k + 1]!);
+      }
+    }
   }
 
   /**
@@ -765,7 +879,7 @@ class Cabin {
    */
   private humps(): void {
     const w = this.spec.wheels;
-    const r = w.radius * w.arch;
+    const r = w.radius * this.frame.archFactor(w.rear);
     const s0 = w.rear - r - 0.005;
     const full = w.rear + r + 0.005;
     const s1 = Math.min(full, this.lowerEnd);
@@ -1050,10 +1164,12 @@ class Cabin {
     for (const v of L.vents ?? []) {
       for (const x of v.x === undefined ? [half - 0.07, -(half - 0.07)] : [v.x]) {
         const m = this.fascia(x, belt + v.dy);
+        const [hx, hy] = v.half ?? [0.035, 0.024];
         b.push(m.matrix).color(COLOURS.black);
-        b.quad('trim', [-0.035, -0.024, 0.002], [0.035, -0.024, 0.002], [0.035, 0.024, 0.002], [-0.035, 0.024, 0.002]);
+        b.quad('trim', [-hx, -hy, 0.002], [hx, -hy, 0.002], [hx, hy, 0.002], [-hx, hy, 0.002]);
         b.color(look.dash);
-        for (const y of [-0.012, 0, 0.012]) beam(b, 'trim', [-0.032, y, 0.005], [0.032, y, 0.005], 0.003, 0.004);
+        const n = Math.round(hy / 0.012) - 1;
+        for (let i = -n; i <= n; i++) beam(b, 'trim', [-(hx - 0.003), i * 0.012, 0.005], [hx - 0.003, i * 0.012, 0.005], 0.003, 0.004);
         b.pop();
       }
     }
@@ -1073,6 +1189,22 @@ class Cabin {
         // No back faces: each sits on the face it is mounted on.
         b.color(COLOURS.black).box('trim', [0, 0, 0.003], [0.017, 0.027, 0.003], 0b011111);
         b.color(shade(look.dash, 1.4)).box('trim', [0, 0.003, 0.009], [0.012, 0.02, 0.003], 0b011111);
+        b.pop();
+      }
+    }
+    if (L.heater) {
+      const { dy, half: [hx, hy], knobs, radius } = L.heater;
+      b.push(this.fascia(0, belt + dy).matrix).color(COLOURS.black);
+      rect(b, 'trim', 0, 0, hx, hy, 0.002);
+      b.pop();
+      for (const x of knobs) {
+        // A bright ring round a black knob with a grip bar across it and a white pointer up the bar.
+        b.push(this.fascia(x, belt + dy).matrix).color(COLOURS.black);
+        b.cylinderZ('chrome', [0, 0, 0.004], radius, 0.003, 12, false);
+        b.cylinderZ('trim', [0, 0, 0.009], radius * 0.78, 0.007, 10);
+        b.box('trim', [0, 0, 0.019], [radius * 0.22, radius * 0.72, 0.004]);
+        b.color(COLOURS.white);
+        rect(b, 'trim', 0, radius * 0.45, 0.0012, radius * 0.22, 0.0232);
         b.pop();
       }
     }

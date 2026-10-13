@@ -4,7 +4,7 @@ What the owner wants, what is done, what is left. How to work: [`README.md`](REA
 Why things are the way they are: [`HISTORY.md`](HISTORY.md). Keep this file current with
 every change (update the car's row and the gaps).
 
-Last updated: 2026-10-13, after commit 8620a22 (the 2115 details).
+Last updated: 2026-10-13, the 2110 added and the 2115/2110 third-review fixes (lid corners, flush wrapping head lamps, the 2110's bumper), committed after cfff462.
 
 ## The owner's goal
 
@@ -44,7 +44,7 @@ to the kit tyre. The kit's five generated wheel styles were removed at the owner
 1. ✅ **Generator core**: 2106 and 2108 in the car lab, hover and click.
 2. **VAZ cars** from specs: 2101, 2102, 2103, 2104, 2105, 2106, 2107, 2108, 2109, 21099,
    2110, 2112, 2115, 2121, 2131, 1111.
-   Done: 2101–2109, 21099, 2115. **Left: 2110, 2112, 2121, 2131, 1111.**
+   Done: 2101–2109, 21099, 2110, 2115. **Left: 2112, 2121, 2131, 1111.**
 3. **GAZ and UAZ-469**, then the **UAZ «буханка»** (UAZ-452).
 4. **Trucks**, starting with the **ZIL-130**.
 
@@ -78,14 +78,14 @@ body work; wheels from `DISTINCT_SOVIET_WHEEL_SETS`. Triangle counts in README.
 | 2109 | `BODY_2109` + `LOOK_2109` | 3dcar.ru `vaz_2109.jpg` (registered; door lines from Commons photo `p1`) (`measurements-samara.md`) | done | rear door handle from the generator's rule (2.886 vs 2.99 on the photo) |
 | 21099 | `BODY_21099` + `LOOK_21099` | 3dcar.ru `vaz_21099.jpg`; Commons | done | early face only (the late "high bonnet" face not modelled) |
 | 2115 | `BODY_2115` + `LOOK_2115` | Commons photos only (no drawing exists); factory figures vaz.ru / drom.ru | done | see below |
-| 2110 | – | – | **not started** | no drawing in the repo; no `sv_` sibling in the pack |
-| 2112 | – | – | **not started** | the 2110's hatch; derive from the 2110 shell |
+| 2110 | `BODY_2110` + `LOOK_2110` (tens.ts), `CABIN_2110` | 3dcar.ru `vaz_2110.jpg` (4.092 mm/px from the drawn wheelbase); Commons photos for the quarter glass, arches, flap side, lamps, dash; factory figures infocar.ua / autoopt.ru / cartechnic.ru (`measurements-2110.md`) | done (base early car), owner's review fixes in | see below |
+| 2112 | – | 3dcar.ru `vaz_2112.jpg` saved (not measured yet) | **not started** | the 2110's hatch; derive from `BODY_2110` |
 | 2121 | – | `niva.jpg` factory four-view present | **not started** | sibling `sv_niva` (off-road wheel pool kept automatically); 4×4 bay/underbody and its own dash needed |
 | 2131 | – | – | **not started** | sibling `sv_niva_long`; derive from the 2121 shell |
 | 1111 | – | – | **not started** | no `sv_` sibling (`KIT_CARS` requires one from `SOVIET_CARS`): a decision for the owner. The owner's own carforge Oka (`cf_vaz1111`, uncommitted files) is separate work; don't touch it |
 
 **2115 details — done** (commit 8620a22):
-late-face head lamps and indicators (chamfered `lens` outlines), the slot under the bonnet
+late-face head lamps and indicators (since the third review a `cornerLamps` unit, flush and wrapping round the corner), the slot under the bonnet
 lip, rectangular front fog lamps in black housings (`panel` spans), grey door mouldings
 (`waist`, finish `grey`) in line with a grey band round both bumpers (moulded bumper
 `moulding`), and a boot-lid `spoiler` with the high brake lamp that lifts with the lid. New
@@ -103,14 +103,45 @@ spec fields are in README's Spec reference; 12 092 triangles (README budget tabl
   the rear bumper, the bonnet lip as its own part.
 - The overhang split rests on one photo corrected for depth (±20 mm); licences of the five
   front photos used for the face were not checked (reading only).
+- After the third review the boot lid's rear corners meet the wings on a clean shut line
+  (`BodyFrame.lidFace`) and the head-lamp unit lies flush and wraps round the corner;
+  12 136 triangles.
+
+**2110 — done**: its own shell on the `samara` platform with its own dash
+(`CABIN_2110`), sibling `sv_vaz21099` with the label "VAZ-2110" (the 2115 precedent), the
+base early (1996–2003) car: slot grille, no spoiler, no door mouldings. 14 799 triangles.
+After the owner's reviews: the rear door's edge rakes forward to the sill with rounded turns
+(`CabinColumn.foot`, `round`) and the body behind it has cabin trim, the rear arch is a
+low half ellipse covering the tyre (`rearArchRise`), the bonnet covers the whole top with
+its shut lines along the wings' top edge and its nose comes down between the head lamps
+carrying the slot (`bonnet`, front `lid`; the earlier narrow bonnet was a misreading of
+the bonnet's raised centre, HISTORY.md), the head-lamp unit lies flush and wraps round the
+corner, its indicator clear with the amber behind (`cornerLamps`), one lid reflector
+across the centre line, a feature line under the windows (`featureLine`), a nose rounded
+in plan and a front bumper whose sides lie on the wings back to the arch, its foot in line
+with the sill (bumper `corner`, `wrapTo`), the boot lid's rear corners on a clean shut line
+(`BodyFrame.lidFace`). Proved: 2101–21099 identical against cfff462, the 2115 moved on its
+lid and lamps only. Lab: side overlay on the drawing, all opening parts, lamps at night,
+no program linked after boot.
+
+2110 gaps left (`measurements-2110.md` §7):
+- The indicator's clear part shows a small fold of its own where the nose's skin twists
+  between the face station and the next; the rear fog lamp not modelled; the lid's side on
+  the tail face is the generator's 25 mm wall, not the drawing's 82 mm slant.
+- A 40 mm strip of wing top (the model's shoulder) shows beside the bonnet; the car has
+  almost none. The nose's sides are straight.
+- Dash: heights hung from the Samara's cluster (no side photo), one section across the
+  width, the left of the cluster by symmetry, wheel size unmeasured.
 
 ## Next cars: what is known
 
-- **2110 / 2112.** Not Samaras: own shell (`BODY_2110` in a new family file), `platform:
-  'samara'` with a `CABIN_2110` dash override unless the layout differs too much. Drawing:
-  try 3dcar.ru (`vaz_2110.jpg`, `vaz_2112.jpg`) and check it is a JPEG. Sibling: the 2115
-  precedent is `sv_vaz21099` plus a label. The factory row goes into `FACTORY_GEOMETRY`
-  with a source.
+- **2112.** The 2110's hatch: derive `BODY_2112` from `BODY_2110` in `tens.ts` as the 2109
+  does from the 2108 (same nose, doors and heights; its own C pillar, tailgate with
+  `rearKnee`, tail lamps). Drawing `vaz_2112.jpg` (1700×1000 JPEG) is saved next to
+  `vaz_2110.jpg`, undimensioned: register it on the 2110's features (`measurements-samara.md`
+  §0 shows how) and check its doors and quarter glass against photos. Sibling
+  `sv_vaz21099` plus a label; factory row with a source. The 2111 estate drawing
+  (`vaz_2111.jpg`) is saved too.
 - **2121 / 2131.** `niva.jpg` in `build/carshape/_refs/bp/img/`. Needs a new platform (4×4
   transfer box and axles in bay.ts, the Niva dash), spare wheel in the bay [INFERENCE from
   the real car], tailgate down to the bumper.

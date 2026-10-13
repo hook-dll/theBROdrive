@@ -987,6 +987,10 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   kit_vaz2109:    { length: 4.006, width: 1.650, height: 1.402, clearance: 0.160, wheelbase: 2.460, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.281, tyreWidth: 0.165 },
   kit_vaz21099:   { length: 4.205, width: 1.650, height: 1.402, clearance: 0.160, wheelbase: 2.460, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.281, tyreWidth: 0.165 },
   kit_vaz2115:    { length: 4.330, width: 1.650, height: 1.402, clearance: 0.170, wheelbase: 2.460, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.281, tyreWidth: 0.165 },
+  // The 2110 has no sibling either: 4265 × 1680 × 1420, 2492 wheelbase (infocar.ua, cartechnic.ru,
+  // whobycar.com), 1400/1370 tracks (autoopt.ru, cartechnic.ru), 165 clearance (catalog-vaz.ru,
+  // infocar.ua); 175/70R13 (autoopt.ru): 0.288 m free radius.
+  kit_vaz2110:    { length: 4.265, width: 1.680, height: 1.420, clearance: 0.165, wheelbase: 2.492, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.288, tyreWidth: 0.175 },
 };
 
 function factoryGeometry(id: string): FactoryGeometry {
@@ -2190,6 +2194,8 @@ const KIT_CARS: readonly Entry[] = (
     ['kit_vaz21099', 'sv_vaz21099', 'vaz21099'],
     // The facelifted 21099: the 21099's running gear under it.
     ['kit_vaz2115', 'sv_vaz21099', 'vaz2115', 'VAZ-2115 Samara'],
+    // The pack has no 2110 either: the 21099's running gear under it, as for the 2115.
+    ['kit_vaz2110', 'sv_vaz21099', 'vaz2110', 'VAZ-2110'],
   ] satisfies readonly (readonly [id: string, sibling: string, kit: string, label?: string])[]
 ).map(([id, sibling, kit, label]) => {
   const base = SOVIET_CARS.find((e) => e.id === sibling);

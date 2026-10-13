@@ -72,6 +72,30 @@
   triangles; the other kit cars were proved unchanged by per-triangle hashes. The high brake
   lamp shares the brake slot, so it also glows with the tail lamps, and the fog lamps never
   light: the lamps have no role for either.
+- Kit VAZ-2110 `kit_vaz2110` (`src/carkit/tens.ts`, measured in `measurements-2110.md` on
+  3dcar.ru's `vaz_2110.jpg`, Commons photos and the published 4265 × 1680 × 1420, 2492
+  wheelbase), on the 21099's running gear like the 2115: its own shell on the Samara
+  platform with a waist rising to the C pillar, the rear door's shut line raked back along
+  it and a fixed quarter glass in the body behind, a boot lid coming down between the
+  corner lamps with the lamp bar on it, body-colour bumpers, narrow head lamps with a dark
+  slot between. New `WheelSpec.rearArch` lets the rear arch hug the tyre while the front
+  stands clear. The base early car (slot grille, no spoiler or mouldings) with its own
+  dashboard (`CABIN_2110`, read off two Commons interior photos: a hood over swapped big
+  dials, two big centre vents, a two-knob heater panel, the radio low in the stack); its
+  rear door's edge rakes forward to the sill in front of a low elliptic rear arch, its
+  turns rounded and the body behind it lined inside (`CabinColumn.foot` with `round`,
+  `rearArchRise`), a bonnet over the whole top whose nose comes down between the head
+  lamps carrying the slot (`KitCarSpec.bonnet`, front `FaceLook.lid`), a feature line
+  under the windows (`featureLine`), a nose rounded in plan and a front bumper whose sides
+  lie on the wings back to the wheel arch, its foot in line with the sill (moulded
+  `corner`, `wrapTo`), one lid reflector across the centre line. 14 799 triangles; the
+  other kit cars were proved unchanged by per-triangle hashes.
+- Kit 2115 and 2110: the boot lid's rear corners meet the wings on a clean shut line with
+  flat faces (the lid's top turns down to a line across at the lamps' top and its rear
+  panel lies in the tail face between the lamps, `BodyFrame.lidFace`), and the head-lamp
+  units lie flush on the body and wrap round its corners onto the flanks
+  (`KitLook.cornerLamps`, laid on the skin as built, `skinX`); lens `chamfer` and
+  `flankLamps` are gone.
 - Kit documentation for agents: `src/carkit/README.md` (working rules, spec reference,
   adding a car end to end, proving refactors), `STATUS.md` (goal, roadmap, per-car status,
   gaps) and `HISTORY.md` (fix log and approaches not to retry).

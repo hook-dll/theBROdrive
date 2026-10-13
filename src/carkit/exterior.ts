@@ -12,10 +12,10 @@
  */
 
 import * as THREE from 'three';
-import { PartBuilder, lerp, type KitSlot, type Vec3 } from './builder';
+import { PartBuilder, lerp, table, type KitSlot, type Vec3 } from './builder';
 import { addBuilt, pivotGroup, type KitContext } from './context';
-import type { BodyFrame } from './body';
-import type { FaceAnchor, FaceItem, FaceLook, FaceX, FaceY, Finish, LampRole, LensChamfer, Span } from './spec';
+import { skinX, type BodyFrame } from './body';
+import type { CornerLampPoint, FaceAnchor, FaceItem, FaceLook, FaceX, FaceY, Finish, LampRole, Span } from './spec';
 
 const CHROME_TRIM = 0xb8bec3;
 const BLACK = 0x161718;
@@ -73,11 +73,10 @@ function sweep(b: PartBuilder, slot: KitSlot, path: readonly SweepPoint[], secti
 
 /**
  * Plan path of a bumper across one end of the car: back along each flank by `wrap`,
- * round the corner and across the face, standing `standoff` off the face.
+ * round the corner (radius `r`) and across the face, standing `standoff` off the face.
  */
-function bumperPath(half: number, zFace: number, end: 1 | -1, depth: number, standoff: number, wrap: number): SweepPoint[] {
+function bumperPath(half: number, zFace: number, end: 1 | -1, depth: number, standoff: number, wrap: number, r = 0.09): SweepPoint[] {
   const z = zFace + end * standoff;
-  const r = 0.09;
   const side = (sx: number): SweepPoint[] => [
     { x: sx * half, z: z - end * wrap, nx: sx, nz: 0, depth: depth * 0.3 },
     { x: sx * half, z: z - end * r * 0.4, nx: sx, nz: 0, depth: depth * 0.4 },
@@ -88,6 +87,36 @@ function bumperPath(half: number, zFace: number, end: 1 | -1, depth: number, sta
   const right = side(-1).reverse();
   // Wound so the swept faces face out at both ends of the car.
   const path = [...left, { x: 0, z, nx: 0, nz: end, depth }, ...right];
+  return end > 0 ? path.reverse() : path;
+}
+
+/** How far a bumper that follows the flanks (`wrapTo`) stands off the side. */
+const BUMPER_FLANK_OUT = 0.006;
+/** Points along each flank of such a bumper. */
+const BUMPER_FLANK_STEPS = 5;
+
+/**
+ * Plan path of a moulded bumper whose sides follow the flanks back to `wrapTo` (spec.ts
+ * `wrapTo`): across the face and round a corner of radius `r` as `bumperPath`, then along
+ * each flank just outside the body at the bumper's top height, so its side lies flush on
+ * the wing and runs on to the wheel arch. `grow` and `depth` as in `bumperPath`.
+ */
+function flankBumperPath(frame: BodyFrame, sEnd: number, end: 1 | -1, top: number, depth: number, grow: number, wrapTo: number, r: number): SweepPoint[] {
+  const z = frame.z(sEnd) - end * 0.01;
+  const sideDepth = depth * 0.3;
+  // The path stands `sideDepth` inside the flank so the section's outer face is just outside it.
+  const base = (s: number): number => frame.sideX(s, top) + BUMPER_FLANK_OUT + grow - sideDepth;
+  const sCorner = sEnd + end * (0.01 + r * 0.4);
+  const halfCorner = base(sCorner);
+  const side = (sx: number): SweepPoint[] => [
+    ...Array.from({ length: BUMPER_FLANK_STEPS }, (_, k): SweepPoint => {
+      const s = lerp(wrapTo, sCorner, k / (BUMPER_FLANK_STEPS - 1));
+      return { x: sx * base(s), z: frame.z(s), nx: sx, nz: 0, depth: sideDepth };
+    }),
+    { x: sx * (halfCorner - r * 0.3), z: z - end * r * 0.1, nx: sx * 0.7071, nz: end * 0.7071, depth: depth * 0.75 },
+    { x: sx * (halfCorner - r), z, nx: 0, nz: end, depth: depth * 0.95 },
+  ];
+  const path = [...side(1), { x: 0, z, nx: 0, nz: end, depth }, ...side(-1).reverse()];
   return end > 0 ? path.reverse() : path;
 }
 
@@ -179,37 +208,6 @@ function centreHalf(a: number, b: number): [number, number] {
 
 type P2 = [number, number];
 
-/** The point `d` from `p` towards `q`, measured along `axis` (0: across, 1: up). */
-function toward(p: P2, q: P2, d: number, axis: 0 | 1): P2 {
-  const t = d / Math.abs(q[axis] - p[axis]);
-  return [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
-}
-
-/**
- * A lens outline on the positive side, counter-clockwise from its inner bottom corner:
- * inner and outer edges at the bottom, the top's ends `slantOuter` / `slantInner`
- * inboard of those, and each corner cut by its chamfer (spec.ts `LensChamfer`).
- */
-function lensOutline(inner: number, outer: number, bottom: number, top: number, slantOuter: number, slantInner: number, chamfer?: LensChamfer): P2[] {
-  const ib: P2 = [inner, bottom];
-  const ob: P2 = [outer, bottom];
-  const ot: P2 = [outer - slantOuter, top];
-  const it: P2 = [inner - slantInner, top];
-  if (!chamfer) return [ib, ob, ot, it];
-  // Each corner gives way to two points: on the edge before it, then on the edge after.
-  const cut = (p: P2, before: P2, after: P2, c: readonly [number, number] | undefined, beforeAxis: 0 | 1): P2[] => {
-    if (!c) return [p];
-    const [across, up] = c;
-    return beforeAxis === 0 ? [toward(p, before, across, 0), toward(p, after, up, 1)] : [toward(p, before, up, 1), toward(p, after, across, 0)];
-  };
-  return [
-    ...cut(ib, it, ob, chamfer.innerBottom, 1),
-    ...cut(ob, ib, ot, chamfer.outerBottom, 0),
-    ...cut(ot, ob, it, chamfer.outerTop, 1),
-    ...cut(it, ot, ib, chamfer.innerTop, 0),
-  ];
-}
-
 /** Builds one end face's items, in order. Items off the centre line go on both sides. */
 function buildFace(frame: BodyFrame, look: FaceLook, facing: 1 | -1, b: PartBuilder): void {
   const face = new EndFace(frame, facing);
@@ -245,15 +243,17 @@ function buildFaceItem(face: EndFace, item: FaceItem, b: PartBuilder): void {
     case 'lens': {
       const [x, hx] = face.spanX(item.x);
       const [y, hy] = face.spanY(item.y);
-      for (const side of [1, -1]) {
+      // A lens centred on the centre line is one lens across it (the 2110's lid reflector).
+      for (const side of x === 0 ? [1] : [1, -1]) {
         const slot = lampSlot(item.role, side);
-        if (!item.slant && !item.chamfer) {
+        if (!item.slant) {
           lens(b, slot, [side * x, y, face.out(item.proud)], [hx, hy, item.depth]);
           continue;
         }
-        // A slab on the face whose top edge stands inboard: outline in (x, y), extruded out.
-        const slant = item.slant ?? { outer: 0, inner: 0 };
-        const outline = lensOutline(x - hx, x + hx, y - hy, y + hy, slant.outer, slant.inner, item.chamfer).map(([px, py]): [number, number] => [side * px, py]);
+        // A slab on the face whose top edge's ends stand `slant` inboard of the bottom's:
+        // outline in (x, y) counter-clockwise from the inner bottom corner, extruded out.
+        const slant = item.slant;
+        const outline = ([[x - hx, y - hy], [x + hx, y - hy], [x + hx - slant.outer, y + hy], [x - hx - slant.inner, y + hy]] as P2[]).map(([px, py]): P2 => [side * px, py]);
         // Counter-clockwise seen from outside the face, whichever side and end.
         if (side * face.facing < 0) outline.reverse();
         const z0 = face.out(item.proud - item.depth);
@@ -391,9 +391,14 @@ function buildBumpers(ctx: KitContext, b: PartBuilder): void {
       const depth = reach + 0.01;
       // As wide as the face at its widest, which on a leaning nose is low down.
       const half = Math.min(Math.max(sec.r1[0], sec.r2[0]) + 0.03, widest - depth * 0.35);
+      const wrapTo = bumper.wrapTo;
+      const pathOf = (grow: number, d: number, wrap: number): SweepPoint[] =>
+        wrapTo === undefined
+          ? bumperPath(half + grow, zFace - end * 0.01, end, d, 0, wrap, bumper.corner)
+          : flankBumperPath(frame, sEnd, end, y1, d, grow, wrapTo, bumper.corner ?? 0.09);
       const shell = bumper.finish ? finishSlot(bumper.finish) : { slot: 'trim' as const, color: 0x232427 };
       b.color(shell.color);
-      sweep(b, shell.slot, bumperPath(half, zFace - end * 0.01, end, depth, 0, 0.2), [
+      sweep(b, shell.slot, pathOf(0, depth, 0.2), [
         [0, y0 + 0.02],
         [0.7, y0],
         [0.92, y0 + 0.03],
@@ -403,7 +408,7 @@ function buildBumpers(ctx: KitContext, b: PartBuilder): void {
         [0.55, y1],
         [0, y1],
       ]);
-      const path = bumperPath(half + 0.003, zFace - end * 0.01, end, depth + 0.006, 0, 0.19);
+      const path = pathOf(0.003, depth + 0.006, 0.19);
       if (bumper.moulding) {
         // A moulding band round the bumper in its own finish, in place of the groove.
         const band = finishSlot(bumper.moulding.finish);
@@ -428,8 +433,8 @@ function buildSill(ctx: KitContext, body: PartBuilder): void {
   const spec = frame.spec;
   if (!spec.look.sill) return;
   const { slot, color } = finishSlot(spec.look.sill);
-  const s0 = spec.wheels.front + spec.wheels.radius * spec.wheels.arch + 0.02;
-  const s1 = spec.wheels.rear - spec.wheels.radius * spec.wheels.arch - 0.02;
+  const s0 = spec.wheels.front + spec.wheels.radius * frame.archFactor(spec.wheels.front) + 0.02;
+  const s1 = spec.wheels.rear - spec.wheels.radius * frame.archFactor(spec.wheels.rear) - 0.02;
   body.color(color);
   for (const side of [1, -1]) {
     const y = frame.station((s0 + s1) / 2).sill + 0.045;
@@ -445,34 +450,45 @@ const MOULDING_RUN = 0.3;
 /** How far short of a wheel arch's edge a moulding low enough to meet it stops. */
 const MOULDING_ARCH_GAP = 0.03;
 
+/** A strip along each flank: the waist moulding, or a pressed feature line. */
+interface FlankStrip {
+  /** Centre height at s. */
+  readonly yAt: (s: number) => number;
+  readonly height: number;
+  readonly slot: KitSlot;
+  readonly color: number;
+  /** How far it stands off the side. */
+  readonly out: number;
+  readonly first: number;
+  readonly last: number;
+  /** Node name suffix for the pieces riding on doors. */
+  readonly name: string;
+}
+
 /**
- * The waist moulding (`KitLook.waist`): a strip along each flank from nose to tail,
- * following the side's plan, broken where it crosses a door's shut lines so each door
- * carries its own piece and swings with it, and stopping short of a wheel arch it would
- * run into (the 2115's door mouldings run low, past the arches' tops).
+ * A strip along each flank from `first` to `last`, following the side's plan, broken
+ * where it crosses a door's shut lines so each door carries its own piece and swings with
+ * it, and stopping short of a wheel arch it would run into (the 2115's door mouldings run
+ * low, past the arches' tops).
  */
-function buildWaist(ctx: KitContext, body: PartBuilder): void {
+function buildFlankStrip(ctx: KitContext, body: PartBuilder, strip: FlankStrip): void {
   const { frame, nodes, root } = ctx;
   const spec = frame.spec;
-  const waist = spec.look.waist;
-  if (!waist) return;
-  const { slot, color } = finishSlot(waist.finish);
+  const { slot, color, first, last, out } = strip;
   root.updateMatrixWorld(true);
   // Each door's s range at rest: the car frame's z is `zNose - s`.
   const doors = [...nodes].filter(([owner]) => owner.startsWith('door_')).map(([owner, door]) => {
     const box = new THREE.Box3().setFromObject(door.node);
     return { owner, door, side: owner.endsWith('l') ? 1 : -1, s0: frame.zNose - box.max.z, s1: frame.zNose - box.min.z };
   });
-  const st = spec.stations;
-  const first = st[0]!.s + 0.02;
-  const last = st[st.length - 1]!.s - 0.02;
   // The s ranges where an arch, grown by the gap, reaches up to the strip's bottom edge.
   const w = spec.wheels;
-  const reach = w.radius * w.arch + MOULDING_ARCH_GAP;
-  const lift = waist.y - waist.height / 2 - w.radius;
-  const arches = lift >= reach ? [] : [w.front, w.rear].map((axle) => {
+  const arches = [w.front, w.rear].flatMap((axle) => {
+    const lift = strip.yAt(axle) - strip.height / 2 - w.radius;
+    const reach = w.radius * frame.archFactor(axle) + MOULDING_ARCH_GAP;
+    if (lift >= reach) return [];
     const d = lift > 0 ? Math.sqrt(reach * reach - lift * lift) : reach;
-    return [axle - d, axle + d] as const;
+    return [[axle - d, axle + d] as const];
   });
   const builders = new Map<string, PartBuilder>();
   for (const side of [1, -1]) {
@@ -490,23 +506,51 @@ function buildWaist(ctx: KitContext, body: PartBuilder): void {
       if (!b) builders.set(key, (b = key === 'body' ? body : new PartBuilder()));
       b.color(color);
       const pieces = Math.max(1, Math.ceil((c - a) / MOULDING_RUN));
-      const point = (s: number, dy: number, out: number): Vec3 => [side * (frame.sideX(s, waist.y + dy) + out), waist.y + dy, frame.z(s)];
-      const h = waist.height / 2;
+      const point = (s: number, dy: number, o: number): Vec3 => [side * (frame.sideX(s, strip.yAt(s) + dy) + o), strip.yAt(s) + dy, frame.z(s)];
+      const h = strip.height / 2;
       for (let k = 0; k < pieces; k++) {
         const s0 = a + ((c - a) * k) / pieces;
         const s1 = a + ((c - a) * (k + 1)) / pieces;
-        b.quad(slot, point(s0, -h, 0.008), point(s1, -h, 0.008), point(s1, h, 0.008), point(s0, h, 0.008));
-        b.quad(slot, point(s0, h, 0.008), point(s1, h, 0.008), point(s1, h, 0), point(s0, h, 0));
-        b.quad(slot, point(s0, -h, 0), point(s1, -h, 0), point(s1, -h, 0.008), point(s0, -h, 0.008));
+        b.quad(slot, point(s0, -h, out), point(s1, -h, out), point(s1, h, out), point(s0, h, out));
+        b.quad(slot, point(s0, h, out), point(s1, h, out), point(s1, h, 0), point(s0, h, 0));
+        b.quad(slot, point(s0, -h, 0), point(s1, -h, 0), point(s1, -h, out), point(s0, -h, out));
       }
-      b.quad(slot, point(a, -h, 0), point(a, -h, 0.008), point(a, h, 0.008), point(a, h, 0));
-      b.quad(slot, point(c, -h, 0.008), point(c, -h, 0), point(c, h, 0), point(c, h, 0.008));
+      b.quad(slot, point(a, -h, 0), point(a, -h, out), point(a, h, out), point(a, h, 0));
+      b.quad(slot, point(c, -h, out), point(c, -h, 0), point(c, h, 0), point(c, h, out));
     }
   }
   for (const { owner, door } of doors) {
     const b = builders.get(owner);
-    if (b) addBuilt(door.node, b, door.pivot, `${owner}_waist`);
+    if (b) addBuilt(door.node, b, door.pivot, `${owner}_${strip.name}`);
   }
+}
+
+/** The waist moulding (`KitLook.waist`), nose to tail at one height. */
+function buildWaist(ctx: KitContext, body: PartBuilder): void {
+  const spec = ctx.frame.spec;
+  const waist = spec.look.waist;
+  if (!waist) return;
+  const st = spec.stations;
+  buildFlankStrip(ctx, body, { yAt: () => waist.y, height: waist.height, ...finishSlot(waist.finish), out: 0.008, first: st[0]!.s + 0.02, last: st[st.length - 1]!.s - 0.02, name: 'waist' });
+}
+
+/** How far a feature line's ridge stands off the side. */
+const FEATURE_LINE_OUT = 0.005;
+
+/** The pressed feature line (`KitLook.featureLine`): a narrow ridge in the paint through its points. */
+function buildFeatureLine(ctx: KitContext, body: PartBuilder): void {
+  const line = ctx.frame.spec.look.featureLine;
+  if (!line) return;
+  const pts = line.points;
+  buildFlankStrip(ctx, body, {
+    yAt: (s) => table(pts, s),
+    height: line.height,
+    ...finishSlot('paint'),
+    out: FEATURE_LINE_OUT,
+    first: pts[0]![0],
+    last: pts[pts.length - 1]![0],
+    name: 'line',
+  });
 }
 
 /** An amber repeater on each front wing (`KitLook.repeater`), in its side's blinker slot. */
@@ -519,6 +563,71 @@ function buildRepeaters(ctx: KitContext, body: PartBuilder): void {
   for (const side of [1, -1]) {
     const x = side * (frame.sideX(s, y) + 0.004);
     lens(body, lampSlot('blinker', side), [x, y, frame.z(s)], [0.006, (r.y1 - r.y0) / 2, (r.s1 - r.s0) / 2]);
+  }
+}
+
+/** How far a corner lamp's lens stands off the body: flush, just clear of the paint. */
+const CORNER_LAMP_OUT = 0.004;
+/** Longest step of a corner lamp along the flank, so it keeps to the curving side. */
+const CORNER_LAMP_STEP = 0.02;
+
+/**
+ * Lamp units wrapping round the front corners (`KitLook.cornerLamps`): a thin lens lying
+ * on the face from its inner end to the corner and on along the flank, every stretch
+ * between two points in its role's slot (or its finish), with a rim down to the body.
+ */
+function buildCornerLamps(ctx: KitContext, body: PartBuilder): void {
+  const { frame } = ctx;
+  const lamps = frame.spec.look.cornerLamps;
+  if (!lamps) return;
+  const sFace = frame.spec.stations[0]!.s;
+  const zFace = frame.z(sFace);
+  const diag = CORNER_LAMP_OUT * Math.SQRT1_2;
+  for (const lamp of lamps) {
+    for (const side of [1, -1]) {
+      // A column across the lamp at a point, bottom, middle and top: [on the body, on the lens].
+      const column = (p: CornerLampPoint): [Vec3, Vec3][] =>
+        [p.y[0], (p.y[0] + p.y[1]) / 2, p.y[1]].map((y): [Vec3, Vec3] => {
+          if (p.x !== undefined) {
+            const [xb, xt] = typeof p.x === 'number' ? [p.x, p.x] : p.x;
+            const x = side * lerp(xb, xt, (y - p.y[0]) / (p.y[1] - p.y[0]));
+            return [[x, y, zFace], [x, y, zFace + CORNER_LAMP_OUT]];
+          }
+          if (p.s !== undefined) {
+            const x = skinX(frame, p.s, y);
+            return [[side * x, y, frame.z(p.s)], [side * (x + CORNER_LAMP_OUT), y, frame.z(p.s)]];
+          }
+          const x = skinX(frame, sFace, y);
+          return [[side * x, y, zFace], [side * (x + diag), y, zFace + diag]];
+        });
+      const points = lamp.points;
+      for (let i = 0; i + 1 < points.length; i++) {
+        const a = points[i]!;
+        const c = points[i + 1]!;
+        const { slot, color } = a.role ? { slot: lampSlot(a.role, side), color: 0xffffff } : finishSlot(a.finish ?? 'chrome');
+        // Off the face, the stretch steps along the flank so it keeps to the curving side.
+        const sa = a.s ?? sFace;
+        const sc = c.s ?? sFace;
+        const steps = a.x === undefined && c.x === undefined ? Math.max(1, Math.ceil(Math.abs(sc - sa) / CORNER_LAMP_STEP)) : 1;
+        const columns = Array.from({ length: steps + 1 }, (_, k) => {
+          if (k === 0) return column(a);
+          if (k === steps) return column(c);
+          const t = k / steps;
+          return column({ s: lerp(sa, sc, t), y: [lerp(a.y[0], c.y[0], t), lerp(a.y[1], c.y[1], t)] });
+        });
+        body.color(color);
+        for (let k = 0; k < steps; k++) {
+          const p = columns[k]!;
+          const q = columns[k + 1]!;
+          body.bridge(slot, p.map(([, o]) => o), q.map(([, o]) => o));
+          // Its rim down to the body along the bottom and top edges.
+          for (const r of [0, 2]) body.quad(slot, p[r]![0], q[r]![0], q[r]![1], p[r]![1]);
+        }
+        // And across its two ends.
+        if (i === 0) body.bridge(slot, columns[0]!.map(([s]) => s), columns[0]!.map(([, o]) => o));
+        if (i + 2 === points.length) body.bridge(slot, columns[steps]!.map(([s]) => s), columns[steps]!.map(([, o]) => o));
+      }
+    }
   }
 }
 
@@ -606,18 +715,21 @@ function buildFiller(ctx: KitContext): void {
 }
 
 /**
- * The rear face's `lid` items (spec.ts `FaceLook.lid`), built on the end face like the
- * rest but hung on the boot lid or tailgate, so they lift with it.
+ * Each end face's `lid` items (spec.ts `FaceLook.lid`), built on the end face like the
+ * rest but hung on the part that comes down to it, so they lift with it: the boot lid or
+ * tailgate at the tail, the bonnet's nose at the front.
  */
 function buildLidFace(ctx: KitContext): void {
-  const items = ctx.frame.spec.look.rear.lid;
-  if (!items) return;
-  const lid = ctx.nodes.get('boot') ?? ctx.nodes.get('tailgate');
-  if (!lid) throw new Error(`Kit car "${ctx.frame.spec.id}" has lid items but no boot lid or tailgate`);
-  const b = new PartBuilder();
-  const face = new EndFace(ctx.frame, -1);
-  for (const item of items) buildFaceItem(face, item, b);
-  addBuilt(lid.node, b, lid.pivot, 'lid_face');
+  for (const facing of [-1, 1] as const) {
+    const items = (facing > 0 ? ctx.frame.spec.look.front : ctx.frame.spec.look.rear).lid;
+    if (!items) continue;
+    const lid = facing > 0 ? ctx.nodes.get('bonnet') : ctx.nodes.get('boot') ?? ctx.nodes.get('tailgate');
+    if (!lid) throw new Error(`Kit car "${ctx.frame.spec.id}" has ${facing > 0 ? 'nose items but no bonnet' : 'lid items but no boot lid or tailgate'}`);
+    const b = new PartBuilder();
+    const face = new EndFace(ctx.frame, facing);
+    for (const item of items) buildFaceItem(face, item, b);
+    addBuilt(lid.node, b, lid.pivot, facing > 0 ? 'nose_face' : 'lid_face');
+  }
 }
 
 /** How far a spoiler's feet sink into the lid, so no seam shows where they stand on it. */
@@ -692,6 +804,8 @@ export function buildExterior(ctx: KitContext): void {
   buildSill(ctx, body);
   buildWaist(ctx, body);
   buildRepeaters(ctx, body);
+  buildCornerLamps(ctx, body);
+  buildFeatureLine(ctx, body);
   addBuilt(ctx.root, body, [0, 0, 0], 'exterior');
   buildLidFace(ctx);
   buildSpoiler(ctx);
