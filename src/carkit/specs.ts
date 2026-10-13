@@ -391,15 +391,18 @@ const LOOK_2105: KitLook = {
   front: {
     bumper: { kind: 'blade', finish: 'alloy', lift: 0.0475, height: 0.129, depth: 0.045, lower: { finish: 'black', share: 0.3 }, strip: null, ends: 'black', overriders: null },
     items: [
+      // The same lamp units as the 2107's on the same black surround; only the grille
+      // between them is the 2105's own, flush and with horizontal bars.
+      { kind: 'panel', x: { centre: 0.719 }, y: { from: ['bumperTop', 0.073], to: ['bumperTop', 0.28] }, finish: 'black', proud: 0.006 },
       {
         kind: 'grille',
-        x: { centre: 0.318 },
-        y: { from: ['bumperTop', 0.079], to: ['bumperTop', 0.209] },
+        x: { centre: 0.345 },
+        y: { from: ['bumperTop', 0.097], to: ['bumperTop', 0.253] },
         back: true,
-        bars: { dir: 'horizontal', count: 6, finish: 'black', margin: 0.012, width: 0.01, depth: 0.01, proud: 0.026 },
+        bars: { dir: 'horizontal', count: 7, finish: 'black', margin: 0.012, width: 0.01, depth: 0.01, proud: 0.026 },
       },
-      { kind: 'lens', role: 'head', x: { from: { centre: 0.343 }, to: { centre: 0.604 } }, y: { from: ['bumperTop', 0.092], to: ['bumperTop', 0.218] }, depth: 0.01, proud: 0.012 },
-      { kind: 'lens', role: 'blinker', x: { from: { centre: 0.604 }, to: { centre: 0.669 } }, y: { from: ['bumperTop', 0.092], to: ['bumperTop', 0.218] }, depth: 0.01, proud: 0.012 },
+      { kind: 'lens', role: 'head', x: { from: { centre: 0.372 }, to: { centre: 0.603 } }, y: { from: ['bumperTop', 0.097], to: ['bumperTop', 0.253] }, depth: 0.01, proud: 0.014 },
+      { kind: 'lens', role: 'blinker', x: { from: { centre: 0.603 }, to: { centre: 0.695 } }, y: { from: ['bumperTop', 0.097], to: ['bumperTop', 0.253] }, depth: 0.01, proud: 0.014 },
     ],
   },
   rear: {
