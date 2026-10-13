@@ -68,6 +68,11 @@ interface LabState {
   timeHours: number;
   quality: GraphicsQuality;
   factory: number;
+  /**
+   * Which instance of each model: its appearance key, so paint and (kit) wheel style
+   * change together, as two cars of one model met on the road would.
+   */
+  variant: number;
 }
 
 interface LabCar {
@@ -82,7 +87,7 @@ interface LabCar {
 
 /** What `window.__carLab` exposes. */
 export interface CarLabApi {
-  set(values: Partial<Pick<LabState, 'dirt' | 'scratches' | 'timeHours' | 'factory'>>): void;
+  set(values: Partial<Pick<LabState, 'dirt' | 'scratches' | 'timeHours' | 'factory' | 'variant'>>): void;
   /** Frames one car from `azimuth` radians around it, or the whole grid with no id. */
   focus(modelId?: string, azimuth?: number, elevation?: number, distance?: number): void;
   /** Puts the camera at `position` looking at `target`, both relative to a car's anchor. */
@@ -164,6 +169,7 @@ function createInterface(
     <label><span>Пыль</span><input data-control="dirt" type="range" min="0" max="1" step="0.01"><output></output></label>
     <label><span>Царапины</span><input data-control="scratches" type="range" min="0" max="1" step="0.01"><output></output></label>
     <label><span>Время суток</span><input data-control="timeHours" type="range" min="0" max="24" step="0.05"><output></output></label>
+    <label><span>Экземпляр</span><input data-control="variant" type="range" min="0" max="19" step="1"><output></output></label>
     <label><span>Качество</span><select data-control="quality"><option value="acceptable">Acceptable</option><option value="standard">Standard</option><option value="blessing">Blessing</option></select><output></output></label>
     ${unifiedRow}
     ${styleRow}
@@ -174,7 +180,7 @@ function createInterface(
   const sync = (): void => {
     root.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-control]').forEach((input) => {
       const key = input.dataset.control;
-      if (key === 'dirt' || key === 'scratches' || key === 'timeHours' || key === 'factory') {
+      if (key === 'dirt' || key === 'scratches' || key === 'timeHours' || key === 'factory' || key === 'variant') {
         input.value = String(state[key]);
         const output = input.parentElement?.querySelector('output');
         if (output) output.textContent = String(Number(state[key].toFixed(2)));
@@ -199,7 +205,7 @@ function createInterface(
     // box the player just clicked, before its change event is even delivered.
     const key = input.dataset.control;
     if (key === undefined) return;
-    if (key === 'dirt' || key === 'scratches' || key === 'timeHours' || key === 'factory') {
+    if (key === 'dirt' || key === 'scratches' || key === 'timeHours' || key === 'factory' || key === 'variant') {
       state[key] = Number(input.value);
     } else if (key === 'quality' && input instanceof HTMLSelectElement) {
       const quality = input.selectedOptions[0]?.value;
@@ -303,6 +309,7 @@ export async function bootCarLab(): Promise<void> {
     timeHours: queryNumber(query, 'time', 11),
     quality: 'standard',
     factory: 0,
+    variant: queryNumber(query, 'variant', 0),
   };
   const renderer = new Renderer(canvas, state.quality, true, DEFAULT_INK_STRENGTH);
   const [starField] = await Promise.all([
@@ -348,7 +355,9 @@ export async function bootCarLab(): Promise<void> {
       car.anchor.remove(car.instance.body);
       for (const wheel of car.instance.wheels.values()) car.anchor.remove(wheel);
     }
-    const instance = CAR_FACTORIES[state.factory]!.create(car.def.id, `${car.def.id}:car-lab`);
+    // Instance 0 keeps the key the lab always used, so its screenshots stay comparable.
+    const key = state.variant === 0 ? `${car.def.id}:car-lab` : `${car.def.id}:car-lab:${state.variant}`;
+    const instance = CAR_FACTORIES[state.factory]!.create(car.def.id, key);
     car.rig = car.def.kit ? new KitRig(instance.body) : null;
     const measure = carModelMeasure(car.def.id);
     const rideY = carSpawnYAboveGround(measure, 0, 0);
@@ -364,6 +373,9 @@ export async function bootCarLab(): Promise<void> {
     car.instance = instance;
   };
   let builtFactory = state.factory;
+  let builtVariant = state.variant;
+  /** The car `focus` framed, if any: the kit panel drives its rig. */
+  let focused: LabCar | null = null;
   for (const car of cars) buildCar(car);
 
   const controls = new OrbitControls(renderer.camera, canvas);
@@ -382,9 +394,12 @@ export async function bootCarLab(): Promise<void> {
   const apply = (): void => {
     renderer.setQuality(state.quality);
     starField.setQuality(state.quality, prefersMobilePresentation());
-    if (state.factory !== builtFactory) {
+    if (state.factory !== builtFactory || state.variant !== builtVariant) {
       builtFactory = state.factory;
+      builtVariant = state.variant;
       for (const car of cars) buildCar(car);
+      // The focused car is a new instance with a new rig: its panel must drive that one.
+      if (focused?.rig && focused.instance) fillKitPanel(kitPanel, focused.rig, focused.instance.body);
     }
     for (const car of cars) car.instance?.surface.setCondition(state.dirt, state.scratches);
   };
@@ -475,11 +490,12 @@ export async function bootCarLab(): Promise<void> {
       apply();
       interfaceRoot.querySelectorAll<HTMLInputElement>('input[data-control]').forEach((input) => {
         const key = input.dataset.control;
-        if (key === 'dirt' || key === 'scratches' || key === 'timeHours') input.value = String(state[key]);
+        if (key === 'dirt' || key === 'scratches' || key === 'timeHours' || key === 'variant') input.value = String(state[key]);
       });
     },
     focus(modelId, azimuth = 0.9, elevation = 0.18, distance) {
       const car = cars.find((candidate) => candidate.def.id === modelId);
+      focused = car ?? null;
       // Name boards help find a car in the grid and only get in the way of a close-up.
       for (const other of cars) other.label.visible = !car;
       kitPanel.style.display = car?.rig && car.instance ? 'block' : 'none';

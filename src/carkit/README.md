@@ -5,7 +5,8 @@ loader would return. From there the car goes through the usual pipeline in
 `render/carmodel.ts` (`buildTemplate`), so it gets paint, dust, scratches, stickers, glass
 dirt, lamps and fitting to the factory dimensions on the same terms as every other model.
 
-Status: stage 1. Two cars (`kit_vaz2106`, `kit_vaz2108`) are shown in the car lab only:
+Status: stage 3 under way. Six cars — `kit_vaz2101`, `kit_vaz2103`, `kit_vaz2105`,
+`kit_vaz2106`, `kit_vaz2107`, `kit_vaz2108` — are shown in the car lab only:
 `/?car-lab&pack=Kit`. They are absent from traffic, the garage, spawns and POIs.
 
 ## Vision (agreed with the owner)
@@ -36,7 +37,8 @@ Status: stage 1. Two cars (`kit_vaz2106`, `kit_vaz2108`) are shown in the car la
 1. ✅ Generator core, 2106 and 2108 in car-lab, hover and click.
 2. A "Get in" button in car-lab: camera at the driver's seat, keys turn the wheel and press
    the pedals, clicks on fittings from inside.
-3. The remaining 14 cars from specs (see "Telling the classics apart" below).
+3. The remaining cars from specs. ✅ Looks as descriptions, five wheel styles, the 2101,
+   2103, 2105 and 2107. Left: 2102/2104 (estates), 2109/21099/2115, 2110/2112, 2121/2131, 1111.
 4. Driving for real on the playground with the running gear of the existing VAZ models;
    catalogue entries for 2112 and 2115.
 5. Owner's call: replace the old models in the world, rearrange the bonnet grid, transfer
@@ -57,8 +59,9 @@ Status: stage 1. Two cars (`kit_vaz2106`, `kit_vaz2108`) are shown in the car la
 
 | File | What it does |
 |---|---|
-| `spec.ts` | Spec types: `KitCarSpec`, `TubStation`, `CabinSpec`, `CabinColumn`, `WheelSpec`, `KitLook`. |
-| `specs.ts` | Car numbers (`KIT_SPECS`), each with a comment saying where it was measured. |
+| `spec.ts` | Spec types: `KitCarSpec`, `TubStation`, `CabinSpec`, `CabinColumn`, `WheelSpec`, `KitLook` and the face/bumper descriptions (`FaceItem`, `BumperLook`). |
+| `specs.ts` | Car numbers (`KIT_SPECS`): body families (`BODY_124`, `BODY_05`) placed per car with `onBody`, one `LOOK_*` per car, each with a comment saying where it was measured. |
+| `measurements-classics.md` | The 2101/2103/2105/2106/2107 measurement report: every figure with its drawing or photo and scale. |
 | `builder.ts` | `PartBuilder`: flat triangles per material slot, transform stack, primitives (`box`, `bevelBox`, `extrude`, `cylinderX/Y/Z`, `torusY`, `bridge`), vertex colours. |
 | `body.ts` | `BodyFrame` (cross-section and height lookups) and `buildShell`: tub, greenhouse and roof as one face list, then cut into parts. |
 | `exterior.ts` | Bumpers (swept round the corners), grille, lamps, mirrors, handles, wipers, filler neck. |
@@ -235,52 +238,81 @@ the first 2106 had a front overhang 0.8 m instead of 0.6 and doors that were too
 
 The silhouette barely separates the 2101, 2103 and 2106: they share one body and differ by
 about 50 mm in length (bumpers). They are recognised by the face, the tail, the trim and the
-dashboard. The 2105 and 2107 share their own, squarer body. So the work splits into "shape"
-and "trim".
+dashboard. The 2105 and 2107 share their own, squarer body. So a car is a **body family**
+plus a **look** plus a **cabin override**:
+
+- `BODY_124` (2101, 2103, 2106) and `BODY_05` (2105, 2107) are written once;
+  `onBody(body, ds, length)` moves a family's shell to one car's own bumper tip.
+- `LOOK_*` describes the ends as part lists placed against the end face's own lines —
+  `bumperTop`, `bumperBottom`, `belt`, `deck`, `mid` — plus side trim. Kinds:
+  - `panel`: a flat surround across the face;
+  - `round`: a round lamp in a chrome ring;
+  - `lens`: a rectangular lens in a lamp role;
+  - `grille`: frame, dark back and bars (vertical/horizontal, finish, count), optionally
+    standing out of the face (`standOut`, the 2107's);
+  - `cluster`: a tail lamp in a black housing, columns of cells by role;
+  - `frame`: a rectangular outline (chrome surrounds).
+
+  Bumpers are a `blade` (finish, two-tone `lower`, `strip`, plastic `ends`, `overriders`
+  from rubber blocks to chrome fangs) or a `moulded` plastic one. Side trim: `sill`,
+  `waist` (broken at the shut lines, each piece riding on its door), `repeater`,
+  `brightwork`. Finishes: chrome, black, alloy (bare aluminium), rubber.
+- `cabinLayout` overrides the platform's interior layout: `CABIN_2101` (ribbon
+  speedometer), `CABIN_2103` (five dials on wood), `CABIN_2105` (own cluster pod),
+  `CABIN_2107` (one-piece "euro" dash) in `interior.ts`.
+
+What each one carries (numbers and sources in `measurements-classics.md`):
 
 | | 2101 | 2103 | 2106 | 2105 | 2107 |
 |---|---|---|---|---|---|
-| Body | 124 | 124 | 124 | squared ("05") | squared ("05") |
-| Headlamps | 2 round in a wide chrome grille | 4 round in one chrome grille | 4 round in black surrounds, plastic grille | rectangular units, black grille | rectangular units, tall chrome grille standing out |
-| Bumpers | thin chrome with overriders ("fangs") | chrome with a rubber strip | chrome with plastic end caps | aluminium with plastic ends | chrome with plastic ends |
-| Tail lamps | small, at the corners | horizontal, with chrome surrounds | large clusters with reversing lamps | large, wrapping round the corner | as the 2105 |
-| Side | chrome on the arches and sill | same + moulding | moulding with an insert, repeater on the wing | wide black moulding | as the 2105 |
-| Quarter lights | yes | yes | yes | no | no |
+| Body | 124 | 124 | 124 | "05" | "05" |
+| Front | 2 round lamps by a wide chrome grille | 4 round lamps inside one chrome grille | 4 round in black surrounds in a chrome frame, chrome-framed grille | rectangular units with amber outer cells, flush black grille | taller units in a black band, tall chrome grille standing out |
+| Bumpers | thin chrome, chrome fangs | chrome, chrome fangs | chrome, rubber strip and blocks, black end caps | aluminium, black lip and end caps | chrome over black, black ends |
+| Tail | small chrome-rimmed lamps, reversing lamps apart | chrome surround round lamps and plate | black panel in a chrome outline, 3×3 cells | wide lamps, 2×3 cells (no wrap: checked on a side photo) | as the 2105, two rows |
+| Side | chrome sill, round repeater | chrome waist and sill | waist with black insert, chrome sill | black ribbed sill strip | painted |
+| Quarter lights / rear-door fixed pane | yes / – | yes / – | yes / – | no / yes | no / yes |
 | Head restraints | no | no | yes | yes | yes |
-| Dashboard | flat, ribbon speedometer | round gauges, wood-look panel | as the 2103 | its own, rectangular cluster | large "euro" panel with tachometer |
+| Dashboard | ribbon speedometer | five dials in a row on wood | wood, round dials | own pod, padded | "euro" panel |
 
-What the generator can do today:
-- the shape: different `stations`/`cabin` give the "05" body (sharper side crease, flat
-  bonnet and boot, wide C-pillar);
-- doors, quarter lights and head restraints are already per-model flags.
+A door can carry a fixed pane (`glass: 'fixed'` in a door strip becomes `quarter_*`,
+riding with the door): the 2105/2107 rear door's quarter.
 
-What it cannot do yet:
-- `KitLook` has only enums (`headlamps: 'twin-round' | 'rect'`,
-  `taillamps: 'classic' | 'samara'`, `bumpers: 'chrome' | 'plastic'`);
-- the interior's `LAYOUTS` are per platform.
+## Refactoring without breaking a car
 
-As things stand the 2101, 2103 and 2106 would come out identical.
+When the generator changes shape but should not change a car, prove it on geometry:
+build each car from the committed code (a `git worktree` with `node_modules` linked) and
+from the working tree, collect every mesh's triangles in the car frame, sort them so
+emission order does not matter, and compare vertex by vertex. The descriptions refactor
+was checked this way: the 2108 came out identical; the 2106 differed only in its grille
+bars, 0.29 mm (their spacing is now a rounded margin), before its looks were then
+deliberately corrected to the measurements.
 
-Next step: replace the enums with descriptions.
-- **Face**: the lamp list (shape, size, position), grille (type, width, height, how far it
-  stands out, chrome/black), indicators.
-- **Tail**: the cluster's cells (role, shape, grid), surround.
-- **Bumper**: profile, ends, overriders, strip.
-- **Side**: mouldings, repeaters, handles.
-- **Interior**: `LAYOUTS` become "platform + per-model overrides" (dashboard shape, gauge
-  set, wheel).
+## Wheels: five interchangeable styles
 
-Then each of the five classics is a spec of about 60 lines with no new code, and the same
-applies to 2109/21099/2115, 2110/2112 and 2121/2131.
+`KIT_WHEEL_STYLES` in `wheels.ts`: stamped steel with a small cap, chrome dome, dome with
+a chrome ring on a dark-painted rim, full plastic cover, cast "daisy". Each is a
+description (face steel/alloy, paint, cover, ring), not a model. Every style fits every
+kit car: the loader builds each car's wheels in every style (`buildKitWheelSet`, through
+the same `takeOwnWheels` pass as a model's own wheels, kept as `Template.wheelStyles`),
+and each instance wears one style on all four, picked by its appearance key — so two cars
+of one model are met on different wheels, and one car keeps its wheels across saves. All
+styles draw from the same four wheel slots (tyre, rim, chrome, trim), so they cost no
+shader program; the program anchor carries every style anyway. In the lab, `Экземпляр`
+(and `?variant=`) steps the appearance key: paint and wheels change together.
 
 ## Budget and current figures
 
-| | Total | Body + trim | Interior | Engine bay | Boot | Underbody | Wheels |
-|---|---|---|---|---|---|---|---|
-| 2106 | 12.2k | 5.3k | 3.1k | 1.05k | 0.3k | 0.75k | 1.6k |
-| 2108 | 10.7k | 3.8k | 3.2k | 1.25k | 0.04k | 0.6k | 1.8k |
+| | Total | Body + trim | Interior | Engine bay | Boot | Underbody | Wheels | Beyond 25 m |
+|---|---|---|---|---|---|---|---|---|
+| 2101 | 12.0k | 5.1k | 3.0k | 1.05k | 0.3k | 0.75k | 1.8k | 6.9k |
+| 2103 | 12.7k | 5.6k | 3.2k | 1.05k | 0.3k | 0.75k | 1.8k | 7.4k |
+| 2105 | 12.5k | 5.3k | 3.2k | 1.07k | 0.3k | 0.75k | 1.8k | 7.2k |
+| 2106 | 13.1k | 6.0k | 3.1k | 1.05k | 0.3k | 0.75k | 1.8k | 7.9k |
+| 2107 | 12.7k | 5.2k | 3.6k | 1.07k | 0.3k | 0.75k | 1.8k | 7.1k |
+| 2108 | 10.8k | 3.8k | 3.2k | 1.25k | 0.04k | 0.6k | 1.8k | 5.7k |
 
-Beyond 25 m about 7k remain. Lowest point of the body: 0.170 m, the factory ground clearance.
+Wheels are counted in the steel-cap style (the heaviest, about 450 per wheel). Lowest
+point of the body: 0.170 m, the factory ground clearance.
 
 ## Known gaps
 
@@ -290,13 +322,19 @@ Beyond 25 m about 7k remain. Lowest point of the body: 0.170 m, the factory grou
 - Shaders: a kit car's anchor for program warm-up comes from the general loader. The clear
   glass (`car-glass-clear`) is a new variant: when the car goes into the world, check
   `info.programs` during play (see the shader-variant rules).
-- The 2108's plastic bumper looks heavy. The 2106's arches have no chrome.
+- The 2108's plastic bumper looks heavy. The 2103's arch chrome, the C-pillar vents of the
+  classics and the 2105/2107 mirror sail are not modelled; the 2107's bonnet is not notched
+  round its grille.
+- The 2105/2107 hubs are as drawn (0.635 / 3.048), 20–30 mm off the drawing's dimension
+  line; the arches and doors are drawn round the drawn hubs.
 - No ink outline. That was the agreement; the reference has one.
 
 ## Adding a car
 
 1. Pick the drawing and photos, and measure as described above.
-2. Add a spec to `specs.ts` with a comment on its source.
+2. Add a spec to `specs.ts` with a comment on its source: reuse a body family with
+   `onBody` where the car shares one, and write its `LOOK_*` (and `CABIN_*` if its dash
+   differs from the platform's).
 3. Add a row to `KIT_CARS` (`vehicle/carmodels.ts`): id, sibling `sv_*`, spec key.
 4. Add the factory dimensions to `FACTORY_GEOMETRY` and a fit row:
    `bun tools/fit-models.ts kit_<id>`.

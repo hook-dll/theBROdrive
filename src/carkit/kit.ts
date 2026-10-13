@@ -16,7 +16,7 @@ import { addBuilt, pivotGroup, type KitContext, type KitNode } from './context';
 import { buildExterior } from './exterior';
 import { buildInterior } from './interior';
 import { KIT_SPECS } from './specs';
-import { buildWheel } from './wheels';
+import { KIT_WHEEL_STYLES, buildWheel, type WheelStyle } from './wheels';
 import type { KitMotion } from './rig';
 
 /** Russian names for the shell's moving parts, shown on hover. */
@@ -67,14 +67,15 @@ export function buildKitCar(id: string): THREE.Group {
       continue;
     }
     const motion = shellMotion(part.owner, frame);
-    const control = { id: part.owner, label: PART_LABELS[part.owner] ?? part.owner };
+    // A part that does not move (a door's fixed quarter pane) is not a control.
+    const control = motion ? { id: part.owner, label: PART_LABELS[part.owner] ?? part.owner } : undefined;
     const node = pivotGroup(part.owner, part.pivot, motion, control);
     addBuilt(node, part.builder, part.pivot, part.owner);
     nodes.set(part.owner, { node, pivot: part.pivot });
   }
   // Panes ride in their doors.
   for (const [owner, { node }] of nodes) {
-    const door = nodes.get(owner.replace(/^(window|vent)_/, 'door_'));
+    const door = nodes.get(owner.replace(/^(window|vent|quarter)_/, 'door_'));
     if (!door || door.node === node) continue;
     node.position.sub(new THREE.Vector3(...door.pivot));
     door.node.add(node);
@@ -86,7 +87,20 @@ export function buildKitCar(id: string): THREE.Group {
   buildInterior(ctx);
   buildBay(ctx);
 
-  // Wheels.
+  // The scene carries the first style; the loader adds the rest (`buildKitWheelSet`).
+  for (const wheel of buildKitWheelSet(id, KIT_WHEEL_STYLES[0]!).children.slice()) root.add(wheel);
+  return root;
+}
+
+/**
+ * The four wheels of a kit car in one style, standing where the car's spec puts them and
+ * named for its `wheelNodes`: what the loader takes a car's wheels from, once per style.
+ */
+export function buildKitWheelSet(id: string, style: WheelStyle): THREE.Group {
+  const spec = KIT_SPECS[id];
+  if (!spec) throw new Error(`Unknown kit car "${id}"`);
+  const frame = new BodyFrame(spec);
+  const set = new THREE.Group();
   const w = spec.wheels;
   const wheels: [string, number, number][] = [
     ['kit_wheel_fl', w.front, w.frontHalfTrack],
@@ -95,12 +109,12 @@ export function buildKitCar(id: string): THREE.Group {
     ['kit_wheel_rr', w.rear, -w.rearHalfTrack],
   ];
   for (const [name, s, x] of wheels) {
-    const wheel = buildWheel(w.radius, w.width, { hubcap: spec.look.bumpers === 'chrome' ? 'chrome-dome' : 'small-cap' });
+    const wheel = buildWheel(w.radius, w.width, style);
     wheel.name = name;
     wheel.position.set(x, w.radius, frame.z(s));
     // Built with the outer face to +X (the left side): the right wheels turn round.
     if (x < 0) wheel.rotation.y = Math.PI;
-    root.add(wheel);
+    set.add(wheel);
   }
-  return root;
+  return set;
 }

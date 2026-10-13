@@ -19,6 +19,8 @@
  * one at a shared corner.
  */
 
+import type { CabinLayoutOverride } from './interior';
+
 /** One half-section of the tub; every value is interpolated between stations. */
 export interface TubStation {
   readonly s: number;
@@ -118,22 +120,128 @@ export interface KitCarSpec {
   /** Fuel flap on the right side: s range and height range. */
   readonly flap: { readonly s0: number; readonly s1: number; readonly y0: number; readonly y1: number };
   readonly look: KitLook;
+  /** Per-car changes to the platform's cabin layout (interior.ts `LAYOUTS`): another dash, wheel or gauges. */
+  readonly cabinLayout?: CabinLayoutOverride;
 }
 
-/** Trim choices that are styling rather than shape. */
+/**
+ * Everything that is styling rather than shape. The ends of the car are described as
+ * lists of parts placed on the end face, so a new face is data, not code.
+ */
 export interface KitLook {
-  /** Chrome or black plastic bumpers. */
-  readonly bumpers: 'chrome' | 'plastic';
+  readonly label: string;
   /** Interior vinyl colour. */
   readonly upholstery: number;
   readonly dash: number;
-  /** Headlamps: round pairs (2106) or rectangular units (2108). */
-  readonly headlamps: 'twin-round' | 'rect';
-  /** Rear lamps: wide horizontal cluster (2106) or tall corner units (2108). */
-  readonly taillamps: 'classic' | 'samara';
-  /** Vent windows in the front doors. */
-  readonly ventWindows: boolean;
   /** Headrests on the front seats. */
   readonly headrests: boolean;
-  readonly label: string;
+  readonly front: FaceLook;
+  readonly rear: FaceLook;
+  /** Door handles and mirrors. */
+  readonly brightwork: Finish;
+  /** A strip along the sill between the arches, or none. */
+  readonly sill: Finish | null;
+  /** A strip along the flank at `y`, nose to tail, broken at the shut lines; or none. */
+  readonly waist: { readonly y: number; readonly height: number; readonly finish: Finish } | null;
+  /** The amber side repeater on each front wing (s and y ranges), or none. */
+  readonly repeater: { readonly s0: number; readonly s1: number; readonly y0: number; readonly y1: number } | null;
 }
+
+/** Surface finishes trim is made in: bright metal, black plastic, bare aluminium, rubber. */
+export type Finish = 'chrome' | 'black' | 'alloy' | 'rubber';
+
+/** One end of the car: its bumper and what stands on its face. */
+export interface FaceLook {
+  readonly bumper: BumperLook;
+  /** Drawn in order; later items stand on earlier ones (a lamp on its surround). */
+  readonly items: readonly FaceItem[];
+}
+
+export type BumperLook =
+  /** A bar on brackets, its ends turned round the corners. */
+  | {
+      readonly kind: 'blade';
+      readonly finish: Finish;
+      /** Centre height over the sill's bevel, and the bar's height. */
+      readonly lift: number;
+      readonly height: number;
+      /** How far the bar reaches out of the face's plane at its middle. */
+      readonly depth: number;
+      /** The lower `share` of the bar in another finish (the 2107's black lower face). */
+      readonly lower?: { readonly finish: Finish; readonly share: number };
+      /** A strip along the bar's face, or none. */
+      readonly strip: Finish | null;
+      /** Plastic caps over the ends where they wrap round the corners. */
+      readonly ends?: Finish;
+      /**
+       * Overriders standing on the bar, `inset` in from its end: half width and half
+       * height, and how far their centre stands below the bar's.
+       */
+      readonly overriders: { readonly inset: number; readonly half: readonly [number, number]; readonly drop: number; readonly finish: Finish } | null;
+    }
+  /** A deep moulded bumper wrapping the corners, with a groove along it. */
+  | {
+      readonly kind: 'moulded';
+      /** Its foot under the sill's bevel, and its height. */
+      readonly drop: number;
+      readonly height: number;
+    };
+
+/**
+ * A height on an end face, from one of its lines plus an offset in metres:
+ * `bumperTop` / `bumperBottom` (the bumper's band), `belt` (the side's top at the end
+ * station), `deck` (the bonnet or boot edge there) and `mid` (halfway from the bumper's
+ * top to the deck).
+ */
+export type FaceY = readonly [FaceAnchor, number];
+export type FaceAnchor = 'bumperTop' | 'bumperBottom' | 'belt' | 'deck' | 'mid';
+
+/** A distance across an end face: from the centre line, or in from the side. */
+export type FaceX = { readonly centre: number } | { readonly inset: number };
+
+/** A part's extent along one axis: a centre and half size, or from one line to another. */
+export type Span<T> = { readonly at: T; readonly half: number } | { readonly from: T; readonly to: T };
+
+/** What a lens does: the vehicle lights each role as one. `blinker` takes its side's role. */
+export type LampRole = 'head' | 'tail' | 'brake' | 'reverse' | 'blinker' | 'inert';
+
+/**
+ * One part on an end face. Everything not on the centre line is built on both sides.
+ * `proud` is how far it stands out of the face.
+ */
+export type FaceItem =
+  /** A flat surround from one side to the other. */
+  | { readonly kind: 'panel'; readonly x: FaceX; readonly y: Span<FaceY>; readonly finish: Finish; readonly proud: number }
+  /** A round lamp in a chrome ring. */
+  | { readonly kind: 'round'; readonly role: LampRole; readonly x: FaceX; readonly y: FaceY; readonly radius: number }
+  /** A rectangular lens. */
+  | { readonly kind: 'lens'; readonly role: LampRole; readonly x: Span<FaceX>; readonly y: Span<FaceY>; readonly depth: number; readonly proud: number }
+  /** A grille on the centre line out to `x`: an optional frame and back, and bars across it. */
+  | {
+      readonly kind: 'grille';
+      readonly x: FaceX;
+      readonly y: Span<FaceY>;
+      /** The whole grille stands this far out of the face (the 2107's). */
+      readonly standOut?: number;
+      readonly frame?: { readonly finish: Finish; readonly margin: number };
+      /** A dark plate behind the bars. */
+      readonly back: boolean;
+      readonly bars: {
+        readonly dir: 'vertical' | 'horizontal';
+        readonly count: number;
+        readonly finish: Finish | 'dark';
+        /** First and last bar centres stand this far in from the grille's edges. */
+        readonly margin: number;
+        /** Bar width across its run, and its depth out of the face from the bar's front. */
+        readonly width: number;
+        readonly depth: number;
+        readonly proud: number;
+      };
+    }
+  /**
+   * A tail-lamp cluster in a black housing: columns of cells from the outer edge in,
+   * each column's roles from the top down.
+   */
+  | { readonly kind: 'cluster'; readonly x: Span<FaceX>; readonly y: Span<FaceY>; readonly columns: readonly (readonly LampRole[])[] }
+  /** A rectangular outline of `width` bars (a chrome surround); both sides unless centred. */
+  | { readonly kind: 'frame'; readonly x: Span<FaceX>; readonly y: Span<FaceY>; readonly width: number; readonly finish: Finish; readonly proud: number };

@@ -18,6 +18,24 @@
   `CarModelDef.clearGlass` gives them see-through panes whose dust turns opaque. In the lab a
   click works a part (`KitRig`), a panel drives the cabin's inputs, and beyond 25 m a kit car
   drops its cabin, bay, boot and underbody and its glass goes back to a tinted mirror.
+- KIT CARS, the classics: `kit_vaz2101`, `kit_vaz2103`, `kit_vaz2105`, `kit_vaz2107` join
+  the lab's kit row, measured on the 3dcar.ru drawings and Commons photos
+  (`src/carkit/measurements-classics.md`). A car's looks are now descriptions, not enums:
+  each end face is a list of parts (`panel`, `round`, `lens`, `grille`, `cluster`, `frame`)
+  placed against the face's own lines, bumpers are blades (two-tone, strips, plastic end
+  caps, overriders from rubber blocks to chrome fangs) or moulded, and side trim is a sill
+  strip, a waist moulding that breaks at the shut lines and rides on the doors, and wing
+  repeaters. The 2101/2103/2106 share one shell and the 2105/2107 another (`onBody`); each
+  has its own dash (`cabinLayout`: the 2101's ribbon speedometer, the 2103's five dials on
+  wood, the 2105's pod, the 2107's one-piece panel). The 2105/2107 rear door carries its
+  fixed quarter pane. The refactor was checked on geometry against the committed code: the
+  2108 is identical, the 2106 differed by 0.29 mm in its grille bars before its trim was
+  corrected to the measurements (black-insert waist moulding, repeaters, black rear panel
+  in a chrome outline, 3×3 tail cells, end caps).
+- Kit cars come on five interchangeable wheel styles (stamped with a cap, chrome dome, dome
+  with a ring, full plastic cover, cast "daisy"), one per car instance on all four wheels,
+  picked by its appearance key (`Template.wheelStyles`). The lab's `Экземпляр` slider and
+  `?variant=` step through instances.
 
 - THE VAZ-1111 OKA IN THE PACK'S STYLE (`cf_vaz1111`) REPLACES the GTA SA Oka (`sa_oka` is
   gone from the catalogue, its `oka.glb`, `tools/oka-author.py` and the trim-plate rear screen

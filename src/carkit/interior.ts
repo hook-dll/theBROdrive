@@ -61,7 +61,11 @@ const COLOURS = {
   green: 0x3fae4a,
   wood: 0x5e3b20,
   lamp: 0xe8e4d2,
+  cluster: 0x2a2c2f,
 } as const;
+
+/** Warning lamps on a cluster face, in turn along the grid. */
+const TELLTALES = [0x3fae4a, 0xd88a1c, 0xc4241c, 0x2e6fd0] as const;
 
 /** Which seat or door a control belongs to, for its hover label. */
 const WHERE: Readonly<Record<string, string>> = {
@@ -73,18 +77,41 @@ const WHERE: Readonly<Record<string, string>> = {
   r: 'пассажира',
 };
 
-interface GaugeLook {
-  readonly channel: 'speed' | 'rpm' | 'fuel' | 'temp';
-  /** Centre: towards the driver's right of the column, and above the cowl's belt. */
+type GaugeChannel = 'speed' | 'rpm' | 'fuel' | 'temp';
+
+interface GaugeBase {
+  /**
+   * What drives it. Absent: the needle stands fixed at mid-scale. Oil pressure, the
+   * voltmeter and the economy meter have no channel in the rig, and a still needle
+   * reads truer than one borrowed from another gauge.
+   */
+  readonly channel?: GaugeChannel;
+  /** Centre on the cluster face: towards the driver's right of the column, and above the cowl's belt. */
   readonly right: number;
   readonly up: number;
-  readonly radius: number;
-  /** Channel value at full sweep; the sweep clockwise and the rest angle (rad, 0 = driver's right). */
+  /** Channel value at full scale. */
   readonly full: number;
-  readonly sweep: number;
-  readonly rest: number;
   readonly ticks: number;
 }
+
+interface RoundGauge extends GaugeBase {
+  readonly kind?: 'round';
+  readonly radius: number;
+  /** Sweep clockwise (negative runs anticlockwise) and the rest angle (rad, 0 = driver's right). */
+  readonly sweep: number;
+  readonly rest: number;
+  /** Only ticks and a needle: a second scale on the face of the gauge listed before it. */
+  readonly bare?: boolean;
+}
+
+/** A horizontal window with a marker sliding left to right across it (the 2101's speedometer). */
+interface RibbonGauge extends GaugeBase {
+  readonly kind: 'ribbon';
+  /** Window half width and half height. */
+  readonly half: P2;
+}
+
+type GaugeLook = RoundGauge | RibbonGauge;
 
 /**
  * One platform's furniture. `ds` is metres behind the cowl; heights named `dy` are
@@ -126,8 +153,19 @@ interface Layout {
   readonly binnacleHalf: number;
   readonly cluster: number;
   readonly gauges: readonly GaugeLook[];
-  /** Steering wheel centre (ds, dy), column rake above horizontal, rim radius, spoke angles (0 = driver's left, 90 = up). */
-  readonly wheel: { readonly ds: number; readonly dy: number; readonly rake: number; readonly radius: number; readonly spokes: readonly number[] };
+  /**
+   * Steering wheel centre (ds, dy), column rake above horizontal, rim radius and tube,
+   * spoke angles (0 = driver's left, 90 = up) and the horn: a round boss or a wide pad.
+   */
+  readonly wheel: {
+    readonly ds: number;
+    readonly dy: number;
+    readonly rake: number;
+    readonly radius: number;
+    readonly rim: number;
+    readonly spokes: readonly number[];
+    readonly hub: 'round' | 'pad';
+  };
   /** Pedal hinge (ds, dy) under the dash and pad centre (ds, height over the floor). */
   readonly pedals: { readonly pivot: P2; readonly pad: P2 };
   /** Gear lever: ds of its gaiter, height and how far its knob leans back. */
@@ -139,22 +177,41 @@ interface Layout {
   readonly radio: P2;
   readonly ashtray: P2;
   readonly hazard: P2;
-  readonly lights: { readonly right: number; readonly dy: number; readonly kind: 'knob' | 'rocker' };
-  /** Face vents at the dash ends (dy), if any. */
-  readonly vents?: number;
+  /** The light switch; on the cluster face its `dy` is a height like a gauge's `up`. */
+  readonly lights: { readonly right: number; readonly dy: number; readonly kind: 'knob' | 'rocker'; readonly on?: 'fascia' | 'cluster' };
+  /** Slatted face vents on the fascia at [x, dy]; without `x`, a pair at the dash's ends. */
+  readonly vents?: readonly { readonly dy: number; readonly x?: number }[];
+  /** Round eyeball vents on the fascia at [x, dy]. */
+  readonly eyeballs?: { readonly radius: number; readonly at: readonly P2[] };
+  /** A framed panel on the cluster face behind the gauges: centre (right, up), half size, colour and frame. */
+  readonly clusterFace?: { readonly right: number; readonly up: number; readonly half: P2; readonly colour: number; readonly frame: 'chrome' | 'black' };
+  /** Warning lamps on the cluster face: a grid of `cols` x `rows` at `pitch`, centred at (right, up). */
+  readonly lamps?: { readonly right: number; readonly up: number; readonly cols: number; readonly rows: number; readonly pitch: number };
+  /** Switches with no channel: [x, dy] on the fascia, or [right, up] on the cluster face as the gauges. */
+  readonly rockers?: { readonly on: 'fascia' | 'cluster'; readonly at: readonly P2[] };
+  /**
+   * Centre stack from the fascia's foot down to the tunnel, its face continuing the
+   * fascia's line: fittings placed below the fascia's foot stand on it.
+   */
+  readonly stack?: { readonly half: number };
   readonly carpet: number;
   readonly headliner: number;
 }
 
+/** A car's changes to its platform's layout (`KitCarSpec.cabinLayout`). */
+export type CabinLayoutOverride = Partial<Layout>;
+
+/** Scales of the stock dials: a big one sweeping 240 degrees, a small one 90 (full scale 1). */
+const BIG = { sweep: 240 * (Math.PI / 180), rest: 210 * (Math.PI / 180), ticks: 9 } as const;
+const SMALL = { full: 1, sweep: Math.PI / 2, rest: 225 * (Math.PI / 180), ticks: 3 } as const;
+
 /** Big round dials over the wheel's hub: speedometer and tachometer, then the small pair. */
 function dials(big: number, small: number, spread: number, smallSpread: number, up: number, smallUp: number): GaugeLook[] {
-  const big240 = { sweep: 240 * (Math.PI / 180), rest: 210 * (Math.PI / 180), ticks: 9 };
-  const small90 = { full: 1, sweep: Math.PI / 2, rest: 225 * (Math.PI / 180), ticks: 3 };
   return [
-    { channel: 'speed', right: -spread, up, radius: big, full: 180, ...big240 },
-    { channel: 'rpm', right: spread, up, radius: big, full: 8000, ...big240 },
-    { channel: 'fuel', right: -smallSpread, up: smallUp, radius: small, ...small90 },
-    { channel: 'temp', right: smallSpread, up: smallUp, radius: small, ...small90 },
+    { channel: 'speed', right: -spread, up, radius: big, full: 180, ...BIG },
+    { channel: 'rpm', right: spread, up, radius: big, full: 8000, ...BIG },
+    { channel: 'fuel', right: -smallSpread, up: smallUp, radius: small, ...SMALL },
+    { channel: 'temp', right: smallSpread, up: smallUp, radius: small, ...SMALL },
   ];
 }
 
@@ -184,7 +241,7 @@ const LAYOUTS: Readonly<Record<KitCarSpec['platform'], Layout>> = {
     binnacleHalf: 0.215,
     cluster: 0.352,
     gauges: dials(0.048, 0.029, 0.066, 0.165, 0.06, 0.052),
-    wheel: { ds: 0.55, dy: 0.094, rake: 28 * (Math.PI / 180), radius: 0.19, spokes: [-15, 195] },
+    wheel: { ds: 0.55, dy: 0.094, rake: 28 * (Math.PI / 180), radius: 0.19, rim: 0.0145, spokes: [-15, 195], hub: 'round' },
     pedals: { pivot: [0.1, -0.16], pad: [0.21, 0.135] },
     gear: { ds: 0.62, height: 0.32, lean: 0.1 },
     handbrake: { rear: 0.08, length: 0.26 },
@@ -220,7 +277,7 @@ const LAYOUTS: Readonly<Record<KitCarSpec['platform'], Layout>> = {
     binnacleHalf: 0.21,
     cluster: 0.472,
     gauges: dials(0.044, 0.025, 0.062, 0.16, 0.015, 0.005),
-    wheel: { ds: 0.58, dy: -0.02, rake: 22 * (Math.PI / 180), radius: 0.185, spokes: [-25, 205, 270] },
+    wheel: { ds: 0.58, dy: -0.02, rake: 22 * (Math.PI / 180), radius: 0.185, rim: 0.0145, spokes: [-25, 205, 270], hub: 'pad' },
     pedals: { pivot: [0.1, -0.29], pad: [0.22, 0.115] },
     gear: { ds: 0.72, height: 0.22, lean: 0.04 },
     handbrake: { rear: 0.12, length: 0.24 },
@@ -229,10 +286,122 @@ const LAYOUTS: Readonly<Record<KitCarSpec['platform'], Layout>> = {
     ashtray: [0, -0.212],
     hazard: [0, -0.085],
     lights: { right: -0.2, dy: -0.1, kind: 'rocker' },
-    vents: -0.1,
+    vents: [{ dy: -0.1 }],
     carpet: 0x26272a,
     headliner: 0x9a9ca0,
   },
+};
+
+// Per-model dashboards on the classic platform. Sizes are ratios read off interior
+// photos and the 2105/2107 cluster schematics, scaled to absolutes from a 1.36 m cabin
+// width (no dashboard photo carries a scale). The 2106 is the platform's own layout.
+
+/**
+ * VAZ-2101: a flat dash without wood, a shallow chrome-bezelled hood (about 0.30 x
+ * 0.10 m) over a ribbon speedometer 0-180, temperature and fuel dials at its ends and a
+ * row of six warning lamps; two eyeball vents right of the hood; a thin-rimmed wheel.
+ */
+export const CABIN_2101: CabinLayoutOverride = {
+  wood: undefined,
+  binnacle: [[0.26, 0.05], [0.28, 0.125], [0.38, 0.136], [0.41, 0.126], [0.41, 0.114], [0.352, 0.11], [0.352, 0.013], [0.3, 0.013]],
+  binnacleHalf: 0.17,
+  clusterFace: { right: 0, up: 0.062, half: [0.15, 0.045], colour: COLOURS.cluster, frame: 'chrome' },
+  gauges: [
+    { kind: 'ribbon', channel: 'speed', right: 0, up: 0.074, half: [0.1, 0.016], full: 180, ticks: 10 },
+    { channel: 'temp', right: -0.128, up: 0.062, radius: 0.018, ...SMALL },
+    { channel: 'fuel', right: 0.128, up: 0.062, radius: 0.018, ...SMALL },
+  ],
+  lamps: { right: 0, up: 0.04, cols: 6, rows: 1, pitch: 0.02 },
+  eyeballs: { radius: 0.026, at: [[0.115, -0.014], [0.045, -0.014]] },
+  radio: [0, -0.08],
+  wheel: { ...LAYOUTS.classic.wheel, radius: 0.2, rim: 0.012 },
+};
+
+/**
+ * VAZ-2103: the 2106's hood and wood band, a wood panel behind five dials in one row
+ * (fuel, temperature, oil pressure, then tachometer and speedometer at twice their
+ * size) and three rockers under the small dials, the first switching the lights.
+ */
+export const CABIN_2103: CabinLayoutOverride = {
+  clusterFace: { right: 0, up: 0.062, half: [0.21, 0.05], colour: COLOURS.wood, frame: 'black' },
+  gauges: [
+    { channel: 'fuel', right: -0.18, up: 0.062, radius: 0.024, ...SMALL },
+    { channel: 'temp', right: -0.12, up: 0.062, radius: 0.024, ...SMALL },
+    { right: -0.06, up: 0.062, radius: 0.024, ...SMALL },
+    { channel: 'rpm', right: 0.03, up: 0.062, radius: 0.044, full: 8000, ...BIG },
+    { channel: 'speed', right: 0.138, up: 0.062, radius: 0.044, full: 180, ...BIG },
+  ],
+  lights: { right: -0.18, dy: -0.05, kind: 'rocker' },
+  rockers: { on: 'fascia', at: [[LAYOUTS.classic.seatX + 0.12, -0.05], [LAYOUTS.classic.seatX + 0.06, -0.05]] },
+  wheel: { ...LAYOUTS.classic.wheel, radius: 0.2, rim: 0.012 },
+};
+
+/**
+ * VAZ-2105: a padded black dash without wood and its own rectangular cluster pod
+ * (about 0.37 x 0.115 m): a combined fuel and temperature dial on the left, the
+ * speedometer on the right, a small voltmeter between under a block of six warning
+ * lamps, and two rockers at each end, the top left one for the lights.
+ */
+export const CABIN_2105: CabinLayoutOverride = {
+  wood: undefined,
+  dash: [
+    [0.16, 0.05], [0.28, 0.065], [0.33, 0.05], [0.35, 0.015], [0.345, -0.15],
+    [0.32, -0.2], [0.12, -0.22], [0.045, -0.195], [0.045, -0.06],
+  ],
+  fascia: [[0.35, 0.015], [0.345, -0.15]],
+  binnacle: [[0.25, 0.055], [0.27, 0.135], [0.385, 0.14], [0.395, 0.128], [0.39, 0.12], [0.39, 0.003], [0.33, 0.003]],
+  binnacleHalf: 0.205,
+  cluster: 0.39,
+  clusterFace: { right: 0, up: 0.0615, half: [0.185, 0.0575], colour: COLOURS.cluster, frame: 'black' },
+  gauges: [
+    // Fuel across the top of the left dial, temperature across its bottom.
+    { channel: 'fuel', right: -0.085, up: 0.0615, radius: 0.048, full: 1, sweep: 140 * (Math.PI / 180), rest: 160 * (Math.PI / 180), ticks: 3 },
+    { channel: 'temp', right: -0.085, up: 0.0615, radius: 0.048, full: 1, sweep: -140 * (Math.PI / 180), rest: 200 * (Math.PI / 180), ticks: 3, bare: true },
+    { channel: 'speed', right: 0.085, up: 0.0615, radius: 0.048, full: 180, ...BIG },
+    { right: 0, up: 0.03, radius: 0.02, ...SMALL },
+  ],
+  lamps: { right: 0, up: 0.088, cols: 3, rows: 2, pitch: 0.014 },
+  lights: { right: -0.163, dy: 0.0885, kind: 'rocker', on: 'cluster' },
+  rockers: { on: 'cluster', at: [[-0.163, 0.0335], [0.163, 0.0885], [0.163, 0.0335]] },
+  wheel: { ...LAYOUTS.classic.wheel, hub: 'pad' },
+};
+
+/**
+ * VAZ-2107: the big one-piece padded "euro" dash with a deep hood over a wide cluster
+ * (about 0.40 x 0.14 m): tachometer and speedometer, a column of seven warning lamps
+ * between them and two small dials at each end (economy meter and temperature,
+ * fuel and voltmeter). A centre stack under twin vents carries four rockers (the
+ * first for the lights), the radio and the ashtray; a large glovebox.
+ */
+export const CABIN_2107: CabinLayoutOverride = {
+  wood: undefined,
+  dash: [
+    [0.15, 0.065], [0.3, 0.08], [0.355, 0.065], [0.372, 0.025], [0.36, -0.17],
+    [0.33, -0.23], [0.12, -0.25], [0.045, -0.22], [0.045, -0.06],
+  ],
+  fascia: [[0.372, 0.025], [0.36, -0.17]],
+  binnacle: [[0.24, 0.075], [0.27, 0.165], [0.42, 0.175], [0.455, 0.163], [0.455, 0.148], [0.385, 0.143], [0.385, -0.008], [0.33, -0.008]],
+  binnacleHalf: 0.222,
+  cluster: 0.385,
+  clusterFace: { right: 0, up: 0.0675, half: [0.2, 0.07], colour: COLOURS.cluster, frame: 'black' },
+  gauges: [
+    { channel: 'rpm', right: -0.085, up: 0.0675, radius: 0.054, full: 8000, ...BIG },
+    { channel: 'speed', right: 0.085, up: 0.0675, radius: 0.054, full: 180, ...BIG },
+    { right: -0.172, up: 0.1, radius: 0.022, ...SMALL },
+    { channel: 'temp', right: -0.172, up: 0.035, radius: 0.022, ...SMALL },
+    { channel: 'fuel', right: 0.172, up: 0.1, radius: 0.022, ...SMALL },
+    { right: 0.172, up: 0.035, radius: 0.022, ...SMALL },
+  ],
+  lamps: { right: 0, up: 0.0675, cols: 1, rows: 7, pitch: 0.016 },
+  stack: { half: 0.1 },
+  vents: [{ dy: -0.04 }, { x: 0.06, dy: -0.1 }, { x: -0.06, dy: -0.1 }],
+  glovebox: { x: -0.34, dy: -0.1, half: [0.19, 0.068] },
+  hazard: [0, -0.1],
+  lights: { right: LAYOUTS.classic.seatX - 0.075, dy: -0.2, kind: 'rocker' },
+  rockers: { on: 'fascia', at: [[0.025, -0.2], [-0.025, -0.2], [-0.075, -0.2]] },
+  radio: [0, -0.26],
+  ashtray: [0, -0.33],
+  wheel: { ...LAYOUTS.classic.wheel, hub: 'pad' },
 };
 
 export function buildInterior(ctx: KitContext): void {
@@ -358,6 +527,22 @@ function mount(origin: Vec3, recline: number): Mount {
   return { matrix, u, n, at: (x, y, z) => add(origin, add(scale(u, x), add(scale(v, y), scale(n, z)))) };
 }
 
+/** Flat rectangle facing out of a mount's face (its matrix pushed), centred at (cx, cy), `z` off the face. */
+function rect(b: PartBuilder, slot: KitSlot, cx: number, cy: number, hx: number, hy: number, z: number): void {
+  b.quad(slot, [cx - hx, cy - hy, z], [cx + hx, cy - hy, z], [cx + hx, cy + hy, z], [cx - hx, cy + hy, z]);
+}
+
+/** A dial's needle and hub on mount `m`'s face, pointing at `angle` (rad, 0 = driver's right). */
+function needle(b: PartBuilder, m: Mount, r: number, angle: number): void {
+  const d: Vec3 = [Math.cos(angle), Math.sin(angle), 0];
+  const p: Vec3 = [-d[1], d[0], 0];
+  const pt = (k: number, w: number): Vec3 => [d[0] * r * k + p[0] * w, d[1] * r * k + p[1] * w, 0.008];
+  b.push(m.matrix).color(COLOURS.needle);
+  b.quad('trim', pt(-0.15, -0.002), pt(0.85, -0.001), pt(0.85, 0.001), pt(-0.15, 0.002));
+  b.color(COLOURS.black).cylinderZ('trim', [0, 0, 0.009], r * 0.12, 0.002, 6);
+  b.pop();
+}
+
 interface FloorRow {
   readonly s: number;
   /** Floor height beside the tunnel, the tunnel's top, its base and top half widths. */
@@ -404,7 +589,7 @@ class Cabin {
     this.ctx = ctx;
     this.frame = ctx.frame;
     this.spec = ctx.frame.spec;
-    this.lay = LAYOUTS[this.spec.platform];
+    this.lay = { ...LAYOUTS[this.spec.platform], ...this.spec.cabinLayout };
     this.hatch = this.spec.bootEnd === undefined;
     const f = this.frame;
     const w = this.spec.wheels;
@@ -756,10 +941,20 @@ class Cabin {
 
   // ---- dash ----
 
+  /** Where the fascia's face (extended past its ends: the stack) stands at height y. */
+  private fasciaS(y: number): number {
+    const [[dt, yt], [db, yb]] = this.lay.fascia;
+    return this.frame.cowl + lerp(db, dt, (y - this.belt - yb) / (yt - yb));
+  }
+
   private fascia(x: number, y: number): Mount {
     const [[dt, yt], [db, yb]] = this.lay.fascia;
-    const ds = lerp(db, dt, (y - this.belt - yb) / (yt - yb));
-    return mount(this.P(x, y, this.frame.cowl + ds), Math.atan2(-(dt - db), yt - yb));
+    return mount(this.P(x, y, this.fasciaS(y)), Math.atan2(-(dt - db), yt - yb));
+  }
+
+  /** A point on the cluster face, `right` of the column and `up` over the cowl's belt. */
+  private clusterAt(right: number, up: number): Mount {
+    return mount(this.P(this.x0 - right, this.belt + up, this.frame.cowl + this.lay.cluster), 0);
   }
 
   /** Prism along X between `xs`; `profile(x)` is a closed (s, y) section, capped at both ends. */
@@ -791,20 +986,52 @@ class Cabin {
       ...L.dash.map(([ds, dy]): P2 => [cowl + ds, belt + dy]),
     ]);
     this.prismX(b, 'trim', [this.x0 - L.binnacleHalf, this.x0 + L.binnacleHalf], () => L.binnacle.map(([ds, dy]): P2 => [cowl + ds, belt + dy]));
+    if (L.stack) {
+      // Down the fascia's line from its foot to the tunnel; the back corners hide in
+      // the dash and the toe board.
+      const foot = belt + L.fascia[1][1];
+      const floor = this.tunnelTop(this.fasciaS(foot)) - 0.005;
+      const back = cowl + 0.06;
+      this.prismX(b, 'trim', [-L.stack.half, L.stack.half], () => [
+        [back, foot], [this.fasciaS(foot), foot], [this.fasciaS(floor), floor], [back, this.tunnelTop(back) - 0.005],
+      ]);
+    }
     if (L.wood) {
       const [y0, y1] = L.wood;
       const m = this.fascia(0, belt + (y0 + y1) / 2);
       b.color(COLOURS.wood).push(m.matrix).box('trim', [0, 0, 0.002], [half - 0.01, (y1 - y0) / 2, 0.002]).pop();
     }
+    if (L.clusterFace) {
+      const { right, up, half: [hx, hy], colour, frame } = L.clusterFace;
+      b.push(this.clusterAt(right, up).matrix).color(COLOURS.black);
+      rect(b, frame === 'chrome' ? 'chrome' : 'trim', 0, 0, hx + 0.006, hy + 0.006, 0.0015);
+      b.color(colour);
+      rect(b, 'trim', 0, 0, hx, hy, 0.0025);
+      b.pop();
+    }
+    if (L.lamps) {
+      const { right, up, cols, rows, pitch } = L.lamps;
+      b.push(this.clusterAt(right, up).matrix);
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          b.color(TELLTALES[(r * cols + c) % TELLTALES.length]!);
+          rect(b, 'trim', (c - (cols - 1) / 2) * pitch, ((rows - 1) / 2 - r) * pitch, pitch * 0.3, pitch * 0.3, 0.0035);
+        }
+      }
+      b.pop();
+    }
 
-    for (const g of L.gauges) this.gauge(g);
+    for (const g of L.gauges) {
+      if (g.kind === 'ribbon') this.ribbon(g);
+      else this.gauge(g);
+    }
     this.glovebox();
     this.radio();
     this.ashtray();
     this.switches();
-    if (L.vents !== undefined) {
-      for (const side of [1, -1]) {
-        const m = this.fascia(side * (half - 0.07), belt + L.vents);
+    for (const v of L.vents ?? []) {
+      for (const x of v.x === undefined ? [half - 0.07, -(half - 0.07)] : [v.x]) {
+        const m = this.fascia(x, belt + v.dy);
         b.push(m.matrix).color(COLOURS.black);
         b.quad('trim', [-0.035, -0.024, 0.002], [0.035, -0.024, 0.002], [0.035, 0.024, 0.002], [-0.035, 0.024, 0.002]);
         b.color(look.dash);
@@ -812,21 +1039,41 @@ class Cabin {
         b.pop();
       }
     }
+    if (L.eyeballs) {
+      const r = L.eyeballs.radius;
+      for (const [x, dy] of L.eyeballs.at) {
+        b.push(this.fascia(x, belt + dy).matrix).color(COLOURS.black);
+        b.cylinderZ('chrome', [0, 0, 0.005], r, 0.005, 10, false);
+        b.cylinderZ('trim', [0, 0, 0.007], r * 0.72, 0.007, 8);
+        b.pop();
+      }
+    }
+    if (L.rockers) {
+      const { on, at } = L.rockers;
+      for (const [a, dy] of at) {
+        b.push((on === 'cluster' ? this.clusterAt(a, dy) : this.fascia(a, belt + dy)).matrix);
+        // No back faces: each sits on the face it is mounted on.
+        b.color(COLOURS.black).box('trim', [0, 0, 0.003], [0.017, 0.027, 0.003], 0b011111);
+        b.color(shade(look.dash, 1.4)).box('trim', [0, 0.003, 0.009], [0.012, 0.02, 0.003], 0b011111);
+        b.pop();
+      }
+    }
   }
 
-  /** A round dial on the cluster face: bezel, face, ticks and a needle on its channel. */
-  private gauge(g: GaugeLook): void {
-    const centre = this.P(this.x0 - g.right, this.belt + g.up, this.frame.cowl + this.lay.cluster);
-    const m = mount(centre, 0);
+  /** A round dial on the cluster face: bezel, face, ticks and a needle on its channel (fixed without one). */
+  private gauge(g: RoundGauge): void {
+    const m = this.clusterAt(g.right, g.up);
     const r = g.radius;
     const b = this.fixed.push(m.matrix);
-    b.color(COLOURS.black).cylinderZ('chrome', [0, 0, 0.006], r + 0.005, 0.006, 12, false);
-    const disc: Vec3[] = [];
-    for (let i = 0; i < 12; i++) {
-      const a = (i / 12) * Math.PI * 2;
-      disc.push([Math.cos(a) * r, Math.sin(a) * r, 0.004]);
+    if (!g.bare) {
+      b.color(COLOURS.black).cylinderZ('chrome', [0, 0, 0.006], r + 0.005, 0.006, 12, false);
+      const disc: Vec3[] = [];
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * Math.PI * 2;
+        disc.push([Math.cos(a) * r, Math.sin(a) * r, 0.004]);
+      }
+      b.color(COLOURS.face).poly('trim', disc);
     }
-    b.color(COLOURS.face).poly('trim', disc);
     b.color(COLOURS.tick);
     for (let i = 0; i < g.ticks; i++) {
       const a = g.rest - (g.sweep * i) / (g.ticks - 1);
@@ -836,16 +1083,37 @@ class Cabin {
       b.quad('trim', at(0.74, -1), at(0.92, -1), at(0.92, 1), at(0.74, 1));
     }
     b.pop();
+    if (!g.channel) {
+      needle(this.fixed, m, r, g.rest - g.sweep / 2);
+      return;
+    }
     const at = m.at(0, 0, 0.008);
     this.hinge(this.group, ORIGIN, `needle_${g.channel}`, at, { channel: g.channel, kind: 'rot', axis: m.n, amount: -g.sweep / g.full }, undefined, (n) => {
-      const d: Vec3 = [Math.cos(g.rest), Math.sin(g.rest), 0];
-      const p: Vec3 = [-d[1], d[0], 0];
-      const pt = (k: number, w: number): Vec3 => [d[0] * r * k + p[0] * w, d[1] * r * k + p[1] * w, 0.008];
-      n.push(m.matrix).color(COLOURS.needle);
-      n.quad('trim', pt(-0.15, -0.002), pt(0.85, -0.001), pt(0.85, 0.001), pt(-0.15, 0.002));
-      n.color(COLOURS.black).cylinderZ('trim', [0, 0, 0.009], r * 0.12, 0.002, 6);
-      n.pop();
+      needle(n, m, r, g.rest);
     });
+  }
+
+  /** A ribbon window on the cluster face, its ticks and a marker sliding along it with the channel. */
+  private ribbon(g: RibbonGauge): void {
+    const m = this.clusterAt(g.right, g.up);
+    const [hw, hh] = g.half;
+    const run = hw * 0.92;
+    const b = this.fixed.push(m.matrix).color(COLOURS.black);
+    rect(b, 'chrome', 0, 0, hw + 0.004, hh + 0.004, 0.003);
+    b.color(COLOURS.face);
+    rect(b, 'trim', 0, 0, hw, hh, 0.004);
+    b.color(COLOURS.tick);
+    for (let i = 0; i < g.ticks; i++) rect(b, 'trim', lerp(-run, run, i / (g.ticks - 1)), -hh * 0.45, 0.0012, hh * 0.4, 0.0046);
+    b.pop();
+    const at = m.at(-run, 0, 0.005);
+    const motion: KitMotion | undefined = g.channel && { channel: g.channel, kind: 'pos', axis: m.u, amount: (2 * run) / g.full };
+    const draw = (n: PartBuilder): void => {
+      n.push(m.matrix).color(COLOURS.needle);
+      rect(n, 'trim', motion ? -run : 0, 0, 0.0018, hh * 0.9, 0.005);
+      n.pop();
+    };
+    if (motion) this.hinge(this.group, ORIGIN, `needle_${g.channel}`, at, motion, undefined, draw);
+    else draw(this.fixed);
   }
 
   /** Lid hinged at its foot, falling open towards the passenger, over a dark opening. */
@@ -906,7 +1174,8 @@ class Cabin {
   private switches(): void {
     const L = this.lay;
     const lightCtl: KitControl = { id: 'lights', label: 'Фары', action: { type: 'cycle', channel: 'lights', values: [0, 1, 2] } };
-    const lm = this.fascia(this.x0 - L.lights.right, this.belt + L.lights.dy);
+    const { right, dy, on } = L.lights;
+    const lm = on === 'cluster' ? this.clusterAt(right, dy) : this.fascia(this.x0 - right, this.belt + dy);
     if (L.lights.kind === 'knob') {
       this.hinge(this.group, ORIGIN, 'light_switch', lm.at(0, 0, 0), { channel: 'lights', kind: 'rot', axis: lm.n, amount: -0.55 }, lightCtl, (b) => {
         b.push(lm.matrix).color(COLOURS.black).cylinderZ('trim', [0, 0, 0.01], 0.017, 0.01, 8);
@@ -970,7 +1239,7 @@ class Cabin {
     wheel.rotation.x = tilt;
     const wb = new PartBuilder().color(COLOURS.black);
     const R = w.radius;
-    wb.torusY('trim', R, 0.0145, 16, 5);
+    wb.torusY('trim', R, w.rim, 16, 5);
     wb.cylinderY('trim', [0, -0.045, 0], 0.04, 0.02, 8);
     for (const deg of w.spokes) {
       const a = (deg * Math.PI) / 180;
@@ -980,7 +1249,7 @@ class Cabin {
     attach(this.group, ORIGIN, wheel);
     this.hinge(wheel, ORIGIN, 'horn', ORIGIN, { channel: 'horn', kind: 'pos', axis: [0, -1, 0], amount: 0.006 }, { id: 'horn', label: 'Гудок', action: { type: 'press', channel: 'horn' } }, (h) => {
       h.color(shade(COLOURS.black, 1.3));
-      if (this.spec.platform === 'classic') {
+      if (w.hub === 'round') {
         h.cylinderY('trim', [0, -0.02, 0], 0.055, 0.012, 10);
         h.color(COLOURS.black).cylinderY('chrome', [0, -0.006, 0], 0.016, 0.003, 6);
       } else {

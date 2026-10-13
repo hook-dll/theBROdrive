@@ -44,7 +44,8 @@ import {
   secondaryFactoryPaintHex,
 } from '../vehicle/carpaint';
 import { lampLensAnchors } from '../vehicle/vehiclelamps';
-import { buildKitCar } from '../carkit/kit';
+import { buildKitCar, buildKitWheelSet } from '../carkit/kit';
+import { KIT_WHEEL_STYLES } from '../carkit/wheels';
 
 /**
  * DEV-only A/B switch for the unified car style: `?carstyle=unified`, alongside any
@@ -175,6 +176,11 @@ interface Template {
   readonly body: THREE.Object3D;
   /** One template per wheel id, already scaled. */
   readonly wheels: ReadonlyMap<string, THREE.Object3D>;
+  /**
+   * Interchangeable wheel sets a kit body is seen on (`buildKitWheelSet`), each one
+   * template per wheel id; each instance wears one set on all four. Empty otherwise.
+   */
+  readonly wheelStyles: readonly ReadonlyMap<string, THREE.Object3D>[];
   /** Where the road reaches this body, for the paint's dirt placement. */
   readonly frame: CarBodyFrame;
   /** The spare wheel's mount (`CarModelDef.spareNode`), chassis-local, or null. */
@@ -1507,7 +1513,7 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     wheelCentreY: wheels.reduce((sum, wheel) => sum + wheel.pos[1], 0) / wheels.length,
     wheelRadius: wheels.reduce((sum, wheel) => sum + wheel.radius, 0) / wheels.length,
   };
-  return { def, measure, body: scene, wheels: parts.objects, frame, spare };
+  return { def, measure, body: scene, wheels: parts.objects, wheelStyles: [], frame, spare };
 }
 
 /** One shared palette per pack, loaded once and pointed at by every body in it. */
@@ -1602,7 +1608,13 @@ function loadModel(def: CarModelDef): Promise<void> {
       tuneMaps(scene);
       unifyCarMaterials(scene, def);
     });
-    templates.set(def.id, await onOwnFrame(() => buildTemplate(def, scene)));
+    templates.set(def.id, await onOwnFrame(() => {
+      const t = buildTemplate(def, scene);
+      const kit = def.kit;
+      if (!kit) return t;
+      // Each style goes through the same wheel pass the scene's own wheels did.
+      return { ...t, wheelStyles: KIT_WHEEL_STYLES.map((style) => takeOwnWheels(def, buildKitWheelSet(kit, style)).objects) };
+    }));
   })().catch((error) => {
     modelLoads.delete(def.id);
     throw error;
@@ -1674,23 +1686,28 @@ function template(id: string): Template {
   return t;
 }
 
-function selectedWheelTemplate(t: Template, appearanceKey: string): Template {
+/**
+ * The wheels an instance wears: one of a kit body's styles, one of the Soviet sets in
+ * the def's pool, or the model's own — always all four from the same set.
+ */
+function selectedWheels(t: Template, appearanceKey: string): ReadonlyMap<string, THREE.Object3D> {
+  if (t.wheelStyles.length > 0) return t.wheelStyles[appearanceHash('kit-wheel-style', appearanceKey) % t.wheelStyles.length]!;
   const pool = t.def.wheelSetPool;
-  if (!pool || pool.length === 0) return t;
+  if (!pool || pool.length === 0) return t.wheels;
   const sourceId = pool[appearanceHash('vaz-wheel-set', appearanceKey) % pool.length]!;
-  return templates.get(sourceId) ?? t;
+  return (templates.get(sourceId) ?? t).wheels;
 }
 
 /**
- * Clones a wheel style from the selected Soviet set while keeping this body's
- * measured factory rolling radius. The source set contributes mesh, rim and
- * tyre appearance; chassis geometry remains the target model's responsibility.
+ * Clones a wheel style from the selected set while keeping this body's measured
+ * factory rolling radius. The source set contributes mesh, rim and tyre appearance;
+ * chassis geometry remains the target model's responsibility.
  */
 function cloneWheels(t: Template, appearanceKey: string): Map<string, THREE.Object3D> {
-  const source = selectedWheelTemplate(t, appearanceKey);
+  const source = selectedWheels(t, appearanceKey);
   const wheels = new Map<string, THREE.Object3D>();
   for (const targetWheel of t.measure.wheels) {
-    const mesh = source.wheels.get(targetWheel.id)!.clone(true);
+    const mesh = source.get(targetWheel.id)!.clone(true);
     mesh.updateMatrixWorld(true);
     const box = boundsOf(mesh);
     const visualWidth = box.max.x - box.min.x;
@@ -1864,6 +1881,7 @@ async function buildProgramAnchor(id: string): Promise<THREE.Group> {
       const source = templates.get(sourceId);
       if (source) for (const wheel of source.wheels.values()) group.add(wheel.clone(true));
     }
+    for (const style of t.wheelStyles) for (const wheel of style.values()) group.add(wheel.clone(true));
     return group;
   });
   await onOwnFrame(() => {

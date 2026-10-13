@@ -567,7 +567,8 @@ export function buildShell(frame: BodyFrame): ShellResult {
         const owner = column.upper ?? 'body';
         upper = owner === 'body' ? 'body' : doorName(owner, side);
         const kind = column.glass ?? 'none';
-        if (kind === 'fixed') glass = 'body';
+        // A fixed pane in a door (the 2105's rear quarter) rides with the door.
+        if (kind === 'fixed') glass = upper === 'body' ? 'body' : upper.replace('door', 'quarter');
         else if (kind === 'drop') glass = upper === 'body' ? 'body' : upper.replace('door', 'window');
         else if (kind === 'vent') glass = upper === 'body' ? 'body' : upper.replace('door', 'vent');
       }
@@ -640,9 +641,7 @@ function cutShell(frame: BodyFrame, shell: Shell): ShellResult {
       set.add(f.owner);
     }
   }
-  const isGlass = (owner: string): boolean => /^(window|vent)_/.test(owner);
-  const faceMat = new Map<string, Mat>();
-  for (const f of faces) if (f.mat === 'glass') faceMat.set(f.owner, 'glass');
+  const isGlass = (owner: string): boolean => /^(window|vent|quarter)_/.test(owner);
 
   /** Where `owner` draws vertex v after the cut. */
   const placed = (owner: string, v: number, glassOwner: boolean): Vec3 => {
