@@ -976,7 +976,9 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   // Kit bodies: their siblings' factory figures (the same cars); the 2107 is the 4145 its
   // dimensioned drawing and the period literature give.
   kit_vaz2101:    { length: 4.073, width: 1.611, height: 1.382, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.349, rearTrack: 1.305, wheelRadius: 0.297, tyreWidth: 0.155 },
+  kit_vaz2102:    { length: 4.059, width: 1.611, height: 1.458, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.297, tyreWidth: 0.165 },
   kit_vaz2103:    { length: 4.116, width: 1.611, height: 1.446, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288, tyreWidth: 0.165 },
+  kit_vaz2104:    { length: 4.115, width: 1.620, height: 1.443, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288, tyreWidth: 0.165 },
   kit_vaz2105:    { length: 4.130, width: 1.620, height: 1.446, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288, tyreWidth: 0.165 },
   kit_vaz2106:    { length: 4.166, width: 1.611, height: 1.444, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288, tyreWidth: 0.165 },
   kit_vaz2107:    { length: 4.145, width: 1.620, height: 1.435, clearance: 0.170, wheelbase: 2.424, frontTrack: 1.365, rearTrack: 1.321, wheelRadius: 0.288, tyreWidth: 0.165 },
@@ -2165,7 +2167,9 @@ const ENTRIES: readonly Entry[] = [
 const KIT_CARS: readonly Entry[] = (
   [
     ['kit_vaz2101', 'sv_vaz2101', 'vaz2101'],
+    ['kit_vaz2102', 'sv_vaz2102', 'vaz2102'],
     ['kit_vaz2103', 'sv_vaz2103', 'vaz2103'],
+    ['kit_vaz2104', 'sv_vaz2104', 'vaz2104'],
     ['kit_vaz2105', 'sv_vaz2105', 'vaz2105'],
     ['kit_vaz2106', 'sv_vaz2106', 'vaz2106'],
     ['kit_vaz2107', 'sv_vaz2107', 'vaz2107'],

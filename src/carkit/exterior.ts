@@ -509,12 +509,13 @@ function buildFiller(ctx: KitContext): void {
   if (!nodes.has('flap')) return;
   const s = (flap.s0 + flap.s1) / 2;
   const y = (flap.y0 + flap.y1) / 2;
-  const x = -(frame.sideX(s, y) - 0.035);
+  const side = flap.side === 'left' ? 1 : -1;
+  const x = side * (frame.sideX(s, y) - 0.035);
   const b = new PartBuilder().color(0x1a1b1c);
   const hz = (flap.s1 - flap.s0) / 2 - 0.006;
   const hy = (flap.y1 - flap.y0) / 2 - 0.006;
-  b.boxFrom('trim', [x - 0.03, y - hy, frame.z(s) - hz], [x + 0.0, y + hy, frame.z(s) + hz], 0b111110);
-  b.color(0x2e3032).cylinderX('trim', [x + 0.002, y, frame.z(s)], 0.026, 0.01, 8);
+  b.boxFrom('trim', [x - 0.015 - side * 0.015, y - hy, frame.z(s) - hz], [x - 0.015 + side * 0.015, y + hy, frame.z(s) + hz], 0b111111 & ~(side > 0 ? 1 : 2));
+  b.color(0x2e3032).cylinderX('trim', [x + side * 0.002, y, frame.z(s)], 0.026, 0.01, 8);
   addBuilt(ctx.root, b, [0, 0, 0], 'filler');
 }
 

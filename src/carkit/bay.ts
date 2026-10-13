@@ -24,6 +24,7 @@ import * as THREE from 'three';
 import type { BodyFrame } from './body';
 import { PartBuilder, type KitSlot, type Vec3 } from './builder';
 import { addBuilt, type KitContext } from './context';
+import { loadSpaceStart } from './interior';
 
 /** Ground clearance of the lowest part under the car: the factory figure the body was fitted to. */
 const CLEARANCE = 0.17;
@@ -633,13 +634,10 @@ function taper(b: PartBuilder, frame: BodyFrame, slot: KitSlot, colour: number, 
 // Boot
 // ---------------------------------------------------------------------------------
 
-/**
- * A hatch's load floor starts this far behind the cowl: the back face of the rear
- * bench's box (interior.ts), which closes the space under the floor's front edge.
- */
-const HATCH_BENCH_BACK = 1.85;
 /** A hatch's load floor below the tailgate's sill. */
 const HATCH_SILL_DROP = 0.28;
+/** ...and at least this far over the floor pan at the tail. */
+const LOAD_FLOOR_RISE = 0.12;
 
 /**
  * A saloon's boot: a painted tub from the rear seat's bulkhead to the panel under the
@@ -720,10 +718,11 @@ function buildHatchBoot(frame: BodyFrame, b: PartBuilder): void {
   const spec = frame.spec;
   const w = spec.wheels;
   const st = spec.stations;
-  const s0 = frame.cowl + HATCH_BENCH_BACK;
+  const s0 = loadSpaceStart(frame);
   const s1 = st[st.length - 1]!.s - 0.008;
   const inner = frame.wellX(w.rear) - WELL_GAP;
-  const floor = frame.deckY(frame.rearBase, 0) - HATCH_SILL_DROP;
+  // Under the tailgate's sill, but never under the floor pan: an estate's sill is low.
+  const floor = Math.max(frame.deckY(frame.rearBase, 0) - HATCH_SILL_DROP, frame.station(frame.rearBase).sill + LOAD_FLOOR_RISE);
   const shelf = Math.max(w.radius * (1 + w.arch) + WELL_GAP, floor + 0.05);
   b.color(COLOURS.bootTrim);
   b.quad('trim', at(frame, -inner, floor, s0), at(frame, inner, floor, s0), at(frame, inner, floor, s1), at(frame, -inner, floor, s1));
@@ -851,7 +850,8 @@ function classicChassis(frame: BodyFrame, b: PartBuilder, route: BayRoute): void
     ex,
     ey,
     [cowl + 0.55, cowl + 1.0],
-    [w.rear + 0.21, Math.min(w.rear + 0.78, spec.bootEnd! - 0.2)],
+    // Short of the tail panel: the boot lid's end on a saloon, the body's last station on an estate.
+    [w.rear + 0.21, Math.min(w.rear + 0.78, (spec.bootEnd ?? spec.stations[spec.stations.length - 1]!.s) - 0.2)],
     ex,
   );
 }

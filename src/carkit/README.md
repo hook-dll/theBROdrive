@@ -5,8 +5,8 @@ loader would return. From there the car goes through the usual pipeline in
 `render/carmodel.ts` (`buildTemplate`), so it gets paint, dust, scratches, stickers, glass
 dirt, lamps and fitting to the factory dimensions on the same terms as every other model.
 
-Status: stage 3 under way. Six cars — `kit_vaz2101`, `kit_vaz2103`, `kit_vaz2105`,
-`kit_vaz2106`, `kit_vaz2107`, `kit_vaz2108` — are shown in the car lab only:
+Status: stage 3 under way. Eight cars — `kit_vaz2101` … `kit_vaz2107` and `kit_vaz2108` —
+are shown in the car lab only:
 `/?car-lab&pack=Kit`. They are absent from traffic, the garage, spawns and POIs.
 
 ## Vision (agreed with the owner)
@@ -38,7 +38,7 @@ Status: stage 3 under way. Six cars — `kit_vaz2101`, `kit_vaz2103`, `kit_vaz21
 2. A "Get in" button in car-lab: camera at the driver's seat, keys turn the wheel and press
    the pedals, clicks on fittings from inside.
 3. The remaining cars from specs. ✅ Looks as descriptions, five wheel styles, the 2101,
-   2103, 2105 and 2107. Left: 2102/2104 (estates), 2109/21099/2115, 2110/2112, 2121/2131, 1111.
+   2102, 2103, 2104, 2105 and 2107. Left: 2109/21099/2115, 2110/2112, 2121/2131, 1111.
 4. Driving for real on the playground with the running gear of the existing VAZ models;
    catalogue entries for 2112 and 2115.
 5. Owner's call: replace the old models in the world, rearrange the bonnet grid, transfer
@@ -61,7 +61,8 @@ Status: stage 3 under way. Six cars — `kit_vaz2101`, `kit_vaz2103`, `kit_vaz21
 |---|---|
 | `spec.ts` | Spec types: `KitCarSpec`, `TubStation`, `CabinSpec`, `CabinColumn`, `WheelSpec`, `KitLook` and the face/bumper descriptions (`FaceItem`, `BumperLook`). |
 | `specs.ts` | Car numbers (`KIT_SPECS`): body families (`BODY_124`, `BODY_05`) placed per car with `onBody`, one `LOOK_*` per car, each with a comment saying where it was measured. |
-| `measurements-classics.md` | The 2101/2103/2105/2106/2107 measurement report: every figure with its drawing or photo and scale. |
+| `measurements-classics.md`, `measurements-estates.md` | Measurement reports: every figure with its drawing or photo and scale. |
+| `estates.ts` | The 2102/2104 bodies and backs (`BODY_2102`, `BODY_2104`, `REAR_*`); their fronts and sides are their saloons'. |
 | `builder.ts` | `PartBuilder`: flat triangles per material slot, transform stack, primitives (`box`, `bevelBox`, `extrude`, `cylinderX/Y/Z`, `torusY`, `bridge`), vertex colours. |
 | `body.ts` | `BodyFrame` (cross-section and height lookups) and `buildShell`: tub, greenhouse and roof as one face list, then cut into parts. |
 | `exterior.ts` | Bumpers (swept round the corners), grille, lamps, mirrors, handles, wipers, filler neck. |
@@ -276,6 +277,13 @@ What each one carries (numbers and sources in `measurements-classics.md`):
 
 A door can carry a fixed pane (`glass: 'fixed'` in a door strip becomes `quarter_*`,
 riding with the door): the 2105/2107 rear door's quarter.
+
+The estates (2102 on the 124 shell, 2104 on the 05) reuse their saloons' face, side and
+dash. Their tail stations are `flat: 1`, so the deck lies level out to the pillar row and
+the tailgate (no `bootEnd`, hinged at the roof, folded at `rearKnee`) gets a flat sill with
+upright sides between the corner lamps. The filler is on the left (`flap.side`). The rear
+bench is pulled forward with `cabinLayout.bench`, and the load floor starts at the bench
+(`loadSpaceStart`) and never sinks below the floor pan.
 
 ## Refactoring without breaking a car
 

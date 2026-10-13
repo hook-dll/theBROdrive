@@ -408,6 +408,19 @@ export function buildInterior(ctx: KitContext): void {
   new Cabin(ctx).build();
 }
 
+/** The rear bench's hip along the car, for a frame and its layout. */
+function benchHip(frame: BodyFrame, lay: Layout): number {
+  return lay.bench.from === 'rearBase' ? frame.rearBase + lay.bench.offset : frame.cowl + lay.hip + lay.bench.offset;
+}
+
+/**
+ * Where a hatch's or an estate's load space starts: the back of the rear bench's base.
+ * bay.ts lays the load floor from here, so the two never overlap or leave a gap.
+ */
+export function loadSpaceStart(frame: BodyFrame): number {
+  return benchHip(frame, { ...LAYOUTS[frame.spec.platform], ...frame.spec.cabinLayout }) + BENCH_BACK;
+}
+
 // ---- small geometry ----
 
 function add(a: Vec3, b: Vec3): Vec3 {
@@ -598,7 +611,7 @@ class Cabin {
     this.floorEnd = w.rear - w.radius * w.arch - 0.01;
     this.belt = f.station(f.cowl).belt;
     this.hipS = f.cowl + this.lay.hip;
-    this.benchS = this.lay.bench.from === 'rearBase' ? f.rearBase + this.lay.bench.offset : this.hipS + this.lay.bench.offset;
+    this.benchS = benchHip(f, this.lay);
     this.lowerEnd = this.hatch ? this.benchS + BENCH_BACK : f.rearBase - 0.005;
     this.x0 = this.lay.seatX;
     const t = this.lay.tunnel;

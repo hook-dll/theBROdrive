@@ -86,7 +86,7 @@ export class BodyFrame {
 
   station(s: number): TubStation {
     const st = this.spec.stations;
-    const pick = (key: keyof TubStation): number => table(st.map((x) => [x.s, x[key]] as const), s);
+    const pick = (key: Exclude<keyof TubStation, 'flat'>): number => table(st.map((x) => [x.s, x[key]] as const), s);
     return {
       s,
       sill: pick('sill'),
@@ -96,6 +96,7 @@ export class BodyFrame {
       wSill: pick('wSill'),
       wCrease: pick('wCrease'),
       wBelt: pick('wBelt'),
+      flat: table(st.map((x) => [x.s, x.flat ?? 0] as const), s),
     };
   }
 
@@ -127,12 +128,21 @@ export class BodyFrame {
     return line[line.length - 1]![0];
   }
 
-  /** Deck height at half-width x (parabolic crown from the edge to the centre line). */
+  /**
+   * Deck height at half-width x: a parabolic crown from the edge to the centre line, or,
+   * where the station is `flat`, level out to the pillar row and straight up to the edge
+   * from there (an estate's tailgate sill with its upright sides).
+   */
   deckY(s: number, x: number): number {
     const sec = this.section(s);
     const edge = sec.r4;
     const t = Math.min(1, Math.abs(x) / edge[0]);
-    return lerp(sec.st.deck, edge[1], t * t);
+    const crowned = lerp(sec.st.deck, edge[1], t * t);
+    const flat = sec.st.flat ?? 0;
+    if (flat <= 0) return crowned;
+    const pillarX = edge[0] - this.spec.cabin.pillar;
+    const u = Math.min(1, Math.max(0, (Math.abs(x) - pillarX) / (edge[0] - pillarX)));
+    return lerp(crowned, lerp(sec.st.deck, edge[1], u), flat);
   }
 
   /** The tub's deck rows at s: fractions of the deck edge's half width. */
@@ -393,7 +403,7 @@ export function buildShell(frame: BodyFrame): ShellResult {
         const pb1 = bSide[i + 1]!;
         let owner = 'body';
         if (lower !== 'body' && i >= doorRow) owner = doorName(lower, side);
-        if (side < 0 && sMid > spec.flap.s0 && sMid < spec.flap.s1 && i >= flapRows[0]! && i < flapRows[1]!) {
+        if (side === (spec.flap.side === 'left' ? 1 : -1) && sMid > spec.flap.s0 && sMid < spec.flap.s1 && i >= flapRows[0]! && i < flapRows[1]!) {
           owner = 'flap';
         }
         shell.face(

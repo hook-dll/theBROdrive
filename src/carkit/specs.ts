@@ -17,11 +17,12 @@
  * cars' heights.
  */
 
+import { BODY_2102, BODY_2104, REAR_2102, REAR_2104 } from './estates';
 import { CABIN_2101, CABIN_2103, CABIN_2105, CABIN_2107 } from './interior';
 import type { KitCarSpec, KitLook } from './spec';
 
 /** The shape of a car: everything a spec holds but its id, its looks and its cabin. */
-type KitBody = Omit<KitCarSpec, 'id' | 'look' | 'cabinLayout'>;
+export type KitBody = Omit<KitCarSpec, 'id' | 'look' | 'cabinLayout'>;
 
 /**
  * A family's shell for one car: every `s` moved by `ds` (a bumper standing further out
@@ -561,7 +562,20 @@ const VAZ2108: KitCarSpec = {
 
 export const KIT_SPECS: Readonly<Record<string, KitCarSpec>> = {
   vaz2101: { id: 'vaz2101', ...onBody(BODY_124, -0.045, 4.073), look: LOOK_2101, cabinLayout: CABIN_2101 },
+  // The estates' rear bench stands where the saloons' does, not off their longer tail.
+  vaz2102: {
+    id: 'vaz2102',
+    ...onBody(BODY_2102, -0.045, 4.059),
+    look: { ...LOOK_2101, label: 'VAZ-2102', rear: REAR_2102 },
+    cabinLayout: { ...CABIN_2101, bench: { from: 'rearBase', offset: -1.155 } },
+  },
   vaz2103: { id: 'vaz2103', ...onBody(BODY_124, -0.02, 4.116), look: LOOK_2103, cabinLayout: CABIN_2103 },
+  vaz2104: {
+    id: 'vaz2104',
+    ...BODY_2104,
+    look: { ...LOOK_2105, label: 'VAZ-2104', rear: REAR_2104 },
+    cabinLayout: { ...CABIN_2105, bench: { from: 'rearBase', offset: -1.115 } },
+  },
   vaz2105: { id: 'vaz2105', ...BODY_05, look: LOOK_2105, cabinLayout: CABIN_2105 },
   vaz2106: { id: 'vaz2106', ...BODY_124, look: LOOK_2106 },
   vaz2107: { id: 'vaz2107', ...onBody(BODY_05, 0.012, 4.145), look: LOOK_2107, cabinLayout: CABIN_2107 },

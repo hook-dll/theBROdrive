@@ -43,7 +43,7 @@ function shellMotion(owner: string, frame: BodyFrame): KitMotion | undefined {
   if (owner === 'bonnet') return { channel: owner, kind: 'rot', axis: [1, 0, 0], amount: -0.95 };
   if (owner === 'boot') return { channel: owner, kind: 'rot', axis: [1, 0, 0], amount: 1.05 };
   if (owner === 'tailgate') return { channel: owner, kind: 'rot', axis: [1, 0, 0], amount: 1.25 };
-  if (owner === 'flap') return { channel: owner, kind: 'rot', axis: [0, 1, 0], amount: 1.6 };
+  if (owner === 'flap') return { channel: owner, kind: 'rot', axis: [0, 1, 0], amount: frame.spec.flap.side === 'left' ? -1.6 : 1.6 };
   if (owner.startsWith('window_')) {
     const drop = frame.spec.cabin.rail - frame.spec.cabin.glassTop - frame.station(frame.cowl).belt - frame.spec.cabin.glassBottom - 0.02;
     return { channel: owner, kind: 'pos', axis: [0, -1, 0], amount: drop };

@@ -36,6 +36,11 @@
   with a ring, full plastic cover, cast "daisy"), one per car instance on all four wheels,
   picked by its appearance key (`Template.wheelStyles`). The lab's `Экземпляр` slider and
   `?variant=` step through instances.
+- Kit estates `kit_vaz2102` and `kit_vaz2104` (`src/carkit/estates.ts`, measured in
+  `measurements-estates.md`): their saloons' fronts on a roof run to the tail, quarter glass,
+  a roof-hinged tailgate with a flat sill (`TubStation.flat`) between corner lamps, the
+  filler on the left (`flap.side`), and a load floor from the rear bench back
+  (`loadSpaceStart`).
 
 - THE VAZ-1111 OKA IN THE PACK'S STYLE (`cf_vaz1111`) REPLACES the GTA SA Oka (`sa_oka` is
   gone from the catalogue, its `oka.glb`, `tools/oka-author.py` and the trim-plate rear screen

@@ -36,6 +36,11 @@ export interface TubStation {
   readonly wSill: number;
   readonly wCrease: number;
   readonly wBelt: number;
+  /**
+   * 0 (default): the deck crowns from its edge to the centre line. 1: it lies level out
+   * to the pillar row and rises straight to the edge there — an estate's tailgate sill.
+   */
+  readonly flat?: number;
 }
 
 /** Who owns one strip of the greenhouse side, between a column and the next. */
@@ -117,8 +122,8 @@ export interface KitCarSpec {
   readonly bonnetFront: number;
   /** Boot lid from the back light's base to this s; a tailgate when absent. */
   readonly bootEnd?: number;
-  /** Fuel flap on the right side: s range and height range. */
-  readonly flap: { readonly s0: number; readonly s1: number; readonly y0: number; readonly y1: number };
+  /** Fuel flap on a rear wing (the right one unless `side` says left): s and height ranges. */
+  readonly flap: { readonly s0: number; readonly s1: number; readonly y0: number; readonly y1: number; readonly side?: 'left' | 'right' };
   readonly look: KitLook;
   /** Per-car changes to the platform's cabin layout (interior.ts `LAYOUTS`): another dash, wheel or gauges. */
   readonly cabinLayout?: CabinLayoutOverride;
