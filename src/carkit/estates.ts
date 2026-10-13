@@ -105,8 +105,8 @@ export const BODY_2104: KitBody = {
   length: 4.12, // [D 4.124; passport 4.115]
   platform: 'classic',
   stations: [
-    { s: 0.05, sill: 0.36, crease: 0.76, belt: 0.795, deck: 0.82, wSill: 0.74, wCrease: 0.755, wBelt: 0.745 }, // BODY_05
-    { s: 0.35, sill: 0.36, crease: 0.763, belt: 0.868, deck: 0.913, wSill: 0.77, wCrease: 0.79, wBelt: 0.77 }, // BODY_05
+    { s: 0.05, sill: 0.36, crease: 0.76, belt: 0.84, deck: 0.875, wSill: 0.74, wCrease: 0.755, wBelt: 0.745 }, // BODY_05
+    { s: 0.35, sill: 0.36, crease: 0.763, belt: 0.87, deck: 0.925, wSill: 0.77, wCrease: 0.79, wBelt: 0.77 }, // BODY_05
     { s: 0.9, sill: 0.265, crease: 0.766, belt: 0.878, deck: 0.968, wSill: 0.77, wCrease: 0.81, wBelt: 0.775 }, // BODY_05
     { s: 1.0, sill: 0.268, crease: 0.766, belt: 0.88, deck: 1.0, wSill: 0.77, wCrease: 0.81, wBelt: 0.775 }, // BODY_05
     { s: 2.1, sill: 0.258, crease: 0.767, belt: 0.885, deck: 0.92, wSill: 0.77, wCrease: 0.81, wBelt: 0.775 }, // BODY_05
