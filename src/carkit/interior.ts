@@ -1133,12 +1133,21 @@ class Cabin {
       lens(n.color(DOME_LIT), 'lamp_glow', ly - 0.0005 + GLOW_TRAVEL);
     }, false);
 
-    // Mirror: hung from the header on a stem, well behind the screen.
-    const [[sb, yb], [st, yt]] = glass(0, 'front');
-    const atGlass = (y: number): number => lerp(sb, st, (y - yb) / (yt - yb));
+    // Mirror: hung from the header on a stem, behind the screen. Placed from the glass at
+    // the pad's corners, not at its centre: on the Samaras' and tens' raked screens the glass
+    // at the pad's top edge stands 5 cm further back than at its middle, and a fixed 7 cm
+    // from the middle put the top 15-23 mm through the screen.
+    const glassS = (x: number, y: number): number => {
+      const [[sb, yb], [st, yt]] = glass(x, 'front');
+      return lerp(sb, st, (y - yb) / (yt - yb));
+    };
     const my = cab.rail - 0.085;
-    const ms = atGlass(my) + 0.07;
-    const root = this.P(0, cab.rail - 0.01, atGlass(cab.rail - 0.01) + 0.03);
+    // Pad half size 0.105 x 0.03 x 0.014, turned 0.1 rad towards the driver: its far end
+    // swings 1 cm towards the glass. 4 cm is added in front of the nearest corner: the
+    // screen bows ahead of this straight foot-to-top line, so the air left is 2-3 cm
+    // (tools measured: Samaras 22 mm, classics 30 mm, ahead of the mirror).
+    const ms = Math.max(...[-0.105, 0.105].flatMap((x) => [my - 0.03, my + 0.03].map((y) => glassS(x, y)))) + 0.014 + 0.0105 + 0.04;
+    const root = this.P(0, cab.rail - 0.01, glassS(0, cab.rail - 0.01) + 0.03);
     b.color(COLOURS.black);
     beam(b, 'trim', root, this.P(0, my + 0.02, ms), 0.008, 0.008, [1, 0, 0]);
     b.pushAt(this.P(0, my, ms), [0.12, 0.1, 0]);

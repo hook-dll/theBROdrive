@@ -542,6 +542,13 @@
 
 ### Fixed
 
+- KIT REAR-VIEW MIRROR NO LONGER THROUGH THE SCREEN (`carkit/interior.ts` `headliner`).
+  It stood a fixed 7 cm behind the glass at its own centre; on the Samaras' and tens'
+  raked screens the glass at the pad's top edge is 5 cm further back, and the mirror came
+  through by 23 mm (2108/09/099/2115) and 14.5 mm (2110/2112). It is now placed from the
+  glass at the pad's corners: measured on all 13 bodies (throwaway raycast against the
+  screen glass), nothing through, 22-30 mm of air ahead of it.
+
 - KIT GAUGES: THE SPEEDOMETER AND TACHOMETER FOLLOW THE CAR (`carkit/rig.ts`). Both are fed
   in km/h and rpm but eased at 2.5 units a second, so 0-100 km/h took 40 s on the dial and
   idle-to-4000 rpm about 20 min; they now follow at once like the HUD's dials. Checked: a
