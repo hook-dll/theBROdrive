@@ -39,6 +39,7 @@ import { loadCarModel } from './render/carmodel';
 import { CAR_LAMP_KNEE } from './render/materials';
 import { preloadTrailerModel } from './render/trailermodel';
 import { itemProgramAnchor } from './render/partmesh';
+import { FarCarField, nearDrawEstimate } from './render/farcars';
 import { CarMirrors, mirrorProgramAnchor } from './render/carmirrors';
 import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
 import { Interaction } from './player/interaction';
@@ -472,6 +473,9 @@ async function boot(): Promise<void> {
     itemProgramAnchor(),
     mirrorProgramAnchor(),
   );
+  // Far traffic draws as one instance per model; built now so its hidden anchor links the
+  // shared far-car program behind the loading cover (render/farcars.ts).
+  const farCars = new FarCarField(renderer.scene);
   /** Reused receiver for the nearest dancer's sound; see `DancerField.heard`. */
   const dancerSound: DancerHeard = { x: 0, y: 0, z: 0, flapMps: 0, airRate: 0 };
   /**
@@ -2196,7 +2200,7 @@ async function boot(): Promise<void> {
     frameProfiler?.begin('vehicles');
     Vehicle.viewFrom(renderer.camera.position, frameDt);
     for (const vehicle of vehicles.values()) vehicle.syncVisuals(alpha);
-    traffic.syncVisuals(alpha);
+    traffic.syncVisuals(alpha, farCars);
     // Trailer physics advances and snapshots in the fixed step exactly like cars,
     // but its scene root must also consume those snapshots every rendered frame.
     // Without this call the rigid body and hitch moved while the GLB stayed forever
@@ -2864,6 +2868,24 @@ async function boot(): Promise<void> {
       courierAt: (index: number) => courierStop(world.seed, index),
       // `mirrors.stats.renders` counts mirror passes; `mirrors.enabled = false` is the A/B.
       mirrors: carMirrors,
+      // `farCars.enabled = false` draws every traffic car in full, for the A/B; `stats`
+      // counts this frame's far cars, the models they drew as, and the draws they save.
+      farCars: {
+        get enabled(): boolean {
+          return farCars.enabled;
+        },
+        set enabled(on: boolean) {
+          farCars.enabled = on;
+        },
+        get stats(): { cars: number; models: number; drawsSaved: number } {
+          let full = 0;
+          traffic.forEachVehicle((_, vehicle) => {
+            if (!vehicle.root.visible) full += nearDrawEstimate(vehicle.root);
+          });
+          // Each model drawn far is one draw in the scene pass and one in the sun's.
+          return { ...farCars.stats, drawsSaved: full - farCars.stats.models * 2 };
+        },
+      },
     });
   }
 

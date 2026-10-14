@@ -7,6 +7,7 @@ import { hash01, mulberry32 } from '../core/rng';
 import { createServiceableCarState, poseOnGround } from '../game/spawn';
 import { GameWorld, newWorldState } from '../game/state';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
+import type { FarCarField } from '../render/farcars';
 import {
   Autopilot,
   AUTOPILOT_MODES,
@@ -241,6 +242,14 @@ const STUCK_RECYCLE_S = 18;
 const FELL_OUT_M = 30;
 /** Up-axis height below which a still car is a wreck (on its side, its end or its roof). */
 const WRECK_UP_MAX = 0.5;
+/** An impact this hard, m/s, counts in `TrafficStatus.impacts` and shows the car in full. */
+const IMPACT_MPS = 1.8;
+/**
+ * Seconds a car is drawn in full after an impact (`IMPACT_MPS`), however far: the far
+ * mesh is a car standing square on its wheels, and one that is tumbling, sliding sideways
+ * or settling on a wheel it lost does not stand like that.
+ */
+const CRASH_FULL_DETAIL_S = 5;
 /** A car standing below this, m/s, with its plan wanting this far across, is blocked. */
 const BOTTLENECK_STILL_MPS = 1;
 const BOTTLENECK_ACROSS_M = 0.8;
@@ -751,6 +760,8 @@ interface TrafficCar {
   rails: TrafficRails | null;
   /** Seconds before this car may be put on rails again; see RAILS_PASS_HOLDOFF_S. */
   railsHoldoff: number;
+  /** Seconds it is still drawn in full after a crash; see CRASH_FULL_DETAIL_S. */
+  fullDetailFor: number;
   /** Driven for a race (see `RivalSpawn`): exempt from trim, recycle and the count. */
   rival: boolean;
   /** A rival's hand-in at a lay-by; see `RivalHandIn`. */
@@ -2226,6 +2237,7 @@ export class RoadTraffic {
         }
       }
       if (car.railsHoldoff > 0) car.railsHoldoff -= dt;
+      if (car.fullDetailFor > 0) car.fullDetailFor -= dt;
       if (car.rails) {
         if (
           Math.abs(car.forwardS - playerS) >= RAILS_WAKE_M &&
@@ -2620,12 +2632,26 @@ export class RoadTraffic {
     for (const car of this.carList) {
       car.vehicle.postStep();
       const impact = car.vehicle.lastImpact;
-      if (impact && impact.severityMps > 1.8) this.impactCount++;
+      if (impact && impact.severityMps > IMPACT_MPS) {
+        this.impactCount++;
+        car.fullDetailFor = CRASH_FULL_DETAIL_S;
+      }
     }
   }
 
-  syncVisuals(alpha: number): void {
-    for (const car of this.carList) car.vehicle.syncVisuals(alpha);
+  /**
+   * Poses every car for this frame, the far ones as instances of their model's far mesh
+   * (`far`, render/farcars.ts). A crashed car, and a wreck on its side, end or roof, is
+   * drawn in full: see CRASH_FULL_DETAIL_S.
+   */
+  syncVisuals(alpha: number, far: FarCarField): void {
+    far.begin();
+    for (const car of this.carList) {
+      const q = car.vehicle.root.quaternion;
+      const upright = 1 - 2 * (q.x * q.x + q.z * q.z) >= WRECK_UP_MAX;
+      car.vehicle.syncVisuals(alpha, car.fullDetailFor <= 0 && upright ? far : null);
+    }
+    far.end();
   }
 
   dispose(): void {
@@ -2872,6 +2898,7 @@ export class RoadTraffic {
       turnS: -1,
       rails: null,
       railsHoldoff: 0,
+      fullDetailFor: 0,
       rival: false,
       handIn: 'none',
       headWait: 0,

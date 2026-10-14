@@ -124,8 +124,11 @@ const LENS_EMISSIVE: Readonly<Record<LensRole, number>> = {
   blink_r: 0xff8a00,
 };
 
-/** Groups a far car stops drawing: the cabin, the engine bay, the boot and the underbody. */
-const DETAIL_GROUPS = new Set(['kit_cabin', 'kit_bay', 'kit_boot', 'kit_under']);
+/**
+ * Groups a far car stops drawing: the cabin, the engine bay, the boot and the underbody.
+ * The far traffic mesh leaves them out too (render/farcars.ts `bakeFarCarGeometry`).
+ */
+export const KIT_DETAIL_GROUPS: ReadonlySet<string> = new Set(['kit_cabin', 'kit_bay', 'kit_boot', 'kit_under']);
 /** Clear glass opacity near, and the tinted mirror it stands in for far away. */
 const GLASS_NEAR_OPACITY = 0.28;
 const GLASS_FAR_OPACITY = 0.9;
@@ -310,7 +313,7 @@ class SinkingPane {
  */
 export function poseKitStatic(root: THREE.Object3D): void {
   root.traverse((node) => {
-    if (DETAIL_GROUPS.has(node.name)) node.visible = false;
+    if (KIT_DETAIL_GROUPS.has(node.name)) node.visible = false;
     if (node instanceof THREE.Mesh && node.material instanceof THREE.MeshStandardMaterial && node.material.name === 'car-glass-clear') {
       node.material.opacity = GLASS_FAR_OPACITY;
     }
@@ -337,7 +340,7 @@ export class KitRig {
   /** `ownLenses` gives this car its own lens materials (the lab; a Vehicle binds its own). */
   constructor(root: THREE.Object3D, ownLenses = true) {
     root.traverse((node) => {
-      if (DETAIL_GROUPS.has(node.name)) this.detail.push(node);
+      if (KIT_DETAIL_GROUPS.has(node.name)) this.detail.push(node);
       if (node instanceof THREE.Mesh && node.material instanceof THREE.MeshStandardMaterial && node.material.name === 'car-glass-clear') {
         if (!this.glass.includes(node.material)) this.glass.push(node.material);
       }

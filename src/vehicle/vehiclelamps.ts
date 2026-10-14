@@ -134,6 +134,20 @@ const LENS_GRIME_BEAM_LOSS = 0.35;
 const TAILLIGHT_EMISSIVE = 0xff0000;
 const REVERSE_LIGHT_EMISSIVE = 0xf4f7ff;
 const BLINKER_EMISSIVE = 0xff8a00;
+/**
+ * The colour each switched lens role glows in, in the order of a model's lamp role
+ * selectors (head, tail, stop, reverse, left and right blinker; render/carmodel.ts
+ * `lampRoleSelectors`) and of `VehicleLamps.lensLevel`. The far traffic mesh lights its
+ * lenses from it (render/farcars.ts).
+ */
+export const LENS_ROLE_EMISSIVE: readonly number[] = [
+  HEADLIGHT_EMISSIVE,
+  TAILLIGHT_EMISSIVE,
+  TAILLIGHT_EMISSIVE,
+  REVERSE_LIGHT_EMISSIVE,
+  BLINKER_EMISSIVE,
+  BLINKER_EMISSIVE,
+];
 
 const TAILLIGHT_BEAM = {
   distance: 6,
@@ -336,6 +350,25 @@ export class VehicleLamps {
       this.leftBlinkerMaterials,
       this.rightBlinkerMaterials,
     ];
+  }
+
+  /**
+   * How brightly lens role `role` (an index into `LENS_ROLE_EMISSIVE`) glows this instant,
+   * as it leaves the lens: its lenses' `emissiveIntensity`, which every control above
+   * writes to all of a role's lenses at once, through the dust the lens shader takes off
+   * it (`GRIME_EMISSIVE` in render/materials.ts; keep the two in step). 0 for a role the
+   * model has no lens for.
+   */
+  lensLevel(role: number): number {
+    const materials =
+      role === 0 ? this.headlightLensMaterials
+      : role === 1 ? this.taillightMaterials
+      : role === 2 ? this.brakeLightMaterials
+      : role === 3 ? this.reverseLightMaterials
+      : role === 4 ? this.leftBlinkerMaterials
+      : this.rightBlinkerMaterials;
+    const film = Math.min(1.1 * this.grime, 1);
+    return (materials[0]?.emissiveIntensity ?? 0) * (1 - 0.8 * film);
   }
 
   /** Share of a beam that gets through the dust on its lens. */

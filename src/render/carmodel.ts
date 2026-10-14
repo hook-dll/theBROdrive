@@ -46,6 +46,8 @@ import {
 import { lampLensAnchors } from '../vehicle/vehiclelamps';
 import { buildKitCar } from '../carkit/kit';
 import { poseKitStatic } from '../carkit/rig';
+import { MATERIALS_CONFIG } from '../config';
+import { bakeFarCarGeometry, type FarCarSurface } from './farcars';
 import { KIT_DRIVER_EYE_NODE, KIT_REAR_EYE_NODE } from '../carkit/interior';
 import { KIT_BONNET_CELL_NODE } from '../carkit/bay';
 import { KIT_FILLER_NODE } from '../carkit/exterior';
@@ -1693,6 +1695,9 @@ export function loadCarModel(id: string): Promise<void> {
       const anchor = await buildProgramAnchor(id);
       programAnchors.add(anchor);
       if (programCompiler) await programCompiler(anchor);
+      // A frame of its own like every other step; its program is the boot anchor's
+      // (render/farcars.ts), so it needs no compiling.
+      farGeometries.set(id, await onOwnFrame(() => buildFarGeometry(template(id))));
       readyModels.add(id);
     })().catch((error: unknown) => {
       modelReadiness.delete(id);
@@ -1741,12 +1746,11 @@ function selectedWheels(t: Template, appearanceKey: string): ReadonlyMap<string,
 }
 
 /**
- * Clones a wheel style from the selected set while keeping this body's measured
- * factory rolling radius. The source set contributes mesh, rim and tyre appearance;
- * chassis geometry remains the target model's responsibility.
+ * Clones a wheel style from `source` (a set: `selectedWheels`) while keeping this body's
+ * measured factory rolling radius. The source set contributes mesh, rim and tyre
+ * appearance; chassis geometry remains the target model's responsibility.
  */
-function cloneWheels(t: Template, appearanceKey: string): Map<string, THREE.Object3D> {
-  const source = selectedWheels(t, appearanceKey);
+function cloneWheels(t: Template, source: ReadonlyMap<string, THREE.Object3D>): Map<string, THREE.Object3D> {
   const wheels = new Map<string, THREE.Object3D>();
   for (const targetWheel of t.measure.wheels) {
     const mesh = source.get(targetWheel.id)!.clone(true);
@@ -1814,7 +1818,7 @@ interface StaticCarInstance {
 }
 
 function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInstance {
-  const wheels = cloneWheels(t, appearanceKey);
+  const wheels = cloneWheels(t, selectedWheels(t, appearanceKey));
   const body = t.body.clone(true);
   const paint = cloneCarBodyPaintMaterials(body, t, appearanceKey);
   const glass = cloneCarGlass(body, paint);
@@ -1919,7 +1923,7 @@ function cloneStaticModel(t: Template, appearanceKey = t.def.id): StaticCarInsta
   const glass = cloneCarGlass(body, paint);
   applyRandomPaint(body, t.def, appearanceKey);
   if (t.def.kit) poseKitStatic(body);
-  const wheels = cloneWheels(t, appearanceKey);
+  const wheels = cloneWheels(t, selectedWheels(t, appearanceKey));
   addSpareWheel(body, t, wheels);
   group.add(body);
   for (const wheel of t.measure.wheels) {
@@ -1928,6 +1932,64 @@ function cloneStaticModel(t: Template, appearanceKey = t.def.id): StaticCarInsta
     group.add(mesh);
   }
   return { model: group, paint, glass };
+}
+
+/** Each loaded model's far traffic mesh (`buildFarGeometry`), built once as it loads. */
+const farGeometries = new Map<string, THREE.BufferGeometry>();
+
+/**
+ * One model's far traffic mesh (render/farcars.ts): the body in the pose a static shell
+ * stands in (`cloneStaticModel`: shut, without the kit's cabin, bay, boot and underbody)
+ * on the model's OWN wheels, every part in its own colour and finish, the paint left to
+ * the instance and the lenses to the car's lamps. Its own set rather than one from the
+ * pool a near car wears (`selectedWheels`): one mesh serves every car of the model, and a
+ * pool set takes its colours from the Soviet atlas, which no vertex colour carries. A
+ * wheel is a few pixels across from there.
+ */
+function buildFarGeometry(t: Template): THREE.BufferGeometry {
+  const def = t.def;
+  const roles = lampRoleSelectors(def);
+  const roots: THREE.Object3D[] = [t.body];
+  const wheels = cloneWheels(t, t.wheels);
+  if (t.spare) {
+    // `addSpareWheel`, in the chassis frame the mount is measured in.
+    const mount = new THREE.Group();
+    mount.position.copy(t.spare.centre);
+    mount.rotation.y = t.spare.yaw;
+    mount.add(wheels.get('wheel_rl')!.clone(true));
+    roots.push(mount);
+  }
+  for (const wheel of t.measure.wheels) {
+    const mesh = wheels.get(wheel.id)!;
+    mesh.position.set(wheel.pos[0], wheel.pos[1], wheel.pos[2]);
+    roots.push(mesh);
+  }
+  const describe = (mesh: THREE.Mesh, material: THREE.Material): FarCarSurface | null => {
+    // Every lit kit slot is a standard material. The one unlit slot, `lamp_glow`, lights
+    // only the cabin's lamps, and the far mesh has no cabin.
+    if (!(material instanceof THREE.MeshStandardMaterial)) return null;
+    const paint = isRandomPaintMesh(mesh, def) && isPaintSlot(material, def);
+    // The role `VehicleLamps.bindLampMaterials` binds the lens by: mesh name, then material.
+    const role = roles.findIndex((selectors) => selectors.includes(mesh.name) || selectors.includes(material.name));
+    return {
+      color: material.color,
+      vertexColors: material.vertexColors,
+      paint,
+      // The finish `makeCarBodyConditionMaterial` gives every car's paint.
+      roughness: paint ? MATERIALS_CONFIG.paintRoughness : material.roughness,
+      metalness: paint ? MATERIALS_CONFIG.paintMetalness : material.metalness,
+      lamp: role + 1,
+    };
+  };
+  return bakeFarCarGeometry(roots, describe);
+}
+
+/**
+ * A loaded model's far traffic mesh (`buildFarGeometry`), shared by every far car of it;
+ * null until `loadCarModel` has built it.
+ */
+export function carModelFarGeometry(id: string): THREE.BufferGeometry | null {
+  return farGeometries.get(id) ?? null;
 }
 
 /**
@@ -2016,6 +2078,8 @@ export function disposeCarModelCache(): void {
     dispose(t.body);
     for (const wheel of t.wheels.values()) dispose(wheel);
   }
+  for (const geometry of farGeometries.values()) geometry.dispose();
+  farGeometries.clear();
   templates.clear();
   modelLoads.clear();
   paletteLoads.clear();

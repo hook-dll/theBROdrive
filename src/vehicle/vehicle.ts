@@ -62,11 +62,14 @@ import {
 import { Drivetrain, matchGearbox } from './drivetrain';
 import {
   STEERING_WHEEL_NODE,
+  carModelFarGeometry,
   carModelMeasure,
   createCarModel,
   type CarModelMeasure,
 } from '../render/carmodel';
 import type { CarBodySurface } from '../render/carsurface';
+import { FAR_CAR_ENTER_M, FAR_CAR_EXIT_M, type FarCarField } from '../render/farcars';
+import { carPaintSeenFromAfar } from '../render/materials';
 import { carPaintColor, type CarPaint } from './carpaint';
 import type { ContactPatchField } from '../render/contactpatches';
 import { patchOpacity } from '../render/contactpatches';
@@ -1005,6 +1008,9 @@ export class Vehicle implements Rebasable {
   /** The respray last written into the paint; null means the factory colour. */
   private appliedPaint: CarPaint | null = null;
   private readonly paintScratch = new THREE.Color();
+  /** Past the far line from the eye at the last frame; see `drawFar`. */
+  private farSide = false;
+  private readonly farPaint = new THREE.Color();
   private bodyConditionEmitTimer = 0;
   private lastAuthOil: number;
   private fluidEmitTimer = 0;
@@ -3603,7 +3609,13 @@ export class Vehicle implements Rebasable {
     return this.surface;
   }
 
-  syncVisuals(alpha: number): void {
+  /**
+   * Poses the visual root at this frame's interpolated pose. `far`, given for traffic
+   * only, lets a car beyond `FAR_CAR_ENTER_M` of the eye be drawn as an instance of its
+   * model's far mesh instead (render/farcars.ts); the car the player sits in is never
+   * that far from the camera.
+   */
+  syncVisuals(alpha: number, far: FarCarField | null = null): void {
     const controller = this.controller;
     if (!controller) return;
 
@@ -3639,6 +3651,13 @@ export class Vehicle implements Rebasable {
 
     this.lamps.applyRearLightState();
 
+    // Drawn far, the root hides and nothing below is seen: wheels, steering wheel, the
+    // kit rig. The pose above stays current, since the light pool projects this car's
+    // beams from it either way.
+    const drawnFar = far !== null && this.drawFar(far);
+    this.rootGroup.visible = !drawnFar;
+    if (drawnFar) return;
+
     // Wheels are chassis-local, and interpolated between the last two steps exactly as
     // the chassis is (see `spinPrev`).
     for (const w of this.wheels) {
@@ -3664,6 +3683,23 @@ export class Vehicle implements Rebasable {
         (this.steerCommand / this.model.steerLock) * STEERING_WHEEL_HALF_LOCK_RAD;
     }
     if (this.kitRig) this.driveKit(this.kitRig);
+  }
+
+  /**
+   * Adds this car to `far` if it stands beyond the far line from the eye: out past
+   * `FAR_CAR_ENTER_M`, back in inside `FAR_CAR_EXIT_M`. False while it is nearer, before
+   * the first eye is known, before its model's far mesh is built, or when the field
+   * turns it away; it is then drawn in full.
+   */
+  private drawFar(far: FarCarField): boolean {
+    if (!kitEyeKnown || !this.surface) return false;
+    const distance = this.rootGroup.position.distanceTo(kitEye);
+    this.farSide = distance > (this.farSide ? FAR_CAR_EXIT_M : FAR_CAR_ENTER_M);
+    if (!this.farSide) return false;
+    const geometry = carModelFarGeometry(this.model.id);
+    if (!geometry) return false;
+    carPaintSeenFromAfar(this.surface.paint, this.localBodyDirt, this.farPaint);
+    return far.add(geometry, this.rootGroup.position, this.rootGroup.quaternion, this.farPaint, this.lamps);
   }
 
   /**

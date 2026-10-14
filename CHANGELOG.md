@@ -4,6 +4,17 @@
 
 ### Added
 
+- FAR TRAFFIC CARS ARE ONE DRAW PER MODEL (`render/farcars.ts`, `render/carmodel.ts`
+  `carModelFarGeometry`, `vehicle/vehicle.ts` `syncVisuals`, `world/traffic.ts`). Each
+  kit model gets one merged, shut far mesh at load (no cabin, bay, boot or underbody,
+  opaque tinted glass); a traffic car beyond 60 m (back near inside 50 m) hides its full
+  model and becomes an instance of its model's mesh, its paint and dust per instance,
+  its lenses lit from its own lamps (beams, tails, brakes, reverse, blinkers), casting a
+  sun shadow. Player-owned and parked cars, and a car just hit or on its side, stay full.
+  Measured on the M2 Pro (High, 16-19 far cars, alternating 5 s windows):
+  `__bro.farCars.enabled` on 517-618 draw calls and 2.4-2.9 ms render CPU, off
+  1124-1129 and 4.9-5.0 ms; no program linked after boot, no shader errors.
+
 - THE CABIN OPENS TO THE OUTSIDE BY ITS WINDOWS AND DOORS (`audio/cabinopenness.ts`,
   `AudioMixer.setCabinShell`, `audio/vehicleaudio.ts`, `audio/ambience.ts`). Every outside
   sound — the air, rain, animals, the other traffic, crashes and the open country's

@@ -1263,6 +1263,7 @@ specularStrength *= 1.0 - 0.85 * grimeFilm;`;
 // A lens under dust lets out a good deal less, and what it lets out has come through
 // sand: warmer, a dim amber rather than a white bulb. The loss has to be large to show
 // at all — a lit lens is several times over white, and a mild cut stays clipped white.
+// The far traffic mesh dims its lenses the same way (vehicle/vehiclelamps.ts `lensLevel`).
 const GRIME_EMISSIVE = `#include <emissivemap_fragment>
 totalEmissiveRadiance *= ( 1.0 - 0.8 * grimeFilm ) * mix( vec3( 1.0 ), vec3( 1.0, 0.8, 0.55 ), grimeFilm );`;
 
@@ -1365,6 +1366,26 @@ export function weatherStaticCarPaint(paint: readonly THREE.Material[], dust: nu
     material.roughness += (0.96 - material.roughness) * dust;
     material.metalness *= 1 - dust;
   }
+}
+
+/**
+ * Share of the paint the condition shader's dust covers on a car seen side-on at full
+ * dirt, judged from its terms (CAR_BODY_CONDITION): a crust over the sills, arches and
+ * tail, a thin film above. The far traffic mesh has no wear shader and takes this mean.
+ */
+const FAR_PAINT_DUST_SHARE = 0.5;
+
+/**
+ * The colour one car's paint reads as from far away (render/farcars.ts): its own paint,
+ * either kind (`setCarBodyPaintColor`), pulled toward the dust by `dirt`.
+ */
+export function carPaintSeenFromAfar(paint: readonly THREE.Material[], dirt: number, out: THREE.Color): THREE.Color {
+  const material = paint[0];
+  const uniforms = material ? carBodyUniforms.get(material) : undefined;
+  if (uniforms !== undefined && uniforms.palettePaint.value > 0) out.copy(uniforms.paintColor.value);
+  else if (material instanceof THREE.MeshStandardMaterial) out.copy(material.color);
+  else out.setRGB(1, 1, 1);
+  return out.lerp(STATIC_DUST_COLOR, FAR_PAINT_DUST_SHARE * dirt);
 }
 
 /** Applies cosmetic wear, with irreversible engine destruction forced visibly burnt. */
