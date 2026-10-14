@@ -419,6 +419,17 @@ const KIT_VEHICLE_CHANNELS: Readonly<Record<string, true>> = {
 /** The shell's own panels (doors, lids, flap): outside parts, not cabin fittings. */
 const KIT_SHELL_PART = /^(door_|bonnet$|boot$|tailgate$|flap$)/;
 
+/** Lids opened only from outside: from a seat they are not offered. */
+const KIT_LID_PART = /^(bonnet|boot|tailgate)$/;
+
+/**
+ * Parts worked only through their own control: a door's pane by its crank
+ * (`crank_*`), the wiper arms by the stalk (`stalk_wipers`). The pane is looked
+ * through like fixed glass; an arm stops the ray and offers nothing.
+ */
+const KIT_PANE_PART = /^window_/;
+const KIT_WIPER_ARMS = 'wipers';
+
 /** A front seat's parts, by the channel's position; the rear bench is `KIT_BENCH_NODE`. */
 const KIT_FRONT_SEAT = /^(?:seat|seatback|headrest)_(f[lr])$/;
 /**
@@ -1577,8 +1588,9 @@ export class Interaction {
    * (on foot, within VEHICLE_RANGE) or sits in.
    *
    * Reach rules on the part found: the channels the Vehicle drives itself are not
-   * offered (`KIT_VEHICLE_CHANNELS`), and on foot only the shell's panels are
-   * (`KIT_SHELL_PART`): a window, a vent or a cabin fitting is worked from a seat.
+   * offered (`KIT_VEHICLE_CHANNELS`), nor a drop pane or the wiper arms (worked by the
+   * crank and the stalk); on foot only the shell's panels are (`KIT_SHELL_PART`), and
+   * from a seat every part but the lids (`KIT_LID_PART`).
    */
   private aimKit(
     vehicle: Vehicle,
@@ -1608,7 +1620,8 @@ export class Interaction {
     for (const hit of this.hits) {
       if (!(hit.object as THREE.Mesh).isMesh || !shownUnder(hit.object, root)) continue;
       const picked = KitRig.controlOf(hit.object);
-      if (!picked && isGlassHit(hit)) {
+      const pane = picked !== null && KIT_PANE_PART.test(picked.control.id);
+      if ((!picked || pane) && isGlassHit(hit)) {
         aim.throughGlass = true;
         continue;
       }
@@ -1617,9 +1630,11 @@ export class Interaction {
       aim.seat = this.kitSeatOf(hit);
       if (
         picked
+        && !pane
+        && picked.control.id !== KIT_WIPER_ARMS
         && !KIT_VEHICLE_CHANNELS[kitAction(picked.control).channel]
         && !KIT_SEAT_PART.test(picked.control.id)
-        && (seated || KIT_SHELL_PART.test(picked.control.id))
+        && (seated ? !KIT_LID_PART.test(picked.control.id) : KIT_SHELL_PART.test(picked.control.id))
       ) {
         aim.part = picked;
       }

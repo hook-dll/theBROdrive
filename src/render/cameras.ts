@@ -77,6 +77,14 @@ const RECENTER_EPSILON = 1e-3;
 const CHASE_RECENTER_IDLE_SECONDS = 6;
 /** The cabin view waits this long after the last look input before facing the road again. */
 const CABIN_RECENTER_IDLE_SECONDS = 3;
+/**
+ * Cabin-view near plane, metres. The eye sits 5-10 cm from the roof lining, the pillar
+ * and the head restraint as the head turns, and `CAMERA_NEAR` (0.08) cut through them
+ * to the sky. 2 cm keeps trim in front of the eye. The cost is depth steps 4x coarser
+ * across the scene (24-bit depth): a 1 mm gap now fights beyond ~13 m instead of ~26 m,
+ * which from the seat is the world outside, not the cabin.
+ */
+const CABIN_NEAR = 0.02;
 /** Automatic horizontal return is gentler than the explicit V-key snap. */
 const CHASE_RECENTER_OMEGA = 2;
 /** Ignore sub-pixel touch jitter when deciding whether horizontal look is active. */
@@ -1304,11 +1312,13 @@ export class CameraRig {
   }
 
   /**
-   * Hands the live FOV and the near plane kept in step with the far one to the camera,
-   * and rebuilds its projection only when one of them changed.
+   * Hands the live FOV and the near plane to the camera, and rebuilds its projection
+   * only when one of them changed. Outside the cabin the near plane is kept in step
+   * with the far one; in the cabin view it drops to `CABIN_NEAR`, so the headliner,
+   * pillars and head restraints a hand's width from the eye are drawn, not sliced open.
    */
   private updateProjection(): void {
-    const targetNear = nearPlaneForFarPlane(this.camera.far);
+    const targetNear = this._mode === 'cabin' ? CABIN_NEAR : nearPlaneForFarPlane(this.camera.far);
     let projectionChanged = false;
     if (Math.abs(this.fov - this.camera.fov) > FOV_EPSILON) {
       this.camera.fov = this.fov;
