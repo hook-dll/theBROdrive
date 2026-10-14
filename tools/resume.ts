@@ -77,7 +77,7 @@ installVehicleAutosave(
 
 /** One autosave, through the real trigger, drained to its microtask. */
 async function autosave(): Promise<void> {
-  world.apply({ t: 'enter_car', carId: 'car:none' });
+  world.apply({ t: 'enter_car', carId: 'car:none', seat: 'driver' });
   await Promise.resolve();
 }
 

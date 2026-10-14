@@ -3,13 +3,14 @@ import { createItemMesh, disposeItemMeshResources, setPocketWatchState } from '.
 import { setPartCondition } from './materials';
 import type { Vehicle } from '../vehicle/vehicle';
 import {
+  bonnetGridOnLid,
+  storageCellBox,
+  storageCellCount,
   TRUNK_CELL_COUNT,
-  TRUNK_CELL_HEIGHT,
-  storageGridColumns,
-  storageCellLocal,
-  trunkGridWidth,
+  type StorageGridShape,
   type TrunkViewState,
 } from '../vehicle/trunk';
+import { carModelMeasure } from './carmodel';
 import type { WorldOrigin } from '../world/origin';
 import type { WreckTrunk } from '../world/wrecktrunks';
 import type { CourierTrunk } from '../world/couriers';
@@ -17,6 +18,13 @@ import type { CourierTrunk } from '../world/couriers';
 const CELL_INSET = 0.9;
 const ITEM_FIT = 0.68;
 const ITEM_FORWARD = 0.045;
+/**
+ * A bonnet part fills its cell: it stands where the real one does, so it is drawn at
+ * the size the room allows rather than as a thumbnail.
+ */
+const BONNET_ITEM_FIT = 0.92;
+/** A bonnet cell's panel lies on the cell's floor, lifted off whatever is under it. */
+const BONNET_PANEL_LIFT = 0.006;
 const CONDITION_PROGRAM_KEY = 'condition-rust-dirt-v1';
 /**
  * Display pose inside a holder whose +Z points at the eye (Euler XYZ). The generic
@@ -31,7 +39,10 @@ const _box = new THREE.Box3();
 const _size = new THREE.Vector3();
 const _centre = new THREE.Vector3();
 
-/** World-space 4x2 trunk cells with real miniature item meshes and no labels. */
+/**
+ * World-space storage cells with real item meshes and no labels: the trunk's 4x2 plane
+ * behind the car, or the bonnet's cells lying in the engine bay at their parts' places.
+ */
 export class TrunkView {
   private readonly root = new THREE.Group();
   private readonly panelGeometry = new THREE.PlaneGeometry(1, 1);
@@ -64,9 +75,15 @@ export class TrunkView {
   private readonly posePosition = new THREE.Vector3();
   private readonly poseQuaternion = new THREE.Quaternion();
   private readonly cellPosition = new THREE.Vector3();
+  private readonly cellSize = new THREE.Vector3();
 
   private itemSignature = '';
-  private layoutSignature = '';
+  /** What the panels were last laid out for; any change lays them out again. */
+  private layoutShape: StorageGridShape | null = null;
+  private layoutSide: TrunkViewState['side'] | null = null;
+  private layoutOnLid = false;
+  /** Which panels the last layout placed: a bonnet has fewer cells than the trunk. */
+  private readonly laidOut: boolean[] = new Array<boolean>(TRUNK_CELL_COUNT).fill(false);
 
   constructor(private readonly scene: THREE.Scene) {
     this.root.name = 'vehicle-storage-grid';
@@ -84,8 +101,9 @@ export class TrunkView {
   }
 
   /**
-   * @param eye World-space camera position. Every item turns inside its cell to face
-   *   it, so the contents read the same from behind, beside or above the car.
+   * @param eye World-space camera position. Every trunk item turns inside its cell to
+   *   face it, so the contents read the same from behind, beside or above the car; a
+   *   bonnet part stands square in the bay, as the real one is bolted in.
    */
   update(
     view: TrunkViewState | null,
@@ -102,20 +120,22 @@ export class TrunkView {
       return;
     }
 
-    let halfExtents: readonly [number, number, number];
+    let shape: StorageGridShape;
     if (view.owner === 'car') {
       if (!vehicle) {
         this.root.visible = false;
         return;
       }
-      halfExtents = vehicle.modelMeasure.halfExtents;
+      shape = vehicle.modelMeasure;
       vehicle.interpolatedTransform(alpha, this.posePosition, this.poseQuaternion);
     } else {
       if (!fixed) {
         this.root.visible = false;
         return;
       }
-      halfExtents = fixed.halfExtents;
+      // The shell's own model measure: it carries the bay's cells once the model has
+      // loaded, which it has by the time the shell is drawn.
+      shape = carModelMeasure(fixed.modelId);
       this.posePosition.set(fixed.x - origin.x, fixed.y, fixed.z - origin.z);
       this.poseQuaternion.set(fixed.qx, fixed.qy, fixed.qz, fixed.qw);
     }
@@ -123,15 +143,17 @@ export class TrunkView {
     this.root.visible = true;
     this.root.position.copy(this.posePosition);
     this.root.quaternion.copy(this.poseQuaternion);
-    const layoutSignature = `${view.side}|${halfExtents[0]}|${halfExtents[1]}|${halfExtents[2]}|${view.cells.length}`;
-    if (layoutSignature !== this.layoutSignature) {
-      this.layoutSignature = layoutSignature;
-      this.layout(halfExtents, view.side, view.cells.length);
+    const onLid = view.side === 'bonnet' && bonnetGridOnLid(view.owner);
+    if (shape !== this.layoutShape || view.side !== this.layoutSide || onLid !== this.layoutOnLid) {
+      this.layoutShape = shape;
+      this.layoutSide = view.side;
+      this.layoutOnLid = onLid;
+      this.layout(shape, view.side, onLid);
       this.itemSignature = '';
     }
 
     for (let cell = 0; cell < TRUNK_CELL_COUNT; cell++) {
-      const visible = cell < view.cells.length;
+      const visible = this.laidOut[cell]! && cell < view.cells.length;
       this.panels[cell]!.visible = visible;
       this.borders[cell]!.visible = visible;
       const selected = visible && cell === view.selectedCell;
@@ -146,61 +168,114 @@ export class TrunkView {
     ).join('|');
     if (itemSignature !== this.itemSignature) {
       this.itemSignature = itemSignature;
-      this.rebuildItems(view, halfExtents);
+      this.rebuildItems(view, shape, onLid);
     }
     for (const watch of this.pocketWatches) {
       setPocketWatchState(watch, timeOfDay, dayFactor);
     }
+    if (view.side === 'bonnet') return;
     // `lookAt` resolves the parent's world transform itself, so a holder under the
     // tilted car still aims straight at the eye with world up kept up.
     this.root.updateMatrixWorld();
     for (const holder of this.itemHolders) holder.lookAt(eye);
   }
 
-  private layout(
-    halfExtents: readonly [number, number, number],
-    side: TrunkViewState['side'],
-    cellCount: number,
-  ): void {
-    const cellWidth = trunkGridWidth(halfExtents[0]) / storageGridColumns(side);
-    for (let cell = 0; cell < cellCount; cell++) {
-      storageCellLocal(cell, halfExtents, side, this.cellPosition);
+  /**
+   * Places every cell's panel and border: upright in the trunk's plane facing the
+   * player behind the car, or flat on a bonnet cell's floor facing up out of the bay.
+   */
+  private layout(shape: StorageGridShape, side: TrunkViewState['side'], onLid: boolean): void {
+    const count = storageCellCount(side);
+    for (let cell = 0; cell < TRUNK_CELL_COUNT; cell++) {
+      const placed = cell < count && storageCellBox(cell, shape, side, onLid, this.cellPosition, this.cellSize);
+      this.laidOut[cell] = placed;
+      if (!placed) continue;
       const panel = this.panels[cell]!;
-      panel.position.copy(this.cellPosition);
-      panel.rotation.y = side === 'bonnet' ? Math.PI : 0;
-      panel.scale.set(cellWidth * CELL_INSET, TRUNK_CELL_HEIGHT * CELL_INSET, 1);
       const border = this.borders[cell]!;
-      border.position.copy(this.cellPosition);
-      border.position.z += side === 'bonnet' ? 0.002 : -0.002;
-      border.rotation.y = side === 'bonnet' ? Math.PI : 0;
-      border.scale.set(cellWidth * CELL_INSET, TRUNK_CELL_HEIGHT * CELL_INSET, 1);
+      if (side === 'bonnet') {
+        this.cellPosition.y -= this.cellSize.y * 0.5 - BONNET_PANEL_LIFT;
+        panel.position.copy(this.cellPosition);
+        panel.rotation.set(-Math.PI / 2, 0, 0);
+        panel.scale.set(this.cellSize.x * CELL_INSET, this.cellSize.z * CELL_INSET, 1);
+        border.position.copy(this.cellPosition);
+        border.position.y += 0.002;
+        border.rotation.set(-Math.PI / 2, 0, 0);
+        border.scale.set(this.cellSize.x * CELL_INSET, this.cellSize.z * CELL_INSET, 1);
+      } else {
+        panel.position.copy(this.cellPosition);
+        panel.rotation.set(0, 0, 0);
+        panel.scale.set(this.cellSize.x * CELL_INSET, this.cellSize.y * CELL_INSET, 1);
+        border.position.copy(this.cellPosition);
+        border.position.z -= 0.002;
+        border.rotation.set(0, 0, 0);
+        border.scale.set(this.cellSize.x * CELL_INSET, this.cellSize.y * CELL_INSET, 1);
+      }
     }
   }
 
-  private rebuildItems(view: TrunkViewState, halfExtents: readonly [number, number, number]): void {
+  private rebuildItems(view: TrunkViewState, shape: StorageGridShape, onLid: boolean): void {
     this.clearItems();
-    const cellWidth = trunkGridWidth(halfExtents[0]) / storageGridColumns(view.side);
-    const target = Math.min(cellWidth, TRUNK_CELL_HEIGHT) * ITEM_FIT;
+    const bonnet = view.side === 'bonnet';
     for (let cell = 0; cell < TRUNK_CELL_COUNT; cell++) {
       const item = view.cells[cell];
       if (!item) continue;
+      if (!storageCellBox(cell, shape, view.side, onLid, this.cellPosition, this.cellSize)) continue;
       const mesh = createItemMesh(item);
       if (item.type === 'part') setPartCondition(mesh, item.part);
-      const flat = item.type === 'photograph' || item.type === 'pocket_watch' || item.type === 'postcard';
-      mesh.rotation.copy(flat ? POSE_FLAT : POSE_GENERIC);
-      if (item.type === 'pocket_watch') this.pocketWatches.push(mesh);
-      _box.setFromObject(mesh).getSize(_size);
-      _box.getCenter(_centre);
-      mesh.position.sub(_centre);
       const holder = new THREE.Group();
       holder.add(mesh);
-      const longest = Math.max(_size.x, _size.y, _size.z, 1e-4);
-      holder.scale.setScalar(target / longest);
-      storageCellLocal(cell, halfExtents, view.side, holder.position);
-      holder.position.z += view.side === 'bonnet' ? ITEM_FORWARD : -ITEM_FORWARD;
+      if (bonnet) {
+        this.fitToCell(mesh, holder);
+      } else {
+        const flat = item.type === 'photograph' || item.type === 'pocket_watch' || item.type === 'postcard';
+        mesh.rotation.copy(flat ? POSE_FLAT : POSE_GENERIC);
+        if (item.type === 'pocket_watch') this.pocketWatches.push(mesh);
+        _box.setFromObject(mesh).getSize(_size);
+        _box.getCenter(_centre);
+        mesh.position.sub(_centre);
+        const longest = Math.max(_size.x, _size.y, _size.z, 1e-4);
+        holder.scale.setScalar((Math.min(this.cellSize.x, this.cellSize.y) * ITEM_FIT) / longest);
+        holder.position.copy(this.cellPosition);
+        holder.position.z -= ITEM_FORWARD;
+      }
       this.itemHolders.push(holder);
       this.root.add(holder);
     }
+  }
+
+  /**
+   * Stands a bonnet part on its cell's floor (`cellPosition`/`cellSize`, the cell's box),
+   * as large as the room allows. It is turned square to the car whichever way round
+   * fills the cell better, so a long engine lies along a long cell.
+   */
+  private fitToCell(mesh: THREE.Object3D, holder: THREE.Group): void {
+    const size = this.cellSize;
+    let bestScale = 0;
+    let bestYaw = 0;
+    for (const yaw of [0, Math.PI / 2]) {
+      mesh.rotation.set(0, yaw, 0);
+      _box.setFromObject(mesh).getSize(_size);
+      const scale = Math.min(
+        size.x / Math.max(_size.x, 1e-4),
+        size.y / Math.max(_size.y, 1e-4),
+        size.z / Math.max(_size.z, 1e-4),
+      );
+      if (scale > bestScale) {
+        bestScale = scale;
+        bestYaw = yaw;
+      }
+    }
+    mesh.rotation.set(0, bestYaw, 0);
+    _box.setFromObject(mesh);
+    _box.getCenter(_centre);
+    // Centred over the floor, its lowest point on it.
+    mesh.position.x -= _centre.x;
+    mesh.position.y -= _box.min.y;
+    mesh.position.z -= _centre.z;
+    const scale = bestScale * BONNET_ITEM_FIT;
+    holder.scale.setScalar(scale);
+    holder.position.copy(this.cellPosition);
+    holder.position.y -= size.y * 0.5 - BONNET_PANEL_LIFT;
   }
 
   private clearItems(): void {

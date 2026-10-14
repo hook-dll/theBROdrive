@@ -71,7 +71,7 @@ export interface DeliveryProbe {
   /** Absolute parking position of that courier. */
   readonly courierX: number;
   readonly courierZ: number;
-  /** The car the player is driving, or null on foot. */
+  /** The car the player sits in (any seat), or null on foot. */
   readonly drivingCarId: string | null;
   /** Absolute X/Z of a trailer, live or saved; null when no such trailer exists. */
   readonly trailerPosition: (trailerId: string) => { readonly x: number; readonly z: number } | null;

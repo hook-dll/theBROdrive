@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { PhysicsWorld } from '../core/physics';
 
-import type { CarState, GameWorld, StickerState } from '../game/state';
+import type { CarState, GameWorld, PlayerSeat, StickerState } from '../game/state';
 import { contractAcceptRefusal, contractDeliveryEffect, contractRewardSticker } from '../contracts/registry';
 import type { DeliveryProbe } from '../contracts/types';
 import { TOW_COUPLE_RANGE_M, towEyeWorld, type CarTowField } from '../vehicle/cartow';
@@ -31,13 +31,12 @@ import type { TrailerField } from '../vehicle/trailer';
 import { carModel } from '../vehicle/carmodels';
 import { carPaintSwatch, visiblePaintHex } from '../vehicle/carpaint';
 import {
+  bonnetGridOnLid,
   intersectStorageGrid,
+  storageGridCentreLocal,
+  storageRevealDistance,
   TRUNK_CELL_COUNT,
-  TRUNK_CELL_HEIGHT,
-  TRUNK_GRID_DEPTH,
-  storageGridCentreY,
-  storageGridRows,
-  trunkGridWidth,
+  type StorageGridShape,
   type StorageOwnerKind,
   type StorageSide,
   type TrunkGridRayHit,
@@ -52,6 +51,7 @@ import {
   partContainer,
 } from '../vehicle/bonnet';
 import { CAR_BODY_POSITION_ATTRIBUTE, setPartCondition } from '../render/materials';
+import { carModelMeasure } from '../render/carmodel';
 import type { FoleyEvent, FoleyContinuous } from '../audio/foley';
 import type { Player } from './player';
 import type { WorldOrigin } from '../world/origin';
@@ -61,6 +61,7 @@ import type { BoardableField } from '../story/sitebuild';
 import { STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
 import { uprightStickerRoll } from '../render/stickers';
 import { KitRig, type KitControl, type KitPicked } from '../carkit/rig';
+import { KIT_BENCH_NODE } from '../carkit/interior';
 
 /** How far the eye ray reaches for picking. */
 const RAY_RANGE = 2.6;
@@ -81,15 +82,10 @@ const VEHICLE_RANGE = 3.5;
  * left. `speedKmh` is already absolute, so fast reversing refuses too.
  */
 const EXIT_SPEED_LIMIT_KMH = 5;
-/** Refusal shown after the driver presses interact above the exit speed. */
+/** Refusal shown after the occupant presses interact above the exit speed. */
 const EXIT_REFUSED_PROMPT = 'slow down to step out';
 /** How long a refused exit keeps saying why after the press, seconds. */
 const EXIT_REFUSAL_SECONDS = 2.5;
-/**
- * Refusal for a kit car with both front doors shut: the way out is through a door,
- * so it has to be opened first (look at it, E).
- */
-const EXIT_DOOR_SHUT_PROMPT = 'the doors are shut · look at a front door, [E] to open it';
 /**
  * Slack around a kit door's opening for the entry test, metres: the eye ray may cross
  * the door plane a hand's width outside the shut door's outline (the seal, the
@@ -150,6 +146,8 @@ type Target =
   | { kind: 'trailer'; trailerId: string }
   | { kind: 'storage'; owner: StorageOwnerKind; side: StorageSide; id: string; cell: number | null }
   | { kind: 'car-entry'; carId: string }
+  /** The open (or shut) fuel flap of a kit car, aimed at with a can in hand. */
+  | { kind: 'filler'; carId: string }
   | { kind: 'aircraft' }
   | {
       kind: 'car-body';
@@ -175,12 +173,17 @@ export interface InteractionResult {
   boot: TrunkViewState | null;
   /** True on the F edge that asks to board the parked plane. */
   board: boolean;
+  /**
+   * The driver's crosshair is on a fitting E works (a door, a switch, a visor). The
+   * seated view names nothing: the HUD shows its crosshair only while this holds.
+   */
+  cabinAim: boolean;
 }
 
 /**
  * Litres a second a can transfers. Pouring is aimed at the fitted part that owns
- * the reservoir, inside an opened bonnet, so the grid's own `BOOT_RANGE` is the
- * whole proximity rule: there is no separate pour distance.
+ * the reservoir, inside an opened bonnet, or at the open fuel flap, so the grid's own
+ * `BOOT_RANGE` is the whole proximity rule: there is no separate pour distance.
  */
 const FLUID_POUR_RATE = 1.2;
 /** Within this many litres of capacity a reservoir reads as full. */
@@ -196,6 +199,13 @@ const BOOT_RANGE = 1.6;
  */
 const BOOT_REVEAL_MARGIN = 0.15;
 /**
+ * Aim forgiveness round the fuel flap's opening, on every side: the opening is a hand
+ * across, and a can's spout is aimed at it, not threaded into it.
+ */
+const FILLER_AIM_MARGIN = 0.05;
+/** A lid or the flap counts as open past half its travel, as the kit's own toggles do. */
+const LID_OPEN = 0.5;
+/**
  * How far the player may walk from an opened compartment before it closes itself, as
  * a multiple of `BOOT_RANGE`.
  *
@@ -209,6 +219,10 @@ const BOOT_REVEAL_MARGIN = 0.15;
  * design: `BOOT_RANGE` is how close you must be to open a compartment, and this is
  * how far you must walk for it to give up on you. Reaching in still needs the aim,
  * so nothing about operating a cell has changed.
+ *
+ * A kit car's lids are the authority over its own grids (`followLids`): the grid opens
+ * with its lid and shuts with it; this distance still lets it go when the player walks
+ * away from a lid left open.
  */
 const GRID_PERSIST_RANGE = BOOT_RANGE * 2;
 
@@ -221,12 +235,14 @@ const EMPTY_WRECK_BONNET: readonly (Item | null)[] =
   new Array<Item | null>(BONNET_SLOT_COUNT).fill(null);
 
 /**
- * A serviceable reservoir, resolved from the bonnet slot the crosshair is on.
+ * A serviceable reservoir, resolved from the bonnet slot or the fuel flap the
+ * crosshair is on.
  *
- * Levels are read and filled through the FITTED PART that holds them — the engine
- * for oil, the radiator, the fuel tank — so what the bonnet tells you is exactly
- * what a can can pour into. A missing part has no reservoir at all, and its fluid
- * left with it (see `moveSlotFluid` in game/state.ts).
+ * Oil and water are read and filled through the FITTED PART that holds them — the
+ * engine, the radiator — so what the bonnet tells you is exactly what a can can pour
+ * into. A missing part has no reservoir at all, and its fluid left with it (see
+ * `moveSlotFluid` in game/state.ts). Petrol goes into the body's own tank, through
+ * the flap (`fillerReservoir`).
  */
 interface Reservoir {
   /** What the readout calls it: 'oil', 'water' or 'petrol'. */
@@ -271,13 +287,26 @@ function bonnetReservoir(car: CarState, stats: CarStats, cell: number): Reservoi
         ? { label: 'water', level: car.waterLitres, capacity, wants: 'water' }
         : null;
     }
-    case 'fuel_tank': {
-      if (stats.tankCapacity <= 0) return null;
-      return { label: 'petrol', level: car.fuelLitres, capacity: stats.tankCapacity, wants: 'petrol' };
-    }
     default:
       return null;
   }
+}
+
+/** The body's own fuel tank, read and filled through the flap. */
+function fillerReservoir(car: CarState, stats: CarStats): Reservoir | null {
+  if (stats.tankCapacity <= 0) return null;
+  return { label: 'petrol', level: car.fuelLitres, capacity: stats.tankCapacity, wants: 'petrol' };
+}
+
+/**
+ * Whether a kit car's lid over a compartment is open: the bonnet, or the boot lid or
+ * tailgate, whichever the body has. Null for a car with no rig, whose grids open on F.
+ */
+function lidOpen(rig: KitRig | null, side: StorageSide): boolean | null {
+  if (!rig) return null;
+  return side === 'bonnet'
+    ? rig.get('bonnet') > LID_OPEN
+    : rig.get('boot') > LID_OPEN || rig.get('tailgate') > LID_OPEN;
 }
 
 /**
@@ -299,7 +328,7 @@ type AimedReservoir = Reservoir &
 function loosePartReservoir(part: PartInstance): Reservoir | null {
   const container = partContainer(part);
   if (container === null) return null;
-  const wants: FluidKind = container.channel === 'fuel' ? 'petrol' : container.channel;
+  const wants: FluidKind = container.channel;
   return { label: wants, level: part.litres ?? 0, capacity: container.capacity, wants };
 }
 
@@ -336,16 +365,16 @@ interface Resolved {
   /** Distance from the eye to the car's chassis centre, metres. */
   vehicleDist: number;
   /**
-   * The kit car's working part the eye ray meets (door, lid, flap, a fitting reached
-   * through an opening), or null; see `aimKit`. Only ever set for `vehicle`.
+   * The kit car's shell panel the eye ray meets (a side door, a lid, the flap), or null;
+   * see `aimKit`. Only ever set for `vehicle`.
    */
   kitPart: KitPicked | null;
   /** The eye ray met the kit car's render mesh within reach. */
   kitHit: boolean;
-  /** The front door the player stands at (see `kitEntryDoor`), or null. */
+  /** The side door the player stands at (see `kitEntryDoor`), or null. */
   kitDoor: KitDoor | null;
-  /** F gets in: `kitDoor` is open and the eye looks through it into the cabin. */
-  kitReady: boolean;
+  /** F gets in, to this seat: the eye looks at it through an open side door's opening. */
+  kitSeat: PlayerSeat | null;
 }
 
 /** `DeliveryProbe` with writable fields, so one instance can track the aim. */
@@ -401,6 +430,7 @@ const KIT_PART_NAMES: Readonly<Record<string, string>> = {
   horn: 'horn',
   visor_l: 'left sun visor',
   visor_r: 'right sun visor',
+  dome: 'courtesy lamp',
 };
 
 /** Whose seat a `seat_*`, `seatback_*` or `headrest_*` channel moves. */
@@ -427,7 +457,7 @@ function kitPartName(channel: string): string {
  */
 const KIT_VERBS: readonly (readonly [RegExp, string, string])[] = [
   [/^window_/, 'lower', 'raise'],
-  [/^(radio|hazard)$/, 'turn on', 'turn off'],
+  [/^(radio|hazard|dome)$/, 'turn on', 'turn off'],
   [/^seat_/, 'slide forward', 'slide back'],
   [/^seatback_/, 'recline', 'raise'],
   [/^headrest_/, 'raise', 'lower'],
@@ -456,6 +486,17 @@ const KIT_VEHICLE_CHANNELS: Readonly<Record<string, true>> = {
 /** The shell's own panels (doors, lids, flap): outside parts, not cabin fittings. */
 const KIT_SHELL_PART = /^(door_|bonnet$|boot$|tailgate$|flap$)/;
 
+/** A front seat's parts, by the channel's position; the rear bench is `KIT_BENCH_NODE`. */
+const KIT_FRONT_SEAT = /^(?:seat|seatback|headrest)_(f[lr])$/;
+
+/** What the F prompt calls a seat. */
+const SEAT_NAMES: Readonly<Record<PlayerSeat, string>> = {
+  driver: "driver's seat",
+  passenger: 'front passenger seat',
+  'rear-left': 'rear seat',
+  'rear-right': 'rear seat',
+};
+
 function kitAction(control: KitControl): NonNullable<KitControl['action']> {
   return control.action ?? { type: 'toggle', channel: control.id };
 }
@@ -464,7 +505,7 @@ function kitAction(control: KitControl): NonNullable<KitControl['action']> {
 interface KitDoor {
   readonly id: string;
   readonly node: THREE.Object3D;
-  /** `door_fl`/`door_fr`: the doors the driver's seat is reached through. */
+  /** `door_fl`/`door_fr`: the doors the front seats are reached through. */
   readonly front: boolean;
   /** On the car's +X side, which is its LEFT, the driver's, in the kit frame. */
   readonly left: boolean;
@@ -478,14 +519,6 @@ function shownUnder(object: THREE.Object3D, root: THREE.Object3D): boolean {
     if (!node.visible) return false;
   }
   return true;
-}
-
-/** Does `object` sit in a kit cabin group (`kit_cabin`, on the root or in a door) below `top`? */
-function inKitCabin(object: THREE.Object3D, top: THREE.Object3D): boolean {
-  for (let node: THREE.Object3D | null = object; node && node !== top; node = node.parent) {
-    if (node.name === 'kit_cabin') return true;
-  }
-  return false;
 }
 
 /** The car lab's picking rule (car-lab.ts `pick`): a pane is glass by its material's name. */
@@ -539,6 +572,15 @@ export class Interaction {
     y: number;
     z: number;
   } | null = null;
+  /**
+   * The target car's lids as last seen on foot, so a lid that has just opened shows
+   * its grid even when another compartment's is up (see `followLids`).
+   */
+  private readonly lidsSeen = { carId: '', bonnet: false, trunk: false };
+  /** Chassis-local box of the fuel flap's opening and the ray tested against it; see `aimsAtFiller`. */
+  private readonly fillerBox = new THREE.Box3();
+  private readonly fillerRay = new THREE.Ray();
+  private readonly fillerHit = new THREE.Vector3();
 
   private readonly tScratch = new THREE.Vector3();
   private readonly qScratch = new THREE.Quaternion();
@@ -577,15 +619,14 @@ export class Interaction {
   private readonly stickerNormalMatrix = new THREE.Matrix3();
   /**
    * What `aimKit` found on a kit car's render mesh, reused in place; valid for the call
-   * that filled it. `part` is the working part, already filtered by reach rules;
-   * `cabin` and `doorId` describe the first opaque thing hit; `throughGlass` says a
-   * pane was looked through on the way to it.
+   * that filled it. `part` is the working part, already filtered by reach rules; `seat`
+   * is the seat the first opaque thing hit belongs to; `throughGlass` says a pane was
+   * looked through on the way to it.
    */
   private readonly kitAimed = {
     part: null as KitPicked | null,
     distance: Infinity,
-    cabin: false,
-    doorId: null as string | null,
+    seat: null as PlayerSeat | null,
     throughGlass: false,
   };
   /** Side doors per rig, found once; a rebuilt car has a new rig and new nodes. */
@@ -683,6 +724,8 @@ export class Interaction {
     dirY: number,
     dirZ: number,
     roadS: number,
+    /** The drawing camera is the cabin view (not the chase or the hood). */
+    cabinView: boolean,
   ): InteractionResult {
     const interactPressed = input.interact && !this.prevInteract;
     const mountPressed = input.mount && !this.prevMount;
@@ -712,37 +755,38 @@ export class Interaction {
       // at the car, and a driver cannot reach into it.
       this.openStorage = null;
       // A kit car is worked from the seat too: the ray runs from whichever camera is
-      // drawing (the cabin view, the hood, the chase), so the driver looks at a door
-      // or a fitting and E works it.
+      // drawing, so the occupant looks at a door or a fitting and E works it; from the
+      // chase or the hood view only the side doors answer. No label names it: the
+      // crosshair appears on it (`cabinAim`), so words never sit over the dash and the road.
       const active = this.getVehicle();
       const rig = active?.vehicle.kit ?? null;
       let prompt: string | null = null;
       let aimed: KitPicked | null = null;
       if (active && rig) {
-        aimed = this.seatedKitPart(active.vehicle, eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
+        aimed = this.seatedKitPart(active.vehicle, eyeX, eyeY, eyeZ, dirX, dirY, dirZ, cabinView);
         if (aimed) {
           this.kitClaimsE = true;
           if (useHeldPressed) this.workKitPart(active.vehicle, rig, aimed.control);
-          prompt = this.kitPartPrompt(active.vehicle, rig, aimed.control);
         }
       }
       // Successful exit is self-evident. A refused one says why for a few seconds after
       // the press (F is a tap, not a hold), re-asked live, so it goes the moment a door
-      // opens or the car stops; a part in the aim is named beside it.
+      // opens or the car stops.
       if (interactPressed) {
-        this.exitRefusalLeft = this.tryExit(roadS, aimed) !== null ? EXIT_REFUSAL_SECONDS : 0;
+        this.exitRefusalLeft = this.tryExit(roadS) !== null ? EXIT_REFUSAL_SECONDS : 0;
       } else {
         this.exitRefusalLeft = Math.max(0, this.exitRefusalLeft - dt);
       }
       if (this.exitRefusalLeft > 0) {
         const refusal = this.exitRefused();
-        if (refusal) prompt = prompt ? `${refusal} · ${prompt}` : refusal;
+        if (refusal) prompt = refusal;
         else this.exitRefusalLeft = 0;
       }
-      return { prompt, sound: this.sound, continuous: null, boot: null, board: false };
+      return { prompt, sound: this.sound, continuous: null, boot: null, board: false, cabinAim: aimed !== null };
     }
 
     const resolved = this.resolve(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
+    this.followLids(resolved, eyeX, eyeY, eyeZ);
     // The bar action is settled before the prompt is built from it. A storage cell,
     // a loose item or a trailer in the aim keeps its own action: the bar is what is
     // offered when the player is simply standing at the join with nothing to aim at.
@@ -821,10 +865,10 @@ export class Interaction {
     // Resolved AFTER the actions above, so stowing or taking is reflected in the
     // same frame the player sees rather than one behind.
     //
-    // Drawn from `openStorage`, NOT from the aim: the compartment the player opened
-    // stays on screen while they look elsewhere, and closes itself only when they
-    // walk out of `GRID_PERSIST_RANGE`. Only the highlighted cell still follows the
-    // crosshair, because only reaching in needs the aim.
+    // Drawn from `openStorage`, NOT from the aim: the open compartment stays on screen
+    // while the player looks elsewhere, and closes with its lid (`followLids`) or when
+    // they walk out of `GRID_PERSIST_RANGE`. Only the highlighted cell still follows
+    // the crosshair, because only reaching in needs the aim.
     let boot: TrunkViewState | null = null;
     const open = this.openStorage;
     if (open) {
@@ -842,7 +886,7 @@ export class Interaction {
         };
       }
     }
-    return { prompt, sound: this.sound, continuous: this.continuous, boot, board };
+    return { prompt, sound: this.sound, continuous: this.continuous, boot, board, cabinAim: false };
   }
 
   /** A target that belongs to a car and is not an open storage grid. */
@@ -937,7 +981,7 @@ export class Interaction {
       this.onStickerPreview(null, null, false);
       this.onStickerPlaced(carId, sticker);
       this.sound = 'mount';
-      return { prompt: 'stuck on', sound: this.sound, continuous: null, boot: null, board: false };
+      return { prompt: 'stuck on', sound: this.sound, continuous: null, boot: null, board: false, cabinAim: false };
     }
     this.onStickerPreview(carId, sticker, true);
     const size = Math.round(style.scale * 100);
@@ -947,6 +991,7 @@ export class Interaction {
       continuous: null,
       boot: null,
       board: false,
+      cabinAim: false,
     };
   }
 
@@ -1099,37 +1144,99 @@ export class Interaction {
   }
 
   /**
-   * ABSOLUTE world centre of a compartment's grid: the same chassis-local plane
+   * ABSOLUTE world centre of a compartment's grid: the same chassis-local cells
    * `pickStorage` intersects, so "how far am I from the grid" is measured against the
    * thing the player is actually looking at rather than the car's centre.
    */
   private storageGridCentre(
     target: { readonly owner: StorageOwnerKind; readonly side: StorageSide; readonly id: string },
-    vehicle: Vehicle | null,
     out: THREE.Vector3,
   ): boolean {
-    let half: readonly [number, number, number];
+    let shape: StorageGridShape;
     if (target.owner !== 'car') {
       const fixed = target.owner === 'wreck'
         ? this.wreckTrunks.get(target.id)
         : this.couriers.get(target.id);
       if (!fixed) return false;
-      half = fixed.halfExtents;
+      shape = carModelMeasure(fixed.modelId);
       this.trunkQuaternion.set(fixed.qx, fixed.qy, fixed.qz, fixed.qw);
       out.set(fixed.x, fixed.y, fixed.z);
     } else {
+      const vehicle = this.carLookup.vehicle(target.id);
       if (!vehicle) return false;
-      half = vehicle.modelMeasure.halfExtents;
+      shape = vehicle.modelMeasure;
       vehicle.chassis.rotation(this.trunkQuaternion);
       const t = vehicle.chassis.translation(this.tScratch);
       out.set(t.x + this.origin.x, t.y, t.z + this.origin.z);
     }
-    const depth = half[2] + TRUNK_GRID_DEPTH;
-    this.gridScratch
-      .set(0, storageGridCentreY(half[1]), target.side === 'bonnet' ? depth : -depth)
-      .applyQuaternion(this.trunkQuaternion);
-    out.add(this.gridScratch);
+    const onLid = target.side === 'bonnet' && bonnetGridOnLid(target.owner);
+    if (!storageGridCentreLocal(shape, target.side, onLid, this.gridScratch)) return false;
+    out.add(this.gridScratch.applyQuaternion(this.trunkQuaternion));
     return true;
+  }
+
+  /**
+   * Makes a kit car's lids the authority over its grids: there is no [F] to open one.
+   * A grid whose lid has shut closes, and a lid's grid rides with its car. The grid
+   * shown is the aimed compartment under an open lid, else a lid that has just opened,
+   * else — with nothing open — the nearest open lid within `GRID_PERSIST_RANGE`. One
+   * grid is up at a time, as the renderer draws one.
+   *
+   * Wrecks, couriers and a car without a rig have no lid to follow and keep the [F]
+   * that opens them.
+   */
+  private followLids(resolved: Resolved, eyeX: number, eyeY: number, eyeZ: number): void {
+    const open = this.openStorage;
+    if (open?.owner === 'car') {
+      const lid = lidOpen(this.carLookup.vehicle(open.id)?.kit ?? null, open.side);
+      if (lid === false || !this.storageGridCentre(open, this.vScratch)) {
+        this.openStorage = null;
+      } else if (lid) {
+        open.x = this.vScratch.x;
+        open.y = this.vScratch.y;
+        open.z = this.vScratch.z;
+      }
+    }
+
+    const carId = resolved.carId;
+    const rig = resolved.vehicle?.kit ?? null;
+    if (!carId || !rig) return;
+    const seen = this.lidsSeen;
+    const bonnet = lidOpen(rig, 'bonnet') === true;
+    const trunk = lidOpen(rig, 'trunk') === true;
+    const sameCar = seen.carId === carId;
+    const t = resolved.target;
+    let side: StorageSide | null = null;
+    // `resolve` offers a kit car's compartment only under its open lid.
+    if (t.kind === 'storage' && t.owner === 'car' && t.id === carId) side = t.side;
+    else if (sameCar && bonnet && !seen.bonnet) side = 'bonnet';
+    else if (sameCar && trunk && !seen.trunk) side = 'trunk';
+    seen.carId = carId;
+    seen.bonnet = bonnet;
+    seen.trunk = trunk;
+
+    const eyeAbsX = eyeX + this.origin.x;
+    const eyeAbsZ = eyeZ + this.origin.z;
+    if (side === null) {
+      if (this.openStorage) return;
+      let nearest = GRID_PERSIST_RANGE * GRID_PERSIST_RANGE;
+      for (const candidate of ['bonnet', 'trunk'] as const) {
+        if (!(candidate === 'bonnet' ? bonnet : trunk)) continue;
+        if (!this.storageGridCentre({ owner: 'car', side: candidate, id: carId }, this.vScratch)) continue;
+        const dx = eyeAbsX - this.vScratch.x;
+        const dy = eyeY - this.vScratch.y;
+        const dz = eyeAbsZ - this.vScratch.z;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 <= nearest) {
+          nearest = d2;
+          side = candidate;
+        }
+      }
+      if (side === null) return;
+    }
+    const target = { owner: 'car', side, id: carId } as const;
+    if (this.isStorageOpen(target) || !this.storageGridCentre(target, this.vScratch)) return;
+    this.openStorage = { ...target, x: this.vScratch.x, y: this.vScratch.y, z: this.vScratch.z };
   }
 
   /**
@@ -1148,7 +1255,7 @@ export class Interaction {
     if (
       target.kind === 'storage' &&
       this.isStorageOpen(target) &&
-      this.storageGridCentre(target, resolved.vehicle, this.vScratch)
+      this.storageGridCentre(target, this.vScratch)
     ) {
       open.x = this.vScratch.x;
       open.y = this.vScratch.y;
@@ -1164,8 +1271,8 @@ export class Interaction {
   }
 
   /**
-   * Resolves the same chassis-local grid the renderer draws. A narrowly padded
-   * rectangle reveals it before a precise cell is under the crosshair.
+   * Resolves the same chassis-local cells the renderer draws. A narrowly padded box
+   * round the whole grid reveals it before a precise cell is under the crosshair.
    */
   private pickStorage(
     eyeX: number,
@@ -1176,39 +1283,55 @@ export class Interaction {
     dirZ: number,
     position: { readonly x: number; readonly y: number; readonly z: number },
     quaternion: THREE.Quaternion,
-    halfExtents: readonly [number, number, number],
+    shape: StorageGridShape,
     side: StorageSide,
+    onLid: boolean,
   ): boolean {
     this.trunkInverse.copy(quaternion).invert();
     this.trunkEye.set(eyeX - position.x, eyeY - position.y, eyeZ - position.z).applyQuaternion(this.trunkInverse);
     this.trunkDirection.set(dirX, dirY, dirZ).applyQuaternion(this.trunkInverse);
     if (
-      intersectStorageGrid(this.trunkEye, this.trunkDirection, halfExtents, side, this.trunkRayHit) &&
+      intersectStorageGrid(this.trunkEye, this.trunkDirection, shape, side, onLid, this.trunkRayHit) &&
       this.trunkRayHit.distance <= BOOT_RANGE
     ) {
       this.trunkPickedCell = this.trunkRayHit.cell;
       this.trunkPickedDistance = this.trunkRayHit.distance;
       return true;
     }
-
-    if (Math.abs(this.trunkDirection.z) < 1e-5) return false;
-    const planeZ = side === 'bonnet'
-      ? halfExtents[2] + TRUNK_GRID_DEPTH
-      : -halfExtents[2] - TRUNK_GRID_DEPTH;
-    const distance = (planeZ - this.trunkEye.z) / this.trunkDirection.z;
-    if (distance <= 0 || distance > BOOT_RANGE) return false;
-
-    const localX = this.trunkEye.x + this.trunkDirection.x * distance;
-    const localY = this.trunkEye.y + this.trunkDirection.y * distance;
-    const halfWidth = trunkGridWidth(halfExtents[0]) * 0.5 + BOOT_REVEAL_MARGIN;
-    const halfHeight = storageGridRows(side) * TRUNK_CELL_HEIGHT * 0.5 + BOOT_REVEAL_MARGIN;
-    const centreY = storageGridCentreY(halfExtents[1]);
-    if (Math.abs(localX) > halfWidth || Math.abs(localY - centreY) > halfHeight) {
-      return false;
-    }
+    const distance = storageRevealDistance(this.trunkEye, this.trunkDirection, shape, side, onLid, BOOT_REVEAL_MARGIN);
+    if (distance > BOOT_RANGE) return false;
     this.trunkPickedCell = null;
     this.trunkPickedDistance = distance;
     return true;
+  }
+
+  /**
+   * Whether the eye ray meets a kit car's fuel flap opening (`CarModelMeasure.filler`,
+   * padded by `FILLER_AIM_MARGIN`) within `BOOT_RANGE`; the distance, or Infinity.
+   */
+  private fillerDistance(
+    vehicle: Vehicle,
+    eyeX: number,
+    eyeY: number,
+    eyeZ: number,
+    dirX: number,
+    dirY: number,
+    dirZ: number,
+  ): number {
+    const filler = vehicle.modelMeasure.filler;
+    if (!filler) return Infinity;
+    vehicle.chassis.rotation(this.qScratch);
+    const t = vehicle.chassis.translation(this.tScratch);
+    this.trunkInverse.copy(this.qScratch).invert();
+    this.fillerRay.origin.set(eyeX - t.x, eyeY - t.y, eyeZ - t.z).applyQuaternion(this.trunkInverse);
+    this.fillerRay.direction.set(dirX, dirY, dirZ).applyQuaternion(this.trunkInverse);
+    const [cx, cy, cz] = filler.centre;
+    const [sx, sy, sz] = filler.size;
+    this.fillerBox.min.set(cx - sx * 0.5, cy - sy * 0.5, cz - sz * 0.5).subScalar(FILLER_AIM_MARGIN);
+    this.fillerBox.max.set(cx + sx * 0.5, cy + sy * 0.5, cz + sz * 0.5).addScalar(FILLER_AIM_MARGIN);
+    if (!this.fillerRay.intersectBox(this.fillerBox, this.fillerHit)) return Infinity;
+    const distance = this.fillerHit.sub(this.fillerRay.origin).length();
+    return distance <= BOOT_RANGE ? distance : Infinity;
   }
 
   private resolve(
@@ -1285,10 +1408,12 @@ export class Interaction {
       vehicleDist = Math.hypot(t.x - eyeX, t.y - eyeY, t.z - eyeZ);
 
       // Rear and front use the same deliberate close-range interaction. The nearer
-      // plane wins, so a long bus cannot expose both ends at once.
-      const half = vehicle.modelMeasure.halfExtents;
+      // grid wins, so a long bus cannot expose both ends at once. A kit car's grid is
+      // there only under its open lid (`followLids`): a shut one is reached by opening it.
+      const rig = vehicle.kit;
       for (const side of ['trunk', 'bonnet'] as const) {
-        if (this.pickStorage(eyeX, eyeY, eyeZ, dx, dy, dz, t, this.qScratch, half, side)) {
+        if (lidOpen(rig, side) === false) continue;
+        if (this.pickStorage(eyeX, eyeY, eyeZ, dx, dy, dz, t, this.qScratch, vehicle.modelMeasure, side, false)) {
           keep(this.trunkPickedDistance, {
             kind: 'storage',
             owner: 'car',
@@ -1313,10 +1438,21 @@ export class Interaction {
       // A kit car is worked part by part, so for it the eye ray is also tested against
       // the render mesh, which is what the parts are. Bounded: only this one car, only
       // inside VEHICLE_RANGE, and the ray itself stops there (`aimKit`).
-      const rig = vehicle.kit;
       if (rig && vehicleDist <= VEHICLE_RANGE) {
         kitHit = this.aimKit(vehicle, eyeX, eyeY, eyeZ, dx, dy, dz, VEHICLE_RANGE, false);
         kitDoor = this.kitEntryDoor(rig, vehicle, eyeX, eyeY, eyeZ);
+      }
+
+      // With a can in hand the fuel flap is a target of its own, and it wins over the
+      // body it is cut into: the can is aimed at the filler, not at the car.
+      if (rig && this.inventory.held?.type === 'fluid_can') {
+        const distance = this.fillerDistance(vehicle, eyeX, eyeY, eyeZ, dx, dy, dz);
+        const current = target as Target;
+        const body = current.kind === 'none' || current.kind === 'car-entry' || current.kind === 'car-body';
+        if (distance < Infinity && (body || distance < bestDist)) {
+          bestDist = distance;
+          target = { kind: 'filler', carId };
+        }
       }
     }
 
@@ -1325,7 +1461,9 @@ export class Interaction {
       this.trunkQuaternion.set(wreck.qx, wreck.qy, wreck.qz, wreck.qw);
       // Both ends of a shell are openable, exactly as a driven car's are: the rear
       // gives up the trunk's cans and tools, the service cells under the bonnet give
-      // up the worn parts. The nearer plane wins, so a buried nose exposes its boot.
+      // up the worn parts. The nearer grid wins, so a buried nose exposes its boot. The
+      // shell's lid never opens, so its bonnet cells lie on it (`bonnetGridOnLid`).
+      const shape = carModelMeasure(wreck.modelId);
       for (const side of ['trunk', 'bonnet'] as const) {
         if (
           this.pickStorage(
@@ -1337,8 +1475,9 @@ export class Interaction {
             dz,
             this.trunkPosition,
             this.trunkQuaternion,
-            wreck.halfExtents,
+            shape,
             side,
+            side === 'bonnet' && bonnetGridOnLid('wreck'),
           )
         ) {
           keep(this.trunkPickedDistance, {
@@ -1369,8 +1508,9 @@ export class Interaction {
           dz,
           this.trunkPosition,
           this.trunkQuaternion,
-          courier.halfExtents,
+          courier,
           'trunk',
+          false,
         )
       ) {
         keep(this.trunkPickedDistance, {
@@ -1386,28 +1526,26 @@ export class Interaction {
     // The kit aim answers only when nothing else stands nearer in the ray (a loose part,
     // a trailer); the car's own entry and compartment targets never occlude it.
     let kitPart: KitPicked | null = null;
-    let kitReady = false;
+    let kitSeat: PlayerSeat | null = null;
     const rig = vehicle?.kit ?? null;
-    if (kitHit && rig) {
+    if (kitHit && rig && vehicle) {
       const aim = this.kitAimed;
       const t = target as Target;
-      const own = t.kind === 'none' || t.kind === 'car-entry' || t.kind === 'car-body'
+      const own = t.kind === 'none' || t.kind === 'car-entry' || t.kind === 'car-body' || t.kind === 'filler'
         || (t.kind === 'storage' && t.owner === 'car' && t.id === carId);
       if (own || aim.distance <= bestDist) {
         kitPart = aim.distance <= RAY_RANGE ? aim.part : null;
-        // Getting in: see `kitEntryDoor` and `throughOpening` for the two halves.
-        kitReady = kitDoor !== null
-          && rig.get(kitDoor.id) > 0.5
-          && aim.cabin
-          && aim.doorId !== kitDoor.id
-          && !aim.throughGlass
-          && this.throughOpening(kitDoor, eyeX, eyeY, eyeZ, dx, dy, dz);
+        // Getting in: the first thing the ray meets is a seat, not behind glass, and the
+        // ray reaches it through an open side door's opening (`kitOpenDoorInRay`).
+        if (aim.seat && !aim.throughGlass && this.kitOpenDoorInRay(rig, vehicle, eyeX, eyeY, eyeZ, dx, dy, dz)) {
+          kitSeat = aim.seat;
+        }
       } else {
         kitHit = false;
       }
     }
 
-    return { target, vehicle, carId, vehicleDist, kitPart, kitHit, kitDoor, kitReady };
+    return { target, vehicle, carId, vehicleDist, kitPart, kitHit, kitDoor, kitSeat };
   }
 
   /** Scratch for `pickBody`'s stamp read: the hit face's three corners and two edges. */
@@ -1505,8 +1643,8 @@ export class Interaction {
    * (on foot, within VEHICLE_RANGE) or sits in.
    *
    * Reach rules on the part found: the channels the Vehicle drives itself are not
-   * offered (`KIT_VEHICLE_CHANNELS`), and on foot a cabin fitting (the glovebox, a
-   * switch, a winder on a door card) is reached through an opening, never through glass.
+   * offered (`KIT_VEHICLE_CHANNELS`), and on foot only the shell's panels are
+   * (`KIT_SHELL_PART`): a window, a vent or a cabin fitting is worked from a seat.
    */
   private aimKit(
     vehicle: Vehicle,
@@ -1522,8 +1660,7 @@ export class Interaction {
     const aim = this.kitAimed;
     aim.part = null;
     aim.distance = Infinity;
-    aim.cabin = false;
-    aim.doorId = null;
+    aim.seat = null;
     aim.throughGlass = false;
     const root = vehicle.root;
     this.raycaster.set(
@@ -1543,18 +1680,11 @@ export class Interaction {
       }
       found = true;
       aim.distance = hit.distance;
-      aim.cabin = inKitCabin(hit.object, root);
-      for (let node: THREE.Object3D | null = hit.object; node && node !== root; node = node.parent) {
-        const id = (node.userData.kitControl as KitControl | undefined)?.id;
-        if (id?.startsWith('door_')) {
-          aim.doorId = id;
-          break;
-        }
-      }
+      aim.seat = this.kitSeatOf(hit);
       if (
         picked
         && !KIT_VEHICLE_CHANNELS[kitAction(picked.control).channel]
-        && (seated || !aim.throughGlass || !inKitCabin(picked.node, root))
+        && (seated || KIT_SHELL_PART.test(picked.control.id))
       ) {
         aim.part = picked;
       }
@@ -1565,12 +1695,30 @@ export class Interaction {
   }
 
   /**
-   * The part the seated driver aims at through the drawing camera, or null. The shell's
-   * panels (doors, lids, flap) are offered only below the exit speed: the chase camera
-   * looks at the car all the time, and nobody opens a door at speed. So at speed, with
-   * the camera outside the car's measured box (the chase view), nothing can be offered
-   * and the ray is not cast at all. It reaches from the camera across the car and no
-   * further.
+   * The seat a kit car's surface belongs to, or null: a front seat by its parts' channel
+   * (`seat_fl` and the back and headrest riding on it are the driver's, on the left),
+   * the rear bench by its group, halved down the car's centre line.
+   */
+  private kitSeatOf(hit: THREE.Intersection): PlayerSeat | null {
+    for (let node: THREE.Object3D | null = hit.object; node; node = node.parent) {
+      if (node.name === KIT_BENCH_NODE) {
+        return node.worldToLocal(this.kitEye.copy(hit.point)).x > 0 ? 'rear-left' : 'rear-right';
+      }
+      const id = (node.userData.kitControl as KitControl | undefined)?.id;
+      if (id === undefined) continue;
+      const front = KIT_FRONT_SEAT.exec(id);
+      return front ? (front[1] === 'fl' ? 'driver' : 'passenger') : null;
+    }
+    return null;
+  }
+
+  /**
+   * The part the seated player aims at through the drawing camera, or null. Away from
+   * the cabin view (the chase, the hood) only the side doors are offered, and the
+   * shell's panels only below the exit speed: the chase camera looks at the car all the
+   * time, and nobody opens a door at speed. So at speed nothing can be offered outside
+   * the cabin view or with the camera outside the car's measured box, and the ray is not
+   * cast at all. It reaches from the camera across the car and no further.
    */
   private seatedKitPart(
     vehicle: Vehicle,
@@ -1580,11 +1728,13 @@ export class Interaction {
     dirX: number,
     dirY: number,
     dirZ: number,
+    cabinView: boolean,
   ): KitPicked | null {
     const t = vehicle.chassis.translation(this.tScratch);
     const half = vehicle.modelMeasure.halfExtents;
     const moving = vehicle.speedKmh >= EXIT_SPEED_LIMIT_KMH;
     if (moving) {
+      if (!cabinView) return null;
       vehicle.chassis.rotation(this.qScratch);
       const local = this.vScratch.set(eyeX - t.x, eyeY - t.y, eyeZ - t.z)
         .applyQuaternion(this.qBody.copy(this.qScratch).invert());
@@ -1593,6 +1743,7 @@ export class Interaction {
     const reach = Math.hypot(t.x - eyeX, t.y - eyeY, t.z - eyeZ) + Math.hypot(half[0], half[1], half[2]);
     if (!this.aimKit(vehicle, eyeX, eyeY, eyeZ, dirX, dirY, dirZ, reach, true)) return null;
     const part = this.kitAimed.part;
+    if (part && !cabinView && !part.control.id.startsWith('door_')) return null;
     if (part && moving && KIT_SHELL_PART.test(part.control.id)) return null;
     return part;
   }
@@ -1626,9 +1777,9 @@ export class Interaction {
   }
 
   /**
-   * The front door the player would get in by, where he stands: the side door whose
-   * shut outline is nearest the eye, when that is a FRONT door on the player's side of
-   * the car. Null beside a rear door, and for a car without doors found.
+   * The side door the player stands at: the one whose shut outline is nearest the eye,
+   * when it is on the player's side of the car. Null for a car without doors found.
+   * Only the "shut" prompt asks; getting in is `kitOpenDoorInRay`.
    */
   private kitEntryDoor(rig: KitRig, vehicle: Vehicle, eyeX: number, eyeY: number, eyeZ: number): KitDoor | null {
     const doors = this.kitDoors(rig, vehicle);
@@ -1644,17 +1795,43 @@ export class Interaction {
         nearest = door;
       }
     }
-    if (!nearest?.front || eye.x > 0 !== nearest.left) return null;
+    if (!nearest || eye.x > 0 !== nearest.left) return null;
     return nearest;
+  }
+
+  /**
+   * Does the eye ray enter the car through an open side door on the player's side?
+   * Any of them, front or rear: the rear bench of a two-door car is reached through a
+   * front door, a front seat across the car through the near one.
+   */
+  private kitOpenDoorInRay(
+    rig: KitRig,
+    vehicle: Vehicle,
+    eyeX: number,
+    eyeY: number,
+    eyeZ: number,
+    dx: number,
+    dy: number,
+    dz: number,
+  ): boolean {
+    const doors = this.kitDoors(rig, vehicle);
+    const frame = doors[0]?.node.parent;
+    if (!frame) return false;
+    const left = frame.worldToLocal(this.kitEye.set(eyeX, eyeY, eyeZ)).x > 0;
+    for (const door of doors) {
+      if (door.left !== left || rig.get(door.id) <= 0.5) continue;
+      if (this.throughOpening(door, eyeX, eyeY, eyeZ, dx, dy, dz)) return true;
+    }
+    return false;
   }
 
   /**
    * Does the eye ray pass through `door`'s opening? Where the ray crosses the plane of
    * the shut door's outer skin (car frame), the crossing must fall inside the shut
    * door's outline, give or take `KIT_OPENING_SLACK`. With the rest of the entry rule in
-   * `resolve` (the first opaque thing hit is the cabin, not through glass, not the swung
-   * door's own card), that is "looking into the cabin through this open door": a look
-   * through the windscreen, over the roof or from the nose does not count.
+   * `resolve` (the first opaque thing hit is a seat, not through glass), that is
+   * "looking at a seat through this open door": a look through the windscreen, over the
+   * roof or from the nose does not count.
    */
   private throughOpening(
     door: KitDoor,
@@ -1741,6 +1918,8 @@ export class Interaction {
     if (target.kind === 'none') return false;
     // F boards the plane rather than manipulating it; see `fixedUpdate`.
     if (target.kind === 'aircraft') return false;
+    // The flap is poured into, not picked up: F there still gets in as it does at the body.
+    if (target.kind === 'filler') return false;
     if (target.kind === 'car-body' || target.kind === 'car-entry') {
       return this.inventory.held?.type === 'sticker_envelope';
     }
@@ -1788,12 +1967,26 @@ export class Interaction {
       return `[F] pick up ${itemLabel(item)}`;
     }
 
-
+    // The body's tank, through its flap: the level as the bonnet's readouts show
+    // theirs, the pour once the flap is open, and how to open it while it is shut (the
+    // flap's own "[E] open fuel flap" stands beside this when it is in the aim).
+    if (t.kind === 'filler') {
+      const car = this.world.state.cars[t.carId];
+      const reservoir = car && resolved.vehicle ? fillerReservoir(car, resolved.vehicle.stats) : null;
+      if (!reservoir) return null;
+      const flapOpen = (resolved.vehicle?.kit?.get('flap') ?? 0) > LID_OPEN;
+      if (!flapOpen) {
+        const opener = resolved.kitPart?.control.id === 'flap' ? '' : ' · look at it, [E] to open';
+        return `${fillReadout(reservoir)} — fuel flap shut${opener}`;
+      }
+      return held?.type === 'fluid_can' ? this.pourPrompt(held, reservoir) : fillReadout(reservoir);
+    }
 
     if (t.kind === 'storage') {
       const cells = this.storageCells(t);
       if (!cells) return null;
       const label = t.side === 'bonnet' ? 'bonnet' : 'trunk';
+      // Only a compartment with no lid to follow is ever aimed at shut; see `followLids`.
       if (!this.isStorageOpen(t)) return `[F] open ${label}`;
 
       let used = 0;
@@ -1803,7 +1996,7 @@ export class Interaction {
       if (t.cell === null) return `${label} ${used}/${cells.length}`;
       const item = cells[t.cell];
       if (item) {
-        // A fitted engine, radiator or fuel tank reports what it is holding.
+        // A fitted engine or radiator reports what it is holding.
         // Same resolution the pour uses, so the number you read is the number a can
         // fills — and holding one turns the readout into the pour offer itself.
         const reservoir = this.aimedReservoir(resolved);
@@ -1860,15 +2053,12 @@ export class Interaction {
       return `[F] hitch to ${carModel(this.world.state.cars[resolved.carId]!.modelId).label}`;
     }
 
-    // A kit car is got into through an open front door, looking in (see `resolve`).
+    // A kit car is got into by looking at a seat through an open side door (see `resolve`).
     const kitRig = resolved.vehicle?.kit ?? null;
     if (kitRig && resolved.carId && (t.kind === 'none' || t.kind === 'car-body' || t.kind === 'car-entry')) {
+      if (resolved.kitSeat) return this.cabinRefusal() ?? `[F] sit in the ${SEAT_NAMES[resolved.kitSeat]}`;
       const door = resolved.kitDoor;
       if (!door) return null;
-      if (resolved.kitReady) {
-        const car = this.world.state.cars[resolved.carId];
-        return this.cabinRefusal() ?? (car ? `[F] get in ${carModel(car.modelId).label}` : '[F] get in');
-      }
       // Shut: say so, and how to open it unless the aim names another part (its E is
       // shown beside this). The door itself already reads "[E] open front left door";
       // an aim off the car says nothing.
@@ -1891,10 +2081,11 @@ export class Interaction {
   }
 
   /**
-   * The reservoir under the crosshair. Three kinds resolve here so that the level
+   * The reservoir under the crosshair. Four kinds resolve here so that the level
    * readout and the pour can never disagree about which container you are looking
-   * at: a fitted engine, radiator or tank in an OPENED bonnet; the same three parts
-   * lying loose in the world; and a can on the ground.
+   * at: a fitted engine or radiator in an OPENED bonnet; the body's tank through an
+   * OPEN fuel flap; the same engine or radiator lying loose in the world; and a can
+   * on the ground.
    *
    * Filling a part before it is installed is the point of the loose cases. A wreck
    * gives up a dry engine, you top it up where it lies, and the car it goes into
@@ -1921,6 +2112,12 @@ export class Interaction {
         sink: 'loose-can',
         itemId: t.itemId,
       };
+    }
+    if (t.kind === 'filler') {
+      const car = this.world.state.cars[t.carId];
+      if (!car || !resolved.vehicle || (resolved.vehicle.kit?.get('flap') ?? 0) <= LID_OPEN) return null;
+      const reservoir = fillerReservoir(car, resolved.vehicle.stats);
+      return reservoir ? { ...reservoir, sink: 'car', carId: t.carId } : null;
     }
     if (t.kind !== 'storage' || t.side !== 'bonnet' || t.owner !== 'car' || t.cell === null) {
       return null;
@@ -2095,10 +2292,11 @@ export class Interaction {
   /**
    * Pours the held can into the reservoir the crosshair is on.
    *
-   * Aimed at the fitted part, not the car: you open the bonnet, look at the engine,
-   * the radiator or the fuel tank, and hold the button. That makes the filling
-   * gesture the same object as the level readout, and it is why an empty slot takes
-   * nothing — there is no reservoir without the part that holds it.
+   * Aimed at what holds the fluid, not the car: you open the bonnet and look at the
+   * engine or the radiator, or open the fuel flap and look at the filler, and hold the
+   * button. That makes the filling gesture the same object as the level readout, and
+   * it is why an empty slot takes nothing — there is no reservoir without the part
+   * that holds it.
    *
    * One code path for all three fluids. The kind decides only which number goes up.
    */
@@ -2200,13 +2398,15 @@ export class Interaction {
     }
 
 
-    // The first press opens a compartment. Further presses operate its aimed cell.
+    // A compartment with no lid to follow (a wreck, a courier) opens on the first
+    // press; a kit car's is already open under its lid (`followLids`). Further presses
+    // operate the aimed cell.
     if (t.kind === 'storage') {
       if (!this.isStorageOpen(t)) {
         // Located from the same transform the target was resolved against, so this
         // cannot fail in practice; refusing to open rather than guessing a position
         // keeps the persistence rule measuring a real compartment.
-        if (!this.storageGridCentre(t, resolved.vehicle, this.vScratch)) return;
+        if (!this.storageGridCentre(t, this.vScratch)) return;
         this.openStorage = {
           owner: t.owner,
           side: t.side,
@@ -2376,11 +2576,11 @@ export class Interaction {
     if (!resolved.vehicle || !resolved.carId) return;
     const target = resolved.target;
     if (resolved.vehicle.kit) {
-      // A kit car: through its open front door, looking in, is the whole rule (see
+      // A kit car: a seat looked at through an open side door is the whole rule (see
       // `resolve`); the eye may look past Rapier's reach into the cabin, so a `none`
       // target counts, while a loose thing in front of the car keeps F for itself.
       if (target.kind !== 'none' && target.kind !== 'car-body' && target.kind !== 'car-entry') return;
-      if (!resolved.kitReady) {
+      if (!resolved.kitSeat) {
         if (resolved.kitDoor && resolved.kitHit) this.sound = 'refused';
         return;
       }
@@ -2393,7 +2593,7 @@ export class Interaction {
       this.sound = 'refused';
       return;
     }
-    this.world.apply({ t: 'enter_car', carId: resolved.carId });
+    this.world.apply({ t: 'enter_car', carId: resolved.carId, seat: resolved.kitSeat ?? 'driver' });
     this.player?.setEnabled(false);
     this.sound = 'enter-car';
   }
@@ -2412,33 +2612,34 @@ export class Interaction {
   }
 
   /**
-   * The refusal prompt when the driver cannot step out, else null: the car is moving
+   * The refusal prompt when the occupant cannot step out, else null: the car is moving
    * too fast (`speedKmh` is absolute, so reversing at speed too), or it is a kit car
-   * with both front doors shut. Kept separate from `tryExit` so the prompt re-asks the
-   * gate after the press without re-running the exit itself, which stays edge-triggered.
+   * whose door by his seat is shut. Kept separate from `tryExit` so the prompt re-asks
+   * the gate after the press without re-running the exit itself, which stays
+   * edge-triggered.
    */
   private exitRefused(): string | null {
     const active = this.getVehicle();
     if (!active) return null;
     if (active.vehicle.speedKmh >= EXIT_SPEED_LIMIT_KMH) return EXIT_REFUSED_PROMPT;
     const rig = active.vehicle.kit;
-    if (rig && !this.kitExitDoor(rig, active.vehicle, null)) return EXIT_DOOR_SHUT_PROMPT;
+    const door = rig ? this.kitExitDoor(rig, active.vehicle, this.world.state.player.seat) : null;
+    if (rig && door && rig.get(door.id) <= 0.5) return `the ${kitPartName(door.id)} is shut · look at it, [E] to open it`;
     return null;
   }
 
-  /** `aimed` is the part the seated driver looks at: an open front door there is the one used. */
-  private tryExit(roadS: number, aimed: KitPicked | null): string | null {
+  private tryExit(roadS: number): string | null {
     const carId = this.world.state.player.drivingCarId;
     if (!carId) return null;
     const active = this.getVehicle();
     if (!active) return null;
     const refusal = this.exitRefused();
     if (refusal) {
-      if (refusal === EXIT_DOOR_SHUT_PROMPT) this.sound = 'refused';
+      if (refusal !== EXIT_REFUSED_PROMPT) this.sound = 'refused';
       return refusal;
     }
     const rig = active.vehicle.kit;
-    const door = rig ? this.kitExitDoor(rig, active.vehicle, aimed) : null;
+    const door = rig ? this.kitExitDoor(rig, active.vehicle, this.world.state.player.seat) : null;
     const exit = this.computeExitPosition(carId, active.vehicle, door);
     this.world.apply({ t: 'exit_car' });
     this.sound = 'exit-car';
@@ -2450,17 +2651,20 @@ export class Interaction {
   }
 
   /**
-   * The open front door a driver steps out through: the one he looks at, else the
-   * driver's (left), else the passenger's. Null while both are shut.
+   * The door `seat` is left by, open or shut: the front door on its side for a front
+   * seat; for a rear seat the rear door on its side, or the front one on a car without
+   * rear doors. Null for a kit car without doors found, which is left by its flank.
    */
-  private kitExitDoor(rig: KitRig, vehicle: Vehicle, aimed: KitPicked | null): KitDoor | null {
-    let open: KitDoor | null = null;
+  private kitExitDoor(rig: KitRig, vehicle: Vehicle, seat: PlayerSeat): KitDoor | null {
+    const left = seat === 'driver' || seat === 'rear-left';
+    const rear = seat === 'rear-left' || seat === 'rear-right';
+    let front: KitDoor | null = null;
     for (const door of this.kitDoors(rig, vehicle)) {
-      if (!door.front || rig.get(door.id) <= 0.5) continue;
-      if (aimed?.control.id === door.id) return door;
-      if (!open || door.left) open = door;
+      if (door.left !== left) continue;
+      if (!door.front && rear) return door;
+      if (door.front) front = door;
     }
-    return open;
+    return front;
   }
 
   private computeExitPosition(

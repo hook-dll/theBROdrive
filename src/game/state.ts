@@ -143,6 +143,10 @@ export interface CarState {
   towedBy?: string | null;
 }
 
+/** A kit car's four seats; the driver sits on the car's left (+X in the kit frame). */
+export const PLAYER_SEATS = ['driver', 'passenger', 'rear-left', 'rear-right'] as const;
+export type PlayerSeat = (typeof PLAYER_SEATS)[number];
+
 export interface PlayerState {
   x: number;
   y: number;
@@ -153,8 +157,13 @@ export interface PlayerState {
   health: number;
   /** Arclength hint for road projection; also what save files display. */
   s: number;
-  /** Car the player is currently driving, or null when on foot. */
+  /** Car the player is currently sitting in, or null when on foot. */
   drivingCarId: string | null;
+  /**
+   * Which seat of `drivingCarId` he sits in. Only the driver's seat drives the car;
+   * from the others it stands held where it is. Meaningless on foot.
+   */
+  seat: PlayerSeat;
   /**
    * The pack, in slot order. `Inventory` is authoritative in-session and mirrors
    * itself here through the `inventory` delta; this array holds the same item
@@ -219,8 +228,18 @@ export interface TrailerLoad {
 export type TrailerLoadKind = 'pipes' | 'beams';
 
 
+/**
+ * Layout version of the saved state, for the migrations its shape alone cannot tell
+ * apart (save/save.ts). A save without the field is version 1.
+ *  - 2: the bonnet lost the fuel tank's cell; four cells (engine, turbine, radiator, air
+ *    filter), where a version 1 bonnet had the tank fourth and the filter fifth.
+ */
+export const SAVE_VERSION = 2;
+
 export interface WorldState {
   readonly seed: number;
+  /** `SAVE_VERSION` this state was written in; migrated saves carry the current one. */
+  readonly saveVersion: number;
   /** Real Laayoune local-solar date corresponding to dayIndex zero. */
   readonly calendarEpoch: string;
   /** Seconds since midnight of the in-game clock. */
@@ -245,7 +264,7 @@ export interface WorldState {
   wreckStorage: Record<string, (Item | null)[]>;
   /**
    * Persistent service cells of deterministic static wreck bonnets, keyed by wreck id.
-   * The cells are fixed by `BONNET_SLOT_KINDS` (engine, turbine, radiator, tank, air
+   * The cells are fixed by `BONNET_SLOT_KINDS` (engine, turbine, radiator, air
    * filter); a wreck's bonnet gives up worn parts, its trunk gives up cans and tools.
    */
   wreckBonnet: Record<string, (Item | null)[]>;
@@ -287,7 +306,7 @@ export type WorldDelta =
   | { t: 'settings'; settings: Settings }
   | { t: 'player_move'; x: number; y: number; z: number; yaw: number; pitch: number; s: number }
   | { t: 'player_health'; health: number }
-  | { t: 'enter_car'; carId: string }
+  | { t: 'enter_car'; carId: string; seat: PlayerSeat }
   | { t: 'exit_car' }
   | { t: 'car_add'; car: CarState }
   | { t: 'car_remove'; carId: string }
@@ -334,7 +353,7 @@ export type WorldDelta =
   | { t: 'part_pickup'; partId: string }
   | { t: 'part_condition'; partId: string; dirt: number; rust: number }
   /**
-   * Fluid poured into a container that is NOT fitted to a car: a tank, radiator or
+   * Fluid poured into a container that is NOT fitted to a car: a radiator or
    * engine lying in the world. The level lives on the part (`PartInstance.litres`)
    * and comes back out through the `car_bonnet` transfer when it is installed.
    */
@@ -362,6 +381,7 @@ const RUNTIME_ID_PREFIX = 'rt:';
 export function newWorldState(seed: number): WorldState {
   return {
     seed: seed >>> 0,
+    saveVersion: SAVE_VERSION,
     calendarEpoch: localSolarDateAt(),
     // Start mid-morning: the garage should be lit on a new game.
     timeOfDay: DAY_LENGTH * 0.36,
@@ -378,6 +398,7 @@ export function newWorldState(seed: number): WorldState {
       health: 1,
       s: 0,
       drivingCarId: null,
+      seat: 'driver',
       carried: [],
       carriedSelected: 0,
       wornSunShades: null,
@@ -402,9 +423,8 @@ export function newWorldState(seed: number): WorldState {
  * the part and an installation has to pour it back out. This lives in the reducer
  * rather than at the interaction site because that makes it unconditional: every
  * path that swaps a bonnet cell goes through this delta. The old code instead zeroed
- * the radiator and the fuel tank at ONE call site, which is why a full tank you
- * unbolted came back dry and the engine's oil silently teleported to whatever engine
- * you fitted next.
+ * the radiator at ONE call site, which is why a full radiator you unbolted came back
+ * dry and the engine's oil silently teleported to whatever engine you fitted next.
  *
  * Capacity is not enforced: a small radiator moved onto a big engine is simply
  * under-filled, and the bonnet readout says so.
@@ -432,10 +452,7 @@ function moveSlotFluid(
   // `bonnetAccepts` is the same gate installation uses, so a part that was never a
   // container for THIS slot cannot be handed a level it has no business holding.
   if (bonnetAccepts(cell, outgoing)) {
-    if (channel === 'fuel') {
-      outgoing.part.litres = car.fuelLitres;
-      car.fuelLitres = 0;
-    } else if (channel === 'water') {
+    if (channel === 'water') {
       outgoing.part.litres = car.waterLitres;
       car.waterLitres = 0;
     } else {
@@ -446,9 +463,7 @@ function moveSlotFluid(
 
   if (bonnetAccepts(cell, incoming)) {
     const litres = Math.max(0, incoming.part.litres ?? 0);
-    if (channel === 'fuel') {
-      car.fuelLitres = litres;
-    } else if (channel === 'water') {
+    if (channel === 'water') {
       car.waterLitres = litres;
     } else {
       car.oilLitres = litres;
@@ -580,9 +595,11 @@ export class GameWorld {
         break;
       case 'enter_car':
         s.player.drivingCarId = delta.carId;
+        s.player.seat = delta.seat;
         break;
       case 'exit_car':
         s.player.drivingCarId = null;
+        s.player.seat = 'driver';
         break;
       case 'car_transform': {
         const car = s.cars[delta.carId];

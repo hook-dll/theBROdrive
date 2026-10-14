@@ -1,6 +1,6 @@
 import { hash } from '../core/rng';
 import { parseCalendarEpoch } from '../game/calendar';
-import { DAY_LENGTH, newWorldState } from '../game/state';
+import { DAY_LENGTH, newWorldState, PLAYER_SEATS, SAVE_VERSION, type PlayerSeat } from '../game/state';
 import type {
   CarState,
   HeadlightMode,
@@ -463,6 +463,7 @@ export function migrateState(raw: unknown): WorldState {
   const courierStorageRaw = recordField(obj.courierStorage, 'courierStorage');
 
   const seed = seedRaw >>> 0;
+  const version = numOr(obj.saveVersion, 1);
   const defaults = newWorldState(seed);
   const dp = defaults.player;
 
@@ -491,6 +492,8 @@ export function migrateState(raw: unknown): WorldState {
     health: Math.min(1, Math.max(0, numOr(playerRaw.health, dp.health))),
     s: numOr(playerRaw.s, dp.s),
     drivingCarId: typeof playerRaw.drivingCarId === 'string' ? playerRaw.drivingCarId : null,
+    // Saves from before seats were always in the driver's.
+    seat: PLAYER_SEATS.includes(playerRaw.seat as PlayerSeat) ? (playerRaw.seat as PlayerSeat) : 'driver',
     carried,
     carriedSelected: Math.min(
       Math.max(0, Math.trunc(numOr(playerRaw.carriedSelected, 0))),
@@ -501,7 +504,7 @@ export function migrateState(raw: unknown): WorldState {
 
   const cars: Record<string, CarState> = {};
   for (const [id, value] of Object.entries(carsRaw)) {
-    cars[id] = migrateCar(asRecord(value, `car "${id}"`));
+    cars[id] = migrateCar(asRecord(value, `car "${id}"`), version);
   }
   // A tow bar needs both ends and only one end per car. Checked here, where the
   // whole car set is known: a save naming a tower that is gone (or claiming a
@@ -538,7 +541,7 @@ export function migrateState(raw: unknown): WorldState {
 
   const wreckBonnet: Record<string, (Item | null)[]> = {};
   for (const [id, value] of Object.entries(wreckBonnetRaw)) {
-    wreckBonnet[id] = migrateStorage(value, BONNET_SLOT_COUNT, `wreck "${id}" bonnet`);
+    wreckBonnet[id] = migrateStorage(migrateBonnetLayout(value, version), BONNET_SLOT_COUNT, `wreck "${id}" bonnet`);
   }
 
   const courierStorage: Record<string, (Item | null)[]> = {};
@@ -549,7 +552,7 @@ export function migrateState(raw: unknown): WorldState {
   const looseParts: Record<string, { part: PartInstance; x: number; y: number; z: number }> = {};
   for (const [id, value] of Object.entries(loosePartsRaw)) {
     const raw = asRecord(value, `loose part "${id}"`);
-    // A part whose variant left the catalogue (the diesel engines) is dropped with it.
+    // A part whose variant left the catalogue (the diesel engines, the fuel tanks) is dropped with it.
     try {
       looseParts[id] = migrateLoosePart(raw);
     } catch {
@@ -591,6 +594,7 @@ export function migrateState(raw: unknown): WorldState {
 
   return {
     seed,
+    saveVersion: SAVE_VERSION,
     calendarEpoch,
     timeOfDay: numOr(obj.timeOfDay, defaults.timeOfDay),
     playedSeconds: numOr(obj.playedSeconds, defaults.playedSeconds),
@@ -664,6 +668,20 @@ function migrateTrailerLoad(raw: unknown): TrailerLoad | null {
   return { kind: obj.kind, halfExtents: half };
 }
 
+/** Where a version 1 bonnet kept its fuel tank, between the radiator and the air filter. */
+const LEGACY_TANK_CELL = 3;
+
+/**
+ * A saved bonnet in the current cell layout. Before `SAVE_VERSION` 2 the fuel tank had
+ * a cell; the tank is the body's own now, so that cell goes with whatever was in it and
+ * the air filter moves up into it. A bonnet saved before the filter had a cell ends at
+ * the tank and comes out three long, which `migrateCar` reads as filterless.
+ */
+function migrateBonnetLayout(raw: unknown, version: number): unknown {
+  if (version >= 2 || !Array.isArray(raw)) return raw;
+  return raw.filter((_, cell) => cell !== LEGACY_TANK_CELL);
+}
+
 function migrateStorage(raw: unknown, cells: number, where: string): (Item | null)[] {
   const storage = new Array<Item | null>(cells).fill(null);
   if (!Array.isArray(raw)) return storage;
@@ -717,7 +735,7 @@ function worldModelId(saved: unknown): string {
   return CAR_MODELS.some((model) => model.id === twin) ? twin : DEFAULT_CAR_MODEL_ID;
 }
 
-function migrateCar(raw: Record<string, unknown>): CarState {
+function migrateCar(raw: Record<string, unknown>, version: number): CarState {
   if (typeof raw.id !== 'string') throw new Error('Save data is malformed: car is missing an id');
 
   // A pre-cutover save carries a bodyId and a part layout that has no meaning
@@ -762,17 +780,19 @@ function migrateCar(raw: Record<string, unknown>): CarState {
   const storageCells = hasCarModel(modelId) ? carModel(modelId).storageCells : 0;
   const storage = migrateStorage(raw.storage, storageCells, `car "${raw.id}" boot`);
   const def = carModel(modelId);
-  const defaultBonnet = createBonnetStorage(raw.id, def.engineId, def.bodyClass, def.tankLitres);
-  const bonnet = raw.bonnet === undefined
-    ? defaultBonnet
-    : normalizeBonnetStorage(migrateStorage(raw.bonnet, BONNET_SLOT_COUNT, `car "${raw.id}" bonnet`));
+  const savedBonnet = migrateBonnetLayout(raw.bonnet, version);
+  const bonnet = savedBonnet === undefined
+    ? createBonnetStorage(raw.id, def.engineId)
+    : normalizeBonnetStorage(migrateStorage(savedBonnet, BONNET_SLOT_COUNT, `car "${raw.id}" bonnet`));
   // A bonnet saved before the air filter had its cell gets the factory filter: the car
   // ran without one only because the game did not model it.
-  if (Array.isArray(raw.bonnet) && raw.bonnet.length <= AIR_FILTER_CELL) {
+  if (Array.isArray(savedBonnet) && savedBonnet.length <= AIR_FILTER_CELL) {
     bonnet[AIR_FILTER_CELL] = factoryAirFilter(raw.id);
   }
   // There is one fuel. A tank saved holding diesel or a mixture keeps its litres as it.
-  const fuelLitres = Math.max(0, numOr(raw.fuelLitres, 0));
+  // The tank is the body's own now, so a level saved against a bigger fitted tank is
+  // cut to what this body holds.
+  const fuelLitres = Math.min(def.tankLitres, Math.max(0, numOr(raw.fuelLitres, 0)));
 
   const headlightMode: HeadlightMode =
     raw.headlightMode === 'low' || raw.headlightMode === 'high' ? raw.headlightMode : 'off';
@@ -854,8 +874,9 @@ const LEGACY_REMOVED_CONTRACT_KINDS: Readonly<Record<string, true>> = {
 
 /**
  * Throws on a variant the catalogue no longer has (the diesel engines went with the
- * fuel), so every caller drops that one part rather than the save: storage cells
- * catch it per cell, loose parts per part, carried items through `isRemovedLegacyItem`.
+ * fuel, the fuel tanks into the bodies), so every caller drops that one part rather
+ * than the save: storage cells catch it per cell, loose parts per part, carried items
+ * through `isRemovedLegacyItem`.
  */
 function migratePart(raw: unknown, where: string): PartInstance {
   const obj = asRecord(raw, `part at ${where}`);
@@ -904,8 +925,8 @@ function migrateLooseItem(raw: Record<string, unknown>): { item: Item; x: number
  * failing the whole load. The hand winch's anchors and constraint were removed
  * with the mechanic; converting it to an unrelated item would invent progress.
  * The wrench never had an action of its own and was taken out of the loot. Diesel
- * went with every diesel engine: its cans, and any engine part that is no longer in
- * the catalogue, are dropped.
+ * went with every diesel engine: its cans, and any part that is no longer in the
+ * catalogue (the fuel tanks too, now the body's own), are dropped.
  */
 function isRemovedLegacyItem(raw: unknown): boolean {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return false;

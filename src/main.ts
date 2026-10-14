@@ -73,6 +73,8 @@ import { BEAM_GROUPS } from './vehicle/vehiclelamps';
  * waiting behind a far one for more than a second and a half.
  */
 const LAMP_HANDOVER_S = 0.75;
+/** The beam pool's group for the courtesy lamp, after the lamp groups (`BEAM_GROUPS`). */
+const DOME_BEAM_GROUP = BEAM_GROUPS.length;
 import { ContactPatchField } from './render/contactpatches';
 import { ChunkStreamer } from './world/chunks';
 import { DesertTileStreamer } from './world/deserttiles';
@@ -134,8 +136,7 @@ import {
   markResumeTarget,
   RESUME_HEALTHY_SECONDS,
 } from './save/resume';
-import { bonnetAirFilter, bonnetPart, bonnetWaterCapacity } from './vehicle/bonnet';
-import { AIR_FILTER_DUE_CLOG } from './vehicle/airfilter';
+import { bonnetWaterCapacity } from './vehicle/bonnet';
 import {
   TrailerField,
   TRAILER_MODEL_FIT,
@@ -1327,6 +1328,8 @@ async function boot(): Promise<void> {
   let recordTimer = 0;
   let paused = false;
   let prompt: string | null = null;
+  /** Seated, the crosshair is on a cabin fitting; see `InteractionResult.cabinAim`. */
+  let cabinAim = false;
   /** Trunk grid under the crosshair, or null. Set by the interaction tick. */
   let boot: TrunkViewState | null = null;
   /** Arclength of whatever the camera is following; drives streaming and the sky. */
@@ -1380,6 +1383,7 @@ async function boot(): Promise<void> {
     zoomAccum = 0;
     recenterAccum = false;
     prompt = null;
+    cabinAim = false;
     boot = null;
   };
   // Dev-only, behind one compile-time fold. `import.meta.env.DEV` is constant, so a
@@ -1550,8 +1554,12 @@ async function boot(): Promise<void> {
 
     const drivingId = s.player.drivingCarId;
     const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
-    touch.setDriving(driving !== null);
-    input.setDriving(driving !== null);
+    // Only the driver's seat drives. From any other the car stands held like a parked
+    // one (`settle` below) and the keys that work it do nothing; looking round, the
+    // camera, the fittings in reach and the doors stay the occupant's.
+    const controlled = driving !== null && s.player.seat === 'driver' ? driving : null;
+    touch.setDriving(controlled !== null);
+    input.setDriving(controlled !== null);
 
     // MASS IS RE-DERIVED HERE EVERY STEP rather than wired to the deltas that can
     // change it. Fuel burns, a can pours, the boot takes a parcel, the driver picks
@@ -1574,7 +1582,7 @@ async function boot(): Promise<void> {
           : 'precise control off — steering self-centres',
       );
     }
-    input.setPreciseSteering(!dying && s.settings.preciseSteering && driving !== null);
+    input.setPreciseSteering(!dying && s.settings.preciseSteering && controlled !== null);
 
     // Refresh the stream's road-frame snapshot before the player's autopilot reads it.
     // Every controller still writes its intent before the shared physics step.
@@ -1604,8 +1612,15 @@ async function boot(): Promise<void> {
     }
     frameProfiler?.end('traffic');
 
-    cabinCamera.step(dt, f, driving ? (s.cars[drivingId!]?.modelId ?? null) : null);
-    if (driving) {
+    cabinCamera.step(dt, f, controlled ? (s.cars[drivingId!]?.modelId ?? null) : null);
+    if (driving && !controlled) {
+      player.setEnabled(false);
+      if (f.cycleCamera) camera.cycleDriving();
+      autopilot.setEngaged(false);
+      if (f.toggleAutopilot || f.toggleLights || f.toggleLeftIndicator || f.toggleRightIndicator) {
+        hud.setToast('only the driver can do that');
+      }
+    } else if (driving) {
       // setEnabled early-returns when unchanged, so calling it every tick is free.
       player.setEnabled(false);
       if (f.cycleCamera) camera.cycleDriving();
@@ -1663,7 +1678,7 @@ async function boot(): Promise<void> {
     // on, and a towed car has to roll, so it is stepped by the tow controller below
     // and left out of this loop.
     for (const [id, vehicle] of vehicles) {
-      if (id === drivingId || carTowField.stepping(id)) continue;
+      if (vehicle === controlled || carTowField.stepping(id)) continue;
       vehicle.settle(dt);
     }
 
@@ -1917,8 +1932,10 @@ async function boot(): Promise<void> {
       dir.y,
       dir.z,
       activeS,
+      camera.mode === 'cabin',
     );
     prompt = interacted.prompt;
+    cabinAim = interacted.cabinAim;
     boot = interacted.boot;
     if (interacted.board && story === null && !dying) {
       // Boarding is an ending: a reload from here on must land on the title screen, not
@@ -1940,6 +1957,7 @@ async function boot(): Promise<void> {
       postcardView = 'down';
       gumActive = false;
       prompt = null;
+      cabinAim = false;
       boot = null;
       Object.assign(lastInput, deathInput);
       lookYawAccum = 0;
@@ -2202,7 +2220,7 @@ async function boot(): Promise<void> {
       target.wheelContact = driving.audio.wheelContactFraction;
       target.hoodOffset = driving.modelMeasure.hoodPoint;
       const drivenModel = s.cars[drivingId!]?.modelId;
-      if (drivenModel) target.cabinOffset = cabinCamera.eyeFor(drivenModel);
+      if (drivenModel) target.cabinOffset = cabinCamera.eyeFor(drivenModel, s.player.seat);
       // The dynamic camera's raw material: where the car is really going, not where it
       // points. Body-frame speed and slip come from the same solver step.
       const velocity = driving.chassis.linvel();
@@ -2354,10 +2372,17 @@ async function boot(): Promise<void> {
     // nothing; elsewhere they stay two pool beams.
     const shadowedHeadlamps = vehicleLights.hasShadowBeam;
     beamPool.begin();
-    if (driving && driving.hasLitLamps) {
+    // The courtesy lamp of the car the player sits in lights its cabin with one pool
+    // beam, pinned after the headlamps and before the tail and reversing lamps: from the
+    // seat it is the light that is seen. On a four-slot tier at night the tail lamps'
+    // pair is what gives way to it.
+    if (driving) {
       for (let g = 0; g < BEAM_GROUPS.length; g++) {
-        const slots = g === 0 && shadowedHeadlamps ? 0 : driving.beamCount(BEAM_GROUPS[g], false);
-        beamPool.request(driving, g, slots, true);
+        if (driving.hasLitLamps) {
+          const slots = g === 0 && shadowedHeadlamps ? 0 : driving.beamCount(BEAM_GROUPS[g], false);
+          beamPool.request(driving, g, slots, true);
+        }
+        if (g === 0) beamPool.request(driving, DOME_BEAM_GROUP, driving.domeBeamCount, true);
       }
     }
     for (let g = 0; g < BEAM_GROUPS.length; g++) {
@@ -2373,6 +2398,10 @@ async function boot(): Promise<void> {
     vehicleLights.beginFrame();
     if (driving && driving.hasLitLamps && shadowedHeadlamps) {
       driving.syncProjectedLights(vehicleLights, 'front', 1, true, true);
+    }
+    if (driving) {
+      const share = beamPool.share(driving, DOME_BEAM_GROUP);
+      if (share > 0) driving.syncDomeLight(vehicleLights, share);
     }
     for (let i = 0; i < litVehicles.length; i++) {
       const vehicle = litVehicles[i];
@@ -2528,13 +2557,6 @@ async function boot(): Promise<void> {
       const car = s.cars[drivingId!];
       const waterCap = bonnetWaterCapacity(car?.bonnet ?? []);
       const oilCap = oilCapacity(stats.engine);
-      // The lamp is the engine management telling the driver something is wrong under
-      // the bonnet: no engine, no oil, no air filter, or a filter due for replacement.
-      const filter = bonnetAirFilter(car?.bonnet ?? []);
-      const checkEngine = bonnetPart(car?.bonnet ?? [], 0) === null
-        || (car?.oilLitres ?? 0) <= 0
-        || filter === null
-        || (filter.clog ?? 0) >= AIR_FILTER_DUE_CLOG;
       // The dash's wind gauge reads the wind at the car itself, gusts included, in the
       // car's frame: forward (sin h, cos h), right (-cos h, sin h).
       const at = driving.root.position;
@@ -2544,6 +2566,8 @@ async function boot(): Promise<void> {
       const cosH = Math.cos(heading);
       const indicator = driving.indicator;
       const blinkerLit = driving.indicatorLit;
+      // A kit car's cluster is in the cabin view; the hood view shows none.
+      hud.setCabinInstruments(camera.mode === 'cabin' && driving.kit !== null);
       hud.setDriving({
         speedKmh: driving.speedKmh,
         rpm: driving.rpm,
@@ -2557,7 +2581,7 @@ async function boot(): Promise<void> {
         oilFraction: oilCap > 0 ? (car?.oilLitres ?? 0) / oilCap : 1,
         engineRunning: driving.engineRunning,
         engineDestroyed: driving.engineDestroyed,
-        checkEngine,
+        checkEngine: driving.checkEngine,
         handbrake: lastInput.handbrake,
         blinkerLeft: blinkerLit && (indicator === 'left' || indicator === 'hazard'),
         blinkerRight: blinkerLit && (indicator === 'right' || indicator === 'hazard'),
@@ -2685,7 +2709,7 @@ async function boot(): Promise<void> {
     audio.endTrafficFrame(frameDt);
     hud.setRadio(audio.radioReadout);
 
-    hud.setPrompt(prompt);
+    hud.setPrompt(prompt, cabinAim);
     hud.setCabinEditor(cabinCamera.hud);
     trunkView.update(
       boot,

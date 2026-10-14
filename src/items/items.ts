@@ -382,9 +382,8 @@ export function itemMass(item: Item): number {
       const v = variant(item.part.variantId);
       const litres = item.part.litres ?? 0;
       if (litres <= 0) return v.mass;
-      // A full radiator or tank is mostly fluid, and the player feels that on foot.
-      const fluid: FluidKind =
-        v.kind === 'engine' ? 'oil' : v.kind === 'fuel_tank' ? 'petrol' : 'water';
+      // A full radiator is mostly water, and the player feels that on foot.
+      const fluid: FluidKind = v.kind === 'engine' ? 'oil' : 'water';
       return v.mass + litres * FLUID_DENSITY[fluid];
     }
     case 'fluid_can':

@@ -33,7 +33,7 @@ export interface CameraTarget {
   wheelContact: number;
   /** Bonnet camera mount in chassis-local metres; see CarModelMeasure.hoodPoint. */
   hoodOffset: readonly [number, number, number];
-  /** Driver's eye in chassis-local metres, the cabin view's mount; see vehicle/cabincamera.ts. */
+  /** The seated player's eye in chassis-local metres, the cabin view's mount; see vehicle/cabincamera.ts. */
   cabinOffset: readonly [number, number, number];
   /**
    * Velocity in the float frame, X and Z, m/s. Zero on foot.

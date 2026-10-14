@@ -104,7 +104,7 @@ export async function bootIntoCar(browser, { URL, W, H, DPR = 1, SEED = 'flick',
       const d = (t.x - p.x) ** 2 + (t.z - p.z) ** 2;
       if (d < bestD) { bestD = d; best = id; }
     }
-    if (best) b.world.apply({ t: 'enter_car', carId: best });
+    if (best) b.world.apply({ t: 'enter_car', carId: best, seat: 'driver' });
   });
 
   return page;

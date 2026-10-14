@@ -126,7 +126,7 @@ try {
           const d = (t.x - p.x) ** 2 + (t.z - p.z) ** 2;
           if (d < bestD) { bestD = d; best = id; }
         }
-        if (best) b.world.apply({ t: 'enter_car', carId: best });
+        if (best) b.world.apply({ t: 'enter_car', carId: best, seat: 'driver' });
         return false;
       });
       await sleep(1500);

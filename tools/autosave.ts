@@ -118,7 +118,7 @@ await Promise.resolve();
 check('trailer mutation autosaves', calls.length === 2, `${calls.length} writes`);
 check('trailer hitch is captured', calls[1]?.state.trailers['trailer:test']?.hitchedTo === 'car:test', String(calls[1]?.state.trailers['trailer:test']?.hitchedTo));
 
-world.apply({ t: 'enter_car', carId: 'car:test' });
+world.apply({ t: 'enter_car', carId: 'car:test', seat: 'driver' });
 await Promise.resolve();
 check('entering writes one autosave', calls.length === 3, `${calls.length} writes`);
 check('enter state is captured', calls[2]?.state.player.drivingCarId === 'car:test', String(calls[2]?.state.player.drivingCarId));
@@ -143,7 +143,7 @@ check('save code keeps trailer state', roundTrip.trailers['trailer:test']?.x ===
 // Behind the wheel nothing but the exit saves: a save booked by the crash itself would
 // capture the fatal one, and the reload would put the player back into it. Dust and
 // the lamps ride along with the exit.
-world.apply({ t: 'enter_car', carId: 'car:test' });
+world.apply({ t: 'enter_car', carId: 'car:test', seat: 'driver' });
 await Promise.resolve();
 check('re-entering autosaves', calls.length === 5, `${calls.length} writes`);
 world.apply({ t: 'car_body_condition', carId: 'car:test', dirt: 0.42, scratches: 0.17 });
@@ -183,7 +183,7 @@ check(
     lightRoundTrip.cars['car:test']?.reverseLightsOn === true,
   JSON.stringify(lightRoundTrip.cars['car:test']),
 );
-world.apply({ t: 'enter_car', carId: 'car:test' });
+world.apply({ t: 'enter_car', carId: 'car:test', seat: 'driver' });
 await Promise.resolve();
 check('unsubscribe stops autosaves', calls.length === 6, `${calls.length} writes`);
 

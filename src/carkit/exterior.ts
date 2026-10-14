@@ -675,33 +675,224 @@ function buildDoorHardware(ctx: KitContext): void {
   }
 }
 
-/** Two wiper arms parked along the screen's foot, sweeping on `wiper_sweep`. */
+/**
+ * Wiper spindles across the car (+x is the left): the driver's just left of centre, the
+ * passenger's towards the right corner. Both arms park lying to the left, the classic
+ * Zhiguli's and the Samara's tandem on a left-hand-drive car.
+ */
+const WIPER_PIVOTS = [0.06, -0.34];
+/** The spindles stand this far below the glass's bottom edge, in the screen's frame strip. */
+const WIPER_PIVOT_BELOW = 0.015;
+/** The most an arm sweeps from its park, about 100°, the Zhiguli's and the Samara's; and the least, 90°. */
+const WIPER_SWEEP = 1.75;
+const WIPER_SWEEP_MIN = Math.PI / 2;
+/**
+ * A parked arm lies at most this steep, low along the screen's foot; where a screen
+ * curved in plan lifts its foot towards the pillar too far for that, at most the second.
+ */
+const WIPER_PARKS = [(20 * Math.PI) / 180, (45 * Math.PI) / 180];
+/** The blade keeps this far inside the pane's sides and top: the pillars and header stand proud. */
+const WIPER_EDGE = 0.015;
+/** And this far above its bottom edge: half the blade's width and a little. */
+const WIPER_FOOT = 0.006;
+/** The blade's rubber edge clears the glass by this much where the glass stands highest under it. */
+const WIPER_GAP = 0.003;
+/** Blade stations along its length: it is bent to the screen between them. */
+const WIPER_STATIONS = 16;
+const WIPER_STEP = Math.PI / 90;
+
+/**
+ * Two wiper arms parked along the screen's foot, both lying to the left, sweeping up on
+ * `wiper_sweep`. Each arm is the longest whose blade, upright, stays on the pane and
+ * that parks low and still sweeps 90-100° between the pillars. The screen is faceted
+ * and curved, so each arm turns about its own axis: the one that keeps the glass under
+ * every point of its blade the most level over its sweep (one plane normal for both
+ * left a blade 2-7 cm off the glass). The blade is then bent as a frame blade is, at each
+ * station just clear of the highest glass it passes over. A rigid blade cannot follow a
+ * screen curved in plan: over the sweep it lifts off by up to 6 mm on the 2101's screen,
+ * 11 on the 2107's, 16 on the Samaras' and 21 on the tens'.
+ */
 function buildWipers(ctx: KitContext): void {
   const { frame, root } = ctx;
   const spec = frame.spec;
   const cabin = spec.cabin;
+  const pane = root.getObjectByName('body_glass');
+  const panel = root.getObjectByName('body_paint');
+  if (!pane || !panel) throw new Error(`Kit car "${spec.id}": wipers need the shell's glass and paint`);
   const foot = frame.screenFoot(0);
-  const base: Vec3 = [0, frame.deckY(foot, 0), frame.z(foot)];
-  const head: Vec3 = [0, cabin.rail + cabin.crown, frame.z(cabin.columns[0]!.top)];
-  const up = new THREE.Vector3(head[0] - base[0], head[1] - base[1], head[2] - base[2]).normalize();
+  const base = new THREE.Vector3(0, frame.deckY(foot, 0), frame.z(foot));
+  const head = new THREE.Vector3(0, cabin.rail + cabin.crown, frame.z(cabin.columns[0]!.top));
+  const up = head.sub(base).normalize();
   const across = new THREE.Vector3(1, 0, 0);
-  const normal = new THREE.Vector3().crossVectors(across, up).normalize();
-  const basis = new THREE.Matrix4().makeBasis(across, up, normal);
-  const length = Math.min(0.5, spec.cabin.railHalf * 0.75);
-  for (const [i, px] of [0.42, -0.08].entries()) {
-    const at: Vec3 = [px, base[1] + 0.035, base[2] - 0.03];
-    const g = pivotGroup(`wiper_${i}`, at, { channel: 'wiper_sweep', kind: 'rot', axis: [normal.x, normal.y, normal.z], amount: -1.75 }, { id: 'wipers', label: 'Дворники', action: { type: 'cycle', channel: 'wipers', values: [0, 1, 2] } });
+  const screenNormal = new THREE.Vector3().crossVectors(across, up).normalize();
+  const ray = new THREE.Raycaster();
+  ray.far = 0.6;
+  const origin = new THREE.Vector3();
+  const down = new THREE.Vector3();
+  /** The surface of `target` under `q`, along `n`. */
+  const under = (target: THREE.Object3D, q: THREE.Vector3, n: THREE.Vector3): THREE.Intersection | undefined => {
+    ray.set(origin.copy(q).addScaledVector(n, 0.3), down.copy(n).negate());
+    return ray.intersectObject(target, false)[0];
+  };
+  const blade = cabin.wiperBlade;
+  const q = new THREE.Vector3();
+  const m = new THREE.Vector3();
+  const onPane = (point: THREE.Vector3, n: THREE.Vector3): boolean =>
+    !!under(pane, m.copy(point).addScaledVector(up, WIPER_EDGE), n)
+    && !!under(pane, m.copy(point).addScaledVector(up, -WIPER_FOOT), n)
+    && !!under(pane, m.copy(point).addScaledVector(across, WIPER_EDGE), n)
+    && !!under(pane, m.copy(point).addScaledVector(across, -WIPER_EDGE), n);
+
+  for (const [i, px] of WIPER_PIVOTS.entries()) {
+    // The glass's bottom edge above the spindle.
+    const start = new THREE.Vector3(px, base.y, base.z).addScaledVector(up, -0.1);
+    let edge: THREE.Vector3 | undefined;
+    for (let t = 0; t < 0.4 && !edge; t += 0.002) edge = under(pane, q.copy(start).addScaledVector(up, t), screenNormal)?.point;
+    if (!edge) throw new Error(`Kit car "${spec.id}": no windscreen above wiper ${i}`);
+    const at = edge.addScaledVector(up, -WIPER_PIVOT_BELOW);
+
+    // The arm's plane: `n` its axis, `park` lying to the left, `rise` up the glass.
+    const n = new THREE.Vector3();
+    const park = new THREE.Vector3();
+    const rise = new THREE.Vector3();
+    const turnAbout = (axis: THREE.Vector3): void => {
+      n.copy(axis).normalize();
+      park.copy(across).addScaledVector(n, -n.x).normalize();
+      rise.crossVectors(n, park);
+    };
+    const point = (phi: number, r: number, out: THREE.Vector3): THREE.Vector3 =>
+      out.copy(at).addScaledVector(park, r * Math.cos(phi)).addScaledVector(rise, r * Math.sin(phi));
+    /** The glass's height over the arm's plane at angle `phi`, radius `r`. */
+    const glassAt = (phi: number, r: number): number | undefined => {
+      const hit = under(pane, point(phi, r, q), n);
+      return hit ? hit.point.sub(at).dot(n) : undefined;
+    };
+    const radii = (arm: number, count: number): number[] =>
+      Array.from({ length: count + 1 }, (_, k) => arm - blade / 2 + (blade * k) / count);
+    const bladeOn = (phi: number, arm: number): boolean => radii(arm, 4).every((r) => onPane(point(phi, r, q), n));
+
+    let arm = 0;
+    let rest = 0;
+    let sweep = 0;
+    /**
+     * Arm length, park and sweep about the present axis: the longest arm whose blade,
+     * upright, stays on the pane, that parks low along the foot and still sweeps 90°
+     * between the pillars.
+     */
+    const fit = (): void => {
+      let top = 0;
+      for (let r = 0.05; r < 1.2; r += 0.005) {
+        if (onPane(point(Math.PI / 2, r, q), n)) top = r;
+        else if (top > 0) break;
+      }
+      for (const steepest of WIPER_PARKS) {
+        for (arm = top - blade / 2; arm > blade / 2; arm -= 0.01) {
+          rest = Number.NaN;
+          for (let phi = 0; phi <= steepest; phi += WIPER_STEP) {
+            if (bladeOn(phi, arm)) {
+              rest = phi;
+              break;
+            }
+          }
+          if (Number.isNaN(rest)) continue;
+          sweep = 0;
+          while (sweep + WIPER_STEP <= WIPER_SWEEP && bladeOn(rest + sweep + WIPER_STEP, arm)) sweep += WIPER_STEP;
+          if (sweep >= WIPER_SWEEP_MIN) return;
+        }
+      }
+      throw new Error(`Kit car "${spec.id}": wiper ${i} cannot sweep 90° on the glass`);
+    };
+    /** How far the glass under the blade rises and falls over the sweep, worst station. */
+    const unevenness = (): number => {
+      let worst = 0;
+      for (const r of radii(arm, 6)) {
+        let lo = Infinity;
+        let hi = -Infinity;
+        for (let k = 0; k <= 10; k++) {
+          const h = glassAt(rest + (sweep * k) / 10, r) ?? Infinity;
+          lo = Math.min(lo, h);
+          hi = Math.max(hi, h);
+        }
+        worst = Math.max(worst, hi - lo);
+      }
+      return worst;
+    };
+
+    turnAbout(screenNormal);
+    fit();
+    // Tilt the axis towards the most level sweep: the best of a coarse grid of two tilts
+    // (the score has several dips), refined by a pattern search.
+    const centre = n.clone();
+    const tiltA = across.clone();
+    const tiltB = new THREE.Vector3().crossVectors(centre, across);
+    const axis = new THREE.Vector3();
+    let best = Infinity;
+    let ta = 0;
+    let tb = 0;
+    const tryTilt = (a: number, c: number): boolean => {
+      turnAbout(axis.copy(centre).addScaledVector(tiltA, a).addScaledVector(tiltB, c));
+      const score = unevenness();
+      if (score >= best) return false;
+      [best, ta, tb] = [score, a, c];
+      return true;
+    };
+    for (let a = -0.16; a <= 0.161; a += 0.04) for (let c = -0.16; c <= 0.161; c += 0.04) tryTilt(a, c);
+    for (let step = 0.02; step > 0.004; step /= 2) {
+      for (let moved = true; moved; ) {
+        moved = false;
+        for (const [da, db] of [[step, 0], [-step, 0], [0, step], [0, -step]] as const) moved = tryTilt(ta + da, tb + db) || moved;
+      }
+    }
+    turnAbout(axis.copy(centre).addScaledVector(tiltA, ta).addScaledVector(tiltB, tb));
+    fit();
+
+    // Blade: at each station, clear of the highest glass it passes over, between stations too.
+    const stations = radii(arm, WIPER_STATIONS);
+    const fine = radii(arm, WIPER_STATIONS * 2);
+    const high = fine.map((r) => {
+      let top = -Infinity;
+      for (let k = 0; k <= 24; k++) top = Math.max(top, glassAt(rest + (sweep * k) / 24, r) ?? -Infinity);
+      return top;
+    });
+    const lift = stations.map((_, k) => Math.max(high[2 * k]!, high[2 * k - 1] ?? -Infinity, high[2 * k + 1] ?? -Infinity) + WIPER_GAP);
+    // The spindle stands out of the frame strip.
+    const strip = under(panel, at, n);
+    if (!strip) throw new Error(`Kit car "${spec.id}": wiper ${i}'s spindle is off the body`);
+    const seat = strip.point.sub(at).dot(n);
+
+    // A turn about `n` takes `park` towards `n × park`, which is `rise`.
+    const g = pivotGroup(`wiper_${i}`, [at.x, at.y, at.z], { channel: 'wiper_sweep', kind: 'rot', axis: [n.x, n.y, n.z], amount: sweep }, { id: 'wipers', label: 'Дворники', action: { type: 'cycle', channel: 'wipers', values: [0, 1, 2] } });
     const b = new PartBuilder().color(BLACK);
-    b.push(new THREE.Matrix4().makeTranslation(...at).multiply(basis));
-    b.cylinderZ('trim', [0, 0, 0.01], 0.014, 0.012, 6);
-    // Arm and blade, lying parked toward the passenger side (-x).
-    b.boxFrom('trim', [-length, -0.006, 0.012], [0, 0.006, 0.022]);
-    b.boxFrom('trim', [-length - 0.02, 0.004, 0.006], [-0.04, 0.012, 0.014]);
+    // Built parked: x along the arm, z out of the glass.
+    const along = point(rest, 1, new THREE.Vector3()).sub(at);
+    b.push(new THREE.Matrix4().makeTranslation(at.x, at.y, at.z).multiply(new THREE.Matrix4().makeBasis(along, new THREE.Vector3().crossVectors(n, along), n)));
+    const hubTop = seat + 0.022;
+    b.cylinderZ('trim', [0, 0, seat + 0.008], 0.014, 0.014, 6);
+    const bar = (points: readonly (readonly [number, number])[], half: number, depth: number): void => {
+      const rings = points.map(([x, z]): Vec3[] => [[x, -half, z], [x, half, z], [x, half, z + depth], [x, -half, z + depth]]);
+      for (let k = 0; k + 1 < rings.length; k++) b.bridge('trim', rings[k]!, rings[k + 1]!, true);
+      b.poly('trim', [...rings[0]!].reverse());
+      b.poly('trim', rings[rings.length - 1]!);
+    };
+    // Arm: from the spindle's top down onto the blade's middle.
+    bar([[0, hubTop - 0.01], [arm + 0.02, lift[WIPER_STATIONS / 2]! + 0.01]], 0.006, 0.01);
+    bar(stations.map((r, k) => [r, lift[k]!]), 0.004, 0.01);
     b.pop();
-    addBuilt(g, b, at, `wiper_${i}`);
+    addBuilt(g, b, [at.x, at.y, at.z], `wiper_${i}`);
     root.add(g);
   }
 }
+
+/**
+ * Name of an empty node over the fuel flap's opening, in the kit frame: its position the
+ * opening's centre on the skin, its scale the opening's box (out from the cup to just
+ * proud of the skin). render/carmodel.ts measures it after the body fit
+ * (`CarModelMeasure.filler`), where a held can pours into the tank, and takes it out of
+ * the template.
+ */
+export const KIT_FILLER_NODE = 'kit_filler';
+/** How far the filler's aim box stands proud of the skin: a can's spout goes in from outside. */
+const FILLER_PROUD = 0.04;
 
 /** A cup with a cap behind the fuel flap, so an open flap shows a filler, not a void. */
 function buildFiller(ctx: KitContext): void {
@@ -711,13 +902,22 @@ function buildFiller(ctx: KitContext): void {
   const s = (flap.s0 + flap.s1) / 2;
   const y = (flap.y0 + flap.y1) / 2;
   const side = flap.side === 'left' ? 1 : -1;
-  const x = side * (frame.sideX(s, y) - 0.035);
+  const skin = frame.sideX(s, y);
+  const x = side * (skin - 0.035);
   const b = new PartBuilder().color(0x1a1b1c);
   const hz = (flap.s1 - flap.s0) / 2 - 0.006;
   const hy = (flap.y1 - flap.y0) / 2 - 0.006;
   b.boxFrom('trim', [x - 0.015 - side * 0.015, y - hy, frame.z(s) - hz], [x - 0.015 + side * 0.015, y + hy, frame.z(s) + hz], 0b111111 & ~(side > 0 ? 1 : 2));
   b.color(0x2e3032).cylinderX('trim', [x + side * 0.002, y, frame.z(s)], 0.026, 0.01, 8);
   addBuilt(ctx.root, b, [0, 0, 0], 'filler');
+  // From the cup's back (0.05 inside the skin) to FILLER_PROUD outside it.
+  const inner = skin - 0.05;
+  const outer = skin + FILLER_PROUD;
+  const marker = new THREE.Object3D();
+  marker.name = KIT_FILLER_NODE;
+  marker.position.set(side * (inner + outer) * 0.5, y, frame.z(s));
+  marker.scale.set(outer - inner, flap.y1 - flap.y0, flap.s1 - flap.s0);
+  ctx.root.add(marker);
 }
 
 /**

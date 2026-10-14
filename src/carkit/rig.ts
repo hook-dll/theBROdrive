@@ -12,7 +12,8 @@
  * Channels ease towards their targets, so a door swings and a needle sweeps. Some
  * channels are derived every frame from others (the wipers' sweep from their switch,
  * the gear lever's two axes from the gear), and the lamp lenses are lit from the
- * light switch, the stalk, the hazard button and the pedals.
+ * light switch, the stalk, the hazard button and the pedals. A cluster's warning lamp
+ * and the courtesy lamp are lit faces slid out from behind a dark lens (interior.ts).
  */
 
 import * as THREE from 'three';
@@ -30,6 +31,11 @@ export interface KitMotion {
   readonly axis: readonly [number, number, number];
   /** Radians or metres per unit of channel value; for `sink`, a share of the height. */
   readonly amount: number;
+  /**
+   * Channel values the part stops at, as a needle at its pins: the value is clamped to
+   * them, and the pose it was built in is at the first. Absent: no stops, built at 0.
+   */
+  readonly stops?: readonly [number, number];
 }
 
 export type KitAction =
@@ -51,13 +57,21 @@ export interface KitPicked {
   readonly control: KitControl;
 }
 
-/** Channels that follow their target at once (driving inputs, read out by gauges). */
-const INSTANT = new Set(['steer', 'throttle', 'brake', 'clutch', 'handbrake', 'gear_fb', 'gear_lr', 'wiper_sweep']);
+/**
+ * Channels that follow their target at once (driving inputs, read out by gauges). The
+ * speedometer and tachometer are here as the HUD's dials are: they are fed in km/h and
+ * rpm, and an ease of a few units a second left them minutes behind the car. A warning
+ * lamp (`tell_*`) and the courtesy lamp light as they are switched.
+ */
+const INSTANT = /^(steer|throttle|brake|clutch|handbrake|gear_fb|gear_lr|wiper_sweep|speed|rpm|dome|tell_\w+)$/;
 /** Ease rate per channel prefix, units per second. */
 const RATE: readonly [RegExp, number][] = [
   [/^door_|^boot|^tailgate|^bonnet/, 1.6],
   [/^window_/, 0.45],
-  [/^(speed|rpm|fuel|temp)$/, 2.5],
+  [/^(fuel|temp)$/, 2.5],
+  // Oil pressure (kgf/cm²) and the voltmeter (V): a damped needle crosses its dial in
+  // about 0.3 s. The economy meter's 0..1 takes the default.
+  [/^(oil|volts)$/, 20],
   [/^horn|^hazard_button/, 12],
 ];
 
@@ -300,6 +314,11 @@ export class KitRig {
   private readonly channels = new Map<string, Channel>();
   private readonly lenses = new Map<LensRole, THREE.MeshStandardMaterial[]>();
   private time = 0;
+  /**
+   * Cycles the wipers have run. Not a channel: a channel eases towards its target, and
+   * this one was pulled back to 0 faster than it ran, so the arms never left their park.
+   */
+  private wiperPhase = 0;
   private near: boolean | null = null;
   private readonly detail: THREE.Object3D[] = [];
   private readonly glass: THREE.MeshStandardMaterial[] = [];
@@ -368,7 +387,7 @@ export class KitRig {
   set(name: string, value: number, immediate = false): void {
     const c = this.channel(name);
     c.target = value;
-    if (immediate || INSTANT.has(name)) c.value = value;
+    if (immediate || INSTANT.test(name)) c.value = value;
   }
 
   /**
@@ -378,6 +397,7 @@ export class KitRig {
   adopt(other: KitRig): void {
     for (const [name, c] of other.channels) this.channels.set(name, { value: c.value, target: c.target });
     this.time = other.time;
+    this.wiperPhase = other.wiperPhase;
   }
 
   /** The control a picked object belongs to, if any. */
@@ -416,14 +436,14 @@ export class KitRig {
     const wipers = this.get('wipers');
     if (wipers > 0) {
       const hz = wipers > 1.5 ? 1.1 : 0.6;
-      this.channel('wiper_phase').value += dt * hz;
-      this.set('wiper_sweep', 0.5 - 0.5 * Math.cos(this.channel('wiper_phase').value * Math.PI * 2));
+      this.wiperPhase += dt * hz;
+      this.set('wiper_sweep', 0.5 - 0.5 * Math.cos(this.wiperPhase * Math.PI * 2));
     } else {
-      // Park: finish the stroke and stay down.
+      // Park: finish the stroke and stay down; switched on again, the arms rise from where they are.
       const sweep = this.channel('wiper_sweep');
       sweep.value = Math.max(0, sweep.value - dt * 1.5);
       sweep.target = sweep.value;
-      this.channel('wiper_phase').value = 0;
+      this.wiperPhase = Math.acos(1 - 2 * sweep.value) / (Math.PI * 2);
     }
     // A radio that is on shows it: the needle drifts along the band.
     if (this.get('radio') > 0.5) this.set('radio_tune', 0.5 + 0.4 * Math.sin(this.time * 0.15));
@@ -443,7 +463,9 @@ export class KitRig {
     }
 
     for (const d of this.driven) {
-      const v = this.channels.get(d.motion.channel)?.value ?? 0;
+      const raw = this.channels.get(d.motion.channel)?.value ?? 0;
+      const stops = d.motion.stops;
+      const v = stops ? Math.min(stops[1], Math.max(stops[0], raw)) - stops[0] : raw;
       // Stickers on a pane hang under it (render/stickerdecals.ts) and cannot be cut with
       // it: they are folded away while it is down, every frame, so one printed meanwhile
       // does not show in the air.

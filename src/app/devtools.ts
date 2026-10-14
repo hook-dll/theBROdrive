@@ -193,7 +193,7 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
   const devDriveModel = (modelId: string): string => {
     if (ctx.world.state.player.drivingCarId) ctx.world.apply({ t: 'exit_car' });
     const carId = devSpawnVehicle({ modelId });
-    ctx.world.apply({ t: 'enter_car', carId });
+    ctx.world.apply({ t: 'enter_car', carId, seat: 'driver' });
     return carId;
   };
 
@@ -472,7 +472,7 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
       ctx.hud.setToast(`no car within ${DEV_FLIP_RADIUS} m`);
       return;
     }
-    ctx.world.apply({ t: 'enter_car', carId: nearestId });
+    ctx.world.apply({ t: 'enter_car', carId: nearestId, seat: 'driver' });
     ctx.hud.setToast('seated in the nearest car');
   };
 

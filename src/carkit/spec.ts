@@ -107,6 +107,8 @@ export interface CabinSpec {
    * forward. Absent: the screen's foot straight across at the cowl.
    */
   readonly screenFoot?: number;
+  /** Windscreen wiper blade length (the parts catalogues: the classics 330 mm, the Samaras and tens 510 mm). */
+  readonly wiperBlade: number;
   /** Back light: base strip above the deck and header below the rail. */
   readonly rearBottom: number;
   readonly rearHeader: number;

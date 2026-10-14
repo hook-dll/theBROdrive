@@ -66,8 +66,31 @@ const COLOURS = {
   cluster: 0x2a2c2f,
 } as const;
 
-/** Warning lamps on a cluster face, in turn along the grid. */
-const TELLTALES = [0x3fae4a, 0xd88a1c, 0xc4241c, 0x2e6fd0] as const;
+/**
+ * What a cluster's warning lamp tells, and its colour lit. Each lights on its rig
+ * channel `tell_<name>` (0 or 1, fed by `Vehicle.driveKit`): indicators (blinking),
+ * main beam, side lights, fuel reserve, low oil pressure, no charge, handbrake and
+ * check engine. Off, the lens reads a dark shade of the same colour.
+ */
+type Telltale = 'turn' | 'beam' | 'side' | 'fuel' | 'oil' | 'charge' | 'brake' | 'check';
+const TELLTALES: Readonly<Record<Telltale, number>> = {
+  turn: 0x4dff5e,
+  side: 0x4dff5e,
+  beam: 0x3d8bff,
+  fuel: 0xffa21f,
+  check: 0xffa21f,
+  oil: 0xff3523,
+  charge: 0xff3523,
+  brake: 0xff3523,
+};
+/**
+ * A lit face's travel: it stands just proud of its lens lit, and this far back off,
+ * behind the face it is mounted in. Further than the depth between a lens and that
+ * face, so the dark one hides whole.
+ */
+const GLOW_TRAVEL = 0.008;
+/** The courtesy lamp's lens lit: a warm filament behind milky plastic. */
+const DOME_LIT = 0xfff0c8;
 
 /** Which seat or door a control belongs to, for its hover label. */
 const WHERE: Readonly<Record<string, string>> = {
@@ -79,19 +102,20 @@ const WHERE: Readonly<Record<string, string>> = {
   r: 'пассажира',
 };
 
-type GaugeChannel = 'speed' | 'rpm' | 'fuel' | 'temp';
+/**
+ * The rig channel a needle reads: km/h, rpm, fuel and temperature as fractions, oil
+ * pressure in kgf/cm², the voltmeter in volts and the economy meter's manifold vacuum
+ * as a fraction (closed throttle 1).
+ */
+type GaugeChannel = 'speed' | 'rpm' | 'fuel' | 'temp' | 'oil' | 'volts' | 'vacuum';
 
 interface GaugeBase {
-  /**
-   * What drives it. Absent: the needle stands fixed at mid-scale. Oil pressure, the
-   * voltmeter and the economy meter have no channel in the rig, and a still needle
-   * reads truer than one borrowed from another gauge.
-   */
-  readonly channel?: GaugeChannel;
+  readonly channel: GaugeChannel;
   /** Centre on the cluster face: towards the driver's right of the column, and above the cowl's belt. */
   readonly right: number;
   readonly up: number;
-  /** Channel value at full scale. */
+  /** Channel value at the scale's start (default 0) and at full scale: the needle's pins. */
+  readonly min?: number;
   readonly full: number;
   readonly ticks: number;
 }
@@ -190,8 +214,11 @@ interface Layout {
   readonly eyeballs?: { readonly radius: number; readonly at: readonly P2[] };
   /** A framed panel on the cluster face behind the gauges: centre (right, up), half size, colour and frame. */
   readonly clusterFace?: { readonly right: number; readonly up: number; readonly half: P2; readonly colour: number; readonly frame: 'chrome' | 'black' };
-  /** Warning lamps on the cluster face: a grid of `cols` x `rows` at `pitch`, centred at (right, up). */
-  readonly lamps?: { readonly right: number; readonly up: number; readonly cols: number; readonly rows: number; readonly pitch: number };
+  /**
+   * Warning lamps on the cluster face: `show` laid row by row into a grid `cols` wide at
+   * `pitch`, centred at (right, up).
+   */
+  readonly lamps?: { readonly right: number; readonly up: number; readonly cols: number; readonly pitch: number; readonly show: readonly Telltale[] };
   /** Switches with no channel: [x, dy] on the fascia, or [right, up] on the cluster face as the gauges. */
   readonly rockers?: { readonly on: 'fascia' | 'cluster'; readonly at: readonly P2[] };
   /**
@@ -214,6 +241,9 @@ export type CabinLayoutOverride = Partial<Layout>;
 /** Scales of the stock dials: a big one sweeping 240 degrees, a small one 90 (full scale 1). */
 const BIG = { sweep: 240 * (Math.PI / 180), rest: 210 * (Math.PI / 180), ticks: 9 } as const;
 const SMALL = { full: 1, sweep: Math.PI / 2, rest: 225 * (Math.PI / 180), ticks: 3 } as const;
+/** The Zhiguli's small oil pressure dial, 0-8 kgf/cm², and voltmeter, 8-16 V. */
+const OIL_DIAL = { ...SMALL, full: 8, ticks: 5 } as const;
+const VOLT_DIAL = { ...SMALL, min: 8, full: 16, ticks: 5 } as const;
 
 /** Big round dials over the wheel's hub: speedometer and tachometer, then the small pair. */
 function dials(big: number, small: number, spread: number, smallSpread: number, up: number, smallUp: number): GaugeLook[] {
@@ -251,7 +281,11 @@ const LAYOUTS: Readonly<Record<KitCarSpec['platform'], Layout>> = {
     binnacleHalf: 0.215,
     cluster: 0.352,
     gauges: dials(0.048, 0.029, 0.066, 0.165, 0.06, 0.052),
-    wheel: { ds: 0.55, dy: 0.094, rake: 28 * (Math.PI / 180), radius: 0.19, rim: 0.0145, spokes: [-15, 195], hub: 'round' },
+    // Warning lamps in a column in the gap between the big dials.
+    lamps: { right: 0, up: 0.06, cols: 1, pitch: 0.012, show: ['turn', 'side', 'beam', 'fuel', 'oil', 'charge', 'brake'] },
+    // Hub 0.03 over the belt: the rim's top stands about 5 cm over the hood, as the 2108's
+    // stands at its cowl, instead of reaching up into the screen.
+    wheel: { ds: 0.55, dy: 0.03, rake: 28 * (Math.PI / 180), radius: 0.19, rim: 0.0145, spokes: [-15, 195], hub: 'round' },
     pedals: { pivot: [0.1, -0.16], pad: [0.21, 0.135] },
     gear: { ds: 0.62, height: 0.32, lean: 0.1 },
     handbrake: { rear: 0.08, length: 0.26 },
@@ -287,6 +321,7 @@ const LAYOUTS: Readonly<Record<KitCarSpec['platform'], Layout>> = {
     binnacleHalf: 0.21,
     cluster: 0.472,
     gauges: dials(0.044, 0.025, 0.062, 0.16, 0.015, 0.005),
+    lamps: { right: 0, up: 0.015, cols: 1, pitch: 0.012, show: ['turn', 'side', 'beam', 'fuel', 'oil', 'charge', 'brake'] },
     wheel: { ds: 0.58, dy: -0.02, rake: 22 * (Math.PI / 180), radius: 0.185, rim: 0.0145, spokes: [-25, 205, 270], hub: 'pad' },
     pedals: { pivot: [0.1, -0.29], pad: [0.22, 0.115] },
     gear: { ds: 0.72, height: 0.22, lean: 0.04 },
@@ -321,10 +356,10 @@ export const CABIN_2101: CabinLayoutOverride = {
     { channel: 'temp', right: -0.128, up: 0.062, radius: 0.018, ...SMALL },
     { channel: 'fuel', right: 0.128, up: 0.062, radius: 0.018, ...SMALL },
   ],
-  lamps: { right: 0, up: 0.04, cols: 6, rows: 1, pitch: 0.02 },
+  lamps: { right: 0, up: 0.04, cols: 6, pitch: 0.02, show: ['turn', 'side', 'beam', 'oil', 'charge', 'brake'] },
   eyeballs: { radius: 0.026, at: [[0.115, -0.014], [0.045, -0.014]] },
   radio: [0, -0.08],
-  wheel: { ...LAYOUTS.classic.wheel, radius: 0.2, rim: 0.012 },
+  wheel: { ...LAYOUTS.classic.wheel, rim: 0.012 },
 };
 
 /**
@@ -337,13 +372,15 @@ export const CABIN_2103: CabinLayoutOverride = {
   gauges: [
     { channel: 'fuel', right: -0.18, up: 0.062, radius: 0.024, ...SMALL },
     { channel: 'temp', right: -0.12, up: 0.062, radius: 0.024, ...SMALL },
-    { right: -0.06, up: 0.062, radius: 0.024, ...SMALL },
+    { channel: 'oil', right: -0.06, up: 0.062, radius: 0.024, ...OIL_DIAL },
     { channel: 'rpm', right: 0.03, up: 0.062, radius: 0.044, full: 8000, ...BIG },
     { channel: 'speed', right: 0.138, up: 0.062, radius: 0.044, full: 180, ...BIG },
   ],
+  // Warning lamps in a row on the wood under the three small dials.
+  lamps: { right: -0.12, up: 0.022, cols: 7, pitch: 0.016, show: ['turn', 'side', 'beam', 'fuel', 'oil', 'charge', 'brake'] },
   lights: { right: -0.18, dy: -0.05, kind: 'rocker' },
   rockers: { on: 'fascia', at: [[LAYOUTS.classic.seatX + 0.12, -0.05], [LAYOUTS.classic.seatX + 0.06, -0.05]] },
-  wheel: { ...LAYOUTS.classic.wheel, radius: 0.2, rim: 0.012 },
+  wheel: { ...LAYOUTS.classic.wheel, rim: 0.012 },
 };
 
 /**
@@ -368,9 +405,9 @@ export const CABIN_2105: CabinLayoutOverride = {
     { channel: 'fuel', right: -0.085, up: 0.0615, radius: 0.048, full: 1, sweep: 140 * (Math.PI / 180), rest: 160 * (Math.PI / 180), ticks: 3 },
     { channel: 'temp', right: -0.085, up: 0.0615, radius: 0.048, full: 1, sweep: -140 * (Math.PI / 180), rest: 200 * (Math.PI / 180), ticks: 3, bare: true },
     { channel: 'speed', right: 0.085, up: 0.0615, radius: 0.048, full: 180, ...BIG },
-    { right: 0, up: 0.03, radius: 0.02, ...SMALL },
+    { channel: 'volts', right: 0, up: 0.03, radius: 0.02, ...VOLT_DIAL },
   ],
-  lamps: { right: 0, up: 0.088, cols: 3, rows: 2, pitch: 0.014 },
+  lamps: { right: 0, up: 0.088, cols: 3, pitch: 0.014, show: ['turn', 'beam', 'fuel', 'brake', 'oil', 'charge'] },
   lights: { right: -0.163, dy: 0.0885, kind: 'rocker', on: 'cluster' },
   rockers: { on: 'cluster', at: [[-0.163, 0.0335], [0.163, 0.0885], [0.163, 0.0335]] },
   wheel: { ...LAYOUTS.classic.wheel, hub: 'pad' },
@@ -397,12 +434,12 @@ export const CABIN_2107: CabinLayoutOverride = {
   gauges: [
     { channel: 'rpm', right: -0.085, up: 0.0675, radius: 0.054, full: 8000, ...BIG },
     { channel: 'speed', right: 0.085, up: 0.0675, radius: 0.054, full: 180, ...BIG },
-    { right: -0.172, up: 0.1, radius: 0.022, ...SMALL },
+    { channel: 'vacuum', right: -0.172, up: 0.1, radius: 0.022, ...SMALL },
     { channel: 'temp', right: -0.172, up: 0.035, radius: 0.022, ...SMALL },
     { channel: 'fuel', right: 0.172, up: 0.1, radius: 0.022, ...SMALL },
-    { right: 0.172, up: 0.035, radius: 0.022, ...SMALL },
+    { channel: 'volts', right: 0.172, up: 0.035, radius: 0.022, ...VOLT_DIAL },
   ],
-  lamps: { right: 0, up: 0.0675, cols: 1, rows: 7, pitch: 0.016 },
+  lamps: { right: 0, up: 0.0675, cols: 1, pitch: 0.016, show: ['turn', 'side', 'beam', 'fuel', 'brake', 'oil', 'charge'] },
   stack: { half: 0.1 },
   vents: [{ dy: -0.04 }, { x: 0.06, dy: -0.1 }, { x: -0.06, dy: -0.1 }],
   glovebox: { x: -0.34, dy: -0.1, half: [0.19, 0.068] },
@@ -460,6 +497,9 @@ export const CABIN_2110: CabinLayoutOverride = {
     { channel: 'temp', right: -0.11, up: -0.01, radius: 0.0185, ...SMALL },
     { channel: 'fuel', right: 0.11, up: -0.01, radius: 0.0185, ...SMALL },
   ],
+  // Warning lamps: neither photo makes them out under the hood, so the 2110's set lies in
+  // one row across the face's top, between the dials' bezels and the hood's lip.
+  lamps: { right: 0, up: 0.08, cols: 8, pitch: 0.0145, show: ['turn', 'side', 'beam', 'fuel', 'check', 'oil', 'charge', 'brake'] },
   // Two square rockers on the hood's right flank, 170 px right of the cluster's centre,
   // 60 and 18 px over the dials (fog lamps and rear screen heater in the 2005 photo);
   // set 0.056 apart, not 0.038, since the kit's rocker is taller than the 40 mm square one.
@@ -498,6 +538,20 @@ export const CABIN_2110: CabinLayoutOverride = {
  * takes it out of the template.
  */
 export const KIT_DRIVER_EYE_NODE = 'kit_driver_eye';
+/** The same over the rear bench's left seat; the right one is its mirror. */
+export const KIT_REAR_EYE_NODE = 'kit_rear_eye';
+/**
+ * Name of the group holding the rear bench's meshes, inside `kit_cabin`: the bench is
+ * one piece with no channel, and getting in (player/interaction.ts) has to know it.
+ */
+export const KIT_BENCH_NODE = 'kit_bench';
+/**
+ * Name of the courtesy lamp's group (its lens, the `dome` switch), in the car frame and
+ * unturned: the Vehicle hangs the cabin's light from it (`Vehicle.syncDomeLight`).
+ */
+export const KIT_DOME_LAMP_NODE = 'kit_dome_lamp';
+/** The rear bench's two seats' centre lines off the car's centre, where its inserts are. */
+const BENCH_SEAT_X = 0.25;
 /** Seated eye over the driver's cushion top, metres: a mid-size adult sitting upright. */
 const SEATED_EYE = 0.74;
 /** The eye's run behind the hip: the torso leans back with the backrest. */
@@ -740,6 +794,7 @@ class Cabin {
     for (const side of [1, -1]) this.frontSeat(side);
     this.bench();
     this.driverEye();
+    this.rearEye();
     addBuilt(this.group, this.fixed, ORIGIN, 'cabin', true);
     this.ctx.root.add(this.group);
     this.doors();
@@ -751,6 +806,15 @@ class Cabin {
     eye.name = KIT_DRIVER_EYE_NODE;
     const y = Math.min(this.floorY + this.lay.cushion + SEATED_EYE, this.dome(this.x0) - EYE_HEADROOM);
     eye.position.set(...this.P(this.x0, y, this.hipS + EYE_BEHIND_HIP));
+    this.ctx.root.add(eye);
+  }
+
+  /** The empty `KIT_REAR_EYE_NODE`, seated on the bench as the driver's is on his cushion. */
+  private rearEye(): void {
+    const eye = new THREE.Object3D();
+    eye.name = KIT_REAR_EYE_NODE;
+    const y = Math.min(this.floorY + this.lay.benchCushion + SEATED_EYE, this.dome(BENCH_SEAT_X) - EYE_HEADROOM);
+    eye.position.set(...this.P(BENCH_SEAT_X, y, this.benchS + EYE_BEHIND_HIP));
     this.ctx.root.add(eye);
   }
 
@@ -795,7 +859,10 @@ class Cabin {
     return this.spec.cabin.railHalf - 0.085;
   }
 
-  /** A pivot group with its own geometry, hung under `parent` (standing at `parentAt`). */
+  /**
+   * A pivot group with its own geometry, hung under `parent` (standing at `parentAt`).
+   * `casts = false` for a part thinner than a shadow texel (see `addBuilt`).
+   */
   private hinge(
     parent: THREE.Object3D,
     parentAt: Vec3,
@@ -804,11 +871,12 @@ class Cabin {
     motion: KitMotion | undefined,
     control: KitControl | undefined,
     draw: (b: PartBuilder) => void,
+    casts = true,
   ): THREE.Group {
     const g = pivotGroup(name, at, motion, control);
     const b = new PartBuilder();
     draw(b);
-    if (!b.empty) addBuilt(g, b, at, name, true);
+    if (!b.empty) addBuilt(g, b, at, name, true, casts);
     attach(parent, parentAt, g);
     return g;
   }
@@ -1049,9 +1117,21 @@ class Cabin {
     const b = this.fixed.color(this.lay.headliner);
     for (let i = 0; i + 1 < rows.length; i++) b.bridge('trim', rows[i]!, rows[i + 1]!);
 
+    // Courtesy lamp: the lens is its switch, and lit, a face slides down out of the
+    // headliner over it (`GLOW_TRAVEL`). The car the player sits in also lights the cabin
+    // from here (`Vehicle.syncDomeLight`).
     const lampS = lerp(frontTop, rearTop, 0.45);
     const ly = this.dome(0) - 0.004;
-    b.color(COLOURS.lamp).quad('trim', this.P(0.05, ly, lampS - 0.03), this.P(-0.05, ly, lampS - 0.03), this.P(-0.05, ly, lampS + 0.03), this.P(0.05, ly, lampS + 0.03));
+    const lens = (n: PartBuilder, slot: KitSlot, y: number): void => {
+      n.quad(slot, this.P(0.05, y, lampS - 0.03), this.P(-0.05, y, lampS - 0.03), this.P(-0.05, y, lampS + 0.03), this.P(0.05, y, lampS + 0.03));
+    };
+    const at = this.P(0, ly, lampS);
+    const lamp = this.hinge(this.group, ORIGIN, KIT_DOME_LAMP_NODE, at, undefined, { id: 'dome', label: 'Плафон' }, (n) => {
+      lens(n.color(COLOURS.lamp), 'trim', ly);
+    }, false);
+    this.hinge(lamp, at, 'dome_glow', at, { channel: 'dome', kind: 'pos', axis: [0, -1, 0], amount: GLOW_TRAVEL }, undefined, (n) => {
+      lens(n.color(DOME_LIT), 'lamp_glow', ly - 0.0005 + GLOW_TRAVEL);
+    }, false);
 
     // Mirror: hung from the header on a stem, well behind the screen.
     const [[sb, yb], [st, yt]] = glass(0, 'front');
@@ -1066,7 +1146,8 @@ class Cabin {
     b.quad('chrome', [0.095, -0.022, -0.0145], [-0.095, -0.022, -0.0145], [-0.095, 0.022, -0.0145], [0.095, 0.022, -0.0145]);
     b.pop();
 
-    // Sun visors lie flat under the headliner and swing down about their front edge.
+    // Sun visors lie flat under the headliner and swing down about their front edge. A
+    // visor is 1.6 cm thick, under a shadow texel: it casts nothing (see `addBuilt`).
     for (const side of [1, -1]) {
       const name = side > 0 ? 'visor_l' : 'visor_r';
       const x = side * 0.34;
@@ -1077,7 +1158,7 @@ class Cabin {
         v.pushAt(at);
         pad(v, 'trim', [0, -0.008, -0.08], [0.16, 0.008, 0.075], 0.006);
         v.pop();
-      });
+      }, false);
     }
   }
 
@@ -1167,15 +1248,25 @@ class Cabin {
       b.pop();
     }
     if (L.lamps) {
-      const { right, up, cols, rows, pitch } = L.lamps;
-      b.push(this.clusterAt(right, up).matrix);
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          b.color(TELLTALES[(r * cols + c) % TELLTALES.length]!);
-          rect(b, 'trim', (c - (cols - 1) / 2) * pitch, ((rows - 1) / 2 - r) * pitch, pitch * 0.3, pitch * 0.3, 0.0035);
-        }
-      }
-      b.pop();
+      const { right, up, cols, pitch, show } = L.lamps;
+      const rows = Math.ceil(show.length / cols);
+      const m = this.clusterAt(right, up);
+      const h = pitch * 0.3;
+      show.forEach((tell, i) => {
+        const x = ((i % cols) - (cols - 1) / 2) * pitch;
+        const y = ((rows - 1) / 2 - Math.floor(i / cols)) * pitch;
+        b.push(m.matrix).color(shade(TELLTALES[tell], 0.3));
+        rect(b, 'trim', x, y, h, h, 0.0035);
+        b.pop();
+        // Lit, the face stands half a millimetre proud of its lens; off, behind the cluster's face.
+        const at = m.at(x, y, 0.004);
+        const motion: KitMotion = { channel: `tell_${tell}`, kind: 'pos', axis: m.n, amount: GLOW_TRAVEL };
+        this.hinge(this.group, ORIGIN, `telltale_${tell}`, at, motion, undefined, (n) => {
+          n.push(m.matrix).color(TELLTALES[tell]);
+          rect(n, 'lamp_glow', x, y, h, h, 0.004 - GLOW_TRAVEL);
+          n.pop();
+        }, false);
+      });
     }
 
     for (const g of L.gauges) {
@@ -1236,7 +1327,7 @@ class Cabin {
     }
   }
 
-  /** A round dial on the cluster face: bezel, face, ticks and a needle on its channel (fixed without one). */
+  /** A round dial on the cluster face: bezel, face, ticks and a needle on its channel. */
   private gauge(g: RoundGauge): void {
     const m = this.clusterAt(g.right, g.up);
     const r = g.radius;
@@ -1259,12 +1350,10 @@ class Cabin {
       b.quad('trim', at(0.74, -1), at(0.92, -1), at(0.92, 1), at(0.74, 1));
     }
     b.pop();
-    if (!g.channel) {
-      needle(this.fixed, m, r, g.rest - g.sweep / 2);
-      return;
-    }
+    const min = g.min ?? 0;
     const at = m.at(0, 0, 0.008);
-    this.hinge(this.group, ORIGIN, `needle_${g.channel}`, at, { channel: g.channel, kind: 'rot', axis: m.n, amount: -g.sweep / g.full }, undefined, (n) => {
+    const motion: KitMotion = { channel: g.channel, kind: 'rot', axis: m.n, amount: -g.sweep / (g.full - min), stops: [min, g.full] };
+    this.hinge(this.group, ORIGIN, `needle_${g.channel}`, at, motion, undefined, (n) => {
       needle(n, m, r, g.rest);
     });
   }
@@ -1282,14 +1371,13 @@ class Cabin {
     for (let i = 0; i < g.ticks; i++) rect(b, 'trim', lerp(-run, run, i / (g.ticks - 1)), -hh * 0.45, 0.0012, hh * 0.4, 0.0046);
     b.pop();
     const at = m.at(-run, 0, 0.005);
-    const motion: KitMotion | undefined = g.channel && { channel: g.channel, kind: 'pos', axis: m.u, amount: (2 * run) / g.full };
-    const draw = (n: PartBuilder): void => {
+    const min = g.min ?? 0;
+    const motion: KitMotion = { channel: g.channel, kind: 'pos', axis: m.u, amount: (2 * run) / (g.full - min), stops: [min, g.full] };
+    this.hinge(this.group, ORIGIN, `needle_${g.channel}`, at, motion, undefined, (n) => {
       n.push(m.matrix).color(COLOURS.needle);
-      rect(n, 'trim', motion ? -run : 0, 0, 0.0018, hh * 0.9, 0.005);
+      rect(n, 'trim', -run, 0, 0.0018, hh * 0.9, 0.005);
       n.pop();
-    };
-    if (motion) this.hinge(this.group, ORIGIN, `needle_${g.channel}`, at, motion, undefined, draw);
-    else draw(this.fixed);
+    });
   }
 
   /** Lid hinged at its foot, falling open towards the passenger, over a dark opening. */
@@ -1551,7 +1639,7 @@ class Cabin {
    */
   private bench(): void {
     const L = this.lay;
-    const b = this.fixed;
+    const b = new PartBuilder();
     const H = this.benchS;
     const top = this.floorY + L.benchCushion;
     const wall = this.frame.wellX(this.spec.wheels.rear) - 0.022;
@@ -1570,13 +1658,17 @@ class Cabin {
     b.pushAt(this.P(0, top - 0.07, H - 0.13), [-0.06, 0, 0]).color(uph);
     pad(b, 'trim', ORIGIN, [half, 0.07, 0.25], 0.04);
     b.color(insert);
-    for (const sx of [-0.25, 0.25]) b.quad('trim', [sx - 0.12, 0.072, -0.18], [sx + 0.12, 0.072, -0.18], [sx + 0.12, 0.072, 0.18], [sx - 0.12, 0.072, 0.18]);
+    for (const sx of [-BENCH_SEAT_X, BENCH_SEAT_X]) b.quad('trim', [sx - 0.12, 0.072, -0.18], [sx + 0.12, 0.072, -0.18], [sx + 0.12, 0.072, 0.18], [sx - 0.12, 0.072, 0.18]);
     b.pop();
     b.pushAt(this.P(0, top - 0.035, H), [-L.benchRecline, 0, 0]).color(uph);
     pad(b, 'trim', [0, 0.25, -0.05], [half, 0.25, 0.065], 0.04, 0.97);
     b.color(insert);
-    for (const sx of [-0.25, 0.25]) b.quad('trim', [sx - 0.11, 0.06, 0.017], [sx + 0.11, 0.06, 0.017], [sx + 0.11, 0.42, 0.017], [sx - 0.11, 0.42, 0.017]);
+    for (const sx of [-BENCH_SEAT_X, BENCH_SEAT_X]) b.quad('trim', [sx - 0.11, 0.06, 0.017], [sx + 0.11, 0.06, 0.017], [sx + 0.11, 0.42, 0.017], [sx - 0.11, 0.42, 0.017]);
     b.pop();
+    const group = new THREE.Group();
+    group.name = KIT_BENCH_NODE;
+    addBuilt(group, b, ORIGIN, 'bench', true);
+    this.group.add(group);
   }
 
   // ---- doors ----

@@ -364,13 +364,7 @@ export function createStartingCar(world: GameWorld, road: Road, terrain: Terrain
   const engine = modelEngine(def);
 
   const fuelLitres = Math.min(4 + hash01(world.seed, 0x3f1) * 6, def.tankLitres);
-  const bonnet = createBonnetStorage(
-    'car:start',
-    def.engineId,
-    def.bodyClass,
-    def.tankLitres,
-    0.15 + hash01(world.seed, 0x3f4) * 0.2,
-  );
+  const bonnet = createBonnetStorage('car:start', def.engineId, 0.15 + hash01(world.seed, 0x3f4) * 0.2);
   const waterLitres = bonnetWaterCapacity(bonnet) * (0.45 + hash01(world.seed, 0x3f2) * 0.3);
   const oilLitres = oilCapacity(engine) * (0.4 + hash01(world.seed, 0x3f3) * 0.35);
 

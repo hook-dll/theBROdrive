@@ -139,7 +139,8 @@ Integration outside the folder:
   `update`. The rig, not the `STEERING_WHEEL_NODE` path, turns a kit car's wheel.
 - `render/carmodel.ts`: `loadModel` calls `buildKitCar` on a frame of its own. Clear glass
   comes from `carClearGlassMaterial`. A cabin mesh with `userData.kitShadowed` receives
-  shadows. `cloneWheels` rescales the pack's wheel sets to the kit tyre. Static clones
+  shadows; one with `userData.kitCastsNone` (a part thinner than a shadow texel: the sun
+  visors) casts none. `cloneWheels` rescales the pack's wheel sets to the kit tyre. Static clones
   (wrecks, couriers: `cloneStaticModel`) are posed far once (`poseKitStatic`: no cabin,
   bay, boot or underbody, mirror glass).
 - `render/stickerdecals.ts`: decals on a moving part (`StickerDecalCarrier`: the nearest
@@ -243,6 +244,7 @@ author.
 | `glassBottom`, `glassTop` | Side glass: bottom above the belt, top below the rail. |
 | `screenBottom`, `screenHeader` | Windscreen base strip above the cowl, header below the rail. |
 | `screenFoot?` | How far ahead of the cowl the windscreen's foot stands on the centre line, fading to nothing at the corners (1 − frac²): a screen curved in plan, more raked in profile; the bonnet ends that far forward (`BodyFrame.bonnetRear`), the scuttle between. The Samaras 0.15, the tens 0.156 (drawings). |
+| `wiperBlade` | Windscreen wiper blade length (parts catalogues: the classics 0.33, the Samaras and tens 0.51). The arms, their park and sweep are fitted to the glass (`buildWipers`). |
 | `rearBottom`, `rearHeader` | Same for the back light. |
 | `rearKnee?` | `{ s, y }` on the centre line where a hatch's tailgate folds: glass above, painted panel below. Absent: the back light runs straight to its base. |
 | `pillar` | Pillar strip width at the windscreen and back-light edges. |
@@ -384,7 +386,8 @@ the paint slot, so it takes the car's colour, dust, scratches and stickers).
 the `dash` and `fascia` sections, `wood` band, `binnacle` and `cluster`, `gauges` (round or
 ribbon), steering `wheel` (position, rake, radius, spokes, hub), `pedals`, `gear`,
 `handbrake`, `glovebox`, `radio`, `ashtray`, `hazard`, `lights` switch, `vents` (each with
-an optional opening size `half`), `eyeballs`, `clusterFace`, `lamps` (telltales), `rockers`,
+an optional opening size `half`), `eyeballs`, `clusterFace`, `lamps` (telltales: a grid
+`cols` wide of the functions in `show`, each lit on its `tell_*` channel), `rockers`,
 `stack`, `heater?` (a heater panel with knobs: `{ dy, half, knobs, radius }`), `carpet`,
 `headliner`. In `Layout`, `ds` is metres behind the cowl and `dy` an offset from the belt
 at the cowl. Existing dashes: `CABIN_2101` (ribbon speedometer), `CABIN_2103` (five dials on
@@ -409,6 +412,11 @@ stack); the Samaras use the `samara` platform's layout as is.
 - Paint: material `paint`. Only it takes colour, dust, scratches and stickers. Every other
   name (`trim`, `chrome`, `tyre`, `wheel_rim`, `glass`, `lamp_*`) is filtered out by the
   paint-slot rule.
+- Lit faces: slot `lamp_glow`, the one unlit material (vertex colours). A warning lamp's
+  or the courtesy lamp's lit face slides out from behind its dark lens on a `pos` motion
+  (`GLOW_TRAVEL`), so lighting one is a pose, not a material change.
+- Courtesy lamp: group `kit_dome_lamp` (`KIT_DOME_LAMP_NODE`), the `dome` switch; the
+  Vehicle hangs the cabin's light from it.
 - Glass: material `glass` (= `glassMaterial`). With `clearGlass` it becomes the shared
   `car-glass-clear`.
 - Steering wheel: node `steering_wheel`, its origin on the column axis, local +Y along the
@@ -419,9 +427,10 @@ stack); the Samaras use the `samara` platform's layout as is.
 
 ## Controls and channels (`rig.ts`)
 
-A node that moves carries `userData.kitMotion = { channel, kind: 'rot'|'pos', axis, amount }`.
+A node that moves carries `userData.kitMotion = { channel, kind: 'rot'|'pos', axis, amount, stops? }`.
 The motion is applied from the built pose: angle or offset = `amount × channel value`, along
-an axis in the parent's frame.
+an axis in the parent's frame. A needle's `stops` [min, max] are its pins: the value is
+clamped to them and the built pose is at `min`.
 
 A node that can be clicked carries `userData.kitControl = { id, label, action? }`, where
 `action` is `toggle` (default, flips the channel `id`), `cycle` (steps through values) or
@@ -432,8 +441,9 @@ does not move (a door's fixed `quarter_*` pane) is not a control.
 |---|---|
 | Driving | `steer` −1..1, `throttle`, `brake`, `clutch`, `handbrake` 0..1, `gear` −1..5 |
 | Derived from `gear` | `gear_fb`, `gear_lr` (H-pattern, `GEAR_GATE`) |
-| Instruments | `speed` km/h, `rpm`, `fuel`, `temp` 0..1 |
-| Light and signals | `lights` 0/1/2, `blinker` −1/0/1, `hazard`, `horn` |
+| Instruments | `speed` km/h, `rpm`, `fuel`, `temp` 0..1, `oil` kgf/cm², `volts` V, `vacuum` 0..1 |
+| Warning lamps | `tell_turn`, `tell_beam`, `tell_side`, `tell_fuel`, `tell_oil`, `tell_charge`, `tell_brake`, `tell_check` 0/1 |
+| Light and signals | `lights` 0/1/2, `blinker` −1/0/1, `hazard`, `horn`, `dome` (courtesy lamp) |
 | Wipers and radio | `wipers` 0/1/2 → `wiper_sweep`; `radio` → `radio_tune` |
 | Body | `door_*`, `bonnet`, `boot`, `tailgate`, `flap`, `window_*`, `vent_*` |
 | Cabin | `glovebox`, `ashtray`, `visor_l/r`, `seat_*`, `seatback_*`, `headrest_*` |

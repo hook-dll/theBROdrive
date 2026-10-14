@@ -13,9 +13,40 @@ const TRUNK_GRID_MAX_WIDTH = 1.6;
 const TRUNK_GRID_BODY_FRACTION = 1.65;
 /** Raised from bumper height to just below an on-foot player's eye line. */
 const STORAGE_GRID_CENTRE_Y_FRACTION = 0.55;
+/**
+ * A shell's bonnet cells stand this far above the room under its lid: on the closed
+ * bonnet's skin (the lid's 0.035 inner skin and the bay's 0.045 clearance, plus the
+ * crown), since a static shell's lid never opens to show the bay.
+ */
+const LID_TOP_GAP = 0.09;
 
 export type StorageSide = 'trunk' | 'bonnet';
 export type StorageOwnerKind = 'car' | 'wreck' | 'courier';
+
+/**
+ * One bonnet cell lying flat in the engine bay, chassis-local metres: (x, z) the centre
+ * of its floor rectangle, y the floor's height, `width` across the car (X), `depth` along
+ * it (Z), `height` the clear room above the floor up to the closed bonnet's inner skin.
+ */
+export interface StorageCellRect {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly width: number;
+  readonly depth: number;
+  readonly height: number;
+}
+
+/**
+ * What a compartment's grid is laid out against: the body box for the trunk's plane
+ * behind the car, and the kit bay's measured cells for the bonnet. A `CarModelMeasure`
+ * is one. Without `bonnetCells` (a body that is not a kit) the bonnet has no grid.
+ */
+export interface StorageGridShape {
+  readonly halfExtents: readonly [number, number, number];
+  /** In `BONNET_SLOT_KINDS` order. */
+  readonly bonnetCells?: readonly StorageCellRect[];
+}
 
 /** Fixed-step trunk view handed from world interaction to the renderer. */
 export interface TrunkViewState {
@@ -26,55 +57,137 @@ export interface TrunkViewState {
   readonly selectedCell: number | null;
 }
 
+/**
+ * Whether a bonnet's cells lie on its closed lid rather than in the bay. A driven car's
+ * grid is shown only while its bonnet is open; a roadside shell's lid is part of a static
+ * model and never opens, so its cells are laid on top of it, in the same plan.
+ */
+export function bonnetGridOnLid(owner: StorageOwnerKind): boolean {
+  return owner !== 'car';
+}
+
 /** Width follows the body, capped so bus and truck cells stay small and readable. */
-export function trunkGridWidth(halfWidth: number): number {
+function trunkGridWidth(halfWidth: number): number {
   return Math.min(TRUNK_GRID_MAX_WIDTH, halfWidth * TRUNK_GRID_BODY_FRACTION);
 }
 
-export function storageGridCentreY(halfHeight: number): number {
-  return halfHeight * STORAGE_GRID_CENTRE_Y_FRACTION;
+export function storageCellCount(side: StorageSide): number {
+  return side === 'bonnet' ? BONNET_SLOT_COUNT : TRUNK_CELL_COUNT;
 }
 
-export function storageGridRows(side: StorageSide): number {
-  return side === 'bonnet' ? 1 : TRUNK_ROWS;
-}
-
-/** The trunk is four by two; the bonnet is one row of its service cells. */
-export function storageGridColumns(side: StorageSide): number {
-  return side === 'bonnet' ? BONNET_SLOT_COUNT : TRUNK_COLUMNS;
+/** Axis-aligned chassis-local box: min and max corners. */
+interface Bounds {
+  minX: number;
+  minY: number;
+  minZ: number;
+  maxX: number;
+  maxY: number;
+  maxZ: number;
 }
 
 /**
- * Sign that turns a column offset into chassis-local X. Cells count left to right
- * as the player sees them. The trunk is read from behind the car, looking along
- * +Z, so the player's left is +X; the bonnet is read from in front, where the
- * player's left is -X.
+ * One cell's box in chassis-local space. A trunk cell is a flat panel in the plane
+ * behind the car (zero depth); a bonnet cell is the room its part stands in. False
+ * when the shape has no such cell.
+ *
+ * Trunk cells count left to right as the player sees them, read from behind the car
+ * looking along +Z, where the player's left is +X.
  */
-function columnSign(side: StorageSide): number {
-  return side === 'bonnet' ? 1 : -1;
+function cellBounds(cell: number, shape: StorageGridShape, side: StorageSide, onLid: boolean, out: Bounds): boolean {
+  if (side === 'bonnet') {
+    const rect = shape.bonnetCells?.[cell];
+    if (!rect) return false;
+    const floor = onLid ? rect.y + rect.height + LID_TOP_GAP : rect.y;
+    out.minX = rect.x - rect.width * 0.5;
+    out.maxX = rect.x + rect.width * 0.5;
+    out.minY = floor;
+    out.maxY = floor + rect.height;
+    out.minZ = rect.z - rect.depth * 0.5;
+    out.maxZ = rect.z + rect.depth * 0.5;
+    return true;
+  }
+  if (cell < 0 || cell >= TRUNK_CELL_COUNT) return false;
+  const half = shape.halfExtents;
+  const cellWidth = trunkGridWidth(half[0]) / TRUNK_COLUMNS;
+  const column = cell % TRUNK_COLUMNS;
+  const row = Math.floor(cell / TRUNK_COLUMNS);
+  const x = -(column - (TRUNK_COLUMNS - 1) * 0.5) * cellWidth;
+  const y = half[1] * STORAGE_GRID_CENTRE_Y_FRACTION + ((TRUNK_ROWS - 1) * 0.5 - row) * TRUNK_CELL_HEIGHT;
+  out.minX = x - cellWidth * 0.5;
+  out.maxX = x + cellWidth * 0.5;
+  out.minY = y - TRUNK_CELL_HEIGHT * 0.5;
+  out.maxY = y + TRUNK_CELL_HEIGHT * 0.5;
+  out.minZ = out.maxZ = -half[2] - TRUNK_GRID_DEPTH;
+  return true;
 }
 
-/** Writes one cell centre in chassis-local space without allocating. */
-export function storageCellLocal(
+const _cell: Bounds = { minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 0, maxZ: 0 };
+
+/** Writes one cell's box centre and full size (chassis-local) without allocating; see `cellBounds`. */
+export function storageCellBox(
   cell: number,
-  halfExtents: readonly [number, number, number],
+  shape: StorageGridShape,
   side: StorageSide,
-  out: THREE.Vector3,
-): THREE.Vector3 {
-  const width = trunkGridWidth(halfExtents[0]);
-  const columns = storageGridColumns(side);
-  const cellWidth = width / columns;
-  const column = cell % columns;
-  const row = Math.floor(cell / columns);
-  const rows = storageGridRows(side);
-  out.set(
-    columnSign(side) * (column - (columns - 1) * 0.5) * cellWidth,
-    storageGridCentreY(halfExtents[1]) + ((rows - 1) * 0.5 - row) * TRUNK_CELL_HEIGHT,
-    side === 'bonnet'
-      ? halfExtents[2] + TRUNK_GRID_DEPTH
-      : -halfExtents[2] - TRUNK_GRID_DEPTH,
-  );
-  return out;
+  onLid: boolean,
+  centre: THREE.Vector3,
+  size: THREE.Vector3,
+): boolean {
+  if (!cellBounds(cell, shape, side, onLid, _cell)) return false;
+  centre.set((_cell.minX + _cell.maxX) * 0.5, (_cell.minY + _cell.maxY) * 0.5, (_cell.minZ + _cell.maxZ) * 0.5);
+  size.set(_cell.maxX - _cell.minX, _cell.maxY - _cell.minY, _cell.maxZ - _cell.minZ);
+  return true;
+}
+
+const _bounds: Bounds = { minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 0, maxZ: 0 };
+
+/** Every cell's box together; false when the shape has no grid on that side. */
+function gridBounds(shape: StorageGridShape, side: StorageSide, onLid: boolean, out: Bounds): boolean {
+  out.minX = out.minY = out.minZ = Infinity;
+  out.maxX = out.maxY = out.maxZ = -Infinity;
+  const count = storageCellCount(side);
+  let any = false;
+  for (let cell = 0; cell < count; cell++) {
+    if (!cellBounds(cell, shape, side, onLid, _cell)) continue;
+    any = true;
+    out.minX = Math.min(out.minX, _cell.minX);
+    out.maxX = Math.max(out.maxX, _cell.maxX);
+    out.minY = Math.min(out.minY, _cell.minY);
+    out.maxY = Math.max(out.maxY, _cell.maxY);
+    out.minZ = Math.min(out.minZ, _cell.minZ);
+    out.maxZ = Math.max(out.maxZ, _cell.maxZ);
+  }
+  return any;
+}
+
+let slabNear = 0;
+let slabFar = Infinity;
+
+/** Narrows the running slab interval by one axis; false once the ray misses. */
+function slab(origin: number, direction: number, lo: number, hi: number): boolean {
+  if (Math.abs(direction) < 1e-9) return origin >= lo && origin <= hi;
+  let t0 = (lo - origin) / direction;
+  let t1 = (hi - origin) / direction;
+  if (t0 > t1) {
+    const t = t0;
+    t0 = t1;
+    t1 = t;
+  }
+  slabNear = Math.max(slabNear, t0);
+  slabFar = Math.min(slabFar, t1);
+  return slabNear <= slabFar;
+}
+
+/**
+ * Distance along a chassis-local ray to where it enters a box (0 from inside), or
+ * Infinity on a miss. A flat box (one size 0) is its plane's rectangle.
+ */
+function rayBox(eye: THREE.Vector3, direction: THREE.Vector3, b: Bounds): number {
+  slabNear = 0;
+  slabFar = Infinity;
+  if (!slab(eye.x, direction.x, b.minX, b.maxX)) return Infinity;
+  if (!slab(eye.y, direction.y, b.minY, b.maxY)) return Infinity;
+  if (!slab(eye.z, direction.z, b.minZ, b.maxZ)) return Infinity;
+  return slabNear;
 }
 
 export interface TrunkGridRayHit {
@@ -83,38 +196,70 @@ export interface TrunkGridRayHit {
 }
 
 /**
- * Intersects a chassis-local aim ray with the exact rectangle drawn by a trunk
- * or bonnet visualizer. Cell selection and rendering therefore cannot drift.
+ * Intersects a chassis-local aim ray with the exact cells drawn by a trunk or bonnet
+ * visualizer. Cell selection and rendering therefore cannot drift. The nearest cell
+ * the ray enters wins: the bonnet's cells stand at different heights in the bay.
  */
 export function intersectStorageGrid(
   eye: THREE.Vector3,
   direction: THREE.Vector3,
-  halfExtents: readonly [number, number, number],
+  shape: StorageGridShape,
   side: StorageSide,
+  onLid: boolean,
   out: TrunkGridRayHit,
 ): boolean {
-  if (Math.abs(direction.z) < 1e-5) return false;
-  const planeZ = side === 'bonnet'
-    ? halfExtents[2] + TRUNK_GRID_DEPTH
-    : -halfExtents[2] - TRUNK_GRID_DEPTH;
-  const distance = (planeZ - eye.z) / direction.z;
-  if (distance <= 0) return false;
-
-  const x = eye.x + direction.x * distance;
-  const y = eye.y + direction.y * distance;
-  const width = trunkGridWidth(halfExtents[0]);
-  const rows = storageGridRows(side);
-  const height = rows * TRUNK_CELL_HEIGHT;
-  const centreY = storageGridCentreY(halfExtents[1]);
-  if (x < -width * 0.5 || x > width * 0.5 || y < centreY - height * 0.5 || y > centreY + height * 0.5) {
-    return false;
+  let best = Infinity;
+  let bestCell = -1;
+  const count = storageCellCount(side);
+  for (let cell = 0; cell < count; cell++) {
+    if (!cellBounds(cell, shape, side, onLid, _cell)) continue;
+    const distance = rayBox(eye, direction, _cell);
+    if (distance < best) {
+      best = distance;
+      bestCell = cell;
+    }
   }
+  if (bestCell < 0 || !(best > 0)) return false;
+  out.cell = bestCell;
+  out.distance = best;
+  return true;
+}
 
-  const columns = storageGridColumns(side);
-  const across = columnSign(side) * x;
-  const column = Math.min(columns - 1, Math.floor(((across + width * 0.5) / width) * columns));
-  const row = Math.min(rows - 1, Math.floor(((centreY + height * 0.5 - y) / height) * rows));
-  out.cell = row * columns + column;
-  out.distance = distance;
+/**
+ * Distance along a chassis-local ray to the whole grid padded by `margin` on every
+ * side, or Infinity: the aim forgiveness that reveals a closed compartment before a
+ * precise cell is under the crosshair.
+ */
+export function storageRevealDistance(
+  eye: THREE.Vector3,
+  direction: THREE.Vector3,
+  shape: StorageGridShape,
+  side: StorageSide,
+  onLid: boolean,
+  margin: number,
+): number {
+  if (!gridBounds(shape, side, onLid, _bounds)) return Infinity;
+  _bounds.minX -= margin;
+  _bounds.maxX += margin;
+  _bounds.minY -= margin;
+  _bounds.maxY += margin;
+  // The trunk's plane keeps zero depth: it is revealed by a rectangle, not a box.
+  if (side === 'bonnet') {
+    _bounds.minZ -= margin;
+    _bounds.maxZ += margin;
+  }
+  const distance = rayBox(eye, direction, _bounds);
+  return distance > 0 ? distance : Infinity;
+}
+
+/** Writes the chassis-local centre of a whole grid; false when the shape has none there. */
+export function storageGridCentreLocal(
+  shape: StorageGridShape,
+  side: StorageSide,
+  onLid: boolean,
+  out: THREE.Vector3,
+): boolean {
+  if (!gridBounds(shape, side, onLid, _bounds)) return false;
+  out.set((_bounds.minX + _bounds.maxX) * 0.5, (_bounds.minY + _bounds.maxY) * 0.5, (_bounds.minZ + _bounds.maxZ) * 0.5);
   return true;
 }

@@ -1,22 +1,28 @@
 /**
- * The driver's-seat camera position per car model, and the in-game editor that tunes it.
+ * The cabin camera's eye per car model and seat, and the in-game editor that tunes the
+ * driver's.
  *
- * WHERE THE EYE COMES FROM, first match wins:
+ * THE DRIVER'S EYE, first match wins:
  *  1. this browser's override (`localStorage`, written by J when the config file could
  *     not be written: a build without the dev server, or a failed POST);
  *  2. `config/cabin-cameras.json`, `{ "<modelId>": [x, y, z] }`, written by J in dev;
  *  3. the kit's own seat (`CarModelMeasure.cabinEye`, from the cushion and a seated eye
  *     height, see carkit/interior.ts), or the bonnet mount on a body that has no seat.
+ * The front passenger's is the driver's mirrored across the car. The rear seats' come from
+ * the bench the same way (`CarModelMeasure.rearEye`, the left one; the right is its
+ * mirror), and are not edited.
  * All in chassis-local metres: +X the car's left, +Y up, +Z forward.
  *
- * THE EDITOR. O steps X → Y → Z → off (switching to the cabin view on the way in); while
- * it is open the pedal and steering keys move the eye along that axis and drive nothing
+ * THE EDITOR, for the driver's eye only. O steps X → Y → Z → off (switching to the cabin
+ * view on the way in); while it is open the pedal and steering keys move the eye along
+ * that axis and drive nothing
  * (`InputReader.setCabinEditing`). J saves the eye for the model, editor open or not, as
  * long as the cabin view shows.
  */
 
 import cabinCameraConfig from '../../config/cabin-cameras.json';
 import type { InputFrame, InputReader } from '../core/input';
+import type { PlayerSeat } from '../game/state';
 import type { CameraRig } from '../render/cameras';
 import { carModelMeasure } from '../render/carmodel';
 
@@ -60,6 +66,7 @@ export class CabinCamera {
   private readonly live = new Map<string, [number, number, number]>();
   private axis: CabinAxis | null = null;
   private hudText: string | null = null;
+  private readonly seatEye: [number, number, number] = [0, 0, 0];
 
   constructor(
     private readonly input: InputReader,
@@ -67,8 +74,20 @@ export class CabinCamera {
     private readonly toast: (text: string) => void,
   ) {}
 
-  /** The eye the cabin view uses for `modelId`; see the lookup order above. */
-  eyeFor(modelId: string): Eye {
+  /** The eye the cabin view uses for `seat` in `modelId`; see the notes above. */
+  eyeFor(modelId: string, seat: PlayerSeat): Eye {
+    if (seat === 'driver') return this.driverEye(modelId);
+    const from = seat === 'passenger' ? this.driverEye(modelId) : carModelMeasure(modelId).rearEye ?? this.driverEye(modelId);
+    // Mirrored for the right-hand seats, into one scratch: the view reads it every frame.
+    const mirror = seat === 'passenger' || seat === 'rear-right';
+    this.seatEye[0] = mirror ? -from[0] : from[0];
+    this.seatEye[1] = from[1];
+    this.seatEye[2] = from[2];
+    return this.seatEye;
+  }
+
+  /** The driver's eye for `modelId`; see the lookup order above. */
+  private driverEye(modelId: string): Eye {
     const edited = this.live.get(modelId);
     if (edited) return edited;
     const known = this.stored[modelId] ?? this.config[modelId];
@@ -83,8 +102,8 @@ export class CabinCamera {
   }
 
   /**
-   * One fixed step: O and J, and the held keys moving the eye. `modelId` is the driven
-   * car's model, null on foot (which closes the editor).
+   * One fixed step: O and J, and the held keys moving the eye. `modelId` is the car's
+   * model while the player sits in its driver's seat, else null (which closes the editor).
    */
   step(dt: number, f: InputFrame, modelId: string | null): void {
     if (modelId === null) {
@@ -111,7 +130,7 @@ export class CabinCamera {
       if (along !== 0) {
         let eye = this.live.get(modelId);
         if (!eye) {
-          const from = this.eyeFor(modelId);
+          const from = this.driverEye(modelId);
           eye = [from[0], from[1], from[2]];
           this.live.set(modelId, eye);
         }
@@ -130,7 +149,7 @@ export class CabinCamera {
   }
 
   private describe(modelId: string, axis: CabinAxis): string {
-    const [x, y, z] = this.eyeFor(modelId);
+    const [x, y, z] = this.driverEye(modelId);
     const keys = axis === 'x' ? 'A/← left · D/→ right' : axis === 'y' ? 'W/↑ up · S/↓ down' : 'W/↑ forward · S/↓ back';
     return (
       `cabin camera · ${modelId} · editing ${axis.toUpperCase()}\n`
@@ -144,7 +163,7 @@ export class CabinCamera {
    * anywhere else, or if that fails, this browser keeps it and says so.
    */
   private save(modelId: string): void {
-    const from = this.eyeFor(modelId);
+    const from = this.driverEye(modelId);
     const eye: Eye = [round3(from[0]), round3(from[1]), round3(from[2])];
     const text = `${eye[0].toFixed(3)}, ${eye[1].toFixed(3)}, ${eye[2].toFixed(3)}`;
     if (!import.meta.env.DEV) {

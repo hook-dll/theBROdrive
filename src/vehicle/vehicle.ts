@@ -23,6 +23,7 @@ import { hash01 } from '../core/rng';
 import { WorldOrigin, type Rebasable, type RebaseShift } from '../world/origin';
 import { DAY_LENGTH, type CarState, type GameWorld } from '../game/state';
 import {
+  FUEL_RESERVE_FRACTION,
   OIL_LOSS_LPH,
   oilCapacity,
   variant,
@@ -51,7 +52,7 @@ import {
   engineFailureReason,
   stockBonnetVariants,
 } from './bonnet';
-import { airFilterBreath, airFilterWear } from './airfilter';
+import { AIR_FILTER_DUE_CLOG, airFilterBreath, airFilterWear } from './airfilter';
 import {
   EngineCoolingSystem,
   ambientAirC,
@@ -71,6 +72,7 @@ import type { ContactPatchField } from '../render/contactpatches';
 import { patchOpacity } from '../render/contactpatches';
 import type { VehicleLightRig } from '../render/vehiclelights';
 import { KitRig } from '../carkit/rig';
+import { KIT_DOME_LAMP_NODE } from '../carkit/interior';
 
 import {
   AIR_DENSITY,
@@ -716,6 +718,38 @@ const kitEye = new THREE.Vector3();
 let kitEyeKnown = false;
 let kitFrameDt = 1 / 60;
 
+/**
+ * A Zhiguli's oil pressure, kgf/cm²: about 2 hot at idle, 4.5 from 3000 rpm up (the
+ * relief valve holds it there). Below 40% of the sump the pickup draws air and it falls
+ * away. The warning lamp's switch closes under 0.5.
+ */
+const OIL_IDLE_KGF = 2;
+const OIL_REVS_KGF = 4.5;
+const OIL_REVS_RPM = 3000;
+const OIL_STARVE_FRACTION = 0.4;
+const OIL_LAMP_KGF = 0.5;
+/**
+ * Volts on the cluster: a rested battery with the key on, the regulator's 13.5 at idle
+ * rising to 14.2 once the alternator is spun past 1500 rpm, and up to 0.4 V lost to the
+ * headlamps (most of it while the alternator idles).
+ */
+const BATTERY_V = 12.4;
+const CHARGE_IDLE_V = 13.5;
+const CHARGE_FULL_V = 14.2;
+const CHARGE_FULL_RPM = 1500;
+const HEADLAMP_DROP_V = 0.4;
+/**
+ * The courtesy lamp's light on the cabin: a festoon bulb's warm 5 W behind a milky lens,
+ * spread over a wide cone and fading out just past the floor. Inverse-linear rather than
+ * square, so the seat cushions are not lost to the bright patch on the headliner's rim.
+ * Set by eye at 23:00 on a 2107: 1.6 was invisible against the night ambient; 8 over
+ * 2.2 m shows the seats, wheel and pedals without washing out the cluster.
+ */
+const DOME_TINT = 0xffd9a8;
+const DOME_INTENSITY = 8;
+const DOME_RANGE_M = 2.2;
+const DOME_ANGLE = 1.25;
+
 export class Vehicle implements Rebasable {
   private readonly physics: PhysicsWorld;
   private readonly world: GameWorld;
@@ -800,6 +834,17 @@ export class Vehicle implements Rebasable {
   /** The pedals as the driver's feet hold them, latched in the fixed step for `driveKit`. */
   private kitThrottle = 0;
   private kitHandbrake = 0;
+  /**
+   * The ignition is on: somebody drives this car (the player or the traffic), latched in
+   * the fixed step. A parked car's oil gauge and voltmeter rest on their pins and its
+   * warning lamps are dark, but for the lamps of the lights themselves (indicators, side
+   * lights, main beam): those circuits need no key.
+   */
+  private kitIgnition = false;
+  /** The kit courtesy lamp's node, which the cabin's light hangs from (`syncDomeLight`). */
+  private kitDome: THREE.Object3D | null = null;
+  private readonly domeSource = new THREE.Vector3();
+  private readonly domeTarget = new THREE.Vector3();
   /** This car's lamps: beam mode, indicator, lens materials and the beams they cast. */
   private readonly lamps: VehicleLamps;
   /** Threshold-pedal braking authority, m/s²; see `measuredBrakeDecel`. */
@@ -2071,6 +2116,7 @@ export class Vehicle implements Rebasable {
     braking: boolean,
   ): void {
     this.lamps.adoptLiveState();
+    this.kitIgnition = true;
     const t = this.chassisBody.translation(this.railTranslation);
     const v = this.railVelocity;
     v.x = (x - this.origin.x - t.x) / dt;
@@ -2158,6 +2204,7 @@ export class Vehicle implements Rebasable {
     const controller = this.controller;
     if (!controller) return;
     this.lamps.adoptLiveState();
+    this.kitIgnition = false;
     // Nobody is driving this one, so no step of its own explains its velocity. Leaving
     // the impact detector primed across that gap would report the whole standing
     // interval as one collision the moment the player got back in.
@@ -2562,6 +2609,7 @@ export class Vehicle implements Rebasable {
     const throttle = this.engineRunning ? throttleInput : 0;
     this.kitThrottle = throttleInput;
     this.kitHandbrake = input.handbrake ? 1 : 0;
+    this.kitIgnition = true;
     // The crank turns with the DRIVEN wheels (their mean, which is what an open
     // differential gives it), so a tyre breaking loose revs the engine towards its
     // cut, loses torque there and is bounded by it, and the driver hears it. The
@@ -3626,9 +3674,9 @@ export class Vehicle implements Rebasable {
 
   /**
    * Poses a kit body from the driving state: wheel, pedals, gear lever, handbrake,
-   * needles, light switch, stalk and hazard button follow the car, then the rig eases
-   * everything (doors included) by this frame's length and draws its cabin only near
-   * the eye (`viewFrom`). The rig's own lenses stay dark: `lamps` lights this car.
+   * needles, warning lamps, light switch, stalk and hazard button follow the car, then
+   * the rig eases everything (doors included) by this frame's length and draws its cabin
+   * only near the eye (`viewFrom`). The rig's own lenses stay dark: `lamps` lights this car.
    */
   private driveKit(kit: KitRig): void {
     kit.set('steer', this.model.steerLock > 0 ? this.steerCommand / this.model.steerLock : 0);
@@ -3639,15 +3687,72 @@ export class Vehicle implements Rebasable {
     kit.set('gear', this.drivetrain.gearIndex);
     kit.set('speed', this.speedKmh);
     kit.set('rpm', this.drivetrain.rpm);
-    kit.set('fuel', this.model.tankLitres > 0 ? this.localFuel / this.model.tankLitres : 0);
+    const fuel = this.model.tankLitres > 0 ? this.localFuel / this.model.tankLitres : 0;
+    kit.set('fuel', fuel);
     kit.set('temp', this.cooling.gaugeFraction);
     const beam = this.lamps.mode;
     kit.set('lights', beam === 'high' ? 2 : beam === 'low' ? 1 : 0);
     const side = this.lamps.indicator;
     kit.set('blinker', side === 'left' ? -1 : side === 'right' ? 1 : 0);
     kit.set('hazard', side === 'hazard' ? 1 : 0);
+
+    // The electrical gauges and the cluster's lamps, from the key, the engine and the sump.
+    const key = this.kitIgnition;
+    const engine = this.statsValue.engine;
+    const turning = key && this.engineRunning;
+    const revs = this.drivetrain.rpm;
+    const capacity = oilCapacity(engine);
+    const sump = capacity > 0 ? clamp(this.localOil / (capacity * OIL_STARVE_FRACTION), 0, 1) : 0;
+    const lift = clamp((revs - engine.idleRpm) / (OIL_REVS_RPM - engine.idleRpm), 0, 1);
+    const oil = turning ? (OIL_IDLE_KGF + (OIL_REVS_KGF - OIL_IDLE_KGF) * lift) * sump : 0;
+    kit.set('oil', oil);
+    const charge = clamp((revs - engine.idleRpm) / (CHARGE_FULL_RPM - engine.idleRpm), 0, 1);
+    const lampDrop = beam === 'off' ? 0 : HEADLAMP_DROP_V * (beam === 'high' ? 1 : 0.75) * (turning ? 1 - 0.7 * charge : 1);
+    kit.set('volts', key ? (turning ? CHARGE_IDLE_V + (CHARGE_FULL_V - CHARGE_IDLE_V) * charge : BATTERY_V) - lampDrop : 0);
+    // Manifold vacuum, as the economy meter reads it: most with the throttle shut, more
+    // still on the overrun at revs, none with it wide open.
+    const shut = 1 - clamp(this.kitThrottle, 0, 1);
+    kit.set('vacuum', turning ? clamp(shut * (0.75 + 0.2 * lift), 0, 1) : 0);
+    kit.set('tell_turn', this.lamps.blinkerLit ? 1 : 0);
+    kit.set('tell_side', beam === 'off' ? 0 : 1);
+    kit.set('tell_beam', beam === 'high' ? 1 : 0);
+    kit.set('tell_fuel', key && fuel < FUEL_RESERVE_FRACTION ? 1 : 0);
+    kit.set('tell_oil', key && oil < OIL_LAMP_KGF ? 1 : 0);
+    kit.set('tell_charge', key && !turning ? 1 : 0);
+    kit.set('tell_brake', key && this.kitHandbrake > 0 ? 1 : 0);
+    kit.set('tell_check', key && this.checkEngine ? 1 : 0);
+
     kit.setDetail(!kitEyeKnown || this.rootGroup.position.distanceToSquared(kitEye) < KIT_DETAIL_DISTANCE_SQ);
     kit.update(kitFrameDt);
+  }
+
+  /**
+   * The check-engine lamp: the engine management telling the driver something is wrong
+   * under the bonnet: no engine, no oil, no air filter, or a filter due for replacement.
+   */
+  get checkEngine(): boolean {
+    const bonnet = this.car.bonnet;
+    const filter = bonnetAirFilter(bonnet);
+    return bonnetPart(bonnet, 0) === null || this.localOil <= 0 || filter === null || (filter.clog ?? 0) >= AIR_FILTER_DUE_CLOG;
+  }
+
+  /** Pool lights the courtesy lamp asks for: one while it is switched on, none off. */
+  get domeBeamCount(): number {
+    return this.kitDome !== null && this.kitRig !== null && this.kitRig.get('dome') > 0.5 ? 1 : 0;
+  }
+
+  /**
+   * Lights the cabin from the courtesy lamp: a wide warm cone straight down from the
+   * headliner, reaching the seats and the floor and no further. Only the car the player
+   * sits in is offered this (main.ts); everyone else's lamp only glows. The caller has
+   * secured its slot (`domeBeamCount`); `gain` is the slot's handover share.
+   */
+  syncDomeLight(rig: VehicleLightRig, gain: number): void {
+    const node = this.kitDome;
+    if (!node || this.domeBeamCount === 0) return;
+    const source = node.getWorldPosition(this.domeSource);
+    const target = this.domeTarget.set(0, -1, 0).applyQuaternion(this.rootGroup.quaternion).add(source);
+    rig.addBeam(source, target, DOME_TINT, DOME_INTENSITY * gain, DOME_RANGE_M, DOME_ANGLE, 1, 1);
   }
 
   /**
@@ -4482,11 +4587,7 @@ export class Vehicle implements Rebasable {
     const installedSpec = installedEngine ? variant(installedEngine.variantId).engine : undefined;
     const engine = installedSpec ?? modelEngine(this.model);
 
-    const stock = stockBonnetVariants(
-      this.model.engineId,
-      this.model.bodyClass,
-      this.model.tankLitres,
-    );
+    const stock = stockBonnetVariants(this.model.engineId);
     const anchors = this.loadAnchors;
     const loads: LoadPoint[] = [];
     /** Records one load at its anchor and returns its mass, so the sum reads as one line. */
@@ -5491,6 +5592,7 @@ export class Vehicle implements Rebasable {
       // carries the same name, and two writers would fight over it.
       this.kitRig = new KitRig(instance.body, false);
       if (previousKit) this.kitRig.adopt(previousKit);
+      this.kitDome = instance.body.getObjectByName(KIT_DOME_LAMP_NODE) ?? null;
     } else {
       // The body subtree is cloned per vehicle, so this node belongs to this car and
       // turning it cannot turn anybody else's wheel.
@@ -5543,6 +5645,7 @@ export class Vehicle implements Rebasable {
     this.steeringWheelRest = 0;
     this.kitRig?.dispose();
     this.kitRig = null;
+    this.kitDome = null;
   }
 
   /** Writes the air filter wear driven since the last write into the fitted filter. */

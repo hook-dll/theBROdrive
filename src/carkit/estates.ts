@@ -60,6 +60,7 @@ export const BODY_2102: KitBody = {
     glassTop: 0.038, // BODY_124
     screenBottom: 0.025, // BODY_124
     screenHeader: 0.045, // BODY_124
+    wiperBlade: 0.33, // BODY_124
     rearBottom: 0.025, // unused with a knee
     // tailgate glass top 1.233 raw (rear view) → 1.218; centre top rail + crown 1.315 [D]
     rearHeader: 0.1,
@@ -154,6 +155,7 @@ export const BODY_2104: KitBody = {
     glassTop: 0.04, // BODY_05
     screenBottom: 0.025, // BODY_05
     screenHeader: 0.045, // BODY_05
+    wiperBlade: 0.33, // BODY_05
     rearBottom: 0.025, // unused with a knee
     // tailgate glass top 1.30–1.33 (rear view) against rail + crown 1.423 [D]
     rearHeader: 0.11,

@@ -46,7 +46,11 @@ import {
 import { lampLensAnchors } from '../vehicle/vehiclelamps';
 import { buildKitCar } from '../carkit/kit';
 import { poseKitStatic } from '../carkit/rig';
-import { KIT_DRIVER_EYE_NODE } from '../carkit/interior';
+import { KIT_DRIVER_EYE_NODE, KIT_REAR_EYE_NODE } from '../carkit/interior';
+import { KIT_BONNET_CELL_NODE } from '../carkit/bay';
+import { KIT_FILLER_NODE } from '../carkit/exterior';
+import { BONNET_SLOT_KINDS } from '../vehicle/bonnet';
+import type { StorageCellRect } from '../vehicle/trunk';
 
 /**
  * DEV-only A/B switch for the unified car style: `?carstyle=unified`, alongside any
@@ -174,6 +178,20 @@ export interface CarModelMeasure {
    * the fit manifest; the cabin camera then falls back to `hoodPoint`.
    */
   readonly cabinEye?: readonly [number, number, number];
+  /** The rear left passenger's, the same way (`KIT_REAR_EYE_NODE`); absent with `cabinEye`. */
+  readonly rearEye?: readonly [number, number, number];
+  /**
+   * The bonnet's service cells in chassis-local metres, in `BONNET_SLOT_KINDS` order:
+   * the kit bay's cell markers (`KIT_BONNET_CELL_NODE`) after the body fit, each at its
+   * part's place in the engine bay. Absent on non-kit bodies and in the fit manifest.
+   */
+  readonly bonnetCells?: readonly StorageCellRect[];
+  /**
+   * The fuel flap's opening, chassis-local: where a held can pours petrol into the
+   * body's tank (player/interaction.ts). The kit's `KIT_FILLER_NODE` after the body fit;
+   * absent on non-kit bodies and in the fit manifest.
+   */
+  readonly filler?: { readonly centre: readonly [number, number, number]; readonly size: readonly [number, number, number] };
 }
 
 interface Template {
@@ -619,7 +637,8 @@ function prepareMaterials(root: THREE.Object3D, bodywork: boolean, lenses: Reado
     // straight through the cars ahead and drew them on the road with see-through
     // windows. A car's shadow is its silhouette, windows included.
     const lens = lenses.has(child.name) || materials.every((material) => lenses.has(material.name));
-    child.castShadow = !lens;
+    // A kit part thinner than a shadow texel casts nothing (carkit/context.ts `addBuilt`).
+    child.castShadow = !lens && child.userData.kitCastsNone !== true;
     // Bodywork receives none, but a kit cabin does: it is the roof's shadow that tells
     // a seat seen through the glass from one standing in the sun.
     child.receiveShadow = !bodywork || child.userData.kitShadowed === true;
@@ -1491,16 +1510,27 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     (hoodFrontZ + hoodRearZ) * 0.5,
   ];
 
-  // The kit's driver-eye anchor, through the same fit as every sample above and settled
-  // by the loaded ride drop like the cabin around it (far from both axles, so in full).
-  // It is an empty node: it leaves the template so no instance clones it.
-  const eyeNode = scene.getObjectByName(KIT_DRIVER_EYE_NODE);
-  let cabinEye: [number, number, number] | undefined;
-  if (eyeNode) {
-    eyeNode.getWorldPosition(_sample);
-    cabinEye = [_sample.x, _sample.y - centre.y - (def.loadedRideDrop ?? 0), _sample.z - centre.z];
-    eyeNode.removeFromParent();
-  }
+  // The kit's anchors — eyes, bonnet cells, the filler — through the same fit as every
+  // sample above and settled by the loaded ride drop like the cabin around them. A box
+  // anchor's world scale is its size. They are empty nodes: they leave the template so
+  // no instance clones them.
+  const anchorAt = (name: string): { centre: [number, number, number]; size: [number, number, number] } | undefined => {
+    const node = scene.getObjectByName(name);
+    if (!node) return undefined;
+    node.getWorldPosition(_sample);
+    const at: [number, number, number] = [_sample.x, _sample.y - centre.y - (def.loadedRideDrop ?? 0), _sample.z - centre.z];
+    node.getWorldScale(_sample);
+    node.removeFromParent();
+    return { centre: at, size: [Math.abs(_sample.x), Math.abs(_sample.y), Math.abs(_sample.z)] };
+  };
+  const cabinEye = anchorAt(KIT_DRIVER_EYE_NODE)?.centre;
+  const rearEye = anchorAt(KIT_REAR_EYE_NODE)?.centre;
+  const filler = anchorAt(KIT_FILLER_NODE);
+  // All four cells or none: the bonnet's grid is indexed by kind.
+  const cellBoxes = BONNET_SLOT_KINDS.map((kind) => anchorAt(`${KIT_BONNET_CELL_NODE}:${kind}`));
+  const bonnetCells = cellBoxes.every((box) => box !== undefined)
+    ? cellBoxes.map(({ centre: [x, y, z], size: [width, height, depth] }): StorageCellRect => ({ x, y, z, width, depth, height }))
+    : undefined;
 
   // The unified style's normals, before the chassis stamp below reads the buffers
   // this replaces.
@@ -1518,6 +1548,9 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     hoodPoint,
     visualOffset: [-centre.x, -centre.y, -centre.z],
     cabinEye,
+    rearEye,
+    bonnetCells,
+    filler,
   };
   const [fl, fr, rl, rr] = wheels;
   const frame: CarBodyFrame = {

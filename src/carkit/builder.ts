@@ -25,7 +25,8 @@ export type KitSlot =
   | 'lamp_reverse'
   | 'lamp_blinker_l'
   | 'lamp_blinker_r'
-  | 'lamp_inert';
+  | 'lamp_inert'
+  | 'lamp_glow';
 
 interface SlotBuffer {
   positions: number[];

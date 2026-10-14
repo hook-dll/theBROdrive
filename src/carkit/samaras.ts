@@ -66,6 +66,7 @@ export const BODY_2108: KitBody = {
     glassTop: 0.04,
     screenBottom: 0.025,
     screenHeader: 0.045,
+    wiperBlade: 0.51,
     // The screen's foot on the centre line at s 1.08 on the bonnet [D side view].
     screenFoot: 0.15,
     rearBottom: 0.025,

@@ -42,7 +42,7 @@ export function createServiceableCarState(
   const engineId = engineVariantId ?? def.engineId;
   const engine = variant(engineId).engine;
   const half = heading / 2;
-  const bonnet = createBonnetStorage(id, engineId, def.bodyClass, def.tankLitres);
+  const bonnet = createBonnetStorage(id, engineId);
   return {
     id,
     modelId,

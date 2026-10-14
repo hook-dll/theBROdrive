@@ -7,8 +7,9 @@
  * the player's hands, or be fitted into a service cell on a complete car model's
  * anchor point without changing representation.
  *
- * The authored model remains the car body, but engine, turbocharger, radiator, fuel
- * tank and air filter instances occupy typed bonnet cells and carry service capability.
+ * The authored model remains the car body, but engine, turbocharger, radiator and air
+ * filter instances occupy typed bonnet cells and carry service capability. The fuel
+ * tank is the body's own (`CarModelDef.tankLitres`), filled through the flap.
  * Everything mounted on free-form body anchors remains cosmetic.
  *
  * NETPLAY: every instance carries a stable string id, and nothing here references a
@@ -19,7 +20,6 @@ export type PartKind =
   | 'engine'
   | 'gearbox'
   | 'radiator'
-  | 'fuel_tank'
   | 'turbine'
   | 'air_filter';
 
@@ -152,8 +152,6 @@ export interface PartVariant {
   readonly gearbox?: GearboxSpec;
   /** Water capacity, on the radiator only. */
   readonly radiator?: RadiatorSpec;
-  /** Fuel tank capacity, litres. */
-  readonly capacity?: number;
   /** Which body classes this variant physically fits. */
   readonly fits: readonly BodyClass[];
 }
@@ -590,28 +588,8 @@ export const GEARBOX_VARIANTS: readonly PartVariant[] = [
   },
 ];
 
-export const TANK_VARIANTS: readonly PartVariant[] = [
-  { id: 'tank_40', kind: 'fuel_tank', label: '40 L tank', mass: 14, capacity: 40, fits: ['car'] },
-  {
-    id: 'tank_65',
-    kind: 'fuel_tank',
-    label: '65 L tank',
-    mass: 19,
-    capacity: 65,
-    fits: ['car', 'truck'],
-  },
-  {
-    id: 'tank_140',
-    kind: 'fuel_tank',
-    label: '140 L saddle tank',
-    mass: 38,
-    capacity: 140,
-    fits: ['truck', 'bus'],
-  },
-];
-
 /**
- * The turbocharger: the optional service part in bonnet cell 1. Fitted, it boosts
+ * The turbocharger: the optional service part in its bonnet cell. Fitted, it boosts
  * whatever engine it sits on (see `TURBO_TORQUE_GAIN` in vehicle/drivetrain.ts):
  * nothing below the spool speed, then up to a third more torque with a short lag.
  *
@@ -631,7 +609,7 @@ const TURBINE_VARIANTS: readonly PartVariant[] = [
 ];
 
 /**
- * The air filter: a paper element in bonnet cell 4. It clogs with distance, faster
+ * The air filter: a paper element in its bonnet cell. It clogs with distance, faster
  * in a dust storm, and a clogged one starves the engine of air (vehicle/airfilter.ts).
  * No engine runs without one.
  */
@@ -645,10 +623,7 @@ const AIR_FILTER_VARIANTS: readonly PartVariant[] = [
   },
 ];
 
-/**
- * The 2101's engine and gearbox and the Zhiguli tank, which the catalogue resolves
- * for the first saloons and the estates.
- */
+/** The 2101's engine and gearbox, which the catalogue resolves for the first saloons and the estates. */
 const LADA_VARIANTS: readonly PartVariant[] = [
   {
     // VAZ-2101: 1.198 litre, 64 hp (47 kW) at 5600 and 8.9 kgf·m (87.3 Nm) at 3400,
@@ -691,7 +666,6 @@ const LADA_VARIANTS: readonly PartVariant[] = [
       efficiency: 0.9,
     },
   },
-  { id: 'tank_lada_39', kind: 'fuel_tank', label: '39 L tank', mass: 13, capacity: 39, fits: ['car'] },
 ];
 
 /*
@@ -1293,7 +1267,6 @@ const RADIATOR_VARIANTS: readonly PartVariant[] = [
 export const ALL_VARIANTS: readonly PartVariant[] = [
   ...ENGINE_VARIANTS,
   ...GEARBOX_VARIANTS,
-  ...TANK_VARIANTS,
   ...RADIATOR_VARIANTS,
   ...TURBINE_VARIANTS,
   ...AIR_FILTER_VARIANTS,
@@ -1442,6 +1415,12 @@ export function engineHeat(engine: EngineSpec): EngineHeatSpec {
  * cost water faster the lower it gets.
  */
 export const OIL_LOSS_LPH = 2.1;
+
+/**
+ * Fuel fraction below which the tank is on its reserve: the HUD's fuel gauge reads as an
+ * alarm and a kit cluster's reserve lamp lights.
+ */
+export const FUEL_RESERVE_FRACTION = 0.12;
 
 /**
  * What the physics and HUD need from a car. Every field is a property of the

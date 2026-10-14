@@ -3,10 +3,15 @@
  *
  * All three are seen only with a lid open or the car on its side, so they are built to
  * read, not to engineer: panels that close each space so no void or road shows through,
- * and the big recognisable parts in their true places — an inline four along the
- * classic's bay or across the Samara's, the radiator in front of it, the battery and
- * reservoirs on the inner wings; the spare and the fuel tank on the saloon boot's right
- * side; the exhaust, the driveline and the suspension underneath.
+ * and the big recognisable parts in their true places — the battery and reservoirs on
+ * the inner wings, the brake booster on the firewall; the spare and the fuel tank on the
+ * saloon boot's right side; the exhaust, the driveline and the suspension underneath.
+ *
+ * The engine, its turbine, the radiator and the air filter are the bonnet's service
+ * cells (vehicle/bonnet.ts), drawn by the grid from what the car carries, so the bay
+ * leaves their places empty and marks each with a `KIT_BONNET_CELL_NODE`: an inline
+ * four along the classic's bay or across the Samara's, the radiator in front of it,
+ * the turbine on the exhaust side and the air filter on the intake side.
  *
  * Everything is placed off the frame (axles, cowl, deck, sills), so another body on the
  * same platform gets the same layout fitted to its own shell. The shell sets the limits:
@@ -47,34 +52,23 @@ const TOWER_R = 0.075;
 const TOWER_IN = 0.07;
 /** Box faces without the bottom one, for parts standing on something. */
 const UPPER_FACES = 0b110111;
-/** Box faces without the top one, for parts whose top is inside another. */
-const NO_TOP = 0b111011;
 /**
  * Two walls that would meet face to face stand this far apart instead: in one plane they
  * z-fight at any distance (tools/kit-zfight.ts), 2 mm apart only far beyond 25 m, where
  * the bay is no longer drawn.
  */
 const PLANE_GAP = 0.002;
-/** The classic's front beam stands this far ahead of the axle; the sump's deep part clears it. */
+/** The classic's front beam stands this far ahead of the axle. */
 const CROSSMEMBER_AHEAD = 0.08;
 
 const COLOURS = {
-  iron: 0x56595d,
-  sump: 0x26282a,
   alloy: 0x8d9093,
-  camClassic: 0x8a281f,
-  camSamara: 0x3e4144,
-  rib: 0xa9acaf,
   black: 0x19191a,
-  manifold: 0x5c3c2b,
   exhaust: 0x4b4541,
-  radiator: 0x222527,
-  radiatorTank: 0x6b5835,
   battery: 0x2b2d30,
   terminal: 0x9a2a20,
   plastic: 0xd5d1c2,
   capBlue: 0x2b4f8a,
-  oilFilter: 0xb5561e,
   underseal: 0x212222,
   driveline: 0x2c2d2e,
   spring: 0x3b3e41,
@@ -93,8 +87,9 @@ export function buildBay(ctx: KitContext): void {
   const classic = frame.spec.platform === 'classic';
 
   const b = new PartBuilder();
-  const route = buildEngineBay(frame, b, classic);
+  const { route, cells } = buildEngineBay(frame, b, classic);
   addBuilt(bay, b, [0, 0, 0], 'bay', true);
+  for (const kind of CELL_KINDS) ctx.root.add(cellMarker(frame, kind, cells[kind]));
 
   const lb = new PartBuilder();
   if (frame.spec.bootEnd !== undefined) buildSaloonBoot(frame, lb, classic);
@@ -289,116 +284,90 @@ function battery(b: PartBuilder, frame: BodyFrame, side: number, inner: number, 
 // Engine bay
 // ---------------------------------------------------------------------------------
 
-/** What the bay hands the underbody: where the exhaust leaves the engine, and the crank. */
+/**
+ * Name prefix of the empty nodes marking the bonnet's service cells, one per part kind
+ * (`${KIT_BONNET_CELL_NODE}:${kind}`): position the centre of the cell's floor, scale
+ * its width across the car, its height and its depth along the car. The grid draws each
+ * cell there (render/carmodel.ts measures them and drops the nodes).
+ */
+export const KIT_BONNET_CELL_NODE = 'kit_bonnet_cell';
+
+/** The bonnet's part kinds, as vehicle/bonnet.ts names its cells. */
+const CELL_KINDS = ['engine', 'turbine', 'radiator', 'air_filter'] as const;
+type CellKind = (typeof CELL_KINDS)[number];
+
+/** A cell: its floor rectangle (x across, s along the car), the floor's height and the clear room's top. */
+interface Cell {
+  readonly x0: number;
+  readonly x1: number;
+  readonly s0: number;
+  readonly s1: number;
+  readonly floor: number;
+  readonly top: number;
+}
+
+/** Cells keep this far clear of each other and of the bay's fixed parts. */
+const CELL_GAP = 0.01;
+/** The radiator's cell along the car: a core with its tanks, its fan mount and its pipes' necks (render/partmesh.ts). */
+const RADIATOR_CELL_DEPTH = 0.14;
+/** The classic's air filter cell along the car, about where its carburettor stood. */
+const AIR_FILTER_CELL_LENGTH = 0.3;
+/**
+ * With no engine in the bay the exhaust's down-pipe starts this far under the shell's
+ * floor (its centre, the pipe's radius plus a hair), so nothing of it shows in the bay.
+ */
+const DOWNPIPE_DROP = 0.03;
+
+/** What the bay hands the underbody: where the exhaust starts, and the crank. */
 interface BayRoute {
-  /** Exhaust manifold's outlet, car frame. */
+  /** The exhaust down-pipe's start under the floor, car frame. */
   readonly outlet: Vec3;
   /** Crank axis height and the engine's offset across the car: where the driveline leaves it. */
   readonly crankY: number;
   readonly engineX: number;
 }
 
-interface Inline4 {
-  /** Block length along the crank and half width across it. */
-  readonly length: number;
-  readonly half: number;
-  readonly pan: number;
-  readonly block: number;
-  readonly head: number;
-  readonly cover: number;
-  readonly coverColour: number;
-  /** Intake on the engine's left (+x local), across the head from the exhaust. */
-  readonly crossflow: boolean;
-  /** Engine-driven fan on the water pump (the classic); the Samara's is electric. */
-  readonly fan: boolean;
-  /** Local z range of the deep part of the sump; the rest is a shallow tray. */
-  readonly sumpZ: readonly [number, number];
-  /** Local height of the shallow tray's bottom. */
-  readonly trayY: number;
+interface BayLayout {
+  readonly route: BayRoute;
+  readonly cells: Readonly<Record<CellKind, Cell>>;
+}
+
+/** The fixed parts of the bay that the engines' cells keep clear of. */
+interface BayFixtures {
+  readonly inner: number;
+  readonly support: number;
+  readonly radiator: Cell;
+  /** The master cylinder's front end and the booster's inboard edge, left of the firewall. */
+  readonly boosterS: number;
+  readonly boosterX: number;
+  /** Underside of the scuttle's plenum at the cowl. */
+  readonly scuttleFloor: number;
 }
 
 /**
- * An inline four about its own origin: the sump's bottom under the middle of the block,
- * +z towards the timing end, +x the engine's left. The exhaust is on its right; the
- * intake joins it there (the classic) or sits across the head (crossflow). Every size
- * across the engine is a fraction of the block's half width, so one drawing serves a
- * big or a small four. Returns the exhaust outlet and the top of the carburettor, local.
+ * Highest point of the shell's floor over s0..s1, a hair up: a cell's floor is flat and
+ * the shell's slopes, so standing on the highest point it never dips through it.
  */
-function inline4(b: PartBuilder, e: Inline4): { outlet: Vec3; carb: Vec3 } {
-  const L = e.length;
-  const h = e.half;
-  const yBlock = e.pan;
-  const yHead = yBlock + e.block;
-  const yCover = yHead + e.head;
-  const top = yCover + e.cover;
-  // Sump: a deep pan where the crossmember leaves room, a shallow tray elsewhere.
-  b.color(COLOURS.sump);
-  if (e.sumpZ[1] - e.sumpZ[0] > 0.08) {
-    const zc = (e.sumpZ[0] + e.sumpZ[1]) / 2;
-    b.bevelBox('trim', [0, (e.pan + 0.004) / 2, zc], [h * 0.85, (e.pan + 0.004) / 2, (e.sumpZ[1] - e.sumpZ[0]) / 2], 0.025);
-  }
-  b.box('trim', [0, (e.trayY + e.pan + 0.004) / 2, 0], [h * 0.9, (e.pan + 0.004 - e.trayY) / 2, L / 2 - 0.03]);
-  // Block, head and cam cover: each chamfered, each narrower than the one below.
-  b.color(COLOURS.iron).bevelBox('trim', [0, yBlock + e.block / 2, 0], [h, e.block / 2, L / 2], h * 0.25);
-  b.color(COLOURS.alloy).bevelBox('trim', [0, yHead + e.head / 2, 0], [h * 0.88, e.head / 2, L / 2 - 0.01], h * 0.15);
-  const c = e.cover;
-  const cover: Pt[] = [[h * 0.78, 0], [h * 0.78, c * 0.45], [h * 0.5, c], [-h * 0.5, c], [-h * 0.78, c * 0.45], [-h * 0.78, 0]];
-  b.color(e.coverColour).extrude('trim', cover, -(L / 2 - 0.025), L / 2 - 0.025, 0, yCover);
-  b.color(COLOURS.rib);
-  for (const x of [-0.27, 0, 0.27]) b.box('trim', [x * h, top + 0.006, 0], [0.008, 0.008, L / 2 - 0.09], UPPER_FACES);
-  b.color(COLOURS.black).box('trim', [h * 0.35, top + 0.014, L / 2 - 0.1], [0.024, 0.014, 0.024], UPPER_FACES);
-  // Timing end: cover, pulleys and the belt between them.
-  const front = L / 2;
-  b.color(COLOURS.alloy).box('trim', [0, (yBlock + yCover) / 2, front + 0.018], [h * 0.77, (yCover - yBlock) / 2, 0.018]);
-  const crank: Vec3 = [0, yBlock + 0.05, front + 0.05];
-  const pump: Vec3 = [0, yBlock + e.block * 0.82, front + 0.05];
-  b.color(COLOURS.black);
-  b.cylinderZ('trim', crank, h * 0.5, 0.014, 6);
-  b.cylinderZ('trim', pump, h * 0.38, 0.012, 6);
-  for (const x of [-0.42, 0.42]) b.box('trim', [x * h, (crank[1] + pump[1]) / 2, front + 0.05], [0.006, (pump[1] - crank[1]) / 2, 0.008]);
-  if (e.fan) {
-    // Four pitched blades on the water pump's hub.
-    const fz = front + 0.1;
-    b.cylinderZ('trim', [0, pump[1], fz], 0.04, 0.02, 6);
-    for (let k = 0; k < 4; k++) {
-      const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
-      const ca = Math.cos(a);
-      const sa = Math.sin(a);
-      const p = (r: number, w: number, dz: number): Vec3 => [ca * r - sa * w, pump[1] + sa * r + ca * w, fz + dz];
-      b.poly('trim', [p(0.035, -0.04, -0.015), p(0.2, -0.045, -0.02), p(0.2, 0.045, 0.02), p(0.035, 0.04, 0.015)]);
-    }
-  }
-  // Right side: alternator low at the front, exhaust manifold along the head.
-  b.color(COLOURS.alloy).cylinderZ('trim', [-h * 1.3, yBlock + e.block * 0.55, front - 0.05], h * 0.5, 0.06, 8);
-  b.color(COLOURS.manifold);
-  const runnerY = yHead + e.head * 0.35;
-  for (let i = 0; i < 4; i++) {
-    const z = ((i - 1.5) / 4) * (L - 0.06);
-    b.box('trim', [-h * 1.15, runnerY, z], [h * 0.27, 0.022, 0.026]);
-  }
-  const collector = -h * 1.46;
-  b.box('trim', [collector, runnerY - 0.04, 0], [h * 0.23, 0.035, L / 2 - 0.06]);
-  const outlet: Vec3 = [collector, runnerY - 0.075, -(L / 2 - 0.1)];
-  // Intake and carburettor: over the exhaust, or across the head. Over the exhaust its
-  // sides stand inside the runners' ends, not in their plane.
-  const ix = (e.crossflow ? 1.15 : -1.15) * h;
-  b.color(COLOURS.alloy);
-  b.box('trim', [ix, yHead + e.head * 0.85, 0], [h * 0.27 - PLANE_GAP, 0.028, L / 2 - 0.1]);
-  const carbX = (e.crossflow ? 0.85 : -1.0) * h;
-  const carbY0 = yHead + e.head;
-  b.box('trim', [carbX, (carbY0 + top) / 2, 0], [0.05, (top - carbY0) / 2, 0.05]);
-  // Left side: oil filter low, distributor high with its four leads to the plugs.
-  b.color(COLOURS.oilFilter).cylinderX('trim', [h * 1.3, yBlock + e.block * 0.3, 0.06], 0.045, 0.04, 6);
-  const dist: Vec3 = [h * 1.23, yHead + 0.04, -0.06];
-  b.color(COLOURS.black).cylinderY('trim', dist, 0.045, 0.035, 6);
-  for (let i = 0; i < 4; i++) {
-    const z = ((i - 1.5) / 4) * (L - 0.06);
-    rod(b, 'trim', [dist[0], dist[1] + 0.035, dist[2]], [h * 0.8, yHead + e.head * 0.6, z], 0.005, 3);
-  }
-  return { outlet, carb: [carbX, top, 0] };
+function cellFloor(frame: BodyFrame, s0: number, s1: number): number {
+  let y = -Infinity;
+  for (const s of stationsBetween(frame, s0, s1)) y = Math.max(y, floorY(frame, s));
+  return y + PLANE_GAP;
 }
 
-function buildEngineBay(frame: BodyFrame, b: PartBuilder, classic: boolean): BayRoute {
+/** A cell over x0..x1, s0..s1 from `floor`, by default up to the closed lid. */
+function cell(frame: BodyFrame, x0: number, x1: number, s0: number, s1: number, floor: number, top = ceiling(frame, s0, s1, Math.max(Math.abs(x0), Math.abs(x1)))): Cell {
+  return { x0, x1, s0, s1, floor, top };
+}
+
+function cellMarker(frame: BodyFrame, kind: CellKind, c: Cell): THREE.Object3D {
+  const node = new THREE.Object3D();
+  node.name = `${KIT_BONNET_CELL_NODE}:${kind}`;
+  node.position.set((c.x0 + c.x1) / 2, c.floor, frame.z((c.s0 + c.s1) / 2));
+  node.scale.set(c.x1 - c.x0, c.top - c.floor, c.s1 - c.s0);
+  return node;
+}
+
+function buildEngineBay(frame: BodyFrame, b: PartBuilder, classic: boolean): BayLayout {
   const spec = frame.spec;
   const w = spec.wheels;
   const inner = frame.wellX(w.front) - WELL_GAP;
@@ -428,17 +397,13 @@ function buildEngineBay(frame: BodyFrame, b: PartBuilder, classic: boolean): Bay
     const [x0, x1] = side > 0 ? [radHalf + 0.01, inner] : [-inner, -radHalf - 0.01];
     boxS(b, frame, 'paint', [x0, fl, support - 0.03], [x1, slamTop - 0.05, support], UPPER_FACES);
   }
-  boxS(b, frame, 'paint', [-inner, fl, support - 0.03], [inner, fl + 0.07, support], UPPER_FACES);
+  const memberTop = fl + 0.07;
+  boxS(b, frame, 'paint', [-inner, fl, support - 0.03], [inner, memberTop, support], UPPER_FACES);
+  // The radiator's cell: between the posts, on the lower member's height and up under
+  // the slam panel's lip, as the core stood.
   const rs0 = support + 0.005;
-  const rs1 = support + 0.045;
-  const radBottom = fl + 0.08;
-  const radTop = slamTop - 0.06;
-  b.color(COLOURS.radiator);
-  // The core's top is inside the header tank (whose top is at radTop): no top face.
-  boxS(b, frame, 'trim', [-radHalf, radBottom, rs0], [radHalf, radTop, rs1], NO_TOP);
-  b.color(COLOURS.radiatorTank);
-  boxS(b, frame, 'trim', [-radHalf - 0.01, radTop - 0.05, rs0 - 0.005], [radHalf + 0.01, radTop, rs1 + 0.01]);
-  boxS(b, frame, 'chrome', [radHalf - 0.08, radTop, rs0 + 0.002], [radHalf - 0.04, radTop + 0.02, rs1 - 0.002], UPPER_FACES);
+  const rs1 = rs0 + RADIATOR_CELL_DEPTH;
+  const radiator = cell(frame, -radHalf, radHalf, rs0, rs1, Math.max(memberTop, cellFloor(frame, rs0, rs1)), Math.min(slamTop - 0.05 - CELL_GAP, ceiling(frame, rs0, rs1, radHalf)));
 
   // ---- towers over the front axle ----
   const towerX = inner - TOWER_IN;
@@ -456,154 +421,128 @@ function buildEngineBay(frame: BodyFrame, b: PartBuilder, classic: boolean): Bay
   // ---- brake booster and master cylinder on the driver's (left) side of the firewall ----
   // Under the brake pedal (interior.ts: column x 0.36-0.37, brake 0.01 inboard of it).
   const boosterX = 0.36;
+  const boosterR = 0.1;
   const boosterY = Math.min(scuttleTop - 0.22, floorY(frame, cowl) + 0.36);
-  b.color(COLOURS.black).cylinderZ('trim', [boosterX, boosterY, frame.z(cowl - 0.045)], 0.1, 0.04, 10);
-  b.color(COLOURS.alloy).cylinderZ('trim', [boosterX, boosterY, frame.z(cowl - 0.16)], 0.03, 0.075, 6);
+  const masterS = cowl - 0.16;
+  const masterHalf = 0.075;
+  b.color(COLOURS.black).cylinderZ('trim', [boosterX, boosterY, frame.z(cowl - 0.045)], boosterR, 0.04, 10);
+  b.color(COLOURS.alloy).cylinderZ('trim', [boosterX, boosterY, frame.z(masterS)], 0.03, masterHalf, 6);
   reservoir(b, frame, boosterX - 0.04, boosterX + 0.04, cowl - 0.22, cowl - 0.12, boosterY + 0.03, boosterY + 0.1, COLOURS.black);
 
-  return classic ? classicEngine(frame, b, inner, support, rs1) : samaraEngine(frame, b, inner, support, rs1);
+  const bay: BayFixtures = { inner, support, radiator, boosterS: masterS - masterHalf, boosterX: boosterX - boosterR, scuttleFloor: scuttleTop - 0.09 };
+  const { route, cells } = classic ? classicEngine(frame, b, bay) : samaraEngine(frame, b, bay);
+  return { route, cells: { ...cells, radiator } };
+}
+
+/** What a platform's engine side adds: the route and every cell but the radiator's. */
+interface EngineSide {
+  readonly route: BayRoute;
+  readonly cells: Readonly<Record<Exclude<CellKind, 'radiator'>, Cell>>;
 }
 
 /**
- * The classic: a longitudinal four a touch left of centre, its fan just behind the
- * radiator and its gearbox running on under the tunnel; the battery on the right in
- * front of the tower, the expansion tank on the right behind it, the washer bottle on
- * the left.
+ * The classic: a longitudinal four a touch left of centre with its gearbox running on
+ * under the tunnel; the battery on the right in front of the tower, the expansion tank
+ * on the right behind it, the washer bottle on the left. The turbine's cell is in the
+ * right rear corner by the exhaust manifold's outlet, the air filter's on the left
+ * beside where the carburettor stood.
  */
-function classicEngine(frame: BodyFrame, b: PartBuilder, inner: number, support: number, radiatorBack: number): BayRoute {
+function classicEngine(frame: BodyFrame, b: PartBuilder, bay: BayFixtures): EngineSide {
   const w = frame.spec.wheels;
   const cowl = frame.cowl;
+  const { inner, support } = bay;
+  // The block's length and half width; its fan and pulleys stood between its timing
+  // end and the radiator.
   const L = 0.54;
   const half = 0.16;
   const engineX = 0.02;
-  const sFront = radiatorBack + 0.17;
+  const sFront = support + 0.215;
+  const sBack = sFront + L;
   const sMid = sFront + L / 2;
   // The crank sits just above the floor at the firewall, so the gearbox and the
   // propshaft behind it hang half below the floor, as they do in the tunnel.
   const crankY = floorY(frame, cowl) + 0.025;
-  const pan = 0.08;
-  const base = crankY - pan;
-  const room = ceiling(frame, sFront - 0.1, sFront + L, 0.32) - base;
-  const stack = room - pan - 0.1;
-  const crossmemberS = w.front - CROSSMEMBER_AHEAD;
-  const sumpFront = crossmemberS + 0.06;
-  const e: Inline4 = {
-    length: L,
-    half,
-    pan,
-    block: stack * 0.52,
-    head: stack * 0.2,
-    cover: stack * 0.17,
-    coverColour: COLOURS.camClassic,
-    crossflow: false,
-    fan: true,
-    sumpZ: [-(L / 2 - 0.04), Math.min(L / 2 - 0.04, sMid - sumpFront)],
-    trayY: floorY(frame, crossmemberS) + 0.005 - base,
-  };
-  b.pushAt([engineX, base, frame.z(sMid)]);
-  const { outlet, carb } = inline4(b, e);
-  // Round air filter on the carburettor: a big flat drum, black with a chrome lid and
-  // its snorkel to the front.
-  const filterTop = ceiling(frame, sMid - 0.18, sMid + 0.18, 0.32) - base - 0.01;
-  const filterH = Math.max(0.05, filterTop - carb[1] - 0.012);
-  const fy = carb[1] + 0.006 + filterH / 2;
-  b.color(COLOURS.black).cylinderY('trim', [carb[0], fy, 0], 0.17, filterH / 2, 12);
-  b.poly('chrome', Array.from({ length: 12 }, (_, i): Vec3 => [carb[0] + Math.cos((i / 12) * Math.PI * 2) * 0.15, fy + filterH / 2 + 0.003, Math.sin((i / 12) * Math.PI * 2) * 0.15]));
-  b.box('trim', [carb[0] - 0.02, fy - filterH * 0.1, 0.22], [0.045, filterH * 0.3, 0.07]);
-  const outletCar = new THREE.Vector3(...outlet).applyMatrix4(b.matrix);
-  b.pop();
-
-  // Bellhousing to the firewall; the gearbox carries on in the underbody.
-  const sBack = sFront + L;
-  taper(b, frame, 'trim', COLOURS.alloy, engineX, crankY, sBack, half, crankY - CLEARANCE - 0.012, cowl + 0.02, 0.12, crankY - CLEARANCE - 0.012, 8);
 
   // Battery in front of the right tower, expansion tank behind it, washer bottle left.
   const batteryEnd = w.front - TOWER_R - 0.03;
   const batteryStart = Math.max(support + 0.08, batteryEnd - 0.25);
   battery(b, frame, -1, inner, batteryStart, batteryEnd, ceiling(frame, batteryStart, batteryEnd, inner) - 0.02);
-  const tankTop = ceiling(frame, cowl - 0.38, cowl - 0.2, inner) - 0.03;
-  reservoir(b, frame, -inner + 0.01, -inner + 0.13, cowl - 0.38, cowl - 0.2, tankTop - 0.15, tankTop, COLOURS.black);
+  const tankStart = cowl - 0.38;
+  const tankEnd = cowl - 0.2;
+  const tankTop = ceiling(frame, tankStart, tankEnd, inner) - 0.03;
+  reservoir(b, frame, -inner + 0.01, -inner + 0.13, tankStart, tankEnd, tankTop - 0.15, tankTop, COLOURS.black);
   const washerTop = ceiling(frame, support + 0.08, support + 0.24, inner) - 0.03;
   reservoir(b, frame, inner - 0.14, inner - 0.01, support + 0.08, support + 0.24, washerTop - 0.17, washerTop, COLOURS.capBlue);
-  // Top hose from the radiator's tank to the thermostat on the head's nose.
-  hose(b, frame, [[-0.2, 0, radiatorBack], [-0.12, -0.02, radiatorBack + 0.08], [engineX - 0.04, -0.04, sFront - 0.02]], ceiling(frame, support, sFront, 0.3) - 0.03);
 
-  return { outlet: [outletCar.x, outletCar.y, outletCar.z], crankY, engineX };
+  // The engine's cell: the block with the alternator and the exhaust and intake
+  // manifolds on its right, the distributor on its left.
+  const engine = cell(frame, engineX - 1.8 * half, engineX + 1.2 * half, sFront, sBack, cellFloor(frame, sFront, sBack));
+  // The turbine's: behind the expansion tank, by where the manifold's outlet was, inboard
+  // of the rail and under the scuttle's plenum, which reaches over it at the firewall.
+  const ts0 = tankEnd + CELL_GAP;
+  const ts1 = cowl - CELL_GAP;
+  const tx0 = -(inner - RAIL_W - CELL_GAP);
+  const turbine = cell(frame, tx0, engine.x0 - CELL_GAP, ts0, ts1, cellFloor(frame, ts0, ts1), Math.min(bay.scuttleFloor - CELL_GAP, ceiling(frame, ts0, ts1, -tx0)));
+  // The air filter's: beside the carburettor's place, inboard of the tower and the washer
+  // bottle, between the radiator's cell and the master cylinder.
+  const as0Min = bay.radiator.s1 + CELL_GAP;
+  const as1Max = bay.boosterS - CELL_GAP;
+  const as0 = Math.max(as0Min, Math.min(sMid - AIR_FILTER_CELL_LENGTH / 2, as1Max - AIR_FILTER_CELL_LENGTH));
+  const as1 = Math.min(as1Max, as0 + AIR_FILTER_CELL_LENGTH);
+  const airFilter = cell(frame, engine.x1 + CELL_GAP, inner - TOWER_IN - TOWER_R - CELL_GAP, as0, as1, cellFloor(frame, as0, as1));
+
+  // The exhaust starts under the floor below where the manifold's outlet was, at the
+  // engine's rear on its right.
+  const sOut = sBack - 0.1;
+  const outlet = at(frame, engineX - 1.46 * half, floorY(frame, sOut) - DOWNPIPE_DROP, sOut);
+  return { route: { outlet, crankY, engineX }, cells: { engine, turbine, air_filter: airFilter } };
 }
 
 /**
  * The Samara: a transverse four on the right, leaning back, with the gearbox on the
- * left and the driveshafts out to the wheels; an electric fan on the radiator, a
- * box air filter on the carburettor, the battery on the left in front of its tower.
+ * left and the driveshafts out to the wheels; the battery on the left in front of its
+ * tower. The turbine's cell is behind the engine along its exhaust side; the air
+ * filter's stands on the gearbox, where the injection cars carry the filter's housing.
  */
-function samaraEngine(frame: BodyFrame, b: PartBuilder, inner: number, support: number, radiatorBack: number): BayRoute {
+function samaraEngine(frame: BodyFrame, b: PartBuilder, bay: BayFixtures): EngineSide {
   const w = frame.spec.wheels;
   const cowl = frame.cowl;
+  const { inner, support } = bay;
+  // The block's length along the crank and half width across it, and its place.
   const L = 0.39;
+  const half = 0.14;
   const engineX = -0.14;
   const sMid = w.front - 0.15;
+  // The crank: over the sump's `pan` with the block leant back by `tilt` about it. The
+  // gearbox bolts on at its height.
   const tilt = 0.15;
   const pan = 0.075;
   const base = floorY(frame, sMid) - 0.045;
-  const room = ceiling(frame, sMid - 0.26, sMid + 0.22, Math.abs(engineX) + 0.22) - base - 0.03;
-  const stack = room - pan - 0.11;
-  const e: Inline4 = {
-    length: L,
-    half: 0.14,
-    pan,
-    block: stack * 0.52,
-    head: stack * 0.2,
-    cover: stack * 0.17,
-    coverColour: COLOURS.camSamara,
-    crossflow: true,
-    fan: false,
-    sumpZ: [-(L / 2 - 0.04), L / 2 - 0.04],
-    trayY: 0.045,
-  };
-  // Crank across the car, timing end to the right, leaning its top towards the firewall.
-  b.pushAt([engineX, base, frame.z(sMid)], [0, -Math.PI / 2, tilt]);
-  const { outlet, carb } = inline4(b, e);
-  // Box air filter on the carburettor.
-  const fh = Math.max(0.05, room - carb[1] - 0.015);
-  b.color(COLOURS.black).bevelBox('trim', [carb[0] - 0.03, carb[1] + 0.006 + fh / 2, 0], [0.12, fh / 2, 0.17], 0.02);
-  b.color(COLOURS.alloy).bevelBox('trim', [carb[0] - 0.03, carb[1] + 0.008 + fh, 0], [0.1, 0.006, 0.14], 0.004);
-  const outletCar = new THREE.Vector3(...outlet).applyMatrix4(b.matrix);
-  const crank = new THREE.Vector3(0, pan, 0).applyMatrix4(b.matrix);
-  b.pop();
+  const crankY = base + pan * Math.cos(tilt);
+  const sCrank = sMid + pan * Math.sin(tilt);
 
   // Gearbox on the left: bellhousing on the block's end, the case and the final drive
   // over the axle line.
   const xb = engineX + L / 2;
-  const sCrank = frame.zNose - crank.z;
   b.color(COLOURS.alloy);
-  b.cylinderX('trim', [xb + 0.035, crank.y, crank.z], 0.13, 0.035, 8);
-  const gearTop = crank.y + 0.14;
+  b.cylinderX('trim', [xb + 0.035, crankY, frame.z(sCrank)], 0.13, 0.035, 8);
+  const gearTop = crankY + 0.14;
   const gearOut = inner - 0.17;
-  bevelS(b, frame, 'trim', [xb + 0.07, floorY(frame, w.front) - 0.05, sCrank - 0.1], [gearOut, gearTop, w.front + 0.07], 0.04);
+  const gearS0 = sCrank - 0.1;
+  const gearS1 = w.front + 0.07;
+  bevelS(b, frame, 'trim', [xb + 0.07, floorY(frame, w.front) - 0.05, gearS0], [gearOut, gearTop, gearS1], 0.04);
   // Driveshafts from the case's faces at the hubs' height, with their joints' boots.
   const y = w.radius;
+  const bootR = 0.04;
   const hub = w.frontHalfTrack - 0.07;
   b.color(COLOURS.driveline);
   for (const [x0, x1] of [[gearOut, hub], [xb + 0.07, -hub]] as const) {
     rod(b, 'trim', at(frame, x0, y, w.front), at(frame, x1, y, w.front), 0.018, 6);
     const dir = Math.sign(x1 - x0);
     b.color(COLOURS.black);
-    b.cylinderX('trim', at(frame, x0 + dir * 0.06, y, w.front), 0.04, 0.05, 6);
-    b.cylinderX('trim', at(frame, x1 - dir * 0.07, y, w.front), 0.04, 0.05, 6);
+    b.cylinderX('trim', at(frame, x0 + dir * 0.06, y, w.front), bootR, 0.05, 6);
+    b.cylinderX('trim', at(frame, x1 - dir * 0.07, y, w.front), bootR, 0.05, 6);
     b.color(COLOURS.driveline);
-  }
-
-  // Electric fan in its shroud behind the radiator.
-  const fl = floorY(frame, support);
-  const fanY = (fl + ceiling(frame, support, support + 0.1, 0.3)) / 2 - 0.02;
-  const fanS = radiatorBack + 0.035;
-  b.color(COLOURS.black);
-  b.cylinderZ('trim', at(frame, -0.08, fanY, fanS), 0.15, 0.03, 12, false);
-  b.cylinderZ('trim', at(frame, -0.08, fanY, fanS + 0.02), 0.05, 0.035, 8);
-  for (let k = 0; k < 4; k++) {
-    const a = (k / 4) * Math.PI * 2;
-    const p = (r: number, wd: number): Vec3 => at(frame, -0.08 + Math.cos(a) * r - Math.sin(a) * wd, fanY + Math.sin(a) * r + Math.cos(a) * wd, fanS - 0.005);
-    b.poly('trim', [p(0.05, -0.035), p(0.14, -0.04), p(0.14, 0.04), p(0.05, 0.035)]);
   }
 
   // Battery on the left in front of its tower; expansion tank and washer bottle right.
@@ -614,20 +553,34 @@ function samaraEngine(frame: BodyFrame, b: PartBuilder, inner: number, support: 
   reservoir(b, frame, -inner + 0.01, -inner + 0.15, cowl - 0.32, cowl - 0.14, tankTop - 0.14, tankTop, COLOURS.black);
   const washerTop = ceiling(frame, support + 0.08, support + 0.22, inner) - 0.03;
   reservoir(b, frame, -inner + 0.01, -inner + 0.14, support + 0.08, support + 0.22, washerTop - 0.15, washerTop, COLOURS.capBlue);
-  hose(b, frame, [[-0.2, 0, radiatorBack], [-0.25, -0.03, radiatorBack + 0.1], [engineX - L / 2 + 0.04, -0.08, sMid - 0.1]], ceiling(frame, support, sMid, 0.3) - 0.03);
 
-  return { outlet: [outletCar.x, outletCar.y, outletCar.z], crankY: crank.y, engineX };
-}
+  // The engine's cell: from the timing end's pulleys on the right to the bellhousing;
+  // ahead to the intake and the oil filter, back to the exhaust manifold with the head
+  // leaning over it. The tower, the washer and the tank stand outboard of it. The right
+  // driveshaft and its inner boot cross under it above the floor; the cell's floor clears them.
+  const es0 = sMid - 1.45 * half;
+  const es1 = sMid + 2 * half;
+  const engineFloor = Math.max(cellFloor(frame, es0, es1), y + bootR + PLANE_GAP);
+  const engine = cell(frame, Math.max(engineX - L / 2 - 0.06, -(inner - 0.15 - CELL_GAP)), xb - PLANE_GAP, es0, es1, engineFloor);
+  // The turbine's: behind it along the manifold, up to the firewall under the scuttle.
+  const ts0 = es1 + CELL_GAP;
+  const ts1 = cowl - CELL_GAP;
+  const tx0 = engineX - L / 2;
+  const turbine = cell(frame, tx0, engine.x1, ts0, ts1, cellFloor(frame, ts0, ts1), Math.min(bay.scuttleFloor - CELL_GAP, ceiling(frame, ts0, ts1, -tx0)));
+  // The air filter's: on the gearbox's case, inboard of the battery.
+  const airFilter = cell(frame, xb + 0.07 + CELL_GAP, inner - 0.19 - CELL_GAP, gearS0, gearS1, gearTop + PLANE_GAP);
 
-/** A radiator hose: points as (x, drop below `topY`, s). */
-function hose(b: PartBuilder, frame: BodyFrame, points: readonly Vec3[], topY: number): void {
-  b.color(COLOURS.black);
-  tube(b, 'trim', points.map(([x, dy, s]) => at(frame, x, topY + dy, s)), 0.02, 5);
+  // The exhaust starts under the floor below where the manifold's outlet was, behind
+  // the engine near its gearbox end.
+  const sOut = sMid + 1.46 * half;
+  const outlet = at(frame, xb - 0.1, floorY(frame, sOut) - DOWNPIPE_DROP, sOut);
+  return { route: { outlet, crankY, engineX }, cells: { engine, turbine, air_filter: airFilter } };
 }
 
 /**
  * A casing round an axis along the car, tapering from (rx0, ry0) at s0 to (rx1, ry1)
- * at s1; its bottom radius is kept above the clearance by the callers.
+ * at s1, closed at s0, where nothing bolts to it any more; its bottom radius is kept
+ * above the clearance by the caller.
  */
 function taper(b: PartBuilder, frame: BodyFrame, slot: KitSlot, colour: number, x: number, y: number, s0: number, rx0: number, ry0: number, s1: number, rx1: number, ry1: number, sides: number): void {
   const ring = (s: number, rx: number, ry: number): Vec3[] => {
@@ -638,7 +591,9 @@ function taper(b: PartBuilder, frame: BodyFrame, slot: KitSlot, colour: number, 
     }
     return out;
   };
-  b.color(colour).bridge(slot, ring(s0, rx0, ry0), ring(s1, rx1, ry1), true);
+  const front = ring(s0, rx0, ry0);
+  b.color(colour).bridge(slot, front, ring(s1, rx1, ry1), true);
+  b.poly(slot, front);
 }
 
 // ---------------------------------------------------------------------------------
@@ -773,7 +728,7 @@ function buildUnderbody(frame: BodyFrame, b: PartBuilder, classic: boolean, rout
   else samaraChassis(frame, b, route);
 }
 
-/** Exhaust from the manifold's outlet: down-pipe, resonator, silencer at CLEARANCE, tail pipe out at the right rear. */
+/** Exhaust from the down-pipe's start under the bay: resonator, silencer at CLEARANCE, tail pipe out at the right rear. */
 function exhaust(frame: BodyFrame, b: PartBuilder, down: readonly Vec3[], x: number, y: number, resonator: readonly [number, number], silencer: readonly [number, number], silencerX: number): void {
   const spec = frame.spec;
   b.color(COLOURS.exhaust);
@@ -796,7 +751,7 @@ function classicChassis(frame: BodyFrame, b: PartBuilder, route: BayRoute): void
   const cowl = frame.cowl;
   const R = w.radius;
 
-  // Front beam under the engine, between the wishbones' inner pivots.
+  // Front beam under the engine's place, between the wishbones' inner pivots.
   const cs = w.front - CROSSMEMBER_AHEAD;
   const cf = floorY(frame, cs);
   b.color(COLOURS.underseal);
@@ -813,7 +768,7 @@ function classicChassis(frame: BodyFrame, b: PartBuilder, route: BayRoute): void
   b.color(COLOURS.black);
   tube(b, 'trim', [at(frame, 0.52, by, w.front - 0.02), at(frame, 0.45, by, barS), at(frame, -0.45, by, barS), at(frame, -0.52, by, w.front - 0.02)], 0.012, 4);
 
-  // Gearbox on from the bellhousing, propshaft to the pinion.
+  // Gearbox from the firewall, where the engine's bellhousing met it; propshaft to the pinion.
   const x = route.engineX;
   const cy = route.crankY;
   const gearEnd = cowl + 0.45;
@@ -852,7 +807,7 @@ function classicChassis(frame: BodyFrame, b: PartBuilder, route: BayRoute): void
   exhaust(
     frame,
     b,
-    [o, at(frame, o[0] - 0.01, (o[1] + floorY(frame, cowl)) / 2, os + 0.06), at(frame, ex, ey + 0.02, cowl + 0.05), at(frame, ex, ey, cowl + 0.25)],
+    [o, at(frame, o[0] - 0.01, (o[1] + ey) / 2, os + 0.06), at(frame, ex, ey + 0.02, cowl + 0.05), at(frame, ex, ey, cowl + 0.25)],
     ex,
     ey,
     [cowl + 0.55, cowl + 1.0],
@@ -913,7 +868,7 @@ function samaraChassis(frame: BodyFrame, b: PartBuilder, route: BayRoute): void 
   }
   across(b, frame, 'trim', [[beamS - 0.04, bf - 0.005], [beamS - 0.03, bf - 0.055], [beamS + 0.03, bf - 0.055], [beamS + 0.04, bf - 0.005]], -0.575, 0.575);
 
-  // Exhaust: down behind the engine, along the left of centre past the tank, under the
+  // Exhaust: from behind the engine's place, along the left of centre past the tank, under the
   // beam, then across to the silencer on the right.
   const ex = 0.06;
   const ey = CLEARANCE + 0.022;
@@ -923,7 +878,7 @@ function samaraChassis(frame: BodyFrame, b: PartBuilder, route: BayRoute): void 
   exhaust(
     frame,
     b,
-    [o, at(frame, o[0] + 0.02, (o[1] + ey) / 2 + 0.05, os + 0.12), at(frame, ex, ey + 0.015, os + 0.35), at(frame, ex, ey, cowl + 0.2)],
+    [o, at(frame, o[0] + 0.02, (o[1] + ey) / 2, os + 0.12), at(frame, ex, ey + 0.015, os + 0.35), at(frame, ex, ey, cowl + 0.2)],
     ex,
     ey,
     [cowl + 0.5, cowl + 0.9],

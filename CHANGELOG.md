@@ -4,6 +4,39 @@
 
 ### Added
 
+- KIT CARS: SIT IN ANY SEAT (`player/interaction.ts`, `game/state.ts` `player.seat`,
+  `vehicle/cabincamera.ts`, `main.ts`). F gets in only while the eye looks through an open
+  side door at a seat, and the player sits in that one: driver's, front passenger's or
+  either half of the rear bench (`kit_bench` group). Only the driver's seat drives: from
+  another the car holds where it stands and pedals, steering, gears, lamps and the
+  autopilot refuse ("only the driver can do that"). The cabin view is from the seat (the
+  passenger's is the driver's eye mirrored, the rear ones from `CarModelMeasure.rearEye`).
+  F gets out through the open door on the seat's side and names it when shut. Saves keep
+  the seat; older ones load in the driver's. Checked in a dev build on a 2107: through the
+  open right front door the prompt read `[F] sit in the front passenger seat`, F sat there,
+  W left the car at 0 km/h, F with that door shut refused, with it open stepped out on the
+  right.
+- KIT CLUSTERS READ EVERYTHING (`carkit/interior.ts`, `carkit/rig.ts`,
+  `vehicle/vehicle.ts` `driveKit`). The dials that stood at mid-scale now have channels:
+  the 2103's oil pressure (`oil`, 0 engine off, about 2 at idle, 4.5 from 3000 rpm, falling
+  with a low sump), the 2105's and 2107's voltmeter (`volts`, 12.4 ignition on, 13.5 idle
+  to 14.2 by 1500 rpm, less with the headlamps) and the 2107's economy meter (`vacuum`).
+  Every cluster has working warning lamps (`tell_turn` blinking, `tell_side`, `tell_beam`,
+  `tell_fuel` at `FUEL_RESERVE_FRACTION`, `tell_oil`, `tell_charge`, `tell_brake`,
+  `tell_check` from the new `Vehicle.checkEngine`); a lit face on one shared unlit material
+  slides in front of the dark lens, so a lamp changes no program. Cars that had none (2103,
+  2106, the Samaras) got them. In the cabin view the on-screen cluster stands down
+  (`Hud.setCabinInstruments`). Checked on a 2107: idle 850 rpm read oil 2, 13.5 V, vacuum
+  0.75; at 3400 rpm under full throttle oil 4.5, 14.1 V, vacuum 0; the turn lamp blinked
+  with the indicator and the high-beam lamp lit blue.
+- KIT COURTESY LAMP (`carkit/interior.ts` `dome`, `vehicle/vehicle.ts` `syncDomeLight`,
+  `main.ts`). E on the lamp in the headliner switches it; the lens glows on any car, and in
+  the car the player sits in it also takes one light from the existing vehicle light pool
+  (a warm spot straight down, 2.2 m, no shadow), asked for right after that car's
+  headlamps. No new lights. On the 4-slot tiers with dipped beams on, it bumps the car's
+  own tail-lamp light on the road while it is lit. Checked at 23:00: the pool spot appeared
+  at intensity 8 over the driver; toggling linked no program.
+
 - KIT CARS IN THE WORLD: the kit bodies (`src/carkit`, `kit_vaz2101` … `kit_vaz2112`, 13
   cars) are now the game's only cars. `CAR_MODELS` is `KIT_CARS`, so traffic (driver odds
   per kit model in `DRIVER_ODDS`), race rivals, contract cars, the story's start car,
@@ -346,6 +379,46 @@
 
 ### Changed
 
+- FUEL TANK IS NO LONGER A PART; PETROL GOES IN THROUGH THE FLAP (`parts/registry.ts`,
+  `vehicle/bonnet.ts`, `player/interaction.ts`, `save/save.ts`). The tank is the model's
+  own (`tankLitres`); the bonnet holds four typed cells: engine, turbine, radiator, air
+  filter. With a petrol can in hand the open fuel flap takes petrol (`[LMB] pour petrol`);
+  shut, the prompt says to open it. Saves get `saveVersion` 2: a version-1 bonnet drops its
+  tank cell (the air filter moves up), fuel is kept up to the model's tank, tank items
+  elsewhere are removed. Checked on a 2107: flap shut, LMB poured nothing; open, 2.5 s
+  took 10 → 13 L from a 20 L can.
+- THE BONNET GRID LIES IN THE BAY AND THE GRIDS FOLLOW THEIR LIDS (`vehicle/trunk.ts`,
+  `render/trunkview.ts`, `carkit/bay.ts`, `render/carmodel.ts` `bonnetCells`). The engine,
+  its filter and fans, the radiator and their hoses are no longer drawn in the kit bay
+  (battery, reservoirs and the bay's panels stay): the parts are what stands in the grid,
+  each cell at its part's real place, the engine's large cell in the middle. A kit car's
+  bonnet grid opens with the bonnet and closes with it, the boot's with the boot or
+  tailgate; no aim and F to open. Checked on a 2107: bonnet open → the grid showed with the
+  engine centred, shut → hidden, open again → shown.
+- KIT WIPERS WORK AND SIT ON THE GLASS (`carkit/rig.ts`, `carkit/exterior.ts`, new
+  `CabinSpec.wiperBlade`). The sweep phase lived in a channel that eased back to 0 faster
+  than it advanced, so the arms never moved; it is a plain field now. Both arms park to the
+  left, each turns about its own axis fitted to the glass, its blade bent over it. Blade gap
+  over the sweep, measured on all 13 bodies: classics 3.0-5.8 mm (sank 2.5 mm into the
+  paint before), 2104/05/07 up to 11 mm, the Samaras up to 16 mm, the tens up to 21 mm at
+  the ends of the stroke: a rigid blade cannot follow those screens' curve.
+- KIT CARS FROM OUTSIDE: PANELS ONLY (`player/interaction.ts`). On foot E works the side
+  doors, bonnet, boot or tailgate and the fuel flap, never a window or a cabin fitting; in
+  the chase and hood views a seated player works only the side doors.
+
+- KIT CABIN FROM THE SEAT: NO LABELS, THE CROSSHAIR INSTEAD (`player/interaction.ts`,
+  `ui/hud.ts`). Seated, a door or fitting in the aim is no longer named by a prompt
+  (`[E] fold down left sun visor` sat over the dash and the road): the round crosshair,
+  hidden while driving, appears while it is on something E works
+  (`InteractionResult.cabinAim`). A refused exit still prints its line. On foot nothing
+  changed. Checked in a dev build: a 2106's cabin view at pitch 0.15 on the left visor
+  showed the crosshair with no prompt, off it nothing.
+- CLASSIC ZHIGULI STEERING WHEEL LOWER AND THE 2101/2102/2103 ONE SMALLER
+  (`carkit/interior.ts`). The classic platform's hub stands 0.03 m over the belt (was
+  0.094): the rim's top now crosses the hood as the 2108's crosses its cowl, instead of
+  reaching into the screen, and the dials show inside the rim. The 2101/2102/2103 rim is
+  the platform's 0.19 m radius (was 0.2). Seen in the cabin view of the 2101, 2106 and 2107.
+
 - CONTRACTS SCORE NOTHING ON THE WAY (`contracts/`). Carry it to a later courier and it
   pays: every kind with a signature sticker always pays it, parcel its seed-random one.
   Gone: the fragile radio's condition, the trailer and oversize hit/tip checks, the tow
@@ -468,6 +541,18 @@
     handed in, placed 2nd and 3rd.
 
 ### Fixed
+
+- KIT GAUGES: THE SPEEDOMETER AND TACHOMETER FOLLOW THE CAR (`carkit/rig.ts`). Both are fed
+  in km/h and rpm but eased at 2.5 units a second, so 0-100 km/h took 40 s on the dial and
+  idle-to-4000 rpm about 20 min; they now follow at once like the HUD's dials. Checked: a
+  freshly spawned 2106's `kit.get('rpm')` read the engine's 850 at once.
+- NO ACNE ON THE KIT SUN VISORS (`carkit/interior.ts`, `carkit/context.ts`,
+  `render/carmodel.ts`). A visor is a closed pad 1.6 cm thick, under a 7 cm sun-shadow
+  texel, and its back faces put its own depth into the map: diagonal bands crawled over
+  its lit face (the house-siding fault of 0.20). It casts nothing now
+  (`addBuilt(..., casts = false)` → `userData.kitCastsNone`); it still receives the
+  roof's shadow. Checked on a 2106 with both visors down at 10:00 and 12:00: bands before,
+  none after.
 
 - KIT CARS' Z-FIGHTING: faces built in another part's face flickered at any distance:
   - the 2103's chrome headlamp rings against its black grille;

@@ -6,7 +6,7 @@ import { operateTrunkCell } from '../src/player/interaction';
 import { CAR_MODELS, DEFAULT_CAR_MODEL_ID } from '../src/vehicle/carmodels';
 import {
   intersectStorageGrid,
-  storageCellLocal,
+  storageCellBox,
   TRUNK_CELL_COUNT,
   type TrunkGridRayHit,
 } from '../src/vehicle/trunk';
@@ -74,16 +74,17 @@ check(
   `${migrated.wreckStorage['wreck:test']?.length ?? 0} cells`,
 );
 
-const half: readonly [number, number, number] = [0.9, 0.65, 2.1];
+const shape = { halfExtents: [0.9, 0.65, 2.1] as const };
 const centre = new THREE.Vector3();
+const size = new THREE.Vector3();
 const eye = new THREE.Vector3();
 const direction = new THREE.Vector3(0, 0, 1);
 const rayHit: TrunkGridRayHit = { cell: -1, distance: 0 };
 let selectedAll = true;
 for (let cell = 0; cell < TRUNK_CELL_COUNT; cell++) {
-  storageCellLocal(cell, half, 'trunk', centre);
+  storageCellBox(cell, shape, 'trunk', false, centre, size);
   eye.copy(centre).addScaledVector(direction, -1);
-  if (!intersectStorageGrid(eye, direction, half, 'trunk', rayHit) || rayHit.cell !== cell) {
+  if (!intersectStorageGrid(eye, direction, shape, 'trunk', false, rayHit) || rayHit.cell !== cell) {
     selectedAll = false;
   }
 }
@@ -92,7 +93,10 @@ check('aim ray selects all eight cells', selectedAll, selectedAll ? '0..7 exact'
 // The trunk is read from behind the car, looking along chassis +Z, so the player's
 // left is +X: cell 1 must sit there and each next cell further right (lower X).
 const trunkXs: number[] = [];
-for (let cell = 0; cell < TRUNK_CELL_COUNT; cell++) trunkXs.push(storageCellLocal(cell, half, 'trunk', centre).x);
+for (let cell = 0; cell < TRUNK_CELL_COUNT; cell++) {
+  storageCellBox(cell, shape, 'trunk', false, centre, size);
+  trunkXs.push(centre.x);
+}
 const leftToRight = [0, 1, 2, 4, 5, 6].every((cell) => trunkXs[cell]! > trunkXs[cell + 1]!);
 check('trunk cells count left to right from behind', leftToRight, trunkXs.map((x) => x.toFixed(2)).join(' '));
 

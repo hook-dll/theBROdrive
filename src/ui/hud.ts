@@ -3,6 +3,7 @@ import type { Item } from '../items/items';
 import type { EngineTempReadout } from '../vehicle/cooling';
 import type { WheelRideState } from '../vehicle/vehicle';
 import type { AutopilotMode } from '../vehicle/autopilot';
+import { FUEL_RESERVE_FRACTION } from '../parts/registry';
 
 /**
  * HUD overlay. Plain DOM, no framework. Every element is created once and cached;
@@ -248,8 +249,6 @@ const SEGMENT_GLYPHS: Readonly<Record<string, string>> = {
   Y: 'kmo', Z: 'abmpef',
 };
 
-/** Fuel fraction below which the analogue gauge reads as an alarm. */
-const FUEL_ALARM_FRACTION = 0.12;
 /**
  * Water/oil fraction below which the warning lamp lights. Higher than the fuel
  * alarm because these are not fixable at the roadside from a jerrycan you happen
@@ -320,6 +319,10 @@ export class Hud {
   private readonly tops: HTMLElement[] = [];
 
   private readonly crosshairEl: HTMLElement;
+  /** A car is being driven: the crosshair then shows only on a cabin fitting (`setPrompt`). */
+  private driving = false;
+  /** The cabin view shows the car's own cluster; see `setCabinInstruments`. */
+  private cabinInstruments = false;
   private readonly promptEl: HTMLElement;
   /** The cabin-camera editor's axis and eye readout; see vehicle/cabincamera.ts. */
   private readonly cabinEditorEl: HTMLElement;
@@ -900,15 +903,22 @@ export class Hud {
     this.root.classList.toggle('is-death-sequence', dying);
   }
 
+  /**
+   * The view is the cabin, where the car's own instruments read the same values: the
+   * on-screen cluster stands down while it holds (`setDriving` draws nothing).
+   */
+  setCabinInstruments(inView: boolean): void {
+    this.cabinInstruments = inView;
+  }
+
   setDriving(readout: DrivingReadout | null): void {
-    if (readout === null) {
+    this.driving = readout !== null;
+    if (readout === null || this.cabinInstruments) {
       this.setVisible(this.drivingCluster, false);
-      this.setVisible(this.crosshairEl, true);
       this.insetClockMs = -1;
       return;
     }
     this.setVisible(this.drivingCluster, true);
-    this.setVisible(this.crosshairEl, false);
 
     // WHOSE CAR THIS IS, said by the instrument faces: black while the player drives,
     // the mode's own colour while the autopilot does. The ink follows the face — a
@@ -947,7 +957,7 @@ export class Hud {
       this.fuelDeg,
       this.fuelNeedle,
     );
-    this.fuelEl.classList.toggle('is-alarm', fuelFraction < FUEL_ALARM_FRACTION);
+    this.fuelEl.classList.toggle('is-alarm', fuelFraction < FUEL_RESERVE_FRACTION);
 
     const temperature = readout.temperature;
     this.setVisible(this.temperatureCluster, temperature !== null);
@@ -966,7 +976,7 @@ export class Hud {
 
     // Faults own the display until the car is healthy; radio never trails them.
     const warnings: string[] = [];
-    if (fuelFraction < FUEL_ALARM_FRACTION) {
+    if (fuelFraction < FUEL_RESERVE_FRACTION) {
       warnings.push(readout.fuelLitres <= 0 ? 'NO FUEL' : 'FUEL LOW');
     }
     if (readout.engineDestroyed) warnings.push('ENGINE DESTROYED');
@@ -1170,9 +1180,14 @@ export class Hud {
     return rounded;
   }
 
-  setPrompt(text: string | null): void {
+  /**
+   * On foot the crosshair always shows, dim until the aim names something. Driving it
+   * shows only on a cabin fitting E works (`cabinAim`), which no label names.
+   */
+  setPrompt(text: string | null, cabinAim: boolean): void {
     this.setVisible(this.promptEl, text !== null);
-    this.crosshairEl.classList.toggle('is-dim', text === null);
+    this.setVisible(this.crosshairEl, !this.driving || cabinAim);
+    this.crosshairEl.classList.toggle('is-dim', !cabinAim && text === null);
     if (text !== null) this.setText(this.promptEl, text);
   }
 

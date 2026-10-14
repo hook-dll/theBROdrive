@@ -224,7 +224,6 @@ function buildPart(b: MeshBuilder, v: PartVariant): void {
   switch (v.kind) {
     case 'engine': return buildEngine(b, v);
     case 'gearbox': return buildGearbox(b, v);
-    case 'fuel_tank': return buildTank(b, v);
     case 'radiator': return buildRadiator(b, v);
     case 'turbine': return buildTurbine(b, v);
     case 'air_filter': return buildAirFilter(b, v);
@@ -409,30 +408,6 @@ function buildGearbox(b: MeshBuilder, v: PartVariant): void {
       b.box(`${id}_fin_${i}`, w * 0.7, 0.015 * scale, 0.05 * scale, dark, [0, h * 0.5 + 0.008 * scale, z]);
     }
   }
-}
-
-
-
-// ----------------------------- fuel tanks -----------------------------
-
-function buildTank(b: MeshBuilder, v: PartVariant): void {
-  const steel = cond(0x6f747a, 0.85, 0.45);
-  const cap = flat(0xb03a2e, 0.5);
-  const id = v.id;
-  let w: number, h: number, d: number;
-  switch (v.id) {
-    case 'tank_40': w = 0.5; h = 0.24; d = 0.62; break;
-    case 'tank_lada_39': w = 0.62; h = 0.2; d = 0.5; break;
-    case 'tank_65': w = 0.6; h = 0.28; d = 0.78; break;
-    case 'tank_140': w = 1.05; h = 0.4; d = 0.55; break;
-    default: throw new Error(`unhandled tank variant: ${v.id}`);
-  }
-
-  b.box(`${id}_body`, w, h, d, steel, [0, 0, 0]);
-  b.cylinder(`${id}_neck`, 0.04, 0.04, 0.08, 10, steel, [w * 0.3, h * 0.5, 0]);
-  b.cylinder(`${id}_cap`, 0.045, 0.045, 0.03, 12, cap, [w * 0.3, h * 0.5 + 0.04, 0]);
-  b.box(`${id}_strap1`, w * 1.02, 0.03, 0.03, steel, [0, 0, d * 0.25]);
-  b.box(`${id}_strap2`, w * 1.02, 0.03, 0.03, steel, [0, 0, -d * 0.25]);
 }
 
 

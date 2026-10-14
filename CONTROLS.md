@@ -10,34 +10,46 @@ controls: `Escape`/`` ` `` pause, `+` fullscreen, `-` the cinema viewport.
 ## Cars: doors with E, getting in and out with F
 
 The kit cars (`src/carkit`) are worked part by part (`src/player/interaction.ts`,
-`aimKit` and the `kit*` methods beside it):
+`aimKit` and the `kit*` methods beside it). Picking is against the car's render mesh with
+the car lab's rule: clear glass is looked through unless the pane itself moves.
 
-- **E works the part in the crosshair**: the doors, the bonnet, the boot lid or tailgate,
-  the fuel flap, the windows and quarter vents, and the cabin fittings (glovebox,
-  ashtray, radio, wipers, light switch, hazard button, indicator stalk, the horn pad,
-  which only moves: the game has no horn sound). The prompt names it: `[E] open front left
-  door`, `[E] lower front left window`, `[E] switch wipers`. Picking is against the car's
-  render mesh with the car lab's rule: clear glass is looked through unless the pane
-  itself moves. On foot a cabin fitting is reached only through an opening (an open door
-  or a lowered window), never through glass. The light switch, hazards and stalk work the
-  car's own lamps. The handbrake lever and the pedals follow the driving controls and are
-  not offered. A sticker envelope in hand keeps E (it mirrors the sticker); any other
-  held item gives E up while a part is in the crosshair.
-- **F gets in only through an open front door.** The player stands at a front door (the
-  side door whose shut outline is nearest the eye is a front one, on the player's side),
-  that door is open, and the look goes into the cabin through it: the eye ray's first
-  opaque hit is the cabin (seat, dash, floor, the far door's card), not through glass,
-  and the ray crosses the door's plane inside the shut door's outline. Then the prompt
-  is `[F] get in <car>`; the seat is the driver's, whichever front door it was. With the
-  door shut F only refuses, and the prompt says to open the door. The boot and bonnet
-  storage grids keep F as before; the cabin carry limits still apply.
-- **Seated, the ray runs from the camera that is drawing** (chase, hood or cabin), so the
-  driver looks at a door, or at a fitting in the cabin view, and presses E. Doors, lids
-  and the flap are offered only below the exit speed (5 km/h); fittings any time.
-- **F gets out only through an open front door** (and below 5 km/h). With both shut it
-  refuses: `the doors are shut · look at a front door, [E] to open it`. The player steps
-  out beside the door used (the aimed open front door, else the driver's, else the
-  passenger's), on that door's side, ground-checked.
+- **On foot, E works only the panels**: the side doors, the bonnet, the boot lid or
+  tailgate and the fuel flap, named by the prompt (`[E] open front left door`). Windows,
+  vents and everything in the cabin are not reached from outside, even through an open
+  door. A sticker envelope in hand keeps E (it mirrors the sticker); any other held item
+  gives E up while a panel is in the crosshair.
+- **The bonnet and boot grids follow their lids.** Opening the bonnet shows its grid in the
+  bay, where the parts stand: the engine's big cell in the middle, the radiator in front,
+  the turbine and the air filter beside it. Opening the boot or tailgate shows the boot's
+  grid; shutting a lid hides it, and so does walking 3.2 m away. F on a cell takes or
+  fits as before. Wrecks and couriers, whose lids do not open, keep aim and F to open.
+- **Petrol goes in through the fuel flap.** With a petrol can in hand, aim at the flap:
+  shut, the prompt shows the level and says to open it; open, hold the left button to
+  pour (`[LMB] pour petrol — petrol 12.3/39.0 L`). Oil and water still pour into the
+  engine and radiator cells in the open bonnet. The tank is the car's own; it is not a part.
+- **F gets in by looking at a seat through an open side door** (front or rear, on the
+  player's side; the rear bench through a front door on a two-door car). The first opaque
+  thing the eye ray meets must be the seat, not seen through glass, and the ray must
+  cross the open door's outline. The prompt names it: `[F] sit in the driver's seat`,
+  `front passenger seat`, `rear seat`, and the player sits in that seat. With the door
+  shut F refuses and says to open it. The cabin carry limits still apply.
+- **Only the driver's seat drives.** From any other seat the car holds where it stands:
+  pedals, steering, gears, lights, indicators and the autopilot do nothing ("only the
+  driver can do that"). The cabin view is from that seat (the passenger's is the
+  driver's eye mirrored; the rear seats' sit over the bench).
+- **Seated, the ray runs from the camera that is drawing.** In the cabin view everything
+  within reach works (doors, lids, windows, switches, stalks, visors, the courtesy lamp,
+  the horn pad, which only moves: the game has no horn sound); in the chase and hood views
+  only the side doors do. Doors, lids and the flap are offered only below the exit speed
+  (5 km/h). No prompt names the part from the seat: the round crosshair, hidden while
+  driving, shows while it is on something E works. The light switch, hazards and stalk
+  work the car's own lamps; the wiper stalk runs the wipers slow, fast and off.
+- **F gets out through the open door on the seat's side** (a rear seat's rear door, or
+  the front door on a car without rear doors) below 5 km/h. With it shut F refuses and
+  names it (`the front right door is shut · look at it, [E] to open it`). The player steps
+  out beside that door, ground-checked.
+- **The cabin view hides the on-screen cluster**: the car's own instruments read speed,
+  revs, fuel, temperature, oil pressure, charge and vacuum, and its warning lamps light.
 
 Cars without a kit body keep the old rule: F at the car's body enters, and exits on the
 left. The touch overlay's E button is on-foot only, so from the seat parts are worked

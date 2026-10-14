@@ -1211,8 +1211,6 @@ function makeWorkingCar(
   const bonnet = createBonnetStorage(
     carId,
     def.engineId,
-    def.bodyClass,
-    def.tankLitres,
     0.1 + hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 9) * 0.85,
   );
   return {
@@ -1424,8 +1422,8 @@ export function layOutWreckField(poi: Poi, road: Road, keepOut?: WreckKeepOut): 
 /**
  * A half-buried shell still carries salvage.
  *
- * The bonnet keeps its five service cells, but not necessarily filled: an engine is
- * the likeliest find, the radiator, tank and air filter each take their own roll, and
+ * The bonnet keeps its four service cells, but not necessarily filled: an engine is
+ * the likeliest find, the radiator and air filter each take their own roll, and
  * the factory-optional turbocharger is the rarest. Engines are usually the Soviet units
  * a body of that class was built around, but an import a breaker pulled turns up
  * occasionally. Parts come out WORN — dust, rust, a clogged element — because the car
@@ -1440,7 +1438,7 @@ export function layOutWreckField(poi: Poi, road: Road, keepOut?: WreckKeepOut): 
  * what stops the world restocking it.
  */
 /** Chance each bonnet cell (in `BONNET_SLOT_KINDS` order) still holds its part. */
-const WRECK_BONNET_FILL: readonly number[] = [0.55, 0.15, 0.45, 0.4, 0.5];
+const WRECK_BONNET_FILL: readonly number[] = [0.55, 0.15, 0.45, 0.5];
 /** Of the wrecks that kept an engine, this share kept an import instead. */
 const WRECK_IMPORT_ENGINE_CHANCE = 0.18;
 /** Chance each of a wreck's sixteen boot cells holds a find. */

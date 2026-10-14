@@ -2,32 +2,34 @@ import type { Item, PartItem } from '../items/items';
 import {
   oilCapacity,
   variant,
-  type BodyClass,
   type EngineSpec,
   type PartInstance,
   type RadiatorSpec,
 } from '../parts/registry';
 
-/** Every car exposes the same five service positions, left to right. */
-export const BONNET_SLOT_KINDS = ['engine', 'turbine', 'radiator', 'fuel_tank', 'air_filter'] as const;
+/**
+ * Every car exposes the same four service positions, each a cell at its part's real
+ * place in the engine bay (`CarModelMeasure.bonnetCells`). The fuel tank is the body's
+ * own and is filled through the flap, so it has no cell.
+ */
+export const BONNET_SLOT_KINDS = ['engine', 'turbine', 'radiator', 'air_filter'] as const;
 export const BONNET_SLOT_COUNT = BONNET_SLOT_KINDS.length;
 export type BonnetPartKind = (typeof BONNET_SLOT_KINDS)[number];
-/** The air filter's cell, the one position added after the first four. */
-export const AIR_FILTER_CELL = 4;
+export const AIR_FILTER_CELL = 3;
 
 export function bonnetSlotKind(cell: number): BonnetPartKind | null {
   return BONNET_SLOT_KINDS[cell] ?? null;
 }
 
 /**
- * Which of the car's three reservoirs the container in this slot owns.
+ * Which of the car's two bonnet reservoirs the container in this slot owns.
  *
  * One table rather than a `kind === 'radiator'` test at each call site: the level
  * readout, the pour, and the transfer that keeps a removed container's fluid with it
  * (see the `car_bonnet` delta in game/state.ts) must all agree about which slot
  * holds what, and a turbine slot holding nothing is part of that agreement.
  */
-export type BonnetFluidChannel = 'oil' | 'water' | 'fuel';
+export type BonnetFluidChannel = 'oil' | 'water';
 
 export function bonnetSlotFluid(cell: number): BonnetFluidChannel | null {
   switch (bonnetSlotKind(cell)) {
@@ -35,8 +37,6 @@ export function bonnetSlotFluid(cell: number): BonnetFluidChannel | null {
       return 'oil';
     case 'radiator':
       return 'water';
-    case 'fuel_tank':
-      return 'fuel';
     default:
       return null;
   }
@@ -45,9 +45,9 @@ export function bonnetSlotFluid(cell: number): BonnetFluidChannel | null {
 /**
  * What a container part holds and how much of it, whether or not it is fitted.
  *
- * A detached engine, radiator or tank keeps its fluid in `PartInstance.litres`
+ * A detached engine or radiator keeps its fluid in `PartInstance.litres`
  * (see parts/registry.ts), so a part lying on the workshop floor can be filled
- * before it is bolted in. This resolves the same three capacities the fitted
+ * before it is bolted in. This resolves the same two capacities the fitted
  * readouts use, from the part alone: the bonnet is not consulted, because there
  * may not be one.
  */
@@ -63,8 +63,6 @@ export function partContainer(part: PartInstance): PartContainer | null {
       return spec.engine ? { channel: 'oil', capacity: oilCapacity(spec.engine) } : null;
     case 'radiator':
       return spec.radiator ? { channel: 'water', capacity: spec.radiator.capacity } : null;
-    case 'fuel_tank':
-      return spec.capacity ? { channel: 'fuel', capacity: spec.capacity } : null;
     default:
       return null;
   }
@@ -95,47 +93,32 @@ export function factoryAirFilter(carId: string, clog = 0): PartItem {
 }
 
 /**
- * The tank a body of this class and capacity leaves the factory with.
+ * The parts a roadworthy car of this model leaves the factory with, by bonnet cell.
  *
- * Shared by `stockBonnetVariants` and the fresh-car build below so the two cannot
- * disagree: a car's MASS is measured against this set, and a disagreement would
- * make every car start life heavier or lighter than its own kerb weight.
+ * Shared with the fresh-car build below so the two cannot disagree: a car's MASS is
+ * measured against this set, and a disagreement would make every car start life
+ * heavier or lighter than its own kerb weight.
  */
-function stockTankVariant(bodyClass: BodyClass, tankCapacity: number): string {
-  if (tankCapacity <= 45) return 'tank_40';
-  if (tankCapacity <= 65) return 'tank_65';
-  if (bodyClass === 'truck' || bodyClass === 'bus') return 'tank_140';
-  return 'tank_65';
-}
-
-/** The parts a roadworthy car of this model leaves the factory with, by bonnet cell. */
-export function stockBonnetVariants(
-  engineVariantId: string,
-  bodyClass: BodyClass,
-  tankCapacity: number,
-): readonly (string | null)[] {
-  return [engineVariantId, null, 'radiator', stockTankVariant(bodyClass, tankCapacity), 'air_filter'];
+export function stockBonnetVariants(engineVariantId: string): readonly (string | null)[] {
+  return [engineVariantId, null, 'radiator', 'air_filter'];
 }
 
 /**
  * Factory state for a roadworthy car. The turbocharger position starts empty: forced
- * induction is something the player finds and fits, while the engine, both
- * reservoirs and the air filter are required.
+ * induction is something the player finds and fits, while the engine, the radiator
+ * and the air filter are required.
  */
 export function createBonnetStorage(
   carId: string,
   engineVariantId: string,
-  bodyClass: BodyClass,
-  tankCapacity: number,
   /** How worn the fitted air filter already is: a roadside find has been driven. */
   airFilterClog = 0,
 ): (Item | null)[] {
-  const stock = stockBonnetVariants(engineVariantId, bodyClass, tankCapacity);
+  const stock = stockBonnetVariants(engineVariantId);
   return [
     servicePart(carId, 'engine', stock[0]!),
     null,
     servicePart(carId, 'radiator', stock[2]!),
-    servicePart(carId, 'fuel-tank', stock[3]!),
     factoryAirFilter(carId, airFilterClog),
   ];
 }
@@ -150,16 +133,14 @@ export function normalizeBonnetStorage(cells: readonly (Item | null)[]): (Item |
   return normalized;
 }
 
-
 /**
- * Pure service gate shared by simulation and behavioral checks: an engine, a tank
- * with fuel in it, and an air filter. A clogged filter still runs (it only costs
+ * Pure service gate shared by simulation and behavioral checks: an engine, fuel in
+ * the body's tank, and an air filter. A clogged filter still runs (it only costs
  * power); a missing one does not start.
  */
 export function bonnetCanRun(cells: readonly (Item | null)[], fuelLitres: number): boolean {
   return (
     bonnetPart(cells, 0) !== null &&
-    bonnetPart(cells, 3) !== null &&
     bonnetPart(cells, AIR_FILTER_CELL) !== null &&
     fuelLitres > 0
   );
