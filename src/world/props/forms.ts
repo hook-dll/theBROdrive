@@ -15,6 +15,7 @@ import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferG
 import { hash01 } from '../../core/rng';
 import { SurfaceType } from '../../core/surfaces';
 import { DESERT_TILE_FADE_FULL } from '../terrainmesh';
+import type { BatchLod } from './instancebatch';
 
 import {
   DELINEATOR_EMBED,
@@ -119,6 +120,8 @@ export interface PropForm {
   maxScale: number;
   /** Relative selection weight inside its surface's form list. 1 is an ordinary member. */
   readonly weight: number;
+  /** Range rules for the batch pages the scatter draws this form in (instancebatch.ts). */
+  readonly lod?: BatchLod;
   /**
    * Per-instance shape variation amplitudes, absent on everything that is not a plant.
    * A boulder is a boulder; a tree is never the same tree twice.
@@ -625,11 +628,14 @@ function shade(geometry: THREE.BufferGeometry, low: number, high: number, y0: nu
  * ending in a ragged clump of sage-green leaves, pale on top and dark beneath. The
  * clumps are jittered hard so their outline is leafy, never a pebble's smooth curve.
  */
-function buildBush(seed: number, light = false): THREE.BufferGeometry {
+function buildBush(seed: number, profile: 'full' | 'light' | 'far' = 'full'): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
   // The light build profile's bush (Very Low and Low) is the same fan with fewer, coarser
   // clumps: at 360 lines a clump is a handful of pixels, and 946 triangles per bush was
-  // the largest single share of a mini-PC's frame (render/retro.ts).
+  // the largest single share of a mini-PC's frame (render/retro.ts). The far bush
+  // (`COVER_BUSH_FAR_M`) keeps the full fan's clumps where they are, each a plain
+  // icosahedron, and drops the twigs: two or three centimetres thick, under a pixel there.
+  const light = profile === 'light';
   const twigs = light ? 7 : 11;
   for (let i = 0; i < twigs; i++) {
     const len = 0.3 + hash01(seed, i, 1) * 0.32;
@@ -640,14 +646,14 @@ function buildBush(seed: number, light = false): THREE.BufferGeometry {
     twig.translate(0, len / 2, 0);
     twig.rotateZ(tilt);
     twig.rotateY(az);
-    parts.push(paint(twig, 0x4a3524));
+    if (profile !== 'far') parts.push(paint(twig, 0x4a3524));
     // The clump sits on the twig's tip: rotateZ tips +Y towards -X, rotateY turns it.
     const tipOut = Math.sin(tilt) * len;
     const tipX = -tipOut * Math.cos(az);
     const tipZ = tipOut * Math.sin(az);
     const tipY = Math.cos(tilt) * len;
     const r = 0.08 + hash01(seed, i, 4) * 0.06;
-    const clump = weldedIcosphere(light ? 0 : 1);
+    const clump = weldedIcosphere(profile === 'full' ? 1 : 0);
     const pos = clump.getAttribute('position') as THREE.BufferAttribute;
     for (let v = 0; v < pos.count; v++) {
       const k = 0.6 + hash01(seed, i, v + 32) * 0.75;
@@ -684,19 +690,38 @@ function buildRosette(seed: number): THREE.BufferGeometry {
   return mergeGeometries(parts);
 }
 
+/**
+ * The full bush gives way to the far one (`buildBush`) this far from the camera: a
+ * clump is about four pixels across there on a 1080-line display, where its 80 faces
+ * and a plain icosahedron's 20 draw the same, and the 946-triangle bush was most of the
+ * frame's triangles at Standard (1.4 of 2.5 million, measured at km 30).
+ */
+const COVER_BUSH_FAR_M = 60;
+
 let _groundCoverForms: PropForm[] | null = null;
-/** Ground-cover forms for the roadside scatter's decoration stream. */
+/**
+ * Ground-cover forms for the roadside scatter's decoration stream. Their batch pages are
+ * kept per patch of ground and not drawn past the cover's fade (`COVER_FADE_GONE_M`):
+ * the cover is built 800 m along the road either side and drawn to 290 m, and before
+ * that the vertex shader shrank most of it to nothing every frame.
+ */
 export function groundCoverForms(): PropForm[] {
   if (!_groundCoverForms) {
+    const fade: BatchLod = { hideBeyond: COVER_FADE_GONE_M };
     const tuft = (id: string, geometry: THREE.BufferGeometry, weight: number): PropForm => ({
       id, geometry, material: matCover, baseRadius: 0.3, height: 0.5, collider: 'none', sink: 0.05,
-      rotate3d: false, minScale: 0.7, maxScale: 1.5, weight,
+      rotate3d: false, minScale: 0.7, maxScale: 1.5, weight, lod: fade,
     });
+    // The light build's bush is already the cheap one.
+    const light = lightGeometryActive();
+    const bushLod: BatchLod = light
+      ? fade
+      : { hideBeyond: COVER_FADE_GONE_M, far: { geometry: buildBush(0x7f03, 'far'), distance: COVER_BUSH_FAR_M } };
     _groundCoverForms = [
       tuft('tuft-straw', buildGrassTuft(0x7f01, 11, 0xa88d58, 0xd6c28d), 1),
       tuft('tuft-grey', buildGrassTuft(0x7f02, 8, 0x8f8467, 0xbdb392), 0.7),
-      { id: 'bush', geometry: buildBush(0x7f03, lightGeometryActive()), material: matCover, baseRadius: 0.5, height: 0.6, collider: 'none', sink: 0.04, rotate3d: false, minScale: 0.7, maxScale: 1.3, weight: 0.45 },
-      { id: 'rosette', geometry: buildRosette(0x7f04), material: matCover, baseRadius: 0.4, height: 0.5, collider: 'none', sink: 0.02, rotate3d: false, minScale: 0.7, maxScale: 1.3, weight: 0.3 },
+      { id: 'bush', geometry: buildBush(0x7f03, light ? 'light' : 'full'), material: matCover, baseRadius: 0.5, height: 0.6, collider: 'none', sink: 0.04, rotate3d: false, minScale: 0.7, maxScale: 1.3, weight: 0.45, lod: bushLod },
+      { id: 'rosette', geometry: buildRosette(0x7f04), material: matCover, baseRadius: 0.4, height: 0.5, collider: 'none', sink: 0.02, rotate3d: false, minScale: 0.7, maxScale: 1.3, weight: 0.3, lod: fade },
     ];
   }
   return _groundCoverForms;

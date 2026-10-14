@@ -619,6 +619,11 @@ export class ChunkStreamer {
     this.batches.rebase();
   }
 
+  /** Range of the batch pages that have one, for the camera at (`x`, `z`) in the render frame. */
+  syncLod(x: number, z: number): void {
+    this.batches.syncLod(x, z);
+  }
+
   private context(chunk: BuiltChunk): ChunkContext {
     return {
       chunkIndex: chunk.index,

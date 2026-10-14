@@ -4,6 +4,19 @@
 
 ### Added
 
+- THE GROUND COVER HAS A RANGE (`world/props/instancebatch.ts` `BatchLod`, `syncLod`;
+  `world/props/forms.ts` `COVER_BUSH_FAR_M`). The cover's batch pages are kept per
+  160 m patch of ground, and once a frame each page takes its range from the camera:
+  past the cover's 290 m fade it is not drawn at all (the cover is built 800 m along the
+  road either side, and the vertex shader had been shrinking most of it to nothing every
+  frame), and past 60 m the 946-triangle bush draws a 220-triangle one, the same clumps
+  as plain icosahedra without the twigs. Same attributes, same program: none linked
+  over a kilometre of driving. Measured at Standard, 1920x1080, LOD off against on
+  over the same frozen frame: 2.28 → 1.35 million triangles and 0.9 ms of GPU at km 30,
+  2.19 → 1.20 million and 1.0 ms on a crest at km 55; the frames differ in 232 of 1.44
+  million pixels. Rocks, cacti and the trees stay as they were: 36-650 triangles each,
+  and the dragon tree's 3808 come to about 80 thousand in a frame.
+
 - MID-RANGE TRAFFIC IS A FEW DRAWS PER CAR (`render/farcars.ts` `MID_CAR_ENTER_M`,
   `render/carmodel.ts` `buildMidModel`, `vehicle/vehicle.ts` `drawMid`). Between 55 m
   (back near inside 50 m) and the far swap a traffic car draws its paint as one merged

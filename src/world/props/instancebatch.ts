@@ -16,7 +16,22 @@ import * as THREE from 'three';
  * Culling: a page's bounding sphere grows as slots are allocated, from the geometry
  * sphere transformed by each slot's matrix. It never shrinks while the page lives, so
  * it stays conservative.
+ *
+ * Range (`BatchKind.lod`): a kind with a `lod` keeps its pages per world cell
+ * (`LOD_CELL_M`) as well as per band, so a page is a patch of ground. `syncLod` then
+ * sets each such page by how far the camera is from the nearest of its instances: the
+ * kind's own geometry, its `far` geometry, or not drawn at all. Only the page's geometry
+ * and visibility change, never its slots, so a `BatchSlot` held by a caller stays valid.
  */
+
+/**
+ * Side of the world cell an LOD kind's pages are kept per, metres. Smaller cells follow
+ * the camera more closely and cost more draw calls; at 160 m the ground cover inside its
+ * 290 m fade is about twenty cells per form.
+ */
+const LOD_CELL_M = 160;
+/** A page switches back to the nearer state only this far inside the line it crossed. */
+const LOD_HYSTERESIS_M = 8;
 
 /** Consecutive chunks that share one set of pages. */
 export const BATCH_BAND_CHUNKS = 4;
@@ -30,6 +45,21 @@ export interface BatchKind {
   readonly castShadow?: boolean;
   readonly receiveShadow?: boolean;
   readonly renderOrder?: number;
+  readonly lod?: BatchLod;
+}
+
+/**
+ * Range rules for a kind. Distances run across the ground (x, z) from the camera to the
+ * page's nearest instance, the plane the ground cover's own fade is measured in.
+ */
+export interface BatchLod {
+  /**
+   * Drawn instead of the kind's geometry past `distance`. It must carry the same
+   * attributes, so the page keeps its shader program.
+   */
+  readonly far?: { readonly geometry: THREE.BufferGeometry; readonly distance: number };
+  /** Past this every instance has faded to nothing in the vertex shader: the page is not drawn. */
+  readonly hideBeyond: number;
 }
 
 /** The chunk a slot is allocated for. `ChunkContext` satisfies this. */
@@ -68,6 +98,14 @@ interface Page {
   /** Slots ever handed out. The page draws `next` instances. */
   next: number;
   live: number;
+  /** For an LOD kind: what `syncLod` last set. */
+  range: PageRange;
+}
+
+const enum PageRange {
+  Near,
+  Far,
+  Hidden,
 }
 
 const ZERO_MATRIX = new THREE.Matrix4().makeScale(0, 0, 0);
@@ -91,6 +129,8 @@ export class InstanceBatches {
   readonly root = new THREE.Group();
   private readonly families = new Map<string, Family>();
   private readonly pageOf = new Map<THREE.InstancedMesh, Page>();
+  /** The pages of LOD kinds, the only ones `syncLod` walks. */
+  private readonly lodPages: Page[] = [];
 
   constructor(private readonly origin: BatchOrigin) {}
 
@@ -100,7 +140,12 @@ export class InstanceBatches {
    */
   allocate(chunk: BatchChunk, kind: BatchKind, local: THREE.Matrix4): BatchSlot {
     const band = Math.floor(chunk.chunkIndex / BATCH_BAND_CHUNKS);
-    const key = `${identityOf(kind.geometry)}:${identityOf(kind.material)}:${band}`;
+    let key = `${identityOf(kind.geometry)}:${identityOf(kind.material)}:${band}`;
+    if (kind.lod) {
+      const cellX = Math.floor((local.elements[12] + chunk.originX) / LOD_CELL_M);
+      const cellZ = Math.floor((local.elements[14] + chunk.originZ) / LOD_CELL_M);
+      key += `:${cellX}:${cellZ}`;
+    }
     let family = this.families.get(key);
     if (!family) {
       family = { key, kind, pages: [] };
@@ -149,6 +194,31 @@ export class InstanceBatches {
     }
   }
 
+  /**
+   * Sets every LOD page's geometry and visibility for a camera at (`x`, `z`), in the
+   * render frame. Once per rendered frame, after the camera moved; it walks only the
+   * LOD pages (a few dozen) and touches a page only when its range changes.
+   */
+  syncLod(x: number, z: number): void {
+    for (const page of this.lodPages) {
+      const lod = page.family.kind.lod!;
+      const sphere = page.sphere;
+      // Ground distance to the nearest point the page's instances can occupy.
+      const d = sphere.isEmpty()
+        ? Infinity
+        : Math.hypot(sphere.center.x + page.mesh.position.x - x, sphere.center.z + page.mesh.position.z - z) - sphere.radius;
+      const was = page.range;
+      let range: PageRange;
+      if (d > lod.hideBeyond - (was === PageRange.Hidden ? LOD_HYSTERESIS_M : 0)) range = PageRange.Hidden;
+      else if (lod.far && d > lod.far.distance - (was === PageRange.Near ? 0 : LOD_HYSTERESIS_M)) range = PageRange.Far;
+      else range = PageRange.Near;
+      if (range === was) continue;
+      page.range = range;
+      page.mesh.visible = range !== PageRange.Hidden;
+      if (range !== PageRange.Hidden) page.mesh.geometry = range === PageRange.Far ? lod.far!.geometry : page.family.kind.geometry;
+    }
+  }
+
   /** Removes and frees every page. */
   dispose(): void {
     for (const family of this.families.values()) {
@@ -179,11 +249,13 @@ export class InstanceBatches {
       free: [],
       next: 0,
       live: 0,
+      range: PageRange.Near,
     };
     mesh.position.set(0, 0, 0);
     mesh.updateMatrix();
     family.pages.push(page);
     this.pageOf.set(mesh, page);
+    if (kind.lod) this.lodPages.push(page);
     this.root.add(mesh);
     return page;
   }
@@ -194,6 +266,7 @@ export class InstanceBatches {
     if (at >= 0) family.pages.splice(at, 1);
     if (family.pages.length === 0) this.families.delete(family.key);
     this.pageOf.delete(page.mesh);
+    if (family.kind.lod) this.lodPages.splice(this.lodPages.indexOf(page), 1);
     this.root.remove(page.mesh);
     page.mesh.dispose();
   }

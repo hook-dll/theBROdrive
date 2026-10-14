@@ -553,7 +553,7 @@ export class ScatterProvider implements ChunkProvider {
       list.push(pl);
     }
     for (const [form, list] of byForm) {
-      const kind = { geometry: form.geometry, material: form.material };
+      const kind = { geometry: form.geometry, material: form.material, lod: form.lod };
       for (let i = 0; i < list.length; i++) {
         const pl = list[i]!;
         _dummy.position.set(pl.x - ox, pl.y, pl.z - oz);

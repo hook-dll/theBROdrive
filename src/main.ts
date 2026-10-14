@@ -2215,6 +2215,8 @@ async function boot(): Promise<void> {
     // its own, so it needs no interpolation and is placed after the cars moved.
     carTowField.syncVisuals();
     debris.syncVisuals();
+    // The camera has moved for this frame: the ground cover's pages take their range.
+    streamer.syncLod(renderer.camera.position.x, renderer.camera.position.z);
     frameProfiler?.end('vehicles');
 
     frameProfiler?.begin('effects');
