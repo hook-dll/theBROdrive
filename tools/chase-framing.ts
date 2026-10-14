@@ -151,7 +151,7 @@ const target: CameraTarget = {
   steering: 0,
   surfaceRoughness: 0,
   wheelContact: 0,
-  hoodOffset: [0, 0, 0],
+  cabinOffset: [0, 0, 0],
 };
 let carYaw = 0;
 

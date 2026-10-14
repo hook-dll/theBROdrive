@@ -27,7 +27,7 @@ export type SampleName =
   | 'flock-1' | 'flock-2'
   | 'gravel-roll' | 'skid'
   | 'crash-1' | 'crash-2' | 'crash-3'
-  | 'door-open' | 'door-close'
+  | 'door-open' | 'door-close' | 'bonnet-open' | 'bonnet-shut' | 'boot-open' | 'boot-shut'
   | 'step-gravel' | 'step-soft' | 'step-hard'
   | 'rifle' | 'shotgun' | 'bolt' | 'shutter'
   | 'handbrake-on' | 'handbrake-off';

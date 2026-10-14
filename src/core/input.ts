@@ -171,7 +171,7 @@ export const BINDABLE_ACTIONS: readonly {
   { id: 'indicatorLeft', label: 'Left blinker', defaultKeys: ['Comma'] },
   { id: 'indicatorRight', label: 'Right blinker', defaultKeys: ['Period'] },
   { id: 'mouseSteer', label: 'Precise steering', defaultKeys: ['KeyM'] },
-  { id: 'camera', label: 'Cycle camera: chase / hood / cabin', defaultKeys: ['KeyC'] },
+  { id: 'camera', label: 'Switch camera: chase / cabin', defaultKeys: ['KeyC'] },
   { id: 'recenterCamera', label: 'Recenter camera', defaultKeys: ['KeyV'] },
   // The cabin-camera editor: O steps the axis being moved (X, Y, Z, off) and WASD/arrows
   // move the eye instead of driving; J saves the eye for this model.

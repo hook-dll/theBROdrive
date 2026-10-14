@@ -42,8 +42,12 @@ const SHUTTER_GAIN = 2.2;
 const GUM_BLOW_GAIN = 0.11;
 
 export type FoleyEvent =
-  | 'enter-car'
-  | 'exit-car'
+  | 'door-open'
+  | 'door-close'
+  | 'bonnet-open'
+  | 'bonnet-shut'
+  | 'boot-open'
+  | 'boot-shut'
   | 'pickup'
   | 'mount'
   | 'detach'
@@ -269,15 +273,14 @@ export class Foley {
 
   event(event: FoleyEvent): void {
     switch (event) {
-      case 'enter-car':
-      case 'exit-car':
-        // Getting in is a door pulled shut; getting out, the latch and the door swung
-        // open (it is shut again behind you off-screen).
-        playOnce(this.mixer, this.mixer.samples, event === 'enter-car' ? 'door-close' : 'door-open', this.out, {
-          gain: DOOR_GAIN,
-          spread: 0.04,
-          delay: event === 'enter-car' ? 0.25 : 0,
-        });
+      // A kit car's panels: the latch as one swings open, the slam as it lands shut.
+      case 'door-open':
+      case 'door-close':
+      case 'bonnet-open':
+      case 'bonnet-shut':
+      case 'boot-open':
+      case 'boot-shut':
+        playOnce(this.mixer, this.mixer.samples, event, this.out, { gain: DOOR_GAIN, spread: 0.04 });
         break;
       case 'pickup':
         this.mixer.burst(this.out, { gain: 0.18, frequency: 700, q: 1.5, decay: 0.07 });

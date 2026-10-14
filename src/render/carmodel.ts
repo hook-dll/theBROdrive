@@ -1222,8 +1222,8 @@ function applyModelYaw(scene: THREE.Group, yaw: number): void {
 
 
 /**
- * How far the hood camera stands above the measured bonnet skin, metres. Enough to
- * clear the panel it is mounted on without floating off it.
+ * How far the bonnet mount (`hoodPoint`, the cabin eye of a body without a seat)
+ * stands above the measured bonnet skin, metres.
  */
 const HOOD_CAMERA_CLEARANCE_M = 0.1;
 /** Scratch for the bonnet sweep; measuring a body must not allocate per vertex. */

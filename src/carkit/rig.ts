@@ -404,6 +404,11 @@ export class KitRig {
     return this.channels.get(name)?.target ?? 0;
   }
 
+  /** Where a channel stands now, on its way to `get`'s target. */
+  position(name: string): number {
+    return this.channels.get(name)?.value ?? 0;
+  }
+
   set(name: string, value: number, immediate = false): void {
     const c = this.channel(name);
     c.target = value;

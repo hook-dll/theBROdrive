@@ -21,6 +21,7 @@ import {
   MOUSE_SENSITIVITY_MAX,
   MOUSE_SENSITIVITY_MIN,
   FRAME_RATE_LIMITS,
+  MIRROR_FRAME_RATES,
   RETRO_LINE_CHOICES,
   TIME_OF_DAY_PRESETS,
 } from '../game/settings';
@@ -1625,6 +1626,32 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           },
         },
       ]),
+      // The car's mirrors are each a second render of the scene, so how often they
+      // redraw is its own choice, beside the frame rate and independent of it.
+      segmented('Mirrors', [
+        ...MIRROR_FRAME_RATES.map((rate) => ({
+          label: String(rate),
+          icon: 'gfx2',
+          hint:
+            `Each car mirror redraws ${rate} times a second. Each redraw is the scene drawn ` +
+            'again, small, so fewer is cheaper; the frame rate is not affected.',
+          active: () => settings.mirrorFrameRate === rate,
+          pick: () => {
+            settings.mirrorFrameRate = rate;
+            changed();
+          },
+        })),
+        {
+          label: 'Max',
+          icon: 'gfx1',
+          hint: 'Every mirror redraws every frame: three more scene renders per frame.',
+          active: () => settings.mirrorFrameRate === null,
+          pick: () => {
+            settings.mirrorFrameRate = null;
+            changed();
+          },
+        },
+      ]),
       segmented('Antialiasing', [
         {
           label: 'On',
@@ -2378,6 +2405,7 @@ export class MainMenu {
         retroLines: base.retroLines,
         msaa: base.msaa,
         frameRateLimit: base.frameRateLimit,
+        mirrorFrameRate: base.mirrorFrameRate,
         fieldOfView: base.fieldOfView,
         preciseSteering: base.preciseSteering,
         cameraShake: base.cameraShake,
@@ -2409,6 +2437,7 @@ export class MainMenu {
           retroLines: settings.retroLines,
           msaa: settings.msaa,
           frameRateLimit: settings.frameRateLimit,
+          mirrorFrameRate: settings.mirrorFrameRate,
           fieldOfView: settings.fieldOfView,
           preciseSteering: settings.preciseSteering,
           cameraShake: settings.cameraShake,

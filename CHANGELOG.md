@@ -4,6 +4,24 @@
 
 ### Added
 
+- KIT PANELS SOUND THEMSELVES (`player/interaction.ts` `KIT_PANEL_SOUND`,
+  `listenForShut`; `audio/foley.ts`; new `bonnet-open`, `bonnet-shut`, `boot-open`,
+  `boot-shut` recordings, CC0 from Freesound, in `tools/sound/manifest.json`). Any side
+  door sounds its latch as it opens and its slam as it lands shut (`KitRig.position`, at
+  2% of its travel); the bonnet and the boot or tailgate have their own pair. Getting in
+  and out no longer plays a door: it is the doors themselves now. Checked on a 2107 by
+  E on foot: door shut → `door-close` as it landed, open → `door-open`, bonnet open →
+  `bonnet-open`, shut → `bonnet-shut`; reopening a door before it lands drops its slam.
+- MIRROR FRAME RATE (Settings › Quality › Advanced › Mirrors: 10, 15, 20, 30, 60, Max;
+  `Settings.mirrorFrameRate`, default 20). How many times a second each live mirror is
+  redrawn, independent of the frame rate cap; Max is every mirror every frame. The
+  renders are spread over frames by a clock (`CarMirrors.draw`). Measured in the cabin
+  view: 10 → 10.0, 15 → 15.0, 20 → 20.0, 30 → 30.0, 60 → 59 redraws a second per mirror.
+- THE CABIN VIEW FACES THE ROAD AGAIN 3 S AFTER THE MOUSE STOPS (`render/cameras.ts`
+  `CABIN_RECENTER_IDLE_SECONDS`): the head eases back to straight ahead and level at
+  the chase view's automatic rate; any look input stops it. Checked: turned 0.9 rad,
+  held there for 2 s, back to 0.18 at 3.5 s and 0 by 6 s.
+
 - KIT MIRRORS WORK (`render/carmirrors.ts`, `core/renderer.ts`, `carkit/interior.ts`,
   `carkit/exterior.ts`, `game/settings.ts` `mirrorScale`). In the cabin view of the car the
   player sits in, the interior mirror and both door mirrors show the world behind: each is
@@ -391,6 +409,17 @@
     leaving the pad.
 
 ### Changed
+
+- THE BONNET CAMERA IS GONE (`render/cameras.ts`): C switches chase ↔ cabin. `CameraMode`
+  has no `hood`, `CameraTarget` no `hoodOffset`; the bonnet mount `hoodPoint` stays as
+  the cabin eye of a body without a seat. The engine's swapped voicing
+  (`audio/vehicleaudio.ts` `engineHeardAs`) was tuned with that camera and is unchanged.
+- KIT SEATS ARE NOT WORKED (`player/interaction.ts` `KIT_SEAT_PART`): no sliding,
+  reclining or headrest in the game; a seat is only where F sits the player. The car lab
+  still moves them.
+- THE FUEL FLAP SHOWS THE TANK WHEN OPEN: aimed at the open flap, `petrol 12.3/39.0 L`,
+  and with a can in hand the pour line; shut, nothing, and it takes nothing. The open
+  flap is a target without a can too.
 
 - KIT CARS NAME NOTHING (`player/interaction.ts`, `ui/hud.ts`). No prompt for a kit
   car's doors, lids, flap or seats, on foot or seated, and no refusal text on getting out:

@@ -421,6 +421,22 @@ const KIT_SHELL_PART = /^(door_|bonnet$|boot$|tailgate$|flap$)/;
 
 /** A front seat's parts, by the channel's position; the rear bench is `KIT_BENCH_NODE`. */
 const KIT_FRONT_SEAT = /^(?:seat|seatback|headrest)_(f[lr])$/;
+/**
+ * A seat's own controls (its runners, back and headrest): sat in, never worked. They
+ * stay controls in the car lab; in the game the seat is only where F puts the player.
+ */
+const KIT_SEAT_PART = /^(?:seat|seatback|headrest)_/;
+
+/** A panel's sounds by channel: [channel, latch as it opens, slam as it lands shut]. */
+const KIT_PANEL_SOUND: readonly (readonly [RegExp, FoleyEvent, FoleyEvent])[] = [
+  [/^door_/, 'door-open', 'door-close'],
+  [/^bonnet$/, 'bonnet-open', 'bonnet-shut'],
+  [/^(boot|tailgate)$/, 'boot-open', 'boot-shut'],
+];
+/** A shutting panel is heard landing once its pose is this close to closed (0..1). */
+const PANEL_SHUT_AT = 0.02;
+/** Longest a panel takes to swing shut from wide open, with margin, seconds. */
+const PANEL_SHUT_WAIT_S = 3;
 
 function kitAction(control: KitControl): NonNullable<KitControl['action']> {
   return control.action ?? { type: 'toggle', channel: control.id };
@@ -564,6 +580,8 @@ export class Interaction {
   private kitPress: { rig: KitRig; control: KitControl; left: number } | null = null;
   /** Last tick's aim named a kit part, so E belongs to it; see `claimsUseHeld`. */
   private kitClaimsE = false;
+  /** Panels set swinging shut, slammed by `listenForShut` as each lands. */
+  private readonly shutting: { rig: KitRig; channel: string; sound: FoleyEvent; left: number }[] = [];
   /** This tick's car-to-car bar action, or null; see `towAction`. */
   private towActionValue: TowAction | null = null;
   /** Reused receiver for the two cars nearest the player, and their eyes. */
@@ -647,7 +665,7 @@ export class Interaction {
     dirY: number,
     dirZ: number,
     roadS: number,
-    /** The drawing camera is the cabin view (not the chase or the hood). */
+    /** The drawing camera is the cabin view (not the chase). */
     cabinView: boolean,
   ): InteractionResult {
     const interactPressed = input.interact && !this.prevInteract;
@@ -665,6 +683,7 @@ export class Interaction {
     const useHeldPressed = input.useHeld && !this.prevUseHeld;
     this.prevUseHeld = input.useHeld;
     this.kitClaimsE = false;
+    this.listenForShut(dt);
     if (this.kitPress) {
       this.kitPress.left -= dt;
       if (this.kitPress.left <= 0) {
@@ -679,7 +698,7 @@ export class Interaction {
       this.openStorage = null;
       // A kit car is worked from the seat too: the ray runs from whichever camera is
       // drawing, so the occupant looks at a door or a fitting and E works it; from the
-      // chase or the hood view only the side doors answer. Nothing is said: the crosshair
+      // chase view only the side doors answer. Nothing is said: the crosshair
       // appears on it (`actionable`), and a refused exit is the door that stays shut.
       const active = this.getVehicle();
       const rig = active?.vehicle.kit ?? null;
@@ -1358,9 +1377,9 @@ export class Interaction {
         kitDoor = this.kitEntryDoor(rig, vehicle, eyeX, eyeY, eyeZ);
       }
 
-      // With a can in hand the fuel flap is a target of its own, and it wins over the
-      // body it is cut into: the can is aimed at the filler, not at the car.
-      if (rig && this.inventory.held?.type === 'fluid_can') {
+      // The fuel flap is a target of its own while it is open (its level is read there)
+      // and, shut, while a can is in hand; it wins over the body it is cut into.
+      if (rig && (this.inventory.held?.type === 'fluid_can' || rig.get('flap') > LID_OPEN)) {
         const distance = this.fillerDistance(vehicle, eyeX, eyeY, eyeZ, dx, dy, dz);
         const current = target as Target;
         const body = current.kind === 'none' || current.kind === 'car-entry' || current.kind === 'car-body';
@@ -1599,6 +1618,7 @@ export class Interaction {
       if (
         picked
         && !KIT_VEHICLE_CHANNELS[kitAction(picked.control).channel]
+        && !KIT_SEAT_PART.test(picked.control.id)
         && (seated || KIT_SHELL_PART.test(picked.control.id))
       ) {
         aim.part = picked;
@@ -1629,7 +1649,7 @@ export class Interaction {
 
   /**
    * The part the seated player aims at through the drawing camera, or null. Away from
-   * the cabin view (the chase, the hood) only the side doors are offered, and the
+   * the cabin view (the chase) only the side doors are offered, and the
    * shell's panels only below the exit speed: the chase camera looks at the car all the
    * time, and nobody opens a door at speed. So at speed nothing can be offered outside
    * the cabin view or with the camera outside the car's measured box, and the ray is not
@@ -1778,7 +1798,8 @@ export class Interaction {
    * Works a kit part as a click does in the car lab, except the lamp switches: those
    * channels follow the car's own lamps every frame, so the switch works the lamps (the
    * beam, the hazards, the indicators) and the rig shows it. A momentary part (the
-   * horn) is held down for `KIT_PRESS_SECONDS`.
+   * horn) is held down for `KIT_PRESS_SECONDS`. A door, the bonnet or the boot sounds
+   * its latch as it opens; its slam waits until it lands shut (`listenForShut`).
    */
   private workKitPart(vehicle: Vehicle, rig: KitRig, control: KitControl): void {
     const action = kitAction(control);
@@ -1796,6 +1817,35 @@ export class Interaction {
       this.kitPress = { rig, control, left: KIT_PRESS_SECONDS };
     } else {
       rig.activate(control);
+      const panel = KIT_PANEL_SOUND.find(([pattern]) => pattern.test(action.channel));
+      if (panel) {
+        const opening = rig.get(action.channel) > 0.5;
+        this.sound = opening ? panel[1] : null;
+        const at = this.shutting.findIndex((s) => s.rig === rig && s.channel === action.channel);
+        if (at >= 0) this.shutting.splice(at, 1);
+        if (!opening) this.shutting.push({ rig, channel: action.channel, sound: panel[2], left: PANEL_SHUT_WAIT_S });
+      }
+    }
+  }
+
+  /**
+   * Slams each panel set swinging shut once it lands (its pose within `PANEL_SHUT_AT`
+   * of closed). One sound a tick: a second panel landing on the same tick waits for the
+   * next. A panel opened again before it landed was taken off the list by `workKitPart`;
+   * one whose car stopped updating (streamed out mid-swing) is dropped after
+   * `PANEL_SHUT_WAIT_S`, silently.
+   */
+  private listenForShut(dt: number): void {
+    for (let i = this.shutting.length - 1; i >= 0; i--) {
+      const s = this.shutting[i]!;
+      s.left -= dt;
+      if (s.rig.position(s.channel) > PANEL_SHUT_AT) {
+        if (s.left <= 0) this.shutting.splice(i, 1);
+        continue;
+      }
+      if (this.sound !== null) continue;
+      this.sound = s.sound;
+      this.shutting.splice(i, 1);
     }
   }
 
@@ -1871,9 +1921,16 @@ export class Interaction {
       return `[F] pick up ${itemLabel(item)}`;
     }
 
-    // The body's tank, through its flap: nothing is said. The crosshair lights while a
-    // can is on an open flap (`InteractionResult.actionable`); the fuel gauge is the level.
-    if (t.kind === 'filler') return null;
+    // The body's tank, through its flap: shut, nothing — the tank is not seen and takes
+    // nothing; open, its level, and with a can in hand the pour as the bonnet's
+    // reservoirs show theirs.
+    if (t.kind === 'filler') {
+      const car = this.world.state.cars[t.carId];
+      const open = (resolved.vehicle?.kit?.get('flap') ?? 0) > LID_OPEN;
+      const reservoir = open && car && resolved.vehicle ? fillerReservoir(car, resolved.vehicle.stats) : null;
+      if (!reservoir) return null;
+      return held?.type === 'fluid_can' ? this.pourPrompt(held, reservoir) : fillReadout(reservoir);
+    }
 
     if (t.kind === 'storage') {
       const cells = this.storageCells(t);
@@ -2481,7 +2538,7 @@ export class Interaction {
     }
     this.world.apply({ t: 'enter_car', carId: resolved.carId, seat: resolved.kitSeat ?? 'driver' });
     this.player?.setEnabled(false);
-    this.sound = 'enter-car';
+    // Getting in is silent: the door was heard opening, and is heard shutting if he shuts it.
   }
 
   /**
@@ -2515,7 +2572,7 @@ export class Interaction {
     }
     const exit = this.computeExitPosition(carId, active.vehicle, door);
     this.world.apply({ t: 'exit_car' });
-    this.sound = 'exit-car';
+    // Silent, as getting in is: the door he leaves by was opened and is shut with E.
     if (this.player) {
       this.player.setEnabled(true);
       if (exit) this.player.teleport(exit.x, exit.y, exit.z, roadS);

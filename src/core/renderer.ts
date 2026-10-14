@@ -51,8 +51,8 @@ const SAND_VEIL = new SandColor(new THREE.Color(0.78, 0.69, 0.56));
 
 export const CAMERA_FAR = 4000;
 /**
- * Near-plane floor in metres. The hood camera sits a hand's width off the bonnet,
- * so this must clear the panel it is mounted on without slicing into it.
+ * Near-plane floor in metres. The cabin eye sits a hand's width from the headliner and
+ * the pillars, so this must clear the trim round it without slicing into it.
  * `setViewDistance` only ever raises this, never lowers it.
  */
 export const CAMERA_NEAR = 0.08;

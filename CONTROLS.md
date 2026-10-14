@@ -23,30 +23,33 @@ with his load says why.
 - **On foot, E works only the panels**: the side doors, the bonnet, the boot lid or
   tailgate and the fuel flap. Windows, vents and everything in the cabin are not reached
   from outside, even through an open door. A sticker envelope in hand keeps E (it mirrors
-  the sticker); any other held item gives E up while a panel is in the crosshair.
+  the sticker); any other held item gives E up while a panel is in the crosshair. A
+  door, the bonnet and the boot each sound their latch as they open and their slam as
+  they land shut; getting in and out is silent.
 - **The bonnet and boot grids follow their lids.** Opening the bonnet shows its grid in the
   bay, where the parts stand: the engine's big cell in the middle, the radiator in front,
   the turbine and the air filter beside it, each cell outlined round its top and lit pink
   under the aim (within 1.6 m of the eye). Opening the boot or tailgate shows the boot's
   grid; shutting a lid hides it, and so does walking 3.2 m away. F on a cell takes or
   fits as before. Wrecks and couriers, whose lids do not open, keep aim and F to open.
-- **Petrol goes in through the fuel flap.** With a petrol can in hand, open the flap and
-  hold the left button on it; the crosshair lights while it takes petrol, and the fuel
-  gauge is the level. Oil and water still pour into the engine and radiator cells in the
-  open bonnet. The tank is the car's own; it is not a part.
+- **Petrol goes in through the fuel flap.** Open the flap and aim at it: the line shows the
+  tank's level (`petrol 12.3/39.0 L`); with a petrol can in hand, hold the left button to
+  pour and the line shows the pour. Shut, the flap shows nothing and takes nothing. Oil
+  and water still pour into the engine and radiator cells in the open bonnet. The tank is
+  the car's own; it is not a part.
 - **F gets in by looking at a seat through an open side door** (front or rear, on the
   player's side; the rear bench through a front door on a two-door car). The first opaque
   thing the eye ray meets must be the seat, not seen through glass, and the ray must
   cross the open door's outline. The player sits in that seat. The cabin carry limits
-  still apply.
+  still apply. The seats themselves are not worked: no sliding, reclining or headrests.
 - **Only the driver's seat drives.** From any other seat the car holds where it stands:
   pedals, steering, gears, lights, indicators and the autopilot do nothing ("only the
   driver can do that"). The cabin view is from that seat (the passenger's is the
   driver's eye mirrored; the rear seats' sit over the bench).
 - **Seated, the ray runs from the camera that is drawing.** In the cabin view everything
   within reach works (doors, lids, windows, switches, stalks, visors, the courtesy lamp,
-  the horn pad, which only moves: the game has no horn sound); in the chase and hood views
-  only the side doors do. Doors, lids and the flap are offered only below the exit speed
+  the horn pad, which only moves: the game has no horn sound); in the chase view only the
+  side doors do. Doors, lids and the flap are offered only below the exit speed
   (5 km/h). The light switch, hazards and stalk work the car's own lamps; the wiper stalk
   runs the wipers slow, fast and off.
 - **F gets out through the open door on the seat's side** (a rear seat's rear door, or
@@ -76,7 +79,7 @@ own layout would otherwise drive the car with its triggers as its steering.
 | A | handbrake (toggle) | jump |
 | B | use held item (`E`) | use held item (`E`) |
 | X | enter/exit car, pick up/mount (`F`) | same |
-| Y | camera: chase → hood → cabin (`C`) | camera mode |
+| Y | camera: chase ↔ cabin (`C`) | camera mode |
 | RB / LB | shift up / down (manual or override) | — |
 | D-pad ↑ | recentre camera (`V`) | recentre camera |
 | D-pad ↓ | radio station (`R`) | drop item (`Q`) |
@@ -152,11 +155,11 @@ Levels come from `RUMBLE_*` in `src/main.ts`.
 
 ## Driving views and the cabin camera
 
-`C` cycles the driving view: **chase** (the follow arm) → **hood** (the bonnet mount)
-→ **cabin** (the driver's seat) → chase. Entering hood or cabin faces down the car.
-The cabin eye is rigid with the chassis and so is its horizon; the mouse turns the
-driver's head against the car (to look at a door, say), there is no zoom, no
-occlusion pull-in, and neither the speed sway nor the shake kicks reach it.
+`C` switches the driving view: **chase** (the follow arm) ↔ **cabin** (the seat).
+Entering the cabin faces down the car. The cabin eye is rigid with the chassis and so
+is its horizon; the mouse turns the head against the car (to look at a door, say), and
+3 s after the mouse stops the head turns back to the road by itself. There is no zoom,
+no occlusion pull-in, and neither the speed sway nor the shake kicks reach it.
 
 The eye is per car model, chassis-local metres (+X the car's left, +Y up, +Z
 forward), first match wins (`src/vehicle/cabincamera.ts`):

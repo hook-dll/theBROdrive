@@ -29,6 +29,10 @@ thanks to them.
 | crash-3.ogg | [Clank Car Crash Collision](https://freesound.org/s/151624/) | qubodup |
 | door-open.ogg | [Car_Door_Open_02.wav](https://freesound.org/s/488056/) | BenDrain |
 | door-close.ogg | [Car_Door_Closing_Dull_04](https://freesound.org/s/778421/) | BlondPanda |
+| bonnet-open.ogg | [Car_Hood-Open_metalic-hollow-springy.aif](https://freesound.org/s/86233/) | nmscher |
+| bonnet-shut.ogg | [car hood close](https://freesound.org/s/410134/) | soundman9826 |
+| boot-open.ogg | [Opening_Car_Trunk.wav](https://freesound.org/s/344602/) | vcspran |
+| boot-shut.ogg | [CarBootClose.wav](https://freesound.org/s/136535/) | jmdh |
 | step-gravel.ogg | [Footsteps outdoors gravel.wav](https://freesound.org/s/505831/) | jedg |
 | step-soft.ogg | [Hiking Boot Footsteps on Grass](https://freesound.org/s/521587/) | Fission9 |
 | step-hard.ogg | [footsteps shoes walk road asphalt hard.flac](https://freesound.org/s/637556/) | kyles |

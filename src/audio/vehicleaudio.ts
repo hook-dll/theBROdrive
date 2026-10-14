@@ -240,11 +240,13 @@ export class VehicleAudio {
    * THE ENGINE HAS ITS OWN SHELL, AND IT IS VOICED THE OTHER WAY ROUND.
    *
    * By ear (the player's, 2026-09-28): the engine heard from the bonnet camera and the
-   * engine heard from the chase camera sounded swapped. The bonnet camera sits ON the
+   * engine heard from the chase camera sounded swapped. The bonnet camera sat ON the
    * bay, in the open air, not behind a firewall; the chase camera hears the car as a
    * whole shut box going by. So the engine — exhaust and bay, nothing else — goes
    * through its own filter pair driven by the opposite perspective (`engineHeardAs`),
-   * while tyres, wind and the body keep the cabin/outside voicing they had.
+   * while tyres, wind and the body keep the cabin/outside voicing they had. The bonnet
+   * view is gone; 'cabin' is now the seat's view, behind the firewall, and the swap has
+   * not been listened to again from there.
    */
   private readonly engineOut: GainNode;
   private readonly engineLowpass: BiquadFilterNode;
@@ -607,7 +609,7 @@ export class VehicleAudio {
     }
   }
 
-  /** Cabin (bonnet camera) or outside (chase). Crossfades the shell's filtering. */
+  /** Cabin (the seat's view) or outside (chase). Crossfades the shell's filtering. */
   setPerspective(perspective: CarPerspective): void {
     if (this.perspective === perspective) return;
     this.perspective = perspective;

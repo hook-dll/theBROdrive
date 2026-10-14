@@ -462,7 +462,6 @@ export async function bootMirageLab(): Promise<void> {
     steering: 0,
     surfaceRoughness: 0,
     wheelContact: 0,
-    hoodOffset: vehicle.modelMeasure.hoodPoint,
     cabinOffset: vehicle.modelMeasure.cabinEye ?? vehicle.modelMeasure.hoodPoint,
     velocityX: 0,
     velocityZ: 0,
@@ -566,7 +565,7 @@ export async function bootMirageLab(): Promise<void> {
         `глаз ${heat.eyeAboveM.toFixed(1)} м · уклон ${(heat.groundSlope * 100).toFixed(1)}%`;
     }
     if (driveStatus) {
-      const cameraLabel = camera.mode === 'hood' ? 'капот' : 'погоня';
+      const cameraLabel = camera.mode === 'cabin' ? 'салон' : 'погоня';
       driveStatus.textContent = `${Math.round(vehicle.speedKmh)} км/ч · камера: ${cameraLabel}`;
     }
     renderer.render();

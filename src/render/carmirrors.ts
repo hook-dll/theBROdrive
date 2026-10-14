@@ -14,7 +14,8 @@
  * program it already has. The face material is one more program, linked at boot through
  * `mirrorProgramAnchor`.
  *
- * Cost. One mirror per frame, in turn, so each refreshes at a third of the frame rate;
+ * Cost. Each mirror redraws `Settings.mirrorFrameRate` times a second, in turn, so the
+ * renders spread over the frames instead of landing together (null: all, every frame);
  * no shadow pass, no scene matrix walk and no post pass (`Renderer.renderMirror`); small
  * fixed targets, halved on the low rung and none on Very Low (`GraphicsTier.mirrorScale`).
  */
@@ -23,7 +24,7 @@ import * as THREE from 'three';
 import type { KitMirror } from '../carkit/names';
 import type { KitRig } from '../carkit/rig';
 import type { Renderer } from '../core/renderer';
-import { GRAPHICS_TIERS, type GraphicsQuality } from '../game/settings';
+import { GRAPHICS_TIERS, type GraphicsQuality, type MirrorFrameRate } from '../game/settings';
 
 const MIRRORS: readonly KitMirror[] = ['inner', 'left', 'right'];
 
@@ -153,9 +154,15 @@ export class CarMirrors {
   /** The car whose faces are live, if any. */
   private shown: KitRig | null = null;
   private next = 0;
+  /** Renders a second per mirror, null for all of them every frame; see `setRate`. */
+  private rate: MirrorFrameRate = null;
+  /** Mirror renders owed by the clock and not yet drawn, and when that was counted. */
+  private owed = 0;
+  private lastMs = -1;
   private readonly camera = new THREE.PerspectiveCamera();
 
-  constructor(private readonly renderer: Renderer, quality: GraphicsQuality) {
+  constructor(private readonly renderer: Renderer, quality: GraphicsQuality, rate: MirrorFrameRate) {
+    this.rate = rate;
     this.setQuality(quality);
     renderer.setMirrorPass(this);
   }
@@ -178,6 +185,11 @@ export class CarMirrors {
     }
   }
 
+  /** `Settings.mirrorFrameRate`: each mirror's redraws a second, or null for every frame. */
+  setRate(rate: MirrorFrameRate): void {
+    this.rate = rate;
+  }
+
   /**
    * Once a frame, before the frame is drawn: `kit` is the rig of the car the player sits
    * in (any seat), `cabinView` whether the camera is the cabin view.
@@ -186,21 +198,33 @@ export class CarMirrors {
     this.show(this.enabled && this.scale > 0 && cabinView ? kit : null);
   }
 
-  /** Renders the next mirror in turn; called by `Renderer.render` after the frame. */
+  /**
+   * Renders the mirrors the clock has come round to; called by `Renderer.render` after
+   * the frame. At most each mirror once a frame, so a long frame does not queue a burst;
+   * up to one round more is carried to the next frame, so a rate at the frame rate is
+   * not lost to frames a hair longer than the last.
+   */
   draw(): void {
     const kit = this.shown;
     if (!kit || kit.mirrorFaces.length === 0) return;
-    const face = kit.mirrorFaces[this.next++ % kit.mirrorFaces.length]!;
-    if (!this.aim(face)) {
+    const count = kit.mirrorFaces.length;
+    const now = performance.now();
+    const seconds = this.lastMs < 0 ? 0 : (now - this.lastMs) / 1000;
+    this.lastMs = now;
+    this.owed = this.rate === null ? count : Math.min(this.owed + seconds * this.rate * count, 2 * count);
+    for (let drawn = 0; drawn < count && this.owed >= 1; drawn++, this.owed--) {
+      const face = kit.mirrorFaces[this.next++ % count]!;
+      if (!this.aim(face)) {
+        face.visible = false;
+        continue;
+      }
+      // Its own face lies on the near plane, and drawing it would sample the target being drawn.
       face.visible = false;
-      return;
+      this.renderer.renderMirror(view(face.userData.kitMirror as KitMirror).target, this.camera);
+      // Shown only once drawn, so a face never shows an empty or another car's target.
+      face.visible = true;
+      this.stats.renders++;
     }
-    // Its own face lies on the near plane, and drawing it would sample the target being drawn.
-    face.visible = false;
-    this.renderer.renderMirror(view(face.userData.kitMirror as KitMirror).target, this.camera);
-    // Shown only once drawn, so a face never shows an empty or another car's target.
-    face.visible = true;
-    this.stats.renders++;
   }
 
   private show(kit: KitRig | null): void {
@@ -208,6 +232,10 @@ export class CarMirrors {
     if (this.shown) for (const face of this.shown.mirrorFaces) face.visible = false;
     this.shown = kit;
     this.next = 0;
+    // A car newly shown draws every mirror at once, so no face waits a slow rate's
+    // interval for its first picture.
+    this.owed = kit ? kit.mirrorFaces.length : 0;
+    this.lastMs = -1;
   }
 
   /**

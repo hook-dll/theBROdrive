@@ -376,6 +376,23 @@ export const FRAME_RATE_LIMITS = [30, 60, 75, 120, 144] as const;
 export type FrameRateLimit = (typeof FRAME_RATE_LIMITS)[number] | null;
 
 /**
+ * How many times a second each live mirror is redrawn, or `null` for every frame. Set
+ * apart from the frame rate: each mirror is a second render of the scene, so its cost
+ * is chosen on its own. 20 is one mirror a frame at 60 FPS, how they first shipped.
+ */
+export const MIRROR_FRAME_RATES = [10, 15, 20, 30, 60] as const;
+export type MirrorFrameRate = (typeof MIRROR_FRAME_RATES)[number] | null;
+const DEFAULT_MIRROR_FRAME_RATE: MirrorFrameRate = 20;
+
+/** An offered mirror rate, null (every frame) as stored, else the default. */
+export function mirrorFrameRateFrom(raw: unknown): MirrorFrameRate {
+  if (raw === null) return null;
+  return typeof raw === 'number' && MIRROR_FRAME_RATES.some((rate) => rate === raw)
+    ? (raw as MirrorFrameRate)
+    : DEFAULT_MIRROR_FRAME_RATE;
+}
+
+/**
  * Offered manual render scales, as a fraction of the DISPLAY's own pixels.
  *
  * Not a fraction of the rung: the rung's ceiling is what `Auto` decides to spend, and
@@ -532,6 +549,8 @@ export interface Settings {
    * and now have different answers.
    */
   frameRateLimit: FrameRateLimit;
+  /** Redraws a second of each live car mirror, or null for every frame; see `MIRROR_FRAME_RATES`. */
+  mirrorFrameRate: MirrorFrameRate;
   /**
    * Persistent precise control: mouse travel and A/D move one linear virtual wheel
    * that stays where the player leaves it. Off by default because standard steering
@@ -658,6 +677,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // Uncapped by default on every device, phones included: a cap is the player's choice
   // to make (heat, noise), not a default to discover.
   frameRateLimit: null,
+  mirrorFrameRate: DEFAULT_MIRROR_FRAME_RATE,
   fieldOfView: DEFAULT_FIELD_OF_VIEW,
   // Off by default; M switches it on, and the pause menu remembers which.
   preciseSteering: false,
@@ -903,6 +923,7 @@ export function sanitizeSettings(raw: unknown): Settings {
     // name this setting had first; reading it is how a save made before this change keeps
     // the cap its player chose instead of silently becoming uncapped and hot.
     frameRateLimit: frameRateLimitFrom(obj.frameRateLimit ?? obj.mobileFrameRate),
+    mirrorFrameRate: mirrorFrameRateFrom(obj.mirrorFrameRate),
     // `mouseSteering` is the pre-precise-control name in existing saves. Read it once;
     // every newly sanitized Settings object writes only the truthful new field.
     preciseSteering: obj.preciseSteering === true || obj.mouseSteering === true,

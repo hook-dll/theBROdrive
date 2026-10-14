@@ -441,7 +441,7 @@ async function boot(): Promise<void> {
   const weapons = new WeaponController();
   const heldView = new HeldItemView(renderer.camera, renderer.scene);
   // The kit car's live mirrors, for the car the player sits in and the cabin view only.
-  const carMirrors = new CarMirrors(renderer, world.state.settings.graphicsQuality);
+  const carMirrors = new CarMirrors(renderer, world.state.settings.graphicsQuality, world.state.settings.mirrorFrameRate);
   const trunkView = new TrunkView(renderer.scene);
   /** The car currently showing a sticker being tried on, so it can be cleared. */
   let stickerPreviewCarId: string | null = null;
@@ -1303,7 +1303,6 @@ async function boot(): Promise<void> {
     steering: 0,
     surfaceRoughness: 0,
     wheelContact: 0,
-    hoodOffset: [0, 0, 0],
     cabinOffset: [0, 0, 0],
     velocityX: 0,
     velocityZ: 0,
@@ -2222,7 +2221,6 @@ async function boot(): Promise<void> {
       target.steering = driving.steeringFraction;
       target.surfaceRoughness = driving.audio.surfaceRoughness;
       target.wheelContact = driving.audio.wheelContactFraction;
-      target.hoodOffset = driving.modelMeasure.hoodPoint;
       const drivenModel = s.cars[drivingId!]?.modelId;
       if (drivenModel) target.cabinOffset = cabinCamera.eyeFor(drivenModel, s.player.seat);
       // The dynamic camera's raw material: where the car is really going, not where it
@@ -2570,7 +2568,7 @@ async function boot(): Promise<void> {
       const cosH = Math.cos(heading);
       const indicator = driving.indicator;
       const blinkerLit = driving.indicatorLit;
-      // A kit car's cluster is in the cabin view; the hood view shows none.
+      // A kit car's cluster is in view from the seat; the chase shows none.
       hud.setCabinInstruments(camera.mode === 'cabin' && driving.kit !== null);
       hud.setDriving({
         speedKmh: driving.speedKmh,
@@ -2658,7 +2656,7 @@ async function boot(): Promise<void> {
     radioSpatial.listenerQy = renderer.camera.quaternion.y;
     radioSpatial.listenerQz = renderer.camera.quaternion.z;
     radioSpatial.listenerQw = renderer.camera.quaternion.w;
-    const cabinView = driving !== null && (camera.mode === 'hood' || camera.mode === 'cabin');
+    const cabinView = driving !== null && camera.mode === 'cabin';
     if (driving) {
       // Chassis local +Z is forward.
       const q = driving.root.quaternion;
@@ -2936,6 +2934,7 @@ async function boot(): Promise<void> {
       const tier = world.state.settings.graphicsQuality;
       renderer.setQuality(tier);
       carMirrors.setQuality(tier);
+      carMirrors.setRate(world.state.settings.mirrorFrameRate);
       sky.setQuality(tier, mobilePresentation);
       const horizon = viewDistanceFor(world.state.settings.viewDistance, mobilePresentation);
       renderer.setViewDistance(horizon);
