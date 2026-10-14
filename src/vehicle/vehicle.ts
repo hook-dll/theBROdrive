@@ -5541,6 +5541,7 @@ export class Vehicle implements Rebasable {
     this.wheelMeshes.clear();
     this.steeringWheel = null;
     this.steeringWheelRest = 0;
+    this.kitRig?.dispose();
     this.kitRig = null;
   }
 

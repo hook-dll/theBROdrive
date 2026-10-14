@@ -469,6 +469,15 @@
 
 ### Fixed
 
+- KIT DROP GLASS INTO THE CABIN: a lowered door window on a kit car came down inside the
+  door card, into the cabin. The pane leans in with the greenhouse (12.7 cm over its
+  height on the classics, the door is 7.5 cm thick) and used to drop straight down. It now
+  slides in its own plane and nothing below its bottom edge is drawn
+  (`carkit/rig.ts` `SinkingPane`: the showing part is cut on the CPU while the channel
+  moves, into a copy of the pane the car makes on its first move, same attributes and
+  program); a pane wound fully down is not drawn, and a sticker on it is folded away
+  until it comes up. Checked headless on every pane of all 13 cars at 0, ½ and 1 (nothing
+  below the edge, off its plane ≤ 4 mm, the shut pane's own) and in the car lab.
 - STICKERS ON OPENING PARTS: a sticker on a kit car's door, bonnet, boot lid, flap or drop
   glass stayed where the shut part was when it opened (all of a car's decals were one mesh
   under the body). Decals cut from a moving part now hang under that part in its shut

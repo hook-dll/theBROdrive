@@ -310,6 +310,16 @@ Format of an entry: **Problem** → **Cause** → **Fix** → *Code* (commit).
   the same node). Wrecks and couriers are posed far once (`poseKitStatic`). A rig skips
   parts whose channel did not move (`Driven.applied`), so a parked kit car costs a
   comparison per part. *vehicle/vehicle.ts `driveKit`, carkit/rig.ts*.
+- **Lowered side windows stood in the cabin, next to the door.** → A drop pane leans in
+  with the greenhouse (its top 12.7 cm in from its bottom on the classics, 10–12.5 on
+  the rest) and slid straight down, so its top came 5 cm past the 7.5 cm door's card.
+  → It slides in its own plane, square to its bottom edge, and nothing below that edge
+  is drawn: the showing part is cut out of the shut pane (Sutherland–Hodgman, every
+  attribute, so the same program) into a copy the car makes on the pane's first move;
+  fully down it is not drawn, and stickers on it fold away (scale 0) until it is up.
+  Stickers are cut from the shut pane (`KIT_SHUT_GEOMETRY`). The 2 cm of glass the old
+  drop left showing is gone: a pane winds all the way down. *carkit/rig.ts
+  `SinkingPane`, kit.ts `shellMotion`, render/stickerdecals.ts*.
 
 ## Failed approaches (do not retry)
 

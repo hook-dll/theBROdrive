@@ -352,6 +352,7 @@ export async function bootCarLab(): Promise<void> {
   const buildCar = (car: LabCar): void => {
     if (car.instance) {
       car.instance.surface.dispose();
+      car.rig?.dispose();
       car.anchor.remove(car.instance.body);
       for (const wheel of car.instance.wheels.values()) car.anchor.remove(wheel);
     }

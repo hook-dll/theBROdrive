@@ -185,7 +185,8 @@ Integration outside the folder:
    - glass is recessed (`GLASS_INSET`) and edged with dark rubber.
 6. **Hinges.** Pivots come from each part's geometry: door at its front edge, bonnet at
    its rear edge, boot lid at its front edge, tailgate at its top edge, flap at its front
-   edge, quarter light at its rear post, drop glass at its own bottom edge. Panes
+   edge, quarter light at its rear post. A drop glass winds down into its door in its
+   own plane, cut at its bottom edge (rig.ts `SinkingPane`). Panes
    (`window_*`, `vent_*`, `quarter_*`) ride inside their door. Opening angles are in
    `shellMotion` (kit.ts).
 7. **Exterior, interior, bay** are added (`buildExterior`, `buildInterior`, `buildBay`).

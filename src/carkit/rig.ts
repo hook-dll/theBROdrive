@@ -5,7 +5,7 @@
  *
  *  - `userData.kitMotion` on a node that moves: a CHANNEL (a number) drives it, as a
  *    turn about an axis or a slide along one, in the node's own parent frame, from the
- *    pose it was built in;
+ *    pose it was built in, or as a drop pane winding down into its door (`sink`);
  *  - `userData.kitControl` on a node a player can click: what the click does to which
  *    channel. A click on any mesh below it counts.
  *
@@ -20,10 +20,15 @@ import { KIT_LAMP_NODES } from './names';
 
 export interface KitMotion {
   readonly channel: string;
-  readonly kind: 'rot' | 'pos';
+  /**
+   * `rot` turns about `axis`, `pos` slides along it. `sink` is a drop pane winding down
+   * into its door (`SinkingPane`): `axis` is unused and `amount` is the share of the
+   * pane's height it travels at a channel value of 1.
+   */
+  readonly kind: 'rot' | 'pos' | 'sink';
   /** Axis in the node's parent frame. */
   readonly axis: readonly [number, number, number];
-  /** Radians or metres per unit of channel value. */
+  /** Radians or metres per unit of channel value; for `sink`, a share of the height. */
   readonly amount: number;
 }
 
@@ -75,6 +80,8 @@ interface Driven {
   readonly restPosition: THREE.Vector3;
   readonly restQuaternion: THREE.Quaternion;
   readonly axis: THREE.Vector3;
+  /** A `sink` part's panes (its glass meshes); empty for every other motion. */
+  readonly panes: readonly SinkingPane[];
   /** The channel value the node was last posed at: a still part is not posed again. */
   applied: number;
 }
@@ -110,6 +117,169 @@ const GLASS_NEAR_OPACITY = 0.28;
 const GLASS_FAR_OPACITY = 0.9;
 
 const _q = new THREE.Quaternion();
+const _a = new THREE.Vector3();
+const _b = new THREE.Vector3();
+const _c = new THREE.Vector3();
+const _ab = new THREE.Vector3();
+const _ac = new THREE.Vector3();
+
+/** Where a drop pane's shut geometry is kept while it draws a cut copy (render/stickerdecals.ts). */
+export const KIT_SHUT_GEOMETRY = 'kitShutGeometry';
+
+/**
+ * A drop pane winding down into its door. It slides in its own plane, square to its
+ * bottom edge (where the glass meets the door's top), and nothing of it is drawn below
+ * that edge: the part still showing is cut out of the shut pane on the CPU each time the
+ * channel moves, into a copy of the geometry this car alone owns, made the first time
+ * the pane moves. The cut carries every attribute the pane has (dust, the body stamp),
+ * so it draws with the same program.
+ *
+ * A straight drop brought the top of a pane leaning in with the greenhouse down 5 cm
+ * inside the door card, into the cabin.
+ */
+class SinkingPane {
+  private readonly source: THREE.BufferGeometry;
+  /** The shut pane's attributes, and this car's cut copy of each (`own`, made on first move). */
+  private readonly from: THREE.BufferAttribute[];
+  private to: THREE.BufferAttribute[] = [];
+  private own: THREE.BufferGeometry | null = null;
+  /** A point of the bottom edge and the pane's up, in the mesh's frame. */
+  private readonly base = new THREE.Vector3();
+  private readonly up = new THREE.Vector3();
+  /** Metres from the bottom edge to the pane's highest point along `up`. */
+  private readonly height: number;
+  /** Signed heights above the cut of one triangle's corners, and the cut polygon (from, to, t). */
+  private readonly side = new Float64Array(3);
+  private readonly cutFrom = new Int32Array(4);
+  private readonly cutTo = new Int32Array(4);
+  private readonly cutT = new Float64Array(4);
+
+  constructor(readonly mesh: THREE.Mesh) {
+    this.source = mesh.geometry;
+    mesh.userData[KIT_SHUT_GEOMETRY] = this.source;
+    this.from = Object.values(this.source.attributes) as THREE.BufferAttribute[];
+    const position = this.source.getAttribute('position');
+    const normal = new THREE.Vector3();
+    for (let i = 0; i + 2 < position.count; i += 3) {
+      _a.fromBufferAttribute(position, i);
+      _b.fromBufferAttribute(position, i + 1);
+      _c.fromBufferAttribute(position, i + 2);
+      normal.add(_ab.subVectors(_b, _a).cross(_ac.subVectors(_c, _a)));
+    }
+    normal.normalize();
+    // Up in the pane's plane, then the bottom edge: the ends of the pane's lowest quarter.
+    const guess = new THREE.Vector3(0, 1, 0).addScaledVector(normal, -normal.y).normalize();
+    const along = new THREE.Vector3().crossVectors(guess, normal).normalize();
+    let low = Infinity;
+    let high = -Infinity;
+    for (let i = 0; i < position.count; i++) {
+      const h = _a.fromBufferAttribute(position, i).dot(guess);
+      low = Math.min(low, h);
+      high = Math.max(high, h);
+    }
+    const cut = low + (high - low) * 0.25;
+    const first = new THREE.Vector3();
+    const last = new THREE.Vector3();
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = 0; i < position.count; i++) {
+      _a.fromBufferAttribute(position, i);
+      if (_a.dot(guess) > cut) continue;
+      const s = _a.dot(along);
+      if (s < min) (min = s), first.copy(_a);
+      if (s > max) (max = s), last.copy(_a);
+    }
+    const edge = _ab.subVectors(last, first).normalize();
+    this.up.crossVectors(normal, edge).normalize();
+    if (this.up.dot(guess) < 0) this.up.negate();
+    this.base.copy(first);
+    let height = 0;
+    for (let i = 0; i < position.count; i++) height = Math.max(height, _a.fromBufferAttribute(position, i).sub(this.base).dot(this.up));
+    this.height = height;
+  }
+
+  /** Lowers the pane by `share` of its height (0 shut, 1 gone into the door). */
+  pose(share: number): void {
+    const drop = Math.min(1, Math.max(0, share)) * this.height;
+    if (drop <= 0) {
+      this.mesh.geometry = this.source;
+      this.mesh.visible = true;
+      return;
+    }
+    if (drop >= this.height) {
+      this.mesh.visible = false;
+      return;
+    }
+    this.mesh.visible = true;
+    const own = this.own ?? (this.own = this.copy());
+    this.mesh.geometry = own;
+    const position = this.source.getAttribute('position');
+    let out = 0;
+    for (let t = 0; t + 2 < position.count; t += 3) {
+      for (let k = 0; k < 3; k++) this.side[k] = _a.fromBufferAttribute(position, t + k).sub(this.base).dot(this.up) - drop;
+      // Sutherland-Hodgman against the bottom edge: at most four corners, fanned.
+      let n = 0;
+      for (let k = 0; k < 3; k++) {
+        const next = (k + 1) % 3;
+        const here = this.side[k]!;
+        const there = this.side[next]!;
+        if (here >= 0) {
+          this.cutFrom[n] = t + k;
+          this.cutTo[n] = t + k;
+          this.cutT[n++] = 0;
+        }
+        if (here >= 0 !== there >= 0) {
+          this.cutFrom[n] = t + k;
+          this.cutTo[n] = t + next;
+          this.cutT[n++] = here / (here - there);
+        }
+      }
+      for (let f = 1; f + 1 < n; f++) {
+        this.emit(0, out++, drop);
+        this.emit(f, out++, drop);
+        this.emit(f + 1, out++, drop);
+      }
+    }
+    own.setDrawRange(0, out);
+    for (const attribute of this.to) attribute.needsUpdate = true;
+  }
+
+  /** Writes corner `corner` of the cut polygon as vertex `out`, lowered by `drop`. */
+  private emit(corner: number, out: number, drop: number): void {
+    const from = this.cutFrom[corner]!;
+    const to = this.cutTo[corner]!;
+    const w = this.cutT[corner]!;
+    for (let i = 0; i < this.from.length; i++) {
+      const src = this.from[i]!;
+      const dst = this.to[i]!;
+      for (let c = 0; c < src.itemSize; c++) dst.setComponent(out, c, src.getComponent(from, c) * (1 - w) + src.getComponent(to, c) * w);
+    }
+    const p = this.own!.getAttribute('position') as THREE.BufferAttribute;
+    p.setXYZ(out, p.getX(out) - this.up.x * drop, p.getY(out) - this.up.y * drop, p.getZ(out) - this.up.z * drop);
+  }
+
+  /** This car's own copy: room for every triangle cut into two. */
+  private copy(): THREE.BufferGeometry {
+    const own = new THREE.BufferGeometry();
+    const names = Object.keys(this.source.attributes);
+    this.to = this.from.map((src, i) => {
+      const array = new (src.array.constructor as new (length: number) => THREE.TypedArray)(src.count * 2 * src.itemSize);
+      const dst = new THREE.BufferAttribute(array, src.itemSize, src.normalized).setUsage(THREE.DynamicDrawUsage);
+      own.setAttribute(names[i]!, dst);
+      return dst;
+    });
+    own.boundingBox = this.source.boundingBox?.clone() ?? null;
+    own.boundingSphere = this.source.boundingSphere?.clone() ?? null;
+    return own;
+  }
+
+  dispose(): void {
+    this.mesh.geometry = this.source;
+    this.own?.dispose();
+    this.own = null;
+  }
+}
+
 
 /**
  * A kit body nobody drives or opens (a wreck, a courier: render/carmodel.ts
@@ -149,6 +319,10 @@ export class KitRig {
         restPosition: node.position.clone(),
         restQuaternion: node.quaternion.clone(),
         axis: new THREE.Vector3(...motion.axis).normalize(),
+        panes:
+          motion.kind === 'sink'
+            ? node.children.filter((child): child is THREE.Mesh => child instanceof THREE.Mesh).map((mesh) => new SinkingPane(mesh))
+            : [],
         applied: Number.NaN,
       });
       this.channel(motion.channel);
@@ -270,15 +444,32 @@ export class KitRig {
 
     for (const d of this.driven) {
       const v = this.channels.get(d.motion.channel)?.value ?? 0;
+      // Stickers on a pane hang under it (render/stickerdecals.ts) and cannot be cut with
+      // it: they are folded away while it is down, every frame, so one printed meanwhile
+      // does not show in the air.
+      if (v > 0 && d.panes.length > 0) for (const child of d.node.children) if (!this.isPane(d, child)) child.scale.setScalar(0);
       if (v === d.applied) continue;
       d.applied = v;
       if (d.motion.kind === 'rot') {
         d.node.quaternion.copy(d.restQuaternion).multiply(_q.setFromAxisAngle(d.axis, d.motion.amount * v));
+      } else if (d.motion.kind === 'sink') {
+        for (const pane of d.panes) pane.pose(d.motion.amount * v);
+        if (v === 0) for (const child of d.node.children) if (!this.isPane(d, child)) child.scale.setScalar(1);
       } else {
         d.node.position.copy(d.restPosition).addScaledVector(d.axis, d.motion.amount * v);
       }
     }
     this.applyLamps();
+  }
+
+  private isPane(d: Driven, node: THREE.Object3D): boolean {
+    for (const pane of d.panes) if (pane.mesh === node) return true;
+    return false;
+  }
+
+  /** Frees what this car alone owns (cut panes) and puts the shut panes back. */
+  dispose(): void {
+    for (const d of this.driven) for (const pane of d.panes) pane.dispose();
   }
 
   private applyLamps(): void {
