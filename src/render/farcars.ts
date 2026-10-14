@@ -27,13 +27,14 @@ import { KIT_DETAIL_GROUPS } from '../carkit/rig';
 import { LENS_ROLE_EMISSIVE, type VehicleLamps } from '../vehicle/vehiclelamps';
 
 /** A traffic car goes far beyond this distance from the eye, metres... */
-export const FAR_CAR_ENTER_M = 60;
+export const FAR_CAR_ENTER_M = 110;
 /**
  * ...and comes back near inside this one. The gap keeps a car driving along the line from
- * swapping every frame. Both sit past `KIT_DETAIL_M` (50 m), where the near car already
- * stands in the far mesh's pose, so the swap changes the paint's dust and little else.
+ * swapping every frame. At 50-60 m the swap was in plain sight (reported from play); at
+ * 90-110 m a car is a quarter of the size, and in the traffic measured on the M2 Pro four
+ * of every five far cars stand further still, so most of the saving is kept.
  */
-export const FAR_CAR_EXIT_M = 50;
+export const FAR_CAR_EXIT_M = 90;
 
 /**
  * Far cars of one model the mesh holds: the densest traffic setting's wide-road cap (48,
@@ -62,6 +63,11 @@ export interface FarCarSurface {
   readonly metalness: number;
   /** 0 for none, else 1 + the lens role's index in `LENS_ROLE_EMISSIVE`. */
   readonly lamp: number;
+  /**
+   * Its colour map, sampled at each vertex's UV into the vertex colour: the Soviet wheel
+   * sets take their rim and tyre colours from a palette texture, and the far mesh has no map.
+   */
+  readonly map?: THREE.Texture | null;
 }
 
 const _local = new THREE.Matrix4();
@@ -74,6 +80,26 @@ const _ab = new THREE.Vector3();
 const _ac = new THREE.Vector3();
 const _base = new THREE.Color();
 const _color = new THREE.Color();
+const _texel = new THREE.Color();
+
+/** A map's pixels, read once per texture; null when its image cannot be read. */
+const mapPixels = new WeakMap<THREE.Texture, { data: Uint8ClampedArray; width: number; height: number } | null>();
+
+function pixelsOf(map: THREE.Texture): { data: Uint8ClampedArray; width: number; height: number } | null {
+  if (mapPixels.has(map)) return mapPixels.get(map)!;
+  const image = map.image as (CanvasImageSource & { width: number; height: number }) | undefined;
+  let pixels: { data: Uint8ClampedArray; width: number; height: number } | null = null;
+  if (image && image.width > 0 && image.height > 0 && typeof OffscreenCanvas !== 'undefined') {
+    const canvas = new OffscreenCanvas(image.width, image.height);
+    const context = canvas.getContext('2d');
+    if (context) {
+      context.drawImage(image, 0, 0);
+      pixels = { data: context.getImageData(0, 0, image.width, image.height).data, width: image.width, height: image.height };
+    }
+  }
+  mapPixels.set(map, pixels);
+  return pixels;
+}
 
 interface Piece {
   readonly geometry: THREE.BufferGeometry;
@@ -138,6 +164,8 @@ export function bakeFarCarGeometry(
     const position = geometry.getAttribute('position');
     const normal = geometry.getAttribute('normal') as THREE.BufferAttribute | undefined;
     const vertexColor = surface.vertexColors ? (geometry.getAttribute('color') as THREE.BufferAttribute | undefined) : undefined;
+    const pixels = surface.map ? pixelsOf(surface.map) : null;
+    const uv = pixels ? (geometry.getAttribute('uv') as THREE.BufferAttribute | undefined) : undefined;
     _normalMatrix.getNormalMatrix(matrix);
     const paint = surface.paint ? 255 : 0;
     _base.set(surface.paint ? 0xffffff : surface.color);
@@ -162,6 +190,16 @@ export function bakeFarCarGeometry(
           _color.r *= vertexColor.getX(source);
           _color.g *= vertexColor.getY(source);
           _color.b *= vertexColor.getZ(source);
+        }
+        if (pixels && uv) {
+          // The texel under the vertex, in the map's sRGB, brought to working colour as the
+          // material's own sampling would.
+          const repeat = surface.map!.flipY ? 1 - uv.getY(source) : uv.getY(source);
+          const x = Math.min(pixels.width - 1, Math.max(0, Math.floor((uv.getX(source) - Math.floor(uv.getX(source))) * pixels.width)));
+          const y = Math.min(pixels.height - 1, Math.max(0, Math.floor((repeat - Math.floor(repeat)) * pixels.height)));
+          const at = (y * pixels.width + x) * 4;
+          _texel.setRGB(pixels.data[at]! / 255, pixels.data[at + 1]! / 255, pixels.data[at + 2]! / 255, THREE.SRGBColorSpace);
+          _color.multiply(_texel);
         }
         colors[v * 3] = toByte(_color.r);
         colors[v * 3 + 1] = toByte(_color.g);

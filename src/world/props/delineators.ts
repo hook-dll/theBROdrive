@@ -182,6 +182,19 @@ function delineatorPost(): THREE.BufferGeometry {
 /** Material order for `delineatorPost`'s two groups. */
 const DELINEATOR_MATERIALS: THREE.Material[] = [matDelineator, matReflector];
 
+/**
+ * A hidden page of one post, in the scene from boot, as the chunk batches make theirs
+ * (instance batch, no shadow either way): its program is linked under the loading cover.
+ * Runs of posts stand only at some variety events, so the first one used to be met a
+ * minute or two into the drive and linked the instanced variant then (measured: one
+ * program at 111 s on seed `flick`). The broken-post plain variant is DebrisField's.
+ */
+export function delineatorProgramAnchor(): THREE.Object3D {
+  const anchor = new THREE.InstancedMesh(delineatorPost(), DELINEATOR_MATERIALS, 1);
+  anchor.name = 'delineator-anchor';
+  anchor.visible = false;
+  return anchor;
+}
 
 /**
  * Every post station of one run that falls in `[fromS, toS)`.

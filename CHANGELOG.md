@@ -4,6 +4,22 @@
 
 ### Added
 
+- NO HITCHES IN THE FIRST MINUTES OF A DRIVE (`app/bootwarmup.ts`,
+  `world/props/delineators.ts` `delineatorProgramAnchor`). Every car model is built
+  behind the loading cover now (body, template, program anchor, far mesh) instead of the
+  first time traffic brings one: each was a 36-70 ms kit build on the M2 Pro, a dozen
+  hitches in the first minute. And the roadside delineator runs' instanced program had
+  no boot anchor (only the broken-post plain variant had), so the first run of posts,
+  minutes in, linked it mid-drive. Measured from a fresh profile, 150 s of driving
+  after New drive on seed `flick`: before, 12 frames over 25 ms (to 75 ms), 7 long tasks
+  and one program link at 111 s; after, none of the three; boot 6-8 s.
+- FAR TRAFFIC SWAPS AT 90-110 M, WITH ITS REAL WHEELS. The swap moved from 50-60 m,
+  where it was seen, to beyond 110 m (back near inside 90 m). The far mesh wears the
+  model's first Soviet wheel set, its colours sampled from the palette texture into the
+  vertex colours (`FarCarSurface.map`); the Phong wheels had been dropped from the bake,
+  so far cars had no wheels at all. Draw calls with the far LOD at the new distance:
+  517-788 against 1091-1559 without, render CPU 2.7-3.3 ms against 5.0-6.0 ms.
+
 - FAR TRAFFIC CARS ARE ONE DRAW PER MODEL (`render/farcars.ts`, `render/carmodel.ts`
   `carModelFarGeometry`, `vehicle/vehicle.ts` `syncVisuals`, `world/traffic.ts`). Each
   kit model gets one merged, shut far mesh at load (no cabin, bay, boot or underbody,

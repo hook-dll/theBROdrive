@@ -100,6 +100,7 @@ import { hasEscapedWorld } from './world/landscape';
 import { DelineatorProvider } from './world/props/delineators';
 import { MonumentProvider, monumentProgramAnchor } from './world/props/monuments';
 import { PoleProvider, poleProgramAnchor } from './world/props/poles';
+import { delineatorProgramAnchor } from './world/props/delineators';
 import { ScatterProvider } from './world/props/scatter';
 import { SidetrackProvider, sidetrackProgramAnchor } from './world/sidetrack';
 import { updateWeather, weather, windAt } from './world/weather';
@@ -470,6 +471,7 @@ async function boot(): Promise<void> {
     monumentProgramAnchor(),
     sidetrackProgramAnchor(),
     poleProgramAnchor(),
+    delineatorProgramAnchor(),
     itemProgramAnchor(),
     mirrorProgramAnchor(),
   );

@@ -1950,7 +1950,11 @@ function buildFarGeometry(t: Template): THREE.BufferGeometry {
   const def = t.def;
   const roles = lampRoleSelectors(def);
   const roots: THREE.Object3D[] = [t.body];
-  const wheels = cloneWheels(t, t.wheels);
+  // The pool's first set, not the kit's placeholder wheel: near traffic wears the pool's
+  // sets, and the plain disc was what gave the swap away. One set per model: a far car
+  // is too small for its own set to be told from another.
+  const poolSet = t.def.wheelSetPool?.[0];
+  const wheels = cloneWheels(t, (poolSet ? templates.get(poolSet) : undefined)?.wheels ?? t.wheels);
   if (t.spare) {
     // `addSpareWheel`, in the chassis frame the mount is measured in.
     const mount = new THREE.Group();
@@ -1965,6 +1969,11 @@ function buildFarGeometry(t: Template): THREE.BufferGeometry {
     roots.push(mesh);
   }
   const describe = (mesh: THREE.Mesh, material: THREE.Material): FarCarSurface | null => {
+    // The Soviet wheel sets are Phong with a palette map: their colour is the texel,
+    // their finish a tyre's or a painted rim's, so a mid roughness stands for both.
+    if (material instanceof THREE.MeshPhongMaterial) {
+      return { color: material.color, vertexColors: material.vertexColors, paint: false, roughness: 0.7, metalness: 0.1, lamp: 0, map: material.map };
+    }
     // Every lit kit slot is a standard material. The one unlit slot, `lamp_glow`, lights
     // only the cabin's lamps, and the far mesh has no cabin.
     if (!(material instanceof THREE.MeshStandardMaterial)) return null;
@@ -1979,6 +1988,7 @@ function buildFarGeometry(t: Template): THREE.BufferGeometry {
       roughness: paint ? MATERIALS_CONFIG.paintRoughness : material.roughness,
       metalness: paint ? MATERIALS_CONFIG.paintMetalness : material.metalness,
       lamp: role + 1,
+      map: material.map,
     };
   };
   return bakeFarCarGeometry(roots, describe);
