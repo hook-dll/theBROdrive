@@ -448,7 +448,7 @@ does not move (a door's fixed `quarter_*` pane) is not a control.
 | Derived from `gear` | `gear_fb`, `gear_lr` (H-pattern, `GEAR_GATE`) |
 | Instruments | `speed` km/h, `rpm`, `fuel`, `temp` 0..1, `oil` kgf/cm², `volts` V, `vacuum` 0..1 |
 | Warning lamps | `tell_turn`, `tell_beam`, `tell_side`, `tell_fuel`, `tell_oil`, `tell_charge`, `tell_brake`, `tell_check` 0/1 |
-| Light and signals | `lights` 0/1/2, `blinker` −1/0/1, `hazard`, `horn`, `dome` (courtesy lamp) |
+| Light and signals | `lights` 0/1/2 → `panel` (instrument lighting, on at 1 and 2), `blinker` −1/0/1, `hazard`, `horn`, `dome` (courtesy lamp) |
 | Wipers and radio | `wipers` 0/1/2 → `wiper_sweep`; `radio` → `radio_tune` |
 | Body | `door_*`, `bonnet`, `boot`, `tailgate`, `flap`, `window_*`, `vent_*` |
 | Cabin | `glovebox`, `ashtray`, `visor_l/r`, `seat_*`, `seatback_*`, `headrest_*` |

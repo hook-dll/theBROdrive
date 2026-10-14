@@ -452,13 +452,14 @@ export class VehicleLamps {
   };
 
   /**
-   * Spotlights `group` projects while lit: one per lamp, or a single one for the
-   * pair when `merged`. Zero while it is dark, so a dark group asks the pool nothing.
+   * Pool spotlights `group` projects while lit: one per lamp, a single one for the pair
+   * when `merged`, or one fewer than its lamps when `shadowed` (one lamp takes the rig's
+   * shadowed beam instead). Zero while it is dark, so a dark group asks the pool nothing.
    */
-  beamCount(group: BeamGroup, merged: boolean): number {
+  beamCount(group: BeamGroup, merged: boolean, shadowed = false): number {
     const { mounts, intensity } = this.beamGroup(group);
     if (mounts.length === 0 || !(intensity > 0)) return 0;
-    return merged ? 1 : mounts.length;
+    return merged ? 1 : shadowed ? mounts.length - 1 : mounts.length;
   }
 
   /**
@@ -477,9 +478,13 @@ export class VehicleLamps {
    * seen from, two cones a metre apart are one pool of light, and the pool then
    * carries twice as many cars as it would lamps.
    *
-   * `shadowed` sends the (merged) beam to the rig's one shadow-casting spotlight
-   * (`VehicleLightRig.addShadowBeam`) instead of a pool slot: the driven car's
-   * headlamps, where the tier draws shadows.
+   * `shadowed` sends ONE lamp, the driver's side one (the largest local x), to the rig's
+   * shadow-casting spotlight (`VehicleLightRig.addShadowBeam`) and every other lamp to a
+   * pool slot of its own (`beamCount(group, false, true)`): the driven car's headlamps,
+   * where the tier draws shadows. The pair used to go to the shadowed beam as one light
+   * from between the lamps, so the car laid ONE pool and one glint in the road; two
+   * shadowed lamps measured +4 ms, so the other lamp lights without a shadow and thins
+   * the first one's shadows as a second real lamp does.
    */
   syncProjectedLights(
     rig: VehicleLightRig,
@@ -502,12 +507,16 @@ export class VehicleLamps {
     const color =
       group === 'front' ? HEADLIGHT_BEAM_TINT : group === 'tail' ? TAILLIGHT_EMISSIVE : REVERSE_LIGHT_EMISSIVE;
     const distanceScale = group === 'front' ? rig.headlightDistanceScale : 1;
-    if (merged || shadowed) {
-      this.projectBeam(rig, mounts, color, intensity * gain * mounts.length, shape, distanceScale, shadowed);
+    if (merged) {
+      this.projectBeam(rig, mounts, color, intensity * gain * mounts.length, shape, distanceScale, false);
       return;
     }
+    let shadowMount: VehicleBeamMount | null = null;
+    if (shadowed) {
+      for (const mount of mounts) if (!shadowMount || mount.sourceLocal.x > shadowMount.sourceLocal.x) shadowMount = mount;
+    }
     for (const mount of mounts) {
-      this.projectBeam(rig, mount, color, intensity * gain, shape, distanceScale, false);
+      this.projectBeam(rig, mount, color, intensity * gain, shape, distanceScale, mount === shadowMount);
     }
   }
 

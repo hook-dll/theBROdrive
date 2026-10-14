@@ -4,6 +4,21 @@
 
 ### Added
 
+- THE DRIVEN CAR LAYS TWO HEADLAMP POOLS, NOT ONE (`vehicle/vehiclelamps.ts`
+  `syncProjectedLights`, `beamCount`; `main.ts`). Where the tier draws shadows (Standard,
+  Blessing) both headlamps went into the one shadow-casting spotlight as a single beam
+  from between them, so the car lit the road with one pool and one glint. Now the
+  driver's side lamp keeps the shadowed spotlight and the other lamp takes a pinned pool
+  slot, at the same total light. The slot budget is unchanged: the pool gives that slot
+  up from traffic beams (Standard: five other cars' merged beams instead of six; one
+  fewer with the courtesy lamp on). Shadows come from one lamp, the other fills them a
+  little, as a second real lamp does. Traffic headlamps stay one merged beam per car.
+- INSTRUMENT LIGHTING (`carkit/interior.ts` `PANEL_*`, rig channel `panel`). With the
+  side lights on, dipped or main beam, every dial's face is faintly lit and its ticks and
+  needle glow (green ticks, orange needles); the ribbon gauge likewise. Lit faces like the
+  warning lamps', slid out over the dial: no light, no new program (90 before and after
+  switching the lights through every mode while driving in the cabin view).
+
 - THE GROUND COVER HAS A RANGE (`world/props/instancebatch.ts` `BatchLod`, `syncLod`;
   `world/props/forms.ts` `COVER_BUSH_FAR_M`). The cover's batch pages are kept per
   160 m patch of ground, and once a frame each page takes its range from the camera:

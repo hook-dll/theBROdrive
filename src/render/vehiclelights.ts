@@ -120,14 +120,15 @@ export class VehicleLightRig {
   readonly headlightDistanceScale: number;
   private readonly lights: THREE.SpotLight[] = [];
   /**
-   * The one spotlight that casts a shadow: the driven car's headlamps, as one beam
-   * from between them. Null where the tier draws no sun shadow either.
+   * The one spotlight that casts a shadow: the driven car's driver's side headlamp; the
+   * other lamp takes a pool slot (vehiclelamps.ts `syncProjectedLights`). Null where
+   * the tier draws no sun shadow either.
    *
    * Its own light, not a pool slot, and taken OUT of the slot budget: the count of
    * spots and of shadowed spots is compiled into every lit program, so both are
    * fixed here, and the total stays the tier's. Measured in the prototype on an M2
    * Pro: one shadowed headlamp +0.4 ms GPU and ~16 depth draws at night; two cost
-   * +4 ms, which is why the pair is merged rather than shadowed lamp by lamp.
+   * +4 ms, which is why only one lamp is shadowed.
    */
   private readonly shadowLight: THREE.SpotLight | null;
   private shadowClaimed = false;

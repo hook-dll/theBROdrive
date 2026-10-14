@@ -63,7 +63,7 @@ export interface KitPicked {
  * rpm, and an ease of a few units a second left them minutes behind the car. A warning
  * lamp (`tell_*`) and the courtesy lamp light as they are switched.
  */
-const INSTANT = /^(steer|throttle|brake|clutch|handbrake|gear_fb|gear_lr|wiper_sweep|speed|rpm|dome|tell_\w+)$/;
+const INSTANT = /^(steer|throttle|brake|clutch|handbrake|gear_fb|gear_lr|wiper_sweep|speed|rpm|dome|panel|tell_\w+)$/;
 /** Ease rate per channel prefix, units per second. */
 const RATE: readonly [RegExp, number][] = [
   [/^door_|^boot|^tailgate|^bonnet/, 1.6],
@@ -493,6 +493,8 @@ export class KitRig {
     }
     // A radio that is on shows it: the needle drifts along the band.
     if (this.get('radio') > 0.5) this.set('radio_tune', 0.5 + 0.4 * Math.sin(this.time * 0.15));
+    // The instrument lighting is on whenever the light switch is: dipped or main beam.
+    this.set('panel', this.get('lights') >= 1 ? 1 : 0);
 
     for (const [name, c] of this.channels) {
       if (c.value === c.target) continue;

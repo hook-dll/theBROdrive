@@ -91,6 +91,17 @@ const TELLTALES: Readonly<Record<Telltale, number>> = {
 const GLOW_TRAVEL = 0.008;
 /** The courtesy lamp's lens lit: a warm filament behind milky plastic. */
 const DOME_LIT = 0xfff0c8;
+/**
+ * The instrument lighting, on with the side lights (rig channel `panel`, derived from
+ * the light switch `lights` in rig.ts): a dial's face faintly lit, its ticks and its needle glowing.
+ * Lit faces like the warning lamps', slid out over the dial's own, so the cluster
+ * needs no light and no new program. Kept dim: it is read at night, from the seat.
+ */
+const PANEL_FACE = 0x0c1610;
+const PANEL_TICK = shade(0xb4ecbc, 0.62);
+const PANEL_NEEDLE = shade(COLOURS.needle, 0.72);
+/** The rig channel the instrument lighting's lit faces slide out on, by `GLOW_TRAVEL`. */
+const PANEL_MOTION_CHANNEL = 'panel';
 
 /** Which seat or door a control belongs to, for its hover label. */
 const WHERE: Readonly<Record<string, string>> = {
@@ -1391,12 +1402,42 @@ class Cabin {
       b.quad('trim', at(0.74, -1), at(0.92, -1), at(0.92, 1), at(0.74, 1));
     }
     b.pop();
+    const glowAt = m.at(0, 0, 0.0044);
+    this.hinge(this.group, ORIGIN, `panel_glow_${g.channel}`, glowAt, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: GLOW_TRAVEL }, undefined, (n) => {
+      n.push(m.matrix);
+      if (!g.bare) {
+        const disc: Vec3[] = [];
+        for (let i = 0; i < 12; i++) {
+          const a = (i / 12) * Math.PI * 2;
+          disc.push([Math.cos(a) * r, Math.sin(a) * r, 0.0043 - GLOW_TRAVEL]);
+        }
+        n.color(PANEL_FACE).poly('lamp_glow', disc);
+      }
+      n.color(PANEL_TICK);
+      for (let i = 0; i < g.ticks; i++) {
+        const a = g.rest - (g.sweep * i) / (g.ticks - 1);
+        const d: Vec3 = [Math.cos(a), Math.sin(a), 0];
+        const p: Vec3 = [-d[1] * 0.0018, d[0] * 0.0018, 0];
+        const at = (k: number, sgn: number): Vec3 => [d[0] * r * k + sgn * p[0], d[1] * r * k + sgn * p[1], 0.0049 - GLOW_TRAVEL];
+        n.quad('lamp_glow', at(0.74, -1), at(0.92, -1), at(0.92, 1), at(0.74, 1));
+      }
+      n.pop();
+    }, false);
     const min = g.min ?? 0;
     const at = m.at(0, 0, 0.008);
     const motion: KitMotion = { channel: g.channel, kind: 'rot', axis: m.n, amount: -g.sweep / (g.full - min), stops: [min, g.full] };
-    this.hinge(this.group, ORIGIN, `needle_${g.channel}`, at, motion, undefined, (n) => {
+    const hand = this.hinge(this.group, ORIGIN, `needle_${g.channel}`, at, motion, undefined, (n) => {
       needle(n, m, r, g.rest);
     });
+    // The needle's own glow rides on it, under its painted face while the lights are off.
+    this.hinge(hand, at, `needle_glow_${g.channel}`, at, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: GLOW_TRAVEL }, undefined, (n) => {
+      const d: Vec3 = [Math.cos(g.rest), Math.sin(g.rest), 0];
+      const p: Vec3 = [-d[1], d[0], 0];
+      const pt = (k: number, w: number): Vec3 => [d[0] * r * k + p[0] * w, d[1] * r * k + p[1] * w, 0.0084 - GLOW_TRAVEL];
+      n.push(m.matrix).color(PANEL_NEEDLE);
+      n.quad('lamp_glow', pt(0.14, -0.0015), pt(0.85, -0.001), pt(0.85, 0.001), pt(0.14, 0.0015));
+      n.pop();
+    }, false);
   }
 
   /** A ribbon window on the cluster face, its ticks and a marker sliding along it with the channel. */
@@ -1411,14 +1452,26 @@ class Cabin {
     b.color(COLOURS.tick);
     for (let i = 0; i < g.ticks; i++) rect(b, 'trim', lerp(-run, run, i / (g.ticks - 1)), -hh * 0.45, 0.0012, hh * 0.4, 0.0046);
     b.pop();
+    this.hinge(this.group, ORIGIN, `panel_glow_${g.channel}`, m.at(0, 0, 0.0044), { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: GLOW_TRAVEL }, undefined, (n) => {
+      n.push(m.matrix).color(PANEL_FACE);
+      rect(n, 'lamp_glow', 0, 0, hw, hh, 0.0043 - GLOW_TRAVEL);
+      n.color(PANEL_TICK);
+      for (let i = 0; i < g.ticks; i++) rect(n, 'lamp_glow', lerp(-run, run, i / (g.ticks - 1)), -hh * 0.45, 0.0012, hh * 0.4, 0.0049 - GLOW_TRAVEL);
+      n.pop();
+    }, false);
     const at = m.at(-run, 0, 0.005);
     const min = g.min ?? 0;
     const motion: KitMotion = { channel: g.channel, kind: 'pos', axis: m.u, amount: (2 * run) / (g.full - min), stops: [min, g.full] };
-    this.hinge(this.group, ORIGIN, `needle_${g.channel}`, at, motion, undefined, (n) => {
+    const hand = this.hinge(this.group, ORIGIN, `needle_${g.channel}`, at, motion, undefined, (n) => {
       n.push(m.matrix).color(COLOURS.needle);
       rect(n, 'trim', -run, 0, 0.0018, hh * 0.9, 0.005);
       n.pop();
     });
+    this.hinge(hand, at, `needle_glow_${g.channel}`, at, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: GLOW_TRAVEL }, undefined, (n) => {
+      n.push(m.matrix).color(PANEL_NEEDLE);
+      rect(n, 'lamp_glow', -run, 0, 0.0014, hh * 0.86, 0.0054 - GLOW_TRAVEL);
+      n.pop();
+    }, false);
   }
 
   /** Lid hinged at its foot, falling open towards the passenger, over a dark opening. */

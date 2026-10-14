@@ -3863,9 +3863,9 @@ export class Vehicle implements Rebasable {
     return this.lamps.anyLit();
   }
 
-  /** Spotlights one of this vehicle's lamp groups needs while lit (vehiclelamps.ts). */
-  beamCount(group: BeamGroup, merged: boolean): number {
-    return this.lamps.beamCount(group, merged);
+  /** Pool spotlights one of this vehicle's lamp groups needs while lit (vehiclelamps.ts). */
+  beamCount(group: BeamGroup, merged: boolean, shadowed = false): number {
+    return this.lamps.beamCount(group, merged, shadowed);
   }
 
   /**
