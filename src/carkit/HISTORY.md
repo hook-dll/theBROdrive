@@ -321,6 +321,63 @@ Format of an entry: **Problem** → **Cause** → **Fix** → *Code* (commit).
   drop left showing is gone: a pane winds all the way down. *carkit/rig.ts
   `SinkingPane`, kit.ts `shellMotion`, render/stickerdecals.ts*.
 
+## Rendering (2026-10-14)
+
+- **Z-fighting: could it be found and fixed without the owner pointing at each spot?**
+  The census (`tools/kit-zfight.ts`) builds every car closed and open. It pairs faces
+  that lie in one plane and overlap, bands each pair by the distance at which the 24-bit
+  depth buffer (near 0.08 m) loses it, and keeps the pairs a line of sight reaches. It
+  found 22 causes that flicker at any distance and are seen. Each one is a part generated
+  exactly in another part's face, against a part of another colour. The fix is a
+  millimetre, a dropped face that lies inside another part, or a spec value:
+  - C1, all cars: the radiator core's top lay in the header tank's top. The core has no
+    top face (`NO_TOP`, *bay.ts:438*).
+  - C9/C14, classics: the radiator support's posts and lower member stood on the
+    underbody with their bottom faces in it. They get `UPPER_FACES` (*bay.ts:429, 431*).
+  - C13/C19, all cars: the scuttle's back lay in the firewall. It stands 2 mm ahead
+    (`PLANE_GAP`, *bay.ts:416*).
+  - C53, classics: the intake log's sides lay in the exhaust runners' ends. It is 2 mm
+    narrower each side (*bay.ts:386*).
+  - C2, classics: a grille frame's back lay in the nose panel. It is sunk 4 mm, as a
+    `frame` item is (*exterior.ts:276*).
+  - C3/C6: the round lamps' chrome ring had its back in the face and, on the 2103, its
+    front in the grille's front: a flicker round all four lamps, seen from the whole front
+    half. The ring now runs from 1 mm into the face to 26 mm out, centre `out(0.0125)`,
+    half `0.0135` (*exterior.ts:240*).
+  - C15/C49/C51/C62/C71, all grilles: bars spanning the slot ended on the dark back box's
+    faces. The back box reaches 2 mm past the slot every way (*exterior.ts:280*).
+  - C30, 2110/2112: the groove ridge (6 mm proud on the centre line) crossed the lower
+    intake's face. The intake's `standOut` went from 0.02 to 0.024 (*tens.ts:221*).
+  - C31, 2115: the moulding band's front met the lower intake's front on the centre line.
+    `standOut` went from 0.027 to 0.029 (*samaras.ts:394*).
+  - C54, 2101 tail: the lamp's black plate and the chrome rim shared their bottom face.
+    The cluster starts at `bumperTop` +0.129 instead of +0.127 (*specs.ts:249*).
+  - C76, 2103: the blinker's front lay in the grille frame's front where it tucks under.
+    `proud` went from 0.01 to 0.008 (*specs.ts:293*).
+  - C29, all cars: the handbrake lever's end lay in the grip's end. The lever stops at
+    98 % (*interior.ts:1493*).
+  - C86, Samaras, tens, 2107: the vent louvres' backs lay on their backing. They stand
+    1 mm off it, at z 0.006 (*interior.ts:1198*).
+  - C48 (and C34/C37 at 10–25 m), every door: the handle recess crossed the door's
+    inner skin, which is offset along its own normals. The recess stands 5 mm off the
+    card line instead of 2 mm (*interior.ts:1638*).
+  - C83, 2104: the headliner's rear drop crossed the tailgate's inner skin at the header.
+    A hatch's drop stands 6 cm in from the glass line instead of 5, which clears the skin
+    by 5 mm (*interior.ts:1038*).
+
+  The scanner went from 133 visible close-range clusters to 0. No new close-range or
+  10–25 m row appeared, and the 10–25 m rows of the door recess and the 2110 intake are
+  gone too. Proved on geometry, per mesh, closed pose:
+  - every changed mesh is one of the fixes above;
+  - each car has 8 fewer triangles (the dropped faces);
+  - the 2110, 2112 and 2115 noses reach up to 2 mm further, because the intake is now the
+    proudest part. Their fit rows were refreshed (`tools/fit-models.ts`), and
+    `tools/kit-proportions.ts` passes its hard gates.
+
+  Still open: the 10–25 m layer steps in the cabin (0.5–0.6 mm: mirror glass, armrest
+  cup, radio dial, gauge ticks, cluster bezels) and the rear hump tops against the arch
+  liners (STATUS.md).
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent

@@ -234,8 +234,10 @@ function buildFaceItem(face: EndFace, item: FaceItem, b: PartBuilder): void {
       const x = face.x(item.x);
       const y = face.y(item.y);
       for (const side of [1, -1]) {
-        // A chrome ring on the face and the lens standing on it.
-        b.color(CHROME_TRIM).cylinderZ('chrome', [side * x, y, face.out(0.012)], item.radius * 1.18, 0.012, 12);
+        // A chrome ring on the face and the lens standing on it. The ring reaches 1 mm into
+        // the face and 26 mm out of it, so neither cap lies in the face or in a grille's
+        // front 24 mm out (the 2103's lamps stand on its grille).
+        b.color(CHROME_TRIM).cylinderZ('chrome', [side * x, y, face.out(0.0125)], item.radius * 1.18, 0.0135, 12);
         b.cylinderZ(lampSlot(item.role, side), [side * x, y, face.out(0.024)], item.radius, 0.01, 12);
       }
       return;
@@ -268,11 +270,14 @@ function buildFaceItem(face: EndFace, item: FaceItem, b: PartBuilder): void {
       // A grille standing out of the face is a box from the face to its front.
       const so = item.standOut ?? 0;
       if (item.frame) {
+        // Sunk 4 mm into the face, as a `frame` item: its back is not in the face's plane.
         const m = item.frame.margin;
         const { slot, color } = finishSlot(item.frame.finish);
-        b.color(color).boxFrom(slot, [-gw - m, y - hy - m, face.out(0)], [gw + m, y + hy + m, face.out(so + 0.02)]);
+        b.color(color).boxFrom(slot, [-gw - m, y - hy - m, face.out(-0.004)], [gw + m, y + hy + m, face.out(so + 0.02)]);
       }
-      if (item.back) b.color(GRILLE_DARK).boxFrom('trim', [-gw, y - hy, face.out(so + 0.006)], [gw, y + hy, face.out(so + 0.024)]);
+      // The dark back reaches 2 mm past the slot every way, so bars that span the slot end
+      // inside it rather than on its faces.
+      if (item.back) b.color(GRILLE_DARK).boxFrom('trim', [-gw - 0.002, y - hy - 0.002, face.out(so + 0.006)], [gw + 0.002, y + hy + 0.002, face.out(so + 0.024)]);
       const bars = item.bars;
       const { slot, color } = finishSlot(bars.finish);
       b.color(color);

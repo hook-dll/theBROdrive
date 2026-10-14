@@ -469,6 +469,21 @@
 
 ### Fixed
 
+- KIT CARS' Z-FIGHTING: faces built in another part's face flickered at any distance:
+  - the 2103's chrome headlamp rings against its black grille;
+  - grille bars against the dark slot behind them, on every grille;
+  - the 2110/2112/2115 lower intake against the bumper's groove or moulding band;
+  - the radiator top, scuttle and radiator support in the engine bay;
+  - the handbrake grip, vent louvres, door handle recess and a 2104 headliner corner.
+  Each is now a millimetre, a dropped hidden face or a spec value apart
+  (`carkit/bay.ts`, `exterior.ts`, `interior.ts`, `specs.ts`, `tens.ts`, `samaras.ts`;
+  the full list with file and line is in `src/carkit/HISTORY.md` "Rendering").
+  The new `tools/kit-zfight.ts` builds every kit car shut and open and lists the faces
+  that share a plane, banded by the distance the 24-bit depth buffer loses them at and
+  kept only where a line of sight reaches them. It went from 133 visible close-range
+  clusters to 0 on all 13 cars. Every changed mesh is one of the fixes, and each car has
+  8 fewer triangles. The 2110/2112/2115 noses reach up to 2 mm further (the intake), so
+  their `model-fits.json` rows were refreshed.
 - KIT DROP GLASS INTO THE CABIN: a lowered door window on a kit car came down inside the
   door card, into the cabin. The pane leans in with the greenhouse (12.7 cm over its
   height on the classics, the door is 7.5 cm thick) and used to drop straight down. It now

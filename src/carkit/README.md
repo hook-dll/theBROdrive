@@ -31,8 +31,9 @@ needed, drop it for the simple version.
 **Workflow: screenshots first, docs at acceptance.** As soon as a shape is visible in the
 lab, send the owner (through the main agent) draft screenshots from his angles, before
 hash proofs and docs. Iterate on his feedback. Only when he accepts the model: run the
-full checks (tsc, hashes, lamps at night, shader programs, fit rows), write the docs
-(this file, STATUS, HISTORY, CHANGELOG, measurements) and commit.
+full checks (tsc, hashes, z-fighting `tools/kit-zfight.ts`, lamps at night, shader
+programs, fit rows), write the docs (this file, STATUS, HISTORY, CHANGELOG, measurements)
+and commit.
 
 **Machine and processes** (full text: `.omp/rules/process-hygiene.md`, untracked):
 - Run your own Vite: `npx vite --port 5199 --strictPort`. Port 5173 is the owner's own
@@ -581,7 +582,11 @@ Re-run `fit-models.ts` for every car whose shape changed. Stage the file as in
      fitting.
 3. Triangles: within ≈ 8–13k total ([Budget](#budget-and-current-figures)); add the row.
 4. The proof that other cars did not move, if the generator changed.
-5. Docs: README (new spec fields, families table, budget row), `STATUS.md` (car row),
+5. Z-fighting: `nice -n 15 ~/.bun/bin/bun tools/kit-zfight.ts kit_vaz2110` (all cars
+   without ids, ~7 s) must end with `0 visible close-range clusters`. A row there names
+   both emitters (`file:line`); keep two faces of different look ≥ 2 mm apart, or drop the
+   one inside another part (`UPPER_FACES`, `NO_TOP` in bay.ts).
+6. Docs: README (new spec fields, families table, budget row), `STATUS.md` (car row),
    `HISTORY.md` (fixes), `CHANGELOG.md` (an `### Added` entry).
 
 ## Proving a refactor
@@ -622,19 +627,19 @@ groups.
 
 | | Total | Body + trim | Cabin | Engine bay | Boot | Underbody | Wheels | Beyond 25 m |
 |---|---|---|---|---|---|---|---|---|
-| 2101 | 11 497 | 5 071 | 2 985 | 1 053 | 298 | 746 | 1 344 | 6 415 |
-| 2102 | 11 480 | 5 342 | 2 945 | 1 053 | 50 | 746 | 1 344 | 6 686 |
-| 2103 | 12 205 | 5 591 | 3 173 | 1 053 | 298 | 746 | 1 344 | 6 935 |
-| 2104 | 11 804 | 5 414 | 3 189 | 1 073 | 38 | 746 | 1 344 | 6 758 |
-| 2105 | 12 139 | 5 439 | 3 239 | 1 073 | 298 | 746 | 1 344 | 6 783 |
-| 2106 | 12 607 | 6 023 | 3 143 | 1 053 | 298 | 746 | 1 344 | 7 367 |
-| 2107 | 12 347 | 5 299 | 3 587 | 1 073 | 298 | 746 | 1 344 | 6 643 |
-| 2108 | 10 272 | 3 828 | 3 195 | 1 247 | 38 | 620 | 1 344 | 5 172 |
-| 2109 | 11 396 | 4 712 | 3 435 | 1 247 | 38 | 620 | 1 344 | 6 056 |
-| 21099 | 11 699 | 4 901 | 3 519 | 1 247 | 68 | 620 | 1 344 | 6 245 |
-| 2115 | 12 309 | 5 511 | 3 519 | 1 247 | 68 | 620 | 1 344 | 6 855 |
-| 2110 | 14 775 | 7 509 | 3 927 | 1 307 | 56 | 632 | 1 344 | 8 853 |
-| 2112 | 14 705 | 7 539 | 3 833 | 1 307 | 50 | 632 | 1 344 | 8 883 |
+| 2101 | 11 489 | 5 071 | 2 985 | 1 045 | 298 | 746 | 1 344 | 6 415 |
+| 2102 | 11 472 | 5 342 | 2 945 | 1 045 | 50 | 746 | 1 344 | 6 686 |
+| 2103 | 12 197 | 5 591 | 3 173 | 1 045 | 298 | 746 | 1 344 | 6 935 |
+| 2104 | 11 796 | 5 414 | 3 189 | 1 065 | 38 | 746 | 1 344 | 6 758 |
+| 2105 | 12 131 | 5 439 | 3 239 | 1 065 | 298 | 746 | 1 344 | 6 783 |
+| 2106 | 12 599 | 6 023 | 3 143 | 1 045 | 298 | 746 | 1 344 | 7 367 |
+| 2107 | 12 339 | 5 299 | 3 587 | 1 065 | 298 | 746 | 1 344 | 6 643 |
+| 2108 | 10 264 | 3 828 | 3 195 | 1 239 | 38 | 620 | 1 344 | 5 172 |
+| 2109 | 11 388 | 4 712 | 3 435 | 1 239 | 38 | 620 | 1 344 | 6 056 |
+| 21099 | 11 691 | 4 901 | 3 519 | 1 239 | 68 | 620 | 1 344 | 6 245 |
+| 2115 | 12 301 | 5 511 | 3 519 | 1 239 | 68 | 620 | 1 344 | 6 855 |
+| 2110 | 14 767 | 7 509 | 3 927 | 1 299 | 56 | 632 | 1 344 | 8 853 |
+| 2112 | 14 697 | 7 539 | 3 833 | 1 299 | 50 | 632 | 1 344 | 8 883 |
 
 The owner set the budget aside for the 2110 and 2112 (the rounded rear shut line adds side
 rows to every tub column).

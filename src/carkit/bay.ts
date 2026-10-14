@@ -47,6 +47,14 @@ const TOWER_R = 0.075;
 const TOWER_IN = 0.07;
 /** Box faces without the bottom one, for parts standing on something. */
 const UPPER_FACES = 0b110111;
+/** Box faces without the top one, for parts whose top is inside another. */
+const NO_TOP = 0b111011;
+/**
+ * Two walls that would meet face to face stand this far apart instead: in one plane they
+ * z-fight at any distance (tools/kit-zfight.ts), 2 mm apart only far beyond 25 m, where
+ * the bay is no longer drawn.
+ */
+const PLANE_GAP = 0.002;
 /** The classic's front beam stands this far ahead of the axle; the sump's deep part clears it. */
 const CROSSMEMBER_AHEAD = 0.08;
 
@@ -371,10 +379,11 @@ function inline4(b: PartBuilder, e: Inline4): { outlet: Vec3; carb: Vec3 } {
   const collector = -h * 1.46;
   b.box('trim', [collector, runnerY - 0.04, 0], [h * 0.23, 0.035, L / 2 - 0.06]);
   const outlet: Vec3 = [collector, runnerY - 0.075, -(L / 2 - 0.1)];
-  // Intake and carburettor: over the exhaust, or across the head.
+  // Intake and carburettor: over the exhaust, or across the head. Over the exhaust its
+  // sides stand inside the runners' ends, not in their plane.
   const ix = (e.crossflow ? 1.15 : -1.15) * h;
   b.color(COLOURS.alloy);
-  b.box('trim', [ix, yHead + e.head * 0.85, 0], [h * 0.27, 0.028, L / 2 - 0.1]);
+  b.box('trim', [ix, yHead + e.head * 0.85, 0], [h * 0.27 - PLANE_GAP, 0.028, L / 2 - 0.1]);
   const carbX = (e.crossflow ? 0.85 : -1.0) * h;
   const carbY0 = yHead + e.head;
   b.box('trim', [carbX, (carbY0 + top) / 2, 0], [0.05, (top - carbY0) / 2, 0.05]);
@@ -401,9 +410,11 @@ function buildEngineBay(frame: BodyFrame, b: PartBuilder, classic: boolean): Bay
   const ss = stationsBetween(frame, support - 0.04, cowl);
   for (const side of [1, -1]) loft(b, 'paint', frame, ss, side, (s) => wingWall(frame, s, inner, shelf, floorY(frame, s), true));
   bulkhead(b, frame, cowl, inner, shelf, floorY(frame, cowl));
-  // Scuttle: the plenum under the screen's foot, a black grille on top.
+  // Scuttle: the plenum under the screen's foot, a black grille on top. Its back stands
+  // 2 mm ahead of the bulkhead at the cowl, so the two walls do not share a plane.
   const scuttleTop = ceiling(frame, cowl - 0.1, cowl, frame.lidX(cowl));
-  const scuttle: Pt[] = [[cowl, scuttleTop - 0.09], [cowl, scuttleTop], [cowl - 0.1, scuttleTop - 0.005], [cowl - 0.1, scuttleTop - 0.05]];
+  const scuttleBack = cowl - PLANE_GAP;
+  const scuttle: Pt[] = [[scuttleBack, scuttleTop - 0.09], [scuttleBack, scuttleTop], [cowl - 0.1, scuttleTop - 0.005], [cowl - 0.1, scuttleTop - 0.05]];
   b.color(COLOURS.black);
   across(b, frame, 'trim', scuttle, -frame.lidX(cowl), frame.lidX(cowl));
 
@@ -412,17 +423,19 @@ function buildEngineBay(frame: BodyFrame, b: PartBuilder, classic: boolean): Bay
   const fl = floorY(frame, support);
   const slamTop = ceiling(frame, support - 0.06, support + 0.02, inner);
   across(b, frame, 'paint', [[support - 0.06, slamTop - 0.012], [support - 0.06, slamTop], [support + 0.02, slamTop], [support + 0.02, slamTop - 0.05], [support - 0.03, slamTop - 0.05]], -inner, inner);
+  // Posts and lower member stand on the shell's underbody: no bottom faces in its plane.
   for (const side of [1, -1]) {
     const [x0, x1] = side > 0 ? [radHalf + 0.01, inner] : [-inner, -radHalf - 0.01];
-    boxS(b, frame, 'paint', [x0, fl, support - 0.03], [x1, slamTop - 0.05, support]);
+    boxS(b, frame, 'paint', [x0, fl, support - 0.03], [x1, slamTop - 0.05, support], UPPER_FACES);
   }
-  boxS(b, frame, 'paint', [-inner, fl, support - 0.03], [inner, fl + 0.07, support]);
+  boxS(b, frame, 'paint', [-inner, fl, support - 0.03], [inner, fl + 0.07, support], UPPER_FACES);
   const rs0 = support + 0.005;
   const rs1 = support + 0.045;
   const radBottom = fl + 0.08;
   const radTop = slamTop - 0.06;
   b.color(COLOURS.radiator);
-  boxS(b, frame, 'trim', [-radHalf, radBottom, rs0], [radHalf, radTop, rs1]);
+  // The core's top is inside the header tank (whose top is at radTop): no top face.
+  boxS(b, frame, 'trim', [-radHalf, radBottom, rs0], [radHalf, radTop, rs1], NO_TOP);
   b.color(COLOURS.radiatorTank);
   boxS(b, frame, 'trim', [-radHalf - 0.01, radTop - 0.05, rs0 - 0.005], [radHalf + 0.01, radTop, rs1 + 0.01]);
   boxS(b, frame, 'chrome', [radHalf - 0.08, radTop, rs0 + 0.002], [radHalf - 0.04, radTop + 0.02, rs1 - 0.002], UPPER_FACES);

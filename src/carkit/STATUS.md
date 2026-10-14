@@ -191,6 +191,13 @@ slot (as on the 2115).
   A kit car's anchor (`buildProgramAnchor`) holds its driving clone, a wreck and a
   courier; LOD, opening parts and a door's sticker layer change only visibility, uniforms
   and transforms.
+- **Z-fighting** (`tools/kit-zfight.ts`, 2026-10-14): the close-range causes are fixed;
+  0 visible clusters flicker at any distance on all 13 cars (HISTORY.md "Rendering").
+  Left: the 10–25 m rows (gaps of 0.15–0.93 mm, flickering between 10 m and the 25 m
+  cabin LOD): the cabin's 0.5–0.6 mm layer steps (mirror glass on its pad, armrest cup,
+  radio dial, gauge ticks and cluster bezels) and the rear hump tops crossing the arch
+  liners (`interior.ts` `humps`, `HUMP_RISE` lifted straight up). Rerun the scanner after
+  any generator change: no close-range visible row may appear.
 - **No ink outline** (agreed).
 - The bonnet item grid is not rearranged yet (engine central).
 - **Lamp roles**: only head, tail, brake, reverse, blinkers (and never-lit `inert`). Every

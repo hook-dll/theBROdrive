@@ -385,12 +385,13 @@ export const LOOK_2115: KitLook = {
       { kind: 'panel', x: { from: { centre: 0.52 }, to: { centre: 0.69 } }, y: { from: ['bumperBottom', 0.02], to: ['bumperBottom', 0.1] }, finish: 'black', proud: 0.047 },
       { kind: 'panel', x: { from: { centre: 0.55 }, to: { centre: 0.66 } }, y: { from: ['bumperBottom', 0.03], to: ['bumperBottom', 0.09] }, finish: 'chrome', proud: 0.05 },
       // The dark recessed intake strip between them, under the band [owner's front photo:
-      // 0.18–0.22 below the bumper's top].
+      // 0.18–0.22 below the bumper's top]. It stands 2 mm ahead of the band's front, which
+      // reaches it on the centre line, so the two are not in one plane.
       {
         kind: 'grille',
         x: { centre: 0.5 },
         y: { from: ['bumperBottom', 0.045], to: ['bumperBottom', 0.09] },
-        standOut: 0.027,
+        standOut: 0.029,
         back: true,
         bars: { dir: 'horizontal', count: 1, finish: 'black', margin: 0, width: 0.012, depth: 0.01, proud: 0.004 },
       },

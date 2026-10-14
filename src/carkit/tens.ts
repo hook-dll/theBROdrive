@@ -211,12 +211,14 @@ export const LOOK_2110: KitLook = {
     items: [
       // Fog-lamp recesses (blanks on most cars) in the bumper's lower band.
       { kind: 'panel', x: { from: { centre: 0.3 }, to: { centre: 0.475 } }, y: { from: ['bumperBottom', 0.037], to: ['bumperBottom', 0.118] }, finish: 'black', proud: 0.045 },
-      // The dark intake between them, out at the bumper's face.
+      // The dark intake between them, out at the bumper's face: 2 mm ahead of the groove's
+      // ridge (6 mm proud on the centre line), so the groove stops at it instead of
+      // crossing its face in one plane.
       {
         kind: 'grille',
         x: { centre: 0.287 },
         y: { from: ['bumperBottom', 0.055], to: ['bumperBottom', 0.135] },
-        standOut: 0.02,
+        standOut: 0.024,
         back: true,
         bars: { dir: 'vertical', count: 2, finish: 'paint', margin: 0, width: 0.02, depth: 0.01, proud: 0.005 },
       },

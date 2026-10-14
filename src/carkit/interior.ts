@@ -1033,7 +1033,9 @@ class Cabin {
     const drop = (x: number, kind: 'front' | 'rear'): Vec3 => {
       const [[sb, yb], [st, yt]] = glass(x, kind);
       const y = this.dome(x) - (kind === 'front' ? cab.screenHeader : cab.rearHeader) - 0.01;
-      const s = lerp(sb, st, (y - yb) / (yt - yb)) + (kind === 'front' ? 0.025 : this.hatch ? -0.05 : -0.025);
+      // A hatch's drop stands 6 cm in from the glass line: at 5 cm the 2104's crossed the
+      // tailgate's inner skin at the header (z-fighting); 6 cm clears it by 5 mm.
+      const s = lerp(sb, st, (y - yb) / (yt - yb)) + (kind === 'front' ? 0.025 : this.hatch ? -0.06 : -0.025);
       return this.P(x, y, s);
     };
     const frontTop = top0 + 0.03;
@@ -1192,7 +1194,8 @@ class Cabin {
         b.quad('trim', [-hx, -hy, 0.002], [hx, -hy, 0.002], [hx, hy, 0.002], [-hx, hy, 0.002]);
         b.color(look.dash);
         const n = Math.round(hy / 0.012) - 1;
-        for (let i = -n; i <= n; i++) beam(b, 'trim', [-(hx - 0.003), i * 0.012, 0.005], [hx - 0.003, i * 0.012, 0.005], 0.003, 0.004);
+        // Louvres 6 mm deep from 3 mm off the face: their backs clear the backing by 1 mm.
+        for (let i = -n; i <= n; i++) beam(b, 'trim', [-(hx - 0.003), i * 0.012, 0.006], [hx - 0.003, i * 0.012, 0.006], 0.003, 0.004);
         b.pop();
       }
     }
@@ -1486,7 +1489,8 @@ class Cabin {
     const tip = this.P(0, hy + 0.05, hs - L.handbrake.length);
     this.hinge(this.group, ORIGIN, 'handbrake', hp, { channel: 'handbrake', kind: 'rot', axis: [1, 0, 0], amount: -0.4 }, { id: 'handbrake', label: 'Ручник' }, (h) => {
       h.color(COLOURS.metal);
-      beam(h, 'trim', hp, tip, 0.011, 0.014);
+      // The lever stops just inside the grip, so its end is not in the grip's end.
+      beam(h, 'trim', hp, add(hp, scale(sub(tip, hp), 0.98)), 0.011, 0.014);
       h.color(COLOURS.black);
       beam(h, 'trim', add(hp, scale(sub(tip, hp), 0.5)), tip, 0.016, 0.02);
       h.cylinderZ('chrome', add(tip, [0, 0, 0.006]), 0.007, 0.007, 6);
@@ -1626,10 +1630,12 @@ class Cabin {
       const cup = (s: number, k: number): Vec3 => card(s, ay + 0.0255, 0.03 + k * 0.016);
       b.quad('trim', cup(as - 0.06, -1), cup(as + 0.04, -1), cup(as + 0.04, 1), cup(as - 0.06, 1));
 
-      // Inner handle: a chrome lever in a dark recess at the card's front top.
+      // Inner handle: a chrome lever in a dark recess at the card's front top. The recess
+      // stands 5 mm off the card line: the door's inner skin, offset along its own
+      // normals, wanders a millimetre or so either side of that line.
       const hs = s0 + (front ? 0.13 : 0.1);
       const hy = belt - 0.085;
-      b.quad('trim', card(hs - 0.05, hy - 0.022, 0.002), card(hs + 0.05, hy - 0.022, 0.002), card(hs + 0.05, hy + 0.022, 0.002), card(hs - 0.05, hy + 0.022, 0.002));
+      b.quad('trim', card(hs - 0.05, hy - 0.022, 0.005), card(hs + 0.05, hy - 0.022, 0.005), card(hs + 0.05, hy + 0.022, 0.005), card(hs - 0.05, hy + 0.022, 0.005));
       beam(b, 'chrome', card(hs + 0.035, hy, 0.008), card(hs - 0.03, hy, 0.012), 0.006, 0.007);
 
       // Capping over the door's top between the card and the glass, and the lock knob through it.

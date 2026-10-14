@@ -244,7 +244,9 @@ const LOOK_2101: KitLook = {
     },
     items: [
       { kind: 'frame', x: { from: { centre: 0.37 }, to: { centre: 0.7 } }, y: { from: ['bumperTop', 0.115], to: ['bumperTop', 0.245] }, width: 0.012, finish: 'chrome', proud: 0.012 },
-      { kind: 'cluster', x: { from: { centre: 0.38 }, to: { centre: 0.69 } }, y: { from: ['bumperTop', 0.127], to: ['bumperTop', 0.235] }, columns: [['blinker'], ['tail', 'brake']] },
+      // From +0.129, not the drawing's +0.127: the lamp's black plate (12 mm round it) then
+      // ends 2 mm inside the rim's bottom bar instead of in its bottom face (z-fighting).
+      { kind: 'cluster', x: { from: { centre: 0.38 }, to: { centre: 0.69 } }, y: { from: ['bumperTop', 0.129], to: ['bumperTop', 0.235] }, columns: [['blinker'], ['tail', 'brake']] },
       { kind: 'lens', role: 'reverse', x: { from: { centre: 0.472 }, to: { centre: 0.594 } }, y: { from: ['bumperTop', 0.065], to: ['bumperTop', 0.108] }, depth: 0.01, proud: 0.012 },
     ],
   },
@@ -287,7 +289,8 @@ const LOOK_2103: KitLook = {
       },
       { kind: 'round', role: 'head', x: { centre: 0.59 }, y: ['deck', -0.119], radius: 0.064 },
       { kind: 'round', role: 'head', x: { centre: 0.424 }, y: ['deck', -0.119], radius: 0.064 },
-      { kind: 'lens', role: 'blinker', x: { from: { centre: 0.545 }, to: { centre: 0.655 } }, y: { from: ['deck', -0.282], to: ['deck', -0.243] }, depth: 0.01, proud: 0.01 },
+      // Its top tucks under the grille's frame: 2 mm behind the frame's front (proud 0.008), not in it.
+      { kind: 'lens', role: 'blinker', x: { from: { centre: 0.545 }, to: { centre: 0.655 } }, y: { from: ['deck', -0.282], to: ['deck', -0.243] }, depth: 0.01, proud: 0.008 },
     ],
   },
   rear: {
