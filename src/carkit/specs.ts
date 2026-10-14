@@ -231,7 +231,9 @@ const LOOK_2101: KitLook = {
         bars: { dir: 'horizontal', count: 7, finish: 'chrome', margin: 0.015, width: 0.01, depth: 0.01, proud: 0.028 },
       },
       { kind: 'round', role: 'head', x: { centre: 0.575 }, y: ['mid', 0.04], radius: 0.095 },
-      { kind: 'lens', role: 'blinker', x: { from: { centre: 0.535 }, to: { centre: 0.655 } }, y: { from: ['bumperTop', 0.005], to: ['bumperTop', 0.065] }, depth: 0.01, proud: 0.01 },
+      // Half depth 0.0135 at proud 0.0065: the front stands 20 mm out as drawn and the back
+      // 7 mm inside the face, not in its plane.
+      { kind: 'lens', role: 'blinker', x: { from: { centre: 0.535 }, to: { centre: 0.655 } }, y: { from: ['bumperTop', 0.005], to: ['bumperTop', 0.065] }, depth: 0.0135, proud: 0.0065 },
     ],
   },
   rear: {

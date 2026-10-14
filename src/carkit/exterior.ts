@@ -388,8 +388,10 @@ function buildBumpers(ctx: KitContext, b: PartBuilder): void {
           const finish = finishSlot(o.finish);
           b.color(finish.color).bevelBox(finish.slot, [side * (half - o.inset), y - o.drop, zFace + end * (reach - 0.02)], [o.half[0], o.half[1], 0.028], 0.012);
         }
-        // Bracket from the body to the blade.
-        b.color(BLACK).boxFrom('trim', [side * (half - 0.32) - 0.02, y - 0.02, Math.min(zFace, zFace + end * (reach - blade))], [side * (half - 0.32) + 0.02, y + 0.02, Math.max(zFace, zFace + end * (reach - blade))]);
+        // Bracket from the body to the blade, without its face on the body (it would lie in
+        // the end face's plane).
+        const zOut = zFace + end * (reach - blade);
+        b.color(BLACK).boxFrom('trim', [side * (half - 0.32) - 0.02, y - 0.02, Math.min(zFace, zOut)], [side * (half - 0.32) + 0.02, y + 0.02, Math.max(zFace, zOut)], end > 0 ? 0b011111 : 0b101111);
       }
     } else {
       // Moulded plastic bumper: deep, wrapping the corners, its face bevelled top and

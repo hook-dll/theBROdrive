@@ -147,10 +147,13 @@ function loft(b: PartBuilder, slot: KitSlot, frame: BodyFrame, ss: readonly numb
   }
 }
 
-/** Prism across the car: a section in (s, y) extruded along x from x0 to x1. */
-function across(b: PartBuilder, frame: BodyFrame, slot: KitSlot, section: readonly Pt[], x0: number, x1: number): void {
+/**
+ * Prism across the car: a section in (s, y) extruded along x from x0 to x1. `closed =
+ * false` leaves out the face along the section's closing edge (one lying on the floor).
+ */
+function across(b: PartBuilder, frame: BodyFrame, slot: KitSlot, section: readonly Pt[], x0: number, x1: number, closed = true): void {
   b.push(new THREE.Matrix4().set(0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, frame.zNose, 0, 0, 0, 1));
-  b.extrude(slot, section, x0, x1);
+  b.extrude(slot, section, x0, x1, 0, 0, true, closed);
   b.pop();
 }
 
@@ -752,11 +755,12 @@ function classicChassis(frame: BodyFrame, b: PartBuilder, route: BayRoute): void
   const cowl = frame.cowl;
   const R = w.radius;
 
-  // Front beam under the engine's place, between the wishbones' inner pivots.
+  // Front beam under the engine's place, between the wishbones' inner pivots. It has no
+  // top face: that would lie in the floor's plane (its closing edge, last point to first).
   const cs = w.front - CROSSMEMBER_AHEAD;
   const cf = floorY(frame, cs);
   b.color(COLOURS.underseal);
-  across(b, frame, 'trim', [[cs - 0.045, cf], [cs - 0.035, cf - 0.05], [cs + 0.035, cf - 0.05], [cs + 0.045, cf]], -0.47, 0.47);
+  across(b, frame, 'trim', [[cs - 0.045, cf], [cs - 0.035, cf - 0.05], [cs + 0.035, cf - 0.05], [cs + 0.045, cf]], -0.47, 0.47, false);
   const ff = floorY(frame, w.front);
   const ball = w.frontHalfTrack - 0.1;
   for (const side of [1, -1]) {

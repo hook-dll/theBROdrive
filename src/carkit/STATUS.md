@@ -191,17 +191,13 @@ slot (as on the 2115).
   A kit car's anchor (`buildProgramAnchor`) holds its driving clone, a wreck and a
   courier; LOD, opening parts and a door's sticker layer change only visibility, uniforms
   and transforms.
-- **Z-fighting** (`tools/kit-zfight.ts`, 2026-10-14): the close-range causes are fixed;
-  0 visible clusters flicker at any distance on all 13 cars (HISTORY.md "Rendering").
-  Left: the 10–25 m rows (gaps of 0.15–0.93 mm, flickering between 10 m and the 25 m
-  cabin LOD): the cabin's 0.5–0.6 mm layer steps (mirror glass on its pad, armrest cup,
-  radio dial, gauge ticks and cluster bezels) and the rear hump tops crossing the arch
-  liners (`interior.ts` `humps`, `HUMP_RISE` lifted straight up). Rerun the scanner after
-  any generator change: no close-range visible row may appear. On 2026-10-15 the scanner
-  reports 31 visible close-range rows, the same on HEAD 1b3772a as with the lining and
-  tail-lamp change: the classics' underbody against the body's sill trim (`bay.ts:153`)
-  and the front blinker lenses and bumper brackets in the face (`exterior.ts:29`, `:392`).
-  They appeared since the 2026-10-14 census and are not fixed yet.
+- **Z-fighting** (`tools/kit-zfight.ts`, 2026-10-15): 0 visible close-range clusters on
+  all 13 cars (HISTORY.md "Rendering" and "Cabin lining and tail lamps"). Left: the
+  10–25 m rows (gaps of 0.15–0.93 mm, flickering between 10 m and the 25 m cabin LOD):
+  the cabin's 0.5–0.6 mm layer steps (mirror glass on its pad, armrest cup, radio dial,
+  gauge ticks and cluster bezels) and the rear hump tops crossing the arch liners
+  (`interior.ts` `humps`, `HUMP_RISE` lifted straight up). Rerun the scanner after any
+  generator change: no close-range visible row may appear.
 - **Cabin lining** (2026-10-15): above the belt the lining is the shell's greenhouse and
   roof set `LINING_DEPTH` in (`ShellResult.lining`), so it ends at every pane and opening;
   rubber runs from each pane to the frame's inner side. Left: thin slivers of paint in the

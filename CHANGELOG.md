@@ -703,6 +703,11 @@
 
 ### Fixed
 
+- NO Z-FIGHTING ON THE CLASSICS' NOSE AND UNDERBODY (`carkit/bay.ts`, `exterior.ts`,
+  `specs.ts`): the front beam's top, the bumper brackets' backs and the 2101/2102
+  indicator lenses' backs no longer lie in the body's faces; `tools/kit-zfight.ts`
+  31 → 0 visible close-range clusters.
+
 - NO CRAWLING SHADOW BANDS ON CABINS AND BUILDINGS (`render/lightshader.ts`
   `installSunShadowSlopeBias`, `config/graphics.json` `shadowNormalBias` 0.02 → 0.08,
   `render/carmodel.ts` `prepareMaterials`). The sun's normal bias is now turned to the

@@ -413,6 +413,21 @@ Format of an entry: **Problem** → **Cause** → **Fix** → *Code* (commit).
   parameter is gone (only the mirror face keeps `kitCastsNone`); the bias is turned to the
   light's side and scaled by the angle to the sun. *render/carmodel.ts
   `prepareMaterials`, render/lightshader.ts, context.ts `addBuilt`*.
+- **31 visible close-range z-fight clusters on the classics** (the census found them on
+  HEAD 1b3772a as well; none on the Samaras and tens). Three causes, each a face exactly in
+  another part's face:
+  - classics: the front beam's top lay in the underbody floor (gap 0.05 mm). The beam is
+    built without its top face (`across(..., closed = false)`, `PartBuilder.extrude`'s new
+    `closed`) (*bay.ts `classicChassis`*);
+  - every blade bumper: each bracket's end face lay in the end face's plane. The bracket
+    box leaves that face out (*exterior.ts `buildBumpers`*);
+  - 2101/2102: the front indicator lens's back lay in the face (`proud` = `depth`). Half
+    depth 0.0135 at `proud` 0.0065: its front stays 20 mm out, its back 7 mm inside
+    (*specs.ts `LOOK_2101`*).
+
+  Census: 31 → 0 visible close-range clusters; 10–25 m rows 2101–2103 and 2106 down by 2
+  each; >25 m/far rows 2102, 2104, 2105 down by 2, the rest unchanged. 10 triangles fewer
+  on each classic; fit rows unchanged.
 
 ## Failed approaches (do not retry)
 

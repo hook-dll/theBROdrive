@@ -181,12 +181,14 @@ export class PartBuilder {
 
   /**
    * Prism: a convex or star-shaped XY section (counter-clockwise) extruded along Z
-   * from `z0` to `z1`, offset by (ox, oy). Caps are fans from the centroid.
+   * from `z0` to `z1`, offset by (ox, oy). Caps are fans from the centroid. `closed =
+   * false` leaves out the wall along the section's closing edge (last point to first):
+   * the face of a prism whose side lies on another part.
    */
-  extrude(slot: KitSlot, section: readonly (readonly [number, number])[], z0: number, z1: number, ox = 0, oy = 0, caps = true): this {
+  extrude(slot: KitSlot, section: readonly (readonly [number, number])[], z0: number, z1: number, ox = 0, oy = 0, caps = true, closed = true): this {
     const front: Vec3[] = section.map(([x, y]) => [x + ox, y + oy, z1]);
     const back: Vec3[] = section.map(([x, y]) => [x + ox, y + oy, z0]);
-    this.bridge(slot, back, front, true);
+    this.bridge(slot, back, front, closed);
     if (caps) {
       let mx = 0;
       let my = 0;
