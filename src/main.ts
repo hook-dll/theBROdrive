@@ -478,6 +478,9 @@ async function boot(): Promise<void> {
   // Far traffic draws as one instance per model; built now so its hidden anchor links the
   // shared far-car program behind the loading cover (render/farcars.ts).
   const farCars = new FarCarField(renderer.scene);
+  // Mid traffic's shared parts (trim, glass, lenses, wheels): the same program, so the same
+  // kind of field; each car's paint draws in its own root (render/farcars.ts, MID TRAFFIC).
+  const midCars = new FarCarField(renderer.scene, 'mid-cars');
   /** Reused receiver for the nearest dancer's sound; see `DancerField.heard`. */
   const dancerSound: DancerHeard = { x: 0, y: 0, z: 0, flapMps: 0, airRate: 0 };
   /**
@@ -2202,7 +2205,7 @@ async function boot(): Promise<void> {
     frameProfiler?.begin('vehicles');
     Vehicle.viewFrom(renderer.camera.position, frameDt);
     for (const vehicle of vehicles.values()) vehicle.syncVisuals(alpha);
-    traffic.syncVisuals(alpha, farCars);
+    traffic.syncVisuals(alpha, farCars, midCars);
     // Trailer physics advances and snapshots in the fixed step exactly like cars,
     // but its scene root must also consume those snapshots every rendered frame.
     // Without this call the rigid body and hitch moved while the GLB stayed forever
@@ -2882,10 +2885,35 @@ async function boot(): Promise<void> {
         get stats(): { cars: number; models: number; drawsSaved: number } {
           let full = 0;
           traffic.forEachVehicle((_, vehicle) => {
-            if (!vehicle.root.visible) full += nearDrawEstimate(vehicle.root);
+            if (!vehicle.root.visible) full += nearDrawEstimate(vehicle.nearParts);
           });
           // Each model drawn far is one draw in the scene pass and one in the sun's.
           return { ...farCars.stats, drawsSaved: full - farCars.stats.models * 2 };
+        },
+      },
+      // `midCars.enabled = false` draws every traffic car inside the far line in full, for
+      // the A/B. `stats`: this frame's mid cars, the shared meshes they used (body rest per
+      // model, wheel per set; one draw each and one in the sun's), every draw they cost
+      // (their own paint too, also casting), and the draws they save.
+      midCars: {
+        get enabled(): boolean {
+          return midCars.enabled;
+        },
+        set enabled(on: boolean) {
+          midCars.enabled = on;
+        },
+        get stats(): { cars: number; sharedMeshes: number; draws: number; drawsSaved: number } {
+          let cars = 0;
+          let paint = 0;
+          let full = 0;
+          traffic.forEachVehicle((_, vehicle) => {
+            if (!vehicle.root.visible || !vehicle.drawnMid) return;
+            cars++;
+            paint += vehicle.midPaintSlots;
+            full += nearDrawEstimate(vehicle.nearParts);
+          });
+          const draws = (paint + midCars.stats.models) * 2;
+          return { cars, sharedMeshes: midCars.stats.models, draws, drawsSaved: full - draws };
         },
       },
     });

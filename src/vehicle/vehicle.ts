@@ -65,10 +65,17 @@ import {
   carModelFarGeometry,
   carModelMeasure,
   createCarModel,
+  type CarMidInstance,
   type CarModelMeasure,
 } from '../render/carmodel';
 import type { CarBodySurface } from '../render/carsurface';
-import { FAR_CAR_ENTER_M, FAR_CAR_EXIT_M, type FarCarField } from '../render/farcars';
+import {
+  FAR_CAR_ENTER_M,
+  FAR_CAR_EXIT_M,
+  MID_CAR_ENTER_M,
+  MID_CAR_EXIT_M,
+  type FarCarField,
+} from '../render/farcars';
 import { carPaintSeenFromAfar } from '../render/materials';
 import { carPaintColor, type CarPaint } from './carpaint';
 import type { ContactPatchField } from '../render/contactpatches';
@@ -1011,6 +1018,12 @@ export class Vehicle implements Rebasable {
   /** Past the far line from the eye at the last frame; see `drawFar`. */
   private farSide = false;
   private readonly farPaint = new THREE.Color();
+  /** This car's mid-range parts (render/carmodel.ts), from its visuals; null for none. */
+  private midParts: CarMidInstance | null = null;
+  /** Past the mid line from the eye at the last frame; see `drawMid`. */
+  private midSide = false;
+  /** The mid parts stand in for the body and wheels; see `showMid`. */
+  private midShown = false;
   private bodyConditionEmitTimer = 0;
   private lastAuthOil: number;
   private fluidEmitTimer = 0;
@@ -3610,12 +3623,12 @@ export class Vehicle implements Rebasable {
   }
 
   /**
-   * Poses the visual root at this frame's interpolated pose. `far`, given for traffic
-   * only, lets a car beyond `FAR_CAR_ENTER_M` of the eye be drawn as an instance of its
-   * model's far mesh instead (render/farcars.ts); the car the player sits in is never
-   * that far from the camera.
+   * Poses the visual root at this frame's interpolated pose. `far` and `mid`, given for
+   * traffic only, let a car beyond `FAR_CAR_ENTER_M` of the eye be drawn as an instance of
+   * its model's far mesh instead, and one between `MID_CAR_ENTER_M` and that as its mid
+   * parts (render/farcars.ts); the car the player sits in is never that far from the camera.
    */
-  syncVisuals(alpha: number, far: FarCarField | null = null): void {
+  syncVisuals(alpha: number, far: FarCarField | null = null, mid: FarCarField | null = null): void {
     const controller = this.controller;
     if (!controller) return;
 
@@ -3652,11 +3665,17 @@ export class Vehicle implements Rebasable {
     this.lamps.applyRearLightState();
 
     // Drawn far, the root hides and nothing below is seen: wheels, steering wheel, the
-    // kit rig. The pose above stays current, since the light pool projects this car's
-    // beams from it either way.
+    // kit rig. Drawn mid, the body and wheels hide behind the mid parts. The pose above
+    // stays current, since the light pool projects this car's beams from it either way.
     const drawnFar = far !== null && this.drawFar(far);
     this.rootGroup.visible = !drawnFar;
-    if (drawnFar) return;
+    // Far, the near parts are put back, which is what a car coming in past the far line
+    // starts from and what the far field's draw estimate counts.
+    const drawnMid = !drawnFar && mid !== null && this.drawMid(mid);
+    this.showMid(drawnMid);
+    // Mid, the wheels and the rig stand where they were: the mid parts are baked shut,
+    // and a door that opens sends the car back near (`drawMid`) before it moves.
+    if (drawnFar || drawnMid) return;
 
     // Wheels are chassis-local, and interpolated between the last two steps exactly as
     // the chassis is (see `spinPrev`).
@@ -3700,6 +3719,55 @@ export class Vehicle implements Rebasable {
     if (!geometry) return false;
     carPaintSeenFromAfar(this.surface.paint, this.localBodyDirt, this.farPaint);
     return far.add(geometry, this.rootGroup.position, this.rootGroup.quaternion, this.farPaint, this.lamps);
+  }
+
+  /**
+   * Adds this car's mid parts to `mid` if it stands past the mid line from the eye: out
+   * past `MID_CAR_ENTER_M`, back in inside `MID_CAR_EXIT_M`. False while it is nearer,
+   * before the first eye is known, for a model without mid parts, while any door, pane,
+   * lid or flap of a kit body is off its stop (the parts are baked shut), or when the
+   * field turns it away; it is then drawn in full.
+   */
+  private drawMid(mid: FarCarField): boolean {
+    const parts = this.midParts;
+    if (!kitEyeKnown || !parts) return false;
+    const distance = this.rootGroup.position.distanceTo(kitEye);
+    this.midSide = distance > (this.midSide ? MID_CAR_EXIT_M : MID_CAR_ENTER_M);
+    if (!this.midSide || (this.kitRig !== null && !this.kitRig.shut)) return false;
+    return mid.addMid(parts.rest, parts.wheels, this.rootGroup.position, this.rootGroup.quaternion, this.lamps);
+  }
+
+  /**
+   * Shows the mid paint in place of the body and wheels, or puts them back. Visibility
+   * only, on the frames it changes: every program is the near car's or the far field's.
+   */
+  private showMid(shown: boolean): void {
+    if (shown === this.midShown) return;
+    this.midShown = shown;
+    if (this.bodyGroup) this.bodyGroup.visible = !shown;
+    for (const w of this.wheels) w.mesh.visible = !shown;
+    if (this.midParts) this.midParts.paint.visible = shown;
+  }
+
+  /** DEV: drawn as mid parts this frame (`__bro.midCars`). */
+  get drawnMid(): boolean {
+    return this.midShown;
+  }
+
+  /**
+   * DEV: the parts a near car draws, shown or not (render/farcars.ts `nearDrawEstimate`):
+   * the body and the wheels.
+   */
+  get nearParts(): THREE.Object3D[] {
+    const parts: THREE.Object3D[] = this.bodyGroup ? [this.bodyGroup] : [];
+    for (const w of this.wheels) parts.push(w.mesh);
+    return parts;
+  }
+
+  /** DEV: the mid paint's draws in the scene pass (one per paint material); 0 without one. */
+  get midPaintSlots(): number {
+    const paint = this.midParts?.paint;
+    return paint ? (Array.isArray(paint.material) ? paint.material.length : 1) : 0;
   }
 
   /**
@@ -5636,6 +5704,9 @@ export class Vehicle implements Rebasable {
     for (const [id, mesh] of instance.wheels) this.wheelMeshes.set(id, mesh);
 
     this.lamps.build(this.measure.halfExtents, this.contactPlaneY);
+    // After the lamps bind theirs, so no lens walk ever meets it; hidden until `showMid`.
+    this.midParts = instance.mid;
+    if (instance.mid) this.rootGroup.add(instance.mid.paint);
 
     this.surface = instance.surface;
     this.surface.setCondition(this.localBodyDirt, this.localBodyScratches);
@@ -5671,6 +5742,9 @@ export class Vehicle implements Rebasable {
     this.surface = null;
     for (const child of this.rootGroup.children.slice()) this.rootGroup.remove(child);
     this.bodyGroup = null;
+    // Its materials are the paint's, which the surface disposed; its geometry is the model's.
+    this.midParts = null;
+    this.midShown = false;
     this.bodyRestScale.set(1, 1, 1);
     this.wheelMeshes.clear();
     this.steeringWheel = null;

@@ -4,6 +4,16 @@
 
 ### Added
 
+- MID-RANGE TRAFFIC IS A FEW DRAWS PER CAR (`render/farcars.ts` `MID_CAR_ENTER_M`,
+  `render/carmodel.ts` `buildMidModel`, `vehicle/vehicle.ts` `drawMid`). Between 55 m
+  (back near inside 50 m) and the far swap a traffic car draws its paint as one merged
+  mesh with its OWN paint material (its dust and scratches stay), everything else as a
+  shared per-model mesh and its wheel set as shared wheel meshes: one draw of its own plus
+  shared ones, against about 28. A car with a door, lid or window off its stop, crashed
+  or not upright stays near. Built at boot (boot 6.5 s on the M2 Pro); no program
+  linked during 90 s of driving. Wheels do not turn at mid range, stickers drop.
+  `__bro.midCars` (`enabled`, `stats`).
+
 - NO HITCHES IN THE FIRST MINUTES OF A DRIVE (`app/bootwarmup.ts`,
   `world/props/delineators.ts` `delineatorProgramAnchor`). Every car model is built
   behind the loading cover now (body, template, program anchor, far mesh) instead of the

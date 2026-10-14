@@ -23,7 +23,7 @@
  */
 
 import * as THREE from 'three';
-import { KIT_DETAIL_GROUPS } from '../carkit/rig';
+import { KIT_DETAIL_GROUPS, KIT_DETAIL_M } from '../carkit/rig';
 import { LENS_ROLE_EMISSIVE, type VehicleLamps } from '../vehicle/vehiclelamps';
 
 /** A traffic car goes far beyond this distance from the eye, metres... */
@@ -35,6 +35,22 @@ export const FAR_CAR_ENTER_M = 110;
  * of every five far cars stand further still, so most of the saving is kept.
  */
 export const FAR_CAR_EXIT_M = 90;
+
+/**
+ * MID TRAFFIC: between the kit's detail line and the far line a traffic car draws its
+ * paint as one merged mesh in its own paint material (`bakeCarPaintGeometry`), and every
+ * other part of it as instances in a second field of this kind: the body's trim, glass and
+ * lenses as one per model, its wheels as one per wheel of its set. Past `KIT_DETAIL_M` a
+ * near kit car already stands shut without its cabin, bay, boot or underbody, yet still
+ * costs some 28 draws (body, doors, lids, wheels, glass, lenses each their own); drawn mid
+ * it costs its paint, one draw and one in the sun's pass, plus a share of the shared ones.
+ *
+ * It goes mid this far past the detail line, so a car crossing it does not swap every
+ * frame, and comes back near at the line itself, where the near car's own pose is the
+ * same shut, cabinless one the mid meshes were baked in.
+ */
+export const MID_CAR_ENTER_M = KIT_DETAIL_M + 5;
+export const MID_CAR_EXIT_M = KIT_DETAIL_M;
 
 /**
  * Far cars of one model the mesh holds: the densest traffic setting's wide-road cap (48,
@@ -78,6 +94,7 @@ const _c = new THREE.Vector3();
 const _n = new THREE.Vector3();
 const _ab = new THREE.Vector3();
 const _ac = new THREE.Vector3();
+const _t = new THREE.Vector3();
 const _base = new THREE.Color();
 const _color = new THREE.Color();
 const _texel = new THREE.Color();
@@ -101,16 +118,52 @@ function pixelsOf(map: THREE.Texture): { data: Uint8ClampedArray; width: number;
   return pixels;
 }
 
-interface Piece {
+interface Piece<S> {
   readonly geometry: THREE.BufferGeometry;
   readonly matrix: THREE.Matrix4;
   readonly start: number;
   readonly count: number;
-  readonly surface: FarCarSurface;
+  readonly surface: S;
 }
 
 function toByte(value: number): number {
   return Math.round(Math.min(Math.max(value, 0), 1) * 255);
+}
+
+/**
+ * Every visible material slot under `roots` that `describe` keeps, with its mesh's
+ * chassis-local matrix (each root's own transform included), minus the kit groups a car
+ * past `KIT_DETAIL_M` stops drawing. Reads the template without changing it.
+ */
+function collectPieces<S>(
+  roots: readonly THREE.Object3D[],
+  describe: (mesh: THREE.Mesh, material: THREE.Material) => S | null,
+): Piece<S>[] {
+  const pieces: Piece<S>[] = [];
+  const walk = (node: THREE.Object3D, parent: THREE.Matrix4): void => {
+    if (!node.visible || KIT_DETAIL_GROUPS.has(node.name)) return;
+    const local = node.matrixAutoUpdate ? _local.compose(node.position, node.quaternion, node.scale) : node.matrix;
+    const matrix = new THREE.Matrix4().multiplyMatrices(parent, local);
+    if (node instanceof THREE.Mesh) {
+      const geometry = node.geometry as THREE.BufferGeometry;
+      const total = geometry.index ? geometry.index.count : geometry.getAttribute('position').count;
+      // Three draws a single-material mesh whole, groups or not.
+      const slots = Array.isArray(node.material)
+        ? geometry.groups.map((group) => ({ start: group.start, count: group.count, material: (node.material as THREE.Material[])[group.materialIndex ?? 0] }))
+        : [{ start: 0, count: total, material: node.material as THREE.Material }];
+      for (const slot of slots) {
+        if (!slot.material) continue;
+        const surface = describe(node, slot.material);
+        if (surface === null) continue;
+        const count = Math.min(slot.count, total - slot.start);
+        pieces.push({ geometry, matrix, start: slot.start, count: count - (count % 3), surface });
+      }
+    }
+    for (const child of node.children) walk(child, matrix);
+  };
+  const identity = new THREE.Matrix4();
+  for (const root of roots) walk(root, identity);
+  return pieces;
 }
 
 /**
@@ -126,30 +179,7 @@ export function bakeFarCarGeometry(
   roots: readonly THREE.Object3D[],
   describe: (mesh: THREE.Mesh, material: THREE.Material) => FarCarSurface | null,
 ): THREE.BufferGeometry {
-  const pieces: Piece[] = [];
-  const walk = (node: THREE.Object3D, parent: THREE.Matrix4): void => {
-    if (!node.visible || KIT_DETAIL_GROUPS.has(node.name)) return;
-    const local = node.matrixAutoUpdate ? _local.compose(node.position, node.quaternion, node.scale) : node.matrix;
-    const matrix = new THREE.Matrix4().multiplyMatrices(parent, local);
-    if (node instanceof THREE.Mesh) {
-      const geometry = node.geometry as THREE.BufferGeometry;
-      const total = geometry.index ? geometry.index.count : geometry.getAttribute('position').count;
-      // Three draws a single-material mesh whole, groups or not.
-      const slots = Array.isArray(node.material)
-        ? geometry.groups.map((group) => ({ start: group.start, count: group.count, material: (node.material as THREE.Material[])[group.materialIndex ?? 0] }))
-        : [{ start: 0, count: total, material: node.material as THREE.Material }];
-      for (const slot of slots) {
-        if (!slot.material) continue;
-        const surface = describe(node, slot.material);
-        if (!surface) continue;
-        const count = Math.min(slot.count, total - slot.start);
-        pieces.push({ geometry, matrix, start: slot.start, count: count - (count % 3), surface });
-      }
-    }
-    for (const child of node.children) walk(child, matrix);
-  };
-  const identity = new THREE.Matrix4();
-  for (const root of roots) walk(root, identity);
+  const pieces = collectPieces(roots, describe);
 
   let vertices = 0;
   for (const piece of pieces) vertices += piece.count;
@@ -217,6 +247,91 @@ export function bakeFarCarGeometry(
   geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3, true));
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3, true));
   geometry.setAttribute(SURFACE_ATTRIBUTE, new THREE.BufferAttribute(surfaces, 4, true));
+  return geometry;
+}
+
+/**
+ * One model's mid paint: every visible paint slot under `roots` (`slotOf` gives its index
+ * into the model's paint materials, or -1 for anything else), merged chassis-local into
+ * one buffer with one group per paint material, minus the kit groups past `KIT_DETAIL_M`.
+ * Null when the model has no paint there.
+ *
+ * It is drawn in the car's OWN paint material, so it keeps the attributes that material's
+ * program reads: every attribute all the pieces share, in float. Position, normal and
+ * tangent are carried into the chassis frame; everything else, the chassis stamp
+ * (`CAR_BODY_POSITION_ATTRIBUTE`, already chassis-local) included, is copied as it is.
+ * A mirrored piece has its corners swapped so its faces keep their winding, which the
+ * shadow side reads.
+ */
+export function bakeCarPaintGeometry(
+  roots: readonly THREE.Object3D[],
+  slotOf: (mesh: THREE.Mesh, material: THREE.Material) => number,
+): THREE.BufferGeometry | null {
+  const pieces = collectPieces(roots, (mesh, material) => {
+    const slot = slotOf(mesh, material);
+    return slot >= 0 ? slot : null;
+  });
+  if (pieces.length === 0) return null;
+  pieces.sort((a, b) => a.surface - b.surface);
+
+  // The attributes every piece has, each at the size the first piece gives it.
+  const sizes = new Map<string, number>();
+  for (const [name, attribute] of Object.entries(pieces[0]!.geometry.attributes)) sizes.set(name, attribute.itemSize);
+  for (const { geometry } of pieces) {
+    for (const [name, size] of sizes) {
+      if (geometry.getAttribute(name)?.itemSize !== size) sizes.delete(name);
+    }
+  }
+  sizes.set('normal', 3);
+
+  let vertices = 0;
+  for (const piece of pieces) vertices += piece.count;
+  const out = new Map<string, Float32Array>();
+  for (const [name, size] of sizes) out.set(name, new Float32Array(vertices * size));
+  const geometry = new THREE.BufferGeometry();
+  let v = 0;
+  let groupStart = 0;
+  const corner = [_a, _b, _c] as const;
+  for (let p = 0; p < pieces.length; p++) {
+    const { geometry: source, matrix, start, count, surface } = pieces[p]!;
+    const index = source.index;
+    const position = source.getAttribute('position');
+    const normal = source.getAttribute('normal') as THREE.BufferAttribute | undefined;
+    _normalMatrix.getNormalMatrix(matrix);
+    const order = matrix.determinant() < 0 ? ([0, 2, 1] as const) : ([0, 1, 2] as const);
+    for (let k = start; k < start + count; k += 3) {
+      for (let j = 0; j < 3; j++) corner[j]!.fromBufferAttribute(position, index ? index.getX(k + order[j]!) : k + order[j]!).applyMatrix4(matrix);
+      if (!normal) _n.crossVectors(_ab.subVectors(_b, _a), _ac.subVectors(_c, _a)).normalize();
+      for (let j = 0; j < 3; j++) {
+        const vertex = index ? index.getX(k + order[j]!) : k + order[j]!;
+        for (const [name, size] of sizes) {
+          const data = out.get(name)!;
+          const at = v * size;
+          if (name === 'position') {
+            corner[j]!.toArray(data, at);
+          } else if (name === 'normal') {
+            if (normal) _n.fromBufferAttribute(normal, vertex).applyMatrix3(_normalMatrix).normalize();
+            _n.toArray(data, at);
+          } else {
+            const attribute = source.getAttribute(name);
+            // `getComponent` denormalizes a quantized attribute.
+            for (let c = 0; c < size; c++) data[at + c] = attribute.getComponent(vertex, c);
+            if (name === 'tangent') {
+              _t.set(data[at]!, data[at + 1]!, data[at + 2]!).transformDirection(matrix).toArray(data, at);
+            }
+          }
+        }
+        v++;
+      }
+    }
+    const next = pieces[p + 1];
+    if (!next || next.surface !== surface) {
+      geometry.addGroup(groupStart, v - groupStart, surface);
+      groupStart = v;
+    }
+  }
+  for (const [name, size] of sizes) geometry.setAttribute(name, new THREE.BufferAttribute(out.get(name)!, size));
+  geometry.computeBoundingSphere();
   return geometry;
 }
 
@@ -317,23 +432,34 @@ interface FarModel {
 }
 
 const _matrix = new THREE.Matrix4();
+const _part = new THREE.Matrix4();
 const ONE = new THREE.Vector3(1, 1, 1);
+const WHITE = new THREE.Color(1, 1, 1);
+
+/** One wheel of a mid car (render/carmodel.ts `CarMidModel`): its set's mesh, chassis-local. */
+export interface MidCarWheel {
+  readonly geometry: THREE.BufferGeometry;
+  readonly matrix: THREE.Matrix4;
+}
 
 /**
  * The far meshes, one per model met so far, refilled every frame: `begin`, then `add` per
  * far car, then `end`. A car that went near, despawned or crashed simply is not added, so
  * nothing ever has to be freed, and the frame allocates nothing.
+ *
+ * The mid cars' shared parts are a second field of the same kind (`addMid`): every mesh
+ * in it is one of `makeFarMesh`, so it links nothing either.
  */
 export class FarCarField {
-  /** DEV A/B (`__bro.farCars.enabled`): off, every traffic car draws in full. */
+  /** DEV A/B (`__bro.farCars.enabled`, `__bro.midCars.enabled`): off, every traffic car draws in full. */
   enabled = true;
-  /** DEV: this frame's far cars, and the models they were drawn as (one draw each). */
+  /** DEV: this frame's instances, and the meshes they were drawn in (one draw each). */
   readonly stats = { cars: 0, models: 0 };
   private readonly group = new THREE.Group();
   private readonly models = new Map<THREE.BufferGeometry, FarModel>();
 
-  constructor(scene: THREE.Scene) {
-    this.group.name = 'far-cars';
+  constructor(scene: THREE.Scene, name = 'far-cars') {
+    this.group.name = name;
     this.group.add(programAnchor());
     scene.add(this.group);
   }
@@ -355,10 +481,41 @@ export class FarCarField {
     lamps: VehicleLamps,
   ): boolean {
     if (!this.enabled) return false;
+    const model = this.model(geometry);
+    if (model.count >= FAR_CAR_CAPACITY) return false;
+    this.place(model, _matrix.compose(position, quaternion, ONE), paint, lamps);
+    return true;
+  }
+
+  /**
+   * Draws a mid car's shared parts at its render pose: `rest` (its model's trim, glass and
+   * lenses, lit as `lamps` lights them) and each of `wheels`. All or none: false, and
+   * nothing added, when the field is off or any of their meshes is full.
+   */
+  addMid(
+    rest: THREE.BufferGeometry,
+    wheels: readonly MidCarWheel[],
+    position: THREE.Vector3,
+    quaternion: THREE.Quaternion,
+    lamps: VehicleLamps,
+  ): boolean {
+    if (!this.enabled) return false;
+    const restModel = this.model(rest);
+    if (restModel.count >= FAR_CAR_CAPACITY) return false;
+    // A set's wheel mesh takes up to two of one car (a spare is a second rear left).
+    for (const wheel of wheels) if (this.model(wheel.geometry).count >= FAR_CAR_CAPACITY - 1) return false;
+    _matrix.compose(position, quaternion, ONE);
+    // The rest carries no paint: its instance colour multiplies nothing.
+    this.place(restModel, _matrix, WHITE, lamps);
+    for (const wheel of wheels) this.place(this.model(wheel.geometry), _part.multiplyMatrices(_matrix, wheel.matrix), WHITE, null);
+    return true;
+  }
+
+  private model(geometry: THREE.BufferGeometry): FarModel {
     let model = this.models.get(geometry);
     if (!model) {
       const mesh = makeFarMesh(geometry);
-      mesh.name = 'far-car';
+      mesh.name = this.group.name;
       this.group.add(mesh);
       model = {
         mesh,
@@ -368,17 +525,20 @@ export class FarCarField {
       };
       this.models.set(geometry, model);
     }
-    if (model.count >= FAR_CAR_CAPACITY) return false;
+    return model;
+  }
+
+  /** One instance at `matrix`; `lamps` null for a part without lenses (a wheel). */
+  private place(model: FarModel, matrix: THREE.Matrix4, paint: THREE.Color, lamps: VehicleLamps | null): void {
     const i = model.count++;
-    model.mesh.setMatrixAt(i, _matrix.compose(position, quaternion, ONE));
+    model.mesh.setMatrixAt(i, matrix);
     model.mesh.setColorAt(i, paint);
     const a = model.lampsA.array as Float32Array;
     const b = model.lampsB.array as Float32Array;
     for (let role = 0; role < 3; role++) {
-      a[i * 3 + role] = lamps.lensLevel(role);
-      b[i * 3 + role] = lamps.lensLevel(role + 3);
+      a[i * 3 + role] = lamps ? lamps.lensLevel(role) : 0;
+      b[i * 3 + role] = lamps ? lamps.lensLevel(role + 3) : 0;
     }
-    return true;
   }
 
   end(): void {
@@ -401,21 +561,22 @@ export class FarCarField {
 }
 
 /**
- * DEV (`__bro.farCars.stats`): the draws a far car's own graph would cost if shown at
- * that range, one per visible material slot in the scene pass and one per caster in the
- * sun's, without the kit groups that stop drawing past `KIT_DETAIL_M`. An estimate for the
- * A/B; `renderer.info.render.calls` with the field off and on is the measurement.
+ * DEV (`__bro.farCars.stats`, `__bro.midCars.stats`): the draws a car's near parts (its
+ * body and wheels: `Vehicle.nearParts`, shown or hidden) would cost if drawn past
+ * `KIT_DETAIL_M`, one per visible material slot in the scene pass and one per caster in
+ * the sun's, without the kit groups that stop drawing there. An estimate for the A/B;
+ * `renderer.info.render.calls` with the field off and on is the measurement.
  */
-export function nearDrawEstimate(root: THREE.Object3D): number {
+export function nearDrawEstimate(parts: readonly THREE.Object3D[]): number {
   let draws = 0;
-  const walk = (node: THREE.Object3D): void => {
-    if (!node.visible || KIT_DETAIL_GROUPS.has(node.name)) return;
+  const walk = (node: THREE.Object3D, part: boolean): void => {
+    if ((!part && !node.visible) || KIT_DETAIL_GROUPS.has(node.name)) return;
     if (node instanceof THREE.Mesh) {
       const slots = Array.isArray(node.material) ? (node.geometry as THREE.BufferGeometry).groups.length : 1;
       draws += slots * (node.castShadow ? 2 : 1);
     }
-    for (const child of node.children) walk(child);
+    for (const child of node.children) walk(child, false);
   };
-  for (const child of root.children) walk(child);
+  for (const part of parts) walk(part, true);
   return draws;
 }

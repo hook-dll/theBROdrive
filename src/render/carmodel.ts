@@ -47,7 +47,7 @@ import { lampLensAnchors } from '../vehicle/vehiclelamps';
 import { buildKitCar } from '../carkit/kit';
 import { poseKitStatic } from '../carkit/rig';
 import { MATERIALS_CONFIG } from '../config';
-import { bakeFarCarGeometry, type FarCarSurface } from './farcars';
+import { bakeCarPaintGeometry, bakeFarCarGeometry, type FarCarSurface, type MidCarWheel } from './farcars';
 import { KIT_DRIVER_EYE_NODE, KIT_REAR_EYE_NODE } from '../carkit/interior';
 import { KIT_BONNET_CELL_NODE } from '../carkit/bay';
 import { KIT_FILLER_NODE } from '../carkit/exterior';
@@ -330,17 +330,18 @@ function isPaintSlot(material: THREE.Material, def: CarModelDef): boolean {
 
 /**
  * Gives one car instance its own condition-shaded copy of each paint slot, leaving
- * glass, lamps and trim on their shared materials, and returns those copies.
+ * glass, lamps and trim on their shared materials, and returns those copies by the
+ * template material each one copies.
  *
- * The returned list IS the car's paint handle. Everything that later writes dirt or
- * scratches writes it through this list, so nothing has to walk the car's scene graph
- * to find its paint again.
+ * The copies ARE the car's paint handle. Everything that later writes dirt or
+ * scratches writes it through them, so nothing has to walk the car's scene graph
+ * to find its paint again; the mid paint (`CarMidModel`) finds its own by source.
  */
 function cloneCarBodyPaintMaterials(
   root: THREE.Object3D,
   t: Template,
   appearanceKey: string,
-): THREE.Material[] {
+): Map<THREE.Material, THREE.Material> {
   const def = t.def;
   const seed = appearanceHash(def.id, appearanceKey);
   const clones = new Map<THREE.Material, THREE.Material>();
@@ -360,7 +361,7 @@ function cloneCarBodyPaintMaterials(
       ? mesh.material.map(eligible)
       : eligible(mesh.material);
   });
-  return [...clones.values()];
+  return clones;
 }
 
 /**
@@ -1692,6 +1693,10 @@ export function loadCarModel(id: string): Promise<void> {
   if (!ready) {
     ready = (async () => {
       await preloadCarModels([id]);
+      // Before the anchor, so it holds the mid paint as every car of the model draws it.
+      // The rest and the wheels are the far program's, which the field's boot anchor holds.
+      const mid = await onOwnFrame(() => buildMidModel(template(id)));
+      if (mid) midModels.set(id, mid);
       const anchor = await buildProgramAnchor(id);
       programAnchors.add(anchor);
       if (programCompiler) await programCompiler(anchor);
@@ -1808,6 +1813,22 @@ export interface CarModelInstance {
   readonly wheels: ReadonlyMap<string, THREE.Object3D>;
   /** This car's paint condition; see render/carsurface.ts. */
   readonly surface: CarBodySurface;
+  /** This car as drawn at mid range (`CarMidModel`); null for a model without one. */
+  readonly mid: CarMidInstance | null;
+}
+
+/** One car's mid-range parts (render/farcars.ts, MID TRAFFIC). */
+export interface CarMidInstance {
+  /**
+   * The model's merged paint in this car's OWN paint materials, so its colour, dust,
+   * scratches and highlight are the near body's. Chassis-local, for the car's root;
+   * made hidden.
+   */
+  readonly paint: THREE.Mesh;
+  /** Its model's trim, glass and lenses, for the mid field (shared by the model). */
+  readonly rest: THREE.BufferGeometry;
+  /** The wheels of its own set, chassis-local (shared by every car of model and set). */
+  readonly wheels: readonly MidCarWheel[];
 }
 
 /** A static shell and the paint materials it was instanced with. */
@@ -1818,9 +1839,11 @@ interface StaticCarInstance {
 }
 
 function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInstance {
-  const wheels = cloneWheels(t, selectedWheels(t, appearanceKey));
+  const set = selectedWheels(t, appearanceKey);
+  const wheels = cloneWheels(t, set);
   const body = t.body.clone(true);
-  const paint = cloneCarBodyPaintMaterials(body, t, appearanceKey);
+  const clones = cloneCarBodyPaintMaterials(body, t, appearanceKey);
+  const paint = [...clones.values()];
   const glass = cloneCarGlass(body, paint);
   prepareSovietShellFaces(body, t.def);
   applyRandomPaint(body, t.def, appearanceKey);
@@ -1833,7 +1856,39 @@ function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInsta
   );
   const surface = new CarBodySurface(paint, glass, decals);
   addSpareWheel(body, t, wheels);
-  return { body, wheels, surface };
+  return { body, wheels, surface, mid: midInstance(t, clones, set) };
+}
+
+/**
+ * A car's mid parts: its model's (`midModels`) with its own paint copies in place of the
+ * template's, and the wheels of its own set. Null before the model's are built.
+ */
+function midInstance(
+  t: Template,
+  clones: ReadonlyMap<THREE.Material, THREE.Material>,
+  set: ReadonlyMap<string, THREE.Object3D>,
+): CarMidInstance | null {
+  const model = midModels.get(t.def.id);
+  const wheels = model?.wheels.get(set);
+  if (!model || !wheels) return null;
+  const materials: THREE.Material[] = [];
+  for (const source of model.paintSources) {
+    const own = clones.get(source);
+    if (!own) return null;
+    materials.push(own);
+  }
+  const paint = new THREE.Mesh(model.paint, materials.length === 1 ? materials[0]! : materials);
+  paint.name = 'mid-paint';
+  // The paint's own shadow contract (`prepareMaterials`): bodywork casts, never receives.
+  // Receiving is in the program key, so it must match the near panels' for the program
+  // to be theirs.
+  paint.castShadow = true;
+  paint.receiveShadow = false;
+  paint.visible = false;
+  // Hidden or not, a raycast meets it, and the sticker and door picks (player/interaction.ts)
+  // must meet the near panels, an open door where it stands, instead.
+  paint.raycast = () => {};
+  return { paint, rest: model.rest, wheels };
 }
 
 const _spareMatrix = new THREE.Matrix4();
@@ -1919,7 +1974,7 @@ function cloneStaticModel(t: Template, appearanceKey = t.def.id): StaticCarInsta
   const group = new THREE.Group();
   group.name = t.def.id;
   const body = t.body.clone(true);
-  const paint = cloneCarBodyPaintMaterials(body, t, appearanceKey);
+  const paint = [...cloneCarBodyPaintMaterials(body, t, appearanceKey).values()];
   const glass = cloneCarGlass(body, paint);
   applyRandomPaint(body, t.def, appearanceKey);
   if (t.def.kit) poseKitStatic(body);
@@ -1948,7 +2003,6 @@ const farGeometries = new Map<string, THREE.BufferGeometry>();
  */
 function buildFarGeometry(t: Template): THREE.BufferGeometry {
   const def = t.def;
-  const roles = lampRoleSelectors(def);
   const roots: THREE.Object3D[] = [t.body];
   // The pool's first set, not the kit's placeholder wheel: near traffic wears the pool's
   // sets, and the plain disc was what gave the swap away. One set per model: a far car
@@ -1968,7 +2022,17 @@ function buildFarGeometry(t: Template): THREE.BufferGeometry {
     mesh.position.set(wheel.pos[0], wheel.pos[1], wheel.pos[2]);
     roots.push(mesh);
   }
-  const describe = (mesh: THREE.Mesh, material: THREE.Material): FarCarSurface | null => {
+  return bakeFarCarGeometry(roots, farSurfaceOf(def, true));
+}
+
+/**
+ * How the far and mid bakes see one material slot of a `def` part: its colour, finish and
+ * lens role, the paint flagged for the instance (`FarCarSurface`). `bodywork` false for a
+ * wheel, which no car paints (`cloneCarBodyPaintMaterials` walks the body alone).
+ */
+function farSurfaceOf(def: CarModelDef, bodywork: boolean): (mesh: THREE.Mesh, material: THREE.Material) => FarCarSurface | null {
+  const roles = lampRoleSelectors(def);
+  return (mesh, material) => {
     // The Soviet wheel sets are Phong with a palette map: their colour is the texel,
     // their finish a tyre's or a painted rim's, so a mid roughness stands for both.
     if (material instanceof THREE.MeshPhongMaterial) {
@@ -1977,7 +2041,7 @@ function buildFarGeometry(t: Template): THREE.BufferGeometry {
     // Every lit kit slot is a standard material. The one unlit slot, `lamp_glow`, lights
     // only the cabin's lamps, and the far mesh has no cabin.
     if (!(material instanceof THREE.MeshStandardMaterial)) return null;
-    const paint = isRandomPaintMesh(mesh, def) && isPaintSlot(material, def);
+    const paint = bodywork && isRandomPaintMesh(mesh, def) && isPaintSlot(material, def);
     // The role `VehicleLamps.bindLampMaterials` binds the lens by: mesh name, then material.
     const role = roles.findIndex((selectors) => selectors.includes(mesh.name) || selectors.includes(material.name));
     return {
@@ -1991,7 +2055,6 @@ function buildFarGeometry(t: Template): THREE.BufferGeometry {
       map: material.map,
     };
   };
-  return bakeFarCarGeometry(roots, describe);
 }
 
 /**
@@ -2000,6 +2063,97 @@ function buildFarGeometry(t: Template): THREE.BufferGeometry {
  */
 export function carModelFarGeometry(id: string): THREE.BufferGeometry | null {
   return farGeometries.get(id) ?? null;
+}
+
+/**
+ * One model's mid-range meshes (render/farcars.ts, MID TRAFFIC), in the pose a near kit
+ * car takes past `KIT_DETAIL_M`: shut, without its cabin, bay, boot and underbody.
+ */
+interface CarMidModel {
+  /** Every paint slot, one group per entry of `paintSources`. */
+  readonly paint: THREE.BufferGeometry;
+  /** The template paint materials, in group order; a car draws its own copy of each. */
+  readonly paintSources: readonly THREE.Material[];
+  /** Everything else of the body, the far mesh's way: trim, chrome, opaque glass, lenses. */
+  readonly rest: THREE.BufferGeometry;
+  /** Per wheel set the pool can give the model (`selectedWheels`): its wheels on this body. */
+  readonly wheels: ReadonlyMap<ReadonlyMap<string, THREE.Object3D>, readonly MidCarWheel[]>;
+}
+
+/** Each loaded model's mid meshes (`buildMidModel`), built once as it loads. */
+const midModels = new Map<string, CarMidModel>();
+/**
+ * One mid mesh per wheel template, in the wheel's own frame, shared by every body that
+ * wears its set: the body's fit is in each `MidCarWheel.matrix`, not in the mesh.
+ */
+const midWheelGeometries = new Map<THREE.Object3D, THREE.BufferGeometry>();
+
+const _midWheelAt = new THREE.Vector3();
+const _midSpare = new THREE.Matrix4();
+const IDENTITY_QUATERNION = new THREE.Quaternion();
+
+/**
+ * A model's mid meshes, or null for a body with no paint outside its kit groups. The
+ * paint is cut by the same rule that gives a car its paint copies, less any part a lamp
+ * binds as its lens (the car draws those in a lens material, so they belong to `rest`).
+ */
+function buildMidModel(t: Template): CarMidModel | null {
+  const def = t.def;
+  const lamps = lampNames(def);
+  const paintSources: THREE.Material[] = [];
+  const paint = bakeCarPaintGeometry([t.body], (mesh, material) => {
+    if (!isRandomPaintMesh(mesh, def) || !isPaintSlot(material, def)) return -1;
+    if (lamps.has(mesh.name) || lamps.has(material.name)) return -1;
+    const slot = paintSources.indexOf(material);
+    return slot >= 0 ? slot : paintSources.push(material) - 1;
+  });
+  if (!paint) return null;
+  const far = farSurfaceOf(def, true);
+  const rest = bakeFarCarGeometry([t.body], (mesh, material) => {
+    const surface = far(mesh, material);
+    if (!surface?.paint) return surface;
+    return surface.lamp > 0 ? { ...surface, paint: false } : null;
+  });
+
+  const wheelSurface = farSurfaceOf(def, false);
+  const wheelGeometry = (wheel: THREE.Object3D): THREE.BufferGeometry => {
+    let geometry = midWheelGeometries.get(wheel);
+    if (!geometry) {
+      const local = wheel.clone(true);
+      local.position.set(0, 0, 0);
+      local.quaternion.identity();
+      local.scale.set(1, 1, 1);
+      geometry = bakeFarCarGeometry([local], wheelSurface);
+      midWheelGeometries.set(wheel, geometry);
+    }
+    return geometry;
+  };
+  const sets = (def.wheelSetPool ?? []).map((id) => (templates.get(id) ?? t).wheels);
+  if (sets.length === 0) sets.push(t.wheels);
+  const wheels = new Map<ReadonlyMap<string, THREE.Object3D>, MidCarWheel[]>();
+  for (const set of sets) {
+    if (wheels.has(set)) continue;
+    // Sized to this body as `cloneWheels` sizes a near car's. Unturned: a near wheel's
+    // rotation is the vehicle's to set every frame (`syncVisuals`), from none.
+    const fitted = cloneWheels(t, set);
+    const list: MidCarWheel[] = t.measure.wheels.map((wheel) => ({
+      geometry: wheelGeometry(set.get(wheel.id)!),
+      matrix: new THREE.Matrix4().compose(_midWheelAt.fromArray(wheel.pos), IDENTITY_QUATERNION, fitted.get(wheel.id)!.scale),
+    }));
+    if (t.spare) {
+      // `addSpareWheel`, in the chassis frame the mount is measured in.
+      const spare = fitted.get('wheel_rl')!;
+      list.push({
+        geometry: wheelGeometry(set.get('wheel_rl')!),
+        matrix: new THREE.Matrix4()
+          .makeRotationY(t.spare.yaw)
+          .setPosition(t.spare.centre)
+          .multiply(_midSpare.compose(_midWheelAt.set(0, 0, 0), spare.quaternion, spare.scale)),
+      });
+    }
+    wheels.set(set, list);
+  }
+  return { paint, paintSources, rest, wheels };
 }
 
 /**
@@ -2014,6 +2168,9 @@ async function buildProgramAnchor(id: string): Promise<THREE.Group> {
     group.name = id;
     const driving = cloneDrivingModel(t);
     group.add(driving.body, ...driving.wheels.values(), ...lampLensAnchors(t.def, driving.body));
+    // The mid paint is the near paint's material over a merged buffer of its own, whose
+    // attributes are the program's as much as the material is.
+    if (driving.mid) group.add(driving.mid.paint);
     // Every set the wheel pool can give this body, not only the one its own key picks.
     for (const sourceId of t.def.wheelSetPool ?? []) {
       const source = templates.get(sourceId);
@@ -2090,6 +2247,13 @@ export function disposeCarModelCache(): void {
   }
   for (const geometry of farGeometries.values()) geometry.dispose();
   farGeometries.clear();
+  for (const mid of midModels.values()) {
+    mid.paint.dispose();
+    mid.rest.dispose();
+  }
+  midModels.clear();
+  for (const geometry of midWheelGeometries.values()) geometry.dispose();
+  midWheelGeometries.clear();
   templates.clear();
   modelLoads.clear();
   paletteLoads.clear();

@@ -2641,17 +2641,20 @@ export class RoadTraffic {
 
   /**
    * Poses every car for this frame, the far ones as instances of their model's far mesh
-   * (`far`, render/farcars.ts). A crashed car, and a wreck on its side, end or roof, is
-   * drawn in full: see CRASH_FULL_DETAIL_S.
+   * (`far`, render/farcars.ts) and the mid ones as their mid parts (`mid`). A crashed car,
+   * and a wreck on its side, end or roof, is drawn in full: see CRASH_FULL_DETAIL_S.
    */
-  syncVisuals(alpha: number, far: FarCarField): void {
+  syncVisuals(alpha: number, far: FarCarField, mid: FarCarField): void {
     far.begin();
+    mid.begin();
     for (const car of this.carList) {
       const q = car.vehicle.root.quaternion;
       const upright = 1 - 2 * (q.x * q.x + q.z * q.z) >= WRECK_UP_MAX;
-      car.vehicle.syncVisuals(alpha, car.fullDetailFor <= 0 && upright ? far : null);
+      const lod = car.fullDetailFor <= 0 && upright;
+      car.vehicle.syncVisuals(alpha, lod ? far : null, lod ? mid : null);
     }
     far.end();
+    mid.end();
   }
 
   dispose(): void {

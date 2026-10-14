@@ -137,8 +137,8 @@ const BLINKER_EMISSIVE = 0xff8a00;
 /**
  * The colour each switched lens role glows in, in the order of a model's lamp role
  * selectors (head, tail, stop, reverse, left and right blinker; render/carmodel.ts
- * `lampRoleSelectors`) and of `VehicleLamps.lensLevel`. The far traffic mesh lights its
- * lenses from it (render/farcars.ts).
+ * `lampRoleSelectors`) and of `VehicleLamps.lensLevel`. The far and mid traffic meshes
+ * light their lenses from it (render/farcars.ts).
  */
 export const LENS_ROLE_EMISSIVE: readonly number[] = [
   HEADLIGHT_EMISSIVE,

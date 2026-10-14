@@ -126,7 +126,7 @@ const LENS_EMISSIVE: Readonly<Record<LensRole, number>> = {
 
 /**
  * Groups a far car stops drawing: the cabin, the engine bay, the boot and the underbody.
- * The far traffic mesh leaves them out too (render/farcars.ts `bakeFarCarGeometry`).
+ * The mid and far traffic meshes leave them out too (render/farcars.ts `collectPieces`).
  */
 export const KIT_DETAIL_GROUPS: ReadonlySet<string> = new Set(['kit_cabin', 'kit_bay', 'kit_boot', 'kit_under']);
 /** Clear glass opacity near, and the tinted mirror it stands in for far away. */
@@ -140,6 +140,12 @@ const GLASS_FAR_OPACITY = 0.9;
  */
 const GLASS_CLEAR_M = 30;
 export const KIT_DETAIL_M = 50;
+/**
+ * The shell's own moving parts (carkit/kit.ts `shellMotion`): doors, their panes and vent
+ * wings, the bonnet, boot or tailgate and the filler flap. With any of them off its stop
+ * the car is not in the pose the mid traffic meshes were baked in (render/farcars.ts).
+ */
+const SHELL_CHANNEL = /^(door_|window_|vent_|bonnet$|boot$|tailgate$|flap$)/;
 
 const _q = new THREE.Quaternion();
 const _a = new THREE.Vector3();
@@ -334,6 +340,8 @@ export class KitRig {
   private glassOpacity = -1;
   private readonly detail: THREE.Object3D[] = [];
   private readonly glass: THREE.MeshStandardMaterial[] = [];
+  /** Names of the shell's moving parts' channels (`SHELL_CHANNEL`); `adopt` replaces the channels themselves. */
+  private readonly shell: string[] = [];
   /** The live mirror faces (`userData.kitMirror`), shown by render/carmirrors.ts. */
   readonly mirrorFaces: THREE.Mesh[] = [];
 
@@ -360,6 +368,7 @@ export class KitRig {
         applied: Number.NaN,
       });
       this.channel(motion.channel);
+      if (SHELL_CHANNEL.test(motion.channel) && !this.shell.includes(motion.channel)) this.shell.push(motion.channel);
     });
     if (!ownLenses) return;
     for (const role of Object.keys(LENS_NODES) as LensRole[]) {
@@ -395,6 +404,15 @@ export class KitRig {
     }
     this.glassOpacity = opacity;
     for (const material of this.glass) material.opacity = opacity;
+  }
+
+  /** Every door, pane, lid and flap shut and staying so: the shell's baked pose. */
+  get shut(): boolean {
+    for (const name of this.shell) {
+      const c = this.channels.get(name);
+      if (c && (c.value !== 0 || c.target !== 0)) return false;
+    }
+    return true;
   }
 
   private channel(name: string): Channel {
