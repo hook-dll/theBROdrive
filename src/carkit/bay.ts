@@ -97,8 +97,15 @@ export function buildBay(ctx: KitContext): void {
   addBuilt(boot, lb, [0, 0, 0], 'boot', true);
 
   const ub = new PartBuilder();
-  buildUnderbody(frame, ub, classic, route);
+  const eb = new PartBuilder();
+  buildUnderbody(frame, ub, eb, classic, route);
   addBuilt(under, ub, [0, 0, 0], 'under', true);
+  // The exhaust is outside the detail groups: its silencer and tail pipe hang under the
+  // tail of every car met from behind, and drawn only within `KIT_DETAIL_M` they came in
+  // at 50 m on a car caught up with slowly. So it draws at every distance and the mid and
+  // far meshes bake it. It keeps the underbody's shadows (`kitShadowed`: receives the
+  // shell's, casts none), a program every kit car already has.
+  addBuilt(ctx.root, eb, [0, 0, 0], 'exhaust', true);
 }
 
 function detailGroup(ctx: KitContext, name: string): THREE.Group {
@@ -707,7 +714,7 @@ function buildHatchBoot(frame: BodyFrame, b: PartBuilder): void {
 const RAIL_X = 0.42;
 const RAIL_HALF = 0.035;
 
-function buildUnderbody(frame: BodyFrame, b: PartBuilder, classic: boolean, route: BayRoute): void {
+function buildUnderbody(frame: BodyFrame, b: PartBuilder, eb: PartBuilder, classic: boolean, route: BayRoute): void {
   const spec = frame.spec;
   const w = spec.wheels;
   const cowl = frame.cowl;
@@ -728,8 +735,8 @@ function buildUnderbody(frame: BodyFrame, b: PartBuilder, classic: boolean, rout
     }
   }
 
-  if (classic) classicChassis(frame, b, route);
-  else samaraChassis(frame, b, route);
+  if (classic) classicChassis(frame, b, eb, route);
+  else samaraChassis(frame, b, eb, route);
 }
 
 /** Exhaust from the down-pipe's start under the bay: resonator, silencer at CLEARANCE, tail pipe out at the right rear. */
@@ -749,7 +756,7 @@ function exhaust(frame: BodyFrame, b: PartBuilder, down: readonly Vec3[], x: num
  * gearbox and propshaft in the tunnel, and the live rear axle on four trailing links and
  * a Panhard rod, its differential hanging lowest at CLEARANCE.
  */
-function classicChassis(frame: BodyFrame, b: PartBuilder, route: BayRoute): void {
+function classicChassis(frame: BodyFrame, b: PartBuilder, eb: PartBuilder, route: BayRoute): void {
   const spec = frame.spec;
   const w = spec.wheels;
   const cowl = frame.cowl;
@@ -812,7 +819,7 @@ function classicChassis(frame: BodyFrame, b: PartBuilder, route: BayRoute): void
   const os = frame.zNose - o[2];
   exhaust(
     frame,
-    b,
+    eb,
     [o, at(frame, o[0] - 0.01, (o[1] + ey) / 2, os + 0.06), at(frame, ex, ey + 0.02, cowl + 0.05), at(frame, ex, ey, cowl + 0.25)],
     ex,
     ey,
@@ -828,7 +835,7 @@ function classicChassis(frame: BodyFrame, b: PartBuilder, route: BayRoute): void
  * bar, the fuel tank under the rear seat, and the twist beam on its trailing arms with
  * the springs over them; the silencer hangs lowest at CLEARANCE.
  */
-function samaraChassis(frame: BodyFrame, b: PartBuilder, route: BayRoute): void {
+function samaraChassis(frame: BodyFrame, b: PartBuilder, eb: PartBuilder, route: BayRoute): void {
   const spec = frame.spec;
   const w = spec.wheels;
   const cowl = frame.cowl;
@@ -885,7 +892,7 @@ function samaraChassis(frame: BodyFrame, b: PartBuilder, route: BayRoute): void 
   const tail = spec.stations[spec.stations.length - 1]!.s;
   exhaust(
     frame,
-    b,
+    eb,
     [o, at(frame, o[0] + 0.02, (o[1] + ey) / 2, os + 0.12), at(frame, ex, ey + 0.015, os + 0.35), at(frame, ex, ey, cowl + 0.2)],
     ex,
     ey,

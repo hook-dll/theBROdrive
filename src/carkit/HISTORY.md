@@ -487,6 +487,42 @@ Format of an entry: **Problem** → **Cause** → **Fix** → *Code* (commit).
   the holed `body_paint` whole (position, colour, normal; the dust stamp
   `CAR_BODY_POSITION_ATTRIBUTE` is per vertex), and stickers clip per triangle.
 
+## Traffic seen from behind (2026-10-15)
+
+Renders: `/tmp/trafficrear/` (`sheet-before.png`, `sheet-after.png`: rows 2107 full, 2107
+mid, 2109 full, 2109 mid; columns 70, 55, 45, 35 m; eye 1.3 m high behind the car, lens
+narrowed to frame it; dirt 0.6, scratches 0.5). Car lab `__carLab.mid/only/look(…, fov)`.
+Every LOD switch was already on its line; the three were content differences.
+
+- **The silencer and tail pipe appear at about 50 m on a car caught up with slowly.** →
+  The exhaust was in `kit_under`, drawn within `KIT_DETAIL_M` and left out of the mid and
+  far bakes. → `exhaust()` builds into its own builder, added on the root as
+  `exhaust_trim` (`kitShadowed`, the underbody's program); the bakes take it like any
+  trim. A near car draws one more mesh. *bay.ts `buildBay`, `buildUnderbody`*
+- **The cabin appears through the rear window at 50 m.** → The pane was 0.9 opaque at
+  50 m, so a tenth of the seats switched on there, and at 45 m a quarter showed where the
+  mid car at 55 m had none. → Glass tuning rather than a coarse cabin in the mid mesh: the
+  mid mesh is opaque far material, a cabin in it would show only through a pane that is
+  opaque there anyway, and it would not exist in a full car between 50 and 55 m. The glass
+  is now an opaque mirror (1.0, as the mid and far glass) from `GLASS_MIRROR_M` 45 m and
+  fades to 0.28 at 30 m; the cabin comes and goes behind an opaque pane. Rear glass, mid
+  55 m vs full 45 m (box-blurred mean |Δ| of 255 over glass and tail panel): 2107 5.2 →
+  1.0, 2109 14.4 → 1.6. *rig.ts `kitGlassOpacity`*
+- **Dirt at the rear appears at 50 m.** → Not the paint: the mid paint has every
+  attribute the near paint has (`position, normal, color, carBodyPos` on every piece,
+  checked on both cars) and draws in the car's own paint material, so its dust and
+  scratches matched already (2107 70 m full vs mid: 0.13). It was the rear window: the mid
+  car drew its panes in the far material's flat tint, the near car in its own glass with
+  the paint's crust on it (the 2109's lower back light). → The panes are baked like the
+  paint (`bakeCarPaintGeometry`) into `CarMidInstance.glass`, drawn in the car's own glass;
+  `Vehicle.showMid` poses the rig far, since it is not driven while mid. Cost: one draw
+  and one per shadow pass per mid car (lab, one car at 70 m: 12 → 15 calls; full car 96 →
+  97 with the exhaust). *render/carmodel.ts `buildMidModel`, `midInstance`;
+  vehicle/vehicle.ts `showMid`, `midOwnDraws`*
+- Left: the rest of the underbody (classic axle and diff, Samara twist beam and tank) is a
+  dark band under the bumper from 50 m in; the mid bumper and wheels are a shade lighter
+  than near (far material, unchanged).
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent

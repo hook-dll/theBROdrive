@@ -1829,7 +1829,13 @@ export interface CarMidInstance {
    * made hidden.
    */
   readonly paint: THREE.Mesh;
-  /** Its model's trim, glass and lenses, for the mid field (shared by the model). */
+  /**
+   * The model's merged panes in this car's OWN glass (`cloneCarGlass`), so their dust and
+   * the kit rig's opacity are the near panes'. Placed and hidden as `paint` is; null for a
+   * body without glass.
+   */
+  readonly glass: THREE.Mesh | null;
+  /** Its model's trim and lenses, for the mid field (shared by the model). */
   readonly rest: THREE.BufferGeometry;
   /** The wheels of its own set, chassis-local (shared by every car of model and set). */
   readonly wheels: readonly MidCarWheel[];
@@ -1860,16 +1866,18 @@ function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInsta
   );
   const surface = new CarBodySurface(paint, glass, decals);
   addSpareWheel(body, t, wheels);
-  return { body, wheels, surface, mid: midInstance(t, clones, set) };
+  return { body, wheels, surface, mid: midInstance(t, clones, glass[0] ?? null, set) };
 }
 
 /**
- * A car's mid parts: its model's (`midModels`) with its own paint copies in place of the
- * template's, and the wheels of its own set. Null before the model's are built.
+ * A car's mid parts: its model's (`midModels`) with its own paint and glass copies in
+ * place of the template's, and the wheels of its own set. Null before the model's are
+ * built.
  */
 function midInstance(
   t: Template,
   clones: ReadonlyMap<THREE.Material, THREE.Material>,
+  ownGlass: THREE.Material | null,
   set: ReadonlyMap<string, THREE.Object3D>,
 ): CarMidInstance | null {
   const model = midModels.get(t.def.id);
@@ -1892,7 +1900,17 @@ function midInstance(
   // Hidden or not, a raycast meets it, and the sticker and door picks (player/interaction.ts)
   // must meet the near panels, an open door where it stands, instead.
   paint.raycast = () => {};
-  return { paint, rest: model.rest, wheels };
+  let glass: THREE.Mesh | null = null;
+  if (model.glass && ownGlass) {
+    glass = new THREE.Mesh(model.glass, ownGlass);
+    glass.name = 'mid-glass';
+    // The panes' contract (`prepareMaterials`): they cast as the body round them, receive none.
+    glass.castShadow = true;
+    glass.receiveShadow = false;
+    glass.visible = false;
+    glass.raycast = () => {};
+  }
+  return { paint, glass, rest: model.rest, wheels };
 }
 
 const _spareMatrix = new THREE.Matrix4();
@@ -2078,7 +2096,9 @@ interface CarMidModel {
   readonly paint: THREE.BufferGeometry;
   /** The template paint materials, in group order; a car draws its own copy of each. */
   readonly paintSources: readonly THREE.Material[];
-  /** Everything else of the body, the far mesh's way: trim, chrome, opaque glass, lenses. */
+  /** Every window pane, drawn in the car's own glass (`cloneCarGlass`); null for none. */
+  readonly glass: THREE.BufferGeometry | null;
+  /** Everything else of the body, the far mesh's way: trim, chrome, lenses. */
   readonly rest: THREE.BufferGeometry;
   /** Per wheel set the pool can give the model (`selectedWheels`): its wheels on this body. */
   readonly wheels: ReadonlyMap<ReadonlyMap<string, THREE.Object3D>, readonly MidCarWheel[]>;
@@ -2100,6 +2120,9 @@ const IDENTITY_QUATERNION = new THREE.Quaternion();
  * A model's mid meshes, or null for a body with no paint outside its kit groups. The
  * paint is cut by the same rule that gives a car its paint copies, less any part a lamp
  * binds as its lens (the car draws those in a lens material, so they belong to `rest`).
+ * The panes are cut by the rule that gives a car its own glass (`cloneCarGlass`): drawn
+ * in it, they carry the car's dust and the kit rig's opacity as the near panes do, where
+ * the far mesh's flat tint showed a clean pane that turned dusty at `KIT_DETAIL_M`.
  */
 function buildMidModel(t: Template): CarMidModel | null {
   const def = t.def;
@@ -2112,13 +2135,15 @@ function buildMidModel(t: Template): CarMidModel | null {
     return slot >= 0 ? slot : paintSources.push(material) - 1;
   });
   if (!paint) return null;
+  const isGlass = (material: THREE.Material): boolean => material === carGlassMaterial() || material === carClearGlassMaterial();
+  const glass = bakeCarPaintGeometry([t.body], (_mesh, material) => (isGlass(material) ? 0 : -1));
   const far = farSurfaceOf(def, true);
   const rest = bakeFarCarGeometry([t.body], (mesh, material) => {
+    if (isGlass(material)) return null;
     const surface = far(mesh, material);
     if (!surface?.paint) return surface;
     return surface.lamp > 0 ? { ...surface, paint: false } : null;
   });
-
   const wheelSurface = farSurfaceOf(def, false);
   const wheelGeometry = (wheel: THREE.Object3D): THREE.BufferGeometry => {
     let geometry = midWheelGeometries.get(wheel);
@@ -2157,7 +2182,7 @@ function buildMidModel(t: Template): CarMidModel | null {
     }
     wheels.set(set, list);
   }
-  return { paint, paintSources, rest, wheels };
+  return { paint, paintSources, glass, rest, wheels };
 }
 
 /**
@@ -2172,9 +2197,10 @@ async function buildProgramAnchor(id: string): Promise<THREE.Group> {
     group.name = id;
     const driving = cloneDrivingModel(t);
     group.add(driving.body, ...driving.wheels.values(), ...lampLensAnchors(t.def, driving.body));
-    // The mid paint is the near paint's material over a merged buffer of its own, whose
-    // attributes are the program's as much as the material is.
+    // The mid paint and glass are the near ones' materials over merged buffers of their
+    // own, whose attributes are the program's as much as the material is.
     if (driving.mid) group.add(driving.mid.paint);
+    if (driving.mid?.glass) group.add(driving.mid.glass);
     // Every set the wheel pool can give this body, not only the one its own key picks.
     for (const sourceId of t.def.wheelSetPool ?? []) {
       const source = templates.get(sourceId);
@@ -2253,6 +2279,7 @@ export function disposeCarModelCache(): void {
   farGeometries.clear();
   for (const mid of midModels.values()) {
     mid.paint.dispose();
+    mid.glass?.dispose();
     mid.rest.dispose();
   }
   midModels.clear();

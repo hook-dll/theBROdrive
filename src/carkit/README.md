@@ -112,7 +112,7 @@ from the angle he complained about; changes are judged there, not in code.
 | `body.ts` | `BodyFrame` (cross-section, deck and lid lookups) and `buildShell`: tub, greenhouse and roof as one face list, then cut into parts. Shell constants (`SHUT_GAP`, `JAMB_DEPTH`, `DOOR_THICKNESS`, `NOTCH_WALL`, …). |
 | `exterior.ts` | End faces (`FaceLook.items` / `.lid`), bumpers swept round the corners, sill strip, flank strips (waist moulding, feature line: `buildFlankStrip`), repeaters, flank lamps, mirrors, handles, wipers, filler neck. |
 | `interior.ts` | Trim, dashboard, gauges, wheel, pedals, levers, seats, door cards. Per-platform layout table `LAYOUTS`, per-car overrides `CABIN_2101/2103/2105/2107/2110`. |
-| `bay.ts` | Engine bay (`kit_bay`), boot (`kit_boot`), underbody (`kit_under`). |
+| `bay.ts` | Engine bay (`kit_bay`), boot (`kit_boot`), underbody (`kit_under`); the exhaust (`exhaust_trim` on the root, outside the detail groups: drawn at every distance, baked into the mid and far meshes). |
 | `wheels.ts` | The kit's own placeholder wheel (tyre on a plain steel disc): sets where the wheels stand and their size. |
 | `materials.ts` | One shared material per slot. |
 | `names.ts` | Node names the catalogue selects by (wheels, lamps, glass). No imports, so the catalogue can include it. |
@@ -138,11 +138,14 @@ Integration outside the folder:
   `setDetail` (the distance from `Vehicle.viewFrom`'s eye, which main.ts gives once a frame) and
   `update`. The rig, not the `STEERING_WHEEL_NODE` path, turns a kit car's wheel.
 - `render/carmodel.ts`: `loadModel` calls `buildKitCar` on a frame of its own. Clear glass
-  comes from `carClearGlassMaterial`. A detail mesh (cabin, bay, boot, underbody) with
-  `userData.kitShadowed` receives shadows and casts none; one with `userData.kitCastsNone`
-  (the mirror face) casts none. `cloneWheels` rescales the pack's wheel sets to the kit tyre. Static clones
+  comes from `carClearGlassMaterial`. A detail mesh (cabin, bay, boot, underbody, and the
+  exhaust, which is not a detail part) with `userData.kitShadowed` receives shadows and
+  casts none; one with `userData.kitCastsNone` (the mirror face) casts none. `cloneWheels`
+  rescales the pack's wheel sets to the kit tyre. Static clones
   (wrecks, couriers: `cloneStaticModel`) are posed far once (`poseKitStatic`: no cabin,
-  bay, boot or underbody, mirror glass).
+  bay, boot or underbody, mirror glass). Mid traffic (`CarMidInstance`) draws its paint and
+  its panes in the car's own paint and glass (dust, scratches and rig opacity as the near
+  car's), the rest as instances (render/farcars.ts); `Vehicle.showMid` poses the rig far.
 - `render/stickerdecals.ts`: decals on a moving part (`StickerDecalCarrier`: the nearest
   node with `kitMotion`) hang under that part in its shut frame, so a sticker on a door
   swings with it; `player/interaction.ts` `pickBody` places a sticker from the chassis
@@ -444,7 +447,8 @@ stack); the Samaras use the `samara` platform's layout as is.
   `userData.kitMirror` = `inner`/`left`/`right`, collected as `KitRig.mirrorFaces`);
   render/carmirrors.ts draws them for the car the player sits in, in the cabin view.
 - Detail groups for LOD: `kit_cabin` (on the root and inside every door), `kit_bay`,
-  `kit_boot`, `kit_under`.
+  `kit_boot`, `kit_under`. The exhaust is not one: its silencer and tail pipe are seen
+  under the tail of every car met from behind.
 
 ## Controls and channels (`rig.ts`)
 
@@ -475,8 +479,9 @@ In the lab the rig lights the lamps from the channels: low/high beam and tail la
 the def's `lights`, and the rig is created with `ownLenses = false`.
 
 `setDetail(distance)` switches only the visibility of the detail groups (drawn within
-`KIT_DETAIL_M`, 50 m) and the glass opacity (clear to 30 m, fading to the tinted mirror by
-50 m), so crossing the LOD distance triggers no shader compile.
+`KIT_DETAIL_M`, 50 m) and the glass opacity (0.28 to 30 m, fading to the opaque tinted
+mirror by `GLASS_MIRROR_M`, 45 m), so crossing the LOD distance triggers no shader compile,
+and the cabin appears and goes behind an opaque pane, unseen.
 
 ## Wheels: the Soviet pack's sets
 
@@ -497,7 +502,10 @@ appearance key: paint and wheels change together.
   a button per clickable part.
 - Automation, `window.__carLab` (`CarLabApi` in car-lab.ts):
   - `focus(id, azimuth, elevation, distance)` — orbit framing;
-  - `look(id, [camera], [target])` — coordinates relative to the car (front is +z);
+  - `look(id, [camera], [target], fov?)` — coordinates relative to the car (front is +z);
+    `fov` in degrees narrows the lens without moving the eye, so the LOD distance is real;
+  - `mid(id, on)` — draw the car as mid traffic does (its mid paint, glass and the shared
+    parts), posed far; `only(id | null)` — show one car alone;
   - `kit(id).set(channel, v)`, `.activate(controlId)` (`'door_fl'`, `'door_rl'`, `'bonnet'`,
     `'boot'`, `'tailgate'`, `'flap'`, `'window_fl'`, …), `.controls()`;
   - `set({ dirt, scratches, timeHours, variant })`;

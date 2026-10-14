@@ -3739,15 +3739,22 @@ export class Vehicle implements Rebasable {
   }
 
   /**
-   * Shows the mid paint in place of the body and wheels, or puts them back. Visibility
-   * only, on the frames it changes: every program is the near car's or the far field's.
+   * Shows the mid paint and glass in place of the body and wheels, or puts them back.
+   * Visibility only, on the frames it changes: every program is the near car's or the far
+   * field's. The rig is not driven while mid (`syncVisuals` returns first), so it is posed
+   * far here: the mid panes are the car's own glass, and a car never seen near would show
+   * them at the template's clear opacity.
    */
   private showMid(shown: boolean): void {
     if (shown === this.midShown) return;
     this.midShown = shown;
     if (this.bodyGroup) this.bodyGroup.visible = !shown;
     for (const w of this.wheels) w.mesh.visible = !shown;
-    if (this.midParts) this.midParts.paint.visible = shown;
+    if (this.midParts) {
+      this.midParts.paint.visible = shown;
+      if (this.midParts.glass) this.midParts.glass.visible = shown;
+    }
+    if (shown) this.kitRig?.setDetail(Infinity);
   }
 
   /** DEV: drawn as mid parts this frame (`__bro.midCars`). */
@@ -3765,10 +3772,11 @@ export class Vehicle implements Rebasable {
     return parts;
   }
 
-  /** DEV: the mid paint's draws in the scene pass (one per paint material); 0 without one. */
-  get midPaintSlots(): number {
-    const paint = this.midParts?.paint;
-    return paint ? (Array.isArray(paint.material) ? paint.material.length : 1) : 0;
+  /** DEV: the mid paint's and glass's draws in the scene pass (one per material); 0 without them. */
+  get midOwnDraws(): number {
+    const parts = this.midParts;
+    if (!parts) return 0;
+    return (Array.isArray(parts.paint.material) ? parts.paint.material.length : 1) + (parts.glass ? 1 : 0);
   }
 
   /**
@@ -5730,6 +5738,7 @@ export class Vehicle implements Rebasable {
     // After the lamps bind theirs, so no lens walk ever meets it; hidden until `showMid`.
     this.midParts = instance.mid;
     if (instance.mid) this.rootGroup.add(instance.mid.paint);
+    if (instance.mid?.glass) this.rootGroup.add(instance.mid.glass);
 
     this.surface = instance.surface;
     this.surface.setCondition(this.localBodyDirt, this.localBodyScratches);
@@ -5765,7 +5774,7 @@ export class Vehicle implements Rebasable {
     this.surface = null;
     for (const child of this.rootGroup.children.slice()) this.rootGroup.remove(child);
     this.bodyGroup = null;
-    // Its materials are the paint's, which the surface disposed; its geometry is the model's.
+    // Its materials are the paint's and glass's, which the surface disposed; its geometry is the model's.
     this.midParts = null;
     this.midShown = false;
     this.bodyRestScale.set(1, 1, 1);

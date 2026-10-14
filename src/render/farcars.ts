@@ -10,7 +10,8 @@
  *
  * The far mesh (`bakeFarCarGeometry`, built once per model as it loads: render/carmodel.ts)
  * is the kit body in the pose a near car already takes past `KIT_DETAIL_M` (carkit/rig.ts):
- * shut, no cabin, bay, boot or underbody, the glass a tinted mirror, here opaque. Every
+ * shut, no cabin, bay, boot or underbody (the exhaust is not a detail part: it stays), the
+ * glass the opaque tinted mirror. Every
  * part keeps its own colour and finish per vertex; the paint takes the instance colour;
  * the lamp lenses glow by the car's own lamps, per instance, so far traffic still shows
  * its head and tail lamps at night. The beams are unchanged: they are the light pool's,
@@ -38,12 +39,14 @@ export const FAR_CAR_EXIT_M = 90;
 
 /**
  * MID TRAFFIC: between the kit's detail line and the far line a traffic car draws its
- * paint as one merged mesh in its own paint material (`bakeCarPaintGeometry`), and every
- * other part of it as instances in a second field of this kind: the body's trim, glass and
- * lenses as one per model, its wheels as one per wheel of its set. Past `KIT_DETAIL_M` a
- * near kit car already stands shut without its cabin, bay, boot or underbody, yet still
+ * paint as one merged mesh in its own paint material (`bakeCarPaintGeometry`), its panes
+ * the same way in its own glass (their dust and the rig's opacity are the near panes'),
+ * and every other part of it as instances in a second field of this kind: the body's trim
+ * and lenses as one per model, its wheels as one per wheel of its set. Past `KIT_DETAIL_M`
+ * a near kit car already stands shut without its cabin, bay, boot or underbody, yet still
  * costs some 28 draws (body, doors, lids, wheels, glass, lenses each their own); drawn mid
- * it costs its paint, one draw and one in the sun's pass, plus a share of the shared ones.
+ * it costs its paint and its glass, a draw each and one each in the sun's pass, plus a
+ * share of the shared ones.
  *
  * It goes mid this far past the detail line, so a car crossing it does not swap every
  * frame, and comes back near at the line itself, where the near car's own pose is the

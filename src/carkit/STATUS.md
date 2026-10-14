@@ -33,8 +33,8 @@ fully interactive interior, eventually replacing the pack bodies in the world.
 **Must keep working**: stickers, dust/dirt and scratches on the paint; head, tail, brake,
 indicator and reversing lamps.
 
-**Budget**: ≈ 8–13k triangles per car; LOD at 25 m (cabin, bay, boot and underbody not
-drawn, glass opaque).
+**Budget**: ≈ 8–13k triangles per car; LOD at 50 m (cabin, bay, boot and underbody not
+drawn; the glass an opaque mirror from 45 m).
 
 **Wheels**: the Soviet pack's wheel sets, each of the six designs equally likely, rescaled
 to the kit tyre. The kit's five generated wheel styles were removed at the owner's request.
@@ -203,6 +203,13 @@ slot (as on the 2115).
 - **Shadows** (2026-10-15): the kit's detail parts (`kitShadowed`: cabin, bay, boot,
   underbody) cast no sun shadow and receive the shell's; only the mirror face carries
   `kitCastsNone`, and `addBuilt`/`Cabin.hinge` have no `casts` parameter any more.
+- **Traffic seen from behind** (2026-10-15): the exhaust draws at every distance and is in
+  the mid and far meshes; the glass is an opaque mirror from 45 m, so the cabin's 50 m line
+  is unseen; mid traffic's panes are the car's own glass, dust and all. Behind a 2107 and a
+  2109, mid at 55 m matches full at 45 m in exhaust, paint dust and the rear glass (renders
+  in HISTORY.md "Traffic seen from behind"). Left: the rest of the underbody (classic axle
+  and diff, Samara twist beam and tank) still comes in at 50 m as a dark band under the
+  bumper; mid bumpers and wheels are a shade lighter than near (the far material).
 - **No ink outline** (agreed).
 - The bonnet item grid is not rearranged yet (engine central).
 - **Lamp roles**: only head, tail, brake, reverse, blinkers (and never-lit `inert`). Every

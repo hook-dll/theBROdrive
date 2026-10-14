@@ -136,29 +136,36 @@ const LENS_EMISSIVE: Readonly<Record<LensRole, number>> = {
  * The mid and far traffic meshes leave them out too (render/farcars.ts `collectPieces`).
  */
 export const KIT_DETAIL_GROUPS: ReadonlySet<string> = new Set(['kit_cabin', 'kit_bay', 'kit_boot', 'kit_under']);
-/** Clear glass opacity near, and the tinted mirror it stands in for far away. */
+/**
+ * Clear glass opacity near, and the tinted mirror it stands in for far away: opaque, as the
+ * mid and far meshes' glass is, so nothing behind it shows when the cabin stops drawing.
+ */
 const GLASS_NEAR_OPACITY = 0.28;
-const GLASS_FAR_OPACITY = 0.9;
+const GLASS_FAR_OPACITY = 1;
 /**
  * The glass seen from inside its own car: the world through it as if it were hardly
  * there. Not zero, so a pane still shows a glint of the sky and its dust.
  */
 const GLASS_INSIDE_OPACITY = 0.05;
 /**
- * The glass stays clear to `GLASS_CLEAR_M` from the eye and fades to the tinted mirror by
- * `KIT_DETAIL_M`, where the cabin, bay, boot and underbody stop drawing behind it. One
- * 25 m step did both at once: the panes of a passing car went from mirror to clear in one
- * frame, a few car lengths away, in plain sight.
+ * The glass stays clear to `GLASS_CLEAR_M` from the eye and fades to the opaque mirror by
+ * `GLASS_MIRROR_M`, inside `KIT_DETAIL_M`, where the cabin, bay, boot and underbody stop
+ * drawing behind it. One 25 m step did both at once: the panes of a passing car went from
+ * mirror to clear in one frame, a few car lengths away, in plain sight. A pane still 0.9
+ * opaque at `KIT_DETAIL_M` let a tenth of the seats show and vanish there, and a car caught
+ * up with slowly showed its seats at 45 m where at 55 m (mid traffic) it had none; behind
+ * an opaque pane from 45 m the cabin comes and goes unseen.
  */
 const GLASS_CLEAR_M = 30;
+const GLASS_MIRROR_M = 45;
 export const KIT_DETAIL_M = 50;
 /**
  * The glass's opacity seen from `distance` m outside the car: clear to `GLASS_CLEAR_M`,
- * then fading to the tinted mirror at `KIT_DETAIL_M`. Rounded to a hundredth, below what
+ * then fading to the opaque mirror at `GLASS_MIRROR_M`. Rounded to a hundredth, below what
  * the eye resolves on a pane, so a moving eye does not write it every frame.
  */
 export function kitGlassOpacity(distance: number): number {
-  const t = Math.min(Math.max((distance - GLASS_CLEAR_M) / (KIT_DETAIL_M - GLASS_CLEAR_M), 0), 1);
+  const t = Math.min(Math.max((distance - GLASS_CLEAR_M) / (GLASS_MIRROR_M - GLASS_CLEAR_M), 0), 1);
   return Math.round((GLASS_NEAR_OPACITY + (GLASS_FAR_OPACITY - GLASS_NEAR_OPACITY) * t) * 100) / 100;
 }
 /**

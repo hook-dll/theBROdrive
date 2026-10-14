@@ -35,13 +35,15 @@ import {
   carModelMeasure,
   carSpawnYAboveGround,
   createCarModel,
-  preloadCarModels,
+  loadCarModel,
   type CarModelInstance,
 } from './render/carmodel';
+import { FarCarField } from './render/farcars';
 import { makeFlatMaterial } from './render/materials';
 import { Sky } from './render/sky';
 import { loadStarField } from './render/starcatalog';
 import { KitRig, type KitControl, type KitPicked } from './carkit/rig';
+import type { VehicleLamps } from './vehicle/vehiclelamps';
 import { CAR_MODELS, LAB_CAR_MODELS, type CarModelDef } from './vehicle/carmodels';
 
 const CALENDAR = newWorldState(1337).calendarEpoch;
@@ -83,6 +85,8 @@ interface LabCar {
   instance: CarModelInstance | null;
   /** Kit cars only: their doors, lamps and controls. */
   rig: KitRig | null;
+  /** Drawn as mid traffic (`CarLabApi.mid`). */
+  mid: boolean;
 }
 
 /** What `window.__carLab` exposes. */
@@ -90,8 +94,16 @@ export interface CarLabApi {
   set(values: Partial<Pick<LabState, 'dirt' | 'scratches' | 'timeHours' | 'factory' | 'variant'>>): void;
   /** Frames one car from `azimuth` radians around it, or the whole grid with no id. */
   focus(modelId?: string, azimuth?: number, elevation?: number, distance?: number): void;
-  /** Puts the camera at `position` looking at `target`, both relative to a car's anchor. */
-  look(modelId: string, position: readonly [number, number, number], target: readonly [number, number, number]): void;
+  /**
+   * Puts the camera at `position` looking at `target`, both relative to a car's anchor;
+   * `fov` (degrees) narrows the lens for a far car without moving the eye, so the LOD
+   * distance stays the real one.
+   */
+  look(modelId: string, position: readonly [number, number, number], target: readonly [number, number, number], fov?: number): void;
+  /** Draws a car as traffic past `MID_CAR_ENTER_M` does (its mid paint and parts), or in full. */
+  mid(modelId: string, on: boolean): void;
+  /** Shows only this car (null: all of them), so a far view down the grid meets no other. */
+  only(modelId: string | null): void;
   /** A kit car's rig: set a channel, click a control by id, list the controls. */
   kit(modelId: string): {
     set(channel: string, value: number): void;
@@ -311,7 +323,8 @@ export async function bootCarLab(): Promise<void> {
   const renderer = new Renderer(canvas, state.quality, true, DEFAULT_INK_STRENGTH);
   const [starField] = await Promise.all([
     loadStarField(new Date(parseCalendarEpoch(CALENDAR)), state.quality, prefersMobilePresentation()),
-    preloadCarModels(labModels.map((def) => def.id)),
+    // `loadCarModel`, not a bare preload: it also builds the mid meshes `mid` draws.
+    Promise.all(labModels.map((def) => loadCarModel(def.id))),
   ]);
   const sky = new Sky(renderer.scene, renderer.fog, renderer.renderer, starField);
   await sky.waitForAssets();
@@ -340,7 +353,7 @@ export async function bootCarLab(): Promise<void> {
       label.position.set(0, 2.7, 0);
       anchor.add(label);
       renderer.scene.add(anchor);
-      cars.push({ def, pack, anchor, label, instance: null, rig: null });
+      cars.push({ def, pack, anchor, label, instance: null, rig: null, mid: false });
     });
     row += Math.ceil(defs.length / COLUMNS);
   }
@@ -352,6 +365,7 @@ export async function bootCarLab(): Promise<void> {
       car.rig?.dispose();
       car.anchor.remove(car.instance.body);
       for (const wheel of car.instance.wheels.values()) car.anchor.remove(wheel);
+      for (const part of [car.instance.mid?.paint, car.instance.mid?.glass]) if (part) car.anchor.remove(part);
     }
     // Instance 0 keeps the key the lab always used, so its screenshots stay comparable.
     const key = state.variant === 0 ? `${car.def.id}:car-lab` : `${car.def.id}:car-lab:${state.variant}`;
@@ -368,7 +382,25 @@ export async function bootCarLab(): Promise<void> {
       car.anchor.add(mesh);
     }
     instance.surface.setCondition(state.dirt, state.scratches);
+    // The mid paint and glass are chassis-local, the body's own transform baked in: they
+    // stand at the chassis origin the wheels are placed from. Hidden until `mid` shows them.
+    for (const part of [instance.mid?.paint, instance.mid?.glass]) {
+      if (!part) continue;
+      part.position.set(0, rideY, 0);
+      car.anchor.add(part);
+    }
     car.instance = instance;
+    showMid(car);
+  };
+  /** Mid in place of the body and wheels, as `Vehicle.showMid` swaps them. */
+  const showMid = (car: LabCar): void => {
+    const instance = car.instance;
+    if (!instance) return;
+    const mid = car.mid && instance.mid !== null;
+    instance.body.visible = !mid;
+    for (const wheel of instance.wheels.values()) wheel.visible = !mid;
+    if (instance.mid) instance.mid.paint.visible = mid;
+    if (instance.mid?.glass) instance.mid.glass.visible = mid;
   };
   let builtFactory = state.factory;
   let builtVariant = state.variant;
@@ -463,6 +495,11 @@ export async function bootCarLab(): Promise<void> {
   });
 
   const view = new THREE.Vector3();
+  // Mid traffic's shared parts (trim, glass, lenses, wheels), drawn unlit as parked cars' are.
+  const midField = new FarCarField(renderer.scene, 'lab-mid-cars');
+  const midAt = new THREE.Vector3();
+  const darkLamps = { lensLevel: () => 0 } as unknown as VehicleLamps;
+  const labFov = renderer.camera.fov;
   let lastFrame = performance.now();
   const renderFrame = (): void => {
     const now = performance.now();
@@ -471,9 +508,18 @@ export async function bootCarLab(): Promise<void> {
     const eye = renderer.camera.position;
     for (const car of cars) {
       if (!car.rig) continue;
-      car.rig.setDetail(car.anchor.position.distanceTo(eye));
+      // A mid car is posed far whatever the eye's distance, as `Vehicle.showMid` poses it.
+      car.rig.setDetail(car.mid ? Infinity : car.anchor.position.distanceTo(eye));
       car.rig.update(dt);
     }
+    midField.begin();
+    for (const car of cars) {
+      const mid = car.mid ? car.instance?.mid : null;
+      if (!mid || !car.anchor.visible) continue;
+      midAt.copy(mid.paint.position).applyQuaternion(car.anchor.quaternion).add(car.anchor.position);
+      midField.addMid(mid.rest, mid.wheels, midAt, car.anchor.quaternion, darkLamps);
+    }
+    midField.end();
     controls.update();
     const cam = renderer.camera.position;
     renderer.camera.getWorldDirection(view);
@@ -507,14 +553,25 @@ export async function bootCarLab(): Promise<void> {
       target.y = half[1] * 0.9;
       frame(target, distance ?? Math.max(half[2], half[0]) * 2.6, CAR_YAW + azimuth, elevation);
     },
-    look(modelId, position, target) {
+    look(modelId, position, target, fov = labFov) {
       const car = cars.find((candidate) => candidate.def.id === modelId);
       if (!car) return;
       for (const other of cars) other.label.visible = false;
       car.anchor.updateMatrixWorld(true);
       controls.target.copy(car.anchor.localToWorld(new THREE.Vector3(...target)));
       renderer.camera.position.copy(car.anchor.localToWorld(new THREE.Vector3(...position)));
+      renderer.camera.fov = fov;
+      renderer.camera.updateProjectionMatrix();
       controls.update();
+    },
+    mid(modelId, on) {
+      const car = cars.find((candidate) => candidate.def.id === modelId);
+      if (!car) return;
+      car.mid = on;
+      showMid(car);
+    },
+    only(modelId) {
+      for (const car of cars) car.anchor.visible = modelId === null || car.def.id === modelId;
     },
     kit(modelId) {
       const car = cars.find((candidate) => candidate.def.id === modelId);

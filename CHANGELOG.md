@@ -708,6 +708,17 @@
 
 ### Fixed
 
+- A KIT CAR CAUGHT UP WITH FROM BEHIND NO LONGER GROWS ITS EXHAUST, SEATS AND WINDOW DUST AT
+  50 M (`carkit/bay.ts`, `carkit/rig.ts`, `render/carmodel.ts`, `render/farcars.ts`,
+  `vehicle/vehicle.ts`). The exhaust is out of the underbody's detail group, so it draws at
+  every distance and the mid and far meshes bake it; the glass is an opaque mirror from 45 m
+  (was 0.9 at 50 m), fading to 0.28 at 30 m, so the cabin comes and goes unseen behind it;
+  mid traffic draws its panes in the car's own glass, so their dust is the near panes'
+  (the far mesh's flat tint showed a clean pane). Behind a 2107 and a 2109, mid at 55 m
+  against full at 45 m: glass and tail panel differ by 1.0–1.6 of 255 (was 5.2–14.4).
+  A mid car costs one draw more and one more per shadow pass (its glass); a near one one
+  more (the exhaust). The car lab gains `__carLab.mid`, `only` and a `look` FOV for the A/B.
+
 - NO Z-FIGHTING ON KIT CARS AT ANY DISTANCE (`carkit/*`, `tools/kit-zfight.ts`): items on
   the body skin sit in holes cut in the shell instead of on its hidden face, cabin decals
   are laid into their surfaces, lit faces swap places with their dark faces, and the

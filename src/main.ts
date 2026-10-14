@@ -2925,15 +2925,15 @@ async function boot(): Promise<void> {
         },
         get stats(): { cars: number; sharedMeshes: number; draws: number; drawsSaved: number } {
           let cars = 0;
-          let paint = 0;
+          let own = 0;
           let full = 0;
           traffic.forEachVehicle((_, vehicle) => {
             if (!vehicle.root.visible || !vehicle.drawnMid) return;
             cars++;
-            paint += vehicle.midPaintSlots;
+            own += vehicle.midOwnDraws;
             full += nearDrawEstimate(vehicle.nearParts);
           });
-          const draws = (paint + midCars.stats.models) * 2;
+          const draws = (own + midCars.stats.models) * 2;
           return { cars, sharedMeshes: midCars.stats.models, draws, drawsSaved: full - draws };
         },
       },
