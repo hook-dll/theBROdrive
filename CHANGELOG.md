@@ -703,6 +703,25 @@
 
 ### Fixed
 
+- NO CRAWLING SHADOW BANDS ON CABINS AND BUILDINGS (`render/lightshader.ts`
+  `installSunShadowSlopeBias`, `config/graphics.json` `shadowNormalBias` 0.02 → 0.08,
+  `render/carmodel.ts` `prepareMaterials`). The sun's normal bias is now turned to the
+  light's side of a double-sided panel and scaled by the sine of its angle to the sun:
+  a texel on a wall or seat the sun grazes, nothing on sand it faces square, so the
+  car's contact shadow keeps its margin (tools/shadow-bias.ts: 3.0x). Kit detail parts
+  (cabin, bay, boot, underbody) cast no sun shadow; they receive the shell's.
+
+- FEWER DRAWS PER NEAR KIT CAR: those casters were 55 of a near kit car's ~200 draws
+  (346 → 291 at the seed-7 start with one car), part of the frame rate lost at POIs
+  with several parked kit cars.
+
+- KIT CABIN LINING FOLLOWS THE SHELL (`carkit/body.ts`, `interior.ts`, `bay.ts`): the
+  headliner and upper trim are the shell's own greenhouse faces set 28 mm in, so they
+  stop at every glass edge; no paint shows round the windows from inside.
+
+- KIT TAIL LAMPS SIT ON THE BODY (`carkit/exterior.ts`, `specs.ts`): no black backing
+  plate, no black 2106 rear panel and its distant z-fight; chrome surrounds kept.
+
 - NO MORE FLASH OF THE BODY IN THE CABIN VIEW (`render/cameras.ts` `rebase`). On every
   floating-origin shift (each kilometre or so) the rendered camera was left a kilometre
   behind for one frame, so the car the player sat in was past its cabin's detail range

@@ -138,9 +138,9 @@ Integration outside the folder:
   `setDetail` (the distance from `Vehicle.viewFrom`'s eye, which main.ts gives once a frame) and
   `update`. The rig, not the `STEERING_WHEEL_NODE` path, turns a kit car's wheel.
 - `render/carmodel.ts`: `loadModel` calls `buildKitCar` on a frame of its own. Clear glass
-  comes from `carClearGlassMaterial`. A cabin mesh with `userData.kitShadowed` receives
-  shadows; one with `userData.kitCastsNone` (a part thinner than a shadow texel: the sun
-  visors) casts none. `cloneWheels` rescales the pack's wheel sets to the kit tyre. Static clones
+  comes from `carClearGlassMaterial`. A detail mesh (cabin, bay, boot, underbody) with
+  `userData.kitShadowed` receives shadows and casts none; one with `userData.kitCastsNone`
+  (the mirror face) casts none. `cloneWheels` rescales the pack's wheel sets to the kit tyre. Static clones
   (wrecks, couriers: `cloneStaticModel`) are posed far once (`poseKitStatic`: no cabin,
   bay, boot or underbody, mirror glass).
 - `render/stickerdecals.ts`: decals on a moving part (`StickerDecalCarrier`: the nearest
@@ -182,9 +182,15 @@ Integration outside the folder:
    - gaps: each opening part's edge pulls in by half a gap (`SHUT_GAP`) and the body's edge
      pushes out by the other half;
    - jamb flanges go on the body (`JAMB_DEPTH`), end faces and an inner skin go on the
-     parts (`DOOR_THICKNESS`, `LID_THICKNESS`);
-   - the door card below the belt is in the upholstery colour;
-   - glass is recessed (`GLASS_INSET`) and edged with dark rubber.
+     parts (`DOOR_THICKNESS`, `LID_THICKNESS`); round the greenhouse the flanges and the
+     parts' edges are rubber (the seal);
+   - a door's and a tailgate's inner skin is in the upholstery colour (the card below the
+     belt, the frame's lining above it); a bonnet's and a boot lid's stay painted;
+   - glass is recessed (`GLASS_INSET`) and edged with dark rubber, from the frame's edge
+     back to the pane and on to the frame's inner side (the lining or the inner skin);
+   - the body's own greenhouse and roof faces, offset `LINING_DEPTH` inward, are the
+     cabin's lining (`ShellResult.lining`): pillar trims, headers and headliner end at
+     the panes and openings exactly. interior.ts draws it in the headliner colour.
 6. **Hinges.** Pivots come from each part's geometry: door at its front edge, bonnet at
    its rear edge, boot lid at its front edge, tailgate at its top edge, flap at its front
    edge, quarter light at its rear post. A drop glass winds down into its door in its
@@ -353,7 +359,7 @@ meshes keep the lamp names, so lamps still work.
 | `round` | `role`, `x`, `y: FaceY`, `radius` | A round lamp in a chrome ring (classics). |
 | `lens` | `role`, `x: Span<FaceX>`, `y: Span<FaceY>`, `depth`, `proud`, `slant?` | A lamp lens; one centred on the centre line (`x: { at: { centre: 0 }, half }`) is built once across it (the 2110's lid reflector). `slant: { outer, inner }` moves the top edge's outer/inner ends inboard of the bottom's: a trapezoid (2108 headlamps) or a parallelogram; negative values lean out. A lamp that wraps round the body's corner is a `cornerLamps` unit, not a face lens. |
 | `grille` | `x: FaceX` (half width), `y`, `standOut?`, `frame?: { finish, margin }`, `back`, `bars: { dir, count, finish, margin, width, depth, proud }` | Grille or slot; `standOut` lifts the whole grille out of the face (the 2107's; the 2115's lower intake). |
-| `cluster` | `x: Span<FaceX>`, `y: Span<FaceY>`, `columns: LampRole[][]` | Tail-lamp cluster in a black housing: columns from the outer edge in, each column's roles top to bottom. |
+| `cluster` | `x: Span<FaceX>`, `y: Span<FaceY>`, `columns: LampRole[][]` | Tail-lamp cluster straight on the body, its cells tiling the span (no housing; add a `frame` for a chrome surround): columns from the outer edge in, each column's roles top to bottom. |
 | `frame` | `x`, `y`, `width`, `finish`, `proud` | A rectangular outline (chrome surround). |
 
 **`LampRole`**: `head`, `tail`, `brake`, `reverse`, `blinker` (takes its side's slot),
@@ -632,30 +638,33 @@ fourth review's rear corner lamps and `frontLean` (2101–2107 identical, the es
 triangle counts and bounds), and the 2112 round (`flush`, `screenFoot`, column `drop`,
 `frontLean.full`, the nose split, the greenhouse foot at stations, the tailgate spoiler:
 the classic saloons 2101, 2103, 2105–2107 identical against cfff462; the estates moved
-only by the closed rear-quarter slits, the Samaras and tens by design).
+only by the closed rear-quarter slits, the Samaras and tens by design), and the shell
+lining with its seals and the tail clusters without a backing plate (2026-10-15: every car
+moved by design, inside the greenhouse and on its tail lamps; all 13 fit rows identical to
+HEAD's, so the bounds, wheel mounts and bonnet point did not move).
 
 ## Budget and current figures
 
 Budget ≈ 8–13k triangles per car near, with LOD at `KIT_DETAIL_M`. Counted by building each
-car with `buildKitCar` and summing triangles per group; the wheels are the kit's placeholder
-wheels (336 each) that the pack's sets replace. "Far" = everything except the four detail
-groups.
+car with `buildKitCar` and summing triangles per group (2026-10-15); the wheels are the
+kit's placeholder wheels (336 each) that the pack's sets replace. "Cabin" includes the door
+trim hung in the doors; "Far" = everything except the four detail groups.
 
 | | Total | Body + trim | Cabin | Engine bay | Boot | Underbody | Wheels | Far |
 |---|---|---|---|---|---|---|---|---|
-| 2101 | 11 489 | 5 071 | 2 985 | 1 045 | 298 | 746 | 1 344 | 6 415 |
-| 2102 | 11 472 | 5 342 | 2 945 | 1 045 | 50 | 746 | 1 344 | 6 686 |
-| 2103 | 12 197 | 5 591 | 3 173 | 1 045 | 298 | 746 | 1 344 | 6 935 |
-| 2104 | 11 796 | 5 414 | 3 189 | 1 065 | 38 | 746 | 1 344 | 6 758 |
-| 2105 | 12 131 | 5 439 | 3 239 | 1 065 | 298 | 746 | 1 344 | 6 783 |
-| 2106 | 12 599 | 6 023 | 3 143 | 1 045 | 298 | 746 | 1 344 | 7 367 |
-| 2107 | 12 339 | 5 299 | 3 587 | 1 065 | 298 | 746 | 1 344 | 6 643 |
-| 2108 | 10 264 | 3 828 | 3 195 | 1 239 | 38 | 620 | 1 344 | 5 172 |
-| 2109 | 11 388 | 4 712 | 3 435 | 1 239 | 38 | 620 | 1 344 | 6 056 |
-| 21099 | 11 691 | 4 901 | 3 519 | 1 239 | 68 | 620 | 1 344 | 6 245 |
-| 2115 | 12 301 | 5 511 | 3 519 | 1 239 | 68 | 620 | 1 344 | 6 855 |
-| 2110 | 14 767 | 7 509 | 3 927 | 1 299 | 56 | 632 | 1 344 | 8 853 |
-| 2112 | 14 697 | 7 539 | 3 833 | 1 299 | 50 | 632 | 1 344 | 8 883 |
+| 2101 | 11 511 | 5 371 | 3 315 | 431 | 298 | 752 | 1 344 | 6 715 |
+| 2102 | 11 652 | 5 682 | 3 377 | 431 | 66 | 752 | 1 344 | 7 026 |
+| 2103 | 12 297 | 5 891 | 3 581 | 431 | 298 | 752 | 1 344 | 7 235 |
+| 2104 | 11 994 | 5 754 | 3 643 | 451 | 50 | 752 | 1 344 | 7 098 |
+| 2105 | 12 223 | 5 755 | 3 623 | 451 | 298 | 752 | 1 344 | 7 099 |
+| 2106 | 12 661 | 6 311 | 3 525 | 431 | 298 | 752 | 1 344 | 7 655 |
+| 2107 | 12 491 | 5 615 | 4 031 | 451 | 298 | 752 | 1 344 | 6 959 |
+| 2108 | 10 296 | 4 120 | 3 547 | 615 | 50 | 620 | 1 344 | 5 464 |
+| 2109 | 11 524 | 5 020 | 3 875 | 615 | 50 | 620 | 1 344 | 6 364 |
+| 21099 | 11 785 | 5 209 | 3 929 | 615 | 68 | 620 | 1 344 | 6 553 |
+| 2115 | 12 395 | 5 819 | 3 929 | 615 | 68 | 620 | 1 344 | 7 163 |
+| 2110 | 14 865 | 7 817 | 4 341 | 675 | 56 | 632 | 1 344 | 9 161 |
+| 2112 | 14 845 | 7 855 | 4 273 | 675 | 66 | 632 | 1 344 | 9 199 |
 
 The owner set the budget aside for the 2110 and 2112 (the rounded rear shut line adds side
 rows to every tub column).
@@ -675,7 +684,7 @@ dashboard. The 2105 and 2107 share their own, squarer body. Numbers and sources 
 | Body | 124 | 124 | 124 | "05" | "05" |
 | Front | 2 round lamps by a wide chrome grille | 4 round lamps inside one chrome grille | 4 round in black surrounds in a chrome frame, chrome-framed grille | the 2107's lamp units on its black surround, flush black grille with horizontal bars | taller units in a black band, tall chrome grille standing out |
 | Bumpers | thin chrome, chrome fangs | chrome, chrome fangs | chrome, rubber strip and blocks, black end caps | aluminium, black lip and end caps | chrome over black, black ends |
-| Tail | small chrome-rimmed lamps, reversing lamps apart | chrome surround round lamps and plate | black panel in a chrome outline, 3×3 cells | wide lamps, 2×3 cells (no wrap: checked on a side photo) | as the 2105, two rows |
+| Tail | small chrome-rimmed lamps, reversing lamps apart | chrome surround round lamps and plate | a chrome outline round the panel between the lamps (body colour: the owner's call, the real one is black), 3×3 cells | wide lamps, 2×3 cells (no wrap: checked on a side photo) | as the 2105, two rows |
 | Side | chrome sill, round repeater | chrome waist and sill | waist with black insert, chrome sill | black ribbed sill strip | painted |
 | Quarter lights / rear-door fixed pane | yes / – | yes / – | yes / – | no / yes | no / yes |
 | Head restraints | no | no | yes | yes | yes |

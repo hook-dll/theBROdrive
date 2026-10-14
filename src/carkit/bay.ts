@@ -27,7 +27,7 @@
  */
 
 import * as THREE from 'three';
-import type { BodyFrame } from './body';
+import { LINING_DEPTH, type BodyFrame } from './body';
 import { PartBuilder, type KitSlot, type Vec3 } from './builder';
 import { addBuilt, type KitContext } from './context';
 import { loadSpaceStart } from './interior';
@@ -671,8 +671,8 @@ function buildSaloonBoot(frame: BodyFrame, b: PartBuilder, classic: boolean): vo
 
 /**
  * A hatch's luggage space: a carpeted load floor from the rear bench's box to the tail
- * and trimmed sides up to the belt. The spare lives under the floor, out of sight, so
- * the space is left empty.
+ * and trimmed sides up to the deck's edge, where the greenhouse's lining starts. The
+ * spare lives under the floor, out of sight, so the space is left empty.
  */
 function buildHatchBoot(frame: BodyFrame, b: PartBuilder): void {
   const spec = frame.spec;
@@ -690,7 +690,8 @@ function buildHatchBoot(frame: BodyFrame, b: PartBuilder): void {
   for (const side of [1, -1]) {
     loft(b, 'trim', frame, stationsBetween(frame, s0, s1), side, (s) => {
       const belt = frame.station(s).belt - 0.02;
-      return [[inner, floor], [inner, shelf], [frame.sideX(s, shelf) - 0.08, shelf], [frame.sideX(s, belt) - 0.08, belt]];
+      const [edgeX, edgeY] = frame.section(s).r4;
+      return [[inner, floor], [inner, shelf], [frame.sideX(s, shelf) - 0.08, shelf], [frame.sideX(s, belt) - 0.08, belt], [edgeX - LINING_DEPTH, edgeY]];
     });
   }
 }

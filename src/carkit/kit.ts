@@ -80,7 +80,7 @@ export function buildKitCar(id: string): THREE.Group {
   }
   for (const { node } of nodes.values()) if (!node.parent) root.add(node);
 
-  const ctx: KitContext = { frame, root, nodes };
+  const ctx: KitContext = { frame, root, nodes, lining: shell.lining };
   buildExterior(ctx);
   buildInterior(ctx);
   buildBay(ctx);

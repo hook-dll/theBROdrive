@@ -298,19 +298,19 @@ function buildFaceItem(face: EndFace, item: FaceItem, b: PartBuilder): void {
       return;
     }
     case 'cluster': {
+      // One unit straight on the body, no backing: its cells tile the span with a 3 mm
+      // seam between them, each reaching 1 mm into the face, so none lies in its plane.
       const [x, hx] = face.spanX(item.x);
       const [y, hy] = face.spanY(item.y);
       const outer = x + hx;
-      const inner = x - hx;
-      const w = (outer - inner) / item.columns.length;
+      const w = (2 * hx) / item.columns.length;
       for (const side of [1, -1]) {
-        b.color(BLACK).boxFrom('trim', [side > 0 ? inner - 0.012 : -outer - 0.012, y - hy - 0.012, face.out(0.006)], [side > 0 ? outer + 0.012 : -inner + 0.012, y + hy + 0.012, face.out(-0.002)]);
         item.columns.forEach((roles, k) => {
           const cx = outer - (k + 0.5) * w;
           const rowH = (2 * hy) / roles.length;
           roles.forEach((role, r) => {
             const cy = y + hy - (r + 0.5) * rowH;
-            lens(b, lampSlot(role, side), [side * cx, cy, face.out(0.01)], [w / 2 - 0.004, rowH / 2 - 0.004, 0.01]);
+            b.bevelBox(lampSlot(role, side), [side * cx, cy, face.out(0.009)], [w / 2 - 0.0015, rowH / 2 - 0.0015, 0.01], 0.004);
           });
         });
       }

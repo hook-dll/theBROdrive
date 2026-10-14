@@ -10,7 +10,9 @@
  *    half, so a closed door shows a real gap and an ink line;
  *  - turns a flange in on the body side of every gap (the jamb an open door shows)
  *    and a return plus an inner skin on the part (a door card, a bonnet's underside);
- *  - sets every pane back from its frame on a dark rubber return.
+ *  - sets every pane back from its frame on a dark rubber return;
+ *  - offsets the body's own greenhouse and roof inward into the cabin's lining (pillar
+ *    trims and headliner, `ShellResult.lining`), so the trim follows the openings exactly.
  */
 
 import * as THREE from 'three';
@@ -30,6 +32,11 @@ export const DOOR_THICKNESS = 0.075;
 const LID_THICKNESS = 0.035;
 /** How far a pane sits behind its frame. */
 const GLASS_INSET = 0.012;
+/**
+ * The cabin lining stands this far in from the body's greenhouse and roof. Every pane's
+ * edge gets a rubber return back to it, and to a door's or tailgate's inner skin.
+ */
+export const LINING_DEPTH = 0.028;
 /** Width of the wall a notched deck (`TubStation.notch`) rises in, just inside the notch. */
 const NOTCH_WALL = 0.025;
 /** Deck left between a `KitCarSpec.bonnet`'s rear edge and the cowl (the scuttle). */
@@ -51,6 +58,8 @@ interface Face {
   mat: Mat;
   /** Winding already outward; skips the centre-line heuristic (wheel wells). */
   fixed?: boolean;
+  /** The body's greenhouse or roof: lined inside (`ShellResult.lining`). */
+  lined?: boolean;
 }
 
 /** A moving part of the shell, ready to be hung at its pivot. */
@@ -308,7 +317,7 @@ class Shell {
     return index;
   }
 
-  face(points: readonly Vec3[], owner: string, mat: Mat, fixed = false): void {
+  face(points: readonly Vec3[], owner: string, mat: Mat, fixed = false, lined = false): void {
     const v: number[] = [];
     for (const p of points) {
       const i = this.vertex(p);
@@ -316,7 +325,7 @@ class Shell {
     }
     if (v.length < 3) return;
     if (area(v.map((i) => this.positions[i]!)) < 1e-7) return;
-    this.faces.push({ v, owner, mat, fixed });
+    this.faces.push({ v, owner, mat, fixed, lined });
   }
 }
 
@@ -553,6 +562,12 @@ interface Ring {
 export interface ShellResult {
   readonly parts: ShellPart[];
   readonly triangles: number;
+  /**
+   * The cabin lining in the car frame: the body's own greenhouse faces (pillars, headers,
+   * rail) and the roof, offset `LINING_DEPTH` inward. Ends at every pane's and every
+   * opening's edge, as the shell does.
+   */
+  readonly lining: readonly Vec3[][];
 }
 
 export function buildShell(frame: BodyFrame): ShellResult {
@@ -872,11 +887,11 @@ export function buildShell(frame: BodyFrame): ShellResult {
       ];
       for (const [p0, p1, p2, p3, band] of bands) {
         if (band === 3) {
-          shell.face([p0, p1, p2, p3], 'body', 'paint');
+          shell.face([p0, p1, p2, p3], 'body', 'paint', false, true);
         } else if (band === 1 && glass !== null) {
           shell.face([p0, p1, p2, p3], glass, 'glass');
         } else {
-          shell.face([p0, p1, p2, p3], upper, 'paint');
+          shell.face([p0, p1, p2, p3], upper, 'paint', false, upper === 'body');
         }
       }
     }
@@ -889,7 +904,7 @@ export function buildShell(frame: BodyFrame): ShellResult {
       const u0 = sides[i]!.u;
       const u1 = sides[i + 1]!.u;
       for (let k = 0; k + 1 < fracs.length; k++) {
-        shell.face([roofPoint(u0, fracs[k]!), roofPoint(u1, fracs[k]!), roofPoint(u1, fracs[k + 1]!), roofPoint(u0, fracs[k + 1]!)], 'body', 'paint');
+        shell.face([roofPoint(u0, fracs[k]!), roofPoint(u1, fracs[k]!), roofPoint(u1, fracs[k + 1]!), roofPoint(u0, fracs[k + 1]!)], 'body', 'paint', false, true);
       }
     }
   }
@@ -984,7 +999,23 @@ function cutShell(frame: BodyFrame, shell: Shell): ShellResult {
     }
   }
 
-  const beltAt = (z: number): number => frame.station(frame.zNose - z).belt;
+  // The lining: lined faces offset inward along normals of the lined faces alone, so it is
+  // one closed skin over pillars, headers, rail and roof.
+  const liningNormals = new Map<number, Vec3>();
+  for (const f of faces) {
+    if (!f.lined) continue;
+    const n = newell(f.v.map((i) => positions[i]!));
+    for (const v of f.v) liningNormals.set(v, add(liningNormals.get(v) ?? [0, 0, 0], n));
+  }
+  const lined = (v: number): Vec3 => add(placed('body', v, false), scale(norm(liningNormals.get(v)!), -LINING_DEPTH));
+  /** Where a frame's inner side is at vertex v: the lining, or a moving part's inner skin. */
+  const innerOf = (f: Face, v: number): Vec3 | undefined => {
+    if (f.lined) return lined(v);
+    if (!MOVING.test(f.owner)) return undefined;
+    const depth = f.owner.startsWith('door') ? DOOR_THICKNESS : LID_THICKNESS;
+    return add(placed(f.owner, v, false), scale(norm(normals.get(key(f.owner, v))!), -depth));
+  };
+
   for (const { a, b, faces: pair } of edges.values()) {
     if (pair.length !== 2) continue;
     const [f0, f1] = pair as [Face, Face];
@@ -992,18 +1023,25 @@ function cutShell(frame: BodyFrame, shell: Shell): ShellResult {
     const g1 = f1.mat === 'glass';
     if (g0 && g1) continue;
     if (g0 || g1) {
-      // Rubber return from the frame's edge back to the pane.
+      // Rubber return from the frame's edge back to the pane, and on from the pane to the
+      // frame's inner side, so no painted inside shows round a pane from the cabin.
       const pane = g0 ? f0 : f1;
       const frameFace = g0 ? f1 : f0;
       const fa = placed(frameFace.owner, a, false);
       const fb = placed(frameFace.owner, b, false);
       const ga = placed(pane.owner, a, true);
       const gb = placed(pane.owner, b, true);
-      builderOf(frameFace.owner).color(SHELL_COLOURS.rubber).poly('trim', [fa, fb, gb, ga]);
+      const rubber = builderOf(frameFace.owner).color(SHELL_COLOURS.rubber);
+      rubber.poly('trim', [fa, fb, gb, ga]);
+      const ia = innerOf(frameFace, a);
+      const ib = innerOf(frameFace, b);
+      if (ia && ib) rubber.poly('trim', [ga, gb, ib, ia]);
       continue;
     }
     if (f0.owner === f1.owner) continue;
     if (!MOVING.test(f0.owner) && !MOVING.test(f1.owner)) continue;
+    // Round the greenhouse the jamb and the part's edge are the seal's: rubber.
+    const seal = f0.lined || f1.lined;
     for (const f of [f0, f1]) {
       const pa = placed(f.owner, a, false);
       const pb = placed(f.owner, b, false);
@@ -1011,22 +1049,25 @@ function cutShell(frame: BodyFrame, shell: Shell): ShellResult {
       const nb = norm(normals.get(key(f.owner, b))!);
       const moving = MOVING.test(f.owner);
       const depth = moving ? (f.owner.startsWith('door') ? DOOR_THICKNESS : LID_THICKNESS) : JAMB_DEPTH;
-      builderOf(f.owner).poly('paint', [pa, pb, add(pb, scale(nb, -depth)), add(pa, scale(na, -depth))]);
+      const edge = [pa, pb, add(pb, scale(nb, -depth)), add(pa, scale(na, -depth))];
+      if (seal) builderOf(f.owner).color(SHELL_COLOURS.rubber).poly('trim', edge);
+      else builderOf(f.owner).poly('paint', edge);
     }
   }
 
-  // Inner skins of the moving panels: a door card below the belt, painted steel above.
+  // Inner skins of the moving panels: a door's and a tailgate's are trim in the
+  // upholstery's colour (a door card below the belt, the frame's lining above it); a
+  // bonnet's, a boot lid's and the flap's are painted steel.
   for (const f of faces) {
     if (!MOVING.test(f.owner) || f.mat === 'glass') continue;
-    const door = f.owner.startsWith('door');
-    const depth = door ? DOOR_THICKNESS : LID_THICKNESS;
-    const pts = f.v.map((v) => add(placed(f.owner, v, false), scale(norm(normals.get(key(f.owner, v))!), -depth))).reverse();
-    const c = centroid(pts);
-    const card = door && c[1] < beltAt(c[2]) + 0.02;
+    const pts = f.v.map((v) => innerOf(f, v)!).reverse();
     const b = builderOf(f.owner);
-    if (card) b.color(frame.spec.look.upholstery).poly('trim', pts);
+    if (f.owner.startsWith('door') || f.owner === 'tailgate') b.color(frame.spec.look.upholstery).poly('trim', pts);
     else b.poly('paint', pts);
   }
+
+  const lining: Vec3[][] = [];
+  for (const f of faces) if (f.lined) lining.push(f.v.map(lined).reverse());
 
   // Pivots: hinges at the leading edge (doors, flap), rear edge (bonnet), front edge
   // (boot) and top edge (tailgate); panes slide or swing about their own frame.
@@ -1039,7 +1080,7 @@ function cutShell(frame: BodyFrame, shell: Shell): ShellResult {
     triangles += builder.triangleCount();
     parts.push({ owner, builder, pivot });
   }
-  return { parts, triangles };
+  return { parts, triangles, lining };
 }
 
 function pivotOf(owner: string, verts: readonly Vec3[]): Vec3 {

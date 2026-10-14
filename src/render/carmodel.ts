@@ -640,8 +640,12 @@ function prepareMaterials(root: THREE.Object3D, bodywork: boolean, lenses: Reado
     // straight through the cars ahead and drew them on the road with see-through
     // windows. A car's shadow is its silhouette, windows included.
     const lens = lenses.has(child.name) || materials.every((material) => lenses.has(material.name));
-    // A kit part thinner than a shadow texel casts nothing (carkit/context.ts `addBuilt`).
-    child.castShadow = !lens && child.userData.kitCastsNone !== true;
+    // A kit's detail parts (cabin, bay, boot, underbody: `kitShadowed`) cast nothing:
+    // the shell's silhouette is the car's shadow already, and inside the cabin each small
+    // part shadowing its neighbour a few centimetres off banded with acne. They were also
+    // ~55 of a near kit car's ~200 draws (sun depth pass included), and a POI with a few
+    // parked kit cars halved the frame rate. The mirror face casts none either.
+    child.castShadow = !lens && child.userData.kitCastsNone !== true && child.userData.kitShadowed !== true;
     // Bodywork receives none, but a kit cabin does: it is the roof's shadow that tells
     // a seat seen through the glass from one standing in the sun.
     child.receiveShadow = !bodywork || child.userData.kitShadowed === true;

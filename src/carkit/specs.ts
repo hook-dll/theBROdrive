@@ -246,8 +246,8 @@ const LOOK_2101: KitLook = {
     },
     items: [
       { kind: 'frame', x: { from: { centre: 0.37 }, to: { centre: 0.7 } }, y: { from: ['bumperTop', 0.115], to: ['bumperTop', 0.245] }, width: 0.012, finish: 'chrome', proud: 0.012 },
-      // From +0.129, not the drawing's +0.127: the lamp's black plate (12 mm round it) then
-      // ends 2 mm inside the rim's bottom bar instead of in its bottom face (z-fighting).
+      // From +0.129, not the drawing's +0.127: the cells stand 2 mm clear of the rim's
+      // bottom bar and reach 2 mm into its top bar.
       { kind: 'cluster', x: { from: { centre: 0.38 }, to: { centre: 0.69 } }, y: { from: ['bumperTop', 0.129], to: ['bumperTop', 0.235] }, columns: [['blinker'], ['tail', 'brake']] },
       { kind: 'lens', role: 'reverse', x: { from: { centre: 0.472 }, to: { centre: 0.594 } }, y: { from: ['bumperTop', 0.065], to: ['bumperTop', 0.108] }, depth: 0.01, proud: 0.012 },
     ],
@@ -316,8 +316,8 @@ const LOOK_2103: KitLook = {
  * VAZ-2106 (vaz_2106.jpg, heights by 1382/1446, and Commons photos): four round lamps in
  * black surrounds inside a chrome frame round the whole lamp band, a chrome-framed grille,
  * the indicators on the face under the outer lamps; chrome blades with black plastic end
- * caps and rubber overriders; at the rear a black panel in a chrome outline carrying a
- * 3×3 cell cluster each side; a waist moulding with a black insert.
+ * caps and rubber overriders; at the rear a chrome outline round the panel between the
+ * lamps, with a 3×3 cell cluster each side; a waist moulding with a black insert.
  */
 const LOOK_2106: KitLook = {
   label: 'VAZ-2106',
@@ -367,7 +367,6 @@ const LOOK_2106: KitLook = {
       overriders: { inset: 0.28, half: [0.04, 0.07], drop: 0.01, finish: 'rubber' },
     },
     items: [
-      { kind: 'panel', x: { centre: 0.66 }, y: { from: ['belt', -0.265], to: ['belt', -0.01] }, finish: 'black', proud: 0.003 },
       { kind: 'frame', x: { from: { centre: -0.665 }, to: { centre: 0.665 } }, y: { from: ['belt', -0.27], to: ['belt', -0.005] }, width: 0.01, finish: 'chrome', proud: 0.007 },
       {
         kind: 'cluster',

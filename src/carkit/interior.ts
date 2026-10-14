@@ -4,9 +4,11 @@
  *
  *  - LINING (carpet and tunnel, firewall, headliner, pillar and quarter trims, sills,
  *    arch humps, parcel shelf) closes the shell from inside, so neither the inner skin
- *    nor the void under the decks shows through the glass. It keeps clear of what moves
- *    or turns: a door's inner skin stands DOOR_CARD in from its outer skin, above the
- *    belt as well (the window frame), and the tyres turn outboard of `wellX`.
+ *    nor the void under the decks shows through the glass. Above the belt it is the
+ *    shell's own (`KitContext.lining`: the greenhouse and roof offset inward), so it ends
+ *    at the panes and openings exactly. It keeps clear of what moves or turns: a door's
+ *    inner skin stands DOOR_CARD in from its outer skin, above the belt as well (the
+ *    window frame), and the tyres turn outboard of `wellX`.
  *  - FURNITURE (dash, column and wheel, pedals, levers, seats) is fixed geometry in one
  *    builder, so the whole cabin is one mesh per slot. Each moving part is its own
  *    pivot group, tagged for the rig (rig.ts) with the shared channel names.
@@ -24,21 +26,17 @@
  */
 
 import * as THREE from 'three';
-import { DOOR_THICKNESS as DOOR_CARD, type BodyFrame } from './body';
+import { DOOR_THICKNESS as DOOR_CARD, LINING_DEPTH, type BodyFrame } from './body';
 import { PartBuilder, lerp, table, type KitSlot, type Vec3 } from './builder';
 import { addBuilt, addMirrorFace, attach, mirrorFrame, pivotGroup, type KitContext } from './context';
 import type { KitControl, KitMotion } from './rig';
-import type { CabinColumn, KitCarSpec } from './spec';
+import type { KitCarSpec } from './spec';
 
 type P2 = readonly [number, number];
 
 /** Lining in from the outer skin below the belt, and in from the greenhouse above it. */
 const SIDE_CLEAR = 0.08;
 const GLASS_CLEAR = 0.075;
-/** Pillar trims in from the greenhouse: about level with a door frame's inner skin. */
-const PILLAR_IN = 0.065;
-/** Side trim stops this far ahead of a tailgate's opening. */
-const HATCH_TRIM_CLEAR = 0.06;
 /** Firewall lining behind the cowl. */
 const FIREWALL = 0.02;
 /** Floor pan above the sill's underside (the shell's flat underbody). */
@@ -601,10 +599,10 @@ function cabinFloor(frame: BodyFrame): number {
   return frame.station(frame.cowl + 0.5).sill + FLOOR_RISE;
 }
 
-/** Underside of the headliner at half width x. */
+/** Underside of the headliner (the shell's roof lining) at half width x. */
 function headlinerUnder(cab: KitCarSpec['cabin'], x: number): number {
   const xr = cab.railHalf - cab.railInset;
-  return cab.rail + cab.railRise + cab.crown * (1 - (x / xr) ** 2) - 0.028;
+  return cab.rail + cab.railRise + cab.crown * (1 - (x / xr) ** 2) - LINING_DEPTH;
 }
 
 /**
@@ -761,15 +759,6 @@ interface FloorRow {
   readonly topHalf: number;
 }
 
-/** A point of the greenhouse ring seen from inside: belt, optional knee, rail. */
-interface RingPoint {
-  readonly b: Vec3;
-  readonly k?: Vec3;
-  readonly t: Vec3;
-  readonly kind: 'front' | 'side' | 'rear';
-  readonly column?: CabinColumn;
-}
-
 class Cabin {
   private readonly ctx: KitContext;
   private readonly frame: BodyFrame;
@@ -825,7 +814,7 @@ class Cabin {
     this.sidePanels();
     this.humps();
     this.sills();
-    this.pillars();
+    this.lining();
     this.headliner();
     this.shelf();
     this.dash();
@@ -892,14 +881,8 @@ class Cabin {
     return headlinerUnder(this.spec.cabin, x);
   }
 
-  /** Headliner's half width: inside the door frames' inner skins at the rail. */
-  private get headHalf(): number {
-    return this.spec.cabin.railHalf - 0.085;
-  }
-
   /**
    * A pivot group with its own geometry, hung under `parent` (standing at `parentAt`).
-   * `casts = false` for a part thinner than a shadow texel (see `addBuilt`).
    */
   private hinge(
     parent: THREE.Object3D,
@@ -909,12 +892,11 @@ class Cabin {
     motion: KitMotion | undefined,
     control: KitControl | undefined,
     draw: (b: PartBuilder) => void,
-    casts = true,
   ): THREE.Group {
     const g = pivotGroup(name, at, motion, control);
     const b = new PartBuilder();
     draw(b);
-    if (!b.empty) addBuilt(g, b, at, name, true, casts);
+    if (!b.empty) addBuilt(g, b, at, name, true);
     attach(parent, parentAt, g);
     return g;
   }
@@ -966,7 +948,8 @@ class Cabin {
           const belt = sec.r3[1];
           const yc = clamp(sec.r2[1], yb, belt);
           const x = (y: number): number => side * (this.frame.sideX(s, y) - SIDE_CLEAR);
-          return [this.P(x(yb), yb, s), this.P(x(yc), yc, s), this.P(x(belt), belt, s), this.P(side * (sec.r4[0] - PILLAR_IN), sec.r4[1], s)];
+          // The top meets the lining's foot, LINING_DEPTH in from the deck's edge.
+          return [this.P(x(yb), yb, s), this.P(x(yc), yc, s), this.P(x(belt), belt, s), this.P(side * (sec.r4[0] - LINING_DEPTH), sec.r4[1], s)];
         });
         this.fixed.color(this.spec.look.upholstery);
         for (let k = 0; k + 1 < columns.length; k++) this.fixed.bridge('trim', columns[k]!, columns[k + 1]!);
@@ -1046,83 +1029,24 @@ class Cabin {
     }
   }
 
-  /** The greenhouse ring as the shell builds it, reduced to what the trims follow. */
-  private ring(side: number): RingPoint[] {
-    const f = this.frame;
-    const cab = this.spec.cabin;
-    const end = (kind: 'front' | 'rear'): RingPoint => {
-      const frac = f.deckFracs(f.cowl)[2]!;
-      const s = kind === 'front' ? f.screenFoot(frac) : f.rearBase;
-      const top = kind === 'front' ? cab.columns[0]!.top : cab.columns[cab.columns.length - 1]!.top;
-      const x = f.deckFracs(kind === 'front' ? f.cowl : s)[2]! * f.section(kind === 'front' ? f.cowl : s).r4[0];
-      const b = this.P(side * x, f.deckY(s, x), s);
-      const t = this.P(side * frac * cab.railHalf, cab.rail + cab.crown * (1 - frac * frac), top);
-      if (kind === 'rear' && cab.rearKnee) {
-        const cb = f.deckY(s, 0);
-        const kt = (cab.rearKnee.y - cb) / (cab.rail + cab.crown - cb);
-        return { b, k: [lerp(b[0], t[0], kt), lerp(b[1], t[1], kt), f.z(cab.rearKnee.s)], t, kind };
-      }
-      return { b, t, kind };
-    };
-    const sides = cab.columns.map((column): RingPoint => {
-      const sec = f.section(column.s);
-      return { b: this.P(side * sec.r4[0], sec.r4[1], column.s), t: this.P(side * cab.railHalf, cab.rail - (column.drop ?? 0), column.top), kind: 'side', column };
-    });
-    return [end('front'), ...sides, end('rear')];
-  }
-
   /**
-   * Trim over the body's own greenhouse strips without glass: the screen and back-light
-   * pillars, A, B and C pillars. Side strips stand in about as far as the door frames'
-   * inner skins and turn in under the headliner's edge at the top.
+   * The shell's lining over its own greenhouse and roof (`KitContext.lining`): pillar
+   * trims, headers, the rail and the headliner as one skin in the headliner's colour.
    */
-  private pillars(): void {
-    const cab = this.spec.cabin;
-    const rearIn = this.hatch ? 0.05 : 0.03;
+  private lining(): void {
     const b = this.fixed.color(this.lay.headliner);
-    for (const side of [1, -1]) {
-      // Side points come in; end points move along the car into the cabin. Nothing may
-      // reach the cowl's plane, where the bay's scuttle stands.
-      const front = this.frame.z(this.fw);
-      // Behind a tailgate the jamb is deep and on an estate the back leans over it
-      // (rearLean), so side trim keeps a hand's width ahead of the opening.
-      const back = this.hatch ? this.frame.z(this.frame.rearBase) + HATCH_TRIM_CLEAR : -Infinity;
-      const ring = this.ring(side).map((p) => {
-        const move = (q: Vec3): Vec3 =>
-          p.kind === 'side'
-            ? [q[0] - side * PILLAR_IN, q[1], Math.max(back, Math.min(q[2], front))]
-            : [q[0], q[1], q[2] + (p.kind === 'front' ? -0.03 : rearIn)];
-        return { ...p, b: move(p.b), k: p.k && move(p.k), t: move(p.t) };
-      });
-      for (let i = 0; i + 1 < ring.length; i++) {
-        const a = ring[i]!;
-        const c = ring[i + 1]!;
-        const both = a.kind === 'side' && c.kind === 'side';
-        const trimmed =
-          (a.kind === 'front' && c.kind === 'side') ||
-          (a.kind === 'side' && c.kind === 'rear') ||
-          (both && (a.column!.upper ?? 'body') === 'body' && (a.column!.glass ?? 'none') === 'none');
-        if (!trimmed) continue;
-        b.poly('trim', [a.b, c.b, ...(c.k ? [c.k] : []), c.t, a.t, ...(a.k ? [a.k] : [])]);
-        if (both) {
-          const lip = cab.rail - 0.004;
-          b.quad('trim', a.t, c.t, [side * this.headHalf, lip, c.t[2]], [side * this.headHalf, lip, a.t[2]]);
-        }
-      }
-    }
+    for (const poly of this.ctx.lining) b.poly('trim', poly);
   }
 
   /**
-   * Headliner under the roof, dropping down the screen's and back light's headers in
-   * front and behind; plus the courtesy lamp, sun visors and the mirror.
+   * The headliner's fittings, which hang from the shell's lining: the courtesy lamp, sun
+   * visors and the mirror.
    */
   private headliner(): void {
     const f = this.frame;
     const cab = this.spec.cabin;
     const top0 = cab.columns[0]!.top;
     const topN = cab.columns[cab.columns.length - 1]!.top;
-    const half = this.headHalf;
-    const xs = [1, 0.5, 0, -0.5, -1].map((k) => k * half);
     // Glass line at half width x: base (s, y) and top (s, y) for the screen or back light.
     const glass = (x: number, kind: 'front' | 'rear'): [P2, P2] => {
       const frac = Math.abs(x) / cab.railHalf;
@@ -1136,24 +1060,8 @@ class Cabin {
       }
       return [[s, yb], [kind === 'front' ? top0 : topN, yt]];
     };
-    const drop = (x: number, kind: 'front' | 'rear'): Vec3 => {
-      const [[sb, yb], [st, yt]] = glass(x, kind);
-      const y = this.dome(x) - (kind === 'front' ? cab.screenHeader : cab.rearHeader) - 0.01;
-      // A hatch's drop stands 6 cm in from the glass line: at 5 cm the 2104's crossed the
-      // tailgate's inner skin at the header (z-fighting); 6 cm clears it by 5 mm.
-      const s = lerp(sb, st, (y - yb) / (yt - yb)) + (kind === 'front' ? 0.025 : this.hatch ? -0.06 : -0.025);
-      return this.P(x, y, s);
-    };
     const frontTop = top0 + 0.03;
     const rearTop = topN - (this.hatch ? 0.06 : 0.03);
-    const rows = [
-      xs.map((x) => drop(x, 'front')),
-      xs.map((x) => this.P(x, this.dome(x), frontTop)),
-      xs.map((x) => this.P(x, this.dome(x), rearTop)),
-      xs.map((x) => drop(x, 'rear')),
-    ];
-    const b = this.fixed.color(this.lay.headliner);
-    for (let i = 0; i + 1 < rows.length; i++) b.bridge('trim', rows[i]!, rows[i + 1]!);
 
     // Courtesy lamp: the lens is its switch, and lit, a face slides down out of the
     // headliner over it (`GLOW_TRAVEL`). The car the player sits in also lights the cabin
@@ -1166,10 +1074,10 @@ class Cabin {
     const at = this.P(0, ly, lampS);
     const lamp = this.hinge(this.group, ORIGIN, KIT_DOME_LAMP_NODE, at, undefined, { id: 'dome', label: 'Плафон' }, (n) => {
       lens(n.color(COLOURS.lamp), 'trim', ly);
-    }, false);
+    });
     this.hinge(lamp, at, 'dome_glow', at, { channel: 'dome', kind: 'pos', axis: [0, -1, 0], amount: GLOW_TRAVEL }, undefined, (n) => {
       lens(n.color(DOME_LIT), 'lamp_glow', ly - 0.0005 + GLOW_TRAVEL);
-    }, false);
+    });
 
     // Mirror: hung from the header on a stem, behind the screen. Placed from the glass at
     // the pad's corners, not at its centre: on the Samaras' and tens' raked screens the glass
@@ -1198,7 +1106,7 @@ class Cabin {
     for (const x of [-0.105, 0.105]) for (const y of [-0.03, 0.03]) for (const z of [-0.014, 0.014]) reach = Math.max(reach, corner.set(x, y, z).applyMatrix3(turn).z);
     const ms = nearest + reach + 0.04;
     const root = this.P(0, cab.rail - 0.01, glassS(0, cab.rail - 0.01) + 0.03);
-    b.color(COLOURS.black);
+    const b = this.fixed.color(COLOURS.black);
     beam(b, 'trim', root, this.P(0, my + 0.02, ms), 0.008, 0.008, [1, 0, 0]);
     // The pad turns on a ball at the stem's end, by hand (rig.ts `aim`): side to side
     // about its own up, then up and down about its own across, from the pose above.
@@ -1217,8 +1125,7 @@ class Cabin {
     // The live face 1.5 mm proud of the glass.
     addMirrorFace(pane, frame, centre, [0.095, 0.022], -0.016, 'inner');
 
-    // Sun visors lie flat under the headliner and swing down about their front edge. A
-    // visor is 1.6 cm thick, under a shadow texel: it casts nothing (see `addBuilt`).
+    // Sun visors lie flat under the headliner and swing down about their front edge.
     for (const side of [1, -1]) {
       const name = side > 0 ? 'visor_l' : 'visor_r';
       const x = side * 0.34;
@@ -1229,7 +1136,7 @@ class Cabin {
         v.pushAt(at);
         pad(v, 'trim', [0, -0.008, -0.08], [0.16, 0.008, 0.075], 0.006);
         v.pop();
-      }, false);
+      });
     }
   }
 
@@ -1243,9 +1150,25 @@ class Cabin {
       : Math.min(benchTop + 0.4, f.section(f.rearBase).r4[1] - 0.012);
     const s0 = this.benchS + 0.25;
     const s1 = this.hatch && cab.rearKnee ? cab.rearKnee.s - 0.05 : f.rearBase - 0.015;
-    let half = Infinity;
-    for (let i = 0; i <= 4; i++) half = Math.min(half, this.inner(lerp(s0, s1, i / 4), y) - 0.01);
-    this.fixed.color(shade(this.spec.look.dash, 1.1)).quad('trim', this.P(half, y, s0), this.P(-half, y, s0), this.P(-half, y, s1), this.P(half, y, s1));
+    // A saloon's shelf reaches out to the quarter trim (`sidePanels`) along its length, so
+    // no slot shows the boot past its edge; a hatch's stays inside the greenhouse.
+    const edge = (s: number): number => {
+      const sec = f.section(s);
+      if (this.hatch || y >= sec.r4[1]) return this.inner(s, y) - 0.01;
+      if (y <= sec.r3[1]) return f.sideX(s, y) - SIDE_CLEAR - 0.005;
+      const t = (y - sec.r3[1]) / (sec.r4[1] - sec.r3[1]);
+      return lerp(f.sideX(s, sec.r3[1]) - SIDE_CLEAR, sec.r4[0] - LINING_DEPTH, t) - 0.005;
+    };
+    const ss = [0, 0.25, 0.5, 0.75, 1].map((k) => lerp(s0, s1, k));
+    const row = (side: number): Vec3[] => ss.map((s) => this.P(side * edge(s), y, s));
+    const b = this.fixed.color(shade(this.spec.look.dash, 1.1)).bridge('trim', row(1), row(-1));
+    if (this.hatch) return;
+    // A saloon's boot stands behind the shelf: a wall at its rear edge from the cushion's
+    // height up to the back light's foot (where the lining starts) shuts it off, above the
+    // shelf and beside the bench's back.
+    const e = edge(s1);
+    const xs = [1, 0.5, 0, -0.5, -1].map((k) => k * e);
+    b.bridge('trim', xs.map((x) => this.P(x, benchTop, s1)), xs.map((x) => this.P(x, Math.max(y, f.deckY(f.rearBase, Math.abs(x)) - 0.005), s1)));
   }
 
   // ---- dash ----
@@ -1336,7 +1259,7 @@ class Cabin {
           n.push(m.matrix).color(TELLTALES[tell]);
           rect(n, 'lamp_glow', x, y, h, h, 0.004 - GLOW_TRAVEL);
           n.pop();
-        }, false);
+        });
       });
     }
 
@@ -1441,7 +1364,7 @@ class Cabin {
         n.quad('lamp_glow', at(0.74, -1), at(0.92, -1), at(0.92, 1), at(0.74, 1));
       }
       n.pop();
-    }, false);
+    });
     const min = g.min ?? 0;
     const at = m.at(0, 0, 0.008);
     const motion: KitMotion = { channel: g.channel, kind: 'rot', axis: m.n, amount: -g.sweep / (g.full - min), stops: [min, g.full] };
@@ -1456,7 +1379,7 @@ class Cabin {
       n.push(m.matrix).color(PANEL_NEEDLE);
       n.quad('lamp_glow', pt(0.14, -0.0015), pt(0.85, -0.001), pt(0.85, 0.001), pt(0.14, 0.0015));
       n.pop();
-    }, false);
+    });
   }
 
   /** A ribbon window on the cluster face, its ticks and a marker sliding along it with the channel. */
@@ -1477,7 +1400,7 @@ class Cabin {
       n.color(PANEL_TICK);
       for (let i = 0; i < g.ticks; i++) rect(n, 'lamp_glow', lerp(-run, run, i / (g.ticks - 1)), -hh * 0.45, 0.0012, hh * 0.4, 0.0049 - GLOW_TRAVEL);
       n.pop();
-    }, false);
+    });
     const at = m.at(-run, 0, 0.005);
     const min = g.min ?? 0;
     const motion: KitMotion = { channel: g.channel, kind: 'pos', axis: m.u, amount: (2 * run) / (g.full - min), stops: [min, g.full] };
@@ -1490,7 +1413,7 @@ class Cabin {
       n.push(m.matrix).color(PANEL_NEEDLE);
       rect(n, 'lamp_glow', -run, 0, 0.0014, hh * 0.86, 0.0054 - GLOW_TRAVEL);
       n.pop();
-    }, false);
+    });
   }
 
   /** Lid hinged at its foot, falling open towards the passenger, over a dark opening. */

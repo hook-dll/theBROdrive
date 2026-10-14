@@ -12,8 +12,10 @@
  *
  *  - `shadow.bias` is a fraction of the shadow camera's depth range, so its size in
  *    METRES is `|bias| * (far - near)`. Over 40..540 m the old -0.0004 was 20 cm.
- *  - `shadow.normalBias` pushes the receiver along its own normal, which for flat sand
- *    under a high sun is straight at the light: another `normalBias * sin(elevation)`.
+ *  - `shadow.normalBias` pushes the receiver along its own normal, scaled by the sine of
+ *    the angle to the light (render/lightshader.ts): for flat sand that is
+ *    `normalBias * cos(elevation)` along the normal, `* sin(elevation)` of it toward
+ *    the light. (Before the slope scale it was the full `normalBias * sin(elevation)`.)
  *  - Three renders a caster's BACK faces into the depth map (`shadowSide`, set in
  *    `prepareMaterials` in render/carmodel.ts), so the depth stored under a car is
  *    its UNDERBODY. The sand beneath sits one GROUND CLEARANCE further from the
@@ -41,7 +43,8 @@ const SHADOW_NEAR = 40;
 const SHADOW_FAR = SUN_DISTANCE + 300;
 const SHADOW_MIN_ELEVATION = 0.26;
 const BIAS_NOW = -0.00004;
-const NORMAL_BIAS_NOW = 0.02;
+const NORMAL_BIAS_NOW = 0.08;
+const SLOPE_SCALED_NOW = true;
 /** What shipped before this was measured. */
 const BIAS_BEFORE = -0.0004;
 const NORMAL_BIAS_BEFORE = 0.05;
@@ -61,9 +64,10 @@ const CLEARANCES: readonly { readonly label: string; readonly metres: number }[]
 const DEPTH_RANGE = SHADOW_FAR - SHADOW_NEAR;
 
 /** Vertical gap, in metres, below which the contact shadow is erased. */
-function erasedBelow(elevationRad: number, bias: number, normalBias: number): number {
+function erasedBelow(elevationRad: number, bias: number, normalBias: number, slopeScaled: boolean): number {
   const sin = Math.sin(elevationRad);
-  return sin * (Math.abs(bias) * DEPTH_RANGE + normalBias * sin);
+  const slope = slopeScaled ? Math.cos(elevationRad) : 1;
+  return sin * (Math.abs(bias) * DEPTH_RANGE + normalBias * slope * sin);
 }
 
 let failures = 0;
@@ -84,8 +88,8 @@ let worstBefore = 0;
 let worstAfter = 0;
 for (const degrees of ELEVATIONS_DEG) {
   const rad = Math.max((degrees * Math.PI) / 180, SHADOW_MIN_ELEVATION);
-  const before = erasedBelow(rad, BIAS_BEFORE, NORMAL_BIAS_BEFORE);
-  const after = erasedBelow(rad, BIAS_NOW, NORMAL_BIAS_NOW);
+  const before = erasedBelow(rad, BIAS_BEFORE, NORMAL_BIAS_BEFORE, false);
+  const after = erasedBelow(rad, BIAS_NOW, NORMAL_BIAS_NOW, SLOPE_SCALED_NOW);
   worstBefore = Math.max(worstBefore, before);
   worstAfter = Math.max(worstAfter, after);
   const lost = CLEARANCES.filter((car) => car.metres <= before).map((car) => car.label);

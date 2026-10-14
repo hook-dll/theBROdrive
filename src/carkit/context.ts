@@ -22,23 +22,22 @@ export interface KitContext {
   readonly root: THREE.Group;
   /** The shell's moving parts by owner: door_fl, door_rl, bonnet, boot, tailgate, flap, ... */
   readonly nodes: ReadonlyMap<string, KitNode>;
+  /** The cabin lining the shell derives from its greenhouse and roof (`ShellResult.lining`). */
+  readonly lining: readonly (readonly Vec3[])[];
 }
 
 /**
  * Meshes of one builder, one per slot, under `parent`. Geometry is written in the car
  * frame and moved into the parent's (`origin` is where the parent stands in the car
- * frame). `shadowed` marks cabin parts, which take the roof's shadow (bodywork does
- * not; see `prepareMaterials` in render/carmodel.ts). `casts = false` is for a closed
- * part thinner than a sun-shadow texel (7 cm), a sun visor: its back faces would put its
- * own depth into the map and band its lit face with acne.
+ * frame). `shadowed` marks the detail parts (cabin, bay, boot, underbody): they take
+ * the shell's shadow but cast none (see `prepareMaterials` in render/carmodel.ts).
  */
-export function addBuilt(parent: THREE.Object3D, builder: PartBuilder, origin: Vec3, name: string, shadowed = false, casts = true): void {
+export function addBuilt(parent: THREE.Object3D, builder: PartBuilder, origin: Vec3, name: string, shadowed = false): void {
   for (const [slot, geometry] of builder.build()) {
     geometry.translate(-origin[0], -origin[1], -origin[2]);
     const mesh = new THREE.Mesh(geometry, kitMaterial(slot));
     mesh.name = meshName(slot, name);
     if (shadowed) mesh.userData.kitShadowed = true;
-    if (!casts) mesh.userData.kitCastsNone = true;
     parent.add(mesh);
   }
 }

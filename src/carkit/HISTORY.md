@@ -378,6 +378,42 @@ Format of an entry: **Problem** → **Cause** → **Fix** → *Code* (commit).
   cup, radio dial, gauge ticks, cluster bezels) and the rear hump tops against the arch
   liners (STATUS.md).
 
+## Cabin lining and tail lamps (2026-10-15)
+
+- **Inside the 2109 (and every kit car) the headliner poked past the top of the screen and
+  back light; round the side windows the body's paint showed between the trim pieces, and
+  pillar trims floated or crossed the glass.** → The headliner and pillar trims were
+  separate guesses (`headliner`'s drops, `pillars` with `PILLAR_IN`, `HATCH_TRIM_CLEAR`),
+  not the shell's openings; the panes' rubber stopped at the outer skin; a door's frame
+  above the belt and a tailgate were painted inside; the shell's jambs round the
+  greenhouse were paint. → The shell marks its own greenhouse and roof faces (`lined`)
+  and offsets them `LINING_DEPTH` (28 mm) inward along their own normals: one closed skin
+  of pillars, headers, rail and roof (`ShellResult.lining`, `KitContext.lining`), drawn in
+  the headliner colour (`Cabin.lining`); the old headliner panel and pillar trims are gone.
+  Every pane's rubber runs on from the pane to the frame's inner side (the lining or the
+  part's inner skin); door and tailgate inner skins are trim in the upholstery colour;
+  the jambs and part edges round the greenhouse are rubber (the seal). The quarter trims
+  and a hatch's luggage-side trims reach up to the lining's foot; a saloon's parcel shelf
+  reaches out to the quarter trims and a wall behind it closes the boot up to the back
+  light's foot (the 2110's boot paint showed there). About +300–450 triangles per car.
+  Not done: painting the body's inner side dark. The shell is one double-sided `paint`
+  material, and a different inner colour per face would need a material variant.
+  *body.ts `cutShell`, interior.ts `lining`/`sidePanels`/`shelf`, bay.ts `buildHatchBoot`*.
+- **Tail lamps sat on black backing plates; the 2106's whole rear panel between the lamps
+  was black and z-fought with the body at a distance.** → `cluster` drew a black housing
+  6 mm proud round its cells, and the 2106's look had a black `panel` 3 mm proud. → A
+  cluster's cells tile its span straight on the body (3 mm seams, each 1 mm into the
+  face); the 2106's panel is gone (its chrome outline stays), and the 2101's chrome rim
+  stays. Visible >25 m z-fight rows fell on every car (2106 77 → 57).
+  *exterior.ts `buildFaceItem` `cluster`, specs.ts `LOOK_2106`*.
+- **Crawling shadow bands on cabin parts.** → Small cabin parts shadowed their
+  neighbours a few centimetres off, and the sun's normal bias did not suit a grazed
+  double-sided panel. → Kit detail parts (`kitShadowed`: cabin, bay, boot, underbody) cast
+  no sun shadow and receive the shell's; `addBuilt`'s and `Cabin.hinge`'s `casts`
+  parameter is gone (only the mirror face keeps `kitCastsNone`); the bias is turned to the
+  light's side and scaled by the angle to the sun. *render/carmodel.ts
+  `prepareMaterials`, render/lightshader.ts, context.ts `addBuilt`*.
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent

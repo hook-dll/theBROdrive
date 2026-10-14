@@ -418,7 +418,7 @@ export type FaceItem =
       };
     }
   /**
-   * A tail-lamp cluster in a black housing: columns of cells from the outer edge in,
+   * A tail-lamp cluster straight on the body (no housing): columns of cells from the outer edge in,
    * each column's roles from the top down.
    */
   | { readonly kind: 'cluster'; readonly x: Span<FaceX>; readonly y: Span<FaceY>; readonly columns: readonly (readonly LampRole[])[] }

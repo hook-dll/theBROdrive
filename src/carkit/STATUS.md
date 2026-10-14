@@ -4,7 +4,7 @@ What the owner wants, what is done, what is left. How to work: [`README.md`](REA
 Why things are the way they are: [`HISTORY.md`](HISTORY.md). Keep this file current with
 every change (update the car's row and the gaps).
 
-Last updated: 2026-10-13, the kit cars became the world's only cars (traffic, start car, rivals, couriers, wrecks, saves); stickers ride the doors.
+Last updated: 2026-10-15, the cabin lining is the shell's own (headliner and upper trim end at the glass), the tail lamps sit on the body without a black backing, and the kit's detail parts cast no sun shadow.
 
 ## The owner's goal
 
@@ -74,7 +74,7 @@ Triangle counts in README.
 | 2103 | `BODY_124` + `LOOK_2103`, `CABIN_2103` | 3dcar.ru `vaz_2103.jpg`; Commons | done | arch chrome, C-pillar vents |
 | 2104 | `BODY_2104` + `REAR_2104` (estates.ts) | 3dcar.ru `vaz_2104.jpg` (undimensioned, registered on `BODY_05`); Commons | done | no rear wiper; tailgate badge/handle and plate not placed |
 | 2105 | `BODY_05` + `LOOK_2105`, `CABIN_2105` | 3dcar.ru `vaz_2107_1982.jpg` (body), `vaz_2105.jpg` (face, tail); Commons | done | mirror sail; hubs 20–30 mm off the dimension line (drawn hubs kept). A pillar slimmed in c86627d (also 2104, 2107) |
-| 2106 | `BODY_124` + `LOOK_2106` | `vaz2101.jpg` + 0.045; 3dcar.ru `vaz_2106.jpg`; Commons | done | C-pillar vents |
+| 2106 | `BODY_124` + `LOOK_2106` | `vaz2101.jpg` + 0.045; 3dcar.ru `vaz_2106.jpg`; Commons | done | C-pillar vents; the rear panel between the lamps is body colour in its chrome outline (the owner's call; the real one is black) |
 | 2107 | `BODY_05` + `LOOK_2107`, `CABIN_2107` | 3dcar.ru `vaz_2107_1982.jpg`; Commons | done | mirror sail; bonnet not notched round the grille |
 | 2108 | `BODY_2108` + `LOOK_2108` (samaras.ts) | `vaz2108.jpg` factory drawing; front view for the face | done | the plastic bumper looks heavy |
 | 2109 | `BODY_2109` + `LOOK_2109` | 3dcar.ru `vaz_2109.jpg` (registered; door lines from Commons photo `p1`) (`measurements-samara.md`) | done | rear door handle from the generator's rule (2.886 vs 2.99 on the photo) |
@@ -197,7 +197,18 @@ slot (as on the 2115).
   cabin LOD): the cabin's 0.5–0.6 mm layer steps (mirror glass on its pad, armrest cup,
   radio dial, gauge ticks and cluster bezels) and the rear hump tops crossing the arch
   liners (`interior.ts` `humps`, `HUMP_RISE` lifted straight up). Rerun the scanner after
-  any generator change: no close-range visible row may appear.
+  any generator change: no close-range visible row may appear. On 2026-10-15 the scanner
+  reports 31 visible close-range rows, the same on HEAD 1b3772a as with the lining and
+  tail-lamp change: the classics' underbody against the body's sill trim (`bay.ts:153`)
+  and the front blinker lenses and bumper brackets in the face (`exterior.ts:29`, `:392`).
+  They appeared since the 2026-10-14 census and are not fixed yet.
+- **Cabin lining** (2026-10-15): above the belt the lining is the shell's greenhouse and
+  roof set `LINING_DEPTH` in (`ShellResult.lining`), so it ends at every pane and opening;
+  rubber runs from each pane to the frame's inner side. Left: thin slivers of paint in the
+  door shut gaps just below the belt (the door-card area).
+- **Shadows** (2026-10-15): the kit's detail parts (`kitShadowed`: cabin, bay, boot,
+  underbody) cast no sun shadow and receive the shell's; only the mirror face carries
+  `kitCastsNone`, and `addBuilt`/`Cabin.hinge` have no `casts` parameter any more.
 - **No ink outline** (agreed).
 - The bonnet item grid is not rearranged yet (engine central).
 - **Lamp roles**: only head, tail, brake, reverse, blinkers (and never-lit `inert`). Every
