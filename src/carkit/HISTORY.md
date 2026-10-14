@@ -23,6 +23,11 @@ Format of an entry: **Problem** → **Cause** → **Fix** → *Code* (commit).
   Undimensioned or coarse drawings. → Cross-check every drawing against a second source;
   prefer the photo for lines, the drawn hubs for arches and doors (they are drawn round the
   hubs). *measurements files*.
+- **The z-fight census only reported**: a spec could land with visible clusters or slits
+  and nothing failed. → `kit-zfight.ts` printed tables and always exited 0. → It now exits
+  1 on any visible cluster in any band or any slit, listing car, band, both emitters and
+  the gap; its self-test covers a covered and an open shell hole; README "Check" makes it
+  a required gate with the fit and triangle rows. *tools/kit-zfight.ts* (uncommitted).
 
 ## Generator
 

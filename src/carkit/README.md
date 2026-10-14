@@ -599,6 +599,10 @@ Re-run `fit-models.ts` for every car whose shape changed. Stage the file as in
 
 ### 6. Check
 
+A new or changed spec is accepted only when its fit row (step 5), its triangle row
+([Budget](#budget-and-current-figures)) and a passing z-fight run (item 5 below) are all in
+place. The z-fight run is not optional and is not judged by eye.
+
 1. `nice -n 10 npx tsc --noEmit -p .`
 2. Lab (your Vite on 5199, one tab), the car checked against its photos:
    - four sides and the three-quarters the owner uses; overlay on the drawing;
@@ -614,16 +618,54 @@ Re-run `fit-models.ts` for every car whose shape changed. Stage the file as in
      fitting.
 3. Triangles: within ≈ 8–13k total ([Budget](#budget-and-current-figures)); add the row.
 4. The proof that other cars did not move, if the generator changed.
-5. Z-fighting and holes: `nice -n 15 ~/.bun/bin/bun tools/kit-zfight.ts kit_vaz2110` (all
-   cars without ids, ~7 s): every car's row must read 0 in the close, 10-25 m and >25 m/far
-   visible columns and 0 slits, and the run must end with `0 visible close-range clusters,
-   0 shell holes open to a viewpoint`. A cluster names both emitters (`file:line`); drop
-   the face that lies inside another part (`UPPER_FACES`, `0b111011` in bay.ts, an open
-   back) or lay a decal into its surface (`inlay`); a millimetre or two of air only moves
-   the fight further out. A slit names the hole's owner and a point in it: the item over
-   it leaves a gap, usually two flush walls cut away together.
+5. Z-fighting and holes (required gate): `nice -n 15 npx tsx tools/kit-zfight.ts kit_vaz2110`
+   (all cars without ids, ~15 s). It runs its self-test first (coplanar, gap, occlusion and
+   a covered vs an open shell hole), then exits 1 if any car has a visible cluster in any
+   band (close, 10-25 m, >25 m/far) or any slit, printing one `FAIL` line per finding with
+   the car, band, both emitters (`provA` / `provB`, `file:line`) and the gap; it ends with
+   `PASS` and exit 0 otherwise. Fix a cluster by dropping the face that lies inside another
+   part (`UPPER_FACES`, `0b111011` in bay.ts, an open back) or laying a decal into its
+   surface (`inlay`); a millimetre or two of air only moves the fight further out. A slit
+   names the hole's owner and a point in it: the item over it leaves a gap, usually two
+   flush walls cut away together.
 6. Docs: README (new spec fields, families table, budget row), `STATUS.md` (car row),
    `HISTORY.md` (fixes), `CHANGELOG.md` (an `### Added` entry).
+
+### Writing a spec without z-fighting
+
+The generator already keeps faces apart; a spec stays clean by using its mechanisms
+instead of placing faces by hand.
+
+- **Cabin lining comes from the shell.** Pillar trims and headliner are the body's own
+  greenhouse and roof faces offset `LINING_DEPTH` inward (`ShellResult.lining`, body.ts).
+  Never place upper trim by hand: it would sit on the lining and fight it.
+- **Items on the body skin sit in holes.** Anything that stands on a shell part's skin
+  declares a `KitHole` (body.ts): `ctx.holes.push({ owner: 'body', outline: { poly } })`,
+  where `owner` is the shell part (`body`, `door_fl`, `boot`, `bonnet`, `tailgate`,
+  `flap`, …) and `poly` the footprint in the car frame, on the skin's plane.
+  `cutShellHoles` cuts that part's `paint` skin away under it, and kit-zfight checks that
+  the item covers the hole from every exterior viewpoint (no slit).
+- **Flush walls on one end face form a union.** Lamps, grilles, plates and blanks on a
+  nose or tail go through `EndFace.place(b, part, prints)` (exterior.ts): what is already
+  inside the new part's volume is cut away, the part loses what lies inside earlier
+  parts, and of two walls flush in one plane facing the same way the later one stays
+  (`keepOutside`). Footprints rooted in the face (`z0 < 0`) add their `KitHole` themselves.
+- **Cabin decals are cut into their surface.** A badge, panel frame or label on the dash
+  or cluster uses `inlay(b, slot, corners)` (interior.ts), which first cuts the surface
+  under it (`cutLocal`) so the decal is the only face there; never lay a quad a fraction
+  of a millimetre over another.
+- **Every cluster layout drives the same rig channels.** `Vehicle.driveKit`
+  (vehicle/vehicle.ts) sets these on every kit car, whatever its `LAYOUTS` / `cabinLayout`
+  gauges; a new dial or lamp must read one of them, not a new name:
+  - driving: `steer`, `throttle`, `brake`, `clutch`, `handbrake`, `gear` (the rig derives
+    `gear_fb` / `gear_lr` for the lever and the reversing glow);
+  - gauges: `speed` (km/h), `rpm`, `fuel`, `temp`, `oil` (kgf/cm²), `volts`, `vacuum`
+    (economy meter, 0..1);
+  - switches: `lights` (0 off, 1 low, 2 high; the rig derives `panel` from it),
+    `blinker` (-1/0/1), `hazard`;
+  - warning lamps: `tell_turn`, `tell_side`, `tell_beam`, `tell_fuel`, `tell_oil`,
+    `tell_charge`, `tell_brake`, `tell_check` (a layout's `lamps.show` picks from the
+    names after `tell_`).
 
 ## Proving a refactor
 

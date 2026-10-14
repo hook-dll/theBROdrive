@@ -4,6 +4,11 @@
 
 ### Added
 
+- KIT Z-FIGHT GATE (`tools/kit-zfight.ts`, `carkit/README.md` "Check"). The scanner exits
+  1 on any visible z-fight cluster in any band or any open shell hole, naming car, band,
+  both emitters and the gap; its self-test now covers a slit. Required before a kit spec
+  is accepted; README gains a section on writing specs without z-fighting.
+
 - CLEAR GLASS FROM INSIDE (`carkit/rig.ts` `GLASS_INSIDE_OPACITY`, `setDetail(…, inside)`;
   `vehicle/vehicle.ts` `driveKit`). With the eye inside a kit car's measured body (its
   cabin view, any seat) that car's panes draw at opacity 0.05 instead of 0.28: the world

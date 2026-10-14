@@ -729,6 +729,20 @@ function selfTest(): void {
   const h = findPairs(s2).find((x) => s2.mesh[x.a] === 0 && s2.mesh[x.b] === 1 && x.area > 1e-4)!;
   const seen = seenBy(grid, h, [[0.07, 3, 0.07], [0.07, -3, 0.07]]);
   ok(!seen[0] && seen[1], 'occlusion: lid hides the overlap from above, not from below');
+  // Shell hole: a 10 cm hole at y = 2 with an item face 1 mm over it is covered from above;
+  // the same hole with the item left out of the occluders is a slit (the gate's other half).
+  const holeY = 2;
+  const cover = sq(-0.01, -0.01, 0.11, 0.11, holeY + 0.001, 1);
+  const floor = sq(-1, -1, 1, 1, 0, 0);
+  const s3 = soupFromTris([...cover, ...floor], meshes);
+  const holeRoot = new THREE.Object3D();
+  const holePoly: Vec3[] = [[0, holeY, 0], [0.1, holeY, 0], [0.1, holeY, 0.1], [0, holeY, 0.1]];
+  holeRoot.userData.kitHoles = [{ owner: 'test', outline: { poly: holePoly } }];
+  const above = [[0.05, 5, 0.05], [0.5, 4, 0.3]];
+  const covered = holeSlits(holeRoot, new RayGrid(s3, () => true), above);
+  const open = holeSlits(holeRoot, new RayGrid(s3, (t) => s3.mesh[t] !== 1), above);
+  ok(covered.holes === 1 && covered.slits.length === 0, 'shell hole under an item face: no slit');
+  ok(open.slits.length === 1 && open.slits[0]!.owner === 'test', 'shell hole with nothing over it: slit');
 }
 
 // ---------------------------------------------------------------- per car
@@ -982,7 +996,22 @@ for (const id of ids) {
 console.log('\ncar        tris  clusters   close: visible hidden same-look   10-25 m visible   >25 m/far visible   holes slits');
 for (const row of rows) console.log(row);
 console.log(`\n${closeVisible} visible close-range clusters, ${slitCount} shell holes open to a viewpoint`);
+// Gate: any visible cluster in any band, or any slit, fails the run.
+const failures: string[] = [];
+for (const r of results) {
+  for (const s of r.slits) failures.push(`${r.id}: slit in ${s.owner} hole at ${s.at.join(', ')} from ${s.view.join(', ')}`);
+  for (const c of r.clusters) {
+    if (c.severity <= 0) continue;
+    failures.push(`${r.id}: ${BAND_NAMES[c.band]} ${c.meshA.path} [${c.provA}] / ${c.meshB.path} [${c.provB}] gap ${(c.gapMin * 1e3).toFixed(2)}-${(c.gapMax * 1e3).toFixed(2)} mm`);
+  }
+}
 if (jsonPath) {
   await Bun.write(jsonPath, JSON.stringify({ extViews: EXT_N_HOLDER.n, cabViews: CAB_N, results }, null, 1));
   console.log(`wrote ${jsonPath}`);
 }
+if (failures.length > 0) {
+  console.log(`\nFAIL: ${failures.length} visible z-fight cluster(s) or shell slit(s)`);
+  for (const f of failures) console.log(`  ${f}`);
+  process.exit(1);
+}
+console.log('\nPASS: no visible z-fight in any band, no shell slits');

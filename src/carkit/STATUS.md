@@ -194,8 +194,8 @@ slot (as on the 2115).
 - **Z-fighting** (`tools/kit-zfight.ts`, 2026-10-16): 0 visible clusters in every band
   (close, 10–25 m, >25 m/far) on all 13 cars, and every shell hole under an item is
   covered from every exterior viewpoint by what a mid or far car still draws (0 slits).
-  HISTORY.md "Z-fighting at every distance". Rerun the scanner after any generator
-  change: every visible column and the slit column must stay 0.
+  HISTORY.md "Z-fighting at every distance". The scanner is a gate (2026-10-15): it exits
+  1 on any visible cluster or slit, so rerun it after any generator or spec change.
 - **Cabin lining** (2026-10-15): above the belt the lining is the shell's greenhouse and
   roof set `LINING_DEPTH` in (`ShellResult.lining`), so it ends at every pane and opening;
   rubber runs from each pane to the frame's inner side. Left: thin slivers of paint in the
