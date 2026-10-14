@@ -2210,7 +2210,7 @@ async function boot(): Promise<void> {
     updatePad(driving);
 
     frameProfiler?.begin('vehicles');
-    Vehicle.viewFrom(renderer.camera.position, frameDt);
+    Vehicle.viewFrom(renderer.camera.position, frameDt, driving);
     for (const vehicle of vehicles.values()) vehicle.syncVisuals(alpha);
     traffic.syncVisuals(alpha, farCars, midCars);
     // Trailer physics advances and snapshots in the fixed step exactly like cars,

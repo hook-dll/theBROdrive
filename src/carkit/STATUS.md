@@ -210,6 +210,14 @@ slot (as on the 2115).
   in HISTORY.md "Traffic seen from behind"). Left: the rest of the underbody (classic axle
   and diff, Samara twist beam and tank) still comes in at 50 m as a dark band under the
   bumper; mid bumpers and wheels are a shade lighter than near (the far material).
+- **Cabin fine detail** (2026-10-15): the cabin's small parts (needles, dial faces and
+  their glow, warning lamps, switches, knobs, stalks, horn pad, pedals, levers, cranks,
+  door handles and lock knobs, visors, courtesy lamp, glovebox, ashtray) draw only within
+  `KIT_FINE_M` 6 m, with the eye inside, or for the car the player sits in; seats, bench,
+  door cards, dash, wheel rim and the inside mirror stay to 50 m. A parked 2101 at 10 m
+  draws 61 meshes instead of 121, a 2109 63 instead of 130. Windows and dial faces the
+  fine faces fill keep stand-ins, so no hole shows. Left: a lit cluster's faint glow is not
+  seen past 6 m at night (1–8 pixels at 8 m; HISTORY.md "Cabin fine detail").
 - **No ink outline** (agreed).
 - The bonnet item grid is not rearranged yet (engine central).
 - **Lamp roles**: only head, tail, brake, reverse, blinkers (and never-lit `inert`). Every

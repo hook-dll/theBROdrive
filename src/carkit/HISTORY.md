@@ -523,6 +523,45 @@ Every LOD switch was already on its line; the three were content differences.
   dark band under the bumper from 50 m in; the mid bumper and wheels are a shade lighter
   than near (far material, unchanged).
 
+## Cabin fine detail (2026-10-15)
+
+Renders: `/tmp/cabinlod/` (car lab, one tab, 1440×900 at DPR 1.25; `before_*` = HEAD,
+`after_*`, `compare_*` side by side; views: open driver's door 1.5 m out, side window 3 m
+out, and side, front and rear three-quarter at 8 m from the centre, each also through a
+12–20° lens from the same eye; day 11:00 and night 22:00 with the lights on). Meshes
+counted on the loaded model (`createCarModel`, a headless script, all visible ancestors).
+
+- **Several parked kit cars at a POI cut the frame rate; you never see the small cabin
+  parts unless you are in the car or right at it.** → A near kit car drew ~120 meshes, 74
+  (2101) or 85 (2109) of them cabin, every one for any car within 50 m. → A second tier
+  inside `kit_cabin`: nodes tagged `userData.kitFine` (context.ts `fineDetail`) draw only
+  within `KIT_FINE_M` 6 m of the car's centre, with the eye inside, or for the car the
+  player sits in (`Vehicle.viewFrom(eye, dt, occupied)`; the chase camera stands about 6 m
+  behind). Visibility only, no program change; the rig still poses hidden parts every
+  `update`, so a needle comes back where it reads. Fine: dome lamp, visors, warning lamps,
+  dial faces and glows, needles, glovebox lid, radio needle and knob, ashtray, light
+  switch, hazard button, stalks, horn pad, pedals, gear lever, handbrake lever, window
+  cranks, and each door's handle lever and lock knob (now their own `fittings_*` mesh, out
+  of the door card's chrome). Coarse: the fixed cabin, seats, backs, headrests, bench,
+  wheel, inside mirror, door cards. Holes: a stand-in 24 mm behind every window the fine
+  faces fill (`WINDOW_FILL`: warning lamps, the 2101's ribbon, bare dial ticks), in their
+  dark colour, and an octagon of dial face laid in the cluster face under each round dial
+  (the bezel otherwise rings the cluster's or the wood's colour). Meshes (scene pass; sun
+  depth pass 33 throughout, detail parts cast none): 2101 121 at 3 m and 10 m → 121 at
+  3 m, 61 at 10 m; 2109 130 → 130 and 63. Renders: door and window views identical to HEAD
+  below the sky (no pixel over 25 of 255 differs, day or night); at 8 m 9–28 pixels of 2
+  million differ by day, 0–1 at night. Triangles +84–430 per car (the octagon cuts; a
+  12-gon cost up to 611). *rig.ts `KIT_FINE_M`, `setDetail`; interior.ts `WINDOW_FILL`,
+  `fineDetail` call sites, `doors`; context.ts `fineDetail`; vehicle.ts `viewFrom`,
+  `driveKit`; main.ts, playground.ts*
+- **The inside mirror vanished at the line.** → From 8 m ahead its pad stood black
+  against the screen and the sky: the one fine part plainly seen going (2101 front view,
+  normal lens: 152 pixels differed from HEAD with it fine, 19 with it coarse). → The
+  mirror is coarse (2 meshes). *interior.ts `headliner`*
+- Left: at night a lit cluster's faint glow (ticks, needles) goes at 6 m: from the rear
+  three-quarter at 8 m, 1–8 pixels darker by at most 29 of 255. The courtesy lamp's lit
+  lens goes at 6 m too, on a car left with it on.
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent

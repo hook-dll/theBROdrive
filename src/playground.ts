@@ -360,7 +360,7 @@ export async function bootPlayground(): Promise<void> {
       }
     }
 
-    Vehicle.viewFrom(camera.position, frameDt);
+    Vehicle.viewFrom(camera.position, frameDt, vehicle);
     vehicle.syncVisuals(1);
     traffic.syncVisuals(1);
     vehicle.absoluteTranslation(position);

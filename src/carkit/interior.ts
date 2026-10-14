@@ -11,9 +11,13 @@
  *    window frame), and the tyres turn outboard of `wellX`.
  *  - FURNITURE (dash, column and wheel, pedals, levers, seats) is fixed geometry in one
  *    builder, so the whole cabin is one mesh per slot. Each moving part is its own
- *    pivot group, tagged for the rig (rig.ts) with the shared channel names.
+ *    pivot group, tagged for the rig (rig.ts) with the shared channel names. The small
+ *    ones are the cabin's fine detail (`fineDetail`), drawn only near (rig.ts
+ *    `KIT_FINE_M`); every window and dial face they fill keeps a stand-in in the fixed
+ *    geometry (`WINDOW_FILL`), so the cabin seen from further shows no hole.
  *  - DOOR TRIM (armrest, handle, lock knob, window crank, the capping over the door's
- *    window sill) hangs inside each door node and swings with it.
+ *    window sill) hangs inside each door node and swings with it; the handle's lever, the
+ *    lock knob and the crank are fine detail.
  *
  * Positions come from the frame. The platform table holds only the furniture's own
  * proportions, and its heights are offsets from the floor or from the belt at the
@@ -28,7 +32,7 @@
 import * as THREE from 'three';
 import { DOOR_THICKNESS as DOOR_CARD, LINING_DEPTH, type BodyFrame } from './body';
 import { PartBuilder, lerp, table, type KitSlot, type Vec3 } from './builder';
-import { addBuilt, addMirrorFace, attach, mirrorFrame, pivotGroup, type KitContext } from './context';
+import { addBuilt, addMirrorFace, attach, fineDetail, mirrorFrame, pivotGroup, type KitContext } from './context';
 import type { KitControl, KitMotion } from './rig';
 import type { KitCarSpec } from './spec';
 
@@ -93,6 +97,14 @@ const GLOW_TRAVEL = 0.008;
  * behind the cluster's face and 4 mm or more from every other face put away there.
  */
 const NEEDLE_TRAVEL = 0.02;
+/**
+ * A window cut in the cluster's face (a warning lamp's, a ribbon dial's, a bare dial's
+ * ticks) has a stand-in this far behind it, in the colour of what fills it dark: past
+ * rig.ts `KIT_FINE_M` the faces that fill it do not draw, and the window then shows the
+ * stand-in, not the binnacle's inside. 8 mm behind the deepest face put away in one (a
+ * ribbon's needle, `NEEDLE_TRAVEL` behind its 4 mm), so near it fights none of them.
+ */
+const WINDOW_FILL = 0.024;
 /** The courtesy lamp's lens lit: a warm filament behind milky plastic. */
 const DOME_LIT = 0xfff0c8;
 /**
@@ -1110,7 +1122,7 @@ class Cabin {
       n.quad(slot, this.P(0.05, y, lampS - 0.03), this.P(-0.05, y, lampS - 0.03), this.P(-0.05, y, lampS + 0.03), this.P(0.05, y, lampS + 0.03));
     };
     const at = this.P(0, ly, lampS);
-    const lamp = this.hinge(this.group, ORIGIN, KIT_DOME_LAMP_NODE, at, undefined, { id: 'dome', label: 'Плафон' }, () => {});
+    const lamp = fineDetail(this.hinge(this.group, ORIGIN, KIT_DOME_LAMP_NODE, at, undefined, { id: 'dome', label: 'Плафон' }, () => {}));
     this.hinge(lamp, at, 'dome_dim', at, { channel: 'dome', kind: 'pos', axis: [0, 1, 0], amount: GLOW_TRAVEL }, undefined, (n) => {
       lens(n.color(COLOURS.lamp), 'trim', ly);
     });
@@ -1153,6 +1165,8 @@ class Cabin {
     b.pop();
     const e = frame.elements;
     const centre: Vec3 = [e[12]!, e[13]!, e[14]!];
+    // The mirror stays coarse (rig.ts `KIT_FINE_M`): its pad stands black against the screen
+    // and the sky, and seen from 8 m ahead it vanished at the fine detail's line.
     const ball = pivotGroup('mirror_ball', centre, { channel: 'mirror_yaw', kind: 'rot', axis: [e[4]!, e[5]!, e[6]!], amount: 1 });
     attach(this.group, ORIGIN, ball);
     const pane = this.hinge(ball, centre, 'mirror', centre, { channel: 'mirror_pitch', kind: 'rot', axis: [e[0]!, e[1]!, e[2]!], amount: 1 }, MIRROR_CONTROL, (m) => {
@@ -1170,12 +1184,12 @@ class Cabin {
       const x = side * 0.34;
       const y = this.dome(Math.abs(x) + 0.16) - 0.014;
       const at = this.P(x, y, frontTop + 0.005);
-      this.hinge(this.group, ORIGIN, name, at, { channel: name, kind: 'rot', axis: [1, 0, 0], amount: -1.35 }, { id: name, label: `Козырёк ${WHERE[name.slice(-1)]}` }, (v) => {
+      fineDetail(this.hinge(this.group, ORIGIN, name, at, { channel: name, kind: 'rot', axis: [1, 0, 0], amount: -1.35 }, { id: name, label: `Козырёк ${WHERE[name.slice(-1)]}` }, (v) => {
         v.color(shade(this.lay.headliner, 0.92));
         v.pushAt(at);
         pad(v, 'trim', [0, -0.008, -0.08], [0.16, 0.008, 0.075], 0.006);
         v.pop();
-      });
+      }));
     }
   }
 
@@ -1291,16 +1305,17 @@ class Cabin {
         // Its window cut in the cluster's face: the dark lens fills it, and lit, slides back
         // by `GLOW_TRAVEL` as the lit face slides out into it from as far behind.
         cutLocal(b.push(m.matrix), rectCorners(x, y, h, h, 0));
+        b.color(shade(TELLTALES[tell], 0.3)).poly('trim', rectCorners(x, y, h, h, -WINDOW_FILL));
         b.pop();
         const at = m.at(x, y, 0);
-        this.hinge(this.group, ORIGIN, `telltale_dim_${tell}`, at, { channel: `tell_${tell}`, kind: 'pos', axis: m.n, amount: -GLOW_TRAVEL }, undefined, (n) => {
+        fineDetail(this.hinge(this.group, ORIGIN, `telltale_dim_${tell}`, at, { channel: `tell_${tell}`, kind: 'pos', axis: m.n, amount: -GLOW_TRAVEL }, undefined, (n) => {
           n.push(m.matrix).color(shade(TELLTALES[tell], 0.3)).poly('trim', rectCorners(x, y, h, h, 0));
           n.pop();
-        });
-        this.hinge(this.group, ORIGIN, `telltale_${tell}`, at, { channel: `tell_${tell}`, kind: 'pos', axis: m.n, amount: GLOW_TRAVEL }, undefined, (n) => {
+        }));
+        fineDetail(this.hinge(this.group, ORIGIN, `telltale_${tell}`, at, { channel: `tell_${tell}`, kind: 'pos', axis: m.n, amount: GLOW_TRAVEL }, undefined, (n) => {
           n.push(m.matrix).color(TELLTALES[tell]).poly('lamp_glow', rectCorners(x, y, h, h, -GLOW_TRAVEL));
           n.pop();
-        });
+        }));
       });
     }
 
@@ -1386,8 +1401,22 @@ class Cabin {
       disc.push([Math.cos(a) * r, Math.sin(a) * r, z]);
     }
     const b = this.fixed.push(m.matrix);
-    if (g.bare) for (const t of ticks) cutLocal(b, t);
-    else b.color(COLOURS.black).cylinderZ('chrome', [0, 0, 0.006], r + 0.005, 0.006, 12, false);
+    if (g.bare) {
+      for (const t of ticks) {
+        cutLocal(b, t);
+        b.color(COLOURS.tick).poly('trim', t.map(([x, y]): Vec3 => [x, y, -WINDOW_FILL]));
+      }
+    } else {
+      b.color(COLOURS.black).cylinderZ('chrome', [0, 0, 0.006], r + 0.005, 0.006, 12, false);
+      // The painted face's stand-in, laid in the cluster's face 4 mm under it: past
+      // `KIT_FINE_M` the face does not draw, and the bezel would ring the cluster's colour.
+      // An octagon inside the face's 12-gon: fewer cuts in the face, and none of it shows
+      // past the face near.
+      const k = r * Math.cos(Math.PI / 12);
+      const octagon: Vec3[] = [];
+      for (let i = 0; i < 8; i++) octagon.push([Math.cos((i / 8) * Math.PI * 2) * k, Math.sin((i / 8) * Math.PI * 2) * k, 0]);
+      inlay(b.color(COLOURS.face), 'trim', octagon);
+    }
     b.pop();
     const face = (n: PartBuilder, lit: boolean): void => {
       const dz = lit ? -GLOW_TRAVEL : 0;
@@ -1403,15 +1432,15 @@ class Cabin {
       n.pop();
     };
     const faceAt = m.at(0, 0, z);
-    this.hinge(this.group, ORIGIN, `panel_dim_${g.channel}`, faceAt, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: -GLOW_TRAVEL }, undefined, (n) => face(n, false));
-    this.hinge(this.group, ORIGIN, `panel_glow_${g.channel}`, faceAt, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: GLOW_TRAVEL }, undefined, (n) => face(n, true));
+    fineDetail(this.hinge(this.group, ORIGIN, `panel_dim_${g.channel}`, faceAt, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: -GLOW_TRAVEL }, undefined, (n) => face(n, false)));
+    fineDetail(this.hinge(this.group, ORIGIN, `panel_glow_${g.channel}`, faceAt, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: GLOW_TRAVEL }, undefined, (n) => face(n, true)));
     const min = g.min ?? 0;
     const at = m.at(0, 0, 0.008);
     const motion: KitMotion = { channel: g.channel, kind: 'rot', axis: m.n, amount: -g.sweep / (g.full - min), stops: [min, g.full] };
-    const hand = this.hinge(this.group, ORIGIN, `needle_${g.channel}`, at, motion, undefined, (n) => {
+    const hand = fineDetail(this.hinge(this.group, ORIGIN, `needle_${g.channel}`, at, motion, undefined, (n) => {
       n.push(m.matrix).color(COLOURS.black).cylinderZ('trim', [0, 0, 0.009], r * 0.12, 0.002, 6);
       n.pop();
-    });
+    }));
     // The painted needle and its glow ride on the hand and swap places with the lights.
     this.hinge(hand, at, `needle_dim_${g.channel}`, at, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: -NEEDLE_TRAVEL }, undefined, (n) => {
       needle(n.color(COLOURS.needle), m, r, g.rest, 0.008, -0.15, 'trim');
@@ -1432,6 +1461,7 @@ class Cabin {
     const b = this.fixed.push(m.matrix).color(COLOURS.black);
     inlay(b, 'chrome', rectCorners(0, 0, hw + 0.004, hh + 0.004, 0));
     cutLocal(b, rectCorners(0, 0, hw, hh, 0));
+    b.color(COLOURS.face).poly('trim', rectCorners(0, 0, hw, hh, -WINDOW_FILL));
     b.pop();
     const face = (n: PartBuilder, lit: boolean): void => {
       const z = lit ? -GLOW_TRAVEL : 0;
@@ -1442,12 +1472,12 @@ class Cabin {
       n.pop();
     };
     const faceAt = m.at(0, 0, 0);
-    this.hinge(this.group, ORIGIN, `panel_dim_${g.channel}`, faceAt, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: -GLOW_TRAVEL }, undefined, (n) => face(n, false));
-    this.hinge(this.group, ORIGIN, `panel_glow_${g.channel}`, faceAt, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: GLOW_TRAVEL }, undefined, (n) => face(n, true));
+    fineDetail(this.hinge(this.group, ORIGIN, `panel_dim_${g.channel}`, faceAt, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: -GLOW_TRAVEL }, undefined, (n) => face(n, false)));
+    fineDetail(this.hinge(this.group, ORIGIN, `panel_glow_${g.channel}`, faceAt, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: GLOW_TRAVEL }, undefined, (n) => face(n, true)));
     const at = m.at(-run, 0, 0.004);
     const min = g.min ?? 0;
     const motion: KitMotion = { channel: g.channel, kind: 'pos', axis: m.u, amount: (2 * run) / (g.full - min), stops: [min, g.full] };
-    const hand = this.hinge(this.group, ORIGIN, `needle_${g.channel}`, at, motion, undefined, () => {});
+    const hand = fineDetail(this.hinge(this.group, ORIGIN, `needle_${g.channel}`, at, motion, undefined, () => {}));
     this.hinge(hand, at, `needle_dim_${g.channel}`, at, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: -NEEDLE_TRAVEL }, undefined, (n) => {
       n.push(m.matrix).color(COLOURS.needle).poly('trim', rectCorners(-run, 0, 0.0018, hh * 0.9, 0.004));
       n.pop();
@@ -1471,12 +1501,12 @@ class Cabin {
     this.fixed.color(COLOURS.black).poly('trim', rectCorners(0, 0, ox, oy, -0.005));
     this.fixed.pop();
     const at = m.at(0, -hy, 0.007);
-    this.hinge(this.group, ORIGIN, 'glovebox', at, { channel: 'glovebox', kind: 'rot', axis: [1, 0, 0], amount: -1.2 }, { id: 'glovebox', label: 'Бардачок' }, (b) => {
+    fineDetail(this.hinge(this.group, ORIGIN, 'glovebox', at, { channel: 'glovebox', kind: 'rot', axis: [1, 0, 0], amount: -1.2 }, { id: 'glovebox', label: 'Бардачок' }, (b) => {
       b.push(m.matrix).color(shade(this.spec.look.dash, 1.15));
       pad(b, 'trim', [0, 0, 0.007], [hx, hy, 0.007], 0.005);
       b.color(COLOURS.black).box('chrome', [0, hy - 0.018, 0.016], [0.03, 0.006, 0.003]);
       b.pop();
-    });
+    }));
   }
 
   /** Radio: a dial with a needle drifting along the band, a power knob and a tuning knob. */
@@ -1491,30 +1521,30 @@ class Cabin {
     b.pop();
     // The needle 3.5 mm off the dial, so the two do not fight in depth from outside.
     const needleAt = m.at(-0.045, 0.011, 0.0155);
-    this.hinge(this.group, ORIGIN, 'radio_needle', needleAt, { channel: 'radio_tune', kind: 'pos', axis: m.u, amount: 0.09 }, undefined, (n) => {
+    fineDetail(this.hinge(this.group, ORIGIN, 'radio_needle', needleAt, { channel: 'radio_tune', kind: 'pos', axis: m.u, amount: 0.09 }, undefined, (n) => {
       n.push(m.matrix).color(COLOURS.dialNeedle);
       n.quad('trim', [-0.0458, 0.003, 0.0155], [-0.0442, 0.003, 0.0155], [-0.0442, 0.019, 0.0155], [-0.0458, 0.019, 0.0155]);
       n.pop();
-    });
+    }));
     const knobAt = m.at(-0.07, -0.008, 0.012);
-    this.hinge(this.group, ORIGIN, 'radio_knob', knobAt, { channel: 'radio', kind: 'rot', axis: m.n, amount: -0.6 }, { id: 'radio', label: 'Магнитола' }, (k) => {
+    fineDetail(this.hinge(this.group, ORIGIN, 'radio_knob', knobAt, { channel: 'radio', kind: 'rot', axis: m.n, amount: -0.6 }, { id: 'radio', label: 'Магнитола' }, (k) => {
       k.push(m.matrix).color(COLOURS.black).cylinderZ('trim', [-0.07, -0.008, 0.017], 0.011, 0.005, 8);
       inlay(k.color(COLOURS.white), 'trim', [[-0.071, -0.006, 0.022], [-0.069, -0.006, 0.022], [-0.069, 0.001, 0.022], [-0.071, 0.001, 0.022]]);
       k.pop();
-    });
+    }));
   }
 
   /** Ashtray drawer sliding out of the fascia. */
   private ashtray(): void {
     const [x, dy] = this.lay.ashtray;
     const m = this.fascia(x, this.belt + dy);
-    this.hinge(this.group, ORIGIN, 'ashtray', m.at(0, 0, 0), { channel: 'ashtray', kind: 'pos', axis: m.n, amount: 0.08 }, { id: 'ashtray', label: 'Пепельница' }, (b) => {
+    fineDetail(this.hinge(this.group, ORIGIN, 'ashtray', m.at(0, 0, 0), { channel: 'ashtray', kind: 'pos', axis: m.n, amount: 0.08 }, { id: 'ashtray', label: 'Пепельница' }, (b) => {
       b.push(m.matrix).color(shade(this.spec.look.dash, 1.2));
       pad(b, 'trim', [0, 0, 0.005], [0.065, 0.02, 0.005], 0.003);
       b.color(COLOURS.black).box('chrome', [0, 0.012, 0.0105], [0.03, 0.003, 0.0008]);
       b.color(COLOURS.metal).box('trim', [0, -0.002, -0.04], [0.058, 0.016, 0.04]);
       b.pop();
-    });
+    }));
   }
 
   /** Light switch (knob or rocker) and the hazard button. */
@@ -1524,30 +1554,30 @@ class Cabin {
     const { right, dy, on } = L.lights;
     const lm = on === 'cluster' ? this.clusterAt(right, dy) : this.fascia(this.x0 - right, this.belt + dy);
     if (L.lights.kind === 'knob') {
-      this.hinge(this.group, ORIGIN, 'light_switch', lm.at(0, 0, 0), { channel: 'lights', kind: 'rot', axis: lm.n, amount: -0.55 }, lightCtl, (b) => {
+      fineDetail(this.hinge(this.group, ORIGIN, 'light_switch', lm.at(0, 0, 0), { channel: 'lights', kind: 'rot', axis: lm.n, amount: -0.55 }, lightCtl, (b) => {
         b.push(lm.matrix).color(COLOURS.black).cylinderZ('trim', [0, 0, 0.01], 0.017, 0.01, 8);
         b.color(COLOURS.white).quad('trim', [-0.002, 0.002, 0.0205], [0.002, 0.002, 0.0205], [0.002, 0.014, 0.0205], [-0.002, 0.014, 0.0205]);
         b.pop();
-      });
+      }));
     } else {
       this.fixed.push(lm.matrix).color(COLOURS.black);
       pad(this.fixed, 'trim', [0, 0, 0.003], [0.017, 0.027, 0.003], 0.002);
       this.fixed.pop();
-      this.hinge(this.group, ORIGIN, 'light_switch', lm.at(0, 0, 0.006), { channel: 'lights', kind: 'rot', axis: lm.u, amount: 0.16 }, lightCtl, (b) => {
+      fineDetail(this.hinge(this.group, ORIGIN, 'light_switch', lm.at(0, 0, 0.006), { channel: 'lights', kind: 'rot', axis: lm.u, amount: 0.16 }, lightCtl, (b) => {
         b.push(lm.matrix).color(shade(this.spec.look.dash, 1.4));
         pad(b, 'trim', [0, 0, 0.011], [0.012, 0.022, 0.005], 0.003);
         b.color(COLOURS.green).quad('trim', [-0.005, 0.006, 0.0162], [0.005, 0.006, 0.0162], [0.005, 0.014, 0.0162], [-0.005, 0.014, 0.0162]);
         b.pop();
-      });
+      }));
     }
     const [hx, hdy] = L.hazard;
     const hm = this.fascia(hx, this.belt + hdy);
-    this.hinge(this.group, ORIGIN, 'hazard_button', hm.at(0, 0, 0), { channel: 'hazard', kind: 'pos', axis: scale(hm.n, -1), amount: 0.005 }, { id: 'hazard', label: 'Аварийка' }, (b) => {
+    fineDetail(this.hinge(this.group, ORIGIN, 'hazard_button', hm.at(0, 0, 0), { channel: 'hazard', kind: 'pos', axis: scale(hm.n, -1), amount: 0.005 }, { id: 'hazard', label: 'Аварийка' }, (b) => {
       b.push(hm.matrix).color(COLOURS.hazard);
       pad(b, 'trim', [0, 0, 0.007], [0.015, 0.013, 0.007], 0.003);
       b.color(COLOURS.white).tri('trim', [-0.007, -0.005, 0.0145], [0.007, -0.005, 0.0145], [0, 0.007, 0.0145]);
       b.pop();
-    });
+    }));
   }
 
   // ---- driving controls ----
@@ -1574,12 +1604,12 @@ class Cabin {
     for (const [side, name, label, action, amount] of stalks) {
       const at = local([side * 0.045, -0.11, 0.005]);
       const channel = action!.channel;
-      this.hinge(this.group, ORIGIN, name, at, { channel, kind: 'rot', axis: toDriver, amount }, { id: channel, label, action }, (s) => {
+      fineDetail(this.hinge(this.group, ORIGIN, name, at, { channel, kind: 'rot', axis: toDriver, amount }, { id: channel, label, action }, (s) => {
         s.pushAt(centre, [tilt, 0, 0]).color(COLOURS.black);
         beam(s, 'trim', [side * 0.04, -0.11, 0.005], [side * 0.16, -0.122, -0.015], 0.0055, 0.0055);
         pad(s, 'trim', [side * 0.172, -0.124, -0.017], [0.016, 0.009, 0.009], 0.004);
         s.pop();
-      });
+      }));
     }
 
     const wheel = pivotGroup('steering_wheel', centre, { channel: 'steer', kind: 'rot', axis: [0, 1, 0], amount: (485 * Math.PI) / 180 });
@@ -1594,7 +1624,7 @@ class Cabin {
     }
     addBuilt(wheel, wb, ORIGIN, 'steering_wheel', true);
     attach(this.group, ORIGIN, wheel);
-    this.hinge(wheel, ORIGIN, 'horn', ORIGIN, { channel: 'horn', kind: 'pos', axis: [0, -1, 0], amount: 0.006 }, { id: 'horn', label: 'Гудок', action: { type: 'press', channel: 'horn' } }, (h) => {
+    fineDetail(this.hinge(wheel, ORIGIN, 'horn', ORIGIN, { channel: 'horn', kind: 'pos', axis: [0, -1, 0], amount: 0.006 }, { id: 'horn', label: 'Гудок', action: { type: 'press', channel: 'horn' } }, (h) => {
       h.color(shade(COLOURS.black, 1.3));
       if (w.hub === 'round') {
         h.cylinderY('trim', [0, -0.02, 0], 0.055, 0.012, 10);
@@ -1602,7 +1632,7 @@ class Cabin {
       } else {
         pad(h, 'trim', [0, -0.02, -0.005], [0.075, 0.014, 0.05], 0.012);
       }
-    });
+    }));
   }
 
   /** Clutch, brake and throttle hung from the scuttle; a press swings the pad forward. */
@@ -1618,13 +1648,13 @@ class Cabin {
       const x = this.x0 + dx;
       const pivot = this.P(x, this.belt + L.pedals.pivot[1], this.frame.cowl + L.pedals.pivot[0]);
       const padAt = this.P(x, this.floorY + L.pedals.pad[1], this.frame.cowl + L.pedals.pad[0]);
-      this.hinge(this.group, ORIGIN, `pedal_${name}`, pivot, { channel: name, kind: 'rot', axis: [1, 0, 0], amount }, undefined, (b) => {
+      fineDetail(this.hinge(this.group, ORIGIN, `pedal_${name}`, pivot, { channel: name, kind: 'rot', axis: [1, 0, 0], amount }, undefined, (b) => {
         b.color(COLOURS.metal);
         beam(b, 'trim', pivot, add(padAt, [0, 0, -0.01]), 0.008, 0.005, [0, 0, 1]);
         b.color(COLOURS.rubber).pushAt(padAt, [toe, 0, 0]);
         pad(b, 'trim', ORIGIN, [hw, hh, 0.009], 0.004);
         b.pop();
-      });
+      }));
     }
   }
 
@@ -1644,7 +1674,7 @@ class Cabin {
     b.color(COLOURS.rubber);
     gaiter(b, 'trim', this.P(0, base, gs), [[0, 0.07], [0.05, 0.05], [0.1, 0.026]], 8);
     const pivot = this.P(0, base + 0.04, gs);
-    const fb = this.hinge(this.group, ORIGIN, 'gear_fb', pivot, { channel: 'gear_fb', kind: 'rot', axis: [1, 0, 0], amount: 0.2 }, undefined, () => {});
+    const fb = fineDetail(this.hinge(this.group, ORIGIN, 'gear_fb', pivot, { channel: 'gear_fb', kind: 'rot', axis: [1, 0, 0], amount: 0.2 }, undefined, () => {}));
     this.hinge(fb, pivot, 'gear_lr', pivot, { channel: 'gear_lr', kind: 'rot', axis: [0, 0, 1], amount: 0.14 }, undefined, (g) => {
       const knob = this.P(0, base + L.gear.height, gs + L.gear.lean);
       g.color(COLOURS.black);
@@ -1658,14 +1688,14 @@ class Cabin {
     pad(b, 'trim', this.P(0, hy - 0.012, hs - 0.06), [0.035, 0.026, 0.09], 0.012);
     const hp = this.P(0, hy, hs);
     const tip = this.P(0, hy + 0.05, hs - L.handbrake.length);
-    this.hinge(this.group, ORIGIN, 'handbrake', hp, { channel: 'handbrake', kind: 'rot', axis: [1, 0, 0], amount: -0.4 }, { id: 'handbrake', label: 'Ручник' }, (h) => {
+    fineDetail(this.hinge(this.group, ORIGIN, 'handbrake', hp, { channel: 'handbrake', kind: 'rot', axis: [1, 0, 0], amount: -0.4 }, { id: 'handbrake', label: 'Ручник' }, (h) => {
       h.color(COLOURS.metal);
       // The lever stops just inside the grip, so its end is not in the grip's end.
       beam(h, 'trim', hp, add(hp, scale(sub(tip, hp), 0.98)), 0.011, 0.014);
       h.color(COLOURS.black);
       beam(h, 'trim', add(hp, scale(sub(tip, hp), 0.5)), tip, 0.016, 0.02);
       h.cylinderZ('chrome', add(tip, [0, 0, 0.006]), 0.007, 0.007, 6);
-    });
+    }));
   }
 
   // ---- seats ----
@@ -1808,11 +1838,13 @@ class Cabin {
       // Inner handle: a chrome lever in a dark recess at the card's front top. The recess
       // stands 7.5 mm off the card line: the door's inner skin, offset along its own
       // normals, wanders a millimetre or so either side of that line, and the two stay
-      // apart in depth from the road.
+      // apart in depth from the road. The lever and the lock knob are the door's fine
+      // detail (`fineDetail`), built apart from the card; the recess stays with it.
       const hs = s0 + (front ? 0.13 : 0.1);
       const hy = belt - 0.085;
       b.quad('trim', card(hs - 0.05, hy - 0.022, 0.0075), card(hs + 0.05, hy - 0.022, 0.0075), card(hs + 0.05, hy + 0.022, 0.0075), card(hs - 0.05, hy + 0.022, 0.0075));
-      beam(b, 'chrome', card(hs + 0.035, hy, 0.008), card(hs - 0.03, hy, 0.012), 0.006, 0.007);
+      const fit = new PartBuilder().color(COLOURS.black);
+      beam(fit, 'chrome', card(hs + 0.035, hy, 0.008), card(hs - 0.03, hy, 0.012), 0.006, 0.007);
 
       // Capping over the door's top between the card and the glass, and the lock knob through it.
       const [u0, u1] = upper;
@@ -1820,9 +1852,13 @@ class Cabin {
       const cap = (s: number, d: number): Vec3 => this.P(side * (this.glassX(s, ky(s)) - d), ky(s), s);
       b.color(this.spec.look.dash).quad('trim', cap(u0 + 0.01, 0.02), cap(u1 - 0.01, 0.02), cap(u1 - 0.01, DOOR_CARD + 0.002), cap(u0 + 0.01, DOOR_CARD + 0.002));
       const knob = cap(u1 - 0.07, 0.05);
-      b.color(COLOURS.black).cylinderY('chrome', add(knob, [0, 0.014, 0]), 0.0065, 0.016, 6);
+      fit.cylinderY('chrome', add(knob, [0, 0.014, 0]), 0.0065, 0.016, 6);
 
       addBuilt(group, b, door.pivot, `trim_${pos}`, true);
+      const fittings = fineDetail(new THREE.Group());
+      fittings.name = `fittings_${pos}`;
+      group.add(fittings);
+      addBuilt(fittings, fit, door.pivot, `fittings_${pos}`, true);
 
       // Window crank: four turns over the window's travel.
       const window = `window_${pos}`;
@@ -1831,13 +1867,13 @@ class Cabin {
       const cy = belt - 0.35;
       const at = card(cs, cy, 0.006);
       const control: KitControl = { id: `crank_${pos}`, label: `Стеклоподъёмник, ${pos.startsWith('f') ? 'передняя' : 'задняя'} ${pos.endsWith('l') ? 'левая' : 'правая'} дверь`, action: { type: 'toggle', channel: window } };
-      this.hinge(group, door.pivot, `crank_${pos}`, at, { channel: window, kind: 'rot', axis: [1, 0, 0], amount: side * 8 * Math.PI }, control, (c) => {
+      fineDetail(this.hinge(group, door.pivot, `crank_${pos}`, at, { channel: window, kind: 'rot', axis: [1, 0, 0], amount: side * 8 * Math.PI }, control, (c) => {
         const inward = (d: number): Vec3 => [-side * d, 0, 0];
         const end = add(at, [0, 0.06, -0.045]);
         c.color(COLOURS.metal).cylinderX('chrome', add(at, inward(0.006)), 0.02, 0.006, 8);
         beam(c, 'chrome', add(at, inward(0.014)), add(end, inward(0.014)), 0.008, 0.004, [1, 0, 0]);
         c.color(COLOURS.black).cylinderX('trim', add(end, inward(0.032)), 0.011, 0.016, 6);
-      });
+      }));
     }
   }
 }

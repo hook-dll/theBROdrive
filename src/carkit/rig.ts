@@ -160,6 +160,21 @@ const GLASS_CLEAR_M = 30;
 const GLASS_MIRROR_M = 45;
 export const KIT_DETAIL_M = 50;
 /**
+ * The cabin's fine detail (`userData.kitFine`, context.ts `fineDetail`: needles, dial
+ * faces, warning lamps, switches, knobs, stalks, horn pad, pedals, levers, cranks, door
+ * handles and lock knobs, visors, the courtesy lamp, glovebox and ashtray) draws only with
+ * the eye in this car, for the car the player sits in, or within this distance of the
+ * car's centre. A player at the open driver's door (1.5 m out) stands about 2.7 m from
+ * the centre, one at the side window (3 m out) about 4 m. Past 6 m a 1 cm warning lamp
+ * covers under two pixels and a 3 mm needle half of one (65° over 1080 px), behind a
+ * pane at 0.28 opacity. From 8 m, car-lab renders (2026-10-15) showed only single-pixel
+ * specks going; the inside mirror, which stood black against the screen, stays coarse
+ * for that. The coarse cabin (lining, dash and console bodies, seats, bench, wheel
+ * rim, door cards, mirror) still draws to `KIT_DETAIL_M`, with a stand-in in every window
+ * and dial the fine faces fill (interior.ts `WINDOW_FILL`).
+ */
+export const KIT_FINE_M = 6;
+/**
  * The glass's opacity seen from `distance` m outside the car: clear to `GLASS_CLEAR_M`,
  * then fading to the opaque mirror at `GLASS_MIRROR_M`. Rounded to a hundredth, below what
  * the eye resolves on a pane, so a moving eye does not write it every frame.
@@ -365,8 +380,11 @@ export class KitRig {
    */
   private wiperPhase = 0;
   private near: boolean | null = null;
+  private fineShown: boolean | null = null;
   private glassOpacity = -1;
   private readonly detail: THREE.Object3D[] = [];
+  /** The cabin's fine detail (`KIT_FINE_M`). */
+  private readonly fine: THREE.Object3D[] = [];
   private readonly glass: THREE.MeshStandardMaterial[] = [];
   /** Names of the shell's moving parts' channels (`SHELL_CHANNEL`); `adopt` replaces the channels themselves. */
   private readonly shell: string[] = [];
@@ -377,6 +395,7 @@ export class KitRig {
   constructor(root: THREE.Object3D, ownLenses = true) {
     root.traverse((node) => {
       if (KIT_DETAIL_GROUPS.has(node.name)) this.detail.push(node);
+      if (node.userData.kitFine) this.fine.push(node);
       if (node instanceof THREE.Mesh && node.material instanceof THREE.MeshStandardMaterial && node.material.name === 'car-glass-clear') {
         if (!this.glass.includes(node.material)) this.glass.push(node.material);
       }
@@ -417,17 +436,25 @@ export class KitRig {
   /**
    * Detail by the eye's distance (m): within `KIT_DETAIL_M` the cabin, bay, boot and
    * underbody draw, and the glass fades from clear (to `GLASS_CLEAR_M`) to the tinted
-   * mirror; beyond, none of them draw. `inside` (the eye in this car's cabin) leaves the
-   * glass all but clear (`GLASS_INSIDE_OPACITY`). Only uniforms and visibility change,
-   * so crossing the line links no program.
+   * mirror; beyond, none of them draw. The cabin's fine detail draws only within
+   * `KIT_FINE_M`, or with `inside` or `occupied`. `inside` (the eye in this car's cabin)
+   * leaves the glass all but clear (`GLASS_INSIDE_OPACITY`); `occupied` (the car the
+   * player sits in, seen from any camera) keeps the fine detail. Only uniforms and
+   * visibility change, so crossing a line links no program. Hidden parts are still posed
+   * every `update`, so they come back in their current pose.
    */
-  setDetail(distance: number, inside = false): void {
+  setDetail(distance: number, inside = false, occupied = false): void {
     const near = distance < KIT_DETAIL_M;
+    const fine = inside || occupied || distance < KIT_FINE_M;
     const opacity = inside ? GLASS_INSIDE_OPACITY : kitGlassOpacity(distance);
-    if (near === this.near && opacity === this.glassOpacity) return;
+    if (near === this.near && fine === this.fineShown && opacity === this.glassOpacity) return;
     if (near !== this.near) {
       this.near = near;
       for (const node of this.detail) node.visible = near;
+    }
+    if (fine !== this.fineShown) {
+      this.fineShown = fine;
+      for (const node of this.fine) node.visible = fine;
     }
     this.glassOpacity = opacity;
     for (const material of this.glass) material.opacity = opacity;

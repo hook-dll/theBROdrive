@@ -720,6 +720,8 @@ interface VehicleStats extends CarStats {
 /** Where this frame is seen from (scene frame) and its length; see `Vehicle.viewFrom`. */
 const kitEye = new THREE.Vector3();
 let kitEyeKnown = false;
+/** The car the player sits in, any seat (`Vehicle.viewFrom`): its cabin's fine detail always draws. */
+let kitOccupied: Vehicle | null = null;
 let kitFrameDt = 1 / 60;
 const kitEyeLocal = new THREE.Vector3();
 
@@ -1347,13 +1349,16 @@ export class Vehicle implements Rebasable {
   /**
    * Where this frame is seen from (the camera, scene frame) and its length in seconds,
    * given once per rendered frame before the vehicles' `syncVisuals`: kit cars ease
-   * their parts by it and draw their cabins only near it. Never given (a lab), every kit
-   * car counts as near and frames as 1/60 s.
+   * their parts by it and draw their cabins only near it. `occupied` is the car the
+   * player sits in, if any: its cabin keeps its fine detail from every camera (the chase
+   * camera stands about `KIT_FINE_M` behind). Never given (a lab), every kit car counts
+   * as near and frames as 1/60 s.
    */
-  static viewFrom(eye: THREE.Vector3, frameDt: number): void {
+  static viewFrom(eye: THREE.Vector3, frameDt: number, occupied: Vehicle | null): void {
     kitEye.copy(eye);
     kitEyeKnown = true;
     kitFrameDt = Math.min(Math.max(frameDt, 0), 0.1);
+    kitOccupied = occupied;
   }
 
   /** Measurements taken off the model's GLB (chassis-local metres). */
@@ -3829,16 +3834,17 @@ export class Vehicle implements Rebasable {
     kit.set('tell_brake', key && this.kitHandbrake > 0 ? 1 : 0);
     kit.set('tell_check', key && this.checkEngine ? 1 : 0);
 
-    // The car the player sits in is always within the detail range; with no eye given
-    // yet (the first frame), everything draws. An eye inside the measured body (the
-    // cabin view of whoever sits in it) sees out through all but clear glass.
+    // The car the player sits in is always within the detail range, and keeps its fine
+    // detail; with no eye given yet (the first frame), everything draws. An eye inside
+    // the measured body (the cabin view of whoever sits in it) sees out through all but
+    // clear glass.
     let inside = false;
     if (kitEyeKnown) {
       const local = this.rootGroup.worldToLocal(kitEyeLocal.copy(kitEye));
       const half = this.measure.halfExtents;
       inside = Math.abs(local.x) < half[0] && Math.abs(local.y) < half[1] && Math.abs(local.z) < half[2];
     }
-    kit.setDetail(kitEyeKnown ? this.rootGroup.position.distanceTo(kitEye) : 0, inside);
+    kit.setDetail(kitEyeKnown ? this.rootGroup.position.distanceTo(kitEye) : 0, inside, kitOccupied === this);
     kit.update(kitFrameDt);
   }
 

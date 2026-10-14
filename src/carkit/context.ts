@@ -93,6 +93,16 @@ export function pivotGroup(name: string, at: Vec3, motion?: KitMotion, control?:
 }
 
 /**
+ * Tags `node` as the cabin's fine detail: the small parts (needles, lit faces, switches,
+ * cranks, pedals) the rig draws only with the eye in this car or within `KIT_FINE_M` of it
+ * (rig.ts `setDetail`). Returns `node`.
+ */
+export function fineDetail<T extends THREE.Object3D>(node: T): T {
+  node.userData.kitFine = true;
+  return node;
+}
+
+/**
  * Adds `child` (built at car-frame position `at`) under `parent` (standing at
  * `parentPivot` in the car frame, unrotated at build time).
  */

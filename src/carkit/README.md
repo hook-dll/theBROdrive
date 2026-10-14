@@ -135,8 +135,9 @@ Integration outside the folder:
   Each rendered frame `driveKit` writes the driving channels (`steer`, `throttle`, `brake`,
   `clutch`, `handbrake`, `gear`, `speed`, `rpm`, `fuel`, `temp`, `lights`, `blinker`,
   `hazard`: the Vehicle owns these, so a script must not write them) and runs
-  `setDetail` (the distance from `Vehicle.viewFrom`'s eye, which main.ts gives once a frame) and
-  `update`. The rig, not the `STEERING_WHEEL_NODE` path, turns a kit car's wheel.
+  `setDetail` (the distance from `Vehicle.viewFrom`'s eye, which main.ts gives once a frame
+  with the car the player sits in, whose fine detail always draws) and `update`. The rig,
+  not the `STEERING_WHEEL_NODE` path, turns a kit car's wheel.
 - `render/carmodel.ts`: `loadModel` calls `buildKitCar` on a frame of its own. Clear glass
   comes from `carClearGlassMaterial`. A detail mesh (cabin, bay, boot, underbody, and the
   exhaust, which is not a detail part) with `userData.kitShadowed` receives shadows and
@@ -153,7 +154,7 @@ Integration outside the folder:
 - `render/materials.ts`: dust on glass raises opacity, so dirty clear glass is not
   see-through. On opaque glass this changes nothing.
 - `car-lab.ts`: the Kit row, the `?pack=` filter, hover and click, the "КАБИНА" panel, LOD by
-  distance (`KitRig.setDetail`), `window.__carLab`.
+  distance (`KitRig.setDetail`: the cabin's fine detail within 6 m), `window.__carLab`.
 - `vehicle/model-fits.json`: a measured fit row for every kit car (`tools/fit-models.ts`).
 
 ## How the body is built
@@ -433,7 +434,11 @@ stack); the Samaras use the `samara` platform's layout as is.
   volume, and where two walls lie flush facing the same way the later part's stays
   (`Outline.keepOutside`). Flat decals in the cabin (seat inserts, dials, the radio's
   band, the glovebox opening, vent backings) are laid into the surface they sit on
-  (`inlay`, `cutLocal` in interior.ts), not floated a millimetre over it.
+  (`inlay`, `cutLocal` in interior.ts), not floated a millimetre over it. A window cut for
+  a face of the fine detail (a warning lamp, a ribbon dial, a bare dial's ticks) has a
+  stand-in `WINDOW_FILL` (24 mm) behind it in the colour that fills it dark, and a round
+  dial's face an octagon stand-in laid in the cluster's face 4 mm under it: what shows
+  where the fine faces were when they stop drawing.
 - Courtesy lamp: group `kit_dome_lamp` (`KIT_DOME_LAMP_NODE`), the `dome` switch; the
   Vehicle hangs the cabin's light from it.
 - Glass: material `glass` (= `glassMaterial`). With `clearGlass` it becomes the shared
@@ -449,6 +454,16 @@ stack); the Samaras use the `samara` platform's layout as is.
 - Detail groups for LOD: `kit_cabin` (on the root and inside every door), `kit_bay`,
   `kit_boot`, `kit_under`. The exhaust is not one: its silencer and tail pipe are seen
   under the tail of every car met from behind.
+- Fine detail (`userData.kitFine`, context.ts `fineDetail`), inside `kit_cabin`: the
+  courtesy lamp (`kit_dome_lamp`, still found by name), visors, `telltale_*`, `panel_dim_*`
+  and `panel_glow_*`, `needle_*` (with their dim and glow needles), glovebox, `radio_needle`,
+  `radio_knob`, ashtray, `light_switch`, `hazard_button`, the two stalks, `horn`, the three
+  pedals, `gear_fb` (the lever), `handbrake`, `crank_*` and each door's `fittings_*` (inner
+  handle lever and lock knob). Coarse, drawn to `KIT_DETAIL_M`: the fixed cabin (lining,
+  dash, binnacle, cluster face and frame, vents, heater, radio body and band, rockers,
+  column, gaiter, handbrake base, seat rails), `seat_*`, `seatback_*`, `headrest_*`, the
+  bench, `steering_wheel` (rim, hub, spokes), the inside mirror, and the door cards
+  `trim_*` (with the handle recess and the capping).
 
 ## Controls and channels (`rig.ts`)
 
@@ -478,10 +493,25 @@ In the lab the rig lights the lamps from the channels: low/high beam and tail la
 `blinker` and `hazard` at 90 flashes a minute. In the game `VehicleLamps` does it through
 the def's `lights`, and the rig is created with `ownLenses = false`.
 
-`setDetail(distance)` switches only the visibility of the detail groups (drawn within
-`KIT_DETAIL_M`, 50 m) and the glass opacity (0.28 to 30 m, fading to the opaque tinted
-mirror by `GLASS_MIRROR_M`, 45 m), so crossing the LOD distance triggers no shader compile,
-and the cabin appears and goes behind an opaque pane, unseen.
+`setDetail(distance, inside?, occupied?)` switches only the visibility of the detail
+groups (drawn within `KIT_DETAIL_M`, 50 m) and of the cabin's fine detail (drawn within
+`KIT_FINE_M`, 6 m, or with the eye inside this car, or for the car the player sits in),
+and the glass opacity (0.28 to 30 m, fading to the opaque tinted mirror by
+`GLASS_MIRROR_M`, 45 m), so crossing a LOD distance triggers no shader compile, and the
+cabin appears and goes behind an opaque pane, unseen. Hidden parts are posed by every
+`update` all the same, so a needle that comes back into range stands where it reads.
+
+The fine detail is 60 of a near 2101's 74 cabin meshes (67 of a 2109's 85), counted on the
+loaded model (`createCarModel`) with a headless script, 2026-10-15: a parked 2101 seen
+from 10 m draws 61 meshes instead of 121, a 2109 63 instead of 130; from 3 m and inside,
+all of them. The sun's depth pass is 33 either way (detail parts cast no shadow). 6 m: a
+player at the open driver's door (1.5 m out) stands ~2.7 m from the car's centre, one at
+the side window (3 m out) ~4 m; past 6 m a 1 cm warning lamp is under two pixels and a
+3 mm needle half of one (65° over 1080 px). Car-lab renders of both cars, by day and at
+night with the lights on, from the door and the window match the full cabin; from 8 m the
+frames differ in 9–28 pixels of 2 million (lock knobs, needles, dial ticks, the lit
+cluster's faint glow). The inside mirror is coarse because from 8 m ahead it was the one
+part plainly seen going, black against the screen.
 
 ## Wheels: the Soviet pack's sets
 
@@ -621,7 +651,8 @@ place. The z-fight run is not optional and is not judged by eye.
    - at night with lamps on: head, tail, brake, indicators (both, hazard), reversing;
    - dust 0.8 and scratches; a sticker on the body;
    - LOD: the glass fades to a tinted mirror between 30 and 50 m, and from 50 m the
-     cabin, bay, boot and underbody vanish behind it;
+     cabin, bay, boot and underbody vanish behind it; from 6 m the fine detail
+     (`KIT_FINE_M`) goes with no hole or pop in the cluster, day and at night lit;
    - the cabin through the glass: dash, gauges, wheel, pedals, seats, every clickable
      fitting.
 3. Triangles: within ≈ 8–13k total ([Budget](#budget-and-current-figures)); add the row.
@@ -710,27 +741,28 @@ HEAD's, so the bounds, wheel mounts and bonnet point did not move).
 ## Budget and current figures
 
 Budget ≈ 8–13k triangles per car near, with LOD at `KIT_DETAIL_M`. Counted by building each
-car with `buildKitCar` and summing triangles per group (2026-10-16, after the z-fight round:
-the shell holes, cuts and inlays added 650–1550 per car and put the 2106, 2107 and 2115
-a few hundred over 13k; the cabin carries most of it); the wheels are the
-kit's placeholder wheels (336 each) that the pack's sets replace. "Cabin" includes the door
-trim hung in the doors; "Far" = everything except the four detail groups.
+car with `buildKitCar` and summing triangles per group (2026-10-15, after the cabin's fine
+detail tier: the window and dial stand-ins added 84–430 cabin triangles per car, most on
+the cars with four round dials; the exhaust had moved from the underbody to the body);
+the wheels are the kit's placeholder wheels (336 each) that the pack's sets replace.
+"Cabin" includes the door trim hung in the doors, "of it fine" is the part drawn only
+within `KIT_FINE_M`; "Far" = everything except the four detail groups.
 
-| | Total | Body + trim | Cabin | Engine bay | Boot | Underbody | Wheels | Far |
-|---|---|---|---|---|---|---|---|---|
-| 2101 | 12 309 | 5 522 | 3 968 | 429 | 298 | 748 | 1 344 | 6 866 |
-| 2102 | 12 380 | 5 788 | 4 005 | 429 | 66 | 748 | 1 344 | 7 132 |
-| 2103 | 12 783 | 5 632 | 4 332 | 429 | 298 | 748 | 1 344 | 6 976 |
-| 2104 | 12 442 | 5 710 | 4 141 | 449 | 50 | 748 | 1 344 | 7 054 |
-| 2105 | 12 693 | 5 703 | 4 151 | 449 | 298 | 748 | 1 344 | 7 047 |
-| 2106 | 13 459 | 6 455 | 4 185 | 429 | 298 | 748 | 1 344 | 7 799 |
-| 2107 | 13 353 | 5 689 | 4 825 | 449 | 298 | 748 | 1 344 | 7 033 |
-| 2108 | 10 960 | 4 160 | 4 177 | 613 | 50 | 616 | 1 344 | 5 504 |
-| 2109 | 12 210 | 5 060 | 4 527 | 613 | 50 | 616 | 1 344 | 6 404 |
-| 21099 | 12 486 | 5 229 | 4 616 | 613 | 68 | 616 | 1 344 | 6 573 |
-| 2115 | 13 687 | 6 429 | 4 617 | 613 | 68 | 616 | 1 344 | 7 773 |
-| 2110 | 16 398 | 8 610 | 5 087 | 673 | 56 | 628 | 1 344 | 9 954 |
-| 2112 | 16 367 | 8 674 | 4 982 | 673 | 66 | 628 | 1 344 | 10 018 |
+| | Total | Body + trim | Cabin | of it fine | Engine bay | Boot | Underbody | Wheels | Far |
+|---|---|---|---|---|---|---|---|---|---|
+| 2101 | 12 392 | 5 682 | 4 051 | 1 791 | 429 | 298 | 588 | 1 344 | 7 026 |
+| 2102 | 12 465 | 5 948 | 4 090 | 1 791 | 429 | 66 | 588 | 1 344 | 7 292 |
+| 2103 | 12 958 | 5 792 | 4 507 | 2 099 | 429 | 298 | 588 | 1 344 | 7 136 |
+| 2104 | 12 584 | 5 870 | 4 283 | 1 757 | 449 | 50 | 588 | 1 344 | 7 214 |
+| 2105 | 12 835 | 5 863 | 4 293 | 1 757 | 449 | 298 | 588 | 1 344 | 7 207 |
+| 2106 | 13 888 | 6 615 | 4 614 | 1 955 | 429 | 298 | 588 | 1 344 | 7 959 |
+| 2107 | 13 726 | 5 849 | 5 198 | 2 171 | 449 | 298 | 588 | 1 344 | 7 193 |
+| 2108 | 11 342 | 4 320 | 4 559 | 1 739 | 613 | 50 | 456 | 1 344 | 5 664 |
+| 2109 | 12 592 | 5 220 | 4 909 | 1 947 | 613 | 50 | 456 | 1 344 | 6 564 |
+| 21099 | 12 868 | 5 389 | 4 998 | 1 947 | 613 | 68 | 456 | 1 344 | 6 733 |
+| 2115 | 14 071 | 6 591 | 4 999 | 1 947 | 613 | 68 | 456 | 1 344 | 7 935 |
+| 2110 | 16 516 | 8 768 | 5 207 | 1 983 | 673 | 56 | 468 | 1 344 | 10 112 |
+| 2112 | 16 487 | 8 834 | 5 102 | 1 983 | 673 | 66 | 468 | 1 344 | 10 178 |
 
 The owner set the budget aside for the 2110 and 2112 (the rounded rear shut line adds side
 rows to every tub column).

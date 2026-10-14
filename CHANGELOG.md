@@ -521,6 +521,10 @@
 
 ### Changed
 
+- KIT CABIN FINE DETAIL ONLY NEAR (`carkit/rig.ts` `KIT_FINE_M`, `carkit/interior.ts`,
+  `vehicle/vehicle.ts` `viewFrom`): needles, dial faces, warning lamps, switches, stalks,
+  pedals, levers, cranks, door handles, visors and the like draw within 6 m, with the eye
+  inside, or for the car the player sits in; a parked 2101 at 10 m draws 61 meshes, not 121.
 - THE BONNET CAMERA IS GONE (`render/cameras.ts`): C switches chase ↔ cabin. `CameraMode`
   has no `hood`, `CameraTarget` no `hoodOffset`; the bonnet mount `hoodPoint` stays as
   the cabin eye of a body without a seat. The engine's swapped voicing
