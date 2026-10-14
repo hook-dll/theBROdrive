@@ -708,6 +708,24 @@
 
 ### Fixed
 
+- SHADOW EDGES NO LONGER SHIMMER (`render/sky.ts` `SHADOW_DIR_STEP`, `render/lightshader.ts`
+  `installStableShadowFilter`). The sun's shadow took its direction fresh every frame, and the
+  sun turns 0.25 degrees a second, so the shadow map's texel lattice turned a little each
+  frame and every edge (a building's on the sand, a car's, the roof's on a seat) re-stepped
+  along its length at different moments. The shadow's direction is now held until the sun
+  has moved 0.004 rad (about a second of the day): with the camera still, the lattice
+  changed 5 times in 300 frames instead of 299. Three's PCF also turned its five taps per
+  pixel by screen-space noise, a dither that crawled as the camera moved; it is four taps
+  on a fixed half-texel cross, a two-texel tent anchored to the map, one tap fewer. A car
+  turning still moves its own shadows across the lattice; the tent keeps those steps soft.
+
+- THE FIRST DOOR, LID, STEP OR CRASH OF A SESSION IS HEARD (`audio/samples.ts`
+  `EVENT_SAMPLES`). Recordings were fetched on first use, and a one-shot cannot wait, so
+  the first door, bonnet or boot of a session was silent and only the second played. Every
+  event one-shot (about 85 s of audio, 300 KB) now loads with the audio; checked in game:
+  `door-open` and `bonnet-open` decoded before any door was touched (were not). Beds stay
+  lazy, and thunder (370 KB) loads once rain starts, before lightning can strike.
+
 - A KIT CAR CAUGHT UP WITH FROM BEHIND NO LONGER GROWS ITS EXHAUST, SEATS AND WINDOW DUST AT
   50 M (`carkit/bay.ts`, `carkit/rig.ts`, `render/carmodel.ts`, `render/farcars.ts`,
   `vehicle/vehicle.ts`). The exhaust is out of the underbody's detail group, so it draws at

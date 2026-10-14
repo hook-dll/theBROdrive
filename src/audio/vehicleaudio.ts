@@ -329,9 +329,6 @@ export class VehicleAudio {
   private lastHandbrake: boolean | null = null;
 
   constructor(private readonly mixer: AudioMixer) {
-    // The lever answers the first press of a session, so its takes cannot wait for it.
-    void mixer.samples.load('handbrake-on');
-    void mixer.samples.load('handbrake-off');
     const ctx = mixer.ctx;
 
     // --- places and the cabin ---------------------------------------------------

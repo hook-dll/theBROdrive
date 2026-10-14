@@ -38,7 +38,7 @@
 
 import { AUDIO_CONFIG } from '../config';
 import { AudioMixer, ramp, setPannerPosition } from './mixer';
-import { Bed, playOnce, type SampleName } from './samples';
+import { Bed, playOnce, THUNDER_SAMPLES, type SampleName } from './samples';
 
 const AMBIENCE_GAIN = AUDIO_CONFIG.ambienceGain;
 const RAIN_GAIN = AUDIO_CONFIG.rainGain;
@@ -150,6 +150,7 @@ export class Ambience {
 
   private lastBoltSeed = -1;
   private lastThunder: SampleName | null = null;
+  private thunderRequested = false;
   /** When each species last called: a pair of hawks does not scream over each other. */
   private readonly lastCall = new Map<string, number>();
   /** Animals keep quiet in rain and hard wind; last frame's value, for bird calls. */
@@ -204,6 +205,13 @@ export class Ambience {
     const cabinOpen = f.cabinOpen;
     this.rain.set(RAIN_GAIN * rain * (cabinOpen === null ? 1 : 0.55 + 0.45 * cabinOpen), now, 0.5);
     this.roof.set(cabinOpen !== null ? RAIN_GAIN * ROOF * rain : 0, now, 0.25);
+
+    // Thunder is fetched once rain starts (see samples.ts LOADING): weather.ts strikes
+    // lightning only above 0.2 rain, so the takes have arrived before the first stroke.
+    if (!this.thunderRequested && rain > 0) {
+      this.thunderRequested = true;
+      for (const name of THUNDER_SAMPLES) void this.mixer.samples.load(name);
+    }
 
     // --- thunder ----------------------------------------------------------------
     if (f.boltSeed !== this.lastBoltSeed) {

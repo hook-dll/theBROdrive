@@ -93,6 +93,18 @@ const SHADOW_KEY_SHARE_FULL = 0.05;
  * car length and a lane to spare.
  */
 const SHADOW_BEHIND_M = 16;
+/**
+ * The angle, radians, the sun moves before its SHADOW follows: about one second of the
+ * 24-minute day. The sun turns 0.25 degrees a second, so a shadow direction taken fresh
+ * every frame turned the shadow map's texel lattice a little each frame, and every
+ * shadow edge re-stepped along its length at a different moment: a building's shadow on
+ * the sand, a car's, the roof's on a seat, all shimmering whenever the sun was up.
+ * Held, the lattice stands still and an edge steps once a second, all of it together,
+ * by under a texel for a caster within 15 m. The light's colour, intensity and the disc
+ * still follow the sun every frame; only the shadow's direction is held.
+ */
+const SHADOW_DIR_STEP = 0.004;
+const SHADOW_DIR_STEP_COS = Math.cos(SHADOW_DIR_STEP);
 
 
 /** Deliberate presentation scale: physical lunar disc is too small in play. */
@@ -970,6 +982,8 @@ export class Sky {
   private readonly _lightDir = new THREE.Vector3();
   /** Light direction with its elevation clamped, for the shadow camera only. */
   private readonly _shadowDir = new THREE.Vector3();
+  /** `_shadowDir` before it is held to SHADOW_DIR_STEP. */
+  private readonly _shadowDirLive = new THREE.Vector3();
   private readonly _targetPos = new THREE.Vector3();
   /** Half the sun shadow box's side, metres; set by `setQuality` with the map size. */
   private shadowHalfSize = GRAPHICS_CONFIG.shadowFrustumHalfSize;
@@ -1440,9 +1454,13 @@ export class Sky {
     const elevation = Math.atan2(dir.y, horizontal);
     if (elevation < SHADOW_MIN_ELEVATION && horizontal > 1e-4) {
       const flat = Math.cos(SHADOW_MIN_ELEVATION) / horizontal;
-      this._shadowDir.set(dir.x * flat, Math.sin(SHADOW_MIN_ELEVATION), dir.z * flat);
+      this._shadowDirLive.set(dir.x * flat, Math.sin(SHADOW_MIN_ELEVATION), dir.z * flat);
     } else {
-      this._shadowDir.copy(dir);
+      this._shadowDirLive.copy(dir);
+    }
+    // Held to SHADOW_DIR_STEP; `dot` of two unit vectors against cos(step).
+    if (this._shadowDir.lengthSq() === 0 || this._shadowDir.dot(this._shadowDirLive) < SHADOW_DIR_STEP_COS) {
+      this._shadowDir.copy(this._shadowDirLive);
     }
     // `_targetPos` just followed the camera to a WORLD position that moves smoothly,
     // a fraction of a shadow-map texel every frame. Left as-is, every point in the

@@ -60,6 +60,39 @@ function installSunShadowSlopeBias(): void {
 			}`,
   );
 }
+/**
+ * Shadow edges that stay put on screen.
+ *
+ * Three's PCF takes five hardware-filtered taps on a Vogel disk and turns the disk per
+ * PIXEL by interleaved gradient noise (`gl_FragCoord`). The noise is fixed to the screen
+ * while the world moves under it, so every shadow edge (a building's on the sand, a car's,
+ * the roof's on a seat) was redrawn with a different dither each frame: it flickered and
+ * crawled whenever the camera moved, and the sun's box snapping to its texel grid
+ * (render/sky.ts) cannot hold that still.
+ *
+ * Four taps at a fixed half-texel cross instead. Each is the hardware's 2x2 compare,
+ * so the sum is a two-texel tent over the shadow map: soft, and anchored to the map,
+ * so it moves with the world and not with the pixels. One tap fewer than three's. The
+ * chunk changes for every program alike, before any compiles: no variant.
+ */
+function installStableShadowFilter(): void {
+  const chunk = THREE.ShaderChunk.shadowmap_pars_fragment;
+  const marker = 'shadowStableTap';
+  if (chunk.includes(marker)) return;
+  const disk = /float phi = interleavedGradientNoise\( gl_FragCoord\.xy \) \* PI2;\s*shadow = \(\s*texture\( shadowMap, vec3\( shadowCoord\.xy \+ vogelDiskSample\( 0, 5, phi \) \* radius, shadowCoord\.z \) \) \+[\s\S]*?vogelDiskSample\( 4, 5, phi \) \* radius, shadowCoord\.z \) \)\s*\) \* 0\.2;/;
+  if (!disk.test(chunk)) throw new Error('Three PCF shadow layout changed');
+  THREE.ShaderChunk.shadowmap_pars_fragment = chunk.replace(
+    disk,
+    `vec2 ${marker} = texelSize * ( 0.5 * max( shadowRadius, 1.0 ) );
+				shadow = (
+					texture( shadowMap, vec3( shadowCoord.xy + vec2( -${marker}.x, -${marker}.y ), shadowCoord.z ) ) +
+					texture( shadowMap, vec3( shadowCoord.xy + vec2( ${marker}.x, -${marker}.y ), shadowCoord.z ) ) +
+					texture( shadowMap, vec3( shadowCoord.xy + vec2( -${marker}.x, ${marker}.y ), shadowCoord.z ) ) +
+					texture( shadowMap, vec3( shadowCoord.xy + vec2( ${marker}.x, ${marker}.y ), shadowCoord.z ) )
+				) * 0.25;`,
+  );
+}
 
 installPointLightZeroGuard();
 installSunShadowSlopeBias();
+installStableShadowFilter();

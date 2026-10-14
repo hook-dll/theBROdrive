@@ -9,9 +9,14 @@
  * levelled by tools/sound/build.mjs into small mono Ogg Opus files, and given their
  * width, distance and variety here, at play time.
  *
- * LOADING. Nothing is fetched until a voice first asks for it, so a clear day never
- * downloads a thunderstorm. Until a buffer has arrived the voice is simply silent: every
- * caller treats "not loaded yet" as "not audible yet", never as an error.
+ * LOADING. Every sound an EVENT plays once (a door, a lid, a step, a crash, a shot, the
+ * handbrake, a bird call) is fetched as the bank is made: `playOnce` cannot wait, and a
+ * lazy fetch made the first door of a session silent and only the second audible. They
+ * are short, about 85 s of audio in all. Beds (`Bed`) stay lazy, since a loop that
+ * starts a moment late is not missed, and so does thunder, the longest takes (some
+ * 120 s), which the ambience asks for as soon as rain starts (`Ambience.update`).
+ * Until a buffer has arrived the voice is simply silent: every caller treats "not loaded
+ * yet" as "not audible yet", never as an error.
  */
 
 import type { AudioMixer } from './mixer';
@@ -34,13 +39,31 @@ export type SampleName =
 
 const BASE = `${import.meta.env.BASE_URL}audio/`;
 
+/** The one-shots an event plays (see LOADING): fetched when the bank is made. */
+const EVENT_SAMPLES: readonly SampleName[] = [
+  'door-open', 'door-close', 'bonnet-open', 'bonnet-shut', 'boot-open', 'boot-shut',
+  'step-gravel', 'step-soft', 'step-hard',
+  'crash-1', 'crash-2', 'crash-3',
+  'rifle', 'shotgun', 'bolt', 'shutter',
+  'handbrake-on', 'handbrake-off',
+  'raven', 'hawk', 'sparrow', 'swallows', 'flock-1', 'flock-2',
+];
+
+/** Thunder, fetched once the weather turns rather than on a clear day. */
+export const THUNDER_SAMPLES: readonly SampleName[] = [
+  'thunder-near-1', 'thunder-near-2', 'thunder-near-3',
+  'thunder-far-1', 'thunder-far-2', 'thunder-far-3', 'thunder-far-4',
+];
+
 export class SampleBank {
   private readonly buffers = new Map<SampleName, AudioBuffer>();
   private readonly pending = new Map<SampleName, Promise<AudioBuffer | null>>();
   /** Slices (onset, length) of a take holding several hits, e.g. footsteps. */
   private readonly slices = new Map<SampleName, readonly [number, number][]>();
 
-  constructor(private readonly ctx: BaseAudioContext) {}
+  constructor(private readonly ctx: BaseAudioContext) {
+    for (const name of EVENT_SAMPLES) void this.load(name);
+  }
 
   /** The buffer if it has arrived; otherwise starts fetching it and returns null. */
   get(name: SampleName): AudioBuffer | null {
