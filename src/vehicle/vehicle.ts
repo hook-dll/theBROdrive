@@ -721,6 +721,7 @@ interface VehicleStats extends CarStats {
 const kitEye = new THREE.Vector3();
 let kitEyeKnown = false;
 let kitFrameDt = 1 / 60;
+const kitEyeLocal = new THREE.Vector3();
 
 /**
  * A Zhiguli's oil pressure, kgf/cm²: about 2 hot at idle, 4.5 from 3000 rpm up (the
@@ -3821,8 +3822,15 @@ export class Vehicle implements Rebasable {
     kit.set('tell_check', key && this.checkEngine ? 1 : 0);
 
     // The car the player sits in is always within the detail range; with no eye given
-    // yet (the first frame), everything draws.
-    kit.setDetail(kitEyeKnown ? this.rootGroup.position.distanceTo(kitEye) : 0);
+    // yet (the first frame), everything draws. An eye inside the measured body (the
+    // cabin view of whoever sits in it) sees out through all but clear glass.
+    let inside = false;
+    if (kitEyeKnown) {
+      const local = this.rootGroup.worldToLocal(kitEyeLocal.copy(kitEye));
+      const half = this.measure.halfExtents;
+      inside = Math.abs(local.x) < half[0] && Math.abs(local.y) < half[1] && Math.abs(local.z) < half[2];
+    }
+    kit.setDetail(kitEyeKnown ? this.rootGroup.position.distanceTo(kitEye) : 0, inside);
     kit.update(kitFrameDt);
   }
 

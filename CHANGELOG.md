@@ -4,6 +4,18 @@
 
 ### Added
 
+- CLEAR GLASS FROM INSIDE (`carkit/rig.ts` `GLASS_INSIDE_OPACITY`, `setDetail(…, inside)`;
+  `vehicle/vehicle.ts` `driveKit`). With the eye inside a kit car's measured body (its
+  cabin view, any seat) that car's panes draw at opacity 0.05 instead of 0.28: the world
+  through them as if they were hardly there, a glint and the dust still on them. Seen
+  from outside, the chase camera and other cars, the glass is as before. An opacity
+  write only, per car (each car has its own glass copy).
+
+- THE CABIN VIEW TURNS BACK TO THE ROAD AFTER 1 S, NOT 3 (`render/cameras.ts`
+  `CABIN_RECENTER_IDLE_SECONDS`), and not at all while E is held on the inside mirror
+  (`CameraRig.setCabinLookHeld`): the head stayed on the mirror through 2.5 s of aiming,
+  then eased back to the road a second after E was let go. The chase view keeps its 6 s.
+
 - MOVE BETWEEN SEATS WITH F (`player/interaction.ts`). Seated, in the cabin view and
   with the car below the exit speed, look at another seat (a front seat, either half of
   the rear bench) and press F: the occupant moves into it. F at anything else gets out

@@ -76,7 +76,7 @@ const RECENTER_EPSILON = 1e-3;
 /** Chase view waits this long after the last horizontal look input before following the car. */
 const CHASE_RECENTER_IDLE_SECONDS = 6;
 /** The cabin view waits this long after the last look input before facing the road again. */
-const CABIN_RECENTER_IDLE_SECONDS = 3;
+const CABIN_RECENTER_IDLE_SECONDS = 1;
 /**
  * Cabin-view near plane, metres. The eye sits 5-10 cm from the roof lining, the pillar
  * and the head restraint as the head turns, and `CAMERA_NEAR` (0.08) cut through them
@@ -428,6 +428,8 @@ export class CameraRig {
   private cabinYawOffset = 0;
   /** Seconds since the player last turned the head in the cabin view. */
   private cabinLookIdle = 0;
+  /** The hand is on a fitting the mouse works (the inside mirror): the head stays where it looks. */
+  private cabinLookHeld = false;
   /** Ten-power binocular view: a held-item effect, independent of the camera mode. */
   private binoculars = false;
   private deathActive = false;
@@ -603,6 +605,11 @@ export class CameraRig {
 
   setBinoculars(active: boolean): void {
     this.binoculars = active;
+  }
+
+  /** While true the cabin view does not turn back to the road (main.ts: E held on the mirror). */
+  setCabinLookHeld(held: boolean): void {
+    this.cabinLookHeld = held;
   }
 
   setMode(mode: CameraMode): void {
@@ -784,7 +791,7 @@ export class CameraRig {
     }
     // The seat's head is turned by either axis, so either keeps it where it is.
     const lookActive = horizontalLookActive || Math.abs(input.lookPitch) >= CHASE_LOOK_ACTIVITY_EPSILON;
-    this.cabinLookIdle = inputMode === 'cabin' && !lookActive ? this.cabinLookIdle + d : 0;
+    this.cabinLookIdle = inputMode === 'cabin' && !lookActive && !this.cabinLookHeld ? this.cabinLookIdle + d : 0;
 
     // Re-centre (V): level pitch and, in an external view, ease toward the
     // vehicle heading captured on the press frame so the car lands directly ahead.

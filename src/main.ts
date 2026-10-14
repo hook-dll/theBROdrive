@@ -2297,6 +2297,7 @@ async function boot(): Promise<void> {
     const usingCamera =
       !dying && driving === null && inventory.held?.type === 'camera' && cameraActive;
     camera.setBinoculars(usingBinoculars);
+    camera.setCabinLookHeld(aimingKit !== null);
     let deathFade = 0;
     if (dying) {
       deathFade = camera.updateDeath(frameDt, target);

@@ -140,6 +140,11 @@ export const KIT_DETAIL_GROUPS: ReadonlySet<string> = new Set(['kit_cabin', 'kit
 const GLASS_NEAR_OPACITY = 0.28;
 const GLASS_FAR_OPACITY = 0.9;
 /**
+ * The glass seen from inside its own car: the world through it as if it were hardly
+ * there. Not zero, so a pane still shows a glint of the sky and its dust.
+ */
+const GLASS_INSIDE_OPACITY = 0.05;
+/**
  * The glass stays clear to `GLASS_CLEAR_M` from the eye and fades to the tinted mirror by
  * `KIT_DETAIL_M`, where the cabin, bay, boot and underbody stop drawing behind it. One
  * 25 m step did both at once: the panes of a passing car went from mirror to clear in one
@@ -396,14 +401,17 @@ export class KitRig {
   /**
    * Detail by the eye's distance (m): within `KIT_DETAIL_M` the cabin, bay, boot and
    * underbody draw, and the glass fades from clear (to `GLASS_CLEAR_M`) to the tinted
-   * mirror; beyond, none of them draw. Only uniforms and visibility change, so crossing
-   * the line links no program.
+   * mirror; beyond, none of them draw. `inside` (the eye in this car's cabin) leaves the
+   * glass all but clear (`GLASS_INSIDE_OPACITY`). Only uniforms and visibility change,
+   * so crossing the line links no program.
    */
-  setDetail(distance: number): void {
+  setDetail(distance: number, inside = false): void {
     const near = distance < KIT_DETAIL_M;
     const t = Math.min(Math.max((distance - GLASS_CLEAR_M) / (KIT_DETAIL_M - GLASS_CLEAR_M), 0), 1);
     // A hundredth of opacity is below what the eye resolves on a pane: no write per frame.
-    const opacity = Math.round((GLASS_NEAR_OPACITY + (GLASS_FAR_OPACITY - GLASS_NEAR_OPACITY) * t) * 100) / 100;
+    const opacity = inside
+      ? GLASS_INSIDE_OPACITY
+      : Math.round((GLASS_NEAR_OPACITY + (GLASS_FAR_OPACITY - GLASS_NEAR_OPACITY) * t) * 100) / 100;
     if (near === this.near && opacity === this.glassOpacity) return;
     if (near !== this.near) {
       this.near = near;
