@@ -5,7 +5,7 @@
 
 import * as THREE from 'three';
 import { mirrorFaceGeometry, mirrorFaceMaterial } from '../render/carmirrors';
-import type { BodyFrame } from './body';
+import type { BodyFrame, KitHole } from './body';
 import type { KitSlot, PartBuilder, Vec3 } from './builder';
 import { kitMaterial } from './materials';
 import { KIT_LAMP_NODES, type KitMirror } from './names';
@@ -24,6 +24,11 @@ export interface KitContext {
   readonly nodes: ReadonlyMap<string, KitNode>;
   /** The cabin lining the shell derives from its greenhouse and roof (`ShellResult.lining`). */
   readonly lining: readonly (readonly Vec3[])[];
+  /**
+   * Where the parts built on the outside stand on the shell: kit.ts cuts the skin away
+   * under each (`cutShellHoles`) once everything is built.
+   */
+  readonly holes: KitHole[];
 }
 
 /**

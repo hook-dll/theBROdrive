@@ -10,7 +10,7 @@
  */
 
 import * as THREE from 'three';
-import { BodyFrame, buildShell } from './body';
+import { BodyFrame, buildShell, cutShellHoles, type KitHole } from './body';
 import { buildBay } from './bay';
 import { addBuilt, pivotGroup, type KitContext, type KitNode } from './context';
 import { buildExterior } from './exterior';
@@ -18,6 +18,7 @@ import { buildInterior } from './interior';
 import { KIT_SPECS } from './specs';
 import { buildWheel } from './wheels';
 import type { KitMotion } from './rig';
+import type { Vec3 } from './builder';
 
 /** Russian names for the shell's moving parts, shown on hover. */
 const PART_LABELS: Readonly<Record<string, string>> = {
@@ -80,12 +81,15 @@ export function buildKitCar(id: string): THREE.Group {
   }
   for (const { node } of nodes.values()) if (!node.parent) root.add(node);
 
-  const ctx: KitContext = { frame, root, nodes, lining: shell.lining };
+  const ctx: KitContext = { frame, root, nodes, lining: shell.lining, holes: [] };
   buildExterior(ctx);
   buildInterior(ctx);
   buildBay(ctx);
-  if (spec.rearLean) leanEnd(root, frame.z(frame.rearBase), -1, spec.rearLean);
-  if (spec.frontLean) leanEnd(root, frame.z(spec.frontLean.full ?? spec.bonnetFront), 1, spec.frontLean);
+  cutShellHoles(root, ctx.holes);
+  if (spec.rearLean) leanEnd(root, ctx.holes, frame.z(frame.rearBase), -1, spec.rearLean);
+  if (spec.frontLean) leanEnd(root, ctx.holes, frame.z(spec.frontLean.full ?? spec.bonnetFront), 1, spec.frontLean);
+  // For tools (tools/kit-zfight.ts checks every hole is covered): the cut outlines, leant.
+  root.userData.kitHoles = ctx.holes;
 
   // The car's own wheels, named for its `wheelNodes`: they set the wheels' places and
   // size; the loader shods the car from the Soviet pack's sets (`wheelSetPool`).
@@ -119,8 +123,16 @@ const _inv = new THREE.Matrix4();
  * warped in their built (closed) pose, so they still close flush; wheels are added
  * afterwards and never touched. `end` is +1 at the front, −1 at the tail.
  */
-function leanEnd(root: THREE.Object3D, zFull: number, end: 1 | -1, lean: { readonly base: number; readonly lean: number; readonly blend: number }): void {
+function leanEnd(root: THREE.Object3D, holes: KitHole[], zFull: number, end: 1 | -1, lean: { readonly base: number; readonly lean: number; readonly blend: number }): void {
   const zStart = zFull - end * lean.blend;
+  /** Moves a car-frame point; false where it stays. */
+  const warp = (p: THREE.Vector3): boolean => {
+    const into = end * (p.z - zStart);
+    if (into <= 0 || p.y <= lean.base) return false;
+    const w = Math.min(1, into / lean.blend);
+    p.z -= end * (w * w * (3 - 2 * w) * lean.lean * (p.y - lean.base));
+    return true;
+  };
   root.updateMatrixWorld(true);
   root.traverse((node) => {
     const mesh = node as THREE.Mesh;
@@ -130,10 +142,7 @@ function leanEnd(root: THREE.Object3D, zFull: number, end: 1 | -1, lean: { reado
     let moved = false;
     for (let i = 0; i < position.count; i++) {
       _p.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld);
-      const into = end * (_p.z - zStart);
-      if (into <= 0 || _p.y <= lean.base) continue;
-      const w = Math.min(1, into / lean.blend);
-      _p.z -= end * (w * w * (3 - 2 * w) * lean.lean * (_p.y - lean.base));
+      if (!warp(_p)) continue;
       _p.applyMatrix4(_inv);
       position.setXYZ(i, _p.x, _p.y, _p.z);
       moved = true;
@@ -143,6 +152,13 @@ function leanEnd(root: THREE.Object3D, zFull: number, end: 1 | -1, lean: { reado
     mesh.geometry.computeVertexNormals();
     mesh.geometry.computeBoundingBox();
     mesh.geometry.computeBoundingSphere();
+  });
+  holes.forEach((hole, i) => {
+    const poly = hole.outline.poly.map((q): Vec3 => {
+      warp(_p.set(q[0], q[1], q[2]));
+      return [_p.x, _p.y, _p.z];
+    });
+    holes[i] = { ...hole, outline: { ...hole.outline, poly } };
   });
 }
 

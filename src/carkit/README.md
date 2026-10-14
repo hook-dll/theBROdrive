@@ -418,9 +418,19 @@ stack); the Samaras use the `samara` platform's layout as is.
 - Paint: material `paint`. Only it takes colour, dust, scratches and stickers. Every other
   name (`trim`, `chrome`, `tyre`, `wheel_rim`, `glass`, `lamp_*`) is filtered out by the
   paint-slot rule.
-- Lit faces: slot `lamp_glow`, the one unlit material (vertex colours). A warning lamp's
-  or the courtesy lamp's lit face slides out from behind its dark lens on a `pos` motion
-  (`GLOW_TRAVEL`), so lighting one is a pose, not a material change.
+- Lit faces: slot `lamp_glow`, the one unlit material (vertex colours). A warning lamp's,
+  a dial's face and ticks, a needle's and the courtesy lamp's dark face and lit face swap
+  places on a pair of `pos` motions on the same channel: the dark one slides back by
+  `GLOW_TRAVEL` (a needle `NEEDLE_TRAVEL`) as the lit one slides out into its place, so
+  lighting one is a pose, not a material change, and the two never lie in one plane.
+- Nothing lies on a hidden face. An item on the body skin (a lamp, grille, badge, bumper,
+  repeater) is rooted 7 mm into it (`FACE_ROOT`) with no back face, and the shell is cut
+  under it (`KitHole`, `cutShellHoles`; outlines on `root.userData.kitHoles`). Items on one
+  end face are placed as a union (`EndFace.place`): each cuts what lies inside the other's
+  volume, and where two walls lie flush facing the same way the later part's stays
+  (`Outline.keepOutside`). Flat decals in the cabin (seat inserts, dials, the radio's
+  band, the glovebox opening, vent backings) are laid into the surface they sit on
+  (`inlay`, `cutLocal` in interior.ts), not floated a millimetre over it.
 - Courtesy lamp: group `kit_dome_lamp` (`KIT_DOME_LAMP_NODE`), the `dome` switch; the
   Vehicle hangs the cabin's light from it.
 - Glass: material `glass` (= `glassMaterial`). With `clearGlass` it becomes the shared
@@ -604,10 +614,14 @@ Re-run `fit-models.ts` for every car whose shape changed. Stage the file as in
      fitting.
 3. Triangles: within ≈ 8–13k total ([Budget](#budget-and-current-figures)); add the row.
 4. The proof that other cars did not move, if the generator changed.
-5. Z-fighting: `nice -n 15 ~/.bun/bin/bun tools/kit-zfight.ts kit_vaz2110` (all cars
-   without ids, ~7 s) must end with `0 visible close-range clusters`. A row there names
-   both emitters (`file:line`); keep two faces of different look ≥ 2 mm apart, or drop the
-   one inside another part (`UPPER_FACES`, `NO_TOP` in bay.ts).
+5. Z-fighting and holes: `nice -n 15 ~/.bun/bin/bun tools/kit-zfight.ts kit_vaz2110` (all
+   cars without ids, ~7 s): every car's row must read 0 in the close, 10-25 m and >25 m/far
+   visible columns and 0 slits, and the run must end with `0 visible close-range clusters,
+   0 shell holes open to a viewpoint`. A cluster names both emitters (`file:line`); drop
+   the face that lies inside another part (`UPPER_FACES`, `0b111011` in bay.ts, an open
+   back) or lay a decal into its surface (`inlay`); a millimetre or two of air only moves
+   the fight further out. A slit names the hole's owner and a point in it: the item over
+   it leaves a gap, usually two flush walls cut away together.
 6. Docs: README (new spec fields, families table, budget row), `STATUS.md` (car row),
    `HISTORY.md` (fixes), `CHANGELOG.md` (an `### Added` entry).
 
@@ -646,25 +660,27 @@ HEAD's, so the bounds, wheel mounts and bonnet point did not move).
 ## Budget and current figures
 
 Budget ≈ 8–13k triangles per car near, with LOD at `KIT_DETAIL_M`. Counted by building each
-car with `buildKitCar` and summing triangles per group (2026-10-15); the wheels are the
+car with `buildKitCar` and summing triangles per group (2026-10-16, after the z-fight round:
+the shell holes, cuts and inlays added 650–1550 per car and put the 2106, 2107 and 2115
+a few hundred over 13k; the cabin carries most of it); the wheels are the
 kit's placeholder wheels (336 each) that the pack's sets replace. "Cabin" includes the door
 trim hung in the doors; "Far" = everything except the four detail groups.
 
 | | Total | Body + trim | Cabin | Engine bay | Boot | Underbody | Wheels | Far |
 |---|---|---|---|---|---|---|---|---|
-| 2101 | 11 501 | 5 363 | 3 315 | 431 | 298 | 750 | 1 344 | 6 707 |
-| 2102 | 11 642 | 5 674 | 3 377 | 431 | 66 | 750 | 1 344 | 7 018 |
-| 2103 | 12 287 | 5 883 | 3 581 | 431 | 298 | 750 | 1 344 | 7 227 |
-| 2104 | 11 984 | 5 746 | 3 643 | 451 | 50 | 750 | 1 344 | 7 090 |
-| 2105 | 12 213 | 5 747 | 3 623 | 451 | 298 | 750 | 1 344 | 7 091 |
-| 2106 | 12 651 | 6 303 | 3 525 | 431 | 298 | 750 | 1 344 | 7 647 |
-| 2107 | 12 481 | 5 607 | 4 031 | 451 | 298 | 750 | 1 344 | 6 951 |
-| 2108 | 10 296 | 4 120 | 3 547 | 615 | 50 | 620 | 1 344 | 5 464 |
-| 2109 | 11 524 | 5 020 | 3 875 | 615 | 50 | 620 | 1 344 | 6 364 |
-| 21099 | 11 785 | 5 209 | 3 929 | 615 | 68 | 620 | 1 344 | 6 553 |
-| 2115 | 12 395 | 5 819 | 3 929 | 615 | 68 | 620 | 1 344 | 7 163 |
-| 2110 | 14 865 | 7 817 | 4 341 | 675 | 56 | 632 | 1 344 | 9 161 |
-| 2112 | 14 845 | 7 855 | 4 273 | 675 | 66 | 632 | 1 344 | 9 199 |
+| 2101 | 12 309 | 5 522 | 3 968 | 429 | 298 | 748 | 1 344 | 6 866 |
+| 2102 | 12 380 | 5 788 | 4 005 | 429 | 66 | 748 | 1 344 | 7 132 |
+| 2103 | 12 783 | 5 632 | 4 332 | 429 | 298 | 748 | 1 344 | 6 976 |
+| 2104 | 12 442 | 5 710 | 4 141 | 449 | 50 | 748 | 1 344 | 7 054 |
+| 2105 | 12 693 | 5 703 | 4 151 | 449 | 298 | 748 | 1 344 | 7 047 |
+| 2106 | 13 459 | 6 455 | 4 185 | 429 | 298 | 748 | 1 344 | 7 799 |
+| 2107 | 13 353 | 5 689 | 4 825 | 449 | 298 | 748 | 1 344 | 7 033 |
+| 2108 | 10 960 | 4 160 | 4 177 | 613 | 50 | 616 | 1 344 | 5 504 |
+| 2109 | 12 210 | 5 060 | 4 527 | 613 | 50 | 616 | 1 344 | 6 404 |
+| 21099 | 12 486 | 5 229 | 4 616 | 613 | 68 | 616 | 1 344 | 6 573 |
+| 2115 | 13 687 | 6 429 | 4 617 | 613 | 68 | 616 | 1 344 | 7 773 |
+| 2110 | 16 398 | 8 610 | 5 087 | 673 | 56 | 628 | 1 344 | 9 954 |
+| 2112 | 16 367 | 8 674 | 4 982 | 673 | 66 | 628 | 1 344 | 10 018 |
 
 The owner set the budget aside for the 2110 and 2112 (the rounded rear shut line adds side
 rows to every tub column).

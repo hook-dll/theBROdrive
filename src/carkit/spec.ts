@@ -400,7 +400,10 @@ export type FaceItem =
       readonly kind: 'grille';
       readonly x: FaceX;
       readonly y: Span<FaceY>;
-      /** The whole grille stands this far out of the face (the 2107's). */
+      /**
+       * The whole grille stands this far out of the face (the 2107's). In a moulded
+       * bumper (an intake) its front stands at least 10 mm ahead of the bumper's.
+       */
       readonly standOut?: number;
       readonly frame?: { readonly finish: Finish; readonly margin: number };
       /** A dark plate behind the bars. */
@@ -419,7 +422,8 @@ export type FaceItem =
     }
   /**
    * A tail-lamp cluster straight on the body (no housing): columns of cells from the outer edge in,
-   * each column's roles from the top down.
+   * each column's roles from the top down. The cells tile the span with no seam, rooted
+   * in the face; only the unit's outer walls are drawn.
    */
   | { readonly kind: 'cluster'; readonly x: Span<FaceX>; readonly y: Span<FaceY>; readonly columns: readonly (readonly LampRole[])[] }
   /** A rectangular outline of `width` bars (a chrome surround); both sides unless centred. */

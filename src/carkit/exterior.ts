@@ -12,9 +12,9 @@
  */
 
 import * as THREE from 'three';
-import { PartBuilder, lerp, table, type KitSlot, type Vec3 } from './builder';
+import { PartBuilder, lerp, table, type Caps, type KitSlot, type Outline, type Vec3 } from './builder';
 import { addBuilt, addMirrorFace, mirrorFrame, pivotGroup, type KitContext } from './context';
-import { skinX, type BodyFrame } from './body';
+import { skinX, type BodyFrame, type KitHole } from './body';
 import { driverEyeAt } from './interior';
 import type { CornerLampPoint, FaceAnchor, FaceItem, FaceLook, FaceX, FaceY, Finish, LampRole, Span } from './spec';
 
@@ -62,14 +62,40 @@ interface SweepPoint {
 }
 
 /**
- * Sweeps a section — (outward fraction 0..1, height) pairs — along a path in plan,
- * capping both ends: a bumper that turns round the corners in one piece.
+ * A sweep's section point: outward fraction 0..1 of the path's depth, height, and metres
+ * added outward (a strip that must stand a set distance off the surface it rides on).
  */
-function sweep(b: PartBuilder, slot: KitSlot, path: readonly SweepPoint[], section: readonly (readonly [number, number])[]): void {
-  const rings: Vec3[][] = path.map((p) => section.map(([o, y]) => [p.x + p.nx * o * p.depth, y, p.z + p.nz * o * p.depth] as Vec3));
-  for (let i = 0; i + 1 < rings.length; i++) b.bridge(slot, rings[i]!, rings[i + 1]!, true);
+type SectionPoint = readonly [number, number, number?];
+
+function sweepPoint(p: SweepPoint, [o, y, a = 0]: SectionPoint): Vec3 {
+  return [p.x + p.nx * (o * p.depth + a), y, p.z + p.nz * (o * p.depth + a)];
+}
+
+/**
+ * Sweeps a section along a path in plan, capping both ends: a bumper that turns round the
+ * corners in one piece. `omit` lists section edges (k is from point k to the next) to
+ * leave out: a bumper's back, which faces the body, or where two parts of it meet.
+ */
+function sweep(b: PartBuilder, slot: KitSlot, path: readonly SweepPoint[], section: readonly SectionPoint[], omit: readonly number[] = []): void {
+  const rings: Vec3[][] = path.map((p) => section.map((q) => sweepPoint(p, q)));
+  const n = section.length;
+  for (let i = 0; i + 1 < rings.length; i++) {
+    for (let k = 0; k < n; k++) if (!omit.includes(k)) b.quad(slot, rings[i]![k]!, rings[i]![(k + 1) % n]!, rings[i + 1]![(k + 1) % n]!, rings[i + 1]![k]!);
+  }
   b.poly(slot, rings[0]!);
   b.poly(slot, [...rings[rings.length - 1]!].reverse());
+}
+
+/**
+ * What a swept part covers: for each step of the path, the quad its section's edge from
+ * `a` to `b` sweeps, as the cut under it (`PartBuilder.cut`) reaching `reach` either side.
+ */
+function sweptOutlines(path: readonly SweepPoint[], a: SectionPoint, b: SectionPoint, reach: number): Outline[] {
+  const out: Outline[] = [];
+  for (let i = 0; i + 1 < path.length; i++) {
+    out.push({ poly: [sweepPoint(path[i]!, a), sweepPoint(path[i + 1]!, a), sweepPoint(path[i + 1]!, b), sweepPoint(path[i]!, b)], reach });
+  }
+  return out;
 }
 
 /**
@@ -161,15 +187,34 @@ function finishSlot(finish: Finish | 'dark'): { slot: KitSlot; color: number } {
 }
 
 /**
+ * How deep every part on an end face roots into it: past the census's coplanar band
+ * (tools/kit-zfight.ts, 6 mm), so no part's back lies close under the face's skin.
+ */
+const FACE_ROOT = 0.007;
+
+/** A part's outline on an end face, (x, y), and how far it reaches out of the face (negative: into the body). */
+interface Footprint {
+  readonly poly: readonly P2[];
+  readonly z0: number;
+  readonly z1: number;
+}
+
+/**
  * One end face, resolved: its plane, half width and lines, and how a description's
- * positions land on it. `facing` is +1 at the nose and -1 at the tail.
+ * positions land on it. `facing` is +1 at the nose and -1 at the tail. `owner` is the
+ * shell part the face's items stand on, cut away under them (`KitHole`).
  */
 class EndFace {
   readonly z: number;
   readonly half: number;
+  /**
+   * A moulded bumper's band on this face and how far its front stands out of the face (to
+   * the car's tip), or undefined for a blade bumper.
+   */
+  readonly moulded?: { readonly y0: number; readonly y1: number; readonly front: number };
   private readonly lines: Readonly<Record<FaceAnchor, number>>;
 
-  constructor(frame: BodyFrame, readonly facing: 1 | -1) {
+  constructor(frame: BodyFrame, readonly facing: 1 | -1, private readonly owner: string, private readonly holes: KitHole[]) {
     const { front, tail } = ends(frame);
     const s = facing > 0 ? front : tail;
     const sec = frame.section(s);
@@ -178,11 +223,24 @@ class EndFace {
     this.z = frame.z(s);
     this.half = sec.r2[0];
     this.lines = { bumperTop: bumper.y1, bumperBottom: bumper.y0, belt: sec.r3[1], deck, mid: (bumper.y1 + deck) / 2 };
+    if ((facing > 0 ? frame.spec.look.front : frame.spec.look.rear).bumper.kind === 'moulded') {
+      this.moulded = { ...bumper, front: facing > 0 ? s : frame.spec.length - s };
+    }
   }
 
   /** The plane `d` out of the face (negative: into the body). */
   out(d: number): number {
     return this.z + this.facing * d;
+  }
+
+  /** The cap a prism rooted in the face keeps: its front only. Its back would lie hidden in the body a few millimetres under other parts' backs. */
+  get frontCap(): Caps {
+    return this.facing > 0 ? 'z1' : 'z0';
+  }
+
+  /** `PartBuilder.box` faces of a box rooted in the face: all but its back. */
+  get noBack(): number {
+    return 0b111111 & ~(this.facing > 0 ? 32 : 16);
   }
 
   x(at: FaceX): number {
@@ -201,6 +259,32 @@ class EndFace {
   spanY(span: Span<FaceY>): [number, number] {
     return 'at' in span ? [this.y(span.at), span.half] : centreHalf(this.y(span.from), this.y(span.to));
   }
+
+  /** Volumes of the parts placed on this face so far. */
+  readonly placed: Outline[] = [];
+
+  /**
+   * Adds a part to `b`, built in `part` with its footprints, as a union: whatever `b`
+   * already holds inside the part's volume (a grille's back under a lamp, a bumper's face
+   * under a fog-lamp blank, a neighbour's wall) is cut away, and so is whatever of the
+   * part lies inside a part placed before it (a panel's edge under a frame's bar), and the
+   * shell's skin under a part rooted in the face. Where a wall of each lies flush in one
+   * plane facing the same way (a post's foot on a slot back's floor), the earlier one's
+   * gives way and the part's stays (`Outline.keepOutside`). Every cut runs along a part's
+   * walls: no slit can open.
+   */
+  place(b: PartBuilder, part: PartBuilder, prints: readonly Footprint[]): void {
+    const volumes = prints.map((f) => this.volume(f));
+    part.cut(this.placed.map((v) => ({ ...v, keepOutside: true })));
+    b.cut(volumes).append(part);
+    this.placed.push(...volumes);
+    for (const f of prints) if (f.z0 < 0) this.holes.push({ owner: this.owner, outline: { poly: f.poly.map(([x, y]): Vec3 => [x, y, this.z]) } });
+  }
+
+  /** A footprint's prism, as a cut (`PartBuilder.cut`). */
+  volume(f: Footprint): Outline {
+    return { poly: f.poly.map(([x, y]): Vec3 => [x, y, this.out((f.z0 + f.z1) / 2)]), reach: (f.z1 - f.z0) / 2, solid: true };
+  }
 }
 
 function centreHalf(a: number, b: number): [number, number] {
@@ -209,49 +293,85 @@ function centreHalf(a: number, b: number): [number, number] {
 
 type P2 = [number, number];
 
-/** Builds one end face's items, in order. Items off the centre line go on both sides. */
-function buildFace(frame: BodyFrame, look: FaceLook, facing: 1 | -1, b: PartBuilder): void {
-  const face = new EndFace(frame, facing);
-  for (const item of look.items) buildFaceItem(face, item, b);
+/** `PartBuilder.bevelBox`'s section about (cx, cy): the outline a lens or cell stands on. */
+function octagon(cx: number, cy: number, hx: number, hy: number, bevel: number): P2[] {
+  const b = Math.min(bevel, hx * 0.9, hy * 0.9);
+  return ([[hx - b, -hy], [hx, -hy + b], [hx, hy - b], [hx - b, hy], [-hx + b, hy], [-hx, hy - b], [-hx, -hy + b], [-hx + b, -hy]] as P2[]).map(([x, y]): P2 => [cx + x, cy + y]);
 }
 
-function buildFaceItem(face: EndFace, item: FaceItem, b: PartBuilder): void {
+function rect(x0: number, y0: number, x1: number, y1: number): P2[] {
+  return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+}
+
+/** A moulded bumper's ridge or band, which goes on among the face's items (`buildFace`). */
+interface Ridge {
+  readonly part: PartBuilder;
+  readonly volume: readonly Outline[];
+  readonly y0: number;
+  readonly y1: number;
+  /** How far its front stands out of the end face at the centre line. */
+  readonly front: number;
+}
+
+/**
+ * Builds one end face's items, each over what is there before it. Items off the centre
+ * line go on both sides. On a moulded bumper its ridge goes on after the items it passes
+ * in front of and before those standing in front of it (an intake), so each cuts what is
+ * hidden inside it.
+ */
+function buildFace(face: EndFace, items: readonly FaceItem[], b: PartBuilder, ridge?: Ridge): void {
+  const built = items.map((item) => {
+    const part = new PartBuilder();
+    const prints = buildFaceItem(face, item, part);
+    const ahead = ridge !== undefined && prints.some((f) => f.z1 > ridge.front && Math.min(...f.poly.map(([, y]) => y)) < ridge.y1 && Math.max(...f.poly.map(([, y]) => y)) > ridge.y0);
+    return { part, prints, ahead };
+  });
+  for (const { part, prints } of built.filter((i) => !i.ahead)) face.place(b, part, prints);
+  if (ridge) b.cut(ridge.volume).append(ridge.part.cut(face.placed));
+  for (const { part, prints } of built.filter((i) => i.ahead)) face.place(b, part, prints);
+}
+
+function buildFaceItem(face: EndFace, item: FaceItem, b: PartBuilder): Footprint[] {
   switch (item.kind) {
     case 'panel': {
       const [y, hy] = face.spanY(item.y);
       const { slot, color } = finishSlot(item.finish);
-      if ('centre' in item.x || 'inset' in item.x) {
-        const x = face.x(item.x);
-        b.color(color).boxFrom(slot, [-x, y - hy, face.out(-0.01)], [x, y + hy, face.out(item.proud)]);
-        return;
-      }
-      // A block on each side.
-      const [x, hx] = face.spanX(item.x);
       b.color(color);
-      for (const side of [1, -1]) b.boxFrom(slot, [side * x - hx, y - hy, face.out(-0.01)], [side * x + hx, y + hy, face.out(item.proud)]);
-      return;
+      const spans: [number, number][] = 'centre' in item.x || 'inset' in item.x ? [[-face.x(item.x), face.x(item.x)]] : (() => {
+        // A block on each side.
+        const [x, hx] = face.spanX(item.x);
+        return [[x - hx, x + hx], [-x - hx, -x + hx]];
+      })();
+      return spans.map(([x0, x1]) => {
+        b.boxFrom(slot, [x0, y - hy, face.out(-FACE_ROOT)], [x1, y + hy, face.out(item.proud)], face.noBack);
+        return { poly: rect(x0, y - hy, x1, y + hy), z0: -FACE_ROOT, z1: item.proud };
+      });
     }
     case 'round': {
       const x = face.x(item.x);
       const y = face.y(item.y);
-      for (const side of [1, -1]) {
-        // A chrome ring on the face and the lens standing on it. The ring reaches 1 mm into
-        // the face and 26 mm out of it, so neither cap lies in the face or in a grille's
-        // front 24 mm out (the 2103's lamps stand on its grille).
-        b.color(CHROME_TRIM).cylinderZ('chrome', [side * x, y, face.out(0.0125)], item.radius * 1.18, 0.0135, 12);
+      const r = item.radius * 1.18;
+      return [1, -1].map((side) => {
+        // A chrome ring rooted in the face, 26 mm out of it (clear of a grille's front 24 mm
+        // out: the 2103's lamps stand on its grille), and the lens standing in it.
+        b.color(CHROME_TRIM).cylinderZ('chrome', [side * x, y, face.out((0.026 - FACE_ROOT) / 2)], r, (0.026 + FACE_ROOT) / 2, 12, face.frontCap);
         b.cylinderZ(lampSlot(item.role, side), [side * x, y, face.out(0.024)], item.radius, 0.01, 12);
-      }
-      return;
+        const ring = Array.from({ length: 12 }, (_, i): P2 => [side * x + Math.cos((i / 12) * Math.PI * 2) * r, y + Math.sin((i / 12) * Math.PI * 2) * r]);
+        return { poly: ring, z0: -FACE_ROOT, z1: 0.034 };
+      });
     }
     case 'lens': {
       const [x, hx] = face.spanX(item.x);
       const [y, hy] = face.spanY(item.y);
+      const z0 = Math.min(item.proud - item.depth, -FACE_ROOT);
+      const z1 = item.proud + item.depth;
       // A lens centred on the centre line is one lens across it (the 2110's lid reflector).
-      for (const side of x === 0 ? [1] : [1, -1]) {
+      return (x === 0 ? [1] : [1, -1]).map((side) => {
         const slot = lampSlot(item.role, side);
         if (!item.slant) {
-          lens(b, slot, [side * x, y, face.out(item.proud)], [hx, hy, item.depth]);
-          continue;
+          const bevel = Math.min(hx, hy) * 0.35;
+          b.bevelBox(slot, [side * x, y, face.out((z0 + z1) / 2)], [hx, hy, (z1 - z0) / 2], bevel, face.frontCap);
+          return { poly: octagon(side * x, y, hx, hy, bevel), z0, z1 };
         }
         // A slab on the face whose top edge's ends stand `slant` inboard of the bottom's:
         // outline in (x, y) counter-clockwise from the inner bottom corner, extruded out.
@@ -259,84 +379,187 @@ function buildFaceItem(face: EndFace, item: FaceItem, b: PartBuilder): void {
         const outline = ([[x - hx, y - hy], [x + hx, y - hy], [x + hx - slant.outer, y + hy], [x - hx - slant.inner, y + hy]] as P2[]).map(([px, py]): P2 => [side * px, py]);
         // Counter-clockwise seen from outside the face, whichever side and end.
         if (side * face.facing < 0) outline.reverse();
-        const z0 = face.out(item.proud - item.depth);
-        const z1 = face.out(item.proud + item.depth);
-        b.extrude(slot, outline, Math.min(z0, z1), Math.max(z0, z1));
-      }
-      return;
+        b.extrude(slot, outline, Math.min(face.out(z0), face.out(z1)), Math.max(face.out(z0), face.out(z1)), 0, 0, face.frontCap);
+        return { poly: outline, z0, z1 };
+      });
     }
     case 'grille': {
       const gw = face.x(item.x);
       const [y, hy] = face.spanY(item.y);
-      // A grille standing out of the face is a box from the face to its front.
-      const so = item.standOut ?? 0;
-      if (item.frame) {
-        // Sunk 4 mm into the face, as a `frame` item: its back is not in the face's plane.
-        const m = item.frame.margin;
-        const { slot, color } = finishSlot(item.frame.finish);
-        b.color(color).boxFrom(slot, [-gw - m, y - hy - m, face.out(-0.004)], [gw + m, y + hy + m, face.out(so + 0.02)]);
-      }
+      // A grille standing out of a moulded bumper (an intake) stands with its front 10 mm
+      // ahead of the bumper's (4 mm ahead of its 6 mm ridge), however `standOut` reads, so
+      // neither the bumper's face nor its ridge lies within millimetres of it.
+      const m = face.moulded;
+      const inBumper = item.standOut !== undefined && m !== undefined && y + hy > m.y0 && y - hy < m.y1;
+      const so = inBumper ? Math.max(item.standOut!, m.front + 0.01 - 0.024) : item.standOut ?? 0;
       // The dark back reaches 2 mm past the slot every way, so bars that span the slot end
-      // inside it rather than on its faces.
-      if (item.back) b.color(GRILLE_DARK).boxFrom('trim', [-gw - 0.002, y - hy - 0.002, face.out(so + 0.006)], [gw + 0.002, y + hy + 0.002, face.out(so + 0.024)]);
+      // on its walls. It roots in the face, through a bumper the grille stands out of.
+      const [px, py] = [gw + 0.002, hy + 0.002];
+      const z0 = -FACE_ROOT;
+      const prints: Footprint[] = [];
+      if (item.frame) {
+        // A ring round the back, so no frame lies under it.
+        const [fx, fy] = [gw + item.frame.margin, hy + item.frame.margin];
+        const { slot, color } = finishSlot(item.frame.finish);
+        const [a, c] = [face.out(-FACE_ROOT), face.out(so + 0.02)];
+        b.color(color);
+        // No faces where the ring's pieces meet each other or the back: they would lie in one plane.
+        const inner = item.back ? 0b111111 : 0;
+        b.boxFrom(slot, [-fx, y + py, a], [fx, y + fy, c], face.noBack & ~(8 & inner));
+        b.boxFrom(slot, [-fx, y - fy, a], [fx, y - py, c], face.noBack & ~(4 & inner));
+        b.boxFrom(slot, [-fx, y - py, a], [-px, y + py, c], face.noBack & ~12 & ~(1 & inner));
+        b.boxFrom(slot, [px, y - py, a], [fx, y + py, c], face.noBack & ~12 & ~(2 & inner));
+        if (item.back) prints.push({ poly: rect(-fx, y - fy, fx, y + fy), z0, z1: so + 0.024 });
+        else for (const [x0, y0, x1, y1] of [[-fx, y + py, fx, y + fy], [-fx, y - fy, fx, y - py], [-fx, y - py, -px, y + py], [px, y - py, fx, y + py]] as const) prints.push({ poly: rect(x0, y0, x1, y1), z0, z1: so + 0.02 });
+      } else if (item.back) {
+        prints.push({ poly: rect(-px, y - py, px, y + py), z0, z1: so + 0.024 });
+      }
+      // The back, then the bars on it: the back's face under each bar is cut away.
+      const back = new PartBuilder();
+      if (item.back) back.color(GRILLE_DARK).boxFrom('trim', [-px, y - py, face.out(z0)], [px, y + py, face.out(so + 0.024)], face.noBack);
       const bars = item.bars;
       const { slot, color } = finishSlot(bars.finish);
-      b.color(color);
-      const z0 = face.out(so + bars.proud - bars.depth);
-      const z1 = face.out(so + bars.proud);
+      const [b0, b1] = [so + bars.proud - bars.depth, so + bars.proud];
       const w = bars.width / 2;
-      for (let i = 0; i < bars.count; i++) {
+      // Bars whose front stays behind the back's are hidden in it: not built.
+      const shown = !item.back || b1 > so + 0.024;
+      for (let i = 0; shown && i < bars.count; i++) {
         const t = bars.count > 1 ? i / (bars.count - 1) : 0.5;
-        if (bars.dir === 'vertical') {
-          const x = -gw + bars.margin + t * 2 * (gw - bars.margin);
-          b.boxFrom(slot, [x - w, y - hy, z0], [x + w, y + hy, z1]);
-        } else {
-          const by = y - hy + bars.margin + t * 2 * (hy - bars.margin);
-          b.boxFrom(slot, [-gw, by - w, z0], [gw, by + w, z1]);
-        }
+        const bar = new PartBuilder().color(color);
+        // Bars span the slot to the back's walls (2 mm past the slot), with or without a
+        // back, and a bar edge on the slot's edge goes out to them: a bar meets the walls,
+        // which are cut inside it, instead of standing 2 mm in from them (the Samaras' bars
+        // over their slot meet its back's walls too).
+        const [ex, ey] = [px, py];
+        const [x0, y0, x1, y1] = (bars.dir === 'vertical'
+          ? [-gw + bars.margin + t * 2 * (gw - bars.margin) - w, y - ey, -gw + bars.margin + t * 2 * (gw - bars.margin) + w, y + ey]
+          : [-ex, y - hy + bars.margin + t * 2 * (hy - bars.margin) - w, ex, y - hy + bars.margin + t * 2 * (hy - bars.margin) + w]
+        ).map((v, k) => (k % 2 === 0 ? (Math.abs(Math.abs(v) - gw) < 0.004 ? Math.sign(v) * ex : v) : Math.abs(Math.abs(v - y) - hy) < 0.004 ? y + Math.sign(v - y) * ey : v));
+        bar.boxFrom(slot, [x0!, y0!, face.out(b0)], [x1!, y1!, face.out(b1)]);
+        const print = { poly: rect(x0!, y0!, x1!, y1!), z0: b0, z1: b1 };
+        back.cut([face.volume(print)]).append(bar);
+        prints.push(print);
       }
-      return;
+      b.append(back);
+      return prints;
     }
     case 'cluster': {
-      // One unit straight on the body, no backing: its cells tile the span with a 3 mm
-      // seam between them, each reaching 1 mm into the face, so none lies in its plane.
+      // One unit straight on the body, rooted in the face: its cells tile the span with no
+      // seam, each drawing its front and only the walls on the unit's edge.
       const [x, hx] = face.spanX(item.x);
       const [y, hy] = face.spanY(item.y);
       const outer = x + hx;
       const w = (2 * hx) / item.columns.length;
+      const [z0, z1] = [face.out(-FACE_ROOT), face.out(0.019)];
+      const front = face.facing > 0 ? 16 : 32;
+      const last = item.columns.length - 1;
       for (const side of [1, -1]) {
         item.columns.forEach((roles, k) => {
           const cx = outer - (k + 0.5) * w;
           const rowH = (2 * hy) / roles.length;
           roles.forEach((role, r) => {
             const cy = y + hy - (r + 0.5) * rowH;
-            b.bevelBox(lampSlot(role, side), [side * cx, cy, face.out(0.009)], [w / 2 - 0.0015, rowH / 2 - 0.0015, 0.01], 0.004);
+            const walls = (k === 0 ? (side > 0 ? 1 : 2) : 0) | (k === last ? (side > 0 ? 2 : 1) : 0) | (r === 0 ? 4 : 0) | (r === roles.length - 1 ? 8 : 0);
+            b.boxFrom(lampSlot(role, side), [side * cx - w / 2, cy - rowH / 2, z0], [side * cx + w / 2, cy + rowH / 2, z1], front | walls);
           });
         });
       }
-      return;
+      return [1, -1].map((side) => ({ poly: rect(side * x - hx, y - hy, side * x + hx, y + hy), z0: -FACE_ROOT, z1: 0.019 }));
     }
     case 'frame': {
       const [x, hx] = face.spanX(item.x);
       const [y, hy] = face.spanY(item.y);
       const { slot, color } = finishSlot(item.finish);
       const t = item.width;
-      const z0 = face.out(-0.004);
-      const z1 = face.out(item.proud);
       b.color(color);
+      const prints: Footprint[] = [];
       for (const side of Math.abs(x) < 1e-6 ? [1] : [1, -1]) {
         const cx = side * x;
-        b.boxFrom(slot, [cx - hx, y + hy - t, z0], [cx + hx, y + hy, z1]);
-        b.boxFrom(slot, [cx - hx, y - hy, z0], [cx + hx, y - hy + t, z1]);
-        b.boxFrom(slot, [cx - hx, y - hy + t, z0], [cx - hx + t, y + hy - t, z1]);
-        b.boxFrom(slot, [cx + hx - t, y - hy + t, z0], [cx + hx, y + hy - t, z1]);
+        for (const [x0, y0, x1, y1] of [
+          [cx - hx, y + hy - t, cx + hx, y + hy],
+          [cx - hx, y - hy, cx + hx, y - hy + t],
+          [cx - hx, y - hy + t, cx - hx + t, y + hy - t],
+          [cx + hx - t, y - hy + t, cx + hx, y + hy - t],
+        ] as const) {
+          b.boxFrom(slot, [x0, y0, face.out(-FACE_ROOT)], [x1, y1, face.out(item.proud)], face.noBack);
+          prints.push({ poly: rect(x0, y0, x1, y1), z0: -FACE_ROOT, z1: item.proud });
+        }
       }
-      return;
+      return prints;
     }
   }
 }
 
-function buildBumpers(ctx: KitContext, b: PartBuilder): void {
+/** A path pulled in by `d` at both ends, so what rides on it stops short of the part's end faces. */
+function shortened(path: readonly SweepPoint[], d: number): SweepPoint[] {
+  const pull = (p: SweepPoint, q: SweepPoint): SweepPoint => {
+    const l = Math.hypot(q.x - p.x, q.z - p.z);
+    return { ...p, x: p.x + ((q.x - p.x) * d) / l, z: p.z + ((q.z - p.z) * d) / l };
+  };
+  return [pull(path[0]!, path[1]!), ...path.slice(1, -1), pull(path[path.length - 1]!, path[path.length - 2]!)];
+}
+
+/**
+ * Holes in the shell under a moulded bumper: on the end face along its straight run, and
+ * along each flank where its sides follow them (`flankSteps` segments at each end of the
+ * path), each between the heights where the shell's skin lies inside the bumper's section
+ * with 3 mm to spare. Its corners keep the skin: the bumper rounds them in plan, the shell
+ * does not.
+ */
+function bumperHoles(ctx: KitContext, path: readonly SweepPoint[], section: readonly (readonly [number, number])[], end: 1 | -1, flankSteps: number): void {
+  const { frame } = ctx;
+  const margin = 0.003;
+  /** The heights where a skin point, `out` metres outward of the path point, is inside the section. */
+  const covered = (p: SweepPoint, out: (y: number) => number): [number, number] | undefined => {
+    let lo = Infinity;
+    let hi = -Infinity;
+    const ys = section.map(([, y]) => y);
+    for (let y = Math.min(...ys); y <= Math.max(...ys); y += 0.002) {
+      const o = out(y);
+      const ok = [o - margin, o + margin].every((oo) => [y - margin, y + margin].every((yy) => insideSection(section, oo / p.depth, yy)));
+      if (ok) {
+        lo = Math.min(lo, y);
+        hi = Math.max(hi, y);
+      }
+    }
+    return lo < hi ? [lo, hi] : undefined;
+  };
+  const zFace = frame.z(end > 0 ? ends(frame).front : ends(frame).tail);
+  const along = (a: SweepPoint, c: SweepPoint, range: (p: SweepPoint) => [number, number] | undefined, at: (p: SweepPoint, y: number) => Vec3): void => {
+    const ra = range(a);
+    const rc = range(c);
+    if (!ra || !rc) return;
+    const [y0, y1] = [Math.max(ra[0], rc[0]), Math.min(ra[1], rc[1])];
+    if (y1 - y0 < 0.01) return;
+    ctx.holes.push({ owner: 'body', outline: { poly: [at(a, y0), at(c, y0), at(c, y1), at(a, y1)] } });
+  };
+  // The straight run across the face: the points facing straight out.
+  const face = path.filter((p) => Math.abs(p.nz) > 0.999);
+  const onFace = (p: SweepPoint): [number, number] | undefined => covered(p, () => end * (zFace - p.z));
+  for (let i = 0; i + 1 < face.length; i++) along(face[i]!, face[i + 1]!, onFace, (p, y) => [p.x, y, zFace]);
+  if (flankSteps === 0) return;
+  // Along the flanks: the skin at the path point's s, out from the path along x.
+  const skin = (p: SweepPoint, y: number): number => frame.sideX(frame.zNose - p.z, y);
+  const onFlank = (p: SweepPoint): [number, number] | undefined => covered(p, (y) => skin(p, y) - Math.abs(p.x));
+  for (const run of [path.slice(0, flankSteps + 1), path.slice(-flankSteps - 1)]) {
+    for (let i = 0; i + 1 < run.length; i++) along(run[i]!, run[i + 1]!, onFlank, (p, y) => [Math.sign(p.x) * skin(p, y), y, p.z]);
+  }
+}
+
+/** Whether (o, y) lies inside a closed section polygon (even-odd). */
+function insideSection(section: readonly (readonly [number, number])[], o: number, y: number): boolean {
+  let inside = false;
+  for (let i = 0, j = section.length - 1; i < section.length; j = i++) {
+    const [oi, yi] = section[i]!;
+    const [oj, yj] = section[j]!;
+    if (yi > y !== yj > y && o < ((oj - oi) * (y - yi)) / (yj - yi) + oi) inside = !inside;
+  }
+  return inside;
+}
+
+/** Builds both bumpers into `b`; a moulded bumper's ridge or band is returned by end (+1 the nose) to go on among the face's items. */
+function buildBumpers(ctx: KitContext, b: PartBuilder): Map<1 | -1, Ridge> {
+  const ridges = new Map<1 | -1, Ridge>();
   const { frame } = ctx;
   const spec = frame.spec;
   const { front, tail } = ends(frame);
@@ -349,39 +572,53 @@ function buildBumpers(ctx: KitContext, b: PartBuilder): void {
     const { y0, y1 } = bumperBand(frame, end);
     const bumper = (end > 0 ? spec.look.front : spec.look.rear).bumper;
     if (bumper.kind === 'blade') {
-      // A bar on brackets, its ends turned back round the corners.
+      // A bar on brackets, its ends turned back round the corners. Its back faces the body
+      // a few millimetres off: no face there.
       const blade = bumper.depth;
       // Inside the published width even where the ends wrap round the corners.
       const half = Math.min(sec.r2[0] + 0.02, widest - blade * 0.35);
       const y = (y0 + y1) / 2;
       const path = bumperPath(half, zFace, end, blade, reach - blade, 0.16);
       const main = finishSlot(bumper.finish);
+      const bar = new PartBuilder();
       if (bumper.lower) {
         // Two-tone: the lower share of the bar in its own finish, split on a flat line.
         const ym = y0 + bumper.lower.share * (y1 - y0);
         const low = finishSlot(bumper.lower.finish);
-        b.color(low.color);
-        sweep(b, low.slot, path, [[0, y0], [0.75, y0], [1, y0 + 0.025], [1, ym], [0, ym]]);
-        b.color(main.color);
-        sweep(b, main.slot, path, [[0, ym], [1, ym], [1, y1 - 0.025], [0.75, y1], [0, y1]]);
+        bar.color(low.color);
+        sweep(bar, low.slot, path, [[0, y0], [0.75, y0], [1, y0 + 0.025], [1, ym], [0, ym]], [3, 4]);
+        bar.color(main.color);
+        sweep(bar, main.slot, path, [[0, ym], [1, ym], [1, y1 - 0.025], [0.75, y1], [0, y1]], [0, 4]);
       } else {
-        b.color(main.color);
-        sweep(b, main.slot, path, [[0, y0], [0.75, y0], [1, y0 + 0.025], [1, y1 - 0.025], [0.75, y1], [0, y1]]);
+        bar.color(main.color);
+        sweep(bar, main.slot, path, [[0, y0], [0.75, y0], [1, y0 + 0.025], [1, y1 - 0.025], [0.75, y1], [0, y1]], [5]);
       }
       if (bumper.strip) {
+        // A rubber strip 4 mm proud of the blade's face, rooted 7 mm in it; the face under it is cut.
         const strip = finishSlot(bumper.strip);
-        b.color(strip.color);
-        sweep(b, strip.slot, bumperPath(half, zFace, end, blade + 0.004, reach - blade, 0.15), [[0.9, y - 0.012], [1, y - 0.012], [1, y + 0.012], [0.9, y + 0.012]]);
+        const along = bumperPath(half, zFace, end, blade, reach - blade, 0.15);
+        const rubber = new PartBuilder().color(strip.color);
+        sweep(rubber, strip.slot, along, [[1, y - 0.012, -0.007], [1, y - 0.012, 0.004], [1, y + 0.012, 0.004], [1, y + 0.012, -0.007]], [3]);
+        bar.cut(sweptOutlines(along, [1, y - 0.012, 0.004], [1, y + 0.012, 0.004], 0.0075)).append(rubber);
       }
       if (bumper.ends) {
-        // Caps over the wrapped ends: the path's first and last three points, a size up.
+        // Caps over the wrapped ends: the path's first and last three points, a size up. What
+        // of the bar lies inside a cap is cut away.
         const caps = bumperPath(half + 0.004, zFace, end, blade + 0.006, reach - blade, 0.17);
         const cap = finishSlot(bumper.ends);
-        b.color(cap.color);
-        const section: [number, number][] = [[0, y0 - 0.006], [1, y0 - 0.006], [1, y1 + 0.006], [0, y1 + 0.006]];
-        sweep(b, cap.slot, caps.slice(0, 3), section);
-        sweep(b, cap.slot, caps.slice(-3), section);
+        const section: SectionPoint[] = [[0, y0 - 0.006], [1, y0 - 0.006], [1, y1 + 0.006], [0, y1 + 0.006]];
+        const covers = new PartBuilder().color(cap.color);
+        for (const ends of [caps.slice(0, 3), caps.slice(-3)]) {
+          sweep(covers, cap.slot, ends, section);
+          bar.cut([
+            ...sweptOutlines(ends, section[1]!, section[2]!, 0.012),
+            ...sweptOutlines(ends, section[0]!, section[1]!, 0.012),
+            ...sweptOutlines(ends, section[2]!, section[3]!, 0.012),
+          ]);
+        }
+        bar.append(covers);
       }
+      b.append(bar);
       for (const side of [1, -1]) {
         const o = bumper.overriders;
         if (o) {
@@ -400,35 +637,36 @@ function buildBumpers(ctx: KitContext, b: PartBuilder): void {
       // As wide as the face at its widest, which on a leaning nose is low down.
       const half = Math.min(Math.max(sec.r1[0], sec.r2[0]) + 0.03, widest - depth * 0.35);
       const wrapTo = bumper.wrapTo;
-      const pathOf = (grow: number, d: number, wrap: number): SweepPoint[] =>
-        wrapTo === undefined
-          ? bumperPath(half + grow, zFace - end * 0.01, end, d, 0, wrap, bumper.corner)
-          : flankBumperPath(frame, sEnd, end, y1, d, grow, wrapTo, bumper.corner ?? 0.09);
+      const corner = bumper.corner ?? 0.09;
+      const path = wrapTo === undefined
+        ? bumperPath(half, zFace - end * 0.01, end, depth, 0, 0.2, bumper.corner)
+        : flankBumperPath(frame, sEnd, end, y1, depth, 0, wrapTo, corner);
       const shell = bumper.finish ? finishSlot(bumper.finish) : { slot: 'trim' as const, color: 0x232427 };
-      b.color(shell.color);
       // A flush bumper's top starts inside the body's skin and rounds out to its face in
       // its top 60 mm, so it grows out of the end face and the flanks with no ledge.
       const top: [number, number][] = bumper.flush
         ? [[1, y1 - 0.06], [0.5, y1 - 0.015], [0, y1]]
         : [[1, y1 - 0.05], [0.9, y1 - 0.005], [0.55, y1], [0, y1]];
-      sweep(b, shell.slot, pathOf(0, depth, 0.2), [[0, y0 + 0.02], [0.7, y0], [0.92, y0 + 0.03], [1, y0 + 0.08], ...top]);
-      const path = pathOf(0.003, depth + 0.006, 0.19);
-      if (bumper.moulding) {
-        // A moulding band round the bumper in its own finish, in place of the groove.
-        const band = finishSlot(bumper.moulding.finish);
-        const h = bumper.moulding.height / 2;
-        const y = bumper.moulding.y;
-        b.color(band.color);
-        sweep(b, band.slot, path, [[0.97, y - h], [1, y - h], [1, y + h], [0.97, y + h]]);
-        continue;
-      }
-      const g = y0 + 0.11;
-      // A painted bumper's groove is a ridge in its own colour.
-      const groove = bumper.finish ? shell : { slot: 'trim' as const, color: 0x34363a };
-      b.color(groove.color);
-      sweep(b, groove.slot, path, [[0.97, g - 0.012], [1, g - 0.012], [1, g + 0.012], [0.97, g + 0.012]]);
+      const section: [number, number][] = [[0, y0 + 0.02], [0.7, y0], [0.92, y0 + 0.03], [1, y0 + 0.08], ...top];
+      const moulded = new PartBuilder().color(shell.color);
+      // No back: it lies against the end face and the flanks.
+      sweep(moulded, shell.slot, path, section, [section.length - 1]);
+      // The moulding band, or else the groove's ridge, 6 mm proud of the face and rooted 7 mm
+      // in it, a centimetre short of the bumper's ends. It goes on among the face's items
+      // (`buildFace`), cutting the bumper's face and whatever else lies inside it.
+      const band = bumper.moulding
+        ? { ...finishSlot(bumper.moulding.finish), y: bumper.moulding.y, h: bumper.moulding.height / 2 }
+        : { ...(bumper.finish ? shell : { slot: 'trim' as const, color: 0x34363a }), y: y0 + 0.11, h: 0.012 };
+      const along = shortened(path, 0.01);
+      const ridge = new PartBuilder().color(band.color);
+      sweep(ridge, band.slot, along, [[1, band.y - band.h, -0.007], [1, band.y - band.h, 0.006], [1, band.y + band.h, 0.006], [1, band.y + band.h, -0.007]], [3]);
+      b.append(moulded);
+      const volume = sweptOutlines(along, [1, band.y - band.h, -0.0005], [1, band.y + band.h, -0.0005], 0.0065).map((o) => ({ ...o, solid: true }));
+      ridges.set(end, { part: ridge, volume, y0: band.y - band.h, y1: band.y + band.h, front: reach + 0.006 });
+      bumperHoles(ctx, path, section, end, wrapTo === undefined ? 0 : BUMPER_FLANK_STEPS - 1);
     }
   }
+  return ridges;
 }
 
 /** The sill strip between the arches, in `KitLook.sill`'s finish. */
@@ -557,16 +795,25 @@ function buildFeatureLine(ctx: KitContext, body: PartBuilder): void {
   });
 }
 
-/** An amber repeater on each front wing (`KitLook.repeater`), in its side's blinker slot. */
+/**
+ * An amber repeater on each front wing (`KitLook.repeater`), in its side's blinker slot,
+ * rooted `FACE_ROOT` in the wing and standing 10 mm out of it: what is inside it (a waist
+ * moulding it sits on) and the skin under it are cut away.
+ */
 function buildRepeaters(ctx: KitContext, body: PartBuilder): void {
   const { frame } = ctx;
   const r = frame.spec.look.repeater;
   if (!r) return;
   const s = (r.s0 + r.s1) / 2;
   const y = (r.y0 + r.y1) / 2;
+  const [hy, hz] = [(r.y1 - r.y0) / 2, (r.s1 - r.s0) / 2];
   for (const side of [1, -1]) {
-    const x = side * (frame.sideX(s, y) + 0.004);
-    lens(body, lampSlot('blinker', side), [x, y, frame.z(s)], [0.006, (r.y1 - r.y0) / 2, (r.s1 - r.s0) / 2]);
+    const skin = frame.sideX(s, y);
+    const x = side * (skin + (0.01 - FACE_ROOT) / 2);
+    const at = (px: number): Vec3[] => [[px, y - hy, frame.z(s) - hz], [px, y - hy, frame.z(s) + hz], [px, y + hy, frame.z(s) + hz], [px, y + hy, frame.z(s) - hz]];
+    body.cut([{ poly: at(x), reach: (0.01 + FACE_ROOT) / 2, solid: true }]);
+    lens(body, lampSlot('blinker', side), [x, y, frame.z(s)], [(0.01 + FACE_ROOT) / 2, hy, hz]);
+    ctx.holes.push({ owner: 'body', outline: { poly: at(side * skin) } });
   }
 }
 
@@ -578,34 +825,39 @@ const CORNER_LAMP_STEP = 0.02;
 /**
  * Lamp units wrapping round the corners of an end face (`KitLook.cornerLamps`): a thin
  * lens lying on the face from its inner end to the corner and on along the flank, every
- * stretch between two points in its role's slot, with a rim down to the body.
+ * stretch between two points in its role's slot, with a rim rooted `FACE_ROOT` into the
+ * body; the skin under each stretch is cut away.
  */
 function buildCornerLamps(ctx: KitContext, body: PartBuilder): void {
   const { frame } = ctx;
   const lamps = frame.spec.look.cornerLamps;
   if (!lamps) return;
   const stations = frame.spec.stations;
-  const diag = CORNER_LAMP_OUT * Math.SQRT1_2;
+  const diag = Math.SQRT1_2;
   for (const lamp of lamps) {
     // The face it starts on, and which way that face looks along the car.
     const facing = lamp.end === 'rear' ? -1 : 1;
     const sFace = (facing > 0 ? stations[0]! : stations[stations.length - 1]!).s;
     const zFace = frame.z(sFace);
     for (const side of [1, -1]) {
-      // A column across the lamp at a point, bottom, middle and top: [on the body, on the lens].
-      const column = (p: CornerLampPoint): [Vec3, Vec3][] =>
-        [p.y[0], (p.y[0] + p.y[1]) / 2, p.y[1]].map((y): [Vec3, Vec3] => {
+      // A column across the lamp at a point, bottom, middle and top: [on the body, on the
+      // lens, rooted in the body], `d` metres out along the body's normal there.
+      const column = (p: CornerLampPoint): [Vec3, Vec3, Vec3][] =>
+        [p.y[0], (p.y[0] + p.y[1]) / 2, p.y[1]].map((y): [Vec3, Vec3, Vec3] => {
+          let at: (d: number) => Vec3;
           if (p.x !== undefined) {
             const [xb, xt] = typeof p.x === 'number' ? [p.x, p.x] : p.x;
             const x = side * lerp(xb, xt, (y - p.y[0]) / (p.y[1] - p.y[0]));
-            return [[x, y, zFace], [x, y, zFace + facing * CORNER_LAMP_OUT]];
-          }
-          if (p.s !== undefined) {
+            at = (d) => [x, y, zFace + facing * d];
+          } else if (p.s !== undefined) {
             const x = skinX(frame, p.s, y);
-            return [[side * x, y, frame.z(p.s)], [side * (x + CORNER_LAMP_OUT), y, frame.z(p.s)]];
+            const z = frame.z(p.s);
+            at = (d) => [side * (x + d), y, z];
+          } else {
+            const x = skinX(frame, sFace, y);
+            at = (d) => [side * (x + d * diag), y, zFace + facing * d * diag];
           }
-          const x = skinX(frame, sFace, y);
-          return [[side * x, y, zFace], [side * (x + diag), y, zFace + facing * diag]];
+          return [at(0), at(CORNER_LAMP_OUT), at(-FACE_ROOT)];
         });
       const points = lamp.points;
       for (let i = 0; i + 1 < points.length; i++) {
@@ -628,12 +880,13 @@ function buildCornerLamps(ctx: KitContext, body: PartBuilder): void {
           const p = columns[k]!;
           const q = columns[k + 1]!;
           body.bridge(slot, p.map(([, o]) => o), q.map(([, o]) => o));
-          // Its rim down to the body along the bottom and top edges.
-          for (const r of [0, 2]) body.quad(slot, p[r]![0], q[r]![0], q[r]![1], p[r]![1]);
+          // Its rim from inside the body along the bottom and top edges.
+          for (const r of [0, 2]) body.quad(slot, p[r]![2], q[r]![2], q[r]![1], p[r]![1]);
+          for (const r of [0, 1]) ctx.holes.push({ owner: 'body', outline: { poly: [p[r]![0], q[r]![0], q[r + 1]![0], p[r + 1]![0]] } });
         }
         // And across its two ends.
-        if (i === 0) body.bridge(slot, columns[0]!.map(([s]) => s), columns[0]!.map(([, o]) => o));
-        if (i + 2 === points.length) body.bridge(slot, columns[steps]!.map(([s]) => s), columns[steps]!.map(([, o]) => o));
+        if (i === 0) body.bridge(slot, columns[0]!.map(([, , s]) => s), columns[0]!.map(([, o]) => o));
+        if (i + 2 === points.length) body.bridge(slot, columns[steps]!.map(([, , s]) => s), columns[steps]!.map(([, o]) => o));
       }
     }
   }
@@ -673,7 +926,12 @@ function buildDoorHardware(ctx: KitContext): void {
     m.boxFrom(finish.slot, [side > 0 ? mx - 0.01 : -mx - 0.07, my - 0.04, frame.z(ms) - 0.03], [side > 0 ? mx + 0.07 : -mx + 0.01, my - 0.02, frame.z(ms) + 0.03]);
     m.push(mirrorFrame([side * (mx + 0.1), my + 0.02, frame.z(ms)], eye, [0, 0, -1]));
     m.bevelBox(finish.slot, [0, 0, 0], [0.06, 0.045, 0.025], 0.015);
-    m.color(0x7a8a96).box('chrome', [0, 0, -0.026], [0.05, 0.035, 0.002]);
+    // The glass 3 mm proud of the head's face, which is cut under it; no back, it lies in the head.
+    m.cut([{ poly: ([[-0.05, -0.035], [0.05, -0.035], [0.05, 0.035], [-0.05, 0.035]] as const).map(([gx, gy]): Vec3 => {
+      const p = new THREE.Vector3(gx, gy, -0.025).applyMatrix4(m.matrix);
+      return [p.x, p.y, p.z];
+    }), reach: 0.0005 }]);
+    m.color(0x7a8a96).box('chrome', [0, 0, -0.026], [0.05, 0.035, 0.002], 0b101111);
     const holder = new THREE.Group();
     holder.name = `${owner}_mirror`;
     // The live face 1.5 mm proud of the glass.
@@ -705,8 +963,8 @@ const WIPER_PARKS = [(20 * Math.PI) / 180, (45 * Math.PI) / 180];
 const WIPER_EDGE = 0.015;
 /** And this far above its bottom edge: half the blade's width and a little. */
 const WIPER_FOOT = 0.006;
-/** The blade's rubber edge clears the glass by this much where the glass stands highest under it. */
-const WIPER_GAP = 0.003;
+/** The blade's rubber edge clears the glass by this much where the glass stands highest under it: 6 mm, so the two never fight in depth from the road. */
+const WIPER_GAP = 0.006;
 /** Blade stations along its length: it is bent to the screen between them. */
 const WIPER_STATIONS = 16;
 const WIPER_STEP = Math.PI / 90;
@@ -915,8 +1173,9 @@ function buildFiller(ctx: KitContext): void {
   const skin = frame.sideX(s, y);
   const x = side * (skin - 0.035);
   const b = new PartBuilder().color(0x1a1b1c);
-  const hz = (flap.s1 - flap.s0) / 2 - 0.006;
-  const hy = (flap.y1 - flap.y0) / 2 - 0.006;
+  // 12 mm inside the opening each way, clear of the flap's edge returns and the jambs.
+  const hz = (flap.s1 - flap.s0) / 2 - 0.012;
+  const hy = (flap.y1 - flap.y0) / 2 - 0.012;
   b.boxFrom('trim', [x - 0.015 - side * 0.015, y - hy, frame.z(s) - hz], [x - 0.015 + side * 0.015, y + hy, frame.z(s) + hz], 0b111111 & ~(side > 0 ? 1 : 2));
   b.color(0x2e3032).cylinderX('trim', [x + side * 0.002, y, frame.z(s)], 0.026, 0.01, 8);
   addBuilt(ctx.root, b, [0, 0, 0], 'filler');
@@ -939,12 +1198,12 @@ function buildLidFace(ctx: KitContext): void {
   for (const facing of [-1, 1] as const) {
     const items = (facing > 0 ? ctx.frame.spec.look.front : ctx.frame.spec.look.rear).lid;
     if (!items) continue;
-    const lid = facing > 0 ? ctx.nodes.get('bonnet') : ctx.nodes.get('boot') ?? ctx.nodes.get('tailgate');
-    if (!lid) throw new Error(`Kit car "${ctx.frame.spec.id}" has ${facing > 0 ? 'nose items but no bonnet' : 'lid items but no boot lid or tailgate'}`);
+    const lid = facing > 0 ? 'bonnet' : ctx.nodes.has('boot') ? 'boot' : 'tailgate';
+    const node = ctx.nodes.get(lid);
+    if (!node) throw new Error(`Kit car "${ctx.frame.spec.id}" has ${facing > 0 ? 'nose items but no bonnet' : 'lid items but no boot lid or tailgate'}`);
     const b = new PartBuilder();
-    const face = new EndFace(ctx.frame, facing);
-    for (const item of items) buildFaceItem(face, item, b);
-    addBuilt(lid.node, b, lid.pivot, facing > 0 ? 'nose_face' : 'lid_face');
+    buildFace(new EndFace(ctx.frame, facing, lid, ctx.holes), items, b);
+    addBuilt(node.node, b, node.pivot, facing > 0 ? 'nose_face' : 'lid_face');
   }
 }
 
@@ -1012,21 +1271,27 @@ function buildSpoiler(ctx: KitContext): void {
   const ped = sp.pedestal;
   const corners: [number, number][] = [[ped.s0, -ped.half], [ped.s0, ped.half], [ped.s1, ped.half], [ped.s1, -ped.half]];
   b.bridge('paint', corners.map(([s, x]) => onLid(s, x)), corners.map(([s, x]) => P(x, top(s) - t + 0.004, s)), true);
-  // The lamp in a black surround on the pedestal's back.
+  // The lamp in a black surround on the pedestal's back: the surround reaches 10 mm into the
+  // pedestal, which is cut inside it, and the lens 2 mm into the surround, cut under it.
   const lamp = sp.lamp;
   const ly = (lamp.y0 + lamp.y1) / 2;
   const lh = (lamp.y1 - lamp.y0) / 2;
   const zb = frame.z(ped.s1);
-  b.color(BLACK).boxFrom('trim', [-lamp.half - 0.008, ly - lh - 0.006, zb - 0.004], [lamp.half + 0.008, ly + lh + 0.006, zb + 0.01]);
-  lens(b, 'lamp_brake', [0, ly, zb - 0.006], [lamp.half, lh, 0.004]);
+  const across = (poly: readonly P2[], z: number, reach: number): Outline => ({ poly: poly.map(([x, y]): Vec3 => [x, y, z]), reach, solid: true });
+  const surround = new PartBuilder().color(BLACK).boxFrom('trim', [-lamp.half - 0.008, ly - lh - 0.006, zb - 0.004], [lamp.half + 0.008, ly + lh + 0.006, zb + 0.01], 0b101111);
+  const bevel = Math.min(lamp.half, lh) * 0.35;
+  surround.cut([across(octagon(0, ly, lamp.half, lh, bevel), zb - 0.004, 0.006)]);
+  surround.bevelBox('lamp_brake', [0, ly, zb - 0.004], [lamp.half, lh, 0.006], bevel, 'z0');
+  b.cut([across(rect(-lamp.half - 0.008, ly - lh - 0.006, lamp.half + 0.008, ly + lh + 0.006), zb + 0.003, 0.007)]).append(surround);
   addBuilt(lid.node, b, lid.pivot, 'spoiler');
 }
 
 export function buildExterior(ctx: KitContext): void {
   const body = new PartBuilder();
-  buildFace(ctx.frame, ctx.frame.spec.look.front, 1, body);
-  buildFace(ctx.frame, ctx.frame.spec.look.rear, -1, body);
-  buildBumpers(ctx, body);
+  // Bumpers first: a face item standing on one (a fog-lamp blank, an intake) cuts it.
+  const ridges = buildBumpers(ctx, body);
+  buildFace(new EndFace(ctx.frame, 1, 'body', ctx.holes), ctx.frame.spec.look.front.items, body, ridges.get(1));
+  buildFace(new EndFace(ctx.frame, -1, 'body', ctx.holes), ctx.frame.spec.look.rear.items, body, ridges.get(-1));
   buildSill(ctx, body);
   buildWaist(ctx, body);
   buildRepeaters(ctx, body);

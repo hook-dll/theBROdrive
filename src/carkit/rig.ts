@@ -153,6 +153,15 @@ const GLASS_INSIDE_OPACITY = 0.05;
 const GLASS_CLEAR_M = 30;
 export const KIT_DETAIL_M = 50;
 /**
+ * The glass's opacity seen from `distance` m outside the car: clear to `GLASS_CLEAR_M`,
+ * then fading to the tinted mirror at `KIT_DETAIL_M`. Rounded to a hundredth, below what
+ * the eye resolves on a pane, so a moving eye does not write it every frame.
+ */
+export function kitGlassOpacity(distance: number): number {
+  const t = Math.min(Math.max((distance - GLASS_CLEAR_M) / (KIT_DETAIL_M - GLASS_CLEAR_M), 0), 1);
+  return Math.round((GLASS_NEAR_OPACITY + (GLASS_FAR_OPACITY - GLASS_NEAR_OPACITY) * t) * 100) / 100;
+}
+/**
  * The shell's own moving parts (carkit/kit.ts `shellMotion`): doors, their panes and vent
  * wings, the bonnet, boot or tailgate and the filler flap. With any of them off its stop
  * the car is not in the pose the mid traffic meshes were baked in (render/farcars.ts).
@@ -407,11 +416,7 @@ export class KitRig {
    */
   setDetail(distance: number, inside = false): void {
     const near = distance < KIT_DETAIL_M;
-    const t = Math.min(Math.max((distance - GLASS_CLEAR_M) / (KIT_DETAIL_M - GLASS_CLEAR_M), 0), 1);
-    // A hundredth of opacity is below what the eye resolves on a pane: no write per frame.
-    const opacity = inside
-      ? GLASS_INSIDE_OPACITY
-      : Math.round((GLASS_NEAR_OPACITY + (GLASS_FAR_OPACITY - GLASS_NEAR_OPACITY) * t) * 100) / 100;
+    const opacity = inside ? GLASS_INSIDE_OPACITY : kitGlassOpacity(distance);
     if (near === this.near && opacity === this.glassOpacity) return;
     if (near !== this.near) {
       this.near = near;

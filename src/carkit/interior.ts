@@ -82,11 +82,17 @@ const TELLTALES: Readonly<Record<Telltale, number>> = {
   brake: 0xff3523,
 };
 /**
- * A lit face's travel: it stands just proud of its lens lit, and this far back off,
- * behind the face it is mounted in. Further than the depth between a lens and that
- * face, so the dark one hides whole.
+ * How far a lit face slides: a lamp's or a dial's dark face slides back this far as its
+ * lit face slides out into its place (or the lit face alone slides out over a dark lens
+ * set into the face behind it), so in either pose the two stand 8 mm apart and never
+ * fight in depth.
  */
 const GLOW_TRAVEL = 0.008;
+/**
+ * A needle's swap travel, like `GLOW_TRAVEL`: far enough that the one put away lies
+ * behind the cluster's face and 4 mm or more from every other face put away there.
+ */
+const NEEDLE_TRAVEL = 0.02;
 /** The courtesy lamp's lens lit: a warm filament behind milky plastic. */
 const DOME_LIT = 0xfff0c8;
 /**
@@ -734,19 +740,44 @@ function mount(origin: Vec3, recline: number): Mount {
   return { matrix, u, n, at: (x, y, z) => add(origin, add(scale(u, x), add(scale(v, y), scale(n, z)))) };
 }
 
-/** Flat rectangle facing out of a mount's face (its matrix pushed), centred at (cx, cy), `z` off the face. */
-function rect(b: PartBuilder, slot: KitSlot, cx: number, cy: number, hx: number, hy: number, z: number): void {
-  b.quad(slot, [cx - hx, cy - hy, z], [cx + hx, cy - hy, z], [cx + hx, cy + hy, z], [cx - hx, cy + hy, z]);
+const _inlay = new THREE.Vector3();
+
+/**
+ * Cuts away what `b` holds under a flat outline within `depth` of its plane: the hole a
+ * decal or a sliding lamp face fills. Corners in `b`'s current frame.
+ */
+function cutLocal(b: PartBuilder, corners: readonly Vec3[], depth = 0.0005): void {
+  const poly = corners.map((p): Vec3 => {
+    _inlay.set(p[0], p[1], p[2]).applyMatrix4(b.matrix);
+    return [_inlay.x, _inlay.y, _inlay.z];
+  });
+  b.cut([{ poly, reach: depth }]);
 }
 
-/** A dial's needle and hub on mount `m`'s face, pointing at `angle` (rad, 0 = driver's right). */
-function needle(b: PartBuilder, m: Mount, r: number, angle: number): void {
+/**
+ * A flat decal (a dial, an insert, a lens, a badge) laid in the surface it sits on: the
+ * surface under it is cut away first (`cutLocal`), so the decal is the only face there
+ * and nothing fights it in depth. Corners in `b`'s current frame, in the surface's plane.
+ */
+function inlay(b: PartBuilder, slot: KitSlot, corners: readonly Vec3[], depth = 0.0005): void {
+  cutLocal(b, corners, depth);
+  b.poly(slot, corners);
+}
+
+/** A flat rectangle's corners on a mount's face (its matrix pushed), centred at (cx, cy), `z` off the face. */
+function rectCorners(cx: number, cy: number, hx: number, hy: number, z: number): Vec3[] {
+  return [[cx - hx, cy - hy, z], [cx + hx, cy - hy, z], [cx + hx, cy + hy, z], [cx - hx, cy + hy, z]];
+}
+
+/**
+ * A dial's needle on mount `m`'s face, pointing at `angle` (rad, 0 = driver's right), `z`
+ * off the face, from `k0` of the dial's radius `r` out to 0.85 of it.
+ */
+function needle(b: PartBuilder, m: Mount, r: number, angle: number, z: number, k0: number, slot: KitSlot): void {
   const d: Vec3 = [Math.cos(angle), Math.sin(angle), 0];
   const p: Vec3 = [-d[1], d[0], 0];
-  const pt = (k: number, w: number): Vec3 => [d[0] * r * k + p[0] * w, d[1] * r * k + p[1] * w, 0.008];
-  b.push(m.matrix).color(COLOURS.needle);
-  b.quad('trim', pt(-0.15, -0.002), pt(0.85, -0.001), pt(0.85, 0.001), pt(-0.15, 0.002));
-  b.color(COLOURS.black).cylinderZ('trim', [0, 0, 0.009], r * 0.12, 0.002, 6);
+  const pt = (k: number, w: number): Vec3 => [d[0] * r * k + p[0] * w, d[1] * r * k + p[1] * w, z];
+  b.push(m.matrix).quad(slot, pt(k0, -0.002 + (k0 + 0.15) * 0.001), pt(0.85, -0.001), pt(0.85, 0.001), pt(k0, 0.002 - (k0 + 0.15) * 0.001));
   b.pop();
 }
 
@@ -995,9 +1026,15 @@ class Cabin {
     const s0 = w.rear - r - 0.005;
     const full = w.rear + r + 0.005;
     const s1 = Math.min(full, this.lowerEnd);
-    const top = (s: number): number => w.radius + Math.sqrt(Math.max(0, r * r - (s - w.rear) ** 2)) + HUMP_RISE;
-    const ss: number[] = [];
-    for (let i = 0; i <= 8; i++) ss.push(lerp(s0, s1, i / 8));
+    // Over the shell's arch (`archY`) at the shell's own cosine-spaced facets, so each
+    // facet of the top stands parallel to the well's roof under it, HUMP_RISE above.
+    const top = (s: number): number => this.frame.archY(Math.min(Math.max(s, w.rear - r), w.rear + r)) + HUMP_RISE;
+    const ss = [s0];
+    for (let i = 0; i <= 12; i++) {
+      const s = w.rear - r + 2 * r * ((1 - Math.cos((i / 12) * Math.PI)) / 2);
+      if (s > s0 + 0.004 && s < s1 - 0.004) ss.push(s);
+    }
+    ss.push(s1);
     const b = this.fixed.color(shade(this.spec.look.upholstery, 0.8));
     for (const side of [1, -1]) {
       const xi = side * (this.frame.wellX(w.rear) - 0.02);
@@ -1063,8 +1100,9 @@ class Cabin {
     const frontTop = top0 + 0.03;
     const rearTop = topN - (this.hatch ? 0.06 : 0.03);
 
-    // Courtesy lamp: the lens is its switch, and lit, a face slides down out of the
-    // headliner over it (`GLOW_TRAVEL`). The car the player sits in also lights the cabin
+    // Courtesy lamp: the lens is its switch. Lit, it slides up into the headliner by
+    // `GLOW_TRAVEL` and its lit face slides down out of the headliner into its place, so
+    // the two never lie in one plane. The car the player sits in also lights the cabin
     // from here (`Vehicle.syncDomeLight`).
     const lampS = lerp(frontTop, rearTop, 0.45);
     const ly = this.dome(0) - 0.004;
@@ -1072,11 +1110,12 @@ class Cabin {
       n.quad(slot, this.P(0.05, y, lampS - 0.03), this.P(-0.05, y, lampS - 0.03), this.P(-0.05, y, lampS + 0.03), this.P(0.05, y, lampS + 0.03));
     };
     const at = this.P(0, ly, lampS);
-    const lamp = this.hinge(this.group, ORIGIN, KIT_DOME_LAMP_NODE, at, undefined, { id: 'dome', label: 'Плафон' }, (n) => {
+    const lamp = this.hinge(this.group, ORIGIN, KIT_DOME_LAMP_NODE, at, undefined, { id: 'dome', label: 'Плафон' }, () => {});
+    this.hinge(lamp, at, 'dome_dim', at, { channel: 'dome', kind: 'pos', axis: [0, 1, 0], amount: GLOW_TRAVEL }, undefined, (n) => {
       lens(n.color(COLOURS.lamp), 'trim', ly);
     });
     this.hinge(lamp, at, 'dome_glow', at, { channel: 'dome', kind: 'pos', axis: [0, -1, 0], amount: GLOW_TRAVEL }, undefined, (n) => {
-      lens(n.color(DOME_LIT), 'lamp_glow', ly - 0.0005 + GLOW_TRAVEL);
+      lens(n.color(DOME_LIT), 'lamp_glow', ly + GLOW_TRAVEL);
     });
 
     // Mirror: hung from the header on a stem, behind the screen. Placed from the glass at
@@ -1119,10 +1158,10 @@ class Cabin {
     const pane = this.hinge(ball, centre, 'mirror', centre, { channel: 'mirror_pitch', kind: 'rot', axis: [e[0]!, e[1]!, e[2]!], amount: 1 }, MIRROR_CONTROL, (m) => {
       m.push(frame).color(COLOURS.black);
       pad(m, 'trim', ORIGIN, [0.105, 0.03, 0.014], 0.008);
-      m.quad('chrome', [0.095, -0.022, -0.0145], [-0.095, -0.022, -0.0145], [-0.095, 0.022, -0.0145], [0.095, 0.022, -0.0145]);
+      inlay(m, 'chrome', [[0.095, -0.022, -0.014], [-0.095, -0.022, -0.014], [-0.095, 0.022, -0.014], [0.095, 0.022, -0.014]]);
       m.pop();
     });
-    // The live face 1.5 mm proud of the glass.
+    // The live face 2 mm proud of the glass.
     addMirrorFace(pane, frame, centre, [0.095, 0.022], -0.016, 'inner');
 
     // Sun visors lie flat under the headliner and swing down about their front edge.
@@ -1234,11 +1273,11 @@ class Cabin {
       b.color(COLOURS.wood).push(m.matrix).box('trim', [0, 0, 0.002], [half - 0.01, (y1 - y0) / 2, 0.002]).pop();
     }
     if (L.clusterFace) {
+      // The frame laid in the binnacle's face, the face laid in the frame: one plane.
       const { right, up, half: [hx, hy], colour, frame } = L.clusterFace;
       b.push(this.clusterAt(right, up).matrix).color(COLOURS.black);
-      rect(b, frame === 'chrome' ? 'chrome' : 'trim', 0, 0, hx + 0.006, hy + 0.006, 0.0015);
-      b.color(colour);
-      rect(b, 'trim', 0, 0, hx, hy, 0.0025);
+      inlay(b, frame === 'chrome' ? 'chrome' : 'trim', rectCorners(0, 0, hx + 0.006, hy + 0.006, 0));
+      inlay(b.color(colour), 'trim', rectCorners(0, 0, hx, hy, 0));
       b.pop();
     }
     if (L.lamps) {
@@ -1249,15 +1288,17 @@ class Cabin {
       show.forEach((tell, i) => {
         const x = ((i % cols) - (cols - 1) / 2) * pitch;
         const y = ((rows - 1) / 2 - Math.floor(i / cols)) * pitch;
-        b.push(m.matrix).color(shade(TELLTALES[tell], 0.3));
-        rect(b, 'trim', x, y, h, h, 0.0035);
+        // Its window cut in the cluster's face: the dark lens fills it, and lit, slides back
+        // by `GLOW_TRAVEL` as the lit face slides out into it from as far behind.
+        cutLocal(b.push(m.matrix), rectCorners(x, y, h, h, 0));
         b.pop();
-        // Lit, the face stands half a millimetre proud of its lens; off, behind the cluster's face.
-        const at = m.at(x, y, 0.004);
-        const motion: KitMotion = { channel: `tell_${tell}`, kind: 'pos', axis: m.n, amount: GLOW_TRAVEL };
-        this.hinge(this.group, ORIGIN, `telltale_${tell}`, at, motion, undefined, (n) => {
-          n.push(m.matrix).color(TELLTALES[tell]);
-          rect(n, 'lamp_glow', x, y, h, h, 0.004 - GLOW_TRAVEL);
+        const at = m.at(x, y, 0);
+        this.hinge(this.group, ORIGIN, `telltale_dim_${tell}`, at, { channel: `tell_${tell}`, kind: 'pos', axis: m.n, amount: -GLOW_TRAVEL }, undefined, (n) => {
+          n.push(m.matrix).color(shade(TELLTALES[tell], 0.3)).poly('trim', rectCorners(x, y, h, h, 0));
+          n.pop();
+        });
+        this.hinge(this.group, ORIGIN, `telltale_${tell}`, at, { channel: `tell_${tell}`, kind: 'pos', axis: m.n, amount: GLOW_TRAVEL }, undefined, (n) => {
+          n.push(m.matrix).color(TELLTALES[tell]).poly('lamp_glow', rectCorners(x, y, h, h, -GLOW_TRAVEL));
           n.pop();
         });
       });
@@ -1276,11 +1317,11 @@ class Cabin {
         const m = this.fascia(x, belt + v.dy);
         const [hx, hy] = v.half ?? [0.035, 0.024];
         b.push(m.matrix).color(COLOURS.black);
-        b.quad('trim', [-hx, -hy, 0.002], [hx, -hy, 0.002], [hx, hy, 0.002], [-hx, hy, 0.002]);
+        inlay(b, 'trim', rectCorners(0, 0, hx, hy, 0));
         b.color(look.dash);
         const n = Math.round(hy / 0.012) - 1;
-        // Louvres 6 mm deep from 3 mm off the face: their backs clear the backing by 1 mm.
-        for (let i = -n; i <= n; i++) beam(b, 'trim', [-(hx - 0.003), i * 0.012, 0.006], [hx - 0.003, i * 0.012, 0.006], 0.003, 0.004);
+        // Louvres 6 mm deep from 4.5 mm off the backing laid in the face: apart in depth from the road.
+        for (let i = -n; i <= n; i++) beam(b, 'trim', [-(hx - 0.003), i * 0.012, 0.0075], [hx - 0.003, i * 0.012, 0.0075], 0.003, 0.004);
         b.pop();
       }
     }
@@ -1306,7 +1347,7 @@ class Cabin {
     if (L.heater) {
       const { dy, half: [hx, hy], knobs, radius } = L.heater;
       b.push(this.fascia(0, belt + dy).matrix).color(COLOURS.black);
-      rect(b, 'trim', 0, 0, hx, hy, 0.002);
+      inlay(b, 'trim', rectCorners(0, 0, hx, hy, 0));
       b.pop();
       for (const x of knobs) {
         // A bright ring round a black knob with a grip bar across it and a white pointer up the bar.
@@ -1315,103 +1356,104 @@ class Cabin {
         b.cylinderZ('trim', [0, 0, 0.009], radius * 0.78, 0.007, 10);
         b.box('trim', [0, 0, 0.019], [radius * 0.22, radius * 0.72, 0.004]);
         b.color(COLOURS.white);
-        rect(b, 'trim', 0, radius * 0.45, 0.0012, radius * 0.22, 0.0232);
+        inlay(b, 'trim', rectCorners(0, radius * 0.45, 0.0012, radius * 0.22, 0.023));
         b.pop();
       }
     }
   }
 
-  /** A round dial on the cluster face: bezel, face, ticks and a needle on its channel. */
+  /**
+   * A round dial on the cluster face: bezel, face, ticks and a needle on its channel.
+   * The painted face and needle and their lit twins swap places on the panel lights
+   * (`GLOW_TRAVEL`, `NEEDLE_TRAVEL`); the ticks are laid in the face. A bare dial's ticks
+   * are laid in the cluster's face, in windows cut for them.
+   */
   private gauge(g: RoundGauge): void {
     const m = this.clusterAt(g.right, g.up);
     const r = g.radius;
-    const b = this.fixed.push(m.matrix);
-    if (!g.bare) {
-      b.color(COLOURS.black).cylinderZ('chrome', [0, 0, 0.006], r + 0.005, 0.006, 12, false);
-      const disc: Vec3[] = [];
-      for (let i = 0; i < 12; i++) {
-        const a = (i / 12) * Math.PI * 2;
-        disc.push([Math.cos(a) * r, Math.sin(a) * r, 0.004]);
-      }
-      b.color(COLOURS.face).poly('trim', disc);
-    }
-    b.color(COLOURS.tick);
+    const z = g.bare ? 0 : 0.004;
+    const ticks: Vec3[][] = [];
     for (let i = 0; i < g.ticks; i++) {
       const a = g.rest - (g.sweep * i) / (g.ticks - 1);
       const d: Vec3 = [Math.cos(a), Math.sin(a), 0];
       const p: Vec3 = [-d[1] * 0.0018, d[0] * 0.0018, 0];
-      const at = (k: number, sgn: number): Vec3 => [d[0] * r * k + sgn * p[0], d[1] * r * k + sgn * p[1], 0.0046];
-      b.quad('trim', at(0.74, -1), at(0.92, -1), at(0.92, 1), at(0.74, 1));
+      const at = (k: number, sgn: number): Vec3 => [d[0] * r * k + sgn * p[0], d[1] * r * k + sgn * p[1], z];
+      ticks.push([at(0.74, -1), at(0.92, -1), at(0.92, 1), at(0.74, 1)]);
     }
+    const disc: Vec3[] = [];
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      disc.push([Math.cos(a) * r, Math.sin(a) * r, z]);
+    }
+    const b = this.fixed.push(m.matrix);
+    if (g.bare) for (const t of ticks) cutLocal(b, t);
+    else b.color(COLOURS.black).cylinderZ('chrome', [0, 0, 0.006], r + 0.005, 0.006, 12, false);
     b.pop();
-    const glowAt = m.at(0, 0, 0.0044);
-    this.hinge(this.group, ORIGIN, `panel_glow_${g.channel}`, glowAt, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: GLOW_TRAVEL }, undefined, (n) => {
+    const face = (n: PartBuilder, lit: boolean): void => {
+      const dz = lit ? -GLOW_TRAVEL : 0;
+      const at = (pts: readonly Vec3[]): Vec3[] => pts.map(([x, y, pz]): Vec3 => [x, y, pz + dz]);
+      const slot: KitSlot = lit ? 'lamp_glow' : 'trim';
       n.push(m.matrix);
-      if (!g.bare) {
-        const disc: Vec3[] = [];
-        for (let i = 0; i < 12; i++) {
-          const a = (i / 12) * Math.PI * 2;
-          disc.push([Math.cos(a) * r, Math.sin(a) * r, 0.0043 - GLOW_TRAVEL]);
-        }
-        n.color(PANEL_FACE).poly('lamp_glow', disc);
-      }
-      n.color(PANEL_TICK);
-      for (let i = 0; i < g.ticks; i++) {
-        const a = g.rest - (g.sweep * i) / (g.ticks - 1);
-        const d: Vec3 = [Math.cos(a), Math.sin(a), 0];
-        const p: Vec3 = [-d[1] * 0.0018, d[0] * 0.0018, 0];
-        const at = (k: number, sgn: number): Vec3 => [d[0] * r * k + sgn * p[0], d[1] * r * k + sgn * p[1], 0.0049 - GLOW_TRAVEL];
-        n.quad('lamp_glow', at(0.74, -1), at(0.92, -1), at(0.92, 1), at(0.74, 1));
+      if (!g.bare) n.color(lit ? PANEL_FACE : COLOURS.face).poly(slot, at(disc));
+      n.color(lit ? PANEL_TICK : COLOURS.tick);
+      for (const t of ticks) {
+        if (g.bare) n.poly(slot, at(t));
+        else inlay(n, slot, at(t));
       }
       n.pop();
-    });
+    };
+    const faceAt = m.at(0, 0, z);
+    this.hinge(this.group, ORIGIN, `panel_dim_${g.channel}`, faceAt, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: -GLOW_TRAVEL }, undefined, (n) => face(n, false));
+    this.hinge(this.group, ORIGIN, `panel_glow_${g.channel}`, faceAt, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: GLOW_TRAVEL }, undefined, (n) => face(n, true));
     const min = g.min ?? 0;
     const at = m.at(0, 0, 0.008);
     const motion: KitMotion = { channel: g.channel, kind: 'rot', axis: m.n, amount: -g.sweep / (g.full - min), stops: [min, g.full] };
     const hand = this.hinge(this.group, ORIGIN, `needle_${g.channel}`, at, motion, undefined, (n) => {
-      needle(n, m, r, g.rest);
-    });
-    // The needle's own glow rides on it, under its painted face while the lights are off.
-    this.hinge(hand, at, `needle_glow_${g.channel}`, at, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: GLOW_TRAVEL }, undefined, (n) => {
-      const d: Vec3 = [Math.cos(g.rest), Math.sin(g.rest), 0];
-      const p: Vec3 = [-d[1], d[0], 0];
-      const pt = (k: number, w: number): Vec3 => [d[0] * r * k + p[0] * w, d[1] * r * k + p[1] * w, 0.0084 - GLOW_TRAVEL];
-      n.push(m.matrix).color(PANEL_NEEDLE);
-      n.quad('lamp_glow', pt(0.14, -0.0015), pt(0.85, -0.001), pt(0.85, 0.001), pt(0.14, 0.0015));
+      n.push(m.matrix).color(COLOURS.black).cylinderZ('trim', [0, 0, 0.009], r * 0.12, 0.002, 6);
       n.pop();
+    });
+    // The painted needle and its glow ride on the hand and swap places with the lights.
+    this.hinge(hand, at, `needle_dim_${g.channel}`, at, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: -NEEDLE_TRAVEL }, undefined, (n) => {
+      needle(n.color(COLOURS.needle), m, r, g.rest, 0.008, -0.15, 'trim');
+    });
+    this.hinge(hand, at, `needle_glow_${g.channel}`, at, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: NEEDLE_TRAVEL }, undefined, (n) => {
+      needle(n.color(PANEL_NEEDLE), m, r, g.rest, 0.008 - NEEDLE_TRAVEL, 0.12, 'lamp_glow');
     });
   }
 
-  /** A ribbon window on the cluster face, its ticks and a marker sliding along it with the channel. */
+  /**
+   * A ribbon window on the cluster face, its ticks and a marker sliding along it with the
+   * channel. Face and marker swap with their lit twins like a round dial's.
+   */
   private ribbon(g: RibbonGauge): void {
     const m = this.clusterAt(g.right, g.up);
     const [hw, hh] = g.half;
     const run = hw * 0.92;
     const b = this.fixed.push(m.matrix).color(COLOURS.black);
-    rect(b, 'chrome', 0, 0, hw + 0.004, hh + 0.004, 0.003);
-    b.color(COLOURS.face);
-    rect(b, 'trim', 0, 0, hw, hh, 0.004);
-    b.color(COLOURS.tick);
-    for (let i = 0; i < g.ticks; i++) rect(b, 'trim', lerp(-run, run, i / (g.ticks - 1)), -hh * 0.45, 0.0012, hh * 0.4, 0.0046);
+    inlay(b, 'chrome', rectCorners(0, 0, hw + 0.004, hh + 0.004, 0));
+    cutLocal(b, rectCorners(0, 0, hw, hh, 0));
     b.pop();
-    this.hinge(this.group, ORIGIN, `panel_glow_${g.channel}`, m.at(0, 0, 0.0044), { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: GLOW_TRAVEL }, undefined, (n) => {
-      n.push(m.matrix).color(PANEL_FACE);
-      rect(n, 'lamp_glow', 0, 0, hw, hh, 0.0043 - GLOW_TRAVEL);
-      n.color(PANEL_TICK);
-      for (let i = 0; i < g.ticks; i++) rect(n, 'lamp_glow', lerp(-run, run, i / (g.ticks - 1)), -hh * 0.45, 0.0012, hh * 0.4, 0.0049 - GLOW_TRAVEL);
+    const face = (n: PartBuilder, lit: boolean): void => {
+      const z = lit ? -GLOW_TRAVEL : 0;
+      const slot: KitSlot = lit ? 'lamp_glow' : 'trim';
+      n.push(m.matrix).color(lit ? PANEL_FACE : COLOURS.face).poly(slot, rectCorners(0, 0, hw, hh, z));
+      n.color(lit ? PANEL_TICK : COLOURS.tick);
+      for (let i = 0; i < g.ticks; i++) inlay(n, slot, rectCorners(lerp(-run, run, i / (g.ticks - 1)), -hh * 0.45, 0.0012, hh * 0.4, z));
       n.pop();
-    });
-    const at = m.at(-run, 0, 0.005);
+    };
+    const faceAt = m.at(0, 0, 0);
+    this.hinge(this.group, ORIGIN, `panel_dim_${g.channel}`, faceAt, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: -GLOW_TRAVEL }, undefined, (n) => face(n, false));
+    this.hinge(this.group, ORIGIN, `panel_glow_${g.channel}`, faceAt, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: GLOW_TRAVEL }, undefined, (n) => face(n, true));
+    const at = m.at(-run, 0, 0.004);
     const min = g.min ?? 0;
     const motion: KitMotion = { channel: g.channel, kind: 'pos', axis: m.u, amount: (2 * run) / (g.full - min), stops: [min, g.full] };
-    const hand = this.hinge(this.group, ORIGIN, `needle_${g.channel}`, at, motion, undefined, (n) => {
-      n.push(m.matrix).color(COLOURS.needle);
-      rect(n, 'trim', -run, 0, 0.0018, hh * 0.9, 0.005);
+    const hand = this.hinge(this.group, ORIGIN, `needle_${g.channel}`, at, motion, undefined, () => {});
+    this.hinge(hand, at, `needle_dim_${g.channel}`, at, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: -NEEDLE_TRAVEL }, undefined, (n) => {
+      n.push(m.matrix).color(COLOURS.needle).poly('trim', rectCorners(-run, 0, 0.0018, hh * 0.9, 0.004));
       n.pop();
     });
-    this.hinge(hand, at, `needle_glow_${g.channel}`, at, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: GLOW_TRAVEL }, undefined, (n) => {
-      n.push(m.matrix).color(PANEL_NEEDLE);
-      rect(n, 'lamp_glow', -run, 0, 0.0014, hh * 0.86, 0.0054 - GLOW_TRAVEL);
+    this.hinge(hand, at, `needle_glow_${g.channel}`, at, { channel: PANEL_MOTION_CHANNEL, kind: 'pos', axis: m.n, amount: NEEDLE_TRAVEL }, undefined, (n) => {
+      n.push(m.matrix).color(PANEL_NEEDLE).poly('lamp_glow', rectCorners(-run, 0, 0.0014, hh * 0.86, 0.004 - NEEDLE_TRAVEL));
       n.pop();
     });
   }
@@ -1421,8 +1463,12 @@ class Cabin {
     const { x, dy, half } = this.lay.glovebox;
     const m = this.fascia(x, this.belt + dy);
     const [hx, hy] = half;
-    this.fixed.push(m.matrix).color(COLOURS.black);
-    this.fixed.quad('trim', [-hx + 0.008, -hy + 0.006, 0.0015], [hx - 0.008, -hy + 0.006, 0.0015], [hx - 0.008, hy - 0.006, 0.0015], [-hx + 0.008, hy - 0.006, 0.0015]);
+    // The dark opening behind the lid: the fascia is cut under it and it stands 5 mm in,
+    // clear of the closed lid's back, which lies in the fascia's plane.
+    const [ox, oy] = [hx - 0.008, hy - 0.006];
+    this.fixed.push(m.matrix);
+    cutLocal(this.fixed, rectCorners(0, 0, ox, oy, 0), 0.002);
+    this.fixed.color(COLOURS.black).poly('trim', rectCorners(0, 0, ox, oy, -0.005));
     this.fixed.pop();
     const at = m.at(0, -hy, 0.007);
     this.hinge(this.group, ORIGIN, 'glovebox', at, { channel: 'glovebox', kind: 'rot', axis: [1, 0, 0], amount: -1.2 }, { id: 'glovebox', label: 'Бардачок' }, (b) => {
@@ -1440,19 +1486,20 @@ class Cabin {
     const b = this.fixed.push(m.matrix);
     b.color(COLOURS.black);
     pad(b, 'trim', [0, 0, 0.006], [0.09, 0.028, 0.006], 0.004);
-    b.color(COLOURS.dial).quad('trim', [-0.05, 0.002, 0.0125], [0.05, 0.002, 0.0125], [0.05, 0.02, 0.0125], [-0.05, 0.02, 0.0125]);
+    inlay(b.color(COLOURS.dial), 'trim', [[-0.05, 0.002, 0.012], [0.05, 0.002, 0.012], [0.05, 0.02, 0.012], [-0.05, 0.02, 0.012]]);
     b.color(COLOURS.black).cylinderZ('chrome', [0.07, -0.008, 0.017], 0.01, 0.005, 8);
     b.pop();
-    const needleAt = m.at(-0.045, 0.011, 0.013);
+    // The needle 3.5 mm off the dial, so the two do not fight in depth from outside.
+    const needleAt = m.at(-0.045, 0.011, 0.0155);
     this.hinge(this.group, ORIGIN, 'radio_needle', needleAt, { channel: 'radio_tune', kind: 'pos', axis: m.u, amount: 0.09 }, undefined, (n) => {
       n.push(m.matrix).color(COLOURS.dialNeedle);
-      n.quad('trim', [-0.0458, 0.003, 0.0132], [-0.0442, 0.003, 0.0132], [-0.0442, 0.019, 0.0132], [-0.0458, 0.019, 0.0132]);
+      n.quad('trim', [-0.0458, 0.003, 0.0155], [-0.0442, 0.003, 0.0155], [-0.0442, 0.019, 0.0155], [-0.0458, 0.019, 0.0155]);
       n.pop();
     });
     const knobAt = m.at(-0.07, -0.008, 0.012);
     this.hinge(this.group, ORIGIN, 'radio_knob', knobAt, { channel: 'radio', kind: 'rot', axis: m.n, amount: -0.6 }, { id: 'radio', label: 'Магнитола' }, (k) => {
       k.push(m.matrix).color(COLOURS.black).cylinderZ('trim', [-0.07, -0.008, 0.017], 0.011, 0.005, 8);
-      k.color(COLOURS.white).quad('trim', [-0.071, -0.006, 0.0225], [-0.069, -0.006, 0.0225], [-0.069, 0.001, 0.0225], [-0.071, 0.001, 0.0225]);
+      inlay(k.color(COLOURS.white), 'trim', [[-0.071, -0.006, 0.022], [-0.069, -0.006, 0.022], [-0.069, 0.001, 0.022], [-0.071, 0.001, 0.022]]);
       k.pop();
     });
   }
@@ -1643,7 +1690,7 @@ class Cabin {
       pad(b, 'trim', this.P(x, (frameBottom + frameTop) / 2, hip - 0.17), [0.2, (frameTop - frameBottom) / 2, 0.2], 0.02);
       b.pushAt(this.P(x, top - 0.065, hip - 0.17), [-0.07, 0, 0]).color(uph);
       pad(b, 'trim', ORIGIN, [0.25, 0.065, 0.26], 0.04);
-      b.color(insert).quad('trim', [-0.11, 0.067, -0.19], [0.11, 0.067, -0.19], [0.11, 0.067, 0.19], [-0.11, 0.067, 0.19]);
+      inlay(b.color(insert), 'trim', [[-0.11, 0.065, -0.19], [0.11, 0.065, -0.19], [0.11, 0.065, 0.19], [-0.11, 0.065, 0.19]]);
       b.pop();
     });
 
@@ -1653,7 +1700,7 @@ class Cabin {
       b.pushAt(backAt, [-t, 0, 0]).color(uph);
       pad(b, 'trim', [0, 0.27, -0.05], [0.245, 0.27, 0.065], 0.04, 0.88);
       if (L.bolsters) for (const sx of [-1, 1]) pad(b, 'trim', [sx * 0.2, 0.24, -0.005], [0.045, 0.22, 0.05], 0.03);
-      b.color(insert).quad('trim', [-0.1, 0.07, 0.017], [0.1, 0.07, 0.017], [0.1, 0.48, 0.017], [-0.1, 0.48, 0.017]);
+      inlay(b.color(insert), 'trim', [[-0.1, 0.07, 0.015], [0.1, 0.07, 0.015], [0.1, 0.48, 0.015], [-0.1, 0.48, 0.015]]);
       b.pop();
     });
 
@@ -1694,12 +1741,12 @@ class Cabin {
     b.pushAt(this.P(0, top - 0.07, H - 0.13), [-0.06, 0, 0]).color(uph);
     pad(b, 'trim', ORIGIN, [half, 0.07, 0.25], 0.04);
     b.color(insert);
-    for (const sx of [-BENCH_SEAT_X, BENCH_SEAT_X]) b.quad('trim', [sx - 0.12, 0.072, -0.18], [sx + 0.12, 0.072, -0.18], [sx + 0.12, 0.072, 0.18], [sx - 0.12, 0.072, 0.18]);
+    for (const sx of [-BENCH_SEAT_X, BENCH_SEAT_X]) inlay(b, 'trim', [[sx - 0.12, 0.07, -0.18], [sx + 0.12, 0.07, -0.18], [sx + 0.12, 0.07, 0.18], [sx - 0.12, 0.07, 0.18]]);
     b.pop();
     b.pushAt(this.P(0, top - 0.035, H), [-L.benchRecline, 0, 0]).color(uph);
     pad(b, 'trim', [0, 0.25, -0.05], [half, 0.25, 0.065], 0.04, 0.97);
     b.color(insert);
-    for (const sx of [-BENCH_SEAT_X, BENCH_SEAT_X]) b.quad('trim', [sx - 0.11, 0.06, 0.017], [sx + 0.11, 0.06, 0.017], [sx + 0.11, 0.42, 0.017], [sx - 0.11, 0.42, 0.017]);
+    for (const sx of [-BENCH_SEAT_X, BENCH_SEAT_X]) inlay(b, 'trim', [[sx - 0.11, 0.06, 0.015], [sx + 0.11, 0.06, 0.015], [sx + 0.11, 0.42, 0.015], [sx - 0.11, 0.42, 0.015]]);
     b.pop();
     const group = new THREE.Group();
     group.name = KIT_BENCH_NODE;
@@ -1755,15 +1802,16 @@ class Cabin {
       b.color(shade(this.spec.look.upholstery, 0.75));
       b.bevelBox('trim', card(as, ay, 0.03), [0.03, 0.025, ah], 0.012);
       b.color(COLOURS.black);
-      const cup = (s: number, k: number): Vec3 => card(s, ay + 0.0255, 0.03 + k * 0.016);
-      b.quad('trim', cup(as - 0.06, -1), cup(as + 0.04, -1), cup(as + 0.04, 1), cup(as - 0.06, 1));
+      const cup = (s: number, k: number): Vec3 => card(s, ay + 0.025, 0.03 + k * 0.016);
+      inlay(b, 'trim', [cup(as - 0.06, -1), cup(as + 0.04, -1), cup(as + 0.04, 1), cup(as - 0.06, 1)]);
 
       // Inner handle: a chrome lever in a dark recess at the card's front top. The recess
-      // stands 5 mm off the card line: the door's inner skin, offset along its own
-      // normals, wanders a millimetre or so either side of that line.
+      // stands 7.5 mm off the card line: the door's inner skin, offset along its own
+      // normals, wanders a millimetre or so either side of that line, and the two stay
+      // apart in depth from the road.
       const hs = s0 + (front ? 0.13 : 0.1);
       const hy = belt - 0.085;
-      b.quad('trim', card(hs - 0.05, hy - 0.022, 0.005), card(hs + 0.05, hy - 0.022, 0.005), card(hs + 0.05, hy + 0.022, 0.005), card(hs - 0.05, hy + 0.022, 0.005));
+      b.quad('trim', card(hs - 0.05, hy - 0.022, 0.0075), card(hs + 0.05, hy - 0.022, 0.0075), card(hs + 0.05, hy + 0.022, 0.0075), card(hs - 0.05, hy + 0.022, 0.0075));
       beam(b, 'chrome', card(hs + 0.035, hy, 0.008), card(hs - 0.03, hy, 0.012), 0.006, 0.007);
 
       // Capping over the door's top between the card and the glass, and the lock knob through it.

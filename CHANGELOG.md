@@ -703,6 +703,14 @@
 
 ### Fixed
 
+- NO Z-FIGHTING ON KIT CARS AT ANY DISTANCE (`carkit/*`, `tools/kit-zfight.ts`): items on
+  the body skin sit in holes cut in the shell instead of on its hidden face, cabin decals
+  are laid into their surfaces, lit faces swap places with their dark faces, and the
+  underbody's and scuttle's hidden faces are gone. Visible clusters at 10–25 m 16–28 → 0
+  and beyond 25 m 22–57 → 0 per car; the scanner also proves every hole covered from
+  outside by what mid and far traffic draws, and no longer counts sub-pixel fights, fights
+  behind tinted glass or with placeholder wheels.
+
 - NO Z-FIGHTING ON THE CLASSICS' NOSE AND UNDERBODY (`carkit/bay.ts`, `exterior.ts`,
   `specs.ts`): the front beam's top, the bumper brackets' backs and the 2101/2102
   indicator lenses' backs no longer lie in the body's faces; `tools/kit-zfight.ts`

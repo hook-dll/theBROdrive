@@ -12,29 +12,39 @@
  * emitted it (`PartBuilder.tri` is wrapped here, at run time only). Pairs: normals within
  * 3° (either facing: every kit slot is double-sided), planes within 6 mm over a
  * positive-area overlap (shared edges do not count). Pairs group into clusters (same two
- * emitters and colours, same band, within 12 cm), kept from 1 cm². A cluster is visible
- * if a line from its overlap reaches one of 37 exterior or 4 cabin viewpoints past every
- * opaque triangle (bay parts are tried with the bonnet open too); one whose two sides
- * share slot and vertex colour cannot show and scores 0.
+ * emitters and colours, same band, within 12 cm), kept from 1 cm². A cluster is seen if
+ * a line from its overlap reaches one of 37 exterior or 4 cabin viewpoints past every
+ * opaque triangle (bay parts are tried with the bonnet open too). It is visible if it is
+ * seen and also covers a pixel at the furthest distance its part is drawn (the shell to
+ * 700 m, the detail groups to `KIT_DETAIL_M`; 1440 px, 65°), a cabin pair weighted by
+ * the glass's see-through (1 − `kitGlassOpacity`). It is never visible if its two sides
+ * share slot and vertex colour, if it involves the kit's placeholder wheels (the pack's
+ * replace them), or, from the seat, if the cabin's near plane (0.02 m) parts it within
+ * the cabin's 3 m (`CABIN_TAU`).
  *
  * Bands, from the scene pass's 24-bit depth at near 0.08 m (a gap g fights beyond
  * d ≈ sqrt(g·near·2^24/2)):
  *   close    gap < 0.15 mm   fights within 10 m: the lab, the chase cam, the cockpit
- *   10-25 m  0.15-0.93 mm    the cabin, bay, boot and underbody draw to 50 m (`KIT_DETAIL_M`),
- *                            but past 25 m only through glass fading to a tinted mirror
- *   >25 m    0.93-2 mm       exterior only
- *   far      2-6 mm          beyond ~40 m, a car a few dozen pixels wide: no fix needed
+ *   10-25 m  0.15-0.93 mm
+ *   >25 m    0.93-2 mm
+ *   far      2-6 mm
  *
- * Prints per car the visible close-range and 10-25 m clusters with both emitters. A kit
- * change should leave no close-range visible cluster. Nothing here is part of the game.
+ * Shell holes: every outline cut in the shell under an item (`root.userData.kitHoles`)
+ * must be covered, from every exterior viewpoint and a close ring, by the shell and the
+ * exterior alone (what mid and far traffic bake): a sight line through it must meet an
+ * opaque face before it is 2 mm past the hole (`holeSlits`).
+ *
+ * Prints per car every visible cluster with both emitters (`file:line`) and every open
+ * hole; the summary counts them per band. A kit change should leave every visible and
+ * slit column at 0. Nothing here is part of the game.
  */
 
 import * as THREE from 'three';
 import { installAssetShim } from './assetshim';
-import { PartBuilder, type KitSlot, type Vec3 } from '../src/carkit/builder';
+import { PartBuilder, cutUnder, type KitSlot, type Outline, type Vec3 } from '../src/carkit/builder';
 import { buildKitCar } from '../src/carkit/kit';
 import { KIT_SPECS } from '../src/carkit/specs';
-import { KitRig, KIT_SHUT_GEOMETRY } from '../src/carkit/rig';
+import { KitRig, KIT_DETAIL_M, KIT_SHUT_GEOMETRY, kitGlassOpacity } from '../src/carkit/rig';
 
 installAssetShim();
 
@@ -55,6 +65,25 @@ const fightDistance = (gap: number): number => Math.sqrt((gap * DEPTH_NEAR * 2 *
 const gapFightingAt = (d: number): number => (2 * d * d) / (DEPTH_NEAR * 2 ** 24);
 /** Band edges: fights within 10 m (lab, chase cam, cockpit), within 25 m (cabin LOD), 2 mm, 6 mm. */
 const TAUS = [gapFightingAt(10), gapFightingAt(25), FIGHT_GAP, FAR_GAP];
+/**
+ * What a fight must cover to be seen: its fighting overlap, where the depth first gives
+ * way and beyond, at least MIN_FIGHT_PX pixels on a 1440-line frame at the default 65°
+ * (config/gameplay.json). Past that distance the overlap keeps fighting but only shrinks.
+ * The detail groups (cabin, bay, boot, underbody) are not drawn beyond `KIT_DETAIL_M`;
+ * the shell is, out to the far traffic's reach.
+ */
+const SCREEN_H = 1440;
+const FOV_Y = (65 * Math.PI) / 180;
+const MIN_FIGHT_PX = 1;
+const SHELL_DRAW_M = 700;
+const pxPerM = (d: number): number => SCREEN_H / (2 * d * Math.tan(FOV_Y / 2));
+/**
+ * The cabin viewpoints are the player's own seat: the cabin camera's near plane is 0.02 m
+ * (render/cameras.ts `CABIN_NEAR`) and what it looks at stands within ~3 m, so a pair is
+ * seen fighting from them only if it fights at 3 m with that near plane. A cabin seen from
+ * further is another car's, and the exterior viewpoints stand for that.
+ */
+const CABIN_TAU = (2 * 3 * 3) / (0.02 * 2 ** 24);
 
 // ---------------------------------------------------------------- provenance patch
 const sites: string[] = [];
@@ -83,7 +112,7 @@ function callSite(): number {
 }
 /** PartBuilder's private slot buffers plus the provenance this script hangs on it (runtime patch). */
 interface BuilderInternals {
-  slots: Map<KitSlot, { positions: number[] }>;
+  slots: Map<KitSlot, { positions: number[]; colors: number[] }>;
   prov?: Map<KitSlot, number[]>;
 }
 const origTri = PartBuilder.prototype.tri;
@@ -107,6 +136,32 @@ PartBuilder.prototype.build = function (this: PartBuilder) {
   const out = origBuild.call(this);
   for (const [slot, g] of out) g.userData.prov = self.prov?.get(slot) ?? [];
   return out;
+};
+// A cut keeps each piece's emitter; an append brings the other builder's along.
+PartBuilder.prototype.cut = function (this: PartBuilder, outlines: readonly Outline[]) {
+  const self = this as unknown as BuilderInternals;
+  if (outlines.length === 0) return this;
+  for (const [slot, buffer] of self.slots) {
+    const r = cutUnder(buffer.positions, buffer.colors, outlines);
+    const prov = self.prov?.get(slot) ?? [];
+    self.slots.set(slot, { positions: r.positions, colors: r.colors });
+    self.prov ??= new Map();
+    self.prov.set(slot, r.from.map((i) => prov[i]!));
+  }
+  return this;
+};
+const origAppend = PartBuilder.prototype.append;
+PartBuilder.prototype.append = function (this: PartBuilder, other: PartBuilder) {
+  const self = this as unknown as BuilderInternals;
+  const them = other as unknown as BuilderInternals;
+  // Provenance first: append takes the slots' lengths as they stand.
+  for (const [slot, buffer] of them.slots) {
+    const mine = self.slots.get(slot)?.positions.length ?? 0;
+    self.prov ??= new Map();
+    const list = self.prov.get(slot) ?? new Array(mine / 9).fill(intern('?'));
+    self.prov.set(slot, list.concat(them.prov?.get(slot) ?? new Array(buffer.positions.length / 9).fill(intern('?'))));
+  }
+  return origAppend.call(this, other);
 };
 
 // ---------------------------------------------------------------- triangle soup
@@ -298,6 +353,8 @@ interface PairHit {
   gapMin: number;
   /** Overlap area where |B − A| < TAUS[k]. */
   bands: number[];
+  /** Overlap area where |B − A| < tau, for any tau. */
+  within: (tau: number) => number;
   n: [number, number, number];
   /** Points inside the overlap (on A's plane) and B's height above A there along nA: the centroid and 80% towards each corner. */
   samples: { p: [number, number, number]; hB: number }[];
@@ -356,12 +413,13 @@ function testPair(s: Soup, a: number, b: number): PairHit | null {
   if (gapMin > FAR_GAP) return null;
   // The height is affine on the plane: clip the overlap to |h| < tau for each band.
   const h00 = heightAt([0, 0]), hx = heightAt([1, 0]) - h00, hy = heightAt([0, 1]) - h00;
-  const bands = TAUS.map((tau) => {
+  const within = (tau: number): number => {
     if (gap < tau) return area;
     const lo = clipAffine(I, (q) => h00 + hx * q[0] + hy * q[1] - tau);
     const both = clipAffine(lo, (q) => -(h00 + hx * q[0] + hy * q[1]) - tau);
     return both.length < 3 ? 0 : Math.abs(polyArea(both));
-  });
+  };
+  const bands = TAUS.map(within);
   // Centroid of the overlap polygon.
   let cxs = 0, cys = 0, aw = 0;
   for (let i = 0; i < I.length; i++) {
@@ -372,7 +430,7 @@ function testPair(s: Soup, a: number, b: number): PairHit | null {
   const cq: P2 = [cxs / (3 * aw), cys / (3 * aw)];
   const lift = (q: P2): [number, number, number] => [ox + ux * q[0] + wx * q[1], oy + uy * q[0] + wy * q[1], oz + uz * q[0] + wz * q[1]];
   const qs: P2[] = [cq, ...I.map((q): P2 => [cq[0] + (q[0] - cq[0]) * 0.8, cq[1] + (q[1] - cq[1]) * 0.8])];
-  return { a, b, area, gap, gapMin, bands, n: [nx, ny, nz], samples: qs.map((q) => ({ p: lift(q), hB: heightAt(q) })) };
+  return { a, b, area, gap, gapMin, bands, within, n: [nx, ny, nz], samples: qs.map((q) => ({ p: lift(q), hB: heightAt(q) })) };
 }
 
 /** Every coplanar overlapping pair; `keep(a, b)` filters before the geometric test. */
@@ -545,6 +603,92 @@ function seenBy(grid: RayGrid, h: PairHit, views: number[][]): boolean[] {
   });
 }
 
+// ---------------------------------------------------------------- shell holes
+/** A sight line counts as looking into the body once it is this far past the hole's plane, along itself. */
+const HOLE_PAST = 0.002;
+/** Sample points stand at least this far inside every edge of a hole's outline. */
+const HOLE_INSET = 0.0015;
+
+interface Slit {
+  owner: string;
+  at: [number, number, number];
+  view: number[];
+}
+
+/**
+ * Every hole cut in the shell under an item (`KitHole`, `root.userData.kitHoles`) must be
+ * covered by it from every side: a sight line from any exterior viewpoint through a point
+ * inside the hole's outline, on to 2 mm past the hole's plane, has to meet an opaque face
+ * first. One that does not looks through a slit into the body. Points next to each
+ * corner and each edge's middle (at least 1.5 mm inside every edge), and the centre;
+ * viewpoints on the hole's outer side, not grazing it. The line crosses the plane inside
+ * the hole, so a shut gap beside it is not taken for one.
+ */
+function holeSlits(root: THREE.Object3D, grid: RayGrid, views: number[][]): { holes: number; slits: Slit[] } {
+  const holes = (root.userData.kitHoles ?? []) as { owner: string; outline: Outline }[];
+  const slits: Slit[] = [];
+  for (const { owner, outline } of holes) {
+    const poly = outline.poly;
+    const c = [0, 0, 0];
+    for (const p of poly) for (let ax = 0; ax < 3; ax++) c[ax] += p[ax]! / poly.length;
+    const n = [0, 0, 0];
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i]!, b = poly[(i + 1) % poly.length]!;
+      n[0] += (a[1] - b[1]) * (a[2] + b[2]);
+      n[1] += (a[2] - b[2]) * (a[0] + b[0]);
+      n[2] += (a[0] - b[0]) * (a[1] + b[1]);
+    }
+    const len = Math.hypot(n[0]!, n[1]!, n[2]!);
+    // Outward: away from a point on the car's long axis at mid height.
+    const out = n[0]! * c[0]! + n[1]! * (c[1]! - 0.55) + n[2]! * c[2]! >= 0 ? 1 : -1;
+    for (let ax = 0; ax < 3; ax++) n[ax] = (n[ax]! / len) * out;
+    // Distance from q to the nearest edge's line.
+    const edgeDistance = (q: readonly number[]): number => {
+      let best = Infinity;
+      for (let i = 0; i < poly.length; i++) {
+        const a = poly[i]!, b = poly[(i + 1) % poly.length]!;
+        const e = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        const w = [q[0]! - a[0], q[1]! - a[1], q[2]! - a[2]];
+        const el = Math.hypot(e[0]!, e[1]!, e[2]!);
+        if (el < 1e-9) continue;
+        const cx = w[1]! * e[2]! - w[2]! * e[1]!, cy = w[2]! * e[0]! - w[0]! * e[2]!, cz = w[0]! * e[1]! - w[1]! * e[0]!;
+        best = Math.min(best, Math.hypot(cx, cy, cz) / el);
+      }
+      return best;
+    };
+    // Moved from p towards the centre until HOLE_INSET clear of every edge (the centre if the hole is narrower).
+    const inset = (p: readonly number[]): number[] => {
+      for (let k = 0; k < 1; k += 0.01) {
+        const q = [0, 1, 2].map((ax) => p[ax]! + (c[ax]! - p[ax]!) * k);
+        if (edgeDistance(q) >= HOLE_INSET) return q;
+      }
+      return c;
+    };
+    const samples = [c];
+    poly.forEach((p, i) => {
+      const q = poly[(i + 1) % poly.length]!;
+      samples.push(inset(p), inset([(p[0] + q[0]) / 2, (p[1] + q[1]) / 2, (p[2] + q[2]) / 2]));
+    });
+    let found: Slit | undefined;
+    for (const s of samples) {
+      for (const eye of views) {
+        const d = [s[0]! - eye[0]!, s[1]! - eye[1]!, s[2]! - eye[2]!];
+        const dl = Math.hypot(d[0]!, d[1]!, d[2]!);
+        // Only from the outer side, and not grazing (within 5° of the hole's plane).
+        if (-(d[0]! * n[0]! + d[1]! * n[1]! + d[2]! * n[2]!) < 0.087 * dl) continue;
+        const past = [0, 1, 2].map((ax) => s[ax]! + (d[ax]! / dl) * HOLE_PAST);
+        if (!grid.blocked(eye, past, -1, -1)) {
+          found = { owner, at: s.map((x) => Math.round(x * 1000) / 1000) as [number, number, number], view: eye.map((x) => Math.round(x * 100) / 100) };
+          break;
+        }
+      }
+      if (found) break;
+    }
+    if (found) slits.push(found);
+  }
+  return { holes: holes.length, slits };
+}
+
 // ---------------------------------------------------------------- unit test
 function selfTest(): void {
   const M = (name: string): MeshInfo => ({ name, path: name, slot: 'paint', zone: 'exterior', rigid: -1, transparent: false, polygonOffset: false });
@@ -604,8 +748,9 @@ interface Cluster {
   gapMin: number;
   gapMax: number;
   dFight: number; // m: beyond this distance some of it fights (24-bit depth, near 0.08)
-  detail: boolean; // one side is in a group culled beyond 25 m (cabin, bay, boot, under)
+  detail: boolean; // one side is in a group not drawn beyond KIT_DETAIL_M (cabin, bay, boot, under)
   pairs: number;
+  px: number; // pixels it fights over at the worst distance it is drawn at (SCREEN_H, FOV_Y)
   s: number; y: number; x: number; // area-weighted centroid, closed pose
   normal: [number, number, number];
   extViews: number; // exterior viewpoints that see it (of EXT_N), either pose
@@ -634,6 +779,16 @@ function viewpoints(root: THREE.Object3D, length: number): { ext: number[][]; ca
   return { ext, cab };
 }
 
+/** A close ring for the holes' check: a metre off the car at three heights, every 15°. */
+function nearViews(length: number): number[][] {
+  const out: number[][] = [];
+  for (let az = 0; az < 360; az += 15) {
+    const a = (az * Math.PI) / 180;
+    for (const h of [0.3, 0.8, 1.3]) out.push([Math.sin(a) * 1.9, h, Math.cos(a) * (length / 2 + 1)]);
+  }
+  return out;
+}
+
 /** Every motion channel at 0 (closed) or 1 (open), posed by the game's own rig. */
 function setPose(root: THREE.Object3D, rig: KitRig, open: boolean): void {
   root.traverse((node) => {
@@ -644,7 +799,7 @@ function setPose(root: THREE.Object3D, rig: KitRig, open: boolean): void {
   root.updateMatrixWorld(true);
 }
 
-function scanCar(id: string): { clusters: Cluster[]; tris: number; pairs: number; ms: number } {
+function scanCar(id: string): { clusters: Cluster[]; tris: number; pairs: number; ms: number; holes: number; slits: Slit[] } {
   const t0 = performance.now();
   const spec = KIT_SPECS[id];
   const root = buildKitCar(id);
@@ -663,6 +818,10 @@ function scanCar(id: string): { clusters: Cluster[]; tris: number; pairs: number
   const hitsOpen = findPairs(open, (a, b) => rigid(open, a) !== rigid(open, b));
   const gridClosed = new RayGrid(closed, occ(closed));
   const gridOpen = new RayGrid(open, occ(open));
+  // Holes are checked against what a car past `KIT_DETAIL_M` still draws, as the mid and
+  // far traffic meshes bake it (render/farcars.ts): no detail group may be what covers one.
+  const shellOnly = new RayGrid(closed, (t) => occ(closed)(t) && !closed.meshes[closed.mesh[t]!]!.zone.startsWith('kit_'));
+  const { holes, slits } = holeSlits(root, shellOnly, [...ext, ...nearViews(spec.length)]);
 
   type Tagged = { h: PairHit; pose: 'closed' | 'open' };
   const all: Tagged[] = [...hitsClosed.map((h) => ({ h, pose: 'closed' as const })), ...hitsOpen.map((h) => ({ h, pose: 'open' as const }))];
@@ -747,27 +906,43 @@ function scanCar(id: string): { clusters: Cluster[]; tris: number; pairs: number
       if (`${closed.mesh[a]}|${closed.prov[a]}|${closed.col[a]}` !== kA) [a, b] = [b, a];
       const mA = closed.meshes[closed.mesh[a]!]!, mB = closed.meshes[closed.mesh[b]!]!;
       const sameLook = mA.slot === mB.slot && closed.col[a] === closed.col[b];
-      const extViews = extSeen.filter(Boolean).length, cabViews = cabSeen.filter(Boolean).length;
+      const extViews = extSeen.filter(Boolean).length;
+      // The seat sees a fight only one that fights within the cabin's reach (CABIN_TAU).
+      const cabViews = gapMin < CABIN_TAU ? cabSeen.filter(Boolean).length : 0;
       const band = TAUS.findIndex((tau) => gapMin < tau);
       const detail = mA.zone.startsWith('kit_') || mB.zone.startsWith('kit_');
       const vis = Math.max(extViews / ext.length, (0.75 * cabViews) / cab.length);
-      // Area weighted by the range it fights at: ≤10 m full, 10-25 m 0.3, beyond 25 m 0.05 (exterior only).
-      const eff = bands[0]! + 0.3 * (bands[1]! - bands[0]!) + (detail ? 0 : 0.05 * (bands[3]! - bands[1]!));
-      const severity = sameLook ? 0 : eff * 1e4 * vis;
+      // Pixels it fights over, at the worst distance it is drawn at: the overlap within the
+      // depth step there, times the pixels a square metre covers there. The cabin is seen
+      // from outside through its glass, which lets 1 − opacity of it through
+      // (`kitGlassOpacity`: clear to 30 m, a tinted mirror by `KIT_DETAIL_M`).
+      const cabin = mA.zone === 'kit_cabin' || mB.zone === 'kit_cabin';
+      const best = [...byPair.values()].map((l) => l.reduce((p, q) => (q.h.area > p.h.area ? q : p)).h);
+      let px = 0;
+      for (let d = 1; d <= (detail ? KIT_DETAIL_M : SHELL_DRAW_M); d *= 1.05) {
+        const tau = gapFightingAt(d);
+        let fighting = 0;
+        for (const h of best) fighting += h.within(tau);
+        px = Math.max(px, fighting * pxPerM(d) ** 2 * (cabin ? 1 - kitGlassOpacity(d) : 1));
+      }
+      // The kit's own wheels are placeholders: the loader shods every car with the pack's
+      // wheel sets (render/carmodel.ts `cloneWheels`), so a fight with one is never drawn.
+      const placeholder = mA.zone === 'wheel' || mB.zone === 'wheel';
+      const severity = sameLook || placeholder || px < MIN_FIGHT_PX ? 0 : px * vis;
       clusters.push({
         car: id,
         pose: poses.size === 2 ? 'both' : [...poses][0]!,
         meshA: mA, meshB: mB,
         provA: sites[closed.prov[a]!]!, provB: sites[closed.prov[b]!]!,
         colA: closed.col[a]!, colB: closed.col[b]!,
-        sameLook, band, area, bands, gapMin, gapMax, dFight: fightDistance(gapMin), detail, pairs: byPair.size,
+        sameLook, band, area, bands, gapMin, gapMax, dFight: fightDistance(gapMin), detail, pairs: byPair.size, px,
         s: half - sz / wsum, y: sy / wsum, x: sx / wsum,
         normal: nrmOf(h0) as [number, number, number],
         extViews, cabViews, extClosed: count(seen.closed.ext), cabClosed: count(seen.closed.cab), extOpen: count(seen.open.ext), cabOpen: count(seen.open.cab), severity,
       });
     }
   }
-  return { clusters, tris: closed.n, pairs: hitsClosed.length + hitsOpen.length, ms: performance.now() - t0 };
+  return { clusters, tris: closed.n, pairs: hitsClosed.length + hitsOpen.length, ms: performance.now() - t0, holes, slits };
 }
 
 // ---------------------------------------------------------------- main
@@ -780,30 +955,33 @@ selfTest();
 if (args.includes('--test')) process.exit(0);
 const named = args.filter((a, i) => !a.startsWith('--') && (jsonAt < 0 || i !== jsonAt + 1));
 const ids = named.length > 0 ? named.map((a) => a.replace(/^kit_/, '')) : Object.keys(KIT_SPECS);
-const results: { id: string; tris: number; pairs: number; ms: number; clusters: Cluster[] }[] = [];
+const results: { id: string; tris: number; pairs: number; ms: number; clusters: Cluster[]; holes: number; slits: Slit[] }[] = [];
 const rows: string[] = [];
 let closeVisible = 0;
+let slitCount = 0;
 for (const id of ids) {
   const r = scanCar(id);
   results.push({ id, ...r });
   const count = (band: number, f: (c: Cluster) => boolean): number => r.clusters.filter((c) => c.band === band && f(c)).length;
   const visible = (c: Cluster): boolean => c.severity > 0;
-  const shown = r.clusters.filter((c) => visible(c) && c.band <= 1).sort((p, q) => p.band - q.band || q.severity - p.severity);
+  const shown = r.clusters.filter(visible).sort((p, q) => p.band - q.band || q.severity - p.severity);
   closeVisible += count(0, visible);
   rows.push(
-    `${id.padEnd(9)} ${String(r.tris).padStart(6)} ${String(r.clusters.length).padStart(9)}   ${String(count(0, visible)).padStart(7)} ${String(count(0, (c) => !visible(c) && !c.sameLook)).padStart(6)} ${String(count(0, (c) => c.sameLook)).padStart(9)}   ${String(count(1, visible)).padStart(7)}   ${String(r.clusters.filter((c) => visible(c) && c.band >= 2).length).padStart(7)}`,
+    `${id.padEnd(9)} ${String(r.tris).padStart(6)} ${String(r.clusters.length).padStart(9)}   ${String(count(0, visible)).padStart(7)} ${String(count(0, (c) => !visible(c) && !c.sameLook)).padStart(6)} ${String(count(0, (c) => c.sameLook)).padStart(9)}   ${String(count(1, visible)).padStart(7)}   ${String(r.clusters.filter((c) => visible(c) && c.band >= 2).length).padStart(7)}   ${String(r.holes).padStart(5)} ${String(r.slits.length).padStart(5)}`,
   );
-  console.log(`\n${id}: ${r.tris} triangles, ${r.clusters.length} clusters, ${(r.ms / 1000).toFixed(1)} s`);
+  slitCount += r.slits.length;
+  console.log(`\n${id}: ${r.tris} triangles, ${r.clusters.length} clusters, ${r.holes} shell holes, ${(r.ms / 1000).toFixed(1)} s`);
+  for (const s of r.slits) console.log(`  slit    ${s.owner} hole open at ${s.at.join(', ')} from ${s.view.join(', ')}`);
   for (const c of shown) {
     const at = `s ${c.s.toFixed(2)} y ${c.y.toFixed(2)} x ${c.x >= 0 ? '+' : ''}${c.x.toFixed(2)}`;
     console.log(
-      `  ${BAND_NAMES[c.band]!.padEnd(7)} ${c.severity.toFixed(1).padStart(6)}  ${c.meshA.path} [${c.provA}]  /  ${c.meshB.path} [${c.provB}]  ${at}  ${(c.area * 1e4).toFixed(0)} cm²  gap ${(c.gapMin * 1e3).toFixed(2)} mm  views ext ${c.extClosed}/${c.extOpen} cab ${c.cabClosed}/${c.cabOpen}`,
+      `  ${BAND_NAMES[c.band]!.padEnd(7)} ${c.px.toFixed(1).padStart(6)} px  ${c.meshA.path} [${c.provA}]  /  ${c.meshB.path} [${c.provB}]  ${at}  ${(c.area * 1e4).toFixed(0)} cm²  gap ${(c.gapMin * 1e3).toFixed(2)} mm  views ext ${c.extClosed}/${c.extOpen} cab ${c.cabClosed}/${c.cabOpen}`,
     );
   }
 }
-console.log('\ncar        tris  clusters   close: visible hidden same-look   10-25 m visible   >25 m/far visible');
+console.log('\ncar        tris  clusters   close: visible hidden same-look   10-25 m visible   >25 m/far visible   holes slits');
 for (const row of rows) console.log(row);
-console.log(`\n${closeVisible} visible close-range clusters`);
+console.log(`\n${closeVisible} visible close-range clusters, ${slitCount} shell holes open to a viewpoint`);
 if (jsonPath) {
   await Bun.write(jsonPath, JSON.stringify({ extViews: EXT_N_HOLDER.n, cabViews: CAB_N, results }, null, 1));
   console.log(`wrote ${jsonPath}`);

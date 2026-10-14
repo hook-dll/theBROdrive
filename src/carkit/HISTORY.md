@@ -429,6 +429,59 @@ Format of an entry: **Problem** → **Cause** → **Fix** → *Code* (commit).
   each; >25 m/far rows 2102, 2104, 2105 down by 2, the rest unchanged. 10 triangles fewer
   on each classic; fit rows unchanged.
 
+## Z-fighting at every distance (2026-10-16)
+
+- **The census still showed 16–28 visible clusters per car at 10–25 m and 22–57 beyond
+  25 m**, after the close range was clean. Two kinds:
+  - *Tool artefacts* (`tools/kit-zfight.ts` classified them as visible when they cannot
+    show): fights under a pixel at the furthest distance the part is drawn (shell to
+    700 m, detail groups to `KIT_DETAIL_M`; 1440 px tall, 65° FOV); cabin pairs seen
+    through glass that is a tinted mirror by then (weighted by `1 − kitGlassOpacity`);
+    cabin fights counted from the seat although the cabin's near plane (0.02 m) parts
+    them within the cabin's 3 m (`CABIN_TAU`); fights with the kit's placeholder wheels,
+    which the pack's wheels replace. With those classes out: 13–22 at 10–25 m, 31–62
+    beyond.
+  - *Real ones*, every one a face lying on another part's hidden face, a few millimetres
+    off. A separation would have to be 4 mm at 50 m and 3–9 cm for the shell, which
+    traffic draws to ~700 m, so each hidden face was removed instead:
+    - every item on the body skin (lamps, clusters, grilles, badges, bumpers, corner
+      lamps, repeaters, the mirror glass): rooted 7 mm into the skin (`FACE_ROOT`) with no
+      back face, the shell cut under it (`KitHole`, `cutShellHoles`, run after the bay and
+      before `leanEnd`, which warps the outlines too). Items on one end face are a union
+      (`EndFace.place`): each cuts the other's faces inside its volume, ridges of moulded
+      bumpers included, and of two flush walls facing the same way the later part's stays
+      (`Outline.keepOutside`; without it both went and the 2108's slotted panel showed a
+      slit at each post). Cluster cells draw only their outer walls; grille bars run to
+      the back's walls and are cut out of it; an intake in a moulded bumper stands 10 mm
+      ahead of it. *exterior.ts, builder.ts `cutUnder`, body.ts, kit.ts*;
+    - cabin decals 0.3–2 mm over their surfaces (seat and bench inserts, armrest cup,
+      radio band and knob mark, mirror pad's glass, vent backings, heater panel and knob
+      pointers, the cluster's frame and face, ribbon frames and ticks): laid into the
+      surface (`inlay`, the surface cut under them); the glovebox opening sits 5 mm in
+      behind its cut; the radio needle 3.5 mm off its band, vent louvres 4.5 mm off
+      their backing, the door handle's recess 7.5 mm off the card;
+    - lit faces slid out 0.3–0.5 mm over their dark faces: the dark face now slides back
+      as the lit one slides out into its place (`GLOW_TRAVEL`; needles `NEEDLE_TRAVEL`
+      20 mm, clear of the faces put away behind the cluster): telltales, dials and their
+      ticks, needles, ribbons, the courtesy lamp. Still poses on the same channels;
+    - the rear hump tops crossed the well roof: they follow the shell's arch at its own
+      facets, `HUMP_RISE` above (*interior.ts `humps`*);
+    - the scuttle's back 2 mm before the bulkhead: no back face, it stands on the
+      bulkhead; the propshaft's centre bearing and the Samara's beam pivots have no top
+      on the floor; the Samara's tank stands 6 mm under it (*bay.ts*); the filler cup and
+      boot side trims moved clear of the flap and lining (*exterior.ts*, *bay.ts*).
+
+  Census (visible, 10–25 m / >25 m and far), first run → now: 2101 26/22 → 0/0,
+  2102 24/25, 2103 28/37, 2104 16/40, 2105 16/43, 2106 25/57, 2107 22/27, 2108 20/35,
+  2109 22/39, 21099 22/44, 2115 24/52, 2110 22/41, 2112 23/44, all → 0/0; close range 0
+  throughout. Holes per car 10–145 (the tens' and 2115's moulded bumpers carry most),
+  0 open to a viewpoint (checked against the shell and exterior only, as the mid and far
+  traffic meshes bake them). Triangles +650–1550 per car (README budget). Fit rows: only
+  the bonnet point moved, 1.5–2.6 mm up on ten cars (the scuttle now reaches the
+  bulkhead). The mid and far bakes (`bakeFarCarGeometry`, `bakeCarPaintGeometry`) take
+  the holed `body_paint` whole (position, colour, normal; the dust stamp
+  `CAR_BODY_POSITION_ATTRIBUTE` is per vertex), and stickers clip per triangle.
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent

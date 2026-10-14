@@ -16,7 +16,7 @@
  */
 
 import * as THREE from 'three';
-import { PartBuilder, lerp, table, type Vec3 } from './builder';
+import { PartBuilder, clipPolygon, cutUnder, lerp, newell, polygonArea, table, type Outline, type Vec3 } from './builder';
 import type { CabinColumn, KitCarSpec, TubStation } from './spec';
 
 /** Bevel under the sill: how far the side's bottom edge turns under. */
@@ -324,7 +324,7 @@ class Shell {
       if (!v.includes(i)) v.push(i);
     }
     if (v.length < 3) return;
-    if (area(v.map((i) => this.positions[i]!)) < 1e-7) return;
+    if (polygonArea(v.map((i) => this.positions[i]!)) < 1e-7) return;
     this.faces.push({ v, owner, mat, fixed, lined });
   }
 }
@@ -349,47 +349,10 @@ function norm(a: Vec3): Vec3 {
   return l > 1e-12 ? [a[0] / l, a[1] / l, a[2] / l] : [0, 0, 0];
 }
 
-/** Newell normal times area of a planar-ish polygon. */
-function newell(points: readonly Vec3[]): Vec3 {
-  let x = 0;
-  let y = 0;
-  let z = 0;
-  for (let i = 0; i < points.length; i++) {
-    const a = points[i]!;
-    const b = points[(i + 1) % points.length]!;
-    x += (a[1] - b[1]) * (a[2] + b[2]);
-    y += (a[2] - b[2]) * (a[0] + b[0]);
-    z += (a[0] - b[0]) * (a[1] + b[1]);
-  }
-  return [x / 2, y / 2, z / 2];
-}
-
-function area(points: readonly Vec3[]): number {
-  const n = newell(points);
-  return Math.hypot(n[0], n[1], n[2]);
-}
-
 function centroid(points: readonly Vec3[]): Vec3 {
   let c: Vec3 = [0, 0, 0];
   for (const p of points) c = add(c, p);
   return scale(c, 1 / points.length);
-}
-
-/** The part of a convex polygon where `sign × g` is not negative, cut where g crosses 0. */
-function clipPolygon(points: readonly Vec3[], g: (p: Vec3) => number, sign: 1 | -1): Vec3[] {
-  const out: Vec3[] = [];
-  for (let i = 0; i < points.length; i++) {
-    const p = points[i]!;
-    const q = points[(i + 1) % points.length]!;
-    const gp = sign * g(p);
-    const gq = sign * g(q);
-    if (gp >= 0) out.push(p);
-    if ((gp > 0 && gq < 0) || (gp < 0 && gq > 0)) {
-      const t = gp / (gp - gq);
-      out.push([lerp(p[0], q[0], t), lerp(p[1], q[1], t), lerp(p[2], q[2], t)]);
-    }
-  }
-  return out;
 }
 
 /**
@@ -1122,4 +1085,45 @@ function pivotOf(owner: string, verts: readonly Vec3[]): Vec3 {
   }
   // Drop glass slides straight down: pivot at its own bottom.
   return [0, minY, (minZ + maxZ) / 2];
+}
+
+/**
+ * Where a part bolted to the outside (an end face's lamp, panel or grille, a corner lamp,
+ * a moulding) stands on the shell: an outline on the skin (`Outline`), whose part's walls
+ * reach into the body round it. The skin under it is cut away (`cutShellHoles`): a face
+ * hidden under a part but within millimetres of it fights the part in the depth buffer at
+ * a distance, and the shell is drawn out to the far traffic's reach.
+ */
+export interface KitHole {
+  /** The shell part it stands on: `body`, `door_fl`, `boot`, `bonnet`, `tailgate`, `flap`, … */
+  readonly owner: string;
+  readonly outline: Outline;
+}
+
+/**
+ * Cuts the skin of each shell part (its `paint` mesh) away under the holes standing on it
+ * (`cutUnder`). Run once every part is built, before the ends lean.
+ */
+export function cutShellHoles(root: THREE.Object3D, holes: readonly KitHole[]): void {
+  root.updateMatrixWorld(true);
+  const rootInverse = root.matrixWorld.clone().invert();
+  for (const owner of new Set(holes.map((h) => h.owner))) {
+    const node = owner === 'body' ? root : root.getObjectByName(owner);
+    const mesh = node?.children.find((c) => c.name === `${owner}_paint`) as THREE.Mesh | undefined;
+    if (!mesh) throw new Error(`Kit shell has no "${owner}_paint" to cut holes in`);
+    const toCar = rootInverse.clone().multiply(mesh.matrixWorld);
+    const position = mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const color = mesh.geometry.getAttribute('color') as THREE.BufferAttribute;
+    const car = position.clone().applyMatrix4(toCar);
+    const cut = cutUnder(Array.from(car.array), Array.from(color.array), holes.filter((h) => h.owner === owner).map((h) => h.outline));
+    // Tags a tool hangs on the geometry per triangle (tools/kit-zfight.ts `prov`) follow the cut.
+    const tags = mesh.geometry.userData.prov as unknown[] | undefined;
+    if (tags) mesh.geometry.userData.prov = cut.from.map((i) => tags[i]);
+    const local = new THREE.Float32BufferAttribute(cut.positions, 3).applyMatrix4(toCar.clone().invert());
+    mesh.geometry.setAttribute('position', local);
+    mesh.geometry.setAttribute('color', new THREE.Float32BufferAttribute(cut.colors, 3));
+    mesh.geometry.computeVertexNormals();
+    mesh.geometry.computeBoundingBox();
+    mesh.geometry.computeBoundingSphere();
+  }
 }

@@ -382,13 +382,12 @@ function buildEngineBay(frame: BodyFrame, b: PartBuilder, classic: boolean): Bay
   const ss = stationsBetween(frame, support - 0.04, cowl);
   for (const side of [1, -1]) loft(b, 'paint', frame, ss, side, (s) => wingWall(frame, s, inner, shelf, floorY(frame, s), true));
   bulkhead(b, frame, cowl, inner, shelf, floorY(frame, cowl));
-  // Scuttle: the plenum under the screen's foot, a black grille on top. Its back stands
-  // 2 mm ahead of the bulkhead at the cowl, so the two walls do not share a plane.
+  // Scuttle: the plenum under the screen's foot, a black grille on top. It stands against
+  // the bulkhead at the cowl with no back face of its own, so the two share no plane.
   const scuttleTop = ceiling(frame, cowl - 0.1, cowl, frame.lidX(cowl));
-  const scuttleBack = cowl - PLANE_GAP;
-  const scuttle: Pt[] = [[scuttleBack, scuttleTop - 0.09], [scuttleBack, scuttleTop], [cowl - 0.1, scuttleTop - 0.005], [cowl - 0.1, scuttleTop - 0.05]];
+  const scuttle: Pt[] = [[cowl, scuttleTop], [cowl - 0.1, scuttleTop - 0.005], [cowl - 0.1, scuttleTop - 0.05], [cowl, scuttleTop - 0.09]];
   b.color(COLOURS.black);
-  across(b, frame, 'trim', scuttle, -frame.lidX(cowl), frame.lidX(cowl));
+  across(b, frame, 'trim', scuttle, -frame.lidX(cowl), frame.lidX(cowl), false);
 
   // ---- radiator support: slam panel, posts and lower member framing the radiator ----
   const radHalf = 0.29;
@@ -619,8 +618,9 @@ function buildSaloonBoot(frame: BodyFrame, b: PartBuilder, classic: boolean): vo
   const spec = frame.spec;
   const w = spec.wheels;
   const s0 = frame.rearBase + 0.01;
-  // Under the lid's rear edge, but inside the tail face where the lid comes down to it.
-  const s1 = Math.min(spec.bootEnd! + 0.008, spec.stations[spec.stations.length - 1]!.s - 0.005);
+  // Under the lid's rear edge, but 15 mm inside the tail face (or the lid's panel in it), so
+  // the backs of the lamps rooted 7 mm in it stand clear of this wall (exterior.ts `FACE_ROOT`).
+  const s1 = Math.min(spec.bootEnd! + 0.008, spec.stations[spec.stations.length - 1]!.s - 0.015);
   const inner = frame.wellX(w.rear) - WELL_GAP;
   const shelf = w.radius * (1 + frame.archFactor(w.rear)) + WELL_GAP;
   // Flat floor at the highest point of the shell's floor under it.
@@ -784,7 +784,8 @@ function classicChassis(frame: BodyFrame, b: PartBuilder, route: BayRoute): void
   b.cylinderZ('trim', at(frame, x, cy, gearEnd + 0.02), 0.06, 0.02, 8);
   rod(b, 'trim', at(frame, x, cy, gearEnd + 0.04), at(frame, 0, pinionY, pinionS), 0.032, 6);
   const mid = (gearEnd + pinionS) / 2;
-  boxS(b, frame, 'trim', [-0.06, (cy + pinionY) / 2 - 0.03, mid - 0.03], [0.06, floorY(frame, mid), mid + 0.03]);
+  // No top: it meets the floor.
+  boxS(b, frame, 'trim', [-0.06, (cy + pinionY) / 2 - 0.03, mid - 0.03], [0.06, floorY(frame, mid), mid + 0.03], 0b111011);
 
   // Live axle: tubes, the differential (its bottom at CLEARANCE), the pinion nose.
   b.color(COLOURS.driveline);
@@ -850,7 +851,9 @@ function samaraChassis(frame: BodyFrame, b: PartBuilder, route: BayRoute): void 
   const t1 = w.rear - 0.5;
   const tf = Math.min(floorY(frame, t0), floorY(frame, t1));
   b.color(COLOURS.fuelTank);
-  bevelS(b, frame, 'trim', [-0.45, CLEARANCE, t0], [-0.04, tf - 0.002, t1], 0.03);
+  // 6 mm under the floor: its rounded top cannot leave the floor's plane out, and nearer
+  // the two would fight in depth from the road.
+  bevelS(b, frame, 'trim', [-0.45, CLEARANCE, t0], [-0.04, tf - 0.006, t1], 0.03);
   b.color(COLOURS.underseal);
   for (const s of [t0 + 0.07, t1 - 0.07]) boxS(b, frame, 'trim', [-0.47, CLEARANCE, s - 0.015], [-0.02, CLEARANCE + 0.006, s + 0.015]);
 
@@ -862,7 +865,7 @@ function samaraChassis(frame: BodyFrame, b: PartBuilder, route: BayRoute): void 
   const bf = floorY(frame, beamS);
   for (const side of [1, -1]) {
     const pf = floorY(frame, pivotS);
-    boxS(b, frame, 'trim', [side * 0.53, pf - 0.05, pivotS - 0.03], [side * 0.59, pf, pivotS + 0.03]);
+    boxS(b, frame, 'trim', [side * 0.53, pf - 0.05, pivotS - 0.03], [side * 0.59, pf, pivotS + 0.03], 0b111011);
     rod(b, 'trim', at(frame, side * 0.56, pf - 0.03, pivotS), at(frame, side * hub, R - 0.01, w.rear), 0.025, 6);
     const springX = side * (frame.wellX(w.rear) - 0.07);
     boxS(b, frame, 'trim', [Math.min(springX, side * hub), R - 0.02, w.rear - 0.07], [Math.max(springX, side * hub), R + 0.005, w.rear + 0.03]);
