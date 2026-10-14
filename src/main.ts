@@ -145,6 +145,7 @@ import {
 import { Vehicle } from './vehicle/vehicle';
 import type { TrunkViewState } from './vehicle/trunk';
 import { GameAudio, type AmbienceFrame, type CarPose, type RadioSpatialState } from './audio/gameaudio';
+import { cabinOpenness, type CabinOpenness } from './audio/cabinopenness';
 import { STREAM_FRAME_BUDGET_MS, STREAM_JOBS_PER_FRAME, warmUpBoot } from './app/bootwarmup';
 import { installDevTools } from './app/devtools';
 import { RivalRace, newRaceProgress } from './contracts/race';
@@ -1473,6 +1474,8 @@ async function boot(): Promise<void> {
   };
   // Per-frame audio inputs, written in place.
   const carAudioPose: CarPose = { x: 0, y: 0, z: 0, forwardX: 0, forwardZ: 1, airMps: 0, wet: 0 };
+  /** How open the occupied kit car's cabin is to each ear; filled per frame in the cabin view. */
+  const cabinEars: CabinOpenness = { left: 0, right: 0 };
   /** The wind at the driven car, for the dash's wind gauge; written in place. */
   const dashWind = { x: 0, z: 0 };
   const ambienceFrame: AmbienceFrame = {
@@ -1482,7 +1485,7 @@ async function boot(): Promise<void> {
     dust: 0,
     heat: 0,
     dayFactor: 1,
-    cabin: false,
+    cabinOpen: null,
     boltSeed: 0,
     boltAge: 99,
     boltDistance: 5000,
@@ -2677,12 +2680,27 @@ async function boot(): Promise<void> {
       );
       carAudioPose.wet = weather.wet;
     }
+    // The cabin round the listener and its openings, by ear. The car's right is its local
+    // -X; the listener's right ear axis is the camera's +X.
+    let cabinAudio: CabinOpenness | null = null;
+    if (cabinView && driving?.kit) {
+      const q = driving.root.quaternion;
+      const c = renderer.camera.quaternion;
+      const carRightX = -(1 - 2 * (q.y * q.y + q.z * q.z));
+      const carRightY = -(2 * (q.x * q.y + q.w * q.z));
+      const carRightZ = -(2 * (q.x * q.z - q.w * q.y));
+      const earX = 1 - 2 * (c.y * c.y + c.z * c.z);
+      const earY = 2 * (c.x * c.y + c.w * c.z);
+      const earZ = 2 * (c.x * c.z - c.w * c.y);
+      cabinOpenness(driving.kit, s.player.seat, carRightX * earX + carRightY * earY + carRightZ * earZ, cabinEars);
+      cabinAudio = cabinEars;
+    }
     audio.updateDriving(
       driving ? driving.audio : null,
       radioSpatial,
       driving ? drivingId! : null,
       driving ? carAudioPose : null,
-      cabinView,
+      cabinAudio,
       frameDt,
     );
     ambienceFrame.windMps = weather.windMps;
@@ -2691,7 +2709,7 @@ async function boot(): Promise<void> {
     ambienceFrame.dust = weather.dust;
     ambienceFrame.heat = weather.heat;
     ambienceFrame.dayFactor = sky.dayFactor;
-    ambienceFrame.cabin = cabinView;
+    ambienceFrame.cabinOpen = cabinView ? (cabinAudio ? (cabinAudio.left + cabinAudio.right) / 2 : 0) : null;
     ambienceFrame.boltSeed = weather.boltSeed;
     ambienceFrame.boltAge = weather.boltAge;
     ambienceFrame.boltDistance = weather.boltDistance;

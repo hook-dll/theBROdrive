@@ -4,6 +4,19 @@
 
 ### Added
 
+- THE CABIN OPENS TO THE OUTSIDE BY ITS WINDOWS AND DOORS (`audio/cabinopenness.ts`,
+  `AudioMixer.setCabinShell`, `audio/vehicleaudio.ts`, `audio/ambience.ts`). Every outside
+  sound — the air, rain, animals, the other traffic, crashes and the open country's
+  reverb — now reaches the ears through one cabin shell per ear on the world bus (the
+  traffic and crashes were not muffled in the cabin at all before). Shut, it is the old
+  1.5 kHz corner at -2.5 dB; each door, window, quarter vent and the tailgate opens its
+  side of the car, a window steeply from its first centimetres, the listener's own row
+  fully and the other row less, each ear hearing its side and some of the far one, turned
+  with the head. The car's own tyres, wind and body open the same way, and an open window
+  at speed drums harder. Measured in a 2107's cabin view (left / right ear corner): all
+  shut 1.5 / 1.5 kHz; driver's window 15% down 3.9 / 2.3; fully down 11.2 / 3.7; every
+  window down 14.5 / 14.5; the passenger's window 3.7 / 11.2; the chase view 16 / 16.
+
 - KIT PANELS SOUND THEMSELVES (`player/interaction.ts` `KIT_PANEL_SOUND`,
   `listenForShut`; `audio/foley.ts`; new `bonnet-open`, `bonnet-shut`, `boot-open`,
   `boot-shut` recordings, CC0 from Freesound, in `tools/sound/manifest.json`). Any side

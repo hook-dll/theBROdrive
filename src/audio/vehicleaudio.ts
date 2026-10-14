@@ -311,6 +311,8 @@ export class VehicleAudio {
   private wasRunning = false;
   private active = false;
   private perspective: CarPerspective = 'outside';
+  /** How much of the cabin's shell is around the listener: 1 shut, 0 open or outside. */
+  private shell = 0;
   private jointAccumM = 0;
   private nextCrackM = 8;
   private lastBumpAt = 0;
@@ -609,15 +611,23 @@ export class VehicleAudio {
     }
   }
 
-  /** Cabin (the seat's view) or outside (chase). Crossfades the shell's filtering. */
-  setPerspective(perspective: CarPerspective): void {
-    if (this.perspective === perspective) return;
+  /**
+   * Cabin (the seat's view) or outside (chase): crossfades the shell's filtering. In the
+   * cabin `open` (0..1, audio/cabinopenness.ts) opens the tyres', wind's and body's shell
+   * towards the outside, as windows and doors let the car's own noise in; the engine's
+   * voicing follows the perspective alone (see `engineOut`).
+   */
+  setPerspective(perspective: CarPerspective, open = 0): void {
+    const shell = perspective === 'cabin' ? 1 - open : 0;
+    const turned = perspective !== this.perspective;
+    if (!turned && Math.abs(shell - this.shell) < 0.005) return;
     this.perspective = perspective;
+    this.shell = shell;
     const now = this.mixer.now;
-    const cabin = perspective === 'cabin';
-    this.cabinLowpass.frequency.setTargetAtTime(cabin ? CABIN_LP_HZ : OUTSIDE_LP_HZ, now, 0.08);
-    this.cabinBoom.gain.setTargetAtTime(cabin ? CABIN_BOOM_DB : 0, now, 0.08);
-    this.spaceSend.gain.setTargetAtTime(cabin ? 0 : SPACE_SEND, now, 0.08);
+    this.cabinLowpass.frequency.setTargetAtTime(OUTSIDE_LP_HZ * (CABIN_LP_HZ / OUTSIDE_LP_HZ) ** shell, now, 0.08);
+    this.cabinBoom.gain.setTargetAtTime(CABIN_BOOM_DB * shell, now, 0.08);
+    this.spaceSend.gain.setTargetAtTime(SPACE_SEND * (1 - shell), now, 0.08);
+    if (!turned) return;
     const engineCabin = this.engineHeardAs === 'cabin';
     this.engineLowpass.frequency.setTargetAtTime(engineCabin ? CABIN_LP_HZ : OUTSIDE_LP_HZ, now, 0.08);
     this.engineBoom.gain.setTargetAtTime(engineCabin ? CABIN_BOOM_DB : 0, now, 0.08);
@@ -721,9 +731,12 @@ export class VehicleAudio {
     const air = Math.max(0, pose.airMps);
     const windT = clamp01(air / WIND_FULL_MPS);
     this.windHighpass.frequency.setTargetAtTime(110 + 380 * windT, now, 0.1);
-    this.windLowpass.frequency.setTargetAtTime((cabin ? 1400 : 2600) + 2200 * windT, now, 0.1);
-    ramp(this.windGain.gain, windT * windT * WIND_GAIN * gust * (cabin ? 0.6 : 1), now, 0.12);
-    ramp(this.buffetGain.gain, windT * windT * WIND_GAIN * 1.6 * (cabin ? 1 : 0.35) * gust, now, 0.12);
+    // Shut, the cabin dulls the rush and the panels drum (the buffet); an open window lets
+    // the rush in bright and makes the drumming worse, as it does at speed.
+    const shell = this.shell;
+    this.windLowpass.frequency.setTargetAtTime(2600 - 1200 * shell + 2200 * windT, now, 0.1);
+    ramp(this.windGain.gain, windT * windT * WIND_GAIN * gust * (1 - 0.4 * shell), now, 0.12);
+    ramp(this.buffetGain.gain, windT * windT * WIND_GAIN * 1.6 * (cabin ? 1 + 0.8 * (1 - shell) : 0.35) * gust, now, 0.12);
     const sealT = clamp01((air - 18) / 20);
     this.sealFilter.frequency.setTargetAtTime(1150 + 500 * sealT + 90 * Math.sin(this.gustPhase * 0.6), now, 0.2);
     ramp(this.sealGain.gain, cabin ? sealT * sealT * WIND_GAIN * 0.45 * gust : 0, now, 0.2);

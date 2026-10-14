@@ -110,8 +110,12 @@ export interface AmbienceFrame {
   heat: number;
   /** 0 night .. 1 full day (the sky's own day factor). */
   dayFactor: number;
-  /** Listener sits inside a car cabin. */
-  cabin: boolean;
+  /**
+   * The listener sits in a car cabin: how open it is to the outside, 0..1 (mean of the
+   * ears, audio/cabinopenness.ts), or null outside one. The cabin's muffling of the world
+   * itself is the mixer's shell (`AudioMixer.setCabinShell`).
+   */
+  cabinOpen: number | null;
   /** Current or last lightning stroke. */
   boltSeed: number;
   boltAge: number;
@@ -131,9 +135,8 @@ function pick<T>(list: readonly T[], avoid: T | null): T {
 }
 
 export class Ambience {
-  /** Everything outside the car goes through this: muffled by the cabin. */
+  /** Everything outside the car goes through this: muffled by the mixer's cabin shell. */
   private readonly world: GainNode;
-  private readonly worldLowpass: BiquadFilterNode;
   private readonly sources: AudioBufferSourceNode[] = [];
 
   private readonly windLight: Bed;
@@ -151,7 +154,6 @@ export class Ambience {
   private readonly lastCall = new Map<string, number>();
   /** Animals keep quiet in rain and hard wind; last frame's value, for bird calls. */
   private shelter = 1;
-  private cabin = false;
 
   constructor(private readonly mixer: AudioMixer) {
     const ctx = mixer.ctx;
@@ -161,11 +163,7 @@ export class Ambience {
     master.connect(mixer.world);
 
     this.world = ctx.createGain();
-    this.worldLowpass = ctx.createBiquadFilter();
-    this.worldLowpass.type = 'lowpass';
-    this.worldLowpass.frequency.value = 16000;
-    this.worldLowpass.Q.value = 0.6;
-    this.world.connect(this.worldLowpass).connect(master);
+    this.world.connect(master);
 
     this.windLight = new Bed(mixer, bank, 'wind-grass', this.world, 0.8);
     this.windStrong = new Bed(mixer, bank, 'wind-strong', this.world, 0.8);
@@ -192,11 +190,6 @@ export class Ambience {
   update(f: AmbienceFrame, dt: number, rightX: number, rightZ: number): void {
     const now = this.mixer.now;
 
-    if (f.cabin !== this.cabin) {
-      this.cabin = f.cabin;
-      this.worldLowpass.frequency.setTargetAtTime(f.cabin ? 1500 : 16000, now, 0.08);
-    }
-
     // --- air --------------------------------------------------------------------
     const windT = clamp01(f.windMps / 17);
     const strongT = clamp01((windT - 0.35) / 0.5);
@@ -205,9 +198,12 @@ export class Ambience {
     ramp(this.sandGain.gain, 0.05 * f.drift * windT + 0.035 * f.dust, now, 0.3);
 
     // --- rain -------------------------------------------------------------------
+    // Through a shut cabin the rain is the roof's drumming more than the road's hiss;
+    // open windows let the hiss back in. The roof is over your head either way.
     const rain = f.rain;
-    this.rain.set(RAIN_GAIN * rain * (f.cabin ? 0.55 : 1), now, 0.5);
-    this.roof.set(f.cabin ? RAIN_GAIN * ROOF * rain : 0, now, 0.25);
+    const cabinOpen = f.cabinOpen;
+    this.rain.set(RAIN_GAIN * rain * (cabinOpen === null ? 1 : 0.55 + 0.45 * cabinOpen), now, 0.5);
+    this.roof.set(cabinOpen !== null ? RAIN_GAIN * ROOF * rain : 0, now, 0.25);
 
     // --- thunder ----------------------------------------------------------------
     if (f.boltSeed !== this.lastBoltSeed) {

@@ -112,6 +112,16 @@ function xorshift(seed: number): () => number {
 /** The audio graph's own sample rate; see the AudioMixer constructor. */
 const AUDIO_SAMPLE_RATE = 48_000;
 
+/**
+ * The cabin shell on the world bus, per ear: shut, a corner low-pass at `SHELL_SHUT_HZ`
+ * and `SHELL_SHUT_GAIN`; open, the open air. Sweeps the corner exponentially, so a
+ * window an inch down already lets the hiss of the outside in.
+ */
+const SHELL_SHUT_HZ = 1500;
+const SHELL_OPEN_HZ = 16000;
+const SHELL_SHUT_GAIN = 0.75;
+const SHELL_RAMP_S = 0.08;
+
 export class AudioMixer {
   readonly ctx: AudioContext;
   /** Game audio (engine, wind, tyres, foley, the world). Under the master, with the radio. */
@@ -144,6 +154,9 @@ export class AudioMixer {
   private disposed = false;
   private engineWorkletReady = false;
   private readonly engineWorkletWaiters: (() => void)[] = [];
+  /** The world bus's cabin shell, per ear (0 left, 1 right); see `setCabinShell`. */
+  private readonly shellFilters: readonly [BiquadFilterNode, BiquadFilterNode];
+  private readonly shellGains: readonly [GainNode, GainNode];
 
   constructor() {
     // The rate is NAMED, not left to the device. Left to it, Chrome reported 48 kHz
@@ -186,8 +199,25 @@ export class AudioMixer {
     this.radio.connect(this.master);
     this.car = this.ctx.createGain();
     this.car.connect(this.sfx);
-    this.world = this.ctx.createGain();
-    this.world.connect(this.sfx);
+    // Stereo always: mono sources up-mix to both ears before the per-ear shell splits them.
+    this.world = new GainNode(this.ctx, { channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers' });
+    // Everything outside the car reaches the ears through the cabin shell, one filter
+    // and level per ear, so an open window on one side opens that side (`setCabinShell`).
+    const shellSplit = this.ctx.createChannelSplitter(2);
+    const shellMerge = this.ctx.createChannelMerger(2);
+    const ear = (index: 0 | 1): [BiquadFilterNode, GainNode] => {
+      const filter = new BiquadFilterNode(this.ctx, { type: 'lowpass', frequency: SHELL_OPEN_HZ, Q: 0.6 });
+      const gain = this.ctx.createGain();
+      shellSplit.connect(filter, index);
+      filter.connect(gain).connect(shellMerge, 0, index);
+      return [filter, gain];
+    };
+    const [leftFilter, leftGain] = ear(0);
+    const [rightFilter, rightGain] = ear(1);
+    this.shellFilters = [leftFilter, rightFilter];
+    this.shellGains = [leftGain, rightGain];
+    this.world.connect(shellSplit);
+    shellMerge.connect(this.sfx);
     this.traffic = this.ctx.createGain();
     this.traffic.gain.value = TRAFFIC_TRIM;
     this.traffic.connect(this.world);
@@ -213,6 +243,21 @@ export class AudioMixer {
 
     window.addEventListener('pointerdown', this.unlock);
     window.addEventListener('keydown', this.unlock);
+  }
+
+  /**
+   * How open the cabin is to each ear, 0 (shut) .. 1 (as outside); `null` is no cabin
+   * round the listener (on foot, the chase view): the open air. The values come from
+   * audio/cabinopenness.ts.
+   */
+  setCabinShell(left: number | null, right: number | null): void {
+    const now = this.now;
+    const ears = [left, right] as const;
+    for (let i = 0; i < 2; i++) {
+      const open = ears[i] ?? 1;
+      this.shellFilters[i]!.frequency.setTargetAtTime(SHELL_SHUT_HZ * (SHELL_OPEN_HZ / SHELL_SHUT_HZ) ** open, now, SHELL_RAMP_S);
+      this.shellGains[i]!.gain.setTargetAtTime(SHELL_SHUT_GAIN + (1 - SHELL_SHUT_GAIN) * open, now, SHELL_RAMP_S);
+    }
   }
 
   /**

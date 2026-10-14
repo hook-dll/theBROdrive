@@ -17,6 +17,7 @@ import { TrafficAudio } from './trafficaudio';
 import type { SampleName } from './samples';
 import { DancerVoice } from './dancervoice';
 import { Ambience, type AmbienceFrame } from './ambience';
+import type { CabinOpenness } from './cabinopenness';
 import { Foley, type BubbleGumAudioPhase, type FoleyContinuous, type FoleyEvent } from './foley';
 import { Radio, type RadioSpatialState } from './radio';
 import { createPropellerVoice, createSurfVoice, type PropellerVoice, type SurfVoice } from './storyaudio';
@@ -144,20 +145,22 @@ export class GameAudio {
   /**
    * Per-frame car audio. Every entered car owns its own radio stream; inactive
    * radios remain spatial sources while the listener walks around the world.
-   * `pose` places the car's sound sources; `cabin` is the bonnet-seat view.
+   * `pose` places the car's sound sources; `cabin` is how open the cabin round the
+   * listener is to each ear, null outside it (on foot, the chase view).
    */
   updateDriving(
     state: VehicleAudioState | null,
     radioSpatial: RadioSpatialState,
     radioCarId: string | null,
     pose: CarPose | null,
-    cabin: boolean,
+    cabin: CabinOpenness | null,
     dt: number,
   ): void {
     // The listener first: the car's panners are placed against it this frame.
     this.writeListener(radioSpatial);
     this.vehicle.setActive(state !== null && pose !== null);
-    this.vehicle.setPerspective(cabin ? 'cabin' : 'outside');
+    this.vehicle.setPerspective(cabin ? 'cabin' : 'outside', cabin ? (cabin.left + cabin.right) / 2 : 0);
+    this.mixer.setCabinShell(cabin?.left ?? null, cabin?.right ?? null);
     if (state && pose) this.vehicle.update(state, pose, dt);
     this.activeRadioId = radioCarId;
 
