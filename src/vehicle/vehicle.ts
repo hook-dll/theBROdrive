@@ -3868,6 +3868,17 @@ export class Vehicle implements Rebasable {
     return this.lamps.beamCount(group, merged, shadowed);
   }
 
+  /** Saves the inside mirror's aim when the driver has turned it (kit `mirror_*`). */
+  storeMirrorAim(): void {
+    const rig = this.kitRig;
+    if (!rig) return;
+    const yaw = rig.get('mirror_yaw');
+    const pitch = rig.get('mirror_pitch');
+    const saved = this.car.innerMirror;
+    if (saved ? saved[0] === yaw && saved[1] === pitch : yaw === 0 && pitch === 0) return;
+    this.world.apply({ t: 'car_mirror', carId: this.car.id, yaw, pitch });
+  }
+
   /**
    * Offers one LIT lamp group to the shared rig. The beams, their mounts and the
    * merged ambient form all live in vehiclelamps.ts, which owns the state this reads.
@@ -5692,6 +5703,10 @@ export class Vehicle implements Rebasable {
       // carries the same name, and two writers would fight over it.
       this.kitRig = new KitRig(instance.body, false);
       if (previousKit) this.kitRig.adopt(previousKit);
+      else if (this.car.innerMirror) {
+        this.kitRig.set('mirror_yaw', this.car.innerMirror[0], true);
+        this.kitRig.set('mirror_pitch', this.car.innerMirror[1], true);
+      }
       this.kitDome = instance.body.getObjectByName(KIT_DOME_LAMP_NODE) ?? null;
     } else {
       // The body subtree is cloned per vehicle, so this node belongs to this car and

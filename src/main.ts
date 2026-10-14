@@ -186,6 +186,13 @@ const JUMP_REPROJECT_M = 250;
 /** See STATE_LOAD_RADIUS_M in world/ranges.ts. */
 const ACTIVE_LOAD_RADIUS_SQUARED = STATE_LOAD_RADIUS_M * STATE_LOAD_RADIUS_M;
 const ACTIVE_UNLOAD_RADIUS_SQUARED = STATE_UNLOAD_RADIUS_M * STATE_UNLOAD_RADIUS_M;
+/**
+ * Inside mirror channel units (radians) per radian of mouse look while E is held on it:
+ * half, since a mirror turned by θ swings its view by 2θ. Signs make the image follow
+ * the hand: mouse right shows more of the right, mouse up more of the sky.
+ */
+const MIRROR_HAND_YAW = 0.5;
+const MIRROR_HAND_PITCH = 0.5;
 
 /** How often the record marker and player position are pushed into state. */
 const RECORD_INTERVAL = 2;
@@ -2266,6 +2273,15 @@ async function boot(): Promise<void> {
     }
 
     Object.assign(cameraInput, lastInput);
+    // E held on the inside mirror: the mouse turns the mirror, the head stays still. A
+    // mirror turned by θ swings the view in it by 2θ, so half the look delta moves the
+    // image with the hand.
+    const aimingKit = interaction.aimingKit;
+    if (aimingKit) {
+      aimingKit.rig.aim(aimingKit.control, lookYawAccum * MIRROR_HAND_YAW, lookPitchAccum * MIRROR_HAND_PITCH);
+      lookYawAccum = 0;
+      lookPitchAccum = 0;
+    }
     cameraInput.lookYaw = lookYawAccum;
     cameraInput.lookPitch = lookPitchAccum;
     cameraInput.zoomDelta = zoomAccum;

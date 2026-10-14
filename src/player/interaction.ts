@@ -589,6 +589,8 @@ export class Interaction {
   private readonly kitBox = new THREE.Box3();
   /** A momentary fitting (the horn) held down by E, released after `KIT_PRESS_SECONDS`. */
   private kitPress: { rig: KitRig; control: KitControl; left: number } | null = null;
+  /** The hand-aimed part (the inside mirror) E is held on: the mouse turns it, not the head. */
+  private kitAim: { vehicle: Vehicle; rig: KitRig; control: KitControl } | null = null;
   /** Last tick's aim named a kit part, so E belongs to it; see `claimsUseHeld`. */
   private kitClaimsE = false;
   /** Panels set swinging shut, slammed by `listenForShut` as each lands. */
@@ -658,7 +660,12 @@ export class Interaction {
    * hands E to the held item; a sticker in hand keeps E (it mirrors the sticker).
    */
   get claimsUseHeld(): boolean {
-    return this.kitClaimsE;
+    return this.kitClaimsE || this.kitAim !== null;
+  }
+
+  /** The part the mouse turns this frame instead of the view (main.ts), or null. */
+  get aimingKit(): { readonly rig: KitRig; readonly control: KitControl } | null {
+    return this.kitAim;
   }
 
   /** Gives interaction a handle on the on-foot character, so enter/exit can move it. */
@@ -702,6 +709,11 @@ export class Interaction {
         this.kitPress = null;
       }
     }
+    // Let go of E (or out of the seat), the mirror stays where the hand left it.
+    if (this.kitAim && (!input.useHeldDown || !this.world.state.player.drivingCarId)) {
+      this.kitAim.vehicle.storeMirrorAim();
+      this.kitAim = null;
+    }
 
     if (this.world.state.player.drivingCarId) {
       // Sitting down closes whatever was open: the grid belongs to a player standing
@@ -714,15 +726,25 @@ export class Interaction {
       const active = this.getVehicle();
       const rig = active?.vehicle.kit ?? null;
       let aimed: KitPicked | null = null;
+      // Another seat in the aim, from the cabin view in a car at a standstill: F moves
+      // the occupant into it (over the tunnel, between the seats) instead of out.
+      let seat: PlayerSeat | null = null;
       if (active && rig) {
         aimed = this.seatedKitPart(active.vehicle, eyeX, eyeY, eyeZ, dirX, dirY, dirZ, cabinView);
         if (aimed) {
           this.kitClaimsE = true;
           if (useHeldPressed) this.workKitPart(active.vehicle, rig, aimed.control);
         }
+        const other = this.kitAimed.seat;
+        if (cabinView && other !== null && other !== this.world.state.player.seat && active.vehicle.speedKmh < EXIT_SPEED_LIMIT_KMH) {
+          seat = other;
+        }
       }
-      if (interactPressed) this.tryExit(roadS);
-      return { prompt: null, sound: this.sound, continuous: null, boot: null, board: false, actionable: aimed !== null };
+      if (interactPressed) {
+        if (seat) this.world.apply({ t: 'enter_car', carId: this.world.state.player.drivingCarId, seat });
+        else this.tryExit(roadS);
+      }
+      return { prompt: null, sound: this.sound, continuous: null, boot: null, board: false, actionable: aimed !== null || seat !== null };
     }
 
     const resolved = this.resolve(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
@@ -1625,9 +1647,13 @@ export class Interaction {
         aim.throughGlass = true;
         continue;
       }
+      const seat = this.kitSeatOf(hit);
+      // From a seat the eye looks back past its own seat's back and head restraint,
+      // between the seats, at the bench: they are never what the occupant points at.
+      if (seated && seat !== null && seat === this.world.state.player.seat) continue;
       found = true;
       aim.distance = hit.distance;
-      aim.seat = this.kitSeatOf(hit);
+      aim.seat = seat;
       if (
         picked
         && !pane
@@ -1818,6 +1844,10 @@ export class Interaction {
    */
   private workKitPart(vehicle: Vehicle, rig: KitRig, control: KitControl): void {
     const action = kitAction(control);
+    if (action.type === 'aim') {
+      this.kitAim = { vehicle, rig, control };
+      return;
+    }
     this.sound = 'mount';
     if (action.channel === 'lights') {
       vehicle.cycleHeadlights();

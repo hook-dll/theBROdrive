@@ -69,6 +69,11 @@ export interface CarState {
   taillightsOn: boolean;
   /** Last rendered reverse-lamp state. */
   reverseLightsOn: boolean;
+  /**
+   * The inside mirror's aim as the driver set it by hand (carkit `mirror_yaw`,
+   * `mirror_pitch`, radians off the built aim). Absent: never touched.
+   */
+  innerMirror?: readonly [number, number];
   fuelLitres: number;
   /**
    * Water in the radiator and oil in the engine, litres.
@@ -318,6 +323,7 @@ export type WorldDelta =
   /** The fitted air filter's wear, written by the driving car (vehicle/airfilter.ts). */
   | { t: 'car_air_filter'; carId: string; clog: number }
   | { t: 'car_lights'; carId: string; headlightMode: HeadlightMode; taillightsOn: boolean; reverseLightsOn: boolean }
+  | { t: 'car_mirror'; carId: string; yaw: number; pitch: number }
   | { t: 'car_body_condition'; carId: string; dirt: number; scratches: number }
   | { t: 'car_paint'; carId: string; paint: CarPaint }
   | { t: 'car_bonnet'; carId: string; cell: number; item: Item | null }
@@ -626,6 +632,11 @@ export class GameWorld {
           car.taillightsOn = delta.taillightsOn;
           car.reverseLightsOn = delta.reverseLightsOn;
         }
+        break;
+      }
+      case 'car_mirror': {
+        const car = s.cars[delta.carId];
+        if (car) car.innerMirror = [delta.yaw, delta.pitch];
         break;
       }
       case 'car_body_condition': {

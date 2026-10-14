@@ -63,6 +63,8 @@ export interface InputFrame {
   mount: boolean;
   /** Toggle or equip the held handheld item: tap, consumed by the item owner. */
   useHeld: boolean;
+  /** The same key while it is held down: a hand-aimed kit part (the inside mirror) turns while it is. */
+  useHeldDown: boolean;
   /** Drop the held item in front of the player: tap, consumed once by interaction. */
   dropItem: boolean;
   /** Remove the currently worn item: tap, consumed by the wearable owner. */
@@ -120,6 +122,7 @@ export function emptyInput(): InputFrame {
     interact: false,
     mount: false,
     useHeld: false,
+    useHeldDown: false,
     dropItem: false,
     removeWearable: false,
     usePrimary: false,
@@ -698,6 +701,7 @@ export class InputReader {
     f.mount = this.anyPressed(this.keys.mount) || taps?.mount === true || this.padPressed(PAD.X);
     f.useHeld =
       this.anyPressed(this.keys.useHeld) || taps?.useHeld === true || this.padPressed(PAD.B);
+    f.useHeldDown = this.anyHeld(this.keys.useHeld) || pad.buttons[PAD.B] === true;
     f.dropItem =
       this.anyPressed(this.keys.drop)
       || taps?.drop === true

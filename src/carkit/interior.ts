@@ -102,6 +102,15 @@ const PANEL_TICK = shade(0xb4ecbc, 0.62);
 const PANEL_NEEDLE = shade(COLOURS.needle, 0.72);
 /** The rig channel the instrument lighting's lit faces slide out on, by `GLOW_TRAVEL`. */
 const PANEL_MOTION_CHANNEL = 'panel';
+/**
+ * The inside mirror, aimed by hand from the seat: held, the mouse turns it (rig.ts
+ * `aim`), up to 0.2 rad each way on each axis, which swings the view twice that.
+ */
+const MIRROR_CONTROL: KitControl = {
+  id: 'mirror',
+  label: 'Зеркало заднего вида (держите E и ведите мышью)',
+  action: { type: 'aim', channel: 'mirror_pitch', yaw: 'mirror_yaw', limit: 0.2 },
+};
 
 /** Which seat or door a control belongs to, for its hover label. */
 const WHERE: Readonly<Record<string, string>> = {
@@ -1191,12 +1200,22 @@ class Cabin {
     const root = this.P(0, cab.rail - 0.01, glassS(0, cab.rail - 0.01) + 0.03);
     b.color(COLOURS.black);
     beam(b, 'trim', root, this.P(0, my + 0.02, ms), 0.008, 0.008, [1, 0, 0]);
-    b.push(aim(ms));
-    pad(b, 'trim', ORIGIN, [0.105, 0.03, 0.014], 0.008);
-    b.quad('chrome', [0.095, -0.022, -0.0145], [-0.095, -0.022, -0.0145], [-0.095, 0.022, -0.0145], [0.095, 0.022, -0.0145]);
-    // The live face 1.5 mm proud of the glass.
-    addMirrorFace(this.group, b.matrix, ORIGIN, [0.095, 0.022], -0.016, 'inner');
+    // The pad turns on a ball at the stem's end, by hand (rig.ts `aim`): side to side
+    // about its own up, then up and down about its own across, from the pose above.
+    const frame = b.push(aim(ms)).matrix.clone();
     b.pop();
+    const e = frame.elements;
+    const centre: Vec3 = [e[12]!, e[13]!, e[14]!];
+    const ball = pivotGroup('mirror_ball', centre, { channel: 'mirror_yaw', kind: 'rot', axis: [e[4]!, e[5]!, e[6]!], amount: 1 });
+    attach(this.group, ORIGIN, ball);
+    const pane = this.hinge(ball, centre, 'mirror', centre, { channel: 'mirror_pitch', kind: 'rot', axis: [e[0]!, e[1]!, e[2]!], amount: 1 }, MIRROR_CONTROL, (m) => {
+      m.push(frame).color(COLOURS.black);
+      pad(m, 'trim', ORIGIN, [0.105, 0.03, 0.014], 0.008);
+      m.quad('chrome', [0.095, -0.022, -0.0145], [-0.095, -0.022, -0.0145], [-0.095, 0.022, -0.0145], [0.095, 0.022, -0.0145]);
+      m.pop();
+    });
+    // The live face 1.5 mm proud of the glass.
+    addMirrorFace(pane, frame, centre, [0.095, 0.022], -0.016, 'inner');
 
     // Sun visors lie flat under the headliner and swing down about their front edge. A
     // visor is 1.6 cm thick, under a shadow texel: it casts nothing (see `addBuilt`).

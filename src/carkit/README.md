@@ -451,7 +451,7 @@ does not move (a door's fixed `quarter_*` pane) is not a control.
 | Light and signals | `lights` 0/1/2 → `panel` (instrument lighting, on at 1 and 2), `blinker` −1/0/1, `hazard`, `horn`, `dome` (courtesy lamp) |
 | Wipers and radio | `wipers` 0/1/2 → `wiper_sweep`; `radio` → `radio_tune` |
 | Body | `door_*`, `bonnet`, `boot`, `tailgate`, `flap`, `window_*`, `vent_*` |
-| Cabin | `glovebox`, `ashtray`, `visor_l/r`, `seat_*`, `seatback_*`, `headrest_*` |
+| Cabin | `glovebox`, `ashtray`, `visor_l/r`, `seat_*`, `seatback_*`, `headrest_*`, `mirror_yaw`/`mirror_pitch` (inside mirror, radians off its built aim, ±0.2; an `aim` control) |
 
 In the lab the rig lights the lamps from the channels: low/high beam and tail lamps from
 `lights`, brake lamps from `brake`, reversing lamps from `gear < 0`, indicators from

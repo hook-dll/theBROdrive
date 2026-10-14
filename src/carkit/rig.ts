@@ -41,7 +41,13 @@ export interface KitMotion {
 export type KitAction =
   | { readonly type: 'toggle'; readonly channel: string }
   | { readonly type: 'cycle'; readonly channel: string; readonly values: readonly number[] }
-  | { readonly type: 'press'; readonly channel: string };
+  | { readonly type: 'press'; readonly channel: string }
+  /**
+   * A part turned by hand on two axes (the inside mirror): held, the mouse turns it
+   * (`KitRig.aim`); `channel` is the up-down axis, `yaw` the side-to-side one, each held
+   * within ±`limit`.
+   */
+  | { readonly type: 'aim'; readonly channel: string; readonly yaw: string; readonly limit: number };
 
 export interface KitControl {
   readonly id: string;
@@ -61,9 +67,10 @@ export interface KitPicked {
  * Channels that follow their target at once (driving inputs, read out by gauges). The
  * speedometer and tachometer are here as the HUD's dials are: they are fed in km/h and
  * rpm, and an ease of a few units a second left them minutes behind the car. A warning
- * lamp (`tell_*`) and the courtesy lamp light as they are switched.
+ * lamp (`tell_*`) and the courtesy lamp light as they are switched; the inside mirror
+ * (`mirror_*`) turns under the hand.
  */
-const INSTANT = /^(steer|throttle|brake|clutch|handbrake|gear_fb|gear_lr|wiper_sweep|speed|rpm|dome|panel|tell_\w+)$/;
+const INSTANT = /^(steer|throttle|brake|clutch|handbrake|gear_fb|gear_lr|wiper_sweep|speed|rpm|dome|panel|mirror_\w+|tell_\w+)$/;
 /** Ease rate per channel prefix, units per second. */
 const RATE: readonly [RegExp, number][] = [
   [/^door_|^boot|^tailgate|^bonnet/, 1.6],
@@ -463,9 +470,19 @@ export class KitRig {
     } else if (action.type === 'cycle') {
       const at = action.values.indexOf(this.get(action.channel));
       this.set(action.channel, action.values[(at + 1) % action.values.length]!);
-    } else {
+    } else if (action.type === 'press') {
       this.set(action.channel, 1);
     }
+    // `aim` is worked by `aim`, not by a click.
+  }
+
+  /** Turns an `aim` control by `dYaw` and `dPitch` channel units, each held within its limit. */
+  aim(control: KitControl, dYaw: number, dPitch: number): void {
+    const action = control.action;
+    if (action?.type !== 'aim') return;
+    const hold = (v: number): number => Math.min(action.limit, Math.max(-action.limit, v));
+    this.set(action.yaw, hold(this.get(action.yaw) + dYaw));
+    this.set(action.channel, hold(this.get(action.channel) + dPitch));
   }
 
   /** Releases a momentary control (the horn). */

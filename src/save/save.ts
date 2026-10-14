@@ -839,6 +839,11 @@ function migrateCar(raw: Record<string, unknown>, version: number): CarState {
   // The towed car's own field only; the tower carries no mirror. Whether the named
   // car exists is decided once the whole car set is known, in `fromSaveData`.
   if (typeof raw.towedBy === 'string' && raw.towedBy.length > 0) car.towedBy = raw.towedBy;
+  // The inside mirror's hand-set aim; anything malformed leaves the built aim.
+  const mirror = raw.innerMirror;
+  if (Array.isArray(mirror) && mirror.length === 2 && mirror.every((v) => typeof v === 'number' && Number.isFinite(v))) {
+    car.innerMirror = [mirror[0] as number, mirror[1] as number];
+  }
   return car;
 }
 

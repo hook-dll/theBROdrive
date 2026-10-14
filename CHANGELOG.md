@@ -4,6 +4,22 @@
 
 ### Added
 
+- MOVE BETWEEN SEATS WITH F (`player/interaction.ts`). Seated, in the cabin view and
+  with the car below the exit speed, look at another seat (a front seat, either half of
+  the rear bench) and press F: the occupant moves into it. F at anything else gets out
+  as before. The ray from a seat passes its own seat's back and head restraint, so the
+  bench is reachable by looking back between the seats. Checked round all four seats
+  of a 2104.
+
+- THE INSIDE MIRROR IS AIMED BY HAND (`carkit/interior.ts` `MIRROR_CONTROL`, rig.ts `aim`,
+  `player/interaction.ts` `aimingKit`, `main.ts` `MIRROR_HAND_*`). From the seat, hold E on
+  the mirror and move the mouse: the head stays still and the mirror turns on its ball,
+  up to 0.2 rad each way side to side and up and down (the view in it swings twice
+  that). Let go and it stays; the aim is saved with the car (`CarState.innerMirror`,
+  delta `car_mirror`). A load or a heavier engine settles the body and the view with it,
+  as in a real car; this is how the driver puts it right. E held is a new input field,
+  `InputFrame.useHeldDown` (keyboard and pad).
+
 - THE DRIVEN CAR LAYS TWO HEADLAMP POOLS, NOT ONE (`vehicle/vehiclelamps.ts`
   `syncProjectedLights`, `beamCount`; `main.ts`). Where the tier draws shadows (Standard,
   Blessing) both headlamps went into the one shadow-casting spotlight as a single beam
