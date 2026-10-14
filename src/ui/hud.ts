@@ -1181,13 +1181,13 @@ export class Hud {
   }
 
   /**
-   * On foot the crosshair always shows, dim until the aim names something. Driving it
-   * shows only on a cabin fitting E works (`cabinAim`), which no label names.
+   * On foot the crosshair always shows, dim until the aim names something or is on
+   * something a car works (`actionable`). Driving it shows only on the latter.
    */
-  setPrompt(text: string | null, cabinAim: boolean): void {
+  setPrompt(text: string | null, actionable: boolean): void {
     this.setVisible(this.promptEl, text !== null);
-    this.setVisible(this.crosshairEl, !this.driving || cabinAim);
-    this.crosshairEl.classList.toggle('is-dim', !cabinAim && text === null);
+    this.setVisible(this.crosshairEl, !this.driving || actionable);
+    this.crosshairEl.classList.toggle('is-dim', !actionable && text === null);
     if (text !== null) this.setText(this.promptEl, text);
   }
 

@@ -82,10 +82,6 @@ const VEHICLE_RANGE = 3.5;
  * left. `speedKmh` is already absolute, so fast reversing refuses too.
  */
 const EXIT_SPEED_LIMIT_KMH = 5;
-/** Refusal shown after the occupant presses interact above the exit speed. */
-const EXIT_REFUSED_PROMPT = 'slow down to step out';
-/** How long a refused exit keeps saying why after the press, seconds. */
-const EXIT_REFUSAL_SECONDS = 2.5;
 /**
  * Slack around a kit door's opening for the entry test, metres: the eye ray may cross
  * the door plane a hand's width outside the shut door's outline (the seal, the
@@ -174,10 +170,11 @@ export interface InteractionResult {
   /** True on the F edge that asks to board the parked plane. */
   board: boolean;
   /**
-   * The driver's crosshair is on a fitting E works (a door, a switch, a visor). The
-   * seated view names nothing: the HUD shows its crosshair only while this holds.
+   * The crosshair is on something a car's E or F works that no prompt names: a door,
+   * lid, flap or fitting, a seat F sits in, an open flap a held can pours into. The HUD
+   * lights the crosshair for it, and shows it at all while driving only then.
    */
-  cabinAim: boolean;
+  actionable: boolean;
 }
 
 /**
@@ -401,70 +398,6 @@ function scrubLabel(part: PartInstance): string {
 }
 
 /**
- * English names of a kit car's working parts, by the CHANNEL the control works (a window
- * and its winder share `window_fl`). The kit's own labels are the car lab's Russian
- * hover names; the HUD prompts stay English like every other prompt in this file.
- */
-const KIT_PART_NAMES: Readonly<Record<string, string>> = {
-  door_fl: 'front left door',
-  door_fr: 'front right door',
-  door_rl: 'rear left door',
-  door_rr: 'rear right door',
-  bonnet: 'bonnet',
-  boot: 'boot lid',
-  tailgate: 'tailgate',
-  flap: 'fuel flap',
-  window_fl: 'front left window',
-  window_fr: 'front right window',
-  window_rl: 'rear left window',
-  window_rr: 'rear right window',
-  vent_fl: 'left quarter vent',
-  vent_fr: 'right quarter vent',
-  wipers: 'wipers',
-  glovebox: 'glovebox',
-  radio: 'radio',
-  ashtray: 'ashtray',
-  lights: 'headlights',
-  hazard: 'hazard lights',
-  blinker: 'indicators',
-  horn: 'horn',
-  visor_l: 'left sun visor',
-  visor_r: 'right sun visor',
-  dome: 'courtesy lamp',
-};
-
-/** Whose seat a `seat_*`, `seatback_*` or `headrest_*` channel moves. */
-const KIT_SEAT_OWNERS: Readonly<Record<string, string>> = {
-  fl: "driver's",
-  fr: "passenger's",
-  rl: 'rear left',
-  rr: 'rear right',
-};
-
-/** The prompt's name for a kit channel; a part this table does not know reads as its id. */
-function kitPartName(channel: string): string {
-  const named = KIT_PART_NAMES[channel];
-  if (named) return named;
-  const seat = /^(seat|seatback|headrest)_(\w+)$/.exec(channel);
-  const owner = seat ? KIT_SEAT_OWNERS[seat[2]!] : undefined;
-  if (seat && owner) return `${owner} ${seat[1] === 'seatback' ? 'seat back' : seat[1]}`;
-  return channel.replace(/_/g, ' ');
-}
-
-/**
- * The verbs for a toggled kit channel, [at rest, worked], by channel; the rest (doors,
- * lids, the flap, the glovebox, the ashtray, vents) open and close.
- */
-const KIT_VERBS: readonly (readonly [RegExp, string, string])[] = [
-  [/^window_/, 'lower', 'raise'],
-  [/^(radio|hazard|dome)$/, 'turn on', 'turn off'],
-  [/^seat_/, 'slide forward', 'slide back'],
-  [/^seatback_/, 'recline', 'raise'],
-  [/^headrest_/, 'raise', 'lower'],
-  [/^visor_/, 'fold down', 'fold up'],
-];
-
-/**
  * Channels the Vehicle writes from its driving state every frame (`driveKit` in
  * vehicle/vehicle.ts) and that have no world action of their own here: a click on
  * them would be undone on the next frame, so they are not offered. The light switch,
@@ -488,14 +421,6 @@ const KIT_SHELL_PART = /^(door_|bonnet$|boot$|tailgate$|flap$)/;
 
 /** A front seat's parts, by the channel's position; the rear bench is `KIT_BENCH_NODE`. */
 const KIT_FRONT_SEAT = /^(?:seat|seatback|headrest)_(f[lr])$/;
-
-/** What the F prompt calls a seat. */
-const SEAT_NAMES: Readonly<Record<PlayerSeat, string>> = {
-  driver: "driver's seat",
-  passenger: 'front passenger seat',
-  'rear-left': 'rear seat',
-  'rear-right': 'rear seat',
-};
 
 function kitAction(control: KitControl): NonNullable<KitControl['action']> {
   return control.action ?? { type: 'toggle', channel: control.id };
@@ -639,8 +564,6 @@ export class Interaction {
   private kitPress: { rig: KitRig; control: KitControl; left: number } | null = null;
   /** Last tick's aim named a kit part, so E belongs to it; see `claimsUseHeld`. */
   private kitClaimsE = false;
-  /** Seconds a refused exit keeps its reason on screen; see `fixedUpdate`. */
-  private exitRefusalLeft = 0;
   /** This tick's car-to-car bar action, or null; see `towAction`. */
   private towActionValue: TowAction | null = null;
   /** Reused receiver for the two cars nearest the player, and their eyes. */
@@ -756,11 +679,10 @@ export class Interaction {
       this.openStorage = null;
       // A kit car is worked from the seat too: the ray runs from whichever camera is
       // drawing, so the occupant looks at a door or a fitting and E works it; from the
-      // chase or the hood view only the side doors answer. No label names it: the
-      // crosshair appears on it (`cabinAim`), so words never sit over the dash and the road.
+      // chase or the hood view only the side doors answer. Nothing is said: the crosshair
+      // appears on it (`actionable`), and a refused exit is the door that stays shut.
       const active = this.getVehicle();
       const rig = active?.vehicle.kit ?? null;
-      let prompt: string | null = null;
       let aimed: KitPicked | null = null;
       if (active && rig) {
         aimed = this.seatedKitPart(active.vehicle, eyeX, eyeY, eyeZ, dirX, dirY, dirZ, cabinView);
@@ -769,20 +691,8 @@ export class Interaction {
           if (useHeldPressed) this.workKitPart(active.vehicle, rig, aimed.control);
         }
       }
-      // Successful exit is self-evident. A refused one says why for a few seconds after
-      // the press (F is a tap, not a hold), re-asked live, so it goes the moment a door
-      // opens or the car stops.
-      if (interactPressed) {
-        this.exitRefusalLeft = this.tryExit(roadS) !== null ? EXIT_REFUSAL_SECONDS : 0;
-      } else {
-        this.exitRefusalLeft = Math.max(0, this.exitRefusalLeft - dt);
-      }
-      if (this.exitRefusalLeft > 0) {
-        const refusal = this.exitRefused();
-        if (refusal) prompt = refusal;
-        else this.exitRefusalLeft = 0;
-      }
-      return { prompt, sound: this.sound, continuous: null, boot: null, board: false, cabinAim: aimed !== null };
+      if (interactPressed) this.tryExit(roadS);
+      return { prompt: null, sound: this.sound, continuous: null, boot: null, board: false, actionable: aimed !== null };
     }
 
     const resolved = this.resolve(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
@@ -826,17 +736,13 @@ export class Interaction {
     // and the boot are not offered while it is held (an already open boot still takes
     // the envelope into a cell). What is offered is the hint to aim at the car.
     const stickerBlocksCar = envelope !== null && this.isClosedCarTarget(resolved.target);
-    const worldPrompt = envelope !== null && (stickerBlocksCar || resolved.target.kind === 'none')
+    const prompt = envelope !== null && (stickerBlocksCar || resolved.target.kind === 'none')
       ? STICKER_HINT
       : this.promptFor(resolved);
-    // A kit car's part in the aim takes E. A sticker in hand keeps E for mirroring, and
-    // the car is a surface to it, not a set of doors.
+    // A kit car's part in the aim takes E, unnamed: the crosshair lights on it. A sticker
+    // in hand keeps E for mirroring, and the car is a surface to it, not a set of doors.
     const kitRig = resolved.vehicle?.kit ?? null;
     const kitPart = envelope === null && kitRig ? resolved.kitPart : null;
-    const partPrompt = kitPart && resolved.vehicle && kitRig
-      ? this.kitPartPrompt(resolved.vehicle, kitRig, kitPart.control)
-      : null;
-    const prompt = worldPrompt && partPrompt ? `${worldPrompt} · ${partPrompt}` : worldPrompt ?? partPrompt;
     if (kitPart && resolved.vehicle && kitRig) {
       this.kitClaimsE = true;
       if (useHeldPressed) this.workKitPart(resolved.vehicle, kitRig, kitPart.control);
@@ -886,7 +792,11 @@ export class Interaction {
         };
       }
     }
-    return { prompt, sound: this.sound, continuous: this.continuous, boot, board, cabinAim: false };
+    // A refused seat says why (the prompt), so it does not also light the crosshair.
+    const actionable = kitPart !== null
+      || (resolved.kitSeat !== null && !stickerBlocksCar && prompt === null)
+      || (resolved.target.kind === 'filler' && this.inventory.held?.type === 'fluid_can' && this.aimedReservoir(resolved) !== null);
+    return { prompt, sound: this.sound, continuous: this.continuous, boot, board, actionable };
   }
 
   /** A target that belongs to a car and is not an open storage grid. */
@@ -981,7 +891,7 @@ export class Interaction {
       this.onStickerPreview(null, null, false);
       this.onStickerPlaced(carId, sticker);
       this.sound = 'mount';
-      return { prompt: 'stuck on', sound: this.sound, continuous: null, boot: null, board: false, cabinAim: false };
+      return { prompt: 'stuck on', sound: this.sound, continuous: null, boot: null, board: false, actionable: false };
     }
     this.onStickerPreview(carId, sticker, true);
     const size = Math.round(style.scale * 100);
@@ -991,7 +901,7 @@ export class Interaction {
       continuous: null,
       boot: null,
       board: false,
-      cabinAim: false,
+      actionable: false,
     };
   }
 
@@ -1411,9 +1321,11 @@ export class Interaction {
       // grid wins, so a long bus cannot expose both ends at once. A kit car's grid is
       // there only under its open lid (`followLids`): a shut one is reached by opening it.
       const rig = vehicle.kit;
+      let inCompartment = false;
       for (const side of ['trunk', 'bonnet'] as const) {
         if (lidOpen(rig, side) === false) continue;
         if (this.pickStorage(eyeX, eyeY, eyeZ, dx, dy, dz, t, this.qScratch, vehicle.modelMeasure, side, false)) {
+          inCompartment = true;
           keep(this.trunkPickedDistance, {
             kind: 'storage',
             owner: 'car',
@@ -1427,7 +1339,10 @@ export class Interaction {
       // Ordinary entry and whole-body cleaning need only the chassis collider already
       // hit by Rapier above. The full render mesh is raycast only on the one frame a
       // sticker is actually placed; walking near a detailed car stays constant-time.
+      // A compartment aimed into wins over the box it sits in: the bonnet's cells are
+      // inside the chassis box, so its hit always stood nearer and no cell was ever picked.
       if (
+        !inCompartment &&
         vehicleDist <= VEHICLE_RANGE &&
         hit &&
         vehicle.isChassisCollider(hit.colliderHandle)
@@ -1884,17 +1799,6 @@ export class Interaction {
     }
   }
 
-  /** `[E] open front left door`, `[E] lower front left window`, `[E] switch wipers`. */
-  private kitPartPrompt(vehicle: Vehicle, rig: KitRig, control: KitControl): string {
-    const action = kitAction(control);
-    const name = kitPartName(action.channel);
-    if (action.type === 'press') return `[E] ${name}`;
-    if (action.type === 'cycle') return `[E] switch ${name}`;
-    const on = action.channel === 'hazard' ? vehicle.indicator === 'hazard' : rig.get(action.channel) > 0.5;
-    const verbs = KIT_VERBS.find(([pattern]) => pattern.test(action.channel));
-    return `[E] ${verbs ? verbs[on ? 2 : 1] : on ? 'close' : 'open'} ${name}`;
-  }
-
   /**
    * The car interaction is aimed at, with its id.
    *
@@ -1967,20 +1871,9 @@ export class Interaction {
       return `[F] pick up ${itemLabel(item)}`;
     }
 
-    // The body's tank, through its flap: the level as the bonnet's readouts show
-    // theirs, the pour once the flap is open, and how to open it while it is shut (the
-    // flap's own "[E] open fuel flap" stands beside this when it is in the aim).
-    if (t.kind === 'filler') {
-      const car = this.world.state.cars[t.carId];
-      const reservoir = car && resolved.vehicle ? fillerReservoir(car, resolved.vehicle.stats) : null;
-      if (!reservoir) return null;
-      const flapOpen = (resolved.vehicle?.kit?.get('flap') ?? 0) > LID_OPEN;
-      if (!flapOpen) {
-        const opener = resolved.kitPart?.control.id === 'flap' ? '' : ' · look at it, [E] to open';
-        return `${fillReadout(reservoir)} — fuel flap shut${opener}`;
-      }
-      return held?.type === 'fluid_can' ? this.pourPrompt(held, reservoir) : fillReadout(reservoir);
-    }
+    // The body's tank, through its flap: nothing is said. The crosshair lights while a
+    // can is on an open flap (`InteractionResult.actionable`); the fuel gauge is the level.
+    if (t.kind === 'filler') return null;
 
     if (t.kind === 'storage') {
       const cells = this.storageCells(t);
@@ -2053,18 +1946,11 @@ export class Interaction {
       return `[F] hitch to ${carModel(this.world.state.cars[resolved.carId]!.modelId).label}`;
     }
 
-    // A kit car is got into by looking at a seat through an open side door (see `resolve`).
+    // A kit car says nothing about its doors and seats: the crosshair lights on a seat
+    // that F sits in (`actionable`). Only a refusal the eye cannot see is told.
     const kitRig = resolved.vehicle?.kit ?? null;
     if (kitRig && resolved.carId && (t.kind === 'none' || t.kind === 'car-body' || t.kind === 'car-entry')) {
-      if (resolved.kitSeat) return this.cabinRefusal() ?? `[F] sit in the ${SEAT_NAMES[resolved.kitSeat]}`;
-      const door = resolved.kitDoor;
-      if (!door) return null;
-      // Shut: say so, and how to open it unless the aim names another part (its E is
-      // shown beside this). The door itself already reads "[E] open front left door";
-      // an aim off the car says nothing.
-      if (!resolved.kitHit || kitRig.get(door.id) > 0.5 || resolved.kitPart?.control.id === door.id) return null;
-      const name = kitPartName(door.id);
-      return resolved.kitPart ? `${name} shut` : `the ${name} is shut · look at it, [E] to open`;
+      return resolved.kitSeat ? this.cabinRefusal() : null;
     }
 
     if (
@@ -2612,34 +2498,21 @@ export class Interaction {
   }
 
   /**
-   * The refusal prompt when the occupant cannot step out, else null: the car is moving
-   * too fast (`speedKmh` is absolute, so reversing at speed too), or it is a kit car
-   * whose door by his seat is shut. Kept separate from `tryExit` so the prompt re-asks
-   * the gate after the press without re-running the exit itself, which stays
-   * edge-triggered.
+   * Steps the occupant out, or refuses without a word: the car is moving too fast
+   * (`speedKmh` is absolute, so reversing at speed too), or it is a kit car whose door by
+   * his seat is shut, which answers with the refusal knock.
    */
-  private exitRefused(): string | null {
-    const active = this.getVehicle();
-    if (!active) return null;
-    if (active.vehicle.speedKmh >= EXIT_SPEED_LIMIT_KMH) return EXIT_REFUSED_PROMPT;
-    const rig = active.vehicle.kit;
-    const door = rig ? this.kitExitDoor(rig, active.vehicle, this.world.state.player.seat) : null;
-    if (rig && door && rig.get(door.id) <= 0.5) return `the ${kitPartName(door.id)} is shut · look at it, [E] to open it`;
-    return null;
-  }
-
-  private tryExit(roadS: number): string | null {
+  private tryExit(roadS: number): void {
     const carId = this.world.state.player.drivingCarId;
-    if (!carId) return null;
+    if (!carId) return;
     const active = this.getVehicle();
-    if (!active) return null;
-    const refusal = this.exitRefused();
-    if (refusal) {
-      if (refusal !== EXIT_REFUSED_PROMPT) this.sound = 'refused';
-      return refusal;
-    }
+    if (!active || active.vehicle.speedKmh >= EXIT_SPEED_LIMIT_KMH) return;
     const rig = active.vehicle.kit;
     const door = rig ? this.kitExitDoor(rig, active.vehicle, this.world.state.player.seat) : null;
+    if (rig && door && rig.get(door.id) <= 0.5) {
+      this.sound = 'refused';
+      return;
+    }
     const exit = this.computeExitPosition(carId, active.vehicle, door);
     this.world.apply({ t: 'exit_car' });
     this.sound = 'exit-car';
@@ -2647,7 +2520,6 @@ export class Interaction {
       this.player.setEnabled(true);
       if (exit) this.player.teleport(exit.x, exit.y, exit.z, roadS);
     }
-    return null;
   }
 
   /**

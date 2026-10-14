@@ -707,12 +707,6 @@ interface VehicleStats extends CarStats {
   readonly loads: readonly LoadPoint[];
 }
 
-/**
- * A kit car (`CarModelDef.kit`) beyond this many metres of the eye draws no cabin, bay,
- * boot or underbody and its glass goes back to a tinted mirror (`KitRig.setDetail`); the
- * car lab's distance. The car the player sits in is always inside it.
- */
-const KIT_DETAIL_DISTANCE_SQ = 25 * 25;
 /** Where this frame is seen from (scene frame) and its length; see `Vehicle.viewFrom`. */
 const kitEye = new THREE.Vector3();
 let kitEyeKnown = false;
@@ -3722,7 +3716,9 @@ export class Vehicle implements Rebasable {
     kit.set('tell_brake', key && this.kitHandbrake > 0 ? 1 : 0);
     kit.set('tell_check', key && this.checkEngine ? 1 : 0);
 
-    kit.setDetail(!kitEyeKnown || this.rootGroup.position.distanceToSquared(kitEye) < KIT_DETAIL_DISTANCE_SQ);
+    // The car the player sits in is always within the detail range; with no eye given
+    // yet (the first frame), everything draws.
+    kit.setDetail(kitEyeKnown ? this.rootGroup.position.distanceTo(kitEye) : 0);
     kit.update(kitFrameDt);
   }
 

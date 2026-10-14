@@ -13,8 +13,9 @@
 
 import * as THREE from 'three';
 import { PartBuilder, lerp, table, type KitSlot, type Vec3 } from './builder';
-import { addBuilt, pivotGroup, type KitContext } from './context';
+import { addBuilt, addMirrorFace, mirrorFrame, pivotGroup, type KitContext } from './context';
 import { skinX, type BodyFrame } from './body';
+import { driverEyeAt } from './interior';
 import type { CornerLampPoint, FaceAnchor, FaceItem, FaceLook, FaceX, FaceY, Finish, LampRole, Span } from './spec';
 
 const CHROME_TRIM = 0xb8bec3;
@@ -642,6 +643,7 @@ function buildDoorHardware(ctx: KitContext): void {
   const spec = frame.spec;
   const chrome = spec.look.brightwork === 'chrome';
   const finish = finishSlot(spec.look.brightwork);
+  const eye = driverEyeAt(frame);
   for (const [owner, door] of nodes) {
     if (!owner.startsWith('door_')) continue;
     const side = owner.endsWith('l') ? 1 : -1;
@@ -659,16 +661,22 @@ function buildDoorHardware(ctx: KitContext): void {
     b.color(finish.color).bevelBox(finish.slot, [x, y, frame.z(handleS)], chrome ? [0.012, 0.016, 0.075] : [0.012, 0.018, 0.07], 0.006);
     addBuilt(door.node, b, door.pivot, `${owner}_handle`);
     if (!front) continue;
-    // Mirror: a stalk from the door's front top corner and a head on it.
+    // Mirror: a stalk from the door's front top corner and a head on it, turned so the
+    // driver sees straight back along the flank in it (`mirrorFrame`), the car's side a
+    // sliver at its inner edge; the far one turns further than his own.
     const ms = spec.cabin.columns[1]!.s + 0.08;
     const my = frame.station(ms).belt + 0.06;
     const mx = frame.sideX(ms, frame.station(ms).belt);
     const m = new PartBuilder().color(finish.color);
     m.boxFrom(finish.slot, [side > 0 ? mx - 0.01 : -mx - 0.07, my - 0.04, frame.z(ms) - 0.03], [side > 0 ? mx + 0.07 : -mx + 0.01, my - 0.02, frame.z(ms) + 0.03]);
-    m.bevelBox(finish.slot, [side * (mx + 0.1), my + 0.02, frame.z(ms)], [0.06, 0.045, 0.025], 0.015);
-    m.color(0x7a8a96).box('chrome', [side * (mx + 0.1), my + 0.02, frame.z(ms) - 0.026], [0.05, 0.035, 0.002]);
+    m.push(mirrorFrame([side * (mx + 0.1), my + 0.02, frame.z(ms)], eye, [0, 0, -1]));
+    m.bevelBox(finish.slot, [0, 0, 0], [0.06, 0.045, 0.025], 0.015);
+    m.color(0x7a8a96).box('chrome', [0, 0, -0.026], [0.05, 0.035, 0.002]);
     const holder = new THREE.Group();
     holder.name = `${owner}_mirror`;
+    // The live face 1.5 mm proud of the glass.
+    addMirrorFace(holder, m.matrix, door.pivot, [0.05, 0.035], -0.0295, side > 0 ? 'left' : 'right');
+    m.pop();
     addBuilt(holder, m, door.pivot, 'mirrors');
     for (const mesh of holder.children) mesh.name = 'mirrors';
     door.node.add(holder);

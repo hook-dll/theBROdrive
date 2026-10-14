@@ -430,6 +430,11 @@ export class Renderer {
   /** Reused 2D target for compact photographs; created only when the shutter fires. */
   private photoCanvas: HTMLCanvasElement | null = null;
   private photoContext: CanvasRenderingContext2D | null = null;
+  /**
+   * The driven car's live mirrors (render/carmirrors.ts): drawn after the game's frame,
+   * inside its GPU timing, so adaptive resolution pays for them like any other draw.
+   */
+  private mirrorPass: { draw(): void } | null = null;
 
 
   /**
@@ -916,8 +921,39 @@ export class Renderer {
     const query = this.beginGpuTimerQuery();
     try {
       this.drawFrame();
+      this.mirrorPass?.draw();
     } finally {
       if (query !== null) this.endGpuTimerQuery();
+    }
+  }
+
+  setMirrorPass(pass: { draw(): void } | null): void {
+    this.mirrorPass = pass;
+  }
+
+  /**
+   * Draws the game's scene once more, from `camera` into `target`: a live mirror, right
+   * after the frame. Every material keeps its program: any render target gives the same
+   * key (working colour space, no tone mapping). The frame has just updated the scene's
+   * world matrices and every shadow map, so this pass walks neither again, and it has no
+   * post pass. Its draws add to the frame's `info` counters (reset once per frame).
+   */
+  renderMirror(target: THREE.WebGLRenderTarget, camera: THREE.Camera): void {
+    const shadows = this.renderer.shadowMap;
+    const autoUpdate = shadows.autoUpdate;
+    const needsUpdate = shadows.needsUpdate;
+    const matrices = this.scene.matrixWorldAutoUpdate;
+    shadows.autoUpdate = false;
+    shadows.needsUpdate = false;
+    this.scene.matrixWorldAutoUpdate = false;
+    try {
+      this.renderer.setRenderTarget(target);
+      this.renderer.render(this.scene, camera);
+    } finally {
+      this.renderer.setRenderTarget(null);
+      this.scene.matrixWorldAutoUpdate = matrices;
+      shadows.autoUpdate = autoUpdate;
+      shadows.needsUpdate = needsUpdate;
     }
   }
 

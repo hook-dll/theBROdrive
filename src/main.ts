@@ -39,6 +39,7 @@ import { loadCarModel } from './render/carmodel';
 import { CAR_LAMP_KNEE } from './render/materials';
 import { preloadTrailerModel } from './render/trailermodel';
 import { itemProgramAnchor } from './render/partmesh';
+import { CarMirrors, mirrorProgramAnchor } from './render/carmirrors';
 import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
 import { Interaction } from './player/interaction';
 import { ContractRuntime } from './contracts/runtime';
@@ -439,6 +440,8 @@ async function boot(): Promise<void> {
   const birds = new BirdFlock(renderer.scene, road, terrain, world.seed, origin);
   const weapons = new WeaponController();
   const heldView = new HeldItemView(renderer.camera, renderer.scene);
+  // The kit car's live mirrors, for the car the player sits in and the cabin view only.
+  const carMirrors = new CarMirrors(renderer, world.state.settings.graphicsQuality);
   const trunkView = new TrunkView(renderer.scene);
   /** The car currently showing a sticker being tried on, so it can be cleared. */
   let stickerPreviewCarId: string | null = null;
@@ -466,6 +469,7 @@ async function boot(): Promise<void> {
     sidetrackProgramAnchor(),
     poleProgramAnchor(),
     itemProgramAnchor(),
+    mirrorProgramAnchor(),
   );
   /** Reused receiver for the nearest dancer's sound; see `DancerField.heard`. */
   const dancerSound: DancerHeard = { x: 0, y: 0, z: 0, flapMps: 0, airRate: 0 };
@@ -1328,8 +1332,8 @@ async function boot(): Promise<void> {
   let recordTimer = 0;
   let paused = false;
   let prompt: string | null = null;
-  /** Seated, the crosshair is on a cabin fitting; see `InteractionResult.cabinAim`. */
-  let cabinAim = false;
+  /** The crosshair is on something a car works that no prompt names; see `InteractionResult.actionable`. */
+  let actionable = false;
   /** Trunk grid under the crosshair, or null. Set by the interaction tick. */
   let boot: TrunkViewState | null = null;
   /** Arclength of whatever the camera is following; drives streaming and the sky. */
@@ -1383,7 +1387,7 @@ async function boot(): Promise<void> {
     zoomAccum = 0;
     recenterAccum = false;
     prompt = null;
-    cabinAim = false;
+    actionable = false;
     boot = null;
   };
   // Dev-only, behind one compile-time fold. `import.meta.env.DEV` is constant, so a
@@ -1935,7 +1939,7 @@ async function boot(): Promise<void> {
       camera.mode === 'cabin',
     );
     prompt = interacted.prompt;
-    cabinAim = interacted.cabinAim;
+    actionable = interacted.actionable;
     boot = interacted.boot;
     if (interacted.board && story === null && !dying) {
       // Boarding is an ending: a reload from here on must land on the title screen, not
@@ -1957,7 +1961,7 @@ async function boot(): Promise<void> {
       postcardView = 'down';
       gumActive = false;
       prompt = null;
-      cabinAim = false;
+      actionable = false;
       boot = null;
       Object.assign(lastInput, deathInput);
       lookYawAccum = 0;
@@ -2709,7 +2713,7 @@ async function boot(): Promise<void> {
     audio.endTrafficFrame(frameDt);
     hud.setRadio(audio.radioReadout);
 
-    hud.setPrompt(prompt, cabinAim);
+    hud.setPrompt(prompt, actionable);
     hud.setCabinEditor(cabinCamera.hud);
     trunkView.update(
       boot,
@@ -2804,6 +2808,7 @@ async function boot(): Promise<void> {
         hud.setToast(`photograph taken — ${cameraItem.framesRemaining} frames left`);
       }
     }
+    carMirrors.update(driving?.kit ?? null, camera.mode === 'cabin');
     frameProfiler?.begin('draw');
     renderer.render();
     frameProfiler?.end('draw');
@@ -2841,6 +2846,8 @@ async function boot(): Promise<void> {
       loop,
       mirageSchedule,
       courierAt: (index: number) => courierStop(world.seed, index),
+      // `mirrors.stats.renders` counts mirror passes; `mirrors.enabled = false` is the A/B.
+      mirrors: carMirrors,
     });
   }
 
@@ -2928,6 +2935,7 @@ async function boot(): Promise<void> {
       // plane, fog and vista disc) belongs to the CPU level and also applies in place.
       const tier = world.state.settings.graphicsQuality;
       renderer.setQuality(tier);
+      carMirrors.setQuality(tier);
       sky.setQuality(tier, mobilePresentation);
       const horizon = viewDistanceFor(world.state.settings.viewDistance, mobilePresentation);
       renderer.setViewDistance(horizon);

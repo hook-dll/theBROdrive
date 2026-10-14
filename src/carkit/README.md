@@ -116,7 +116,7 @@ from the angle he complained about; changes are judged there, not in code.
 | `wheels.ts` | The kit's own placeholder wheel (tyre on a plain steel disc): sets where the wheels stand and their size. |
 | `materials.ts` | One shared material per slot. |
 | `names.ts` | Node names the catalogue selects by (wheels, lamps, glass). No imports, so the catalogue can include it. |
-| `context.ts` | `KitContext`, `addBuilt`, `pivotGroup`, `attach`: how modules put geometry into the scene. |
+| `context.ts` | `KitContext`, `addBuilt`, `pivotGroup`, `attach`: how modules put geometry into the scene; `mirrorFrame`, `addMirrorFace`: a mirror head's aim and its live face. |
 | `kit.ts` | `buildKitCar(id)`: assembles everything; hinge motions of the shell's parts (`shellMotion`); `leanEnd` (`rearLean`, `frontLean`). |
 | `rig.ts` | `KitRig`: runtime channels, controls, lamps, LOD. |
 
@@ -135,7 +135,7 @@ Integration outside the folder:
   Each rendered frame `driveKit` writes the driving channels (`steer`, `throttle`, `brake`,
   `clutch`, `handbrake`, `gear`, `speed`, `rpm`, `fuel`, `temp`, `lights`, `blinker`,
   `hazard`: the Vehicle owns these, so a script must not write them) and runs
-  `setDetail` (25 m from `Vehicle.viewFrom`'s eye, which main.ts gives once a frame) and
+  `setDetail` (the distance from `Vehicle.viewFrom`'s eye, which main.ts gives once a frame) and
   `update`. The rig, not the `STEERING_WHEEL_NODE` path, turns a kit car's wheel.
 - `render/carmodel.ts`: `loadModel` calls `buildKitCar` on a frame of its own. Clear glass
   comes from `carClearGlassMaterial`. A cabin mesh with `userData.kitShadowed` receives
@@ -149,8 +149,8 @@ Integration outside the folder:
   stamp under the hit, so one aimed at an open door lands on the door.
 - `render/materials.ts`: dust on glass raises opacity, so dirty clear glass is not
   see-through. On opaque glass this changes nothing.
-- `car-lab.ts`: the Kit row, the `?pack=` filter, hover and click, the "КАБИНА" panel, LOD at
-  25 m, `window.__carLab`.
+- `car-lab.ts`: the Kit row, the `?pack=` filter, hover and click, the "КАБИНА" panel, LOD by
+  distance (`KitRig.setDetail`), `window.__carLab`.
 - `vehicle/model-fits.json`: a measured fit row for every kit car (`tools/fit-models.ts`).
 
 ## How the body is built
@@ -421,7 +421,12 @@ stack); the Samaras use the `samara` platform's layout as is.
   `car-glass-clear`.
 - Steering wheel: node `steering_wheel`, its origin on the column axis, local +Y along the
   column towards the driver. The game turns it by `rotation.y`.
-- Mirrors: meshes named `mirrors`, which keeps them out of the measured body width.
+- Mirrors: meshes named `mirrors`, which keeps them out of the measured body width. The
+  interior mirror and both door mirrors are turned to the driver's eye (`driverEyeAt`,
+  `mirrorFrame`): he sees straight back through the back light's middle and along each
+  flank. Each carries a hidden live face over its glass (`addMirrorFace`,
+  `userData.kitMirror` = `inner`/`left`/`right`, collected as `KitRig.mirrorFaces`);
+  render/carmirrors.ts draws them for the car the player sits in, in the cabin view.
 - Detail groups for LOD: `kit_cabin` (on the root and inside every door), `kit_bay`,
   `kit_boot`, `kit_under`.
 
@@ -453,8 +458,9 @@ In the lab the rig lights the lamps from the channels: low/high beam and tail la
 `blinker` and `hazard` at 90 flashes a minute. In the game `VehicleLamps` does it through
 the def's `lights`, and the rig is created with `ownLenses = false`.
 
-`setDetail(near)` switches only the visibility of the detail groups and the glass opacity,
-so crossing the LOD distance (25 m) triggers no shader compile.
+`setDetail(distance)` switches only the visibility of the detail groups (drawn within
+`KIT_DETAIL_M`, 50 m) and the glass opacity (clear to 30 m, fading to the tinted mirror by
+50 m), so crossing the LOD distance triggers no shader compile.
 
 ## Wheels: the Soviet pack's sets
 
@@ -586,8 +592,8 @@ Re-run `fit-models.ts` for every car whose shape changed. Stage the file as in
    - the doors at full real size, the rear door reaching over its arch;
    - at night with lamps on: head, tail, brake, indicators (both, hazard), reversing;
    - dust 0.8 and scratches; a sticker on the body;
-   - LOD: from beyond 25 m the cabin, bay, boot and underbody vanish and the glass goes
-     opaque;
+   - LOD: the glass fades to a tinted mirror between 30 and 50 m, and from 50 m the
+     cabin, bay, boot and underbody vanish behind it;
    - the cabin through the glass: dash, gauges, wheel, pedals, seats, every clickable
      fitting.
 3. Triangles: within ≈ 8–13k total ([Budget](#budget-and-current-figures)); add the row.
@@ -630,12 +636,12 @@ only by the closed rear-quarter slits, the Samaras and tens by design).
 
 ## Budget and current figures
 
-Budget ≈ 8–13k triangles per car with LOD at 25 m. Counted by building each car with
-`buildKitCar` and summing triangles per group; the wheels are the kit's placeholder wheels
-(336 each) that the pack's sets replace. "Beyond 25 m" = everything except the four detail
+Budget ≈ 8–13k triangles per car near, with LOD at `KIT_DETAIL_M`. Counted by building each
+car with `buildKitCar` and summing triangles per group; the wheels are the kit's placeholder
+wheels (336 each) that the pack's sets replace. "Far" = everything except the four detail
 groups.
 
-| | Total | Body + trim | Cabin | Engine bay | Boot | Underbody | Wheels | Beyond 25 m |
+| | Total | Body + trim | Cabin | Engine bay | Boot | Underbody | Wheels | Far |
 |---|---|---|---|---|---|---|---|---|
 | 2101 | 11 489 | 5 071 | 2 985 | 1 045 | 298 | 746 | 1 344 | 6 415 |
 | 2102 | 11 472 | 5 342 | 2 945 | 1 045 | 50 | 746 | 1 344 | 6 686 |

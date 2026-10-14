@@ -129,6 +129,14 @@ const DETAIL_GROUPS = new Set(['kit_cabin', 'kit_bay', 'kit_boot', 'kit_under'])
 /** Clear glass opacity near, and the tinted mirror it stands in for far away. */
 const GLASS_NEAR_OPACITY = 0.28;
 const GLASS_FAR_OPACITY = 0.9;
+/**
+ * The glass stays clear to `GLASS_CLEAR_M` from the eye and fades to the tinted mirror by
+ * `KIT_DETAIL_M`, where the cabin, bay, boot and underbody stop drawing behind it. One
+ * 25 m step did both at once: the panes of a passing car went from mirror to clear in one
+ * frame, a few car lengths away, in plain sight.
+ */
+const GLASS_CLEAR_M = 30;
+export const KIT_DETAIL_M = 50;
 
 const _q = new THREE.Quaternion();
 const _a = new THREE.Vector3();
@@ -320,8 +328,11 @@ export class KitRig {
    */
   private wiperPhase = 0;
   private near: boolean | null = null;
+  private glassOpacity = -1;
   private readonly detail: THREE.Object3D[] = [];
   private readonly glass: THREE.MeshStandardMaterial[] = [];
+  /** The live mirror faces (`userData.kitMirror`), shown by render/carmirrors.ts. */
+  readonly mirrorFaces: THREE.Mesh[] = [];
 
   /** `ownLenses` gives this car its own lens materials (the lab; a Vehicle binds its own). */
   constructor(root: THREE.Object3D, ownLenses = true) {
@@ -330,6 +341,7 @@ export class KitRig {
       if (node instanceof THREE.Mesh && node.material instanceof THREE.MeshStandardMaterial && node.material.name === 'car-glass-clear') {
         if (!this.glass.includes(node.material)) this.glass.push(node.material);
       }
+      if (node instanceof THREE.Mesh && node.userData.kitMirror) this.mirrorFaces.push(node);
       const motion = node.userData.kitMotion as KitMotion | undefined;
       if (!motion) return;
       this.driven.push({
@@ -363,15 +375,23 @@ export class KitRig {
   }
 
   /**
-   * Near: the cabin, bay, boot and underbody draw, and the glass is clear. Far: none of
-   * them draw and the glass is a tinted mirror. Only uniforms and visibility change, so
-   * crossing the line links no program.
+   * Detail by the eye's distance (m): within `KIT_DETAIL_M` the cabin, bay, boot and
+   * underbody draw, and the glass fades from clear (to `GLASS_CLEAR_M`) to the tinted
+   * mirror; beyond, none of them draw. Only uniforms and visibility change, so crossing
+   * the line links no program.
    */
-  setDetail(near: boolean): void {
-    if (near === this.near) return;
-    this.near = near;
-    for (const node of this.detail) node.visible = near;
-    for (const material of this.glass) material.opacity = near ? GLASS_NEAR_OPACITY : GLASS_FAR_OPACITY;
+  setDetail(distance: number): void {
+    const near = distance < KIT_DETAIL_M;
+    const t = Math.min(Math.max((distance - GLASS_CLEAR_M) / (KIT_DETAIL_M - GLASS_CLEAR_M), 0), 1);
+    // A hundredth of opacity is below what the eye resolves on a pane: no write per frame.
+    const opacity = Math.round((GLASS_NEAR_OPACITY + (GLASS_FAR_OPACITY - GLASS_NEAR_OPACITY) * t) * 100) / 100;
+    if (near === this.near && opacity === this.glassOpacity) return;
+    if (near !== this.near) {
+      this.near = near;
+      for (const node of this.detail) node.visible = near;
+    }
+    this.glassOpacity = opacity;
+    for (const material of this.glass) material.opacity = opacity;
   }
 
   private channel(name: string): Channel {

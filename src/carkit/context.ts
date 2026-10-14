@@ -4,10 +4,11 @@
  */
 
 import * as THREE from 'three';
+import { mirrorFaceGeometry, mirrorFaceMaterial } from '../render/carmirrors';
 import type { BodyFrame } from './body';
 import type { KitSlot, PartBuilder, Vec3 } from './builder';
 import { kitMaterial } from './materials';
-import { KIT_LAMP_NODES } from './names';
+import { KIT_LAMP_NODES, type KitMirror } from './names';
 import type { KitControl, KitMotion } from './rig';
 
 export interface KitNode {
@@ -45,6 +46,36 @@ export function addBuilt(parent: THREE.Object3D, builder: PartBuilder, origin: V
 function meshName(slot: KitSlot, part: string): string {
   const lamp = (KIT_LAMP_NODES as Partial<Record<KitSlot, string>>)[slot];
   return lamp ?? `${part}_${slot}`;
+}
+
+/**
+ * A mirror head's frame at `centre`, its glass facing local -Z, turned so that the eye at
+ * `eye` sees along `view` in it: the glass's normal halves the angle between the two.
+ * Local X stays level.
+ */
+export function mirrorFrame(centre: Vec3, eye: Vec3, view: Vec3): THREE.Matrix4 {
+  const at = new THREE.Vector3(...centre);
+  const back = new THREE.Vector3(...eye).sub(at).normalize().add(new THREE.Vector3(...view).normalize()).normalize().negate();
+  const x = new THREE.Vector3(0, 1, 0).cross(back).normalize();
+  const y = back.clone().cross(x);
+  return new THREE.Matrix4().makeBasis(x, y, back).setPosition(at);
+}
+
+/**
+ * A mirror's live face (render/carmirrors.ts) under `parent`, like `addBuilt`'s meshes: a
+ * quad `half` wide and high on the plane z = `z` of `frame` (`mirrorFrame`, as the head
+ * is built in), just proud of the static glass. Hidden: the mirror pass shows the faces
+ * of the car the player sits in, in the cabin view, and only those. It casts nothing, and
+ * its userData keeps carmodel.ts's static merge off it.
+ */
+export function addMirrorFace(parent: THREE.Object3D, frame: THREE.Matrix4, origin: Vec3, half: readonly [number, number], z: number, mirror: KitMirror): void {
+  const geometry = mirrorFaceGeometry(frame, half, z).translate(-origin[0], -origin[1], -origin[2]);
+  const mesh = new THREE.Mesh(geometry, mirrorFaceMaterial(mirror));
+  mesh.name = 'mirror_face';
+  mesh.visible = false;
+  mesh.userData.kitMirror = mirror;
+  mesh.userData.kitCastsNone = true;
+  parent.add(mesh);
 }
 
 /** A group in the car frame at `at`, tagged for the rig. Add it to its parent yourself. */

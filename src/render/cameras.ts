@@ -570,7 +570,11 @@ export class CameraRig {
   /**
    * Rebasable: shift every relative position this rig keeps across frames by the
    * frame step, so the camera stays glued to the world. Y is a height, untouched by
-   * the origin.
+   * the origin. The rendered camera moves too: it is rewritten only in `update`, which
+   * runs after the cars are posed, and until then the frame reads it as the eye
+   * (`Vehicle.viewFrom`). Left a kilometre behind, the occupied car's cabin stood past
+   * its 25 m detail range for that one frame and vanished: a flash of the painted
+   * shell in front of the eyes on every rebase.
    */
   rebase(shift: RebaseShift): void {
     this.eye.x -= shift.dx;
@@ -579,6 +583,8 @@ export class CameraRig {
     this.lookAt.z -= shift.dz;
     this.deathStartEye.x -= shift.dx;
     this.deathStartEye.z -= shift.dz;
+    this.camera.position.x -= shift.dx;
+    this.camera.position.z -= shift.dz;
   }
 
   get mode(): CameraMode {

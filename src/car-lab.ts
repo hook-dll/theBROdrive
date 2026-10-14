@@ -235,9 +235,6 @@ function createInterface(
   return root;
 }
 
-/** Beyond this a kit car draws no cabin and its glass goes back to a tinted mirror. */
-const KIT_DETAIL_DISTANCE = 25;
-
 /** Driving inputs the kit panel offers as sliders: channel, label, range, step. */
 const KIT_DRIVE_SLIDERS: readonly [string, string, number, number, number][] = [
   ['steer', 'Руль', -1, 1, 0.01],
@@ -474,7 +471,7 @@ export async function bootCarLab(): Promise<void> {
     const eye = renderer.camera.position;
     for (const car of cars) {
       if (!car.rig) continue;
-      car.rig.setDetail(car.anchor.position.distanceTo(eye) < KIT_DETAIL_DISTANCE);
+      car.rig.setDetail(car.anchor.position.distanceTo(eye));
       car.rig.update(dt);
     }
     controls.update();

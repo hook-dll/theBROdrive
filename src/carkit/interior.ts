@@ -26,7 +26,7 @@
 import * as THREE from 'three';
 import { DOOR_THICKNESS as DOOR_CARD, type BodyFrame } from './body';
 import { PartBuilder, lerp, table, type KitSlot, type Vec3 } from './builder';
-import { addBuilt, attach, pivotGroup, type KitContext } from './context';
+import { addBuilt, addMirrorFace, attach, mirrorFrame, pivotGroup, type KitContext } from './context';
 import type { KitControl, KitMotion } from './rig';
 import type { CabinColumn, KitCarSpec } from './spec';
 
@@ -576,6 +576,27 @@ export function loadSpaceStart(frame: BodyFrame): number {
   return benchHip(frame, { ...LAYOUTS[frame.spec.platform], ...frame.spec.cabinLayout }) + BENCH_BACK;
 }
 
+/** The cabin's floor pan: the shell's flat underbody plus `FLOOR_RISE`. */
+function cabinFloor(frame: BodyFrame): number {
+  return frame.station(frame.cowl + 0.5).sill + FLOOR_RISE;
+}
+
+/** Underside of the headliner at half width x. */
+function headlinerUnder(cab: KitCarSpec['cabin'], x: number): number {
+  const xr = cab.railHalf - cab.railInset;
+  return cab.rail + cab.railRise + cab.crown * (1 - (x / xr) ** 2) - 0.028;
+}
+
+/**
+ * The driver's eye in the kit frame, over his cushion and kept under the headliner: the
+ * `KIT_DRIVER_EYE_NODE`, and what the mirrors are turned to (exterior.ts as well).
+ */
+export function driverEyeAt(frame: BodyFrame): Vec3 {
+  const lay = { ...LAYOUTS[frame.spec.platform], ...frame.spec.cabinLayout };
+  const y = Math.min(cabinFloor(frame) + lay.cushion + SEATED_EYE, headlinerUnder(frame.spec.cabin, lay.seatX) - EYE_HEADROOM);
+  return [lay.seatX, y, frame.z(frame.cowl + lay.hip + EYE_BEHIND_HIP)];
+}
+
 // ---- small geometry ----
 
 function add(a: Vec3, b: Vec3): Vec3 {
@@ -762,7 +783,7 @@ class Cabin {
     const f = this.frame;
     const w = this.spec.wheels;
     this.fw = f.cowl + FIREWALL;
-    this.floorY = f.station(f.cowl + 0.5).sill + FLOOR_RISE;
+    this.floorY = cabinFloor(f);
     this.floorEnd = w.rear - w.radius * f.archFactor(w.rear) - 0.01;
     this.belt = f.station(f.cowl).belt;
     this.hipS = f.cowl + this.lay.hip;
@@ -800,12 +821,11 @@ class Cabin {
     this.doors();
   }
 
-  /** The empty `KIT_DRIVER_EYE_NODE` over the driver's cushion, kept under the headliner. */
+  /** The empty `KIT_DRIVER_EYE_NODE`. */
   private driverEye(): void {
     const eye = new THREE.Object3D();
     eye.name = KIT_DRIVER_EYE_NODE;
-    const y = Math.min(this.floorY + this.lay.cushion + SEATED_EYE, this.dome(this.x0) - EYE_HEADROOM);
-    eye.position.set(...this.P(this.x0, y, this.hipS + EYE_BEHIND_HIP));
+    eye.position.set(...driverEyeAt(this.frame));
     this.ctx.root.add(eye);
   }
 
@@ -849,9 +869,7 @@ class Cabin {
 
   /** Underside of the headliner at half width x. */
   private dome(x: number): number {
-    const cab = this.spec.cabin;
-    const xr = cab.railHalf - cab.railInset;
-    return cab.rail + cab.railRise + cab.crown * (1 - (x / xr) ** 2) - 0.028;
+    return headlinerUnder(this.spec.cabin, x);
   }
 
   /** Headliner's half width: inside the door frames' inner skins at the rail. */
@@ -1142,17 +1160,31 @@ class Cabin {
       return lerp(sb, st, (y - yb) / (yt - yb));
     };
     const my = cab.rail - 0.085;
-    // Pad half size 0.105 x 0.03 x 0.014, turned 0.1 rad towards the driver: its far end
-    // swings 1 cm towards the glass. 4 cm is added in front of the nearest corner: the
+    // The pad (half size 0.105 x 0.03 x 0.014) is turned so the driver sees straight back
+    // through the back light's middle in it (`mirrorFrame`); the turn swings its far end
+    // towards the glass. 4 cm is added in front of its corner nearest the glass: the
     // screen bows ahead of this straight foot-to-top line, so the air left is 2-3 cm
     // (tools measured: Samaras 22 mm, classics 30 mm, ahead of the mirror).
-    const ms = Math.max(...[-0.105, 0.105].flatMap((x) => [my - 0.03, my + 0.03].map((y) => glassS(x, y)))) + 0.014 + 0.0105 + 0.04;
+    const nearest = Math.max(...[-0.105, 0.105].flatMap((x) => [my - 0.03, my + 0.03].map((y) => glassS(x, y))));
+    const eye = driverEyeAt(f);
+    const [[rearB, rearYb], [rearT, rearYt]] = glass(0, 'rear');
+    const backLight = this.P(0, (rearYb + rearYt) / 2, (rearB + rearT) / 2);
+    const aim = (s: number): THREE.Matrix4 => mirrorFrame(this.P(0, my, s), eye, sub(backLight, this.P(0, my, s)));
+    // How far the turned pad reaches ahead of its centre (+z is forward), placed near
+    // where it will hang: the turn hardly changes over the last few centimetres.
+    const turn = new THREE.Matrix3().setFromMatrix4(aim(nearest + 0.07));
+    const corner = new THREE.Vector3();
+    let reach = 0;
+    for (const x of [-0.105, 0.105]) for (const y of [-0.03, 0.03]) for (const z of [-0.014, 0.014]) reach = Math.max(reach, corner.set(x, y, z).applyMatrix3(turn).z);
+    const ms = nearest + reach + 0.04;
     const root = this.P(0, cab.rail - 0.01, glassS(0, cab.rail - 0.01) + 0.03);
     b.color(COLOURS.black);
     beam(b, 'trim', root, this.P(0, my + 0.02, ms), 0.008, 0.008, [1, 0, 0]);
-    b.pushAt(this.P(0, my, ms), [0.12, 0.1, 0]);
+    b.push(aim(ms));
     pad(b, 'trim', ORIGIN, [0.105, 0.03, 0.014], 0.008);
     b.quad('chrome', [0.095, -0.022, -0.0145], [-0.095, -0.022, -0.0145], [-0.095, 0.022, -0.0145], [0.095, 0.022, -0.0145]);
+    // The live face 1.5 mm proud of the glass.
+    addMirrorFace(this.group, b.matrix, ORIGIN, [0.095, 0.022], -0.016, 'inner');
     b.pop();
 
     // Sun visors lie flat under the headliner and swing down about their front edge. A

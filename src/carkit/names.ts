@@ -33,3 +33,10 @@ export const KIT_LIGHTS = {
 
 /** The material the kit's panes are drawn with (the def's `glassMaterial`). */
 export const KIT_GLASS_MATERIAL = 'glass';
+
+/**
+ * A kit car's three mirrors: the interior one and the door mirrors, by the car's side
+ * (+x is its left). Each carries a hidden live face tagged `userData.kitMirror` with this
+ * id (carkit/context.ts `addMirrorFace`, render/carmirrors.ts).
+ */
+export type KitMirror = 'inner' | 'left' | 'right';

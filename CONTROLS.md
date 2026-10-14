@@ -13,26 +13,32 @@ The kit cars (`src/carkit`) are worked part by part (`src/player/interaction.ts`
 `aimKit` and the `kit*` methods beside it). Picking is against the car's render mesh with
 the car lab's rule: clear glass is looked through unless the pane itself moves.
 
+**A kit car names nothing.** No prompt for its doors, lids, flap or seats, on foot or
+seated: the round crosshair lights on whatever E or F works there (`InteractionResult
+.actionable`), and, while driving, shows only then. A refusal is the thing not happening
+(a door that stays shut answers F with a knock). Only the bonnet and boot cells keep their
+line (`[F] take 1.5 inline-four — oil full — 4.0 L`), and a seat the player cannot take
+with his load says why.
+
 - **On foot, E works only the panels**: the side doors, the bonnet, the boot lid or
-  tailgate and the fuel flap, named by the prompt (`[E] open front left door`). Windows,
-  vents and everything in the cabin are not reached from outside, even through an open
-  door. A sticker envelope in hand keeps E (it mirrors the sticker); any other held item
-  gives E up while a panel is in the crosshair.
+  tailgate and the fuel flap. Windows, vents and everything in the cabin are not reached
+  from outside, even through an open door. A sticker envelope in hand keeps E (it mirrors
+  the sticker); any other held item gives E up while a panel is in the crosshair.
 - **The bonnet and boot grids follow their lids.** Opening the bonnet shows its grid in the
   bay, where the parts stand: the engine's big cell in the middle, the radiator in front,
-  the turbine and the air filter beside it. Opening the boot or tailgate shows the boot's
+  the turbine and the air filter beside it, each cell outlined round its top and lit pink
+  under the aim (within 1.6 m of the eye). Opening the boot or tailgate shows the boot's
   grid; shutting a lid hides it, and so does walking 3.2 m away. F on a cell takes or
   fits as before. Wrecks and couriers, whose lids do not open, keep aim and F to open.
-- **Petrol goes in through the fuel flap.** With a petrol can in hand, aim at the flap:
-  shut, the prompt shows the level and says to open it; open, hold the left button to
-  pour (`[LMB] pour petrol — petrol 12.3/39.0 L`). Oil and water still pour into the
-  engine and radiator cells in the open bonnet. The tank is the car's own; it is not a part.
+- **Petrol goes in through the fuel flap.** With a petrol can in hand, open the flap and
+  hold the left button on it; the crosshair lights while it takes petrol, and the fuel
+  gauge is the level. Oil and water still pour into the engine and radiator cells in the
+  open bonnet. The tank is the car's own; it is not a part.
 - **F gets in by looking at a seat through an open side door** (front or rear, on the
   player's side; the rear bench through a front door on a two-door car). The first opaque
   thing the eye ray meets must be the seat, not seen through glass, and the ray must
-  cross the open door's outline. The prompt names it: `[F] sit in the driver's seat`,
-  `front passenger seat`, `rear seat`, and the player sits in that seat. With the door
-  shut F refuses and says to open it. The cabin carry limits still apply.
+  cross the open door's outline. The player sits in that seat. The cabin carry limits
+  still apply.
 - **Only the driver's seat drives.** From any other seat the car holds where it stands:
   pedals, steering, gears, lights, indicators and the autopilot do nothing ("only the
   driver can do that"). The cabin view is from that seat (the passenger's is the
@@ -41,15 +47,14 @@ the car lab's rule: clear glass is looked through unless the pane itself moves.
   within reach works (doors, lids, windows, switches, stalks, visors, the courtesy lamp,
   the horn pad, which only moves: the game has no horn sound); in the chase and hood views
   only the side doors do. Doors, lids and the flap are offered only below the exit speed
-  (5 km/h). No prompt names the part from the seat: the round crosshair, hidden while
-  driving, shows while it is on something E works. The light switch, hazards and stalk
-  work the car's own lamps; the wiper stalk runs the wipers slow, fast and off.
+  (5 km/h). The light switch, hazards and stalk work the car's own lamps; the wiper stalk
+  runs the wipers slow, fast and off.
 - **F gets out through the open door on the seat's side** (a rear seat's rear door, or
-  the front door on a car without rear doors) below 5 km/h. With it shut F refuses and
-  names it (`the front right door is shut · look at it, [E] to open it`). The player steps
-  out beside that door, ground-checked.
+  the front door on a car without rear doors) below 5 km/h, beside that door,
+  ground-checked.
 - **The cabin view hides the on-screen cluster**: the car's own instruments read speed,
   revs, fuel, temperature, oil pressure, charge and vacuum, and its warning lamps light.
+  The interior and both door mirrors show what is behind, from the seat's eye.
 
 Cars without a kit body keep the old rule: F at the car's body enters, and exits on the
 left. The touch overlay's E button is on-foot only, so from the seat parts are worked

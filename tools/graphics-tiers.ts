@@ -73,7 +73,7 @@ const COST_KEYS = [
   'vehicleLightSlots',
   'mobileVehicleLightSlots',
 ] as const;
-const WILLINGNESS_KEYS = ['supersample', 'headlightDistanceScale'] as const;
+const WILLINGNESS_KEYS = ['supersample', 'headlightDistanceScale', 'mirrorScale'] as const;
 
 console.log('rung         Mpx ceiling   Mpx floor   stars   car lamps');
 let previous: GraphicsQuality | null = null;

@@ -4,6 +4,19 @@
 
 ### Added
 
+- KIT MIRRORS WORK (`render/carmirrors.ts`, `core/renderer.ts`, `carkit/interior.ts`,
+  `carkit/exterior.ts`, `game/settings.ts` `mirrorScale`). In the cabin view of the car the
+  player sits in, the interior mirror and both door mirrors show the world behind: each is
+  drawn from the viewing eye reflected through its glass, through the glass's own corners
+  (an off-axis projection, near plane on the glass), so the image is a true mirror's for
+  any seat. The mirrors are aimed at the driver's eye. One mirror is drawn per frame in
+  turn, into a small sRGB target like the scene pass's (so no program is new), with no
+  shadow-map redraw and no post pass; off on 'retro', half size on 'acceptable'. Measured
+  on the M2 Pro (blessing, 2107 on autopilot, four alternating 5 s windows): mirrors on cost
+  +1.0 to +1.5 ms of render CPU and +350-500 draw calls a frame, 60 fps held throughout;
+  programs 88 before and after entering the cabin view. `__bro.mirrors.enabled` toggles
+  them, `__bro.mirrors.stats` counts their renders.
+
 - KIT CARS: SIT IN ANY SEAT (`player/interaction.ts`, `game/state.ts` `player.seat`,
   `vehicle/cabincamera.ts`, `main.ts`). F gets in only while the eye looks through an open
   side door at a seat, and the player sits in that one: driver's, front passenger's or
@@ -379,6 +392,19 @@
 
 ### Changed
 
+- KIT CARS NAME NOTHING (`player/interaction.ts`, `ui/hud.ts`). No prompt for a kit
+  car's doors, lids, flap or seats, on foot or seated, and no refusal text on getting out:
+  the crosshair lights on whatever E or F works there (`InteractionResult.actionable`,
+  which replaces `cabinAim`), and a door that stays shut is the refusal. The bonnet and
+  boot cells keep their lines, and a seat the player cannot take with his load says why.
+  The name and verb tables behind the prompts are gone.
+- KIT GLASS FADES TO A TINTED MIRROR BETWEEN 30 AND 50 M (`carkit/rig.ts` `setDetail`,
+  `KIT_DETAIL_M`). At one 25 m step a passing car's panes went from mirror to clear in one
+  frame a few car lengths away; now they fade, and the cabin behind them draws to 50 m.
+  `setDetail` takes the distance; the car lab uses the same rule. Checked on the road:
+  traffic at 3-24 m clear (0.28), 35.5 m half-way (0.47), 57 m and beyond tinted (0.9)
+  with the cabin hidden.
+
 - FUEL TANK IS NO LONGER A PART; PETROL GOES IN THROUGH THE FLAP (`parts/registry.ts`,
   `vehicle/bonnet.ts`, `player/interaction.ts`, `save/save.ts`). The tank is the model's
   own (`tankLitres`); the bonnet holds four typed cells: engine, turbine, radiator, air
@@ -541,6 +567,19 @@
     handed in, placed 2nd and 3rd.
 
 ### Fixed
+
+- NO MORE FLASH OF THE BODY IN THE CABIN VIEW (`render/cameras.ts` `rebase`). On every
+  floating-origin shift (each kilometre or so) the rendered camera was left a kilometre
+  behind for one frame, so the car the player sat in was past its cabin's detail range
+  and drew without its cabin: the painted shell's inside flashed past the eyes. The rebase
+  now moves the rendered camera with the eye. A/B across a real rebase at speed: with the
+  old rebase the cabin was hidden for 1 frame, with the fix 0.
+- THE BONNET GRID IS SEEN AND PICKED (`player/interaction.ts`, `render/trunkview.ts`). The
+  bay's cells stand inside the chassis box, and the box's hit always stood nearer, so no
+  cell was ever under the aim; an open compartment now wins over the box it sits in. Each
+  cell's outline rides round its top instead of lying under its part on the bay's dark
+  floor. Checked on a 2107 from the bumper: all four cells picked, the engine cell lit
+  pink with `[F] take 1.5 inline-four — oil full — 4.0 L`.
 
 - KIT REAR-VIEW MIRROR NO LONGER THROUGH THE SCREEN (`carkit/interior.ts` `headliner`).
   It stood a fixed 7 cm behind the glass at its own centre; on the Samaras' and tens'

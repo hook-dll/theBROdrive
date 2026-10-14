@@ -20,7 +20,8 @@
  * Bands, from the scene pass's 24-bit depth at near 0.08 m (a gap g fights beyond
  * d ≈ sqrt(g·near·2^24/2)):
  *   close    gap < 0.15 mm   fights within 10 m: the lab, the chase cam, the cockpit
- *   10-25 m  0.15-0.93 mm    until the cabin, bay, boot and underbody stop drawing at 25 m
+ *   10-25 m  0.15-0.93 mm    the cabin, bay, boot and underbody draw to 50 m (`KIT_DETAIL_M`),
+ *                            but past 25 m only through glass fading to a tinted mirror
  *   >25 m    0.93-2 mm       exterior only
  *   far      2-6 mm          beyond ~40 m, a car a few dozen pixels wide: no fix needed
  *

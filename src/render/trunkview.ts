@@ -25,6 +25,13 @@ const ITEM_FORWARD = 0.045;
 const BONNET_ITEM_FIT = 0.92;
 /** A bonnet cell's panel lies on the cell's floor, lifted off whatever is under it. */
 const BONNET_PANEL_LIFT = 0.006;
+/**
+ * A bonnet cell's outline rides this far under the cell's top, not on its floor: down
+ * there it lay under the part it frames and against the bay's dark floor, and the grid
+ * could not be seen at all with the bonnet up. At the top it rings the opening the eye
+ * looks down into.
+ */
+const BONNET_BORDER_DROP = 0.01;
 const CONDITION_PROGRAM_KEY = 'condition-rust-dirt-v1';
 /**
  * Display pose inside a holder whose +Z points at the eye (Euler XYZ). The generic
@@ -182,7 +189,8 @@ export class TrunkView {
 
   /**
    * Places every cell's panel and border: upright in the trunk's plane facing the
-   * player behind the car, or flat on a bonnet cell's floor facing up out of the bay.
+   * player behind the car, or flat in a bonnet cell facing up out of the bay, the panel
+   * on its floor and the outline round its top.
    */
   private layout(shape: StorageGridShape, side: TrunkViewState['side'], onLid: boolean): void {
     const count = storageCellCount(side);
@@ -193,14 +201,14 @@ export class TrunkView {
       const panel = this.panels[cell]!;
       const border = this.borders[cell]!;
       if (side === 'bonnet') {
+        border.position.copy(this.cellPosition);
+        border.position.y += this.cellSize.y * 0.5 - BONNET_BORDER_DROP;
+        border.rotation.set(-Math.PI / 2, 0, 0);
+        border.scale.set(this.cellSize.x * CELL_INSET, this.cellSize.z * CELL_INSET, 1);
         this.cellPosition.y -= this.cellSize.y * 0.5 - BONNET_PANEL_LIFT;
         panel.position.copy(this.cellPosition);
         panel.rotation.set(-Math.PI / 2, 0, 0);
         panel.scale.set(this.cellSize.x * CELL_INSET, this.cellSize.z * CELL_INSET, 1);
-        border.position.copy(this.cellPosition);
-        border.position.y += 0.002;
-        border.rotation.set(-Math.PI / 2, 0, 0);
-        border.scale.set(this.cellSize.x * CELL_INSET, this.cellSize.z * CELL_INSET, 1);
       } else {
         panel.position.copy(this.cellPosition);
         panel.rotation.set(0, 0, 0);

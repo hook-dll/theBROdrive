@@ -139,6 +139,12 @@ export interface GraphicsTier {
   readonly mobileVehicleLightSlots: number;
   /** Reach multiplier for a projected headlamp beam; the top rung throws light further. */
   readonly headlightDistanceScale: number;
+  /**
+   * Live mirrors in the kit car the player sits in, cabin view only (render/carmirrors.ts):
+   * their render targets' size as a share of full, 0 for the static glass. A mirror is a
+   * small extra scene pass every frame, which the weakest rung leaves out.
+   */
+  readonly mirrorScale: number;
 }
 
 /**
@@ -186,6 +192,7 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     vehicleLightSlots: 4,
     mobileVehicleLightSlots: 4,
     headlightDistanceScale: 1,
+    mirrorScale: 0,
   },
   acceptable: {
     maxPixels: 1600 * 900,
@@ -203,6 +210,8 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     vehicleLightSlots: 4,
     mobileVehicleLightSlots: 4,
     headlightDistanceScale: 1,
+    // Half-size targets: on a phone or a mini-PC the passes cost a quarter of the pixels.
+    mirrorScale: 0.5,
   },
   standard: {
     maxPixels: 2560 * 1440,
@@ -224,6 +233,7 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     vehicleLightSlots: 9,
     mobileVehicleLightSlots: 6,
     headlightDistanceScale: 1,
+    mirrorScale: 1,
   },
   blessing: {
     // 4800x2700, which is 4K with the 1.25x supersampling this rung always had.
@@ -257,6 +267,7 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     // desktop spends 11.
     mobileVehicleLightSlots: 8,
     headlightDistanceScale: 3,
+    mirrorScale: 1,
   },
 };
 
