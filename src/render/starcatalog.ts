@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { starMagnitudeFor, type GraphicsQuality } from '../game/settings';
+import { SCENE_FROM_SCREEN_GLSL } from './displaytransform';
 
 const CATALOG_URL = '/data/tycho2.bin';
 const MAGIC = 'TBR1';
@@ -68,7 +69,7 @@ uniform float uSkyVisibility;
 varying vec3 vColor;
 varying float vFlux;
 varying float vMoonMask;
-
+${SCENE_FROM_SCREEN_GLSL}
 void main() {
   vec2 p = gl_PointCoord - 0.5;
   float r2 = dot(p, p);
@@ -80,7 +81,9 @@ void main() {
   float energy = vFlux * uExposure * uSkyVisibility * 60.0;
   float alpha = min(1.0, energy * psf) * (1.0 - vMoonMask);
   if (alpha < 0.003) discard;
-  gl_FragColor = vec4(vColor, alpha);
+  // The gain above was set by the pixel a star puts on the screen over a black sky;
+  // added as the radiance that shows at that pixel (render/displaytransform.ts).
+  gl_FragColor = vec4(sceneFromScreen(vColor * alpha), 1.0);
 }
 `;
 function blackbodyColor(bv: number, out: THREE.Color): void {

@@ -487,6 +487,26 @@ function meanLuminance(data: Uint8ClampedArray): number {
   return sum / n;
 }
 
+/**
+ * The aggregate was painted against a frame shown linear-encoded, about a gamma dark,
+ * where its sRGB steps reached the screen squared: hard pale stones in dark binder.
+ * Through the sRGB encode (core/renderer.ts `drawFrame`) the same texture read as a
+ * flat lavender wash. Each byte is pushed away from the canvas's mean byte by this
+ * power, which puts that contrast back in the albedo, and the road as a whole is
+ * darkened a little by ROAD_DISPLAY_SCALE. Matched by screenshot at noon against HEAD.
+ */
+const ROAD_TEXTURE_CONTRAST = 2;
+const ROAD_DISPLAY_SCALE = 0.85;
+
+function steepenAboutMean(data: Uint8ClampedArray): void {
+  let sum = 0;
+  for (let i = 0; i < data.length; i += 4) sum += data[i]!;
+  const mean = sum / (data.length / 4);
+  for (let i = 0; i < data.length; i += 4) {
+    for (let c = 0; c < 3; c++) data[i + c] = mean * Math.pow(data[i + c]! / mean, ROAD_TEXTURE_CONTRAST);
+  }
+}
+
 function makeCanvas(): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   const canvas = document.createElement('canvas');
   canvas.width = TEXTURE_SIZE;
@@ -507,9 +527,12 @@ export function roadTextures(): RoadTextures {
   drawPatches(albedo.ctx);
   drawCracks(albedo.ctx, 0.32);
 
-  const mean = meanLuminance(
-    albedo.ctx.getImageData(0, 0, TEXTURE_SIZE, TEXTURE_SIZE).data,
-  );
+  const pixels = albedo.ctx.getImageData(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
+  // The gain is taken from the painted mean, before the contrast below, so the road's
+  // mean colour stays its surface's (times ROAD_DISPLAY_SCALE).
+  const mean = meanLuminance(pixels.data) / ROAD_DISPLAY_SCALE;
+  steepenAboutMean(pixels.data);
+  albedo.ctx.putImageData(pixels, 0, 0);
 
   const map = new THREE.CanvasTexture(albedo.canvas);
   map.wrapS = THREE.RepeatWrapping;

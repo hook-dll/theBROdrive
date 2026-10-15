@@ -57,8 +57,7 @@ export interface LateralGeometry {
   readonly crawl: number;
   /** Speed a lane must be short of the driver's own before it counts as still slow. */
   readonly passAdvantage: number;
-  /** A verge pass gaining less than this on the car it passes is stalling. */
-  readonly shoulderMinGain: number;
+  /** Seconds a verge pass may stall (see `stepShoulder`) before it is given up. */
   readonly shoulderStallS: number;
   readonly shoulderRetryM: number;
 }
@@ -258,31 +257,30 @@ export class LateralCommitment {
 
   /**
    * THE VERGE PASS, once the plan has chosen its line. It lasts while the passed car
-   * is still alongside, not while the forward probe still sees it.
+   * is still alongside, not while the forward probe still sees it; the speed it is
+   * measured against is that car's while it is alongside, the next one's before.
    *
-   * A PASS ON THE VERGE HAS TO BE GAINING. Loose ground costs grip and drag the asphalt
-   * does not, and a racer that could not find its advantage sat alongside for twenty
-   * seconds with its wheels in the dirt. The gain is judged from the moment the car is
-   * out there to gain it (`outOnVerge`) — at the grant it is tucked in at the leader's
-   * own speed, and counting the move out spent most of the clock before a pass could
-   * start. Stalling for `shoulderStallS` gives the pass up: the caller drops the car
-   * below the other one until it is out from alongside, and the verge is barred for
-   * `shoulderRetryM` of road.
+   * IT IS GIVEN UP ONLY WHEN IT CANNOT BE FINISHED, and the caller says which: `giveUp`
+   * when the verge will carry it to no gap and it is at none (unsafe), `stalling` while
+   * on its real numbers it cannot gain on the car it passes (impossible) — given up
+   * after `shoulderStallS` of that. The caller then drops the car below the other one
+   * until it is out from alongside, and the verge is barred for `shoulderRetryM` of
+   * road. See SHOULDER_PASS_MIN_GAIN_MPS in the autopilot.
    */
   stepShoulder(
     granted: boolean,
     onVerge: boolean,
     laneBlockSpeed: number,
     alongsideSpeed: number,
-    outOnVerge: boolean,
-    speed: number,
+    stalling: boolean,
+    giveUp: boolean,
     dt: number,
     travelled: number,
   ): void {
     const g = this.g;
     if (granted && laneBlockSpeed > g.crawl && onVerge) {
       this.shoulderPassing = true;
-      this.shoulderPassSpeed = laneBlockSpeed;
+      this.shoulderPassSpeed = alongsideSpeed < Infinity ? alongsideSpeed : laneBlockSpeed;
     } else if (this.shoulderPassing && onVerge && alongsideSpeed < Infinity) {
       this.shoulderPassSpeed = alongsideSpeed;
     } else {
@@ -293,11 +291,8 @@ export class LateralCommitment {
       this.shoulderYielding = false;
       return;
     }
-    if (outOnVerge) {
-      this.shoulderStallFor =
-        speed - this.shoulderPassSpeed < g.shoulderMinGain ? this.shoulderStallFor + dt : 0;
-    }
-    if (!this.shoulderYielding && this.shoulderStallFor > g.shoulderStallS) {
+    this.shoulderStallFor = stalling ? this.shoulderStallFor + dt : 0;
+    if (!this.shoulderYielding && (giveUp || this.shoulderStallFor > g.shoulderStallS)) {
       this.shoulderYielding = true;
       this.shoulderBarM = travelled + g.shoulderRetryM;
     }

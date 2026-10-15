@@ -65,6 +65,14 @@ const HEADLIGHT_DISTANCE_SCALE: Record<GraphicsQuality, number> = {
 /** Visually zero, but nonzero to prevent first-use GPU driver specialization. */
 const DORMANT_INTENSITY = 1e-8;
 /**
+ * Every projected lamp's authored intensity is scaled by this. The lamps were authored
+ * against a frame shown linear-encoded, about a gamma darker than its light; through the
+ * post pass's sRGB encode (core/renderer.ts `drawFrame`) the same beam's falloff spilled
+ * across the dunes at three times the screen value. Matched by screenshot at midnight:
+ * the pool on the road reads as before, the sand beyond it stays night.
+ */
+const LAMP_EXPOSURE = 0.35;
+/**
  * Beam scale for a car the player is NOT driving, by distance from the camera.
  *
  * `AMBIENT_BEAM_GAIN` is the ceiling: enough that an oncoming car's light is seen
@@ -209,7 +217,7 @@ export class VehicleLightRig {
     light.position.copy(sourceWorld);
     light.target.position.copy(targetWorld);
     light.color.set(color);
-    light.intensity = intensity;
+    light.intensity = intensity * LAMP_EXPOSURE;
     light.distance = distance;
     light.angle = angle;
     light.penumbra = penumbra;
@@ -240,7 +248,7 @@ export class VehicleLightRig {
     light.position.copy(sourceWorld);
     light.target.position.copy(targetWorld);
     light.color.set(color);
-    light.intensity = intensity;
+    light.intensity = intensity * LAMP_EXPOSURE;
     light.distance = distance;
     light.angle = angle;
     light.penumbra = penumbra;

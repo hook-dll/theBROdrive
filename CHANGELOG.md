@@ -4,6 +4,112 @@
 
 ### Added
 
+- THE ROAD STANDS ON A LOW EMBANKMENT WITH A REAL SHOULDER (`world/roadprofile.ts`
+  `SHOULDER_WIDTH_M`, `shoulderFallAt`, `embankmentDropAt`, `shoulderFringeM`;
+  `world/terrain.ts` `gradedBase`; `world/roadmesh.ts` shoulder strip, `SKIRT_ACROSS_M`).
+  Past the asphalt edge: a guaranteed 2.5 m shoulder of `LooseShoulder` on every row,
+  falling 6% at the lip steepening to 15%; a ragged, wandering fringe of the same stone
+  only beyond it; then a 1 m batter to the desert 0.45 m below the asphalt. The terrain
+  is lowered by the same profile, and the strip's collider is its own drawn triangles.
+  Measured by the new `tools/verge-profile.ts` (rays against the real road chunk, lay-by
+  pads included) over 135 chunks, seeds 1337 and 42: drivable past the edge min
+  0.95 / p50 1.75 m before, 2.55 / 2.85 m after on every row (straights and lay-bys);
+  fall 7.9/11.7/14.4% at 0.5/1.5/2.3 m; desert 5 m out 0.48 m below the asphalt (p5
+  0.24, p95 0.69; was 0.09); drawn ground above the strip on 0.3% of rows by at most
+  4 cm (was 98% of rows, up to 11.7 cm). Lay-bys keep their level pad (the strip lies on
+  it). Reflector posts moved from 1.2 m to 3.2 m past the paint (`world/props/delineators.ts`
+  `DELINEATOR_SETBACK_M`, now standing on the tiles' drawn ground via `tileGroundSampler`)
+  and the pole line from 3.1 m to 4.5 m (`world/props/poles.ts` `POLE_SETBACK_M`), so
+  neither stands on the shoulder a verge pass uses. Pole feet p50 7.7 cm over the drawn
+  ground (HEAD 9.5 cm); sidetrack ruts unchanged (they ride `drawnGroundY`, the dev
+  terrain mesh, and float ~10 cm over the tiles as on HEAD). Lakes (520 m+ out)
+  untouched: `tools/water.ts` passes; `tools/corridor-shape.ts` gives the same result as
+  HEAD.
+- FRANTIC DRIVERS PASS A WHOLE QUEUE ON THE VERGE (`vehicle/autopilot.ts`
+  `sizeQueuePass`, `vergeStretchFits`, `vergeCeiling`, `VERGE_CROSS_FALL`;
+  `vehicle/lateral.ts` `stepShoulder`; `vehicle/corridor.ts` `shoulderPassSooner`). The
+  pass is sized to the first real gap in the queue, committed once more than half past,
+  and given up only when it cannot be finished. Its speed is the car beside plus 6 m/s,
+  capped by what the verge allows (the bend on the shoulder's grip less its fall, the
+  road's limit, 130 km/h). The outer tyre stays 0.4 m inside the guaranteed shoulder,
+  and the verge budget uses the profile's fall at that depth (13.6%, was a flat 10%).
+  `tools/frantic-pass.ts` (seeds 1337/42/7, M30 and stock): passed 26 of 48 → 48 of 48,
+  wheels in the desert 128 → 0, slides 0 → 0, contacts 0 → 0, verge give-ups 0 → 0.
+  `tools/autopilot-bench.ts`: the same 8 FAILs as HEAD. `tools/traffic-bench.ts`: one
+  lay-by hand-in FAIL as on HEAD, with 2 stream impacts in both; on HEAD they fall in the
+  far-side window, here in the own-side one.
+  CONTACTS ARE UNRESOLVED. `tools/traffic-road.ts` (`--cap 48 --frantic-share 0.5`, seeds
+  1337 2024 42 7 99, three runs per build, per frantic car-minute, mean [min-max]):
+  HEAD 0.34 [0.30-0.42]; embankment with the old pass logic 0.38 [0.32-0.45]; the queue
+  pass letting the car open up to the verge's ceiling 0.49 [0.42-0.59] (normal cars
+  0.15 against HEAD's 0.09). With the speed held to the car beside plus 6 m/s (the code
+  now) 0.33 [0.17-0.42], normal cars 0.07, left the road 0.19 against HEAD's 6.5 — but
+  that is one variant built without the `vergeCeiling` cap, and the final build's own
+  stream runs were stopped. The contact counter itself has not been validated: a two-car
+  impact is reported by both cars, and the run-to-run spread is not yet known.
+  `tools/traffic-road.ts` gains `left the road`: a wheel on sand or rock, or the body's
+  centre past the 2.5 m shoulder (`CONTROL_SHOULDER_M`); `departure` still means 0.3 m
+  past the paint. `tools/frantic-pass.ts`, `tools/traffic-road.ts` (`--frantic-share`,
+  `--events`) and `tools/verge-profile.ts` are kept as the benches for this.
+
+- **COLOUR PIPELINE DONE PROPERLY: LINEAR HDR SCENE, ONE DISPLAY TRANSFORM.** The scene
+  pass drew into an 8-bit sRGB target, where Three applies no tone mapping, and the post
+  pass wrote those linear values to the canvas unencoded: the whole game ran about a gamma
+  dark and the configured ACES was never applied. The scene now renders linear radiance
+  into a half-float target (`sceneTargetType`, core/renderer.ts; 8-bit sRGB fallback
+  without float render targets). The post pass (render/hazeshader.ts `toDisplay`) maps it
+  to the display once, after the heat haze, mirage, dust wall and veils and before the
+  grade, ink and grain. The curve is the PBR Neutral shoulder without its toe
+  (render/displaytransform.ts), picked from noon/dusk/night sheets against ACES (sunlit
+  sand goes yellow-white), AgX (greys the desert) and full Neutral (its toe turns dusk
+  roads saturated blue). FXAA and the ink measure edges on a square-root approximation of
+  the displayed values.
+  - Colours authored as screen values are decoded, so they show as authored: the sky dome
+    and the environment probe (one shader now; the "linear twin" is gone), fog and air-fog
+    colours, the dust-wall, storm and veil colours, stars and planets, every
+    MeshBasicMaterial colour and emissive (`installScreenAuthoredUnlit`,
+    render/lightshader.ts; mirror faces opt out with `SCENE_RADIANCE`), and the wheel-spray,
+    weather-particle and artifact shaders.
+  - Removed the compensations for the dark display: the post pass's sqrt toe lift and the
+    daylight sky-fill boost.
+  - Retuned (sky.ts unless noted):
+    - `EXPOSURE_TARGET` 5 → 3.
+    - New `DAY_FILL_SHARE` 0.6 (sky fill only; the sand bounce keeps its energy).
+    - New `ENVIRONMENT_SHARE` 0.5.
+    - `ADAPTATION_FLOOR` 0.1 → 0.05 (dusk ground readable).
+    - Night fill 2.8 → 0.35.
+    - Vehicle beams ×0.35 (`LAMP_EXPOSURE`, render/vehiclelights.ts); torch 150 → 52.
+    - Tail and brake ground pool 6/24 → 3/12 (vehicle/vehiclelamps.ts).
+    - Asphalt albedo contrast ×2 about its mean, overall ×0.85 (render/roadtexture.ts).
+    - Grade saturation 1.055 → 1.5, plus a display-space S-curve at 0.45 (`DISPLAY_CONTRAST`).
+  - Mirrors render into the scene target's type, so they go through the same exposure and
+    curve as the main view.
+  - Car-lab ground is segmented: on a 2-triangle 4 km plane the per-vertex fog depth hazed
+    it sky-blue up close.
+
+  Measured on the M2 Pro, same frozen frames HEAD vs new (seed `flick`, 30 km, Standard,
+  traffic cleared), luma p5/p50/p95 of 255:
+
+  | Frame | HEAD | New |
+  |---|---|---|
+  | Noon | 97/127/219 | 94/123/229 |
+  | Golden hour | 61/85/180 | 60/85/187 |
+  | Dusk | 4/5/149 | 6/9/151 |
+  | Night with lamps | 1/7/13 | 1/6/15 |
+  | Haboob | 84/109/139 | 80/105/134 |
+
+  Programs held at 98 → 98 over an autopilot drive through cabin view, blinkers, hazards,
+  dusk, night, low and high beams and a haboob. GPU ms, interleaved, median over 12 s:
+
+  | Tier | HEAD | New |
+  |---|---|---|
+  | Standard, 1.44 Mpx | 8.17 / 8.33 | 7.98 / 8.64 |
+  | Blessing, 1.44 Mpx | 8.46 / 8.58 | 8.61 / 8.26 |
+  | Blessing at 1.5×, 3.24 Mpx | 10.45 / 10.70 | 10.68 / 11.01 |
+
+  That is +0.2–0.3 ms at 3 Mpx. The exact display transform inside FXAA's taps had cost
+  +1 ms there.
+
 - A PANINI LENS IN CINEMA MODE ONLY (`render/hazeshader.ts` `paniniSource`, `sceneTap`;
   `core/renderer.ts` `setCinema`, `panini`; `main.ts` `toggleCinema`). `-` now gives the
   letterbox and the lens together and takes both away; the death letterbox gets them too.

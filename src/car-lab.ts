@@ -331,7 +331,9 @@ export async function bootCarLab(): Promise<void> {
   await sky.waitForAssets();
   renderer.setViewDistance(600);
 
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(4_000, 4_000), makeFlatMaterial(GROUND_COLOUR, 0.95));
+  // Segmented: fog depth is a vertex quantity (render/airfog.ts), and on a two-triangle
+  // 4 km plane every pixel took the corners' ~2.8 km and was hazed sky-blue up close.
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(4_000, 4_000, 100, 100), makeFlatMaterial(GROUND_COLOUR, 0.95));
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   renderer.scene.add(ground);

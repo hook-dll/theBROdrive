@@ -297,8 +297,8 @@ export class DwellingBuilder {
 
   /**
    * @param display Read every hex as a DISPLAY colour (see `displayColour` in
-   *   render/mirage-tableau.ts) instead of sRGB: for unlit forms whose colour must
-   *   reach the screen at its own numeric value.
+   *   render/mirage-tableau.ts) instead of sRGB: for unlit forms painted alongside
+   *   the mirage, whose numbers are the radiance itself.
    */
   constructor(weather: Weathering = {}, display = false) {
     this.fade = weather.fade ?? 0;

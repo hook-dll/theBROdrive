@@ -56,10 +56,11 @@ import { VarietyChannel, varietyEventAt, varietyWeightAt } from './director';
 /**
  * Metres outside the asphalt that nothing here may touch.
  *
- * The verge is 3.5 m of loose shoulder, the pole line stands at 3.1 m and birds perch
- * between 0.7 and 2.4 m out. A batter that started at the paint would bury all three
- * on a cut and leave them in the air on an embankment, so the ground holds its
- * unmodified height across the whole of it and the slope starts outside.
+ * The road's own embankment (`roadprofile.embankmentDropAt`) reaches its foot 3.5 m
+ * out, reflector posts stand at 3.2 m and birds perch between 0.7 and 2.4 m out. A
+ * batter that started at the paint would bury them on a cut and leave them in the air
+ * on an embankment, so this adds nothing across the whole of it and the slope starts
+ * outside. The pole line at 4.5 m stands on the start of a flank, on its drawn ground.
  */
 export const CORRIDOR_KEEP_M = 4;
 

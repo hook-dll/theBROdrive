@@ -127,7 +127,7 @@ export interface CorridorRequest {
   readonly lineAccel: number;
   /**
    * The same, for a move that starts or ends with the body over the paint: the verge's
-   * own grip, which is about half the asphalt's (`SHOULDER_CROSS_FALL` in the
+   * own grip, which is about half the asphalt's (`VERGE_CROSS_FALL` in the
    * autopilot). A line onto the shoulder sized on the asphalt's rate was a line the
    * tyres could not stop at. Defaults to `lineAccel`.
    */
@@ -162,12 +162,19 @@ export interface CorridorRequest {
   /**
    * How far past the asphalt the body's edge may go on THIS driver's side to pass a
    * MOVING car on the right, metres; 0 (the default) is no such pass. The caller grants
-   * it only where the verge is fit for it, and only as far as the road's own graded
-   * shoulder reaches — see `SHOULDER_PASS_GAP_M` and `shoulderWidthM` in the
-   * autopilot. It is priced at `SHOULDER_PASS_COST_PER_M`, so a crossing that is open
-   * stays the cheaper way past.
+   * it only where the verge is fit for it, and only as far as the road's guaranteed
+   * shoulder reaches — see `SHOULDER_PASS_GAP_M` in the autopilot and
+   * `roadprofile.SHOULDER_WIDTH_M`.
    */
   readonly shoulderPassOverhang?: number;
+  /**
+   * The granted verge pass is the soonest way past — sooner than the crossing the
+   * caller sized on the same car, or there is none. Priced at
+   * `SHOULDER_PASS_SOONER_COST_PER_M`, so it beats an open crossing; otherwise at
+   * `SHOULDER_PASS_COST_PER_M`, so an open crossing that is sooner still wins and the
+   * verge is the way past only while the crossing is refused.
+   */
+  readonly shoulderPassSooner?: boolean;
   /**
    * May the body reach over the crown on this line without crossing it? A line up to
    * half a body past the centre is not a crossing (`crossesCentre`), so the oncoming
@@ -347,9 +354,12 @@ const SHOULDER_BYPASS_MAX_SPEED = 2;
  * (`shoulderPassOverhang`), in place of `SHOULDER_COST_PER_M`. The full verge price is
  * a bogging deterrent; a granted verge is paved-road-side and short. At the full
  * overhang this is dearer than a frantic crossing (16 x 0.66 plus a lane), so an open
- * opposing lane still wins.
+ * opposing lane that gets past sooner still wins. When the verge is the sooner way
+ * (`shoulderPassSooner`) it is priced at `SOONER`, a quarter of that, under the
+ * crossing at any overhang the road's strip allows.
  */
 const SHOULDER_PASS_COST_PER_M = 8;
+const SHOULDER_PASS_SOONER_COST_PER_M = 2;
 /**
  * Cost of going round an immovable thing on its LEFT rather than its right.
  *
@@ -502,6 +512,7 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
     obstacles,
     mayCrossCrown,
     shoulderPassOverhang = 0,
+    shoulderPassSooner = false,
     straddleAllowed,
     lineAllowed,
     passSeconds,
@@ -860,7 +871,9 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
       cost =
         Math.abs(line - laneOffset) * LANE_COST_PER_M +
         Math.max(0, bodyEdge - asphaltLimit) *
-          (shoulderPass ? SHOULDER_PASS_COST_PER_M : SHOULDER_COST_PER_M) +
+          (shoulderPass
+            ? shoulderPassSooner ? SHOULDER_PASS_SOONER_COST_PER_M : SHOULDER_PASS_COST_PER_M
+            : SHOULDER_COST_PER_M) +
         (crossesCentre ? oncomingLaneCost : 0);
       // Immovable things are passed on the right, so that two opposing streams go
       // round the same one and still clear each other.

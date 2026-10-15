@@ -262,10 +262,10 @@ function buildScrub(): THREE.BufferGeometry {
  * one material.
  *
  * The hex is a DISPLAY colour, set through `LinearSRGBColorSpace` — the convention
- * `render/mirage-tableau.ts` already uses for its
- * vertex-coloured geometry, because the renderer writes the working colour space
- * straight to the canvas (see the two-pass note in `core/renderer.ts`). Authored any
- * other way a tree comes out a gamma darker than the props standing beside it.
+ * `render/mirage-tableau.ts` (`displayColour`) uses for its vertex-coloured geometry.
+ * These forms were painted against a frame shown linear-encoded, where a hex decoded
+ * from sRGB came out a gamma darker than the props standing beside it; the frame is
+ * now encoded once at the end (core/renderer.ts `drawFrame`), which keeps that relation.
  *
  * Shared with the courier air dancers (props/airdancer.ts), whose blower, tube and
  * face are three display colours on one skinned material.

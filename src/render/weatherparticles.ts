@@ -114,7 +114,9 @@ void main() {
   float a = shape * vFade * uAlpha;
   if (a < 0.003) discard;
   float fogAmount = 1.0 - exp(-uFogDensity * uFogDensity * vFog * vFog);
-  gl_FragColor = vec4(mix(uColor, uFogColor, fogAmount), a * (1.0 - fogAmount * 0.7));
+  // uColor is a screen colour like every unlit one (render/lightshader.ts); the fog's
+  // colour is already radiance (render/sky.ts).
+  gl_FragColor = vec4(mix(sRGBTransferEOTF(vec4(uColor, 1.0)).rgb, uFogColor, fogAmount), a * (1.0 - fogAmount * 0.7));
 }
 `;
 
@@ -331,8 +333,9 @@ export class WeatherParticles {
 
     this.air.set(windX, 0.6, windZ);
     // Flying dust is the fog's own colour, lifted toward lit sand so a clot of it
-    // reads against the murk it is part of.
-    this.colour.copy(fog.color).lerp(SAND, 0.35 * light);
+    // reads against the murk it is part of. In screen values, as `uColor` is: the fog's
+    // colour is radiance (render/sky.ts), so it is encoded back first.
+    this.colour.copy(fog.color).convertLinearToSRGB().lerp(SAND, 0.35 * light);
     this.dust.update(Math.max(w.dust * 1.1, w.drift * w.wind * 0.3), dt, this.air, this.viewer, this.abs, rel, groundY, pixel, this.colour, fog);
 
     this.air.set(windX * 1.15, 0, windZ * 1.15);

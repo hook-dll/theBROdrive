@@ -10,7 +10,14 @@ import { tileGroundSampler, type DrawnGroundSample } from './deserttiledata';
 import { desertPaletteAt, roadConditionAt, ROAD_START_SURFACE } from './gradient';
 import { ROAD_HALF_WIDTH, type Road } from './road';
 import type { RoadDistance } from './roaddistance';
-import { LANE_WIDTH, laneHalfWidthFor, laneOffsetFor, shoulderWidthM } from './roadprofile';
+import {
+  embankmentDropAt,
+  LANE_WIDTH,
+  laneHalfWidthFor,
+  laneOffsetFor,
+  SHOULDER_WIDTH_M,
+  shoulderFringeM,
+} from './roadprofile';
 import {
   EVENT_MAX_KNOTS,
   RoadEventTint,
@@ -30,8 +37,8 @@ import type { ChunkContent, ChunkContext, ChunkProvider } from './chunks';
  * The asphalt ribbon, banked into corners and displaced by a layered surface field —
  * broad undulation, wheel-scale bumps, broken edges, discrete potholes and the road
  * events (humps, rimmed holes, cracks, patches, heaves, joints). The desert terrain
- * begins directly beneath each asphalt edge, and a shoulder strip (SHOULDER_STYLE)
- * brings the edge down onto it. Surface type owns ordinary bump amplitude and the event
+ * begins beneath each asphalt edge and falls away on the road's low embankment, and a
+ * shoulder strip (SHOULDER_STYLE) is that embankment's graded top. Surface type owns ordinary bump amplitude and the event
  * mix; decay increases undulation, edge breakup, pothole and event occurrence. The
  * same vertices feed the visible mesh and trimesh collider, so the car feels the
  * shape the driver sees.
@@ -105,15 +112,22 @@ const MARKING_HALF_WIDTH = 0.12;
 const MARKING_MIN = 0.03;
 
 /**
- * THE SHOULDER: a strip of compacted verge either side, from the asphalt's edge down
- * onto the desert, so the road lies IN the ground instead of on it like a mat.
+ * THE SHOULDER: the road's graded shoulder either side, from the asphalt's edge down
+ * its own embankment onto the desert (`roadprofile.embankmentDropAt`), so the road
+ * stands a little above the ground instead of lying on it like a mat.
  *
- * It is drawn in the desert's own material and ends in the desert's own colour, so
- * the outer edge has no seam to show: it is laid on the tiles' drawn triangles
- * (`tileGroundSampler`), carries their normals and their far-field detail fade, and
- * its last column tucks under the sand so the ground itself cuts its ragged edge. Its
- * only texture is grit in the ground's own ink (DESERT_SHOULDER_MATERIAL), thinning out
- * into the plain sand.
+ * Its first `SHOULDER_WIDTH_M` is the formation itself, built from the asphalt edge's
+ * own height and the profile's fall (6% at the lip steepening to 15%), the same on
+ * every row: the width a verge pass is sized on, and nothing narrows it. Past it the
+ * FRINGE (`shoulderFringeM`) carries on down the top of the batter, wandering, worn
+ * narrower and ragged, and its last column tucks under the drawn ground so the sand
+ * itself cuts the edge. The ground the desert tiles draw under the formation is the
+ * same profile less their 0.1 m under-road offset, and their 3 m lattice chords it from
+ * below; where the ground is higher than the formation all the same (a lay-by's
+ * levelled site, terrain climbing beside a cutting) the strip lies on it instead
+ * (`SHOULDER_LIFT`). Measured by `tools/verge-profile.ts`: 2.55 m drivable on every row,
+ * ground over the strip on 0.3% of rows and never by more than 4 cm. Its only texture is grit in the ground's
+ * own ink (DESERT_SHOULDER_MATERIAL), thinning out into the plain sand.
  *
  * NOT A DARK BAND. A darker verge painted into the terrain once read as shadow patches
  * in play (terrainmesh.ts), so the strip is PALER than the sand and much greyer: the
@@ -123,8 +137,9 @@ const MARKING_MIN = 0.03;
  * (`edgeTone`), which is what makes a gravel road's verge read as the grader's
  * windrow rather than a pale kerb laid beside a dark road.
  *
- * It has a collider (LooseShoulder, the verge surface the handling already models):
- * without one a wheel off the edge sinks through the strip onto the sand under it.
+ * Its collider is its own triangles (LooseShoulder, the verge surface the handling
+ * already models), fringe included: one grip across the whole strip, and the wheels
+ * stand on exactly the surface that is drawn.
  */
 interface ShoulderStyle {
   /** How far the colour moves from the sand towards its own grey: compacted dust. */
@@ -140,9 +155,10 @@ interface ShoulderStyle {
 }
 
 /**
- * Colour, and nothing else: the strip's WIDTH is part of the road's cross-section and
- * lives in `roadprofile.shoulderWidthM`, because the verge is drivable ground and the
- * autopilot sizes a pass on the same number this draws.
+ * Colour, and nothing else: the strip's WIDTH and fall are the road's cross-section and
+ * live in `roadprofile.ts` (`SHOULDER_WIDTH_M`, `shoulderFringeM`, `embankmentDropAt`),
+ * because the verge is drivable ground and the autopilot sizes a pass on the same
+ * numbers this draws.
  */
 const SHOULDER_STYLE: Partial<Record<SurfaceType, ShoulderStyle>> = {
   // A highway's graded crushed-stone shoulder, dusty and pale.
@@ -155,19 +171,26 @@ const SHOULDER_STYLE: Partial<Record<SurfaceType, ShoulderStyle>> = {
   [SurfaceType.Gravel]: { grey: 0.4, stone: 0.7, edgeTone: 0.72, bright: 1.02, grit: 1 },
 };
 const DEFAULT_SHOULDER_STYLE = SHOULDER_STYLE[SurfaceType.Asphalt]!;
-/** Across-strip positions of the columns, 0 at the asphalt edge, 1 at the sand. */
-const SHOULDER_ACROSS: readonly number[] = [0, 0.1, 0.45, 0.8, 1];
-/** Part of the strip over which it comes down from the asphalt's lip to the ground. */
-const SHOULDER_RAMP = 0.55;
-/** Height of the settled strip over the drawn ground, and its tuck under it, metres. */
+/**
+ * Columns of the guaranteed shoulder, metres past the asphalt edge. The formation's
+ * fall steepens across it, and these chords sit within 2 mm of the curve.
+ */
+const SHOULDER_ACROSS_M: readonly number[] = [0, 0.12, 0.6, 1.25, 1.9, SHOULDER_WIDTH_M];
+/** The fringe's two columns past it: its middle, and its ragged edge under the sand. */
+const SHOULDER_COLUMNS = SHOULDER_ACROSS_M.length + 2;
+/** Height of the strip over drawn ground it has to lie on, and its tuck under it, metres. */
 const SHOULDER_LIFT = 0.02;
 const SHOULDER_TUCK = 0.04;
-/** Row jitter of the outer edge, metres: ragged where the sand takes over. */
+/** Row jitter of the fringe's outer edge, metres: ragged where the sand takes over. */
 const SHOULDER_RAGGED = 0.3;
+/** Least fringe a row keeps, metres, so its two columns never fold onto each other. */
+const SHOULDER_FRINGE_MIN = 0.08;
 /**
- * Asphalt-to-ground drops beyond which a row has no shoulder: the ground is not where
- * a verge could meet it (a cut, a pad, a streaming disagreement), and a strip hung
- * down to it would be a curtain. Normally the drop is the tiles' 0.1 m under-road.
+ * Asphalt-to-ground drops, measured under the asphalt edge itself, beyond which a row
+ * has no shoulder: the ground is not where a verge could meet it (a cut, a pad, a
+ * streaming disagreement), and a strip hung down to it would be a curtain. Normally
+ * the drop is the tiles' 0.1 m under-road plus their 3 m lattice's chord across the
+ * embankment's top, under 0.35 m.
  */
 const SHOULDER_MAX_DROP = 0.6;
 const SHOULDER_MAX_RISE = 0.25;
@@ -478,9 +501,10 @@ function smoothstep(lo: number, hi: number, v: number): number {
  * edge and was found standing on end with the desert built through it. The skirt makes
  * "ground beside the road" part of the road chunk, so it exists exactly as far as the
  * road's own physics does, whatever radius the tiles keep. Where a physical tile lies
- * under it too, both are the same surface to within the skirt's coarser chord.
+ * under it too, both are the same surface to within the skirt's coarser chord; the
+ * column a metre out follows the embankment's foot, where that chord is sharpest.
  */
-const SKIRT_ACROSS_M: readonly number[] = [0, 3, 7, 12, 16, 20];
+const SKIRT_ACROSS_M: readonly number[] = [0, 1, 3, 7, 12, 16, 20];
 
 /** The shoulder's drawn strip and its collider source, both origin-relative. */
 interface ShoulderBuild {
@@ -769,7 +793,8 @@ export class RoadMeshProvider implements ChunkProvider {
     const { sStart, sEnd, road } = ctx;
     const ox = ctx.originX;
     const oz = ctx.originZ;
-    const cols = SHOULDER_ACROSS.length;
+    const cols = SHOULDER_COLUMNS;
+    const guaranteedCols = SHOULDER_ACROSS_M.length;
     const rowVertices = 2 * cols;
     const verts = sCount * rowVertices;
     const pos = new Float32Array(verts * 3);
@@ -802,8 +827,8 @@ export class RoadMeshProvider implements ChunkProvider {
       const gritLevel = style.grit * (1 - 0.3 * wear);
       this.sandTongueAt(s, halfWidth);
       const edgeTone = 1 - (1 - style.edgeTone) * (1 - 0.4 * wear);
-      // The strip's own width, from the road's cross-section rather than this table.
-      const stripWidth = shoulderWidthM(cond.surface) * (1 - 0.2 * wear);
+      // The fringe past the guaranteed shoulder: the surface's own, narrowed by wear.
+      const fringeMean = shoulderFringeM(cond.surface) * (1 - 0.4 * wear);
       // A lay-by's asphalt widens this edge from its entry slip to its exit slip
       // (world/laybymesh.ts). The strip on that side hangs off the lay-by's OUTER edge
       // instead, so it walks out with the slip and back: one verge round the whole
@@ -819,11 +844,12 @@ export class RoadMeshProvider implements ChunkProvider {
         );
         const bury = smoothstep(0, SHOULDER_BURY_M, sandReach);
         const lipSand = sandReach > 0 ? 1 : 0;
-        // Each side wanders on its own, slow and a little faster on top.
+        // Each side's fringe wanders on its own, slow and a little faster on top.
         const k = side === 0 ? 1.7 : 4.3;
-        const wander = 1 + 0.14 * Math.sin(s / 23 + k) + 0.08 * Math.sin(s / 7.3 + 2.1 * k);
-        const width = stripWidth * wander;
+        const wander = 1 + 0.55 * Math.sin(s / 23 + k) + 0.3 * Math.sin(s / 7.3 + 2.1 * k);
         const ragged = (hash01(this.seed, 0x5d, rowBase + si, side) - 0.5) * SHOULDER_RAGGED;
+        const fringe = Math.max(SHOULDER_FRINGE_MIN, fringeMean * wander + ragged);
+        const reach = SHOULDER_WIDTH_M + fringe;
         // The asphalt's outer edge on this side: the ribbon's own edge vertex, or the
         // lay-by's where it has widened the asphalt (the same point and height its mesh
         // has, `Terrain.laybySurfaceY`).
@@ -847,40 +873,54 @@ export class RoadMeshProvider implements ChunkProvider {
         const drop = ey - edgeGround;
         const collapsed =
           drop > SHOULDER_MAX_DROP || drop < -SHOULDER_MAX_RISE || terminusWeight(ex + ox, ez + oz) > 0;
+        // Outward across the road, flat: the direction the formation falls in.
+        road.offsetPoint(s, sign * (inner + 1), point);
+        const outX = point.x - ox - ex;
+        const outZ = point.z - oz - ez;
+        const outLength = Math.hypot(outX, outZ) || 1;
 
         for (let c = 0; c < cols; c++) {
-          const t = SHOULDER_ACROSS[c]!;
+          const d =
+            c < guaranteedCols ? SHOULDER_ACROSS_M[c]! : c === guaranteedCols ? SHOULDER_WIDTH_M + fringe * 0.5 : reach;
+          const t = d / reach;
           const vi = (si * 2 + side) * cols + c;
-          let ramp = 1;
           if (c === 0 || collapsed) {
             // On the asphalt's edge, just under its lip; a collapsed row folds the
             // whole strip under it, so its neighbours taper into nothing.
             pos[vi * 3] = ex;
             pos[vi * 3 + 1] = ey - (c === 0 ? 0.004 : SHOULDER_TUCK * 2);
             pos[vi * 3 + 2] = ez;
+            nor[vi * 3] = 0;
             nor[vi * 3 + 1] = 1;
+            nor[vi * 3 + 2] = 0;
             detail[vi] = 0;
           } else {
-            road.offsetPoint(s, sign * (inner + t * (width + ragged * t)), point);
+            road.offsetPoint(s, sign * (inner + d), point);
             ground(point.x, point.z, g);
-            ramp = Math.max(0, 1 - t / SHOULDER_RAMP);
-            const settle = ramp * ramp;
+            const formation = ey - embankmentDropAt(d);
             pos[vi * 3] = point.x - ox;
-            pos[vi * 3 + 1] =
-              c === cols - 1
-                ? g.height - SHOULDER_TUCK
-                : g.height + SHOULDER_LIFT + (drop - SHOULDER_LIFT) * settle;
             pos[vi * 3 + 2] = point.z - oz;
-            // Lit like the road at its lip and like the ground where it lies on it.
-            const nx = g.nx * (1 - settle);
-            const ny = g.ny * (1 - settle) + settle;
-            const nz = g.nz * (1 - settle);
-            const nl = Math.hypot(nx, ny, nz);
-            nor[vi * 3] = nx / nl;
-            nor[vi * 3 + 1] = ny / nl;
-            nor[vi * 3 + 2] = nz / nl;
-            // The tiles drop their fine relief into the vista far off; so does this.
-            detail[vi] = g.detail * (1 - settle);
+            if (c === cols - 1 || g.height + SHOULDER_LIFT > formation) {
+              // The ragged edge under the sand, or ground standing higher than the
+              // formation (a lay-by's levelled site, a ripple): lit and faded like it.
+              pos[vi * 3 + 1] =
+                c === cols - 1 ? Math.min(formation, g.height) - SHOULDER_TUCK : g.height + SHOULDER_LIFT;
+              nor[vi * 3] = g.nx;
+              nor[vi * 3 + 1] = g.ny;
+              nor[vi * 3 + 2] = g.nz;
+              // The tiles drop their fine relief into the vista far off; so does this.
+              detail[vi] = g.detail;
+            } else {
+              pos[vi * 3 + 1] = formation;
+              const fall = (embankmentDropAt(d + 0.05) - embankmentDropAt(d - 0.05)) / 0.1;
+              const nx = (fall * outX) / outLength;
+              const nz = (fall * outZ) / outLength;
+              const nl = Math.hypot(nx, 1, nz);
+              nor[vi * 3] = nx / nl;
+              nor[vi * 3 + 1] = 1 / nl;
+              nor[vi * 3 + 2] = nz / nl;
+              detail[vi] = 0;
+            }
           }
 
           // Colour: the road's stone near the edge, then compacted grey dust, then the
@@ -911,7 +951,7 @@ export class RoadMeshProvider implements ChunkProvider {
         }
         // The skirt starts on the strip's own outer vertex, so the two share an edge.
         const outer = ((si * 2 + side) * cols + cols - 1) * 3;
-        const outerLateral = inner + width + ragged;
+        const outerLateral = inner + reach;
         for (let c = 0; c < skirtCols; c++) {
           const k = ((si * 2 + side) * skirtCols + c) * 3;
           if (c === 0) {

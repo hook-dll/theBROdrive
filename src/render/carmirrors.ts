@@ -15,6 +15,10 @@
  * one more program, linked at boot through
  * `mirrorProgramAnchor`.
  *
+ * Brightness. A mirror holds linear radiance like the scene target, and its face is
+ * unlit, so the face writes that radiance into the scene target unchanged and the post
+ * pass maps it to the display with the rest of the frame: one exposure, one tone curve.
+ *
  * Cost. Each mirror redraws `Settings.mirrorFrameRate` times a second, in turn, so the
  * renders spread over the frames instead of landing together (null: all, every frame);
  * no shadow pass, no scene matrix walk and no post pass (`Renderer.renderMirror`); small
@@ -64,11 +68,12 @@ function view(mirror: KitMirror): View {
   let found = views[mirror];
   if (!found) {
     const [width, height] = PIXELS[mirror];
-    const target = new THREE.WebGLRenderTarget(width, height);
-    // As `hazeTarget`: sRGB storage keeps the dark end of the image from banding.
-    target.texture.colorSpace = THREE.SRGBColorSpace;
+    // Linear radiance like the scene target, of its type (`CarMirrors.setQuality`).
+    const target = new THREE.WebGLRenderTarget(width, height, { type: THREE.HalfFloatType });
     // `glass` in the name keeps the face out of carmodel.ts's paint-slot rule.
+    // SCENE_RADIANCE: the map is radiance, not a screen colour (render/lightshader.ts).
     const material = new THREE.MeshBasicMaterial({ name: `mirror_glass_${mirror}`, map: target.texture, toneMapped: false, fog: false });
+    material.defines = { SCENE_RADIANCE: '' };
     found = views[mirror] = { target, material };
   }
   return found;
@@ -204,9 +209,19 @@ export class CarMirrors {
     // A resized target is reallocated empty: its face waits for the next render.
     this.show(null);
     if (scale <= 0) return;
+    // The scene target's texel type (core/renderer.ts `sceneTargetType`): half float, so
+    // the sun and a following car's lamps keep their excess and roll off as in the main
+    // view; eight-bit sRGB on a context that cannot render half floats.
+    const type = this.renderer.sceneTextureType;
     for (const mirror of MIRRORS) {
       const [width, height] = PIXELS[mirror];
-      view(mirror).target.setSize(Math.round(width * scale), Math.round(height * scale));
+      const target = view(mirror).target;
+      if (target.texture.type !== type) {
+        target.dispose();
+        target.texture.type = type;
+        target.texture.colorSpace = type === THREE.UnsignedByteType ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+      }
+      target.setSize(Math.round(width * scale), Math.round(height * scale));
     }
   }
 

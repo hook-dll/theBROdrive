@@ -13,7 +13,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { hash01 } from '../../core/rng';
 import { SurfaceType } from '../../core/surfaces';
 import { varietyEventsBetween, type VarietyEvent } from '../director';
-import { drawnGroundY } from '../terrainmesh';
+import { tileGroundSampler, type DrawnGroundSample } from '../deserttiledata';
 import type { RoadDistance } from '../roaddistance';
 import { laybyKeepsClear } from '../layby';
 import type { ChunkContext, ChunkContent, ChunkProvider } from '../chunks';
@@ -34,15 +34,15 @@ const TAG_DELINEATOR = 0xde11a7;
 /**
  * MEASURED FROM THE ASPHALT EDGE, like every other setback in this file.
  *
- * 1.2 m is where a delineator belongs: far enough out that a wheel tracking the
- * paint cannot clip one, close enough in that the run reads as edge marking rather
- * than as a fence line retreating into the desert. It also lands the whole run
- * inside the 3.5 m loose verge and nowhere near the 3.1 m pole line, so a post and
- * a mast never fight for the same ground. Perched birds use 0.7-2.4 m of the same
- * shoulder (`agents/birds.ts`); a post is 12 cm wide and carries no collider, so the
- * two share the band the way a bird and a fence post share a fence post.
+ * 3.2 m: on the batter, just past the guaranteed 2.5 m shoulder
+ * (`roadprofile.SHOULDER_WIDTH_M`), where a real road puts its posts — at the edge of
+ * what may be driven on. A frantic verge pass keeps its body inside 2.5 m and runs up
+ * to 0.6 m wide of that as it arrives, so the posts stand clear of it; at the old
+ * 1.2 m they stood in the outer wheel's track. Still close enough in to read as edge
+ * marking rather than a fence line, and well inside the 4.5 m pole line. Perched birds
+ * use 0.7-2.4 m of the shoulder (`agents/birds.ts`), inside the posts.
  */
-export const DELINEATOR_SETBACK_M = 1.2;
+export const DELINEATOR_SETBACK_M = 3.2;
 /** Clear sand a post keeps from a lay-by's asphalt, metres. */
 const DELINEATOR_LAYBY_CLEAR_M = 1;
 /**
@@ -261,11 +261,12 @@ export class DelineatorProvider implements ChunkProvider {
   readonly id = 'delineators';
 
   /**
-   * The SHARED road-distance index, for the same reason `TerrainMeshProvider` takes
-   * it: a post has to stand on the surface that is DRAWN, and `drawnGroundY` can only
-   * reproduce the mesh if it asks the same lattice the mesh asked. Sampling the height
-   * field instead left feet up to 4.6 cm off the drawn ground — measured, in
-   * `tools/verge-furniture.ts` — which on sand in a low sun is a visible gap.
+   * The SHARED road-distance index: a post has to stand on the surface that is DRAWN,
+   * which beside the road is the desert tiles' lattice (`tileGroundSampler`, the same
+   * sampler the shoulder strip lies on), and the sampler can only reproduce it if it asks
+   * the same lattice the tiles asked. `drawnGroundY` (the dev terrain mesh) chords the
+   * road's embankment differently and left feet a median 10 cm and up to 22 cm in the
+   * air on the batter (`tools/verge-profile.ts`).
    *
    * `breakables` is optional for the same reason it is on the scatter: a viewer with
    * no debris field should still get the posts.
@@ -284,6 +285,8 @@ export class DelineatorProvider implements ChunkProvider {
     // 400-1200 m against a 200 m chunk, so most chunks inside a run see exactly one
     // event and most chunks outside one see none.
     const posts: { x: number; y: number; z: number; yaw: number; id: number }[] = [];
+    let ground: ((x: number, z: number, out: DrawnGroundSample) => void) | null = null;
+    const groundSample: DrawnGroundSample = { height: 0, detail: 0, nx: 0, ny: 1, nz: 0 };
     for (const event of varietyEventsBetween(seed, ctx.sStart, ctx.sEnd)) {
       if (event.kind !== 'delineators') continue;
       forEachDelineator(seed, event, ctx.sStart, ctx.sEnd, (s, side, ordinal) => {
@@ -300,6 +303,8 @@ export class DelineatorProvider implements ChunkProvider {
         // No post on a lay-by: its edge is the pad's now, not the road's.
         if (laybyKeepsClear(seed, s, lateral, halfWidth, DELINEATOR_LAYBY_CLEAR_M)) return;
         const p = ctx.road.offsetPoint(s, lateral);
+        ground ??= tileGroundSampler({ seed, road: ctx.road, terrain: ctx.terrain, roadDistance: this.roadDistance });
+        ground(p.x, p.z, groundSample);
         const sample = ctx.road.sampleAt(s);
         // `heading + PI` turns the face back DOWN the road at traffic that has not
         // arrived yet; `+ side * cant` turns it in over the carriageway rather than
@@ -312,7 +317,7 @@ export class DelineatorProvider implements ChunkProvider {
           (hash01(seed, TAG_DELINEATOR, event.index, ordinal, side) - 0.5) * DELINEATOR_YAW_JITTER;
         posts.push({
           x: p.x,
-          y: drawnGroundY(ctx.road, ctx.terrain, this.roadDistance, s, lateral),
+          y: groundSample.height,
           z: p.z,
           yaw,
           id,

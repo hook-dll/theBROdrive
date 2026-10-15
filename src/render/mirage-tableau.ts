@@ -96,14 +96,16 @@ function smoothstep(edge0: number, edge1: number, value: number): number {
   return t * t * (3 - 2 * t);
 }
 /**
- * A mirage colour authored in DISPLAY space.
+ * A mirage colour authored in DISPLAY space: the hex's numbers taken as the radiance
+ * itself, not decoded from sRGB.
  *
- * Pass 2 in core/renderer.ts copies the linear scene target to the canvas
- * untouched, so an unlit material's colour reaches the screen at its own numeric
- * value. Converting an authored hex from sRGB darkens it by a whole gamma, and a
- * tableau multiplies its card palette by an instance colour, so that darkening
- * landed twice: palm fronds measured one or two code values on screen — a black
- * paper cut-out of a palm rather than a green one.
+ * The mirage is unlit and was painted against a frame shown linear-encoded, where an
+ * unlit colour reached the screen at its own numeric value; converting from sRGB
+ * darkened it by a whole gamma, and a tableau multiplies its card palette by an
+ * instance colour, so that darkening landed twice — palm fronds at one or two code
+ * values, a black paper cut-out of a palm. Unlit colour is still a screen value:
+ * render/lightshader.ts decodes it for the encoded frame, so these numbers are what
+ * the display shows.
  */
 export function displayColour(hex: number): THREE.Color {
   return new THREE.Color().setHex(hex, THREE.LinearSRGBColorSpace);
@@ -1200,8 +1202,8 @@ export class MirageTableau {
   }
 
   /**
-   * Sandstone under a desert noon, not albedo: these lightnesses are what the screen
-   * receives (see `displayColour`), and the frame is tone mapped on the way out, so a
+   * Sandstone under a desert noon, not albedo: these lightnesses are radiance an unlit
+   * wall sends (see `displayColour`), and the frame is tone mapped on the way out, so a
    * wall has to be authored near white to read as pale stone rather than as shadow.
    */
   private cityColour(key: number, depth: number, tier: number): void {

@@ -11,6 +11,7 @@ import { PlanetField } from './planetfield';
 import { weather } from '../world/weather';
 import { SandColor } from './desertdust';
 import { setAirFogExtinction, setAirFogSky, setAirFogSun } from './airfog';
+import { SCENE_FROM_SCREEN_GLSL } from './displaytransform';
 
 /**
  * Analytic atmosphere around a real Tycho-2 star catalogue and ephemerides for
@@ -110,25 +111,25 @@ const SHADOW_DIR_STEP_COS = Math.cos(SHADOW_DIR_STEP);
 /** Deliberate presentation scale: physical lunar disc is too small in play. */
 const MOON_VISUAL_SCALE = 3;
 /**
- * Display-referred radiance of sunlit lunar regolith, day and night, in the same
- * authored units as the palette below.
+ * Radiance of sunlit lunar regolith, day and night, in the same authored units as the
+ * palette below.
  *
  * Sunlit regolith does not change brightness with phase — the shader's photometric
  * function carries every angle-dependent term per pixel — so the only thing these
- * two numbers encode is EXPOSURE, and the dome has none of its own. Three disables
- * tone mapping for anything drawn into a render target, and renderer.ts always
- * draws the scene into one, so `col` in the dome shader reaches the display
- * verbatim and clamps at 1. That is the same reason the palette carries a night
- * sky a thousand times darker than its day sky rather than one exposure stop:
- * adaptation is authored in, not computed. The Moon has to be authored the same
- * way, and the two ends are set by what the display can still show:
+ * two numbers encode is EXPOSURE, and the dome has none of its own: the frame's one
+ * exposure is fixed (render/displaytransform.ts), and the sky is not lit by the
+ * adapted lights. That is the same reason the palette carries a night sky a thousand
+ * times darker than its day sky rather than one exposure stop: adaptation is authored
+ * in, not computed. The Moon has to be authored the same way, and the two ends were
+ * set by what the display can still show, then on a frame shown linear-encoded:
  *
  *  - day: a daylight sky is already at 0.75 in blue, so the disc has about 0.65 of
  *    headroom before it flattens into a white hole. At this value the crescent's
  *    bright limb saturates blue only, which is exactly what makes it read white
  *    against blue while red and green keep the maria and the terminator gradient.
  *  - night: the full disc's highlands land just under 1, so a full Moon is white
- *    and dazzling while the maria stay a clear half-tone below it.
+ *    and dazzling while the maria stay a clear half-tone below it. Through the
+ *    neutral curve's shoulder a highland's excess now rolls off instead of clipping.
  */
 const MOON_RADIANCE_DAY = 0.75;
 const MOON_RADIANCE_NIGHT = 1.15;
@@ -156,24 +157,49 @@ const CLEAR_AIR_VISIBILITY_M = 120_000;
 const REGIONAL_HAZE_POWER = 0.5;
 
 /**
- * Total display-referred light the key and the sky bounce are exposed to between
- * them. The two lights below are written as their share of the real illuminance
- * times this exposure, so under full adaptation they always sum to it and only
- * their SPLIT — and the palette they are tinted with — carries the time of day.
+ * Total scene light the key and the sky bounce are exposed to between them, in the
+ * units the post pass's tone curve takes (render/displaytransform.ts). The two
+ * lights below are written as their share of the real illuminance times this exposure,
+ * so under full adaptation they always sum to it and only their SPLIT — and the
+ * palette they are tinted with — carries the time of day.
+ *
+ * At 3 a noon-lit ground lands where the old frame put it, matched by the noon
+ * screenshot's median and 95th-percentile luma against HEAD, with the sunlit excess
+ * rolled off by the curve rather than clipped.
  */
-export const EXPOSURE_TARGET = 5;
+export const EXPOSURE_TARGET = 3;
+/**
+ * The daylight sky fill's share of its photometric value. The old frame was shown a
+ * gamma dark, which squared every light ratio on the screen: a shadow under a 2:1
+ * key-to-fill read 4:1. Through the encoded frame the same lights left noon shadows
+ * and the lee of every dune a pale wash. Six tenths of the fill puts the shadow side
+ * of the car, the poles and the dunes back where the art had it. The night floor
+ * (NIGHT_FILL_INTENSITY) is separate and untouched.
+ */
+const DAY_FILL_SHARE = 0.6;
+/**
+ * The reflection probe's share, for the same reason as `DAY_FILL_SHARE`: the sky light
+ * it carries reached the old screen squared under the sun's. At full strength it lit
+ * the cabin's headliner and every shadowed panel the pale blue-green of the sky probe
+ * (cabin view, 11:00: 166,184,161 against HEAD's warm 175,153,106); at half it is warm
+ * again (155,144,109).
+ */
+const ENVIRONMENT_SHARE = 0.5;
 /**
  * Soft floor under normalized scene illuminance. This is the limit of visual
  * adaptation, not a numerical epsilon: `EXPOSURE_TARGET / ADAPTATION_FLOOR` is a
- * maximum 50x exposure.
+ * maximum 60x exposure.
  *
  * The previous 25,000x maximum divided almost all real day-to-night variation back
  * out of the lights. The desert retained essentially full daylight through civil
- * twilight and stayed readable under 0.002 lux night-sky illumination. Fifty-fold
+ * twilight and stayed readable under 0.002 lux night-sky illumination. Limited
  * adaptation preserves detail at sunset, then lets the world become genuinely dark.
  * Adding the floor in the denominator keeps that transition smooth without a clamp.
+ *
+ * 0.05 since the encoded frame: at 0.1 the ground under a sun 6.6 degrees down was
+ * 5 of 255 (median of the frame), unreadable; 0.05 makes it about 11, a dusk.
  */
-export const ADAPTATION_FLOOR = 0.1;
+export const ADAPTATION_FLOOR = 0.05;
 /**
  * The sky's own dark adaptation remains exactly as authored. Stars and unresolved
  * planets are display-space lights, not illumination cast onto the desert; coupling
@@ -205,8 +231,6 @@ const C_SUN_HIGH = new THREE.Color().setStyle('#fff7ec');
 const C_TURBID = new THREE.Color().setStyle('#c9b18c');
 const C_MOON = new THREE.Color().setStyle('#a9c6e6');
 const C_GROUND = new THREE.Color().setStyle('#d8a45c'); // warm ochre sand bounce
-/** Daylight sky illumination gain; the warm ground bounce is compensated below. */
-const DAY_SKY_FILL_BOOST = 1.5;
 /**
  * MOONLIT FILL. The dome's night palette above is what the SKY looks like, and it
  * is nearly black on purpose — that is what lets the stars read. The hemisphere
@@ -224,18 +248,19 @@ const DAY_SKY_FILL_BOOST = 1.5;
  * the lamps or to wash out a magnitude-8 star. A real desert night is pitch black;
  * this is the eye that has been out in it for a while.
  *
- * THE NUMBER IS SET BY THE PIXEL, not by the photometry. An earlier pass recorded
- * 1.2 as rendering 9-12 of 255 on sand at midnight; measured again from the chase
- * camera at midnight in clear weather (sand either side of the car, the median of the
- * ground band), 1.2 renders 2.4, 1.6 renders 3.4, 2.4 renders 5.3 and 3.2 renders 7.3.
- * At 1.2 the owner could barely see anything beyond the lamps, which is what the
- * numbers say. 2.8 renders 6.4: the ground reads as ground and the dunes as shapes
- * against the stars, and it is still a night, not a dusk. Only this floor is touched;
- * the daytime and twilight fills are photometric and unchanged.
+ * THE NUMBER IS SET BY THE PIXEL, not by the photometry. Against the old frame, shown
+ * linear-encoded, 1.2 rendered 2.4 of 255 on sand at midnight from the chase camera
+ * (the median of the ground band either side of the car) and the owner could barely
+ * see anything beyond the lamps; 2.8 rendered 6.4, which read as ground and dunes
+ * against the stars and still as a night. Through the sRGB encode (core/renderer.ts
+ * `drawFrame`) the same light reads far brighter — the encode lifts the dark end most —
+ * and 0.35 puts the ground back at about 12-13 of 255, measured the same way with the
+ * lamps off (0.9 renders 25). Only this floor is touched; the daytime and twilight
+ * fills are photometric.
  */
 const C_NIGHT_FILL_SKY = new THREE.Color().setStyle('#41567f');
 const C_NIGHT_FILL_GROUND = new THREE.Color().setStyle('#241f19');
-const NIGHT_FILL_INTENSITY = 2.8;
+const NIGHT_FILL_INTENSITY = 0.35;
 
 // ---------------------------------------------------------------------------
 // Weather palettes (world/weather.ts)
@@ -472,9 +497,10 @@ void main() {
 `;
 
 const SKY_FRAGMENT = /* glsl */ `
+${SCENE_FROM_SCREEN_GLSL}
 uniform float uSunAngularRadius;
 uniform float uMoonAngularRadius;
-/** Radiance of sunlit lunar regolith, in the dome's own display-referred units. */
+/** Radiance of sunlit lunar regolith, in the dome's own authored units. */
 uniform float uMoonRadiance;
 uniform sampler2D uMoonTexture;
 uniform vec3 uSunDir;
@@ -854,32 +880,12 @@ void main() {
   col += lunarAlbedo * (sunlit + earthshine) * uMoonRadiance * mdisc * uMoonAmount;
 
 
-  gl_FragColor = vec4(col, 1.0);
-
-  // The correct terminator for a dome drawn straight to the canvas, and kept for
-  // that reason — but INERT on the path renderer.ts actually uses. Three compiles
-  // tone mapping out of anything drawn into a render target, and the colour-space
-  // conversion is the identity into a linear one, so the colour above reaches the
-  // display verbatim and clamps at 1. That is why this whole shader, palette and
-  // Moon alike, is authored display-referred rather than in radiance.
-  #include <tonemapping_fragment>
-  #include <colorspace_fragment>
+  // The palette, sun and Moon are authored as the colour the screen shows (see
+  // MOON_RADIANCE_DAY), so the dome writes the radiance the display transform maps to
+  // that colour (render/displaytransform.ts); the sun disc's excess keeps rolling off.
+  gl_FragColor = vec4(sceneFromScreen(col), 1.0);
 }
 `;
-
-/**
- * Linear-radiance twin of SKY_FRAGMENT, used only for the environment probe.
- *
- * The visible dome ends with `tonemapping_fragment` + `colorspace_fragment` so it
- * matches the scene's ACES + sRGB output exactly. An environment map must carry
- * *linear radiance* instead: feeding it display-referred sRGB would tonemap the
- * sky once into the probe and again when the reflection is shaded, which reads as
- * washed-out, low-contrast chrome. Derived by deleting those two includes from
- * the one source above, so the gradient, sun disc and glow can never drift apart.
- */
-const SKY_FRAGMENT_LINEAR = SKY_FRAGMENT
-  .replace('#include <tonemapping_fragment>', '')
-  .replace('#include <colorspace_fragment>', '');
 
 
 
@@ -1082,10 +1088,10 @@ export class Sky {
 
     // --- Environment probe dome: same geometry and uniform objects as the
     // visible dome, so the one bake (see bakeEnvironment) sees exactly the sky the
-    // dome draws. Only the fragment shader differs (linear radiance, see SKY_FRAGMENT_LINEAR).
+    // dome draws, in the same radiance.
     this.envMaterial = new THREE.ShaderMaterial({
       vertexShader: SKY_VERTEX,
-      fragmentShader: SKY_FRAGMENT_LINEAR,
+      fragmentShader: SKY_FRAGMENT,
       uniforms: domeMaterial.uniforms,
       side: THREE.BackSide,
       depthWrite: false,
@@ -1262,16 +1268,19 @@ export class Sky {
     // gradient's top is the dome's own, `mix(uHorizon, uZenith, 1 - uDomeFlat)`, so the
     // land fog climbs with elevation exactly as the sky does (render/airfog.ts).
     const landFog = LAND_FOG_NIGHT + (1 - LAND_FOG_NIGHT) * day;
-    this.fog.color.copy(this._horizon).multiplyScalar(landFog);
+    // The palette is authored as the screen colour the sky shows (`sceneFromScreen` in
+    // the dome), so the fog that must melt the land into it is that colour's radiance.
+    this.fog.color.copy(this._horizon).multiplyScalar(landFog).convertSRGBToLinear();
     setAirFogSky(
-      this._airSky.copy(this._horizon).lerp(this._zenith, 1 - this.uDomeFlat.value).multiplyScalar(landFog),
+      this._airSky.copy(this._horizon).lerp(this._zenith, 1 - this.uDomeFlat.value).multiplyScalar(landFog)
+        .convertSRGBToLinear(),
     );
     // The dome's anti-solar darkening, set here so the land's fog reads the same value.
     this.uAntiSolar.value = 1 - smoothstep(0, 0.55, Math.abs(this.sunElevation));
     setAirFogSun(
       celestial.sun.direction,
       this.uAntiSolar.value,
-      this._airDusk.copy(this._zenith).multiplyScalar(0.55 * landFog),
+      this._airDusk.copy(this._zenith).multiplyScalar(0.55 * landFog).convertSRGBToLinear(),
     );
     setAirFogExtinction(
       (3.912 / CLEAR_AIR_VISIBILITY_M) * g.haze ** REGIONAL_HAZE_POWER *
@@ -1349,7 +1358,8 @@ export class Sky {
     // Re-baking a PMREM through twilight caused recurrent main-thread/GPU stalls;
     // leaving a bright daytime probe at full strength instead made night materials
     // glow. The exposed light budget is the exact scalar both problems need.
-    this.scene.environmentIntensity = Math.min(
+    // Scaled by ENVIRONMENT_SHARE for the same squared-ratio reason as DAY_FILL_SHARE.
+    this.scene.environmentIntensity = ENVIRONMENT_SHARE * Math.min(
       1,
       (sceneIlluminance * this.exposure) / EXPOSURE_TARGET,
     );
@@ -1383,24 +1393,21 @@ export class Sky {
     // Diffuse sky/ground bounce retains real day-to-night ratios by day, and floors
     // at an authored moonlit fill by night (see NIGHT_FILL_INTENSITY): photometric
     // adaptation alone left the desert at absolute zero, which is what turned a
-    // headlight into the only object on screen. Daylight receives 50% more SKY fill,
-    // while reciprocal compensation keeps the warm sand bounce at its former energy.
-    // This opens upward and vertical shadow detail with a blue-cyan cast without
-    // touching the direct Sun, the shadow map, the dome, or global exposure.
-    const skyFillBoost = 1 + (DAY_SKY_FILL_BOOST - 1) * day;
+    // headlight into the only object on screen.
     this._hemiSky.copy(C_DAY_ZENITH)
       .offsetHSL(g.skyHueShift * 0.5, 0.025, 0.0)
       .lerp(C_DAY_HORIZON, 0.32)
       .lerp(C_SUN_HIGH, 0.025)
       .lerp(C_NIGHT_FILL_SKY, night);
-    this._hemiGround.copy(C_GROUND)
-      .lerp(C_NIGHT_FILL_GROUND, night)
-      .multiplyScalar(1 / skyFillBoost);
+    // DAY_FILL_SHARE cuts the SKY's share only: the warm sand bounce keeps its energy,
+    // or every underside — a cabin roof, the shade under a car — goes grey-green.
+    const fillShare = 1 + (DAY_FILL_SHARE - 1) * day;
+    this._hemiGround.copy(C_GROUND).lerp(C_NIGHT_FILL_GROUND, night).multiplyScalar(1 / fillShare);
     this.hemiLight.color.copy(this._hemiSky);
     this.hemiLight.groundColor.copy(this._hemiGround);
     const photometricFill =
       (celestial.diffuseIlluminanceLux / 10_000) * this.exposure *
-      GRAPHICS_CONFIG.hemisphereIntensityScale * skyFillBoost;
+      GRAPHICS_CONFIG.hemisphereIntensityScale * fillShare;
     this.hemiLight.intensity = Math.max(
       photometricFill,
       NIGHT_FILL_INTENSITY * night * GRAPHICS_CONFIG.hemisphereIntensityScale,

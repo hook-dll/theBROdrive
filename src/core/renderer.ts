@@ -230,6 +230,23 @@ export const SHADOW_ONLY_LAYER = 1;
  */
 const RETRO_LEVELS = 24;
 
+/** The finishing pass's display-space S-curve (render/hazeshader.ts `uContrast`). */
+const DISPLAY_CONTRAST = 0.45;
+
+/**
+ * The scene target's texel type: half float wherever the context can render to it (WebGL2
+ * with EXT_color_buffer_float or _half_float, which every desktop and current phone GPU
+ * has), so the linear radiance keeps its range and its dark end. Without it, eight-bit
+ * sRGB storage: still linear radiance to the shader through the hardware decode, clipped
+ * at 1, which the tone curve then maps a little short of white.
+ */
+function sceneTargetType(renderer: THREE.WebGLRenderer): THREE.TextureDataType {
+  const extensions = renderer.extensions;
+  return extensions.has('EXT_color_buffer_float') || extensions.has('EXT_color_buffer_half_float')
+    ? THREE.HalfFloatType
+    : THREE.UnsignedByteType;
+}
+
 /** Touch plus a coarse pointer or phone-sized screen avoids classifying touch laptops. */
 export function prefersMobilePresentation(): boolean {
   if (navigator.maxTouchPoints <= 0) return false;
@@ -537,8 +554,11 @@ export class Renderer {
         camera.layers.disable(SHADOW_ONLY_LAYER);
       }
     };
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.0;
+    // No Three tone mapping: the display transform is the fullscreen pass's own
+    // (render/displaytransform.ts), applied once to the whole frame. Every scene material
+    // renders into a target, where Three neither tone-maps nor encodes, and the pass is
+    // the only material drawn to the canvas, where Three adds the sRGB encode.
+    this.renderer.toneMapping = THREE.NoToneMapping;
     // Draw statistics are accumulated by hand across BOTH passes of a frame.
     //
     // Three resets its counters at the start of every `render` call by default, so after
@@ -563,9 +583,12 @@ export class Renderer {
     this.scene.fog = this.fog;
 
     // Every tier renders into this colour-and-depth target, then uses the fullscreen
-    // pass for authored colour, restrained film grain, ink and FXAA. Acceptable suppresses
-    // only the haze warp; standard and blessing sample the depth so nearby geometry never
-    // inherits a horizon-shaped screen mask.
+    // pass for the display transform, authored colour, restrained film grain, ink and
+    // FXAA. Acceptable suppresses only the haze warp; standard and blessing sample the
+    // depth so nearby geometry never inherits a horizon-shaped screen mask.
+    //
+    // LINEAR HDR (`sceneTargetType`): the scene's radiance, unclipped, so the sun's disc,
+    // a lamp lens and glinting paint keep their excess for the tone curve to roll off.
     //
     // NOT MULTISAMPLED. Four samples were the costliest line of the frame for what they
     // did: the target has a depth texture the pass reads, so every frame resolved colour
@@ -575,8 +598,9 @@ export class Renderer {
     const hazeDepth = new THREE.DepthTexture(1, 1, THREE.UnsignedIntType);
     hazeDepth.minFilter = THREE.NearestFilter;
     hazeDepth.magFilter = THREE.NearestFilter;
-    this.hazeTarget = new THREE.WebGLRenderTarget(1, 1, { depthTexture: hazeDepth });
-    this.hazeTarget.texture.colorSpace = THREE.SRGBColorSpace;
+    const sceneType = sceneTargetType(this.renderer);
+    this.hazeTarget = new THREE.WebGLRenderTarget(1, 1, { depthTexture: hazeDepth, type: sceneType });
+    if (sceneType === THREE.UnsignedByteType) this.hazeTarget.texture.colorSpace = THREE.SRGBColorSpace;
 
     this.hazeCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.hazeMaterial = new THREE.ShaderMaterial({
@@ -585,9 +609,8 @@ export class Renderer {
       // Page-lifetime, like the rung itself: the retro finish replaces the film grain
       // with an ordered dither (render/hazeshader.ts).
       defines: retroActive() ? { RETRO: '', RETRO_LEVELS: RETRO_LEVELS.toFixed(1) } : {},
-      // No tone mapping, no colour conversion: pass 1 already produced final
-      // sRGB pixels, so this pass only warps UVs and copies texels through.
-      toneMapped: false,
+      // Drawn to the canvas, so Three's output encode is sRGB: `toDisplay` in the shader
+      // applies the tone curve, then that encode (`linearToOutputTexel`).
       depthTest: false,
       depthWrite: false,
       uniforms: {
@@ -625,6 +648,7 @@ export class Renderer {
         uSunCol: { value: new THREE.Color(1, 1, 1) },
         uWallAir: { value: new THREE.Color(1, 1, 1) },
         uGradeSat: { value: 1 },
+        uContrast: { value: DISPLAY_CONTRAST },
         uVeil: { value: 0 },
         uDustAlbedo: { value: WALL_DUST.value },
         uSandVeil: { value: SAND_VEIL.value },
@@ -642,7 +666,9 @@ export class Renderer {
     hazeMesh.frustumCulled = false; // clip-space triangle spans far outside the frustum
     this.hazeScene.add(hazeMesh);
 
-    this.torchLight = new THREE.SpotLight(0xffedbd, 150, 65, 0.32, 0.58, 1.7);
+    // Retuned with the vehicle lamps (render/vehiclelights.ts `LAMP_EXPOSURE`): 150 was
+    // authored against the old linear-encoded frame.
+    this.torchLight = new THREE.SpotLight(0xffedbd, 52, 65, 0.32, 0.58, 1.7);
     this.torchLight.visible = false;
     this.torchLight.castShadow = false;
     this.torchLight.target = this.torchTarget;
@@ -975,6 +1001,11 @@ export class Renderer {
     }
   }
 
+  /** The scene target's texel type, which a render target the scene shows (a mirror) shares. */
+  get sceneTextureType(): THREE.TextureDataType {
+    return this.hazeTarget.texture.type;
+  }
+
   setMirrorPass(pass: { draw(): void } | null): void {
     this.mirrorPass = pass;
   }
@@ -1084,18 +1115,15 @@ export class Renderer {
     );
     this.hazeMaterial.uniforms.uCameraNear.value = camera.near;
     this.hazeMaterial.uniforms.uCameraFar.value = camera.far;
-    // TWO PASSES ON EVERY TIER, and the reason is colour, not shimmer.
+    // TWO PASSES ON EVERY TIER: scene radiance, then the display.
     //
-    // Pass 1 renders into `hazeTarget`. Three writes the WORKING colour space
-    // (linear) into a render target — only the canvas gets `outputColorSpace` —
-    // and pass 2 copies those texels through untouched, so the frame reaches the
-    // display linear-encoded and roughly a gamma darker than a direct render.
-    // The whole game is lit and painted against that image.
-    //
-    // So this is deliberate, not an oversight: skipping the pass on the cheapest
-    // tier made it the only correctly encoded tier, which read as washed out
-    // beside the other two. Acceptable keeps the pass and drops the WARP instead
-    // (see `setHeatHaze`), which is where the cost actually was.
+    // Pass 1 renders into `hazeTarget`. Three writes the WORKING colour space (linear)
+    // into a render target and applies no tone mapping there, so the target holds the
+    // scene's linear radiance. Pass 2 does the haze, the dust and the veils on that
+    // radiance, then maps it to the display exactly once — the renderer's tone operator
+    // and the sRGB encode (`toDisplay` in render/hazeshader.ts) — and draws the grade,
+    // the ink and the grain on the displayed picture. Acceptable keeps the pass and
+    // drops the WARP (see `setHeatHaze`), which is where the cost was.
     this.renderer.setRenderTarget(this.hazeTarget);
     this.renderer.render(scene, camera);
     this.renderer.setRenderTarget(null);
@@ -1152,7 +1180,7 @@ export class Renderer {
 
   /**
    * How much of the day's light the colour finish should assume, 0..1: the sand
-   * veil and the toe lift. Deliberately separate from the heat: the two used to be
+   * veil. Deliberately separate from the heat: the two used to be
    * one number, so the mirage lab's heat slider re-graded the whole picture.
    */
   setDaylight(dayFactor: number): void {

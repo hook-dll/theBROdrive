@@ -63,8 +63,12 @@ const TAG_WIRE = 0x90f1c7;
  * 0.2 m off the paint. Real poles keep their distance from the road they follow, so
  * the setback is what is authored and the lateral is derived — which also means the
  * whole line sweeps out and back through a taper exactly as the carriageway does.
+ *
+ * 4.5 m, past the embankment's foot (`roadprofile`: 2.5 m shoulder, its fringe, a 1 m
+ * batter). At 3.1 m the line stood on the shoulder's outer edge, where a frantic verge
+ * pass puts the body's edge (up to 2.5 m out, and 0.3-0.6 m wider while it arrives).
  */
-const POLE_SETBACK_M = 3.1;
+export const POLE_SETBACK_M = 4.5;
 /**
  * How far below the drawn sand a pole's ground plane is set: a pole is planted, and
  * the sand sits up round its footing rather than meeting it at an edge. Below this the
@@ -532,7 +536,7 @@ let _loudspeaker: THREE.BufferGeometry | null = null;
  *
  * +X is over the carriageway (see `applyPoleRotation`), and that is deliberate: a
  * speaker bolted to a pole exists to be heard from the road. The mouth reaches 0.55 m
- * from a pole standing 3.1 m outside the paint, so it is still two and a half metres
+ * from a pole standing 4.5 m outside the paint, so it is still almost four metres
  * clear of anything driving past.
  */
 function loudspeaker(): THREE.BufferGeometry {

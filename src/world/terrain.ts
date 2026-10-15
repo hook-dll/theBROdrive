@@ -10,6 +10,7 @@ import {
 import { SurfaceType } from '../core/surfaces';
 import { ROAD_HALF_WIDTH, ROAD_MAX_HALF_WIDTH, type Road } from './road';
 import { RoadDistance } from './roaddistance';
+import { embankmentDropAt } from './roadprofile';
 import { SurfaceField, roadSurfaceY } from './roadsurface';
 import { onTerminusPad, terminusWeight } from './terminus';
 import { laybyFlattenWeight, laybyLevel, laybyNear, onLaybyPad } from './layby';
@@ -29,10 +30,12 @@ import { laybyFlattenWeight, laybyLevel, laybyNear, onLaybyPad } from './layby';
  *
  * What survives is the corridor: inside `CORRIDOR_INNER` the ground is the road
  * surface itself (banking and surface field included), sampled through the same
- * shared function the road ribbon uses. At its edge the asphalt meets the desert
- * terrain flush; from there to `CORRIDOR_OUTER` the ground smoothsteps into the open
- * field. The road's own elevation is that field's, so the blend differs only by
- * camber and centimetre-scale surface detail.
+ * shared function the road ribbon uses. At its edge the ground leaves the asphalt
+ * with no step and falls away on the road's own low embankment
+ * (`roadprofile.embankmentDropAt`: a sloping shoulder, a short batter, the desert
+ * 0.45 m below the asphalt); from there to `CORRIDOR_OUTER` it smoothsteps into the
+ * open field. The road's own elevation is that field's, so the blend differs only by
+ * the embankment, camber and centimetre-scale surface detail.
  *
  * Two scheduled shapes are cut into the open field beyond that corridor, both as
  * functions of world position so every mesh and worker agrees on them: the lake
@@ -633,11 +636,14 @@ export class Terrain {
   }
 
   /**
-   * The corridor grading, base only: the road-edge elevation smoothstepped out into
-   * the open field between `CORRIDOR_INNER` and `CORRIDOR_OUTER`.
+   * The corridor grading, base only: the road-edge elevation carried out on the road's
+   * own embankment (`roadprofile.embankmentDropAt`: the shoulder's fall, the batter, the
+   * desert `EMBANKMENT_HEIGHT_M` below the asphalt), smoothstepped into the open field
+   * between `CORRIDOR_INNER` and `CORRIDOR_OUTER`. The embankment fades with the edge
+   * anchor, so out in the field the road's height is nobody's business.
    *
    * The seam is continuous because the edge anchor and open field share the road's
-   * centreline field elevation.
+   * centreline field elevation, and the embankment is zero at the asphalt edge.
    *
    * Past `CORRIDOR_OUTER` this returns the open field directly. That skips a
    * `roadEdgeHeight` sample which would otherwise be computed and discarded.
@@ -648,7 +654,7 @@ export class Terrain {
     const innerWidth = this.road.halfWidthAt(s);
     const t0 = (dist - innerWidth) / (CORRIDOR_OUTER - innerWidth);
     const t = t0 * t0 * (3 - 2 * t0);
-    const inner = this.roadEdgeHeight(s, side);
+    const inner = this.roadEdgeHeight(s, side) - embankmentDropAt(dist - innerWidth);
     return inner + (open - inner) * t;
   }
 

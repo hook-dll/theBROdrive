@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Body } from 'astronomy-engine';
 import type { CelestialFrame } from './astronomy';
+import { SCENE_FROM_SCREEN_GLSL } from './displaytransform';
 
 const PLANET_RADIUS = 2785;
 const COLORS: Record<string, number> = {
@@ -38,13 +39,15 @@ const FRAGMENT = /* glsl */ `
 uniform float uExposure;
 varying vec3 vColor;
 varying float vFlux;
+${SCENE_FROM_SCREEN_GLSL}
 void main() {
   vec2 p = gl_PointCoord - 0.5;
   float r2 = dot(p, p);
   if (r2 > 0.25) discard;
   float energy = vFlux * uExposure * 18.0;
   float alpha = min(1.0, energy * exp(-r2 * 16.0));
-  gl_FragColor = vec4(vColor, alpha);
+  // A screen value, like the stars' (render/starcatalog.ts).
+  gl_FragColor = vec4(sceneFromScreen(vColor * alpha), 1.0);
 }
 `;
 

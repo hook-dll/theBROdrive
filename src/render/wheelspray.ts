@@ -154,9 +154,8 @@ void main() {
   // sparse handful of large motes still reads as a cloud and not as pale pebbles.
   float edge = mix(0.35, 0.9, vTint);
   float a = smoothstep(1.0, edge, r2) * vAlpha;
-  gl_FragColor = vec4(mix(sandColor, smokeColor, vTint), a);
-  #include <tonemapping_fragment>
-  #include <colorspace_fragment>
+  // The colours are screen values, like every unlit colour (render/lightshader.ts).
+  gl_FragColor = vec4(sRGBTransferEOTF(vec4(mix(sandColor, smokeColor, vTint), 1.0)).rgb, a);
 }
 `;
 

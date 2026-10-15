@@ -156,8 +156,11 @@ const TAILLIGHT_BEAM = {
   decay: 1.4,
   targetDistance: 3.5,
   targetDrop: 0.12,
-  runningIntensity: 6,
-  brakeIntensity: 24,
+  // Halved with the encoded frame (core/renderer.ts `drawFrame`): a saturated red pool
+  // keeps its whole red channel through the sRGB encode, and at 6 / 24 it spread a
+  // metre-wide magenta slab behind every car at night.
+  runningIntensity: 3,
+  brakeIntensity: 12,
 } as const;
 const REVERSE_LIGHT_BEAM = {
   distance: 10,

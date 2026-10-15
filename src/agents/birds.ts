@@ -88,9 +88,10 @@ const SALT_TAKEOFF_FAN = 0x46c9;
 // perches were rejected because most put birds on empty air.
 /** Nearest a perched bird stands to the asphalt edge, metres of clear shoulder. */
 export const PERCH_VERGE_MIN = 0.7;
-/** Farthest out it stands. The gravel verge is 3.5 m wide and poles are planted 3.1 m
- *  out, so the band ends short of both: birds on the shoulder, never inside a pole,
- *  and never inside the desert scatter which starts 6.1 m out. */
+/** Farthest out it stands. The guaranteed shoulder is 2.5 m wide, reflector posts stand
+ *  3.2 m out and poles 4.5 m out, so the band ends short of all three: birds on the
+ *  shoulder, never inside a post or a pole, and never inside the desert scatter which
+ *  starts 6.1 m out. */
 export const PERCH_VERGE_MAX = 2.4;
 /** Metres of road a flock is strung along, so it is a scatter and not a line. */
 const PERCH_S_SPREAD = 7;

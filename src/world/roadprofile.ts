@@ -175,28 +175,89 @@ export function laneOffsetFor(halfWidth: number, lane: number): number {
 }
 
 /**
- * Mean width of the graded shoulder past the asphalt edge, metres.
+ * THE ROAD'S CROSS-SECTION PAST THE ASPHALT: a graded shoulder, then a short batter
+ * down to the desert. The road stands on a low embankment of its own spoil.
  *
- * The shoulder is the strip `world/roadmesh.ts` hangs off the ribbon's own edge
- * (`SHOULDER_STYLE`, which reads its width from here): some of the road's own material
- * pushed out and settled, drawn with its own collider (`SurfaceType.LooseShoulder`),
- * so it is the first thing a wheel off the edge rolls onto before the sand. It belongs
- * to the road's cross-section rather than to its decoration — the mesh that draws the
- * verge and the controller that decides how far out a pass may put a body have to
- * agree on how much of it there is, and a surface with no strip of its own gets the
- * asphalt's, exactly as the mesh's own default does.
+ * One function of the distance `d` past the asphalt edge, read by three things that
+ * have to agree: the terrain (world/terrain.ts lowers the graded corridor by it, so the
+ * desert tiles and their colliders lie under it), the shoulder strip the road mesh
+ * draws and collides as `SurfaceType.LooseShoulder` (world/roadmesh.ts), and the
+ * autopilot, which sizes a verge pass on the width and plans the line on the slope.
+ *
+ *  - THE SHOULDER, `SHOULDER_WIDTH_M` wide on every road: guaranteed drivable,
+ *    LooseShoulder all the way across, falling away from the asphalt at
+ *    `SHOULDER_FALL_INNER` at the lip and steepening evenly to `SHOULDER_FALL_OUTER`
+ *    at its outer edge. Nothing narrows it: not wear, not wander, not the ragged edge.
+ *  - THE FRINGE beyond it, `shoulderFringeM` of the same stone on average, wandering
+ *    and ragged where the sand takes over. Drivable while it lasts, promised nowhere.
+ *  - THE BATTER, from the shoulder's edge down to `EMBANKMENT_HEIGHT_M` below the
+ *    asphalt over `EMBANKMENT_BATTER_M`, leaving at the shoulder's own slope and
+ *    landing level; the fringe lies on its top.
+ *
+ * The width is what a frantic verge pass needs. The pass line puts the outer tyre
+ * 1.55-1.7 m past the paint (tools/frantic-pass.ts), and the body runs 0.3-0.6 m wide of
+ * its line as it arrives; the old strip was the surface's mean width narrowed by wear,
+ * wandering ±22% and ragged on top, and measured 1.31 m at its narrowest on a straight,
+ * so the outer wheels went into the sand (mu 0.51 against the strip's 0.8): 14 of 19
+ * frantic slides on the real-road bench were verge passes.
+ *
+ * The slope is what makes a verge overtake look possible but dangerous. With the
+ * inner wheels on the paint and the outer ones 1.6 m out the car leans about 6 degrees,
+ * and the fall takes `g * fall` off the grip the stone has for cornering
+ * (`shoulderFallAt`; the autopilot's verge budget).
  */
-const SHOULDER_WIDTH_M: Partial<Record<SurfaceType, number>> = {
+export const SHOULDER_WIDTH_M = 2.5;
+export const SHOULDER_FALL_INNER = 0.06;
+export const SHOULDER_FALL_OUTER = 0.15;
+/** How far the desert lies below the asphalt edge once the batter is down, metres. */
+export const EMBANKMENT_HEIGHT_M = 0.45;
+/** Lateral run of the batter, from the shoulder's edge to its foot, metres. */
+export const EMBANKMENT_BATTER_M = 1;
+
+/** Cross-fall of the formation at `d` metres past the asphalt edge (rise over run, outward). */
+export function shoulderFallAt(d: number): number {
+  const u = Math.min(1, Math.max(0, d / SHOULDER_WIDTH_M));
+  return SHOULDER_FALL_INNER + (SHOULDER_FALL_OUTER - SHOULDER_FALL_INNER) * u;
+}
+
+/** The shoulder's drop below the asphalt edge at its outer edge, metres. */
+const SHOULDER_EDGE_DROP_M =
+  SHOULDER_WIDTH_M * (SHOULDER_FALL_INNER + SHOULDER_FALL_OUTER) * 0.5;
+
+/**
+ * Depth of the formation below the asphalt edge at `d` metres past it: the shoulder's
+ * steepening fall, the batter (a cubic leaving at the shoulder's slope and landing
+ * level), then `EMBANKMENT_HEIGHT_M` flat. 0 at and inside the edge.
+ */
+export function embankmentDropAt(d: number): number {
+  if (d <= 0) return 0;
+  if (d <= SHOULDER_WIDTH_M) {
+    return d * (SHOULDER_FALL_INNER + ((SHOULDER_FALL_OUTER - SHOULDER_FALL_INNER) * d) / (2 * SHOULDER_WIDTH_M));
+  }
+  const u = (d - SHOULDER_WIDTH_M) / EMBANKMENT_BATTER_M;
+  if (u >= 1) return EMBANKMENT_HEIGHT_M;
+  const m0 = SHOULDER_FALL_OUTER * EMBANKMENT_BATTER_M;
+  const rise = EMBANKMENT_HEIGHT_M - SHOULDER_EDGE_DROP_M;
+  const u2 = u * u;
+  return SHOULDER_EDGE_DROP_M + (u2 * u - 2 * u2 + u) * m0 + (3 * u2 - 2 * u2 * u) * rise;
+}
+
+/**
+ * Mean width of the fringe past the guaranteed shoulder, metres: graded stone the
+ * road mesh draws ragged and wandering, narrowed by wear. It is the surface's
+ * character and nothing a driver may plan on.
+ */
+const SHOULDER_FRINGE_M: Partial<Record<SurfaceType, number>> = {
   // A highway's graded crushed-stone shoulder, dusty and pale.
-  [SurfaceType.Asphalt]: 2.1,
-  // Older and narrower; the desert has had longer to blow back over it.
-  [SurfaceType.CrackedAsphalt]: 1.8,
+  [SurfaceType.Asphalt]: 0.5,
+  // Older; the desert has had longer to blow back over the edge of it.
+  [SurfaceType.CrackedAsphalt]: 0.35,
   // Concrete roads were built wide and pale, with cement dust in the verge.
-  [SurfaceType.Concrete]: 2.3,
+  [SurfaceType.Concrete]: 0.65,
   // The grader's spoil: the road's own gravel pushed off to the sides.
-  [SurfaceType.Gravel]: 1.6,
+  [SurfaceType.Gravel]: 0.3,
 };
 
-export function shoulderWidthM(surface: SurfaceType): number {
-  return SHOULDER_WIDTH_M[surface] ?? SHOULDER_WIDTH_M[SurfaceType.Asphalt]!;
+export function shoulderFringeM(surface: SurfaceType): number {
+  return SHOULDER_FRINGE_M[surface] ?? SHOULDER_FRINGE_M[SurfaceType.Asphalt]!;
 }

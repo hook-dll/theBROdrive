@@ -93,6 +93,39 @@ function installStableShadowFilter(): void {
   );
 }
 
+/**
+ * Unlit colour and emission are authored as SCREEN values.
+ *
+ * Until the colour pipeline was corrected (core/renderer.ts `drawFrame`) the frame
+ * reached the display linear-encoded, so an unlit material's colour and a lit one's
+ * emission were shown at their own numbers: every lens glow, mirage card, dust streak
+ * and basic-material prop was tuned by the pixel it made. The encoded frame showed them
+ * all a gamma brighter than the lit world they were tuned against (the drift streaks in
+ * a haboob went from barely there to bright yellow). So MeshBasicMaterial's colour and
+ * every material's emission are decoded from sRGB here, in the shared chunks — one
+ * program per material as before, no new variants — and reach the screen as authored.
+ * A basic material that shows real radiance (a mirror face, render/carmirrors.ts) sets
+ * the SCENE_RADIANCE define to keep it.
+ */
+function installScreenAuthoredUnlit(): void {
+  const decode = 'sRGBTransferEOTF( vec4( max( %, vec3( 0.0 ) ), 1.0 ) ).rgb';
+  const basicLine = 'vec3 outgoingLight = reflectedLight.indirectDiffuse;';
+  const basic = THREE.ShaderLib.basic.fragmentShader;
+  if (!basic.includes('SCENE_RADIANCE')) {
+    if (!basic.includes(basicLine)) throw new Error('Three basic-material shader layout changed');
+    THREE.ShaderLib.basic.fragmentShader = basic.replace(
+      basicLine,
+      `${basicLine}\n\t#ifndef SCENE_RADIANCE\n\toutgoingLight = ${decode.replace('%', 'outgoingLight')};\n\t#endif`,
+    );
+  }
+  const emissive = THREE.ShaderChunk.emissivemap_fragment;
+  if (!emissive.includes('totalEmissiveRadiance = sRGB')) {
+    THREE.ShaderChunk.emissivemap_fragment =
+      `${emissive}\ntotalEmissiveRadiance = ${decode.replace('%', 'totalEmissiveRadiance')};\n`;
+  }
+}
+
 installPointLightZeroGuard();
 installSunShadowSlopeBias();
 installStableShadowFilter();
+installScreenAuthoredUnlit();

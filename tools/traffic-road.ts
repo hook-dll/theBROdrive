@@ -112,6 +112,8 @@ let egoLogTicks = 0;
  */
 const FRANTIC_SHARE = flag('frantic-share', 0);
 const EVENTS_LOG = args.includes('--events');
+/** `--cap N`: the stream's car ceiling (`RoadTraffic.cap`), as the console knob sets it; the settings' own otherwise. */
+const TRAFFIC_CAP = args.includes('--cap') ? flag('cap', 0) : null;
 /**
  * `--trace-car <id>`: every tenth of a second of that stream car's driving, with the
  * plan's own state, between `--trace-from` and `--trace-to` (metres of s past the start).
@@ -307,7 +309,9 @@ settle();
 // that read resolves decides which fixed step the car appears on, so two runs of one
 // seed drifted apart by as much as ten km/h of ego pace. Loaded up front, a spawn's
 // load promise is already settled and the run is the seed's alone.
+// The ego's body is loaded by name: it need not be one of the stream's catalogue.
 await preloadCarModels();
+await loadCarModel(EGO_MODEL);
 
 /**
  * WHERE THE EGO CAR STARTS, and why it is not simply `START_S`.
@@ -416,6 +420,7 @@ const traffic = new RoadTraffic(
     return dx * dx + dz * dz > radius * radius;
   },
 );
+if (TRAFFIC_CAP !== null) traffic.cap = TRAFFIC_CAP;
 // The ego is the player: it gets the same seat in the coordinator's field that
 // `main.ts` gives him, so what this bench measures is the driver the game ships.
 const egoFieldSeat = { forwardS: EGO_START_S, direction: 1 as const };
@@ -1139,8 +1144,11 @@ function sampleCar(
  * as chaos, each counted once on the step it begins.
  *
  *   airborne   the springs carry under a tenth of the car's parked load for 0.1 s
- *   departure  the body's centre 0.3 m past the asphalt, or the driver says `offroad`,
- *              with no verge pass planned; `verge` is the same with one planned
+ *   departure  the body's centre 0.3 m past the PAINT, or the driver says `offroad`,
+ *              with no verge pass planned; `verge` is the same with one planned. Since
+ *              the road has a guaranteed 2.5 m shoulder (`roadprofile.SHOULDER_WIDTH_M`)
+ *              most of these are cars on drivable ground: leaving the road in the
+ *              owner's sense is `left` (`CONTROL_SHOULDER_M`)
  *   slide      body sideslip over 8 degrees above 10 m/s
  *   contact    an impact over 1.8 m/s (the stream's own threshold)
  *
@@ -1151,6 +1159,13 @@ function sampleCar(
 const CONTROL_AIRBORNE_LOAD = 0.1;
 const CONTROL_AIRBORNE_STEPS = 6;
 const CONTROL_DEPARTURE_M = 0.3;
+/**
+ * The guaranteed drivable shoulder past the paint, metres: `roadprofile.SHOULDER_WIDTH_M`,
+ * written out so the same tool measures HEAD's road too. A car whose body centre is past
+ * it, or with a wheel on sand or rock, has LEFT THE ROAD (`left`); `departure` above only
+ * says it is past the paint, which on this road is still drivable ground.
+ */
+const CONTROL_SHOULDER_M = 2.5;
 /**
  * A departure whose body is within this of the line its driver commanded, measured
  * outward, is the plan's own line past the paint (a detour, a lane line at the verge's
@@ -1179,11 +1194,22 @@ interface ControlTally {
   verge: number;
   slide: number;
   contact: number;
+  /** A wheel standing on the desert (sand or rock past the graded strip): events, and seconds of it. */
+  desert: number;
+  desertSeconds: number;
+  /** Left the road in the owner's sense; see `CONTROL_SHOULDER_M`. */
+  left: number;
   spawn: number;
   /** Wakes whose springs carried over `WAKE_HARD_LOAD` of the parked load in their first `WAKE_CHECK_S`. */
   wakeHard: number;
   /** And wakes whose springs dropped under `CONTROL_AIRBORNE_LOAD` in that window. */
   wakeLight: number;
+  /** Every event above, and every step a wheel first stands on the desert, by `kind manoeuvre`. */
+  byManoeuvre: Map<string, number>;
+}
+function countByManoeuvre(tally: ControlTally, kind: string, manoeuvre: string): void {
+  const key = `${kind} ${manoeuvre}`;
+  tally.byManoeuvre.set(key, (tally.byManoeuvre.get(key) ?? 0) + 1);
 }
 interface ControlCar {
   wasRails: boolean;
@@ -1195,6 +1221,8 @@ interface ControlCar {
   departed: boolean;
   offroad: boolean;
   sliding: boolean;
+  inDesert: boolean;
+  left: boolean;
   /** Snapshots every quarter second over the last two: v>target pedal steer lat load. */
   trail: string[];
   trailClock: number;
@@ -1280,6 +1308,7 @@ function controlEvent(kind: string, car: StreamCar, state: ControlCar, speed: nu
   else if (kind === 'slide') tally.slide++;
   else tally.contact++;
   if (spawning) kind = `spawn-${kind}`;
+  else countByManoeuvre(tally, kind, car.autopilot.manoeuvre);
   if (!EVENTS_LOG) return;
   const s = car.forwardS;
   const crest = (road.sampleAt(s + 16).grade - road.sampleAt(s - 16).grade) / 32;
@@ -1306,12 +1335,12 @@ const paceCondition: RoadConditionBuffer = { surface: SurfaceType.Asphalt, decay
 function trackControl(car: StreamCar): void {
   let tally = controlTally.get(car.style);
   if (!tally) {
-    tally = { seconds: 0, metres: 0, openSeconds: 0, openMetres: 0, woke: 0, airborne: 0, departure: 0, departureOnLine: 0, verge: 0, slide: 0, contact: 0, spawn: 0, wakeHard: 0, wakeLight: 0 };
+    tally = { seconds: 0, metres: 0, openSeconds: 0, openMetres: 0, woke: 0, airborne: 0, departure: 0, departureOnLine: 0, verge: 0, slide: 0, contact: 0, desert: 0, desertSeconds: 0, left: 0, spawn: 0, wakeHard: 0, wakeLight: 0, byManoeuvre: new Map() };
     controlTally.set(car.style, tally);
   }
   let state = controlCars.get(car.id);
   if (!state) {
-    state = { wasRails: false, sinceWake: Infinity, driven: 0, airSteps: 0, airborne: false, departed: false, offroad: false, sliding: false, trail: [], trailClock: 0, wakeCheck: 0, wakeMax: 0, wakeMin: Infinity, wakeLog: '' };
+    state = { wasRails: false, sinceWake: Infinity, driven: 0, airSteps: 0, airborne: false, departed: false, offroad: false, sliding: false, inDesert: false, left: false, trail: [], trailClock: 0, wakeCheck: 0, wakeMax: 0, wakeMin: Infinity, wakeLog: '' };
     controlCars.set(car.id, state);
   }
   state.sinceWake += FIXED_DT;
@@ -1434,6 +1463,23 @@ function trackControl(car: StreamCar): void {
     controlEvent('slide', car, state, speed, `slip ${slipDeg.toFixed(1)} deg`);
   }
   if (slipDeg < CONTROL_SLIDE_DEG / 2) state.sliding = false;
+  // A wheel on the desert itself, past the graded strip: `wheelCode`'s digit for sand or rock.
+  const ground = wheelCode(vehicle);
+  const inDesert = ground.includes(String(SurfaceType.Sand)) || ground.includes(String(SurfaceType.Rock));
+  if (inDesert) tally.desertSeconds += FIXED_DT;
+  if (inDesert && !state.inDesert && state.driven >= CONTROL_SPAWN_S) {
+    tally.desert++;
+    countByManoeuvre(tally, 'desert', car.autopilot.manoeuvre);
+  }
+  state.inDesert = inDesert;
+  // LEFT THE ROAD, in the owner's sense: off the drivable shoulder, not merely on it. A
+  // wheel on the desert, or the body's centre past the guaranteed shoulder.
+  const left = inDesert || over > CONTROL_SHOULDER_M;
+  if (left && !state.left && state.driven >= CONTROL_SPAWN_S) {
+    tally.left++;
+    countByManoeuvre(tally, 'left', car.autopilot.manoeuvre);
+  }
+  state.left = left || (state.left && over > CONTROL_SHOULDER_M - 0.5);
   const impact = vehicle.lastImpact;
   if (impact && impact.severityMps > 1.8) controlEvent('contact', car, state, speed, contactDetail(car, impact.severityMps));
 }
@@ -1487,6 +1533,101 @@ function contactDetail(car: StreamCar, severity: number): string {
   return out;
 }
 
+// ---------------------------------------------------------------- overtakes
+/**
+ * EVERY CAR ONE DRIVER GETS PAST, BY THE MANOEUVRE IT WAS IN WHILE LEVEL, PER STYLE.
+ *
+ * A pair of driven cars going the same way swaps order: the one now ahead is credited
+ * with an overtake, filed under the pass manoeuvre it was in while the two were level
+ * (`crossing` for `pass-oncoming`, `middle`, `verge` for `pass-shoulder`), or `other`
+ * when it was in none (the other car stopped, turned, or was passed in another lane of
+ * a dual carriageway). Dropping back behind a car it had got past takes the credit
+ * back. A car on rails or settling is not driven, and a pair with one in it is
+ * forgotten. Verge passes started and given up are counted off the driver's own
+ * commitment (`LateralCommitment.shoulderPassing`, `shoulderYielding`).
+ */
+const OVERTAKE_LEVEL_M = 4.6;
+const OVERTAKE_KIND: Record<string, string> = {
+  'pass-oncoming': 'crossing',
+  'pass-middle': 'middle',
+  'pass-shoulder': 'verge',
+};
+interface OvertakeTally { crossing: number; middle: number; verge: number; other: number; vergeStarted: number; vergeGivenUp: number }
+const overtakeTally = new Map<string, OvertakeTally>();
+function overtakesOf(style: string): OvertakeTally {
+  let tally = overtakeTally.get(style);
+  if (!tally) {
+    tally = { crossing: 0, middle: 0, verge: 0, other: 0, vergeStarted: 0, vergeGivenUp: 0 };
+    overtakeTally.set(style, tally);
+  }
+  return tally;
+}
+/** Per ordered pair key `a|b` (a < b by id): +1 a ahead, -1 b ahead, and the kind seen while level. */
+const pairOrder = new Map<string, { order: number; aKind: string; bKind: string; credited: string }>();
+const vergeState = new Map<string, { passing: boolean; yielding: boolean }>();
+interface Participant { id: string; style: string; s: number; direction: number; autopilot: Autopilot }
+/** `Autopilot.lateral` is private; the bench reads the verge-pass state nothing in the game publishes. */
+interface WithLateral {
+  readonly lateral: { readonly shoulderPassing: boolean; readonly shoulderYielding: boolean };
+}
+const participants: Participant[] = [];
+function trackOvertakes(): void {
+  participants.length = 0;
+  if (!SOLO) participants.push({ id: 'ego', style: 'ego', s: egoS, direction: 1, autopilot: egoAutopilot });
+  for (const car of cars) {
+    if (car.rails !== null || car.settleFor > 0 || car.turnS >= 0 || car.rival) continue;
+    participants.push({ id: car.id, style: car.style, s: car.forwardS, direction: car.direction, autopilot: car.autopilot });
+  }
+  const live = new Set<string>();
+  for (const p of participants) {
+    const view: WithLateral = p.autopilot as unknown as WithLateral;
+    const lateral = view.lateral;
+    const was = vergeState.get(p.id) ?? { passing: false, yielding: false };
+    if (lateral.shoulderPassing && !was.passing) overtakesOf(p.style).vergeStarted++;
+    if (lateral.shoulderYielding && !was.yielding) overtakesOf(p.style).vergeGivenUp++;
+    vergeState.set(p.id, { passing: lateral.shoulderPassing, yielding: lateral.shoulderYielding });
+  }
+  for (let i = 0; i < participants.length; i++) {
+    for (let j = i + 1; j < participants.length; j++) {
+      let a = participants[i]!;
+      let b = participants[j]!;
+      if (a.direction !== b.direction) continue;
+      if (a.id > b.id) [a, b] = [b, a];
+      const key = `${a.id}|${b.id}`;
+      live.add(key);
+      const along = (a.s - b.s) * a.direction;
+      let entry = pairOrder.get(key);
+      if (!entry) {
+        if (Math.abs(along) < OVERTAKE_LEVEL_M) continue;
+        pairOrder.set(key, { order: Math.sign(along), aKind: '', bKind: '', credited: '' });
+        continue;
+      }
+      if (Math.abs(along) < OVERTAKE_LEVEL_M) {
+        entry.aKind = OVERTAKE_KIND[a.autopilot.manoeuvre] ?? entry.aKind;
+        entry.bKind = OVERTAKE_KIND[b.autopilot.manoeuvre] ?? entry.bKind;
+        continue;
+      }
+      const order = Math.sign(along);
+      if (order === entry.order) continue;
+      const winner = order > 0 ? a : b;
+      const kind = (order > 0 ? entry.aKind : entry.bKind) || 'other';
+      // Getting back behind a car it had just got past undoes that overtake.
+      if (entry.credited !== '') {
+        const [style, previous] = entry.credited.split('/') as [string, keyof OvertakeTally];
+        overtakesOf(style)[previous]--;
+        entry.credited = '';
+      } else {
+        overtakesOf(winner.style)[kind as keyof OvertakeTally]++;
+        entry.credited = `${winner.style}/${kind}`;
+      }
+      entry.order = order;
+      entry.aKind = '';
+      entry.bKind = '';
+    }
+  }
+  for (const key of pairOrder.keys()) if (!live.has(key)) pairOrder.delete(key);
+}
+
 let ticks = 0;
 async function tick(): Promise<void> {
   egoFieldSeat.forwardS = egoS;
@@ -1520,6 +1661,7 @@ async function run(seconds: number, record: boolean): Promise<void> {
     liveSamples.push(cars.length);
     sampleCar('ego', 'ego', EGO_MODEL, 1, 0, ego, egoAutopilot, egoS, egoLateral);
     if (!SOLO) measureRacer();
+    trackOvertakes();
 
     let nearestAhead = Infinity;
     let nearestSameAhead = Infinity;
@@ -1726,8 +1868,23 @@ for (const style of ['cautious', 'normal', 'hurried', 'frantic']) {
     `  control ${style.padEnd(8)} ${minutes.toFixed(1)} driven car-min ${((tally.metres / tally.seconds) * 3.6).toFixed(0)} km/h` +
       `${style === 'frantic' ? `, open road ${(tally.openSeconds / 60).toFixed(1)} min at ${((tally.openMetres / Math.max(tally.openSeconds, 1e-3)) * 3.6).toFixed(0)} km/h` : ''}` +
       ` | per car-min: airborne ${rate(tally.airborne)} departure ${rate(tally.departure)} [${tally.departureOnLine} on its line] verge ${rate(tally.verge)}` +
-      ` slide ${rate(tally.slide)} contact ${rate(tally.contact)} | woke ${tally.woke}` +
+      ` slide ${rate(tally.slide)} contact ${rate(tally.contact)} wheels in the desert ${rate(tally.desert)} ${tally.desertSeconds.toFixed(0)} s left the road ${rate(tally.left)} | woke ${tally.woke}` +
       ` (${tally.wakeHard} hard, ${tally.wakeLight} light landings), spawn events ${tally.spawn}`,
+  );
+  if (style === 'frantic' || style === 'hurried') {
+    console.log(
+      `      by manoeuvre: ${[...tally.byManoeuvre].sort((a, b) => b[1] - a[1]).map(([key, count]) => `${key} ${count}`).join(', ')}`,
+    );
+  }
+}
+for (const style of ['cautious', 'normal', 'hurried', 'frantic', 'ego']) {
+  const passes = overtakeTally.get(style);
+  const minutes = (style === 'ego' ? egoTrack.seconds : controlTally.get(style)?.seconds ?? 0) / 60;
+  if (!passes || minutes <= 0) continue;
+  const rate = (count: number) => `${count} (${(count / minutes).toFixed(2)})`;
+  console.log(
+    `  overtakes ${style.padEnd(8)} per car-min: crossing ${rate(passes.crossing)} middle ${rate(passes.middle)}` +
+      ` verge ${rate(passes.verge)} other ${rate(passes.other)} | verge passes started ${passes.vergeStarted}, given up ${passes.vergeGivenUp}`,
   );
 }
 if (wakeErrors.length > 0) {

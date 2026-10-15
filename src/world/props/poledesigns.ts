@@ -24,8 +24,8 @@
  * it, so no design has to author its own buried length. +X is LEFT of travel —
  * over the carriageway, because the line stands right of the road (see `twist` in
  * poles.ts) — and Z runs along the road, which is the direction the wires leave in.
- * No part reaches further than 2.6 m toward the road: the line stands 3.1 m outside
- * the asphalt edge, so the most a lean can add still leaves an arm over the gravel.
+ * No part reaches further than 2.6 m toward the road: the line stands 4.5 m outside
+ * the asphalt edge, so the most a lean can add still leaves an arm over the shoulder.
  *
  * DRAWING. Every design is one vertex-coloured geometry in one comic-banded material,
  * built with the same `DwellingBuilder` the houses use, so a pole is one draw call

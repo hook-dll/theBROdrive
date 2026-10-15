@@ -63,6 +63,8 @@
 //             image sinks, it does not rise.)
 // ---------------------------------------------------------------------------
 
+import { DISPLAY_CURVE_GLSL, SCENE_FROM_SCREEN_GLSL } from './displaytransform';
+
 /**
  * Scale height of the hot air over the sand, metres.
  *
@@ -388,8 +390,9 @@ export const HAZE_VERTEX = /* glsl */ `
     gl_Position = vec4(position.xy, 0.0, 1.0);
   }
 `;
-
 export const HAZE_FRAGMENT = /* glsl */ `
+  ${DISPLAY_CURVE_GLSL}
+  ${SCENE_FROM_SCREEN_GLSL}
   uniform sampler2D tDiffuse;
   uniform sampler2D tDepth;
   uniform vec2 uResolution;
@@ -468,6 +471,8 @@ export const HAZE_FRAGMENT = /* glsl */ `
   uniform float uFogDensity;
   /** Colour separation of the grade: >1 scrubbed air, <1 haze and dust. */
   uniform float uGradeSat;
+  /** The look's display-space S-curve, 0 (none) .. 1 (full smoothstep). */
+  uniform float uContrast;
   /**
    * Suspended haze from the first tens of metres out. The scene fog is exponential-
    * squared, which is right for distance and leaves the near world spotless; real
@@ -570,6 +575,32 @@ export const HAZE_FRAGMENT = /* glsl */ `
     if (uPanini > 0.0) return sceneSample(tDiffuse, uv);
     #endif
     return texture2D(tDiffuse, uv);
+  }
+
+  /**
+   * Scene radiance to the display: the tone curve (render/displaytransform.ts), then
+   * the sRGB encode. The scene target is linear HDR (core/renderer.ts
+   * \`sceneTargetType\`), and this pass is where the picture is mapped to the display,
+   * ONCE, after the haze, the mirage, the dust and the veils have worked on radiance.
+   * Everything after it — the grade, the ink, the grain — works on the encoded picture
+   * the eye sees, and FXAA and the ink measure their steps through it (\`fxaaLuma\`,
+   * \`inkEdge\`).
+   *
+   * \`linearToOutputTexel\` is Three's output encode: sRGB for this pass, drawn to the
+   * canvas; the identity where tools/haze-probe.ts draws the same source into a target.
+   */
+  vec3 toDisplay(vec3 radiance) {
+    return linearToOutputTexel(vec4(displayCurve(radiance), 1.0)).rgb;
+  }
+
+  /**
+   * The scene's colour at \`uv\` near enough to how the display shows it for measuring a
+   * step: FXAA and the ink take thirty taps a pixel, and the exact transform in each
+   * cost a tenth of the frame at 3 Mpx. The curve is the identity below its shoulder,
+   * and a square root is the sRGB encode within a few code values.
+   */
+  vec3 displayTap(vec2 uv) {
+    return sqrt(clamp(texture2D(tDiffuse, uv).rgb, 0.0, 1.0));
   }
 
   /** Perspective depth-buffer value converted to negative view-space Z. */
@@ -785,15 +816,17 @@ export const HAZE_FRAGMENT = /* glsl */ `
    * the one edge that matters most — the skyline — undrawn.
    *
    * Taps are a pixel and a half out, so the line lands on the edge itself rather than
-   * on the antialiasing gradient beside it.
+   * on the antialiasing gradient beside it. Measured on the displayed picture
+   * (\`displayTap\`): an edge is a step the eye sees, and in radiance the same dune
+   * edge is a step ten times larger at noon than at dusk.
    */
   float inkEdge(vec2 uv, vec2 texel) {
     vec2 d = texel * 1.5;
-    vec3 c  = texture2D(tDiffuse, uv).rgb;
-    vec3 cx = texture2D(tDiffuse, uv + vec2(d.x, 0.0)).rgb;
-    vec3 cX = texture2D(tDiffuse, uv - vec2(d.x, 0.0)).rgb;
-    vec3 cy = texture2D(tDiffuse, uv + vec2(0.0, d.y)).rgb;
-    vec3 cY = texture2D(tDiffuse, uv - vec2(0.0, d.y)).rgb;
+    vec3 c  = displayTap(uv);
+    vec3 cx = displayTap(uv + vec2(d.x, 0.0));
+    vec3 cX = displayTap(uv - vec2(d.x, 0.0));
+    vec3 cy = displayTap(uv + vec2(0.0, d.y));
+    vec3 cY = displayTap(uv - vec2(0.0, d.y));
     // Central differences rather than a full 3x3 kernel: four taps instead of
     // eight, and on a banded image the diagonals add nothing but cost.
     float grad = max(length(cx - cX), length(cy - cY));
@@ -818,10 +851,9 @@ export const HAZE_FRAGMENT = /* glsl */ `
   /** Pixels per step of the walk along an edge, after the first. */
   const float FXAA_STEP[FXAA_STEPS] = float[FXAA_STEPS](1.0, 1.5, 2.0, 2.0, 2.0, 4.0);
 
-  /** Luma in the picture's own encoding, which is the display's: this pass writes its
-   *  texels through unconverted, so this is what the eye sees as a step. */
+  /** Luma of the picture as the display shows it: what the eye sees as a step. */
   float fxaaLuma(vec2 uv) {
-    return dot(texture2D(tDiffuse, uv).rgb, vec3(0.299, 0.587, 0.114));
+    return dot(displayTap(uv), vec3(0.299, 0.587, 0.114));
   }
 
   /**
@@ -1021,7 +1053,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
       float sceneD = -ownViewZ >= uCameraFar * 0.999 ? 1e7 : rayDistance(ownViewZ, wallView);
       if (uWallM >= 0.0) {
         vec4 wall = dustWall(normalize(uCameraRotation * wallView), sceneD);
-        color.rgb = mix(color.rgb, wall.rgb, wall.a);
+        color.rgb = mix(color.rgb, sceneFromScreen(wall.rgb), wall.a);
       }
       // Inside the storm: the wall's own dust, lit as its foot is (low on the face, so
       // little of the sun), hiding every pixel by its distance. The sky counts as 2 km,
@@ -1031,17 +1063,9 @@ export const HAZE_FRAGMENT = /* glsl */ `
         float frontLit = clamp(0.5 + 0.5 * dot(uWindDir, sunFlat), 0.0, 1.0);
         vec3 inside = uDustAlbedo * (uWallAir * 0.45 + uSunCol * (0.15 + 0.8 * frontLit) * 0.25);
         float k = uDustInside * min(sceneD, 2000.0);
-        color.rgb = mix(color.rgb, inside, 1.0 - exp(-k * k));
+        color.rgb = mix(color.rgb, sceneFromScreen(inside), 1.0 - exp(-k * k));
       }
     }
-
-    // ACES' toe is intentionally cinematic, but in a sunlit desert it crushed
-    // backlit paint and props into the same near-black. A small display-space
-    // expansion restores separation inside dark colours without lifting true
-    // black, changing highlights, or touching the renderer's exposure.
-    float sceneLum = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
-    float toeWeight = (1.0 - smoothstep(0.06, 0.42, sceneLum)) * uDaylight * 0.11;
-    color.rgb = mix(color.rgb, sqrt(max(color.rgb, vec3(0.0))), toeWeight);
 
     // A thin sand veil where the sight line has crossed kilometres of desert air.
     // Real scene depth keeps the foreground, cabin and car untouched; a narrow fade
@@ -1054,19 +1078,23 @@ export const HAZE_FRAGMENT = /* glsl */ `
     float sandVeil =
       smoothstep(220.0, 1800.0, airDistance) * horizonAir * uDaylight * 0.032;
     // In thick air the veil is that air, or it draws a pale band along the skyline.
-    color.rgb = mix(color.rgb, mix(uSandVeil, uWallAir, uAirThick), sandVeil);
+    color.rgb = mix(color.rgb, sceneFromScreen(mix(uSandVeil, uWallAir, uAirThick)), sandVeil);
     if (uVeil > 0.0 && airDistance < uCameraFar * 0.999) {
-      color.rgb = mix(color.rgb, uWallAir, uVeil * (1.0 - exp(-airDistance / 320.0)));
+      color.rgb = mix(color.rgb, sceneFromScreen(uWallAir), uVeil * (1.0 - exp(-airDistance / 320.0)));
     }
+    // The one display transform of the frame. Everything above worked on radiance —
+    // the dust, the veils, the mirage are light added and taken away, as the scene's
+    // own fog is — and everything below works on the picture the display shows.
+    color.rgb = toDisplay(color.rgb);
 
-
-    // ACES has already supplied the filmic shoulder and soft contrast in the scene
-    // pass. This display-space finish stays deliberately smaller: a modest
-    // luminance-preserving colour separation, then warm highlights against slightly
-    // cooler shadows. It enriches the desert palette without installing a second
-    // tone mapper or clipping the shoulder ACES just made.
+    // A small finish on the displayed picture: a luminance-preserving colour
+    // separation, then warm highlights against slightly cooler shadows. It enriches
+    // the desert palette without being a second tone curve. The separation is the
+    // art direction's: 1.5 keeps the desert the saturated ochre it was painted against
+    // a frame shown a gamma dark, where every colour's channel ratios reached the screen
+    // squared; the authored palette through the encoded frame alone reads pale.
     float gradeLum = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
-    color.rgb = mix(vec3(gradeLum), color.rgb, 1.055 * uGradeSat);
+    color.rgb = mix(vec3(gradeLum), color.rgb, 1.5 * uGradeSat);
     float highlightWarmth = smoothstep(0.16, 0.82, gradeLum);
     color.rgb *= mix(
       vec3(0.993, 0.998, 1.006),
@@ -1074,6 +1102,11 @@ export const HAZE_FRAGMENT = /* glsl */ `
       highlightWarmth
     );
     color.rgb = clamp(color.rgb, 0.0, 1.0);
+    // The look's contrast: a smoothstep S on the displayed values, black and white
+    // held. The game was painted against a frame shown a gamma dark, which read as hard
+    // noon contrast; the encoded frame is right and flatter, and this is where the art
+    // direction puts the punch back, after the tone curve and before the ink.
+    color.rgb = mix(color.rgb, color.rgb * color.rgb * (3.0 - 2.0 * color.rgb), uContrast);
 
     // Ink is for surfaces, and "surface" is a depth question rather than a screen-height
     // one. The gate used to be a screen-height test against uHorizon, which kept the

@@ -211,7 +211,8 @@ const matMembrane = new THREE.ShaderMaterial({
       float rim = smoothstep( 0.55, 1.0, r );
       float alpha = ( 0.08 + 0.22 * film + 0.35 * rim ) * ( 1.0 - smoothstep( 0.97, 1.0, r ) );
       alpha *= 1.0 - smoothstep( 250.0, 700.0, vDist );
-      gl_FragColor = vec4( colour * alpha, alpha );
+      // Screen colours, like every unlit colour (render/lightshader.ts).
+      gl_FragColor = vec4( sRGBTransferEOTF( vec4( colour, 1.0 ) ).rgb * alpha, alpha );
     }`,
 });
 

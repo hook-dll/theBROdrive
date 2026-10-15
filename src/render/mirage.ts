@@ -298,8 +298,8 @@ function shaded(geometry: THREE.BufferGeometry, colour: number): THREE.BufferGeo
   const box = geometry.boundingBox!;
   const low = box.min.y;
   const span = Math.max(1e-4, box.max.y - low);
-  // Authored in display space like the material: these are numbers that reach the
-  // screen, not albedo.
+  // Authored in display space like the material (`displayColour` in
+  // render/mirage-tableau.ts): the numbers are the radiance, not albedo.
   const tint = new THREE.Color().setHex(colour, THREE.LinearSRGBColorSpace);
   const position = geometry.getAttribute('position');
   const shades = new Float32Array(position.count * 3);
@@ -394,10 +394,10 @@ export class DistantMirage {
     // UNLIT, AND AUTHORED IN DISPLAY SPACE.
     //
     // A shaded standard material turned every structure into a black paper cut-out.
-    // Pass 2 in core/renderer.ts copies the linear scene target to the canvas
-    // untouched, so a colour reaches the screen at its own numeric value: a 0.24
-    // lightness stone is 60/255 at best, and the sun stands behind the silhouette
-    // as often as in front of it, which took the lit face down to single digits.
+    // Under the old frame, shown linear-encoded, a colour reached the screen at its
+    // own numeric value: a 0.24 lightness stone was 60/255 at best, and the sun stands
+    // behind the silhouette as often as in front of it, which took the lit face down to
+    // single digits.
     //
     // A mirage is refracted light rather than a surface. It carries its own
     // brightness, takes no shading, and keeps its colour whatever the sun does.
