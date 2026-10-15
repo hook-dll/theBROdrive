@@ -69,7 +69,7 @@ interface LabState {
   selection: number;
   timeHours: number;
   quality: GraphicsQuality;
-  msaa: boolean;
+  fxaa: boolean;
   ink: number;
   heatStrength: number;
   heat: HeatMirageParameters;
@@ -236,7 +236,7 @@ function createInterface(state: LabState, apply: () => void): HTMLElement {
       <div class="buttons"><button data-time="6">Рассвет</button><button data-time="12">День</button><button data-time="18">Закат</button><button data-time="0">Ночь</button></div>
       <label><span>Время суток</span><input data-control="timeHours" type="range" min="0" max="24" step="0.05"><output></output></label>
       <label><span>Качество</span><select data-control="quality"><option value="acceptable">Acceptable</option><option value="standard">Standard</option><option value="blessing">Blessing</option></select><output></output></label>
-      <label><span>MSAA</span><input data-control="msaa" type="checkbox"><output></output></label>
+      <label><span>FXAA</span><input data-control="fxaa" type="checkbox"><output></output></label>
       <label><span>Контур</span><input data-control="ink" type="range" min="0" max="1" step="0.01"><output></output></label>
     </fieldset>
     <fieldset><legend>Жаркое марево · все параметры</legend>
@@ -341,7 +341,7 @@ export async function bootMirageLab(): Promise<void> {
     selection: 0,
     timeHours: 12,
     quality: 'standard',
-    msaa: true,
+    fxaa: true,
     ink: DEFAULT_INK_STRENGTH,
     heatStrength: 1,
     heat: { ...DEFAULT_HEAT_MIRAGE },
@@ -355,7 +355,7 @@ export async function bootMirageLab(): Promise<void> {
     density: 1,
   };
   const world = new GameWorld(newWorldState(SEED));
-  const renderer = new Renderer(canvas, state.quality, state.msaa, state.ink);
+  const renderer = new Renderer(canvas, state.quality, state.fxaa, state.ink);
   const road = new Road(SEED);
   const terrain = new Terrain(SEED, road);
   const origin = new WorldOrigin();
@@ -414,7 +414,7 @@ export async function bootMirageLab(): Promise<void> {
   const apply = (): void => {
     renderer.setQuality(state.quality);
     starField.setQuality(state.quality, prefersMobilePresentation());
-    renderer.setMsaa(state.msaa);
+    renderer.setFxaa(state.fxaa);
     renderer.setInkStrength(state.ink);
     renderer.setHeatMirageParameters(state.heat);
     const selection = SELECTIONS[state.selection] ?? SELECTIONS[0]!;

@@ -16,7 +16,7 @@
  *   - nothing at all: the noise floor every other row is read against;
  *   - every shadow pass skipped (`shadowMap.autoUpdate = false`): drawing the shadow
  *     maps, not sampling them;
- *   - MSAA the other way round from the rung's own;
+ *   - FXAA the other way round from the rung's own;
  *   - the render scale at 0.5 and 0.7 of the display, which separates the per-pixel
  *     half of the frame from the rest; on Very Low instead its buffer one whole factor
  *     finer (540 lines on a 1080-line display, `Settings.retroLines`);
@@ -70,14 +70,14 @@ try {
     b.world.apply({ t: 'settings', settings: { ...s, dayCycleMinutes: 128, trafficDensity: 'high', viewDistance: view } });
     return {
       tier: s.graphicsQuality,
-      msaa: s.msaa,
+      fxaa: s.fxaa,
       shadows: b.renderer.renderer.shadowMap.enabled,
       lights: b.vehicleLights.lightCount,
       gpu: b.renderer.measuresGpuTime,
     };
   }, process.env.VIEW ?? 'medium');
   if (!info.gpu) throw new Error('this browser exposes no GPU timer');
-  console.log(`tier ${info.tier}, msaa ${info.msaa}, shadows ${info.shadows}, ${info.lights} spot slots, ${W}x${H}, view ${process.env.VIEW ?? 'medium'}, traffic high`);
+  console.log(`tier ${info.tier}, fxaa ${info.fxaa}, shadows ${info.shadows}, ${info.lights} spot slots, ${W}x${H}, view ${process.env.VIEW ?? 'medium'}, traffic high`);
 
   /** Where each scene stands, road metres. */
   const standAt = (scene) => page.evaluate(([scene, fromS]) => {
@@ -279,7 +279,7 @@ try {
       );
 
       // Every change, registered in the page as an on/off pair.
-      const parts = await page.evaluate(([shadows, retro, msaa]) => {
+      const parts = await page.evaluate(([shadows, retro, fxaa]) => {
         const b = window.__bro;
         const r = b.renderer;
         const changes = window.__gpu.changes;
@@ -290,7 +290,7 @@ try {
           ]);
         }
         if (!retro) {
-          changes.set(`msaa ${msaa ? 'off' : 'on'}`, [() => r.setMsaa(!msaa), () => r.setMsaa(msaa)]);
+          changes.set(`fxaa ${fxaa ? 'off' : 'on'}`, [() => r.setFxaa(!fxaa), () => r.setFxaa(fxaa)]);
           for (const scale of [0.5, 0.7]) {
             changes.set(`render scale ${scale}`, [() => r.setRenderScale(scale), () => r.setRenderScale(null)]);
           }
@@ -352,13 +352,13 @@ try {
           keys.push(label);
         }
         return keys;
-      }, [info.shadows, info.tier === 'retro', info.msaa]);
+      }, [info.shadows, info.tier === 'retro', info.fxaa]);
 
       // A change that changes nothing: the noise floor every other row is read against.
       await page.evaluate(() => window.__gpu.changes.set('(nothing: noise floor)', [() => {}, () => {}]));
       const settings = ['(nothing: noise floor)'];
       if (info.shadows) settings.push('shadow passes skipped');
-      if (info.tier !== 'retro') settings.push(`msaa ${info.msaa ? 'off' : 'on'}`, 'render scale 0.5', 'render scale 0.7');
+      if (info.tier !== 'retro') settings.push(`fxaa ${info.fxaa ? 'off' : 'on'}`, 'render scale 0.5', 'render scale 0.7');
       else settings.push('retro buffer x1.5 lines');
       if (process.env.PARTS === '0') {
         for (const name of settings.slice(1)) row(name, await compare(name));

@@ -1652,14 +1652,15 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           },
         },
       ]),
-      segmented('Antialiasing', [
+      // FXAA in the post pass. Not on Very Low: its square pixels are the look.
+      ...(settings.graphicsQuality === 'retro' ? [] : [segmented('Antialiasing', [
         {
-          label: 'On',
+          label: 'FXAA',
           icon: 'gfx3',
-          hint: 'Softens the jagged steps along edges. Costs a lot on a weak chip.',
-          active: () => settings.msaa,
+          hint: 'Smooths the jagged steps along edges in the finished picture. Costs little; fine texture softens a touch.',
+          active: () => settings.fxaa,
           pick: () => {
-            settings.msaa = true;
+            settings.fxaa = true;
             changed();
           },
         },
@@ -1667,13 +1668,13 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           label: 'Off',
           icon: 'gfx1',
           hint: 'Jagged edges left as they are. Render scale and the drawn outlines still apply.',
-          active: () => !settings.msaa,
+          active: () => !settings.fxaa,
           pick: () => {
-            settings.msaa = false;
+            settings.fxaa = false;
             changed();
           },
         },
-      ]),
+      ])]),
     );
   };
 
@@ -2403,7 +2404,7 @@ export class MainMenu {
         graphicsQualitySource: base.graphicsQualitySource,
         renderScale: base.renderScale,
         retroLines: base.retroLines,
-        msaa: base.msaa,
+        fxaa: base.fxaa,
         frameRateLimit: base.frameRateLimit,
         mirrorFrameRate: base.mirrorFrameRate,
         fieldOfView: base.fieldOfView,
@@ -2435,7 +2436,7 @@ export class MainMenu {
           graphicsQualitySource: settings.graphicsQualitySource,
           renderScale: settings.renderScale,
           retroLines: settings.retroLines,
-          msaa: settings.msaa,
+          fxaa: settings.fxaa,
           frameRateLimit: settings.frameRateLimit,
           mirrorFrameRate: settings.mirrorFrameRate,
           fieldOfView: settings.fieldOfView,

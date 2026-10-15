@@ -59,7 +59,7 @@ const UP_PREDICTION_MARGIN = 0.9;
 const SAMPLE_WEIGHT = 0.08;
 /**
  * Samples discarded after every scale change. Resizing reallocates the scene
- * target (and its multisample and depth attachments), so the frames straddling
+ * target (and its depth attachment), so the frames straddling
  * the change measure the reallocation rather than the new resolution.
  */
 const RESIZE_DISCARD_SAMPLES = 8;

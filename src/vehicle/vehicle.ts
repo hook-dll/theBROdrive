@@ -1027,6 +1027,12 @@ export class Vehicle implements Rebasable {
   private midSide = false;
   /** The mid parts stand in for the body and wheels; see `showMid`. */
   private midShown = false;
+  /**
+   * The near meshes this car stopped casting from while its far mesh casts for it in the
+   * shadow-only field (`castNearShadows`); empty while they cast themselves.
+   */
+  private readonly shadowMuted: THREE.Mesh[] = [];
+  private nearCasting = true;
   private bodyConditionEmitTimer = 0;
   private lastAuthOil: number;
   private fluidEmitTimer = 0;
@@ -3633,8 +3639,15 @@ export class Vehicle implements Rebasable {
    * traffic only, let a car beyond `FAR_CAR_ENTER_M` of the eye be drawn as an instance of
    * its model's far mesh instead, and one between `MID_CAR_ENTER_M` and that as its mid
    * parts (render/farcars.ts); the car the player sits in is never that far from the camera.
+   * `shadow`, also traffic only, is the shadow-only field: a car drawn near casts its
+   * shadows as its far mesh there instead of from its own ~40 casting meshes.
    */
-  syncVisuals(alpha: number, far: FarCarField | null = null, mid: FarCarField | null = null): void {
+  syncVisuals(
+    alpha: number,
+    far: FarCarField | null = null,
+    mid: FarCarField | null = null,
+    shadow: FarCarField | null = null,
+  ): void {
     const controller = this.controller;
     if (!controller) return;
 
@@ -3681,7 +3694,16 @@ export class Vehicle implements Rebasable {
     this.showMid(drawnMid);
     // Mid, the wheels and the rig stand where they were: the mid parts are baked shut,
     // and a door that opens sends the car back near (`drawMid`) before it moves.
-    if (drawnFar || drawnMid) return;
+    if (drawnFar || drawnMid) {
+      this.castNearShadows(true);
+      return;
+    }
+    // NEAR SHADOWS FROM THE FAR MESH. A shut near car's casters are exactly the far mesh:
+    // the shell, its glass and its wheels (carmodel.ts `prepareMaterials`: the cabin, bay,
+    // boot, underbody and lenses cast nothing), so one shared draw per model and shadow
+    // pass replaces some forty of its own. A door, lid or pane off its stop is not in the
+    // far mesh: then the car casts itself.
+    this.castNearShadows(!(shadow !== null && this.addStandIn(shadow)));
 
     // Wheels are chassis-local, and interpolated between the last two steps exactly as
     // the chassis is (see `spinPrev`).
@@ -3741,6 +3763,42 @@ export class Vehicle implements Rebasable {
     this.midSide = distance > (this.midSide ? MID_CAR_EXIT_M : MID_CAR_ENTER_M);
     if (!this.midSide || (this.kitRig !== null && !this.kitRig.shut)) return false;
     return mid.addMid(parts.rest, parts.wheels, this.rootGroup.position, this.rootGroup.quaternion, this.lamps);
+  }
+
+  /**
+   * Adds this car to `field` as its model's far mesh, wherever it stands: the shadow-only
+   * field's caster (`syncVisuals`) and the live mirrors' stand-in (render/carmirrors.ts).
+   * False when the far mesh is not what the car shows: no far mesh yet, or a kit body
+   * with a door, lid, pane or flap off its stop. Also false when the field is full.
+   */
+  addStandIn(field: FarCarField): boolean {
+    if (!this.surface || (this.kitRig !== null && !this.kitRig.shut)) return false;
+    const geometry = carModelFarGeometry(this.model.id);
+    if (!geometry) return false;
+    carPaintSeenFromAfar(this.surface.paint, this.localBodyDirt, this.farPaint);
+    return field.add(geometry, this.rootGroup.position, this.rootGroup.quaternion, this.farPaint, this.lamps);
+  }
+
+  /**
+   * Lets the near meshes cast their own shadows, or stops them while the far mesh casts
+   * for them. Only on the frames it changes, and only the meshes it stopped are restored,
+   * so a part that never cast is never made to.
+   */
+  private castNearShadows(on: boolean): void {
+    if (on === this.nearCasting) return;
+    this.nearCasting = on;
+    if (on) {
+      for (const mesh of this.shadowMuted) mesh.castShadow = true;
+      this.shadowMuted.length = 0;
+      return;
+    }
+    for (const part of this.nearParts) {
+      part.traverse((node) => {
+        if (!(node instanceof THREE.Mesh) || !node.castShadow) return;
+        node.castShadow = false;
+        this.shadowMuted.push(node);
+      });
+    }
   }
 
   /**
@@ -5783,6 +5841,9 @@ export class Vehicle implements Rebasable {
     // Its materials are the paint's and glass's, which the surface disposed; its geometry is the model's.
     this.midParts = null;
     this.midShown = false;
+    // The muted meshes leave with the tree; the next one casts until told otherwise.
+    this.shadowMuted.length = 0;
+    this.nearCasting = true;
     this.bodyRestScale.set(1, 1, 1);
     this.wheelMeshes.clear();
     this.steeringWheel = null;

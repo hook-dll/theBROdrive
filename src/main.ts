@@ -8,7 +8,7 @@ import { gamepads, PAD, type RumbleFrame } from './core/gamepad';
 import { GameLoop } from './core/loop';
 import { installScreenWakeLock } from './core/wakelock';
 import { PhysicsWorld } from './core/physics';
-import { prefersMobilePresentation, Renderer } from './core/renderer';
+import { prefersMobilePresentation, Renderer, SHADOW_ONLY_LAYER } from './core/renderer';
 import { FIXED_DT } from './core/physics';
 import { DAY_LENGTH, GameWorld, newWorldState, type CarState } from './game/state';
 import { parseCalendarEpoch } from './game/calendar';
@@ -343,7 +343,7 @@ async function boot(): Promise<void> {
   const renderer = new Renderer(
     canvas,
     world.state.settings.graphicsQuality,
-    world.state.settings.msaa,
+    world.state.settings.fxaa,
     DEFAULT_INK_STRENGTH,
     mobilePresentation,
     world.state.settings.renderScale,
@@ -451,7 +451,16 @@ async function boot(): Promise<void> {
   const weapons = new WeaponController();
   const heldView = new HeldItemView(renderer.camera, renderer.scene);
   // The kit car's live mirrors, for the car the player sits in and the cabin view only.
-  const carMirrors = new CarMirrors(renderer, world.state.settings.graphicsQuality, world.state.settings.mirrorFrameRate);
+  // Every other car is drawn in them as its far mesh: traffic and the player's own alike.
+  const carMirrors = new CarMirrors(
+    renderer,
+    world.state.settings.graphicsQuality,
+    world.state.settings.mirrorFrameRate,
+    (visit) => {
+      traffic.forEachVehicle(visit);
+      for (const [id, vehicle] of vehicles) visit(id, vehicle);
+    },
+  );
   const trunkView = new TrunkView(renderer.scene);
   /** The car currently showing a sticker being tried on, so it can be cleared. */
   let stickerPreviewCarId: string | null = null;
@@ -488,6 +497,9 @@ async function boot(): Promise<void> {
   // Mid traffic's shared parts (trim, glass, lenses, wheels): the same program, so the same
   // kind of field; each car's paint draws in its own root (render/farcars.ts, MID TRAFFIC).
   const midCars = new FarCarField(renderer.scene, 'mid-cars');
+  // Near traffic's shadows: every near traffic car casts as its far mesh here, a field on
+  // the shadow-only layer that no picture draws (core/renderer.ts `SHADOW_ONLY_LAYER`).
+  const shadowCars = new FarCarField(renderer.scene, 'shadow-cars', SHADOW_ONLY_LAYER);
   /** Reused receiver for the nearest dancer's sound; see `DancerField.heard`. */
   const dancerSound: DancerHeard = { x: 0, y: 0, z: 0, flapMps: 0, airRate: 0 };
   /**
@@ -712,7 +724,7 @@ async function boot(): Promise<void> {
             }), dpr ${window.devicePixelRatio.toFixed(2)}`,
           `presenting ${framesPerSecond}, shadows ` +
             `${shadowsFor(s.graphicsQuality, mobilePresentation) ? 'on' : 'off'}, ` +
-            `msaa ${s.msaa ? 'on' : 'off'}`,
+            `fxaa ${s.fxaa ? 'on' : 'off'}`,
           gpuLine,
           `simulation fixed at ${simulationHz} Hz`,
           `light slots ${spotSlots} spot per lit fragment, stars to magnitude ${stars}`,
@@ -725,14 +737,14 @@ async function boot(): Promise<void> {
         ];
         // WHEN THERE IS NO GPU TIMER — every Android browser, which is the device whose
         // heat started this — the frame budget below is the whole of what can be known, and
-        // the only way to attribute its `waiting` is to change something and watch. MSAA is
-        // the one such change that is both a single variable and applied without a reload:
-        // it multiplies the scene pass's sample work and touches nothing else. If turning it
-        // off does not move the waiting, the scene pass is not what the frame is waiting for.
+        // the only way to attribute its `waiting` is to change something and watch. The
+        // render scale is the change that is both a single variable and applied without a
+        // reload: it scales every pass's pixel work and the number of draws not at all. If
+        // halving the pixels does not move the waiting, pixels are not what the frame waits for.
         if (!measuresGpu) {
           header.push(
-            'Attribution without a timer: toggle MSAA on the Display tab and re-read.',
-            'Waiting that shrinks with it is the scene pass; waiting that does not is elsewhere.',
+            'Attribution without a timer: set Render scale to 50% on the Display tab and re-read.',
+            'Waiting that shrinks with it is pixel work; waiting that does not is elsewhere.',
           );
         }
         return (
@@ -2212,7 +2224,7 @@ async function boot(): Promise<void> {
     frameProfiler?.begin('vehicles');
     Vehicle.viewFrom(renderer.camera.position, frameDt, driving);
     for (const vehicle of vehicles.values()) vehicle.syncVisuals(alpha);
-    traffic.syncVisuals(alpha, farCars, midCars);
+    traffic.syncVisuals(alpha, farCars, midCars, shadowCars);
     // Trailer physics advances and snapshots in the fixed step exactly like cars,
     // but its scene root must also consume those snapshots every rendered frame.
     // Without this call the rigid body and hitch moved while the GLB stayed forever
@@ -3009,7 +3021,7 @@ async function boot(): Promise<void> {
       pads.setDeadzone(world.state.settings.controllerDeadzone);
       pads.setSteeringSensitivity(world.state.settings.controllerSteerSensitivity);
       audio.applySettings(world.state.settings);
-      renderer.setMsaa(world.state.settings.msaa);
+      renderer.setFxaa(world.state.settings.fxaa);
       renderer.setRenderScale(world.state.settings.renderScale);
       renderer.setRetroLines(world.state.settings.retroLines);
       camera.setFieldOfView(world.state.settings.fieldOfView);

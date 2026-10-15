@@ -9,15 +9,24 @@
  * `addMirrorFace`), which lies over the static glass and is hidden on every other car.
  *
  * Programs. The targets are ordinary render targets like the scene pass's `hazeTarget`,
- * and Three keys a program on "a render target" (working colour space, no tone mapping;
- * multisampling is not in the key), so every scene material draws into a mirror with the
- * program it already has. The face material is one more program, linked at boot through
+ * and Three keys a program on "a render target" (working colour space, no tone mapping),
+ * so every scene material draws into a mirror with the program it already has; so do the
+ * stand-in cars, whose far-car program the far field links at boot. The face material is
+ * one more program, linked at boot through
  * `mirrorProgramAnchor`.
  *
  * Cost. Each mirror redraws `Settings.mirrorFrameRate` times a second, in turn, so the
  * renders spread over the frames instead of landing together (null: all, every frame);
  * no shadow pass, no scene matrix walk and no post pass (`Renderer.renderMirror`); small
  * fixed targets, halved on the low rung and none on Very Low (`GraphicsTier.mirrorScale`).
+ *
+ * Every car but the player's own is drawn in a mirror as its model's far mesh
+ * (render/farcars.ts), one draw per model: a near kit car in full was some 60 draws of a
+ * mirror's ~200 (measured on the M2 Pro, High traffic), in a picture a few centimetres
+ * across. A car with a door, lid or pane off its stop keeps its own body, which the far
+ * mesh does not show. The draw distance is the scene's: a mirror's nearer far plane cut
+ * its draws by under five percent (the world's batches each span hundreds of metres)
+ * and would clip the sky dome.
  */
 
 import * as THREE from 'three';
@@ -25,6 +34,11 @@ import type { KitMirror } from '../carkit/names';
 import type { KitRig } from '../carkit/rig';
 import type { Renderer } from '../core/renderer';
 import { GRAPHICS_TIERS, type GraphicsQuality, type MirrorFrameRate } from '../game/settings';
+import type { Vehicle } from '../vehicle/vehicle';
+import { FarCarField } from './farcars';
+
+/** Visits every car a mirror may show: traffic and the player's own. */
+export type MirrorCarSource = (visit: (id: string, vehicle: Vehicle) => void) => void;
 
 const MIRRORS: readonly KitMirror[] = ['inner', 'left', 'right'];
 
@@ -160,9 +174,20 @@ export class CarMirrors {
   private owed = 0;
   private lastMs = -1;
   private readonly camera = new THREE.PerspectiveCamera();
+  /** The cars drawn in the mirrors as their far mesh; shown only while a mirror draws. */
+  private readonly standIns: FarCarField;
+  /** Roots hidden for the mirror renders under way, put back after them. */
+  private readonly hidden: THREE.Object3D[] = [];
 
-  constructor(private readonly renderer: Renderer, quality: GraphicsQuality, rate: MirrorFrameRate) {
+  constructor(
+    private readonly renderer: Renderer,
+    quality: GraphicsQuality,
+    rate: MirrorFrameRate,
+    private readonly cars: MirrorCarSource,
+  ) {
     this.rate = rate;
+    this.standIns = new FarCarField(renderer.scene, 'mirror-cars');
+    this.standIns.setVisible(false);
     this.setQuality(quality);
     renderer.setMirrorPass(this);
   }
@@ -212,19 +237,54 @@ export class CarMirrors {
     const seconds = this.lastMs < 0 ? 0 : (now - this.lastMs) / 1000;
     this.lastMs = now;
     this.owed = this.rate === null ? count : Math.min(this.owed + seconds * this.rate * count, 2 * count);
-    for (let drawn = 0; drawn < count && this.owed >= 1; drawn++, this.owed--) {
-      const face = kit.mirrorFaces[this.next++ % count]!;
-      if (!this.aim(face)) {
+    let swapped = false;
+    try {
+      for (let drawn = 0; drawn < count && this.owed >= 1; drawn++, this.owed--) {
+        const face = kit.mirrorFaces[this.next++ % count]!;
+        if (!this.aim(face)) {
+          face.visible = false;
+          continue;
+        }
+        if (!swapped) {
+          this.standInCars();
+          swapped = true;
+        }
+        // Its own face lies on the near plane, and drawing it would sample the target being drawn.
         face.visible = false;
-        continue;
+        this.renderer.renderMirror(view(face.userData.kitMirror as KitMirror).target, this.camera);
+        // Shown only once drawn, so a face never shows an empty or another car's target.
+        face.visible = true;
+        this.stats.renders++;
       }
-      // Its own face lies on the near plane, and drawing it would sample the target being drawn.
-      face.visible = false;
-      this.renderer.renderMirror(view(face.userData.kitMirror as KitMirror).target, this.camera);
-      // Shown only once drawn, so a face never shows an empty or another car's target.
-      face.visible = true;
-      this.stats.renders++;
+    } finally {
+      if (swapped) this.restoreCars();
     }
+  }
+
+  /** Hides every car the mirrors draw as its far mesh and fills the stand-in field. */
+  private standInCars(): void {
+    this.standIns.begin();
+    this.cars(this.standIn);
+    this.standIns.end();
+    this.standIns.setVisible(true);
+  }
+
+  /**
+   * One car into the stand-in field. Not the car the mirrors belong to: its cabin and its
+   * own boot are what the inner mirror shows. A car already hidden is drawn far, and the
+   * far field is in the mirrors as it is.
+   */
+  private readonly standIn = (_id: string, vehicle: Vehicle): void => {
+    const root = vehicle.root;
+    if (vehicle.kit === this.shown || !root.visible || !vehicle.addStandIn(this.standIns)) return;
+    root.visible = false;
+    this.hidden.push(root);
+  };
+
+  private restoreCars(): void {
+    for (const root of this.hidden) root.visible = true;
+    this.hidden.length = 0;
+    this.standIns.setVisible(false);
   }
 
   private show(kit: KitRig | null): void {

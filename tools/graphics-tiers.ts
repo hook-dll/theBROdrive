@@ -117,12 +117,6 @@ for (const quality of LADDER) {
 if (GRAPHICS_TIERS.acceptable.shadows) {
   failures.push('the weakest rung claims it can afford a shadow pass');
 }
-for (const quality of LADDER) {
-  const tier = GRAPHICS_TIERS[quality];
-  if (!tier.shadows && tier.msaa === false && tier.shadows !== false) {
-    failures.push(`${quality}: nonsensical shadow/MSAA combination`);
-  }
-}
 
 // --- 1b. a phone's rung buys sharpness, not heat ------------------------------
 //
@@ -449,7 +443,7 @@ console.log('\ndisplay                       offered   scale     Mpx       ratio
     const offs: Partial<Settings>[] = [
       { viewDistance: preset === 'high' ? 'low' : 'high' },
       { trafficDensity: preset === 'high' ? 'low' : 'high' },
-      { msaa: !on.msaa },
+      { fxaa: !on.fxaa },
       { frameRateLimit: 60 },
       on.graphicsQuality === 'retro' ? { retroLines: 540 } : { renderScale: 0.85 },
     ];
@@ -460,8 +454,8 @@ console.log('\ndisplay                       offered   scale     Mpx       ratio
     }
   }
   if (qualityPresetOf(DEFAULT_SETTINGS) !== 'medium') failures.push('the shipped defaults are not the Medium preset');
-  const old = sanitizeSettings({ graphicsQuality: 'blessing', viewDistance: 'low', trafficDensity: 'high', msaa: false });
-  if (old.graphicsQuality !== 'blessing' || old.viewDistance !== 'low' || old.trafficDensity !== 'high' || old.msaa) {
+  const old = sanitizeSettings({ graphicsQuality: 'blessing', viewDistance: 'low', trafficDensity: 'high', fxaa: false });
+  if (old.graphicsQuality !== 'blessing' || old.viewDistance !== 'low' || old.trafficDensity !== 'high' || old.fxaa) {
     failures.push('a stored mix of quality values was not kept as it was');
   }
   if (qualityPresetOf(old) !== null) failures.push('a stored mix of quality values reads as a preset');

@@ -245,9 +245,9 @@ export async function warmUpBoot(ctx: BootWarmupContext): Promise<void> {
       const current = ctx.world.state.settings;
       const settings = qualityPresetOf(current) !== null
         ? withQualityPreset(current, qualityPresetForDetail(tier), current.graphicsQualitySource)
-        : { ...current, graphicsQuality: tier, msaa: GRAPHICS_TIERS[tier].msaa };
+        : { ...current, graphicsQuality: tier, fxaa: GRAPHICS_TIERS[tier].fxaa };
       ctx.world.apply({ t: 'settings', settings });
-      ctx.renderer.setMsaa(settings.msaa);
+      ctx.renderer.setFxaa(settings.fxaa);
       ctx.renderer.setQuality(tier);
       ctx.sky.setQuality(tier, ctx.mobilePresentation);
       const horizon = viewDistanceFor(settings.viewDistance, ctx.mobilePresentation);

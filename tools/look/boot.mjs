@@ -52,8 +52,8 @@ export async function bootIntoCar(browser, { URL, W, H, DPR = 1, SEED = 'flick',
   // The tier goes into the stored preferences BEFORE the page runs, which is the path a
   // player's own choice takes: the renderer, the light budget and the retro rung all
   // read it at construction. Setting it on the live state afterwards changed the menu's
-  // idea of the tier and nothing the GPU was doing — the shadows and the MSAA of
-  // whatever the launch had picked stayed on. Stored as `chosen` so no launch
+  // idea of the tier and nothing the GPU was doing — the shadows of whatever the
+  // launch had picked stayed on. Stored as `chosen` so no launch
   // measurement moves it; each launch is a fresh browser profile.
   if (TIER) {
     if (!HORIZON_M[TIER]) throw new Error(`unknown TIER ${TIER}`);
@@ -69,7 +69,7 @@ export async function bootIntoCar(browser, { URL, W, H, DPR = 1, SEED = 'flick',
         ...stored,
         graphicsQuality: tier,
         graphicsQualitySource: 'chosen',
-        msaa: tier === 'standard' || tier === 'blessing',
+        fxaa: tier === 'standard' || tier === 'blessing',
       }));
     }, TIER);
   }

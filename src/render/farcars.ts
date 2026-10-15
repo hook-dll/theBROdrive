@@ -461,10 +461,22 @@ export class FarCarField {
   private readonly group = new THREE.Group();
   private readonly models = new Map<THREE.BufferGeometry, FarModel>();
 
-  constructor(scene: THREE.Scene, name = 'far-cars') {
+  /**
+   * `layer`, when given, is the only layer the field's meshes are on: `SHADOW_ONLY_LAYER`
+   * (core/renderer.ts) makes a field that casts the sun's and the lamps' shadows and is
+   * never drawn in a picture. Same mesh, same material: the same depth program.
+   */
+  constructor(scene: THREE.Scene, name = 'far-cars', private readonly layer: number | null = null) {
     this.group.name = name;
-    this.group.add(programAnchor());
+    const anchor = programAnchor();
+    if (layer !== null) anchor.layers.set(layer);
+    this.group.add(anchor);
     scene.add(this.group);
+  }
+
+  /** Shows or hides the whole field, whatever `end` decided for its meshes. */
+  setVisible(visible: boolean): void {
+    this.group.visible = visible;
   }
 
   begin(): void {
@@ -519,6 +531,7 @@ export class FarCarField {
     if (!model) {
       const mesh = makeFarMesh(geometry);
       mesh.name = this.group.name;
+      if (this.layer !== null) mesh.layers.set(this.layer);
       this.group.add(mesh);
       model = {
         mesh,

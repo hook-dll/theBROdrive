@@ -407,6 +407,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
   uniform float uCameraFar;
   uniform float uInkStrength;
   uniform float uInkThreshold;
+  uniform float uFxaa;
   uniform vec3 uViewTint;
   uniform float uViewTintStrength;
   uniform float uBinoculars;
@@ -692,8 +693,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
    * A Sobel on the already-shaded image, not on a depth buffer, and deliberately:
    * the ground's own shading is banded (render/comic.ts), so its band boundaries ARE
    * the strata edges a pen would draw, and a colour edge detector inks both those and
-   * every silhouette in one pass. It also survives MSAA, which sampling a depth
-   * texture alongside a multisampled colour target does not.
+   * every silhouette in one pass.
    *
    * Full RGB distance rather than luminance: a tan dune against a blue sky is a
    * enormous HUE step and barely a brightness one, so a luminance-only detector left
@@ -720,6 +720,114 @@ export const HAZE_FRAGMENT = /* glsl */ `
     return smoothstep(uInkThreshold, uInkThreshold * 2.6, rel);
   }
 
+  /** FXAA's edge thresholds: the contrast below which a pixel is left alone, absolute and
+   *  relative to its brightest neighbour. FXAA 3.11's own "high quality" pair: the
+   *  stricter "extreme" one three's FXAAShader uses also softens the road's aggregate and
+   *  the stipple, which are texture, not jaggies. */
+  #define FXAA_CONTRAST 0.0625
+  #define FXAA_RELATIVE 0.125
+  /** How much of the sub-pixel blend is taken; 1 is the full blur of a lone bright texel. */
+  #define FXAA_SUBPIXEL 0.75
+  #define FXAA_STEPS 6
+  #define FXAA_GUESS 8.0
+  /** Pixels per step of the walk along an edge, after the first. */
+  const float FXAA_STEP[FXAA_STEPS] = float[FXAA_STEPS](1.0, 1.5, 2.0, 2.0, 2.0, 4.0);
+
+  /** Luma in the picture's own encoding, which is the display's: this pass writes its
+   *  texels through unconverted, so this is what the eye sees as a step. */
+  float fxaaLuma(vec2 uv) {
+    return dot(texture2D(tDiffuse, uv).rgb, vec3(0.299, 0.587, 0.114));
+  }
+
+  /**
+   * The picture at \`uv\` through FXAA (Lottes' algorithm, in the form three ships as
+   * FXAAShader): a pixel on a luma edge is sampled a fraction of a pixel across it, by
+   * how far along the edge's run it stands, so a stair of whole pixels becomes a ramp.
+   * Five taps decide that a pixel is flat, and most of a frame is.
+   *
+   * It replaces four-sample MSAA, which had to resolve the colour and the depth target
+   * every frame. FXAA works on the shaded picture, so it smooths what MSAA never could
+   * (the edges inside alpha-tested leaves and in the banded shading) and is blind to a
+   * sub-pixel wire, which MSAA saw. The ink is drawn after it, from the same picture.
+   */
+  vec4 fxaaSample(vec2 uv) {
+    vec2 px = 1.0 / uResolution;
+    float m = fxaaLuma(uv);
+    float n = fxaaLuma(uv + vec2(0.0, px.y));
+    float e = fxaaLuma(uv + vec2(px.x, 0.0));
+    float s = fxaaLuma(uv - vec2(0.0, px.y));
+    float w = fxaaLuma(uv - vec2(px.x, 0.0));
+    float highest = max(max(max(max(n, e), s), w), m);
+    float lowest = min(min(min(min(n, e), s), w), m);
+    float contrast = highest - lowest;
+    if (contrast < max(FXAA_CONTRAST, FXAA_RELATIVE * highest)) return texture2D(tDiffuse, uv);
+    float ne = fxaaLuma(uv + px);
+    float nw = fxaaLuma(uv + vec2(-px.x, px.y));
+    float se = fxaaLuma(uv + vec2(px.x, -px.y));
+    float sw = fxaaLuma(uv - px);
+
+    // Sub-pixel: how far the centre stands from its neighbourhood's weighted mean.
+    float mean = (2.0 * (n + e + s + w) + ne + nw + se + sw) / 12.0;
+    float sub = smoothstep(0.0, 1.0, clamp(abs(mean - m) / contrast, 0.0, 1.0));
+    sub = sub * sub * FXAA_SUBPIXEL;
+
+    // The edge's direction, and the side of this pixel it runs along.
+    float horizontal = abs(n + s - 2.0 * m) * 2.0 + abs(ne + se - 2.0 * e) + abs(nw + sw - 2.0 * w);
+    float vertical = abs(e + w - 2.0 * m) * 2.0 + abs(ne + nw - 2.0 * n) + abs(se + sw - 2.0 * s);
+    bool isHorizontal = horizontal >= vertical;
+    float pLuma = isHorizontal ? n : e;
+    float nLuma = isHorizontal ? s : w;
+    float pGradient = abs(pLuma - m);
+    float nGradient = abs(nLuma - m);
+    float across = isHorizontal ? px.y : px.x;
+    float opposite = pLuma;
+    float gradient = pGradient;
+    if (pGradient < nGradient) {
+      across = -across;
+      opposite = nLuma;
+      gradient = nGradient;
+    }
+
+    // Walk the edge both ways to where it ends.
+    vec2 edgeUv = uv;
+    vec2 along = isHorizontal ? vec2(px.x, 0.0) : vec2(0.0, px.y);
+    if (isHorizontal) edgeUv.y += across * 0.5;
+    else edgeUv.x += across * 0.5;
+    float edgeLuma = (m + opposite) * 0.5;
+    float threshold = gradient * 0.25;
+    vec2 pUv = edgeUv + along * FXAA_STEP[0];
+    float pDelta = fxaaLuma(pUv) - edgeLuma;
+    bool pEnd = abs(pDelta) >= threshold;
+    for (int i = 1; i < FXAA_STEPS && !pEnd; i++) {
+      pUv += along * FXAA_STEP[i];
+      pDelta = fxaaLuma(pUv) - edgeLuma;
+      pEnd = abs(pDelta) >= threshold;
+    }
+    if (!pEnd) pUv += along * FXAA_GUESS;
+    vec2 nUv = edgeUv - along * FXAA_STEP[0];
+    float nDelta = fxaaLuma(nUv) - edgeLuma;
+    bool nEnd = abs(nDelta) >= threshold;
+    for (int i = 1; i < FXAA_STEPS && !nEnd; i++) {
+      nUv -= along * FXAA_STEP[i];
+      nDelta = fxaaLuma(nUv) - edgeLuma;
+      nEnd = abs(nDelta) >= threshold;
+    }
+    if (!nEnd) nUv -= along * FXAA_GUESS;
+
+    float pDistance = isHorizontal ? pUv.x - uv.x : pUv.y - uv.y;
+    float nDistance = isHorizontal ? uv.x - nUv.x : uv.y - nUv.y;
+    bool pNearer = pDistance <= nDistance;
+    float shortest = pNearer ? pDistance : nDistance;
+    bool deltaSign = (pNearer ? pDelta : nDelta) >= 0.0;
+    // Blended only on the side of the edge where the run ends: the other side is the edge's
+    // inside, already the right colour.
+    float edgeBlend = deltaSign == (m - edgeLuma >= 0.0) ? 0.0 : 0.5 - shortest / (pDistance + nDistance);
+    float blend = max(sub, edgeBlend);
+    if (isHorizontal) uv.y += across * blend;
+    else uv.x += across * blend;
+    return texture2D(tDiffuse, uv);
+  }
+
   void main() {
     vec2 uv = vUv;
     // One depth tap every pixel pays whatever happens: the veil, the ink gate and
@@ -741,7 +849,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
       // Real first-surface depth keeps nearby geometry rigid wherever it is on screen.
       float depthClear = smoothstep(NEAR_CLEAR_M, NEAR_FULL_M, distance);
       // Ground is uniquely intolerant of a missing depth sample: one cleared texel at
-      // an MSAA edge would otherwise make the road boil underfoot. A conservative
+      // a silhouette would otherwise make the road boil underfoot. A conservative
       // ray/line backup excludes descending rays whose ground intersection is nearby;
       // actual depth remains authoritative for every object and distant slope.
       float groundClear = climb < -1e-4
@@ -807,7 +915,8 @@ export const HAZE_FRAGMENT = /* glsl */ `
           * step(distance, mirrored);
       }
     }
-    vec4 color = texture2D(tDiffuse, uv);
+    // A uniform branch: every fragment agrees, and with FXAA off this is the one tap.
+    vec4 color = uFxaa > 0.5 ? fxaaSample(uv) : texture2D(tDiffuse, uv);
     if (mirageWeight > 0.0) {
       color.rgb = mix(color.rgb, texture2D(tDiffuse, mirrorUv).rgb, mirageWeight);
     }

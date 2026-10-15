@@ -93,8 +93,8 @@ export interface GraphicsTier {
    * and 64 MB of depth instead of 16. Ignored where `shadows` is off.
    */
   readonly sunShadowMapSize: number;
-  /** Default for `Settings.msaa`; a player may still choose otherwise. */
-  readonly msaa: boolean;
+  /** Default for `Settings.fxaa`; a player may still choose otherwise. */
+  readonly fxaa: boolean;
   /**
    * Whether a phone presentation gets the sun shadow pass at this rung.
    *
@@ -183,7 +183,7 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     supersample: 1,
     shadows: false,
     sunShadowMapSize: 2048,
-    msaa: false,
+    fxaa: false,
     mobileShadows: false,
     starMagnitude: 6,
     mobileStarMagnitude: 6,
@@ -202,7 +202,7 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     supersample: 1,
     shadows: false,
     sunShadowMapSize: 2048,
-    msaa: false,
+    fxaa: false,
     mobileShadows: false,
     starMagnitude: 7,
     mobileStarMagnitude: 7,
@@ -221,7 +221,7 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     supersample: 1,
     shadows: true,
     sunShadowMapSize: 2048,
-    msaa: true,
+    fxaa: true,
     mobileShadows: false,
     starMagnitude: 8,
     mobileStarMagnitude: 7.5,
@@ -244,7 +244,7 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     supersample: 1.25,
     shadows: true,
     sunShadowMapSize: 4096,
-    msaa: true,
+    fxaa: true,
     mobileShadows: false,
     starMagnitude: 8.5,
     mobileStarMagnitude: 8,
@@ -536,8 +536,8 @@ export interface Settings {
    * changing it moves the resting composition and nothing else.
    */
   fieldOfView: number;
-  /** Four-sample geometry-edge antialiasing on the scene render target. */
-  msaa: boolean;
+  /** FXAA: edge antialiasing in the post pass, on the shaded picture (render/hazeshader.ts). */
+  fxaa: boolean;
   /**
    * Frames per second the presentation may present, or null for no cap.
    *
@@ -673,7 +673,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // cannot hold it. A player who would rather name the number picks one in the menu.
   renderScale: null,
   retroLines: 360,
-  msaa: true,
+  fxaa: true,
   // Uncapped by default on every device, phones included: a cap is the player's choice
   // to make (heat, noise), not a default to discover.
   frameRateLimit: null,
@@ -698,7 +698,7 @@ export const DEFAULT_SETTINGS: Settings = {
  * a player who moves one of them in Advanced sees `Custom`.
  *
  * A preset also brings what picking a rung always brought: the rung's own
- * multisampling, automatic resolution (Very Low: its own 360 lines) and no frame cap.
+ * antialiasing, automatic resolution (Very Low: its own 360 lines) and no frame cap.
  */
 export type QualityPreset = ComputeLevel;
 
@@ -733,7 +733,7 @@ export function withQualityPreset(
     trafficDensity: preset,
     renderScale: null,
     retroLines: 360,
-    msaa: GRAPHICS_TIERS[quality].msaa,
+    fxaa: GRAPHICS_TIERS[quality].fxaa,
     frameRateLimit: null,
   };
 }
@@ -747,7 +747,7 @@ export function qualityPresetOf(settings: Settings): QualityPreset | null {
   const onPreset =
     settings.viewDistance === preset
     && settings.trafficDensity === preset
-    && settings.msaa === GRAPHICS_TIERS[settings.graphicsQuality].msaa
+    && settings.fxaa === GRAPHICS_TIERS[settings.graphicsQuality].fxaa
     && settings.frameRateLimit === null
     && (settings.graphicsQuality === 'retro' ? settings.retroLines === 360 : settings.renderScale === null);
   return onPreset ? preset : null;
@@ -767,7 +767,7 @@ export function withRemeasure(settings: Settings): Settings {
 }
 
 /**
- * A phone's first launch: it must not inherit desktop DPR, MSAA and refresh costs. The
+ * A phone's first launch: it must not inherit desktop DPR, antialiasing and refresh costs. The
  * rung is authored for the presentation, not measured and not chosen (`device`), and a
  * phone core is the slowest processor this game runs on, so it gets the lightest stream
  * and the 2 km horizon. Once the player stores preferences, they win.
@@ -775,7 +775,7 @@ export function withRemeasure(settings: Settings): Settings {
 export const PHONE_FIRST_LAUNCH = {
   graphicsQuality: 'acceptable',
   graphicsQualitySource: 'device',
-  msaa: false,
+  fxaa: false,
   viewDistance: 'very_low',
   trafficDensity: 'very_low',
 } as const satisfies Partial<Settings>;
@@ -913,10 +913,11 @@ export function sanitizeSettings(raw: unknown): Settings {
     // The tier they chose is the answer, and it is right there in the same object.
     // `eyeAdaptation` lived here once and is deliberately not migrated: exposure is
     // analytic now, so a stored preference has nothing left to select.
-    // Preserve the old tier behavior once, then this becomes an independent choice.
-    msaa:
-      typeof obj.msaa === 'boolean'
-        ? obj.msaa
+    // The rung's own default until the player chooses. A stored `msaa` is deliberately
+    // not migrated: multisampling is gone, and FXAA is a different trade to choose.
+    fxaa:
+      typeof obj.fxaa === 'boolean'
+        ? obj.fxaa
         : obj.graphicsQuality !== 'acceptable' && obj.graphicsQuality !== 'retro',
     // Snap to an offered rate rather than clamping, so a hand-edited 31 or 999 cannot
     // become a frame rate the menu has no button for. `mobileFrameRate` is the phone-only

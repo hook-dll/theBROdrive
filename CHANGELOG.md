@@ -4,6 +4,45 @@
 
 ### Added
 
+- NEAR TRAFFIC CASTS ITS SHADOWS AS ITS FAR MESH (`vehicle/vehicle.ts` `castNearShadows`,
+  `addStandIn`; `world/traffic.ts` `syncVisuals`; `core/renderer.ts` `SHADOW_ONLY_LAYER`).
+  A shut near traffic car's casters (shell, glass, wheels) are exactly its model's far
+  mesh, so its ~40 casting meshes stop casting and a shadow-only far field (`shadow-cars`)
+  casts for it: one draw per model and shadow pass. The field's meshes are on a layer the
+  viewing camera has only during three's shadow pass, so no picture draws them. A car
+  with a door, lid or pane off its stop, or crashed, casts itself. Measured on the M2 Pro
+  (Blessing, High traffic, cabin view): one near car 140 shadow draws a frame before; three
+  near cars 2-4 after (the whole shadow pass 230 → 81). A/B screenshots of a near 2102 in
+  the sun: no visible difference. Programs 95 → 94 over 45 s of driving.
+- THE MIRRORS SHOW OTHER CARS AS THEIR FAR MESH (`render/carmirrors.ts` `standInCars`).
+  While a mirror draws, every car but the player's own (traffic and parked) is hidden and
+  drawn as its model's far mesh, its paint, dust and lamps per instance; a car with
+  something open keeps its body. A near kit car was ~60 of a mirror render's ~200 draws;
+  after, all near cars together are 2. A shorter mirror draw distance was measured and
+  rejected: 300 m instead of the scene's cut a mirror's draws 202 → 193 (the world's
+  batches span hundreds of metres) and would clip the 3 km sky dome.
+
+- FXAA REPLACES MSAA (`render/hazeshader.ts` `fxaaSample`, `Settings.fxaa`, menu
+  Antialiasing: FXAA / Off). The scene target is no longer multisampled: it carries a
+  depth texture the post pass reads, so four samples meant resolving colour and depth
+  every frame, on Blessing at up to 4800x2700. FXAA runs inside the existing post pass
+  on the shaded picture, behind a uniform branch (no program change), before the ink;
+  the row is hidden on Very Low. Defaults follow the rung as MSAA's did (Standard and
+  Blessing on). A stored `msaa` is not migrated. Measured on the M2 Pro, Blessing at
+  1936x1089: 1% of the pixels change, +0.4-1.0 ms of GPU. `tools/look/gpucost.mjs` A/Bs
+  FXAA instead of MSAA; the no-timer attribution hint in the dev frame report now uses
+  the render scale.
+
+- KIT WIPER STALK WORKS AGAIN, 2110/2112 DASH AND WIPERS (`player/interaction.ts`
+  `KIT_WIPER_ARM`; `carkit/interior.ts`, `exterior.ts`, `tens.ts`). The pick refused every
+  part with control id `wipers` to keep the arms on the glass inert, and the stalk carries
+  the same id: no kit car's stalk could be pressed. The arms are now told by node name.
+  The tens' dash ends shallow at the doors and sits 5 cm higher in front of the driver
+  (`dashLoft`), the front door handle and winder stand where the repair manual shows them
+  (`frontDoor`), so the handle, winder and knees are no longer hidden. On a curved
+  windscreen the wiper fit now parks the lowest arm (500 mm blades): the driver's tip
+  0.084 m above its spindle instead of 0.19. Sources in `carkit/measurements-2110.md` §4.1.
+
 - KIT Z-FIGHT GATE (`tools/kit-zfight.ts`, `carkit/README.md` "Check"). The scanner exits
   1 on any visible z-fight cluster in any band or any open shell hole, naming car, band,
   both emitters and the gap; its self-test now covers a slit. Required before a kit spec

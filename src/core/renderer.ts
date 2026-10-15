@@ -204,12 +204,12 @@ export function offeredRenderScales(
   }
   return offered;
 }
+
 /**
- * Four samples was the only useful multisampling level in measurement: 2x retained
- * almost all of the cost. Whether it is enabled is an independent display setting;
- * graphics tiers control resolution and shadows.
+ * The layer of meshes that only cast shadows: the near traffic cars' stand-ins
+ * (render/farcars.ts, world/traffic.ts). See the constructor's `shadowMap.render`.
  */
-const MSAA_SAMPLES = 4;
+export const SHADOW_ONLY_LAYER = 1;
 
 /**
  * Steps per colour channel in the retro finish. Few enough that the dithered bands read
@@ -418,12 +418,8 @@ export class Renderer {
   private hazeFineRiseHz = DEFAULT_HEAT_MIRAGE.fineRiseHz;
   /** Wall clock of the previous frame, seconds; negative until the first one. */
   private hazeClockS = -1;
-  /** What the pass was last told, kept for the depth-resolve decision. */
-  private daylight = 0;
-  private shimmerStrength = 0;
-  private mirageStrength = 0;
-  /** A haboob wall or the dust inside one is being drawn, which needs the resolved depth. */
-  private wallActive = false;
+  /** `Settings.fxaa`, kept so a rung change can apply it (never on the retro rung). */
+  private fxaa: boolean;
   /** Hand torch projected from the rendered eye; disabled rather than recreated. */
   private readonly torchLight: THREE.SpotLight;
   private readonly torchTarget = new THREE.Object3D();
@@ -457,7 +453,7 @@ export class Renderer {
   constructor(
     canvas: HTMLCanvasElement,
     quality: GraphicsQuality = 'standard',
-    msaa = true,
+    fxaa = true,
     inkStrength = DEFAULT_INK_STRENGTH,
     private readonly mobilePresentation = prefersMobilePresentation(),
     /**
@@ -469,13 +465,13 @@ export class Renderer {
     fieldOfView = DEFAULT_FIELD_OF_VIEW,
   ) {
     this.quality = quality;
+    this.fxaa = fxaa;
     this.renderer = new THREE.WebGLRenderer({
       canvas,
-      // NOT antialiased. Standard and Blessing draw scene pixels into
-      // `hazeTarget`, whose MSAA sample count is controlled independently;
-      // acceptable draws directly to the default framebuffer. A multisampled
-      // backbuffer would allocate and resolve an image that cannot differ by one
-      // pixel after the fullscreen pass.
+      // NOT antialiased. Every rung draws scene pixels into `hazeTarget`; the
+      // antialiasing, where the player wants it, is FXAA in the fullscreen pass. A
+      // multisampled backbuffer would allocate and resolve an image that cannot differ
+      // by one pixel after that pass.
       antialias: false,
       // Never ask a phone for its highest-performance configuration. On a desktop this
       // hint picks the discrete GPU, which is what it is for; on a phone there is only
@@ -509,6 +505,21 @@ export class Renderer {
     // noise at this shadow resolution; plain PCF is visually near-identical and
     // materially cheaper on a low-end iGPU.
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    // Shadow-only casters (`SHADOW_ONLY_LAYER`). Three tests a caster's layers against the
+    // VIEWING camera's in the shadow pass too, and builds the frame's draw lists before
+    // that pass runs. So the layer is on for the shadow pass alone: a mesh on it alone
+    // casts every shadow-casting light's shadow and is in no draw list of any picture,
+    // the mirrors' included (they draw no shadow pass).
+    const shadowMap = this.renderer.shadowMap;
+    const drawShadows = shadowMap.render.bind(shadowMap);
+    shadowMap.render = (lights, scene, camera) => {
+      camera.layers.enable(SHADOW_ONLY_LAYER);
+      try {
+        drawShadows(lights, scene, camera);
+      } finally {
+        camera.layers.disable(SHADOW_ONLY_LAYER);
+      }
+    };
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
     // Draw statistics are accumulated by hand across BOTH passes of a frame.
@@ -535,19 +546,19 @@ export class Renderer {
     this.scene.fog = this.fog;
 
     // Every tier renders into this colour-and-depth target, then uses the fullscreen
-    // pass for authored colour, restrained film grain and ink. Acceptable suppresses
-    // only the haze warp; standard and blessing sample the resolved depth so nearby
-    // geometry never inherits a horizon-shaped screen mask.
-    // The independent MSAA setting decides geometry-edge samples.
+    // pass for authored colour, restrained film grain, ink and FXAA. Acceptable suppresses
+    // only the haze warp; standard and blessing sample the depth so nearby geometry never
+    // inherits a horizon-shaped screen mask.
+    //
+    // NOT MULTISAMPLED. Four samples were the costliest line of the frame for what they
+    // did: the target has a depth texture the pass reads, so every frame resolved colour
+    // AND depth from four samples, at up to 4800x2700 on Blessing on top of its
+    // supersampling. FXAA (`Settings.fxaa`) works on the shaded picture in the pass that
+    // already reads it.
     const hazeDepth = new THREE.DepthTexture(1, 1, THREE.UnsignedIntType);
     hazeDepth.minFilter = THREE.NearestFilter;
     hazeDepth.magFilter = THREE.NearestFilter;
-    this.hazeTarget = new THREE.WebGLRenderTarget(1, 1, {
-      // Multisampling a frame that is then shown as whole-pixel blocks only blurs the
-      // blocks' edges, so the retro rung never pays for it.
-      samples: msaa && quality !== 'retro' ? MSAA_SAMPLES : 0,
-      depthTexture: hazeDepth,
-    });
+    this.hazeTarget = new THREE.WebGLRenderTarget(1, 1, { depthTexture: hazeDepth });
     this.hazeTarget.texture.colorSpace = THREE.SRGBColorSpace;
 
     this.hazeCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -581,6 +592,7 @@ export class Renderer {
         uCameraFar: { value: CAMERA_FAR },
         uInkStrength: { value: Math.min(1, Math.max(0, inkStrength)) },
         uInkThreshold: { value: INK_THRESHOLD },
+        uFxaa: { value: fxaa && quality !== 'retro' ? 1 : 0 },
         uViewTint: { value: new THREE.Color(1, 1, 1) },
         uViewTintStrength: { value: 0 },
         uBinoculars: { value: 0 },
@@ -1108,9 +1120,7 @@ export class Renderer {
    * one number, so the mirage lab's heat slider re-graded the whole picture.
    */
   setDaylight(dayFactor: number): void {
-    this.daylight = Math.min(1, Math.max(0, dayFactor));
-    this.hazeMaterial.uniforms.uDaylight.value = this.daylight;
-    this.updateDepthResolve();
+    this.hazeMaterial.uniforms.uDaylight.value = Math.min(1, Math.max(0, dayFactor));
   }
 
   /**
@@ -1124,13 +1134,10 @@ export class Renderer {
    */
   setHeatHaze(frame: HeatHazeFrame): void {
     const enabled = this.quality !== 'acceptable' && this.quality !== 'retro';
-    this.shimmerStrength = enabled ? Math.min(1, Math.max(0, frame.shimmer)) : 0;
-    this.mirageStrength = enabled ? Math.min(1, Math.max(0, frame.mirage)) : 0;
-    this.hazeMaterial.uniforms.uStrength.value = this.shimmerStrength;
-    this.hazeMaterial.uniforms.uMirage.value = this.mirageStrength;
+    this.hazeMaterial.uniforms.uStrength.value = enabled ? Math.min(1, Math.max(0, frame.shimmer)) : 0;
+    this.hazeMaterial.uniforms.uMirage.value = enabled ? Math.min(1, Math.max(0, frame.mirage)) : 0;
     this.hazeEyeHeight = frame.eyeAboveM;
     this.hazeMaterial.uniforms.uGroundSlope.value = frame.groundSlope;
-    this.updateDepthResolve();
   }
 
   /**
@@ -1158,9 +1165,6 @@ export class Renderer {
     const u = this.hazeMaterial.uniforms;
     u.uWallM.value = frame.wallM;
     u.uDustInside.value = frame.dustInside;
-    const wallWas = this.wallActive;
-    this.wallActive = frame.wallM >= 0 || frame.dustInside > 0;
-    if (wallWas !== this.wallActive) this.updateDepthResolve();
     (u.uWindDir.value as THREE.Vector2).set(frame.windX, frame.windZ);
     // One period of the crest noise (1100 m cells, 48 of them) so the uniform never
     // carries a road-sized number into f32.
@@ -1174,28 +1178,6 @@ export class Renderer {
     u.uVeil.value = frame.veil;
     u.uAirThick.value = frame.airThick;
     u.uFogDensity.value = frame.weatherFog;
-  }
-
-  private updateDepthResolve(): void {
-    // THE WARP IS NOT THE ONLY THING THAT SAMPLES DEPTH, which is what this line
-    // used to assume. `tDepth` also decides where the sand veil begins and — far
-    // more visibly — which fragments the INK pass is allowed to outline: the sky,
-    // the stars and the planets are excluded by sitting at the far plane, and
-    // that test runs on every tier, every frame, warp or no warp.
-    //
-    // Leaving the multisampled depth unresolved therefore did not skip a sample
-    // nobody read. It handed the outline gate an UNDEFINED texture — three
-    // invalidates the attachment when the flag is off — for the whole night and
-    // for the entire lifetime of the cheapest tier, so the drawn look either
-    // vanished or spread into the sky depending on what the driver left behind.
-    // The resolve is skipped only when nothing in the pass reads depth at all.
-    const ink = this.hazeMaterial.uniforms.uInkStrength.value as number;
-    this.hazeTarget.resolveDepthBuffer =
-      this.shimmerStrength > 0 ||
-      this.mirageStrength > 0 ||
-      ink > 0 ||
-      this.daylight > 0 ||
-      this.wallActive;
   }
 
   /** Size the scene-pass target to the actual drawing buffer (CSS size × pixel ratio). */
@@ -1381,12 +1363,13 @@ export class Renderer {
   }
 
   /**
-   * Switches the resolution/shadow tier in place. MSAA is deliberately untouched:
-   * it is an independent display preference.
+   * Switches the resolution/shadow tier in place. FXAA stays the player's choice; only
+   * the retro rung, whose pixels are meant to show, never draws it.
    */
   setQuality(quality: GraphicsQuality): void {
     if (quality === this.quality) return;
     this.quality = quality;
+    this.setFxaa(this.fxaa);
     this.adaptiveResolution.setQuality(quality);
     this.adaptiveResolution.setPinned(this.renderScale !== null || quality === 'retro');
     this.applyRetroCanvas();
@@ -1449,13 +1432,10 @@ export class Renderer {
     };
   }
 
-  /** Changes scene-target multisampling without changing resolution quality. */
-  setMsaa(enabled: boolean): void {
-    const samples = enabled && this.quality !== 'retro' ? MSAA_SAMPLES : 0;
-    if (this.hazeTarget.samples === samples) return;
-    this.hazeTarget.samples = samples;
-    // Multisampling is allocation state; Three recreates the target on next bind.
-    this.hazeTarget.dispose();
+  /** `Settings.fxaa`: a uniform the pass branches on, so no program and no target change. */
+  setFxaa(enabled: boolean): void {
+    this.fxaa = enabled;
+    this.hazeMaterial.uniforms.uFxaa.value = enabled && this.quality !== 'retro' ? 1 : 0;
   }
 
   /** Changes post-process outline opacity without rebuilding the shader pass. */
