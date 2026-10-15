@@ -4,6 +4,11 @@
 
 ### Added
 
+- TRAFFIC KNOBS IN THE CONSOLE (`world/traffic.ts` `RoadTraffic.controlHz`, `caps`):
+  `__bro.traffic.controlHz = 10` sets how many decisions a second the traffic drivers
+  make (45 by default; forces stay at 60 Hz), `__bro.traffic.caps = { narrow: 6, wide:
+  12 }` overrides the menu's traffic ceilings (clamped 0-48), `= null` hands them back.
+
 - KIT CARS IN THE FEWEST FLAT FACES (`carkit/simplify.ts` `simplifyFlats`, run by
   `carkit/kit.ts` on every car after the leans). In each builder mesh a vertex whose
   triangles lie in one plane (0.1 mm, 1.5°) in one colour is taken out and the hole
