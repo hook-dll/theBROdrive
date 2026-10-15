@@ -179,6 +179,14 @@ The wing's ends come down to the lid as end plates 50 mm wide, running forward t
 
 `p19` columns through the doors (the grey band is bluer than the paint): top **0.528–0.537**, bottom 0.435–0.44 (front door 0.542 / 0.435 by eye; rear door 0.533 / 0.442). Spec: `waist` y **0.4875**, height **0.095**, finish **`grey`** (unpainted grey plastic, a trim vertex colour; `f1` shows body-colour ones). It runs from nose to tail, broken at the shut lines and stopping 30 mm short of each wheel arch (the band passes below the arches' tops at 0.64); under the bumpers' wraps it is hidden. The bumpers carry the same band in place of their groove (moulded bumper `moulding`): front 0.483–0.558 (`p19` front crop) → y **0.52**, height **0.075**; rear 0.438–0.519 (`p19` x 1800) → y **0.478**, height **0.08**.
 
+### 3.7 Bumpers after the 2026-10-15 review ("the rear bumper too massive against the front")
+
+| Feature | Reading | Spec |
+|---|---|---|
+| Rear bumper's side | [P p19 right side: the bumper and its grey band run on along the wing to the rear arch's back; P p13 rear 3/4: the bumper's side lies in the wing's line, no step] | rear moulded bumper `flush`, `wrapTo` **3.675** (the rear arch's back at 3.65 = 3.29 + 0.281 · 1.28); height **0.306** and drop 0.04 kept (§3.2) |
+| Corners | – | both bumpers' corners (radius 0.09) are one flat chamfer from the flank, level with the end face, to the face (generator, `BUMPER_CHAMFER` 0.15): the front face is flat to ±0.676, the rear to ±0.656 |
+| Front fog lamps | kept on the bumper's flat face, 15 mm inboard of where it turns into the chamfer | housing **±0.505..0.675** (was 0.52..0.69), lens **±0.535..0.645** (was 0.55..0.66); heights unchanged |
+
 ## 4. Generator changes
 
 1. **`TubStation.notch`** (body.ts `BodyFrame.lidX`, `deckY`, `deckFracs`). On a notched station the deck lies level at `deck` out to `notch − NOTCH_WALL`, rises in a 25 mm wall to the deck edge's height and stays level to the side. The lid is cut along `notch` instead of the pillar row (`lidX`), linearly between stations. This is the flat-bottomed lid between lamp corners that `measurements-estates.md` §3.1 asked for; the 2115 is the first car to use it. bay.ts's boot walls and bulkheads follow `lidX`.
@@ -205,7 +213,7 @@ The wing's ends come down to the lid as end plates 50 mm wide, running forward t
 - **Greenhouse heights.** All four share the 2108 drawing's greenhouse (roof 1.335). The 21099 drawing, scaled on the 2108's belt and sill, has its roof at 1.402. The loader fits every body to the passport height (1402), so the shell grows 5 % as a whole; the glass stays ~60 mm shallower relative to the body than on the 21099 drawing.
 - **2109 drawing.** It is undimensioned, and its door lines disagree with the photo and the 21099 drawing by 0.1 m; the photo was used. Its quarter light's rear edge (3.513 / 3.144) disagrees with the 2108's panel (3.57 / 3.12) by 57 mm; the 2108's is kept.
 - **Front door's front edge.** The photo (1.239) and the 21099 drawing (1.251) put it 27–39 mm ahead of the 2108's 1.278, which is kept so the shared front stays identical.
-- **2115 not modelled:** the plate recess in the rear bumper, the side repeaters (`p19`: s 1.14–1.21, y 0.676–0.703 on the front wing), the bonnet's lip as a separate part (it is the painted face). The fog lamps never light (no fog-lamp channel). The high brake lamp is in the brake slot, so like every kit brake cell it also glows at tail level when the lights are on; a real one lights with the brake only.
+- **2115 not modelled:** the plate recess in the rear bumper, the side repeaters (`p19`: s 1.14–1.21, y 0.676–0.703 on the front wing), the bonnet's lip as a separate part (it is the painted face). The fog lamps never light (no fog-lamp channel). The high brake lamp is in the brake slot, so like every kit brake cell it also glows at tail level when the lights are on; a real one lights with the brake only. Above the flush rear bumper's side a thin dark line shows where the body tucks under its crease, and a dot where the body's corner meets the bumper's flush top.
 - **Rear door handles** come from the generator's rule (0.13 ahead of the door's rear frame): 2.886 on the 2109 against its photo's 2.99.
 - **21099 drawing vs the rear door.** The drop glass's rear edge is moved off the drawn line for the reasons in §1.1.
 - **Tail-lamp roles.** Colours are measured; which red cell is tail and which is stop is [INFERENCE] on the 21099 and the 2115.

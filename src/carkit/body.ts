@@ -25,6 +25,8 @@ const SILL_BEVEL = 0.035;
 const ARCH_LIP = 0.045;
 /** Shut gap between a moving panel and the body. */
 const SHUT_GAP = 0.006;
+/** A raked shut line's point this close to the fuel flap's top or bottom row takes its height (`BodyFrame.shutLine`). */
+const ROW_SNAP = 0.005;
 /** Depth of the jamb flange inside a gap. */
 const JAMB_DEPTH = 0.045;
 /** Thickness of a door (its card stands this far in from the skin); lids are thinner. */
@@ -231,7 +233,10 @@ export class BodyFrame {
   /**
    * A raked shut line below the belt (`CabinColumn.foot`) as [s, y] points from the belt
    * down to the doors' bottom: upright on the column, straight to the foot, its two
-   * corners rounded by `foot.round`. Heights fall monotonically along it.
+   * corners rounded by `foot.round`. Heights fall monotonically along it. Every point is
+   * a side row on every tub column (`sideCutRows`), so a point within `ROW_SNAP` of the
+   * fuel flap's top or bottom takes that row's height: two rows a few millimetres apart
+   * only cut the whole flank into slivers and bent the flap's opening out of line.
    */
   shutLine(column: CabinColumn): [number, number][] {
     const foot = column.foot!;
@@ -240,7 +245,9 @@ export class BodyFrame {
     const top: [number, number] = [column.s, this.station(column.s).belt];
     const corner: [number, number] = [column.s, foot.y];
     const base: [number, number] = [foot.s, bottom];
-    return [top, ...fillet(top, corner, base, upper), ...fillet(corner, base, [foot.s - 1, bottom], lower)];
+    const rows = [this.spec.flap.y0, this.spec.flap.y1];
+    const snap = (y: number): number => rows.find((r) => Math.abs(r - y) < ROW_SNAP) ?? y;
+    return [top, ...fillet(top, corner, base, upper), ...fillet(corner, base, [foot.s - 1, bottom], lower)].map(([s, y]) => [s, snap(y)]);
   }
 
   /** Half width the boot lid or tailgate is cut along at s: the pillar row, or the stations' `notch`. */
@@ -387,7 +394,7 @@ function fillet(prev: readonly [number, number], corner: readonly [number, numbe
 }
 
 /** Tub columns: stations, cabin columns, arch subdivisions and every cut line. */
-function tubColumns(frame: BodyFrame): number[] {
+export function tubColumns(frame: BodyFrame): number[] {
   const spec = frame.spec;
   const s = new Set<number>();
   for (const st of spec.stations) s.add(st.s);

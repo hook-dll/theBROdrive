@@ -4,6 +4,27 @@
 
 ### Added
 
+- KIT CARS IN THE FEWEST FLAT FACES (`carkit/simplify.ts` `simplifyFlats`, run by
+  `carkit/kit.ts` on every car after the leans). In each builder mesh a vertex whose
+  triangles lie in one plane (0.1 mm, 1.5°) in one colour is taken out and the hole
+  refilled with the fattest ears, no fans; zero-area triangles are dropped; a vertex on an
+  open edge goes only where the edge runs straight on and no other mesh has a corner
+  there. Every kit car 8-18% fewer triangles (2101 12 393 → 11 229, 2109 12 593 → 11 394,
+  2115 14 070 → 12 224, 2110 16 584 → 13 723, 2112 16 553 → 13 634), all 13 bounds
+  unchanged; the 2112's body paint 3 035 → 2 105 triangles, slivers 272 → 212, zero-area
+  116 → 15. With it, at the owner's review of the 2112's rear corner: the wrap-round
+  lamps are flat pieces bent only where the skin bends (`carkit/exterior.ts`
+  `buildCornerLamps`, `carkit/body.ts` `tubColumns`; the 2112's tail lens 152 → 28
+  triangles, no mosaic), a moulded bumper's small corner is one chamfer and its flank
+  side has a point at each station (`flankBumperPath`, `BUMPER_CHAMFER`), the filler cup
+  no longer shows through the closed flap of the 2110 and 2112 (`buildFiller`), a raked
+  shut line's point within 5 mm of the flap's edge takes its height (`BodyFrame.shutLine`
+  `ROW_SNAP`), and the 2115's rear bumper lies flush along the wings to the rear arch as
+  its front one does (`carkit/samaras.ts`, `wrapTo` 3.675; fog lamps 15 mm inboard).
+  `tools/kit-zfight.ts` passes on all 13; fit rows identical but the tens' `hoodPoint`,
+  17 mm lower (sampled by vertex; the bonnet did not move); the car lab links the same
+  programs as before, none from lamps or opened parts. ~35 ms per car at build.
+
 - NEAR TRAFFIC CASTS ITS SHADOWS AS ITS FAR MESH (`vehicle/vehicle.ts` `castNearShadows`,
   `addStandIn`; `world/traffic.ts` `syncVisuals`; `core/renderer.ts` `SHADOW_ONLY_LAYER`).
   A shut near traffic car's casters (shell, glass, wheels) are exactly its model's far
@@ -32,6 +53,12 @@
   1936x1089: 1% of the pixels change, +0.4-1.0 ms of GPU. `tools/look/gpucost.mjs` A/Bs
   FXAA instead of MSAA; the no-timer attribution hint in the dev frame report now uses
   the render scale.
+
+- TRAFFIC IS ONE STEP LIGHTER AT EVERY LEVEL (`game/settings.ts` `TRAFFIC_CAPS`): High
+  12/24 cars (two-lane / four-lane), Medium 8/16, Low 4/8, Very Low 2/4, from 24/48,
+  12/24, 8/16 and 4/8. Not a bug in the count: the ceiling holds every car alive within
+  the 800 m of solid road either side of the player, created 500 m off or further, so a
+  full High stream was some twenty full physical cars of which a player sees a handful.
 
 - KIT WIPER STALK WORKS AGAIN, 2110/2112 DASH AND WIPERS (`player/interaction.ts`
   `KIT_WIPER_ARM`; `carkit/interior.ts`, `exterior.ts`, `tens.ts`). The pick refused every

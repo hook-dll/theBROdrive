@@ -594,6 +594,66 @@ counted on the loaded model (`createCarModel`, a headless script, all visible an
   three-quarter at 8 m, 1–8 pixels darker by at most 29 of 255. The courtesy lamp's lit
   lens goes at 6 m too, on a car left with it on.
 
+## Simpler faces (2026-10-15)
+
+Renders: `/tmp/tail2112/` (round 1: `cmp_*`), `/tmp/tail2112/r2/` (round 2: `cmp_*`, left
+HEAD c3ebe42, right after; the owner's rear 3/4 of the 2112 at 17 h and 8 h, the flap, the
+bumper corner, the 2110, the 2115's rear, front and side), `/tmp/tail2112/final/` (lamps at
+night, parts open).
+
+- **2112: "the rear corner has too many faces, could it be simpler?"** (owner's screenshot:
+  a mosaic on the wrap-round tail lamp, streaks on the panel above it). → The corner lamp
+  stepped along the flank every 20 mm (`CORNER_LAMP_STEP`), three rows high, and every
+  cell, under the `rearLean` warp, bent its own way; each cell also cut its own hole, so
+  the quarter above was a fan of thin triangles from the D pillar's foot to each notch.
+  `kit_tail` was 152 triangles (2109: 8). → The lens bends only where the skin under it
+  does: at the tub's columns along the flank (`tubColumns`, now exported) and across its
+  height only at a crease or belt running through it (the tens' front indicator); every
+  other stretch is one flat piece. `kit_tail` 28, each rear indicator 88 → 22 (the
+  last 0.45 m of the car); holes cut under the 2112's items 145 → 41. *exterior.ts
+  `buildCornerLamps`, body.ts `tubColumns`*.
+- **"Shouldn't the generator itself work that way: if it can be simpler, why
+  complicate?"** → Generators sample strips and cut holes, and nothing merged what came
+  out flat; the 2112's body paint was 3035 triangles, 272 of them slivers and 116 of zero
+  area (2109: 1742). → `simplifyFlats` runs on every car after the leans: in each builder
+  mesh a vertex whose triangles lie in one plane (0.1 mm, 1.5°) in one colour is taken
+  out and the hole refilled by the fattest ear each time (no fans); zero-area triangles
+  go; a vertex on an open edge goes only where the edge runs straight on and no other
+  mesh has a corner there. Every car moved (8–18% fewer triangles: 2101 12 393 → 11 229,
+  2109 12 593 → 11 394, 2112 16 553 → 13 634), all 13 bounds identical; the 2112's body
+  paint 2105 triangles, 212 slivers, 15 zero-area. *simplify.ts, kit.ts*.
+- **A 2 mm strip down the whole tens' flank.** → A point of the rear door's rounded shut
+  line fell 2.4 mm under the fuel flap's top (0.8324 against 0.83), and every point of
+  that line is a side row on every tub column. → A point within 5 mm of the flap's top or
+  bottom takes that height (`ROW_SNAP`). *body.ts `BodyFrame.shutLine`*.
+- **2112: "an artifact on the fuel flap".** → The filler cup behind it was a box squared
+  to the skin at the flap's middle; the flank tapers and leans in over the flap, so the
+  cup's rear top corner stood out through the closed flap (a black wedge, 2110 too). → Its
+  rim follows the skin as built at each corner, 5 mm inside (`skinX`). A thin dark line in
+  the flap's top gap seen from above remains (the gap itself). *exterior.ts `buildFiller`*.
+- **"The rear bumper corner facets can be simplified."** → A flank-following bumper
+  turned its corner in two facets (a 45° mid point) and stepped along the flank in five
+  even steps that missed the stations where the side bends, so the body showed through
+  in a notch above it. → A corner up to 0.15 (`BUMPER_CHAMFER`) is one chamfer from the
+  flank, level with the end face, to the face (a chamfer from further along let the
+  body's corner through); along the flank a point at each station; the hole in the end
+  face stops 15 mm short of the corner (`BUMPER_HOLE_END`). The 2110's front (0.28) keeps
+  its two-step turn. *exterior.ts `flankBumperPath`, `bumperHoles`*.
+- **2115: "the rear bumper is now too massive compared to the front one".** → It was the
+  only kit bumper still a box standing out of the tail with square sides and a shelf on
+  top; the front one is flush and runs along the wings to the arch. Photos p19 (right
+  side) and p13 (rear 3/4) show the rear one doing the same. → The measured height
+  (0.306) kept; `flush` and `wrapTo` 3.675 (the arch's back at 3.65). The front fog lamps
+  moved 15 mm inboard (±0.505–0.675, lenses ±0.535–0.645) to stay on the bumper's flat
+  face, which now turns into its chamfer at 0.676 (the census found a slit there).
+  *samaras.ts `LOOK_2115`*.
+- Checks: `kit-zfight.ts` PASS on all 13 (0 visible clusters, 0 slits); `fit-models.ts` on
+  all 13: rows identical but the 2110's and 2112's `hoodPoint` height, 17 mm lower (the
+  bonnet window is sampled by vertex and a flat run's inner vertex went; the bonnet did not
+  move; the kit cars' cabin view uses `cabinEye`); the car lab links 15 programs after
+  boot and the same later ones (night sky, first framing) on HEAD and after, none from
+  lamps or opened parts.
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent
@@ -614,6 +674,11 @@ counted on the loaded model (`createCarModel`, a headless script, all visible an
 - **Proportioning by eye** (first 2106): see Method.
 - **Generated wheel styles**: removed at the owner's request; use the pack's sets.
 - **Following a drawing's bonnet roll-off literally on BODY_05**: read as a bent nose.
+- **Sampling a lamp lens every 20 mm along a flank** to keep it on a curving side: under a
+  lean each cell bends its own way and the lens reads as a mosaic; bend only at the skin's
+  own columns and rows.
+- **A flank bumper's corner chamfer starting `r · 0.4` back along the flank**: the body's
+  corner, 1 cm behind the end face, pokes through it; start it level with the end face.
 
 ## Template for new entries
 

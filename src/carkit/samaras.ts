@@ -382,9 +382,10 @@ export const LOOK_2115: KitLook = {
         bars: { dir: 'horizontal', count: 1, finish: 'alloy', margin: 0, width: 0.008, depth: 0.01, proud: 0.022 },
       },
       // Rectangular fog lamps in black housings low at the bumper's corners [P owner's 3/4
-      // photo]; never lit (no fog-lamp channel), so the lens is a bright unlit finish.
-      { kind: 'panel', x: { from: { centre: 0.52 }, to: { centre: 0.69 } }, y: { from: ['bumperBottom', 0.02], to: ['bumperBottom', 0.1] }, finish: 'black', proud: 0.047 },
-      { kind: 'panel', x: { from: { centre: 0.55 }, to: { centre: 0.66 } }, y: { from: ['bumperBottom', 0.03], to: ['bumperBottom', 0.09] }, finish: 'chrome', proud: 0.05 },
+      // photo]; never lit (no fog-lamp channel), so the lens is a bright unlit finish. Moved
+      // 15 mm inboard to stay on the bumper's flat face, which turns into its corner chamfer at 0.676.
+      { kind: 'panel', x: { from: { centre: 0.505 }, to: { centre: 0.675 } }, y: { from: ['bumperBottom', 0.02], to: ['bumperBottom', 0.1] }, finish: 'black', proud: 0.047 },
+      { kind: 'panel', x: { from: { centre: 0.535 }, to: { centre: 0.645 } }, y: { from: ['bumperBottom', 0.03], to: ['bumperBottom', 0.09] }, finish: 'chrome', proud: 0.05 },
       // The dark recessed intake strip between them, under the band [owner's front photo:
       // 0.18–0.22 below the bumper's top]. It stands 2 mm ahead of the band's front, which
       // reaches it on the centre line, so the two are not in one plane.
@@ -399,7 +400,10 @@ export const LOOK_2115: KitLook = {
     ],
   },
   rear: {
-    bumper: { kind: 'moulded', drop: 0.04, height: 0.306, finish: 'paint', moulding: { y: 0.478, height: 0.08, finish: 'grey' } },
+    // Flush with the body and its sides on the wings forward to the rear arch (3.65), as
+    // the front one runs to its arch [P p19 right side, p13 rear 3/4: the band and the
+    // bumper's side run on to the arch's back in the wing's line].
+    bumper: { kind: 'moulded', drop: 0.04, height: 0.306, finish: 'paint', moulding: { y: 0.478, height: 0.08, finish: 'grey' }, wrapTo: 3.675, flush: true },
     // The corner lamps are `cornerLamps`, wrapping onto the wings.
     items: [],
     lid: [

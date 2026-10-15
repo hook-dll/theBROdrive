@@ -15,6 +15,7 @@ import { buildBay } from './bay';
 import { addBuilt, pivotGroup, type KitContext, type KitNode } from './context';
 import { buildExterior } from './exterior';
 import { buildInterior } from './interior';
+import { simplifyFlats } from './simplify';
 import { KIT_SPECS } from './specs';
 import { buildWheel } from './wheels';
 import type { KitMotion } from './rig';
@@ -88,6 +89,8 @@ export function buildKitCar(id: string): THREE.Group {
   cutShellHoles(root, ctx.holes);
   if (spec.rearLean) leanEnd(root, ctx.holes, frame.z(frame.rearBase), -1, spec.rearLean);
   if (spec.frontLean) leanEnd(root, ctx.holes, frame.z(spec.frontLean.full ?? spec.bonnetFront), 1, spec.frontLean);
+  // The finished shape in the fewest faces: flat runs merged, zero-area triangles gone.
+  simplifyFlats(root);
   // For tools (tools/kit-zfight.ts checks every hole is covered): the cut outlines, leant.
   root.userData.kitHoles = ctx.holes;
 

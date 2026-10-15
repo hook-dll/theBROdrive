@@ -14,7 +14,7 @@
 import * as THREE from 'three';
 import { PartBuilder, lerp, table, type Caps, type KitSlot, type Outline, type Vec3 } from './builder';
 import { addBuilt, addMirrorFace, mirrorFrame, pivotGroup, type KitContext } from './context';
-import { skinX, type BodyFrame, type KitHole } from './body';
+import { skinX, tubColumns, type BodyFrame, type KitHole } from './body';
 import { driverEyeAt } from './interior';
 import type { CornerLampPoint, FaceAnchor, FaceItem, FaceLook, FaceX, FaceY, Finish, LampRole, Span } from './spec';
 
@@ -119,28 +119,37 @@ function bumperPath(half: number, zFace: number, end: 1 | -1, depth: number, sta
 
 /** How far a bumper that follows the flanks (`wrapTo`) stands off the side. */
 const BUMPER_FLANK_OUT = 0.006;
-/** Points along each flank of such a bumper. */
-const BUMPER_FLANK_STEPS = 5;
+/** The points of a flank bumper's side that run along the flank (facing straight out). */
+const flankPoints = (path: readonly SweepPoint[]): number => path.filter((p) => Math.abs(p.nx) === 1).length / 2;
+/** A flank bumper's corner up to this radius is one flat chamfer; a larger one turns in two. */
+const BUMPER_CHAMFER = 0.15;
+/** A moulded bumper's hole in the end face stops this short of the corner on each side. */
+const BUMPER_HOLE_END = 0.015;
 
 /**
  * Plan path of a moulded bumper whose sides follow the flanks back to `wrapTo` (spec.ts
  * `wrapTo`): across the face and round a corner of radius `r` as `bumperPath`, then along
  * each flank just outside the body at the bumper's top height, so its side lies flush on
- * the wing and runs on to the wheel arch. `grow` and `depth` as in `bumperPath`.
+ * the wing and runs on to the wheel arch. `grow` and `depth` as in `bumperPath`. A small
+ * corner is one chamfer from the flank, level with the end face, to the face: a mid
+ * point there only bent it into facets, and a chamfer starting further along the flank
+ * would let the body's corner poke through it.
  */
 function flankBumperPath(frame: BodyFrame, sEnd: number, end: 1 | -1, top: number, depth: number, grow: number, wrapTo: number, r: number): SweepPoint[] {
   const z = frame.z(sEnd) - end * 0.01;
   const sideDepth = depth * 0.3;
+  const round = r > BUMPER_CHAMFER;
   // The path stands `sideDepth` inside the flank so the section's outer face is just outside it.
   const base = (s: number): number => frame.sideX(s, top) + BUMPER_FLANK_OUT + grow - sideDepth;
-  const sCorner = sEnd + end * (0.01 + r * 0.4);
+  const sCorner = round ? sEnd + end * (0.01 + r * 0.4) : sEnd;
   const halfCorner = base(sCorner);
+  // Along the flank: a point at each end and at every station between, where the side
+  // bends in plan; between them the side is straight and so is the bumper.
+  const inner = frame.spec.stations.map((st) => st.s).filter((s) => s > Math.min(wrapTo, sCorner) + 0.01 && s < Math.max(wrapTo, sCorner) - 0.01);
+  const along = [wrapTo, ...(wrapTo < sCorner ? inner : inner.reverse()), sCorner];
   const side = (sx: number): SweepPoint[] => [
-    ...Array.from({ length: BUMPER_FLANK_STEPS }, (_, k): SweepPoint => {
-      const s = lerp(wrapTo, sCorner, k / (BUMPER_FLANK_STEPS - 1));
-      return { x: sx * base(s), z: frame.z(s), nx: sx, nz: 0, depth: sideDepth };
-    }),
-    { x: sx * (halfCorner - r * 0.3), z: z - end * r * 0.1, nx: sx * 0.7071, nz: end * 0.7071, depth: depth * 0.75 },
+    ...along.map((s): SweepPoint => ({ x: sx * base(s), z: frame.z(s), nx: sx, nz: 0, depth: sideDepth })),
+    ...(round ? [{ x: sx * (halfCorner - r * 0.3), z: z - end * r * 0.1, nx: sx * 0.7071, nz: end * 0.7071, depth: depth * 0.75 }] : []),
     { x: sx * (halfCorner - r), z, nx: 0, nz: end, depth: depth * 0.95 },
   ];
   const path = [...side(1), { x: 0, z, nx: 0, nz: end, depth }, ...side(-1).reverse()];
@@ -533,8 +542,9 @@ function bumperHoles(ctx: KitContext, path: readonly SweepPoint[], section: read
     if (y1 - y0 < 0.01) return;
     ctx.holes.push({ owner: 'body', outline: { poly: [at(a, y0), at(c, y0), at(c, y1), at(a, y1)] } });
   };
-  // The straight run across the face: the points facing straight out.
-  const face = path.filter((p) => Math.abs(p.nz) > 0.999);
+  // The straight run across the face: the points facing straight out, its two ends pulled
+  // in by `BUMPER_HOLE_END` so the corner (a chamfer) covers them from every side.
+  const face = path.filter((p) => Math.abs(p.nz) > 0.999).map((p) => ({ ...p, x: Math.sign(p.x) * Math.max(0, Math.abs(p.x) - BUMPER_HOLE_END) }));
   const onFace = (p: SweepPoint): [number, number] | undefined => covered(p, () => end * (zFace - p.z));
   for (let i = 0; i + 1 < face.length; i++) along(face[i]!, face[i + 1]!, onFace, (p, y) => [p.x, y, zFace]);
   if (flankSteps === 0) return;
@@ -663,7 +673,7 @@ function buildBumpers(ctx: KitContext, b: PartBuilder): Map<1 | -1, Ridge> {
       b.append(moulded);
       const volume = sweptOutlines(along, [1, band.y - band.h, -0.0005], [1, band.y + band.h, -0.0005], 0.0065).map((o) => ({ ...o, solid: true }));
       ridges.set(end, { part: ridge, volume, y0: band.y - band.h, y1: band.y + band.h, front: reach + 0.006 });
-      bumperHoles(ctx, path, section, end, wrapTo === undefined ? 0 : BUMPER_FLANK_STEPS - 1);
+      bumperHoles(ctx, path, section, end, wrapTo === undefined ? 0 : flankPoints(path) - 1);
     }
   }
   return ridges;
@@ -819,31 +829,64 @@ function buildRepeaters(ctx: KitContext, body: PartBuilder): void {
 
 /** How far a corner lamp's lens stands off the body: flush, just clear of the paint. */
 const CORNER_LAMP_OUT = 0.004;
-/** Longest step of a corner lamp along the flank, so it keeps to the curving side. */
-const CORNER_LAMP_STEP = 0.02;
+/** A side row (crease or belt) inside a corner lamp by more than this bends the lens along it. */
+const CORNER_LAMP_KINK = 0.005;
 
 /**
  * Lamp units wrapping round the corners of an end face (`KitLook.cornerLamps`): a thin
  * lens lying on the face from its inner end to the corner and on along the flank, every
  * stretch between two points in its role's slot, with a rim rooted `FACE_ROOT` into the
- * body; the skin under each stretch is cut away.
+ * body; the skin under each stretch is cut away. The lens is flat wherever the skin is:
+ * on the flank it bends only at the tub's columns (between them the skin is flat faces)
+ * and, across its height, only at a side row the skin bends at (the crease or the belt)
+ * where one runs through it; elsewhere it is one flat piece from its bottom to its top.
  */
 function buildCornerLamps(ctx: KitContext, body: PartBuilder): void {
   const { frame } = ctx;
   const lamps = frame.spec.look.cornerLamps;
   if (!lamps) return;
   const stations = frame.spec.stations;
+  const cols = tubColumns(frame);
   const diag = Math.SQRT1_2;
   for (const lamp of lamps) {
     // The face it starts on, and which way that face looks along the car.
     const facing = lamp.end === 'rear' ? -1 : 1;
     const sFace = (facing > 0 ? stations[0]! : stations[stations.length - 1]!).s;
     const zFace = frame.z(sFace);
+    const points = lamp.points;
+    // Off the face, a stretch breaks at every tub column it crosses.
+    const stretches = points.slice(0, -1).map((a, i): CornerLampPoint[] => {
+      const c = points[i + 1]!;
+      if (a.x !== undefined || c.x !== undefined) return [a, c];
+      const sa = a.s ?? sFace;
+      const sc = c.s ?? sFace;
+      const inner = cols.filter((s) => s > Math.min(sa, sc) + 1e-6 && s < Math.max(sa, sc) - 1e-6);
+      if (sc < sa) inner.reverse();
+      return [a, ...inner.map((s): CornerLampPoint => {
+        const t = (s - sa) / (sc - sa);
+        return { s, y: [lerp(a.y[0], c.y[0], t), lerp(a.y[1], c.y[1], t)] };
+      }), c];
+    });
+    // The side's rows (crease, belt) that run through the lamp on the flank or at the
+    // corner: the lens bends along them there; on the end face, which is flat, a row
+    // only has to be where its neighbour's is.
+    const flankS = (p: CornerLampPoint): number => p.s ?? sFace;
+    const onFlank = stretches.flat().filter((p) => p.x === undefined);
+    const kinks = (['crease', 'belt'] as const).filter((row) =>
+      onFlank.some((p) => {
+        const y = frame.station(flankS(p))[row];
+        return y > p.y[0] + CORNER_LAMP_KINK && y < p.y[1] - CORNER_LAMP_KINK;
+      }));
+    const rowsAt = (p: CornerLampPoint): number[] => [
+      p.y[0],
+      ...kinks.map((row) => Math.min(p.y[1] - CORNER_LAMP_KINK, Math.max(p.y[0] + CORNER_LAMP_KINK, frame.station(flankS(p))[row]))).sort((u, v) => u - v),
+      p.y[1],
+    ];
     for (const side of [1, -1]) {
-      // A column across the lamp at a point, bottom, middle and top: [on the body, on the
+      // A column across the lamp at a point, one entry per row: [on the body, on the
       // lens, rooted in the body], `d` metres out along the body's normal there.
       const column = (p: CornerLampPoint): [Vec3, Vec3, Vec3][] =>
-        [p.y[0], (p.y[0] + p.y[1]) / 2, p.y[1]].map((y): [Vec3, Vec3, Vec3] => {
+        rowsAt(p).map((y): [Vec3, Vec3, Vec3] => {
           let at: (d: number) => Vec3;
           if (p.x !== undefined) {
             const [xb, xt] = typeof p.x === 'number' ? [p.x, p.x] : p.x;
@@ -859,34 +902,25 @@ function buildCornerLamps(ctx: KitContext, body: PartBuilder): void {
           }
           return [at(0), at(CORNER_LAMP_OUT), at(-FACE_ROOT)];
         });
-      const points = lamp.points;
-      for (let i = 0; i + 1 < points.length; i++) {
-        const a = points[i]!;
-        const c = points[i + 1]!;
-        if (!a.role) throw new Error(`Kit car "${frame.spec.id}": a corner lamp's point before its last has no role`);
-        const slot = lampSlot(a.role, side);
-        // Off the face, the stretch steps along the flank so it keeps to the curving side.
-        const sa = a.s ?? sFace;
-        const sc = c.s ?? sFace;
-        const steps = a.x === undefined && c.x === undefined ? Math.max(1, Math.ceil(Math.abs(sc - sa) / CORNER_LAMP_STEP)) : 1;
-        const columns = Array.from({ length: steps + 1 }, (_, k) => {
-          if (k === 0) return column(a);
-          if (k === steps) return column(c);
-          const t = k / steps;
-          return column({ s: lerp(sa, sc, t), y: [lerp(a.y[0], c.y[0], t), lerp(a.y[1], c.y[1], t)] });
-        });
+      for (const [i, stretch] of stretches.entries()) {
+        const role = points[i]!.role;
+        if (!role) throw new Error(`Kit car "${frame.spec.id}": a corner lamp's point before its last has no role`);
+        const slot = lampSlot(role, side);
+        const columns = stretch.map(column);
+        const top = columns[0]!.length - 1;
         body.color(0xffffff);
-        for (let k = 0; k < steps; k++) {
+        for (let k = 0; k + 1 < columns.length; k++) {
           const p = columns[k]!;
           const q = columns[k + 1]!;
           body.bridge(slot, p.map(([, o]) => o), q.map(([, o]) => o));
           // Its rim from inside the body along the bottom and top edges.
-          for (const r of [0, 2]) body.quad(slot, p[r]![2], q[r]![2], q[r]![1], p[r]![1]);
-          for (const r of [0, 1]) ctx.holes.push({ owner: 'body', outline: { poly: [p[r]![0], q[r]![0], q[r + 1]![0], p[r + 1]![0]] } });
+          for (const r of [0, top]) body.quad(slot, p[r]![2], q[r]![2], q[r]![1], p[r]![1]);
+          for (let r = 0; r < top; r++) ctx.holes.push({ owner: 'body', outline: { poly: [p[r]![0], q[r]![0], q[r + 1]![0], p[r + 1]![0]] } });
         }
         // And across its two ends.
+        const last = columns[columns.length - 1]!;
         if (i === 0) body.bridge(slot, columns[0]!.map(([, , s]) => s), columns[0]!.map(([, o]) => o));
-        if (i + 2 === points.length) body.bridge(slot, columns[steps]!.map(([, , s]) => s), columns[steps]!.map(([, o]) => o));
+        if (i + 1 === stretches.length) body.bridge(slot, last.map(([, , s]) => s), last.map(([, o]) => o));
       }
     }
   }
@@ -1172,7 +1206,12 @@ export const KIT_FILLER_NODE = 'kit_filler';
 /** How far the filler's aim box stands proud of the skin: a can's spout goes in from outside. */
 const FILLER_PROUD = 0.04;
 
-/** A cup with a cap behind the fuel flap, so an open flap shows a filler, not a void. */
+/**
+ * A cup with a cap behind the fuel flap, so an open flap shows a filler, not a void. Its
+ * rim follows the skin as built at each corner, 5 mm inside it: the flank tapers and
+ * leans in over the flap, and a cup squared to the skin at the flap's middle stood out
+ * through the closed flap at its rear top corner (a black wedge on the 2110 and 2112).
+ */
 function buildFiller(ctx: KitContext): void {
   const { frame, nodes } = ctx;
   const flap = frame.spec.flap;
@@ -1186,7 +1225,11 @@ function buildFiller(ctx: KitContext): void {
   // 12 mm inside the opening each way, clear of the flap's edge returns and the jambs.
   const hz = (flap.s1 - flap.s0) / 2 - 0.012;
   const hy = (flap.y1 - flap.y0) / 2 - 0.012;
-  b.boxFrom('trim', [x - 0.015 - side * 0.015, y - hy, frame.z(s) - hz], [x - 0.015 + side * 0.015, y + hy, frame.z(s) + hz], 0b111111 & ~(side > 0 ? 1 : 2));
+  const corners = ([[-1, -1], [1, -1], [1, 1], [-1, 1]] as const).map(([ds, dy]): [number, number] => [s + ds * hz, y + dy * hy]);
+  const rim = corners.map(([cs, cy]): Vec3 => [side * (skinX(frame, cs, cy) - 0.005), cy, frame.z(cs)]);
+  const back = corners.map(([cs, cy]): Vec3 => [side * (skin - 0.035), cy, frame.z(cs)]);
+  for (let i = 0; i < 4; i++) b.quad('trim', back[i]!, back[(i + 1) % 4]!, rim[(i + 1) % 4]!, rim[i]!);
+  b.quad('trim', back[3]!, back[2]!, back[1]!, back[0]!);
   b.color(0x2e3032).cylinderX('trim', [x + side * 0.002, y, frame.z(s)], 0.026, 0.01, 8);
   addBuilt(ctx.root, b, [0, 0, 0], 'filler');
   // From the cup's back (0.05 inside the skin) to FILLER_PROUD outside it.

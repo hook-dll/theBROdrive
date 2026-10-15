@@ -217,6 +217,8 @@ All optional; absent, a car builds exactly as before.
 
 `kit_vaz2110`: **14 775 triangles** (body + trim 7 509, cabin 3 927, bay 1 307, boot 56, underbody 632, wheels 1 344; 8 853 beyond 25 m); the rounded shut line's points are side rows on every tub column (nine in place of one). The owner set the triangle budget aside for this car. Bounds ±0.935 (mirrors) × 0.170…1.424 × ±2.138 m. Lowest point 0.170 (the fuel tank); the front floor under the engine is 0.275 so the sump clears it.
 
+After the 2026-10-15 simplicity round (HISTORY.md "Simpler faces"): **13 723 triangles** (body + trim 6 363, cabin 4 877, bay 627, boot 52, underbody 460, wheels 1 344; 7 707 beyond 25 m), bounds unchanged. The flat-run merge (`simplifyFlats`) took the side rows the rounded shut line puts on every tub column off the flat panels; a shut-line point within 5 mm of the flap's top or bottom takes that row's height (`ROW_SNAP`: 0.8074 → 0.81 on the 2110's 0.70–0.81 flap, 0.8324 → 0.83 on the 2112's 0.71–0.83); the filler cup's rim follows the skin; the rear bumper's 0.09 corner is one chamfer; the corner lamps bend only at the tub's columns. `fit-models.ts`: `hoodPoint` height 17 mm lower (2110 0.378 → 0.361, 2112 0.380 → 0.363), sampled by vertex over a bonnet that did not move.
+
 Lab after the third review (`/tmp/vaz2110/lab4/`): the lid corners from the owner's angles (`lid_2110_left_c.png`, `lid_2115_right_c.png`), the boot open (`boot_open_2110_c.png`, `boot_open_2115_c.png`), the lamps flush and wrapping (`corner_close_c.png`, `corner_close_2115_c.png`, `front34_2110_c.png`, `front34_2115_c.png`, `front_2110_left_c.png`), the side on the drawing (`ov_side.png`, `ov_front.png`: the bumper's side runs to the arch on the drawn line), lamps at night with the hazards (`night_kit_vaz2110.png`, `night_kit_vaz2115.png`); 15 WebGL programs linked after boot and still 15 after showing, opening and lighting both cars.
 
 Lab after the fourth review (`/tmp/vaz2110/lab6/`): rear corners of the 2110 and 2115 (`rear_kit_vaz2110.png`, `rear_kit_vaz2115.png`, `after_rear.png` against `before_rear.png`), the Samaras' raked faces (`after_front.png`), lamps at night with hazards, brake and reverse on the 2108, 2110 and 2115 (`night.png`); 15 programs after boot and still 15 after opening every part and lighting the three cars.
@@ -236,7 +238,7 @@ Owner's review round with the 2112 (`/tmp/vaz2112/draft2/` … `draft4/`):
 - **Bonnet:** the cut follows the deck's edge 10 mm in, but the model's shoulder (40 mm) stays on the body, so a narrow strip of wing top shows beside the bonnet that the car does not have; the nose's sides are straight.
 - **Rear door:** the trim behind the raked edge is a flat lining, no pocket or speaker.
 - **Dash:** heights hung from the Samara's cluster (no side view of the dash), the left of the cluster placed by symmetry, the wheel's size unmeasured; the end caps' depth is an estimate (the handle must show past it), and the passenger's lower half keeps the -0.34 face (the glovebox lid's foot is lower, -0.41); not drawn: the vent pod's frame and slider, the clock panel, the ignition-lock boss, the armrest grip around the inner handle.
-- **Triangles:** 14 775, above the 8–13k of the other cars (set aside by the owner).
+- **Triangles:** 13 723 (14 775 at first build), above the 8–13k of the other cars (set aside by the owner).
 - Licences of the photos are as listed; the CC BY-SA ones were used for reading only.
 
 ## 8. VAZ-2112 (`BODY_2112`, `LOOK_2112`)
@@ -270,6 +272,8 @@ Owner's review round with the 2112 (`/tmp/vaz2112/draft2/` … `draft4/`):
 ### Result
 
 `kit_vaz2112`: **14 705 triangles** (body + trim 7 539, cabin 3 833, bay 1 307, boot 50, underbody 632, wheels 1 344; 8 883 beyond 25 m), bounds ±0.935 × 0.170…1.424 × ±2.091. Lab (`/tmp/vaz2112/draft*/`, `final/`): the side overlay on the drawing, front and rear 3/4, the tailgate and spoiler open and closed, lamps at night (`final/night.png`), 15 programs after boot and after exercising.
+
+After the 2026-10-15 simplicity round: **13 634 triangles** (body + trim 6 349, cabin 4 794, bay 627, boot 60, underbody 460, wheels 1 344; 7 693 beyond 25 m), bounds unchanged; body paint 3 035 → 2 105 triangles (slivers 272 → 212, zero-area 116 → 15), `kit_tail` 152 → 28. Renders `/tmp/tail2112/r2/`. The tail lamp's flank pieces fold 5° along one diagonal (half the skin's own twist between the stations 3.95 and 4.1, half `rearLean`); the owner left it.
 
 ### Gaps
 

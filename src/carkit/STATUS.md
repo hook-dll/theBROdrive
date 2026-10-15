@@ -34,7 +34,8 @@ fully interactive interior, eventually replacing the pack bodies in the world.
 indicator and reversing lamps.
 
 **Budget**: ≈ 8–13k triangles per car; LOD at 50 m (cabin, bay, boot and underbody not
-drawn; the glass an opaque mirror from 45 m).
+drawn; the glass an opaque mirror from 45 m). Since 2026-10-15 every car's flat runs are
+merged after it is built (`simplifyFlats`): 10.2–13.7k triangles, 8–18% fewer than before.
 
 **Wheels**: the Soviet pack's wheel sets, each of the six designs equally likely, rescaled
 to the kit tyre. The kit's five generated wheel styles were removed at the owner's request.
@@ -111,7 +112,10 @@ spec fields are in README's Spec reference; 12 092 triangles (README budget tabl
   width at the lamps (photo: lamps 0.41–0.97 of the half width), tall head lamps
   (0.645–0.772), a shallow flush bumper (0.27 deep) with its grey band at plate height in
   line with the door mouldings (0.505 / 0.09), a dark intake strip under it, fog lamps low
-  at the corners; 12 309 triangles.
+  at the corners; 12 309 triangles. Round of 2026-10-15: the rear bumper flush and wrapped
+  along the wings to the rear arch as the front one is (it stood out as a box, "too
+  massive against the front"), a one-chamfer corner on both, the fog lamps 15 mm inboard;
+  12 224 triangles after the flat-run merge.
 
 **2110 — done**: its own shell on the `samara` platform with its own dash
 (`CABIN_2110`), sibling `sv_vaz21099` with the label "VAZ-2110" (the 2115 precedent), the
@@ -140,7 +144,11 @@ the knee over the lamps and its lower panel to the bumper between corner lamps (
 tail, `rearLean` 0.2), the lamps wrapping 0.18 onto the wings, a reversing lamp at each
 end of the tailgate with a red bar between, a tall flush rear bumper, and a wing on the
 tailgate's glass with the high brake lamp (`spoiler` on a tailgate). Sibling `sv_vaz21099`
-with the label "VAZ-2112"; 14 705 triangles; dash `CABIN_2110`.
+with the label "VAZ-2112"; dash `CABIN_2110`. Round of 2026-10-15: the tail lamps flat
+pieces bent once round the corner (no mosaic), the panel above them and the flank in
+fewer, fatter triangles (the flat-run merge; slivers in the body paint 272 → 212, zero-area
+116 → 15), no filler cup through the closed flap, a one-chamfer rear bumper corner; 13 634
+triangles (2110: 13 723).
 
 2112 gaps left (`measurements-2110.md` §8): the tailgate's opening between the lamps is
 ±0.545 (photo ±0.50); the flap's place is the drawing's, not checked on a right-side
@@ -188,6 +196,8 @@ slot (as on the 2115).
   chassis stamp under the aim, so a sticker on a door, lid, flap or drop glass moves with
   it and one aimed at an open door lands on the door.
 - **Shaders**: checked in the world (2026-10-13), see the CHANGELOG entry for the counts.
+  The car lab links 15 programs after boot; with the kit cars at night, lamps on and parts
+  open the count is the same on HEAD and on the flat-run merge (2026-10-15).
   A kit car's anchor (`buildProgramAnchor`) holds its driving clone, a wreck and a
   courier; LOD, opening parts and a door's sticker layer change only visibility, uniforms
   and transforms.
@@ -196,6 +206,11 @@ slot (as on the 2115).
   covered from every exterior viewpoint by what a mid or far car still draws (0 slits).
   HISTORY.md "Z-fighting at every distance". The scanner is a gate (2026-10-15): it exits
   1 on any visible cluster or slit, so rerun it after any generator or spec change.
+- **Flat runs** (2026-10-15): `simplifyFlats` merges every car's coplanar same-colour
+  triangles and drops zero-area ones. Left: slivers where a surface genuinely bends in
+  small steps (bumper sweeps, the rounded rear-door edge on the tens), and the 5° diagonal
+  fold in each flank piece of the tens' tail-lamp lens (half the body's own twist there,
+  half `rearLean`; the owner left it as is).
 - **Cabin lining** (2026-10-15): above the belt the lining is the shell's greenhouse and
   roof set `LINING_DEPTH` in (`ShellResult.lining`), so it ends at every pane and opening;
   rubber runs from each pane to the frame's inner side. Left: thin slivers of paint in the
