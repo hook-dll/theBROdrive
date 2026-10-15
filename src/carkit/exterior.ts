@@ -955,8 +955,10 @@ const WIPER_PIVOT_BELOW = 0.015;
 const WIPER_SWEEP = 1.75;
 const WIPER_SWEEP_MIN = Math.PI / 2;
 /**
- * A parked arm lies at most this steep, low along the screen's foot; where a screen
- * curved in plan lifts its foot towards the pillar too far for that, at most the second.
+ * A parked arm lies at most this steep, low along the screen's foot: the longest arm that
+ * parks so. Where a screen curved in plan lifts its foot towards the pillar too far for
+ * that (the tens'), at most the second, and then the arm that parks lowest, shortened as
+ * far as that takes: the longest one there stood up to 45° across the driver's view.
  */
 const WIPER_PARKS = [(20 * Math.PI) / 180, (45 * Math.PI) / 180];
 /** The blade keeps this far inside the pane's sides and top: the pillars and header stand proud. */
@@ -1045,7 +1047,8 @@ function buildWipers(ctx: KitContext): void {
     /**
      * Arm length, park and sweep about the present axis: the longest arm whose blade,
      * upright, stays on the pane, that parks low along the foot and still sweeps 90°
-     * between the pillars.
+     * between the pillars; failing that, of the arms that park within the steeper limit
+     * and sweep 90°, the one parked lowest (the longest of those).
      */
     const fit = (): void => {
       let top = 0;
@@ -1053,7 +1056,8 @@ function buildWipers(ctx: KitContext): void {
         if (onPane(point(Math.PI / 2, r, q), n)) top = r;
         else if (top > 0) break;
       }
-      for (const steepest of WIPER_PARKS) {
+      for (const [pass, steepest] of WIPER_PARKS.entries()) {
+        let low: [number, number, number] | null = null;
         for (arm = top - blade / 2; arm > blade / 2; arm -= 0.01) {
           rest = Number.NaN;
           for (let phi = 0; phi <= steepest; phi += WIPER_STEP) {
@@ -1065,7 +1069,13 @@ function buildWipers(ctx: KitContext): void {
           if (Number.isNaN(rest)) continue;
           sweep = 0;
           while (sweep + WIPER_STEP <= WIPER_SWEEP && bladeOn(rest + sweep + WIPER_STEP, arm)) sweep += WIPER_STEP;
-          if (sweep >= WIPER_SWEEP_MIN) return;
+          if (sweep < WIPER_SWEEP_MIN) continue;
+          if (pass === 0) return;
+          if (!low || rest < low[1]) low = [arm, rest, sweep];
+        }
+        if (low) {
+          [arm, rest, sweep] = low;
+          return;
         }
       }
       throw new Error(`Kit car "${spec.id}": wiper ${i} cannot sweep 90° on the glass`);

@@ -171,6 +171,32 @@ Commons was searched through the API and every file in the VAZ-2110/2111/2112, L
 
 New optional `Layout` fields (absent on every other dash, proved by hashes): `vents[].half` (the opening's size; the default reproduces the old slats exactly) and `heater` (a black panel with chrome-ringed knobs, `trim` and `chrome` slots only).
 
+### 4.1 Dash massing, door card, stalk (owner's review with the 2112, 2026-10-15)
+
+The owner, sitting in the 2112: the dash covers the closed doors' handles and winders and the knees; the wiper stalk cannot be worked.
+
+| Source | Shows |
+|---|---|
+| SergeyRod (3) above, crop x 150-850, y 100-800 (`/tmp/cabin2110/ph/sp3_left.jpg`) | The driver's door past the end vent's pod: its inner handle level with the vent, and the door's panel open below the pod down to the floor; the knee panel under the column only. |
+| vaz-rukovodstvo.ru 8-10 "Снятие обшивки передней и задней двери" (repair manual photos `15-obivdvaz.jpg`, `23-obivdvaz.jpg`) | Front door card with the armrest grip off: the inner handle's lever through the grip's top (step 5: "выведя ручку замка из отверстия ручки подлокотника"), the crank's shaft below it, the pocket and speaker at the bottom. |
+| vaz-rukovodstvo.ru 8-15 "Снятие приборной панели" (`0snpanel-13vaz.jpg`, `0snpanel-20vaz.jpg`) | The dash's lower ends stand forward at the kick panels (the fuse block's housing over the bonnet release on the left). |
+| Parts catalogues: oximo.com.ua, 2dvornika.com.ua, akb.ru, avtoskazka.com (part 2110-5205070) | Wiper blades 500 mm driver's and passenger's [F]. |
+
+Door card [P manual 15, read on a door seen at a slant, so a little further back than drawn]: the card spans x 165-1050 at the belt (front edge at 1050), the belt at y 225, the door's bottom at y 790. Inner handle (x 735-845, y 330): **29%** of the length behind the front, **19%** of the height under the belt; crank shaft (865, 530): **21%** behind, **54%** down. On the 2110's 1.0 m card, 0.64 m tall: `frontDoor` handle **[0.30, -0.12]**, crank **[0.22, -0.35]** (was 0.13 / -0.085 and 0.35 / -0.35, the generator's rule).
+
+Dash (`dashLoft`, sections ds, dy as `dash`):
+
+| | Before | After | Source |
+|---|---|---|---|
+| Over the glovebox and the stack (x -0.93 to 0.2 of the half width, + = driver's side) | face to -0.34 at ds 0.455, underside -0.37 / -0.38 | unchanged (`DASH_2110`) | glovebox lid's foot -0.41 [P] |
+| Before the driver (x 0.55-0.93) | the same | face to **-0.29** at ds **0.443** (on the same 13.5° face), lip -0.315, underside **-0.33**, firewall -0.30 (`DASH_2110_DRIVER`) | knee panel's foot y 555 → -0.29 [P] |
+| Ends (x ±1, the last 4.7 cm of the ±0.669 half width) | the full section, 0.378-0.455 deep | top to ds 0.255, face 0.262-**0.275** down to **-0.14**, underside to (0.10, -0.33) (`DASH_2110_END`) | door past the pod, open below it [P]; lower ends forward at the kick panels [P manual]; depth [E]: the handle at 0.30 must show past it |
+| End vents | ±0.599 (half width - 0.07) | **±0.58** | read 0.617 (302 px outboard of the column at 0.85 mm/px, ±15%), kept on the full face inside the caps |
+
+From the driver's eye (headless rays at the part's vertices, first hit): inner handle levers 0/36 → 24/36 (driver's), 0/36 → 14/36 (passenger's); cranks 135/204 → 199/204 (driver's), 36/204 → 0/204 (passenger's: now 0.13 further forward, behind the glovebox's end); wiper stalk 128/168 before and after (the 2107's 121): its geometry was never the problem (the pick refused its control id, HISTORY.md).
+
+Wipers [F, generator]: blades **0.50** (was 0.51). No arm parks within 20° on the screen curved in plan, so the fit falls back to 45°; there the arm that parks lowest is now taken. Driver's arm reach 0.619 → **0.583**, its parked tip 0.191 → **0.084** over the spindle (passenger's 0.071); sweep 100° / 96°.
+
 ## 5. Generator changes
 
 All optional; absent, a car builds exactly as before.
@@ -209,7 +235,7 @@ Owner's review round with the 2112 (`/tmp/vaz2112/draft2/` … `draft4/`):
 - **Lamps:** where the nose's skin twists between the face station and the next (the lamp top's corner leans in from 0.648 to 0.585), the lens follows a small twist. The smoked rear cells are drawn amber (indicators); the rear fog lamp is not modelled. The lid's side edge on the tail face is the generator's 25 mm wall, not the drawing's 82 mm slant.
 - **Bonnet:** the cut follows the deck's edge 10 mm in, but the model's shoulder (40 mm) stays on the body, so a narrow strip of wing top shows beside the bonnet that the car does not have; the nose's sides are straight.
 - **Rear door:** the trim behind the raked edge is a flat lining, no pocket or speaker.
-- **Dash:** heights hung from the Samara's cluster (no side view of the dash), one section across the width (the passenger side goes lower), the left of the cluster placed by symmetry, the wheel's size unmeasured; not drawn: the vent pod's frame and slider, the clock panel, the ignition-lock boss.
+- **Dash:** heights hung from the Samara's cluster (no side view of the dash), the left of the cluster placed by symmetry, the wheel's size unmeasured; the end caps' depth is an estimate (the handle must show past it), and the passenger's lower half keeps the -0.34 face (the glovebox lid's foot is lower, -0.41); not drawn: the vent pod's frame and slider, the clock panel, the ignition-lock boss, the armrest grip around the inner handle.
 - **Triangles:** 14 775, above the 8–13k of the other cars (set aside by the owner).
 - Licences of the photos are as listed; the CC BY-SA ones were used for reading only.
 

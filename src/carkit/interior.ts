@@ -206,6 +206,15 @@ interface Layout {
   readonly console?: { readonly ds0: number; readonly ds1: number; readonly height: number };
   /** Dash section (ds, dy) from the top's run round to the firewall; its front point follows the deck. */
   readonly dash: readonly P2[];
+  /**
+   * The dash's section across the car, where one section cannot serve the whole width:
+   * `[x, section]` pairs from the passenger's end (-1) to the driver's (+1), `x` a fraction
+   * of the dash's half width, each section with as many points as `dash`, lofted
+   * between. Absent: `dash` at -1, -0.55, 0, 0.55 and 1. The fascia's line and every
+   * fitting on it stay where `fascia` puts them, so a section that ends higher or
+   * further forward must not reach under one.
+   */
+  readonly dashLoft?: readonly (readonly [number, readonly P2[]])[];
   /** Fascia face, top and bottom (ds, dy): lids and switches mount on it. */
   readonly fascia: readonly [P2, P2];
   /** Wood-look band on the fascia (dy bottom, top). */
@@ -239,6 +248,12 @@ interface Layout {
   readonly radio: P2;
   readonly ashtray: P2;
   readonly hazard: P2;
+  /**
+   * The front doors' inner handle and window crank: metres behind the card's front edge
+   * and `dy` from the door's belt. Absent: the handle 0.13 behind the front at -0.085, the
+   * crank 0.35 behind it at -0.35.
+   */
+  readonly frontDoor?: { readonly handle: P2; readonly crank: P2 };
   /** The light switch; on the cluster face its `dy` is a height like a gauge's `up`. */
   readonly lights: { readonly right: number; readonly dy: number; readonly kind: 'knob' | 'rocker'; readonly on?: 'fascia' | 'cluster' };
   /**
@@ -499,6 +514,22 @@ export const CABIN_2107: CabinLayoutOverride = {
 // below the dials' centres (y 215) at 0.9 mm/px. Pixels (x, y) are on the first photo's
 // 1600 x 1200 original; the readings are in measurements-2110.md ("Dashboard").
 
+/** The 2110's dash section over the stack and the glovebox (`CABIN_2110.dash`). */
+const DASH_2110: readonly P2[] = [
+  [0.22, -0.005], [0.33, 0.008], [0.365, 0.002], [0.378, -0.02], [0.455, -0.34],
+  [0.42, -0.37], [0.15, -0.38], [0.045, -0.33], [0.045, -0.12],
+];
+/** Before the driver: the same face down to the knee panel's foot, -0.29. */
+const DASH_2110_DRIVER: readonly P2[] = [
+  [0.22, -0.005], [0.33, 0.008], [0.365, 0.002], [0.378, -0.02], [0.443, -0.29],
+  [0.415, -0.315], [0.15, -0.33], [0.045, -0.3], [0.045, -0.12],
+];
+/** At the doors: an end cap 0.11-0.12 m shallower, its foot at -0.14, its underside down to the firewall. */
+const DASH_2110_END: readonly P2[] = [
+  [0.17, -0.005], [0.235, 0.004], [0.255, 0], [0.262, -0.02], [0.275, -0.14],
+  [0.255, -0.165], [0.1, -0.33], [0.045, -0.33], [0.045, -0.12],
+];
+
 /**
  * VAZ-2110: a tall fascia leaning back to a long sloping top, a deep hood over the
  * cluster (tachometer left, speedometer right, a small dial outboard of each) with two
@@ -508,12 +539,20 @@ export const CABIN_2107: CabinLayoutOverride = {
  */
 export const CABIN_2110: CabinLayoutOverride = {
   // A tall face leaning back 13.5 degrees as the stack does, from under the top's rounded
-  // edge down to -0.34: between the driver's knee panel's foot (y 555, -0.29) and the
-  // glovebox lid's (y 690, -0.41), since one section serves the whole width. The top
-  // falls to it from the screen, as the large top seen past the stack does.
-  dash: [
-    [0.22, -0.005], [0.33, 0.008], [0.365, 0.002], [0.378, -0.02], [0.455, -0.34],
-    [0.42, -0.37], [0.15, -0.38], [0.045, -0.33], [0.045, -0.12],
+  // edge down to -0.34 over the stack and the glovebox (its lid's foot is lower still,
+  // y 690, -0.41). The top falls to it from the screen, as the large top seen past the
+  // stack does.
+  dash: DASH_2110,
+  // The driver's half stops at the knee panel's foot (y 555, -0.29) on the same face, its
+  // underside 5 cm higher, and both ends are shallow end caps: on the photo the door
+  // shows past the end vent's pod, its inner handle level with the vent and the door's
+  // panel open below it to the floor, and the manual's pictures of the dash's removal
+  // (vaz-rukovodstvo.ru 8-15) show its lower ends forward at the kick panels. Over the
+  // last 5 cm the face runs forward to an end at ds 0.26-0.275 down to -0.14, its
+  // underside then down to the firewall: the door card's handle and crank show past it.
+  dashLoft: [
+    [-1, DASH_2110_END], [-0.93, DASH_2110], [-0.55, DASH_2110], [0, DASH_2110],
+    [0.2, DASH_2110], [0.55, DASH_2110_DRIVER], [0.93, DASH_2110_DRIVER], [1, DASH_2110_END],
   ],
   fascia: [[0.378, -0.02], [0.455, -0.34]],
   // Hood over the cluster, standing proud of the face. Half width: the cluster's centre
@@ -542,10 +581,13 @@ export const CABIN_2110: CabinLayoutOverride = {
   // The light switch mirrors the top one on the left flank: no photo shows that flank.
   rockers: { on: 'cluster', at: [[0.15, 0.078], [0.15, 0.022]] },
   lights: { right: -0.15, dy: 0.078, kind: 'rocker', on: 'cluster' },
-  // End vents: the driver's (x 500, y 300) about 0.08 square, lowered 8 mm to clear the
-  // hood. The centre pair 0.1 x 0.075 each, 130 px apart (x 1126, 1255; y 311).
+  // End vents: the driver's (x 500, y 300) about 0.08 square, 302 px (0.257) outboard of
+  // the column (x 0.617), lowered 8 mm to clear the hood; set at ±0.58 so they stay on
+  // the face inside the end caps. The centre pair 0.1 x 0.075 each, 130 px apart (x 1126,
+  // 1255; y 311).
   vents: [
-    { dy: -0.07, half: [0.04, 0.04] },
+    { x: 0.58, dy: -0.07, half: [0.04, 0.04] },
+    { x: -0.58, dy: -0.07, half: [0.04, 0.04] },
     { x: 0.056, dy: -0.07, half: [0.05, 0.038] },
     { x: -0.056, dy: -0.07, half: [0.05, 0.038] },
   ],
@@ -566,6 +608,13 @@ export const CABIN_2110: CabinLayoutOverride = {
   // quarter); the rim's tube 30 px across on a 250 px radius. Size is the Samara's: no
   // photo scales the wheel.
   wheel: { ...LAYOUTS.samara.wheel, rim: 0.011, spokes: [-40, 220] },
+  // Front door card (vaz-rukovodstvo.ru 8-10, the card with its armrest grip off): the
+  // inner handle's lever stands at the grip's top, 29% of the card's length behind its
+  // front edge and 19% of its height under the belt; the crank's shaft 21% behind the
+  // front and 54% down. On a 1.0 m card 0.64 m tall (belt 0.94, door bottom 0.30), read
+  // on a door seen at a slant, so a little further back than drawn: 0.30 / -0.12 and
+  // 0.22 / -0.35.
+  frontDoor: { handle: [0.3, -0.12], crank: [0.22, -0.35] },
 };
 
 /**
@@ -1266,9 +1315,10 @@ class Cabin {
       half = Math.min(half, this.glassX(cowl + ds, top) - 0.085, f.sideX(cowl + ds, belt - 0.15) - 0.085);
     }
     b.color(look.dash);
-    this.prismX(b, 'trim', [-half, -0.55 * half, 0, 0.55 * half, half], (x) => [
+    const loft = new Map((L.dashLoft ?? [-1, -0.55, 0, 0.55, 1].map((k) => [k, L.dash] as const)).map(([k, section]) => [k * half, section]));
+    this.prismX(b, 'trim', [...loft.keys()], (x) => [
       [cowl + 0.012, f.deckY(cowl + 0.012, x) - 0.012],
-      ...L.dash.map(([ds, dy]): P2 => [cowl + ds, belt + dy]),
+      ...loft.get(x)!.map(([ds, dy]): P2 => [cowl + ds, belt + dy]),
     ]);
     this.prismX(b, 'trim', [this.x0 - L.binnacleHalf, this.x0 + L.binnacleHalf], () => L.binnacle.map(([ds, dy]): P2 => [cowl + ds, belt + dy]));
     if (L.stack) {
@@ -1840,8 +1890,9 @@ class Cabin {
       // normals, wanders a millimetre or so either side of that line, and the two stay
       // apart in depth from the road. The lever and the lock knob are the door's fine
       // detail (`fineDetail`), built apart from the card; the recess stays with it.
-      const hs = s0 + (front ? 0.13 : 0.1);
-      const hy = belt - 0.085;
+      const fd = front ? this.lay.frontDoor : undefined;
+      const hs = s0 + (fd ? fd.handle[0] : front ? 0.13 : 0.1);
+      const hy = belt + (fd ? fd.handle[1] : -0.085);
       b.quad('trim', card(hs - 0.05, hy - 0.022, 0.0075), card(hs + 0.05, hy - 0.022, 0.0075), card(hs + 0.05, hy + 0.022, 0.0075), card(hs - 0.05, hy + 0.022, 0.0075));
       const fit = new PartBuilder().color(COLOURS.black);
       beam(fit, 'chrome', card(hs + 0.035, hy, 0.008), card(hs - 0.03, hy, 0.012), 0.006, 0.007);
@@ -1863,8 +1914,8 @@ class Cabin {
       // Window crank: four turns over the window's travel.
       const window = `window_${pos}`;
       if (!this.ctx.nodes.has(window)) continue;
-      const cs = s0 + (front ? 0.35 : 0.28);
-      const cy = belt - 0.35;
+      const cs = s0 + (fd ? fd.crank[0] : front ? 0.35 : 0.28);
+      const cy = belt + (fd ? fd.crank[1] : -0.35);
       const at = card(cs, cy, 0.006);
       const control: KitControl = { id: `crank_${pos}`, label: `Стеклоподъёмник, ${pos.startsWith('f') ? 'передняя' : 'задняя'} ${pos.endsWith('l') ? 'левая' : 'правая'} дверь`, action: { type: 'toggle', channel: window } };
       fineDetail(this.hinge(group, door.pivot, `crank_${pos}`, at, { channel: window, kind: 'rot', axis: [1, 0, 0], amount: side * 8 * Math.PI }, control, (c) => {

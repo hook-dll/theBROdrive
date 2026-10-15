@@ -294,6 +294,38 @@ Format of an entry: **Problem** → **Cause** → **Fix** → *Code* (commit).
   ahead of the arch, its foot at the band's bottom (0.255) in line with the sill (0.258);
   the indicator is part of the corner lamp (previous entry). *spec.ts, exterior.ts,
   tens.ts*.
+- **2112: the wiper stalk could not be worked from the driver's seat.** → Not the 2112's
+  geometry (from the driver's eye 128 of 168 rays reach the stalk first; the 2107's 121):
+  the seated pick (`aimKit`, player/interaction.ts) refused every part whose control id
+  was `wipers`, meant for the arms on the glass, and the stalk carries the same id, so no
+  kit car's wiper stalk was ever offered since the stalk and crank rule (9bb953e). → The
+  arms are told by their node (`wiper_<i>`), not their control id. Every kit car's stalk
+  works again; the arms still offer nothing. *player/interaction.ts `KIT_WIPER_ARM`*.
+- **2110/2112: the dash hid the closed doors' inner handles and window winders and came
+  down over the knees; "far too massive".** → One section served the whole width: the
+  face down to -0.34 at ds 0.455 (between the knee panel's -0.29 and the glovebox's
+  -0.41) ran to the end caps at ±0.67, 0.38-0.455 deep, and the door card's handle
+  (0.13 behind its front) and crank lay alongside it, the handle inside the cap's reach:
+  from the eye none of 36 rays at either handle and 135 / 36 of 204 at the cranks reached
+  them. On the photo the door shows past the end vent's pod, open below it to the floor,
+  and the manual's door card has the handle at the armrest grip's top, 0.3 back. →
+  `dashLoft`
+  (optional, absent on every other car): the section over the stack and glovebox as
+  before, the driver's half down to the knee panel's -0.29 (underside 5 cm higher), the
+  last 5 cm of each end running forward to a cap 0.26-0.275 deep down to -0.14; end
+  vents at ±0.58 on the face; `frontDoor` puts the 2110's handle and crank where the
+  manual's card has them (0.30 / -0.12, 0.22 / -0.35). Now 24 / 14 of the handles' 36
+  rays and 199 of the driver's crank's 204 reach them; the passenger's crank, 0.13
+  further forward as on the car, is behind the glovebox from the driver's seat. Hashes:
+  every other car identical. *interior.ts `CABIN_2110`, `DASH_2110*`, `Layout.dashLoft`,
+  `Layout.frontDoor`*.
+- **2110/2112 wipers parked in an odd position, blocking the view.** → No arm with the
+  0.51 blade parks within 20° on the tens' screen, curved in plan, so the fit fell back to
+  45° and kept the longest arm there: the driver's stood up the glass, its tip 0.19 m over
+  its spindle. → In the 45° fallback the arm that parks lowest wins (the longest of
+  those); blades 0.50 (both 500 mm, part 2110-5205070). The driver's arm is 36 mm shorter
+  and its tip 0.084 m up, as low as the passenger's; the other cars park within 20° and
+  are identical. *exterior.ts `buildWipers` `fit`, tens.ts `wiperBlade`*.
 
 ## World (2026-10-13)
 

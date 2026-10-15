@@ -425,10 +425,12 @@ const KIT_LID_PART = /^(bonnet|boot|tailgate)$/;
 /**
  * Parts worked only through their own control: a door's pane by its crank
  * (`crank_*`), the wiper arms by the stalk (`stalk_wipers`). The pane is looked
- * through like fixed glass; an arm stops the ray and offers nothing.
+ * through like fixed glass; an arm stops the ray and offers nothing. The arms are told
+ * by their node (`wiper_<i>`, exterior.ts `buildWipers`), not their control: the stalk
+ * carries the same `wipers` control id, and matching the id hid the stalk as well.
  */
 const KIT_PANE_PART = /^window_/;
-const KIT_WIPER_ARMS = 'wipers';
+const KIT_WIPER_ARM = /^wiper_\d+$/;
 
 /** A front seat's parts, by the channel's position; the rear bench is `KIT_BENCH_NODE`. */
 const KIT_FRONT_SEAT = /^(?:seat|seatback|headrest)_(f[lr])$/;
@@ -1657,7 +1659,7 @@ export class Interaction {
       if (
         picked
         && !pane
-        && picked.control.id !== KIT_WIPER_ARMS
+        && !KIT_WIPER_ARM.test(picked.node.name)
         && !KIT_VEHICLE_CHANNELS[kitAction(picked.control).channel]
         && !KIT_SEAT_PART.test(picked.control.id)
         && (seated ? !KIT_LID_PART.test(picked.control.id) : KIT_SHELL_PART.test(picked.control.id))

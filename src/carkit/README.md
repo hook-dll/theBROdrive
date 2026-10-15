@@ -254,7 +254,7 @@ author.
 | `glassBottom`, `glassTop` | Side glass: bottom above the belt, top below the rail. |
 | `screenBottom`, `screenHeader` | Windscreen base strip above the cowl, header below the rail. |
 | `screenFoot?` | How far ahead of the cowl the windscreen's foot stands on the centre line, fading to nothing at the corners (1 − frac²): a screen curved in plan, more raked in profile; the bonnet ends that far forward (`BodyFrame.bonnetRear`), the scuttle between. The Samaras 0.15, the tens 0.156 (drawings). |
-| `wiperBlade` | Windscreen wiper blade length (parts catalogues: the classics 0.33, the Samaras and tens 0.51). The arms, their park and sweep are fitted to the glass (`buildWipers`). |
+| `wiperBlade` | Windscreen wiper blade length (parts catalogues: the classics 0.33, the Samaras 0.51, the tens 0.50). The arms, their park and sweep are fitted to the glass (`buildWipers`): the longest arm that parks within 20°, else the one parking lowest within 45° (the tens' screen, curved in plan). |
 | `rearBottom`, `rearHeader` | Same for the back light. |
 | `rearKnee?` | `{ s, y }` on the centre line where a hatch's tailgate folds: glass above, painted panel below. Absent: the back light runs straight to its base. |
 | `pillar` | Pillar strip width at the windscreen and back-light edges. |
@@ -393,9 +393,12 @@ the paint slot, so it takes the car's colour, dust, scratches and stickers).
 `Partial<Layout>` (interior.ts) over the platform's layout. Fields a car may change: seat
 `hip`, rear `bench` (`{ from: 'rearBase' | 'hip', offset }`; the estates pull it forward),
 `cushion`/`benchCushion`, `recline`, `bolsters`, `seatX`, toe board, `tunnel`, `console`,
-the `dash` and `fascia` sections, `wood` band, `binnacle` and `cluster`, `gauges` (round or
+the `dash` and `fascia` sections, `dashLoft` (sections across the width where one cannot
+serve it: the 2110's driver's half up to the knee panel and shallow end caps at the
+doors), `wood` band, `binnacle` and `cluster`, `gauges` (round or
 ribbon), steering `wheel` (position, rake, radius, spokes, hub), `pedals`, `gear`,
-`handbrake`, `glovebox`, `radio`, `ashtray`, `hazard`, `lights` switch, `vents` (each with
+`handbrake`, `glovebox`, `radio`, `ashtray`, `hazard`, `frontDoor` (the front cards' inner
+handle and crank), `lights` switch, `vents` (each with
 an optional opening size `half`), `eyeballs`, `clusterFace`, `lamps` (telltales: a grid
 `cols` wide of the functions in `show`, each lit on its `tell_*` channel), `rockers`,
 `stack`, `heater?` (a heater panel with knobs: `{ dy, half, knobs, radius }`), `carpet`,
