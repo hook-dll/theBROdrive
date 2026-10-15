@@ -346,17 +346,20 @@ export type ComputeLevel = 'very_low' | 'low' | 'medium' | 'high';
 /**
  * Traffic replenishment ceilings per level: two-lane and four-lane road.
  *
- * Medium is the 12/24 the stream had when it lived in 400 m either side of the player.
- * Doubling it with the 800 m reach was meant to hold the density per metre, but the
- * cars do not spread over the window: receding cars behind are recycled and the budget
- * lives on the road ahead, so the doubled count read as twice the traffic. High is
- * 24/48: a busy road for a processor that can carry it.
+ * The ceiling counts every car alive along the 800 m of solid road either side of the
+ * player (world/ranges.ts `TRAFFIC_REACH_M`), and a car is created 500 m away or more
+ * (`TRAFFIC_UNSEEN_M`): most of a full stream is hundreds of metres off, a few pixels
+ * wide, yet each is a full physical car with its own driver. The owner played High's
+ * 24/48 and never saw more than some sixteen cars ahead and three behind; Medium felt
+ * like plenty and played much lighter. So every level is one step lighter than it was
+ * (2026-10-15): High is the old Medium's 12/24, Medium the old Low's, Low the old Very
+ * Low's, and Very Low half of that.
  */
 export const TRAFFIC_CAPS: Record<ComputeLevel, { readonly narrow: number; readonly wide: number }> = {
-  very_low: { narrow: 4, wide: 8 },
-  low: { narrow: 8, wide: 16 },
-  medium: { narrow: 12, wide: 24 },
-  high: { narrow: 24, wide: 48 },
+  very_low: { narrow: 2, wide: 4 },
+  low: { narrow: 4, wide: 8 },
+  medium: { narrow: 8, wide: 16 },
+  high: { narrow: 12, wide: 24 },
 };
 
 function computeLevel(value: unknown): ComputeLevel | null {
@@ -685,7 +688,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // Off by default; a joke should be opted into, not discovered mid-drive.
   bouncyCars: false,
   dashboardSize: 1,
-  // 16 km of desert and the 12/24 stream; High is for a processor with room beyond them.
+  // 16 km of desert and the 8/16 stream; High is for a processor with room beyond them.
   viewDistance: 'medium',
   trafficDensity: 'medium',
 };
