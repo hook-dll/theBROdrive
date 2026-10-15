@@ -360,13 +360,12 @@ async function boot(): Promise<void> {
     if (transition) void transition.catch(() => undefined);
   };
   /**
-   * Letterboxes by changing the canvas viewport itself. Renderer.resizeViewport
-   * then updates both the drawing buffer and camera aspect, so nothing is cropped
-   * or squeezed behind the bars.
+   * Letterboxes by changing the canvas viewport itself. Renderer.setCinema then
+   * updates both the drawing buffer and camera aspect, so nothing is cropped or
+   * squeezed behind the bars, and puts the Panini lens on the film with them.
    */
   const toggleCinema = (): void => {
-    document.body.classList.toggle('is-cinematic');
-    renderer.resizeViewport();
+    renderer.setCinema(document.body.classList.toggle('is-cinematic'));
   };
 
   const vehicleLights = new VehicleLightRig(
@@ -1335,8 +1334,6 @@ async function boot(): Promise<void> {
     cabinOffset: [0, 0, 0],
     velocityX: 0,
     velocityZ: 0,
-    velocityY: 0,
-    gearLabel: '',
   };
 
   let lastInput: InputFrame = input.sample(0);
@@ -2004,7 +2001,7 @@ async function boot(): Promise<void> {
       uiRoot.style.visibility = 'hidden';
       if (!document.body.classList.contains('is-cinematic')) {
         document.body.classList.add('is-cinematic');
-        renderer.resizeViewport();
+        renderer.setCinema(true);
       }
     }
     if (interacted.sound) audio.foley(interacted.sound);
@@ -2261,8 +2258,6 @@ async function boot(): Promise<void> {
       const velocity = driving.chassis.linvel();
       target.velocityX = velocity.x;
       target.velocityZ = velocity.z;
-      target.velocityY = velocity.y;
-      target.gearLabel = driving.gearLabel;
     } else {
       const p = player.interpolatedPosition(alpha);
       // CameraRig's foot mode adds its own eye height, so hand it the FEET
@@ -2280,8 +2275,6 @@ async function boot(): Promise<void> {
       target.wheelContact = 0;
       target.velocityX = 0;
       target.velocityZ = 0;
-      target.velocityY = 0;
-      target.gearLabel = '';
     }
 
     Object.assign(cameraInput, lastInput);
@@ -2952,22 +2945,6 @@ async function boot(): Promise<void> {
     });
   }
 
-  // DEV: the shake kicks of the driving camera (render/cameras.ts KICK_OMEGA), on unless
-  // switched off from the pause menu, kept across reloads.
-  const SHAKE_KICKS_KEY = 'bro.shakeKicks';
-  let shakeKicksOn = localStorage.getItem(SHAKE_KICKS_KEY) !== 'off';
-  if (import.meta.env.DEV) camera.setShakeKicks(shakeKicksOn);
-  const devShakeKicks = {
-    get label(): string {
-      return shakeKicksOn ? 'on' : 'off';
-    },
-    cycle(): void {
-      shakeKicksOn = !shakeKicksOn;
-      camera.setShakeKicks(shakeKicksOn);
-      localStorage.setItem(SHAKE_KICKS_KEY, shakeKicksOn ? 'on' : 'off');
-    },
-  };
-
   /**
    * The pause overlay's window on the game. Settings live in world state (so a save
    * carries them), which is why every mutation routes through `world.apply` here
@@ -2977,7 +2954,6 @@ async function boot(): Promise<void> {
     settings: () => world.state.settings,
     frameReport,
     perfOverlay: perfOverlay ?? undefined,
-    shakeKicks: import.meta.env.DEV ? devShakeKicks : undefined,
     viewport: () => renderer.viewport(),
     /**
      * Throw away the recorded verdict and measure this machine again.

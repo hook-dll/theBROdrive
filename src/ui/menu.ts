@@ -754,8 +754,6 @@ export interface PauseHooks {
   frameReport?: () => string;
   /** The live performance graph across the top of the screen (ui/perfoverlay.ts). Dev only. */
   perfOverlay?: { readonly enabled: boolean; setEnabled(on: boolean): void };
-  /** The camera's shake kicks (render/cameras.ts KICK_OMEGA). Dev only. */
-  shakeKicks?: { readonly label: string; cycle(): void };
   /**
    * Record a fully fuelled car into the world.
    *
@@ -1382,10 +1380,9 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
     };
     const presetHint = (level: QualityPreset): string => {
       const quality = QUALITY_PRESET_DETAIL[level];
-      const caps = TRAFFIC_CAPS[level];
       return (
         `${formatHorizon(viewDistanceFor(level, mobilePresentation))} of desert, up to `
-        + `${caps.narrow} cars on a two-lane road. `
+        + `${TRAFFIC_CAPS[level]} cars on the road. `
         + (quality === 'retro'
           ? 'For weak mini-PCs and old laptops: the world drawn at about 360 lines as crisp '
             + 'square pixels, like a late-90s game, with lighter ground cover and no sun shadows.'
@@ -1499,8 +1496,7 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
         label,
         icon: TRAFFIC_ICONS[level],
         hint:
-          `Up to ${TRAFFIC_CAPS[level].narrow} cars on a two-lane road and `
-          + `${TRAFFIC_CAPS[level].wide} on a four-lane one. Every one is fully `
+          `Up to ${TRAFFIC_CAPS[level]} cars on the road. Every one is fully `
           + 'simulated with its own driver, so this is the processor\'s, not the '
           + 'graphics card\'s.',
         active: () => settings.trafficDensity === level,
@@ -2614,17 +2610,6 @@ export class MainMenu {
           const index = devTools.length;
           devButton(label(), () => {
             overlay.setEnabled(!overlay.enabled);
-            const btn = devTools[index];
-            if (btn) btn.textContent = label();
-          });
-        }
-        // The camera's event kicks (render/cameras.ts KICK_OMEGA) on top of the sway.
-        if (import.meta.env.DEV && hooks.shakeKicks) {
-          const kicks = hooks.shakeKicks;
-          const label = (): string => `Shake kicks: ${kicks.label}`;
-          const index = devTools.length;
-          devButton(label(), () => {
-            kicks.cycle();
             const btn = devTools[index];
             if (btn) btn.textContent = label();
           });

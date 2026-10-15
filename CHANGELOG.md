@@ -4,10 +4,36 @@
 
 ### Added
 
-- TRAFFIC KNOBS IN THE CONSOLE (`world/traffic.ts` `RoadTraffic.controlHz`, `caps`):
+- A PANINI LENS IN CINEMA MODE ONLY (`render/hazeshader.ts` `paniniSource`, `sceneTap`;
+  `core/renderer.ts` `setCinema`, `panini`; `main.ts` `toggleCinema`). `-` now gives the
+  letterbox and the lens together and takes both away; the death letterbox gets them too.
+  Panini d defaults to 0.3 and is tuned live in a dev console with
+  `__bro.renderer.panini = 0.5` (read back with `__bro.renderer.panini`; 0 is the plain
+  frame; outside cinema the value is kept and the frame stays rectilinear). Strength is a
+  uniform: 100 programs before, at Panini 0, 0.3 and 0.6, and after two cinema toggles in
+  chase and cabin. FXAA, the ink, the haze rays, the dust wall, the mirage and the sand
+  veil all read the scene through the lens; the binocular and viewfinder masks stay on
+  the screen. While the lens is on the scene target is 1.25x per axis (1.56x the scene
+  pixels) and sampled Catmull-Rom: at 0.3 the centre crop's 99.5th-percentile neighbour
+  step is 55 with it, 51 at 1x, 53 for the rectilinear frame. Normal play is untouched:
+  the new pass rendered against the old one from the same frame, FXAA on and off, differs
+  in 0 of 10.9 M bytes.
+- SHAKE KICKS REMOVED (`render/cameras.ts`, `main.ts`, `ui/menu.ts`, `mirage-lab.ts`):
+  the dev-only event jolts of the driving view (throttle/brake onset, shift, landing,
+  bump) are gone with their Pause › Shake kicks row, the `bro.shakeKicks` key and the
+  `CameraTarget.velocityY`/`gearLabel` fields only they read. The speed sway
+  (`setShake`, Camera shake setting) is unchanged.
+- TRAFFIC KNOBS IN THE CONSOLE (`world/traffic.ts` `RoadTraffic.controlHz`, `cap`):
   `__bro.traffic.controlHz = 10` sets how many decisions a second the traffic drivers
-  make (45 by default; forces stay at 60 Hz), `__bro.traffic.caps = { narrow: 6, wide:
-  12 }` overrides the menu's traffic ceilings (clamped 0-48), `= null` hands them back.
+  make (forces stay at 60 Hz), `__bro.traffic.cap = 30` overrides the menu's traffic
+  ceiling (clamped 0-48), `= null` hands it back.
+- TRAFFIC: ONE CEILING, A BIGGER STREAM, HUMAN-PACED DRIVERS (`game/settings.ts`
+  `TRAFFIC_CAPS`, `world/traffic.ts` `TRAFFIC_CONTROL_HZ`, `DENSITY_FLOOR`). The ceiling
+  no longer follows the carriageway's width: High 48 cars, Medium 24, Low 12, Very Low 6,
+  two lanes or four. The stream's target is drawn in 35-100% of it (was 70-100%), so a
+  drive swings between quiet and busy. Traffic drivers decide 12 times a second (was 45),
+  chosen by the owner after trying 45, 10 and 5 live; an obstacle is answered within
+  83 ms. A target above 24 cars still spawns faster and packs its lanes tighter.
 
 - KIT CARS IN THE FEWEST FLAT FACES (`carkit/simplify.ts` `simplifyFlats`, run by
   `carkit/kit.ts` on every car after the leans). In each builder mesh a vertex whose
@@ -58,12 +84,6 @@
   1936x1089: 1% of the pixels change, +0.4-1.0 ms of GPU. `tools/look/gpucost.mjs` A/Bs
   FXAA instead of MSAA; the no-timer attribution hint in the dev frame report now uses
   the render scale.
-
-- TRAFFIC IS ONE STEP LIGHTER AT EVERY LEVEL (`game/settings.ts` `TRAFFIC_CAPS`): High
-  12/24 cars (two-lane / four-lane), Medium 8/16, Low 4/8, Very Low 2/4, from 24/48,
-  12/24, 8/16 and 4/8. Not a bug in the count: the ceiling holds every car alive within
-  the 800 m of solid road either side of the player, created 500 m off or further, so a
-  full High stream was some twenty full physical cars of which a player sees a handful.
 
 - KIT WIPER STALK WORKS AGAIN, 2110/2112 DASH AND WIPERS (`player/interaction.ts`
   `KIT_WIPER_ARM`; `carkit/interior.ts`, `exterior.ts`, `tens.ts`). The pick refused every

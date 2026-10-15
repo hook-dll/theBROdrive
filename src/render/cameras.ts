@@ -43,10 +43,6 @@ export interface CameraTarget {
    */
   velocityX: number;
   velocityZ: number;
-  /** Vertical velocity, m/s; zero on foot. Read by the shake kicks for landings and bumps. */
-  velocityY: number;
-  /** Gearbox label ('N', 'R', '1'…); '' on foot. A change is a shift kick. */
-  gearLabel: string;
 }
 
 /* ---- tuning ---- */
@@ -178,59 +174,6 @@ const SURGE_PUSH_MAX = 0.1;
 const SURGE_OMEGA = 2.5;
 /** Measured accelerations past this (m/s²) are a crash or a teleport, not a surge. */
 const SURGE_ACCEL_CLAMP = 12;
-/**
- * SHAKE KICKS (DEV toggle `bro.shakeKicks`, on by default in dev): a short damped jolt
- * of the driving view on an event — a hard throttle or brake onset, a gear change, a
- * landing or a hard bump. Each is an impulse into a damped spring per axis (pitch, roll,
- * and the eye's drop): KICK_OMEGA with KICK_ZETA rings out in about 0.25 s with one small
- * overshoot. Amplitudes are peak angles in radians, peak drops in metres.
- */
-const KICK_OMEGA = 24;
-const KICK_ZETA = 0.5;
-/**
- * Peak of the spring's impulse response per unit initial velocity: the damped sine's
- * first crest, `exp(-ζ/√(1-ζ²) · atan(√(1-ζ²)/ζ)) / ω`, 0.546 / KICK_OMEGA at ζ = 0.5.
- */
-const KICK_PEAK_GAIN =
-  Math.exp((-KICK_ZETA / Math.sqrt(1 - KICK_ZETA ** 2)) * Math.atan(Math.sqrt(1 - KICK_ZETA ** 2) / KICK_ZETA))
-  / KICK_OMEGA;
-const DEG = Math.PI / 180;
-const KICK_MIN = 0.4 * DEG;
-const KICK_MAX = 1.2 * DEG;
-/**
- * Extra kick per m/s² past the onset threshold (accel/brake) or the bump threshold:
- * KICK_MIN at 3.5 m/s², KICK_MAX at 6 — a Lada's hard stop is ~5.5, its launch ~4.4.
- */
-const KICK_PER_MPS2 = 0.32 * DEG;
-/** A throttle kick's share of a brake kick at the same |accel|: the head is pressed back less than it is thrown. */
-const KICK_THROTTLE_SHARE = 0.8;
-/** Kick on a shift: an upshift nods the view down, a downshift tips it up. */
-const KICK_UPSHIFT = -0.5 * DEG;
-const KICK_DOWNSHIFT = 0.4 * DEG;
-/** Eye drop at a landing, metres: KICK_DROP_MIN at 2 m/s sink, KICK_DROP_MAX at 8. */
-const KICK_DROP_MIN = 0.025;
-const KICK_DROP_MAX = 0.06;
-/** Eye drop at a hard brake onset, metres, from KICK_DROP_MIN up by the brake's strength. */
-const KICK_DROP_BRAKE_MAX = 0.04;
-/**
- * Fast-follow acceleration (rad/s, tau 50 ms) the onset detector reads; the surge is too
- * slow. Still slow enough to smooth the speed's fixed-step staircase at 120 Hz.
- */
-const KICK_ACCEL_OMEGA = 20;
-/** Onset: |accel| crosses this, m/s², re-arming only below KICK_ACCEL_REARM. */
-const KICK_ACCEL_ON = 3.5;
-const KICK_ACCEL_REARM = 1.5;
-/**
- * Seconds after an onset during which a still-rising acceleration tops the kick up. The
- * fast-follow value crosses the threshold before it reaches the event's own strength, so
- * a kick sized at the crossing alone was always the minimum; the top-ups land inside a
- * quarter of the spring's period, so they add to the same crest rather than a second one.
- */
-const KICK_ONSET_WINDOW = 0.12;
-/** Touchdown after at least this long airborne counts as a landing, seconds. */
-const KICK_AIR_MIN = 0.12;
-/** Vertical speed change in one frame on the ground that counts as a bump, m/s. */
-const KICK_BUMP_DVY = 1.2;
 /**
  * THE SWAY: a slow float of the driving view at speed, which is what is left to say
  * "fast" once acceleration has settled — the wind and the dashes are then the only cues.
@@ -463,32 +406,6 @@ export class CameraRig {
   private leanVelocity = 0;
   /** Look-into-corner yaw, radians; zero in steady. */
   private steerLook = 0;
-  /** DEV shake kicks; see KICK_OMEGA. */
-  private kicks = false;
-  /** Kick springs, radians and rad/s, about the view's pitch and roll axes. */
-  private kickPitch = 0;
-  private kickPitchVel = 0;
-  private kickRoll = 0;
-  private kickRollVel = 0;
-  /** Kick spring of the eye's drop, metres (positive = down) and m/s. */
-  private kickDrop = 0;
-  private kickDropVel = 0;
-  /** Fast-follow acceleration for the onset detector, m/s², and its re-arm latch. */
-  private kickAccel = 0;
-  private kickAccelArmed = true;
-  /**
-   * The open onset: seconds left in its top-up window (KICK_ONSET_WINDOW), and the pitch
-   * (signed, radians) and drop (metres) it has delivered so far.
-   */
-  private kickOnsetLeft = 0;
-  private kickOnsetPitch = 0;
-  private kickOnsetDrop = 0;
-  /** Last frame's gear label, vertical speed, and seconds without any wheel on the ground. */
-  private kickGear = '';
-  private kickVelY = Number.NaN;
-  private kickAir = 0;
-  /** Alternates the roll direction of successive bumps so they do not all lean one way. */
-  private kickSide = 1;
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
@@ -520,27 +437,6 @@ export class CameraRig {
     this.shake = on;
   }
 
-  /** DEV: event kicks on top of the speed sway; still gated by `setShake`. */
-  setShakeKicks(on: boolean): void {
-    this.kicks = on;
-    if (!on) this.resetKicks();
-  }
-
-  private resetKicks(): void {
-    this.kickPitch = 0;
-    this.kickPitchVel = 0;
-    this.kickRoll = 0;
-    this.kickRollVel = 0;
-    this.kickDrop = 0;
-    this.kickDropVel = 0;
-    this.kickAccel = 0;
-    this.kickAccelArmed = true;
-    this.kickOnsetLeft = 0;
-    this.kickGear = '';
-    this.kickVelY = Number.NaN;
-    this.kickAir = 0;
-  }
-
   /**
    * `Settings.cameraStyle`. Applied in place, and entering `steady` clears every
    * dynamic term, so the steady camera is the camera this rig has always been rather
@@ -561,7 +457,6 @@ export class CameraRig {
     this.leanOffset = 0;
     this.leanVelocity = 0;
     this.steerLook = 0;
-    this.resetKicks();
   }
 
   /**
@@ -871,7 +766,6 @@ export class CameraRig {
     this.surgeSpeedMps = speedMps;
     this.surge += (accel - this.surge) * (1 - Math.exp(-SURGE_OMEGA * d));
     this.shakeTime += d;
-    if (this.kicks && this.shake && !onFoot) this.detectKicks(target, accel, d);
 
     // Zoom drives the chase arm only; the seat has no arm to lengthen.
     if (input.zoomDelta !== 0 && !onFoot && this._mode === 'chase') {
@@ -917,10 +811,8 @@ export class CameraRig {
 
     _mA.lookAt(this.eye, this.lookAt, mode === 'cabin' ? _cabinUp : _UP);
     this.camera.quaternion.setFromRotationMatrix(_mA);
-    // The kicks and the sway shake a camera hung off the car; from the driver's seat the
-    // cabin around the eye would visibly swim, so the cabin view takes neither.
-    const kicking = mode !== 'foot' && mode !== 'cabin' && this.kicks && this.shake;
-    if (kicking) this.applyKicks(d);
+    // The sway shakes a camera hung off the car; from the driver's seat the cabin
+    // around the eye would visibly swim, so the cabin view does not take it.
     if (mode !== 'foot' && mode !== 'cabin' && this.shake) this.applyShake(target);
     // The camera sits in the relative scene graph, so its position is the relative
     // eye verbatim — no origin arithmetic here or at any consumer. The eye is built
@@ -930,9 +822,6 @@ export class CameraRig {
     // `eyeDirection` expose that same relative eye to interaction and spawn code,
     // which also live in the relative frame, so no absolute accessor is needed.
     this.camera.position.copy(this.eye);
-    // The kicks' drop moves the rendered eye only, like their rotation: interaction rays
-    // keep the steady eye.
-    if (kicking && this.kickDrop !== 0) this.camera.position.y -= this.kickDrop;
 
     this.updateFov(d, mode !== 'foot');
   }
@@ -1109,101 +998,6 @@ export class CameraRig {
     const yaw = 0.55 * Math.sin(w * 0.7 + 2.1) + 0.3 * Math.sin(w * 1.1 + 0.3) + 0.25 * Math.sin(w * 0.45 + 4.4);
     const roll = 0.5 * Math.sin(w * 0.9 + 4.0) + 0.3 * Math.sin(w * 1.7 + 2.6) + 0.3 * Math.sin(w * 0.6 + 1.1);
     _eA.set(pitch * SHAKE_PITCH_RAD * scale, yaw * SHAKE_YAW_RAD * scale, roll * SHAKE_ROLL_RAD * scale, 'YXZ');
-    this.camera.quaternion.multiply(_qB.setFromEuler(_eA));
-  }
-
-  /**
-   * Kick: adds a peak of `pitch`/`roll` radians and an eye drop of `drop` metres to the
-   * springs; see KICK_OMEGA.
-   */
-  private kick(pitch: number, roll: number, drop = 0): void {
-    this.kickPitchVel += pitch / KICK_PEAK_GAIN;
-    this.kickRollVel += roll / KICK_PEAK_GAIN;
-    this.kickDropVel += drop / KICK_PEAK_GAIN;
-  }
-
-  /**
-   * Finds this frame's kick events: an acceleration or brake onset (the fast-follow
-   * acceleration crossing KICK_ACCEL_ON from rest), a shift between forward gears, a
-   * touchdown after KICK_AIR_MIN in the air, or a step in vertical speed on the ground.
-   */
-  private detectKicks(target: CameraTarget, accel: number, d: number): void {
-    this.kickAccel += (accel - this.kickAccel) * (1 - Math.exp(-KICK_ACCEL_OMEGA * d));
-    const a = Math.abs(this.kickAccel);
-    if (this.kickAccelArmed && a > KICK_ACCEL_ON) {
-      this.kickAccelArmed = false;
-      this.kickOnsetLeft = KICK_ONSET_WINDOW;
-      this.kickOnsetPitch = 0;
-      this.kickOnsetDrop = 0;
-    } else if (!this.kickAccelArmed && a < KICK_ACCEL_REARM) {
-      this.kickAccelArmed = true;
-    }
-    if (this.kickOnsetLeft > 0) {
-      this.kickOnsetLeft -= d;
-      // Throttle tips the view up (the head pressed back); a brake nods it down, harder,
-      // and drops the eye as the nose dives. Sized by the strongest |accel| of the window.
-      const amp = clamp(KICK_MIN + (a - KICK_ACCEL_ON) * KICK_PER_MPS2, KICK_MIN, KICK_MAX);
-      const share = (amp - KICK_MIN) / (KICK_MAX - KICK_MIN);
-      const pitch = this.kickAccel > 0 ? Math.max(KICK_MIN, amp * KICK_THROTTLE_SHARE) : -amp;
-      const drop = this.kickAccel > 0 ? 0 : KICK_DROP_MIN + share * (KICK_DROP_BRAKE_MAX - KICK_DROP_MIN);
-      if (Math.abs(pitch) > Math.abs(this.kickOnsetPitch)) {
-        this.kick(pitch - this.kickOnsetPitch, 0, Math.max(0, drop - this.kickOnsetDrop));
-        this.kickOnsetPitch = pitch;
-        this.kickOnsetDrop = Math.max(drop, this.kickOnsetDrop);
-      }
-    }
-
-    const gear = target.gearLabel;
-    if (gear !== this.kickGear) {
-      const from = Number(this.kickGear);
-      const to = Number(gear);
-      // Forward gears only, and moving: N/R selections at a standstill are not shifts.
-      if (from > 0 && to > 0 && target.speedKmh > 5) {
-        this.kick(to > from ? KICK_UPSHIFT : KICK_DOWNSHIFT, 0);
-      }
-      this.kickGear = gear;
-    }
-
-    const vy = target.velocityY;
-    if (target.wheelContact <= 0) {
-      this.kickAir += d;
-    } else {
-      if (this.kickAir >= KICK_AIR_MIN && !Number.isNaN(this.kickVelY)) {
-        // Landing: sink speed at touchdown, 2 m/s for the minimum kick, 8 for the most.
-        const sink = Math.max(0, -this.kickVelY);
-        const share = clamp((sink - 2) / 6, 0, 1);
-        const amp = KICK_MIN + share * (KICK_MAX - KICK_MIN);
-        this.kickSide = -this.kickSide;
-        this.kick(-amp, amp * 0.35 * this.kickSide, KICK_DROP_MIN + share * (KICK_DROP_MAX - KICK_DROP_MIN));
-      } else if (!Number.isNaN(this.kickVelY) && Math.abs(vy - this.kickVelY) > KICK_BUMP_DVY) {
-        const dv = Math.abs(vy - this.kickVelY);
-        const amp = clamp(KICK_MIN + (dv - KICK_BUMP_DVY) * KICK_PER_MPS2, KICK_MIN, KICK_MAX * 0.7);
-        this.kickSide = -this.kickSide;
-        this.kick(amp * 0.6, amp * this.kickSide);
-      }
-      this.kickAir = 0;
-    }
-    this.kickVelY = vy;
-  }
-
-  /** Steps the kick springs and turns the finished driving view by them. */
-  private applyKicks(d: number): void {
-    // Semi-implicit Euler in sub-steps of at most 1/240 s: stable for KICK_OMEGA at any rate.
-    const steps = Math.ceil(d * 240);
-    const h = d / steps;
-    const w2 = KICK_OMEGA * KICK_OMEGA;
-    const c = 2 * KICK_ZETA * KICK_OMEGA;
-    for (let i = 0; i < steps; i++) {
-      this.kickPitchVel += (-w2 * this.kickPitch - c * this.kickPitchVel) * h;
-      this.kickPitch += this.kickPitchVel * h;
-      this.kickRollVel += (-w2 * this.kickRoll - c * this.kickRollVel) * h;
-      this.kickRoll += this.kickRollVel * h;
-      this.kickDropVel += (-w2 * this.kickDrop - c * this.kickDropVel) * h;
-      this.kickDrop += this.kickDropVel * h;
-    }
-    if (Math.abs(this.kickDrop) < 1e-5) this.kickDrop = 0;
-    if (Math.abs(this.kickPitch) < 1e-6 && Math.abs(this.kickRoll) < 1e-6) return;
-    _eA.set(this.kickPitch, 0, this.kickRoll, 'YXZ');
     this.camera.quaternion.multiply(_qB.setFromEuler(_eA));
   }
 

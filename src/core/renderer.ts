@@ -48,6 +48,19 @@ import type { ShadeTint } from '../items/items';
 const WALL_DUST = new SandColor(new THREE.Color(0.72, 0.42, 0.2));
 /** The distant sand veil over the horizon, likewise. */
 const SAND_VEIL = new SandColor(new THREE.Color(0.78, 0.69, 0.56));
+/**
+ * The cinema lens's Panini strength d (render/hazeshader.ts `paniniSource`) until the
+ * console knob (`Renderer.panini`) changes it. The lens is only on in cinema mode.
+ */
+const DEFAULT_PANINI = 0.3;
+/**
+ * Magnification the scene target carries while the cinema lens is on, per axis. The
+ * lens magnifies the centre about 1.2x (Panini 0.3 at the letterboxed aspect) and the
+ * target supplies that, so the Catmull-Rom tap only resamples, never upscales. Fixed
+ * rather than fitted to the strength or the FOV: tuning the lens or widening the view
+ * at speed never reallocates the target.
+ */
+const PANINI_TARGET_SCALE = 1.25;
 
 export const CAMERA_FAR = 4000;
 /**
@@ -404,6 +417,10 @@ export class Renderer {
   private readonly _drawSize = new THREE.Vector2();
   /** Reused scratch for the camera's forward vector (horizon tracking). */
   private readonly _forward = new THREE.Vector3();
+  /** Whether the cinema lens is on: cinema mode, set through `setCinema`. */
+  private cinemaLens = false;
+  /** The cinema lens's Panini strength; see `panini`. */
+  private paniniStrength = DEFAULT_PANINI;
   /**
    * Camera height above the grazed-ground line, metres, for the hot-layer
    * integration. Defaulted to a standing eye so the very first frame is sensible
@@ -588,6 +605,8 @@ export class Renderer {
         uHorizon: { value: 0.5 },
         uCameraRotation: { value: new THREE.Matrix3() },
         uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(fieldOfView) / 2) },
+        uPanini: { value: 0 },
+        uSceneResolution: { value: new THREE.Vector2(1, 1) },
         uCameraNear: { value: CAMERA_NEAR },
         uCameraFar: { value: CAMERA_FAR },
         uInkStrength: { value: Math.min(1, Math.max(0, inkStrength)) },
@@ -647,11 +666,28 @@ export class Renderer {
 
 
   /**
-   * Re-reads the canvas CSS viewport after an in-page display-mode change.
-   * Browser resizes already call the same path through the window listener.
+   * Cinema mode's share of the frame: re-reads the canvas CSS viewport after the
+   * letterbox has changed it (browser resizes already take the same path through the
+   * window listener), and turns the Panini lens on or off with it.
    */
-  resizeViewport(): void {
+  setCinema(on: boolean): void {
+    this.cinemaLens = on;
     this.resize();
+  }
+
+  /**
+   * The cinema lens's Panini strength d, live: `__bro.renderer.panini = 0.5` in a dev
+   * console. 0 is the plain rectilinear frame; outside cinema mode the value is kept
+   * for the next time and the frame stays rectilinear. A uniform, never a program.
+   */
+  get panini(): number {
+    return this.paniniStrength;
+  }
+
+  set panini(strength: number) {
+    if (!Number.isFinite(strength)) return;
+    this.paniniStrength = Math.max(0, strength);
+    this.resizeHazeTarget();
   }
 
   /**
@@ -1180,11 +1216,24 @@ export class Renderer {
     u.uFogDensity.value = frame.weatherFog;
   }
 
-  /** Size the scene-pass target to the actual drawing buffer (CSS size × pixel ratio). */
+  /**
+   * Size the scene-pass target to the drawing buffer (CSS size × pixel ratio), times
+   * `PANINI_TARGET_SCALE` while the cinema lens is on, and hand the lens its uniforms.
+   * On the retro rung the lens still warps, but the target stays at the drawing size:
+   * its pixels are the look. Three's `setSize` is a no-op at an unchanged size, so
+   * tuning the strength reallocates nothing.
+   */
   private resizeHazeTarget(): void {
     this.renderer.getDrawingBufferSize(this._drawSize);
-    this.hazeTarget.setSize(this._drawSize.x, this._drawSize.y);
-    this.hazeMaterial.uniforms.uResolution.value.set(this._drawSize.x, this._drawSize.y);
+    const uniforms = this.hazeMaterial.uniforms;
+    const lens = this.cinemaLens ? this.paniniStrength : 0;
+    const scale = lens > 0 && this.quality !== 'retro' ? PANINI_TARGET_SCALE : 1;
+    const width = Math.round(this._drawSize.x * scale);
+    const height = Math.round(this._drawSize.y * scale);
+    this.hazeTarget.setSize(width, height);
+    uniforms.uSceneResolution.value.set(width, height);
+    uniforms.uResolution.value.set(this._drawSize.x, this._drawSize.y);
+    uniforms.uPanini.value = lens;
   }
 
 

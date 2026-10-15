@@ -344,22 +344,19 @@ export function presentationFpsFor(frameRateLimit: number | null): number | null
 export type ComputeLevel = 'very_low' | 'low' | 'medium' | 'high';
 
 /**
- * Traffic replenishment ceilings per level: two-lane and four-lane road.
+ * Traffic replenishment ceiling per level: the same on a two-lane road as on a four-lane
+ * one (owner, 2026-10-15).
  *
  * The ceiling counts every car alive along the 800 m of solid road either side of the
- * player (world/ranges.ts `TRAFFIC_REACH_M`), and a car is created 500 m away or more
- * (`TRAFFIC_UNSEEN_M`): most of a full stream is hundreds of metres off, a few pixels
- * wide, yet each is a full physical car with its own driver. The owner played High's
- * 24/48 and never saw more than some sixteen cars ahead and three behind; Medium felt
- * like plenty and played much lighter. So every level is one step lighter than it was
- * (2026-10-15): High is the old Medium's 12/24, Medium the old Low's, Low the old Very
- * Low's, and Very Low half of that.
+ * player (world/ranges.ts `TRAFFIC_REACH_M`). With the kit cars down to a few draws each
+ * (render/kitdraw.ts) and the drivers deciding 12 times a second (world/traffic.ts
+ * `TRAFFIC_CONTROL_HZ`), a stream can be big: 48 on High, halving per level down.
  */
-export const TRAFFIC_CAPS: Record<ComputeLevel, { readonly narrow: number; readonly wide: number }> = {
-  very_low: { narrow: 2, wide: 4 },
-  low: { narrow: 4, wide: 8 },
-  medium: { narrow: 8, wide: 16 },
-  high: { narrow: 12, wide: 24 },
+export const TRAFFIC_CAPS: Record<ComputeLevel, number> = {
+  very_low: 6,
+  low: 12,
+  medium: 24,
+  high: 48,
 };
 
 function computeLevel(value: unknown): ComputeLevel | null {
@@ -381,11 +378,13 @@ export type FrameRateLimit = (typeof FRAME_RATE_LIMITS)[number] | null;
 /**
  * How many times a second each live mirror is redrawn, or `null` for every frame. Set
  * apart from the frame rate: each mirror is a second render of the scene, so its cost
- * is chosen on its own. 20 is one mirror a frame at 60 FPS, how they first shipped.
+ * is chosen on its own. Default every frame (owner, 2026-10-15): with every other car
+ * drawn in a mirror as its far mesh and the kit cars a few draws each, a mirror render
+ * is cheap. It shipped at 20, one mirror a frame at 60 FPS.
  */
 export const MIRROR_FRAME_RATES = [10, 15, 20, 30, 60] as const;
 export type MirrorFrameRate = (typeof MIRROR_FRAME_RATES)[number] | null;
-const DEFAULT_MIRROR_FRAME_RATE: MirrorFrameRate = 20;
+const DEFAULT_MIRROR_FRAME_RATE: MirrorFrameRate = null;
 
 /** An offered mirror rate, null (every frame) as stored, else the default. */
 export function mirrorFrameRateFrom(raw: unknown): MirrorFrameRate {
@@ -688,7 +687,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // Off by default; a joke should be opted into, not discovered mid-drive.
   bouncyCars: false,
   dashboardSize: 1,
-  // 16 km of desert and the 8/16 stream; High is for a processor with room beyond them.
+  // 16 km of desert and a 24-car stream; High is for a processor with room beyond them.
   viewDistance: 'medium',
   trafficDensity: 'medium',
 };

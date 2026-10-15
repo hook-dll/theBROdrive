@@ -18,6 +18,7 @@ import { WorldOrigin } from '../src/world/origin';
 import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
 import { roadSurfaceY, SurfaceField } from '../src/world/roadsurface';
 import { DENSITY_FLOOR, RoadTraffic, type RivalPose } from '../src/world/traffic';
+import { TRAFFIC_CAPS } from '../src/game/settings';
 import { RivalRace } from '../src/contracts/race';
 import type { ContractCargoItem } from '../src/items/items';
 import { couriersBetween } from '../src/world/couriers';
@@ -370,11 +371,10 @@ check(
   traffic.status.count === 0,
   `${traffic.status.count} cars remain`,
 );
-// THE STREAM IS SIZED BY THE ROAD, NOT BY A SETTING.
+// THE STREAM IS SIZED BY THE PROCESSOR, NOT BY THE ROAD.
 //
-// A two-lane stretch holds twelve cars and a four-lane one twenty-four, with the taper
-// between them interpolated. This is the property the menu slider used to stand in for,
-// and it is now the road's own answer.
+// One ceiling per traffic level, the same on a two-lane stretch as on a four-lane one
+// (owner, 2026-10-15): the default Medium holds `TRAFFIC_CAPS.medium` either way.
 {
   const wideS = findUniformS(road, 1);
   const narrowS = findUniformS(road, 0);
@@ -394,20 +394,17 @@ check(
   narrowTraffic.fixedUpdate(FIXED_DT, wideS, 0, 0, 0);
   const wideCap = narrowTraffic.status.cap;
   const wideTarget = narrowTraffic.status.target;
+  const expected = TRAFFIC_CAPS.medium;
   check(
-    'a two-lane stretch limits replenishment to twelve',
-    Math.abs(narrowCap - 12) < 0.01,
-    `cap ${narrowCap.toFixed(2)}`,
+    'two lanes and four hold the same ceiling',
+    narrowCap === expected && wideCap === expected,
+    `cap ${narrowCap} narrow, ${wideCap} wide, ${expected} expected`,
   );
-  check(
-    'a four-lane stretch limits replenishment to twenty-four',
-    Math.abs(wideCap - 24) < 0.01,
-    `cap ${wideCap.toFixed(2)}`,
-  );
+  const floor = Math.ceil(expected * DENSITY_FLOOR);
   check(
     'density targets stay between the floor and replenishment cap',
-    narrowTarget >= Math.ceil(12 * 0.35) && narrowTarget <= 12 && wideTarget >= Math.ceil(24 * 0.35) && wideTarget <= 24,
-    `${narrowTarget} of ${narrowCap.toFixed(0)} narrow, ${wideTarget} of ${wideCap.toFixed(0)} wide`,
+    narrowTarget >= floor && narrowTarget <= expected && wideTarget >= floor && wideTarget <= expected,
+    `${narrowTarget} narrow, ${wideTarget} wide, range ${floor}-${expected}`,
   );
   narrowTraffic.dispose();
   check(

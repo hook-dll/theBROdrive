@@ -159,7 +159,7 @@ Levels come from `RUMBLE_*` in `src/main.ts`.
 Entering the cabin faces down the car. The cabin eye is rigid with the chassis and so
 is its horizon; the mouse turns the head against the car (to look at a door, say), and
 3 s after the mouse stops the head turns back to the road by itself. There is no zoom,
-no occlusion pull-in, and neither the speed sway nor the shake kicks reach it.
+no occlusion pull-in, and the speed sway does not reach it.
 
 The eye is per car model, chassis-local metres (+X the car's left, +Y up, +Z
 forward), first match wins (`src/vehicle/cabincamera.ts`):
