@@ -94,6 +94,84 @@ function installStableShadowFilter(): void {
 }
 
 /**
+ * The sun's near cascade (render/sky.ts `sunNearLight`): a second shadow-casting
+ * directional light, black and dark in every lit program, whose map is a small box
+ * around the eye at about a fifth of the sun's texel. Directional light 0 is the sun,
+ * 1 the cascade (sky.ts adds them in that order and nothing else in the world scene is
+ * a directional light; render/comic.ts reads the sun as light 0 too).
+ *
+ * When a program has exactly two directional shadows, the sun's shadow is read from
+ * the near map wherever the fragment is inside it, from the wide map outside, and
+ * mixed across the near box's last 8% of its side so the edge does not show; the
+ * cascade's own loop pass is compiled out, so it lights nothing and costs no taps.
+ * Any other count (the ending's own sky, galleries) keeps three's loop as it is.
+ *
+ * The near map is filtered wider than `installStableShadowFilter`'s cross: nine of the
+ * hardware's 2x2 compares one texel apart, weighted 1-2-1 each way, a smooth kernel
+ * four texels (6 cm) across. Magnified that close, the cross's two-texel tent still
+ * showed every texel of a diagonal edge as a step. Nine taps on the fragments within
+ * the box only; outside it the wide map's four as before. Fixed to the map like the
+ * cross, so edges do not crawl.
+ *
+ * The chunks change for every program alike, before any compiles: no variant. The
+ * `&& receiveShadow )` test stays verbatim for the kit body's gate (render/materials.ts
+ * `kitLightsBegin`).
+ */
+function installSunShadowCascade(): void {
+  const marker = 'sunCascadeShadow';
+  const lights = THREE.ShaderChunk.lights_fragment_begin;
+  if (lights.includes(marker)) return;
+  const loop = /(for \( int i = 0; i < NUM_DIR_LIGHTS; i \+\+ \) \{\s*)(directionalLight = directionalLights\[ i \];[\s\S]*?)(directLight\.color \*= \( directLight\.visible && receiveShadow \) \? getShadow\( directionalShadowMap\[ i \],[^;]*;)([\s\S]*?RE_Direct\([^;]*;)(\s*\}\s*#pragma unroll_loop_end)/;
+  if (!loop.test(lights)) throw new Error('Three directional-light shader layout changed');
+  THREE.ShaderChunk.lights_fragment_begin = lights.replace(
+    loop,
+    `$1#if !( NUM_DIR_LIGHT_SHADOWS == 2 && UNROLLED_LOOP_INDEX == 1 )
+		$2#if NUM_DIR_LIGHT_SHADOWS == 2
+		directLight.color *= ( directLight.visible && receiveShadow ) ? ${marker}() : 1.0;
+		#else
+		$3
+		#endif$4
+		#endif$5`,
+  );
+  const tap = (k: number): string =>
+    `getShadow( directionalShadowMap[ ${k} ], directionalLightShadows[ ${k} ].shadowMapSize, directionalLightShadows[ ${k} ].shadowIntensity, directionalLightShadows[ ${k} ].shadowBias, directionalLightShadows[ ${k} ].shadowRadius, vDirectionalShadowCoord[ ${k} ] )`;
+  THREE.ShaderChunk.shadowmap_pars_fragment += `
+#if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS == 2
+	#if defined( SHADOWMAP_TYPE_PCF )
+	float sunNearShadow() {
+		vec4 coord = vDirectionalShadowCoord[ 1 ];
+		vec3 uv = coord.xyz / coord.w;
+		uv.z += directionalLightShadows[ 1 ].shadowBias;
+		vec2 texel = max( directionalLightShadows[ 1 ].shadowRadius, 1.0 ) / directionalLightShadows[ 1 ].shadowMapSize;
+		float shadow = 0.0;
+		for ( int y = -1; y <= 1; y ++ ) {
+			for ( int x = -1; x <= 1; x ++ ) {
+				float weight = ( x == 0 ? 2.0 : 1.0 ) * ( y == 0 ? 2.0 : 1.0 );
+				shadow += weight * texture( directionalShadowMap[ 1 ], vec3( uv.xy + vec2( float( x ), float( y ) ) * texel, uv.z ) );
+			}
+		}
+		return mix( 1.0, shadow / 16.0, directionalLightShadows[ 1 ].shadowIntensity );
+	}
+	#else
+	float sunNearShadow() {
+		return ${tap(1)};
+	}
+	#endif
+	float ${marker}() {
+		vec3 nearUv = vDirectionalShadowCoord[ 1 ].xyz / vDirectionalShadowCoord[ 1 ].w;
+		vec2 nearEdge = min( nearUv.xy, 1.0 - nearUv.xy );
+		float nearWeight = smoothstep( 0.0, 0.08, min( nearEdge.x, nearEdge.y ) ) * step( nearUv.z, 1.0 );
+		float nearShadow = 1.0;
+		float wideShadow = 1.0;
+		if ( nearWeight > 0.0 ) nearShadow = sunNearShadow();
+		if ( nearWeight < 1.0 ) wideShadow = ${tap(0)};
+		return mix( wideShadow, nearShadow, nearWeight );
+	}
+#endif
+`;
+}
+
+/**
  * Unlit colour and emission are authored as SCREEN values.
  *
  * Until the colour pipeline was corrected (core/renderer.ts `drawFrame`) the frame
@@ -128,4 +206,5 @@ function installScreenAuthoredUnlit(): void {
 installPointLightZeroGuard();
 installSunShadowSlopeBias();
 installStableShadowFilter();
+installSunShadowCascade();
 installScreenAuthoredUnlit();

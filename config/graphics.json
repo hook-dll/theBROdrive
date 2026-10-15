@@ -5,5 +5,10 @@
   "shadowFar": 800,
   "shadowBias": -0.00004,
   "shadowNormalBias": 0.08,
+  "shadowCascadeMapSize": 2048,
+  "shadowCascadeHalfSize": 16,
+  "shadowCascadeBehind": 8,
+  "shadowCascadeBias": -0.00001,
+  "shadowCascadeNormalBias": 0.02,
   "hemisphereIntensityScale": 1.00
 }

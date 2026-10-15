@@ -4,6 +4,28 @@
 
 ### Added
 
+- LESS SCRIPT PER FRAME (`vehicle/vehicle.ts` `HiddenStillGroup`, `render/vista.ts`
+  `GROUND_REFRESH_S`, `world/traffic.ts` control phases). The owner's Windows profile is
+  80% scripting, and the frame's cost barely followed draws or triangles (190 draws at
+  116 FPS, 900 at 90). Profiled on the M2 Pro: three's world-matrix walk visited every
+  part of every hidden far traffic car, ~260 objects each, most of the scene's 6000; a
+  hidden car root now keeps only its own matrix (walk 0.6 → 0.1 ms median). The vista
+  disc rewrote and uploaded all its vertices every frame; it now follows the camera at
+  most 75 times a second (half the cost at 144 FPS). Traffic drivers deciding at 12 Hz
+  were put on two of every five 60 Hz ticks; their phases are now spread over all five.
+- THE SUN'S NEAR SHADOW CASCADE (`render/sky.ts` `sunNearLight`, `render/lightshader.ts`
+  `installSunShadowCascade`, `config/graphics.json` `shadowCascade*`). The ugly car shadows
+  were never the far mesh: A/B in the car lab, a 2106 casting its near meshes and its far
+  mesh gave the same staircase, because the sun's map is 7 cm a texel (13 cm on the sand
+  under a 30-degree sun). A second black directional light now casts a 2048 map over a
+  32 m box round the eye (8 m behind, leaning ahead as the sun's box does), 1.6 cm a
+  texel. Inside it the sun's shadow is read from that map with a nine-tap 1-2-1 filter,
+  outside from the wide map as before, blended over the box's last 8%; the cascade's own
+  light pass is compiled out. Every program changes alike at boot: no variant. Near
+  traffic within 16 m of the eye casts its own meshes again (steered wheels, open gaps),
+  the far-mesh stand-in from 18 m on. Measured on the M2 Pro (Standard, chase camera,
+  autopilot): the near pass is 26 draws a frame beside the sun's 34, of 266 in all; the
+  program count did not grow over a 3 s sample in the car.
 - KIT NIVAS AND OKA: `kit_vaz2121`, `kit_vaz2131` and `kit_vaz1111` (`src/carkit/nivas.ts`,
   `oka.ts`; measured in `measurements-niva.md`, `measurements-oka.md`) join the world's
   cars, which completes the VAZ roadmap. The 2121 is read off the factory four-view

@@ -2902,8 +2902,10 @@ export class RoadTraffic {
         request.lane,
       ),
       wasPassing: false,
-      controlAccumulator:
-        (this.carList.length & 1) * (this.controlIntervalS * 0.5),
+      // Spread over the whole control interval, not two halves: at 12 Hz on a 60 Hz step
+      // the drivers decide on one of five ticks, and two phases put them all on two of
+      // them (traffic p95 three times its mean). The golden-ratio walk spreads any count.
+      controlAccumulator: ((this.carList.length * 0.6180339887) % 1) * this.controlIntervalS,
       controlElapsed: 0,
       turnS: -1,
       rails: null,

@@ -86,6 +86,11 @@ const RELIEF_FADE_END = 7000;
  * movement is continuous and immediately reversible instead of starting a timed morph.
  */
 const SAMPLE_CELL_SIZE = 250;
+/**
+ * Shortest time between two height refreshes of the disc, seconds; see `update`. Just
+ * under a 72 Hz step, so a 144 Hz frame refreshes every other frame, not every third.
+ */
+const GROUND_REFRESH_S = 1 / 75;
 
 /** Downward overlap bias, fading out over the first eighty metres of the vista. */
 const INNER_BIAS = 2;
@@ -320,6 +325,8 @@ export class VistaMesh {
   private sampleCellZ = Number.NaN;
   private interpolationX = 0;
   private interpolationZ = 0;
+  /** Seconds since the disc's heights last followed the camera. */
+  private sinceGroundRefresh = Infinity;
 
   /** CPU-only mesa animation data; none of these buffers are uploaded as attributes. */
   private mesaGroundY: GroundHeightSamples | null = null;
@@ -561,6 +568,14 @@ export class VistaMesh {
     if (cellChanged) this.prepareRoadUnderlay(s);
     if (cellChanged) this.loadGroundCell(cellX, cellZ, s);
 
+    // The disc follows the camera at most 75 times a second (`GROUND_REFRESH_S`).
+    // Rewriting and uploading every vertex was the largest script cost in a frame after
+    // the draws (0.9 ms on the owner's 5950X at 132 FPS). A disc left in place for one
+    // frame is still right where it is: its heights belong to where it stands, and only
+    // its rim, 0.5 m at 40 m/s, lags the camera.
+    this.sinceGroundRefresh += frameDt;
+    if (!cellChanged && this.sinceGroundRefresh < GROUND_REFRESH_S) return;
+    this.sinceGroundRefresh = 0;
     this.interpolationX = Math.max(
       0,
       Math.min(1, (cameraX - cellX * SAMPLE_CELL_SIZE) / SAMPLE_CELL_SIZE),

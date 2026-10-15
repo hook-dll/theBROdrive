@@ -16,6 +16,7 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { StickerState } from '../game/state';
+import { GRAPHICS_CONFIG } from '../config';
 import type { PhysicsWorld, Vec3 } from '../core/physics';
 import type { InputFrame } from '../core/input';
 import { MicroRelief, RoadTexture, SURFACES, SurfaceType } from '../core/surfaces';
@@ -717,6 +718,28 @@ interface VehicleStats extends CarStats {
   readonly loads: readonly LoadPoint[];
 }
 
+/**
+ * A car's root that does not walk its subtree's world matrices while hidden.
+ *
+ * Three's `updateMatrixWorld` visits every descendant every frame, shown or not, and a
+ * kit car is some 260 objects: with the far traffic hidden behind the far field, its
+ * cars were most of the scene's 6000 objects and the walk was the largest single cost in
+ * the frame's script after the draws. Hidden, only the root's own matrix is kept, so
+ * anything placing itself from the car's pose still reads it; the frame it shows again
+ * its moved matrix forces the whole subtree. A descendant asked for its world position
+ * meanwhile updates its parents itself (`getWorldPosition`).
+ */
+class HiddenStillGroup extends THREE.Group {
+  override updateMatrixWorld(force?: boolean): void {
+    if (this.visible) {
+      super.updateMatrixWorld(force);
+      return;
+    }
+    this.updateWorldMatrix(false, false);
+    this.matrixWorldNeedsUpdate = true;
+  }
+}
+
 /** Where this frame is seen from (scene frame) and its length; see `Vehicle.viewFrom`. */
 const kitEye = new THREE.Vector3();
 let kitEyeKnown = false;
@@ -724,6 +747,17 @@ let kitEyeKnown = false;
 let kitOccupied: Vehicle | null = null;
 let kitFrameDt = 1 / 60;
 const kitEyeLocal = new THREE.Vector3();
+
+/**
+ * A near traffic car this close to the eye casts its own meshes; further out its far mesh
+ * casts for it (`castNearShadows`). In the sun's near cascade (render/sky.ts
+ * `sunNearLight`, 1.6 cm a texel) the far mesh's shadow shows what it is: wheels that do
+ * not steer, lenses and trim that cast, gaps that close. In the wide map (7 cm) the two
+ * are the same picture. Coming in at the cascade's half side, out 2 m further, so a car
+ * holding its distance does not swap every frame.
+ */
+const SELF_SHADOW_ENTER_M = GRAPHICS_CONFIG.shadowCascadeHalfSize;
+const SELF_SHADOW_EXIT_M = SELF_SHADOW_ENTER_M + 2;
 
 /**
  * A Zhiguli's oil pressure, kgf/cm²: about 2 hot at idle, 4.5 from 3000 rpm up (the
@@ -800,7 +834,7 @@ export class Vehicle implements Rebasable {
    */
   private carriedMassKg = 0;
 
-  private readonly rootGroup = new THREE.Group();
+  private readonly rootGroup = new HiddenStillGroup();
   /** Per-car phase offset (turns) so traffic does not hop in unison; see `BOUNCE_HOP_HZ`. */
   private readonly bouncePhase: number;
   /** The body-and-trim subtree alone, for `BOUNCE_SQUASH_MAX`; wheels are siblings. */
@@ -1035,6 +1069,8 @@ export class Vehicle implements Rebasable {
    */
   private readonly shadowMuted: THREE.Mesh[] = [];
   private nearCasting = true;
+  /** Inside the self-shadow line from the eye at the last frame; see `castsOwnShadow`. */
+  private selfShadowSide = false;
   private bodyConditionEmitTimer = 0;
   private lastAuthOil: number;
   private fluidEmitTimer = 0;
@@ -3700,12 +3736,13 @@ export class Vehicle implements Rebasable {
       this.castNearShadows(true);
       return;
     }
-    // NEAR SHADOWS FROM THE FAR MESH. A shut near car's casters are exactly the far mesh:
+    // NEAR SHADOWS FROM THE FAR MESH. A shut near car's casters are nearly the far mesh:
     // the shell, its glass and its wheels (carmodel.ts `prepareMaterials`: the cabin, bay,
-    // boot, underbody and lenses cast nothing), so one shared draw per model and shadow
-    // pass replaces some forty of its own. A door, lid or pane off its stop is not in the
-    // far mesh: then the car casts itself.
-    this.castNearShadows(!(shadow !== null && this.addStandIn(shadow)));
+    // boot and underbody cast nothing), so one shared draw per model and shadow pass
+    // replaces its own. Not inside the self-shadow line (SELF_SHADOW_ENTER_M), where the
+    // sun's near cascade is sharp enough to tell them apart, and not with a door, lid or
+    // pane off its stop, which the far mesh does not have: then the car casts itself.
+    this.castNearShadows(!(shadow !== null && !this.castsOwnShadow() && this.addStandIn(shadow)));
 
     // Wheels are chassis-local, and interpolated between the last two steps exactly as
     // the chassis is (see `spinPrev`).
@@ -3779,6 +3816,17 @@ export class Vehicle implements Rebasable {
     if (!geometry) return false;
     carPaintSeenFromAfar(this.surface.paint, this.localBodyDirt, this.farPaint);
     return field.add(geometry, this.rootGroup.position, this.rootGroup.quaternion, this.farPaint, this.lamps);
+  }
+
+  /**
+   * Inside the self-shadow line from the eye: in past `SELF_SHADOW_ENTER_M`, out past
+   * `SELF_SHADOW_EXIT_M`. False before the first eye is known.
+   */
+  private castsOwnShadow(): boolean {
+    if (!kitEyeKnown) return false;
+    const distance = this.rootGroup.position.distanceTo(kitEye);
+    this.selfShadowSide = distance < (this.selfShadowSide ? SELF_SHADOW_EXIT_M : SELF_SHADOW_ENTER_M);
+    return this.selfShadowSide;
   }
 
   /**

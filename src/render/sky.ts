@@ -915,6 +915,19 @@ export class Sky {
 
   private readonly planetField = new PlanetField();
   private readonly sunLight: THREE.DirectionalLight;
+  /**
+   * THE SUN'S NEAR CASCADE (the shader side is render/lightshader.ts
+   * `installSunShadowCascade`). The sun's own map is 7 cm a texel, 13 cm on the sand
+   * under a 30-degree sun: a car's shadow is some 30 by 60 texels and its outline steps
+   * like a staircase, whatever mesh casts it. A second map of the same size over a box
+   * of `GRAPHICS_CONFIG.shadowCascadeHalfSize` round the eye, leaning forward as the
+   * sun's does but keeping `shadowCascadeBehind` behind (the 6 m chase arm and a car), is
+   * 1.6 cm a texel: the car's own shadow, a passing car's, the wheels and the mirrors, at
+   * the price of one more shadow pass over only what stands in it. Its biases are the
+   * sun's scaled to the smaller texel. The light is black, so it lights nothing: only its
+   * map is read, as the sun's, inside its box.
+   */
+  private readonly sunNearLight: THREE.DirectionalLight;
   private readonly hemiLight: THREE.HemisphereLight;
   /** Solar System Scope lunar map, CC BY 4.0; attribution is in LICENSE. */
   private readonly moonTexture: THREE.Texture;
@@ -991,6 +1004,8 @@ export class Sky {
   /** `_shadowDir` before it is held to SHADOW_DIR_STEP. */
   private readonly _shadowDirLive = new THREE.Vector3();
   private readonly _targetPos = new THREE.Vector3();
+  /** The near cascade's box centre, as `_targetPos` is the sun's. */
+  private readonly _nearTargetPos = new THREE.Vector3();
   /** Half the sun shadow box's side, metres; set by `setQuality` with the map size. */
   private shadowHalfSize = GRAPHICS_CONFIG.shadowFrustumHalfSize;
   /** Orthonormal basis perpendicular to `_shadowDir`, rebuilt each frame it changes. */
@@ -1122,6 +1137,26 @@ export class Sky {
     scene.add(this.sunLight);
     // The target must be in the scene graph for its matrixWorld to update.
     scene.add(this.sunLight.target);
+
+    // --- The sun's near shadow cascade (`sunNearLight`) ---
+    // Added right after the sun: three keeps shadow-casting lights in scene order, and
+    // the cascade shader reads directional light 0 as the sun and 1 as this.
+    this.sunNearLight = new THREE.DirectionalLight(0x000000, 0);
+    this.sunNearLight.castShadow = true;
+    const near = this.sunNearLight.shadow;
+    const nearHalf = GRAPHICS_CONFIG.shadowCascadeHalfSize;
+    near.mapSize.set(GRAPHICS_CONFIG.shadowCascadeMapSize, GRAPHICS_CONFIG.shadowCascadeMapSize);
+    near.camera.left = -nearHalf;
+    near.camera.right = nearHalf;
+    near.camera.top = nearHalf;
+    near.camera.bottom = -nearHalf;
+    near.camera.near = GRAPHICS_CONFIG.shadowNear;
+    near.camera.far = GRAPHICS_CONFIG.shadowFar;
+    near.camera.updateProjectionMatrix();
+    near.bias = GRAPHICS_CONFIG.shadowCascadeBias;
+    near.normalBias = GRAPHICS_CONFIG.shadowCascadeNormalBias;
+    scene.add(this.sunNearLight);
+    scene.add(this.sunNearLight.target);
 
     // --- Hemisphere bounce ---
     this.hemiLight = new THREE.HemisphereLight(0x88b4e6, 0xd8a45c, 1.0);
@@ -1443,11 +1478,15 @@ export class Sky {
     // camera's facing on the ground; looking straight down it has no length and
     // the box stays centred, which is right for a view that sees all round.
     this._targetPos.set(cameraX, cameraY, cameraZ);
+    this._nearTargetPos.set(cameraX, cameraY, cameraZ);
     const viewLength = Math.hypot(viewX, viewZ);
     if (viewLength > 1e-3) {
       const lean = (this.shadowHalfSize - SHADOW_BEHIND_M) / viewLength;
       this._targetPos.x += viewX * lean;
       this._targetPos.z += viewZ * lean;
+      const nearLean = (GRAPHICS_CONFIG.shadowCascadeHalfSize - GRAPHICS_CONFIG.shadowCascadeBehind) / viewLength;
+      this._nearTargetPos.x += viewX * nearLean;
+      this._nearTargetPos.z += viewZ * nearLean;
     }
 
     // Shadow direction: the light's own direction, with its elevation lifted to
@@ -1480,8 +1519,13 @@ export class Sky {
     // world point land on the SAME texel regardless of camera motion, which is what
     // stops the crawl; the residual discretisation is one texel (a few centimetres),
     // far below anything a player can see move.
-    this.stabilizeShadowTarget();
+    this.stabilizeShadowTarget(this._targetPos, (2 * this.shadowHalfSize) / this.sunLight.shadow.mapSize.x);
+    this.stabilizeShadowTarget(
+      this._nearTargetPos,
+      (2 * GRAPHICS_CONFIG.shadowCascadeHalfSize) / GRAPHICS_CONFIG.shadowCascadeMapSize,
+    );
     this.sunLight.position.copy(this._shadowDir).multiplyScalar(SUN_DISTANCE).add(this._targetPos);
+    this.sunNearLight.position.copy(this._shadowDir).multiplyScalar(SUN_DISTANCE).add(this._nearTargetPos);
     // Fade the whole shadow out as the true sun sinks: at that point the ground is
     // in general shade anyway, and a clamped shadow under a horizon sun is the one
     // case where the cheat above would be visible. It also fades with the key's share
@@ -1494,6 +1538,7 @@ export class Sky {
       smoothstep(SHADOW_KEY_SHARE_GONE, SHADOW_KEY_SHARE_FULL, keyShare) *
       (1 - 0.45 * weather.haze) * (1 - 0.9 * weather.dust) * (1 - 0.75 * weather.cloud);
     this.sunLight.shadow.intensity = shadowStrength;
+    this.sunNearLight.shadow.intensity = shadowStrength;
     // A zero-strength shadow is never drawn again until it returns. Freezing the map
     // rather than clearing `castShadow` is the point: `castShadow` is compiled into
     // every lit program, so switching it at dusk recompiled the world, while three
@@ -1506,8 +1551,12 @@ export class Sky {
     // watching; one pass while there is no map puts both under the loading cover.
     const shadow = this.sunLight.shadow;
     shadow.autoUpdate = shadowStrength > 0 || shadow.map === null;
+    const nearShadow = this.sunNearLight.shadow;
+    nearShadow.autoUpdate = shadowStrength > 0 || nearShadow.map === null;
     this.sunLight.target.position.copy(this._targetPos);
     this.sunLight.target.updateMatrixWorld();
+    this.sunNearLight.target.position.copy(this._nearTargetPos);
+    this.sunNearLight.target.updateMatrixWorld();
   }
 
   /**
@@ -1573,22 +1622,21 @@ export class Sky {
   }
 
   /**
-   * Snaps `_targetPos` to the shadow map's texel grid, in the plane perpendicular
-   * to `_shadowDir` — the two axes the shadow camera actually samples. See the call
-   * site in `update()` for why: this is what stops an indoor shadow boundary from
-   * swimming as the camera it is centred on moves continuously.
+   * Snaps a shadow box's centre to its map's texel grid (`texel` metres), in the plane
+   * perpendicular to `_shadowDir` — the two axes the shadow camera actually samples. See
+   * the call site in `update()` for why: this is what stops an indoor shadow boundary
+   * from swimming as the camera it is centred on moves continuously.
    */
-  private stabilizeShadowTarget(): void {
+  private stabilizeShadowTarget(target: THREE.Vector3, texel: number): void {
     const reference = Math.abs(this._shadowDir.y) > 0.999 ? WORLD_UP_FALLBACK : WORLD_UP;
     this._shadowRight.crossVectors(reference, this._shadowDir).normalize();
     this._shadowUp.crossVectors(this._shadowDir, this._shadowRight).normalize();
 
-    const texel = (2 * this.shadowHalfSize) / this.sunLight.shadow.mapSize.x;
-    const right = this._targetPos.dot(this._shadowRight);
-    const up = this._targetPos.dot(this._shadowUp);
+    const right = target.dot(this._shadowRight);
+    const up = target.dot(this._shadowUp);
     const snappedRight = Math.round(right / texel) * texel;
     const snappedUp = Math.round(up / texel) * texel;
-    this._targetPos
+    target
       .addScaledVector(this._shadowRight, snappedRight - right)
       .addScaledVector(this._shadowUp, snappedUp - up);
   }
@@ -1712,6 +1760,9 @@ export class Sky {
     this.scene.remove(this.root);
     this.scene.remove(this.sunLight);
     this.scene.remove(this.sunLight.target);
+    this.scene.remove(this.sunNearLight);
+    this.scene.remove(this.sunNearLight.target);
+    this.sunNearLight.shadow.dispose();
     this.scene.remove(this.hemiLight);
 
     this.dome.geometry.dispose();

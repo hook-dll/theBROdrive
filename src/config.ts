@@ -63,6 +63,14 @@ export interface GraphicsConfig {
   readonly shadowFar: number;
   readonly shadowBias: number;
   readonly shadowNormalBias: number;
+  /** The sun's near cascade (render/sky.ts `sunNearLight`): map side, texels. */
+  readonly shadowCascadeMapSize: number;
+  /** Half its box's side, metres: also how near a traffic car casts its own meshes. */
+  readonly shadowCascadeHalfSize: number;
+  /** How much of its box stays behind the camera, metres. */
+  readonly shadowCascadeBehind: number;
+  readonly shadowCascadeBias: number;
+  readonly shadowCascadeNormalBias: number;
   readonly hemisphereIntensityScale: number;
 }
 
@@ -130,6 +138,11 @@ const GRAPHICS_FIELDS: Fields<GraphicsConfig> = {
   shadowFar: true,
   shadowBias: true,
   shadowNormalBias: true,
+  shadowCascadeMapSize: true,
+  shadowCascadeHalfSize: true,
+  shadowCascadeBehind: true,
+  shadowCascadeBias: true,
+  shadowCascadeNormalBias: true,
   hemisphereIntensityScale: true,
 };
 
