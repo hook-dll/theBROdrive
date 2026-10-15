@@ -699,6 +699,36 @@ amplified differences; `bench-*.json`, `pick-*.json`).
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent
+## Nivas and Oka (2026-10-16)
+
+- **2121: the tail corners stood behind the tailgate, a pale wedge between them (lab).**
+  → With `flat` tail stations at belt 1.0 the corners rose upright 0.1 behind the
+  tailgate's raked lower panel, and the greenhouse's last strip left the lining showing.
+  → The belt runs at 1.0 to s 3.58, where the raked line crosses it, and the tail
+  stations stand at 0.775, so the D pillar comes down the raked line flush with the
+  tailgate (the Samara's arrangement). *nivas.ts*.
+- **2131: a pale sliver on both tailgate pillars (owner).** → The belt's turn down at the
+  station 3.58 (+0.5) lay inside the D pillar's last greenhouse strip; the strip's foot
+  bent there while its top did not, the skin twisted and the lining showed through. → A
+  cabin column at that station, so no strip folds across a bend of the tub (2121 too).
+  *nivas.ts*.
+- **Niva bench and Oka bench fought the wheel-house covers at a distance.** → A bench
+  standing between the covers kept the usual 2 mm. → `bench.clear` 0.04 on those layouts.
+  *interior.ts*.
+- **Oka bonnet in long slivers (owner: "переусложнили").** → The drawn crown grew from 45
+  to 99 mm and shrank again along the bonnet, a twisted surface the flat-run merge cannot
+  flatten. → One crown, 70 mm over the wings' top all along. *oka.ts*.
+- **Oka: stacked tail lamp bands, and the door's rear shut line, fought (gate).** → The
+  bands' rims inside the body shared their planes where the bands shared an edge (seen
+  from the cabin through the load space); a door ending on one column above and below
+  the belt crossed its seal and its painted edge. → 6 mm between the bands; the frame
+  above the belt ends 2 cm before the door's lower shut line (the 2121's B pillar).
+  *oka.ts*.
+- **Oka: only the left mirror, the tailgate down between the lamps (owner).** →
+  `KitLook.mirrors: 'left'`; a tailgate comes down the tail face like a boot lid when the
+  last station has a `notch` (`BodyFrame.lidFace`, `lidOwner`). *spec.ts, exterior.ts,
+  body.ts, oka.ts*.
+
   the pillars. Reverted. The warp works on the built geometry as is.
 - **Bridging a sloped boot lid straight to a notched tail outline** (the lid's rear face
   as one band from its top to the stepped notch contour): it folds wherever the contour

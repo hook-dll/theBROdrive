@@ -479,6 +479,27 @@ const TARGETS: Readonly<Record<string, Target>> = {
     source: 'VAZ-2115 1.5i (2111 engine): LO (top, 0-100, turn, brake ceiling "груженого"), CE (top, 0-100, gross 1410); drom.ru/catalog/lada/2115/77754 prints 155 km/h and 14 s',
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.167 },
   },
+  kit_vaz2121: {
+    wheelbase: 2.2, track: 1.43, radius: 0.343, top: 132, to100: 23,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.5, lat: 0.66, hz: 1.15,
+    brake80: 40, grossKg: 1550,
+    source: 'as sv_niva: AO vaz-2121 (brake, gross); lada-niva.ru/niva/soobschenie-s-harakteristikami.html',
+    known0to100: { reason: NIVA_LOSSES, dev: -0.106 },
+  },
+  kit_vaz2131: {
+    wheelbase: 2.7, track: 1.43, radius: 0.343, top: 132, to100: 25,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 6.3, lat: 0.64, hz: 1.15,
+    brake80: 40, grossKg: 1870,
+    source: 'as sv_niva_long: AO vaz-2131; lada-niva.ru/vid-img/sravnenie.jpg; brake (the 2121x family table), gross niva-faq.msk.ru/tehnika/obsch/tehdann/213_312.htm; track vaz.ru/v2131.htm (kit_vaz2131 row)',
+    known0to100: { reason: NIVA_LOSSES, dev: -0.131 },
+  },
+  kit_vaz1111: {
+    wheelbase: 2.18, track: 1.214, radius: 0.26, top: 120, to100: 30,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 4.8, lat: null, hz: 1.3,
+    brake80: 38, grossKg: 975,
+    source: 'as cf_vaz1111: man. autoprospect.ru/vaz/1111-oka/1-4-tekhnicheskie-kharakteristiki.html; brake, gross AO vaz-1111',
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.146 },
+  },
 };
 
 /*

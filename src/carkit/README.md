@@ -108,7 +108,9 @@ from the angle he complained about; changes are judged there, not in code.
 | `estates.ts` | The 2102/2104 bodies and backs (`BODY_2102`, `BODY_2104`, `REAR_*`); their fronts and sides are their saloons'. |
 | `samaras.ts` | The Samara family: `BODY_2108` / `LOOK_2108` and the 2109, 21099 and 2115 bodies and looks built on it. |
 | `tens.ts` | The "tens": `BODY_2110` / `LOOK_2110` (the 2112 and 2111 are to derive from it). |
-| `measurements-classics.md`, `measurements-estates.md`, `measurements-samara.md`, `measurements-2110.md` | Measurement reports: every figure with its drawing or photo, scale and tag. |
+| `nivas.ts` | The Nivas: `BODY_2121` / `LOOK_2121` (platform `niva`) and the 2131 on its shell. |
+| `oka.ts` | The VAZ-1111: `BODY_1111` / `LOOK_1111` (platform `samara`). |
+| `measurements-classics.md`, `measurements-estates.md`, `measurements-samara.md`, `measurements-2110.md`, `measurements-niva.md`, `measurements-oka.md` | Measurement reports: every figure with its drawing or photo, scale and tag. |
 | `builder.ts` | `PartBuilder`: flat triangles per material slot, transform stack, primitives (`box`, `bevelBox`, `extrude`, `cylinderX/Y/Z`, `torusY`, `bridge`, `poly`), vertex colours. |
 | `body.ts` | `BodyFrame` (cross-section, deck and lid lookups) and `buildShell`: tub, greenhouse and roof as one face list, then cut into parts. Shell constants (`SHUT_GAP`, `JAMB_DEPTH`, `DOOR_THICKNESS`, `NOTCH_WALL`, …). |
 | `exterior.ts` | End faces (`FaceLook.items` / `.lid`), bumpers swept round the corners, sill strip, flank strips (waist moulding, feature line: `buildFlankStrip`), repeaters, flank lamps, mirrors, handles, wipers, filler neck. |
@@ -240,7 +242,7 @@ author.
 | Field | Meaning |
 |---|---|
 | `length` | Bumper tip to bumper tip, as built (the loader then fits it to `FACTORY_GEOMETRY`). |
-| `platform` | `'classic'` or `'samara'`: picks the interior layout (`LAYOUTS` in interior.ts) and the engine bay / underbody in bay.ts. |
+| `platform` | `'classic'`, `'samara'` or `'niva'`: picks the interior layout (`LAYOUTS` in interior.ts) and the engine bay / underbody in bay.ts. `'niva'` is the classic's bay, floor and furniture with permanent four-wheel drive under it (bay.ts `nivaTransfer`: transfer box rising into the tunnel, front propshaft, front differential, driveshafts), the lowest parts at its 220 mm clearance, and its own dash (`LAYOUTS.niva`). |
 | `stations` | `TubStation[]`, nose to tail; the first is the front face, the last the tail face. |
 | `cabin` | `CabinSpec`: the greenhouse. |
 | `wheels` | `WheelSpec`: axles, tyre, tracks, arches. |
@@ -248,7 +250,7 @@ author.
 | `doorBottom` | Height of the doors' bottom edge (top of the sill under them). |
 | `bonnetFront` | `s` where the bonnet starts; it runs to the cowl. |
 | `bonnet?` | `{ inset, nose? }`: the bonnet's side cut `inset` in from the deck's edge instead of at the pillar row (the 2110's covers the whole top, its shut lines along the wings' top edge); it ends 12 mm (`SCUTTLE`) short of the cowl and the bay's inner wings stand under the cut. `nose: { y, half: [bottom, top] }`: the bonnet comes down the front face between the head lamps to height `y` (set `bonnetFront` to the first station); `front.lid` items ride on it. Absent: the pillar-row bonnet. |
-| `bootEnd` | `s` where a boot lid ends (it runs from the back light's foot). **Absent = a tailgate** hinged at the roof. Equal to the last station's `s` with a `notch` there, the lid comes down the tail face (2115, 2110): its top turns down to a line across at the corners' top and its rear panel lies in the tail face between the corner lamps (`BodyFrame.lidFace`). |
+| `bootEnd` | `s` where a boot lid ends (it runs from the back light's foot). **Absent = a tailgate** hinged at the roof. Equal to the last station's `s` with a `notch` there, the lid comes down the tail face (2115, 2110): its top turns down to a line across at the corners' top and its rear panel lies in the tail face between the corner lamps (`BodyFrame.lidFace`). A tailgate does the same when the last station carries a `notch` (the Oka's, down between its corner lamps; `BodyFrame.lidOwner`). |
 | `rearLean` | `{ base, lean, blend }`: above height `base`, every point behind the rear base moves forward `lean` m per m of height, faded in over `blend` m ahead of it. Makes an estate's tailgate, lamp corners and lamps one raked plane. Built (closed) pose is warped, so parts still close flush. |
 | `frontLean` | The same at the nose (kit.ts `leanEnd`): above `base`, every point ahead of `full` (default the bonnet's front edge) moves back `lean` m per m of height, faded out over `blend` m behind it. Put `base` on a face row (the crease) and `full` behind the corner lamps' end, so the lamps lean exactly with the faces they lie on; a long `blend` keeps the bonnet one smooth surface. The Samaras' face (`BODY_2108`: base 0.625, lean 0.36, blend 0.15) and the tens' (`BODY_2110`: base 0.58, lean 0.586, blend 0.6, full 0.2). |
 | `flap` | Fuel flap: `s0..s1`, `y0..y1`, `side` (`'right'` default; the classic estates' is `'left'`). |
@@ -347,6 +349,8 @@ cabin: … }`) share everything not overridden. Current families:
 | `BODY_2108` | 2108 drawing | 2108; 2109 (`BODY_2109`: other columns); 21099 (`BODY_21099`: columns, tail, `bootEnd`) |
 | `BODY_2115` | 2108 frame | 2115 (`+0.045`, length 4.33) |
 | `BODY_2110` | 2110 drawing (`tens.ts`) | 2110; 2112 (`BODY_2112`: own tail from the rear door, hatch) |
+| `BODY_2121` | `niva.jpg` factory four-view (`nivas.ts`) | 2121; 2131 (`BODY_2131`: the 2121 to its B pillar, 0.5 longer behind it, rear doors) |
+| `BODY_1111` | 3dcar.ru `vaz_1111_oka.jpg` (`oka.ts`) | 1111 |
 
 ### Look (`KitLook`)
 
@@ -357,6 +361,7 @@ cabin: … }`) share everything not overridden. Current families:
 | `headrests` | Head restraints on the front seats. |
 | `front`, `rear` | `FaceLook`: one end of the car. |
 | `brightwork` | `Finish` of door handles and mirrors. |
+| `mirrors?` | `'left'`: only the driver's door mirror (the base Oka). Absent: both. |
 | `sill` | `Finish` of a strip along the sill between the arches, or `null`. |
 | `waist` | `{ y, height, finish }`: a moulding along the flank, broken at the shut lines (each piece riding on its door) and stopping `MOULDING_ARCH_GAP` (30 mm) short of a wheel arch it would run into (the 2115's low door mouldings; the classics' strips sit above their arches and are not cut); or `null`. |
 | `repeater` | `{ s0, s1, y0, y1 }`: the amber side repeater on each front wing, or `null`. |
@@ -429,11 +434,16 @@ handle and crank), `lights` switch, `vents` (each with
 an optional opening size `half`), `eyeballs`, `clusterFace`, `lamps` (telltales: a grid
 `cols` wide of the functions in `show`, each lit on its `tell_*` channel), `rockers`,
 `stack`, `heater?` (a heater panel with knobs: `{ dy, half, knobs, radius }`), `carpet`,
-`headliner`. In `Layout`, `ds` is metres behind the cowl and `dy` an offset from the belt
+`headliner`, `bench.clear` (the bench base's air to the rear wheel-house covers, default
+0.022: a bench standing between them, the Nivas' and the Oka's, takes 0.04, since 2 mm
+there fights at a distance), `lenses` (a second telltale grid) and `transfer` (static
+transfer-box levers on the tunnel, `LAYOUTS.niva`). In `Layout`, `ds` is metres behind the cowl and `dy` an offset from the belt
 at the cowl. Existing dashes: `CABIN_2101` (ribbon speedometer), `CABIN_2103` (five dials on
 wood), `CABIN_2105` (own pod), `CABIN_2107` (one-piece "euro" panel), `CABIN_2110` (tall
 face, hood over swapped big dials, two big centre vents, heater panel, radio low in the
-stack); the Samaras use the `samara` platform's layout as is.
+stack), `CABIN_1111` (ribbon speedometer in a small hood), `CABIN_2131` (the 2121's with
+the bench further back); the Samaras use the `samara` platform's layout as is, the 2121
+the `niva` platform's.
 
 ## Scene contract
 
@@ -664,9 +674,9 @@ Working files (crops, grids, overlays) go in `/tmp/<family>/`; only the report i
   their own shell `BODY_2110`; the 2112 hatch and 2111 estate would then derive from it as
   the 2109 does from the 2108). Put a new family in its own file (`tens.ts`, like
   `samaras.ts`) with a header comment and the source of every number in comments.
-- Choose `platform`. Only `'classic'` and `'samara'` exist; a front-drive car takes
-  `'samara'`, and a different dash goes in a `CABIN_*` override in interior.ts. A truly new
-  layout (Niva, Oka, trucks) means a new platform entry in interior.ts `LAYOUTS` and bay.ts.
+- Choose `platform`: `'classic'`, `'samara'` (any front-drive car; the Oka) or `'niva'`; a
+  different dash goes in a `CABIN_*` override in interior.ts. A truly new layout (trucks)
+  means a new platform entry in interior.ts `LAYOUTS` and bay.ts.
 - Write the `LOOK_*` from the front/rear photos with the item kinds above. Reuse a
   family's look by spreading it (`{ ...LOOK_2108, label, rear }`).
 - If the car needs something the language cannot say, add an optional field to `spec.ts`
@@ -815,7 +825,10 @@ triangles, all 13 bounds identical; fit rows identical but for the 2110's and 21
 inner vertex of a flat run: the bonnet itself did not move; 15 WebGL programs after boot
 in the lab, and night, lamps and opened parts add none the head build does not), and the
 one-material, one-draw car (2026-10-15, against 5a9136e: all 13 identical by every
-mesh's triangles; only attributes and materials changed).
+mesh's triangles; only attributes and materials changed), and the Nivas' and the Oka's
+generator additions (platform `niva` with `clearance`/`nivaTransfer`, `bench.clear`,
+`lenses`, `transfer`, the tailgate `lidFace`, `mirrors`: 2026-10-16, all 13 earlier cars
+identical).
 
 ## Budget and current figures
 
@@ -842,6 +855,9 @@ within `KIT_FINE_M`; "Far" = everything except the four detail groups.
 | 2115 | 12 224 | 5 407 | 4 403 | 1 751 | 561 | 61 | 448 | 1 344 | 6 751 |
 | 2110 | 13 723 | 6 363 | 4 877 | 1 775 | 627 | 52 | 460 | 1 344 | 7 707 |
 | 2112 | 13 634 | 6 349 | 4 794 | 1 775 | 627 | 60 | 460 | 1 344 | 7 693 |
+| 2121 | 11 852 | 4 762 | 4 451 | – | 421 | 60 | 814 | 1 344 | 6 106 |
+| 2131 | 12 974 | 5 593 | 4 730 | – | 421 | 60 | 826 | 1 344 | 6 937 |
+| 1111 | 10 595 | 4 347 | 3 813 | – | 597 | 46 | 448 | 1 344 | 5 691 |
 
 The owner set the budget aside for the 2110 and 2112 (the rounded rear shut line adds side
 rows to every tub column).

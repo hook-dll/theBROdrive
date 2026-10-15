@@ -4,6 +4,23 @@
 
 ### Added
 
+- KIT NIVAS AND OKA: `kit_vaz2121`, `kit_vaz2131` and `kit_vaz1111` (`src/carkit/nivas.ts`,
+  `oka.ts`; measured in `measurements-niva.md`, `measurements-oka.md`) join the world's
+  cars, which completes the VAZ roadmap. The 2121 is read off the factory four-view
+  `niva.jpg`, the 2131 is its shell 0.5 m longer behind the B pillar with rear doors (photos
+  only: no drawing exists), the 1111 the dimensioned 3dcar.ru four-view. New platform
+  `niva` (`carkit/bay.ts` `nivaTransfer`: transfer box, front propshaft, front
+  differential and driveshafts under the classic's driveline, 220 mm clearance;
+  `carkit/interior.ts` `LAYOUTS.niva`: the 2106 instruments in a wide panel, static
+  transfer levers). The Nivas ride on `sv_niva` / `sv_niva_long`; the Oka on the carforge
+  Oka's running gear from its manual (`vehicle/carmodels.ts` `KIT_CARS` siblings may now
+  be any catalogue entry). A tailgate may come down the tail face between notched lamp
+  corners like a boot lid (`BodyFrame.lidFace`), `KitLook.mirrors: 'left'`,
+  `bench.clear`. Saves on the pack Nivas and the carforge Oka load on these
+  (`save/save.ts`); traffic odds: Nivas calm, Oka sleeper. `tools/kit-zfight.ts` passes
+  on all three, `tools/reality.ts` within tolerance (0-100 deviations as their siblings'),
+  `tools/kit-proportions.ts` hard gates pass; the 13 earlier cars identical by geometry.
+  10.6–13.0k triangles.
 - THE ROAD STANDS ON A LOW EMBANKMENT WITH A REAL SHOULDER (`world/roadprofile.ts`
   `SHOULDER_WIDTH_M`, `shoulderFallAt`, `embankmentDropAt`, `shoulderFringeM`;
   `world/terrain.ts` `gradedBase`; `world/roadmesh.ts` shoulder strip, `SKIRT_ACROSS_M`).

@@ -156,7 +156,12 @@ export interface WheelSpec {
 export interface KitCarSpec {
   readonly id: string;
   readonly length: number;
-  readonly platform: 'classic' | 'samara';
+  /**
+   * Picks the interior layout (interior.ts `LAYOUTS`) and the bay and underbody (bay.ts).
+   * `'niva'`: the classic's longitudinal engine and cabin with permanent four-wheel drive
+   * (transfer box, front axle) and its own dash.
+   */
+  readonly platform: 'classic' | 'samara' | 'niva';
   readonly stations: readonly TubStation[];
   readonly cabin: CabinSpec;
   readonly wheels: WheelSpec;
@@ -218,6 +223,8 @@ export interface KitLook {
    * meets a wheel arch; or none.
    */
   readonly waist: { readonly y: number; readonly height: number; readonly finish: Finish } | null;
+  /** Door mirrors: `'left'` only the driver's (the base Oka). Absent: both. */
+  readonly mirrors?: 'left';
   /** The amber side repeater on each front wing (s and y ranges), or none. */
   readonly repeater: { readonly s0: number; readonly s1: number; readonly y0: number; readonly y1: number } | null;
   /** A body-colour wing on the boot lid or tailgate with the high brake lamp, or none. */

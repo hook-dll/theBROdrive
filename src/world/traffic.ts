@@ -121,15 +121,17 @@ const PLATOON_CHANCE = 0.32;
  * WHO DRIVES WHAT: the driver's character comes from the car (owner, 2026-10-10), not
  * from one share for the whole stream. `[sleeper, hurried, frantic]` odds per model:
  *
- *  - the old and the slow are always sleepers: the first four Zhigulis;
- *  - the later Zhigulis and the Samaras (the 2115 among them): 25% sleeper, 25% hurried
- *    and 50% frantic (20% frantic read as no frantic at all, owner 2026-10-10);
+ *  - the old and the slow are always sleepers: the first four Zhigulis and the Oka;
+ *  - the later Zhigulis, the Samaras (the 2115 among them) and the Nivas: 25% sleeper,
+ *    25% hurried and 50% frantic (20% frantic read as no frantic at all, owner
+ *    2026-10-10; the pack Nivas had these odds too);
  *  - everything else (the 2110 and the 2112: an official's or a taxi driver's car, owner
  *    2026-10-12) is a car somebody drives to get somewhere fast: half hurried, half
  *    frantic.
  *
  * The world's cars are the kit bodies (`CAR_MODELS`, 2026-10-13); the rows the pack
- * bodies had (the Volgas, UAZs, Oka, IZh and Nivas) left with them.
+ * bodies had (the Volgas, UAZs and IZh) left with them. The Oka keeps the sleeper the
+ * carforge one was.
  *
  * A frantic driver still gets the BMW engine and its gearbox (`franticEngine`).
  */
@@ -148,6 +150,9 @@ const DRIVER_ODDS: Readonly<Record<string, readonly [number, number, number]>> =
   kit_vaz2109: CALM_CAR,
   kit_vaz21099: CALM_CAR,
   kit_vaz2115: CALM_CAR,
+  kit_vaz2121: CALM_CAR,
+  kit_vaz2131: CALM_CAR,
+  kit_vaz1111: SLOW_CAR,
 };
 /**
  * WHAT A FRANTIC DRIVER DRIVES, AND WHAT IS UNDER ITS BONNET. Any car the stream can

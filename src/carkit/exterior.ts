@@ -949,7 +949,7 @@ function buildDoorHardware(ctx: KitContext): void {
     const x = side * (frame.sideX(handleS, y) + 0.006);
     b.color(finish.color).bevelBox(finish.slot, [x, y, frame.z(handleS)], chrome ? [0.012, 0.016, 0.075] : [0.012, 0.018, 0.07], 0.006);
     addBuilt(door.node, b, door.pivot, `${owner}_handle`);
-    if (!front) continue;
+    if (!front || (side < 0 && spec.look.mirrors === 'left')) continue;
     // Mirror: a stalk from the door's front top corner and a head on it, turned so the
     // driver sees straight back along the flank in it (`mirrorFrame`), the car's side a
     // sliver at its inner edge; the far one turns further than his own.

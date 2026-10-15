@@ -1000,6 +1000,17 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   // The 2112, the 2110's hatch: 4170 × 1676 × 1430, 2490 wheelbase, 1400/1370 tracks,
   // 175/70R13 (autoopt.ru); the 2110's width, wheelbase and clearance kept (same stampings).
   kit_vaz2112:    { length: 4.170, width: 1.680, height: 1.430, clearance: 0.165, wheelbase: 2.492, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.288, tyreWidth: 0.175 },
+  // The 2121, its pack sibling's figures (sv_niva): 3720 × 1680 × 1640, 2200 wheelbase,
+  // 1430/1400 tracks, 220 clearance, 175/80 R16 (niva-faq.msk.ru factory sheet; infocar.ua,
+  // catalog-vaz.ru; src/carkit/measurements-niva.md).
+  kit_vaz2121:    { length: 3.720, width: 1.680, height: 1.640, clearance: 0.220, wheelbase: 2.200, frontTrack: 1.430, rearTrack: 1.400, wheelRadius: 0.343, tyreWidth: 0.175 },
+  // The 2131: 4220 × 1680 × 1640, 2700 wheelbase, 1430/1400 tracks (vaz.ru/v2131.htm: the
+  // 2121's overhangs, 500 longer), 220 clearance (autoopt.ru, catalog-vaz.ru), 175/80 R16. The
+  // pack row's 4240 and 1440/1420 are autoopt's and catalog-vaz's (later bumpers [INFERENCE]).
+  kit_vaz2131:    { length: 4.220, width: 1.680, height: 1.640, clearance: 0.220, wheelbase: 2.700, frontTrack: 1.430, rearTrack: 1.400, wheelRadius: 0.343, tyreWidth: 0.175 },
+  // The 1111, its carforge sibling's figures (the 1111 manual): 3200 × 1420 × 1400, 2180
+  // wheelbase, 1214/1204 tracks, 150 clearance, 135/80 R12 (src/carkit/measurements-oka.md).
+  kit_vaz1111:    { length: 3.200, width: 1.420, height: 1.400, clearance: 0.150, wheelbase: 2.180, frontTrack: 1.214, rearTrack: 1.204, wheelRadius: 0.260, tyreWidth: 0.135 },
 };
 
 function factoryGeometry(id: string): FactoryGeometry {
@@ -2267,9 +2278,10 @@ const GEAR_VAZ_2115: KitRunningGear = {
 };
 
 /**
- * Kit bodies (src/carkit), the game's cars. Each takes the running gear of the pack body
- * it is modelled on (the same engine, gearbox, springs and masses), and a car the pack has
- * no body for takes a label and its own running gear over the nearest sibling's.
+ * Kit bodies (src/carkit), the game's cars. Each takes the running gear of the catalogue
+ * body it is modelled on (the same engine, gearbox, springs and masses: a pack body, or
+ * for the Oka the carforge one, whose running gear is its factory manual's), and a car
+ * no body exists for takes a label and its own running gear over the nearest sibling's.
  */
 const KIT_CARS: readonly Entry[] = (
   [
@@ -2286,9 +2298,12 @@ const KIT_CARS: readonly Entry[] = (
     ['kit_vaz2115', 'sv_vaz21099', 'vaz2115', 'VAZ-2115 Samara', GEAR_VAZ_2115],
     ['kit_vaz2110', 'sv_vaz21099', 'vaz2110', 'VAZ-2110', GEAR_VAZ_21102],
     ['kit_vaz2112', 'sv_vaz21099', 'vaz2112', 'VAZ-2112', GEAR_VAZ_21122],
+    ['kit_vaz2121', 'sv_niva', 'vaz2121'],
+    ['kit_vaz2131', 'sv_niva_long', 'vaz2131'],
+    ['kit_vaz1111', 'cf_vaz1111', 'vaz1111'],
   ] satisfies readonly (readonly [id: string, sibling: string, kit: string, label?: string, gear?: KitRunningGear])[]
 ).map(([id, sibling, kit, label, gear]) => {
-  const base = SOVIET_CARS.find((e) => e.id === sibling);
+  const base = ENTRIES.find((e) => e.id === sibling);
   if (!base) throw new Error(`Kit car "${id}" names a missing sibling "${sibling}"`);
   return {
     ...base,
@@ -2300,6 +2315,7 @@ const KIT_CARS: readonly Entry[] = (
     kit,
     textureFile: undefined,
     glassUvCell: undefined,
+    paintUvCell: undefined,
     glassMaterial: KIT_GLASS_MATERIAL,
     clearGlass: true,
     paintStyle: 'solid-paint',

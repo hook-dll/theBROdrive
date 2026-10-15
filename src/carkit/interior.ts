@@ -182,7 +182,12 @@ type GaugeLook = RoundGauge | RibbonGauge;
 interface Layout {
   /** Driver's hip behind the cowl; the rear bench's hip from the rear base or the driver's hip. */
   readonly hip: number;
-  readonly bench: { readonly from: 'rearBase' | 'hip'; readonly offset: number };
+  /**
+   * `clear`: the bench's base this far inside the rear wells (default 0.022, 2 mm off the
+   * wheel-house covers' walls). A bench standing between the covers along its length (the
+   * Niva's) keeps more, as 2 mm of air there fights at a distance.
+   */
+  readonly bench: { readonly from: 'rearBase' | 'hip'; readonly offset: number; readonly clear?: number };
   /** Cushion tops over the floor, front seats and rear bench. */
   readonly cushion: number;
   readonly benchCushion: number;
@@ -241,6 +246,12 @@ interface Layout {
   readonly pedals: { readonly pivot: P2; readonly pad: P2 };
   /** Gear lever: ds of its gaiter, height and how far its knob leans back. */
   readonly gear: { readonly ds: number; readonly height: number; readonly lean: number };
+  /**
+   * The Niva's transfer-box levers on the tunnel behind the gear lever, fixed parts: their
+   * gaiters' ds, and each lever's x, height over the tunnel, knob radius and the knob's
+   * lean (back along the car, then across in +x).
+   */
+  readonly transfer?: { readonly ds: number; readonly levers: readonly { readonly x: number; readonly height: number; readonly knob: number; readonly lean: P2 }[] };
   /** Handbrake hinge behind the driver's hip, and its length forward. */
   readonly handbrake: { readonly rear: number; readonly length: number };
   /** Fascia fittings at [x, dy]; the light switch is placed off the column, to the driver's right by `right`. */
@@ -270,6 +281,8 @@ interface Layout {
    * `pitch`, centred at (right, up).
    */
   readonly lamps?: { readonly right: number; readonly up: number; readonly cols: number; readonly pitch: number; readonly show: readonly Telltale[] };
+  /** A second group of warning lamps laid as `lamps` (the Niva's two big lenses under its temperature gauge). */
+  readonly lenses?: Layout['lamps'];
   /** Switches with no channel: [x, dy] on the fascia, or [right, up] on the cluster face as the gauges. */
   readonly rockers?: { readonly on: 'fascia' | 'cluster'; readonly at: readonly P2[] };
   /**
@@ -306,7 +319,8 @@ function dials(big: number, small: number, spread: number, smallSpread: number, 
   ];
 }
 
-const LAYOUTS: Readonly<Record<KitCarSpec['platform'], Layout>> = {
+/** The classic's and the Samara's layouts; the Niva's (`LAYOUTS.niva`) is the classic's with its own dash. */
+const BASE_LAYOUTS: Readonly<Record<'classic' | 'samara', Layout>> = {
   // Zhiguli: a flat fascia with a wood band, a deep hood over round dials, a thin
   // two-spoke wheel on a steep column, pedals hung from the scuttle, a tall tunnel for
   // the gearbox and prop shaft and a long lever straight out of the box.
@@ -387,6 +401,134 @@ const LAYOUTS: Readonly<Record<KitCarSpec['platform'], Layout>> = {
     headliner: 0x9a9ca0,
   },
 };
+
+// The VAZ-2121 Niva of 1977-1993 on the classic's furniture (its seats and instruments
+// are the 2106's: "шестерочные", ZR below), read off these sources. Pixels (x, y) below
+// are on the ZR cluster photo, y up from the big dials' centre.
+//  - Za Rulyom, "К юбилею Нивы: ретротест ВАЗ-2121" (a 1983 car, photos ©zr.ru, read for
+//    measurement only), https://www.zr.ru/content/articles/906566-k-yubileyu-nivy-retro-test-vaz/:
+//    the cluster shot square through the wheel (1280 x 800), the cabin from the driver's
+//    door, the lenses and rockers close up.
+//  - Wikimedia Commons: "VAZ-2121 (first generation) "Niva" (interior view).jpg" (public
+//    domain; a pre-1994 car), "Interior 1980.jpg" (CC BY-SA 4.0, User:Niva80; the stack
+//    and the tunnel's levers), "1990 Lada Niva Truck interior (2654354756).jpg" (CC BY-SA
+//    2.0; cluster, stack, wheel).
+//  - The factory four-view build/carshape/_refs/bp/img/niva.jpg, scaled by its 2200 mm
+//    wheelbase (597 px, 3.685 mm/px): the seats and the rear bench drawn dashed.
+// Scale on the cluster photo: its speedometer and tachometer are the 2106's, whose bezel
+// the classic draws 0.106 across (radius 0.048 + 0.005); there 265 px, 0.4 mm/px. The
+// column stands between the two big dials (the trip knob, x 635, and the rim's
+// symmetry, x 640), as on the 2106. Heights are hung from the big dials' centre, 0.06
+// over the belt as the classic's [E]: no photo shows the belt and the dials together.
+
+const LAYOUTS: Readonly<Record<KitCarSpec['platform'], Layout>> = {
+  ...BASE_LAYOUTS,
+  /**
+   * VAZ-2121: a black padded dash, a wide flat instrument panel over the driver's half
+   * (2106 instruments in their own wells: fuel over oil pressure, tachometer,
+   * speedometer, temperature, two big chrome-ringed lenses under it), three rockers under
+   * the lenses, a console under the dash's middle (face vent, heater knobs and hazard,
+   * radio), the gear lever well forward and the transfer box's two short levers behind it.
+   */
+  niva: {
+    ...BASE_LAYOUTS.classic,
+    // Front seat: drawn at 0.65 behind the cowl in both views (the backrest's foot at x
+    // 1225 side, the headrest 50 px ahead of the B-pillar in plan), the cowl at x 1052;
+    // that leaves 0.47 m from hip to pedal, so the drawing has it at its rails' front.
+    // 0.85 [E] keeps the classic's seat-to-pedal reach within 0.1 while the backrest stays
+    // ahead of the B-pillar (door 1055-1330 px: 1.02 m behind the cowl).
+    hip: 0.85,
+    // Rear bench: its back's foot drawn at x 1465, 1.52 behind the cowl and 0.06 ahead of
+    // the rear axle [D].
+    // It stands between the rear wheel-house covers [P], its base 2 cm off them.
+    bench: { from: 'hip', offset: 0.67, clear: 0.04 },
+    // Seat centres 112 and 98 px either side of the plan's centre line: 0.39 [D]; 0.38, so
+    // the panel's end (seatX + binnacleHalf) stays where the 2107's stands in a body 35 mm
+    // narrower a side.
+    seatX: 0.38,
+    // A flat tray on the tunnel round the transfer levers, about 0.25 across [P, ZR].
+    tunnel: { heights: [0.08, 0.17, 0.11], base: [0.2, 0.16], top: [0.12, 0.11] },
+    // A face standing upright to the console's top, its top roll over the panel's [E].
+    dash: [
+      [0.15, 0.07], [0.29, 0.085], [0.33, 0.07], [0.345, 0.03], [0.345, -0.17],
+      [0.32, -0.215], [0.12, -0.235], [0.045, -0.205], [0.045, -0.06],
+    ],
+    fascia: [[0.345, 0.03], [0.345, -0.17]],
+    wood: undefined,
+    // The instrument panel: 1220 px wide (x 30-1250), almost centred on the column: half
+    // 0.244 [P], here 0.23 so its end stays inside the dash. Its face from 0.077 over the
+    // dials (frame top, y 140) down past the rockers (y 545, 0.085 under them) [P]; it
+    // stands 3.5 cm proud of the dash's face under a short lip [E], so the windows cut in it
+    // (`WINDOW_FILL`) keep 1.1 cm in front of the dash's face inside it.
+    binnacle: [[0.24, 0.08], [0.27, 0.145], [0.375, 0.155], [0.415, 0.147], [0.415, 0.137], [0.38, 0.135], [0.38, -0.06], [0.33, -0.06]],
+    binnacleHalf: 0.23,
+    cluster: 0.38,
+    clusterFace: { right: 0, up: 0.0375, half: [0.218, 0.09], colour: COLOURS.cluster, frame: 'black' },
+    gauges: [
+      // Centres (px, y up from the big dials' 333) and bezels on the cluster photo: the
+      // tachometer 0-80 x100 at x 464, the speedometer 0-180 at x 810.
+      { channel: 'rpm', right: -0.07, up: 0.06, radius: 0.048, full: 8000, ...BIG },
+      { channel: 'speed', right: 0.068, up: 0.06, radius: 0.048, full: 180, ...BIG },
+      // Fuel (0, 1/2, 1) at x 178, y +53 and temperature (50, 90, 130) at x 1092, y +49,
+      // bezels 145 px across; oil pressure (0-8) at x 225, y -129, 125 px across.
+      { channel: 'fuel', right: -0.185, up: 0.081, radius: 0.024, ...SMALL },
+      { channel: 'temp', right: 0.181, up: 0.08, radius: 0.024, ...SMALL },
+      { channel: 'oil', right: -0.166, up: 0.008, radius: 0.02, ...OIL_DIAL },
+    ],
+    // The real lamps sit in the big dials' faces (parking brake, charge and choke in the
+    // tachometer's, side lights, indicators and main beam in the speedometer's), which a
+    // dial's face covers here; they stand in a column between the dials, as the 2106's.
+    lamps: { right: 0, up: 0.06, cols: 1, pitch: 0.012, show: ['turn', 'side', 'beam', 'oil', 'charge'] },
+    // The two big lenses, 60 px (24 mm) across at x 1040 and 1142, y -98: amber (the
+    // centre differential's lock, which has no channel: here the fuel reserve, the
+    // 2121's other amber lamp, in the fuel dial on the car) and red (brake fluid; here
+    // the brake lamp).
+    lenses: { right: 0.18, up: 0.021, cols: 2, pitch: 0.041, show: ['fuel', 'brake'] },
+    // Three rockers on the panel under the lenses, 95 px apart at y -212 (x 965, 1060,
+    // 1155): the first the lights (a lamp on its key) [P, ZR close-up].
+    lights: { right: 0.128, dy: -0.025, kind: 'rocker', on: 'cluster' },
+    rockers: { on: 'cluster', at: [[0.165, -0.025], [0.202, -0.025]] },
+    // Console under the dash's middle (Commons "Interior 1980", 280 px wide, the radio
+    // filling it): a slatted face vent on top, two knobs on the driver's side with the
+    // hazard switch beside them, the radio under them [P]; the ashtray at its foot [E].
+    stack: { half: 0.1 },
+    vents: [{ x: 0, dy: -0.135, half: [0.07, 0.024] }],
+    heater: { dy: -0.215, half: [0.09, 0.028], knobs: [0.06, 0.005], radius: 0.016 },
+    hazard: [-0.055, -0.215],
+    radio: [0, -0.275],
+    ashtray: [0, -0.335],
+    // The lid in the passenger's half of the face, under the top roll [P, Commons
+    // interior view]; on the car it opens upwards (ZR).
+    glovebox: { x: -0.37, dy: -0.06, half: [0.17, 0.05] },
+    // Two spokes nearly level under a wide bar across the hub [P, ZR]; the 2106's size and
+    // place [E]: the stalks' tips then stand 5 cm clear of the rockers, the rim of the lip.
+    wheel: { ...BASE_LAYOUTS.classic.wheel, spokes: [-5, 185], hub: 'pad' },
+    // Gear lever out of the tunnel by the console's foot, long and cranked back; the
+    // transfer box's two short levers side by side behind it on the tray, over the box
+    // (bay.ts, 0.57-0.83 behind the cowl): the centre differential's lock on the left,
+    // taller, the range lever (high, neutral, low) on the right with a ball knob leaning
+    // outboard [P, ZR, Commons; which is which: avtovaz.com.ua "Раздатка Нива 2121"] [E sizes].
+    gear: { ds: 0.48, height: 0.34, lean: 0.12 },
+    transfer: {
+      ds: 0.66,
+      levers: [
+        { x: 0.045, height: 0.2, knob: 0.016, lean: [0.02, 0] },
+        { x: -0.045, height: 0.15, knob: 0.02, lean: [0.03, -0.03] },
+      ],
+    },
+    handbrake: { rear: 0.1, length: 0.2 },
+    // Black ribbed rubber mats, a pale perforated headliner [P].
+    carpet: 0x1c1c1d,
+    headliner: 0xcfcabd,
+  },
+};
+
+/**
+ * VAZ-2131: the 2121's cabin with the rear bench 0.33 further back, its hip at s 3.0 over
+ * the rear door's rear half (glass 2.36–3.11), 0.39 ahead of the rear axle [E: the 500
+ * mm the body grew goes to the rear legroom and the load space; no drawing of the cabin].
+ */
+export const CABIN_2131: CabinLayoutOverride = { bench: { from: 'hip', offset: 1.0, clear: 0.04 } };
 
 // Per-model dashboards on the classic platform. Sizes are ratios read off interior
 // photos and the 2105/2107 cluster schematics, scaled to absolutes from a 1.36 m cabin
@@ -615,6 +757,73 @@ export const CABIN_2110: CabinLayoutOverride = {
   // on a door seen at a slant, so a little further back than drawn: 0.30 / -0.12 and
   // 0.22 / -0.35.
   frontDoor: { handle: [0.3, -0.12], crank: [0.22, -0.35] },
+};
+
+// The VAZ-1111 «Ока» of 1988-1996 on the Samara's furniture, read off these sources:
+//  - Wikimedia Commons "Oka-Innenraum.jpg" (CC BY 4.0; an early car, 4288 x 2848): the
+//    dash from the driver's door, cluster, switches, heater sliders, wheel, lever.
+//  - The factory four-view https://3dcar.ru/media/blueprints/full/vaz/vaz_1111_oka.jpg
+//    (2200 x 1500, 3200 mm over 1176 px): the seats and the rear bench drawn dashed.
+// Scale on the photo: the column (hub x 1563) to the heater panel's centre line (x 3430),
+// 1867 px, is the driver's seat line 0.31 off the centre [E: the classic's 0.37 scaled
+// by the cabin, 1.2 / 1.36], so 0.17 mm/px at the fascia; on the cluster its window's
+// 1000 px read 0.19 m [E: the same scale, the window a little nearer]. Heights hang
+// from the Samara's cluster (window 0.03 over the belt) [E].
+
+/**
+ * VAZ-1111: a plain black dash, a shallow box hood over a long window holding a wide
+ * flat speedometer scale 0-160 with the fuel dial at its left end, warning lamps in a
+ * row under it, three rockers left of the column and two right of it, two round face
+ * vents over the heater's sliders in the middle, an open shelf before the passenger,
+ * a thick two-spoke wheel (one spoke up-left, one down), a short lever, no console.
+ */
+export const CABIN_1111: CabinLayoutOverride = {
+  // Hip and bench from the drawing: driver's hip 0.92 behind the screen's foot [D], the
+  // bench's hip 0.75 behind it [D], the cabin being 0.2 m shorter than the Samara's.
+  hip: 0.92,
+  // It stands between the rear wheel-house covers, its base 2 cm off them.
+  bench: { from: 'hip', offset: 0.75, clear: 0.04 },
+  seatX: 0.31,
+  bolsters: false,
+  console: undefined,
+  // Hood 0.27 across (photo x 1120-2520 at the cluster's scale) [P], widened to 0.33 so
+  // its face reaches the flank rockers' line [E].
+  binnacleHalf: 0.165,
+  clusterFace: { right: 0, up: 0.013, half: [0.15, 0.045], colour: COLOURS.cluster, frame: 'black' },
+  gauges: [
+    // The scale's 0 to 160 marks over 0.133 m, its centre 0.017 right of the window's [P];
+    // drawn as a ribbon (the needle really pivots low, sweeping a flat arc).
+    { kind: 'ribbon', channel: 'speed', right: 0.017, up: 0.032, half: [0.066, 0.014], full: 160, ticks: 9 },
+    // Fuel dial (0, 1/2, 1) inside the window's left end [P]; the right end is behind
+    // the rim in every photo: the temperature dial there, as far right of the scale's
+    // centre as the fuel dial is left of it, clear of the ribbon [E].
+    { channel: 'fuel', right: -0.079, up: 0.026, radius: 0.013, ...SMALL },
+    { channel: 'temp', right: 0.113, up: 0.026, radius: 0.013, ...SMALL },
+  ],
+  // Square lamps under the window, about 0.03 apart [P]: brake, oil, charge on the left,
+  // turn on the right; the rest behind the pad and rim [E].
+  lamps: { right: 0, up: -0.008, cols: 6, pitch: 0.03, show: ['brake', 'oil', 'charge', 'beam', 'turn', 'side'] },
+  // Rockers under the hood's left flank 0.08-0.14 left of the column (the outer one the
+  // lights [E]) and two right of the column 0.10/0.13 off the centre line [P].
+  lights: { right: -0.14, dy: -0.1, kind: 'rocker' },
+  rockers: { on: 'fascia', at: [[0.43, -0.1], [0.4, -0.1], [0.13, -0.16], [0.1, -0.16]] },
+  // Round vents (about 0.075 across) 0.06 either side of the centre line [P].
+  vents: [
+    { x: 0.058, dy: -0.075, half: [0.036, 0.03] },
+    { x: -0.058, dy: -0.075, half: [0.036, 0.03] },
+  ],
+  // Two horizontal sliders in a panel 0.11 x 0.04 [P], drawn as two small knobs.
+  heater: { dy: -0.17, half: [0.055, 0.02], knobs: [0.025, -0.025], radius: 0.009 },
+  hazard: [0, -0.125],
+  // The round blank right of the heater (photo x 4040) taken as the ashtray [P]; no radio
+  // in the early car: its slot stays under the heater [E].
+  ashtray: [-0.11, -0.19],
+  radio: [0, -0.215],
+  // An open shelf, not a lid: its face where the lid would be [E].
+  glovebox: { x: -0.38, dy: -0.15, half: [0.13, 0.045] },
+  // Rim 0.36 across with a thick tube (22 px on 458 in the photo's thumbnail) [P/E].
+  wheel: { ...LAYOUTS.samara.wheel, ds: 0.56, radius: 0.18, rim: 0.016, spokes: [34, 270] },
+  gear: { ds: 0.62, height: 0.24, lean: 0.04 },
 };
 
 /**
@@ -1344,8 +1553,9 @@ class Cabin {
       inlay(b.color(colour), 'trim', rectCorners(0, 0, hx, hy, 0));
       b.pop();
     }
-    if (L.lamps) {
-      const { right, up, cols, pitch, show } = L.lamps;
+    for (const lamps of [L.lamps, L.lenses]) {
+      if (!lamps) continue;
+      const { right, up, cols, pitch, show } = lamps;
       const rows = Math.ceil(show.length / cols);
       const m = this.clusterAt(right, up);
       const h = pitch * 0.3;
@@ -1746,6 +1956,22 @@ class Cabin {
       beam(h, 'trim', add(hp, scale(sub(tip, hp), 0.5)), tip, 0.016, 0.02);
       h.cylinderZ('chrome', add(tip, [0, 0, 0.006]), 0.007, 0.007, 6);
     }));
+
+    // The Niva's transfer-box levers: fixed, each a metal stem out of its own small gaiter
+    // with a black knob on it.
+    if (L.transfer) {
+      const ts = cowl + L.transfer.ds;
+      const top = this.tunnelTop(ts);
+      for (const t of L.transfer.levers) {
+        b.color(COLOURS.rubber);
+        gaiter(b, 'trim', this.P(t.x, top, ts), [[0, 0.035], [0.03, 0.026], [0.06, 0.012]], 8);
+        const knob = this.P(t.x + t.lean[1], top + t.height, ts + t.lean[0]);
+        b.color(COLOURS.metal);
+        beam(b, 'trim', this.P(t.x, top + 0.03, ts), knob, 0.005, 0.005, [1, 0, 0]);
+        b.color(COLOURS.black);
+        pad(b, 'trim', knob, [t.knob, t.knob, t.knob], t.knob * 0.45);
+      }
+    }
   }
 
   // ---- seats ----
@@ -1805,7 +2031,7 @@ class Cabin {
     const b = new PartBuilder();
     const H = this.benchS;
     const top = this.floorY + L.benchCushion;
-    const wall = this.frame.wellX(this.spec.wheels.rear) - 0.022;
+    const wall = this.frame.wellX(this.spec.wheels.rear) - (L.bench.clear ?? 0.022);
     const half = wall - 0.013;
     const uph = this.spec.look.upholstery;
     const insert = shade(uph, 1.35);

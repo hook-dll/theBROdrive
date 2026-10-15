@@ -714,18 +714,22 @@ function migrateCarPaint(raw: unknown): CarPaint | null {
 /**
  * Bodies the catalogue dropped for a new body of the same car: the save keeps the car,
  * running gear and all, on the body that replaced it. The GTA SA Oka gave way to the
- * carforge one (2026-10-12); the 2105 rally car has no kit body and becomes the kit 2105.
+ * carforge one (2026-10-12); the 2105 rally car has no kit body and becomes the kit 2105;
+ * the pack Nivas, whose ids do not name the model, load on the kit 2121 and 2131.
  */
 const RETIRED_MODEL_IDS: Readonly<Record<string, string>> = {
   sa_oka: 'cf_vaz1111',
   sv_vaz2105r: 'kit_vaz2105',
+  sv_niva: 'kit_vaz2121',
+  sv_niva_long: 'kit_vaz2131',
 };
 
 /**
  * The world's body for a saved model id. Only kit bodies drive in the world now
  * (2026-10-13, `CAR_MODELS`): a car saved on a pack body (`sv_vaz2101`, `sa_vaz2109`,
  * `gt_vaz2110`, …) loads on the kit body of the same car (`kit_vaz2101`, …), and one
- * with no kit twin (the Volgas, the Nivas, the Oka, …) on the default.
+ * with no kit twin (the Volgas, …) on the default. The carforge Oka (`cf_vaz1111`, and
+ * the retired `sa_oka` through it) loads on `kit_vaz1111`.
  */
 function worldModelId(saved: unknown): string {
   if (typeof saved !== 'string') return DEFAULT_CAR_MODEL_ID;

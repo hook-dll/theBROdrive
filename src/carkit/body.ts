@@ -194,13 +194,20 @@ export class BodyFrame {
   }
 
   /**
-   * The tail station a boot lid comes down (`bootEnd` on the last station, which carries a
-   * `notch`), or undefined. There the lid's top turns down to a line across at the corner
-   * lamps' top, and below that line its rear panel lies in the tail face between the lamps.
+   * The tail station a boot lid or tailgate comes down (`bootEnd` on the last station, or
+   * no `bootEnd` at all: a hatch; the last station carries a `notch`), or undefined. There
+   * the lid's top turns down to a line across at the corner lamps' top, and below that line
+   * its rear panel lies in the tail face between the lamps (the 2115's boot lid, the Oka's
+   * tailgate).
    */
   get lidFace(): number | undefined {
     const last = this.spec.stations[this.spec.stations.length - 1]!;
-    return last.notch !== undefined && this.spec.bootEnd === last.s ? last.s : undefined;
+    return last.notch !== undefined && (this.spec.bootEnd === undefined || this.spec.bootEnd === last.s) ? last.s : undefined;
+  }
+
+  /** The part that comes down the tail face (`lidFace`): the boot lid or the tailgate. */
+  get lidOwner(): 'boot' | 'tailgate' {
+    return this.spec.bootEnd === undefined ? 'tailgate' : 'boot';
   }
 
   /**
@@ -631,6 +638,8 @@ export function buildShell(frame: BodyFrame): ShellResult {
         if (i >= 1) {
           if (sMid > spec.bonnetFront && sMid < frame.bonnetRear) owner = 'bonnet';
           if (spec.bootEnd !== undefined && sMid > frame.rearBase && sMid < spec.bootEnd) owner = 'boot';
+          // A tailgate coming down the tail face also takes the deck behind its foot.
+          if (spec.bootEnd === undefined && frame.lidFace !== undefined && sMid > frame.rearBase) owner = 'tailgate';
         }
         shell.face(
           [
@@ -720,8 +729,8 @@ export function buildShell(frame: BodyFrame): ShellResult {
       const yTop = sec.r4[1];
       const yFoot = sec.st.deck;
       for (const side of [1, -1]) {
-        shell.face([P(side * cut!, yTop, s), P(side * foot!, yTop, s), P(side * foot!, yFoot, s)], 'boot', 'paint');
-        shell.face([P(side * foot!, yTop, s), P(0, yTop, s), P(0, yFoot, s), P(side * foot!, yFoot, s)], 'boot', 'paint');
+        shell.face([P(side * cut!, yTop, s), P(side * foot!, yTop, s), P(side * foot!, yFoot, s)], frame.lidOwner, 'paint');
+        shell.face([P(side * foot!, yTop, s), P(0, yTop, s), P(0, yFoot, s), P(side * foot!, yFoot, s)], frame.lidOwner, 'paint');
       }
     }
   }

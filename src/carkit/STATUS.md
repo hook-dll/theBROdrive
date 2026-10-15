@@ -43,9 +43,8 @@ to the kit tyre. The kit's five generated wheel styles were removed at the owner
 ## Roadmap (agreed order)
 
 1. ✅ **Generator core**: 2106 and 2108 in the car lab, hover and click.
-2. **VAZ cars** from specs: 2101, 2102, 2103, 2104, 2105, 2106, 2107, 2108, 2109, 21099,
-   2110, 2112, 2115, 2121, 2131, 1111.
-   Done: 2101–2109, 21099, 2110, 2112, 2115. **Left: 2121, 2131, 1111.**
+2. ✅ **VAZ cars** from specs: 2101, 2102, 2103, 2104, 2105, 2106, 2107, 2108, 2109, 21099,
+   2110, 2112, 2115, 2121, 2131, 1111. All done (the last three accepted 2026-10-16).
 3. **GAZ and UAZ-469**, then the **UAZ «буханка»** (UAZ-452).
 4. **Trucks**, starting with the **ZIL-130**.
 
@@ -83,9 +82,9 @@ Triangle counts in README.
 | 2115 | `BODY_2115` + `LOOK_2115` | Commons photos only (no drawing exists); factory figures vaz.ru / drom.ru | done | see below |
 | 2110 | `BODY_2110` + `LOOK_2110` (tens.ts), `CABIN_2110` | 3dcar.ru `vaz_2110.jpg` (4.092 mm/px from the drawn wheelbase); Commons photos for the quarter glass, arches, flap side, lamps, dash; factory figures infocar.ua / autoopt.ru / cartechnic.ru (`measurements-2110.md`) | done (base early car), owner's review fixes in | see below |
 | 2112 | `BODY_2112` + `LOOK_2112` (tens.ts), `CABIN_2110` | 3dcar.ru `vaz_2112.jpg` (3.98 mm/px from the drawn wheelbase, hubs x 815 / 1441, ground y 410); Commons photos for the tail, lamps, spoiler; factory figures autoopt.ru (`measurements-2110.md` §8) | done | see below |
-| 2121 | – | `niva.jpg` factory four-view present | **not started** | sibling `sv_niva` (off-road wheel pool kept automatically); 4×4 bay/underbody and its own dash needed |
-| 2131 | – | – | **not started** | sibling `sv_niva_long`; derive from the 2121 shell |
-| 1111 | – | – | **not started** | no `sv_` sibling (`KIT_CARS` requires one from `SOVIET_CARS`): a decision for the owner. The owner's own carforge Oka (`cf_vaz1111`, uncommitted files) is separate work; don't touch it |
+| 2121 | `BODY_2121` + `LOOK_2121` (nivas.ts), platform `niva` (`LAYOUTS.niva`) | `niva.jpg` factory four-view (3.632 mm/px from the drawn wheelbase); Commons photos (`measurements-niva.md`) | done (owner accepted 2026-10-16) | arches one circle (real ones taller than wide), no arch flares, the bumper ends do not wrap round the wings, rear side reflectors and C-pillar slot not modelled, spare wheel not in the bay, transfer levers static |
+| 2131 | `BODY_2131` (the 2121 + 0.5 behind the B pillar) + `LOOK_2131`, `CABIN_2131` | no drawing exists; Commons photos registered on the 2121's B shut line and rear axle, ±4 cm (`measurements-niva.md` §5) | done (owner accepted 2026-10-16) | as the 2121; D-pillar vent slots and roof rack not modelled |
+| 1111 | `BODY_1111` + `LOOK_1111` (oka.ts), platform `samara`, `CABIN_1111` | 3dcar.ru `vaz_1111_oka.jpg` (dimensioned, 2.696 mm/px); Commons photos (`measurements-oka.md`) | done (owner accepted 2026-10-16) | running gear `cf_vaz1111`'s (the 1111 manual; `KIT_CARS` siblings may be any catalogue entry); a pair of wipers (the car has one); a red fog lens at both rear ends (the car has one); the underbody hangs to 0.116 under a floor at its clearance (advisory) |
 
 **2115 details — done** (commit 8620a22):
 late-face head lamps and indicators (since the third review a `cornerLamps` unit, flush and wrapping round the corner; since the fourth the tail lamps too, and the Samaras' face rakes back, `frontLean`), the slot under the bonnet
@@ -168,11 +167,6 @@ slot (as on the 2115).
 
 - **2111** (the tens' estate, not on the roadmap). Drawing `vaz_2111.jpg` is saved; it
   would derive from `BODY_2110` as the 2112 does.
-- **2121 / 2131.** `niva.jpg` in `build/carshape/_refs/bp/img/`. Needs a new platform (4×4
-  transfer box and axles in bay.ts, the Niva dash), spare wheel in the bay [INFERENCE from
-  the real car], tailgate down to the bumper.
-- **1111.** A small front-drive two-cylinder car; no pack sibling. Ask the owner which
-  running gear it borrows.
 
 ## Later families: what they need
 

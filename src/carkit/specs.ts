@@ -19,10 +19,12 @@
  */
 
 import { BODY_2102, BODY_2104, REAR_2102, REAR_2104 } from './estates';
-import { CABIN_2101, CABIN_2103, CABIN_2105, CABIN_2107, CABIN_2110 } from './interior';
+import { CABIN_1111, CABIN_2101, CABIN_2103, CABIN_2105, CABIN_2107, CABIN_2110, CABIN_2131 } from './interior';
+import { BODY_1111, LOOK_1111 } from './oka';
 import { BODY_2108, BODY_2109, BODY_21099, BODY_2115, LOOK_2108, LOOK_2109, LOOK_21099, LOOK_2115 } from './samaras';
 import type { KitCarSpec, KitLook } from './spec';
 import { BODY_2110, BODY_2112, LOOK_2110, LOOK_2112 } from './tens';
+import { BODY_2121, BODY_2131, LOOK_2121, LOOK_2131 } from './nivas';
 
 /** The shape of a car: everything a spec holds but its id, its looks and its cabin. */
 export type KitBody = Omit<KitCarSpec, 'id' | 'look' | 'cabinLayout'>;
@@ -497,4 +499,7 @@ export const KIT_SPECS: Readonly<Record<string, KitCarSpec>> = {
   vaz2115: { id: 'vaz2115', ...onBody(BODY_2115, 0.045, 4.33), look: LOOK_2115 },
   vaz2110: { id: 'vaz2110', ...BODY_2110, look: LOOK_2110, cabinLayout: CABIN_2110 },
   vaz2112: { id: 'vaz2112', ...BODY_2112, look: LOOK_2112, cabinLayout: CABIN_2110 },
+  vaz2121: { id: 'vaz2121', ...BODY_2121, look: LOOK_2121 },
+  vaz2131: { id: 'vaz2131', ...BODY_2131, look: LOOK_2131, cabinLayout: CABIN_2131 },
+  vaz1111: { id: 'vaz1111', ...BODY_1111, look: LOOK_1111, cabinLayout: CABIN_1111 },
 };

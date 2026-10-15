@@ -10,9 +10,10 @@
  * The engine, its turbine, the radiator and the air filter are the bonnet's service
  * cells (vehicle/bonnet.ts), drawn by the grid from what the car carries, so the bay
  * leaves their places empty and marks each with a `KIT_BONNET_CELL_NODE`: an inline
- * four along the classic's bay or across the Samara's, the radiator in front of it,
- * the turbine on the exhaust side and the air filter on the intake side.
- *
+ * four along the classic's (and the Niva's) bay or across the Samara's, the radiator in
+ * front of it, the turbine on the exhaust side and the air filter on the intake side.
+ * The Niva is the classic underneath with its four-wheel drive added: a transfer box
+ * behind the gearbox, a front propshaft to a front differential and driveshafts.
  * Everything is placed off the frame (axles, cowl, deck, sills), so another body on the
  * same platform gets the same layout fitted to its own shell. The shell sets the limits:
  *
@@ -22,8 +23,8 @@
  *    of the tyres;
  *  - the shell's dark floor at sill height closes every space from below, so what is
  *    meant to be seen from under the car hangs below it, and the lowest of it (the
- *    classic's differential, the Samara's fuel tank) stands at exactly CLEARANCE; the
- *    silencers are tucked up SILENCER_TUCK above it.
+ *    classic's and the Niva's differentials, the Samara's fuel tank) stands at exactly
+ *    the factory clearance (`clearance`); the silencers are tucked up SILENCER_TUCK above it.
  */
 
 import * as THREE from 'three';
@@ -34,6 +35,12 @@ import { loadSpaceStart } from './interior';
 
 /** Ground clearance of the lowest part under the car: the factory figure the body was fitted to. */
 const CLEARANCE = 0.17;
+/** The Niva's: 220 mm (`FACTORY_GEOMETRY.sv_niva`, vehicle/carmodels.ts). */
+const NIVA_CLEARANCE = 0.22;
+
+function clearance(frame: BodyFrame): number {
+  return frame.spec.platform === 'niva' ? NIVA_CLEARANCE : CLEARANCE;
+}
 /** The silencer hangs this far above the lowest point, tucked up under the floor. */
 const SILENCER_TUCK = 0.025;
 /** Room under a lid's deck line: its 0.035 inner skin plus a hair, so nothing shows through. */
@@ -84,7 +91,8 @@ export function buildBay(ctx: KitContext): void {
   const boot = detailGroup(ctx, 'kit_boot');
   const under = detailGroup(ctx, 'kit_under');
   const { frame } = ctx;
-  const classic = frame.spec.platform === 'classic';
+  // The Niva's engine, bay and cabin floor are the classic's.
+  const classic = frame.spec.platform !== 'samara';
 
   const b = new PartBuilder();
   const { route, cells } = buildEngineBay(frame, b, classic);
@@ -739,14 +747,15 @@ function buildUnderbody(frame: BodyFrame, b: PartBuilder, eb: PartBuilder, class
   else samaraChassis(frame, b, eb, route);
 }
 
-/** Exhaust from the down-pipe's start under the bay: resonator, silencer at CLEARANCE, tail pipe out at the right rear. */
+/** Exhaust from the down-pipe's start under the bay: resonator, silencer at the clearance, tail pipe out at the right rear. */
 function exhaust(frame: BodyFrame, b: PartBuilder, down: readonly Vec3[], x: number, y: number, resonator: readonly [number, number], silencer: readonly [number, number], silencerX: number): void {
   const spec = frame.spec;
+  const C = clearance(frame);
   b.color(COLOURS.exhaust);
   tube(b, 'trim', [...down, at(frame, x, y, resonator[0])], 0.022, 6);
-  bevelS(b, frame, 'trim', [x - 0.075, CLEARANCE + 0.006, resonator[0]], [x + 0.075, y + 0.04, resonator[1]], 0.025);
+  bevelS(b, frame, 'trim', [x - 0.075, C + 0.006, resonator[0]], [x + 0.075, y + 0.04, resonator[1]], 0.025);
   tube(b, 'trim', [at(frame, x, y, resonator[1]), at(frame, x, y, silencer[0] - 0.25), at(frame, silencerX, y, silencer[0])], 0.022, 6);
-  bevelS(b, frame, 'trim', [silencerX - 0.13, CLEARANCE + SILENCER_TUCK, silencer[0]], [silencerX + 0.13, CLEARANCE + SILENCER_TUCK + 0.085, silencer[1]], 0.035);
+  bevelS(b, frame, 'trim', [silencerX - 0.13, C + SILENCER_TUCK, silencer[0]], [silencerX + 0.13, C + SILENCER_TUCK + 0.085, silencer[1]], 0.035);
   const tail = spec.stations[spec.stations.length - 1]!.s;
   tube(b, 'trim', [at(frame, silencerX - 0.03, y + 0.007, silencer[1]), at(frame, silencerX - 0.08, y + 0.03, tail - 0.05), at(frame, -0.45, y + 0.045, spec.length - 0.03)], 0.022, 6);
 }
@@ -754,13 +763,16 @@ function exhaust(frame: BodyFrame, b: PartBuilder, down: readonly Vec3[], x: num
 /**
  * The classic's underside: the front beam and wishbones with the anti-roll bar, the
  * gearbox and propshaft in the tunnel, and the live rear axle on four trailing links and
- * a Panhard rod, its differential hanging lowest at CLEARANCE.
+ * a Panhard rod, its differential hanging lowest at the clearance. The Niva adds its
+ * four-wheel drive (`nivaTransfer`).
  */
 function classicChassis(frame: BodyFrame, b: PartBuilder, eb: PartBuilder, route: BayRoute): void {
   const spec = frame.spec;
   const w = spec.wheels;
   const cowl = frame.cowl;
   const R = w.radius;
+  const C = clearance(frame);
+  const niva = spec.platform === 'niva';
 
   // Front beam under the engine's place, between the wishbones' inner pivots. It has no
   // top face: that would lie in the floor's plane (its closing edge, last point to first).
@@ -780,24 +792,29 @@ function classicChassis(frame: BodyFrame, b: PartBuilder, eb: PartBuilder, route
   b.color(COLOURS.black);
   tube(b, 'trim', [at(frame, 0.52, by, w.front - 0.02), at(frame, 0.45, by, barS), at(frame, -0.45, by, barS), at(frame, -0.52, by, w.front - 0.02)], 0.012, 4);
 
-  // Gearbox from the firewall, where the engine's bellhousing met it; propshaft to the pinion.
+  // Gearbox from the firewall, where the engine's bellhousing met it; propshaft to the
+  // pinion, on the Niva from the transfer box behind the gearbox.
   const x = route.engineX;
   const cy = route.crankY;
   const gearEnd = cowl + 0.45;
-  taper(b, frame, 'trim', COLOURS.alloy, x, cy, cowl + 0.02, 0.11, cy - CLEARANCE - 0.012, gearEnd, 0.07, 0.065, 8);
+  taper(b, frame, 'trim', COLOURS.alloy, x, cy, cowl + 0.02, 0.11, cy - C - 0.012, gearEnd, 0.07, 0.065, 8);
   const pinionY = R - 0.035;
   const pinionS = w.rear - 0.16;
   b.color(COLOURS.driveline);
   b.cylinderZ('trim', at(frame, x, cy, gearEnd + 0.02), 0.06, 0.02, 8);
-  rod(b, 'trim', at(frame, x, cy, gearEnd + 0.04), at(frame, 0, pinionY, pinionS), 0.032, 6);
-  const mid = (gearEnd + pinionS) / 2;
-  // No top: it meets the floor.
-  boxS(b, frame, 'trim', [-0.06, (cy + pinionY) / 2 - 0.03, mid - 0.03], [0.06, floorY(frame, mid), mid + 0.03], 0b111011);
+  const shaftFrom = niva ? nivaTransfer(frame, b, x, cy, gearEnd + 0.04) : at(frame, x, cy, gearEnd + 0.04);
+  b.color(COLOURS.driveline);
+  rod(b, 'trim', shaftFrom, at(frame, 0, pinionY, pinionS), 0.032, 6);
+  if (!niva) {
+    // The long propshaft's centre bearing. No top: it meets the floor.
+    const mid = (gearEnd + pinionS) / 2;
+    boxS(b, frame, 'trim', [-0.06, (cy + pinionY) / 2 - 0.03, mid - 0.03], [0.06, floorY(frame, mid), mid + 0.03], 0b111011);
+  }
 
-  // Live axle: tubes, the differential (its bottom at CLEARANCE), the pinion nose.
+  // Live axle: tubes, the differential (its bottom at the clearance), the pinion nose.
   b.color(COLOURS.driveline);
   b.cylinderX('trim', at(frame, 0, R, w.rear), 0.035, w.rearHalfTrack - 0.06, 6);
-  const diff = R - CLEARANCE;
+  const diff = R - C;
   b.cylinderZ('trim', at(frame, 0, R, w.rear), diff, 0.065, 8);
   b.cylinderZ('trim', at(frame, 0, R, w.rear + 0.075), diff * 0.85, 0.012, 8);
   b.cylinderZ('trim', at(frame, 0, pinionY, w.rear - 0.11), 0.055, 0.05, 8);
@@ -812,9 +829,10 @@ function classicChassis(frame: BodyFrame, b: PartBuilder, eb: PartBuilder, route
   }
   rod(b, 'trim', at(frame, 0.5, R - 0.03, w.rear + 0.13), at(frame, -0.45, rf - 0.012, w.rear + 0.13), 0.014, 5);
 
-  // Exhaust along the right of the tunnel, under the axle, out at the right rear.
-  const ex = -0.17;
-  const ey = CLEARANCE + 0.035;
+  // Exhaust along the right of the tunnel, under the axle, out at the right rear. On the
+  // Niva it keeps outboard of the transfer box and its resonator behind it.
+  const ex = niva ? -0.22 : -0.17;
+  const ey = C + 0.035;
   const o = route.outlet;
   const os = frame.zNose - o[2];
   exhaust(
@@ -823,11 +841,67 @@ function classicChassis(frame: BodyFrame, b: PartBuilder, eb: PartBuilder, route
     [o, at(frame, o[0] - 0.01, (o[1] + ey) / 2, os + 0.06), at(frame, ex, ey + 0.02, cowl + 0.05), at(frame, ex, ey, cowl + 0.25)],
     ex,
     ey,
-    [cowl + 0.55, cowl + 1.0],
+    niva ? [cowl + 0.85, Math.min(cowl + 1.25, w.rear - 0.4)] : [cowl + 0.55, cowl + 1.0],
     // Short of the tail panel: the boot lid's end on a saloon, the body's last station on an estate.
     [w.rear + 0.21, Math.min(w.rear + 0.78, (spec.bootEnd ?? spec.stations[spec.stations.length - 1]!.s) - 0.2)],
     ex,
   );
+}
+
+/**
+ * The Niva's four-wheel drive under the classic's driveline [E: schematic, from the real
+ * car's layout]: a short shaft from the gearbox to the transfer box hanging under the
+ * tunnel, a front propshaft from its right front to the front differential on the
+ * right under the engine (its bottom at the clearance, as the rear one's), and
+ * driveshafts with their joints' boots out to the front hubs. Returns the transfer box's
+ * rear output, where the rear propshaft starts.
+ */
+function nivaTransfer(frame: BodyFrame, b: PartBuilder, x: number, cy: number, s: number): Vec3 {
+  const w = frame.spec.wheels;
+  const R = w.radius;
+  const C = clearance(frame);
+  // The box: 0.26 along, 0.28 across (more of it right, where the front output is). The
+  // Niva's floor stands only a few cm over the clearance (its sill, 0.26), so the box rises
+  // into the tunnel (interior.ts `tunnel`, 0.08 high and more over it) from 10 mm over the
+  // clearance.
+  const t0 = s + 0.08;
+  const t1 = t0 + 0.26;
+  const top = Math.min(floorY(frame, t0), floorY(frame, t1)) + 0.05;
+  const bottom = C + 0.01;
+  const ty = (top + bottom) / 2;
+  b.color(COLOURS.driveline);
+  rod(b, 'trim', at(frame, x, cy, s), at(frame, x, ty, t0), 0.028, 6);
+  b.color(COLOURS.alloy);
+  bevelS(b, frame, 'trim', [x - 0.18, bottom, t0], [x + 0.1, top, t1], 0.03);
+  b.color(COLOURS.driveline);
+  b.cylinderZ('trim', at(frame, x, ty, t1 + 0.015), 0.055, 0.015, 8);
+
+  // Front differential: a housing round its pinion's axis, right of centre and just behind
+  // the axle line, clear of the front beam ahead of it.
+  const ff = floorY(frame, w.front);
+  const rd = Math.min(0.1, (ff - 0.006 - C) / 2);
+  const xd = -0.1;
+  const yd = C + rd;
+  const sd = w.front + 0.04;
+  b.cylinderZ('trim', at(frame, xd, yd, sd), rd, 0.06, 8);
+  b.cylinderZ('trim', at(frame, xd, yd, sd + 0.1), rd * 0.5, 0.04, 8);
+  // Front propshaft along the right of the gearbox.
+  const xf = x - 0.14;
+  b.cylinderZ('trim', at(frame, xf, ty, t0 - 0.015), 0.05, 0.015, 8);
+  rod(b, 'trim', at(frame, xf, ty, t0 - 0.03), at(frame, xd, yd, sd + 0.14), 0.026, 6);
+  // Driveshafts to the hubs, a boot at each end.
+  const hub = w.frontHalfTrack - 0.07;
+  for (const side of [1, -1]) {
+    const x0 = xd + side * rd;
+    const x1 = side * hub;
+    b.color(COLOURS.driveline);
+    rod(b, 'trim', at(frame, x0, yd, sd), at(frame, x1, R, w.front), 0.018, 6);
+    b.color(COLOURS.black);
+    const along = (k: number): Vec3 => at(frame, x0 + (x1 - x0) * k, yd + (R - yd) * k, sd + (w.front - sd) * k);
+    const span = Math.abs(x1 - x0);
+    for (const k of [0.06 / span, 1 - 0.07 / span]) b.cylinderX('trim', along(k), 0.04, 0.05, 6);
+  }
+  return at(frame, x, ty, t1 + 0.03);
 }
 
 /**
