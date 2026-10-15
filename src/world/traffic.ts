@@ -308,9 +308,10 @@ const TURN_REJOIN_M = 25;
  * Ambient drivers do not need a new multi-ray route plan at the 60 Hz suspension
  * rate. Forty-five decisions per second keep obstacle latency below 23 ms while
  * reducing the dominant traffic CPU cost; vehicle forces still advance every
- * physics step.
+ * physics step. `RoadTraffic.controlHz` overrides it live (`__bro.traffic.controlHz`),
+ * for trying how drivers feel at other rates.
  */
-const TRAFFIC_CONTROL_INTERVAL_S = 1 / 45;
+const TRAFFIC_CONTROL_HZ = 45;
 /**
  * How often the coordinator's PAIRWISE rules are re-answered, seconds.
  *
@@ -904,6 +905,14 @@ export class RoadTraffic {
   /** Reused coordinator scratch; allocating and sorting two fresh arrays at 60 Hz caused GC churn. */
   private readonly forwardQueue: TrafficCar[] = [];
   private readonly reverseQueue: TrafficCar[] = [];
+  /**
+   * Driver decisions a second (`TRAFFIC_CONTROL_HZ`). Public so a console can try other
+   * rates live; the spawn gap's reaction allowance follows it.
+   */
+  controlHz = TRAFFIC_CONTROL_HZ;
+  private get controlIntervalS(): number {
+    return 1 / Math.max(1, this.controlHz);
+  }
   /**
    * The widest stream this stretch of road will hold, from `widenessAt`. Recomputed
    * every step because the widening changes under the stream as it drives.
@@ -2147,7 +2156,7 @@ export class RoadTraffic {
     // the loop below, which is a linear pass per car and exists to dip a headlight.
     //
     // What they produce are PERMISSIONS, latched until re-evaluated, and read by
-    // drivers that decide at `TRAFFIC_CONTROL_INTERVAL_S` about manoeuvres measured in
+    // drivers that decide at `controlHz` about manoeuvres measured in
     // hundreds of metres. A tenth of a second of staleness is 4 m of closure between
     // two cars meeting at 70 km/h, against exclusion windows of 120 and 260 m.
     this.coordinationTimer -= dt;
@@ -2262,10 +2271,10 @@ export class RoadTraffic {
         this.serviceTurn(car);
         car.controlAccumulator += dt;
         car.controlElapsed += dt;
-        if (car.controlAccumulator >= TRAFFIC_CONTROL_INTERVAL_S) {
+        if (car.controlAccumulator >= this.controlIntervalS) {
           const controlDt = car.controlElapsed;
           car.controlElapsed = 0;
-          car.controlAccumulator %= TRAFFIC_CONTROL_INTERVAL_S;
+          car.controlAccumulator %= this.controlIntervalS;
           car.autopilot.drive(controlDt, car.vehicle, car.input, originX, originZ);
         }
         car.vehicle.fixedUpdate(dt, car.input);
@@ -2391,7 +2400,7 @@ export class RoadTraffic {
     // plans its line from where it is, rather than from where it last decided anything.
     // It decides on this very step, over the one step it has been driving.
     car.autopilot.setEngaged(true);
-    car.controlAccumulator = TRAFFIC_CONTROL_INTERVAL_S;
+    car.controlAccumulator = this.controlIntervalS;
     car.controlElapsed = 0;
   }
 
@@ -2899,7 +2908,7 @@ export class RoadTraffic {
       ),
       wasPassing: false,
       controlAccumulator:
-        (this.carList.length & 1) * (TRAFFIC_CONTROL_INTERVAL_S * 0.5),
+        (this.carList.length & 1) * (this.controlIntervalS * 0.5),
       controlElapsed: 0,
       turnS: -1,
       rails: null,
@@ -3214,7 +3223,7 @@ export class RoadTraffic {
             : 0;
           requiredGap = Math.max(
             rival ? PLATOON_MIN_GAP_M : SPAWN_ROAD_GAP_M,
-            car.bodyRadius + halfLength + config.brakeLead + speed * TRAFFIC_CONTROL_INTERVAL_S + stop,
+            car.bodyRadius + halfLength + config.brakeLead + speed * this.controlIntervalS + stop,
           );
         }
         if (gap < requiredGap) return false;
@@ -3367,7 +3376,24 @@ export class RoadTraffic {
    * than a full two-lane road's worth is a busy road and queues up.
    */
   private get trafficCaps(): { readonly narrow: number; readonly wide: number } {
-    return TRAFFIC_CAPS[this.sourceWorld.state.settings.trafficDensity];
+    return this.capsOverride ?? TRAFFIC_CAPS[this.sourceWorld.state.settings.trafficDensity];
+  }
+
+  private capsOverride: { readonly narrow: number; readonly wide: number } | null = null;
+
+  /**
+   * Console override of the menu's traffic ceilings (`__bro.traffic.caps = { narrow: 6,
+   * wide: 12 }`; `null` hands them back to the menu). Clamped to 0-48 so the far-car
+   * meshes (64 a model) keep room for the race rivals. Surplus cars drain behind the
+   * player as at any lowering; a raise fills at the normal spawn rate.
+   */
+  get caps(): { readonly narrow: number; readonly wide: number } {
+    return this.trafficCaps;
+  }
+
+  set caps(value: { readonly narrow: number; readonly wide: number } | null) {
+    const clamp = (n: number): number => Math.min(48, Math.max(0, Math.round(n)));
+    this.capsOverride = value === null ? null : { narrow: clamp(value.narrow), wide: clamp(Math.max(value.narrow, value.wide)) };
   }
 
   /**
