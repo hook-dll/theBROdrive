@@ -1023,6 +1023,8 @@ export class Vehicle implements Rebasable {
   private readonly farPaint = new THREE.Color();
   /** This car's mid-range parts (render/carmodel.ts), from its visuals; null for none. */
   private midParts: CarMidInstance | null = null;
+  /** A kit car's four wheels drawn as one mesh (render/kitdraw.ts); null for any other model. */
+  private wheelDraw: THREE.SkinnedMesh | null = null;
   /** Past the mid line from the eye at the last frame; see `drawMid`. */
   private midSide = false;
   /** The mid parts stand in for the body and wheels; see `showMid`. */
@@ -3813,6 +3815,7 @@ export class Vehicle implements Rebasable {
     this.midShown = shown;
     if (this.bodyGroup) this.bodyGroup.visible = !shown;
     for (const w of this.wheels) w.mesh.visible = !shown;
+    if (this.wheelDraw) this.wheelDraw.visible = !shown;
     if (this.midParts) {
       this.midParts.paint.visible = shown;
       if (this.midParts.glass) this.midParts.glass.visible = shown;
@@ -3832,6 +3835,7 @@ export class Vehicle implements Rebasable {
   get nearParts(): THREE.Object3D[] {
     const parts: THREE.Object3D[] = this.bodyGroup ? [this.bodyGroup] : [];
     for (const w of this.wheels) parts.push(w.mesh);
+    if (this.wheelDraw) parts.push(this.wheelDraw);
     return parts;
   }
 
@@ -5797,6 +5801,9 @@ export class Vehicle implements Rebasable {
 
     this.wheelMeshes.clear();
     for (const [id, mesh] of instance.wheels) this.wheelMeshes.set(id, mesh);
+    // Beside the wheels, which `rebuild` hangs under the root: it draws them as they stand.
+    this.wheelDraw = instance.wheelDraw;
+    if (instance.wheelDraw) this.rootGroup.add(instance.wheelDraw);
 
     this.lamps.build(this.measure.halfExtents, this.contactPlaneY);
     // After the lamps bind theirs, so no lens walk ever meets it; hidden until `showMid`.
@@ -5846,9 +5853,9 @@ export class Vehicle implements Rebasable {
     this.nearCasting = true;
     this.bodyRestScale.set(1, 1, 1);
     this.wheelMeshes.clear();
+    this.wheelDraw = null;
     this.steeringWheel = null;
     this.steeringWheelRest = 0;
-    this.kitRig?.dispose();
     this.kitRig = null;
     this.kitDome = null;
   }

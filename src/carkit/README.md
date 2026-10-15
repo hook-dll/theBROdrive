@@ -52,9 +52,10 @@ and commit.
 - Typecheck: `nice -n 10 npx tsc --noEmit -p .` (a clean run prints only npm notices).
   `bun` is at `~/.bun/bin/bun`.
 - Shaders (`.omp/rules/shader-variants.md`): no material variant may first appear at run
-  time. The kit has one shared material per slot (`materials.ts`); LOD changes only
-  visibility and uniforms (`KitRig.setDetail`); never toggle a light's `visible` or
-  `castShadow`; a new `onBeforeCompile` patch needs a stable shared `customProgramCacheKey`.
+  time. A kit car is one opaque material and its glass (`materials.ts`), merged into one
+  skinned mesh per material (render/kitdraw.ts); LOD changes only visibility, bones and
+  uniforms (`KitRig.setDetail`); never toggle a light's `visible` or `castShadow`; a new
+  `onBeforeCompile` patch needs a stable shared `customProgramCacheKey`.
 - Visual rules: flat faces, the game's lighting and palette, no outlines. Real factory
   proportions measured from drawings or photos, **never from memory**; simplified shape,
   no caricature, never stacked boxes. Doors at their full real size.
@@ -115,7 +116,7 @@ from the angle he complained about; changes are judged there, not in code.
 | `bay.ts` | Engine bay (`kit_bay`), boot (`kit_boot`), underbody (`kit_under`); the exhaust (`exhaust_trim` on the root, outside the detail groups: drawn at every distance, baked into the mid and far meshes). |
 | `wheels.ts` | The kit's own placeholder wheel (tyre on a plain steel disc): sets where the wheels stand and their size. |
 | `simplify.ts` | `simplifyFlats`: the finished car's flat runs merged into the fewest, fattest triangles and zero-area ones dropped (step 9 of [How the body is built](#how-the-body-is-built)). |
-| `materials.ts` | One shared material per slot. |
+| `materials.ts` | The one kit material (`kitBodyMaterial`) and the glass; `KIT_SLOT_FINISH`, each slot's colour, finish and lamp role; `finishKitSurfaces`, which writes a built mesh's slot into its vertices ([Draw calls](#draw-calls-one-car-three-draws)). |
 | `names.ts` | Node names the catalogue selects by (wheels, lamps, glass). No imports, so the catalogue can include it. |
 | `context.ts` | `KitContext`, `addBuilt`, `pivotGroup`, `attach`: how modules put geometry into the scene; `mirrorFrame`, `addMirrorFace`: a mirror head's aim and its live face. |
 | `kit.ts` | `buildKitCar(id)`: assembles everything; hinge motions of the shell's parts (`shellMotion`); `leanEnd` (`rearLean`, `frontLean`). |
@@ -142,18 +143,28 @@ Integration outside the folder:
 - `render/carmodel.ts`: `loadModel` calls `buildKitCar` on a frame of its own. Clear glass
   comes from `carClearGlassMaterial`. A detail mesh (cabin, bay, boot, underbody, and the
   exhaust, which is not a detail part) with `userData.kitShadowed` receives shadows and
-  casts none; one with `userData.kitCastsNone` (the mirror face) casts none. `cloneWheels`
-  rescales the pack's wheel sets to the kit tyre. Static clones
-  (wrecks, couriers: `cloneStaticModel`) are posed far once (`poseKitStatic`: no cabin,
-  bay, boot or underbody, mirror glass). Mid traffic (`CarMidInstance`) draws its paint and
-  its panes in the car's own paint and glass (dust, scratches and rig opacity as the near
-  car's), the rest as instances (render/farcars.ts); `Vehicle.showMid` poses the rig far.
+  casts none; one with `userData.kitCastsNone` (the mirror face) casts none (written into
+  each vertex, `KIT_SHADOW_ATTRIBUTE`). `buildTemplate` merges the car (`prepareKitDraw`);
+  every car gets its own copy of the one material (`makeCarBodyConditionMaterial`, `kit`)
+  and of the glass, over the template's merged buffers (`attachKitDraw`), and its wheel
+  set as one mesh (`CarModelInstance.wheelDraw`). `cloneWheels` rescales the pack's wheel
+  sets to the kit tyre. Static clones (wrecks, couriers: `cloneStaticModel`) are the mid
+  shell, its panes as the tinted mirror and its wheels as one plain mesh: three draws.
+  Mid traffic (`CarMidInstance`) draws the shut shell without its detail groups in the
+  car's own one material (lenses lit by its own lamps) and its panes in its own glass,
+  the wheels as instances (render/farcars.ts); `Vehicle.showMid` poses the rig far.
+- `render/kitdraw.ts`: the merge, `KitSkeleton` (the rig's nodes as bones),
+  `KIT_PICK_LAYER` (the parts the car was built of, kept as pick proxies).
 - `render/stickerdecals.ts`: decals on a moving part (`StickerDecalCarrier`: the nearest
   node with `kitMotion`) hang under that part in its shut frame, so a sticker on a door
   swings with it; `player/interaction.ts` `pickBody` places a sticker from the chassis
   stamp under the hit, so one aimed at an open door lands on the door.
 - `render/materials.ts`: dust on glass raises opacity, so dirty clear glass is not
-  see-through. On opaque glass this changes nothing.
+  see-through. On opaque glass this changes nothing. The kit material's patch
+  (`patchKitBodyShader`), `carLensGlows`, `setCarLensGrime`, the drop panes' clip
+  (`makeCarGrimeMaterial` `panes`, `setCarGlassPaneDrop`) and `kitCastDepthMaterial`.
+- `player/interaction.ts`, `car-lab.ts`, `app/devtools.ts` `stickerSheet`: their raycasters
+  enable `KIT_PICK_LAYER`, so they meet the parts, never the merged meshes.
 - `car-lab.ts`: the Kit row, the `?pack=` filter, hover and click, the "КАБИНА" panel, LOD by
   distance (`KitRig.setDetail`: the cabin's fine detail within 6 m), `window.__carLab`.
 - `vehicle/model-fits.json`: a measured fit row for every kit car (`tools/fit-models.ts`).
@@ -199,7 +210,8 @@ Integration outside the folder:
 6. **Hinges.** Pivots come from each part's geometry: door at its front edge, bonnet at
    its rear edge, boot lid at its front edge, tailgate at its top edge, flap at its front
    edge, quarter light at its rear post. A drop glass winds down into its door in its
-   own plane, cut at its bottom edge (rig.ts `SinkingPane`). Panes
+   own plane, the glass shader dropping what has gone below the door's top (rig.ts
+   `SinkingPane`). Panes
    (`window_*`, `vent_*`, `quarter_*`) ride inside their door. Opening angles are in
    `shellMotion` (kit.ts).
 7. **Exterior, interior, bay** are added (`buildExterior`, `buildInterior`, `buildBay`).
@@ -437,10 +449,10 @@ stack); the Samaras use the `samara` platform's layout as is.
   | indicator left | `kit_blink_l` |
   | indicator right | `kit_blink_r` |
   | never switched | `rear_passive` |
-- Paint: material `paint`. Only it takes colour, dust, scratches and stickers. Every other
-  name (`trim`, `chrome`, `tyre`, `wheel_rim`, `glass`, `lamp_*`) is filtered out by the
-  paint-slot rule.
-- Lit faces: slot `lamp_glow`, the one unlit material (vertex colours). A warning lamp's,
+- Paint: slot `paint` (`userData.kitSlot`, a paint share of 1 in `CAR_SURFACE_ATTRIBUTE`).
+  Only it takes colour, dust, scratches, the sticker highlight and stickers; every other
+  slot keeps its own colour and finish in its vertices.
+- Lit faces: slot `lamp_glow`, drawn unlit in its vertex colour (lamp role `CAR_LAMP_UNLIT`). A warning lamp's,
   a dial's face and ticks, a needle's and the courtesy lamp's dark face and lit face swap
   places on a pair of `pos` motions on the same channel: the dark one slides back by
   `GLOW_TRAVEL` (a needle `NEEDLE_TRAVEL`) as the lit one slides out into its place, so
@@ -460,7 +472,7 @@ stack); the Samaras use the `samara` platform's layout as is.
 - Courtesy lamp: group `kit_dome_lamp` (`KIT_DOME_LAMP_NODE`), the `dome` switch; the
   Vehicle hangs the cabin's light from it.
 - Glass: material `glass` (= `glassMaterial`). With `clearGlass` it becomes the shared
-  `car-glass-clear`.
+  `car-glass-clear`; every car draws its own copy, drop panes clipped at the door's top.
 - Steering wheel: node `steering_wheel`, its origin on the column axis, local +Y along the
   column towards the driver. The game turns it by `rotation.y`.
 - Mirrors: meshes named `mirrors`, which keeps them out of the measured body width. The
@@ -530,6 +542,47 @@ night with the lights on, from the door and the window match the full cabin; fro
 frames differ in 9–28 pixels of 2 million (lock knobs, needles, dial ticks, the lit
 cluster's faint glow). The inside mirror is coarse because from 8 m ahead it was the one
 part plainly seen going, black against the screen.
+
+## Draw calls: one car, three draws
+
+A near kit car used to draw every mesh it was built of: 60–150 draws in the scene pass,
+about 40 in the sun's, 34 in the inside mirror's, each 3–4 µs of main thread. Now it is
+drawn as three meshes (render/kitdraw.ts):
+
+1. **One material.** Every slot but the glass draws with `kitBodyMaterial`
+   (materials.ts). What made a slot what it was goes into its vertices once the car is
+   built (`finishKitSurfaces`): `color` (the slot's colour, or the colour each vertex was
+   built in for `trim` and `lamp_glow`) and `CAR_SURFACE_ATTRIBUTE` (render/materials.ts:
+   paint share, roughness, metalness, lamp role, the far traffic mesh's convention). Each
+   car's copy of it is its paint (`makeCarBodyConditionMaterial` with `kit`): its colour,
+   finish, emissive, dust, scratches, highlight and lamp knee apply where the paint share
+   is 1; a lens glows by its role from the car's own levels (`carLensGlows`, which
+   `VehicleLamps` and the lab rig write as they wrote lens materials) under its own dust
+   (`setCarLensGrime`); a lit face is drawn unlit. Shadows per vertex too
+   (`KIT_SHADOW_ATTRIBUTE`): a part receives where its mesh did, and casts where it did
+   (`kitCastDepthMaterial` clips the rest out of the depth pass).
+2. **Bones.** `prepareKitDraw` merges the car into one buffer per material, every vertex
+   weighted 1 to the node its part moves or hides with: the body, every `kitMotion` node,
+   the detail groups, every `kitFine` node and every drop pane (~90–100 bones). The rig
+   still writes those nodes; `KitSkeleton` reads them into the bone texture once a frame
+   (only when one moved does the texture upload), and a hidden node folds its part to a
+   point. Drop panes slide as bones and the glass discards what is below the door's top
+   (`KIT_PANE_ATTRIBUTE`, `setCarGlassPaneDrop`). The four wheels are one mesh too, their
+   bones the wheel nodes the vehicle turns (`attachKitWheels`).
+3. **Pick proxies.** The meshes the car was built of stay, on `KIT_PICK_LAYER` alone:
+   no camera draws them, every raycaster that picks a part enables the layer. Names,
+   materials, chassis stamp, `kitControl` and lamp bindings are as before, so picking,
+   doors, stickers, lamp beams and the far and mid bakes read them unchanged.
+
+The mirror faces stay meshes of their own (render/carmirrors.ts hides and shows them).
+A sticker layer is one more draw where a car has stickers.
+
+Measured 2026-10-15 in the game (Blessing, seed `flick`, km 3, four parked kit cars ahead
+of the start 2104, traffic hidden, frozen frame): own car in the cabin view 87 → 6 scene
+draws (body, glass front and back, wheels, the two mirror faces in view), chase 142 → 4; a parked car
+5–13 m away 72–150 → 4; the sun's pass 37–44 → 3 per car; the inside mirror's 34 → 4.
+`renderer.render()` 2.9 → 1.5 ms (cabin) and 3.0 → 1.4 ms (chase), the start car alone
+1.2–1.4 → 1.1 ms.
 
 ## Wheels: the Soviet pack's sets
 
@@ -760,7 +813,9 @@ wrapped rear bumper (2026-10-15, against c3ebe42: every car moved by design, 8�
 triangles, all 13 bounds identical; fit rows identical but for the 2110's and 2112's
 `hoodPoint` height, 17 mm lower, because the bonnet window it samples by vertex lost an
 inner vertex of a flat run: the bonnet itself did not move; 15 WebGL programs after boot
-in the lab, and night, lamps and opened parts add none the head build does not).
+in the lab, and night, lamps and opened parts add none the head build does not), and the
+one-material, one-draw car (2026-10-15, against 5a9136e: all 13 identical by every
+mesh's triangles; only attributes and materials changed).
 
 ## Budget and current figures
 

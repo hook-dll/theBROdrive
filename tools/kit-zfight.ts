@@ -44,7 +44,8 @@ import { installAssetShim } from './assetshim';
 import { PartBuilder, cutUnder, type KitSlot, type Outline, type Vec3 } from '../src/carkit/builder';
 import { buildKitCar } from '../src/carkit/kit';
 import { KIT_SPECS } from '../src/carkit/specs';
-import { KitRig, KIT_DETAIL_M, KIT_SHUT_GEOMETRY, kitGlassOpacity } from '../src/carkit/rig';
+import { KitRig, KIT_DETAIL_M, kitGlassOpacity } from '../src/carkit/rig';
+import { KIT_SLOT_FINISH } from '../src/carkit/materials';
 
 installAssetShim();
 
@@ -185,11 +186,6 @@ interface Soup {
   meshes: MeshInfo[];
 }
 
-/** The mesh's shut geometry: a sunk drop pane draws a cut copy (rig.ts `KIT_SHUT_GEOMETRY`). */
-function geometryOf(mesh: THREE.Mesh): THREE.BufferGeometry {
-  return (mesh.userData[KIT_SHUT_GEOMETRY] as THREE.BufferGeometry | undefined) ?? mesh.geometry;
-}
-
 function soupFromRoot(root: THREE.Object3D, meshes?: MeshInfo[]): Soup {
   root.updateMatrixWorld(true);
   const list: { mesh: THREE.Mesh; info: MeshInfo }[] = [];
@@ -209,21 +205,22 @@ function soupFromRoot(root: THREE.Object3D, meshes?: MeshInfo[]): Soup {
         if (/^kit_wheel_/.test(p.name)) zone = 'wheel';
         if (rigid < 0 && p.userData?.kitMotion) rigid = p.id;
       }
-      // Kit meshes carry one material each (materials.ts).
+      // Every slot but the glass is one material (materials.ts): the slot is the mesh's.
       const m = node.material as THREE.Material;
+      const slot = (node.userData.kitSlot as string | undefined) ?? m.name;
       info = {
         name: node.name,
         path: names.join('/'),
-        slot: m.name,
+        slot,
         zone,
         rigid,
-        transparent: !!m.transparent || m.name === 'glass',
+        transparent: !!m.transparent || slot === 'glass',
         polygonOffset: !!m.polygonOffset,
       };
       infos.push(info);
     }
     list.push({ mesh: node, info });
-    total += geometryOf(node).getAttribute('position').count / 3;
+    total += node.geometry.getAttribute('position').count / 3;
     k++;
   });
   const v = new Float64Array(total * 9);
@@ -235,16 +232,16 @@ function soupFromRoot(root: THREE.Object3D, meshes?: MeshInfo[]): Soup {
   const p = new THREE.Vector3();
   let t = 0;
   list.forEach(({ mesh: node }, mi) => {
-    const geometry = geometryOf(node);
+    const geometry = node.geometry;
     // A pane wound into its door (rig.ts `SinkingPane`) is not drawn: its triangles
     // collapse to a point, so they neither pair nor block a view.
     let shown = true;
     for (let q: THREE.Object3D | null = node; q && q !== root; q = q.parent) if (!q.visible) shown = false;
-    if (shown && geometry !== node.geometry) throw new Error(`${node.name}: a part-sunk pane; pose drop panes fully up or down`);
     const pos = geometry.getAttribute('position');
     const color = geometry.getAttribute('color');
     const pv: number[] = geometry.userData.prov ?? [];
-    const vc = (node.material as THREE.Material & { vertexColors?: boolean }).vertexColors === true;
+    const slot = node.userData.kitSlot as keyof typeof KIT_SLOT_FINISH | undefined;
+    const vc = slot !== undefined && KIT_SLOT_FINISH[slot]?.vertexColors === true;
     const index = geometry.index;
     const count = index ? index.count : pos.count;
     for (let i = 0; i < count; i += 3) {

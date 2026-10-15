@@ -654,6 +654,34 @@ night, parts open).
   boot and the same later ones (night sky, first framing) on HEAD and after, none from
   lamps or opened parts.
 
+## Three draws a car (2026-10-15)
+
+Renders and numbers: `/tmp/onedraw/` (`before-*` HEAD 5a9136e, `after-*`; `diff-*`
+amplified differences; `bench-*.json`, `pick-*.json`).
+
+- **A near kit car was 60–150 draws in the scene pass, ~40 in the sun's and 34 in the inside
+  mirror's, each 3–4 µs of main thread** (the owner approved making it ~3). → One mesh
+  per material slot per part (14 slots, ~107 moving parts: 140 part × material pairs on
+  the 2112). Merging needs one material, and the parts move. → (1) Every slot but the glass
+  is one material, the slot in the vertices (`color`, `CAR_SURFACE_ATTRIBUTE`: paint
+  share, roughness, metalness, lamp role; `KIT_SHADOW_ATTRIBUTE`: casts, receives), each
+  car's copy its paint, lenses lit per role from uniforms; (2) the car merged into one
+  rigid-skinned mesh per material on its own nodes as bones, the four wheels one more; the
+  parts kept as pick proxies on `KIT_PICK_LAYER`. Own car cabin 87 → 6, chase 142 → 4,
+  parked car 72–150 → 4, sun 37–44 → 3, mirror 34 → 4; `renderer.render()` with five kit
+  cars 2.9 → 1.5 ms. Car-lab A/B on four cars, day, night, parts open, dust: at most a few
+  hundred pixels differ (blink phase aside); the same picks for every control, seat, door
+  and sticker aim on HEAD and after. *carkit/materials.ts, render/kitdraw.ts,
+  render/materials.ts, render/carmodel.ts, carkit/rig.ts, vehicle/vehiclelamps.ts*.
+- **A drop pane cut on the CPU each time it moved** (`SinkingPane` wrote a cut copy of the
+  pane per car) could not be cut out of a merged buffer. → The pane slides as its own bone
+  and its glass discards what is below the door's top (`KIT_PANE_ATTRIBUTE`, its height
+  over the pane's bottom edge; `setCarGlassPaneDrop`); a ray meets only what shows. Lab
+  renders of the 2112 with panes at 0.3, 0.5 and 0.8: 56–64 pixels differ from HEAD's cut.
+  *carkit/rig.ts `SinkingPane`, `paneFrame`*.
+- Not merged: the mirror faces (shown and hidden by render/carmirrors.ts) and a sticker
+  layer, one draw where a car has stickers.
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent

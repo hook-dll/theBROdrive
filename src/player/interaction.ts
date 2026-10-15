@@ -52,6 +52,7 @@ import {
 } from '../vehicle/bonnet';
 import { CAR_BODY_POSITION_ATTRIBUTE, setPartCondition } from '../render/materials';
 import { carModelMeasure } from '../render/carmodel';
+import { KIT_PICK_LAYER } from '../render/kitdraw';
 import type { FoleyEvent, FoleyContinuous } from '../audio/foley';
 import type { Player } from './player';
 import type { WorldOrigin } from '../world/origin';
@@ -654,7 +655,10 @@ export class Interaction {
     private readonly boardable: BoardableField,
     /** Coins a race win pays for handing this cargo in now; see `RivalRace.winCoins`. */
     private readonly raceCoins: (itemId: string) => number,
-  ) {}
+  ) {
+    // A kit car is drawn merged and picked by the parts it was built of (render/kitdraw.ts).
+    this.raycaster.layers.enable(KIT_PICK_LAYER);
+  }
 
   /**
    * The last tick's aim named a kit car's working part, so E works that part and not

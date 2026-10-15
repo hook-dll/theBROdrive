@@ -39,6 +39,7 @@ import {
   type CarModelInstance,
 } from './render/carmodel';
 import { FarCarField } from './render/farcars';
+import { KIT_PICK_LAYER } from './render/kitdraw';
 import { makeFlatMaterial } from './render/materials';
 import { Sky } from './render/sky';
 import { loadStarField } from './render/starcatalog';
@@ -362,10 +363,9 @@ export async function bootCarLab(): Promise<void> {
   const buildCar = (car: LabCar): void => {
     if (car.instance) {
       car.instance.surface.dispose();
-      car.rig?.dispose();
       car.anchor.remove(car.instance.body);
       for (const wheel of car.instance.wheels.values()) car.anchor.remove(wheel);
-      for (const part of [car.instance.mid?.paint, car.instance.mid?.glass]) if (part) car.anchor.remove(part);
+      for (const part of [car.instance.wheelDraw, car.instance.mid?.paint, car.instance.mid?.glass]) if (part) car.anchor.remove(part);
     }
     // Instance 0 keeps the key the lab always used, so its screenshots stay comparable.
     const key = state.variant === 0 ? `${car.def.id}:car-lab` : `${car.def.id}:car-lab:${state.variant}`;
@@ -381,6 +381,8 @@ export async function bootCarLab(): Promise<void> {
       mesh.position.set(wheel.pos[0], wheel.pos[1] + rideY, wheel.pos[2]);
       car.anchor.add(mesh);
     }
+    // A kit car's wheels draw as one mesh beside them (render/kitdraw.ts).
+    if (instance.wheelDraw) car.anchor.add(instance.wheelDraw);
     instance.surface.setCondition(state.dirt, state.scratches);
     // The mid paint and glass are chassis-local, the body's own transform baked in: they
     // stand at the chassis origin the wheels are placed from. Hidden until `mid` shows them.
@@ -399,6 +401,7 @@ export async function bootCarLab(): Promise<void> {
     const mid = car.mid && instance.mid !== null;
     instance.body.visible = !mid;
     for (const wheel of instance.wheels.values()) wheel.visible = !mid;
+    if (instance.wheelDraw) instance.wheelDraw.visible = !mid;
     if (instance.mid) instance.mid.paint.visible = mid;
     if (instance.mid?.glass) instance.mid.glass.visible = mid;
   };
@@ -440,6 +443,7 @@ export async function bootCarLab(): Promise<void> {
     'position:fixed;z-index:60;pointer-events:none;padding:3px 7px;font:12px Consolas,monospace;color:#f2d59b;background:rgba(19,17,13,.85);border:1px solid #82735b;display:none';
   document.body.appendChild(tooltip);
   const raycaster = new THREE.Raycaster();
+  raycaster.layers.enable(KIT_PICK_LAYER);
   const pointer = new THREE.Vector2();
   const pick = (event: PointerEvent): { car: LabCar; control: KitPicked | null } | null => {
     const rect = canvas.getBoundingClientRect();

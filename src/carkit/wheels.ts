@@ -9,7 +9,7 @@
 
 import * as THREE from 'three';
 import { PartBuilder, type KitSlot, type Vec3 } from './builder';
-import { kitMaterial } from './materials';
+import { kitBodyMaterial } from './materials';
 
 const SEGMENTS = 14;
 
@@ -48,8 +48,9 @@ export function buildWheel(radius: number, width: number): THREE.Group {
   lathe(b, 'rim', [[rim * 0.001, -w * 0.5], [rim, -w * 0.82]]);
   const group = new THREE.Group();
   for (const [slot, geometry] of b.build()) {
-    const mesh = new THREE.Mesh(geometry, kitMaterial(slot));
+    const mesh = new THREE.Mesh(geometry, kitBodyMaterial());
     mesh.name = slot;
+    mesh.userData.kitSlot = slot;
     group.add(mesh);
   }
   return group;

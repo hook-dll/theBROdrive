@@ -1,7 +1,8 @@
 /**
  * Builds a kit car as the scene a model file would have loaded: car-frame metres,
  * +Z forward, +X left, ground at y = 0, wheels named for `wheelNodes`, lamp lenses
- * named for `lights`, the painted shell in material `paint` and the panes in `glass`.
+ * named for `lights`, every part in the one kit material (its slot in its vertices,
+ * materials.ts) and the panes in `glass`.
  * render/carmodel.ts then fits, measures and instances it like any other model.
  *
  * Moving parts hang from pivot groups at their hinges. A pivot carries
@@ -15,6 +16,7 @@ import { buildBay } from './bay';
 import { addBuilt, pivotGroup, type KitContext, type KitNode } from './context';
 import { buildExterior } from './exterior';
 import { buildInterior } from './interior';
+import { finishKitSurfaces } from './materials';
 import { simplifyFlats } from './simplify';
 import { KIT_SPECS } from './specs';
 import { buildWheel } from './wheels';
@@ -111,6 +113,7 @@ export function buildKitCar(id: string): THREE.Group {
     if (x < 0) wheel.rotation.y = Math.PI;
     root.add(wheel);
   }
+  finishKitSurfaces(root);
   return root;
 }
 

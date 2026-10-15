@@ -318,8 +318,12 @@ uniform float uHighlight;`;
  *
  * `carPaintPanel` tells the condition chunk which fragments are paint. Scratches in
  * chrome, rubber and black trim cells barely show, so they are drawn faintly there.
+ * `carPaintShare` is how much of the fragment is the car's paint at all: 1 on every
+ * paint material but a kit car's one material, where it is the vertex's paint share
+ * (KIT_BODY_MAP) and gates everything only paint takes (highlight, courier rim).
  */
 const CAR_PAINT_MAP = `float carPaintPanel = 1.0;
+float carPaintShare = 1.0;
 #include <map_fragment>
 #ifdef USE_MAP
 if ( uPalettePaint > 0.5 ) {
@@ -340,7 +344,7 @@ if ( uPalettePaint > 0.5 ) {
 const CAR_HIGHLIGHT = `
 if ( uHighlight > 0.001 ) {
   float hlRim = pow( 1.0 - saturate( dot( normal, normalize( -vViewPosition ) ) ), 2.0 );
-  diffuseColor.rgb += uHighlight * ( 0.08 + 0.8 * hlRim ) * vec3( 1.0, 0.8, 0.42 );
+  diffuseColor.rgb += carPaintShare * uHighlight * ( 0.08 + 0.8 * hlRim ) * vec3( 1.0, 0.8, 0.42 );
 }`;
 
 /**
@@ -561,6 +565,237 @@ function patchCarBodyShader(
       '#include <normal_fragment_maps>',
       (unified ? CAR_ATLAS_FINISH_PAINT + CAR_BODY_CONDITION : CAR_BODY_CONDITION) + CAR_HIGHLIGHT,
     );
+}
+
+// ---------------------------------------------------------------------------
+// Kit cars: the whole car in one material
+// ---------------------------------------------------------------------------
+
+/**
+ * Per vertex, what one surface of a car is, as four normalized bytes: its paint share
+ * (1 on the car's paint, 0 elsewhere), roughness, metalness and lamp role. The far traffic
+ * mesh reads it (render/farcars.ts) and so does a kit car's one material (`KIT_BODY_*`):
+ * one convention for a whole car in one draw, near or far.
+ *
+ * Lamp roles: 0 none; 1-6 a switched lens, 1 + its index in `LENS_ROLE_EMISSIVE`
+ * (vehicle/vehiclelamps.ts: head, tail, stop, reverse, left and right blinker);
+ * `CAR_LAMP_INERT` a lens nothing switches; `CAR_LAMP_UNLIT` a lit face drawn in its own
+ * colour at any hour (a kit cluster's warning lamp, the courtesy lamp). Only 1-6 glow.
+ */
+export const CAR_SURFACE_ATTRIBUTE = 'carSurface';
+export const CAR_LAMP_INERT = 7;
+export const CAR_LAMP_UNLIT = 8;
+/** Per kit vertex: whether its part casts a shadow and whether it receives one (bytes). */
+export const KIT_SHADOW_ATTRIBUTE = 'kitShadow';
+/**
+ * Per kit glass vertex: the drop pane it belongs to (1-8, 0 for a pane that does not
+ * wind down) and its height above that pane's bottom edge in the shut pose, metres of the
+ * pane's own frame (carkit/rig.ts `paneFrame`).
+ */
+export const KIT_PANE_ATTRIBUTE = 'kitPane';
+/** Drop panes one car's glass can wind down (`KIT_PANE_ATTRIBUTE`): two vec4 uniforms. */
+export const KIT_PANE_SLOTS = 8;
+
+/** One lens role's glow: a lens material, or a role of a kit car's one material (`carLensGlows`). */
+export interface LensGlow {
+  readonly emissive: THREE.Color;
+  emissiveIntensity: number;
+}
+
+/** A kit car's lamp state in its one material, per lens role (`CAR_SURFACE_ATTRIBUTE`). */
+interface KitBodyUniforms {
+  readonly lensColor: { value: THREE.Color[] };
+  readonly lensLevel: { value: Float32Array };
+  /** Dust on the lenses, 0..1, as `makeCarGrimeMaterial`'s `uGrime` on a lens material. */
+  readonly lensGrime: { value: number };
+  readonly glows: readonly LensGlow[];
+}
+const kitBodyUniforms = new WeakMap<THREE.Material, KitBodyUniforms>();
+
+/** One role of a kit car's lens uniforms, shaped as the lens material it stands in for. */
+class KitLensGlow implements LensGlow {
+  constructor(
+    readonly emissive: THREE.Color,
+    private readonly levels: Float32Array,
+    private readonly role: number,
+  ) {}
+
+  get emissiveIntensity(): number {
+    return this.levels[this.role]!;
+  }
+
+  set emissiveIntensity(value: number) {
+    this.levels[this.role] = value;
+  }
+}
+
+const KIT_BODY_PROGRAM_KEY = `${CAR_BODY_PROGRAM_KEY}-kit-v1`;
+
+const KIT_BODY_VERTEX_PARS = `${CAR_BODY_VERTEX_PARS}
+attribute vec4 ${CAR_SURFACE_ATTRIBUTE};
+attribute vec2 ${KIT_SHADOW_ATTRIBUTE};
+uniform vec3 uKitLensColor[ 6 ];
+uniform float uKitLensLevel[ 6 ];
+varying vec4 vKitSurface;
+varying vec2 vKitRole;
+varying vec3 vKitGlow;`;
+
+/**
+ * The surface bytes to the fragment: paint share, roughness, metalness, and whether the
+ * part receives shadows; whether it is a switched lens and whether it is unlit; and its
+ * glow, this car's level of its role in that role's colour, as a lens material's
+ * `emissive * emissiveIntensity`. Roles pick by masks, as the far mesh's do.
+ */
+const KIT_BODY_VERTEX_COLOR = `#include <color_vertex>
+vKitSurface = vec4( ${CAR_SURFACE_ATTRIBUTE}.xyz, ${KIT_SHADOW_ATTRIBUTE}.y );
+float kitRole = floor( ${CAR_SURFACE_ATTRIBUTE}.w * 255.0 + 0.5 );
+vec3 kitRoleA = 1.0 - step( 0.5, abs( vec3( kitRole ) - vec3( 1.0, 2.0, 3.0 ) ) );
+vec3 kitRoleB = 1.0 - step( 0.5, abs( vec3( kitRole ) - vec3( 4.0, 5.0, 6.0 ) ) );
+vKitRole = vec2( dot( kitRoleA + kitRoleB, vec3( 1.0 ) ), 1.0 - step( 0.5, abs( kitRole - ${CAR_LAMP_UNLIT}.0 ) ) );
+vKitGlow = uKitLensColor[ 0 ] * ( uKitLensLevel[ 0 ] * kitRoleA.x )
+  + uKitLensColor[ 1 ] * ( uKitLensLevel[ 1 ] * kitRoleA.y )
+  + uKitLensColor[ 2 ] * ( uKitLensLevel[ 2 ] * kitRoleA.z )
+  + uKitLensColor[ 3 ] * ( uKitLensLevel[ 3 ] * kitRoleB.x )
+  + uKitLensColor[ 4 ] * ( uKitLensLevel[ 4 ] * kitRoleB.y )
+  + uKitLensColor[ 5 ] * ( uKitLensLevel[ 5 ] * kitRoleB.z );`;
+
+const KIT_BODY_PARS = `${CAR_BODY_PARS}
+uniform float uKitLensGrime;
+varying vec4 vKitSurface;
+varying vec2 vKitRole;
+varying vec3 vKitGlow;`;
+
+/** The paint share replaces the palette test: a kit car has no map. */
+const KIT_BODY_MAP = `float carPaintPanel = 1.0;
+float carPaintShare = vKitSurface.x;
+#include <map_fragment>`;
+
+/**
+ * Paint takes the material's colour (the car's, `setCarBodyPaintColor`); every other part
+ * its vertex colour, which is its slot's colour (carkit/materials.ts). A switched lens
+ * takes the lens film (materials.ts GRIME_COLOR) from the car's lens dust.
+ */
+const KIT_BODY_COLOR = `diffuseColor.rgb = mix( vColor.rgb, diffuseColor.rgb, carPaintShare );
+float kitLensFilm = saturate( 1.1 * uKitLensGrime ) * vKitRole.x;
+diffuseColor.rgb = mix( diffuseColor.rgb, mix( uDustLight, uDustCrust, 0.15 ), kitLensFilm * 0.85 );`;
+
+/** Paint keeps the material's finish (`weatherStaticCarPaint` and the courier write it). */
+const KIT_BODY_ROUGHNESS = `float roughnessFactor = mix( vKitSurface.y, roughness, carPaintShare );
+roughnessFactor = mix( roughnessFactor, 0.95, kitLensFilm );`;
+const KIT_BODY_METALNESS = `float metalnessFactor = mix( vKitSurface.z, metalness, carPaintShare );
+metalnessFactor = mix( metalnessFactor, 0.0, saturate( kitLensFilm * 1.7 ) );`;
+
+/**
+ * The paint's wear, on the paint alone. Evaluated for every fragment and kept where the
+ * paint share is, rather than branched on it: the scratches take screen derivatives,
+ * which a branch on a varying would make undefined along every part's edge.
+ */
+const KIT_BODY_CONDITION = `vec3 kitBaseColor = diffuseColor.rgb;
+float kitBaseRoughness = roughnessFactor;
+float kitBaseMetalness = metalnessFactor;
+${CAR_BODY_CONDITION}
+diffuseColor.rgb = mix( kitBaseColor, diffuseColor.rgb, carPaintShare );
+roughnessFactor = mix( kitBaseRoughness, roughnessFactor, carPaintShare );
+metalnessFactor = mix( kitBaseMetalness, metalnessFactor, carPaintShare );
+${CAR_HIGHLIGHT}`;
+
+/** The material's own emissive is the paint's (a courier's); a lens glows by its role. */
+const KIT_BODY_EMISSIVE = `#include <emissivemap_fragment>
+totalEmissiveRadiance = totalEmissiveRadiance * carPaintShare
+  + vKitGlow * ( 1.0 - 0.8 * kitLensFilm ) * mix( vec3( 1.0 ), vec3( 1.0, 0.8, 0.55 ), kitLensFilm );`;
+
+/** The lamp knee on the paint alone; an unlit face is its own colour, as a basic material's. */
+const KIT_BODY_OPAQUE = `outgoingLight = mix( outgoingLight, diffuseColor.rgb, vKitRole.y );
+if ( uLampKnee > 0.0 ) {
+  vec3 lampOver = max( outgoingLight - 0.7, 0.0 );
+  outgoingLight = mix( outgoingLight, outgoingLight - lampOver + lampOver / ( 1.0 + lampOver / 0.3 ), uLampKnee * carPaintShare );
+}
+#include <opaque_fragment>`;
+
+/**
+ * Shadows only where the part receives them (carmodel.ts `prepareMaterials`: the kit's
+ * detail parts and exhaust do, the bodywork and lenses do not). `receiveShadow` is a
+ * uniform in three, not a program variant, so the mesh receives and this narrows it.
+ * Read at compile time: render/lightshader.ts patches the chunk once at start-up.
+ */
+function kitLightsBegin(): string {
+  const chunk = THREE.ShaderChunk.lights_fragment_begin;
+  const gated = chunk.replaceAll('&& receiveShadow )', '&& kitReceiveShadow )');
+  if (gated === chunk) throw new Error('Three lights_fragment_begin layout changed: no receiveShadow test');
+  return `bool kitReceiveShadow = receiveShadow && vKitSurface.w > 0.5;\n${gated}`;
+}
+
+function patchKitBodyShader(shader: WebGLProgramParametersWithUniforms, uniforms: CarBodyUniforms, kit: KitBodyUniforms): void {
+  shader.uniforms.uDirt = uniforms.dirt;
+  shader.uniforms.uScratch = uniforms.scratches;
+  bindDesertDust(shader);
+  shader.uniforms.uCarFieldOrigin = uniforms.fieldOrigin;
+  shader.uniforms.uCarBodyHalf = uniforms.bodyHalf;
+  shader.uniforms.uCarAxles = uniforms.axles;
+  shader.uniforms.uPalettePaint = uniforms.palettePaint;
+  shader.uniforms.uPalettePaintColor = uniforms.paintColor;
+  shader.uniforms.uPalettePaintCell = uniforms.paintCell;
+  shader.uniforms.uHighlight = uniforms.highlight;
+  shader.uniforms.uLampKnee = CAR_LAMP_KNEE;
+  shader.uniforms.uKitLensColor = kit.lensColor;
+  shader.uniforms.uKitLensLevel = kit.lensLevel;
+  shader.uniforms.uKitLensGrime = kit.lensGrime;
+
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', KIT_BODY_VERTEX_PARS)
+    .replace('#include <worldpos_vertex>', CAR_BODY_VERTEX_HOOK)
+    .replace('#include <color_vertex>', KIT_BODY_VERTEX_COLOR);
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', KIT_BODY_PARS)
+    .replace('#include <map_fragment>', KIT_BODY_MAP)
+    .replace('#include <color_fragment>', KIT_BODY_COLOR)
+    .replace('#include <roughnessmap_fragment>', KIT_BODY_ROUGHNESS)
+    .replace('#include <metalnessmap_fragment>', KIT_BODY_METALNESS)
+    .replace('#include <normal_fragment_maps>', KIT_BODY_CONDITION)
+    .replace('#include <emissivemap_fragment>', KIT_BODY_EMISSIVE)
+    .replace('#include <lights_fragment_begin>', kitLightsBegin())
+    .replace('#include <opaque_fragment>', KIT_BODY_OPAQUE);
+}
+
+/**
+ * The six lens roles of a kit car's one material (`makeCarBodyConditionMaterial` with
+ * `kit`), in `LENS_ROLE_EMISSIVE` order, each written as a lens material would be; null
+ * for any other material.
+ */
+export function carLensGlows(material: THREE.Material): readonly LensGlow[] | null {
+  return kitBodyUniforms.get(material)?.glows ?? null;
+}
+
+/** Dust on a kit car's lenses (its one material), 0..1. */
+export function setCarLensGrime(material: THREE.Material, grime: number): void {
+  const uniforms = kitBodyUniforms.get(material);
+  if (uniforms) uniforms.lensGrime.value = grime;
+}
+
+const KIT_CAST_PROGRAM_KEY = 'kit-cast-v1';
+let kitCastDepth: THREE.MeshDepthMaterial | null = null;
+
+/**
+ * The shadow pass's material for a kit car's one-material mesh (`customDepthMaterial`):
+ * three's depth material, with every vertex of a part that casts nothing
+ * (`KIT_SHADOW_ATTRIBUTE`: the lenses, the detail parts, the exhaust) put outside the
+ * clip volume. Back faces, as every car material's `shadowSide`, set here because the
+ * pass hands a custom material its side and `compileShadowDepth` compiles it as it is.
+ */
+export function kitCastDepthMaterial(): THREE.MeshDepthMaterial {
+  if (kitCastDepth) return kitCastDepth;
+  const material = new THREE.MeshDepthMaterial({ side: THREE.BackSide });
+  material.name = 'kit-cast-depth';
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>\nattribute vec2 ${KIT_SHADOW_ATTRIBUTE};`)
+      .replace(
+        '#include <project_vertex>',
+        `#include <project_vertex>\nif ( ${KIT_SHADOW_ATTRIBUTE}.x < 0.5 ) gl_Position = vec4( 0.0, 0.0, 2.0, 1.0 );`,
+      );
+  };
+  material.customProgramCacheKey = () => KIT_CAST_PROGRAM_KEY;
+  return (kitCastDepth = material);
 }
 
 
@@ -929,12 +1164,19 @@ function cloneAsStandard(
  * cell finishes to this same program, and is carried on the material rather than read
  * here because `?carstyle` is carmodel.ts's flag — and the two variants must not share
  * a compiled program.
+ *
+ * `kit` makes it a kit car's ONE material (carkit/materials.ts): the source carries the
+ * whole car, every part told apart by its vertex colour and `CAR_SURFACE_ATTRIBUTE`.
+ * The paint is where the paint share is, and only there does the material's own colour,
+ * finish, emissive, wear, highlight and lamp knee apply; the lenses glow by this car's
+ * levels per role (`carLensGlows`) under their own dust (`setCarLensGrime`).
  */
 export function makeCarBodyConditionMaterial(
   source: THREE.Material,
   frame: CarBodyFrame,
   seed: number,
   unified: boolean,
+  kit = false,
 ): THREE.Material {
   const material = makeCarPaintFinishMaterial(source);
   if (!(material instanceof THREE.MeshStandardMaterial)) return material;
@@ -959,6 +1201,20 @@ export function makeCarBodyConditionMaterial(
     highlight: { value: 0 },
   };
   carBodyUniforms.set(material, uniforms);
+  if (kit) {
+    const colors = Array.from({ length: 6 }, () => new THREE.Color(0, 0, 0));
+    const levels = new Float32Array(6);
+    const lamps: KitBodyUniforms = {
+      lensColor: { value: colors },
+      lensLevel: { value: levels },
+      lensGrime: { value: 0 },
+      glows: colors.map((color, role) => new KitLensGlow(color, levels, role)),
+    };
+    kitBodyUniforms.set(material, lamps);
+    material.onBeforeCompile = (shader) => patchKitBodyShader(shader, uniforms, lamps);
+    material.customProgramCacheKey = () => KIT_BODY_PROGRAM_KEY;
+    return material;
+  }
   material.onBeforeCompile = (shader) => patchCarBodyShader(shader, uniforms, unified);
   material.customProgramCacheKey = () =>
     unified ? `${CAR_BODY_PROGRAM_KEY}-unified` : CAR_BODY_PROGRAM_KEY;
@@ -1285,20 +1541,45 @@ export function carPaintGrimeFrame(paint: THREE.Material): CarGrimeFrame | null 
   return carBodyUniforms.get(paint) ?? null;
 }
 
+/** A kit car's glass: each drop pane's drop this instant (`KIT_PANE_ATTRIBUTE`), slots 1-4 and 5-8. */
+const kitPaneDrops = new WeakMap<THREE.Material, readonly [THREE.Vector4, THREE.Vector4]>();
+
+const KIT_PANE_VERTEX_PARS = `
+attribute vec2 ${KIT_PANE_ATTRIBUTE};
+uniform vec4 uKitPaneDropA;
+uniform vec4 uKitPaneDropB;
+varying float vKitPaneClip;`;
+
+/** Height above the pane's bottom edge as it stands now: below zero it is inside the door. */
+const KIT_PANE_VERTEX = `
+vec4 kitPaneA = 1.0 - step( 0.5, abs( vec4( ${KIT_PANE_ATTRIBUTE}.x ) - vec4( 1.0, 2.0, 3.0, 4.0 ) ) );
+vec4 kitPaneB = 1.0 - step( 0.5, abs( vec4( ${KIT_PANE_ATTRIBUTE}.x ) - vec4( 5.0, 6.0, 7.0, 8.0 ) ) );
+vKitPaneClip = ${KIT_PANE_ATTRIBUTE}.y - dot( kitPaneA, uKitPaneDropA ) - dot( kitPaneB, uKitPaneDropB );`;
+
+const KIT_PANE_CLIP = `if ( vKitPaneClip < 0.0 ) discard;
+#include <clipping_planes_fragment>`;
+
 /**
  * Gives a glass or lamp material the grime, in place, and returns it. The material
  * must be this car's own (a clone): the uniform is per material. With `frame` (window
  * glass stamped with chassis positions) the dust is the paint's crust continued over
  * the pane; without it (lamp lenses) an even film.
+ *
+ * `panes` (a kit car's glass, which also carries `KIT_PANE_ATTRIBUTE`): a drop pane
+ * winding into its door is not drawn below the door's top (carkit/rig.ts `SinkingPane`
+ * slides it, `setCarGlassPaneDrop` says how far).
  */
 export function makeCarGrimeMaterial<T extends THREE.MeshStandardMaterial | THREE.MeshPhongMaterial>(
   material: T,
   frame: CarGrimeFrame | null = null,
+  panes = false,
 ): T {
   const grime = { value: 0 };
   carGrimeUniforms.set(material, grime);
   const standard = material instanceof THREE.MeshStandardMaterial;
   const glass = standard && frame !== null;
+  const drops = glass && panes ? ([new THREE.Vector4(), new THREE.Vector4()] as const) : null;
+  if (drops) kitPaneDrops.set(material, drops);
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uGrime = grime;
     shader.uniforms.uGrimeSkyScale = {
@@ -1310,13 +1591,18 @@ export function makeCarGrimeMaterial<T extends THREE.MeshStandardMaterial | THRE
       shader.uniforms.uCarBodyHalf = frame.bodyHalf;
       shader.uniforms.uCarAxles = frame.axles;
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', GLASS_GRIME_VERTEX_PARS)
-        .replace('#include <worldpos_vertex>', GLASS_GRIME_VERTEX_HOOK);
+        .replace('#include <common>', drops ? GLASS_GRIME_VERTEX_PARS + KIT_PANE_VERTEX_PARS : GLASS_GRIME_VERTEX_PARS)
+        .replace('#include <worldpos_vertex>', drops ? GLASS_GRIME_VERTEX_HOOK + KIT_PANE_VERTEX : GLASS_GRIME_VERTEX_HOOK);
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', GLASS_GRIME_FRAGMENT_PARS)
+        .replace('#include <common>', drops ? `${GLASS_GRIME_FRAGMENT_PARS}\nvarying float vKitPaneClip;` : GLASS_GRIME_FRAGMENT_PARS)
         .replace('#include <color_fragment>', GLASS_GRIME_DECLARE)
         .replace('#include <normal_fragment_maps>', GLASS_GRIME_BODY)
         .replace('#include <lights_fragment_maps>', GRIME_SKY);
+      if (drops) {
+        shader.uniforms.uKitPaneDropA = { value: drops[0] };
+        shader.uniforms.uKitPaneDropB = { value: drops[1] };
+        shader.fragmentShader = shader.fragmentShader.replace('#include <clipping_planes_fragment>', KIT_PANE_CLIP);
+      }
       return;
     }
     let fragment = shader.fragmentShader
@@ -1331,8 +1617,16 @@ export function makeCarGrimeMaterial<T extends THREE.MeshStandardMaterial | THRE
       : fragment.replace('#include <specularmap_fragment>', GRIME_SPECULAR);
     shader.fragmentShader = fragment;
   };
-  material.customProgramCacheKey = () => (glass ? CAR_GLASS_GRIME_PROGRAM_KEY : CAR_GRIME_PROGRAM_KEY);
+  material.customProgramCacheKey = () =>
+    glass ? (drops ? `${CAR_GLASS_GRIME_PROGRAM_KEY}-panes` : CAR_GLASS_GRIME_PROGRAM_KEY) : CAR_GRIME_PROGRAM_KEY;
   return material;
+}
+
+/** How far drop pane `slot` (1-based, `KIT_PANE_ATTRIBUTE`) of a kit car's glass has wound down. */
+export function setCarGlassPaneDrop(material: THREE.Material, slot: number, drop: number): void {
+  const drops = kitPaneDrops.get(material);
+  if (!drops || slot < 1 || slot > KIT_PANE_SLOTS) return;
+  drops[slot <= 4 ? 0 : 1].setComponent((slot - 1) % 4, drop);
 }
 
 /** Writes grime (0..1) into glass or lamp materials made by `makeCarGrimeMaterial`. */

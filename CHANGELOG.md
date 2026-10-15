@@ -587,6 +587,32 @@
 
 ### Changed
 
+- A KIT CAR IS THREE DRAWS (`carkit/materials.ts`, `render/kitdraw.ts`,
+  `render/materials.ts` `patchKitBodyShader`, `render/carmodel.ts`, `carkit/rig.ts`). Every
+  kit slot but the glass is one material, its slot (colour, roughness, metalness, paint
+  share, lamp role, unlit flag, shadow casting and receiving) in the vertices, the far
+  traffic mesh's convention (`CAR_SURFACE_ATTRIBUTE`). Each car's copy is its paint: its
+  colour, dust, scratches and sticker highlight apply where the paint share is 1, the
+  lenses glow by role from the car's own lamp levels (`carLensGlows`) under its lens dust.
+  The car's ~150 meshes are merged into one skinned mesh per material, every vertex
+  weighted 1 to the node it moves or hides with (~90-100 bones: doors, lids, panes,
+  needles, pedals, levers, stalks, the wheel, wipers, mirrors, the detail and fine
+  tiers); `KitRig` still drives the same nodes and `KitSkeleton` reads them into the bone
+  texture once a frame. A drop pane slides as its bone and the glass drops what is below
+  the door's top. The four wheels are one mesh on the wheel nodes. The meshes the car was
+  built of stay as pick proxies on a layer no camera draws (`KIT_PICK_LAYER`), so doors,
+  controls, seats and stickers pick as before; wrecks and couriers are the mid shell, its
+  glass and its wheels (3 draws). Measured on the M2 Pro (Blessing, seed `flick`, km 3, the
+  start 2104 and four parked kit cars, traffic hidden, frozen frame): own car in the cabin
+  view 87 → 6 scene draws (body, glass back and front, wheels, two mirror faces), chase
+  142 → 4; a near parked car 72-150 → 4; the sun's pass 37-44 → 3 per car; the inside
+  mirror's view of the own car 34 → 4; `renderer.render()` (the profiler's `draw`) 2.9 →
+  1.5 ms in the cabin view, 3.0 → 1.4 ms in the chase. No program linked over a 90 s drive (cabin and
+  chase, night, head and main beam, blinkers, hazards, doors, bonnet, boot, panes, wipers,
+  courtesy lamp) nor on jumps to km 4-20 (wrecks and couriers). Car-lab A/B against HEAD
+  (2112, 2101, 2109, 2104: 3/4 views, cabin, parts open, dust and scratches, night lamps,
+  mid at 57 m): at most a few hundred pixels of 1.44 million differ, blink phase aside;
+  every car's triangles identical by geometry hash; `tools/kit-zfight.ts` PASS on all 13.
 - KIT CABIN FINE DETAIL ONLY NEAR (`carkit/rig.ts` `KIT_FINE_M`, `carkit/interior.ts`,
   `vehicle/vehicle.ts` `viewFrom`): needles, dial faces, warning lamps, switches, stalks,
   pedals, levers, cranks, door handles, visors and the like draw within 6 m, with the eye

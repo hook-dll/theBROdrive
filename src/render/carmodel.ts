@@ -22,6 +22,7 @@ import {
   makeUnifiedSurfaceMaterial,
   makeCarGrimeMaterial,
   carPaintGrimeFrame,
+  kitCastDepthMaterial,
   setCarBodyCondition,
   setCarBodyPalettePaint,
   setCarGrime,
@@ -45,9 +46,11 @@ import {
 } from '../vehicle/carpaint';
 import { lampLensAnchors } from '../vehicle/vehiclelamps';
 import { buildKitCar } from '../carkit/kit';
-import { poseKitStatic } from '../carkit/rig';
+import { kitBodyMaterial } from '../carkit/materials';
+import { kitGlassOpacity } from '../carkit/rig';
 import { MATERIALS_CONFIG } from '../config';
 import { bakeCarPaintGeometry, bakeFarCarGeometry, type FarCarSurface, type MidCarWheel } from './farcars';
+import { attachKitDraw, attachKitWheels, bakeKitWheels, prepareKitDraw, type KitDrawModel, type KitSkeleton, type KitWheelModel } from './kitdraw';
 import { KIT_DRIVER_EYE_NODE, KIT_REAR_EYE_NODE } from '../carkit/interior';
 import { KIT_BONNET_CELL_NODE } from '../carkit/bay';
 import { KIT_FILLER_NODE } from '../carkit/exterior';
@@ -207,6 +210,8 @@ interface Template {
   readonly frame: CarBodyFrame;
   /** The spare wheel's mount (`CarModelDef.spareNode`), chassis-local, or null. */
   readonly spare: SpareMount | null;
+  /** A kit body's merged meshes (render/kitdraw.ts); null for any other model. */
+  readonly kit: KitDrawModel | null;
 }
 
 interface SpareMount {
@@ -348,7 +353,7 @@ function cloneCarBodyPaintMaterials(
   const paint = (source: THREE.Material): THREE.Material => {
     const existing = clones.get(source);
     if (existing) return existing;
-    const material = makeCarBodyConditionMaterial(source, t.frame, seed, CAR_STYLE_UNIFIED);
+    const material = makeCarBodyConditionMaterial(source, t.frame, seed, CAR_STYLE_UNIFIED, def.kit !== undefined);
     clones.set(source, material);
     return material;
   };
@@ -467,10 +472,14 @@ function markStickerSurfaces(root: THREE.Object3D, def: CarModelDef, glass: read
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
     const materials = materialsOf(child);
-    const paintMesh = isRandomPaintMesh(child, def);
+    // A kit car is one material: its paint is the parts built in the paint slot, and only
+    // the parts it was built of (the pick proxies, render/kitdraw.ts) carry stickers.
+    const slot = child.userData.kitSlot as string | undefined;
+    const kitPart = def.kit === undefined || slot !== undefined;
+    const paintMesh = isRandomPaintMesh(child, def) && (def.kit === undefined || slot === 'paint');
     child.userData.stickerMaterialIndices = materials
       .map((material, index) =>
-        glass.includes(material) || (paintMesh && isPaintSlot(material, def)) ? index : -1,
+        kitPart && (glass.includes(material) || (paintMesh && isPaintSlot(material, def))) ? index : -1,
       )
       .filter((index) => index >= 0);
     child.userData.stickerPaintCell =
@@ -502,12 +511,12 @@ function applyCourierAppearance(paint: readonly THREE.Material[]): void {
       previousCompile.call(material, shader, renderer);
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <opaque_fragment>',
-        `outgoingLight += mix(vec3(0.05, 0.9, 0.82), vec3(0.9, 0.15, 0.72),
+        `outgoingLight += carPaintShare * mix(vec3(0.05, 0.9, 0.82), vec3(0.9, 0.15, 0.72),
           0.5 + 0.5 * normal.y) * pow(1.0 - abs(dot(normalize(normal), normalize(vViewPosition))), 2.2) * 1.4;
         #include <opaque_fragment>`,
       );
     };
-    material.customProgramCacheKey = () => `${previousKey.call(material)}|courier-rim-v1`;
+    material.customProgramCacheKey = () => `${previousKey.call(material)}|courier-rim-v2`;
     material.needsUpdate = true;
   }
 }
@@ -907,9 +916,10 @@ let glassMaterial: THREE.MeshStandardMaterial | null = null;
 /**
  * Gives one car instance its own copy of the shared glass, so its windows can gather
  * dust of their own (`makeCarGrimeMaterial`). One copy per car, not per pane: every
- * window of a car is as dirty as the rest. Returns the copies (none if no glass).
+ * window of a car is as dirty as the rest. Returns the copies (none if no glass). A kit
+ * car's glass also winds its drop panes down (`panes`, render/kitdraw.ts).
  */
-function cloneCarGlass(root: THREE.Object3D, paint: readonly THREE.Material[]): THREE.Material[] {
+function cloneCarGlass(root: THREE.Object3D, paint: readonly THREE.Material[], panes: boolean): THREE.Material[] {
   const shared: readonly THREE.Material[] = [carGlassMaterial(), carClearGlassMaterial()];
   // The panes lay the paint's dust in the paint's chassis frame (materials.ts
   // GLASS_GRIME_BODY); a car with no condition paint gets the lens's even film.
@@ -917,7 +927,7 @@ function cloneCarGlass(root: THREE.Object3D, paint: readonly THREE.Material[]): 
   let own: THREE.MeshStandardMaterial | null = null;
   const swap = (material: THREE.Material): THREE.Material => {
     if (!shared.includes(material)) return material;
-    own ??= makeCarGrimeMaterial((material as THREE.MeshStandardMaterial).clone(), frame);
+    own ??= makeCarGrimeMaterial((material as THREE.MeshStandardMaterial).clone(), frame, panes);
     return own;
   };
   root.traverse((mesh) => {
@@ -1545,7 +1555,10 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
 
   prepareMaterials(scene, true, lensNames(def));
   stampCarBodyPositions(scene, def);
-  mergeStaticBodyMeshes(scene, def);
+  // A kit body merges whole into one skinned mesh per material (render/kitdraw.ts) and
+  // keeps its parts as pick proxies; any other body merges its static lenses and trim.
+  const kit = def.kit ? prepareKitDraw(scene) : null;
+  if (!kit) mergeStaticBodyMeshes(scene, def);
 
   // Geometry is now expressed directly in chassis-local metres; keeping the source
   // origin offset in the fit manifest remains useful for asset diagnostics.
@@ -1567,7 +1580,7 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     wheelCentreY: wheels.reduce((sum, wheel) => sum + wheel.pos[1], 0) / wheels.length,
     wheelRadius: wheels.reduce((sum, wheel) => sum + wheel.radius, 0) / wheels.length,
   };
-  return { def, measure, body: scene, wheels: parts.objects, frame, spare };
+  return { def, measure, body: scene, wheels: parts.objects, frame, spare, kit };
 }
 
 /** One shared palette per pack, loaded once and pointed at by every body in it. */
@@ -1815,6 +1828,11 @@ export interface CarModelInstance {
   readonly body: THREE.Object3D;
   /** Wheel id -> its own object, to be parented and driven by the vehicle. */
   readonly wheels: ReadonlyMap<string, THREE.Object3D>;
+  /**
+   * A kit car's four wheels as one mesh (render/kitdraw.ts `attachKitWheels`): add it
+   * under the same parent as `wheels`, which it draws as they stand; null for any other.
+   */
+  readonly wheelDraw: THREE.SkinnedMesh | null;
   /** This car's paint condition; see render/carsurface.ts. */
   readonly surface: CarBodySurface;
   /** This car as drawn at mid range (`CarMidModel`); null for a model without one. */
@@ -1826,7 +1844,7 @@ export interface CarMidInstance {
   /**
    * The model's merged paint in this car's OWN paint materials, so its colour, dust,
    * scratches and highlight are the near body's. Chassis-local, for the car's root;
-   * made hidden.
+   * made hidden. A kit car's is its whole shut body in its one material, lenses included.
    */
   readonly paint: THREE.Mesh;
   /**
@@ -1835,8 +1853,8 @@ export interface CarMidInstance {
    * body without glass.
    */
   readonly glass: THREE.Mesh | null;
-  /** Its model's trim and lenses, for the mid field (shared by the model). */
-  readonly rest: THREE.BufferGeometry;
+  /** Its model's trim and lenses, for the mid field (shared by the model); null for a kit car. */
+  readonly rest: THREE.BufferGeometry | null;
   /** The wheels of its own set, chassis-local (shared by every car of model and set). */
   readonly wheels: readonly MidCarWheel[];
 }
@@ -1848,13 +1866,35 @@ interface StaticCarInstance {
   readonly glass: readonly THREE.Material[];
 }
 
+/** Each kit model's wheels per set it can wear, merged (`bakeKitWheels`), fitted to the body. */
+const kitWheelModels = new Map<string, Map<ReadonlyMap<string, THREE.Object3D>, KitWheelModel>>();
+
+function kitWheelModel(t: Template, set: ReadonlyMap<string, THREE.Object3D>): KitWheelModel {
+  let models = kitWheelModels.get(t.def.id);
+  if (!models) kitWheelModels.set(t.def.id, (models = new Map()));
+  let model = models.get(set);
+  if (!model) models.set(set, (model = bakeKitWheels(cloneWheels(t, set))));
+  return model;
+}
+
 function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInstance {
   const set = selectedWheels(t, appearanceKey);
   const wheels = cloneWheels(t, set);
   const body = t.body.clone(true);
   const clones = cloneCarBodyPaintMaterials(body, t, appearanceKey);
   const paint = [...clones.values()];
-  const glass = cloneCarGlass(body, paint);
+  const glass = cloneCarGlass(body, paint, t.kit !== null);
+  // First, while the body holds only its own nodes: the bones are found by their place.
+  const skeletons: KitSkeleton[] = [];
+  let wheelDraw: THREE.SkinnedMesh | null = null;
+  if (t.kit) {
+    skeletons.push(attachKitDraw(body, t.kit, clones.get(kitBodyMaterial())!, glass[0] ?? null));
+    // Culled as a sphere round the chassis centre the wheels stand within.
+    const reach = Math.hypot(...t.measure.halfExtents) + Math.max(...t.measure.wheels.map((wheel) => wheel.radius));
+    const drawn = attachKitWheels(kitWheelModel(t, set), wheels, reach);
+    wheelDraw = drawn.mesh;
+    skeletons.push(drawn.skeleton);
+  }
   prepareSovietShellFaces(body, t.def);
   applyRandomPaint(body, t.def, appearanceKey);
   markStickerSurfaces(body, t.def, glass);
@@ -1864,9 +1904,22 @@ function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInsta
     stickerDecalSurfaces(body, t.def),
     paint.length > 0 ? carPaintGrimeFrame(paint[0]!) : null,
   );
-  const surface = new CarBodySurface(paint, glass, decals);
+  const surface = new CarBodySurface(paint, glass, decals, skeletons);
   addSpareWheel(body, t, wheels);
-  return { body, wheels, surface, mid: midInstance(t, clones, glass[0] ?? null, set) };
+  return { body, wheels, wheelDraw, surface, mid: midInstance(t, clones, glass[0] ?? null, set) };
+}
+
+/**
+ * A kit car's whole shut body as one plain mesh in its one material (`CarMidModel.paint`):
+ * casting where its parts cast and receiving where they receive, as the near car's merged
+ * mesh (render/kitdraw.ts `attachKitDraw`), and so with the same programs but skinning.
+ */
+function kitShellMesh(geometry: THREE.BufferGeometry, material: THREE.Material): THREE.Mesh {
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.customDepthMaterial = kitCastDepthMaterial();
+  return mesh;
 }
 
 /**
@@ -1889,13 +1942,16 @@ function midInstance(
     if (!own) return null;
     materials.push(own);
   }
-  const paint = new THREE.Mesh(model.paint, materials.length === 1 ? materials[0]! : materials);
+  let paint: THREE.Mesh;
+  if (t.kit) {
+    paint = kitShellMesh(model.paint, materials[0]!);
+  } else {
+    paint = new THREE.Mesh(model.paint, materials.length === 1 ? materials[0]! : materials);
+    // The paint's own shadow contract (`prepareMaterials`): bodywork casts, never receives.
+    paint.castShadow = true;
+    paint.receiveShadow = false;
+  }
   paint.name = 'mid-paint';
-  // The paint's own shadow contract (`prepareMaterials`): bodywork casts, never receives.
-  // Receiving is in the program key, so it must match the near panels' for the program
-  // to be theirs.
-  paint.castShadow = true;
-  paint.receiveShadow = false;
   paint.visible = false;
   // Hidden or not, a raycast meets it, and the sticker and door picks (player/interaction.ts)
   // must meet the near panels, an open door where it stands, instead.
@@ -1987,20 +2043,65 @@ export function createCarModel(id: string, appearanceKey = id): CarModelInstance
   return cloneDrivingModel(template(id), appearanceKey);
 }
 
+/** Each kit model's wheels per set, placed and merged for a static car (`cloneStaticModel`). */
+const kitStaticWheels = new Map<string, Map<ReadonlyMap<string, THREE.Object3D>, { geometry: THREE.BufferGeometry; materials: THREE.Material[] }>>();
+
 /**
  * A static, non-driven copy of a whole vehicle, with its wheels placed at the same
- * factory track, wheelbase and clearance used by the driven chassis. A kit body comes
- * shut and in its far pose (`poseKitStatic`): nobody opens a wreck's doors.
+ * factory track, wheelbase and clearance used by the driven chassis. A kit body is the
+ * shut body without its cabin, bay, boot and underbody that mid traffic draws
+ * (`CarMidModel`), its glass the tinted mirror, and its wheels one merged mesh: three
+ * draws. Nobody opens a wreck's doors.
  */
 function cloneStaticModel(t: Template, appearanceKey = t.def.id): StaticCarInstance {
   const group = new THREE.Group();
   group.name = t.def.id;
+  const set = selectedWheels(t, appearanceKey);
+  if (t.kit) {
+    const mid = midModels.get(t.def.id);
+    if (!mid) throw new Error(`Car model "${t.def.id}" has no mid meshes for a static shell`);
+    const shell = kitShellMesh(mid.paint, kitBodyMaterial());
+    shell.name = 'body';
+    group.add(shell);
+    if (mid.glass) {
+      const panes = new THREE.Mesh(mid.glass, carClearGlassMaterial());
+      panes.castShadow = true;
+      group.add(panes);
+    }
+    const paint = [...cloneCarBodyPaintMaterials(group, t, appearanceKey).values()];
+    const glass = cloneCarGlass(group, paint, true);
+    applyRandomPaint(group, t.def, appearanceKey);
+    for (const material of glass) material.opacity = kitGlassOpacity(Infinity);
+    let sets = kitStaticWheels.get(t.def.id);
+    if (!sets) kitStaticWheels.set(t.def.id, (sets = new Map()));
+    let baked = sets.get(set);
+    if (!baked) {
+      const placed = cloneWheels(t, set);
+      const materials: THREE.Material[] = [];
+      const roots = t.measure.wheels.map((wheel) => {
+        const root = placed.get(wheel.id)!;
+        root.position.fromArray(wheel.pos);
+        return root;
+      });
+      const geometry = bakeCarPaintGeometry(roots, (_mesh, material) => {
+        const slot = materials.indexOf(material);
+        return slot >= 0 ? slot : materials.push(material) - 1;
+      });
+      if (!geometry) throw new Error(`Car model "${t.def.id}" has a wheel set with no meshes`);
+      sets.set(set, (baked = { geometry, materials }));
+    }
+    const wheels = new THREE.Mesh(baked.geometry, baked.materials.length === 1 ? baked.materials[0]! : baked.materials);
+    wheels.name = 'wheels';
+    wheels.castShadow = true;
+    wheels.receiveShadow = true;
+    group.add(wheels);
+    return { model: group, paint, glass };
+  }
   const body = t.body.clone(true);
   const paint = [...cloneCarBodyPaintMaterials(body, t, appearanceKey).values()];
-  const glass = cloneCarGlass(body, paint);
+  const glass = cloneCarGlass(body, paint, false);
   applyRandomPaint(body, t.def, appearanceKey);
-  if (t.def.kit) poseKitStatic(body);
-  const wheels = cloneWheels(t, selectedWheels(t, appearanceKey));
+  const wheels = cloneWheels(t, set);
   addSpareWheel(body, t, wheels);
   group.add(body);
   for (const wheel of t.measure.wheels) {
@@ -2047,6 +2148,9 @@ function buildFarGeometry(t: Template): THREE.BufferGeometry {
   return bakeFarCarGeometry(roots, farSurfaceOf(def, true));
 }
 
+/** A kit part's far surface: everything is in its vertices (carkit/materials.ts). */
+const KIT_FAR_SURFACE: FarCarSurface = { color: new THREE.Color(1, 1, 1), vertexColors: true, paint: false, roughness: 0, metalness: 0, lamp: 0, perVertex: true };
+
 /**
  * How the far and mid bakes see one material slot of a `def` part: its colour, finish and
  * lens role, the paint flagged for the instance (`FarCarSurface`). `bodywork` false for a
@@ -2055,6 +2159,8 @@ function buildFarGeometry(t: Template): THREE.BufferGeometry {
 function farSurfaceOf(def: CarModelDef, bodywork: boolean): (mesh: THREE.Mesh, material: THREE.Material) => FarCarSurface | null {
   const roles = lampRoleSelectors(def);
   return (mesh, material) => {
+    const slot = mesh.userData.kitSlot as string | undefined;
+    if (slot !== undefined && slot !== 'glass') return KIT_FAR_SURFACE;
     // The Soviet wheel sets are Phong with a palette map: their colour is the texel,
     // their finish a tyre's or a painted rim's, so a mid roughness stands for both.
     if (material instanceof THREE.MeshPhongMaterial) {
@@ -2098,8 +2204,8 @@ interface CarMidModel {
   readonly paintSources: readonly THREE.Material[];
   /** Every window pane, drawn in the car's own glass (`cloneCarGlass`); null for none. */
   readonly glass: THREE.BufferGeometry | null;
-  /** Everything else of the body, the far mesh's way: trim, chrome, lenses. */
-  readonly rest: THREE.BufferGeometry;
+  /** Everything else of the body, the far mesh's way: trim, chrome, lenses; null for a kit body. */
+  readonly rest: THREE.BufferGeometry | null;
   /** Per wheel set the pool can give the model (`selectedWheels`): its wheels on this body. */
   readonly wheels: ReadonlyMap<ReadonlyMap<string, THREE.Object3D>, readonly MidCarWheel[]>;
 }
@@ -2120,6 +2226,8 @@ const IDENTITY_QUATERNION = new THREE.Quaternion();
  * A model's mid meshes, or null for a body with no paint outside its kit groups. The
  * paint is cut by the same rule that gives a car its paint copies, less any part a lamp
  * binds as its lens (the car draws those in a lens material, so they belong to `rest`).
+ * A kit body is one material, lenses and trim included: its whole shut shell is the
+ * "paint", lit by the car's own lamps, and it has no `rest`.
  * The panes are cut by the rule that gives a car its own glass (`cloneCarGlass`): drawn
  * in it, they carry the car's dust and the kit rig's opacity as the near panes do, where
  * the far mesh's flat tint showed a clean pane that turned dusty at `KIT_DETAIL_M`.
@@ -2128,22 +2236,31 @@ function buildMidModel(t: Template): CarMidModel | null {
   const def = t.def;
   const lamps = lampNames(def);
   const paintSources: THREE.Material[] = [];
-  const paint = bakeCarPaintGeometry([t.body], (mesh, material) => {
-    if (!isRandomPaintMesh(mesh, def) || !isPaintSlot(material, def)) return -1;
-    if (lamps.has(mesh.name) || lamps.has(material.name)) return -1;
-    const slot = paintSources.indexOf(material);
-    return slot >= 0 ? slot : paintSources.push(material) - 1;
-  });
+  const paint = t.kit
+    ? bakeCarPaintGeometry([t.body], (mesh, material) => {
+        const slot = mesh.userData.kitSlot as string | undefined;
+        if (slot === undefined || slot === 'glass') return -1;
+        if (!paintSources.includes(material)) paintSources.push(material);
+        return 0;
+      })
+    : bakeCarPaintGeometry([t.body], (mesh, material) => {
+        if (!isRandomPaintMesh(mesh, def) || !isPaintSlot(material, def)) return -1;
+        if (lamps.has(mesh.name) || lamps.has(material.name)) return -1;
+        const slot = paintSources.indexOf(material);
+        return slot >= 0 ? slot : paintSources.push(material) - 1;
+      });
   if (!paint) return null;
   const isGlass = (material: THREE.Material): boolean => material === carGlassMaterial() || material === carClearGlassMaterial();
   const glass = bakeCarPaintGeometry([t.body], (_mesh, material) => (isGlass(material) ? 0 : -1));
   const far = farSurfaceOf(def, true);
-  const rest = bakeFarCarGeometry([t.body], (mesh, material) => {
-    if (isGlass(material)) return null;
-    const surface = far(mesh, material);
-    if (!surface?.paint) return surface;
-    return surface.lamp > 0 ? { ...surface, paint: false } : null;
-  });
+  const rest = t.kit
+    ? null
+    : bakeFarCarGeometry([t.body], (mesh, material) => {
+        if (isGlass(material)) return null;
+        const surface = far(mesh, material);
+        if (!surface?.paint) return surface;
+        return surface.lamp > 0 ? { ...surface, paint: false } : null;
+      });
   const wheelSurface = farSurfaceOf(def, false);
   const wheelGeometry = (wheel: THREE.Object3D): THREE.BufferGeometry => {
     let geometry = midWheelGeometries.get(wheel);
@@ -2196,15 +2313,20 @@ async function buildProgramAnchor(id: string): Promise<THREE.Group> {
     const group = new THREE.Group();
     group.name = id;
     const driving = cloneDrivingModel(t);
-    group.add(driving.body, ...driving.wheels.values(), ...lampLensAnchors(t.def, driving.body));
+    // A kit car draws its wheels as one skinned mesh (the wheels themselves are pick
+    // proxies); any other draws its wheel meshes.
+    group.add(driving.body, ...(driving.wheelDraw ? [driving.wheelDraw] : driving.wheels.values()), ...lampLensAnchors(t.def, driving.body));
     // The mid paint and glass are the near ones' materials over merged buffers of their
     // own, whose attributes are the program's as much as the material is.
     if (driving.mid) group.add(driving.mid.paint);
     if (driving.mid?.glass) group.add(driving.mid.glass);
-    // Every set the wheel pool can give this body, not only the one its own key picks.
+    // Every set the wheel pool can give this body, not only the one its own key picks:
+    // as a static car wears it and, on a kit body, as a driven one does.
     for (const sourceId of t.def.wheelSetPool ?? []) {
       const source = templates.get(sourceId);
-      if (source) for (const wheel of source.wheels.values()) group.add(wheel.clone(true));
+      if (!source) continue;
+      for (const wheel of source.wheels.values()) group.add(wheel.clone(true));
+      if (t.kit) group.add(attachKitWheels(kitWheelModel(t, source.wheels), cloneWheels(t, source.wheels), 1).mesh);
     }
     return group;
   });
@@ -2274,17 +2396,22 @@ export function disposeCarModelCache(): void {
   for (const t of templates.values()) {
     dispose(t.body);
     for (const wheel of t.wheels.values()) dispose(wheel);
+    t.kit?.opaque.dispose();
+    t.kit?.glass?.dispose();
   }
   for (const geometry of farGeometries.values()) geometry.dispose();
   farGeometries.clear();
   for (const mid of midModels.values()) {
     mid.paint.dispose();
     mid.glass?.dispose();
-    mid.rest.dispose();
+    mid.rest?.dispose();
   }
   midModels.clear();
   for (const geometry of midWheelGeometries.values()) geometry.dispose();
   midWheelGeometries.clear();
+  for (const sets of [...kitWheelModels.values(), ...kitStaticWheels.values()]) for (const { geometry } of sets.values()) geometry.dispose();
+  kitWheelModels.clear();
+  kitStaticWheels.clear();
   templates.clear();
   modelLoads.clear();
   paletteLoads.clear();

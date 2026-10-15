@@ -21,7 +21,7 @@ import { addWetGlare } from '../render/cloudshadow';
  */
 export const BEAM_GROUPS = ['front', 'tail', 'reverse'] as const;
 export type BeamGroup = (typeof BEAM_GROUPS)[number];
-import { makeCarGrimeMaterial, setCarGrime } from '../render/materials';
+import { carLensGlows, makeCarGrimeMaterial, setCarGrime, setCarLensGrime, type LensGlow } from '../render/materials';
 import type { CarModelDef } from './carmodels';
 import { clamp } from './vehicletuning';
 
@@ -188,7 +188,8 @@ function lensMaterial(source: EmissiveMaterial): EmissiveMaterial {
  * One mesh per lamp lens a Vehicle of `model` binds on `root`, over the lens's own
  * geometry and carrying the material the Vehicle makes for it — what a shader warm-up
  * has to compile, because a Vehicle makes its lens materials only as it is built.
- * Never bound into `root` and never drawn (see carmodel.ts, program anchors).
+ * Never bound into `root` and never drawn (see carmodel.ts, program anchors). A kit
+ * car's lenses are its one material's (`carLensGlows`), already in its anchor.
  */
 export function lampLensAnchors(model: CarModelDef, root: THREE.Object3D): THREE.Mesh[] {
   const lights = model.lights;
@@ -205,7 +206,7 @@ export function lampLensAnchors(model: CarModelDef, root: THREE.Object3D): THREE
   root.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) return;
     for (const source of Array.isArray(object.material) ? object.material : [object.material]) {
-      if (!isLampLens(selectors, object, source)) continue;
+      if (!isLampLens(selectors, object, source) || carLensGlows(source)) continue;
       if (!(source instanceof THREE.MeshStandardMaterial) && !(source instanceof THREE.MeshPhongMaterial)) continue;
       anchors.push(new THREE.Mesh(object.geometry, lensMaterial(source)));
     }
@@ -247,12 +248,20 @@ export class VehicleLamps {
   private reverseLightLensMeshes: THREE.Mesh[] = [];
   /** Keep a loaded lamp snapshot visible until the first simulation step re-evaluates it. */
   private restoredLightStatePending = true;
-  private readonly headlightLensMaterials: EmissiveMaterial[] = [];
-  private readonly taillightMaterials: EmissiveMaterial[] = [];
-  private readonly brakeLightMaterials: EmissiveMaterial[] = [];
-  private readonly reverseLightMaterials: EmissiveMaterial[] = [];
-  private readonly leftBlinkerMaterials: EmissiveMaterial[] = [];
-  private readonly rightBlinkerMaterials: EmissiveMaterial[] = [];
+  /**
+   * Each lens role's glows: this car's own lens materials, or a kit car's roles of its one
+   * material (render/materials.ts `carLensGlows`). Every control writes all of a role's.
+   */
+  private readonly headlightLensMaterials: LensGlow[] = [];
+  private readonly taillightMaterials: LensGlow[] = [];
+  private readonly brakeLightMaterials: LensGlow[] = [];
+  private readonly reverseLightMaterials: LensGlow[] = [];
+  private readonly leftBlinkerMaterials: LensGlow[] = [];
+  private readonly rightBlinkerMaterials: LensGlow[] = [];
+  /** The lens materials this car made itself (`lensMaterial`): grimed here, freed in `clear`. */
+  private readonly ownLensMaterials: EmissiveMaterial[] = [];
+  /** A kit car's one material, whose lens dust is a uniform of its own (`setCarLensGrime`). */
+  private kitBody: THREE.Material | null = null;
   private rearLightState = -1;
   private reverseLightState = false;
   private indicatorSide: IndicatorSide = 'off';
@@ -338,18 +347,8 @@ export class VehicleLamps {
   setGrime(grime: number): void {
     if (grime === this.grime) return;
     this.grime = grime;
-    for (const list of this.lampMaterialLists()) setCarGrime(list, grime);
-  }
-
-  private lampMaterialLists(): readonly EmissiveMaterial[][] {
-    return [
-      this.headlightLensMaterials,
-      this.taillightMaterials,
-      this.brakeLightMaterials,
-      this.reverseLightMaterials,
-      this.leftBlinkerMaterials,
-      this.rightBlinkerMaterials,
-    ];
+    setCarGrime(this.ownLensMaterials, grime);
+    if (this.kitBody) setCarLensGrime(this.kitBody, grime);
   }
 
   /**
@@ -394,7 +393,7 @@ export class VehicleLamps {
         this.winkElapsed = -1;
         this.applyIndicatorState(this.indicatorLit);
       } else {
-        const on = (materials: readonly EmissiveMaterial[]): void => {
+        const on = (materials: readonly LensGlow[]): void => {
           for (const material of materials) {
             material.emissive.setHex(lit ? BLINKER_EMISSIVE : 0x000000);
             material.emissiveIntensity = lit ? 5 : 0;
@@ -620,9 +619,14 @@ export class VehicleLamps {
     this.applyRearLightState();
   }
 
+  /**
+   * Binds the lenses `selectors` names to `output`; `role` is their index in
+   * `LENS_ROLE_EMISSIVE`, which picks a kit car's glow of that role.
+   */
   private bindLampMaterials(
     selectors: readonly string[] | undefined,
-    output: EmissiveMaterial[],
+    output: LensGlow[],
+    role: number,
   ): THREE.Mesh[] {
     if (!selectors || selectors.length === 0) return [];
     const wanted = new Set(selectors);
@@ -633,6 +637,13 @@ export class VehicleLamps {
       const bind = (source: THREE.Material): THREE.Material => {
         if (!isLampLens(wanted, object, source)) return source;
         matched = true;
+        const glows = carLensGlows(source);
+        if (glows) {
+          this.kitBody = source;
+          setCarLensGrime(source, this.grime);
+          if (!output.includes(glows[role]!)) output.push(glows[role]!);
+          return source;
+        }
         if (
           !(source instanceof THREE.MeshStandardMaterial) &&
           !(source instanceof THREE.MeshPhongMaterial)
@@ -643,6 +654,7 @@ export class VehicleLamps {
         }
         const material = lensMaterial(source);
         setCarGrime([material], this.grime);
+        this.ownLensMaterials.push(material);
         output.push(material);
         return material;
       };
@@ -665,18 +677,21 @@ export class VehicleLamps {
     this.headlightLensMeshes = this.bindLampMaterials(
       lights.headlights,
       this.headlightLensMaterials,
+      0,
     );
     this.taillightLensMeshes = this.bindLampMaterials(
       lights.taillights,
       this.taillightMaterials,
+      1,
     );
-    this.bindLampMaterials(lights.brakeLights, this.brakeLightMaterials);
+    this.bindLampMaterials(lights.brakeLights, this.brakeLightMaterials, 2);
     this.reverseLightLensMeshes = this.bindLampMaterials(
       lights.reverseLights,
       this.reverseLightMaterials,
+      3,
     );
-    this.bindLampMaterials(lights.leftBlinkers, this.leftBlinkerMaterials);
-    this.bindLampMaterials(lights.rightBlinkers, this.rightBlinkerMaterials);
+    this.bindLampMaterials(lights.leftBlinkers, this.leftBlinkerMaterials, 4);
+    this.bindLampMaterials(lights.rightBlinkers, this.rightBlinkerMaterials, 5);
     this.rearLightState = -1;
     this.reverseLightState = false;
     this.applyIndicatorState(false);
@@ -834,7 +849,7 @@ export class VehicleLamps {
 
   private applyIndicatorState(lit: boolean): void {
     this.indicatorLit = lit;
-    const apply = (materials: readonly EmissiveMaterial[], active: boolean): void => {
+    const apply = (materials: readonly LensGlow[], active: boolean): void => {
       for (const material of materials) {
         material.emissive.setHex(active ? BLINKER_EMISSIVE : 0x000000);
         material.emissiveIntensity = active ? 5 : 0;
@@ -847,12 +862,9 @@ export class VehicleLamps {
 
   /** Releases this car's per-instance lamp materials and forgets every mount. */
   clear(): void {
-    for (const material of this.headlightLensMaterials) material.dispose();
-    for (const material of this.taillightMaterials) material.dispose();
-    for (const material of this.brakeLightMaterials) material.dispose();
-    for (const material of this.reverseLightMaterials) material.dispose();
-    for (const material of this.leftBlinkerMaterials) material.dispose();
-    for (const material of this.rightBlinkerMaterials) material.dispose();
+    for (const material of this.ownLensMaterials) material.dispose();
+    this.ownLensMaterials.length = 0;
+    this.kitBody = null;
     this.headlightMounts = [];
     this.taillightMounts = [];
     this.reverseLightMounts = [];

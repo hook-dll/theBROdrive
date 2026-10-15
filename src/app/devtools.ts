@@ -28,6 +28,7 @@ import type { Interaction } from '../player/interaction';
 import type { Player } from '../player/player';
 import type { PlayerVitals } from '../player/vitals';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
+import { KIT_PICK_LAYER } from '../render/kitdraw';
 import type { CameraRig } from '../render/cameras';
 import { LakeWater } from '../render/lakewater';
 import type { Sky } from '../render/sky';
@@ -633,6 +634,7 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     const box = new THREE.Box3().setFromObject(root);
     const inv = root.matrixWorld.clone().invert();
     const ray = new THREE.Raycaster();
+    ray.layers.enable(KIT_PICK_LAYER);
     const hits: THREE.Intersection[] = [];
     const found: { p: THREE.Vector3; n: THREE.Vector3 }[] = [];
     const nm = new THREE.Matrix3();

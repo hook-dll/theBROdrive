@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { mirrorFaceGeometry, mirrorFaceMaterial } from '../render/carmirrors';
 import type { BodyFrame, KitHole } from './body';
 import type { KitSlot, PartBuilder, Vec3 } from './builder';
-import { kitMaterial } from './materials';
+import { kitBodyMaterial, kitGlassMaterial } from './materials';
 import { KIT_LAMP_NODES, type KitMirror } from './names';
 import type { KitControl, KitMotion } from './rig';
 
@@ -34,14 +34,17 @@ export interface KitContext {
 /**
  * Meshes of one builder, one per slot, under `parent`. Geometry is written in the car
  * frame and moved into the parent's (`origin` is where the parent stands in the car
- * frame). `shadowed` marks the detail parts (cabin, bay, boot, underbody): they take
- * the shell's shadow but cast none (see `prepareMaterials` in render/carmodel.ts).
+ * frame). Every slot but the glass draws with the one kit material; the slot is kept on
+ * the mesh (`userData.kitSlot`) until `finishKitSurfaces` writes it into the vertices.
+ * `shadowed` marks the detail parts (cabin, bay, boot, underbody): they take the shell's
+ * shadow but cast none (see `prepareMaterials` in render/carmodel.ts).
  */
 export function addBuilt(parent: THREE.Object3D, builder: PartBuilder, origin: Vec3, name: string, shadowed = false): void {
   for (const [slot, geometry] of builder.build()) {
     geometry.translate(-origin[0], -origin[1], -origin[2]);
-    const mesh = new THREE.Mesh(geometry, kitMaterial(slot));
+    const mesh = new THREE.Mesh(geometry, slot === 'glass' ? kitGlassMaterial() : kitBodyMaterial());
     mesh.name = meshName(slot, name);
+    mesh.userData.kitSlot = slot;
     if (shadowed) mesh.userData.kitShadowed = true;
     parent.add(mesh);
   }

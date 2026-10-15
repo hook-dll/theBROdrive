@@ -26,6 +26,7 @@
 import * as THREE from 'three';
 import { KIT_DETAIL_GROUPS, KIT_DETAIL_M } from '../carkit/rig';
 import { LENS_ROLE_EMISSIVE, type VehicleLamps } from '../vehicle/vehiclelamps';
+import { CAR_SURFACE_ATTRIBUTE } from './materials';
 
 /** A traffic car goes far beyond this distance from the eye, metres... */
 export const FAR_CAR_ENTER_M = 110;
@@ -62,15 +63,17 @@ export const MID_CAR_EXIT_M = KIT_DETAIL_M;
  */
 const FAR_CAR_CAPACITY = 64;
 
-/** Per vertex: paint share, roughness, metalness, lamp role (`FarCarSurface`), as bytes. */
-const SURFACE_ATTRIBUTE = 'farCarSurface';
 /** Per instance: emission of the head, tail and stop lenses. */
 const LAMPS_A_ATTRIBUTE = 'farCarLampsA';
 /** Per instance: emission of the reverse lenses and the left and right blinkers. */
 const LAMPS_B_ATTRIBUTE = 'farCarLampsB';
-const PROGRAM_KEY = 'far-car-v1';
+const PROGRAM_KEY = 'far-car-v2';
 
-/** What one material slot of a model looks like from afar. */
+/**
+ * What one material slot of a model looks like from afar. Per vertex it becomes `color`
+ * and `CAR_SURFACE_ATTRIBUTE` (render/materials.ts: paint share, roughness, metalness, lamp
+ * role), the convention a kit car's own vertices already carry (`perVertex`).
+ */
 export interface FarCarSurface {
   /** Its colour; ignored for paint, which is the instance's. */
   readonly color: THREE.Color;
@@ -87,6 +90,11 @@ export interface FarCarSurface {
    * sets take their rim and tyre colours from a palette texture, and the far mesh has no map.
    */
   readonly map?: THREE.Texture | null;
+  /**
+   * A kit part (carkit/materials.ts): its colour and surface are its own vertices', and
+   * every field above but `color` (multiplied in) is ignored.
+   */
+  readonly perVertex?: boolean;
 }
 
 const _local = new THREE.Matrix4();
@@ -122,6 +130,7 @@ function pixelsOf(map: THREE.Texture): { data: Uint8ClampedArray; width: number;
 }
 
 interface Piece<S> {
+  readonly mesh: THREE.Mesh;
   readonly geometry: THREE.BufferGeometry;
   readonly matrix: THREE.Matrix4;
   readonly start: number;
@@ -136,15 +145,16 @@ function toByte(value: number): number {
 /**
  * Every visible material slot under `roots` that `describe` keeps, with its mesh's
  * chassis-local matrix (each root's own transform included), minus the kit groups a car
- * past `KIT_DETAIL_M` stops drawing. Reads the template without changing it.
+ * past `KIT_DETAIL_M` stops drawing unless `whole`. Reads the template without changing it.
  */
 function collectPieces<S>(
   roots: readonly THREE.Object3D[],
   describe: (mesh: THREE.Mesh, material: THREE.Material) => S | null,
+  whole = false,
 ): Piece<S>[] {
   const pieces: Piece<S>[] = [];
   const walk = (node: THREE.Object3D, parent: THREE.Matrix4): void => {
-    if (!node.visible || KIT_DETAIL_GROUPS.has(node.name)) return;
+    if (!node.visible || (!whole && KIT_DETAIL_GROUPS.has(node.name))) return;
     const local = node.matrixAutoUpdate ? _local.compose(node.position, node.quaternion, node.scale) : node.matrix;
     const matrix = new THREE.Matrix4().multiplyMatrices(parent, local);
     if (node instanceof THREE.Mesh) {
@@ -159,7 +169,7 @@ function collectPieces<S>(
         const surface = describe(node, slot.material);
         if (surface === null) continue;
         const count = Math.min(slot.count, total - slot.start);
-        pieces.push({ geometry, matrix, start: slot.start, count: count - (count % 3), surface });
+        pieces.push({ mesh: node, geometry, matrix, start: slot.start, count: count - (count % 3), surface });
       }
     }
     for (const child of node.children) walk(child, matrix);
@@ -196,7 +206,8 @@ export function bakeFarCarGeometry(
     const index = geometry.index;
     const position = geometry.getAttribute('position');
     const normal = geometry.getAttribute('normal') as THREE.BufferAttribute | undefined;
-    const vertexColor = surface.vertexColors ? (geometry.getAttribute('color') as THREE.BufferAttribute | undefined) : undefined;
+    const own = surface.perVertex ? (geometry.getAttribute(CAR_SURFACE_ATTRIBUTE) as THREE.BufferAttribute | undefined) : undefined;
+    const vertexColor = surface.vertexColors || own ? (geometry.getAttribute('color') as THREE.BufferAttribute | undefined) : undefined;
     const pixels = surface.map ? pixelsOf(surface.map) : null;
     const uv = pixels ? (geometry.getAttribute('uv') as THREE.BufferAttribute | undefined) : undefined;
     _normalMatrix.getNormalMatrix(matrix);
@@ -237,10 +248,14 @@ export function bakeFarCarGeometry(
         colors[v * 3] = toByte(_color.r);
         colors[v * 3 + 1] = toByte(_color.g);
         colors[v * 3 + 2] = toByte(_color.b);
-        surfaces[v * 4] = paint;
-        surfaces[v * 4 + 1] = roughness;
-        surfaces[v * 4 + 2] = metalness;
-        surfaces[v * 4 + 3] = surface.lamp;
+        if (own) {
+          for (let c = 0; c < 4; c++) surfaces[v * 4 + c] = toByte(own.getComponent(source, c));
+        } else {
+          surfaces[v * 4] = paint;
+          surfaces[v * 4 + 1] = roughness;
+          surfaces[v * 4 + 2] = metalness;
+          surfaces[v * 4 + 3] = surface.lamp;
+        }
         v++;
       }
     }
@@ -249,7 +264,7 @@ export function bakeFarCarGeometry(
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3, true));
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3, true));
-  geometry.setAttribute(SURFACE_ATTRIBUTE, new THREE.BufferAttribute(surfaces, 4, true));
+  geometry.setAttribute(CAR_SURFACE_ATTRIBUTE, new THREE.BufferAttribute(surfaces, 4, true));
   return geometry;
 }
 
@@ -265,15 +280,23 @@ export function bakeFarCarGeometry(
  * (`CAR_BODY_POSITION_ATTRIBUTE`, already chassis-local) included, is copied as it is.
  * A mirrored piece has its corners swapped so its faces keep their winding, which the
  * shadow side reads.
+ *
+ * `bones` makes it a rigid skin (render/kitdraw.ts): every part, the kit's detail groups
+ * included, each vertex weighted 1 to its mesh's bone.
  */
 export function bakeCarPaintGeometry(
   roots: readonly THREE.Object3D[],
   slotOf: (mesh: THREE.Mesh, material: THREE.Material) => number,
+  bones?: (mesh: THREE.Mesh) => number,
 ): THREE.BufferGeometry | null {
-  const pieces = collectPieces(roots, (mesh, material) => {
-    const slot = slotOf(mesh, material);
-    return slot >= 0 ? slot : null;
-  });
+  const pieces = collectPieces(
+    roots,
+    (mesh, material) => {
+      const slot = slotOf(mesh, material);
+      return slot >= 0 ? slot : null;
+    },
+    bones !== undefined,
+  );
   if (pieces.length === 0) return null;
   pieces.sort((a, b) => a.surface - b.surface);
 
@@ -292,11 +315,14 @@ export function bakeCarPaintGeometry(
   const out = new Map<string, Float32Array>();
   for (const [name, size] of sizes) out.set(name, new Float32Array(vertices * size));
   const geometry = new THREE.BufferGeometry();
+  const boneOf = bones ? pieces.map((piece) => bones(piece.mesh)) : null;
+  const skinIndex = boneOf ? (Math.max(...boneOf) < 256 ? new Uint8Array(vertices * 4) : new Uint16Array(vertices * 4)) : null;
   let v = 0;
   let groupStart = 0;
   const corner = [_a, _b, _c] as const;
   for (let p = 0; p < pieces.length; p++) {
     const { geometry: source, matrix, start, count, surface } = pieces[p]!;
+    if (skinIndex) for (let i = v; i < v + count; i++) skinIndex[i * 4] = boneOf![p]!;
     const index = source.index;
     const position = source.getAttribute('position');
     const normal = source.getAttribute('normal') as THREE.BufferAttribute | undefined;
@@ -334,12 +360,18 @@ export function bakeCarPaintGeometry(
     }
   }
   for (const [name, size] of sizes) geometry.setAttribute(name, new THREE.BufferAttribute(out.get(name)!, size));
+  if (skinIndex) {
+    const weight = new Uint8Array(vertices * 4);
+    for (let i = 0; i < vertices; i++) weight[i * 4] = 255;
+    geometry.setAttribute('skinIndex', new THREE.BufferAttribute(skinIndex, 4));
+    geometry.setAttribute('skinWeight', new THREE.BufferAttribute(weight, 4, true));
+  }
   geometry.computeBoundingSphere();
   return geometry;
 }
 
 const VERTEX_PARS = /* glsl */ `#include <common>
-attribute vec4 ${SURFACE_ATTRIBUTE};
+attribute vec4 ${CAR_SURFACE_ATTRIBUTE};
 attribute vec3 ${LAMPS_A_ATTRIBUTE};
 attribute vec3 ${LAMPS_B_ATTRIBUTE};
 uniform vec3 farCarLampTint[ ${LENS_ROLE_EMISSIVE.length} ];
@@ -353,9 +385,9 @@ varying vec3 vFarCarGlow;`;
  * The role picks by masks rather than by indexing with it, which some drivers compile
  * badly in a vertex shader.
  */
-const VERTEX_COLOR = /* glsl */ `vColor = vec4( color * mix( vec3( 1.0 ), instanceColor.rgb, ${SURFACE_ATTRIBUTE}.x ), 1.0 );
-vFarCarFinish = ${SURFACE_ATTRIBUTE}.yz;
-float farCarLamp = ${SURFACE_ATTRIBUTE}.w * 255.0;
+const VERTEX_COLOR = /* glsl */ `vColor = vec4( color * mix( vec3( 1.0 ), instanceColor.rgb, ${CAR_SURFACE_ATTRIBUTE}.x ), 1.0 );
+vFarCarFinish = ${CAR_SURFACE_ATTRIBUTE}.yz;
+float farCarLamp = ${CAR_SURFACE_ATTRIBUTE}.w * 255.0;
 vec3 farCarRoleA = 1.0 - step( 0.5, abs( vec3( farCarLamp ) - vec3( 1.0, 2.0, 3.0 ) ) );
 vec3 farCarRoleB = 1.0 - step( 0.5, abs( vec3( farCarLamp ) - vec3( 4.0, 5.0, 6.0 ) ) );
 vFarCarGlow = ( dot( farCarRoleA, ${LAMPS_A_ATTRIBUTE} ) + dot( farCarRoleB, ${LAMPS_B_ATTRIBUTE} ) ) * (
@@ -420,7 +452,7 @@ function programAnchor(): THREE.InstancedMesh {
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3));
   geometry.setAttribute('normal', new THREE.BufferAttribute(new Int8Array([0, 127, 0, 0, 127, 0, 0, 127, 0]), 3, true));
   geometry.setAttribute('color', new THREE.BufferAttribute(new Uint8Array(9), 3, true));
-  geometry.setAttribute(SURFACE_ATTRIBUTE, new THREE.BufferAttribute(new Uint8Array(12), 4, true));
+  geometry.setAttribute(CAR_SURFACE_ATTRIBUTE, new THREE.BufferAttribute(new Uint8Array(12), 4, true));
   const mesh = makeFarMesh(geometry);
   mesh.name = 'far-car-program-anchor';
   mesh.visible = false;
@@ -504,24 +536,25 @@ export class FarCarField {
 
   /**
    * Draws a mid car's shared parts at its render pose: `rest` (its model's trim, glass and
-   * lenses, lit as `lamps` lights them) and each of `wheels`. All or none: false, and
-   * nothing added, when the field is off or any of their meshes is full.
+   * lenses, lit as `lamps` lights them; null for a kit car, whose own mid mesh is the
+   * whole body) and each of `wheels`. All or none: false, and nothing added, when the
+   * field is off or any of their meshes is full.
    */
   addMid(
-    rest: THREE.BufferGeometry,
+    rest: THREE.BufferGeometry | null,
     wheels: readonly MidCarWheel[],
     position: THREE.Vector3,
     quaternion: THREE.Quaternion,
     lamps: VehicleLamps,
   ): boolean {
     if (!this.enabled) return false;
-    const restModel = this.model(rest);
-    if (restModel.count >= FAR_CAR_CAPACITY) return false;
+    const restModel = rest ? this.model(rest) : null;
+    if (restModel && restModel.count >= FAR_CAR_CAPACITY) return false;
     // A set's wheel mesh takes up to two of one car (a spare is a second rear left).
     for (const wheel of wheels) if (this.model(wheel.geometry).count >= FAR_CAR_CAPACITY - 1) return false;
     _matrix.compose(position, quaternion, ONE);
     // The rest carries no paint: its instance colour multiplies nothing.
-    this.place(restModel, _matrix, WHITE, lamps);
+    if (restModel) this.place(restModel, _matrix, WHITE, lamps);
     for (const wheel of wheels) this.place(this.model(wheel.geometry), _part.multiplyMatrices(_matrix, wheel.matrix), WHITE, null);
     return true;
   }
@@ -580,14 +613,15 @@ export class FarCarField {
  * DEV (`__bro.farCars.stats`, `__bro.midCars.stats`): the draws a car's near parts (its
  * body and wheels: `Vehicle.nearParts`, shown or hidden) would cost if drawn past
  * `KIT_DETAIL_M`, one per visible material slot in the scene pass and one per caster in
- * the sun's, without the kit groups that stop drawing there. An estimate for the A/B;
+ * the sun's, without the kit groups that stop drawing there and the pick proxies no
+ * picture draws (render/kitdraw.ts `KIT_PICK_LAYER`). An estimate for the A/B;
  * `renderer.info.render.calls` with the field off and on is the measurement.
  */
 export function nearDrawEstimate(parts: readonly THREE.Object3D[]): number {
   let draws = 0;
   const walk = (node: THREE.Object3D, part: boolean): void => {
     if ((!part && !node.visible) || KIT_DETAIL_GROUPS.has(node.name)) return;
-    if (node instanceof THREE.Mesh) {
+    if (node instanceof THREE.Mesh && node.layers.isEnabled(0)) {
       const slots = Array.isArray(node.material) ? (node.geometry as THREE.BufferGeometry).groups.length : 1;
       draws += slots * (node.castShadow ? 2 : 1);
     }

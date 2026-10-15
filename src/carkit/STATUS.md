@@ -198,9 +198,14 @@ slot (as on the 2115).
 - **Shaders**: checked in the world (2026-10-13), see the CHANGELOG entry for the counts.
   The car lab links 15 programs after boot; with the kit cars at night, lamps on and parts
   open the count is the same on HEAD and on the flat-run merge (2026-10-15).
-  A kit car's anchor (`buildProgramAnchor`) holds its driving clone, a wreck and a
-  courier; LOD, opening parts and a door's sticker layer change only visibility, uniforms
-  and transforms.
+  A kit car's anchor (`buildProgramAnchor`) holds its driving clone (skinned body, glass
+  and wheels), its mid shell, a wreck and a courier; LOD, opening parts and a door's
+  sticker layer change only visibility, bones, uniforms and transforms. Since the
+  three-draw car (2026-10-15) no program links over a 90 s drive with every lamp, door and
+  pane worked, nor on jumps along 20 km of wrecks and couriers.
+- **Draw calls** (2026-10-15): a kit car is three draws (its one material, its glass, its
+  wheels; README "Draw calls"), mirror faces and a sticker layer apart. Left: the glass is
+  transparent and double sided, so it draws twice (back faces, then front), as before.
 - **Z-fighting** (`tools/kit-zfight.ts`, 2026-10-16): 0 visible clusters in every band
   (close, 10–25 m, >25 m/far) on all 13 cars, and every shell hole under an item is
   covered from every exterior viewpoint by what a mid or far car still draws (0 slits).

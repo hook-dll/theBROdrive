@@ -37,7 +37,6 @@
  */
 
 import * as THREE from 'three';
-import { KIT_SHUT_GEOMETRY } from '../carkit/rig';
 import type { StickerState } from '../game/state';
 import { stickerDef } from '../items/stickercatalog';
 import { stickerAtlas, type AtlasRect } from './stickerart';
@@ -294,9 +293,9 @@ function collectTriangles(surfaces: readonly StickerDecalSurface[], body: THREE.
   body.updateWorldMatrix(true, true);
   const bodyInverse = body.matrixWorld.clone().invert();
   for (const { mesh, accepts, carrier } of surfaces) {
-    // A drop pane that is down draws a cut copy (carkit/rig.ts `SinkingPane`); stickers
-    // are cut from the shut pane, as from every other part.
-    const geometry = (mesh.userData[KIT_SHUT_GEOMETRY] as THREE.BufferGeometry | undefined) ?? mesh.geometry;
+    // A drop pane that is down only slides (carkit/rig.ts `SinkingPane`): its geometry and
+    // its stamp stay the shut pane's, and a slide turns no normal.
+    const geometry = mesh.geometry;
     const position = geometry.getAttribute('position');
     const bodyPos = geometry.getAttribute(CAR_BODY_POSITION_ATTRIBUTE) as THREE.BufferAttribute | undefined;
     if (!position || !bodyPos) continue;

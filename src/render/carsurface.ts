@@ -38,6 +38,8 @@ export class CarBodySurface {
     readonly glass: readonly THREE.Material[] = [],
     /** This car's sticker decals (render/stickerdecals.ts). */
     private readonly decals: CarStickerDecals | null = null,
+    /** A kit car's skeletons (render/kitdraw.ts): their bone textures are this car's alone. */
+    private readonly skeletons: readonly THREE.Skeleton[] = [],
   ) {}
 
   /** Writes dirt and scratches into this car's paint; free when neither changed. */
@@ -70,10 +72,11 @@ export class CarBodySurface {
     setCarBodyHighlight(this.paint, value);
   }
 
-  /** Frees this car's own paint, glass and decal materials. */
+  /** Frees this car's own paint, glass and decal materials and its bone textures. */
   dispose(): void {
     for (const material of this.paint) material.dispose();
     for (const material of this.glass) material.dispose();
     this.decals?.dispose();
+    for (const skeleton of this.skeletons) skeleton.dispose();
   }
 }
