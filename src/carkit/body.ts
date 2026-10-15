@@ -792,7 +792,7 @@ export function buildShell(frame: BodyFrame): ShellResult {
       const t: Vec3 = P(side * cabin.railHalf, cabin.rail - (column.drop ?? 0), column.top);
       const last = i === cabin.columns.length - 1;
       let k = along(b, t, b[1] + cabin.glassBottom);
-      let q = along(b, t, t[1] - cabin.glassTop);
+      let q = along(b, t, t[1] - cabin.glassTop - (column.glassDrop ?? 0));
       if (last && cabin.rearKnee) {
         // The rear corner folds where the tailgate does, so the D pillar lies flush with
         // the tailgate's glass instead of standing out behind it.

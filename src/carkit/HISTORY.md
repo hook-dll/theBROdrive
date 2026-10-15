@@ -231,6 +231,10 @@ Format of an entry: **Problem** → **Cause** → **Fix** → *Code* (commit).
   72 mm, the 2108/2109's at 3.6 by 14 mm, the estates' by up to 11 mm): an open seam. →
   The side ring gets a point at every such station, its foot on the tub's edge (only where
   the edge bends by over 1 mm, so the classic saloons stay identical). *body.ts*.
+- **21099 boot heavy.** → Its shoulder was the 2115's, half 0.80 at the belt against the
+  drawing's rear view 0.76–0.78 (0.825 at the crease). → Own boot stations: belt half
+  0.785 / 0.77 / 0.755 / 0.75 from the back light to the tail, the lid's trailing edge on
+  the drawn line (belt 0.89, deck 0.91 at 4.1). The 2115 keeps `SALOON_BOOT`. *samaras.ts*.
 
 ## Tens (2110, 2112)
 
@@ -326,6 +330,16 @@ Format of an entry: **Problem** → **Cause** → **Fix** → *Code* (commit).
   those); blades 0.50 (both 500 mm, part 2110-5205070). The driver's arm is 36 mm shorter
   and its tip 0.084 m up, as low as the passenger's; the other cars park within 20° and
   are identical. *exterior.ts `buildWipers` `fit`, tens.ts `wiperBlade`*.
+- **2110/2112: the front door glass's top front corner (raked edge into the rail) too
+  sharp; rounded on the car; then a dent at the A pillar's top.** → The glass column ran
+  straight to the rail at 1.89; any `drop` (the column's top under the rail) leaves the
+  rail's face above it sloping in, a dent, and mixed drops along the pillar, frame and
+  glass zigzagged the outer edge. → The rail and the outer edge are left whole (no `drop`
+  on the tens' A pillar any more); only the glass's top edge drops 0.05 at its front
+  column (`CabinColumn.glassDrop`, the frame widening above it) and one more glass column
+  (s 1.45, top 1.95) brings it back to the frame's width: one chamfer inside the frame,
+  a few triangles per side. The 2112 takes the 2110's first 12 columns. *spec.ts, body.ts,
+  tens.ts*.
 
 ## World (2026-10-13)
 

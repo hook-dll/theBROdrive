@@ -2161,17 +2161,19 @@ function farSurfaceOf(def: CarModelDef, bodywork: boolean): (mesh: THREE.Mesh, m
   return (mesh, material) => {
     const slot = mesh.userData.kitSlot as string | undefined;
     if (slot !== undefined && slot !== 'glass') return KIT_FAR_SURFACE;
-    // The Soviet wheel sets are Phong with a palette map: their colour is the texel,
-    // their finish a tyre's or a painted rim's, so a mid roughness stands for both.
+    // The role `VehicleLamps.bindLampMaterials` binds the lens by: mesh name, then material.
+    const lamp = roles.findIndex((selectors) => selectors.includes(mesh.name) || selectors.includes(material.name)) + 1;
+    // The Soviet wheel sets and bodies are Phong with a palette map: their colour is the
+    // texel, their finish a tyre's or a painted rim's, so a mid roughness stands for all.
+    // Their lenses are Phong too and glow by their role as the near lens does: without it
+    // a lit head lamp went dark at `MID_CAR_ENTER_M` and lit up again coming back in.
     if (material instanceof THREE.MeshPhongMaterial) {
-      return { color: material.color, vertexColors: material.vertexColors, paint: false, roughness: 0.7, metalness: 0.1, lamp: 0, map: material.map };
+      return { color: material.color, vertexColors: material.vertexColors, paint: false, roughness: 0.7, metalness: 0.1, lamp, map: material.map };
     }
     // Every lit kit slot is a standard material. The one unlit slot, `lamp_glow`, lights
     // only the cabin's lamps, and the far mesh has no cabin.
     if (!(material instanceof THREE.MeshStandardMaterial)) return null;
     const paint = bodywork && isRandomPaintMesh(mesh, def) && isPaintSlot(material, def);
-    // The role `VehicleLamps.bindLampMaterials` binds the lens by: mesh name, then material.
-    const role = roles.findIndex((selectors) => selectors.includes(mesh.name) || selectors.includes(material.name));
     return {
       color: material.color,
       vertexColors: material.vertexColors,
@@ -2179,7 +2181,7 @@ function farSurfaceOf(def: CarModelDef, bodywork: boolean): (mesh: THREE.Mesh, m
       // The finish `makeCarBodyConditionMaterial` gives every car's paint.
       roughness: paint ? MATERIALS_CONFIG.paintRoughness : material.roughness,
       metalness: paint ? MATERIALS_CONFIG.paintMetalness : material.metalness,
-      lamp: role + 1,
+      lamp,
       map: material.map,
     };
   };

@@ -213,10 +213,14 @@ export const BODY_21099: KitBody = {
   length: 4.205,
   stations: [
     ...SALOON_FRONT,
-    ...SALOON_BOOT,
-    { s: 4.1, sill: 0.33, crease: 0.63, belt: 0.905, deck: 0.925, wSill: 0.775, wCrease: 0.8, wBelt: 0.785 },
+    // SALOON_BOOT's heights with the 21099's narrower shoulder: on the drawing's rear view
+    // the body's outline at the boot's shoulder is half 0.76–0.78 against 0.825 at the
+    // crease, the lid tumbling in over it; the 2115's fuller boot keeps SALOON_BOOT's.
+    ...SALOON_BOOT.map((station, i) => ({ ...station, wBelt: [0.785, 0.77][i]! })),
+    // The lid's trailing edge on the drawn line (4.068 / 0.94, 4.109 / 0.903) [D].
+    { s: 4.1, sill: 0.33, crease: 0.63, belt: 0.89, deck: 0.91, wSill: 0.775, wCrease: 0.8, wBelt: 0.755 },
     // The tail face: lamps up to 0.77 [D], 0.755 / 0.785 half widths [D top view].
-    { s: 4.15, sill: 0.36, crease: 0.62, belt: 0.765, deck: 0.785, wSill: 0.755, wCrease: 0.785, wBelt: 0.77 },
+    { s: 4.15, sill: 0.36, crease: 0.62, belt: 0.765, deck: 0.785, wSill: 0.755, wCrease: 0.785, wBelt: 0.75 },
   ],
   cabin: {
     ...BODY_2108.cabin,

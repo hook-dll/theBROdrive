@@ -61,12 +61,16 @@ export const BODY_2110: KitBody = {
   shoulder: { inset: 0.04, rise: 0.015 },
   cabin: {
     columns: [
-      // The A pillar [D: 1.32 at the belt to 1.338 high at 1.768], its top chamfered into
-      // the rail as the drawn line rounds into the roof (1.342 at 1.77 → the rail's 1.379 at
-      // 1.85); the front door's frame and glass run up behind it to that rounded corner.
-      { s: 1.31, top: 1.77, upper: 'body', drop: 0.037 },
+      // The A pillar [D: 1.32 at the belt to 1.338 high at 1.768] runs straight into the
+      // rail: a `drop` chamfer there read as a dent in the rail's corner. The front door's
+      // frame and glass run up behind it.
+      { s: 1.31, top: 1.77, upper: 'body' },
       { s: 1.325, top: 1.85, upper: 'door1' },
-      { s: 1.385, top: 1.89, upper: 'door1', glass: 'drop' },
+      // The drop glass's front edge, its top front corner cut by one chamfer inside the
+      // frame as the photos' rounded corner: the edge's top 0.05 lower (`glassDrop`), the
+      // glass's top back to the frame's width at the next column. The rail is untouched.
+      { s: 1.385, top: 1.89, upper: 'door1', glass: 'drop', glassDrop: 0.05 },
+      { s: 1.45, top: 1.95, upper: 'door1', glass: 'drop' },
       // The B pillar: the two doors' frames meet on it; the doors share one shut line
       // below the belt at 2.33.
       { s: 2.269, top: 2.324, upper: 'door1' },
@@ -279,7 +283,7 @@ export const BODY_2112: KitBody = {
   cabin: {
     ...BODY_2110.cabin,
     columns: [
-      ...BODY_2110.cabin.columns.slice(0, 11),
+      ...BODY_2110.cabin.columns.slice(0, 12),
       // The quarter glass's rear corner on the belt [D: x 1540, y 148] and the D pillar.
       { s: 3.71, top: 3.26, upper: 'body' },
       // The roof's rear end [D: x 1433, 1.333 on the outline] over the tailgate's foot.

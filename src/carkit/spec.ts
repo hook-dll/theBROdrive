@@ -79,6 +79,12 @@ export interface CabinColumn {
    * the tens' A pillar rounding into the roof). Absent: at the rail.
    */
   readonly drop?: number;
+  /**
+   * The glass's top edge on this column stands this far lower, the frame above it
+   * widening by as much; the rail and the outer edge stay put. One chamfer of a glass
+   * corner inside its frame (the tens' front door glass). Absent: the frame's own width.
+   */
+  readonly glassDrop?: number;
 }
 
 export interface CabinSpec {
