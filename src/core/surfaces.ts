@@ -231,10 +231,13 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     roughness: 0.012,
     microRelief: 0.012,
     hummock: 0.012,
-    // Sun-aged neutral asphalt: light enough to read as an old dry road rather than
-    // freshly laid wet bitumen. Fine aggregate and bleaching vary this base in the map.
+    // An AGED, sun-bleached mat: 0.14 linear as drawn (render/roadtexture.ts's display
+    // scale included), against a physical 0.10-0.18 for old asphalt. Fresh courses are
+    // shaded down from this to 0.06-0.08 per stretch (world/gradient.ts `roadCourseAt`).
+    // It was 0x9e9c9d, a flat 0.27 everywhere: concrete's value, and the road did not
+    // read against the sand (owner, 2026-10-16).
     texture: 0.009,
-    color: 0x9e9c9d,
+    color: 0x757475,
     dust: 0.0,
     smoke: 1.0,
   },
@@ -250,9 +253,9 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     roughness: 0.06,
     microRelief: 0.016,
     hummock: 0.016,
-    // Older cracked districts stay distinct, but no longer collapse back to wet black.
+    // Older and paler than the kept surface, 0.16 as drawn; still asphalt, not concrete.
     texture: 0.014,
-    color: 0x888482,
+    color: 0x7e7a78,
     dust: 0.1,
     smoke: 0.85,
   },

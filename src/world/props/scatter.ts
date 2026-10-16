@@ -120,19 +120,27 @@ const CACTUS_DENSITY = 0.009;
 const ROCK_COLLIDER_MIN = 0.55; // pebbles under this radius (m) get no collider
 /**
  * Ground cover (dry tufts, shrubs, rosettes), a decoration stream of its own:
- * its own tag, so no existing cell's roll moves. A little thicker near the road, where
- * runoff off the asphalt waters the verge, but spread well out over the open desert
- * to `GROUND_COVER_LAT`: the first cut fell off with the cube of the distance over
- * 160 m and read as a hedge along the verge. Only built inside the physics radius: a
- * tuft is a few pixels by then, and a chunk rebuilds when it crosses it. That profile
- * is what a stretch at full density looks like — `groundCoverDensity`
- * (`groundcover.ts`) thins it over kilometres of road and clears it entirely on bare
- * stretches, keyed on the arclength each candidate is placed at.
+ * its own tag, so no existing cell's roll moves. Two populations:
+ *
+ *  - THE OPEN DESERT: one candidate per `GROUND_COVER_CELL` square out to
+ *    `GROUND_COVER_LAT`, kept at `GROUND_COVER_OPEN`, an even sparse spread.
+ *  - THE VERGE: the band `VERGE_NEAR_M`-`VERGE_FAR_M` from the asphalt, where runoff
+ *    off the road waters the ground, 4-6 times as dense on average and CLUMPED: a
+ *    clump of two to six plants every few dozen metres with bare sand between, more of
+ *    them where the ground beside the road lies lower than the asphalt and on the side
+ *    the road's camber sheds its water to (`vergeRunoff`). A smooth density bump here
+ *    read as a hedge along the verge twice (the cube falloff over 160 m, then this
+ *    profile's 2x near the road): a uniform verge is a planted one, a clumped one grew.
+ *
+ * Only built inside the physics radius: a tuft is a few pixels by then, and a chunk
+ * rebuilds when it crosses it. That is what a stretch at full density looks like —
+ * `groundCoverDensity` (`groundcover.ts`) thins both populations over kilometres of road
+ * and clears them on bare stretches, keyed on the arclength each candidate is placed at.
  */
 const TAG_GROUND_COVER = 0x7f6c0e;
 const GROUND_COVER_CELL = 3;
-const GROUND_COVER_NEAR = 0.085;
-const GROUND_COVER_FAR = 0.04;
+/** Chance of a plant per open cell: one per 450 m². */
+const GROUND_COVER_OPEN = 0.02;
 const GROUND_COVER_LAT = 320;
 /**
  * Very Low and Low stop the cover here instead (`lightGeometryActive`). At 360 lines a
@@ -141,10 +149,43 @@ const GROUND_COVER_LAT = 320;
  * frame's triangles (render/retro.ts).
  */
 const RETRO_GROUND_COVER_LAT = 140;
-/** Nearest a tuft grows to the asphalt edge, metres: past the shoulder strip. */
-const GROUND_COVER_SETBACK_M = 2.2;
+/** Nearest a tuft grows to the asphalt edge, metres: on the shoulder's sandy fringe. */
+const GROUND_COVER_SETBACK_M = 2.5;
+/** The verge band, metres from the asphalt edge. */
+const VERGE_NEAR_M = GROUND_COVER_SETBACK_M;
+const VERGE_FAR_M = 12;
+/** Hash domain of the verge clumps, and their cell along the road per side, metres. */
+const TAG_VERGE_COVER = 0x5645_5247; // 'VERG'
+const VERGE_CELL_M = 6;
+/**
+ * Chance a cell holds a clump, on dry ground and at full runoff. With four plants a
+ * clump on average that is 5-6 times the open density across the band, measured as an
+ * average over the runoff a road actually has (about 0.4).
+ */
+const VERGE_CLUMP_DRY = 0.08;
+const VERGE_CLUMP_WET = 0.25;
+/** Plants in one clump, and its radius range, metres. */
+const VERGE_CLUMP_MIN = 2;
+const VERGE_CLUMP_MAX = 6;
+const VERGE_CLUMP_RADIUS: readonly [number, number] = [1.1, 2.6];
 /** Clear sand kept round a lay-by's asphalt by rocks and tufts alike, metres. */
 const LAYBY_CLEAR_M = 2;
+
+/**
+ * How much of the road's water reaches a verge point, 0..1: the more the ground there
+ * lies below the asphalt's edge, and the more this side's edge lies below the other's
+ * (the camber sheds the whole road to it), the more. A cutting's verge, standing above
+ * the road, gets none of it.
+ */
+function vergeRunoff(ctx: ChunkContext, s: number, side: number, lateral: number): number {
+  const edge = ctx.terrain.roadEdgeHeight(s, side);
+  const p = ctx.road.offsetPoint(s, lateral);
+  const below = edge - ctx.terrain.explorationHeightFromFrame(p.x, p.z, lateral, s);
+  const shed = ctx.terrain.roadEdgeHeight(s, -side) - edge;
+  const fall = Math.min(1, Math.max(0, (below - 0.25) / 0.95));
+  const camber = Math.min(1, Math.max(0, (shed - 0.02) / 0.13));
+  return Math.min(1, 0.75 * fall * fall * (3 - 2 * fall) + 0.4 * camber);
+}
 /**
  * Hit radius as a share of the form's placed radius: a tuft's blades splay past the
  * part a bumper would actually flatten.
@@ -483,6 +524,36 @@ export class ScatterProvider implements ChunkProvider {
     const cover: ScatterPlacement[] = [];
     if (ctx.hasPhysics && groundCoverActive()) {
       const covers = groundCoverForms();
+      // One plant, from its own rolls: the same keep-clears as the scatter (no tufts
+      // through a yard, a strip or a lay-by), and none on rock.
+      const place = (s: number, lateral: number, id: number, formRoll: number, scaleRoll: number, yaw: number): void => {
+        if (storyKeepsClear(s, lateral)) return;
+        if (laybyKeepsClear(seed, s, lateral, ctx.road.halfWidthAt(s), LAYBY_CLEAR_M)) return;
+        const p = ctx.road.offsetPoint(s, lateral);
+        if (ctx.terrain.surfaceFromFrame(p.x, p.z, lateral, s) === SurfaceType.Rock) return;
+        const form = pickDesertForm(covers, formRoll);
+        const scale = form.minScale + scaleRoll * (form.maxScale - form.minScale);
+        const radius = form.baseRadius * scale;
+        const groundY = ctx.terrain.explorationHeightFromFrame(p.x, p.z, lateral, s);
+        cover.push({
+          form,
+          id,
+          x: p.x,
+          y: groundY - radius * form.sink,
+          z: p.z,
+          rx: 0,
+          ry: yaw,
+          rz: 0,
+          scale,
+          roadS: 0,
+          roadLateral: 0,
+          radius,
+          roadHazard: false,
+          mesh: null,
+          instance: 0,
+          groundY,
+        });
+      };
       const coverSStart = Math.floor(ctx.sStart / GROUND_COVER_CELL);
       const coverSEnd = Math.ceil(ctx.sEnd / GROUND_COVER_CELL);
       const coverLMax = Math.ceil(
@@ -491,53 +562,74 @@ export class ScatterProvider implements ChunkProvider {
       for (let cs = coverSStart; cs < coverSEnd; cs++) {
         for (let cl = -coverLMax; cl < coverLMax; cl++) {
           const roll = hash01(seed, TAG_GROUND_COVER, cs, cl);
-          if (roll >= GROUND_COVER_NEAR) continue;
+          if (roll >= GROUND_COVER_OPEN) continue;
           const id = propCellId(cs, cl);
           if (this.groundCover?.isBroken(id)) continue;
           const s = (cs + hash01(seed, TAG_GROUND_COVER, cs, cl, 1)) * GROUND_COVER_CELL;
           if (s < ctx.sStart || s >= ctx.sEnd) continue;
           const lateral = (cl + hash01(seed, TAG_GROUND_COVER, cs, cl, 2)) * GROUND_COVER_CELL;
-          const past = Math.abs(lateral) - ctx.road.halfWidthAt(s);
-          if (past < GROUND_COVER_SETBACK_M) continue;
-          // Same keep-clear the scatter uses: no tufts through the yard or the strip.
-          if (storyKeepsClear(s, lateral)) continue;
-          if (laybyKeepsClear(seed, s, lateral, ctx.road.halfWidthAt(s), LAYBY_CLEAR_M)) continue;
-          // A little thicker along the verge, then an even spread over the open desert.
-          const near = 1 - Math.min(1, past / GROUND_COVER_LAT);
-          const density = GROUND_COVER_FAR + (GROUND_COVER_NEAR - GROUND_COVER_FAR) * near * near;
-          if (roll >= density) continue;
+          if (Math.abs(lateral) - ctx.road.halfWidthAt(s) < GROUND_COVER_SETBACK_M) continue;
           // Cover comes and goes in long stretches along the road: `groundCoverDensity`
           // is 1 where today's field stands, 0 on bare ground and a share between. The
           // SAME roll is tested again against the thinned density, so a prop that
           // survives a sparse stretch is one of the props that was already there, in the
           // place it was — the thinning only takes candidates away, it never moves one.
-          if (roll >= density * groundCoverDensity(s, seed)) continue;
-          const p = ctx.road.offsetPoint(s, lateral);
-          if (ctx.terrain.surfaceFromFrame(p.x, p.z, lateral, s) === SurfaceType.Rock) continue;
-          const form = pickDesertForm(covers, hash01(seed, TAG_GROUND_COVER, cs, cl, 3));
-          const scale = form.minScale + hash01(seed, TAG_GROUND_COVER, cs, cl, 4) * (form.maxScale - form.minScale);
-          const radius = form.baseRadius * scale;
-          const groundY = ctx.terrain.explorationHeightFromFrame(p.x, p.z, lateral, s);
-          cover.push({
-            form,
+          if (roll >= GROUND_COVER_OPEN * groundCoverDensity(s, seed)) continue;
+          place(
+            s,
+            lateral,
             id,
-            x: p.x,
-            y: groundY - radius * form.sink,
-            z: p.z,
-            rx: 0,
-            ry: hash01(seed, TAG_GROUND_COVER, cs, cl, 5) * Math.PI * 2,
-            rz: 0,
-            scale,
-            roadS: 0,
-            roadLateral: 0,
-            radius,
-            roadHazard: false,
-            mesh: null,
-            instance: 0,
-            groundY,
-          });
+            hash01(seed, TAG_GROUND_COVER, cs, cl, 3),
+            hash01(seed, TAG_GROUND_COVER, cs, cl, 4),
+            hash01(seed, TAG_GROUND_COVER, cs, cl, 5) * Math.PI * 2,
+          );
         }
         if ((cs & 3) === 3) yield;
+      }
+
+      // The verge's clumps, one candidate per cell and side. A clump belongs to the
+      // chunk its centre is in; its plants may stand a couple of metres past that chunk's
+      // end, which is harmless — they are placed in absolute coordinates. Ids are
+      // negative, clear of every `propCellId`, and a pure function of (cell, side, plant).
+      const vergeStart = Math.floor(ctx.sStart / VERGE_CELL_M);
+      const vergeEnd = Math.ceil(ctx.sEnd / VERGE_CELL_M);
+      for (let side = -1; side <= 1; side += 2) {
+        const sideIndex = side < 0 ? 0 : 1;
+        for (let vc = vergeStart; vc < vergeEnd; vc++) {
+          const roll = hash01(seed, TAG_VERGE_COVER, vc, sideIndex);
+          if (roll >= VERGE_CLUMP_WET) continue;
+          const s = (vc + hash01(seed, TAG_VERGE_COVER, vc, sideIndex, 1)) * VERGE_CELL_M;
+          if (s < ctx.sStart || s >= ctx.sEnd) continue;
+          const radius =
+            VERGE_CLUMP_RADIUS[0] + (VERGE_CLUMP_RADIUS[1] - VERGE_CLUMP_RADIUS[0]) * hash01(seed, TAG_VERGE_COVER, vc, sideIndex, 3);
+          const out = VERGE_NEAR_M + (VERGE_FAR_M - VERGE_NEAR_M) * hash01(seed, TAG_VERGE_COVER, vc, sideIndex, 2);
+          const centre = side * (ctx.road.halfWidthAt(s) + out);
+          const chance = VERGE_CLUMP_DRY + (VERGE_CLUMP_WET - VERGE_CLUMP_DRY) * vergeRunoff(ctx, s, side, centre);
+          // The same roll against the thinned chance, as the open cover above.
+          if (roll >= chance * groundCoverDensity(s, seed)) continue;
+          const count =
+            VERGE_CLUMP_MIN +
+            Math.floor(hash01(seed, TAG_VERGE_COVER, vc, sideIndex, 4) * (VERGE_CLUMP_MAX - VERGE_CLUMP_MIN + 1));
+          for (let k = 0; k < count; k++) {
+            const id = -1 - ((vc * 2 + sideIndex) * VERGE_CLUMP_MAX + k);
+            if (this.groundCover?.isBroken(id)) continue;
+            const angle = hash01(seed, TAG_VERGE_COVER, vc, sideIndex, 10 + k) * Math.PI * 2;
+            const reach = radius * Math.sqrt(hash01(seed, TAG_VERGE_COVER, vc, sideIndex, 20 + k));
+            const ps = s + Math.cos(angle) * reach;
+            const lateral = centre + Math.sin(angle) * reach;
+            const past = side * lateral - ctx.road.halfWidthAt(ps);
+            if (past < VERGE_NEAR_M || past > VERGE_FAR_M + VERGE_CLUMP_RADIUS[1]) continue;
+            place(
+              ps,
+              lateral,
+              id,
+              hash01(seed, TAG_VERGE_COVER, vc, sideIndex, 30 + k),
+              hash01(seed, TAG_VERGE_COVER, vc, sideIndex, 40 + k),
+              hash01(seed, TAG_VERGE_COVER, vc, sideIndex, 50 + k) * Math.PI * 2,
+            );
+          }
+          if ((vc & 7) === 7) yield;
+        }
       }
     }
 

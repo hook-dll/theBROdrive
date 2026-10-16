@@ -7,9 +7,24 @@ import { applyGroundSpotlightNormals } from '../render/comic';
 import { applyCloudShadow } from '../render/cloudshadow';
 import { applyGroundLight } from '../render/groundlight';
 import { applyCleanSurface } from '../render/cleanstyle';
+import {
+  applyRoadLook,
+  ROAD_DRIFT_MAX_M,
+  setRoadDetailMap,
+  WHEEL_TRACK_HALF,
+  WHEEL_TRACK_LANE_BIAS,
+} from '../render/roadlook';
 import { varietyEventOfKindAt, varietyWeightAt, type VarietyEvent } from './director';
 import { tileGroundSampler, type DrawnGroundSample } from './deserttiledata';
-import { desertPaletteAt, roadConditionAt, ROAD_START_SURFACE } from './gradient';
+import {
+  COURSE_AGED_ALBEDO,
+  desertPaletteAt,
+  roadConditionAt,
+  roadCourseAt,
+  ROAD_START_SURFACE,
+  type RoadCondition,
+  type RoadCourseBuffer,
+} from './gradient';
 import { ROAD_HALF_WIDTH, type Road } from './road';
 import type { RoadDistance } from './roaddistance';
 import {
@@ -128,31 +143,28 @@ const MARKING_MIN = 0.03;
  * below; where the ground is higher than the formation all the same (a lay-by's
  * levelled site, terrain climbing beside a cutting) the strip lies on it instead
  * (`SHOULDER_LIFT`). Measured by `tools/verge-profile.ts`: 2.55 m drivable on every row,
- * ground over the strip on 0.3% of rows and never by more than 4 cm. Its only texture is grit in the ground's
- * own ink (DESERT_SHOULDER_MATERIAL), thinning out into the plain sand.
+ * ground over the strip on 0.3% of rows and never by more than 4 cm. Its only texture is
+ * grit in the ground's own ink (DESERT_SHOULDER_MATERIAL), thinning out into the sand.
  *
- * NOT A DARK BAND. A darker verge painted into the terrain once read as shadow patches
- * in play (terrainmesh.ts), so the strip is PALER than the sand and much greyer: the
- * compacted fines and dust of a graded verge. It has to be a clear change of material:
- * a strip at the sand's own luminance with a quarter of its saturation taken out
- * vanished completely once the palettes went saturated (Mars, the orange ergs). Only the road's own spill near the edge may be darker
- * (`edgeTone`), which is what makes a gravel road's verge read as the grader's
- * windrow rather than a pale kerb laid beside a dark road.
+ * A DARK CRUSHED-STONE BAND, then sand (owner, 2026-10-16: the old title screen's dark,
+ * rough gravel shoulder against orange sand is the reference). Neutral grey stone, NOT
+ * tinted by the desert: a band in the sand's hue at a lower value is what read as shadow
+ * patches when a darker verge was once painted into the terrain (terrainmesh.ts), and
+ * an earlier pale grey strip vanished against the saturated palettes. A different
+ * material reads as one by its hue and its grain, so the band carries the strongest grit
+ * in the game, pale stones on dark (`aShoulderGrit`). Its outer edge wanders row by row
+ * and the sand takes it back over the rest of the strip.
  *
  * Its collider is its own triangles (LooseShoulder, the verge surface the handling
  * already models), fringe included: one grip across the whole strip, and the wheels
  * stand on exactly the surface that is drawn.
  */
 interface ShoulderStyle {
-  /** How far the colour moves from the sand towards its own grey: compacted dust. */
-  readonly grey: number;
-  /** How much of the road's stone (the palette gravel) is in it near the edge. */
+  /** Linear luminance of the band's stone; 0 takes the road's own (palette) gravel. */
   readonly stone: number;
-  /** Luminance against the sand at the asphalt edge, where the road's spill lies. */
-  readonly edgeTone: number;
-  /** Luminance against the sand, where the luminance is the sand's. */
-  readonly bright: number;
-  /** Grit stipple strength near the edge, 0..1. */
+  /** Metres of stone from the asphalt's edge before the sand takes over. */
+  readonly band: number;
+  /** Grit stipple strength over the stone, 0..1. */
   readonly grit: number;
 }
 
@@ -163,16 +175,32 @@ interface ShoulderStyle {
  * numbers this draws.
  */
 const SHOULDER_STYLE: Partial<Record<SurfaceType, ShoulderStyle>> = {
-  // A highway's graded crushed-stone shoulder, dusty and pale.
-  [SurfaceType.Asphalt]: { grey: 0.6, stone: 0.34, edgeTone: 0.9, bright: 1.09, grit: 0.85 },
-  // Older; the desert has had longer to blow back over it, but it is still a verge.
-  [SurfaceType.CrackedAsphalt]: { grey: 0.5, stone: 0.34, edgeTone: 0.88, bright: 1.07, grit: 0.8 },
+  // A highway's crushed-stone shoulder, about an aged mat's value (0.14), over the
+  // whole formation to the embankment's break (SHOULDER_WIDTH_M, 2.5 m).
+  [SurfaceType.Asphalt]: { stone: 0.13, band: 2.3, grit: 1 },
+  // Older; the desert has had longer to blow back over it.
+  [SurfaceType.CrackedAsphalt]: { stone: 0.14, band: 2, grit: 0.9 },
   // Concrete roads were built wide and pale, with cement dust in the verge.
-  [SurfaceType.Concrete]: { grey: 0.7, stone: 0.2, edgeTone: 0.96, bright: 1.16, grit: 0.6 },
-  // The grader's spoil: the road's own gravel pushed off to the sides.
-  [SurfaceType.Gravel]: { grey: 0.4, stone: 0.7, edgeTone: 0.72, bright: 1.02, grit: 1 },
+  [SurfaceType.Concrete]: { stone: 0.2, band: 2.1, grit: 0.7 },
+  // The grader's windrow: the road's own gravel pushed off to the sides.
+  [SurfaceType.Gravel]: { stone: 0, band: 1.6, grit: 1 },
 };
 const DEFAULT_SHOULDER_STYLE = SHOULDER_STYLE[SurfaceType.Asphalt]!;
+/**
+ * The crushed stone's hue, scaled to `stone`: a warm grey-brown of its own, the same on
+ * every palette. Neutral grey read as a concrete strip under the blue sky's fill.
+ */
+const SHOULDER_STONE_LINEAR = new THREE.Color(0x6b6158);
+/**
+ * Width of the band's outer edge, metres. The band covers the formation and its edge
+ * falls on the embankment's break, so the stone thins out down the top of the batter
+ * into the sand at its foot: the change of material is where the ground changes slope,
+ * and that is what makes the road read as standing on a bank rather than lying on the
+ * sand with a dark stripe beside it.
+ */
+const SHOULDER_BAND_SOFT = 1;
+/** Share of a windrow's gravel colour a gravel road's band is drawn at: spoil in shade. */
+const SHOULDER_WINDROW_TONE = 0.8;
 /**
  * Columns of the guaranteed shoulder, metres past the asphalt edge. The formation's
  * fall steepens across it, and these chords sit within 2 mm of the curve.
@@ -221,44 +249,54 @@ const SHOULDER_BURY_M = 1;
 const SHOULDER_LIP_SAND = 0.45;
 
 /**
- * Weathering of the driving surface, as three things a photograph of an old road
- * shows and this road did not.
+ * Weathering of the driving surface, as the things a photograph of an old road shows.
  *
- *  1. WHEEL PATHS. Tyres polish two strips per lane and grind dust out of them.
- *     Each lane supplies its own pair, so opening a lane extends the traffic story
- *     rather than scaling narrow-road tracks across empty asphalt.
- *  2. A DUSTY CROWN AND ROAD EDGE. Between the wheel paths and out at the edges
- *     nothing sweeps the surface, so wind-blown dust settles and bitumen bleaches.
+ *  1. COURSES AND WHEEL TRACKS. Fresh and bleached stretches meeting at seams, polished
+ *     wheel paths and an oil strip down each lane. They need edges finer than these
+ *     vertices, so they are drawn per pixel (render/roadlook.ts) from what each vertex
+ *     says about them (`aRoadCourse`, `aRoadEdge`); see `buildSteps`.
+ *  2. DUST. Nothing sweeps a decaying road, so wind-blown dust settles over it and
+ *     greys the bitumen towards the desert's stone.
  *  3. DIRT AT THE EDGE OF THE MAT. The outer half metre ravels into the verge before
- *     the asphalt ends rather than stopping in a hard visual line.
+ *     the asphalt ends rather than stopping in a hard visual line, and wind-blown sand
+ *     lies on its lip (`ROAD_DRIFT_MAX_M`).
  *
- * All three are applied to the vertex colour, on top of the tiled asphalt texture
- * (render/roadtexture.ts) that carries aggregate, cracks and patches.
+ * All of it rides on the tiled asphalt texture (render/roadtexture.ts) that carries
+ * aggregate, tar-sealed cracks and patches, and its chip-seal detail.
  */
-/**
- * The inherited polished pair is centred 0.2 m outward of each nominal lane centre:
- * it preserves the narrow road's ±0.85/±2.45 m tracks while carrying that real-world
- * camber bias into every added lane.
- */
-const WHEEL_TRACK_LANE_BIAS = 0.2;
-/** A 1.6 m tyre track places each path 0.8 m either side of its lane centre. */
-const WHEEL_TRACK_HALF = 0.8;
-/** Half-width of a polished strip, metres. */
-const WHEEL_PATH_HALF = 0.5;
-/** Darkening at the centre of a wheel path, as a fraction of the lane colour. */
-const WHEEL_PATH_DARKEN = 0.16;
-/** Lightening of the dusty, unswept surface between and beside the wheel paths. */
-const DUST_LIGHTEN = 0.11;
+/** Lightening of a fully decayed surface by settled dust. */
+const DUST_LIGHTEN = 0.14;
 /** How much of that dust reads as colour rather than brightness (towards gravel). */
 const DUST_TINT = 0.3;
 /** Width of the ravelled band inside the mat's edge, metres. */
 const EDGE_RAVEL = 0.55;
-/** Fraction of the way to gravel colour the very edge of the mat reaches. */
+/** Fraction of the way to the shoulder's stone the very edge of the mat reaches. */
 const EDGE_RAVEL_MIX = 0.4;
 /** Wavelength (m) of the coarse tonal mottling applied per vertex. */
 const MOTTLE_WAVELENGTH = 7;
 /** Peak brightness swing of that mottling. */
 const MOTTLE_AMOUNT = 0.07;
+/**
+ * The linear albedo the asphalt surfaces' own colours (core/surfaces.ts) are drawn at,
+ * texture gain included: a course's albedo divided by this is its shade. Both surfaces
+ * are an aged mat; CrackedAsphalt the older and paler.
+ */
+const COURSE_BASE_ALBEDO: Partial<Record<SurfaceType, number>> = {
+  [SurfaceType.Asphalt]: (COURSE_AGED_ALBEDO[0] + COURSE_AGED_ALBEDO[1]) * 0.5,
+  [SurfaceType.CrackedAsphalt]: COURSE_AGED_ALBEDO[1],
+};
+/**
+ * Metres from a seam inside which a row carries both of its courses. Further out the
+ * row carries its own course twice, which is what lets the next seam take over halfway
+ * between two without a phantom seam where the reference changes (render/roadlook.ts).
+ */
+const SEAM_REACH_M = 8;
+/** Wheel-track strength by surface: asphalt polishes, concrete a little, gravel not. */
+const TRACK_STRENGTH: Partial<Record<SurfaceType, number>> = {
+  [SurfaceType.Asphalt]: 1,
+  [SurfaceType.CrackedAsphalt]: 1,
+  [SurfaceType.Concrete]: 0.5,
+};
 
 /**
  * Paint wear. Nothing repaints this road, so the markings are chalky rather than
@@ -389,6 +427,46 @@ const TONGUE_MAX_SHARE = 0.95;
 /** The row's sand tongue: extra reach in metres, and the shoulder (-1, 0, 1) it is on. */
 const tongueRow = { reach: 0, side: 0 };
 
+/** The row's course and seam (gradient.ts `roadCourseAt`), reused every row. */
+const courseRow: RoadCourseBuffer = { seam: 0, before: 0, after: 0 };
+
+/**
+ * The marking pass's row state for the drift (`emitMarkingQuad`): the row's ends and
+ * widths, each side's drift, its sand, and the build's own output arrays.
+ */
+const markingRow = {
+  s0: 0,
+  s1: 0,
+  halfWidth0: 0,
+  halfWidth1: 0,
+  left: 0,
+  right: 0,
+  tileBase: 0,
+  sand: new THREE.Color(),
+  edges: [] as number[],
+  sands: [] as number[],
+};
+
+/**
+ * Reach of the wind-blown sand on the asphalt's edge at this row, metres, signed by
+ * the side (`sign`); render/roadlook.ts draws its ragged boundary inside it. Every road
+ * has some: about a third of `ROAD_DRIFT_MAX_M` on a kept one, all of it once the road
+ * is decaying or sanded, with long swells along the road so it comes and goes. None on
+ * the side a lay-by widens: that edge is the lay-by's, not the road's.
+ */
+function driftReach(
+  s: number,
+  sign: number,
+  cond: Pick<RoadCondition, 'decay' | 'sandCover'>,
+  laybySide: number,
+): number {
+  if (laybySide === sign) return 0;
+  const k = sign < 0 ? 1.3 : 3.9;
+  const swell = 0.6 + 0.28 * Math.sin(s / 61 + k) + 0.17 * Math.sin(s / 19.7 + 2.3 * k);
+  const level = 0.35 + 0.65 * Math.min(1, cond.decay * 1.7 + cond.sandCover);
+  return sign * ROAD_DRIFT_MAX_M * Math.min(1, swell * level);
+}
+
 /** What the paint is doing at an arclength. */
 const enum MarkingMode {
   /** The road's own rule, untouched. */
@@ -480,7 +558,6 @@ const paintBase = new THREE.Color();
 const shoulderSand = new THREE.Color();
 const shoulderStone = new THREE.Color();
 const shoulderColour = new THREE.Color();
-const shoulderGrey = new THREE.Color();
 const shoulderGround: DrawnGroundSample = { height: 0, detail: 0, nx: 0, ny: 1, nz: 0 };
 
 function luminance(c: THREE.Color): number {
@@ -531,9 +608,11 @@ interface ShoulderBuild {
 // carries, so it captures that patch instead of hiding it. A cloud crossing the road is
 // most of the effect: the ribbon is the one surface always in view. The ground light
 // (render/groundlight.ts) replaces their physical lobe; the two that go glossy in the
-// wet keep a Blinn-Phong glint. The surface's Clean branch (render/cleanstyle.ts) goes
-// outermost on the ribbon: it only changes how its two maps are read.
-const roadMaterial = applyCleanSurface(applyGroundLight(applyCloudShadow(
+// wet keep a Blinn-Phong glint. The per-pixel look (render/roadlook.ts: courses, wheel
+// tracks, sand drift, chips) works on the albedo after the vertex colour. The surface's
+// Clean branch (render/cleanstyle.ts) goes outermost on the ribbon: it only changes how
+// its two maps are read.
+const roadMaterial = applyCleanSurface(applyRoadLook(applyGroundLight(applyCloudShadow(
   applyGroundSpotlightNormals(
     new THREE.MeshStandardMaterial({
       vertexColors: true,
@@ -542,7 +621,7 @@ const roadMaterial = applyCleanSurface(applyGroundLight(applyCloudShadow(
     }),
   ),
   { wetSheen: true },
-), { specular: true }));
+), { specular: true }), 'surface'));
 /** Dark, weathered aggregate exposed only where the sand falls below the mat edge. */
 const roadBedMaterial = applyGroundLight(applyCloudShadow(
   applyGroundSpotlightNormals(
@@ -559,7 +638,8 @@ let texturesAttached = false;
 function attachRoadTextures(): void {
   if (texturesAttached) return;
   texturesAttached = true;
-  const { map, normal, mean } = roadTextures();
+  const { map, normal, detail, mean } = roadTextures();
+  setRoadDetailMap(detail);
   roadMaterial.map = map;
   // Tangent-space normals of the wearing course, baked from the same height field as
   // the albedo. Flat strength: the relief is the aggregate, and a low sun is the only
@@ -603,7 +683,8 @@ export function roadVertexColorGain(): number {
   return textureGain;
 }
 
-const markingMaterial = applyGroundLight(applyCloudShadow(
+// The paint takes the road look's drift only: sand blown onto the edge lies over the line.
+const markingMaterial = applyRoadLook(applyGroundLight(applyCloudShadow(
   applyGroundSpotlightNormals(
     new THREE.MeshStandardMaterial({
       vertexColors: true,
@@ -617,7 +698,7 @@ const markingMaterial = applyGroundLight(applyCloudShadow(
     }),
   ),
   { wetSheen: true },
-), { specular: true });
+), { specular: true }), 'paint');
 
 /** 1 inside [lo, hi], 0 outside, smoothstepped over `soft` metres at either end. */
 function softBand(v: number, lo: number, hi: number, soft: number): number {
@@ -823,15 +904,16 @@ export class RoadMeshProvider implements ChunkProvider {
       const style = SHOULDER_STYLE[cond.surface] ?? DEFAULT_SHOULDER_STYLE;
       const palette = desertPaletteAt(s);
       shoulderSand.setHex(palette.sand);
-      shoulderStone.setHex(palette.gravel);
-      const sandLum = luminance(shoulderSand);
+      if (style.stone > 0) {
+        shoulderStone.copy(SHOULDER_STONE_LINEAR).multiplyScalar(style.stone / luminance(SHOULDER_STONE_LINEAR));
+      } else {
+        shoulderStone.setHex(palette.gravel).multiplyScalar(SHOULDER_WINDROW_TONE);
+      }
       // A worn road's verge is half sand already: the same wedge the lanes get.
       const wear = Math.max(cond.decay, cond.sandCover);
-      const grey = style.grey * (1 - 0.3 * wear);
-      const stone = style.stone * (1 - 0.4 * wear);
+      const band = style.band * (1 - 0.35 * wear);
       const gritLevel = style.grit * (1 - 0.3 * wear);
       this.sandTongueAt(s, halfWidth);
-      const edgeTone = 1 - (1 - style.edgeTone) * (1 - 0.4 * wear);
       // The fringe past the guaranteed shoulder: the surface's own, narrowed by wear.
       const fringeMean = shoulderFringeM(cond.surface) * (1 - 0.4 * wear);
       // A lay-by's asphalt widens this edge from its entry slip to its exit slip
@@ -849,11 +931,17 @@ export class RoadMeshProvider implements ChunkProvider {
         );
         const bury = smoothstep(0, SHOULDER_BURY_M, sandReach);
         const lipSand = sandReach > 0 ? 1 : 0;
+        // The drift on the asphalt's lip came over the verge: some of it is banked there.
+        const driftLip =
+          Math.abs(driftReach(s, sign, cond, layby && laybyOuterAt(layby, s, halfWidth) > halfWidth ? layby.side : 0)) /
+          ROAD_DRIFT_MAX_M;
         // Each side's fringe wanders on its own, slow and a little faster on top.
         const k = side === 0 ? 1.7 : 4.3;
         const wander = 1 + 0.55 * Math.sin(s / 23 + k) + 0.3 * Math.sin(s / 7.3 + 2.1 * k);
         const ragged = (hash01(this.seed, 0x5d, rowBase + si, side) - 0.5) * SHOULDER_RAGGED;
         const fringe = Math.max(SHOULDER_FRINGE_MIN, fringeMean * wander + ragged);
+        // The stone band's own edge wanders too, on a different beat from the fringe.
+        const bandEdge = band * (0.85 + 0.15 * Math.sin(s / 17.3 + 3 * k)) + ragged * 0.5;
         const reach = SHOULDER_WIDTH_M + fringe;
         // The asphalt's outer edge on this side: the ribbon's own edge vertex, or the
         // lay-by's where it has widened the asphalt (the same point and height its mesh
@@ -928,31 +1016,28 @@ export class RoadMeshProvider implements ChunkProvider {
             }
           }
 
-          // Colour: the road's stone near the edge, then compacted grey dust, then the
-          // sand itself at the last column — exactly the tile's colour there.
-          const stoneMix = stone * (1 - smoothstep(0.3, 0.85, t));
-          shoulderColour.copy(shoulderSand).lerp(shoulderStone, stoneMix);
-          const mixedLum = luminance(shoulderColour);
-          const greyMix = grey * (1 - smoothstep(0.72, 1, t));
-          // Dust is a warm grey, not a neutral one: a neutral grey beside a green
-          // palette's ground read as a cold concrete kerb.
-          shoulderColour.lerp(shoulderGrey.setRGB(mixedLum * 1.06, mixedLum, mixedLum * 0.86), greyMix);
-          const outer = smoothstep(0.72, 1, t);
+          // Colour: the crushed-stone band from the edge, then the sand itself, which at
+          // the last column is exactly the tile's colour there.
+          const stoneOut =
+            c === cols - 1 ? 1 : smoothstep(bandEdge - SHOULDER_BAND_SOFT * 0.5, bandEdge + SHOULDER_BAND_SOFT * 0.5, d);
           const mottle =
-            1 + SHOULDER_MOTTLE * (1 - outer) * this.mottleNoise.fbm(s / 3.1 + sign * 17, t * 1.3, 2, 2, 0.5);
-          const sandTone = sandLum * (1 + (style.bright - 1) * (1 - outer));
-          const spill = 1 - smoothstep(0.1, 0.6, t);
-          const target =
-            sandTone * (1 + (edgeTone - 1) * spill) * mottle * (c === 0 ? 1 - SHOULDER_CRUMB : 1);
-          shoulderColour.multiplyScalar(target / Math.max(1e-4, luminance(shoulderColour)));
+            1 + SHOULDER_MOTTLE * (1 - stoneOut) * this.mottleNoise.fbm(s / 3.1 + sign * 17, t * 1.3, 2, 2, 0.5);
+          shoulderColour
+            .copy(shoulderStone)
+            .multiplyScalar(mottle * (c === 0 ? 1 - SHOULDER_CRUMB : 1))
+            .lerp(shoulderSand, stoneOut);
           // A drift on the road lies across the verge too, in the sand's own colour,
           // and whatever sand reaches the mat's edge is banked against its lip.
-          const sanded = Math.max(bury, lipSand * (1 - smoothstep(0, SHOULDER_LIP_SAND, t)));
+          const sanded = Math.max(
+            bury,
+            lipSand * (1 - smoothstep(0, SHOULDER_LIP_SAND, t)),
+            driftLip * 0.3 * (1 - smoothstep(0, 0.15, d)),
+          );
           shoulderColour.lerp(shoulderSand, sanded);
           col[vi * 3] = shoulderColour.r;
           col[vi * 3 + 1] = shoulderColour.g;
           col[vi * 3 + 2] = shoulderColour.b;
-          grit[vi] = gritLevel * (1 - smoothstep(0.35, 1, t)) * (1 - sanded);
+          grit[vi] = gritLevel * (1 - stoneOut) * (1 - sanded);
         }
         // The skirt starts on the strip's own outer vertex, so the two share an edge.
         const outer = ((si * 2 + side) * cols + cols - 1) * 3;
@@ -1062,6 +1147,11 @@ export class RoadMeshProvider implements ChunkProvider {
     const positions = new Float32Array(vertexCount * 3);
     const colors = new Float32Array(vertexCount * 3);
     const uvs = new Float32Array(vertexCount * 2);
+    // The per-pixel look's inputs (render/roadlook.ts), every one linear along a row
+    // and across it, so the extra rows below interpolate them like the colour.
+    const course = new Float32Array(vertexCount * 3);
+    const edges = new Float32Array(vertexCount * 4);
+    const sands = new Float32Array(vertexCount * 3);
     const indices = new Uint32Array((rowCount - 1) * (latCount - 1) * 6);
 
     const group = new THREE.Group();
@@ -1097,6 +1187,27 @@ export class RoadMeshProvider implements ChunkProvider {
         const palette = desertPaletteAt(s);
         sandLinear.setHex(palette.sand);
         gravelLinear.setHex(palette.gravel);
+
+        // The asphalt course this row lies on, and the seam near it (see SEAM_REACH_M).
+        const baseAlbedo = COURSE_BASE_ALBEDO[cond.surface];
+        let seamD = 1;
+        let shadeBefore = 1;
+        let shadeAfter = 1;
+        if (baseAlbedo !== undefined) {
+          roadCourseAt(this.seed, s, courseRow);
+          seamD = s - courseRow.seam;
+          shadeBefore = courseRow.before / baseAlbedo;
+          shadeAfter = courseRow.after / baseAlbedo;
+          if (Math.abs(seamD) >= SEAM_REACH_M) {
+            if (seamD < 0) shadeAfter = shadeBefore;
+            else shadeBefore = shadeAfter;
+          }
+        }
+        const trackBase = (TRACK_STRENGTH[cond.surface] ?? 0) * (1 - 0.6 * cond.decay);
+        const layby = laybyNear(this.seed, s);
+        const laybySide = layby && laybyOuterAt(layby, s, halfWidth) > halfWidth ? layby.side : 0;
+        const driftLeft = driftReach(s, -1, cond, laybySide);
+        const driftRight = driftReach(s, 1, cond, laybySide);
 
         // The director's surface features, resolved once for the whole row. Three
         // probes rather than three searches: these kinds share the Surface channel,
@@ -1137,12 +1248,11 @@ export class RoadMeshProvider implements ChunkProvider {
           const a = Math.abs(lateral);
           // One shoulder only: `side` is the windward one, and the other side keeps
           // the district's own uniform cover with nothing added.
-          color.lerpColors(
-            laneBase ?? gravelLinear,
-            sandLinear,
-            sandFactor(a, halfWidth, cond.sandCover, lateral * tongueRow.side > 0 ? tongueRow.reach : 0),
-          );
-          this.weather(color, gravelLinear, s, lateral, a, halfWidth, cond.decay);
+          const sand = sandFactor(a, halfWidth, cond.sandCover, lateral * tongueRow.side > 0 ? tongueRow.reach : 0);
+          color.lerpColors(laneBase ?? gravelLinear, sandLinear, sand);
+          this.weather(color, gravelLinear, laneBase ? SHOULDER_STONE_LINEAR : gravelLinear, s, lateral, a, halfWidth, cond.decay);
+          // How much of this vertex is bare asphalt, for the course shade and tracks.
+          let bare = 1 - sand;
           // Repair and rubber go on AFTER the weathering, in the order the road got
           // them: the district wears, then somebody patches it, then somebody locks
           // a wheel up on the patch.
@@ -1151,6 +1261,7 @@ export class RoadMeshProvider implements ChunkProvider {
             if (coverage > 0) {
               color.lerp(PATCH_LINEAR, coverage * PATCH_MIX);
               color.multiplyScalar(1 - coverage * PATCH_GLOSS);
+              bare *= 1 - coverage * PATCH_MIX;
             }
           }
           if (skidRow.ink > 0) {
@@ -1170,6 +1281,17 @@ export class RoadMeshProvider implements ChunkProvider {
           colors[vi * 3] = color.r;
           colors[vi * 3 + 1] = color.g;
           colors[vi * 3 + 2] = color.b;
+
+          course[vi * 3] = seamD;
+          course[vi * 3 + 1] = 1 + (shadeBefore - 1) * bare;
+          course[vi * 3 + 2] = 1 + (shadeAfter - 1) * bare;
+          edges[vi * 4] = halfWidth - a;
+          edges[vi * 4 + 1] = lateral < 0 ? driftLeft : driftRight;
+          edges[vi * 4 + 2] = trackBase * bare;
+          edges[vi * 4 + 3] = uvs[vi * 2 + 1]! * ROAD_TILE_METRES;
+          sands[vi * 3] = sandLinear.r;
+          sands[vi * 3 + 1] = sandLinear.g;
+          sands[vi * 3 + 2] = sandLinear.b;
         }
         yield;
       }
@@ -1201,6 +1323,11 @@ export class RoadMeshProvider implements ChunkProvider {
             for (let k = 0; k < 3; k++) {
               positions[v * 3 + k] = positions[a * 3 + k]! + (positions[b * 3 + k]! - positions[a * 3 + k]!) * t;
               colors[v * 3 + k] = colors[a * 3 + k]! + (colors[b * 3 + k]! - colors[a * 3 + k]!) * t;
+              course[v * 3 + k] = course[a * 3 + k]! + (course[b * 3 + k]! - course[a * 3 + k]!) * t;
+              sands[v * 3 + k] = sands[a * 3 + k]! + (sands[b * 3 + k]! - sands[a * 3 + k]!) * t;
+            }
+            for (let k = 0; k < 4; k++) {
+              edges[v * 4 + k] = edges[a * 4 + k]! + (edges[b * 4 + k]! - edges[a * 4 + k]!) * t;
             }
             uvs[v * 2] = uvs[a * 2]! + (uvs[b * 2]! - uvs[a * 2]!) * t;
             uvs[v * 2 + 1] = uvs[a * 2 + 1]! + (uvs[b * 2 + 1]! - uvs[a * 2 + 1]!) * t;
@@ -1235,6 +1362,9 @@ export class RoadMeshProvider implements ChunkProvider {
       geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
       geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
       geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+      geometry.setAttribute('aRoadCourse', new THREE.BufferAttribute(course, 3));
+      geometry.setAttribute('aRoadEdge', new THREE.BufferAttribute(edges, 4));
+      geometry.setAttribute('aRoadSand', new THREE.BufferAttribute(sands, 3));
       geometry.setIndex(new THREE.BufferAttribute(indices, 1));
       // The road uses the same upward lighting basis as the desert. Actual slope
       // normals made it read as a dark shadow strip on grades.
@@ -1405,53 +1535,33 @@ export class RoadMeshProvider implements ChunkProvider {
   }
 
   /**
-   * Wears the lane colour at one vertex: polished wheel paths, dust on the crown and
-   * verge side, a ravelled outer edge, and coarse tonal mottling on top. See the
-   * WHEEL_PATH_* block for why these three and not others.
+   * Wears the lane colour at one vertex: settled dust, a ravelled outer edge, and
+   * coarse tonal mottling on top (see DUST_LIGHTEN). The wheel tracks are per pixel
+   * (render/roadlook.ts), because their edges are finer than these columns.
    *
    * Everything scales with `decay` in the direction the desert takes it: an
-   * abandoned road loses its polished tracks (nothing drives it) and gains dust.
+   * abandoned road gains dust and frays at the edge. `ravel` is what the edge frays
+   * into: the shoulder's stone beside a sealed road, the road's own beside gravel.
    */
   private weather(
     color: THREE.Color,
     gravel: THREE.Color,
+    ravel: THREE.Color,
     s: number,
     lateral: number,
     a: number,
     halfWidth: number,
     decay: number,
   ): void {
-    let track = 0;
-    if (halfWidth === HW) {
-      // Keep the original literal centres, rather than reconstructing them through
-      // arithmetic, so the narrow road's weather field remains bit-identical.
-      for (const centre of [-2.45, -0.85, 0.85, 2.45]) {
-        const t = 1 - Math.min(1, Math.abs(lateral - centre) / WHEEL_PATH_HALF);
-        if (t > track) track = t;
-      }
-    } else {
-      for (const side of [-1, 1]) {
-        for (let lane = 0; lane < 2; lane++) {
-          const centre = side * (laneOffsetFor(halfWidth, lane) + WHEEL_TRACK_LANE_BIAS);
-          for (const wheel of [-WHEEL_TRACK_HALF, WHEEL_TRACK_HALF]) {
-            const t = 1 - Math.min(1, Math.abs(lateral - (centre + wheel)) / WHEEL_PATH_HALF);
-            if (t > track) track = t;
-          }
-        }
-      }
-    }
-    const smoothTrack = track * track * (3 - 2 * track);
-    const polish = smoothTrack * WHEEL_PATH_DARKEN * (1 - decay * 0.7);
-    const dust = (1 - smoothTrack) * DUST_LIGHTEN * (0.5 + decay);
-
-    color.multiplyScalar(1 - polish + dust);
+    const dust = DUST_LIGHTEN * decay;
+    color.multiplyScalar(1 + dust);
     if (dust > 0) color.lerp(gravel, dust * DUST_TINT);
 
     // Ravelled edge: the mat frays into the verge rather than ending at a line.
     const intoEdge = 1 - Math.min(1, (halfWidth - a) / EDGE_RAVEL);
     if (intoEdge > 0) {
       const t = intoEdge * intoEdge;
-      color.lerp(gravel, t * EDGE_RAVEL_MIX * (0.6 + decay * 0.4));
+      color.lerp(ravel, t * EDGE_RAVEL_MIX * (0.6 + decay * 0.4));
     }
 
     // Coarse mottling: patchy pours and old repairs at a scale the tiled texture
@@ -1663,6 +1773,12 @@ export class RoadMeshProvider implements ChunkProvider {
       const colors: number[] = [];
       const point = { x: 0, y: 0, z: 0 };
       const color = new THREE.Color();
+      // The drift's inputs, per vertex like the ribbon's (render/roadlook.ts 'paint').
+      // Local to this build and handed to `markingRow` afresh every row, because the
+      // build yields between rows and another chunk's may run in between.
+      const edges: number[] = [];
+      const sands: number[] = [];
+      const tileBase = sStart - (((sStart % ROAD_TILE_METRES) + ROAD_TILE_METRES) % ROAD_TILE_METRES);
 
       // Marking quads are emitted per surface step so their corners coincide with
       // mesh vertices rather than floating across a bump or pothole — and split at a
@@ -1678,6 +1794,18 @@ export class RoadMeshProvider implements ChunkProvider {
         const mode = this.markingModeAt(s);
         const halfWidth0 = road.halfWidthAt(s);
         const halfWidth1 = road.halfWidthAt(s1);
+        const layby = laybyNear(this.seed, s);
+        const laybySide = layby && laybyOuterAt(layby, s, halfWidth0) > halfWidth0 ? layby.side : 0;
+        markingRow.edges = edges;
+        markingRow.sands = sands;
+        markingRow.tileBase = tileBase;
+        markingRow.s0 = s;
+        markingRow.s1 = s1;
+        markingRow.halfWidth0 = halfWidth0;
+        markingRow.halfWidth1 = halfWidth1;
+        markingRow.left = driftReach(s, -1, condition, laybySide);
+        markingRow.right = driftReach(s, 1, condition, laybySide);
+        markingRow.sand.setHex(desertPaletteAt(s).sand);
         if (mode === MarkingMode.Ghost) {
           // One chalky crown stripe, solid, at a coverage far under a fresh coat.
           // Emitted OUTSIDE the `condition.markings` gate on purpose: that gate is
@@ -1764,6 +1892,8 @@ export class RoadMeshProvider implements ChunkProvider {
       geometry = new THREE.BufferGeometry();
       geometry.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(positions), 3));
       geometry.setAttribute('color', new THREE.BufferAttribute(Float32Array.from(colors), 3));
+      geometry.setAttribute('aRoadEdge', new THREE.BufferAttribute(Float32Array.from(edges), 4));
+      geometry.setAttribute('aRoadSand', new THREE.BufferAttribute(Float32Array.from(sands), 3));
       const normals = new Float32Array(positions.length);
       for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
       geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
@@ -1817,9 +1947,17 @@ export class RoadMeshProvider implements ChunkProvider {
       const xs = [x00, x01, x10, x11];
       const ys = [y00, y01, y10, y11];
       const zs = [z00, z01, z10, z11];
+      const ss = [sa, sa, sb, sb];
+      const ls = [la - half, la + half, lb - half, lb + half];
+      const row = markingRow;
       for (const i of order) {
         positions.push(xs[i]!, ys[i]!, zs[i]!);
         colors.push(color.r, color.g, color.b);
+        const s = ss[i]!;
+        const lateral = ls[i]!;
+        const halfWidth = row.halfWidth0 + ((row.halfWidth1 - row.halfWidth0) * (s - row.s0)) / (row.s1 - row.s0);
+        row.edges.push(halfWidth - Math.abs(lateral), lateral < 0 ? row.left : row.right, 0, s - row.tileBase);
+        row.sands.push(row.sand.r, row.sand.g, row.sand.b);
       }
       sa = sb;
       la = lb;

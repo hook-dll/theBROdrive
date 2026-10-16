@@ -937,7 +937,7 @@ export class Terrain {
    * Road-surface height at one asphalt edge (`side` = ±1). At the local half-width,
    * both road and desert meshes sample this exact value.
    */
-  private roadEdgeHeight(s: number, side: number): number {
+  roadEdgeHeight(s: number, side: number): number {
     const halfWidth = this.road.halfWidthAt(s);
     const p = this.road.offsetPoint(s, side * halfWidth);
     return roadSurfaceY(this.road, this.field, s, side * halfWidth, p.x, p.z);

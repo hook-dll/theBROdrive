@@ -22,6 +22,8 @@ import { maxAnisotropy } from './texturequality';
  *  - NORMAL, derived from the same height field, so a low sun rakes across the
  *    wearing course instead of finding a mirror.
  *  - The height field itself never leaves this module.
+ *  - DETAIL, the chip-seal stones on a 4 m tile (`paintDetail`), which the road shader
+ *    (render/roadlook.ts) multiplies over the 24 m tile.
  *
  * THE GRAIN IS WRAPPING GRADIENT NOISE, and that is a correction rather than a
  * preference. Two earlier versions were rejected by looking at the result:
@@ -63,8 +65,14 @@ const TEXTURE_SIZE = 1024;
 
 /** Mid-grey the tile is drawn around, 0..255. */
 const BASE_TONE = 190;
-/** Peak tonal swing of the wearing course, in tone units. */
-const COURSE_RANGE = 30;
+/**
+ * Peak tonal swing of the wearing course, in tone units. 26: it was raised to 42 earlier
+ * the same day (owner, 2026-10-16: no grain, the road did not read against the desert),
+ * and then the chip-seal detail (`paintDetail`) took over the grain. At 42 on top of the
+ * chips, the macro tile's own terraces turned the dark road into a shimmering lavender
+ * static; the macro tile now carries the pour, the bleaching, patches and seals.
+ */
+const COURSE_RANGE = 26;
 /**
  * Octaves of the wearing course, as (lattice cells, gain, transposed). Chosen against
  * the 2.3 cm texel: 64 cells is 16 px (37 cm) and carries how a pour was mixed, 128 is
@@ -117,6 +125,8 @@ const RAVEL_RELIEF = 0.85;
  */
 interface GradientLattice {
   readonly cells: number;
+  /** Lattice cells per texel of the canvas this lattice tiles. */
+  readonly perTexel: number;
   /** (gx, gy) per corner, row-major. */
   readonly g: Float32Array;
 }
@@ -128,7 +138,7 @@ for (let i = 0; i < 8; i++) {
   GRAD_Y[i] = Math.sin((i * Math.PI) / 4);
 }
 
-function buildLattice(cells: number, tag: number): GradientLattice {
+function buildLattice(cells: number, tag: number, size = TEXTURE_SIZE): GradientLattice {
   const g = new Float32Array(cells * cells * 2);
   for (let cy = 0; cy < cells; cy++) {
     for (let cx = 0; cx < cells; cx++) {
@@ -138,7 +148,7 @@ function buildLattice(cells: number, tag: number): GradientLattice {
       g[o + 1] = GRAD_Y[pick]!;
     }
   }
-  return { cells, g };
+  return { cells, perTexel: cells / size, g };
 }
 
 const COURSE_LATTICES: readonly GradientLattice[] = COURSE.map((o) => buildLattice(o.cells, o.tag));
@@ -149,6 +159,8 @@ interface RoadTextures {
   readonly map: THREE.Texture;
   /** Tangent-space normals of the wearing course. */
   readonly normal: THREE.Texture;
+  /** The chip-seal multiplier, linear, mean 1, stored at 1/ROAD_DETAIL_ENCODE (`paintDetail`). */
+  readonly detail: THREE.Texture;
   /** Mean albedo luminance in linear space. Divide vertex colours by this. */
   readonly mean: number;
 }
@@ -179,7 +191,7 @@ function wrapCell(i: number, cells: number): number {
 
 /**
  * Gradient (Perlin) noise on a wrapping lattice, so the left edge meets the right and
- * the top meets the bottom. `cells` must divide TEXTURE_SIZE evenly.
+ * the top meets the bottom. `cells` must divide the canvas size evenly.
  *
  * `transposed` swaps the axes, which is a rotation of the lattice by 90 degrees and
  * costs nothing: octaves that share an axis share its alignment, and four octaves
@@ -193,8 +205,8 @@ function wrapPerlin(l: GradientLattice, x: number, y: number, transposed = false
   }
   const cells = l.cells;
   const g = l.g;
-  const fx = (x / TEXTURE_SIZE) * cells;
-  const fy = (y / TEXTURE_SIZE) * cells;
+  const fx = x * l.perTexel;
+  const fy = y * l.perTexel;
   const ix = Math.floor(fx);
   const iy = Math.floor(fy);
   const dx = fx - ix;
@@ -389,51 +401,103 @@ function wrapped(ctx: CanvasRenderingContext2D, paint: () => void): void {
   }
 }
 
-/** One meandering crack, walked in short segments with a wandering heading. */
-function crackPath(ctx: CanvasRenderingContext2D, index: number, length: number): void {
+/**
+ * One sealed crack, walked in short segments with a wandering heading, plus the one
+ * branch a crack usually throws: a crack network is a trunk with forks, not a squiggle.
+ * The heading wanders slowly and then sharply now and then, which is the difference
+ * between a crack and a random walk: asphalt splits along a line until a stone stops it.
+ */
+function sealPath(ctx: CanvasRenderingContext2D, index: number, length: number): void {
+  const step = 8;
   let x = rnd(4, index * 80) * TEXTURE_SIZE;
   let y = rnd(4, index * 80 + 1) * TEXTURE_SIZE;
   let heading = rnd(4, index * 80 + 2) * Math.PI * 2;
+  const steps = Math.round(length / step);
+  const fork = Math.floor(steps * (0.3 + 0.4 * rnd(4, index * 80 + 70)));
+  let forkX = x;
+  let forkY = y;
+  let forkHeading = heading;
   ctx.beginPath();
   ctx.moveTo(x, y);
-  const steps = Math.round(length / 10);
   for (let k = 0; k < steps; k++) {
-    heading += (rnd(4, index * 80 + 3 + k) - 0.5) * 0.9;
-    x += Math.cos(heading) * 10;
-    y += Math.sin(heading) * 10;
+    const r = rnd(4, index * 80 + 3 + k);
+    heading += (r - 0.5) * (r > 0.9 || r < 0.1 ? 1.1 : 0.35);
+    x += Math.cos(heading) * step;
+    y += Math.sin(heading) * step;
     ctx.lineTo(x, y);
+    if (k === fork) {
+      forkX = x;
+      forkY = y;
+      forkHeading = heading + (rnd(4, index * 80 + 71) < 0.5 ? -1 : 1) * (0.6 + 0.5 * rnd(4, index * 80 + 72));
+    }
+  }
+  ctx.moveTo(forkX, forkY);
+  for (let k = 0; k < steps / 3; k++) {
+    forkHeading += (rnd(6, index * 80 + 3 + k) - 0.5) * 0.45;
+    forkX += Math.cos(forkHeading) * step;
+    forkY += Math.sin(forkHeading) * step;
+    ctx.lineTo(forkX, forkY);
   }
   ctx.stroke();
 }
 
+/** Sealed cracks per 24 m tile. */
+const SEAL_COUNT = 3;
+
 /**
- * Cracks, and the tar poured into them.
+ * Cracks, as the TAR SNAKES poured into them.
  *
- * A bare crack reads as a scratch. What says "this has been patched for thirty
- * years" is the SEALANT: an overwide snake of bitumen brushed along the crack,
- * wandering where the crew's brush wandered. Each is drawn twice — a soft dark
- * snake, then a hairline inside it.
+ * A bare crack reads as a scratch. What says "this has been patched for thirty years"
+ * is the sealant: a band of bitumen 7-13 cm wide brushed along the crack, wandering
+ * where the crew's brush wandered, black against the bleached mat (owner, 2026-10-16:
+ * the old title screen's black snakes on grey asphalt are the reference). The crack
+ * itself is under the tar, so there is no hairline. Each is a soft halo, where the
+ * brush thinned out, and a dense core.
  *
- * TWO per 24 m tile, not six, and short. A crack every four metres of a repeating tile
- * is a pattern before it is damage, and the tile's own repeat is what the eye then locks
- * onto: long meandering loops are the most memorable thing a 24 m tile can carry, so
- * they are the first thing to go when the repeat starts showing. The road's real damage
- * budget is spent on potholes and ravelled edges, which are placed in world space and
+ * The core is as dark as the albedo can usefully go: about a fifth of the tile's mean,
+ * so 0.03 against a 0.14 aged mat, and barely darker than a fresh course, which is
+ * what tar on new asphalt looks like. Its relief is taken out of the height field
+ * (`sealMask`), so a low sun finds a smooth, glossy strip across the grit.
+ *
+ * THREE per 24 m tile, and short. A crack every four metres of a repeating tile is a
+ * pattern before it is damage, and long meandering loops are the most memorable thing a
+ * 24 m tile can carry. The road's real damage budget is spent on potholes, ravelled
+ * edges and the director's sealed-crack repairs, which are placed in world space and
  * never repeat.
  */
-function drawCracks(ctx: CanvasRenderingContext2D, alpha: number): void {
-  for (let i = 0; i < 2; i++) {
-    const length = 120 + rnd(3, i) * 320;
+function drawSeals(ctx: CanvasRenderingContext2D, mask: boolean): void {
+  for (let i = 0; i < SEAL_COUNT; i++) {
+    const length = 140 + rnd(3, i) * 300;
+    const width = 3 + rnd(3, i + 100) * 2.5;
     wrapped(ctx, () => {
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      ctx.strokeStyle = `rgba(${BASE_TONE - 60},${BASE_TONE - 62},${BASE_TONE - 64},${alpha})`;
-      ctx.lineWidth = 2 + rnd(3, i + 100) * 2.5;
-      crackPath(ctx, i, length);
-      ctx.strokeStyle = `rgba(30,30,32,${Math.min(1, alpha * 1.3)})`;
-      ctx.lineWidth = 1;
-      crackPath(ctx, i, length);
+      ctx.strokeStyle = mask ? 'rgba(255,255,255,0.5)' : `rgba(${BASE_TONE - 45},${BASE_TONE - 46},${BASE_TONE - 47},0.45)`;
+      ctx.lineWidth = width + 3;
+      sealPath(ctx, i, length);
+      ctx.strokeStyle = mask ? 'rgb(255,255,255)' : 'rgba(112,110,108,0.95)';
+      ctx.lineWidth = width;
+      sealPath(ctx, i, length);
     });
+  }
+}
+
+/** Relief under a seal, in the height field's units: tar sits a little proud and flat. */
+const SEAL_HEIGHT = 0.62;
+
+/**
+ * Flattens the height field under the seals, so the normal map carries no grain there.
+ * The mask is the same strokes drawn white on black, so it matches the albedo exactly.
+ */
+function sealRelief(height: Float32Array): void {
+  const { ctx } = makeCanvas();
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
+  drawSeals(ctx, true);
+  const mask = ctx.getImageData(0, 0, TEXTURE_SIZE, TEXTURE_SIZE).data;
+  for (let i = 0; i < height.length; i++) {
+    const m = mask[i * 4]! / 255;
+    if (m > 0) height[i] = height[i]! + (SEAL_HEIGHT - height[i]!) * m;
   }
 }
 
@@ -458,6 +522,83 @@ function drawPatches(ctx: CanvasRenderingContext2D): void {
       ctx.restore();
     });
   }
+}
+
+/**
+ * THE CHIP-SEAL DETAIL: the stones themselves, at a scale the 24 m tile cannot carry.
+ *
+ * A desert highway is surface-dressed, not paved with a smooth mix: binder sprayed on
+ * and 10-20 mm stone chips rolled into it, so close up it is pale chips in black tar
+ * (owner, 2026-10-16, against the old title screen). At 2.3 cm a texel the macro tile
+ * cannot draw a chip, only a sample of the grit field; this 4 m tile at 7.8 mm a texel
+ * can, with a chip two to four texels across.
+ *
+ * It is a MULTIPLIER with a mean of exactly 1, stored linear at a third of its value
+ * (`ROAD_DETAIL_ENCODE`), so minification averages it to 1 and the far road keeps the
+ * macro tile's and the vertex colours' value untouched: mip-safe by construction, not
+ * by tuning. The road shader (render/roadlook.ts) samples it once, at
+ * `ROAD_DETAIL_REPEAT` times the macro UV, and leaves it out in the Clean style, where
+ * the surface is the vertex colour.
+ *
+ * The same lessons as the macro tile: gradient noise, iso-contoured, never stamped
+ * shapes. A chip is where the 4 px octave (roughened by the 2 px one) stands well proud,
+ * so chips are isolated round peaks in binder rather than a 50/50 maze of iso-contours
+ * (which read as worms); a slower field (8 px) says which chips are pale quartz and
+ * which grey basalt, and a 32 px one how thickly they were spread.
+ */
+const DETAIL_TILE_METRES = 4;
+/** Detail tiles across one macro tile: the factor the shader scales the UV by. */
+export const ROAD_DETAIL_REPEAT = ROAD_TILE_METRES / DETAIL_TILE_METRES;
+const DETAIL_SIZE = 512;
+const CHIP_LATTICES: readonly { readonly lattice: GradientLattice; readonly gain: number; readonly transposed: boolean }[] = [
+  { lattice: buildLattice(128, 0x2c1b3c6d, DETAIL_SIZE), gain: 0.8, transposed: false },
+  { lattice: buildLattice(256, 0x297a2d39, DETAIL_SIZE), gain: 0.22, transposed: true },
+];
+const STONE_LATTICE = buildLattice(64, 0x5bd1e995, DETAIL_SIZE);
+const SPREAD_LATTICE = buildLattice(16, 0x68e31da4, DETAIL_SIZE);
+/** Relative albedos before the mean is divided out: binder, grey chip, pale chip. */
+const DETAIL_BINDER = 0.55;
+const DETAIL_GREY_CHIP = 1;
+const DETAIL_PALE_CHIP = 2.3;
+/** The detail map stores a third of the multiplier, so a pale chip at 2.7 still fits. */
+export const ROAD_DETAIL_ENCODE = 3;
+
+function paintDetail(): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = DETAIL_SIZE;
+  canvas.height = DETAIL_SIZE;
+  const ctx = canvas.getContext('2d')!;
+  const count = DETAIL_SIZE * DETAIL_SIZE;
+  const value = new Float32Array(count * 3);
+  let sum = 0;
+  for (let y = 0; y < DETAIL_SIZE; y++) {
+    for (let x = 0; x < DETAIL_SIZE; x++) {
+      let field = 0.12 * wrapPerlin(SPREAD_LATTICE, x, y);
+      for (const octave of CHIP_LATTICES) {
+        field += octave.gain * wrapPerlin(octave.lattice, x, y, octave.transposed);
+      }
+      // A chip is where the field stands well proud, about a third of the surface; the
+      // riser is a texel or so, the stone's rounded edge and all the sampling allows.
+      const chip = smoothstep(0.12, 0.26, field);
+      const pale = smoothstep(0.15, 0.35, wrapPerlin(STONE_LATTICE, x, y, true));
+      const stone = DETAIL_GREY_CHIP + (DETAIL_PALE_CHIP - DETAIL_GREY_CHIP) * pale;
+      const v = DETAIL_BINDER + (stone - DETAIL_BINDER) * chip;
+      const o = (y * DETAIL_SIZE + x) * 3;
+      // Pale quartz is warm, basalt a little cool, binder neutral.
+      value[o] = v * (1 + 0.04 * chip * (pale - 0.4));
+      value[o + 1] = v;
+      value[o + 2] = v * (1 - 0.07 * chip * (pale - 0.4));
+      sum += v;
+    }
+  }
+  const scale = count / sum / ROAD_DETAIL_ENCODE;
+  const img = ctx.createImageData(DETAIL_SIZE, DETAIL_SIZE);
+  for (let i = 0; i < count; i++) {
+    for (let c = 0; c < 3; c++) img.data[i * 4 + c] = Math.round(Math.min(1, value[i * 3 + c]! * scale) * 255);
+    img.data[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvas;
 }
 
 /**
@@ -496,7 +637,12 @@ function meanLuminance(data: Uint8ClampedArray): number {
  * darkened a little by ROAD_DISPLAY_SCALE. Matched by screenshot at noon against HEAD.
  */
 const ROAD_TEXTURE_CONTRAST = 2;
-const ROAD_DISPLAY_SCALE = 0.85;
+/**
+ * 0.78, down from 0.85 (owner, 2026-10-16): the road is the subject and has to stand
+ * off the pale sand and shoulder by its value as well as its texture, in the Clean style
+ * too, where the texture is only its coarse mips.
+ */
+const ROAD_DISPLAY_SCALE = 0.78;
 
 function steepenAboutMean(data: Uint8ClampedArray): void {
   let sum = 0;
@@ -525,7 +671,8 @@ export function roadTextures(): RoadTextures {
   const height = new Float32Array(TEXTURE_SIZE * TEXTURE_SIZE);
   paintCourse(albedo.ctx, height);
   drawPatches(albedo.ctx);
-  drawCracks(albedo.ctx, 0.32);
+  drawSeals(albedo.ctx, false);
+  sealRelief(height);
 
   const pixels = albedo.ctx.getImageData(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
   // The gain is taken from the painted mean, before the contrast below, so the road's
@@ -547,6 +694,13 @@ export function roadTextures(): RoadTextures {
   normal.colorSpace = THREE.NoColorSpace;
   normal.anisotropy = maxAnisotropy();
 
-  cached = { map, normal, mean };
+  const detail = new THREE.CanvasTexture(paintDetail());
+  detail.wrapS = THREE.RepeatWrapping;
+  detail.wrapT = THREE.RepeatWrapping;
+  // A multiplier, not a colour: linear bytes, so the mips average to exactly 1.
+  detail.colorSpace = THREE.NoColorSpace;
+  detail.anisotropy = maxAnisotropy();
+
+  cached = { map, normal, detail, mean };
   return cached;
 }

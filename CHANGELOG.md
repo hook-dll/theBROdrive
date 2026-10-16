@@ -4,6 +4,24 @@
 
 ### Added
 
+- A NEW KIT CAR: AZLK-2141 Moskvich (`src/carkit/azlk.ts` `BODY_2141`, `LOOK_2141`). The
+  1986–1998 base liftback from the-blueprints.com's dimensioned four-view (5.714 mm/px from
+  the drawn hubs) and Commons photos: a near-upright face of rectangular head lamps and a
+  black slatted grille with the amber indicators wrapping round the corners, deep black
+  plastic bumpers, a bonnet whose crown grows evenly from the lip to the cowl, a shoulder
+  line along the flank, four doors under a slim A pillar with the front door's glass close
+  behind it, a quarter glass under the falling roof (`roofDrop`) and a wide D pillar, and
+  the long tailgate from the roof to the bumper, nearly all glass, coming down between the
+  tail lamps (amber, red, white reversing cell, red) with its plate panel. On the `samara`
+  platform's cabin as is.
+  In the lab and in the world (`KIT_CARS`, the running gear of `sa_azlk2141`, the 2141-01;
+  a save on the pack body loads on it). Numbers in `measurements-2141.md`. After the
+  owner's first review both bumpers sit under the lamps (their tops 0.605 → 0.565 at the
+  front, 0.585 → 0.545 at the back), and the A pillar is slim on the 2141 and on the GAZ-24
+  and GAZ-31029 too: the door's frame and glass stand 0.075–0.08 of s behind the pillar's
+  line, parallel to it, where 0.20–0.38 of paint stood at the belt (`volgas.ts`,
+  `measurements-volga.md` §3.5). No generator change: every other kit car is untouched.
+
 - THE GROUND'S OWN LIGHT (`render/groundlight.ts`). Sand, mesas, the road, its bed and
   markings no longer run Three's physical GGX lobe for the sun and every spotlight slot:
   Lambert plus a backscatter term (light behind the eye brightens grainy ground, up to
@@ -892,6 +910,41 @@
     leaving the pad.
 
 ### Changed
+
+- THE ROAD READS AGAINST THE DESERT (owner, 2026-10-16, against the old title screen:
+  near-black asphalt, black tar snakes, a dark gravel shoulder, orange sand). Five parts:
+  - VALUE. The asphalt was a flat 0.27 linear albedo, concrete's. It is now an aged mat at
+    0.14 (`Asphalt` 0x757475, `CrackedAsphalt` 0x7e7a78 at 0.16, display scale included;
+    concrete keeps its 0.25), and WEARING COURSES (`world/gradient.ts` `roadCourseAt`)
+    alternate along it: 135-765 m stretches, fresh at 0.06-0.08 or bleached at 0.12-0.16,
+    fresh about half the time on a kept road and rarely on an abandoned one, meeting at a
+    crisp transverse seam with a thin dark joint.
+  - WHEEL TRACKS. Per lane, two polished wheel paths (up to +60% on an aged course, none
+    on a fresh one) and a dark oil strip between them (up to −40%), 15 cm soft edges, on
+    every lane of a widened road. They replace the vertex-colour wheel paths, which could
+    only be as sharp as the 0.4 m section columns.
+  - TEXTURE. A chip-seal DETAIL map (`roadtexture.ts` `paintDetail`): pale and grey stone
+    chips in binder on a 4 m tile, 7.8 mm a texel, a multiplier with a mean of exactly 1 so
+    its mips fade to the macro tile's value; one extra sample, on the road surface only,
+    and not in the Clean style. The 24 m tile's cracks are black TAR SNAKES now, three a
+    tile, forked, with their relief flattened out of the normal map; its own grain is
+    calmer (`COURSE_RANGE` 42 → 26), the chips carry it.
+  - EDGE. Wind-blown SAND lies 0-40 cm onto the asphalt's edge in ragged tongues, over the
+    edge line's paint too, more on a decaying road, none where a lay-by widens it. The
+    shoulder is a dark crushed-stone band over the embankment's formation (stone 0.13, a
+    warm grey of its own, not the palette's), thinning into the sand down the batter, with
+    pale stones in its grit.
+  - GROUND COVER (`world/props/scatter.ts`). The open desert is thinned to 0.02 a 3 m cell;
+    the verge 2.5-12 m from the asphalt gets CLUMPS of two to six plants with bare sand
+    between, 5-6 times the open density on average, more where the ground lies below the
+    road and on the side its camber sheds water to (`vergeRunoff`).
+
+  The courses, tracks and drift are drawn per pixel (`render/roadlook.ts`) from three
+  vertex attributes, so they keep crisp edges the 0.4 m × 1.33 m collider vertices could
+  not carry, and they show in the Clean style. One program per part under a constant key
+  (`road-look-v1-surface`, `-paint`); lay-bys, the terminus pad and site aprons read the
+  neutral defaults. Measured on seed `flick` from km 29.6: 99 programs before and after a
+  1.2 km autopilot drive across two seams and a switch to Clean.
 
 - A KIT CAR IS THREE DRAWS (`carkit/materials.ts`, `render/kitdraw.ts`,
   `render/materials.ts` `patchKitBodyShader`, `render/carmodel.ts`, `carkit/rig.ts`). Every

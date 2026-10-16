@@ -260,10 +260,12 @@ function bilinear(
 export const DESERT_TILE_FADE_FULL = 300;
 export const DESERT_TILE_FADE_GONE = DESERT_TILE_SIZE * 2;
 /**
- * Grit on the road shoulder, in the ground's own ink: a finer, denser stipple than the
- * desert's, weighted per vertex (`aShoulderGrit`, 0 where the strip meets the sand) so
- * it thins out into the plain ground. Two sizes, the small ones darker: crushed stone
- * reads as grains, not as a photograph laid on a drawing.
+ * Grit on the road shoulder: a finer, denser stipple than the desert's, weighted per
+ * vertex (`aShoulderGrit`, 0 where the strip meets the sand) so it thins out into the
+ * plain ground. Two sizes: the small ones darker, the coarse ones PALE, because the
+ * shoulder is a dark crushed-stone band (world/roadmesh.ts SHOULDER_STYLE) and a dark
+ * grain on dark stone is invisible. Pale stones on dark is what reads as gravel and not
+ * as a shadow lying beside the road.
  */
 const SHOULDER_GRIT_FRAGMENT = /* glsl */ `
 if ( vShoulderGrit > 0.001 ) {
@@ -273,7 +275,7 @@ if ( vShoulderGrit > 0.001 ) {
   vec2 coarseUv = vComicWorld.xz / 0.42 + 7.3;
   float coarseFoot = max( fwidth( coarseUv.x ), fwidth( coarseUv.y ) );
   float coarse = comicStipple( coarseUv, coarseFoot ) * ( 1.0 - smoothstep( 0.3, 0.8, coarseFoot ) );
-  gl_FragColor.rgb *= 1.0 - vShoulderGrit * ( fine * 0.3 + coarse * 0.2 );
+  gl_FragColor.rgb *= 1.0 - vShoulderGrit * ( fine * 0.45 - coarse * 1.0 );
 }
 #include <tonemapping_fragment>`;
 

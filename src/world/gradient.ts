@@ -520,6 +520,70 @@ export function roadConditionAt(seed: number, s: number, out?: RoadConditionBuff
   return condition;
 }
 
+/**
+ * WEARING COURSES: the asphalt was not all laid at once.
+ *
+ * A desert highway is resurfaced a stretch at a time, so its value alternates in runs of
+ * hundreds of metres: a fresh course is near-black bitumen, an old one is bleached to a
+ * pale grey, and where one meets the other there is a straight transverse SEAM, the line
+ * the paver started at. Courses are a hash lattice along arclength (one per
+ * `COURSE_LENGTH_M` cell, its start jittered inside the cell, so 135-765 m long) and the
+ * road's decay decides how often a stretch was relaid: a kept road is half fresh, an
+ * abandoned one almost never.
+ *
+ * The albedos are physical, linear, before the surface texture's grain: fresh asphalt
+ * is 0.05-0.10, aged 0.10-0.18 (owner, 2026-10-16, against a road that had been a flat
+ * 0.27 everywhere). Only the asphalt surfaces have courses; world/roadmesh.ts turns
+ * them into a shade of the surface's own colour.
+ */
+const COURSE_LENGTH_M = 450;
+const COURSE_TAG = 0x43525345; // 'CRSE'
+/** Albedo range of a fresh course, and of an aged one. */
+export const COURSE_FRESH_ALBEDO: readonly [number, number] = [0.06, 0.08];
+export const COURSE_AGED_ALBEDO: readonly [number, number] = [0.12, 0.16];
+
+/** Start of course `k`, metres: jittered inside its cell, so starts never cross. */
+function courseStart(seed: number, k: number): number {
+  return (k + 0.15 + 0.7 * hash01(seed, COURSE_TAG, k)) * COURSE_LENGTH_M;
+}
+
+/** Linear albedo of course `k`. */
+function courseAlbedo(seed: number, k: number): number {
+  const middle = (courseStart(seed, k) + courseStart(seed, k + 1)) * 0.5;
+  const decay = roadConditionAt(seed, Math.max(0, middle)).decay;
+  const kept = 1 - Math.min(1, Math.max(0, (decay - 0.1) / 0.35));
+  const fresh = hash01(seed, COURSE_TAG, k, 1) < 0.12 + 0.4 * kept;
+  const [lo, hi] = fresh ? COURSE_FRESH_ALBEDO : COURSE_AGED_ALBEDO;
+  return lo + (hi - lo) * hash01(seed, COURSE_TAG, k, 2);
+}
+
+/** Caller-owned storage for `roadCourseAt`. */
+export interface RoadCourseBuffer {
+  /** Arclength of the seam nearest `s`, metres. */
+  seam: number;
+  /** Linear albedo of the course before that seam, and of the one after it. */
+  before: number;
+  after: number;
+}
+
+/** The seam nearest `s` and the courses either side of it. */
+export function roadCourseAt(seed: number, s: number, out: RoadCourseBuffer): RoadCourseBuffer {
+  let k = Math.floor(s / COURSE_LENGTH_M);
+  if (s < courseStart(seed, k)) k--;
+  const start = courseStart(seed, k);
+  const end = courseStart(seed, k + 1);
+  if (s - start <= end - s) {
+    out.seam = start;
+    out.before = courseAlbedo(seed, k - 1);
+    out.after = courseAlbedo(seed, k);
+  } else {
+    out.seam = end;
+    out.before = courseAlbedo(seed, k);
+    out.after = courseAlbedo(seed, k + 1);
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Roadside pole eras
 // ---------------------------------------------------------------------------
