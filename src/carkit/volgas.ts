@@ -239,11 +239,16 @@ export const BODY_GAZ31029: KitBody = {
   length: 4.885,
   stations: [
     // The face [D side view: x 15–25; front view: lamps 0.577–0.77, the lip 0.86].
-    { s: 0.07, sill: 0.34, crease: 0.72, belt: 0.85, deck: 0.86, wSill: 0.85, wCrease: 0.875, wBelt: 0.87 },
+    // The bonnet's centre line is the drawing's (lip 0.86, 0.947 at s 0.54, 1.07 at the
+    // cowl); its crown over the wings' top grows evenly along it, 0.02 at the lip to the
+    // 24's 0.10 at the cowl (`belt` = deck − shoulder rise − crown). The drawn wings' top
+    // put the crown at −0.005 (a dish) to s 0.25, then 0.022, then 0.10: a crown that
+    // jumps twists the bonnet into slivers, as on the Oka (owner, 2026-10-16).
+    { s: 0.07, sill: 0.34, crease: 0.72, belt: 0.825, deck: 0.86, wSill: 0.85, wCrease: 0.875, wBelt: 0.87 },
     // The lamps' wrap ends; the wing's top and the bonnet rise to the cowl [D: bonnet 0.947
     // at x 100, 1.007 at x 200].
-    { s: 0.25, sill: 0.3, crease: 0.75, belt: 0.89, deck: 0.9, wSill: 0.875, wCrease: 0.9, wBelt: 0.885 },
-    { s: 0.542, sill: 0.28, crease: 0.77, belt: 0.91, deck: 0.947, wSill: 0.875, wCrease: 0.9, wBelt: 0.885 },
+    { s: 0.25, sill: 0.3, crease: 0.75, belt: 0.855, deck: 0.9, wSill: 0.875, wCrease: 0.9, wBelt: 0.885 },
+    { s: 0.542, sill: 0.28, crease: 0.77, belt: 0.871, deck: 0.947, wSill: 0.875, wCrease: 0.9, wBelt: 0.885 },
     ...MIDDLE_24_IN_31029,
     // The back light's foot on the new boot [D: x 686.7, y 166.7].
     { s: 3.92, sill: 0.27, crease: 0.79, belt: 0.945, deck: 0.98, wSill: 0.875, wCrease: 0.9, wBelt: 0.885 },
