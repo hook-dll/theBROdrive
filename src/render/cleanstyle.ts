@@ -7,8 +7,10 @@ import * as THREE from 'three';
  * of it: large quiet shapes, nothing on screen smaller than a few pixels, and nothing
  * that changes from one frame to the next unless the world did. Its parts:
  *
- *  1. The asphalt loses its fine texture and normal relief; only the tile's broad
- *     patches survive, read from a deep mip (`applyCleanAsphalt`).
+ *  1. Ground and building finishes lose their painted texture and normal relief: the
+ *     road in every surface, the sites' wall and floor patterns read their map's mean
+ *     colour (`applyCleanSurface`), and the desert loses its ink stipple
+ *     (render/comic.ts). Vertex colours, markings and strata stay.
  *  2. The finishing pass draws no film grain (core/renderer.ts `setStyle`).
  *  3. Small scatter shrinks away once it would be under `CLEAN_CULL_GONE_PX` tall, and
  *     the batch pages wholly past that line are not drawn (`applyCleanCull`,
@@ -34,7 +36,7 @@ import * as THREE from 'three';
 
 /**
  * The lit programs' switches, `uniform vec3 cleanStyle`: x faceted normals and banded
- * sun, y crisp near shadow, z flat asphalt. Each is 0 or 1; they move together today
+ * sun, y crisp near shadow, z flat surfaces. Each is 0 or 1; they move together today
  * and are separate so a lab can look at one at a time.
  */
 export const cleanStyle = { x: 0, y: 0, z: 0 };
@@ -91,52 +93,50 @@ export function cleanPixelsPerMetre(projection: THREE.Matrix4): number {
  */
 export const CLEAN_SMOOTH_NORMALS = '#define CLEAN_SMOOTH_NORMALS\n';
 
-/**
- * Mip bias for the asphalt albedo in Clean. The tile is 1024 texels over 24 m, so
- * six levels down a texel is about 1.5 m: the 4 m bleaching blotches and the old
- * patches survive as soft shapes, while the aggregate, ravelling and cracks — the
- * detail that sparkles at speed — average into the mat's own grey. Far off, the
- * computed level plus this reaches the last mip, one flat colour.
- */
-const CLEAN_ASPHALT_MAP_BIAS = 6;
-
-const CLEAN_ASPHALT_MAP = /* glsl */ `
+// A mip BIAS was not enough: near the camera the computed level is at or below zero, so
+// mip 6 of the asphalt still showed the painted aggregate as a blurred mush right behind
+// the car. The last mip (`textureLod` past every level) is the texture's mean colour,
+// one value for the whole surface: the vertex colour (the road's wear, decay and
+// patches) and the markings stay, the painted texture is gone at every distance.
+const CLEAN_SURFACE_MAP = /* glsl */ `
 #ifdef USE_MAP
 	vec4 sampledDiffuseColor;
 	if ( cleanStyle.z > 0.0 ) {
-		sampledDiffuseColor = texture2D( map, vMapUv, ${CLEAN_ASPHALT_MAP_BIAS.toFixed(1)} );
+		sampledDiffuseColor = textureLod( map, vMapUv, 16.0 );
 	} else {
 		sampledDiffuseColor = texture2D( map, vMapUv );
 	}
 	diffuseColor *= sampledDiffuseColor;
 #endif`;
 
-// The relief of the wearing course goes with its colour: a low sun raking a flat
-// grey mat would otherwise draw the aggregate back in as light.
-const CLEAN_ASPHALT_NORMAL = /* glsl */ `
+// The relief goes with the colour: a low sun raking a flat mat would otherwise draw the
+// aggregate back in as light.
+const CLEAN_SURFACE_NORMAL = /* glsl */ `
 if ( cleanStyle.z <= 0.0 ) {
 #include <normal_fragment_maps>
 }`;
 
-const ASPHALT_KEY = 'clean-asphalt-v1';
-const asphaltPatched = new WeakSet<THREE.Material>();
+const SURFACE_KEY = 'clean-surface-v1';
+const surfacePatched = new WeakSet<THREE.Material>();
 
 /**
- * Gives the road's asphalt finish its Clean branch: the albedo from a deep mip and no
- * normal map. Chains the patches already there; idempotent.
+ * Gives a ground or building finish (the road in every surface it is laid in, the
+ * sites' plaster, brick, block, board, metal and tile patterns) its Clean branch: the
+ * albedo map's mean colour and no normal map. Chains the patches already there;
+ * idempotent. The key is the same for every material, so it only joins each one's own.
  */
-export function applyCleanAsphalt<T extends THREE.MeshStandardMaterial>(material: T): T {
-  if (asphaltPatched.has(material)) return material;
-  asphaltPatched.add(material);
+export function applyCleanSurface<T extends THREE.MeshStandardMaterial>(material: T): T {
+  if (surfacePatched.has(material)) return material;
+  surfacePatched.add(material);
   const previousCompile = material.onBeforeCompile;
   material.onBeforeCompile = (shader, renderer) => {
     previousCompile.call(material, shader, renderer);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <map_fragment>', CLEAN_ASPHALT_MAP)
-      .replace('#include <normal_fragment_maps>', CLEAN_ASPHALT_NORMAL);
+      .replace('#include <map_fragment>', CLEAN_SURFACE_MAP)
+      .replace('#include <normal_fragment_maps>', CLEAN_SURFACE_NORMAL);
   };
   const previousKey = material.customProgramCacheKey;
-  material.customProgramCacheKey = () => `${previousKey.call(material)}:${ASPHALT_KEY}`;
+  material.customProgramCacheKey = () => `${previousKey.call(material)}:${SURFACE_KEY}`;
   return material;
 }
 

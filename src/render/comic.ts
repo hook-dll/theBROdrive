@@ -251,7 +251,9 @@ const FRAGMENT_HOOK = /* glsl */ `
   // --- stipple ------------------------------------------------------------
   vec2 stippleUv = vComicWorld.xz / uStippleCell;
   float footprint = max( fwidth( stippleUv.x ), fwidth( stippleUv.y ) );
-  float fade = 1.0 - smoothstep( uStippleRange * 0.35, uStippleRange, viewDist );
+  // The Clean style (render/cleanstyle.ts, cleanStyle.z) keeps the ground's colour and
+  // strata but not its ink dots: specks under a pixel or two crawl as the car moves.
+  float fade = cleanStyle.z > 0.0 ? 0.0 : 1.0 - smoothstep( uStippleRange * 0.35, uStippleRange, viewDist );
   fade *= 1.0 - smoothstep( 0.35, 0.9, footprint );
   if ( fade > 0.001 ) {
     float dots = comicStipple( stippleUv, footprint ) * fade;

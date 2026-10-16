@@ -4,6 +4,15 @@
 
 ### Added
 
+- CLEAN SURFACES ARE FLAT AT EVERY DISTANCE (`render/cleanstyle.ts` `applyCleanSurface`,
+  `world/roadmesh.ts`, `world/poi/kit.ts`, `render/comic.ts`). Clean read the road's
+  albedo with a mip bias of 6, and right behind the car the computed level is at or below
+  zero, so the painted aggregate still showed there as a blurred mush. It now reads the
+  map's last mip, its mean colour, on the road in every surface it is laid in and on the
+  sites' plaster, brick, block, board, metal and tile patterns (whose texture now builds
+  the mipmaps its filter asked for), without their normal maps; the desert drops its ink
+  stipple. Vertex colours, markings and strata stay. Same branch on the shared uniform:
+  programs 100 before and after switching.
 - STYLE: STANDARD OR CLEAN (`game/settings.ts` `VisualStyle`, `render/cleanstyle.ts`,
   `render/lightshader.ts` `installCleanStyle`, `render/hazeshader.ts`, `core/renderer.ts`
   `setStyle`, `world/props/instancebatch.ts` `syncLod`, `ui/menu.ts`, `main.ts`). A row in
