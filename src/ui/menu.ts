@@ -39,7 +39,11 @@ import {
   PHONE_FIRST_LAUNCH,
   QUALITY_PRESET_DETAIL,
   TRAFFIC_CAPS,
+  grassDefault,
   qualityPresetOf,
+  shadowModeDefault,
+  shadowModeFor,
+  type ShadowMode,
   viewDistanceFor,
   loadStoredSettings,
   storeSettings,
@@ -110,30 +114,45 @@ function el(tag: string, cls?: string): HTMLElement {
  * the control that names a resolution and quotes it as one — and two rows quoting the
  * same number is the same drift in a new place: a manual render scale makes the rung's
  * ceiling irrelevant, and this line would go on claiming it.
+ *
+ * Shadows and grass are the player's own rows, so they are passed in as the settings that
+ * picking this rung would leave: the rung's defaults from a preset, the current choice
+ * from the Detail row.
  */
-function describeTier(quality: GraphicsQuality, mobilePresentation: boolean, inDrive: boolean): string {
+function describeTier(
+  quality: GraphicsQuality,
+  shadows: ShadowMode,
+  grass: boolean,
+  mobilePresentation: boolean,
+  inDrive: boolean,
+): string {
   const tier = GRAPHICS_TIERS[quality];
   // Read as the presentation in front of the player will actually get it. A phone is
   // handed different numbers for the shadow pass and the light slots, and a label
   // quoting the desktop column at a phone would be describing a rung nobody is on.
-  const shadows = mobilePresentation ? tier.mobileShadows : tier.shadows;
   const spots = mobilePresentation ? tier.mobileVehicleLightSlots : tier.vehicleLightSlots;
-  const light = buildProfileFor(quality) === 'light';
+  const light = buildProfileFor(quality, grass) === 'light';
   return (
-    `${shadows ? 'Sun shadows' : 'No sun shadows'}, ` +
+    `${SUN_SHADOWS_TEXT[shadowModeFor(shadows, quality, mobilePresentation)]}, ` +
     `${spots} lights shaded on every lit pixel. ` +
     `Stars to magnitude ${mobilePresentation ? tier.mobileStarMagnitude : tier.starMagnitude}. ` +
     (light
-      ? 'Lighter ground cover, plants and open desert, as on Very Low: under half the '
-        + 'triangles of Medium.'
-        + (inDrive ? ' Switching between Low and Medium or High saves the drive and reloads it.' : '')
-      : 'Full ground cover.'
-        + (inDrive
-          ? ' The light count is compiled into the world, so between Medium and High it '
-            + 'changes on the next load.'
-          : ''))
+      ? 'No grass: lighter ground cover, plants and open desert, as on Very Low, under half '
+        + 'the triangles.'
+      : 'Full ground cover with grass.')
+    + (inDrive
+      ? ' Changing the grass saves the drive and reloads it, and the light count is '
+        + 'compiled into the world, so between Medium and High it changes on the next load.'
+      : '')
   );
 }
+
+/** How each effective shadow mode reads at the head of a rung's description. */
+const SUN_SHADOWS_TEXT: Record<ShadowMode, string> = {
+  off: 'No sun shadows',
+  near: 'Sun shadows near the camera only',
+  full: 'Sun shadows',
+};
 
 function formatHorizon(metres: number): string {
   return metres >= 1000 ? `${Math.round(metres / 1000)} km` : `${metres} m`;
@@ -1296,8 +1315,9 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
    * build profile (render/retro.ts) is built into the world. Never on the title, where
    * there is no world yet.
    */
-  const reloadsFor = (quality: GraphicsQuality): boolean =>
-    inDrive && buildProfileFor(quality) !== buildProfileFor(settings.graphicsQuality);
+  const reloadsFor = (quality: GraphicsQuality, grass: boolean): boolean =>
+    inDrive
+    && buildProfileFor(quality, grass) !== buildProfileFor(settings.graphicsQuality, settings.grass);
 
   /**
    * Quality is drawn from its values every time one of them changes, because they depend
@@ -1386,8 +1406,10 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
         + (quality === 'retro'
           ? 'For weak mini-PCs and old laptops: the world drawn at about 360 lines as crisp '
             + 'square pixels, like a late-90s game, with lighter ground cover and no sun shadows.'
-            + (reloadsFor('retro') ? ' Switching to it or away from it saves the drive and reloads it.' : '')
-          : describeTier(quality, mobilePresentation, inDrive))
+            + (reloadsFor('retro', grassDefault('retro'))
+              ? ' Switching to it or away from it saves the drive and reloads it.'
+              : '')
+          : describeTier(quality, shadowModeDefault(quality), grassDefault(quality), mobilePresentation, inDrive))
       );
     };
 
@@ -1461,15 +1483,16 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           hint: () =>
             'For weak mini-PCs and old laptops. The world is drawn at about 360 lines '
             + '(540 under Render scale) and shown as crisp square pixels, like a late-90s '
-            + 'game, with lighter ground cover and no sun shadows. '
-            + (reloadsFor('retro') ? 'Switching to it or away from it saves the drive and reloads it.' : ''),
+            + 'game, with lighter ground cover and '
+            + `${SUN_SHADOWS_TEXT[shadowModeFor(settings.shadows, 'retro', mobilePresentation)].toLowerCase()}. `
+            + (reloadsFor('retro', settings.grass) ? 'Switching to it or away from it saves the drive and reloads it.' : ''),
           active: () => settings.graphicsQuality === 'retro',
           pick: () => pickDetail('retro'),
         },
         ...(['acceptable', 'standard', 'blessing'] as const).map((quality, index) => ({
           label: ['Low', 'Medium', 'High'][index]!,
           icon: ['gfx1', 'gfx2', 'gfx3'][index]!,
-          hint: describeTier(quality, mobilePresentation, inDrive),
+          hint: describeTier(quality, settings.shadows, settings.grass, mobilePresentation, inDrive),
           active: () => settings.graphicsQuality === quality,
           pick: () => pickDetail(quality),
         })),
@@ -1667,6 +1690,65 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           active: () => !settings.fxaa,
           pick: () => {
             settings.fxaa = false;
+            changed();
+          },
+        },
+      ])]),
+      // The sun's shadow, independent of the rung: Near keeps only the cascade around
+      // the camera, which is where a car standing on the ground is read.
+      segmented('Shadows', [
+        {
+          label: 'Off',
+          icon: 'gfx1',
+          hint: 'No sun shadows: the shadow pass is not drawn at all. Cheapest.',
+          active: () => settings.shadows === 'off',
+          pick: () => {
+            settings.shadows = 'off';
+            changed();
+          },
+        },
+        {
+          label: 'Near',
+          icon: 'gfx2',
+          hint: 'Only around the camera, about 30 m: your car and the cars beside it stand on the ground. Costs little.',
+          active: () => settings.shadows === 'near',
+          pick: () => {
+            settings.shadows = 'near';
+            changed();
+          },
+        },
+        {
+          label: 'Full',
+          icon: 'gfx3',
+          hint: 'Near shadows plus the sun\'s wide shadow map out across the desert: hills, poles and buildings cast too.',
+          active: () => settings.shadows === 'full',
+          pick: () => {
+            settings.shadows = 'full';
+            changed();
+          },
+        },
+      ]),
+      // Ground cover and plants. Not on Very Low, whose own light build has none either way.
+      ...(settings.graphicsQuality === 'retro' ? [] : [segmented('Grass', [
+        {
+          label: 'On',
+          icon: 'gfx3',
+          hint: 'Full ground cover, grass and plants, and the fine open desert. Over twice the triangles.'
+            + (inDrive ? ' Changing it saves the drive and reloads it.' : ''),
+          active: () => settings.grass,
+          pick: () => {
+            settings.grass = true;
+            changed();
+          },
+        },
+        {
+          label: 'Off',
+          icon: 'gfx1',
+          hint: 'Lighter ground cover without grass and a coarser open desert, as on Very Low.'
+            + (inDrive ? ' Changing it saves the drive and reloads it.' : ''),
+          active: () => !settings.grass,
+          pick: () => {
+            settings.grass = false;
             changed();
           },
         },
@@ -2401,6 +2483,8 @@ export class MainMenu {
         renderScale: base.renderScale,
         retroLines: base.retroLines,
         fxaa: base.fxaa,
+        shadows: base.shadows,
+        grass: base.grass,
         frameRateLimit: base.frameRateLimit,
         mirrorFrameRate: base.mirrorFrameRate,
         fieldOfView: base.fieldOfView,
@@ -2433,6 +2517,8 @@ export class MainMenu {
           renderScale: settings.renderScale,
           retroLines: settings.retroLines,
           fxaa: settings.fxaa,
+          shadows: settings.shadows,
+          grass: settings.grass,
           frameRateLimit: settings.frameRateLimit,
           mirrorFrameRate: settings.mirrorFrameRate,
           fieldOfView: settings.fieldOfView,

@@ -22,7 +22,9 @@ import {
   DEFAULT_INK_STRENGTH,
   GRAPHICS_TIERS,
   RENDER_SCALES,
-  shadowsFor,
+  shadowModeDefault,
+  shadowModeFor,
+  type ShadowMode,
   type GraphicsQuality,
   type RenderScale,
   type RetroLines,
@@ -454,6 +456,8 @@ export class Renderer {
   private hazeClockS = -1;
   /** `Settings.fxaa`, kept so a rung change can apply it (never on the retro rung). */
   private fxaa: boolean;
+  /** `Settings.shadows`, kept so a rung change can apply it (phones may still force off). */
+  private shadowMode: ShadowMode;
   /** Hand torch projected from the rendered eye; disabled rather than recreated. */
   private readonly torchLight: THREE.SpotLight;
   private readonly torchTarget = new THREE.Object3D();
@@ -497,9 +501,12 @@ export class Renderer {
      */
     private renderScale: RenderScale = null,
     fieldOfView = DEFAULT_FIELD_OF_VIEW,
+    /** `Settings.shadows`; a lab without the setting draws its rung's default. */
+    shadowMode: ShadowMode = shadowModeDefault(quality),
   ) {
     this.quality = quality;
     this.fxaa = fxaa;
+    this.shadowMode = shadowMode;
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       // NOT antialiased. Every rung draws scene pixels into `hazeTarget`; the
@@ -534,7 +541,8 @@ export class Renderer {
     this.applyRetroCanvas();
     this.updateAdaptiveFloor();
     this.renderer.setPixelRatio(this.basePixelRatio);
-    this.renderer.shadowMap.enabled = shadowsFor(quality, this.mobilePresentation);
+    this.renderer.shadowMap.enabled =
+      shadowModeFor(shadowMode, quality, this.mobilePresentation) !== 'off';
     // PCFSoft's wider kernel costs extra texture taps for a blur that reads as
     // noise at this shadow resolution; plain PCF is visually near-identical and
     // materially cheaper on a low-end iGPU.
@@ -1440,8 +1448,8 @@ export class Renderer {
   }
 
   /**
-   * Switches the resolution/shadow tier in place. FXAA stays the player's choice; only
-   * the retro rung, whose pixels are meant to show, never draws it.
+   * Switches the resolution tier in place. FXAA and shadows stay the player's choice;
+   * only the retro rung, whose pixels are meant to show, never draws FXAA.
    */
   setQuality(quality: GraphicsQuality): void {
     if (quality === this.quality) return;
@@ -1451,10 +1459,9 @@ export class Renderer {
     this.adaptiveResolution.setPinned(this.renderScale !== null || quality === 'retro');
     this.applyRetroCanvas();
     this.disposeGpuQueries();
-    // Read from the table, never re-derived: this line used to test the tier name
-    // directly, and a phone's shadow pass is now off on every rung, so a second copy of
-    // the rule here would silently disagree with the one the constructor used.
-    this.renderer.shadowMap.enabled = shadowsFor(quality, this.mobilePresentation);
+    // The phone rule is read from the table through `shadowModeFor`, never re-derived,
+    // so it cannot disagree with the one the constructor used.
+    this.applyShadowMode();
     this.basePixelRatio = this.pixelRatioFor(quality);
     this.updateAdaptiveFloor();
     this.renderer.setPixelRatio(this.basePixelRatio);
@@ -1507,6 +1514,21 @@ export class Renderer {
       cssWidth: Math.max(1, canvas.clientWidth),
       cssHeight: Math.max(1, canvas.clientHeight),
     };
+  }
+
+  /**
+   * `Settings.shadows`. Only Off against Near/Full toggles the shadow map, which
+   * recompiles every lit program, as a rung change always has; Near against Full is the
+   * sky's intensities and map updates (`Sky.setShadowMode`), so nothing recompiles.
+   */
+  setShadowMode(mode: ShadowMode): void {
+    this.shadowMode = mode;
+    this.applyShadowMode();
+  }
+
+  private applyShadowMode(): void {
+    const enabled = shadowModeFor(this.shadowMode, this.quality, this.mobilePresentation) !== 'off';
+    if (this.renderer.shadowMap.enabled !== enabled) this.renderer.shadowMap.enabled = enabled;
   }
 
   /** `Settings.fxaa`: a uniform the pass branches on, so no program and no target change. */

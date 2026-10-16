@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import {
   GRAPHICS_TIERS,
-  shadowsFor,
+  shadowModeDefault,
+  shadowModeFor,
   vehicleLightSlotsFor,
   type GraphicsQuality,
 } from '../game/settings';
@@ -153,7 +154,13 @@ export class VehicleLightRig {
     // The count is compiled into every lit material, so it is decided here and never
     // again: see `mobileVehicleLightSlots` for what it costs per pixel.
     let slots = vehicleLightSlotsFor(quality, mobilePresentation);
-    if (shadowsFor(quality, mobilePresentation) && slots > 1) {
+    // The rung's default, not `Settings.shadows`: a shadowed lamp is a light that can
+    // never be added or removed later, and the player's choice may change mid-drive.
+    // With the shadow map off the lamp simply casts nothing.
+    if (
+      shadowModeFor(shadowModeDefault(quality), quality, mobilePresentation) !== 'off'
+      && slots > 1
+    ) {
       const light = new THREE.SpotLight(0xffffff, DORMANT_INTENSITY);
       limitShadowRange(light);
       light.shadow.mapSize.set(HEADLAMP_SHADOW_MAP, HEADLAMP_SHADOW_MAP);

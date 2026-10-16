@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { WebGLProgramParametersWithUniforms } from 'three';
 import { hashUnit2 } from '../core/rng';
-import { shadowsFor, type GraphicsQuality } from '../game/settings';
+import { shadowModeDefault, shadowModeFor, type GraphicsQuality } from '../game/settings';
 import { weather } from '../world/weather';
 
 /**
@@ -689,10 +689,11 @@ const pan = { x: 0, z: 0 };
  *
  * `dt` is the render frame's delta, NOT wall-clock: a paused or time-scaled game
  * must not have clouds drifting on its own. `dayFactor` is the sky's, and the rung
- * decides the detail octave — `shadowsFor` is reused rather than a new tier key
- * invented, because it already answers the question being asked here (does this
- * presentation have per-pixel fill rate to spare for the light), and it answers no
- * for every phone, which is where the second octave was worth the most.
+ * decides the detail octave — the rung's default shadow mode through `shadowModeFor`
+ * is reused rather than a new tier key invented, because it already answers the
+ * question being asked here (does this presentation have per-pixel fill rate to spare
+ * for the light), and it answers no for every phone, which is where the second octave
+ * was worth the most. The player's `Settings.shadows` is a different question.
  */
 export function advanceCloudShadows(
   seed: number,
@@ -718,7 +719,8 @@ export function advanceCloudShadows(
     (1 - 0.9 * Math.max(0, w.cloud - 0.6) / 0.4) *
     (1 - 0.6 * w.haze) *
     (1 - w.dust);
-  uniforms.uCloudDetail.value = shadowsFor(quality, mobilePresentation) ? 1 : 0;
+  uniforms.uCloudDetail.value =
+    shadowModeFor(shadowModeDefault(quality), quality, mobilePresentation) !== 'off' ? 1 : 0;
   uniforms.uWet.value = w.wet;
   uniforms.uGroundPan.value.set(
     originX - WET_PERIOD_M * Math.floor(originX / WET_PERIOD_M),

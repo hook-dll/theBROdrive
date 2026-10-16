@@ -309,9 +309,33 @@ export function starMagnitudeFor(
   return mobilePresentation ? tier.mobileStarMagnitude : tier.starMagnitude;
 }
 
-/** Whether this presentation pays for a sun shadow pass. */
-export function shadowsFor(quality: GraphicsQuality, mobilePresentation: boolean): boolean {
-  return mobilePresentation ? GRAPHICS_TIERS[quality].mobileShadows : GRAPHICS_TIERS[quality].shadows;
+/**
+ * Sun shadows as the player chose them: none, only the near cascade around the camera
+ * (about 30 m, so the car and its neighbours stand on the ground), or near plus the
+ * wide map out to the horizon.
+ */
+export type ShadowMode = 'off' | 'near' | 'full';
+
+/** Default for `Settings.shadows` at a rung. */
+export function shadowModeDefault(quality: GraphicsQuality): ShadowMode {
+  return GRAPHICS_TIERS[quality].shadows ? 'full' : 'off';
+}
+
+/** Default for `Settings.grass` at a rung: the rungs whose build profile carried it. */
+export function grassDefault(quality: GraphicsQuality): boolean {
+  return quality === 'standard' || quality === 'blessing';
+}
+
+/**
+ * The shadow mode this presentation pays for. A phone stays without the pass on a rung
+ * whose tier says so, whatever the setting: that rule is about the device, not taste.
+ */
+export function shadowModeFor(
+  mode: ShadowMode,
+  quality: GraphicsQuality,
+  mobilePresentation: boolean,
+): ShadowMode {
+  return mobilePresentation && !GRAPHICS_TIERS[quality].mobileShadows ? 'off' : mode;
 }
 
 /**
@@ -540,6 +564,13 @@ export interface Settings {
   fieldOfView: number;
   /** FXAA: edge antialiasing in the post pass, on the shaded picture (render/hazeshader.ts). */
   fxaa: boolean;
+  /** Sun shadows (`ShadowMode`); the rung's default until the player chooses. */
+  shadows: ShadowMode;
+  /**
+   * Ground cover and plants, and the fine open desert, built into the world (render/
+   * retro.ts build profile). Fixed for a load, so changing it reloads the drive.
+   */
+  grass: boolean;
   /**
    * Frames per second the presentation may present, or null for no cap.
    *
@@ -676,6 +707,8 @@ export const DEFAULT_SETTINGS: Settings = {
   renderScale: null,
   retroLines: 360,
   fxaa: true,
+  shadows: 'full',
+  grass: true,
   // Uncapped by default on every device, phones included: a cap is the player's choice
   // to make (heat, noise), not a default to discover.
   frameRateLimit: null,
@@ -736,6 +769,8 @@ export function withQualityPreset(
     renderScale: null,
     retroLines: 360,
     fxaa: GRAPHICS_TIERS[quality].fxaa,
+    shadows: shadowModeDefault(quality),
+    grass: grassDefault(quality),
     frameRateLimit: null,
   };
 }
@@ -750,6 +785,8 @@ export function qualityPresetOf(settings: Settings): QualityPreset | null {
     settings.viewDistance === preset
     && settings.trafficDensity === preset
     && settings.fxaa === GRAPHICS_TIERS[settings.graphicsQuality].fxaa
+    && settings.shadows === shadowModeDefault(settings.graphicsQuality)
+    && settings.grass === grassDefault(settings.graphicsQuality)
     && settings.frameRateLimit === null
     && (settings.graphicsQuality === 'retro' ? settings.retroLines === 360 : settings.renderScale === null);
   return onPreset ? preset : null;
@@ -778,6 +815,8 @@ export const PHONE_FIRST_LAUNCH = {
   graphicsQuality: 'acceptable',
   graphicsQualitySource: 'device',
   fxaa: false,
+  shadows: 'off',
+  grass: false,
   viewDistance: 'very_low',
   trafficDensity: 'very_low',
 } as const satisfies Partial<Settings>;
@@ -830,6 +869,14 @@ export function sanitizeSettings(raw: unknown): Settings {
     typeof obj.fieldOfView === 'number' && Number.isFinite(obj.fieldOfView)
       ? obj.fieldOfView
       : DEFAULT_FIELD_OF_VIEW;
+  // Anything unrecognised is standard, so an old save (which has no such field)
+  // keeps the look it was made with.
+  const graphicsQuality: GraphicsQuality =
+    obj.graphicsQuality === 'retro'
+      || obj.graphicsQuality === 'acceptable'
+      || obj.graphicsQuality === 'blessing'
+      ? obj.graphicsQuality
+      : 'standard';
 
   // Missing unit-interval settings mean an old save: use the authored default.
   const unitInterval = (value: unknown, fallback: number): number =>
@@ -881,14 +928,7 @@ export function sanitizeSettings(raw: unknown): Settings {
     radioStation1Url: radioUrl(obj.radioStation1Url, 'https://streams.radiomast.io/nts1'),
     radioStation2Url: radioUrl(obj.radioStation2Url, 'https://streams.radiomast.io/nts2'),
     keyBindings: {},
-    // Anything unrecognised is standard, so an old save (which has no such field)
-    // keeps the look it was made with.
-    graphicsQuality:
-      obj.graphicsQuality === 'retro'
-        || obj.graphicsQuality === 'acceptable'
-        || obj.graphicsQuality === 'blessing'
-        ? obj.graphicsQuality
-        : 'standard',
+    graphicsQuality,
     // A MISSING source means preferences written before this field existed, and the
     // honest reading of those is that the question has been answered — by whoever wrote
     // them. Reading it as `default` instead would re-measure every existing player once
@@ -921,6 +961,13 @@ export function sanitizeSettings(raw: unknown): Settings {
       typeof obj.fxaa === 'boolean'
         ? obj.fxaa
         : obj.graphicsQuality !== 'acceptable' && obj.graphicsQuality !== 'retro',
+    // Missing or unrecognised means a save from before the option: the stored rung's
+    // own default, which is what that save was drawing.
+    shadows:
+      obj.shadows === 'off' || obj.shadows === 'near' || obj.shadows === 'full'
+        ? obj.shadows
+        : shadowModeDefault(graphicsQuality),
+    grass: typeof obj.grass === 'boolean' ? obj.grass : grassDefault(graphicsQuality),
     // Snap to an offered rate rather than clamping, so a hand-edited 31 or 999 cannot
     // become a frame rate the menu has no button for. `mobileFrameRate` is the phone-only
     // name this setting had first; reading it is how a save made before this change keeps

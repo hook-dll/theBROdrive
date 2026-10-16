@@ -4,6 +4,18 @@
 
 ### Added
 
+- SHADOWS AND GRASS SETTINGS (`game/settings.ts` `ShadowMode` `shadowModeFor`,
+  `render/retro.ts` `buildProfileFor`, `render/sky.ts` `setShadowMode`, `core/renderer.ts`
+  `setShadowMode`, `ui/menu.ts`). Two rows beside Antialiasing, independent of the
+  quality preset, so Low with heavy traffic can still have shadows under the cars and
+  grass can be judged on its own. Shadows: Off, Near (only the 32 m cascade around the
+  camera; the sun's wide map sits at zero intensity and is not redrawn) or Full. Grass
+  On/Off picks the build profile (`full` or `light`) that the rung alone used to pick;
+  changing it saves and reloads the drive. Each preset sets both from its rung, so Low
+  is still no grass and Medium still full shadows, and a save without them gets its
+  rung's defaults. Off against Near/Full toggles the shadow map and recompiles as a rung
+  change always has; Near against Full changes only intensities and map updates. Phones
+  stay without sun shadows on every rung whose tier says so.
 - LESS SCRIPT PER FRAME (`vehicle/vehicle.ts` `HiddenStillGroup`, `render/vista.ts`
   `GROUND_REFRESH_S`, `world/traffic.ts` control phases). The owner's Windows profile is
   80% scripting, and the frame's cost barely followed draws or triangles (190 draws at

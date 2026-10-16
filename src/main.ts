@@ -18,7 +18,7 @@ import {
   TIME_OF_DAY_PRESETS,
   loadStoredSettings,
   presentationFpsFor,
-  shadowsFor,
+  shadowModeFor,
   starMagnitudeFor,
   storeSettings,
   vehicleLightSlotsFor,
@@ -303,10 +303,10 @@ async function boot(): Promise<void> {
     tierUndetected =
       world.state.settings.graphicsQualitySource === 'default' && !mobilePresentation;
   }
-  // Before anything is built: the rung's build profile (render/retro.ts) decides the
-  // ground cover, the plants, the open desert and, on Very Low, the finishing pass, and
-  // all of them are baked for the page's lifetime.
-  installBuildProfile(world.state.settings.graphicsQuality);
+  // Before anything is built: the build profile (render/retro.ts), from the rung and the
+  // grass setting, decides the ground cover, the plants, the open desert and, on Very
+  // Low, the finishing pass, and all of them are baked for the page's lifetime.
+  installBuildProfile(world.state.settings.graphicsQuality, world.state.settings.grass);
   /** A switch across build profiles has started its save-and-reload. */
   let profileReloading = false;
 
@@ -348,6 +348,7 @@ async function boot(): Promise<void> {
     mobilePresentation,
     world.state.settings.renderScale,
     world.state.settings.fieldOfView,
+    world.state.settings.shadows,
   );
   renderer.setRetroLines(world.state.settings.retroLines);
   /** Fullscreen API mode shared by the plus key and the touch fullscreen button. */
@@ -418,6 +419,7 @@ async function boot(): Promise<void> {
   const sky = new Sky(renderer.scene, renderer.fog, renderer.renderer, starField);
   // The sun's shadow map is sized by the tier (`GraphicsTier.sunShadowMapSize`).
   sky.setQuality(world.state.settings.graphicsQuality, mobilePresentation);
+  sky.setShadowMode(world.state.settings.shadows);
   await sky.waitForAssets();
   // Warm every POI building: building one costs 3.7 ms on a 5950X — more than the
   // whole 3 ms streaming budget — and a first use happens while the player is driving
@@ -721,9 +723,9 @@ async function boot(): Promise<void> {
                 ? `auto, ${(renderer.resolutionScale * 100).toFixed(0)}% of the rung's ceiling`
                 : `${Math.round(s.renderScale * 100)}% of the display, fixed`
             }), dpr ${window.devicePixelRatio.toFixed(2)}`,
-          `presenting ${framesPerSecond}, shadows ` +
-            `${shadowsFor(s.graphicsQuality, mobilePresentation) ? 'on' : 'off'}, ` +
-            `fxaa ${s.fxaa ? 'on' : 'off'}`,
+          `presenting ${framesPerSecond}, shadows `
+            + `${shadowModeFor(s.shadows, s.graphicsQuality, mobilePresentation)}, `
+            + `grass ${s.grass ? 'on' : 'off'}, fxaa ${s.fxaa ? 'on' : 'off'}`,
           gpuLine,
           `simulation fixed at ${simulationHz} Hz`,
           `light slots ${spotSlots} spot per lit fragment, stars to magnitude ${stars}`,
@@ -2973,12 +2975,15 @@ async function boot(): Promise<void> {
     },
     applySettings: (next) => {
       world.apply({ t: 'settings', settings: next });
-      // A rung on another build profile is a reload: the profile is built into the
-      // world's ground cover, plants and open desert, and on Very Low the finishing pass
-      // (render/retro.ts). So Very Low <-> anything and Low <-> Medium/High reload; Medium
-      // <-> High applies in place. The drive is saved and marked for resume first, so
-      // the player lands back in the car rather than on the title.
-      if (buildProfileFor(world.state.settings.graphicsQuality) !== activeBuildProfile()) {
+      // A rung or grass setting on another build profile is a reload: the profile is
+      // built into the world's ground cover, plants and open desert, and on Very Low the
+      // finishing pass (render/retro.ts). So Very Low <-> anything and grass on <-> off
+      // reload; rungs that keep the profile apply in place. The drive is saved and marked
+      // for resume first, so the player lands back in the car rather than on the title.
+      if (
+        buildProfileFor(world.state.settings.graphicsQuality, world.state.settings.grass)
+          !== activeBuildProfile()
+      ) {
         if (!profileReloading) {
           profileReloading = true;
           const state = stateForSave();
@@ -2998,6 +3003,8 @@ async function boot(): Promise<void> {
       pads.setSteeringSensitivity(world.state.settings.controllerSteerSensitivity);
       audio.applySettings(world.state.settings);
       renderer.setFxaa(world.state.settings.fxaa);
+      renderer.setShadowMode(world.state.settings.shadows);
+      sky.setShadowMode(world.state.settings.shadows);
       renderer.setRenderScale(world.state.settings.renderScale);
       renderer.setRetroLines(world.state.settings.retroLines);
       camera.setFieldOfView(world.state.settings.fieldOfView);

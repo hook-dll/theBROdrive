@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { maxAnisotropy } from './texturequality';
 import { GRAPHICS_CONFIG } from '../config';
-import { GRAPHICS_TIERS, type GraphicsQuality } from '../game/settings';
+import { GRAPHICS_TIERS, type GraphicsQuality, type ShadowMode } from '../game/settings';
 import { DAY_LENGTH } from '../game/state';
 import { skyGradientAt } from '../world/gradient';
 import { hash01 } from '../core/rng';
@@ -928,6 +928,12 @@ export class Sky {
    * map is read, as the sun's, inside its box.
    */
   private readonly sunNearLight: THREE.DirectionalLight;
+  /**
+   * `Settings.shadows`. Near leaves the wide map at zero intensity (the cascade shader
+   * then reads it as lit) and stops redrawing it; only intensities and `autoUpdate`
+   * change, so moving between modes never recompiles a program.
+   */
+  private shadowMode: ShadowMode = 'full';
   private readonly hemiLight: THREE.HemisphereLight;
   /** Solar System Scope lunar map, CC BY 4.0; attribution is in LICENSE. */
   private readonly moonTexture: THREE.Texture;
@@ -1537,8 +1543,10 @@ export class Sky {
       smoothstep(0, SHADOW_FADE_ELEVATION, elevation) *
       smoothstep(SHADOW_KEY_SHARE_GONE, SHADOW_KEY_SHARE_FULL, keyShare) *
       (1 - 0.45 * weather.haze) * (1 - 0.9 * weather.dust) * (1 - 0.75 * weather.cloud);
-    this.sunLight.shadow.intensity = shadowStrength;
-    this.sunNearLight.shadow.intensity = shadowStrength;
+    const wideStrength = this.shadowMode === 'full' ? shadowStrength : 0;
+    const nearStrength = this.shadowMode === 'off' ? 0 : shadowStrength;
+    this.sunLight.shadow.intensity = wideStrength;
+    this.sunNearLight.shadow.intensity = nearStrength;
     // A zero-strength shadow is never drawn again until it returns. Freezing the map
     // rather than clearing `castShadow` is the point: `castShadow` is compiled into
     // every lit program, so switching it at dusk recompiled the world, while three
@@ -1548,11 +1556,12 @@ export class Sky {
     //
     // Except before the map exists. A drive that launches at night would otherwise
     // allocate the map and compile every caster's depth program at DAWN, with the player
-    // watching; one pass while there is no map puts both under the loading cover.
+    // watching; one pass while there is no map puts both under the loading cover. Near
+    // keeps that one pass for the wide map too, so its sampler always has a map to read.
     const shadow = this.sunLight.shadow;
-    shadow.autoUpdate = shadowStrength > 0 || shadow.map === null;
+    shadow.autoUpdate = wideStrength > 0 || shadow.map === null;
     const nearShadow = this.sunNearLight.shadow;
-    nearShadow.autoUpdate = shadowStrength > 0 || nearShadow.map === null;
+    nearShadow.autoUpdate = nearStrength > 0 || nearShadow.map === null;
     this.sunLight.target.position.copy(this._targetPos);
     this.sunLight.target.updateMatrixWorld();
     this.sunNearLight.target.position.copy(this._nearTargetPos);
@@ -1672,6 +1681,11 @@ export class Sky {
   setQuality(quality: GraphicsQuality, mobilePresentation?: boolean): void {
     this.starField.setQuality(quality, mobilePresentation);
     this.applyShadowBox(GRAPHICS_TIERS[quality].sunShadowMapSize);
+  }
+
+  /** `Settings.shadows`, applied by the next `update`; see `shadowMode`. */
+  setShadowMode(mode: ShadowMode): void {
+    this.shadowMode = mode;
   }
 
   /**

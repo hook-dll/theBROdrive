@@ -12,6 +12,8 @@ import type { GameLoop } from '../core/loop';
 import type { Renderer } from '../core/renderer';
 import {
   GRAPHICS_TIERS,
+  grassDefault,
+  shadowModeDefault,
   presentationFpsFor,
   qualityPresetForDetail,
   qualityPresetOf,
@@ -245,9 +247,17 @@ export async function warmUpBoot(ctx: BootWarmupContext): Promise<void> {
       const current = ctx.world.state.settings;
       const settings = qualityPresetOf(current) !== null
         ? withQualityPreset(current, qualityPresetForDetail(tier), current.graphicsQualitySource)
-        : { ...current, graphicsQuality: tier, fxaa: GRAPHICS_TIERS[tier].fxaa };
+        : {
+          ...current,
+          graphicsQuality: tier,
+          fxaa: GRAPHICS_TIERS[tier].fxaa,
+          shadows: shadowModeDefault(tier),
+          grass: grassDefault(tier),
+        };
       ctx.world.apply({ t: 'settings', settings });
       ctx.renderer.setFxaa(settings.fxaa);
+      ctx.renderer.setShadowMode(settings.shadows);
+      ctx.sky.setShadowMode(settings.shadows);
       ctx.renderer.setQuality(tier);
       ctx.sky.setQuality(tier, ctx.mobilePresentation);
       const horizon = viewDistanceFor(settings.viewDistance, ctx.mobilePresentation);
