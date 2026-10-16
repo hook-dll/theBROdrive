@@ -293,7 +293,7 @@ async function boot(): Promise<void> {
    */
   let tierUndetected = false;
   {
-    const stored = loadStoredSettings();
+    const stored = loadStoredSettings(mobilePresentation);
     if (stored) {
       world.apply({ t: 'settings', settings: stored });
     }
@@ -346,7 +346,7 @@ async function boot(): Promise<void> {
     world.state.settings.fxaa,
     DEFAULT_INK_STRENGTH,
     mobilePresentation,
-    world.state.settings.renderScale,
+    world.state.settings.renderHeight,
     world.state.settings.fieldOfView,
     world.state.settings.shadows,
   );
@@ -693,8 +693,8 @@ async function boot(): Promise<void> {
         const measuresGpu = renderer.measuresGpuTime;
         // THREE STATES, NOT TWO. "Not measurable" and "not measured yet" are different
         // answers and only one of them is about the device: `gpuFrameMs` is also null
-        // immediately after any resolution change, because the controller throws its
-        // evidence away, so a machine that measures its GPU perfectly well would have been
+        // immediately after any resolution change, because the renderer throws its
+        // average away, so a machine that measures its GPU perfectly well would have been
         // told its GPU could not be measured. Reporting the wrong one of these sends
         // somebody hunting a browser limitation they do not have.
         const gpuLine = !measuresGpu
@@ -715,17 +715,16 @@ async function boot(): Promise<void> {
         const stars = starMagnitudeFor(s.graphicsQuality, mobilePresentation);
         const framesPerSecond =
           s.frameRateLimit === null ? 'uncapped' : `${s.frameRateLimit} FPS (capped)`;
+        const frame = renderer.drawingBufferSize;
         const header = [
           `tier ${s.graphicsQuality}, ${mobilePresentation ? 'phone' : 'desktop'} presentation`,
-          `pixels ${(renderer.renderedPixels / 1_000_000).toFixed(2)} Mpx `
-            + `(${
-              s.renderScale === null
-                ? `auto, ${(renderer.resolutionScale * 100).toFixed(0)}% of the rung's ceiling`
-                : `${Math.round(s.renderScale * 100)}% of the display, fixed`
-            }), dpr ${window.devicePixelRatio.toFixed(2)}`,
+          `resolution ${frame.width}x${frame.height} `
+            + `(${s.graphicsQuality === 'retro' ? s.retroLines : s.renderHeight}p), `
+            + `${((frame.width * frame.height) / 1_000_000).toFixed(2)} Mpx, `
+            + `dpr ${window.devicePixelRatio.toFixed(2)}`,
           `presenting ${framesPerSecond}, shadows `
             + `${shadowModeFor(s.shadows, s.graphicsQuality, mobilePresentation)}, `
-            + `grass ${s.grass ? 'on' : 'off'}, fxaa ${s.fxaa ? 'on' : 'off'}`,
+            + `grass ${s.grass}, fxaa ${s.fxaa ? 'on' : 'off'}`,
           gpuLine,
           `simulation fixed at ${simulationHz} Hz`,
           `light slots ${spotSlots} spot per lit fragment, stars to magnitude ${stars}`,
@@ -739,12 +738,12 @@ async function boot(): Promise<void> {
         // WHEN THERE IS NO GPU TIMER — every Android browser, which is the device whose
         // heat started this — the frame budget below is the whole of what can be known, and
         // the only way to attribute its `waiting` is to change something and watch. The
-        // render scale is the change that is both a single variable and applied without a
+        // frame height is the change that is both a single variable and applied without a
         // reload: it scales every pass's pixel work and the number of draws not at all. If
         // halving the pixels does not move the waiting, pixels are not what the frame waits for.
         if (!measuresGpu) {
           header.push(
-            'Attribution without a timer: set Render scale to 50% on the Display tab and re-read.',
+            'Attribution without a timer: set Resolution to 540p under Quality > Advanced and re-read.',
             'Waiting that shrinks with it is pixel work; waiting that does not is elsewhere.',
           );
         }
@@ -2151,13 +2150,13 @@ async function boot(): Promise<void> {
     trailers: trailerField,
   });
   /**
-   * Holds the adaptive-resolution controller off the frames that are not worth
-   * judging. Every measurement taken before `settleLaunchResolution` (app/bootwarmup.ts) has finished
-   * belongs to the launch transient — freshly compiled shader variants, first
-   * texture uploads, the boot GC — not to the cost of the drive, and letting it
-   * judge those walked a healthy machine straight down to its resolution floor.
+   * Holds the renderer's GPU average off the frames that are not worth counting. Every
+   * measurement taken before `measureLaunchFrame` (app/bootwarmup.ts) has finished
+   * belongs to the launch transient — freshly compiled shader variants, first texture
+   * uploads, the boot GC — not to the cost of the drive, and counting those would read a
+   * healthy machine as one that cannot hold its rung.
    */
-  let adaptationFrozen = true;
+  let gpuTimingFrozen = true;
 
   /**
    * The pad buttons the RENDER frame owns, and the rumble it drives.
@@ -2827,9 +2826,8 @@ async function boot(): Promise<void> {
 
     // GPU timer queries measure only render submission. The one startup PMREM bake
     // is excluded because it is a different GPU workload; ordinary frames, including
-    // the whole day-night transition, remain eligible for adaptive resolution.
-    const adaptationEligible = !adaptationFrozen && !sky.didBakeEnvironmentThisFrame;
-    renderer.adaptResolution(adaptationEligible, true);
+    // the whole day-night transition, count towards the GPU average.
+    renderer.setGpuTimingEligible(!gpuTimingFrozen && !sky.didBakeEnvironmentThisFrame);
     rebasedThisFrame = false;
     renderer.setDaylight(sky.dayFactor);
     renderer.setItemViewEffects(
@@ -2968,7 +2966,7 @@ async function boot(): Promise<void> {
      * reload lands in is the one that asks the question.
      */
     remeasureGraphics: () => {
-      const settings = withRemeasure(world.state.settings);
+      const settings = withRemeasure(world.state.settings, mobilePresentation);
       world.apply({ t: 'settings', settings });
       storeSettings(settings);
       window.location.reload();
@@ -3005,7 +3003,7 @@ async function boot(): Promise<void> {
       renderer.setFxaa(world.state.settings.fxaa);
       renderer.setShadowMode(world.state.settings.shadows);
       sky.setShadowMode(world.state.settings.shadows);
-      renderer.setRenderScale(world.state.settings.renderScale);
+      renderer.setRenderHeight(world.state.settings.renderHeight);
       renderer.setRetroLines(world.state.settings.retroLines);
       camera.setFieldOfView(world.state.settings.fieldOfView);
       camera.setShake(world.state.settings.cameraShake);
@@ -3138,8 +3136,8 @@ async function boot(): Promise<void> {
     bootGround: initialGround,
     render,
     nextFrameId: () => ++frameId,
-    setAdaptationFrozen: (frozen) => {
-      adaptationFrozen = frozen;
+    setGpuTimingFrozen: (frozen) => {
+      gpuTimingFrozen = frozen;
     },
     takeTierUndetected: () => {
       const undetected = tierUndetected;

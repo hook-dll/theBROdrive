@@ -4,6 +4,22 @@
 
 ### Added
 
+- RESOLUTION IS A FRAME HEIGHT: 540p, 720p, 1080p OR 1440p (`game/settings.ts`
+  `RENDER_HEIGHTS` `renderHeightDefault`, `core/renderer.ts` `renderPixelRatio`
+  `setRenderHeight`, `app/bootwarmup.ts`, `ui/menu.ts`, `main.ts`). The Render scale row
+  (Auto, 50-150%) is now Resolution with four line counts: the frame is drawn at exactly
+  that many lines, width from the window, and shown full-window as before. A percentage
+  needed a base the player could not see — 150% on a 4K display promised 4953x2616.
+  Each rung's preset sets its own height (Low 720, Medium 1080, High 1440; a phone 540,
+  720, 720); Very Low keeps its 360/540 lines. The hints quote the real pixels and how
+  the frame meets the screen (1440p on a 4K panel is scaled up 1.5x). Stored percentages
+  and Auto become the rung's own height. Dynamic resolution is gone with Auto
+  (`core/adaptivequality.ts` and the rungs' pixel ceilings, floors and supersampling,
+  `tools/adaptive-quality.ts`, `tools/adaptive-resolution.ts`): the GPU running average
+  now lives in the renderer, and the first launch's rung measurement judges each rung by
+  its measured GPU time against the rung's budget instead of by how far the controller
+  had walked the resolution down. `tools/graphics-tiers.ts` checks that every height draws
+  exactly its lines on every canvas.
 - SHADOWS AND GRASS SETTINGS (`game/settings.ts` `ShadowMode` `shadowModeFor`,
   `render/retro.ts` `buildProfileFor`, `render/sky.ts` `setShadowMode`, `core/renderer.ts`
   `setShadowMode`, `ui/menu.ts`). Two rows beside Antialiasing, independent of the
@@ -16,6 +32,13 @@
   rung's defaults. Off against Near/Full toggles the shadow map and recompiles as a rung
   change always has; Near against Full changes only intensities and map updates. Phones
   stay without sun shadows on every rung whose tier says so.
+- GRASS HAS THREE STATES: FULL, LIGHT, OFF (`game/settings.ts` `GrassMode`,
+  `render/retro.ts` `bare` profile `groundCoverActive`, `world/props/scatter.ts`,
+  `ui/menu.ts`). Grass Off kept Low's light ground cover, which still read as grass.
+  Full and Light are the two builds the rungs always had; Off is Light without any
+  ground cover. Measured at the drive's start on Low (seed flick, high traffic and
+  distance): 4463 instanced props with Full, 1882 with Light, 743 with Off. A stored
+  on/off reads as Full/Light.
 - LESS SCRIPT PER FRAME (`vehicle/vehicle.ts` `HiddenStillGroup`, `render/vista.ts`
   `GROUND_REFRESH_S`, `world/traffic.ts` control phases). The owner's Windows profile is
   80% scripting, and the frame's cost barely followed draws or triangles (190 draws at

@@ -1169,7 +1169,7 @@ const POSTCARD_THICKNESS = 0.0022;
  *
  * SUPERSAMPLED ON PURPOSE. Raised, the card sits 0.25 m from the eye, where it covers
  * some 45% of a 16:9 frame's width at the default 58-degree vertical FOV — about 860
- * screen pixels across at 1080p, and half that when adaptive resolution is at its floor.
+ * pixels across at 1080p, and half that at 540p.
  * At 2048 the handwriting is still oversampled at the dark end of that range, which is
  * the whole difference between a card you read and a card you squint at; mipmaps and the
  * hardware anisotropy cap carry the minified end for free.

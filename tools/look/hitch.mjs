@@ -91,7 +91,7 @@ try {
         kmh: Math.round(Math.hypot(b.autopilot.controlledVehicle?.chassis.linvel().x ?? 0, b.autopilot.controlledVehicle?.chassis.linvel().z ?? 0) * 3.6),
         weather: b.weather.now.kind,
         hour: b.state().timeOfDay / 60,
-        scale: b.renderer.resolutionScale,
+        lines: b.renderer.drawingBufferSize.height,
         sunShadow: b.sky.sunLight.shadow.autoUpdate && b.sky.sunLight.shadow.intensity > 0,
         lampShadow: lamp !== null && lamp.shadow.autoUpdate,
         spikes: window.__broSpikes.slice(),
@@ -115,7 +115,7 @@ try {
       const over = (ms) => gaps.filter((g) => g > ms).length;
       const shadows = `${flags.sun === flags.samples ? 'sun' : flags.sun > 0 ? 'sun~' : '-'}/${flags.lamp === flags.samples ? 'lamp' : flags.lamp > 0 ? 'lamp~' : '-'}`;
       console.log(
-        `h=${state.hour.toFixed(2)} s=${state.s} ${state.kmh} km/h ${state.weather} scale=${state.scale.toFixed(2)} shadows=${shadows}`
+        `h=${state.hour.toFixed(2)} s=${state.s} ${state.kmh} km/h ${state.weather} lines=${state.lines} shadows=${shadows}`
           + ` frames=${gaps.length} p50=${at(0.5).toFixed(1)} p99=${at(0.99).toFixed(1)} max=${(sorted.at(-1) ?? 0).toFixed(0)}`
           + ` >25ms=${over(25)} >50ms=${over(50)} programs=${programs}`,
       );

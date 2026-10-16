@@ -42,7 +42,7 @@ export type TimeOfDayPreset = 'morning' | 'noon' | 'evening' | 'midnight';
  * processor time, so it moved to the CPU level (`viewDistanceFor`), next to the traffic.
  * Everything left here is what the graphics card pays for.
  *
- * THE PIXEL NUMBERS ARE ABSOLUTE CEILINGS, and that is the second half of the fix. The
+ * THE RESOLUTION IS A NUMBER OF LINES, and that is the second half of the fix. The
  * tiers used to resolve their resolution as `min(DPR x multiplier, DPR cap)` — a display
  * PERCENTAGE — for everything except `acceptable`, which was the only tier with an
  * absolute budget. On a display whose device-pixel-ratio is 1, which is every 4K
@@ -52,9 +52,9 @@ export type TimeOfDayPreset = 'morning' | 'noon' | 'evening' | 'midnight';
  * on an Intel N100 at 4K and `standard` on a 4090 at 4K were the same load, and the
  * only way down was `acceptable` at 1.44 Mpx — a 5.8x cliff, with no rung in between.
  *
- * An absolute ceiling makes a rung mean the same thing on a phone, a mini-PC and a
- * workstation. Below the ceiling the display's own sharpness still decides, and above
- * it a supersampling multiplier lets the top rung spend headroom it is told it has.
+ * A fixed frame height makes a rung mean the same thing on a phone, a mini-PC and a
+ * workstation, and it is the one number a player can read without arithmetic: 1080p is
+ * 1080 lines on any screen, where "150%" on a 4K display promised 4953x2616.
  */
 export type GraphicsQuality = 'retro' | 'acceptable' | 'standard' | 'blessing';
 
@@ -64,23 +64,12 @@ export type GraphicsQuality = 'retro' | 'acceptable' | 'standard' | 'blessing';
  */
 export interface GraphicsTier {
   /**
-   * Absolute ceiling on rendered scene pixels, on a desktop presentation. The render
-   * scale is `min(DPR x supersample, sqrt(ceiling / cssPixels))`, so a large display
-   * cannot exceed this and a small one is never downscaled below its own sharpness.
+   * Default `Settings.renderHeight` on a desktop presentation: the lines a preset puts
+   * the frame at. Width follows the canvas aspect (core/renderer.ts `pixelRatioFor`).
    */
-  readonly maxPixels: number;
-  /** The same ceiling under phone presentation, where a DPR of 3 invites millions. */
-  readonly mobileMaxPixels: number;
-  /**
-   * Absolute FLOOR on rendered scene pixels: where dynamic resolution stops. Absolute
-   * rather than a fraction of the ceiling, because a fraction says nothing about what
-   * the image looks like — 0.55 of a phone's budget and 0.55 of a 4K workstation's are
-   * different pictures, and the whole point of a floor is the picture it guarantees.
-   */
-  readonly minPixels: number;
-  readonly mobileMinPixels: number;
-  /** Supersampling headroom above the display, for a rung told it has some. */
-  readonly supersample: number;
+  readonly renderHeight: RenderHeight;
+  /** The same under phone presentation, where a DPR of 3 invites millions. */
+  readonly mobileRenderHeight: RenderHeight;
   /** Sun shadow map. The one per-frame pass a weak machine cannot afford at any size. */
   readonly shadows: boolean;
   /**
@@ -159,12 +148,12 @@ export interface GraphicsTier {
  *    cover, plants and open desert of `retro` — because the cover alone was most of the
  *    frame's triangles. Switching to or from it reloads the drive too.
  *  - `standard` — an ordinary desktop with a discrete GPU or a good integrated one.
- *    Native on a 1440p display, shadows on.
- *  - `blessing` — a machine with headroom to spare. Supersamples,
- *    and a sky deep enough to be crowded rather than plotted.
+ *    1080 lines, shadows on.
+ *  - `blessing` — a machine with headroom to spare. 1440 lines, which a 1080p display
+ *    shows supersampled, and a sky deep enough to be crowded rather than plotted.
  *
  * A rung is a statement about the MACHINE, and a phone is two machines at once: the one
- * that draws the picture and the one that gets hot. Its pixel ceiling is
+ * that draws the picture and the one that gets hot. Its frame height is
  * the first; its shadow pass and its frame rate are the second — and the second is the
  * player's, because no browser will tell the game how warm the phone is.
  */
@@ -173,14 +162,14 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
   // 36.5 ms of GPU at 0.92 Mpx — 20 FPS — and the only way further down that ladder
   // was a bilinear stretch of fewer pixels, which reads as a broken image. This rung
   // draws a fixed low-resolution frame upscaled by whole pixels (render/retro.ts), so
-  // the pixels are a style rather than a blur. Its pixel numbers are what the menu
-  // quotes; the renderer derives the real buffer from the display's height.
+  // the pixels are a style rather than a blur. Its frame height is `retroLines`, never
+  // `renderHeight`: the line count IS the look.
   retro: {
-    maxPixels: 640 * 360,
-    mobileMaxPixels: 640 * 360,
-    minPixels: 640 * 360,
-    mobileMinPixels: 640 * 360,
-    supersample: 1,
+    // Not drawn on this rung. What a Very Low preset leaves in the setting: the lowest
+    // offered, so a player who leaves the rung by the Detail row alone lands on the
+    // lightest frame the other rungs have.
+    renderHeight: 540,
+    mobileRenderHeight: 540,
     shadows: false,
     sunShadowMapSize: 2048,
     fxaa: false,
@@ -195,11 +184,10 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     mirrorScale: 0,
   },
   acceptable: {
-    maxPixels: 1600 * 900,
-    mobileMaxPixels: 960 * 540,
-    minPixels: 1280 * 720,
-    mobileMinPixels: 640 * 360,
-    supersample: 1,
+    // 720 lines on a desktop: the old 1280x720 floor of this rung, a mini-PC on a 4K
+    // television shading a ninth of the panel. A phone gets 540.
+    renderHeight: 720,
+    mobileRenderHeight: 540,
     shadows: false,
     sunShadowMapSize: 2048,
     fxaa: false,
@@ -214,11 +202,8 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     mirrorScale: 0.5,
   },
   standard: {
-    maxPixels: 2560 * 1440,
-    mobileMaxPixels: 1280 * 720,
-    minPixels: 1600 * 900,
-    mobileMinPixels: 960 * 540,
-    supersample: 1,
+    renderHeight: 1080,
+    mobileRenderHeight: 720,
     shadows: true,
     sunShadowMapSize: 2048,
     fxaa: true,
@@ -236,12 +221,11 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     mirrorScale: 1,
   },
   blessing: {
-    // 4800x2700, which is 4K with the 1.25x supersampling this rung always had.
-    maxPixels: 4800 * 2700,
-    mobileMaxPixels: 1600 * 900,
-    minPixels: 1920 * 1080,
-    mobileMinPixels: 1280 * 720,
-    supersample: 1.25,
+    // 1440 on a desktop: native on a 1440p panel, supersampled on 1080p, 1.5x upscaled
+    // on 4K. A phone's screen cannot resolve more than 720 lines at arm's length, and
+    // the heat a phone pays for pixels is the player's to buy, not the preset's.
+    renderHeight: 1440,
+    mobileRenderHeight: 720,
     shadows: true,
     sunShadowMapSize: 4096,
     fxaa: true,
@@ -256,7 +240,7 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     // the standard rung at 120 frames a second ran this one at 22-26. Spots are also the
     // dearer half — twelve spots alone cost 13.2 ms where twelve points cost 6.0 — so the
     // cut was taken out of the spots. The tier keeps everything else it was chosen for:
-    // the supersampling, the sky.
+    // the resolution, the sky.
     //
     // THE POINT SLOTS ARE GONE. Their only sources were the switchable room lights in
     // the mast huts, and the whole point-light path went with them. What is left is 11
@@ -321,9 +305,18 @@ export function shadowModeDefault(quality: GraphicsQuality): ShadowMode {
   return GRAPHICS_TIERS[quality].shadows ? 'full' : 'off';
 }
 
-/** Default for `Settings.grass` at a rung: the rungs whose build profile carried it. */
-export function grassDefault(quality: GraphicsQuality): boolean {
-  return quality === 'standard' || quality === 'blessing';
+/**
+ * How much ground cover a load is built with (render/retro.ts build profile): Full (the
+ * full cover, plants and fine open desert), Light (the light cover, plants and coarse
+ * open desert Low always had), Off (Light without any ground cover).
+ */
+export type GrassMode = 'full' | 'light' | 'off';
+
+export const GRASS_MODES: readonly GrassMode[] = ['full', 'light', 'off'];
+
+/** Default for `Settings.grass` at a rung: the build each rung always had. */
+export function grassDefault(quality: GraphicsQuality): GrassMode {
+  return quality === 'standard' || quality === 'blessing' ? 'full' : 'light';
 }
 
 /**
@@ -419,31 +412,26 @@ export function mirrorFrameRateFrom(raw: unknown): MirrorFrameRate {
 }
 
 /**
- * Offered manual render scales, as a fraction of the DISPLAY's own pixels.
+ * Offered frame heights, in lines: the frame is drawn at exactly this many rows, its
+ * width from the canvas aspect, and shown full-window.
  *
- * Not a fraction of the rung: the rung's ceiling is what `Auto` decides to spend, and
- * a player overriding it is answering a different question — how many pixels do I want
- * for this window — which only has a meaning against the window. 100% is one
- * drawing-buffer pixel per device pixel; below that is the in-between a three-rung
- * ladder cannot offer; above it is supersampling, which used to be reachable only by
- * also buying eighteen headlamps.
- *
- * It exists because `Auto` cannot work everywhere: the measurement behind it is a GPU
- * timer query, and a browser without `EXT_disjoint_timer_query_webgl2` — Safari, most
- * Android WebViews — can never move the scale at all. There, three rungs was the whole
- * of the choice.
+ * Lines, not a percentage of the display: a percentage needs a stated base, and the base
+ * is the one thing a player cannot see — 150% on a 4K display was 4953x2616. Four fixed
+ * numbers mean the same picture on every screen, and nothing moves them but the player:
+ * the game used to walk the resolution down by GPU timing, which a browser without
+ * `EXT_disjoint_timer_query_webgl2` (Safari, most Android WebViews) could never do, so
+ * the automatic mode was a different control on different browsers.
  */
-export const RENDER_SCALES = [0.5, 0.7, 0.85, 1, 1.25, 1.5] as const;
-/** One offered fraction. Named because the menu row and the bench both iterate them. */
-export type RenderScaleFraction = (typeof RENDER_SCALES)[number];
-/** A chosen fraction of the display, or null to let the rung and the GPU decide. */
-export type RenderScale = RenderScaleFraction | null;
+export const RENDER_HEIGHTS = [540, 720, 1080, 1440] as const;
+export type RenderHeight = (typeof RENDER_HEIGHTS)[number];
 
-/** An offered fraction, or null. Anything else — hand-edited, stale — is automatic. */
-export function renderScaleFrom(raw: unknown): RenderScale {
-  return typeof raw === 'number' && RENDER_SCALES.some((scale) => scale === raw)
-    ? (raw as RenderScale)
-    : null;
+/** The height a rung's preset puts the frame at, for this presentation. */
+export function renderHeightDefault(
+  quality: GraphicsQuality,
+  mobilePresentation: boolean,
+): RenderHeight {
+  const tier = GRAPHICS_TIERS[quality];
+  return mobilePresentation ? tier.mobileRenderHeight : tier.renderHeight;
 }
 
 /**
@@ -451,7 +439,7 @@ export function renderScaleFrom(raw: unknown): RenderScale {
  * (render/retro.ts). 360 is the rung's own look and its budget; 540 is two display
  * pixels per frame pixel on a 1080-line screen instead of three — visibly finer, and
  * measured on an M2 Pro at the heaviest scenes as +0.7-0.9 ms of GPU on 2.4-3.6 (the
- * rung's frame is mostly geometry, not fill). Offered in the Render scale row; never moved
+ * rung's frame is mostly geometry, not fill). Offered in the Resolution row; never moved
  * by the game, because the pixels are the look.
  */
 export const RETRO_LINE_CHOICES = [360, 540] as const;
@@ -542,14 +530,14 @@ export interface Settings {
    */
   graphicsQualitySource: GraphicsQualitySource;
   /**
-   * Manual drawing-buffer scale as a fraction of the display, or null for automatic.
+   * Frame height, lines; see `RENDER_HEIGHTS`. Ignored on Very Low, which draws
+   * `retroLines`.
    *
    * The rung answers "what can this machine afford" in three steps; this answers "how
-   * many pixels do I want" continuously, in both directions, and turns the adaptive
-   * controller off while it is set — `Auto` IS the adaptive mode, and a fixed number
-   * that still drifts is not a fixed number.
+   * many pixels do I want", and the game never moves it: a preset sets it to the rung's
+   * own height (`renderHeightDefault`), and only the player changes it after that.
    */
-  renderScale: RenderScale;
+  renderHeight: RenderHeight;
   /** Very Low's frame height, lines; see `RETRO_LINE_CHOICES`. Ignored on every other rung. */
   retroLines: RetroLines;
   /**
@@ -567,10 +555,10 @@ export interface Settings {
   /** Sun shadows (`ShadowMode`); the rung's default until the player chooses. */
   shadows: ShadowMode;
   /**
-   * Ground cover and plants, and the fine open desert, built into the world (render/
+   * Ground cover, plants and open desert built into the world (`GrassMode`, render/
    * retro.ts build profile). Fixed for a load, so changing it reloads the drive.
    */
-  grass: boolean;
+  grass: GrassMode;
   /**
    * Frames per second the presentation may present, or null for no cap.
    *
@@ -702,13 +690,13 @@ export const DEFAULT_SETTINGS: Settings = {
   // guessing, and not true of measuring, which is what the launch settle already does.
   graphicsQuality: 'standard',
   graphicsQualitySource: 'default',
-  // Automatic: the rung's own ceiling, walked down by GPU measurement if the machine
-  // cannot hold it. A player who would rather name the number picks one in the menu.
-  renderScale: null,
+  // The Medium rung's desktop height; a phone's first launch takes its own
+  // (`PHONE_FIRST_LAUNCH`).
+  renderHeight: GRAPHICS_TIERS.standard.renderHeight,
   retroLines: 360,
   fxaa: true,
   shadows: 'full',
-  grass: true,
+  grass: 'full',
   // Uncapped by default on every device, phones included: a cap is the player's choice
   // to make (heat, noise), not a default to discover.
   frameRateLimit: null,
@@ -733,7 +721,7 @@ export const DEFAULT_SETTINGS: Settings = {
  * a player who moves one of them in Advanced sees `Custom`.
  *
  * A preset also brings what picking a rung always brought: the rung's own
- * antialiasing, automatic resolution (Very Low: its own 360 lines) and no frame cap.
+ * antialiasing, its own frame height (Very Low: its own 360 lines) and no frame cap.
  */
 export type QualityPreset = ComputeLevel;
 
@@ -758,6 +746,7 @@ export function withQualityPreset(
   settings: Settings,
   preset: QualityPreset,
   source: GraphicsQualitySource,
+  mobilePresentation: boolean,
 ): Settings {
   const quality = QUALITY_PRESET_DETAIL[preset];
   return {
@@ -766,7 +755,7 @@ export function withQualityPreset(
     graphicsQualitySource: source,
     viewDistance: preset,
     trafficDensity: preset,
-    renderScale: null,
+    renderHeight: renderHeightDefault(quality, mobilePresentation),
     retroLines: 360,
     fxaa: GRAPHICS_TIERS[quality].fxaa,
     shadows: shadowModeDefault(quality),
@@ -776,10 +765,10 @@ export function withQualityPreset(
 }
 
 /**
- * The preset these settings are exactly on, or null for `Custom`. The render scale is
+ * The preset these settings are exactly on, or null for `Custom`. The frame height is
  * compared off Very Low and its line count on it, because each rung offers only the one.
  */
-export function qualityPresetOf(settings: Settings): QualityPreset | null {
+export function qualityPresetOf(settings: Settings, mobilePresentation: boolean): QualityPreset | null {
   const preset = qualityPresetForDetail(settings.graphicsQuality);
   const onPreset =
     settings.viewDistance === preset
@@ -788,7 +777,9 @@ export function qualityPresetOf(settings: Settings): QualityPreset | null {
     && settings.shadows === shadowModeDefault(settings.graphicsQuality)
     && settings.grass === grassDefault(settings.graphicsQuality)
     && settings.frameRateLimit === null
-    && (settings.graphicsQuality === 'retro' ? settings.retroLines === 360 : settings.renderScale === null);
+    && (settings.graphicsQuality === 'retro'
+      ? settings.retroLines === 360
+      : settings.renderHeight === renderHeightDefault(settings.graphicsQuality, mobilePresentation));
   return onPreset ? preset : null;
 }
 
@@ -798,10 +789,10 @@ export function qualityPresetOf(settings: Settings): QualityPreset | null {
  * cannot step to another rung in place — so Very Low starts it from Low: the Low preset
  * when the settings were on a preset, the Low rung alone when they were not.
  */
-export function withRemeasure(settings: Settings): Settings {
+export function withRemeasure(settings: Settings, mobilePresentation: boolean): Settings {
   if (settings.graphicsQuality !== 'retro') return { ...settings, graphicsQualitySource: 'default' };
-  return qualityPresetOf(settings) !== null
-    ? withQualityPreset(settings, 'low', 'default')
+  return qualityPresetOf(settings, mobilePresentation) !== null
+    ? withQualityPreset(settings, 'low', 'default', mobilePresentation)
     : { ...settings, graphicsQuality: 'acceptable', graphicsQualitySource: 'default' };
 }
 
@@ -816,7 +807,8 @@ export const PHONE_FIRST_LAUNCH = {
   graphicsQualitySource: 'device',
   fxaa: false,
   shadows: 'off',
-  grass: false,
+  grass: 'light',
+  renderHeight: GRAPHICS_TIERS.acceptable.mobileRenderHeight,
   viewDistance: 'very_low',
   trafficDensity: 'very_low',
 } as const satisfies Partial<Settings>;
@@ -851,7 +843,11 @@ export function frameRateLimitFrom(raw: unknown): FrameRateLimit {
     : null;
 }
 
-export function sanitizeSettings(raw: unknown): Settings {
+/**
+ * Any stored value as a valid `Settings`. `mobilePresentation` picks which column of the
+ * rung a missing or unoffered frame height falls back to.
+ */
+export function sanitizeSettings(raw: unknown, mobilePresentation: boolean): Settings {
   const obj =
     typeof raw === 'object' && raw !== null && !Array.isArray(raw)
       ? (raw as Record<string, unknown>)
@@ -939,9 +935,12 @@ export function sanitizeSettings(raw: unknown): Settings {
         || obj.graphicsQualitySource === 'measured'
         ? obj.graphicsQualitySource
         : 'chosen',
-    // Snapped to an offered fraction rather than clamped, so a hand-edited 0.33 cannot
-    // become a resolution the menu has no button for and the player cannot get back to.
-    renderScale: renderScaleFrom(obj.renderScale),
+    // Snapped to an offered height rather than clamped, so a hand-edited 1000 cannot
+    // become a resolution the menu has no button for. Preferences from before the
+    // heights carry a `renderScale` instead (a percentage, or null for automatic); none
+    // of those names a height, so they land on the rung's own, as a preset would.
+    renderHeight: RENDER_HEIGHTS.find((height) => height === obj.renderHeight)
+      ?? renderHeightDefault(graphicsQuality, mobilePresentation),
     retroLines: retroLinesFrom(obj.retroLines),
     // Whole degrees: the slider steps in ones, and a stored 64.7 would paint as 65 and
     // then render as something else.
@@ -967,7 +966,10 @@ export function sanitizeSettings(raw: unknown): Settings {
       obj.shadows === 'off' || obj.shadows === 'near' || obj.shadows === 'full'
         ? obj.shadows
         : shadowModeDefault(graphicsQuality),
-    grass: typeof obj.grass === 'boolean' ? obj.grass : grassDefault(graphicsQuality),
+    // The two-state switch it replaced stored true for Full and false for Light.
+    grass: (GRASS_MODES as readonly unknown[]).includes(obj.grass)
+      ? (obj.grass as GrassMode)
+      : obj.grass === true ? 'full' : obj.grass === false ? 'light' : grassDefault(graphicsQuality),
     // Snap to an offered rate rather than clamping, so a hand-edited 31 or 999 cannot
     // become a frame rate the menu has no button for. `mobileFrameRate` is the phone-only
     // name this setting had first; reading it is how a save made before this change keeps
@@ -1037,11 +1039,11 @@ export function sanitizeSettings(raw: unknown): Settings {
 const SETTINGS_KEY = 'brodrive-settings-v1';
 
 /** The stored preferences, or null if there are none or they cannot be read. */
-export function loadStoredSettings(): Settings | null {
+export function loadStoredSettings(mobilePresentation: boolean): Settings | null {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (raw === null) return null;
-    return sanitizeSettings(JSON.parse(raw));
+    return sanitizeSettings(JSON.parse(raw), mobilePresentation);
   } catch {
     return null;
   }

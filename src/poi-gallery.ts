@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { primeMaxAnisotropy } from './render/texturequality';
-import { AdaptiveResolutionController } from './core/adaptivequality';
 import { makeFlatMaterial } from './render/materials';
 import { createPoiVariant, mergePoiStatics, poiVariantIndex } from './world/poi-variants';
 import { createStructureInstance, POI_STRUCTURES } from './world/poistructures';
@@ -40,13 +39,12 @@ const OVERVIEW_Z = Math.max(120, GRID_ROWS * 27);
 const WALK_SPEED = 8;
 const FAST_SPEED = 24;
 const EYE_HEIGHT = 1.75;
-/** Mirrors the game's 'acceptable' tier budget: 1600x900 rendered pixels. */
-const MAX_RENDER_PIXELS = 1600 * 900;
-
-function pixelRatio(): number {
-  const cssPixels = Math.max(1, window.innerWidth * window.innerHeight);
-  return Math.min(window.devicePixelRatio, Math.sqrt(MAX_RENDER_PIXELS / cssPixels));
-}
+/**
+ * Frame height, lines: the game's Low rung on a desktop (game/settings.ts), width from
+ * the window. Interiors are fill-rate bound (48 ms a frame at 1600x900, 17 at half of
+ * it), and 720 lines holds the 30 Hz a prototype walkthrough wants.
+ */
+const RENDER_HEIGHT = 720;
 
 interface GalleryEntry {
   readonly name: string;
@@ -211,7 +209,7 @@ export function bootPoiGallery(): void {
   // a hard pixel budget, because this viewer is fill-rate bound, not geometry bound.
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
   primeMaxAnisotropy(renderer);
-  renderer.setPixelRatio(pixelRatio());
+  renderer.setPixelRatio(RENDER_HEIGHT / window.innerHeight);
   renderer.setSize(window.innerWidth, window.innerHeight, false);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -355,7 +353,7 @@ export function bootPoiGallery(): void {
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
-    renderer.setPixelRatio(pixelRatio() * adaptiveScale);
+    renderer.setPixelRatio(RENDER_HEIGHT / window.innerHeight);
     renderer.setSize(window.innerWidth, window.innerHeight, false);
   });
 
@@ -363,29 +361,10 @@ export function bootPoiGallery(): void {
   const right = new THREE.Vector3();
   const movement = new THREE.Vector3();
   const up = new THREE.Vector3(0, 1, 0);
-  /**
-   * Interiors are fill-rate bound: the same frame costs 48 ms at the full pixel
-   * budget and 17 ms at half of it. The game's controller is reused rather than
-   * reinvented, fed the frame period instead of a GPU timer query — this viewer is
-   * GPU-bound by construction, so the two agree, and 'acceptable' already targets
-   * the 30 Hz presentation a prototype walkthrough wants. Its 0.8 floor bottoms out
-   * at exactly 1280x720 of the 1600x900 budget.
-   */
-  const adaptive = new AdaptiveResolutionController('acceptable');
-  let adaptiveScale = 1;
-  const sampleFrameCost = (frameMs: number): void => {
-    if (adaptive.sample(frameMs, true, true, performance.now()) === null) return;
-    if (adaptive.scale === adaptiveScale) return;
-    adaptiveScale = adaptive.scale;
-    renderer.setPixelRatio(pixelRatio() * adaptiveScale);
-    renderer.setSize(window.innerWidth, window.innerHeight, false);
-  };
   let previous = performance.now();
   const render = (now: number): void => {
-    const frameMs = now - previous;
-    const delta = Math.min(0.05, frameMs / 1000);
+    const delta = Math.min(0.05, (now - previous) / 1000);
     previous = now;
-    sampleFrameCost(frameMs);
     camera.getWorldDirection(forward);
     forward.y = 0;
     if (forward.lengthSq() > 0.001) forward.normalize();

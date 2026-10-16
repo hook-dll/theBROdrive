@@ -17,8 +17,8 @@
  *   - every shadow pass skipped (`shadowMap.autoUpdate = false`): drawing the shadow
  *     maps, not sampling them;
  *   - FXAA the other way round from the rung's own;
- *   - the render scale at 0.5 and 0.7 of the display, which separates the per-pixel
- *     half of the frame from the rest; on Very Low instead its buffer one whole factor
+ *   - the frame at 540 and 720 lines (`Renderer.setRenderHeight`), which separates the
+ *     per-pixel half of the frame from the rest; on Very Low instead its buffer one whole factor
  *     finer (540 lines on a 1080-line display, `Settings.retroLines`);
  *   - each part of the world hidden in turn — every chunk provider's content together
  *     (`chunk:poles`, `chunk:poi`, ...), the traffic, the player's car, and every other
@@ -165,13 +165,7 @@ try {
       }
       await sleep(250);
     }
-    await page.evaluate(() => {
-      const b = window.__bro;
-      b.loop.stop();
-      // The rung's own full resolution: a manual choice and back resets the controller.
-      b.renderer.setRenderScale(1);
-      b.renderer.setRenderScale(null);
-    });
+    await page.evaluate(() => window.__bro.loop.stop());
   };
 
   /**
@@ -291,8 +285,9 @@ try {
         }
         if (!retro) {
           changes.set(`fxaa ${fxaa ? 'off' : 'on'}`, [() => r.setFxaa(!fxaa), () => r.setFxaa(fxaa)]);
-          for (const scale of [0.5, 0.7]) {
-            changes.set(`render scale ${scale}`, [() => r.setRenderScale(scale), () => r.setRenderScale(null)]);
+          const own = window.__bro.state().settings.renderHeight;
+          for (const height of [540, 720]) {
+            changes.set(`render height ${height}p`, [() => r.setRenderHeight(height), () => r.setRenderHeight(own)]);
           }
         } else {
           // The retro buffer one whole factor finer: 540 lines on a 1080-line display.
@@ -358,7 +353,7 @@ try {
       await page.evaluate(() => window.__gpu.changes.set('(nothing: noise floor)', [() => {}, () => {}]));
       const settings = ['(nothing: noise floor)'];
       if (info.shadows) settings.push('shadow passes skipped');
-      if (info.tier !== 'retro') settings.push(`fxaa ${info.fxaa ? 'off' : 'on'}`, 'render scale 0.5', 'render scale 0.7');
+      if (info.tier !== 'retro') settings.push(`fxaa ${info.fxaa ? 'off' : 'on'}`, 'render height 540p', 'render height 720p');
       else settings.push('retro buffer x1.5 lines');
       if (process.env.PARTS === '0') {
         for (const name of settings.slice(1)) row(name, await compare(name));

@@ -30,6 +30,7 @@ import type {
   GraphicsQuality,
   GraphicsQualitySource,
   QualityPreset,
+  RenderHeight,
   Settings,
   TimeOfDayPreset,
 } from '../game/settings';
@@ -38,11 +39,13 @@ import {
   DEFAULT_SETTINGS,
   PHONE_FIRST_LAUNCH,
   QUALITY_PRESET_DETAIL,
+  RENDER_HEIGHTS,
   TRAFFIC_CAPS,
   grassDefault,
   qualityPresetOf,
   shadowModeDefault,
   shadowModeFor,
+  type GrassMode,
   type ShadowMode,
   viewDistanceFor,
   loadStoredSettings,
@@ -51,12 +54,7 @@ import {
   withRemeasure,
 } from '../game/settings';
 import { RADIO_RECOMMENDATIONS } from '../audio/radio';
-import {
-  manualRenderScale,
-  offeredRenderScales,
-  prefersMobilePresentation,
-  renderScaleFor,
-} from '../core/renderer';
+import { prefersMobilePresentation, renderPixelRatio } from '../core/renderer';
 import { buildProfileFor, retroPixelRatio } from '../render/retro';
 import type { SpawnRequest } from '../game/spawn';
 import { CAR_MODELS } from '../vehicle/carmodels';
@@ -102,6 +100,18 @@ function el(tag: string, cls?: string): HTMLElement {
 }
 
 /**
+ * What each frame height is, beside the pixels it draws and how it meets the screen
+ * (the Resolution row). Short and about the picture, not the rung: a height is the same
+ * picture on every level.
+ */
+const RESOLUTION_NOTES: Record<RenderHeight, string> = {
+  540: 'The lightest on the graphics chip, and the softest.',
+  720: 'Light on the chip; soft on a big screen.',
+  1080: 'Full HD: sharp on most screens.',
+  1440: 'The sharpest, and the heaviest on the chip.',
+};
+
+/**
  * What a detail level means, spelled out from the rung's own numbers.
  *
  * Read out of `GRAPHICS_TIERS` rather than written here, so a label cannot describe a
@@ -110,10 +120,10 @@ function el(tag: string, cls?: string): HTMLElement {
  * waited for the next load: two halves of one rung described in two places, and only
  * one of them true.
  *
- * PIXELS ARE DELIBERATELY ABSENT. The rung still carries a ceiling, but `Render scale` is
- * the control that names a resolution and quotes it as one — and two rows quoting the
- * same number is the same drift in a new place: a manual render scale makes the rung's
- * ceiling irrelevant, and this line would go on claiming it.
+ * PIXELS ARE DELIBERATELY ABSENT. `Resolution` is the control that names a frame height
+ * and quotes it as one, and the rung's own height is only where a preset puts it — two
+ * rows quoting the same number is the same drift in a new place, and this line would go
+ * on claiming it after the player picked another.
  *
  * Shadows and grass are the player's own rows, so they are passed in as the settings that
  * picking this rung would leave: the rung's defaults from a preset, the current choice
@@ -122,7 +132,7 @@ function el(tag: string, cls?: string): HTMLElement {
 function describeTier(
   quality: GraphicsQuality,
   shadows: ShadowMode,
-  grass: boolean,
+  grass: GrassMode,
   mobilePresentation: boolean,
   inDrive: boolean,
 ): string {
@@ -131,15 +141,16 @@ function describeTier(
   // handed different numbers for the shadow pass and the light slots, and a label
   // quoting the desktop column at a phone would be describing a rung nobody is on.
   const spots = mobilePresentation ? tier.mobileVehicleLightSlots : tier.vehicleLightSlots;
-  const light = buildProfileFor(quality, grass) === 'light';
+  const profile = buildProfileFor(quality, grass);
   return (
     `${SUN_SHADOWS_TEXT[shadowModeFor(shadows, quality, mobilePresentation)]}, ` +
     `${spots} lights shaded on every lit pixel. ` +
     `Stars to magnitude ${mobilePresentation ? tier.mobileStarMagnitude : tier.starMagnitude}. ` +
-    (light
-      ? 'No grass: lighter ground cover, plants and open desert, as on Very Low, under half '
-        + 'the triangles.'
-      : 'Full ground cover with grass.')
+    (profile === 'full'
+      ? 'Full ground cover with grass.'
+      : profile === 'light'
+        ? 'Light ground cover, lighter plants and a coarser open desert, under half the triangles.'
+        : 'No ground cover at all, lighter plants and a coarser open desert.')
     + (inDrive
       ? ' Changing the grass saves the drive and reloads it, and the light count is '
         + 'compiled into the world, so between Medium and High it changes on the next load.'
@@ -200,8 +211,8 @@ const ICONS: Record<string, readonly string[]> = {
   gfx2: ['M5 18v-3M12 18v-7'],
   gfx3: ['M5 18v-3M12 18v-7M19 18v-11'],
   /**
-   * A framed grid, for a control whose axis is PIXELS rather than quality: the render
-   * scale row is the one place in this menu where the player is naming a resolution.
+   * A framed grid, for a control whose axis is PIXELS rather than quality: the
+   * Resolution row is the one place in this menu where the player is naming a resolution.
    */
   pixels: ['M4 5h16v14H4z', 'M4 12h16M12 5v14'],
   /** A view cone from the eye, for the field of view. */
@@ -750,7 +761,7 @@ export interface PauseHooks {
    * The canvas CSS size the resolution policy is resolved against.
    *
    * Not `window.innerWidth`: cinema mode shortens the CANVAS and not the window, so the
-   * two disagree by exactly 180 pixels while it is on — and a render-scale row that
+   * two disagree by exactly 180 pixels while it is on — and a Resolution row that
    * quotes a resolution the game is not rendering is the same drift this control exists
    * to end.
    */
@@ -838,7 +849,7 @@ interface SettingsHost {
   readonly settings: Settings;
   /** Pushes the working copy whole: through world.apply in a drive, to storage on the title. */
   readonly apply: () => void;
-  /** The canvas CSS size the render-scale rows quote pixels for; see `PauseHooks.viewport`. */
+  /** The canvas CSS size the Resolution rows quote pixels for; see `PauseHooks.viewport`. */
   readonly viewport: () => { readonly cssWidth: number; readonly cssHeight: number };
   /** Hands the detail level back to the launch measurement; see `PauseHooks.remeasureGraphics`. */
   readonly remeasureGraphics: () => void;
@@ -1315,7 +1326,7 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
    * build profile (render/retro.ts) is built into the world. Never on the title, where
    * there is no world yet.
    */
-  const reloadsFor = (quality: GraphicsQuality, grass: boolean): boolean =>
+  const reloadsFor = (quality: GraphicsQuality, grass: GrassMode): boolean =>
     inDrive
     && buildProfileFor(quality, grass) !== buildProfileFor(settings.graphicsQuality, settings.grass);
 
@@ -1354,13 +1365,12 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
    * pause overlay is up, so changes are only seen after Resume.
    */
   const renderQuality = (): void => {
-    const preset = qualityPresetOf(settings);
-    // `Render scale` quotes PIXELS, not a percentage of something unstated, and reads
-    // them from the canvas rather than the window: cinema mode shortens the canvas
-    // by two 90-pixel bars and leaves the window alone, and a row that names a
-    // resolution the game is not rendering is the drift this control exists to end.
+    const preset = qualityPresetOf(settings, mobilePresentation);
+    // `Resolution` quotes the PIXELS each height draws on this canvas, read from the
+    // canvas rather than the window: cinema mode shortens the canvas by two 90-pixel
+    // bars and leaves the window alone, and a row that names a resolution the game is
+    // not rendering is the drift this control exists to end.
     const viewport = host.viewport();
-    const cssPixels = viewport.cssWidth * viewport.cssHeight;
     const pixelsAt = (ratio: number): string => {
       const width = Math.floor(viewport.cssWidth * ratio);
       const height = Math.floor(viewport.cssHeight * ratio);
@@ -1425,7 +1435,7 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           hint: () => presetHint(level),
           active: () => preset === level,
           pick: () => {
-            Object.assign(settings, withQualityPreset(settings, level, 'chosen'));
+            Object.assign(settings, withQualityPreset(settings, level, 'chosen', mobilePresentation));
             changed();
           },
         })),
@@ -1453,7 +1463,7 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
     toggleBtn.dataset.key = 'quality/advanced';
     toggleBtn.setAttribute('aria-expanded', String(qualityAdvancedOpen));
     const toggleHint =
-      'Detail, view distance, traffic, render scale, frame rate and antialiasing, each on '
+      'Detail, view distance, traffic, resolution, frame rate and antialiasing, each on '
       + 'its own. Changing one makes the preset Custom.';
     toggleBtn.addEventListener('click', () => {
       qualityAdvancedOpen = !qualityAdvancedOpen;
@@ -1475,14 +1485,14 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
     };
     advanced.append(
       // HOW MUCH WORLD there is — whether the sun casts, how many lamps are shaded, how
-      // deep the sky goes. `Render scale` below owns the resolution.
+      // deep the sky goes. `Resolution` below owns the frame height.
       segmented('Detail', [
         {
           label: 'Very Low',
           icon: 'retro',
           hint: () =>
             'For weak mini-PCs and old laptops. The world is drawn at about 360 lines '
-            + '(540 under Render scale) and shown as crisp square pixels, like a late-90s '
+            + '(540 under Resolution) and shown as crisp square pixels, like a late-90s '
             + 'game, with lighter ground cover and '
             + `${SUN_SHADOWS_TEXT[shadowModeFor(settings.shadows, 'retro', mobilePresentation)].toLowerCase()}. `
             + (reloadsFor('retro', settings.grass) ? 'Switching to it or away from it saves the drive and reloads it.' : ''),
@@ -1528,17 +1538,15 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           changed();
         },
       }))),
-      // THE AXIS THE LEVEL CANNOT EXPRESS. A level is three points — on a 4K
-      // television 1.44, 3.69 and 12.96 megapixels — and a machine is not three
-      // machines; worse, `Auto` is a GPU timer query, so a browser without
-      // `EXT_disjoint_timer_query_webgl2` cannot move the scale at all and three
-      // points were the whole of the choice there. Both directions are offered:
-      // down for the machine between two levels, up for the one with headroom that
-      // does not want a 25 km vista and eighteen headlamps to go with it.
+      // THE AXIS THE LEVEL CANNOT EXPRESS. A level is three points and a machine is not
+      // three machines, so the frame height is its own row: down for the machine between
+      // two levels, up for the one with headroom that does not want a 25 km vista and
+      // eighteen headlamps to go with it. Heights in lines rather than a share of the
+      // display, because a share needs a base the player cannot see.
       // On the retro rung the row offers whole-pixel line counts instead: its
       // resolution IS the look (render/retro.ts), so the choice is how coarse the
-      // squares are, never a fraction the compositor would smear.
-      ...(settings.graphicsQuality === 'retro' ? [segmented('Render scale', RETRO_LINE_CHOICES.map((lines) => ({
+      // squares are, never a height the compositor would smear.
+      ...(settings.graphicsQuality === 'retro' ? [segmented('Resolution', RETRO_LINE_CHOICES.map((lines) => ({
         label: `${lines} lines`,
         icon: 'pixels',
         hint: () =>
@@ -1553,62 +1561,28 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           settings.retroLines = lines;
           changed();
         },
-      })))] : [segmented('Render scale', [
-        {
-          label: 'Auto',
-          icon: 'display',
-          hint: () =>
-            'The game watches your graphics chip and picks, lowering this if the '
-            + 'machine cannot keep up. Full resolution here is '
-            + `${pixelsAt(
-              renderScaleFor(
-                settings.graphicsQuality,
-                cssPixels,
-                window.devicePixelRatio,
-                mobilePresentation,
-              ),
-            )}. `
-            + 'Some browsers will not let the game time the chip — Safari, and most '
-            + 'phones inside an app. There it cannot watch, so pick a number yourself.',
-          active: () => settings.renderScale === null,
-          pick: () => {
-            settings.renderScale = null;
-            changed();
-          },
+      })))] : [segmented('Resolution', RENDER_HEIGHTS.map((height) => ({
+        label: `${height}p`,
+        icon: 'pixels',
+        hint: () => {
+          const ratio = renderPixelRatio(height, viewport.cssHeight);
+          // How the frame meets this screen, from its own device lines: the same choice
+          // is an upscale on a 4K panel and a supersample on a 1080p one.
+          const stretch = (viewport.cssHeight * window.devicePixelRatio)
+            / Math.floor(viewport.cssHeight * ratio);
+          return `${pixelsAt(ratio)}. ${RESOLUTION_NOTES[height]} `
+            + (stretch > 1.01
+              ? `On this screen it is scaled up ${stretch.toFixed(1)}x.`
+              : stretch < 0.99
+                ? 'Drawn bigger than this screen and shrunk down, which smooths every edge.'
+                : 'This screen\'s own pixels.');
         },
-        // Built from the display, not from the list: the absolute bound flattens
-        // the top of the row on a large screen, and two buttons with one outcome
-        // is the menu promising pixels it will not draw.
-        ...offeredRenderScales(
-          cssPixels,
-          window.devicePixelRatio,
-          mobilePresentation,
-          settings.renderScale,
-        ).map((scale) => ({
-          label: `${Math.round(scale * 100)}%`,
-          icon: 'pixels',
-          hint: () =>
-            `${Math.round(scale * 100)}% of this display: `
-            + `${pixelsAt(
-              manualRenderScale(
-                cssPixels,
-                window.devicePixelRatio,
-                mobilePresentation,
-                scale,
-              ),
-            )}. `
-            + (scale > 1
-              ? 'Drawn bigger than the screen and shrunk down, which smooths every '
-                + 'edge. Capped at what the game will ever draw. '
-              : '')
-            + 'Fixed: the game will not lower it for you.',
-          active: () => settings.renderScale === scale,
-          pick: () => {
-            settings.renderScale = scale;
-            changed();
-          },
-        })),
-      ])]),
+        active: () => settings.renderHeight === height,
+        pick: () => {
+          settings.renderHeight = height;
+          changed();
+        },
+      })))]),
       // THE ONE LEVER THAT WORKS ON EVERY DEVICE, for opposite reasons, so it is
       // offered on both. On a phone it is a thermal control and has to be the
       // player's: no browser reports thermal state, battery temperature or clock
@@ -1686,7 +1660,7 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
         {
           label: 'Off',
           icon: 'gfx1',
-          hint: 'Jagged edges left as they are. Render scale and the drawn outlines still apply.',
+          hint: 'Jagged edges left as they are. Resolution and the drawn outlines still apply.',
           active: () => !settings.fxaa,
           pick: () => {
             settings.fxaa = false;
@@ -1728,31 +1702,35 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           },
         },
       ]),
-      // Ground cover and plants. Not on Very Low, whose own light build has none either way.
+      // Ground cover and plants. Not on Very Low, whose own light build is fixed.
       ...(settings.graphicsQuality === 'retro' ? [] : [segmented('Grass', [
         {
-          label: 'On',
+          label: 'Full',
           icon: 'gfx3',
-          hint: 'Full ground cover, grass and plants, and the fine open desert. Over twice the triangles.'
-            + (inDrive ? ' Changing it saves the drive and reloads it.' : ''),
-          active: () => settings.grass,
-          pick: () => {
-            settings.grass = true;
-            changed();
-          },
+          hint: 'Full ground cover, grass and plants, and the fine open desert. Over twice the triangles.',
+          mode: 'full' as const,
+        },
+        {
+          label: 'Light',
+          icon: 'gfx2',
+          hint: 'Lighter, sparser ground cover nearer the road, lighter plants and a coarser open desert.',
+          mode: 'light' as const,
         },
         {
           label: 'Off',
           icon: 'gfx1',
-          hint: 'Lighter ground cover without grass and a coarser open desert, as on Very Low.'
-            + (inDrive ? ' Changing it saves the drive and reloads it.' : ''),
-          active: () => !settings.grass,
-          pick: () => {
-            settings.grass = false;
-            changed();
-          },
+          hint: 'No tufts, bushes or rosettes at all, lighter plants and a coarser open desert.',
+          mode: 'off' as const,
         },
-      ])]),
+      ].map(({ mode, hint, ...option }) => ({
+        ...option,
+        hint: hint + (inDrive ? ' Changing it saves the drive and reloads it.' : ''),
+        active: () => settings.grass === mode,
+        pick: () => {
+          settings.grass = mode;
+          changed();
+        },
+      })))]),
     );
   };
 
@@ -2356,11 +2334,12 @@ export class MainMenu {
      * here does not hand a phone the desktop's graphics.
      */
     const renderSettings = (): void => {
-      const stored = loadStoredSettings();
+      const mobilePresentation = prefersMobilePresentation();
+      const stored = loadStoredSettings(mobilePresentation);
       const settings: Settings = stored ?? {
         ...DEFAULT_SETTINGS,
         keyBindings: {},
-        ...(prefersMobilePresentation() ? PHONE_FIRST_LAUNCH : {}),
+        ...(mobilePresentation ? PHONE_FIRST_LAUNCH : {}),
       };
       const apply = (): void => storeSettings(settings);
       settingsScreen = openSettings(sheet, {
@@ -2369,7 +2348,7 @@ export class MainMenu {
         viewport: () => ({ cssWidth: window.innerWidth, cssHeight: window.innerHeight }),
         // The launch the player is about to start is the one that measures.
         remeasureGraphics: () => {
-          Object.assign(settings, withRemeasure(settings));
+          Object.assign(settings, withRemeasure(settings, mobilePresentation));
           apply();
         },
         back: () => backToFront('settings'),
@@ -2480,7 +2459,7 @@ export class MainMenu {
         keyBindings: { ...base.keyBindings },
         graphicsQuality: base.graphicsQuality,
         graphicsQualitySource: base.graphicsQualitySource,
-        renderScale: base.renderScale,
+        renderHeight: base.renderHeight,
         retroLines: base.retroLines,
         fxaa: base.fxaa,
         shadows: base.shadows,
@@ -2514,7 +2493,7 @@ export class MainMenu {
           keyBindings: { ...settings.keyBindings },
           graphicsQuality: settings.graphicsQuality,
           graphicsQualitySource: settings.graphicsQualitySource,
-          renderScale: settings.renderScale,
+          renderHeight: settings.renderHeight,
           retroLines: settings.retroLines,
           fxaa: settings.fxaa,
           shadows: settings.shadows,

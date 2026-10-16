@@ -18,22 +18,24 @@
  * (tools/look/gpucost.mjs, a crest with 30 live cars at 1080p), Low drew exactly the
  * triangles and draw calls Medium drew — 2.1 million and 400-800 — and saved only on
  * pixels, the sun's shadow and lamp slots; the ground cover alone was 1.7 million of
- * those triangles. So the build is chosen by a PROFILE, not by the rung: `full` with
- * grass (`Settings.grass`, the default on Medium and High), `light` without it (this
- * rung's ground cover, plants and coarse open desert; the default on Low), and `retro`,
- * which is `light` plus this rung's own look (the cheap specular, the dither, the
+ * those triangles. So the build is chosen by a PROFILE, not by the rung, from the rung
+ * and `Settings.grass`: `full` (grass Full, the default on Medium and High), `light`
+ * (grass Light: the light ground cover, plants and coarse open desert; the default on
+ * Low), `bare` (grass Off: `light` with no ground cover at all), and `retro`, which keeps
+ * the light cover and adds this rung's own look (the cheap specular, the dither, the
  * one-pixel wires) whatever the grass setting. Crossing between profiles reloads the drive.
  */
 
 import * as THREE from 'three';
-import type { GraphicsQuality } from '../game/settings';
+import type { GrassMode, GraphicsQuality } from '../game/settings';
 
 /** What a load's world is built from; see the note above. */
-export type BuildProfile = 'full' | 'light' | 'retro';
+export type BuildProfile = 'full' | 'light' | 'bare' | 'retro';
 
 /** The profile a rung and the player's grass setting are built with. */
-export function buildProfileFor(quality: GraphicsQuality, grass: boolean): BuildProfile {
-  return quality === 'retro' ? 'retro' : grass ? 'full' : 'light';
+export function buildProfileFor(quality: GraphicsQuality, grass: GrassMode): BuildProfile {
+  if (quality === 'retro') return 'retro';
+  return grass === 'full' ? 'full' : grass === 'light' ? 'light' : 'bare';
 }
 
 let profile: BuildProfile = 'full';
@@ -50,16 +52,25 @@ export function retroActive(): boolean {
 
 /**
  * Whether this load builds the light ground cover, plants and open desert: Very Low, and
- * any other rung with grass off. Fixed for the page's lifetime.
+ * any other rung with grass Light or Off. Fixed for the page's lifetime.
  */
 export function lightGeometryActive(): boolean {
   return profile !== 'full';
 }
 
+/**
+ * Whether this load grows ground cover at all (the tufts, bushes and rosettes of the
+ * roadside scatter): every profile but grass Off (`bare`), which is the light build with
+ * no cover. Fixed for the page's lifetime.
+ */
+export function groundCoverActive(): boolean {
+  return profile !== 'bare';
+}
+
 let installed = false;
 
 /** Called once from main.ts, before any world geometry or material is built. */
-export function installBuildProfile(quality: GraphicsQuality, grass: boolean): void {
+export function installBuildProfile(quality: GraphicsQuality, grass: GrassMode): void {
   if (installed) return;
   installed = true;
   profile = buildProfileFor(quality, grass);

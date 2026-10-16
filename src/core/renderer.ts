@@ -16,19 +16,16 @@ import {
   type HeatHazeFrame,
   type HeatMirageParameters,
 } from '../render/hazeshader';
-import { AdaptiveResolutionController } from './adaptivequality';
 import {
   DEFAULT_FIELD_OF_VIEW,
   DEFAULT_INK_STRENGTH,
-  GRAPHICS_TIERS,
-  RENDER_SCALES,
+  renderHeightDefault,
   shadowModeDefault,
   shadowModeFor,
   type ShadowMode,
   type GraphicsQuality,
-  type RenderScale,
+  type RenderHeight,
   type RetroLines,
-  type RenderScaleFraction,
 } from '../game/settings';
 import type { ShadeTint } from '../items/items';
 
@@ -101,123 +98,22 @@ export function farPlaneForViewDistance(metres: number): number {
 const MAX_DEPTH_RATIO = 160000;
 
 /**
- * A DISPLAY can never ask for more pixels than the rung allows, and that is the whole
- * of this file's resolution policy now.
- *
- * It used to be a display PERCENTAGE: `min(DPR x multiplier, DPR cap)`. On a screen whose
- * device-pixel-ratio is 1 — every 4K television, every monitor at 100% scaling — that
- * resolves to exactly 1.0 at every rung, so a mini-PC on a television and a workstation
- * on the same television were both asked to shade 8.29 megapixels. Measured across the
- * machines this game runs on, `standard` was the same load on an Intel N100 as on an RTX
- * 4090, and the only rung beneath it was a 5.8x cliff with nothing in between.
- *
- * An absolute ceiling per rung fixes that at the root: below the ceiling the display's
- * own sharpness still decides what to render, and above it a supersampling multiplier
- * lets the top rung spend headroom it is told it has. `GRAPHICS_TIERS` owns the numbers;
- * this is only the arithmetic that spends them.
+ * Ceiling on the drawing-buffer ratio, whatever the chosen height asks of the canvas:
+ * past 2 it is not sharpness. It bites only on a canvas shorter than half the chosen
+ * height — 1440p in a 600-pixel window — and the menu quotes the clamped result.
  */
-/** Ceiling on device-pixel-ratio, whatever a display claims: past 2 it is not sharpness. */
 const MAX_PIXEL_RATIO = 2;
 
 /**
- * The drawing-buffer scale for a rung on a display, as a pure function.
+ * The drawing-buffer ratio that draws `renderHeight` lines on a canvas `cssHeight` CSS
+ * pixels tall; the width follows at the same ratio, so the aspect is the canvas's own.
  *
- * Pure and exported because it is the whole of the resolution policy and it is the part
- * that was wrong: a policy reachable only through a live WebGL context is a policy nobody
- * checks, and the bug it carried — a display percentage that resolved to exactly 1.0 on
- * every ratio-1 screen, so a 4K television cost a mini-PC and a workstation the same
- * 8.29 megapixels — survived because the only way to see it was to own the television.
- * `tools/graphics-tiers.ts` drives this directly.
+ * Exported because the menu quotes the frame this produces: one function, so the row
+ * cannot name a resolution the renderer is not drawing. Half a line of headroom because
+ * three floors `cssHeight x ratio`, and `H / h x h` can land one ulp under `H`.
  */
-export function renderScaleFor(
-  quality: GraphicsQuality,
-  cssPixels: number,
-  devicePixelRatio: number,
-  mobilePresentation: boolean,
-): number {
-  const tier = GRAPHICS_TIERS[quality];
-  const ceiling = mobilePresentation ? tier.mobileMaxPixels : tier.maxPixels;
-  // Three terms, each answering a different question: what the display wants (`dpr`),
-  // what this rung is willing to supersample to (`supersample`), and what the rung's
-  // absolute budget will pay for. The smallest wins, so a 4K television can never
-  // exceed the budget and a small retina panel is never downscaled below its sharpness.
-  return Math.min(
-    devicePixelRatio * tier.supersample,
-    MAX_PIXEL_RATIO,
-    Math.sqrt(ceiling / Math.max(1, cssPixels)),
-  );
-}
-
-/** Where dynamic resolution stops for a rung, as the same kind of scale. */
-export function minimumScaleFor(
-  quality: GraphicsQuality,
-  cssPixels: number,
-  devicePixelRatio: number,
-  mobilePresentation: boolean,
-): number {
-  const tier = GRAPHICS_TIERS[quality];
-  const floor = mobilePresentation ? tier.mobileMinPixels : tier.minPixels;
-  const base = cssPixels * devicePixelRatio * devicePixelRatio;
-  return Math.min(1, Math.sqrt(floor / Math.max(1, base)));
-}
-
-/**
- * The drawing-buffer scale a player's explicit render-scale choice asks for.
- *
- * A fraction of the DISPLAY, not of the rung. `renderScaleFor` above is a rung spending
- * its own budget; this is a player refusing that budget in either direction — down,
- * because three rungs on a 4K television are 1.44, 3.69 and 12.96 megapixels and a
- * machine is not three machines, and up, because supersampling was reachable only by
- * also buying a 25 km vista and eighteen headlamps. The DPR cap still applies before
- * the fraction, because past 2 it is not sharpness, it is arithmetic.
- *
- * The one thing it will not be is unbounded. The top rung's ceiling is the most this
- * game ever draws on purpose, so it bounds a manual choice too: without it, 150% on a
- * retina laptop asks for 20 megapixels, and a player who cannot reach ten frames a
- * second cannot reach the menu that would undo it either.
- */
-export function manualRenderScale(
-  cssPixels: number,
-  devicePixelRatio: number,
-  mobilePresentation: boolean,
-  fraction: number,
-): number {
-  const top = GRAPHICS_TIERS.blessing;
-  const ceiling = mobilePresentation ? top.mobileMaxPixels : top.maxPixels;
-  return Math.min(
-    Math.min(devicePixelRatio, MAX_PIXEL_RATIO) * fraction,
-    Math.sqrt(ceiling / Math.max(1, cssPixels)),
-  );
-}
-
-/**
- * The offered fractions that actually differ on THIS display, plus whichever one the
- * player is already on.
- *
- * The bound in `manualRenderScale` is absolute, so it flattens the top of the row on a
- * large display: on a 4K television 125% and 150% both resolve to the top rung's
- * ceiling, and on a phone every choice from 100% up does — three buttons with one
- * outcome, which is a menu describing a resolution it cannot deliver. The row is built
- * from the display instead of from the list.
- *
- * `current` is retained whatever it resolves to, because a player who carried a stored
- * 150% to a 4K television must still see which button he is on.
- */
-export function offeredRenderScales(
-  cssPixels: number,
-  devicePixelRatio: number,
-  mobilePresentation: boolean,
-  current: RenderScale = null,
-): readonly RenderScaleFraction[] {
-  const offered: RenderScaleFraction[] = [];
-  let previous = 0;
-  for (const fraction of RENDER_SCALES) {
-    const ratio = manualRenderScale(cssPixels, devicePixelRatio, mobilePresentation, fraction);
-    if (ratio <= previous && fraction !== current) continue;
-    offered.push(fraction);
-    previous = Math.max(previous, ratio);
-  }
-  return offered;
+export function renderPixelRatio(renderHeight: number, cssHeight: number): number {
+  return Math.min(MAX_PIXEL_RATIO, (renderHeight + 0.5) / Math.max(1, cssHeight));
 }
 
 /**
@@ -364,6 +260,20 @@ function drawPhotoMileage(
 
 
 const MAX_PENDING_GPU_QUERIES = 8;
+/**
+ * The GPU running average behind `gpuFrameMs` and the launch's rung measurement
+ * (app/bootwarmup.ts). An exponential mean, not a streak or a window: a brief stall
+ * raises it for a moment and decays again, so only cost that PERSISTS reads as the
+ * frame's cost.
+ */
+const GPU_SAMPLE_WEIGHT = 0.08;
+/**
+ * Samples dropped after every resolution change: resizing reallocates the scene target
+ * and its depth attachment, so the frames straddling it measure the reallocation.
+ */
+const GPU_DISCARD_SAMPLES = 8;
+/** Samples the average converges over before it counts as a measurement; half a second at 60 Hz. */
+const GPU_SETTLE_SAMPLES = 30;
 
 /** The face a PCF shadow pass draws of a material with no `shadowSide` (three's WebGLShadowMap). */
 const PCF_SHADOW_SIDE: Readonly<Record<THREE.Side, THREE.Side>> = {
@@ -466,27 +376,19 @@ export class Renderer {
   private photoContext: CanvasRenderingContext2D | null = null;
   /**
    * The driven car's live mirrors (render/carmirrors.ts): drawn after the game's frame,
-   * inside its GPU timing, so adaptive resolution pays for them like any other draw.
+   * inside its GPU timing, so the measured frame cost includes them like any other draw.
    */
   private mirrorPass: { draw(): void } | null = null;
 
-
-  /**
-   * The tier's cap, resolved against this display once. `adaptResolution` scales
-   * THIS, not the raw cap: basing it on the cap meant that on any display below
-   * the cap (a DPR 1.25 monitor, say) the controller's own "reduced" ratios were
-   * still larger than the native ratio the constructor had chosen, so the first
-   * step down quietly asked the weakest machines to draw MORE pixels.
-   */
-  private basePixelRatio: number;
   private quality: GraphicsQuality;
-  private readonly adaptiveResolution: AdaptiveResolutionController;
   private readonly timerQueryGl: WebGL2RenderingContext | null;
   private readonly timerQueryExt: GpuTimerQueryExtension | null;
   private readonly pendingGpuQueries: PendingGpuQuery[] = [];
-  private readonly completedGpuSamples: number[] = [];
-  private readonly completedGpuSampleEligibility: boolean[] = [];
   private queryEligible = false;
+  /** Exponential mean of the admitted GPU durations, ms; null since the last reset. */
+  private gpuAverageMs: number | null = null;
+  /** Admitted GPU samples since the last resolution change, discarded ones included. */
+  private gpuSamples = 0;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -495,11 +397,10 @@ export class Renderer {
     inkStrength = DEFAULT_INK_STRENGTH,
     private readonly mobilePresentation = prefersMobilePresentation(),
     /**
-     * The player's fixed drawing-buffer fraction, or null for the rung's own budget
-     * adapted by measurement. While it is set the controller is pinned: a named
-     * resolution that still drifts is not a named resolution.
+     * `Settings.renderHeight`, lines; a lab without the setting draws its rung's own.
+     * The retro rung ignores it for `retroLines`.
      */
-    private renderScale: RenderScale = null,
+    private renderHeight: RenderHeight = renderHeightDefault(quality, mobilePresentation),
     fieldOfView = DEFAULT_FIELD_OF_VIEW,
     /** `Settings.shadows`; a lab without the setting draws its rung's default. */
     shadowMode: ShadowMode = shadowModeDefault(quality),
@@ -522,7 +423,6 @@ export class Renderer {
       powerPreference: this.mobilePresentation ? 'default' : 'high-performance',
     });
     primeMaxAnisotropy(this.renderer);
-    this.adaptiveResolution = new AdaptiveResolutionController(quality);
     const context = this.renderer.getContext();
     if (
       typeof WebGL2RenderingContext !== 'undefined'
@@ -536,11 +436,8 @@ export class Renderer {
       this.timerQueryGl = null;
       this.timerQueryExt = null;
     }
-    this.basePixelRatio = this.pixelRatioFor(quality);
-    this.adaptiveResolution.setPinned(renderScale !== null || quality === 'retro');
     this.applyRetroCanvas();
-    this.updateAdaptiveFloor();
-    this.renderer.setPixelRatio(this.basePixelRatio);
+    this.renderer.setPixelRatio(this.pixelRatio());
     this.renderer.shadowMap.enabled =
       shadowModeFor(shadowMode, quality, this.mobilePresentation) !== 'off';
     // PCFSoft's wider kernel costs extra texture taps for a blur that reads as
@@ -928,52 +825,17 @@ export class Renderer {
   }
 
   /**
-   * The drawing-buffer ratio this display gets before adaptation: the rung's budget,
-   * or the player's fraction when he has named one.
+   * The drawing-buffer ratio for the current rung and canvas: the player's frame height,
+   * or on the retro rung its own whole-pixel line count.
    */
-  private pixelRatioFor(quality: GraphicsQuality): number {
-    const canvas = this.renderer.domElement;
-    const cssPixels = canvas.clientWidth * canvas.clientHeight;
-    // The retro rung's pixels are its look, so neither the player's render scale nor
-    // the adaptive controller may move them (see render/retro.ts).
-    if (quality === 'retro') {
-      return retroPixelRatio(canvas.clientHeight, window.devicePixelRatio, this.retroLines);
+  private pixelRatio(): number {
+    const cssHeight = this.renderer.domElement.clientHeight;
+    // The retro rung's pixels are its look, so the frame height never moves them (see
+    // render/retro.ts).
+    if (this.quality === 'retro') {
+      return retroPixelRatio(cssHeight, window.devicePixelRatio, this.retroLines);
     }
-    if (this.renderScale !== null) {
-      return manualRenderScale(
-        cssPixels,
-        window.devicePixelRatio,
-        this.mobilePresentation,
-        this.renderScale,
-      );
-    }
-    return renderScaleFor(quality, cssPixels, window.devicePixelRatio, this.mobilePresentation);
-  }
-
-  /**
-   * Where dynamic resolution stops, as an ABSOLUTE pixel count rather than a fraction
-   * of the ceiling.
-   *
-   * A fraction says nothing about the picture: 0.55 of a phone's budget and 0.55 of a
-   * workstation's are different images entirely, and the one thing a floor has to
-   * guarantee is the image below which the machine is no longer worth looking at. Every
-   * rung used to answer this its own way — `acceptable` and both mobile paths in
-   * absolute pixels, `standard` and `blessing` in ratios — so whether a rung had a real
-   * floor depended on which rung it was.
-   */
-  private updateAdaptiveFloor(): void {
-    const canvas = this.renderer.domElement;
-    // `this.basePixelRatio`, never the renderer's live ratio: `setQuality` recomputes the
-    // floor BEFORE it installs the new ratio, so reading it here would measure against the
-    // rung the machine just left and quietly hand back that rung's floor.
-    this.adaptiveResolution.setMinimumScale(
-      minimumScaleFor(
-        this.quality,
-        canvas.clientWidth * canvas.clientHeight,
-        this.basePixelRatio,
-        this.mobilePresentation,
-      ),
-    );
+    return renderPixelRatio(this.renderHeight, cssHeight);
   }
 
   /**
@@ -988,9 +850,7 @@ export class Renderer {
     const canvas = this.renderer.domElement;
     const width = Math.max(1, canvas.clientWidth);
     const height = Math.max(1, canvas.clientHeight);
-    this.basePixelRatio = this.pixelRatioFor(this.quality);
-    this.updateAdaptiveFloor();
-    this.renderer.setPixelRatio(this.basePixelRatio * this.adaptiveResolution.scale);
+    this.renderer.setPixelRatio(this.pixelRatio());
     this.renderer.setSize(width, height, false);
     this.resizeHazeTarget();
 
@@ -1272,32 +1132,21 @@ export class Renderer {
     uniforms.uPanini.value = lens;
   }
 
+  // --- Resolution and GPU timing ---
 
-  // --- Adaptive resolution ---
-
-  /**
-   * The live drawing-buffer scale, where 1 is the tier's full resolution. The
-   * launch settles this under the loading cover, so the first frame the player
-   * sees is already at the resolution the rest of the session will run at.
-   */
-  get resolutionScale(): number {
-    return this.adaptiveResolution.scale;
-  }
-
-  /**
-   * Pixels the scene is actually shaded at, both passes.
-   *
-   * A COUNT rather than a percentage, because a percentage needs a stated base and the
-   * base moved: with a manual render scale the resolution is a fraction of the display
-   * and `resolutionScale` stays at 1, so the old "% of ceiling" readout would report
-   * full resolution at every setting the player chose.
-   */
+  /** Pixels the scene is actually shaded at, both passes. */
   get renderedPixels(): number {
     this.renderer.getDrawingBufferSize(this._drawSize);
     return this._drawSize.x * this._drawSize.y;
   }
 
-  /** Whether this context can time the GPU. Without it the scale never moves. */
+  /** The drawing buffer, device pixels: the frame the scene is shaded at. */
+  get drawingBufferSize(): { readonly width: number; readonly height: number } {
+    this.renderer.getDrawingBufferSize(this._drawSize);
+    return { width: this._drawSize.x, height: this._drawSize.y };
+  }
+
+  /** Whether this context can time the GPU. Without it `gpuFrameMs` stays null. */
   get measuresGpuTime(): boolean {
     return this.timerQueryExt !== null;
   }
@@ -1322,61 +1171,41 @@ export class Renderer {
   }
 
   /**
-   * Mean measured GPU duration of a frame, or null without timer queries.
+   * Mean measured GPU duration of a frame, or null without timer queries or since the
+   * last resolution change.
    *
-   * Development only in practice: it exists so the on-device frame report can say
-   * whether the frame is waiting on the GPU or the CPU, which no other reading can
-   * separate on a phone.
+   * Read by the on-device frame report, to say whether the frame is waiting on the GPU
+   * or the CPU, which no other reading can separate on a phone; and by the launch, to
+   * judge the rung (app/bootwarmup.ts).
    */
   get gpuFrameMs(): number | null {
-    return this.adaptiveResolution.averageGpuMs;
+    return this.gpuAverageMs;
   }
 
   /**
-   * The newest single GPU frame time, ms — not the controller's average — for a live
-   * graph (ui/perfoverlay.ts). Null until a timer query has completed.
+   * The newest single GPU frame time, ms — not the running average — for a live graph
+   * (ui/perfoverlay.ts). Null until a timer query has completed.
    */
   get latestGpuMs(): number | null {
     return this.latestGpuMsValue;
   }
   private latestGpuMsValue: number | null = null;
 
-  /** Whether the live scale has been measured long enough to stand on its own. */
-  get resolutionSettled(): boolean {
-    return this.adaptiveResolution.verdictReached(performance.now());
+  /**
+   * Whether `gpuFrameMs` has seen enough frames at this resolution to stand for it: the
+   * discarded straddling frames, then half a second of averaging.
+   */
+  get gpuTimeSettled(): boolean {
+    return this.gpuSamples >= GPU_DISCARD_SAMPLES + GPU_SETTLE_SAMPLES;
   }
 
   /**
-   * Incorporates completed GPU timer results using this frame's safety policy.
-   * With no completed GPU result (including unsupported/disjoint queries), the
-   * controller gets a null sample and intentionally retains its current scale.
+   * Whether the frame about to be drawn is a fair sample of the drive's GPU cost. Read
+   * when its timer query begins, so a launch transient or an environment bake never
+   * reaches the average.
    */
-  adaptResolution(eligible: boolean, allowUpscale: boolean): void {
+  setGpuTimingEligible(eligible: boolean): void {
     this.queryEligible = eligible;
-    const now = performance.now();
-    let changed = false;
-
-    if (this.completedGpuSamples.length === 0) {
-      changed = this.adaptiveResolution.sample(null, eligible, allowUpscale, now) !== null;
-    } else {
-      while (this.completedGpuSamples.length > 0) {
-        const gpuMs = this.completedGpuSamples.shift();
-        const sampleEligible = this.completedGpuSampleEligibility.shift();
-        if (gpuMs === undefined || sampleEligible === undefined) break;
-        changed = this.adaptiveResolution.sample(
-          gpuMs,
-          eligible && sampleEligible,
-          allowUpscale,
-          now,
-        ) !== null || changed;
-      }
-    }
-
-    if (!changed) return;
-    // setPixelRatio re-sizes the drawing buffer around the current CSS size, so
-    // the canvas layout never moves when the resolution changes.
-    this.renderer.setPixelRatio(this.basePixelRatio * this.adaptiveResolution.scale);
-    this.resizeHazeTarget();
   }
 
   private beginGpuTimerQuery(): WebGLQuery | null {
@@ -1426,13 +1255,13 @@ export class Renderer {
       const gpuMs = typeof result === 'number' ? result / 1_000_000 : Number.NaN;
       gl.deleteQuery(pending.query);
       if (!Number.isFinite(gpuMs) || gpuMs < 0) continue;
-      if (this.completedGpuSamples.length === MAX_PENDING_GPU_QUERIES) {
-        this.completedGpuSamples.shift();
-        this.completedGpuSampleEligibility.shift();
-      }
-      this.completedGpuSamples.push(gpuMs);
       this.latestGpuMsValue = gpuMs;
-      this.completedGpuSampleEligibility.push(pending.eligible);
+      if (!pending.eligible) continue;
+      this.gpuSamples += 1;
+      if (this.gpuSamples <= GPU_DISCARD_SAMPLES) continue;
+      this.gpuAverageMs = this.gpuAverageMs === null
+        ? gpuMs
+        : this.gpuAverageMs + (gpuMs - this.gpuAverageMs) * GPU_SAMPLE_WEIGHT;
     }
   }
 
@@ -1443,8 +1272,20 @@ export class Renderer {
       }
     }
     this.pendingGpuQueries.length = 0;
-    this.completedGpuSamples.length = 0;
-    this.completedGpuSampleEligibility.length = 0;
+  }
+
+  /**
+   * Installs the drawing-buffer ratio for the current rung, height and canvas, and
+   * forgets the GPU average: it was measured at a pixel count that no longer applies.
+   * `setPixelRatio` re-sizes the buffer around the current CSS size, so the canvas
+   * layout never moves.
+   */
+  private applyResolution(): void {
+    this.disposeGpuQueries();
+    this.gpuAverageMs = null;
+    this.gpuSamples = 0;
+    this.renderer.setPixelRatio(this.pixelRatio());
+    this.resizeHazeTarget();
   }
 
   /**
@@ -1455,36 +1296,19 @@ export class Renderer {
     if (quality === this.quality) return;
     this.quality = quality;
     this.setFxaa(this.fxaa);
-    this.adaptiveResolution.setQuality(quality);
-    this.adaptiveResolution.setPinned(this.renderScale !== null || quality === 'retro');
     this.applyRetroCanvas();
-    this.disposeGpuQueries();
     // The phone rule is read from the table through `shadowModeFor`, never re-derived,
     // so it cannot disagree with the one the constructor used.
     this.applyShadowMode();
-    this.basePixelRatio = this.pixelRatioFor(quality);
-    this.updateAdaptiveFloor();
-    this.renderer.setPixelRatio(this.basePixelRatio);
-    this.resizeHazeTarget();
+    this.applyResolution();
   }
 
-  /**
-   * Installs the player's render-scale choice, or returns the rung to automatic.
-   *
-   * The controller is RESET either way rather than kept: its cost slope and its live
-   * average were measured at a different pixel count, and coming back to `Auto` holding
-   * a reduction it earned before the change would hand the player a resolution he
-   * cannot account for.
-   */
-  setRenderScale(scale: RenderScale): void {
-    if (scale === this.renderScale) return;
-    this.renderScale = scale;
-    this.adaptiveResolution.setPinned(scale !== null || this.quality === 'retro');
-    this.disposeGpuQueries();
-    this.basePixelRatio = this.pixelRatioFor(this.quality);
-    this.updateAdaptiveFloor();
-    this.renderer.setPixelRatio(this.basePixelRatio);
-    this.resizeHazeTarget();
+  /** Installs the player's frame height (`Settings.renderHeight`); no effect on the retro rung. */
+  setRenderHeight(height: RenderHeight): void {
+    if (height === this.renderHeight) return;
+    this.renderHeight = height;
+    if (this.quality === 'retro') return;
+    this.applyResolution();
   }
 
   /** Very Low's frame height, lines (`Settings.retroLines`); no effect on other rungs. */
@@ -1495,9 +1319,7 @@ export class Renderer {
     if (lines === this.retroLines) return;
     this.retroLines = lines;
     if (this.quality !== 'retro') return;
-    this.basePixelRatio = this.pixelRatioFor(this.quality);
-    this.renderer.setPixelRatio(this.basePixelRatio);
-    this.resizeHazeTarget();
+    this.applyResolution();
   }
 
   /**

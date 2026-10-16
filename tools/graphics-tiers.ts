@@ -10,12 +10,13 @@
  * is a control that does nothing, which is what the star depth was: limiting magnitude 8
  * on both of the lower rungs.
  *
- * BOUNDED. A display may never talk a rung into more pixels than that rung's budget, on
- * any display, at any device-pixel-ratio. The old policy resolved the resolution as a
- * DISPLAY PERCENTAGE, so on any screen with a ratio of 1 — every 4K television, every
- * monitor at 100% scaling — every rung resolved to exactly 1.0 and the tier decided
- * nothing at all: a mini-PC and a workstation on the same television were both asked to
- * shade 8.29 megapixels, with a 5.8x cliff down to the only rung that had a real budget.
+ * EXACT. A rung's resolution is a frame height in lines, and the frame drawn is that
+ * height on every display — not a percentage of the display. The old policy resolved the
+ * resolution as a DISPLAY PERCENTAGE, so on any screen with a ratio of 1 — every 4K
+ * television, every monitor at 100% scaling — every rung resolved to exactly 1.0 and the
+ * tier decided nothing at all: a mini-PC and a workstation on the same television were
+ * both asked to shade 8.29 megapixels, with a 5.8x cliff down to the only rung that had
+ * a real budget.
  */
 
 import {
@@ -25,8 +26,8 @@ import {
   GRAPHICS_TIERS,
   presentationFpsFor,
   qualityPresetOf,
-  RENDER_SCALES,
-  renderScaleFrom,
+  RENDER_HEIGHTS,
+  renderHeightDefault,
   sanitizeSettings,
   starMagnitudeFor,
   vehicleLightSlotsFor,
@@ -37,7 +38,7 @@ import {
 } from '../src/game/settings';
 import { FIXED_DT } from '../src/core/physics';
 import { MAX_STEPS_PER_FRAME } from '../src/core/loop';
-import { manualRenderScale, minimumScaleFor, offeredRenderScales, renderScaleFor } from '../src/core/renderer';
+import { renderPixelRatio } from '../src/core/renderer';
 import { installAssetShim } from './assetshim';
 
 installAssetShim();
@@ -59,38 +60,32 @@ const DISPLAYS: readonly { name: string; css: [number, number]; dpr: number; mob
 //
 // TWO KINDS OF KEY, and the difference is the point of naming them. A COST key is what
 // the rung spends, and it must climb strictly at every step or the rung above is not a
-// purchase. A WILLINGNESS key is a threshold the rung is allowed to cross — how far past
-// the display it will supersample, how far it throws a headlamp — and those may repeat,
+// purchase. A WILLINGNESS key is a threshold the rung is allowed to cross — how many
+// lines it hands a phone, how far it throws a headlamp — and those may repeat,
 // because the rungs differ in what they can afford long before they differ in what they
 // will attempt.
 const COST_KEYS = [
-  'maxPixels',
-  'mobileMaxPixels',
-  'minPixels',
-  'mobileMinPixels',
+  'renderHeight',
   'starMagnitude',
   'mobileStarMagnitude',
   'vehicleLightSlots',
   'mobileVehicleLightSlots',
 ] as const;
-const WILLINGNESS_KEYS = ['supersample', 'headlightDistanceScale', 'mirrorScale'] as const;
+const WILLINGNESS_KEYS = ['mobileRenderHeight', 'headlightDistanceScale', 'mirrorScale'] as const;
 
-console.log('rung         Mpx ceiling   Mpx floor   stars   car lamps');
+console.log('rung         lines   phone lines   stars   car lamps');
 let previous: GraphicsQuality | null = null;
 for (const quality of LADDER) {
   const tier = GRAPHICS_TIERS[quality];
   console.log(
-    `${quality.padEnd(12)} ${(tier.maxPixels / 1e6).toFixed(2).padStart(11)} ` +
-      `${(tier.minPixels / 1e6).toFixed(2).padStart(11)} ` +
+    `${quality.padEnd(12)} ${String(tier.renderHeight).padStart(5)} ` +
+      `${String(tier.mobileRenderHeight).padStart(13)} ` +
       `${tier.starMagnitude.toFixed(1).padStart(7)} ` +
       `${String(tier.vehicleLightSlots).padStart(11)}`,
   );
 
-  if (tier.minPixels >= tier.maxPixels) {
-    failures.push(`${quality}: the adaptive floor is at or above its own ceiling`);
-  }
-  if (tier.mobileMinPixels >= tier.mobileMaxPixels) {
-    failures.push(`${quality}: the mobile floor is at or above its own ceiling`);
+  if (tier.mobileRenderHeight > tier.renderHeight) {
+    failures.push(`${quality}: a phone is handed more lines than a desktop`);
   }
   if (previous !== null) {
     const below = GRAPHICS_TIERS[previous];
@@ -186,13 +181,14 @@ if (GRAPHICS_TIERS.acceptable.shadows) {
 // makes the ceiling's reason legible: light evaluations per frame is pixels x slots, and
 // nothing else in the game scales that way.
 {
-  console.log(String.fromCharCode(10) + 'phone light cost at the pixel ceiling each rung gives a phone');
+  const phone = DISPLAYS.find((display) => display.mobile)!;
+  console.log(String.fromCharCode(10) + `phone light cost at each rung's own frame height, on ${phone.name}`);
   console.log('rung         pixels      slots   evaluations/frame   at 60 FPS');
   for (const quality of LADDER) {
-    const tier = GRAPHICS_TIERS[quality];
-    // The phone column throughout: the pixel ceiling a phone gets is `mobileMaxPixels`,
-    // and the slot count is the phone's own.
-    const pixels = tier.mobileMaxPixels;
+    // The phone column throughout: the height a phone's preset gets is
+    // `mobileRenderHeight`, and the slot count is the phone's own.
+    const lines = GRAPHICS_TIERS[quality].mobileRenderHeight;
+    const pixels = Math.floor((lines * phone.css[0]) / phone.css[1]) * lines;
     const slots = vehicleLightSlotsFor(quality, true);
     const perFrame = pixels * slots;
     console.log(
@@ -250,215 +246,121 @@ function checkRates(): void {
   }
 }
 
-// --- 2. no display can exceed a rung's budget ---------------------------------
-console.log('\ndisplay                       rung         scale   Mpx rendered   Mpx ceiling');
-for (const display of DISPLAYS) {
-  const cssPixels = display.css[0] * display.css[1];
-  for (const quality of LADDER) {
-    const tier = GRAPHICS_TIERS[quality];
-    const ceiling = (display.mobile ? tier.mobileMaxPixels : tier.maxPixels) / 1e6;
-    const scale = renderScaleFor(quality, cssPixels, display.dpr, display.mobile);
-    const rendered = (cssPixels * scale * scale) / 1e6;
-    console.log(
-      `${display.name.padEnd(29)} ${quality.padEnd(12)} ${scale.toFixed(2).padStart(5)} ` +
-        `${rendered.toFixed(2).padStart(14)} ${ceiling.toFixed(2).padStart(14)}`,
-    );
-
-    // A tenth of a per cent covers the ceiling being expressed as whole pixels.
-    if (rendered > ceiling * 1.001) {
-      failures.push(
-        `${display.name} on ${quality} renders ${rendered.toFixed(2)} Mpx against a ` +
-          `${ceiling.toFixed(2)} Mpx ceiling`,
-      );
-    }
-    const floor = minimumScaleFor(quality, cssPixels, display.dpr, display.mobile);
-    if (floor > 1) {
-      failures.push(`${display.name} on ${quality} floors above full resolution`);
-    }
-    if (floor <= 0) {
-      failures.push(`${display.name} on ${quality} has no resolution floor at all`);
-    }
-  }
-}
-
-// AND THE REGRESSION THIS EXISTS FOR. A display whose ratio is 1 must still be told
-// apart by the rung: if the weakest and the strongest rung cost the same on a 4K
-// television, the tier has stopped being a control.
-{
-  const cssPixels = 3840 * 2160;
-  const lowest = renderScaleFor('acceptable', cssPixels, 1, false);
-  const middle = renderScaleFor('standard', cssPixels, 1, false);
-  const highest = renderScaleFor('blessing', cssPixels, 1, false);
-  if (!(lowest < middle * 0.95)) {
-    failures.push(
-      `on a 4K television the weakest rung renders ${(lowest * lowest * cssPixels / 1e6).toFixed(2)} Mpx ` +
-        `against the middle rung's ${(middle * middle * cssPixels / 1e6).toFixed(2)} — no headroom to give away`,
-    );
-  }
-  if (!(highest >= middle)) {
-    failures.push('the strongest rung is not at least the middle one on a 4K television');
-  }
-}
-
-// AND NO CLIFF. The failure this whole bench was written for was not that two rungs were
-// equal — it was that the middle rung was 5.8x the weakest on a 4K television, with
-// nothing in between, so a machine that could not afford the middle rung had to fall all
-// the way to the bottom.
+// --- 2. the frame is the height the player chose ---------------------------------
 //
-// The bound is 4x rather than tighter because the TOP rung is allowed to be extravagant:
-// it supersamples, it is chosen deliberately, and nothing is ever forced onto it. What
-// must not happen is a gap in the range a weak machine has to choose from, and a gap of
-// 5.8x in that range is exactly what this reports.
-{
-  const cssPixels = 3840 * 2160;
-  const loadOf = (quality: GraphicsQuality): number => {
-    const scale = renderScaleFor(quality, cssPixels, 1, false);
-    return cssPixels * scale * scale;
-  };
+// Three things must hold, and each of them is a way the control could quietly stop
+// being one:
+//
+//  - IT IS EXACT. A height drawn on a canvas tall enough for it is that many lines, on
+//    every display at every device-pixel-ratio: three floors `cssHeight x ratio`, so a
+//    ratio one ulp short draws 1079 lines and the menu says 1080.
+//  - IT IS BOUNDED. Past a ratio of 2 more lines are not sharpness, so a short canvas
+//    draws twice its CSS height, and the menu quotes that rather than the label.
+//  - THE ROW MOVES. A taller choice never draws fewer lines than a shorter one.
+console.log('\ndisplay                       height   ratio   drawn');
+for (const display of DISPLAYS) {
+  const [cssWidth, cssHeight] = display.css;
+  let previousLines = 0;
+  for (const height of RENDER_HEIGHTS) {
+    const ratio = renderPixelRatio(height, cssHeight);
+    const lines = Math.floor(cssHeight * ratio);
+    console.log(
+      `${display.name.padEnd(29)} ${`${height}p`.padStart(6)} ${ratio.toFixed(2).padStart(7)} `
+        + `${`${Math.floor(cssWidth * ratio)}x${lines}`.padStart(11)}`,
+    );
+    const expected = Math.min(height, Math.floor(cssHeight * 2));
+    if (lines !== expected) {
+      failures.push(`${display.name} at ${height}p draws ${lines} lines, not ${expected}`);
+    }
+    if (lines < previousLines) {
+      failures.push(`${display.name} at ${height}p draws fewer lines than the choice below it`);
+    }
+    previousLines = lines;
+  }
+}
+// Every height a canvas could be, not just the listed displays: the ulp is per height.
+for (let cssHeight = 300; cssHeight <= 2400; cssHeight++) {
+  for (const height of RENDER_HEIGHTS) {
+    const lines = Math.floor(cssHeight * renderPixelRatio(height, cssHeight));
+    if (lines !== Math.min(height, Math.floor(cssHeight * 2))) {
+      failures.push(`a ${cssHeight}-pixel canvas at ${height}p draws ${lines} lines`);
+    }
+  }
+}
+
+// AND NO CLIFF. The failure this whole bench was written for was a middle rung 5.8x the
+// weakest on a 4K television, with nothing in between, so a machine that could not
+// afford it had to fall all the way to the bottom. The rungs' own heights must keep every
+// step within 4x in pixels, on a desktop and on a phone.
+for (const mobile of [false, true]) {
   for (let i = 1; i < LADDER.length; i++) {
-    const below = loadOf(LADDER[i - 1]!);
-    const above = loadOf(LADDER[i]!);
-    const ratio = above / below;
+    const below = renderHeightDefault(LADDER[i - 1]!, mobile);
+    const above = renderHeightDefault(LADDER[i]!, mobile);
+    const ratio = (above * above) / (below * below);
     if (ratio > 4) {
       failures.push(
-        `on a 4K television ${LADDER[i]} costs ${ratio.toFixed(1)}x ${LADDER[i - 1]} ` +
-          `(${(above / 1e6).toFixed(2)} Mpx against ${(below / 1e6).toFixed(2)}) — a rung ` +
-          `is missing between them`,
+        `${mobile ? 'on a phone' : 'on a desktop'} ${LADDER[i]} draws ${ratio.toFixed(1)}x the `
+          + `pixels of ${LADDER[i - 1]} (${above} lines against ${below}) — a rung is missing between them`,
       );
     }
   }
 }
 
-// --- 3. the manual render scale ------------------------------------------------
-//
-// The rung is three points and a machine is not three machines, so a player may name a
-// fraction of his own display instead. Three things must hold, and each of them is a way
-// the control could quietly stop being one:
-//
-//  - THE ROW THE MENU SHOWS MOVES. Every fraction the menu OFFERS must give strictly
-//    more pixels than the one before it on that display. The absolute bound below
-//    flattens the top of the list on a large screen — on a 4K television 125% and 150%
-//    both land on the ceiling — so the offered row is derived from the display, and this
-//    is the check that the derivation is doing its job rather than the list being
-//    quietly presented as if it were.
-//  - IT IS BOUNDED. Not by the rung, but by the top rung's ceiling, which is the most
-//    this game ever draws on purpose. Without that bound 150% on a retina laptop asks
-//    for 20 megapixels and the menu that would undo it is unreachable.
-//  - 100% MEANS THE DISPLAY. One drawing-buffer pixel per device pixel, under the same
-//    ratio cap the automatic policy uses, so the readout in the menu is a resolution
-//    rather than a percentage of something unstated.
-console.log('\ndisplay                       offered   scale     Mpx       ratio');
-{
-  const top = GRAPHICS_TIERS.blessing;
-  for (const display of DISPLAYS) {
-    const cssPixels = display.css[0] * display.css[1];
-    const bound = (display.mobile ? top.mobileMaxPixels : top.maxPixels) / 1e6;
-    const offered = offeredRenderScales(cssPixels, display.dpr, display.mobile);
-    let previous = 0;
-    for (const fraction of RENDER_SCALES) {
-      const shown = offered.includes(fraction);
-      const ratio = manualRenderScale(cssPixels, display.dpr, display.mobile, fraction);
-      const rendered = (cssPixels * ratio * ratio) / 1e6;
-      console.log(
-        `${display.name.padEnd(29)} ${(shown ? 'yes' : 'no').padStart(7)} `
-          + `${`${Math.round(fraction * 100)}%`.padStart(5)} `
-          + `${rendered.toFixed(2).padStart(7)} ${ratio.toFixed(2).padStart(11)}`,
-      );
-      if (rendered > bound * 1.001) {
-        failures.push(
-          `${display.name} at ${Math.round(fraction * 100)}% renders ${rendered.toFixed(2)} Mpx, `
-            + `past the ${bound.toFixed(2)} Mpx the top rung would ever draw`,
-        );
-      }
-      if (!shown) continue;
-      // Equal is the failure: a clamped pair offered as two buttons has one outcome.
-      if (rendered <= previous) {
-        failures.push(
-          `${display.name} offers ${Math.round(fraction * 100)}% at ${rendered.toFixed(2)} Mpx, `
-            + `no more than the previous offered choice's ${previous.toFixed(2)} — two buttons, `
-            + 'one result',
-        );
-      }
-      previous = rendered;
-    }
-    if (offered.length === 0) {
-      failures.push(`${display.name} is offered no manual render scale at all`);
-    }
-  }
-
-  // A stored choice the display would clamp is still shown, or the player cannot see
-  // which button he is on after carrying his preferences to a bigger screen.
-  {
-    const cssPixels = 3840 * 2160;
-    const offered = offeredRenderScales(cssPixels, 1, false);
-    const withCurrent = offeredRenderScales(cssPixels, 1, false, 1.5);
-    if (offered.includes(1.5)) {
-      failures.push('a 4K television offers both 125% and 150%, which resolve to the same pixels');
-    }
-    if (!withCurrent.includes(1.5)) {
-      failures.push('a stored 150% is not shown on a display that clamps it — nothing is selected');
-    }
-  }
-
-  // 100% is the display's own pixels, capped the way the automatic policy caps them.
-  for (const display of DISPLAYS) {
-    const cssPixels = display.css[0] * display.css[1];
-    const ratio = manualRenderScale(cssPixels, display.dpr, display.mobile, 1);
-    const expected = Math.min(
-      display.dpr,
-      2,
-      Math.sqrt((display.mobile ? top.mobileMaxPixels : top.maxPixels) / cssPixels),
-    );
-    if (Math.abs(ratio - expected) > 1e-9) {
-      failures.push(
-        `${display.name} at 100% resolves ${ratio.toFixed(3)} rather than the display's own `
-          + `${expected.toFixed(3)}`,
-      );
-    }
-  }
-
-  // And a hand-edited preferences file cannot invent a fraction the menu has no button
-  // for: an unreachable resolution is one the player cannot get back from.
-  for (const fraction of RENDER_SCALES) {
-    if (renderScaleFrom(fraction) !== fraction) {
-      failures.push(`a saved render scale of ${fraction} was not kept`);
-    }
-  }
-  for (const garbage of [0.33, 2, 0, -1, '1', Number.NaN, undefined, null]) {
-    if (renderScaleFrom(garbage) !== null) {
-      failures.push(`a saved render scale of ${String(garbage)} became something other than Auto`);
-    }
-  }
-}
-
-// --- 4. the quality preset ------------------------------------------------------
+// --- 3. the quality preset ------------------------------------------------------
 //
 // The preset is not stored: it is read back off the values it sets. So every preset must
 // read back as itself, the shipped defaults must be one (Medium), any one Advanced value
 // moved off it must read as Custom, and an old stored preference must keep its values.
 {
-  for (const preset of ['very_low', 'low', 'medium', 'high'] as const) {
-    const on = withQualityPreset(DEFAULT_SETTINGS, preset, 'chosen');
-    if (qualityPresetOf(on) !== preset) failures.push(`the ${preset} preset does not read back as itself`);
-    const offs: Partial<Settings>[] = [
-      { viewDistance: preset === 'high' ? 'low' : 'high' },
-      { trafficDensity: preset === 'high' ? 'low' : 'high' },
-      { fxaa: !on.fxaa },
-      { frameRateLimit: 60 },
-      on.graphicsQuality === 'retro' ? { retroLines: 540 } : { renderScale: 0.85 },
-    ];
-    for (const off of offs) {
-      if (qualityPresetOf({ ...on, ...off }) !== null) {
-        failures.push(`${preset} with ${JSON.stringify(off)} still reads as the preset, not Custom`);
+  for (const mobile of [false, true]) {
+    for (const preset of ['very_low', 'low', 'medium', 'high'] as const) {
+      const on = withQualityPreset(DEFAULT_SETTINGS, preset, 'chosen', mobile);
+      if (qualityPresetOf(on, mobile) !== preset) failures.push(`the ${preset} preset does not read back as itself`);
+      const offs: Partial<Settings>[] = [
+        { viewDistance: preset === 'high' ? 'low' : 'high' },
+        { trafficDensity: preset === 'high' ? 'low' : 'high' },
+        { fxaa: !on.fxaa },
+        { frameRateLimit: 60 },
+        on.graphicsQuality === 'retro'
+          ? { retroLines: 540 }
+          : { renderHeight: RENDER_HEIGHTS.find((height) => height !== on.renderHeight)! },
+      ];
+      for (const off of offs) {
+        if (qualityPresetOf({ ...on, ...off }, mobile) !== null) {
+          failures.push(`${preset} with ${JSON.stringify(off)} still reads as the preset, not Custom`);
+        }
       }
     }
   }
-  if (qualityPresetOf(DEFAULT_SETTINGS) !== 'medium') failures.push('the shipped defaults are not the Medium preset');
-  const old = sanitizeSettings({ graphicsQuality: 'blessing', viewDistance: 'low', trafficDensity: 'high', fxaa: false });
+  if (qualityPresetOf(DEFAULT_SETTINGS, false) !== 'medium') failures.push('the shipped defaults are not the Medium preset');
+  const old = sanitizeSettings(
+    { graphicsQuality: 'blessing', viewDistance: 'low', trafficDensity: 'high', fxaa: false },
+    false,
+  );
   if (old.graphicsQuality !== 'blessing' || old.viewDistance !== 'low' || old.trafficDensity !== 'high' || old.fxaa) {
     failures.push('a stored mix of quality values was not kept as it was');
   }
-  if (qualityPresetOf(old) !== null) failures.push('a stored mix of quality values reads as a preset');
+  if (qualityPresetOf(old, false) !== null) failures.push('a stored mix of quality values reads as a preset');
+
+  // A stored height the menu offers is kept; anything else — an old `renderScale`, a
+  // hand-edited 1000 — lands on the rung's own height for the presentation, never on a
+  // resolution the menu has no button for.
+  for (const height of RENDER_HEIGHTS) {
+    if (sanitizeSettings({ renderHeight: height }, false).renderHeight !== height) {
+      failures.push(`a saved height of ${height} was not kept`);
+    }
+  }
+  for (const mobile of [false, true]) {
+    for (const stale of [{ renderScale: 1.5 }, { renderScale: null }, { renderHeight: 1000 }, {}]) {
+      const migrated = sanitizeSettings({ graphicsQuality: 'blessing', ...stale }, mobile);
+      if (migrated.renderHeight !== renderHeightDefault('blessing', mobile)) {
+        failures.push(
+          `${JSON.stringify(stale)} became ${migrated.renderHeight}p, not the rung's own `
+            + `${renderHeightDefault('blessing', mobile)}p (${mobile ? 'phone' : 'desktop'})`,
+        );
+      }
+    }
+  }
 }
 
 if (failures.length > 0) {
@@ -466,6 +368,6 @@ if (failures.length > 0) {
   throw new Error(`${failures.length} graphics-tier checks failed`);
 }
 console.log(
-  '\nthe ladder climbs at every rung, no display can talk a rung past its budget, and '
-    + 'every render scale the menu offers is a different picture; every quality preset reads back',
+  '\nthe ladder climbs at every rung, every frame is the height chosen for it, and '
+    + 'every quality preset reads back',
 );

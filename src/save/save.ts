@@ -603,8 +603,10 @@ export function migrateState(raw: unknown): WorldState {
     dayIndex: Math.max(0, Math.floor(numOr(obj.dayIndex, defaults.dayIndex))),
     recordS: numOr(obj.recordS, defaults.recordS),
     // A save written before settings existed has no field here; sanitizeSettings
-    // accepts anything (including undefined) and yields a valid Settings.
-    settings: sanitizeSettings(obj.settings),
+    // accepts anything (including undefined) and yields a valid Settings. Desktop
+    // presentation for a missing frame height: a save's settings never reach a phone's
+    // renderer, because stored preferences and `PHONE_FIRST_LAUNCH` outrank them (main.ts).
+    settings: sanitizeSettings(obj.settings, false),
     player,
     cars,
     wreckStorage,

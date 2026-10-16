@@ -11,7 +11,7 @@
  * rate.
  */
 
-import { lightGeometryActive } from '../../render/retro';
+import { groundCoverActive, lightGeometryActive } from '../../render/retro';
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { hash01 } from '../../core/rng';
@@ -481,7 +481,7 @@ export class ScatterProvider implements ChunkProvider {
     // so the physics pass below never walks it. The car bursts it through
     // `GroundCoverField` instead.
     const cover: ScatterPlacement[] = [];
-    if (ctx.hasPhysics) {
+    if (ctx.hasPhysics && groundCoverActive()) {
       const covers = groundCoverForms();
       const coverSStart = Math.floor(ctx.sStart / GROUND_COVER_CELL);
       const coverSEnd = Math.ceil(ctx.sEnd / GROUND_COVER_CELL);

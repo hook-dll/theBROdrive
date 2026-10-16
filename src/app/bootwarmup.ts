@@ -1,11 +1,11 @@
 /**
  * The launch phase between a built world and a playable one: finish the streamed world,
- * then settle the drawing-buffer scale and the graphics rung against real GPU timings,
- * all under the loading cover.
+ * then measure the frame's GPU cost and settle the graphics rung against it, all under
+ * the loading cover.
  *
  * Built by the composition root with an explicit context, so the module holds no
  * reference to the boot closure it was lifted out of: the two flags it moves
- * (`setAdaptationFrozen`, `takeTierUndetected`) stay owned by the caller.
+ * (`setGpuTimingFrozen`, `takeTierUndetected`) stay owned by the caller.
  */
 
 import type { GameLoop } from '../core/loop';
@@ -20,7 +20,6 @@ import {
   storeSettings,
   viewDistanceFor,
   withQualityPreset,
-  type GraphicsQuality,
 } from '../game/settings';
 import type { GameWorld } from '../game/state';
 import { compileCarProgramsWith, loadCarModel } from '../render/carmodel';
@@ -74,10 +73,10 @@ export interface BootWarmupContext {
   /** Advances the frame counter the render pass shares and returns the new value. */
   nextFrameId(): number;
   /**
-   * Holds the adaptive-resolution controller off the frames that are not worth
-   * judging. This phase owns the flag while it runs; the game reads it per frame.
+   * Holds the renderer's GPU average off the frames that are not worth counting. This
+   * phase owns the flag while it runs; the game reads it per frame.
    */
-  setAdaptationFrozen(frozen: boolean): void;
+  setGpuTimingFrozen(frozen: boolean): void;
   /** Reads and clears the launch's pending question of what rung this machine is. */
   takeTierUndetected(): boolean;
 }
@@ -147,44 +146,34 @@ export async function warmUpBoot(ctx: BootWarmupContext): Promise<void> {
   await warmStreamedWorld();
 
   /**
-   * WHY THE LAUNCH WAITS FOR THE PICTURE TO STOP CHANGING.
+   * WHY THE LAUNCH MEASURES THE FRAME BEFORE THE COVER LIFTS.
    *
    * The barrier above guarantees that everything is BUILT: the world is streamed,
    * both live shader variants are linked, and a GPU fence has retired the first
-   * real frame. It does not guarantee that the frame the player is about to see is
-   * the frame he will keep. Resolution is measured, and the frames straddling the
-   * reveal are the most expensive of the session — the remaining shader variants,
-   * the first uploads, the boot GC — so the adaptive controller used to read that
-   * transient as a machine that could not cope and walk the drawing buffer down,
-   * step after step, to its floor. At 55% the film grain is filtered away by the
-   * upscale, the ink outlines smear into a general darkening, and the road loses
-   * its aggregate: the drive looked unfinished, and a second launch — with a warm
-   * cache and therefore fewer slow frames — looked right.
+   * real frame. It does not say what the frame COSTS, and the rung verdict below needs
+   * exactly that: a GPU average taken on the real frame path at the resolution the
+   * player will drive at. The frames straddling the reveal are the most expensive of
+   * the session — the remaining shader variants, the first uploads, the boot GC — and
+   * averaging them in would read a healthy machine as one that cannot cope.
    *
-   * So the same real frame path runs here, under the cover, at display pace. The
-   * first frames are rendered but not judged (`setAdaptationFrozen`), which is what
-   * throws the transient away; the rest are judged exactly as they will be in the
-   * drive. The cover leaves when the controller has actually MEASURED the scale it
-   * is holding, so the first frame the player sees is the finished one.
+   * So the same real frame path runs here, under the cover, at display pace. The first
+   * frames are rendered but not counted (`setGpuTimingFrozen`), which is what throws
+   * the transient away and keeps it off the player's screen; the rest are counted
+   * exactly as they will be in the drive. The cover leaves when the average has settled
+   * (`Renderer.gpuTimeSettled`).
    */
   const SETTLE_DISCARD_FRAMES = 30;
   /**
-   * Wall-clock ceiling, not a frame count: the frames being settled are the slowest
-   * of the session, so counting them measures the machine rather than the wait. A
-   * descent is bounded — each step needs its discarded resize frames, its half
-   * second of evidence and a 1.5 s cooldown, and the floor is four steps below full
-   * resolution — so twenty seconds covers the worst honest case. A machine with
-   * headroom reaches its verdict in about a second and a half and leaves then.
-   *
-   * Leaving early would be worse than waiting: the remaining steps would then be
-   * taken with the player watching, which is the resolution walking down under him
-   * — precisely the thing this phase exists to prevent.
+   * Wall-clock ceiling, not a frame count: the frames being measured are the slowest of
+   * the session, so counting them measures the machine rather than the wait. A machine
+   * with headroom settles in about a second; twenty seconds is a machine drawing three
+   * or four frames a second, which has nothing to gain from a longer cover.
    */
   const SETTLE_MAX_MS = 20_000;
-  const settleLaunchResolution = async (): Promise<void> => {
-    // Without GPU timing nothing can move the scale, so there is nothing to settle.
+  const measureLaunchFrame = async (): Promise<void> => {
+    // Without GPU timing there is nothing to measure.
     if (!ctx.renderer.measuresGpuTime) {
-      ctx.setAdaptationFrozen(false);
+      ctx.setGpuTimingFrozen(false);
       return;
     }
     const label = ctx.loading.querySelector<HTMLElement>('.launch-loading-text');
@@ -192,7 +181,7 @@ export async function warmUpBoot(ctx: BootWarmupContext): Promise<void> {
     const deadline = performance.now() + SETTLE_MAX_MS;
     for (let frame = 0; performance.now() < deadline; frame++) {
       const discard = frame < SETTLE_DISCARD_FRAMES;
-      ctx.setAdaptationFrozen(discard);
+      ctx.setGpuTimingFrozen(discard);
       await new Promise<void>((resolve) => {
         requestAnimationFrame(() => {
           resolve();
@@ -200,53 +189,66 @@ export async function warmUpBoot(ctx: BootWarmupContext): Promise<void> {
       });
       render(0, 0);
       if (discard) continue;
-      if (ctx.renderer.resolutionSettled) break;
+      if (ctx.renderer.gpuTimeSettled) break;
     }
-    ctx.setAdaptationFrozen(false);
+    ctx.setGpuTimingFrozen(false);
   };
 
+  /**
+   * Measured GPU per frame each rung must hold, ms. `acceptable` deliberately targets a
+   * stable 30 Hz presentation: its extra budget buys picture on small integrated GPUs,
+   * while the simulation stays at its fixed rate.
+   */
+  const RUNG_GPU_BUDGET_MS = { acceptable: 26, standard: 11, blessing: 11 } as const;
+  /**
+   * How far past its budget a rung may run before the launch takes it away. The rescue
+   * threshold the dynamic resolution used to give: a rung was judged wrong once it had to
+   * give up two resolution steps of 0.88 (1 / 0.88² ≈ 1.29 of the budget, if all fill).
+   */
+  const RUNG_OVERRUN = 1.3;
   /**
    * WHAT RUNG IS THIS MACHINE, asked once, on the one launch where nobody has answered.
    *
    * Nothing auto-detected the GPU before this, and the comment defending that said
    * guessing wrong either robs a capable machine or leaves a weak one stuttering. That
    * is true of guessing. It is not true of MEASURING, and the measurement already
-   * exists: the launch settles the drawing-buffer scale under the loading cover against
-   * real GPU timer queries, so by the time the cover lifts the controller has said, in
-   * numbers, whether this machine holds the rung it was given.
+   * exists: the launch times the real frame under the loading cover with GPU timer
+   * queries, so by the time the cover lifts it has said, in milliseconds, whether this
+   * machine holds the rung it was given at that rung's resolution.
    *
-   * So the rung is WALKED, in both directions, against the settled scale — and the two
+   * So the rung is WALKED, in both directions, against its budget — and the two
    * directions are not symmetrical, because being wrong is not.
    *
-   * Down is a rescue: a machine giving away more than a fifth of the resolution it was
-   * promised is stuttering, and nothing else will tell the player why.
+   * Down is a rescue: a machine running well past the rung's budget is stuttering, and
+   * nothing else will tell the player why.
    *
    * Up is a bonus that has to be paid for fairly. The default rung is deliberately
    * modest, so a fast machine left on it renders less than its display can show — but a
-   * rung that does not fit must be PUT BACK, with its own settle to prove it, or a
+   * rung that does not fit must be PUT BACK, with its own measurement to prove it, or a
    * player who never opened the menu is pushed into stutter by the courtesy.
    */
-  const AUTO_TIER_BACKOFF = 0.8;
-  const AUTO_TIER_COMFORT = 0.95;
   const detectGraphicsTier = async (): Promise<void> => {
     if (!ctx.renderer.measuresGpuTime) return;
-    // The launch settle has already run by the time this is called, so if the controller
-    // never reached a verdict, this machine cannot measure itself and the scale it is
-    // sitting on says nothing about it. Bailing here is not a nicety: without a verdict
-    // the controller can never move, so every rung this walked would burn its own settle
-    // DEADLINE — a machine that cannot measure would pay twenty extra seconds of loading
-    // screen to learn nothing. Observed happening, which is why the guard exists.
-    if (!ctx.renderer.resolutionSettled) return;
-    const ladder: GraphicsQuality[] = ['blessing', 'standard', 'acceptable'];
+    // The launch measurement has already run by the time this is called, so if it never
+    // settled, this machine cannot measure itself and every rung this walked would burn
+    // its own measurement DEADLINE — twenty extra seconds of loading screen to learn
+    // nothing. Observed happening, which is why the guard exists.
+    if (!ctx.renderer.gpuTimeSettled) return;
+    const ladder = ['blessing', 'standard', 'acceptable'] as const;
     // Each step moves the whole QUALITY PRESET when the settings are on one (a first
     // launch is: the defaults are Medium), so the verdict lands on Low, Medium or High
-    // with the view distance and traffic that go with the rung. Settings already off a preset
-    // were set by hand, and only the rung moves under them.
+    // with the frame height, view distance and traffic that go with the rung. Settings
+    // already off a preset were set by hand, and only the rung moves under them.
     const adopt = async (index: number): Promise<void> => {
       const tier = ladder[index]!;
       const current = ctx.world.state.settings;
-      const settings = qualityPresetOf(current) !== null
-        ? withQualityPreset(current, qualityPresetForDetail(tier), current.graphicsQualitySource)
+      const settings = qualityPresetOf(current, ctx.mobilePresentation) !== null
+        ? withQualityPreset(
+          current,
+          qualityPresetForDetail(tier),
+          current.graphicsQualitySource,
+          ctx.mobilePresentation,
+        )
         : {
           ...current,
           graphicsQuality: tier,
@@ -258,25 +260,32 @@ export async function warmUpBoot(ctx: BootWarmupContext): Promise<void> {
       ctx.renderer.setFxaa(settings.fxaa);
       ctx.renderer.setShadowMode(settings.shadows);
       ctx.sky.setShadowMode(settings.shadows);
+      ctx.renderer.setRenderHeight(settings.renderHeight);
       ctx.renderer.setQuality(tier);
       ctx.sky.setQuality(tier, ctx.mobilePresentation);
       const horizon = viewDistanceFor(settings.viewDistance, ctx.mobilePresentation);
       ctx.renderer.setViewDistance(horizon);
       ctx.vista.setViewDistance(horizon);
       ctx.loop.setRenderFps(presentationFpsFor(ctx.world.state.settings.frameRateLimit));
-      await settleLaunchResolution();
+      await measureLaunchFrame();
     };
 
-    let index = Math.max(0, ladder.indexOf(ctx.world.state.settings.graphicsQuality));
-    while (index < ladder.length - 1 && ctx.renderer.resolutionScale < AUTO_TIER_BACKOFF) {
+    let index = Math.max(0, ladder.findIndex((tier) => tier === ctx.world.state.settings.graphicsQuality));
+    /** The rung's measured cost as a share of its budget, or null if it never settled. */
+    const load = (): number | null => {
+      const gpuMs = ctx.renderer.gpuFrameMs;
+      return ctx.renderer.gpuTimeSettled && gpuMs !== null ? gpuMs / RUNG_GPU_BUDGET_MS[ladder[index]!] : null;
+    };
+    for (let cost = load(); cost !== null && cost > RUNG_OVERRUN && index < ladder.length - 1; cost = load()) {
       index += 1;
       await adopt(index);
     }
-    while (index > 0 && ctx.renderer.resolutionScale > AUTO_TIER_COMFORT) {
+    for (let cost = load(); cost !== null && cost <= 1 && index > 0; cost = load()) {
       const previous = index;
       index -= 1;
       await adopt(index);
-      if (ctx.renderer.resolutionScale < AUTO_TIER_BACKOFF) {
+      const climbed = load();
+      if (climbed === null || climbed > RUNG_OVERRUN) {
         index = previous;
         await adopt(index);
         break;
@@ -309,7 +318,7 @@ export async function warmUpBoot(ctx: BootWarmupContext): Promise<void> {
   await Promise.all(CAR_MODELS.map((def) => loadCarModel(def.id)));
   render(0, 0);
   await ctx.renderer.waitForSubmittedFrame();
-  await settleLaunchResolution();
+  await measureLaunchFrame();
   if (ctx.takeTierUndetected()) await detectGraphicsTier();
   ctx.loading.classList.add('is-hidden');
 }
