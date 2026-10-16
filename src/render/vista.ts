@@ -3,6 +3,7 @@ import { farPlaneForViewDistance } from '../core/renderer';
 import { hashUnit3 } from '../core/rng';
 import { applyCloudShadow } from './cloudshadow';
 import { applyComicShading } from './comic';
+import { applyGroundLight } from './groundlight';
 
 import { DESERT_TILE_SIZE } from '../world/deserttiledata';
 import { desertPaletteAt } from '../world/gradient';
@@ -192,7 +193,7 @@ const mesaLinear = new THREE.Color();
 // `render/cloudshadow.ts`): a patch that stopped at the edge of the near tiles
 // would draw its own boundary across the desert, which is the one place the effect
 // would be worse than not having it.
-const MESA_MATERIAL = applyCloudShadow(
+const MESA_MATERIAL = applyGroundLight(applyCloudShadow(
   applyComicShading(
     new THREE.MeshStandardMaterial({
       vertexColors: true,
@@ -211,13 +212,13 @@ const MESA_MATERIAL = applyCloudShadow(
       stippleStrength: 0,
     },
   ),
-);
+));
 
 
 // Same authored shading as streamed terrain, used only where both terrain systems
 // overlap. It draws colour but not depth, so the fine tiles win without corrupting
 // the depth of the distant vista, mesas, fog, or the post-process.
-const VISTA_OVERLAP_MATERIAL = applyDesertGround(
+const VISTA_OVERLAP_MATERIAL = applyGroundLight(applyDesertGround(
   applyCloudShadow(
     applyComicShading(
       new THREE.MeshStandardMaterial({
@@ -234,7 +235,7 @@ const VISTA_OVERLAP_MATERIAL = applyDesertGround(
       },
     ),
   ),
-);
+));
 
 
 function smoothstep01(t: number): number {

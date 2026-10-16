@@ -140,12 +140,12 @@ async function run(): Promise<void> {
    * undimmed gain, every lamp its own beam, and the pool hands over at once (a fade
    * of zero); the ambient fade and the handover have their own scenarios below.
    */
-  const projectFrame = (activeRig: VehicleLightRig, gain = 1, merged = false): void => {
+  const projectFrame = (activeRig: VehicleLightRig, gain = 1): void => {
     const pool = new FadingSlotPool(activeRig.lightCount, 0);
     pool.begin();
     for (let g = 0; g < BEAM_GROUPS.length; g++) {
       for (const vehicle of vehicles) {
-        if (vehicle.hasLitLamps && gain > 0) pool.request(vehicle, g, vehicle.beamCount(BEAM_GROUPS[g], merged), false);
+        if (vehicle.hasLitLamps && gain > 0) pool.request(vehicle, g, vehicle.beamCount(BEAM_GROUPS[g]), false);
       }
     }
     pool.resolve(1 / 60);
@@ -153,7 +153,7 @@ async function run(): Promise<void> {
     for (const vehicle of vehicles) {
       for (let g = 0; g < BEAM_GROUPS.length; g++) {
         const share = pool.share(vehicle, g);
-        if (share > 0) vehicle.syncProjectedLights(activeRig, BEAM_GROUPS[g], gain * share, merged, false);
+        if (share > 0) vehicle.syncProjectedLights(activeRig, BEAM_GROUPS[g], gain * share, false);
       }
     }
     activeRig.endFrame();
@@ -279,18 +279,17 @@ async function run(): Promise<void> {
       vehicle.setHeadlights('low');
       vehicle.syncVisuals(1);
     }
-    projectFrame(rig, ambientBeamGain(200), true);
+    projectFrame(rig, ambientBeamGain(200));
     check(
       'far ambient cars: a faded beam claims no slot',
       ambientBeamGain(200) === 0 && rig.beamCount === 0 && allDark(spotlights(scene)),
       `gain ${ambientBeamGain(200)}, ${rig.beamCount} beams`,
     );
-    projectFrame(rig, ambientBeamGain(20), true);
+    projectFrame(rig, ambientBeamGain(20));
     const nearBeams = rig.beamCount;
-    // Numbers, not light objects: the next frame overwrites the same slots. A merged
-    // beam carries its pair's light, so it is compared per lamp.
+    // Numbers, not light objects: the next frame overwrites the same slots.
     const fadedHeadlight =
-      Math.max(...spotlights(scene).map((light) => (light.distance > 100 ? light.intensity : 0))) / 2;
+      Math.max(...spotlights(scene).map((light) => (light.distance > 100 ? light.intensity : 0)));
     for (const vehicle of vehicles.slice(1)) vehicle.setHeadlights('off');
     projectFrame(rig);
     for (const vehicle of vehicles.slice(1)) vehicle.setHeadlights('low');

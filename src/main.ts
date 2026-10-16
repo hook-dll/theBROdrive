@@ -2409,13 +2409,13 @@ async function boot(): Promise<void> {
       const vehicle = litVehicles[i];
       litGains[i] = vehicle === driving ? 1 : ambientBeamGain(vehicle.root.position.distanceTo(cam));
     }
-    // Merged (`g === 0 && vehicle !== driving`): one beam per headlamp pair, for traffic
-    // only — far down the road two cones read as one. Tail and reversing lamps are never
-    // merged: one pool on the centreline read wrongly in play on every car, its own
-    // included. The driven car's headlamps are never merged either: where the tier draws
-    // shadows, its driver's side lamp takes the rig's one shadow-casting beam
-    // (render/vehiclelights.ts; a second shadowed spot measured ten times dearer) and the
-    // other lamp a pinned pool slot, so it lays two pools in the road, not one.
+    // No lamp pair is merged into one beam any more, traffic included: a car with two
+    // lit headlamps laying ONE pool of light on the road read wrongly up close, and the
+    // ground light (render/groundlight.ts) made each slot cheap enough to spend two per
+    // car. The pool's handover fade still decides who gets light when slots run out.
+    // Where the tier draws shadows, the driven car's driver's side lamp takes the rig's
+    // one shadow-casting beam (render/vehiclelights.ts; a second shadowed spot measured
+    // ten times dearer) and the other lamp a pinned pool slot.
     const shadowedHeadlamps = vehicleLights.hasShadowBeam;
     beamPool.begin();
     // The courtesy lamp of the car the player sits in lights its cabin with one pool
@@ -2425,7 +2425,7 @@ async function boot(): Promise<void> {
     if (driving) {
       for (let g = 0; g < BEAM_GROUPS.length; g++) {
         if (driving.hasLitLamps) {
-          const slots = driving.beamCount(BEAM_GROUPS[g], false, g === 0 && shadowedHeadlamps);
+          const slots = driving.beamCount(BEAM_GROUPS[g], g === 0 && shadowedHeadlamps);
           beamPool.request(driving, g, slots, true);
         }
         if (g === 0) beamPool.request(driving, DOME_BEAM_GROUP, driving.domeBeamCount, true);
@@ -2437,13 +2437,13 @@ async function boot(): Promise<void> {
         // A gain of zero asks for nothing: past the range fade the pool belongs to
         // the beams near enough to be seen.
         if (vehicle === driving || !(litGains[i] > 0)) continue;
-        beamPool.request(vehicle, g, vehicle.beamCount(BEAM_GROUPS[g], g === 0), false);
+        beamPool.request(vehicle, g, vehicle.beamCount(BEAM_GROUPS[g]), false);
       }
     }
     beamPool.resolve(frameDt);
     vehicleLights.beginFrame();
     if (driving && driving.hasLitLamps && shadowedHeadlamps) {
-      driving.syncProjectedLights(vehicleLights, 'front', 1, false, true);
+      driving.syncProjectedLights(vehicleLights, 'front', 1, true);
     }
     if (driving) {
       const share = beamPool.share(driving, DOME_BEAM_GROUP);
@@ -2456,7 +2456,7 @@ async function boot(): Promise<void> {
         if (g === 0 && vehicle === driving && shadowedHeadlamps) continue;
         const share = beamPool.share(vehicle, g);
         if (share > 0) {
-          vehicle.syncProjectedLights(vehicleLights, BEAM_GROUPS[g], litGains[i] * share, g === 0 && vehicle !== driving, false);
+          vehicle.syncProjectedLights(vehicleLights, BEAM_GROUPS[g], litGains[i] * share, false);
         }
       }
     }

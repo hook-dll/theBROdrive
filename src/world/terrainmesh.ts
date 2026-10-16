@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { SurfaceType } from '../core/surfaces';
 import { applyComicShading } from '../render/comic';
 import { applyCloudShadow } from '../render/cloudshadow';
+import { applyGroundLight } from '../render/groundlight';
 import { CLEAN_SMOOTH_NORMALS } from '../render/cleanstyle';
 import { weather } from './weather';
 import { type Road } from './road';
@@ -606,7 +607,7 @@ transformed.y -= aTerrainDetail * detailFade;${grit ? '\nvShoulderGrit = aShould
 }
 
 function createTerrainMaterial(options: DesertGroundOptions): THREE.MeshStandardMaterial {
-  return applyDesertGround(
+  return applyGroundLight(applyDesertGround(
     applyCloudShadow(
       applyComicShading(
         new THREE.MeshStandardMaterial({
@@ -623,7 +624,7 @@ function createTerrainMaterial(options: DesertGroundOptions): THREE.MeshStandard
       ),
     ),
     options,
-  );
+  ));
 }
 export const TERRAIN_MATERIAL = createTerrainMaterial({});
 /** Fine player-centred tiles whose small-scale height relaxes into the vista base. */

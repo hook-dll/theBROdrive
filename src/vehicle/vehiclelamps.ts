@@ -135,6 +135,14 @@ const TAILLIGHT_EMISSIVE = 0xff0000;
 const REVERSE_LIGHT_EMISSIVE = 0xf4f7ff;
 const BLINKER_EMISSIVE = 0xff8a00;
 /**
+ * Stop-lens emission. Kept just over the display curve's shoulder: the curve
+ * (render/displaytransform.ts) bleaches a channel toward white by how far its peak
+ * overshoots, so the old 6 showed pure red as pink (≈ sRGB 1, 0.69, 0.69). At 1.2 the
+ * lens reads full red, still twice the running lamp's 0.55; the thrown beam carries
+ * the rest of the brake's brightness.
+ */
+const BRAKE_LENS_INTENSITY = 1.2;
+/**
  * The colour each switched lens role glows in, in the order of a model's lamp role
  * selectors (head, tail, stop, reverse, left and right blinker; render/carmodel.ts
  * `lampRoleSelectors`) and of `VehicleLamps.lensLevel`. The far and mid traffic meshes
@@ -454,14 +462,14 @@ export class VehicleLamps {
   };
 
   /**
-   * Pool spotlights `group` projects while lit: one per lamp, a single one for the pair
-   * when `merged`, or one fewer than its lamps when `shadowed` (one lamp takes the rig's
-   * shadowed beam instead). Zero while it is dark, so a dark group asks the pool nothing.
+   * Pool spotlights `group` projects while lit: one per lamp, or one fewer than its
+   * lamps when `shadowed` (one lamp takes the rig's shadowed beam instead). Zero while
+   * it is dark, so a dark group asks the pool nothing.
    */
-  beamCount(group: BeamGroup, merged: boolean, shadowed = false): number {
+  beamCount(group: BeamGroup, shadowed = false): number {
     const { mounts, intensity } = this.beamGroup(group);
     if (mounts.length === 0 || !(intensity > 0)) return 0;
-    return merged ? 1 : shadowed ? mounts.length - 1 : mounts.length;
+    return shadowed ? mounts.length - 1 : mounts.length;
   }
 
   /**
@@ -469,20 +477,19 @@ export class VehicleLamps {
    * the interpolated render pose. Called for every live vehicle, not just the driven
    * one: a lamp that is on casts a beam whoever left it on, so a restored save and a
    * car abandoned with its headlights burning both light the ground. The caller has
-   * already secured `beamCount(group, merged)` slots for it (render/slotpool.ts).
+   * already secured `beamCount(group)` slots for it (render/slotpool.ts).
    *
    * `gain` scales the beam. The driven car is offered 1: its own beams are the only
    * way to read the road at night and MUST NOT be touched. Every other car is offered
    * its range fade (`ambientBeamGain`) times its share of the pool.
    *
-   * `merged` projects a lamp pair as ONE spotlight from between the two, carrying
-   * both lamps' light. Other cars are drawn that way: at the range their pools are
-   * seen from, two cones a metre apart are one pool of light, and the pool then
-   * carries twice as many cars as it would lamps.
+   * Every lamp is its own beam, other cars' included. Traffic used to project a pair
+   * as ONE spotlight from between the lamps, to carry twice as many cars in the pool;
+   * up close two lit headlamps then laid one pool in the road.
    *
    * `shadowed` sends ONE lamp, the driver's side one (the largest local x), to the rig's
    * shadow-casting spotlight (`VehicleLightRig.addShadowBeam`) and every other lamp to a
-   * pool slot of its own (`beamCount(group, false, true)`): the driven car's headlamps,
+   * pool slot of its own (`beamCount(group, true)`): the driven car's headlamps,
    * where the tier draws shadows. The pair used to go to the shadowed beam as one light
    * from between the lamps, so the car laid ONE pool and one glint in the road; two
    * shadowed lamps measured +4 ms, so the other lamp lights without a shadow and thins
@@ -492,7 +499,6 @@ export class VehicleLamps {
     rig: VehicleLightRig,
     group: BeamGroup,
     gain: number,
-    merged: boolean,
     shadowed: boolean,
   ): void {
     if (!(gain > 0)) return;
@@ -509,10 +515,6 @@ export class VehicleLamps {
     const color =
       group === 'front' ? HEADLIGHT_BEAM_TINT : group === 'tail' ? TAILLIGHT_EMISSIVE : REVERSE_LIGHT_EMISSIVE;
     const distanceScale = group === 'front' ? rig.headlightDistanceScale : 1;
-    if (merged) {
-      this.projectBeam(rig, mounts, color, intensity * gain * mounts.length, shape, distanceScale, false);
-      return;
-    }
     let shadowMount: VehicleBeamMount | null = null;
     if (shadowed) {
       for (const mount of mounts) if (!shadowMount || mount.sourceLocal.x > shadowMount.sourceLocal.x) shadowMount = mount;
@@ -561,32 +563,18 @@ export class VehicleLamps {
     }
   }
 
-  /** One spotlight from `mount`, or from between all of `mount`'s lamps. */
+  /** One spotlight from `mount`. */
   private projectBeam(
     rig: VehicleLightRig,
-    mount: VehicleBeamMount | readonly VehicleBeamMount[],
+    mount: VehicleBeamMount,
     color: THREE.ColorRepresentation,
     intensity: number,
     shape: ProjectedBeamShape,
     distanceScale: number,
     shadowed: boolean,
   ): void {
-    const sourceWorld = this.projectedLightSource;
-    const targetWorld = this.projectedLightTarget;
-    if (Array.isArray(mount)) {
-      sourceWorld.set(0, 0, 0);
-      targetWorld.set(0, 0, 0);
-      for (const lamp of mount as readonly VehicleBeamMount[]) {
-        sourceWorld.add(lamp.sourceLocal);
-        targetWorld.add(lamp.aimLocal);
-      }
-      sourceWorld.multiplyScalar(1 / mount.length);
-      targetWorld.multiplyScalar(1 / mount.length);
-    } else {
-      const lamp = mount as VehicleBeamMount;
-      sourceWorld.copy(lamp.sourceLocal);
-      targetWorld.copy(lamp.aimLocal);
-    }
+    const sourceWorld = this.projectedLightSource.copy(mount.sourceLocal);
+    const targetWorld = this.projectedLightTarget.copy(mount.aimLocal);
     sourceWorld.applyQuaternion(this.ctx.rootGroup.quaternion).add(this.ctx.rootGroup.position);
     targetWorld.applyQuaternion(this.ctx.rootGroup.quaternion).add(this.ctx.rootGroup.position);
     (shadowed ? rig.addShadowBeam : rig.addBeam).call(
@@ -819,12 +807,12 @@ export class VehicleLamps {
       this.rearLightState = next;
       const combinedRearLens = this.brakeLightMaterials.length === 0;
       let runningIntensity = running ? 0.55 : 0;
-      if (combinedRearLens && braking) runningIntensity = 6;
+      if (combinedRearLens && braking) runningIntensity = BRAKE_LENS_INTENSITY;
       for (const material of this.taillightMaterials) {
         material.emissive.setHex(runningIntensity > 0 ? TAILLIGHT_EMISSIVE : 0x000000);
         material.emissiveIntensity = runningIntensity;
       }
-      const brakeIntensity = braking ? 6 : 0;
+      const brakeIntensity = braking ? BRAKE_LENS_INTENSITY : 0;
       for (const material of this.brakeLightMaterials) {
         material.emissive.setHex(brakeIntensity > 0 ? TAILLIGHT_EMISSIVE : 0x000000);
         material.emissiveIntensity = brakeIntensity;

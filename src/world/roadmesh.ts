@@ -5,6 +5,7 @@ import { SurfaceType, SURFACES } from '../core/surfaces';
 import { ROAD_TILE_METRES, roadTextures } from '../render/roadtexture';
 import { applyGroundSpotlightNormals } from '../render/comic';
 import { applyCloudShadow } from '../render/cloudshadow';
+import { applyGroundLight } from '../render/groundlight';
 import { applyCleanSurface } from '../render/cleanstyle';
 import { varietyEventOfKindAt, varietyWeightAt, type VarietyEvent } from './director';
 import { tileGroundSampler, type DrawnGroundSample } from './deserttiledata';
@@ -528,10 +529,11 @@ interface ShoulderBuild {
 // colours are divided by the albedo's mean so the surface keeps its old brightness.
 // Cloud shadow wraps all three around the ground-spotlight patch each of them already
 // carries, so it captures that patch instead of hiding it. A cloud crossing the road is
-// most of the effect: the ribbon is the one surface always in view. The surface's Clean
-// branch (render/cleanstyle.ts) goes outermost on the ribbon: it only changes how its
-// two maps are read.
-const roadMaterial = applyCleanSurface(applyCloudShadow(
+// most of the effect: the ribbon is the one surface always in view. The ground light
+// (render/groundlight.ts) replaces their physical lobe; the two that go glossy in the
+// wet keep a Blinn-Phong glint. The surface's Clean branch (render/cleanstyle.ts) goes
+// outermost on the ribbon: it only changes how its two maps are read.
+const roadMaterial = applyCleanSurface(applyGroundLight(applyCloudShadow(
   applyGroundSpotlightNormals(
     new THREE.MeshStandardMaterial({
       vertexColors: true,
@@ -540,9 +542,9 @@ const roadMaterial = applyCleanSurface(applyCloudShadow(
     }),
   ),
   { wetSheen: true },
-));
+), { specular: true }));
 /** Dark, weathered aggregate exposed only where the sand falls below the mat edge. */
-const roadBedMaterial = applyCloudShadow(
+const roadBedMaterial = applyGroundLight(applyCloudShadow(
   applyGroundSpotlightNormals(
     new THREE.MeshStandardMaterial({
       color: 0x25231f,
@@ -550,7 +552,7 @@ const roadBedMaterial = applyCloudShadow(
       metalness: 0,
     }),
   ),
-);
+));
 let textureGain = 1;
 let texturesAttached = false;
 
@@ -601,7 +603,7 @@ export function roadVertexColorGain(): number {
   return textureGain;
 }
 
-const markingMaterial = applyCloudShadow(
+const markingMaterial = applyGroundLight(applyCloudShadow(
   applyGroundSpotlightNormals(
     new THREE.MeshStandardMaterial({
       vertexColors: true,
@@ -615,7 +617,7 @@ const markingMaterial = applyCloudShadow(
     }),
   ),
   { wetSheen: true },
-);
+), { specular: true });
 
 /** 1 inside [lo, hi], 0 outside, smoothstepped over `soft` metres at either end. */
 function softBand(v: number, lo: number, hi: number, soft: number): number {

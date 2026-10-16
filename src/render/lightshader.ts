@@ -222,12 +222,17 @@ function installScreenAuthoredUnlit(): void {
  *    normal from `CLEAN_FACET_FULL_M` to `CLEAN_FACET_GONE_M`: out there triangles
  *    shrink toward a pixel, and a face normal per pixel-sized triangle is glitter.
  *    Ground that sets `CLEAN_SMOOTH_NORMALS` keeps its own (see that define).
- *  - LIGHT. The sun's Lambert term is stepped into four bands at their centres, so the
- *    mean light is kept and only its gradient is posterised, with a short ramp at each
- *    step so an edge across a curved face is not a stair of pixels. Below the first
- *    step it stays continuous, so a low sun fades off a surface instead of dropping a
- *    band at dusk. Applied as a factor on the light's colour before `RE_Direct`, which
- *    multiplies the colour by the same Lambert term: the product is the band.
+ *  - LIGHT. Every directional and spot light's Lambert term is stepped into four bands
+ *    at their centres, so the mean light is kept and only its gradient is posterised,
+ *    with a short ramp at each step so an edge across a curved face is not a stair of
+ *    pixels. Below the first step it stays continuous, so a low sun fades off a surface
+ *    instead of dropping a band at dusk, and a headlamp's grazing pool on a flat road
+ *    (cos under 0.25 past a few metres) keeps its smooth falloff. Applied as a factor on
+ *    the light's colour before `RE_Direct`, which multiplies the colour by the same
+ *    Lambert term: the product is the band. Headlamps were left smooth once while the
+ *    sun was banded, so a lit car or post read in two styles at once. The ground's
+ *    slope-normal spot call (render/comic.ts) is banded on the shading normal, which is
+ *    its own normal on flat ground.
  *
  * `cleanStyle` reaches the built-in lit materials through their ShaderLib uniforms
  * and ShaderMaterials through `UniformsLib.lights`; the value is the shared plain
@@ -245,7 +250,7 @@ function installCleanStyle(): void {
   }
   THREE.ShaderChunk.lights_pars_begin += `
 ${uniform}
-float cleanSunBand( float dotNL ) {
+float cleanLightBand( float dotNL ) {
 	if ( cleanStyle.x <= 0.0 || dotNL <= 0.0 ) return 1.0;
 	float t = dotNL * 4.0;
 	float i = floor( t );
@@ -257,12 +262,19 @@ float cleanSunBand( float dotNL ) {
   const normalLine = 'vec3 geometryNormal = normal;';
   const directCall =
     'RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );';
+  const band = 'directLight.color *= cleanLightBand( dot( geometryNormal, directLight.direction ) );\n\t\t';
+  const spotLoop = lights.indexOf('i < NUM_SPOT_LIGHTS;');
+  const spotCall = spotLoop >= 0 ? lights.indexOf(directCall, spotLoop) : -1;
   const dirLoop = lights.indexOf('i < NUM_DIR_LIGHTS;');
   const dirCall = dirLoop >= 0 ? lights.indexOf(directCall, dirLoop) : -1;
-  if (!lights.includes(normalLine) || dirCall < 0) throw new Error('Three lights_fragment_begin layout changed');
+  if (!lights.includes(normalLine) || spotCall < 0 || dirCall < 0 || spotCall > dirCall) {
+    throw new Error('Three lights_fragment_begin layout changed');
+  }
   THREE.ShaderChunk.lights_fragment_begin = (
-    lights.slice(0, dirCall)
-    + 'directLight.color *= cleanSunBand( dot( geometryNormal, directLight.direction ) );\n\t\t'
+    lights.slice(0, spotCall)
+    + band
+    + lights.slice(spotCall, dirCall)
+    + band
     + lights.slice(dirCall)
   ).replace(
     normalLine,

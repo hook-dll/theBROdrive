@@ -4001,8 +4001,8 @@ export class Vehicle implements Rebasable {
   }
 
   /** Pool spotlights one of this vehicle's lamp groups needs while lit (vehiclelamps.ts). */
-  beamCount(group: BeamGroup, merged: boolean, shadowed = false): number {
-    return this.lamps.beamCount(group, merged, shadowed);
+  beamCount(group: BeamGroup, shadowed = false): number {
+    return this.lamps.beamCount(group, shadowed);
   }
 
   /** Saves the inside mirror's aim when the driver has turned it (kit `mirror_*`). */
@@ -4017,17 +4017,16 @@ export class Vehicle implements Rebasable {
   }
 
   /**
-   * Offers one LIT lamp group to the shared rig. The beams, their mounts and the
-   * merged ambient form all live in vehiclelamps.ts, which owns the state this reads.
+   * Offers one LIT lamp group to the shared rig. The beams and their mounts live in
+   * vehiclelamps.ts, which owns the state this reads.
    */
   syncProjectedLights(
     rig: VehicleLightRig,
     group: BeamGroup,
     gain: number,
-    merged: boolean,
     shadowed: boolean,
   ): void {
-    this.lamps.syncProjectedLights(rig, group, gain, merged, shadowed);
+    this.lamps.syncProjectedLights(rig, group, gain, shadowed);
   }
 
   /** Headlamps this car would lay in the road for an eye at `eye` (vehiclelamps.ts). */

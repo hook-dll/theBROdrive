@@ -78,27 +78,13 @@ export function installBuildProfile(quality: GraphicsQuality, grass: GrassMode):
 }
 
 /**
- * Blinn-Phong in place of multiscatter GGX for every direct light, in every lit material.
- *
- * Three's physical direct term evaluates the full GGX lobe AND two lookups into the DFG
- * table per light per fragment, and on an immediate-mode integrated GPU every overdrawn
- * fragment pays it again. A period renderer had no specular at all; this keeps a sun
- * glint on paint and glass — roughness mapped to the equivalent Blinn-Phong exponent —
- * for a fraction of the arithmetic. Installed into the shared chunk before anything
- * compiles, the same way render/lightshader.ts guards its light loop, so the comic,
- * ground and car materials that patch the standard shader all get it.
+ * A Blinn-Phong lobe named `name`, in place of Three's multiscatter GGX: roughness goes
+ * to an exponent through the GGX alpha, 2 / alpha^2 - 2. The physical program does not
+ * include the Blinn-Phong chunk, so the lobe is written out here. Shared with the ground
+ * light (render/groundlight.ts), which uses it for the road's wet glint.
  */
-function installCheapSpecular(): void {
-  const chunk = THREE.ShaderChunk.lights_physical_pars_fragment;
-  const direct =
-    'reflectedLight.directSpecular += irradiance * BRDF_GGX_Multiscatter( directLight.direction, geometryViewDir, geometryNormal, material );';
-  const entry = 'void RE_Direct_Physical(';
-  if (!chunk.includes(direct) || !chunk.includes(entry)) {
-    throw new Error('Three physical direct-light shader layout changed');
-  }
-  // The physical program does not include the Blinn-Phong chunk, so the lobe is here.
-  // Roughness goes to an exponent through the GGX alpha, 2 / alpha^2 - 2.
-  const lobe = `vec3 retroSpecular( const in vec3 lightDir, const in vec3 viewDir, const in vec3 normal, const in PhysicalMaterial material ) {
+export function blinnPhongLobeGlsl(name: string): string {
+  return `vec3 ${name}( const in vec3 lightDir, const in vec3 viewDir, const in vec3 normal, const in PhysicalMaterial material ) {
 	vec3 halfDir = normalize( lightDir + viewDir );
 	float dotNH = saturate( dot( normal, halfDir ) );
 	float dotVH = saturate( dot( viewDir, halfDir ) );
@@ -110,6 +96,27 @@ function installCheapSpecular(): void {
 }
 
 `;
+}
+
+/**
+ * Blinn-Phong in place of multiscatter GGX for every direct light, in every lit material.
+ *
+ * Three's physical direct term evaluates the full GGX lobe AND two lookups into the DFG
+ * table per light per fragment, and on an immediate-mode integrated GPU every overdrawn
+ * fragment pays it again. A period renderer had no specular at all; this keeps a sun
+ * glint on paint and glass for a fraction of the arithmetic. Installed into the shared
+ * chunk before anything compiles, the same way render/lightshader.ts guards its light
+ * loop, so the comic, ground and car materials that patch the standard shader all get it.
+ */
+function installCheapSpecular(): void {
+  const chunk = THREE.ShaderChunk.lights_physical_pars_fragment;
+  const direct =
+    'reflectedLight.directSpecular += irradiance * BRDF_GGX_Multiscatter( directLight.direction, geometryViewDir, geometryNormal, material );';
+  const entry = 'void RE_Direct_Physical(';
+  if (!chunk.includes(direct) || !chunk.includes(entry)) {
+    throw new Error('Three physical direct-light shader layout changed');
+  }
+  const lobe = blinnPhongLobeGlsl('retroSpecular');
   THREE.ShaderChunk.lights_physical_pars_fragment = chunk
     .replace(entry, lobe + entry)
     .replace(

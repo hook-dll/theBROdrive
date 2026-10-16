@@ -43,7 +43,7 @@ import {
  *
  * WHOSE LIGHT MATTERS. The driven car's beams are the only way to read the road at
  * night, so they are projected exactly as authored. Every other car's are projected
- * faded (`ambientBeamGain`) and one beam per lamp pair:
+ * faded (`ambientBeamGain`), one beam per lamp like the driven car's:
  *
  *  - Comfort. A night with four cars around threw four full-brightness pools across
  *    the asphalt, one of them oncoming and sweeping over the player's own lane. It

@@ -4,6 +4,15 @@
 
 ### Added
 
+- THE GROUND'S OWN LIGHT (`render/groundlight.ts`). Sand, mesas, the road, its bed and
+  markings no longer run Three's physical GGX lobe for the sun and every spotlight slot:
+  Lambert plus a backscatter term (light behind the eye brightens grainy ground, up to
+  +20 %), the environment as irradiance only, and on the road and markings a Blinn-Phong
+  glint for the wet. The Clean style's light bands now step spotlights as well as the
+  sun (`render/lightshader.ts` `cleanLightBand`). Other cars' headlamps are one beam per
+  lamp, no longer one merged beam per pair. Not yet measured against the 2026-10-16
+  slot-cliff baseline (M2 Pro, 1440 lines: 14.5 ms at 11 slots, 16.3 at 13, 35.0 at 14).
+
 - THREE NEW KIT CARS: VAZ-2111, GAZ-24, GAZ-31029 (`src/carkit/tens.ts` `BODY_2111`,
   `src/carkit/volgas.ts`). The tens' estate on the 2110's nose and doors with its own rear
   door frame, long quarter glass and tailgate (3dcar.ru `vaz_2111.jpg`); the GAZ-24 from its
