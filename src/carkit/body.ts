@@ -674,7 +674,12 @@ export function buildShell(frame: BodyFrame): ShellResult {
         const e0 = edge[i]!;
         const e1 = edge[i + 1]!;
         const quad: Vec3[] = [P(e0.x, e0.y, e0.s), P(e1.x, e1.y, e1.s), P(inner(e1.s), e1.y, e1.s), P(inner(e0.s), e0.y, e0.s)];
-        shell.face(side > 0 ? quad : [...quad].reverse(), 'body', 'dark', true);
+        // Wound to face DOWN, at the wheel. Every car casts from its back faces only
+        // (`shadowSide = BackSide`, render/carmodel.ts), and wound up the ceiling was
+        // culled from the sun's depth pass for any sun above the horizon: the skin's arch
+        // opening let the light through to the road, and the shadow had an arch-shaped
+        // hole with the wheel's own shadow in it (owner, 2026-10-16).
+        shell.face(side > 0 ? [...quad].reverse() : quad, 'body', 'dark', true);
       }
       const sill = frame.station(axle).sill;
       const centre = P(inner(axle), Math.min(sill, w.radius), axle);
