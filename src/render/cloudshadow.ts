@@ -363,19 +363,23 @@ export function cloudShadowFactorFromPan(
 // ---------------------------------------------------------------------------
 
 /**
- * Written once and shared by every ground material. The literals come from the
+ * Height of the cumulus deck above the eye, metres, for the sky's clouds (render/sky.ts)
+ * and the sun shift below. Fair-weather cumulus over a hot desert bases at 1.5-3 km;
+ * the low end keeps a 420 m patch a broad puff overhead rather than a speck.
+ */
+export const CLOUD_BASE_M = 1500;
+
+/**
+ * The field itself, shared by the ground (its shadows) and the sky (the clouds that
+ * cast them): one lattice, one salt, one pan, so every patch of shade on the sand has
+ * its cloud overhead and the two drift together. `cloudField` is the raw value before
+ * any threshold; `detail` 0..1 scales the half-size octave. The literals come from the
  * constants above rather than being retyped, because the CPU twin and the shader
  * disagreeing about a lattice spacing is a bug nobody would find by looking.
  */
-const CLOUD_VERTEX_PARS = /* glsl */ `
+export const CLOUD_FIELD_GLSL = /* glsl */ `
 uniform vec2 uCloudPan;
 uniform float uCloudSalt;
-uniform float uCloudDetail;
-uniform float uCloudStrength;
-uniform float uWet;
-uniform vec2 uGroundPan;
-varying float vCloudShade;
-varying float vWetMask;
 
 float cloudHash( float cx, float cz, float salt ) {
 	float hx = fract( cx * 0.1031 );
@@ -407,20 +411,44 @@ float cloudNoise( vec2 p, float cells, float salt ) {
 	return mix( mix( a, b, f.x ), mix( c, d, f.x ), f.y );
 }
 
-float cloudShade( vec2 scene, float dist ) {
-	vec2 at = scene + uCloudPan;
+/** The half-size octave alone, zero-mean (see CLOUD_DETAIL_AMPLITUDE). */
+float cloudDetailOctave( vec2 at ) {
+	return ( cloudNoise(
+		at / ${CLOUD_DETAIL_CELL_M.toFixed(1)},
+		${CLOUD_DETAIL_PERIOD_CELLS.toFixed(1)},
+		uCloudSalt + ${CLOUD_DETAIL_SALT.toFixed(1)}
+	) - 0.5 ) * ${CLOUD_DETAIL_AMPLITUDE.toFixed(2)};
+}
+
+float cloudField( vec2 at, float detail ) {
 	float field = cloudNoise( at / ${CLOUD_CELL_M.toFixed(1)}, ${CLOUD_PERIOD_CELLS.toFixed(1)}, uCloudSalt );
+	if ( detail > 0.0 ) field += detail * cloudDetailOctave( at );
+	return field;
+}
+`;
+
+/** Middle of the shade's edge band in field units: where a cloud's edge stands. */
+export const CLOUD_EDGE_MID = (CLOUD_EDGE_LOW + CLOUD_EDGE_HIGH) / 2;
+
+const CLOUD_VERTEX_PARS = /* glsl */ `
+${CLOUD_FIELD_GLSL}
+uniform float uCloudDetail;
+uniform float uCloudStrength;
+uniform float uWet;
+uniform vec2 uGroundPan;
+uniform vec2 uCloudSunShift;
+varying float vCloudShade;
+varying float vWetMask;
+
+float cloudShade( vec2 scene, float dist ) {
+	// The cloud that shades this point stands up the sun's ray from it, not overhead.
+	vec2 at = scene + uCloudPan + uCloudSunShift;
 	// See CLOUD_FAR_*: out where the mesh is too coarse for them, the patches give way
 	// to the field's own mean, so distant land keeps its average shade without blinking.
-	field = mix( field, 0.5, smoothstep( ${CLOUD_FAR_START_M.toFixed(1)}, ${CLOUD_FAR_END_M.toFixed(1)}, dist ) );
+	float near = 1.0 - smoothstep( ${CLOUD_FAR_START_M.toFixed(1)}, ${CLOUD_FAR_END_M.toFixed(1)}, dist );
 	float detail = uCloudDetail * ( 1.0 - smoothstep( ${CLOUD_DETAIL_FAR_START_M.toFixed(1)}, ${CLOUD_DETAIL_FAR_END_M.toFixed(1)}, dist ) );
-	if ( detail > 0.0 ) {
-		field += detail * ( cloudNoise(
-			at / ${CLOUD_DETAIL_CELL_M.toFixed(1)},
-			${CLOUD_DETAIL_PERIOD_CELLS.toFixed(1)},
-			uCloudSalt + ${CLOUD_DETAIL_SALT.toFixed(1)}
-		) - 0.5 ) * ${CLOUD_DETAIL_AMPLITUDE.toFixed(2)};
-	}
+	float field = mix( 0.5, cloudNoise( at / ${CLOUD_CELL_M.toFixed(1)}, ${CLOUD_PERIOD_CELLS.toFixed(1)}, uCloudSalt ), near );
+	if ( detail > 0.0 ) field += detail * cloudDetailOctave( at );
 	return smoothstep( ${CLOUD_EDGE_LOW.toFixed(2)}, ${CLOUD_EDGE_HIGH.toFixed(2)}, field );
 }
 `;
@@ -515,7 +543,7 @@ const CLOUD_FRAGMENT_HOOK = /* glsl */ `
 #include <opaque_fragment>`;
 
 /** Suffix, so a patched material never shares a program with an unpatched one. */
-const CLOUD_PROGRAM_KEY = 'cloud-shadow-v4';
+const CLOUD_PROGRAM_KEY = 'cloud-shadow-v5';
 
 /**
  * ONE uniform block for the whole world. Every patched material is bound to these
@@ -531,7 +559,32 @@ const uniforms = {
   uWet: { value: 0 },
   /** The rebase origin reduced into one wet-patch period: puddles stay put on a rebase. */
   uGroundPan: { value: new THREE.Vector2() },
+  /** From a ground point to the cloud that shades it, along the sun's ray (`setCloudSunShift`). */
+  uCloudSunShift: { value: new THREE.Vector2() },
 };
+
+/**
+ * The field's uniforms for the sky's cumulus (render/sky.ts): the very objects the
+ * ground is bound to, so the clouds and their shadows can never be a frame apart.
+ */
+export const cloudFieldUniforms = { uCloudPan: uniforms.uCloudPan, uCloudSalt: uniforms.uCloudSalt };
+
+/**
+ * Lowest sun the shift follows. Below it the shadow would come from a cloud ten or more
+ * kilometres off, out where the sky has faded its clouds into the horizon; the shadows
+ * themselves are fading out with the day by then (`CLOUD_DAY_LOW`).
+ */
+const SUN_SHIFT_MIN_ELEVATION = 0.15;
+
+/**
+ * Points the ground's shade at the clouds that cast it: a ground point is shaded by the
+ * deck where the ray from it to the sun (`sunDir`, unit, scene frame) meets
+ * `CLOUD_BASE_M`. Called once a frame by the sky.
+ */
+export function setCloudSunShift(sunDir: THREE.Vector3): void {
+  const k = CLOUD_BASE_M / Math.max(SUN_SHIFT_MIN_ELEVATION, sunDir.y);
+  uniforms.uCloudSunShift.value.set(sunDir.x * k, sunDir.z * k);
+}
 
 /** Materials already carrying the injection, so a second call cannot double it. */
 const injected = new WeakSet<THREE.Material>();

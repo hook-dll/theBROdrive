@@ -12,6 +12,15 @@ import { weather } from '../world/weather';
 import { SandColor } from './desertdust';
 import { setAirFogExtinction, setAirFogSky, setAirFogSun } from './airfog';
 import { SCENE_FROM_SCREEN_GLSL } from './displaytransform';
+import {
+  CLOUD_BASE_M,
+  CLOUD_DETAIL_CELL_M,
+  CLOUD_EDGE_MID,
+  CLOUD_FIELD_GLSL,
+  CLOUD_PERIOD_M,
+  cloudFieldUniforms,
+  setCloudSunShift,
+} from './cloudshadow';
 
 /**
  * Analytic atmosphere around a real Tycho-2 star catalogue and ephemerides for
@@ -498,6 +507,7 @@ void main() {
 
 const SKY_FRAGMENT = /* glsl */ `
 ${SCENE_FROM_SCREEN_GLSL}
+${CLOUD_FIELD_GLSL}
 uniform float uSunAngularRadius;
 uniform float uMoonAngularRadius;
 /** Radiance of sunlit lunar regolith, in the dome's own authored units. */
@@ -516,12 +526,8 @@ uniform float uMoonAmount;
  * is near the horizon and is zero at midday and through the night.
  */
 uniform float uAntiSolar;
-/** Fraction of the sky the cirrus deck covers, 0..1. */
-uniform float uCloudCover;
-/** Overall visibility of the deck: 1 in daylight, 0 in deep night. */
+/** Overall visibility of the cumulus: 1 in daylight, 0 in deep night. */
 uniform float uCloudAmount;
-/** Seconds, wrapped. Drifts the deck downwind. */
-uniform float uCloudTime;
 
 // --- Weather (world/weather.ts). Every term below is gated on its own uniform, so a
 // clear sky pays for five comparisons and nothing else. ---
@@ -532,7 +538,7 @@ uniform float uCloudTime;
  * the darker sky just above it — the one thing thick air must never show.
  */
 uniform float uDomeFlat;
-/** Storm deck: the cirrus becomes a grey convective overcast with darker bases. */
+/** Storm deck: the cumulus closes into a grey convective overcast with darker bases. */
 uniform float uStorm;
 /** Cirrostratus optics: the 22-degree halo and the two sun dogs. */
 uniform float uHalo;
@@ -551,7 +557,11 @@ uniform float uBoltSeed;
 varying vec3 vDir;
 
 /**
- * CIRRUS, procedurally, inside the dome fragment.
+ * CUMULUS, procedurally, inside the dome fragment: the clouds whose shadows cross the
+ * desert (render/cloudshadow.ts). The view ray meets a flat deck CLOUD_BASE_M above
+ * the eye, and the deck is the very field the ground's shade is drawn from, at the same
+ * pan, so every patch of shade has its cloud up the sun's ray from it and the two drift
+ * together. It replaced a cirrus deck that had nothing to do with the shadows under it.
  *
  * No geometry and no draw call, which buys three things beyond the cost. It cannot be
  * outlined: the ink pass works on object edges, and a cloud shaded into the dome's own
@@ -563,8 +573,7 @@ varying vec3 vDir;
  *
  * What it cannot do: occlude stars. The dome writes no depth and the star field is
  * separate geometry, so a night cloud would have stars shining through it. Rather than
- * fake that, uCloudAmount fades the deck out as night falls — which is close to
- * honest anyway, since unlit cirrus over a desert is not visible.
+ * fake that, uCloudAmount fades the deck out as night falls.
  */
 /*
  * Arithmetic hash, not fract(sin(x) * 43758.5). The sine hash leans on the GPU's sin
@@ -591,17 +600,6 @@ float cloudNoise(vec2 p) {
   );
 }
 
-/** Four octaves. Enough for a fibrous edge; a fifth is invisible at this scale. */
-float cloudFbm(vec2 p) {
-  float sum = 0.0;
-  float amp = 0.5;
-  for (int k = 0; k < 4; k++) {
-    sum += amp * cloudNoise(p);
-    p *= 2.03;
-    amp *= 0.5;
-  }
-  return sum;
-}
 
 /** Disc-plane coordinates in a world-up tangent basis, stable as the camera moves. */
 vec2 moonTextureUv(vec3 offset) {
@@ -671,63 +669,54 @@ void main() {
   float lowBand = 1.0 - smoothstep(0.0, 0.45, h);
   col = mix(col, uZenith * 0.55, uAntiSolar * away * lowBand);
 
-  // --- Cirrus deck -----------------------------------------------------------
+  // --- Cumulus ---------------------------------------------------------------
   //
-  // The view ray is intersected with a flat plane at unit height: dir.xz / dir.y is
-  // the standard cloud-plane parameterisation, and it is what gives the deck
-  // perspective for nothing. Wisps overhead are broad and round; the same wisps
-  // toward the horizon compress into long streaks, which is exactly how a high deck
-  // looks and is the whole reason not to just paint noise on the dome directly.
-  //
-  // dir.y is floored because the projection diverges at the horizon: the uv goes to
-  // infinity, the noise goes to hash grain, and the result is a shimmering band. The
-  // floor bounds the frequency and the fade below hides where it bites.
-  float deckY = max(dir.y, 0.06);
-  vec2 cuv = dir.xz / deckY;
-
-  // Near-isotropic scale before the noise. The old 0.55 / 2.1 squash dragged every
-  // feature along the other axis into combed filaments; the small difference kept
-  // here is only enough to stop the deck reading as a tiled repeat. The drift is
-  // slow and on x, so the deck still slides sideways like a high wind deck should.
-  vec2 combed = cuv * vec2(0.75, 0.9) + vec2(uCloudTime * 0.0035, 0.0);
-  float n = cloudFbm(combed);
-
-  // Multiply by a second sample at half the frequency instead of domain-warping.
-  // The old warp smeared the weave into filaments; a coarse factor that drops low
-  // punches real holes and, where it stays high, lets the fine noise through, so
-  // the deck breaks into isolated rounded puffs with clear sky between them.
-  n *= cloudFbm(combed * 0.5);
-
-  // Cover is a threshold on the noise, so raising it does not fade cloud in
-  // everywhere at once — it grows the patches outward from where cloud already is,
-  // which is how a sky actually fills in. The multiply above cuts the field's
-  // values to about 0.4 of their former size, so the band is re-scaled by that same
-  // 0.4 and narrowed so the deck reads as separate spots rather than one soft veil.
-  float edge = 1.0 - uCloudCover;
-  float deck = smoothstep(edge * 0.4, edge * 0.4 + 0.20, n);
-
-  // Out before the horizon band, which must stay pure gradient: the fog colour is
-  // copied from it, and a cloud reaching down into it would put a hard line along
-  // the join where the far desert dissolves into the sky.
-  deck *= smoothstep(0.02, 0.22, dir.y);
-  deck *= uCloudAmount;
-
-  // Cirrus is ice: bright, and it takes its colour from the sun rather than owning
-  // one. Toward the sun it is lit through and nearly white; away from it, it settles
-  // to the pale horizon tone. That single term is also what makes the deck catch a
-  // low sun and go gold at dusk, with no second palette to author or keep in step.
-  float lit = 0.45 + 0.55 * max(sd, 0.0);
-  vec3 cloudCol = mix(uHorizon, uSunColor, lit * 0.55);
-  if (uStorm > 0.0) {
-    // A convective deck is not ice: it is thick, grey, and darkest where it is
-    // thickest, so the same noise that places the puffs now shades them — dense
-    // cores sink toward a slate base, thin edges stay the pale horizon grey. The
-    // cover grows from the cirrus threshold (uCloudCover rises with the storm), so
-    // the sky closes in from the existing wisps rather than fading in everywhere.
-    float thick = smoothstep(0.08, 0.42, n);
-    vec3 stormCol = mix(uHorizon * 1.04, uZenith * 0.78, thick);
-    stormCol += uSunColor * 0.12 * pow(max(sd, 0.0), 3.0) * (1.0 - thick);
-    cloudCol = mix(cloudCol, stormCol, uStorm);
+  // Not a volume: a 2.5D deck lit as one. What sells a cumulus is its light, and three
+  // cheap terms carry it: the side facing away from the sun is in the cloud's own
+  // shade where the deck thickens toward the sun (one more field sample, one cloud's
+  // depth sunward), a deck seen from straight below shows its flat grey base, and a
+  // thin edge against the sun is lit through (the silver lining).
+  float deck = 0.0;
+  vec3 cloudCol = uHorizon;
+  if (uCloudAmount > 0.0 && dir.y > 0.02) {
+    // dir.y is floored: the projection diverges at the horizon, and the fade below
+    // hides where the floor bites.
+    float reach = ${CLOUD_BASE_M.toFixed(1)} / max(dir.y, 0.05);
+    vec2 at = cameraPosition.xz + dir.xz * reach + uCloudPan;
+    float field = cloudField(at, 1.0);
+    // A finer octave the shadows do not need, for a puff's ragged edge; gone where its
+    // cells shrink toward a pixel, before it can shimmer.
+    float fine = 1.0 - smoothstep(5000.0, 12000.0, reach);
+    if (fine > 0.0) {
+      field += fine * 0.07 * (cloudNoise(
+        at / ${(CLOUD_DETAIL_CELL_M / 2).toFixed(1)},
+        ${(CLOUD_PERIOD_M / (CLOUD_DETAIL_CELL_M / 2)).toFixed(1)},
+        uCloudSalt + 31.0
+      ) - 0.5);
+    }
+    // The cloud's edge is where its shadow's edge band has its middle; a storm lowers
+    // it until the deck closes.
+    float edge = ${CLOUD_EDGE_MID.toFixed(3)} - 0.47 * uStorm;
+    float body = smoothstep(edge - 0.02, edge + 0.08, field);
+    float thick = smoothstep(edge, edge + 0.3, field);
+    vec2 sunward = normalize(uSunDir.xz + vec2(1e-4, 0.0)) * 180.0;
+    float shade = clamp((cloudField(at + sunward, 0.0) - field) * 3.5, 0.0, 1.0);
+    float base = smoothstep(0.3, 0.9, dir.y) * thick;
+    vec3 litCol = mix(uHorizon, uSunColor, 0.7) * 1.08;
+    vec3 shadeCol = mix(uZenith, uHorizon, 0.65) * 0.8;
+    cloudCol = mix(shadeCol, litCol, (1.0 - 0.75 * shade) * (1.0 - 0.45 * base));
+    cloudCol += uSunColor * 0.9 * pow(max(sd, 0.0), 6.0) * (1.0 - thick);
+    if (uStorm > 0.0) {
+      // A convective deck: thick, grey, and darkest where it is thickest.
+      vec3 stormCol = mix(uHorizon * 1.04, uZenith * 0.78, thick);
+      stormCol += uSunColor * 0.12 * pow(max(sd, 0.0), 3.0) * (1.0 - thick);
+      cloudCol = mix(cloudCol, stormCol, uStorm);
+    }
+    // Far clouds sink into the horizon's air, and the deck is out before the horizon
+    // band, which must stay pure gradient: the fog colour is copied from it.
+    float far = smoothstep(6000.0, 26000.0, reach);
+    cloudCol = mix(cloudCol, uHorizon, far * 0.7);
+    deck = body * (1.0 - far) * smoothstep(0.02, 0.16, dir.y) * uCloudAmount;
   }
   col = mix(col, cloudCol, deck);
 
@@ -970,16 +959,12 @@ export class Sky {
    * has fallen (when there is no glow left to be asymmetric about).
    */
   private readonly uAntiSolar = { value: 0 };
-  /** Fraction of sky the cirrus deck covers; straight from the sky gradient. */
-  private readonly uCloudCover = { value: 0 };
   /**
    * Overall deck visibility. Falls to zero as night lands, because the dome cannot
    * depth-test against the star field and so cannot occlude a star — see the note in
    * SKY_FRAGMENT.
    */
   private readonly uCloudAmount = { value: 0 };
-  /** Deck drift clock, seconds, wrapped well inside float precision. */
-  private readonly uCloudTime = { value: 0 };
   // --- Weather (see the SKY_FRAGMENT weather block) ---
   private readonly uDomeFlat = { value: 0 };
   private readonly uStorm = { value: 0 };
@@ -1080,9 +1065,9 @@ export class Sky {
         uMoonAngularRadius: this.uMoonAngularRadius,
         uMoonRadiance: this.uMoonRadiance,
         uAntiSolar: this.uAntiSolar,
-        uCloudCover: this.uCloudCover,
+        uCloudPan: cloudFieldUniforms.uCloudPan,
+        uCloudSalt: cloudFieldUniforms.uCloudSalt,
         uCloudAmount: this.uCloudAmount,
-        uCloudTime: this.uCloudTime,
         uDomeFlat: this.uDomeFlat,
         uStorm: this.uStorm,
         uHalo: this.uHalo,
@@ -1358,22 +1343,17 @@ export class Sky {
     this.uSunGlowIntensity.value = sunGlowIntensity;
     this.uMoonAmount.value = smoothstep(-0.01, 0.005, celestial.moon.direction.y);
 
-    // --- Cirrus deck ---
-    // Cover comes from the sky gradient (weather, on a 400 km cycle). Visibility is
-    // held through dusk — a lit deck at sunset is the best the sky ever looks — and
-    // gone by the time `night` reaches 1, past nautical dusk, because the dome cannot
-    // occlude a star.
-    this.uCloudCover.value = Math.max(
-      g.cloudCover * (1 - weather.clarity * 0.5),
-      0.5 + 0.5 * weather.cloud,
-      g.cloudCover + weather.halo * 0.25,
-    );
+    // --- Cumulus ---
+    // Held through dusk — a lit deck at sunset is the best the sky ever looks — and gone
+    // by the time `night` reaches 1, past nautical dusk, because the dome cannot occlude
+    // a star. Where the clouds stand is the shadow field's (render/cloudshadow.ts); the
+    // sun shift points the ground's shade at them.
+    setCloudSunShift(celestial.sun.direction);
     // A storm deck stays visible after dark (it is lit by the town-less desert's
-    // nothing, and by lightning), so it does not fade with the night like cirrus.
+    // nothing, and by lightning), so it does not fade with the night like fair cloud.
     // Haze and dust swallow the high cloud: the sky above a mgla is one milky veil.
     this.uCloudAmount.value =
       Math.max(1 - night, weather.cloud * 0.9) * (1 - 0.85 * weather.haze) * (1 - weather.dust);
-    this.uCloudTime.value = (performance.now() * 0.001) % 3600;
     this.updateWeatherOptics(celestial.sun.direction);
 
     // --- Photometric exposure and real catalogue stars ---

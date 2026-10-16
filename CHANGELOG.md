@@ -911,6 +911,17 @@
 
 ### Changed
 
+- CUMULUS OVER THE SHADOWS, NOT CIRRUS BESIDE THEM (`render/sky.ts`, `render/cloudshadow.ts`).
+  The sky's cirrus deck had nothing to do with the cloud shadows crossing the desert. The
+  dome now draws a cumulus deck 1.5 km above the eye (`CLOUD_BASE_M`) from the very field
+  the ground's shade comes from (`CLOUD_FIELD_GLSL`, same pan and salt), with its edge where
+  the shade's edge band has its middle, and the ground samples that field up the sun's ray
+  (`setCloudSunShift`), so each patch of shade has its cloud where the sun puts it and the
+  two drift together. Lit as a volume without being one: the side away from the sun
+  shaded where the deck thickens sunward, a grey base seen from below, a lit-through edge
+  against the sun; a storm lowers the edge until the deck closes. Five noise lookups per
+  sky pixel above the horizon, no geometry. Gone: the cirrus (`cloudFbm`, `uCloudCover`,
+  `uCloudTime`) and the sky gradient's `cloudCover`.
 - GRASS IS THE PLAYER'S, AND OFF (`Settings.groundCover`, `game/settings.ts`). Ground cover
   starts Off on every rung and no preset, launch measurement or phone default changes it;
   only the Grass row does. Stored under the new key `groundCover`, so every value the

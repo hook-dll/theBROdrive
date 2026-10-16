@@ -701,15 +701,6 @@ export interface SkyGradient {
   readonly skyHueShift: number;
   /** Fog density multiplier, so distance haze thickens with dust. */
   readonly haze: number;
-  /**
-   * How much of the sky the cirrus deck covers, 0..1.
-   *
-   * Weather, not geology, so it moves on a much shorter cycle than the palette: bands
-   * of thickening and thinning high cloud a few hundred kilometres wide. It never
-   * reaches 0 or 1 — a desert sky is rarely either swept clean or shut in, and the
-   * deck is what gives the sky something to do at noon.
-   */
-  readonly cloudCover: number;
 }
 
 /** Drift at which the aurora begins to appear at all. */
@@ -745,11 +736,6 @@ export function skyGradientAt(s: number): SkyGradient {
     aurora: Math.min(1, Math.max(0, (p - AURORA_ONSET) / (1 - AURORA_ONSET)) ** 1.6),
     skyHueShift: 0.14 * (0.5 - 0.5 * Math.cos(6 * Math.PI * t)),
     haze: 1 + 2.2 * (0.5 - 0.5 * Math.cos(4 * Math.PI * t)),
-    // Ten cycles per palette cycle — 400 km bands, so cloud is weather and reads on
-    // the scale of an afternoon's driving rather than of a region. Sine rather than
-    // the shifted cosines above because this one must NOT start at an extreme: the
-    // opening sky wants its normal amount of cirrus, not a swept-clean one.
-    cloudCover: 0.55 + 0.2 * Math.sin(2 * Math.PI * 10 * t),
   };
 }
 
