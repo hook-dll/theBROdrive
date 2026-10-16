@@ -4,6 +4,15 @@
 
 ### Added
 
+- DESERT WAVES STAY UNDER THE WHEELS (`world/terrain.ts` fine band). The 10 m
+  corrugation drops from 0.36 to 0.09, the 20 m chop from 0.3 to 0.12 and the scoops
+  from 0.32 to 0.16 m deep, each held to the lift-off limit A ≤ g·L²/(4π²v²) for a car
+  with 9 cm of bump travel; the desert's discomfort stays in the long dune swell. On
+  `tools/offroad-feel.ts` (seed 42, 20/40/60 m alongside, 60 and 90 km/h asked): wave p99
+  0.25-0.29 → 0.08-0.12 m, lift-off speed 50-58 → 104-116 km/h, jolt99 1.4-2.2 →
+  0.82-0.99 g (lane 0.28-0.35), wheel load peak 5.0-8.0 → 1.7-2.1x static, airborne
+  0.3-1.7% → 0, flips 1 → 0, body contacts 10-33 → 0 per km. Still slower and rougher
+  than the road: heave 0.31-0.37 g against 0.10-0.13, and 71-79 km/h held of 90 asked.
 - OFF-ROAD FEEL ON THE GAME'S OWN GROUND (`tools/offroad-feel.ts`). `surface-feel.ts` drives
   its desert on `TerrainMeshProvider`, which only road-lab streams. This bench drives a
   real Zhiguli over the colliders the game actually builds there: the road chunk's

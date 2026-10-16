@@ -111,10 +111,18 @@ const RIPPLE_FULL = 55;
  * Above that floor there are two layers:
  *
  *  1. CORRUGATION. Long-crested transverse ridges about 10 m apart, a hundred metres
- *     of crest, a quarter of a metre tall. Ten metres is 1.7 Hz at 60 km/h and 2.5 at
- *     90 — the primary-ride band, which is what "the car starts to sway and bounce"
+ *     of crest, under a tenth of a metre tall. Ten metres is 1.7 Hz at 60 km/h and 2.5
+ *     at 90 — the primary-ride band, which is what "the car starts to sway and bounce"
  *     actually means, and the band impact deleted when it cut the old isotropic chop
  *     from 0.95 m to 0.3 m and threw the pits away.
+ *
+ *     ITS HEIGHT IS CAPPED BY LIFT-OFF, NOT BY TASTE. A sine of height A and
+ *     wavelength L stays under the wheels at speed v only while A <= g L^2 / (4 pi^2
+ *     v^2): 0.089 m for L = 10 m at 60 km/h. At 0.36 m the crests launched the car from
+ *     about 50 km/h (0.09 m of bump travel, bump stop from 0.054), with flips and the
+ *     chassis hitting the sand. The discomfort that is meant to stay lives in the long
+ *     dune swell the body rides over, not in this band. Do NOT move a strong wave to
+ *     ~20 m: at 90 km/h that is 1.25 Hz, the body's own bounce frequency.
  *
  *     It is ORGANISED rather than isotropic, and that is the whole design. The same
  *     energy as isotropic FBM is the crumpled blanket this branch got rid of; laid out
@@ -143,26 +151,34 @@ const RIPPLE_FULL = 55;
  * kilometre-scale field down to `CORRUGATION_PATCH_FLOOR`. Some flats hammer, some
  * are quiet, and which is which is a property of the place.
  *
- * Numbers this band is set by, all at 60 km/h from `tools/desert-washboard.ts` and an
- * in-game drive at 66-68 km/h:
+ * Numbers this band is set by. Mesh kick from `tools/desert-washboard.ts` at 60 km/h
+ * (along 16-80 m); geometry and car from `tools/offroad-feel.ts` (`DIAG=1 SEAMS=10
+ * ALONG_M=5000`, along the road at 20/40/60 m, asked 60 and 90 km/h):
  *
- *                         mesh kick rms/p99    body heave rms/p95 (g)
- *   road (reference)        0.18-0.31 / 0.5-0.9      0.101 / -
- *   desert before           0.095 / 0.32             0.317 / 0.61
- *   desert, 0.24 m         0.300 / 1.09             0.707 / 1.38
- *   desert, 0.36 m         0.40-0.44 / 1.52-1.75       - / -
+ *                         mesh kick rms/p99   wave99 m    lift-off km/h  heave g  jolt99 g   load99  air%   flips  body/km  held km/h (asked 90)
+ *   road (reference)       0.18-0.31/0.5-0.9    -            -          0.10-0.13 0.28-0.35  1.4-1.5  0      0       0         90
+ *   corr 0.36, chop 0.3,   0.50-0.51/1.86-1.89  0.25-0.29   50-58       0.45-0.65 1.4-2.2   5.0-8.0  0.3-1.7 1/30km 10-33     26-44
+ *     scoop 0.32
+ *   corr 0.09, chop 0.12,  0.13-0.15/0.49-0.54  0.08-0.12  104-116      0.31-0.37 0.82-0.99 1.7-2.1  0      0       0         71-79
+ *     scoop 0.16 (now)
+ *
+ * The desert stays rougher than the asphalt where the body feels it (heave 3x, jolt99
+ * 3x the lane) and slower (the autopilot holds 71-79 km/h of 90 asked), but no
+ * longer bottoms, flies or rolls.
  */
 const CORRUGATION_SPACING = 5;
 const CORRUGATION_COHERENCE = 48;
-const CORRUGATION_AMPLITUDE = 0.36;
+const CORRUGATION_AMPLITUDE = 0.09;
 const CORRUGATION_BEND_WAVELENGTH = 420;
 const CORRUGATION_BEND = 26;
 const CORRUGATION_PATCH_LENGTH = 1500;
 const CORRUGATION_PATCH_WIDTH = 430;
 const CORRUGATION_PATCH_FLOOR = 0.4;
 
+// Same lift-off limit as the corrugation: a 20 m wave stays down at 90 km/h up to
+// 0.16 m, and the FBM's p99 runs well above its amplitude.
 const CHOP_WAVELENGTH = 20;
-const CHOP_AMPLITUDE = 0.3;
+const CHOP_AMPLITUDE = 0.12;
 
 /**
  * SCOOPS: the discrete events, and the reason an excursion has a worst moment rather
@@ -183,11 +199,12 @@ const CHOP_AMPLITUDE = 0.3;
  * surface coefficient alone: `runInclineLaunchCheck` requires a stock VAZ-2106 to
  * pull away on a five-degree sandy incline. The depth and threshold keep the steeper
  * scoop faces sparse. `tools/desert-washboard.ts` still reports the wider
- * blocked/stranded census that bounds them.
+ * blocked/stranded census that bounds them. Depth is also bounded by the same lift-off
+ * limit as the corrugation: at 0.32 m a scoop's rim was a launch ramp at 60 km/h.
  */
 const SCOOP_WAVELENGTH = 26;
 const SCOOP_THRESHOLD = 0.5;
-const SCOOP_DEPTH = 0.32;
+const SCOOP_DEPTH = 0.16;
 
 /**
  * Lateral distance at which the fine band is fully in. Short on purpose: the player

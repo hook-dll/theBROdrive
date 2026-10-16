@@ -30,7 +30,10 @@
  * Reference points, both at 60 km/h: the road is kick rms 0.18-0.31 m/s and p99
  * 0.50-0.89 (tools/ride-bench.ts); the desert before the corrugation band went in was
  * rms 0.06 and p99 0.22, i.e. a THIRD of the asphalt, which is the defect this exists
- * to keep measured.
+ * to keep measured. The 0.36 m corrugation then gave rms 0.50 / p99 1.9 and launched
+ * the car; the lift-off-capped band (0.09 m, see terrain.ts) gives rms 0.13-0.15 and
+ * p99 0.49-0.54 along 16-80 m, on purpose: the desert's discomfort is in the long
+ * swell the body rides over (tools/offroad-feel.ts), not in this short band.
  *
  * Nothing here is part of the game bundle.
  */
