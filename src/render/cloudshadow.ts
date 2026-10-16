@@ -140,13 +140,12 @@ const CLOUD_EDGE_LOW = 0.42;
 const CLOUD_EDGE_HIGH = 0.74;
 /**
  * Where the sky's cumulus stands, in field units (render/cloudvolume.ts): a cloud's
- * footprint begins where the field crosses `CLOUD_COVER_EDGE`, and its coverage (which
- * also sets how tall it builds) reaches 1 `CLOUD_COVER_SPAN` above that. The field's
- * 62nd percentile is 0.58, so before erosion about 38% of the sky has cloud over it,
- * a little under a third after; fair-weather cumulus over a desert is 25-40%.
+ * footprint begins where the field crosses `CLOUD_COVER_EDGE` (its height is read from
+ * the blurred field, in cloudvolume.ts). The field's 62nd percentile is 0.58, so before
+ * erosion about 38% of the sky has cloud over it, a little under a third after;
+ * fair-weather cumulus over a desert is 25-40%.
  */
 export const CLOUD_COVER_EDGE = 0.58;
-export const CLOUD_COVER_SPAN = 0.3;
 /**
  * Deepest darkening, as a fraction of the light leaving the surface.
  *

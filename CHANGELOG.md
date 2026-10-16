@@ -918,20 +918,34 @@
   `CLOUD_BASE_M` (1.3 km above the eye, one flat condensation level for every cloud) to
   `CLOUD_TOP_M` (2.3 km): footprint from the very field the ground's shade comes from
   (same pan and salt, baked into a 1024² coverage map round the eye and rebaked every
-  3 km), a column's top rising with its coverage into a dome, eroded by a 64³ tiling
-  Perlin-Worley noise baked at startup (billows at the body, wisps under the base, on an
-  oblique lattice so trilinear creases do not draw level lines). Lit with Beer-Lambert,
-  a five-sample march toward the sun, three multiple-scattering octaves, a dual-lobe
-  Henyey-Greenstein phase (the silver lining), a powder term, and sky/sand ambient by
-  height in the column; far cloud sinks into the horizon colour and the layer fades out
-  above the horizon band. Drawn before the scene at 360 lines at most, 64 steps with
-  empty space skipped (and stepped back into, so the entry never jumps a step), jittered
-  per pixel and frame and accumulated over frames, reprojected by view direction; the
-  dome composites it in linear light behind the rainbow and the lightning and in front of
-  the sun, the Moon and the halo. A storm lowers the footprint edge, thickens and raises
-  the columns until the deck closes. Measured on the M2 Pro at 2560x1440, frame GPU time
-  against no clouds at all: +1.4 ms (the previous 2D deck: +1.4 to +1.8 ms); against the
-  2D deck, -0.2 to -0.4 ms. Desktop `standard` and `blessing` only: the low rungs, phones,
+  3 km). A cloud's HEIGHT is read from that field blurred over 300 m (two separable
+  passes into the map's second channel at each rebake), so each cloud is one smooth hill:
+  a small cloud a flat humilis about 120 m thick, a typical one 400 m, the big cores
+  800 m. Its side draws in as it climbs, so the shoulders round over into the top, and the
+  dome's surface is cut into billows by a 64³ tiling Perlin-Worley noise baked at startup.
+  The billowed erosion acts only near the surface. The lowest 90 m get a wispy fray.
+  Nothing extends below the flat base, and the noise sits on an oblique lattice so
+  trilinear creases do not draw level lines. The first version read the height from the
+  raw coverage, which climbs about 0.1 every 100 m at a cloud's edge, so a column rose a
+  kilometre over 300 m and many clouds came out as cones and spikes. Lit with
+  Beer-Lambert, a six-sample march toward the sun reaching 1.9 km (twice that under a low
+  sun, so neighbours shade each other at dusk), three multiple-scattering octaves, a
+  dual-lobe Henyey-Greenstein phase (the silver lining), a light powder term, and
+  sky/ground ambient by height in the column. At sunset the ambient comes from the zenith
+  alone, greyed toward slate, and the sun reaching a cloud's lower half is dimmed. Far
+  cloud sinks into the dusk sky rather than the horizon glow, so clouds toward a low sun
+  stand dark with lit rims instead of glowing orange through. Drawn before the scene at
+  360 lines at most, 64 steps with empty space skipped (and stepped back into, so the
+  entry never jumps a step). The view ray and the light march each have their own
+  per-pixel jitter sequence (golden ratio and plastic number, so the two never move in
+  step), accumulated over frames (history weight 0.93) and reprojected by view direction.
+  Sharing one jitter left hatched stripes the history could not average out. The dome
+  composites the result in linear light: in front of the sun, the Moon and the halo,
+  behind the rainbow and the lightning. A storm lowers the footprint edge, thickens the
+  clouds and stands every column to the top of the slab until the deck closes. Cost on the
+  M2 Pro at 2560x1440 (cloud picture 640x360), the cloud pass alone timed with its own
+  GPU query in the same tab: 1.15-1.55 ms (the first volumetric version: 1.75-2.6 ms).
+  Desktop `standard` and `blessing` only: the low rungs, phones,
   the environment probe and a mirror's directions outside the view keep the 2D deck,
   switched by a uniform, so no program changes. The ground's shade band moved to
   0.42-0.74 so it sits under the clouds (`CLOUD_COVER_EDGE`): about 36% of the ground in

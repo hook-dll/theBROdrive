@@ -3,7 +3,6 @@ import { mulberry32 } from '../core/rng';
 import {
   CLOUD_BASE_M,
   CLOUD_COVER_EDGE,
-  CLOUD_COVER_SPAN,
   CLOUD_FIELD_GLSL,
   CLOUD_PERIOD_M,
   CLOUD_TOP_M,
@@ -26,31 +25,37 @@ import {
  * a `WEATHER_SIZE` map around the eye (`weatherTarget`) and rebaked only when the eye
  * and the wind have carried it `WEATHER_REBAKE_M`; the march reads the map.
  *
- * WHAT SHAPE. Coverage (the field above `CLOUD_COVER_EDGE`) decides how tall a column
- * builds: the densest cores reach the top of the slab, the edges stay low, so every
- * cloud is a dome with a flat base. A tiling 3D noise (`NOISE_SIZE` cubed, baked on the
- * CPU at startup: Perlin-Worley plus three Worley octaves) erodes it: the billows of
- * the body at `SHAPE_TILE_M`, and a finer erosion at `DETAIL_TILE_M` that is wispy at
- * the base and cauliflower at the top. Both tiles divide the field's period, so the
- * clouds stay continuous when the pan is reduced modulo that period.
+ * WHAT SHAPE. The footprint is the field above `CLOUD_COVER_EDGE`; the HEIGHT is the
+ * field blurred over `HEIGHT_BLUR_M` (a second channel of the same map), so one cloud is
+ * one smooth hill: low and flat when its footprint is small, tall only over a big core,
+ * never a cone. The side draws in as it climbs, so the shoulders round into the top,
+ * and the base is flat. A tiling 3D noise (`NOISE_SIZE` cubed, baked on the CPU at
+ * startup: Perlin-Worley plus three Worley octaves) cuts the dome's surface into billows
+ * at `SHAPE_TILE_M`, with a finer erosion at `DETAIL_TILE_M`: cauliflower over the
+ * surface, a soft fray in the lowest 90 m, nothing ever below the base. Both tiles divide
+ * the field's period, so the clouds stay continuous when the pan is reduced modulo it.
  *
- * HOW IT IS LIT. Beer-Lambert extinction along the view ray; at each sample a short
- * march toward the sun (`LIGHT_STEPS`) gives the light's own extinction, three
- * scattering octaves (Wrenninge's multiple-scattering approximation) keep the interiors
- * from going black, a dual-lobe Henyey-Greenstein phase puts the silver lining round a
- * cloud against the sun, and the "powder" term darkens the thin crevices seen with the
- * sun behind. Ambient is the sky's own colours by height in the cloud: warm sand bounce
- * under the flat base, blue sky on the tops. Far clouds sink into the horizon colour,
+ * HOW IT IS LIT. Beer-Lambert extinction along the view ray; at each sample a march of
+ * six widening steps toward the sun (twice as long under a low sun) gives the light's
+ * own extinction, three scattering octaves (Wrenninge's multiple-scattering
+ * approximation) keep the interiors from going black, a dual-lobe Henyey-Greenstein
+ * phase puts the silver lining round a cloud against the sun, and a light "powder" term
+ * darkens the thinnest wisps seen with the sun behind. Ambient is the sky's own colours
+ * by height in the cloud: ground bounce under the flat base, sky on the tops. At sunset
+ * it comes from the zenith only, greyed toward slate, and the sun reaching a cloud's
+ * lower half is dimmed, so a sunset cloud is a lit crown over a blue-grey body. Far
+ * clouds sink into the air in front of them (the dusk sky, not the glow at the horizon),
  * and the whole layer fades out above the horizon band, which must stay pure gradient
  * because the fog colour is copied from it.
  *
  * WHAT IT COSTS. At most `TARGET_LINES` lines (a third of a 1080-line frame, a quarter
- * of 1440), up to `MAX_STEPS`
- * steps with empty space skipped at double stride, jittered per pixel and frame and
+ * of 1440), up to `MAX_STEPS` steps with empty space skipped at double stride. The view
+ * ray and the light march are jittered per pixel and frame on two separate sequences,
  * accumulated over frames with the history reprojected by view direction (the clouds
- * are kilometres off, so the eye's own travel within a frame is negligible). The dome
- * (render/sky.ts) composites it where the sky is visible; geometry draws over the dome,
- * so the clouds are behind everything by construction.
+ * are kilometres off, so the eye's own travel within a frame is negligible). Measured
+ * on an M2 Pro, 1.15-1.55 ms at 640x360. The dome (render/sky.ts) composites it where
+ * the sky is visible; geometry draws over the dome, so the clouds are behind everything
+ * by construction.
  *
  * TIERS. Only `standard` and `blessing` on a desktop presentation draw it. The rest
  * keep the dome's 2D deck, which is also what the environment probe bakes from, and
@@ -63,13 +68,34 @@ import {
 
 /** Side of the tiling 3D noise, voxels. 64^3 RGBA8 is 1 MB. */
 const NOISE_SIZE = 64;
-/** Tile of the body noise, metres: 48 tiles to the field's period (Worley cells 280-70 m). */
-const SHAPE_TILE_M = CLOUD_PERIOD_M / 48;
+/** Tile of the body noise, metres: 80 tiles to the field's period (billows 170-40 m). */
+const SHAPE_TILE_M = CLOUD_PERIOD_M / 80;
 /** Tile of the erosion noise, metres: 192 to the period (cells 70-17 m). */
 const DETAIL_TILE_M = CLOUD_PERIOD_M / 192;
 /** Half the side of the baked coverage map, metres. */
 const WEATHER_HALF_M = 24_000;
 const WEATHER_SIZE = 1024;
+/**
+ * Gaussian radius of the blurred field a cloud's height is read from, metres. The raw
+ * field climbs about 0.1 a hundred metres at a cloud's edge, so a height read from it
+ * rose a kilometre across three hundred metres: every cloud a cone. Blurred over 300 m
+ * the height of one cloud is a smooth hill on its footprint, low where the footprint is
+ * small, tall only over a big core, and its bilinear creases (47 m texels) are too
+ * shallow to show in the lighting.
+ */
+const HEIGHT_BLUR_M = 300;
+const BLUR_SIGMA_TEXELS = HEIGHT_BLUR_M / ((WEATHER_HALF_M * 2) / WEATHER_SIZE);
+/** Taps each side of the centre, 1.5 texels apart (bilinear between), out to 3 sigma. */
+const BLUR_TAP_TEXELS = 1.5;
+const BLUR_TAPS = Math.ceil((3 * BLUR_SIGMA_TEXELS) / BLUR_TAP_TEXELS);
+/**
+ * Where the blurred field puts a column's height (`column`): 0.1 of the slab at
+ * `HEIGHT_LOW`, the whole of it `HEIGHT_SPAN` above. Measured over the footprints of
+ * four seeds, the blurred field runs 0.47 (5th percentile) to 0.74 (95th), 0.59 at the
+ * median: a typical cloud 400 m thick, the small ones 120 m, the big cores 800 m.
+ */
+const HEIGHT_LOW = 0.45;
+const HEIGHT_SPAN = 0.35;
 /** How far the map's centre may fall behind the eye before it is baked again. */
 const WEATHER_REBAKE_M = 3_000;
 /**
@@ -80,7 +106,7 @@ const WEATHER_REBAKE_M = 3_000;
 const TARGET_DIVISOR = 3;
 const TARGET_LINES = 360;
 /** Share of the accumulated history kept each frame. */
-const HISTORY_WEIGHT = 0.88;
+const HISTORY_WEIGHT = 0.93;
 const MAX_STEPS = 64;
 /** Extinction of the densest cloud, per metre. */
 const SIGMA_MAX = 0.045;
@@ -253,14 +279,38 @@ void main() {
 }
 `;
 
-/** The coverage map: the shadow field's raw value round the map's centre. */
+/** The coverage map, first pass: the shadow field's raw value round the map's centre. */
 const WEATHER_FRAGMENT = /* glsl */ `
 ${CLOUD_FIELD_GLSL}
 uniform vec2 uMapCentre;
 varying vec2 vUv;
 void main() {
   vec2 at = uMapCentre + (vUv - 0.5) * ${(WEATHER_HALF_M * 2).toFixed(1)};
-  gl_FragColor = vec4(clamp(cloudField(at, 1.0), 0.0, 1.0), 0.0, 0.0, 1.0);
+  float field = clamp(cloudField(at, 1.0), 0.0, 1.0);
+  gl_FragColor = vec4(field, field, 0.0, 1.0);
+}
+`;
+
+/**
+ * The coverage map's two blur passes: R is carried through untouched, G is blurred along
+ * `uBlurStep` (one texel across, then one down) with a Gaussian of `HEIGHT_BLUR_M`. The
+ * blurred field is what a cloud's HEIGHT is read from (see `density`).
+ */
+const BLUR_FRAGMENT = /* glsl */ `
+uniform sampler2D uSource;
+uniform vec2 uBlurStep;
+varying vec2 vUv;
+void main() {
+  vec4 centre = texture2D(uSource, vUv);
+  float sum = centre.g;
+  float weight = 1.0;
+  for (int i = 1; i <= ${BLUR_TAPS}; i++) {
+    float x = float(i) * ${BLUR_TAP_TEXELS.toFixed(2)};
+    float w = exp(-0.5 * x * x / ${(BLUR_SIGMA_TEXELS * BLUR_SIGMA_TEXELS).toFixed(3)});
+    sum += w * (texture2D(uSource, vUv + uBlurStep * x).g + texture2D(uSource, vUv - uBlurStep * x).g);
+    weight += 2.0 * w;
+  }
+  gl_FragColor = vec4(centre.r, sum / weight, 0.0, 1.0);
 }
 `;
 
@@ -297,37 +347,44 @@ float remap(float v, float lo, float hi, float a, float b) {
   return a + (v - lo) / (hi - lo) * (b - a);
 }
 
-/** Coverage 0..1 at a field point: the cloud's footprint and how tall it builds. */
-float coverage(vec2 at) {
+/**
+ * The column at a field point: x how far inside its footprint the point stands, 0 at
+ * the edge to 1 about 250 m in; y how high it builds above the base, metres. The height
+ * comes from the BLURRED field (HEIGHT_BLUR_M), so across one cloud it is a smooth hill:
+ * a small cloud a flat humilis a hundred metres thick, a big core a kilometre. A storm
+ * lowers both edges until the deck closes and stands every column to the top.
+ */
+vec2 column(vec2 at) {
   vec2 q = (at - uMapCentre) / ${(WEATHER_HALF_M * 2).toFixed(1)};
-  float field = texture2D(uWeather, q + 0.5).r;
+  vec2 field = texture2D(uWeather, q + 0.5).rg;
   float edge = 1.0 - smoothstep(0.4, 0.5, max(abs(q.x), abs(q.y)));
-  // A storm lowers the edge until the deck closes.
   float threshold = ${CLOUD_COVER_EDGE.toFixed(3)} - 0.55 * uStorm;
-  return clamp((field - threshold) / ${CLOUD_COVER_SPAN.toFixed(3)}, 0.0, 1.0) * edge;
+  float inside = clamp((field.r - threshold) / 0.25, 0.0, 1.0) * edge;
+  float u = clamp((field.g - ${HEIGHT_LOW.toFixed(3)} + 0.55 * uStorm) / ${HEIGHT_SPAN.toFixed(3)}, 0.0, 1.0);
+  float top = THICK * mix(0.1 + 0.9 * pow(u, 1.2), 1.0, uStorm);
+  return vec2(inside, top);
 }
 
 /**
- * Density at p = (field x, height above the eye, field z). A column's top rises with its
- * coverage (faster at the edge than in the core, so the edge is rounded rather than a
- * cone's slope) and the column narrows toward it as a circle does: every cloud a dome on
- * a flat base, about as tall as it is wide, the densest cores towering. The body noise is
- * kept where it beats the coverage's threshold, and the erosion bites the edges.
+ * Density at p = (field x, height above the eye, field z) in a column.
+ *
+ * The ENVELOPE is the column's own dome. Its side draws in as it climbs (a point must
+ * stand further inside the footprint the higher it is, as the square of its height in
+ * the column), so the shoulders round over into the top; and it fades out over the last
+ * 400 m under the top. Deep inside it every voxel is cloud; toward its surface only the
+ * crowns of the body noise's billows survive, so the surface is a heap of rounded lumps
+ * that may stand up to 150 m proud of it. Nothing hangs below the base: under it the
+ * density is zero, and the lowest 90 m are only frayed by the wispy erosion, never
+ * extended. The billowed erosion works on the surface alone (1 - envelope), so a dome's
+ * outline is cauliflower and its inside stays solid.
  */
-float columnTop(float cov) {
-  return mix(mix(0.15, 1.0, pow(cov, 0.75)), 1.0, uStorm);
-}
-
-float density(vec3 p, float cov, float lod, bool detail) {
-  float h = (p.y - BASE) / THICK;
-  if (h <= 0.0 || h >= 1.0 || cov <= 0.0) return 0.0;
-  float hn = h / columnTop(cov);
-  if (hn >= 1.0) return 0.0;
-  // Flat base: full density within 30 m of the condensation level. A cumulus is widest
-  // a little above its base, not at it (its edges curl up and in from the flat bottom),
-  // so the lowest quarter of the column is held in; without it every cloud flared at
-  // the bottom like a bell.
-  float profile = smoothstep(0.0, 0.03, h) * mix(0.7, 1.0, smoothstep(0.0, 0.3, hn)) * sqrt(1.0 - hn * hn);
+float density(vec3 p, vec2 col, float lod, bool detail) {
+  float hm = p.y - BASE;
+  float top = col.y;
+  if (col.x <= 0.0 || hm <= 0.0 || hm >= top + 150.0) return 0.0;
+  float hn = clamp(hm / top, 0.0, 1.0);
+  float rise = 0.7 * hn * hn;
+  float env = smoothstep(rise, rise + 0.5, col.x) * smoothstep(top + 150.0, top - 250.0, hm);
   // The noise is read on an oblique lattice. Trilinear filtering creases at every voxel
   // plane, and with horizontal planes the steep remaps below turned those creases into
   // fine level lines across every cloud. Whole-number coefficients on x and z keep the
@@ -336,13 +393,14 @@ float density(vec3 p, float cov, float lod, bool detail) {
   vec4 n = textureLod(uNoise, q / ${SHAPE_TILE_M.toFixed(1)}, lod);
   float lowFbm = n.g * 0.625 + n.b * 0.25 + n.a * 0.125;
   float body = clamp(remap(n.r, lowFbm - 1.0, 1.0, 0.0, 1.0), 0.0, 1.0);
-  float d = clamp(remap(body * profile, 0.55 * (1.0 - cov), 1.0, 0.0, 1.0), 0.0, 1.0);
-  if (detail && d > 0.0 && d < 0.85) {
+  float d = clamp((body - 1.0 + 1.3 * env) / 0.2, 0.0, 1.0) * smoothstep(0.0, 40.0, hm);
+  if (detail && d > 0.0 && d < 0.9) {
     vec4 e = textureLod(uNoise, q / ${DETAIL_TILE_M.toFixed(1)} + vec3(0.0, 0.0, 0.37), lod + 0.5);
     float high = e.g * 0.625 + e.b * 0.25 + e.a * 0.125;
-    // Wispy under the base, billowed above it.
-    float erode = mix(high, 1.0 - high, clamp(h * 5.0, 0.0, 1.0));
-    d = clamp(remap(d, erode * 0.5, 1.0, 0.0, 1.0), 0.0, 1.0);
+    // Wisps in the lowest 90 m, billows above.
+    float lift = smoothstep(0.0, 90.0, hm);
+    float erode = mix(high, 1.0 - high, lift) * (0.6 * (1.0 - env) + 0.3 * (1.0 - lift));
+    d = clamp(remap(d, erode, 1.0, 0.0, 1.0), 0.0, 1.0);
   }
   return d * mix(1.0, 1.6, uStorm);
 }
@@ -378,24 +436,41 @@ void main() {
       // phases correlated, and the history kept them as contour stripes.)
       vec3 h3 = fract(vec3(gl_FragCoord.xyx) * 0.1031);
       h3 += dot(h3, h3.yzx + 33.33);
-      float ign = fract(fract((h3.x + h3.y) * h3.z) + uFrame * 0.61803399);
+      float hashed = fract((h3.x + h3.y) * h3.z);
+      float ign = fract(hashed + uFrame * 0.61803399);
+      // The light march's own jitter, on a second sequence (the plastic number's), so its
+      // samples do not move in step with the view ray's: shared, the two together left a
+      // hatched residue the history could not average away.
+      float lightJitter = fract(hashed * 7.31 + uFrame * 0.75487767);
       float t = t0 + dt * ign;
       vec2 origin = uEye.xz + uCloudPan;
 
       vec3 sun = toLinear(uSunColor) * 1.1;
       vec3 zenith = toLinear(uZenith);
       vec3 horizonLin = toLinear(uHorizon);
-      // Sky light on the tops comes mostly from overhead, not from the bright band at the
-      // horizon (at sunset that band is the glow, and a backlit cloud lit by it glowed
-      // orange right through instead of standing dark against it); under the base, the
-      // sand's warm bounce of the sun and sky.
-      vec3 skyAmbient = mix(zenith, horizonLin, 0.3) * 0.5;
-      vec3 groundAmbient = (horizonLin * 0.3 + toLinear(vec3(0.85, 0.64, 0.38)) * max(uSunDir.y, 0.0) * 0.32) * 0.5;
+      // 1 with the sun on the horizon, 0 from 20 degrees up.
+      float lowSun = 1.0 - smoothstep(0.05, 0.35, uSunDir.y);
+      // Sky light on the tops comes mostly from overhead, and at sunset only from
+      // overhead: the bright horizon band is then the glow itself, and a cloud lit by it
+      // glowed orange right through instead of standing dark against it. The shaded
+      // underside sees the sand's warm bounce of a high sun, and at sunset the dim blue
+      // of the sky over the other horizon, which is what makes a sunset cloud's base
+      // blue-grey under its lit rim.
+      vec3 skyAmbient = mix(zenith, horizonLin, 0.3 * (1.0 - lowSun)) * 0.5;
+      vec3 groundAmbient = zenith * 0.22 + toLinear(vec3(0.85, 0.64, 0.38)) * max(uSunDir.y, 0.0) * 0.16;
+      // A dusk zenith is a deep violet, and a cloud's shade lit by it alone came out as
+      // saturated as the sky: real shade under a sunset is a slate grey with a cast.
+      float greyShade = 0.45 * lowSun;
+      skyAmbient = mix(skyAmbient, vec3(dot(skyAmbient, vec3(0.2126, 0.7152, 0.0722))), greyShade);
+      groundAmbient = mix(groundAmbient, vec3(dot(groundAmbient, vec3(0.2126, 0.7152, 0.0722))), greyShade);
       float c = dot(dir, uSunDir);
       float ph1 = phase(c, 1.0);
       float ph2 = phase(c, 0.5);
       float ph3 = phase(c, 0.25);
       vec3 sunStep = normalize(uSunDir + vec3(0.0, 0.002, 0.0));
+      // The light's march reaches 1.9 km, and twice that under a low sun, whose light
+      // crosses whole clouds and their neighbours before it reaches a cloud's far side.
+      float lightReach = mix(1.0, 2.0, lowSun);
       float depthSum = 0.0;
       float weightSum = 0.0;
       // Steps at fine stride left before empty space may be crossed at double stride again.
@@ -404,8 +479,8 @@ void main() {
       for (int i = 0; i < ${MAX_STEPS}; i++) {
         if (t > t1 || transmit < 0.015) break;
         vec2 at = origin + dir.xz * t;
-        float cov = coverage(at);
-        if (cov <= 0.0) {
+        vec2 col = column(at);
+        if (col.x <= 0.0) {
           t += fine > 0 ? dt : dt * 2.0;
           fine--;
           continue;
@@ -421,33 +496,34 @@ void main() {
         fine = 4;
         vec3 p = vec3(at.x, dir.y * t, at.y);
         float lod = log2(max(1.0, t * uPixelAngle * ${(NOISE_SIZE / SHAPE_TILE_M).toFixed(5)}));
-        float d = density(p, cov, lod, true);
+        float d = density(p, col, lod, true);
         if (d > 0.0) {
           float sigma = d * SIGMA;
-          // The light's own path toward the sun, in widening steps.
+          // The light's own path toward the sun, in widening steps, every one scaled by
+          // the pixel's jitter so the samples do not land at fixed distances.
           float od = 0.0;
-          // Every step scaled by the pixel's jitter, so the light's samples do not land at
-          // fixed heights and contour the tops.
           float along = 0.0;
-          float seg = 30.0 + 30.0 * ign;
-          for (int j = 0; j < 5; j++) {
+          float seg = (36.0 + 18.0 * lightJitter) * lightReach;
+          for (int j = 0; j < 6; j++) {
             along += seg * 0.5;
             vec3 q = p + sunStep * along;
-            float lc = coverage(q.xz);
-            od += density(q, lc, lod + 1.0, false) * SIGMA * seg;
+            od += density(q, column(q.xz), lod + 1.0, false) * SIGMA * seg;
             along += seg * 0.5;
-            seg *= 1.9;
+            seg *= 1.8;
           }
-          // Ambient by height within this column: the top sees the sky, the base the sand.
-          float hc = clamp((p.y - BASE) / (THICK * columnTop(cov)), 0.0, 1.0);
+          // Height within this column: the top sees the sky, the base the ground.
+          float hc = clamp((p.y - BASE) / max(col.y, 60.0), 0.0, 1.0);
+          // A low sun's light reaches a cloud's lower half through more air and past the
+          // clouds round it: under the lit crown, the body goes dim and red.
+          float sunAt = mix(1.0, 0.3 + 0.7 * smoothstep(0.1, 0.9, hc), lowSun);
           // Three scattering octaves: each keeps more light and forgets more direction.
           float light = exp(-od) * ph1 + 0.3 * exp(-od * 0.25) * ph2 + 0.1 * exp(-od * 0.07) * ph3;
           // Powder: thin cloud has not yet built up its in-scatter, so seen with the sun
           // behind the eye its crevices and wisps go darker than the bulk.
-          float powder = 1.0 - exp(-d * 9.0);
-          light *= mix(1.0, powder, 0.6 * (0.5 - 0.5 * c));
+          float powder = 1.0 - exp(-d * 20.0);
+          light *= mix(1.0, powder, 0.35 * (0.5 - 0.5 * c));
           vec3 ambient = mix(groundAmbient, skyAmbient, smoothstep(0.0, 0.8, hc)) * (0.55 + 0.45 * exp(-d * 1.5));
-          vec3 radiance = sun * light + ambient;
+          vec3 radiance = sun * (light * sunAt) + ambient;
           float stepT = exp(-sigma * dt);
           float absorbed = transmit * (1.0 - stepT);
           scattered += radiance * absorbed;
@@ -457,10 +533,13 @@ void main() {
         }
         t += dt;
       }
-      // Far cloud sinks into the horizon's air.
+      // Far cloud sinks into the air in front of it. At sunset that air is not the glow
+      // on the horizon (the sun's own light, which a cloud in front of it blocks) but the
+      // dusk sky: far clouds toward the sun stand dark against the glow.
       float dist = weightSum > 0.0 ? depthSum / weightSum : t1;
       float air = 1.0 - exp(-dist / 22000.0);
-      scattered = mix(scattered, horizonLin * (1.0 - transmit), air);
+      vec3 airCol = mix(horizonLin, zenith, 0.6 * lowSun);
+      scattered = mix(scattered, airCol * (1.0 - transmit), air);
     }
     scattered *= fade;
     transmit = 1.0 - (1.0 - transmit) * fade;
@@ -526,15 +605,20 @@ export class CloudVolume {
 
   private readonly webgl: THREE.WebGLRenderer;
   private readonly noise: THREE.Data3DTexture;
+  /** The coverage map the march reads: R the raw field, G the blurred one. */
   private readonly weatherTarget: THREE.WebGLRenderTarget;
+  /** Between the two blur passes. */
+  private readonly weatherBlurTarget: THREE.WebGLRenderTarget;
   private readonly history: [THREE.WebGLRenderTarget, THREE.WebGLRenderTarget];
   private current = 0;
   private historyValid = false;
   private readonly geometry = fullscreenTriangle();
   private readonly camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private readonly weatherScene = new THREE.Scene();
+  private readonly blurScene = new THREE.Scene();
   private readonly marchScene = new THREE.Scene();
   private readonly weatherMaterial: THREE.ShaderMaterial;
+  private readonly blurMaterial: THREE.ShaderMaterial;
   private readonly marchMaterial: THREE.ShaderMaterial;
   /** Map centre in field coordinates, and the salt it was baked with; NaN until baked. */
   private readonly mapCentre = new THREE.Vector2(Number.NaN, Number.NaN);
@@ -554,6 +638,7 @@ export class CloudVolume {
     const type = half ? THREE.HalfFloatType : THREE.UnsignedByteType;
     // Half float where it renders: eight bits terraced the coverage, and the tops with it.
     this.weatherTarget = passTarget(WEATHER_SIZE, WEATHER_SIZE, type);
+    this.weatherBlurTarget = passTarget(WEATHER_SIZE, WEATHER_SIZE, type);
     this.history = [passTarget(1, 1, type), passTarget(1, 1, type)];
 
     this.weatherMaterial = new THREE.ShaderMaterial({
@@ -563,6 +648,16 @@ export class CloudVolume {
         uCloudPan: cloudFieldUniforms.uCloudPan,
         uCloudSalt: cloudFieldUniforms.uCloudSalt,
         uMapCentre: { value: this.mapCentre },
+      },
+      depthTest: false,
+      depthWrite: false,
+    });
+    this.blurMaterial = new THREE.ShaderMaterial({
+      vertexShader: FULLSCREEN_VERTEX,
+      fragmentShader: BLUR_FRAGMENT,
+      uniforms: {
+        uSource: { value: this.weatherTarget.texture },
+        uBlurStep: { value: new THREE.Vector2() },
       },
       depthTest: false,
       depthWrite: false,
@@ -596,6 +691,7 @@ export class CloudVolume {
     this.amount = sky.uCloudAmount;
     for (const [scene, material] of [
       [this.weatherScene, this.weatherMaterial],
+      [this.blurScene, this.blurMaterial],
       [this.marchScene, this.marchMaterial],
     ] as const) {
       const mesh = new THREE.Mesh(this.geometry, material);
@@ -604,13 +700,14 @@ export class CloudVolume {
     }
   }
 
-  /** Links both programs, behind the loading cover (`Renderer.waitForFrameShaders`). */
+  /** Links the three programs, behind the loading cover (`Renderer.waitForFrameShaders`). */
   compile(): Promise<unknown> {
     const previous = this.webgl.getRenderTarget();
     try {
       this.webgl.setRenderTarget(this.history[0]);
       return Promise.all([
         this.webgl.compileAsync(this.weatherScene, this.camera),
+        this.webgl.compileAsync(this.blurScene, this.camera),
         this.webgl.compileAsync(this.marchScene, this.camera),
       ]);
     } finally {
@@ -652,6 +749,16 @@ export class CloudVolume {
       this.mapSalt = salt;
       this.webgl.setRenderTarget(this.weatherTarget);
       this.webgl.render(this.weatherScene, this.camera);
+      // The height channel's blur: across into the spare target, then down back again.
+      const blur = this.blurMaterial.uniforms;
+      blur.uSource!.value = this.weatherTarget.texture;
+      (blur.uBlurStep!.value as THREE.Vector2).set(1 / WEATHER_SIZE, 0);
+      this.webgl.setRenderTarget(this.weatherBlurTarget);
+      this.webgl.render(this.blurScene, this.camera);
+      blur.uSource!.value = this.weatherBlurTarget.texture;
+      (blur.uBlurStep!.value as THREE.Vector2).set(0, 1 / WEATHER_SIZE);
+      this.webgl.setRenderTarget(this.weatherTarget);
+      this.webgl.render(this.blurScene, this.camera);
     }
 
     const u = this.marchMaterial.uniforms;
@@ -680,10 +787,12 @@ export class CloudVolume {
   dispose(): void {
     this.noise.dispose();
     this.weatherTarget.dispose();
+    this.weatherBlurTarget.dispose();
     this.history[0].dispose();
     this.history[1].dispose();
     this.geometry.dispose();
     this.weatherMaterial.dispose();
+    this.blurMaterial.dispose();
     this.marchMaterial.dispose();
   }
 }
