@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { PhysicsWorld } from '../core/physics';
 import { WorldOrigin, type Rebasable, type RebaseShift } from '../world/origin';
-import { SURFACES, SurfaceType } from '../core/surfaces';
+import { SURFACES, SurfaceType, sinkageShare } from '../core/surfaces';
 import type { GameWorld, TrailerState } from '../game/state';
 import type { Vehicle, WheelSprayState } from './vehicle';
 import {
@@ -1094,7 +1094,10 @@ export class Trailer implements Rebasable {
       const rollingN = parked
         ? 0
         : -Math.sign(forwardSpeed) *
-          Math.min(surface.rollingResistance * w.loadN, (shareMass * absForward) / dt);
+          Math.min(
+            (surface.rollingResistance + surface.sinkage * sinkageShare(absForward)) * w.loadN,
+            (shareMass * absForward) / dt,
+          );
       const alongImpulse = (forceN + rollingN) * dt;
       if (alongImpulse !== 0) {
         impulse.x = f.x * alongImpulse;

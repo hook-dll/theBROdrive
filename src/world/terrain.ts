@@ -160,11 +160,16 @@ const RIPPLE_FULL = 55;
  *   corr 0.36, chop 0.3,   0.50-0.51/1.86-1.89  0.25-0.29   50-58       0.45-0.65 1.4-2.2   5.0-8.0  0.3-1.7 1/30km 10-33     26-44
  *     scoop 0.32
  *   corr 0.09, chop 0.12,  0.13-0.15/0.49-0.54  0.08-0.12  104-116      0.31-0.37 0.82-0.99 1.7-2.1  0      0       0         71-79
- *     scoop 0.16 (now)
+ *     scoop 0.16
+ *   + lane washboard 0.14  0.14-0.19/0.49-0.75  0.09-0.14   74-92       0.30-0.37 0.81-1.06 2.0-2.9  0      0       0         39-44
+ *     and sand sinkage 0.11 (now)
  *
  * The desert stays rougher than the asphalt where the body feels it (heave 3x, jolt99
- * 3x the lane) and slower (the autopilot holds 71-79 km/h of 90 asked), but no
- * longer bottoms, flies or rolls.
+ * 3x the lane) and no longer bottoms, flies or rolls. What makes it SLOW is the sand
+ * (`SurfaceProps.sinkage` in core/surfaces.ts), not the waves: they only have to be felt
+ * at the pace the sand allows, and the lane washboard below is what makes running
+ * beside the road the roughest and slowest way through it. Away from the road the same
+ * car holds 56-70 km/h of 90 asked (offroad-feel `ONLY=open`).
  */
 const CORRUGATION_SPACING = 5;
 const CORRUGATION_COHERENCE = 48;
@@ -205,6 +210,48 @@ const CHOP_AMPLITUDE = 0.12;
 const SCOOP_WAVELENGTH = 26;
 const SCOOP_THRESHOLD = 0.5;
 const SCOOP_DEPTH = 0.16;
+
+/**
+ * THE PARALLEL LANE'S WASHBOARD. Beside the road the corrugation is not on the dune
+ * axis: its crests run SQUARE TO THE ROAD, on lines of constant arclength, so a car
+ * driving alongside crosses every one of them and a car driving away from the road
+ * runs along them. It is what washboard is — a track corrugates across its own
+ * direction of travel, and the strip beside a road is where everyone who leaves it
+ * drives — and it is what makes the desert useless as a free second carriageway
+ * while leaving it open in every other direction.
+ *
+ * Same band as `CORRUGATION_*` (a 10 m wave of value noise, so it never rings at one
+ * frequency), taller, and kept up by a higher patch floor so no stretch of the lane is
+ * quiet. Its height is set by the lift-off limit at the speed the sand lets a car
+ * hold here (`SurfaceProps.sinkage`), not at road speed: rough and grounded at that
+ * pace, bouncing on its bump stops at 90.
+ *
+ * It needs the EXACT road frame, so it lives only where every height consumer has
+ * one: the tile lattice projects onto the road out to `EXACT_DISTANCE_GATE` (70 m) in
+ * world/deserttiledata.ts and samples an approximate owner past it, so the band is
+ * gone by LANE_REACH, inside that gate. Past it the dune-axis corrugation is all there
+ * is. Inside a bend the crest lines converge (spacing x (1 + lateral·curvature)), and
+ * squeezed below ~7.5 m the wave would be shorter than the heightfield can carry and
+ * would launch at a walk, so the band also gives way to the dune-axis field where
+ * that squeeze passes LANE_SQUEEZE_FULL.
+ */
+const LANE_AMPLITUDE = 0.14;
+const LANE_PATCH_FLOOR = 0.85;
+/**
+ * Lateral, metres, by which the lane band is fully in (it grows from DETAIL_FADE_IN, so
+ * a car that leaves the road at speed meets the open field first and the washboard
+ * after a few seconds of sinkage), where it starts giving way, and where it is gone.
+ */
+const LANE_FULL = 20;
+const LANE_HOLD = 54;
+const LANE_REACH = 66;
+/** Crest-line squeeze (-lateral·curvature) at which the band starts to fade, and is gone. */
+const LANE_SQUEEZE_FULL = 0.1;
+const LANE_SQUEEZE_GONE = 0.25;
+/** A crest's wander off square, metres, over LANE_BEND_ACROSS of lateral. */
+const LANE_BEND = 4;
+const LANE_BEND_ACROSS = 40;
+const LANE_BEND_ALONG = 300;
 
 /**
  * Lateral distance at which the fine band is fully in. Short on purpose: the player
@@ -477,9 +524,29 @@ export class Terrain {
    * The fine band at a point, UNFADED: corrugation, chop and scoops (see the
    * constants above). One function so the shipped tile lattice and the legacy road
    * fan cannot carry different ground, and so the two fades below are the only
-   * difference between them.
+   * difference between them. `lateral` and `s` are the exact road frame wherever the
+   * lane washboard can be (see LANE_REACH).
    */
-  private fineRelief(x: number, z: number): number {
+  private fineRelief(x: number, z: number, lateral: number, s: number): number {
+    const lane = this.laneWeight(lateral, s);
+    let h = 0;
+    if (lane < 1) h += this.duneCorrugation(x, z) * (1 - lane);
+    if (lane > 0) h += this.laneCorrugation(lateral, s) * lane;
+
+    h += this.chopNoise.fbm(x / CHOP_WAVELENGTH, z / CHOP_WAVELENGTH, 2, 2, 0.5) * CHOP_AMPLITUDE;
+
+    // `t * (2 - t)` gives the hollow a flattish floor and steep walls instead of the
+    // cone a linear ramp leaves, so a wheel drops into it and climbs out again.
+    const scoop = this.scoopNoise.fbm(x / SCOOP_WAVELENGTH, z / SCOOP_WAVELENGTH, 3, 2.3, 0.5);
+    if (scoop > SCOOP_THRESHOLD) {
+      const t = (scoop - SCOOP_THRESHOLD) / (1 - SCOOP_THRESHOLD);
+      h -= t * (2 - t) * SCOOP_DEPTH;
+    }
+    return h;
+  }
+
+  /** The open desert's corrugation, on the dune axis (see CORRUGATION_*). */
+  private duneCorrugation(x: number, z: number): number {
     // The dune band's own axis, so the ripples run WITH the ridges. `across` is the
     // direction the crests are counted along; `along` is a crest's own length.
     const along = x * DUNE_AXIS_X + z * DUNE_AXIS_Z;
@@ -498,21 +565,50 @@ export class Terrain {
     );
     const strength =
       CORRUGATION_PATCH_FLOOR + (1 - CORRUGATION_PATCH_FLOOR) * smoothstep01(patch * 0.5 + 0.5);
-    let h =
+    return (
       this.corrugationNoise.at((across + bend) / CORRUGATION_SPACING, along / CORRUGATION_COHERENCE) *
       CORRUGATION_AMPLITUDE *
-      strength;
+      strength
+    );
+  }
 
-    h += this.chopNoise.fbm(x / CHOP_WAVELENGTH, z / CHOP_WAVELENGTH, 2, 2, 0.5) * CHOP_AMPLITUDE;
+  /**
+   * How much of the corrugation beside the road is the lane washboard rather than the
+   * dune field, 0..1: growing in from the fine band's own fade-in to LANE_FULL, all of
+   * it out to LANE_HOLD, none past LANE_REACH, and none where a bend squeezes the crest
+   * lines (see the LANE_* constants).
+   */
+  private laneWeight(lateral: number, s: number): number {
+    const dist = Math.abs(lateral);
+    const reach =
+      smoothstep01((dist - DETAIL_FADE_IN) / (LANE_FULL - DETAIL_FADE_IN)) *
+      (1 - smoothstep01((dist - LANE_HOLD) / (LANE_REACH - LANE_HOLD)));
+    if (reach <= 0) return 0;
+    const squeeze = -lateral * this.road.curvatureAt(s);
+    return (
+      reach *
+      (1 - smoothstep01((squeeze - LANE_SQUEEZE_FULL) / (LANE_SQUEEZE_GONE - LANE_SQUEEZE_FULL)))
+    );
+  }
 
-    // `t * (2 - t)` gives the hollow a flattish floor and steep walls instead of the
-    // cone a linear ramp leaves, so a wheel drops into it and climbs out again.
-    const scoop = this.scoopNoise.fbm(x / SCOOP_WAVELENGTH, z / SCOOP_WAVELENGTH, 3, 2.3, 0.5);
-    if (scoop > SCOOP_THRESHOLD) {
-      const t = (scoop - SCOOP_THRESHOLD) / (1 - SCOOP_THRESHOLD);
-      h -= t * (2 - t) * SCOOP_DEPTH;
-    }
-    return h;
+  /**
+   * The lane washboard: the corrugation's own noise on the road frame, counted along
+   * arclength so its crests stand square to the road. Offsets keep it from repeating
+   * the dune field's lattice values.
+   */
+  private laneCorrugation(lateral: number, s: number): number {
+    const bend =
+      this.corrugationBendNoise.at(s / LANE_BEND_ALONG + 91.7, lateral / LANE_BEND_ACROSS) * LANE_BEND;
+    const patch = this.corrugationPatchNoise.at(
+      s / CORRUGATION_PATCH_LENGTH + 37.1,
+      lateral / CORRUGATION_PATCH_WIDTH,
+    );
+    const strength = LANE_PATCH_FLOOR + (1 - LANE_PATCH_FLOOR) * smoothstep01(patch * 0.5 + 0.5);
+    return (
+      this.corrugationNoise.at((s + bend) / CORRUGATION_SPACING + 517.3, lateral / CORRUGATION_COHERENCE + 211.9) *
+      LANE_AMPLITUDE *
+      strength
+    );
   }
 
   /**
@@ -541,7 +637,7 @@ export class Terrain {
     // seven-metre crest by it would have thinned the crest over exactly the twenty
     // metres it is supposed to climb, and cut its outer flank off at 62 m mid-air.
     return (
-      (this.fineRelief(x, z) * fade + this.corridorShape(x, z, dist, s, inner)) *
+      (this.fineRelief(x, z, lateral, s) * fade + this.corridorShape(x, z, dist, s, inner)) *
       (1 - paved) *
       (1 - level)
     );
@@ -564,7 +660,7 @@ export class Terrain {
     if (level >= 1) return 0;
     const fade = smoothstep01((dist - inner) / (DETAIL_FADE_IN - inner));
     return (
-      (this.fineRelief(x, z) * fade + this.corridorShape(x, z, dist, s, inner)) *
+      (this.fineRelief(x, z, lateral, s) * fade + this.corridorShape(x, z, dist, s, inner)) *
       (1 - paved) *
       (1 - level)
     );

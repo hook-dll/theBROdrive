@@ -19,7 +19,7 @@ import type { StickerState } from '../game/state';
 import { GRAPHICS_CONFIG } from '../config';
 import type { PhysicsWorld, Vec3 } from '../core/physics';
 import type { InputFrame } from '../core/input';
-import { MicroRelief, RoadTexture, SURFACES, SurfaceType } from '../core/surfaces';
+import { MicroRelief, RoadTexture, SURFACES, SurfaceType, sinkageShare } from '../core/surfaces';
 import { hash01 } from '../core/rng';
 import { WorldOrigin, type Rebasable, type RebaseShift } from '../world/origin';
 import { DAY_LENGTH, type CarState, type GameWorld } from '../game/state';
@@ -2939,6 +2939,7 @@ export class Vehicle implements Rebasable {
       mass > 0 ? (this.thresholdBrakePedalValue * footBrakeDemandN) / mass : 0;
     const wheelCount = this.wheels.length;
     let rollingResistanceSum = 0;
+    let sinkageSum = 0;
     let roughnessSum = 0;
     let contactCount = 0;
     this.surfaceVotes.fill(0);
@@ -3191,6 +3192,9 @@ export class Vehicle implements Rebasable {
         rollingResistanceSum +=
           surface.rollingResistance -
           (surface.rollingResistance - DIG_FIRM_RR) * this.digWeightCar;
+        // The speed-grown half of soft sand (`SurfaceProps.sinkage`) goes the same way:
+        // a car down on the firm layer is not ploughing the loose one.
+        sinkageSum += surface.sinkage * (1 - this.digWeightCar);
         roughnessSum += surface.roughness;
         this.surfaceVotes[surfaceType]++;
       }
@@ -3259,7 +3263,8 @@ export class Vehicle implements Rebasable {
     if (hSpeed > 0.01) {
       let retarding = this.dragCoeff * hSpeedSq;
       if (contactCount > 0 && wheelCount > 0) {
-        const rr = rollingResistanceSum / contactCount;
+        const rr =
+          (rollingResistanceSum + sinkageSum * sinkageShare(hSpeed)) / contactCount;
         retarding += rr * mass * GRAVITY * (contactCount / wheelCount);
       }
 

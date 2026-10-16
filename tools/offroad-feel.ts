@@ -20,6 +20,9 @@
  *             the embankment's foot.
  *   along     the road's own lane as the control, then the desert alongside it at a
  *             fixed lateral over a few kilometres: the deliberate waves.
+ *   open      the rest of the desert: straight lines leaving the road square to it and
+ *             at 45 degrees, and a line parallel to it OPEN_FAR_M out. Driving away from
+ *             the road has to stay easier than driving beside it.
  *   geometry  no car: the waves themselves along the same lines (see `geometryRuns`).
  *
  * Per run, what the seat and the car report:
@@ -50,7 +53,8 @@
  * every half second. BODY_RAISE=m lifts the chassis box's floor by m (an experiment).
  *
  *   bun tools/offroad-feel.ts                 everything
- *   ONLY=seam|along|geometry  SEAMS=n (crossing sites, default 6)  ALONG_M=n (default 2500)
+ *   ONLY=seam|along|open|geometry  SEAMS=n (crossing sites, default 6)  ALONG_M=n (default 2500)
+ *   MODEL=id (default sv_vaz2105r)  GEOMETRY_S=s GEOMETRY_LATERALS=a,b,.. (geometry lines)
  *
  * Heavy: builds real road chunks and desert tiles. Run alone, under `nice -n 15`.
  * Nothing here is part of the game bundle.
@@ -88,7 +92,7 @@ installAssetShim();
 installDocumentShim();
 
 const SEED = 42;
-const MODEL_ID = 'sv_vaz2105r';
+const MODEL_ID = process.env.MODEL ?? 'sv_vaz2105r';
 /** The lane the seam runs leave from (the same right-lane line surface-feel drives). */
 const LANE_LATERAL = 1.65;
 /** First seam site, and the spacing between sites, metres of arclength. */
@@ -116,6 +120,8 @@ const SPIKE_G = 1;
 const CAUSE_STEPS = 20;
 /** Roll rate, deg/s, a tip is counted at. */
 const TIP_DEG_S = 150;
+/** Steps stopped (under 1 m/s) with the throttle down before a run counts as stuck. */
+const STUCK_STEPS = 180;
 /** Bump stop load over static load at which a stop counts as crushed. */
 const CRUSH_LOAD = 3;
 
@@ -414,7 +420,7 @@ function drive(g: Ground, car: Car, startS: number, stats: Stats, o: DriveOption
   let lastClamp = -1000;
   let wasAirborne = false;
   let wasTipping = false;
-  while (steps < 60_000 && stalled < 600) {
+  while (steps < 60_000) {
     const abs = vehicle.absoluteTranslation(scratchAbs);
     const projection = g.road.project(abs.x, abs.z, s);
     s = projection.s;
@@ -461,8 +467,21 @@ function drive(g: Ground, car: Car, startS: number, stats: Stats, o: DriveOption
           `${(speed * 3.6).toFixed(0)} km/h ${vehicle.gearLabel} upY ${upY.toFixed(2)} on ${under.join('|')}`,
       );
     }
-    if (upY < FLIP_UP_Y) {
-      if (measuring) stats.flips++;
+    stalled = speed < 1 && hold === 0 ? stalled + 1 : 0;
+    const stuck = stalled >= STUCK_STEPS;
+    if (upY < FLIP_UP_Y || stuck) {
+      if (measuring && !stuck) stats.flips++;
+      if (measuring && stuck) {
+        // Stopped dead with the throttle down: against a prop's collider (the body is
+        // touching fixed ground) or by the ground alone. Counted, then put back on the
+        // line past it, so one rock does not decide the run's mean speed.
+        const key = steps - lastBody <= STUCK_STEPS ? 'stuck<-body' : 'stuck<-ground';
+        stats.events[key] = (stats.events[key] ?? 0) + 1;
+      }
+      if (process.env.TRACE) {
+        console.log(`  ${stuck ? 'STUCK' : 'FLIP'} at s ${s.toFixed(0)} lat ${lateral.toFixed(1)} ${(speed * 3.6).toFixed(0)} km/h`);
+      }
+      stalled = 0;
       o.recover(car, s);
       lastVy = vehicle.chassis.linvel().y;
       hold = RECOVER_HOLD_STEPS;
@@ -475,7 +494,6 @@ function drive(g: Ground, car: Car, startS: number, stats: Stats, o: DriveOption
       }
       continue;
     }
-    stalled = speed < 1 ? stalled + 1 : 0;
     metres += speed * FIXED_DT;
     if (hold > 0) {
       hold--;
@@ -821,6 +839,72 @@ async function alongRuns(): Promise<void> {
   }
 }
 
+/** Sites the open-desert lines start from, their spacing, and the far line's lateral. */
+const OPEN_SITES = 3;
+const OPEN_SPACING_S = 1500;
+const OPEN_START_LATERAL = 12;
+const OPEN_LENGTH_M = 900;
+/** Metres of an open line not measured: the car settling from its launch speed. */
+const OPEN_SETTLE_M = 150;
+const OPEN_FAR_M = 300;
+
+/**
+ * The desert away from the road: square to it, at 45 degrees, and parallel to it far
+ * out. Straight lines from the right-hand side of the road, so the road's own curves
+ * cannot steer the run.
+ */
+async function openRuns(): Promise<void> {
+  const configs = [
+    { label: 'perpendicular', angleDeg: 90, lateral: OPEN_START_LATERAL },
+    { label: 'diagonal 45', angleDeg: 45, lateral: OPEN_START_LATERAL },
+    { label: `far ${OPEN_FAR_M}m`, angleDeg: 0, lateral: OPEN_FAR_M },
+  ];
+  for (const c of configs) {
+    for (const kmh of [60, 90]) {
+      const speed = kmh / 3.6;
+      const st = newStats(`${c.label} ${kmh}`);
+      for (let site = 0; site < OPEN_SITES; site++) {
+        const s0 = ALONG_START_S + site * OPEN_SPACING_S;
+        const start = { x: 0, y: 0, z: 0 };
+        const ahead = { x: 0, y: 0, z: 0 };
+        const out = { x: 0, y: 0, z: 0 };
+        road.offsetPoint(s0, c.lateral, start);
+        road.offsetPoint(s0 + 1, c.lateral, ahead);
+        road.offsetPoint(s0, c.lateral + 1, out);
+        const fLen = Math.hypot(ahead.x - start.x, ahead.z - start.z);
+        const fx = (ahead.x - start.x) / fLen;
+        const fz = (ahead.z - start.z) / fLen;
+        const a = (c.angleDeg * Math.PI) / 180;
+        const line: Line = {
+          x: start.x,
+          z: start.z,
+          dx: Math.cos(a) * fx + Math.sin(a) * (out.x - start.x),
+          dz: Math.cos(a) * fz + Math.sin(a) * (out.z - start.z),
+        };
+        const g = await makeGround(start.x, start.z);
+        const car = spawn(g, start.x, start.z, Math.atan2(line.dx, line.dz), speed, s0, c.lateral);
+        let metres = 0;
+        drive(g, car, s0, st, {
+          speed,
+          seam: false,
+          aim: (x, z, _s, reach, into) => {
+            const along = (x - line.x) * line.dx + (z - line.z) * line.dz;
+            metres = along;
+            into.x = line.x + line.dx * (along + reach);
+            into.z = line.z + line.dz * (along + reach);
+          },
+          measure: () => metres > OPEN_SETTLE_M,
+          done: () => metres > OPEN_LENGTH_M,
+          offLine: (x, z) => Math.abs((x - line.x) * line.dz - (z - line.z) * line.dx),
+          recover: lineRecover(g, line, speed),
+        });
+        car.vehicle.dispose();
+      }
+      print(st);
+    }
+  }
+}
+
 /**
  * THE GROUND ITSELF, for a terrain-side fix: the collider's height along each `along`
  * line, sampled by ray every GEOMETRY_STEP_M, split into the long swell a body on its
@@ -839,15 +923,21 @@ const GEOMETRY_SWELL_M = 15;
 const GEOMETRY_CURVE_M = 2.5;
 
 async function geometryRuns(): Promise<void> {
-  console.log('\nground geometry along the lines (collider, by ray):');
-  console.log('line       wave99  waverms  slope99  curv99  lift-off');
+  // GEOMETRY_S / GEOMETRY_LATERALS move the lines, e.g. to the inside of a tight bend.
+  const startS = Number(process.env.GEOMETRY_S ?? ALONG_START_S);
+  const laterals = (process.env.GEOMETRY_LATERALS ?? '20,40,60').split(',').map(Number);
+  console.log(`\nground geometry along the lines from s ${startS} (collider, by ray):`);
+  console.log('line       wave99  waverms  slope99  curv99  lift-off  fn-dev99/max');
   const point = { x: 0, y: 0, z: 0 };
-  for (const lateral of [20, 40, 60]) {
-    road.offsetPoint(ALONG_START_S, lateral, point);
+  for (const lateral of laterals) {
+    road.offsetPoint(startS, lateral, point);
     const g = await makeGround(point.x, point.z);
     const heights: number[] = [];
+    // How far the collider sits from the height FUNCTION every other consumer reads
+    // (`Terrain.heightAt`): the crests a wheel feels against the ones drawn and placed on.
+    const deviations: number[] = [];
     let kept = Number.NEGATIVE_INFINITY;
-    for (let s = ALONG_START_S; s <= ALONG_START_S + ALONG_METRES; s += GEOMETRY_STEP_M) {
+    for (let s = startS; s <= startS + ALONG_METRES; s += GEOMETRY_STEP_M) {
       road.offsetPoint(s, lateral, point);
       if (s - kept >= 50) {
         keepGround(g, point.x, point.z, s, lateral);
@@ -861,6 +951,10 @@ async function geometryRuns(): Promise<void> {
         4000,
       );
       heights.push(hit ? hit.point.y : Number.NaN);
+      // Props (rocks, cacti) register as Rock; the ground is Sand.
+      if (hit && g.physics.surfaces.lookupType(hit.colliderHandle) === SurfaceType.Sand) {
+        deviations.push(Math.abs(hit.point.y - g.terrain.heightAt(point.x, point.z, s)));
+      }
     }
     const swell = Math.round(GEOMETRY_SWELL_M / GEOMETRY_STEP_M);
     const curve = Math.round(GEOMETRY_CURVE_M / GEOMETRY_STEP_M);
@@ -892,6 +986,7 @@ async function geometryRuns(): Promise<void> {
         pct(slopes, 0.99).toFixed(3).padStart(8),
         curv99.toFixed(4).padStart(7),
         `${(Math.sqrt(9.81 / curv99) * 3.6).toFixed(0)} km/h`.padStart(9),
+        `${pct(deviations, 0.99).toFixed(3)}/${pct(deviations, 1).toFixed(3)}`.padStart(13),
       ].join(' '),
     );
   }
@@ -903,7 +998,8 @@ if (process.env.ONLY === 'geometry') {
 } else {
   console.log(`offroad feel, ${MODEL_ID}, seed ${SEED}; game colliders (strip + skirt + desert tiles)`);
   console.log(HEADER);
-  if (process.env.ONLY !== 'along') await seamRuns();
-  if (process.env.ONLY !== 'seam') await alongRuns();
+  if (process.env.ONLY !== 'along' && process.env.ONLY !== 'open') await seamRuns();
+  if (process.env.ONLY !== 'seam' && process.env.ONLY !== 'open') await alongRuns();
+  if (!process.env.ONLY || process.env.ONLY === 'open') await openRuns();
   if (!process.env.ONLY) await geometryRuns();
 }

@@ -4,6 +4,26 @@
 
 ### Added
 
+- THE DESERT IS NOT A SECOND CARRIAGEWAY (`core/surfaces.ts` `sinkage`, `world/terrain.ts`
+  lane washboard). Sand gets a speed-grown soft-ground drag, `sinkage · v²/(v² + 15²)` of
+  the car's weight on top of its flat rolling resistance (0.11 at saturation; 0.045 at
+  45 km/h, a thousandth at a walk, lifted by the dig), so full throttle on open sand is a
+  labouring engine rather than a cruise. Beside the road the 10 m corrugation is
+  re-phased on the road's arclength — crests square to the road, 0.14 m, growing in
+  from 10 to 20 m out and gone by 66 m (inside the tile lattice's exact-projection gate),
+  faded where a bend would squeeze them under 7.5 m — so driving alongside crosses every
+  crest and driving away runs along them. On `tools/offroad-feel.ts` (rally VAZ-2105,
+  seed 42, `DIAG=1 SEAMS=10 ALONG_M=5000`): alongside at 20-60 m held 71-79 → 39-44 km/h
+  of 90 asked (56-60 → 43-47 of 60), jolt99 0.81-1.06 g (lane 0.28-0.35), load p99
+  1.96-2.93x static, airborne 0, flips 0, body contacts 0, wave lift-off 74-92 km/h; away
+  from the road (new `ONLY=open` runs: square to it, 45°, and 300 m out) 70-89 → 56-70.
+  Softer cars alongside (2500 m, 90 asked): VAZ-2101 83-89 → 48-51, Oka 78-81 → 52-58, on
+  wheel load p99 2.4-4.8x static (2.2-4.5x before, at their old speeds), no flips. Road runs
+  in `surface-feel.ts` and the lane control are byte-identical; seam crossings match the
+  old figures; escape census 0% stranded and the sand climb sweep unchanged. The bench
+  also gains `MODEL=`, `GEOMETRY_S=`/`GEOMETRY_LATERALS=`, a collider-vs-`heightAt`
+  deviation column, and counts a car stopped dead (usually on a rock prop) as `stuck`
+  and puts it back on its line instead of ending the run.
 - DESERT WAVES STAY UNDER THE WHEELS (`world/terrain.ts` fine band). The 10 m
   corrugation drops from 0.36 to 0.09, the 20 m chop from 0.3 to 0.12 and the scoops
   from 0.32 to 0.16 m deep, each held to the lift-off limit A ≤ g·L²/(4π²v²) for a car

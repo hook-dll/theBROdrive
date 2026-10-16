@@ -111,6 +111,20 @@ export interface SurfaceProps {
    * sheds speed and can trip the vehicle.
    */
   readonly deformationDrag: number;
+  /**
+   * SOFT GROUND THAT GROWS WITH SPEED: the drag of a wheel sinking into and bulldozing
+   * loose material, as a fraction of vehicle weight at saturation. See `sinkageShare`.
+   *
+   * `rollingResistance` is the speed-independent half and stays small, because it is
+   * what a stopped car has to overcome to get going (see its note on sand). This half
+   * is what keeps a car from treating the open desert as a free parallel lane: next to
+   * nothing at a crawl, a moderate drag at a careful pace, and a strong one at road
+   * speed — a car that leaves the asphalt at 90 is hauled down to the pace the sand
+   * allows, and full throttle there is a labouring engine rather than a cruise.
+   *
+   * Zero for every surface a road is made of, the verge included.
+   */
+  readonly sinkage: number;
   /** Amplitude in metres of the micro-bumps baked into the collider mesh. */
   readonly roughness: number;
   /**
@@ -213,6 +227,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     optimalSlip: 0.12,
     rollingResistance: 0.013,
     deformationDrag: 0,
+    sinkage: 0,
     roughness: 0.012,
     microRelief: 0.012,
     hummock: 0.012,
@@ -231,6 +246,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     optimalSlip: 0.14,
     rollingResistance: 0.018,
     deformationDrag: 0,
+    sinkage: 0,
     roughness: 0.06,
     microRelief: 0.016,
     hummock: 0.016,
@@ -255,6 +271,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     // road has little loose material on it, and this is the number that decides
     // whether a slide on gravel slows you down or just holds you sideways forever.
     deformationDrag: 0.12,
+    sinkage: 0,
     roughness: 0.09,
     // Gravel is the ROUGHEST ground in the game, and it used to be quieter than sand:
     // 7 mm against sand's 18. A graded track corrugates under its own traffic —
@@ -295,6 +312,12 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     // its sidewall. This is what makes a broadside skid in sand shed speed and trip the
     // car instead of holding a clean line forever.
     deformationDrag: 0.55,
+    // The desert's sinkage, set on tools/offroad-feel.ts against the rally VAZ-2105 at
+    // full throttle: 56-70 km/h away from the road (it held 70-89 before), 39-47 beside
+    // it where the lane washboard (world/terrain.ts) runs across its path (71-79
+    // before). 0.045 of the car's weight at a careful 45 km/h, a thousandth at a walk,
+    // and gone under the dig: climbs and the escape census are unchanged.
+    sinkage: 0.11,
     roughness: 0.05,
     // Wind ripple, and the long hummocks under the geometry's own ~10 m corrugation
     // crests. Sand gives under load, so its ripple is softer than gravel's chatter
@@ -317,6 +340,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     optimalSlip: 0.14,
     rollingResistance: 0.022,
     deformationDrag: 0,
+    sinkage: 0,
     roughness: 0.13,
     // Broken rock chatters rather than ripples, and a shelf is never flat.
     microRelief: 0.024,
@@ -333,6 +357,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     optimalSlip: 0.12,
     rollingResistance: 0.012,
     deformationDrag: 0,
+    sinkage: 0,
     roughness: 0.006,
     microRelief: 0.01,
     hummock: 0.01,
@@ -356,6 +381,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     rollingResistance: 0.06,
     // Deeper loose material than a graded district, so it ploughs more.
     deformationDrag: 0.32,
+    sinkage: 0,
     roughness: 0.075,
     // The grader's spoil: coarser than the district's surface course and never rolled,
     // so it holds a coarser ripple than the road it came off.
@@ -367,6 +393,22 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     smoke: 0.1,
   },
 };
+
+/**
+ * Speed, m/s, at which a surface's `sinkage` is half in. 15 m/s is 54 km/h: the
+ * drag is a fifth of its full value at a careful 25 km/h and four-fifths at 110.
+ */
+const SINKAGE_HALF_MPS = 15;
+
+/**
+ * How much of a surface's `sinkage` acts at `speed` (m/s), 0..1: `v² / (v² + V²)` with
+ * V = SINKAGE_HALF_MPS. Saturating rather than quadratic, so a car arriving at road
+ * speed is slowed hard but not stopped dead.
+ */
+export function sinkageShare(speed: number): number {
+  const v2 = speed * speed;
+  return v2 / (v2 + SINKAGE_HALF_MPS * SINKAGE_HALF_MPS);
+}
 
 /**
  * The sub-collider ground profile, as a field.
