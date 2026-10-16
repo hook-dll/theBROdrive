@@ -3,7 +3,6 @@ import * as THREE from 'three';
 import type { SurfaceType } from '../core/surfaces';
 import { ROAD_TILE_METRES } from '../render/roadtexture';
 import type { ChunkContent, ChunkContext, ChunkProvider } from './chunks';
-import { desertPaletteAt } from './gradient';
 import { laybyOuterAt, laybysBetween, type Layby } from './layby';
 import { roadAsphaltMaterial, roadLaneVertexColor, roadVertexColorGain } from './roadmesh';
 import { SURFACE_STEP } from './roadsurface';
@@ -20,16 +19,18 @@ const MIN_COLLIDER_WIDTH_M = 0.02;
 /** Rows of quads per collider trimesh (as roadmesh.ts's `COLLIDER_SLAB_QUADS`). */
 const COLLIDER_SLAB_QUADS = 15;
 /**
- * Wind-blown dust, towards the sand: some over the whole pad, which nobody sweeps, and
- * more on the outer column, where the desert and its shoulder strip meet it.
+ * Dust that nobody sweeps: some over the whole pad, a little more on the outer column,
+ * where the shoulder meets it. A light warm grey of its own, not the palette's sand: no
+ * asphalt carries sand (owner, 2026-10-17; the road's own is world/roadmesh.ts).
  */
+const DUST_COLOUR = new THREE.Color(0x8c877e);
 const DUST = 0.14;
-const EDGE_DUST = 0.4;
+const EDGE_DUST = 0.25;
 /** Brightness swing of a slow mottle along the pad, so it is not one flat tone. */
 const MOTTLE = 0.05;
 
 const lane = new THREE.Color();
-const sand = new THREE.Color();
+const dust = new THREE.Color();
 const tone = new THREE.Color();
 const point = { x: 0, y: 0, z: 0 };
 
@@ -144,7 +145,7 @@ export class LaybyMeshProvider implements ChunkProvider {
         widest = r;
       }
       roadLaneVertexColor(lane, layby.surface, s);
-      sand.setHex(desertPaletteAt(s).sand).multiplyScalar(roadVertexColorGain());
+      dust.copy(DUST_COLOUR).multiplyScalar(roadVertexColorGain());
       const mottle = 1 + MOTTLE * Math.sin(s / 9.7) * Math.sin(s / 3.3 + 1.3);
       for (let c = 0; c < COLUMNS; c++) {
         const lateral = layby.side * (halfWidth + ((outer - halfWidth) * c) / (COLUMNS - 1));
@@ -156,7 +157,7 @@ export class LaybyMeshProvider implements ChunkProvider {
         normals[vi * 3 + 1] = 1;
         uvs[vi * 2] = lateral / ROAD_TILE_METRES;
         uvs[vi * 2 + 1] = textureVStart + (s - sStart) / ROAD_TILE_METRES;
-        tone.copy(lane).multiplyScalar(mottle).lerp(sand, c === COLUMNS - 1 ? EDGE_DUST : DUST);
+        tone.copy(lane).multiplyScalar(mottle).lerp(dust, c === COLUMNS - 1 ? EDGE_DUST : DUST);
         colors[vi * 3] = tone.r;
         colors[vi * 3 + 1] = tone.g;
         colors[vi * 3 + 2] = tone.b;

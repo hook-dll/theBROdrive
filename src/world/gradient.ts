@@ -55,7 +55,10 @@ export interface RoadCondition {
   readonly surface: SurfaceType;
   /** 0 = pristine, MAX_WEAR = as broken as the desert is ever allowed to leave it. */
   readonly decay: number;
-  /** Fraction of the lane width buried under drifted sand, 0..1. */
+  /**
+   * How far drifted sand has taken the lanes, 0..1. Read by the autopilot's pace and
+   * the verge's wear; the asphalt itself is never drawn sanded (world/roadmesh.ts).
+   */
   readonly sandCover: number;
   /** Whether painted lane markings are still visible. */
   readonly markings: number;

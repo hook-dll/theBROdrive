@@ -911,17 +911,35 @@
 
 ### Changed
 
-- CUMULUS OVER THE SHADOWS, NOT CIRRUS BESIDE THEM (`render/sky.ts`, `render/cloudshadow.ts`).
-  The sky's cirrus deck had nothing to do with the cloud shadows crossing the desert. The
-  dome now draws a cumulus deck 1.5 km above the eye (`CLOUD_BASE_M`) from the very field
-  the ground's shade comes from (`CLOUD_FIELD_GLSL`, same pan and salt), with its edge where
-  the shade's edge band has its middle, and the ground samples that field up the sun's ray
-  (`setCloudSunShift`), so each patch of shade has its cloud where the sun puts it and the
-  two drift together. Lit as a volume without being one: the side away from the sun
-  shaded where the deck thickens sunward, a grey base seen from below, a lit-through edge
-  against the sun; a storm lowers the edge until the deck closes. Five noise lookups per
-  sky pixel above the horizon, no geometry. Gone: the cirrus (`cloudFbm`, `uCloudCover`,
-  `uCloudTime`) and the sky gradient's `cloudCover`.
+- VOLUMETRIC CUMULUS OVER THE SHADOWS (`render/cloudvolume.ts`, `render/sky.ts`,
+  `render/cloudshadow.ts`, `core/renderer.ts` `setSkyPass`). The sky's cirrus deck had
+  nothing to do with the cloud shadows crossing the desert, and the flat cumulus decks
+  that replaced it read as painted blobs. The clouds are now a raymarched slab from
+  `CLOUD_BASE_M` (1.3 km above the eye, one flat condensation level for every cloud) to
+  `CLOUD_TOP_M` (2.3 km): footprint from the very field the ground's shade comes from
+  (same pan and salt, baked into a 1024² coverage map round the eye and rebaked every
+  3 km), a column's top rising with its coverage into a dome, eroded by a 64³ tiling
+  Perlin-Worley noise baked at startup (billows at the body, wisps under the base, on an
+  oblique lattice so trilinear creases do not draw level lines). Lit with Beer-Lambert,
+  a five-sample march toward the sun, three multiple-scattering octaves, a dual-lobe
+  Henyey-Greenstein phase (the silver lining), a powder term, and sky/sand ambient by
+  height in the column; far cloud sinks into the horizon colour and the layer fades out
+  above the horizon band. Drawn before the scene at 360 lines at most, 64 steps with
+  empty space skipped (and stepped back into, so the entry never jumps a step), jittered
+  per pixel and frame and accumulated over frames, reprojected by view direction; the
+  dome composites it in linear light behind the rainbow and the lightning and in front of
+  the sun, the Moon and the halo. A storm lowers the footprint edge, thickens and raises
+  the columns until the deck closes. Measured on the M2 Pro at 2560x1440, frame GPU time
+  against no clouds at all: +1.4 ms (the previous 2D deck: +1.4 to +1.8 ms); against the
+  2D deck, -0.2 to -0.4 ms. Desktop `standard` and `blessing` only: the low rungs, phones,
+  the environment probe and a mirror's directions outside the view keep the 2D deck,
+  switched by a uniform, so no program changes. The ground's shade band moved to
+  0.42-0.74 so it sits under the clouds (`CLOUD_COVER_EDGE`): about 36% of the ground in
+  shade under about 36% cloud footprint, and the shade looks up the sun's ray to one
+  height (`CLOUD_SHADOW_HEIGHT_M`); the per-cloud base heights (`cloudBase`) are gone.
+  `tools/sky-variety.ts` checks the cover, that every footprint is in shade, and the far
+  ground's mean shade. Gone with the cirrus: `cloudFbm`, `uCloudCover`, `uCloudTime` and
+  the sky gradient's `cloudCover`.
 - GRASS IS THE PLAYER'S, AND OFF (`Settings.groundCover`, `game/settings.ts`). Ground cover
   starts Off on every rung and no preset, launch measurement or phone default changes it;
   only the Grass row does. Stored under the new key `groundCover`, so every value the
@@ -954,20 +972,19 @@
     and not in the Clean style. The 24 m tile's cracks are black TAR SNAKES now, three a
     tile, forked, with their relief flattened out of the normal map; its own grain is
     calmer (`COURSE_RANGE` 42 → 26), the chips carry it.
-  - EDGE. Wind-blown SAND lies 0-40 cm onto the asphalt's edge in ragged tongues, over the
-    edge line's paint too, more on a decaying road, none where a lay-by widens it. The
-    shoulder is a dark crushed-stone band over the embankment's formation (stone 0.13, a
-    warm grey of its own, not the palette's), thinning into the sand down the batter, with
-    pale stones in its grit.
+  - EDGE. The shoulder is a dark crushed-stone band over the embankment's formation
+    (stone 0.13, a warm grey of its own, not the palette's), with pale stones in its grit.
+    (As first shipped it also laid sand tongues on the asphalt's edge and buried the band
+    on any sanded stretch; both are gone, see Fixed: THE ROAD'S VERGE IS DARK GRAVEL.)
   - GROUND COVER (`world/props/scatter.ts`). The open desert is thinned to 0.02 a 3 m cell;
     the verge 2.5-12 m from the asphalt gets CLUMPS of two to six plants with bare sand
     between, 5-6 times the open density on average, more where the ground lies below the
     road and on the side its camber sheds water to (`vergeRunoff`).
 
-  The courses, tracks and drift are drawn per pixel (`render/roadlook.ts`) from three
-  vertex attributes, so they keep crisp edges the 0.4 m × 1.33 m collider vertices could
-  not carry, and they show in the Clean style. One program per part under a constant key
-  (`road-look-v1-surface`, `-paint`); lay-bys, the terminus pad and site aprons read the
+  The courses and tracks are drawn per pixel (`render/roadlook.ts`) from two vertex
+  attributes, so they keep crisp edges the 0.4 m × 1.33 m collider vertices could
+  not carry, and they show in the Clean style. One program under a constant key
+  (`road-look-v3-surface`; the markings' `-paint` part is gone); lay-bys, the terminus pad and site aprons read the
   neutral defaults. Measured on seed `flick` from km 29.6: 99 programs before and after a
   1.2 km autopilot drive across two seams and a switch to Clean.
 
@@ -1215,20 +1232,45 @@
   kernel, about the penumbra of a car roof 3-5 m from the sand under a low sun), and Clean
   reads them too instead of its one hardware compare, whose 1.6 cm steps read as a hard,
   stair-stepped car shadow. `cleanStyle.y` is no longer used.
-- THE ROAD'S VERGE AND ITS DRIFT ARE ONE (`world/roadmesh.ts` THE EVERYDAY DRIFT ON THE
-  VERGE, `render/roadlook.ts` `ROAD_DRIFT_GLSL` `SHOULDER_DRIFT_FAN`, `world/terrainmesh.ts`
-  `SHOULDER_DRIFT_FRAGMENT`). Two owner reports on the road look above, 2026-10-16. On a
-  decaying stretch the dark crushed-stone band did not show at all: any district sand
-  buried the whole verge a third and its first 45% outright, so the verge was plain sand
-  with a pale step at the embankment. And where it did show, the drift's tongues lay on
-  the asphalt's edge with clean gravel beside them, sand from nowhere. The verge now reads
-  the asphalt drift's own level function at the same `along`, per pixel: sand where the
-  level plus a fan across the band (and a sanded district's cover) is above zero, so a
-  tongue on the mat runs on into sand on the verge, widening and thinning out toward the
-  band's outer edge, and stone shows between the fans, widest at the road. Grit and
-  ripples follow the sand. The drift's floor is higher (gain 2.2, floor 1.6, was 1.8 and
-  0.65): a tongue on about a fifth of the edge instead of some 70%, since the verge beside
-  each one has to be sand. A sanded district keeps only a 12% lip by the mat. Both styles.
+- THE ROAD'S VERGE IS DARK GRAVEL BY THE ASPHALT, AND THE SAND MEETS IT IN ONE WAVY LINE
+  (`world/roadmesh.ts` WHERE THE SAND MEETS THE BAND `SHOULDER_SAND_*`, `render/roadlook.ts`).
+  Owner reports on the road look above, 2026-10-16 and -17. On a decaying stretch the
+  crushed-stone band did not show at all: any district sand buried the whole verge a third
+  and its first 45% outright. Where it did show, the drift's tongues lay on the asphalt's
+  edge with clean gravel beside them, and the band's own edge took a per-row hash (1.33 m)
+  that read as a comb. A per-pixel drift of sand fans across the band, tried in between,
+  read as "an endless comb" too, and sand reaching the band's top would have to lie on the
+  road as well, which he does not want. Now there is NO SAND ON ANY ASPHALT:
+  - The per-pixel drift on the mat's edge and over the edge line's paint is gone; the
+    markings no longer take the road look at all (one program fewer; road look key
+    `road-look-v3-surface`).
+  - A decaying district's `sandCover` no longer draws a sand wedge in from both edges
+    (`sandFactor` is gone). The number stays: the autopilot's pace and the verge's wear
+    read it. A worn road reads worn by its decay tint, ravelled edge, cracks, patches
+    and holes.
+  - The director's `sandTongue` kind is gone (`world/director.ts`, `roadmesh.ts`'s
+    tongue cells and the verge it buried, `tools/surface-paint.ts`'s tongue section).
+    The Surface channel draws from three kinds now, so its schedule changed: over 20 000
+    windows on seeds 1337, 7 and flick about 62% of the old patch, skid and marking
+    windows keep their kind and span, the rest (and every old tongue window) draw anew.
+    `tools/variety-timeline.ts` passes (worst gap 2025 m against 2100 m).
+  - Lay-by pads (`world/laybymesh.ts`) take their dust towards a light warm grey of
+    their own (14% over the pad, 25% on the outer column) instead of the palette's sand
+    (14%, 40%).
+
+  On the verge: clean gravel for at least 0.8 m from the asphalt on every surface and
+  condition, and the desert's sand meeting the band in ONE soft (0.6 m) line along each
+  verge whose middle lies 1.6 m out, swung ±0.5 m on 53, 29 and 17 m waves, each verge its
+  own phase; whole sand by 2.4 m, inside the 2.5 m formation. Programs 101 before and
+  after a 30 s autopilot drive and a switch to Clean (seed flick, km 53; measured before
+  the district wedge, tongues and lay-by sand were removed, which change vertex colours
+  only). `tools/surface-paint.ts` (seeds 1337 and 7): layout, NaN, floor and ceiling
+  (now bounded by the brightest lane colour, not the palette's sand), rubber and paint
+  checks pass; three failures were there before this change (the off-feature golden,
+  stale since the road-look commit; a cut-and-fill patch at 78.6 km on 1337 and two on 7
+  that do not darken their lane; one ghost marking on 7 whose edge steps only 32%), and
+  the on-feature golden now fails too, on its row count alone, because the Surface
+  channel's windows moved.
 - SHADOW EDGES NO LONGER SHIMMER (`render/sky.ts` `SHADOW_DIR_STEP`, `render/lightshader.ts`
   `installStableShadowFilter`). The sun's shadow took its direction fresh every frame, and the
   sun turns 0.25 degrees a second, so the shadow map's texel lattice turned a little each

@@ -421,6 +421,9 @@ async function boot(): Promise<void> {
   // The sun's shadow map is sized by the tier (`GraphicsTier.sunShadowMapSize`).
   sky.setQuality(world.state.settings.graphicsQuality, mobilePresentation);
   sky.setShadowMode(world.state.settings.shadows);
+  // The volumetric cumulus is drawn before the scene; installed before the boot warm-up
+  // so `waitForFrameShaders` links its programs.
+  renderer.setSkyPass(sky.cloudPass);
   await sky.waitForAssets();
   // Warm every POI building: building one costs 3.7 ms on a 5950X — more than the
   // whole 3 ms streaming budget — and a first use happens while the player is driving

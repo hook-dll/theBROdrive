@@ -381,6 +381,14 @@ export class Renderer {
    * inside its GPU timing, so the measured frame cost includes them like any other draw.
    */
   private mirrorPass: { draw(): void } | null = null;
+  /**
+   * The sky's volumetric cumulus (render/cloudvolume.ts): drawn into its own small target
+   * before the scene pass, which the dome then reads. Inside the GPU timing like the rest.
+   */
+  private skyPass: {
+    draw(camera: THREE.PerspectiveCamera, width: number, height: number): void;
+    compile(): Promise<unknown>;
+  } | null = null;
 
   private quality: GraphicsQuality;
   private readonly timerQueryGl: WebGL2RenderingContext | null;
@@ -637,7 +645,8 @@ export class Renderer {
     try {
       this.renderer.setRenderTarget(null);
       const postReady = this.renderer.compileAsync(this.hazeScene, this.hazeCamera);
-      await Promise.all([sceneReady, depthReady, postReady]);
+      const skyReady = this.skyPass?.compile();
+      await Promise.all([sceneReady, depthReady, postReady, skyReady]);
     } finally {
       this.renderer.setRenderTarget(previousTarget);
     }
@@ -881,6 +890,11 @@ export class Renderer {
     this.mirrorPass = pass;
   }
 
+  /** Installs the sky's cloud pass; see `skyPass`. Before `waitForFrameShaders`, which links it. */
+  setSkyPass(pass: Renderer['skyPass']): void {
+    this.skyPass = pass;
+  }
+
   /**
    * Draws the game's scene once more, from `camera` into `target`: a live mirror, right
    * after the frame. Every material keeps its program: any render target gives the same
@@ -995,6 +1009,10 @@ export class Renderer {
     // and the sRGB encode (`toDisplay` in render/hazeshader.ts) — and draws the grade,
     // the ink and the grain on the displayed picture. Acceptable keeps the pass and
     // drops the WARP (see `setHeatHaze`), which is where the cost was.
+    //
+    // Before both, the sky's clouds, for the game's own scene only: the ending cutscene
+    // has no dome to read them.
+    if (scene === this.scene) this.skyPass?.draw(camera, this.hazeTarget.width, this.hazeTarget.height);
     this.renderer.setRenderTarget(this.hazeTarget);
     this.renderer.render(scene, camera);
     this.renderer.setRenderTarget(null);

@@ -59,8 +59,7 @@ export type VarietyKind =
   // Surface
   | 'patches'
   | 'skid'
-  | 'markings'
-  | 'sandTongue';
+  | 'markings';
 
 /**
  * Window length per channel, metres.
@@ -134,8 +133,6 @@ const KINDS: readonly KindDef[] = [
   { kind: 'skid', channel: VarietyChannel.Surface, weight: 0.22, minLength: 20, maxLength: 60, ramp: 4 },
   /** The paint changes its mind: double solid, nothing at all, an edge rumble line. */
   { kind: 'markings', channel: VarietyChannel.Surface, weight: 0.26, minLength: 250, maxLength: 800, ramp: 40 },
-  /** Sand tongues reaching across a lane from the windward shoulder. */
-  { kind: 'sandTongue', channel: VarietyChannel.Surface, weight: 0.22, minLength: 40, maxLength: 160, ramp: 18 },
 ];
 
 /** Kind definitions grouped by channel, in `KINDS` order. Built once. */

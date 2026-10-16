@@ -14,13 +14,14 @@ import { setAirFogExtinction, setAirFogSky, setAirFogSun } from './airfog';
 import { SCENE_FROM_SCREEN_GLSL } from './displaytransform';
 import {
   CLOUD_BASE_M,
+  CLOUD_COVER_EDGE,
   CLOUD_DETAIL_CELL_M,
-  CLOUD_EDGE_MID,
   CLOUD_FIELD_GLSL,
   CLOUD_PERIOD_M,
   cloudFieldUniforms,
   setCloudSunShift,
 } from './cloudshadow';
+import { CloudVolume } from './cloudvolume';
 
 /**
  * Analytic atmosphere around a real Tycho-2 star catalogue and ephemerides for
@@ -528,6 +529,14 @@ uniform float uMoonAmount;
 uniform float uAntiSolar;
 /** Overall visibility of the cumulus: 1 in daylight, 0 in deep night. */
 uniform float uCloudAmount;
+/**
+ * The volumetric cumulus (render/cloudvolume.ts): 1 while its pass drew this frame, its
+ * picture (rgb scattered light, a transmittance) and the view it was drawn for. 0 on the
+ * tiers without it and in the environment probe, which keep the 2D deck below.
+ */
+uniform float uCloudVolume;
+uniform sampler2D uCloudTex;
+uniform mat4 uCloudViewProj;
 
 // --- Weather (world/weather.ts). Every term below is gated on its own uniform, so a
 // clear sky pays for five comparisons and nothing else. ---
@@ -557,23 +566,23 @@ uniform float uBoltSeed;
 varying vec3 vDir;
 
 /**
- * CUMULUS, procedurally, inside the dome fragment: the clouds whose shadows cross the
- * desert (render/cloudshadow.ts). The view ray meets a flat deck CLOUD_BASE_M above
- * the eye, and the deck is the very field the ground's shade is drawn from, at the same
- * pan, so every patch of shade has its cloud up the sun's ray from it and the two drift
- * together. It replaced a cirrus deck that had nothing to do with the shadows under it.
+ * CUMULUS. Two ways, one field: render/cloudshadow.ts's, at the same pan, so every patch
+ * of shade on the desert has its cloud up the sun's ray from it and the two drift
+ * together.
  *
- * No geometry and no draw call, which buys three things beyond the cost. It cannot be
- * outlined: the ink pass works on object edges, and a cloud shaded into the dome's own
- * fragment has none, where a billboard layer would have come back ringed in ink. It
- * cannot break the fog seam, because the deck is faded out before it reaches the
- * horizon band that the fog colour is copied from. And it is in the environment probe
- * for free, since the probe shares this shader — so an overcast sky genuinely lights
- * the car slightly differently.
+ * THE VOLUME (render/cloudvolume.ts) where its pass ran: a raymarched slab drawn at a
+ * third of the lines before the scene, read here by projecting this pixel's direction
+ * into the view it was drawn for, and composited over everything behind the clouds (the
+ * gradient, the halo, the sun and the Moon). Geometry draws over the dome, so the clouds
+ * are behind every object by construction, and the ink never touches the sky.
  *
- * What it cannot do: occlude stars. The dome writes no depth and the star field is
- * separate geometry, so a night cloud would have stars shining through it. Rather than
- * fake that, uCloudAmount fades the deck out as night falls.
+ * THE 2D DECK everywhere else: the low tiers, the environment probe (which shares this
+ * shader, so an overcast sky still lights the car a little differently), and a mirror's
+ * directions the main view does not cover. A flat deck CLOUD_BASE_M above the eye with
+ * a high, thin one behind it, lit by one sample toward the sun.
+ *
+ * Neither can occlude stars: the dome writes no depth and the star field is separate
+ * geometry, so uCloudAmount fades fair cloud out as night falls.
  */
 /*
  * Arithmetic hash, not fract(sin(x) * 43758.5). The sine hash leans on the GPU's sin
@@ -670,28 +679,30 @@ void main() {
   col = mix(col, uZenith * 0.55, uAntiSolar * away * lowBand);
 
   // --- Cumulus ---------------------------------------------------------------
-  //
-  // Not a volume: two 2.5D decks lit as one. What sells a cumulus is its light, and three
-  // cheap terms carry it: the side facing away from the sun is in the cloud's own
-  // shade where the deck thickens toward the sun (one more field sample, one cloud's
-  // depth sunward), a deck seen from straight below shows its flat grey base, and a
-  // thin edge against the sun is lit through (the silver lining).
-  //
-  // PARALLAX. The low deck is the shadow field, each cloud at its own base (cloudBase,
-  // 1.1-2.5 km), so neighbours slide past one another as the car moves; a thin, paler
-  // altocumulus deck at 4.5 km behind it slides slower still. Neither is a flat
-  // painted ceiling any more.
-  float deck = 0.0;
+  vec4 vol = vec4(0.0, 0.0, 0.0, 1.0);
+  bool volumetric = false;
+  if (uCloudVolume > 0.5) {
+    vec4 clip = uCloudViewProj * vec4(dir, 0.0);
+    if (clip.w > 0.0) {
+      vec2 cloudUv = clip.xy / clip.w * 0.5 + 0.5;
+      // A pixel's width of slack: the dome's edge pixels project a hair outside.
+      if (all(greaterThan(cloudUv, vec2(-0.01))) && all(lessThan(cloudUv, vec2(1.01)))) {
+        volumetric = true;
+        vol = texture2D(uCloudTex, clamp(cloudUv, 0.0, 1.0));
+      }
+    }
+  }
+  float deck = volumetric ? 1.0 - vol.a : 0.0;
   vec3 cloudCol = uHorizon;
-  if (uCloudAmount > 0.0 && dir.y > 0.02) {
-    // dir.y is floored: the projection diverges at the horizon, and the fade below
-    // hides where the floor bites.
+  if (!volumetric && uCloudAmount > 0.0 && dir.y > 0.02) {
+    // The 2D deck. dir.y is floored: the projection diverges at the horizon, and the
+    // fade below hides where the floor bites.
     float dy = max(dir.y, 0.05);
     float horizonFade = smoothstep(0.02, 0.16, dir.y) * uCloudAmount;
     vec3 litCol = mix(uHorizon, uSunColor, 0.7) * 1.08;
     vec3 shadeCol = mix(uZenith, uHorizon, 0.65) * 0.8;
     vec2 sunward = normalize(uSunDir.xz + vec2(1e-4, 0.0)) * 180.0;
-    float edge = ${CLOUD_EDGE_MID.toFixed(3)} - 0.47 * uStorm;
+    float edge = ${(CLOUD_COVER_EDGE - 0.05).toFixed(3)} - 0.5 * uStorm;
 
     // High deck: the same field at twice the frequency (a whole multiple, so it stays
     // periodic on the pan's period) and far from the low deck's patch of it. Sparse and
@@ -704,13 +715,9 @@ void main() {
     vec3 highCol = mix(litCol, uHorizon, 0.35 + 0.5 * highFar);
     float highDeck = 0.4 * highBody * (1.0 - highFar) * horizonFade;
 
-    // Low deck: find the cloud on the mean base, then meet it at its own height. Far
-    // off the heights give way to the mean: there one step of reach is kilometres, and
-    // the jump between neighbouring clouds' heights drew rings round the horizon.
+    // Low deck, on the slab's flat base.
     float reach = ${CLOUD_BASE_M.toFixed(1)} / dy;
     vec2 at = cameraPosition.xz + dir.xz * reach + uCloudPan;
-    reach = mix(cloudBase(at) / dy, reach, smoothstep(3000.0, 8000.0, reach));
-    at = cameraPosition.xz + dir.xz * reach + uCloudPan;
     float field = cloudField(at, 1.0);
     // A finer octave the shadows do not need, for a puff's ragged edge; gone where its
     // cells shrink toward a pixel, before it can shimmer.
@@ -722,8 +729,7 @@ void main() {
         uCloudSalt + 31.0
       ) - 0.5);
     }
-    // The cloud's edge stands a little inside its shadow's edge band, so about a third
-    // of the sky is cloud while the shade's soft penumbra reaches past it; a storm
+    // The cloud's edge is the volume's footprint edge (CLOUD_COVER_EDGE); a storm
     // lowers it until the deck closes.
     float body = smoothstep(edge + 0.05, edge + 0.13, field);
     float thick = smoothstep(edge, edge + 0.3, field);
@@ -747,7 +753,7 @@ void main() {
     deck = lowDeck + highDeck * (1.0 - lowDeck);
     cloudCol = deck > 0.0 ? (lowCol * lowDeck + highCol * highDeck * (1.0 - lowDeck)) / deck : uHorizon;
   }
-  col = mix(col, cloudCol, deck);
+  if (!volumetric) col = mix(col, cloudCol, deck);
 
   float sunUp = smoothstep(-0.02, 0.06, uSunDir.y);
 
@@ -776,50 +782,6 @@ void main() {
       vec3 dogCol = x < 0.0 ? vec3(1.0, 0.58, 0.4) : mix(vec3(1.0, 0.93, 0.8), vec3(0.9, 0.95, 1.0), smoothstep(0.0, 0.04, x));
       col += dogCol * spot * 0.32 * uHalo * sunUp * step(0.0, dot(dir, dogD));
     }
-  }
-
-  // --- Rainbow --------------------------------------------------------------
-  // 42 degrees round the antisolar point, red outside, violet inside, with the faint
-  // reversed secondary at 51 and the darker Alexander band between. Only where rain
-  // is falling in front of the eye and the sun is behind it, which the uniform says.
-  if (uRainbow > 0.0 && dir.y > 0.0) {
-    float anti = acos(clamp(-sd, -1.0, 1.0));
-    // Primary 40.5-42.5 degrees, violet inside; secondary 50-53.5, reversed and dimmer.
-    float p = (anti - 0.706) / 0.036;
-    float q = (0.935 - anti) / 0.06;
-    vec3 bow = vec3(0.0);
-    if (p > 0.0 && p < 1.0) {
-      vec3 hue = clamp(abs(fract(vec3(0.78 * (1.0 - p)) + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
-      bow += mix(hue, vec3(1.0), 0.3) * sin(3.14159 * p);
-    }
-    if (q > 0.0 && q < 1.0) {
-      vec3 hue = clamp(abs(fract(vec3(0.78 * (1.0 - q)) + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
-      bow += 0.3 * mix(hue, vec3(1.0), 0.35) * sin(3.14159 * q);
-    }
-    // Brighter sky inside the primary, darker Alexander's band between the two.
-    float inner = 1.0 - smoothstep(0.55, 0.705, anti);
-    float alexander = smoothstep(0.745, 0.77, anti) * (1.0 - smoothstep(0.85, 0.875, anti));
-    float foot = smoothstep(0.0, 0.08, dir.y);
-    col += (bow * 0.13 + inner * 0.03) * uRainbow * foot;
-    col *= 1.0 - alexander * 0.06 * uRainbow * foot;
-  }
-
-  // --- Lightning ------------------------------------------------------------
-  if (uFlash > 0.001) {
-    // The whole deck lights from inside; clear sky only a little.
-    col += vec3(0.78, 0.8, 1.0) * uFlash * (0.12 + 0.55 * deck * uStorm);
-    // The channel: a jagged line from the cloud base to the ground on one bearing.
-    float az = atan(dir.x, dir.z);
-    float da = mod(az - uBoltAz + 3.14159265, 6.28318531) - 3.14159265;
-    float e = asin(clamp(dir.y, -1.0, 1.0));
-    float h = clamp(e / max(uBoltTop, 0.01), 0.0, 1.0);
-    float jag = (cloudNoise(vec2(h * 9.0, uBoltSeed * 50.0)) - 0.5) * 0.03
-      + (cloudNoise(vec2(h * 31.0, uBoltSeed * 50.0 + 7.0)) - 0.5) * 0.009;
-    float width = 0.0009 + 0.0005 * (1.0 - h);
-    float core = exp(-pow((da - jag * uBoltTop * 4.0) / width, 2.0));
-    float glow = exp(-abs(da - jag * uBoltTop * 4.0) / (width * 8.0));
-    float span = step(0.0, e) * step(e, uBoltTop);
-    col += vec3(0.85, 0.87, 1.0) * (core * 2.0 + glow * 0.25) * span * uFlash;
   }
 
   // Disc edges are one-pixel derivative transitions. The old fixed dot-product
@@ -897,6 +859,60 @@ void main() {
   vec3 lunarAlbedo = texture2D(uMoonTexture, moonMapUv).rgb * vec3(1.10, 1.0, 0.84);
   col += lunarAlbedo * (sunlit + earthshine) * uMoonRadiance * mdisc * uMoonAmount;
 
+  // --- The volumetric cumulus over all of the above ---------------------------
+  // Composited in linear light: the volume scattered radiance (screen-referred, like
+  // the palette) and kept a share of what lies behind it. The rainbow and the lightning
+  // below are in front of the clouds and are added after.
+  if (volumetric) {
+    vec3 behind = sRGBTransferEOTF(vec4(max(col, 0.0), 1.0)).rgb;
+    col = sRGBTransferOETF(vec4(behind * vol.a + vol.rgb, 1.0)).rgb;
+  }
+
+
+  // --- Rainbow --------------------------------------------------------------
+  // 42 degrees round the antisolar point, red outside, violet inside, with the faint
+  // reversed secondary at 51 and the darker Alexander band between. Only where rain
+  // is falling in front of the eye and the sun is behind it, which the uniform says.
+  if (uRainbow > 0.0 && dir.y > 0.0) {
+    float anti = acos(clamp(-sd, -1.0, 1.0));
+    // Primary 40.5-42.5 degrees, violet inside; secondary 50-53.5, reversed and dimmer.
+    float p = (anti - 0.706) / 0.036;
+    float q = (0.935 - anti) / 0.06;
+    vec3 bow = vec3(0.0);
+    if (p > 0.0 && p < 1.0) {
+      vec3 hue = clamp(abs(fract(vec3(0.78 * (1.0 - p)) + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+      bow += mix(hue, vec3(1.0), 0.3) * sin(3.14159 * p);
+    }
+    if (q > 0.0 && q < 1.0) {
+      vec3 hue = clamp(abs(fract(vec3(0.78 * (1.0 - q)) + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+      bow += 0.3 * mix(hue, vec3(1.0), 0.35) * sin(3.14159 * q);
+    }
+    // Brighter sky inside the primary, darker Alexander's band between the two.
+    float inner = 1.0 - smoothstep(0.55, 0.705, anti);
+    float alexander = smoothstep(0.745, 0.77, anti) * (1.0 - smoothstep(0.85, 0.875, anti));
+    float foot = smoothstep(0.0, 0.08, dir.y);
+    col += (bow * 0.13 + inner * 0.03) * uRainbow * foot;
+    col *= 1.0 - alexander * 0.06 * uRainbow * foot;
+  }
+
+  // --- Lightning ------------------------------------------------------------
+  if (uFlash > 0.001) {
+    // The whole deck lights from inside; clear sky only a little.
+    col += vec3(0.78, 0.8, 1.0) * uFlash * (0.12 + 0.55 * deck * uStorm);
+    // The channel: a jagged line from the cloud base to the ground on one bearing.
+    float az = atan(dir.x, dir.z);
+    float da = mod(az - uBoltAz + 3.14159265, 6.28318531) - 3.14159265;
+    float e = asin(clamp(dir.y, -1.0, 1.0));
+    float h = clamp(e / max(uBoltTop, 0.01), 0.0, 1.0);
+    float jag = (cloudNoise(vec2(h * 9.0, uBoltSeed * 50.0)) - 0.5) * 0.03
+      + (cloudNoise(vec2(h * 31.0, uBoltSeed * 50.0 + 7.0)) - 0.5) * 0.009;
+    float width = 0.0009 + 0.0005 * (1.0 - h);
+    float core = exp(-pow((da - jag * uBoltTop * 4.0) / width, 2.0));
+    float glow = exp(-abs(da - jag * uBoltTop * 4.0) / (width * 8.0));
+    float span = step(0.0, e) * step(e, uBoltTop);
+    col += vec3(0.85, 0.87, 1.0) * (core * 2.0 + glow * 0.25) * span * uFlash;
+  }
+
 
   // The palette, sun and Moon are authored as the colour the screen shows (see
   // MOON_RADIANCE_DAY), so the dome writes the radiance the display transform maps to
@@ -966,6 +982,8 @@ export class Sky {
   /** Holds one dome, sharing the visible dome's uniforms, shaded in linear space. */
   private readonly envMaterial: THREE.ShaderMaterial;
   private envTarget: THREE.WebGLRenderTarget | null = null;
+  /** The volumetric cumulus pass; the renderer draws it before the scene (`cloudPass`). */
+  private readonly cloudVolume: CloudVolume;
 
   /** True only for the update that successfully replaced the environment target. */
   private didBakeEnvironment = false;
@@ -1077,15 +1095,27 @@ export class Sky {
 
     // --- Sky dome ---
     const domeGeometry = new THREE.SphereGeometry(DOME_RADIUS, 48, 24);
+    const sunDir = { value: this.uSunDir };
+    const zenith = { value: this.uZenith };
+    const horizon = { value: this.uHorizon };
+    const sunColor = { value: this.uSunColor };
+    this.cloudVolume = new CloudVolume(webgl, {
+      uSunDir: sunDir,
+      uZenith: zenith,
+      uHorizon: horizon,
+      uSunColor: sunColor,
+      uStorm: this.uStorm,
+      uCloudAmount: this.uCloudAmount,
+    });
     const domeMaterial = new THREE.ShaderMaterial({
       vertexShader: SKY_VERTEX,
       fragmentShader: SKY_FRAGMENT,
       uniforms: {
-        uSunDir: { value: this.uSunDir },
+        uSunDir: sunDir,
         uMoonDir: { value: this.uMoonDir },
-        uZenith: { value: this.uZenith },
-        uHorizon: { value: this.uHorizon },
-        uSunColor: { value: this.uSunColor },
+        uZenith: zenith,
+        uHorizon: horizon,
+        uSunColor: sunColor,
         uSunGlowColor: { value: this.uSunGlowColor },
         uSunGlowIntensity: this.uSunGlowIntensity,
         uMoonTexture: { value: this.moonTexture },
@@ -1097,6 +1127,7 @@ export class Sky {
         uCloudPan: cloudFieldUniforms.uCloudPan,
         uCloudSalt: cloudFieldUniforms.uCloudSalt,
         uCloudAmount: this.uCloudAmount,
+        ...this.cloudVolume.domeUniforms,
         uDomeFlat: this.uDomeFlat,
         uStorm: this.uStorm,
         uHalo: this.uHalo,
@@ -1675,6 +1706,10 @@ export class Sky {
    */
   private bakeEnvironment(): void {
     if (this.envTarget !== null) return;
+    // The probe's six faces are not the view the volume was drawn for: the 2D deck.
+    const volume = this.cloudVolume.domeUniforms.uCloudVolume;
+    const wasVolume = volume.value;
+    volume.value = 0;
     this.envTarget = this.pmrem.fromScene(
       this.envScene,
       0,
@@ -1682,14 +1717,28 @@ export class Sky {
       DOME_RADIUS * 2,
       { size: 128 },
     );
+    volume.value = wasVolume;
     this.scene.environment = this.envTarget.texture;
     this.didBakeEnvironment = true;
   }
 
-  /** Applies the rendering tier to the catalogue star depth and the sun's shadow map. */
+  /**
+   * The volumetric cumulus pass, for `Renderer.setSkyPass`: drawn before the scene, read
+   * by the dome. Labs that never install it keep the 2D deck.
+   */
+  get cloudPass(): CloudVolume {
+    return this.cloudVolume;
+  }
+
+  /**
+   * Applies the rendering tier to the catalogue star depth, the sun's shadow map and the
+   * cumulus: the volume on desktop `standard` and `blessing`, the 2D deck below them and
+   * on phones. A uniform decides which the dome reads, so no program changes.
+   */
   setQuality(quality: GraphicsQuality, mobilePresentation?: boolean): void {
     this.starField.setQuality(quality, mobilePresentation);
     this.applyShadowBox(GRAPHICS_TIERS[quality].sunShadowMapSize);
+    this.cloudVolume.enabled = mobilePresentation !== true && (quality === 'standard' || quality === 'blessing');
   }
 
   /** `Settings.shadows`, applied by the next `update`; see `shadowMode`. */
@@ -1799,5 +1848,6 @@ export class Sky {
     this.envMaterial.dispose();
     if (this.envTarget !== null) this.envTarget.dispose();
     this.pmrem.dispose();
+    this.cloudVolume.dispose();
   }
 }

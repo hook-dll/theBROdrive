@@ -1,10 +1,10 @@
 /**
  * tools/surface-paint.ts
  *
- * THE FOUR THINGS THE DIRECTOR IS ALLOWED TO DO TO THE ASPHALT, measured on built
- * geometry rather than argued about: bitumen patches, laid rubber, a change of paint
- * and sand tongues (world/director.ts kinds 'patches', 'skid', 'markings',
- * 'sandTongue', all painted by RoadMeshProvider in world/roadmesh.ts).
+ * THE THREE THINGS THE DIRECTOR IS ALLOWED TO DO TO THE ASPHALT, measured on built
+ * geometry rather than argued about: bitumen patches, laid rubber and a change of paint
+ * (world/director.ts kinds 'patches', 'skid', 'markings', all painted by
+ * RoadMeshProvider in world/roadmesh.ts).
  *
  * Real chunks, real provider, headless. What it asks:
  *
@@ -19,7 +19,6 @@
  *  - PATCHES darken the lane measurably where they fire.
  *  - RUBBER lands in the wheel paths, off the crown and off the shoulder.
  *  - PAINT changes over the marking event's span and nowhere else, at one hard edge.
- *  - SAND reaches further in on the tongue's own side and nowhere else.
  *
  * Residuals are measured against a per-column reference built from the rows the
  * feature does not reach, rescaled per row by the MEDIAN of its column ratios. The
@@ -43,7 +42,7 @@ import {
   type VarietyEvent,
   type VarietyKind,
 } from '../src/world/director';
-import { SURFACES } from '../src/core/surfaces';
+import { SURFACES, SurfaceType } from '../src/core/surfaces';
 import { MAX_WEAR, ROAD_START_SURFACE, desertPaletteAt, roadConditionAt } from '../src/world/gradient';
 import { Road } from '../src/world/road';
 import { RoadMeshProvider, roadAsphaltVertexColorAtStart } from '../src/world/roadmesh';
@@ -275,8 +274,7 @@ function touched(s: number): boolean {
   return (
     varietyEventOfKindAt(SEED, 'patches', s) !== null ||
     varietyEventOfKindAt(SEED, 'skid', s) !== null ||
-    varietyEventOfKindAt(SEED, 'markings', s) !== null ||
-    varietyEventOfKindAt(SEED, 'sandTongue', s) !== null
+    varietyEventOfKindAt(SEED, 'markings', s) !== null
   );
 }
 
@@ -345,11 +343,11 @@ check(
 );
 // THE CEILING. The mat's colours are not confined to [0, 1] and never were:
 // `textureGain` divides the vertex colour by the asphalt albedo's mean, so the
-// textured surface keeps the brightness it had before it was textured, and a fully
-// sand-covered vertex already lands near 1.2. So the bound that can honestly be
-// asserted is the pipeline's own: the palette's brightest sand channel, times that
-// gain, times the most the dust and mottling terms in `weather` can lighten one
-// vertex. Anything above that is a colour nothing in the road can explain.
+// textured surface keeps the brightness it had before it was textured. So the bound
+// that can honestly be asserted is the pipeline's own: the brightest lane colour the
+// mat can start from (a sealed surface's albedo, or the palette's gravel on a gravel
+// district), times that gain, times the most the dust and mottling terms in `weather`
+// can lighten one vertex. Anything above that is a colour nothing in the road can explain.
 //
 // `roadAsphaltVertexColorAtStart` is the provider's own gain-corrected colour for the
 // opening district, so dividing it by that district's raw albedo recovers the gain
@@ -358,13 +356,17 @@ const startAlbedo = new THREE.Color(SURFACES[ROAD_START_SURFACE].color);
 const textureGain = roadAsphaltVertexColorAtStart(new THREE.Color()).r / startAlbedo.r;
 /** DUST_LIGHTEN and MOTTLE_AMOUNT in roadmesh.ts, at the deepest wear the world shows. */
 const WEATHER_LIFT = (1 + 0.11 * (0.5 + MAX_WEAR)) * (1 + 0.07 * (0.7 + MAX_WEAR));
-const sandProbe = new THREE.Color();
-let brightestSand = 0;
-for (let s = 0; s < SWEEP_CHUNKS * CHUNK_LENGTH; s += CHUNK_LENGTH) {
-  sandProbe.setHex(desertPaletteAt(s).sand);
-  brightestSand = Math.max(brightestSand, sandProbe.r, sandProbe.g, sandProbe.b);
+const laneProbe = new THREE.Color();
+let brightestLane = 0;
+for (const surface of [SurfaceType.Asphalt, SurfaceType.CrackedAsphalt, SurfaceType.Concrete]) {
+  laneProbe.setHex(SURFACES[surface].color);
+  brightestLane = Math.max(brightestLane, laneProbe.r, laneProbe.g, laneProbe.b);
 }
-const ceiling = brightestSand * textureGain * WEATHER_LIFT;
+for (let s = 0; s < SWEEP_CHUNKS * CHUNK_LENGTH; s += CHUNK_LENGTH) {
+  laneProbe.setHex(desertPaletteAt(s).gravel);
+  brightestLane = Math.max(brightestLane, laneProbe.r, laneProbe.g, laneProbe.b);
+}
+const ceiling = brightestLane * textureGain * WEATHER_LIFT;
 check(
   'no channel passes the palette-and-gain ceiling',
   Math.max(quietMax, liveMax) <= ceiling,
@@ -703,95 +705,6 @@ check(
   arcSeen === 0
     ? 'no arc in the sample'
     : `${arcSeen} events, worst wheel share ${(arcWheelWorst * 100).toFixed(1)}%`,
-);
-
-// ---------------------------------------------------------------------------
-// 'sandTongue': sand reaches in on one side only
-// ---------------------------------------------------------------------------
-//
-// Measured as a LEFT-AGAINST-RIGHT comparison of the same row, in warmth. The section
-// laterals are symmetric and every other thing the mat does across its width — the
-// district's own sand wedge, wheel polish, dust, edge ravel — is a function of
-// |lateral|, so all of it cancels and what is left in the difference is the tongue.
-// No reference rows, no drift to correct for, and it reports the one number the
-// feature is actually about: how far in, in metres, the sand got.
-console.log('');
-console.log("'sandTongue': how far the sand reaches in, windward against lee");
-/**
- * Warmth by which a vertex must beat its mirror to count as sanded, absolutely and as
- * a share of its own warmth. The relative gate is what makes this work on a district
- * that is ALREADY sanded at both edges: there both mirrors sit near 0.9 warmth, and
- * the 2D mottling is a brightness multiplier, so it alone put 0.1 of warmth between
- * them — enough to clear an absolute gate and read as a tongue on the lee side.
- */
-const SANDED_WARMTH = 0.05;
-const SANDED_SHARE = 0.35;
-let tongueChecked = 0;
-let tongueOk = 0;
-let worstReach = Infinity;
-let worstLeak = 0;
-// Two per SIDE, not the first four: every sandTongue event on the early road happens
-// to be windward-right, and a sign error in the side test would have been invisible.
-const tongues = sampleByVariant('sandTongue', (event) => (event.side > 0 ? 'left' : 'right'), 2);
-console.log(`  census over ${Object.values(tongues.census).reduce((a, b) => a + b, 0)} events: ${censusLine(tongues.census)}`);
-for (const event of tongues.events) {
-  const span = event.halfLength + event.ramp;
-  const st = stretchOver(event.s - span - 200, event.s + span + 200);
-  let insideReach = 0;
-  let insideLee = 0;
-  let outsideReach = 0;
-  let fingerRows = 0;
-  let liveRowCount = 0;
-  for (let row = 0; row < st.rows; row++) {
-    const s = st.rowS[row]!;
-    const live = varietyWeightAt(SEED, 'sandTongue', s) > 0.5;
-    const quiet = varietyEventOfKindAt(SEED, 'sandTongue', s) === null;
-    if (!live && !quiet) continue;
-    const hw = st.halfWidth[row]!;
-    let reachWind = 0;
-    let reachLee = 0;
-    for (let li = 0; li < st.columns; li++) {
-      const lat = st.lateral[row * st.columns + li]!;
-      const delta =
-        st.warm[row * st.columns + li]! - st.warm[row * st.columns + (st.columns - 1 - li)]!;
-      if (delta <= SANDED_WARMTH) continue;
-      if (delta <= SANDED_SHARE * st.warm[row * st.columns + li]!) continue;
-      // Reach is measured from the asphalt edge inward, which is the direction the
-      // sand travels and the number the feature is specified in.
-      const reach = hw - Math.abs(lat);
-      if (lat * event.side > 0) reachWind = Math.max(reachWind, reach);
-      else reachLee = Math.max(reachLee, reach);
-    }
-    if (live) {
-      liveRowCount++;
-      if (reachWind > 0) fingerRows++;
-      insideReach = Math.max(insideReach, reachWind);
-      insideLee = Math.max(insideLee, reachLee);
-    } else {
-      outsideReach = Math.max(outsideReach, Math.max(reachWind, reachLee));
-    }
-  }
-  console.log(
-    `  s=${(event.s / 1000).toFixed(2)} km side ${event.side > 0 ? 'left ' : 'right'} ` +
-      `reaches ${insideReach.toFixed(2)} m in on ${((fingerRows / Math.max(1, liveRowCount)) * 100).toFixed(0)}% of its rows  ` +
-      `lee ${insideLee.toFixed(2)} m  off-event ${outsideReach.toFixed(2)} m`,
-  );
-  tongueChecked++;
-  // One lane is 2.9 m and a tongue is capped just short of the crown, so "across a
-  // lane" means better than a metre of reach at its strongest finger.
-  if (insideReach > 1 && insideLee === 0 && outsideReach === 0) tongueOk++;
-  worstReach = Math.min(worstReach, insideReach);
-  worstLeak = Math.max(worstLeak, Math.max(insideLee, outsideReach));
-}
-check(
-  'a tongue reaches across a lane on its own side',
-  tongueChecked > 0 && tongueOk === tongueChecked,
-  `${tongueOk}/${tongueChecked} events, weakest reach ${worstReach.toFixed(2)} m (must be > 1 m)`,
-);
-check(
-  'and neither the lee side nor the road outside is sanded',
-  worstLeak === 0,
-  `worst leak ${worstLeak.toFixed(2)} m`,
 );
 
 // ---------------------------------------------------------------------------

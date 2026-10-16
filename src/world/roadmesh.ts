@@ -9,7 +9,6 @@ import { applyGroundLight } from '../render/groundlight';
 import { applyCleanSurface } from '../render/cleanstyle';
 import {
   applyRoadLook,
-  ROAD_DRIFT_MAX_M,
   setRoadDetailMap,
   WHEEL_TRACK_HALF,
   WHEEL_TRACK_LANE_BIAS,
@@ -152,8 +151,9 @@ const MARKING_MIN = 0.03;
  * patches when a darker verge was once painted into the terrain (terrainmesh.ts), and
  * an earlier pale grey strip vanished against the saturated palettes. A different
  * material reads as one by its hue and its grain, so the band carries the strongest grit
- * in the game, pale stones on dark (`aShoulderGrit`). Its outer edge wanders row by row
- * and the sand takes it back over the rest of the strip.
+ * in the game, pale stones on dark (`aShoulderGrit`). The desert's sand meets it in ONE
+ * soft line that meanders along the road (`SHOULDER_SAND_*`), never nearer the asphalt
+ * than `SHOULDER_SAND_CLEAN_M`.
  *
  * Its collider is its own triangles (LooseShoulder, the verge surface the handling
  * already models), fringe included: one grip across the whole strip, and the wheels
@@ -162,8 +162,6 @@ const MARKING_MIN = 0.03;
 interface ShoulderStyle {
   /** Linear luminance of the band's stone; 0 takes the road's own (palette) gravel. */
   readonly stone: number;
-  /** Metres of stone from the asphalt's edge before the sand takes over. */
-  readonly band: number;
   /** Grit stipple strength over the stone, 0..1. */
   readonly grit: number;
 }
@@ -172,18 +170,18 @@ interface ShoulderStyle {
  * Colour, and nothing else: the strip's WIDTH and fall are the road's cross-section and
  * live in `roadprofile.ts` (`SHOULDER_WIDTH_M`, `shoulderFringeM`, `embankmentDropAt`),
  * because the verge is drivable ground and the autopilot sizes a pass on the same
- * numbers this draws.
+ * numbers this draws. Where the sand meets the band is the same on every surface
+ * (`SHOULDER_SAND_*`).
  */
 const SHOULDER_STYLE: Partial<Record<SurfaceType, ShoulderStyle>> = {
-  // A highway's crushed-stone shoulder, about an aged mat's value (0.14), over the
-  // whole formation to the embankment's break (SHOULDER_WIDTH_M, 2.5 m).
-  [SurfaceType.Asphalt]: { stone: 0.13, band: 2.3, grit: 1 },
-  // Older; the desert has had longer to blow back over it.
-  [SurfaceType.CrackedAsphalt]: { stone: 0.14, band: 2, grit: 0.9 },
+  // A highway's crushed-stone shoulder, about an aged mat's value (0.14).
+  [SurfaceType.Asphalt]: { stone: 0.13, grit: 1 },
+  // Older and a shade paler.
+  [SurfaceType.CrackedAsphalt]: { stone: 0.14, grit: 0.9 },
   // Concrete roads were built wide and pale, with cement dust in the verge.
-  [SurfaceType.Concrete]: { stone: 0.2, band: 2.1, grit: 0.7 },
+  [SurfaceType.Concrete]: { stone: 0.2, grit: 0.7 },
   // The grader's windrow: the road's own gravel pushed off to the sides.
-  [SurfaceType.Gravel]: { stone: 0, band: 1.6, grit: 1 },
+  [SurfaceType.Gravel]: { stone: 0, grit: 1 },
 };
 const DEFAULT_SHOULDER_STYLE = SHOULDER_STYLE[SurfaceType.Asphalt]!;
 /**
@@ -192,13 +190,23 @@ const DEFAULT_SHOULDER_STYLE = SHOULDER_STYLE[SurfaceType.Asphalt]!;
  */
 const SHOULDER_STONE_LINEAR = new THREE.Color(0x6b6158);
 /**
- * Width of the band's outer edge, metres. The band covers the formation and its edge
- * falls on the embankment's break, so the stone thins out down the top of the batter
- * into the sand at its foot: the change of material is where the ground changes slope,
- * and that is what makes the road read as standing on a bank rather than lying on the
- * sand with a dark stripe beside it.
+ * WHERE THE SAND MEETS THE BAND (owner, 2026-10-17): one soft line along each verge,
+ * meandering on long waves, with clean dark gravel between it and the asphalt and plain
+ * sand beyond. Its middle (the colour half way) lies `SHOULDER_SAND_LINE_M` from the
+ * asphalt's edge, swung by up to `SHOULDER_SAND_SWING_M` on three sines of 53, 29 and
+ * 17 m wavelength, each verge on its own phase; the change from stone to sand takes
+ * `SHOULDER_BAND_SOFT`. So the stone is never sand within `SHOULDER_SAND_CLEAN_M` (0.8 m)
+ * of the asphalt, and the sand is whole by 2.4 m, inside the formation's 2.5 m: the
+ * ragged fringe past it is sand on sand and cannot show as a comb.
+ *
+ * Not per row and not per pixel: an earlier edge took a per-row hash (1.33 m) and a
+ * per-pixel drift of tongues and fans once crossed the band; both read as an endless
+ * comb along the road (owner's screenshots, 2026-10-16 and -17).
  */
-const SHOULDER_BAND_SOFT = 1;
+const SHOULDER_SAND_CLEAN_M = 0.8;
+const SHOULDER_BAND_SOFT = 0.6;
+const SHOULDER_SAND_SWING_M = 0.5;
+const SHOULDER_SAND_LINE_M = SHOULDER_SAND_CLEAN_M + SHOULDER_BAND_SOFT * 0.5 + SHOULDER_SAND_SWING_M;
 /** Share of a windrow's gravel colour a gravel road's band is drawn at: spoil in shade. */
 const SHOULDER_WINDROW_TONE = 0.8;
 /**
@@ -228,49 +236,6 @@ const SHOULDER_MAX_RISE = 0.25;
 const SHOULDER_MOTTLE = 0.05;
 /** Darkening of the crumbs right at the asphalt edge (column 0 only). */
 const SHOULDER_CRUMB = 0.12;
-/**
- * Reach of a director's sand tongue on the asphalt, metres in from the edge, at which
- * the shoulder beside it is buried outright.
- *
- * Sand that lies on the road crossed the verge to get there. Drawn without this, a
- * tongue stopped at the mat's edge as bright sand and the strip beside it stayed grey
- * crushed stone with its grit: a hard seam of clean verge between two sands, as if the
- * drift had jumped it. Below this reach the verge is partly covered.
- */
-const SHOULDER_BURY_M = 1;
-/**
- * Part of the strip, from the asphalt, that the sand banked against the road's lip
- * covers beside a director's tongue (`SHOULDER_LIP_SAND`) and beside a sanded
- * district's mat (`SHOULDER_DUST_LIP`). `sandFactor` puts the mat's edge vertex at full
- * sand for ANY district cover, so a verge without a lip met that sand with its own grey
- * and crumbs in a hard line; this carries the edge's colour over the lip and lets the
- * verge come up out of it. The district's lip is narrow: it used to be the tongue's,
- * with the whole verge a third buried besides, and on every decaying stretch the dark
- * band was gone (owner's screenshot, 2026-10-16).
- */
-const SHOULDER_LIP_SAND = 0.45;
-const SHOULDER_DUST_LIP = 0.12;
-/**
- * THE EVERYDAY DRIFT ON THE VERGE, drawn per pixel by the shoulder's material
- * (world/terrainmesh.ts SHOULDER_DRIFT_FRAGMENT) from `aShoulderDrift`.
- *
- * Sand blows in from the desert, so it lies deepest at the band's outer edge and thins
- * toward the road. The asphalt's drift (render/roadlook.ts) is a ragged line along the
- * road, `roadDriftLevel(along)`, sand on the mat wherever it is above zero. The verge
- * reads the SAME function at the same `along` and takes sand wherever
- * `roadDriftLevel + SHOULDER_DRIFT_FAN * (metres out / band width) + cover` is above
- * zero: at the asphalt's edge exactly where a tongue lies on the mat (so a tongue on the
- * asphalt always runs on into sand beside it, and clean stone beside it means a clean
- * edge), widening outward into fans that meet as plain sand at the band's edge. Between
- * the fans the crushed stone shows, widest at the road (owner, 2026-10-16: sand on the
- * asphalt with clean gravel beside it read as sand from nowhere).
- *
- * `SHOULDER_DRIFT_FAN` (render/roadlook.ts, beside the shader that reads it) is the
- * level the fans gain across the band, where the lip's roughness also eases off so a
- * fan is broad and not a comb of spikes. `SHOULDER_DRIFT_SANDED` times a district's
- * `sandCover` raises the level everywhere: a sanded road's fans reach further in.
- */
-const SHOULDER_DRIFT_SANDED = 1.5;
 
 /**
  * Weathering of the driving surface, as the things a photograph of an old road shows.
@@ -282,8 +247,7 @@ const SHOULDER_DRIFT_SANDED = 1.5;
  *  2. DUST. Nothing sweeps a decaying road, so wind-blown dust settles over it and
  *     greys the bitumen towards the desert's stone.
  *  3. DIRT AT THE EDGE OF THE MAT. The outer half metre ravels into the verge before
- *     the asphalt ends rather than stopping in a hard visual line, and wind-blown sand
- *     lies on its lip (`ROAD_DRIFT_MAX_M`).
+ *     the asphalt ends rather than stopping in a hard visual line.
  *
  * All of it rides on the tiled asphalt texture (render/roadtexture.ts) that carries
  * aggregate, tar-sealed cracks and patches, and its chip-seal detail.
@@ -333,9 +297,9 @@ const PAINT_WEAR_WAVELENGTH = 11;
 const PAINT_GONE = 0.34;
 
 /**
- * SURFACE VARIETY: the four things world/director.ts is allowed to do to the asphalt.
+ * SURFACE VARIETY: the three things world/director.ts is allowed to do to the asphalt.
  *
- * All four are COLOUR, on vertices that already exist. The mat's vertices ARE the
+ * All three are COLOUR, on vertices that already exist. The mat's vertices ARE the
  * collider the car drives on (see the slab loop in `buildSteps`), so a feature that
  * moved one to make a picture would move the road under the wheels, and the collider
  * is indexed straight off the fixed row/column counts, so a feature that added one
@@ -344,9 +308,9 @@ const PAINT_GONE = 0.34;
  * so off-feature the arithmetic is bit-for-bit the road that was here before it
  * (tools/surface-paint.ts carries the checksum that proves that, not an argument).
  *
- * The Surface channel runs ONE kind per window, so a patch, a skid, a marking change
- * and a sand tongue can never overlap each other: each block below has to compose
- * with the district's own weathering and with nothing else.
+ * The Surface channel runs ONE kind per window, so a patch, a skid and a marking
+ * change can never overlap each other: each block below has to compose with the
+ * district's own weathering and with nothing else.
  */
 
 /** Fresh bitumen: near black with the faintest warm cast. Tar, not paint. */
@@ -410,86 +374,9 @@ const SKID_HALF = 0.42;
  */
 const SKID_EDGE_FADE = 0.35;
 
-/**
- * Sand tongues: extra reach INWARD from one shoulder, on top of whatever uniform
- * cover `roadConditionAt` already gives the district.
- *
- * Visual only, and deliberately so. `RoadCondition.sandCover` is read by the
- * autopilot's pace model (vehicle/autopilot.ts), so wiring the tongue into it would
- * slow every AI car for free — but it would slow them for the whole ROW and for both
- * sides, because sandCover has no lateral term at all. Grip is left alone for the
- * same shape of reason: the surface registry is per collider slab, and a tongue is
- * thinner than a slab is long.
- */
-const TONGUE_MAX_REACH = LANE_WIDTH * 1.15;
-/**
- * Metres between tongues, and how much of a cell the tongue's own centre may wander
- * inside — so the spacing varies from about 5 m to 25 m rather than metronoming.
- *
- * A cell grid, not a noise threshold. The first attempt windowed an fbm and it is the
- * wrong instrument for a feature that MUST appear: the shortest sandTongue span the
- * director schedules is 40 m, and a threshold high enough to make a sharp finger was
- * crossed in none of those 40 m about half the time. The event fired and the road did
- * not change. One tongue per cell is a promise: even the shortest span carries two.
- */
-const TONGUE_SPACING = 15;
-const TONGUE_JITTER = 0.7;
-/**
- * Windward nose and downwind tail of one tongue, metres. Asymmetric because drifting
- * sand is: it piles into a steep face and then feathers away for metres downwind.
- */
-const TONGUE_NOSE_M = 2.5;
-const TONGUE_TAIL_M = 8;
-/** Hash domain for the tongue cells, distinct from every other stream here. */
-const TONGUE_TAG = 0x544e4745; // 'TNGE'
-/**
- * Share of the half-width a tongue may never pass. Sand reaching across A LANE is a
- * detail; sand over the crown is a road nobody can drive, and the asphalt wins.
- */
-const TONGUE_MAX_SHARE = 0.95;
-
-/** The row's sand tongue: extra reach in metres, and the shoulder (-1, 0, 1) it is on. */
-const tongueRow = { reach: 0, side: 0 };
-
 /** The row's course and seam (gradient.ts `roadCourseAt`), reused every row. */
 const courseRow: RoadCourseBuffer = { seam: 0, before: 0, after: 0 };
 
-/**
- * The marking pass's row state for the drift (`emitMarkingQuad`): the row's ends and
- * widths, each side's drift, its sand, and the build's own output arrays.
- */
-const markingRow = {
-  s0: 0,
-  s1: 0,
-  halfWidth0: 0,
-  halfWidth1: 0,
-  left: 0,
-  right: 0,
-  tileBase: 0,
-  sand: new THREE.Color(),
-  edges: [] as number[],
-  sands: [] as number[],
-};
-
-/**
- * Reach of the wind-blown sand on the asphalt's edge at this row, metres, signed by
- * the side (`sign`); render/roadlook.ts draws its ragged boundary inside it. Every road
- * has some: about a third of `ROAD_DRIFT_MAX_M` on a kept one, all of it once the road
- * is decaying or sanded, with long swells along the road so it comes and goes. None on
- * the side a lay-by widens: that edge is the lay-by's, not the road's.
- */
-function driftReach(
-  s: number,
-  sign: number,
-  cond: Pick<RoadCondition, 'decay' | 'sandCover'>,
-  laybySide: number,
-): number {
-  if (laybySide === sign) return 0;
-  const k = sign < 0 ? 1.3 : 3.9;
-  const swell = 0.6 + 0.28 * Math.sin(s / 61 + k) + 0.17 * Math.sin(s / 19.7 + 2.3 * k);
-  const level = 0.35 + 0.65 * Math.min(1, cond.decay * 1.7 + cond.sandCover);
-  return sign * ROAD_DRIFT_MAX_M * Math.min(1, swell * level);
-}
 
 /** What the paint is doing at an arclength. */
 const enum MarkingMode {
@@ -566,11 +453,10 @@ const SURFACE_LINEAR: Partial<Record<SurfaceType, THREE.Color>> = {
 
 /**
  * Palette scratch colours, updated once per arclength row and reused across the
- * row's vertices so no palette lookup allocates. Gravel tints weathered asphalt;
- * sand colours wind-blown cover at the edge.
+ * row's vertices so no palette lookup allocates. Gravel tints weathered asphalt
+ * and is a gravel district's own lane.
  */
 const gravelLinear = new THREE.Color();
-const sandLinear = new THREE.Color();
 /** Chalky, sun-dulled paint. Fresh white is what made the markings look printed. */
 const PAINT_LINEAR = new THREE.Color(PAINT_COLOR);
 /**
@@ -634,7 +520,7 @@ interface ShoulderBuild {
 // (render/groundlight.ts) replaces their physical lobe, and nothing on the road reflects:
 // no glint, no wet sheen, no headlamp streaks (owner, 2026-10-16: asphalt in the desert
 // is matt, and a road dries in minutes after rain). The per-pixel look (render/
-// roadlook.ts: courses, wheel tracks, sand drift, chips) works on the albedo after the
+// roadlook.ts: courses, wheel tracks, chips) works on the albedo after the
 // vertex colour. The surface's Clean branch (render/cleanstyle.ts) goes outermost on
 // the ribbon: it only changes how its two maps are read.
 const roadMaterial = applyCleanSurface(applyRoadLook(applyGroundLight(applyCloudShadow(
@@ -645,7 +531,7 @@ const roadMaterial = applyCleanSurface(applyRoadLook(applyGroundLight(applyCloud
       metalness: 0,
     }),
   ),
-)), 'surface'));
+))));
 /** Dark, weathered aggregate exposed only where the sand falls below the mat edge. */
 const roadBedMaterial = applyGroundLight(applyCloudShadow(
   applyGroundSpotlightNormals(
@@ -700,15 +586,14 @@ export function roadLaneVertexColor(out: THREE.Color, surface: SurfaceType, s: n
 
 /**
  * The factor every road vertex colour is multiplied by, so the albedo texture's mean
- * does not darken it: a colour mixed into the asphalt (sand on a lay-by) takes it too.
+ * does not darken it: a colour mixed into the asphalt (dust on a lay-by) takes it too.
  */
 export function roadVertexColorGain(): number {
   attachRoadTextures();
   return textureGain;
 }
 
-// The paint takes the road look's drift only: sand blown onto the edge lies over the line.
-const markingMaterial = applyRoadLook(applyGroundLight(applyCloudShadow(
+const markingMaterial = applyGroundLight(applyCloudShadow(
   applyGroundSpotlightNormals(
     new THREE.MeshStandardMaterial({
       vertexColors: true,
@@ -721,7 +606,7 @@ const markingMaterial = applyRoadLook(applyGroundLight(applyCloudShadow(
       polygonOffsetUnits: -1,
     }),
   ),
-)), 'paint');
+));
 
 /** 1 inside [lo, hi], 0 outside, smoothstepped over `soft` metres at either end. */
 function softBand(v: number, lo: number, hi: number, soft: number): number {
@@ -729,40 +614,6 @@ function softBand(v: number, lo: number, hi: number, soft: number): number {
   const b = (hi - v) / soft;
   const t = Math.min(1, Math.max(0, Math.min(a, b)));
   return t * t * (3 - 2 * t);
-}
-
-/**
- * Fraction of sand covering a point at |lateral| = a.
- *
- * TWO wedges, and they are shaped differently on purpose.
- *
- * The district's own `sandCover` from `roadConditionAt` is a LINEAR wedge in from both
- * edges — thin dust that thickens towards the shoulder, which is what a road that is
- * slowly losing its edges looks like. Passing `tongueReach` 0 reproduces it exactly,
- * including the no-sand case, and that is what keeps the off-feature road identical.
- *
- * The director's tongue is a DRIFT: something the wind piled up. A drift is opaque
- * over nearly all of its reach and feathers only at the very tip, so its profile is a
- * square root rather than a line. Built linear first, it measured as a 1.7 m reach
- * that only became visible over the last 0.9 m of it — a gradient across the lane
- * rather than a tongue lying on it.
- */
-function sandFactor(a: number, halfWidth: number, sandCover: number, tongueReach: number): number {
-  const districtTip = halfWidth * (1 - sandCover);
-  let cover =
-    a <= districtTip || districtTip >= halfWidth
-      ? 0
-      : a >= halfWidth
-        ? 1
-        : (a - districtTip) / (halfWidth - districtTip);
-  if (tongueReach > 0) {
-    const tongueTip = halfWidth - tongueReach;
-    if (a > tongueTip) {
-      const drift = Math.sqrt(Math.min(1, (a - tongueTip) / tongueReach));
-      if (drift > cover) cover = drift;
-    }
-  }
-  return cover;
 }
 
 interface MarkingLine {
@@ -911,12 +762,6 @@ export class RoadMeshProvider implements ChunkProvider {
     const col = new Float32Array(verts * 3);
     const detail = new Float32Array(verts);
     const grit = new Float32Array(verts);
-    // The drift's inputs (render/roadlook.ts `ROAD_DRIFT_GLSL`, world/terrainmesh.ts
-    // SHOULDER_DRIFT_FRAGMENT): across the band, side, the ribbon's own `along`, cover.
-    const drift = new Float32Array(verts * 4);
-    const driftSand = new Float32Array(verts * 3);
-    // The ribbon's `along` (`aRoadEdge.w`) is arclength less this chunk's tile start.
-    const tileBase = sStart - (((sStart % ROAD_TILE_METRES) + ROAD_TILE_METRES) % ROAD_TILE_METRES);
     const ground = tileGroundSampler({ seed: this.seed, road, terrain: ctx.terrain, roadDistance: this.roadDistance });
     const g = shoulderGround;
     const point = { x: 0, y: 0, z: 0 };
@@ -938,11 +783,9 @@ export class RoadMeshProvider implements ChunkProvider {
       } else {
         shoulderStone.setHex(palette.gravel).multiplyScalar(SHOULDER_WINDROW_TONE);
       }
-      // A worn road's verge is half sand already: the same wedge the lanes get.
+      // A worn road's verge has less grit showing and a narrower fringe.
       const wear = Math.max(cond.decay, cond.sandCover);
-      const band = style.band * (1 - 0.35 * wear);
       const gritLevel = style.grit * (1 - 0.3 * wear);
-      this.sandTongueAt(s, halfWidth);
       // The fringe past the guaranteed shoulder: the surface's own, narrowed by wear.
       const fringeMean = shoulderFringeM(cond.surface) * (1 - 0.4 * wear);
       // A lay-by's asphalt widens this edge from its entry slip to its exit slip
@@ -952,21 +795,16 @@ export class RoadMeshProvider implements ChunkProvider {
       const layby = laybyNear(this.seed, s);
       for (let side = 0; side < 2; side++) {
         const sign = side === 0 ? -1 : 1;
-        // A director's sand tongue reaching across the lane on this side crossed the verge
-        // to get there: the verge under it is buried by as much, and banked deep at the lip.
-        // A sanded district's mat carries sand at its edge too (`sandFactor`): a narrow lip.
-        const tongueReach = sign * tongueRow.side > 0 ? tongueRow.reach : 0;
-        const bury = smoothstep(0, SHOULDER_BURY_M, tongueReach);
-        const lip = tongueReach > 0 ? SHOULDER_LIP_SAND : cond.sandCover > 0 ? SHOULDER_DUST_LIP : 0;
-        // A sanded district's verge takes the drift further toward the road.
-        const driftCover = SHOULDER_DRIFT_SANDED * cond.sandCover;
         // Each side's fringe wanders on its own, slow and a little faster on top.
         const k = side === 0 ? 1.7 : 4.3;
         const wander = 1 + 0.55 * Math.sin(s / 23 + k) + 0.3 * Math.sin(s / 7.3 + 2.1 * k);
         const ragged = (hash01(this.seed, 0x5d, rowBase + si, side) - 0.5) * SHOULDER_RAGGED;
         const fringe = Math.max(SHOULDER_FRINGE_MIN, fringeMean * wander + ragged);
-        // The stone band's own edge wanders too, on a different beat from the fringe.
-        const bandEdge = band * (0.85 + 0.15 * Math.sin(s / 17.3 + 3 * k)) + ragged * 0.5;
+        // Where the sand meets the stone (SHOULDER_SAND_*): long waves, each verge its own.
+        const sandLine =
+          SHOULDER_SAND_LINE_M +
+          SHOULDER_SAND_SWING_M *
+            (0.55 * Math.sin(s / 8.4 + 2 * k) + 0.3 * Math.sin(s / 4.6 + 3.1 * k) + 0.15 * Math.sin(s / 2.7 + 5.3 * k));
         const reach = SHOULDER_WIDTH_M + fringe;
         // The asphalt's outer edge on this side: the ribbon's own edge vertex, or the
         // lay-by's where it has widened the asphalt (the same point and height its mesh
@@ -1044,28 +882,17 @@ export class RoadMeshProvider implements ChunkProvider {
           // Colour: the crushed-stone band from the edge, then the sand itself, which at
           // the last column is exactly the tile's colour there.
           const stoneOut =
-            c === cols - 1 ? 1 : smoothstep(bandEdge - SHOULDER_BAND_SOFT * 0.5, bandEdge + SHOULDER_BAND_SOFT * 0.5, d);
+            c === cols - 1 ? 1 : smoothstep(sandLine - SHOULDER_BAND_SOFT * 0.5, sandLine + SHOULDER_BAND_SOFT * 0.5, d);
           const mottle =
             1 + SHOULDER_MOTTLE * (1 - stoneOut) * this.mottleNoise.fbm(s / 3.1 + sign * 17, t * 1.3, 2, 2, 0.5);
           shoulderColour
             .copy(shoulderStone)
             .multiplyScalar(mottle * (c === 0 ? 1 - SHOULDER_CRUMB : 1))
             .lerp(shoulderSand, stoneOut);
-          // Sand that lies on the mat's edge lies across the verge beside it too, in the
-          // sand's own colour. The everyday drift is drawn per pixel (SHOULDER_DRIFT_*).
-          const sanded = Math.max(bury, lip > 0 ? 1 - smoothstep(0, lip, t) : 0);
-          shoulderColour.lerp(shoulderSand, sanded);
           col[vi * 3] = shoulderColour.r;
           col[vi * 3 + 1] = shoulderColour.g;
           col[vi * 3 + 2] = shoulderColour.b;
-          grit[vi] = gritLevel * (1 - stoneOut) * (1 - sanded);
-          drift[vi * 4] = d / Math.max(bandEdge, 0.5);
-          drift[vi * 4 + 1] = sign;
-          drift[vi * 4 + 2] = s - tileBase;
-          drift[vi * 4 + 3] = driftCover;
-          driftSand[vi * 3] = shoulderSand.r;
-          driftSand[vi * 3 + 1] = shoulderSand.g;
-          driftSand[vi * 3 + 2] = shoulderSand.b;
+          grit[vi] = gritLevel * (1 - stoneOut);
         }
         // The skirt starts on the strip's own outer vertex, so the two share an edge.
         const outer = ((si * 2 + side) * cols + cols - 1) * 3;
@@ -1124,8 +951,6 @@ export class RoadMeshProvider implements ChunkProvider {
     geometry.setAttribute('color', new THREE.BufferAttribute(col, 3));
     geometry.setAttribute('aTerrainDetail', new THREE.BufferAttribute(detail, 1));
     geometry.setAttribute('aShoulderGrit', new THREE.BufferAttribute(grit, 1));
-    geometry.setAttribute('aShoulderDrift', new THREE.BufferAttribute(drift, 4));
-    geometry.setAttribute('aShoulderSand', new THREE.BufferAttribute(driftSand, 3));
     geometry.setIndex(new THREE.BufferAttribute(index, 1));
     return {
       geometry,
@@ -1180,8 +1005,7 @@ export class RoadMeshProvider implements ChunkProvider {
     // The per-pixel look's inputs (render/roadlook.ts), every one linear along a row
     // and across it, so the extra rows below interpolate them like the colour.
     const course = new Float32Array(vertexCount * 3);
-    const edges = new Float32Array(vertexCount * 4);
-    const sands = new Float32Array(vertexCount * 3);
+    const edges = new Float32Array(vertexCount * 2);
     const indices = new Uint32Array((rowCount - 1) * (latCount - 1) * 6);
 
     const group = new THREE.Group();
@@ -1215,7 +1039,6 @@ export class RoadMeshProvider implements ChunkProvider {
         // Palette colour is a function of arclength alone: sample once per row, so
         // neighbouring chunks share the seam row and a rebuild is identical.
         const palette = desertPaletteAt(s);
-        sandLinear.setHex(palette.sand);
         gravelLinear.setHex(palette.gravel);
 
         // The asphalt course this row lies on, and the seam near it (see SEAM_REACH_M).
@@ -1234,10 +1057,6 @@ export class RoadMeshProvider implements ChunkProvider {
           }
         }
         const trackBase = (TRACK_STRENGTH[cond.surface] ?? 0) * (1 - 0.6 * cond.decay);
-        const layby = laybyNear(this.seed, s);
-        const laybySide = layby && laybyOuterAt(layby, s, halfWidth) > halfWidth ? layby.side : 0;
-        const driftLeft = driftReach(s, -1, cond, laybySide);
-        const driftRight = driftReach(s, 1, cond, laybySide);
 
         // The director's surface features, resolved once for the whole row. Three
         // probes rather than three searches: these kinds share the Surface channel,
@@ -1256,7 +1075,6 @@ export class RoadMeshProvider implements ChunkProvider {
         } else {
           skidRow.ink = 0;
         }
-        this.sandTongueAt(s, halfWidth);
 
         for (let li = 0; li < latCount; li++) {
           const lateral = sectionLateral(halfWidth, li);
@@ -1276,13 +1094,10 @@ export class RoadMeshProvider implements ChunkProvider {
           uvs[vi * 2 + 1] = textureVStart + (s - sStart) / ROAD_TILE_METRES;
 
           const a = Math.abs(lateral);
-          // One shoulder only: `side` is the windward one, and the other side keeps
-          // the district's own uniform cover with nothing added.
-          const sand = sandFactor(a, halfWidth, cond.sandCover, lateral * tongueRow.side > 0 ? tongueRow.reach : 0);
-          color.lerpColors(laneBase ?? gravelLinear, sandLinear, sand);
+          color.copy(laneBase ?? gravelLinear);
           this.weather(color, gravelLinear, laneBase ? SHOULDER_STONE_LINEAR : gravelLinear, s, lateral, a, halfWidth, cond.decay);
           // How much of this vertex is bare asphalt, for the course shade and tracks.
-          let bare = 1 - sand;
+          let bare = 1;
           // Repair and rubber go on AFTER the weathering, in the order the road got
           // them: the district wears, then somebody patches it, then somebody locks
           // a wheel up on the patch.
@@ -1315,13 +1130,8 @@ export class RoadMeshProvider implements ChunkProvider {
           course[vi * 3] = seamD;
           course[vi * 3 + 1] = 1 + (shadeBefore - 1) * bare;
           course[vi * 3 + 2] = 1 + (shadeAfter - 1) * bare;
-          edges[vi * 4] = halfWidth - a;
-          edges[vi * 4 + 1] = lateral < 0 ? driftLeft : driftRight;
-          edges[vi * 4 + 2] = trackBase * bare;
-          edges[vi * 4 + 3] = uvs[vi * 2 + 1]! * ROAD_TILE_METRES;
-          sands[vi * 3] = sandLinear.r;
-          sands[vi * 3 + 1] = sandLinear.g;
-          sands[vi * 3 + 2] = sandLinear.b;
+          edges[vi * 2] = halfWidth - a;
+          edges[vi * 2 + 1] = trackBase * bare;
         }
         yield;
       }
@@ -1354,10 +1164,9 @@ export class RoadMeshProvider implements ChunkProvider {
               positions[v * 3 + k] = positions[a * 3 + k]! + (positions[b * 3 + k]! - positions[a * 3 + k]!) * t;
               colors[v * 3 + k] = colors[a * 3 + k]! + (colors[b * 3 + k]! - colors[a * 3 + k]!) * t;
               course[v * 3 + k] = course[a * 3 + k]! + (course[b * 3 + k]! - course[a * 3 + k]!) * t;
-              sands[v * 3 + k] = sands[a * 3 + k]! + (sands[b * 3 + k]! - sands[a * 3 + k]!) * t;
             }
-            for (let k = 0; k < 4; k++) {
-              edges[v * 4 + k] = edges[a * 4 + k]! + (edges[b * 4 + k]! - edges[a * 4 + k]!) * t;
+            for (let k = 0; k < 2; k++) {
+              edges[v * 2 + k] = edges[a * 2 + k]! + (edges[b * 2 + k]! - edges[a * 2 + k]!) * t;
             }
             uvs[v * 2] = uvs[a * 2]! + (uvs[b * 2]! - uvs[a * 2]!) * t;
             uvs[v * 2 + 1] = uvs[a * 2 + 1]! + (uvs[b * 2 + 1]! - uvs[a * 2 + 1]!) * t;
@@ -1393,8 +1202,7 @@ export class RoadMeshProvider implements ChunkProvider {
       geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
       geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
       geometry.setAttribute('aRoadCourse', new THREE.BufferAttribute(course, 3));
-      geometry.setAttribute('aRoadEdge', new THREE.BufferAttribute(edges, 4));
-      geometry.setAttribute('aRoadSand', new THREE.BufferAttribute(sands, 3));
+      geometry.setAttribute('aRoadEdge', new THREE.BufferAttribute(edges, 2));
       geometry.setIndex(new THREE.BufferAttribute(indices, 1));
       // The road uses the same upward lighting basis as the desert. Actual slope
       // normals made it read as a dark shadow strip on grades.
@@ -1702,55 +1510,6 @@ export class RoadMeshProvider implements ChunkProvider {
   }
 
   /**
-   * The director's sand tongue at this arclength, into `tongueRow`: its reach with the
-   * event's ramp applied, and its side. Read by the ribbon and by the shoulder beside
-   * it, so a drift on the asphalt and the verge it crossed cannot disagree.
-   */
-  private sandTongueAt(s: number, halfWidth: number): void {
-    const event = varietyEventOfKindAt(this.seed, 'sandTongue', s);
-    if (!event) {
-      tongueRow.reach = 0;
-      tongueRow.side = 0;
-      return;
-    }
-    tongueRow.reach =
-      this.tongueReachAt(s, halfWidth, event.draw) * varietyWeightAt(this.seed, 'sandTongue', s);
-    tongueRow.side = event.side;
-  }
-
-  /**
-   * Metres of extra sand reach at this arclength, before the director's ramp.
-   *
-   * Separate fingers with bare asphalt between them, one per TONGUE_SPACING cell.
-   * Two cells are examined, not one, because a tail is longer than a cell: the tongue
-   * upwind of this one can still be feathering across here.
-   *
-   * The cell index comes off ABSOLUTE arclength, so a rebuilt chunk puts the same
-   * tongues in the same places — which is the whole reason this is a hash grid and
-   * not anything that accumulates along the road.
-   */
-  private tongueReachAt(s: number, halfWidth: number, draw: number): number {
-    const cell = Math.floor(s / TONGUE_SPACING);
-    let strongest = 0;
-    for (let k = cell - 1; k <= cell; k++) {
-      const centre =
-        (k + 0.15 + TONGUE_JITTER * hash01(TONGUE_TAG, k, this.seed)) * TONGUE_SPACING;
-      const d = s - centre;
-      const profile = d < 0 ? 1 + d / TONGUE_NOSE_M : 1 - d / TONGUE_TAIL_M;
-      if (profile <= 0) continue;
-      const shaped =
-        profile * profile * (3 - 2 * profile) *
-        (0.55 + 0.45 * hash01(TONGUE_TAG ^ 0x11, k, this.seed));
-      if (shaped > strongest) strongest = shaped;
-    }
-    if (strongest <= 0) return 0;
-    return Math.min(
-      halfWidth * TONGUE_MAX_SHARE,
-      TONGUE_MAX_REACH * (0.55 + 0.45 * draw) * strongest,
-    );
-  }
-
-  /**
    * What the paint does at this arclength. See MARKING_SNAP_M for why the ends are
    * hard edges snapped to a dash boundary instead of the usual ramp.
    */
@@ -1803,12 +1562,6 @@ export class RoadMeshProvider implements ChunkProvider {
       const colors: number[] = [];
       const point = { x: 0, y: 0, z: 0 };
       const color = new THREE.Color();
-      // The drift's inputs, per vertex like the ribbon's (render/roadlook.ts 'paint').
-      // Local to this build and handed to `markingRow` afresh every row, because the
-      // build yields between rows and another chunk's may run in between.
-      const edges: number[] = [];
-      const sands: number[] = [];
-      const tileBase = sStart - (((sStart % ROAD_TILE_METRES) + ROAD_TILE_METRES) % ROAD_TILE_METRES);
 
       // Marking quads are emitted per surface step so their corners coincide with
       // mesh vertices rather than floating across a bump or pothole — and split at a
@@ -1824,18 +1577,7 @@ export class RoadMeshProvider implements ChunkProvider {
         const mode = this.markingModeAt(s);
         const halfWidth0 = road.halfWidthAt(s);
         const halfWidth1 = road.halfWidthAt(s1);
-        const layby = laybyNear(this.seed, s);
-        const laybySide = layby && laybyOuterAt(layby, s, halfWidth0) > halfWidth0 ? layby.side : 0;
-        markingRow.edges = edges;
-        markingRow.sands = sands;
-        markingRow.tileBase = tileBase;
-        markingRow.s0 = s;
-        markingRow.s1 = s1;
-        markingRow.halfWidth0 = halfWidth0;
-        markingRow.halfWidth1 = halfWidth1;
-        markingRow.left = driftReach(s, -1, condition, laybySide);
-        markingRow.right = driftReach(s, 1, condition, laybySide);
-        markingRow.sand.setHex(desertPaletteAt(s).sand);
+
         if (mode === MarkingMode.Ghost) {
           // One chalky crown stripe, solid, at a coverage far under a fresh coat.
           // Emitted OUTSIDE the `condition.markings` gate on purpose: that gate is
@@ -1922,8 +1664,6 @@ export class RoadMeshProvider implements ChunkProvider {
       geometry = new THREE.BufferGeometry();
       geometry.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(positions), 3));
       geometry.setAttribute('color', new THREE.BufferAttribute(Float32Array.from(colors), 3));
-      geometry.setAttribute('aRoadEdge', new THREE.BufferAttribute(Float32Array.from(edges), 4));
-      geometry.setAttribute('aRoadSand', new THREE.BufferAttribute(Float32Array.from(sands), 3));
       const normals = new Float32Array(positions.length);
       for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
       geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
@@ -1977,17 +1717,9 @@ export class RoadMeshProvider implements ChunkProvider {
       const xs = [x00, x01, x10, x11];
       const ys = [y00, y01, y10, y11];
       const zs = [z00, z01, z10, z11];
-      const ss = [sa, sa, sb, sb];
-      const ls = [la - half, la + half, lb - half, lb + half];
-      const row = markingRow;
       for (const i of order) {
         positions.push(xs[i]!, ys[i]!, zs[i]!);
         colors.push(color.r, color.g, color.b);
-        const s = ss[i]!;
-        const lateral = ls[i]!;
-        const halfWidth = row.halfWidth0 + ((row.halfWidth1 - row.halfWidth0) * (s - row.s0)) / (row.s1 - row.s0);
-        row.edges.push(halfWidth - Math.abs(lateral), lateral < 0 ? row.left : row.right, 0, s - row.tileBase);
-        row.sands.push(row.sand.r, row.sand.g, row.sand.b);
       }
       sa = sb;
       la = lb;

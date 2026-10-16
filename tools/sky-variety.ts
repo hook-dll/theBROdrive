@@ -46,9 +46,13 @@ import {
   cloudShadowShadeAt,
   cloudShadowStrength,
   CLOUD_CELL_M,
+  CLOUD_COVER_EDGE,
   CLOUD_DARKEN_MAX,
   CLOUD_DRIFT_MPS,
+  CLOUD_FAR_FIELD,
   CLOUD_PERIOD_M,
+  cloudFieldAt,
+  cloudShadeOfField,
 } from '../src/render/cloudshadow';
 import { weatherAt, weatherKindOfSlot, WEATHER_SLOT_S, type WeatherChannels } from '../src/world/weather';
 
@@ -242,6 +246,53 @@ console.log('cloud shadow field');
     'the penumbra stays smaller than the patches it shades',
     penumbra.median < runM * 0.6,
     `${penumbra.median.toFixed(0)} m against a ${runM.toFixed(0)} m run`,
+  );
+}
+
+// -- the clouds over the shadows -----------------------------------------------
+
+// The sky's cumulus is a volume (render/cloudvolume.ts) whose footprint is this field
+// above CLOUD_COVER_EDGE. Its cover is a fair-weather sky's, every cloud's footprint is
+// in shade (before the sun shift, which only slides the shade along the sun's ray), and
+// far ground's stand-in field gives the patches' mean shade, not a lighter or darker one.
+{
+  let footprint = 0;
+  let footprintShaded = 0;
+  let shadeSum = 0;
+  let samples = 0;
+  for (const seed of SEEDS) {
+    const salt = cloudShadowSalt(seed);
+    for (let i = 0; i < 40_000; i++) {
+      const d = i * 5;
+      const x = d * 0.8 + seed * 977;
+      const z = d * 0.6 - seed * 613;
+      const field = cloudFieldAt(x, z, salt, 1);
+      const shade = cloudShadeOfField(field);
+      samples++;
+      shadeSum += shade;
+      if (field > CLOUD_COVER_EDGE) {
+        footprint++;
+        if (shade > IN_SHADOW) footprintShaded++;
+      }
+    }
+  }
+  const cover = footprint / samples;
+  check(
+    'the sky is fair-weather cumulus',
+    cover > 0.25 && cover < 0.45,
+    `${(cover * 100).toFixed(1)}% of the sky over a cloud footprint (before erosion)`,
+  );
+  check(
+    'every cloud has its shadow',
+    footprintShaded / Math.max(1, footprint) > 0.97,
+    `${((footprintShaded / Math.max(1, footprint)) * 100).toFixed(1)}% of footprint ground in shade`,
+  );
+  const meanShade = shadeSum / samples;
+  const farShade = cloudShadeOfField(CLOUD_FAR_FIELD);
+  check(
+    'far ground keeps the mean shade',
+    Math.abs(meanShade - farShade) < 0.05,
+    `mean ${meanShade.toFixed(3)}, far stand-in ${farShade.toFixed(3)}`,
   );
 }
 

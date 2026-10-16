@@ -128,14 +128,25 @@ const CLOUD_DETAIL_AMPLITUDE = 0.14;
  * reads as one when the patch is 400 m across. The band is 0.40 wide; measured by
  * `tools/sky-variety.ts`, which fails below 100 m.
  *
- * LOWERED ONCE, from 0.42..0.82. That band shaded a third of the ground and only a
- * storm moved it down, by up to 0.16, while the deck built and cleared. The clearing
- * after rain was the one time the patches were seen at all — and as the last of the
- * cloud went the band slid back up and the desert went uniformly bright again within
- * a minute. The clearing's band is now every day's.
+ * LOWERED ONCE, from 0.42..0.82, so the clearing after rain was every day's; and
+ * RAISED BACK to 0.42..0.74 (2026-10-17) when the sky's cumulus became a volume
+ * (render/cloudvolume.ts). The shade now has to be the shadow OF those clouds, so the
+ * band's middle sits on the clouds' own footprint edge (`CLOUD_COVER_EDGE`): about two
+ * fifths of the ground in shade, under about a third of the sky in cloud, and the
+ * penumbra reaching a little past each cloud as a real one does. 0.32 wide, so the
+ * 10-90% penumbra stays over 100 m (the tool's floor).
  */
-const CLOUD_EDGE_LOW = 0.26;
-const CLOUD_EDGE_HIGH = 0.66;
+const CLOUD_EDGE_LOW = 0.42;
+const CLOUD_EDGE_HIGH = 0.74;
+/**
+ * Where the sky's cumulus stands, in field units (render/cloudvolume.ts): a cloud's
+ * footprint begins where the field crosses `CLOUD_COVER_EDGE`, and its coverage (which
+ * also sets how tall it builds) reaches 1 `CLOUD_COVER_SPAN` above that. The field's
+ * 62nd percentile is 0.58, so before erosion about 38% of the sky has cloud over it,
+ * a little under a third after; fair-weather cumulus over a desert is 25-40%.
+ */
+export const CLOUD_COVER_EDGE = 0.58;
+export const CLOUD_COVER_SPAN = 0.3;
 /**
  * Deepest darkening, as a fraction of the light leaving the surface.
  *
@@ -308,13 +319,18 @@ const SALT_WARP_Z = 43;
 const SALT_COVER = 47;
 const SALT_SECOND = 53;
 
-/** Shade from an already-drifted sample point. Shared by both entry points. */
-function shadeFromSample(sx: number, sz: number, salt: number, detail: number): number {
-  return smoothstep(CLOUD_EDGE_LOW, CLOUD_EDGE_HIGH, fieldAt(sx, sz, salt, detail));
+/** Shade of a raw field value: the shadow's edge band (`CLOUD_EDGE_LOW`..`HIGH`). */
+export function cloudShadeOfField(field: number): number {
+  return smoothstep(CLOUD_EDGE_LOW, CLOUD_EDGE_HIGH, field);
 }
 
-/** CPU twin of the GLSL `cloudField`. */
-function fieldAt(sx: number, sz: number, salt: number, detail: number): number {
+/** Shade from an already-drifted sample point. Shared by both entry points. */
+function shadeFromSample(sx: number, sz: number, salt: number, detail: number): number {
+  return cloudShadeOfField(cloudFieldAt(sx, sz, salt, detail));
+}
+
+/** CPU twin of the GLSL `cloudField`, at an already-drifted sample point. */
+export function cloudFieldAt(sx: number, sz: number, salt: number, detail: number): number {
   const warpCell = CLOUD_PERIOD_M / CLOUD_WARP_CELLS;
   const px = sx + (cloudNoise(sx / warpCell, sz / warpCell, CLOUD_WARP_CELLS, salt + SALT_WARP_X) - 0.5) * CLOUD_WARP_M;
   const pz = sz + (cloudNoise(sx / warpCell, sz / warpCell, CLOUD_WARP_CELLS, salt + SALT_WARP_Z) - 0.5) * CLOUD_WARP_M;
@@ -398,15 +414,19 @@ export function cloudShadowFactorFromPan(
 // ---------------------------------------------------------------------------
 
 /**
- * Mean height of the cumulus bases above the eye, metres, for the sky's clouds
- * (render/sky.ts) and the shadows' sun shift. Fair-weather cumulus over a hot desert
- * bases at 1.5-3 km. Each cloud has its own (`cloudBase`): 0.75-1.65 of this, on a
- * 1.9 km field, so neighbouring clouds stand at different heights and slide past one
- * another as the car moves.
+ * The cumulus slab above the eye, metres (render/cloudvolume.ts). Fair-weather cumulus
+ * all condense at one level, the lifting condensation level, so every cloud has its
+ * flat base at `CLOUD_BASE_M`; the tops build to at most `CLOUD_TOP_M`, the densest
+ * cores tallest. Parallax comes from the volume itself now, not from staggered decks.
  */
-export const CLOUD_BASE_M = 1500;
-const CLOUD_HEIGHT_CELLS = 28;
-const SALT_HEIGHT = 59;
+export const CLOUD_BASE_M = 1300;
+export const CLOUD_TOP_M = 2300;
+/**
+ * The one height the ground's shade looks up the sun's ray to: a few hundred metres
+ * into the slab, where a typical cloud is widest, so the shadow lands under the body
+ * of the cloud rather than under its base alone.
+ */
+const CLOUD_SHADOW_HEIGHT_M = CLOUD_BASE_M + 350;
 
 /**
  * The field itself, shared by the ground (its shadows) and the sky (the clouds that
@@ -473,15 +493,15 @@ float cloudField( vec2 at, float detail ) {
 	if ( detail > 0.0 ) field += detail * cloudDetailOctave( p );
 	return field;
 }
-
-/** This cloud's base above the eye, metres (see CLOUD_BASE_M). */
-float cloudBase( vec2 at ) {
-	return ${CLOUD_BASE_M.toFixed(1)} * ( 0.75 + 0.9 * cloudNoise( at / ${(CLOUD_PERIOD_M / CLOUD_HEIGHT_CELLS).toFixed(1)}, ${CLOUD_HEIGHT_CELLS.toFixed(1)}, uCloudSalt + ${SALT_HEIGHT.toFixed(1)} ) );
-}
 `;
 
-/** Middle of the shade's edge band in field units: where a cloud's edge stands. */
-export const CLOUD_EDGE_MID = (CLOUD_EDGE_LOW + CLOUD_EDGE_HIGH) / 2;
+/**
+ * The field value the distant ground's shade gives way to: the one whose shade is the
+ * field's MEAN shade (about 0.37), so far land keeps the average light of the patches
+ * rather than the shade of the average field, which this band would make far too light.
+ * `tools/sky-variety.ts` measures the mean against it.
+ */
+export const CLOUD_FAR_FIELD = 0.55;
 
 const CLOUD_VERTEX_PARS = /* glsl */ `
 ${CLOUD_FIELD_GLSL}
@@ -494,15 +514,14 @@ varying float vCloudShade;
 varying float vWetMask;
 
 float cloudShade( vec2 scene, float dist ) {
-	// The cloud that shades this point stands up the sun's ray from it, at its own
-	// height: one step at the mean base finds which cloud, a second at that cloud's.
-	vec2 ground = scene + uCloudPan;
-	vec2 at = ground + uCloudSunSlope * cloudBase( ground + uCloudSunSlope * ${CLOUD_BASE_M.toFixed(1)} );
+	// The cloud that shades this point stands up the sun's ray from it: met at the height
+	// where the slab's clouds are widest (CLOUD_SHADOW_HEIGHT_M).
+	vec2 at = scene + uCloudPan + uCloudSunSlope * ${CLOUD_SHADOW_HEIGHT_M.toFixed(1)};
 	// See CLOUD_FAR_*: out where the mesh is too coarse for them, the patches give way
-	// to the field's own mean, so distant land keeps its average shade without blinking.
+	// to their mean shade (CLOUD_FAR_FIELD), so distant land keeps it without blinking.
 	float near = 1.0 - smoothstep( ${CLOUD_FAR_START_M.toFixed(1)}, ${CLOUD_FAR_END_M.toFixed(1)}, dist );
 	float detail = uCloudDetail * ( 1.0 - smoothstep( ${CLOUD_DETAIL_FAR_START_M.toFixed(1)}, ${CLOUD_DETAIL_FAR_END_M.toFixed(1)}, dist ) );
-	float field = mix( 0.5, cloudField( at, detail ), near );
+	float field = mix( ${CLOUD_FAR_FIELD.toFixed(2)}, cloudField( at, detail ), near );
 	return smoothstep( ${CLOUD_EDGE_LOW.toFixed(2)}, ${CLOUD_EDGE_HIGH.toFixed(2)}, field );
 }
 `;
@@ -618,7 +637,7 @@ const uniforms = {
 };
 
 /**
- * The field's uniforms for the sky's cumulus (render/sky.ts): the very objects the
+ * The field's uniforms for the sky's cumulus (render/sky.ts, render/cloudvolume.ts): the very objects the
  * ground is bound to, so the clouds and their shadows can never be a frame apart.
  */
 export const cloudFieldUniforms = { uCloudPan: uniforms.uCloudPan, uCloudSalt: uniforms.uCloudSalt };
@@ -632,8 +651,8 @@ const SUN_SHIFT_MIN_ELEVATION = 0.15;
 
 /**
  * Points the ground's shade at the clouds that cast it: a ground point is shaded by the
- * cloud where the ray from it to the sun (`sunDir`, unit, scene frame) meets that
- * cloud's own base (`cloudBase`). Called once a frame by the sky.
+ * cloud where the ray from it to the sun (`sunDir`, unit, scene frame) meets the body of
+ * the slab (`CLOUD_SHADOW_HEIGHT_M`). Called once a frame by the sky.
  */
 export function setCloudSunShift(sunDir: THREE.Vector3): void {
   const k = 1 / Math.max(SUN_SHIFT_MIN_ELEVATION, sunDir.y);
