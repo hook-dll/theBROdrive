@@ -108,15 +108,16 @@ function installStableShadowFilter(): void {
  * Any other count (the ending's own sky, galleries) keeps three's loop as it is.
  *
  * The near map is filtered wider than `installStableShadowFilter`'s cross: nine of the
- * hardware's 2x2 compares one texel apart, weighted 1-2-1 each way, a smooth kernel
- * four texels (6 cm) across. Magnified that close, the cross's two-texel tent still
- * showed every texel of a diagonal edge as a step. Nine taps on the fragments within
- * the box only; outside it the wide map's four as before. Fixed to the map like the
- * cross, so edges do not crawl.
+ * hardware's 2x2 compares 1.5 texels apart, weighted 1-2-1 each way, a smooth kernel
+ * five texels (8 cm) across. Magnified that close, the cross's two-texel tent still
+ * showed every texel of a diagonal edge as a step, and a car's shadow under a low sun
+ * wants a penumbra of that order anyway (the sun's half degree over the 3-5 m from a
+ * roof to the sand). Nine taps on the fragments within the box only; outside it the
+ * wide map's four as before. Fixed to the map like the cross, so edges do not crawl.
  *
- * The Clean style (render/cleanstyle.ts, `cleanStyle.y`) reads the near map with ONE
- * of those compares instead: a silhouette a single near texel (1.5 cm) wide, still
- * fixed to the map. A branch on a uniform, in the same function both styles compile.
+ * Both styles read it so. The Clean style once took ONE compare here for a crisp
+ * silhouette; the owner read its 1.6 cm steps as a hard, stair-stepped car shadow
+ * (2026-10-16), and a soft edge is as still from frame to frame as a crisp one.
  *
  * The chunks change for every program alike, before any compiles: no variant. The
  * `&& receiveShadow )` test stays verbatim for the kit body's gate (render/materials.ts
@@ -147,10 +148,7 @@ function installSunShadowCascade(): void {
 		vec4 coord = vDirectionalShadowCoord[ 1 ];
 		vec3 uv = coord.xyz / coord.w;
 		uv.z += directionalLightShadows[ 1 ].shadowBias;
-		if ( cleanStyle.y > 0.0 ) {
-			return mix( 1.0, texture( directionalShadowMap[ 1 ], uv ), directionalLightShadows[ 1 ].shadowIntensity );
-		}
-		vec2 texel = max( directionalLightShadows[ 1 ].shadowRadius, 1.0 ) / directionalLightShadows[ 1 ].shadowMapSize;
+		vec2 texel = 1.5 * max( directionalLightShadows[ 1 ].shadowRadius, 1.0 ) / directionalLightShadows[ 1 ].shadowMapSize;
 		float shadow = 0.0;
 		for ( int y = -1; y <= 1; y ++ ) {
 			for ( int x = -1; x <= 1; x ++ ) {

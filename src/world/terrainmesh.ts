@@ -5,6 +5,7 @@ import { applyComicShading } from '../render/comic';
 import { applyCloudShadow } from '../render/cloudshadow';
 import { applyGroundLight } from '../render/groundlight';
 import { CLEAN_SMOOTH_NORMALS } from '../render/cleanstyle';
+import { ROAD_DRIFT_GLSL, SHOULDER_DRIFT_FAN } from '../render/roadlook';
 import { weather } from './weather';
 import { type Road } from './road';
 import { RoadDistance } from './roaddistance';
@@ -268,16 +269,51 @@ export const DESERT_TILE_FADE_GONE = DESERT_TILE_SIZE * 2;
  * as a shadow lying beside the road.
  */
 const SHOULDER_GRIT_FRAGMENT = /* glsl */ `
-if ( vShoulderGrit > 0.001 ) {
+float shoulderGrit = vShoulderGrit * ( 1.0 - shoulderSand );
+if ( shoulderGrit > 0.001 ) {
   vec2 fineUv = vComicWorld.xz / 0.16;
   float fineFoot = max( fwidth( fineUv.x ), fwidth( fineUv.y ) );
   float fine = comicStipple( fineUv, fineFoot ) * ( 1.0 - smoothstep( 0.3, 0.8, fineFoot ) );
   vec2 coarseUv = vComicWorld.xz / 0.42 + 7.3;
   float coarseFoot = max( fwidth( coarseUv.x ), fwidth( coarseUv.y ) );
   float coarse = comicStipple( coarseUv, coarseFoot ) * ( 1.0 - smoothstep( 0.3, 0.8, coarseFoot ) );
-  gl_FragColor.rgb *= 1.0 - vShoulderGrit * ( fine * 0.45 - coarse * 1.0 );
+  gl_FragColor.rgb *= 1.0 - shoulderGrit * ( fine * 0.45 - coarse * 1.0 );
 }
 #include <tonemapping_fragment>`;
+
+/**
+ * THE EVERYDAY DRIFT ON THE ROAD'S VERGE (world/roadmesh.ts SHOULDER_DRIFT_SANDED's
+ * note): sand in its own colour wherever the asphalt's drift level at this `along`, plus
+ * the fan across the band and the district's cover, is above zero. Before the ground's
+ * tint, so the sand takes the same broad patches the desert beside it does. Its grit and
+ * ripples follow: stones on the bare band, ripples on the sand.
+ */
+const SHOULDER_DRIFT_FRAGMENT = /* glsl */ `
+float shoulderSand;
+{
+  float across = clamp( vShoulderDrift.x, 0.0, 1.0 );
+  float level = roadDriftLevel( vShoulderDrift.z, vShoulderDrift.y < 0.0 ? 1.7 : 4.3, 1.0 - 0.6 * across )
+    + ${SHOULDER_DRIFT_FAN.toFixed(4)} * across + vShoulderDrift.w;
+  // Crisp at the asphalt, as the drift on it is; a thinning skin of sand further out.
+  float aa = fwidth( level ) + 0.02 + 0.3 * across;
+  shoulderSand = smoothstep( -aa, aa, level );
+  diffuseColor.rgb = mix( diffuseColor.rgb, vShoulderSand, shoulderSand );
+}
+`;
+
+const SHOULDER_VERTEX_PARS = /* glsl */ `attribute float aShoulderGrit;
+attribute vec4 aShoulderDrift;
+attribute vec3 aShoulderSand;
+varying float vShoulderGrit;
+varying vec4 vShoulderDrift;
+varying vec3 vShoulderSand;
+`;
+
+const SHOULDER_FRAGMENT_PARS = /* glsl */ `varying float vShoulderGrit;
+varying vec4 vShoulderDrift;
+varying vec3 vShoulderSand;
+${ROAD_DRIFT_GLSL}
+`;
 
 /**
  * THE DESERT'S OWN SURFACE, on every material that draws it (tiles, vista, the vista's
@@ -534,10 +570,10 @@ export function advanceDesertGlitter(dt: number, dayFactor: number): void {
 }
 
 const GROUND_COLOR_HOOK = (grit: boolean): string => /* glsl */ `#include <color_fragment>
-diffuseColor.rgb *= vGroundTint;
+${grit ? SHOULDER_DRIFT_FRAGMENT : ''}diffuseColor.rgb *= vGroundTint;
 {
   float rippleFade = vGroundSurface.z * ( 1.0 - smoothstep( 14.0, 42.0, length( vViewPosition ) ) );
-${grit ? '  rippleFade *= 1.0 - min( 1.0, vShoulderGrit * 2.0 );\n' : ''}  if ( rippleFade > 0.001 ) {
+${grit ? '  rippleFade *= 1.0 - min( 1.0, vShoulderGrit * ( 1.0 - shoulderSand ) * 2.0 );\n' : ''}  if ( rippleFade > 0.001 ) {
     float phase = dot( vGroundWorld, vec2( -0.5736, 0.8192 ) ) * 11.42 + vGroundSurface.y;
     float alias = 1.0 - smoothstep( 0.7, 1.8, fwidth( phase ) );
     float wave = sin( phase );
@@ -550,7 +586,7 @@ ${grit ? '  rippleFade *= 1.0 - min( 1.0, vShoulderGrit * 2.0 );\n' : ''}  if ( 
 interface DesertGroundOptions {
   /** The tiles' wheel-scale relief, `aTerrainDetail`: fades out far off, tones crests. */
   readonly detail?: boolean;
-  /** The road shoulder's grit, `aShoulderGrit`. */
+  /** The road shoulder's grit and drift, `aShoulderGrit`, `aShoulderDrift`, `aShoulderSand`. */
   readonly grit?: boolean;
 }
 
@@ -575,9 +611,7 @@ export function applyDesertGround(
     let vertex = shader.vertexShader
       .replace(
         '#include <common>',
-        `#include <common>\n${detail ? 'attribute float aTerrainDetail;\n' : ''}${
-          grit ? 'attribute float aShoulderGrit;\nvarying float vShoulderGrit;\n' : ''
-        }${GROUND_VERTEX_PARS}`,
+        `#include <common>\n${detail ? 'attribute float aTerrainDetail;\n' : ''}${grit ? SHOULDER_VERTEX_PARS : ''}${GROUND_VERTEX_PARS}`,
       )
       .replace('#include <worldpos_vertex>', GROUND_VERTEX_HOOK(detail));
     if (detail) {
@@ -586,14 +620,14 @@ export function applyDesertGround(
         `vec3 transformed = vec3( position );
 float tileDistance = length( ( modelMatrix * vec4( position, 1.0 ) ).xz - cameraPosition.xz );
 float detailFade = smoothstep( ${DESERT_TILE_FADE_FULL.toFixed(1)}, ${DESERT_TILE_FADE_GONE.toFixed(1)}, tileDistance );
-transformed.y -= aTerrainDetail * detailFade;${grit ? '\nvShoulderGrit = aShoulderGrit;' : ''}`,
+transformed.y -= aTerrainDetail * detailFade;${grit ? '\nvShoulderGrit = aShoulderGrit;\nvShoulderDrift = aShoulderDrift;\nvShoulderSand = aShoulderSand;' : ''}`,
       );
     }
     shader.vertexShader = vertex;
     let fragment = shader.fragmentShader
       .replace(
         '#include <common>',
-        `#include <common>\n${grit ? 'varying float vShoulderGrit;\n' : ''}${GROUND_FRAGMENT_PARS}`,
+        `#include <common>\n${grit ? SHOULDER_FRAGMENT_PARS : ''}${GROUND_FRAGMENT_PARS}`,
       )
       .replace('#include <color_fragment>', GROUND_COLOR_HOOK(grit))
       .replace('comicStipple( stippleUv, footprint )', 'groundStipple( stippleUv, footprint, vGroundSurface.x )')
@@ -604,7 +638,7 @@ transformed.y -= aTerrainDetail * detailFade;${grit ? '\nvShoulderGrit = aShould
   };
   const previousKey = material.customProgramCacheKey;
   material.customProgramCacheKey = () =>
-    `${previousKey.call(material)}:desert-ground-v3${detail ? ':detail-fade-v1' : ''}${grit ? ':shoulder-grit-v1' : ''}`;
+    `${previousKey.call(material)}:desert-ground-v3${detail ? ':detail-fade-v1' : ''}${grit ? ':shoulder-grit-v2' : ''}`;
   return material;
 }
 

@@ -1188,6 +1188,47 @@
 
 ### Fixed
 
+- A CAR'S SHADOW IS ONE SOLID SILHOUETTE (`render/carshadowhull.ts`, `render/carmodel.ts`
+  `shadowHullOf` `carModelShadowHull`, `render/farcars.ts` `FarCarField.addCaster`,
+  `vehicle/vehicle.ts` `castHull`). Owner's report, 2026-10-16: a GAZ-31029 parked on the
+  sand under a low sun cast a cut-out with a wedge of sunlit sand between the rear wheel
+  and the bumper and light lines through it. Every body is zero-thickness panels casting
+  from their back faces, with the floor, bay and cabin casting nothing, so light that came
+  in through a panel facing the sun went out wherever no panel faced away from it: under
+  the tail behind the rear arch, through the door and lid shut lines, under the scuttle.
+  Rendering the car's casters from the sun showed exactly those holes (the earlier fix,
+  42811af, re-wound the arch ceiling only and its "no arch-shaped holes" did not close
+  them). Every model now also casts a closed SHADOW HULL on the shadow-only layer: its
+  cross-sections every 5 cm (the convex hull of each plane cut of the casting panels and
+  panes, read at 12 fixed directions), lofted and capped, stations a straight loft carries
+  within 2 cm dropped; wheels and mirrors cast as themselves, and under the sills between
+  the wheels the sand stays lit. Back faces cast, as on every car part, so the cabin seen
+  through the glass is lit as before. 650-1030 triangles a model, baked once as it loads
+  in a frame of its own; a driven, parked, near or static car carries it as a mesh, a car
+  the far, mid or stand-in meshes draw casts it from the shadow-only field (one draw per
+  model a pass: 12 for 19 far cars measured). Its depth program is the plain one
+  `waitForFrameShaders` links at boot: programs 101 before and after a 30 s autopilot
+  drive with traffic (seed flick, km 53). The car's own headlamp beam is unchanged with
+  the hull on and off.
+- SOFT NEAR SHADOWS IN BOTH STYLES (`render/lightshader.ts` `installSunShadowCascade`,
+  `render/cleanstyle.ts`). The near cascade's nine taps stand 1.5 texels apart (an 8 cm
+  kernel, about the penumbra of a car roof 3-5 m from the sand under a low sun), and Clean
+  reads them too instead of its one hardware compare, whose 1.6 cm steps read as a hard,
+  stair-stepped car shadow. `cleanStyle.y` is no longer used.
+- THE ROAD'S VERGE AND ITS DRIFT ARE ONE (`world/roadmesh.ts` THE EVERYDAY DRIFT ON THE
+  VERGE, `render/roadlook.ts` `ROAD_DRIFT_GLSL` `SHOULDER_DRIFT_FAN`, `world/terrainmesh.ts`
+  `SHOULDER_DRIFT_FRAGMENT`). Two owner reports on the road look above, 2026-10-16. On a
+  decaying stretch the dark crushed-stone band did not show at all: any district sand
+  buried the whole verge a third and its first 45% outright, so the verge was plain sand
+  with a pale step at the embankment. And where it did show, the drift's tongues lay on
+  the asphalt's edge with clean gravel beside them, sand from nowhere. The verge now reads
+  the asphalt drift's own level function at the same `along`, per pixel: sand where the
+  level plus a fan across the band (and a sanded district's cover) is above zero, so a
+  tongue on the mat runs on into sand on the verge, widening and thinning out toward the
+  band's outer edge, and stone shows between the fans, widest at the road. Grit and
+  ripples follow the sand. The drift's floor is higher (gain 2.2, floor 1.6, was 1.8 and
+  0.65): a tongue on about a fifth of the edge instead of some 70%, since the verge beside
+  each one has to be sand. A sanded district keeps only a 12% lip by the mat. Both styles.
 - SHADOW EDGES NO LONGER SHIMMER (`render/sky.ts` `SHADOW_DIR_STEP`, `render/lightshader.ts`
   `installStableShadowFilter`). The sun's shadow took its direction fresh every frame, and the
   sun turns 0.25 degrees a second, so the shadow map's texel lattice turned a little each

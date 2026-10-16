@@ -147,7 +147,7 @@ function toByte(value: number): number {
  * chassis-local matrix (each root's own transform included), minus the kit groups a car
  * past `KIT_DETAIL_M` stops drawing unless `whole`. Reads the template without changing it.
  */
-function collectPieces<S>(
+export function collectPieces<S>(
   roots: readonly THREE.Object3D[],
   describe: (mesh: THREE.Mesh, material: THREE.Material) => S | null,
   whole = false,
@@ -531,6 +531,18 @@ export class FarCarField {
     const model = this.model(geometry);
     if (model.count >= FAR_CAR_CAPACITY) return false;
     this.place(model, _matrix.compose(position, quaternion, ONE), paint, lamps);
+    return true;
+  }
+
+  /**
+   * One instance of a mesh that only casts, at a car's render pose: the shadow hull
+   * (render/carshadowhull.ts) in the shadow-only field. False when the field is off or full.
+   */
+  addCaster(geometry: THREE.BufferGeometry, position: THREE.Vector3, quaternion: THREE.Quaternion): boolean {
+    if (!this.enabled) return false;
+    const model = this.model(geometry);
+    if (model.count >= FAR_CAR_CAPACITY) return false;
+    this.place(model, _matrix.compose(position, quaternion, ONE), WHITE, null);
     return true;
   }
 

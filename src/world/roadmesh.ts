@@ -229,24 +229,48 @@ const SHOULDER_MOTTLE = 0.05;
 /** Darkening of the crumbs right at the asphalt edge (column 0 only). */
 const SHOULDER_CRUMB = 0.12;
 /**
- * Reach of the sand on the asphalt, metres in from the edge, at which the shoulder
- * beside it is buried outright.
+ * Reach of a director's sand tongue on the asphalt, metres in from the edge, at which
+ * the shoulder beside it is buried outright.
  *
  * Sand that lies on the road crossed the verge to get there. Drawn without this, a
- * district's sand wedge or a director's tongue stopped at the mat's edge as bright sand
- * and the strip beside it stayed grey crushed stone with its grit: a hard seam of
- * clean verge between two sands, as if the drift had jumped it. Below this reach the
- * verge is partly covered (thin dust on the road is thin dust on the verge).
+ * tongue stopped at the mat's edge as bright sand and the strip beside it stayed grey
+ * crushed stone with its grit: a hard seam of clean verge between two sands, as if the
+ * drift had jumped it. Below this reach the verge is partly covered.
  */
 const SHOULDER_BURY_M = 1;
 /**
  * Part of the strip, from the asphalt, that the sand banked against the road's lip
- * covers wherever the mat's edge carries any sand at all. `sandFactor` puts the edge
- * vertex at full sand for ANY cover, so a verge that only took the reach above met
- * that sand with its own grey and crumbs in a hard line; this carries the edge's
- * colour over the lip and lets the verge come up out of it.
+ * covers beside a director's tongue (`SHOULDER_LIP_SAND`) and beside a sanded
+ * district's mat (`SHOULDER_DUST_LIP`). `sandFactor` puts the mat's edge vertex at full
+ * sand for ANY district cover, so a verge without a lip met that sand with its own grey
+ * and crumbs in a hard line; this carries the edge's colour over the lip and lets the
+ * verge come up out of it. The district's lip is narrow: it used to be the tongue's,
+ * with the whole verge a third buried besides, and on every decaying stretch the dark
+ * band was gone (owner's screenshot, 2026-10-16).
  */
 const SHOULDER_LIP_SAND = 0.45;
+const SHOULDER_DUST_LIP = 0.12;
+/**
+ * THE EVERYDAY DRIFT ON THE VERGE, drawn per pixel by the shoulder's material
+ * (world/terrainmesh.ts SHOULDER_DRIFT_FRAGMENT) from `aShoulderDrift`.
+ *
+ * Sand blows in from the desert, so it lies deepest at the band's outer edge and thins
+ * toward the road. The asphalt's drift (render/roadlook.ts) is a ragged line along the
+ * road, `roadDriftLevel(along)`, sand on the mat wherever it is above zero. The verge
+ * reads the SAME function at the same `along` and takes sand wherever
+ * `roadDriftLevel + SHOULDER_DRIFT_FAN * (metres out / band width) + cover` is above
+ * zero: at the asphalt's edge exactly where a tongue lies on the mat (so a tongue on the
+ * asphalt always runs on into sand beside it, and clean stone beside it means a clean
+ * edge), widening outward into fans that meet as plain sand at the band's edge. Between
+ * the fans the crushed stone shows, widest at the road (owner, 2026-10-16: sand on the
+ * asphalt with clean gravel beside it read as sand from nowhere).
+ *
+ * `SHOULDER_DRIFT_FAN` (render/roadlook.ts, beside the shader that reads it) is the
+ * level the fans gain across the band, where the lip's roughness also eases off so a
+ * fan is broad and not a comb of spikes. `SHOULDER_DRIFT_SANDED` times a district's
+ * `sandCover` raises the level everywhere: a sanded road's fans reach further in.
+ */
+const SHOULDER_DRIFT_SANDED = 1.5;
 
 /**
  * Weathering of the driving surface, as the things a photograph of an old road shows.
@@ -887,6 +911,12 @@ export class RoadMeshProvider implements ChunkProvider {
     const col = new Float32Array(verts * 3);
     const detail = new Float32Array(verts);
     const grit = new Float32Array(verts);
+    // The drift's inputs (render/roadlook.ts `ROAD_DRIFT_GLSL`, world/terrainmesh.ts
+    // SHOULDER_DRIFT_FRAGMENT): across the band, side, the ribbon's own `along`, cover.
+    const drift = new Float32Array(verts * 4);
+    const driftSand = new Float32Array(verts * 3);
+    // The ribbon's `along` (`aRoadEdge.w`) is arclength less this chunk's tile start.
+    const tileBase = sStart - (((sStart % ROAD_TILE_METRES) + ROAD_TILE_METRES) % ROAD_TILE_METRES);
     const ground = tileGroundSampler({ seed: this.seed, road, terrain: ctx.terrain, roadDistance: this.roadDistance });
     const g = shoulderGround;
     const point = { x: 0, y: 0, z: 0 };
@@ -922,18 +952,14 @@ export class RoadMeshProvider implements ChunkProvider {
       const layby = laybyNear(this.seed, s);
       for (let side = 0; side < 2; side++) {
         const sign = side === 0 ? -1 : 1;
-        // How far the sand on the asphalt reaches in from THIS edge (see sandFactor):
-        // the verge under it is buried by as much.
-        const sandReach = Math.max(
-          cond.sandCover * halfWidth,
-          sign * tongueRow.side > 0 ? tongueRow.reach : 0,
-        );
-        const bury = smoothstep(0, SHOULDER_BURY_M, sandReach);
-        const lipSand = sandReach > 0 ? 1 : 0;
-        // The drift on the asphalt's lip came over the verge: some of it is banked there.
-        const driftLip =
-          Math.abs(driftReach(s, sign, cond, layby && laybyOuterAt(layby, s, halfWidth) > halfWidth ? layby.side : 0)) /
-          ROAD_DRIFT_MAX_M;
+        // A director's sand tongue reaching across the lane on this side crossed the verge
+        // to get there: the verge under it is buried by as much, and banked deep at the lip.
+        // A sanded district's mat carries sand at its edge too (`sandFactor`): a narrow lip.
+        const tongueReach = sign * tongueRow.side > 0 ? tongueRow.reach : 0;
+        const bury = smoothstep(0, SHOULDER_BURY_M, tongueReach);
+        const lip = tongueReach > 0 ? SHOULDER_LIP_SAND : cond.sandCover > 0 ? SHOULDER_DUST_LIP : 0;
+        // A sanded district's verge takes the drift further toward the road.
+        const driftCover = SHOULDER_DRIFT_SANDED * cond.sandCover;
         // Each side's fringe wanders on its own, slow and a little faster on top.
         const k = side === 0 ? 1.7 : 4.3;
         const wander = 1 + 0.55 * Math.sin(s / 23 + k) + 0.3 * Math.sin(s / 7.3 + 2.1 * k);
@@ -1025,18 +1051,21 @@ export class RoadMeshProvider implements ChunkProvider {
             .copy(shoulderStone)
             .multiplyScalar(mottle * (c === 0 ? 1 - SHOULDER_CRUMB : 1))
             .lerp(shoulderSand, stoneOut);
-          // A drift on the road lies across the verge too, in the sand's own colour,
-          // and whatever sand reaches the mat's edge is banked against its lip.
-          const sanded = Math.max(
-            bury,
-            lipSand * (1 - smoothstep(0, SHOULDER_LIP_SAND, t)),
-            driftLip * 0.3 * (1 - smoothstep(0, 0.15, d)),
-          );
+          // Sand that lies on the mat's edge lies across the verge beside it too, in the
+          // sand's own colour. The everyday drift is drawn per pixel (SHOULDER_DRIFT_*).
+          const sanded = Math.max(bury, lip > 0 ? 1 - smoothstep(0, lip, t) : 0);
           shoulderColour.lerp(shoulderSand, sanded);
           col[vi * 3] = shoulderColour.r;
           col[vi * 3 + 1] = shoulderColour.g;
           col[vi * 3 + 2] = shoulderColour.b;
           grit[vi] = gritLevel * (1 - stoneOut) * (1 - sanded);
+          drift[vi * 4] = d / Math.max(bandEdge, 0.5);
+          drift[vi * 4 + 1] = sign;
+          drift[vi * 4 + 2] = s - tileBase;
+          drift[vi * 4 + 3] = driftCover;
+          driftSand[vi * 3] = shoulderSand.r;
+          driftSand[vi * 3 + 1] = shoulderSand.g;
+          driftSand[vi * 3 + 2] = shoulderSand.b;
         }
         // The skirt starts on the strip's own outer vertex, so the two share an edge.
         const outer = ((si * 2 + side) * cols + cols - 1) * 3;
@@ -1095,6 +1124,8 @@ export class RoadMeshProvider implements ChunkProvider {
     geometry.setAttribute('color', new THREE.BufferAttribute(col, 3));
     geometry.setAttribute('aTerrainDetail', new THREE.BufferAttribute(detail, 1));
     geometry.setAttribute('aShoulderGrit', new THREE.BufferAttribute(grit, 1));
+    geometry.setAttribute('aShoulderDrift', new THREE.BufferAttribute(drift, 4));
+    geometry.setAttribute('aShoulderSand', new THREE.BufferAttribute(driftSand, 3));
     geometry.setIndex(new THREE.BufferAttribute(index, 1));
     return {
       geometry,

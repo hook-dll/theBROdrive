@@ -50,6 +50,7 @@ import { kitBodyMaterial } from '../carkit/materials';
 import { kitGlassOpacity } from '../carkit/rig';
 import { MATERIALS_CONFIG } from '../config';
 import { bakeCarPaintGeometry, bakeFarCarGeometry, type FarCarSurface, type MidCarWheel } from './farcars';
+import { bakeCarShadowHull, carShadowHullMesh } from './carshadowhull';
 import { attachKitDraw, attachKitWheels, bakeKitWheels, prepareKitDraw, type KitDrawModel, type KitSkeleton, type KitWheelModel } from './kitdraw';
 import { KIT_DRIVER_EYE_NODE, KIT_REAR_EYE_NODE } from '../carkit/interior';
 import { KIT_BONNET_CELL_NODE } from '../carkit/bay';
@@ -1714,6 +1715,9 @@ export function loadCarModel(id: string): Promise<void> {
       // The rest and the wheels are the far program's, which the field's boot anchor holds.
       const mid = await onOwnFrame(() => buildMidModel(template(id)));
       if (mid) midModels.set(id, mid);
+      // The shadow hull (`shadowHullOf`) in a frame of its own too, 10-25 ms on the M2
+      // Pro; the anchor's driving and static clones then take it ready-made.
+      await onOwnFrame(() => shadowHullOf(template(id)));
       const anchor = await buildProgramAnchor(id);
       programAnchors.add(anchor);
       if (programCompiler) await programCompiler(anchor);
@@ -1837,6 +1841,12 @@ export interface CarModelInstance {
   readonly surface: CarBodySurface;
   /** This car as drawn at mid range (`CarMidModel`); null for a model without one. */
   readonly mid: CarMidInstance | null;
+  /**
+   * The body's shadow hull (render/carshadowhull.ts), chassis-local, for the car's root:
+   * a mesh on the shadow-only layer, casting so the car's shadow is one solid silhouette.
+   * Null for a body with no casting panels.
+   */
+  readonly shadowHull: THREE.Mesh | null;
 }
 
 /** One car's mid-range parts (render/farcars.ts, MID TRAFFIC). */
@@ -1906,7 +1916,15 @@ function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInsta
   );
   const surface = new CarBodySurface(paint, glass, decals, skeletons);
   addSpareWheel(body, t, wheels);
-  return { body, wheels, wheelDraw, surface, mid: midInstance(t, clones, glass[0] ?? null, set) };
+  const hull = shadowHullOf(t);
+  return {
+    body,
+    wheels,
+    wheelDraw,
+    surface,
+    mid: midInstance(t, clones, glass[0] ?? null, set),
+    shadowHull: hull ? carShadowHullMesh(hull.mesh) : null,
+  };
 }
 
 /**
@@ -2057,6 +2075,9 @@ function cloneStaticModel(t: Template, appearanceKey = t.def.id): StaticCarInsta
   const group = new THREE.Group();
   group.name = t.def.id;
   const set = selectedWheels(t, appearanceKey);
+  // The body's shadow hull: a static car's shadow is a solid silhouette like a driven one's.
+  const hull = shadowHullOf(t);
+  if (hull) group.add(carShadowHullMesh(hull.mesh));
   if (t.kit) {
     const mid = midModels.get(t.def.id);
     if (!mid) throw new Error(`Car model "${t.def.id}" has no mid meshes for a static shell`);
@@ -2110,6 +2131,40 @@ function cloneStaticModel(t: Template, appearanceKey = t.def.id): StaticCarInsta
     group.add(mesh);
   }
   return { model: group, paint, glass };
+}
+
+/**
+ * Each model's shadow hull (render/carshadowhull.ts `bakeCarShadowHull`), built as the
+ * model loads (`loadCarModel`), or by its first car if one comes sooner: `mesh` for
+ * a car's own hull mesh, `field` the same triangles for the shadow-only field
+ * (render/farcars.ts `FarCarField.addCaster`), whose instanced attributes stay off the mesh's.
+ */
+const shadowHulls = new Map<string, { readonly mesh: THREE.BufferGeometry; readonly field: THREE.BufferGeometry } | null>();
+
+function shadowHullOf(t: Template): { readonly mesh: THREE.BufferGeometry; readonly field: THREE.BufferGeometry } | null {
+  let hull = shadowHulls.get(t.def.id);
+  if (hull === undefined) {
+    const mesh = bakeCarShadowHull(t.body);
+    let field: THREE.BufferGeometry | null = null;
+    if (mesh) {
+      field = new THREE.BufferGeometry();
+      field.setAttribute('position', mesh.getAttribute('position'));
+      field.setAttribute('normal', mesh.getAttribute('normal'));
+      field.setIndex(mesh.index);
+      field.boundingSphere = mesh.boundingSphere;
+    }
+    hull = mesh && field ? { mesh, field } : null;
+    shadowHulls.set(t.def.id, hull);
+  }
+  return hull;
+}
+
+/**
+ * A loaded model's shadow hull for the shadow-only field, where a car the far or mid
+ * meshes draw casts it; null before the model's first car or for a body without one.
+ */
+export function carModelShadowHull(id: string): THREE.BufferGeometry | null {
+  return shadowHulls.get(id)?.field ?? null;
 }
 
 /** Each loaded model's far traffic mesh (`buildFarGeometry`), built once as it loads. */

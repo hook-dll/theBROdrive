@@ -17,8 +17,8 @@ import * as THREE from 'three';
  *     world/props/instancebatch.ts `syncLod`).
  *  4. Lit surfaces take the face normal of their triangle and the sun's light in a few
  *     steps (render/lightshader.ts `installCleanStyle`).
- *  5. The near shadow cascade is read with one hardware tap, a crisp silhouette, in
- *     place of its soft nine (render/lightshader.ts `installSunShadowCascade`).
+ *  The near shadow cascade is read the same soft way in both styles: Clean once read it
+ *  with one hardware tap, and the owner saw a hard, stair-stepped car shadow (2026-10-16).
  *
  * NONE OF IT IS A PROGRAM VARIANT. Every part is GLSL that both styles compile — in
  * the shared chunks, installed before anything compiles, or in a patch a material
@@ -36,8 +36,9 @@ import * as THREE from 'three';
 
 /**
  * The lit programs' switches, `uniform vec3 cleanStyle`: x faceted normals and banded
- * sun, y crisp near shadow, z flat surfaces. Each is 0 or 1; they move together today
- * and are separate so a lab can look at one at a time.
+ * sun, z flat surfaces; y is unused since the near shadow is the same in both styles.
+ * Each is 0 or 1; they move together today and are separate so a lab can look at one
+ * at a time.
  */
 export const cleanStyle = { x: 0, y: 0, z: 0 };
 
@@ -64,7 +65,6 @@ export function setCleanStyle(on: boolean): void {
   cleanOn = on;
   const value = on ? 1 : 0;
   cleanStyle.x = value;
-  cleanStyle.y = value;
   cleanStyle.z = value;
   cleanCull.x = on ? frameHeightPx * 0.5 : 0;
 }

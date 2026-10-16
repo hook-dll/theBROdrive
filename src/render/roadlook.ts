@@ -55,6 +55,14 @@ const SEAM_JOINT_HALF = 0.03;
 const SEAM_JOINT_DARKEN = 0.35;
 /** Farthest a drift reaches onto the asphalt, metres. */
 export const ROAD_DRIFT_MAX_M = 0.4;
+/** The drift level's gain on its shape and its floor (`ROAD_DRIFT_GLSL`). */
+const DRIFT_LEVEL_GAIN = 2.2;
+const DRIFT_LEVEL_FLOOR = 1.6;
+/**
+ * Drift level the road's verge gains across its crushed-stone band, from the asphalt's
+ * edge to the band's outer edge (world/roadmesh.ts, THE EVERYDAY DRIFT ON THE VERGE).
+ */
+export const SHOULDER_DRIFT_FAN = 0.4;
 
 /** Per-vertex values that switch every feature off, for geometries that carry none. */
 export const ROAD_LOOK_DEFAULTS: Readonly<Record<string, readonly number[]>> = {
@@ -75,6 +83,42 @@ export type RoadLookPart = 'surface' | 'paint';
 
 const f = (v: number): string => v.toFixed(4);
 
+/**
+ * The drift's ragged edge along the road, `roadDriftLevel( along, phase, rough )`: sand
+ * lies on the asphalt's edge where it is above zero, reaching in by up to its value (to
+ * 1) of the row's drift reach. The road's verge (world/terrainmesh.ts) reads the same
+ * function at the same `along` (`s` less the chunk's tile start), so the sand on both is
+ * one drift.
+ *
+ * Every term repeats in ${ROAD_TILE_METRES} m, the tile, because 'along' is only
+ * continuous inside a chunk and differs between two chunks by whole tiles: three waves
+ * for the drift's body and two value noises, 25 and 8 cm, for its lip. `rough` scales
+ * the lip's terms (the fastest wave and both noises): 1 on the asphalt, less out on the
+ * verge, where the same drift lies in broader fans. The floor cuts it into tongues with
+ * bare edge between, not a sand-coloured kerb line: about a quarter of the edge carries
+ * one. It was -0.65 of a 1.8 gain, sand on some 70% of every edge, and the verge beside
+ * all of that has to be sand too (2026-10-16).
+ */
+export const ROAD_DRIFT_GLSL = /* glsl */ `
+float roadHash( float i ) {
+	return fract( sin( i * 127.1 ) * 43758.5453 );
+}
+float roadDriftNoise( float along, float perMetre, float phase ) {
+	float c = along * perMetre;
+	float i = floor( c );
+	float t = c - i;
+	t = t * t * ( 3.0 - 2.0 * t );
+	float cells = ${f(ROAD_TILE_METRES)} * perMetre;
+	return mix( roadHash( mod( i, cells ) + phase * 31.0 ), roadHash( mod( i + 1.0, cells ) + phase * 31.0 ), t );
+}
+float roadDriftLevel( float along, float phase, float rough ) {
+	float k = ${f((2 * Math.PI) / ROAD_TILE_METRES)};
+	float shape = 0.5 + 0.26 * sin( along * k * 3.0 + phase ) + 0.18 * sin( along * k * 8.0 + 2.3 * phase )
+		+ rough * ( 0.14 * sin( along * k * 19.0 + 4.1 * phase )
+		+ 0.36 * ( roadDriftNoise( along, 4.0, phase ) - 0.5 ) + 0.16 * ( roadDriftNoise( along, 12.0, phase + 0.5 ) - 0.5 ) );
+	return shape * ${f(DRIFT_LEVEL_GAIN)} - ${f(DRIFT_LEVEL_FLOOR)};
+}`;
+
 const VERTEX_PARS = (surface: boolean): string => `
 attribute vec4 aRoadEdge;
 attribute vec3 aRoadSand;
@@ -91,30 +135,9 @@ const FRAGMENT_PARS = (surface: boolean): string => `
 varying vec4 vRoadEdge;
 varying vec3 vRoadSand;
 ${surface ? 'varying vec3 vRoadCourse;\nuniform sampler2D roadDetail;' : ''}
+${ROAD_DRIFT_GLSL}
 float roadBand( float d, float halfWidth, float aa ) {
 	return 1.0 - smoothstep( halfWidth - ${f(TRACK_SOFT * 0.5)} - aa, halfWidth + ${f(TRACK_SOFT * 0.5)} + aa, abs( d ) );
-}
-float roadHash( float i ) {
-	return fract( sin( i * 127.1 ) * 43758.5453 );
-}
-// The drift's ragged edge along the road. Every term repeats in ${ROAD_TILE_METRES} m, the tile,
-// because 'along' is only continuous inside a chunk and differs between two chunks by
-// whole tiles: three waves for the drift's body and two value noises, 25 and 8 cm, for
-// its lip. The caller cuts it off below a floor, so it lies in tongues with bare edge
-// between, not as a sand-coloured kerb line.
-float roadDriftNoise( float along, float perMetre, float phase ) {
-	float c = along * perMetre;
-	float i = floor( c );
-	float t = c - i;
-	t = t * t * ( 3.0 - 2.0 * t );
-	float cells = ${f(ROAD_TILE_METRES)} * perMetre;
-	return mix( roadHash( mod( i, cells ) + phase * 31.0 ), roadHash( mod( i + 1.0, cells ) + phase * 31.0 ), t );
-}
-float roadDriftShape( float along, float phase ) {
-	float k = ${f((2 * Math.PI) / ROAD_TILE_METRES)};
-	return 0.5 + 0.26 * sin( along * k * 3.0 + phase ) + 0.18 * sin( along * k * 8.0 + 2.3 * phase )
-		+ 0.14 * sin( along * k * 19.0 + 4.1 * phase )
-		+ 0.36 * ( roadDriftNoise( along, 4.0, phase ) - 0.5 ) + 0.16 * ( roadDriftNoise( along, 12.0, phase + 0.5 ) - 0.5 );
 }`;
 
 const SURFACE_FRAGMENT = `
@@ -148,7 +171,7 @@ const SURFACE_FRAGMENT = `
 
 const DRIFT_FRAGMENT = `
 	float roadDriftPhase = vRoadEdge.y < 0.0 ? 1.7 : 4.3;
-	float roadReach = abs( vRoadEdge.y ) * clamp( roadDriftShape( vRoadEdge.w, roadDriftPhase ) * 1.8 - 0.65, 0.0, 1.0 );
+	float roadReach = abs( vRoadEdge.y ) * clamp( roadDriftLevel( vRoadEdge.w, roadDriftPhase, 1.0 ), 0.0, 1.0 );
 	float roadEdgeAa = fwidth( vRoadEdge.x ) + 0.012;
 	float roadSand = ( 1.0 - smoothstep( roadReach - roadEdgeAa, roadReach + roadEdgeAa, vRoadEdge.x ) ) * step( 0.005, roadReach );
 	diffuseColor.rgb = mix( diffuseColor.rgb, vRoadSand, roadSand );`;
@@ -181,6 +204,6 @@ export function applyRoadLook<T extends THREE.MeshStandardMaterial>(material: T,
       );
   };
   const previousKey = material.customProgramCacheKey;
-  material.customProgramCacheKey = () => `${previousKey.call(material)}:road-look-v1-${part}`;
+  material.customProgramCacheKey = () => `${previousKey.call(material)}:road-look-v2-${part}`;
   return material;
 }

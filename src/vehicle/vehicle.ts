@@ -64,6 +64,7 @@ import { Drivetrain, matchGearbox } from './drivetrain';
 import {
   STEERING_WHEEL_NODE,
   carModelFarGeometry,
+  carModelShadowHull,
   carModelMeasure,
   createCarModel,
   type CarMidInstance,
@@ -841,6 +842,12 @@ export class Vehicle implements Rebasable {
   private bodyGroup: THREE.Object3D | null = null;
   /** This car's paint, created with its visuals; see render/carsurface.ts. */
   private surface: CarBodySurface | null = null;
+  /**
+   * The body's shadow hull (render/carshadowhull.ts) under the root, casting while the
+   * car casts as itself; a car the far, mid or stand-in meshes draw casts it from the
+   * shadow-only field instead (`castHull`).
+   */
+  private shadowHull: THREE.Mesh | null = null;
   /**
    * `bodyGroup`'s scale AT REST, captured once in `buildVisuals`. `buildTemplate`
    * (render/carmodel.ts) bakes each model's own unit-correction factor into this
@@ -3739,6 +3746,7 @@ export class Vehicle implements Rebasable {
     // and a door that opens sends the car back near (`drawMid`) before it moves.
     if (drawnFar || drawnMid) {
       this.castNearShadows(true);
+      this.castHull(shadow);
       return;
     }
     // NEAR SHADOWS FROM THE FAR MESH. A shut near car's casters are nearly the far mesh:
@@ -3747,7 +3755,9 @@ export class Vehicle implements Rebasable {
     // replaces its own. Not inside the self-shadow line (SELF_SHADOW_ENTER_M), where the
     // sun's near cascade is sharp enough to tell them apart, and not with a door, lid or
     // pane off its stop, which the far mesh does not have: then the car casts itself.
-    this.castNearShadows(!(shadow !== null && !this.castsOwnShadow() && this.addStandIn(shadow)));
+    const standIn = shadow !== null && !this.castsOwnShadow() && this.addStandIn(shadow);
+    this.castNearShadows(!standIn);
+    this.castHull(standIn ? shadow : null);
 
     // Wheels are chassis-local, and interpolated between the last two steps exactly as
     // the chassis is (see `spinPrev`).
@@ -3854,6 +3864,17 @@ export class Vehicle implements Rebasable {
         this.shadowMuted.push(node);
       });
     }
+  }
+
+  /**
+   * Casts the shadow hull from `field` when one is given and takes it, else as this car's
+   * own hull mesh (hidden with the root when the car is drawn far).
+   */
+  private castHull(field: FarCarField | null): void {
+    const hull = this.shadowHull;
+    if (!hull) return;
+    const geometry = field ? carModelShadowHull(this.model.id) : null;
+    hull.visible = !(field && geometry && field.addCaster(geometry, this.rootGroup.position, this.rootGroup.quaternion));
   }
 
   /**
@@ -5852,6 +5873,9 @@ export class Vehicle implements Rebasable {
     this.midParts = instance.mid;
     if (instance.mid) this.rootGroup.add(instance.mid.paint);
     if (instance.mid?.glass) this.rootGroup.add(instance.mid.glass);
+    // Chassis-local like the mid parts; `castHull` decides each frame who casts it.
+    this.shadowHull = instance.shadowHull;
+    if (instance.shadowHull) this.rootGroup.add(instance.shadowHull);
 
     this.surface = instance.surface;
     this.surface.setCondition(this.localBodyDirt, this.localBodyScratches);
@@ -5890,6 +5914,7 @@ export class Vehicle implements Rebasable {
     // Its materials are the paint's and glass's, which the surface disposed; its geometry is the model's.
     this.midParts = null;
     this.midShown = false;
+    this.shadowHull = null;
     // The muted meshes leave with the tree; the next one casts until told otherwise.
     this.shadowMuted.length = 0;
     this.nearCasting = true;
