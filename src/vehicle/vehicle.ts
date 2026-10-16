@@ -4029,16 +4029,6 @@ export class Vehicle implements Rebasable {
     this.lamps.syncProjectedLights(rig, group, gain, shadowed);
   }
 
-  /** Headlamps this car would lay in the road for an eye at `eye` (vehiclelamps.ts). */
-  wetGlareLamps(eye: THREE.Vector3): number {
-    return this.lamps.wetGlareLamps(eye);
-  }
-
-  /** Offers the lit headlamps to the road's reflection streaks, scaled by `share`. */
-  offerWetGlare(share: number): void {
-    this.lamps.offerWetGlare(share);
-  }
-
   /**
    * Offers this car's tyres to the shared contact-patch field, one per grounded wheel.
    *

@@ -19,9 +19,9 @@
  * triangles and draw calls Medium drew — 2.1 million and 400-800 — and saved only on
  * pixels, the sun's shadow and lamp slots; the ground cover alone was 1.7 million of
  * those triangles. So the build is chosen by a PROFILE, not by the rung, from the rung
- * and `Settings.grass`: `full` (grass Full, the default on Medium and High), `light`
- * (grass Light: the light ground cover, plants and coarse open desert; the default on
- * Low), `bare` (grass Off: `light` with no ground cover at all), and `retro`, which keeps
+ * and `Settings.groundCover`: `full` (grass Full), `light` (grass Light: the light ground
+ * cover, plants and coarse open desert), `bare` (grass Off, the default: `light` with no
+ * ground cover at all), and `retro`, which keeps
  * the light cover and adds this rung's own look (the cheap specular, the dither, the
  * one-pixel wires) whatever the grass setting. Crossing between profiles reloads the drive.
  */
@@ -78,27 +78,6 @@ export function installBuildProfile(quality: GraphicsQuality, grass: GrassMode):
 }
 
 /**
- * A Blinn-Phong lobe named `name`, in place of Three's multiscatter GGX: roughness goes
- * to an exponent through the GGX alpha, 2 / alpha^2 - 2. The physical program does not
- * include the Blinn-Phong chunk, so the lobe is written out here. Shared with the ground
- * light (render/groundlight.ts), which uses it for the road's wet glint.
- */
-export function blinnPhongLobeGlsl(name: string): string {
-  return `vec3 ${name}( const in vec3 lightDir, const in vec3 viewDir, const in vec3 normal, const in PhysicalMaterial material ) {
-	vec3 halfDir = normalize( lightDir + viewDir );
-	float dotNH = saturate( dot( normal, halfDir ) );
-	float dotVH = saturate( dot( viewDir, halfDir ) );
-	float alpha = max( pow2( material.roughness ), 0.02 );
-	// Never below 1: rough matt surfaces reach 0, and pow( 0.0, 0.0 ) is undefined in GLSL.
-	float shininess = clamp( 2.0 / pow2( alpha ) - 2.0, 1.0, 2048.0 );
-	vec3 F = F_Schlick( material.specularColorBlended, material.specularF90, dotVH );
-	return F * ( 0.25 * RECIPROCAL_PI * ( shininess * 0.5 + 1.0 ) * pow( dotNH, shininess ) );
-}
-
-`;
-}
-
-/**
  * Blinn-Phong in place of multiscatter GGX for every direct light, in every lit material.
  *
  * Three's physical direct term evaluates the full GGX lobe AND two lookups into the DFG
@@ -116,7 +95,20 @@ function installCheapSpecular(): void {
   if (!chunk.includes(direct) || !chunk.includes(entry)) {
     throw new Error('Three physical direct-light shader layout changed');
   }
-  const lobe = blinnPhongLobeGlsl('retroSpecular');
+  // The physical program does not include the Blinn-Phong chunk, so the lobe is here.
+  // Roughness goes to an exponent through the GGX alpha, 2 / alpha^2 - 2.
+  const lobe = `vec3 retroSpecular( const in vec3 lightDir, const in vec3 viewDir, const in vec3 normal, const in PhysicalMaterial material ) {
+	vec3 halfDir = normalize( lightDir + viewDir );
+	float dotNH = saturate( dot( normal, halfDir ) );
+	float dotVH = saturate( dot( viewDir, halfDir ) );
+	float alpha = max( pow2( material.roughness ), 0.02 );
+	// Never below 1: rough matt surfaces reach 0, and pow( 0.0, 0.0 ) is undefined in GLSL.
+	float shininess = clamp( 2.0 / pow2( alpha ) - 2.0, 1.0, 2048.0 );
+	vec3 F = F_Schlick( material.specularColorBlended, material.specularF90, dotVH );
+	return F * ( 0.25 * RECIPROCAL_PI * ( shininess * 0.5 + 1.0 ) * pow( dotNH, shininess ) );
+}
+
+`;
   THREE.ShaderChunk.lights_physical_pars_fragment = chunk
     .replace(entry, lobe + entry)
     .replace(

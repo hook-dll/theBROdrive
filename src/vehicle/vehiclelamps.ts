@@ -11,7 +11,6 @@
 import * as THREE from 'three';
 import type { CarState, GameWorld } from '../game/state';
 import type { VehicleLightRig } from '../render/vehiclelights';
-import { addWetGlare } from '../render/cloudshadow';
 
 /**
  * A vehicle's lamps as the light pool sees them: each group is lit or dark as a
@@ -521,45 +520,6 @@ export class VehicleLamps {
     }
     for (const mount of mounts) {
       this.projectBeam(rig, mount, color, intensity * gain, shape, distanceScale, mount === shadowMount);
-    }
-  }
-
-  /**
-   * Headlamps this car would lay in the road for an eye at `eye` (scene space): both,
-   * or none while they are off or point away from it. A lamp aimed away draws no
-   * streak at all (the shader's `aim`), so it must not hold one of the few streaks the
-   * road can draw while an oncoming car waits for it.
-   */
-  wetGlareLamps(eye: THREE.Vector3): number {
-    if (this.headlightMode === 'off' || !(this.headlightEnvironmentFactor > 0)) return 0;
-    const root = this.ctx.rootGroup;
-    const forward = this.projectedLightTarget.set(0, 0, 1).applyQuaternion(root.quaternion);
-    const facing = forward.x * (eye.x - root.position.x) + forward.z * (eye.z - root.position.z);
-    return facing > 0 ? this.headlightMounts.length : 0;
-  }
-
-  /**
-   * Offers the lit headlamps to the road's reflection streaks (`render/cloudshadow.ts`),
-   * scaled by `share`, this car's hold on the streak list. Not range-faded like the
-   * projected beams: the streak of a lamp in the road is seen as far as the lamp is.
-   */
-  offerWetGlare(share: number): void {
-    if (this.headlightMode === 'off') return;
-    const strength =
-      (this.headlightMode === 'high' ? 1.4 : 1) *
-      this.headlightEnvironmentFactor *
-      this.beamThroughGrime *
-      share;
-    if (!(strength > 0)) return;
-    const q = this.ctx.rootGroup.quaternion;
-    for (const mount of this.headlightMounts) {
-      const source = this.projectedLightSource.copy(mount.sourceLocal).applyQuaternion(q).add(this.ctx.rootGroup.position);
-      const forward = this.projectedLightTarget
-        .copy(mount.aimLocal)
-        .sub(mount.sourceLocal)
-        .applyQuaternion(q)
-        .normalize();
-      addWetGlare(source, forward, strength);
     }
   }
 

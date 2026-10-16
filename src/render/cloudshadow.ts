@@ -363,27 +363,6 @@ export function cloudShadowFactorFromPan(
 // ---------------------------------------------------------------------------
 
 /**
- * Lamps whose reflection a wet road draws, at most: three cars' headlamp pairs.
- *
- * WHY NOT THE SPOTLIGHTS. A spotlight's glint is the GGX lobe of its own pool of light,
- * and two things about that pool make it the wrong carrier for the reflection. It is
- * faded out between 60 and 130 m for every car but the driven one (`ambientBeamGain`),
- * so an oncoming car's reflection only arrived when it was nearly alongside; and a
- * rough lobe round the mirror point reads as a blob sunk under the surface. So each
- * lamp is drawn here directly, visible from as far as the lamp is, as a band LYING ON
- * THE ROAD: from the ground under the lamp towards the ground under the eye, measured
- * in metres on the fragment's own plane, narrow at the lamp and widening as it comes
- * over. A screen-space mirror streak was tried first; being one screen width top to
- * bottom, it read as a pillar of light standing down into the ground. Road deck only
- * (`WET_SHEEN`), dimmer and broader while dry, a uniform-bounded loop.
- *
- * The list is handed out by a `FadingSlotPool` in main.ts, to lamps that face the eye,
- * nearest first, so a streak fades over when a nearer car takes its place instead of
- * vanishing in one frame.
- */
-export const WET_GLARE_MAX = 6;
-
-/**
  * Written once and shared by every ground material. The literals come from the
  * constants above rather than being retyped, because the CPU twin and the shader
  * disagreeing about a lattice spacing is a bug nobody would find by looking.
@@ -460,11 +439,6 @@ varying float vCloudShade;
 varying float vWetMask;
 uniform float uCloudStrength;
 uniform float uWet;
-#ifdef WET_SHEEN
-uniform int uGlareCount;
-uniform vec4 uGlarePos[ ${WET_GLARE_MAX} ];
-uniform vec3 uGlareDir[ ${WET_GLARE_MAX} ];
-#endif
 `;
 
 /**
@@ -525,14 +499,10 @@ const CLOUD_VERTEX_HOOK = /* glsl */ `#include <worldpos_vertex>
  * uniform, so the branch is coherent across every fragment in the draw.
  */
 /**
- * A DRY road shows other cars' headlamps too — the long soft sheen oncoming lights
- * lay on night asphalt — at this share of the wet streak's strength and this many
- * times its width. Dimmer than wet, as rough aggregate should be: at 2.2 it was
- * brighter, and every oncoming car laid a burnt-white bar up the road at you.
+ * Wet ground only darkens. The road used to go glossy and mirror the horizon, and every
+ * oncoming headlamp laid a streak along it, wet or dry; the owner (2026-10-16) wanted
+ * none of it: desert asphalt is matt, and after rain it dries in minutes.
  */
-const DRY_GLARE_SHARE = 0.85;
-const DRY_GLARE_SPREAD = 1.5;
-
 const CLOUD_FRAGMENT_HOOK = /* glsl */ `
 	if ( uCloudStrength > 0.0 ) {
 		outgoingLight *= 1.0 - vCloudShade * uCloudStrength;
@@ -541,71 +511,11 @@ const CLOUD_FRAGMENT_HOOK = /* glsl */ `
 		// Water darkens anything porous by filling the air gaps that scattered light
 		// back out: damp sand and wet asphalt both lose about a third of their light.
 		outgoingLight *= 1.0 - 0.36 * vWetMask;
-		#if defined( WET_SHEEN ) && defined( USE_FOG )
-		// A wet road is a dim mirror at grazing angles: what it shows ahead is the sky
-		// at the horizon, which is the fog colour. Schlick's Fresnel on the shaded
-		// normal, so the aggregate's relief still breaks the sheen up.
-		float wetNdv = clamp( dot( normal, normalize( vViewPosition ) ), 0.0, 1.0 );
-		float wetFresnel = 0.03 + 0.97 * pow( 1.0 - wetNdv, 5.0 );
-		outgoingLight = mix( outgoingLight, fogColor * 1.08, wetFresnel * vWetMask * 0.9 );
-		#endif
 	}
-	#ifdef WET_SHEEN
-	// Other cars' headlamps in the road: a band of light LYING ON THE ROAD, from the
-	// ground under each lamp towards the ground under the eye. See WET_GLARE_MAX for
-	// why this is not left to the spotlights' own specular. Dry asphalt shows it too,
-	// dimmer and broader (its aggregate is a rough mirror at grazing angles); water
-	// sharpens and brightens it.
-	if ( uGlareCount > 0 ) {
-		float glareWet = uWet > 0.0 ? vWetMask : 0.0;
-		float glareNdv = clamp( dot( normal, normalize( vViewPosition ) ), 0.0, 1.0 );
-		float glareFresnel = 0.03 + 0.97 * pow( 1.0 - glareNdv, 5.0 );
-		float glareSpread = mix( ${DRY_GLARE_SPREAD.toFixed(2)}, 1.0, glareWet );
-		float glareGain = mix( ${DRY_GLARE_SHARE.toFixed(2)}, 1.0, glareWet );
-		vec3 glare = vec3( 0.0 );
-			vec3 gP = - vViewPosition;
-			vec3 gN = nonPerturbedNormal;
-			// The eye dropped onto this fragment's plane.
-			vec3 eyeGround = gN * dot( gP, gN );
-			for ( int i = 0; i < ${WET_GLARE_MAX}; i ++ ) {
-				if ( i >= uGlareCount ) break;
-				vec3 lamp = ( viewMatrix * vec4( uGlarePos[ i ].xyz, 1.0 ) ).xyz;
-				vec3 lampGround = lamp - gN * dot( lamp - gP, gN );
-				vec3 path = eyeGround - lampGround;
-				float pathLen = length( path );
-				if ( pathLen < 1.0 ) continue;
-				vec3 pathDir = path / pathLen;
-				// Metres along the band from the lamp, and metres across it, both
-				// measured on the road: the band keeps the asphalt's perspective.
-				vec3 fromLamp = gP - lampGround;
-				float along = dot( fromLamp, pathDir );
-				float across = length( fromLamp - along * pathDir );
-				// Narrow at the lamp, spreading as it comes towards the eye.
-				float halfWidth = ( 0.16 + 0.012 * max( along, 0.0 ) ) * glareSpread;
-				float band = exp( - across * across / ( halfWidth * halfWidth ) );
-				// Starts at the lamp, brightest there, and fades out on the way over.
-				band *= smoothstep( - 0.6, 0.8, along ) * exp( - max( along, 0.0 ) / ( 8.0 + pathLen * 0.35 ) );
-				band *= 1.0 - smoothstep( pathLen * 0.85, pathLen, along );
-				// A headlamp throws its light forward: nothing off the back of the car.
-				vec3 lampFwd = ( viewMatrix * vec4( uGlareDir[ i ], 0.0 ) ).xyz;
-				float aim = smoothstep( 0.0, 0.6, dot( normalize( lampFwd - gN * dot( lampFwd, gN ) ), pathDir ) );
-				glare += band * aim * uGlarePos[ i ].w / ( 1.0 + pathLen / 80.0 );
-			}
-		// Saturating, not added flat: the scene pass has no tone-mapping shoulder, so a
-		// streak summed past 1 clipped to a white bar. x / (1 + x) keeps a faint sheen
-		// linear and rolls a strong one off below paper white.
-		vec3 glareLevel = glare * glareFresnel * glareGain;
-		outgoingLight += vec3( 1.0, 0.93, 0.8 ) * ( glareLevel / ( 1.0 + glareLevel ) );
-	}
-	#endif
 #include <opaque_fragment>`;
 
-/** A wet road also goes glossy: the sun and headlamps draw a glint along it. */
-const WET_ROUGHNESS_HOOK = /* glsl */ `#include <roughnessmap_fragment>
-	roughnessFactor = mix( roughnessFactor, 0.34, uWet * vWetMask );`;
-
 /** Suffix, so a patched material never shares a program with an unpatched one. */
-const CLOUD_PROGRAM_KEY = 'cloud-shadow-v3';
+const CLOUD_PROGRAM_KEY = 'cloud-shadow-v4';
 
 /**
  * ONE uniform block for the whole world. Every patched material is bound to these
@@ -621,26 +531,19 @@ const uniforms = {
   uWet: { value: 0 },
   /** The rebase origin reduced into one wet-patch period: puddles stay put on a rebase. */
   uGroundPan: { value: new THREE.Vector2() },
-  /** Wet-road glare lamps: scene-space position and strength, and forward (see WET_GLARE_MAX). */
-  uGlareCount: { value: 0 },
-  uGlarePos: { value: Array.from({ length: WET_GLARE_MAX }, () => new THREE.Vector4()) },
-  uGlareDir: { value: Array.from({ length: WET_GLARE_MAX }, () => new THREE.Vector3(0, 0, 1)) },
 };
 
 /** Materials already carrying the injection, so a second call cannot double it. */
 const injected = new WeakSet<THREE.Material>();
 
-function patchCloudShader(shader: WebGLProgramParametersWithUniforms, sheen: boolean): void {
+function patchCloudShader(shader: WebGLProgramParametersWithUniforms): void {
   for (const [name, uniform] of Object.entries(uniforms)) shader.uniforms[name] = uniform;
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', `#include <common>\n${CLOUD_VERTEX_PARS}`)
     .replace('#include <worldpos_vertex>', CLOUD_VERTEX_HOOK);
   shader.fragmentShader = shader.fragmentShader
-    .replace('#include <common>', `#include <common>\n${sheen ? '#define WET_SHEEN\n' : ''}${CLOUD_FRAGMENT_PARS}`)
+    .replace('#include <common>', `#include <common>\n${CLOUD_FRAGMENT_PARS}`)
     .replace('#include <opaque_fragment>', CLOUD_FRAGMENT_HOOK);
-  if (sheen) {
-    shader.fragmentShader = shader.fragmentShader.replace('#include <roughnessmap_fragment>', WET_ROUGHNESS_HOOK);
-  }
 }
 
 /**
@@ -656,22 +559,17 @@ function patchCloudShader(shader: WebGLProgramParametersWithUniforms, sheen: boo
  * has to be a no-op rather than a second copy of the GLSL (which would not compile:
  * `vCloudShade` would be declared twice).
  */
-export function applyCloudShadow(
-  material: THREE.MeshStandardMaterial,
-  options: { wetSheen?: boolean } = {},
-): THREE.MeshStandardMaterial {
+export function applyCloudShadow(material: THREE.MeshStandardMaterial): THREE.MeshStandardMaterial {
   if (injected.has(material)) return material;
   injected.add(material);
-  const sheen = options.wetSheen === true;
 
   const previousCompile = material.onBeforeCompile;
   material.onBeforeCompile = (shader, renderer) => {
     previousCompile.call(material, shader, renderer);
-    patchCloudShader(shader, sheen);
+    patchCloudShader(shader);
   };
   const previousKey = material.customProgramCacheKey;
-  material.customProgramCacheKey = () =>
-    `${previousKey.call(material)}:${CLOUD_PROGRAM_KEY}${sheen ? ':wet-sheen' : ''}`;
+  material.customProgramCacheKey = () => `${previousKey.call(material)}:${CLOUD_PROGRAM_KEY}`;
   return material;
 }
 
@@ -749,24 +647,3 @@ export function cloudShadowFrame(): {
     detail: uniforms.uCloudDetail.value,
   };
 }
-
-/** Starts the frame's wet-road glare list (see WET_GLARE_MAX). */
-export function beginWetGlare(): void {
-  uniforms.uGlareCount.value = 0;
-}
-
-/**
- * Adds one lit headlamp: its scene-space position, the way it points, and a strength
- * (1 for a dipped beam). Refused silently once the list is full, so the caller offers
- * nearest first.
- */
-export function addWetGlare(position: THREE.Vector3, forward: THREE.Vector3, strength: number): void {
-  const n = uniforms.uGlareCount.value;
-  if (n >= WET_GLARE_MAX || !(strength > 0)) return;
-  uniforms.uGlarePos.value[n].set(position.x, position.y, position.z, strength * WET_GLARE_GAIN);
-  uniforms.uGlareDir.value[n].copy(forward);
-  uniforms.uGlareCount.value = n + 1;
-}
-
-/** Peak linear radiance a streak adds before Fresnel, per unit lamp strength. */
-const WET_GLARE_GAIN = 2.5;

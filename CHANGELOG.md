@@ -911,6 +911,20 @@
 
 ### Changed
 
+- GRASS IS THE PLAYER'S, AND OFF (`Settings.groundCover`, `game/settings.ts`). Ground cover
+  starts Off on every rung and no preset, launch measurement or phone default changes it;
+  only the Grass row does. Stored under the new key `groundCover`, so every value the
+  presets wrote as `grass` is dropped and starts Off (a player who had picked one by hand
+  picks it again). `grassDefault` is gone.
+- QUALITY ROWS RUN CHEAPEST TO DEAREST, LEFT TO RIGHT: Antialiasing Off / FXAA, Grass
+  Off / Light / Full, Style Clean / Standard (`ui/menu.ts`).
+- NOTHING ON THE ROAD REFLECTS (owner: desert asphalt is matt and dries in minutes). Gone:
+  the road's and markings' Blinn-Phong glint (`groundlight.ts` `specular`), the wet road's
+  gloss and its Fresnel mirror of the horizon (`cloudshadow.ts` `WET_SHEEN`,
+  `WET_ROUGHNESS_HOOK`), and every headlamp streak laid on the road, wet or dry
+  (`WET_GLARE_MAX`, `addWetGlare`, the glare pool in `main.ts`, `Vehicle.offerWetGlare`).
+  Wet ground still darkens by a third in patches as it did.
+
 - THE ROAD READS AGAINST THE DESERT (owner, 2026-10-16, against the old title screen:
   near-black asphalt, black tar snakes, a dark gravel shoulder, orange sand). Five parts:
   - VALUE. The asphalt was a flat 0.27 linear albedo, concrete's. It is now an aged mat at

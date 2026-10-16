@@ -314,11 +314,6 @@ export type GrassMode = 'full' | 'light' | 'off';
 
 export const GRASS_MODES: readonly GrassMode[] = ['full', 'light', 'off'];
 
-/** Default for `Settings.grass` at a rung: the build each rung always had. */
-export function grassDefault(quality: GraphicsQuality): GrassMode {
-  return quality === 'standard' || quality === 'blessing' ? 'full' : 'light';
-}
-
 /**
  * The picture's art direction (render/cleanstyle.ts). Standard is the game as tuned;
  * Clean is calm and temporally stable: a flat road, no film grain, no specks of
@@ -565,8 +560,14 @@ export interface Settings {
   /**
    * Ground cover, plants and open desert built into the world (`GrassMode`, render/
    * retro.ts build profile). Fixed for a load, so changing it reloads the drive.
+   *
+   * THE PLAYER'S ALONE: Off until he picks otherwise in the Grass row, on every rung, and
+   * no preset, launch measurement or phone default writes it (owner, 2026-10-16). Stored
+   * as `groundCover`, not the `grass` it was called while the presets owned it: every
+   * stored `grass` was the presets' choice as often as the player's, and dropping it is
+   * how they all start Off.
    */
-  grass: GrassMode;
+  groundCover: GrassMode;
   /** Art direction (`VisualStyle`); uniforms only, so it applies in place mid-drive. */
   style: VisualStyle;
   /**
@@ -706,7 +707,7 @@ export const DEFAULT_SETTINGS: Settings = {
   retroLines: 360,
   fxaa: true,
   shadows: 'full',
-  grass: 'full',
+  groundCover: 'off',
   style: 'standard',
   // Uncapped by default on every device, phones included: a cap is the player's choice
   // to make (heat, noise), not a default to discover.
@@ -770,7 +771,6 @@ export function withQualityPreset(
     retroLines: 360,
     fxaa: GRAPHICS_TIERS[quality].fxaa,
     shadows: shadowModeDefault(quality),
-    grass: grassDefault(quality),
     style: 'standard',
     frameRateLimit: null,
   };
@@ -787,7 +787,6 @@ export function qualityPresetOf(settings: Settings, mobilePresentation: boolean)
     && settings.trafficDensity === preset
     && settings.fxaa === GRAPHICS_TIERS[settings.graphicsQuality].fxaa
     && settings.shadows === shadowModeDefault(settings.graphicsQuality)
-    && settings.grass === grassDefault(settings.graphicsQuality)
     && settings.style === 'standard'
     && settings.frameRateLimit === null
     && (settings.graphicsQuality === 'retro'
@@ -820,7 +819,6 @@ export const PHONE_FIRST_LAUNCH = {
   graphicsQualitySource: 'device',
   fxaa: false,
   shadows: 'off',
-  grass: 'light',
   renderHeight: GRAPHICS_TIERS.acceptable.mobileRenderHeight,
   viewDistance: 'very_low',
   trafficDensity: 'very_low',
@@ -979,10 +977,10 @@ export function sanitizeSettings(raw: unknown, mobilePresentation: boolean): Set
       obj.shadows === 'off' || obj.shadows === 'near' || obj.shadows === 'full'
         ? obj.shadows
         : shadowModeDefault(graphicsQuality),
-    // The two-state switch it replaced stored true for Full and false for Light.
-    grass: (GRASS_MODES as readonly unknown[]).includes(obj.grass)
-      ? (obj.grass as GrassMode)
-      : obj.grass === true ? 'full' : obj.grass === false ? 'light' : grassDefault(graphicsQuality),
+    // Only the key the player's own choice is stored under; see `Settings.groundCover`.
+    groundCover: (GRASS_MODES as readonly unknown[]).includes(obj.groundCover)
+      ? (obj.groundCover as GrassMode)
+      : 'off',
     // Missing means a save from before the option, which drew Standard.
     style: obj.style === 'clean' ? 'clean' : 'standard',
     // Snap to an offered rate rather than clamping, so a hand-edited 31 or 999 cannot

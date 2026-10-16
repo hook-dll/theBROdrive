@@ -41,7 +41,6 @@ import {
   QUALITY_PRESET_DETAIL,
   RENDER_HEIGHTS,
   TRAFFIC_CAPS,
-  grassDefault,
   qualityPresetOf,
   shadowModeDefault,
   shadowModeFor,
@@ -126,8 +125,8 @@ const RESOLUTION_NOTES: Record<RenderHeight, string> = {
  * on claiming it after the player picked another.
  *
  * Shadows and grass are the player's own rows, so they are passed in as the settings that
- * picking this rung would leave: the rung's defaults from a preset, the current choice
- * from the Detail row.
+ * picking this rung would leave: the rung's default shadows from a preset, the current
+ * choice from the Detail row, and the player's grass either way (no preset touches it).
  */
 function describeTier(
   quality: GraphicsQuality,
@@ -1328,7 +1327,7 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
    */
   const reloadsFor = (quality: GraphicsQuality, grass: GrassMode): boolean =>
     inDrive
-    && buildProfileFor(quality, grass) !== buildProfileFor(settings.graphicsQuality, settings.grass);
+    && buildProfileFor(quality, grass) !== buildProfileFor(settings.graphicsQuality, settings.groundCover);
 
   /**
    * Quality is drawn from its values every time one of them changes, because they depend
@@ -1416,10 +1415,10 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
         + (quality === 'retro'
           ? 'For weak mini-PCs and old laptops: the world drawn at about 360 lines as crisp '
             + 'square pixels, like a late-90s game, with lighter ground cover and no sun shadows.'
-            + (reloadsFor('retro', grassDefault('retro'))
+            + (reloadsFor('retro', settings.groundCover)
               ? ' Switching to it or away from it saves the drive and reloads it.'
               : '')
-          : describeTier(quality, shadowModeDefault(quality), grassDefault(quality), mobilePresentation, inDrive))
+          : describeTier(quality, shadowModeDefault(quality), settings.groundCover, mobilePresentation, inDrive))
       );
     };
 
@@ -1495,14 +1494,14 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
             + '(540 under Resolution) and shown as crisp square pixels, like a late-90s '
             + 'game, with lighter ground cover and '
             + `${SUN_SHADOWS_TEXT[shadowModeFor(settings.shadows, 'retro', mobilePresentation)].toLowerCase()}. `
-            + (reloadsFor('retro', settings.grass) ? 'Switching to it or away from it saves the drive and reloads it.' : ''),
+            + (reloadsFor('retro', settings.groundCover) ? 'Switching to it or away from it saves the drive and reloads it.' : ''),
           active: () => settings.graphicsQuality === 'retro',
           pick: () => pickDetail('retro'),
         },
         ...(['acceptable', 'standard', 'blessing'] as const).map((quality, index) => ({
           label: ['Low', 'Medium', 'High'][index]!,
           icon: ['gfx1', 'gfx2', 'gfx3'][index]!,
-          hint: describeTier(quality, settings.shadows, settings.grass, mobilePresentation, inDrive),
+          hint: describeTier(quality, settings.shadows, settings.groundCover, mobilePresentation, inDrive),
           active: () => settings.graphicsQuality === quality,
           pick: () => pickDetail(quality),
         })),
@@ -1645,18 +1644,9 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           },
         },
       ]),
-      // FXAA in the post pass. Not on Very Low: its square pixels are the look.
+      // FXAA in the post pass. Not on Very Low: its square pixels are the look. Every row
+      // runs from the cheapest choice on the left to the dearest on the right.
       ...(settings.graphicsQuality === 'retro' ? [] : [segmented('Antialiasing', [
-        {
-          label: 'FXAA',
-          icon: 'gfx3',
-          hint: 'Smooths the jagged steps along edges in the finished picture. Costs little; fine texture softens a touch.',
-          active: () => settings.fxaa,
-          pick: () => {
-            settings.fxaa = true;
-            changed();
-          },
-        },
         {
           label: 'Off',
           icon: 'gfx1',
@@ -1664,6 +1654,16 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           active: () => !settings.fxaa,
           pick: () => {
             settings.fxaa = false;
+            changed();
+          },
+        },
+        {
+          label: 'FXAA',
+          icon: 'gfx3',
+          hint: 'Smooths the jagged steps along edges in the finished picture. Costs little; fine texture softens a touch.',
+          active: () => settings.fxaa,
+          pick: () => {
+            settings.fxaa = true;
             changed();
           },
         },
@@ -1702,13 +1702,14 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           },
         },
       ]),
-      // Ground cover and plants. Not on Very Low, whose own light build is fixed.
+      // Ground cover and plants. Not on Very Low, whose own light build is fixed. Off
+      // until the player picks otherwise; no preset changes it (`Settings.groundCover`).
       ...(settings.graphicsQuality === 'retro' ? [] : [segmented('Grass', [
         {
-          label: 'Full',
-          icon: 'gfx3',
-          hint: 'Full ground cover, grass and plants, and the fine open desert. Over twice the triangles.',
-          mode: 'full' as const,
+          label: 'Off',
+          icon: 'gfx1',
+          hint: 'No tufts, bushes or rosettes at all, lighter plants and a coarser open desert.',
+          mode: 'off' as const,
         },
         {
           label: 'Light',
@@ -1717,34 +1718,34 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           mode: 'light' as const,
         },
         {
-          label: 'Off',
-          icon: 'gfx1',
-          hint: 'No tufts, bushes or rosettes at all, lighter plants and a coarser open desert.',
-          mode: 'off' as const,
+          label: 'Full',
+          icon: 'gfx3',
+          hint: 'Full ground cover, grass and plants, and the fine open desert. Over twice the triangles.',
+          mode: 'full' as const,
         },
       ].map(({ mode, hint, ...option }) => ({
         ...option,
         hint: hint + (inDrive ? ' Changing it saves the drive and reloads it.' : ''),
-        active: () => settings.grass === mode,
+        active: () => settings.groundCover === mode,
         pick: () => {
-          settings.grass = mode;
+          settings.groundCover = mode;
           changed();
         },
       })))]),
       // Art direction, on every rung: uniforms only, so it changes in place mid-drive.
       segmented('Style', [
         {
-          label: 'Standard',
-          icon: 'gfx3',
-          hint: 'The game as tuned: textured asphalt, film grain, smooth shading and soft shadows.',
-          style: 'standard' as const,
-        },
-        {
           label: 'Clean',
           icon: 'gfx1',
           hint: 'Calm and steady: flat asphalt, no film grain, no specks of scatter, faceted shapes '
             + 'in a few steps of light, crisp shadows near the car. Easier on tired eyes. Costs nothing.',
           style: 'clean' as const,
+        },
+        {
+          label: 'Standard',
+          icon: 'gfx3',
+          hint: 'The game as tuned: textured asphalt, film grain, smooth shading and soft shadows.',
+          style: 'standard' as const,
         },
       ].map(({ style, ...option }) => ({
         ...option,
@@ -2486,7 +2487,7 @@ export class MainMenu {
         retroLines: base.retroLines,
         fxaa: base.fxaa,
         shadows: base.shadows,
-        grass: base.grass,
+        groundCover: base.groundCover,
         style: base.style,
         frameRateLimit: base.frameRateLimit,
         mirrorFrameRate: base.mirrorFrameRate,
@@ -2521,7 +2522,7 @@ export class MainMenu {
           retroLines: settings.retroLines,
           fxaa: settings.fxaa,
           shadows: settings.shadows,
-          grass: settings.grass,
+          groundCover: settings.groundCover,
           style: settings.style,
           frameRateLimit: settings.frameRateLimit,
           mirrorFrameRate: settings.mirrorFrameRate,

@@ -12,7 +12,6 @@ import type { GameLoop } from '../core/loop';
 import type { Renderer } from '../core/renderer';
 import {
   GRAPHICS_TIERS,
-  grassDefault,
   shadowModeDefault,
   presentationFpsFor,
   qualityPresetForDetail,
@@ -254,7 +253,6 @@ export async function warmUpBoot(ctx: BootWarmupContext): Promise<void> {
           graphicsQuality: tier,
           fxaa: GRAPHICS_TIERS[tier].fxaa,
           shadows: shadowModeDefault(tier),
-          grass: grassDefault(tier),
         };
       ctx.world.apply({ t: 'settings', settings });
       ctx.renderer.setFxaa(settings.fxaa);

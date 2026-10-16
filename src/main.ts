@@ -110,7 +110,7 @@ import { WorldOrigin } from './world/origin';
 import { HazardIndex } from './world/hazards';
 import { PLAYER_FIELD_ID, RoadTraffic } from './world/traffic';
 import { Autopilot } from './vehicle/autopilot';
-import { advanceCloudShadows, beginWetGlare, WET_GLARE_MAX } from './render/cloudshadow';
+import { advanceCloudShadows } from './render/cloudshadow';
 import { advanceDesertGlitter, setDesertGroundArclength } from './world/terrainmesh';
 import { HeatHaze } from './render/heathaze';
 import { WeatherParticles } from './render/weatherparticles';
@@ -307,7 +307,7 @@ async function boot(): Promise<void> {
   // Before anything is built: the build profile (render/retro.ts), from the rung and the
   // grass setting, decides the ground cover, the plants, the open desert and, on Very
   // Low, the finishing pass, and all of them are baked for the page's lifetime.
-  installBuildProfile(world.state.settings.graphicsQuality, world.state.settings.grass);
+  installBuildProfile(world.state.settings.graphicsQuality, world.state.settings.groundCover);
   /** A switch across build profiles has started its save-and-reload. */
   let profileReloading = false;
 
@@ -379,7 +379,6 @@ async function boot(): Promise<void> {
   // Who holds the rig's spotlights, and the road's headlamp streaks, frame to frame:
   // a slot is handed over by fading, never reassigned in one frame (render/slotpool.ts).
   const beamPool = new FadingSlotPool(vehicleLights.lightCount, LAMP_HANDOVER_S);
-  const glarePool = new FadingSlotPool(WET_GLARE_MAX, LAMP_HANDOVER_S);
   // Contact shadows are not a night effect and are not gated on the light rig: they are
   // the only thing on screen that reports what each tyre is carrying, they are the one
   // shadow source that survives the cheapest graphics tier, and they cost one draw call.
@@ -726,7 +725,7 @@ async function boot(): Promise<void> {
             + `dpr ${window.devicePixelRatio.toFixed(2)}`,
           `presenting ${framesPerSecond}, shadows `
             + `${shadowModeFor(s.shadows, s.graphicsQuality, mobilePresentation)}, `
-            + `grass ${s.grass}, fxaa ${s.fxaa ? 'on' : 'off'}, style ${s.style}`,
+            + `grass ${s.groundCover}, fxaa ${s.fxaa ? 'on' : 'off'}, style ${s.style}`,
           gpuLine,
           `simulation fixed at ${simulationHz} Hz`,
           `light slots ${spotSlots} spot per lit fragment, stars to magnitude ${stars}`,
@@ -2462,20 +2461,6 @@ async function boot(): Promise<void> {
     }
     vehicleLights.endFrame();
 
-    // Their headlamps in the road, nearest first, through the same kind of handover.
-    // Not the driven car's own: from behind it, its lamps' mirror image lies under its
-    // own bonnet. Nor any lamp pointing away from the eye, which draws no streak.
-    glarePool.begin();
-    for (const vehicle of litVehicles) {
-      if (vehicle !== driving) glarePool.request(vehicle, 0, vehicle.wetGlareLamps(cam), false);
-    }
-    glarePool.resolve(frameDt);
-    beginWetGlare();
-    for (const vehicle of litVehicles) {
-      const share = glarePool.share(vehicle, 0);
-      if (share > 0) vehicle.offerWetGlare(share);
-    }
-
     // Tyres are offered to the patch pool in the same order and for the same reason:
     // the driven car first, then the traffic by range, so a full pool refuses the
     // patches nobody can see rather than the ones under the player's own car.
@@ -2986,7 +2971,7 @@ async function boot(): Promise<void> {
       // reload; rungs that keep the profile apply in place. The drive is saved and marked
       // for resume first, so the player lands back in the car rather than on the title.
       if (
-        buildProfileFor(world.state.settings.graphicsQuality, world.state.settings.grass)
+        buildProfileFor(world.state.settings.graphicsQuality, world.state.settings.groundCover)
           !== activeBuildProfile()
       ) {
         if (!profileReloading) {

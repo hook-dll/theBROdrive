@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { blinnPhongLobeGlsl } from './retro';
 
 /**
  * THE GROUND'S OWN LIGHT: sand, rock and road are lit as matt ground, not as Three's
@@ -21,12 +20,9 @@ import { blinnPhongLobeGlsl } from './retro';
  *    a driver's own beams light the road ahead more than a bystander sees. No wrap
  *    term: a wrapped Lambert lifts grazing light, and headlamps on a flat road arrive
  *    grazing (cos 0.007 at 100 m), so it lit the far road many times over.
- *  - On the road only (`specular`), a Blinn-Phong glint, so wet asphalt still draws
- *    the sun and the headlamps along it once `WET_ROUGHNESS_HOOK` (render/cloudshadow.ts)
- *    makes it glossy. Sand and rock have none.
- *  - The environment as irradiance only. Its prefiltered specular is gone; the wet
- *    road's mirror of the horizon is drawn by the cloud-shadow patch from the fog
- *    colour, not by the environment map.
+ *  - No specular at all: nothing on the ground reflects, the road included (owner,
+ *    2026-10-16: desert asphalt is matt, and it dries in minutes after rain).
+ *  - The environment as irradiance only. Its prefiltered specular is gone.
  *
  * The macros are redefined right after Three's physical lighting chunk, so every
  * `RE_Direct` call in the light loops (including the ground's slope-normal spotlight
@@ -41,8 +37,7 @@ import { blinnPhongLobeGlsl } from './retro';
  */
 const BACKSCATTER_GAIN = 0.2;
 
-const GROUND_LIGHT_GLSL = (specular: boolean): string => /* glsl */ `#include <lights_physical_pars_fragment>
-${specular ? blinnPhongLobeGlsl('groundSpecular') : ''}
+const GROUND_LIGHT_GLSL = /* glsl */ `#include <lights_physical_pars_fragment>
 void RE_Direct_Ground( const in IncidentLight directLight, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in PhysicalMaterial material, inout ReflectedLight reflectedLight ) {
 	float dotNL = saturate( dot( geometryNormal, directLight.direction ) );
 	vec3 irradiance = dotNL * directLight.color;
@@ -51,7 +46,6 @@ void RE_Direct_Ground( const in IncidentLight directLight, const in vec3 geometr
 	behind *= behind;
 	behind *= behind;
 	reflectedLight.directDiffuse += irradiance * ( 1.0 + ${BACKSCATTER_GAIN.toFixed(3)} * behind ) * BRDF_Lambert( material.diffuseContribution );
-	${specular ? 'reflectedLight.directSpecular += irradiance * groundSpecular( directLight.direction, geometryViewDir, geometryNormal, material );' : ''}
 }
 void RE_IndirectSpecular_Ground( const in vec3 radiance, const in vec3 irradiance, const in vec3 clearcoatRadiance, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in PhysicalMaterial material, inout ReflectedLight reflectedLight ) {
 	reflectedLight.indirectDiffuse += material.diffuseContribution * irradiance * RECIPROCAL_PI;
@@ -68,16 +62,10 @@ const patched = new WeakSet<THREE.Material>();
 /**
  * Gives one ground material the ground light above. Chains onto the patches already on
  * it (comic, cloud shadow, desert ground) and is idempotent, like `applyCloudShadow`.
- * `specular` keeps a Blinn-Phong glint: the road, its bed and its markings, which go
- * glossy in the wet.
  */
-export function applyGroundLight<T extends THREE.MeshStandardMaterial>(
-  material: T,
-  options: { specular?: boolean } = {},
-): T {
+export function applyGroundLight<T extends THREE.MeshStandardMaterial>(material: T): T {
   if (patched.has(material)) return material;
   patched.add(material);
-  const specular = options.specular === true;
   const previousCompile = material.onBeforeCompile;
   material.onBeforeCompile = (shader, renderer) => {
     previousCompile.call(material, shader, renderer);
@@ -85,10 +73,9 @@ export function applyGroundLight<T extends THREE.MeshStandardMaterial>(
     if (!shader.fragmentShader.includes(include)) {
       throw new Error('Three physical fragment layout changed');
     }
-    shader.fragmentShader = shader.fragmentShader.replace(include, GROUND_LIGHT_GLSL(specular));
+    shader.fragmentShader = shader.fragmentShader.replace(include, GROUND_LIGHT_GLSL);
   };
   const previousKey = material.customProgramCacheKey;
-  material.customProgramCacheKey = () =>
-    `${previousKey.call(material)}:${GROUND_LIGHT_KEY}${specular ? ':specular' : ''}`;
+  material.customProgramCacheKey = () => `${previousKey.call(material)}:${GROUND_LIGHT_KEY}`;
   return material;
 }

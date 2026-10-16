@@ -607,11 +607,12 @@ interface ShoulderBuild {
 // Cloud shadow wraps all three around the ground-spotlight patch each of them already
 // carries, so it captures that patch instead of hiding it. A cloud crossing the road is
 // most of the effect: the ribbon is the one surface always in view. The ground light
-// (render/groundlight.ts) replaces their physical lobe; the two that go glossy in the
-// wet keep a Blinn-Phong glint. The per-pixel look (render/roadlook.ts: courses, wheel
-// tracks, sand drift, chips) works on the albedo after the vertex colour. The surface's
-// Clean branch (render/cleanstyle.ts) goes outermost on the ribbon: it only changes how
-// its two maps are read.
+// (render/groundlight.ts) replaces their physical lobe, and nothing on the road reflects:
+// no glint, no wet sheen, no headlamp streaks (owner, 2026-10-16: asphalt in the desert
+// is matt, and a road dries in minutes after rain). The per-pixel look (render/
+// roadlook.ts: courses, wheel tracks, sand drift, chips) works on the albedo after the
+// vertex colour. The surface's Clean branch (render/cleanstyle.ts) goes outermost on
+// the ribbon: it only changes how its two maps are read.
 const roadMaterial = applyCleanSurface(applyRoadLook(applyGroundLight(applyCloudShadow(
   applyGroundSpotlightNormals(
     new THREE.MeshStandardMaterial({
@@ -620,8 +621,7 @@ const roadMaterial = applyCleanSurface(applyRoadLook(applyGroundLight(applyCloud
       metalness: 0,
     }),
   ),
-  { wetSheen: true },
-), { specular: true }), 'surface'));
+)), 'surface'));
 /** Dark, weathered aggregate exposed only where the sand falls below the mat edge. */
 const roadBedMaterial = applyGroundLight(applyCloudShadow(
   applyGroundSpotlightNormals(
@@ -697,8 +697,7 @@ const markingMaterial = applyRoadLook(applyGroundLight(applyCloudShadow(
       polygonOffsetUnits: -1,
     }),
   ),
-  { wetSheen: true },
-), { specular: true }), 'paint');
+)), 'paint');
 
 /** 1 inside [lo, hi], 0 outside, smoothstepped over `soft` metres at either end. */
 function softBand(v: number, lo: number, hi: number, soft: number): number {
