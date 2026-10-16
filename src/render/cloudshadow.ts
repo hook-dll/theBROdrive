@@ -281,22 +281,57 @@ export function cloudShadowShadeAt(
   );
 }
 
+/**
+ * THE FIELD'S IRREGULARITY (owner, 2026-10-17: the sky showed "a grid", clouds that
+ * shout "a function made us"). Value noise keeps its lattice: every blob sits on a
+ * square cell of one size. Four cheap terms break that, every one periodic on the
+ * field's period so the origin reduction above still holds:
+ *  - WARP. The sample point is pushed up to `CLOUD_WARP_M` by a 1.68 km noise pair, so
+ *    no cell edge stays straight.
+ *  - A SECOND LATTICE at 97 cells a period (554 m), mixed in: two incommensurate grids
+ *    leave no axis for the eye to find.
+ *  - COVERAGE at 3.36 km: whole districts of sky more and less cloudy, clusters and
+ *    clear gaps rather than an even sprinkle.
+ *  - The half-size DETAIL octave, as before, on the warped point.
+ * The sum is re-spread about 0.5 (`CLOUD_SPREAD`), since mixing two lattices narrows it.
+ */
+const CLOUD_WARP_CELLS = 32;
+const CLOUD_WARP_M = 520;
+const CLOUD_SECOND_CELLS = 97;
+const CLOUD_SECOND_SHARE = 0.35;
+const CLOUD_COVER_CELLS = 16;
+const CLOUD_COVER_AMPLITUDE = 0.24;
+const CLOUD_SPREAD = 1.3;
+/** Hash offsets of the extra lattices, whole numbers like CLOUD_DETAIL_SALT. */
+const SALT_WARP_X = 41;
+const SALT_WARP_Z = 43;
+const SALT_COVER = 47;
+const SALT_SECOND = 53;
+
 /** Shade from an already-drifted sample point. Shared by both entry points. */
 function shadeFromSample(sx: number, sz: number, salt: number, detail: number): number {
-  let field = cloudNoise(sx / CLOUD_CELL_M, sz / CLOUD_CELL_M, CLOUD_PERIOD_CELLS, salt);
+  return smoothstep(CLOUD_EDGE_LOW, CLOUD_EDGE_HIGH, fieldAt(sx, sz, salt, detail));
+}
+
+/** CPU twin of the GLSL `cloudField`. */
+function fieldAt(sx: number, sz: number, salt: number, detail: number): number {
+  const warpCell = CLOUD_PERIOD_M / CLOUD_WARP_CELLS;
+  const px = sx + (cloudNoise(sx / warpCell, sz / warpCell, CLOUD_WARP_CELLS, salt + SALT_WARP_X) - 0.5) * CLOUD_WARP_M;
+  const pz = sz + (cloudNoise(sx / warpCell, sz / warpCell, CLOUD_WARP_CELLS, salt + SALT_WARP_Z) - 0.5) * CLOUD_WARP_M;
+  const secondCell = CLOUD_PERIOD_M / CLOUD_SECOND_CELLS;
+  const a = cloudNoise(px / CLOUD_CELL_M, pz / CLOUD_CELL_M, CLOUD_PERIOD_CELLS, salt);
+  const b = cloudNoise(px / secondCell, pz / secondCell, CLOUD_SECOND_CELLS, salt + SALT_SECOND);
+  const coverCell = CLOUD_PERIOD_M / CLOUD_COVER_CELLS;
+  let field =
+    0.5 + (a + (b - a) * CLOUD_SECOND_SHARE - 0.5) * CLOUD_SPREAD +
+    (cloudNoise(sx / coverCell, sz / coverCell, CLOUD_COVER_CELLS, salt + SALT_COVER) - 0.5) * CLOUD_COVER_AMPLITUDE;
   if (detail > 0) {
     field +=
       detail *
-      (cloudNoise(
-        sx / CLOUD_DETAIL_CELL_M,
-        sz / CLOUD_DETAIL_CELL_M,
-        CLOUD_DETAIL_PERIOD_CELLS,
-        salt + CLOUD_DETAIL_SALT,
-      ) -
-        0.5) *
+      (cloudNoise(px / CLOUD_DETAIL_CELL_M, pz / CLOUD_DETAIL_CELL_M, CLOUD_DETAIL_PERIOD_CELLS, salt + CLOUD_DETAIL_SALT) - 0.5) *
       CLOUD_DETAIL_AMPLITUDE;
   }
-  return smoothstep(CLOUD_EDGE_LOW, CLOUD_EDGE_HIGH, field);
+  return field;
 }
 
 /** How much of the light survives at a point: 1 in full sun, `1 - CLOUD_DARKEN_MAX` at worst. */
@@ -363,11 +398,15 @@ export function cloudShadowFactorFromPan(
 // ---------------------------------------------------------------------------
 
 /**
- * Height of the cumulus deck above the eye, metres, for the sky's clouds (render/sky.ts)
- * and the sun shift below. Fair-weather cumulus over a hot desert bases at 1.5-3 km;
- * the low end keeps a 420 m patch a broad puff overhead rather than a speck.
+ * Mean height of the cumulus bases above the eye, metres, for the sky's clouds
+ * (render/sky.ts) and the shadows' sun shift. Fair-weather cumulus over a hot desert
+ * bases at 1.5-3 km. Each cloud has its own (`cloudBase`): 0.75-1.65 of this, on a
+ * 1.9 km field, so neighbouring clouds stand at different heights and slide past one
+ * another as the car moves.
  */
 export const CLOUD_BASE_M = 1500;
+const CLOUD_HEIGHT_CELLS = 28;
+const SALT_HEIGHT = 59;
 
 /**
  * The field itself, shared by the ground (its shadows) and the sky (the clouds that
@@ -421,9 +460,23 @@ float cloudDetailOctave( vec2 at ) {
 }
 
 float cloudField( vec2 at, float detail ) {
-	float field = cloudNoise( at / ${CLOUD_CELL_M.toFixed(1)}, ${CLOUD_PERIOD_CELLS.toFixed(1)}, uCloudSalt );
-	if ( detail > 0.0 ) field += detail * cloudDetailOctave( at );
+	// See fieldAt (the CPU twin) for the four terms.
+	vec2 warp = vec2(
+		cloudNoise( at / ${(CLOUD_PERIOD_M / CLOUD_WARP_CELLS).toFixed(1)}, ${CLOUD_WARP_CELLS.toFixed(1)}, uCloudSalt + ${SALT_WARP_X.toFixed(1)} ),
+		cloudNoise( at / ${(CLOUD_PERIOD_M / CLOUD_WARP_CELLS).toFixed(1)}, ${CLOUD_WARP_CELLS.toFixed(1)}, uCloudSalt + ${SALT_WARP_Z.toFixed(1)} )
+	) - 0.5;
+	vec2 p = at + warp * ${CLOUD_WARP_M.toFixed(1)};
+	float a = cloudNoise( p / ${CLOUD_CELL_M.toFixed(1)}, ${CLOUD_PERIOD_CELLS.toFixed(1)}, uCloudSalt );
+	float b = cloudNoise( p / ${(CLOUD_PERIOD_M / CLOUD_SECOND_CELLS).toFixed(4)}, ${CLOUD_SECOND_CELLS.toFixed(1)}, uCloudSalt + ${SALT_SECOND.toFixed(1)} );
+	float field = 0.5 + ( mix( a, b, ${CLOUD_SECOND_SHARE.toFixed(2)} ) - 0.5 ) * ${CLOUD_SPREAD.toFixed(2)}
+		+ ( cloudNoise( at / ${(CLOUD_PERIOD_M / CLOUD_COVER_CELLS).toFixed(1)}, ${CLOUD_COVER_CELLS.toFixed(1)}, uCloudSalt + ${SALT_COVER.toFixed(1)} ) - 0.5 ) * ${CLOUD_COVER_AMPLITUDE.toFixed(2)};
+	if ( detail > 0.0 ) field += detail * cloudDetailOctave( p );
 	return field;
+}
+
+/** This cloud's base above the eye, metres (see CLOUD_BASE_M). */
+float cloudBase( vec2 at ) {
+	return ${CLOUD_BASE_M.toFixed(1)} * ( 0.75 + 0.9 * cloudNoise( at / ${(CLOUD_PERIOD_M / CLOUD_HEIGHT_CELLS).toFixed(1)}, ${CLOUD_HEIGHT_CELLS.toFixed(1)}, uCloudSalt + ${SALT_HEIGHT.toFixed(1)} ) );
 }
 `;
 
@@ -436,19 +489,20 @@ uniform float uCloudDetail;
 uniform float uCloudStrength;
 uniform float uWet;
 uniform vec2 uGroundPan;
-uniform vec2 uCloudSunShift;
+uniform vec2 uCloudSunSlope;
 varying float vCloudShade;
 varying float vWetMask;
 
 float cloudShade( vec2 scene, float dist ) {
-	// The cloud that shades this point stands up the sun's ray from it, not overhead.
-	vec2 at = scene + uCloudPan + uCloudSunShift;
+	// The cloud that shades this point stands up the sun's ray from it, at its own
+	// height: one step at the mean base finds which cloud, a second at that cloud's.
+	vec2 ground = scene + uCloudPan;
+	vec2 at = ground + uCloudSunSlope * cloudBase( ground + uCloudSunSlope * ${CLOUD_BASE_M.toFixed(1)} );
 	// See CLOUD_FAR_*: out where the mesh is too coarse for them, the patches give way
 	// to the field's own mean, so distant land keeps its average shade without blinking.
 	float near = 1.0 - smoothstep( ${CLOUD_FAR_START_M.toFixed(1)}, ${CLOUD_FAR_END_M.toFixed(1)}, dist );
 	float detail = uCloudDetail * ( 1.0 - smoothstep( ${CLOUD_DETAIL_FAR_START_M.toFixed(1)}, ${CLOUD_DETAIL_FAR_END_M.toFixed(1)}, dist ) );
-	float field = mix( 0.5, cloudNoise( at / ${CLOUD_CELL_M.toFixed(1)}, ${CLOUD_PERIOD_CELLS.toFixed(1)}, uCloudSalt ), near );
-	if ( detail > 0.0 ) field += detail * cloudDetailOctave( at );
+	float field = mix( 0.5, cloudField( at, detail ), near );
 	return smoothstep( ${CLOUD_EDGE_LOW.toFixed(2)}, ${CLOUD_EDGE_HIGH.toFixed(2)}, field );
 }
 `;
@@ -559,8 +613,8 @@ const uniforms = {
   uWet: { value: 0 },
   /** The rebase origin reduced into one wet-patch period: puddles stay put on a rebase. */
   uGroundPan: { value: new THREE.Vector2() },
-  /** From a ground point to the cloud that shades it, along the sun's ray (`setCloudSunShift`). */
-  uCloudSunShift: { value: new THREE.Vector2() },
+  /** Horizontal metres per metre of height along the sun's ray (`setCloudSunShift`). */
+  uCloudSunSlope: { value: new THREE.Vector2() },
 };
 
 /**
@@ -578,12 +632,12 @@ const SUN_SHIFT_MIN_ELEVATION = 0.15;
 
 /**
  * Points the ground's shade at the clouds that cast it: a ground point is shaded by the
- * deck where the ray from it to the sun (`sunDir`, unit, scene frame) meets
- * `CLOUD_BASE_M`. Called once a frame by the sky.
+ * cloud where the ray from it to the sun (`sunDir`, unit, scene frame) meets that
+ * cloud's own base (`cloudBase`). Called once a frame by the sky.
  */
 export function setCloudSunShift(sunDir: THREE.Vector3): void {
-  const k = CLOUD_BASE_M / Math.max(SUN_SHIFT_MIN_ELEVATION, sunDir.y);
-  uniforms.uCloudSunShift.value.set(sunDir.x * k, sunDir.z * k);
+  const k = 1 / Math.max(SUN_SHIFT_MIN_ELEVATION, sunDir.y);
+  uniforms.uCloudSunSlope.value.set(sunDir.x * k, sunDir.z * k);
 }
 
 /** Materials already carrying the injection, so a second call cannot double it. */

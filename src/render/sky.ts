@@ -671,18 +671,46 @@ void main() {
 
   // --- Cumulus ---------------------------------------------------------------
   //
-  // Not a volume: a 2.5D deck lit as one. What sells a cumulus is its light, and three
+  // Not a volume: two 2.5D decks lit as one. What sells a cumulus is its light, and three
   // cheap terms carry it: the side facing away from the sun is in the cloud's own
   // shade where the deck thickens toward the sun (one more field sample, one cloud's
   // depth sunward), a deck seen from straight below shows its flat grey base, and a
   // thin edge against the sun is lit through (the silver lining).
+  //
+  // PARALLAX. The low deck is the shadow field, each cloud at its own base (cloudBase,
+  // 1.1-2.5 km), so neighbours slide past one another as the car moves; a thin, paler
+  // altocumulus deck at 4.5 km behind it slides slower still. Neither is a flat
+  // painted ceiling any more.
   float deck = 0.0;
   vec3 cloudCol = uHorizon;
   if (uCloudAmount > 0.0 && dir.y > 0.02) {
     // dir.y is floored: the projection diverges at the horizon, and the fade below
     // hides where the floor bites.
-    float reach = ${CLOUD_BASE_M.toFixed(1)} / max(dir.y, 0.05);
+    float dy = max(dir.y, 0.05);
+    float horizonFade = smoothstep(0.02, 0.16, dir.y) * uCloudAmount;
+    vec3 litCol = mix(uHorizon, uSunColor, 0.7) * 1.08;
+    vec3 shadeCol = mix(uZenith, uHorizon, 0.65) * 0.8;
+    vec2 sunward = normalize(uSunDir.xz + vec2(1e-4, 0.0)) * 180.0;
+    float edge = ${CLOUD_EDGE_MID.toFixed(3)} - 0.47 * uStorm;
+
+    // High deck: the same field at twice the frequency (a whole multiple, so it stays
+    // periodic on the pan's period) and far from the low deck's patch of it. Sparse and
+    // thin: only the field's peaks, at under half opacity.
+    float highReach = ${(CLOUD_BASE_M * 3).toFixed(1)} / dy;
+    vec2 highAt = (cameraPosition.xz + dir.xz * highReach + uCloudPan) * 2.0 + vec2(13440.0, 26880.0);
+    float highField = cloudField(highAt, 0.0);
+    float highBody = smoothstep(edge + 0.16, edge + 0.26, highField) * (1.0 - uStorm);
+    float highFar = smoothstep(6000.0, 24000.0, highReach);
+    vec3 highCol = mix(litCol, uHorizon, 0.35 + 0.5 * highFar);
+    float highDeck = 0.4 * highBody * (1.0 - highFar) * horizonFade;
+
+    // Low deck: find the cloud on the mean base, then meet it at its own height. Far
+    // off the heights give way to the mean: there one step of reach is kilometres, and
+    // the jump between neighbouring clouds' heights drew rings round the horizon.
+    float reach = ${CLOUD_BASE_M.toFixed(1)} / dy;
     vec2 at = cameraPosition.xz + dir.xz * reach + uCloudPan;
+    reach = mix(cloudBase(at) / dy, reach, smoothstep(3000.0, 8000.0, reach));
+    at = cameraPosition.xz + dir.xz * reach + uCloudPan;
     float field = cloudField(at, 1.0);
     // A finer octave the shadows do not need, for a puff's ragged edge; gone where its
     // cells shrink toward a pixel, before it can shimmer.
@@ -694,29 +722,30 @@ void main() {
         uCloudSalt + 31.0
       ) - 0.5);
     }
-    // The cloud's edge is where its shadow's edge band has its middle; a storm lowers
-    // it until the deck closes.
-    float edge = ${CLOUD_EDGE_MID.toFixed(3)} - 0.47 * uStorm;
-    float body = smoothstep(edge - 0.02, edge + 0.08, field);
+    // The cloud's edge stands a little inside its shadow's edge band, so about a third
+    // of the sky is cloud while the shade's soft penumbra reaches past it; a storm
+    // lowers it until the deck closes.
+    float body = smoothstep(edge + 0.05, edge + 0.13, field);
     float thick = smoothstep(edge, edge + 0.3, field);
-    vec2 sunward = normalize(uSunDir.xz + vec2(1e-4, 0.0)) * 180.0;
     float shade = clamp((cloudField(at + sunward, 0.0) - field) * 3.5, 0.0, 1.0);
     float base = smoothstep(0.3, 0.9, dir.y) * thick;
-    vec3 litCol = mix(uHorizon, uSunColor, 0.7) * 1.08;
-    vec3 shadeCol = mix(uZenith, uHorizon, 0.65) * 0.8;
-    cloudCol = mix(shadeCol, litCol, (1.0 - 0.75 * shade) * (1.0 - 0.45 * base));
-    cloudCol += uSunColor * 0.9 * pow(max(sd, 0.0), 6.0) * (1.0 - thick);
+    vec3 lowCol = mix(shadeCol, litCol, (1.0 - 0.75 * shade) * (1.0 - 0.45 * base));
+    lowCol += uSunColor * 0.9 * pow(max(sd, 0.0), 6.0) * (1.0 - thick);
     if (uStorm > 0.0) {
       // A convective deck: thick, grey, and darkest where it is thickest.
       vec3 stormCol = mix(uHorizon * 1.04, uZenith * 0.78, thick);
       stormCol += uSunColor * 0.12 * pow(max(sd, 0.0), 3.0) * (1.0 - thick);
-      cloudCol = mix(cloudCol, stormCol, uStorm);
+      lowCol = mix(lowCol, stormCol, uStorm);
     }
     // Far clouds sink into the horizon's air, and the deck is out before the horizon
     // band, which must stay pure gradient: the fog colour is copied from it.
     float far = smoothstep(6000.0, 26000.0, reach);
-    cloudCol = mix(cloudCol, uHorizon, far * 0.7);
-    deck = body * (1.0 - far) * smoothstep(0.02, 0.16, dir.y) * uCloudAmount;
+    lowCol = mix(lowCol, uHorizon, far * 0.7);
+    float lowDeck = body * (1.0 - far) * horizonFade;
+
+    // The low deck in front of the high one.
+    deck = lowDeck + highDeck * (1.0 - lowDeck);
+    cloudCol = deck > 0.0 ? (lowCol * lowDeck + highCol * highDeck * (1.0 - lowDeck)) / deck : uHorizon;
   }
   col = mix(col, cloudCol, deck);
 
