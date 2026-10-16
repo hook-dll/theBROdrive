@@ -919,9 +919,10 @@
   `CLOUD_TOP_M` (2.3 km): footprint from the very field the ground's shade comes from
   (same pan and salt, baked into a 1024² coverage map round the eye and rebaked every
   3 km). A cloud's HEIGHT is read from that field blurred over 300 m (two separable
-  passes into the map's second channel at each rebake), so each cloud is one smooth hill:
-  a small cloud a flat humilis about 120 m thick, a typical one 400 m, the big cores
-  800 m. Its side draws in as it climbs, so the shoulders round over into the top, and the
+  passes into the map's second channel at each rebake), relative to the footprint's
+  edge, so each cloud is one smooth hill and its height goes with its size: a small cloud
+  a flat humilis about 100 m thick, a typical one 280 m, the big merged cores 800 m to the
+  full kilometre. Its side draws in as it climbs, so the shoulders round over into the top, and the
   dome's surface is cut into billows by a 64³ tiling Perlin-Worley noise baked at startup.
   The billowed erosion acts only near the surface. The lowest 90 m get a wispy fray.
   Nothing extends below the flat base, and the noise sits on an oblique lattice so
@@ -932,9 +933,17 @@
   sun, so neighbours shade each other at dusk), three multiple-scattering octaves, a
   dual-lobe Henyey-Greenstein phase (the silver lining), a light powder term, and
   sky/ground ambient by height in the column. At sunset the ambient comes from the zenith
-  alone, greyed toward slate, and the sun reaching a cloud's lower half is dimmed. Far
-  cloud sinks into the dusk sky rather than the horizon glow, so clouds toward a low sun
-  stand dark with lit rims instead of glowing orange through. Drawn before the scene at
+  alone, greyed toward slate, and the sun reaching a cloud's lower half is dimmed.
+  AERIAL PERSPECTIVE IS THE LAND'S (`render/airfog.ts`): the same clear-air extinction
+  (regional haze, clarity, mgla, rain, storm), the same haboob FogExp2, the same fog
+  colour by elevation and the same anti-solar pull. It is taken along the slant path to
+  each pixel's transmittance-weighted cloud depth, with the air thinning upward over a
+  1.8 km scale height. Overhead clouds stay crisp, low far ones dissolve into the horizon
+  as a mesa at that distance does, and on a thick haze or dust day they vanish. A cloud is
+  never less veiled than land nearer along the same sight line: the land's fog ignores the
+  height fall-off, which only ever veils the land more. Before, the clouds had their own
+  fixed 22 km law, and on a hazy day crisp, dark clouds stood behind a mesa nearly lost in
+  the haze. Drawn before the scene at
   360 lines at most, 64 steps with empty space skipped (and stepped back into, so the
   entry never jumps a step). The view ray and the light march each have their own
   per-pixel jitter sequence (golden ratio and plastic number, so the two never move in
@@ -947,13 +956,22 @@
   GPU query in the same tab: 1.15-1.55 ms (the first volumetric version: 1.75-2.6 ms).
   Desktop `standard` and `blessing` only: the low rungs, phones,
   the environment probe and a mirror's directions outside the view keep the 2D deck,
-  switched by a uniform, so no program changes. The ground's shade band moved to
-  0.42-0.74 so it sits under the clouds (`CLOUD_COVER_EDGE`): about 36% of the ground in
-  shade under about 36% cloud footprint, and the shade looks up the sun's ray to one
-  height (`CLOUD_SHADOW_HEIGHT_M`); the per-cloud base heights (`cloudBase`) are gone.
-  `tools/sky-variety.ts` checks the cover, that every footprint is in shade, and the far
-  ground's mean shade. Gone with the cirrus: `cloudFbm`, `uCloudCover`, `uCloudTime` and
-  the sky gradient's `cloudCover`.
+  switched by a uniform, so no program changes.
+
+  SPARSE AND UNEVEN (owner: a third of the sky in cloud "looks generated"). The field's
+  3.36 km coverage term went from 0.24 to 0.6 (`CLOUD_COVER_AMPLITUDE`), and the cloud
+  edge moved to the field's 85th percentile (`CLOUD_COVER_EDGE` 0.77): about 14% of the sky
+  over a footprint on average, but by district. Of 3 km stretches of sky, 16% are near-clear
+  (under 3%, a cloud or two at most), the median holds 12% and 19% hold over a quarter, up
+  to 56%. A clear district shows a few small isolated clouds where the field's peaks
+  poke through, and a cloudy one shows big merged clouds. The ground's shade band moved
+  with the edge (0.61-0.93, 0.32 wide), so the shade stays under the clouds, about 14% of
+  the ground. The shade looks up the sun's ray to one height (`CLOUD_SHADOW_HEIGHT_M`);
+  the per-cloud base heights (`cloudBase`) are gone. `tools/sky-variety.ts` checks the
+  cover (10-20%), that districts range from near-clear to over a quarter, that every
+  footprint is in shade, the shade fraction (8-25%), and the far ground's mean shade.
+  Gone with the cirrus: `cloudFbm`, `uCloudCover`, `uCloudTime` and the sky gradient's
+  `cloudCover`.
 - GRASS IS THE PLAYER'S, AND OFF (`Settings.groundCover`, `game/settings.ts`). Ground cover
   starts Off on every rung and no preset, launch measurement or phone default changes it;
   only the Grass row does. Stored under the new key `groundCover`, so every value the

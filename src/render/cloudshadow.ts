@@ -128,24 +128,27 @@ const CLOUD_DETAIL_AMPLITUDE = 0.14;
  * reads as one when the patch is 400 m across. The band is 0.40 wide; measured by
  * `tools/sky-variety.ts`, which fails below 100 m.
  *
- * LOWERED ONCE, from 0.42..0.82, so the clearing after rain was every day's; and
- * RAISED BACK to 0.42..0.74 (2026-10-17) when the sky's cumulus became a volume
- * (render/cloudvolume.ts). The shade now has to be the shadow OF those clouds, so the
- * band's middle sits on the clouds' own footprint edge (`CLOUD_COVER_EDGE`): about two
- * fifths of the ground in shade, under about a third of the sky in cloud, and the
- * penumbra reaching a little past each cloud as a real one does. 0.32 wide, so the
+ * LOWERED ONCE, from 0.42..0.82, so the clearing after rain was every day's; RAISED
+ * BACK to 0.42..0.74 (2026-10-17) when the sky's cumulus became a volume
+ * (render/cloudvolume.ts) and the shade had to be the shadow OF those clouds; and
+ * RAISED AGAIN to 0.61..0.93 the same day, when the owner found the sky too full ("it
+ * looks generated"). The band's middle sits on the clouds' own footprint edge
+ * (`CLOUD_COVER_EDGE`), so the shade fraction follows the cloud cover, about 15%, and
+ * the penumbra reaches a little past each cloud as a real one does. 0.32 wide, so the
  * 10-90% penumbra stays over 100 m (the tool's floor).
  */
-const CLOUD_EDGE_LOW = 0.42;
-const CLOUD_EDGE_HIGH = 0.74;
+const CLOUD_EDGE_LOW = 0.61;
+const CLOUD_EDGE_HIGH = 0.93;
 /**
  * Where the sky's cumulus stands, in field units (render/cloudvolume.ts): a cloud's
  * footprint begins where the field crosses `CLOUD_COVER_EDGE` (its height is read from
- * the blurred field, in cloudvolume.ts). The field's 62nd percentile is 0.58, so before
- * erosion about 38% of the sky has cloud over it, a little under a third after;
- * fair-weather cumulus over a desert is 25-40%.
+ * the blurred field, in cloudvolume.ts). The field's 85th percentile is 0.77, so before
+ * erosion about 15% of the sky has cloud over it, and not evenly: over 3 km stretches
+ * of sky (`CLOUD_COVER_AMPLITUDE`) one in seven holds almost nothing, the median 12%,
+ * one in ten 30% or more. A clear-district sky has a few isolated small clouds where the
+ * field's peaks poke through; a cloudy district's footprints run together into big ones.
  */
-export const CLOUD_COVER_EDGE = 0.58;
+export const CLOUD_COVER_EDGE = 0.77;
 /**
  * Deepest darkening, as a fraction of the light leaving the surface.
  *
@@ -301,7 +304,10 @@ export function cloudShadowShadeAt(
  *  - A SECOND LATTICE at 97 cells a period (554 m), mixed in: two incommensurate grids
  *    leave no axis for the eye to find.
  *  - COVERAGE at 3.36 km: whole districts of sky more and less cloudy, clusters and
- *    clear gaps rather than an even sprinkle.
+ *    clear gaps rather than an even sprinkle. Its amplitude was 0.24, and the sky then
+ *    held about the same number of same-size puffs everywhere, which read as
+ *    procedural; at 0.6 it outweighs the other terms over a district, so some districts
+ *    are near-clear with a few small clouds and others hold big merged ones.
  *  - The half-size DETAIL octave, as before, on the warped point.
  * The sum is re-spread about 0.5 (`CLOUD_SPREAD`), since mixing two lattices narrows it.
  */
@@ -310,7 +316,7 @@ const CLOUD_WARP_M = 520;
 const CLOUD_SECOND_CELLS = 97;
 const CLOUD_SECOND_SHARE = 0.35;
 const CLOUD_COVER_CELLS = 16;
-const CLOUD_COVER_AMPLITUDE = 0.24;
+const CLOUD_COVER_AMPLITUDE = 0.6;
 const CLOUD_SPREAD = 1.3;
 /** Hash offsets of the extra lattices, whole numbers like CLOUD_DETAIL_SALT. */
 const SALT_WARP_X = 41;
@@ -496,11 +502,11 @@ float cloudField( vec2 at, float detail ) {
 
 /**
  * The field value the distant ground's shade gives way to: the one whose shade is the
- * field's MEAN shade (about 0.37), so far land keeps the average light of the patches
- * rather than the shade of the average field, which this band would make far too light.
+ * field's MEAN shade (about 0.15), so far land keeps the average light of the patches
+ * rather than the shade of the average field, which this band would make unshaded.
  * `tools/sky-variety.ts` measures the mean against it.
  */
-export const CLOUD_FAR_FIELD = 0.55;
+export const CLOUD_FAR_FIELD = 0.69;
 
 const CLOUD_VERTEX_PARS = /* glsl */ `
 ${CLOUD_FIELD_GLSL}

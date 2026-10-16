@@ -211,11 +211,12 @@ console.log('cloud shadow field');
     runM > 120 && runM < 900,
     `mean shaded run ${runM.toFixed(0)} m`,
   );
-  // About half: the band a clearing storm used to lower the field to, now every day's
-  // (see CLOUD_EDGE_LOW). Past two thirds it stops reading as patches and reads as overcast.
+  // About a sixth: the shade is the shadow of a sparse sky (see CLOUD_EDGE_LOW and
+  // CLOUD_COVER_EDGE), and follows its cover. Past two thirds it would read as overcast,
+  // under a twentieth as no clouds at all.
   check(
-    'shade comes in patches, not as an overcast',
-    cover > 0.06 && cover < 0.65,
+    'shade comes in patches, under a sparse sky',
+    cover > 0.08 && cover < 0.25,
     `${(cover * 100).toFixed(1)}% in shade`,
   );
   check(
@@ -252,9 +253,10 @@ console.log('cloud shadow field');
 // -- the clouds over the shadows -----------------------------------------------
 
 // The sky's cumulus is a volume (render/cloudvolume.ts) whose footprint is this field
-// above CLOUD_COVER_EDGE. Its cover is a fair-weather sky's, every cloud's footprint is
-// in shade (before the sun shift, which only slides the shade along the sun's ray), and
-// far ground's stand-in field gives the patches' mean shade, not a lighter or darker one.
+// above CLOUD_COVER_EDGE. Its cover is a sparse fair-weather sky's (owner, 2026-10-17:
+// a third of the sky "looks generated"), every cloud's footprint is in shade (before the
+// sun shift, which only slides the shade along the sun's ray), and far ground's stand-in
+// field gives the patches' mean shade, not a lighter or darker one.
 {
   let footprint = 0;
   let footprintShaded = 0;
@@ -278,8 +280,8 @@ console.log('cloud shadow field');
   }
   const cover = footprint / samples;
   check(
-    'the sky is fair-weather cumulus',
-    cover > 0.25 && cover < 0.45,
+    'the sky is sparse fair-weather cumulus',
+    cover > 0.1 && cover < 0.2,
     `${(cover * 100).toFixed(1)}% of the sky over a cloud footprint (before erosion)`,
   );
   check(
@@ -293,6 +295,53 @@ console.log('cloud shadow field');
     'far ground keeps the mean shade',
     Math.abs(meanShade - farShade) < 0.05,
     `mean ${meanShade.toFixed(3)}, far stand-in ${farShade.toFixed(3)}`,
+  );
+}
+
+// -- and the cover is not even ---------------------------------------------------
+
+// A sky with the same sprinkle of same-size puffs everywhere reads as procedural. Over
+// 3 km stretches of sky (about what one look up takes in) the cover has to range: some
+// stretches near-clear, holding a cloud or two at most, others a third cloud.
+{
+  const WINDOW_M = 3000;
+  const STEP_M = 60;
+  const PER_SIDE = WINDOW_M / STEP_M;
+  const covers: number[] = [];
+  for (const seed of SEEDS) {
+    const salt = cloudShadowSalt(seed);
+    for (let wz = 0; wz < 8; wz++) {
+      for (let wx = 0; wx < 8; wx++) {
+        let inside = 0;
+        for (let j = 0; j < PER_SIDE; j++) {
+          for (let i = 0; i < PER_SIDE; i++) {
+            const x = wx * WINDOW_M + i * STEP_M + seed * 1111;
+            const z = wz * WINDOW_M + j * STEP_M - seed * 777;
+            if (cloudFieldAt(x, z, salt, 1) > CLOUD_COVER_EDGE) inside++;
+          }
+        }
+        covers.push(inside / (PER_SIDE * PER_SIDE));
+      }
+    }
+  }
+  covers.sort((a, b) => a - b);
+  const clear = covers.filter((c) => c < 0.03).length / covers.length;
+  const cloudy = covers.filter((c) => c > 0.25).length / covers.length;
+  const median = covers[covers.length >> 1] ?? 0;
+  console.log(
+    `    ${covers.length} stretches of 3 km: ${(clear * 100).toFixed(0)}% near-clear (<3%), ` +
+      `median ${(median * 100).toFixed(0)}%, ${(cloudy * 100).toFixed(0)}% over a quarter, ` +
+      `most ${((covers[covers.length - 1] ?? 0) * 100).toFixed(0)}%`,
+  );
+  check(
+    'some stretches of sky are near-clear',
+    clear > 0.06,
+    `${(clear * 100).toFixed(0)}% of 3 km stretches under 3% cover`,
+  );
+  check(
+    'and some are properly cloudy',
+    cloudy > 0.06,
+    `${(cloudy * 100).toFixed(0)}% of 3 km stretches over 25% cover`,
   );
 }
 

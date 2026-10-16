@@ -1106,6 +1106,7 @@ export class Sky {
       uSunColor: sunColor,
       uStorm: this.uStorm,
       uCloudAmount: this.uCloudAmount,
+      fog,
     });
     const domeMaterial = new THREE.ShaderMaterial({
       vertexShader: SKY_VERTEX,

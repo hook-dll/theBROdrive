@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mulberry32 } from '../core/rng';
+import { airDusk, airFog, airSky, airSun } from './airfog';
 import {
   CLOUD_BASE_M,
   CLOUD_COVER_EDGE,
@@ -44,9 +45,11 @@ import {
  * by height in the cloud: ground bounce under the flat base, sky on the tops. At sunset
  * it comes from the zenith only, greyed toward slate, and the sun reaching a cloud's
  * lower half is dimmed, so a sunset cloud is a lit crown over a blue-grey body. Far
- * clouds sink into the air in front of them (the dusk sky, not the glow at the horizon),
- * and the whole layer fades out above the horizon band, which must stay pure gradient
- * because the fog colour is copied from it.
+ * clouds are veiled by the land's own aerial perspective (render/airfog.ts: extinction,
+ * haboob, fog colour, anti-solar pull) along the slant path, the air thinning upward
+ * (`AIR_SCALE_HEIGHT_M`), so no cloud reads clearer than a mesa in front of it; and the
+ * whole layer fades out above the horizon band, which must stay pure gradient because
+ * the fog colour is copied from it.
  *
  * WHAT IT COSTS. At most `TARGET_LINES` lines (a third of a 1080-line frame, a quarter
  * of 1440), up to `MAX_STEPS` steps with empty space skipped at double stride. The view
@@ -90,12 +93,26 @@ const BLUR_TAP_TEXELS = 1.5;
 const BLUR_TAPS = Math.ceil((3 * BLUR_SIGMA_TEXELS) / BLUR_TAP_TEXELS);
 /**
  * Where the blurred field puts a column's height (`column`): 0.1 of the slab at
- * `HEIGHT_LOW`, the whole of it `HEIGHT_SPAN` above. Measured over the footprints of
- * four seeds, the blurred field runs 0.47 (5th percentile) to 0.74 (95th), 0.59 at the
- * median: a typical cloud 400 m thick, the small ones 120 m, the big cores 800 m.
+ * `HEIGHT_LOW`, the whole of it `HEIGHT_SPAN` above. Tied to the footprint's edge, so
+ * that height goes with SIZE: a small cloud, whose blurred field barely reaches the
+ * edge, stays a flat humilis; only a big merged core towers. Measured over the
+ * footprints of four seeds with the edge at 0.77, the blurred field runs 0.56 (5th
+ * percentile) to 0.89 (95th), 0.73 at the median: a typical cloud 280 m thick, the big
+ * ones 800 m, the cores of a cloudy district the full kilometre. Set from the old
+ * absolute 0.45 when the edge rose, every small cloud stood 700 m tall on a 200 m
+ * footprint: a pillar; at the edge less 0.08 they were flat lenses.
  */
-const HEIGHT_LOW = 0.45;
-const HEIGHT_SPAN = 0.35;
+const HEIGHT_LOW = CLOUD_COVER_EDGE - 0.12;
+const HEIGHT_SPAN = 0.3;
+/**
+ * Scale height of the air's haze, metres: its density falls by e every this far up.
+ * Desert haze and dust sit in the boundary layer, under about two kilometres, so a
+ * cloud straight overhead looks through a fraction of what a cloud at the horizon does.
+ * The land's fog (render/airfog.ts) ignores the fall-off, which over a sight line that
+ * never climbs more than a few hundred metres changes nothing, and errs toward fogging
+ * the land MORE: a cloud behind a mesa is always at least as veiled as the mesa.
+ */
+const AIR_SCALE_HEIGHT_M = 1800;
 /** How far the map's centre may fall behind the eye before it is baked again. */
 const WEATHER_REBAKE_M = 3_000;
 /**
@@ -286,7 +303,8 @@ uniform vec2 uMapCentre;
 varying vec2 vUv;
 void main() {
   vec2 at = uMapCentre + (vUv - 0.5) * ${(WEATHER_HALF_M * 2).toFixed(1)};
-  float field = clamp(cloudField(at, 1.0), 0.0, 1.0);
+  // Not clamped at 1: in a cloudy district the field reaches 1.35, and the cores need it.
+  float field = clamp(cloudField(at, 1.0), 0.0, 2.0);
   gl_FragColor = vec4(field, field, 0.0, 1.0);
 }
 `;
@@ -334,8 +352,18 @@ uniform float uStorm;
 uniform float uCloudAmount;
 uniform float uFrame;
 uniform float uPixelAngle;
+// The land's aerial perspective (render/airfog.ts): fog colour at the horizon, the
+// colour its gradient climbs to, clear-air extinction per metre (airFog.x), the
+// anti-solar pull, and the haboob's FogExp2 density.
+uniform vec3 uFogColor;
+uniform float uDustFog;
+uniform vec3 airFog;
+uniform vec3 airSky;
+uniform vec3 airSun;
+uniform vec3 airDusk;
 varying vec2 vUv;
 
+#define AIR_SCALE_HEIGHT ${AIR_SCALE_HEIGHT_M.toFixed(1)}
 #define BASE ${CLOUD_BASE_M.toFixed(1)}
 #define TOP ${CLOUD_TOP_M.toFixed(1)}
 #define THICK ${(CLOUD_TOP_M - CLOUD_BASE_M).toFixed(1)}
@@ -533,13 +561,25 @@ void main() {
         }
         t += dt;
       }
-      // Far cloud sinks into the air in front of it. At sunset that air is not the glow
-      // on the horizon (the sun's own light, which a cloud in front of it blocks) but the
-      // dusk sky: far clouds toward the sun stand dark against the glow.
+      // AERIAL PERSPECTIVE, THE LAND'S OWN (render/airfog.ts): the same extinction, the
+      // same haboob, the same fog colour by elevation and the same anti-solar pull, so a
+      // cloud can never read clearer than a mesa nearer along the same sight line. Taken
+      // along the slant path to the cloud's transmittance-weighted depth, with the air
+      // thinning upward (AIR_SCALE_HEIGHT): overhead clouds stay crisp, low far ones
+      // dissolve into the horizon exactly as the land at that distance does, and on a
+      // thick haze or dust day they are gone.
       float dist = weightSum > 0.0 ? depthSum / weightSum : t1;
-      float air = 1.0 - exp(-dist / 22000.0);
-      vec3 airCol = mix(horizonLin, zenith, 0.6 * lowSun);
-      scattered = mix(scattered, airCol * (1.0 - transmit), air);
+      float rise = dist * dir.y / AIR_SCALE_HEIGHT;
+      float slant = dist * (rise > 1e-4 ? (1.0 - exp(-rise)) / rise : 1.0);
+      float dustDepth = uDustFog * slant;
+      float airClear = exp(-airFog.x * slant - dustDepth * dustDepth);
+      vec3 fogTint = mix(uFogColor, airSky, pow(clamp(dir.y, 0.0, 1.0), 0.62));
+      float antiSolar = length(airSun);
+      if (antiSolar > 0.0) {
+        float away = pow(max(-dot(dir, airSun / antiSolar), 0.0), 1.5);
+        fogTint = mix(fogTint, airDusk, antiSolar * away * (1.0 - smoothstep(0.0, 0.45, dir.y)));
+      }
+      scattered = scattered * airClear + fogTint * (1.0 - transmit) * (1.0 - airClear);
     }
     scattered *= fade;
     transmit = 1.0 - (1.0 - transmit) * fade;
@@ -571,6 +611,11 @@ export interface CloudSkyUniforms {
   readonly uSunColor: { value: THREE.Color };
   readonly uStorm: { value: number };
   readonly uCloudAmount: { value: number };
+  /**
+   * The scene's fog: its colour is the land's fog colour at the horizon, its density
+   * the haboob's FogExp2 (render/airfog.ts). The clouds take the same air the land does.
+   */
+  readonly fog: THREE.FogExp2;
 }
 
 function fullscreenTriangle(): THREE.BufferGeometry {
@@ -629,6 +674,8 @@ export class CloudVolume {
   private readonly _eye = new THREE.Vector3();
   /** The sky's cumulus visibility: zero skips the whole pass. */
   private readonly amount: { value: number };
+  /** The scene's fog, whose density (the haboob's) the march reads every frame. */
+  private readonly fog: THREE.FogExp2;
 
   constructor(webgl: THREE.WebGLRenderer, sky: CloudSkyUniforms) {
     this.webgl = webgl;
@@ -684,11 +731,19 @@ export class CloudVolume {
         uCloudAmount: sky.uCloudAmount,
         uFrame: { value: 0 },
         uPixelAngle: { value: 0.001 },
+        // The land's own aerial perspective (render/airfog.ts), shared by reference.
+        uFogColor: { value: sky.fog.color },
+        uDustFog: { value: 0 },
+        airFog: { value: airFog },
+        airSky: { value: airSky },
+        airSun: { value: airSun },
+        airDusk: { value: airDusk },
       },
       depthTest: false,
       depthWrite: false,
     });
     this.amount = sky.uCloudAmount;
+    this.fog = sky.fog;
     for (const [scene, material] of [
       [this.weatherScene, this.weatherMaterial],
       [this.blurScene, this.blurMaterial],
@@ -770,6 +825,7 @@ export class CloudVolume {
     u.uFrame!.value = this.frame;
     this.frame = (this.frame + 1) % 64;
     u.uPixelAngle!.value = (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)) / (camera.zoom * h);
+    u.uDustFog!.value = this.fog.density;
     const read = this.history[this.current];
     this.current ^= 1;
     const write = this.history[this.current];
