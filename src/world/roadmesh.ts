@@ -5,6 +5,7 @@ import { SurfaceType, SURFACES } from '../core/surfaces';
 import { ROAD_TILE_METRES, roadTextures } from '../render/roadtexture';
 import { applyGroundSpotlightNormals } from '../render/comic';
 import { applyCloudShadow } from '../render/cloudshadow';
+import { applyCleanAsphalt } from '../render/cleanstyle';
 import { varietyEventOfKindAt, varietyWeightAt, type VarietyEvent } from './director';
 import { tileGroundSampler, type DrawnGroundSample } from './deserttiledata';
 import { desertPaletteAt, roadConditionAt, ROAD_START_SURFACE } from './gradient';
@@ -525,10 +526,12 @@ interface ShoulderBuild {
 // Shared across every chunk; never disposed by the streamer. The maps are built on
 // the first chunk build (they need a canvas, so not at module load) and the vertex
 // colours are divided by the albedo's mean so the surface keeps its old brightness.
-// Cloud shadow is the outermost wrap on all three, so it captures the ground-spotlight
-// patch each of them already carries instead of hiding it. A cloud crossing the road is
-// most of the effect: the ribbon is the one surface always in view.
-const roadMaterial = applyCloudShadow(
+// Cloud shadow wraps all three around the ground-spotlight patch each of them already
+// carries, so it captures that patch instead of hiding it. A cloud crossing the road is
+// most of the effect: the ribbon is the one surface always in view. The asphalt's Clean
+// branch (render/cleanstyle.ts) goes outermost on the ribbon: it only changes how its
+// two maps are read.
+const roadMaterial = applyCleanAsphalt(applyCloudShadow(
   applyGroundSpotlightNormals(
     new THREE.MeshStandardMaterial({
       vertexColors: true,
@@ -537,7 +540,7 @@ const roadMaterial = applyCloudShadow(
     }),
   ),
   { wetSheen: true },
-);
+));
 /** Dark, weathered aggregate exposed only where the sand falls below the mat edge. */
 const roadBedMaterial = applyCloudShadow(
   applyGroundSpotlightNormals(

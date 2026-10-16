@@ -425,6 +425,9 @@ export const HAZE_FRAGMENT = /* glsl */ `
   uniform float uInkStrength;
   uniform float uInkThreshold;
   uniform float uFxaa;
+  // The Clean style (render/cleanstyle.ts) draws no grain: 1 skips it. Zero, the value
+  // a pass built without it reads, is Standard.
+  uniform float uGrainOff;
   uniform vec3 uViewTint;
   uniform float uViewTintStrength;
   uniform float uBinoculars;
@@ -1143,14 +1146,16 @@ export const HAZE_FRAGMENT = /* glsl */ `
     ) / 16.0;
     color.rgb = clamp(floor(color.rgb * RETRO_LEVELS + bayer) / RETRO_LEVELS, 0.0, 1.0);
     #else
-    float grainFrame = mod(floor(uTime * 12.0), 64.0);
-    vec2 grainPixel = gl_FragCoord.xy + vec2(grainFrame * 17.0, grainFrame * 43.0);
-    float grain =
-      fract(52.9829189 * fract(dot(grainPixel, vec2(0.06711056, 0.00583715)))) - 0.5;
-    float grainLum = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
-    float grainMask =
-      smoothstep(0.015, 0.12, grainLum) * (1.0 - smoothstep(0.72, 1.0, grainLum));
-    color.rgb = clamp(color.rgb + grain * grainMask * 0.08, 0.0, 1.0);
+    if (uGrainOff < 0.5) {
+      float grainFrame = mod(floor(uTime * 12.0), 64.0);
+      vec2 grainPixel = gl_FragCoord.xy + vec2(grainFrame * 17.0, grainFrame * 43.0);
+      float grain =
+        fract(52.9829189 * fract(dot(grainPixel, vec2(0.06711056, 0.00583715)))) - 0.5;
+      float grainLum = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
+      float grainMask =
+        smoothstep(0.015, 0.12, grainLum) * (1.0 - smoothstep(0.72, 1.0, grainLum));
+      color.rgb = clamp(color.rgb + grain * grainMask * 0.08, 0.0, 1.0);
+    }
     #endif
 
     // Worn shades are a coloured-glass transmission curve, not a flat alpha wash:

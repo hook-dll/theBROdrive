@@ -1731,6 +1731,29 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           changed();
         },
       })))]),
+      // Art direction, on every rung: uniforms only, so it changes in place mid-drive.
+      segmented('Style', [
+        {
+          label: 'Standard',
+          icon: 'gfx3',
+          hint: 'The game as tuned: textured asphalt, film grain, smooth shading and soft shadows.',
+          style: 'standard' as const,
+        },
+        {
+          label: 'Clean',
+          icon: 'gfx1',
+          hint: 'Calm and steady: flat asphalt, no film grain, no specks of scatter, faceted shapes '
+            + 'in a few steps of light, crisp shadows near the car. Easier on tired eyes. Costs nothing.',
+          style: 'clean' as const,
+        },
+      ].map(({ style, ...option }) => ({
+        ...option,
+        active: () => settings.style === style,
+        pick: () => {
+          settings.style = style;
+          changed();
+        },
+      }))),
     );
   };
 
@@ -2464,6 +2487,7 @@ export class MainMenu {
         fxaa: base.fxaa,
         shadows: base.shadows,
         grass: base.grass,
+        style: base.style,
         frameRateLimit: base.frameRateLimit,
         mirrorFrameRate: base.mirrorFrameRate,
         fieldOfView: base.fieldOfView,
@@ -2498,6 +2522,7 @@ export class MainMenu {
           fxaa: settings.fxaa,
           shadows: settings.shadows,
           grass: settings.grass,
+          style: settings.style,
           frameRateLimit: settings.frameRateLimit,
           mirrorFrameRate: settings.mirrorFrameRate,
           fieldOfView: settings.fieldOfView,

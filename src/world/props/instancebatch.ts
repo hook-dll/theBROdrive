@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CLEAN_CULL_GONE_PX } from '../../render/cleanstyle';
 
 /**
  * Shared instanced batches for chunk props.
@@ -60,6 +61,13 @@ export interface BatchLod {
   readonly far?: { readonly geometry: THREE.BufferGeometry; readonly distance: number };
   /** Past this every instance has faded to nothing in the vertex shader: the page is not drawn. */
   readonly hideBeyond: number;
+  /**
+   * The kind's largest instance, metres, as its material's Clean cull measures it
+   * (render/cleanstyle.ts `applyCleanCull`: the form size times the largest scale). In
+   * the Clean style a page is not drawn once even that would be under
+   * `CLEAN_CULL_GONE_PX`; the shader has already shrunk every instance in it to nothing.
+   */
+  readonly cleanSize?: number;
 }
 
 /** The chunk a slot is allocated for. `ChunkContext` satisfies this. */
@@ -198,10 +206,16 @@ export class InstanceBatches {
    * Sets every LOD page's geometry and visibility for a camera at (`x`, `z`), in the
    * render frame. Once per rendered frame, after the camera moved; it walks only the
    * LOD pages (a few dozen) and touches a page only when its range changes.
+   * `cleanPixelsPerMetre` (render/cleanstyle.ts) is 0 outside the Clean style. The
+   * ground distance it is divided by is never more than the eye distance the shader
+   * divides by, so a page hidden here holds nothing the shader would still draw.
    */
-  syncLod(x: number, z: number): void {
+  syncLod(x: number, z: number, cleanPixelsPerMetre: number): void {
     for (const page of this.lodPages) {
       const lod = page.family.kind.lod!;
+      const hideBeyond = cleanPixelsPerMetre > 0 && lod.cleanSize !== undefined
+        ? Math.min(lod.hideBeyond, (lod.cleanSize * cleanPixelsPerMetre) / CLEAN_CULL_GONE_PX)
+        : lod.hideBeyond;
       const sphere = page.sphere;
       // Ground distance to the nearest point the page's instances can occupy.
       const d = sphere.isEmpty()
@@ -209,7 +223,7 @@ export class InstanceBatches {
         : Math.hypot(sphere.center.x + page.mesh.position.x - x, sphere.center.z + page.mesh.position.z - z) - sphere.radius;
       const was = page.range;
       let range: PageRange;
-      if (d > lod.hideBeyond - (was === PageRange.Hidden ? LOD_HYSTERESIS_M : 0)) range = PageRange.Hidden;
+      if (d > hideBeyond - (was === PageRange.Hidden ? LOD_HYSTERESIS_M : 0)) range = PageRange.Hidden;
       else if (lod.far && d > lod.far.distance - (was === PageRange.Near ? 0 : LOD_HYSTERESIS_M)) range = PageRange.Far;
       else range = PageRange.Near;
       if (range === was) continue;

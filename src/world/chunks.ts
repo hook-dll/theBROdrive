@@ -619,9 +619,12 @@ export class ChunkStreamer {
     this.batches.rebase();
   }
 
-  /** Range of the batch pages that have one, for the camera at (`x`, `z`) in the render frame. */
-  syncLod(x: number, z: number): void {
-    this.batches.syncLod(x, z);
+  /**
+   * Range of the batch pages that have one, for the camera at (`x`, `z`) in the render
+   * frame; `cleanPixelsPerMetre` is render/cleanstyle.ts's, 0 outside the Clean style.
+   */
+  syncLod(x: number, z: number, cleanPixelsPerMetre: number): void {
+    this.batches.syncLod(x, z, cleanPixelsPerMetre);
   }
 
   private context(chunk: BuiltChunk): ChunkContext {

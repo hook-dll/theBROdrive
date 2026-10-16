@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { WebGLProgramParametersWithUniforms } from 'three';
 // Galleries use comic/materials without the game Renderer; install before any compile.
 import './lightshader';
+import { CLEAN_SMOOTH_NORMALS } from './cleanstyle';
 
 /**
  * Comic-book shading for the ground: banded light, strata contours, ink stipple.
@@ -308,12 +309,15 @@ export function applyComicShading(
   return material;
 }
 
-/** Applies slope-correct spotlight response without the comic surface treatment. */
+/**
+ * Applies slope-correct spotlight response without the comic surface treatment. The
+ * road, its bed and markings: ground that keeps its own normals in the Clean style.
+ */
 export function applyGroundSpotlightNormals(
   material: THREE.MeshStandardMaterial,
 ): THREE.MeshStandardMaterial {
   material.onBeforeCompile = (shader) => {
-    shader.fragmentShader = patchGroundSpotNormal(shader.fragmentShader);
+    shader.fragmentShader = CLEAN_SMOOTH_NORMALS + patchGroundSpotNormal(shader.fragmentShader);
   };
   material.customProgramCacheKey = () => GROUND_SPOT_PROGRAM_KEY;
   return material;

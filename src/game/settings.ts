@@ -320,6 +320,14 @@ export function grassDefault(quality: GraphicsQuality): GrassMode {
 }
 
 /**
+ * The picture's art direction (render/cleanstyle.ts). Standard is the game as tuned;
+ * Clean is calm and temporally stable: a flat road, no film grain, no specks of
+ * scatter, faceted surfaces in a few steps of light and crisp near shadows. A taste,
+ * not a cost, so every rung defaults to Standard and a preset puts it back there.
+ */
+export type VisualStyle = 'standard' | 'clean';
+
+/**
  * The shadow mode this presentation pays for. A phone stays without the pass on a rung
  * whose tier says so, whatever the setting: that rule is about the device, not taste.
  */
@@ -559,6 +567,8 @@ export interface Settings {
    * retro.ts build profile). Fixed for a load, so changing it reloads the drive.
    */
   grass: GrassMode;
+  /** Art direction (`VisualStyle`); uniforms only, so it applies in place mid-drive. */
+  style: VisualStyle;
   /**
    * Frames per second the presentation may present, or null for no cap.
    *
@@ -697,6 +707,7 @@ export const DEFAULT_SETTINGS: Settings = {
   fxaa: true,
   shadows: 'full',
   grass: 'full',
+  style: 'standard',
   // Uncapped by default on every device, phones included: a cap is the player's choice
   // to make (heat, noise), not a default to discover.
   frameRateLimit: null,
@@ -760,6 +771,7 @@ export function withQualityPreset(
     fxaa: GRAPHICS_TIERS[quality].fxaa,
     shadows: shadowModeDefault(quality),
     grass: grassDefault(quality),
+    style: 'standard',
     frameRateLimit: null,
   };
 }
@@ -776,6 +788,7 @@ export function qualityPresetOf(settings: Settings, mobilePresentation: boolean)
     && settings.fxaa === GRAPHICS_TIERS[settings.graphicsQuality].fxaa
     && settings.shadows === shadowModeDefault(settings.graphicsQuality)
     && settings.grass === grassDefault(settings.graphicsQuality)
+    && settings.style === 'standard'
     && settings.frameRateLimit === null
     && (settings.graphicsQuality === 'retro'
       ? settings.retroLines === 360
@@ -970,6 +983,8 @@ export function sanitizeSettings(raw: unknown, mobilePresentation: boolean): Set
     grass: (GRASS_MODES as readonly unknown[]).includes(obj.grass)
       ? (obj.grass as GrassMode)
       : obj.grass === true ? 'full' : obj.grass === false ? 'light' : grassDefault(graphicsQuality),
+    // Missing means a save from before the option, which drew Standard.
+    style: obj.style === 'clean' ? 'clean' : 'standard',
     // Snap to an offered rate rather than clamping, so a hand-edited 31 or 999 cannot
     // become a frame rate the menu has no button for. `mobileFrameRate` is the phone-only
     // name this setting had first; reading it is how a save made before this change keeps

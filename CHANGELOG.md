@@ -4,6 +4,21 @@
 
 ### Added
 
+- STYLE: STANDARD OR CLEAN (`game/settings.ts` `VisualStyle`, `render/cleanstyle.ts`,
+  `render/lightshader.ts` `installCleanStyle`, `render/hazeshader.ts`, `core/renderer.ts`
+  `setStyle`, `world/props/instancebatch.ts` `syncLod`, `ui/menu.ts`, `main.ts`). A row in
+  Quality beside Shadows and Grass, Standard on every rung and kept by every preset;
+  Clean is a calm, temporally stable low-poly picture for tired eyes. In Clean the
+  asphalt is read from a deep mip with no normal map, so only its metre-scale patches,
+  the vertex colour and the markings remain; the finishing pass draws no film grain;
+  ground cover, barrel cacti and scrub shrink away below 6-8 px of projected height and
+  their batch pages go undrawn once every instance in them would; lit surfaces take
+  their triangle's face normal (fading back to smooth by 600 m; the terrain and the
+  road keep their own) and the sun's light in four bands; and the near shadow cascade
+  is one hardware compare, a crisp silhouette, instead of its soft nine. All of it is
+  branches on shared uniforms in GLSL both styles compile, so switching applies in
+  place with no program linked and Standard draws as before. The frame report's header
+  names the style.
 - RESOLUTION IS A FRAME HEIGHT: 540p, 720p, 1080p OR 1440p (`game/settings.ts`
   `RENDER_HEIGHTS` `renderHeightDefault`, `core/renderer.ts` `renderPixelRatio`
   `setRenderHeight`, `app/bootwarmup.ts`, `ui/menu.ts`, `main.ts`). The Render scale row

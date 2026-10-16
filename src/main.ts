@@ -63,6 +63,7 @@ import { MirageTableau } from './render/mirage-tableau';
 import { MirageSchedule } from './render/mirage-schedule';
 import { LakeWater } from './render/lakewater';
 import { roadTextures } from './render/roadtexture';
+import { cleanPixelsPerMetre } from './render/cleanstyle';
 import { WheelSpray } from './render/wheelspray';
 import { SandTyreTracks } from './render/tyretracks';
 import { ambientBeamGain, VehicleLightRig } from './render/vehiclelights';
@@ -351,6 +352,7 @@ async function boot(): Promise<void> {
     world.state.settings.shadows,
   );
   renderer.setRetroLines(world.state.settings.retroLines);
+  renderer.setStyle(world.state.settings.style);
   /** Fullscreen API mode shared by the plus key and the touch fullscreen button. */
   const toggleFullscreen = (): void => {
     const transition = document.fullscreenElement
@@ -724,7 +726,7 @@ async function boot(): Promise<void> {
             + `dpr ${window.devicePixelRatio.toFixed(2)}`,
           `presenting ${framesPerSecond}, shadows `
             + `${shadowModeFor(s.shadows, s.graphicsQuality, mobilePresentation)}, `
-            + `grass ${s.grass}, fxaa ${s.fxaa ? 'on' : 'off'}`,
+            + `grass ${s.grass}, fxaa ${s.fxaa ? 'on' : 'off'}, style ${s.style}`,
           gpuLine,
           `simulation fixed at ${simulationHz} Hz`,
           `light slots ${spotSlots} spot per lit fragment, stars to magnitude ${stars}`,
@@ -2232,8 +2234,13 @@ async function boot(): Promise<void> {
     // its own, so it needs no interpolation and is placed after the cars moved.
     carTowField.syncVisuals();
     debris.syncVisuals();
-    // The camera has moved for this frame: the ground cover's pages take their range.
-    streamer.syncLod(renderer.camera.position.x, renderer.camera.position.z);
+    // The camera has moved for this frame: the ground cover's pages take their range,
+    // and in the Clean style the pages whose every tuft is under a few pixels go too.
+    streamer.syncLod(
+      renderer.camera.position.x,
+      renderer.camera.position.z,
+      cleanPixelsPerMetre(renderer.camera.projectionMatrix),
+    );
     frameProfiler?.end('vehicles');
 
     frameProfiler?.begin('effects');
@@ -3005,6 +3012,7 @@ async function boot(): Promise<void> {
       sky.setShadowMode(world.state.settings.shadows);
       renderer.setRenderHeight(world.state.settings.renderHeight);
       renderer.setRetroLines(world.state.settings.retroLines);
+      renderer.setStyle(world.state.settings.style);
       camera.setFieldOfView(world.state.settings.fieldOfView);
       camera.setShake(world.state.settings.cameraShake);
       camera.setStyle(world.state.settings.cameraStyle);

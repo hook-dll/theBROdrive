@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { cleanStyle } from './cleanstyle';
 
 /**
  * Keep every light slot and its program variant, but skip exactly black uniforms.
@@ -113,6 +114,10 @@ function installStableShadowFilter(): void {
  * the box only; outside it the wide map's four as before. Fixed to the map like the
  * cross, so edges do not crawl.
  *
+ * The Clean style (render/cleanstyle.ts, `cleanStyle.y`) reads the near map with ONE
+ * of those compares instead: a silhouette a single near texel (1.5 cm) wide, still
+ * fixed to the map. A branch on a uniform, in the same function both styles compile.
+ *
  * The chunks change for every program alike, before any compiles: no variant. The
  * `&& receiveShadow )` test stays verbatim for the kit body's gate (render/materials.ts
  * `kitLightsBegin`).
@@ -142,6 +147,9 @@ function installSunShadowCascade(): void {
 		vec4 coord = vDirectionalShadowCoord[ 1 ];
 		vec3 uv = coord.xyz / coord.w;
 		uv.z += directionalLightShadows[ 1 ].shadowBias;
+		if ( cleanStyle.y > 0.0 ) {
+			return mix( 1.0, texture( directionalShadowMap[ 1 ], uv ), directionalLightShadows[ 1 ].shadowIntensity );
+		}
 		vec2 texel = max( directionalLightShadows[ 1 ].shadowRadius, 1.0 ) / directionalLightShadows[ 1 ].shadowMapSize;
 		float shadow = 0.0;
 		for ( int y = -1; y <= 1; y ++ ) {
@@ -203,8 +211,77 @@ function installScreenAuthoredUnlit(): void {
   }
 }
 
+/**
+ * The Clean style's faces and light (render/cleanstyle.ts, `cleanStyle.x`), for every
+ * lit program at once.
+ *
+ *  - FACES. The lighting normal becomes the triangle's own, from the derivatives of the
+ *    view position (three's `flatShading` arithmetic). `flatShading` itself is a
+ *    program key, so toggling it would relink every lit material mid-drive; this is a
+ *    branch in the chunk all of them already compiled. It fades back to the smooth
+ *    normal from `CLEAN_FACET_FULL_M` to `CLEAN_FACET_GONE_M`: out there triangles
+ *    shrink toward a pixel, and a face normal per pixel-sized triangle is glitter.
+ *    Ground that sets `CLEAN_SMOOTH_NORMALS` keeps its own (see that define).
+ *  - LIGHT. The sun's Lambert term is stepped into four bands at their centres, so the
+ *    mean light is kept and only its gradient is posterised, with a short ramp at each
+ *    step so an edge across a curved face is not a stair of pixels. Below the first
+ *    step it stays continuous, so a low sun fades off a surface instead of dropping a
+ *    band at dusk. Applied as a factor on the light's colour before `RE_Direct`, which
+ *    multiplies the colour by the same Lambert term: the product is the band.
+ *
+ * `cleanStyle` reaches the built-in lit materials through their ShaderLib uniforms
+ * and ShaderMaterials through `UniformsLib.lights`; the value is the shared plain
+ * object, so no material is touched to switch it.
+ */
+const CLEAN_FACET_FULL_M = 250;
+const CLEAN_FACET_GONE_M = 600;
+
+function installCleanStyle(): void {
+  const uniform = 'uniform vec3 cleanStyle;';
+  if (THREE.ShaderChunk.lights_pars_begin.includes(uniform)) return;
+  (THREE.UniformsLib.lights as Record<string, THREE.IUniform>).cleanStyle = { value: cleanStyle };
+  for (const shader of Object.values(THREE.ShaderLib)) {
+    if ('directionalLights' in shader.uniforms) shader.uniforms.cleanStyle = { value: cleanStyle };
+  }
+  THREE.ShaderChunk.lights_pars_begin += `
+${uniform}
+float cleanSunBand( float dotNL ) {
+	if ( cleanStyle.x <= 0.0 || dotNL <= 0.0 ) return 1.0;
+	float t = dotNL * 4.0;
+	float i = floor( t );
+	float stepped = min( ( i + 0.5 + smoothstep( 0.85, 1.0, t - i ) ) * 0.25, 0.875 );
+	return mix( dotNL, stepped, smoothstep( 0.0, 0.25, dotNL ) ) / dotNL;
+}
+`;
+  const lights = THREE.ShaderChunk.lights_fragment_begin;
+  const normalLine = 'vec3 geometryNormal = normal;';
+  const directCall =
+    'RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );';
+  const dirLoop = lights.indexOf('i < NUM_DIR_LIGHTS;');
+  const dirCall = dirLoop >= 0 ? lights.indexOf(directCall, dirLoop) : -1;
+  if (!lights.includes(normalLine) || dirCall < 0) throw new Error('Three lights_fragment_begin layout changed');
+  THREE.ShaderChunk.lights_fragment_begin = (
+    lights.slice(0, dirCall)
+    + 'directLight.color *= cleanSunBand( dot( geometryNormal, directLight.direction ) );\n\t\t'
+    + lights.slice(dirCall)
+  ).replace(
+    normalLine,
+    `${normalLine}
+#ifndef CLEAN_SMOOTH_NORMALS
+if ( cleanStyle.x > 0.0 ) {
+	vec3 cleanFacet = normalize( cross( dFdx( vViewPosition ), dFdy( vViewPosition ) ) );
+	float cleanFacetNear = 1.0 - smoothstep( ${CLEAN_FACET_FULL_M.toFixed(1)}, ${CLEAN_FACET_GONE_M.toFixed(1)}, length( vViewPosition ) );
+	vec3 cleanNormal = mix( geometryNormal, cleanFacet, cleanFacetNear );
+	// A smooth normal opposite its own face (a silhouette) would mix to zero.
+	geometryNormal = dot( cleanNormal, cleanNormal ) > 1e-8 ? normalize( cleanNormal ) : cleanFacet;
+}
+#endif`,
+  );
+}
+
 installPointLightZeroGuard();
 installSunShadowSlopeBias();
 installStableShadowFilter();
 installSunShadowCascade();
+installCleanStyle();
 installScreenAuthoredUnlit();

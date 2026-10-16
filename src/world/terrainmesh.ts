@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { SurfaceType } from '../core/surfaces';
 import { applyComicShading } from '../render/comic';
 import { applyCloudShadow } from '../render/cloudshadow';
+import { CLEAN_SMOOTH_NORMALS } from '../render/cleanstyle';
 import { weather } from './weather';
 import { type Road } from './road';
 import { RoadDistance } from './roaddistance';
@@ -595,7 +596,8 @@ transformed.y -= aTerrainDetail * detailFade;${grit ? '\nvShoulderGrit = aShould
       .replace('comicStipple( stippleUv, footprint )', 'groundStipple( stippleUv, footprint, vGroundSurface.x )')
       .replace('#include <opaque_fragment>', GROUND_GLITTER_HOOK);
     if (grit) fragment = fragment.replace('#include <tonemapping_fragment>', SHOULDER_GRIT_FRAGMENT);
-    shader.fragmentShader = fragment;
+    // The ground keeps its interpolated normals in the Clean style (render/cleanstyle.ts).
+    shader.fragmentShader = CLEAN_SMOOTH_NORMALS + fragment;
   };
   const previousKey = material.customProgramCacheKey;
   material.customProgramCacheKey = () =>

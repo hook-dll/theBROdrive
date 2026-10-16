@@ -4,6 +4,7 @@ import '../render/lightshader';
 import { setAirFogEdge } from '../render/airfog';
 import { primeMaxAnisotropy } from '../render/texturequality';
 import { retroActive, retroPixelRatio } from '../render/retro';
+import { setCleanFrameHeight, setCleanStyle } from '../render/cleanstyle';
 import {
   advanceHazePhase,
   createHeatMirageUniforms,
@@ -26,6 +27,7 @@ import {
   type GraphicsQuality,
   type RenderHeight,
   type RetroLines,
+  type VisualStyle,
 } from '../game/settings';
 import type { ShadeTint } from '../items/items';
 
@@ -540,6 +542,7 @@ export class Renderer {
         uInkStrength: { value: Math.min(1, Math.max(0, inkStrength)) },
         uInkThreshold: { value: INK_THRESHOLD },
         uFxaa: { value: fxaa && quality !== 'retro' ? 1 : 0 },
+        uGrainOff: { value: 0 },
         uViewTint: { value: new THREE.Color(1, 1, 1) },
         uViewTintStrength: { value: 0 },
         uBinoculars: { value: 0 },
@@ -1130,6 +1133,7 @@ export class Renderer {
     uniforms.uSceneResolution.value.set(width, height);
     uniforms.uResolution.value.set(this._drawSize.x, this._drawSize.y);
     uniforms.uPanini.value = lens;
+    setCleanFrameHeight(this._drawSize.y);
   }
 
   // --- Resolution and GPU timing ---
@@ -1357,6 +1361,17 @@ export class Renderer {
   setFxaa(enabled: boolean): void {
     this.fxaa = enabled;
     this.hazeMaterial.uniforms.uFxaa.value = enabled && this.quality !== 'retro' ? 1 : 0;
+  }
+
+  /**
+   * `Settings.style`. Clean is uniforms only (render/cleanstyle.ts): the lit chunks'
+   * switches, the small-scatter cull and the pass's grain, so nothing recompiles and
+   * no target changes.
+   */
+  setStyle(style: VisualStyle): void {
+    const clean = style === 'clean';
+    setCleanStyle(clean);
+    this.hazeMaterial.uniforms.uGrainOff.value = clean ? 1 : 0;
   }
 
   /** Changes post-process outline opacity without rebuilding the shader pass. */
