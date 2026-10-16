@@ -218,3 +218,30 @@ The wing's ends come down to the lid as end plates 50 mm wide, running forward t
 - **21099 drawing vs the rear door.** The drop glass's rear edge is moved off the drawn line for the reasons in §1.1.
 - **Tail-lamp roles.** Colours are measured; which red cell is tail and which is stop is [INFERENCE] on the 21099 and the 2115.
 - **2115 overhang split** rests on one near-orthographic photo corrected for depth (±20 mm); the factory gives only the 4330 total.
+- **Front wing vs door (§6).** The wing's shoulder line is on the drawn 0.705, but the doors' crease row stays at 0.63–0.64 (the drawings put the line at 0.71 on the doors too), so behind the arch the line comes down 75 mm to the door. The 2115's own nose stations keep the old wing (crease 0.6 under the arch's lip).
+
+## 6. Front wing (2108, 2109, 21099; 2108 frame)
+
+Owner (2026-10-16): the front wing in front of and above the front arch is over-complicated, too many breaks and facets.
+
+**Registration.** 2108 side view: front hub x 829.3, ground y 431, 3.826 mm/px, so s = (x − 623.8) / 261.37 and y = (431 − y_px) / 261.37 (the bumper tips 622 / 1669 land on 0 / 4.006). Top view: the same s; centre line y 811.5, across 3.88 mm/px (1620 = 417.5 px at s 1.8); half widths below are scaled by 0.825 / 0.81 onto the model's cabin. Photos and the other drawings as in §0 (the 2109 drawing's heights registered on the belt 0.911 at y 250, isotropic, for this comparison only).
+
+| Feature | Reading | Spec |
+|---|---|---|
+| Shoulder line (the side's crease) | 2108 [D]: y_px 250 at x 695, 248.5 at 700, 247 at 710–750, 246–246.5 at 780–800, 245.5 at 930–945, 245 along the door → **0.69** at s 0.27, **0.698–0.710** from s 0.29 to 1.23, 0.71 on the door. 2109 [D]: 0.697 / 0.708 / 0.71 / 0.717 / 0.721 at s 0.35 / 0.5 / 0.6 / 0.785 / 1.0. 21099 [D, heights 5 % high, §5]: 0.716 → 0.737 over the same s. Photo `p1`: 0.675 at s 0.31, 0.69 over the hub, 0.708 at the door [P] | `crease` **0.705** at s 0.425, 0.5 and 0.878 (was 0.6 → 0.63) |
+| Arch, radial from the hub (829.3, 357.6) every 10° [D] | opening 93–94 px = **0.359**; the flare's crest 101–102 px = 0.388; its outer edge 105–108 px = **0.40–0.41** from 50° to 130°, broken at the top, where it comes within 20 mm of the shoulder line (0.685 against 0.705); the tyre 71 px | arch 0.281 × 1.28 = 0.360 and `ARCH_LIP` 0.045 → lip 0.686 at the top: unchanged, now 19 mm under the crease |
+| Widest line in plan [D top] | half 0.757 / 0.765 / 0.775 / 0.776 / 0.788 / 0.80 / 0.81 / 0.807 / 0.812 at s 0.14 / 0.215 / 0.29 / 0.37 / 0.52 / 0.67 / 0.865 / 1.06 / 1.25 | `wCrease` **0.77 / 0.775 / 0.801** at s 0.425 / 0.5 / 0.878 (was 0.81 / 0.815 / 0.82), the door's 0.825 at 1.232 |
+| Lean of the face above the shoulder line (the widest line against the wing's top, `wBelt`) | 0.28 / 0.25 / 0.18 / 0.06 m per m at s 0.52 / 0.67 / 0.865 / 1.06 | **0.244 / 0.2 / 0.124** at s 0.425 / 0.5 / 0.878, the door's 0.056 at the cowl; the corner's 0.45 at s 0.17 kept |
+
+**What made the facets.** The crease row (0.6 at s 0.5, 0.63 at the cowl) ran under the arch's top (0.641) and its lip (0.686). Every side row below the lip is lifted onto it (body.ts `sideColumn`), so from s ≈ 0.55 to 1.0 the crease lay on the lip in some arch columns and at its own height in the next, and the faces between cut diagonally across its 15° kink: fans of thin triangles up to 22° apart. Above it, the face's lean turned from 0.283 (16°) at s 0.5 to the door's 0.056 (3°) across the twelve arch facet columns, which the 0.73 / 0.83 flap rows cut into thin strips.
+
+**Spec** (samaras.ts `WING_FRONT`, `WING_MID`, `COWL`, `onRun`). Two stations on existing arch facet columns, s 0.42532 and 0.878092 (0.785 − 0.35968 cos(i · 15°), i = 0, 7), so no tub column, bonnet face or sill moves: their belt, deck, sill and widths other than `wCrease` are the old ones interpolated (`onRun`). The arch and its lip now always lie under the crease, the face above it is cut by no arch row, and the turn of its lean from the corner's 0.45 to 0.244 happens in the one wide strip in front of the arch (s 0.17–0.42), where it is one fold. The crease comes down behind the arch to the door's 0.63 (§5).
+
+**Check** (left wing, s 0.17–1.235, y 0.45–0.95, faces of the body's paint; dihedral between neighbouring faces across their upright edges, i.e. columns and strip diagonals, not the rows):
+
+| Car | Largest angle | Edges over 2° | Σ length × angle |
+|---|---|---|---|
+| 2108, 2109 | 22.4° → **6.9°** | 4.13 → **1.34** m | 21.4 → **11.5** m° |
+| 21099 | 22.4° → **7.5°** | 6.94 → **1.81** m | 25.3 → **15.2** m° |
+
+Proof against the tree before the change (`/tmp/cf/base.json`, triangles in the car frame at 1e-5 m, sorted, hashed): every other car identical in hash, count and bounds (the 2115 included: its stations take only the cowl and door from `SALOON_FRONT`), apart from the GAZ-24, GAZ-31029 and 2111, which a concurrent greenhouse change was moving. On the three, bounds unchanged; triangles 2108 / 2109 10 229 / 11 394 → 10 301 / 11 466, 21099 11 757 → 11 879; the triangles that differ lie in s 0.17–1.232, y 0.264–0.90, |x| 0.48–0.825, in three meshes only on each: the body's paint (the wing), its trim (the front arch's liner, whose edge follows the skin) and the engine bay's paint (its inner wings loft through the two new stations, within 1.7 mm of their old surface). `tools/kit-zfight.ts vaz2108 vaz2109 vaz21099`: PASS, 0 visible and 0 slits. Close-ups before and after over the drawings: `build/k/compare2/samara_<car>_wing_{before,after}_{side,side_lines,side_overlay,top_overlay,top_lines,q34,front}.png`.

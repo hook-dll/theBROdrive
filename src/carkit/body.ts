@@ -16,7 +16,7 @@
  */
 
 import * as THREE from 'three';
-import { PartBuilder, clipPolygon, cutUnder, lerp, newell, polygonArea, table, type Outline, type Vec3 } from './builder';
+import { PartBuilder, clipPolygon, cutUnder, lerp, lerp3, newell, polygonArea, table, type Outline, type Vec3 } from './builder';
 import type { CabinColumn, KitCarSpec, TubStation } from './spec';
 
 /** Bevel under the sill: how far the side's bottom edge turns under. */
@@ -235,6 +235,12 @@ export class BodyFrame {
   screenFoot(frac: number): number {
     const foot = this.spec.cabin.screenFoot;
     return foot === undefined ? this.cowl : this.cowl - foot * (1 - frac * frac);
+  }
+
+  /** How far the roof stands below its level at s (`CabinSpec.roofDrop`); 0 without one. */
+  roofDrop(s: number): number {
+    const line = this.spec.cabin.roofDrop;
+    return line ? table(line, s) : 0;
   }
 
   /**
@@ -755,6 +761,28 @@ export function buildShell(frame: BodyFrame): ShellResult {
     const t = (y - a[1]) / (b[1] - a[1] || 1);
     return [lerp(a[0], b[0], t), y, lerp(a[2], b[2], t)];
   };
+  /**
+   * A painted greenhouse or roof quad. On a rounded roof (`railBend`) a twisted one is cut
+   * on the diagonal that folds it outward: the other diagonal sinks it into a dent where the
+   * roof's rows drop by different amounts (`cornerDrop`, `roofDrop`). Else one face, fanned
+   * by the builder as before.
+   */
+  const quad = (q: Vec3[], owner: string, mat: Mat, lined: boolean): void => {
+    const n = newell([q[0]!, q[1]!, q[2]!]);
+    const twist = dot(sub(q[3]!, q[0]!), norm(n));
+    if (!cabin.railBend || Math.hypot(n[0], n[1], n[2]) < 1e-12 || Math.abs(twist) < 1e-6) {
+      shell.face(q, owner, mat, false, lined);
+      return;
+    }
+    // Outward as `cutShell` takes it: away from a line along the car at mid height. With
+    // the last corner standing out of the first three's plane, the 0–2 fold would be
+    // concave: cut on 1–3.
+    const c = centroid(q);
+    const out: Vec3 = Math.abs(n[2]) > Math.abs(n[0]) + Math.abs(n[1]) ? [0, 0, c[2]] : [c[0], c[1] - 0.62, 0];
+    const lastOut = twist * Math.sign(dot(n, out)) > 0;
+    const halves = lastOut ? [[q[0]!, q[1]!, q[3]!], [q[1]!, q[2]!, q[3]!]] : [[q[0]!, q[1]!, q[2]!], [q[0]!, q[2]!, q[3]!]];
+    for (const h of halves) shell.face(h, owner, mat, false, lined);
+  };
   for (const side of [1, -1]) {
     const ring: Ring[] = [];
     // One set of fractions across the roof for both ends, so the roof's grid meets the
@@ -768,7 +796,11 @@ export function buildShell(frame: BodyFrame): ShellResult {
       return [0, 1, 2].map((index) => {
         const x = local[index]! * sec.r4[0];
         const frac = cowlFracs[index]!;
-        const crownY = cabin.rail + cabin.crown * (1 - frac * frac);
+        // The end column's `cornerDrop` lowers the screen's (or back light's) outer top
+        // corner with it, so the rail's corner is cut as one convex chamfer.
+        const column = kind === 'front' ? cabin.columns[0]! : cabin.columns[cabin.columns.length - 1]!;
+        const endDrop = index === 2 ? (column.cornerDrop ?? 0) : 0;
+        const crownY = cabin.rail + cabin.crown * (1 - frac * frac) - endDrop - frame.roofDrop(top);
         // A curved screen's foot stands ahead of the cowl towards the centre line.
         const sb = kind === 'front' ? frame.screenFoot(frac) : s;
         const b: Vec3 = P(side * x, frame.deckY(sb, x), sb);
@@ -780,7 +812,7 @@ export function buildShell(frame: BodyFrame): ShellResult {
           q = along(b, t, t[1] - cabin.screenHeader);
         } else if (cabin.rearKnee) {
           const centreB = frame.deckY(s, 0);
-          const centreT = cabin.rail + cabin.crown;
+          const centreT = cabin.rail + cabin.crown - frame.roofDrop(top);
           const kt = (cabin.rearKnee.y - centreB) / (centreT - centreB);
           k = [lerp(b[0], t[0], kt), lerp(b[1], t[1], kt), frame.z(cabin.rearKnee.s)];
           q = along(k, t, t[1] - cabin.rearHeader);
@@ -789,7 +821,7 @@ export function buildShell(frame: BodyFrame): ShellResult {
           q = along(b, t, t[1] - cabin.rearHeader);
         }
         const inset = kind === 'front' ? cabin.railInset : -cabin.railInset;
-        const u: Vec3 = P(side * frac * (cabin.railHalf - cabin.railInset), crownY + cabin.railRise, top + inset);
+        const u: Vec3 = P(side * frac * (cabin.railHalf - cabin.railInset), crownY + frame.roofDrop(top) + cabin.railRise - frame.roofDrop(top + inset), top + inset);
         return { b, k, q, t, u, kind, frac };
       });
     };
@@ -797,8 +829,10 @@ export function buildShell(frame: BodyFrame): ShellResult {
     const sideRing: Ring[] = cabin.columns.map((column, i) => {
       const sec = frame.section(column.s);
       const b: Vec3 = P(side * sec.r4[0], sec.r4[1], column.s);
-      // A column's `drop` chamfers the rail's corner: its top point stands below the rail.
-      const t: Vec3 = P(side * cabin.railHalf, cabin.rail - (column.drop ?? 0), column.top);
+      // `drop` lowers the column's top point below the rail; `cornerDrop` also the rail's
+      // edge over it (`u`), as the screen's outer top corner does (`end`).
+      const corner = column.cornerDrop ?? 0;
+      const t: Vec3 = P(side * cabin.railHalf, cabin.rail - (column.drop ?? corner) - frame.roofDrop(column.top), column.top);
       const last = i === cabin.columns.length - 1;
       let k = along(b, t, b[1] + cabin.glassBottom);
       let q = along(b, t, t[1] - cabin.glassTop - (column.glassDrop ?? 0));
@@ -810,7 +844,7 @@ export function buildShell(frame: BodyFrame): ShellResult {
         q = along(k, t, t[1] - cabin.glassTop);
       }
       const inset = i === 0 ? cabin.railInset : last ? -cabin.railInset : 0;
-      const u: Vec3 = P(side * (cabin.railHalf - cabin.railInset), cabin.rail + cabin.railRise, column.top + inset);
+      const u: Vec3 = P(side * (cabin.railHalf - cabin.railInset), cabin.rail + cabin.railRise - corner - frame.roofDrop(column.top + inset), column.top + inset);
       return { b, k, q, t, u, kind: 'side', frac: 1, column };
     });
     sideRing.forEach((a, i) => {
@@ -818,20 +852,52 @@ export function buildShell(frame: BodyFrame): ShellResult {
       const next = sideRing[i + 1];
       if (!next) return;
       // Where a station between two columns bends the tub's top edge (a hatch's D pillar
-      // over the lamp corners), the strip's foot bends with it, so the two meet there.
+      // over the lamp corners), the strip's foot bends with it, so the two meet there; at
+      // a point of `roofDrop` between the columns' tops the strip's top bends with the roof.
       const s0 = a.column!.s;
       const s1 = next.column!.s;
+      const bends: { f: number; sb: number }[] = [];
       for (const st of spec.stations) {
         if (st.s <= s0 || st.s >= s1) continue;
         const f = (st.s - s0) / (s1 - s0);
-        const at = (p: Vec3, q: Vec3): Vec3 => [lerp(p[0], q[0], f), lerp(p[1], q[1], f), lerp(p[2], q[2], f)];
         const sec = frame.section(st.s);
-        const b: Vec3 = P(side * sec.r4[0], sec.r4[1], st.s);
+        const straight = lerp3(a.b, next.b, f);
+        if (Math.hypot(side * sec.r4[0] - straight[0], sec.r4[1] - straight[1]) <= 0.001) continue;
+        bends.push({ f, sb: st.s });
+      }
+      const line = cabin.roofDrop;
+      if (line) {
+        const top0 = a.column!.top;
+        const top1 = next.column!.top;
+        for (const [s] of line) {
+          if (s <= top0 || s >= top1) continue;
+          const f = (s - top0) / (top1 - top0);
+          bends.push({ f, sb: lerp(s0, s1, f) });
+        }
+        bends.sort((p, q) => p.f - q.f);
+      }
+      for (const { f, sb } of bends) {
+        const at = (p: Vec3, q: Vec3): Vec3 => lerp3(p, q, f);
+        const sec = frame.section(sb);
+        const b: Vec3 = P(side * sec.r4[0], sec.r4[1], sb);
         const straight = at(a.b, next.b);
-        if (Math.hypot(b[0] - straight[0], b[1] - straight[1]) <= 0.001) continue;
         const kl = at(a.k, next.k);
         const k: Vec3 = [kl[0] + b[0] - straight[0], kl[1] + b[1] - straight[1], kl[2] + b[2] - straight[2]];
-        ring.push({ b, k, q: at(a.q, next.q), t: at(a.t, next.t), u: at(a.u, next.u), kind: 'side', frac: 1, column: a.column });
+        let q = at(a.q, next.q);
+        let t = at(a.t, next.t);
+        let u = at(a.u, next.u);
+        if (line) {
+          // The roof's own drop at the point, not the two columns' mean; the glass's top
+          // follows the rail.
+          const bend = (p: Vec3, pa: Vec3, pb: Vec3): number =>
+            frame.roofDrop(frame.zNose - p[2]) - lerp(frame.roofDrop(frame.zNose - pa[2]), frame.roofDrop(frame.zNose - pb[2]), f);
+          const dt = bend(t, a.t, next.t);
+          const du = bend(u, a.u, next.u);
+          q = [q[0], q[1] - dt, q[2]];
+          t = [t[0], t[1] - dt, t[2]];
+          u = [u[0], u[1] - du, u[2]];
+        }
+        ring.push({ b, k, q, t, u, kind: 'side', frac: 1, column: a.column });
       }
     });
     ring.push(...end('rear').reverse());
@@ -862,15 +928,30 @@ export function buildShell(frame: BodyFrame): ShellResult {
         [a.b, b.b, b.k, a.k, 0],
         [a.k, b.k, b.q, a.q, 1],
         [a.q, b.q, b.t, a.t, 2],
-        [a.t, b.t, b.u, a.u, 3],
       ];
+      const bend = cabin.railBend;
+      if (bend) {
+        // A row along the rail's chamfer, so the roof's edge turns in two steps. Its first
+        // step from the glass's top rises no steeper than the glass under it (95 %): at a
+        // raked back light the full lift folded the header in along the glass's top edge.
+        const m = (r: Ring): Vec3 => {
+          const run = (p: Vec3, q: Vec3): number => Math.hypot(p[0] - q[0], p[2] - q[2]) || 1e-9;
+          const glassSlope = (r.t[1] - r.q[1]) / run(r.t, r.q);
+          const edgeSlope = (r.u[1] - r.t[1]) / run(r.u, r.t);
+          const up = edgeSlope > 0 && glassSlope > 0 ? Math.min(bend[1], (bend[0] * 0.95 * glassSlope) / edgeSlope) : bend[1];
+          return [lerp(r.t[0], r.u[0], bend[0]), lerp(r.t[1], r.u[1], Math.max(bend[0], up)), lerp(r.t[2], r.u[2], bend[0])];
+        };
+        bands.push([a.t, b.t, m(b), m(a), 3], [m(a), m(b), b.u, a.u, 3]);
+      } else {
+        bands.push([a.t, b.t, b.u, a.u, 3]);
+      }
       for (const [p0, p1, p2, p3, band] of bands) {
         if (band === 3) {
-          shell.face([p0, p1, p2, p3], 'body', 'paint', false, true);
+          quad([p0, p1, p2, p3], 'body', 'paint', true);
         } else if (band === 1 && glass !== null) {
           shell.face([p0, p1, p2, p3], glass, 'glass');
         } else {
-          shell.face([p0, p1, p2, p3], upper, 'paint', false, upper === 'body');
+          quad([p0, p1, p2, p3], upper, 'paint', upper === 'body');
         }
       }
     }
@@ -878,12 +959,19 @@ export function buildShell(frame: BodyFrame): ShellResult {
     // ---- roof: rows at the side columns, across at the deck's fractions ----
     const fracs = [1, cowlFracs[2]!, cowlFracs[1]!, 0];
     const sides = ring.filter((r) => r.kind === 'side');
-    const roofPoint = (u: Vec3, f: number): Vec3 => [u[0] * f, cabin.rail + cabin.railRise + cabin.crown * (1 - f * f), u[2]];
+    // The rows from the screen's outer corner outwards (f >= that corner's fraction) are
+    // lowered with their column's rail edge, so they meet the dropped corners (`drop`);
+    // the inner ones by the roof's drop at their s (`roofDrop`).
+    const roofPoint = (u: Vec3, f: number): Vec3 => [
+      u[0] * f,
+      cabin.rail + cabin.railRise + cabin.crown * (1 - f * f) - (f >= cowlFracs[2]! ? cabin.rail + cabin.railRise - u[1] : frame.roofDrop(frame.zNose - u[2])),
+      u[2],
+    ];
     for (let i = 0; i + 1 < sides.length; i++) {
       const u0 = sides[i]!.u;
       const u1 = sides[i + 1]!.u;
       for (let k = 0; k + 1 < fracs.length; k++) {
-        shell.face([roofPoint(u0, fracs[k]!), roofPoint(u1, fracs[k]!), roofPoint(u1, fracs[k + 1]!), roofPoint(u0, fracs[k + 1]!)], 'body', 'paint', false, true);
+        quad([roofPoint(u0, fracs[k]!), roofPoint(u1, fracs[k]!), roofPoint(u1, fracs[k + 1]!), roofPoint(u0, fracs[k + 1]!)], 'body', 'paint', true);
       }
     }
   }

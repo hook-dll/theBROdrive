@@ -235,6 +235,26 @@ Format of an entry: **Problem** → **Cause** → **Fix** → *Code* (commit).
   drawing's rear view 0.76–0.78 (0.825 at the crease). → Own boot stations: belt half
   0.785 / 0.77 / 0.755 / 0.75 from the back light to the tail, the lid's trailing edge on
   the drawn line (belt 0.89, deck 0.91 at 4.1). The 2115 keeps `SALOON_BOOT`. *samaras.ts*.
+- **2108/2109/21099 front wing over-complicated in front of and above the front arch: too
+  many breaks, facets and creases.** → The wing's crease (its widest row) ran at 0.6–0.63,
+  under the arch's top (0.641) and its lip (0.686). Every side row below the lip is lifted
+  onto it (`sideColumn`), so over s 0.55–1.0 the crease was on the lip in some arch columns
+  and at its own height in their neighbours, and the faces between cut across its 15° kink:
+  fans of thin triangles up to 22° apart. Above it the face turned from 16° of lean at s 0.5
+  to the door's 3° across a dozen arch columns. → The crease is the drawing's shoulder line
+  (0.70–0.71 [D 2108; the 2109 and 21099 drawings and photo `p1` agree]): 0.705 from the
+  arch's front (s 0.425) to past the hub (0.878), 20 mm over the lip, which matches the
+  drawn flare (0.685); half 0.77 → 0.801 straight in plan [D top view]; the face above it
+  leans 0.244 / 0.2 at s 0.425 / 0.5 and turns upright to the door; behind the arch it comes
+  down to the door's crease (0.63). Two stations added, both on existing arch columns, with
+  the belt, deck and sill interpolated, so the bonnet and the wing's top are unchanged
+  (`onRun`). On the left wing the largest angle between neighbouring faces 22.4° → 6.9°,
+  the length of edges over 2° 4.1 → 1.3 m (21099 6.9 → 1.8 m). Proved: every other car's
+  hash identical; on the three only the wing's skin, the front arch's liner and the engine
+  bay's inner wings (two more loft sections, within 1.7 mm of the old surface) changed, s
+  0.17–1.232. Left: the door's crease stays 0.63 against the drawn 0.71, so the line slopes
+  down 75 mm from over the hub to the door; the 2115's own nose stations keep the old
+  crease. *samaras.ts*, `measurements-samara.md` §6; `build/k/compare2/samara_*_wing_*`.
 
 ## Tens (2110, 2112)
 
@@ -332,14 +352,17 @@ Format of an entry: **Problem** → **Cause** → **Fix** → *Code* (commit).
   are identical. *exterior.ts `buildWipers` `fit`, tens.ts `wiperBlade`*.
 - **2110/2112: the front door glass's top front corner (raked edge into the rail) too
   sharp; rounded on the car; then a dent at the A pillar's top.** → The glass column ran
-  straight to the rail at 1.89; any `drop` (the column's top under the rail) leaves the
-  rail's face above it sloping in, a dent, and mixed drops along the pillar, frame and
-  glass zigzagged the outer edge. → The rail and the outer edge are left whole (no `drop`
-  on the tens' A pillar any more); only the glass's top edge drops 0.05 at its front
-  column (`CabinColumn.glassDrop`, the frame widening above it) and one more glass column
-  (s 1.45, top 1.95) brings it back to the frame's width: one chamfer inside the frame,
-  a few triangles per side. The 2112 takes the 2110's first 12 columns. *spec.ts, body.ts,
-  tens.ts*.
+  straight to the rail at 1.89; `drop` lowers only a column's top point, so the rail's
+  strip above it tips inwards (a dent); lowering the rail's edge with it still left the
+  screen's top corner high, and the facet from it down to the pillar folded (a dent from
+  the front 3/4). → `CabinColumn.cornerDrop` (tens' A pillar 0.037) lowers, together, the
+  column's top point, the rail's edge over it (`u`), the roof's rows from the screen's
+  outer corner outwards and the screen's outer top corner itself: one convex chamfer of
+  the corner. `drop` (the Samaras' 0.03) is unchanged; 2108–2115 identical in hash against
+  HEAD 649d0e9. The glass's top edge drops 0.05 at its front column
+  (`CabinColumn.glassDrop`, the frame widening above it) and one more glass column (s
+  1.45, top 1.95) brings it back: one chamfer inside the frame. The 2112 takes the
+  2110's first 12 columns. *spec.ts, body.ts, tens.ts*.
 
 ## World (2026-10-13)
 
@@ -696,9 +719,6 @@ amplified differences; `bench-*.json`, `pick-*.json`).
 - Not merged: the mirror faces (shown and hidden by render/carmirrors.ts) and a sticker
   layer, one draw where a car has stickers.
 
-## Failed approaches (do not retry)
-
-- **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent
 ## Nivas and Oka (2026-10-16)
 
 - **2121: the tail corners stood behind the tailgate, a pale wedge between them (lab).**
@@ -729,6 +749,9 @@ amplified differences; `bench-*.json`, `pick-*.json`).
   last station has a `notch` (`BodyFrame.lidFace`, `lidOwner`). *spec.ts, exterior.ts,
   body.ts, oka.ts*.
 
+## Failed approaches (do not retry)
+
+- **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent
   the pillars. Reverted. The warp works on the built geometry as is.
 - **Bridging a sloped boot lid straight to a notched tail outline** (the lid's rear face
   as one band from its top to the stepped notch contour): it folds wherever the contour

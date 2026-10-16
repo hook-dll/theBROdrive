@@ -730,8 +730,9 @@ const RETIRED_MODEL_IDS: Readonly<Record<string, string>> = {
  * The world's body for a saved model id. Only kit bodies drive in the world now
  * (2026-10-13, `CAR_MODELS`): a car saved on a pack body (`sv_vaz2101`, `sa_vaz2109`,
  * `gt_vaz2110`, …) loads on the kit body of the same car (`kit_vaz2101`, …), and one
- * with no kit twin (the Volgas, …) on the default. The carforge Oka (`cf_vaz1111`, and
- * the retired `sa_oka` through it) loads on `kit_vaz1111`.
+ * with no kit twin (the UAZs, the GAZ-21, …) on the default. The carforge Oka
+ * (`cf_vaz1111`, and the retired `sa_oka` through it) loads on `kit_vaz1111`, the
+ * carforge Volga (`cf_gaz31029`) on `kit_gaz31029`.
  */
 function worldModelId(saved: unknown): string {
   if (typeof saved !== 'string') return DEFAULT_CAR_MODEL_ID;

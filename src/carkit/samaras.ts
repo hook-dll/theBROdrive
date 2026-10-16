@@ -11,12 +11,39 @@
  * bumpers and its face.
  */
 
+import { lerp } from './builder';
 import type { CabinColumn, FaceLook, KitLook, TubStation } from './spec';
 import type { KitBody } from './specs';
 
 /** The Samara's deep moulded bumpers, the front one taller. */
 const SAMARA_FRONT_BUMPER = { kind: 'moulded', drop: 0.03, height: 0.26 } as const;
 const SAMARA_REAR_BUMPER = { kind: 'moulded', drop: 0.03, height: 0.22 } as const;
+
+/**
+ * A station at `s` on the straight run between stations `a` and `b`, every field
+ * interpolated as the generator interpolates them: until a field is overridden it
+ * changes nothing, so a new station keeps the belt, the deck and the sill where they were.
+ */
+function onRun(a: TubStation, b: TubStation, s: number): TubStation {
+  const t = (s - a.s) / (b.s - a.s);
+  const at = (key: 'sill' | 'crease' | 'belt' | 'deck' | 'wSill' | 'wCrease' | 'wBelt'): number => lerp(a[key], b[key], t);
+  return { s, sill: at('sill'), crease: at('crease'), belt: at('belt'), deck: at('deck'), wSill: at('wSill'), wCrease: at('wCrease'), wBelt: at('wBelt') };
+}
+
+/**
+ * The front wing (measurements-samara.md §6). Its top leans in more and more from the
+ * door to the lamps, whose outer edges it meets at the nose. Its widest line is the
+ * shoulder line the 2108 drawing has at 0.70–0.71 from s 0.29 to the door [D side y
+ * 247–245.5 px], 20 mm over the arch's lip (0.685 [D]): `crease` 0.705 from the arch's
+ * front (s 0.425) to past the hub, so the arch and its lip stay under it and no row of the
+ * side crosses it. The face above it leans in 0.244 m per m at the arch's front and 0.2 at
+ * s 0.5, turning gradually upright to the door's 0.056 at the cowl; the shoulder line runs
+ * straight in plan, half 0.77 → 0.801 [D top view: 0.776 → 0.81, scaled to the cabin's
+ * 0.825], and comes down to the door's crease (0.63) behind the arch.
+ */
+const WING_FRONT: TubStation = { s: 0.17, sill: 0.33, crease: 0.6, belt: 0.8, deck: 0.815, wSill: 0.785, wCrease: 0.8, wBelt: 0.71 };
+const WING_MID: TubStation = { s: 0.5, sill: 0.285, crease: 0.705, belt: 0.83, deck: 0.85, wSill: 0.795, wCrease: 0.775, wBelt: 0.75 };
+const COWL: TubStation = { s: 1.232, sill: 0.264, crease: 0.63, belt: 0.9, deck: 0.92, wSill: 0.8, wCrease: 0.825, wBelt: 0.81 };
 
 /**
  * VAZ-2108, 3.826 mm/px: overhangs 785 / 761 over a 2460 wheelbase. A plastic bumper to
@@ -31,12 +58,15 @@ export const BODY_2108: KitBody = {
   length: 4.006,
   platform: 'samara',
   stations: [
-    // The wing's top leans in more and more from the door to the lamps, whose outer edges
-    // it meets at the nose; the crease below it stays nearly full width all the way.
+    // The face; the front wing's corner behind it, leaning in at the top to the lamps' ends.
     { s: 0.11, sill: 0.36, crease: 0.6, belt: 0.775, deck: 0.79, wSill: 0.775, wCrease: 0.785, wBelt: 0.69 },
-    { s: 0.17, sill: 0.33, crease: 0.6, belt: 0.8, deck: 0.815, wSill: 0.785, wCrease: 0.8, wBelt: 0.71 },
-    { s: 0.5, sill: 0.285, crease: 0.6, belt: 0.83, deck: 0.85, wSill: 0.795, wCrease: 0.815, wBelt: 0.75 },
-    { s: 1.232, sill: 0.264, crease: 0.63, belt: 0.9, deck: 0.92, wSill: 0.8, wCrease: 0.825, wBelt: 0.81 },
+    WING_FRONT,
+    // On the arch's facet columns s = 0.785 − 0.35968 cos(i · 15°), i = 0 and 7, so they
+    // add no tub column.
+    { ...onRun(WING_FRONT, WING_MID, 0.42532), crease: 0.705, wCrease: 0.77 },
+    WING_MID,
+    { ...onRun(WING_MID, COWL, 0.878092), crease: 0.705, wCrease: 0.801 },
+    COWL,
     { s: 2.55, sill: 0.264, crease: 0.64, belt: 0.911, deck: 0.93, wSill: 0.8, wCrease: 0.825, wBelt: 0.81 },
     { s: 3.6, sill: 0.28, crease: 0.64, belt: 0.92, deck: 0.94, wSill: 0.795, wCrease: 0.82, wBelt: 0.805 },
     { s: 3.86, sill: 0.33, crease: 0.63, belt: 0.79, deck: 0.81, wSill: 0.78, wCrease: 0.81, wBelt: 0.79 },
@@ -189,7 +219,7 @@ export const BODY_2109: KitBody = {
 export const LOOK_2109: KitLook = { ...LOOK_2108, label: 'VAZ-2109' };
 
 /** The 2108's stations ahead of the rear wheel, which the saloons share. */
-const SALOON_FRONT: readonly TubStation[] = BODY_2108.stations.slice(0, 5);
+const SALOON_FRONT: readonly TubStation[] = BODY_2108.stations.filter((st) => st.s < BODY_2108.wheels.rear);
 
 /** The saloons' boot side from the back light's foot to the start of their tails. */
 const SALOON_BOOT: readonly TubStation[] = [
@@ -281,7 +311,7 @@ export const BODY_2115: KitBody = {
     { s: 0.0, sill: 0.36, crease: 0.6, belt: 0.775, deck: 0.79, wSill: 0.77, wCrease: 0.78, wBelt: 0.77 },
     { s: 0.17, sill: 0.33, crease: 0.6, belt: 0.8, deck: 0.815, wSill: 0.785, wCrease: 0.8, wBelt: 0.785 },
     { s: 0.5, sill: 0.285, crease: 0.6, belt: 0.83, deck: 0.85, wSill: 0.795, wCrease: 0.815, wBelt: 0.79 },
-    ...SALOON_FRONT.slice(3),
+    ...SALOON_FRONT.filter((st) => st.s >= COWL.s),
     ...SALOON_BOOT,
     { s: 4.105, sill: 0.3, crease: 0.63, belt: 0.915, deck: 0.94, wSill: 0.775, wCrease: 0.8, wBelt: 0.785 },
     // The tail face: the lid's foot 0.61 between corners topped at 0.765, cut at ±0.575.

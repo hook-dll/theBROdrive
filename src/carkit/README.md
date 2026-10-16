@@ -1,4 +1,4 @@
-# carkit: VAZ cars generated at load time, interior included
+# carkit: Soviet cars generated at load time, interior included
 
 `src/carkit` builds a car from a numeric spec as a `THREE.Group`, the same scene a GLB/FBX
 loader would return. From there the car goes through the usual pipeline in
@@ -7,8 +7,8 @@ dirt, lamps and fitting to the factory dimensions on the same terms as every oth
 
 Since 2026-10-13 the kit cars are the game's only cars (`CAR_MODELS`): traffic, rivals, the
 start car, contract cars, couriers, wrecks and the dev spawn menu draw from them, and a save
-naming a pack body loads on its kit twin. The car lab (`/?car-lab&pack=Kit`) still shows
-them beside the other packs.
+naming a pack body loads on its kit twin. The car lab (`/?car-lab`) shows the kit cars
+only.
 
 **Reading order for a new agent:**
 1. this file: how the kit works, the spec language, how to add a car, the working rules;
@@ -107,10 +107,11 @@ from the angle he complained about; changes are judged there, not in code.
 | `specs.ts` | `KIT_SPECS` (the registry), `KitBody`, `onBody`, the classic shells `BODY_124` / `BODY_05` and the classics' `LOOK_*`. |
 | `estates.ts` | The 2102/2104 bodies and backs (`BODY_2102`, `BODY_2104`, `REAR_*`); their fronts and sides are their saloons'. |
 | `samaras.ts` | The Samara family: `BODY_2108` / `LOOK_2108` and the 2109, 21099 and 2115 bodies and looks built on it. |
-| `tens.ts` | The "tens": `BODY_2110` / `LOOK_2110` (the 2112 and 2111 are to derive from it). |
+| `tens.ts` | The "tens": `BODY_2110` / `LOOK_2110`, the 2112 hatch and the 2111 estate derived from it. |
 | `nivas.ts` | The Nivas: `BODY_2121` / `LOOK_2121` (platform `niva`) and the 2131 on its shell. |
 | `oka.ts` | The VAZ-1111: `BODY_1111` / `LOOK_1111` (platform `samara`). |
-| `measurements-classics.md`, `measurements-estates.md`, `measurements-samara.md`, `measurements-2110.md`, `measurements-niva.md`, `measurements-oka.md` | Measurement reports: every figure with its drawing or photo, scale and tag. |
+| `volgas.ts` | The Volgas: `BODY_GAZ24` / `LOOK_GAZ24` (platform `classic`) and the GAZ-31029 on the 24's doors and greenhouse with its own nose and tail. |
+| `measurements-classics.md`, `measurements-estates.md`, `measurements-samara.md`, `measurements-2110.md`, `measurements-niva.md`, `measurements-oka.md`, `measurements-volga.md` | Measurement reports: every figure with its drawing or photo, scale and tag. |
 | `builder.ts` | `PartBuilder`: flat triangles per material slot, transform stack, primitives (`box`, `bevelBox`, `extrude`, `cylinderX/Y/Z`, `torusY`, `bridge`, `poly`), vertex colours. |
 | `body.ts` | `BodyFrame` (cross-section, deck and lid lookups) and `buildShell`: tub, greenhouse and roof as one face list, then cut into parts. Shell constants (`SHUT_GAP`, `JAMB_DEPTH`, `DOOR_THICKNESS`, `NOTCH_WALL`, …). |
 | `exterior.ts` | End faces (`FaceLook.items` / `.lid`), bumpers swept round the corners, sill strip, flank strips (waist moulding, feature line: `buildFlankStrip`), repeaters, flank lamps, mirrors, handles, wipers, filler neck. |
@@ -129,8 +130,8 @@ Integration outside the folder:
 - `vehicle/carmodels.ts`: `CarModelDef.kit` (build from a spec instead of reading `file`),
   `CarModelDef.clearGlass`, `FACTORY_GEOMETRY` rows `kit_*`, the `KIT_CARS` list (each kit
   car on the running gear of an `sv_*` sibling), `DISTINCT_SOVIET_WHEEL_SETS`, `CAR_MODELS`
-  (= `KIT_CARS`: the world's cars) and `LAB_CAR_MODELS` (every other pack: resolvable
-  through `carModel(id)` for the lab and the wheel sets, in no list the game draws from).
+  (= `KIT_CARS`: the world's cars and the car lab's); every other pack is only resolvable
+  through `carModel(id)` for the running gear and the wheel sets, in no list anything draws.
 - `save/save.ts` `worldModelId`: a saved `sv_*`/`sa_*`/`gt_*` id loads as `kit_<same car>`
   (`sv_vaz2105r` as `kit_vaz2105`), one with no kit twin as `DEFAULT_CAR_MODEL_ID`
   (`kit_vaz2101`).
@@ -167,7 +168,7 @@ Integration outside the folder:
   (`makeCarGrimeMaterial` `panes`, `setCarGlassPaneDrop`) and `kitCastDepthMaterial`.
 - `player/interaction.ts`, `car-lab.ts`, `app/devtools.ts` `stickerSheet`: their raycasters
   enable `KIT_PICK_LAYER`, so they meet the parts, never the merged meshes.
-- `car-lab.ts`: the Kit row, the `?pack=` filter, hover and click, the "КАБИНА" panel, LOD by
+- `car-lab.ts`: the kit cars in a grid, hover and click, the "КАБИНА" panel, LOD by
   distance (`KitRig.setDetail`: the cabin's fine detail within 6 m), `window.__carLab`.
 - `vehicle/model-fits.json`: a measured fit row for every kit car (`tools/fit-models.ts`).
 
@@ -276,6 +277,8 @@ author.
 | `rail`, `railHalf` | Roof-rail height and half width (the top ring). |
 | `crown` | Roof crown on the centre line above the rail. |
 | `railInset`, `railRise` | The rail's chamfer onto the roof. |
+| `railBend?` | `[across, up]`: a row along that chamfer at those fractions of `railInset` / `railRise` from the rail, so the roof's edge turns into the side glass and the screens' headers in two facets (the Volgas and tens `[0.3, 0.6]`); its first facet never rises steeper than 95 % of the glass under it, and with it every twisted greenhouse and roof quad is cut on its convex diagonal (`buildShell` `quad`). Absent: one chamfer. Keep `roofDrop` convex (the roof rising ever less steeply from the screen) and do not combine it with a step `cornerDrop`: either folds the roof in behind the header (the tens' corner dents, 2026-10-16). |
+| `roofDrop?` | The roof's line in profile, `[s, drop]` points: everything at the roof at s (rail, its chamfer, the side glass's tops, the screen's and back light's tops, the roof's rows; the headliner, mirror, visors and wipers follow through `BodyFrame.roofDrop`) stands that much lower, linear between points, held beyond; every point between two columns' tops adds a row (`buildShell` inserts a ring entry). Keep the drop at a column's `top + railInset` no more than `railRise` over the drop at its `top`, or the roof dips under the screen's header. The Volgas' arched roofs, the tens' (whose screen top may come down only 0.02 before the 500 mm blades stop sweeping 90°). Absent: level. |
 | `glassBottom`, `glassTop` | Side glass: bottom above the belt, top below the rail. |
 | `screenBottom`, `screenHeader` | Windscreen base strip above the cowl, header below the rail. |
 | `screenFoot?` | How far ahead of the cowl the windscreen's foot stands on the centre line, fading to nothing at the corners (1 − frac²): a screen curved in plan, more raked in profile; the bonnet ends that far forward (`BodyFrame.bonnetRear`), the scuttle between. The Samaras 0.15, the tens 0.156 (drawings). |
@@ -348,9 +351,10 @@ cabin: … }`) share everything not overridden. Current families:
 | `BODY_2104` | `BODY_05`'s | 2104 |
 | `BODY_2108` | 2108 drawing | 2108; 2109 (`BODY_2109`: other columns); 21099 (`BODY_21099`: columns, tail, `bootEnd`) |
 | `BODY_2115` | 2108 frame | 2115 (`+0.045`, length 4.33) |
-| `BODY_2110` | 2110 drawing (`tens.ts`) | 2110; 2112 (`BODY_2112`: own tail from the rear door, hatch) |
+| `BODY_2110` | 2110 drawing (`tens.ts`) | 2110; 2112 (`BODY_2112`: own tail from the rear door, hatch); 2111 (`BODY_2111`: own rear door frame and estate tail) |
 | `BODY_2121` | `niva.jpg` factory four-view (`nivas.ts`) | 2121; 2131 (`BODY_2131`: the 2121 to its B pillar, 0.5 longer behind it, rear doors) |
 | `BODY_1111` | 3dcar.ru `vaz_1111_oka.jpg` (`oka.ts`) | 1111 |
+| `BODY_GAZ24` | 3dcar.ru `gaz_24.jpg` factory four-view (`volgas.ts`) | GAZ-24; GAZ-31029 (`BODY_GAZ31029`: the 24's columns and middle stations moved back 0.14, its own nose and tail from the-blueprints.com drawing) |
 
 ### Look (`KitLook`)
 
@@ -407,7 +411,9 @@ the paint slot, so it takes the car's colour, dust, scratches and stickers).
 - `blade`: `finish`, `lift` (centre height over the sill's bevel), `height`, `depth` (reach
   out of the face), `lower?: { finish, share }` (two-tone), `strip` (finish or `null`),
   `ends?` (end caps' finish), `overriders` (`{ inset, half: [w, h], drop, finish }` or
-  `null`).
+  `null`), `wrap?` (how far its ends run back along the flanks from the bar's back,
+  hugging the wings 8 mm off the side at every station they pass: the Volgas' long blades;
+  absent: a 0.16 return).
 - `moulded`: `drop` (foot under the sill's bevel), `height`, `finish?` (absent = dark
   plastic; `'paint'` = body colour, its groove a painted ridge), `moulding?: { y, height,
   finish }` (a band round the bumper instead of the groove: centre height above the
@@ -606,7 +612,7 @@ appearance key: paint and wheels change together.
 
 ## Lab
 
-- URL: `http://localhost:5199/?car-lab&pack=Kit&time=12` (only the kit row; `time` hours,
+- URL: `http://localhost:5199/?car-lab&time=12` (the kit cars; `time` hours,
   `variant`, `dirt`, `scratches`, `focus` seed state).
 - Hovering shows a part's name; a click works it. A drag is the camera, not a click.
 - Choosing a car opens the "КАБИНА" panel on the right: sliders for the driving inputs and
@@ -636,7 +642,9 @@ hatch the 2112 derived from it. Follow the steps in order.
   only) and run `file` on it: a missing drawing comes back as an HTML 404 page with a
   `.jpg` name (`vaz_2115.jpg` there is one). Factory four-views already there:
   `vaz2101.jpg`, `vaz2108.jpg`, `niva.jpg`, `uaz469.jpg`, `uaz2.jpg`, `gaz21.jpg`,
-  `moskvich412.jpg`, `zaz968.jpg`, …
+  `moskvich412.jpg`, `zaz968.jpg`, … GAZ drawings sit under `.../full/gaz/` (`gaz_24`,
+  `gaz_2402`, `gaz_21`, `gaz_3102`, `gaz_3110` exist; `gaz_31029` does not: the 31029 was
+  measured on the-blueprints.com's watermarked preview, `measurements-volga.md`).
 - **Check the drawing against photos**: the 2110 drawing leaves out the rear quarter glass,
   flattens the rear arch and is mirrored (its flap on the wrong side).
 - **Photos.** Wikimedia Commons, via the API, 1280–2400 px renditions; record title and
@@ -855,9 +863,12 @@ within `KIT_FINE_M`; "Far" = everything except the four detail groups.
 | 2115 | 12 224 | 5 407 | 4 403 | 1 751 | 561 | 61 | 448 | 1 344 | 6 751 |
 | 2110 | 13 723 | 6 363 | 4 877 | 1 775 | 627 | 52 | 460 | 1 344 | 7 707 |
 | 2112 | 13 634 | 6 349 | 4 794 | 1 775 | 627 | 60 | 460 | 1 344 | 7 693 |
+| 2111 | 13 770 | 6 469 | 4 810 | 1 775 | 627 | 60 | 460 | 1 344 | 7 813 |
 | 2121 | 11 852 | 4 762 | 4 451 | – | 421 | 60 | 814 | 1 344 | 6 106 |
 | 2131 | 12 974 | 5 593 | 4 730 | – | 421 | 60 | 826 | 1 344 | 6 937 |
 | 1111 | 10 595 | 4 347 | 3 813 | – | 597 | 46 | 448 | 1 344 | 5 691 |
+| GAZ-24 | 11 938 | 5 460 | 3 889 | 1 747 | 401 | 284 | 560 | 1 344 | 6 804 |
+| GAZ-31029 | 11 118 | 4 444 | 4 051 | 1 747 | 421 | 294 | 564 | 1 344 | 5 788 |
 
 The owner set the budget aside for the 2110 and 2112 (the rounded rear shut line adds side
 rows to every tub column).
@@ -938,3 +949,25 @@ pillar, the roof ending at 3.285, a tailgate whose glass falls to the knee over 
 0.865 (`flat` tail station, `rearLean` 0.2), a reversing lamp at each end of the tailgate
 and a red bar between, a tall flush rear bumper, and a wing on the tailgate's glass with
 the high brake lamp (`spoiler`).
+
+The 2111 (`BODY_2111`, `LOOK_2111`) is the 2110 to the rear door's belt with an estate
+tail (`vaz_2111.jpg` and Commons photos): the rear door's frame further back at the rail,
+a long quarter glass in the body to a D pillar, the roof on to 3.97, the 2112's tail
+arrangement at the estate's heights (corner lamps topped at 0.89, the tailgate between
+them down to the bumper with its reversing cells and red bar, `flat` tail station,
+`rearLean` 0.1), no spoiler and no roof rails.
+
+## The Volgas: GAZ-24 / GAZ-31029
+
+Both are `classic`-platform cars in `volgas.ts` (`measurements-volga.md`). The GAZ-24
+(`gaz_24.jpg`, the factory four-view with its dimension lines) has a level belt crease
+nose to tail with the handles on it, front doors with quarter lights, rear doors whose
+glass ends upright ahead of a blind sail raked along the C pillar, a front arch clear of
+the tyre and a rear one covering its top; its face is a full-width grille of upright
+chrome bars between round lamps, with a chrome blade and fangs; at the back tall corner
+lamps in chrome rims and a ribbed chrome band; the filler under an oval flap on the left
+rear wing. The GAZ-31029 takes the 24's columns and middle stations 0.14 further back
+(its longer nose) and adds its own ends from the-blueprints.com drawing: a square face
+with rectangular head lamps whose indicators wrap round the corners (`cornerLamps`), a
+black grille, black bumpers, and a lower boot whose lid comes down the tail face between
+the wings (`notch`) over horizontal lamps wrapping onto them.

@@ -75,10 +75,17 @@ export interface CabinColumn {
   readonly foot?: { readonly y: number; readonly s: number; readonly round?: readonly [number, number] };
   /**
    * The column's top point stands this far below the rail: one straight chamfer of the
-   * rail's front corner from the A pillar up to the next column's top (the Samaras' and
-   * the tens' A pillar rounding into the roof). Absent: at the rail.
+   * rail's front corner from the A pillar up to the next column's top (the Samaras' A
+   * pillar). Absent: at the rail.
    */
   readonly drop?: number;
+  /**
+   * Like `drop`, but the rail's edge over the point, the roof's outer rows and the end
+   * glass's outer top corner come down with it: one convex chamfer of the whole corner,
+   * where `drop` alone leaves the rail's strip tipped in (the tens' A pillar). Only on
+   * the first or last column. Absent: none.
+   */
+  readonly cornerDrop?: number;
   /**
    * The glass's top edge on this column stands this far lower, the frame above it
    * widening by as much; the rail and the outer edge stay put. One chamfer of a glass
@@ -101,6 +108,21 @@ export interface CabinSpec {
   /** The rail's chamfer onto the roof: inset across, rise up. */
   readonly railInset: number;
   readonly railRise: number;
+  /**
+   * A row along that chamfer at `[across, up]` fractions of `railInset` and `railRise` from
+   * the rail, so the roof's edge turns into the side glass and the screens' headers in two
+   * steps (convex with `up` > `across`). Absent: one straight chamfer.
+   */
+  readonly railBend?: readonly [number, number];
+  /**
+   * The roof's line in profile: `[s, drop]` points, nose to tail. At s everything at the
+   * roof (the rail and its chamfer, the side glass's and the end glass's tops, the roof's
+   * rows) stands `drop` lower, linear between the points and held beyond them. The
+   * greenhouse gets a row of the roof at every point, so the roof bends there: a roof
+   * rounding down into the windscreen and the back light (the Volgas', the tens').
+   * Absent: level.
+   */
+  readonly roofDrop?: readonly (readonly [number, number])[];
   /** Side glass: its bottom above the belt and its top below the rail. */
   readonly glassBottom: number;
   readonly glassTop: number;
@@ -216,6 +238,8 @@ export interface KitLook {
   readonly rear: FaceLook;
   /** Door handles and mirrors. */
   readonly brightwork: Finish;
+  /** Door mirrors: `'left'` only the driver's (the base Oka). Absent: both. */
+  readonly mirrors?: 'left';
   /** A strip along the sill between the arches, or none. */
   readonly sill: Finish | null;
   /**
@@ -223,8 +247,6 @@ export interface KitLook {
    * meets a wheel arch; or none.
    */
   readonly waist: { readonly y: number; readonly height: number; readonly finish: Finish } | null;
-  /** Door mirrors: `'left'` only the driver's (the base Oka). Absent: both. */
-  readonly mirrors?: 'left';
   /** The amber side repeater on each front wing (s and y ranges), or none. */
   readonly repeater: { readonly s0: number; readonly s1: number; readonly y0: number; readonly y1: number } | null;
   /** A body-colour wing on the boot lid or tailgate with the high brake lamp, or none. */
@@ -326,6 +348,11 @@ export type BumperLook =
       readonly strip: Finish | null;
       /** Plastic caps over the ends where they wrap round the corners. */
       readonly ends?: Finish;
+      /**
+       * How far its ends run back along the flanks from the bar's face, hugging the
+       * wings (the Volgas' long wrapped blades). Absent: a short 0.16 return off the corner.
+       */
+      readonly wrap?: number;
       /**
        * Overriders standing on the bar, `inset` in from its end: half width and half
        * height, and how far their centre stands below the bar's.

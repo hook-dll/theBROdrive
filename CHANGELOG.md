@@ -4,6 +4,28 @@
 
 ### Added
 
+- THREE NEW KIT CARS: VAZ-2111, GAZ-24, GAZ-31029 (`src/carkit/tens.ts` `BODY_2111`,
+  `src/carkit/volgas.ts`). The tens' estate on the 2110's nose and doors with its own rear
+  door frame, long quarter glass and tailgate (3dcar.ru `vaz_2111.jpg`); the GAZ-24 from its
+  dimensioned factory four-view (`gaz_24.jpg`) on the classic platform; the GAZ-31029 as the
+  24's doors and greenhouse with its square nose and own tail (the-blueprints.com drawing).
+  In the lab and in the world (`KIT_CARS`, running gear of `sv_vaz21099` with the 2111's
+  1040 kg / `sv_gaz24` / `cf_gaz31029`; saved Volgas now load on their kit twins). Numbers in
+  `measurements-2110.md` §9 and `measurements-volga.md`. The rear wheel-house covers no longer
+  emit NaN vertices when the arch's end lands a float hair outside it (all earlier cars
+  identical by geometry hash). After the owner's first review: the Volgas' greenhouse is
+  measured anew (the 24's quarter light behind a frame, the rear door's glass turning down
+  into a post and a fixed pane under the raked C pillar; the 31029's single front pane and
+  raked rear glass), both roofs arch in profile, the 24's nose is crowned across and its
+  boot falls behind the back light, the 31029's tail corners are rounded, and both cars'
+  bumpers run back along the wings as drawn (blade `wrap`); the 2111's lower tail stands
+  out over its bumper (the bumper no longer sticks out 85 mm behind it). The tens (2110,
+  2112, 2111) get the same profile arch of the roof. New spec fields, absent on every other
+  car: `CabinSpec.roofDrop` (the roof's line in profile), `CabinSpec.railBend` (a second
+  facet rounding the roof's edge into the side glass), blade bumper `wrap`. Also the
+  Samaras' (2108, 2109, 21099) front wing simplified to one clean surface over the arch
+  (crease 0.705 on the drawn shoulder line). All other cars identical by geometry hash.
+
 - THE DESERT IS NOT A SECOND CARRIAGEWAY (`core/surfaces.ts` `sinkage`, `world/terrain.ts`
   lane washboard). Sand gets a speed-grown soft-ground drag, `sinkage · v²/(v² + 15²)` of
   the car's weight on top of its flat rolling resistance (0.11 at saturation; 0.045 at

@@ -101,11 +101,24 @@ function sweptOutlines(path: readonly SweepPoint[], a: SectionPoint, b: SectionP
 /**
  * Plan path of a bumper across one end of the car: back along each flank by `wrap`,
  * round the corner (radius `r`) and across the face, standing `standoff` off the face.
+ * `flank`: a long wrap hugging the wings (a blade's `wrap`): the side's half width at a z,
+ * and the z of every station it passes, from its end towards the corner.
  */
-function bumperPath(half: number, zFace: number, end: 1 | -1, depth: number, standoff: number, wrap: number, r = 0.09): SweepPoint[] {
+function bumperPath(
+  half: number,
+  zFace: number,
+  end: 1 | -1,
+  depth: number,
+  standoff: number,
+  wrap: number,
+  r = 0.09,
+  flank?: { readonly half: (z: number) => number; readonly zs: readonly number[] },
+): SweepPoint[] {
   const z = zFace + end * standoff;
   const side = (sx: number): SweepPoint[] => [
-    { x: sx * half, z: z - end * wrap, nx: sx, nz: 0, depth: depth * 0.3 },
+    ...(flank
+      ? [z - end * wrap, ...flank.zs].map((zp): SweepPoint => ({ x: sx * flank.half(zp), z: zp, nx: sx, nz: 0, depth: depth * 0.3 }))
+      : [{ x: sx * half, z: z - end * wrap, nx: sx, nz: 0, depth: depth * 0.3 }]),
     { x: sx * half, z: z - end * r * 0.4, nx: sx, nz: 0, depth: depth * 0.4 },
     { x: sx * (half - r * 0.3), z: z - end * r * 0.1, nx: sx * 0.7071, nz: end * 0.7071, depth: depth * 0.75 },
     { x: sx * (half - r), z, nx: 0, nz: end, depth: depth * 0.95 },
@@ -588,7 +601,22 @@ function buildBumpers(ctx: KitContext, b: PartBuilder): Map<1 | -1, Ridge> {
       // Inside the published width even where the ends wrap round the corners.
       const half = Math.min(sec.r2[0] + 0.02, widest - blade * 0.35);
       const y = (y0 + y1) / 2;
-      const path = bumperPath(half, zFace, end, blade, reach - blade, 0.16);
+      // A long `wrap` hugs the wings: its back 8 mm off the side over the bar's height at
+      // every station it passes.
+      const flank = (grow: number, wrap: number): Parameters<typeof bumperPath>[7] => {
+        if (bumper.wrap === undefined) return undefined;
+        const zCorner = zFace + end * (reach - blade) - end * 0.09 * 0.4;
+        const zEnd = zFace + end * (reach - blade) - end * wrap;
+        const zs = spec.stations.map((st) => frame.z(st.s)).filter((z) => (z - zEnd) * (zCorner - z) > 0);
+        zs.sort((a, b) => end * (b - a));
+        const at = (z: number): number => {
+          const s = frame.zNose - z;
+          return Math.max(half, frame.sideX(s, y0) + 0.008, frame.sideX(s, y1) + 0.008) + grow;
+        };
+        return { half: at, zs };
+      };
+      const wrap = bumper.wrap ?? 0.16;
+      const path = bumperPath(half, zFace, end, blade, reach - blade, wrap, undefined, flank(0, wrap));
       const main = finishSlot(bumper.finish);
       const bar = new PartBuilder();
       if (bumper.lower) {
@@ -606,7 +634,8 @@ function buildBumpers(ctx: KitContext, b: PartBuilder): Map<1 | -1, Ridge> {
       if (bumper.strip) {
         // A rubber strip 4 mm proud of the blade's face, rooted 7 mm in it; the face under it is cut.
         const strip = finishSlot(bumper.strip);
-        const along = bumperPath(half, zFace, end, blade, reach - blade, 0.15);
+        const stripWrap = bumper.wrap === undefined ? 0.15 : wrap - 0.01;
+        const along = bumperPath(half, zFace, end, blade, reach - blade, stripWrap, undefined, flank(0, stripWrap));
         const rubber = new PartBuilder().color(strip.color);
         sweep(rubber, strip.slot, along, [[1, y - 0.012, -0.007], [1, y - 0.012, 0.004], [1, y + 0.012, 0.004], [1, y + 0.012, -0.007]], [3]);
         bar.cut(sweptOutlines(along, [1, y - 0.012, 0.004], [1, y + 0.012, 0.004], 0.0075)).append(rubber);
@@ -614,7 +643,8 @@ function buildBumpers(ctx: KitContext, b: PartBuilder): Map<1 | -1, Ridge> {
       if (bumper.ends) {
         // Caps over the wrapped ends: the path's first and last three points, a size up. What
         // of the bar lies inside a cap is cut away.
-        const caps = bumperPath(half + 0.004, zFace, end, blade + 0.006, reach - blade, 0.17);
+        const capWrap = bumper.wrap === undefined ? 0.17 : wrap + 0.01;
+        const caps = bumperPath(half + 0.004, zFace, end, blade + 0.006, reach - blade, capWrap, undefined, flank(0.004, capWrap));
         const cap = finishSlot(bumper.ends);
         const section: SectionPoint[] = [[0, y0 - 0.006], [1, y0 - 0.006], [1, y1 + 0.006], [0, y1 + 0.006]];
         const covers = new PartBuilder().color(cap.color);
@@ -1025,7 +1055,7 @@ function buildWipers(ctx: KitContext): void {
   if (!pane || !panel) throw new Error(`Kit car "${spec.id}": wipers need the shell's glass and paint`);
   const foot = frame.screenFoot(0);
   const base = new THREE.Vector3(0, frame.deckY(foot, 0), frame.z(foot));
-  const head = new THREE.Vector3(0, cabin.rail + cabin.crown, frame.z(cabin.columns[0]!.top));
+  const head = new THREE.Vector3(0, cabin.rail + cabin.crown - frame.roofDrop(cabin.columns[0]!.top), frame.z(cabin.columns[0]!.top));
   const up = head.sub(base).normalize();
   const across = new THREE.Vector3(1, 0, 0);
   const screenNormal = new THREE.Vector3().crossVectors(across, up).normalize();
@@ -1284,7 +1314,7 @@ function buildSpoiler(ctx: KitContext): void {
   const lidY = (s: number, x: number): number =>
     frame.spec.bootEnd !== undefined || !knee
       ? frame.deckY(s, x)
-      : lerp(knee.y, cabin.rail + cabin.crown, (knee.s - s) / (knee.s - roofRear)) - cabin.crown * Math.min(1, (x / cabin.railHalf) ** 2);
+      : lerp(knee.y, cabin.rail + cabin.crown - frame.roofDrop(roofRear), (knee.s - s) / (knee.s - roofRear)) - cabin.crown * Math.min(1, (x / cabin.railHalf) ** 2);
   const P = (x: number, y: number, s: number): Vec3 => [x, y, frame.z(s)];
   const onLid = (s: number, x: number): Vec3 => P(x, lidY(s, x) - SPOILER_SINK, s);
   const top = (s: number): number => lerp(sp.top0, sp.top1, (s - sp.s0) / (sp.s1 - sp.s0));

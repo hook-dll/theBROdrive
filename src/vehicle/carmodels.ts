@@ -49,7 +49,7 @@ function modelFit(id: string): CarModelFit {
  *    pack's 9x2 atlas, glass in its (3, 1) cell, one node per lamp role.
  *  - KIT: no file at all. src/carkit builds the scene at load from a spec, with a
  *    full interior and hinged panels. These are the game's cars (`CAR_MODELS`); every
- *    other pack is the lab's (`LAB_CAR_MODELS`).
+ *    other pack is only resolvable by id (`carModel`), for the kit cars' running gear.
  */
 const SOVIET = '/models/soviet';
 const SAAS = '/models/saas';
@@ -1000,6 +1000,10 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   // The 2112, the 2110's hatch: 4170 × 1676 × 1430, 2490 wheelbase, 1400/1370 tracks,
   // 175/70R13 (autoopt.ru); the 2110's width, wheelbase and clearance kept (same stampings).
   kit_vaz2112:    { length: 4.170, width: 1.680, height: 1.430, clearance: 0.165, wheelbase: 2.492, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.288, tyreWidth: 0.175 },
+  // The 2111, the 2110's estate: 4285 × 1680 × 1480, 2492 wheelbase, 1400/1370 tracks
+  // (vaz.ru/v2111.htm). The 1480 is over the roof rails, which the kit leaves out: the
+  // drawing's roof stands at 1430 (src/carkit/measurements-2110.md §9), the 2112's height.
+  kit_vaz2111:    { length: 4.285, width: 1.680, height: 1.430, clearance: 0.165, wheelbase: 2.492, frontTrack: 1.400, rearTrack: 1.370, wheelRadius: 0.288, tyreWidth: 0.175 },
   // The 2121, its pack sibling's figures (sv_niva): 3720 × 1680 × 1640, 2200 wheelbase,
   // 1430/1400 tracks, 220 clearance, 175/80 R16 (niva-faq.msk.ru factory sheet; infocar.ua,
   // catalog-vaz.ru; src/carkit/measurements-niva.md).
@@ -1011,6 +1015,12 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   // The 1111, its carforge sibling's figures (the 1111 manual): 3200 × 1420 × 1400, 2180
   // wheelbase, 1214/1204 tracks, 150 clearance, 135/80 R12 (src/carkit/measurements-oka.md).
   kit_vaz1111:    { length: 3.200, width: 1.420, height: 1.400, clearance: 0.150, wheelbase: 2.180, frontTrack: 1.214, rearTrack: 1.204, wheelRadius: 0.260, tyreWidth: 0.135 },
+  // The GAZ-24, its pack sibling's figures (sv_gaz24) with the factory drawing's 1476 front
+  // track (gaz_24.jpg: 4735 × 1800 × 1490, 2800, 1476/1420; src/carkit/measurements-volga.md).
+  kit_gaz24:      { length: 4.735, width: 1.800, height: 1.490, clearance: 0.174, wheelbase: 2.800, frontTrack: 1.476, rearTrack: 1.420, wheelRadius: 0.354, tyreWidth: 0.187 },
+  // The GAZ-31029: 4885 × 1800 × 1476, 2800 wheelbase, 1495/1425 tracks, 156 clearance,
+  // 205/70 R14 (drivernotes.net, auto-data.net, the-blueprints.com drawing; measurements-volga.md).
+  kit_gaz31029:   { length: 4.885, width: 1.800, height: 1.476, clearance: 0.156, wheelbase: 2.800, frontTrack: 1.495, rearTrack: 1.425, wheelRadius: 0.321, tyreWidth: 0.205 },
 };
 
 function factoryGeometry(id: string): FactoryGeometry {
@@ -2257,6 +2267,13 @@ const GEAR_VAZ_21102: KitRunningGear = {
  */
 const GEAR_VAZ_21122: KitRunningGear = GEAR_VAZ_21102;
 /**
+ * VAZ-2111, the estate with the 2111 engine: kerb 1040 kg, 162 km/h and 14.0 s (2110 manual,
+ * autoprospect.ru/vaz/2110-zhiguli/1-obshhie-svedeniya.html), everything else the 21102's;
+ * its Cd·A raised by the cube of the top speeds (167/162) so the estate tops out where the
+ * manual says.
+ */
+const GEAR_VAZ_2111: KitRunningGear = { ...GEAR_VAZ_21102, mass: 1040, dragArea: 0.73 };
+/**
  * VAZ-2115 1.5i (2111 engine): kerb 985 kg (carexpert.ru, ladaonline.ru, wiki.zr.ru;
  * drom.ru prints 970), 165/70 R13 (ladaonline.ru: 165/70 or 175/70 R13), 3.7 axle, tank
  * 43 l, 158 km/h and 13.2 s (ladaonline.ru, carexpert.ru), 5.2 m turning radius. Grip,
@@ -2298,9 +2315,12 @@ const KIT_CARS: readonly Entry[] = (
     ['kit_vaz2115', 'sv_vaz21099', 'vaz2115', 'VAZ-2115 Samara', GEAR_VAZ_2115],
     ['kit_vaz2110', 'sv_vaz21099', 'vaz2110', 'VAZ-2110', GEAR_VAZ_21102],
     ['kit_vaz2112', 'sv_vaz21099', 'vaz2112', 'VAZ-2112', GEAR_VAZ_21122],
+    ['kit_vaz2111', 'sv_vaz21099', 'vaz2111', 'VAZ-2111', GEAR_VAZ_2111],
     ['kit_vaz2121', 'sv_niva', 'vaz2121'],
     ['kit_vaz2131', 'sv_niva_long', 'vaz2131'],
     ['kit_vaz1111', 'cf_vaz1111', 'vaz1111'],
+    ['kit_gaz24', 'sv_gaz24', 'gaz24'],
+    ['kit_gaz31029', 'cf_gaz31029', 'gaz31029'],
   ] satisfies readonly (readonly [id: string, sibling: string, kit: string, label?: string, gear?: KitRunningGear])[]
 ).map(([id, sibling, kit, label, gear]) => {
   const base = ENTRIES.find((e) => e.id === sibling);
@@ -2380,13 +2400,13 @@ function catalogueDef(e: Entry): CarModelDef {
  */
 export const CAR_MODELS: readonly CarModelDef[] = KIT_CARS.map(catalogueDef);
 /**
- * Bodies only the car lab shows (`?car-lab`): the vendored packs and the carforge cars.
- * Resolvable by id (a kit car wears the Soviet pack's wheel sets) but in no list the
- * game draws from, and a save naming one loads as its kit twin (save.ts).
+ * The vendored packs and the carforge cars: resolvable by id (a kit car wears the Soviet
+ * pack's wheel sets and runs on its sibling's gear) but in no list the game or the car
+ * lab draws from, and a save naming one loads as its kit twin (save.ts).
  */
-export const LAB_CAR_MODELS: readonly CarModelDef[] = ENTRIES.map(catalogueDef);
+const PACK_CAR_MODELS: readonly CarModelDef[] = ENTRIES.map(catalogueDef);
 
-const BY_ID = new Map([...CAR_MODELS, ...LAB_CAR_MODELS].map((m) => [m.id, m]));
+const BY_ID = new Map([...CAR_MODELS, ...PACK_CAR_MODELS].map((m) => [m.id, m]));
 
 /**
  * The model a new game starts in and every unknown saved id resolves to. The

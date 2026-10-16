@@ -472,6 +472,14 @@ const TARGETS: Readonly<Record<string, Target>> = {
     source: 'VAZ-21122 (2111 engine): M110 (top, 0-100, turn, brake ceiling; gross as kerb 1020 + payload 475); R110 (load condition); geometry kit_vaz2112 row (autoopt.ru vaz-2112)',
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.11 },
   },
+  kit_vaz2111: {
+    wheelbase: 2.492, track: 1.4, radius: 0.288, top: 162, to100: 14,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, lat: null, hz: 1.3,
+    brake80: 38, grossKg: 1540,
+    brakeTest: { m: 55.0, judged: false, source: 'the 21102 saloon\'s (Za Rulem 2004), same brakes and tyres' },
+    source: 'VAZ-2111 (2111 engine): M110 (kerb 1040, payload 500, 162 km/h, 14.0 s, turn, brake ceiling); R110 (load condition); geometry kit_vaz2111 row (vaz.ru/v2111.htm)',
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.136 },
+  },
   kit_vaz2115: {
     wheelbase: 2.46, track: 1.4, radius: 0.281, top: 158, to100: 13.2,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.2, lat: null, hz: 1.3,
@@ -499,6 +507,18 @@ const TARGETS: Readonly<Record<string, Target>> = {
     brake80: 38, grossKg: 975,
     source: 'as cf_vaz1111: man. autoprospect.ru/vaz/1111-oka/1-4-tekhnicheskie-kharakteristiki.html; brake, gross AO vaz-1111',
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.146 },
+  },
+  kit_gaz24: {
+    wheelbase: 2.8, track: 1.476, radius: 0.354, top: 145, to100: null,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.5, lat: 0.64, hz: 1.0,
+    brake80: 43.2, grossKg: 1820,
+    source: 'as sv_gaz24: man. long-vehicle.narod.ru/gaz24/book24/24_tech.htm (no factory 0-100); brake AO gaz-24-10; gross igorkalinin.com/volga/data.ru.html; track the gaz_24.jpg dimension (1476)',
+  },
+  kit_gaz31029: {
+    wheelbase: 2.8, track: 1.495, radius: 0.321, top: 147, to100: null,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, lat: null, hz: 1.0,
+    brake80: 43.2, grossKg: 1800,
+    source: 'as cf_gaz31029: drom.ru/catalog/gaz/31029_volga/83566 (tracks, turn); top ru.wikipedia ГАЗ-31029 145, avto-russia.ru 150; gross 110km.ru; brake the GAZ-24-10 ceiling',
   },
 };
 

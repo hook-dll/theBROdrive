@@ -1,4 +1,4 @@
-# VAZ-2110 and VAZ-2112: measured numbers
+# VAZ-2110, VAZ-2112 and VAZ-2111: measured numbers
 
 Crops, gridded readings, photos, overlays and lab captures are in `/tmp/vaz2110/` (photos in `ph/`, lab captures in `lab/`). Only this file, the code and the drawing in `build/carshape/_refs/bp/img/` were written.
 
@@ -280,3 +280,65 @@ After the 2026-10-15 simplicity round: **13 634 triangles** (body + trim 6 349, 
 - The tailgate's opening between the lamps is ±0.545 (photo ±0.50): the narrowest the flat tail cut gives without a new field.
 - The flap stands where the drawing has it; not checked on a right-side photo.
 - The reversing cells are white, not smoked; the high brake lamp shares the brake slot.
+
+## 9. VAZ-2111 (`BODY_2111`, `LOOK_2111`)
+
+### Sources
+
+| Source | Use |
+|---|---|
+| vaz.ru/v2111.htm [F] | 4285 × 1680 × 1480, wheelbase 2492, tracks 1400 / 1370. The 1480 is over the roof rails (the drawing's roof is 1.43 without them, its rails to 1.465); the kit has no rails, so `kit_vaz2111` = 4.285 × 1.680 × **1.430** (the 2112's height), the 2110's clearance and tyre. |
+| 2110 manual, autoprospect.ru/vaz/2110-zhiguli/1-obshhie-svedeniya.html [F] | 2111 with the 2111 engine: kerb 1040 kg, payload 500, 162 km/h, 14.0 s; brake ceiling 38 m, turning radius 5.2 m (`GEAR_VAZ_2111`, `tools/reality.ts`). |
+| 3dcar.ru `vaz_2111.jpg` (1700 × 1000, saved) [D] | Side view, **4.185 mm/px** from the drawn wheelbase: hubs x 798 / 1393.5 (tyre runs at y 400–413), ground y 416, tips x 600 / 1624 → 4285, the factory length. Front overhang 829 (2110: 825), so the nose and doors are the 2110's (ds 0). Shows the left side; the flap is drawn there, as on the mirrored 2110 drawing. Rear view: centre x 286, half width 202 px at the widest. |
+| Commons "2011 Lada 211120-82.grey rear" (CC0) [P] | Rear 3/4: corner lamps on the wings, the tailgate's lamp band (smoked reversing cells, red bar) at the corner lamps' height, the tailgate's lower panel down to the bumper with the plate on it. |
+| Commons "2007 Lada 211120 grey rear", "2007 Lada 21112 red rear", "2006 Lada 211140 silver rear" (CC0 / CC BY 4.0), "Lada 111 arriere" (CC BY 3.0), "Lada 111 SW", "Lada 111 (2111) Station Wagon" I and II, "Lada 111 (Series 2111 wagon)" (public domain), "Lada 2111 (silver colored) in Kyiv" (CC BY 3.0) [P] | The same arrangement on every car; no spoiler; roof rails on most. Saved as `vaz2111_*.jpg` beside the drawing. |
+
+### Side and tail [D side view unless marked; s = (x − 600) × 4.185 mm]
+
+| Feature | Reading | s, y (m) | Spec |
+|---|---|---|---|
+| Rear door's drop glass, rear edge | x 1363 at the belt, 1340 high | 3.193 / 3.097 | column 3.205 / 3.08 |
+| Rear door's shut line | x 1378 at the belt, 1350 at the rail; upright to y 215 then forward | 3.256 / 3.139; 0.84 | column 3.249 / 3.12 (the 2110's belt point), the 2110's `foot` |
+| Quarter glass (body) | front x 1383 / 1353, rear x 1535 / 1503 (belt / rail); bottom y 172 → 167 | 3.277 / 3.151, 3.913 / 3.779; 1.021 → 1.042 | columns 3.275 / 3.15 (fixed), 3.9 / 3.78 |
+| Roof's rear end | outline corner x 1550, y 80 (the line at x 1520 is the glass's top edge) | 3.976, 1.41 | last column top 3.97 |
+| Tailgate glass foot (knee) | outline at y 167, x 1588 | 4.135, 1.042 | `rearKnee` 4.19 / 1.04, raked to 4.138 |
+| Tail outline | x 1600 at y 193, 1607 at y 240, 1622 at y 273 | 4.185 / 0.933, 4.214 / 0.737, 4.277 / 0.60 | tail station 4.2, `rearLean` 0.1 m/m above 0.52 |
+| Feature line | y 225.5 at x 1000, 215.5 at 1320, 208 at 1520, 203.5 at 1600 | 0.799 / 1.674 … 0.889 / 4.185 | the 2110's points to 3.2, then (3.85, 0.87), (4.05, 0.886) |
+| Corner lamps | between the feature line's end (0.889) and y 242.5; wrap on the flank from the tailgate's line (x 1568–1573) | 0.735–0.89; from s 4.06 | `cornerLamps` rear, 0.735–0.815–0.885 (stop/tail under the indicator) |
+| Tailgate's foot | rear view: 45 px under the lamps (0.19); side: the tailgate's line down to y 293 | 0.52 | tail station `deck` 0.52, `flat` |
+| Rear bumper's top | rear view y 777 | 0.49 | moulded, drop 0.055, height 0.21 (top 0.49) |
+| Fuel flap | x 1435–1485, y 213–243 | 3.494–3.704, 0.724–0.85 | `flap`, right side as on the 2110 |
+
+### Tail face [D rear view, 4.15 mm/px from the half width; P "2011 Lada 211120-82.grey rear"]
+
+| Feature | Reading | Spec |
+|---|---|---|
+| Tailgate's edge at the lamps | x 147.5 / 152 (outer / inner line) | ±0.575 / 0.556 drawn; the generator's flat-tail cut ±0.545 |
+| Reversing cells / red bar | splits at x 196 / 376 | cells ±0.374..±0.535, bar ±0.369 (`rear.lid`, from `belt` −0.155 to −0.005) |
+| Corner lamps | from the tailgate's edge round the corner | `x` 0.555 |
+
+### Result
+
+`kit_vaz2111`: **13 770 triangles** (body + trim 6 469, cabin 4 810, of it fine 1 775, bay 627, boot 60, underbody 460, wheels 1 344; 7 813 beyond 25 m), bounds ±0.941 (mirrors) × 0…1.424 × ±2.152 m. `tools/kit-zfight.ts`: PASS. `tools/reality.ts kit_vaz2111`: 162 km/h (manual 162), 0-100 15.9 s against the catalogue's 14.0 (accepted as `CATALOGUE_OPTIMISTIC`, 13.6 %, as the 2110/2112), turning circle and brake within. Lab (`build/k/lab5/kit_vaz2111-*.png`; side, front and rear against the drawing in `build/k/compare/vaz2111_{side,front,rear}.png`): every door, the bonnet, tailgate and flap open, lamps at night, the cabin; 14 WebGL programs linked after boot and framing every kit car, still 14 after opening, lighting and the cabin view.
+
+### Gaps
+
+- No roof rails (most cars have them): the factory 1480 is over them, the kit row is the roof's 1430.
+- The tailgate's opening between the lamps is ±0.545 (drawn ±0.565), as on the 2112.
+- The red bar on the tailgate is a reflector (`inert`), as on the 2112; the reversing cells are white, not smoked.
+- Not modelled: the rubbing strip on the rear wings (drawing y 243–257 from s 3.35), the plate and its recess, the rear wiper.
+- Running gear: the 21102's but for the mass and Cd·A; no estate-specific spring or axle-load figure was found.
+
+### 9.1 Owner's first review (2026-10-16)
+
+Measured with an orthographic render of the built car laid on the drawing at the drawing's own scale (`build/k/compare2/vaz2111_{side,front,rear}{,_lines}.png`, 3/4 views `vaz2111_q50.png`, `_q140.png`).
+
+| Complaint | Drawing [D side view, 4.185 mm/px from the hubs] | Before | After |
+|---|---|---|---|
+| Rear bumper sticks out | The tail's outline: 4.123 at 1.03, 4.181 at 0.904, 4.215 at 0.74–0.78, 4.24 at 0.695, 4.274 at 0.569, 4.282 at 0.485 (the bumper's top), 4.232 at 0.36 (its rounded underside). The lower tail stands out over the bumper; the bumper's back is flush with it within 10 mm. | Tail station 4.20, `rearLean` 0.1 m/m above 0.52: the lower tail 70 mm ahead of the drawing, the bumper 85 mm proud of it. | Tail station, rear base and knee 4.265, `rearLean` 0.275 m/m above 0.6 (built: 4.265 below 0.6, 4.21 at 0.8, 4.144 at the knee); the bumper 20 mm proud. Bumper side `wrapTo` 3.63 kept (drawn 3.63: x 1465). |
+| The door in profile | Front shut line x 905 (1.273); B shut line x 1150–1153; rear door's rear edge upright at x 1377 from the window to y 225 (0.80), turning to a straight slope (1360, 252) → (1305, 330), dx/dy −0.705, to 2.909 at the doors' bottom (y 343, 0.305). | Front edge 1.30 (2110's door), B 2.33, the rear edge upright to 0.805 then forward to 2.90, upper turn r 0.17. | Unchanged: the cut lines lie on the drawing within 2–3 cm (overlay `vaz2111_side_lines.png`). The earlier side-by-side was a perspective lab shot at another scale. What the drawing has and the model does not: the doors' low double line at 0.40–0.43 (y 313–320) and the rear wing's rubbing strip (0.66–0.70). |
+| Roof (scope of the review) | The outline under the rails: 1.364 at 1.80, 1.394 at 1.90, 1.41 at 2.0, 1.419 from 2.2; 1.423 at 3.9, 1.394 at 3.95, 1.335 at 4.0. | Level 1.423 from 1.80 to 3.95. | `roofDrop` (the tens' front, `ROOF_FRONT_TENS`, then 0.024 at 3.935, 0.04 at 3.97), `railBend` [0.3, 0.6]. |
+
+The 2110 and 2112 got the same roof (the 2110's outline: 1.33 at 1.75, 1.375 at 1.85, 1.404 at 2.0, 1.424 from 2.4 to 2.6, 1.408 at 2.95, 1.387 at 3.1, 1.371 at 3.15; the 2112's 1.401 at 2.95, 1.373 at 3.15, 1.349 at 3.25, 1.337 at 3.3). Model before: level 1.424 from 1.80 to the back light (2110) or the tailgate (2112). After: the screen's top on the centre line 0.02 lower (1.389; the outline reads 1.345, but at 0.03 the 500 mm blades no longer sweep 90° on the glass), the roof rounding up to its crest by 2.4 and down to the back light (0.036 at 3.106–3.141) or the tailgate (0.072 at 3.25–3.285). Nothing else on the 2110 and 2112 moved. Triangles: 2110 13 850 → 14 594, 2112 13 759 → 14 610, 2111 13 770 → 14 310.
+
+**Roof corners (owner's second look, 2026-10-16).** The 0.037 step `cornerDrop` at the A pillar's top, with the roof's profile behind it, folded the roof in behind the screen's header at both front corners (concave folds over s 1.6–2.3: max 55°, Σ angle × length 59 m°; before the profile, already 40° / 25 m°). The step is gone and the front profile is convex (`ROOF_FRONT_TENS`: 0.02 to s 1.805, then 0.016 / 0.012 / 0.006 / 0.0015 / 0 at 1.85 / 1.9 / 2.0 / 2.2 / 2.4, the roof rising ever less steeply): max 6° (a 29 mm edge at the door frame's shut gap), Σ 3.2 m°. The A pillar's top stands at 1.359 (drawn 1.338, the step's 1.342). Close-ups `build/k/compare3/vaz21{10,11,12}_roofcorner.png`, `lab_vaz21{10,11,12}_roofcorner.png`. The 2111's lower tailgate: `rearLean` based on the foot's row (0.52, lean 0.2) instead of between rows (0.6), no folds left there (`vaz2111_tailgate.png`).

@@ -1,7 +1,7 @@
 /**
  * Car condition laboratory (`?car-lab`, development builds only).
  *
- * Every car in the catalogue, parked in rows by source pack, lit by the game's own
+ * Every car the game drives (`CAR_MODELS`, the kit bodies), parked in a grid, lit by the game's own
  * Renderer and Sky — the same probe, tone map, ink and daylight grade the road has —
  * so what the paint does here is what it does on the road. Sliders set every car's
  * dirt and scratches at once.
@@ -45,7 +45,7 @@ import { Sky } from './render/sky';
 import { loadStarField } from './render/starcatalog';
 import { KitRig, type KitControl, type KitPicked } from './carkit/rig';
 import type { VehicleLamps } from './vehicle/vehiclelamps';
-import { CAR_MODELS, LAB_CAR_MODELS, type CarModelDef } from './vehicle/carmodels';
+import { CAR_MODELS, type CarModelDef } from './vehicle/carmodels';
 
 const CALENDAR = newWorldState(1337).calendarEpoch;
 const CELL_X = 6.5;
@@ -80,7 +80,6 @@ interface LabState {
 
 interface LabCar {
   readonly def: CarModelDef;
-  readonly pack: string;
   readonly anchor: THREE.Group;
   readonly label: THREE.Sprite;
   instance: CarModelInstance | null;
@@ -114,15 +113,6 @@ export interface CarLabApi {
   /** Renders a frame now and returns the canvas as a PNG data URL. */
   capture(): string;
   readonly models: readonly string[];
-}
-
-function packOf(def: CarModelDef): string {
-  if (def.kit) return 'Kit';
-  if (def.id.startsWith('sv_')) return 'Soviet FBX';
-  if (def.id.startsWith('sa_')) return 'GTA SA';
-  if (def.id.startsWith('gt_')) return 'GTA V';
-  if (def.id.startsWith('cf_')) return 'carforge';
-  return 'other';
 }
 
 function makeLabel(text: string): THREE.Sprite {
@@ -186,7 +176,7 @@ function createInterface(
     <label><span>Качество</span><select data-control="quality"><option value="acceptable">Acceptable</option><option value="standard">Standard</option><option value="blessing">Blessing</option></select><output></output></label>
     ${unifiedRow}
     ${styleRow}
-    <select data-control="focus"><option value="">Общий вид</option>${cars.map((car) => `<option value="${car.def.id}">${car.pack} · ${car.def.label}</option>`).join('')}</select>
+    <select data-control="focus"><option value="">Общий вид</option>${cars.map((car) => `<option value="${car.def.id}">${car.def.label}</option>`).join('')}</select>
     <div class="buttons"><button data-action="game">Вернуться в игру</button></div>`;
   document.body.appendChild(root);
 
@@ -310,9 +300,8 @@ export async function bootCarLab(): Promise<void> {
   document.title = 'Car condition lab · Voyage Mirage';
 
   const query = new URLSearchParams(window.location.search);
-  // `?pack=Kit` (or any pack name) keeps one row: a quick lab for the cars being built.
-  const onlyPack = query.get('pack');
-  const labModels = [...CAR_MODELS, ...LAB_CAR_MODELS].filter((def) => onlyPack === null || packOf(def) === onlyPack);
+  // The game's cars only: the kit bodies. The pack bodies they replaced are not drawn here.
+  const labModels = CAR_MODELS;
   const state: LabState = {
     dirt: queryNumber(query, 'dirt', 0),
     scratches: queryNumber(query, 'scratches', 0),
@@ -338,29 +327,23 @@ export async function bootCarLab(): Promise<void> {
   ground.receiveShadow = true;
   renderer.scene.add(ground);
 
-  // Rows by pack, so one screenshot row compares like with like.
   const cars: LabCar[] = [];
-  const packs = [...new Set(labModels.map(packOf))];
-  let row = 0;
-  for (const pack of packs) {
-    const defs = labModels.filter((def) => packOf(def) === pack);
-    defs.forEach((def, index) => {
-      const anchor = new THREE.Group();
-      anchor.position.set(
-        (index % COLUMNS - (COLUMNS - 1) / 2) * CELL_X,
-        0,
-        (row + Math.floor(index / COLUMNS)) * CELL_Z,
-      );
-      anchor.rotation.y = CAR_YAW;
-      const label = makeLabel(`${pack} · ${def.label}`);
-      label.position.set(0, 2.7, 0);
-      anchor.add(label);
-      renderer.scene.add(anchor);
-      cars.push({ def, pack, anchor, label, instance: null, rig: null, mid: false });
-    });
-    row += Math.ceil(defs.length / COLUMNS);
-  }
-  const gridCentre = new THREE.Vector3(0, 0, ((row - 1) * CELL_Z) / 2);
+  labModels.forEach((def, index) => {
+    const anchor = new THREE.Group();
+    anchor.position.set(
+      (index % COLUMNS - (COLUMNS - 1) / 2) * CELL_X,
+      0,
+      Math.floor(index / COLUMNS) * CELL_Z,
+    );
+    anchor.rotation.y = CAR_YAW;
+    const label = makeLabel(def.label);
+    label.position.set(0, 2.7, 0);
+    anchor.add(label);
+    renderer.scene.add(anchor);
+    cars.push({ def, anchor, label, instance: null, rig: null, mid: false });
+  });
+  const rows = Math.ceil(labModels.length / COLUMNS);
+  const gridCentre = new THREE.Vector3(0, 0, ((rows - 1) * CELL_Z) / 2);
 
   const buildCar = (car: LabCar): void => {
     if (car.instance) {

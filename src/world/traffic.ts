@@ -125,13 +125,13 @@ const PLATOON_CHANCE = 0.32;
  *  - the later Zhigulis, the Samaras (the 2115 among them) and the Nivas: 25% sleeper,
  *    25% hurried and 50% frantic (20% frantic read as no frantic at all, owner
  *    2026-10-10; the pack Nivas had these odds too);
- *  - everything else (the 2110 and the 2112: an official's or a taxi driver's car, owner
- *    2026-10-12) is a car somebody drives to get somewhere fast: half hurried, half
- *    frantic.
+ *  - everything else (the 2110, 2111 and 2112: an official's or a taxi driver's car,
+ *    owner 2026-10-12; the kit Volgas, 24 and 31029, the same) is a car somebody drives
+ *    to get somewhere fast: half hurried, half frantic.
  *
  * The world's cars are the kit bodies (`CAR_MODELS`, 2026-10-13); the rows the pack
- * bodies had (the Volgas, UAZs and IZh) left with them. The Oka keeps the sleeper the
- * carforge one was.
+ * bodies had (UAZs and IZh) left with them. The Oka keeps the sleeper the carforge one
+ * was.
  *
  * A frantic driver still gets the BMW engine and its gearbox (`franticEngine`).
  */

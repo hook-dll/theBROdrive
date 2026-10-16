@@ -875,10 +875,11 @@ function cabinFloor(frame: BodyFrame): number {
   return frame.station(frame.cowl + 0.5).sill + FLOOR_RISE;
 }
 
-/** Underside of the headliner (the shell's roof lining) at half width x. */
-function headlinerUnder(cab: KitCarSpec['cabin'], x: number): number {
+/** Underside of the headliner (the shell's roof lining) at half width x and position s. */
+function headlinerUnder(frame: BodyFrame, x: number, s: number): number {
+  const cab = frame.spec.cabin;
   const xr = cab.railHalf - cab.railInset;
-  return cab.rail + cab.railRise + cab.crown * (1 - (x / xr) ** 2) - LINING_DEPTH;
+  return cab.rail + cab.railRise + cab.crown * (1 - (x / xr) ** 2) - LINING_DEPTH - frame.roofDrop(s);
 }
 
 /**
@@ -887,8 +888,9 @@ function headlinerUnder(cab: KitCarSpec['cabin'], x: number): number {
  */
 export function driverEyeAt(frame: BodyFrame): Vec3 {
   const lay = { ...LAYOUTS[frame.spec.platform], ...frame.spec.cabinLayout };
-  const y = Math.min(cabinFloor(frame) + lay.cushion + SEATED_EYE, headlinerUnder(frame.spec.cabin, lay.seatX) - EYE_HEADROOM);
-  return [lay.seatX, y, frame.z(frame.cowl + lay.hip + EYE_BEHIND_HIP)];
+  const s = frame.cowl + lay.hip + EYE_BEHIND_HIP;
+  const y = Math.min(cabinFloor(frame) + lay.cushion + SEATED_EYE, headlinerUnder(frame, lay.seatX, s) - EYE_HEADROOM);
+  return [lay.seatX, y, frame.z(s)];
 }
 
 // ---- small geometry ----
@@ -1143,7 +1145,7 @@ class Cabin {
   private rearEye(): void {
     const eye = new THREE.Object3D();
     eye.name = KIT_REAR_EYE_NODE;
-    const y = Math.min(this.floorY + this.lay.benchCushion + SEATED_EYE, this.dome(BENCH_SEAT_X) - EYE_HEADROOM);
+    const y = Math.min(this.floorY + this.lay.benchCushion + SEATED_EYE, this.dome(BENCH_SEAT_X, this.benchS + EYE_BEHIND_HIP) - EYE_HEADROOM);
     eye.position.set(...this.P(BENCH_SEAT_X, y, this.benchS + EYE_BEHIND_HIP));
     this.ctx.root.add(eye);
   }
@@ -1177,9 +1179,9 @@ class Cabin {
     return y <= this.frame.station(s).belt ? this.frame.sideX(s, y) - SIDE_CLEAR : this.glassX(s, y) - GLASS_CLEAR;
   }
 
-  /** Underside of the headliner at half width x. */
-  private dome(x: number): number {
-    return headlinerUnder(this.spec.cabin, x);
+  /** Underside of the headliner at half width x and position s. */
+  private dome(x: number, s: number): number {
+    return headlinerUnder(this.frame, x, s);
   }
 
   /**
@@ -1297,8 +1299,13 @@ class Cabin {
     const full = w.rear + r + 0.005;
     const s1 = Math.min(full, this.lowerEnd);
     // Over the shell's arch (`archY`) at the shell's own cosine-spaced facets, so each
-    // facet of the top stands parallel to the well's roof under it, HUMP_RISE above.
-    const top = (s: number): number => this.frame.archY(Math.min(Math.max(s, w.rear - r), w.rear + r)) + HUMP_RISE;
+    // facet of the top stands parallel to the well's roof under it, HUMP_RISE above. At the
+    // arch's very ends `axle − r` taken back off the axle can land a hair outside it, where
+    // `archY` has no arch: the arch's foot there, the hub's height.
+    const top = (s: number): number => {
+      const y = this.frame.archY(Math.min(Math.max(s, w.rear - r), w.rear + r));
+      return (Number.isFinite(y) ? y : w.radius) + HUMP_RISE;
+    };
     const ss = [s0];
     for (let i = 0; i <= 12; i++) {
       const s = w.rear - r + 2 * r * ((1 - Math.cos((i / 12) * Math.PI)) / 2);
@@ -1357,7 +1364,7 @@ class Cabin {
     // Glass line at half width x: base (s, y) and top (s, y) for the screen or back light.
     const glass = (x: number, kind: 'front' | 'rear'): [P2, P2] => {
       const frac = Math.abs(x) / cab.railHalf;
-      const yt = cab.rail + cab.crown * (1 - frac * frac);
+      const yt = cab.rail + cab.crown * (1 - frac * frac) - f.roofDrop(kind === 'front' ? top0 : topN);
       const s = kind === 'front' ? f.screenFoot(frac) : f.rearBase;
       const yb = f.deckY(s, frac * f.section(kind === 'front' ? f.cowl : s).r4[0]);
       if (kind === 'rear' && cab.rearKnee) {
@@ -1375,7 +1382,7 @@ class Cabin {
     // the two never lie in one plane. The car the player sits in also lights the cabin
     // from here (`Vehicle.syncDomeLight`).
     const lampS = lerp(frontTop, rearTop, 0.45);
-    const ly = this.dome(0) - 0.004;
+    const ly = this.dome(0, lampS) - 0.004;
     const lens = (n: PartBuilder, slot: KitSlot, y: number): void => {
       n.quad(slot, this.P(0.05, y, lampS - 0.03), this.P(-0.05, y, lampS - 0.03), this.P(-0.05, y, lampS + 0.03), this.P(0.05, y, lampS + 0.03));
     };
@@ -1396,7 +1403,7 @@ class Cabin {
       const [[sb, yb], [st, yt]] = glass(x, 'front');
       return lerp(sb, st, (y - yb) / (yt - yb));
     };
-    const my = cab.rail - 0.085;
+    const my = cab.rail - 0.085 - f.roofDrop(top0);
     // The pad (half size 0.105 x 0.03 x 0.014) is turned so the driver sees straight back
     // through the back light's middle in it (`mirrorFrame`); the turn swings its far end
     // towards the glass. 4 cm is added in front of its corner nearest the glass: the
@@ -1414,7 +1421,7 @@ class Cabin {
     let reach = 0;
     for (const x of [-0.105, 0.105]) for (const y of [-0.03, 0.03]) for (const z of [-0.014, 0.014]) reach = Math.max(reach, corner.set(x, y, z).applyMatrix3(turn).z);
     const ms = nearest + reach + 0.04;
-    const root = this.P(0, cab.rail - 0.01, glassS(0, cab.rail - 0.01) + 0.03);
+    const root = this.P(0, cab.rail - 0.01 - f.roofDrop(top0), glassS(0, cab.rail - 0.01 - f.roofDrop(top0)) + 0.03);
     const b = this.fixed.color(COLOURS.black);
     beam(b, 'trim', root, this.P(0, my + 0.02, ms), 0.008, 0.008, [1, 0, 0]);
     // The pad turns on a ball at the stem's end, by hand (rig.ts `aim`): side to side
@@ -1440,7 +1447,7 @@ class Cabin {
     for (const side of [1, -1]) {
       const name = side > 0 ? 'visor_l' : 'visor_r';
       const x = side * 0.34;
-      const y = this.dome(Math.abs(x) + 0.16) - 0.014;
+      const y = this.dome(Math.abs(x) + 0.16, frontTop + 0.005) - 0.014;
       const at = this.P(x, y, frontTop + 0.005);
       fineDetail(this.hinge(this.group, ORIGIN, name, at, { channel: name, kind: 'rot', axis: [1, 0, 0], amount: -1.35 }, { id: name, label: `Козырёк ${WHERE[name.slice(-1)]}` }, (v) => {
         v.color(shade(this.lay.headliner, 0.92));

@@ -1,6 +1,6 @@
 /**
- * The "tens" family: VAZ-2110 (saloon) and VAZ-2112 (hatchback). Numbers and sources in
- * measurements-2110.md.
+ * The "tens" family: VAZ-2110 (saloon), VAZ-2112 (hatchback) and VAZ-2111 (estate).
+ * Numbers and sources in measurements-2110.md.
  *
  * Measured on 3dcar.ru's `vaz_2110.jpg` (side view 4.092 mm/px from the drawn 2492
  * wheelbase: hubs x 819.5 / 1428.5, ground y 408; its tips give 4268 against the
@@ -12,12 +12,32 @@
  * pillar, a greenhouse narrowing more to the roof, the rear door's shut line raked back
  * along the C pillar with a fixed quarter glass in the body behind it, and a boot lid
  * that comes down between the corner lamps carrying the lamp bar (the 2115 took this
- * tail from the 2110). The 2112 hatch derives from `BODY_2110` as the 2109 does from the
- * 2108: the same nose, doors and heights, its own tail.
+ * tail from the 2110). The 2112 hatch and the 2111 estate derive from `BODY_2110` as the
+ * 2109 does from the 2108: the same nose, front doors and heights, their own tails.
  */
 
 import type { KitLook } from './spec';
 import type { KitBody } from './specs';
+
+/**
+ * The tens' roof in profile from the windscreen's top [D `vaz_2110.jpg` side view, the
+ * outline: 1.33 at s 1.75, 1.359 at 1.80, 1.375 at 1.85, 1.387 at 1.90, 1.399 at 1.95, 1.404
+ * at 2.0, 1.412 at 2.1, 1.416 at 2.2, 1.42 at 2.3, 1.424 from 2.4; the 2112's and 2111's
+ * drawings within 5 mm]: the roof rounding up from the screen over 0.6 m. The screen's top
+ * on the centre line comes down only 0.02 (1.389, against the outline's 1.345): lower, the
+ * tens' 500 mm blades no longer sweep 90° on the glass (`buildWipers`, from 0.03). From
+ * there the roof rises ever less steeply (0.09, 0.08, 0.06, 0.02 m per m), so the header,
+ * the A pillar's top and the door frames' tops round into it with no fold.
+ */
+const ROOF_FRONT_TENS: readonly (readonly [number, number])[] = [
+  [1.77, 0.02],
+  [1.805, 0.02],
+  [1.85, 0.016],
+  [1.9, 0.012],
+  [2.0, 0.006],
+  [2.2, 0.0015],
+  [2.4, 0],
+];
 
 /**
  * VAZ-2110: overhangs 825 / 940 over a 2492 wheelbase. The face raked from the bumper's
@@ -61,9 +81,9 @@ export const BODY_2110: KitBody = {
   shoulder: { inset: 0.04, rise: 0.015 },
   cabin: {
     columns: [
-      // The A pillar [D: 1.32 at the belt to 1.338 high at 1.768] runs straight into the
-      // rail: a `drop` chamfer there read as a dent in the rail's corner. The front door's
-      // frame and glass run up behind it.
+      // The A pillar [D: 1.32 at the belt to 1.338 high at 1.768]. Its top rounds into the
+      // roof with the roof's profile alone (`roofDrop`, 1.359 at 1.77): the step drop of the
+      // corner (`cornerDrop` 0.037, 1.342) left a fold along the screen's header behind it.
       { s: 1.31, top: 1.77, upper: 'body' },
       { s: 1.325, top: 1.85, upper: 'door1' },
       // The drop glass's front edge, its top front corner cut by one chamfer inside the
@@ -95,7 +115,13 @@ export const BODY_2110: KitBody = {
     railHalf: 0.53,
     crown: 0.03,
     railInset: 0.035,
+    // The roof's edge rounds into the side glass [D front view: the outline's corners turn
+    // over ~15 px, 0.06].
+    railBend: [0.3, 0.6],
     railRise: 0.015,
+    // The roof rounding into the screen, then down to the back light [D: 1.42 at 2.75, 1.416
+    // at 2.85, 1.408 at 2.95, 1.399 at 3.0, 1.395 at 3.05, 1.387 at 3.1, 1.371 at 3.15].
+    roofDrop: [...ROOF_FRONT_TENS, [2.6, 0], [2.85, 0.008], [3.0, 0.025], [3.106, 0.036], [3.141, 0.036]],
     glassBottom: 0.012,
     glassTop: 0.035,
     screenBottom: 0.03,
@@ -292,6 +318,10 @@ export const BODY_2112: KitBody = {
     // The tailgate folds over the lamps: glass above to the roof, the lower panel upright
     // below, raked by `rearLean`.
     rearKnee: { s: 4.095, y: 1.0 },
+    // The roof falling to the tailgate's top [D `vaz_2112.jpg`, the outline: 1.413 at 2.75,
+    // 1.409 at 2.85, 1.401 at 2.95, 1.389 at 3.05, 1.373 at 3.15, 1.361 at 3.2, 1.349 at 3.25,
+    // 1.337 at 3.3].
+    roofDrop: [...ROOF_FRONT_TENS, [2.6, 0], [2.85, 0.01], [3.05, 0.03], [3.2, 0.058], [3.25, 0.072], [3.285, 0.072]],
   },
   bootEnd: undefined,
   rearLean: { base: 0.71, lean: 0.2, blend: 0.3 },
@@ -367,6 +397,126 @@ export const LOOK_2112: KitLook = {
         columns: [['reverse']],
       },
       { kind: 'lens', role: 'inert', x: { at: { centre: 0 }, half: 0.355 }, y: { from: ['belt', -0.146], to: ['belt', -0.009] }, depth: 0.008, proud: 0.01 },
+    ],
+  },
+};
+
+/**
+ * VAZ-2111: the 2110 to the rear door's belt, then an estate [D `vaz_2111.jpg`, 4.185 mm/px
+ * from the drawn 2492 wheelbase: hubs x 798 / 1393.5, ground y 416, tip x 600; its tips
+ * give 4285, the factory length]. The rear door's frame runs further back at the rail
+ * (3.12, the saloon's 3.001); behind it a pillar, a long quarter glass in the body to 3.9
+ * at the belt (3.78 at the rail) and a D pillar; the roof runs on at the rail to 3.97; the
+ * tailgate's glass falls to the knee (1.04 at 4.138) and its lower panel comes down to the
+ * bumper (0.52) between corner lamps topped at 0.89, the plate on it, the whole back raked
+ * 0.1 m per m (`rearLean`) [P Commons "2011 Lada 211120-82 grey rear", "Lada 111 arriere"].
+ */
+export const BODY_2111: KitBody = {
+  ...BODY_2110,
+  length: 4.285,
+  stations: [
+    ...BODY_2110.stations.slice(0, 9),
+    // The D pillar's foot under the quarter glass's rear corner [D: glass bottom y 167,
+    // 1.042, at x 1535].
+    { s: 3.95, sill: 0.3, crease: 0.68, belt: 1.03, deck: 1.04, wSill: 0.725, wCrease: 0.745, wBelt: 0.705 },
+    // The tail face, the tailgate's foot (rearBase) in it at 0.52 [D rear view: 0.19 under
+    // the lamps; side view: the tailgate's line to y 293]; the corner lamps 0.735–0.89 [D
+    // side view: the feature line meets the tail at y 203.5] on the corners beside it. Below
+    // the lamps the tail stands out over the bumper [D side view, the outline: 4.274 at
+    // 0.569, 4.282 at 0.485 (the bumper's top), 4.24 at 0.695, 4.215 at 0.74–0.78].
+    { s: 4.265, sill: 0.3, crease: 0.7, belt: 0.89, deck: 0.52, wSill: 0.675, wCrease: 0.69, wBelt: 0.66, flat: 1 },
+  ],
+  cabin: {
+    ...BODY_2110.cabin,
+    columns: [
+      ...BODY_2110.cabin.columns.slice(0, 9),
+      // The rear door's frame: its glass's rear edge [D: x 1363 at the belt, 1340 high] and
+      // the shut line [D: x 1378 at the belt, 1350 at the rail]; below the belt the 2110's
+      // raked foot [D: upright to y 215, 0.84, then forward to the sill].
+      { s: 3.205, top: 3.08, upper: 'door2' },
+      { s: 3.249, top: 3.12, upper: 'body', foot: { y: 0.805, s: 2.9, round: [0.17, 0.03] } },
+      // The pillar behind it, then the quarter glass in the body [D: x 1383 / 1353 front,
+      // 1535 / 1503 rear, at the belt / under the rail].
+      { s: 3.275, top: 3.15, upper: 'body', glass: 'fixed' },
+      // The D pillar.
+      { s: 3.9, top: 3.78, upper: 'body' },
+      // The roof's rear end [D: the outline's corner at x 1550, 3.976; the line at x 1520 is
+      // the glass's top edge inside it] over the tailgate's foot.
+      { s: 4.265, top: 3.97 },
+    ],
+    // The tailgate folds at the glass's foot [D: the outline at y 167–170, x 1586–1588:
+    // 1.03–1.04 at 4.123–4.131 once raked]: glass above to the roof, the lower panel below.
+    rearKnee: { s: 4.265, y: 1.04 },
+    // Level under the rails to the D pillar, then rounding down to the tailgate's top [D:
+    // 1.423 at 3.9, 1.394 at 3.95, 1.335 at 4.0].
+    roofDrop: [...ROOF_FRONT_TENS, [3.8, 0], [3.935, 0.024], [3.97, 0.04]],
+  },
+  bootEnd: undefined,
+  // The back above the tailgate's foot leans forward 0.2 m per m [D side view, the outline:
+  // 4.24 at 0.695, 4.215 at 0.78, 4.181 at 0.904, 4.123 at 1.03; built: 4.21 at 0.8, 4.16
+  // at the knee]. Based on the foot's row (0.52): a base between rows (0.6) folded the
+  // lower panel's faces across it.
+  rearLean: { base: 0.52, lean: 0.2, blend: 0.3 },
+  // Over the rear arch's back [D: x 1435–1485, y 213–243; the drawing shows the left side,
+  // the flap is on the right as on the 2110].
+  flap: { s0: 3.494, s1: 3.704, y0: 0.724, y1: 0.85 },
+};
+
+/**
+ * The 2111's look: the 2110's front and flanks, no spoiler; at the back the 2112's
+ * arrangement at the estate's heights: corner lamps (indicator over the tail and stop lamp)
+ * wrapping onto the wings, a smoked reversing lamp at each end of the tailgate and one red
+ * bar between them [D rear view: the cells ±0.374..±0.556, the bar ±0.374; P "2011 Lada
+ * 211120-82 grey rear"], the plate on the tailgate's lower panel under them.
+ */
+export const LOOK_2111: KitLook = {
+  ...LOOK_2110,
+  label: 'VAZ-2111',
+  cornerLamps: [
+    LOOK_2110.cornerLamps![0]!,
+    {
+      end: 'rear',
+      points: [
+        { x: 0.555, y: [0.815, 0.885], role: 'blinker' },
+        { y: [0.815, 0.885], role: 'blinker' },
+        { s: 4.06, y: [0.815, 0.885] },
+      ],
+    },
+    {
+      end: 'rear',
+      points: [
+        { x: 0.555, y: [0.735, 0.815], role: 'brake' },
+        { y: [0.735, 0.815], role: 'tail' },
+        { s: 4.06, y: [0.735, 0.815] },
+      ],
+    },
+  ],
+  // The 2110's line, then rising to the lamps' top at the tail [D: y 208 at x 1520, 203.5
+  // at x 1600].
+  featureLine: {
+    points: [
+      [0.34, 0.735],
+      [0.745, 0.763],
+      [1.07, 0.78],
+      [2.05, 0.8],
+      [3.2, 0.829],
+      [3.85, 0.87],
+      [4.05, 0.886],
+    ],
+    height: 0.012,
+  },
+  rear: {
+    // Its top at the tailgate's foot [D rear view: y 777, 0.49].
+    bumper: { kind: 'moulded', drop: 0.055, height: 0.21, finish: 'paint', wrapTo: 3.63, flush: true },
+    items: [],
+    lid: [
+      {
+        kind: 'cluster',
+        x: { from: { centre: 0.535 }, to: { centre: 0.374 } },
+        y: { from: ['belt', -0.155], to: ['belt', -0.005] },
+        columns: [['reverse']],
+      },
+      { kind: 'lens', role: 'inert', x: { at: { centre: 0 }, half: 0.369 }, y: { from: ['belt', -0.151], to: ['belt', -0.009] }, depth: 0.008, proud: 0.01 },
     ],
   },
 };

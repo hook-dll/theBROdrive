@@ -4,7 +4,7 @@ What the owner wants, what is done, what is left. How to work: [`README.md`](REA
 Why things are the way they are: [`HISTORY.md`](HISTORY.md). Keep this file current with
 every change (update the car's row and the gaps).
 
-Last updated: 2026-10-15, the cabin lining is the shell's own (headliner and upper trim end at the glass), the tail lamps sit on the body without a black backing, and the kit's detail parts cast no sun shadow.
+Last updated: 2026-10-16, the owner's first review of the three new kit cars worked in (Volga greenhouses, roofs, bonnet/boot, bumper wraps; the 2111's tail; the tens' roof arch; the Samaras' front wing), drafts again awaiting his review (z-fight gate passed, 14 WebGL programs unchanged).
 
 ## The owner's goal
 
@@ -44,8 +44,10 @@ to the kit tyre. The kit's five generated wheel styles were removed at the owner
 
 1. ✅ **Generator core**: 2106 and 2108 in the car lab, hover and click.
 2. ✅ **VAZ cars** from specs: 2101, 2102, 2103, 2104, 2105, 2106, 2107, 2108, 2109, 21099,
-   2110, 2112, 2115, 2121, 2131, 1111. All done (the last three accepted 2026-10-16).
-3. **GAZ and UAZ-469**, then the **UAZ «буханка»** (UAZ-452).
+   2110, 2112, 2115, 2121, 2131, 1111. All done (the last three accepted 2026-10-16). The
+   2111 estate added 2026-10-16 (draft, awaiting the owner's review).
+3. **GAZ and UAZ-469**, then the **UAZ «буханка»** (UAZ-452). GAZ-24 and GAZ-31029 drafted
+   2026-10-16 (awaiting the owner's review); the GAZ-21 is not wanted.
 4. **Trucks**, starting with the **ZIL-130**.
 
 Pending stages that run alongside (the old numbering in commit messages: stage 2 = cockpit,
@@ -55,7 +57,7 @@ stage 4 = driving):
   `throttle`, `brake`, `clutch`, `gear`, …); fittings clickable from inside. Not started.
 - **Driving in the world**: done (2026-10-13). `CAR_MODELS` is `KIT_CARS`: traffic, rivals,
   contract cars, the start car, couriers, wrecks and the dev spawn menu are kit cars on the
-  running gear of their `sv_*` siblings; the pack bodies are lab-only (`LAB_CAR_MODELS`)
+  running gear of their `sv_*` siblings; the pack bodies are drawn nowhere, not even in the lab,
   and a save naming one loads on its kit twin. Every world `Vehicle` of a kit model has a
   live rig (`vehicle.kit`): doors, lids and flap open in the world, and the wheel, pedals,
   lever, handbrake, needles, light switch, stalk and hazard button follow the car.
@@ -85,6 +87,9 @@ Triangle counts in README.
 | 2121 | `BODY_2121` + `LOOK_2121` (nivas.ts), platform `niva` (`LAYOUTS.niva`) | `niva.jpg` factory four-view (3.632 mm/px from the drawn wheelbase); Commons photos (`measurements-niva.md`) | done (owner accepted 2026-10-16) | arches one circle (real ones taller than wide), no arch flares, the bumper ends do not wrap round the wings, rear side reflectors and C-pillar slot not modelled, spare wheel not in the bay, transfer levers static |
 | 2131 | `BODY_2131` (the 2121 + 0.5 behind the B pillar) + `LOOK_2131`, `CABIN_2131` | no drawing exists; Commons photos registered on the 2121's B shut line and rear axle, ±4 cm (`measurements-niva.md` §5) | done (owner accepted 2026-10-16) | as the 2121; D-pillar vent slots and roof rack not modelled |
 | 1111 | `BODY_1111` + `LOOK_1111` (oka.ts), platform `samara`, `CABIN_1111` | 3dcar.ru `vaz_1111_oka.jpg` (dimensioned, 2.696 mm/px); Commons photos (`measurements-oka.md`) | done (owner accepted 2026-10-16) | running gear `cf_vaz1111`'s (the 1111 manual; `KIT_CARS` siblings may be any catalogue entry); a pair of wipers (the car has one); a red fog lens at both rear ends (the car has one); the underbody hangs to 0.116 under a floor at its clearance (advisory) |
+| 2111 | `BODY_2111` + `LOOK_2111` (tens.ts), `CABIN_2110` | 3dcar.ru `vaz_2111.jpg` (4.185 mm/px from the drawn wheelbase, hubs x 798 / 1393.5, ground y 416); Commons rear photos; factory figures vaz.ru, the 2110 manual (`measurements-2110.md` §9, §9.1) | draft, review 1 worked in (the tail out over the bumper, `rearLean` 0.275 above 0.6; the roof's arch), awaiting the owner's review | no roof rails (the factory 1480 is over them; kit row 1430); tailgate cut ±0.545 (drawn ±0.565); the red bar a reflector; rear-wing rubbing strip, the doors' low double line (0.40–0.43), plate, rear wiper not modelled; the screen's top 24 mm over the drawn outline (wiper sweep); running gear the 21102's with the 2111's 1040 kg and a Cd·A for its 162 km/h (`GEAR_VAZ_2111`) |
+| GAZ-24 | `BODY_GAZ24` + `LOOK_GAZ24` (volgas.ts), platform `classic` | 3dcar.ru `gaz_24.jpg` factory four-view (5.10 mm/px from the drawn wheelbase; dimension lines 4735 / 2800 / 756 / 1490 / 1800 / 1476 / 1420); Commons photos (`measurements-volga.md` §1, §3) | draft, review 1 worked in (greenhouse with quarter light, post and fixed pane; arched roof `roofDrop`, `railBend`; crowned nose, boot slope; blade `wrap` 0.33 / 0.43), awaiting the owner's review | running gear `sv_gaz24`'s; the classic platform's VAZ dash and seats; C-pillar louvre, plates, the bonnet's raised centre (15 mm) not modelled; wiper length [E]; rear fangs from the early photos; window corners chamfered, not round |
+| GAZ-31029 | `BODY_GAZ31029` + `LOOK_GAZ31029` (volgas.ts): the 24's middle stations + 0.14, its own greenhouse columns, nose and tail | the-blueprints.com GAZ-31029 drawing (5.761 mm/px, heights × 1.028 to the 24's roof); `gaz_3102.jpg` cross-check; Commons photos (`measurements-volga.md` §2, §3) | draft, review 1 worked in (single front pane, raked rear glass, arched roof, rounded tail corners, blade `wrap` 0.415 / 0.25), awaiting the owner's review | running gear `cf_gaz31029`'s; flap side the drawing's (left), unchecked; fog lamps, plates, badge not modelled; the classic platform's dash |
 
 **2115 details — done** (commit 8620a22):
 late-face head lamps and indicators (since the third review a `cornerLamps` unit, flush and wrapping round the corner; since the fourth the tail lamps too, and the Samaras' face rakes back, `frontLean`), the slot under the bonnet
@@ -165,13 +170,17 @@ slot (as on the 2115).
 
 ## Next cars: what is known
 
-- **2111** (the tens' estate, not on the roadmap). Drawing `vaz_2111.jpg` is saved; it
-  would derive from `BODY_2110` as the 2112 does.
+- **2111**, **GAZ-24**, **GAZ-31029**: drafted 2026-10-16 (rows above); the owner's first
+  review worked in the same day. With it the **2110** and **2112** got the roof's profile
+  arch (`roofDrop`, `railBend`; nothing else on them moved), and the **2108 / 2109 / 21099**
+  front wing was simplified to the drawing's shoulder line (crease 0.705 over the arch); the
+  doors' crease stays 0.63 (drawn 0.71), so that line slopes down behind the arch
+  (`measurements-samara.md` §6).
 
 ## Later families: what they need
 
-- **GAZ (Volga 21/24)**: drawings `gaz21.jpg` present; siblings `sv_gaz21`, `sv_gaz24`.
-  Classic-like layout (`'classic'` platform probably reusable [INFERENCE]).
+- **GAZ**: the 24 and 31029 are drafted; the GAZ-21 is not wanted. No Volga dash
+  (`CABIN_*`) yet: both use the classic platform's.
 - **UAZ-469**: `uaz469.jpg` and `uaz2.jpg` (a 3151 hardtop four-view, dimensioned) present.
   Body-on-frame with a separate soft/hard top, flat panels, external hinges; no pack
   sibling (check `SOVIET_CARS`).
