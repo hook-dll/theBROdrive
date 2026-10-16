@@ -4,6 +4,23 @@
 
 ### Added
 
+- OFF-ROAD FEEL ON THE GAME'S OWN GROUND (`tools/offroad-feel.ts`). `surface-feel.ts` drives
+  its desert on `TerrainMeshProvider`, which only road-lab streams. This bench drives a
+  real Zhiguli over the colliders the game actually builds there: the road chunk's
+  shoulder strip, its verge skirt and the `DesertTileStreamer` heightfield. Runs: lane to
+  desert crossings at 6° and 30°, 40 and 80 km/h, at ten sites; the desert at 20, 40 and
+  60 m alongside, 60 and 90 km/h asked, 5 km each, with the lane itself as the control;
+  and the wave geometry along the same lines. Per run it reports jolt99 and maxg, the
+  wheel load peak over static, airborne share, roll and pitch rates, flips, body
+  contacts, and seam collider and surface switching. DIAG=1 splits every 1 g jolt by
+  source and attributes every launch and tip to what preceded it. Seed 42 today: lane
+  jolt99 0.28-0.35 g, load peak 2.0-2.2x; desert jolt99 1.0-2.7 g, load peak 7.9-17x,
+  bump stop engaged on 61-86% of 1 g jolts, ~23 body-box contacts/km, mostly at the
+  tail. The seam does not flip surfaces (≤0.1 surface reversals per wheel per crossing).
+  The waves (0.24-0.26 m p99 about a 30 m swell, crest curvature 0.036-0.045 /m) lift a
+  car off at 53-60 km/h whatever the suspension does. A yielding-sand contact model was
+  tried against this bench and dropped: it halved the load peaks and cut jolt99 by
+  15-25%, but body contacts rose from 19 to 29 per km and flips from 1 to 4-10 per 37 km.
 - CLEAN SURFACES ARE FLAT AT EVERY DISTANCE (`render/cleanstyle.ts` `applyCleanSurface`,
   `world/roadmesh.ts`, `world/poi/kit.ts`, `render/comic.ts`). Clean read the road's
   albedo with a mip bias of 6, and right behind the car the computed level is at or below
