@@ -111,7 +111,8 @@ from the angle he complained about; changes are judged there, not in code.
 | `nivas.ts` | The Nivas: `BODY_2121` / `LOOK_2121` (platform `niva`) and the 2131 on its shell. |
 | `oka.ts` | The VAZ-1111: `BODY_1111` / `LOOK_1111` (platform `samara`). |
 | `volgas.ts` | The Volgas: `BODY_GAZ24` / `LOOK_GAZ24` (platform `classic`) and the GAZ-31029 on the 24's doors and greenhouse with its own nose and tail. |
-| `measurements-classics.md`, `measurements-estates.md`, `measurements-samara.md`, `measurements-2110.md`, `measurements-niva.md`, `measurements-oka.md`, `measurements-volga.md` | Measurement reports: every figure with its drawing or photo, scale and tag. |
+| `azlk.ts` | The AZLK-2141 Moskvich: `BODY_2141` / `LOOK_2141` (platform `samara`). |
+| `measurements-classics.md`, `measurements-estates.md`, `measurements-samara.md`, `measurements-2110.md`, `measurements-niva.md`, `measurements-oka.md`, `measurements-volga.md`, `measurements-2141.md` | Measurement reports: every figure with its drawing or photo, scale and tag. |
 | `builder.ts` | `PartBuilder`: flat triangles per material slot, transform stack, primitives (`box`, `bevelBox`, `extrude`, `cylinderX/Y/Z`, `torusY`, `bridge`, `poly`), vertex colours. |
 | `body.ts` | `BodyFrame` (cross-section, deck and lid lookups) and `buildShell`: tub, greenhouse and roof as one face list, then cut into parts. Shell constants (`SHUT_GAP`, `JAMB_DEPTH`, `DOOR_THICKNESS`, `NOTCH_WALL`, …). |
 | `exterior.ts` | End faces (`FaceLook.items` / `.lid`), bumpers swept round the corners, sill strip, flank strips (waist moulding, feature line: `buildFlankStrip`), repeaters, flank lamps, mirrors, handles, wipers, filler neck. |
@@ -355,6 +356,7 @@ cabin: … }`) share everything not overridden. Current families:
 | `BODY_2121` | `niva.jpg` factory four-view (`nivas.ts`) | 2121; 2131 (`BODY_2131`: the 2121 to its B pillar, 0.5 longer behind it, rear doors) |
 | `BODY_1111` | 3dcar.ru `vaz_1111_oka.jpg` (`oka.ts`) | 1111 |
 | `BODY_GAZ24` | 3dcar.ru `gaz_24.jpg` factory four-view (`volgas.ts`) | GAZ-24; GAZ-31029 (`BODY_GAZ31029`: the 24's columns and middle stations moved back 0.14, its own nose and tail from the-blueprints.com drawing) |
+| `BODY_2141` | the-blueprints.com "Moskvich 2141 (1986-2001)" drawing (`azlk.ts`) | AZLK-2141 |
 
 ### Look (`KitLook`)
 
@@ -448,8 +450,8 @@ at the cowl. Existing dashes: `CABIN_2101` (ribbon speedometer), `CABIN_2103` (f
 wood), `CABIN_2105` (own pod), `CABIN_2107` (one-piece "euro" panel), `CABIN_2110` (tall
 face, hood over swapped big dials, two big centre vents, heater panel, radio low in the
 stack), `CABIN_1111` (ribbon speedometer in a small hood), `CABIN_2131` (the 2121's with
-the bench further back); the Samaras use the `samara` platform's layout as is, the 2121
-the `niva` platform's.
+the bench further back); the Samaras and the AZLK-2141 use the `samara` platform's layout
+as is, the 2121 the `niva` platform's.
 
 ## Scene contract
 
@@ -867,8 +869,9 @@ within `KIT_FINE_M`; "Far" = everything except the four detail groups.
 | 2121 | 11 852 | 4 762 | 4 451 | – | 421 | 60 | 814 | 1 344 | 6 106 |
 | 2131 | 12 974 | 5 593 | 4 730 | – | 421 | 60 | 826 | 1 344 | 6 937 |
 | 1111 | 10 595 | 4 347 | 3 813 | – | 597 | 46 | 448 | 1 344 | 5 691 |
-| GAZ-24 | 11 938 | 5 460 | 3 889 | 1 747 | 401 | 284 | 560 | 1 344 | 6 804 |
-| GAZ-31029 | 11 118 | 4 444 | 4 051 | 1 747 | 421 | 294 | 564 | 1 344 | 5 788 |
+| GAZ-24 | 13 366 | 6 558 | 4 209 | 1 747 | 401 | 294 | 560 | 1 344 | 7 902 |
+| GAZ-31029 | 11 888 | 5 018 | 4 247 | 1 747 | 421 | 294 | 564 | 1 344 | 6 362 |
+| AZLK-2141 | 12 131 | 5 243 | 4 411 | 1 751 | 617 | 60 | 456 | 1 344 | 6 587 |
 
 The owner set the budget aside for the 2110 and 2112 (the rounded rear shut line adds side
 rows to every tub column).

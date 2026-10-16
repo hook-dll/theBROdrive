@@ -58,13 +58,18 @@ export const BODY_GAZ24: KitBody = {
     columns: [
       // The A pillar from the screen's foot to the roof's front [D: x 775 → 852].
       { s: 1.36, top: 1.75, upper: 'body' },
-      // The front door's frame from its shut line (1.459 [D: x 795]) up the pillar to the
-      // rail [D: the frame's outer line (800, 143) → (862, 62): 1.485 → 1.80].
-      { s: 1.46, top: 1.81, upper: 'door1' },
-      // The quarter light: its front edge raked behind the frame [D: (838, 128) → (870,
-      // 85): 1.68 / 1.05 → 1.84 / 1.27, 1.62 at the belt], up to its post [D: x 884–890,
-      // upright, 1.913–1.944].
-      { s: 1.6, top: 1.915, upper: 'door1', glass: 'vent' },
+      // A slim pillar with the quarter light close behind it (owner, 2026-10-16: the door's
+      // frame from 1.46 and the quarter light's glass from 1.60 at the belt left a broad
+      // painted wedge). Drawn [D: (806, 125) → (856, 70)], the pillar's outer line and the
+      // quarter light's front edge stand 14 px (0.072 of s) apart at mid height, 5.3 cm
+      // across [P "GAZ-24 (1st generation) Volga (side view)": 22 px at 5.46 mm/px, chrome
+      // included]: here the door's frame 0.04 behind the pillar's line and the glass 0.035
+      // behind that, parallel to it. Below the belt the wing still reaches back to the door's
+      // shut line at 1.459 [D: x 795].
+      { s: 1.4, top: 1.79, upper: 'door1', lower: 'body' },
+      // The quarter light from here to its post [D: x 884–890, upright, 1.913–1.944].
+      { s: 1.435, top: 1.825, upper: 'door1', glass: 'vent', lower: 'body' },
+      { s: 1.46, top: 1.85, upper: 'door1', glass: 'vent' },
       { s: 1.92, top: 1.92, upper: 'door1' },
       { s: 1.94, top: 1.94, upper: 'door1', glass: 'drop' },
       // The B pillar [D: x 965 / 972 / 980 / 985], upright.
@@ -266,10 +271,15 @@ export const BODY_GAZ31029: KitBody = {
     // 31029 drawing has it (no quarter light, no post in the rear door).
     columns: [
       { s: 1.5, top: 1.89, upper: 'body' },
-      { s: 1.6, top: 1.95, upper: 'door1' },
-      // The front glass's front edge [D: (310, 155) → (355, 100): 1.751 / 1.036 → 2.011
-      // / 1.362; 1.698 at the belt, 2.041 at the rail].
-      { s: 1.7, top: 2.04, upper: 'door1', glass: 'drop' },
+      // The 24's slim pillar 0.14 further back: the door's frame 0.04 behind the pillar's
+      // line, the glass 0.035 behind that, parallel to it, the wing below the belt to the
+      // door's shut line (1.60). Drawn [D: at y 125 the pillar's outer line x 316 (1.786),
+      // the glass x 330 (1.867), 0.081 of s apart; the glass's front edge (310, 155) →
+      // (355, 100), 1.698 at the belt]; the door's frame from 1.60 and the glass from 1.70
+      // at the belt left a broad painted wedge (owner, 2026-10-16).
+      { s: 1.54, top: 1.93, upper: 'door1', lower: 'body' },
+      { s: 1.575, top: 1.965, upper: 'door1', glass: 'drop', lower: 'body' },
+      { s: 1.6, top: 1.99, upper: 'door1', glass: 'drop' },
       { s: 2.466, top: 2.466, upper: 'door1' },
       { s: 2.502, top: 2.502, upper: 'body', lower: 'door1' },
       { s: 2.54, top: 2.54, upper: 'body', lower: 'door2' },

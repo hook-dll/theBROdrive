@@ -520,6 +520,13 @@ const TARGETS: Readonly<Record<string, Target>> = {
     brake80: 43.2, grossKg: 1800,
     source: 'as cf_gaz31029: drom.ru/catalog/gaz/31029_volga/83566 (tracks, turn); top ru.wikipedia ГАЗ-31029 145, avto-russia.ru 150; gross 110km.ru; brake the GAZ-24-10 ceiling',
   },
+  kit_azlk2141: {
+    wheelbase: 2.58, track: 1.44, radius: 0.31, top: 158, to100: 14.9,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.0, lat: null, hz: 1.15,
+    brake80: 43.2, grossKg: 1455,
+    source: 'as sa_azlk2141: AO moskvich-2141 (2141-01, VAZ-2106-70 engine; brake, gross); AP azlk/2141-moskvich/1-2-tekhnicheskie-dannye-i-kharakteristiki-avtomobilejj-moskvich.html; geometry kit_azlk2141 row',
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.109 },
+  },
 };
 
 /*

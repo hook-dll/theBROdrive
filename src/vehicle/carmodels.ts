@@ -1021,6 +1021,10 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   // The GAZ-31029: 4885 × 1800 × 1476, 2800 wheelbase, 1495/1425 tracks, 156 clearance,
   // 205/70 R14 (drivernotes.net, auto-data.net, the-blueprints.com drawing; measurements-volga.md).
   kit_gaz31029:   { length: 4.885, width: 1.800, height: 1.476, clearance: 0.156, wheelbase: 2.800, frontTrack: 1.495, rearTrack: 1.425, wheelRadius: 0.321, tyreWidth: 0.205 },
+  // The AZLK-2141, its pack sibling's figures (sa_azlk2141): 4350 × 1690 × 1400, 2580
+  // wheelbase, 1440/1420 tracks, 140 clearance, 165/80 R14 (drom.ru, wiki.zr.ru, njcar.ru;
+  // src/carkit/measurements-2141.md).
+  kit_azlk2141:   { length: 4.350, width: 1.690, height: 1.400, clearance: 0.140, wheelbase: 2.580, frontTrack: 1.440, rearTrack: 1.420, wheelRadius: 0.310, tyreWidth: 0.165 },
 };
 
 function factoryGeometry(id: string): FactoryGeometry {
@@ -2321,6 +2325,8 @@ const KIT_CARS: readonly Entry[] = (
     ['kit_vaz1111', 'cf_vaz1111', 'vaz1111'],
     ['kit_gaz24', 'sv_gaz24', 'gaz24'],
     ['kit_gaz31029', 'cf_gaz31029', 'gaz31029'],
+    // The pack's label names the Svyatogor; its running gear is the 2141-01's (see the entry).
+    ['kit_azlk2141', 'sa_azlk2141', 'azlk2141', 'AZLK-2141 Moskvich'],
   ] satisfies readonly (readonly [id: string, sibling: string, kit: string, label?: string, gear?: KitRunningGear])[]
 ).map(([id, sibling, kit, label, gear]) => {
   const base = ENTRIES.find((e) => e.id === sibling);

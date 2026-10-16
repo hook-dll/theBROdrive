@@ -749,6 +749,23 @@ amplified differences; `bench-*.json`, `pick-*.json`).
   last station has a `notch` (`BodyFrame.lidFace`, `lidOwner`). *spec.ts, exterior.ts,
   body.ts, oka.ts*.
 
+## Volgas and AZLK-2141 (2026-10-16)
+
+- **2141, GAZ-24, GAZ-31029: the A pillar too heavy, the front door's glass squeezed by
+  it (owner).** → The door's frame and glass columns stood at the drawn frame and glass
+  lines, far behind the pillar's line at the belt (a drawn sail, a rounded quarter-light
+  corner, glass edges more upright than the pillar): 0.38 / 0.24 / 0.20 of painted s at the
+  belt between the screen and the glass. → The pillar's line (the screen's) kept; the
+  door's frame 0.04–0.05 behind it and the glass 0.03–0.035 behind that, parallel to it
+  down to the belt (0.075–0.08 of s, 5–6 cm across, as the drawn and photographed pillar
+  and frame); below the belt the wing still reaches the door's shut line (`lower: 'body'`).
+  *azlk.ts, volgas.ts; measurements-2141.md §1, measurements-volga.md §3.5*.
+- **2141: the front bumper covered the lamps' lower edge (owner).** → A moulded bumper's
+  band starts `drop` under the face's sill bevel (sill + 0.035), not under the sill: the
+  draft's 0.04 / 0.36 put its top at 0.605 over lamps from 0.584 (the rear 0.585 over
+  0.556). → `drop` 0.085 / `height` 0.365 (0.20–0.565) at the front, 0.075 / 0.265
+  (0.28–0.545) at the back, both tops under the lamps as drawn. *azlk.ts*.
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent

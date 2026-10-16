@@ -18,6 +18,7 @@
  * 2115) in samaras.ts and the 2110 in tens.ts, each with its measurement report.
  */
 
+import { BODY_2141, LOOK_2141 } from './azlk';
 import { BODY_2102, BODY_2104, REAR_2102, REAR_2104 } from './estates';
 import { CABIN_1111, CABIN_2101, CABIN_2103, CABIN_2105, CABIN_2107, CABIN_2110, CABIN_2131 } from './interior';
 import { BODY_1111, LOOK_1111 } from './oka';
@@ -506,4 +507,5 @@ export const KIT_SPECS: Readonly<Record<string, KitCarSpec>> = {
   vaz1111: { id: 'vaz1111', ...BODY_1111, look: LOOK_1111, cabinLayout: CABIN_1111 },
   gaz24: { id: 'gaz24', ...BODY_GAZ24, look: LOOK_GAZ24 },
   gaz31029: { id: 'gaz31029', ...BODY_GAZ31029, look: LOOK_GAZ31029 },
+  azlk2141: { id: 'azlk2141', ...BODY_2141, look: LOOK_2141 },
 };
