@@ -836,18 +836,18 @@ function classicChassis(frame: BodyFrame, b: PartBuilder, eb: PartBuilder, route
   b.color(COLOURS.underseal);
   across(b, frame, 'trim', [[cs - 0.045, cf], [cs - 0.035, cf - 0.05], [cs + 0.035, cf - 0.05], [cs + 0.045, cf]], -0.47, 0.47, false);
   const ff = floorY(frame, w.front);
-  // Keep the outer ball joints tucked inside the wheel-house line.  The old 100 mm
-  // inset left the UAZ's long front rods visible past the tyre at steering lock.
-  const ball = w.frontHalfTrack - 0.14;
+  // Front linkage stays behind the wheel envelope.  It is static underbody geometry,
+  // not part of the wheel, so an outer joint near the tyre remains visible at lock.
+  const ball = w.frontHalfTrack - 0.24;
   for (const side of [1, -1]) {
     const joint = at(frame, side * ball, R - 0.08, w.front);
-    rod(b, 'trim', at(frame, side * 0.32, cf - 0.03, cs), joint, 0.016, 5);
-    rod(b, 'trim', at(frame, side * 0.32, ff - 0.03, w.front + 0.14), joint, 0.016, 5);
+    rod(b, 'trim', at(frame, side * 0.28, cf - 0.03, cs), joint, 0.016, 5);
+    rod(b, 'trim', at(frame, side * 0.28, ff - 0.03, w.front + 0.12), joint, 0.016, 5);
   }
   const barS = w.front - 0.25;
   const by = floorY(frame, barS) - 0.025;
   b.color(COLOURS.black);
-  tube(b, 'trim', [at(frame, 0.52, by, w.front - 0.02), at(frame, 0.45, by, barS), at(frame, -0.45, by, barS), at(frame, -0.52, by, w.front - 0.02)], 0.012, 4);
+  tube(b, 'trim', [at(frame, 0.4, by, w.front - 0.02), at(frame, 0.36, by, barS), at(frame, -0.36, by, barS), at(frame, -0.4, by, w.front - 0.02)], 0.012, 4);
 
   // Gearbox from the firewall, where the engine's bellhousing met it; propshaft to the
   // pinion, on the Niva from the transfer box behind the gearbox.
