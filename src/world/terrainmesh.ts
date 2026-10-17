@@ -410,10 +410,19 @@ float groundStipple( vec2 world, float footprint, float keepBelow ) {
  * pixel centre, and off-duty the rest of the time, so the same grain dims and vanishes
  * as the pixel grid slides under it. And the camera term in the beat swept each grain
  * through its wink in 30-80 ms at driving speed — two frames of one pixel, which the
- * eye integrates into the sand. The disc is a whole pixel across now — the fragment that
- * owns a grain is lit in full wherever the grain falls inside it, and the light fades
- * out over the next pixel, so a grain is a point and not a coin — the eye-motion term is
- * a tenth of its old rate, and the peak reads at all (see GLITTER_PEAK). It fades with
+ * eye integrates into the sand. The disc then went a whole pixel across, still measured
+ * on each world axis over its own fwidth, and that is only a screen circle when the
+ * world axes happen to line up with the screen's: with the road running diagonally
+ * across the view, fwidth adds the long along-the-road footprint into both world axes,
+ * and every distant grain swelled into a wide soft ellipse. The offset now goes back
+ * through the inverse of the screen-to-ground Jacobian (dFdx, dFdy of the cell
+ * coordinate), which gives the true pixel offset from the fragment to the grain at any
+ * heading and grazing angle, so the disc is a circle of the same pixel radius at every
+ * distance: the fragment that owns a grain is lit in full wherever the grain falls
+ * inside it, and the light fades out over the next pixel, so a grain is a point and not
+ * a coin. The grain's true 4 mm wins only near the wheels, where it covers more than
+ * that; it shrinks with distance and cannot make a blob. The eye-motion term is a tenth
+ * of its old rate, and the peak reads at all (see GLITTER_PEAK). It fades with
  * distance, 55-90 m.
  *
  * Cost: a uniform branch, derivatives taken once outside any divergent branch (they
@@ -424,7 +433,11 @@ float groundStipple( vec2 world, float footprint, float keepBelow ) {
 const GROUND_GLITTER_HOOK = /* glsl */ `
 if ( uGlitter > 0.0 ) {
   vec2 grainAt = vGroundWorld / ${GLITTER_CELL_M.toFixed(2)};
-  vec2 grainFootprint = max( fwidth( grainAt ), vec2( 1e-4 ) );
+  // One pixel right and one pixel up, in cells: the screen-to-ground Jacobian.
+  vec2 grainDx = dFdx( grainAt );
+  vec2 grainDy = dFdy( grainAt );
+  float grainDet = grainDx.x * grainDy.y - grainDx.y * grainDy.x;
+  grainDet = abs( grainDet ) < 1e-12 ? 1e-12 : grainDet;
   float glitterDist = length( vViewPosition );
   if ( glitterDist < 90.0 ) {
     vec2 grainCell = mod( floor( grainAt ), 4096.0 );
@@ -433,12 +446,16 @@ if ( uGlitter > 0.0 ) {
     if ( grainRoll > 1.0 - grainOccupancy ) {
       vec2 grainOffset = vec2( glitterHash( grainCell + 5.0 ), glitterHash( grainCell + 9.0 ) ) - 0.5;
       // Two discs, the larger wins: the grain's true few millimetres, which near the
-      // eye covers two or three pixels, and a whole pixel on each screen axis (the
-      // offset over its own footprint), which keeps a distant grain a point instead of a
-      // dash and lights the fragment that owns it in full wherever the grain falls
-      // inside it — the sub-pixel phase is what used to flicker a glint into noise.
+      // eye covers two or three pixels, and a disc about a pixel across in true screen
+      // pixels (the cell offset through the inverse Jacobian), round at any heading or
+      // grazing angle, which keeps a distant grain a point and lights the fragment that
+      // owns it in full wherever the grain falls inside it — the sub-pixel phase is
+      // what used to flicker a glint into noise.
       vec2 grainOff = fract( grainAt ) - 0.5 - grainOffset * 0.6;
-      vec2 grainPx = grainOff / grainFootprint;
+      vec2 grainPx = vec2(
+        grainDy.y * grainOff.x - grainDy.x * grainOff.y,
+        grainDx.x * grainOff.y - grainDx.y * grainOff.x
+      ) / grainDet;
       float grain = max(
         1.0 - smoothstep( 0.55, 1.1, length( grainPx ) ),
         1.0 - smoothstep( ${(GLITTER_GRAIN_CELLS * 0.4).toFixed(4)}, ${GLITTER_GRAIN_CELLS.toFixed(4)}, length( grainOff ) )

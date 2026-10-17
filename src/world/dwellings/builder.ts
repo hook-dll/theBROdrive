@@ -183,8 +183,10 @@ function ccw(points: readonly P2[]): P2[] {
   return THREE.ShapeUtils.isClockWise(contour) ? [...points].reverse() : [...points];
 }
 
-function triangulate(points: readonly P2[]): number[][] {
-  return THREE.ShapeUtils.triangulateShape(points.map(([u, v]) => new THREE.Vector2(u, v)), []);
+/** Indices into `points` followed by every hole's points, in order. */
+function triangulate(points: readonly P2[], holes: readonly (readonly P2[])[] = []): number[][] {
+  const ring = (outline: readonly P2[]): THREE.Vector2[] => outline.map(([u, v]) => new THREE.Vector2(u, v));
+  return THREE.ShapeUtils.triangulateShape(ring(points), holes.map(ring));
 }
 
 let bodyMaterial: THREE.MeshStandardMaterial | null = null;
@@ -1145,19 +1147,24 @@ export class Facade {
     ), Math.abs(d1 - d0));
   }
 
-  /** Painted shape: any outline, raised `depth` off the wall (starting at `from`). */
-  shape(outline: readonly P2[], hex: number, depth = 0.025, from = 0): void {
-    this.b.skin(() => this.drawShape(outline, hex, depth, from), depth);
+  /**
+   * Painted shape: any outline, raised `depth` off the wall (starting at `from`).
+   * `holes` are cut out of its face and left without walls of their own: the caller
+   * fills each one with something that stands proud of it (a door's panels).
+   */
+  shape(outline: readonly P2[], hex: number, depth = 0.025, from = 0, holes: readonly (readonly P2[])[] = []): void {
+    this.b.skin(() => this.drawShape(outline, hex, depth, from, holes), depth);
   }
 
-  private drawShape(outline: readonly P2[], hex: number, depth: number, from: number): void {
+  private drawShape(outline: readonly P2[], hex: number, depth: number, from: number, holes: readonly (readonly P2[])[]): void {
     const points = ccw(outline);
+    const corners = holes.length > 0 ? [...points, ...holes.flat()] : points;
     const outward = this.n;
     const front = from + depth;
-    for (const [i, j, k] of triangulate(points)) {
-      const a = points[i!]!;
-      const b = points[j!]!;
-      const c = points[k!]!;
+    for (const [i, j, k] of triangulate(points, holes)) {
+      const a = corners[i!]!;
+      const b = corners[j!]!;
+      const c = corners[k!]!;
       this.b.poly([this.p(a[0], a[1], front), this.p(b[0], b[1], front), this.p(c[0], c[1], front)], hex, outward);
     }
     for (let i = 0; i < points.length; i++) {
@@ -1303,8 +1310,19 @@ export class Facade {
         0.018,
       );
     }
-    this.shape(outline, hex, 0.035, style.surround !== undefined ? 0.018 : 0);
-    const leafFront = (style.surround !== undefined ? 0.018 : 0) + 0.035;
+    const leafBack = style.surround !== undefined ? 0.018 : 0;
+    const leafFront = leafBack + 0.035;
+    // Raised panels fill holes cut through the leaf instead of lying 1.5 cm on it: both
+    // are skin on one polygon offset, and that gap alone fought from about 100 m.
+    const panels: (readonly [number, number, number, number])[] = [];
+    if (style.panels) {
+      const pw = (style.double ? w / 2 : w) * 0.3;
+      for (const x of style.double ? [left + w / 4, right - w / 4] : [u]) {
+        panels.push([x - pw, v + 0.15, x + pw, v + straight * 0.42]);
+        if (!style.glass) panels.push([x - pw, v + straight * 0.5, x + pw, v + straight * 0.88]);
+      }
+    }
+    this.shape(outline, hex, 0.035, leafBack, panels.map(([u0, v0, u1, v1]) => rectOutline(u0, v0, u1, v1)));
     const dark = shade(hex, 0.74);
     this.box(left - fw, left, v, v + straight, 0, 0.07, frame);
     this.box(right, right + fw, v, v + straight, 0, 0.07, frame);
@@ -1329,14 +1347,7 @@ export class Facade {
       this.box(left - fw, right + fw, v + h, v + h + fw, 0, 0.07, frame);
     }
     if (style.double) this.box(u - 0.015, u + 0.015, v, v + straight, leafFront, leafFront + 0.012, dark);
-    if (style.panels) {
-      const leaves = style.double ? [left + w / 4, right - w / 4] : [u];
-      const pw = (style.double ? w / 2 : w) * 0.3;
-      for (const x of leaves) {
-        this.box(x - pw, x + pw, v + 0.15, v + straight * 0.42, leafFront, leafFront + 0.015, dark);
-        if (!style.glass) this.box(x - pw, x + pw, v + straight * 0.5, v + straight * 0.88, leafFront, leafFront + 0.015, dark);
-      }
-    }
+    for (const [u0, v0, u1, v1] of panels) this.box(u0, u1, v0, v1, leafBack, leafFront + 0.015, dark);
     if (style.glass) {
       const gw = Math.min(w * 0.5, 0.5);
       this.glass(rectOutline(u - gw / 2, v + straight * 0.55, u + gw / 2, v + straight * 0.86), leafFront + 0.006);

@@ -251,6 +251,8 @@ interface Layout {
    * Steering wheel centre (ds, dy), column rake above horizontal, rim radius and tube,
    * spoke angles (0 = driver's left, 90 = up) and the horn: a round boss or a wide pad.
    * `chrome`: spokes and horn bright (the GAZ-24's chrome horn bar across the wheel).
+   * `toFloor`: the column runs on down its own line to the floor or toe board (a van's
+   * column, which passes under a shallow dash), instead of stopping 0.4 m below the hub.
    */
   readonly wheel: {
     readonly ds: number;
@@ -261,6 +263,7 @@ interface Layout {
     readonly spokes: readonly number[];
     readonly hub: 'round' | 'pad';
     readonly chrome?: boolean;
+    readonly toFloor?: boolean;
   };
   /** Pedal hinge (ds, dy) under the dash and pad centre (ds, height over the floor). */
   readonly pedals: { readonly pivot: P2; readonly pad: P2 };
@@ -1131,10 +1134,10 @@ export const CABIN_UAZ469: CabinLayoutOverride = {
 
 /**
  * UAZ-2206: a flat painted steel dash under the screen, a deep level shelf on top, the
- * face upright; low on the driver's side, outboard of the column, a grey-blue panel of
- * four chrome-ringed dials (the speedometer 0-120 the largest, oil, fuel, temperature)
- * with a row of round warning lamps over them, a knob and a lamp under them; small
- * plates right of the column; a large thin two-spoke wheel on a steep column; the gear
+ * face upright; low on the face right of the column (towards the middle, clear of the
+ * wheel's rim), a grey-blue panel of four chrome-ringed dials (the speedometer 0-120 the
+ * largest, oil, fuel, temperature) with a row of round warning lamps over them, a knob
+ * under them; a large thin two-spoke wheel on a steep column down to the floor; the gear
  * lever and the transfer box's levers out of the floor behind the engine's cover.
  */
 export const CABIN_UAZ2206: CabinLayoutOverride = {
@@ -1152,42 +1155,44 @@ export const CABIN_UAZ2206: CabinLayoutOverride = {
   stack: undefined,
   vents: undefined,
   heater: undefined,
-  // The instrument panel: a flat plate 4 cm proud of the face, low and just outboard of
-  // the column [P: x 30-420 px left of the column at x 640, y 600-900, under the lamps'
-  // row]. A narrow strip, the four dials nearly touching: 0.23 x 0.094 inside its frame,
-  // 2.5 times as wide as tall [P: about 400 x 160 px, the strip seen at a slant]; its
-  // inner end at the column [P].
+  // The instrument panel: a flat plate 6 cm proud of the face, low on it, right of the
+  // column towards the dash's middle (its centre 0.045 off the centre line), so from the
+  // driver's eye every needle and lamp clears the wheel's rim [owner's review; checked by
+  // rays from `kit_driver_eye`]. A narrow strip, the four dials nearly touching: 0.23 x
+  // 0.094 inside its frame, 2.5 times as wide as tall [P: about 400 x 160 px].
   binnacle: [[0.3, -0.045], [0.36, -0.045], [0.36, -0.152], [0.3, -0.152]],
   binnacleHalf: 0.125,
-  binnacleRight: -0.035,
+  binnacleRight: 0.47,
   cluster: 0.36,
-  clusterFace: { right: -0.035, up: -0.096, half: [0.115, 0.047], colour: 0x4a5560, frame: 'chrome' },
+  clusterFace: { right: 0.47, up: -0.096, half: [0.115, 0.047], colour: 0x4a5560, frame: 'chrome' },
   gauges: [
     // From the door's side: oil (0-6), the speedometer 0-120 [P "80 … 120"], fuel [P the
     // pump], temperature; the speedometer about 1.45 times the others [P], the bezels
     // nearly touching [P].
-    { channel: 'oil', right: -0.125, up: -0.105, radius: 0.02, ...SMALL, full: 6, ticks: 4 },
-    { channel: 'speed', right: -0.065, up: -0.1, radius: 0.029, full: 120, ...BIG },
-    { channel: 'fuel', right: 0, up: -0.105, radius: 0.02, ...SMALL },
-    { channel: 'temp', right: 0.055, up: -0.105, radius: 0.02, ...SMALL },
+    { channel: 'oil', right: 0.38, up: -0.105, radius: 0.02, ...SMALL, full: 6, ticks: 4 },
+    { channel: 'speed', right: 0.44, up: -0.1, radius: 0.029, full: 120, ...BIG },
+    { channel: 'fuel', right: 0.505, up: -0.105, radius: 0.02, ...SMALL },
+    { channel: 'temp', right: 0.56, up: -0.105, radius: 0.02, ...SMALL },
   ],
   // The round lamps over the dials: red, white, amber [P].
-  lamps: { right: -0.065, up: -0.06, cols: 4, pitch: 0.025, show: ['charge', 'side', 'turn', 'beam'] },
-  // A knob by the panel's outer foot (the lights) and a toggle switch [P]; the hazard
-  // button (none on the car, kept for the game) by them [E].
-  lights: { right: -0.175, dy: -0.12, kind: 'knob' },
+  lamps: { right: 0.44, up: -0.06, cols: 4, pitch: 0.025, show: ['charge', 'side', 'turn', 'beam'] },
+  // The lights' knob and the hazard button (none on the car, kept for the game) on the
+  // face past the panel's right end, above its lip so the plate does not hide them [E].
+  lights: { right: 0.66, dy: -0.1, kind: 'knob' },
   rockers: { on: 'fascia', at: [[0.75, -0.15]] },
-  hazard: [0.38, -0.15],
-  // Right of the column: small plates [P]; the ashtray there [E]. The radio (none on the
+  hazard: [-0.2, -0.1],
+  // The ashtray left of the panel, behind the wheel's rim [E]. The radio (none on the
   // car, kept for the game's radio) hung under the face's foot, its top tucked into it,
   // between the driver's knee and the engine's cover [E]; a small lid before the
   // passenger [E].
   radio: [0.29, -0.205],
-  ashtray: [0.18, -0.13],
+  ashtray: [0.24, -0.11],
   glovebox: { x: -0.45, dy: -0.08, half: [0.14, 0.06] },
   // Rim 0.40 across, a thin grip; two spokes, up-left and down-right, and a round boss
-  // [P]; the column steep, down in front of the dash's face [P].
-  wheel: { ds: 0.53, dy: 0.19, rake: 65 * (Math.PI / 180), radius: 0.2, rim: 0.012, spokes: [40, 220], hub: 'round' },
+  // [P]; the column steep, down into the dash's face and on under it to the floor [P].
+  // Rake 52: the hub's axis meets the face (ds 0.32) at dy -0.08, mid face; at 65 it ran
+  // 3 cm under the face's foot, so the column hung clear of the dash with nothing round it.
+  wheel: { ds: 0.53, dy: 0.19, rake: 52 * (Math.PI / 180), radius: 0.2, rim: 0.012, spokes: [40, 220], hub: 'round', toFloor: true },
   pedals: { pivot: [0.15, -0.22], pad: [0.3, 0.13] },
 };
 
@@ -2328,7 +2333,15 @@ class Cabin {
     const local = (p: Vec3): Vec3 => add(centre, rotX(p, tilt));
 
     const b = this.fixed.pushAt(centre, [tilt, 0, 0]);
-    b.color(COLOURS.metal).cylinderY('trim', [0, -0.25, 0], 0.02, 0.15, 8, false);
+    // The column, from inside the shroud down its own line: 0.4 below the hub, or with
+    // `toFloor` on to where it meets the floor or toe board (sampled every centimetre).
+    let end = 0.4;
+    if (w.toFloor) {
+      const down = Math.sin(w.rake);
+      const ahead = Math.cos(w.rake);
+      while (end < 1.5 && this.belt + w.dy - end * down > this.floorAt(this.frame.cowl + w.ds - end * ahead)) end += 0.01;
+    }
+    b.color(COLOURS.metal).cylinderY('trim', [0, -(end + 0.1) / 2, 0], 0.02, (end - 0.1) / 2, 8, false);
     b.color(COLOURS.black);
     pad(b, 'trim', [0, -0.165, -0.008], [0.045, 0.095, 0.04], 0.014);
     b.pop();

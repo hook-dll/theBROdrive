@@ -1463,6 +1463,20 @@
 
 ### Fixed
 
+- THE LOG CABIN NO LONGER FLICKERS AS IT RECEDES (`world/dwellings/americas.ts` `logCabin`,
+  `world/dwellings/builder.ts` `Facade.door` `Facade.shape`). Two skin layers lay a
+  centimetre apart on the one polygon offset all facade skin shares, so the offset
+  could not part them and the 24-bit depth lost them: the gable's battens ran 6 mm behind
+  the loft window's glass (sky mirror against dark wood from ~63 m), and the door's
+  raised panels lay 1.5 cm on the leaf (from ~100 m). The battens now stop at the
+  window's sill rail, and a panelled door's leaf has holes its panels fill from the wall
+  out, as on every dwelling with a panelled door. Same looks, same casters, no new
+  material. New `tools/dwelling-skin.ts` lists, per dwelling, skin buried under shell
+  and skin stacked on skin, with the range each fight starts at and whether it is wider
+  than a pixel there; log cabin: 11 337 cm² of visible fight → 0
+  (`npx tsx tools/dwelling-skin.ts --strict log-cabin` exits 0). Visible stacked area
+  fell on 21 other dwellings with a panelled door (victorian-ghost +0.5 %, a
+  re-triangulation); their other findings are listed by the tool and not touched here.
 - A CAR'S SHADOW IS ONE SOLID SILHOUETTE (`render/carshadowhull.ts`, `render/carmodel.ts`
   `shadowHullOf` `carModelShadowHull`, `render/farcars.ts` `FarCarField.addCaster`,
   `vehicle/vehicle.ts` `castHull`). Owner's report, 2026-10-16: a GAZ-31029 parked on the

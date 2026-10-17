@@ -136,8 +136,14 @@ export function logCabin(b: DwellingBuilder): void {
   for (const u of [-2.1, 2.1]) front.window(u, 1.25, 0.75, 0.85, { frame: dark, cross: true, shutters: 0x7a3a26 });
   b.gable(-3.6, 3.6, -2.8, 2.8, 2.95, 5.0, { roof: shakes, wall: 0x7a5230, over: 0.45, end: 0.4 });
   const gableEnd = new Facade(b, [-3.6, 0, 0], [0, 0, 1], [-1, 0, 0], 5.6, 5.0);
-  battens(gableEnd, 3.0, 3.6, 0.35, 0x5f3f24, -1.8, 1.8);
-  gableEnd.window(0, 3.25, 0.55, 0.6, { frame: dark });
+  // Board-and-batten round the loft window. The two battens behind it stop at its sill
+  // rail: under the pane they lay 6 mm behind glass on the same polygon offset as
+  // theirs, and fought it from about 60 m.
+  const loft = { v: 3.25, w: 0.55, h: 0.6, frame: 0.08 };
+  battens(gableEnd, 3.0, 3.6, 0.35, 0x5f3f24, -1.8, -0.4);
+  battens(gableEnd, 3.0, loft.v - loft.frame, 0.35, 0x5f3f24, -0.4, 0.3);
+  battens(gableEnd, 3.0, 3.6, 0.35, 0x5f3f24, 0.3, 1.8);
+  gableEnd.window(0, loft.v, loft.w, loft.h, { frame: dark, frameWidth: loft.frame });
   porch(b, -3.6, 3.6, -4.7, -2.95, 0.3, 2.35, { deck: 0x7d5a3a, post: 0x5f3f24, roof: shakes }, 4, 0.3);
   steps(b, -0.6, 0.6, -4.7, 0.3, 1, 0x7d5a3a);
   // Fieldstone chimney up the right gable, stepping in as it rises.

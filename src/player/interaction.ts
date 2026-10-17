@@ -420,6 +420,12 @@ const KIT_VEHICLE_CHANNELS: Readonly<Record<string, true>> = {
 
 /** The shell's own panels (doors, lids, flap): outside parts, not cabin fittings. */
 const KIT_SHELL_PART = /^(door_|bonnet$|boot$|tailgate(_[lr])?$|flap$)/;
+/**
+ * Cabin parts also worked on foot, when the eye ray reaches them through an open side
+ * door (`kitOpenDoorInRay`): the van's engine cover between the front seats, which is
+ * lifted from the cab's door as from the seat.
+ */
+const KIT_DOOR_REACH_PART = /^engine_cover$/;
 
 /** Lids opened only from outside: from a seat they are not offered. */
 const KIT_LID_PART = /^(bonnet|boot|tailgate(_[lr])?)$/;
@@ -1633,7 +1639,8 @@ export class Interaction {
    * Reach rules on the part found: the channels the Vehicle drives itself are not
    * offered (`KIT_VEHICLE_CHANNELS`), nor a drop pane or the wiper arms (worked by the
    * crank and the stalk); on foot only the shell's panels are (`KIT_SHELL_PART`), and
-   * from a seat every part but the lids (`KIT_LID_PART`).
+   * through an open side door the parts in `KIT_DOOR_REACH_PART`; from a seat every
+   * part but the lids (`KIT_LID_PART`).
    */
   private aimKit(
     vehicle: Vehicle,
@@ -1700,7 +1707,10 @@ export class Interaction {
         && !KIT_VEHICLE_CHANNELS[kitAction(picked.control).channel]
         && !KIT_SEAT_PART.test(picked.control.id)
         && (frontSeat || !KIT_SIDE_MIRROR.test(picked.control.id))
-        && (seated ? !KIT_LID_PART.test(picked.control.id) : KIT_SHELL_PART.test(picked.control.id))
+        && (seated
+          ? !KIT_LID_PART.test(picked.control.id)
+          : KIT_SHELL_PART.test(picked.control.id)
+            || (KIT_DOOR_REACH_PART.test(picked.control.id) && vehicle.kit !== null && this.kitOpenDoorInRay(vehicle.kit, vehicle, eyeX, eyeY, eyeZ, dx, dy, dz)))
       ) {
         aim.part = picked;
       }
