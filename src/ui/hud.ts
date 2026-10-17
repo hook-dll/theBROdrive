@@ -263,6 +263,11 @@ const TOAST_LEAVE_MS = 300;
 const MAX_TOASTS = 4;
 /** Length of the race bead line, px; matches `.hud-race` width in hud.css. */
 const RACE_LINE_PX = 260;
+/**
+ * The crosshair fades this long after the view was last turned: long enough to read
+ * what the aim settled on, short enough that a still view is clean (owner: 3-5 s).
+ */
+const CROSSHAIR_IDLE_MS = 4000;
 
 function el(tag: string, cls?: string): HTMLElement {
   const node = document.createElement(tag);
@@ -319,8 +324,8 @@ export class Hud {
   private readonly tops: HTMLElement[] = [];
 
   private readonly crosshairEl: HTMLElement;
-  /** A car is being driven: the crosshair then shows only on a cabin fitting (`setPrompt`). */
-  private driving = false;
+  /** When the view was last turned, ms (`noteLook`); the crosshair fades after it. */
+  private lastLookMs = -Infinity;
   /** The cabin view shows the car's own cluster; see `setCabinInstruments`. */
   private cabinInstruments = false;
   private readonly promptEl: HTMLElement;
@@ -912,7 +917,6 @@ export class Hud {
   }
 
   setDriving(readout: DrivingReadout | null): void {
-    this.driving = readout !== null;
     if (readout === null || this.cabinInstruments) {
       this.setVisible(this.drivingCluster, false);
       this.insetClockMs = -1;
@@ -1181,14 +1185,23 @@ export class Hud {
   }
 
   /**
-   * On foot the crosshair always shows, dim until the aim names something or is on
-   * something a car works (`actionable`). Driving it shows only on the latter.
+   * The crosshair is the look's: it shows while the view is turned (mouse, stick, touch)
+   * and fades out `CROSSHAIR_IDLE_MS` after the last turn, on foot and seated alike. Dim
+   * until the aim names something; on something a car works (`actionable`) it fills,
+   * and the fill pulses (hud.css `hud-crosshair-pulse`).
    */
   setPrompt(text: string | null, actionable: boolean): void {
     this.setVisible(this.promptEl, text !== null);
-    this.setVisible(this.crosshairEl, !this.driving || actionable);
+    const idle = performance.now() - this.lastLookMs > CROSSHAIR_IDLE_MS;
+    this.crosshairEl.classList.toggle('is-idle', idle);
+    this.crosshairEl.classList.toggle('is-actionable', actionable);
     this.crosshairEl.classList.toggle('is-dim', !actionable && text === null);
     if (text !== null) this.setText(this.promptEl, text);
+  }
+
+  /** Called every rendered frame: whether the view was turned since the last one. */
+  noteLook(turned: boolean): void {
+    if (turned) this.lastLookMs = performance.now();
   }
 
   /** The cabin-camera editor's line, or null to hide it. */

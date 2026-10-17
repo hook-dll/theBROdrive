@@ -1352,6 +1352,9 @@ async function boot(): Promise<void> {
    */
   const cameraInput: InputFrame = emptyInput();
   const deathInput: InputFrame = emptyInput();
+  /** The controls an autopilot drives with while the player sits in another seat. */
+  const passengerDrive: InputFrame = emptyInput();
+  const blankDrive: Readonly<InputFrame> = emptyInput();
   let lookYawAccum = 0;
   let lookPitchAccum = 0;
   let zoomAccum = 0;
@@ -1652,9 +1655,18 @@ async function boot(): Promise<void> {
     if (driving && !controlled) {
       player.setEnabled(false);
       if (f.cycleCamera) camera.cycleDriving();
-      autopilot.setEngaged(false);
       if (f.toggleAutopilot || f.toggleLights || f.toggleLeftIndicator || f.toggleRightIndicator) {
         hud.setToast('only the driver can do that');
+      }
+      // Moving to another seat leaves an engaged autopilot driving: it is the car's
+      // driver now, and the occupant's own keys reach nothing on the controls. It drives
+      // from a blank frame, so a passenger's throttle or steering is never the car's.
+      // Only stepping out of the car drops it (the on-foot branch below).
+      if (autopilot.engaged) {
+        Object.assign(passengerDrive, blankDrive);
+        autopilot.setOncomingGap(traffic.nearestOncomingDistance(activeS, 1));
+        autopilot.drive(dt, driving, passengerDrive, origin.x, origin.z);
+        driving.fixedUpdate(dt, passengerDrive);
       }
     } else if (driving) {
       // setEnabled early-returns when unchanged, so calling it every tick is free.
@@ -2029,9 +2041,10 @@ async function boot(): Promise<void> {
       driving.kit?.set('radio', audio.radioDial(drivingId!));
       // The hazard button: from the driver's seat it steps the hazards with the autopilot,
       // sleeper → hurried → frantic → off, the hazards on while it drives and out with it.
-      // Anything that drops the autopilot (P to off, leaving the seat) drops its hazards
-      // too (`Autopilot.setEngaged`). From another seat the autopilot is not the
-      // occupant's: the button only switches the hazards.
+      // Anything that drops the autopilot (P to off, stepping out of the car) drops its
+      // hazards too (`Autopilot.setEngaged`). From another seat the autopilot keeps
+      // driving but is not the occupant's to change: the button only switches the
+      // hazards, and tells a driving autopilot so, or it would put its own lamps back.
       if (cabinPress === 'hazard') {
         if (controlled) {
           if (!autopilot.engaged) {
@@ -2048,7 +2061,9 @@ async function boot(): Promise<void> {
           driving.setIndicator(autopilot.engaged ? 'hazard' : 'off');
           hud.setToast(autopilot.engaged ? `hazards · autopilot: ${autopilot.mode}` : 'hazards off · autopilot off');
         } else {
-          driving.setIndicator(driving.indicator === 'hazard' ? 'off' : 'hazard');
+          const on = driving.indicator !== 'hazard';
+          if (autopilot.engaged) autopilot.setHazards(on);
+          driving.setIndicator(on ? 'hazard' : 'off');
         }
       }
     }
@@ -2320,6 +2335,8 @@ async function boot(): Promise<void> {
     // mirror turned by θ swings the view in it by 2θ, so half the look delta moves the
     // image with the hand.
     const aimingKit = interaction.aimingKit;
+    // The crosshair shows while the view is being turned and fades once it is left alone.
+    hud.noteLook(lookYawAccum !== 0 || lookPitchAccum !== 0);
     if (aimingKit) {
       aimingKit.rig.aim(aimingKit.control, lookYawAccum * MIRROR_HAND_YAW, lookPitchAccum * MIRROR_HAND_PITCH);
       lookYawAccum = 0;

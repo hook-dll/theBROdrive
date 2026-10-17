@@ -230,6 +230,31 @@ body.is-cinematic #ui {
   opacity: 0.32;
 }
 
+/* The view left alone: the crosshair dissolves rather than blinking out. */
+.hud-crosshair.is-idle {
+  opacity: 0;
+  transition: opacity 1.2s ease;
+}
+
+/* On something a car works: the ring fills, and the fill breathes about once a second. */
+.hud-crosshair::after {
+  content: "";
+  position: absolute;
+  inset: 1.5px;
+  border-radius: 50%;
+  background: var(--hud-fg);
+  opacity: 0;
+}
+
+.hud-crosshair.is-actionable::after {
+  animation: hud-crosshair-pulse 1.1s ease-in-out infinite alternate;
+}
+
+@keyframes hud-crosshair-pulse {
+  from { opacity: 0.25; }
+  to { opacity: 0.95; }
+}
+
 .hud-prompt {
   position: absolute;
   left: 50%;

@@ -18,10 +18,19 @@
 - The HAZARD button, from the driver's seat, steps hazards with the autopilot: hazards +
   sleeper → hazards + hurried → hazards + frantic → both off. The autopilot keeps the
   hazards on while it drives (`Autopilot.setHazards`, which beats its own lane-change
-  blinkers); anything that drops the autopilot (P to off, leaving the driver's seat) puts
-  them out with it. From another seat the button only switches the hazards (the
-  autopilot is the driver's). A passenger's hazards no longer go out every step either:
-  `Autopilot.setEngaged(false)` only clears the lamps on a real disengagement.
+  blinkers); P to off or stepping out of the car puts them out with it. From another
+  seat the button only switches the hazards (and tells a driving autopilot, which keeps
+  them as set). `Autopilot.setEngaged(false)` only clears the lamps on a real
+  disengagement.
+- THE AUTOPILOT KEEPS DRIVING WHEN YOU MOVE SEATS (main.ts). Changing to any other seat
+  used to drop it on the next step and the car rolled on undriven; now it drives on from a
+  blank control frame, so the occupant's own keys never reach the car, and taking the
+  driver's seat again finds it still driving. Only stepping out of the car drops it.
+- THE CROSSHAIR FOLLOWS THE LOOK (ui/hud.ts `noteLook`, hud.css). It shows while the view
+  is turned (mouse, stick, touch), on foot and seated alike, and dissolves over 1.2 s once
+  the view has been left alone for 4 s (`CROSSHAIR_IDLE_MS`). On something a car works
+  it fills, and the fill pulses about once a second. It used to stay up on foot for good
+  and, seated, show only on a fitting.
 - BOTH DOOR MIRRORS are adjustable (hold E on the head, move the mouse), from either
   front seat only, through the closed door glass or vent window; from the rear they are
   not offered. Their heads turn on new `mirror_l_*`/`mirror_r_*` channels, the live
