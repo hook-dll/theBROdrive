@@ -4,8 +4,8 @@ import { cleanStyle } from './cleanstyle';
 /**
  * Keep every light slot and its program variant, but skip exactly black uniforms.
  * Install globally before compilation so ordinary, comic and loaded car materials
- * agree. The condition is uniform across fragments; spotlight derivatives and all
- * active-light/shadow operations remain untouched.
+ * agree. The condition is uniform across fragments; all active-light/shadow operations
+ * remain untouched. (The spot loop has its own guard, `installSpotLightDormantGuard`.)
  */
 function installPointLightZeroGuard(): void {
   const guard = 'if ( any( notEqual( pointLights[ i ].color, vec3( 0.0 ) ) ) )';
@@ -18,6 +18,61 @@ function installPointLightZeroGuard(): void {
   THREE.ShaderChunk.lights_fragment_begin = chunk.replace(
     pointLoop,
     `$1${guard} {\n\t\t$2\n\t\t}$3`,
+  );
+}
+
+/**
+ * A spot slot whose colour (three's `color * intensity`) has no channel this bright is
+ * DORMANT and skipped by the spot loop. The rig parks an unclaimed slot at 1e-8
+ * (render/vehiclelights.ts `DORMANT_INTENSITY`), a hundredth of this; a lit lamp fading
+ * through it is a millionth of a candela, nothing any pixel shows.
+ */
+export const SPOT_LIGHT_LIVE_MIN = 1e-6;
+
+/** A `SPOT_REACH` mask with every slot in reach (an int uniform: all 32 bits set). */
+export const SPOT_REACH_ALL = -1;
+
+/**
+ * The spot loop skips every slot that cannot light this fragment's material, by a branch
+ * on uniforms alone, the same for every fragment of the draw:
+ *
+ *  - DORMANT slots (`SPOT_LIGHT_LIVE_MIN`). At noon every slot is dormant, and the loop
+ *    still ran the whole physical light for each: on the driven car seen from the cabin,
+ *    8.4 ms of its 8.65 ms at 1440 lines on the M2 Pro (11 slots; 0.25 ms with none).
+ *  - Slots out of reach (`SPOT_REACH`, a macro a material defines before this chunk:
+ *    render/materials.ts gives a kit car's body and glass a per-car mask, which main.ts
+ *    fills for the occupied car from render/vehiclelights.ts `spotReachMask`, a test of
+ *    each lit beam's cone against the car). Everyone else's is `true`.
+ *
+ * The slot count, the shadowed slot (index 0 while `NUM_SPOT_LIGHT_SHADOWS` is 1) and the
+ * program are unchanged: the shadow lookup, the light map and `directLight.visible` all
+ * sit inside the branch exactly as three wrote them, so a skipped slot contributes what a
+ * dormant one did (nothing visible) and a live one exactly what it did before. Being
+ * uniform, the branch keeps screen derivatives defined inside it (the ground's slope-
+ * normal spot call, render/comic.ts).
+ *
+ * DRIVER RISK, stated plainly. The dormant intensity is nonzero because some drivers
+ * specialized the first executed program around an exactly-zero light contribution and
+ * stalled for seconds when a slot first lit (vehiclelights.ts). That rule still holds:
+ * no slot's uniforms ever reach exactly zero, and the guarded body is still in the
+ * program. What is new is a branch that is never taken until the first lamp lights. A
+ * driver that specializes on uniform VALUES could in principle fold that branch away the
+ * way it folded the zero light; nothing here can rule that out. The first headlamp of a
+ * session on Windows/ANGLE is the moment to watch for a hitch.
+ */
+function installSpotLightDormantGuard(): void {
+  const chunk = THREE.ShaderChunk.lights_fragment_begin;
+  if (chunk.includes('SPOT_REACH(')) return;
+
+  const spotLoop = /(#pragma unroll_loop_start\s+for \( int i = 0; i < NUM_SPOT_LIGHTS; i \+\+ \) \{\s*)(spotLight = spotLights\[ i \];[\s\S]*?RE_Direct\( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight \);)(\s*\}\s*#pragma unroll_loop_end)/;
+  if (!spotLoop.test(chunk)) throw new Error('Three spot-light shader layout changed');
+  const live = `max3( spotLights[ i ].color ) >= ${SPOT_LIGHT_LIVE_MIN.toExponential()}`;
+  THREE.ShaderChunk.lights_fragment_begin = chunk.replace(
+    spotLoop,
+    `#ifndef SPOT_REACH
+	#define SPOT_REACH( index ) true
+	#endif
+	$1if ( ${live} && SPOT_REACH( UNROLLED_LOOP_INDEX ) ) {\n\t\t$2\n\t\t}$3`,
   );
 }
 
@@ -290,6 +345,7 @@ if ( cleanStyle.x > 0.0 ) {
 }
 
 installPointLightZeroGuard();
+installSpotLightDormantGuard();
 installSunShadowSlopeBias();
 installStableShadowFilter();
 installSunShadowCascade();

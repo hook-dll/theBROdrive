@@ -84,6 +84,8 @@ import { carPaintColor, type CarPaint } from './carpaint';
 import type { ContactPatchField } from '../render/contactpatches';
 import { patchOpacity } from '../render/contactpatches';
 import type { VehicleLightRig } from '../render/vehiclelights';
+import { SPOT_REACH_ALL } from '../render/lightshader';
+import { SWING_REACH_M } from '../render/kitdraw';
 import { KitRig } from '../carkit/rig';
 import { KIT_DOME_LAMP_NODE } from '../carkit/interior';
 
@@ -796,6 +798,12 @@ const DOME_TINT = 0xffd9a8;
 const DOME_INTENSITY = 8;
 const DOME_RANGE_M = 2.2;
 const DOME_ANGLE = 1.25;
+/**
+ * Slack on the sphere a spot slot's reach is tested against (`syncSpotReach`), metres:
+ * the body's bounce, squash, roll and pitch under the root, and the root not being the
+ * measured box's centre to the millimetre.
+ */
+const SPOT_REACH_MARGIN_M = 0.5;
 
 export class Vehicle implements Rebasable {
   private readonly physics: PhysicsWorld;
@@ -4016,6 +4024,24 @@ export class Vehicle implements Rebasable {
     const source = node.getWorldPosition(this.domeSource);
     const target = this.domeTarget.set(0, -1, 0).applyQuaternion(this.rootGroup.quaternion).add(source);
     rig.addBeam(source, target, DOME_TINT, DOME_INTENSITY * gain, DOME_RANGE_M, DOME_ANGLE, 1, 1);
+  }
+
+  /**
+   * Tells this car's body and glass which spot slots can light it this frame
+   * (render/vehiclelights.ts `spotReachMask`; call after the rig's `endFrame`), or with
+   * no rig, every slot. A kit car's alone: any other model's materials ignore it. The
+   * sphere is the measured body with its doors and lids swung out (render/kitdraw.ts
+   * `SWING_REACH_M`), which is all its body and glass draw.
+   */
+  syncSpotReach(rig: VehicleLightRig | null): void {
+    const surface = this.surface;
+    if (!surface) return;
+    if (rig === null) {
+      surface.setSpotReach(SPOT_REACH_ALL);
+      return;
+    }
+    const radius = Math.hypot(...this.measure.halfExtents) + SWING_REACH_M + SPOT_REACH_MARGIN_M;
+    surface.setSpotReach(rig.spotReachMask(this.rootGroup.position, radius));
   }
 
   /**

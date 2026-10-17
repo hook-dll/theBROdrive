@@ -207,7 +207,7 @@ class KitSkinnedMesh extends THREE.SkinnedMesh {
 }
 
 /** How far a part of a car swings out of its shut outline (an open door, the bonnet), metres. */
-const SWING_REACH_M = 1.5;
+export const SWING_REACH_M = 1.5;
 
 /** A skinned mesh over `skeleton`, its bones in the frame of the mesh's parent. */
 function skinned(geometry: THREE.BufferGeometry, material: THREE.Material | THREE.Material[], skeleton: KitSkeleton, sphere: THREE.Sphere): THREE.SkinnedMesh {

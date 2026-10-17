@@ -379,6 +379,8 @@ async function boot(): Promise<void> {
   // Who holds the rig's spotlights, and the road's headlamp streaks, frame to frame:
   // a slot is handed over by fading, never reassigned in one frame (render/slotpool.ts).
   const beamPool = new FadingSlotPool(vehicleLights.lightCount, LAMP_HANDOVER_S);
+  // The car whose body and glass skip the spot slots that cannot reach it (`syncSpotReach`).
+  let spotReachCar: Vehicle | null = null;
   // Contact shadows are not a night effect and are not gated on the light rig: they are
   // the only thing on screen that reports what each tyre is carrying, they are the one
   // shadow source that survives the cheapest graphics tier, and they cost one draw call.
@@ -2516,6 +2518,15 @@ async function boot(): Promise<void> {
       }
     }
     vehicleLights.endFrame();
+    // The car the player sits in fills the screen from the cabin, and every spot slot
+    // that lights nothing of it is a whole light per pixel of it (render/lightshader.ts
+    // `SPOT_REACH`): its body and glass skip the beams that cannot reach it. A car left
+    // behind takes every slot again, since only this one is tested each frame.
+    if (spotReachCar !== driving) {
+      spotReachCar?.syncSpotReach(null);
+      spotReachCar = driving;
+    }
+    driving?.syncSpotReach(vehicleLights);
 
     // Tyres are offered to the patch pool in the same order and for the same reason:
     // the driven car first, then the traffic by range, so a full pool refuses the

@@ -13,6 +13,7 @@ import { MATERIALS_CONFIG } from '../config';
 import { applyComicShading } from './comic';
 import { SandColor } from './desertdust';
 import { stickerAtlas } from './stickerart';
+import { SPOT_REACH_ALL } from './lightshader';
 
 /** Per-instance uniforms for condition-shaded materials. */
 interface ConditionUniforms {
@@ -612,6 +613,19 @@ interface KitBodyUniforms {
 }
 const kitBodyUniforms = new WeakMap<THREE.Material, KitBodyUniforms>();
 
+/**
+ * A kit car's body and glass: which spot slots can reach the car (`setCarSpotReach`), bit
+ * `i` for the shader's spot light `i`, all of them unless told otherwise.
+ */
+const carSpotReach = new WeakMap<THREE.Material, { value: number }>();
+
+/**
+ * The spot loop's reach test (render/lightshader.ts `SPOT_REACH`) on this material's own
+ * mask. One program for every kit car: a car nobody masks has every bit set.
+ */
+const KIT_SPOT_REACH_PARS = `uniform int uKitSpotReach;
+#define SPOT_REACH( index ) ( ( uKitSpotReach & ( 1 << ( index ) ) ) != 0 )`;
+
 /** One role of a kit car's lens uniforms, shaped as the lens material it stands in for. */
 class KitLensGlow implements LensGlow {
   constructor(
@@ -629,7 +643,7 @@ class KitLensGlow implements LensGlow {
   }
 }
 
-const KIT_BODY_PROGRAM_KEY = `${CAR_BODY_PROGRAM_KEY}-kit-v1`;
+const KIT_BODY_PROGRAM_KEY = `${CAR_BODY_PROGRAM_KEY}-kit-v2`;
 
 const KIT_BODY_VERTEX_PARS = `${CAR_BODY_VERTEX_PARS}
 attribute vec4 ${CAR_SURFACE_ATTRIBUTE};
@@ -663,7 +677,8 @@ const KIT_BODY_PARS = `${CAR_BODY_PARS}
 uniform float uKitLensGrime;
 varying vec4 vKitSurface;
 varying vec2 vKitRole;
-varying vec3 vKitGlow;`;
+varying vec3 vKitGlow;
+${KIT_SPOT_REACH_PARS}`;
 
 /** The paint share replaces the palette test: a kit car has no map. */
 const KIT_BODY_MAP = `float carPaintPanel = 1.0;
@@ -713,19 +728,59 @@ if ( uLampKnee > 0.0 ) {
 #include <opaque_fragment>`;
 
 /**
+ * MATT DETAIL TRIM under the lamps: Lambert alone.
+ *
+ * The cabin, door trim, bay, boot and underbody (the parts that receive shadows,
+ * `KIT_SHADOW_ATTRIBUTE`; carmodel.ts `prepareMaterials`) in an unpainted, non-metal,
+ * rough slot (carkit/materials.ts: `trim` at 0.75, `tyre` at 0.9, the lit faces) are lit
+ * by each spot slot with the diffuse term three's physical light already gave them, and
+ * no GGX lobe: no Fresnel, distribution, visibility or the multiscatter table lookups,
+ * per lamp per fragment. The lobe it drops is a broad, dim sheen at that roughness (the
+ * ground did the same, render/groundlight.ts). The sun and the sky keep the physical
+ * light, so the daylight look of the dash and seats is untouched; chrome, paint, lenses,
+ * the glass and the exterior trim stay physical under the lamps too.
+ *
+ * A branch on the surface bytes, which are one slot's per triangle: it splits only along
+ * a slot's edge.
+ */
+const KIT_MATT_ROUGHNESS = 0.7;
+const KIT_MATT_LIGHT = `#include <lights_physical_pars_fragment>
+void RE_Direct_KitMatt( const in IncidentLight directLight, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in PhysicalMaterial material, inout ReflectedLight reflectedLight ) {
+	float dotNL = saturate( dot( geometryNormal, directLight.direction ) );
+	reflectedLight.directDiffuse += dotNL * directLight.color * BRDF_Lambert( material.diffuseContribution );
+}`;
+const KIT_DIRECT_CALL =
+  'RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );';
+const KIT_SPOT_CALL = `if ( kitMatt ) RE_Direct_KitMatt( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );
+		else ${KIT_DIRECT_CALL}`;
+
+/**
  * Shadows only where the part receives them (carmodel.ts `prepareMaterials`: the kit's
  * detail parts and exhaust do, the bodywork and lenses do not). `receiveShadow` is a
  * uniform in three, not a program variant, so the mesh receives and this narrows it.
+ * The spot loop's light call becomes `KIT_SPOT_CALL` (`KIT_MATT_LIGHT`).
  * Read at compile time: render/lightshader.ts patches the chunk once at start-up.
  */
 function kitLightsBegin(): string {
   const chunk = THREE.ShaderChunk.lights_fragment_begin;
   const gated = chunk.replaceAll('&& receiveShadow )', '&& kitReceiveShadow )');
   if (gated === chunk) throw new Error('Three lights_fragment_begin layout changed: no receiveShadow test');
-  return `bool kitReceiveShadow = receiveShadow && vKitSurface.w > 0.5;\n${gated}`;
+  const spotLoop = gated.indexOf('i < NUM_SPOT_LIGHTS;');
+  const dirLoop = gated.indexOf('i < NUM_DIR_LIGHTS;');
+  const spotCall = spotLoop >= 0 ? gated.indexOf(KIT_DIRECT_CALL, spotLoop) : -1;
+  if (spotCall < 0 || dirLoop < 0 || spotCall > dirLoop) throw new Error('Three lights_fragment_begin layout changed: no spot light call');
+  const lit = gated.slice(0, spotCall) + KIT_SPOT_CALL + gated.slice(spotCall + KIT_DIRECT_CALL.length);
+  return `bool kitReceiveShadow = receiveShadow && vKitSurface.w > 0.5;
+bool kitMatt = vKitSurface.w > 0.5 && vKitSurface.x < 0.01 && vKitSurface.z < 0.01 && vKitSurface.y > ${KIT_MATT_ROUGHNESS.toFixed(2)} && vKitRole.x < 0.5;
+${lit}`;
 }
 
-function patchKitBodyShader(shader: WebGLProgramParametersWithUniforms, uniforms: CarBodyUniforms, kit: KitBodyUniforms): void {
+function patchKitBodyShader(
+  shader: WebGLProgramParametersWithUniforms,
+  uniforms: CarBodyUniforms,
+  kit: KitBodyUniforms,
+  spotReach: { value: number },
+): void {
   shader.uniforms.uDirt = uniforms.dirt;
   shader.uniforms.uScratch = uniforms.scratches;
   bindDesertDust(shader);
@@ -740,6 +795,10 @@ function patchKitBodyShader(shader: WebGLProgramParametersWithUniforms, uniforms
   shader.uniforms.uKitLensColor = kit.lensColor;
   shader.uniforms.uKitLensLevel = kit.lensLevel;
   shader.uniforms.uKitLensGrime = kit.lensGrime;
+  shader.uniforms.uKitSpotReach = spotReach;
+  if (!shader.fragmentShader.includes('#include <lights_physical_pars_fragment>')) {
+    throw new Error('Three physical fragment layout changed');
+  }
 
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', KIT_BODY_VERTEX_PARS)
@@ -753,6 +812,7 @@ function patchKitBodyShader(shader: WebGLProgramParametersWithUniforms, uniforms
     .replace('#include <metalnessmap_fragment>', KIT_BODY_METALNESS)
     .replace('#include <normal_fragment_maps>', KIT_BODY_CONDITION)
     .replace('#include <emissivemap_fragment>', KIT_BODY_EMISSIVE)
+    .replace('#include <lights_physical_pars_fragment>', KIT_MATT_LIGHT)
     .replace('#include <lights_fragment_begin>', kitLightsBegin())
     .replace('#include <opaque_fragment>', KIT_BODY_OPAQUE);
 }
@@ -1211,7 +1271,9 @@ export function makeCarBodyConditionMaterial(
       glows: colors.map((color, role) => new KitLensGlow(color, levels, role)),
     };
     kitBodyUniforms.set(material, lamps);
-    material.onBeforeCompile = (shader) => patchKitBodyShader(shader, uniforms, lamps);
+    const spotReach = { value: SPOT_REACH_ALL };
+    carSpotReach.set(material, spotReach);
+    material.onBeforeCompile = (shader) => patchKitBodyShader(shader, uniforms, lamps, spotReach);
     material.customProgramCacheKey = () => KIT_BODY_PROGRAM_KEY;
     return material;
   }
@@ -1567,7 +1629,8 @@ const KIT_PANE_CLIP = `if ( vKitPaneClip < 0.0 ) discard;
  *
  * `panes` (a kit car's glass, which also carries `KIT_PANE_ATTRIBUTE`): a drop pane
  * winding into its door is not drawn below the door's top (carkit/rig.ts `SinkingPane`
- * slides it, `setCarGlassPaneDrop` says how far).
+ * slides it, `setCarGlassPaneDrop` says how far), and the glass takes the car's spot
+ * reach as its body does (`setCarSpotReach`).
  */
 export function makeCarGrimeMaterial<T extends THREE.MeshStandardMaterial | THREE.MeshPhongMaterial>(
   material: T,
@@ -1580,6 +1643,9 @@ export function makeCarGrimeMaterial<T extends THREE.MeshStandardMaterial | THRE
   const glass = standard && frame !== null;
   const drops = glass && panes ? ([new THREE.Vector4(), new THREE.Vector4()] as const) : null;
   if (drops) kitPaneDrops.set(material, drops);
+  // A kit car's glass is the car's too, so it takes the body's spot reach (`setCarSpotReach`).
+  const spotReach = drops ? { value: SPOT_REACH_ALL } : null;
+  if (spotReach) carSpotReach.set(material, spotReach);
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uGrime = grime;
     shader.uniforms.uGrimeSkyScale = {
@@ -1594,13 +1660,14 @@ export function makeCarGrimeMaterial<T extends THREE.MeshStandardMaterial | THRE
         .replace('#include <common>', drops ? GLASS_GRIME_VERTEX_PARS + KIT_PANE_VERTEX_PARS : GLASS_GRIME_VERTEX_PARS)
         .replace('#include <worldpos_vertex>', drops ? GLASS_GRIME_VERTEX_HOOK + KIT_PANE_VERTEX : GLASS_GRIME_VERTEX_HOOK);
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', drops ? `${GLASS_GRIME_FRAGMENT_PARS}\nvarying float vKitPaneClip;` : GLASS_GRIME_FRAGMENT_PARS)
+        .replace('#include <common>', drops ? `${GLASS_GRIME_FRAGMENT_PARS}\nvarying float vKitPaneClip;\n${KIT_SPOT_REACH_PARS}` : GLASS_GRIME_FRAGMENT_PARS)
         .replace('#include <color_fragment>', GLASS_GRIME_DECLARE)
         .replace('#include <normal_fragment_maps>', GLASS_GRIME_BODY)
         .replace('#include <lights_fragment_maps>', GRIME_SKY);
       if (drops) {
         shader.uniforms.uKitPaneDropA = { value: drops[0] };
         shader.uniforms.uKitPaneDropB = { value: drops[1] };
+        shader.uniforms.uKitSpotReach = spotReach!;
         shader.fragmentShader = shader.fragmentShader.replace('#include <clipping_planes_fragment>', KIT_PANE_CLIP);
       }
       return;
@@ -1618,7 +1685,7 @@ export function makeCarGrimeMaterial<T extends THREE.MeshStandardMaterial | THRE
     shader.fragmentShader = fragment;
   };
   material.customProgramCacheKey = () =>
-    glass ? (drops ? `${CAR_GLASS_GRIME_PROGRAM_KEY}-panes` : CAR_GLASS_GRIME_PROGRAM_KEY) : CAR_GRIME_PROGRAM_KEY;
+    glass ? (drops ? `${CAR_GLASS_GRIME_PROGRAM_KEY}-panes-v2` : CAR_GLASS_GRIME_PROGRAM_KEY) : CAR_GRIME_PROGRAM_KEY;
   return material;
 }
 
@@ -1627,6 +1694,18 @@ export function setCarGlassPaneDrop(material: THREE.Material, slot: number, drop
   const drops = kitPaneDrops.get(material);
   if (!drops || slot < 1 || slot > KIT_PANE_SLOTS) return;
   drops[slot <= 4 ? 0 : 1].setComponent((slot - 1) % 4, drop);
+}
+
+/**
+ * Which spot slots can reach this car (render/vehiclelights.ts `spotReachMask`), written
+ * into a kit car's body and glass; `SPOT_REACH_ALL` for every slot. Any other material is
+ * left alone. A uniform write: the program is the one every kit car draws with.
+ */
+export function setCarSpotReach(materials: readonly THREE.Material[], mask: number): void {
+  for (const material of materials) {
+    const uniform = carSpotReach.get(material);
+    if (uniform) uniform.value = mask;
+  }
 }
 
 /** Writes grime (0..1) into glass or lamp materials made by `makeCarGrimeMaterial`. */

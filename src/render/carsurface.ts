@@ -15,7 +15,9 @@ import {
   setCarBodyHighlight,
   setCarBodyPaintColor,
   setCarGrime,
+  setCarSpotReach,
 } from './materials';
+import { SPOT_REACH_ALL } from './lightshader';
 import type { CarStickerDecals } from './stickerdecals';
 
 /**
@@ -29,6 +31,7 @@ export const GLASS_DIRT_SHARE = 1;
 export class CarBodySurface {
   private appliedDirt = -1;
   private appliedHighlight = 0;
+  private appliedSpotReach = SPOT_REACH_ALL;
   private appliedScratches = -1;
 
   constructor(
@@ -70,6 +73,17 @@ export class CarBodySurface {
     if (value === this.appliedHighlight) return;
     this.appliedHighlight = value;
     setCarBodyHighlight(this.paint, value);
+  }
+
+  /**
+   * Which spot slots can reach this car (render/vehiclelights.ts `spotReachMask`), for
+   * a kit car's body and glass; `SPOT_REACH_ALL` for every slot. Free when unchanged.
+   */
+  setSpotReach(mask: number): void {
+    if (mask === this.appliedSpotReach) return;
+    this.appliedSpotReach = mask;
+    setCarSpotReach(this.paint, mask);
+    setCarSpotReach(this.glass, mask);
   }
 
   /** Frees this car's own paint, glass and decal materials and its bone textures. */

@@ -6,6 +6,7 @@ import {
   vehicleLightSlotsFor,
   type GraphicsQuality,
 } from '../game/settings';
+import { SPOT_LIGHT_LIVE_MIN, SPOT_REACH_ALL } from './lightshader';
 
 /**
  * Renderer spotlights for the vehicle lamps that are LIT, wherever they are.
@@ -27,7 +28,9 @@ import {
  *
  *  - Slots are lit by INTENSITY alone. Unclaimed slots stay in the scene at a
  *    visually black, nonzero intensity, so cycling headlights, braking or driving
- *    away remains a uniform write without a zero-to-lit driver specialization.
+ *    away remains a uniform write without a zero-to-lit driver specialization. The
+ *    spot loop skips a slot that dark by a uniform branch (render/lightshader.ts
+ *    `installSpotLightDormantGuard`, which states what that does and does not risk).
  *  - The pool NEVER changes size. It was grown on demand, on the argument that a
  *    second lit car is rare enough to pay for when it happens. Measured, that
  *    payment is 4.5 SECONDS of blocked main thread on this scene the moment the
@@ -63,7 +66,10 @@ const HEADLIGHT_DISTANCE_SCALE: Record<GraphicsQuality, number> = {
   standard: GRAPHICS_TIERS.standard.headlightDistanceScale,
   blessing: GRAPHICS_TIERS.blessing.headlightDistanceScale,
 };
-/** Visually zero, but nonzero to prevent first-use GPU driver specialization. */
+/**
+ * Visually zero, but nonzero to prevent first-use GPU driver specialization. Below
+ * render/lightshader.ts `SPOT_LIGHT_LIVE_MIN`, so the spot loop skips a dormant slot.
+ */
 const DORMANT_INTENSITY = 1e-8;
 /**
  * Every projected lamp's authored intensity is scaled by this. The lamps were authored
@@ -123,6 +129,42 @@ function limitShadowRange(light: THREE.SpotLight): void {
     update(target);
     light.distance = distance;
   };
+}
+
+const _axis = new THREE.Vector3();
+const _toCentre = new THREE.Vector3();
+
+/**
+ * Whether spot `light` puts any light on a sphere (world `centre`, `radius`). Exact where
+ * three's light is exactly zero, conservative everywhere else: a slot left in is a cost,
+ * a slot left out is a lamp missing from the car.
+ *
+ *  - Dormant (`SPOT_LIGHT_LIVE_MIN`, the shader's own test): the loop skips it anyway.
+ *  - Range: three's `getDistanceAttenuation` is zero from `distance` on (0: unlimited).
+ *  - Cone: `getSpotAttenuation` is zero outside the OUTER cone, `angle`; the penumbra
+ *    only softens inside it. The test is the centre's distance from the cone's side
+ *    line, which never exceeds its distance from the cone itself.
+ *  - Behind the lamp nothing is lit (the cone is under 90 degrees).
+ *  - A sphere round the lamp itself always counts: a car's own lamps, its courtesy lamp
+ *    and the shadowed headlamp are inside its own sphere.
+ */
+function spotReaches(light: THREE.SpotLight, centre: THREE.Vector3, radius: number): boolean {
+  const color = light.color;
+  if (!(Math.max(color.r, color.g, color.b) * light.intensity >= SPOT_LIGHT_LIVE_MIN)) return false;
+  const toCentre = _toCentre.subVectors(centre, light.position);
+  const distanceSq = toCentre.lengthSq();
+  if (distanceSq <= radius * radius) return true;
+  if (light.distance > 0) {
+    const range = light.distance + radius;
+    if (distanceSq > range * range) return false;
+  }
+  const axis = _axis.subVectors(light.target.position, light.position);
+  const axisLength = axis.length();
+  if (!(axisLength > 1e-6) || !(light.angle < Math.PI / 2)) return true;
+  const along = toCentre.dot(axis) / axisLength;
+  if (along < -radius) return false;
+  const across = Math.sqrt(Math.max(0, distanceSq - along * along));
+  return Math.cos(light.angle) * across - Math.sin(light.angle) * along <= radius;
 }
 
 export class VehicleLightRig {
@@ -279,6 +321,35 @@ export class VehicleLightRig {
       if (!this.shadowClaimed) shadowLight.intensity = DORMANT_INTENSITY;
       shadowLight.shadow.autoUpdate = this.shadowClaimed || shadowLight.shadow.map === null;
     }
+  }
+
+  /**
+   * The slots that can light a sphere (world `centre`, `radius`) this frame, as the
+   * mask a kit car's body and glass skip the rest by (render/materials.ts
+   * `setCarSpotReach`, render/lightshader.ts `SPOT_REACH`). Call after `endFrame`.
+   *
+   * Bit `i` is the renderer's spot light `i`. Three numbers them shadow-casting first,
+   * then in scene order, so the shadowed beam is 0 and the pool follows in its own order:
+   * which holds while this rig's lights are the only spotlights drawn. The one other in
+   * the game, the hand torch (core/renderer.ts), is a scene child as these are; while any
+   * spotlight not of this rig is visible there, or the slots outgrow the int, every bit is
+   * set.
+   */
+  spotReachMask(centre: THREE.Vector3, radius: number): number {
+    const offset = this.shadowLight === null ? 0 : 1;
+    if (this.lights.length + offset > 31) return SPOT_REACH_ALL;
+    for (const child of this.scene.children) {
+      const light = child as THREE.SpotLight;
+      if (light.isSpotLight && light.visible && light !== this.shadowLight && !this.lights.includes(light)) {
+        return SPOT_REACH_ALL;
+      }
+    }
+    let mask = 0;
+    if (this.shadowLight !== null && spotReaches(this.shadowLight, centre, radius)) mask |= 1;
+    for (let i = 0; i < this.lights.length; i++) {
+      if (spotReaches(this.lights[i], centre, radius)) mask |= 1 << (i + offset);
+    }
+    return mask;
   }
 
   clear(): void {

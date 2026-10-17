@@ -948,6 +948,33 @@
 
 ### Changed
 
+- CHEAPER LAMPS ON THE PLAYER'S OWN CAR (`render/lightshader.ts`, `render/vehiclelights.ts`,
+  `render/materials.ts`, `render/carsurface.ts`, `vehicle/vehicle.ts`, `main.ts`). Measured
+  from the cabin at noon (Blessing, 1440 lines, M2 Pro), the driven car cost 13.7 ms of a
+  21.9 ms frame; 8.4 ms of its body's 8.65 ms was the spot-light loop, every slot dormant.
+  Three changes, none a new program variant (the kit body and glass keys are bumped, and
+  every kit model's program anchor compiles them at boot as before):
+  - DORMANT SPOT SLOTS ARE SKIPPED, in every lit material: the spot loop branches on the
+    slot's own colour uniform (`SPOT_LIGHT_LIVE_MIN`, 1e-6, a hundred times the rig's
+    dormant 1e-8). The slots, the shadowed slot, the program and the nonzero dormant
+    intensity are all unchanged; what is new is a uniform branch that stays shut until a
+    lamp lights, so the first headlamp of a session is the moment to watch on Windows.
+  - THE OCCUPIED CAR SKIPS BEAMS THAT CANNOT REACH IT: once a frame the rig tests each
+    lit slot's range and outer cone against the car's sphere (measured body, doors and
+    lids swung out, 0.5 m slack; `VehicleLightRig.spotReachMask`) and the car's kit body
+    and glass skip the rest (`uKitSpotReach`). Conservative: its own lamps, the courtesy
+    lamp and the shadowed headlamp always pass, and any other visible spotlight (the hand
+    torch) turns the mask off. Every other car keeps every slot.
+  - MATT CABIN TRIM IS LIT LAMBERT-ONLY BY THE LAMPS: the kit's detail parts (cabin, door
+    trim, bay, boot, underbody) in an unpainted, non-metal slot rougher than 0.7 drop the
+    GGX lobe in the spot loop and keep exactly the diffuse term. The sun and sky still
+    light them physically; chrome, paint, lenses, glass and the exterior trim are as
+    before. The lamps' faint sheen on the dash and seats is the one visible difference.
+  Expected, NOT yet measured: at noon the body's spot loop from ~8.4 ms to well under
+  1 ms and the glass's share of its 4.5 ms with it; at night the saving depends on how
+  many lit beams reach the car. The window grime (1.3 ms) is unchanged: it already sits
+  behind a uniform test and is visible.
+
 - THE SUN'S WIDE AUREOLE IS WEATHER, NOT EVERY NOON (`render/sky.ts` `uSunAureole`). The
   glow's broad lobe (`pow(sd, 12)`, still 47% at 20 degrees from the disc) was lit on every
   clear day, a pale disc 40-60 degrees across that read as a permanent halo. In clean air
