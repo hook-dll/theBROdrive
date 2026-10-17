@@ -1238,7 +1238,7 @@ const WIPER_PARKS = [(20 * Math.PI) / 180, (45 * Math.PI) / 180];
 const WIPER_EDGE = 0.015;
 /** And this far above its bottom edge: half the blade's width and a little. */
 const WIPER_FOOT = 0.006;
-/** The blade's rubber edge clears the glass by this much where the glass stands highest under it: 6 mm, so the two never fight in depth from the road. */
+/** The blade's rubber edge clears the glass by this much where it rests: 6 mm avoids z-fighting. */
 const WIPER_GAP = 0.006;
 /** Blade stations along its length: it is bent to the screen between them. */
 const WIPER_STATIONS = 16;
@@ -1401,11 +1401,10 @@ function buildWipers(ctx: KitContext): void {
     // Blade: at each station, clear of the highest glass it passes over, between stations too.
     const stations = radii(arm, WIPER_STATIONS);
     const fine = radii(arm, WIPER_STATIONS * 2);
-    const high = fine.map((r) => {
-      let top = -Infinity;
-      for (let k = 0; k <= 24; k++) top = Math.max(top, glassAt(rest + (sweep * k) / 24, r) ?? -Infinity);
-      return top;
-    });
+    // Park the blade against the glass at rest.  The old mesh used the highest glass
+    // point over the entire sweep, which made a curved screen lift the parked blade
+    // visibly away from its lower edge (notably on the UAZ-469).
+    const high = fine.map((r) => glassAt(rest, r) ?? -Infinity);
     const lift = stations.map((_, k) => Math.max(high[2 * k]!, high[2 * k - 1] ?? -Infinity, high[2 * k + 1] ?? -Infinity) + WIPER_GAP);
     // The spindle stands out of the frame strip.
     const strip = under(panel, at, n);

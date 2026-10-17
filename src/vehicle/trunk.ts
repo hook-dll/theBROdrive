@@ -58,7 +58,9 @@ export interface TrunkViewState {
  * driven car and on a roadside shell alike.
  */
 export const STORAGE_LID_CHANNELS: Readonly<Record<StorageSide, readonly string[]>> = {
-  bonnet: ['bonnet'],
+  // Forward-control vans expose their service bay through the cabin engine cover rather
+  // than an exterior bonnet; other kit cars simply have no `engine_cover` channel.
+  bonnet: ['bonnet', 'engine_cover'],
   trunk: ['boot', 'tailgate', 'tailgate_l', 'tailgate_r'],
 };
 

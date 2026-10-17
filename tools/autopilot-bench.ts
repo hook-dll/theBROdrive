@@ -918,6 +918,12 @@ async function checkPassingSafety(): Promise<void> {
   for (let i = 0; i < 2; i++) {
     rig.physics.step();
     emergency.drive(FIXED_DT, rig.vehicle, rig.input, 0, 0);
+    console.log(
+      `  emergency t=${((i + 1) * FIXED_DT).toFixed(3)} gap=${emergency.obstacleGap.toFixed(2)} ` +
+        `obs=${emergency.obstacleSpeed.toFixed(2)} target=${emergency.targetSpeed.toFixed(2)} ` +
+        `activity=${emergency.activity} limit=${emergency.bindingSpeedLimit} ` +
+        `brake=${rig.input.brake.toFixed(2)} throttle=${rig.input.throttle.toFixed(2)}`,
+    );
   }
   check(
     'a closer home-lane leader cannot mask oncoming emergency braking',
@@ -936,6 +942,13 @@ async function checkPassingSafety(): Promise<void> {
   for (let i = 0; i < 8; i++) {
     rig.physics.step();
     passing.drive(FIXED_DT, rig.vehicle, rig.input, 0, 0);
+    console.log(
+      `  passing t=${((i + 1) * FIXED_DT).toFixed(3)} gap=${passing.obstacleGap.toFixed(2)} ` +
+        `obs=${passing.obstacleSpeed.toFixed(2)} target=${passing.targetSpeed.toFixed(2)} ` +
+        `pass=${passing.passAttempt} urge=${passing.passUrge} activity=${passing.activity} ` +
+        `limit=${passing.bindingSpeedLimit} brake=${rig.input.brake.toFixed(2)} ` +
+        `throttle=${rig.input.throttle.toFixed(2)}`,
+    );
   }
   check(
     'a clear committed overtake keeps its kickdown allowance',

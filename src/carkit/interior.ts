@@ -577,7 +577,9 @@ const LAYOUTS: Readonly<Record<KitCarSpec['platform'], Layout>> = {
     toeTop: 0.12,
     toeRun: 0.2,
     tunnel: { heights: [0, 0, 0], base: [0.2, 0.2], top: [0.17, 0.17] },
-    engineCover: { ds0: 0.3, ds1: 0.8, half: 0.2, height: 0.32 },
+    // The engine is under a removable cabin cover behind the front seats.  The gear and
+    // transfer levers stay between the seats, in front of the service opening.
+    engineCover: { ds0: 1.08, ds1: 2.45, half: 0.62, height: 0.46 },
     gear: { ds: 0.88, height: 0.45, lean: -0.05 },
     transfer: {
       ds: 0.94,

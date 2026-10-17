@@ -8,10 +8,9 @@
  * saloon boot's right side; the exhaust, the driveline and the suspension underneath.
  *
  * The engine, its turbine, the radiator and the air filter are the bonnet's service
- * cells (vehicle/bonnet.ts), drawn by the grid from what the car carries, so the bay
- * leaves their places empty and marks each with a `KIT_BONNET_CELL_NODE`: an inline
- * four along the classic's (and the Niva's) bay or across the Samara's, the radiator in
- * front of it, the turbine on the exhaust side and the air filter on the intake side.
+ * cells (vehicle/bonnet.ts), drawn by the grid from what the car carries.  On a
+ * forward-control van those same cells sit under the cabin engine cover; every kit
+ * still exposes the same four `KIT_BONNET_CELL_NODE` anchors to the renderer.
  * The Niva is the classic underneath with its four-wheel drive added: a transfer box
  * behind the gearbox, a front propshaft to a front differential and driveshafts.
  * Everything is placed off the frame (axles, cowl, deck, sills), so another body on the
@@ -94,15 +93,17 @@ export function buildBay(ctx: KitContext): void {
   const { frame } = ctx;
   // The Niva's and the van's engine and cabin floor are the classic's.
   const classic = frame.spec.platform !== 'samara';
-  // A forward-control van has nothing ahead of the screen to open and no boot: its engine
-  // stands under the cabin's cover (interior.ts `engineCover`), its floor runs to the rear
-  // doors, and with no bonnet cells it keeps no service grid.
+  // A forward-control van has no exterior bonnet: its service bay is the large cabin
+  // opening under `engine_cover`.  Keep the same four typed cells so the state and
+  // renderer do not need a second storage layout.
   const van = frame.spec.platform === 'van';
 
   const b = new PartBuilder();
   let route: BayRoute;
   if (van) {
     route = vanRoute(frame);
+    const cells = buildVanServiceCells(frame);
+    for (const kind of CELL_KINDS) ctx.root.add(cellMarker(frame, kind, cells[kind]));
   } else {
     const bayLayout = buildEngineBay(frame, b, classic);
     route = bayLayout.route;
@@ -407,6 +408,17 @@ function cellMarker(frame: BodyFrame, kind: CellKind, c: Cell): THREE.Object3D {
   node.position.set((c.x0 + c.x1) / 2, c.floor, frame.z((c.s0 + c.s1) / 2));
   node.scale.set(c.x1 - c.x0, c.top - c.floor, c.s1 - c.s0);
   return node;
+}
+/** Service cells under the UAZ-2206's large cabin engine cover. */
+function buildVanServiceCells(frame: BodyFrame): Readonly<Record<CellKind, Cell>> {
+  const floor = cellFloor(frame, 1.08, 2.45);
+  const top = floor + 0.4;
+  return {
+    engine: cell(frame, -0.4, 0.4, 1.12, 1.85, floor, top),
+    turbine: cell(frame, 0.41, 0.8, 1.12, 1.62, floor, top),
+    radiator: cell(frame, -0.8, -0.41, 1.12, 1.62, floor, top),
+    air_filter: cell(frame, 0.41, 0.8, 1.65, 2.35, floor, top),
+  };
 }
 
 function buildEngineBay(frame: BodyFrame, b: PartBuilder, classic: boolean): BayLayout {
@@ -824,7 +836,9 @@ function classicChassis(frame: BodyFrame, b: PartBuilder, eb: PartBuilder, route
   b.color(COLOURS.underseal);
   across(b, frame, 'trim', [[cs - 0.045, cf], [cs - 0.035, cf - 0.05], [cs + 0.035, cf - 0.05], [cs + 0.045, cf]], -0.47, 0.47, false);
   const ff = floorY(frame, w.front);
-  const ball = w.frontHalfTrack - 0.1;
+  // Keep the outer ball joints tucked inside the wheel-house line.  The old 100 mm
+  // inset left the UAZ's long front rods visible past the tyre at steering lock.
+  const ball = w.frontHalfTrack - 0.14;
   for (const side of [1, -1]) {
     const joint = at(frame, side * ball, R - 0.08, w.front);
     rod(b, 'trim', at(frame, side * 0.32, cf - 0.03, cs), joint, 0.016, 5);
