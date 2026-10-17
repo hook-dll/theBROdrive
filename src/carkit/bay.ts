@@ -763,19 +763,22 @@ function buildUnderbody(frame: BodyFrame, b: PartBuilder, eb: PartBuilder, class
   const w = spec.wheels;
   const cowl = frame.cowl;
 
-  // ---- floor rails and crossmembers (the tunnel's width left free between halves) ----
-  b.color(COLOURS.underseal);
-  const railEnd = w.rear - 0.85;
-  for (const side of [1, -1]) {
-    loft(b, 'trim', frame, stationsBetween(frame, cowl + 0.05, railEnd), side, (s) => {
-      const f = floorY(frame, s);
-      return [[RAIL_X - RAIL_HALF, f + 0.002], [RAIL_X - RAIL_HALF, f - RAIL_HALF], [RAIL_X + RAIL_HALF, f - RAIL_HALF], [RAIL_X + RAIL_HALF, f + 0.002]];
-    });
-    for (const s of [cowl + 0.62, w.rear - 0.95]) {
-      const f = floorY(frame, s);
-      const outer = frame.section(s).r0[0] - 0.06;
-      const [x0, x1] = side > 0 ? [0.15, outer] : [-outer, -0.15];
-      boxS(b, frame, 'trim', [x0, f - 0.028, s - 0.035], [x1, f + 0.002, s + 0.035], 0b111011);
+  // The UAZ bodies have their own closed sill/arch envelope; the generic floor rails
+  // otherwise show as a black shelf outside the front wheel arch.
+  if (spec.id !== 'uaz469' && spec.id !== 'uaz2206') {
+    b.color(COLOURS.underseal);
+    const railEnd = w.rear - 0.85;
+    for (const side of [1, -1]) {
+      loft(b, 'trim', frame, stationsBetween(frame, cowl + 0.05, railEnd), side, (s) => {
+        const f = floorY(frame, s);
+        return [[RAIL_X - RAIL_HALF, f + 0.002], [RAIL_X - RAIL_HALF, f - RAIL_HALF], [RAIL_X + RAIL_HALF, f - RAIL_HALF], [RAIL_X + RAIL_HALF, f + 0.002]];
+      });
+      for (const s of [cowl + 0.62, w.rear - 0.95]) {
+        const f = floorY(frame, s);
+        const outer = frame.section(s).r0[0] - 0.06;
+        const [x0, x1] = side > 0 ? [0.15, outer] : [-outer, -0.15];
+        boxS(b, frame, 'trim', [x0, f - 0.028, s - 0.035], [x1, f + 0.002, s + 0.035], 0b111011);
+      }
     }
   }
 
@@ -829,23 +832,24 @@ function classicChassis(frame: BodyFrame, b: PartBuilder, eb: PartBuilder, route
   const C = clearance(frame);
   const niva = spec.platform === 'niva' || spec.platform === 'van';
 
-  // Front beam under the engine's place, between the wishbones' inner pivots. It has no
-  // top face: that would lie in the floor's plane (its closing edge, last point to first).
-  const cs = w.front - CROSSMEMBER_AHEAD;
-  const cf = floorY(frame, cs);
-  b.color(COLOURS.underseal);
-  across(b, frame, 'trim', [[cs - 0.045, cf], [cs - 0.035, cf - 0.05], [cs + 0.035, cf - 0.05], [cs + 0.045, cf]], -0.47, 0.47, false);
-  const ff = floorY(frame, w.front);
-  const ball = w.frontHalfTrack - 0.1;
-  for (const side of [1, -1]) {
-    const joint = at(frame, side * ball, R - 0.08, w.front);
-    rod(b, 'trim', at(frame, side * 0.32, cf - 0.03, cs), joint, 0.016, 5);
-    rod(b, 'trim', at(frame, side * 0.32, ff - 0.03, w.front + 0.14), joint, 0.016, 5);
+  if (spec.id !== 'uaz469' && spec.id !== 'uaz2206') {
+    // Generic classic front linkage is not part of the UAZ visual underbody.
+    const cs = w.front - CROSSMEMBER_AHEAD;
+    const cf = floorY(frame, cs);
+    b.color(COLOURS.underseal);
+    across(b, frame, 'trim', [[cs - 0.045, cf], [cs - 0.035, cf - 0.05], [cs + 0.035, cf - 0.05], [cs + 0.045, cf]], -0.47, 0.47, false);
+    const ff = floorY(frame, w.front);
+    const ball = w.frontHalfTrack - 0.1;
+    for (const side of [1, -1]) {
+      const joint = at(frame, side * ball, R - 0.08, w.front);
+      rod(b, 'trim', at(frame, side * 0.32, cf - 0.03, cs), joint, 0.016, 5);
+      rod(b, 'trim', at(frame, side * 0.32, ff - 0.03, w.front + 0.14), joint, 0.016, 5);
+    }
+    const barS = w.front - 0.25;
+    const by = floorY(frame, barS) - 0.025;
+    b.color(COLOURS.black);
+    tube(b, 'trim', [at(frame, 0.52, by, w.front - 0.02), at(frame, 0.45, by, barS), at(frame, -0.45, by, barS), at(frame, -0.52, by, w.front - 0.02)], 0.012, 4);
   }
-  const barS = w.front - 0.25;
-  const by = floorY(frame, barS) - 0.025;
-  b.color(COLOURS.black);
-  tube(b, 'trim', [at(frame, 0.52, by, w.front - 0.02), at(frame, 0.45, by, barS), at(frame, -0.45, by, barS), at(frame, -0.52, by, w.front - 0.02)], 0.012, 4);
 
   // Gearbox from the firewall, where the engine's bellhousing met it; propshaft to the
   // pinion, on the Niva from the transfer box behind the gearbox.
