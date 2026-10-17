@@ -43,6 +43,11 @@ export interface CameraTarget {
    */
   velocityX: number;
   velocityZ: number;
+  /**
+   * The car is being driven by the autopilot: the cabin view then never turns back to
+   * the road on its own, since the player is a passenger looking about.
+   */
+  autopilot: boolean;
 }
 
 /* ---- tuning ---- */
@@ -71,8 +76,12 @@ const RECENTER_OMEGA = 8;
 const RECENTER_EPSILON = 1e-3;
 /** Chase view waits this long after the last horizontal look input before following the car. */
 const CHASE_RECENTER_IDLE_SECONDS = 6;
-/** The cabin view waits this long after the last look input before facing the road again. */
-const CABIN_RECENTER_IDLE_SECONDS = 1;
+/**
+ * The cabin view waits this long after the last look input before facing the road again
+ * (owner, 2026-10-17: one second came back before a glance was finished). Never while
+ * the autopilot drives (`CameraTarget.autopilot`).
+ */
+const CABIN_RECENTER_IDLE_SECONDS = 2;
 /**
  * Cabin-view near plane, metres. The eye sits 5-10 cm from the roof lining, the pillar
  * and the head restraint as the head turns, and `CAMERA_NEAR` (0.08) cut through them
@@ -738,8 +747,12 @@ export class CameraRig {
     }
     // The cabin view turns back to the road `CABIN_RECENTER_IDLE_SECONDS` after the
     // player stops looking about: the head eases to straight ahead and level at the
-    // chase view's gentle automatic rate, and any look input stops it at once.
-    if (inputMode === 'cabin' && !this.recentering && this.cabinLookIdle >= CABIN_RECENTER_IDLE_SECONDS) {
+    // chase view's gentle automatic rate, and any look input stops it at once. Not on
+    // autopilot: nobody needs the road ahead then, and the head stays where it was left.
+    if (
+      inputMode === 'cabin' && !target.autopilot && !this.recentering
+      && this.cabinLookIdle >= CABIN_RECENTER_IDLE_SECONDS
+    ) {
       const k = 1 - Math.exp(-CHASE_RECENTER_OMEGA * d);
       const yawError = wrapAngle(this.vehicleYaw - this.yawValue);
       this.yawValue = Math.abs(yawError) < RECENTER_EPSILON ? this.vehicleYaw : wrapAngle(this.yawValue + yawError * k);

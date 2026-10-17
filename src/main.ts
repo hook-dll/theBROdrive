@@ -1339,6 +1339,7 @@ async function boot(): Promise<void> {
     cabinOffset: [0, 0, 0],
     velocityX: 0,
     velocityZ: 0,
+    autopilot: false,
   };
 
   let lastInput: InputFrame = input.sample(0);
@@ -1594,8 +1595,9 @@ async function boot(): Promise<void> {
     const drivingId = s.player.drivingCarId;
     const driving = drivingId ? (vehicles.get(drivingId) ?? null) : null;
     // Only the driver's seat drives. From any other the car stands held like a parked
-    // one (`settle` below) and the keys that work it do nothing; looking round, the
-    // camera, the fittings in reach and the doors stay the occupant's.
+    // one (`settle` below) and the keys that work it do nothing, unless the autopilot
+    // drives it (`stepped`); looking round, the camera, the fittings in reach and the
+    // doors stay the occupant's.
     const controlled = driving !== null && s.player.seat === 'driver' ? driving : null;
     touch.setDriving(controlled !== null);
     input.setDriving(controlled !== null);
@@ -1725,8 +1727,12 @@ async function boot(): Promise<void> {
     // A towed car is the exception: `settle` PINS a car to the spot it is standing
     // on, and a towed car has to roll, so it is stepped by the tow controller below
     // and left out of this loop.
+    // The car the player sits in is stepped above whenever someone drives it: the
+    // player from the driver's seat, or the autopilot from any seat. Settling it as
+    // well pinned it to the spot under an autopilot that kept pressing the throttle.
+    const stepped = controlled ?? (driving !== null && autopilot.engaged ? driving : null);
     for (const [id, vehicle] of vehicles) {
-      if (vehicle === controlled || carTowField.stepping(id)) continue;
+      if (vehicle === stepped || carTowField.stepping(id)) continue;
       vehicle.settle(dt);
     }
 
@@ -2311,6 +2317,7 @@ async function boot(): Promise<void> {
       const velocity = driving.chassis.linvel();
       target.velocityX = velocity.x;
       target.velocityZ = velocity.z;
+      target.autopilot = autopilot.engaged;
     } else {
       const p = player.interpolatedPosition(alpha);
       // CameraRig's foot mode adds its own eye height, so hand it the FEET
@@ -2328,6 +2335,7 @@ async function boot(): Promise<void> {
       target.wheelContact = 0;
       target.velocityX = 0;
       target.velocityZ = 0;
+      target.autopilot = false;
     }
 
     Object.assign(cameraInput, lastInput);

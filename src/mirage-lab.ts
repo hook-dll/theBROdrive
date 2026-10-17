@@ -465,6 +465,7 @@ export async function bootMirageLab(): Promise<void> {
     cabinOffset: vehicle.modelMeasure.cabinEye ?? vehicle.modelMeasure.hoodPoint,
     velocityX: 0,
     velocityZ: 0,
+    autopilot: false,
   };
   const targetPosition = new THREE.Vector3();
   const targetRotation = new THREE.Quaternion();

@@ -31,6 +31,11 @@
   the view has been left alone for 4 s (`CROSSHAIR_IDLE_MS`). On something a car works
   it fills, and the fill pulses about once a second. It used to stay up on foot for good
   and, seated, show only on a fitting.
+- THE CABIN VIEW WAITS LONGER, AND NOT AT ALL ON AUTOPILOT (render/cameras.ts). It turned
+  back to the road one second after the last look, before a glance was over; now two
+  (`CABIN_RECENTER_IDLE_SECONDS`), and never while the autopilot drives
+  (`CameraTarget.autopilot`): the head stays where it was left. The chase view is
+  unchanged.
 - BOTH DOOR MIRRORS are adjustable (hold E on the head, move the mouse), from either
   front seat only, through the closed door glass or vent window; from the rear they are
   not offered. Their heads turn on new `mirror_l_*`/`mirror_r_*` channels, the live
