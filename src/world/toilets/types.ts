@@ -1,8 +1,9 @@
 /**
  * The Japanese street-toilet POIs (docs/toilet-poi-design.md): what a catalogue entry
- * is made of. A variant is DATA: one service cabin, the family of volumes around it, the
- * fixtures it carries, an optional face and the scenario it opens with. Geometry is
- * rebuilt from it; progress is saved apart from it (state.ts).
+ * is made of. A variant is DATA: one service cabin, the family of volumes around it, its
+ * layout (scale and siting) and host, the fixtures it carries, an optional face and the
+ * scenario it opens with. Geometry is rebuilt from it; progress is saved apart from it
+ * (state.ts).
  */
 
 /** Progress through a visit, in order. */
@@ -19,8 +20,9 @@ export const TOILET_EMOTIONS: readonly ToiletEmotion[] = ['sleepy', 'angry', 'em
 export type ToiletVerb = 'open' | 'close' | 'turn' | 'press' | 'pull' | 'slide' | 'insert' | 'pour' | 'pump' | 'wipe';
 
 /**
- * The scenario a variant opens with. Only its id is catalogued so far: the action
- * sequences and their mistake effects are not implemented yet.
+ * The scenario a variant opens with. Only its id and the fixtures it needs are
+ * catalogued so far: the action sequences and their mistake effects are not implemented
+ * yet.
  */
 export type ToiletScenarioId = 'clogged-drain';
 
@@ -220,6 +222,52 @@ export interface ToiletShellSpec {
 /** The stateful fixtures a cabin can carry; each kind has one builder in fixtures.ts. */
 export type ToiletFixtureKind = 'door' | 'valve' | 'flush' | 'lid' | 'plunger' | 'floor-dirt';
 
+/**
+ * The fixtures each scenario acts on: a variant opening with a scenario carries at least
+ * these (toilet-check holds it). The lid is the bowl's, never a scenario's.
+ */
+export const TOILET_SCENARIO_FIXTURES: { readonly [id in ToiletScenarioId]: readonly ToiletFixtureKind[] } = {
+  'clogged-drain': ['door', 'valve', 'plunger', 'flush', 'floor-dirt'],
+};
+
+/**
+ * The layout: the scale and siting a player reads on arrival, across the plan families
+ * (layouts.ts holds each one's rules and planned share; docs/toilet-poi-design.md,
+ * "Layouts"). Not to be confused with `toiletLayout` (geometry.ts), the fixture layout
+ * inside the cabin.
+ */
+export type ToiletLayoutKind =
+  /** One cabin on its own. */
+  | 'single'
+  /** One cabin inside a small open gesture: a wall, an eave, a canopy. */
+  | 'pavilion'
+  /** Sealed rooms beside the cabin in one line under one roof. */
+  | 'row'
+  /** Separate huts about the cabin. */
+  | 'cluster'
+  /** A round plan about the cabin: a ring, a drum court, a round eave. */
+  | 'circular'
+  /** Many sealed booths under one large cover: a station or park block. */
+  | 'large-public'
+  /** An outbuilding of a non-toilet POI (`ToiletVariant.host`). */
+  | 'facility-attached'
+  /** Off-grid, in the open desert: its own water and light. */
+  | 'desert-autonomous';
+
+/**
+ * The non-toilet POI an attached toilet belongs to, and where it stands on that POI's
+ * plot. The toilet is an outbuilding: it stands clear of the host's authored footprint,
+ * its door facing away from it (toilet-check holds both against the footprint).
+ */
+export interface ToiletHost {
+  /** The host's id in world/poistructures.ts `POI_STRUCTURES`: a mast or a dwelling. */
+  readonly structure: string;
+  /** The toilet's origin in the host's frame (front at -Z, ground at y = 0), metres. */
+  readonly at: readonly [number, number];
+  /** About +Y from the host's frame, radians; at 0 the toilet's door faces -Z like the host's front. */
+  readonly yaw: number;
+}
+
 /** Optional eyes and brows over the door. */
 export interface ToiletFaceSpec {
   /** Shown on arrival, before anything is fixed. */
@@ -254,6 +302,10 @@ export interface ToiletVariant {
   /** Second line in the gallery: designer, place, year. */
   readonly note: string;
   readonly shell: ToiletShellSpec;
+  /** Scale and siting class; layouts.ts holds what each allows. */
+  readonly layout: ToiletLayoutKind;
+  /** Only for a `facility-attached` layout: the non-toilet POI it belongs to. */
+  readonly host?: ToiletHost;
   readonly bowl: ToiletBowl;
   /** The fixtures present, in the order the gallery lists them. */
   readonly fixtures: readonly ToiletFixtureKind[];

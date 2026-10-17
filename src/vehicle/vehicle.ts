@@ -180,10 +180,7 @@ import {
   SCRATCH_IMPACT_THRESHOLD_MPS,
   SCRATCH_PER_IMPACT_CAP,
   SCRATCH_PER_SEVERITY_MPS,
-  SHOVE_BRAKE_FRACTION,
-  SHOVE_RAMP_SECONDS,
-  SHOVE_RELEASE_SECONDS,
-  SHOVE_SPEED_CAP,
+  FLIP_HOLD_RELEASE_SECONDS,
   SLIDE_CONE_THRESHOLD,
   SLIDE_MIN_MPS,
   SLIDE_ONSET_TAU,
@@ -1122,10 +1119,10 @@ export class Vehicle implements Rebasable {
   private readonly railRotation = { x: 0, y: 0, z: 0, w: 1 };
   private readonly railAngvel = { x: 0, y: 0, z: 0 };
   /**
-   * Seconds of shove left before the parking hold re-latches. Counted down in `settle`,
-   * so it only ever matters on a car nobody is driving.
+   * Seconds left before the parking hold may re-latch after `flipOver`. Counted down in
+   * `settle`, so it only ever matters on a car nobody is driving.
    */
-  private shoveTimer = 0;
+  private holdReleaseTimer = 0;
   /**
    * Service-brake demand from the last driven step, 0..1. Read by a coupled
    * trailer so its brakes come on with the car's pedal.
@@ -2473,15 +2470,14 @@ export class Vehicle implements Rebasable {
       this.world.apply({ t: 'car_engine_temp', carId: this.car.id, celsius: this.localTemp });
     }
     const n = this.wheels.length;
-    // Being shoved suspends the hold, not the brake. The hold is a teleport — it
-    // re-places the chassis at `parkingHoldPos` every step — so with it active no
-    // impulse from anywhere can move the car at all.
+    // The hold is a teleport — it re-places the chassis at `parkingHoldPos` every step —
+    // so it stays off for a moment after `flipOver`, until the dropped car has landed.
     //
     // Crucially, a newly spawned car is NOT held yet. The old unconditional request
     // latched its first airborne transform before gravity could land it; every menu
     // and POI spawn therefore remained floating forever.
-    const shoved = this.shoveTimer > 0;
-    if (shoved) this.shoveTimer = Math.max(0, this.shoveTimer - dt);
+    const released = this.holdReleaseTimer > 0;
+    if (released) this.holdReleaseTimer = Math.max(0, this.holdReleaseTimer - dt);
     this.parkingHoldRequested = false;
     // Nobody is driving, so there is no pedal. A trailer left coupled to a parked
     // car holds on its own brakes (uncoupled or not, it is not being towed).
@@ -2495,8 +2491,7 @@ export class Vehicle implements Rebasable {
     // parked tick and lose the driver's last steering position.
     // Parking brake: same impulse units as the foot brake (see the braking note
     // above), spread over every wheel. Sized to hold, not to stop.
-    const decel = shoved ? PARK_BRAKE_DECEL * SHOVE_BRAKE_FRACTION : PARK_BRAKE_DECEL;
-    const impulse = (decel * this.statsValue.mass * dt) / n;
+    const impulse = (PARK_BRAKE_DECEL * this.statsValue.mass * dt) / n;
     for (const w of this.wheels) {
       controller.setWheelEngineForce(w.index, 0);
       controller.setWheelSteering(w.index, this.wheelSteerAngle(w));
@@ -2514,74 +2509,11 @@ export class Vehicle implements Rebasable {
     }
     const verticalSpeed = Math.abs(this.chassisBody.linvel().y);
     this.parkingHoldRequested =
-      !shoved &&
+      !released &&
       (
         this.parkingHoldActive ||
         (this.snapshotPrimed && contacts >= 2 && verticalSpeed < PARK_HOLD_SPEED_MPS)
       );
-  }
-
-  /**
-   * Somebody is leaning on this car. Push it, grudgingly.
-   *
-   * `Shoveable`, implemented for the player's character controller (player.ts). It is a
-   * REQUEST rather than an impulse applied from outside for one reason: a parked car pins
-   * its own chassis every step, and only the car can lift that pin. It also owns the
-   * arithmetic, which wants the car's mass — a 1200 kg hatchback and a 7 t truck should
-   * both creep, not one be immovable and the other slide.
-   *
-   * The cap is a target SPEED, not a force: it takes the velocity the body already has
-   * along the push axis and only supplies the impulse needed to close the gap to
-   * SHOVE_SPEED_CAP, scaled so that gap closes over SHOVE_RAMP_SECONDS. That is what makes
-   * the same call reasonable on a parked saloon and harmless on a wreck: nothing can be
-   * accelerated past a walking shove however long it is leaned on.
-   */
-  shove(dirX: number, dirZ: number, seconds: number): void {
-    const len = Math.hypot(dirX, dirZ);
-    if (len < 1e-4 || seconds <= 0) return;
-    const nx = dirX / len;
-    const nz = dirZ / len;
-
-    const v = this.chassisBody.linvel();
-    const along = v.x * nx + v.z * nz;
-    const gap = SHOVE_SPEED_CAP - along;
-    // Already going that way at least as fast as a shove can push: nothing to add. This
-    // is also what stops a shove helping a rolling car along indefinitely.
-    if (gap <= 0) {
-      this.shoveTimer = SHOVE_RELEASE_SECONDS;
-      return;
-    }
-
-    const mass = this.statsValue.mass;
-    const impulse = Math.min(gap, (SHOVE_SPEED_CAP * seconds) / SHOVE_RAMP_SECONDS) * mass;
-    // Horizontal only. A player walking into a bumper must never lift a car or press it
-    // into the ground, and the wheel ray-casts are unforgiving about both.
-    this.chassisBody.applyImpulse({ x: nx * impulse, y: 0, z: nz * impulse }, true);
-    this.shoveTimer = SHOVE_RELEASE_SECONDS;
-  }
-
-
-  /**
-   * Push fallback for the player's capsule. Character-controller collision reports
-   * can disappear at a raised rear edge when autostep owns the contact; testing the
-   * same capsule sphere against the chassis OBB keeps the boot side shoulderable.
-   * Returns true only while the player is touching and moving into the body.
-   */
-  tryShoveFromSphere(
-    x: number,
-    y: number,
-    z: number,
-    radius: number,
-    moveX: number,
-    moveZ: number,
-    seconds: number,
-  ): boolean {
-    if (!this.sphereTouchesBody(x, y, z, radius)) return false;
-    const pushX = -this.contactNormal.x;
-    const pushZ = -this.contactNormal.z;
-    if (moveX * pushX + moveZ * pushZ <= 0) return false;
-    this.shove(pushX, pushZ, seconds);
-    return true;
   }
 
   /** True when a world-space sphere touches the chassis body box. */
@@ -2618,14 +2550,14 @@ export class Vehicle implements Rebasable {
     this.chassisBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
     this.parkingHoldRequested = false;
     this.parkingHoldActive = false;
-    this.shoveTimer = SHOVE_RELEASE_SECONDS;
+    this.holdReleaseTimer = FLIP_HOLD_RELEASE_SECONDS;
     this.primeTransform();
     this.snapshotPrimed = false;
   }
 
   /**
    * Sphere/OBB overlap in chassis-local space. On success `contactNormal` points
-   * horizontally out of the car toward the sphere and is reused by the shove path.
+   * horizontally out of the car toward the sphere.
    */
   private sphereTouchesBody(x: number, y: number, z: number, radius: number): boolean {
     const t = this.chassisBody.translation();

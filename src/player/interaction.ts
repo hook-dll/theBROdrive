@@ -31,9 +31,10 @@ import type { TrailerField } from '../vehicle/trailer';
 import { carModel } from '../vehicle/carmodels';
 import { carPaintSwatch, visiblePaintHex } from '../vehicle/carpaint';
 import {
-  bonnetGridOnLid,
   intersectStorageGrid,
+  STORAGE_LID_CHANNELS,
   storageGridCentreLocal,
+  storageLidSide,
   storageRevealDistance,
   TRUNK_CELL_COUNT,
   type StorageGridShape,
@@ -57,6 +58,7 @@ import type { FoleyEvent, FoleyContinuous } from '../audio/foley';
 import type { Player } from './player';
 import type { WorldOrigin } from '../world/origin';
 import type { WreckTrunkField } from '../world/wrecktrunks';
+import type { StaticCarLids } from '../render/staticlids';
 import type { CourierField, CourierTrunk } from '../world/couriers';
 import type { BoardableField } from '../story/sitebuild';
 import { STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
@@ -297,15 +299,14 @@ function fillerReservoir(car: CarState, stats: CarStats): Reservoir | null {
 }
 
 /**
- * Whether a kit car's lid over a compartment is open: the bonnet, or the boot lid or
- * tailgate (either leaf of a split one), whichever the body has. Null for a car with no
- * rig, whose grids open on F.
+ * Whether the lid over a compartment is open, on a kit car or a roadside shell: the
+ * bonnet, or the boot lid or tailgate (either leaf of a split one), whichever the body
+ * has (`STORAGE_LID_CHANNELS`). Null with no rig: a body with no lids, whose grids open on F.
  */
 function lidOpen(rig: KitRig | null, side: StorageSide): boolean | null {
   if (!rig) return null;
-  return side === 'bonnet'
-    ? rig.get('bonnet') > LID_OPEN
-    : rig.get('boot') > LID_OPEN || rig.get('tailgate') > LID_OPEN || rig.get('tailgate_l') > LID_OPEN || rig.get('tailgate_r') > LID_OPEN;
+  for (const channel of STORAGE_LID_CHANNELS[side]) if (rig.get(channel) > LID_OPEN) return true;
+  return false;
 }
 
 /**
@@ -374,6 +375,11 @@ interface Resolved {
   kitDoor: KitDoor | null;
   /** F gets in, to this seat: the eye looks at it through an open side door's opening. */
   kitSeat: PlayerSeat | null;
+  /**
+   * A roadside shell's lid the eye ray meets (`aimWreckLid`), or null: E works it as it
+   * does a car's.
+   */
+  wreckLid: { readonly id: string; readonly lids: StaticCarLids; readonly control: KitControl } | null;
 }
 
 /** `DeliveryProbe` with writable fields, so one instance can track the aim. */
@@ -593,6 +599,8 @@ export class Interaction {
     seat: null as PlayerSeat | null,
     throughGlass: false,
   };
+  /** The lid `aimWreckLid` last found, valid for the call that filled it. */
+  private wreckLidAimed: KitControl | null = null;
   /** Side doors per rig, found once; a rebuilt car has a new rig and new nodes. */
   private readonly kitDoorCache = new WeakMap<KitRig, readonly KitDoor[]>();
   private readonly kitEye = new THREE.Vector3();
@@ -826,6 +834,12 @@ export class Interaction {
       this.kitClaimsE = true;
       if (useHeldPressed) this.workKitPart(resolved.vehicle, kitRig, kitPart.control);
     }
+    // A roadside shell's lid takes E the same way.
+    const wreckLid = envelope === null && !kitPart ? resolved.wreckLid : null;
+    if (wreckLid) {
+      this.kitClaimsE = true;
+      if (useHeldPressed) this.workWreckLid(wreckLid.id, wreckLid.lids, wreckLid.control);
+    }
 
     if (input.usePrimary) this.usePrimary(dt, resolved);
     if (this.spentSponge !== null) {
@@ -873,6 +887,7 @@ export class Interaction {
     }
     // A refused seat says why (the prompt), so it does not also light the crosshair.
     const actionable = kitPart !== null
+      || wreckLid !== null
       || (resolved.kitSeat !== null && !stickerBlocksCar && prompt === null)
       || (resolved.target.kind === 'filler' && this.inventory.held?.type === 'fluid_can' && this.aimedReservoir(resolved) !== null);
     return { prompt, sound: this.sound, continuous: this.continuous, boot, board, actionable };
@@ -1158,21 +1173,21 @@ export class Interaction {
       const t = vehicle.chassis.translation(this.tScratch);
       out.set(t.x + this.origin.x, t.y, t.z + this.origin.z);
     }
-    const onLid = target.side === 'bonnet' && bonnetGridOnLid(target.owner);
-    if (!storageGridCentreLocal(shape, target.side, onLid, this.gridScratch)) return false;
+    if (!storageGridCentreLocal(shape, target.side, this.gridScratch)) return false;
     out.add(this.gridScratch.applyQuaternion(this.trunkQuaternion));
     return true;
   }
 
   /**
-   * Makes a kit car's lids the authority over its grids: there is no [F] to open one.
-   * A grid whose lid has shut closes, and a lid's grid rides with its car. The grid
-   * shown is the aimed compartment under an open lid, else a lid that has just opened,
-   * else — with nothing open — the nearest open lid within `GRID_PERSIST_RANGE`. One
-   * grid is up at a time, as the renderer draws one.
+   * Makes the lids the authority over their grids, a kit car's and a roadside shell's:
+   * a grid whose lid has shut closes, and a lid's grid rides with its car. The grid
+   * shown is the aimed compartment under an open lid, else a car's lid that has just
+   * opened (a shell's opens its grid itself, `workWreckLid`), else — with nothing open —
+   * the nearest open lid of the car within `GRID_PERSIST_RANGE`. One grid is up at a
+   * time, as the renderer draws one.
    *
-   * Wrecks, couriers and a car without a rig have no lid to follow and keep the [F]
-   * that opens them.
+   * A car without a rig and a courier have no lid to follow and keep the [F] that
+   * opens them.
    */
   private followLids(resolved: Resolved, eyeX: number, eyeY: number, eyeZ: number): void {
     const open = this.openStorage;
@@ -1185,6 +1200,19 @@ export class Interaction {
         open.y = this.vScratch.y;
         open.z = this.vScratch.z;
       }
+    } else if (open?.owner === 'wreck' && lidOpen(this.wreckTrunks.lids(open.id)?.rig ?? null, open.side) === false) {
+      this.openStorage = null;
+    }
+
+    const t = resolved.target;
+    // `resolve` offers a shell's compartment under its lid shut or open; open, it shows.
+    if (
+      t.kind === 'storage'
+      && t.owner === 'wreck'
+      && !this.isStorageOpen(t)
+      && lidOpen(this.wreckTrunks.lids(t.id)?.rig ?? null, t.side) === true
+    ) {
+      this.openGrid(t);
     }
 
     const carId = resolved.carId;
@@ -1194,7 +1222,6 @@ export class Interaction {
     const bonnet = lidOpen(rig, 'bonnet') === true;
     const trunk = lidOpen(rig, 'trunk') === true;
     const sameCar = seen.carId === carId;
-    const t = resolved.target;
     let side: StorageSide | null = null;
     // `resolve` offers a kit car's compartment only under its open lid.
     if (t.kind === 'storage' && t.owner === 'car' && t.id === carId) side = t.side;
@@ -1274,20 +1301,19 @@ export class Interaction {
     quaternion: THREE.Quaternion,
     shape: StorageGridShape,
     side: StorageSide,
-    onLid: boolean,
   ): boolean {
     this.trunkInverse.copy(quaternion).invert();
     this.trunkEye.set(eyeX - position.x, eyeY - position.y, eyeZ - position.z).applyQuaternion(this.trunkInverse);
     this.trunkDirection.set(dirX, dirY, dirZ).applyQuaternion(this.trunkInverse);
     if (
-      intersectStorageGrid(this.trunkEye, this.trunkDirection, shape, side, onLid, this.trunkRayHit) &&
+      intersectStorageGrid(this.trunkEye, this.trunkDirection, shape, side, this.trunkRayHit) &&
       this.trunkRayHit.distance <= BOOT_RANGE
     ) {
       this.trunkPickedCell = this.trunkRayHit.cell;
       this.trunkPickedDistance = this.trunkRayHit.distance;
       return true;
     }
-    const distance = storageRevealDistance(this.trunkEye, this.trunkDirection, shape, side, onLid, BOOT_REVEAL_MARGIN);
+    const distance = storageRevealDistance(this.trunkEye, this.trunkDirection, shape, side, BOOT_REVEAL_MARGIN);
     if (distance > BOOT_RANGE) return false;
     this.trunkPickedCell = null;
     this.trunkPickedDistance = distance;
@@ -1403,7 +1429,7 @@ export class Interaction {
       let inCompartment = false;
       for (const side of ['trunk', 'bonnet'] as const) {
         if (lidOpen(rig, side) === false) continue;
-        if (this.pickStorage(eyeX, eyeY, eyeZ, dx, dy, dz, t, this.qScratch, vehicle.modelMeasure, side, false)) {
+        if (this.pickStorage(eyeX, eyeY, eyeZ, dx, dy, dz, t, this.qScratch, vehicle.modelMeasure, side)) {
           inCompartment = true;
           keep(this.trunkPickedDistance, {
             kind: 'storage',
@@ -1450,30 +1476,26 @@ export class Interaction {
       }
     }
 
+    // The lid of a roadside shell nearest in the eye ray, if any (`aimWreckLid`).
+    let wreckLidId: string | null = null;
+    let wreckLids: StaticCarLids | null = null;
+    let wreckLidControl: KitControl | null = null;
+    let wreckLidDistance = Infinity;
     for (const wreck of this.wreckTrunks.values()) {
       this.trunkPosition.set(wreck.x - this.origin.x, wreck.y, wreck.z - this.origin.z);
       this.trunkQuaternion.set(wreck.qx, wreck.qy, wreck.qz, wreck.qw);
-      // Both ends of a shell are openable, exactly as a driven car's are: the rear
-      // gives up the trunk's cans and tools, the service cells under the bonnet give
-      // up the worn parts. The nearer grid wins, so a buried nose exposes its boot. The
-      // shell's lid never opens, so its bonnet cells lie on it (`bonnetGridOnLid`).
+      // Both ends of a shell open, exactly as a driven car's do: the rear gives up the
+      // trunk's cans and tools, the service cells under the bonnet give up the worn
+      // parts. The nearer grid wins, so a buried nose exposes its boot. Every shell is a
+      // kit body and its grids lie under its lids (`StaticCarLids`), offered shut too,
+      // where F opens the lid first (`mount`); a shell whose model is still loading has
+      // no lids yet and offers nothing.
+      const lids = this.wreckTrunks.lids(wreck.id);
+      if (!lids) continue;
       const shape = carModelMeasure(wreck.modelId);
       for (const side of ['trunk', 'bonnet'] as const) {
-        if (
-          this.pickStorage(
-            eyeX,
-            eyeY,
-            eyeZ,
-            dx,
-            dy,
-            dz,
-            this.trunkPosition,
-            this.trunkQuaternion,
-            shape,
-            side,
-            side === 'bonnet' && bonnetGridOnLid('wreck'),
-          )
-        ) {
+        if (!lids.has(side)) continue;
+        if (this.pickStorage(eyeX, eyeY, eyeZ, dx, dy, dz, this.trunkPosition, this.trunkQuaternion, shape, side)) {
           keep(this.trunkPickedDistance, {
             kind: 'storage',
             owner: 'wreck',
@@ -1482,6 +1504,15 @@ export class Interaction {
             cell: this.trunkPickedCell,
           });
         }
+      }
+      const p = this.trunkPosition;
+      if (Math.hypot(p.x - eyeX, p.y - eyeY, p.z - eyeZ) > VEHICLE_RANGE) continue;
+      const distance = this.aimWreckLid(lids, eyeX, eyeY, eyeZ, dx, dy, dz);
+      if (distance < wreckLidDistance) {
+        wreckLidDistance = distance;
+        wreckLidId = wreck.id;
+        wreckLids = lids;
+        wreckLidControl = this.wreckLidAimed;
       }
     }
 
@@ -1504,7 +1535,6 @@ export class Interaction {
           this.trunkQuaternion,
           courier,
           'trunk',
-          false,
         )
       ) {
         keep(this.trunkPickedDistance, {
@@ -1539,7 +1569,33 @@ export class Interaction {
       }
     }
 
-    return { target, vehicle, carId, vehicleDist, kitPart, kitHit, kitDoor, kitSeat };
+    // A shell's lid answers as a car's part does: unless something else stands nearer in
+    // the ray, its own compartments aside.
+    let wreckLid: Resolved['wreckLid'] = null;
+    if (wreckLidId !== null && wreckLids && wreckLidControl) {
+      const t = target as Target;
+      const own = t.kind === 'none' || (t.kind === 'storage' && t.owner === 'wreck' && t.id === wreckLidId);
+      if (own || wreckLidDistance <= bestDist) wreckLid = { id: wreckLidId, lids: wreckLids, control: wreckLidControl };
+    }
+
+    return { target, vehicle, carId, vehicleDist, kitPart, kitHit, kitDoor, kitSeat, wreckLid };
+  }
+
+  /**
+   * Distance along the eye ray, within `RAY_RANGE`, to the nearest of a roadside shell's
+   * lids, or Infinity; its control in `wreckLidAimed`. Only the lids are tested, a few
+   * hundred triangles: the shell round them is never worked.
+   */
+  private aimWreckLid(lids: StaticCarLids, eyeX: number, eyeY: number, eyeZ: number, dx: number, dy: number, dz: number): number {
+    this.raycaster.set(this.rayOrigin.set(eyeX, eyeY, eyeZ), this.rayDir.set(dx, dy, dz));
+    this.raycaster.far = RAY_RANGE;
+    this.hits.length = 0;
+    // Each call sorts the whole list, so after the last the nearest hit is first.
+    for (const pivot of lids.pivots) this.raycaster.intersectObject(pivot, true, this.hits);
+    const hit = this.hits[0];
+    this.hits.length = 0;
+    this.wreckLidAimed = hit ? (KitRig.controlOf(hit.object)?.control ?? null) : null;
+    return hit && this.wreckLidAimed ? hit.distance : Infinity;
   }
 
   /** Scratch for `pickBody`'s stamp read: the hit face's three corners and two edges. */
@@ -1878,8 +1934,8 @@ export class Interaction {
    * channels follow the car's own lamps every frame, so the switch works the lamps (the
    * beam, the indicators) and the rig shows it. The hazard button and the radio knob are
    * handed to the composition root (`takeCabinPress`). A momentary part (the horn) is
-   * held down for `KIT_PRESS_SECONDS`. A door, the bonnet or the boot sounds its latch as
-   * it opens; its slam waits until it lands shut (`listenForShut`).
+   * held down for `KIT_PRESS_SECONDS`. A door, the bonnet or the boot is toggled with its
+   * latch and slam (`togglePanel`).
    */
   private workKitPart(vehicle: Vehicle, rig: KitRig, control: KitControl): void {
     const action = kitAction(control);
@@ -1903,16 +1959,45 @@ export class Interaction {
       rig.activate(control);
       this.kitPress = { rig, control, left: KIT_PRESS_SECONDS };
     } else {
-      rig.activate(control);
-      const panel = KIT_PANEL_SOUND.find(([pattern]) => pattern.test(action.channel));
-      if (panel) {
-        const opening = rig.get(action.channel) > 0.5;
-        this.sound = opening ? panel[1] : null;
-        const at = this.shutting.findIndex((s) => s.rig === rig && s.channel === action.channel);
-        if (at >= 0) this.shutting.splice(at, 1);
-        if (!opening) this.shutting.push({ rig, channel: action.channel, sound: panel[2], left: PANEL_SHUT_WAIT_S });
-      }
+      this.togglePanel(rig, control);
     }
+  }
+
+  /**
+   * Toggles a kit part (`KitRig.activate`). A door, the bonnet or the boot sounds its
+   * latch as it opens; its slam waits until it lands shut (`listenForShut`).
+   */
+  private togglePanel(rig: KitRig, control: KitControl): void {
+    rig.activate(control);
+    const channel = kitAction(control).channel;
+    const panel = KIT_PANEL_SOUND.find(([pattern]) => pattern.test(channel));
+    if (!panel) return;
+    const opening = rig.get(channel) > 0.5;
+    this.sound = opening ? panel[1] : null;
+    const at = this.shutting.findIndex((s) => s.rig === rig && s.channel === channel);
+    if (at >= 0) this.shutting.splice(at, 1);
+    if (!opening) this.shutting.push({ rig, channel, sound: panel[2], left: PANEL_SHUT_WAIT_S });
+  }
+
+  /**
+   * Works a roadside shell's lid as `workKitPart` works a car's. Opening it opens its
+   * compartment's grid too, as a car's lid does (`followLids`), even over another grid.
+   */
+  private workWreckLid(id: string, lids: StaticCarLids, control: KitControl): void {
+    this.sound = 'mount';
+    this.togglePanel(lids.rig, control);
+    const side = storageLidSide(control.id);
+    if (side && lidOpen(lids.rig, side)) this.openGrid({ owner: 'wreck', side, id });
+  }
+
+  /**
+   * Shows a compartment's grid, measured at its centre (`storageGridCentre`); false
+   * when it cannot be placed. Opening rules are the callers'.
+   */
+  private openGrid(target: { readonly owner: StorageOwnerKind; readonly side: StorageSide; readonly id: string }): boolean {
+    if (!this.storageGridCentre(target, this.vScratch)) return false;
+    this.openStorage = { owner: target.owner, side: target.side, id: target.id, x: this.vScratch.x, y: this.vScratch.y, z: this.vScratch.z };
+    return true;
   }
 
   /**
@@ -2023,7 +2108,8 @@ export class Interaction {
       const cells = this.storageCells(t);
       if (!cells) return null;
       const label = t.side === 'bonnet' ? 'bonnet' : 'trunk';
-      // Only a compartment with no lid to follow is ever aimed at shut; see `followLids`.
+      // Aimed at shut: a compartment with no lid to follow, or a roadside shell's under
+      // its shut lid, which F opens first (`mount`); a kit car's is offered only open.
       if (!this.isStorageOpen(t)) return `[F] open ${label}`;
 
       let used = 0;
@@ -2428,24 +2514,23 @@ export class Interaction {
     }
 
 
-    // A compartment with no lid to follow (a wreck, a courier) opens on the first
-    // press; a kit car's is already open under its lid (`followLids`). Further presses
-    // operate the aimed cell.
+    // A compartment with no lid to follow (a courier, a car without a rig) opens on the
+    // first press; a kit car's is already open under its lid (`followLids`). A roadside
+    // shell's opens with its lid: the press lifts every leaf over the compartment first,
+    // so the grid never shows under a shut lid. Further presses operate the aimed cell.
     if (t.kind === 'storage') {
       if (!this.isStorageOpen(t)) {
         // Located from the same transform the target was resolved against, so this
         // cannot fail in practice; refusing to open rather than guessing a position
         // keeps the persistence rule measuring a real compartment.
-        if (!this.storageGridCentre(t, this.vScratch)) return;
-        this.openStorage = {
-          owner: t.owner,
-          side: t.side,
-          id: t.id,
-          x: this.vScratch.x,
-          y: this.vScratch.y,
-          z: this.vScratch.z,
-        };
+        if (!this.openGrid(t)) return;
         this.sound = 'mount';
+        const lids = t.owner === 'wreck' ? this.wreckTrunks.lids(t.id) : null;
+        if (lids && !lidOpen(lids.rig, t.side)) {
+          for (const control of lids.controls) {
+            if (storageLidSide(control.id) === t.side) this.togglePanel(lids.rig, control);
+          }
+        }
         return;
       }
       if (t.cell === null) return;

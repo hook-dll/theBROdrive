@@ -961,6 +961,21 @@
 
 ### Changed
 
+- CLOUDS FROM BELOW (render/cloudfield.ts, render/clouds.ts). Every big lobe used to be
+  centred at or under the base, so the flat cut was each lobe's widest section: from
+  under a cloud the whole outline was one flat face with one normal and one blue-grey
+  colour, a slab under a white top. Body and crown lobes now stand over the base
+  (`BASE_LIFT_MIN`/`BASE_LIFT_SPAN`, centre 0.55-0.78 of the vertical radius up), so the
+  cut is a core of 69% of the outline (median; was 100%) with rounded flanks turning
+  under to it, and every lobe's lowest rings still clamp into the base plane, so
+  overlapping cuts stay coplanar. The underside's ambient is the horizon's paler sky with
+  three times the sand bounce (noon base 0.13 → 0.20 of the lit top, blue/red 1.96 →
+  1.16), and sunlight scattered through the body lights the sunward flanks (1.3× the
+  core at noon), fading out at sunset. A cloud's length is eased under twice its
+  district's base (`LENGTH_PER_BASE`, `fitUnder`): seen from right under it none spans
+  over 105° (was 139°, a 6.9 km raft on a 1.3 km base). `CLOUDS_PER_CELL` 0.045 → 0.05
+  holds the cover at 12% (14.5% before, 11% with the shorter clouds alone).
+  tools/sky-variety.ts checks the cut share, the clamped bottoms and the overhead span.
 - LIVE BEAM AXLES (`SuspensionTuning.frontAxle`/`rearAxle` in parts/registry.ts;
   `Vehicle.updateBeamLean` and `stepBeamAxleHop` in vehicle/vehicle.ts;
   `BEAM_AXLE_GYRATION_SQ` in vehicle/vehicletuning.ts). Every axle now says whether it is
@@ -1476,6 +1491,19 @@
 
 ### Fixed
 
+- A ROADSIDE WRECK'S BONNET AND BOOT OPEN, AND ITS GRIDS ARE REACHED ONLY THROUGH THEM
+  (render/carmodel.ts `kitStaticParts`, `hangStaticLids`; render/staticlids.ts
+  `StaticCarLids`; world/wrecktrunks.ts; player/interaction.ts). A shell sunk at a POI was
+  one merged mesh with no lid control, so its lids never moved while F opened the bonnet
+  grid (laid on the shut lid) and the trunk grid straight through them. Every shell now
+  hangs the driven car's bonnet and boot lid or tailgate (both rear doors on the UAZ-2206)
+  on the same hinges, cut from the mid shell, and a hidden cabin, bay and boot (the driven
+  car's merged buffer over a fixed skeleton, its programs) shows while a lid is open. E on a
+  lid works it as on a car; F at a shut compartment lifts its lid and opens the grid with
+  it, never a cell; the grid shuts with the lid. The bonnet grid stands in the bay, as on a
+  car (`bonnetGridOnLid` and the `onLid` plumbing are gone). Lids shut again when the chunk
+  is rebuilt; contents persist as before. Couriers keep their F trunk. Gate:
+  `bun tools/wreck-lids.ts`.
 - UAZ-469 DOOR MIRRORS STAND WHERE THE CAR'S DO (`carkit/uaz.ts` `LOOK_UAZ469`, new
   `KitLook.mirrorStalk`, `carkit/exterior.ts` `buildDoorHardware`). The heads sat on the
   generic short arm at the door's top, centre 1.19 m, under the glass's foot (1.23): from
@@ -1781,6 +1809,15 @@
     steps at most 1.24 mm across the road-edge joint (442 raycast pairs), and screenshots
     from the same viewpoints at both slips before and after, with the camera nudged
     between frames, show the strip continuous and no slit, wedge or flicker.
+
+### Removed
+
+- PUSHING CARS ON FOOT. Walking into a car no longer shoulders it along: walking up to
+  a door to get in kept sliding the car away. A live car's chassis is `IMMOVABLE` to the
+  player's capsule (player/player.ts, main.ts); `Vehicle.shove`, `tryShoveFromSphere`,
+  `Player.setNearbyShove` and the `SHOVE_*` tuning are gone. The parking hold still stays
+  off for 0.2 s after a flip (`FLIP_HOLD_RELEASE_SECONDS`). Loose parts, jerry cans and
+  the football are nudged as before.
 
 ## 0.22.0 — 2026-10-10
 

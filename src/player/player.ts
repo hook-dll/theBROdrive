@@ -42,22 +42,18 @@ const TERMINAL_VELOCITY = 30;
 const TELEPORT_REHOME_DISTANCE = 150;
 
 /**
- * How fast a leaned-on dynamic body is allowed to get (m/s). A shove is a
- * TARGET SPEED, not a force: a raw force that creeps a 1200 kg car is ~320 N,
- * which launches a 5 kg jerry can at over 60 m/s. Capping the *speed* means the
- * same lean nudges a can and creeps a truck alike. 0.4 m/s is a fast walking
- * elbow — the car is plainly heavy and only grudgingly gives ground. At walk
- * speed (3.4 m/s) the car read as weightless and was flung like the cans.
+ * How fast a leaned-on loose body is allowed to get (m/s). A shove is a TARGET
+ * SPEED, not a force: a raw force launches a 5 kg jerry can at walk speed, while
+ * capping the *speed* nudges a can and a crate alike. Vehicles are not shoved at
+ * all (`IMMOVABLE`).
  */
 const PUSH_TARGET_SPEED = 0.4;
 /**
  * Seconds of leaning to reach `PUSH_TARGET_SPEED` from rest, ignoring the body's
- * own rolling resistance. 1.5 s makes the first moments nearly motionless — the
- * car resists, then slowly yields — which is what "heavy" feels like. 0.2 s felt
- * like an elastic shove, not a push.
+ * own rolling resistance, so a nudge builds instead of kicking.
  */
 const PUSH_RAMP_SECONDS = 1.5;
-/** Acceleration a lean applies to ANY dynamic body: the target spread over the ramp. */
+/** Acceleration a lean applies to an unowned dynamic body: the target spread over the ramp. */
 const PUSH_ACCEL = PUSH_TARGET_SPEED / PUSH_RAMP_SECONDS;
 
 function clamp(value: number, lo: number, hi: number): number {
@@ -65,20 +61,21 @@ function clamp(value: number, lo: number, hi: number): number {
 }
 
 /**
- * A body the player can shove that owns its own response to the push. A parked
- * car pins its chassis every step — its parking hold re-teleports it and zeroes
- * its velocity after Rapier has stepped — so only the car itself can lift that
- * and creep; an impulse applied from outside is silently undone one tick later.
- * Owned bodies answer a shove request instead. Bodies with no owner (loose
- * parts, jerry cans, wrecks) fall through to the direct impulse below.
+ * A body the player can shove that owns its own response to the push (a football).
+ * Bodies with no owner (loose parts, jerry cans) fall through to the direct impulse
+ * in `fixedUpdate`.
  */
 export interface Shoveable {
-  /**
-   * `speedMps` lets light props distinguish a walking nudge from a sprinting kick;
-   * heavy vehicles deliberately ignore it and retain their mass-limited creep.
-   */
+  /** `speedMps` lets a light prop distinguish a walking nudge from a sprinting kick. */
   shove(dirX: number, dirZ: number, seconds: number, speedMps: number): void;
 }
+
+/**
+ * Lookup answer for a dynamic body the player walks into but never moves: a car. The
+ * capsule stops against it; nothing is applied to it.
+ */
+export const IMMOVABLE = 'immovable';
+export type ShoveOwner = Shoveable | typeof IMMOVABLE | null;
 
 export class Player implements Rebasable {
   /** Eye height above the capsule centre, metres. */
@@ -101,22 +98,8 @@ export class Player implements Rebasable {
   private enabled = true;
   private emitTimer = 0;
 
-  /** Maps a struck body's handle to its owner, or null; null gets a direct impulse. */
-  private shoveLookup: (bodyHandle: number) => Shoveable | null = () => null;
-  /**
-   * Contact fallback for owned bodies at character-controller autostep edges.
-   * Returns the body handle it shoved so the computed-collision path does not
-   * apply the same request twice.
-   */
-  private nearbyShove: (
-    x: number,
-    y: number,
-    z: number,
-    radius: number,
-    moveX: number,
-    moveZ: number,
-    seconds: number,
-  ) => number | null = () => null;
+  /** Maps a struck body's handle to its owner; null gets a direct impulse. */
+  private shoveLookup: (bodyHandle: number) => ShoveOwner = () => null;
   private readonly moveScratch = { x: 0, y: 0, z: 0 };
   private readonly appliedScratch = { x: 0, y: 0, z: 0 };
   private readonly posScratch = { x: 0, y: 0, z: 0 };
@@ -190,26 +173,12 @@ export class Player implements Rebasable {
   }
 
   /**
-   * Installs the lookup mapping a struck body's handle to its `Shoveable` owner.
-   * Defaults to null (no owner), so this file stands alone and every dynamic body
-   * gets the direct impulse; `main.ts` wires cars and any other owned body in.
+   * Installs the lookup mapping a struck body's handle to its `Shoveable` owner, or
+   * `IMMOVABLE`. Defaults to null (no owner), so this file stands alone and every
+   * dynamic body gets the direct impulse; `main.ts` wires vehicles and footballs in.
    */
-  setShoveLookup(lookup: (bodyHandle: number) => Shoveable | null): void {
+  setShoveLookup(lookup: (bodyHandle: number) => ShoveOwner): void {
     this.shoveLookup = lookup;
-  }
-
-  setNearbyShove(
-    shove: (
-      x: number,
-      y: number,
-      z: number,
-      radius: number,
-      moveX: number,
-      moveZ: number,
-      seconds: number,
-    ) => number | null,
-  ): void {
-    this.nearbyShove = shove;
   }
 
   /**
@@ -429,28 +398,11 @@ export class Player implements Rebasable {
     mv.y = this.verticalVelocity * dt;
     mv.z = moveZ * dt;
 
-    // The raised rear edge of some chassis boxes is eligible for autostep, which
-    // can omit it from computedCollision even though the capsule is pressed against
-    // the boot. Let the vehicle OBB provide that one missing contact report.
-    let nearbyShovedHandle: number | null = null;
-    if (moveX * moveX + moveZ * moveZ > 1e-8) {
-      const p = this.body.translation(this.posScratch);
-      nearbyShovedHandle = this.nearbyShove(
-        p.x,
-        p.y,
-        p.z,
-        CAPSULE_RADIUS + 0.03,
-        moveX,
-        moveZ,
-        dt,
-      );
-    }
-
     this.controller.computeColliderMovement(this.collider, mv);
 
-    // Shove the dynamic bodies the capsule is leaning into. The controller's
-    // built-in impulse path is off (see the constructor); this is the only push,
-    // driven explicitly so the speed can be capped per body.
+    // Shove the loose bodies the capsule is leaning into. The controller's built-in
+    // impulse path is off (see the constructor); this is the only push, driven
+    // explicitly so the speed can be capped per body.
     const numCollisions = this.controller.numComputedCollisions();
     let supportNormalY = 0;
     let supportHandle: number | null = null;
@@ -480,11 +432,9 @@ export class Player implements Rebasable {
       // along it reports a collision but must not push.
       const approach = moveX * px + moveZ * pz;
       if (approach <= 0) continue;
-      if (body.handle === nearbyShovedHandle) continue;
-
-      // Owned bodies (cars) answer a shove request: they know their own mass and
-      // lift their own parking hold, which no outside impulse could move.
+      // Vehicles are never pushed by the player; footballs answer with their own kick.
       const owner = this.shoveLookup(body.handle);
+      if (owner === IMMOVABLE) continue;
       if (owner) {
         owner.shove(px, pz, dt, Math.hypot(moveX, moveZ));
         continue;
@@ -500,8 +450,7 @@ export class Player implements Rebasable {
       const dv = Math.min(PUSH_ACCEL * dt, PUSH_TARGET_SPEED - speedAlongAxis);
 
       // Impulse = mass * Δv: the force scales with the struck body's mass, so a
-      // heavy truck and a light hatchback creep at the same rate instead of the
-      // truck being immovable and the hatchback flying.
+      // heavy crate and a light can creep at the same rate.
       const impulse = body.mass() * dv;
       this.pushImpulse.x = px * impulse;
       this.pushImpulse.y = 0;

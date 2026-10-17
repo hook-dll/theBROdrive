@@ -95,6 +95,8 @@ gear).
 | Three slots | x 172–302, y 292–302 | ±0.26, 0.76–0.80 | D, P | slot grille ±0.26 |
 | Indicators (round, amber) | x 100 / 375, y 290 | ±0.595 at 0.78 | D, P | lens ±0.555–0.635 |
 | Glass foot / canvas sides | | ±0.77 / ±0.80 | D | `railHalf` 0.80 |
+| Roof across (hard top; the canvas the same over its bows) | rows 89–117 | 1.931 level to ±0.64; 1.923 / 1.91 / 1.89 / 1.86 at ±0.66 / 0.69 / 0.71 / 0.74; 1.79 at ±0.77 | D (ground y 535 of the full sheet); P the owner's four fronts (hdpic.club "uaz-speredi" 1, 4, 12, 48): the canvas straight across, small rolled corners, the frame's top bar straight | `crown` 0.11, `crownPower` 20: 1.93 / 1.91 at the pillar row (±0.69) / 1.82 at ±0.75 |
+| Windscreen frame's top bar / glass top | rows 125 / 130 | 1.775 / 1.75, straight across | D | screen top 1.79 across, 1.77 at the pillar row; glass top 1.74 (`screenHeader` 0.05) |
 | Tracks | | 1445 | F | half track 0.7225 |
 
 ### 1.4 Rear view (`uaz2.jpg`, rear-view crop at (140, 690), 4.33 mm/px)
@@ -138,7 +140,8 @@ for seatX 0.40 [E], 0.71 mm/px; heights from the dials' centre (y 395) at 0.04 o
 
 - `CabinSpec.softTop { colour, from }`: the roof, the rail chamfer and the body's or
   tailgate's greenhouse strips behind `from` drawn as canvas (unpainted trim in its colour,
-  `Mat 'canvas'` in body.ts); the back's glass only in the middle; the back is the body's.
+  `Mat 'canvas'` in body.ts); the back's glass only in the middle; the back is the body's;
+  the sun visors on the windscreen frame's header bar (interior.ts `headliner`).
 - `KitCarSpec.bonnet.rear`: the bonnet ends at that s, a scuttle deck between it and the screen.
 - `KitCarSpec.tailgateHinge 'left' | 'right'`: the tailgate hinged upright at its side edge
   (pivot at that edge, rotating about Y, 1.2 rad).
@@ -156,6 +159,19 @@ seat): the door mirror's head that much higher (and 3.5 cm further back) on an u
 stalk; 0.17 here. Proof: geometry hashes of the 21 other kit cars identical before and
 after; `tools/kit-zfight.ts` PASS on all 22.
 
+The roof and the visors (2026-10-17, the owner: the visors too high to shield the sun;
+check first that the roof is flat). The crown was a parabola (1.84 at the pillar row ±0.69,
+the screen's top arched 1.79 → 1.70); the drawing and the owner's four front photos have a
+flat top rolled down only at its edges (§1.3): `crownPower` 20. The canvas shows no sag
+across or between the bows on the photos (stretched); the profile is unchanged. The visors
+lay under the canvas 12 cm over the glass's top there (1.72) and, lowered, covered none
+of it from the eye (bottom edge 26°, the glass's top 25°); under `softTop` they hang from
+the frame's header bar: pivot (±0.34, 1.756, s 1.526), 5 cm behind the glass, stowed
+1.74–1.756 at s 1.53–1.68 (30° over the eye, above the glass's top at 27°), lowered to
+1.60 (its edge 18.5° over the eye at seatX 0.40, s 2.08, 1.425). Proof: geometry hashes
+of the 21 other kit cars identical; the 469's bounds unchanged, 11 309 → 11 260
+triangles; `tools/kit-zfight.ts` PASS on all 22.
+
 ### 1.8 Gaps
 
 - Heights: built roof 1.93, fitted to the 2015 passport: the car grows 4 % in height; the
@@ -164,6 +180,16 @@ after; `tools/kit-zfight.ts` PASS on all 22.
   and flare over the arches; the arch is one circle (real ones square-cut).
 - Canvas: one smooth skin (no folds, straps, side curtain windows on the doors' upper half;
   the doors' upper frames are painted steel with fixed glass, sliding on the car).
+- Greenhouse heights (found checking the roof, 2026-10-17; not changed): re-read on the
+  side view, the front door's glass is y 82–173 (1.71–1.32) and the doors' frames' top
+  y 63 (1.80), not y 135–200 / 105 as in §1.2; the "UAZ 469.JPG" photo, scaled on the
+  front door (belt 1.20 to bottom 0.44), agrees: glass 1.31–1.745, frame top ~1.80. Built:
+  glass 1.23–1.635, `rail` 1.68, so the canvas band over the doors is 0.14 tall (real
+  ~0.05) and the side glass sits ~8 cm low. Raising `rail` to ~1.80 with the roof kept at
+  1.93 needs `railRise`/`crown` re-fitted and the door glass and mirrors re-checked.
+- The roof's profile: the drawn hard top's front stands at 1.87 over the screen and rises
+  to 1.94 by s 2.1; the built roof rises 0.14 in the 5 cm behind the screen's top and is
+  level from there.
 - Rear door: the tail face between ±0.32 from the body's top to 0.70; the real door is
   wider (about ±0.40 [P]) and its hinges stand proud. Only the left fuel flap is built (the
   car has one each side).

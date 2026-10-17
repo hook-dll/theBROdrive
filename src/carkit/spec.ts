@@ -178,7 +178,8 @@ export interface CabinSpec {
    * A canvas top (the UAZ-469's): the roof, the rail's chamfer onto it and every painted
    * greenhouse strip of the body or the tailgate behind `from` (the strip's middle at the
    * belt) are canvas in `colour`, unpainted trim; the windscreen's frame, the pillars ahead
-   * of `from` and the doors' frames stay painted. Absent: all painted.
+   * of `from` and the doors' frames stay painted. The sun visors hang from the windscreen
+   * frame's header bar, not under the roof (interior.ts `headliner`). Absent: all painted.
    */
   readonly softTop?: { readonly colour: number; readonly from: number };
 }

@@ -72,10 +72,11 @@ const CANDIDATES = 2;
  * Fair-weather clouds per cell at a district cover of one. Set so the ground under a
  * cloud averages 10-15% (tools/sky-variety.ts measures it). The owner read the sky of
  * half-kilometre puffs in groups as confetti and its short tall ones as towers: clouds
- * are now rare and big (1.4 to 6 km along the wind, over a kilometre across), and the
- * cover comes from cloud size, not count.
+ * are now rare and big (1.4 to 6 km along the wind, over a kilometre across, the biggest
+ * only under a high base: `LENGTH_PER_BASE`), and the cover comes from cloud size, not
+ * count.
  */
-const CLOUDS_PER_CELL = 0.045;
+const CLOUDS_PER_CELL = 0.05;
 /** Ranks a storm adds to every cell, clear districts included, on top of swelling the fair share. */
 const STORM_EXTRA = 0.6;
 /** How far over a rank the cover must go before a cloud is full size. */
@@ -238,6 +239,33 @@ export function cloudFieldOf(seed: number, x: number, z: number, elapsed: number
 // ---------------------------------------------------------------------------
 
 /**
+ * How high a body lobe's centre stands over the base, as a share of its vertical radius:
+ * `BASE_LIFT_MIN` up to `BASE_LIFT_MIN + BASE_LIFT_SPAN`. The flat cut is then 0.63-0.84
+ * of the lobe's width instead of all of it. The top end is held at 0.78 so that every
+ * corner of a lobe's detail-2 icosphere from 0.85 of its radius down (its lowest rings),
+ * even pulled in by render/clouds.ts's `LUMP` (8%), is below the base and clamped onto
+ * it: a lobe's bottom lies IN the base plane, where every lobe's cut shades alike
+ * (overlaps are invisible), and no face of it hovers flat a few metres over a
+ * neighbour's cut, where the two would fight for the depth buffer.
+ */
+const BASE_LIFT_MIN = 0.55;
+const BASE_LIFT_SPAN = 0.23;
+/**
+ * The longest cloud a base this high carries, as a multiple of the base's height: a
+ * cumulus is about as wide as the layer under it is deep. A 6 km raft on a 1 km base
+ * spans 140 degrees of the sky from under it, and in the owner's screenshot such clouds
+ * near the road read as a low ceiling: at this length none seen from right under it
+ * spans much over a hundred. Applied softly (`fitUnder`) so the sizes do not pile up at
+ * the limit.
+ */
+const LENGTH_PER_BASE = 2;
+
+/** `length` eased under `room`: unchanged when well short of it, never past it. */
+function fitUnder(length: number, room: number): number {
+  return length / (1 + (length / room) ** 4) ** 0.25;
+}
+
+/**
  * One cloud under construction, in its own frame: x along the wind (its length), z
  * across, y up from its flat base.
  */
@@ -260,11 +288,15 @@ function blob(list: number[], cx: number, cy: number, cz: number, rx: number, ry
  *    mediocris 2.8-6 km, a fifth to under a third as tall. Nothing smaller: the owner
  *    read half-kilometre puffs in groups as confetti, and the short tall ones (a narrow
  *    dome seen end-on) as towers.
- *  - A BROAD FLAT BASE AND A LUMPY DOME OFF-CENTRE. A row of 3-5 body lobes runs the
- *    whole length, cut flat at the base, their tops following an envelope whose peak
- *    stands off the middle (`peak`); 1-2 crown lobes sit over the peak with their bottoms
- *    inside the body. Neighbouring lobes overlap by well over half a radius, so the
- *    outline is one bumpy body with no sky between its parts.
+ *  - A FLAT BASE NARROWER THAN THE BODY, AND A LUMPY DOME OFF-CENTRE. A row of 3-5 body
+ *    lobes runs the whole length, their tops following an envelope whose peak stands off
+ *    the middle (`peak`); 1-2 crown lobes sit over the peak with their bottoms inside the
+ *    body. Each body lobe is centred ABOVE the base (`BASE_LIFT_MIN`), so the cloud bulges
+ *    out over a base cut smaller than itself and its lower flanks turn under toward it.
+ *    The owner read the first, sunk lobes (centres at or under the base, so the cut was
+ *    each lobe's widest section) as giant flat slabs from below: the whole underside was
+ *    one flat face of one colour. Neighbouring lobes overlap by well over half a radius,
+ *    so the outline is one bumpy body with no sky between its parts.
  *  - ROUNDED, NEVER STRETCHED UP. No lobe is taller than it is wide (ry at most 0.85 of
  *    its narrower horizontal radius): an icosphere stretched upward is a tent.
  *  - SMALL LOBES SUNK IN. 6-12 lobes a quarter to two fifths of their parent, centred
@@ -290,18 +322,23 @@ function buildBody(b: Builder, length: number, width: number, height: number, bo
     const rx = Math.max(0.92 * spacing, 0.2 * length) * (0.95 + 0.12 * r());
     const rz = 0.46 * width * (0.88 + 0.12 * r()) * Math.sqrt(taper);
     const h = bodyTop * envelope(u) * (0.92 + 0.08 * r());
-    const ry = Math.min(0.85 * Math.min(rx, rz), h / 0.62);
-    // Mostly below the base, cut flat there; a lobe too squat to reach `h` from below
-    // stands on the base instead of floating over it.
-    const cy = Math.min(h - ry, ry);
+    // Centred above the base by a share of its height that varies lobe to lobe and grows
+    // toward the tapered ends, so the flat cut is a narrower, uneven core with rounded
+    // flanks round it rather than the lobe's whole footprint.
+    const lift = BASE_LIFT_MIN + BASE_LIFT_SPAN * (0.7 * r() + (0.3 * (1 - taper)) / 0.65);
+    const ry = Math.min(0.85 * Math.min(rx, rz), h / (1 + lift));
+    const cy = lift * ry;
     blob(b.big, u, cy, (r() - 0.5) * 0.15 * width, rx, ry, rz, (r() - 0.5) * 0.4);
   }
   for (let k = 0; k < crowns; k++) {
     const u = peak + (k === 0 ? (r() - 0.5) * 0.08 : (r() < 0.5 ? -1 : 1) * (0.12 + 0.08 * r())) * length;
     const rx = 0.24 * length * (0.9 + 0.2 * r());
     const rz = 0.345 * width * (0.9 + 0.15 * r());
-    const ry = 0.85 * Math.min(rx, rz);
-    let cy = height * (k === 0 ? 1 : 0.8 + 0.1 * r()) - ry;
+    const top = height * (k === 0 ? 1 : 0.8 + 0.1 * r());
+    // Centred over the base like the body lobes, never a ball sunk through it whose cut
+    // would be the crown's whole width.
+    const ry = Math.min(0.85 * Math.min(rx, rz), top / (1 + BASE_LIFT_MIN));
+    let cy = top - ry;
     // Its bottom inside the body under it, never a separate lump perched on top.
     const floor = 0.7 * bodyTop * envelope(u);
     if (cy - ry > floor) cy = floor + ry;
@@ -369,7 +406,10 @@ function addLobes(b: Builder, height: number, count: number): void {
     const size = Math.min(rx, rz) * (0.25 + 0.15 * r());
     const sy = size * (0.7 + 0.15 * r());
     const along = sy * Math.abs(ny) + size * (1 - Math.abs(ny));
-    const sunk = (0.5 + 0.2 * r()) * along;
+    // No deeper than the middle of the parent's chord along the normal (its deepest
+    // point that way), so the centre stays inside even a flat parent.
+    const deepest = nl ** 3 / ((ux / (rx * rx)) ** 2 + (up / (ry * ry)) ** 2 + (uz / (rz * rz)) ** 2);
+    const sunk = Math.min((0.5 + 0.2 * r()) * along, deepest);
     blob(b.small, px - wx * sunk, py - ny * sunk, pz - wz * sunk, size * (1 + 0.25 * r()), sy, size, r() * Math.PI * 2);
     k++;
   }
@@ -506,33 +546,36 @@ function buildCloudSet(seed: number): CloudSet {
         builder.rand = r;
         builder.big.length = 0;
         builder.small.length = 0;
+        // One straight base for the district (its condensation level), within a few tens
+        // of metres from cloud to cloud.
+        const level = periodicNoise(x, z, 6, seed, TAG_BASE);
+        const condensation = 1000 + 2500 * level ** 1.3;
+        const room = LENGTH_PER_BASE * condensation;
         // Rare, big clouds: the cover comes from their size. Humilis 1.4-3 km long and a
         // sixth to a fifth as tall; mediocris 2.8-6 km, a fifth to under a third as tall;
         // both only 1.3-1.6 times as long as wide, so one seen end-on down the wind is
         // still a kilometre or more across; in a cloudy district now and then a
-        // congestus, broad as a mediocris.
+        // congestus, broad as a mediocris. Under a low base all of them are fitted to
+        // the shallower layer (`LENGTH_PER_BASE`), so the biggest rafts stand high.
         let kind: number;
         if (r() < 0.012 * Math.min(1, cover / 1.6)) {
           kind = CloudKind.Congestus;
-          buildCongestus(builder, 3000 + 1500 * r());
+          buildCongestus(builder, fitUnder(3000 + 1500 * r(), room));
         } else if (r() < 0.6) {
           kind = CloudKind.Humilis;
-          const length = 1400 + 1600 * r() ** 1.3;
+          const length = fitUnder(1400 + 1600 * r() ** 1.3, room);
           const height = length * (0.16 + 0.05 * r());
           buildBody(builder, length, length / (1.3 + 0.3 * r()), height, 3, 1);
           addLobes(builder, height, CLOUD_COMPACT_SMALL);
         } else {
           kind = CloudKind.Mediocris;
-          const length = 2800 + 3200 * r() ** 1.5;
+          const length = fitUnder(2800 + 3200 * r() ** 1.5, room);
           const bodies = 4 + Math.floor(r() * 2);
           const height = length * (0.2 + 0.08 * r());
           buildBody(builder, length, length / (1.3 + 0.3 * r()), height, bodies, CLOUD_BIG_SLOTS - bodies);
           addLobes(builder, height, 10 + Math.floor(r() * 3));
         }
-        // One straight base for the district (its condensation level), within a few tens
-        // of metres from cloud to cloud.
-        const level = periodicNoise(x, z, 6, seed, TAG_BASE);
-        const base = 1000 + 2500 * level ** 1.3 + (r() - 0.5) * 60;
+        const base = condensation + (r() - 0.5) * 60;
         const yaw = windAngle + (r() - 0.5) * 0.5;
         emit(x, z, ox, oz, base, yaw, kind, cover, rank, 0.92 + 0.08 * r());
       }

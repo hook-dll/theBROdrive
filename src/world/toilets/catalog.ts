@@ -1,12 +1,13 @@
 /**
- * The Japanese street-toilet catalogue (docs/toilet-poi-design.md). Ten of the planned
- * fifty so far: nine low-poly readings of THE TOKYO TOILET project in Shibuya and one of
- * the Tobe Zoo toilet in Ehime, each a service cabin (geometry.ts) inside one of the plan
- * families (families.ts). Ids are stable: saves key on them.
+ * The Japanese street-toilet catalogue (docs/toilet-poi-design.md). Eleven of the
+ * planned fifty so far: nine low-poly readings of THE TOKYO TOILET project in Shibuya,
+ * one of the Tobe Zoo toilet in Ehime and one vernacular outhouse that belongs to the
+ * minka dwelling, each a service cabin (geometry.ts) inside one of the plan families
+ * (families.ts) at one of the layouts (layouts.ts). Ids are stable: saves key on them.
  *
- * The world does not place these yet; they stand in the POI gallery
- * (`?poi-gallery&type=toilet`) and go through the POI merge path like every kit variant
- * (world/poi-variants.ts).
+ * The world does not place these yet, the attached one included; they stand in the POI
+ * gallery (`?poi-gallery&type=toilet`) and go through the POI merge path like every kit
+ * variant (world/poi-variants.ts).
  */
 
 import type { ToiletSourceCard, ToiletVariant } from './types';
@@ -70,6 +71,7 @@ export const TOILET_VARIANTS: readonly ToiletVariant[] = [
         ],
       },
     },
+    layout: 'row',
     bowl: 'washlet',
     fixtures: ['door', 'lid', 'flush', 'valve', 'plunger', 'floor-dirt'],
     face: { arrival: 'embarrassed', size: 0.15, brow: 0.2 },
@@ -117,6 +119,7 @@ export const TOILET_VARIANTS: readonly ToiletVariant[] = [
         ],
       },
     },
+    layout: 'cluster',
     bowl: 'washlet',
     fixtures: ['door', 'lid', 'flush', 'valve', 'plunger', 'floor-dirt'],
     face: { arrival: 'sleepy', size: 0.13, brow: 0.17 },
@@ -157,6 +160,7 @@ export const TOILET_VARIANTS: readonly ToiletVariant[] = [
       dressing: ['house'],
       form: { family: 'cabin' },
     },
+    layout: 'single',
     bowl: 'washlet',
     fixtures: ['door', 'lid', 'flush', 'valve', 'plunger', 'floor-dirt'],
     face: { arrival: 'worried', size: 0.14, brow: 0.19 },
@@ -192,6 +196,7 @@ export const TOILET_VARIANTS: readonly ToiletVariant[] = [
       dressing: [],
       form: { family: 'cabin' },
     },
+    layout: 'single',
     bowl: 'washlet',
     fixtures: ['door', 'lid', 'flush', 'valve', 'plunger', 'floor-dirt'],
     face: { arrival: 'angry', size: 0.13, brow: 0.2 },
@@ -227,6 +232,7 @@ export const TOILET_VARIANTS: readonly ToiletVariant[] = [
       dressing: ['privacy-walls'],
       form: { family: 'cabin' },
     },
+    layout: 'single',
     bowl: 'squat',
     fixtures: ['door', 'flush', 'valve', 'plunger', 'floor-dirt'],
     face: null,
@@ -272,6 +278,7 @@ export const TOILET_VARIANTS: readonly ToiletVariant[] = [
         faucets: [0.55, 0.7, 0.85, 1.0, 0.75],
       },
     },
+    layout: 'pavilion',
     bowl: 'washlet',
     fixtures: ['door', 'lid', 'flush', 'valve', 'plunger', 'floor-dirt'],
     face: { arrival: 'worried', size: 0.14, brow: 0.19 },
@@ -324,6 +331,7 @@ export const TOILET_VARIANTS: readonly ToiletVariant[] = [
         ],
       },
     },
+    layout: 'large-public',
     bowl: 'washlet',
     fixtures: ['door', 'lid', 'flush', 'valve', 'plunger', 'floor-dirt'],
     face: { arrival: 'angry', size: 0.14, brow: 0.2 },
@@ -365,6 +373,7 @@ export const TOILET_VARIANTS: readonly ToiletVariant[] = [
         columns: [],
       },
     },
+    layout: 'circular',
     bowl: 'washlet',
     fixtures: ['door', 'lid', 'flush', 'valve', 'plunger', 'floor-dirt'],
     face: null,
@@ -407,6 +416,7 @@ export const TOILET_VARIANTS: readonly ToiletVariant[] = [
         ],
       },
     },
+    layout: 'cluster',
     bowl: 'washlet',
     fixtures: ['door', 'lid', 'flush', 'valve', 'plunger', 'floor-dirt'],
     face: { arrival: 'sleepy', size: 0.14, brow: 0.18 },
@@ -462,6 +472,7 @@ export const TOILET_VARIANTS: readonly ToiletVariant[] = [
         ],
       },
     },
+    layout: 'pavilion',
     bowl: 'washlet',
     fixtures: ['door', 'lid', 'flush', 'valve', 'plunger', 'floor-dirt'],
     face: null,
@@ -476,6 +487,59 @@ export const TOILET_VARIANTS: readonly ToiletVariant[] = [
         silhouette: 'A 12 m cross-laminated cedar canopy left to deflect under its own weight into a gentle bowed curve, on rows of slender steel columns along its edges',
         plan: 'Two 2 x 2 m cubic volumes of precast concrete blocks under the canopy, by the zoo entrance',
         palette: 'Chiselled concrete and Ehime cedar',
+      },
+    ],
+  },
+  {
+    id: 'toilet-minka-outhouse',
+    name: 'Нужник у минки',
+    note: 'Vernacular · outbuilding of the Edo-period minka',
+    shell: {
+      width: 2.2,
+      depth: 2.2,
+      height: 2.4,
+      roof: 'pyramid',
+      overhang: 0.3,
+      wallPattern: 'boards',
+      palette: {
+        walls: [0x6b4a30, 0x6b4a30, 0x6b4a30, 0x6b4a30],
+        trim: 0x3a2a1e,
+        roof: 0x4a4e52,
+        plinth: 0x9a968c,
+        floor: 0x8a867c,
+        door: 0x5a3e2a,
+        accent: 0x3a2a1e,
+      },
+      dressing: [],
+      form: { family: 'cabin' },
+    },
+    layout: 'facility-attached',
+    // Beside the minka's right gable (world/dwellings/asia.ts), its door facing the way the
+    // house's front does: 1.4 m clear of the house's authored footprint.
+    host: { structure: 'minka', at: [9.8, 2.0], yaw: 0 },
+    bowl: 'squat',
+    fixtures: ['door', 'flush', 'valve', 'plunger', 'floor-dirt'],
+    face: { arrival: 'sleepy', size: 0.12, brow: 0.16 },
+    scenario: 'clogged-drain',
+    sources: [
+      {
+        url: 'https://en.wikipedia.org/wiki/Toilets_in_Japan',
+        title: 'Toilets in Japan',
+        author: 'Wikipedia contributors',
+        licence: `${FACTS_ONLY} (the article is CC BY-SA 4.0)`,
+        accessed: ACCESSED,
+        plan: 'Historically the toilet stood outside the house and shoes were worn to walk to it; drawn as an outbuilding beside the farmhouse',
+        fixtures:
+          'A squat pan; older buildings in the country often have only squat toilets, whose tank, piping and flush may be those of a Western toilet; drawn retrofitted with a flush and a valve',
+      },
+      {
+        url: 'https://en.wikipedia.org/wiki/Minka',
+        title: 'Minka',
+        author: 'Wikipedia contributors',
+        licence: `${FACTS_ONLY} (the article is CC BY-SA 4.0)`,
+        accessed: ACCESSED,
+        silhouette: 'The hōgyō roof slopes in four directions to a point',
+        palette: 'Where clay was scarce, boards were used for the walls; dark timber, as on the minka it stands beside',
       },
     ],
   },

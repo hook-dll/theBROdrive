@@ -3,7 +3,6 @@ import { createItemMesh, disposeItemMeshResources, setPocketWatchState } from '.
 import { setPartCondition } from './materials';
 import type { Vehicle } from '../vehicle/vehicle';
 import {
-  bonnetGridOnLid,
   storageCellBox,
   storageCellCount,
   TRUNK_CELL_COUNT,
@@ -88,7 +87,6 @@ export class TrunkView {
   /** What the panels were last laid out for; any change lays them out again. */
   private layoutShape: StorageGridShape | null = null;
   private layoutSide: TrunkViewState['side'] | null = null;
-  private layoutOnLid = false;
   /** Which panels the last layout placed: a bonnet has fewer cells than the trunk. */
   private readonly laidOut: boolean[] = new Array<boolean>(TRUNK_CELL_COUNT).fill(false);
 
@@ -150,12 +148,10 @@ export class TrunkView {
     this.root.visible = true;
     this.root.position.copy(this.posePosition);
     this.root.quaternion.copy(this.poseQuaternion);
-    const onLid = view.side === 'bonnet' && bonnetGridOnLid(view.owner);
-    if (shape !== this.layoutShape || view.side !== this.layoutSide || onLid !== this.layoutOnLid) {
+    if (shape !== this.layoutShape || view.side !== this.layoutSide) {
       this.layoutShape = shape;
       this.layoutSide = view.side;
-      this.layoutOnLid = onLid;
-      this.layout(shape, view.side, onLid);
+      this.layout(shape, view.side);
       this.itemSignature = '';
     }
 
@@ -175,7 +171,7 @@ export class TrunkView {
     ).join('|');
     if (itemSignature !== this.itemSignature) {
       this.itemSignature = itemSignature;
-      this.rebuildItems(view, shape, onLid);
+      this.rebuildItems(view, shape);
     }
     for (const watch of this.pocketWatches) {
       setPocketWatchState(watch, timeOfDay, dayFactor);
@@ -192,10 +188,10 @@ export class TrunkView {
    * player behind the car, or flat in a bonnet cell facing up out of the bay, the panel
    * on its floor and the outline round its top.
    */
-  private layout(shape: StorageGridShape, side: TrunkViewState['side'], onLid: boolean): void {
+  private layout(shape: StorageGridShape, side: TrunkViewState['side']): void {
     const count = storageCellCount(side);
     for (let cell = 0; cell < TRUNK_CELL_COUNT; cell++) {
-      const placed = cell < count && storageCellBox(cell, shape, side, onLid, this.cellPosition, this.cellSize);
+      const placed = cell < count && storageCellBox(cell, shape, side, this.cellPosition, this.cellSize);
       this.laidOut[cell] = placed;
       if (!placed) continue;
       const panel = this.panels[cell]!;
@@ -221,13 +217,13 @@ export class TrunkView {
     }
   }
 
-  private rebuildItems(view: TrunkViewState, shape: StorageGridShape, onLid: boolean): void {
+  private rebuildItems(view: TrunkViewState, shape: StorageGridShape): void {
     this.clearItems();
     const bonnet = view.side === 'bonnet';
     for (let cell = 0; cell < TRUNK_CELL_COUNT; cell++) {
       const item = view.cells[cell];
       if (!item) continue;
-      if (!storageCellBox(cell, shape, view.side, onLid, this.cellPosition, this.cellSize)) continue;
+      if (!storageCellBox(cell, shape, view.side, this.cellPosition, this.cellSize)) continue;
       const mesh = createItemMesh(item);
       if (item.type === 'part') setPartCondition(mesh, item.part);
       const holder = new THREE.Group();

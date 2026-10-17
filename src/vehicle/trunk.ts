@@ -13,12 +13,6 @@ const TRUNK_GRID_MAX_WIDTH = 1.6;
 const TRUNK_GRID_BODY_FRACTION = 1.65;
 /** Raised from bumper height to just below an on-foot player's eye line. */
 const STORAGE_GRID_CENTRE_Y_FRACTION = 0.55;
-/**
- * A shell's bonnet cells stand this far above the room under its lid: on the closed
- * bonnet's skin (the lid's 0.035 inner skin and the bay's 0.045 clearance, plus the
- * crown), since a static shell's lid never opens to show the bay.
- */
-const LID_TOP_GAP = 0.09;
 
 export type StorageSide = 'trunk' | 'bonnet';
 export type StorageOwnerKind = 'car' | 'wreck' | 'courier';
@@ -58,12 +52,21 @@ export interface TrunkViewState {
 }
 
 /**
- * Whether a bonnet's cells lie on its closed lid rather than in the bay. A driven car's
- * grid is shown only while its bonnet is open; a roadside shell's lid is part of a static
- * model and never opens, so its cells are laid on top of it, in the same plan.
+ * A kit body's lids over each compartment, by rig channel (carkit/kit.ts `shellMotion`):
+ * the bonnet, and the boot lid or tailgate behind (either leaf of a split one), whichever
+ * the body has. A compartment's grid is reached only with one of its lids open, on a
+ * driven car and on a roadside shell alike.
  */
-export function bonnetGridOnLid(owner: StorageOwnerKind): boolean {
-  return owner !== 'car';
+export const STORAGE_LID_CHANNELS: Readonly<Record<StorageSide, readonly string[]>> = {
+  bonnet: ['bonnet'],
+  trunk: ['boot', 'tailgate', 'tailgate_l', 'tailgate_r'],
+};
+
+/** The compartment a lid's channel covers, or null for a channel that is no lid. */
+export function storageLidSide(channel: string): StorageSide | null {
+  if (STORAGE_LID_CHANNELS.bonnet.includes(channel)) return 'bonnet';
+  if (STORAGE_LID_CHANNELS.trunk.includes(channel)) return 'trunk';
+  return null;
 }
 
 /** Width follows the body, capped so bus and truck cells stay small and readable. */
@@ -93,15 +96,14 @@ interface Bounds {
  * Trunk cells count left to right as the player sees them, read from behind the car
  * looking along +Z, where the player's left is +X.
  */
-function cellBounds(cell: number, shape: StorageGridShape, side: StorageSide, onLid: boolean, out: Bounds): boolean {
+function cellBounds(cell: number, shape: StorageGridShape, side: StorageSide, out: Bounds): boolean {
   if (side === 'bonnet') {
     const rect = shape.bonnetCells?.[cell];
     if (!rect) return false;
-    const floor = onLid ? rect.y + rect.height + LID_TOP_GAP : rect.y;
     out.minX = rect.x - rect.width * 0.5;
     out.maxX = rect.x + rect.width * 0.5;
-    out.minY = floor;
-    out.maxY = floor + rect.height;
+    out.minY = rect.y;
+    out.maxY = rect.y + rect.height;
     out.minZ = rect.z - rect.depth * 0.5;
     out.maxZ = rect.z + rect.depth * 0.5;
     return true;
@@ -128,11 +130,10 @@ export function storageCellBox(
   cell: number,
   shape: StorageGridShape,
   side: StorageSide,
-  onLid: boolean,
   centre: THREE.Vector3,
   size: THREE.Vector3,
 ): boolean {
-  if (!cellBounds(cell, shape, side, onLid, _cell)) return false;
+  if (!cellBounds(cell, shape, side, _cell)) return false;
   centre.set((_cell.minX + _cell.maxX) * 0.5, (_cell.minY + _cell.maxY) * 0.5, (_cell.minZ + _cell.maxZ) * 0.5);
   size.set(_cell.maxX - _cell.minX, _cell.maxY - _cell.minY, _cell.maxZ - _cell.minZ);
   return true;
@@ -141,13 +142,13 @@ export function storageCellBox(
 const _bounds: Bounds = { minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 0, maxZ: 0 };
 
 /** Every cell's box together; false when the shape has no grid on that side. */
-function gridBounds(shape: StorageGridShape, side: StorageSide, onLid: boolean, out: Bounds): boolean {
+function gridBounds(shape: StorageGridShape, side: StorageSide, out: Bounds): boolean {
   out.minX = out.minY = out.minZ = Infinity;
   out.maxX = out.maxY = out.maxZ = -Infinity;
   const count = storageCellCount(side);
   let any = false;
   for (let cell = 0; cell < count; cell++) {
-    if (!cellBounds(cell, shape, side, onLid, _cell)) continue;
+    if (!cellBounds(cell, shape, side, _cell)) continue;
     any = true;
     out.minX = Math.min(out.minX, _cell.minX);
     out.maxX = Math.max(out.maxX, _cell.maxX);
@@ -205,14 +206,13 @@ export function intersectStorageGrid(
   direction: THREE.Vector3,
   shape: StorageGridShape,
   side: StorageSide,
-  onLid: boolean,
   out: TrunkGridRayHit,
 ): boolean {
   let best = Infinity;
   let bestCell = -1;
   const count = storageCellCount(side);
   for (let cell = 0; cell < count; cell++) {
-    if (!cellBounds(cell, shape, side, onLid, _cell)) continue;
+    if (!cellBounds(cell, shape, side, _cell)) continue;
     const distance = rayBox(eye, direction, _cell);
     if (distance < best) {
       best = distance;
@@ -235,10 +235,9 @@ export function storageRevealDistance(
   direction: THREE.Vector3,
   shape: StorageGridShape,
   side: StorageSide,
-  onLid: boolean,
   margin: number,
 ): number {
-  if (!gridBounds(shape, side, onLid, _bounds)) return Infinity;
+  if (!gridBounds(shape, side, _bounds)) return Infinity;
   _bounds.minX -= margin;
   _bounds.maxX += margin;
   _bounds.minY -= margin;
@@ -256,10 +255,9 @@ export function storageRevealDistance(
 export function storageGridCentreLocal(
   shape: StorageGridShape,
   side: StorageSide,
-  onLid: boolean,
   out: THREE.Vector3,
 ): boolean {
-  if (!gridBounds(shape, side, onLid, _bounds)) return false;
+  if (!gridBounds(shape, side, _bounds)) return false;
   out.set((_bounds.minX + _bounds.maxX) * 0.5, (_bounds.minY + _bounds.maxY) * 0.5, (_bounds.minZ + _bounds.maxZ) * 0.5);
   return true;
 }

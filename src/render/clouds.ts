@@ -38,9 +38,11 @@ import { SCENE_EXPOSURE } from './displaytransform';
  * so the shading is flat per facet like a mesa or a car body.
  *
  * HOW IT IS LIT. Lambert from the sun on each facet, ambient from the sky's own colours by
- * which way the facet faces (the zenith's blue overhead, a grey-blue mixed with the sand's
- * warm bounce underneath), a little darker low in the cloud; at sunset the sun reaches
- * only the upper half, so a sunset cloud is a lit crown over a blue-grey body. Clean
+ * which way the facet faces (the zenith's blue overhead, the horizon's paler sky mixed
+ * with the sand's warm bounce underneath), a little darker low in the cloud, and the sun
+ * scattered through the body onto the facets that turn under, most on the flanks toward
+ * it, so a base shades round into a darker core; at sunset the sun reaches only the
+ * upper half, so a sunset cloud is a lit crown over a blue-grey body. Clean
  * bands the sun like every lit surface in that style. Far clouds take the land's own
  * aerial perspective (render/airfog.ts: extinction, haboob, fog colour by elevation,
  * the anti-solar pull) along the slant path, the air thinning upward
@@ -247,17 +249,28 @@ void main() {
 	float hc = clamp( p0.y / max( cloudHead.w * aCloud.w, 40.0 ), 0.0, 1.0 );
 	// A low sun reaches a cloud's lower half through more air and past its neighbours.
 	float sunAt = mix( 1.0, 0.3 + 0.7 * smoothstep( 0.1, 0.85, hc ), lowSun );
-	// Sky light on the tops comes mostly from overhead, and at sunset only from overhead;
-	// the underside sees the sand's warm bounce of a high sun, and at sunset the dim blue of
-	// the sky opposite, greyed: a sunset cloud's base is slate, not violet.
+	// Sky light on the tops comes mostly from overhead, and at sunset only from overhead.
+	// The underside sees the horizon's paler sky and the sand's warm bounce of a high sun,
+	// close to neutral: the old base (half the zenith's blue, a third of this bounce) read
+	// in the owner's screenshot as a blue-grey slab under a white top. At sunset it sees
+	// the dim blue of the sky opposite, greyed: a sunset cloud's base is slate, not violet.
 	vec3 skyAmbient = mix( uZenithLin, uHorizonLin, 0.35 * ( 1.0 - lowSun ) ) * 0.55;
-	vec3 groundAmbient = mix( uZenithLin, uHorizonLin, 0.5 ) * 0.3 + vec3( 0.69, 0.37, 0.12 ) * max( uSunDir.y, 0.0 ) * 0.07;
+	float sunUp = max( uSunDir.y, 0.0 );
+	vec3 groundAmbient = mix( uZenithLin, uHorizonLin, 0.6 - 0.25 * lowSun ) * 0.3 + vec3( 0.69, 0.37, 0.12 ) * sunUp * 0.22;
 	float grey = 0.45 * lowSun;
 	skyAmbient = mix( skyAmbient, vec3( dot( skyAmbient, vec3( 0.2126, 0.7152, 0.0722 ) ) ), grey );
 	groundAmbient = mix( groundAmbient, vec3( dot( groundAmbient, vec3( 0.2126, 0.7152, 0.0722 ) ) ), grey );
 	vec3 ambient = mix( groundAmbient, skyAmbient, n.y * 0.5 + 0.5 ) * ( 0.8 + 0.2 * hc );
+	// Sunlight scattered through the body to the facets that turn under: most on the
+	// flanks toward the sun, least on the flat base, so the underside shades round from
+	// its flanks into a darker core instead of being one face of one grey. A function of
+	// the facet's normal alone, so every lobe's cut, coplanar in the base, takes the same
+	// colour. The upper facets are left to the Lambert above, and at sunset it fades,
+	// keeping the lit crown over a slate body.
+	float through = 0.5 + 0.5 * dot( n, uSunDir );
+	float scatter = 0.3 * through * through * clamp( 0.3 - n.y, 0.0, 1.0 ) * ( 1.0 - lowSun );
 	float albedo = cloudHead.y * ( 1.0 - 0.55 * uStorm );
-	vec3 col = albedo * ( uSunLin * ( lambert * sunAt ) + ambient );
+	vec3 col = albedo * ( uSunLin * ( lambert * sunAt + scatter ) + ambient );
 	// Seen toward the sun, the light coming through lights the THIN parts: the facets on a
 	// lobe's silhouette, where the eye grazes the cloud, are a bright edge (the silver
 	// lining) round a grey body, not a body washed pale all over.

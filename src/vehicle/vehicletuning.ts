@@ -1605,39 +1605,11 @@ export const PARK_HOLD_SPEED_MPS = 0.12;
 export const PARK_HOLD_MIN_LOAD_FRACTION = 0.45;
 
 /**
- * Being shouldered by the player, in four numbers.
- *
- * The target is a car that feels like a car: it moves, and it is obviously not worth
- * moving far. `SHOVE_SPEED_CAP` is a slow walk, and `SHOVE_RAMP_SECONDS` is how long
- * leaning on it takes to get there — a second and a half, so the first moment of contact
- * does nothing perceptible and the motion builds. Together they cap the acceleration at
- * `0.4 / 1.5 = 0.27 m/s2`, which against a 1200 kg saloon is 320 N of shove: a person
- * pushing hard, and 45 times less than the parking brake it has to work against, which is
- * why `SHOVE_BRAKE_FRACTION` exists.
- *
- * `SHOVE_RELEASE_SECONDS` is how long a car stays shovable after the last push. It has to
- * outlast one fixed step so the hold does not re-latch between contacts, and has to be
- * short enough that letting go stops the car: at a fifth of a second the weakened brake
- * has the car down from 0.4 m/s in about the same time the hold takes to come back.
+ * Seconds the parking hold stays off after `Vehicle.flipOver`: longer than one fixed
+ * step, so the hold cannot latch the lifted, velocity-zeroed body in mid-air before it
+ * drops onto its wheels.
  */
-export const SHOVE_SPEED_CAP = 0.4;
-export const SHOVE_RAMP_SECONDS = 1.5;
-export const SHOVE_RELEASE_SECONDS = 0.2;
-/**
- * Fraction of the parking brake left on while a car is being shoved. Not zero: with the
- * brake off entirely a shoved car on any grade rolls away, which is a different game.
- *
- * The first pass set this to a quarter, on the theory that 12 × 0.25 = 3 m/s² was "weak
- * enough to lose to the shove". It is weaker than the full brake, but the shove it has to
- * lose to is only 0.4 / 1.5 = 0.27 m/s² (320 N on a 1200 kg saloon), so 3 m/s² was eleven
- * times the shove and cancelled it inside a single step: the car never moved. A shove can
- * only win if the weakened brake is WEAKER than the shove itself, so this is sized just
- * under half of it: 12 × 0.01 = 0.12 m/s² of holding, leaving ~0.15 m/s² of net creep.
- * The hold (a teleport) re-latches 0.2 s after the shoulder comes off and stops the car
- * properly, so this brake only has to keep it from rolling away on a gentle grade until
- * then.
- */
-export const SHOVE_BRAKE_FRACTION = 0.01;
+export const FLIP_HOLD_RELEASE_SECONDS = 0.2;
 /** Residual motion treated as stopped before an automatic changes drive direction. */
 export const AUTO_DIRECTION_RELEASE_MPS = 0.08;
 /** Hard road-speed ceiling for a catastrophically damaged but still running engine. */

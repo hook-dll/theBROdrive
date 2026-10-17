@@ -1404,120 +1404,6 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
     };
 
     pane.append(
-      // ONE ROW FOR THE MACHINE. The labels used to name machines (`Phone`, `Desktop`,
-      // `Workstation`), which asked the player to classify his own computer and then
-      // guess which class he was in; the measurement answers that now, and says so in
-      // the head, so the levels can describe the picture instead.
-      segmented('Quality', [
-        ...COMPUTE_LEVELS.map(({ level, label }) => ({
-          label,
-          icon: PRESET_ICONS[level],
-          hint: () => presetHint(level),
-          active: () => preset === level,
-          pick: () => {
-            Object.assign(settings, withQualityPreset(settings, level, 'chosen', mobilePresentation));
-            changed();
-          },
-        })),
-        {
-          label: 'Custom',
-          icon: 'controls',
-          hint: 'Your own mix, set under Advanced. Pick a level to go back to one.',
-          active: () => preset === null,
-          pick: () => {
-            qualityAdvancedOpen = true;
-            rerenderQuality();
-          },
-        },
-      ], presetHead),
-    );
-
-    // ADVANCED: every value the preset sets, one row each, for the player who wants
-    // one of them without the rest. Folded by default — the preset is the answer for
-    // most — and remembered open once opened.
-    const toggleField = el('div', 'menu-field');
-    const toggleHead = el('div', 'menu-field-head');
-    const toggleLabel = el('span', 'menu-label');
-    toggleLabel.textContent = 'Advanced';
-    const toggleBtn = button('menu-button menu-reset', qualityAdvancedOpen ? 'Hide' : 'Show');
-    toggleBtn.dataset.key = 'quality/advanced';
-    toggleBtn.setAttribute('aria-expanded', String(qualityAdvancedOpen));
-    const toggleHint =
-      'Detail, view distance, traffic, resolution, frame rate and antialiasing, each on '
-      + 'its own. Changing one makes the preset Custom.';
-    toggleBtn.addEventListener('click', () => {
-      qualityAdvancedOpen = !qualityAdvancedOpen;
-      rerenderQuality();
-    });
-    toggleBtn.addEventListener('pointerenter', () => setHint(toggleHint));
-    toggleBtn.addEventListener('focus', () => setHint(toggleHint));
-    toggleHead.append(icon('controls'), toggleLabel, toggleBtn);
-    toggleField.appendChild(toggleHead);
-    pane.appendChild(toggleField);
-    if (!qualityAdvancedOpen) return;
-
-    const advanced = el('div', 'menu-advanced');
-    pane.appendChild(advanced);
-    const pickDetail = (quality: GraphicsQuality): void => {
-      settings.graphicsQuality = quality;
-      settings.graphicsQualitySource = 'chosen';
-      changed();
-    };
-    advanced.append(
-      // HOW MUCH WORLD there is — whether the sun casts, how many lamps are shaded, how
-      // deep the sky goes. `Resolution` below owns the frame height.
-      segmented('Detail', [
-        {
-          label: 'Very Low',
-          icon: 'retro',
-          hint: () =>
-            'For weak mini-PCs and old laptops. The world is drawn at about 360 lines '
-            + '(540 under Resolution) and shown as crisp square pixels, like a late-90s '
-            + 'game, with lighter ground cover and '
-            + `${SUN_SHADOWS_TEXT[shadowModeFor(settings.shadows, 'retro', mobilePresentation)].toLowerCase()}. `
-            + (reloadsFor('retro', settings.groundCover) ? 'Switching to it or away from it saves the drive and reloads it.' : ''),
-          active: () => settings.graphicsQuality === 'retro',
-          pick: () => pickDetail('retro'),
-        },
-        ...(['acceptable', 'standard', 'blessing'] as const).map((quality, index) => ({
-          label: ['Low', 'Medium', 'High'][index]!,
-          icon: ['gfx1', 'gfx2', 'gfx3'][index]!,
-          hint: describeTier(quality, settings.shadows, settings.groundCover, mobilePresentation, inDrive),
-          active: () => settings.graphicsQuality === quality,
-          pick: () => pickDetail(quality),
-        })),
-      ]),
-      // THE PROCESSOR'S BILL, a different chip from the rest: the far desert, rebuilt
-      // cell by cell as you drive, and the traffic, every car a full physical vehicle
-      // with its own driver. Two rows because they cost different things and a machine
-      // may afford one and not the other. Both apply live.
-      segmented('View distance', COMPUTE_LEVELS.map(({ level, label }) => ({
-        label,
-        icon: HORIZON_ICONS[level],
-        hint:
-          `${formatHorizon(viewDistanceFor(level, mobilePresentation))} of desert before the haze. `
-          + 'The far desert is rebuilt by the processor as you drive; the farther it '
-          + 'reaches, the bigger that rebuild, and a slow processor feels it as a '
-          + 'stutter every few hundred metres.',
-        active: () => settings.viewDistance === level,
-        pick: () => {
-          settings.viewDistance = level;
-          changed();
-        },
-      }))),
-      segmented('Traffic', COMPUTE_LEVELS.map(({ level, label }) => ({
-        label,
-        icon: TRAFFIC_ICONS[level],
-        hint:
-          `Up to ${TRAFFIC_CAPS[level]} cars on the road. Every one is fully `
-          + 'simulated with its own driver, so this is the processor\'s, not the '
-          + 'graphics card\'s.',
-        active: () => settings.trafficDensity === level,
-        pick: () => {
-          settings.trafficDensity = level;
-          changed();
-        },
-      }))),
       // THE AXIS THE LEVEL CANNOT EXPRESS. A level is three points and a machine is not
       // three machines, so the frame height is its own row: down for the machine between
       // two levels, up for the one with headroom that does not want a 25 km vista and
@@ -1563,6 +1449,119 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           changed();
         },
       })))]),
+      segmented('Traffic', COMPUTE_LEVELS.map(({ level, label }) => ({
+        label,
+        icon: TRAFFIC_ICONS[level],
+        hint:
+          `Up to ${TRAFFIC_CAPS[level]} cars on the road. Every one is fully `
+          + 'simulated with its own driver, so this is the processor\'s, not the '
+          + 'graphics card\'s.',
+        active: () => settings.trafficDensity === level,
+        pick: () => {
+          settings.trafficDensity = level;
+          changed();
+        },
+      }))),
+      // ONE ROW FOR THE MACHINE. The labels used to name machines (`Phone`, `Desktop`,
+      // `Workstation`), which asked the player to classify his own computer and then
+      // guess which class he was in; the measurement answers that now, and says so in
+      // the head, so the levels can describe the picture instead.
+      segmented('Preset', [
+        ...COMPUTE_LEVELS.map(({ level, label }) => ({
+          label,
+          icon: PRESET_ICONS[level],
+          hint: () => presetHint(level),
+          active: () => preset === level,
+          pick: () => {
+            Object.assign(settings, withQualityPreset(settings, level, 'chosen', mobilePresentation));
+            changed();
+          },
+        })),
+        {
+          label: 'Custom',
+          icon: 'controls',
+          hint: 'Your own mix, set under Advanced. Pick a level to go back to one.',
+          active: () => preset === null,
+          pick: () => {
+            qualityAdvancedOpen = true;
+            rerenderQuality();
+          },
+        },
+      ], presetHead),
+    );
+
+    // ADVANCED: every value the preset sets, one row each, for the player who wants
+    // one of them without the rest. Folded by default — the preset is the answer for
+    // most — and remembered open once opened.
+    const toggleField = el('div', 'menu-field');
+    const toggleHead = el('div', 'menu-field-head');
+    const toggleLabel = el('span', 'menu-label');
+    toggleLabel.textContent = 'Advanced';
+    const toggleBtn = button('menu-button menu-reset', qualityAdvancedOpen ? 'Hide' : 'Show');
+    toggleBtn.dataset.key = 'quality/advanced';
+    toggleBtn.setAttribute('aria-expanded', String(qualityAdvancedOpen));
+    const toggleHint =
+      'Detail, view distance, frame rate, mirrors, antialiasing, shadows, grass and style, each on '
+      + 'its own. Changing one makes the preset Custom.';
+    toggleBtn.addEventListener('click', () => {
+      qualityAdvancedOpen = !qualityAdvancedOpen;
+      rerenderQuality();
+    });
+    toggleBtn.addEventListener('pointerenter', () => setHint(toggleHint));
+    toggleBtn.addEventListener('focus', () => setHint(toggleHint));
+    toggleHead.append(icon('controls'), toggleLabel, toggleBtn);
+    toggleField.appendChild(toggleHead);
+    pane.appendChild(toggleField);
+    if (!qualityAdvancedOpen) return;
+
+    const advanced = el('div', 'menu-advanced');
+    pane.appendChild(advanced);
+    const pickDetail = (quality: GraphicsQuality): void => {
+      settings.graphicsQuality = quality;
+      settings.graphicsQualitySource = 'chosen';
+      changed();
+    };
+    advanced.append(
+      // HOW MUCH WORLD there is — whether the sun casts, how many lamps are shaded, how
+      // deep the sky goes. `Resolution` below owns the frame height.
+      segmented('Detail', [
+        {
+          label: 'Very Low',
+          icon: 'retro',
+          hint: () =>
+            'For weak mini-PCs and old laptops. The world is drawn at about 360 lines '
+            + '(540 under Resolution) and shown as crisp square pixels, like a late-90s '
+            + 'game, with lighter ground cover and '
+            + `${SUN_SHADOWS_TEXT[shadowModeFor(settings.shadows, 'retro', mobilePresentation)].toLowerCase()}. `
+            + (reloadsFor('retro', settings.groundCover) ? 'Switching to it or away from it saves the drive and reloads it.' : ''),
+          active: () => settings.graphicsQuality === 'retro',
+          pick: () => pickDetail('retro'),
+        },
+        ...(['acceptable', 'standard', 'blessing'] as const).map((quality, index) => ({
+          label: ['Low', 'Medium', 'High'][index]!,
+          icon: ['gfx1', 'gfx2', 'gfx3'][index]!,
+          hint: describeTier(quality, settings.shadows, settings.groundCover, mobilePresentation, inDrive),
+          active: () => settings.graphicsQuality === quality,
+          pick: () => pickDetail(quality),
+        })),
+      ]),
+      // THE PROCESSOR'S BILL for the far desert, rebuilt cell by cell as you drive: the
+      // farther it reaches, the bigger that rebuild. Traffic is the processor's too, and its
+      // row sits above. Both apply live.
+      segmented('View distance', COMPUTE_LEVELS.map(({ level, label }) => ({
+        label,
+        icon: HORIZON_ICONS[level],
+        hint:
+          `${formatHorizon(viewDistanceFor(level, mobilePresentation))} of desert before the haze. `
+          + 'The far desert is rebuilt by the processor as you drive; the farther it '
+          + 'reaches, the bigger that rebuild, and a slow processor feels it as a '
+          + 'stutter every few hundred metres.',
+        active: () => settings.viewDistance === level,
+        pick: () => {
+          settings.viewDistance = level;
+          changed();
+        },
+      }))),
       // THE ONE LEVER THAT WORKS ON EVERY DEVICE, for opposite reasons, so it is
       // offered on both. On a phone it is a thermal control and has to be the
       // player's: no browser reports thermal state, battery temperature or clock

@@ -47,16 +47,17 @@ import {
 import { lampLensAnchors } from '../vehicle/vehiclelamps';
 import { buildKitCar } from '../carkit/kit';
 import { kitBodyMaterial } from '../carkit/materials';
-import { kitGlassOpacity } from '../carkit/rig';
+import { kitGlassOpacity, type KitControl } from '../carkit/rig';
 import { MATERIALS_CONFIG } from '../config';
 import { bakeCarPaintGeometry, bakeFarCarGeometry, type FarCarSurface, type MidCarWheel } from './farcars';
 import { bakeCarShadowHull, carShadowHullMesh } from './carshadowhull';
-import { attachKitDraw, attachKitWheels, bakeKitWheels, prepareKitDraw, type KitDrawModel, type KitSkeleton, type KitWheelModel } from './kitdraw';
+import { attachKitDraw, attachKitWheels, bakeKitWheels, kitRestMesh, kitRestSkeleton, prepareKitDraw, type KitDrawModel, type KitSkeleton, type KitWheelModel } from './kitdraw';
+import { StaticCarLids } from './staticlids';
 import { KIT_DRIVER_EYE_NODE, KIT_REAR_EYE_NODE } from '../carkit/interior';
 import { KIT_BONNET_CELL_NODE } from '../carkit/bay';
 import { KIT_FILLER_NODE } from '../carkit/exterior';
 import { BONNET_SLOT_KINDS } from '../vehicle/bonnet';
-import type { StorageCellRect } from '../vehicle/trunk';
+import { storageLidSide, type StorageCellRect } from '../vehicle/trunk';
 
 /**
  * DEV-only A/B switch for the unified car style: `?carstyle=unified`, alongside any
@@ -971,6 +972,11 @@ function carClearGlassMaterial(): THREE.MeshStandardMaterial {
   return clearGlassMaterial;
 }
 
+/** Whether a template material is one of the shared panes a car draws in its own glass (`cloneCarGlass`). */
+function isSharedCarGlass(material: THREE.Material): boolean {
+  return material === carGlassMaterial() || material === carClearGlassMaterial();
+}
+
 /**
  * Separates a body's windows into the shared opaque tint, whichever way its pack
  * drew them.
@@ -1869,11 +1875,12 @@ export interface CarMidInstance {
   readonly wheels: readonly MidCarWheel[];
 }
 
-/** A static shell and the paint materials it was instanced with. */
+/** A static shell, the paint materials it was instanced with, and its lids if they open. */
 interface StaticCarInstance {
   readonly model: THREE.Object3D;
   readonly paint: readonly THREE.Material[];
   readonly glass: readonly THREE.Material[];
+  readonly lids: StaticCarLids | null;
 }
 
 /** Each kit model's wheels per set it can wear, merged (`bakeKitWheels`), fitted to the body. */
@@ -2064,14 +2071,137 @@ export function createCarModel(id: string, appearanceKey = id): CarModelInstance
 /** Each kit model's wheels per set, placed and merged for a static car (`cloneStaticModel`). */
 const kitStaticWheels = new Map<string, Map<ReadonlyMap<string, THREE.Object3D>, { geometry: THREE.BufferGeometry; materials: THREE.Material[] }>>();
 
+/** A kit model's lid as a static shell hangs it: its template pivot and its own meshes. */
+interface KitStaticLid {
+  /** The template's hinge node: its pose under its parent, its motion and its control. */
+  readonly node: THREE.Object3D;
+  /** The lid's paint and its panes, in the pivot's own frame; null for none. */
+  readonly paint: THREE.BufferGeometry | null;
+  readonly glass: THREE.BufferGeometry | null;
+}
+
+/**
+ * A kit model's static shell with lids that open (`kitStaticParts`): the mid shell
+ * (`CarMidModel`) less its lids, each lid on its own, and the cabin, bay and boot to
+ * show under an open one.
+ */
+interface KitStaticParts {
+  /** The shut body less the lids, chassis-local, as `CarMidModel.paint` cuts it. */
+  readonly paint: THREE.BufferGeometry;
+  readonly glass: THREE.BufferGeometry | null;
+  readonly lids: readonly KitStaticLid[];
+  /** The model's merged mesh with only the cabin, bay and boot left (`kitRestSkeleton`). */
+  readonly inside: THREE.Skeleton;
+}
+
+const kitStaticPartsByModel = new Map<string, KitStaticParts>();
+
+/** The detail groups an open lid shows: what is under the bonnet, behind the boot lid or tailgate, and the cabin beyond. */
+const STATIC_INSIDE_GROUPS: Readonly<Record<string, true>> = { kit_cabin: true, kit_bay: true, kit_boot: true };
+
+/** A kit model's `KitStaticParts`, cut once from its template and kept for the session. */
+function kitStaticParts(t: Template, kit: KitDrawModel): KitStaticParts {
+  const cached = kitStaticPartsByModel.get(t.def.id);
+  if (cached) return cached;
+  const lidNodes: THREE.Object3D[] = [];
+  t.body.traverse((node) => {
+    const control = node.userData.kitControl as KitControl | undefined;
+    if (control && node.userData.kitMotion && storageLidSide(control.id)) lidNodes.push(node);
+  });
+  const onLid = new Set<THREE.Object3D>();
+  for (const lid of lidNodes) lid.traverse((node) => onLid.add(node));
+  // The cuts `buildMidModel` makes: every kit slot but the glass is the one paint.
+  const paintSlot = (mesh: THREE.Mesh): number => (mesh.userData.kitSlot !== undefined && mesh.userData.kitSlot !== 'glass' ? 0 : -1);
+  const glassSlot = (_mesh: THREE.Mesh, material: THREE.Material): number => (isSharedCarGlass(material) ? 0 : -1);
+  const paint = bakeCarPaintGeometry([t.body], (mesh) => (onLid.has(mesh) ? -1 : paintSlot(mesh)));
+  if (!paint) throw new Error(`Car model "${t.def.id}" has no shell outside its lids`);
+  const lids = lidNodes.map((node): KitStaticLid => ({
+    node,
+    // The children with their own transforms: the lid in its pivot's frame.
+    paint: bakeCarPaintGeometry(node.children, paintSlot),
+    glass: bakeCarPaintGeometry(node.children, glassSlot),
+  }));
+  const parts: KitStaticParts = {
+    paint,
+    glass: bakeCarPaintGeometry([t.body], (mesh, material) => (onLid.has(mesh) ? -1 : glassSlot(mesh, material))),
+    lids,
+    // A lid's own detail swings with it, so only what stays put is shown.
+    inside: kitRestSkeleton(kit, t.body, (node) => {
+      if (onLid.has(node)) return false;
+      for (let at: THREE.Object3D | null = node; at && at !== t.body; at = at.parent) {
+        if (STATIC_INSIDE_GROUPS[at.name]) return true;
+      }
+      return false;
+    }),
+  };
+  kitStaticPartsByModel.set(t.def.id, parts);
+  return parts;
+}
+
+/**
+ * Hangs a static kit shell's lids on their hinges, as the driven car's are: a node in the
+ * body node's frame (the template's fit), under it each lid's ancestors and its pivot
+ * with the template's pose, motion and control, and the cabin, bay and boot, hidden until
+ * a lid opens. Every frame is a plain position, rotation and scale, so freezing the chunk
+ * (world/chunks.ts `freezeStaticSubtree`) recomposes exactly these matrices.
+ */
+function hangStaticLids(group: THREE.Group, t: Template, kit: KitDrawModel, parts: KitStaticParts, paint: THREE.Material): StaticCarLids {
+  const copyPose = (from: THREE.Object3D, name: string): THREE.Group => {
+    const node = new THREE.Group();
+    node.name = name;
+    node.position.copy(from.position);
+    node.quaternion.copy(from.quaternion);
+    node.scale.copy(from.scale);
+    return node;
+  };
+  const body = copyPose(t.body, 'lids');
+  const controls: KitControl[] = [];
+  const pivots: THREE.Object3D[] = [];
+  for (const lid of parts.lids) {
+    let parent: THREE.Object3D = body;
+    const chain: THREE.Object3D[] = [];
+    for (let at = lid.node.parent; at && at !== t.body; at = at.parent) chain.unshift(at);
+    for (const at of chain) {
+      const frame = copyPose(at, at.name);
+      parent.add(frame);
+      parent = frame;
+    }
+    const pivot = copyPose(lid.node, lid.node.name);
+    const control = lid.node.userData.kitControl as KitControl;
+    pivot.userData.kitMotion = lid.node.userData.kitMotion;
+    pivot.userData.kitControl = control;
+    if (lid.paint) {
+      const skin = kitShellMesh(lid.paint, paint);
+      skin.name = `${lid.node.name}_skin`;
+      pivot.add(skin);
+    }
+    if (lid.glass) {
+      const panes = new THREE.Mesh(lid.glass, carClearGlassMaterial());
+      panes.castShadow = true;
+      pivot.add(panes);
+    }
+    parent.add(pivot);
+    controls.push(control);
+    pivots.push(pivot);
+  }
+  const inside = kitRestMesh(kit, parts.inside, paint);
+  inside.name = 'inside';
+  inside.visible = false;
+  body.add(inside);
+  group.add(body);
+  return new StaticCarLids(group, controls, pivots, inside);
+}
+
 /**
  * A static, non-driven copy of a whole vehicle, with its wheels placed at the same
  * factory track, wheelbase and clearance used by the driven chassis. A kit body is the
  * shut body without its cabin, bay, boot and underbody that mid traffic draws
  * (`CarMidModel`), its glass the tinted mirror, and its wheels one merged mesh: three
- * draws. Nobody opens a wreck's doors.
+ * draws. Nobody opens a wreck's doors; with `lidded` its bonnet and boot lid or tailgate
+ * open (`hangStaticLids`), one draw more per lid, and the cabin, bay and boot draw while
+ * one is open.
  */
-function cloneStaticModel(t: Template, appearanceKey = t.def.id): StaticCarInstance {
+function cloneStaticModel(t: Template, appearanceKey = t.def.id, lidded = false): StaticCarInstance {
   const group = new THREE.Group();
   group.name = t.def.id;
   const set = selectedWheels(t, appearanceKey);
@@ -2081,15 +2211,20 @@ function cloneStaticModel(t: Template, appearanceKey = t.def.id): StaticCarInsta
   if (t.kit) {
     const mid = midModels.get(t.def.id);
     if (!mid) throw new Error(`Car model "${t.def.id}" has no mid meshes for a static shell`);
-    const shell = kitShellMesh(mid.paint, kitBodyMaterial());
+    const parts = lidded ? kitStaticParts(t, t.kit) : null;
+    const shell = kitShellMesh(parts?.paint ?? mid.paint, kitBodyMaterial());
     shell.name = 'body';
     group.add(shell);
-    if (mid.glass) {
-      const panes = new THREE.Mesh(mid.glass, carClearGlassMaterial());
+    const paneGeometry = parts ? parts.glass : mid.glass;
+    if (paneGeometry) {
+      const panes = new THREE.Mesh(paneGeometry, carClearGlassMaterial());
       panes.castShadow = true;
       group.add(panes);
     }
-    const paint = [...cloneCarBodyPaintMaterials(group, t, appearanceKey).values()];
+    const clones = cloneCarBodyPaintMaterials(group, t, appearanceKey);
+    const paint = [...clones.values()];
+    // Before the glass is cloned, so the lids' panes take the car's own copy too.
+    const lids = parts ? hangStaticLids(group, t, t.kit, parts, clones.get(kitBodyMaterial())!) : null;
     const glass = cloneCarGlass(group, paint, true);
     applyRandomPaint(group, t.def, appearanceKey);
     for (const material of glass) material.opacity = kitGlassOpacity(Infinity);
@@ -2116,7 +2251,7 @@ function cloneStaticModel(t: Template, appearanceKey = t.def.id): StaticCarInsta
     wheels.castShadow = true;
     wheels.receiveShadow = true;
     group.add(wheels);
-    return { model: group, paint, glass };
+    return { model: group, paint, glass, lids };
   }
   const body = t.body.clone(true);
   const paint = [...cloneCarBodyPaintMaterials(body, t, appearanceKey).values()];
@@ -2130,7 +2265,7 @@ function cloneStaticModel(t: Template, appearanceKey = t.def.id): StaticCarInsta
     mesh.position.set(wheel.pos[0], wheel.pos[1], wheel.pos[2]);
     group.add(mesh);
   }
-  return { model: group, paint, glass };
+  return { model: group, paint, glass, lids: null };
 }
 
 /**
@@ -2307,13 +2442,12 @@ function buildMidModel(t: Template): CarMidModel | null {
         return slot >= 0 ? slot : paintSources.push(material) - 1;
       });
   if (!paint) return null;
-  const isGlass = (material: THREE.Material): boolean => material === carGlassMaterial() || material === carClearGlassMaterial();
-  const glass = bakeCarPaintGeometry([t.body], (_mesh, material) => (isGlass(material) ? 0 : -1));
+  const glass = bakeCarPaintGeometry([t.body], (_mesh, material) => (isSharedCarGlass(material) ? 0 : -1));
   const far = farSurfaceOf(def, true);
   const rest = t.kit
     ? null
     : bakeFarCarGeometry([t.body], (mesh, material) => {
-        if (isGlass(material)) return null;
+        if (isSharedCarGlass(material)) return null;
         const surface = far(mesh, material);
         if (!surface?.paint) return surface;
         return surface.lamp > 0 ? { ...surface, paint: false } : null;
@@ -2391,22 +2525,32 @@ async function buildProgramAnchor(id: string): Promise<THREE.Group> {
     const t = template(id);
     const courier = cloneStaticModel(t);
     applyCourierAppearance(courier.paint);
-    anchor.add(cloneStaticModel(t).model, courier.model);
+    // The wreck's shell with its lids and, hidden, its cabin, bay and boot: compiling
+    // traverses hidden meshes too, so the shell links nothing when a lid first opens.
+    anchor.add(cloneStaticModel(t, t.def.id, true).model, courier.model);
   });
   return anchor;
+}
+
+/** A roadside shell (`createStaticCarModel`) and its lids, null for a body with none that open. */
+export interface StaticCarModel {
+  readonly model: THREE.Object3D;
+  readonly lids: StaticCarLids | null;
 }
 
 /**
  * A static, non-driven copy of a whole vehicle — wheels included, bolted where the
  * model puts them. This is what wrecks and scenery cars use, and it arrives already
- * weathered (`derelictDust`).
+ * weathered (`derelictDust`). A kit body's bonnet and boot lid or tailgate open as the
+ * driven car's do (`StaticCarLids`); the caller eases them while the player can reach
+ * them.
  */
-export function createStaticCarModel(id: string, appearanceKey = id): THREE.Object3D {
-  const instance = cloneStaticModel(template(id), appearanceKey);
+export function createStaticCarModel(id: string, appearanceKey = id): StaticCarModel {
+  const instance = cloneStaticModel(template(id), appearanceKey, true);
   const dust = derelictDust(id, appearanceKey);
   weatherStaticCarPaint(instance.paint, dust);
   setCarGrime(instance.glass, dust * GLASS_DIRT_SHARE);
-  return instance.model;
+  return { model: instance.model, lids: instance.lids };
 }
 
 /**

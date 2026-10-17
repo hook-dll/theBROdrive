@@ -1667,28 +1667,6 @@ function buildWrecks(
       continue;
     }
     const matrix = poseMatrix(p.x, originY, p.z, yaw, roll, pitch, ox, oz);
-    const addShell = (): void => {
-      const shell = createStaticCarModel(def.id, carId);
-      setFromMatrix(shell, matrix);
-      group.add(shell);
-    };
-    if (isCarModelLoaded(def.id)) {
-      addShell();
-    } else {
-      let cancelled = false;
-      deferredVisuals.push(() => {
-        cancelled = true;
-      });
-      void loadCarModel(def.id).then(
-        () => {
-          if (!cancelled) addShell();
-        },
-        (error: unknown) => {
-          console.error(`failed to load static car model "${def.id}"`, error);
-        },
-      );
-    }
-
     // A box approximates a static shell well enough for a solid obstacle.
     const collider = addStaticCollider(
       ctx,
@@ -1716,6 +1694,30 @@ function buildWrecks(
       // The shell only takes loot the first time it is built: `poi_looted` is what
       // keeps an emptied wreck empty across every later chunk rebuild.
       if (shouldLoot) stockWreckLoot(ctx, poi, carId, w, def.bodyClass);
+    }
+    // After the registration, so the shell's lids join a registered wreck.
+    const addShell = (): void => {
+      const shell = createStaticCarModel(def.id, carId);
+      setFromMatrix(shell.model, matrix);
+      group.add(shell.model);
+      // Only a registered shell is within the player's reach; its lids are eased there.
+      if (shell.lids) wreckTrunks.attachLids(carId, shell.lids);
+    };
+    if (isCarModelLoaded(def.id)) {
+      addShell();
+    } else {
+      let cancelled = false;
+      deferredVisuals.push(() => {
+        cancelled = true;
+      });
+      void loadCarModel(def.id).then(
+        () => {
+          if (!cancelled) addShell();
+        },
+        (error: unknown) => {
+          console.error(`failed to load static car model "${def.id}"`, error);
+        },
+      );
     }
   }
 }

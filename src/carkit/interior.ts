@@ -1875,12 +1875,21 @@ class Cabin {
     // The live face 2 mm proud of the glass.
     addMirrorFace(pane, frame, centre, [0.095, 0.022], -0.016, 'inner');
 
-    // Sun visors lie flat under the headliner and swing down about their front edge.
+    // Sun visors lie flat under the headliner and swing down about their front edge. Under
+    // a soft top (`CabinSpec.softTop`) they hang from the windscreen frame's header bar
+    // instead, flat behind it with their underside at the glass's top and 5 cm behind the
+    // glass (the header's lining stands 3 cm behind it): the canvas rises `railRise` over
+    // the frame, and from under it a lowered visor covered none of the glass.
     for (const side of [1, -1]) {
       const name = side > 0 ? 'visor_l' : 'visor_r';
       const x = side * 0.34;
-      const y = this.dome(Math.abs(x) + 0.16, frontTop + 0.005) - 0.014;
-      const at = this.P(x, y, frontTop + 0.005);
+      let y = this.dome(Math.abs(x) + 0.16, frontTop + 0.005) - 0.014;
+      let s = frontTop + 0.005;
+      if (cab.softTop) {
+        y = glass(Math.abs(x) + 0.16, 'front')[1][1] - cab.screenHeader + 0.016;
+        s = glassS(x, y) + 0.05;
+      }
+      const at = this.P(x, y, s);
       fineDetail(this.hinge(this.group, ORIGIN, name, at, { channel: name, kind: 'rot', axis: [1, 0, 0], amount: -1.35 }, { id: name, label: `Козырёк ${WHERE[name.slice(-1)]}` }, (v) => {
         v.color(shade(this.lay.headliner, 0.92));
         v.pushAt(at);

@@ -153,12 +153,17 @@ Integration outside the folder:
   and of the glass, over the template's merged buffers (`attachKitDraw`), and its wheel
   set as one mesh (`CarModelInstance.wheelDraw`). `cloneWheels` rescales the pack's wheel
   sets to the kit tyre. Static clones (wrecks, couriers: `cloneStaticModel`) are the mid
-  shell, its panes as the tinted mirror and its wheels as one plain mesh: three draws.
+  shell, its panes as the tinted mirror and its wheels as one plain mesh: three draws. A
+  wreck's shell is cut round its bonnet and boot lid or tailgate (`kitStaticParts`), which
+  hang on the driven car's hinges with their controls (`hangStaticLids`, a draw each) and
+  are worked by render/staticlids.ts `StaticCarLids`; while one is open the cabin, bay and
+  boot draw from the merged buffer over a fixed skeleton (kitdraw.ts `kitRestSkeleton`).
   Mid traffic (`CarMidInstance`) draws the shut shell without its detail groups in the
   car's own one material (lenses lit by its own lamps) and its panes in its own glass,
   the wheels as instances (render/farcars.ts); `Vehicle.showMid` poses the rig far.
 - `render/kitdraw.ts`: the merge, `KitSkeleton` (the rig's nodes as bones),
-  `KIT_PICK_LAYER` (the parts the car was built of, kept as pick proxies).
+  `kitRestSkeleton`/`kitRestMesh` (chosen parts at rest, the rest folded, never written
+  again), `KIT_PICK_LAYER` (the parts the car was built of, kept as pick proxies).
 - `render/stickerdecals.ts`: decals on a moving part (`StickerDecalCarrier`: the nearest
   node with `kitMotion`) hang under that part in its shut frame, so a sticker on a door
   swings with it; `player/interaction.ts` `pickBody` places a sticker from the chassis
@@ -277,7 +282,7 @@ author.
 | `columns` | `CabinColumn[]` from the windscreen's base corner (the cowl) to the back light's base corner. Each column's `s` is also a tub column. The first column's `s` is the cowl; the last's is the rear base (`frame.rearBase`). |
 | `rail`, `railHalf` | Roof-rail height and half width (the top ring). |
 | `crown` | Roof crown on the centre line above the rail. |
-| `crownPower?` | How the crown falls across the roof: `crown · (1 − f^crownPower)` at fraction f of its half width. Default 2 (a parabola); the UAZ-2206 3 (flat middle, rolled into the gutters). |
+| `crownPower?` | How the crown falls across the roof: `crown · (1 − f^crownPower)` at fraction f of its half width. Default 2 (a parabola); the UAZ-2206 3 (flat middle, rolled into the gutters); the UAZ-469 20 (level across, rolled down only at its edges, the windscreen's top straight with it). |
 | `railInset`, `railRise` | The rail's chamfer onto the roof. |
 | `railBend?` | `[across, up]`: a row along that chamfer at those fractions of `railInset` / `railRise` from the rail, so the roof's edge turns into the side glass and the screens' headers in two facets (the Volgas and tens `[0.3, 0.6]`); its first facet never rises steeper than 95 % of the glass under it, and with it every twisted greenhouse and roof quad is cut on its convex diagonal (`buildShell` `quad`). Absent: one chamfer. Keep `roofDrop` convex (the roof rising ever less steeply from the screen) and do not combine it with a step `cornerDrop`: either folds the roof in behind the header (the tens' corner dents, 2026-10-16). |
 | `roofDrop?` | The roof's line in profile, `[s, drop]` points: everything at the roof at s (rail, its chamfer, the side glass's tops, the screen's and back light's tops, the roof's rows; the headliner, mirror, visors and wipers follow through `BodyFrame.roofDrop`) stands that much lower, linear between points, held beyond; every point between two columns' tops adds a row (`buildShell` inserts a ring entry). Keep the drop at a column's `top + railInset` no more than `railRise` over the drop at its `top`, or the roof dips under the screen's header. The Volgas' arched roofs, the tens' (whose screen top may come down only 0.02 before the 500 mm blades stop sweeping 90°). Absent: level. |

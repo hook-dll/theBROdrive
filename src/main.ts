@@ -47,7 +47,7 @@ import { ContractRuntime } from './contracts/runtime';
 import { ensureContractWorldObjects, type ContractWorldDeps } from './contracts/world';
 import type { ContractPlace } from './contracts/types';
 import { CarTowField } from './vehicle/cartow';
-import { Player } from './player/player';
+import { IMMOVABLE, Player } from './player/player';
 import { PlayerVitals } from './player/vitals';
 import { BirdFlock } from './agents/birds';
 import { TumbleweedField } from './agents/tumbleweed';
@@ -936,31 +936,22 @@ async function boot(): Promise<void> {
   };
 
   /**
-   * Which vehicle a struck rigid body belongs to, for the player's shove.
+   * What answers the player's lean on a struck rigid body: a football kicks, a live
+   * vehicle's chassis is `IMMOVABLE` (the player never pushes cars).
    *
    * A linear scan over the live vehicles, which is a handful: the streamer only keeps
-   * cars near the camera, and this runs at most once per fixed step and only while the
-   * capsule is actually pressed into something dynamic. A handle map would have to be
-   * maintained through every spawn, despawn and rebuild for no measurable gain.
+   * cars near the camera, and this runs only while the capsule is actually pressed
+   * into something dynamic. A handle map would have to be maintained through every
+   * spawn, despawn and rebuild for no measurable gain.
    *
-   * Bodies with no owner here — loose parts, jerry cans, wreck shells — get the player's
-   * direct impulse instead, which is the right answer for them: nothing pins them, so
-   * nothing has to lift a pin.
+   * Bodies with no owner here — loose parts, jerry cans — get the player's direct
+   * impulse instead.
    */
   player.setShoveLookup((bodyHandle) => {
     const football = loose.shoveableForBody(bodyHandle);
     if (football) return football;
     for (const vehicle of vehicles.values()) {
-      if (vehicle.chassis.handle === bodyHandle) return vehicle;
-    }
-    return null;
-  });
-
-  player.setNearbyShove((x, y, z, radius, moveX, moveZ, seconds) => {
-    for (const vehicle of vehicles.values()) {
-      if (vehicle.tryShoveFromSphere(x, y, z, radius, moveX, moveZ, seconds)) {
-        return vehicle.chassis.handle;
-      }
+      if (vehicle.chassis.handle === bodyHandle) return IMMOVABLE;
     }
     return null;
   });
@@ -2287,6 +2278,9 @@ async function boot(): Promise<void> {
     // its own, so it needs no interpolation and is placed after the cars moved.
     carTowField.syncVisuals();
     debris.syncVisuals();
+    // Roadside shells' lids the player opened or shut ease on the rendered frame, as a
+    // driven car's do.
+    wreckTrunks.syncVisuals(frameDt);
     // The camera has moved for this frame: the ground cover's pages take their range,
     // and in the Clean style the pages whose every tuft is under a few pixels go too.
     streamer.syncLod(

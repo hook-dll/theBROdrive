@@ -6,14 +6,15 @@ A POI is a silent client rather than an NPC. The building communicates through c
 
 ## Scope
 
-The first catalogue contains 50 designer, architectural, and street Japanese toilet variants. They supplement existing POIs and remain low-poly. Each variant is one service cabin inside one of a small set of plan families (see "Families"), with data-driven dimensions, fixtures, palette, face, and scenario. A new variant MUST NOT require a new interaction implementation unless it introduces a genuinely new verb.
+The first catalogue contains 50 designer, architectural, vernacular and street Japanese toilet variants. They supplement existing POIs and remain low-poly. Each variant is one service cabin inside one of a small set of plan families (see "Families"), read at one of eight layouts (see "Layouts"), with data-driven dimensions, fixtures, palette, face, and scenario. A new variant MUST NOT require a new interaction implementation unless it introduces a genuinely new verb.
 
-Thematic mix to aim the 50 at: compact Japanese pavilion (10), station/parking (8), concrete/minimal (8), park/trail (8), sculptural/designer (10), desert adaptations (6). Themes pick buildings; families draw them.
+Thematic mix to aim the 50 at: compact Japanese pavilion (10), station/parking (8), concrete/minimal (8), park/trail (8), sculptural/designer (10), desert adaptations (6). Themes pick buildings; layouts pick scale and siting; families draw them.
 
 ## Code layout
 
-- `src/world/toilets/types.ts`: `ToiletVariant`, `ToiletShellSpec`, `ToiletForm` (the family and its parameters), `ToiletAnnex`, `ToiletFixtureSpec`, `ToiletScenario`, `ToiletState`, `ToiletFaceSpec`.
+- `src/world/toilets/types.ts`: `ToiletVariant`, `ToiletShellSpec`, `ToiletForm` (the family and its parameters), `ToiletLayoutKind`, `ToiletHost`, `ToiletAnnex`, `ToiletFixtureKind`, `TOILET_SCENARIO_FIXTURES`, `ToiletState`, `ToiletFaceSpec`.
 - `src/world/toilets/catalog.ts`: the stable 50-entry catalogue and source IDs.
+- `src/world/toilets/layouts.ts`: `TOILET_LAYOUTS`, one rule per layout (families, sealed volumes, span, hosted, planned share); `toiletAnnexCount`.
 - `src/world/toilets/geometry.ts`: the service cabin (walls, door, interior, optional drum wrap), its fixture layout and the authored footprint; low-poly meshes only.
 - `src/world/toilets/families.ts`: the plan families around the cabin, each with a footprint twin.
 - `src/world/toilets/parts.ts`: shared parts: roofs over a rectangle or a drum, the drum wrap, sealed annex booths, louvres, columns, the `Reach` footprints are summed from.
@@ -64,6 +65,49 @@ Facts only: no image, drawing or text is reproduced. Every entry's cards are in 
 | `toilet-ito-yoyogi-hachiman` | Yoyogi-Hachiman, 2021 | Toyo Ito | `cluster` + `drum` | [official](https://tokyotoilet.jp/en/yoyogi_hachiman/) | Three cylinders like mushrooms in a row, circulation between them, round roofs that look as if they float; a tile gradation, drawn as three shades |
 | `toilet-yanoaoyama-tobe-zoo` | Tobe Zoological Park, Ehime, 2026 | Yano Aoyama Architecture Design | `canopy` | [Dezeen](https://www.dezeen.com/2026/07/25/yano-aoyama-architecture-design-tobe-zoo-toilet/) | Two 2 x 2 m cubes of chiselled precast concrete blocks under a 12 m cross-laminated cedar canopy deflected into a bowed curve, on slender steel columns along its edges |
 
+## Layouts
+
+A layout is the scale and siting the player reads on arrival, across families: the same `eave` draws a pavilion over one cabin or a station block over ten booths. Each variant names one (`ToiletVariant.layout`); `layouts.ts` holds its rule and toilet-check holds every variant to it. The planned shares sum to the fifty.
+
+| Layout | Reads as | Families | Sealed volumes | Span (m) | Planned | Drawn |
+|---|---|---|---|---|---|---|
+| `single` | One cabin on its own: kiosk, park booth, roadside box | `cabin` | 0 | ≤ 6 | 9 | NIGO Jingumae, Newson Urasando, Wonderwall Ebisu Park |
+| `pavilion` | One cabin in a small open gesture: a wall, an eave, a canopy | `vessel`, `eave`, `canopy` | 0-1 | ≤ 16 | 8 | Fujimoto Nishisando, Yano Aoyama Tobe Zoo |
+| `row` | Rooms side by side in one line under one roof | `row` | 1-4 | ≤ 14 | 6 | Ban Fukamachi |
+| `cluster` | Separate huts about the cabin | `cluster` | 2-6 | ≤ 16 | 6 | Kuma Nabeshima, Ito Yoyogi-Hachiman |
+| `circular` | A round plan: a ring, a drum court, a round eave | `eave`, `vessel` | 0-4 | ≤ 12 | 5 | Ando Jingu-Dori Park |
+| `large-public` | Many booths under one large cover: station, park block, service area | `row`, `cluster`, `eave`, `canopy` | 3-10 | ≤ 24 | 4 | Kobayashi Sasazuka Greenway |
+| `facility-attached` | An outbuilding of a non-toilet POI (a dwelling or a mast) | `cabin`, `row` | 0-1 | ≤ 6 | 6 | Minka outhouse |
+| `desert-autonomous` | Off-grid in the open desert: its own tank, pump and light | `cabin`, `cluster`, `canopy` | 0-2 | ≤ 12 | 6 | none yet |
+
+Span is the longest side of the authored footprint. A `large-public` layout of more than four booths, or a `desert-autonomous` one with a visible tank, may need a family parameter that does not exist yet (a booth grid, a raised tank); it gets one, never a new interaction.
+
+### Attached to a host
+
+A `facility-attached` toilet belongs to an existing non-toilet POI and is still its own catalogue entry, with its own id, shell, fixtures and save record. `ToiletVariant.host` names the host's id in `world/poistructures.ts` `POI_STRUCTURES` and places the toilet in the host's frame (`at`, `yaw`; front at -Z). Only an attached layout has a host, and it always has one.
+
+- The host's building is not changed: the toilet is an outbuilding on the host's plot, never a room cut into the host's merged shell. The dwellings are exterior-only (`world/dwellings`), so a toilet inside one would need a second interior model.
+- The toilet stands at least 1 m (a walkway) clear of the host's authored footprint and at most 6 m from it, and the 1.5 m approach straight out of its door leads away from the host.
+- Placement is the world's job, not the catalogue's: when toilets are placed, an attached one is placed with its host's POI, in the host's frame, and the host's lay-by and keep-out grow by the toilet's footprint. Until then it stands alone in the gallery.
+
+First attached entry: `toilet-minka-outhouse`, a board-walled outhouse with a hōgyō roof beside the `minka` dwelling's right gable, a squat pan retrofitted with a cistern flush and a valve. Sources: [Toilets in Japan](https://en.wikipedia.org/wiki/Toilets_in_Japan) (the toilet historically stood outside the house; older rural buildings often have only squat toilets, whose tank, piping and flush may be those of a Western toilet) and [Minka](https://en.wikipedia.org/wiki/Minka) (the hōgyō roof; boards for walls where clay was scarce). Facts only, accessed 2026-10-17.
+
+## Visual and interactive volume
+
+Every variant, at every layout, has two volumes.
+
+- **Interactive volume**: the one service cabin (`geometry.ts`) the player enters, its door at -Z, its fixtures, lamp, mirror and face (`rig.ts`). Its size is bounded by the cabin's own minimums (2.2 x 2.2 x 2.4 m) and does not grow with the layout: a ten-booth station still has one cabin to fix. Everything the save, the scenario and the rig touch is in it.
+- **Visual volume**: everything the family and the layout add around it: sealed rooms, huts, booths and cubes (each a solid with a closed door), covers, columns, louvres, the vessel, screens, fences. It is static kit geometry merged with the shell, has no fixtures, lights, reflections or state, and sets the footprint and the layout's span.
+
+Scale therefore costs triangles and draws, never mechanics: a larger layout is more sealed volumes, and toilet-check's merge gate (at most 40 draws after merging) bounds it. A sealed volume MUST NOT become enterable without becoming a second cabin with its own fixtures, state and save record; that is a new model, not a larger layout.
+
+## Shared fixture and scenario contract
+
+- **Fixtures** are a closed set (`ToiletFixtureKind`: `door`, `valve`, `flush`, `lid`, `plunger`, `floor-dirt`), each with one builder in `fixtures.ts`, placed by the cabin's fixture layout (`toiletLayout` in `geometry.ts`), never by a family or a layout. A variant lists the fixtures it carries; the `lid` goes with a washlet bowl and only with one.
+- **Scenarios** are data keyed by `ToiletScenarioId`. `TOILET_SCENARIO_FIXTURES` names the fixtures each one acts on; a variant carries at least those for the scenario it opens with (toilet-check holds it). `clogged-drain` acts on `door`, `valve`, `plunger`, `flush`, `floor-dirt`, so it runs on a squat pan as well as a washlet.
+- **A layout never adds a fixture or a verb.** A desert-autonomous toilet's pump or tank, when built, is a new fixture kind with its own builder and the scenario that needs it, usable by every layout.
+- **Save and state** stay per cabin (`state.ts`): an attached toilet saves under its own variant id, and its host's state (looted flags, wrecks) is untouched by it.
+
 ## Runtime model
 
 A toilet state is one of `arrived`, `inspected`, `repairing`, `cleaning`, `testing`, `healthy`. A fixture exposes typed actions: `open`, `close`, `turn`, `press`, `pull`, `slide`, `insert`, `pour`, `pump`, and `wipe`. Scenarios validate action order and object state, not menu choices.
@@ -104,8 +148,10 @@ Foundation, 2026-10-17. Built: `types.ts`, `catalog.ts`, `geometry.ts` (the serv
 
 First architectural wave, 2026-10-17: `families.ts` and `parts.ts` (the six families above) and the catalogue at 10 of 50 (see "First-wave sources"). Ban Fukamachi became a `row` of three rooms and Kuma Nabeshima a `cluster` of five huts in cedar louvres (the `battens` dressing is gone); Fujimoto Nishisando, Kobayashi Sasazuka Greenway, Ando Jingu-Dori Park, Ito Yoyogi-Hachiman and Yano Aoyama Tobe Zoo are new. Ids of the first five are unchanged. Merged shells are 14-22 draws and 0.6-3k triangles each.
 
+Layouts, 2026-10-17: `layouts.ts` and the `layout`/`host` fields; every first-wave entry classified (see "Layouts"), ids unchanged; `TOILET_SCENARIO_FIXTURES`; the first attached entry, `toilet-minka-outhouse`, at 11 of 50. The catalogue draws 7 of the 8 layouts; `desert-autonomous` has no entry yet.
+
 The shells are POI kit variants (`world/poi-variants.ts`) and go through `world/poivariantbuild.ts` like the masts; the world neither places nor warms them yet. The gallery API is `window.__poiGallery`: `focus(id)`, `overview()`, `roofs(visible)`, `setTime(hours)`, `inspect(id)`, `state(id, state)`, `reset(id)`, `complete(id)`, `activate(id, fixture, verb?)`, `emotion(id, emotion)`, `snapshot()`, `restore(records)`, `stats()`, `capture()`.
 
-Not built yet: `scenarios.ts` (action order, wrong-order consequences; state poses in `rig.ts` stand in for the clogged-drain visit), `sounds.ts`, the remaining 40 variants (no family yet for a sphere, as at Nanago Dori Park, or for a lit panel ring, as at Ebisu Park), world placement and a stable POI id, game-save integration (a `WorldState` field and migration), player interaction (raycast on `toiletFixture`), boot program anchors for the toilet materials, the lamp light slots and the mirror pass in the game renderer. The first-wave shells have not been looked at in the gallery yet.
+Not built yet: `scenarios.ts` (action order, wrong-order consequences; state poses in `rig.ts` stand in for the clogged-drain visit), `sounds.ts`, the remaining 39 variants (no family yet for a sphere, as at Nanago Dori Park, or for a lit panel ring, as at Ebisu Park; no booth grid for a large public block; no tank or pump fixture for a desert-autonomous toilet), world placement and a stable POI id (an attached toilet placed with its host, the host's lay-by and keep-out grown for it), the gallery showing an attached toilet beside its host, game-save integration (a `WorldState` field and migration), player interaction (raycast on `toiletFixture`), boot program anchors for the toilet materials, the lamp light slots and the mirror pass in the game renderer. The first-wave shells and the minka outhouse have not been looked at in the gallery yet.
 
-Gates without a browser: `nice -n 15 bun tools/toilet-check.ts` (catalogue, merge, placement, z-fighting, fixtures, lamp, mirror camera, determinism, save/load, face, families). The rendered mirror, day/night look and shader-program growth are checked in the gallery (`__poiGallery.stats().programs`).
+Gates without a browser: `nice -n 15 bun tools/toilet-check.ts` (catalogue and scenario fixtures, merge, placement, z-fighting, fixtures, lamp, mirror camera, determinism, save/load, face, families, layouts and hosts). The rendered mirror, day/night look and shader-program growth are checked in the gallery (`__poiGallery.stats().programs`).

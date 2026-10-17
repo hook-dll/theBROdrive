@@ -101,8 +101,16 @@ export const BODY_UAZ469: KitBody = {
     rail: 1.68,
     railHalf: 0.8, // the frames ±0.77, the canvas over them ±0.80 [D front]
     // The canvas' sides rise 0.14 over the frames to its roof's edge (1.82) and crown to
-    // 1.93 [D front: the hard top's 1.82 / 1.93; P the canvas the same height].
+    // 1.93 [D front: the hard top's 1.82 / 1.93; P the canvas the same height]. The top is
+    // flat across, not arched: level at 1.93 to ±0.64, rolled down 1.923 / 1.91 / 1.89 /
+    // 1.86 at ±0.66 / 0.69 / 0.71 / 0.74 [D front, uaz2.jpg front view rows 89-117 at
+    // 4.33 mm/px]; the canvas over the bows straight across with small rolled corners and
+    // the windscreen frame's top bar straight [P the owner's four fronts, hdpic.club
+    // "uaz-speredi" 1, 4, 12, 48]. `crownPower` 20 puts the roof's pillar row (±0.69) at
+    // 1.91 and the screen's top at 1.79 across to 1.77 at the pillar row (was a parabola:
+    // 1.84 / 1.70).
     crown: 0.11,
+    crownPower: 20,
     railInset: 0.05,
     railRise: 0.14,
     railBend: [0.3, 0.75],

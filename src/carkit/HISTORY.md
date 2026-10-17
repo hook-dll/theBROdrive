@@ -778,6 +778,22 @@ amplified differences; `bench-*.json`, `pick-*.json`).
   out and back into the head at s 1.45 (was 1.415); both glasses seen whole through the
   door glass, the left one 4° under the eye in the straight-ahead view. *spec.ts,
   exterior.ts `buildDoorHardware`, uaz.ts; measurements-uaz.md §1.2*.
+- **UAZ-469: the sun visors too high to shield the sun; is the roof flat? (owner).** → The
+  roof's crown was a parabola from the edge (1.82 at ±0.75) to the centre (1.93): 1.84 at
+  the pillar row (±0.69), and the windscreen's top arched with it, 1.79 in the middle and
+  1.70 at the pillar row. The 3151 front view (`uaz2.jpg`) is level at 1.93 to ±0.64 and
+  rolls down only in its last 0.13 (1.91 at ±0.69); the owner's four front photos show the
+  canvas straight across over the bows with small rolled corners and the frame's top bar
+  straight. No sag across or between the bows on the photos: the canvas is stretched.
+  `crownPower` 20: the roof 1.93 to ±0.64, 1.91 at the pillar row; the screen's top 1.79
+  across, 1.77 at the pillar row; height and bounds unchanged, 11 309 → 11 260 triangles
+  (the flat runs merge). The visors lay under the canvas, which rises 0.14 over the
+  windscreen frame: their pivot 1.84, 12 cm over the glass's top there (1.72); lowered,
+  their bottom edge stood 26° over the eye and the glass's top 25° (now 27°): they covered
+  no glass. Under a soft top they now hang from the frame's header bar: pivot 1.756, 5 cm
+  behind the glass, stowed 1.74-1.756 (30° over the eye, clear of the glass); lowered to
+  1.60, its edge 18.5° over the eye, shading the glass's top 14 cm (the sun from 18.5° to
+  27°). *uaz.ts, interior.ts `headliner`, spec.ts; measurements-uaz.md §1.3, §1.7, §1.8*.
 
 ## Failed approaches (do not retry)
 
