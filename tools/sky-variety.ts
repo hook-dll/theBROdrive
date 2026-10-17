@@ -19,6 +19,10 @@
  *    overlap, small lobes sunk in) with no lobe stretched upward into a point; bases from
  *    1 to 3.5 km on one line per district; a cover of 10-20% that is NOT even (clear
  *    stretches, crowded ones) and clouds that clump rather than sprinkle;
+ *  - FROM BELOW, A CLOUD AND NOT A SLAB: the flat cut at the base is a core inside the
+ *    outline, every lobe's bottom pressed into the base plane or clear of it (no faces
+ *    a few metres apart to fight for depth), and no cloud so long for its base that it
+ *    spans much over a hundred degrees from right under it;
  *  - EVERY CLOUD HAS ITS SHADOW, up the sun's ray from the ground it darkens, at noon and
  *    under an afternoon sun, and the shadow's edge is a penumbra, not a line;
  *  - a storm brings more and bigger clouds;
@@ -247,6 +251,99 @@ console.log('clouds');
     'bases span 1 to 3.5 km, one line per district',
     lowBase < 1100 && highBase > 3300 && (spreads[spreads.length >> 1] ?? 1e9) < 200,
     `${lowBase.toFixed(0)}..${highBase.toFixed(0)} m, median spread in a 2 km cell ${(spreads[spreads.length >> 1] ?? 0).toFixed(0)} m`,
+  );
+}
+
+// -- the underside, and the sky right overhead ----------------------------------------
+
+{
+  // How far render/clouds.ts's `LUMP` moves a corner along its radius, either way.
+  const LUMP = 0.08;
+  // The highest of a detail-2 icosphere's lowest rings of corners, as the mesh builds it.
+  const ico = new THREE.IcosahedronGeometry(1, 2).getAttribute('position');
+  let lowRing = -1;
+  for (let v = 0; v < ico.count; v++) if (ico.getY(v) < -0.84) lowRing = Math.max(lowRing, ico.getY(v));
+  const N = 48;
+  const shares: number[] = [];
+  let hovering = 0;
+  let lobes = 0;
+  let widest = 0;
+  let widestAt = '';
+  for (const seed of SEEDS) {
+    const set = cloudSet(seed);
+    for (let i = 0; i < set.count; i++) {
+      if (cloudGrow(set, i, 0) < 1) continue;
+      const o0 = i * CLOUD_SLOTS * BLOB_FLOATS;
+      let along = 0;
+      for (let j = 0; j < CLOUD_SLOTS; j++) {
+        const o = o0 + j * BLOB_FLOATS;
+        if (set.blobs[o + 3]! <= 0) continue;
+        along = Math.max(along, Math.hypot(set.blobs[o]!, set.blobs[o + 2]!) + Math.max(set.blobs[o + 3]!, set.blobs[o + 5]!));
+        if (j >= CLOUD_BIG_SLOTS) continue;
+        // A big lobe's lowest rings are pressed into the base whatever the lump, or its
+        // bottom stands well clear of it: never a face a few metres over another's cut.
+        lobes++;
+        const cy = set.blobs[o + 1]!;
+        const ry = set.blobs[o + 4]!;
+        const clamped = cy + lowRing * (1 - LUMP) * ry <= 0;
+        const clear = cy - (1 + LUMP) * ry > Math.max(25, 0.15 * ry);
+        if (!clamped && !clear) hovering++;
+      }
+      // From right under it: the flat cut against the whole outline the cloud shows.
+      const reach = set.reach[i]!;
+      let cut = 0;
+      let outline = 0;
+      for (let a = 0; a < N; a++) {
+        for (let b = 0; b < N; b++) {
+          const px = ((a + 0.5) / N * 2 - 1) * reach;
+          const pz = ((b + 0.5) / N * 2 - 1) * reach;
+          let inCut = false;
+          let inOutline = false;
+          for (let j = 0; j < CLOUD_SLOTS && !(inCut && inOutline); j++) {
+            const o = o0 + j * BLOB_FLOATS;
+            if (set.blobs[o + 3]! <= 0) continue;
+            const dx = px - set.blobs[o]!;
+            const dz = pz - set.blobs[o + 2]!;
+            const c = set.blobs[o + 6]!;
+            const s = set.blobs[o + 7]!;
+            const lx = (c * dx + s * dz) / set.blobs[o + 3]!;
+            const lz = (-s * dx + c * dz) / set.blobs[o + 5]!;
+            const cy = set.blobs[o + 1]!;
+            const ry = set.blobs[o + 4]!;
+            // Widest at its centre's height, or at the base if the centre is below it.
+            const ly = (Math.max(cy, 0) - cy) / ry;
+            if (lx * lx + lz * lz + ly * ly < 1 && cy + ry > 0) inOutline = true;
+            if (cy < ry && lx * lx + lz * lz + (cy / ry) ** 2 < 1) inCut = true;
+          }
+          if (inCut) cut++;
+          if (inOutline) outline++;
+        }
+      }
+      shares.push(cut / Math.max(1, outline));
+      const span = (2 * Math.atan(along / set.base[i]!) * 180) / Math.PI;
+      if (span > widest) {
+        widest = span;
+        widestAt = `${(2 * along / 1000).toFixed(1)} km on a ${(set.base[i]! / 1000).toFixed(1)} km base`;
+      }
+    }
+  }
+  shares.sort((a, b) => a - b);
+  const median = shares[shares.length >> 1] ?? 1;
+  const most = shares[shares.length - 1] ?? 1;
+  check(
+    'the base is a flat core inside the outline, not the whole underside',
+    median < 0.8 && most < 0.85,
+    `flat cut ${(median * 100).toFixed(0)}% of the outline seen from under the median cloud, ${(most * 100).toFixed(0)}% at most`,
+  );
+  check(
+    'no lobe hovers just over the base (a depth fight with its neighbour\'s cut)',
+    hovering === 0,
+    `${hovering}/${lobes} big lobes with a bottom neither pressed into the base nor clear of it`,
+  );
+  check(
+    'no cloud is a ceiling: from right under it, none spans much over 100 degrees',
+    widest < 110,
+    `widest ${widest.toFixed(0)} degrees, ${widestAt}`,
   );
 }
 

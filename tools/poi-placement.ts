@@ -568,7 +568,7 @@ const MAX_RESIDUAL_M = 0.6;
   const provider = new PoiProvider(
     { spawnItem: () => {}, spawnPart: () => {}, forget: () => {} } as never,
     { spawn: () => {}, forget: () => {} } as never,
-    { register: () => {}, forget: () => {} } as never,
+    { register: () => {}, attachLids: () => {}, forget: () => {} } as never,
     { register: () => {}, forget: () => {} } as never,
     roadDistance,
   );

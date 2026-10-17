@@ -82,9 +82,9 @@ const direction = new THREE.Vector3(0, 0, 1);
 const rayHit: TrunkGridRayHit = { cell: -1, distance: 0 };
 let selectedAll = true;
 for (let cell = 0; cell < TRUNK_CELL_COUNT; cell++) {
-  storageCellBox(cell, shape, 'trunk', false, centre, size);
+  storageCellBox(cell, shape, 'trunk', centre, size);
   eye.copy(centre).addScaledVector(direction, -1);
-  if (!intersectStorageGrid(eye, direction, shape, 'trunk', false, rayHit) || rayHit.cell !== cell) {
+  if (!intersectStorageGrid(eye, direction, shape, 'trunk', rayHit) || rayHit.cell !== cell) {
     selectedAll = false;
   }
 }
@@ -94,7 +94,7 @@ check('aim ray selects all eight cells', selectedAll, selectedAll ? '0..7 exact'
 // left is +X: cell 1 must sit there and each next cell further right (lower X).
 const trunkXs: number[] = [];
 for (let cell = 0; cell < TRUNK_CELL_COUNT; cell++) {
-  storageCellBox(cell, shape, 'trunk', false, centre, size);
+  storageCellBox(cell, shape, 'trunk', centre, size);
   trunkXs.push(centre.x);
 }
 const leftToRight = [0, 1, 2, 4, 5, 6].every((cell) => trunkXs[cell]! > trunkXs[cell + 1]!);

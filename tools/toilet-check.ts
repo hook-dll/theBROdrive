@@ -4,8 +4,8 @@
  *
  *   nice -n 15 ~/.bun/bin/bun tools/toilet-check.ts
  *
- *  1. catalogue: stable unique ids, every variant registered as a POI variant, source
- *     cards complete;
+ *  1. catalogue: stable unique ids, every variant registered as a POI variant, carrying
+ *     every fixture its scenario acts on, source cards complete;
  *  2. merge: the world's cached instance (world/poivariantbuild.ts) is the merged gallery
  *     form, mesh for mesh and roof for roof, within 1 cm, in few draws;
  *  3. placement: stands on the ground, inside its authored footprint, door clear of its
@@ -26,7 +26,11 @@
  *     cabin, its drum, every annex) interpenetrate and each annex stands on its plinth;
  *     columns stand clear of every volume and of the door's swing; every column and
  *     louvre is carried by its cover and every cover clears everything under it; the
- *     approach to the door is open (only a marked screen may stand across it).
+ *     approach to the door is open (only a marked screen may stand across it);
+ * 12. layouts: the planned shares sum to the fifty; each variant's family, sealed
+ *     volumes and footprint span are ones its layout allows; a host exactly where the
+ *     layout is attached, a real POI structure, the toilet a walkway clear of its
+ *     footprint and still on its plot, the door's approach leading away from it.
  *
  * What still needs the browser (gallery `window.__poiGallery`): the rendered mirror, the
  * day/night look and no shader-program growth while fixtures and states change.
@@ -35,14 +39,16 @@
 import * as THREE from 'three';
 import { aimMirrorCamera } from '../src/render/mirrorview';
 import { createPoiVariant, mergePoiStatics, poiVariantIndex } from '../src/world/poi-variants';
+import { POI_STRUCTURES } from '../src/world/poistructures';
 import { createVariantInstance } from '../src/world/poivariantbuild';
 import { TOILET_VARIANTS } from '../src/world/toilets/catalog';
 import { toiletFootprint, toiletLayout, type ToiletLayout } from '../src/world/toilets/geometry';
 import { MIRROR_FAR } from '../src/world/toilets/mirror';
 import { ToiletRig } from '../src/world/toilets/rig';
 import { completeToilet, decodeToiletProgress, encodeToiletProgress, newToiletProgress, withToiletState } from '../src/world/toilets/state';
+import { TOILET_LAYOUTS, toiletAnnexCount, toiletLayoutRule } from '../src/world/toilets/layouts';
 import { drumCentreZ, PLINTH } from '../src/world/toilets/parts';
-import { TOILET_EMOTIONS, TOILET_FAMILIES, TOILET_STATES, type ToiletVariant } from '../src/world/toilets/types';
+import { TOILET_EMOTIONS, TOILET_FAMILIES, TOILET_SCENARIO_FIXTURES, TOILET_STATES, type ToiletVariant } from '../src/world/toilets/types';
 import { boxCandidates, coplanarFaces, nearDuplicatePanels } from './poizfight';
 
 const failures: string[] = [];
@@ -95,6 +101,7 @@ function posedRig(variant: ToiletVariant, state: (typeof TOILET_STATES)[number])
     check(registered, `${variant.id}: not registered in POI_VARIANTS`);
     check(new Set(variant.fixtures).size === variant.fixtures.length, `${variant.id}: a fixture is listed twice`);
     check(variant.fixtures.includes('lid') === (variant.bowl === 'washlet'), `${variant.id}: a lid goes with a washlet bowl and only with one`);
+    for (const fixture of TOILET_SCENARIO_FIXTURES[variant.scenario]) check(variant.fixtures.includes(fixture), `${variant.id}: the ${variant.scenario} scenario acts on a ${fixture} it does not carry`);
     check(variant.sources.length > 0, `${variant.id}: no source card`);
     for (const card of variant.sources) {
       check(card.url.startsWith('https://'), `${variant.id}: source url ${card.url}`);
@@ -463,8 +470,7 @@ function posedRig(variant: ToiletVariant, state: (typeof TOILET_STATES)[number])
     const covers = parts('cover');
     const columns = parts('column');
     const fins = parts('louvre');
-    const listed =
-      form.family === 'row' ? form.rooms.length : form.family === 'cluster' ? form.huts.length : form.family === 'eave' ? form.booths.length : form.family === 'canopy' ? form.cubes.length : 0;
+    const listed = toiletAnnexCount(form);
     check(annexes.length === listed, `${variant.id}: ${annexes.length} annexes built for ${listed} catalogued`);
     const coverWanted = form.family === 'eave' || form.family === 'canopy' ? 1 : 0;
     check(covers.length === coverWanted, `${variant.id}: ${covers.length} covers built for ${coverWanted}`);
@@ -551,6 +557,59 @@ function posedRig(variant: ToiletVariant, state: (typeof TOILET_STATES)[number])
     check(blocked === null, `${variant.id}: the approach to the door is blocked ${blocked}`);
   }
   console.log(`  ${used.size} of ${TOILET_FAMILIES.length} families drawn; ${annexCount} annexes, ${columnCount} columns, ${louvreCount} louvres placed, carried and clear`);
+}
+
+// --- 12. layouts and hosts ------------------------------------------------------------
+{
+  /** Clear ground between an attached toilet's footprint and its host's, metres. */
+  const HOST_WALKWAY = 1;
+  /** Farthest an attached toilet may stand from its host's footprint and still be on its plot. */
+  const HOST_PLOT = 6;
+  /** How far out from the doorway its approach is held clear of the host. */
+  const APPROACH = 1.5;
+  const planned = TOILET_LAYOUTS.reduce((sum, rule) => sum + rule.planned, 0);
+  check(planned === 50, `the layouts plan ${planned} entries, not the catalogue's fifty`);
+  check(new Set(TOILET_LAYOUTS.map((rule) => rule.kind)).size === TOILET_LAYOUTS.length, 'a layout is listed twice');
+  const drawn = new Map<string, number>();
+  let hosted = 0;
+  for (const variant of TOILET_VARIANTS) {
+    const rule = toiletLayoutRule(variant.layout);
+    drawn.set(rule.kind, (drawn.get(rule.kind) ?? 0) + 1);
+    const { form } = variant.shell;
+    check(rule.families.includes(form.family), `${variant.id}: the ${form.family} family does not draw a ${rule.kind} layout`);
+    const annexes = toiletAnnexCount(form);
+    check(annexes >= rule.annexes[0] && annexes <= rule.annexes[1], `${variant.id}: ${annexes} sealed volumes, where a ${rule.kind} layout has ${rule.annexes[0]}-${rule.annexes[1]}`);
+    const [fx, fz] = toiletFootprint(variant.shell);
+    check(Math.max(fx, fz) <= rule.span, `${variant.id}: spans ${Math.max(fx, fz).toFixed(2)} m, over the ${rule.span} m of a ${rule.kind} layout`);
+    const { host } = variant;
+    check((host !== undefined) === rule.hosted, `${variant.id}: ${rule.hosted ? 'an attached layout without a host' : `a host on a ${rule.kind} layout`}`);
+    if (!host) continue;
+    hosted++;
+    const structure = POI_STRUCTURES.find((candidate) => candidate.id === host.structure);
+    if (!structure) {
+      check(false, `${variant.id}: host ${host.structure} is not a POI structure`);
+      continue;
+    }
+    const hx = structure.footprint[0] / 2;
+    const hz = structure.footprint[1] / 2;
+    const cos = Math.cos(host.yaw);
+    const sin = Math.sin(host.yaw);
+    // The toilet's footprint turned by its yaw, as a box in the host's frame.
+    const halfX = (Math.abs(cos) * fx + Math.abs(sin) * fz) / 2;
+    const halfZ = (Math.abs(sin) * fx + Math.abs(cos) * fz) / 2;
+    const [ax, az] = host.at;
+    const gap = Math.max(Math.abs(ax) - halfX - hx, Math.abs(az) - halfZ - hz);
+    check(gap >= HOST_WALKWAY, `${variant.id}: stands ${gap.toFixed(2)} m from ${host.structure}'s footprint, under the ${HOST_WALKWAY} m walkway`);
+    check(gap <= HOST_PLOT, `${variant.id}: stands ${gap.toFixed(2)} m from ${host.structure}'s footprint, off its ${HOST_PLOT} m plot`);
+    // Straight out of the doorway, in the host's frame (a turn about +Y, as three.js turns).
+    const { door } = toiletLayout(variant);
+    const x = door.hingeX + door.width / 2;
+    const z = -variant.shell.depth / 2 - APPROACH;
+    const px = ax + cos * x + sin * z;
+    const pz = az - sin * x + cos * z;
+    check(Math.abs(px) > hx || Math.abs(pz) > hz, `${variant.id}: the approach to the door leads into ${host.structure}'s footprint`);
+  }
+  console.log(`  layouts drawn of planned: ${TOILET_LAYOUTS.map((rule) => `${rule.kind} ${drawn.get(rule.kind) ?? 0}/${rule.planned}`).join(', ')}; ${hosted} attached to a host`);
 }
 
 if (failures.length > 0) {

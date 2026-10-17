@@ -49,7 +49,7 @@ const noLoose = {
   forget: () => {},
 } as unknown as LoosePartField;
 const noTrailers = { spawn: () => {}, forget: () => {} } as unknown as TrailerField;
-const noWreckTrunks = { register: () => {}, forget: () => {} } as unknown as WreckTrunkField;
+const noWreckTrunks = { register: () => {}, attachLids: () => {}, forget: () => {} } as unknown as WreckTrunkField;
 const noCouriers = { register: () => {}, forget: () => {} } as unknown as CourierField;
 
 const roadDistance = new RoadDistance(road);
