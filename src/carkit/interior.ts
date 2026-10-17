@@ -2274,6 +2274,14 @@ class Cabin {
     inlay(b.color(COLOURS.dial), 'trim', [[-0.05, 0.002, 0.012], [0.05, 0.002, 0.012], [0.05, 0.02, 0.012], [-0.05, 0.02, 0.012]]);
     b.color(COLOURS.black).cylinderZ('chrome', [0.07, -0.008, 0.017], 0.01, 0.005, 8);
     b.pop();
+    // The display is a separate, very dim face: it slides out only when the radio is
+    // on, matching the instrument panel's lit-face convention without a new light.
+    const displayAt = m.at(0, 0.011, 0.013);
+    fineDetail(this.hinge(this.group, ORIGIN, 'radio_display', displayAt, { channel: 'radio', kind: 'pos', axis: m.n, amount: 0.001 }, undefined, (d) => {
+      d.push(m.matrix).color(PANEL_TICK);
+      d.quad('lamp_glow', [-0.05, 0.003, 0.013], [0.05, 0.003, 0.013], [0.05, 0.019, 0.013], [-0.05, 0.019, 0.013]);
+      d.pop();
+    }));
     // The needle 3.5 mm off the dial, so the two do not fight in depth from outside.
     const needleAt = m.at(-0.045, 0.011, 0.0155);
     fineDetail(this.hinge(this.group, ORIGIN, 'radio_needle', needleAt, { channel: 'radio_tune', kind: 'pos', axis: m.u, amount: 0.09 }, undefined, (n) => {
