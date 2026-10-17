@@ -2279,7 +2279,7 @@ class Cabin {
     const displayAt = m.at(0, 0.011, 0.013);
     fineDetail(this.hinge(this.group, ORIGIN, 'radio_display', displayAt, { channel: 'radio', kind: 'visible', axis: [0, 0, 0], amount: 1 }, undefined, (d) => {
       d.push(m.matrix).color(COLOURS.dial);
-      d.quad('lamp_glow', [-0.05, 0.003, 0.013], [0.05, 0.003, 0.013], [0.05, 0.019, 0.013], [-0.05, 0.019, 0.013]);
+      d.quad('lamp_glow', [-0.05, 0.003, 0.017], [0.05, 0.003, 0.017], [0.05, 0.019, 0.017], [-0.05, 0.019, 0.017]);
       d.pop();
     }));
     // The needle 3.5 mm off the dial, so the two do not fight in depth from outside.
