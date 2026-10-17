@@ -21,9 +21,10 @@ import { hashUnit2, hashUnit3, mulberry32 } from '../core/rng';
  * `CLOUD_PERIOD_M` (so the field can be panned modulo the period like every other
  * world-anchored effect, render/cloudshadow.ts). A coarse "district" noise sets how
  * cloudy each stretch of sky is: about a third of the districts are clear or nearly so,
- * a few are crowded. Each cell then draws up to `CANDIDATES` clouds, scattered around a
- * per-cell group centre or anywhere in the cell, so a cloudy district holds groups and a
- * clear one a stray puff: no lattice survives because nothing sits on one.
+ * a few are crowded. Each cell then draws up to `CANDIDATES` clouds, strung along the
+ * wind from a per-cell group centre or anywhere in the cell, so a cloudy district holds
+ * a street of long rafts and a clear one nothing: no lattice survives because nothing
+ * sits on one.
  *
  * THE WEATHER. Every candidate has a rank; a cell shows the candidates whose rank is
  * under its cover (`cloudCover`), and a storm raises the cover, so more clouds appear,
@@ -61,22 +62,40 @@ export const CLOUD_CEILING_M = 5_800;
 /** Lowest cloud base, metres. */
 export const CLOUD_FLOOR_M = 950;
 
-/** Clouds a cell may hold at the height of a storm. */
-const CANDIDATES = 10;
 /**
- * Mean fair-weather clouds per cell at a district cover of one. Set so the ground under a
- * cloud averages 12-18% (tools/sky-variety.ts measures it). Clouds are now few and wide
- * (half a kilometre to three and a half), so a cell of 4.2 km^2 holds well under one on
- * average: the cover comes from cloud size, not from many small ones.
+ * Clouds a cell may hold at the height of a storm: the fair share at the most crowded
+ * district (`fairShare(2.6)`) times the storm's 2.5, plus `STORM_EXTRA`, rounded up. A
+ * rank past it is never shown, so a larger number only spends the cell's stream.
  */
-const CLOUDS_PER_CELL = 0.42;
+const CANDIDATES = 2;
+/**
+ * Fair-weather clouds per cell at a district cover of one. Set so the ground under a
+ * cloud averages 10-15% (tools/sky-variety.ts measures it). The owner read the sky of
+ * half-kilometre puffs in groups as confetti and its short tall ones as towers: clouds
+ * are now rare and big (1.4 to 6 km along the wind, over a kilometre across), and the
+ * cover comes from cloud size, not count.
+ */
+const CLOUDS_PER_CELL = 0.045;
+/** Ranks a storm adds to every cell, clear districts included, on top of swelling the fair share. */
+const STORM_EXTRA = 0.6;
 /** How far over a rank the cover must go before a cloud is full size. */
 const GROW_SPAN = 0.5;
 
 /**
- * The kinds (`CloudSet.kind`): humilis (flat domes half a kilometre to one and a half
- * long), mediocris (one and a half to three and a half kilometres, about half as tall as
- * long) and congestus (rare towers, taller than wide, in cloudy districts only).
+ * Mean fair-weather clouds in a cell of district cover `cover`. Square in the cover: with
+ * clouds this rare a cell holds one at most unless the district is crowded, and a
+ * crowded one holds a short street of two, so the sky still clumps (clear stretches,
+ * then a few long rafts together) instead of sprinkling one raft per cell.
+ */
+function fairShare(cover: number): number {
+  return CLOUDS_PER_CELL * cover * cover;
+}
+
+/**
+ * The kinds (`CloudSet.kind`): humilis (flat rafts 1.4-3 km long, about a fifth as
+ * tall), mediocris (2.8-6 km, a quarter as tall) and congestus (rare, in cloudy
+ * districts only: a mediocris body with one broad heap on its crown, a third as tall as
+ * long, never a column).
  */
 export const CloudKind = { Humilis: 0, Mediocris: 1, Congestus: 2 } as const;
 
@@ -122,7 +141,7 @@ export interface CloudSet {
   /**
    * The farthest any cloud reaches outside its own placement cell, metres: the margin a
    * search by cell must add (a cloud may stand past its cell's edge in a group, and the
-   * biggest are three and a half kilometres long).
+   * biggest are six kilometres long).
    */
   readonly maxReach: number;
 }
@@ -173,9 +192,9 @@ export function districtCover(seed: number, x: number, z: number): number {
  * storm adds grow in from nothing, while it builds.
  */
 export function cloudGrow(set: CloudSet, i: number, storm: number): number {
-  const fair = set.cover[i]! * CLOUDS_PER_CELL;
+  const fair = fairShare(set.cover[i]!);
   const rank = set.rank[i]!;
-  const cover = fair * (1 + 1.5 * storm) + 1.5 * storm;
+  const cover = fair * (1 + 1.5 * storm) + STORM_EXTRA * storm;
   const grow = rank < fair ? 1 : Math.min(1, Math.max(0, (cover - rank) / GROW_SPAN));
   return grow * (1 + 0.35 * storm);
 }
@@ -237,10 +256,11 @@ function blob(list: number[], cx: number, cy: number, cz: number, rx: number, ry
  * THE SHAPE, from photographs of fair-weather cumulus. The owner read the first version
  * as "flying cakes" and the second as a sky of separate rocks and crumbs with pointed
  * tents; a real cumulus is ONE continuous body:
- *  - WIDE AND FEW. Humilis half a kilometre to one and a half long, a quarter to a third
- *    as tall; mediocris one and a half to three and a half kilometres, 0.4-0.55 as tall.
- *    Nothing smaller: a fair-weather sky has no confetti.
- *  - A BROAD FLAT BASE AND A LUMPY DOME OFF-CENTRE. A row of 3-4 body lobes runs the
+ *  - BIG, BROAD AND RARE. Humilis 1.4-3 km long and a sixth to a fifth as tall;
+ *    mediocris 2.8-6 km, a fifth to under a third as tall. Nothing smaller: the owner
+ *    read half-kilometre puffs in groups as confetti, and the short tall ones (a narrow
+ *    dome seen end-on) as towers.
+ *  - A BROAD FLAT BASE AND A LUMPY DOME OFF-CENTRE. A row of 3-5 body lobes runs the
  *    whole length, cut flat at the base, their tops following an envelope whose peak
  *    stands off the middle (`peak`); 1-2 crown lobes sit over the peak with their bottoms
  *    inside the body. Neighbouring lobes overlap by well over half a radius, so the
@@ -250,9 +270,12 @@ function blob(list: number[], cx: number, cy: number, cz: number, rx: number, ry
  *  - SMALL LOBES SUNK IN. 6-12 lobes a quarter to two fifths of their parent, centred
  *    inside it, protruding 30-50% of their own radius from its upper surface and upper
  *    sides, and only where that surface shows (not inside another lobe): cauliflower.
- *  - ALONG THE WIND: length 1.25-1.7 times the width, turned to the drift.
+ *  - ALONG THE WIND: length 1.3-1.6 times the width, turned to the drift: a raft seen
+ *    end-on down the wind is still a kilometre or more across and much wider than tall.
+ * Returns the peak's offset along the length; the caller sinks the small lobes in
+ * (`addLobes`) once every big one is placed.
  */
-function buildBody(b: Builder, length: number, width: number, height: number, bodies: number, crowns: number, smalls: number): void {
+function buildBody(b: Builder, length: number, width: number, height: number, bodies: number, crowns: number): number {
   const r = b.rand;
   const peak = (r() < 0.5 ? -1 : 1) * (0.08 + 0.14 * r()) * length;
   const bodyTop = height * (0.55 + 0.1 * r());
@@ -284,7 +307,7 @@ function buildBody(b: Builder, length: number, width: number, height: number, bo
     if (cy - ry > floor) cy = floor + ry;
     blob(b.big, u, cy, (r() - 0.5) * 0.2 * width, rx, ry, rz, (r() - 0.5) * 0.4);
   }
-  addLobes(b, height, smalls);
+  return peak;
 }
 
 /** Whether a point is inside any big lobe but `except`, by `margin` of its radius. */
@@ -353,26 +376,22 @@ function addLobes(b: Builder, height: number, count: number): void {
 }
 
 /**
- * The congestus: a wide flat foot, then lobes stacked on it, each narrower, every one
- * sunk most of its height into the one below and none taller than wide, until the slots
- * run out (taller than wide overall); sunk small lobes over all of it.
+ * The congestus: a long mediocris body with one broad heap sunk into its crown, wider
+ * than the crown and less than half as tall as the cloud is wide. The stack of ever
+ * narrower lobes it used to be read, seen end-on, as a tower; this reads as a cumulus
+ * that has swollen, a third as tall as long. Sunk small lobes over all of it.
  */
-function buildTower(b: Builder, width: number): void {
+function buildCongestus(b: Builder, length: number): void {
   const r = b.rand;
-  const foot = 0.45 * width;
-  blob(b.big, 0, -0.1 * foot, 0, foot * 1.1, foot * 0.5, foot, (r() - 0.5) * 0.4);
-  let top = 0.4 * foot;
-  let radius = 0.36 * width;
-  const lean = r() * Math.PI * 2;
-  for (let i = 1; i < CLOUD_BIG_SLOTS; i++) {
-    const ry = 0.8 * radius;
-    const cy = top + 0.05 * ry;
-    const shift = 0.05 * width * i * (0.5 + 0.5 * r());
-    blob(b.big, Math.cos(lean) * shift, cy, Math.sin(lean) * shift, radius * (1 + 0.12 * r()), ry, radius, r() * Math.PI * 2);
-    top = cy + ry;
-    radius *= 0.88;
-  }
-  addLobes(b, top, 12);
+  const width = length / (1.35 + 0.2 * r());
+  const height = length * (0.22 + 0.04 * r());
+  const peak = buildBody(b, length, width, height, CLOUD_BIG_SLOTS - 2, 1);
+  const radius = 0.22 * length * (0.95 + 0.1 * r());
+  const ry = 0.6 * radius;
+  const cy = height - 0.35 * ry;
+  const u = peak + (r() - 0.5) * 0.06 * length;
+  blob(b.big, u, cy, (r() - 0.5) * 0.1 * width, radius * (1 + 0.15 * r()), ry, 0.9 * radius, (r() - 0.5) * 0.4);
+  addLobes(b, cy + ry, 12);
 }
 
 // ---------------------------------------------------------------------------
@@ -463,22 +482,23 @@ function buildCloudSet(seed: number): CloudSet {
       const oz = cz * CLOUD_CELL_M;
       const cover = districtCover(seed, ox + CLOUD_CELL_M / 2, oz + CLOUD_CELL_M / 2);
       // The storm's ceiling for this cell (`cloudGrow` at storm 1).
-      const most = cover * CLOUDS_PER_CELL * 2.5 + 1.5;
+      const most = fairShare(cover) * 2.5 + STORM_EXTRA;
       const cellRand = mulberry32((hashUnit3(seed ^ TAG_CELL, cx, cz) * 4294967296) >>> 0);
       const groupX = ox + cellRand() * CLOUD_CELL_M;
       const groupZ = oz + cellRand() * CLOUD_CELL_M;
       for (let k = 0; k < CANDIDATES; k++) {
         const rank = k + cellRand();
-        const grouped = cellRand() < 0.65;
+        const grouped = cellRand() < 0.5;
         const a = cellRand() * Math.PI * 2;
-        const d = Math.sqrt(cellRand()) * 1400;
+        const d = Math.sqrt(cellRand()) * 1800;
         const ux = cellRand();
         const uz = cellRand();
         const shapeSeed = (hashUnit3(seed ^ TAG_SHAPE, cell, k) * 4294967296) >>> 0;
         if (rank >= most) continue;
-        // A group is drawn out along the wind into a loose street.
-        const along = Math.cos(a) * d * 1.7;
-        const across = Math.sin(a) * d * 0.55;
+        // A group is drawn out along the wind into a loose street, its clouds far enough
+        // apart along it to read as a line of long rafts, not a clump of puffs.
+        const along = Math.cos(a) * d * 2;
+        const across = Math.sin(a) * d * 0.5;
         const x = grouped ? groupX + along * windX - across * windZ : ox + ux * CLOUD_CELL_M;
         const z = grouped ? groupZ + along * windZ + across * windX : oz + uz * CLOUD_CELL_M;
 
@@ -486,21 +506,28 @@ function buildCloudSet(seed: number): CloudSet {
         builder.rand = r;
         builder.big.length = 0;
         builder.small.length = 0;
-        // Few, wide clouds: the cover comes from their size. Humilis 0.5-1.5 km long and a
-        // quarter to a third as tall; mediocris 1.5-3.5 km, 0.4-0.55 as tall; in a cloudy
-        // district now and then a congestus tower.
+        // Rare, big clouds: the cover comes from their size. Humilis 1.4-3 km long and a
+        // sixth to a fifth as tall; mediocris 2.8-6 km, a fifth to under a third as tall;
+        // both only 1.3-1.6 times as long as wide, so one seen end-on down the wind is
+        // still a kilometre or more across; in a cloudy district now and then a
+        // congestus, broad as a mediocris.
         let kind: number;
-        if (r() < 0.02 * Math.min(1, cover / 1.6)) {
+        if (r() < 0.012 * Math.min(1, cover / 1.6)) {
           kind = CloudKind.Congestus;
-          buildTower(builder, 900 + 700 * r());
-        } else if (r() < 0.62) {
+          buildCongestus(builder, 3000 + 1500 * r());
+        } else if (r() < 0.6) {
           kind = CloudKind.Humilis;
-          const length = 500 + 1000 * r() ** 1.4;
-          buildBody(builder, length, length / (1.25 + 0.4 * r()), length * (0.25 + 0.1 * r()), 3, 1, CLOUD_COMPACT_SMALL);
+          const length = 1400 + 1600 * r() ** 1.3;
+          const height = length * (0.16 + 0.05 * r());
+          buildBody(builder, length, length / (1.3 + 0.3 * r()), height, 3, 1);
+          addLobes(builder, height, CLOUD_COMPACT_SMALL);
         } else {
           kind = CloudKind.Mediocris;
-          const length = 1500 + 2000 * r() ** 1.6;
-          buildBody(builder, length, length / (1.3 + 0.4 * r()), length * (0.4 + 0.15 * r()), 3 + Math.floor(r() * 2), 2, 10 + Math.floor(r() * 3));
+          const length = 2800 + 3200 * r() ** 1.5;
+          const bodies = 4 + Math.floor(r() * 2);
+          const height = length * (0.2 + 0.08 * r());
+          buildBody(builder, length, length / (1.3 + 0.3 * r()), height, bodies, CLOUD_BIG_SLOTS - bodies);
+          addLobes(builder, height, 10 + Math.floor(r() * 3));
         }
         // One straight base for the district (its condensation level), within a few tens
         // of metres from cloud to cloud.

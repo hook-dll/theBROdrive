@@ -14,7 +14,8 @@
  *  - the sky is a pure function of the seed, and the shade a pure function of seed,
  *    place, time and sun, so a rebuilt frame cannot flicker;
  *  - the sky is what the owner asked for: humilis, mediocris and rare congestus; no
- *    crumbs (every cloud over half a kilometre), each one continuous body (lobes that
+ *    crumbs (every cloud over a kilometre long), no columns (even a congestus stands
+ *    well under its own length tall), each one continuous body (lobes that
  *    overlap, small lobes sunk in) with no lobe stretched upward into a point; bases from
  *    1 to 3.5 km on one line per district; a cover of 10-20% that is NOT even (clear
  *    stretches, crowded ones) and clouds that clump rather than sprinkle;
@@ -221,16 +222,18 @@ console.log('clouds');
     `${((kinds[CloudKind.Congestus]! / fair) * 100).toFixed(1)}% congestus`,
   );
   check(
-    'no crumbs: few clouds, every one wide',
-    (lengths[0] ?? 0) >= 500 && median(lengths) > 900 && median(lengths) < 3000,
+    'no crumbs: rare clouds, every one long',
+    (lengths[0] ?? 0) >= 1000 && median(lengths) > 1800 && median(lengths) < 4000,
     `smallest ${(lengths[0] ?? 0).toFixed(0)} m, median ${median(lengths).toFixed(0)} m, largest ${(lengths[lengths.length - 1] ?? 0).toFixed(0)} m long`,
   );
   const hum = median(ratios[CloudKind.Humilis]!);
   const med = median(ratios[CloudKind.Mediocris]!);
   const tower = median(ratios[CloudKind.Congestus]!);
+  // The owner read short tall clouds as towers: every kind is a raft longer than it is
+  // tall, and the congestus heaps higher than a mediocris without becoming a column.
   check(
-    'humilis flat, mediocris about half as tall, towers taller',
-    hum > 0.18 && hum < 0.38 && med > 0.3 && med < 0.6 && tower > 0.8,
+    'humilis flat, mediocris a quarter as tall, congestus heaped but no column',
+    hum > 0.12 && hum < 0.22 && med > 0.18 && med < 0.3 && tower > med && tower < 0.6,
     `height/length medians: humilis ${hum.toFixed(2)}, mediocris ${med.toFixed(2)}, congestus ${tower.toFixed(2)}`,
   );
   check('stretched along the wind', stretched / fair > 0.85, `${((stretched / fair) * 100).toFixed(0)}% longer along the drift than across`);
@@ -359,7 +362,7 @@ console.log('clouds');
   let samples = 0;
   for (const seed of SEEDS) {
     const set = cloudSet(seed);
-    for (let line = 0; line < 6; line++) {
+    for (let line = 0; line < 12; line++) {
       let run: { d: number; s: number }[] | null = null;
       let previous = 0;
       for (let d = 0; d < 20_000; d += 5) {
@@ -425,7 +428,8 @@ console.log('clouds');
 
 {
   // A parked car at eight spots under each sky, for an hour: most of them see shade
-  // arrive and leave, more than once. (One spot can sit under a clear district all hour.)
+  // arrive and leave. (One spot can sit under a clear district all hour, and with clouds
+  // this rare a spot under a cloudy one sees a raft or two pass, not a procession.)
   const STEP_S = 2;
   const SPAN_S = 3600;
   const SPOTS = 8;
@@ -447,7 +451,7 @@ console.log('clouds');
   const spots = SEEDS.length * SPOTS;
   check(
     'standing still, shade comes and goes',
-    visited > spots / 2 && changes > spots * 3,
+    visited > spots / 2 && changes > spots * 2,
     `${visited}/${spots} parked spots see shade come and go in an hour, ${(changes / spots).toFixed(1)} changes each, ${CLOUD_DRIFT_MPS} m/s wind`,
   );
 }

@@ -1141,42 +1141,49 @@ export const CABIN_UAZ2206: CabinLayoutOverride = {
   seatX: 0.515, // the wheel's centre [D front view]
   bolsters: false,
   // A deep level shelf from the screen's foot to an upright face, its foot low over the
-  // driver's knees [P]; 0.32 deep [E].
+  // driver's knees [P]; 0.32 deep [E]. The face 0.22 tall, lip to foot [E: the photo's face
+  // runs about 1.9 panel heights from the shelf's lip to its foot].
   dash: [
-    [0.05, 0.055], [0.3, 0.055], [0.32, 0.04], [0.32, -0.2],
-    [0.29, -0.23], [0.1, -0.25], [0.045, -0.22], [0.045, -0.06],
+    [0.05, 0.055], [0.3, 0.055], [0.32, 0.04], [0.32, -0.18],
+    [0.29, -0.21], [0.1, -0.23], [0.045, -0.2], [0.045, -0.06],
   ],
-  fascia: [[0.32, 0.04], [0.32, -0.2]],
+  fascia: [[0.32, 0.04], [0.32, -0.18]],
   wood: undefined,
   stack: undefined,
   vents: undefined,
   heater: undefined,
-  // The instrument panel: a flat plate 4 cm proud of the face, low and outboard of the
-  // column [P: x 30-420 px left of the column at x 640, y 600-900, under the lamps' row].
-  binnacle: [[0.3, -0.04], [0.36, -0.04], [0.36, -0.17], [0.3, -0.17]],
-  binnacleHalf: 0.16,
-  binnacleRight: -0.06,
+  // The instrument panel: a flat plate 4 cm proud of the face, low and just outboard of
+  // the column [P: x 30-420 px left of the column at x 640, y 600-900, under the lamps'
+  // row]. A narrow strip, the four dials nearly touching: 0.23 x 0.094 inside its frame,
+  // 2.5 times as wide as tall [P: about 400 x 160 px, the strip seen at a slant]; its
+  // inner end at the column [P].
+  binnacle: [[0.3, -0.045], [0.36, -0.045], [0.36, -0.152], [0.3, -0.152]],
+  binnacleHalf: 0.125,
+  binnacleRight: -0.035,
   cluster: 0.36,
-  clusterFace: { right: -0.06, up: -0.105, half: [0.155, 0.06], colour: 0x4a5560, frame: 'chrome' },
+  clusterFace: { right: -0.035, up: -0.096, half: [0.115, 0.047], colour: 0x4a5560, frame: 'chrome' },
   gauges: [
     // From the door's side: oil (0-6), the speedometer 0-120 [P "80 … 120"], fuel [P the
-    // pump], temperature; the speedometer about 1.6 times the others [P].
-    { channel: 'oil', right: -0.175, up: -0.125, radius: 0.025, ...SMALL, full: 6, ticks: 4 },
-    { channel: 'speed', right: -0.085, up: -0.115, radius: 0.04, full: 120, ...BIG },
-    { channel: 'fuel', right: 0.005, up: -0.125, radius: 0.025, ...SMALL },
-    { channel: 'temp', right: 0.065, up: -0.125, radius: 0.025, ...SMALL },
+    // pump], temperature; the speedometer about 1.45 times the others [P], the bezels
+    // nearly touching [P].
+    { channel: 'oil', right: -0.125, up: -0.105, radius: 0.02, ...SMALL, full: 6, ticks: 4 },
+    { channel: 'speed', right: -0.065, up: -0.1, radius: 0.029, full: 120, ...BIG },
+    { channel: 'fuel', right: 0, up: -0.105, radius: 0.02, ...SMALL },
+    { channel: 'temp', right: 0.055, up: -0.105, radius: 0.02, ...SMALL },
   ],
   // The round lamps over the dials: red, white, amber [P].
-  lamps: { right: -0.085, up: -0.06, cols: 4, pitch: 0.03, show: ['charge', 'side', 'turn', 'beam'] },
-  // A knob under the panel (the lights) and a toggle switch [P]; the hazard button (none
-  // on the car, kept for the game) by them [E].
-  lights: { right: -0.05, dy: -0.195, kind: 'knob' },
-  rockers: { on: 'fascia', at: [[0.7, -0.195]] },
-  hazard: [0.42, -0.195],
-  // Right of the column: small plates [P]; the radio (none on the car, kept for the
-  // game's radio) and the ashtray there [E]; a small lid before the passenger [E].
-  radio: [0.18, -0.08],
-  ashtray: [0.18, -0.16],
+  lamps: { right: -0.065, up: -0.06, cols: 4, pitch: 0.025, show: ['charge', 'side', 'turn', 'beam'] },
+  // A knob by the panel's outer foot (the lights) and a toggle switch [P]; the hazard
+  // button (none on the car, kept for the game) by them [E].
+  lights: { right: -0.175, dy: -0.12, kind: 'knob' },
+  rockers: { on: 'fascia', at: [[0.75, -0.15]] },
+  hazard: [0.38, -0.15],
+  // Right of the column: small plates [P]; the ashtray there [E]. The radio (none on the
+  // car, kept for the game's radio) hung under the face's foot, its top tucked into it,
+  // between the driver's knee and the engine's cover [E]; a small lid before the
+  // passenger [E].
+  radio: [0.29, -0.205],
+  ashtray: [0.18, -0.13],
   glovebox: { x: -0.45, dy: -0.08, half: [0.14, 0.06] },
   // Rim 0.40 across, a thin grip; two spokes, up-left and down-right, and a round boss
   // [P]; the column steep, down in front of the dash's face [P].

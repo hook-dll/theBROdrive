@@ -409,6 +409,10 @@ r 0.2 [D plan, ×4.656].
 | Driver's seat centre line | x 0.515 | [D] the wheel's centre |
 | Wheel | large and thin, the column close to vertical | [P `dash-steering`] |
 | Dash | a flat painted steel panel; round dials before the driver; toggle switches | [P] |
+| Dash face | 0.22 tall, shelf lip +0.04 to foot −0.18 over the belt (was −0.20) | [E] about 1.9 panel heights in `dash-steering` |
+| Instrument panel | 0.23 × 0.094 inside the chrome frame (was 0.31 × 0.12), centre 0.035 outboard of the column (was 0.06), up −0.096; plate `binnacleHalf` 0.125 | [P] a strip ~2.5:1 under the lamps' row, inner end at the column; size [E] |
+| Dials | speedometer r 0.029, oil / fuel / temperature r 0.02, bezels nearly touching; lamps at pitch 0.025 over them | [P] ratio ~1.45; sizes [E] |
+| Radio (none on the car, kept for the game) | hung under the face's foot, x 0.29, its top tucked into the face | [E] |
 | Engine | under a padded cover between the front seats, from the dash back about 0.9 m | [E] the general layout; no measured figure |
 | Front seats | on the front wheel boxes | [E] |
 

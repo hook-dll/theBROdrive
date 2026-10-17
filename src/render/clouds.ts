@@ -72,7 +72,7 @@ import { SCENE_EXPOSURE } from './displaytransform';
 /** Clouds per row of the blob texture, and texels per cloud: a header and two a blob. */
 const CLOUDS_PER_ROW = 96;
 const CLOUD_TEXELS = 1 + 2 * CLOUD_SLOTS;
-/** Instances a list can hold; a storm-heavy seed has about 4000 clouds in all. */
+/** Instances a list can hold; a seed has at most 1800 clouds in all (two candidates a cell). */
 const LIST_CAPACITY = 16384;
 /**
  * How far out clouds are drawn, metres. A cloud at the floor's height 26 km out stands two
