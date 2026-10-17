@@ -542,7 +542,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     const turboHz = (1800 + 6200 * this.turboSpeed) * pitch;
     // The whistle is deliberately restrained: its narrow high-frequency tone cuts through
     // the engine bay and becomes especially prominent through the cabin.
-    const turboAmp = this.turboSpeed * this.turboSpeed * 0.025;
+    const turboAmp = this.turboSpeed * this.turboSpeed * 0.005;
 
     const starterHz = (95 + 25 * Math.sin(this.phase * TWO_PI)) * pitch;
     // Belt-driven: fan on the water-pump pulley, alternator geared up ~2x with 36
