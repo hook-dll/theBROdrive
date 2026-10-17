@@ -186,17 +186,21 @@ export class HeatHaze {
     this.frame.groundSlope += (groundSlope - this.frame.groundSlope) * k;
 
     const heat = surfaceHeat(input.sunHeight, input.timeOfDay, input.dayLength);
-    // The cloud field's own strength is zero at night and wherever it is not being
-    // advanced (the labs), so shade is only ever counted where the ground shows it.
+    // The shade's own strength is zero at night and wherever it is not being advanced
+    // (the labs), so shade is only ever counted where the ground shows it. The ground
+    // under the probe stands about where the fitted line puts it.
     const clouds = cloudShadowFrame();
     const shade =
       clouds.strength > 0
         ? cloudShadowShadeAt(
             input.seed,
             eyeX + this.forwardX * SHADE_PROBE_M,
+            intercept + slope * SHADE_PROBE_M,
             eyeZ + this.forwardZ * SHADE_PROBE_M,
             clouds.elapsed,
-            clouds.detail,
+            clouds.slopeX,
+            clouds.slopeZ,
+            weather.cloud,
           ) * (clouds.strength / CLOUD_DARKEN_MAX)
         : 0;
     const flat = 1 - smoothstep(FLAT_RMS_M, ROUGH_RMS_M, rms);

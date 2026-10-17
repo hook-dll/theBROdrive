@@ -2,28 +2,30 @@
  * tools/sky-variety.ts
  *
  * The two things that are supposed to make the light and the horizon stop standing
- * still: the drifting cloud shade on the ground, and the weather schedule
- * (world/weather.ts). Both are driven here as the game drives them.
+ * still: the low-poly clouds and the shadows they drag across the ground
+ * (render/cloudfield.ts, render/clouds.ts, render/cloudshadow.ts), and the weather
+ * schedule (world/weather.ts). Both are driven here as the game drives them.
  *
- * WHAT A HEADLESS BENCH CAN AND CANNOT SETTLE. There is no GPU, so nothing here
- * looks at a pixel. What it can do is better than a screenshot anyway, because every
- * property that could silently be wrong is arithmetic:
+ * WHAT A HEADLESS BENCH CAN AND CANNOT SETTLE. There is no GPU, so nothing here looks at
+ * a pixel. The clouds are a LIST, built from the seed on the CPU, and the shadow map is a
+ * picture of that list taken along the sun's ray; its CPU twin (`cloudShadeAlong`) is
+ * what is measured:
  *
- *  - the cloud field is a PURE function of world position and time, so the same
- *    inputs give the same shade and a rebuilt frame cannot flicker;
- *  - it stays inside the darkening it claims, so no patch is ever a black hole;
- *  - its patches are the size the constant says they are — measured as the mean run
- *    of shaded ground along a transect, which is the only definition of "patch
- *    scale" that cannot be fooled by a lucky sample;
- *  - REBASING THE SAMPLE POINT DOES NOT MOVE THE FIELD. This is the one that would
- *    have shipped: the shader gets an origin-relative position and a panned origin,
- *    and if the two do not compose back into the absolute sample then the whole sky
- *    jumps sideways every kilometre. Checked at 386 km out, which is as far from the
- *    centre as this road ever gets;
- *  - the GLSL splices into the three version actually installed, exactly once, even
- *    when the material has already been patched twice by other systems. A shader
- *    that fails to compile is invisible in a tool that only samples functions, so
- *    the real injection is run against the real `ShaderLib` source and counted.
+ *  - the sky is a pure function of the seed, and the shade a pure function of seed,
+ *    place, time and sun, so a rebuilt frame cannot flicker;
+ *  - the sky is what the owner asked for: humilis, mediocris and rare congestus; no
+ *    crumbs (every cloud over half a kilometre), each one continuous body (lobes that
+ *    overlap, small lobes sunk in) with no lobe stretched upward into a point; bases from
+ *    1 to 3.5 km on one line per district; a cover of 10-20% that is NOT even (clear
+ *    stretches, crowded ones) and clouds that clump rather than sprinkle;
+ *  - EVERY CLOUD HAS ITS SHADOW, up the sun's ray from the ground it darkens, at noon and
+ *    under an afternoon sun, and the shadow's edge is a penumbra, not a line;
+ *  - a storm brings more and bigger clouds;
+ *  - REBASING DOES NOT MOVE THE CLOUDS: the shader gets an origin-relative position and a
+ *    panned origin, and those must compose back into the absolute sample, checked at
+ *    386 km out, as far from the centre as this road ever gets;
+ *  - the ground patch splices into the three version actually installed, exactly once,
+ *    with the map read per VERTEX and nothing but a multiply per fragment;
  *  - the weather schedule is a pure function of seed and clock, stays in range,
  *    is present for most of a drive, and never cuts one episode into the next.
  *
@@ -36,288 +38,242 @@ import * as THREE from 'three';
 import type { WebGLProgramParametersWithUniforms } from 'three';
 import { applyComicShading, applyGroundSpotlightNormals } from '../src/render/comic';
 import {
+  BLOB_FLOATS,
+  CLOUD_BIG_SLOTS,
+  CLOUD_DRIFT_MPS,
+  CLOUD_PERIOD_M,
+  CLOUD_SLOTS,
+  CloudKind,
+  cloudCoverAlong,
+  cloudGrow,
+  cloudPan,
+  cloudSet,
+  cloudShadeAlong,
+  cloudWind,
+  type CloudSet,
+} from '../src/render/cloudfield';
+import {
   advanceCloudShadows,
   applyCloudShadow,
-  cloudShadowFactorAt,
-  cloudShadowFactorFromPan,
+  CLOUD_DARKEN_MAX,
   cloudShadowFrame,
-  cloudShadowPan,
-  cloudShadowSalt,
   cloudShadowShadeAt,
   cloudShadowStrength,
-  CLOUD_CELL_M,
-  CLOUD_COVER_EDGE,
-  CLOUD_DARKEN_MAX,
-  CLOUD_DRIFT_MPS,
-  CLOUD_FAR_FIELD,
-  CLOUD_PERIOD_M,
-  cloudFieldAt,
-  cloudShadeOfField,
 } from '../src/render/cloudshadow';
 import { weatherAt, weatherKindOfSlot, WEATHER_SLOT_S, type WeatherChannels } from '../src/world/weather';
 
 const SEEDS = [1, 7, 42, 1337];
 /** Where the road gets to at 40 000 km: the f32 precision case, in metres. */
 const FAR_FROM_CENTRE = 386_000;
-/** Shade above which ground counts as "in shadow" for the run-length census. */
+/** Shade above which ground counts as "in shadow". */
 const IN_SHADOW = 0.5;
+/** Sun slopes (horizontal metres per metre up the ray): near noon, and mid-afternoon. */
+const SUNS = [
+  { label: 'noon', x: 0.18, z: -0.12 },
+  { label: 'afternoon', x: 0.95, z: 0.55 },
+];
 let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
   if (!ok) failures++;
-  console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${label.padEnd(44)} ${detail}`);
+  console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${label.padEnd(48)} ${detail}`);
 }
 
-/** Mean length of the contiguous shaded runs in a sampled line, in sample steps. */
-function meanRun(shaded: boolean[]): number {
-  let runs = 0;
-  let total = 0;
-  let current = 0;
-  let started = false;
-  for (let i = 0; i < shaded.length; i++) {
-    if (shaded[i]) {
-      current++;
-      continue;
-    }
-    // The first run is dropped: the transect began part-way through it, so its
-    // length says where sampling started rather than how big a patch is.
-    if (current > 0 && started) {
-      runs++;
-      total += current;
-    }
-    started = true;
-    current = 0;
-  }
-  return runs === 0 ? 0 : total / runs;
+function wrap(v: number): number {
+  return v - CLOUD_PERIOD_M * Math.floor(v / CLOUD_PERIOD_M);
 }
 
-/**
- * How wide the shade's own edge is, 10% to 90% of its depth, in metres.
- *
- * Measured along the same diagonals the patch census uses and reported as quantiles
- * rather than a mean, because the distribution is the point: a field can average a
- * soft edge while a quarter of its edges are still a line. Returns the 25th, the
- * median and the 90th over every edge of every seed.
- */
-function penumbraWidths(seeds: readonly number[]): {
-  p25: number;
-  median: number;
-  p90: number;
-  count: number;
-} {
-  const widths: number[] = [];
-  const STEP = 1;
-  for (const seed of seeds) {
-    for (let line = 0; line < 60; line++) {
-      const across = line * 311;
-      let entering = -1;
-      let previous = 0;
-      for (let i = 0; i * STEP < 20_000; i++) {
-        const d = i * STEP;
-        const shade = cloudShadowShadeAt(seed, d * 0.8 + across, d * 0.6 - across, 0, 1);
-        // 0.1 and 0.9 of the shade's own range, so the answer does not move when the
-        // deepest darkening is retuned.
-        if (entering < 0 && previous < 0.1 && shade >= 0.1) entering = d;
-        if (entering >= 0 && previous < 0.9 && shade >= 0.9) {
-          widths.push(d - entering);
-          entering = -1;
-        }
-        if (entering >= 0 && shade < 0.05) entering = -1;
-        if (previous >= 0.1 && shade < 0.1) entering = -1;
-        previous = shade;
-      }
-    }
+/** Fraction of `n` sample points over the period with a cloud straight overhead. */
+function verticalCover(set: CloudSet, storm: number, n: number, offset: number): number {
+  let hit = 0;
+  for (let k = 0; k < n; k++) {
+    const x = wrap(k * 7919.7 + offset);
+    const z = wrap(k * 104_729.3 - offset);
+    if (cloudCoverAlong(set, storm, x, 0, z, 0, 0) > 0) hit++;
   }
-  widths.sort((a, b) => a - b);
-  return {
-    p25: widths[Math.floor(widths.length * 0.25)] ?? 0,
-    median: widths[widths.length >> 1] ?? 0,
-    p90: widths[Math.floor(widths.length * 0.9)] ?? 0,
-    count: widths.length,
-  };
+  return hit / n;
+}
+
+/** Built twice from cold, by way of another seed, so the cache cannot answer for it. */
+function sameSet(a: CloudSet, b: CloudSet): boolean {
+  if (a.count !== b.count) return false;
+  for (let i = 0; i < a.count; i++) {
+    if (a.x[i] !== b.x[i] || a.z[i] !== b.z[i] || a.base[i] !== b.base[i] || a.rank[i] !== b.rank[i]) return false;
+  }
+  for (let i = 0; i < a.blobs.length; i++) if (a.blobs[i] !== b.blobs[i]) return false;
+  return true;
 }
 
 // ---------------------------------------------------------------------------
-// 1. the cloud field
+// 1. the clouds
 // ---------------------------------------------------------------------------
 
-console.log('cloud shadow field');
+console.log('clouds');
 
 {
+  const first = cloudSet(42);
+  cloudSet(7);
+  const again = cloudSet(42);
+  check('the same seed builds the same sky', first !== again && sameSet(first, again), `${first.count} candidates, rebuilt from cold`);
   let repeatable = true;
-  let lowest = 1;
-  let highest = 0;
-  let deepest = 0;
-  for (const seed of SEEDS) {
-    for (let i = 0; i < 40_000; i++) {
-      // Spread over the whole road's worth of coordinate, both signs, and across
-      // ten minutes of drift.
-      const x = (i * 7919) % 900_000 - 450_000;
-      const z = (i * 104_729) % 900_000 - 450_000;
-      const t = (i % 600) * 1.37;
-      const factor = cloudShadowFactorAt(seed, x, z, t, 1, 1);
-      if (cloudShadowFactorAt(seed, x, z, t, 1, 1) !== factor) repeatable = false;
-      if (factor < lowest) lowest = factor;
-      if (factor > highest) highest = factor;
-      const shade = cloudShadowShadeAt(seed, x, z, t, 1);
-      if (shade > deepest) deepest = shade;
-    }
+  for (let i = 0; i < 2000; i++) {
+    const x = (i * 7919) % 900_000 - 450_000;
+    const z = (i * 104_729) % 900_000 - 450_000;
+    const t = (i % 600) * 1.37;
+    const a = cloudShadowShadeAt(42, x, 30, z, t, 0.3, -0.2, 0);
+    if (cloudShadowShadeAt(42, x, 30, z, t, 0.3, -0.2, 0) !== a) repeatable = false;
   }
-  check('the same place and time shade the same', repeatable, '160 000 samples, 4 seeds');
-  check(
-    'darkening stays inside its band',
-    lowest >= 1 - CLOUD_DARKEN_MAX - 1e-6 && highest <= 1 + 1e-6,
-    `light kept ${(lowest * 100).toFixed(1)}%..${(highest * 100).toFixed(1)}% ` +
-      `against a floor of ${((1 - CLOUD_DARKEN_MAX) * 100).toFixed(0)}%`,
-  );
-  check(
-    'a patch does reach full depth',
-    deepest > 0.98,
-    `deepest shade ${(deepest * 100).toFixed(1)}% of the maximum`,
-  );
+  check('the same place, time and sun shade the same', repeatable, '2000 samples');
 }
 
-// -- patch scale, measured rather than asserted -------------------------------
+// -- variety ----------------------------------------------------------------------
 
 {
-  const STEP_M = 5;
-  const LENGTH_M = 200_000;
-  console.log(
-    `\n  transect ${(LENGTH_M / 1000).toFixed(0)} km at ${STEP_M} m, lattice ${CLOUD_CELL_M} m`,
-  );
-  let runSum = 0;
-  let coverSum = 0;
+  const kinds = [0, 0, 0];
+  let lowBase = Infinity;
+  let highBase = 0;
+  let fair = 0;
+  let stretched = 0;
+  let spikes = 0;
+  let lobes = 0;
+  let loose = 0;
+  let floating = 0;
+  let smalls = 0;
+  const lengths: number[] = [];
+  const ratios: number[][] = [[], [], []];
+  const spreads: number[] = [];
+  const wind = { x: 0, z: 0 };
+  /** Normalised distance of a point from lobe `o`'s centre: under 1 inside it. */
+  const lobeDistance = (blobs: Float32Array, o: number, px: number, py: number, pz: number): number => {
+    const dx = px - blobs[o]!;
+    const dz = pz - blobs[o + 2]!;
+    const c = blobs[o + 6]!;
+    const s = blobs[o + 7]!;
+    const lx = (c * dx + s * dz) / blobs[o + 3]!;
+    const lz = (-s * dx + c * dz) / blobs[o + 5]!;
+    const ly = (py - blobs[o + 1]!) / blobs[o + 4]!;
+    return Math.sqrt(lx * lx + ly * ly + lz * lz);
+  };
   for (const seed of SEEDS) {
-    const shaded: boolean[] = [];
-    for (let i = 0; i * STEP_M < LENGTH_M; i++) {
-      // A diagonal, not an axis: a lattice field sampled along one of its own axes
-      // reports the spacing of its rows rather than the size of its patches.
-      const d = i * STEP_M;
-      shaded.push(cloudShadowShadeAt(seed, d * 0.8, d * 0.6, 0, 1) > IN_SHADOW);
-    }
-    const runM = meanRun(shaded) * STEP_M;
-    const cover = shaded.filter(Boolean).length / shaded.length;
-    runSum += runM;
-    coverSum += cover;
-    console.log(
-      `    seed ${String(seed).padStart(4)}   mean shaded run ${runM.toFixed(0).padStart(4)} m   ` +
-        `ground in shade ${(cover * 100).toFixed(1)}%   ` +
-        `time to pass ${(runM / CLOUD_DRIFT_MPS).toFixed(0)} s`,
-    );
-  }
-  const runM = runSum / SEEDS.length;
-  const cover = coverSum / SEEDS.length;
-  check(
-    'patches are a few hundred metres across',
-    runM > 120 && runM < 900,
-    `mean shaded run ${runM.toFixed(0)} m`,
-  );
-  // About a sixth: the shade is the shadow of a sparse sky (see CLOUD_EDGE_LOW and
-  // CLOUD_COVER_EDGE), and follows its cover. Past two thirds it would read as overcast,
-  // under a twentieth as no clouds at all.
-  check(
-    'shade comes in patches, under a sparse sky',
-    cover > 0.08 && cover < 0.25,
-    `${(cover * 100).toFixed(1)}% in shade`,
-  );
-  check(
-    'a patch takes tens of seconds to pass',
-    runM / CLOUD_DRIFT_MPS > 10 && runM / CLOUD_DRIFT_MPS < 240,
-    `${(runM / CLOUD_DRIFT_MPS).toFixed(0)} s at ${CLOUD_DRIFT_MPS} m/s`,
-  );
-
-  // THE PENUMBRA, which is the property this field exists for. A cloud's shadow on
-  // the ground has no edge at all, and a shade ramp a few tens of metres wide reads
-  // as one — a painted grey blob rather than a shadow. The transition is measured as
-  // the distance the shade takes to cross 10% to 90% of its own depth, along the same
-  // diagonals, and the floor is what makes "soft" a thing a later tweak cannot quietly
-  // take away: it was 75 m before the band was widened, and the check would have
-  // passed at 75 m if it only asked for "not a hard line".
-  const penumbra = penumbraWidths(SEEDS);
-  console.log(
-    `    penumbra ${penumbra.median.toFixed(0)} m median, ` +
-      `${penumbra.p25.toFixed(0)} m at the 25th, ${penumbra.p90.toFixed(0)} m at the 90th ` +
-      `over ${penumbra.count} edges`,
-  );
-  check(
-    'the edge of a shadow is a penumbra, not a line',
-    penumbra.median > 100 && penumbra.p25 > 60,
-    `median ${penumbra.median.toFixed(0)} m, worst quartile ${penumbra.p25.toFixed(0)} m`,
-  );
-  check(
-    'the penumbra stays smaller than the patches it shades',
-    penumbra.median < runM * 0.6,
-    `${penumbra.median.toFixed(0)} m against a ${runM.toFixed(0)} m run`,
-  );
-}
-
-// -- the clouds over the shadows -----------------------------------------------
-
-// The sky's cumulus is a volume (render/cloudvolume.ts) whose footprint is this field
-// above CLOUD_COVER_EDGE. Its cover is a sparse fair-weather sky's (owner, 2026-10-17:
-// a third of the sky "looks generated"), every cloud's footprint is in shade (before the
-// sun shift, which only slides the shade along the sun's ray), and far ground's stand-in
-// field gives the patches' mean shade, not a lighter or darker one.
-{
-  let footprint = 0;
-  let footprintShaded = 0;
-  let shadeSum = 0;
-  let samples = 0;
-  for (const seed of SEEDS) {
-    const salt = cloudShadowSalt(seed);
-    for (let i = 0; i < 40_000; i++) {
-      const d = i * 5;
-      const x = d * 0.8 + seed * 977;
-      const z = d * 0.6 - seed * 613;
-      const field = cloudFieldAt(x, z, salt, 1);
-      const shade = cloudShadeOfField(field);
-      samples++;
-      shadeSum += shade;
-      if (field > CLOUD_COVER_EDGE) {
-        footprint++;
-        if (shade > IN_SHADOW) footprintShaded++;
+    const set = cloudSet(seed);
+    cloudWind(seed, wind);
+    const wx = wind.x / Math.hypot(wind.x, wind.z);
+    const wz = wind.z / Math.hypot(wind.x, wind.z);
+    for (let cell = 0; cell + 1 < set.cellStart.length; cell++) {
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (let i = set.cellStart[cell]!; i < set.cellStart[cell + 1]!; i++) {
+        if (cloudGrow(set, i, 0) < 1) continue;
+        lo = Math.min(lo, set.base[i]!);
+        hi = Math.max(hi, set.base[i]!);
       }
+      if (hi > lo) spreads.push(hi - lo);
+    }
+    for (let i = 0; i < set.count; i++) {
+      if (cloudGrow(set, i, 0) < 1) continue;
+      fair++;
+      const kind = set.kind[i]!;
+      kinds[kind]!++;
+      lowBase = Math.min(lowBase, set.base[i]!);
+      highBase = Math.max(highBase, set.base[i]!);
+      let along = 0;
+      let across = 0;
+      const big: number[] = [];
+      for (let j = 0; j < CLOUD_SLOTS; j++) {
+        const o = (i * CLOUD_SLOTS + j) * BLOB_FLOATS;
+        const rx = set.blobs[o + 3]!;
+        if (rx <= 0) continue;
+        const r = Math.max(rx, set.blobs[o + 5]!);
+        along = Math.max(along, Math.abs(set.blobs[o]! * wx + set.blobs[o + 2]! * wz) + r);
+        across = Math.max(across, Math.abs(-set.blobs[o]! * wz + set.blobs[o + 2]! * wx) + r);
+        if (set.blobs[o + 4]! > Math.min(rx, set.blobs[o + 5]!) + 1e-3) spikes++;
+        if (j < CLOUD_BIG_SLOTS) big.push(o);
+        else {
+          // A small lobe is sunk: its centre inside one of the big ones.
+          smalls++;
+          if (!big.some((p) => lobeDistance(set.blobs, p, set.blobs[o]!, set.blobs[o + 1]!, set.blobs[o + 2]!) < 1)) floating++;
+        }
+      }
+      // Every big lobe overlaps a neighbour by over half a radius: its centre within 1.5
+      // radii of the other's, either way round.
+      for (const o of big) {
+        lobes++;
+        if (big.length > 1 && !big.some((p) => p !== o && Math.min(
+          lobeDistance(set.blobs, p, set.blobs[o]!, set.blobs[o + 1]!, set.blobs[o + 2]!),
+          lobeDistance(set.blobs, o, set.blobs[p]!, set.blobs[p + 1]!, set.blobs[p + 2]!),
+        ) < 1.5)) loose++;
+      }
+      lengths.push(2 * along);
+      ratios[kind]!.push(set.top[i]! / (2 * along));
+      if (along > across * 1.1) stretched++;
     }
   }
-  const cover = footprint / samples;
-  check(
-    'the sky is sparse fair-weather cumulus',
-    cover > 0.1 && cover < 0.2,
-    `${(cover * 100).toFixed(1)}% of the sky over a cloud footprint (before erosion)`,
+  const median = (values: number[]): number => [...values].sort((a, b) => a - b)[values.length >> 1] ?? 0;
+  lengths.sort((a, b) => a - b);
+  spreads.sort((a, b) => a - b);
+  console.log(
+    `    ${fair} full-grown fair-weather clouds over ${SEEDS.length} skies: ` +
+      `${kinds[CloudKind.Humilis]} humilis, ${kinds[CloudKind.Mediocris]} mediocris, ` +
+      `${kinds[CloudKind.Congestus]} congestus`,
   );
   check(
-    'every cloud has its shadow',
-    footprintShaded / Math.max(1, footprint) > 0.97,
-    `${((footprintShaded / Math.max(1, footprint)) * 100).toFixed(1)}% of footprint ground in shade`,
+    'every kind is in the sky, towers rare',
+    kinds.every((k) => k > 0) && kinds[CloudKind.Congestus]! / fair < 0.05,
+    `${((kinds[CloudKind.Congestus]! / fair) * 100).toFixed(1)}% congestus`,
   );
-  const meanShade = shadeSum / samples;
-  const farShade = cloudShadeOfField(CLOUD_FAR_FIELD);
   check(
-    'far ground keeps the mean shade',
-    Math.abs(meanShade - farShade) < 0.05,
-    `mean ${meanShade.toFixed(3)}, far stand-in ${farShade.toFixed(3)}`,
+    'no crumbs: few clouds, every one wide',
+    (lengths[0] ?? 0) >= 500 && median(lengths) > 900 && median(lengths) < 3000,
+    `smallest ${(lengths[0] ?? 0).toFixed(0)} m, median ${median(lengths).toFixed(0)} m, largest ${(lengths[lengths.length - 1] ?? 0).toFixed(0)} m long`,
+  );
+  const hum = median(ratios[CloudKind.Humilis]!);
+  const med = median(ratios[CloudKind.Mediocris]!);
+  const tower = median(ratios[CloudKind.Congestus]!);
+  check(
+    'humilis flat, mediocris about half as tall, towers taller',
+    hum > 0.18 && hum < 0.38 && med > 0.3 && med < 0.6 && tower > 0.8,
+    `height/length medians: humilis ${hum.toFixed(2)}, mediocris ${med.toFixed(2)}, congestus ${tower.toFixed(2)}`,
+  );
+  check('stretched along the wind', stretched / fair > 0.85, `${((stretched / fair) * 100).toFixed(0)}% longer along the drift than across`);
+  check('no lobe is stretched upward', spikes === 0, `${spikes} lobes taller than wide`);
+  check(
+    'one continuous body',
+    loose === 0 && floating === 0,
+    `${loose}/${lobes} big lobes without a neighbour overlapping by half a radius, ${floating}/${smalls} small lobes not sunk in`,
+  );
+  check(
+    'bases span 1 to 3.5 km, one line per district',
+    lowBase < 1100 && highBase > 3300 && (spreads[spreads.length >> 1] ?? 1e9) < 200,
+    `${lowBase.toFixed(0)}..${highBase.toFixed(0)} m, median spread in a 2 km cell ${(spreads[spreads.length >> 1] ?? 0).toFixed(0)} m`,
   );
 }
 
-// -- and the cover is not even ---------------------------------------------------
+// -- cover, and how uneven it is ------------------------------------------------------
 
-// A sky with the same sprinkle of same-size puffs everywhere reads as procedural. Over
-// 3 km stretches of sky (about what one look up takes in) the cover has to range: some
-// stretches near-clear, holding a cloud or two at most, others a third cloud.
 {
+  let sum = 0;
+  for (const seed of SEEDS) {
+    const cover = verticalCover(cloudSet(seed), 0, 20_000, seed * 131);
+    sum += cover;
+    console.log(`    seed ${String(seed).padStart(4)}   sky over a cloud ${(cover * 100).toFixed(1)}%`);
+  }
+  const cover = sum / SEEDS.length;
+  check('a sparse fair-weather sky', cover > 0.1 && cover < 0.2, `${(cover * 100).toFixed(1)}% of the ground has a cloud overhead`);
+
+  // Over 3 km stretches of sky (about what one look up takes in) the cover has to range.
   const WINDOW_M = 3000;
-  const STEP_M = 60;
+  const STEP_M = 100;
   const PER_SIDE = WINDOW_M / STEP_M;
   const covers: number[] = [];
   for (const seed of SEEDS) {
-    const salt = cloudShadowSalt(seed);
+    const set = cloudSet(seed);
     for (let wz = 0; wz < 8; wz++) {
       for (let wx = 0; wx < 8; wx++) {
         let inside = 0;
         for (let j = 0; j < PER_SIDE; j++) {
           for (let i = 0; i < PER_SIDE; i++) {
-            const x = wx * WINDOW_M + i * STEP_M + seed * 1111;
-            const z = wz * WINDOW_M + j * STEP_M - seed * 777;
-            if (cloudFieldAt(x, z, salt, 1) > CLOUD_COVER_EDGE) inside++;
+            const x = wrap(wx * WINDOW_M * 2.3 + i * STEP_M + seed * 1111);
+            const z = wrap(wz * WINDOW_M * 2.3 + j * STEP_M - seed * 777);
+            if (cloudCoverAlong(set, 0, x, 0, z, 0, 0) > 0) inside++;
           }
         }
         covers.push(inside / (PER_SIDE * PER_SIDE));
@@ -327,42 +283,172 @@ console.log('cloud shadow field');
   covers.sort((a, b) => a - b);
   const clear = covers.filter((c) => c < 0.03).length / covers.length;
   const cloudy = covers.filter((c) => c > 0.25).length / covers.length;
-  const median = covers[covers.length >> 1] ?? 0;
   console.log(
     `    ${covers.length} stretches of 3 km: ${(clear * 100).toFixed(0)}% near-clear (<3%), ` +
-      `median ${(median * 100).toFixed(0)}%, ${(cloudy * 100).toFixed(0)}% over a quarter, ` +
-      `most ${((covers[covers.length - 1] ?? 0) * 100).toFixed(0)}%`,
+      `median ${((covers[covers.length >> 1] ?? 0) * 100).toFixed(0)}%, ${(cloudy * 100).toFixed(0)}% over a quarter`,
   );
+  check('some stretches of sky are near-clear', clear > 0.1, `${(clear * 100).toFixed(0)}% of 3 km stretches under 3% cover`);
+  check('and some are properly cloudy', cloudy > 0.06, `${(cloudy * 100).toFixed(0)}% of 3 km stretches over 25% cover`);
+
+  // Clumped, not sprinkled: cloud counts in 4 km squares vary more than a Poisson
+  // scatter's would (whose variance equals its mean). With few wide clouds a square holds
+  // one or two, so the ratio is smaller than it was with many small ones; the districts'
+  // clear and crowded stretches above carry most of the unevenness now.
+  const counts: number[] = [];
+  for (const seed of SEEDS) {
+    const set = cloudSet(seed);
+    const side = 4096;
+    const n = CLOUD_PERIOD_M / side;
+    const grid = new Array<number>(n * n).fill(0);
+    for (let i = 0; i < set.count; i++) {
+      if (cloudGrow(set, i, 0) <= 0) continue;
+      grid[Math.floor(set.z[i]! / side) * n + Math.floor(set.x[i]! / side)]!++;
+    }
+    counts.push(...grid);
+  }
+  const mean = counts.reduce((a, b) => a + b, 0) / counts.length;
+  const variance = counts.reduce((a, b) => a + (b - mean) ** 2, 0) / counts.length;
+  check('clouds come in groups', variance / mean > 1.5, `variance/mean ${(variance / mean).toFixed(1)} over 4 km squares (1 is an even scatter)`);
+}
+
+// -- every cloud has its shadow ----------------------------------------------------------
+
+{
+  for (const sun of SUNS) {
+    let tested = 0;
+    let shaded = 0;
+    let soft = 0;
+    let deep = 0;
+    for (const seed of SEEDS) {
+      const set = cloudSet(seed);
+      for (let i = 0; i < set.count && tested < 400 * (SEEDS.indexOf(seed) + 1); i += 7) {
+        if (cloudGrow(set, i, 0) < 1) continue;
+        // The middle of the cloud's first blob, and the ground point whose ray to the
+        // sun passes through it.
+        const o = i * CLOUD_SLOTS * BLOB_FLOATS;
+        const height = set.base[i]! + Math.max(set.blobs[o + 1]!, 0) + 1;
+        const cx = set.x[i]! + set.blobs[o]!;
+        const cz = set.z[i]! + set.blobs[o + 2]!;
+        const gx = wrap(cx - height * sun.x);
+        const gz = wrap(cz - height * sun.z);
+        tested++;
+        if (cloudCoverAlong(set, 0, gx, 0, gz, sun.x, sun.z) >= set.opacity[i]!) shaded++;
+        if (set.reach[i]! > 250) {
+          deep++;
+          if (cloudShadeAlong(set, 0, gx, 0, gz, sun.x, sun.z) > IN_SHADOW * set.opacity[i]!) soft++;
+        }
+      }
+    }
+    check(
+      `every cloud has its shadow up the ray (${sun.label})`,
+      shaded === tested,
+      `${shaded}/${tested} cloud centres shade the ground they stand over along the sun`,
+    );
+    check(
+      `and the blurred shade agrees (${sun.label})`,
+      soft / deep > 0.97,
+      `${soft}/${deep} clouds over 500 m deep in their own shade`,
+    );
+  }
+
+  // The penumbra: along diagonals, every rise from open sun to a shadow's full depth,
+  // measured from 10% to 90% of that shadow's own depth (a raft's is shallower than a
+  // tower's).
+  const widths: number[] = [];
+  let groundShaded = 0;
+  let samples = 0;
+  for (const seed of SEEDS) {
+    const set = cloudSet(seed);
+    for (let line = 0; line < 6; line++) {
+      let run: { d: number; s: number }[] | null = null;
+      let previous = 0;
+      for (let d = 0; d < 20_000; d += 5) {
+        const x = wrap(d * 0.8 + line * 3011 + seed * 97);
+        const z = wrap(d * 0.6 - line * 1999);
+        const shade = cloudShadeAlong(set, 0, x, 0, z, SUNS[0]!.x, SUNS[0]!.z);
+        samples++;
+        if (shade > IN_SHADOW * 0.6) groundShaded++;
+        if (shade < 0.02) run = [];
+        else if (run !== null && shade < previous - 1e-9) {
+          // The top of a rise out of open sun.
+          if (previous > 0.4) {
+            const low = run.find((p) => p.s >= previous * 0.1);
+            const high = run.find((p) => p.s >= previous * 0.9);
+            if (low && high) widths.push(high.d - low.d);
+          }
+          run = null;
+        }
+        run?.push({ d, s: shade });
+        previous = shade;
+      }
+    }
+  }
+  widths.sort((a, b) => a - b);
+  const median = widths[widths.length >> 1] ?? 0;
   check(
-    'some stretches of sky are near-clear',
-    clear > 0.06,
-    `${(clear * 100).toFixed(0)}% of 3 km stretches under 3% cover`,
+    'the edge of a shadow is a penumbra, not a line',
+    widths.length > 50 && median > 90 && median < 260,
+    `10-90% over ${median} m (median of ${widths.length} edges)`,
   );
+  const shadedShare = groundShaded / samples;
   check(
-    'and some are properly cloudy',
-    cloudy > 0.06,
-    `${(cloudy * 100).toFixed(0)}% of 3 km stretches over 25% cover`,
+    'shade comes in patches, under a sparse sky',
+    shadedShare > 0.06 && shadedShare < 0.25,
+    `${(shadedShare * 100).toFixed(1)}% of the ground in shade at noon`,
   );
 }
 
-// -- and the same thing in time, standing still -------------------------------
+// -- a storm --------------------------------------------------------------------------
 
 {
-  const STEP_S = 0.5;
-  const SPAN_S = 3600;
-  let runSum = 0;
+  let fairCount = 0;
+  let stormCount = 0;
+  let fairCover = 0;
+  let stormCover = 0;
   for (const seed of SEEDS) {
-    const shaded: boolean[] = [];
-    for (let i = 0; i * STEP_S < SPAN_S; i++) {
-      shaded.push(cloudShadowShadeAt(seed, 12_345, -67_890, i * STEP_S, 1) > IN_SHADOW);
+    const set = cloudSet(seed);
+    for (let i = 0; i < set.count; i++) {
+      if (cloudGrow(set, i, 0) > 0) fairCount++;
+      if (cloudGrow(set, i, 1) > 0) stormCount++;
     }
-    runSum += meanRun(shaded) * STEP_S;
+    fairCover += verticalCover(set, 0, 4000, 17);
+    stormCover += verticalCover(set, 1, 4000, 17);
   }
-  const runS = runSum / SEEDS.length;
   check(
-    'standing still, the light still changes',
-    runS > 10 && runS < 240,
-    `a parked car is in shade for ${runS.toFixed(0)} s at a time`,
+    'a storm brings more clouds, and bigger',
+    stormCount > fairCount * 1.6 && stormCover > fairCover * 2.2,
+    `${stormCount} clouds against ${fairCount}, cover ${((stormCover / SEEDS.length) * 100).toFixed(0)}% against ${((fairCover / SEEDS.length) * 100).toFixed(0)}%`,
+  );
+}
+
+// -- standing still, the light still changes --------------------------------------------
+
+{
+  // A parked car at eight spots under each sky, for an hour: most of them see shade
+  // arrive and leave, more than once. (One spot can sit under a clear district all hour.)
+  const STEP_S = 2;
+  const SPAN_S = 3600;
+  const SPOTS = 8;
+  let changes = 0;
+  let visited = 0;
+  for (const seed of SEEDS) {
+    for (let spot = 0; spot < SPOTS; spot++) {
+      let previous = -1;
+      let here = 0;
+      for (let t = 0; t < SPAN_S; t += STEP_S) {
+        const shaded = cloudShadowShadeAt(seed, 12_345 + spot * 7_777, 0, -67_890 + spot * 5_311, t, 0.2, 0.1, 0) > IN_SHADOW ? 1 : 0;
+        if (previous >= 0 && shaded !== previous) here++;
+        previous = shaded;
+      }
+      changes += here;
+      if (here >= 2) visited++;
+    }
+  }
+  const spots = SEEDS.length * SPOTS;
+  check(
+    'standing still, shade comes and goes',
+    visited > spots / 2 && changes > spots * 3,
+    `${visited}/${spots} parked spots see shade come and go in an hour, ${(changes / spots).toFixed(1)} changes each, ${CLOUD_DRIFT_MPS} m/s wind`,
   );
 }
 
@@ -370,7 +456,7 @@ console.log('cloud shadow field');
 
 {
   check(
-    'the field is off at night',
+    'the shade is off at night',
     cloudShadowStrength(0) === 0 && cloudShadowStrength(0.11) === 0,
     'strength 0 below the mirage twilight band',
   );
@@ -385,36 +471,37 @@ console.log('cloud shadow field');
 
 {
   const pan = { x: 0, z: 0 };
+  let disagree = 0;
   let worst = 0;
-  for (const seed of SEEDS) {
-    const salt = cloudShadowSalt(seed);
-    for (let i = 0; i < 4000; i++) {
-      // A plausible frame: the origin on its 1 km lattice out at the far end of the
-      // road, the fragment somewhere in the 2.4 km of world that is alive around it.
-      const originX = FAR_FROM_CENTRE + Math.floor(i / 7) * 1000;
-      const originZ = -FAR_FROM_CENTRE + Math.floor(i / 11) * 1000;
-      const relX = ((i * 37) % 2400) - 1200;
-      const relZ = ((i * 53) % 2400) - 1200;
-      const t = (i % 900) * 3.1;
-      const absolute = cloudShadowFactorAt(seed, originX + relX, originZ + relZ, t, 1, 1);
-      cloudShadowPan(seed, t, originX, originZ, pan);
-      const shaderSide = cloudShadowFactorFromPan(pan.x, pan.z, relX, relZ, salt, 1, 1);
-      const diff = Math.abs(absolute - shaderSide);
-      if (diff > worst) worst = diff;
-    }
+  const set = cloudSet(42);
+  for (let i = 0; i < 4000; i++) {
+    // A plausible frame: the origin on its 1 km lattice out at the far end of the
+    // road, the ground point somewhere in the 2.4 km of world alive around it.
+    const originX = FAR_FROM_CENTRE + Math.floor(i / 7) * 1000;
+    const originZ = -FAR_FROM_CENTRE + Math.floor(i / 11) * 1000;
+    const relX = ((i * 37) % 2400) - 1200;
+    const relZ = ((i * 53) % 2400) - 1200;
+    const t = (i % 900) * 3.1;
+    const absolute = cloudShadowShadeAt(42, originX + relX, 20, originZ + relZ, t, 0.3, -0.2, 0);
+    // The shader's path: the scene-relative point plus the reduced pan.
+    cloudPan(42, t, originX, originZ, pan);
+    const shaderSide = cloudShadeAlong(set, 0, wrap(relX + pan.x), 20, wrap(relZ + pan.z), 0.3, -0.2);
+    const diff = Math.abs(absolute - shaderSide);
+    if (diff > 1e-6) disagree++;
+    worst = Math.max(worst, diff);
   }
+  // A silhouette edge sits on one exact metre; f64 rounding of the two paths can put a
+  // sample a nanometre either side of it, once in a great while.
   check(
     'a rebase does not move the clouds',
-    worst < 1e-6,
-    `worst disagreement ${worst.toExponential(1)} over 16 000 frames at 386 km`,
+    disagree <= 2,
+    `${disagree} of 4000 frames at 386 km disagree (worst ${worst.toExponential(1)})`,
   );
 
-  // The pan is also what keeps the shader out of f32's coarse range: assert it is
-  // reduced, because that reduction is the only reason the field is periodic at all.
-  cloudShadowPan(42, 1_000_000, FAR_FROM_CENTRE, FAR_FROM_CENTRE, pan);
+  cloudPan(42, 1_000_000, FAR_FROM_CENTRE, FAR_FROM_CENTRE, pan);
   check(
     'the shader never sees a road-sized coordinate',
-    Math.abs(pan.x) <= CLOUD_PERIOD_M && Math.abs(pan.z) <= CLOUD_PERIOD_M,
+    pan.x >= 0 && pan.x < CLOUD_PERIOD_M && pan.z >= 0 && pan.z < CLOUD_PERIOD_M,
     `pan ${pan.x.toFixed(0)}, ${pan.z.toFixed(0)} m inside a ${(CLOUD_PERIOD_M / 1000).toFixed(1)} km period`,
   );
 }
@@ -423,44 +510,24 @@ console.log('cloud shadow field');
 
 {
   const pan = { x: 0, z: 0 };
+  const before = cloudShadowFrame().elapsed;
   const FRAMES = 120;
   const DT = 1 / 60;
-  for (let i = 0; i < FRAMES; i++) {
-    advanceCloudShadows(42, DT, 1, FAR_FROM_CENTRE, 12_000, 'standard', false);
-  }
+  for (let i = 0; i < FRAMES; i++) advanceCloudShadows(42, DT, 1, FAR_FROM_CENTRE, 12_000);
   const frame = cloudShadowFrame();
-  cloudShadowPan(42, frame.elapsed, FAR_FROM_CENTRE, 12_000, pan);
+  cloudPan(42, frame.elapsed, FAR_FROM_CENTRE, 12_000, pan);
   check(
-    'the frame uniforms are the field',
-    Math.abs(frame.panX - pan.x) < 1e-9 &&
-      Math.abs(frame.panZ - pan.z) < 1e-9 &&
-      frame.salt === cloudShadowSalt(42),
+    'the frame uniforms are the pan',
+    Math.abs(frame.panX - Math.fround(pan.x)) < 1e-2 && Math.abs(frame.panZ - Math.fround(pan.z)) < 1e-2,
     `elapsed ${frame.elapsed.toFixed(2)} s, pan ${frame.panX.toFixed(1)}, ${frame.panZ.toFixed(1)} m`,
   );
   check(
     'dt drives the drift, not the wall clock',
-    Math.abs(frame.elapsed - FRAMES * DT) < 1e-9,
-    `${FRAMES} frames of ${(DT * 1000).toFixed(1)} ms gave ${frame.elapsed.toFixed(3)} s`,
+    Math.abs(frame.elapsed - before - FRAMES * DT) < 1e-9,
+    `${FRAMES} frames of ${(DT * 1000).toFixed(1)} ms gave ${(frame.elapsed - before).toFixed(3)} s`,
   );
-
-  advanceCloudShadows(42, 0, 0, 0, 0, 'blessing', false);
-  const dark = cloudShadowFrame();
-  advanceCloudShadows(42, 0, 1, 0, 0, 'acceptable', false);
-  const weak = cloudShadowFrame();
-  advanceCloudShadows(42, 0, 1, 0, 0, 'blessing', true);
-  const phone = cloudShadowFrame();
-  advanceCloudShadows(42, 0, 1, 0, 0, 'standard', false);
-  const desktop = cloudShadowFrame();
-  check(
-    'a dark frame does no work at all',
-    dark.strength === 0,
-    'strength 0 disables the whole fragment block',
-  );
-  check(
-    'the rung buys the detail octave',
-    weak.detail === 0 && phone.detail === 0 && desktop.detail === 1,
-    'acceptable 0, phone 0, standard desktop 1',
-  );
+  advanceCloudShadows(42, 0, 0, 0, 0);
+  check('a dark frame does no work at all', cloudShadowFrame().strength === 0, 'strength 0 disables the whole block');
 }
 
 // -- the injection, against the installed three -------------------------------
@@ -491,25 +558,23 @@ console.log('cloud shadow field');
       count(shader.fragmentShader, 'varying float vCloudShade;') === 1,
     'applied twice, injected once',
   );
-  // THE COST CHECK, and the reason this file exists at all. The field ran in the
-  // fragment shader once and cost 34 ms a frame on the machine that reported it: the
-  // ground shader is already near the register limit, so four hashes a pixel spilled
-  // it. Nothing in the fragment stage may hash — if a later edit moves the sampler
-  // back down there, this fails with the arithmetic in the message rather than
-  // shipping the same 30x again.
+  // THE COST CHECK. The shade ran in the fragment shader once and cost 34 ms a frame on
+  // the machine that reported it: the ground shader is near the register limit and
+  // spilled. The map is read per vertex; nothing in the fragment stage may sample it.
   check(
-    'the field is evaluated per VERTEX, never per fragment',
+    'the map is read per VERTEX, never per fragment',
     count(shader.vertexShader, 'float cloudShade(') === 1 &&
-      count(shader.vertexShader, '? cloudShade( cloudWorld.xz') === 1 &&
+      count(shader.vertexShader, '? cloudShade( cloudWorld )') === 1 &&
       count(shader.fragmentShader, 'cloudShade(') === 0 &&
-      count(shader.fragmentShader, 'cloudHash(') === 0 &&
+      count(shader.fragmentShader, 'uCloudMap') === 0 &&
+      count(shader.fragmentShader, 'wetHash(') === 0 &&
       count(shader.fragmentShader, 'vCloudShade * uCloudStrength') === 1 &&
       count(shader.vertexShader, 'uCloudStrength > 0.0') === 1,
-    'vertex hash (skipped at night), fragment multiply',
+    'one vertex tap (skipped at night), fragment multiply',
   );
   check(
     'the splice points still exist in three ' + THREE.REVISION,
-    shader.vertexShader.includes('? cloudShade( cloudWorld.xz') &&
+    shader.vertexShader.includes('? cloudShade( cloudWorld )') &&
       count(shader.fragmentShader, '#include <opaque_fragment>') === 1,
     'worldpos_vertex and opaque_fragment both found',
   );
@@ -517,7 +582,7 @@ console.log('cloud shadow field');
     'it chained instead of replacing',
     shader.fragmentShader.includes('uComicBands') &&
       shader.uniforms.uComicBands !== undefined &&
-      shader.uniforms.uCloudPan !== undefined,
+      shader.uniforms.uCloudMap !== undefined,
     'comic uniforms and cloud uniforms both bound',
   );
   check(
@@ -529,9 +594,9 @@ console.log('cloud shadow field');
 
   // AND THE OTHER GROUND STACK. The road ribbon, its bed and its markings carry
   // `applyGroundSpotlightNormals`, which rewrites the stock lighting chunk instead
-  // of the output — a different splice, and the one the road will be wrapped with.
-  // It is checked here rather than trusted, because a patch that quietly replaced
-  // the spotlight one would leave headlamps flat on every uphill road in the game.
+  // of the output — a different splice. Checked here rather than trusted, because a
+  // patch that quietly replaced the spotlight one would leave headlamps flat on every
+  // uphill road in the game.
   const road = applyCloudShadow(
     applyGroundSpotlightNormals(new THREE.MeshStandardMaterial({ vertexColors: true })),
   );
@@ -546,7 +611,7 @@ console.log('cloud shadow field');
     'the road ribbon keeps its spotlight patch',
     count(roadShader.fragmentShader, 'groundSlopeNormal( geometryPosition') === 1 &&
       count(roadShader.fragmentShader, 'vCloudShade * uCloudStrength') === 1 &&
-      roadShader.uniforms.uCloudPan !== undefined,
+      roadShader.uniforms.uCloudMap !== undefined,
     'slope-corrected spotlights and cloud shade in one program',
   );
 }

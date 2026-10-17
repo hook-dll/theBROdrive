@@ -421,9 +421,9 @@ async function boot(): Promise<void> {
   // The sun's shadow map is sized by the tier (`GraphicsTier.sunShadowMapSize`).
   sky.setQuality(world.state.settings.graphicsQuality, mobilePresentation);
   sky.setShadowMode(world.state.settings.shadows);
-  // The volumetric cumulus is drawn before the scene; installed before the boot warm-up
+  // The clouds' shadow map is drawn before the scene; installed before the boot warm-up
   // so `waitForFrameShaders` links its programs.
-  renderer.setSkyPass(sky.cloudPass);
+  renderer.setCloudShadowPass(sky.clouds);
   await sky.waitForAssets();
   // Warm every POI building: building one costs 3.7 ms on a 5950X — more than the
   // whole 3 ms streaming budget — and a first use happens while the player is driving
@@ -2526,19 +2526,13 @@ async function boot(): Promise<void> {
     // permanent world state. Tableaus dissolve as soon as the player leaves the road.
     mirage.update(activeS, sky.dayFactor);
     mirageTableau.update(activeS, activeLateral, sky.dayFactor);
-    // The drifting cloud shade every ground material samples. Driven by the RENDER
-    // frame's own dt, so a paused game's clouds stop with it, and given the f64
-    // origin because the field is anchored to the world rather than to the player —
-    // see `render/cloudshadow.ts`.
-    advanceCloudShadows(
-      world.seed,
-      frameDt,
-      sky.dayFactor,
-      origin.x,
-      origin.z,
-      s.settings.graphicsQuality,
-      mobilePresentation,
-    );
+    // The drifting clouds and the shade every ground material reads from them. Driven by
+    // the RENDER frame's own dt, so a paused game's clouds stop with it, and given the
+    // f64 origin because the clouds are anchored to the world rather than to the player —
+    // see `render/cloudshadow.ts`. Then the cloud layer places this frame's clouds round
+    // the camera and aims its shadow map (`render/clouds.ts`).
+    advanceCloudShadows(world.seed, frameDt, sky.dayFactor, origin.x, origin.z);
+    sky.clouds.update(world.seed, renderer.camera);
     advanceDesertGlitter(frameDt, sky.dayFactor);
     // Heat haze, after the cloud field has advanced: the shade over the ground ahead
     // is one of its inputs (render/heathaze.ts).

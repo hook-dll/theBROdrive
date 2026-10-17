@@ -12,16 +12,9 @@ import { weather } from '../world/weather';
 import { SandColor } from './desertdust';
 import { setAirFogExtinction, setAirFogSky, setAirFogSun } from './airfog';
 import { SCENE_FROM_SCREEN_GLSL } from './displaytransform';
-import {
-  CLOUD_BASE_M,
-  CLOUD_COVER_EDGE,
-  CLOUD_DETAIL_CELL_M,
-  CLOUD_FIELD_GLSL,
-  CLOUD_PERIOD_M,
-  cloudFieldUniforms,
-  setCloudSunShift,
-} from './cloudshadow';
-import { CloudVolume } from './cloudvolume';
+import { cloudPanUniform, setCloudSunShift } from './cloudshadow';
+import { CLOUD_PERIOD_M } from './cloudfield';
+import { CloudLayer } from './clouds';
 
 /**
  * Analytic atmosphere around a real Tycho-2 star catalogue and ephemerides for
@@ -508,7 +501,7 @@ void main() {
 
 const SKY_FRAGMENT = /* glsl */ `
 ${SCENE_FROM_SCREEN_GLSL}
-${CLOUD_FIELD_GLSL}
+uniform vec2 uCloudPan;
 uniform float uSunAngularRadius;
 uniform float uMoonAngularRadius;
 /** Radiance of sunlit lunar regolith, in the dome's own authored units. */
@@ -521,22 +514,20 @@ uniform vec3 uHorizon;
 uniform vec3 uSunColor;
 uniform vec3 uSunGlowColor;
 uniform float uSunGlowIntensity;
+/**
+ * How wide the sun's aureole spreads, 0..1: 0 in clean air (bright only a few degrees
+ * round the disc), 1 in haze, dust, thin high cloud or at sunset (a pale glow tens of
+ * degrees across). See Sky.update.
+ */
+uniform float uSunAureole;
 uniform float uMoonAmount;
 /**
  * How strongly the sky away from the sun is pulled down, 0..1. Peaks when the sun
  * is near the horizon and is zero at midday and through the night.
  */
 uniform float uAntiSolar;
-/** Overall visibility of the cumulus: 1 in daylight, 0 in deep night. */
+/** Overall visibility of the clouds: 1 in daylight, 0 in deep night; a storm deck stays. */
 uniform float uCloudAmount;
-/**
- * The volumetric cumulus (render/cloudvolume.ts): 1 while its pass drew this frame, its
- * picture (rgb scattered light, a transmittance) and the view it was drawn for. 0 on the
- * tiers without it and in the environment probe, which keep the 2D deck below.
- */
-uniform float uCloudVolume;
-uniform sampler2D uCloudTex;
-uniform mat4 uCloudViewProj;
 
 // --- Weather (world/weather.ts). Every term below is gated on its own uniform, so a
 // clear sky pays for five comparisons and nothing else. ---
@@ -566,24 +557,17 @@ uniform float uBoltSeed;
 varying vec3 vDir;
 
 /**
- * CUMULUS. Two ways, one field: render/cloudshadow.ts's, at the same pan, so every patch
- * of shade on the desert has its cloud up the sun's ray from it and the two drift
- * together.
- *
- * THE VOLUME (render/cloudvolume.ts) where its pass ran: a raymarched slab drawn at a
- * third of the lines before the scene, read here by projecting this pixel's direction
- * into the view it was drawn for, and composited over everything behind the clouds (the
- * gradient, the halo, the sun and the Moon). Geometry draws over the dome, so the clouds
- * are behind every object by construction, and the ink never touches the sky.
- *
- * THE 2D DECK everywhere else: the low tiers, the environment probe (which shares this
- * shader, so an overcast sky still lights the car a little differently), and a mirror's
- * directions the main view does not cover. A flat deck CLOUD_BASE_M above the eye with
- * a high, thin one behind it, lit by one sample toward the sun.
- *
- * Neither can occlude stars: the dome writes no depth and the star field is separate
- * geometry, so uCloudAmount fades fair cloud out as night falls.
+ * CLOUDS. The fair-weather cumulus are not the dome's: they are low-poly meshes
+ * (render/clouds.ts), drawn over the dome and the stars, so a cloud hides the stars behind
+ * it. What the dome keeps is the STORM DECK: when a storm builds, a grey convective
+ * overcast closes over the sky, a flat layer STORM_BASE_M up that follows the clouds'
+ * own drift (uCloudPan) and is periodic on their period, so a rebase moves nothing.
+ * The environment probe shares this shader, so a stormy sky lights the car a little
+ * differently as well.
  */
+#define STORM_BASE_M 2500.0
+#define STORM_CELLS 32.0
+#define STORM_CELL_M ${(CLOUD_PERIOD_M / 32).toFixed(1)}
 /*
  * Arithmetic hash, not fract(sin(x) * 43758.5). The sine hash leans on the GPU's sin
  * being accurate for arguments in the tens of thousands, and on phones it is not:
@@ -605,6 +589,20 @@ float cloudNoise(vec2 p) {
   return mix(
     mix(cloudHash(i), cloudHash(i + vec2(1.0, 0.0)), u.x),
     mix(cloudHash(i + vec2(0.0, 1.0)), cloudHash(i + vec2(1.0, 1.0)), u.x),
+    u.y
+  );
+}
+
+/** cloudNoise on a lattice that wraps every cells, so the deck is periodic. */
+float stormNoise(vec2 p, float cells) {
+  vec2 i = floor(p);
+  vec2 f = p - i;
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  vec2 i0 = i - cells * floor(i / cells);
+  vec2 i1 = (i + 1.0) - cells * floor((i + 1.0) / cells);
+  return mix(
+    mix(cloudHash(i0), cloudHash(vec2(i1.x, i0.y)), u.x),
+    mix(cloudHash(vec2(i0.x, i1.y)), cloudHash(i1), u.x),
     u.y
   );
 }
@@ -678,82 +676,33 @@ void main() {
   float lowBand = 1.0 - smoothstep(0.0, 0.45, h);
   col = mix(col, uZenith * 0.55, uAntiSolar * away * lowBand);
 
-  // --- Cumulus ---------------------------------------------------------------
-  vec4 vol = vec4(0.0, 0.0, 0.0, 1.0);
-  bool volumetric = false;
-  if (uCloudVolume > 0.5) {
-    vec4 clip = uCloudViewProj * vec4(dir, 0.0);
-    if (clip.w > 0.0) {
-      vec2 cloudUv = clip.xy / clip.w * 0.5 + 0.5;
-      // A pixel's width of slack: the dome's edge pixels project a hair outside.
-      if (all(greaterThan(cloudUv, vec2(-0.01))) && all(lessThan(cloudUv, vec2(1.01)))) {
-        volumetric = true;
-        vol = texture2D(uCloudTex, clamp(cloudUv, 0.0, 1.0));
-      }
-    }
-  }
-  float deck = volumetric ? 1.0 - vol.a : 0.0;
-  vec3 cloudCol = uHorizon;
-  if (!volumetric && uCloudAmount > 0.0 && dir.y > 0.02) {
-    // The 2D deck. dir.y is floored: the projection diverges at the horizon, and the
-    // fade below hides where the floor bites.
+  // --- Storm deck --------------------------------------------------------------
+  float deck = 0.0;
+  if (uStorm > 0.0 && uCloudAmount > 0.0 && dir.y > 0.02) {
+    // dir.y is floored: the projection diverges at the horizon, and the fade below hides
+    // where the floor bites.
     float dy = max(dir.y, 0.05);
     float horizonFade = smoothstep(0.02, 0.16, dir.y) * uCloudAmount;
-    vec3 litCol = mix(uHorizon, uSunColor, 0.7) * 1.08;
-    vec3 shadeCol = mix(uZenith, uHorizon, 0.65) * 0.8;
-    vec2 sunward = normalize(uSunDir.xz + vec2(1e-4, 0.0)) * 180.0;
-    float edge = ${(CLOUD_COVER_EDGE - 0.05).toFixed(3)} - 0.5 * uStorm;
-
-    // High deck: the same field at twice the frequency (a whole multiple, so it stays
-    // periodic on the pan's period) and far from the low deck's patch of it. Sparse and
-    // thin: only the field's peaks, at under half opacity.
-    float highReach = ${(CLOUD_BASE_M * 3).toFixed(1)} / dy;
-    vec2 highAt = (cameraPosition.xz + dir.xz * highReach + uCloudPan) * 2.0 + vec2(13440.0, 26880.0);
-    float highField = cloudField(highAt, 0.0);
-    float highBody = smoothstep(edge + 0.16, edge + 0.26, highField) * (1.0 - uStorm);
-    float highFar = smoothstep(6000.0, 24000.0, highReach);
-    vec3 highCol = mix(litCol, uHorizon, 0.35 + 0.5 * highFar);
-    float highDeck = 0.4 * highBody * (1.0 - highFar) * horizonFade;
-
-    // Low deck, on the slab's flat base.
-    float reach = ${CLOUD_BASE_M.toFixed(1)} / dy;
-    vec2 at = cameraPosition.xz + dir.xz * reach + uCloudPan;
-    float field = cloudField(at, 1.0);
-    // A finer octave the shadows do not need, for a puff's ragged edge; gone where its
-    // cells shrink toward a pixel, before it can shimmer.
-    float fine = 1.0 - smoothstep(5000.0, 12000.0, reach);
-    if (fine > 0.0) {
-      field += fine * 0.07 * (cloudNoise(
-        at / ${(CLOUD_DETAIL_CELL_M / 2).toFixed(1)},
-        ${(CLOUD_PERIOD_M / (CLOUD_DETAIL_CELL_M / 2)).toFixed(1)},
-        uCloudSalt + 31.0
-      ) - 0.5);
-    }
-    // The cloud's edge is the volume's footprint edge (CLOUD_COVER_EDGE); a storm
-    // lowers it until the deck closes.
-    float body = smoothstep(edge + 0.05, edge + 0.13, field);
-    float thick = smoothstep(edge, edge + 0.3, field);
-    float shade = clamp((cloudField(at + sunward, 0.0) - field) * 3.5, 0.0, 1.0);
-    float base = smoothstep(0.3, 0.9, dir.y) * thick;
-    vec3 lowCol = mix(shadeCol, litCol, (1.0 - 0.75 * shade) * (1.0 - 0.45 * base));
-    lowCol += uSunColor * 0.9 * pow(max(sd, 0.0), 6.0) * (1.0 - thick);
-    if (uStorm > 0.0) {
-      // A convective deck: thick, grey, and darkest where it is thickest.
-      vec3 stormCol = mix(uHorizon * 1.04, uZenith * 0.78, thick);
-      stormCol += uSunColor * 0.12 * pow(max(sd, 0.0), 3.0) * (1.0 - thick);
-      lowCol = mix(lowCol, stormCol, uStorm);
-    }
-    // Far clouds sink into the horizon's air, and the deck is out before the horizon
-    // band, which must stay pure gradient: the fog colour is copied from it.
+    float reach = STORM_BASE_M / dy;
+    vec2 at = (cameraPosition.xz + dir.xz * reach + uCloudPan) / STORM_CELL_M;
+    float field = 0.62 * stormNoise(at, STORM_CELLS) + 0.38 * stormNoise(at * 2.0 + 17.0, STORM_CELLS * 2.0);
+    // The deck closes as the storm builds: its edge falls through the field.
+    float edge = 0.95 - 0.75 * uStorm;
+    float body = smoothstep(edge - 0.05, edge + 0.08, field);
+    float thick = smoothstep(edge - 0.1, edge + 0.3, field);
+    // A convective deck: thick, grey, and darkest where it is thickest.
+    vec3 stormCol = mix(uHorizon * 1.04, uZenith * 0.78, thick);
+    stormCol += uSunColor * 0.12 * pow(max(sd, 0.0), 3.0) * (1.0 - thick);
+    // Far deck sinks into the horizon's air, and is out before the horizon band, which
+    // must stay pure gradient: the fog colour is copied from it.
     float far = smoothstep(6000.0, 26000.0, reach);
-    lowCol = mix(lowCol, uHorizon, far * 0.7);
-    float lowDeck = body * (1.0 - far) * horizonFade;
-
-    // The low deck in front of the high one.
-    deck = lowDeck + highDeck * (1.0 - lowDeck);
-    cloudCol = deck > 0.0 ? (lowCol * lowDeck + highCol * highDeck * (1.0 - lowDeck)) / deck : uHorizon;
+    stormCol = mix(stormCol, uHorizon, far * 0.7);
+    // The deck only closes in once the storm is heavy; the build-up is the meshes' (more
+    // clouds, bigger, darker: render/clouds.ts). Grey, not the palette's blue.
+    stormCol = mix(stormCol, vec3(dot(stormCol, vec3(0.2126, 0.7152, 0.0722))), 0.5);
+    deck = body * (1.0 - far) * horizonFade * smoothstep(0.4, 0.8, uStorm);
+    col = mix(col, stormCol, deck);
   }
-  if (!volumetric) col = mix(col, cloudCol, deck);
 
   float sunUp = smoothstep(-0.02, 0.06, uSunDir.y);
 
@@ -789,9 +738,11 @@ void main() {
   float sunEdge = cos(uSunAngularRadius);
   float sunAa = max(fwidth(sd) * 0.5, 0.0000001);
   float disc = smoothstep(sunEdge - sunAa, sunEdge + sunAa, sd);
-  // Keep the white-hot centre, but concentrate both lobes so the clipped region
-  // does not spread across a large part of a clear high-altitude sky.
-  float glow = pow(max(sd, 0.0), 12.0) * 0.45 + pow(max(sd, 0.0), 96.0) * 1.5;
+  // Keep the white-hot centre. The broad lobe is the aureole: in clean desert air it
+  // falls off within 10-15 degrees (exponent 60); only haze, dust, thin high cloud and
+  // a low sun's long path spread it into the wide pale glow (exponent 12), which had
+  // been lit at noon on every clear day.
+  float glow = pow(max(sd, 0.0), mix(60.0, 12.0, uSunAureole)) * 0.45 + pow(max(sd, 0.0), 96.0) * 1.5;
   col += uSunColor * disc * 2.0;
   col += uSunGlowColor * glow * uSunGlowIntensity;
 
@@ -858,15 +809,6 @@ void main() {
   // only ever land somewhere on the blue side of white.
   vec3 lunarAlbedo = texture2D(uMoonTexture, moonMapUv).rgb * vec3(1.10, 1.0, 0.84);
   col += lunarAlbedo * (sunlit + earthshine) * uMoonRadiance * mdisc * uMoonAmount;
-
-  // --- The volumetric cumulus over all of the above ---------------------------
-  // Composited in linear light: the volume scattered radiance (screen-referred, like
-  // the palette) and kept a share of what lies behind it. The rainbow and the lightning
-  // below are in front of the clouds and are added after.
-  if (volumetric) {
-    vec3 behind = sRGBTransferEOTF(vec4(max(col, 0.0), 1.0)).rgb;
-    col = sRGBTransferOETF(vec4(behind * vol.a + vol.rgb, 1.0)).rgb;
-  }
 
 
   // --- Rainbow --------------------------------------------------------------
@@ -982,8 +924,12 @@ export class Sky {
   /** Holds one dome, sharing the visible dome's uniforms, shaded in linear space. */
   private readonly envMaterial: THREE.ShaderMaterial;
   private envTarget: THREE.WebGLRenderTarget | null = null;
-  /** The volumetric cumulus pass; the renderer draws it before the scene (`cloudPass`). */
-  private readonly cloudVolume: CloudVolume;
+  /**
+   * The low-poly cumulus and their shadow map (render/clouds.ts). In the scene from boot,
+   * so `waitForFrameShaders` links its programs; `main.ts` places it every frame and hands
+   * its coverage pass to the renderer.
+   */
+  readonly clouds: CloudLayer;
 
   /** True only for the update that successfully replaced the environment target. */
   private didBakeEnvironment = false;
@@ -996,6 +942,8 @@ export class Sky {
   private readonly uSunColor = new THREE.Color();
   private readonly uSunGlowColor = new THREE.Color();
   private readonly uSunGlowIntensity = { value: 0 };
+  /** Aureole width, 0..1; see SKY_FRAGMENT `uSunAureole`. */
+  private readonly uSunAureole = { value: 0 };
   private readonly uMoonAmount = { value: 0 };
   private readonly uSunAngularRadius = { value: 0.00465 };
   private readonly uMoonAngularRadius = { value: 0.0045 };
@@ -1007,11 +955,17 @@ export class Sky {
    */
   private readonly uAntiSolar = { value: 0 };
   /**
-   * Overall deck visibility. Falls to zero as night lands, because the dome cannot
-   * depth-test against the star field and so cannot occlude a star — see the note in
-   * SKY_FRAGMENT.
+   * The storm deck's visibility: falls to zero as night lands, and haze and dust swallow
+   * it (the dome's deck is a painted layer, not a body the fog can veil).
    */
   private readonly uCloudAmount = { value: 0 };
+  /**
+   * The cloud bodies' opacity (render/clouds.ts): the night fade only. Haze and dust veil
+   * them through the land's own aerial perspective instead; fading them by alpha made
+   * every cloud a see-through ghost on a hazy day, its back facets showing through its
+   * front and the sun's disc through both.
+   */
+  private readonly uCloudBodies = { value: 0 };
   // --- Weather (see the SKY_FRAGMENT weather block) ---
   private readonly uDomeFlat = { value: 0 };
   private readonly uStorm = { value: 0 };
@@ -1099,15 +1053,17 @@ export class Sky {
     const zenith = { value: this.uZenith };
     const horizon = { value: this.uHorizon };
     const sunColor = { value: this.uSunColor };
-    this.cloudVolume = new CloudVolume(webgl, {
+    this.clouds = new CloudLayer(webgl, {
       uSunDir: sunDir,
       uZenith: zenith,
       uHorizon: horizon,
       uSunColor: sunColor,
       uStorm: this.uStorm,
-      uCloudAmount: this.uCloudAmount,
+      uCloudAmount: this.uCloudBodies,
+      uFlash: this.uFlash,
       fog,
     });
+    scene.add(this.clouds.root);
     const domeMaterial = new THREE.ShaderMaterial({
       vertexShader: SKY_VERTEX,
       fragmentShader: SKY_FRAGMENT,
@@ -1119,16 +1075,15 @@ export class Sky {
         uSunColor: sunColor,
         uSunGlowColor: { value: this.uSunGlowColor },
         uSunGlowIntensity: this.uSunGlowIntensity,
+        uSunAureole: this.uSunAureole,
         uMoonTexture: { value: this.moonTexture },
         uMoonAmount: this.uMoonAmount,
         uSunAngularRadius: this.uSunAngularRadius,
         uMoonAngularRadius: this.uMoonAngularRadius,
         uMoonRadiance: this.uMoonRadiance,
         uAntiSolar: this.uAntiSolar,
-        uCloudPan: cloudFieldUniforms.uCloudPan,
-        uCloudSalt: cloudFieldUniforms.uCloudSalt,
+        uCloudPan: cloudPanUniform,
         uCloudAmount: this.uCloudAmount,
-        ...this.cloudVolume.domeUniforms,
         uDomeFlat: this.uDomeFlat,
         uStorm: this.uStorm,
         uHalo: this.uHalo,
@@ -1402,19 +1357,23 @@ export class Sky {
     this.uSunColor.copy(this._sunColor);
     this.uSunGlowColor.copy(this._sunGlow);
     this.uSunGlowIntensity.value = sunGlowIntensity;
+    // The wide aureole is weather, not the default: haze, dust and the cirrostratus veil
+    // spread the sun's light, and so does a low sun's long path (the sunset mood).
+    this.uSunAureole.value = Math.min(1, Math.max(sunset, weather.haze * 1.5, weather.dust, weather.halo));
     this.uMoonAmount.value = smoothstep(-0.01, 0.005, celestial.moon.direction.y);
 
-    // --- Cumulus ---
-    // Held through dusk — a lit deck at sunset is the best the sky ever looks — and gone
-    // by the time `night` reaches 1, past nautical dusk, because the dome cannot occlude
-    // a star. Where the clouds stand is the shadow field's (render/cloudshadow.ts); the
-    // sun shift points the ground's shade at them.
+    // --- Clouds ---
+    // Held through dusk — a lit cloud at sunset is the best the sky ever looks — and gone
+    // by the time `night` reaches 1, past nautical dusk: the meshes hide the stars behind
+    // them (render/clouds.ts), and an unlit cloud is a hole in the night sky. The sun
+    // shift points the ground's shade at the clouds that cast it.
     setCloudSunShift(celestial.sun.direction);
     // A storm deck stays visible after dark (it is lit by the town-less desert's
     // nothing, and by lightning), so it does not fade with the night like fair cloud.
     // Haze and dust swallow the high cloud: the sky above a mgla is one milky veil.
     this.uCloudAmount.value =
       Math.max(1 - night, weather.cloud * 0.9) * (1 - 0.85 * weather.haze) * (1 - weather.dust);
+    this.uCloudBodies.value = Math.max(1 - night, weather.cloud * 0.9);
     this.updateWeatherOptics(celestial.sun.direction);
 
     // --- Photometric exposure and real catalogue stars ---
@@ -1707,10 +1666,6 @@ export class Sky {
    */
   private bakeEnvironment(): void {
     if (this.envTarget !== null) return;
-    // The probe's six faces are not the view the volume was drawn for: the 2D deck.
-    const volume = this.cloudVolume.domeUniforms.uCloudVolume;
-    const wasVolume = volume.value;
-    volume.value = 0;
     this.envTarget = this.pmrem.fromScene(
       this.envScene,
       0,
@@ -1718,28 +1673,18 @@ export class Sky {
       DOME_RADIUS * 2,
       { size: 128 },
     );
-    volume.value = wasVolume;
     this.scene.environment = this.envTarget.texture;
     this.didBakeEnvironment = true;
   }
 
   /**
-   * The volumetric cumulus pass, for `Renderer.setSkyPass`: drawn before the scene, read
-   * by the dome. Labs that never install it keep the 2D deck.
-   */
-  get cloudPass(): CloudVolume {
-    return this.cloudVolume;
-  }
-
-  /**
    * Applies the rendering tier to the catalogue star depth, the sun's shadow map and the
-   * cumulus: the volume on desktop `standard` and `blessing`, the 2D deck below them and
-   * on phones. A uniform decides which the dome reads, so no program changes.
+   * clouds' reach (render/clouds.ts). No program changes.
    */
   setQuality(quality: GraphicsQuality, mobilePresentation?: boolean): void {
     this.starField.setQuality(quality, mobilePresentation);
     this.applyShadowBox(GRAPHICS_TIERS[quality].sunShadowMapSize);
-    this.cloudVolume.enabled = mobilePresentation !== true && (quality === 'standard' || quality === 'blessing');
+    this.clouds.setQuality(quality, mobilePresentation === true);
   }
 
   /** `Settings.shadows`, applied by the next `update`; see `shadowMode`. */
@@ -1831,6 +1776,7 @@ export class Sky {
 
   dispose(): void {
     this.scene.remove(this.root);
+    this.scene.remove(this.clouds.root);
     this.scene.remove(this.sunLight);
     this.scene.remove(this.sunLight.target);
     this.scene.remove(this.sunNearLight);
@@ -1849,6 +1795,6 @@ export class Sky {
     this.envMaterial.dispose();
     if (this.envTarget !== null) this.envTarget.dispose();
     this.pmrem.dispose();
-    this.cloudVolume.dispose();
+    this.clouds.dispose();
   }
 }

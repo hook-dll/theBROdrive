@@ -185,7 +185,10 @@ export class StarField {
         uMoonDir: { value: new THREE.Vector3(0, -1, 0) },
         uMoonAngularRadius: { value: 0.0045 },
       },
-      transparent: true,
+      // Additive, but in the OPAQUE pass (three blends any non-normal blending there): it
+      // draws right after the dome and before the clouds (render/clouds.ts), which then
+      // cover the stars behind them. As a transparent draw it came after the clouds and
+      // shone through them.
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       toneMapped: false,

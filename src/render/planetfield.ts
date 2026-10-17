@@ -79,8 +79,8 @@ export class PlanetField {
       vertexShader: VERTEX,
       fragmentShader: FRAGMENT,
       uniforms: { uExposure: { value: 0 } },
+      // Opaque pass, before the clouds, like the stars (render/starcatalog.ts).
       depthWrite: false,
-      transparent: true,
       blending: THREE.AdditiveBlending,
       toneMapped: false,
     });

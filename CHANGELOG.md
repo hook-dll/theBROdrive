@@ -911,67 +911,81 @@
 
 ### Changed
 
-- VOLUMETRIC CUMULUS OVER THE SHADOWS (`render/cloudvolume.ts`, `render/sky.ts`,
-  `render/cloudshadow.ts`, `core/renderer.ts` `setSkyPass`). The sky's cirrus deck had
-  nothing to do with the cloud shadows crossing the desert, and the flat cumulus decks
-  that replaced it read as painted blobs. The clouds are now a raymarched slab from
-  `CLOUD_BASE_M` (1.3 km above the eye, one flat condensation level for every cloud) to
-  `CLOUD_TOP_M` (2.3 km): footprint from the very field the ground's shade comes from
-  (same pan and salt, baked into a 1024² coverage map round the eye and rebaked every
-  3 km). A cloud's HEIGHT is read from that field blurred over 300 m (two separable
-  passes into the map's second channel at each rebake), relative to the footprint's
-  edge, so each cloud is one smooth hill and its height goes with its size: a small cloud
-  a flat humilis about 100 m thick, a typical one 280 m, the big merged cores 800 m to the
-  full kilometre. Its side draws in as it climbs, so the shoulders round over into the top, and the
-  dome's surface is cut into billows by a 64³ tiling Perlin-Worley noise baked at startup.
-  The billowed erosion acts only near the surface. The lowest 90 m get a wispy fray.
-  Nothing extends below the flat base, and the noise sits on an oblique lattice so
-  trilinear creases do not draw level lines. The first version read the height from the
-  raw coverage, which climbs about 0.1 every 100 m at a cloud's edge, so a column rose a
-  kilometre over 300 m and many clouds came out as cones and spikes. Lit with
-  Beer-Lambert, a six-sample march toward the sun reaching 1.9 km (twice that under a low
-  sun, so neighbours shade each other at dusk), three multiple-scattering octaves, a
-  dual-lobe Henyey-Greenstein phase (the silver lining), a light powder term, and
-  sky/ground ambient by height in the column. At sunset the ambient comes from the zenith
-  alone, greyed toward slate, and the sun reaching a cloud's lower half is dimmed.
-  AERIAL PERSPECTIVE IS THE LAND'S (`render/airfog.ts`): the same clear-air extinction
-  (regional haze, clarity, mgla, rain, storm), the same haboob FogExp2, the same fog
-  colour by elevation and the same anti-solar pull. It is taken along the slant path to
-  each pixel's transmittance-weighted cloud depth, with the air thinning upward over a
-  1.8 km scale height. Overhead clouds stay crisp, low far ones dissolve into the horizon
-  as a mesa at that distance does, and on a thick haze or dust day they vanish. A cloud is
-  never less veiled than land nearer along the same sight line: the land's fog ignores the
-  height fall-off, which only ever veils the land more. Before, the clouds had their own
-  fixed 22 km law, and on a hazy day crisp, dark clouds stood behind a mesa nearly lost in
-  the haze. Drawn before the scene at
-  360 lines at most, 64 steps with empty space skipped (and stepped back into, so the
-  entry never jumps a step). The view ray and the light march each have their own
-  per-pixel jitter sequence (golden ratio and plastic number, so the two never move in
-  step), accumulated over frames (history weight 0.93) and reprojected by view direction.
-  Sharing one jitter left hatched stripes the history could not average out. The dome
-  composites the result in linear light: in front of the sun, the Moon and the halo,
-  behind the rainbow and the lightning. A storm lowers the footprint edge, thickens the
-  clouds and stands every column to the top of the slab until the deck closes. Cost on the
-  M2 Pro at 2560x1440 (cloud picture 640x360), the cloud pass alone timed with its own
-  GPU query in the same tab: 1.15-1.55 ms (the first volumetric version: 1.75-2.6 ms).
-  Desktop `standard` and `blessing` only: the low rungs, phones,
-  the environment probe and a mirror's directions outside the view keep the 2D deck,
-  switched by a uniform, so no program changes.
+- THE SUN'S WIDE AUREOLE IS WEATHER, NOT EVERY NOON (`render/sky.ts` `uSunAureole`). The
+  glow's broad lobe (`pow(sd, 12)`, still 47% at 20 degrees from the disc) was lit on every
+  clear day, a pale disc 40-60 degrees across that read as a permanent halo. In clean air
+  it now falls off within 10-15 degrees (exponent 60); haze, dust, the cirrostratus veil
+  before a front and a low sun widen it back to the old lobe. The core round the disc and
+  the 22-degree halo (storm and haboob harbingers only) are unchanged.
 
-  SPARSE AND UNEVEN (owner: a third of the sky in cloud "looks generated"). The field's
-  3.36 km coverage term went from 0.24 to 0.6 (`CLOUD_COVER_AMPLITUDE`), and the cloud
-  edge moved to the field's 85th percentile (`CLOUD_COVER_EDGE` 0.77): about 14% of the sky
-  over a footprint on average, but by district. Of 3 km stretches of sky, 16% are near-clear
-  (under 3%, a cloud or two at most), the median holds 12% and 19% hold over a quarter, up
-  to 56%. A clear district shows a few small isolated clouds where the field's peaks
-  poke through, and a cloudy one shows big merged clouds. The ground's shade band moved
-  with the edge (0.61-0.93, 0.32 wide), so the shade stays under the clouds, about 14% of
-  the ground. The shade looks up the sun's ray to one height (`CLOUD_SHADOW_HEIGHT_M`);
-  the per-cloud base heights (`cloudBase`) are gone. `tools/sky-variety.ts` checks the
-  cover (10-20%), that districts range from near-clear to over a quarter, that every
-  footprint is in shade, the shade fraction (8-25%), and the far ground's mean shade.
-  Gone with the cirrus: `cloudFbm`, `uCloudCover`, `uCloudTime` and the sky gradient's
-  `cloudCover`.
+- LOW-POLY CUMULUS, AND SHADOWS THAT ARE THEIRS (`render/cloudfield.ts`, `render/clouds.ts`,
+  `render/cloudshadow.ts`, `render/sky.ts`). The owner rejected the raymarched volume and
+  every noise-field sky before it ("all one height", "still visibly a grid / a function"),
+  so the clouds are now objects in the game's own faceted style. `cloudfield.ts` builds a
+  list per seed (about 490 fair-weather clouds in a 61 km period, more storm candidates):
+  Poisson-scattered in 2 km cells round a per-cell group centre drawn out along the wind
+  into loose streets, under a district cover that leaves about a third of 3 km stretches
+  near-clear. SHAPES FROM PHOTOGRAPHS, third pass (the first read as "flying cakes", the
+  second as rocks and crumbs with pointed tents): FEW, WIDE CLOUDS, no confetti and no
+  fractus shreds: humilis 0.5-1.5 km long and a quarter as tall, mediocris 1.5-3.5 km and
+  0.4 as tall (medians by the tool, against the length), congestus towers under 2% and
+  only in cloudy districts; the smallest cloud is 600 m, the median 1.5 km. ONE
+  CONTINUOUS BODY: a row of 3-4 body lobes the full length, cut flat at one straight base
+  per district (median spread 66-100 m in a 2 km cell), their tops on an envelope that
+  peaks off-centre and thins to the ends; 1-2 crown lobes over the peak with their
+  bottoms inside the body; every big lobe overlaps a neighbour by over half a radius.
+  6-12 small lobes a quarter to two fifths of their parent are SUNK into its upper
+  surface (centre inside, 30-50% of their radius standing out), only where that surface
+  shows. NO POINTS: no lobe is taller than wide (ry at most 0.85 of its narrower
+  horizontal radius), big lobes are detail-2 icospheres and small ones detail 1, corners
+  jostled ±8%. In fair weather a cloud is whole or absent (`cloudGrow`): the partly grown
+  storm candidates no longer sit in a fair sky as shrunken crumbs. Bases 0.99-3.5 km by
+  district; stretched 1.25-1.7 times along the drift. All of them draw in TWO instanced
+  draws (a compact 1760-face mesh for humilis, a 2880-face one for the rest; about 280
+  clouds in the ring, so roughly the faces the many small ones cost before; the lobes live
+  in a float texture, so every cloud is its own shape), placed every frame round the
+  eye out to 26 km (16 km on phones and the two lower rungs), world-anchored by the same
+  reduced pan and wind as before. Lit per facet: Lambert from the sun (banded in Clean),
+  sky ambient on top, a grey-blue under side, the lower half dimmed and the crown lit
+  under a low sun; toward the sun the silhouette facets light up as a silver edge round a
+  grey body (it was a pale wash over the whole cloud); the land's aerial perspective along
+  the slant path (the volume's law, kept). They draw right after the dome in the opaque
+  pass with their own depth range, then a depth-only triangle puts the far plane back so
+  the land draws over them; the stars and planets moved into the opaque pass before them.
+  THE BODIES ARE OPAQUE: they hide the sun's disc and glow and the stars. They had been
+  faded by alpha in haze and dust, at the ring's edge and at the horizon, and a
+  part-transparent cloud showed its back and inner facets through its front (the
+  "interpenetrating lobes flicker" the owner saw toward the sun on a hazy noon: not depth
+  precision, which is about 5 mm at 2 km in the clouds' own range) and the sun through
+  both. Haze and dust now veil them through the aerial perspective, the ring's edge and the
+  horizon band mix them into the air's colour, and only the night fade is alpha, with a
+  depth prepass while it runs so a fading cloud stays one surface deep. A storm brings
+  more clouds, growing from nothing rather than popping in, swollen and darker; the dome
+  keeps a simple grey storm deck that only closes in once a storm is heavy.
+
+  THE SHADOWS ARE THE CLOUDS'. Each frame the clouds whose shadow can reach the eye's
+  16 km are drawn once more, slid along the sun's ray onto a 512² map (32 m texels),
+  blurred twice (a 52 m Gaussian: a 110 m penumbra), and every ground material reads it
+  with one texture tap per VERTEX (`cloudShade`), the fragment stage still one multiply.
+  The noise field, its CPU twin and its warp/coverage/detail terms are gone; the CPU
+  twin is now `cloudShadeAlong` (ray against the clouds' ellipsoids, same blur). The
+  pass is drawn inside the frame's GPU timing via `Renderer.setCloudShadowPass`, which
+  replaces `setSkyPass`. `tools/sky-variety.ts` now checks: same seed same sky; the three
+  kinds with congestus under 5%; no crumbs (smallest over 500 m, median 0.9-3 km); height
+  against length per kind; stretched along the wind; no lobe taller than wide; one
+  continuous body (lobe overlap, small lobes sunk); bases 1-3.5 km on one line per
+  district; cover 16.1% mean (10-20%, 11-19% by seed), clumped (count variance/mean 1.8,
+  lower than with many small clouds), with near-clear and >25% stretches;
+  every sampled cloud shades the ground up the sun's ray at noon and mid-afternoon;
+  penumbra; storm more and bigger; rebase stability at 386 km; the per-vertex splice.
+  Removed: `render/cloudvolume.ts`, the 2D cumulus and high decks in the dome,
+  `CLOUD_FIELD_GLSL`, `cloudFieldUniforms`, `uCloudSalt`, `uCloudDetail`.
+  Measured with the first shapes, before the shape reworks (not re-measured since),
+  on the M2 Pro (1600x900 at 1.25 DPR, standard, noon drive): GPU frame
+  13.8 ms with the clouds off against 13.9-14.5 ms on, in the same tab (noisy; about
+  0.1-0.7 ms for both draws and the map), against the volume's 1.15-1.55 ms pass;
+  no program links during a 35 s drive with a time sweep and a storm (105 before and
+  after).
 - GRASS IS THE PLAYER'S, AND OFF (`Settings.groundCover`, `game/settings.ts`). Ground cover
   starts Off on every rung and no preset, launch measurement or phone default changes it;
   only the Grass row does. Stored under the new key `groundCover`, so every value the

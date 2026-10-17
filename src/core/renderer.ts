@@ -382,13 +382,11 @@ export class Renderer {
    */
   private mirrorPass: { draw(): void } | null = null;
   /**
-   * The sky's volumetric cumulus (render/cloudvolume.ts): drawn into its own small target
-   * before the scene pass, which the dome then reads. Inside the GPU timing like the rest.
+   * The clouds' shadow map (render/clouds.ts): drawn before the scene pass, whose ground
+   * reads it, and inside the GPU timing like the rest. Its programs are linked by
+   * `waitForFrameShaders`, being in no scene the boot compile walks.
    */
-  private skyPass: {
-    draw(camera: THREE.PerspectiveCamera, width: number, height: number): void;
-    compile(): Promise<unknown>;
-  } | null = null;
+  private cloudShadowPass: { draw(): void; compile(): Promise<unknown> } | null = null;
 
   private quality: GraphicsQuality;
   private readonly timerQueryGl: WebGL2RenderingContext | null;
@@ -645,8 +643,8 @@ export class Renderer {
     try {
       this.renderer.setRenderTarget(null);
       const postReady = this.renderer.compileAsync(this.hazeScene, this.hazeCamera);
-      const skyReady = this.skyPass?.compile();
-      await Promise.all([sceneReady, depthReady, postReady, skyReady]);
+      const shadeReady = this.cloudShadowPass?.compile();
+      await Promise.all([sceneReady, depthReady, postReady, shadeReady]);
     } finally {
       this.renderer.setRenderTarget(previousTarget);
     }
@@ -890,9 +888,9 @@ export class Renderer {
     this.mirrorPass = pass;
   }
 
-  /** Installs the sky's cloud pass; see `skyPass`. Before `waitForFrameShaders`, which links it. */
-  setSkyPass(pass: Renderer['skyPass']): void {
-    this.skyPass = pass;
+  /** Installs the clouds' shadow map pass; see `cloudShadowPass`. Before `waitForFrameShaders`. */
+  setCloudShadowPass(pass: Renderer['cloudShadowPass']): void {
+    this.cloudShadowPass = pass;
   }
 
   /**
@@ -1010,9 +1008,9 @@ export class Renderer {
     // the ink and the grain on the displayed picture. Acceptable keeps the pass and
     // drops the WARP (see `setHeatHaze`), which is where the cost was.
     //
-    // Before both, the sky's clouds, for the game's own scene only: the ending cutscene
-    // has no dome to read them.
-    if (scene === this.scene) this.skyPass?.draw(camera, this.hazeTarget.width, this.hazeTarget.height);
+    // Before both, the clouds' shadow map, for the game's own scene only: the ending
+    // cutscene's ground does not read it.
+    if (scene === this.scene) this.cloudShadowPass?.draw();
     this.renderer.setRenderTarget(this.hazeTarget);
     this.renderer.render(scene, camera);
     this.renderer.setRenderTarget(null);
