@@ -17,7 +17,7 @@
 
 import * as THREE from 'three';
 import { PartBuilder, clipPolygon, cutUnder, lerp, lerp3, newell, polygonArea, table, type Outline, type Vec3 } from './builder';
-import type { CabinColumn, KitCarSpec, TubStation } from './spec';
+import type { CabinColumn, CabinOwner, CabinSpec, KitCarSpec, TubStation } from './spec';
 
 /** Bevel under the sill: how far the side's bottom edge turns under. */
 const SILL_BEVEL = 0.035;
@@ -45,6 +45,14 @@ const NOTCH_WALL = 0.025;
 const SCUTTLE = 0.012;
 /** Segments per rounded corner of a raked shut line (`CabinColumn.foot.round`). */
 const CORNER_STEPS = 4;
+/**
+ * A deck quad between two columns is folded along its 1–3 diagonal, not 0–2, where that
+ * diagonal's midpoint lies this much nearer the deck (`deckY`): where the rows change
+ * their meaning from one column to the next (a flat bonnet's crease row, inboard of its
+ * cut, becomes the scuttle's row next to the edge), the 0–2 fold cuts across the crease
+ * and stands a triangle up out of the deck.
+ */
+const DECK_FOLD = 0.01;
 
 export const SHELL_COLOURS = {
   dark: 0x18191a,
@@ -52,7 +60,8 @@ export const SHELL_COLOURS = {
   wheelWell: 0x141515,
 } as const;
 
-type Mat = 'paint' | 'glass' | 'dark';
+/** `canvas`: a soft top's (`CabinSpec.softTop`), unpainted trim in its colour. */
+type Mat = 'paint' | 'glass' | 'dark' | 'canvas';
 
 interface Face {
   v: number[];
@@ -178,13 +187,17 @@ export class BodyFrame {
 
   /** The tub's deck rows at s: fractions of the deck edge's half width. */
   deckFracs(s: number): number[] {
-    const edge = this.section(s).r4[0];
+    const sec = this.section(s);
+    const edge = sec.r4[0];
     const bonnet = this.bonnetX(s);
     if (bonnet !== undefined) {
       // The bonnet's cut is the pillar row; on the nose face the half row is where the
-      // bonnet's nose comes down, elsewhere it halves the bonnet.
+      // bonnet's nose comes down; on a `flat` station it is the pillar line, where the
+      // level top turns down (one plane, not a crown cut into strips); elsewhere it halves
+      // the bonnet.
       const nose = this.spec.bonnet?.nose;
-      const half = nose && s <= this.spec.stations[0]!.s ? nose.half[1] : bonnet / 2;
+      const flat = (sec.st.flat ?? 0) > 0;
+      const half = nose && s <= this.spec.stations[0]!.s ? nose.half[1] : flat ? edge - this.spec.cabin.pillar : bonnet / 2;
       return [0, half / edge, bonnet / edge, 1];
     }
     if (!this.notched) return [0, 0.5, (edge - this.spec.cabin.pillar) / edge, 1];
@@ -211,6 +224,15 @@ export class BodyFrame {
   }
 
   /**
+   * The tailgate's part on one side (+1 left, −1 right): `tailgate`, or with a split
+   * tailgate (`tailgateHinge: 'split'`) its leaf on that side, `tailgate_l` / `tailgate_r`.
+   */
+  tailgateOwner(side: number): string {
+    if (this.spec.tailgateHinge !== 'split') return 'tailgate';
+    return side > 0 ? 'tailgate_l' : 'tailgate_r';
+  }
+
+  /**
    * Half width a `KitCarSpec.bonnet` is cut along at s, `inset` in from the deck's edge,
    * from the bonnet's front to just short of the cowl; undefined elsewhere or without one.
    */
@@ -223,9 +245,12 @@ export class BodyFrame {
   /**
    * Where the bonnet ends: the cowl, or with a `KitCarSpec.bonnet` or a curved screen
    * (`CabinSpec.screenFoot`) `SCUTTLE` short of the screen's foot on the centre line, the
-   * deck between narrowing to the windscreen's base.
+   * deck between narrowing to the windscreen's base; or the bonnet's own `rear`, the
+   * scuttle's deck between it and the screen.
    */
   get bonnetRear(): number {
+    const rear = this.spec.bonnet?.rear;
+    if (rear !== undefined) return rear;
     const foot = this.spec.cabin.screenFoot;
     if (foot !== undefined) return this.cowl - foot - SCUTTLE;
     return this.spec.bonnet ? this.cowl - SCUTTLE : this.cowl;
@@ -237,10 +262,27 @@ export class BodyFrame {
     return foot === undefined ? this.cowl : this.cowl - foot * (1 - frac * frac);
   }
 
+  /**
+   * s of the windscreen's top at a fraction across the roof: the first column's top, or
+   * with `CabinSpec.screenTop` that far ahead of it on the centre line, fading to nothing
+   * at the corners (1 − frac²), as the foot does.
+   */
+  screenTopS(frac: number): number {
+    const top = this.spec.cabin.columns[0]!.top;
+    const ahead = this.spec.cabin.screenTop;
+    return ahead === undefined ? top : top - ahead * (1 - frac * frac);
+  }
+
   /** How far the roof stands below its level at s (`CabinSpec.roofDrop`); 0 without one. */
   roofDrop(s: number): number {
     const line = this.spec.cabin.roofDrop;
     return line ? table(line, s) : 0;
+  }
+
+  /** The roof's crown over the rail at fraction f of its half width (`CabinSpec.crownPower`). */
+  crownAt(f: number): number {
+    const { crown, crownPower } = this.spec.cabin;
+    return crown * (1 - (crownPower === undefined ? f * f : Math.abs(f) ** crownPower));
   }
 
   /**
@@ -282,17 +324,31 @@ export class BodyFrame {
     return axle === w.rear ? (w.rearArch ?? w.arch) : w.arch;
   }
 
+  /**
+   * Where an axle's arch is centred along the car: on the hub, or `WheelSpec.archShift`
+   * from it (negative ahead), for an arch reaching further ahead of the wheel than behind it.
+   */
+  archCentre(axle: number): number {
+    const shift = this.spec.wheels.archShift;
+    if (!shift) return axle;
+    return axle + (axle === this.spec.wheels.rear ? shift[1] : shift[0]);
+  }
+
   /** Arch top at s for either axle, or -Infinity outside both arches. */
   archY(s: number): number {
     const w = this.spec.wheels;
     let best = -Infinity;
     for (const axle of [w.front, w.rear]) {
       const r = w.radius * this.archFactor(axle);
-      const d = s - axle;
+      const d = s - this.archCentre(axle);
       if (Math.abs(d) > r) continue;
-      // A low rear arch is a half ellipse; every other arch a circle on the hub.
+      // A low rear arch is a half ellipse; every other arch a circle on the hub. A squared
+      // arch (`archSquare`) is a superellipse of that power: a flatter top, steeper sides.
       const rise = axle === w.rear ? w.rearArchRise : undefined;
-      const y = rise === undefined ? w.radius + Math.sqrt(r * r - d * d) : w.radius + w.radius * rise * Math.sqrt(Math.max(0, 1 - (d / r) ** 2));
+      const n = w.archSquare;
+      const y = n !== undefined
+        ? w.radius + (rise === undefined ? r : w.radius * rise) * Math.pow(Math.max(0, 1 - Math.abs(d / r) ** n), 1 / n)
+        : rise === undefined ? w.radius + Math.sqrt(r * r - d * d) : w.radius + w.radius * rise * Math.sqrt(Math.max(0, 1 - (d / r) ** 2));
       best = Math.max(best, y);
     }
     return best;
@@ -319,6 +375,16 @@ export class BodyFrame {
 function doorName(owner: string, side: number): string {
   const l = side > 0 ? 'l' : 'r';
   return owner === 'door1' ? `door_f${l}` : `door_r${l}`;
+}
+
+/**
+ * Who owns a cabin column's strip above (`upper`) or below (`lower`) the belt on one side
+ * (+1 left, −1 right): the column's owner, or the body on the side its door is not
+ * (`CabinColumn.only`).
+ */
+export function stripOwner(column: CabinColumn, band: 'upper' | 'lower', side: number): CabinOwner {
+  if (column.only && column.only !== (side > 0 ? 'left' : 'right')) return 'body';
+  return band === 'upper' ? (column.upper ?? 'body') : (column.lower ?? column.upper ?? 'body');
 }
 
 class Shell {
@@ -420,14 +486,15 @@ export function tubColumns(frame: BodyFrame): number[] {
   const w = spec.wheels;
   for (const axle of [w.front, w.rear]) {
     const r = w.radius * frame.archFactor(axle);
+    const c = frame.archCentre(axle);
     const n = 12;
     for (let i = 0; i <= n; i++) {
       // Cosine spacing: short facets where the arch turns down.
       const t = (1 - Math.cos((i / n) * Math.PI)) / 2;
-      s.add(axle - r + 2 * r * t);
+      s.add(c - r + 2 * r * t);
     }
-    s.add(axle - r - 0.004);
-    s.add(axle + r + 0.004);
+    s.add(c - r - 0.004);
+    s.add(c + r + 0.004);
   }
   const sorted = [...s].sort((a, b) => a - b);
   const out: number[] = [];
@@ -567,8 +634,9 @@ export function buildShell(frame: BodyFrame): ShellResult {
     const line = frame.shutLine(c);
     const bySY = line.map(([s, y]) => [y, s] as const).reverse();
     const lineS = (y: number): number => table(bySY, y);
-    const prev = cabin.columns[index - 1]!;
-    return [{ top: line[1]![1], at: c.s, lineS, from: line[line.length - 1]![0], reach: c.s, nearLower: prev.lower ?? prev.upper ?? 'body', farLower: c.lower ?? c.upper ?? 'body' }];
+    // The first column's line (a door edge raking forward of the cowl) has no strip ahead: the body's.
+    const prev = cabin.columns[index - 1] ?? { s: c.s, top: c.top };
+    return [{ top: line[1]![1], at: c.s, lineS, from: line[line.length - 1]![0], reach: c.s, near: prev, far: c }];
   });
 
   for (const side of [1, -1]) {
@@ -594,7 +662,7 @@ export function buildShell(frame: BodyFrame): ShellResult {
       const sMid = (a.s + b.s) / 2;
       const inCabin = sMid > frame.cowl && sMid < frame.rearBase;
       const strip = frame.cabinStrip(sMid);
-      const lower = strip >= 0 ? cabin.columns[strip]!.lower ?? cabin.columns[strip]!.upper ?? 'body' : 'body';
+      const lower = strip >= 0 ? stripOwner(cabin.columns[strip]!, 'lower', side) : 'body';
       // Every column carries the same rows (cut rows clamp, arch rows collapse), so
       // bands pair by index and every side face is a quad or a collapsed triangle.
       const aSide = a.rows.slice(0, sideCount(j) + 1);
@@ -619,8 +687,8 @@ export function buildShell(frame: BodyFrame): ShellResult {
         // A raked shut line crosses the band: each side of it takes the owner of the strip
         // on that side of its column.
         const g = (p: Vec3): number => frame.zNose - p[2] - rake.lineS(p[1]);
-        const before = sMid < rake.at ? lower : rake.nearLower;
-        const after = sMid >= rake.at ? lower : rake.farLower;
+        const before = sMid < rake.at ? lower : stripOwner(rake.near, 'lower', side);
+        const after = sMid >= rake.at ? lower : stripOwner(rake.far, 'lower', side);
         for (const [piece, stripLower] of [[clipPolygon(quad, g, -1), before], [clipPolygon(quad, g, 1), after]] as const) {
           if (piece.length < 3) continue;
           shell.face(piece, sideOwner(stripLower, i, frame.zNose - centroid(piece)[2]), 'paint');
@@ -645,25 +713,35 @@ export function buildShell(frame: BodyFrame): ShellResult {
           if (sMid > spec.bonnetFront && sMid < frame.bonnetRear) owner = 'bonnet';
           if (spec.bootEnd !== undefined && sMid > frame.rearBase && sMid < spec.bootEnd) owner = 'boot';
           // A tailgate coming down the tail face also takes the deck behind its foot.
-          if (spec.bootEnd === undefined && frame.lidFace !== undefined && sMid > frame.rearBase) owner = 'tailgate';
+          if (spec.bootEnd === undefined && frame.lidFace !== undefined && sMid > frame.rearBase) owner = frame.tailgateOwner(side);
         }
-        shell.face(
-          [
-            P(side * aDeck[i]![0], aDeck[i]![1], a.s),
-            P(side * bDeck[i]![0], bDeck[i]![1], b.s),
-            P(side * bDeck[i + 1]![0], bDeck[i + 1]![1], b.s),
-            P(side * aDeck[i + 1]![0], aDeck[i + 1]![1], a.s),
-          ],
-          owner,
-          'paint',
-        );
+        const q: Vec3[] = [
+          P(side * aDeck[i]![0], aDeck[i]![1], a.s),
+          P(side * bDeck[i]![0], bDeck[i]![1], b.s),
+          P(side * bDeck[i + 1]![0], bDeck[i + 1]![1], b.s),
+          P(side * aDeck[i + 1]![0], aDeck[i + 1]![1], a.s),
+        ];
+        // Distance of the deck from a diagonal's midpoint; and how far the quad is from flat
+        // (a level quad, a lid's top at its corners' height, folds either way alike).
+        const miss = (p: Vec3, r: Vec3): number => {
+          const m = lerp3(p, r, 0.5);
+          return Math.abs(m[1] - frame.deckY(frame.zNose - m[2], m[0]));
+        };
+        const twist = Math.abs(dot(norm(cross(sub(q[1]!, q[0]!), sub(q[2]!, q[0]!))), sub(q[3]!, q[0]!)));
+        if (twist > DECK_FOLD && miss(q[1]!, q[3]!) + DECK_FOLD < miss(q[0]!, q[2]!)) {
+          shell.face([q[0]!, q[1]!, q[3]!], owner, 'paint');
+          shell.face([q[1]!, q[2]!, q[3]!], owner, 'paint');
+        } else {
+          shell.face(q, owner, 'paint');
+        }
       }
     }
 
     // ---- wheel wells ----
     const w = spec.wheels;
-    for (const axle of [w.front, w.rear]) {
-      const r = w.radius * frame.archFactor(axle);
+    for (const hub of [w.front, w.rear]) {
+      const r = w.radius * frame.archFactor(hub);
+      const axle = frame.archCentre(hub);
       const archCols = cols.filter((s) => Math.abs(s - axle) <= r);
       const inner = (s: number): number => side * frame.wellX(s);
       const edge = archCols.map((s) => {
@@ -740,8 +818,9 @@ export function buildShell(frame: BodyFrame): ShellResult {
       const yTop = sec.r4[1];
       const yFoot = sec.st.deck;
       for (const side of [1, -1]) {
-        shell.face([P(side * cut!, yTop, s), P(side * foot!, yTop, s), P(side * foot!, yFoot, s)], frame.lidOwner, 'paint');
-        shell.face([P(side * foot!, yTop, s), P(0, yTop, s), P(0, yFoot, s), P(side * foot!, yFoot, s)], frame.lidOwner, 'paint');
+        const lid = frame.lidOwner === 'tailgate' ? frame.tailgateOwner(side) : frame.lidOwner;
+        shell.face([P(side * cut!, yTop, s), P(side * foot!, yTop, s), P(side * foot!, yFoot, s)], lid, 'paint');
+        shell.face([P(side * foot!, yTop, s), P(0, yTop, s), P(0, yFoot, s), P(side * foot!, yFoot, s)], lid, 'paint');
       }
     }
   }
@@ -795,7 +874,7 @@ export function buildShell(frame: BodyFrame): ShellResult {
     const cowlFracs = frame.deckFracs(frame.cowl);
     const end = (kind: 'front' | 'rear'): Ring[] => {
       const s = kind === 'front' ? frame.cowl : frame.rearBase;
-      const top = kind === 'front' ? roofFront : roofRear;
+      const end0 = kind === 'front' ? roofFront : roofRear;
       const sec = frame.section(s);
       const local = frame.deckFracs(s);
       return [0, 1, 2].map((index) => {
@@ -805,7 +884,9 @@ export function buildShell(frame: BodyFrame): ShellResult {
         // corner with it, so the rail's corner is cut as one convex chamfer.
         const column = kind === 'front' ? cabin.columns[0]! : cabin.columns[cabin.columns.length - 1]!;
         const endDrop = index === 2 ? (column.cornerDrop ?? 0) : 0;
-        const crownY = cabin.rail + cabin.crown * (1 - frac * frac) - endDrop - frame.roofDrop(top);
+        // A screen curved in plan at its top too (`screenTop`) stands ahead there.
+        const top = kind === 'front' ? frame.screenTopS(frac) : end0;
+        const crownY = cabin.rail + frame.crownAt(frac) - endDrop - frame.roofDrop(top);
         // A curved screen's foot stands ahead of the cowl towards the centre line.
         const sb = kind === 'front' ? frame.screenFoot(frac) : s;
         const b: Vec3 = P(side * x, frame.deckY(sb, x), sb);
@@ -916,12 +997,14 @@ export function buildShell(frame: BodyFrame): ShellResult {
       if (a.kind === 'front' && b.kind === 'front') {
         glass = 'body';
       } else if (a.kind === 'rear' || b.kind === 'rear') {
-        upper = hatch ? 'tailgate' : 'body';
-        if (a.kind === 'rear' && b.kind === 'rear') glass = upper;
-        else upper = 'body';
+        // A soft top's back is the top's, not the tailgate's, with its window only in the
+        // middle (from the centre line to the half row).
+        upper = hatch && !cabin.softTop ? frame.tailgateOwner(side) : 'body';
+        if (a.kind === 'rear' && b.kind === 'rear' && (!cabin.softTop || a.frac === 0 || b.frac === 0)) glass = upper;
+        else if (a.kind !== 'rear' || b.kind !== 'rear') upper = 'body';
       } else if (a.kind === 'side' && b.kind === 'side') {
         const column = a.column!;
-        const owner = column.upper ?? 'body';
+        const owner = stripOwner(column, 'upper', side);
         upper = owner === 'body' ? 'body' : doorName(owner, side);
         const kind = column.glass ?? 'none';
         // A fixed pane in a door (the 2105's rear quarter) rides with the door.
@@ -950,13 +1033,34 @@ export function buildShell(frame: BodyFrame): ShellResult {
       } else {
         bands.push([a.t, b.t, b.u, a.u, 3]);
       }
+      // A soft top's canvas: the rail's chamfer, and the body's or tailgate's strips behind
+      // `from` (the windscreen's frame and the pillars ahead of it stay painted).
+      const soft = cabin.softTop;
+      const top: Mat = soft ? 'canvas' : 'paint';
+      const strip: Mat = soft && (upper === 'body' || upper.startsWith('tailgate')) && frame.zNose - (a.b[2] + b.b[2]) / 2 > soft.from ? 'canvas' : 'paint';
+      // The back light as a framed pane each side (`rearPanes`): the strip below the
+      // tailgate's top is cut along the pane's outline (a rounded rectangle, convex), glass
+      // inside it, the tailgate's paint round it; above the top, the body's. Every piece is
+      // cut by the same lines, so neighbours share their corners.
+      const panes = cabin.rearPanes !== undefined && a.kind === 'rear' && b.kind === 'rear' ? cabin.rearPanes : undefined;
       for (const [p0, p1, p2, p3, band] of bands) {
         if (band === 3) {
-          quad([p0, p1, p2, p3], 'body', 'paint', true);
+          quad([p0, p1, p2, p3], 'body', top, true);
+        } else if (panes) {
+          const poly = [p0, p1, p2, p3];
+          const over = clipPolygon(poly, (p) => p[1] - panes.top, 1);
+          if (over.length >= 3) shell.face(over, 'body', strip, false, true);
+          let rest = clipPolygon(poly, (p) => p[1] - panes.top, -1);
+          for (const edge of paneEdges(panes, side)) {
+            const out = clipPolygon(rest, edge, 1);
+            if (out.length >= 3) shell.face(out, upper, strip, false, upper === 'body');
+            rest = clipPolygon(rest, edge, -1);
+          }
+          if (rest.length >= 3) shell.face(rest, glass ?? upper, glass === null ? strip : 'glass', false, glass === null && upper === 'body');
         } else if (band === 1 && glass !== null) {
           shell.face([p0, p1, p2, p3], glass, 'glass');
         } else {
-          quad([p0, p1, p2, p3], upper, 'paint', upper === 'body');
+          quad([p0, p1, p2, p3], upper, strip, upper === 'body');
         }
       }
     }
@@ -969,19 +1073,45 @@ export function buildShell(frame: BodyFrame): ShellResult {
     // the inner ones by the roof's drop at their s (`roofDrop`).
     const roofPoint = (u: Vec3, f: number): Vec3 => [
       u[0] * f,
-      cabin.rail + cabin.railRise + cabin.crown * (1 - f * f) - (f >= cowlFracs[2]! ? cabin.rail + cabin.railRise - u[1] : frame.roofDrop(frame.zNose - u[2])),
+      cabin.rail + cabin.railRise + frame.crownAt(f) - (f >= cowlFracs[2]! ? cabin.rail + cabin.railRise - u[1] : frame.roofDrop(frame.zNose - u[2])),
       u[2],
     ];
     for (let i = 0; i + 1 < sides.length; i++) {
+      // The roof's front row follows a curved screen's top (`screenTop`), as the front
+      // ring's roof edge does.
+      const front = i === 0 && cabin.screenTop !== undefined;
       const u0 = sides[i]!.u;
       const u1 = sides[i + 1]!.u;
+      const row0 = (f: number): Vec3 => roofPoint(front ? [u0[0], u0[1], frame.z(frame.screenTopS(f) + cabin.railInset)] : u0, f);
       for (let k = 0; k + 1 < fracs.length; k++) {
-        quad([roofPoint(u0, fracs[k]!), roofPoint(u1, fracs[k]!), roofPoint(u1, fracs[k + 1]!), roofPoint(u0, fracs[k + 1]!)], 'body', 'paint', true);
+        quad([row0(fracs[k]!), roofPoint(u1, fracs[k]!), roofPoint(u1, fracs[k + 1]!), row0(fracs[k + 1]!)], 'body', cabin.softTop ? 'canvas' : 'paint', true);
       }
     }
   }
 
   return cutShell(frame, shell);
+}
+
+/** Segments per rounded corner of a `CabinSpec.rearPanes` pane. */
+const PANE_CORNER_STEPS = 3;
+
+/**
+ * The outline of a `CabinSpec.rearPanes` pane on one side (+1 left, −1 right) as lines g,
+ * the pane where every g ≤ 0: its four sides and, at each corner, lines tangent to the
+ * corner's arc (a polygon round the arc). In the car frame, across the tail face.
+ */
+function paneEdges(pane: NonNullable<CabinSpec['rearPanes']>, side: number): ((p: Vec3) => number)[] {
+  const { x0, x1, y0, y1, r } = pane;
+  const edges: ((p: Vec3) => number)[] = [(p) => x0 - side * p[0], (p) => side * p[0] - x1, (p) => y0 - p[1], (p) => p[1] - y1];
+  for (const [cx, cy, dx, dy] of [[x0 + r, y0 + r, -1, -1], [x1 - r, y0 + r, 1, -1], [x1 - r, y1 - r, 1, 1], [x0 + r, y1 - r, -1, 1]] as const) {
+    for (let k = 1; k <= PANE_CORNER_STEPS; k++) {
+      const a = (k / (PANE_CORNER_STEPS + 1)) * (Math.PI / 2);
+      const nx = dx * Math.cos(a);
+      const ny = dy * Math.sin(a);
+      edges.push((p) => (side * p[0] - cx) * nx + (p[1] - cy) * ny - r);
+    }
+  }
+  return edges;
 }
 
 
@@ -1055,6 +1185,7 @@ function cutShell(frame: BodyFrame, shell: Shell): ShellResult {
     const pts = f.v.map((v) => placed(f.owner, v, glassFace));
     const b = builderOf(f.owner);
     if (f.mat === 'dark') b.color(SHELL_COLOURS.wheelWell).poly('trim', pts);
+    else if (f.mat === 'canvas') b.color(frame.spec.cabin.softTop!.colour).poly('trim', pts);
     else b.poly(glassFace ? 'glass' : 'paint', pts);
   }
 
@@ -1134,7 +1265,7 @@ function cutShell(frame: BodyFrame, shell: Shell): ShellResult {
     if (!MOVING.test(f.owner) || f.mat === 'glass') continue;
     const pts = f.v.map((v) => innerOf(f, v)!).reverse();
     const b = builderOf(f.owner);
-    if (f.owner.startsWith('door') || f.owner === 'tailgate') b.color(frame.spec.look.upholstery).poly('trim', pts);
+    if (f.owner.startsWith('door') || f.owner.startsWith('tailgate')) b.color(frame.spec.look.upholstery).poly('trim', pts);
     else b.poly('paint', pts);
   }
 
@@ -1142,20 +1273,21 @@ function cutShell(frame: BodyFrame, shell: Shell): ShellResult {
   for (const f of faces) if (f.lined) lining.push(f.v.map(lined).reverse());
 
   // Pivots: hinges at the leading edge (doors, flap), rear edge (bonnet), front edge
-  // (boot) and top edge (tailgate); panes slide or swing about their own frame.
+  // (boot) and top edge (tailgate, or its side edge: `tailgateHinge`); panes slide or
+  // swing about their own frame.
   const parts: ShellPart[] = [];
   let triangles = 0;
   for (const [owner, builder] of builders) {
     const verts: Vec3[] = [];
     for (const f of faces) if (f.owner === owner) for (const v of f.v) verts.push(positions[v]!);
-    const pivot = pivotOf(owner, verts);
+    const pivot = pivotOf(owner, verts, frame.spec.tailgateHinge);
     triangles += builder.triangleCount();
     parts.push({ owner, builder, pivot });
   }
   return { parts, triangles, lining };
 }
 
-function pivotOf(owner: string, verts: readonly Vec3[]): Vec3 {
+function pivotOf(owner: string, verts: readonly Vec3[], tailgateHinge?: KitCarSpec['tailgateHinge']): Vec3 {
   if (owner === 'body' || verts.length === 0) return [0, 0, 0];
   let maxZ = -Infinity;
   let minZ = Infinity;
@@ -1181,6 +1313,13 @@ function pivotOf(owner: string, verts: readonly Vec3[]): Vec3 {
   if (owner === 'boot') {
     const front = near(maxZ);
     return [0, Math.max(...front.map((p) => p[1])), maxZ];
+  }
+  if (owner.startsWith('tailgate') && tailgateHinge) {
+    // An upright hinge line at its outermost edge on that side, in the tail face's plane:
+    // a split tailgate's leaves each at their own outer edge.
+    const left = tailgateHinge === 'split' ? owner === 'tailgate_l' : tailgateHinge === 'left';
+    const x = left ? Math.max(...verts.map((p) => p[0])) : Math.min(...verts.map((p) => p[0]));
+    return [x, (minY + maxY) / 2, minZ];
   }
   if (owner === 'tailgate') {
     const top = verts.reduce((m, p) => (p[1] > m[1] ? p : m), verts[0]!);

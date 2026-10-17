@@ -12,7 +12,7 @@
  */
 
 import * as THREE from 'three';
-import { PartBuilder, lerp, table, type Caps, type KitSlot, type Outline, type Vec3 } from './builder';
+import { PartBuilder, clipPolygon, lerp, table, type Caps, type KitSlot, type Outline, type Vec3 } from './builder';
 import { addBuilt, addMirrorFace, mirrorFrame, pivotGroup, type KitContext } from './context';
 import { skinX, tubColumns, type BodyFrame, type KitHole } from './body';
 import { driverEyeAt } from './interior';
@@ -388,8 +388,10 @@ function buildFaceItem(face: EndFace, item: FaceItem, b: PartBuilder): Footprint
       const [y, hy] = face.spanY(item.y);
       const z0 = Math.min(item.proud - item.depth, -FACE_ROOT);
       const z1 = item.proud + item.depth;
-      // A lens centred on the centre line is one lens across it (the 2110's lid reflector).
-      return (x === 0 ? [1] : [1, -1]).map((side) => {
+      // A lens centred on the centre line is one lens across it (the 2110's lid reflector);
+      // one with `only` stands on that side alone.
+      const sides = x === 0 ? [1] : item.only ? [item.only === 'left' ? 1 : -1] : [1, -1];
+      return sides.map((side) => {
         const slot = lampSlot(item.role, side);
         if (!item.slant) {
           const bevel = Math.min(hx, hy) * 0.35;
@@ -409,6 +411,7 @@ function buildFaceItem(face: EndFace, item: FaceItem, b: PartBuilder): Footprint
     case 'grille': {
       const gw = face.x(item.x);
       const [y, hy] = face.spanY(item.y);
+      if (item.slant !== undefined) return slantedGrille(face, item, b, gw, y, hy, item.slant);
       // A grille standing out of a moulded bumper (an intake) stands with its front 10 mm
       // ahead of the bumper's (4 mm ahead of its 6 mm ridge), however `standOut` reads, so
       // neither the bumper's face nor its ridge lies within millimetres of it.
@@ -510,7 +513,97 @@ function buildFaceItem(face: EndFace, item: FaceItem, b: PartBuilder): Footprint
       }
       return prints;
     }
+    case 'wheel': {
+      // A square bracket rooted in the face out to the wheel's back, open at both ends (its
+      // root in the body, its end under the wheel's back), and the wheel in its cover: one
+      // closed drum, one wheel at its own x.
+      const y = face.y(item.y);
+      const { slot, color } = finishSlot(item.finish);
+      const bh = 0.06;
+      const bracket = rect(item.x - bh, y - bh, item.x + bh, y + bh);
+      b.color(color).boxFrom(slot, [item.x - bh, y - bh, Math.min(face.out(-FACE_ROOT), face.out(item.standoff))], [item.x + bh, y + bh, Math.max(face.out(-FACE_ROOT), face.out(item.standoff))], 0b001111);
+      const segments = 16;
+      b.cylinderZ(slot, [item.x, y, face.out(item.standoff + item.width / 2)], item.radius, item.width / 2, segments);
+      const rim = Array.from({ length: segments }, (_, i): P2 => [item.x + Math.cos((i / segments) * Math.PI * 2) * item.radius, y + Math.sin((i / segments) * Math.PI * 2) * item.radius]);
+      return [
+        { poly: bracket, z0: -FACE_ROOT, z1: item.standoff },
+        { poly: rim, z0: item.standoff, z1: item.standoff + item.width },
+      ];
+    }
   }
+}
+
+/**
+ * A trapezoid grille (`grille` with `slant`: the top's ends that far inboard of the
+ * bottom's, the UAZ-2206's): a raised frame round a recessed dark back, and the bars
+ * across the opening, horizontal, or two crossed sets at ±45° (`'diamond'`, the mesh). The
+ * frame is one slab rooted in the face with its front cut away over the opening, and walls
+ * down the opening's edge to the back; the bars end 2 mm inside the frame and stand in the
+ * recess, the back's face cut under them, a crossed set's under the other.
+ */
+function slantedGrille(face: EndFace, item: Extract<FaceItem, { kind: 'grille' }>, b: PartBuilder, gw: number, y: number, hy: number, slant: number): Footprint[] {
+  const so = item.standOut ?? 0;
+  const margin = item.frame?.margin ?? 0;
+  const trap = (grow: number): P2[] => [[-(gw + grow), y - hy - grow], [gw + grow, y - hy - grow], [gw - slant + grow, y + hy + grow], [-(gw - slant + grow), y + hy + grow]];
+  // Counter-clockwise seen from outside the face; inward-facing walls the other way round.
+  const out = (p: readonly P2[]): P2[] => (face.facing > 0 ? [...p] : [...p].reverse());
+  const inward = (p: readonly P2[]): P2[] => out(p).reverse();
+  const extrude = (part: PartBuilder, slot: KitSlot, poly: P2[], a: number, c: number, caps: Caps): void => {
+    part.extrude(slot, poly, Math.min(face.out(a), face.out(c)), Math.max(face.out(a), face.out(c)), 0, 0, caps);
+  };
+  const z0 = -FACE_ROOT;
+  const front = so + 0.02;
+  const floor = so + 0.012;
+  const opening = trap(0);
+  if (item.frame) {
+    const { slot, color } = finishSlot(item.frame.finish);
+    const ring = new PartBuilder().color(color);
+    extrude(ring, slot, out(trap(margin)), z0, front, face.frontCap);
+    ring.cut([{ poly: opening.map(([x, py]): Vec3 => [x, py, face.out(front)]), reach: 0.0005, solid: true }]);
+    extrude(ring, slot, inward(opening), floor, front, false);
+    b.append(ring);
+  }
+  const back = new PartBuilder();
+  if (item.back) extrude(back.color(GRILLE_DARK), 'trim', out(opening), z0, floor, face.frontCap);
+  const bars = item.bars;
+  const { slot, color } = finishSlot(bars.finish);
+  const w = bars.width / 2;
+  const reach = trap(0.002).map(([x, py]): Vec3 => [x, py, 0]);
+  const band = (g: (p: Vec3) => number, c: number): P2[] => {
+    const lo = clipPolygon(reach, (p) => g(p) - (c - w), 1);
+    return clipPolygon(lo, (p) => g(p) - (c + w), -1).map(([x, py]): P2 => [x, py]);
+  };
+  const sets: { dir: (p: Vec3) => number; c: number[]; depth: number }[] = [];
+  const n = bars.count;
+  const spread = (lo: number, hi: number): number[] => Array.from({ length: n }, (_, i) => lo + bars.margin + ((hi - lo - 2 * bars.margin) * (n > 1 ? i / (n - 1) : 0.5)));
+  if (bars.dir === 'diamond') {
+    const span = gw + hy;
+    sets.push({ dir: (p) => p[0] + (p[1] - y), c: spread(-span, span), depth: 0 }, { dir: (p) => p[0] - (p[1] - y), c: spread(-span, span), depth: 0.002 });
+  } else {
+    sets.push({ dir: bars.dir === 'vertical' ? (p) => p[0] : (p) => p[1], c: bars.dir === 'vertical' ? spread(-gw, gw) : spread(y - hy, y + hy), depth: 0 });
+  }
+  const built = sets.map((set) => {
+    const part = new PartBuilder().color(color);
+    const prints: Footprint[] = [];
+    for (const c of set.c) {
+      const poly = band(set.dir, c);
+      if (poly.length < 3) continue;
+      const p = out(poly);
+      // Below the frame's front, which their ends reach under.
+      const [a, top] = [floor - 0.004, Math.min(floor + bars.depth, front - 0.003) - set.depth];
+      extrude(part, slot, p, a, top, face.frontCap);
+      prints.push({ poly: p, z0: a, z1: top });
+    }
+    return { part, prints };
+  });
+  // The set standing lower loses its front under the other's bars.
+  if (built.length === 2) built[1]!.part.cut(built[0]!.prints.map((f) => face.volume(f)));
+  for (const { part, prints } of built) {
+    back.cut(prints.map((f) => face.volume(f)));
+    back.append(part);
+  }
+  b.append(back);
+  return [{ poly: out(trap(margin)), z0, z1: front }];
 }
 
 /** A path pulled in by `d` at both ends, so what rides on it stops short of the part's end faces. */
@@ -849,7 +942,11 @@ function buildRepeaters(ctx: KitContext, body: PartBuilder): void {
   const y = (r.y0 + r.y1) / 2;
   const [hy, hz] = [(r.y1 - r.y0) / 2, (r.s1 - r.s0) / 2];
   for (const side of [1, -1]) {
-    const skin = frame.sideX(s, y);
+    // Above the shoulder (the UAZ-2206's marker high on the B post) the skin is the
+    // greenhouse's: the side ring's straight line from the deck's edge up to the rail.
+    const sec = frame.section(s);
+    const cabin = frame.spec.cabin;
+    const skin = y > sec.r4[1] ? lerp(sec.r4[0], cabin.railHalf, (y - sec.r4[1]) / (cabin.rail - sec.r4[1])) : frame.sideX(s, y);
     const x = side * (skin + (0.01 - FACE_ROOT) / 2);
     const at = (px: number): Vec3[] => [[px, y - hy, frame.z(s) - hz], [px, y - hy, frame.z(s) + hz], [px, y + hy, frame.z(s) + hz], [px, y + hy, frame.z(s) - hz]];
     body.cut([{ poly: at(x), reach: (0.01 + FACE_ROOT) / 2, solid: true }]);
@@ -987,11 +1084,13 @@ function buildDoorHardware(ctx: KitContext): void {
     const rearS = front
       ? cols.find((c) => c.lower === 'door1' && c.upper === 'body')?.s ?? cols.filter((c) => c.upper === 'door1').at(-1)!.s
       : cols.filter((c) => c.upper === 'door2').at(-1)!.s;
-    const handleS = rearS - 0.13;
+    const at = spec.look.handles;
+    const handleS = at ? (front ? at.front : at.rear) : rearS - 0.13;
     const beltY = frame.station(handleS).belt;
-    const y = beltY - (chrome ? 0.07 : 0.09);
+    const y = at ? at.y : beltY - (chrome ? 0.07 : 0.09);
     const x = side * (frame.sideX(handleS, y) + 0.006);
-    b.color(finish.color).bevelBox(finish.slot, [x, y, frame.z(handleS)], chrome ? [0.012, 0.016, 0.075] : [0.012, 0.018, 0.07], 0.006);
+    const half = at?.half ?? (chrome ? 0.075 : 0.07);
+    b.color(finish.color).bevelBox(finish.slot, [x, y, frame.z(handleS)], chrome ? [0.012, 0.016, half] : [0.012, 0.018, half], 0.006);
     addBuilt(door.node, b, door.pivot, `${owner}_handle`);
     if (!front || (side < 0 && spec.look.mirrors === 'left')) continue;
     // Mirror: a stalk from the door's front top corner and a head on it, turned so the
@@ -1035,6 +1134,63 @@ function buildDoorHardware(ctx: KitContext): void {
       if (node instanceof THREE.Mesh) node.name = 'mirrors';
     });
     door.node.add(holder);
+  }
+}
+
+/** Hinge knuckle radius on a split tailgate's leaves; the straps stand 6 mm proud. */
+const LEAF_KNUCKLE = 0.011;
+
+/**
+ * A split tailgate's outside fittings (`KitLook.rearLeaves`), hung on each leaf's pivot so
+ * they swing with it: a hinge strap and its knuckle per band across the outer shut line,
+ * in body colour, and the handle on its leaf. Each piece is built square to the leaf's
+ * skin where it stands (the leaves lean forward above the belt), found by a ray onto the
+ * leaf's paint; its back is left open, sunk 2 mm into the skin.
+ */
+function buildRearLeafHardware(ctx: KitContext): void {
+  const fit = ctx.frame.spec.look.rearLeaves;
+  if (!fit) return;
+  if (ctx.frame.spec.tailgateHinge !== 'split') throw new Error(`Kit car "${ctx.frame.spec.id}": rearLeaves needs a split tailgate`);
+  const finish = finishSlot(ctx.frame.spec.look.brightwork);
+  const ray = new THREE.Raycaster();
+  for (const side of [1, -1] as const) {
+    const owner = ctx.frame.tailgateOwner(side);
+    const leaf = ctx.nodes.get(owner)!;
+    leaf.node.updateMatrixWorld(true);
+    const paint: THREE.Object3D[] = [];
+    leaf.node.traverse((o) => {
+      if (o instanceof THREE.Mesh && o.name === `${owner}_paint`) paint.push(o);
+    });
+    /** The leaf's skin at (x, y), as a frame: x across, y up the skin, z out of it. */
+    const skinFrame = (x: number, y: number): THREE.Matrix4 => {
+      ray.set(new THREE.Vector3(x, y, ctx.frame.z(ctx.frame.spec.length) - 1), new THREE.Vector3(0, 0, 1));
+      const hit = ray.intersectObjects(paint, false)[0];
+      if (!hit?.face) throw new Error(`Kit car "${ctx.frame.spec.id}": no ${owner} skin at x ${x.toFixed(3)}, y ${y.toFixed(3)}`);
+      const n = hit.face.normal.clone();
+      if (n.z > 0) n.negate();
+      const up = new THREE.Vector3(0, 1, 0).addScaledVector(n, -n.y).normalize();
+      const across = new THREE.Vector3().crossVectors(up, n);
+      return new THREE.Matrix4().makeBasis(across, up, n).setPosition(hit.point);
+    };
+    const b = new PartBuilder();
+    const { x0, x1, bands } = fit.hinges;
+    for (const [y0, y1] of bands) {
+      const knuckle = x1 - LEAF_KNUCKLE;
+      const strap = (x0 + knuckle) / 2;
+      const m = skinFrame(side * strap, (y0 + y1) / 2);
+      // Local x runs to −X world: offsets from the strap's centre in world x, turned.
+      const dir = Math.sign(m.elements[0]!);
+      b.push(m).color(0xffffff);
+      b.box('paint', [0, 0, 0.002], [(knuckle - x0) / 2, (y1 - y0) / 2, 0.004], 0b011111);
+      b.cylinderY('paint', [dir * side * (knuckle - strap), 0, LEAF_KNUCKLE - 0.002], LEAF_KNUCKLE, (y1 - y0) / 2, 6);
+      b.pop();
+    }
+    const h = fit.handle;
+    if ((h.leaf === 'left') === side > 0) {
+      const m = skinFrame(side * (h.x0 + h.x1) / 2, h.y);
+      b.push(m).color(finish.color).bevelBox(finish.slot, [0, 0, 0.01], [(h.x1 - h.x0) / 2, 0.018, 0.012], 0.006, 'z1').pop();
+    }
+    addBuilt(leaf.node, b, leaf.pivot, `${owner}_fittings`);
   }
 }
 
@@ -1086,7 +1242,8 @@ function buildWipers(ctx: KitContext): void {
   if (!pane || !panel) throw new Error(`Kit car "${spec.id}": wipers need the shell's glass and paint`);
   const foot = frame.screenFoot(0);
   const base = new THREE.Vector3(0, frame.deckY(foot, 0), frame.z(foot));
-  const head = new THREE.Vector3(0, cabin.rail + cabin.crown - frame.roofDrop(cabin.columns[0]!.top), frame.z(cabin.columns[0]!.top));
+  const screenTop = frame.screenTopS(0);
+  const head = new THREE.Vector3(0, cabin.rail + cabin.crown - frame.roofDrop(screenTop), frame.z(screenTop));
   const up = head.sub(base).normalize();
   const across = new THREE.Vector3(1, 0, 0);
   const screenNormal = new THREE.Vector3().crossVectors(across, up).normalize();
@@ -1312,12 +1469,23 @@ function buildLidFace(ctx: KitContext): void {
   for (const facing of [-1, 1] as const) {
     const items = (facing > 0 ? ctx.frame.spec.look.front : ctx.frame.spec.look.rear).lid;
     if (!items) continue;
-    const lid = facing > 0 ? 'bonnet' : ctx.nodes.has('boot') ? 'boot' : 'tailgate';
-    const node = ctx.nodes.get(lid);
-    if (!node) throw new Error(`Kit car "${ctx.frame.spec.id}" has ${facing > 0 ? 'nose items but no bonnet' : 'lid items but no boot lid or tailgate'}`);
-    const b = new PartBuilder();
-    buildFace(new EndFace(ctx.frame, facing, lid, ctx.holes), items, b);
-    addBuilt(node.node, b, node.pivot, facing > 0 ? 'nose_face' : 'lid_face');
+    // A split tailgate's leaves each carry the one-sided lenses on their side (`only`).
+    const split = facing < 0 && ctx.nodes.has('tailgate_l');
+    const lids: [string, readonly FaceItem[]][] = split
+      ? (['left', 'right'] as const).map((side) => {
+        const mine = items.filter((item) => item.kind === 'lens' && item.only === side);
+        return [side === 'left' ? 'tailgate_l' : 'tailgate_r', mine];
+      })
+      : [[facing > 0 ? 'bonnet' : ctx.nodes.has('boot') ? 'boot' : 'tailgate', items]];
+    if (split && items.some((item) => item.kind !== 'lens' || !item.only)) throw new Error(`Kit car "${ctx.frame.spec.id}": a split tailgate's lid items are one-sided lenses`);
+    for (const [lid, mine] of lids) {
+      if (mine.length === 0) continue;
+      const node = ctx.nodes.get(lid);
+      if (!node) throw new Error(`Kit car "${ctx.frame.spec.id}" has ${facing > 0 ? 'nose items but no bonnet' : 'lid items but no boot lid or tailgate'}`);
+      const b = new PartBuilder();
+      buildFace(new EndFace(ctx.frame, facing, lid, ctx.holes), mine, b);
+      addBuilt(node.node, b, node.pivot, facing > 0 ? 'nose_face' : 'lid_face');
+    }
   }
 }
 
@@ -1415,6 +1583,7 @@ export function buildExterior(ctx: KitContext): void {
   buildLidFace(ctx);
   buildSpoiler(ctx);
   buildDoorHardware(ctx);
+  buildRearLeafHardware(ctx);
   buildWipers(ctx);
   buildFiller(ctx);
 }

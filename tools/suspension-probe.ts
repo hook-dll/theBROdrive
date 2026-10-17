@@ -25,6 +25,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import { installAssetShim } from './assetshim';
+import { installDocumentShim } from './domshim';
 import { emptyInput, type InputFrame } from '../src/core/input';
 import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
 import { SurfaceType } from '../src/core/surfaces';
@@ -420,6 +421,8 @@ async function main(): Promise<void> {
   await RAPIER.init();
   lawSection();
   installAssetShim();
+  // The car's visuals draw their sticker atlas on a canvas.
+  installDocumentShim();
   const ids = MODELS.length > 0 ? MODELS : DEFAULT_MODELS;
   await preloadCarModels(ids);
   for (const id of ids) {

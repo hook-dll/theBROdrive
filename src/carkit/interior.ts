@@ -30,7 +30,7 @@
  */
 
 import * as THREE from 'three';
-import { DOOR_THICKNESS as DOOR_CARD, LINING_DEPTH, type BodyFrame } from './body';
+import { DOOR_THICKNESS as DOOR_CARD, LINING_DEPTH, stripOwner, type BodyFrame } from './body';
 import { PartBuilder, lerp, table, type KitSlot, type Vec3 } from './builder';
 import { addBuilt, addMirrorFace, attach, fineDetail, mirrorFrame, pivotGroup, type KitContext } from './context';
 import type { KitControl, KitMotion } from './rig';
@@ -49,6 +49,12 @@ const FLOOR_RISE = 0.03;
 const HUMP_RISE = 0.03;
 /** The rear bench's closed base reaches this far behind its hip. */
 const BENCH_BACK = 0.12;
+/** The van's lining below the belt stops this far ahead of the rear doors' opening. */
+const VAN_TRIM_CLEAR = 0.06;
+/** The van's floor runs to this far ahead of the rear doors' opening. */
+const VAN_FLOOR_CLEAR = 0.03;
+/** The van's furniture stands this far into its floor (`Cabin.standY`). */
+const VAN_FOOT_SINK = 0.01;
 const ORIGIN: Vec3 = [0, 0, 0];
 
 const COLOURS = {
@@ -224,14 +230,27 @@ interface Layout {
   readonly fascia: readonly [P2, P2];
   /** Wood-look band on the fascia (dy bottom, top). */
   readonly wood?: P2;
-  /** Binnacle section (ds, dy) and half width about the column; the gauges sit on its face at `cluster`. */
+  /**
+   * A band laid into the fascia's face across its width (dy bottom, top) in its own
+   * colour: the GAZ-24's aluminium panel, the GAZ-31029's wood grain. Part of the face,
+   * not a strip on it, so a glovebox opening or a vent cut later goes through it; left out
+   * behind the binnacle.
+   */
+  readonly band?: { readonly dy: P2; readonly colour: number };
+  /**
+   * Binnacle section (ds, dy) and half width about the column, or about the point
+   * `binnacleRight` to the column's right (the UAZ-469's panel in the dash's middle); the
+   * gauges sit on its face at `cluster`.
+   */
   readonly binnacle: readonly P2[];
   readonly binnacleHalf: number;
+  readonly binnacleRight?: number;
   readonly cluster: number;
   readonly gauges: readonly GaugeLook[];
   /**
    * Steering wheel centre (ds, dy), column rake above horizontal, rim radius and tube,
    * spoke angles (0 = driver's left, 90 = up) and the horn: a round boss or a wide pad.
+   * `chrome`: spokes and horn bright (the GAZ-24's chrome horn bar across the wheel).
    */
   readonly wheel: {
     readonly ds: number;
@@ -241,6 +260,7 @@ interface Layout {
     readonly rim: number;
     readonly spokes: readonly number[];
     readonly hub: 'round' | 'pad';
+    readonly chrome?: boolean;
   };
   /** Pedal hinge (ds, dy) under the dash and pad centre (ds, height over the floor). */
   readonly pedals: { readonly pivot: P2; readonly pad: P2 };
@@ -254,8 +274,11 @@ interface Layout {
   readonly transfer?: { readonly ds: number; readonly levers: readonly { readonly x: number; readonly height: number; readonly knob: number; readonly lean: P2 }[] };
   /** Handbrake hinge behind the driver's hip, and its length forward. */
   readonly handbrake: { readonly rear: number; readonly length: number };
-  /** Fascia fittings at [x, dy]; the light switch is placed off the column, to the driver's right by `right`. */
-  readonly glovebox: { readonly x: number; readonly dy: number; readonly half: P2 };
+  /**
+   * Fascia fittings at [x, dy]; the light switch is placed off the column, to the driver's
+   * right by `right`. The glovebox lid in `colour` (default the dash's, a shade lighter).
+   */
+  readonly glovebox: { readonly x: number; readonly dy: number; readonly half: P2; readonly colour?: number };
   readonly radio: P2;
   readonly ashtray: P2;
   readonly hazard: P2;
@@ -277,6 +300,11 @@ interface Layout {
   /** A framed panel on the cluster face behind the gauges: centre (right, up), half size, colour and frame. */
   readonly clusterFace?: { readonly right: number; readonly up: number; readonly half: P2; readonly colour: number; readonly frame: 'chrome' | 'black' };
   /**
+   * A clock on the cluster face (right, up as a gauge's), its hands standing at ten past
+   * ten: it has no channel. Bezel, face, hour marks and hands are coarse.
+   */
+  readonly clock?: { readonly right: number; readonly up: number; readonly radius: number };
+  /**
    * Warning lamps on the cluster face: `show` laid row by row into a grid `cols` wide at
    * `pitch`, centred at (right, up).
    */
@@ -297,6 +325,10 @@ interface Layout {
   readonly stack?: { readonly half: number };
   readonly carpet: number;
   readonly headliner: number;
+  /** The cabin floor over the sill's underside under the front seats; default `FLOOR_RISE` (the van's stands high). */
+  readonly floorRise?: number;
+  /** A padded engine cover on the centre line between the front seats (the van's): ds range, half width, height over the floor; in the dash's colour. */
+  readonly engineCover?: { readonly ds0: number; readonly ds1: number; readonly half: number; readonly height: number };
 }
 
 /** A car's changes to its platform's layout (`KitCarSpec.cabinLayout`). */
@@ -519,6 +551,40 @@ const LAYOUTS: Readonly<Record<KitCarSpec['platform'], Layout>> = {
     handbrake: { rear: 0.1, length: 0.2 },
     // Black ribbed rubber mats, a pale perforated headliner [P].
     carpet: 0x1c1c1d,
+    headliner: 0xcfcabd,
+  },
+  /**
+   * A forward-control van (the UAZ-452 family): the cab over the front axle, the front
+   * seats on the wheel boxes either side of the engine's padded cover, a high flat floor
+   * from the front wall to the rear doors, a large thin wheel on a steep column, pedals
+   * hung under the dash; the gear lever and the transfer levers out of the floor behind
+   * the cover; one transverse bench at the back. The classic's furniture otherwise; the
+   * dash is the car's (`CABIN_UAZ2206`). Figures [E] unless marked: no section of the cab.
+   */
+  van: {
+    ...BASE_LAYOUTS.classic,
+    // The cushion over the front wheel: the hip 0.8 behind the cowl, over the axle's rear
+    // half (the seat's base reaches 0.45 ahead of it).
+    hip: 0.8,
+    bench: { from: 'rearBase', offset: -0.55 },
+    // A flat floor: the cab's under the seats over the arches' tops (0.73), the saloon's
+    // ~0.72 (the roof lining ~2.03 less the drawn 1315 inside height, measurements-uaz.md
+    // §3.8): 0.25 over the sill 0.50 at the cowl + 0.5.
+    floorRise: 0.25,
+    toeTop: 0.12,
+    toeRun: 0.2,
+    tunnel: { heights: [0, 0, 0], base: [0.2, 0.2], top: [0.17, 0.17] },
+    engineCover: { ds0: 0.3, ds1: 0.8, half: 0.2, height: 0.32 },
+    gear: { ds: 0.88, height: 0.45, lean: -0.05 },
+    transfer: {
+      ds: 0.94,
+      levers: [
+        { x: -0.08, height: 0.3, knob: 0.02, lean: [-0.08, 0] },
+        { x: -0.14, height: 0.3, knob: 0.02, lean: [-0.08, -0.01] },
+      ],
+    },
+    handbrake: { rear: 0.35, length: 0.18 },
+    carpet: 0x2c2d26,
     headliner: 0xcfcabd,
   },
 };
@@ -826,6 +892,298 @@ export const CABIN_1111: CabinLayoutOverride = {
   gear: { ds: 0.62, height: 0.24, lean: 0.04 },
 };
 
+// The Volgas on the classic's furniture, read off Wikimedia Commons photos (readings in
+// measurements-volga.md §4). Both share the 24's doors and cowl, so the dash's half width
+// is the same 0.756. The column stands at seatX 0.40: the GAZ-24's instrument panel,
+// centred on the column, stands 0.41 off the centre line [P]; the classic's 0.37 would
+// leave the wide Volga's driver hard by the tunnel.
+//  - GAZ-24: "GAZ-24 (1st generation) "Volga" (interior).jpg" (public domain, 1920 x 1440,
+//    square through the screen from the back seat): the fascia band's ~1700 px are the
+//    dash's 1.512 m, 0.885 mm/px; centre line x 970 (defroster grille, radio, ashtray);
+//    heights hung from the band's top (y 656) at 0.073 over the belt [E: just under the
+//    top roll, which meets the scuttle 0.1 over the belt]. The cluster's layout from
+//    "GAZ 24 Volga interior.jpg" (CC BY-SA 4.0, User:CLI) and
+//    "24-interior-early-1974.jpg" (public domain). The wheel: 420 across (owners' tape
+//    measurements, drive2.ru) [E], a thin grip [P].
+//  - GAZ-31029: "31029-int-2.jpg" (public domain, User:DL24, 1152 x 768, from behind the
+//    driver's seat), the only 31029 interior on Commons: the column (wheel's hub over the
+//    cluster's centre, x 465) to the centre line (vents, heater, band: x 735) is seatX's
+//    0.40, 1.48 mm/px; heights hung from the centre band's top (y 283) at 0.055 [E]. The
+//    wheel about 400-410 across (owners, forum.allgaz.ru) [E], its grip thin [P].
+
+/**
+ * GAZ-24: a long padded top roll over a flat aluminium band across the whole car (the
+ * early cars'): before the driver a long chrome-framed blue-grey panel with the ribbon
+ * speedometer across its top, small window gauges under it (ammeter over fuel at its left
+ * end, temperature, oil pressure) and the clock at its right end; the radio in the middle,
+ * a long glovebox lid, round vents at both ends; knobs on the black panel under the band;
+ * a big thin wheel with a chrome horn bar across it.
+ */
+export const CABIN_GAZ24: CabinLayoutOverride = {
+  seatX: 0.4,
+  wood: undefined,
+  // The top roll level from the scuttle, its lip overhanging the band by 2 cm [P], the
+  // band and the black panel under it in one upright face (band y 656-815, panel to y 897)
+  // [P].
+  dash: [
+    [0.12, 0.1], [0.3, 0.098], [0.352, 0.092], [0.36, 0.08], [0.338, 0.075], [0.338, -0.14],
+    [0.315, -0.18], [0.12, -0.2], [0.045, -0.18], [0.045, -0.06],
+  ],
+  fascia: [[0.338, 0.075], [0.338, -0.14]],
+  band: { dy: [-0.066, 0.073], colour: 0xa7aaa9 },
+  // The instrument panel: its window x 205-812, y 680-798 [P], nearly centred on the
+  // column, its outer end short of the end vent; a flat panel 8 mm proud of the band.
+  binnacle: [[0.3, 0.058], [0.346, 0.058], [0.346, -0.058], [0.3, -0.058]],
+  binnacleHalf: 0.268,
+  cluster: 0.346,
+  clusterFace: { right: 0, up: 0, half: [0.257, 0.05], colour: 0x6c8496, frame: 'chrome' },
+  gauges: [
+    // Numerals 20 at x 425, 180 at x 630: 0-180 over 0.204 m, centred on the column, at
+    // y 727 [P].
+    { kind: 'ribbon', channel: 'speed', right: 0, up: 0.014, half: [0.111, 0.0177], full: 180, ticks: 10 },
+    // Small windows [P, CLI: fractions of the panel]: the ammeter over the fuel gauge at the
+    // left end, temperature (80-120) under the scale's start, oil pressure (0-6) under its
+    // end. No current channel: the ammeter reads the voltmeter's, its zero at 14 V [E].
+    { kind: 'ribbon', channel: 'volts', right: -0.225, up: 0.016, half: [0.024, 0.009], min: 12, full: 16, ticks: 3 },
+    { kind: 'ribbon', channel: 'fuel', right: -0.225, up: -0.022, half: [0.024, 0.009], full: 1, ticks: 3 },
+    { kind: 'ribbon', channel: 'temp', right: -0.079, up: -0.025, half: [0.024, 0.009], full: 1, ticks: 3 },
+    { kind: 'ribbon', channel: 'oil', right: 0.115, up: -0.025, half: [0.024, 0.009], full: 6, ticks: 4 },
+  ],
+  // Two red lamps between the small windows and the scale's start [P]; which four the
+  // car has there is not legible [E].
+  lamps: { right: -0.155, up: -0.005, cols: 2, pitch: 0.03, show: ['turn', 'beam', 'oil', 'brake'] },
+  // The clock at the panel's right end, x 745-800 [P]: square on the car, round here.
+  clock: { right: 0.226, up: 0, radius: 0.02 },
+  // Round vents with chrome rims at the band's ends (x 146 and 1763, 37 px in radius) [P],
+  // drawn 0.03 so the driver's clears the panel.
+  eyeballs: { radius: 0.03, at: [[0.715, 0.018], [-0.715, 0.018]] },
+  // The radio in the middle of the band (x 878-1104, y 695-750) [P]; the lid x 1174-1708,
+  // y 659-793, dark in a bright frame [P].
+  radio: [0, 0.017],
+  glovebox: { x: -0.417, dy: 0.013, half: [0.236, 0.057] },
+  // On the black panel: the ashtray's chrome pull in the middle (y 860) [P]; three knobs
+  // left of the column (x 244, 323, 390; y 866), the middle one taken for the lights, and a
+  // knob right of it (x 799) where the kit's hazard button stands: the early car had none [E].
+  ashtray: [0, -0.106],
+  lights: { right: -0.173, dy: -0.111, kind: 'knob' },
+  hazard: [0.151, -0.111],
+  // 0.2005 to the grip's centre, a 19 mm grip; the bar across the hub dips a little in the
+  // middle (spokes 8 degrees under the level) [P], chrome; its middle drawn as a round boss.
+  wheel: { ...LAYOUTS.classic.wheel, dy: 0, radius: 0.2005, rim: 0.0095, spokes: [-8, 188], hub: 'round', chrome: true },
+};
+
+/**
+ * GAZ-31029: a black padded dash with a wood-grain band across it; before the driver a
+ * raised wood panel under a hood with two big dials (a combined gauge left, the
+ * speedometer right) and the clock between them; the hazard button and the radio's slot
+ * on the band in the middle, two big vents over the heater's sliders and a console down to
+ * the tunnel, a wood glovebox lid, slatted vents at the ends; a wheel with a big pad and
+ * three spokes.
+ */
+export const CABIN_GAZ31029: CabinLayoutOverride = {
+  seatX: 0.4,
+  wood: undefined,
+  // Top level from the scuttle, rounding down to an upright face (band y 283-335) and the
+  // black panel under the lid (to y 480: -0.24); the face stops at -0.2 and the console
+  // carries the heater on down [P/E].
+  dash: [
+    [0.12, 0.1], [0.3, 0.095], [0.34, 0.085], [0.35, 0.06], [0.35, -0.2],
+    [0.325, -0.235], [0.12, -0.25], [0.045, -0.22], [0.045, -0.06],
+  ],
+  fascia: [[0.35, 0.06], [0.35, -0.2]],
+  band: { dy: [-0.022, 0.055], colour: COLOURS.wood },
+  // The wood panel x 326-605, y 237-355 [P] in a black surround under a hood whose lip
+  // stands over it [P], 2 cm proud of the face.
+  binnacle: [[0.25, 0.1], [0.28, 0.142], [0.37, 0.148], [0.392, 0.14], [0.392, 0.134], [0.37, 0.132], [0.37, -0.06], [0.33, -0.06]],
+  binnacleHalf: 0.222,
+  cluster: 0.37,
+  clusterFace: { right: 0, up: 0.0355, half: [0.205, 0.0875], colour: COLOURS.wood, frame: 'black' },
+  gauges: [
+    // Left pod centre x 383, speedometer x 548, faces about 40 px in radius [P]. The left
+    // dial is a combined gauge whose other scales are not legible: fuel across its top
+    // (red marks on the right [P]) and temperature across its bottom, as the 2105's [E].
+    { channel: 'fuel', right: -0.12, up: 0.043, radius: 0.055, full: 1, sweep: 140 * (Math.PI / 180), rest: 160 * (Math.PI / 180), ticks: 3 },
+    { channel: 'temp', right: -0.12, up: 0.043, radius: 0.055, full: 1, sweep: -140 * (Math.PI / 180), rest: 200 * (Math.PI / 180), ticks: 3, bare: true },
+    // 0-180 km/h [P].
+    { channel: 'speed', right: 0.123, up: 0.043, radius: 0.055, full: 180, ...BIG },
+  ],
+  // The small dial between them, its numerals 9, 12, 3: a clock (x 455, y 280) [P].
+  clock: { right: 0, up: 0.059, radius: 0.026 },
+  // The lamps are in the speedometer's face on the car [P]; here in a row under each dial.
+  lamps: { right: 0.123, up: -0.035, cols: 4, pitch: 0.016, show: ['turn', 'beam', 'side', 'brake'] },
+  lenses: { right: -0.12, up: -0.035, cols: 3, pitch: 0.016, show: ['fuel', 'oil', 'charge'] },
+  // Two big vents side by side under the band (x 645-717 and 744-823, y 366-418), the
+  // heater's sliders under them (x 656-829, y 427-473, drawn as two knobs), a console
+  // down to the tunnel [P]; slatted end vents (driver's x 263-315, y 286-320) [P], the
+  // passenger's by symmetry [E].
+  stack: { half: 0.14 },
+  vents: [
+    { x: 0.075, dy: -0.106, half: [0.05, 0.036] },
+    { x: -0.075, dy: -0.106, half: [0.05, 0.036] },
+    { x: 0.67, dy: 0.025, half: [0.035, 0.022] },
+    { x: -0.67, dy: 0.025, half: [0.035, 0.022] },
+  ],
+  heater: { dy: -0.192, half: [0.12, 0.032], knobs: [0.04, -0.04], radius: 0.012 },
+  // On the band: the red hazard button (x 630, y 307) and the radio's slot in the middle
+  // (x 656-803, empty on the photo) [P]; the lid x 866 to past the frame, in wood with a
+  // black pull [P], its outer end by symmetry with the cluster [E].
+  hazard: [0.155, 0.019],
+  radio: [0, 0.017],
+  glovebox: { x: -0.407, dy: 0.0145, half: [0.21, 0.04], colour: COLOURS.wood },
+  // Two round buttons under the cluster right of the column (x 544, 583; y 395) [P], the
+  // first taken for the lights [E]; the ashtray low on the console [E].
+  lights: { right: 0.117, dy: -0.111, kind: 'knob' },
+  ashtray: [0, -0.33],
+  // 0.193 to the grip's centre, an 18 mm grip; the pad reaches the rim at nine o'clock,
+  // a little under the level, and at six [P]; the right spoke by symmetry [E].
+  wheel: { ...LAYOUTS.classic.wheel, dy: 0, radius: 0.193, rim: 0.0095, spokes: [-10, 190, 270], hub: 'pad' },
+};
+
+// The UAZ-469 on the Niva's furniture (its four-wheel drive and transfer levers), read off
+// Wikimedia Commons "UAZ-early-interior-floor-pedals.jpg" (CC BY 2.0, 1920 x 1440, from
+// the driver's seat over the wheel) and the 3151 four-view uaz2.jpg (seats dashed;
+// measurements-uaz.md §1.6). On the photo the windscreen's middle post (x 900) is the
+// car's centre line and the column's hub stands at x 340: 560 px for seatX 0.40 [E],
+// 0.71 mm/px at the dash. Heights are hung from the dials' centre (y 395), 0.04 over the
+// belt [E]: no photo shows the belt and the dials together.
+
+/**
+ * UAZ-469: a flat steel dash in the body's colour across the car under a short top lip;
+ * the speedometer alone right of the column, then in the dash's middle a chrome-framed
+ * panel of four small dials (ammeter, oil pressure, temperature, fuel) with four warning
+ * lamps over it and a row of knobs and switches under it; a small lid right of the panel,
+ * a grab handle before the passenger; a big thin three-spoke wheel; the gear lever and the
+ * transfer box's two levers on the tunnel.
+ */
+export const CABIN_UAZ469: CabinLayoutOverride = {
+  seatX: 0.4,
+  // The front seat's cushion x 400-510 and its back at the B pillar on the 3151 drawing:
+  // hip 0.70 behind the cowl; the rear bench's back at x 700-740, its hip 0.83 behind the
+  // front's, standing between the wheel-house covers [D].
+  hip: 0.7,
+  bench: { from: 'hip', offset: 0.83, clear: 0.04 },
+  bolsters: false,
+  // An upright steel face (top lip y 230, foot y 500: 0.19 tall) under a lip reaching back
+  // 3 cm, its top level from the scuttle [P].
+  dash: [
+    [0.1, 0.13], [0.31, 0.13], [0.345, 0.115], [0.345, -0.07],
+    [0.32, -0.09], [0.12, -0.11], [0.045, -0.1], [0.045, -0.06],
+  ],
+  fascia: [[0.345, 0.115], [0.345, -0.07]],
+  wood: undefined,
+  stack: undefined,
+  vents: undefined,
+  heater: undefined,
+  // A flat plate 7 mm proud of the face from the speedometer to the panel's right end
+  // (x 560-1075: 0.16-0.52 right of the column) [P].
+  binnacle: [[0.3, 0.075], [0.352, 0.075], [0.352, 0.0], [0.3, 0.0]],
+  binnacleHalf: 0.185,
+  binnacleRight: 0.34,
+  cluster: 0.352,
+  // The panel x 710-1075, y 345-440 in a chrome frame, black [P].
+  clusterFace: { right: 0.39, up: 0.04, half: [0.13, 0.032], colour: COLOURS.cluster, frame: 'chrome' },
+  gauges: [
+    // Speedometer 0-120 at x 620, 115 px across [P].
+    { channel: 'speed', right: 0.2, up: 0.04, radius: 0.038, full: 120, ...BIG },
+    // x 755, 850, 935, 1030, 75 px across [P]: the ammeter (-30..30; the voltmeter's
+    // channel, its zero at 14 V [E]), oil pressure 0-6 kgf/cm², temperature, fuel.
+    { channel: 'volts', right: 0.295, up: 0.04, radius: 0.024, ...SMALL, min: 12, full: 16 },
+    { channel: 'oil', right: 0.362, up: 0.04, radius: 0.024, ...SMALL, full: 6, ticks: 4 },
+    { channel: 'temp', right: 0.422, up: 0.04, radius: 0.024, ...SMALL },
+    { channel: 'fuel', right: 0.49, up: 0.04, radius: 0.024, ...SMALL },
+  ],
+  // Four round lamps over the panel (x 755-930, y 320): two dark, two red [P].
+  lamps: { right: 0.356, up: 0.093, cols: 4, pitch: 0.042, show: ['turn', 'beam', 'oil', 'charge'] },
+  // The row under the panel at y 515 (x 765-1010) [P]: the first knob the lights [E], the
+  // rest switches; the hazard button (none on the car) at the row's end [E].
+  lights: { right: 0.3, dy: -0.045, kind: 'knob' },
+  rockers: { on: 'fascia', at: [[0.065, -0.045], [0.03, -0.045], [-0.01, -0.045]] },
+  hazard: [-0.075, -0.045],
+  // The small lid right of the panel (x 1130-1200, y 345-440) [P]; the radio (none on the
+  // car, kept for the game's radio) and the ashtray on the passenger's half [E].
+  glovebox: { x: -0.19, dy: 0.04, half: [0.035, 0.032] },
+  radio: [-0.45, 0.04],
+  ashtray: [-0.45, -0.04],
+  // Rim x 50-630 [P]: 0.42 across, a thin grip; three spokes up and a little right, left
+  // and a little down, down-right [P]; a steep column [E].
+  wheel: { ds: 0.5, dy: 0.0, rake: 35 * (Math.PI / 180), radius: 0.21, rim: 0.011, spokes: [102, -18, 222], hub: 'round' },
+  // Gear lever out of the tunnel's front, the two transfer levers beside it (a ball each)
+  // [P].
+  gear: { ds: 0.5, height: 0.36, lean: 0.08 },
+  transfer: {
+    ds: 0.56,
+    levers: [
+      { x: -0.05, height: 0.24, knob: 0.02, lean: [0.03, 0] },
+      { x: -0.1, height: 0.24, knob: 0.02, lean: [0.03, -0.01] },
+    ],
+  },
+  // Bare painted floor, the canvas' grey-green inside [E].
+  carpet: 0x2c2d26,
+  headliner: 0x6f6d58,
+};
+
+// The UAZ-2206 on the van's furniture, read off Wikimedia Commons "Uljanowski Awtomobilny
+// Sawod 452 (steering wheel).jpg" (CC BY-SA 4.0, Fiver, der Hellseher; 1920 x 1440, from
+// the driver's door over the wheel; measurements-uaz.md §1, §3.8). No dimension of the cab
+// is known: the wheel's centre (x 0.515, 1.52 high) is the factory front view's
+// (measurements-uaz.md §3.6), its rim 0.40 across [D 0.19-0.21 r]; everything else is
+// hung off it by the photo's proportions [E].
+
+/**
+ * UAZ-2206: a flat painted steel dash under the screen, a deep level shelf on top, the
+ * face upright; low on the driver's side, outboard of the column, a grey-blue panel of
+ * four chrome-ringed dials (the speedometer 0-120 the largest, oil, fuel, temperature)
+ * with a row of round warning lamps over them, a knob and a lamp under them; small
+ * plates right of the column; a large thin two-spoke wheel on a steep column; the gear
+ * lever and the transfer box's levers out of the floor behind the engine's cover.
+ */
+export const CABIN_UAZ2206: CabinLayoutOverride = {
+  seatX: 0.515, // the wheel's centre [D front view]
+  bolsters: false,
+  // A deep level shelf from the screen's foot to an upright face, its foot low over the
+  // driver's knees [P]; 0.32 deep [E].
+  dash: [
+    [0.05, 0.055], [0.3, 0.055], [0.32, 0.04], [0.32, -0.2],
+    [0.29, -0.23], [0.1, -0.25], [0.045, -0.22], [0.045, -0.06],
+  ],
+  fascia: [[0.32, 0.04], [0.32, -0.2]],
+  wood: undefined,
+  stack: undefined,
+  vents: undefined,
+  heater: undefined,
+  // The instrument panel: a flat plate 4 cm proud of the face, low and outboard of the
+  // column [P: x 30-420 px left of the column at x 640, y 600-900, under the lamps' row].
+  binnacle: [[0.3, -0.04], [0.36, -0.04], [0.36, -0.17], [0.3, -0.17]],
+  binnacleHalf: 0.16,
+  binnacleRight: -0.06,
+  cluster: 0.36,
+  clusterFace: { right: -0.06, up: -0.105, half: [0.155, 0.06], colour: 0x4a5560, frame: 'chrome' },
+  gauges: [
+    // From the door's side: oil (0-6), the speedometer 0-120 [P "80 … 120"], fuel [P the
+    // pump], temperature; the speedometer about 1.6 times the others [P].
+    { channel: 'oil', right: -0.175, up: -0.125, radius: 0.025, ...SMALL, full: 6, ticks: 4 },
+    { channel: 'speed', right: -0.085, up: -0.115, radius: 0.04, full: 120, ...BIG },
+    { channel: 'fuel', right: 0.005, up: -0.125, radius: 0.025, ...SMALL },
+    { channel: 'temp', right: 0.065, up: -0.125, radius: 0.025, ...SMALL },
+  ],
+  // The round lamps over the dials: red, white, amber [P].
+  lamps: { right: -0.085, up: -0.06, cols: 4, pitch: 0.03, show: ['charge', 'side', 'turn', 'beam'] },
+  // A knob under the panel (the lights) and a toggle switch [P]; the hazard button (none
+  // on the car, kept for the game) by them [E].
+  lights: { right: -0.05, dy: -0.195, kind: 'knob' },
+  rockers: { on: 'fascia', at: [[0.7, -0.195]] },
+  hazard: [0.42, -0.195],
+  // Right of the column: small plates [P]; the radio (none on the car, kept for the
+  // game's radio) and the ashtray there [E]; a small lid before the passenger [E].
+  radio: [0.18, -0.08],
+  ashtray: [0.18, -0.16],
+  glovebox: { x: -0.45, dy: -0.08, half: [0.14, 0.06] },
+  // Rim 0.40 across, a thin grip; two spokes, up-left and down-right, and a round boss
+  // [P]; the column steep, down in front of the dash's face [P].
+  wheel: { ds: 0.53, dy: 0.19, rake: 65 * (Math.PI / 180), radius: 0.2, rim: 0.012, spokes: [40, 220], hub: 'round' },
+  pedals: { pivot: [0.15, -0.22], pad: [0.3, 0.13] },
+};
+
 /**
  * Name of an empty node at the driver's eye, in the kit frame. render/carmodel.ts reads
  * it after the body fit as the default cabin camera (`CarModelMeasure.cabinEye`) and
@@ -857,6 +1215,11 @@ export function buildInterior(ctx: KitContext): void {
   new Cabin(ctx).build();
 }
 
+/** A car's cabin layout: its platform's, with its own `cabinLayout` over it. */
+function layoutOf(frame: BodyFrame): Layout {
+  return { ...LAYOUTS[frame.spec.platform], ...frame.spec.cabinLayout };
+}
+
 /** The rear bench's hip along the car, for a frame and its layout. */
 function benchHip(frame: BodyFrame, lay: Layout): number {
   return lay.bench.from === 'rearBase' ? frame.rearBase + lay.bench.offset : frame.cowl + lay.hip + lay.bench.offset;
@@ -867,19 +1230,27 @@ function benchHip(frame: BodyFrame, lay: Layout): number {
  * bay.ts lays the load floor from here, so the two never overlap or leave a gap.
  */
 export function loadSpaceStart(frame: BodyFrame): number {
-  return benchHip(frame, { ...LAYOUTS[frame.spec.platform], ...frame.spec.cabinLayout }) + BENCH_BACK;
+  return benchHip(frame, layoutOf(frame)) + BENCH_BACK;
 }
 
-/** The cabin's floor pan: the shell's flat underbody plus `FLOOR_RISE`. */
+/**
+ * Where a van's engine cover ends behind the cowl (`Layout.engineCover`): bay.ts starts
+ * the gearbox there, under the floor behind the engine. The cowl without a cover.
+ */
+export function engineCoverEnd(frame: BodyFrame): number {
+  return frame.cowl + (layoutOf(frame).engineCover?.ds1 ?? 0);
+}
+
+/** The cabin's floor pan: the shell's flat underbody plus `floorRise` (`FLOOR_RISE`). */
 function cabinFloor(frame: BodyFrame): number {
-  return frame.station(frame.cowl + 0.5).sill + FLOOR_RISE;
+  return frame.station(frame.cowl + 0.5).sill + (layoutOf(frame).floorRise ?? FLOOR_RISE);
 }
 
 /** Underside of the headliner (the shell's roof lining) at half width x and position s. */
 function headlinerUnder(frame: BodyFrame, x: number, s: number): number {
   const cab = frame.spec.cabin;
   const xr = cab.railHalf - cab.railInset;
-  return cab.rail + cab.railRise + cab.crown * (1 - (x / xr) ** 2) - LINING_DEPTH - frame.roofDrop(s);
+  return cab.rail + cab.railRise + frame.crownAt(x / xr) - LINING_DEPTH - frame.roofDrop(s);
 }
 
 /**
@@ -887,7 +1258,7 @@ function headlinerUnder(frame: BodyFrame, x: number, s: number): number {
  * `KIT_DRIVER_EYE_NODE`, and what the mirrors are turned to (exterior.ts as well).
  */
 export function driverEyeAt(frame: BodyFrame): Vec3 {
-  const lay = { ...LAYOUTS[frame.spec.platform], ...frame.spec.cabinLayout };
+  const lay = layoutOf(frame);
   const s = frame.cowl + lay.hip + EYE_BEHIND_HIP;
   const y = Math.min(cabinFloor(frame) + lay.cushion + SEATED_EYE, headlinerUnder(frame, lay.seatX, s) - EYE_HEADROOM);
   return [lay.seatX, y, frame.z(s)];
@@ -1071,9 +1442,17 @@ class Cabin {
   /** Every fixed part of the cabin. */
   private readonly fixed = new PartBuilder();
   private readonly hatch: boolean;
+  /** A forward-control van (`platform: 'van'`): its floor runs over both axles to the rear doors. */
+  private readonly van: boolean;
   /** Firewall lining, floor height, the floor's rear end (the rear arch's front). */
   private readonly fw: number;
   private readonly floorY: number;
+  /**
+   * Where furniture standing on the floor puts its foot: the floor, or on the van 10 mm
+   * under it, since its floor shows through the saloon's windows and a foot in its plane
+   * fights it there.
+   */
+  private readonly standY: number;
   private readonly floorEnd: number;
   private readonly rows: readonly FloorRow[];
   /** The belt at the cowl: the dash's datum. */
@@ -1081,7 +1460,7 @@ class Cabin {
   /** Driver's hip and the rear bench's hip. */
   private readonly hipS: number;
   private readonly benchS: number;
-  /** Lining below the belt ends here: at the boot, or at a hatch's load floor. */
+  /** Lining below the belt ends here: at the boot, at a hatch's load floor, or short of a van's rear doors. */
   private readonly lowerEnd: number;
   /** Steering column's x. */
   private readonly x0: number;
@@ -1090,17 +1469,19 @@ class Cabin {
     this.ctx = ctx;
     this.frame = ctx.frame;
     this.spec = ctx.frame.spec;
-    this.lay = { ...LAYOUTS[this.spec.platform], ...this.spec.cabinLayout };
+    this.lay = layoutOf(ctx.frame);
     this.hatch = this.spec.bootEnd === undefined;
+    this.van = this.spec.platform === 'van';
     const f = this.frame;
     const w = this.spec.wheels;
     this.fw = f.cowl + FIREWALL;
     this.floorY = cabinFloor(f);
-    this.floorEnd = w.rear - w.radius * f.archFactor(w.rear) - 0.01;
+    this.standY = this.van ? this.floorY - VAN_FOOT_SINK : this.floorY;
+    this.floorEnd = this.van ? f.rearBase - VAN_FLOOR_CLEAR : w.rear - w.radius * f.archFactor(w.rear) - 0.01;
     this.belt = f.station(f.cowl).belt;
     this.hipS = f.cowl + this.lay.hip;
     this.benchS = benchHip(f, this.lay);
-    this.lowerEnd = this.hatch ? this.benchS + BENCH_BACK : f.rearBase - 0.005;
+    this.lowerEnd = this.van ? f.rearBase - VAN_TRIM_CLEAR : this.hatch ? this.benchS + BENCH_BACK : f.rearBase - 0.005;
     this.x0 = this.lay.seatX;
     const t = this.lay.tunnel;
     const y = this.floorY;
@@ -1115,15 +1496,17 @@ class Cabin {
     this.group.name = 'kit_cabin';
     this.floor();
     this.sidePanels();
-    this.humps();
+    // A van's floor stands over its wheel arches: no covers inside.
+    if (!this.van) this.humps();
     this.sills();
     this.lining();
     this.headliner();
-    this.shelf();
+    if (!this.van) this.shelf();
     this.dash();
     this.steering();
     this.pedals();
     this.levers();
+    this.engineCover();
     for (const side of [1, -1]) this.frontSeat(side);
     this.bench();
     this.driverEye();
@@ -1236,14 +1619,16 @@ class Cabin {
     const r = w.radius * this.frame.archFactor(w.rear);
     for (let i = 0; i + 1 < cols.length; i++) {
       const c = cols[i]!;
-      if ((c.lower ?? c.upper ?? 'body') !== 'body') continue;
+      // A door on one side only (`CabinColumn.only`) leaves the other side the body's.
+      const sides = [1, -1].filter((side) => stripOwner(c, 'lower', side) === 'body');
+      if (sides.length === 0) continue;
       const s0 = Math.max(c.s, this.fw);
       const s1 = Math.min(cols[i + 1]!.s, this.lowerEnd);
       if (s1 - s0 < 0.005) continue;
       const samples = [s0, s1];
-      for (let k = -1; k <= 1; k += 0.25) samples.push(w.rear + k * r);
+      for (let k = -1; k <= 1; k += 0.25) samples.push(this.frame.archCentre(w.rear) + k * r);
       const ss = [...new Set(samples.filter((s) => s >= s0 && s <= s1))].sort((a, b) => a - b);
-      for (const side of [1, -1]) {
+      for (const side of sides) {
         const columns = ss.map((s) => {
           const sec = this.frame.section(s);
           const arch = this.frame.archY(s);
@@ -1268,7 +1653,8 @@ class Cabin {
    */
   private rakeTrim(): void {
     for (const c of this.spec.cabin.columns) {
-      if (!c.foot) continue;
+      // The first column's line rakes a door forward of the cowl: no body behind it.
+      if (!c.foot || c === this.spec.cabin.columns[0]) continue;
       // The line below where it leaves its column, by s (it falls as s does).
       const byS = this.frame.shutLine(c).slice(1).reverse();
       const bottom = (s: number): number => Math.max(this.floorAt(s) - 0.005, this.frame.archY(s) + HUMP_RISE);
@@ -1344,6 +1730,33 @@ class Cabin {
   }
 
   /**
+   * The van's padded engine cover on the centre line between the front seats
+   * (`Layout.engineCover`), hinged at its front top edge and lifting at the back, over the
+   * engine's block (its rocker cover and air filter on it) standing on the floor.
+   */
+  private engineCover(): void {
+    const c = this.lay.engineCover;
+    if (!c) return;
+    const cowl = this.frame.cowl;
+    const y1 = this.floorY + c.height;
+    const s0 = cowl + c.ds0;
+    const s1 = cowl + c.ds1;
+    const b = this.fixed;
+    // The block 3 cm inside the cover all round.
+    const top = y1 - 0.06;
+    b.color(COLOURS.metal);
+    b.box('trim', this.P(0, (this.standY + top - 0.05) / 2, (s0 + s1) / 2), [c.half - 0.06, (top - 0.05 - this.standY) / 2, (s1 - s0) / 2 - 0.04]);
+    b.color(COLOURS.black);
+    b.box('trim', this.P(0, top - 0.025, (s0 + s1) / 2 + 0.03), [0.05, 0.025, (s1 - s0) / 2 - 0.1]);
+    b.cylinderY('trim', this.P(0, top - 0.02, s1 - 0.12), 0.08, 0.02, 10);
+    const at = this.P(0, y1, s0);
+    this.hinge(this.group, ORIGIN, 'engine_cover', at, { channel: 'engine_cover', kind: 'rot', axis: [1, 0, 0], amount: 1.1 }, { id: 'engine_cover', label: 'Кожух двигателя' }, (h) => {
+      h.color(shade(this.spec.look.dash, 0.9));
+      pad(h, 'trim', this.P(0, (this.standY + y1) / 2, (s0 + s1) / 2), [c.half, (y1 - this.standY) / 2, (s1 - s0) / 2], 0.05, 0.85);
+    });
+  }
+
+  /**
    * The shell's lining over its own greenhouse and roof (`KitContext.lining`): pillar
    * trims, headers, the rail and the headliner as one skin in the headliner's colour.
    */
@@ -1364,7 +1777,8 @@ class Cabin {
     // Glass line at half width x: base (s, y) and top (s, y) for the screen or back light.
     const glass = (x: number, kind: 'front' | 'rear'): [P2, P2] => {
       const frac = Math.abs(x) / cab.railHalf;
-      const yt = cab.rail + cab.crown * (1 - frac * frac) - f.roofDrop(kind === 'front' ? top0 : topN);
+      const st = f.screenTopS(frac);
+      const yt = cab.rail + f.crownAt(frac) - f.roofDrop(kind === 'front' ? st : topN);
       const s = kind === 'front' ? f.screenFoot(frac) : f.rearBase;
       const yb = f.deckY(s, frac * f.section(kind === 'front' ? f.cowl : s).r4[0]);
       if (kind === 'rear' && cab.rearKnee) {
@@ -1372,7 +1786,7 @@ class Cabin {
         const kt = (cab.rearKnee.y - cb) / (cab.rail + cab.crown - cb);
         return [[cab.rearKnee.s, lerp(yb, yt, kt)], [topN, yt]];
       }
-      return [[s, yb], [kind === 'front' ? top0 : topN, yt]];
+      return [[s, yb], [kind === 'front' ? st : topN, yt]];
     };
     const frontTop = top0 + 0.03;
     const rearTop = topN - (this.hatch ? 0.06 : 0.03);
@@ -1403,7 +1817,10 @@ class Cabin {
       const [[sb, yb], [st, yt]] = glass(x, 'front');
       return lerp(sb, st, (y - yb) / (yt - yb));
     };
-    const my = cab.rail - 0.085 - f.roofDrop(top0);
+    // The header the mirror hangs from: the rail at the screen's top, or on a screen curved
+    // at its top (`screenTop`) the glass's own top on the centre line.
+    const header = cab.screenTop === undefined ? cab.rail - f.roofDrop(top0) : glass(0, 'front')[1][1] + 0.01;
+    const my = header - 0.085;
     // The pad (half size 0.105 x 0.03 x 0.014) is turned so the driver sees straight back
     // through the back light's middle in it (`mirrorFrame`); the turn swings its far end
     // towards the glass. 4 cm is added in front of its corner nearest the glass: the
@@ -1421,7 +1838,7 @@ class Cabin {
     let reach = 0;
     for (const x of [-0.105, 0.105]) for (const y of [-0.03, 0.03]) for (const z of [-0.014, 0.014]) reach = Math.max(reach, corner.set(x, y, z).applyMatrix3(turn).z);
     const ms = nearest + reach + 0.04;
-    const root = this.P(0, cab.rail - 0.01 - f.roofDrop(top0), glassS(0, cab.rail - 0.01 - f.roofDrop(top0)) + 0.03);
+    const root = this.P(0, header - 0.01, glassS(0, header - 0.01) + 0.03);
     const b = this.fixed.color(COLOURS.black);
     beam(b, 'trim', root, this.P(0, my + 0.02, ms), 0.008, 0.008, [1, 0, 0]);
     // The pad turns on a ball at the stem's end, by hand (rig.ts `aim`): side to side
@@ -1536,7 +1953,8 @@ class Cabin {
       [cowl + 0.012, f.deckY(cowl + 0.012, x) - 0.012],
       ...loft.get(x)!.map(([ds, dy]): P2 => [cowl + ds, belt + dy]),
     ]);
-    this.prismX(b, 'trim', [this.x0 - L.binnacleHalf, this.x0 + L.binnacleHalf], () => L.binnacle.map(([ds, dy]): P2 => [cowl + ds, belt + dy]));
+    const bx = this.x0 - (L.binnacleRight ?? 0);
+    this.prismX(b, 'trim', [bx - L.binnacleHalf, bx + L.binnacleHalf], () => L.binnacle.map(([ds, dy]): P2 => [cowl + ds, belt + dy]));
     if (L.stack) {
       // Down the fascia's line from its foot to the tunnel; the back corners hide in
       // the dash and the toe board.
@@ -1551,6 +1969,27 @@ class Cabin {
       const [y0, y1] = L.wood;
       const m = this.fascia(0, belt + (y0 + y1) / 2);
       b.color(COLOURS.wood).push(m.matrix).box('trim', [0, 0, 0.002], [half - 0.01, (y1 - y0) / 2, 0.002]).pop();
+    }
+    if (L.band) {
+      // Left out where the binnacle stands (its width, its section's height): seen at a
+      // slant through a window cut in the cluster's face, it would show past the window's
+      // stand-in.
+      const [y0, y1] = L.band.dy;
+      const mid = (y0 + y1) / 2;
+      const e = half - 0.01;
+      const ys = L.binnacle.map((p) => p[1]);
+      const [lo, hi] = [Math.max(y0, Math.min(...ys)), Math.min(y1, Math.max(...ys))];
+      const [bx0, bx1] = [Math.max(-e, bx - L.binnacleHalf), Math.min(e, bx + L.binnacleHalf)];
+      // [x from, x to, dy from, dy to], x in the car frame.
+      const pieces: readonly (readonly [number, number, number, number])[] = [
+        [-e, bx0, y0, y1], [bx1, e, y0, y1], [bx0, bx1, y0, lo], [bx0, bx1, hi, y1],
+      ];
+      b.color(L.band.colour).push(this.fascia(0, belt + mid).matrix);
+      for (const [xa, xb, ya, yb] of pieces) {
+        // The mount's local X is the car's -x.
+        if (xb - xa > 1e-4 && yb - ya > 1e-4) inlay(b, 'trim', rectCorners(-(xa + xb) / 2, (ya + yb) / 2 - mid, (xb - xa) / 2, (yb - ya) / 2, 0));
+      }
+      b.pop();
     }
     if (L.clusterFace) {
       // The frame laid in the binnacle's face, the face laid in the frame: one plane.
@@ -1589,6 +2028,29 @@ class Cabin {
     for (const g of L.gauges) {
       if (g.kind === 'ribbon') this.ribbon(g);
       else this.gauge(g);
+    }
+    if (L.clock) {
+      // A round dial's bezel and face; the hour marks and the hands laid into the face.
+      const { right, up, radius: r } = L.clock;
+      const c = this.fixed.push(this.clusterAt(right, up).matrix).color(COLOURS.black);
+      c.cylinderZ('chrome', [0, 0, 0.006], r + 0.005, 0.006, 12, false);
+      const ray = (a: number, k0: number, k1: number, w: number): Vec3[] => {
+        const d: P2 = [Math.cos(a), Math.sin(a)];
+        const p: P2 = [-d[1] * w, d[0] * w];
+        return [
+          [d[0] * r * k0 - p[0], d[1] * r * k0 - p[1], 0.004], [d[0] * r * k1 - p[0], d[1] * r * k1 - p[1], 0.004],
+          [d[0] * r * k1 + p[0], d[1] * r * k1 + p[1], 0.004], [d[0] * r * k0 + p[0], d[1] * r * k0 + p[1], 0.004],
+        ];
+      };
+      const disc: Vec3[] = [];
+      for (let i = 0; i < 12; i++) disc.push([Math.cos((i / 12) * Math.PI * 2) * r, Math.sin((i / 12) * Math.PI * 2) * r, 0.004]);
+      c.color(COLOURS.face).poly('trim', disc);
+      c.color(COLOURS.tick);
+      for (let i = 0; i < 12; i++) inlay(c, 'trim', ray((i / 12) * Math.PI * 2, 0.74, 0.92, 0.0012));
+      // Ten past ten: the hour hand at 150 degrees from three o'clock, the minute hand at 30.
+      inlay(c, 'trim', ray((150 * Math.PI) / 180, -0.1, 0.5, 0.0015));
+      inlay(c, 'trim', ray((30 * Math.PI) / 180, -0.1, 0.8, 0.0012));
+      c.pop();
     }
     this.glovebox();
     this.radio();
@@ -1769,7 +2231,7 @@ class Cabin {
     this.fixed.pop();
     const at = m.at(0, -hy, 0.007);
     fineDetail(this.hinge(this.group, ORIGIN, 'glovebox', at, { channel: 'glovebox', kind: 'rot', axis: [1, 0, 0], amount: -1.2 }, { id: 'glovebox', label: 'Бардачок' }, (b) => {
-      b.push(m.matrix).color(shade(this.spec.look.dash, 1.15));
+      b.push(m.matrix).color(this.lay.glovebox.colour ?? shade(this.spec.look.dash, 1.15));
       pad(b, 'trim', [0, 0, 0.007], [hx, hy, 0.007], 0.005);
       b.color(COLOURS.black).box('chrome', [0, hy - 0.018, 0.016], [0.03, 0.006, 0.003]);
       b.pop();
@@ -1887,17 +2349,17 @@ class Cabin {
     wb.cylinderY('trim', [0, -0.045, 0], 0.04, 0.02, 8);
     for (const deg of w.spokes) {
       const a = (deg * Math.PI) / 180;
-      beam(wb, 'trim', [Math.cos(a) * 0.035, -0.04, Math.sin(a) * 0.035], [Math.cos(a) * (R - 0.006), -0.004, Math.sin(a) * (R - 0.006)], 0.016, 0.006);
+      beam(wb, w.chrome ? 'chrome' : 'trim', [Math.cos(a) * 0.035, -0.04, Math.sin(a) * 0.035], [Math.cos(a) * (R - 0.006), -0.004, Math.sin(a) * (R - 0.006)], 0.016, 0.006);
     }
     addBuilt(wheel, wb, ORIGIN, 'steering_wheel', true);
     attach(this.group, ORIGIN, wheel);
     fineDetail(this.hinge(wheel, ORIGIN, 'horn', ORIGIN, { channel: 'horn', kind: 'pos', axis: [0, -1, 0], amount: 0.006 }, { id: 'horn', label: 'Гудок', action: { type: 'press', channel: 'horn' } }, (h) => {
       h.color(shade(COLOURS.black, 1.3));
       if (w.hub === 'round') {
-        h.cylinderY('trim', [0, -0.02, 0], 0.055, 0.012, 10);
+        h.cylinderY(w.chrome ? 'chrome' : 'trim', [0, -0.02, 0], 0.055, 0.012, 10);
         h.color(COLOURS.black).cylinderY('chrome', [0, -0.006, 0], 0.016, 0.003, 6);
       } else {
-        pad(h, 'trim', [0, -0.02, -0.005], [0.075, 0.014, 0.05], 0.012);
+        pad(h, w.chrome ? 'chrome' : 'trim', [0, -0.02, -0.005], [0.075, 0.014, 0.05], 0.012);
       }
     }));
   }
@@ -1993,7 +2455,7 @@ class Cabin {
     const uph = this.spec.look.upholstery;
     const insert = shade(uph, 1.35);
     const fixed = this.fixed.color(COLOURS.metal);
-    for (const dx of [-0.17, 0.17]) beam(fixed, 'trim', this.P(x + dx, this.floorY + 0.012, hip - 0.45), this.P(x + dx, this.floorY + 0.012, hip + 0.1), 0.012, 0.012);
+    for (const dx of [-0.17, 0.17]) beam(fixed, 'trim', this.P(x + dx, this.standY + 0.012, hip - 0.45), this.P(x + dx, this.standY + 0.012, hip + 0.1), 0.012, 0.012);
 
     const baseAt = this.P(x, this.floorY, hip - 0.15);
     const seat = this.hinge(this.group, ORIGIN, `seat_${pos}`, baseAt, { channel: `seat_${pos}`, kind: 'pos', axis: [0, 0, 1], amount: 0.15 }, { id: `seat_${pos}`, label: `Сиденье ${WHERE[pos]}` }, (b) => {
@@ -2044,7 +2506,7 @@ class Cabin {
     const insert = shade(uph, 1.35);
     const skirtTop = top - 0.12;
     b.color(shade(uph, 0.85));
-    pad(b, 'trim', this.P(0, (this.floorY + skirtTop) / 2, H + (BENCH_BACK - 0.36) / 2), [wall, (skirtTop - this.floorY) / 2, (BENCH_BACK + 0.36) / 2], 0.015);
+    pad(b, 'trim', this.P(0, (this.standY + skirtTop) / 2, H + (BENCH_BACK - 0.36) / 2), [wall, (skirtTop - this.standY) / 2, (BENCH_BACK + 0.36) / 2], 0.015);
     if (!this.hatch) {
       const s0 = H + 0.1;
       const s1 = this.frame.rearBase - 0.015;

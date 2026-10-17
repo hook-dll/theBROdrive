@@ -20,13 +20,14 @@
 
 import { BODY_2141, LOOK_2141 } from './azlk';
 import { BODY_2102, BODY_2104, REAR_2102, REAR_2104 } from './estates';
-import { CABIN_1111, CABIN_2101, CABIN_2103, CABIN_2105, CABIN_2107, CABIN_2110, CABIN_2131 } from './interior';
+import { CABIN_1111, CABIN_2101, CABIN_2103, CABIN_2105, CABIN_2107, CABIN_2110, CABIN_2131, CABIN_GAZ24, CABIN_GAZ31029, CABIN_UAZ2206, CABIN_UAZ469 } from './interior';
 import { BODY_1111, LOOK_1111 } from './oka';
 import { BODY_2108, BODY_2109, BODY_21099, BODY_2115, LOOK_2108, LOOK_2109, LOOK_21099, LOOK_2115 } from './samaras';
 import type { KitCarSpec, KitLook } from './spec';
 import { BODY_2110, BODY_2111, BODY_2112, LOOK_2110, LOOK_2111, LOOK_2112 } from './tens';
 import { BODY_2121, BODY_2131, LOOK_2121, LOOK_2131 } from './nivas';
 import { BODY_GAZ24, BODY_GAZ31029, LOOK_GAZ24, LOOK_GAZ31029 } from './volgas';
+import { BODY_UAZ2206, BODY_UAZ469, LOOK_UAZ2206, LOOK_UAZ469 } from './uaz';
 
 /** The shape of a car: everything a spec holds but its id, its looks and its cabin. */
 export type KitBody = Omit<KitCarSpec, 'id' | 'look' | 'cabinLayout'>;
@@ -45,9 +46,11 @@ function onBody(body: KitBody, ds: number, length: number): KitBody {
       ...cabin,
       columns: cabin.columns.map((c) => ({ ...c, s: c.s + ds, top: c.top + ds })),
       rearKnee: cabin.rearKnee && { ...cabin.rearKnee, s: cabin.rearKnee.s + ds },
+      softTop: cabin.softTop && { ...cabin.softTop, from: cabin.softTop.from + ds },
     },
     wheels: { ...body.wheels, front: body.wheels.front + ds, rear: body.wheels.rear + ds },
     bonnetFront: body.bonnetFront + ds,
+    bonnet: body.bonnet && { ...body.bonnet, rear: body.bonnet.rear === undefined ? undefined : body.bonnet.rear + ds },
     bootEnd: body.bootEnd === undefined ? undefined : body.bootEnd + ds,
     flap: { ...body.flap, s0: body.flap.s0 + ds, s1: body.flap.s1 + ds },
   };
@@ -505,7 +508,9 @@ export const KIT_SPECS: Readonly<Record<string, KitCarSpec>> = {
   vaz2121: { id: 'vaz2121', ...BODY_2121, look: LOOK_2121 },
   vaz2131: { id: 'vaz2131', ...BODY_2131, look: LOOK_2131, cabinLayout: CABIN_2131 },
   vaz1111: { id: 'vaz1111', ...BODY_1111, look: LOOK_1111, cabinLayout: CABIN_1111 },
-  gaz24: { id: 'gaz24', ...BODY_GAZ24, look: LOOK_GAZ24 },
-  gaz31029: { id: 'gaz31029', ...BODY_GAZ31029, look: LOOK_GAZ31029 },
+  gaz24: { id: 'gaz24', ...BODY_GAZ24, look: LOOK_GAZ24, cabinLayout: CABIN_GAZ24 },
+  gaz31029: { id: 'gaz31029', ...BODY_GAZ31029, look: LOOK_GAZ31029, cabinLayout: CABIN_GAZ31029 },
   azlk2141: { id: 'azlk2141', ...BODY_2141, look: LOOK_2141 },
+  uaz469: { id: 'uaz469', ...BODY_UAZ469, look: LOOK_UAZ469, cabinLayout: CABIN_UAZ469 },
+  uaz2206: { id: 'uaz2206', ...BODY_UAZ2206, look: LOOK_UAZ2206, cabinLayout: CABIN_UAZ2206 },
 };

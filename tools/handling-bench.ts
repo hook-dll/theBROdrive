@@ -30,8 +30,9 @@ import { SurfaceType } from '../src/core/surfaces';
 import { GameWorld, newWorldState } from '../src/game/state';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { emptyInput, type InputFrame } from '../src/core/input';
-import { preloadCarModels } from '../src/render/carmodel';
-import { CAR_MODELS } from '../src/vehicle/carmodels';
+import { carModelMeasure, preloadCarModels } from '../src/render/carmodel';
+import { CAR_MODELS, carModel, modelEngine, modelGearbox } from '../src/vehicle/carmodels';
+import { fullThrottleUpshiftDue } from '../src/vehicle/drivetrain';
 import { benchCarState } from './benchcar';
 import { Trailer, TRAILER_TARE_KG } from '../src/vehicle/trailer';
 import { WorldOrigin } from '../src/world/origin';
@@ -374,6 +375,103 @@ export function measureTopSpeed(
     },
   );
   return { plateauKmh, spikeKmh, reachedPlateau };
+}
+
+/** A 20 km square of asphalt: a Volga needs several kilometres to settle at its top. */
+export function addLongGround(physics: PhysicsWorld): void {
+  physics.addHeightfield(
+    1,
+    1,
+    new Float32Array(4),
+    { x: 20000, y: 1, z: 20000 },
+    { x: 0, y: 0, z: 0 },
+    SurfaceType.Asphalt,
+  );
+}
+
+/** Mean rolling radius of the axle that drives, as `Vehicle` computes it. */
+export function drivenRadiusOf(modelId: string): number {
+  const wheels = carModelMeasure(modelId).wheels;
+  const rearDriven = carModel(modelId).rearDriveBias >= 0.5;
+  const driven = wheels.filter((w) => w.isFront !== rearDriven);
+  return driven.reduce((sum, w) => sum + w.radius, 0) / driven.length;
+}
+
+/** Seconds of full throttle against the brake before a sprint's clock starts. */
+const PRE_REV_S = 0.6;
+
+/**
+ * A standing start through a manual box driven the way a factory test driver drives it:
+ * first gear engaged before the clock starts, the revs raised against the brake, then
+ * full throttle, and each change made at the power-optimal point
+ * (`fullThrottleUpshiftDue`, the same definition the automatic uses at wide-open
+ * throttle) — decided on the crank speed the road speed implies in the engaged gear,
+ * so a free-revving crank mid-change cannot trigger a second one.
+ *
+ * The revs are raised first because a test driver does not let the clutch up at idle:
+ * the crank's own inertia takes a third of a second of full torque to spin up from
+ * idle to the bite (vehicle/drivetrain.ts), and no 0-100 was ever measured that way.
+ *
+ * Returns the seconds to each of `marksKmh` (null for a mark not reached within
+ * `limitS`) and leaves the rig in manual, at the first step past the highest mark.
+ */
+export function manualSprint(
+  rig: Rig,
+  modelId: string,
+  marksKmh: readonly number[],
+  limitS = 60,
+): (number | null)[] {
+  const engine = modelEngine(carModel(modelId));
+  const gearbox = modelGearbox(carModel(modelId));
+  const radius = drivenRadiusOf(modelId);
+  // A settings delta, never a field write: a fresh world shares DEFAULT_SETTINGS by
+  // reference, and mutating it would put every later rig in manual too.
+  rig.world.apply({
+    t: 'settings',
+    settings: { ...rig.world.state.settings, gearboxMode: 'manual' },
+  });
+
+  // Select first and let the change complete, on the brake; then the revs up against it.
+  drive(rig, gearbox.shiftTime + 0.3, (t, f) => {
+    f.shift = t === 0 ? 1 : 0;
+    f.brake = 1;
+    f.throttle = 0;
+  });
+  if (rig.vehicle.gearLabel !== '1') throw new Error(`${modelId}: could not select first gear`);
+  drive(rig, PRE_REV_S, (_, f) => {
+    f.brake = 1;
+    f.throttle = 1;
+  });
+
+  const reached: (number | null)[] = marksKmh.map(() => null);
+  const last = Math.max(...marksKmh);
+  let t = 0;
+  driveUntil(
+    rig,
+    limitS,
+    (_, f) => {
+      f.brake = 0;
+      f.throttle = 1;
+      f.steer = 0;
+      f.shift = 0;
+      const gear = Number(rig.vehicle.gearLabel);
+      if (gear >= 1 && gear < gearbox.ratios.length) {
+        const ratio = gearbox.ratios[gear - 1]!;
+        const wheelRad = Math.abs(rig.vehicle.audio.forwardMps) / radius;
+        const rpm = (wheelRad * ratio * gearbox.finalDrive * 60) / (2 * Math.PI);
+        if (fullThrottleUpshiftDue(engine, rpm, ratio, gearbox.ratios[gear]!)) f.shift = 1;
+      }
+    },
+    () => {
+      t += FIXED_DT;
+      const kmh = rig.vehicle.speedKmh;
+      marksKmh.forEach((mark, i) => {
+        if (reached[i] === null && kmh >= mark) reached[i] = t;
+      });
+      return kmh >= last;
+    },
+  );
+  return reached;
 }
 
 /**

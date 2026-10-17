@@ -175,6 +175,8 @@ const SUSP_CAR: SuspensionTuning = {
   compressionRatio: 0.26,
   reboundRatio: 0.42,
   bumpTravel: 0.09,
+  frontAxle: 'independent',
+  rearAxle: 'beam',
   frontRollCentreM: 0.08,
   rearRollCentreM: 0.3,
   frontBar: 1,
@@ -244,9 +246,13 @@ const SUSP_CAR: SuspensionTuning = {
  * measured across (`SuspensionTuning.frontToeDeg`): the top of it is set to cancel the
  * toe-out rolling drag pulls through the bushes, and the model has no bushes.
  *
- * Roll camber and roll steer follow the linkage: a beam axle keeps its wheels square to
- * the road (roll camber 0), unequal wishbones keep ~0.6 of the body's lean, a strut
- * ~0.8, a twist beam with its cross member near the pivots ~0.75. Roll steer is the
+ * Roll camber and roll steer follow the linkage: a beam axle (`SuspensionTuning.
+ * rearAxle`/`frontAxle`) keeps its wheels square to a flat road whatever the body does
+ * and tilts both with the axle when one wheel is higher — that is geometry, not a
+ * figure, and its roll camber is written 0 — unequal wishbones keep ~0.6 of the body's
+ * lean, a strut ~0.8, a twist beam with its cross member near the pivots ~0.75. The
+ * live axles are the Zhigulis', the Nivas', the Volgas' and the IZh pickup's rears and
+ * both of a UAZ's; every other axle in the catalogue is independent. Roll steer is the
  * mild understeer every period chassis was given: ~0.04 °/° at the front from the
  * tie-rod geometry, 0.05-0.06 from a live axle's four links, ~0.1 from leaf springs,
  * whose eyes and shackles swing the axle as it rolls (Gillespie, Fundamentals of
@@ -272,6 +278,8 @@ const SUSP_VOLGA_21: SuspensionTuning = {
   compressionRatio: 0.18,
   reboundRatio: 0.3,
   bumpTravel: 0.1,
+  frontAxle: 'independent',
+  rearAxle: 'beam',
   frontRollCentreM: 0.1,
   rearRollCentreM: 0.38,
   frontBar: 1.6,
@@ -296,6 +304,8 @@ const SUSP_VOLGA_24: SuspensionTuning = {
   compressionRatio: 0.2,
   reboundRatio: 0.34,
   bumpTravel: 0.1,
+  frontAxle: 'independent',
+  rearAxle: 'beam',
   frontRollCentreM: 0.1,
   rearRollCentreM: 0.36,
   frontBar: 1.4,
@@ -324,6 +334,8 @@ const SUSP_ZHIGULI: SuspensionTuning = {
   compressionRatio: 0.24,
   reboundRatio: 0.38,
   bumpTravel: 0.095,
+  frontAxle: 'independent',
+  rearAxle: 'beam',
   frontRollCentreM: 0.08,
   rearRollCentreM: 0.3,
   frontBar: 1.5,
@@ -353,6 +365,8 @@ const SUSP_ZHIGULI_ESTATE: SuspensionTuning = {
   compressionRatio: 0.24,
   reboundRatio: 0.4,
   bumpTravel: 0.09,
+  frontAxle: 'independent',
+  rearAxle: 'beam',
   frontRollCentreM: 0.08,
   rearRollCentreM: 0.3,
   frontBar: 1.5,
@@ -381,6 +395,9 @@ const SUSP_SAMARA: SuspensionTuning = {
   compressionRatio: 0.28,
   reboundRatio: 0.42,
   bumpTravel: 0.085,
+  // The rear twist beam twists: written as a bar, its wheels independent.
+  frontAxle: 'independent',
+  rearAxle: 'independent',
   frontRollCentreM: 0.07,
   rearRollCentreM: 0.12,
   frontBar: 1.2,
@@ -410,6 +427,8 @@ const SUSP_NIVA: SuspensionTuning = {
   compressionRatio: 0.24,
   reboundRatio: 0.4,
   bumpTravel: 0.14,
+  frontAxle: 'independent',
+  rearAxle: 'beam',
   frontRollCentreM: 0.12,
   rearRollCentreM: 0.4,
   frontBar: 1,
@@ -437,6 +456,8 @@ const SUSP_LADA_RALLY: SuspensionTuning = {
   compressionRatio: 0.32,
   reboundRatio: 0.48,
   bumpTravel: 0.12,
+  frontAxle: 'independent',
+  rearAxle: 'beam',
   frontRollCentreM: 0.08,
   rearRollCentreM: 0.3,
   frontBar: 1,
@@ -469,6 +490,8 @@ const SUSP_SOFT: SuspensionTuning = {
   compressionRatio: 0.22,
   reboundRatio: 0.36,
   bumpTravel: 0.1,
+  frontAxle: 'independent',
+  rearAxle: 'independent',
   frontRollCentreM: 0.1,
   rearRollCentreM: 0.2,
   frontBar: 0.6,
@@ -492,6 +515,8 @@ const SUSP_SPORT: SuspensionTuning = {
   compressionRatio: 0.3,
   reboundRatio: 0.46,
   bumpTravel: 0.08,
+  frontAxle: 'independent',
+  rearAxle: 'beam',
   frontRollCentreM: 0.06,
   rearRollCentreM: 0.25,
   frontBar: 1.2,
@@ -519,6 +544,8 @@ const SUSP_TRUCK: SuspensionTuning = {
   compressionRatio: 0.24,
   reboundRatio: 0.38,
   bumpTravel: 0.11,
+  frontAxle: 'independent',
+  rearAxle: 'beam',
   frontRollCentreM: 0.1,
   rearRollCentreM: 0.4,
   frontBar: 1,
@@ -653,16 +680,52 @@ export interface LimitedSlip {
 }
 
 /**
- * The tyre the car was sold on, as its size is written on the sidewall. The side-force
- * curve is derived from it (`tyreCurve` in vehicletuning.ts): a tall soft sidewall
- * builds force slowly, peaks late and lets go gently; a low radial is quick, peaks
- * early and breaks away more sharply.
+ * A car's tyre: carcass construction and sidewall. The side-force curve is derived
+ * from it (`tyreCurve` in vehicletuning.ts): a tall soft sidewall builds force slowly,
+ * peaks late and lets go gently; a low radial is quick, peaks early and breaks away
+ * more sharply. Every road car runs `KAMA_217`; the off-road cars (Niva, UAZ) and the
+ * rally 2105 keep their own.
  */
 export interface TyreSpec {
   readonly construction: 'crossply' | 'radial';
   /** Sidewall height over section width: 0.82 for 165R13, 0.6 for 225/60. */
   readonly aspect: number;
 }
+
+/**
+ * THE ROAD TYRE: one typical KAMA of the 2000s on every road car, the owner's choice
+ * (2026-10-17) over a ladder of period Soviet tyres the game has no test data for.
+ *
+ * KAMA-217, Nizhnekamskshina, 175/70 R13 82H (also 175/65 R14 82H), now discontinued.
+ * PUBLISHED (td-kama.com/en/tyre_catalog/car/kama-217/175-70r13/): radial, tubeless,
+ * combined carcass and breaker, road tread, 210 km/h, outer diameter 576 ± 6 mm,
+ * section width at most 177 mm, static radius 261 ± 3 mm, 475 kg at 2.5 kgf/cm², 5J rim,
+ * EU label wet grip E, rolling resistance F, 72 dB. The seller recommends the 175/70 R13
+ * for VAZ models "from the 4th to the 11th" (mosautoshina.ru/catalog/tyre/kama/217/).
+ *
+ * KAMA publishes no dry-grip, cornering-stiffness or relaxation figure, so these are
+ * DERIVED:
+ *  - the side-force curve: `tyreCurve`'s radial rule at the 70 aspect (peak 5.8°,
+ *    plateau 0.81 by 23.9°, 0.31 m relaxation). One curve for every road car; each
+ *    car keeps its own factory wheel radius and width (`FACTORY_GEOMETRY`), so this is
+ *    the KAMA carcass at the car's own size, not a 175/70 R13 on a Volga hub.
+ *  - `KAMA_217_GRIP`, below.
+ * Its label class F is 10.6-12.0 N/kN on the test drum (EC 1222/2009), consistent with
+ * the asphalt's road figure of 0.013 (`SURFACES`), which is left as it was.
+ */
+export const KAMA_217: TyreSpec = { construction: 'radial', aspect: 0.7 };
+/**
+ * KAMA-217's `wheelGrip`, DERIVED: 0.53 is a peak of 0.90 on the reference asphalt
+ * (mu 1.7), 0.68 once locked (`SLIDING_GRIP_FRACTION`). Wet grip class E (1.10-1.24
+ * of the EU reference tyre, EC 1222/2009) puts it at the cheap end of its decade. The
+ * figure is set on the two VAZs measured on budget 13-inch radials, and on the bench
+ * (tools/physics-suite.ts, +150 kg, 2026-10-17) it held both: the Samara at 0.73 g on the 40 m
+ * skidpad against Car and Driver's 0.71 g (06/1989, Samara 1500 on Goodyear Arriva M+S
+ * P175/70R13) and 52.3 m from 100 against that test's 55.5 m rescaled; the 21102 at
+ * 53.6 m against Za Rulem's 55.0 m on its standard 13-inch wheels (11/2004, no ABS).
+ * docs/physics-references.md, kit_vaz2108 and kit_vaz2110.
+ */
+export const KAMA_217_GRIP = 0.53;
 
 /** Mechanical era shared by cars with the same steering and tyre construction. */
 export type HandlingProfile = 'classic' | 'road' | 'sport' | 'utility';
@@ -860,6 +923,11 @@ export interface CarModelDef {
    * own type approval.
    */
   readonly brakeDecelG: number;
+  /**
+   * The load-sensing rear brake pressure regulator ("регулятор давления задних тормозов"),
+   * absent on a car that had none. See `RearBrakeValve`.
+   */
+  readonly rearBrakeValve?: RearBrakeValve;
   readonly suspension: SuspensionTuning;
   /**
    * Steering lock, radians: the rack's angle, the bicycle-model angle of the front
@@ -1025,6 +1093,18 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   // wheelbase, 1440/1420 tracks, 140 clearance, 165/80 R14 (drom.ru, wiki.zr.ru, njcar.ru;
   // src/carkit/measurements-2141.md).
   kit_azlk2141:   { length: 4.350, width: 1.690, height: 1.400, clearance: 0.140, wheelbase: 2.580, frontTrack: 1.440, rearTrack: 1.420, wheelRadius: 0.310, tyreWidth: 0.165 },
+  // The UAZ-469 under its canvas top, its 469B (civilian, single-reduction axles) figures:
+  // 4025 over the spare, 1785 wide, 2380 wheelbase, 1445 tracks, 215/90-15C (the UAZ manual
+  // RE 05808600.072-2000, as cf_uaz31512: the same body); 2015 high under the canvas
+  // (ru.wikipedia "УАЗ-469", after the 1983 "Краткий автомобильный справочник"); 220
+  // clearance (ibid.: 300 on the military 469's portal axles). src/carkit/measurements-uaz.md.
+  kit_uaz469:     { length: 4.025, width: 1.785, height: 2.015, clearance: 0.220, wheelbase: 2.380, frontTrack: 1.445, rearTrack: 1.445, wheelRadius: 0.372, tyreWidth: 0.215 },
+  // The UAZ-2206 bus, the operating manual's figure (РЭ 05808600.059-96): 4380 bumper to
+  // bumper (993 + 2300 + 1087; 4440 over the hitch), 1940 wide, 2101 high over the roof
+  // vent, 2300 wheelbase, 1445 tracks, 220 clearance, 215/90-15C (364 static); the
+  // 0.372 rolling radius and 0.225 width are the running-gear sibling's tyre
+  // (sa_uaz330364). src/carkit/measurements-uaz.md §1, §3.1.
+  kit_uaz2206:    { length: 4.380, width: 1.940, height: 2.101, clearance: 0.220, wheelbase: 2.300, frontTrack: 1.445, rearTrack: 1.445, wheelRadius: 0.372, tyreWidth: 0.225, frontOverhang: 0.993 },
 };
 
 function factoryGeometry(id: string): FactoryGeometry {
@@ -1062,8 +1142,8 @@ function factoryGeometry(id: string): FactoryGeometry {
  * Engines, gearboxes and final drives are the factory's, from the pack's own Soviet
  * driveline table (parts/registry.ts). Masses are catalogue kerb masses, weight
  * distribution is the factory axle split, steering lock is derived from the published
- * turning circle at each body's own measured wheelbase, and the grip ladder is what
- * period tyres actually pull (see the note above the table).
+ * turning circle at each body's own measured wheelbase, and every road car runs the one
+ * road tyre, `KAMA_217` (see the note above the table).
  *
  * `dragArea` is calibrated, in this order and never before the others: real mass,
  * ratios and driveline efficiency, then the engine's factory curve, then Cd·A as the
@@ -1086,6 +1166,7 @@ interface SovietSpec {
   readonly tankLitres: number;
   readonly wheelGrip: number;
   readonly brakeDecelG: number;
+  readonly rearBrakeValve?: RearBrakeValve;
   readonly steerLock: number;
   readonly rearDriveBias: number;
   readonly handlingProfile?: HandlingProfile;
@@ -1102,29 +1183,21 @@ interface SovietSpec {
 
 
 /*
- * ---- the grip ladder, and why it sits so far below 1.0 ----
+ * ---- one road tyre, and the off-road ones ----
  *
  * `wheelGrip` multiplies the surface's one coefficient for drive, braking and
- * cornering alike, so it is the tyre — and these are period Soviet tyres. What the
- * real cars pull on dry asphalt, and what each figure below is calibrated to:
+ * cornering alike, so it is the tyre. Every road car below runs the same one,
+ * `KAMA_217` at `KAMA_217_GRIP`: the cars differ in mass, weight transfer, springs and
+ * axles, not in rubber. It replaced a ladder of period Soviet tyres (cross-ply Volgas
+ * at 0.52-0.60, Fiat-era Zhiguli radials at 0.55-0.58, Samaras at 0.65 with the `road`
+ * profile's 1.08 cornering scale on top), each calibrated to a period lateral figure
+ * with no measurement cited for it.
  *
- *   GAZ-21, 6.70-15 cross-ply          0.62 g   a tall, soft, hot-running carcass
- *   GAZ-24, 7.35-14                    0.66 g
- *   Zhiguli, 155/165-80R13 radial      0.70 g   Fiat-era radials, narrow
- *   later classics, 165/80R13          0.72 g
- *   Samara, 165/70R13                  0.78 g   a lower profile and a wider rim
- *   Niva, 175/80R16 all-terrain        0.66 g   soft block tread, tall sidewall
- *   rally 2105                         0.85 g   the only one built to corner
- *
- * The old ladder ran 0.88-1.04, which measured 0.89-1.04 g on the bench: a 1956
- * Volga cornering like a modern hatchback. The stopping distance on dry asphalt IS set
- * here now: every car's brakes (`brakeDecelG`) out-pull its tyres, so a hard stop ends
- * at this tyre's peak and a floored pedal at its sliding plateau. What it used to be —
- * the brakes capped below the tyres to hit a distance — never let a pedal lock a wheel.
- *
- * The ORDER is unchanged and it still runs backwards from every other pack: these
- * are the oldest cars in the catalogue, and the Samaras are the only ones with a
- * decade of tyre development behind them.
+ * Kept apart, each on its own row: the Niva's 175/80 R16 and the UAZs' 215/90-15C
+ * cross-ply and 225/75 R16 (block treads on tall sidewalls, with their own grip),
+ * and the rally 2105's competition tyre. The stopping distance on dry asphalt is the
+ * tyre's: every car's brakes (`brakeDecelG`) out-pull it, so a hard stop ends at its
+ * peak and a floored pedal at its sliding plateau.
  *
  * ---- steering lock ----
  *
@@ -1157,6 +1230,64 @@ const BRAKES_UNASSISTED_G = 1.0;
 const BRAKES_SERVO_G = 1.2;
 const BRAKES_RALLY_G = 1.4;
 
+/**
+ * THE REAR BRAKE REGULATOR. The Zhiguli, the Samara and the AZLK-2141 each have a valve
+ * in the rear brake line whose lever is tied to the rear axle: the rear springs' load
+ * holds it open, and once the line pressure overcomes that load it closes and passes
+ * the rear brakes only a share of every further rise. Its knee therefore climbs with a
+ * loaded boot and drops as braking lifts the tail. The manuals give its purpose as
+ * keeping the rear wheels from locking before the fronts ("предупреждающий их
+ * преждевременную блокировку по отношению к передним колесам", the 2141's), and it reads
+ * the axle load and nothing else: not the tyres, not the wheel speeds. It is no ABS,
+ * and a hard enough pedal on a slippery enough road still locks the rears.
+ * Sources: the 2103-06 manual (vaz-2101-07.ru/4_upr/11.html; "в зависимости от
+ * положения кузова относительно балки заднего моста"), the 2101 manual §10.7.1
+ * (automend.ru/vaz-2101/autocategory-4092-10.m_id-4085.html), the 2109 manual
+ * (autoruk.ru/vaz-2108-2170/regulyator-davleniya-tormozov-vaz-2109), the 2141's
+ * (matrixplus.ru/m2141-112.htm; remkomplekt.org/moskvich-2141/tormoznoe-upravlenie.html).
+ * The Niva, the Oka, the Volgas and the UAZ are given none: no source for theirs was
+ * read, and the regulator is not invented for them.
+ *
+ *   idealKnee  derived per car, from the kerb axle split, the CoM height, the fixed
+ *              FOOT_BRAKE_REAR_BIAS and `brakeDecelG` (see Vehicle.applyChassisMass):
+ *              the knee where the fixed split meets the ideal distribution, the
+ *              slope along the ideal curve's chord to a floored pedal. Only where that
+ *              knee exists, i.e. the rear's static share exceeds its brake share.
+ *   bench      a knee as a share of a floored pedal's line pressure, with the rear
+ *              springs at their kerb compression, and the share of each further rise
+ *              the valve passes.
+ */
+export type RearBrakeValve =
+  | { readonly kind: 'idealKnee' }
+  | { readonly kind: 'bench'; readonly kneePedal: number; readonly slope: number };
+
+/**
+ * Zhiguli (2101-2107): no pressure figure is printed for the classic valve, and the
+ * classics carry their weight near 50/50, so the knee is derived: the fixed 0.42 rear
+ * split meets the kerb car's ideal distribution at about 0.33 g.
+ */
+const VALVE_ZHIGULI: RearBrakeValve = { kind: 'idealKnee' };
+/**
+ * Samara (2108, 2109, 21099, and the 2110/2115 that share the valve): the 2109 manual's
+ * bench check sets the cut-in ("давление включения") to 3.0 ± 0.1 MPa and wants 3.7-4.5
+ * MPa out of 8 MPa in, a slope of (4.1 − 3.0)/(8 − 3.0) = 0.22 at the band's middle
+ * (0.14-0.30 across it). The knee as a share of the pedal assumes a floored pedal makes
+ * 10 MPa, the top of the 3-10 MPa range that manual checks the valve over: an INFERENCE,
+ * no source here ties a line pressure to `brakeDecelG`. The cut-in is taken as the kerb
+ * car's, the state the manual adjusts the lever in. A Samara's rear static share
+ * (0.38) is below the fixed 0.42 split, so no knee can be derived for it as for the
+ * Zhiguli: below its knee the rear is over-braked at every deceleration.
+ */
+const VALVE_SAMARA: RearBrakeValve = { kind: 'bench', kneePedal: 0.3, slope: 0.22 };
+/**
+ * AZLK-2141: its manual prints the valve's ratio, "передаточное число регулятора без
+ * пружины 2" (remkomplekt.org/moskvich-2141/tormoznoe-upravlenie.html): past the knee
+ * the rear line gets half of each further rise, a slope of 0.5. No knee figure was
+ * found; the Samara's 0.30 of a floored pedal stands in for it (INFERENCE: a
+ * contemporary front-driver with the same 0.38 rear share and a servo).
+ */
+const VALVE_AZLK_2141: RearBrakeValve = { kind: 'bench', kneePedal: 0.3, slope: 0.5 };
+
 const SOVIET_SPECS: readonly SovietSpec[] = [
   {
     // GAZ-21 Volga: 2.445 litre, 70 hp at 4000, three speeds on the column, and
@@ -1173,12 +1304,12 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'gz21.fbx',
     scale: 0.010305,
     mass: 1460,
-    // 6.70-15 cross-ply.
-    tyre: { construction: 'crossply', aspect: 0.95 },
+    // Factory 6.70-15 cross-ply; runs the road tyre.
+    tyre: KAMA_217,
     engineId: 'engine_zmz_21',
     gearboxId: 'gearbox_gaz_3',
     tankLitres: 60,
-    wheelGrip: 0.522,
+    wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_UNASSISTED_G,
     steerLock: 0.519,
     rearDriveBias: 1,
@@ -1202,12 +1333,12 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'gz24.fbx',
     scale: 0.009556,
     mass: 1420,
-    // 7.35-14 cross-ply.
-    tyre: { construction: 'crossply', aspect: 0.95 },
+    // Factory 7.35-14 cross-ply; runs the road tyre.
+    tyre: KAMA_217,
     engineId: 'engine_zmz_24',
     gearboxId: 'gearbox_gaz_4',
     tankLitres: 55,
-    wheelGrip: 0.6,
+    wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     steerLock: 0.638,
     rearDriveBias: 1,
@@ -1228,13 +1359,14 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'vz01.fbx',
     scale: 0.010585,
     mass: 955,
-    // 155 R13, the Zhiguli's Fiat-era radial.
-    tyre: { construction: 'radial', aspect: 0.8 },
+    // Factory 155 R13; runs the road tyre.
+    tyre: KAMA_217,
     engineId: 'engine_lada_1200',
     gearboxId: 'gearbox_lada_4',
     tankLitres: 39,
-    wheelGrip: 0.558,
+    wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_UNASSISTED_G,
+    rearBrakeValve: VALVE_ZHIGULI,
     steerLock: 0.529,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
@@ -1253,13 +1385,14 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'vz02.fbx',
     scale: 0.010632,
     mass: 1010,
-    // 165 R13.
-    tyre: { construction: 'radial', aspect: 0.8 },
+    // Factory 165 R13; runs the road tyre.
+    tyre: KAMA_217,
     engineId: 'engine_lada_1200',
     gearboxId: 'gearbox_lada_4_2102',
     tankLitres: 39,
-    wheelGrip: 0.551,
+    wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_UNASSISTED_G,
+    rearBrakeValve: VALVE_ZHIGULI,
     steerLock: 0.531,
     rearDriveBias: 1,
     frontWeightShare: 0.5,
@@ -1278,13 +1411,14 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'vz03.fbx',
     scale: 0.010632,
     mass: 1030,
-    // 165/80 R13.
-    tyre: { construction: 'radial', aspect: 0.8 },
+    // Factory 165/80 R13; runs the road tyre.
+    tyre: KAMA_217,
     engineId: 'engine_lada_1500',
     gearboxId: 'gearbox_lada_4_tall',
     tankLitres: 39,
-    wheelGrip: 0.574,
+    wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
+    rearBrakeValve: VALVE_ZHIGULI,
     steerLock: 0.53,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
@@ -1303,13 +1437,14 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'vz04.fbx',
     scale: 0.010585,
     mass: 1020,
-    // 165/80 R13.
-    tyre: { construction: 'radial', aspect: 0.8 },
+    // Factory 165/80 R13; runs the road tyre.
+    tyre: KAMA_217,
     engineId: 'engine_lada_1300',
     gearboxId: 'gearbox_lada_4_2105',
     tankLitres: 39,
-    wheelGrip: 0.56,
+    wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
+    rearBrakeValve: VALVE_ZHIGULI,
     steerLock: 0.53,
     rearDriveBias: 1,
     frontWeightShare: 0.5,
@@ -1328,13 +1463,14 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'vz05.fbx',
     scale: 0.010632,
     mass: 995,
-    // 165/80 R13.
-    tyre: { construction: 'radial', aspect: 0.8 },
+    // Factory 165/80 R13; runs the road tyre.
+    tyre: KAMA_217,
     engineId: 'engine_lada_1300',
     gearboxId: 'gearbox_lada_4_2105',
     tankLitres: 39,
-    wheelGrip: 0.57,
+    wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
+    rearBrakeValve: VALVE_ZHIGULI,
     steerLock: 0.53,
     rearDriveBias: 1,
     // Kerb 995 kg "в том числе на переднюю ось 545, на заднюю 450" (autoopt.ru, vaz-2105):
@@ -1386,13 +1522,14 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'vz06.fbx',
     scale: 0.010585,
     mass: 1035,
-    // 165/80 R13.
-    tyre: { construction: 'radial', aspect: 0.8 },
+    // Factory 165/80 R13; runs the road tyre.
+    tyre: KAMA_217,
     engineId: 'engine_lada_1600',
     gearboxId: 'gearbox_lada_4_1600',
     tankLitres: 39,
-    wheelGrip: 0.58,
+    wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
+    rearBrakeValve: VALVE_ZHIGULI,
     steerLock: 0.53,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
@@ -1410,13 +1547,14 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'vz07.fbx',
     scale: 0.010632,
     mass: 1030,
-    // 165/80 R13.
-    tyre: { construction: 'radial', aspect: 0.8 },
+    // Factory 165/80 R13; runs the road tyre.
+    tyre: KAMA_217,
     engineId: 'engine_lada_1500',
     gearboxId: 'gearbox_lada_5',
     tankLitres: 39,
-    wheelGrip: 0.582,
+    wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
+    rearBrakeValve: VALVE_ZHIGULI,
     steerLock: 0.53,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
@@ -1437,13 +1575,14 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'vz08.fbx',
     scale: 0.010123,
     mass: 900,
-    // 165/70 R13.
-    tyre: { construction: 'radial', aspect: 0.7 },
+    // Factory 165/70 R13; runs the road tyre.
+    tyre: KAMA_217,
     engineId: 'engine_samara_1300',
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
-    wheelGrip: 0.65,
+    wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
+    rearBrakeValve: VALVE_SAMARA,
     steerLock: 0.59,
     rearDriveBias: 0,
     handlingProfile: 'road',
@@ -1462,13 +1601,14 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'vz09.fbx',
     scale: 0.010123,
     mass: 915,
-    // 165/70 R13.
-    tyre: { construction: 'radial', aspect: 0.7 },
+    // Factory 165/70 R13; runs the road tyre.
+    tyre: KAMA_217,
     engineId: 'engine_samara_1300',
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
-    wheelGrip: 0.65,
+    wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
+    rearBrakeValve: VALVE_SAMARA,
     steerLock: 0.59,
     rearDriveBias: 0,
     handlingProfile: 'road',
@@ -1489,13 +1629,14 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     file: 'vz099.fbx',
     scale: 0.010082,
     mass: 970,
-    // 165/70 R13.
-    tyre: { construction: 'radial', aspect: 0.7 },
+    // Factory 165/70 R13; runs the road tyre.
+    tyre: KAMA_217,
     engineId: 'engine_samara_1500',
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
-    wheelGrip: 0.65,
+    wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
+    rearBrakeValve: VALVE_SAMARA,
     steerLock: 0.589,
     rearDriveBias: 0,
     handlingProfile: 'road',
@@ -1686,6 +1827,7 @@ const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
   tankLitres: spec.tankLitres,
   wheelGrip: spec.wheelGrip,
   brakeDecelG: spec.brakeDecelG,
+  rearBrakeValve: spec.rearBrakeValve,
   // FBXLoader reports this pack in centimetres, and each body's factor makes that
   // body life-size against the real car's wheelbase (see the pack note above).
   scale: spec.scale,
@@ -1722,13 +1864,14 @@ const SAAS_SPECS: readonly Entry[] = [
     bodyClass: 'car',
     scale: 0.86595,
     mass: 1055,
-    // 165/80 R13 class road radial.
-    tyre: { construction: 'radial', aspect: 0.8 },
+    // Factory 165/80 R14; runs the road tyre.
+    tyre: KAMA_217,
     engineId: 'engine_i4_1600',
     gearboxId: 'gearbox_manual5',
     tankLitres: 55,
-    wheelGrip: 0.65,
+    wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
+    rearBrakeValve: VALVE_AZLK_2141,
     suspension: SUSP_SAMARA,
     steerLock: 0.658,
     rearDriveBias: 0,
@@ -1749,12 +1892,12 @@ const SAAS_SPECS: readonly Entry[] = [
     bodyClass: 'car',
     scale: 1,
     mass: 915,
-    // 165/70 R13.
-    tyre: { construction: 'radial', aspect: 0.7 },
+    // Factory 165/70 R13; runs the road tyre.
+    tyre: KAMA_217,
     engineId: 'engine_samara_1300',
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
-    wheelGrip: 0.65,
+    wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     steerLock: 0.59,
     rearDriveBias: 0,
@@ -1802,6 +1945,7 @@ const SAAS_SPECS: readonly Entry[] = [
     // with the factory +1° of camber, and the axle yaws on its leaves as it rolls.
     suspension: {
       ...SUSP_TRUCK,
+      frontAxle: 'beam',
       ackermann: 0.8,
       frontCamberDeg: 1,
       frontRollCamber: 0,
@@ -1856,14 +2000,13 @@ const SAAS_SPECS: readonly Entry[] = [
     mass: 1015,
     // 1984-1997 2715-01 in its factory low-octane commercial specification:
     // UZAM-412DE, 1478 cc, 49 kW and 102 Nm.
-    // 175/80 R13.
-    tyre: { construction: 'radial', aspect: 0.8 },
+    // Factory 175/80 R13; runs the road tyre.
+    tyre: KAMA_217,
     engineId: 'engine_uzam_412de',
     // Moskvich/IZH four-speed with the 4.22 working-vehicle final drive.
     gearboxId: 'gearbox_izh_4',
     tankLitres: 46,
-    // 175/80 R13 period road tyre; same dry-road calibration as the 2104 estate.
-    wheelGrip: 0.56,
+    wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     // Rear leaf springs carrying a 500 kg payload; not the Zhiguli coil-sprung estate.
     suspension: SUSP_TRUCK,
@@ -1956,12 +2099,12 @@ const GTAV_SPECS: readonly Entry[] = [
     bodyClass: 'car',
     scale: 0.89255,
     mass: 1010,
-    // 175/70 R13.
-    tyre: { construction: 'radial', aspect: 0.7 },
+    // Factory 175/70 R13; runs the road tyre.
+    tyre: KAMA_217,
     engineId: 'engine_samara_1500',
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
-    wheelGrip: 0.66,
+    wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     suspension: SUSP_SAMARA,
     steerLock: 0.604,
@@ -2041,6 +2184,7 @@ const CARFORGE_CARS: readonly Entry[] = [
     // Beam axles on leaves at both ends, as the UAZ-330364's chassis.
     suspension: {
       ...SUSP_TRUCK,
+      frontAxle: 'beam',
       ackermann: 0.8,
       frontCamberDeg: 1,
       frontRollCamber: 0,
@@ -2097,13 +2241,12 @@ const CARFORGE_CARS: readonly Entry[] = [
     bodyClass: 'car',
     scale: 0.01,
     mass: 1400,
-    // 205/70R14 radial (gaz31.com: the factory size).
-    tyre: { construction: 'radial', aspect: 0.7 },
+    // Factory 205/70R14 radial (gaz31.com); runs the road tyre.
+    tyre: KAMA_217,
     engineId: 'engine_zmz_402',
     gearboxId: 'gearbox_gaz_4_31029',
     tankLitres: 55,
-    // Radials on the 24's chassis: a step up from its 7.35-14 cross-plies (0.6).
-    wheelGrip: 0.62,
+    wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     suspension: SUSP_VOLGA_24,
     steerLock: 0.62,
@@ -2140,12 +2283,12 @@ const CARFORGE_CARS: readonly Entry[] = [
     label: 'VAZ-1111 Oka',
     bodyClass: 'car',
     mass: 635,
-    // 135/80 R12.
-    tyre: { construction: 'radial', aspect: 0.8 },
+    // Factory 135/80 R12; runs the road tyre.
+    tyre: KAMA_217,
     engineId: 'engine_vaz_1111',
     gearboxId: 'gearbox_oka_4',
     tankLitres: 30,
-    wheelGrip: 0.61,
+    wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     // MacPherson struts in front, trailing arms on an elastic cross-beam behind:
     // the Samara's layout, and its preset.
@@ -2247,18 +2390,18 @@ type KitRunningGear = Pick<
  */
 /**
  * VAZ-21102: kerb 1020 kg, 175/70 R13, 2111 engine, 167 km/h and 14.0 s (2110 manual).
- * Tank 43 l (drom.ru/catalog/lada/2110/specs/tank). Grip and lock are `gt_vaz2110`'s, set
- * on Za Rulem's 55.0 m 100-0 of a 21102 and the manual's 5.2 m outer-wheel radius. Cd·A is
+ * Tank 43 l (drom.ru/catalog/lada/2110/specs/tank). Tyre the road one (`KAMA_217`); lock
+ * `gt_vaz2110`'s, set on the manual's 5.2 m outer-wheel radius. Cd·A is
  * the tunnel's, 0.347 × 1.931 = 0.670 m², which puts the car at 171 km/h on the bench
  * (tools/reality.ts): 2.7% over the manual's 167, 0.6% over the repair manual's 170.
  */
 const GEAR_VAZ_21102: KitRunningGear = {
   mass: 1020,
-  tyre: { construction: 'radial', aspect: 0.7 },
+  tyre: KAMA_217,
   engineId: 'engine_vaz_2111',
   gearboxId: 'gearbox_samara_5_tall',
   tankLitres: 43,
-  wheelGrip: 0.66,
+  wheelGrip: KAMA_217_GRIP,
   brakeDecelG: BRAKES_SERVO_G,
   steerLock: 0.604,
   frontWeightShare: 0.62,
@@ -2280,22 +2423,42 @@ const GEAR_VAZ_2111: KitRunningGear = { ...GEAR_VAZ_21102, mass: 1040, dragArea:
 /**
  * VAZ-2115 1.5i (2111 engine): kerb 985 kg (carexpert.ru, ladaonline.ru, wiki.zr.ru;
  * drom.ru prints 970), 165/70 R13 (ladaonline.ru: 165/70 or 175/70 R13), 3.7 axle, tank
- * 43 l, 158 km/h and 13.2 s (ladaonline.ru, carexpert.ru), 5.2 m turning radius. Grip,
- * lock and shape the 21099's (the same cabin and doors on a new nose and tail), and its Cd·A,
+ * 43 l, 158 km/h and 13.2 s (ladaonline.ru, carexpert.ru), 5.2 m turning radius. Tyre the
+ * road one; lock and shape the 21099's (the same cabin and doors on a new nose and tail), and its Cd·A,
  * AvtoVAZ's 0.45 on 1.87 m² (no 2115 figure was found): 160 km/h on the bench, 1.3% over.
  */
 const GEAR_VAZ_2115: KitRunningGear = {
   mass: 985,
-  tyre: { construction: 'radial', aspect: 0.7 },
+  tyre: KAMA_217,
   engineId: 'engine_vaz_2111',
   gearboxId: 'gearbox_samara_5_tall',
   tankLitres: 43,
-  wheelGrip: 0.65,
+  wheelGrip: KAMA_217_GRIP,
   brakeDecelG: BRAKES_SERVO_G,
   steerLock: 0.589,
   frontWeightShare: 0.6,
   dragArea: 0.84,
   aero: AERO_SAMARA_SALOON,
+};
+/**
+ * UAZ-2206 on the UAZ-330364's running gear (the same 452-family chassis, engine, box and
+ * transfer box), with its own kerb mass and axle split, 1850 kg with 1020 on the front
+ * (autoopt.ru encyclopedia "УАЗ-2206"; 1855 at infoaboutauto.narod.ru, carexpert.ru), and
+ * its two tanks, 56 + 30 l (infoaboutauto.narod.ru). Engine, box, tyre, grip, brakes, lock
+ * (already set on the 2206's 6.3 m) and aero are the sibling's (measurements-uaz.md §4).
+ */
+const GEAR_UAZ_2206: KitRunningGear = {
+  mass: 1850,
+  tyre: { construction: 'radial', aspect: 0.75 },
+  engineId: 'engine_umz_4213',
+  gearboxId: 'gearbox_uaz_4',
+  tankLitres: 86,
+  wheelGrip: 0.59,
+  brakeDecelG: BRAKES_SERVO_G,
+  steerLock: 0.487,
+  frontWeightShare: 1020 / 1850,
+  dragArea: 3.45,
+  aero: AERO_UAZ_330364,
 };
 
 /**
@@ -2327,6 +2490,10 @@ const KIT_CARS: readonly Entry[] = (
     ['kit_gaz31029', 'cf_gaz31029', 'gaz31029'],
     // The pack's label names the Svyatogor; its running gear is the 2141-01's (see the entry).
     ['kit_azlk2141', 'sa_azlk2141', 'azlk2141', 'AZLK-2141 Moskvich'],
+    // The 469 on its civilian successor's running gear (the same chassis; the 31512's manual).
+    ['kit_uaz469', 'cf_uaz31512', 'uaz469', 'UAZ-469'],
+    // The 2206 bus on the 330364 flatbed's chassis, its own mass and tanks.
+    ['kit_uaz2206', 'sa_uaz330364', 'uaz2206', 'UAZ-2206', GEAR_UAZ_2206],
   ] satisfies readonly (readonly [id: string, sibling: string, kit: string, label?: string, gear?: KitRunningGear])[]
 ).map(([id, sibling, kit, label, gear]) => {
   const base = ENTRIES.find((e) => e.id === sibling);
@@ -2340,6 +2507,9 @@ const KIT_CARS: readonly Entry[] = (
     glb: kit,
     kit,
     textureFile: undefined,
+    // A kit car builds its spare into its body (the UAZ-469's on its rear door), not the
+    // sibling's pack wheel at `spareNode`.
+    spareNode: undefined,
     glassUvCell: undefined,
     paintUvCell: undefined,
     glassMaterial: KIT_GLASS_MATERIAL,
@@ -2382,6 +2552,7 @@ function catalogueDef(e: Entry): CarModelDef {
     tankLitres: e.tankLitres,
     wheelGrip: e.wheelGrip,
     brakeDecelG: e.brakeDecelG,
+    rearBrakeValve: e.rearBrakeValve,
     suspension: e.suspension ?? SUSP_CAR,
     steerLock: e.steerLock,
     rearDriveBias: e.rearDriveBias,

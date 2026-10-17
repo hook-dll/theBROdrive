@@ -32,6 +32,8 @@ const PART_LABELS: Readonly<Record<string, string>> = {
   bonnet: 'Капот',
   boot: 'Багажник',
   tailgate: 'Дверь багажника',
+  tailgate_l: 'Левая задняя дверь',
+  tailgate_r: 'Правая задняя дверь',
   flap: 'Лючок бензобака',
   window_fl: 'Стекло передней левой двери',
   window_fr: 'Стекло передней правой двери',
@@ -46,6 +48,11 @@ function shellMotion(owner: string, frame: BodyFrame): KitMotion | undefined {
   if (owner.startsWith('door_')) return { channel: owner, kind: 'rot', axis: [0, 1, 0], amount: left ? -1.15 : 1.15 };
   if (owner === 'bonnet') return { channel: owner, kind: 'rot', axis: [1, 0, 0], amount: -0.95 };
   if (owner === 'boot') return { channel: owner, kind: 'rot', axis: [1, 0, 0], amount: 1.05 };
+  // A rear door hinged at its side (`tailgateHinge`) swings out about the upright, as a door
+  // does; a split tailgate's two leaves each about their own outer edge.
+  const hinge = frame.spec.tailgateHinge;
+  if (owner === 'tailgate_l' || owner === 'tailgate_r') return { channel: owner, kind: 'rot', axis: [0, 1, 0], amount: left ? -1.5 : 1.5 };
+  if (owner === 'tailgate' && hinge) return { channel: owner, kind: 'rot', axis: [0, 1, 0], amount: hinge === 'left' ? -1.2 : 1.2 };
   if (owner === 'tailgate') return { channel: owner, kind: 'rot', axis: [1, 0, 0], amount: 1.25 };
   if (owner === 'flap') return { channel: owner, kind: 'rot', axis: [0, 1, 0], amount: frame.spec.flap.side === 'left' ? -1.6 : 1.6 };
   // A drop pane winds all the way down into its door (rig.ts `SinkingPane`).

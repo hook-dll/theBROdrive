@@ -16,8 +16,6 @@ import {
   CONTROLLER_STEER_MIN,
   CONTROLLER_STEER_STEP,
   CONTROLLER_VIBRATION_STEP,
-  FIELD_OF_VIEW_MAX,
-  FIELD_OF_VIEW_MIN,
   MOUSE_SENSITIVITY_MAX,
   MOUSE_SENSITIVITY_MIN,
   FRAME_RATE_LIMITS,
@@ -1130,23 +1128,6 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
   /** CAMERA & VIEW: how the world is framed, and the dashboard laid over it. */
   const renderCamera = (): void => {
     pane.append(
-      sliderField(
-        'Field of View',
-        'fov',
-        'How wide a view the camera has. Only the up-and-down angle is set here — a '
-          + 'wider window then shows MORE desert to the sides rather than squeezing '
-          + 'it. 65 is the authored view; the binoculars and the widening as you '
-          + 'accelerate both '
-          + 'follow whatever you set.',
-        FIELD_OF_VIEW_MIN,
-        FIELD_OF_VIEW_MAX,
-        1,
-        () => settings.fieldOfView,
-        (value) => `${Math.round(value)}\u00b0`,
-        (value) => {
-          settings.fieldOfView = value;
-        },
-      ),
       segmented('Camera style', [
         {
           label: 'Steady',
@@ -2061,7 +2042,7 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
       id: 'camera',
       label: 'Camera & view',
       icon: 'fov',
-      hint: 'How wide the view is, how the camera moves, and the dashboard over it.',
+      hint: 'How the camera moves, and the dashboard over it.',
       render: renderCamera,
     },
     {

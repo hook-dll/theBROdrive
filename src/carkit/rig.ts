@@ -197,7 +197,7 @@ export function kitGlassOpacity(distance: number): number {
  * wings, the bonnet, boot or tailgate and the filler flap. With any of them off its stop
  * the car is not in the pose the mid traffic meshes were baked in (render/farcars.ts).
  */
-const SHELL_CHANNEL = /^(door_|window_|vent_|bonnet$|boot$|tailgate$|flap$)/;
+const SHELL_CHANNEL = /^(door_|window_|vent_|bonnet$|boot$|tailgate(_[lr])?$|flap$)/;
 
 const _q = new THREE.Quaternion();
 const _a = new THREE.Vector3();

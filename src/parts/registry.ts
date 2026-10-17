@@ -157,6 +157,16 @@ export interface PartVariant {
 }
 
 /**
+ * How an axle's two wheels are located. `independent`: each wheel on its own links
+ * (wishbones, struts, trailing arms — and the Samara family's twist beam, whose cross
+ * member twists and lets its wheels move apart, so it is written as a bar). `beam`:
+ * both wheels on one rigid axle (a live axle on links or leaf springs, a UAZ's beam
+ * front), so a bump under one wheel tilts the other and the tilt is both wheels'
+ * camber (`Vehicle`'s beam-axle pass).
+ */
+export type AxleLinkage = 'independent' | 'beam';
+
+/**
  * A suspension setup in the units it is designed in, not the units Rapier wants.
  * `Vehicle.rebuild` converts (see `wheelSpringRate` in vehicle/carmodels.ts); the
  * conversion needs each axle's share of the weight, which is why nothing here is a
@@ -173,6 +183,9 @@ export interface SuspensionTuning {
   readonly reboundRatio: number;
   /** Compression available past static sag before the bump stop shuts, metres. */
   readonly bumpTravel: number;
+  /** Each axle's linkage (see `AxleLinkage`). */
+  readonly frontAxle: AxleLinkage;
+  readonly rearAxle: AxleLinkage;
   /**
    * Each axle's ROLL CENTRE: the height above the road, at ride height, through which
    * the links hand the tyres' side force to the body. It is set by the linkage, not the
@@ -218,8 +231,11 @@ export interface SuspensionTuning {
   /**
    * How much of the body's roll the wheel takes with it as camber against the ROAD: 1 is
    * a wheel that stays parallel to the body (trailing arm, equal wishbones), 0 one that
-   * stays square to the road whatever the body does (any beam axle). A MacPherson strut
-   * is ~0.8, unequal wishbones ~0.6: their camber gain claws back the rest.
+   * stays square to the road whatever the body does. A MacPherson strut is ~0.8,
+   * unequal wishbones ~0.6: their camber gain claws back the rest. INDEPENDENT axles
+   * only: a beam axle's camber is its own geometry — square to a flat road whatever the
+   * body does, tilted with the axle when one wheel is higher than the other — and its
+   * figure here is written 0 and never read.
    */
   readonly frontRollCamber: number;
   readonly rearRollCamber: number;

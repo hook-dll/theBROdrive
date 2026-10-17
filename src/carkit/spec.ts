@@ -92,6 +92,12 @@ export interface CabinColumn {
    * corner inside its frame (the tens' front door glass). Absent: the frame's own width.
    */
   readonly glassDrop?: number;
+  /**
+   * The strip's door owner (`upper` / `lower`) on this side only; on the other side the
+   * strip is the body's, with the same glass (the UAZ-2206's side door, on its right
+   * alone). Absent: both sides.
+   */
+  readonly only?: 'left' | 'right';
 }
 
 export interface CabinSpec {
@@ -105,6 +111,12 @@ export interface CabinSpec {
   readonly railHalf: number;
   /** Roof crown on the centre line, above the rail. */
   readonly crown: number;
+  /**
+   * How the crown falls across: `crown · (1 − f^crownPower)` at fraction f of the roof's
+   * half width. Default 2 (a parabola); 3 keeps the middle flatter and rolls it down
+   * into the gutters (the UAZ-2206).
+   */
+  readonly crownPower?: number;
   /** The rail's chamfer onto the roof: inset across, rise up. */
   readonly railInset: number;
   readonly railRise: number;
@@ -135,6 +147,13 @@ export interface CabinSpec {
    * forward. Absent: the screen's foot straight across at the cowl.
    */
   readonly screenFoot?: number;
+  /**
+   * The windscreen's top curved in plan too: how far ahead of the first column's top it
+   * stands on the centre line, fading to nothing at the corners (by 1 − frac²); the roof's
+   * front edge follows it (the UAZ-2206's screen). Absent: straight across at the
+   * column's top.
+   */
+  readonly screenTop?: number;
   /** Windscreen wiper blade length (the parts catalogues: the classics 330 mm, the Samaras 510 mm, the tens 500 mm). */
   readonly wiperBlade: number;
   /** Back light: base strip above the deck and header below the rail. */
@@ -147,6 +166,21 @@ export interface CabinSpec {
   readonly rearKnee?: { readonly s: number; readonly y: number };
   /** Pillar strip at the windscreen and back light edges, across the deck. */
   readonly pillar: number;
+  /**
+   * The back light as one pane each side of the centre line in a painted frame (the
+   * UAZ-2206's rear doors): half widths `x0` to `x1`, heights `y0` to `y1`, corners
+   * rounded by `r`. The tailgate's top runs straight across at `top`, the body above it up
+   * to the roof. Replaces the glass band between `rearBottom` and `rearHeader`. Absent:
+   * one pane across that band.
+   */
+  readonly rearPanes?: { readonly x0: number; readonly x1: number; readonly y0: number; readonly y1: number; readonly r: number; readonly top: number };
+  /**
+   * A canvas top (the UAZ-469's): the roof, the rail's chamfer onto it and every painted
+   * greenhouse strip of the body or the tailgate behind `from` (the strip's middle at the
+   * belt) are canvas in `colour`, unpainted trim; the windscreen's frame, the pillars ahead
+   * of `from` and the doors' frames stay painted. Absent: all painted.
+   */
+  readonly softTop?: { readonly colour: number; readonly from: number };
 }
 
 export interface WheelSpec {
@@ -172,6 +206,17 @@ export interface WheelSpec {
    * its liner follow it; the wells and humps inside keep the circle, clear of the tyre.
    */
   readonly rearArchRise?: number;
+  /**
+   * Both arches' skin outlines as superellipses of this power instead of circles (or the
+   * rear's half ellipse): flatter tops and steeper sides, the UAZ-2206's square-cut arches.
+   * Absent: round.
+   */
+  readonly archSquare?: number;
+  /**
+   * Where each arch is centred off its hub, front and rear (negative ahead): an arch
+   * reaching further ahead of the wheel than behind it. Absent: on the hubs.
+   */
+  readonly archShift?: readonly [number, number];
 }
 
 /** Everything the builder needs for one car. */
@@ -181,9 +226,12 @@ export interface KitCarSpec {
   /**
    * Picks the interior layout (interior.ts `LAYOUTS`) and the bay and underbody (bay.ts).
    * `'niva'`: the classic's longitudinal engine and cabin with permanent four-wheel drive
-   * (transfer box, front axle) and its own dash.
+   * (transfer box, front axle) and its own dash. `'van'`: forward control, the cab over
+   * the front axle and the engine under a cover between the front seats, no engine bay
+   * ahead of the screen, a high flat floor from the dash to the rear doors, four-wheel
+   * drive under it (the UAZ-2206).
    */
-  readonly platform: 'classic' | 'samara' | 'niva';
+  readonly platform: 'classic' | 'samara' | 'niva' | 'van';
   readonly stations: readonly TubStation[];
   readonly cabin: CabinSpec;
   readonly wheels: WheelSpec;
@@ -196,13 +244,29 @@ export interface KitCarSpec {
   /**
    * A bonnet whose side cut stands `inset` in from the deck's edge (the 2110's runs along
    * the top of the wings, almost at the edge) instead of at the pillar row; it ends
-   * `SCUTTLE` short of the cowl. `nose`: the bonnet comes down the front face between the
+   * `SCUTTLE` short of the cowl, or at `rear`, a scuttle deck left between it and the
+   * windscreen (the UAZ-469's). `nose`: the bonnet comes down the front face between the
    * head lamps to height `y`, its half width `half` at the bottom and at the top; its
    * front face items hang on it (`FaceLook.lid`). Absent: the pillar-row bonnet.
    */
-  readonly bonnet?: { readonly inset: number; readonly nose?: { readonly y: number; readonly half: readonly [number, number] } };
+  readonly bonnet?: { readonly inset: number; readonly rear?: number; readonly nose?: { readonly y: number; readonly half: readonly [number, number] } };
   /** Boot lid from the back light's base to this s; a tailgate when absent. */
   readonly bootEnd?: number;
+  /**
+   * The silencer's top and the tail pipe this far under the floor (the shell's underside
+   * over their run) instead of at the clearance: a body standing high over its axles (the
+   * UAZs', floor 0.42-0.56 over a 0.22 clearance), where a silencer at the clearance hangs
+   * a hand's width under the tail. The pipe runs under the rear axle as before and climbs
+   * behind it. Absent: the silencer SILENCER_TUCK over the clearance (bay.ts `exhaust`).
+   */
+  readonly exhaustTuck?: number;
+  /**
+   * A tailgate hinged upright at its left or right edge (a rear door, the UAZ-469's on its
+   * right), opening sideways; `'split'`: two leaves cut on the centre line, each hinged at
+   * its outer edge (`tailgate_l`, `tailgate_r`: the UAZ-2206's rear doors). Absent: hinged
+   * at the roof.
+   */
+  readonly tailgateHinge?: 'left' | 'right' | 'split';
   /**
    * The back leaning forward as one plane above `base` (m per m of height), blended in
    * over `blend` metres ahead of the rear base: an estate whose lamps lie on the slope.
@@ -240,6 +304,21 @@ export interface KitLook {
   readonly brightwork: Finish;
   /** Door mirrors: `'left'` only the driver's (the base Oka). Absent: both. */
   readonly mirrors?: 'left';
+  /**
+   * Where the outside door handles stand, when measured: the centre s of the front doors'
+   * and of the rear (side) doors' handle, their height and half length along the car.
+   * Absent: 0.13 ahead of each door's rear edge, under the belt.
+   */
+  readonly handles?: { readonly front: number; readonly rear: number; readonly y: number; readonly half: number };
+  /**
+   * Outside fittings on a split tailgate's leaves (`tailgateHinge: 'split'`): hinge straps
+   * across each leaf's outer shut line, in body colour, from ±x0 out to ±x1, one per [y0,
+   * y1] band; and one handle (`brightwork`) on the `leaf`, from ±x0 to ±x1 at height y.
+   */
+  readonly rearLeaves?: {
+    readonly hinges: { readonly x0: number; readonly x1: number; readonly bands: readonly (readonly [number, number])[] };
+    readonly handle: { readonly leaf: 'left' | 'right'; readonly x0: number; readonly x1: number; readonly y: number };
+  };
   /** A strip along the sill between the arches, or none. */
   readonly sill: Finish | null;
   /**
@@ -434,6 +513,8 @@ export type FaceItem =
       readonly depth: number;
       readonly proud: number;
       readonly slant?: { readonly outer: number; readonly inner: number };
+      /** On this side only (+x the car's left): a single lamp, the UAZ-2206's reversing lamp on its left rear door. Absent: both sides. */
+      readonly only?: 'left' | 'right';
     }
   /** A grille on the centre line out to `x`: an optional frame and back, and bars across it. */
   | {
@@ -446,10 +527,16 @@ export type FaceItem =
        */
       readonly standOut?: number;
       readonly frame?: { readonly finish: Finish; readonly margin: number };
+      /**
+       * A trapezoid: the top's ends this far inboard of the bottom's (the UAZ-2206's), the
+       * frame raised round a recessed back. Absent: a rectangle.
+       */
+      readonly slant?: number;
       /** A dark plate behind the bars. */
       readonly back: boolean;
       readonly bars: {
-        readonly dir: 'vertical' | 'horizontal';
+        /** `'diamond'`: two crossed sets at ±45°, a mesh (slanted grilles only). */
+        readonly dir: 'vertical' | 'horizontal' | 'diamond';
         readonly count: number;
         readonly finish: Finish | 'dark';
         /** First and last bar centres stand this far in from the grille's edges. */
@@ -467,4 +554,10 @@ export type FaceItem =
    */
   | { readonly kind: 'cluster'; readonly x: Span<FaceX>; readonly y: Span<FaceY>; readonly columns: readonly (readonly LampRole[])[] }
   /** A rectangular outline of `width` bars (a chrome surround); both sides unless centred. */
-  | { readonly kind: 'frame'; readonly x: Span<FaceX>; readonly y: Span<FaceY>; readonly width: number; readonly finish: Finish; readonly proud: number };
+  | { readonly kind: 'frame'; readonly x: Span<FaceX>; readonly y: Span<FaceY>; readonly width: number; readonly finish: Finish; readonly proud: number }
+  /**
+   * A spare wheel in a cover, upright on the face on a bracket: its back `standoff` out of
+   * the face, `width` deep. One wheel at `x` (signed: + is the car's left), not a pair. As
+   * a tail `lid` item it rides on the tailgate (the UAZ-469's, on its rear door).
+   */
+  | { readonly kind: 'wheel'; readonly x: number; readonly y: FaceY; readonly radius: number; readonly width: number; readonly standoff: number; readonly finish: Finish };

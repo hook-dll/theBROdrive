@@ -948,6 +948,154 @@
 
 ### Changed
 
+- LIVE BEAM AXLES (`SuspensionTuning.frontAxle`/`rearAxle` in parts/registry.ts;
+  `Vehicle.updateBeamLean` and `stepBeamAxleHop` in vehicle/vehicle.ts;
+  `BEAM_AXLE_GYRATION_SQ` in vehicle/vehicletuning.ts). Every axle now says whether it is
+  `independent` or `beam`. Beams: the rear of the Zhigulis (2101-2107), Nivas (2121,
+  2131), Volgas (GAZ-24, 31029) and the IZh-2715, and both axles of the UAZ-469 and
+  UAZ-2206. The Samara family, 2110 family, Oka and 2141 rears are twist beams and stay
+  independent.
+  - Rapier's ray springs are unchanged. For vertical force a massless beam with its
+    springs `s` apart on a track `t` is exactly two independent corners plus a bar of
+    `(s/t)² − 1`, which the leaf cars' negative bars already are.
+  - The wheel-hop layer under the collider is one rigid axle per beam: heave and roll, a
+    mass matrix with roll inertia `0.6 · m · (t/2)²` (the 2101's 52 kg axle and its
+    wheels: final drive in the middle, drums and wheels at the ends), and seat springs
+    with `(s/t)² = 1 + bar`. Driven alike on both wheels it matches the old quarter-cars
+    to 1e-10 m (2101) and 1e-7 m (UAZ-469). Driven on one side, the other wheel now
+    moves: a 15 mm ripple under the left wheels, which used to leave the right ones at
+    exactly 0, moves the 2101's right rear −0.27..+0.49 mm (UAZ-469 front and rear
+    about −0.3..+0.25 mm).
+  - A beam wheel's camber is the axle's own tilt against the contact normal under it,
+    or against the line between the two patches for sub-collider relief, clamped to
+    `AXLE_ROLL_LIMIT_RAD`. It used to be the static figure always (roll camber 0). On a
+    flat road it is 0 whatever the body does; with one wheel on a 6 cm step both wheels
+    lean (peak camber steer 0 → 4.6 mrad on the 2101 rear, 3.5 → 11.9 on the UAZ-469
+    front's far wheel).
+  - Unchanged: static stance (body height and all four compressions on every probed car,
+    the UAZ-469 front 0.1 mm), the independent cars (2108, 2110 physics-suite and probe
+    output bit-identical), and the 2101 and Niva suite rows, which are identical too.
+    `tools/physics-suite.ts` (+150 kg, flat asphalt, `build/physics-suite/beam-before`
+    → `beam-after`): GAZ-24 80-0 +0.01 m; UAZ-469 100-0 58.50 → 58.39 m, understeer
+    2.32 → 2.28 °/g; UAZ-2206 100-0 54.42 → 54.50 m, understeer 2.12 → 2.13 °/g; yaw
+    and drift in the brake stops within 0.3° and 0.04 m. A repeat run is bit-identical.
+    On a random ±0.06/±0.12 m heightfield (1 m cells, sand and gravel, 30 km/h, 25 s),
+    against the same cars with the pairing removed in-process (the old path): no car
+    flipped, distance within 1 m, body roll RMS within 0.5° (UAZ-469 on ±0.12 m sand
+    3.00 → 3.48°, peak 7.7 → 13.2°), wheel-load peaks within 0.4 of static.
+    `tools/suspension-probe.ts`: sag, weight split and drop settle times unchanged, brake
+    dive within 0.01°, texture jolt within 0.001 g, tyre deflection within 0.21 mm (2108
+    unchanged). `tools/surface-feel.ts` (2105 rally) road
+    rows: heave within 0.002 g, hits/km −1 to +2. Its desert row tumbles from its spawn
+    in either build (166 g) and lands differently: 46 km/h over 1080 m before, upside
+    down at 32 m after; not a measure of this change.
+  - `tools/suspension-probe.ts` installs the document shim; it crashed on `document` in
+    the car's sticker atlas before reaching any car.
+- THE REAR BRAKE REGULATOR ("регулятор давления задних тормозов", `CarModelDef.rearBrakeValve`
+  and `RearBrakeValve` in vehicle/carmodels.ts; vehicle/vehicle.ts). The Zhiguli
+  (2101-2107), Samara (2108, 2109, 21099 and the 2110/2115 on its running gear) and
+  AZLK-2141 now pass their rear brakes the master-cylinder pressure only up to a knee, and
+  a share of every further rise past it. The knee rides on the rear springs' compression,
+  as the real lever does: it climbs with a loaded boot, drops as braking lifts the tail,
+  and is gone with the axle hanging. It reads nothing else (no tyre, no slip, no wheel
+  speed), so it is not an ABS: the rears still lock on gravel at a hard pedal. The fixed
+  0.42 rear split, the handbrake and `brakeDecelG` are unchanged.
+  - Zhiguli (`idealKnee`): no valve figure was found, so the knee is where the 0.42 split
+    meets the kerb car's ideal distribution, z = (r0 − 0.42)/χ ≈ 0.33 g (r0 the static
+    rear share, χ = CoM height/wheelbase), set at the kerb so the tail rising by that much
+    brings it there; the slope puts a floored pedal back on the ideal curve. 2101: knee
+    0.365 of the pedal, slope 0.483.
+  - Samara: the 2109 manual's bench check, 3.0 MPa cut-in and 3.7-4.5 MPa out of 8 MPa in,
+    so a slope of 0.22; the knee 0.30 of the pedal ASSUMES a floored pedal is 10 MPa (the
+    top of the manual's 3-10 MPa check range; nothing here ties line pressure to
+    `brakeDecelG`). A Samara's rear carries 0.38 standing, under the 0.42 split, so no knee
+    can be derived for it as for the Zhiguli.
+  - AZLK-2141: its manual's ratio 2 ("передаточное число регулятора без пружины"), slope
+    0.5, with the Samara's assumed knee.
+  - Estimates follow it: `estimatedBrakeDecel` solves the threshold with the knee on the
+    springs (`thresholdBrakeG`, replacing `axleBrakeLimitG`), and the threshold pedal and
+    `measuredBrakeDecel` invert the valve.
+  - Measured, flat asphalt, 100-0 km/h, regulator off → on in the same build (+0/85/170 kg):
+    with the pedal ramped from 0 to 1, the 2108/2109 locked their rears first at pedal
+    0.53-0.64 and now lock the fronts first at 0.89-0.97 with the rears never locking; a
+    floored stop is 49.1-52.8 → 51.4-54.1 m, yaw ≤ 0.1°, fronts first; the autopilot's
+    threshold stop 61.2-62.2 → 48.0-51.4 m (MFDD 0.63-0.65 → 0.77-0.81 g). The 2101
+    floored 50.5-53.3 → 53.4-54.9 m and threshold 51.2-53.0 → 51.5-53.8 m, the rears no
+    longer locking ahead of the fronts on the ramp (0.88 → never). The 2141 floored
+    51.6-54.5 → 51.4-54.4 m (max yaw 0.6-0.9°), threshold 61.4-62.2 → 51.6-53.0 m; its
+    rears still lock on the ramp, after the fronts (0.77-0.89 vs 0.88-0.91). On gravel the
+    2108/2109 rears still lock at pedal 0.91-1.0, the 2141's at 0.53-0.65 (at kerb before
+    the fronts), and the 2101's threshold stop is 67.6 → 71.2 m. Suite +150 kg
+    (`build/physics-suite/brake-valve-150.md`): every car locks its fronts first; yaw100
+    2109 0.1°, 2141 1.0°.
+  - Left as found: the Niva, Oka, Volgas and UAZ have no regulator (no source read), and
+    `estimatedBrakeDecel` loads the tyres with the full χ transfer while the step's wheel
+    loads are the springs', which `applyAntiPitch` relieves of ANTI_DIVE_FRACTION (26%) of
+    the braking pitch couple. With the valve the front limits, and the estimate is 4-5%
+    above the measured threshold MFDD (2101, 2108, 2109; the autopilot plans on 0.82-0.9
+    of it).
+- ONE ROAD TYRE: A TYPICAL 2000s KAMA (`KAMA_217`, `KAMA_217_GRIP` in
+  vehicle/carmodels.ts). Every road car now runs KAMA-217 (Nizhnekamskshina, 175/70 R13
+  82H): radial, the 70-aspect `tyreCurve`, `wheelGrip` 0.53. That covers the Zhigulis,
+  Samaras, 2110 family, Oka, AZLK-2141, both Volgas and the IZh-2715. It replaces the
+  ladder of period Soviet tyres (cross-ply Volgas 0.52-0.60, Zhiguli radials 0.55-0.58,
+  Samaras and 2110s 0.65-0.66) and the `road` profile's 1.0824 cornering multiplier,
+  now 1.0 (`HandlingTuning.tyreLateralScale`). KAMA's own card (td-kama.com) publishes
+  the size, load, speed, 576 mm diameter, 261 mm static radius and EU label (wet grip
+  E, rolling F, 72 dB), but no grip, stiffness or relaxation, so the curve and the 0.53
+  are marked DERIVED in the source. The 0.53 is set on the two VAZs measured on budget
+  13-inch radials: Car and Driver's Samara at 0.71 g and Za Rulem's 21102 at 55.0 m
+  from 100. Each car keeps its factory wheel radius and width. The Niva's 175/80 R16, the
+  UAZ-469's 215/90-15C cross-ply, the UAZ-2206's 225/75 R16 and the `utility` and
+  `sport` scales are unchanged, and so is the rally 2105's competition tyre. Isolated A/B
+  on a snapshot without the brake-regulator work, `tools/physics-suite.ts`, +150 kg
+  (`build/physics-suite/kama-before-1.json` → `kama-final-1.json`, compared in
+  `compare-kama.md`; two runs per side are identical apart from wall time):
+  - VAZ-2101: skidpad 0.72 → 0.70 g, 100-0 50.3 → 52.9 m (PM74 derived 49), 80-0
+    32.3 → 34.0 m, understeer 1.73 → 1.75 deg/g.
+  - VAZ-2108: skidpad 0.88 → 0.73 g (C&D sibling 0.71), 100-0 41.1 → 52.3 m (sibling
+    derived 55.5), 80-0 29.2 → 34.8 m, MFDD 0.95 → 0.74 g, first lock rear → front,
+    understeer 0.89 → 1.17 deg/g.
+  - GAZ-24 (cross-ply to radial): skidpad 0.70 → 0.62 g, 100-0 51.5 → 58.0 m, 80-0
+    34.2 → 38.3 m (ceiling 43.2), understeer 2.79 → 2.31 deg/g.
+  - UAZ-469 and UAZ-2206: unchanged to the digit.
+  - Top speed within 0.1 km/h everywhere (142, 147, 144, 110, 104); 0-100 is 0.2 s
+    slower on the 2108 and GAZ-24, unchanged on the 2101.
+  On the same snapshot the 2110 stops from 100 in 53.6 m (Za Rulem 55.0) and pulls
+  0.71 g on the skidpad.
+- THE WHEELS RUN AT 240 HZ (`vehicle/vehicle.ts` `updateWheelDynamics`, `substepWheel`;
+  `WHEEL_SUBSTEPS` in vehicle/vehicletuning.ts). Each wheel's spin, its carcass slip
+  (longitudinal and lateral relaxation), the driveline lag and the drivetrain with its
+  clutch now step four times per 60 Hz physics step. The contact is read once, the Rapier
+  body is held through the substeps, and each tyre's force is averaged into one impulse.
+  A wheel against its carcass has a mode of 18-27 Hz, which the 60 Hz step could not
+  follow: a braked front wheel could sit on the falling side of its curve. On the
+  VAZ-2108's 100-0 stop one front wheel stayed at 37-60% slip for 1.5 s while the other
+  ran at 10%, and the car turned 12 degrees. It now turns 0.5. Two more step faults are
+  gone with it. Every wheel's contact velocity used to be read after the wheels listed
+  before it had pushed the body, so the listing order picked the side: reversed, the
+  2108's stop turned 0.2 degrees and its understeer gradient doubled. And the slip
+  angle was read off the previous step's velocity, before the solver had moved the
+  car, so every tyre answered yaw and sideslip one step late. Now every wheel reads the
+  same step's contact before any tyre pushes. Suite (`build/physics-suite/substep.json`
+  against `baseline.json`): 100-0 is 1-3.5% shorter on the RWD cars and 4-9% shorter on
+  the FWD cars (MFDD 0.86-0.94 → 0.90-0.96 g); the understeer gradient rises 0.23-0.33
+  deg/g everywhere; 0-100, top speed and skidpad g are within 1%. The VAZ-2109 now stops
+  with 10.3 degrees of yaw (was 0.9) and the AZLK-2141 with 6.3 (was 8.4). Neither is a
+  step or order effect: reversing the wheel list changes nothing to the bit, and 8 or 16
+  substeps give 10.4/10.6 and 6.7/7.2. It is a knife edge in the brakes. Every FWD car
+  locks its rears first (one rear bias, `FOOT_BRAKE_REAR_BIAS`, for every car), so the
+  car has no rear side grip. A floored pedal asks 1.05-1.13 of the fronts' peak before
+  the load has come forward and 1.15-1.3 of their sliding force for the rest of the
+  stop, so a front that tips over stays locked. Which front tips is decided by the road
+  texture's ±120 N left-right load noise at the instant the pedal goes down. The 2109
+  gives 0.5, 1.7, 10.3, 2.3 and 6.3 degrees at 130-170 kg of load. The same sweep at
+  60 Hz has 8 of 24 stops (2108, 2109, 2141, 21099) over 3 degrees; 240 Hz has 4.
+  The cost is about 4 µs more per car per step (fixedUpdate 15-20 → 19-21 µs).
+  A 120 Hz chassis moves no figure by more than 1% beyond this and costs twice the
+  physics. The road-deck crawl concession (`LOW_RANGE_MU`) is not a step artefact and
+  stays: with it off, the standing-start gravel ceiling is 12.1 degrees for the 2101 and
+  GAZ-24 both before and after.
 - CHEAPER LAMPS ON THE PLAYER'S OWN CAR (`render/lightshader.ts`, `render/vehiclelights.ts`,
   `render/materials.ts`, `render/carsurface.ts`, `vehicle/vehicle.ts`, `main.ts`). Measured
   from the cabin at noon (Blessing, 1440 lines, M2 Pro), the driven car cost 13.7 ms of a

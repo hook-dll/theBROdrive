@@ -189,3 +189,80 @@ Checked by a throwaway census of concave folds between neighbouring painted face
 | Kit after: door frame 0.04 behind the pillar's line, glass 0.035 behind that, parallel | frame `1.40 / 1.79` (`lower: 'body'`: the wing still reaches the shut line 1.459 below the belt), quarter light from `1.435 / 1.825` to its post 1.92 (a column at the shut line `1.46 / 1.85` inside it): **0.075 of s**, 5.6 cm across | frame `1.54 / 1.93` (`lower: 'body'`), glass from `1.575 / 1.965` (a column at the shut line `1.60 / 1.99`): **0.075 of s** |
 
 The glass now runs down the pillar to the belt: on the 24 the quarter light is a long four-sided pane (its foot 0.19 ahead of the drawn one, whose rounded corner stands behind a chrome frame the kit does not have); on the 31029 the drop pane starts 0.12 further forward at the belt than drawn. Lab before / after: `/tmp/kit2141/apillar_before_after_gaz24.png`, `apillar_before_after_gaz31029.png` (side, s/y grid), `before_gaz*_*.png` / `after_gaz*_*.png` (side, 3/4 front), `after_gaz*_window.png`, `after_gaz*_dooropen.png`. `tools/kit-zfight.ts` PASS; triangles: 24 13 156 → 13 366, 31029 11 692 → 11 888; fit rows unchanged (0 mm stale).
+
+## 4. Dashboards (`CABIN_GAZ24`, `CABIN_GAZ31029` in interior.ts), 2026-10-17 draft
+
+Before this both Volgas drew the `classic` platform's VAZ-2106 dash. Each now has its own `cabinLayout`. Three generator additions, all absent on the other cars (geometry hashes of the 18 other cars identical to HEAD 2c5601f): `Layout.band` (a coloured band laid into the fascia's face across the dash, left out behind the binnacle), `Layout.clock` (a static clock on the cluster face, coarse geometry, no channel), `glovebox.colour`, and `wheel.chrome` (spokes and the round boss in chrome).
+
+### 4.1 Sources [P] (Wikimedia Commons, saved under `build/carshape/_refs/bp/img/`)
+
+| Saved as | Commons title | Licence | What it shows | Used for |
+|---|---|---|---|---|
+| `gaz24_GAZ-24_1st_generation_Volga_interior_.jpg` (already there) | GAZ-24 (1st generation) "Volga" (interior).jpg | public domain | the whole dash square through the screen from the back seat, 1920 × 1440 | every GAZ-24 position (scale below) |
+| `gaz24_GAZ_24_Volga_interior.jpg` | GAZ 24 Volga interior.jpg | CC BY-SA 4.0, User:CLI | an early car through the open driver's door: the cluster panel close | the cluster's windows, lamps, clock |
+| `gaz24_24-interior-early-1974.jpg` | 24-interior-early-1974.jpg | public domain, Алексеев С.С. (DL24) | a 1974 car through the open driver's door | the cluster, the knobs under the band, the vent |
+| `gaz24_Gaz-24-ii-series-int.jpg` | Gaz-24-ii-series-int.jpg | public domain, DL24 | a second-series car from the driver's seat: the same layout with a wood-look band, a single chrome bar across the wheel | check only (the kit draws the early car) |
+| `gaz24_GAZ-24_Citydrive_salon.jpg` | ГАЗ-24 Ситидрайв на СРВ салон.jpg | CC BY-SA 4.0, User:ATI1999 | a restored late car | check only (modern radio) |
+| `gaz31029_31029-int-2.jpg` | 31029-int-2.jpg | public domain, DL24 | the only 31029 interior on Commons, 1152 × 768, from behind the driver's seat | every GAZ-31029 position |
+| `gaz3102_GAZ-3102_Citydrive_salon.jpg` | ГАЗ-3102 Ситидрайв на СРВ салон.jpg | CC BY-SA 4.0, User:ATI1999 | a late (post-2004) GAZ-3102's moulded dash | **not** the 31029's: the 31029 kept the 1982 3102-style panel (wood band, two big dials under a hood, as on `31029-int-2.jpg`); the moulded one came with the 3102's 2004 facelift. Not used. |
+
+Factory figures: none found for either dash. The wheels' diameters are owners' measurements [E]: GAZ-24 420 mm (drive2.ru "Оплётка руля Волга Газ 24 (1977 года)", https://www.drive2.ru/l/8007726/ ; drive2.ru 551722566385927182 "у заводского 42 см"), GAZ-31029 400–410 mm (forum.allgaz.ru t-11498: 41 cm, 40 cm by tape; "на 31029 и 2410 одинаковые рули").
+
+### 4.2 Scales
+
+- **GAZ-24**, frontal photo: the fascia band runs across the cabin, ~1700 px; the kit's dash is 1.512 wide (half 0.756, from the shell), so **0.885 mm/px** across, centre line x 970 (defroster grille, radio, ashtray in line). Heights hung from the band's top (y 656) at **0.073 over the belt [E]**: the top roll stands over the band and meets the scuttle about 0.1 over the belt; no photo shows the belt. The panel stands nearly in the fascia's plane, so the one scale serves it (the wheel is nearer the camera and not scaled from this photo).
+- **GAZ-31029**: the column (wheel's hub, cluster's centre, x 465) to the centre line (x 735, vents, heater, band) is 270 px for the kit's seatX 0.40: **1.48 mm/px**. Heights hung from the centre band's top (y 283) at **0.055 over the belt [E]**.
+- **seatX 0.40** for both (classic 0.37): the GAZ-24's panel centre (x 508) stands 462 px = 0.41 off the centre line [P]; the column is centred on the panel in both photos.
+
+### 4.3 GAZ-24: readings → spec (photo px on the 1920 × 1440 frontal photo unless named)
+
+| Feature | Reading | Value | Spec |
+|---|---|---|---|
+| Fascia band (aluminium) | y 656–815 | 0.141 tall [P] | `band: { dy: [-0.066, 0.073], colour: 0xa7aaa9 }` |
+| Black panel under it | y 815–897 | to −0.14 [P] | `fascia` to −0.14; `dash` face upright at 0.338 |
+| Top roll | overhangs the band ~2 cm, level to the scuttle [P] | [P/E] | `dash` points to dy 0.1 |
+| Instrument panel window | x 205–812, y 680–798 | 0.537 × 0.104, centre 0.41 off centre [P] | `binnacle` flat, 8 mm proud; `binnacleHalf` 0.268; `clusterFace` half [0.257, 0.05], blue-grey 0x6c8496, chrome frame |
+| Speedometer scale | numerals 20 at x 422, 180 at x 622, y 720 (zoom of the frontal photo) | 0–180 over ~0.20 [P] | ribbon `speed` half [0.111, 0.0177], up 0.014 |
+| Small windows | CLI photo: two at the panel's left end one over the other (ammeter "А", fuel "БЕНЗИН"), one under the scale's start (temperature 80–120, "ВОДА"), one under its end (oil 0–6, "МАСЛО") | [P] | ribbons `volts` (12–16 V: no current channel; the ammeter's zero taken at 14 V [E]), `fuel`, `temp`, `oil` 0–6 kgf/cm², each half [0.024, 0.009] |
+| Warning lamps | two red lenses between the left windows and the scale (CLI photo) | [P]; which functions not legible | `lamps` 2 × 2: turn, beam, oil, brake [E] |
+| Clock | right end of the panel, x 745–800 (frontal), square face (CLI) | [P] | `clock` right 0.226, r 0.02 (round in the kit) |
+| Radio | x 880–1105, y 695–750, centred | [P] | `radio` [0, 0.017] (the kit's standard radio) |
+| Glovebox lid | x 1174–1710, y 659–799 | centre −0.418, half 0.237 × 0.062 [P] | `glovebox` x −0.417, half [0.236, 0.057] |
+| End vents | round, chrome rims, x 146 / 1763, y ~732, r ~37 px | ±0.70, r 0.033 [P] | `eyeballs` r 0.03 at ±0.715, dy 0.018 [E: clear of the panel] |
+| Ashtray | chrome pull in the black panel, centre, y 854 | dy −0.10 [P] | `ashtray` [0, −0.106] |
+| Knobs left of the column | x 244, 323, 390; y 866 | [P] | lights knob = the middle one (x 0.573, dy −0.111) [E which] |
+| Knob right of the column | x 799, y 866 | x 0.151 [P] | the kit's `hazard` button there (the early car had none) [E] |
+| Steering wheel | thin black rim, two spokes nearly level dipping to the hub, a chrome bar with the "Волга" script across [P]; 420 across [E owners] | | `wheel` radius 0.2005, rim 0.0095, spokes [−8, 188], round boss, `chrome: true`; dy 0 (hub at the belt) [E] |
+
+### 4.4 GAZ-31029: readings → spec (px on `31029-int-2.jpg`, 1152 × 768)
+
+| Feature | Reading | Value | Spec |
+|---|---|---|---|
+| Wood band across the dash | y 283–335 | 0.077 tall [P] | `band: { dy: [-0.022, 0.055], colour: wood }` |
+| Dash face, black, to | y 480 | −0.24 [P] | `dash` face at 0.35 to −0.2, console below [E] |
+| Instrument panel (wood) | x 326–605, y 237–355, in a black surround under a hood | half 0.206 × 0.087, centre up 0.036 [P] | `binnacle` (hood lip over it, face 2 cm proud), `binnacleHalf` 0.222, `clusterFace` half [0.205, 0.0875] wood, black frame |
+| Left dial (combined gauge) | centre x 383, face r ~40 px; only the fuel arc (upper right, red) legible | right −0.121, r 0.059 [P] | `fuel` over its top, `temp` (bare) over its bottom, r 0.055 [E: the other scales not legible] |
+| Speedometer | centre x 548, 0–180 km/h, r ~40 px | right +0.123 [P] | `speed` r 0.055, BIG |
+| Clock | small dial between them, numerals 9 / 12 / 3, x 455, y 280 | [P] | `clock` right 0, up 0.059, r 0.026 |
+| Warning lamps | in the speedometer's face [P] | | `lamps` row under the speedometer (turn, beam, side, brake), `lenses` under the left dial (fuel, oil, charge) [E] |
+| Hazard button | red, on the band, x 630, y 307 | x 0.155, dy 0.019 [P] | `hazard` [0.155, 0.019] |
+| Radio slot | x 656–803 on the band (empty on the photo) | centred [P] | `radio` [0, 0.017] |
+| Centre vents | x 645–717 and 744–823, y 366–418 | ±0.075, half 0.05 × 0.038, dy −0.106 [P] | two `vents` |
+| Heater sliders | x 656–829, y 427–473 | half 0.128 × 0.034, dy −0.192 [P] | `heater` half [0.12, 0.032], two knobs [P: sliders drawn as knobs] |
+| Console | x 660–830 down to the tunnel | half ~0.13 [P] | `stack` half 0.14 |
+| End vents | driver's x 263–315, y 286–320 (slatted) | x 0.66, dy 0.025, half 0.038 × 0.025 [P]; passenger's by symmetry [E] | `vents` ±0.67 |
+| Buttons under the cluster | round, x 544 and 583, y 395 | right 0.117, dy −0.111 [P] | the light switch (knob) on the first [E which] |
+| Glovebox lid | wood, in the band right of the radio, black pull at its top right; from x 866 out | [P]; outer end past the frame [E] | `glovebox` x −0.407, half [0.21, 0.04], `colour` wood |
+| Ashtray | not seen | [E] | low on the console, dy −0.33 |
+| Steering wheel | a large padded centre reaching the rim at nine and six o'clock, a thin rim [P]; 400–410 across [E owners] | | `wheel` radius 0.193, rim 0.0095, spokes [−10, 190, 270], `hub: 'pad'` |
+
+### 4.5 Result
+
+Lab captures in `/tmp/kit-review/volga-dash/` (not committed): `gaz*-seat.png` (driver's eye, 80 km/h etc.), `gaz*-door.png` (through the open driver's door), `gaz*-controls.png` (wheel turned, glovebox open, light switch clicked, indicator on, 120 km/h), `gaz*-seat-night.png` (22:00, lights 1: panel lit), `gaz*-lod-pair.png` (5.6 m | 6.4 m, the fine detail going at `KIT_FINE_M`), `gaz*-exterior-34.png`, and `gaz*-vs-photo.png` (Commons photo | kit). `tools/kit-zfight.ts kit_gaz24 kit_gaz31029`: PASS. Triangles (`buildKitCar`, README method): GAZ-24 13 366 → **13 286** (cabin 4 209 → 4 129, of it fine 1 747 → 1 529); GAZ-31029 11 888 → **12 125** (cabin 4 247 → 4 484, fine 1 747 → 1 481). Body, bay, boot, underbody, far unchanged.
+
+### 4.6 Gaps
+
+- No dash drawing and no photo with a scale: everything hangs on the shell's dash width (24) or seatX (31029), heights on one estimated anchor each [E].
+- GAZ-24: the panel's lamps' functions, the knobs' functions, the ammeter (drawn on the voltmeter's channel); the clock is round (square on the car); the kit's standard radio and hazard button stand in for the period ones; the "Волга" script on the horn bar is not drawn. The early car's aluminium band is drawn (the II series has a wood-look band, the photo kept for reference).
+- GAZ-31029: only one interior photo; the combined gauge's scales other than fuel, the passenger's end of the dash, the ashtray and the warning lamps' places are estimates. The pad wheel is the kit's pad on three spokes, not the moulded one-piece centre.
+- Both Volgas' seats are still the classic's; seatX moved them 3 cm outboard with the column.

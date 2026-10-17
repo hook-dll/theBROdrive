@@ -1,6 +1,6 @@
 /**
  * How open a kit car's cabin is to the listener's two ears, from its doors, windows,
- * quarter vents and tailgate (KitRig channels), the seat he sits in and where his head
+ * quarter vents and tailgate or rear doors (KitRig channels), the seat he sits in and where his head
  * is turned.
  *
  * Each opening lets a share of the outside in to the car's side it is on. A window
@@ -29,6 +29,9 @@ const OPENINGS: readonly (readonly [string, -1 | 0 | 1, 0 | 1, number])[] = [
   ['vent_fl', 1, 0, 0.3],
   ['vent_fr', -1, 0, 0.3],
   ['tailgate', 0, 1, 0.6],
+  // A split tailgate's two leaves (the UAZ-2206's rear doors), each half of it.
+  ['tailgate_l', 0, 1, 0.3],
+  ['tailgate_r', 0, 1, 0.3],
 ];
 
 /** An opening on the other row than the listener's counts this much. */

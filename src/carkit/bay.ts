@@ -24,22 +24,23 @@
  *  - the shell's dark floor at sill height closes every space from below, so what is
  *    meant to be seen from under the car hangs below it, and the lowest of it (the
  *    classic's and the Niva's differentials, the Samara's fuel tank) stands at exactly
- *    the factory clearance (`clearance`); the silencers are tucked up SILENCER_TUCK above it.
+ *    the factory clearance (`clearance`); the silencers are tucked up SILENCER_TUCK above it,
+ *    or on a high body (`exhaustTuck`, the UAZs) hang just under the floor.
  */
 
 import * as THREE from 'three';
 import { LINING_DEPTH, type BodyFrame } from './body';
 import { PartBuilder, type KitSlot, type Vec3 } from './builder';
 import { addBuilt, type KitContext } from './context';
-import { loadSpaceStart } from './interior';
+import { engineCoverEnd, loadSpaceStart } from './interior';
 
 /** Ground clearance of the lowest part under the car: the factory figure the body was fitted to. */
 const CLEARANCE = 0.17;
-/** The Niva's: 220 mm (`FACTORY_GEOMETRY.sv_niva`, vehicle/carmodels.ts). */
+/** The Niva's and the UAZ-2206's: 220 mm (`FACTORY_GEOMETRY.sv_niva`, `kit_uaz2206`, vehicle/carmodels.ts). */
 const NIVA_CLEARANCE = 0.22;
 
 function clearance(frame: BodyFrame): number {
-  return frame.spec.platform === 'niva' ? NIVA_CLEARANCE : CLEARANCE;
+  return frame.spec.platform === 'niva' || frame.spec.platform === 'van' ? NIVA_CLEARANCE : CLEARANCE;
 }
 /** The silencer hangs this far above the lowest point, tucked up under the floor. */
 const SILENCER_TUCK = 0.025;
@@ -91,17 +92,27 @@ export function buildBay(ctx: KitContext): void {
   const boot = detailGroup(ctx, 'kit_boot');
   const under = detailGroup(ctx, 'kit_under');
   const { frame } = ctx;
-  // The Niva's engine, bay and cabin floor are the classic's.
+  // The Niva's and the van's engine and cabin floor are the classic's.
   const classic = frame.spec.platform !== 'samara';
+  // A forward-control van has nothing ahead of the screen to open and no boot: its engine
+  // stands under the cabin's cover (interior.ts `engineCover`), its floor runs to the rear
+  // doors, and with no bonnet cells it keeps no service grid.
+  const van = frame.spec.platform === 'van';
 
   const b = new PartBuilder();
-  const { route, cells } = buildEngineBay(frame, b, classic);
+  let route: BayRoute;
+  if (van) {
+    route = vanRoute(frame);
+  } else {
+    const bayLayout = buildEngineBay(frame, b, classic);
+    route = bayLayout.route;
+    for (const kind of CELL_KINDS) ctx.root.add(cellMarker(frame, kind, bayLayout.cells[kind]));
+  }
   addBuilt(bay, b, [0, 0, 0], 'bay', true);
-  for (const kind of CELL_KINDS) ctx.root.add(cellMarker(frame, kind, cells[kind]));
 
   const lb = new PartBuilder();
   if (frame.spec.bootEnd !== undefined) buildSaloonBoot(frame, lb, classic);
-  else buildHatchBoot(frame, lb);
+  else if (!van) buildHatchBoot(frame, lb);
   addBuilt(boot, lb, [0, 0, 0], 'boot', true);
 
   const ub = new PartBuilder();
@@ -343,6 +354,19 @@ interface BayRoute {
   /** Crank axis height and the engine's offset across the car: where the driveline leaves it. */
   readonly crankY: number;
   readonly engineX: number;
+  /** Where the gearbox starts along the car (the engine's back); absent, the cowl's firewall. */
+  readonly gearFrom?: number;
+}
+
+/**
+ * The van's route: its engine under the cover between the front seats, over the front
+ * axle, the gearbox from its back (the cover's rear end) hanging under the floor with the
+ * transfer box behind it, the down-pipe from under the engine's rear end, right of centre.
+ */
+function vanRoute(frame: BodyFrame): BayRoute {
+  const gearFrom = engineCoverEnd(frame);
+  const sOut = gearFrom - 0.1;
+  return { outlet: at(frame, -0.12, floorY(frame, sOut) - DOWNPIPE_DROP, sOut), crankY: floorY(frame, gearFrom) + 0.025, engineX: 0, gearFrom };
 }
 
 interface BayLayout {
@@ -747,17 +771,36 @@ function buildUnderbody(frame: BodyFrame, b: PartBuilder, eb: PartBuilder, class
   else samaraChassis(frame, b, eb, route);
 }
 
-/** Exhaust from the down-pipe's start under the bay: resonator, silencer at the clearance, tail pipe out at the right rear. */
+/**
+ * Exhaust from the down-pipe's start under the bay: resonator, silencer at the clearance, tail
+ * pipe out at the right rear. With `exhaustTuck` the silencer and the tail pipe hang that far
+ * under the floor over their run instead, the pipe climbing to them just short of the silencer.
+ */
 function exhaust(frame: BodyFrame, b: PartBuilder, down: readonly Vec3[], x: number, y: number, resonator: readonly [number, number], silencer: readonly [number, number], silencerX: number): void {
   const spec = frame.spec;
   const C = clearance(frame);
   b.color(COLOURS.exhaust);
   tube(b, 'trim', [...down, at(frame, x, y, resonator[0])], 0.022, 6);
   bevelS(b, frame, 'trim', [x - 0.075, C + 0.006, resonator[0]], [x + 0.075, y + 0.04, resonator[1]], 0.025);
-  tube(b, 'trim', [at(frame, x, y, resonator[1]), at(frame, x, y, silencer[0] - 0.25), at(frame, silencerX, y, silencer[0])], 0.022, 6);
-  bevelS(b, frame, 'trim', [silencerX - 0.13, C + SILENCER_TUCK, silencer[0]], [silencerX + 0.13, C + SILENCER_TUCK + 0.085, silencer[1]], 0.035);
   const tail = spec.stations[spec.stations.length - 1]!.s;
-  tube(b, 'trim', [at(frame, silencerX - 0.03, y + 0.007, silencer[1]), at(frame, silencerX - 0.08, y + 0.03, tail - 0.05), at(frame, -0.45, y + 0.045, spec.length - 0.03)], 0.022, 6);
+  const tuck = spec.exhaustTuck;
+  if (tuck === undefined) {
+    tube(b, 'trim', [at(frame, x, y, resonator[1]), at(frame, x, y, silencer[0] - 0.25), at(frame, silencerX, y, silencer[0])], 0.022, 6);
+    bevelS(b, frame, 'trim', [silencerX - 0.13, C + SILENCER_TUCK, silencer[0]], [silencerX + 0.13, C + SILENCER_TUCK + 0.085, silencer[1]], 0.035);
+    tube(b, 'trim', [at(frame, silencerX - 0.03, y + 0.007, silencer[1]), at(frame, silencerX - 0.08, y + 0.03, tail - 0.05), at(frame, -0.45, y + 0.045, spec.length - 0.03)], 0.022, 6);
+    return;
+  }
+  // The floor is straight between stations, so its lowest over a run is at a station or an end.
+  const under = (s0: number, s1: number): number => Math.min(...stationsBetween(frame, s0, s1).map((s) => floorY(frame, s))) - tuck;
+  const top = under(silencer[0], silencer[1]);
+  const mid = top - 0.0425;
+  // Under the axle as before, then up into the silencer's front face, behind whatever
+  // crosses the car ahead of it (the classic's Panhard rod at silencer[0] − 0.08).
+  tube(b, 'trim', [at(frame, x, y, resonator[1]), at(frame, x, y, silencer[0] - 0.25), at(frame, silencerX, y, silencer[0] - 0.06), at(frame, silencerX, mid, silencer[0] + 0.01)], 0.022, 6);
+  bevelS(b, frame, 'trim', [silencerX - 0.13, top - 0.085, silencer[0]], [silencerX + 0.13, top, silencer[1]], 0.035);
+  // Out under the tail's floor, its top `tuck` under it.
+  const ty = under(silencer[1], tail) - 0.022;
+  tube(b, 'trim', [at(frame, silencerX - 0.03, mid, silencer[1] - 0.01), at(frame, silencerX - 0.08, ty, tail - 0.05), at(frame, -0.45, ty, spec.length - 0.03)], 0.022, 6);
 }
 
 /**
@@ -772,7 +815,7 @@ function classicChassis(frame: BodyFrame, b: PartBuilder, eb: PartBuilder, route
   const cowl = frame.cowl;
   const R = w.radius;
   const C = clearance(frame);
-  const niva = spec.platform === 'niva';
+  const niva = spec.platform === 'niva' || spec.platform === 'van';
 
   // Front beam under the engine's place, between the wishbones' inner pivots. It has no
   // top face: that would lie in the floor's plane (its closing edge, last point to first).
@@ -796,8 +839,9 @@ function classicChassis(frame: BodyFrame, b: PartBuilder, eb: PartBuilder, route
   // pinion, on the Niva from the transfer box behind the gearbox.
   const x = route.engineX;
   const cy = route.crankY;
-  const gearEnd = cowl + 0.45;
-  taper(b, frame, 'trim', COLOURS.alloy, x, cy, cowl + 0.02, 0.11, cy - C - 0.012, gearEnd, 0.07, 0.065, 8);
+  const firewall = route.gearFrom ?? cowl;
+  const gearEnd = firewall + 0.45;
+  taper(b, frame, 'trim', COLOURS.alloy, x, cy, firewall + 0.02, 0.11, cy - C - 0.012, gearEnd, 0.07, 0.065, 8);
   const pinionY = R - 0.035;
   const pinionS = w.rear - 0.16;
   b.color(COLOURS.driveline);
@@ -838,10 +882,10 @@ function classicChassis(frame: BodyFrame, b: PartBuilder, eb: PartBuilder, route
   exhaust(
     frame,
     eb,
-    [o, at(frame, o[0] - 0.01, (o[1] + ey) / 2, os + 0.06), at(frame, ex, ey + 0.02, cowl + 0.05), at(frame, ex, ey, cowl + 0.25)],
+    [o, at(frame, o[0] - 0.01, (o[1] + ey) / 2, os + 0.06), at(frame, ex, ey + 0.02, firewall + 0.05), at(frame, ex, ey, firewall + 0.25)],
     ex,
     ey,
-    niva ? [cowl + 0.85, Math.min(cowl + 1.25, w.rear - 0.4)] : [cowl + 0.55, cowl + 1.0],
+    niva ? [firewall + 0.85, Math.min(firewall + 1.25, w.rear - 0.4)] : [firewall + 0.55, firewall + 1.0],
     // Short of the tail panel: the boot lid's end on a saloon, the body's last station on an estate.
     [w.rear + 0.21, Math.min(w.rear + 0.78, (spec.bootEnd ?? spec.stations[spec.stations.length - 1]!.s) - 0.2)],
     ex,

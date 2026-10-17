@@ -117,7 +117,7 @@ export const TRAILER_CAPACITY_KG = 700;
  *
  * The tyre is a period trailer's 13-inch cross-ply (`tyreCurve`: peak at 8°, fading
  * to 0.86 of it by 30°, 0.45 m of relaxation). Its own coefficient is a little under
- * the catalogue cars' road tyres (`wheelGrip` 0.52-0.66): narrow, hard and cheap.
+ * the cars' KAMA road tyre (`KAMA_217_GRIP`, 0.53): narrow, hard and cheap.
  * No temperature model: a trailer tyre does no work but roll.
  */
 const TRAILER_TYRE = tyreCurve({ construction: 'crossply', aspect: 0.8 }, HANDLING_PROFILES.classic);

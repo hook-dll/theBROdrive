@@ -631,10 +631,11 @@ export function aligningMomentPeak(casterRatio: number): { readonly z: number; r
 
 /**
  * Mechanical handling families. The Soviet catalogue stays on `classic`, preserving
- * its slow recirculating-ball steering, cross-ply tyre response and live-axle balance.
- * The GTA SA conversions span later radial-tyred road cars and working 4x4/van
- * chassis; forcing all of them through that Soviet baseline is why visually modern
- * cars felt delayed, vague and tail-light.
+ * its slow recirculating-ball steering and live-axle balance. The GTA SA conversions
+ * span later road cars and working 4x4/van chassis; forcing all of them through that
+ * Soviet baseline is why visually modern cars felt delayed, vague and tail-light. The
+ * TYRE is not the profile's: every road car runs the KAMA road tyre
+ * (`KAMA_217` in carmodels.ts), whatever its profile.
  */
 export interface HandlingTuning {
   /** Rack speed, rad/s at the road wheel: see `STEER_RACK_SPEED_RAD_S`. */
@@ -644,9 +645,11 @@ export interface HandlingTuning {
   readonly drivelineLag: number;
   readonly lateralGripFraction: number;
   /**
-   * The profile's own cornering quality, multiplied ON TOP of the surface's measured
-   * coefficient — later radials and quicker racks against the period baseline. 1.0 is
-   * the classic profile, which is what the surface table is quoted for.
+   * Cornering scale on top of the tyre's own coefficient, for the profiles whose cars
+   * do NOT run the KAMA road tyre: `utility` (the Niva's and the UAZs' block treads)
+   * and `sport` (the rally 2105's competition tyre). No data replaces these two, so
+   * they stay as authored. 1.0 on `classic` and `road`: their cars share the one road
+   * tyre, and a profile multiplier on it (`road` was 1.0824) had no source.
    */
   readonly tyreLateralScale: number;
   readonly rearAxleSideGrip: number;
@@ -902,7 +905,7 @@ export const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>
     bumpSteer: 0.009,
     drivelineLag: 0.055,
     lateralGripFraction: 0.36,
-    tyreLateralScale: 1.0824,
+    tyreLateralScale: 1,
     rearAxleSideGrip: 0.985,
     slipPeakFrontDeg: 5.9,
     slipPeakRearDeg: 5.5,
@@ -961,10 +964,13 @@ export const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>
  */
 export const FOOT_BRAKE_GRIP_RATIO = 0.97;
 /**
- * Rear bias for the foot brake (0..1).
+ * Rear bias for the foot brake (0..1): the split at EQUAL line pressure, which is all of
+ * it on a car without a rear regulator and all of it below the regulator's knee on a
+ * car with one (`CarModelDef.rearBrakeValve`: the Zhiguli, Samara and AZLK-2141). Past the
+ * knee the regulator passes the rear brakes only a share of each further rise.
  *
- * Discs at the front, drums at the back, and no proportioning valve to keep them
- * honest under load transfer.
+ * Discs at the front, drums at the back. The figure itself is not sourced per car:
+ * one split for the catalogue.
  *
  * It was 0.62 — more torque to the axle that UNLOADS under braking — which made the
  * rears run out first and the car try to swap ends. That is a real period failure
@@ -980,9 +986,11 @@ export const FOOT_BRAKE_GRIP_RATIO = 0.97;
  * braking at 0.8 g moves about 17% of the car's weight forward regardless, so the
  * front runs at ~65% of the load while being asked for 58% of the torque. The front
  * gains grip exactly when it is asked to do more work, so deceleration rises and the
- * nose dives properly. The rears still lock first — 42% of the torque on an axle
- * carrying a third of the weight is still more than its share — just no longer a
- * foregone conclusion.
+ * nose dives properly. Without a regulator the rears still lock first — 42% of the
+ * torque on an axle carrying a third of the weight is still more than its share — just
+ * no longer a foregone conclusion. A front-driver's rear carries 38% standing, under
+ * this 42%, so its rear is over-braked at every deceleration until its regulator
+ * closes.
  */
 export const FOOT_BRAKE_REAR_BIAS = 0.42;
 /**
@@ -1079,6 +1087,38 @@ export const LOCK_SLIP_RATIO = -0.5;
  * uneven surfaces having stopped providing any thrill at speed.
  */
 export const WHEEL_LOAD_TAU = 0.025;
+/**
+ * Substeps of the wheel, carcass and driveline loop per 60 Hz fixed step
+ * (`Vehicle.updateWheelDynamics`): 4, so the loop runs at 240 Hz. The chassis is
+ * Rapier's and is held through them; it receives each tyre's force averaged over the
+ * substeps, as one impulse.
+ *
+ * What the loop integrates, and how fast it moves (VAZ-2101, GAZ-24, VAZ-2108 at
+ * the suite's load):
+ *
+ *   wheel against its tyre's slip stiffness   I·v / (Cx·r²): 4-7 ms at 100 km/h,
+ *                                             about 1 ms at 20, under 0.5 at a walk
+ *   carcass, longitudinal (`longitudinalRelaxationM`)  Lx / v: 8-12 ms at 100,
+ *                                             42-61 ms at 20, 78-113 ms at the floor
+ *   carcass, lateral (`TyreCurve.relaxationM`) Ly / v: 11-16 ms at 100, 56-81 at 20
+ *   wheel and carcass together                one mode at sqrt(Cx·r² / (I·Lx)), the
+ *                                             same at every speed: 18 Hz on the GAZ-24,
+ *                                             21 on the 2101, 27 on the 2108's front
+ *   fuel cut against the crank                I_crank · (150 rpm) / T_peak: ~30 ms
+ *   driveline lag (`drivelineLag`)            35-100 ms
+ *   clutch (drivetrain.ts)                    engage 0.12 s, launch 0.15 s, sync 0.12 s
+ *
+ * At 60 Hz the wheel-carcass mode had two to three steps a period: the implicit solve
+ * kept it stable but did not follow it, and a braked wheel could rest on the falling
+ * side of its force curve, where a real one either recovers or locks. Measured on the
+ * VAZ-2108's 100-0 stop: one front wheel held at 37-60% slip for 1.5 s, the other at
+ * 10%, and the car turned 12 degrees. At 240 Hz the mode has 9-13 substeps a period,
+ * and doubling to 480 Hz moves no suite figure by more than 0.3%, a stop's yaw and the
+ * distance of a stop that turns aside excepted: those are decided by which front wheel
+ * tips over its peak first. The wheel itself stays implicit: a millisecond is not a
+ * step anyone can afford.
+ */
+export const WHEEL_SUBSTEPS = 4;
 /**
  * THE SLIP THE LONGITUDINAL CURVE PEAKS AT IS A SURFACE PROPERTY, and it now lives in
  * `SurfaceProps.optimalSlip` rather than here. It used to be this one constant (0.12, a
@@ -1450,6 +1490,29 @@ export function unsprungMass(radius: number): number {
   const scale = radius / TYRE_RATE_REFERENCE_RADIUS;
   return UNSPRUNG_MASS_KG * scale * scale;
 }
+
+/**
+ * A BEAM AXLE's roll inertia about its own centre, as a share of what its mass would
+ * have if it all sat at the two wheels: `J = BEAM_AXLE_GYRATION_SQ · m · (track / 2)²`,
+ * `m` the two corners' unsprung mass together.
+ *
+ * It is the number that makes a beam a beam in the hop layer. At 1 the two ends of the
+ * axle are dynamically independent — an impulse under one wheel moves only that wheel
+ * — and the beam is two quarter-cars. A live axle carries its final drive in the
+ * middle and its tubes and half-shafts along its length, so its radius of gyration is
+ * short of the half-track: lift one end sharply and the axle pivots about a point
+ * inside the other wheel, pressing that tyre into the road before the roll mode
+ * carries it up.
+ *
+ * The Zhiguli's rear axle is 52 kg assembled without its wheels and 1.40 m long (the
+ * VAZ-2101-07 axle, bumper.guru and the VAZ parts tables), on two 13-inch wheels of
+ * about 13.5 kg. Its brake drums (~5 kg each) and the wheels at the ends, the final
+ * drive (~16 kg, an estimate) at the centre and the remaining ~26 kg of banjo, tubes
+ * and shafts spread along the 1.40 m give `J ≈ 20 kg·m²` against `m (t/2)² ≈ 33` at its
+ * 1.30 m track: 0.6, and within 0.03 of it for any split of the centre mass from 10 to
+ * 20 kg. The UAZ's and the Volga's axles are the same arrangement.
+ */
+export const BEAM_AXLE_GYRATION_SQ = 0.6;
 
 /**
  * Progressive bump stop, in place of Rapier's rigid travel clamp.

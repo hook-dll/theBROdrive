@@ -298,13 +298,14 @@ function fillerReservoir(car: CarState, stats: CarStats): Reservoir | null {
 
 /**
  * Whether a kit car's lid over a compartment is open: the bonnet, or the boot lid or
- * tailgate, whichever the body has. Null for a car with no rig, whose grids open on F.
+ * tailgate (either leaf of a split one), whichever the body has. Null for a car with no
+ * rig, whose grids open on F.
  */
 function lidOpen(rig: KitRig | null, side: StorageSide): boolean | null {
   if (!rig) return null;
   return side === 'bonnet'
     ? rig.get('bonnet') > LID_OPEN
-    : rig.get('boot') > LID_OPEN || rig.get('tailgate') > LID_OPEN;
+    : rig.get('boot') > LID_OPEN || rig.get('tailgate') > LID_OPEN || rig.get('tailgate_l') > LID_OPEN || rig.get('tailgate_r') > LID_OPEN;
 }
 
 /**
@@ -418,10 +419,10 @@ const KIT_VEHICLE_CHANNELS: Readonly<Record<string, true>> = {
 };
 
 /** The shell's own panels (doors, lids, flap): outside parts, not cabin fittings. */
-const KIT_SHELL_PART = /^(door_|bonnet$|boot$|tailgate$|flap$)/;
+const KIT_SHELL_PART = /^(door_|bonnet$|boot$|tailgate(_[lr])?$|flap$)/;
 
 /** Lids opened only from outside: from a seat they are not offered. */
-const KIT_LID_PART = /^(bonnet|boot|tailgate)$/;
+const KIT_LID_PART = /^(bonnet|boot|tailgate(_[lr])?)$/;
 
 /**
  * Parts worked only through their own control: a door's pane by its crank
@@ -447,7 +448,7 @@ const KIT_SEAT_PART = /^(?:seat|seatback|headrest)_/;
 const KIT_PANEL_SOUND: readonly (readonly [RegExp, FoleyEvent, FoleyEvent])[] = [
   [/^door_/, 'door-open', 'door-close'],
   [/^bonnet$/, 'bonnet-open', 'bonnet-shut'],
-  [/^(boot|tailgate)$/, 'boot-open', 'boot-shut'],
+  [/^(boot|tailgate(_[lr])?)$/, 'boot-open', 'boot-shut'],
 ];
 /** A shutting panel is heard landing once its pose is this close to closed (0..1). */
 const PANEL_SHUT_AT = 0.02;

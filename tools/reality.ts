@@ -36,21 +36,19 @@
 
 import { installAssetShim } from './assetshim';
 import { installDocumentShim } from './domshim';
-import { FIXED_DT, type PhysicsWorld } from '../src/core/physics';
 import { SurfaceType } from '../src/core/surfaces';
-import { CAR_MODELS, carModel, modelEngine, modelGearbox } from '../src/vehicle/carmodels';
+import { CAR_MODELS, carModel } from '../src/vehicle/carmodels';
 import { carModelMeasure, preloadCarModels } from '../src/render/carmodel';
 import { createPartMesh } from '../src/render/partmesh';
 import { variantsOfKind } from '../src/parts/registry';
-import { engineTorqueNm, fullThrottleUpshiftDue } from '../src/vehicle/drivetrain';
+import { engineTorqueNm } from '../src/vehicle/drivetrain';
 import {
+  addLongGround,
   benchOne,
   brakeDistanceOn,
-  drive,
-  driveUntil,
   makeRig,
+  manualSprint,
   measureTopSpeed,
-  type Rig,
 } from './handling-bench';
 
 installAssetShim();
@@ -71,8 +69,6 @@ const TOLERANCE = {
  * and has to be looked at and re-accepted, not absorbed.
  */
 const KNOWN_DRIFT = 0.03;
-/** Seconds of full throttle against the brake before a 0-100's clock starts. */
-const PRE_REV_S = 0.6;
 
 /** A 0-100 deviation the owner has accepted: its cause and its size when accepted. */
 interface KnownDeviation {
@@ -595,88 +591,6 @@ function newtonMetres(torque: MakerTorque): number {
   return torque.lbft * 1.3558179483;
 }
 
-/** A 20 km square of asphalt: a Volga needs several kilometres to settle at its top. */
-function addLongGround(physics: PhysicsWorld): void {
-  physics.addHeightfield(
-    1,
-    1,
-    new Float32Array(4),
-    { x: 20000, y: 1, z: 20000 },
-    { x: 0, y: 0, z: 0 },
-    SurfaceType.Asphalt,
-  );
-}
-
-/** Mean rolling radius of the axle that drives, as `Vehicle` computes it. */
-function drivenRadiusOf(modelId: string): number {
-  const wheels = carModelMeasure(modelId).wheels;
-  const rearDriven = carModel(modelId).rearDriveBias >= 0.5;
-  const driven = wheels.filter((w) => w.isFront !== rearDriven);
-  return driven.reduce((sum, w) => sum + w.radius, 0) / driven.length;
-}
-
-/**
- * 0-100 km/h through a manual box driven the way a factory test driver drives it:
- * first gear engaged before the clock starts, the revs raised against the brake, then
- * full throttle, and each change made at the power-optimal point
- * (`fullThrottleUpshiftDue`, the same definition the automatic uses at wide-open
- * throttle) — decided on the crank speed the road speed implies in the engaged gear,
- * so a free-revving crank mid-change cannot trigger a second one.
- *
- * The revs are raised first because a test driver does not let the clutch up at idle:
- * the crank's own inertia takes a third of a second of full torque to spin up from
- * idle to the bite (vehicle/drivetrain.ts), and no 0-100 was ever measured that way.
- */
-function manualZeroToHundred(rig: Rig, modelId: string): number | null {
-  const engine = modelEngine(carModel(modelId));
-  const gearbox = modelGearbox(carModel(modelId));
-  const radius = drivenRadiusOf(modelId);
-  // A settings delta, never a field write: a fresh world shares DEFAULT_SETTINGS by
-  // reference, and mutating it would put every later rig in manual too.
-  rig.world.apply({
-    t: 'settings',
-    settings: { ...rig.world.state.settings, gearboxMode: 'manual' },
-  });
-
-  // Select first and let the change complete, on the brake; then the revs up against it.
-  drive(rig, gearbox.shiftTime + 0.3, (t, f) => {
-    f.shift = t === 0 ? 1 : 0;
-    f.brake = 1;
-    f.throttle = 0;
-  });
-  if (rig.vehicle.gearLabel !== '1') throw new Error(`${modelId}: could not select first gear`);
-  drive(rig, PRE_REV_S, (_, f) => {
-    f.brake = 1;
-    f.throttle = 1;
-  });
-
-  let reached: number | null = null;
-  let t = 0;
-  driveUntil(
-    rig,
-    60,
-    (_, f) => {
-      f.brake = 0;
-      f.throttle = 1;
-      f.steer = 0;
-      f.shift = 0;
-      const gear = Number(rig.vehicle.gearLabel);
-      if (gear >= 1 && gear < gearbox.ratios.length) {
-        const ratio = gearbox.ratios[gear - 1]!;
-        const wheelRad = Math.abs(rig.vehicle.audio.forwardMps) / radius;
-        const rpm = (wheelRad * ratio * gearbox.finalDrive * 60) / (2 * Math.PI);
-        if (fullThrottleUpshiftDue(engine, rpm, ratio, gearbox.ratios[gear]!)) f.shift = 1;
-      }
-    },
-    () => {
-      t += FIXED_DT;
-      if (rig.vehicle.speedKmh >= 100) reached = t;
-      return reached !== null;
-    },
-  );
-  return reached;
-}
-
 /** `value` against `target` as a signed fraction, or null when there is no target. */
 function deviation(value: number | null, target: number | null): number | null {
   if (value === null || target === null || target === 0) return null;
@@ -853,7 +767,7 @@ for (const id of ids) {
 
   const accelRig = await makeRig(id);
   accelRig.vehicle.setCarriedMass(real.loadKg);
-  const to100 = manualZeroToHundred(accelRig, id);
+  const to100 = manualSprint(accelRig, id, [100])[0] ?? null;
   accelRig.vehicle.dispose();
   if (to100 === null && real.to100 !== null) {
     failures++;

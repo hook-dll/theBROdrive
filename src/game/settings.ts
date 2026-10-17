@@ -872,10 +872,6 @@ export function sanitizeSettings(raw: unknown, mobilePresentation: boolean): Set
     typeof obj.mouseSensitivity === 'number' && Number.isFinite(obj.mouseSensitivity)
       ? obj.mouseSensitivity
       : DEFAULT_MOUSE_SENSITIVITY;
-  const fieldOfViewRaw =
-    typeof obj.fieldOfView === 'number' && Number.isFinite(obj.fieldOfView)
-      ? obj.fieldOfView
-      : DEFAULT_FIELD_OF_VIEW;
   // Anything unrecognised is standard, so an old save (which has no such field)
   // keeps the look it was made with.
   const graphicsQuality: GraphicsQuality =
@@ -953,11 +949,9 @@ export function sanitizeSettings(raw: unknown, mobilePresentation: boolean): Set
     renderHeight: RENDER_HEIGHTS.find((height) => height === obj.renderHeight)
       ?? renderHeightDefault(graphicsQuality, mobilePresentation),
     retroLines: retroLinesFrom(obj.retroLines),
-    // Whole degrees: the slider steps in ones, and a stored 64.7 would paint as 65 and
-    // then render as something else.
-    fieldOfView: Math.round(
-      Math.min(FIELD_OF_VIEW_MAX, Math.max(FIELD_OF_VIEW_MIN, fieldOfViewRaw)),
-    ),
+    // Not a player setting any more (no slider): a save's old value is dropped so
+    // every player gets the authored view.
+    fieldOfView: DEFAULT_FIELD_OF_VIEW,
     // A save's `viewDistance` is DELIBERATELY DROPPED rather than migrated. The horizon
     // is a property of the CPU level now, and the two ladders do not line up: an old
     // save asking for `vast` on `acceptable` was a combination that should never have
