@@ -28,10 +28,9 @@ export interface KitMotion {
   readonly channel: string;
   /**
    * `rot` turns about `axis`, `pos` slides along it. `sink` is a drop pane winding down
-   * into its door (`SinkingPane`): `axis` is unused and `amount` is the share of the
-   * pane's height it travels at a channel value of 1.
+   * into its door. `visible` gates an indicator face without moving it.
    */
-  readonly kind: 'rot' | 'pos' | 'sink';
+  readonly kind: 'rot' | 'pos' | 'sink' | 'visible';
   /** Axis in the node's parent frame. */
   readonly axis: readonly [number, number, number];
   /** Radians or metres per unit of channel value; for `sink`, a share of the height. */
@@ -524,6 +523,8 @@ export class KitRig {
       } else if (d.motion.kind === 'sink') {
         for (const pane of d.panes) pane.pose(d.motion.amount * v);
         if (v === 0) for (const child of d.node.children) if (!this.isPane(d, child)) child.scale.setScalar(1);
+      } else if (d.motion.kind === 'visible') {
+        d.node.visible = v > 0.5;
       } else {
         d.node.position.copy(d.restPosition).addScaledVector(d.axis, d.motion.amount * v);
       }
