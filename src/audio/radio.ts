@@ -122,6 +122,11 @@ export class Radio {
     return this.stations[this.stationIndex]!;
   }
 
+  /** The preset playing, counted from 1, whether or not it is switched on. */
+  get stationNumber(): number {
+    return this.stationIndex + 1;
+  }
+
   /** Applies the two URLs configured in Settings to this car's radio. */
   setStationUrls(urls: readonly string[]): void {
     const next = urls.slice(0, 2).map((rawUrl, index) => {

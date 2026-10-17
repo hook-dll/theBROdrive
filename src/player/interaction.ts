@@ -432,6 +432,8 @@ const KIT_LID_PART = /^(bonnet|boot|tailgate)$/;
  */
 const KIT_PANE_PART = /^window_/;
 const KIT_WIPER_ARM = /^wiper_\d+$/;
+/** The door mirrors' heads (carkit/exterior.ts `sideMirrorControl`): a front seat's, through any glass. */
+const KIT_SIDE_MIRROR = /^mirror_[lr]$/;
 
 /** A front seat's parts, by the channel's position; the rear bench is `KIT_BENCH_NODE`. */
 const KIT_FRONT_SEAT = /^(?:seat|seatback|headrest)_(f[lr])$/;
@@ -596,6 +598,8 @@ export class Interaction {
   private kitAim: { vehicle: Vehicle; rig: KitRig; control: KitControl } | null = null;
   /** Last tick's aim named a kit part, so E belongs to it; see `claimsUseHeld`. */
   private kitClaimsE = false;
+  /** A seated press main.ts answers; see `takeCabinPress`. */
+  private cabinPress: 'hazard' | 'radio' | null = null;
   /** Panels set swinging shut, slammed by `listenForShut` as each lands. */
   private readonly shutting: { rig: KitRig; channel: string; sound: FoleyEvent; left: number }[] = [];
   /** This tick's car-to-car bar action, or null; see `towAction`. */
@@ -669,6 +673,16 @@ export class Interaction {
     return this.kitClaimsE || this.kitAim !== null;
   }
 
+  /**
+   * The hazard button or the radio knob worked from the seat since the last call, once:
+   * main.ts cycles the hazards with the autopilot and steps the car's radio.
+   */
+  takeCabinPress(): 'hazard' | 'radio' | null {
+    const press = this.cabinPress;
+    this.cabinPress = null;
+    return press;
+  }
+
   /** The part the mouse turns this frame instead of the view (main.ts), or null. */
   get aimingKit(): { readonly rig: KitRig; readonly control: KitControl } | null {
     return this.kitAim;
@@ -732,8 +746,8 @@ export class Interaction {
       const active = this.getVehicle();
       const rig = active?.vehicle.kit ?? null;
       let aimed: KitPicked | null = null;
-      // Another seat in the aim, from the cabin view in a car at a standstill: F moves
-      // the occupant into it (over the tunnel, between the seats) instead of out.
+      // Another seat in the aim, from the cabin view, at any speed: F moves the occupant
+      // into it (over the tunnel, between the seats) instead of out.
       let seat: PlayerSeat | null = null;
       if (active && rig) {
         aimed = this.seatedKitPart(active.vehicle, eyeX, eyeY, eyeZ, dirX, dirY, dirZ, cabinView);
@@ -742,7 +756,7 @@ export class Interaction {
           if (useHeldPressed) this.workKitPart(active.vehicle, rig, aimed.control);
         }
         const other = this.kitAimed.seat;
-        if (cabinView && other !== null && other !== this.world.state.player.seat && active.vehicle.speedKmh < EXIT_SPEED_LIMIT_KMH) {
+        if (cabinView && other !== null && other !== this.world.state.player.seat) {
           seat = other;
         }
       }
@@ -1644,6 +1658,24 @@ export class Interaction {
     this.raycaster.far = far;
     this.hits.length = 0;
     this.raycaster.intersectObject(root, true, this.hits);
+    const frontSeat = seated && (this.world.state.player.seat === 'driver' || this.world.state.player.seat === 'passenger');
+    // A door mirror is reached from a front seat through whatever glass is in the way,
+    // shut or not: the door's drop pane, a vent window, the screen. The first surface
+    // that is not glass decides whether it is the mirror.
+    if (frontSeat) {
+      for (const hit of this.hits) {
+        if (!(hit.object as THREE.Mesh).isMesh || !shownUnder(hit.object, root) || isGlassHit(hit)) continue;
+        const picked = KitRig.controlOf(hit.object);
+        if (picked && KIT_SIDE_MIRROR.test(picked.control.id)) {
+          aim.part = picked;
+          aim.distance = hit.distance;
+          aim.throughGlass = true;
+          this.hits.length = 0;
+          return true;
+        }
+        break;
+      }
+    }
     let found = false;
     for (const hit of this.hits) {
       if (!(hit.object as THREE.Mesh).isMesh || !shownUnder(hit.object, root)) continue;
@@ -1666,6 +1698,7 @@ export class Interaction {
         && !KIT_WIPER_ARM.test(picked.node.name)
         && !KIT_VEHICLE_CHANNELS[kitAction(picked.control).channel]
         && !KIT_SEAT_PART.test(picked.control.id)
+        && (frontSeat || !KIT_SIDE_MIRROR.test(picked.control.id))
         && (seated ? !KIT_LID_PART.test(picked.control.id) : KIT_SHELL_PART.test(picked.control.id))
       ) {
         aim.part = picked;
@@ -1695,12 +1728,9 @@ export class Interaction {
   }
 
   /**
-   * The part the seated player aims at through the drawing camera, or null. Away from
-   * the cabin view (the chase) only the side doors are offered, and the
-   * shell's panels only below the exit speed: the chase camera looks at the car all the
-   * time, and nobody opens a door at speed. So at speed nothing can be offered outside
-   * the cabin view or with the camera outside the car's measured box, and the ray is not
-   * cast at all. It reaches from the camera across the car and no further.
+   * The part the seated player aims at through the drawing camera, or null, at any
+   * speed. Away from the cabin view (the chase) only the side doors are offered. The ray
+   * reaches from the camera across the car and no further.
    */
   private seatedKitPart(
     vehicle: Vehicle,
@@ -1714,19 +1744,10 @@ export class Interaction {
   ): KitPicked | null {
     const t = vehicle.chassis.translation(this.tScratch);
     const half = vehicle.modelMeasure.halfExtents;
-    const moving = vehicle.speedKmh >= EXIT_SPEED_LIMIT_KMH;
-    if (moving) {
-      if (!cabinView) return null;
-      vehicle.chassis.rotation(this.qScratch);
-      const local = this.vScratch.set(eyeX - t.x, eyeY - t.y, eyeZ - t.z)
-        .applyQuaternion(this.qBody.copy(this.qScratch).invert());
-      if (Math.abs(local.x) > half[0] || Math.abs(local.y) > half[1] || Math.abs(local.z) > half[2]) return null;
-    }
     const reach = Math.hypot(t.x - eyeX, t.y - eyeY, t.z - eyeZ) + Math.hypot(half[0], half[1], half[2]);
     if (!this.aimKit(vehicle, eyeX, eyeY, eyeZ, dirX, dirY, dirZ, reach, true)) return null;
     const part = this.kitAimed.part;
     if (part && !cabinView && !part.control.id.startsWith('door_')) return null;
-    if (part && moving && KIT_SHELL_PART.test(part.control.id)) return null;
     return part;
   }
 
@@ -1844,9 +1865,10 @@ export class Interaction {
   /**
    * Works a kit part as a click does in the car lab, except the lamp switches: those
    * channels follow the car's own lamps every frame, so the switch works the lamps (the
-   * beam, the hazards, the indicators) and the rig shows it. A momentary part (the
-   * horn) is held down for `KIT_PRESS_SECONDS`. A door, the bonnet or the boot sounds
-   * its latch as it opens; its slam waits until it lands shut (`listenForShut`).
+   * beam, the indicators) and the rig shows it. The hazard button and the radio knob are
+   * handed to the composition root (`takeCabinPress`). A momentary part (the horn) is
+   * held down for `KIT_PRESS_SECONDS`. A door, the bonnet or the boot sounds its latch as
+   * it opens; its slam waits until it lands shut (`listenForShut`).
    */
   private workKitPart(vehicle: Vehicle, rig: KitRig, control: KitControl): void {
     const action = kitAction(control);
@@ -1857,8 +1879,11 @@ export class Interaction {
     this.sound = 'mount';
     if (action.channel === 'lights') {
       vehicle.cycleHeadlights();
-    } else if (action.channel === 'hazard') {
-      vehicle.setIndicator(vehicle.indicator === 'hazard' ? 'off' : 'hazard');
+    } else if (action.channel === 'hazard' || action.channel === 'radio') {
+      // The hazard button and the radio knob work what the composition root owns (the
+      // autopilot and the car's radio stream); it takes the press (`takeCabinPress`)
+      // and the rig shows the result.
+      this.cabinPress = action.channel;
     } else if (action.channel === 'blinker') {
       const now = vehicle.indicator;
       vehicle.setIndicator(now === 'left' ? 'right' : now === 'right' ? 'off' : 'left');

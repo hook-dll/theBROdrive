@@ -7,6 +7,14 @@ import type { CarPaint } from '../vehicle/carpaint';
 import { DEFAULT_SETTINGS } from './settings';
 import { localSolarDateAt } from './calendar';
 import type { Settings } from './settings';
+import type { KitMirror } from '../carkit/names';
+
+/** Where a car's state keeps each mirror's hand-set aim (`car_mirror`). */
+export const MIRROR_FIELD = {
+  inner: 'innerMirror',
+  left: 'leftMirror',
+  right: 'rightMirror',
+} as const satisfies Readonly<Record<KitMirror, string>>;
 
 /**
  * Authoritative, serialisable game state, plus the single API for mutating it.
@@ -74,6 +82,9 @@ export interface CarState {
    * `mirror_pitch`, radians off the built aim). Absent: never touched.
    */
   innerMirror?: readonly [number, number];
+  /** The door mirrors' hand-set aims (carkit `mirror_l_*`, `mirror_r_*`), as `innerMirror`. */
+  leftMirror?: readonly [number, number];
+  rightMirror?: readonly [number, number];
   fuelLitres: number;
   /**
    * Water in the radiator and oil in the engine, litres.
@@ -323,7 +334,7 @@ export type WorldDelta =
   /** The fitted air filter's wear, written by the driving car (vehicle/airfilter.ts). */
   | { t: 'car_air_filter'; carId: string; clog: number }
   | { t: 'car_lights'; carId: string; headlightMode: HeadlightMode; taillightsOn: boolean; reverseLightsOn: boolean }
-  | { t: 'car_mirror'; carId: string; yaw: number; pitch: number }
+  | { t: 'car_mirror'; carId: string; mirror: KitMirror; yaw: number; pitch: number }
   | { t: 'car_body_condition'; carId: string; dirt: number; scratches: number }
   | { t: 'car_paint'; carId: string; paint: CarPaint }
   | { t: 'car_bonnet'; carId: string; cell: number; item: Item | null }
@@ -636,7 +647,7 @@ export class GameWorld {
       }
       case 'car_mirror': {
         const car = s.cars[delta.carId];
-        if (car) car.innerMirror = [delta.yaw, delta.pitch];
+        if (car) car[MIRROR_FIELD[delta.mirror]] = [delta.yaw, delta.pitch];
         break;
       }
       case 'car_body_condition': {

@@ -2274,6 +2274,7 @@ export class Autopilot {
    */
   private automaticLightsOwned = true;
   private controlledVehicle: Vehicle | null = null;
+  private hazardsHeld = false;
   private readonly dynamicProximityShape: RAPIER.Ball | null;
   private readonly identityRotation = { x: 0, y: 0, z: 0, w: 1 };
   private readonly position = { x: 0, y: 0, z: 0 };
@@ -3026,8 +3027,20 @@ export class Autopilot {
     this.setEngaged(this.engagedValue);
   }
 
+  /**
+   * The hazard button's mandate (the cabin's hazard cycle, main.ts): while held, every
+   * indicator this controller would show is the hazards instead. Dropped with the
+   * engagement, so taking the car back always puts the hazards out with the autopilot.
+   */
+  setHazards(on: boolean): void {
+    this.hazardsHeld = on;
+  }
+
   setEngaged(engaged: boolean): void {
-    if (!engaged) this.controlledVehicle?.setIndicator('off');
+    // Only a real disengagement puts the lamps out: callers re-assert "off" every step
+    // for a passenger, whose own hazards must survive it.
+    if (!engaged && this.engagedValue) this.controlledVehicle?.setIndicator('off');
+    if (!engaged) this.hazardsHeld = false;
     this.engagedValue = engaged;
     // A fresh engagement is a fresh mandate: the automation drives the lamps again
     // until the driver takes the switch back.
@@ -3245,7 +3258,7 @@ export class Autopilot {
     }
     // Parked is parked: the lever goes on, as it does for a car waiting out the dust.
     out.handbrake = targetSpeed < HOLD_TARGET_MPS && speed < SHELTER_PARK_MPS;
-    vehicle.setIndicator(course.indicator);
+    vehicle.setIndicator(this.hazardsHeld ? 'hazard' : course.indicator);
 
     this.racerThrottle = out.throttle;
     this.planLine = line;
@@ -5086,7 +5099,7 @@ export class Autopilot {
     const threshold = indicatorOn ? INDICATOR_RELEASE_M : INDICATOR_DEADBAND_M;
     // A car on its racing line is not changing lanes, however far it moves across; and
     // a racer tells nobody anything.
-    vehicle.setIndicator(
+    vehicle.setIndicator(this.hazardsHeld ? 'hazard' :
       this.shelteringValue
         ? 'hazard'
         : config.racer || this.racingActive || Math.abs(indicatorDelta) < threshold

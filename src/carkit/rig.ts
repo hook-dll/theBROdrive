@@ -99,6 +99,10 @@ const GEAR_GATE: Readonly<Record<number, readonly [number, number]>> = {
 };
 
 const BLINK_PERIOD_S = 2 / 3;
+/** Where the radio's needle stands along its band (0..1) off and on each preset. */
+const RADIO_TUNE_OFF = 0.05;
+const RADIO_TUNE_STATION_1 = 0.32;
+const RADIO_TUNE_STATION_2 = 0.74;
 
 interface Driven {
   readonly node: THREE.Object3D;
@@ -484,8 +488,10 @@ export class KitRig {
       sweep.target = sweep.value;
       this.wiperPhase = Math.acos(1 - 2 * sweep.value) / (Math.PI * 2);
     }
-    // A radio that is on shows it: the needle drifts along the band.
-    if (this.get('radio') > 0.5) this.set('radio_tune', 0.5 + 0.4 * Math.sin(this.time * 0.15));
+    // The radio's needle sits on the station the knob has picked (`radio` 0 off, 1 and
+    // 2 the two presets): a fixed frequency each, and back to the band's start when off.
+    const radio = Math.round(this.get('radio'));
+    this.set('radio_tune', radio === 1 ? RADIO_TUNE_STATION_1 : radio === 2 ? RADIO_TUNE_STATION_2 : RADIO_TUNE_OFF);
     // The instrument lighting is on whenever the light switch is: dipped or main beam.
     this.set('panel', this.get('lights') >= 1 ? 1 : 0);
 

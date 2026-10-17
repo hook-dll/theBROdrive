@@ -1776,7 +1776,7 @@ class Cabin {
     }));
   }
 
-  /** Radio: a dial with a needle drifting along the band, a power knob and a tuning knob. */
+  /** Radio: a dial with a needle standing on the picked preset, a power knob and a tuning knob. */
   private radio(): void {
     const [x, dy] = this.lay.radio;
     const m = this.fascia(x, this.belt + dy);
@@ -1794,7 +1794,7 @@ class Cabin {
       n.pop();
     }));
     const knobAt = m.at(-0.07, -0.008, 0.012);
-    fineDetail(this.hinge(this.group, ORIGIN, 'radio_knob', knobAt, { channel: 'radio', kind: 'rot', axis: m.n, amount: -0.6 }, { id: 'radio', label: 'Магнитола' }, (k) => {
+    fineDetail(this.hinge(this.group, ORIGIN, 'radio_knob', knobAt, { channel: 'radio', kind: 'rot', axis: m.n, amount: -0.45 }, { id: 'radio', label: 'Магнитола', action: { type: 'cycle', channel: 'radio', values: [0, 1, 2] } }, (k) => {
       k.push(m.matrix).color(COLOURS.black).cylinderZ('trim', [-0.07, -0.008, 0.017], 0.011, 0.005, 8);
       inlay(k.color(COLOURS.white), 'trim', [[-0.071, -0.006, 0.022], [-0.069, -0.006, 0.022], [-0.069, 0.001, 0.022], [-0.071, 0.001, 0.022]]);
       k.pop();

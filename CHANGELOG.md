@@ -4,6 +4,29 @@
 
 ### Added
 
+- CABIN CONTROLS AT ANY SPEED. Seated in a kit car, every fitting works standing or
+  driving: seat change (F on another seat), wipers, radio, doors, windows, glovebox,
+  ashtray, light switch, visors, dome lamp, hazard button. Before, `seatedKitPart`
+  (player/interaction.ts) cast no ray at all from outside the car's box and refused the
+  doors at 5 km/h and above, and F into another seat needed the same standstill;
+  stepping out still needs it.
+- The dash RADIO knob steps the car's radio as R does: station 1 → station 2 → off. Its
+  needle stands on a fixed frequency for each preset and rests at the band's start when
+  off (carkit/rig.ts `RADIO_TUNE_*`), where it used to drift along the band while on. The
+  knob was a dead visual toggle; the rig's `radio` channel is now 0/1/2 and follows the
+  car's real radio (`GameAudio.radioDial`).
+- The HAZARD button, from the driver's seat, steps hazards with the autopilot: hazards +
+  sleeper → hazards + hurried → hazards + frantic → both off. The autopilot keeps the
+  hazards on while it drives (`Autopilot.setHazards`, which beats its own lane-change
+  blinkers); anything that drops the autopilot (P to off, leaving the driver's seat) puts
+  them out with it. From another seat the button only switches the hazards (the
+  autopilot is the driver's). A passenger's hazards no longer go out every step either:
+  `Autopilot.setEngaged(false)` only clears the lamps on a real disengagement.
+- BOTH DOOR MIRRORS are adjustable (hold E on the head, move the mouse), from either
+  front seat only, through the closed door glass or vent window; from the rear they are
+  not offered. Their heads turn on new `mirror_l_*`/`mirror_r_*` channels, the live
+  mirror views follow, and the aims are kept per car (`leftMirror`/`rightMirror` beside
+  `innerMirror`, `car_mirror` now names the mirror) and saved.
 - A NEW KIT CAR: AZLK-2141 Moskvich (`src/carkit/azlk.ts` `BODY_2141`, `LOOK_2141`). The
   1986–1998 base liftback from the-blueprints.com's dimensioned four-view (5.714 mm/px from
   the drawn hubs) and Commons photos: a near-upright face of rectangular head lamps and a

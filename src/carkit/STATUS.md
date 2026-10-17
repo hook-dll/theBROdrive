@@ -25,7 +25,11 @@ fully interactive interior, eventually replacing the pack bodies in the world.
 - Doors, bonnet, boot/tailgate and fuel flap open.
 - Live controls: wheel, pedals, gear lever, handbrake, needles, stalks, wipers.
 - Clickable fittings: lights, indicators, hazards, horn, window cranks, quarter lights,
-  glovebox, sun visors, ashtray, radio, seats (slide, recline, head restraints).
+  glovebox, sun visors, ashtray, radio, seats (slide, recline, head restraints), the
+  inside mirror and both door mirrors (aimed by hand; the door mirrors from a front seat,
+  through the glass). In the game all of them work from the seat at any speed; the radio
+  knob steps station 1 → 2 → off with the needle on fixed frequencies, and the hazard
+  button steps hazards with the autopilot (sleeper → hurried → frantic → off).
 - The boot shows **empty**: items stay on the existing trunk grid. Later the bonnet grid
   gets rearranged: engine large and central, other parts at the sides.
 - Later: a cockpit view.

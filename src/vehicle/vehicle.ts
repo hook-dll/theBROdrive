@@ -22,7 +22,8 @@ import type { InputFrame } from '../core/input';
 import { MicroRelief, RoadTexture, SURFACES, SurfaceType, sinkageShare } from '../core/surfaces';
 import { hash01 } from '../core/rng';
 import { WorldOrigin, type Rebasable, type RebaseShift } from '../world/origin';
-import { DAY_LENGTH, type CarState, type GameWorld } from '../game/state';
+import { DAY_LENGTH, MIRROR_FIELD, type CarState, type GameWorld } from '../game/state';
+import type { KitMirror } from '../carkit/names';
 import {
   FUEL_RESERVE_FRACTION,
   OIL_LOSS_LPH,
@@ -223,6 +224,10 @@ import {
 } from './vehicletuning';
 import { VehicleLamps, type BeamGroup, type HeadlightMode, type IndicatorSide } from './vehiclelamps';
 import { weather, weatherGrip, weatherSoftness, windAt } from '../world/weather';
+
+const KIT_MIRRORS: readonly KitMirror[] = ['inner', 'left', 'right'];
+/** Each mirror's rig channel prefix: `<prefix>_yaw`, `<prefix>_pitch`. */
+const KIT_MIRROR_CHANNEL: Readonly<Record<KitMirror, string>> = { inner: 'mirror', left: 'mirror_l', right: 'mirror_r' };
 
 /**
  * Crossflow drag coefficient of a body's flank, on its measured side box (length ×
@@ -4026,15 +4031,20 @@ export class Vehicle implements Rebasable {
     return this.lamps.beamCount(group, shadowed);
   }
 
-  /** Saves the inside mirror's aim when the driver has turned it (kit `mirror_*`). */
+  /**
+   * Saves each mirror's aim the occupant has turned by hand: the inside mirror
+   * (kit `mirror_yaw`/`mirror_pitch`) and the door mirrors (`mirror_l_*`, `mirror_r_*`).
+   */
   storeMirrorAim(): void {
     const rig = this.kitRig;
     if (!rig) return;
-    const yaw = rig.get('mirror_yaw');
-    const pitch = rig.get('mirror_pitch');
-    const saved = this.car.innerMirror;
-    if (saved ? saved[0] === yaw && saved[1] === pitch : yaw === 0 && pitch === 0) return;
-    this.world.apply({ t: 'car_mirror', carId: this.car.id, yaw, pitch });
+    for (const mirror of KIT_MIRRORS) {
+      const yaw = rig.get(`${KIT_MIRROR_CHANNEL[mirror]}_yaw`);
+      const pitch = rig.get(`${KIT_MIRROR_CHANNEL[mirror]}_pitch`);
+      const saved = this.car[MIRROR_FIELD[mirror]];
+      if (saved ? saved[0] === yaw && saved[1] === pitch : yaw === 0 && pitch === 0) continue;
+      this.world.apply({ t: 'car_mirror', carId: this.car.id, mirror, yaw, pitch });
+    }
   }
 
   /**
@@ -5850,9 +5860,13 @@ export class Vehicle implements Rebasable {
       // carries the same name, and two writers would fight over it.
       this.kitRig = new KitRig(instance.body, false);
       if (previousKit) this.kitRig.adopt(previousKit);
-      else if (this.car.innerMirror) {
-        this.kitRig.set('mirror_yaw', this.car.innerMirror[0], true);
-        this.kitRig.set('mirror_pitch', this.car.innerMirror[1], true);
+      else {
+        for (const mirror of KIT_MIRRORS) {
+          const saved = this.car[MIRROR_FIELD[mirror]];
+          if (!saved) continue;
+          this.kitRig.set(`${KIT_MIRROR_CHANNEL[mirror]}_yaw`, saved[0], true);
+          this.kitRig.set(`${KIT_MIRROR_CHANNEL[mirror]}_pitch`, saved[1], true);
+        }
       }
       this.kitDome = instance.body.getObjectByName(KIT_DOME_LAMP_NODE) ?? null;
     } else {

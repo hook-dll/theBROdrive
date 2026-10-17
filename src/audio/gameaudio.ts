@@ -426,6 +426,12 @@ export class GameAudio {
     return station ? `radio — ${station.label}` : 'radio off';
   }
 
+  /** Where the car's radio knob stands: 0 off, 1 and 2 the two presets (carkit `radio`). */
+  radioDial(carId: string): number {
+    const radio = this.radios.get(carId);
+    return radio?.enabled ? radio.stationNumber : 0;
+  }
+
   /** HUD line for the active car's radio, or null outside a car. */
   get radioReadout(): string | null {
     return this.activeRadioId ? (this.radios.get(this.activeRadioId)?.readout ?? null) : null;

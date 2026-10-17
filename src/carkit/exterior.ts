@@ -17,6 +17,7 @@ import { addBuilt, addMirrorFace, mirrorFrame, pivotGroup, type KitContext } fro
 import { skinX, tubColumns, type BodyFrame, type KitHole } from './body';
 import { driverEyeAt } from './interior';
 import type { CornerLampPoint, FaceAnchor, FaceItem, FaceLook, FaceX, FaceY, Finish, LampRole, Span } from './spec';
+import type { KitControl } from './rig';
 
 const CHROME_TRIM = 0xb8bec3;
 const BLACK = 0x161718;
@@ -956,6 +957,19 @@ function buildCornerLamps(ctx: KitContext, body: PartBuilder): void {
   }
 }
 
+/**
+ * A door mirror's head, aimed by hand from a front seat through the door's glass:
+ * held, the mouse turns it (rig.ts `aim`), as the inside mirror (interior.ts
+ * `MIRROR_CONTROL`). `channel` is `mirror_l` or `mirror_r`.
+ */
+function sideMirrorControl(channel: string, side: number): KitControl {
+  return {
+    id: channel,
+    label: `Зеркало ${side > 0 ? 'левое' : 'правое'} (держите E и ведите мышью)`,
+    action: { type: 'aim', channel: `${channel}_pitch`, yaw: `${channel}_yaw`, limit: 0.25 },
+  };
+}
+
 /** Door hardware outside: handle, and a mirror on each front door, in `KitLook.brightwork`. */
 function buildDoorHardware(ctx: KitContext): void {
   const { frame, nodes } = ctx;
@@ -988,21 +1002,38 @@ function buildDoorHardware(ctx: KitContext): void {
     const mx = frame.sideX(ms, frame.station(ms).belt);
     const m = new PartBuilder().color(finish.color);
     m.boxFrom(finish.slot, [side > 0 ? mx - 0.01 : -mx - 0.07, my - 0.04, frame.z(ms) - 0.03], [side > 0 ? mx + 0.07 : -mx + 0.01, my - 0.02, frame.z(ms) + 0.03]);
-    m.push(mirrorFrame([side * (mx + 0.1), my + 0.02, frame.z(ms)], eye, [0, 0, -1]));
-    m.bevelBox(finish.slot, [0, 0, 0], [0.06, 0.045, 0.025], 0.015);
-    // The glass 3 mm proud of the head's face, which is cut under it; no back, it lies in the head.
-    m.cut([{ poly: ([[-0.05, -0.035], [0.05, -0.035], [0.05, 0.035], [-0.05, 0.035]] as const).map(([gx, gy]): Vec3 => {
-      const p = new THREE.Vector3(gx, gy, -0.025).applyMatrix4(m.matrix);
-      return [p.x, p.y, p.z];
-    }), reach: 0.0005 }]);
-    m.color(0x7a8a96).box('chrome', [0, 0, -0.026], [0.05, 0.035, 0.002], 0b101111);
     const holder = new THREE.Group();
     holder.name = `${owner}_mirror`;
-    // The live face 1.5 mm proud of the glass.
-    addMirrorFace(holder, m.matrix, door.pivot, [0.05, 0.035], -0.0295, side > 0 ? 'left' : 'right');
-    m.pop();
     addBuilt(holder, m, door.pivot, 'mirrors');
-    for (const mesh of holder.children) mesh.name = 'mirrors';
+    // The head turns on a ball at its centre, by hand from a front seat (rig.ts `aim`), as
+    // the inside mirror does: side to side about its own up, then up and down about its
+    // own across, from the built aim.
+    const h = new PartBuilder().color(finish.color);
+    const head = h.push(mirrorFrame([side * (mx + 0.1), my + 0.02, frame.z(ms)], eye, [0, 0, -1])).matrix.clone();
+    const e = head.elements;
+    const centre: Vec3 = [e[12]!, e[13]!, e[14]!];
+    const mirror = side > 0 ? 'left' : 'right';
+    const channel = `mirror_${side > 0 ? 'l' : 'r'}`;
+    const ball = pivotGroup(`${channel}_ball`, centre, { channel: `${channel}_yaw`, kind: 'rot', axis: [e[4]!, e[5]!, e[6]!], amount: 1 });
+    const pane = pivotGroup(channel, centre, { channel: `${channel}_pitch`, kind: 'rot', axis: [e[0]!, e[1]!, e[2]!], amount: 1 }, sideMirrorControl(channel, side));
+    ball.add(pane);
+    holder.add(ball);
+    ball.position.set(centre[0] - door.pivot[0], centre[1] - door.pivot[1], centre[2] - door.pivot[2]);
+    pane.position.set(0, 0, 0);
+    h.bevelBox(finish.slot, [0, 0, 0], [0.06, 0.045, 0.025], 0.015);
+    // The glass 3 mm proud of the head's face, which is cut under it; no back, it lies in the head.
+    h.cut([{ poly: ([[-0.05, -0.035], [0.05, -0.035], [0.05, 0.035], [-0.05, 0.035]] as const).map(([gx, gy]): Vec3 => {
+      const p = new THREE.Vector3(gx, gy, -0.025).applyMatrix4(h.matrix);
+      return [p.x, p.y, p.z];
+    }), reach: 0.0005 }]);
+    h.color(0x7a8a96).box('chrome', [0, 0, -0.026], [0.05, 0.035, 0.002], 0b101111);
+    // The live face 1.5 mm proud of the glass.
+    addMirrorFace(pane, h.matrix, centre, [0.05, 0.035], -0.0295, mirror);
+    h.pop();
+    addBuilt(pane, h, centre, 'mirrors');
+    holder.traverse((node) => {
+      if (node instanceof THREE.Mesh) node.name = 'mirrors';
+    });
     door.node.add(holder);
   }
 }

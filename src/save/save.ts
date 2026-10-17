@@ -1,6 +1,6 @@
 import { hash } from '../core/rng';
 import { parseCalendarEpoch } from '../game/calendar';
-import { DAY_LENGTH, newWorldState, PLAYER_SEATS, SAVE_VERSION, type PlayerSeat } from '../game/state';
+import { DAY_LENGTH, MIRROR_FIELD, newWorldState, PLAYER_SEATS, SAVE_VERSION, type PlayerSeat } from '../game/state';
 import type {
   CarState,
   HeadlightMode,
@@ -846,10 +846,13 @@ function migrateCar(raw: Record<string, unknown>, version: number): CarState {
   // The towed car's own field only; the tower carries no mirror. Whether the named
   // car exists is decided once the whole car set is known, in `fromSaveData`.
   if (typeof raw.towedBy === 'string' && raw.towedBy.length > 0) car.towedBy = raw.towedBy;
-  // The inside mirror's hand-set aim; anything malformed leaves the built aim.
-  const mirror = raw.innerMirror;
-  if (Array.isArray(mirror) && mirror.length === 2 && mirror.every((v) => typeof v === 'number' && Number.isFinite(v))) {
-    car.innerMirror = [mirror[0] as number, mirror[1] as number];
+  // The mirrors' hand-set aims (inside and door mirrors); anything malformed leaves the
+  // built aim.
+  for (const field of Object.values(MIRROR_FIELD)) {
+    const mirror = raw[field];
+    if (Array.isArray(mirror) && mirror.length === 2 && mirror.every((v) => typeof v === 'number' && Number.isFinite(v))) {
+      car[field] = [mirror[0] as number, mirror[1] as number];
+    }
   }
   return car;
 }

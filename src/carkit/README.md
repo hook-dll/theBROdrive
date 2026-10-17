@@ -532,9 +532,9 @@ does not move (a door's fixed `quarter_*` pane) is not a control.
 | Instruments | `speed` km/h, `rpm`, `fuel`, `temp` 0..1, `oil` kgf/cm², `volts` V, `vacuum` 0..1 |
 | Warning lamps | `tell_turn`, `tell_beam`, `tell_side`, `tell_fuel`, `tell_oil`, `tell_charge`, `tell_brake`, `tell_check` 0/1 |
 | Light and signals | `lights` 0/1/2 → `panel` (instrument lighting, on at 1 and 2), `blinker` −1/0/1, `hazard`, `horn`, `dome` (courtesy lamp) |
-| Wipers and radio | `wipers` 0/1/2 → `wiper_sweep`; `radio` → `radio_tune` |
+| Wipers and radio | `wipers` 0/1/2 → `wiper_sweep`; `radio` 0/1/2 (off, preset 1, preset 2; in the game it follows the car's radio) → `radio_tune` (a fixed needle position each) |
 | Body | `door_*`, `bonnet`, `boot`, `tailgate`, `flap`, `window_*`, `vent_*` |
-| Cabin | `glovebox`, `ashtray`, `visor_l/r`, `seat_*`, `seatback_*`, `headrest_*`, `mirror_yaw`/`mirror_pitch` (inside mirror, radians off its built aim, ±0.2; an `aim` control) |
+| Cabin | `glovebox`, `ashtray`, `visor_l/r`, `seat_*`, `seatback_*`, `headrest_*`, `mirror_yaw`/`mirror_pitch` (inside mirror, radians off its built aim, ±0.2; an `aim` control), `mirror_l_yaw`/`mirror_l_pitch` and `mirror_r_*` (door mirror heads, ±0.25; `aim` controls `mirror_l`/`mirror_r`, offered in the game to a front seat only, through the door glass) |
 
 In the lab the rig lights the lamps from the channels: low/high beam and tail lamps from
 `lights`, brake lamps from `brake`, reversing lamps from `gear < 0`, indicators from

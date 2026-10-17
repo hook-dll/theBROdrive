@@ -2020,9 +2020,37 @@ async function boot(): Promise<void> {
     // Seated, there is no capsule moving and the voice is silent by construction.
     audio.updateFoot(dt, driving ? 0 : player.groundSpeed, player.grounded, player.groundSurface);
 
-    // Radio: a car fitting, so the keys only do anything from the seat.
+    // Radio: a car fitting, so the key and the dash's knob only do anything from a seat.
+    // The knob and the key step the same radio (off → station 1 → station 2 → off), and
+    // the knob on the dash shows where it stands (its needle on the preset's frequency).
+    const cabinPress = interaction.takeCabinPress();
     if (driving) {
-      if (f.radioCycle) hud.setToast(audio.cycleRadio(drivingId!));
+      if (f.radioCycle || cabinPress === 'radio') hud.setToast(audio.cycleRadio(drivingId!));
+      driving.kit?.set('radio', audio.radioDial(drivingId!));
+      // The hazard button: from the driver's seat it steps the hazards with the autopilot,
+      // sleeper → hurried → frantic → off, the hazards on while it drives and out with it.
+      // Anything that drops the autopilot (P to off, leaving the seat) drops its hazards
+      // too (`Autopilot.setEngaged`). From another seat the autopilot is not the
+      // occupant's: the button only switches the hazards.
+      if (cabinPress === 'hazard') {
+        if (controlled) {
+          if (!autopilot.engaged) {
+            autopilot.setMode('sleeper');
+            autopilot.setEngaged(true);
+          } else if (autopilot.mode === 'sleeper') {
+            autopilot.setMode('hurried');
+          } else if (autopilot.mode === 'hurried') {
+            autopilot.setMode('frantic');
+          } else {
+            autopilot.setEngaged(false);
+          }
+          autopilot.setHazards(autopilot.engaged);
+          driving.setIndicator(autopilot.engaged ? 'hazard' : 'off');
+          hud.setToast(autopilot.engaged ? `hazards · autopilot: ${autopilot.mode}` : 'hazards off · autopilot off');
+        } else {
+          driving.setIndicator(driving.indicator === 'hazard' ? 'off' : 'hazard');
+        }
+      }
     }
 
     // Shooting: the held item decides. A kill only enters the inventory if it fits,
