@@ -4,6 +4,18 @@
 
 ### Added
 
+- KIT CAR DUST FLOW. Each kit car's paint and window dust now follows its own body's
+  airflow: a blunt nose (Niva, UAZ) takes a crust on the bumper and grille, a squareback's
+  base wake holds more dust on the tail, slab flanks catch crosswind dust between sill and
+  belt, a tall body throws more into its arches and a low one sprays its sills, and a
+  roof keeps or sheds its settled film. Six coefficients per kit row in
+  `vehicle/model-fits.json` (`dustFlow`, `CarDustFlow`), authored offline from the car's
+  existing `AeroSpec` and ground clearance by `tools/dust-flow.ts` (an approximation, not
+  CFD; `bun tools/dust-flow.ts` checks the rows and the shader path). They scale the
+  existing dust placement through chassis-space masks and face normals
+  (render/materials.ts `CAR_DUST_FLOW`); every other body gets the neutral flow and dusts
+  exactly as before. Uniforms only: no new program variant, no physics change.
+
 - JAPANESE TOILET POIS, FIRST FIVE (docs/toilet-poi-design.md, world/toilets). Low-poly
   readings of THE TOKYO TOILET (Ban, Kuma, NIGO®, Newson, Wonderwall), each with a source
   card, drawn from one parametric cabin shell (flat, gable or pyramid roof; battens,

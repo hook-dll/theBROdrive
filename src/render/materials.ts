@@ -14,6 +14,7 @@ import { applyComicShading } from './comic';
 import { SandColor } from './desertdust';
 import { stickerAtlas } from './stickerart';
 import { SPOT_REACH_ALL } from './lightshader';
+import type { CarDustFlow } from '../vehicle/carmodels';
 
 /** Per-instance uniforms for condition-shaded materials. */
 interface ConditionUniforms {
@@ -44,6 +45,8 @@ export interface CarBodyFrame {
   /** Wheel-centre height at rest. */
   readonly wheelCentreY: number;
   readonly wheelRadius: number;
+  /** The body's own airflow over that placement (`CarDustFlow`; neutral off the kit cars). */
+  readonly dustFlow: CarDustFlow;
 }
 
 interface CarBodyUniforms {
@@ -54,6 +57,9 @@ interface CarBodyUniforms {
   readonly bodyHalf: { value: THREE.Vector3 };
   /** Front axle Z, rear axle Z, wheel-centre Y, wheel radius. */
   readonly axles: { value: THREE.Vector4 };
+  /** `CarDustFlow` as ( front, roof, wake ) and ( wheel, under, side ): `CAR_DUST_FLOW`. */
+  readonly dustFlowA: { value: THREE.Vector3 };
+  readonly dustFlowB: { value: THREE.Vector3 };
   readonly palettePaint: { value: number };
   readonly paintColor: { value: THREE.Color };
   readonly paintCell: { value: THREE.Vector2 };
@@ -249,6 +255,51 @@ const CAR_BODY_VERTEX_HOOK = `#include <worldpos_vertex>
 vCarBodyPos = ${CAR_BODY_POSITION_ATTRIBUTE};`;
 
 /**
+ * The body's own airflow over the dust placement (vehicle/carmodels.ts `CarDustFlow`),
+ * shared by the paint's dirt (CAR_BODY_CONDITION) and the glass's (GLASS_GRIME_BODY) so
+ * a crust line still crosses a window where it crosses the door. The coefficients are
+ * offline-authored approximations from the model's aero figures (tools/dust-flow.ts),
+ * not a flow solution: a handful of masks over the chassis position and the
+ * chassis-frame face normal, scaling the placement's own terms.
+ *
+ * The normal is the stamped chassis position's screen-derivative cross product. The
+ * stamp is rigid with the body, so it turns with the car, faces the viewer (outward on
+ * a front face, the visible side on a double-sided skin) and needs no attribute. It is
+ * flat per triangle; every mask over it is a soft ramp. Called only under a uniform
+ * gate, so its derivatives are defined.
+ *
+ * Returns the scales of the low band, the arch fans and the tail in xyz, the exposure
+ * the nose and flanks add in w, and the upward film's scale in `roof`. All-zero
+ * coefficients (`NEUTRAL_DUST_FLOW`, every non-kit body) give ( 1, 1, 1, 0 ) and 1
+ * exactly, so the placement is the one without the flow, bit for bit.
+ */
+const CAR_DUST_FLOW = `uniform vec3 uCarDustFlowA;
+uniform vec3 uCarDustFlowB;
+vec4 carDustFlow( vec3 p, float height, float along, float forward, out float roof ) {
+  vec3 n = cross( dFdx( p ), dFdy( p ) );
+  n *= inversesqrt( max( dot( n, n ), 1e-20 ) );
+  float ahead = n.z * forward;
+  // FRONT: forward-looking nose faces below the belt (bumper, grille, valance).
+  float nose = smoothstep( 0.3, 0.8, ahead ) * smoothstep( 0.55, 0.9, along )
+    * ( 1.0 - smoothstep( 0.45, 0.7, height ) );
+  // SIDE: the flanks between the sill and the belt.
+  float flank = smoothstep( 0.5, 0.9, abs( n.x ) ) * smoothstep( 0.12, 0.3, height )
+    * ( 1.0 - smoothstep( 0.5, 0.75, height ) );
+  // ROOF: upward faces of the upper body (roof, bonnet and boot tops).
+  float top = smoothstep( 0.45, 0.85, n.y ) * smoothstep( 0.5, 0.8, height );
+  // WAKE weighs the tail's rear-facing base most; UNDER the low band's down-facing lips.
+  float base = mix( 0.4, 1.0, smoothstep( 0.2, 0.7, -ahead ) );
+  float floorward = mix( 0.6, 1.0, smoothstep( 0.0, 0.6, -n.y ) );
+  roof = 1.0 + uCarDustFlowA.y * top;
+  return vec4(
+    1.0 + uCarDustFlowB.y * floorward,
+    1.0 + uCarDustFlowB.x,
+    1.0 + uCarDustFlowA.z * base,
+    uCarDustFlowA.x * nose + uCarDustFlowB.z * flank
+  );
+}`;
+
+/**
  * Fragment declarations shared by everything that wears the car's dust: the paint
  * (`CAR_BODY_PARS`), the window glass (materials.ts GLASS_GRIME_*) and the sticker
  * decals (render/stickerdecals.ts), which reuse this block so a decal is dusted and
@@ -275,6 +326,7 @@ uniform vec3 uCarBodyHalf;
 uniform vec4 uCarAxles;
 varying vec3 vCarBodyPos;
 ${CONDITION_NOISE}
+${CAR_DUST_FLOW}
 float carArch( vec3 p, float axleZ, float forward ) {
   float ahead = ( p.z - axleZ ) * forward;
   vec2 d = vec2( p.y - uCarAxles.z, ahead * ( ahead < 0.0 ? 0.55 : 1.25 ) );
@@ -364,7 +416,9 @@ if ( uHighlight > 0.001 ) {
  * sills and valances, in a fan behind each wheel and across the tail (the wake of a
  * moving car holds a dust cloud against it), climbing the body as the level rises;
  * above that only a light film that settles more on the roof and bonnet. It is
- * matt, and it hides whatever paint and scratches are under it.
+ * matt, and it hides whatever paint and scratches are under it. The body's own
+ * airflow (`CAR_DUST_FLOW`) then scales those terms per model, and adds the nose and
+ * flank exposure a blunt or slab-sided body takes; neutral on every non-kit body.
  *
  * SCRATCHES are sparse fine streaks of paler, duller paint whose density follows
  * `uScratch`, weighted towards the nose and tail corners, the flanks at bumper to
@@ -424,7 +478,9 @@ if ( uDirt + uScratch > 0.0005 ) {
       carArch( carP, uCarAxles.y, carForward )
     ) * ( 0.35 + 0.65 * flank );
     float tail = smoothstep( 0.6, 0.97, -carAlong ) * ( 1.0 - 0.5 * carHeight );
-    float exposure = max( max( low, arch ), tail );
+    float carFlowRoof;
+    vec4 carFlow = carDustFlow( carP, carHeight, carAlong, carForward, carFlowRoof );
+    float exposure = max( max( max( low * carFlow.x, arch * carFlow.y ), tail * carFlow.z ), carFlow.w );
     float mottle = condNoise( carN * 2.4 );
     // Run-off streaks: long vertically, short across, on the lower body only.
     float drip = condNoise( vec3( carN.x * 6.0, carN.y * 0.8, carN.z * 6.0 ) );
@@ -434,7 +490,7 @@ if ( uDirt + uScratch > 0.0005 ) {
     crust = smoothstep( 0.1, 0.9, crust );
     // View-space normal back to world: settling dust only knows which way is up.
     float carUp = saturate( ( vec4( normal, 0.0 ) * viewMatrix ).y );
-    float film = uDirt * ( 0.22 + 0.33 * carUp ) * ( 0.65 + 0.7 * mottle );
+    float film = uDirt * ( 0.22 + 0.33 * carUp * carFlowRoof ) * ( 0.65 + 0.7 * mottle );
     float cover = saturate( max( crust, film ) );
     vec3 dust = mix( uDustLight, uDustCrust, crust );
     diffuseColor.rgb = mix( diffuseColor.rgb, dust, cover * ( 0.6 + 0.35 * crust ) );
@@ -545,6 +601,8 @@ function patchCarBodyShader(
   shader.uniforms.uCarFieldOrigin = uniforms.fieldOrigin;
   shader.uniforms.uCarBodyHalf = uniforms.bodyHalf;
   shader.uniforms.uCarAxles = uniforms.axles;
+  shader.uniforms.uCarDustFlowA = uniforms.dustFlowA;
+  shader.uniforms.uCarDustFlowB = uniforms.dustFlowB;
   shader.uniforms.uPalettePaint = uniforms.palettePaint;
   shader.uniforms.uPalettePaintColor = uniforms.paintColor;
   shader.uniforms.uPalettePaintCell = uniforms.paintCell;
@@ -787,6 +845,8 @@ function patchKitBodyShader(
   shader.uniforms.uCarFieldOrigin = uniforms.fieldOrigin;
   shader.uniforms.uCarBodyHalf = uniforms.bodyHalf;
   shader.uniforms.uCarAxles = uniforms.axles;
+  shader.uniforms.uCarDustFlowA = uniforms.dustFlowA;
+  shader.uniforms.uCarDustFlowB = uniforms.dustFlowB;
   shader.uniforms.uPalettePaint = uniforms.palettePaint;
   shader.uniforms.uPalettePaintColor = uniforms.paintColor;
   shader.uniforms.uPalettePaintCell = uniforms.paintCell;
@@ -1255,6 +1315,8 @@ export function makeCarBodyConditionMaterial(
         frame.wheelRadius,
       ),
     },
+    dustFlowA: { value: new THREE.Vector3(frame.dustFlow.front, frame.dustFlow.roof, frame.dustFlow.wake) },
+    dustFlowB: { value: new THREE.Vector3(frame.dustFlow.wheel, frame.dustFlow.under, frame.dustFlow.side) },
     palettePaint: { value: 0 },
     paintColor: { value: new THREE.Color() },
     paintCell: { value: new THREE.Vector2() },
@@ -1368,6 +1430,8 @@ export function makeCarStickerMaterial(frame: CarGrimeFrame | null, opacity = 1)
       shader.uniforms.uCarFieldOrigin = frame.fieldOrigin;
       shader.uniforms.uCarBodyHalf = frame.bodyHalf;
       shader.uniforms.uCarAxles = frame.axles;
+      shader.uniforms.uCarDustFlowA = frame.dustFlowA;
+      shader.uniforms.uCarDustFlowB = frame.dustFlowB;
     }
     bindDesertDust(shader);
     shader.vertexShader = shader.vertexShader
@@ -1513,6 +1577,7 @@ uniform vec3 uCarBodyHalf;
 uniform vec4 uCarAxles;
 varying vec3 vCarBodyPos;
 ${CONDITION_NOISE}
+${CAR_DUST_FLOW}
 float glassArch( vec3 p, float axleZ, float forward ) {
   float ahead = ( p.z - axleZ ) * forward;
   vec2 d = vec2( p.y - uCarAxles.z, ahead * ( ahead < 0.0 ? 0.55 : 1.25 ) );
@@ -1539,7 +1604,9 @@ if ( uGrime > 0.0005 ) {
     glassArch( carP, uCarAxles.y, carForward )
   ) * ( 0.35 + 0.65 * flank );
   float tail = smoothstep( 0.6, 0.97, -carAlong ) * ( 1.0 - 0.5 * carHeight );
-  float exposure = max( max( low, arch ), tail );
+  float carFlowRoof;
+  vec4 carFlow = carDustFlow( carP, carHeight, carAlong, carForward, carFlowRoof );
+  float exposure = max( max( max( low * carFlow.x, arch * carFlow.y ), tail * carFlow.z ), carFlow.w );
   float mottle = condNoise( carN * 2.4 );
   float drip = condNoise( vec3( carN.x * 6.0, carN.y * 0.8, carN.z * 6.0 ) );
   float crust = uGrime * ( 0.15 + 1.5 * exposure )
@@ -1547,7 +1614,7 @@ if ( uGrime > 0.0005 ) {
     + ( drip - 0.5 ) * 0.35 * uGrime * low;
   crust = smoothstep( 0.1, 0.9, crust );
   float carUp = saturate( ( vec4( normal, 0.0 ) * viewMatrix ).y );
-  float film = 0.6 * uGrime * ( 0.22 + 0.33 * carUp ) * ( 0.65 + 0.7 * mottle );
+  float film = 0.6 * uGrime * ( 0.22 + 0.33 * carUp * carFlowRoof ) * ( 0.65 + 0.7 * mottle );
   grimeFilm = saturate( max( crust, film ) );
   vec3 dust = mix( uDustLight, uDustCrust, crust );
   diffuseColor.rgb = mix( diffuseColor.rgb, dust, grimeFilm * ( 0.6 + 0.35 * crust ) );
@@ -1596,6 +1663,8 @@ export interface CarGrimeFrame {
   readonly fieldOrigin: { value: THREE.Vector3 };
   readonly bodyHalf: { value: THREE.Vector3 };
   readonly axles: { value: THREE.Vector4 };
+  readonly dustFlowA: { value: THREE.Vector3 };
+  readonly dustFlowB: { value: THREE.Vector3 };
 }
 
 /** The chassis frame of a paint material made by `makeCarBodyConditionMaterial`. */
@@ -1656,6 +1725,8 @@ export function makeCarGrimeMaterial<T extends THREE.MeshStandardMaterial | THRE
       shader.uniforms.uCarFieldOrigin = frame.fieldOrigin;
       shader.uniforms.uCarBodyHalf = frame.bodyHalf;
       shader.uniforms.uCarAxles = frame.axles;
+      shader.uniforms.uCarDustFlowA = frame.dustFlowA;
+      shader.uniforms.uCarDustFlowB = frame.dustFlowB;
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', drops ? GLASS_GRIME_VERTEX_PARS + KIT_PANE_VERTEX_PARS : GLASS_GRIME_VERTEX_PARS)
         .replace('#include <worldpos_vertex>', drops ? GLASS_GRIME_VERTEX_HOOK + KIT_PANE_VERTEX : GLASS_GRIME_VERTEX_HOOK);

@@ -644,7 +644,55 @@ export interface CarModelFit {
   }[];
   readonly hoodPoint: readonly [number, number, number];
   readonly visualOffset: readonly [number, number, number];
+  /** Where the body's own airflow puts road dust on its paint: see `CarDustFlow`. Kit rows only. */
+  readonly dustFlow?: CarDustFlow;
 }
+
+/**
+ * How one body's own airflow places the road dust its paint and glass collect: six
+ * modulations of the dust placement in render/materials.ts (`CAR_DUST_FLOW`, read by
+ * CAR_BODY_CONDITION and GLASS_GRIME_BODY), each masked there by the fragment's chassis
+ * position and its chassis-frame face normal.
+ *
+ * OFFLINE-AUTHORED APPROXIMATIONS, NOT CFD. tools/dust-flow.ts derives every kit row's
+ * values from the body's `AeroSpec` and factory ground clearance (the same literature
+ * shape figures physics already uses), rounds them and writes them into model-fits.json
+ * beside the measured fit; `bun tools/dust-flow.ts` checks the file against it. Nothing
+ * here touches drag, lift or crosswind: the aero coefficients are only read.
+ *
+ *   front  0..1   dust driven onto nose faces that look forward, below the belt (the
+ *                 bumper, grille, valance): ADDED exposure. Blunt noses (high front lift).
+ *   roof  -1..1   how much of the settling film upward faces of the upper body keep (+)
+ *                 or shed (-). Rear lift is suction over the roof: attached, fast flow
+ *                 sweeps it; a squareback's separated roof trailing edge lets it settle.
+ *   wake  -1..1   the base wake's hold on the tail crust, most on rear-facing faces.
+ *                 Square rear flanks (centre of pressure aft) hold the biggest wake.
+ *   wheel -1..1   tyre throw into the arch fans: more for a tall body over open arches.
+ *   under -1..1   road spray on the low band (sills, valances), most on down-facing
+ *                 faces: more the closer the floor runs to the road.
+ *   side   0..1   crosswind dust on the flanks between sill and belt: ADDED exposure.
+ *                 Tall flat flanks (high side-force slope).
+ *
+ * All zero is the neutral flow: the paint dusts exactly as the placement alone puts it,
+ * which is what every body without its own row gets (`modelDustFlow`).
+ */
+export interface CarDustFlow {
+  readonly front: number;
+  readonly roof: number;
+  readonly wake: number;
+  readonly wheel: number;
+  readonly under: number;
+  readonly side: number;
+}
+
+/** The flow that changes nothing: the dust placement as authored. */
+export const NEUTRAL_DUST_FLOW: CarDustFlow = { front: 0, roof: 0, wake: 0, wheel: 0, under: 0, side: 0 };
+
+/** The dust flow a model's paint is shaded with: its kit row's, or neutral on any other body. */
+export function modelDustFlow(def: CarModelDef): CarDustFlow {
+  return def.kit !== undefined && def.fit.dustFlow ? def.fit.dustFlow : NEUTRAL_DUST_FLOW;
+}
+
 /** Stock exterior and running-gear dimensions, metres. */
 export interface FactoryGeometry {
   readonly length: number;

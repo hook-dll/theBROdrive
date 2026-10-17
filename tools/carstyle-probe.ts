@@ -40,6 +40,7 @@ import {
   makeUnifiedSurfaceMaterial,
   type CarBodyFrame,
 } from '../src/render/materials';
+import { NEUTRAL_DUST_FLOW } from '../src/vehicle/carmodels';
 
 installAssetShim();
 
@@ -80,6 +81,7 @@ const FRAME: CarBodyFrame = {
   rearAxleZ: -1.2,
   wheelCentreY: 0.3,
   wheelRadius: 0.3,
+  dustFlow: NEUTRAL_DUST_FLOW,
 };
 
 await preloadCarModels(['sv_vaz2101', 'gt_vaz2110']);

@@ -36,7 +36,7 @@ for (const id of ids) {
 }
 
 await preloadCarModels(ids);
-const fits = JSON.parse(readFileSync(FITS_PATH, 'utf8')) as Record<string, unknown>;
+const fits = JSON.parse(readFileSync(FITS_PATH, 'utf8')) as Record<string, Record<string, unknown> | undefined>;
 for (const id of ids) {
   const m = carModelMeasure(id);
   fits[id] = {
@@ -44,6 +44,8 @@ for (const id of ids) {
     wheels: m.wheels.map((w) => ({ id: w.id, pos: w.pos, radius: w.radius, isFront: w.isFront })),
     hoodPoint: m.hoodPoint,
     visualOffset: m.visualOffset,
+    // Authored from aero, not measured (tools/dust-flow.ts): a refit keeps it.
+    dustFlow: fits[id]?.dustFlow,
   };
   const [x, y, z] = m.halfExtents;
   console.log(`${id}: box ${(2 * x).toFixed(3)} x ${(2 * y).toFixed(3)} x ${(2 * z).toFixed(3)} m`);

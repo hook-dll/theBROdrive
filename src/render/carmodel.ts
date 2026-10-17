@@ -36,6 +36,7 @@ import { CarStickerDecals, type StickerDecalCarrier, type StickerDecalSurface } 
 import {
   CAR_MODELS,
   carModel,
+  modelDustFlow,
   type CarModelDef,
   type CarModelFit,
 } from '../vehicle/carmodels';
@@ -1586,6 +1587,8 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
     rearAxleZ: (rl!.pos[2] + rr!.pos[2]) * 0.5,
     wheelCentreY: wheels.reduce((sum, wheel) => sum + wheel.pos[1], 0) / wheels.length,
     wheelRadius: wheels.reduce((sum, wheel) => sum + wheel.radius, 0) / wheels.length,
+    // The kit row's authored airflow over the dust; neutral on every other body.
+    dustFlow: modelDustFlow(def),
   };
   return { def, measure, body: scene, wheels: parts.objects, frame, spare, kit };
 }

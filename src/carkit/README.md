@@ -176,7 +176,9 @@ Integration outside the folder:
   enable `KIT_PICK_LAYER`, so they meet the parts, never the merged meshes.
 - `car-lab.ts`: the kit cars in a grid, hover and click, the "КАБИНА" panel, LOD by
   distance (`KitRig.setDetail`: the cabin's fine detail within 6 m), `window.__carLab`.
-- `vehicle/model-fits.json`: a measured fit row for every kit car (`tools/fit-models.ts`).
+- `vehicle/model-fits.json`: a measured fit row for every kit car (`tools/fit-models.ts`),
+  with its `dustFlow` (`CarDustFlow`: how the body's airflow places dust on the paint and
+  glass), authored from the car's aero figures by `tools/dust-flow.ts --write`.
 
 ## How the body is built
 
@@ -728,10 +730,12 @@ new id with a bun script (no hand edits of the JSON), then measure it:
   const p = "src/vehicle/model-fits.json"; const f = JSON.parse(await Bun.file(p).text());
   f.kit_vaz2110 = f.kit_vaz21099; await Bun.write(p, JSON.stringify(f, null, 2) + "\n");'
 nice -n 15 ~/.bun/bin/bun tools/fit-models.ts kit_vaz2110
+~/.bun/bin/bun tools/dust-flow.ts --write
 ```
 
-Re-run `fit-models.ts` for every car whose shape changed. Stage the file as in
-[Working rules](#working-rules).
+Re-run `fit-models.ts` for every car whose shape changed (it keeps the row's `dustFlow`);
+re-run `dust-flow.ts --write` whenever a kit car's `aero` or factory clearance changes, and
+`bun tools/dust-flow.ts` must pass. Stage the file as in [Working rules](#working-rules).
 
 ### 6. Check
 

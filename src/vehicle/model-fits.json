@@ -1413,7 +1413,15 @@
       0,
       0,
       0
-    ]
+    ],
+    "dustFlow": {
+      "front": 0.22,
+      "roof": -0.14,
+      "wake": 0.02,
+      "wheel": 0,
+      "under": 0,
+      "side": 0.12
+    }
   },
   "kit_vaz2108": {
     "halfExtents": [
@@ -1472,7 +1480,15 @@
       0,
       5.551115123125783e-17,
       0
-    ]
+    ],
+    "dustFlow": {
+      "front": 0.06,
+      "roof": -0.22,
+      "wake": -0.15,
+      "wheel": 0,
+      "under": 0,
+      "side": 0
+    }
   },
   "kit_vaz2101": {
     "halfExtents": [
@@ -1531,7 +1547,15 @@
       0,
       5.551115123125783e-17,
       0
-    ]
+    ],
+    "dustFlow": {
+      "front": 0.22,
+      "roof": -0.14,
+      "wake": 0.02,
+      "wheel": 0,
+      "under": 0,
+      "side": 0.12
+    }
   },
   "kit_vaz2103": {
     "halfExtents": [
@@ -1590,7 +1614,15 @@
       0,
       0,
       0
-    ]
+    ],
+    "dustFlow": {
+      "front": 0.22,
+      "roof": -0.14,
+      "wake": 0.02,
+      "wheel": 0,
+      "under": 0,
+      "side": 0.12
+    }
   },
   "kit_vaz2105": {
     "halfExtents": [
@@ -1649,7 +1681,15 @@
       0,
       -5.551115123125783e-17,
       0
-    ]
+    ],
+    "dustFlow": {
+      "front": 0.22,
+      "roof": -0.14,
+      "wake": 0.02,
+      "wheel": 0,
+      "under": 0,
+      "side": 0.12
+    }
   },
   "kit_vaz2107": {
     "halfExtents": [
@@ -1708,7 +1748,15 @@
       0,
       -5.551115123125783e-17,
       0
-    ]
+    ],
+    "dustFlow": {
+      "front": 0.22,
+      "roof": -0.14,
+      "wake": 0.02,
+      "wheel": 0,
+      "under": 0,
+      "side": 0.12
+    }
   },
   "kit_vaz2102": {
     "halfExtents": [
@@ -1767,7 +1815,15 @@
       0,
       0,
       0
-    ]
+    ],
+    "dustFlow": {
+      "front": 0.35,
+      "roof": 0.14,
+      "wake": 0.37,
+      "wheel": 0,
+      "under": 0,
+      "side": 0.27
+    }
   },
   "kit_vaz2104": {
     "halfExtents": [
@@ -1826,7 +1882,15 @@
       0,
       0,
       0
-    ]
+    ],
+    "dustFlow": {
+      "front": 0.35,
+      "roof": 0.14,
+      "wake": 0.37,
+      "wheel": 0,
+      "under": 0,
+      "side": 0.27
+    }
   },
   "kit_vaz2109": {
     "halfExtents": [
@@ -1885,7 +1949,15 @@
       0,
       0,
       0
-    ]
+    ],
+    "dustFlow": {
+      "front": 0.06,
+      "roof": -0.22,
+      "wake": -0.15,
+      "wheel": -0.04,
+      "under": 0.03,
+      "side": 0
+    }
   },
   "kit_vaz21099": {
     "halfExtents": [
@@ -1944,7 +2016,15 @@
       0,
       0,
       0
-    ]
+    ],
+    "dustFlow": {
+      "front": 0.09,
+      "roof": -0.12,
+      "wake": -0.01,
+      "wheel": -0.04,
+      "under": 0.03,
+      "side": 0.08
+    }
   },
   "kit_vaz2115": {
     "halfExtents": [
@@ -2003,7 +2083,15 @@
       0,
       5.551115123125783e-17,
       0
-    ]
+    ],
+    "dustFlow": {
+      "front": 0.09,
+      "roof": -0.12,
+      "wake": -0.01,
+      "wheel": 0,
+      "under": 0,
+      "side": 0.08
+    }
   },
   "kit_vaz2110": {
     "halfExtents": [
@@ -2062,7 +2150,15 @@
       0,
       0,
       0
-    ]
+    ],
+    "dustFlow": {
+      "front": 0.06,
+      "roof": -0.04,
+      "wake": 0.05,
+      "wheel": -0.02,
+      "under": 0.02,
+      "side": 0.08
+    }
   },
   "kit_vaz2112": {
     "halfExtents": [
@@ -2121,7 +2217,15 @@
       0,
       0,
       0
-    ]
+    ],
+    "dustFlow": {
+      "front": 0.06,
+      "roof": -0.04,
+      "wake": 0.05,
+      "wheel": -0.02,
+      "under": 0.02,
+      "side": 0.08
+    }
   },
   "kit_vaz2121": {
     "halfExtents": [
@@ -2180,7 +2284,15 @@
       0,
       0,
       0
-    ]
+    ],
+    "dustFlow": {
+      "front": 0.44,
+      "roof": 0.06,
+      "wake": 0.34,
+      "wheel": 0.2,
+      "under": -0.15,
+      "side": 0.35
+    }
   },
   "kit_vaz2131": {
     "halfExtents": [
@@ -2239,7 +2351,15 @@
       0,
       0,
       0
-    ]
+    ],
+    "dustFlow": {
+      "front": 0.44,
+      "roof": 0.06,
+      "wake": 0.34,
+      "wheel": 0.2,
+      "under": -0.15,
+      "side": 0.35
+    }
   },
   "kit_vaz1111": {
     "halfExtents": [
@@ -2298,7 +2418,15 @@
       0,
       5.551115123125783e-17,
       0
-    ]
+    ],
+    "dustFlow": {
+      "front": 0.25,
+      "roof": -0.02,
+      "wake": 0.11,
+      "wheel": -0.08,
+      "under": 0.06,
+      "side": 0.23
+    }
   },
   "kit_vaz2111": {
     "halfExtents": [
@@ -2357,7 +2485,15 @@
       0,
       0,
       0
-    ]
+    ],
+    "dustFlow": {
+      "front": 0.06,
+      "roof": -0.04,
+      "wake": 0.05,
+      "wheel": -0.02,
+      "under": 0.02,
+      "side": 0.08
+    }
   },
   "kit_gaz24": {
     "halfExtents": [
@@ -2416,7 +2552,15 @@
       0,
       -5.551115123125783e-17,
       0
-    ]
+    ],
+    "dustFlow": {
+      "front": 0.25,
+      "roof": -0.1,
+      "wake": 0.12,
+      "wheel": 0.02,
+      "under": -0.01,
+      "side": 0.19
+    }
   },
   "kit_gaz31029": {
     "halfExtents": [
@@ -2475,7 +2619,15 @@
       0,
       -5.551115123125783e-17,
       0
-    ]
+    ],
+    "dustFlow": {
+      "front": 0.25,
+      "roof": -0.1,
+      "wake": 0.12,
+      "wheel": -0.06,
+      "under": 0.04,
+      "side": 0.19
+    }
   },
   "kit_azlk2141": {
     "halfExtents": [
@@ -2534,7 +2686,15 @@
       0,
       5.551115123125783e-17,
       0
-    ]
+    ],
+    "dustFlow": {
+      "front": 0.13,
+      "roof": -0.18,
+      "wake": -0.15,
+      "wheel": -0.12,
+      "under": 0.09,
+      "side": 0
+    }
   },
   "kit_uaz469": {
     "halfExtents": [
@@ -2593,7 +2753,15 @@
       0,
       5.551115123125783e-17,
       0
-    ]
+    ],
+    "dustFlow": {
+      "front": 0.44,
+      "roof": 0.1,
+      "wake": 0.43,
+      "wheel": 0.2,
+      "under": -0.15,
+      "side": 0.42
+    }
   },
   "kit_uaz2206": {
     "halfExtents": [
@@ -2652,6 +2820,14 @@
       0,
       5.551115123125783e-17,
       0
-    ]
+    ],
+    "dustFlow": {
+      "front": 0.6,
+      "roof": 0.3,
+      "wake": 0.64,
+      "wheel": 0.2,
+      "under": -0.15,
+      "side": 0.5
+    }
   }
 }
