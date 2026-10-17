@@ -1,12 +1,12 @@
 {
   "id": "vaz1111",
-  "image": "build/vehicles/vaz1111/lines.png",
-  "source": "the-blueprints.com VAZ-1111 Oka vector preview (24891), cleaned to line art by tools/carforge/lines.py; the GTA SA Oka (sa_oka) used only as the shape reference",
+  "image": "build/vehicles/vaz1111/oka_3dcar_lines.png",
+  "source": "3dcar.ru VAZ-1111 Oka four-view blueprint supplied by the owner (https://3dcar.ru/media/blueprints/full/vaz/vaz_1111_oka.jpg), cleaned to line art by tools/carforge/lines.py; GTA SA Oka remains comparison-only",
   "wheelbase_mm": 2180,
   "views": {
-    "side": [200, 82, 800, 345],
-    "front": [920, 88, 1185, 338],
-    "top": [200, 498, 800, 758]
+    "side": [900, 70, 2080, 620],
+    "front": [90, 70, 760, 640],
+    "top": [900, 735, 2090, 1435]
   },
   "extras": {
     "wheels": {"width": 135, "well": 40, "track_front": 1214, "track_rear": 1204},

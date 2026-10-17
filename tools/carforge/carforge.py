@@ -397,14 +397,15 @@ def _station_ring_raw(s, y, apply_cap=True):
                 u = (y - a) / (b - a)
                 at = _station_ring_raw(s, a, False)
                 bt = _station_ring_raw(s, b, False)
-                edge = (at[R_SHOULDER][0] + (bt[R_SHOULDER][0] - at[R_SHOULDER][0]) * u,
-                        at[R_SHOULDER][1] + (bt[R_SHOULDER][1] - at[R_SHOULDER][1]) * u)
-                centre = (at[R_CENTRE][0] + (bt[R_CENTRE][0] - at[R_CENTRE][0]) * u,
-                          at[R_CENTRE][1] + (bt[R_CENTRE][1] - at[R_CENTRE][1]) * u)
-                for row in range(R_BELT_LO, R_CENTRE):
-                    t = (row - R_SHOULDER) / (R_CENTRE - R_SHOULDER)
-                    out[row] = (edge[0] + (centre[0] - edge[0]) * t,
-                                edge[1] + (centre[1] - edge[1]) * t)
+                # Keep the established ring topology watertight. The cap is deliberately
+                # faired here; the spec's fold threshold prevents diagonal fan splits.
+                crown_slope = CROWN / max(s.low((a + b) / 2), 1.0)
+                cz = at[R_CENTRE][1] + (bt[R_CENTRE][1] - at[R_CENTRE][1]) * u
+                for row in range(R_SHOULDER, R_CENTRE):
+                    x = out[row][0] if row <= R_UPPER else \
+                        out[R_UPPER][0] * (R_CENTRE - row) / (R_CENTRE - R_UPPER)
+                    out[row] = (x, cz - crown_slope * x)
+                out[R_CENTRE] = (0.0, cz)
                 break
     return out
 
@@ -456,6 +457,9 @@ def stations(spec, s, screens):
     for c in (s.top, s.bottom, s.shoulder, s.low, s.high, s.rail):
         for y in c.ys:
             put(y, 2)
+    for a, b in s.cap_bands + s.join_bands:
+        put(a, 4)
+        put(b, 4)
     for _, _, outline, _, _ in arch_specs(spec):
         for y, _ in outline:  # the cut lands on station columns where no view breaks nearby
             put(y, 1)
@@ -557,7 +561,7 @@ def build_shell(spec, s, bm, uvl):
         bmesh.ops.bevel(bm, geom=edges, offset=float(roll["radius"]) * MM,
                         segments=2, affect="EDGES", clamp_overlap=True)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-    split_folded(bm)
+    split_folded(bm, float(spec.get("fold_split_deg", FOLD_SPLIT_DEG)))
     return ys
 
 
@@ -625,21 +629,18 @@ def add_cap(bm, uvl, loop, y_end, sign, inset, cell):
         j = (i + 1) % n
         add_face(bm, uvl, [loop[i], loop[j], inner[j], inner[i]], cell, Vector((0, sign, 0)))
     add_face(bm, uvl, inner, cell, Vector((0, sign, 0)))
-
-
-def split_folded(bm):
-    """Split every non-planar quad along the diagonal that makes its fold convex. Left whole,
-    the game splits it along whichever diagonal comes first, and a concave split shades as a
-    dent: the accordion look. Normals must point outward."""
+def split_folded(bm, threshold_deg=FOLD_SPLIT_DEG):
+    """Split non-planar quads only when the spec allows it. Deliberately flat caps stay quads:
+    Blender's implicit diagonal on a non-planar bonnet is visible as an owner-facing crease."""
     for f in list(bm.faces):
         if len(f.verts) != 4:
             continue
         a, b, c, d = f.verts
         n1 = (b.co - a.co).cross(c.co - a.co)
         n2 = (c.co - a.co).cross(d.co - a.co)
-        if n1.length < 1e-12 or n2.length < 1e-12 or n1.angle(n2) < math.radians(FOLD_SPLIT_DEG):
+        if n1.length < 1e-12 or n2.length < 1e-12 or n1.angle(n2) < math.radians(threshold_deg):
             continue
-        if (d.co - a.co).dot(n1) < 0:  # d lies inside the plane of abc: a-c is a convex crease
+        if (d.co - a.co).dot(n1) < 0:
             bmesh.utils.face_split(f, a, c)
         else:
             bmesh.utils.face_split(f, b, d)
@@ -1841,7 +1842,7 @@ def check_layout(spec, s):
     for key in ("lamps", "plates", "recesses"):
         for it in spec.get(key, []):
             ku = "y" if it["face"] in ("side", "top") else "x"
-            kind = "housing" if key == "recesses" and it.get("housing") else key
+            kind = "housing" if it.get("housing") else key
             outline = item_outline(grown_item(it, float(it["frame"].get("width", FRAME_WIDTH)))
                                    if it.get("frame") else it)
             shapes.append((f"{key[:-1]} {it.get('role', '')} {ku}={it[ku]}".replace("  ", " "),
@@ -1870,6 +1871,16 @@ def check_layout(spec, s):
         for other, oface, opoly, _, okind in shapes:
             if {kind, okind} == {"lamps", "housing"}:
                 continue
+            # A three-colour rear lamp is three adjacent lenses, not three
+            # overlapping details. Their shared edge is intentionally coincident.
+            if kind == okind == "lamps" and face == oface == "rear":
+                x0, x1 = min(p[0] for p in poly), max(p[0] for p in poly)
+                ox0, ox1 = min(p[0] for p in opoly), max(p[0] for p in opoly)
+                z0, z1 = min(p[1] for p in poly), max(p[1] for p in poly)
+                oz0, oz1 = min(p[1] for p in opoly), max(p[1] for p in opoly)
+                if min(x1, ox1) - max(x0, ox0) > 0 and \
+                        min(abs(z1 - oz0), abs(oz1 - z0)) <= 1.0:
+                    continue
             if oface == face and other > name and (any(_inside(p, opoly) for p in edge)
                                                    or any(_inside(q, poly) for q in _sample(opoly, True))):
                 clashes.append(f"{name} and {other} overlap on {face}")
@@ -1903,7 +1914,7 @@ def build_body(spec, cid):
     bm = bmesh.new()
     bm.from_mesh(body.data)
     bm.normal_update()
-    split_folded(bm)
+    split_folded(bm, float(spec.get("fold_split_deg", FOLD_SPLIT_DEG)))
     bmesh.ops.triangulate(bm, faces=[f for f in bm.faces if len(f.verts) > 4])
     bm.to_mesh(body.data)
     bm.free()

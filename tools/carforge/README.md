@@ -65,6 +65,12 @@ from `refgrid.py`'s ray grid over the GTA SA Oka the game used to ship (`sa_oka`
 `git show 8f5a795:public/models/saas/oka.glb`). The GTA model is the reference for renders and
 measurements only; none of its geometry ships.
 
+The primary four-view check is the owner-supplied 3dcar.ru blueprint
+(`https://3dcar.ru/media/blueprints/full/vaz/vaz_1111_oka.jpg`), stored under
+`build/vehicles/vaz1111/00-references/vaz_1111_oka_3dcar.jpg` and cleaned to
+`build/vehicles/vaz1111/oka_3dcar_lines.png`. It owns the side/front/top overlays; the
+GTA mesh remains comparison-only.
+
 ```
 nice -n 15 $BLENDER --background --factory-startup --python tools/carforge/carforge.py -- \
     tools/carforge/examples/vaz1111.json build/carforge/vaz1111/car.fbx
