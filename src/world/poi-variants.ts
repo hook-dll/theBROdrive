@@ -3,9 +3,12 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 
 import type { DoorClearance } from './poi/kit';
 import { buildFallenTower, buildRelayCluster, buildStandingTower } from './poi/towers';
+import { TOILET_VARIANTS } from './toilets/catalog';
+import { buildToiletShell, toiletFootprint } from './toilets/geometry';
 
 /**
- * The kit-built buildings: the three masts the world places. Everything else is a
+ * The kit-built buildings: the three masts the world places, then the Japanese toilet
+ * shells (world/toilets), which only the POI gallery shows so far. Everything else is a
  * dwelling (world/dwellings); see world/poistructures.ts for the list the world draws
  * from.
  */
@@ -100,6 +103,14 @@ export const POI_VARIANTS: readonly PoiVariantDefinition[] = [
   { id: 'standing-tower', name: 'Стоящая вышка', footprint: [10, 10], build: buildStandingTower },
   { id: 'fallen-tower', name: 'Упавшая вышка', footprint: [32, 10], build: buildFallenTower },
   { id: 'relay-cluster', name: 'Узел связи', footprint: [23, 16], build: buildRelayCluster },
+  // The static shell only: the moving fixtures, lamp, face and mirror are a
+  // `ToiletRig` (world/toilets/rig.ts) laid over the merged instance.
+  ...TOILET_VARIANTS.map((variant): PoiVariantDefinition => ({
+    id: variant.id,
+    name: variant.name,
+    footprint: toiletFootprint(variant.shell),
+    build: (root) => buildToiletShell(root, variant),
+  })),
 ];
 
 /** A variant's index by id; throws on a typo so a caller never builds the wrong thing. */

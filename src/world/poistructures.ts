@@ -112,10 +112,10 @@ export function createStructureInstance(index: number): VariantInstance {
 
 /**
  * Builds every structure's shared assets during loading, so the first time each one
- * streams in while driving costs only the Object3D wrapping. Also warms the kit-built
- * variants, which includes the kit-built masts.
+ * streams in while driving costs only the Object3D wrapping: the kit-built masts, then
+ * the dwellings.
  */
 export function warmPoiStructures(): void {
-  warmVariantAssets();
+  warmVariantAssets(MAST_IDS.map(poiVariantIndex));
   for (let dwelling = 0; dwelling < DWELLINGS.length; dwelling++) dwellingAssets(dwelling);
 }

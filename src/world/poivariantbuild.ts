@@ -194,15 +194,16 @@ function assetsFor(index: number): VariantAssets {
 }
 
 /**
- * Builds every variant's assets up front.
+ * Builds the given variants' assets up front.
  *
  * Called during loading rather than left to first use, because first use happens while
  * the player is driving: without this, the first time each kit building appears
  * it costs a full build inside a 3 ms streaming budget. Warmed, every later placement is
- * only Object3D wrapping.
+ * only Object3D wrapping. Only what the world places is worth warming: the toilet shells
+ * are gallery-only so far and build on first use there.
  */
-export function warmVariantAssets(): void {
-  for (let index = 0; index < POI_VARIANTS.length; index++) assetsFor(index);
+export function warmVariantAssets(indices: readonly number[]): void {
+  for (const index of indices) assetsFor(index);
 }
 
 /**

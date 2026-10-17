@@ -368,6 +368,15 @@ const GLITTER_OCCUPANCY_NEAR = 0.25;
 const GLITTER_OCCUPANCY_FAR = 0.03;
 /** A grain's own radius as a share of the cell: 0.012 x 0.35 m, about 4 mm. */
 const GLITTER_GRAIN_CELLS = 0.012;
+/** A grain's disc on screen: full to half this radius, gone at it, in pixels. */
+const GLITTER_GRAIN_PX = 1.1;
+/**
+ * Most lattice columns one fragment searches for the grains whose disc reaches it, two
+ * cells each. A far, low view packs a pixel's height into many cells along the line of
+ * sight (about 30 from a 1.2 m eye at 1080p and 65 m); past this budget the disc shrinks,
+ * round, instead of being cut.
+ */
+const GLITTER_REACH_COLUMNS = 32;
 
 const GROUND_FRAGMENT_PARS = /* glsl */ `
 varying vec3 vGroundTint;
@@ -414,60 +423,110 @@ float groundStipple( vec2 world, float footprint, float keepBelow ) {
  * on each world axis over its own fwidth, and that is only a screen circle when the
  * world axes happen to line up with the screen's: with the road running diagonally
  * across the view, fwidth adds the long along-the-road footprint into both world axes,
- * and every distant grain swelled into a wide soft ellipse. The offset now goes back
+ * and every distant grain swelled into a wide soft ellipse. The offset then went back
  * through the inverse of the screen-to-ground Jacobian (dFdx, dFdy of the cell
  * coordinate), which gives the true pixel offset from the fragment to the grain at any
  * heading and grazing angle, so the disc is a circle of the same pixel radius at every
- * distance: the fragment that owns a grain is lit in full wherever the grain falls
- * inside it, and the light fades out over the next pixel, so a grain is a point and not
- * a coin. The grain's true 4 mm wins only near the wheels, where it covers more than
- * that; it shrinks with distance and cannot make a blob. The eye-motion term is a tenth
- * of its old rate, and the peak reads at all (see GLITTER_PEAK). It fades with
- * distance, 55-90 m.
+ * distance. But each fragment still asked only its OWN cell for a grain, and past about
+ * 12 m from a chase eye a cell is only a few pixels tall, so a grain near its cell's edge
+ * had its disc cut off there: a flat-topped bar mid-field, the whole cell's parallelogram
+ * where the cell was smaller than the disc, a one-row dash far off — a field of little
+ * rectangles.
+ *
+ * So a fragment now finds every grain whose disc reaches it. The disc (radius
+ * GLITTER_GRAIN_PX) is an ellipse in cell space; grains sit 0.2-0.8 of the way across
+ * their cells, so the search walks the lattice columns that ellipse spans along its
+ * long axis (rows and columns swapped where that axis is nearer the world's z), and in
+ * each column the two (rarely three) cells its chord can reach, from the line of chord
+ * midpoints and the longest vertical half-chord. A grain is tested for occupancy at its
+ * cell centre's distance, not the fragment's, so the occupancy grading cannot cut a
+ * grain in half either. Each grain is lit where its disc falls and nowhere else,
+ * whichever cell the fragment is in: a round point, full to half the radius and gone
+ * over the next half pixel. The grain's true 4 mm wins only near the wheels, where it
+ * covers more than that; it shrinks with distance and cannot make a blob. Past
+ * GLITTER_REACH_COLUMNS the disc shrinks, still round, rather than being cut. The
+ * eye-motion term is a tenth of its old rate, and the peak reads at all (see
+ * GLITTER_PEAK). It fades with distance, 55-90 m.
  *
  * Cost: a uniform branch, derivatives taken once outside any divergent branch (they
- * are undefined inside one), one distance test, one arithmetic hash for the cells that
- * hold no grain. Its own hash, not the comic one: `vGroundWorld` runs to tens of
- * kilometres, where a sine hash is garbage.
+ * are undefined inside one), one distance test, and one arithmetic hash per cell
+ * searched: one or none near the eye, where a cell is many pixels, a dozen or two in
+ * the last few pixel rows before 90 m. Its own hash, not the comic one: `vGroundWorld`
+ * runs to tens of kilometres, where a sine hash is garbage.
  */
 const GROUND_GLITTER_HOOK = /* glsl */ `
 if ( uGlitter > 0.0 ) {
   vec2 grainAt = vGroundWorld / ${GLITTER_CELL_M.toFixed(2)};
+  // The fragment from the eye, in world axes: small numbers, unlike vGroundWorld, which
+  // runs to tens of kilometres and would quantise the derivatives taken from it.
+  vec3 glitterEye = ( vec4( -vViewPosition, 0.0 ) * viewMatrix ).xyz;
   // One pixel right and one pixel up, in cells: the screen-to-ground Jacobian.
-  vec2 grainDx = dFdx( grainAt );
-  vec2 grainDy = dFdy( grainAt );
+  vec2 grainDx = dFdx( glitterEye.xz ) / ${GLITTER_CELL_M.toFixed(2)};
+  vec2 grainDy = dFdy( glitterEye.xz ) / ${GLITTER_CELL_M.toFixed(2)};
   float grainDet = grainDx.x * grainDy.y - grainDx.y * grainDy.x;
   grainDet = abs( grainDet ) < 1e-12 ? 1e-12 : grainDet;
   float glitterDist = length( vViewPosition );
   if ( glitterDist < 90.0 ) {
-    vec2 grainCell = mod( floor( grainAt ), 4096.0 );
-    float grainRoll = glitterHash( grainCell );
-    float grainOccupancy = mix( ${GLITTER_OCCUPANCY_NEAR.toFixed(3)}, ${GLITTER_OCCUPANCY_FAR.toFixed(3)}, smoothstep( 3.0, 30.0, glitterDist ) );
-    if ( grainRoll > 1.0 - grainOccupancy ) {
-      vec2 grainOffset = vec2( glitterHash( grainCell + 5.0 ), glitterHash( grainCell + 9.0 ) ) - 0.5;
-      // Two discs, the larger wins: the grain's true few millimetres, which near the
-      // eye covers two or three pixels, and a disc about a pixel across in true screen
-      // pixels (the cell offset through the inverse Jacobian), round at any heading or
-      // grazing angle, which keeps a distant grain a point and lights the fragment that
-      // owns it in full wherever the grain falls inside it — the sub-pixel phase is
-      // what used to flicker a glint into noise.
-      vec2 grainOff = fract( grainAt ) - 0.5 - grainOffset * 0.6;
-      vec2 grainPx = vec2(
-        grainDy.y * grainOff.x - grainDy.x * grainOff.y,
-        grainDx.x * grainOff.y - grainDx.y * grainOff.x
-      ) / grainDet;
-      float grain = max(
-        1.0 - smoothstep( 0.55, 1.1, length( grainPx ) ),
-        1.0 - smoothstep( ${(GLITTER_GRAIN_CELLS * 0.4).toFixed(4)}, ${GLITTER_GRAIN_CELLS.toFixed(4)}, length( grainOff ) )
-      );
-      float beat = sin( uGlitterTime * ( 0.7 + grainRoll * 2.6 ) + grainRoll * 91.0
-        + dot( cameraPosition.xz, vec2( 0.9, 1.3 ) ) * ( 0.08 + 0.06 * glitterHash( grainCell + 2.0 ) ) );
-      float wink = pow( max( beat, 0.0 ), 8.0 );
-      // Coloured the way sand's own crystals are, and nothing like the stars above:
-      // rose-gold, sea-green and lilac, never white.
-      float hue = glitterHash( grainCell + 4.0 );
-      vec3 grainColour = hue < 0.45 ? vec3( 1.0, 0.62, 0.42 ) : hue < 0.8 ? vec3( 0.42, 0.95, 0.78 ) : vec3( 0.78, 0.5, 1.0 );
-      outgoingLight += grainColour * grain * wink * uGlitter * ( 1.0 - smoothstep( 55.0, 90.0, glitterDist ) );
+    vec2 grainBase = floor( grainAt );
+    vec2 grainLocal = grainAt - grainBase;
+    // The eye in this fragment's cell frame; glitterEye.y is its height over the ground.
+    vec2 grainEye = grainLocal - glitterEye.xz / ${GLITTER_CELL_M.toFixed(2)};
+    // Search along the disc's long axis: x here, or z with the axes swapped.
+    float grainSpanX = length( vec2( grainDx.x, grainDy.x ) );
+    float grainSpanY = length( vec2( grainDx.y, grainDy.y ) );
+    bool grainSwap = grainSpanY > grainSpanX;
+    vec2 grainP = grainSwap ? grainLocal.yx : grainLocal;
+    vec2 grainA = grainSwap ? grainDx.yx : grainDx;
+    vec2 grainB = grainSwap ? grainDy.yx : grainDy;
+    float grainSpan = max( max( grainSpanX, grainSpanY ), 1e-6 );
+    // Pixels of disc radius: a pixel and a tenth unless the column budget cannot hold it.
+    float grainRadius = min( ${GLITTER_GRAIN_PX.toFixed(2)}, ${(GLITTER_REACH_COLUMNS * 0.5 - 0.8).toFixed(1)} / grainSpan );
+    float grainReach = max( grainRadius * grainSpan, ${GLITTER_GRAIN_CELLS.toFixed(4)} );
+    // The disc's vertical chords in the search frame: their midpoints lie on a line of
+    // this slope (|slope| <= 1 along the long axis), none longer than twice this.
+    float grainSlope = ( grainA.x * grainA.y + grainB.x * grainB.y ) / ( grainSpan * grainSpan );
+    float grainChord = max( grainRadius * abs( grainDet ) / grainSpan, ${GLITTER_GRAIN_CELLS.toFixed(4)} );
+    float grainFirst = ceil( grainP.x - grainReach - 0.8 );
+    float grainFade = uGlitter * ( 1.0 - smoothstep( 55.0, 90.0, glitterDist ) );
+    for ( int grainColumn = 0; grainColumn < ${GLITTER_REACH_COLUMNS}; grainColumn++ ) {
+      float grainCx = grainFirst + float( grainColumn );
+      if ( grainCx + 0.2 > grainP.x + grainReach ) break;
+      float grainQa = ( max( grainCx + 0.2, grainP.x - grainReach ) - grainP.x ) * grainSlope;
+      float grainQb = ( min( grainCx + 0.8, grainP.x + grainReach ) - grainP.x ) * grainSlope;
+      float grainRowHigh = grainP.y + max( grainQa, grainQb ) + grainChord;
+      float grainFirstRow = ceil( grainP.y + min( grainQa, grainQb ) - grainChord - 0.8 );
+      for ( int grainRow = 0; grainRow < 3; grainRow++ ) {
+        float grainCy = grainFirstRow + float( grainRow );
+        if ( grainCy + 0.2 > grainRowHigh ) break;
+        vec2 grainRel = grainSwap ? vec2( grainCy, grainCx ) : vec2( grainCx, grainCy );
+        vec2 grainCell = mod( grainBase + grainRel, 4096.0 );
+        float grainRoll = glitterHash( grainCell );
+        float grainCellDist = length( vec3( ( grainRel + 0.5 - grainEye ) * ${GLITTER_CELL_M.toFixed(2)}, glitterEye.y ) );
+        float grainOccupancy = mix( ${GLITTER_OCCUPANCY_NEAR.toFixed(3)}, ${GLITTER_OCCUPANCY_FAR.toFixed(3)}, smoothstep( 3.0, 30.0, grainCellDist ) );
+        if ( grainRoll > 1.0 - grainOccupancy ) {
+          vec2 grainOffset = vec2( glitterHash( grainCell + 5.0 ), glitterHash( grainCell + 9.0 ) ) - 0.5;
+          // Two discs, the larger wins: the grain's true few millimetres, which near the
+          // eye covers two or three pixels, and the disc in true screen pixels (the cell
+          // offset through the inverse Jacobian), round at any heading or grazing angle.
+          vec2 grainOff = grainLocal - grainRel - 0.5 - grainOffset * 0.6;
+          vec2 grainPx = vec2(
+            grainDy.y * grainOff.x - grainDy.x * grainOff.y,
+            grainDx.x * grainOff.y - grainDx.y * grainOff.x
+          ) / grainDet;
+          float grain = max(
+            1.0 - smoothstep( grainRadius * 0.5, grainRadius, length( grainPx ) ),
+            1.0 - smoothstep( ${(GLITTER_GRAIN_CELLS * 0.4).toFixed(4)}, ${GLITTER_GRAIN_CELLS.toFixed(4)}, length( grainOff ) )
+          );
+          float beat = sin( uGlitterTime * ( 0.7 + grainRoll * 2.6 ) + grainRoll * 91.0
+            + dot( cameraPosition.xz, vec2( 0.9, 1.3 ) ) * ( 0.08 + 0.06 * glitterHash( grainCell + 2.0 ) ) );
+          float wink = pow( max( beat, 0.0 ), 8.0 );
+          // Coloured the way sand's own crystals are, and nothing like the stars above:
+          // rose-gold, sea-green and lilac, never white.
+          float hue = glitterHash( grainCell + 4.0 );
+          vec3 grainColour = hue < 0.45 ? vec3( 1.0, 0.62, 0.42 ) : hue < 0.8 ? vec3( 0.42, 0.95, 0.78 ) : vec3( 0.78, 0.5, 1.0 );
+          outgoingLight += grainColour * grain * wink * grainFade;
+        }
+      }
     }
   }
 }

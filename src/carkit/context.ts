@@ -4,7 +4,8 @@
  */
 
 import * as THREE from 'three';
-import { mirrorFaceGeometry, mirrorFaceMaterial } from '../render/carmirrors';
+import { mirrorFaceMaterial } from '../render/carmirrors';
+import { mirrorFaceGeometry } from '../render/mirrorview';
 import type { BodyFrame, KitHole } from './body';
 import type { KitSlot, PartBuilder, Vec3 } from './builder';
 import { kitBodyMaterial, kitGlassMaterial } from './materials';

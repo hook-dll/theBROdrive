@@ -4,6 +4,19 @@
 
 ### Added
 
+- JAPANESE TOILET POIS, FIRST FIVE (docs/toilet-poi-design.md, world/toilets). Low-poly
+  readings of THE TOKYO TOILET (Ban, Kuma, NIGO®, Newson, Wonderwall), each with a source
+  card, drawn from one parametric cabin shell (flat, gable or pyramid roof; battens,
+  privacy walls or house dressing) registered as POI kit variants, so they merge and
+  cache like the masts. Over the merged shell a `ToiletRig` carries the stateful fixtures
+  (door, washlet lid, flush, valve, plunger, floor dirt), one central ceiling lamp lit by
+  intensity only, an optional eyes-and-brows face with seven emotions, and a live mirror
+  through one bounded camera (`ToiletMirror`; the car mirrors' off-axis projection is now
+  shared in render/mirrorview.ts). Progress has a save projection (state.ts) that the
+  gallery round-trips; the world does not place toilets yet and the game save does not
+  hold them. `?poi-gallery&type=toilet` lists them (`type=world` the world's buildings),
+  with state, reset, complete and fixture controls, N for night, and
+  `window.__poiGallery` for automation. Gates: `bun tools/toilet-check.ts`.
 - CABIN CONTROLS AT ANY SPEED. Seated in a kit car, every fitting works standing or
   driving: seat change (F on another seat), wipers, radio, doors, windows, glovebox,
   ashtray, light switch, visors, dome lamp, hazard button. Before, `seatedKitPart`
@@ -1462,6 +1475,18 @@
     handed in, placed 2nd and 3rd.
 
 ### Fixed
+
+- THE NIGHT GLITTER IS POINTS, NOT LITTLE RECTANGLES (`GROUND_GLITTER_HOOK`,
+  `world/terrainmesh.ts`). Each fragment asked only its own 0.35 m lattice cell for a
+  grain, and from about 12 m a cell is only a few pixels tall, so a grain near its cell's
+  edge had its disc cut there: flat-topped bars mid-field, whole cell parallelograms, one-row
+  dashes far off. A fragment now searches the cells its pixel disc spans along the disc's
+  long axis (up to `GLITTER_REACH_COLUMNS` columns, two or three cells each) and adds
+  every grain that reaches it, tested for occupancy at the grain's cell, so each grain is
+  the same round 2-3 pixel point at any distance and heading. The screen-to-ground
+  Jacobian is taken from the eye-relative position, not the kilometres-large lattice
+  coordinate. Grains, beat and colours are unchanged; past the column budget (a 1080p
+  cabin view beyond about 70 m) the disc shrinks, still round.
 
 - THE LOG CABIN NO LONGER FLICKERS AS IT RECEDES (`world/dwellings/americas.ts` `logCabin`,
   `world/dwellings/builder.ts` `Facade.door` `Facade.shape`). Two skin layers lay a

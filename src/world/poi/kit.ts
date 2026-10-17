@@ -187,7 +187,7 @@ export function cylinder(
   return mesh;
 }
 
-function wallWithOpenings(
+export function wallWithOpenings(
   parent: THREE.Object3D,
   axis: WallAxis,
   fixed: number,
@@ -227,12 +227,12 @@ function wallWithOpenings(
   }
 }
 
-function trimOpening(
+export function trimOpening(
   parent: THREE.Object3D,
   axis: WallAxis,
   fixed: number,
   opening: Opening,
-  color = C.darkTimber,
+  color: number = C.darkTimber,
 ): void {
   const [start, end, bottom, top] = opening;
   const width = end - start;

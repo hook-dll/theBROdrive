@@ -2510,6 +2510,11 @@ const KIT_CARS: readonly Entry[] = (
     // A kit car builds its spare into its body (the UAZ-469's on its rear door), not the
     // sibling's pack wheel at `spareNode`.
     spareNode: undefined,
+    // Nor the sibling pack body's loaded stance: `applyLoadedRideDrop` moves vertices
+    // only, so a kit's pivots (needles, steering wheel) would stay `loadedRideDrop` above
+    // their parts and turn them round a point that far off (the UAZ-2206's needles and
+    // wheel, 37 mm, from sa_uaz330364). A kit's stance is its own spec's.
+    loadedRideDrop: undefined,
     glassUvCell: undefined,
     paintUvCell: undefined,
     glassMaterial: KIT_GLASS_MATERIAL,
