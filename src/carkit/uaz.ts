@@ -158,6 +158,11 @@ export const LOOK_UAZ469: KitLook = {
   dash: 0x4c5233, // painted steel, olive [P]
   headrests: false, // [P]
   brightwork: 'chrome', // handles [P "UAZ-469 (side)"]
+  // The door mirrors on upright stalks from a bracket at the door's front edge under the
+  // belt, the head behind the stalk beside the glass's front lower corner: drawn at s
+  // 1.39-1.49, y 1.24-1.45 (centre 1.345) [D side x 355-378, y 143-190]; photos 1.34-1.39
+  // [P "UAZ 469.JPG", "UAZ-469 (side)"]. Centre 1.36 here, 0.17 over the short arm's 1.19.
+  mirrorStalk: 0.17,
   sill: null,
   waist: null,
   // The round amber lamp on the scuttle's side [D side (295, 210); P], here on the wing

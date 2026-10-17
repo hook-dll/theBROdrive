@@ -1095,12 +1095,34 @@ function buildDoorHardware(ctx: KitContext): void {
     if (!front || (side < 0 && spec.look.mirrors === 'left')) continue;
     // Mirror: a stalk from the door's front top corner and a head on it, turned so the
     // driver sees straight back along the flank in it (`mirrorFrame`), the car's side a
-    // sliver at its inner edge; the far one turns further than his own.
+    // sliver at its inner edge; the far one turns further than his own. On an upright
+    // stalk (`mirrorStalk`) the head stands that much higher and 3.5 cm further back: a
+    // bracket on the skin under the belt at the door's front edge, a rod 2 cm off the skin
+    // up to the head's centre, an arm out and back from its top into the head's ball.
     const ms = spec.cabin.columns[1]!.s + 0.08;
-    const my = frame.station(ms).belt + 0.06;
-    const mx = frame.sideX(ms, frame.station(ms).belt);
+    const belt = frame.station(ms).belt;
+    const my = belt + 0.06;
+    const mx = frame.sideX(ms, belt);
+    const stalk = spec.look.mirrorStalk;
+    const hx = side * (mx + 0.1);
+    const hy = my + 0.02 + (stalk ?? 0);
+    const hz = frame.z(stalk === undefined ? ms : ms + 0.035);
     const m = new PartBuilder().color(finish.color);
-    m.boxFrom(finish.slot, [side > 0 ? mx - 0.01 : -mx - 0.07, my - 0.04, frame.z(ms) - 0.03], [side > 0 ? mx + 0.07 : -mx + 0.01, my - 0.02, frame.z(ms) + 0.03]);
+    if (stalk === undefined) {
+      m.boxFrom(finish.slot, [side > 0 ? mx - 0.01 : -mx - 0.07, my - 0.04, hz - 0.03], [side > 0 ? mx + 0.07 : -mx + 0.01, my - 0.02, hz + 0.03]);
+    } else {
+      const rx = side * (mx + 0.023);
+      const rz = frame.z(ms - 0.03);
+      m.box(finish.slot, [side * (mx + 0.015), belt - 0.035, rz], [0.025, 0.025, 0.015]);
+      m.box(finish.slot, [rx, (belt - 0.05 + hy) / 2, rz], [0.007, (hy - belt + 0.05) / 2, 0.007]);
+      const run = new THREE.Vector3(hx - rx, 0, hz - rz);
+      const length = run.length();
+      const up = new THREE.Vector3(0, 1, 0);
+      run.normalize();
+      m.push(new THREE.Matrix4().makeBasis(run, up, run.clone().cross(up)).setPosition((rx + hx) / 2, hy, (rz + hz) / 2));
+      m.box(finish.slot, [0, 0, 0], [length / 2, 0.006, 0.006]);
+      m.pop();
+    }
     const holder = new THREE.Group();
     holder.name = `${owner}_mirror`;
     addBuilt(holder, m, door.pivot, 'mirrors');
@@ -1108,7 +1130,7 @@ function buildDoorHardware(ctx: KitContext): void {
     // the inside mirror does: side to side about its own up, then up and down about its
     // own across, from the built aim.
     const h = new PartBuilder().color(finish.color);
-    const head = h.push(mirrorFrame([side * (mx + 0.1), my + 0.02, frame.z(ms)], eye, [0, 0, -1])).matrix.clone();
+    const head = h.push(mirrorFrame([hx, hy, hz], eye, [0, 0, -1])).matrix.clone();
     const e = head.elements;
     const centre: Vec3 = [e[12]!, e[13]!, e[14]!];
     const mirror = side > 0 ? 'left' : 'right';

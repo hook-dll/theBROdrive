@@ -305,6 +305,12 @@ export interface KitLook {
   /** Door mirrors: `'left'` only the driver's (the base Oka). Absent: both. */
   readonly mirrors?: 'left';
   /**
+   * Door mirrors on an upright stalk: the head this much higher than on the short arm at
+   * the door's top and 3.5 cm further back, the stalk rising to it from a bracket on the
+   * door's skin under the belt at its front edge (the UAZ-469). Absent: the short arm.
+   */
+  readonly mirrorStalk?: number;
+  /**
    * Where the outside door handles stand, when measured: the centre s of the front doors'
    * and of the rear (side) doors' handle, their height and half length along the car.
    * Absent: 0.13 ahead of each door's rear edge, under the belt.

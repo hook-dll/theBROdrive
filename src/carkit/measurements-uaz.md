@@ -71,6 +71,7 @@ gear).
 | B shut line (belt) | x 520 | 2.11 | D | 2.115 / 2.13 |
 | Front door's rear edge, raked | (520, 205) → (435, 375) | 2.11, 1.18 → 1.74, 0.44 | D, P fi05 | `foot: { y 1.08, s 1.74 }` |
 | Front door glass | x 355–515, y 135–200 | 1.39–2.09, 1.23–1.48 | D | glass 1.36–2.085 |
+| Door mirror | side view: head x 355–378, y 143–190; stalk down the door's front edge (x 345–360) to a bracket at y 205–225. Front view: head x 12–52 (its heights do not register). Photos: "UAZ 469.JPG" side zoom (1.337 mm/px from the hubs) head 230–400 crop px over the glass foot 395 and the belt crease 485; "UAZ-469 (side)" 3/4 head 218–350 over the belt 420 | s 1.39–1.49, y 1.24–1.45, centre **1.44 / 1.345**; bracket 1.09–1.18; front view ±0.80–0.97. Photos: centre 1.34 and 1.36–1.39, head beside the glass's front lower corner, 6–9 cm behind the stalk | D, P | `mirrorStalk` 0.17: head centre s 1.45, y 1.36, ±0.985 (the generic mx + 0.1, 0.1 further out than drawn: the flank stays a sliver in the glass); rod at s 1.385 from a bracket under the belt (1.06–1.11). The head stays the kit's 0.12 × 0.09 in brightwork; the car's is upright, ~0.10 × 0.2, black |
 | Rear door glass rear edge | x 670 → 650 | 2.76 → 2.68 | D | column 2.76 / top 2.68 |
 | Rear door's rear edge, raked round the arch | (700, 195) → (610, 375) | 2.894, 1.22 → 2.50, 0.44 | D | `foot: { y 1.08, s 2.5 }` |
 | Body behind the doors (hard top: quarter glass; canvas car: none) | | | P side, pd | canvas behind 2.85 (`softTop.from`) |
@@ -122,6 +123,7 @@ for seatX 0.40 [E], 0.71 mm/px; heights from the dials' centre (y 395) at 0.04 o
 | Feature | px | m | Tag | Spec |
 |---|---|---|---|---|
 | Dash face (top lip to foot) | y 230–500 | 0.19 tall | P | `dash` 0.115 → −0.07 over the belt, flat steel in olive |
+| Dash depth: a shallow shelf under the screen (owner's photo ex-roadmedia.ru `20_uaz/21.jpg`) | | face 0.20 behind the screen's foot (was 0.345), shelf 0.10 deep | P/E | `dash`, `fascia`, `binnacle`, `cluster` 0.207 |
 | Speedometer, alone right of the column | x 620, 115 px | 0.2 right, ⌀ 0.08 | P | `speed` 0–120, r 0.038 |
 | Four-dial panel, chrome frame | x 710–1075, y 345–440 | 0.39 right, 0.26 × 0.065 | P | `clusterFace`, `binnacleRight` 0.34 |
 | Dials (ammeter, oil, temperature, fuel) | x 755 / 850 / 935 / 1030, 75 px | r 0.024 | P | volts / oil 0–6 / temp / fuel |
@@ -148,6 +150,11 @@ for seatX 0.40 [E], 0.71 mm/px; heights from the dials' centre (y 395) at 0.04 o
 
 Proof: geometry hashes (README "Proving a refactor") of all 20 earlier cars identical
 against a HEAD generator carrying the same in-progress Volga cabins (2026-10-17).
+
+`KitLook.mirrorStalk` (2026-10-17, the owner: the mirrors too low, hard to see from the
+seat): the door mirror's head that much higher (and 3.5 cm further back) on an upright
+stalk; 0.17 here. Proof: geometry hashes of the 21 other kit cars identical before and
+after; `tools/kit-zfight.ts` PASS on all 22.
 
 ### 1.8 Gaps
 

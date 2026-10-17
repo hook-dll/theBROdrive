@@ -766,6 +766,19 @@ amplified differences; `bench-*.json`, `pick-*.json`).
   0.556). → `drop` 0.085 / `height` 0.365 (0.20–0.565) at the front, 0.075 / 0.265
   (0.28–0.545) at the back, both tops under the lamps as drawn. *azlk.ts*.
 
+## UAZ-469 (2026-10-17)
+
+- **UAZ-469: the door mirrors too low on the body, hard to see from the cabin (owner).** →
+  The generic short arm puts the head's centre 0.08 over the belt: 1.19 on the 469, under
+  its glass's foot (1.23), 15° under the eye; from the seat the door trim hid 34 % of the
+  left glass and the cabin trim 72 % of the right. On the car the head stands on an
+  upright stalk from a bracket at the door's front edge, beside the glass's front lower
+  corner, centre 1.345 drawn (`uaz2.jpg` side), 1.34-1.39 on photos. → `KitLook.mirrorStalk`
+  0.17: the bracket under the belt at s 1.385, a rod 2 cm off the skin up to 1.36, an arm
+  out and back into the head at s 1.45 (was 1.415); both glasses seen whole through the
+  door glass, the left one 4° under the eye in the straight-ahead view. *spec.ts,
+  exterior.ts `buildDoorHardware`, uaz.ts; measurements-uaz.md §1.2*.
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent

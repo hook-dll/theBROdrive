@@ -1,28 +1,28 @@
 /**
- * The one low-poly Japanese toilet cabin every variant is drawn from, and the plan its
+ * The low-poly service cabin every Japanese toilet is built around, and the plan its
  * fixtures are laid out on.
  *
  * A cabin is a plinth, four walls with a door in the front (-Z) and a high window in
- * the back, a tiled floor, a ceiling under one of three roofs, and the fixtures that
- * never move: the pan, the cistern, the sink, the mirror's frame and glass, the flush
- * plate, the valve's pipe and the lamp's base. Everything that moves or changes with
- * progress (door, lid, flush button, valve wheel, plunger, dirt, lamp glow, face, live
- * mirror) is the rig's (rig.ts), laid out on the same `ToiletLayout` and added over the
- * merged shell.
+ * the back, a tiled floor, a ceiling under its roof, and the fixtures that never move:
+ * the pan, the cistern, the sink, the mirror's frame and glass, the flush plate, the
+ * valve's pipe and the lamp's base. A drum (`ToiletShellSpec.drum`) wraps its side and
+ * back walls into a round booth with a flat door front. Everything that moves or changes
+ * with progress (door, lid, flush button, valve wheel, plunger, dirt, lamp glow, face,
+ * live mirror) is the rig's (rig.ts), laid out on the same `ToiletLayout` and added over
+ * the merged shell. Whatever stands around the cabin is its family's (families.ts); a
+ * row's rooms share the cabin's plinth and roof.
  *
- * The shell is built from the POI kit's boxes, so it shares its materials and merges
- * like every kit variant (world/poi-variants.ts `mergePoiStatics`). The corners are
- * closed: the front and back walls run the full width and the side walls fit between
- * them, so nothing overlaps and no corner is open. Ceiling and roof are `poiRoof`, so
- * the gallery's roof toggle opens the interior.
+ * The shell is built from the POI kit's boxes and the parts in parts.ts, so it shares
+ * their materials and merges like every kit variant (world/poi-variants.ts
+ * `mergePoiStatics`). The corners are closed: the front and back walls run the full
+ * width and the side walls fit between them, so nothing overlaps and no corner is open.
+ * Ceiling and roof are `poiRoof`, so the gallery's roof toggle opens the interior.
  */
 
 import * as THREE from 'three';
 import {
   box,
   cylinder,
-  gableGeometry,
-  geometryCache,
   markDoorObstacle,
   material,
   registerDoorClearance,
@@ -31,22 +31,29 @@ import {
   type Opening,
   type V3,
 } from '../poi/kit';
+import { buildFamily, cabinOutline, familyReach } from './families';
+import {
+  drumWrapGeometry,
+  LOUVRE_REACH,
+  louvres,
+  minDrumRadius,
+  PLINTH,
+  PLINTH_MARGIN,
+  Reach,
+  roofHalf,
+  roofLook,
+  roofOver,
+  ROUND_SIDES,
+  WALL,
+} from './parts';
 import type { ToiletShellSpec, ToiletVariant } from './types';
 
-/** Plinth under the cabin, metres; it reaches `PLINTH_MARGIN` past the walls. */
-export const PLINTH = 0.15;
-const PLINTH_MARGIN = 0.2;
-export const WALL = 0.14;
 const TILE = 0.02;
 const CEILING = 0.08;
 const DOOR_WIDTH = 1.0;
-export const DOOR_HEIGHT = 2.05;
+const DOOR_HEIGHT = 2.05;
 /** The kit trims every opening with bars this wide inside the opening (kit.ts `trimOpening`). */
 const TRIM_BAR = 0.09;
-const BATTEN_DEPTH = 0.035;
-const BATTEN_STEP = 0.16;
-const GABLE_PITCH = 0.55;
-const ROOF_SLAB = 0.12;
 const PRIVACY_WALL_HEIGHT = 2.1;
 const PRIVACY_WALL_THICKNESS = 0.16;
 /** The privacy wall's centre, in front of the front wall's outer face. */
@@ -65,7 +72,7 @@ export interface ToiletLayout {
   readonly ceilingY: number;
   /** Interior wall faces. */
   readonly inner: { readonly minX: number; readonly maxX: number; readonly minZ: number; readonly maxZ: number };
-  /** Outermost front surface the face can sit on (the wall, or its battens). */
+  /** Outermost front surface the face can sit on (the wall, or its louvres). */
   readonly frontSkinZ: number;
   readonly door: {
     /** Hinge line, at the opening's left jamb and the front wall's centre plane. */
@@ -88,16 +95,18 @@ export interface ToiletLayout {
 }
 
 export function toiletLayout(variant: ToiletVariant): ToiletLayout {
-  const { width: w, depth: d, height: h } = variant.shell;
+  const { width: w, depth: d, height: h, drum } = variant.shell;
   if (w < MIN_PLAN || d < MIN_PLAN || h < MIN_HEIGHT) {
     throw new Error(`${variant.id}: a toilet cabin needs at least ${MIN_PLAN} x ${MIN_PLAN} x ${MIN_HEIGHT} m`);
+  }
+  if (drum !== undefined && drum < minDrumRadius(w, d)) {
+    throw new Error(`${variant.id}: a drum round a ${w} x ${d} m cabin needs a radius of at least ${minDrumRadius(w, d).toFixed(2)} m`);
   }
   const floorY = PLINTH + TILE;
   const inner = { minX: -w / 2 + WALL, maxX: w / 2 - WALL, minZ: -d / 2 + WALL, maxZ: d / 2 - WALL };
   const doorStart = inner.minX + 0.12;
   const doorEnd = doorStart + DOOR_WIDTH;
-  const battens = variant.shell.dressing.includes('battens');
-  const frontSkinZ = -d / 2 - (battens ? BATTEN_DEPTH : 0);
+  const frontSkinZ = -d / 2 - (variant.shell.dressing.includes('louvres') ? LOUVRE_REACH : 0);
 
   const bowlX = inner.maxX - 0.45;
   const bowlZ = inner.maxZ - 0.36;
@@ -139,20 +148,21 @@ export function toiletLayout(variant: ToiletVariant): ToiletLayout {
 
 /**
  * The authored `[x, z]` extent: symmetric about the origin, as placement reads it, and
- * covering the roof's overhang, the plinth and any dressing in front of the door.
+ * covering the plinth, the roof's overhang, any dressing and the whole family.
  */
 export function toiletFootprint(shell: ToiletShellSpec): readonly [number, number] {
-  let halfX = shell.width / 2 + Math.max(shell.overhang, PLINTH_MARGIN);
-  let halfZ = shell.depth / 2 + Math.max(shell.overhang, PLINTH_MARGIN);
-  // A gable slab's upper edge reaches past its eave by its thickness's run.
-  if (shell.roof === 'gable') halfX = Math.max(halfX, shell.width / 2 + shell.overhang + ROOF_SLAB * Math.sin(GABLE_PITCH));
-  if (shell.dressing.includes('privacy-walls')) {
-    halfZ = Math.max(halfZ, shell.depth / 2 + PRIVACY_WALL_OFFSET + PRIVACY_WALL_THICKNESS / 2);
-  }
+  const { width: w, depth: d } = shell;
+  const reach = new Reach();
+  const outline = cabinOutline(shell);
+  const [roofX, roofZ] = roofHalf(shell.roof, outline, shell.overhang);
+  if (outline.kind === 'circle') reach.circle(outline.x, outline.z, Math.max(outline.radius + PLINTH_MARGIN, roofX));
+  else reach.rect(outline.x, outline.z, Math.max(outline.width / 2 + PLINTH_MARGIN, roofX), Math.max(outline.depth / 2 + PLINTH_MARGIN, roofZ));
+  if (shell.dressing.includes('louvres')) reach.rect(0, 0, w / 2 + LOUVRE_REACH, d / 2 + LOUVRE_REACH);
+  if (shell.dressing.includes('privacy-walls')) reach.point(0, d / 2 + PRIVACY_WALL_OFFSET + PRIVACY_WALL_THICKNESS / 2);
   // The pickets' front faces; the rails sit behind them.
-  if (shell.dressing.includes('house')) halfZ = Math.max(halfZ, shell.depth / 2 + FENCE_OFFSET + 0.015);
-  // Rounded up to the centimetre, so the authored figure never undercuts the measured one.
-  return [Math.ceil(200 * halfX - 1e-6) / 100, Math.ceil(200 * halfZ - 1e-6) / 100];
+  if (shell.dressing.includes('house')) reach.point(0, d / 2 + FENCE_OFFSET + 0.015);
+  familyReach(shell, reach);
+  return reach.footprint();
 }
 
 /** Builds a variant's static shell into `root` (a `PoiVariantDefinition.build`). */
@@ -170,7 +180,14 @@ export function buildToiletShell(root: THREE.Group, variant: ToiletVariant): voi
   const house = shell.dressing.includes('house');
   const sideWindows: Opening[] = house ? [[-0.35, 0.35, 1.15, 1.75]] : [];
 
-  box(root, [w + 2 * PLINTH_MARGIN, PLINTH, d + 2 * PLINTH_MARGIN], [0, PLINTH / 2, 0], palette.plinth, [0, 0, 0], false, 'blocks');
+  const outline = cabinOutline(shell);
+  if (outline.kind === 'circle') {
+    const radius = outline.radius + PLINTH_MARGIN;
+    cylinder(root, radius, radius, PLINTH, ROUND_SIDES, [outline.x, PLINTH / 2, outline.z], palette.plinth);
+  } else {
+    const size = [outline.width + 2 * PLINTH_MARGIN, PLINTH, outline.depth + 2 * PLINTH_MARGIN] as const;
+    box(root, size, [outline.x, PLINTH / 2, outline.z], palette.plinth, [0, 0, 0], false, 'blocks');
+  }
 
   // Everything from the plinth up is built on its top, so the kit's walls start at 0.
   const body = new THREE.Group();
@@ -187,25 +204,40 @@ export function buildToiletShell(root: THREE.Group, variant: ToiletVariant): voi
     windowIn(body, 'z', -w / 2 + WALL / 2, opening, palette.trim);
     windowIn(body, 'z', w / 2 - WALL / 2, opening, palette.trim);
   }
+  if (shell.drum !== undefined) {
+    const wrap = new THREE.Mesh(drumWrapGeometry(w, d, h, shell.drum), material(palette.walls[1]));
+    wrap.castShadow = true;
+    wrap.receiveShadow = true;
+    body.add(wrap);
+  }
   registerDoorClearance(
     root,
     new THREE.Box3(new THREE.Vector3(doorStart, PLINTH + 0.08, -d / 2 - 0.3), new THREE.Vector3(doorEnd, PLINTH + DOOR_HEIGHT, -d / 2 + 1.05)),
     'toilet door',
   );
 
-  if (shell.dressing.includes('battens')) {
+  if (shell.dressing.includes('louvres')) {
     const skipFront: [number, number][] = [[doorStart - 0.1, doorEnd + 0.1]];
     const skipBack: [number, number][] = [[backWindow[0] - 0.1, backWindow[1] + 0.1]];
     const skipSide = sideWindows.map((o): [number, number] => [o[0] - 0.1, o[1] + 0.1]);
-    battens(body, 'x', -d / 2 - BATTEN_DEPTH / 2, w, h, skipFront, palette.accent);
-    battens(body, 'x', d / 2 + BATTEN_DEPTH / 2, w, h, skipBack, palette.accent);
-    battens(body, 'z', -w / 2 - BATTEN_DEPTH / 2, d, h, skipSide, palette.accent);
-    battens(body, 'z', w / 2 + BATTEN_DEPTH / 2, d, h, skipSide, palette.accent);
+    louvres(body, 'x', -d / 2, -1, w, 0, h, skipFront, palette.accent, 0);
+    louvres(body, 'x', d / 2, 1, w, 0, h, skipBack, palette.accent, 1);
+    louvres(body, 'z', -w / 2, -1, d, 0, h, skipSide, palette.accent, 2);
+    louvres(body, 'z', w / 2, 1, d, 0, h, skipSide, palette.accent, 3);
   }
 
   // The ceiling sits inside the walls' top, so the roof rests on walls and ceiling alike.
   box(body, [w - 2 * WALL, CEILING, d - 2 * WALL], [0, h - CEILING / 2, 0], 0xe6e2d8, [0, 0, 0], true);
-  roof(root, variant, PLINTH + h);
+  // A floating roof over a drum stands on the wrap: at the back and either side.
+  const posts =
+    outline.kind === 'circle'
+      ? ([
+          [0, (d / 2 + outline.z + outline.radius) / 2],
+          [(w / 2 + outline.radius) / 2, outline.z],
+          [-(w / 2 + outline.radius) / 2, outline.z],
+        ] as const)
+      : [];
+  roofOver(root, shell.roof, outline, PLINTH + h, shell.overhang, roofLook(palette, [palette.walls[0], palette.walls[1]], house), posts);
 
   interior(root, variant, layout);
 
@@ -235,6 +267,7 @@ export function buildToiletShell(root: THREE.Group, variant: ToiletVariant): voi
     fence(root, -w / 2 - PLINTH_MARGIN, doorStart - 0.35, z, palette.accent);
     fence(root, doorEnd + 0.35, w / 2 + PLINTH_MARGIN, z, palette.accent);
   }
+  buildFamily(root, variant);
 }
 
 /** A trimmed window with a frosted pane filling what the trim leaves of the opening. */
@@ -249,80 +282,11 @@ function windowIn(parent: THREE.Object3D, axis: 'x' | 'z', fixed: number, openin
   else box(parent, [0.02, tall, along], [fixed, y, centre], 0xcfdcda);
 }
 
-/** Vertical battens over one outer wall face, clear of its openings and its corners. */
-function battens(parent: THREE.Object3D, axis: 'x' | 'z', fixed: number, length: number, height: number, skip: readonly (readonly [number, number])[], color: number): void {
-  for (let u = -length / 2 + 0.06; u <= length / 2 - 0.06 + 1e-6; u += BATTEN_STEP) {
-    if (skip.some(([a, b]) => u > a && u < b)) continue;
-    if (axis === 'x') box(parent, [0.05, height, BATTEN_DEPTH], [u, height / 2, fixed], color);
-    else box(parent, [BATTEN_DEPTH, height, 0.05], [fixed, height / 2, u], color);
-  }
-}
-
 /** A low picket fence along X: pickets in front, two rails touching their backs. */
 function fence(parent: THREE.Object3D, from: number, to: number, z: number, color: number): void {
   if (to - from < 0.3) return;
   for (let x = from + 0.04; x <= to - 0.04 + 1e-6; x += 0.14) box(parent, [0.06, 0.8, 0.03], [x, 0.4, z], color);
   for (const y of [0.25, 0.6]) box(parent, [to - from, 0.06, 0.03], [(from + to) / 2, y, z + 0.03], color);
-}
-
-/** A four-sided frustum with flat facets, its corners on the axes' diagonals: unit base. */
-function pyramidGeometry(topShare: number): THREE.BufferGeometry {
-  const key = `toilet-pyramid:${topShare}`;
-  let geometry = geometryCache.get(key);
-  if (!geometry) {
-    const radius = Math.SQRT1_2;
-    geometry = new THREE.CylinderGeometry(radius * topShare, radius, 1, 4, 1, false, Math.PI / 4).toNonIndexed();
-    geometry.computeVertexNormals();
-    geometryCache.set(key, geometry);
-  }
-  return geometry;
-}
-
-function roof(root: THREE.Group, variant: ToiletVariant, y: number): void {
-  const { width: w, depth: d, overhang: o, palette, roof: kind } = variant.shell;
-  if (kind === 'flat') {
-    box(root, [w + 2 * o, 0.16, d + 2 * o], [0, y + 0.08, 0], palette.roof, [0, 0, 0], true);
-    return;
-  }
-  if (kind === 'pyramid') {
-    box(root, [w + 2 * o, 0.1, d + 2 * o], [0, y + 0.05, 0], palette.roof, [0, 0, 0], true);
-    const rise = 0.5 * (Math.min(w, d) / 2 + o);
-    const frustum = new THREE.Mesh(pyramidGeometry(0.1), material(palette.roof));
-    frustum.scale.set(w + 2 * o, rise, d + 2 * o);
-    frustum.position.set(0, y + 0.1 + rise / 2, 0);
-    frustum.castShadow = true;
-    frustum.receiveShadow = true;
-    frustum.userData.poiRoof = true;
-    root.add(frustum);
-    cylinder(root, 0.05, 0.05, 0.35, 6, [0, y + 0.1 + rise + 0.175, 0], palette.accent).userData.poiRoof = true;
-    return;
-  }
-  // Gable, ridge along Z: two slabs whose undersides run along the gable ends' tops.
-  const slope = Math.tan(GABLE_PITCH);
-  const rise = (w / 2) * slope;
-  const run = w / 2 + o;
-  const length = run / Math.cos(GABLE_PITCH);
-  const midX = run / 2;
-  const midY = y + rise - midX * slope;
-  const nx = Math.sin(GABLE_PITCH) * (ROOF_SLAB / 2);
-  const ny = Math.cos(GABLE_PITCH) * (ROOF_SLAB / 2);
-  box(root, [length, ROOF_SLAB, d + 2 * o], [midX + nx, midY + ny, 0], palette.roof, [0, 0, -GABLE_PITCH], true);
-  box(root, [length, ROOF_SLAB, d + 2 * o], [-midX - nx, midY + ny, 0], palette.roof, [0, 0, GABLE_PITCH], true);
-  for (const [z, color] of [[-d / 2 + WALL / 2, palette.walls[0]], [d / 2 - WALL / 2, palette.walls[1]]] as const) {
-    const end = new THREE.Mesh(gableGeometry(w, rise, WALL), material(color));
-    end.position.set(0, y, z);
-    end.castShadow = true;
-    end.receiveShadow = true;
-    end.userData.poiRoof = true;
-    root.add(end);
-  }
-  if (variant.shell.dressing.includes('house')) {
-    const x = 0.45;
-    const surface = y + rise - x * slope + ROOF_SLAB / Math.cos(GABLE_PITCH);
-    for (const z of [-d / 4, 0, d / 4]) {
-      box(root, [0.24, 0.7, 0.24], [x, surface + 0.35 - 0.12, z], palette.accent, [0, 0, 0], true);
-    }
-  }
 }
 
 /** The fixtures that never move. */

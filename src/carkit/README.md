@@ -369,6 +369,7 @@ cabin: … }`) share everything not overridden. Current families:
 | `front`, `rear` | `FaceLook`: one end of the car. |
 | `brightwork` | `Finish` of door handles and mirrors. |
 | `mirrors?` | `'left'`: only the driver's door mirror (the base Oka). Absent: both. |
+| `mirrorStalk?` | Door mirrors on an upright stalk (the UAZ-469): the head this much higher than on the short arm at the door's top (centre belt + 0.08) and 3.5 cm further back, on a rod 2 cm off the skin from a bracket under the belt at the door's front edge, an arm out and back into the head's ball. Absent: the short arm. |
 | `sill` | `Finish` of a strip along the sill between the arches, or `null`. |
 | `waist` | `{ y, height, finish }`: a moulding along the flank, broken at the shut lines (each piece riding on its door) and stopping `MOULDING_ARCH_GAP` (30 mm) short of a wheel arch it would run into (the 2115's low door mouldings; the classics' strips sit above their arches and are not cut); or `null`. |
 | `repeater` | `{ s0, s1, y0, y1 }`: the amber side repeater on each front wing, or `null`. |

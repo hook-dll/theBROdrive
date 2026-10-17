@@ -20,7 +20,13 @@
  *  8. determinism: two builds of a shell and a rig are identical;
  *  9. save/load: every state and completion round-trips through JSON, a rebuilt rig shows
  *     it, and malformed records are refused;
- * 10. face: every emotion lands, brows tilt the right way.
+ * 10. face: every emotion lands, brows tilt the right way;
+ * 11. families: every family is drawn by some variant; each variant builds the annexes,
+ *     covers, louvres, vessel and faucets its catalogue entry lists; no two volumes (the
+ *     cabin, its drum, every annex) interpenetrate and each annex stands on its plinth;
+ *     columns stand clear of every volume and of the door's swing; every column and
+ *     louvre is carried by its cover and every cover clears everything under it; the
+ *     approach to the door is open (only a marked screen may stand across it).
  *
  * What still needs the browser (gallery `window.__poiGallery`): the rendered mirror, the
  * day/night look and no shader-program growth while fixtures and states change.
@@ -35,7 +41,8 @@ import { toiletFootprint, toiletLayout, type ToiletLayout } from '../src/world/t
 import { MIRROR_FAR } from '../src/world/toilets/mirror';
 import { ToiletRig } from '../src/world/toilets/rig';
 import { completeToilet, decodeToiletProgress, encodeToiletProgress, newToiletProgress, withToiletState } from '../src/world/toilets/state';
-import { TOILET_EMOTIONS, TOILET_STATES, type ToiletVariant } from '../src/world/toilets/types';
+import { drumCentreZ, PLINTH } from '../src/world/toilets/parts';
+import { TOILET_EMOTIONS, TOILET_FAMILIES, TOILET_STATES, type ToiletVariant } from '../src/world/toilets/types';
 import { boxCandidates, coplanarFaces, nearDuplicatePanels } from './poizfight';
 
 const failures: string[] = [];
@@ -421,6 +428,129 @@ function posedRig(variant: ToiletVariant, state: (typeof TOILET_STATES)[number])
     check(innerDrop('worried') < 0, `${variant.id}: worried brows do not rise at the inner end`);
   }
   console.log(`  ${faced.length} faces show all ${TOILET_EMOTIONS.length} emotions`);
+}
+
+// --- 11. families ------------------------------------------------------------------
+{
+  const used = new Set(TOILET_VARIANTS.map((variant) => variant.shell.form.family));
+  for (const family of TOILET_FAMILIES) check(used.has(family), `no variant draws the ${family} family`);
+  /** Shared volume of two boxes; touching is none. */
+  const overlap = (a: THREE.Box3, b: THREE.Box3): number => {
+    const x = Math.min(a.max.x, b.max.x) - Math.max(a.min.x, b.min.x);
+    const y = Math.min(a.max.y, b.max.y) - Math.max(a.min.y, b.min.y);
+    const z = Math.min(a.max.z, b.max.z) - Math.max(a.min.z, b.min.z);
+    return x > 1e-4 && y > 1e-4 && z > 1e-4 ? x * y * z : 0;
+  };
+  const ray = new THREE.Raycaster();
+  let annexCount = 0;
+  let columnCount = 0;
+  let louvreCount = 0;
+  for (const variant of TOILET_VARIANTS) {
+    const { shell } = variant;
+    const { form } = shell;
+    const { width: w, depth: d, height: h } = shell;
+    const root = createPoiVariant(poiVariantIndex(variant.id));
+    root.updateMatrixWorld(true);
+    const parts = (name: string): THREE.Object3D[] => {
+      const found: THREE.Object3D[] = [];
+      root.traverse((object) => {
+        if (object.userData.toiletPart === name) found.push(object);
+      });
+      return found;
+    };
+
+    const annexes = parts('annex');
+    const covers = parts('cover');
+    const columns = parts('column');
+    const fins = parts('louvre');
+    const listed =
+      form.family === 'row' ? form.rooms.length : form.family === 'cluster' ? form.huts.length : form.family === 'eave' ? form.booths.length : form.family === 'canopy' ? form.cubes.length : 0;
+    check(annexes.length === listed, `${variant.id}: ${annexes.length} annexes built for ${listed} catalogued`);
+    const coverWanted = form.family === 'eave' || form.family === 'canopy' ? 1 : 0;
+    check(covers.length === coverWanted, `${variant.id}: ${covers.length} covers built for ${coverWanted}`);
+    const columnsWanted = form.family === 'eave' || form.family === 'canopy' ? form.columns.length : 0;
+    check(columns.length === columnsWanted, `${variant.id}: ${columns.length} columns built for ${columnsWanted}`);
+    if (form.family === 'eave' && form.louvres) check(fins.length > form.louvres.count / 2, `${variant.id}: only ${fins.length} of ${form.louvres.count} louvres stand`);
+    else check(fins.length === 0, `${variant.id}: louvres without a louvre ring`);
+    check(parts('vessel').length === (form.family === 'vessel' ? 1 : 0), `${variant.id}: vessel built where none is catalogued, or missing`);
+    const faucets = form.family === 'vessel' ? form.faucets.length : 0;
+    check(parts('faucet').length === faucets, `${variant.id}: ${parts('faucet').length} faucets for ${faucets}`);
+    annexCount += annexes.length;
+    columnCount += columns.length;
+    louvreCount += fins.length;
+
+    // The solid volumes: the cabin (its drum's bounds if it has one), then every annex.
+    const cabin =
+      shell.drum === undefined
+        ? new THREE.Box3(new THREE.Vector3(-w / 2, 0, -d / 2), new THREE.Vector3(w / 2, PLINTH + h, d / 2))
+        : new THREE.Box3(
+            new THREE.Vector3(-shell.drum, 0, drumCentreZ(w, d, shell.drum) - shell.drum),
+            new THREE.Vector3(shell.drum, PLINTH + h, drumCentreZ(w, d, shell.drum) + shell.drum),
+          );
+    const volumes: { readonly label: string; readonly box: THREE.Box3 }[] = [{ label: 'the cabin', box: cabin }];
+    annexes.forEach((group, index) => {
+      const volume = group.children.find((child) => child.userData.toiletVolume === true);
+      if (!volume) {
+        check(false, `${variant.id}: annex ${index + 1} has no volume`);
+        return;
+      }
+      const box = boundsOf(volume);
+      check(Math.abs(box.min.y - PLINTH) < 1e-3, `${variant.id}: annex ${index + 1} does not stand on a plinth (${box.min.y.toFixed(3)} m)`);
+      volumes.push({ label: `annex ${index + 1}`, box });
+    });
+    for (let i = 0; i < volumes.length; i++) {
+      for (let j = i + 1; j < volumes.length; j++) {
+        const shared = overlap(volumes[i]!.box, volumes[j]!.box);
+        check(shared === 0, `${variant.id}: ${volumes[i]!.label} and ${volumes[j]!.label} interpenetrate (${shared.toFixed(3)} m³)`);
+      }
+    }
+
+    // Columns clear every volume and the door's swing: a leaf's width out from the hinge.
+    const layout = toiletLayout(variant);
+    const swing = new THREE.Box3(
+      new THREE.Vector3(layout.door.hingeX - 0.1, 0, -d / 2 - layout.door.width - 0.1),
+      new THREE.Vector3(layout.door.hingeX + layout.door.width, PLINTH + h, -d / 2),
+    );
+    for (const post of columns) {
+      const box = boundsOf(post);
+      for (const { label, box: volume } of volumes) check(overlap(box, volume) === 0, `${variant.id}: a column at ${box.getCenter(new THREE.Vector3()).toArray().map((v) => v.toFixed(1))} stands in ${label}`);
+      check(!box.intersectsBox(swing), `${variant.id}: a column stands in the door's swing`);
+    }
+
+    // Every column and louvre is carried: a ray up from just under its top meets a cover.
+    for (const carried of [...columns, ...fins]) {
+      const box = boundsOf(carried);
+      const centre = box.getCenter(new THREE.Vector3());
+      ray.set(new THREE.Vector3(centre.x, box.max.y - 0.01, centre.z), new THREE.Vector3(0, 1, 0));
+      const hit = ray.intersectObjects(covers, true)[0];
+      check(hit !== undefined && hit.distance < 0.03, `${variant.id}: a ${carried.userData.toiletPart} at ${centre.x.toFixed(1)}, ${centre.z.toFixed(1)} does not reach its cover`);
+    }
+    // Every cover clears what stands under it by 10 cm (its posts and louvres reach it).
+    for (const cover of covers) {
+      const underside = boundsOf(cover).min.y;
+      let tallest = 0;
+      for (const mesh of meshes(root)) {
+        const part = mesh.userData.toiletPart;
+        if (part === 'cover' || part === 'column' || part === 'louvre') continue;
+        tallest = Math.max(tallest, boundsOf(mesh).max.y);
+      }
+      check(tallest <= underside - 0.1, `${variant.id}: the cover's underside at ${underside.toFixed(2)} m clears what is under it (${tallest.toFixed(2)} m) by less than 10 cm`);
+    }
+
+    // The approach: straight out of the doorway, nothing but a marked screen stands. Rays
+    // 5 cm apart across the leaf, so not even a louvre slips between them.
+    const blockers = meshes(root).filter((mesh) => typeof mesh.userData.poiDoorObstacle !== 'string');
+    let blocked: string | null = null;
+    for (let x = layout.door.hingeX; x <= layout.door.hingeX + layout.door.width + 1e-6 && !blocked; x += 0.05) {
+      for (const y of [0.3, 0.7, 1.1, 1.5, 1.9]) {
+        ray.set(new THREE.Vector3(x, y, -d / 2 - 0.1), new THREE.Vector3(0, 0, -1));
+        const hit = ray.intersectObjects(blockers, false)[0];
+        if (hit) blocked = `${hit.distance.toFixed(2)} m out at x ${x.toFixed(2)}, height ${y}`;
+      }
+    }
+    check(blocked === null, `${variant.id}: the approach to the door is blocked ${blocked}`);
+  }
+  console.log(`  ${used.size} of ${TOILET_FAMILIES.length} families drawn; ${annexCount} annexes, ${columnCount} columns, ${louvreCount} louvres placed, carried and clear`);
 }
 
 if (failures.length > 0) {

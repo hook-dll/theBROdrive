@@ -1067,22 +1067,25 @@ export const CABIN_UAZ469: CabinLayoutOverride = {
   bench: { from: 'hip', offset: 0.83, clear: 0.04 },
   bolsters: false,
   // An upright steel face (top lip y 230, foot y 500: 0.19 tall) under a lip reaching back
-  // 3 cm, its top level from the scuttle [P].
+  // 3 cm, its top level from the scuttle [P]. A shallow shelf straight under the screen:
+  // the face 0.20 behind the screen's foot (was 0.345), the shelf from the glass 0.10 deep
+  // to the lip, the footwell and heater open under it [P owner's photo ex-roadmedia.ru
+  // "20_uaz/21.jpg": the shelf about half the face's height deep; E the depth].
   dash: [
-    [0.1, 0.13], [0.31, 0.13], [0.345, 0.115], [0.345, -0.07],
-    [0.32, -0.09], [0.12, -0.11], [0.045, -0.1], [0.045, -0.06],
+    [0.07, 0.13], [0.165, 0.13], [0.2, 0.115], [0.2, -0.07],
+    [0.175, -0.09], [0.1, -0.11], [0.045, -0.1], [0.045, -0.06],
   ],
-  fascia: [[0.345, 0.115], [0.345, -0.07]],
+  fascia: [[0.2, 0.115], [0.2, -0.07]],
   wood: undefined,
   stack: undefined,
   vents: undefined,
   heater: undefined,
   // A flat plate 7 mm proud of the face from the speedometer to the panel's right end
   // (x 560-1075: 0.16-0.52 right of the column) [P].
-  binnacle: [[0.3, 0.075], [0.352, 0.075], [0.352, 0.0], [0.3, 0.0]],
+  binnacle: [[0.155, 0.075], [0.207, 0.075], [0.207, 0.0], [0.155, 0.0]],
   binnacleHalf: 0.185,
   binnacleRight: 0.34,
-  cluster: 0.352,
+  cluster: 0.207,
   // The panel x 710-1075, y 345-440 in a chrome frame, black [P].
   clusterFace: { right: 0.39, up: 0.04, half: [0.13, 0.032], colour: COLOURS.cluster, frame: 'chrome' },
   gauges: [

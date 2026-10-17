@@ -1,8 +1,8 @@
 /**
  * The Japanese street-toilet POIs (docs/toilet-poi-design.md): what a catalogue entry
- * is made of. A variant is DATA: one shell spec, the fixtures it carries, an optional
- * face and the scenario it opens with. Geometry is rebuilt from it; progress is saved
- * apart from it (state.ts).
+ * is made of. A variant is DATA: one service cabin, the family of volumes around it, the
+ * fixtures it carries, an optional face and the scenario it opens with. Geometry is
+ * rebuilt from it; progress is saved apart from it (state.ts).
  */
 
 /** Progress through a visit, in order. */
@@ -24,8 +24,11 @@ export type ToiletVerb = 'open' | 'close' | 'turn' | 'press' | 'pull' | 'slide' 
  */
 export type ToiletScenarioId = 'clogged-drain';
 
-/** Roof over the cabin's ceiling: a slab, a pitched house roof, or a pyramid (hōgyō). */
-export type ToiletRoof = 'flat' | 'gable' | 'pyramid';
+/**
+ * Roof over a volume. On a rectangle: a slab, a pitched house roof, or a pyramid (hōgyō).
+ * On a drum: a round slab, or one lifted clear of the walls on slim posts.
+ */
+export type ToiletRoof = 'flat' | 'gable' | 'pyramid' | 'disc' | 'floating';
 
 /** The pan: a western bowl with a washlet seat and lid, or a floor-level squat pan. */
 export type ToiletBowl = 'washlet' | 'squat';
@@ -33,29 +36,166 @@ export type ToiletBowl = 'washlet' | 'squat';
 /** The shell's wall finish, as the POI kit draws it (world/poi/kit.ts patterns). */
 export type ToiletWallPattern = 'plaster' | 'boards' | 'blocks' | 'metal';
 
-/** Optional exterior dressing on the one shell. */
+/** Optional exterior dressing on the service cabin. */
 export type ToiletDressing =
-  /** Vertical timber battens over every wall (cedar cladding). */
-  | 'battens'
+  /** Cedar boards standing off every wall at varied angles; a cluster's huts wear them too. */
+  | 'louvres'
   /** Two freestanding walls before the door that screen it from the street. */
   | 'privacy-walls'
   /** Chimney stacks on the roof and a low picket fence either side of the door. */
   | 'house';
 
+/**
+ * A sealed booth beside the service cabin, drawn closed: the player never enters it.
+ * `x`, `z` are its ground centre in the variant's frame (the service cabin's centre is the
+ * origin and its door faces -Z); `yaw` turns it about Y, its own door facing -Z before the
+ * turn. `height` is its wall height above its plinth, as the cabin's is.
+ */
+export type ToiletAnnex =
+  | {
+      readonly shape: 'box';
+      readonly x: number;
+      readonly z: number;
+      readonly yaw: number;
+      readonly width: number;
+      readonly depth: number;
+      readonly height: number;
+      readonly color: number;
+    }
+  | {
+      readonly shape: 'drum';
+      readonly x: number;
+      readonly z: number;
+      readonly yaw: number;
+      readonly radius: number;
+      readonly height: number;
+      readonly color: number;
+    };
+
+/** A slim post from the ground to the cover over it, at `[x, z]`. */
+export type ToiletColumn = readonly [number, number];
+
+/** A sealed room of a row, as wide as `width` along X, as deep and tall as the cabin. */
+export interface ToiletRowRoom {
+  /** Rooms on one side follow each other outwards from the cabin, in catalogue order. */
+  readonly side: 'left' | 'right';
+  readonly width: number;
+  readonly color: number;
+}
+
+/** A round or oval eave slab over the whole family. */
+export interface ToiletEave {
+  readonly x: number;
+  readonly z: number;
+  readonly radiusX: number;
+  readonly radiusZ: number;
+  /** Underside, above the ground. */
+  readonly y: number;
+  readonly thickness: number;
+  readonly color: number;
+}
+
+/** A ring of vertical louvres about the cabin's centre, holding the eave up; open front and back. */
+export interface ToiletLouvreRing {
+  /** To the louvres' centre line. */
+  readonly radius: number;
+  readonly count: number;
+  /** Along the ring, and radially. */
+  readonly width: number;
+  readonly depth: number;
+  /** Half the angle, radians, left open at the front (-Z) and at the back (+Z). */
+  readonly entrance: number;
+  readonly color: number;
+}
+
+/** A long cover slab running along X, its underside following `profile`. */
+export interface ToiletCanopy {
+  /** Plan centre. */
+  readonly x: number;
+  readonly z: number;
+  /** Along X, and across Z. */
+  readonly length: number;
+  readonly width: number;
+  /**
+   * Underside heights above the ground at evenly spaced stations from the -X end to the
+   * +X end: a sag deflects it, a zigzag folds it, two stations slant it.
+   */
+  readonly profile: readonly number[];
+  readonly thickness: number;
+  readonly color: number;
+}
+
+/**
+ * The plan family: what stands around the one service cabin the player enters. Each is a
+ * reusable gesture read off a real building (docs/toilet-poi-design.md, "Families").
+ */
+export type ToiletForm =
+  /** The cabin alone. */
+  | { readonly family: 'cabin' }
+  /** Sealed rooms either side of the cabin in one row along X, under one roof. */
+  | { readonly family: 'row'; readonly rooms: readonly ToiletRowRoom[] }
+  /** Separate huts scattered about the cabin, each on its own plinth under its own roof of the cabin's kind. */
+  | { readonly family: 'cluster'; readonly huts: readonly ToiletAnnex[] }
+  /**
+   * A concave vessel: one curved wall wrapping behind the cabin and reaching forward
+   * either side of the door, its rim rising from the back to the tips and flaring out, with
+   * faucets at several heights on its inner face. Its circle's centre is on the cabin's
+   * front face line.
+   */
+  | {
+      readonly family: 'vessel';
+      /** To the wall's centre line at the ground. */
+      readonly radius: number;
+      /** Half the arc, radians, measured from straight behind the cabin. */
+      readonly sweep: number;
+      /** Rim heights above the ground: straight behind the cabin, and at the tips. */
+      readonly back: number;
+      readonly tips: number;
+      /** Outward lean, radians. */
+      readonly flare: number;
+      readonly thickness: number;
+      readonly color: number;
+      /** Spout heights above the ground, one faucet each, alternating sides. */
+      readonly faucets: readonly number[];
+    }
+  /** A round or oval eave over the cabin, held by a louvre ring or by columns, with booths beneath. */
+  | {
+      readonly family: 'eave';
+      readonly eave: ToiletEave;
+      readonly louvres: ToiletLouvreRing | null;
+      readonly booths: readonly ToiletAnnex[];
+      readonly columns: readonly ToiletColumn[];
+    }
+  /** One long deflected, folded or slanted canopy on columns over the cabin and sealed cubes. */
+  | {
+      readonly family: 'canopy';
+      readonly canopy: ToiletCanopy;
+      readonly cubes: readonly ToiletAnnex[];
+      readonly columns: readonly ToiletColumn[];
+    };
+
+export type ToiletFamily = ToiletForm['family'];
+
+export const TOILET_FAMILIES: readonly ToiletFamily[] = ['cabin', 'row', 'cluster', 'vessel', 'eave', 'canopy'];
+
 /** Hex colours, sRGB. */
 export interface ToiletPalette {
-  /** Walls front, back, left, right (the door is in the front, facing -Z). */
+  /** Walls front, back, left, right (the door is in the front, facing -Z); a drum takes the back's. */
   readonly walls: readonly [number, number, number, number];
+  /** Opening trim, the annexes' door frames, columns and the floating roofs' posts. */
   readonly trim: number;
   readonly roof: number;
   readonly plinth: number;
   readonly floor: number;
   readonly door: number;
-  /** Battens, privacy walls, chimneys and fence. */
+  /** Louvres, privacy walls, chimneys and fence. */
   readonly accent: number;
 }
 
-/** The one low-poly cabin every variant is drawn from (geometry.ts). Metres. */
+/**
+ * The one low-poly service cabin the player enters (geometry.ts), and the family drawn
+ * around it (families.ts). Metres.
+ */
 export interface ToiletShellSpec {
   /** Outer wall faces, X. At least 2.2 for the fixtures to fit (geometry.ts throws otherwise). */
   readonly width: number;
@@ -66,9 +206,15 @@ export interface ToiletShellSpec {
   readonly roof: ToiletRoof;
   /** How far the roof reaches past the walls. */
   readonly overhang: number;
+  /**
+   * Wraps the side and back walls in a drum of this radius whose circle runs through the
+   * front corners: a round booth with a flat door front. Its roof is `disc` or `floating`.
+   */
+  readonly drum?: number;
   readonly wallPattern: ToiletWallPattern;
   readonly palette: ToiletPalette;
   readonly dressing: readonly ToiletDressing[];
+  readonly form: ToiletForm;
 }
 
 /** The stateful fixtures a cabin can carry; each kind has one builder in fixtures.ts. */

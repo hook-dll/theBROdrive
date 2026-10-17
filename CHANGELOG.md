@@ -1476,6 +1476,16 @@
 
 ### Fixed
 
+- UAZ-469 DOOR MIRRORS STAND WHERE THE CAR'S DO (`carkit/uaz.ts` `LOOK_UAZ469`, new
+  `KitLook.mirrorStalk`, `carkit/exterior.ts` `buildDoorHardware`). The heads sat on the
+  generic short arm at the door's top, centre 1.19 m, under the glass's foot (1.23): from
+  the seat the door trim hid a third of the left glass and the cabin trim 72 % of the right.
+  They now stand on upright stalks from a bracket at the door's front edge under the belt,
+  the head behind the stalk beside the glass's front lower corner, centre 1.36 m (drawn
+  1.345, photos 1.34-1.39), s 1.415 → 1.45; both glasses are seen whole through the door
+  glass, the left one 4° under the eye in the straight-ahead view. Aim controls and live
+  faces as before; every other kit car's geometry identical.
+
 - THE NIGHT GLITTER IS POINTS, NOT LITTLE RECTANGLES (`GROUND_GLITTER_HOOK`,
   `world/terrainmesh.ts`). Each fragment asked only its own 0.35 m lattice cell for a
   grain, and from about 12 m a cell is only a few pixels tall, so a grain near its cell's
