@@ -852,6 +852,61 @@ export const CABIN_2110: CabinLayoutOverride = {
   frontDoor: { handle: [0.3, -0.12], crank: [0.22, -0.35] },
 };
 
+// The Daewoo Nexia N100 on the Samara's furniture (a moulded dash, struts and a
+// transverse engine), read off these sources:
+//  - Wikimedia Commons "Daewoo Nexia interior.jpg" (CC BY-SA 3.0, 1920 x 1440): the dash
+//    from the driver's seat, the wheel, the end vent, the centre stack.
+//  - "Astra F (MK3) dashboard in Daewoo Nexia.jpg" (CC BY-SA 3.0): the dash from the
+//    driver's door, the hood, the end vents either side of it, the seats.
+//  - "Daewoo Nexia Tacho.jpg" (CC BY-SA 3.0): the cluster square on.
+// Scale on the interior photo: the column (hub x 700) to the stack's centre line (x 1370),
+// 670 px, is the driver's seat line 0.36 off the centre (the Samara's), so 0.54 mm/px at
+// the fascia [E]. Heights hang from the Samara's cluster [E]: no photo shows the belt and
+// the dash together.
+
+/**
+ * Daewoo Nexia: a moulded dark grey dash, a rounded hood over the cluster (the tachometer
+ * left, a big speedometer in the middle, the temperature and fuel dials stacked on the
+ * right), a slatted vent at each end, two vents side by side at the top of the stack over
+ * the heater's three knobs, the radio under them, the glovebox low before the passenger,
+ * a wide pad on a two-spoke wheel.
+ */
+export const CABIN_NEXIA: CabinLayoutOverride = {
+  // The hood rounder and lower than the Samara's box, its lip over the dials [P].
+  binnacle: [[0.25, -0.025], [0.29, 0.07], [0.42, 0.09], [0.49, 0.08], [0.5, 0.065], [0.472, 0.06], [0.472, -0.035], [0.4, -0.03]],
+  binnacleHalf: 0.2,
+  clusterFace: { right: 0, up: 0.012, half: [0.17, 0.05], colour: COLOURS.cluster, frame: 'black' },
+  gauges: [
+    // On the cluster photo the speedometer's numerals ring (about 200 px in radius) is
+    // centred on the column; the tachometer's (150 px) 330 px left of it; the temperature
+    // and fuel dials (about 80 px) 330 px right, 50 px over and 70 px under its centre.
+    { channel: 'speed', right: 0, up: 0.012, radius: 0.042, full: 200, ...BIG },
+    { channel: 'rpm', right: -0.095, up: 0.012, radius: 0.032, full: 8000, ...BIG },
+    { channel: 'temp', right: 0.09, up: 0.03, radius: 0.016, ...SMALL },
+    { channel: 'fuel', right: 0.105, up: -0.01, radius: 0.016, ...SMALL },
+  ],
+  // Two telltales show over the speedometer's shoulders [P]; the rest of the set is not
+  // legible, so the Samara's lies in one row across the face's top.
+  lamps: { right: 0, up: 0.058, cols: 7, pitch: 0.0145, show: ['turn', 'side', 'beam', 'fuel', 'oil', 'charge', 'brake'] },
+  // End vents at the dash's ends level with the hood's foot; the centre pair, each about
+  // 170 x 60 px, side by side over the stack [P].
+  vents: [
+    { x: 0.6, dy: -0.06, half: [0.04, 0.03] },
+    { x: -0.6, dy: -0.06, half: [0.04, 0.03] },
+    { x: 0.05, dy: -0.09, half: [0.045, 0.018] },
+    { x: -0.05, dy: -0.09, half: [0.045, 0.018] },
+  ],
+  // Three knobs about 95 px apart in a dark panel under the vents [P].
+  heater: { dy: -0.165, half: [0.1, 0.03], knobs: [-0.05, 0, 0.05], radius: 0.018 },
+  hazard: [-0.085, -0.12],
+  stack: { half: 0.11 },
+  radio: [0, -0.24],
+  ashtray: [0, -0.3],
+  glovebox: { x: -0.4, dy: -0.18, half: [0.16, 0.05] },
+  // A wide pad on two spokes at four and eight o'clock [P]; the Samara's size.
+  wheel: { ...LAYOUTS.samara.wheel, spokes: [-35, 215] },
+};
+
 // The VAZ-1111 «Ока» of 1988-1996 on the Samara's furniture, read off these sources:
 //  - Wikimedia Commons "Oka-Innenraum.jpg" (CC BY 4.0; an early car, 4288 x 2848): the
 //    dash from the driver's door, cluster, switches, heater sliders, wheel, lever.
@@ -2331,11 +2386,13 @@ class Cabin {
     b.color(COLOURS.black).cylinderZ('chrome', [0.07, -0.008, 0.017], 0.01, 0.005, 8);
     b.pop();
     // The display is a separate, very dim face: it stays on the orange dial and is
-    // visibility-gated by the radio state, never moved or extended from the fascia.
-    const displayAt = m.at(0, 0.011, 0.013);
+    // visibility-gated by the radio state, never moved or extended from the fascia. It lies
+    // UNDER the needle (2 mm over the dial, the needle 1.5 mm over it): lying over the
+    // needle, a lit radio hid its tuning mark.
+    const displayAt = m.at(0, 0.011, 0.014);
     fineDetail(this.hinge(this.group, ORIGIN, 'radio_display', displayAt, { channel: 'radio', kind: 'visible', axis: [0, 0, 0], amount: 1 }, undefined, (d) => {
       d.push(m.matrix).color(COLOURS.dial);
-      d.quad('lamp_glow', [-0.05, 0.003, 0.017], [0.05, 0.003, 0.017], [0.05, 0.019, 0.017], [-0.05, 0.019, 0.017]);
+      d.quad('lamp_glow', [-0.05, 0.003, 0.014], [0.05, 0.003, 0.014], [0.05, 0.019, 0.014], [-0.05, 0.019, 0.014]);
       d.pop();
     }));
     // The needle 3.5 mm off the dial, so the two do not fight in depth from outside.
