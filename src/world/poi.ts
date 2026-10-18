@@ -3,25 +3,9 @@ import type RAPIER from '@dimforge/rapier3d-compat';
 import { hash, hash01, pick } from '../core/rng';
 import { SurfaceType } from '../core/surfaces';
 import { ROAD_LENGTH, type Road } from './road';
-import type { CarState, GameWorld } from '../game/state';
-import {
-  IMPORT_ENGINE_IDS,
-  oilCapacity,
-  variant,
-  variantsOfKind,
-  type BodyClass,
-  type PartInstance,
-} from '../parts/registry';
-import type {
-  FluidCanItem,
-  FluidKind,
-  Item,
-  PartItem,
-  SprayCanItem,
-  ToolItem,
-} from '../items/items';
-import { makeSponge } from '../items/items';
-import { CAR_PAINTS } from '../vehicle/carpaint';
+import type { MarketField } from './market';
+import { buildVendingMachine, vendingAssortment } from './vending';
+import { buildLotSign, lotOffer, makeLotCar } from './carlot';
 import { makeFlatMaterial } from '../render/materials';
 import {
   carModelMeasure,
@@ -33,15 +17,6 @@ import {
 } from '../render/carmodel';
 import { CAR_MODELS, type CarModelDef } from '../vehicle/carmodels';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
-import type { LoosePartField } from '../parts/loose';
-import {
-  bonnetWaterCapacity,
-  createBonnetStorage,
-  BONNET_SLOT_COUNT,
-  BONNET_SLOT_KINDS,
-} from '../vehicle/bonnet';
-import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
-import { COLD_SOAK_C } from '../vehicle/cooling';
 import type { TrailerField } from '../vehicle/trailer';
 import type { WreckTrunkField } from './wrecktrunks';
 import { courierDefaultStorage } from '../contracts/offers';
@@ -84,15 +59,14 @@ const COURIER_MODELS = CAR_MODELS.filter((def) => def.paintStyle !== undefined);
  * can materialise any stretch of road in any order and a save always restores the
  * exact same stop.
  *
- * WHAT STANDS THERE AND WHAT IT HOLDS ARE TWO ROLLS. The building is drawn from
- * `POI_STRUCTURES` (world/poistructures.ts); what is left outside it — fuel, tools,
- * medicine, a salvage field — is its `PoiStock`, rolled separately, so the world's
- * rewards do not depend on which houses the catalogue happens to contain.
+ * WHAT STANDS THERE AND WHAT IT IS FOR ARE TWO ROLLS. The building is drawn from
+ * `POI_STRUCTURES` (world/poistructures.ts); what kind of stop it is — fuel, store,
+ * home, a salvage field — is its `PoiStock`, rolled separately. Nothing lies about a
+ * stop for the taking: what a stop offers is sold (economy plan).
  *
- * Loot is materialised exactly once, keyed by `Poi.index`. `poi_looted` is the
- * idempotency guard: on any later rebuild the generation below is skipped entirely,
- * survivors live in `world.state.looseParts` / `looseItems`, and anything the player
- * already took is simply absent.
+ * A stop's world objects (a trailer, a car field's cars) are materialised exactly
+ * once, keyed by `Poi.index`. `poi_looted` is the idempotency guard: on any later
+ * rebuild that generation is skipped entirely.
  */
 
 /** Domain tag for the desert slots. */
@@ -145,11 +119,6 @@ export interface Poi {
   readonly desert: boolean;
   /** Deterministic per-POI variation seed for shape and loot. */
   readonly variantSeed: number;
-  /**
-   * One of the first two roadside stops of the drive: its car field always holds a car
-   * the player can take, so a swap is on offer before the road asks for one.
-   */
-  readonly guaranteedCar?: boolean;
 }
 
 function halfStructure(structure: number): number {
@@ -182,7 +151,6 @@ function roadsidePoi(seed: number, slot: number, spacing: number): Poi | null {
     stock: roll.stock,
     desert: false,
     variantSeed: roll.variantSeed,
-    guaranteedCar: roll.guaranteedCar,
   };
 }
 
@@ -323,11 +291,6 @@ function desertPoiClearOfNeighbours(poi: Poi, seed: number, spacing: number, roa
     if (Math.hypot(here.x - there.x, here.z - there.z) < needed) return false;
   }
   return true;
-}
-
-/** Running sub-index so every generated part/item in a POI gets a distinct id. */
-interface LootCounter {
-  sub: number;
 }
 
 /** Anchor in XZ plus the road heading, before any terrain sampling. */
@@ -514,140 +477,13 @@ function addStaticMesh(
   addStaticCollider(ctx, geometry, matrix, surface, bodies, colliders);
 }
 
-
-function makeFluidCan(
-  world: GameWorld,
-  poi: Poi,
-  fluid: FluidKind,
-  litres: number,
-  capacity: number,
-  counter: LootCounter,
-): FluidCanItem {
-  const sub = counter.sub++;
-  return {
-    type: 'fluid_can',
-    id: world.generatedPartId('poi_item', poi.index, sub),
-    fluid,
-    capacity,
-    litres,
-  };
-}
-
-/**
- * What a gas stop stocks, by weight.
- *
- * Fuel dominates because fuel is the pressure the player feels every minute;
- * water and oil are the ones they only think about every 150 km or so, so they
- * turn up often enough to be findable and rarely enough to be worth a detour. Small
- * cans for the engine fluids, because that is how they are sold.
- */
-const FLUID_STOCK: readonly { fluid: FluidKind; weight: number; capacity: number }[] = [
-  { fluid: 'petrol', weight: 0.65, capacity: 20 },
-  { fluid: 'water', weight: 0.19, capacity: 5 },
-  { fluid: 'oil', weight: 0.16, capacity: 5 },
-];
-
-function pickFluid(roll: number): { fluid: FluidKind; capacity: number } {
-  let acc = 0;
-  for (const entry of FLUID_STOCK) {
-    acc += entry.weight;
-    if (roll < acc) return entry;
-  }
-  return FLUID_STOCK[0];
-}
-
-function makeTool(world: GameWorld, poi: Poi, counter: LootCounter): ToolItem {
-  const sub = counter.sub++;
-  return makeSponge(
-    world.generatedPartId('poi_item', poi.index, sub),
-    hash01(poi.variantSeed, sub, 41),
-  );
-}
-
-/**
- * A service part left out front: a boxed air filter on a shop step, a turbocharger or
- * an engine on a pallet at a breaker's yard. Engines come dry, like everything pulled
- * from a wreck, and weathered; filters come new in their box.
- */
-function stockPart(
-  ctx: ChunkContext,
-  poi: Poi,
-  yard: Yard,
-  loose: LoosePartField,
-  counter: LootCounter,
-  variantId: string,
-  across: number,
-  out: number,
-): void {
-  const sub = counter.sub++;
-  const id = ctx.world.generatedPartId('poi_item', poi.index, sub);
-  const kind = variant(variantId).kind;
-  const salvaged = kind === 'engine' || kind === 'turbine';
-  const part: PartInstance = {
-    id,
-    variantId,
-    dirt: salvaged ? 0.3 + hash01(poi.variantSeed, sub, 61) * 0.5 : 0,
-    rust: salvaged ? 0.1 + hash01(poi.variantSeed, sub, 62) * 0.4 : 0,
-  };
-  if (kind === 'air_filter') part.clog = 0;
-  const p = yardPoint(ctx, poi, yard, across, out);
-  loose.spawn(part, p.x, p.y + (kind === 'engine' ? 0.45 : 0.25), p.z);
-}
-
-/**
- * The breaker's-yard finds, by chance per stop: an imported engine to swap in, a
- * turbocharger to bolt on, a new air filter.
- */
-function stockSalvageParts(
-  ctx: ChunkContext,
-  poi: Poi,
-  yard: Yard,
-  loose: LoosePartField,
-  counter: LootCounter,
-  engineChance: number,
-  turboChance: number,
-  filterChance: number,
-): void {
-  if (hash01(poi.variantSeed, 63) < engineChance) {
-    const engineId = pick(IMPORT_ENGINE_IDS, poi.variantSeed, 64);
-    stockPart(ctx, poi, yard, loose, counter, engineId, 0.7, 1.7);
-  }
-  if (hash01(poi.variantSeed, 65) < turboChance) {
-    stockPart(ctx, poi, yard, loose, counter, 'turbine_standard', -0.55, 1.5);
-  }
-  if (hash01(poi.variantSeed, 66) < filterChance) {
-    stockPart(ctx, poi, yard, loose, counter, 'air_filter', 0.1, 0.6);
-  }
-}
-
-/**
- * A spray can left on a bench: any factory colour, rarely full, because a found can
- * is somebody's leftover from a touch-up.
- */
-function makeSprayCan(world: GameWorld, poi: Poi, counter: LootCounter): SprayCanItem {
-  const sub = counter.sub++;
-  return {
-    type: 'spray_can',
-    id: world.generatedPartId('poi_item', poi.index, sub),
-    paint: pick(CAR_PAINTS, poi.variantSeed, 43 + sub).hex,
-    charge: 0.45 + hash01(poi.variantSeed, sub, 44) * 0.55,
-  };
-}
-
-/** What turns up about a yard: a sponge or, as often, a spray can. */
-const YARD_FINDS: readonly ('sponge' | 'spray_can')[] = ['sponge', 'spray_can'];
-
 // ---------------------------------------------------------------------------
-// Kind builders. Each builds its scenery unconditionally and its loot only when
-// `shouldLoot` is set, so an emptied POI keeps its structure but never restocks.
+// Kind builders. Each builds its scenery unconditionally and its world objects only
+// when `shouldLoot` is set, so a stop built once never builds them again.
 //
-// POIs do not shed loose vehicle scrap. Scattering wheels, bumpers and seats down the
-// whole road littered the world with things that had to be picked up one by one and
-// fitted nowhere. What a stop gives is tools, cans, and the few service parts worth a
-// detour (`stockSalvageParts`): an air filter now and then, and at a breaker's yard a
-// turbocharger or an imported engine on a pallet. The buried shells carry their own
-// salvage instead — worn parts under the bonnet, cans and tools in the boot — laid out
-// by `stockWreckLoot` where the field is built.
+// NOTHING LIES ABOUT A STOP FOR THE TAKING (economy plan): no cans, tools, gum,
+// medicine or parts by the front wall, and the buried shells' bonnets and boots are
+// empty. Fuel, fluids and parts are bought at a stop's vending machine.
 // ---------------------------------------------------------------------------
 
 /**
@@ -678,56 +514,6 @@ function yardPoint(ctx: ChunkContext, poi: Poi, yard: Yard, across: number, out:
   const x = yard.site.x + o.x;
   const z = yard.site.z + o.z;
   return { x, y: ctx.terrain.heightAt(x, z, poi.s), z };
-}
-
-/**
- * Fuel cans part-used rather than factory-sealed, stood in a row by the front wall.
- *
- * The same stock the old gas stop carried: this is where the world's fuel comes from, and
- * the stock roll keeps it coming from as many stops as it ever did.
- */
-function stockFluidCans(
-  ctx: ChunkContext,
-  poi: Poi,
-  yard: Yard,
-  loose: LoosePartField,
-  counter: LootCounter,
-  count: number,
-): void {
-  for (let i = 0; i < count; i++) {
-    const stock = pickFluid(hash01(poi.variantSeed, 31, i));
-    // A 20 L fuel can holds 12-20 L; a 5 L fluid can holds 3-5.
-    const litres =
-      Math.round(stock.capacity * (0.6 + hash01(poi.variantSeed, 32, i) * 0.4) * 10) / 10;
-    const can = makeFluidCan(ctx.world, poi, stock.fluid, litres, stock.capacity, counter);
-    const c = yardPoint(ctx, poi, yard, -0.95 + i * 0.22, 0.7 + hash01(poi.variantSeed, 34, i) * 0.5);
-    loose.spawnItem(can, c.x, c.y + 0.2, c.z);
-  }
-}
-
-/**
- * One sealed five-piece gum pack. The roadside rescue resource: one per stop that stocks
- * anything a shop would, left on the step.
- */
-function stockGum(
-  ctx: ChunkContext,
-  poi: Poi,
-  yard: Yard,
-  loose: LoosePartField,
-  counter: LootCounter,
-): void {
-  const spot = yardPoint(ctx, poi, yard, 0.32, 1.0);
-  const sub = counter.sub++;
-  loose.spawnItem(
-    {
-      type: 'bubble_gum',
-      id: ctx.world.generatedPartId('poi_item', poi.index, sub),
-      charges: 5,
-    },
-    spot.x,
-    spot.y + 0.18,
-    spot.z,
-  );
 }
 
 /**
@@ -763,110 +549,6 @@ function stockTrailer(
     qz: 0,
     qw: Math.cos(half),
   });
-}
-
-/** Tools, left about the front of the house. */
-function stockTools(
-  ctx: ChunkContext,
-  poi: Poi,
-  yard: Yard,
-  loose: LoosePartField,
-  counter: LootCounter,
-  count: number,
-): void {
-  for (let i = 0; i < count; i++) {
-    const find = pick(YARD_FINDS, poi.variantSeed, 98 + i);
-    const item = find === 'spray_can'
-      ? makeSprayCan(ctx.world, poi, counter)
-      : makeTool(ctx.world, poi, counter);
-    const tp = yardPoint(
-      ctx,
-      poi,
-      yard,
-      0.5 + hash01(poi.variantSeed, 99, i) * 0.45,
-      0.8 + hash01(poi.variantSeed, 100, i) * (YARD_DEPTH_M - 0.8),
-    );
-    loose.spawnItem(item, tp.x, tp.y + 0.25, tp.z);
-  }
-}
-
-/** A medicine pack, left on the step of somebody's home. */
-function stockMedicine(
-  ctx: ChunkContext,
-  poi: Poi,
-  yard: Yard,
-  loose: LoosePartField,
-  counter: LootCounter,
-): void {
-  const spot = yardPoint(ctx, poi, yard, -0.25, 0.9);
-  const sub = counter.sub++;
-  loose.spawnItem(
-    { type: 'medicine', id: ctx.world.generatedPartId('poi_item', poi.index, sub) },
-    spot.x,
-    spot.y + 0.2,
-    spot.z,
-  );
-}
-
-/**
- * What a stop pays out, by its STOCK. The counts and chances are the ones each kind of
- * building paid out when the building and the payout were the same thing, so the
- * supply of each resource is what it was: fuel from `fuel` stops, tools from anywhere
- * with a bench, the car field from `salvage`.
- */
-function grantStockLoot(
-  ctx: ChunkContext,
-  poi: Poi,
-  yard: Yard,
-  loose: LoosePartField,
-  trailers: TrailerField,
-  counter: LootCounter,
-): void {
-  switch (poi.stock) {
-    case 'fuel':
-      // The stop that gets you moving is where you top up: 3-6 cans of fuel and engine
-      // fluids, the gum pack, and a trailer better than half the time.
-      stockFluidCans(ctx, poi, yard, loose, counter, 3 + Math.floor(hash01(poi.variantSeed, 30) * 4));
-      stockGum(ctx, poi, yard, loose, counter);
-      stockTrailer(ctx, poi, yard, trailers);
-      // A forecourt sells filters.
-      if (hash01(poi.variantSeed, 67) < 0.3) {
-        stockPart(ctx, poi, yard, loose, counter, 'air_filter', 0.1, 0.6);
-      }
-      break;
-    case 'store':
-      stockTools(ctx, poi, yard, loose, counter, 1 + Math.floor(hash01(poi.variantSeed, 96) * 3));
-      stockGum(ctx, poi, yard, loose, counter);
-      if (hash01(poi.variantSeed, 97) < 0.5) {
-        stockFluidCans(ctx, poi, yard, loose, counter, 1 + Math.floor(hash01(poi.variantSeed, 95) * 2));
-      }
-      if (hash01(poi.variantSeed, 68) < 0.45) {
-        stockPart(ctx, poi, yard, loose, counter, 'air_filter', 0.1, 0.6);
-      }
-      break;
-    case 'home':
-      // Somebody lived here: a medicine pack, a tool they left out, sometimes a can.
-      stockMedicine(ctx, poi, yard, loose, counter);
-      if (hash01(poi.variantSeed, 94) < 0.6) stockTools(ctx, poi, yard, loose, counter, 1);
-      if (hash01(poi.variantSeed, 93) < 0.35) stockFluidCans(ctx, poi, yard, loose, counter, 1);
-      break;
-    case 'salvage':
-      // Cars are broken down here: the field itself is laid out by `buildWrecks`, and
-      // what came out of them stands by the front.
-      stockTools(ctx, poi, yard, loose, counter, 1 + Math.floor(hash01(poi.variantSeed, 92) * 2));
-      if (hash01(poi.variantSeed, 91) < 0.4) stockFluidCans(ctx, poi, yard, loose, counter, 1);
-      stockSalvageParts(ctx, poi, yard, loose, counter, 0.3, 0.2, 0.4);
-      break;
-    case 'mast':
-      // A maintenance site: tools, and the fuel for whatever got you up there.
-      stockTools(ctx, poi, yard, loose, counter, 1);
-      if (hash01(poi.variantSeed, 90) < 0.5) stockFluidCans(ctx, poi, yard, loose, counter, 1);
-      break;
-    case 'scrap':
-      stockTools(ctx, poi, yard, loose, counter, 1 + Math.floor(hash01(poi.variantSeed, 89) * 2));
-      stockSalvageParts(ctx, poi, yard, loose, counter, 0.25, 0.15, 0.3);
-      break;
-  }
 }
 
 /**
@@ -906,7 +588,7 @@ export function poiYaw(poi: Poi, heading: number): number {
 const SEAT_BURY_MARGIN = 0.08;
 
 /**
- * One stop: a building on the sand, its collider, and its rewards.
+ * One stop: a building on the sand, its collider, and its car field.
  */
 function buildStructurePoi(
   ctx: ChunkContext,
@@ -914,13 +596,13 @@ function buildStructurePoi(
   group: THREE.Group,
   bodies: RAPIER.RigidBody[],
   colliders: RAPIER.Collider[],
-  loose: LoosePartField,
   trailers: TrailerField,
   wreckTrunks: WreckTrunkField,
   registeredWrecks: string[],
   deferredVisuals: Array<() => void>,
-  counter: LootCounter,
   shouldLoot: boolean,
+  market: MarketField,
+  registeredMarket: string[],
 ): void {
   const instance: VariantInstance = createStructureInstance(poi.structure);
   const a = anchorXZ(ctx, poi);
@@ -994,12 +676,20 @@ function buildStructurePoi(
       registeredWrecks,
       deferredVisuals,
       salvageKeepOut(poi, ctx.road, instance),
-      shouldLoot,
+      market,
+      registeredMarket,
     );
   }
 
-  if (shouldLoot) {
-    grantStockLoot(ctx, poi, { site, halfX, halfZ }, loose, trailers, counter);
+  // A fuel stop leaves a trailer beside the house: a world object, never owned.
+  if (shouldLoot && poi.stock === 'fuel') stockTrailer(ctx, poi, { site, halfX, halfZ }, trailers);
+
+  // A fuel or store stop sells from a machine by its front wall, on the side away from
+  // the trailer, its back a hand's width off the wall and facing out.
+  const assortment = vendingAssortment(poi);
+  if (assortment) {
+    const spot = yardPoint(ctx, poi, { site, halfX, halfZ }, -0.55, 0.45);
+    buildVendingMachine(ctx, poi, assortment, spot.x, spot.z, yaw, group, bodies, colliders, market, registeredMarket);
   }
 }
 
@@ -1026,12 +716,12 @@ function buildPoi(
   bodies: RAPIER.RigidBody[],
   colliders: RAPIER.Collider[],
   deferredVisuals: Array<() => void>,
-  loose: LoosePartField,
   trailers: TrailerField,
   wreckTrunks: WreckTrunkField,
   registeredWrecks: string[],
+  market: MarketField,
+  registeredMarket: string[],
 ): void {
-  const counter: LootCounter = { sub: 0 };
   const shouldLoot = ctx.hasPhysics && !ctx.world.state.lootedPois.includes(poi.index);
 
   buildStructurePoi(
@@ -1040,20 +730,19 @@ function buildPoi(
     group,
     bodies,
     colliders,
-    loose,
     trailers,
     wreckTrunks,
     registeredWrecks,
     deferredVisuals,
-    counter,
     shouldLoot,
+    market,
+    registeredMarket,
   );
 
-  // Record that this POI's loot is now materialised. The flag alone is the whole
-  // idempotency guard across chunk promotion / unload / reload.
+  // Record that this POI's world objects are now materialised. The flag alone is the
+  // whole idempotency guard across chunk promotion / unload / reload.
   if (shouldLoot) ctx.world.apply({ t: 'poi_looted', poiIndex: poi.index });
 }
-
 
 // Couriers are their own sparse POIs. The sequence is random-access and every
 // adjacent pair is 5–12 km apart, independent of ordinary POI density.
@@ -1183,74 +872,6 @@ const DANCER_FOOTPRINT_CORNERS: readonly (readonly [number, number])[] = [
 ];
 /** Sunk this far under that lowest corner, so the seam never shows air. */
 const DANCER_SINK_M = 0.03;
-/**
- * Fraction of roadside wreck fields containing one working car. The roll is per
- * field, not per shell: most stops are wrecks only, while roughly one in three has
- * exactly one roadworthy car parked among them.
- */
-const WORKING_CAR_CHANCE = 0.34;
-/**
- * Same, at an ordinary roadside stop: every one of them has shells to strip now, and
- * only now and then a car to take. The first two stops always have one
- * (`Poi.guaranteedCar`).
- */
-const ROADSIDE_WORKING_CAR_CHANCE = 0.2;
-/** Domain tag for the working-car roll, distinct from the placement stream. */
-const WORKING_CAR_DOMAIN = 0x52554e31; // 'RUN1'
-
-function makeWorkingCar(
-  ctx: ChunkContext,
-  poi: Poi,
-  slot: number,
-  def: CarModelDef,
-  x: number,
-  y: number,
-  z: number,
-  yaw: number,
-): CarState {
-  const engine = variant(def.engineId).engine;
-  const halfYaw = yaw / 2;
-  const carId = ctx.world.generatedPartId('poi-car', poi.index, slot);
-  // A roadside find has been driven, and its air filter shows it: anywhere from
-  // freshly changed to well overdue, so some finds want a filter before a long leg.
-  const bonnet = createBonnetStorage(
-    carId,
-    def.engineId,
-    0.1 + hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 9) * 0.85,
-  );
-  return {
-    id: carId,
-    modelId: def.id,
-    headlightMode: 'off',
-    taillightsOn: false,
-    reverseLightsOn: false,
-    stickers: [],
-    // A roadside find, weathered by however long it stood there. Scratched enough to
-    // say somebody else drove it badly, not enough to look like salvage.
-    dirt: 0.7 + hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 7) * 0.25,
-    scratches: 0.25 + hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 8) * 0.3,
-    paint: null,
-    // Enough fuel to make the find immediately useful, but not a free full tank.
-    fuelLitres: def.tankLitres * (0.15 + hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 3) * 0.2),
-    // Part-topped, like the fuel: enough water to set off, little enough that a hot
-    // afternoon makes the level worth a look before a long leg.
-    waterLitres:
-      bonnetWaterCapacity(bonnet) * (0.45 + hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 10) * 0.4),
-    oilLitres: engine ? oilCapacity(engine) : 0,
-    // Stood by the road for months: at air temperature, not at operating heat.
-    engineTempC: COLD_SOAK_C,
-    storage: new Array(def.storageCells).fill(null),
-    bonnet,
-    odometer: Math.floor(hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 4) * 240_000),
-    x,
-    y,
-    z,
-    qx: 0,
-    qy: Math.sin(halfYaw),
-    qz: 0,
-    qw: Math.cos(halfYaw),
-  };
-}
 
 /**
  * Layout of one roadside wreck field.
@@ -1425,182 +1046,10 @@ export function layOutWreckField(poi: Poi, road: Road, keepOut?: WreckKeepOut): 
 }
 
 /**
- * A half-buried shell still carries salvage.
- *
- * The bonnet keeps its four service cells, but not necessarily filled: an engine is
- * the likeliest find, the radiator and air filter each take their own roll, and
- * the factory-optional turbocharger is the rarest. Engines are usually the Soviet units
- * a body of that class was built around, but an import a breaker pulled turns up
- * occasionally. Parts come out WORN — dust, rust, a clogged element — because the car
- * has stood in the sand long enough to be a wreck, not because the find is worthless.
- *
- * The boot holds what a driver leaves in a car: cans, a tool, a spray can, medicine,
- * gum. Never a sticker or a courier envelope — those belong to the delivery economy and
- * to the cars the player actually drives.
- *
- * Every roll is seeded from the POI and the slot, so a given wreck yields the same
- * contents on every pass; the guard that keeps an emptied POI empty (`poi_looted`) is
- * what stops the world restocking it.
- */
-/** Chance each bonnet cell (in `BONNET_SLOT_KINDS` order) still holds its part. */
-const WRECK_BONNET_FILL: readonly number[] = [0.55, 0.15, 0.45, 0.5];
-/** Of the wrecks that kept an engine, this share kept an import instead. */
-const WRECK_IMPORT_ENGINE_CHANCE = 0.18;
-/** Chance each of a wreck's sixteen boot cells holds a find. */
-const WRECK_TRUNK_FILL_CHANCE = 0.24;
-
-type WreckFind =
-  | 'petrol_can'
-  | 'water_can'
-  | 'oil_can'
-  | 'sponge'
-  | 'medicine'
-  | 'gum'
-  | 'spray_can';
-
-/**
- * What a wreck's boot yields, by weight: the fluids a stranded driver needed, the two
- * cleaning tools, and the small odds and ends a glovebox holds.
- */
-const WRECK_TRUNK_FINDS: readonly { readonly find: WreckFind; readonly weight: number }[] = [
-  { find: 'petrol_can', weight: 0.3 },
-  { find: 'water_can', weight: 0.1 },
-  { find: 'oil_can', weight: 0.1 },
-  { find: 'sponge', weight: 0.2 },
-  { find: 'medicine', weight: 0.08 },
-  { find: 'gum', weight: 0.1 },
-  { find: 'spray_can', weight: 0.12 },
-];
-
-/** A part pulled from a shell, worn the way a find in the sand is. */
-function wreckPartItem(
-  world: GameWorld,
-  poi: Poi,
-  wreckIndex: number,
-  slot: number,
-  variantId: string,
-): PartItem {
-  const id = world.generatedPartId('wreck-part', poi.index, wreckIndex * 32 + slot);
-  const part: PartInstance = {
-    id,
-    variantId,
-    dirt: 0.35 + hash01(poi.variantSeed, wreckIndex, 220 + slot) * 0.45,
-    rust: 0.15 + hash01(poi.variantSeed, wreckIndex, 230 + slot) * 0.4,
-  };
-  if (variant(variantId).kind === 'air_filter') {
-    // Filtered a lot of desert before the car stopped: worn past the point it would
-    // run well, which is why a wreck's filter is worth taking and cleaning, not using.
-    part.clog = 0.5 + hash01(poi.variantSeed, wreckIndex, 240 + slot) * 0.7;
-  }
-  return { type: 'part', id, part };
-}
-
-/** An engine the wreck's body class could have carried; imports are the rare draw. */
-function wreckEngineVariant(
-  poi: Poi,
-  wreckIndex: number,
-  bodyClass: BodyClass,
-): string | null {
-  const fitted = variantsOfKind('engine', bodyClass);
-  if (fitted.length === 0) return null;
-  const imports = fitted.filter((candidate) => IMPORT_ENGINE_IDS.includes(candidate.id));
-  if (imports.length > 0 && hash01(poi.variantSeed, wreckIndex, 216) < WRECK_IMPORT_ENGINE_CHANCE) {
-    return pick(imports, poi.variantSeed, wreckIndex, 217).id;
-  }
-  const domestic = fitted.filter((candidate) => !IMPORT_ENGINE_IDS.includes(candidate.id));
-  return pick(domestic.length > 0 ? domestic : fitted, poi.variantSeed, wreckIndex, 218).id;
-}
-
-/** One boot find, with its own stable id. */
-function makeWreckItem(
-  ctx: ChunkContext,
-  poi: Poi,
-  wreckIndex: number,
-  cell: number,
-): Item {
-  const id = ctx.world.generatedPartId('wreck-item', poi.index, wreckIndex * 32 + 16 + cell);
-  const roll = hash01(poi.variantSeed, wreckIndex, 260 + cell);
-  let find = WRECK_TRUNK_FINDS[WRECK_TRUNK_FINDS.length - 1]!.find;
-  let acc = 0;
-  for (const entry of WRECK_TRUNK_FINDS) {
-    acc += entry.weight;
-    if (roll < acc) {
-      find = entry.find;
-      break;
-    }
-  }
-  switch (find) {
-    case 'petrol_can':
-    case 'water_can':
-    case 'oil_can': {
-      const fluid: FluidKind = find === 'petrol_can' ? 'petrol' : find === 'water_can' ? 'water' : 'oil';
-      // A stranded car's can is part-used, never sealed: 3-5 L of the small fluids,
-      // 6-20 L of petrol.
-      const capacity = fluid === 'petrol' ? 20 : 5;
-      const litres =
-        Math.round(capacity * (0.3 + hash01(poi.variantSeed, wreckIndex, 270 + cell) * 0.65) * 10) / 10;
-      return { type: 'fluid_can', id, fluid, capacity, litres };
-    }
-    case 'sponge':
-      // Somebody used it on this car once: half to nearly all of its life left.
-      return makeSponge(
-        id,
-        hash01(poi.variantSeed, wreckIndex, 281 + cell),
-        0.5 + hash01(poi.variantSeed, wreckIndex, 280 + cell) * 0.5,
-      );
-    case 'medicine':
-      return { type: 'medicine', id };
-    case 'gum':
-      return {
-        type: 'bubble_gum',
-        id,
-        charges: 1 + Math.floor(hash01(poi.variantSeed, wreckIndex, 290 + cell) * 4),
-      };
-    case 'spray_can':
-      return {
-        type: 'spray_can',
-        id,
-        paint: pick(CAR_PAINTS, poi.variantSeed, wreckIndex, 300 + cell).hex,
-        charge: 0.25 + hash01(poi.variantSeed, wreckIndex, 310 + cell) * 0.6,
-      };
-  }
-}
-
-/** Writes one shell's bonnet and boot contents into the world state, in one delta. */
-function stockWreckLoot(
-  ctx: ChunkContext,
-  poi: Poi,
-  wreckId: string,
-  wreckIndex: number,
-  bodyClass: BodyClass,
-): void {
-  const bonnet = new Array<Item | null>(BONNET_SLOT_COUNT).fill(null);
-  for (let cell = 0; cell < BONNET_SLOT_KINDS.length; cell++) {
-    if (hash01(poi.variantSeed, wreckIndex, 120 + cell) >= WRECK_BONNET_FILL[cell]!) continue;
-    const kind = BONNET_SLOT_KINDS[cell]!;
-    let variantId: string | null;
-    if (kind === 'engine') {
-      variantId = wreckEngineVariant(poi, wreckIndex, bodyClass);
-    } else {
-      const fitted = variantsOfKind(kind, bodyClass);
-      variantId = fitted.length === 0 ? null : pick(fitted, poi.variantSeed, wreckIndex, 250 + cell).id;
-    }
-    if (variantId === null) continue;
-    bonnet[cell] = wreckPartItem(ctx.world, poi, wreckIndex, cell, variantId);
-  }
-  const trunk = new Array<Item | null>(TRUNK_CELL_COUNT).fill(null);
-  for (let cell = 0; cell < TRUNK_CELL_COUNT; cell++) {
-    if (hash01(poi.variantSeed, wreckIndex, 200 + cell) >= WRECK_TRUNK_FILL_CHANCE) continue;
-    trunk[cell] = makeWreckItem(ctx, poi, wreckIndex, cell);
-  }
-  ctx.world.apply({ t: 'wreck_loot', wreckId, bonnet, trunk });
-}
-
-/**
- * One to three complete models scattered through a roadside wreck field, and rarely
- * one upright slot that is a working car instead of a shell. Both draw from the
- * whole catalogue: a wreck is a state a body is found in, not a class of body, so
- * the same car you can drive is the one you find sunk in the sand beside it.
+ * One to three complete models scattered through a roadside wreck field, and at some
+ * stops one upright car among them for sale (world/carlot.ts). Both draw from the whole
+ * catalogue: a wreck is a state a body is found in, not a class of body, so the same car
+ * you can buy is the one you find sunk in the sand beside it.
  */
 function buildWrecks(
   ctx: ChunkContext,
@@ -1612,8 +1061,8 @@ function buildWrecks(
   registeredWrecks: string[],
   deferredVisuals: Array<() => void>,
   keepOut: WreckKeepOut,
-  /** Whether this POI's loot is being materialised for the first time. */
-  shouldLoot: boolean,
+  market: MarketField,
+  registeredMarket: string[],
 ): void {
   const anchor = anchorXZ(ctx, poi);
   const ox = ctx.originX;
@@ -1621,30 +1070,37 @@ function buildWrecks(
   const slots = layOutWreckField(poi, ctx.road, keepOut);
   const count = slots.length;
 
-  const workingChance = poi.stock === 'salvage' ? WORKING_CAR_CHANCE : ROADSIDE_WORKING_CAR_CHANCE;
-  const hasWorkingCar =
-    poi.guaranteedCar === true || hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 0) < workingChance;
-  const workingSlot = hasWorkingCar
-    ? Math.floor(hash01(poi.variantSeed, WORKING_CAR_DOMAIN, 1) * count)
-    : -1;
+  const lot = lotOffer(ctx.world.seed, poi, count);
 
   for (let w = 0; w < count; w++) {
-    const isWorkingCar = w === workingSlot;
-    const def = slots[w]!.def;
+    const isLotCar = lot !== null && w === lot.slot;
+    const def = isLotCar ? lot.def : slots[w]!.def;
     const measure = carModelMeasure(def.id);
     const half = measure.halfExtents;
     const carId = ctx.world.generatedPartId('poi-car', poi.index, w);
-
-    // A generated working car stays in world state after it is driven away. Never
-    // rebuild a shell or a second car at its original POI.
-    if (isWorkingCar && ctx.world.state.cars[carId]) continue;
-
     const { sDelta, latDelta } = slots[w]!;
     const p = groundPoint(ctx, poi, sDelta, latDelta);
 
+    // The lot's price board, at the car's road-side flank and facing the road; only
+    // while the car is still for sale.
+    const priceBoard = (): void => {
+      const side = poi.lateral < 0 ? -1 : 1;
+      const at = groundPoint(ctx, poi, sDelta, latDelta - side * (half[0] + 0.9));
+      const road = ctx.road.offsetPoint(poi.s + sDelta, 0);
+      buildLotSign(ctx, group, carId, def, at.x, at.y, at.z, Math.atan2(road.x - at.x, road.z - at.z), market, registeredMarket);
+    };
+
+    // A car made at a stop lives in world state from then on, sold or not (or, in a save
+    // from before the lots, taken for free): never a shell or a second car where it stood.
+    const existing = ctx.world.state.cars[carId];
+    if (existing) {
+      if (isLotCar && existing.lotPrice !== undefined) priceBoard();
+      continue;
+    }
+
     const yawRoll = hash01(poi.variantSeed, w, 13);
     let yaw = anchor.heading + (hash01(poi.variantSeed, w, 14) - 0.5) * 0.6;
-    if (!isWorkingCar) {
+    if (!isLotCar) {
       if (yawRoll < 0.32) yaw += Math.PI;
       else if (yawRoll > 0.82) {
         yaw += (hash01(poi.variantSeed, w, 15) < 0.5 ? 1 : -1) * Math.PI * 0.5;
@@ -1654,20 +1110,21 @@ function buildWrecks(
     // The shell lies ALONG the ground and then adds its own derelict lean; the
     // fitted plane is what stops a body bridging a dune face on two wheels.
     const plane = fitGround(ctx.terrain, p.x, p.z, yaw, half[0], half[2], poi.s);
-    const sink = isWorkingCar ? 0.02 : 0.25 + hash01(poi.variantSeed, w, 16) * half[1] * 0.5;
-    const roll = plane.roll + (isWorkingCar ? 0 : (hash01(poi.variantSeed, w, 17) - 0.5) * 0.3);
-    const pitch = plane.pitch + (isWorkingCar ? 0 : (hash01(poi.variantSeed, w, 18) - 0.5) * 0.22);
+    const sink = isLotCar ? 0.02 : 0.25 + hash01(poi.variantSeed, w, 16) * half[1] * 0.5;
+    const roll = plane.roll + (isLotCar ? 0 : (hash01(poi.variantSeed, w, 17) - 0.5) * 0.3);
+    const pitch = plane.pitch + (isLotCar ? 0 : (hash01(poi.variantSeed, w, 18) - 0.5) * 0.22);
     const originY = plane.centreY + half[1] - sink;
 
-    // Distant scenery shows the future working car as an upright static model.
-    // Promotion into the physics band replaces it with a real Vehicle.
-    if (isWorkingCar && ctx.hasPhysics) {
+    // Distant scenery shows the lot car as an upright static model. Promotion into the
+    // physics band replaces it with a real Vehicle, priced until it is bought.
+    if (isLotCar) priceBoard();
+    if (isLotCar && ctx.hasPhysics) {
       // The distant static preview stands on the terrain; promotion creates the
       // physical car in clear air so gravity and suspension determine its ride height.
       const spawnY = carSpawnYAboveGround(measure, p.y);
       ctx.world.apply({
         t: 'car_add',
-        car: makeWorkingCar(ctx, poi, w, def, p.x, spawnY, p.z, yaw),
+        car: makeLotCar(poi, carId, def, p.x, spawnY, p.z, yaw),
       });
       continue;
     }
@@ -1682,7 +1139,7 @@ function buildWrecks(
       colliders,
     );
     const rotation = new THREE.Quaternion().setFromRotationMatrix(matrix);
-    if (!isWorkingCar && collider) {
+    if (!isLotCar && collider) {
       wreckTrunks.register({
         id: carId,
         modelId: def.id,
@@ -1696,9 +1153,7 @@ function buildWrecks(
         halfExtents: half,
       });
       registeredWrecks.push(carId);
-      // The shell only takes loot the first time it is built: `poi_looted` is what
-      // keeps an emptied wreck empty across every later chunk rebuild.
-      if (shouldLoot) stockWreckLoot(ctx, poi, carId, w, def.bodyClass);
+      // The shell is empty: nothing in the world is free for the taking.
     }
     // After the registration, so the shell's lids join a registered wreck.
     const addShell = (): void => {
@@ -1741,12 +1196,13 @@ export class PoiProvider implements ChunkProvider {
   readonly id = 'poi';
 
   constructor(
-    private readonly loose: LoosePartField,
     private readonly trailers: TrailerField,
     private readonly wreckTrunks: WreckTrunkField,
     private readonly couriers: CourierField,
     private readonly roadDistance: RoadDistance,
     private readonly dancers: DancerField,
+    /** The vending machines and lot cars' registry (world/market.ts). */
+    private readonly market: MarketField,
   ) {}
 
   build(ctx: ChunkContext): ChunkContent | null {
@@ -1767,6 +1223,7 @@ export class PoiProvider implements ChunkProvider {
     const registeredWrecks: string[] = [];
     const registeredCouriers: string[] = [];
     const registeredDancers: DancerHandle[] = [];
+    const registeredMarket: string[] = [];
 
     for (const poi of [...pois, ...desert]) {
       buildPoi(
@@ -1776,10 +1233,11 @@ export class PoiProvider implements ChunkProvider {
         bodies,
         colliders,
         deferredVisuals,
-        this.loose,
         this.trailers,
         this.wreckTrunks,
         registeredWrecks,
+        this.market,
+        registeredMarket,
       );
     }
     for (const stop of couriersBetween(ctx.world.seed, ctx.sStart, ctx.sEnd, POI_SPACING)) {
@@ -1817,6 +1275,7 @@ export class PoiProvider implements ChunkProvider {
         this.wreckTrunks.forget(registeredWrecks);
         this.couriers.forget(registeredCouriers);
         this.dancers.forget(registeredDancers);
+        this.market.forget(registeredMarket);
         for (const cancel of deferredVisuals) cancel();
       },
     };

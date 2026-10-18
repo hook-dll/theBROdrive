@@ -1,6 +1,7 @@
 import { hash } from '../core/rng';
 import type { Item, StickerKind, SunShadesItem } from '../items/items';
 import type { PartInstance } from '../parts/registry';
+import type { ContractKind } from '../contracts/types';
 import { AIR_FILTER_CELL, bonnetAccepts, bonnetSlotFluid, BONNET_SLOT_COUNT } from '../vehicle/bonnet';
 import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
 import type { CarPaint } from '../vehicle/carpaint';
@@ -157,6 +158,16 @@ export interface CarState {
    * (vehicle/cartow.ts), so a reload puts the pair back on the bar.
    */
   towedBy?: string | null;
+  /**
+   * The player holds this car's papers: he bought it at a lot (`car_buy`), or it is the
+   * car the drive started in. Absent or false: somebody else's car.
+   */
+  papers?: boolean;
+  /**
+   * Coins a car standing on a lot asks (world/carlot.ts), flat across the road. Present
+   * only while it is for sale: nobody drives it off before `car_buy` clears it.
+   */
+  lotPrice?: number;
 }
 
 /** A kit car's four seats; the driver sits on the car's left (+X in the kit frame). */
@@ -314,6 +325,18 @@ export interface WorldState {
   courierStorage: Record<string, (Item | null)[]>;
   /** Contract cargo ids already exchanged for signed envelopes. */
   completedContractIds: string[];
+  /**
+   * The delivery ledger: completed deliveries counted by contract kind, written with
+   * the completed id (`courier_storage`). Licences read it (economy/economy.ts
+   * `licenceFor`). Saves from before the ledger rebuild it from their completed ids.
+   */
+  deliveriesByKind: Partial<Record<ContractKind, number>>;
+  /**
+   * Vending machine slots already sold, by machine id (world/vending.ts). A machine's
+   * stock is a pure function of the seed and where it stands; this is what it has
+   * given out, so an emptied slot stays empty. Machines never restock.
+   */
+  vendingSold: Record<string, number[]>;
 }
 
 export type WorldDelta =
@@ -360,6 +383,8 @@ export type WorldDelta =
       cells: readonly (Item | null)[];
       consumedItemId?: string;
       completedContractId?: string;
+      /** The completed contract's kind, counted into `deliveriesByKind`. */
+      completedContractKind?: ContractKind;
     }
   | { t: 'trailer_add'; trailer: TrailerState }
   | { t: 'trailer_remove'; trailerId: string }
@@ -384,7 +409,11 @@ export type WorldDelta =
   | { t: 'sticker_place'; carId: string; sticker: StickerState; envelopeId: string }
   | { t: 'inventory'; items: readonly Item[]; selected: number }
   | { t: 'wearable'; shades: SunShadesItem | null }
-  | { t: 'record'; s: number };
+  | { t: 'record'; s: number }
+  /** A vending machine slot paid for and dispensed (world/vending.ts). */
+  | { t: 'vend_sold'; machineId: string; slot: number }
+  /** A lot car paid for: its asking price goes, its papers are the player's. */
+  | { t: 'car_buy'; carId: string };
 
 /** Seconds in an in-game day. A 24-minute day makes night frequent but not tedious. */
 export const DAY_LENGTH = 24 * 60;
@@ -425,11 +454,13 @@ export function newWorldState(seed: number): WorldState {
     wreckBonnet: {},
     courierStorage: {},
     completedContractIds: [],
+    deliveriesByKind: {},
     trailers: {},
     looseParts: {},
     looseItems: {},
     lootedPois: [],
     flattenedProps: [],
+    vendingSold: {},
   };
 }
 
@@ -810,6 +841,19 @@ export class GameWorld {
       case 'prop_flatten':
         if (!s.flattenedProps.includes(delta.propId)) s.flattenedProps.push(delta.propId);
         break;
+      case 'vend_sold': {
+        const sold = s.vendingSold[delta.machineId] ?? (s.vendingSold[delta.machineId] = []);
+        if (!sold.includes(delta.slot)) sold.push(delta.slot);
+        break;
+      }
+      case 'car_buy': {
+        const car = s.cars[delta.carId];
+        if (car) {
+          delete car.lotPrice;
+          car.papers = true;
+        }
+        break;
+      }
       case 'courier_storage':
         if (
           delta.completedContractId
@@ -822,6 +866,10 @@ export class GameWorld {
         }
         if (delta.completedContractId) {
           s.completedContractIds.push(delta.completedContractId);
+          if (delta.completedContractKind) {
+            const kind = delta.completedContractKind;
+            s.deliveriesByKind[kind] = (s.deliveriesByKind[kind] ?? 0) + 1;
+          }
         }
         break;
       case 'sticker_place': {

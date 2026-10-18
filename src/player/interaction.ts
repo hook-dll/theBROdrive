@@ -4,11 +4,11 @@ import type { PhysicsWorld } from '../core/physics';
 import type { CarState, GameWorld, PlayerSeat, StickerState } from '../game/state';
 import { contractAcceptRefusal, contractDeliveryEffect, contractRewardSticker } from '../contracts/registry';
 import type { DeliveryProbe } from '../contracts/types';
+import { contractPay, contractSlotsFor, giveCoins, licenceFor } from '../economy/economy';
 import { TOW_COUPLE_RANGE_M, towEyeWorld, type CarTowField } from '../vehicle/cartow';
 import type { InputFrame } from '../core/input';
 import type {
   Inventory,
-  CoinItem,
   Item,
   PartItem,
   FluidCanItem,
@@ -65,6 +65,9 @@ import { STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
 import { uprightStickerRoll } from '../render/stickers';
 import { KitRig, type KitControl, type KitPicked } from '../carkit/rig';
 import { KIT_BENCH_NODE } from '../carkit/interior';
+import { coinsHeld, itemPrice, spendCoins } from '../economy/economy';
+import type { MarketField } from '../world/market';
+import { aimVending, vendingTrayPoint, type VendingAim } from '../world/vending';
 
 /** How far the eye ray reaches for picking. */
 const RAY_RANGE = 2.6;
@@ -155,7 +158,9 @@ type Target =
       normal: THREE.Vector3;
       valid: boolean;
     }
-  | { kind: 'loose-part'; partId: string };
+  | { kind: 'loose-part'; partId: string }
+  /** A vending machine's front; `slot` is the window slot aimed at, or -1 off the window. */
+  | { kind: 'vending'; machineId: string; slot: number };
 
 /**
  * What one tick of interaction produced: the prompt to draw, at most one
@@ -649,6 +654,8 @@ export class Interaction {
   private readonly towEyeB = { x: 0, y: 0, z: 0 };
   private readonly towEyeC = { x: 0, y: 0, z: 0 };
   private readonly towEyeD = { x: 0, y: 0, z: 0 };
+  /** Where the eye ray met a vending machine's front, reused in place; see `aimVending`. */
+  private readonly vendAim: VendingAim = { distance: 0, slot: -1 };
   /**
    * The delivery probe handed to contract kinds, reused in place: the prompt that
    * aims at a courier boot with a contract in hand rebuilds it every tick, and it
@@ -698,6 +705,8 @@ export class Interaction {
     private readonly boardable: BoardableField,
     /** Coins a race win pays for handing this cargo in now; see `RivalRace.winCoins`. */
     private readonly raceCoins: (itemId: string) => number,
+    /** The vending machines and lot cars in the physics band (world/market.ts). */
+    private readonly market: MarketField,
   ) {
     // A kit car is drawn merged and picked by the parts it was built of (render/kitdraw.ts).
     this.raycaster.layers.enable(KIT_PICK_LAYER);
@@ -1051,6 +1060,23 @@ export class Interaction {
     probe.courierZ = courier.z;
     probe.drivingCarId = this.world.state.player.drivingCarId;
     return probe;
+  }
+
+  /**
+   * Why this car's boot takes no more contracts, or null. How many it carries at once
+   * is the body's (economy/economy.ts `contractSlotsFor`): one in a saloon, two in an
+   * estate, three in the van.
+   */
+  private contractSlotsRefusal(carId: string, cells: readonly (Item | null)[]): string | null {
+    const car = this.world.state.cars[carId];
+    if (!car) return null;
+    const slots = contractSlotsFor(car.modelId);
+    let aboard = 0;
+    for (const cell of cells) if (cell?.type === 'contract_cargo') aboard++;
+    if (aboard < slots) return null;
+    return slots === 1
+      ? 'one contract is already aboard — this car carries one'
+      : `${aboard} contracts already aboard — this car carries ${slots}`;
   }
 
   /**
@@ -1593,6 +1619,13 @@ export class Interaction {
         wreckLidId = courier.id;
         wreckLids = lids;
         wreckLidControl = this.wreckLidAimed;
+      }
+    }
+
+    // A vending machine's front, its window slots in it.
+    for (const machine of this.market.machineValues()) {
+      if (aimVending(machine, this.origin.x, this.origin.z, eyeX, eyeY, eyeZ, dx, dy, dz, RAY_RANGE, this.vendAim)) {
+        keep(this.vendAim.distance, { kind: 'vending', machineId: machine.id, slot: this.vendAim.slot });
       }
     }
 
@@ -2173,6 +2206,16 @@ export class Interaction {
 
     if (t.kind === 'aircraft') return '[F] board the plane';
 
+    if (t.kind === 'vending') return this.vendingPrompt(t.machineId, t.slot);
+    const lot = this.lotCarAimed(resolved);
+    if (lot) {
+      const coins = coinsHeld(this.world.state);
+      const label = carModel(lot.modelId).label;
+      return coins >= (lot.lotPrice ?? 0)
+        ? `[F] buy ${label} — ${lot.lotPrice} coins`
+        : `${label} for sale — ${lot.lotPrice} coins · you have ${coins}`;
+    }
+
 
     if (t.kind === 'loose-part') {
       const part = this.world.state.looseParts[t.partId]?.part;
@@ -2226,6 +2269,13 @@ export class Interaction {
       if (t.cell === null) return null;
       const item = cells[t.cell];
       if (item) {
+        // A contract is signed out only to a licensed driver; the refusal names what
+        // is missing. The offer shows what it pays.
+        if (t.owner === 'courier' && item.type === 'contract_cargo') {
+          const licence = licenceFor(this.world.state, item.contractKind);
+          if (!licence.ok) return licence.reason ?? 'no licence for this cargo';
+          return `[F] take ${itemLabel(item)} — pays ${contractPay(this.world.seed, item)} coins`;
+        }
         // A fitted engine or radiator reports what it is holding.
         // Same resolution the pour uses, so the number you read is the number a can
         // fills — and holding one turns the readout into the pour offer itself.
@@ -2249,14 +2299,11 @@ export class Interaction {
         if (!courier) return null;
         const refusal = contractAcceptRefusal(held, this.deliveryProbe(courier));
         if (refusal) return refusal;
-        return `[F] deliver ${itemLabel(held)} — receive signed envelope`;
+        return `[F] deliver ${itemLabel(held)} — ${contractPay(this.world.seed, held)} coins`;
       }
-      if (
-        held?.type === 'contract_cargo'
-        && t.owner === 'car'
-        && cells.some((cell) => cell?.type === 'contract_cargo')
-      ) {
-        return 'one contract parcel is already aboard';
+      if (held?.type === 'contract_cargo' && t.owner === 'car') {
+        const full = this.contractSlotsRefusal(t.id, cells);
+        if (full) return full;
       }
       if (held) return `[F] stow ${itemLabel(held)}`;
       return null;
@@ -2577,6 +2624,11 @@ export class Interaction {
       return;
     }
 
+    if (t.kind === 'vending') {
+      this.buyFromMachine(t.machineId, t.slot);
+      return;
+    }
+
     if (t.kind === 'loose-part') {
       const loose = this.world.state.looseParts[t.partId];
       if (!loose) return;
@@ -2674,36 +2726,45 @@ export class Interaction {
         const effect = contractDeliveryEffect(held, probe);
         const nextCells = cells.slice();
         nextCells[t.cell] = envelope;
-        // A race won pays its coins beside the envelope, or into the pack when the
-        // courier's boot is full (they stack onto a coin already carried).
-        const coins = this.raceCoins(held.id);
-        let coinToPack: CoinItem | null = null;
-        if (coins > 0) {
-          const coin: CoinItem = { type: 'coin', id: `${held.id}:coin`, value: coins };
-          const free = nextCells.findIndex((cell) => cell === null);
-          if (free >= 0) nextCells[free] = coin;
-          else coinToPack = coin;
-        }
+        // The delivery pays coins (economy/economy.ts `contractPay`), and a race won
+        // adds its prize to them. They go into the pack the cargo just left.
+        const coins = contractPay(this.world.seed, held) + this.raceCoins(held.id);
         this.world.apply({
           t: 'courier_storage',
           courierId: t.id,
           cells: nextCells,
           consumedItemId: held.id,
           completedContractId: held.id,
+          completedContractKind: held.contractKind,
         });
         if (effect?.deltas) {
           for (const delta of effect.deltas) this.world.apply(delta);
         }
         this.inventory.remove(held.id);
-        if (coinToPack) this.inventory.add(coinToPack);
+        const leftover = giveCoins(this.inventory, coins, `${held.id}:coin`);
+        if (leftover) {
+          // A pack too heavy even for a coin: it waits in the courier's boot.
+          const free = nextCells.findIndex((cell) => cell === null);
+          if (free >= 0) {
+            const withCoin = nextCells.slice();
+            withCoin[free] = leftover;
+            this.world.apply({ t: 'courier_storage', courierId: t.id, cells: withCoin });
+          }
+        }
         this.sound = 'mount';
         return;
       }
+      if (held?.type === 'contract_cargo' && t.owner === 'car' && cells[t.cell]?.type !== 'contract_cargo') {
+        if (this.contractSlotsRefusal(t.id, cells)) {
+          this.sound = 'refused';
+          return;
+        }
+      }
+      const taking = cells[t.cell];
       if (
-        !cells[t.cell]
-        && held?.type === 'contract_cargo'
-        && t.owner === 'car'
-        && cells.some((cell) => cell?.type === 'contract_cargo')
+        t.owner === 'courier'
+        && taking?.type === 'contract_cargo'
+        && !licenceFor(this.world.state, taking.contractKind).ok
       ) {
         this.sound = 'refused';
         return;
@@ -2796,8 +2857,68 @@ export class Interaction {
     }
   }
 
+  /**
+   * The car on a lot the player is looking at, or null: the nearest car, still priced
+   * (`lotPrice`), within reach, and in the aim (its body, or a kit car's render mesh).
+   */
+  private lotCarAimed(resolved: Resolved): CarState | null {
+    if (!resolved.carId || resolved.vehicleDist > VEHICLE_RANGE) return null;
+    const car = this.world.state.cars[resolved.carId];
+    if (car?.lotPrice === undefined) return null;
+    const t = resolved.target;
+    const aimed = t.kind === 'car-entry' || t.kind === 'car-body' || (t.kind === 'none' && resolved.kitHit);
+    return aimed ? car : null;
+  }
+
+  /** The window slot under the crosshair: what it is and what it costs here. */
+  private vendingPrompt(machineId: string, slot: number): string | null {
+    const machine = this.market.machine(machineId);
+    if (!machine) return null;
+    const coins = coinsHeld(this.world.state);
+    if (slot < 0) return `${machine.title} vending machine — you have ${coins} coin${coins === 1 ? '' : 's'}`;
+    const item = machine.stock[slot];
+    if (!item) return 'empty';
+    if (this.world.state.vendingSold[machine.id]?.includes(slot)) return 'sold out';
+    const price = itemPrice(item, machine.km);
+    return coins >= price
+      ? `[F] buy ${itemLabel(item)} — ${price} coins`
+      : `${itemLabel(item)} — ${price} coins · you have ${coins}`;
+  }
+
+  /**
+   * Pays for one slot and lets its goods fall into the tray as a real loose thing. The
+   * slot is recorded sold before the thing exists, so no rebuild can hand it out twice.
+   */
+  private buyFromMachine(machineId: string, slot: number): void {
+    const machine = this.market.machine(machineId);
+    const item = slot >= 0 ? machine?.stock[slot] : null;
+    if (!machine || !item || this.world.state.vendingSold[machine.id]?.includes(slot)) return;
+    if (!spendCoins(this.inventory, itemPrice(item, machine.km))) {
+      this.sound = 'refused';
+      return;
+    }
+    this.world.apply({ t: 'vend_sold', machineId: machine.id, slot });
+    this.market.sold(machine.id, slot);
+    const tray = vendingTrayPoint(machine);
+    if (item.type === 'part') this.loose.spawn(item.part, tray.x, tray.y, tray.z);
+    else this.loose.spawnItem(item, tray.x, tray.y, tray.z);
+    this.sound = 'drop';
+  }
+
   private tryEnter(resolved: Resolved): void {
     if (!resolved.vehicle || !resolved.carId) return;
+    // A car on a lot is bought before anyone sits in it: F there pays.
+    const lot = this.lotCarAimed(resolved);
+    if (lot) {
+      if (lot.lotPrice !== undefined && spendCoins(this.inventory, lot.lotPrice)) {
+        this.world.apply({ t: 'car_buy', carId: lot.id });
+        this.market.carSold(lot.id);
+        this.sound = 'pickup';
+      } else {
+        this.sound = 'refused';
+      }
+      return;
+    }
     const target = resolved.target;
     if (resolved.vehicle.kit) {
       // A kit car: a seat looked at through an open side door is the whole rule (see

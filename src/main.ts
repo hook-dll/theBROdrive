@@ -39,6 +39,7 @@ import { loadCarModel } from './render/carmodel';
 import { CAR_LAMP_KNEE } from './render/materials';
 import { preloadTrailerModel } from './render/trailermodel';
 import { itemProgramAnchor } from './render/partmesh';
+import { MarketField, marketProgramAnchor } from './world/market';
 import { FarCarField, nearDrawEstimate } from './render/farcars';
 import { CarMirrors, mirrorProgramAnchor } from './render/carmirrors';
 import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
@@ -88,7 +89,7 @@ import {
   STATE_UNLOAD_RADIUS_M,
 } from './world/ranges';
 import { BoardableField, StartSiteProvider } from './story/sitebuild';
-import { createStartingCar, spawnStartingItems, storySite } from './story/site';
+import { createStartingCar, spawnStartingItems, START_COINS, storySite } from './story/site';
 import { TakeoffCutscene } from './story/takeoff';
 import { StoryOverlay } from './story/overlay';
 import { playEnding } from './story/ending';
@@ -451,6 +452,8 @@ async function boot(): Promise<void> {
   // Static trunk registries follow streamed physics chunks; edited contents live in state.
   const wreckTrunks = new WreckTrunkField();
   const couriers = new CourierField();
+  /** The vending machines and lot cars in the physics band (world/market.ts). */
+  const market = new MarketField();
   /** The parked plane's colliders, so the eye ray can tell the plane from scenery. */
   const boardable = new BoardableField();
   const birds = new BirdFlock(renderer.scene, road, terrain, world.seed, origin);
@@ -485,10 +488,10 @@ async function boot(): Promise<void> {
   // the hidden anchor dancer it adds to the scene compiles their program under the
   // loading cover. See world/props/airdancer.ts.
   const dancers = new DancerField(renderer.scene);
-  // The 20 km marks, the sidetracks and the loose items are built only where they stand;
-  // their hidden program anchors are in the scene from boot for the same reason as the
-  // dancer's. Telegraph poles are drawn per chunk as InstancedMeshes: their program is
-  // linked here too.
+  // The 20 km marks, the sidetracks, the loose items and the market's machines and lot
+  // signs are built only where they stand; their hidden program anchors are in the scene
+  // from boot for the same reason as the dancer's. Telegraph poles are drawn per chunk as
+  // InstancedMeshes: their program is linked here too.
   renderer.scene.add(
     monumentProgramAnchor(),
     sidetrackProgramAnchor(),
@@ -496,6 +499,7 @@ async function boot(): Promise<void> {
     delineatorProgramAnchor(),
     itemProgramAnchor(),
     mirrorProgramAnchor(),
+    marketProgramAnchor(),
   );
   // Far traffic draws as one instance per model; built now so its hidden anchor links the
   // shared far-car program behind the loading cover (render/farcars.ts).
@@ -632,7 +636,7 @@ async function boot(): Promise<void> {
   streamer.register(new DelineatorProvider(roadDistance, debris));
   streamer.register(new SidetrackProvider(roadDistance));
   streamer.register(new MonumentProvider());
-  streamer.register(new PoiProvider(loose, trailerField, wreckTrunks, couriers, roadDistance, dancers));
+  streamer.register(new PoiProvider(trailerField, wreckTrunks, couriers, roadDistance, dancers, market));
 
   let initialYaw = 0;
   const player = new Player(physics, world, origin);
@@ -991,8 +995,9 @@ async function boot(): Promise<void> {
     }
   } else {
     spawnStartingItems(world, loose, road, terrain);
-    // The postcard from home is the only thing the player starts holding.
+    // The player starts holding the postcard from home and a few coins.
     inventory.add({ type: 'postcard', id: world.generatedPartId('story_item', 0, 0) });
+    inventory.add({ type: 'coin', id: world.generatedPartId('story_item', 0, 1), value: START_COINS });
   }
 
   // POI working cars enter state when their chunk reaches the physics band. A new
@@ -1212,6 +1217,7 @@ async function boot(): Promise<void> {
     origin,
     boardable,
     (itemId) => race.winCoins(itemId),
+    market,
   );
   interaction.attachPlayer(player);
 
@@ -2944,6 +2950,8 @@ async function boot(): Promise<void> {
       loop,
       mirageSchedule,
       courierAt: (index: number) => courierStop(world.seed, index),
+      // The vending machines and lot signs in the physics band (world/market.ts).
+      market,
       // `mirrors.stats.renders` counts mirror passes; `mirrors.enabled = false` is the A/B.
       mirrors: carMirrors,
       // `farCars.enabled = false` draws every traffic car in full, for the A/B; `stats`

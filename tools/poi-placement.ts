@@ -28,6 +28,7 @@ import { CHUNK_LENGTH } from '../src/world/ranges';
 import { Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
 import { PoiProvider, desertPoiClearOfRoad, desertPoisBetween, poisBetween } from '../src/world/poi';
+import { MarketField } from '../src/world/market';
 import { POI_SPACING, type PoiStock } from '../src/world/poislots';
 import { createVariantInstance, variantCount, variantDef } from '../src/world/poivariantbuild';
 import {
@@ -566,11 +567,12 @@ const MAX_RESIDUAL_M = 0.6;
   const WALK_CHUNKS = 1500;
   const walkKm = (WALK_CHUNKS * CHUNK_LENGTH) / 1000;
   const provider = new PoiProvider(
-    { spawnItem: () => {}, spawnPart: () => {}, forget: () => {} } as never,
     { spawn: () => {}, forget: () => {} } as never,
     { register: () => {}, attachLids: () => {}, forget: () => {} } as never,
     { register: () => {}, forget: () => {} } as never,
     roadDistance,
+    undefined as never,
+    new MarketField(),
   );
 
   /**

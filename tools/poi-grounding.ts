@@ -25,10 +25,10 @@ import { CHUNK_LENGTH } from '../src/world/ranges';
 import { Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
 import { PoiProvider, desertPoiClearOfRoad, desertPoisBetween, poisBetween } from '../src/world/poi';
+import { MarketField } from '../src/world/market';
 import { POI_SPACING } from '../src/world/poislots';
 import { structureDef, type PoiStructureKind } from '../src/world/poistructures';
 import { RoadDistance } from '../src/world/roaddistance';
-import type { LoosePartField } from '../src/parts/loose';
 import type { TrailerField } from '../src/vehicle/trailer';
 import type { WreckTrunkField } from '../src/world/wrecktrunks';
 import type { CourierField } from '../src/world/couriers';
@@ -43,17 +43,12 @@ const road = new Road(SEED);
 const terrain = new Terrain(SEED, road);
 const world = new GameWorld(newWorldState(SEED));
 
-const noLoose = {
-  spawnItem: () => {},
-  spawnPart: () => {},
-  forget: () => {},
-} as unknown as LoosePartField;
 const noTrailers = { spawn: () => {}, forget: () => {} } as unknown as TrailerField;
 const noWreckTrunks = { register: () => {}, attachLids: () => {}, forget: () => {} } as unknown as WreckTrunkField;
 const noCouriers = { register: () => {}, attachLids: () => {}, forget: () => {} } as unknown as CourierField;
 
 const roadDistance = new RoadDistance(road);
-const provider = new PoiProvider(noLoose, noTrailers, noWreckTrunks, noCouriers, roadDistance);
+const provider = new PoiProvider(noTrailers, noWreckTrunks, noCouriers, roadDistance, undefined as never, new MarketField());
 
 interface Piece {
   readonly minX: number;

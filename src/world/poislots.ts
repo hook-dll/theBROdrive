@@ -107,9 +107,6 @@ function roadsideOccupied(seed: number, slot: number, spacing: number): boolean 
   return hash01(seed, POI_DOMAIN, slot) < POI_OCCUPANCY || isCourierPoiSlot(seed, slot, spacing);
 }
 
-/** Stops of the drive whose car field always has a car to take (see `Poi.guaranteedCar`). */
-const GUARANTEED_CAR_STOPS = 2;
-
 /** One occupied roadside slot, rolled: everything about the stop except its lateral. */
 export interface RoadsideSlot {
   readonly slot: number;
@@ -124,7 +121,6 @@ export interface RoadsideSlot {
   readonly structure: number;
   readonly stock: PoiStock;
   readonly variantSeed: number;
-  readonly guaranteedCar: boolean;
 }
 
 /** The roadside slot's roll, or null when the slot is empty desert or off the road. */
@@ -132,10 +128,6 @@ export function roadsideSlot(seed: number, slot: number, spacing: number): Roads
   const s = slot * spacing;
   if (slot < 1 || s > ROAD_LENGTH) return null;
   if (!roadsideOccupied(seed, slot, spacing)) return null;
-  let earlier = 0;
-  for (let k = 1; k < slot && earlier < GUARANTEED_CAR_STOPS; k++) {
-    if (roadsideOccupied(seed, k, spacing)) earlier++;
-  }
   const { structure, stock } = rollStructure(seed, POI_DOMAIN, slot);
   return {
     slot,
@@ -146,6 +138,5 @@ export function roadsideSlot(seed: number, slot: number, spacing: number): Roads
     structure,
     stock,
     variantSeed: hash(seed, POI_DOMAIN, slot, 4),
-    guaranteedCar: earlier < GUARANTEED_CAR_STOPS,
   };
 }

@@ -17,6 +17,66 @@
   `tools/reality.ts kit_vectraa` gives 200 km/h against 198 and the turn within 1.1 %;
   the 0-100 of 12.2 s against 10.5 s is accepted as catalogue-optimistic. `kit-zfight`
   and `kit-proportions` pass. 13 509 triangles.
+- THE ECONOMY, FIRST SLICE: COINS FOR DELIVERIES, LICENCES, CONTRACT SLOTS, NOTHING FREE
+  (`src/economy/economy.ts`, economy plan draft 3).
+  - Every new drive starts in the VAZ-1111 Oka (was a seed-random car), its papers the
+    player's, 8–12 L in the tank and 5 coins in the pack. The yard by the house holds
+    two to four keepsakes (camera, watch, football, binoculars, torch, shades), no cans
+    or consumables.
+  - A delivery pays coins into the pack: base by kind (parcel 4, heavy crate 6, fragile
+    radio 7, hauls 10–12) × the source courier's km index (1 + 2·(1 − e^(−km/150)),
+    ×3 at most) × quality. A race won adds its prize to the same pile. The offer's
+    prompt and the deliver prompt show the sum.
+  - The fragile radio has a condition again, the delivery's quality: it loses one for
+    one with the scratches the car it rides in takes, and 12% per drop to the ground.
+    Its label shows the percentage once knocked.
+  - Licences from a saved ledger (`WorldState.deliveriesByKind`, counted with the
+    completed id): a heavy crate is signed out after three parcels, a haul (trailer,
+    oversize, tow, car transfer) after a heavy crate and a fragile radio. Checked when
+    the cargo is taken from the courier's boot, with the refusal on the prompt (`no
+    heavy-cargo licence — deliver 3 more parcels first`). Older saves rebuild the
+    ledger from their completed offer ids. The first courier's easy offer is always a
+    parcel.
+  - Contracts per car by body: estates (2102, 2104, 2111, 2131) carry two, the UAZ-2206
+    three, everything else one (was one for every car).
+  - Nothing lies about the world for the taking: stops no longer leave cans, gum,
+    tools, medicine, spray cans or parts by the front wall, a wreck's bonnet and boot
+    are empty, and a courier's boot holds only its four offers. Fuel stops still have
+    their trailers. Items already in an older save stay where they are.
+  - Prices for what vending machines and car lots sell are in `PRICE_TABLE`; machine
+    prices × km index, car prices flat. `Inventory.spendCoins` takes from the pile.
+
+- VENDING MACHINES AND CAR LOTS: EVERYTHING IS BOUGHT (`src/world/vending.ts`,
+  `src/world/carlot.ts`, `src/world/market.ts`, economy plan draft 3).
+  - Every fuel and store stop has a vending machine by its front wall: a low-poly cabinet
+    in the stop's colour (red FUEL, blue PARTS, green GOODS) with a painted head sign, a
+    window of four rows of up to three units, a coin panel and a tray. A fuel stop's is
+    mostly a FUEL machine (petrol in 5, 10 and 20 L cans, oil, water, gum), a store's a
+    PARTS machine (air filters, oil, water, sponges, spray cans; radiators from 25 km,
+    turbochargers from 75 km, an imported engine past 150 km) or a GOODS machine (a bit
+    of everything a driver runs out of). Each row holds one ware, drawn from the seed,
+    the stop and its 25 km band.
+  - Look at a unit in the window: the prompt names it and its price (`itemPrice`: base
+    × km index of where the machine stands). F pays from the coin pile and the thing
+    drops into the tray as a real loose item; short of coins, the prompt says how many
+    are in the pack. A sold slot stays empty for good (`WorldState.vendingSold`, saved;
+    absent in older saves = nothing sold). Machines never restock.
+  - Cars are bought, never found: the working car that used to stand in some car fields
+    for the taking is now a car for sale at some stops (55% of salvage yards, fewer
+    elsewhere), upright among the shells with a FOR SALE board at its road-side flank
+    naming the model and the price. Prices are flat (`carPrice`); the dearest model a
+    lot offers rises 25 coins per 50 km band, and the Daewoos and the Opels stand on
+    lots only past 300 km. The Oka is never on a lot.
+  - The lot car is a real car in the world (`CarState.lotPrice`): its doors and lids
+    work, but F on it offers `[F] buy VAZ-2104 — 65 coins` instead of a seat. Paying gives
+    the player its papers (`CarState.papers`, the `car_buy` delta), the board comes down
+    and the car is his to drive. The first two stops no longer guarantee a car
+    (`Poi.guaranteedCar` is gone).
+  - A purchase (`vend_sold`, `car_buy`) books an autosave, as a stowed item does.
+  - Machines and lot boards draw with two programs, linked at boot by the hidden
+    `marketProgramAnchor`: no program links on first sight (checked on seed 11 over
+    jumps to km 7.7, 15.4 and 30.8).
+
 - OPEL ASTRA F kit car (`src/carkit/opel.ts` `BODY_ASTRA_F`, `LOOK_ASTRA_F`;
   `interior.ts` `CABIN_ASTRA_F`; measured in `measurements-astra.md`). It is the five-door
   hatchback 1.6i GL with the 1994 facelift's face and tail, sold in Russia 1994–1998. It

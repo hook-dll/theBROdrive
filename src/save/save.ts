@@ -23,7 +23,8 @@ import {
 } from '../items/items';
 import { isStickerKind, STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
 import { isContractKind } from '../contracts/registry';
-import type { ContractProgress } from '../contracts/types';
+import { generateContractOffer } from '../contracts/offers';
+import type { ContractKind, ContractProgress } from '../contracts/types';
 import {
   AIR_FILTER_CELL,
   createBonnetStorage,
@@ -161,6 +162,9 @@ export function installVehicleAutosave(
       case 'trailer_cargo':
       case 'sticker_place':
       case 'inventory':
+      // A purchase (world/vending.ts, world/carlot.ts): the coins and what they bought.
+      case 'vend_sold':
+      case 'car_buy':
         if (world.state.player.drivingCarId) return;
         break;
       default:
@@ -592,6 +596,8 @@ export function migrateState(raw: unknown): WorldState {
     }
   }
 
+  const completedContractIds = migrateStringArray(obj.completedContractIds);
+
   return {
     seed,
     saveVersion: SAVE_VERSION,
@@ -612,13 +618,29 @@ export function migrateState(raw: unknown): WorldState {
     wreckStorage,
     wreckBonnet,
     courierStorage,
-    completedContractIds: migrateStringArray(obj.completedContractIds),
+    completedContractIds,
+    deliveriesByKind: migrateDeliveriesByKind(obj.deliveriesByKind, seed, completedContractIds),
     trailers,
     looseParts,
     looseItems,
     lootedPois: migrateNumberArray(obj.lootedPois),
     flattenedProps: migrateNumberArray(obj.flattenedProps),
+    vendingSold: migrateVendingSold(obj.vendingSold),
   };
+}
+
+/**
+ * Vending slots sold, by machine id. Absent on every save from before the machines:
+ * nothing sold. A malformed entry drops that machine's record, which only restocks it.
+ */
+function migrateVendingSold(value: unknown): Record<string, number[]> {
+  const out: Record<string, number[]> = {};
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return out;
+  for (const [id, slots] of Object.entries(value as Record<string, unknown>)) {
+    const sold = migrateNumberArray(slots).filter((slot) => Number.isInteger(slot) && slot >= 0);
+    if (sold.length > 0) out[id] = sold;
+  }
+  return out;
 }
 
 
@@ -846,6 +868,11 @@ function migrateCar(raw: Record<string, unknown>, version: number): CarState {
   // The towed car's own field only; the tower carries no mirror. Whether the named
   // car exists is decided once the whole car set is known, in `fromSaveData`.
   if (typeof raw.towedBy === 'string' && raw.towedBy.length > 0) car.towedBy = raw.towedBy;
+  // Bought or started in: the player's papers. A lot car still for sale keeps its price.
+  if (raw.papers === true) car.papers = true;
+  if (typeof raw.lotPrice === 'number' && Number.isFinite(raw.lotPrice) && raw.lotPrice > 0) {
+    car.lotPrice = Math.round(raw.lotPrice);
+  }
   // The mirrors' hand-set aims (inside and door mirrors); anything malformed leaves the
   // built aim.
   for (const field of Object.values(MIRROR_FIELD)) {
@@ -959,12 +986,46 @@ function isRemovedLegacyItem(raw: unknown): boolean {
 }
 
 /**
- * Rebuilds a contract's saved progress. Older saves also carry condition, heat,
- * violated and status fields from when deliveries were scored; they are dropped.
+ * Rebuilds a contract's saved progress: `started`, and a fragile radio's `condition`
+ * when it has one. Older saves also carry heat, violated and status fields from when
+ * deliveries were scored; they are dropped.
  */
 function sanitizeContractProgress(raw: unknown): ContractProgress {
-  const started = typeof raw === 'object' && raw !== null && (raw as Record<string, unknown>).started === true;
-  return { started };
+  const obj = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
+  const progress: ContractProgress = { started: obj.started === true };
+  if (typeof obj.condition === 'number' && Number.isFinite(obj.condition)) {
+    progress.condition = Math.min(1, Math.max(0, obj.condition));
+  }
+  return progress;
+}
+
+/**
+ * The delivery ledger. A save from before it rebuilds the counts from its completed
+ * ids: an offer's id (`courier:N:offer:S`) regenerates its kind from the seed, so the
+ * licences a player earned before the ledger are not lost. Ids that are not offers
+ * (legacy envelopes) count for nothing.
+ */
+function migrateDeliveriesByKind(
+  raw: unknown,
+  seed: number,
+  completed: readonly string[],
+): Partial<Record<ContractKind, number>> {
+  const ledger: Partial<Record<ContractKind, number>> = {};
+  if (typeof raw === 'object' && raw !== null) {
+    for (const [kind, count] of Object.entries(raw as Record<string, unknown>)) {
+      if (!isContractKind(kind) || typeof count !== 'number' || !Number.isFinite(count)) continue;
+      const n = Math.max(0, Math.trunc(count));
+      if (n > 0) ledger[kind] = n;
+    }
+    return ledger;
+  }
+  for (const id of completed) {
+    const match = /^courier:(\d+):offer:([0-3])$/.exec(id);
+    if (!match) continue;
+    const kind = generateContractOffer(seed, Number(match[1]), Number(match[2])).contractKind;
+    ledger[kind] = (ledger[kind] ?? 0) + 1;
+  }
+  return ledger;
 }
 
 function migrateItem(raw: unknown, where: string): Item {
