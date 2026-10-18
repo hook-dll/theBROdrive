@@ -40,11 +40,18 @@ export const BODY_ASTRA_F: KitBody = {
     // runs stay outside them]; the bonnet's lip 0.69 over lamps
     // 0.55–0.665 [D front y 213, 217–235]. The bonnet's centre line [D side: 0.70 at s 0.07,
     // 0.73 at 0.15, 0.77 at 0.27, 0.836 at 0.54, 0.883 at 0.83, 0.924 at 1.12].
-    { s: 0.1, sill: 0.3, crease: 0.55, belt: 0.675, deck: 0.69, wSill: 0.6, wCrease: 0.62, wBelt: 0.6 },
-    { s: 0.2, sill: 0.3, crease: 0.56, belt: 0.71, deck: 0.735, wSill: 0.675, wCrease: 0.69, wBelt: 0.675 },
-    { s: 0.3, sill: 0.29, crease: 0.57, belt: 0.74, deck: 0.767, wSill: 0.74, wCrease: 0.755, wBelt: 0.735 },
-    { s: 0.45, sill: 0.28, crease: 0.58, belt: 0.78, deck: 0.81, wSill: 0.78, wCrease: 0.795, wBelt: 0.775 },
-    { s: 0.65, sill: 0.27, crease: 0.59, belt: 0.82, deck: 0.855, wSill: 0.815, wCrease: 0.832, wBelt: 0.795 },
+    // Owner's review 2 (2026-10-18): dents on the wings. The plan's slope fell 0.65 → 0.27
+    // per metre at s 0.3, and the flank's lean in over the belt (wCrease − wBelt over its
+    // rise) went 0.16, 0.10, 0.12, 0.10, 0.16, 0.14 station by station, so the side's
+    // facets turned in and out. Now one curve through the drawn plan, wCrease = 0.836 −
+    // 0.216 (1 − (s − 0.1) / 1.03)⁴ (0.62 at 0.1, 0.692 at 0.2, 0.795 at 0.45, 0.836 at the
+    // cowl; D plan 0.70 at 0.17, 0.78 at 0.31, 0.82 at 0.45), the sill 0.016 inside it and
+    // the belt leaning in 0.14 per metre of rise everywhere (the cowl's).
+    { s: 0.1, sill: 0.3, crease: 0.55, belt: 0.675, deck: 0.69, wSill: 0.604, wCrease: 0.62, wBelt: 0.603 },
+    { s: 0.2, sill: 0.3, crease: 0.56, belt: 0.71, deck: 0.735, wSill: 0.676, wCrease: 0.692, wBelt: 0.671 },
+    { s: 0.3, sill: 0.29, crease: 0.57, belt: 0.74, deck: 0.767, wSill: 0.729, wCrease: 0.745, wBelt: 0.721 },
+    { s: 0.45, sill: 0.28, crease: 0.58, belt: 0.78, deck: 0.81, wSill: 0.779, wCrease: 0.795, wBelt: 0.767 },
+    { s: 0.65, sill: 0.27, crease: 0.59, belt: 0.82, deck: 0.855, wSill: 0.81, wCrease: 0.826, wBelt: 0.794 },
     // The cowl [D side (297, 172)]; the flank ±0.836 (the drawing's ±0.848 less the 1.3 %
     // the body came out over the factory 1688 with its arches and bumpers), the shoulder
     // ±0.795 under the glass's foot (±0.79 at 0.93 [D front]).
@@ -76,9 +83,11 @@ export const BODY_ASTRA_F: KitBody = {
       { s: 1.13, top: 1.79, upper: 'body' },
       { s: 1.165, top: 1.825, upper: 'door1', lower: 'body', finish: 'black' },
       // The front door's shut line below the belt [D side x 320]; the mirror's sail from it
-      // to the glass's front edge (1.52 at the belt [D side: the mirror x 345–372]).
+      // to the glass's front edge [D side: the mirror x 345–372, the glass 1.52 at the belt].
+      // Owner's review 2 (2026-10-18): the glass's edge from 1.47 (1.565 at 1.0), so the
+      // driver's lines to both mirror heads (`mirrorS` 1.53) cross the side glass.
       { s: 1.264, top: 1.86, upper: 'door1', finish: 'black' },
-      { s: 1.52, top: 1.88, upper: 'door1', glass: 'drop', finish: 'black' },
+      { s: 1.47, top: 1.88, upper: 'door1', glass: 'drop', finish: 'black' },
       // The B pillar, black [D side x 490–520: the front glass ends 2.255 at the belt, 2.342
       // at the rail; the shut line 2.284; the rear glass from 2.383 / 2.43].
       { s: 2.255, top: 2.34, upper: 'door1', finish: 'black' },
@@ -87,10 +96,14 @@ export const BODY_ASTRA_F: KitBody = {
       { s: 2.33, top: 2.4, upper: 'door2', finish: 'black' },
       { s: 2.383, top: 2.43, upper: 'door2', glass: 'drop', finish: 'black' },
       // The rear glass's rear edge [D side: 3.10 at the belt, 3.053 at the rail], the black
-      // post behind it to the shut line (3.215), which runs down and forward round the rear
-      // arch [D side: upright to 0.69, the arch's top at s 3.05].
+      // post behind it to the shut line (3.215). Owner's review 2 (2026-10-18), the drawing
+      // re-read by pixel rows: below the belt the line runs down to about 0.68 (3.19 at
+      // 0.695), then round the rear arch's lip 2–3 cm in front of it (3.15 at 0.62, 3.06 at
+      // 0.59, 3.03 at 0.55, 2.98 at 0.48, 2.96 at 0.41, 2.94 at the door's bottom); the one
+      // straight slope from 0.69 to 2.95 crossed 7 cm into the arch at 0.45–0.55 (3.07–3.13
+      // against the arch's 3.00–3.06). Now bent at a knee in front of the arch.
       { s: 3.1, top: 3.053, upper: 'door2', finish: 'black' },
-      { s: 3.215, top: 3.135, upper: 'body', finish: 'black', foot: { y: 0.69, s: 2.95, round: [0.12, 0.03] } },
+      { s: 3.215, top: 3.135, upper: 'body', finish: 'black', foot: { y: 0.68, s: 2.93, knee: [3.02, 0.54], round: [0.06, 0.03] } },
       // The fixed quarter glass in the body, nearly a triangle: its front edge the post, its
       // rear edge along the tailgate's line from its foot (3.653) up to the rail [D side].
       { s: 3.228, top: 3.147, upper: 'body', glass: 'fixed', finish: 'black' },
@@ -161,6 +174,10 @@ export const LOOK_ASTRA_F: KitLook = {
   headrests: true,
   brightwork: 'black',
   sill: null,
+  // On the sail at the glass's front foot (owner's review 2: at the default 1.245 the
+  // driver's lines to the heads, eye s 2.19, met the sail) [D side: the mirror x 345–372,
+  // s 1.41–1.57]; the right one's line crosses the glass 6 cm behind its edge.
+  mirrorS: 1.53,
   // The black rubbing strip along the doors only [D side y 232–237: 0.55–0.58, from the front
   // door's shut line x 290 to the rear door's; P "1998 Opel Astra 1.6": none on the wing].
   waist: { y: 0.565, height: 0.03, finish: 'black', span: [1.25, 3.2] },
@@ -208,7 +225,28 @@ export const LOOK_ASTRA_F: KitLook = {
     // Dark grey plastic 0.19–0.535 [D side 0.19–0.49, front 0.18–0.51; P: its top under the
     // lamps' foot]: the band hangs `drop` under the face's sill bevel (0.30 + 0.035). Its
     // sides back along the wings to the front arch.
-    bumper: { kind: 'moulded', drop: 0.145, height: 0.345, corner: 0.2, wrapTo: 0.45 },
+    // Owner's review 2 (2026-10-18): the intake (a flat slab ±0.5) and the fog lamps (flat
+    // panels ±0.52–0.62) stood on the face's plane while the bumper's face curves back from
+    // ±0.45 to its corners (corner 0.2): the slab's ends and the lamps' outer ends stood out
+    // of it, their inner ends sank in, and the groove (0.11 over the foot) ran through the
+    // lamps. On "1996 Opel Astra 1.6i (53295982115)" (the plate 520 mm = 320 px, 1.63 mm/px,
+    // the bumper 0.345 = 205 px): a ribbed line across at 0.134 over the foot, under it the
+    // dark intake (0.05–0.125) from fog lamp to fog lamp, the lamps small clear rectangles
+    // at its ends (0.075–0.146, about ±0.50–0.62 averaged over the near and far sides). Now
+    // laid on the curved face itself (`inlays`), in the face's upright part (from 0.08 over
+    // the foot), the rib a dark band above them.
+    bumper: {
+      kind: 'moulded',
+      drop: 0.145,
+      height: 0.345,
+      corner: 0.2,
+      wrapTo: 0.45,
+      moulding: { y: 0.35, height: 0.012, finish: 'rubber' },
+      inlays: [
+        { x: [0, 0.475], y: [0.085, 0.14], finish: 'black' },
+        { x: [0.49, 0.6], y: [0.085, 0.145], finish: 'grey' },
+      ],
+    },
     items: [
       // The grille between the lamps: black horizontal slats in a body-colour surround, from
       // the bumper's top to under the bonnet's lip [P; D front ±0.33].
@@ -220,18 +258,6 @@ export const LOOK_ASTRA_F: KitLook = {
         back: true,
         bars: { dir: 'horizontal', count: 4, finish: 'black', margin: 0.01, width: 0.01, depth: 0.01, proud: 0.015 },
       },
-      // The black intake across the bumper's lower part [D front ±0.585, 0.28–0.38; P].
-      {
-        kind: 'grille',
-        x: { centre: 0.5 },
-        y: { from: ['bumperBottom', 0.09], to: ['bumperBottom', 0.18] },
-        standOut: 0.024,
-        back: true,
-        bars: { dir: 'horizontal', count: 1, finish: 'black', margin: 0, width: 0.015, depth: 0.01, proud: 0.005 },
-      },
-      // The small fog lamps at the intake's ends [P "1996 Opel Astra 1.6i"]: unlit grey
-      // panels, their faces inside the bumper's.
-      { kind: 'panel', x: { from: { centre: 0.52 }, to: { centre: 0.62 } }, y: { from: ['bumperBottom', 0.1], to: ['bumperBottom', 0.15] }, finish: 'grey', proud: 0.05 },
     ],
   },
   rear: {

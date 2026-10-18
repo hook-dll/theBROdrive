@@ -71,9 +71,12 @@ export interface CabinColumn {
    * Below the belt the shut line on this column runs upright down to height `y`, then
    * straight to `s` at the doors' bottom (the 2110's rear door, whose edge runs forward to
    * the sill in front of the rear arch). `round`: radii of its upper corner (upright to
-   * slope) and lower corner (slope to the door's bottom edge). Absent: upright.
+   * slope) and lower corner (slope to the door's bottom edge). `knee`: an `[s, y]` point
+   * the slope bends at on its way down, rounded by the upper radius (the Astra F's rear
+   * door: quickly forward over the arch's top, then nearly upright in front of it).
+   * Absent: upright.
    */
-  readonly foot?: { readonly y: number; readonly s: number; readonly round?: readonly [number, number] };
+  readonly foot?: { readonly y: number; readonly s: number; readonly round?: readonly [number, number]; readonly knee?: readonly [number, number] };
   /**
    * The column's top point stands this far below the rail: one straight chamfer of the
    * rail's front corner from the A pillar up to the next column's top (the Samaras' A
@@ -511,6 +514,16 @@ export type BumperLook =
        * flat top standing out of the face.
        */
       readonly flush?: boolean;
+      /**
+       * Pieces laid on its face and following it round the corners, 6 mm proud with the
+       * face cut under them (as the moulding): fog lamps and an intake band low on a bumper
+       * whose face curves back towards its ends, where a flat face item would sink in at
+       * one end and stand out at the other (the Astra F's). `x`: half widths [inner,
+       * outer] of each side's piece, or inner 0 for one piece across the centre line; `y`:
+       * heights over the bumper's foot, within its upright face (0.08 to 0.05 under its
+       * top); the inlay's finish.
+       */
+      readonly inlays?: readonly { readonly x: readonly [number, number]; readonly y: readonly [number, number]; readonly finish: Finish }[];
     };
 
 /**

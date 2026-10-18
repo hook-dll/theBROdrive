@@ -978,6 +978,44 @@ amplified differences; `bench-*.json`, `pick-*.json`).
 - **The lid's black panel ended 8 mm over the lid's foot and its bottom fought the lid's
   edge.** → It ends 16 mm over it, inside the notch. *opel.ts*.
 
+## Espero, Vectra, Astra review 2 (2026-10-18)
+
+Renders: `/tmp/{espero,vectra,astra}/r2-*.png` (`r2-doors` doors open, `r2-cabin` the
+in-game cabin view via `__bro.driveModel` + `camera.showCabin`, `r2-vs-photos`). Tables in
+each measurements file's "Review 2".
+
+- **Espero, Vectra: the mouldings looked stuck on and cut unevenly; a door that opened
+  took a piece of the wing's moulding and skin with it (owner).** → `buildFlankStrip` split
+  each strip at the door nodes' bounding boxes. The front door's box reaches over the wing
+  to the A pillar's foot and the rear door's box goes past its raked shut line, so the
+  doors took lengths of the wing's and the C pillar's strip. → The strip is cut at every
+  cabin column's shut line (a raked `foot` line at its slant), and each piece takes the
+  owner of the skin under it (`BodyFrame.flankOwner`, the owners `buildShell` gives the
+  side faces), 5 mm short of the seam. The same goes for every car's waist and feature line.
+  *exterior.ts `buildFlankStrip`, body.ts `flankOwner`, `shutS`*.
+- **Espero: the A pillar so thick that the door mirrors could not be seen from the seat
+  (owner).** → The pillar matches the drawing (1.267 → 2.03). The mirrors stood at the
+  generic 8 cm behind the pillar's column (1.38) while the drawing has them at 1.78–1.90 on
+  the sail. The driver's line to them crossed the black sail. → `KitLook.mirrorS` (Espero
+  1.74, Vectra 1.60, Astra 1.53), the glass's front edge moved forward to the sail's foot
+  (Espero 1.62, Vectra 1.55, Astra 1.47). Checked in the in-game cabin view: both mirrors
+  through the side glass on all three. *spec.ts `mirrorS`, exterior.ts `buildDoorHardware`*.
+- **Vectra: the rear door monstrously narrow (owner).** → The 1989 preview was read with
+  the small quarter glass as body. The door ended at 3.03 against the drawing's 3.30, so it
+  was 0.63 long at the belt against 0.96. → The door carries the quarter glass to 3.29, the
+  shut line raked from 0.80 to 2.98, the B pillar's shut line at 2.345 (was 2.385/2.40).
+  *opel.ts `BODY_VECTRA_A`*.
+- **Astra: dents on the front wings (owner).** → The plan's slope broke at s 0.3 and the
+  flank's lean over the belt changed station to station (0.10–0.16). → One curve through the
+  drawn plan and a constant 0.14 lean. *opel.ts `BODY_ASTRA_F` stations*.
+- **Astra: the fog lamps hidden in the bumper, something sticking out of it (owner).** →
+  The intake slab and fog panels were flat face items on a bumper whose face curves back
+  from ±0.45: the slab's ends stood out and the lamps' inner ends sank in. → `inlays`, laid
+  on the bumper's own face along its path, at the photo's heights; a rubber rib where the
+  groove was. *spec.ts `inlays`, exterior.ts `facePath`*.
+- **Astra: the rear door's shut line ran 7 cm into the rear arch.** → `foot.knee`: the
+  line bends in front of the arch's lip (3.02, 0.54) as drawn. *body.ts `shutLine`*.
+
 ## Police UAZ-469 (2026-10-18)
 
 - **The police car: the UAZ-469 black with white doors, «МИЛИЦИЯ» on them and a light bar

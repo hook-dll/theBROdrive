@@ -287,8 +287,9 @@ export class BodyFrame {
 
   /**
    * A raked shut line below the belt (`CabinColumn.foot`) as [s, y] points from the belt
-   * down to the doors' bottom: upright on the column, straight to the foot, its two
-   * corners rounded by `foot.round`. Heights fall monotonically along it. Every point is
+   * down to the doors' bottom: upright on the column, straight to the foot (through its
+   * `knee` if set), its corners rounded by `foot.round` (the knee by the upper radius).
+   * Heights fall monotonically along it. Every point is
    * a side row on every tub column (`sideCutRows`), so a point within `ROW_SNAP` of the
    * fuel flap's top or bottom takes that row's height: two rows a few millimetres apart
    * only cut the whole flank into slivers and bent the flap's opening out of line.
@@ -300,9 +301,11 @@ export class BodyFrame {
     const top: [number, number] = [column.s, this.station(column.s).belt];
     const corner: [number, number] = [column.s, foot.y];
     const base: [number, number] = [foot.s, bottom];
+    const knee = foot.knee;
     const rows = [this.spec.flap.y0, this.spec.flap.y1];
     const snap = (y: number): number => rows.find((r) => Math.abs(r - y) < ROW_SNAP) ?? y;
-    return [top, ...fillet(top, corner, base, upper), ...fillet(corner, base, [foot.s - 1, bottom], lower)].map(([s, y]) => [s, snap(y)]);
+    const bends = knee ? [...fillet(top, corner, knee, upper), ...fillet(corner, knee, base, upper)] : fillet(top, corner, base, upper);
+    return [top, ...bends, ...fillet(knee ?? corner, base, [foot.s - 1, bottom], lower)].map(([s, y]) => [s, snap(y)]);
   }
 
   /** Half width the boot lid or tailgate is cut along at s: the pillar row, or the stations' `notch`. */

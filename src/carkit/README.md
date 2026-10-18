@@ -316,10 +316,12 @@ below the belt a door may overlap a pillar), `glass` is `'none'`, `'drop'` (wind
 `vent_*`) or `'fixed'` (a fixed pane: in the body if `upper: 'body'`, else it rides with the
 door as `quarter_*`). `finish?: 'black'` makes the strip's paint above the belt black
 trim up to the rail (the frame round its glass, a blacked-out pillar, the mirror's sail; the
-rail's chamfer stays painted: the Espero's frames, B pillar and sail). `foot?: { y, s, round? }` rakes the shut line on this column below
+rail's chamfer stays painted: the Espero's frames, B pillar and sail). `foot?: { y, s, round?, knee? }` rakes the shut line on this column below
 the belt: upright down to `y`, then straight to `s` at the doors' bottom (the 2110's rear
-door, whose edge runs forward to the sill in front of the arch); `round: [upper, lower]` are
-the radii of its two turns (`BodyFrame.shutLine`; a point of the line within 5 mm of the
+door, whose edge runs forward to the sill in front of the arch), bending at `knee: [s, y]`
+on the way if set (the Astra F's: quickly forward over the rear arch's lip, then nearly
+upright in front of it); `round: [upper, lower]` are
+the radii of its turns (`BodyFrame.shutLine`; a point of the line within 5 mm of the
 fuel flap's top or bottom takes that height, `ROW_SNAP`, since every point is a side row on
 every tub column). The side faces it crosses are clipped
 along it, and the body's piece behind it gets cabin trim. `drop?` lowers the column's top
@@ -456,7 +458,11 @@ the paint slot, so it takes the car's colour, dust, scratches and stickers).
   flanks back to, lying on them with its foot in line with the sill, a path point at each
   station between; the tens' and the 2115's bumpers run to their wheel arches),
   `flush?` (its top grows out of the body's surface in its top 60 mm instead of a flat
-  shelf: the tens' and the 2115's bumpers, integrated in the body's lines).
+  shelf: the tens' and the 2115's bumpers, integrated in the body's lines), `inlays?`
+  (`{ x: [inner, outer], y: [bottom, top], finish }[]`: pieces laid on the bumper's own
+  face as it curves round the corners, 6 mm proud with the face cut under them, like the
+  band: the Astra F's intake (inner 0 = one piece across) and fog lamps. A flat face item
+  on a curved bumper sinks in at one end and stands out at the other).
 
 ### Cabin override (`cabinLayout`)
 

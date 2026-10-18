@@ -100,6 +100,39 @@ function sweptOutlines(path: readonly SweepPoint[], a: SectionPoint, b: SectionP
 }
 
 /**
+ * The stretch of a bumper path's outer face between plan x `xa` and `xb` (xa < xb), as
+ * points on the face itself (depth 0), cut where each step crosses them: an inlay laid on
+ * the face (`inlays`). Steps along the flanks (facing straight out) are left out, so only
+ * the face and its corners count, where x runs one way.
+ */
+function facePath(path: readonly SweepPoint[], xa: number, xb: number): SweepPoint[] {
+  const outer = path.map((p): SweepPoint => ({ x: p.x + p.nx * p.depth, z: p.z + p.nz * p.depth, nx: p.nx, nz: p.nz, depth: 0 }));
+  const at = (a: SweepPoint, b: SweepPoint, t: number): SweepPoint => {
+    const nx = a.nx + (b.nx - a.nx) * t;
+    const nz = a.nz + (b.nz - a.nz) * t;
+    const n = Math.hypot(nx, nz);
+    return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, nx: nx / n, nz: nz / n, depth: 0 };
+  };
+  const out: SweepPoint[] = [];
+  const push = (p: SweepPoint): void => {
+    const last = out[out.length - 1];
+    if (!last || Math.hypot(last.x - p.x, last.z - p.z) > 1e-6) out.push(p);
+  };
+  for (let i = 0; i + 1 < outer.length; i++) {
+    const a = outer[i]!;
+    const b = outer[i + 1]!;
+    if (Math.abs(a.nx) === 1 && Math.abs(b.nx) === 1) continue;
+    const dx = b.x - a.x;
+    if (Math.abs(dx) < 1e-9 || Math.max(a.x, b.x) <= xa || Math.min(a.x, b.x) >= xb) continue;
+    const ta = Math.min(1, Math.max(0, (xa - a.x) / dx));
+    const tb = Math.min(1, Math.max(0, (xb - a.x) / dx));
+    push(at(a, b, Math.min(ta, tb)));
+    push(at(a, b, Math.max(ta, tb)));
+  }
+  return out;
+}
+
+/**
  * Plan path of a bumper across one end of the car: back along each flank by `wrap`,
  * round the corner (radius `r`) and across the face, standing `standoff` off the face.
  * `flank`: a long wrap hugging the wings (a blade's `wrap`): the side's half width at a z,
@@ -799,7 +832,21 @@ function buildBumpers(ctx: KitContext, b: PartBuilder): Map<1 | -1, Ridge> {
       const ridge = new PartBuilder().color(band.color);
       sweep(ridge, band.slot, along, [[1, band.y - band.h, -0.007], [1, band.y - band.h, 0.006], [1, band.y + band.h, 0.006], [1, band.y + band.h, -0.007]], [3]);
       b.append(moulded);
-      const volume = sweptOutlines(along, [1, band.y - band.h, -0.0005], [1, band.y + band.h, -0.0005], 0.0065).map((o) => ({ ...o, solid: true }));
+      const volume: Outline[] = sweptOutlines(along, [1, band.y - band.h, -0.0005], [1, band.y + band.h, -0.0005], 0.0065).map((o) => ({ ...o, solid: true }));
+      // Inlays (`inlays`): fog lamps, an intake band, laid on the face itself as it curves
+      // back to the corners, 6 mm proud and rooted 7 mm in it like the band.
+      for (const inlay of bumper.inlays ?? []) {
+        const { slot, color } = finishSlot(inlay.finish);
+        const [ya, yb] = [y0 + inlay.y[0], y0 + inlay.y[1]];
+        const [xi, xo] = inlay.x;
+        ridge.color(color);
+        for (const [xa, xb] of xi === 0 ? [[-xo, xo]] : [[xi, xo], [-xo, -xi]]) {
+          const run = facePath(path, xa!, xb!);
+          if (run.length < 2) continue;
+          sweep(ridge, slot, run, [[0, ya, -0.007], [0, ya, 0.006], [0, yb, 0.006], [0, yb, -0.007]], [3]);
+          volume.push(...sweptOutlines(run, [0, ya, -0.0005], [0, yb, -0.0005], 0.0065).map((o) => ({ ...o, solid: true })));
+        }
+      }
       ridges.set(end, { part: ridge, volume, y0: band.y - band.h, y1: band.y + band.h, front: reach + 0.006 });
       bumperHoles(ctx, path, section, end, wrapTo === undefined ? 0 : flankPoints(path) - 1);
     }

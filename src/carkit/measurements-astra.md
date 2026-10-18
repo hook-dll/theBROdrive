@@ -170,3 +170,31 @@ Samara's 0.36 seat line, 0.82 mm/px; the panorama bends the dash's ends.
   panorama.
 - Overhangs, mass split, tank, red line, engine and gearbox masses are estimates.
 - Triangles: 13 578.
+
+## Review 2 (owner, 2026-10-18): wings, front bumper, rear shut line, mirrors
+
+Re-read on the-blueprints.com vector 9603 preview (`2001_opel_astra_f_5-door.jpg`, the
+scales in opel.ts), pixel rows by script, against "1996 Opel Astra 1.6i (53295982115)" and
+"1998 Opel Astra 1.6 (53484789145)". Factory figures cross-checked: auto-data.net and
+ultimatespecs (wheelbase 2517 / 2520, width 1688–1690, height 1410; length 4050 against
+auto-data's 4086, kept at the drawing's 4050). No free dimensioned drawing was found
+(3dmodels.org's free sheet is the three-door GSi).
+
+| Feature | Drawing / photo | Model before | Model now |
+|---|---|---|---|
+| A pillar, at the belt → rail | 1.13 → 1.79 | same | unchanged |
+| Front door shut line | x 320: 1.26 (1.23–1.25 below 0.8) | 1.264 | unchanged |
+| Front glass front edge | 1.52 at the belt | 1.52 | 1.47 |
+| Mirror head | x 345–372: s 1.41–1.57 | 1.245: **hidden behind the sail** | `mirrorS` 1.53, seen in the cabin view |
+| B pillar | front glass ends 2.255, shut line 2.284, rear glass from 2.383 | same | unchanged |
+| Rear door shut line | 3.215 at the belt, 3.19 at 0.695, round the arch's lip: 3.15 at 0.62, 3.06 at 0.59, 3.03 at 0.55, 2.98 at 0.48, 2.96 at 0.41, 2.94 at the bottom | one slope 0.69 → 2.95: **7 cm into the arch at 0.45–0.55** | `foot` y 0.68, `knee` (3.02, 0.54) → 2.93 |
+| Door lengths at the belt | front 1.26–2.28 (1.02), rear 2.28–3.215 (0.93) | same | unchanged |
+| Front wing plan (wCrease) | ±0.70 at 0.17, ±0.78 at 0.31, ±0.82 at 0.45, ±0.846 from 0.6 | 0.62 / 0.69 / 0.755 / 0.795 / 0.832 at 0.1–0.65: the slope falling 0.65 → 0.27 / m at 0.3; the flank's lean over the belt 0.16 / 0.10 / 0.12 / 0.10 / 0.16 per station (**the dents**) | one curve 0.836 − 0.216 (1 − (s − 0.1)/1.03)⁴: 0.62 / 0.692 / 0.745 / 0.795 / 0.826; the lean 0.14 everywhere |
+| Front bumper: rib | ribbed line across at 0.134 over the foot | the groove at 0.11 running through the fog lamps | a rubber rib at 0.35 (0.135 over the foot) |
+| Intake | dark, 0.05–0.125 over the foot, fog lamp to fog lamp | a flat slab ±0.5 on the face's plane: its ends **stood out** where the face curves back | `inlays` ±0.475 on the curved face, 0.085–0.14 |
+| Fog lamps | small clear rectangles at the intake's ends, 0.075–0.146, about ±0.50–0.62 | flat panels ±0.52–0.62: inner ends **sunk in the bumper** | `inlays` ±0.49–0.60, 0.085–0.145, on the curved face |
+
+The fog lamps and the intake were flat face items on a bumper whose face turns back from
+±0.45 (corner 0.2). They now lie on the bumper's own face (`inlays`, swept along its path
+like the band), from 0.085 over the foot, where the section's face is upright.
+
