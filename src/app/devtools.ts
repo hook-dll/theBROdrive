@@ -54,6 +54,7 @@ import type { WorldOrigin } from '../world/origin';
 import type { Road } from '../world/road';
 import type { RoadTraffic } from '../world/traffic';
 import type { RivalRace } from '../contracts/race';
+import type { PolicePatrol } from '../world/police';
 import type { Terrain } from '../world/terrain';
 import type { WorldWorkScheduler } from '../world/workqueue';
 import { forceWeather, weather } from '../world/weather';
@@ -115,6 +116,7 @@ export interface DevToolsContext {
   readonly tumbleweeds: TumbleweedField;
   readonly traffic: RoadTraffic;
   readonly race: RivalRace;
+  readonly police: PolicePatrol;
   readonly vitals: PlayerVitals;
   readonly autopilot: Autopilot;
   readonly hud: Hud;
@@ -595,6 +597,12 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     traffic: ctx.traffic,
     // `race.snapshot()`: the three rivals' place, speed and phase.
     race: ctx.race,
+    // `police.snapshot()`: heat, the chase, the posts in reach. Smoke hooks:
+    // `police.devPost('shoulder' | 'layby', metres)` puts a post up the road (as near as
+    // 20 m), `police.devChase('speeding' | 'accident' | 'check')` sends its car after the
+    // player, `police.devFlight(true | false | null)` forces the next flight to give up or
+    // escalate, `police.devHeat(n)` sets the wanted level.
+    police: ctx.police,
     vitals: ctx.vitals,
     autopilot: ctx.autopilot,
     // `weather.force('storm', 0.5)` freezes a storm at its peak; `force(null)` hands

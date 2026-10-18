@@ -152,6 +152,7 @@ import { cabinOpenness, type CabinOpenness } from './audio/cabinopenness';
 import { STREAM_FRAME_BUDGET_MS, STREAM_JOBS_PER_FRAME, warmUpBoot } from './app/bootwarmup';
 import { installDevTools } from './app/devtools';
 import { RivalRace, newRaceProgress } from './contracts/race';
+import { PolicePatrol } from './world/police';
 import { createPlayerImpacts } from './app/playerimpacts';
 import { createWheelEffects } from './app/wheeleffects';
 
@@ -862,6 +863,10 @@ async function boot(): Promise<void> {
   const race = new RivalRace(world.seed, road, traffic, loadCarModel, (text) => hud.setToast(text));
   /** Reused receiver for the HUD bead line; see `RivalRace.progress`. */
   const raceProgress = newRaceProgress();
+  /** Police posts, chases and stops; see world/police.ts. */
+  const police = new PolicePatrol(world, road, traffic, inventory, (text) => hud.setToast(text));
+  /** Reused receiver for the chasing police car's position; see `PolicePatrol.sirenAt`. */
+  const sirenPoint = { x: 0, y: 0, z: 0 };
   const NO_RIVALS: readonly number[] = [];
   /** How far past a receiving courier's arclength it stays the delivery target, m. */
   const DELIVERY_PAST_COURIER_M = 40;
@@ -1453,6 +1458,7 @@ async function boot(): Promise<void> {
         tumbleweeds,
         traffic,
         race,
+        police,
         vitals,
         autopilot,
         hud,
@@ -1632,6 +1638,12 @@ async function boot(): Promise<void> {
     frameProfiler?.begin('traffic');
     traffic.fixedUpdate(dt, activeS, activeLateral, origin.x, origin.z);
     race.fixedUpdate(dt, activeS);
+    police.fixedUpdate(dt, {
+      s: activeS,
+      lateral: activeLateral,
+      carId: drivingId,
+      speedKmh: driving?.speedKmh ?? 0,
+    });
     if (race.progress(activeS, raceProgress)) {
       hud.setRouteProgress('race', raceProgress.player, raceProgress.rivals, 0);
     } else if (deliveryMinIndex !== Infinity) {
@@ -1971,6 +1983,12 @@ async function boot(): Promise<void> {
 
     const eye = camera.eyePosition;
     const dir = camera.eyeDirection;
+    // A police stop waiting for the papers takes the [F] before the world does.
+    if (police.awaitingPapers && (f.mount || f.interact) && !medicineActive) {
+      police.handOver();
+      f.mount = false;
+      f.interact = false;
+    }
     const interacted = interaction.fixedUpdate(
       dt,
       medicineActive ? deathInput : f,
@@ -1983,7 +2001,7 @@ async function boot(): Promise<void> {
       activeS,
       camera.mode === 'cabin',
     );
-    prompt = interacted.prompt;
+    prompt = police.prompt ?? interacted.prompt;
     actionable = interacted.actionable;
     boot = interacted.boot;
     if (interacted.board && story === null && !dying) {
@@ -2557,6 +2575,8 @@ async function boot(): Promise<void> {
     dancers.update(frameDt, cam.x + origin.x, cam.z + origin.z, headlightVisibility);
     const dancerHeard = dancers.heard(cam.x + origin.x, cam.z + origin.z, dancerSound);
     audio.updateDancer(dancerHeard, dancerSound.x, dancerSound.y, dancerSound.z, dancerSound.flapMps, dancerSound.airRate);
+    const sirenOn = police.sirenAt(sirenPoint);
+    audio.updateSiren(sirenOn, sirenPoint.x, sirenPoint.y, sirenPoint.z);
     frameProfiler?.end('effects');
     frameProfiler?.begin('vista');
     vista.update(cam.x, cam.z, activeS, frameDt);

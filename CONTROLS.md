@@ -70,6 +70,9 @@ with his load says why.
 - **The cabin view hides the on-screen cluster**: the car's own instruments read speed,
   revs, fuel, temperature, oil pressure, charge and vacuum, and its warning lamps light.
   The interior and both door mirrors show what is behind, from the seat's eye.
+- **At a police stop F hands over the papers** (`src/world/police.ts`): while the stop
+  waits for them (the prompt reads `police stop — [F] hand over your papers`), F goes to
+  the officer, seated or on foot, before any door, seat or pickup it would otherwise work.
 
 Cars without a kit body keep the old rule: F at the car's body enters, and exits on the
 left. The touch overlay's E button is on-foot only, so from the seat parts are worked

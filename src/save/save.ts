@@ -1,10 +1,11 @@
 import { hash } from '../core/rng';
 import { parseCalendarEpoch } from '../game/calendar';
-import { DAY_LENGTH, MIRROR_FIELD, newWorldState, PLAYER_SEATS, SAVE_VERSION, type PlayerSeat } from '../game/state';
+import { DAY_LENGTH, MIRROR_FIELD, newWorldState, PLAYER_SEATS, POLICE_HEAT_MAX, SAVE_VERSION, type PlayerSeat } from '../game/state';
 import type {
   CarState,
   HeadlightMode,
   PlayerState,
+  PoliceRecord,
   StickerState,
   TrailerState,
   TrailerLoad,
@@ -504,6 +505,7 @@ export function migrateState(raw: unknown): WorldState {
       Math.max(0, carried.length - 1),
     ),
     wornSunShades: wornItem,
+    police: migratePoliceRecord(playerRaw.police),
   };
 
   const cars: Record<string, CarState> = {};
@@ -643,7 +645,18 @@ function migrateVendingSold(value: unknown): Record<string, number[]> {
   return out;
 }
 
-
+/**
+ * The police's record of the player (world/police.ts). Absent on every save from before
+ * the police: no heat. Out-of-range values are clamped rather than rejected.
+ */
+function migratePoliceRecord(value: unknown): PoliceRecord {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return { heat: 0, heatUntil: 0 };
+  const raw = value as Record<string, unknown>;
+  return {
+    heat: Math.min(POLICE_HEAT_MAX, Math.max(0, Math.round(numOr(raw.heat, 0)))),
+    heatUntil: Math.max(0, numOr(raw.heatUntil, 0)),
+  };
+}
 
 function migrateTrailer(raw: Record<string, unknown>): TrailerState {
   if (typeof raw.id !== 'string') {
