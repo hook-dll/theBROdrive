@@ -82,6 +82,8 @@ export interface InputFrame {
   moveZ: number;
   jump: boolean;
   sprint: boolean;
+  /** Crouch or stand up on foot: tap, consumed by the player (player/player.ts). */
+  toggleCrouch: boolean;
   /** Mouse look deltas in radians, accumulated since the last frame. */
   lookYaw: number;
   lookPitch: number;
@@ -133,6 +135,7 @@ export function emptyInput(): InputFrame {
     moveZ: 0,
     jump: false,
     sprint: false,
+    toggleCrouch: false,
     toggleAutopilot: false,
     lookYaw: 0,
     lookPitch: 0,
@@ -190,6 +193,9 @@ export const BINDABLE_ACTIONS: readonly {
   { id: 'removeWearable', label: 'Remove worn item', defaultKeys: ['KeyG'] },
   { id: 'jump', label: 'Jump', defaultKeys: ['Space'] },
   { id: 'sprint', label: 'Sprint', defaultKeys: ['ShiftLeft', 'ShiftRight'] },
+  // C is the camera key in a car and free on foot, so the two share it the way F and
+  // Space are shared (see `holderOf` in ui/menu.ts).
+  { id: 'crouch', label: 'Crouch / stand up', defaultKeys: ['KeyC'] },
   // X and Z are the gearbox; item cycling moves to the bracket keys, which nothing
   // else uses and which stay reachable from the movement hand.
   { id: 'itemNext', label: 'Next item', defaultKeys: ['BracketRight'] },
@@ -749,6 +755,9 @@ export class InputReader {
           : touchForward - touchBackward;
     f.jump = this.anyPressed(this.keys.jump) || this.padPressed(PAD.A);
     f.sprint = this.anyHeld(this.keys.sprint) || pad.buttons[PAD.LS] === true;
+    // The pad's Y is the camera in a car, and the crouch on foot, as C is.
+    f.toggleCrouch =
+      this.anyPressed(this.keys.crouch) || taps?.crouch === true || (!this.driving && this.padPressed(PAD.Y));
 
     const drag = this.touch?.consumeLook();
     // While the mouse is steering it is not looking: feeding both would spin the

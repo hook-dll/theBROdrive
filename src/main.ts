@@ -1330,6 +1330,7 @@ async function boot(): Promise<void> {
     surfaceRoughness: 0,
     wheelContact: 0,
     cabinOffset: [0, 0, 0],
+    eyeDrop: 0,
     velocityX: 0,
     velocityZ: 0,
     autopilot: false,
@@ -2308,6 +2309,7 @@ async function boot(): Promise<void> {
       target.wheelContact = driving.audio.wheelContactFraction;
       const drivenModel = s.cars[drivingId!]?.modelId;
       if (drivenModel) target.cabinOffset = cabinCamera.eyeFor(drivenModel, s.player.seat);
+      target.eyeDrop = 0;
       // The dynamic camera's raw material: where the car is really going, not where it
       // points. Body-frame speed and slip come from the same solver step.
       const velocity = driving.chassis.linvel();
@@ -2317,10 +2319,12 @@ async function boot(): Promise<void> {
     } else {
       const p = player.interpolatedPosition(alpha);
       // CameraRig's foot mode adds its own eye height, so hand it the FEET
-      // position; `player.position` is the capsule centre and would double up.
+      // position; `player.position` is the capsule centre and would double up. A
+      // crouch is the eye coming down from there, not the feet.
       target.x = p.x;
       target.y = p.y - Player.FEET_OFFSET;
       target.z = p.z;
+      target.eyeDrop = player.interpolatedEyeDrop(alpha);
       target.qx = 0;
       target.qy = 0;
       target.qz = 0;

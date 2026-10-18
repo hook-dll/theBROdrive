@@ -319,6 +319,15 @@ function cabinLidOpen(rig: KitRig, side: StorageSide): boolean {
 }
 
 /**
+ * Whether a roadside shell's compartment lies under a cabin lid (`KIT_DOOR_REACH_PART`):
+ * the van's bay, reached only through the shell's open side door (`wreckDoors`).
+ */
+function wreckCabinCompartment(lids: StaticCarLids, side: StorageSide): boolean {
+  for (const control of lids.controls) if (KIT_DOOR_REACH_PART.test(control.id) && storageLidSide(control.id) === side) return true;
+  return false;
+}
+
+/**
  * Where a resolved reservoir actually lives, and therefore which delta a pour
  * writes. A fitted container's level belongs to the CAR; a detached one carries it
  * on the part; a can carries its own.
@@ -1506,13 +1515,21 @@ export class Interaction {
       // parts. The nearer grid wins, so a buried nose exposes its boot. Every shell is a
       // kit body and its grids lie under its lids (`StaticCarLids`), offered shut too,
       // where F opens the lid first (`mount`); a shell whose model is still loading has
-      // no lids yet and offers nothing.
+      // no lids yet and offers nothing. The van's bay under its cabin engine cover is
+      // reached only through its open side door, `BOOT_RANGE` counted from the opening
+      // as on the driven van (`wreckCabinCompartment`).
       const lids = this.wreckTrunks.lids(wreck.id);
       if (!lids) continue;
       const shape = carModelMeasure(wreck.modelId);
       for (const side of ['trunk', 'bonnet'] as const) {
         if (!lids.has(side)) continue;
-        if (this.pickStorage(eyeX, eyeY, eyeZ, dx, dy, dz, this.trunkPosition, this.trunkQuaternion, shape, side, BOOT_RANGE)) {
+        let reach = BOOT_RANGE;
+        if (wreckCabinCompartment(lids, side)) {
+          const door = this.openDoorDistance(lids.rig, this.wreckDoors(lids), eyeX, eyeY, eyeZ, dx, dy, dz);
+          if (door === Infinity) continue;
+          reach += door;
+        }
+        if (this.pickStorage(eyeX, eyeY, eyeZ, dx, dy, dz, this.trunkPosition, this.trunkQuaternion, shape, side, reach)) {
           keep(this.trunkPickedDistance, {
             kind: 'storage',
             owner: 'wreck',
@@ -1602,7 +1619,9 @@ export class Interaction {
   /**
    * Distance along the eye ray, within `RAY_RANGE`, to the nearest of a roadside shell's
    * lids, or Infinity; its control in `wreckLidAimed`. Only the lids are tested, a few
-   * hundred triangles: the shell round them is never worked.
+   * hundred triangles: the shell round them is never worked, so a cabin lid (the van's
+   * engine cover, `KIT_DOOR_REACH_PART`) answers only through the open side door, as on
+   * the driven van.
    */
   private aimWreckLid(lids: StaticCarLids, eyeX: number, eyeY: number, eyeZ: number, dx: number, dy: number, dz: number): number {
     this.raycaster.set(this.rayOrigin.set(eyeX, eyeY, eyeZ), this.rayDir.set(dx, dy, dz));
@@ -1612,8 +1631,13 @@ export class Interaction {
     for (const pivot of lids.pivots) this.raycaster.intersectObject(pivot, true, this.hits);
     const hit = this.hits[0];
     this.hits.length = 0;
-    this.wreckLidAimed = hit ? (KitRig.controlOf(hit.object)?.control ?? null) : null;
-    return hit && this.wreckLidAimed ? hit.distance : Infinity;
+    let control = hit ? (KitRig.controlOf(hit.object)?.control ?? null) : null;
+    if (control && KIT_DOOR_REACH_PART.test(control.id)
+      && this.openDoorDistance(lids.rig, this.wreckDoors(lids), eyeX, eyeY, eyeZ, dx, dy, dz) === Infinity) {
+      control = null;
+    }
+    this.wreckLidAimed = control;
+    return hit && control ? hit.distance : Infinity;
   }
 
   /** Scratch for `pickBody`'s stamp read: the hit face's three corners and two edges. */
@@ -1847,21 +1871,44 @@ export class Interaction {
     if (cached) return cached;
     const doors: KitDoor[] = [];
     vehicle.root.traverse((node) => {
-      const id = (node.userData.kitControl as KitControl | undefined)?.id;
-      if (!id || !/^door_[fr][lr]$/.test(id) || !node.parent) return;
-      const box = new THREE.Box3();
-      for (const child of node.children) {
-        const mesh = child as THREE.Mesh;
-        if (!mesh.isMesh) continue;
-        if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
-        box.union(this.kitBox.copy(mesh.geometry.boundingBox!).applyMatrix4(mesh.matrix));
-      }
-      if (box.isEmpty()) return;
-      box.translate(node.position);
-      doors.push({ id, node, front: id.charAt(5) === 'f', left: box.max.x + box.min.x > 0, box });
+      const door = this.kitDoorOf(node);
+      if (door) doors.push(door);
     });
     this.kitDoorCache.set(rig, doors);
     return doors;
+  }
+
+  /**
+   * A roadside shell's side doors that open (render/carmodel.ts `STATIC_SHELL_DOORS`:
+   * the van's middle door), found once per shell among its hinged pivots as `kitDoors`
+   * finds a car's. Empty for every other shell.
+   */
+  private wreckDoors(lids: StaticCarLids): readonly KitDoor[] {
+    const cached = this.kitDoorCache.get(lids.rig);
+    if (cached) return cached;
+    const doors: KitDoor[] = [];
+    for (const pivot of lids.pivots) {
+      const door = this.kitDoorOf(pivot);
+      if (door) doors.push(door);
+    }
+    this.kitDoorCache.set(lids.rig, doors);
+    return doors;
+  }
+
+  /** `node` as a side door, if it is one with meshes to outline it. */
+  private kitDoorOf(node: THREE.Object3D): KitDoor | null {
+    const id = (node.userData.kitControl as KitControl | undefined)?.id;
+    if (!id || !/^door_[fr][lr]$/.test(id) || !node.parent) return null;
+    const box = new THREE.Box3();
+    for (const child of node.children) {
+      const mesh = child as THREE.Mesh;
+      if (!mesh.isMesh) continue;
+      if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+      box.union(this.kitBox.copy(mesh.geometry.boundingBox!).applyMatrix4(mesh.matrix));
+    }
+    if (box.isEmpty()) return null;
+    box.translate(node.position);
+    return { id, node, front: id.charAt(5) === 'f', left: box.max.x + box.min.x > 0, box };
   }
 
   /**
@@ -1887,12 +1934,7 @@ export class Interaction {
     return nearest;
   }
 
-  /**
-   * How far along the eye ray it enters the car through an open side door on the
-   * player's side (0 with the eye already in the opening), or Infinity when it does not.
-   * Any of them, front or rear: the rear bench of a two-door car is reached through a
-   * front door, a front seat across the car through the near one.
-   */
+  /** `openDoorDistance` through a kit car's side doors. */
   private kitOpenDoorDistance(
     rig: KitRig,
     vehicle: Vehicle,
@@ -1903,7 +1945,25 @@ export class Interaction {
     dy: number,
     dz: number,
   ): number {
-    const doors = this.kitDoors(rig, vehicle);
+    return this.openDoorDistance(rig, this.kitDoors(rig, vehicle), eyeX, eyeY, eyeZ, dx, dy, dz);
+  }
+
+  /**
+   * How far along the eye ray it enters the car through one of `doors` standing open on
+   * the player's side (0 with the eye already in the opening), or Infinity when it does
+   * not. Any of them, front or rear: the rear bench of a two-door car is reached through
+   * a front door, a front seat across the car through the near one.
+   */
+  private openDoorDistance(
+    rig: KitRig,
+    doors: readonly KitDoor[],
+    eyeX: number,
+    eyeY: number,
+    eyeZ: number,
+    dx: number,
+    dy: number,
+    dz: number,
+  ): number {
     const frame = doors[0]?.node.parent;
     if (!frame) return Infinity;
     const left = frame.worldToLocal(this.kitEye.set(eyeX, eyeY, eyeZ)).x > 0;
@@ -2004,11 +2064,21 @@ export class Interaction {
   /**
    * Works a roadside shell's lid as `workKitPart` works a car's. Opening it opens its
    * compartment's grid too, as a car's lid does (`followLids`), even over another grid.
+   * The van shell's side door (`wreckDoors`) takes the engine cover with it: opened, the
+   * cover lifts and the bay's grid opens; shut, the cover drops and the grid goes.
    */
   private workWreckLid(id: string, lids: StaticCarLids, control: KitControl): void {
     this.sound = 'mount';
     this.togglePanel(lids.rig, control);
-    const side = storageLidSide(control.id);
+    let side = storageLidSide(control.id);
+    if (side === null && control.id.startsWith('door_')) {
+      const open = lids.rig.get(control.id);
+      for (const cover of lids.controls) {
+        if (!KIT_DOOR_REACH_PART.test(cover.id)) continue;
+        lids.rig.set(cover.id, open);
+        side = storageLidSide(cover.id);
+      }
+    }
     if (side && lidOpen(lids.rig, side)) this.openGrid({ owner: 'wreck', side, id });
   }
 
@@ -2134,11 +2204,9 @@ export class Interaction {
       // its shut lid, which F opens first (`mount`); a kit car's is offered only open.
       if (!this.isStorageOpen(t)) return `[F] open ${label}`;
 
-      let used = 0;
-      for (const cell of cells) {
-        if (cell) used++;
-      }
-      if (t.cell === null) return `${label} ${used}/${cells.length}`;
+      // The grid itself shows which cells hold what, so the prompt names only what F
+      // does: no cell numbers, counters or "empty" readouts.
+      if (t.cell === null) return null;
       const item = cells[t.cell];
       if (item) {
         // A fitted engine or radiator reports what it is holding.
@@ -2149,14 +2217,15 @@ export class Interaction {
           if (held?.type === 'fluid_can') return this.pourPrompt(held, reservoir);
           return `[F] take ${itemLabel(item)} — ${fillReadout(reservoir)}`;
         }
-        return `[F] take ${itemLabel(item)} — cell ${t.cell + 1}`;
+        return `[F] take ${itemLabel(item)}`;
       }
       if (t.side === 'bonnet') {
-        const expected = bonnetSlotKind(t.cell);
-        const slotLabel = expected?.replace('_', ' ') ?? 'service';
-        if (!held) return `empty ${slotLabel} slot`;
-        if (!bonnetAccepts(t.cell, held)) return `${slotLabel} slot — wrong part`;
-        return `[F] install ${itemLabel(held)} — ${slotLabel} slot`;
+        if (!held) return null;
+        if (!bonnetAccepts(t.cell, held)) {
+          const slotLabel = bonnetSlotKind(t.cell)?.replace('_', ' ') ?? 'service';
+          return `${slotLabel} slot — wrong part`;
+        }
+        return `[F] install ${itemLabel(held)}`;
       }
       if (held?.type === 'contract_cargo' && t.owner === 'courier') {
         const courier = this.couriers.get(t.id);
@@ -2172,8 +2241,8 @@ export class Interaction {
       ) {
         return 'one contract parcel is already aboard';
       }
-      if (held) return `[F] stow ${itemLabel(held)} — cell ${t.cell + 1}`;
-      return `empty trunk cell ${t.cell + 1}`;
+      if (held) return `[F] stow ${itemLabel(held)}`;
+      return null;
     }
 
     if (t.kind === 'car-body' || t.kind === 'car-entry') {

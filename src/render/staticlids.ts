@@ -1,9 +1,10 @@
 /**
  * A roadside shell's lids (render/carmodel.ts `createStaticCarModel`): a kit body's bonnet
- * and boot lid or tailgate hung on their hinges as on the driven car, worked by the player
- * (player/interaction.ts) through the same rig channels and eased by `update`. Nothing
- * else on the shell moves. Its cabin, bay and boot (`inside`) draw only while a lid is off
- * its stop, so a shut shell costs what it did before it had lids.
+ * and boot lid or tailgate hung on their hinges as on the driven car, and on the van its
+ * middle side door to the bay under the engine cover (`STATIC_SHELL_DOORS`), worked by
+ * the player (player/interaction.ts) through the same rig channels and eased by `update`.
+ * Nothing else on the shell moves. Its cabin, bay and boot (`inside`) draw only while a
+ * lid is off its stop, so a shut shell costs what it did before it had lids.
  */
 
 import type * as THREE from 'three';

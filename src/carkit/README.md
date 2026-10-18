@@ -154,7 +154,8 @@ Integration outside the folder:
   set as one mesh (`CarModelInstance.wheelDraw`). `cloneWheels` rescales the pack's wheel
   sets to the kit tyre. Static clones (wrecks, couriers: `cloneStaticModel`) are the mid
   shell, its panes as the tinted mirror and its wheels as one plain mesh: three draws. A
-  wreck's shell is cut round its bonnet and boot lid or tailgate (`kitStaticParts`), which
+  wreck's shell is cut round its bonnet and boot lid or tailgate (`kitStaticParts`), and
+  on the UAZ-2206 round its middle side door to the bay too (`STATIC_SHELL_DOORS`), which
   hang on the driven car's hinges with their controls (`hangStaticLids`, a draw each) and
   are worked by render/staticlids.ts `StaticCarLids`; while one is open the cabin, bay and
   boot draw from the merged buffer over a fixed skeleton (kitdraw.ts `kitRestSkeleton`).

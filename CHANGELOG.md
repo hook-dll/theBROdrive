@@ -4,6 +4,27 @@
 
 ### Added
 
+- A ROADSIDE UAZ-2206'S MIDDLE SIDE DOOR OPENS, AND ITS BAY IS REACHED THROUGH IT
+  (render/carmodel.ts `STATIC_SHELL_DOORS`, `kitStaticParts`; render/staticlids.ts;
+  player/interaction.ts `wreckDoors`, `aimWreckLid`, `workWreckLid`; tools/wreck-lids.ts).
+  The van's engine bay lies in the cabin under the engine cover, and a wreck of it had no
+  way in. Its shell alone now hangs `door_rr` on the driven van's hinge beside its lids;
+  E opens it and lifts the cover with it, and the bay's grid opens. The cells are picked
+  through the door opening with `BOOT_RANGE` counted from the opening, as on the driven
+  van (all four taken from beside the door, 1.28–1.86 m from the eye); shut, the door
+  drops the cover and the bay is not reached, and the cover is no longer worked through
+  the shell's walls. Every other wreck's doors stay shut.
+
+- CROUCH ON FOOT. C toggles a crouch (rebindable as "Crouch / stand up"; the pad's Y and
+  a C button on the touch overlay on foot): the eye eases down from 1.62 m to 0.95 m in a
+  quarter second, the capsule shortens to 1.1 m with the feet left where they are, and
+  the player crouch-walks at 1.5 m/s whatever Shift says. Picking and reach come from the
+  camera's eye, so they follow the lowered head. C again or Space stands up, but only
+  with headroom over the head; under something low the player stays down and rises once
+  out from under it. A crouch ends on getting into a car or a rescue. C keeps the camera
+  switch in a car (shared default, like F). player/player.ts, core/input.ts,
+  core/touch.ts, render/cameras.ts `CameraTarget.eyeDrop`; CONTROLS.md.
+
 - KIT CAR DUST FLOW. Each kit car's paint and window dust now follows its own body's
   airflow: a blunt nose (Niva, UAZ) takes a crust on the bumper and grille, a squareback's
   base wake holds more dust on the tail, slab flanks catch crosswind dust between sill and
@@ -1855,6 +1876,12 @@
     between frames, show the strip continuous and no slit, wedge or flicker.
 
 ### Removed
+
+- STORAGE CELL READOUTS IN THE PROMPT (player/interaction.ts). Aiming into an open boot,
+  bonnet or courier trunk no longer says "bonnet 2/4", "empty trunk cell 8", "empty
+  engine slot" or "— cell 3": the grid already shows which cells hold what. The prompt
+  names only what F does there ("[F] take …", "[F] stow …", "[F] install …", a pour, a
+  refusal such as "engine slot — wrong part").
 
 - PUSHING CARS ON FOOT. Walking into a car no longer shoulders it along: walking up to
   a door to get in kept sliding the car away. A live car's chassis is `IMMOVABLE` to the

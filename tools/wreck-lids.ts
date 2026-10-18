@@ -12,7 +12,10 @@
  *    with it; E on the open lid shuts it and the grid goes; E on a shut lid opens both;
  *  - a body with no lid over a compartment (the van's bonnet) offers no grid there, a
  *    kit shell whose lids have not arrived offers none, and a body that is not a kit
- *    keeps the grid F opens.
+ *    keeps the grid F opens;
+ *  - the van's shell alone hangs its middle side door (`STATIC_SHELL_DOORS`): shut, its
+ *    bay under the engine cover is not reached; E opens it with the cover, and every bay
+ *    cell is picked and taken through the opening by the real `Interaction`.
  *
  *   bun tools/wreck-lids.ts
  *
@@ -23,9 +26,10 @@ import * as THREE from 'three';
 import { installAssetShim } from './assetshim';
 import { installDocumentShim } from './domshim';
 import { CAR_MODELS } from '../src/vehicle/carmodels';
-import { carModelMeasure, createCarModel, createCourierCarModel, createStaticCarModel, loadCarModel, type StaticCarModel } from '../src/render/carmodel';
+import { carModelMeasure, createCarModel, createCourierCarModel, createStaticCarModel, loadCarModel, STATIC_SHELL_DOORS, type StaticCarModel } from '../src/render/carmodel';
 import { KitRig } from '../src/carkit/rig';
 import { STORAGE_LID_CHANNELS, storageCellBox, storageGridCentreLocal, storageLidSide, type StorageSide } from '../src/vehicle/trunk';
+import { BONNET_SLOT_COUNT } from '../src/vehicle/bonnet';
 import { emptyInput, type InputFrame } from '../src/core/input';
 import { GameWorld, newWorldState } from '../src/game/state';
 import { Inventory } from '../src/items/items';
@@ -67,7 +71,7 @@ for (const id of kitIds) {
   const drivenLids = new Map<string, THREE.Object3D>();
   driving.traverse((node) => {
     const control = node.userData.kitControl as { id: string } | undefined;
-    if (control && storageLidSide(control.id) && node.userData.kitMotion) drivenLids.set(control.id, node);
+    if (control && (storageLidSide(control.id) || STATIC_SHELL_DOORS[id]?.includes(control.id)) && node.userData.kitMotion) drivenLids.set(control.id, node);
   });
   const lids = shell.lids;
   const ids = lids ? lids.controls.map((control) => control.id).sort() : [];
@@ -249,6 +253,77 @@ for (const [id, side] of [['kit_vaz2106', 'bonnet'], ['kit_vaz2106', 'trunk'], [
   tick(interaction, eye, centre);
   tick(interaction, eye, centre, { mount: true });
   check('with the lid open, F reaches in', inventory.all.length === 1, `${inventory.all.length} carried`);
+}
+{
+  // The van's shell: its bay under the cabin engine cover through the middle side door.
+  const id = 'kit_uaz2206';
+  const { shell, interaction, wrecks, world, inventory } = stage(id);
+  world.state.wreckBonnet['wreck:test'] = Array.from({ length: BONNET_SLOT_COUNT }, (_, cell) => ({ type: 'bubble_gum' as const, id: `bay:${cell}`, charges: 3 }));
+  const lids = shell.lids!;
+  const door = lids.pivots.find((pivot) => pivot.name === 'door_rr')!;
+  check(`${id}: the middle side door hangs`, door !== undefined && lids.controls.some((control) => control.id === 'door_rr'), lids.controls.map((control) => control.id).join(','));
+  // Standing at the door: its shut outline's middle, half a metre out from its skin.
+  const box = new THREE.Box3();
+  for (const child of door.children) {
+    const mesh = child as THREE.Mesh;
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    box.union(mesh.geometry.boundingBox!.clone().applyMatrix4(mesh.matrix));
+  }
+  box.translate(door.position);
+  const left = box.max.x + box.min.x > 0;
+  const eye = door.parent!.localToWorld(new THREE.Vector3(left ? box.max.x + 0.5 : box.min.x - 0.5, box.max.y - 0.1, (box.min.z + box.max.z) / 2));
+  // Each cell's middle, the ray to it from the stretch of the door opening abreast of it.
+  const cells = Array.from({ length: BONNET_SLOT_COUNT }, (_, cell) => {
+    const centre = new THREE.Vector3();
+    const size = new THREE.Vector3();
+    storageCellBox(cell, carModelMeasure(id), 'bonnet', centre, size);
+    return centre.addScaledVector(THREE.Object3D.DEFAULT_UP, size.y / 2);
+  });
+  const shutDoor = new THREE.Box3().setFromObject(door, true);
+  const eyeAbreast = (at: THREE.Vector3): THREE.Vector3 => eye.clone().setZ(THREE.MathUtils.clamp(at.z, shutDoor.min.z + 0.2, shutDoor.max.z - 0.2));
+
+  // Shut: F at a bay cell neither lifts the cover nor reaches in.
+  tick(interaction, eye, cells[0]!);
+  tick(interaction, eye, cells[0]!, { mount: true });
+  let result = tick(interaction, eye, cells[0]!);
+  check(`${id}: door shut, the bay is not reached`, !isOpen(shell, 'bonnet') && result.boot === null && inventory.all.length === 0, `cover ${isOpen(shell, 'bonnet')} · grid ${result.boot?.side ?? 'none'}`);
+
+  // E on the shut door, aimed at its middle from outside, opens it, the cover lifts with
+  // it, the grid opens.
+  const doorMiddle = door.parent!.localToWorld(box.getCenter(new THREE.Vector3()));
+  tick(interaction, eye, doorMiddle);
+  tick(interaction, eye, doorMiddle, { useHeld: true });
+  result = tick(interaction, eye, doorMiddle);
+  check(`${id}: E opens the door, the cover and the grid`, lids.rig.get('door_rr') > 0.5 && isOpen(shell, 'bonnet') && result.boot?.side === 'bonnet', `door ${lids.rig.get('door_rr')} · cover ${isOpen(shell, 'bonnet')} · grid ${result.boot?.side ?? 'none'}`);
+  settle(shell, wrecks);
+  check(`${id}: the open door shows the cabin`, shell.model.getObjectByName('inside')!.visible, '');
+
+  // Through the opening every cell is aimed and taken (the pack emptied between takes:
+  // it holds three).
+  const picked: string[] = [];
+  let taken = 0;
+  for (let cell = 0; cell < cells.length; cell++) {
+    const at = cells[cell]!;
+    const from = eyeAbreast(at);
+    result = tick(interaction, from, at);
+    const selected = result.boot?.selectedCell ?? null;
+    tick(interaction, from, at, { mount: true });
+    picked.push(`${cell}:${selected}@${from.distanceTo(at).toFixed(2)}m`);
+    for (const item of [...inventory.all]) if (inventory.remove(item.id)) taken++;
+  }
+  const kept = world.state.wreckBonnet['wreck:test']!.filter((item) => item !== null).length;
+  check(`${id}: every bay cell picked and taken from the door`, picked.every((entry, cell) => entry.startsWith(`${cell}:${cell}@`)) && kept === 0 && taken === BONNET_SLOT_COUNT, `${picked.join(' ')} · ${taken} taken`);
+
+  // E on the open door shuts it and drops the cover; the grid goes.
+  const swung = new THREE.Box3().setFromObject(door, true).getCenter(new THREE.Vector3());
+  tick(interaction, eye, swung);
+  tick(interaction, eye, swung, { useHeld: true });
+  result = tick(interaction, eye, cells[0]!);
+  check(`${id}: E shuts the door and the cover, the grid goes`, lids.rig.get('door_rr') < 0.5 && !isOpen(shell, 'bonnet') && result.boot === null, `door ${lids.rig.get('door_rr')} · cover ${isOpen(shell, 'bonnet')} · grid ${result.boot?.side ?? 'none'}`);
+}
+{
+  const shells = kitIds.filter((id) => createStaticCarModel(id, `doors:${id}`).lids?.controls.some((control) => control.id.startsWith('door_')));
+  check('only the van shell opens a side door', shells.join(',') === 'kit_uaz2206', shells.join(',') || '(none)');
 }
 
 // Program variants: the lids are the shell's mesh kind in its material; the inside is

@@ -20,6 +20,7 @@ type TouchButton =
   | 'recenter'
   | 'drop'
   | 'removeWearable'
+  | 'crouch'
   | 'lights'
   | 'autopilot'
   | 'handbrake'
@@ -44,6 +45,7 @@ export interface TouchState {
   recenter: boolean;
   drop: boolean;
   removeWearable: boolean;
+  crouch: boolean;
   lights: boolean;
   autopilot: boolean;
   handbrake: boolean;
@@ -79,6 +81,7 @@ const BUTTONS: readonly ButtonSpec[] = [
   { id: 'interact', key: 'F', label: 'Enter / exit vehicle', mode: 'foot', side: 'left', position: 'lower-left' },
   { id: 'drop', key: 'Q', label: 'Drop item', mode: 'foot', side: 'left', position: 'lower-right' },
   { id: 'removeWearable', key: 'G', label: 'Remove worn item', mode: 'foot', side: 'left', position: 'bottom' },
+  { id: 'crouch', key: 'C', label: 'Crouch / stand up', mode: 'foot', side: 'right', position: 'top' },
   { id: 'camera', key: 'C', label: 'Toggle hood / chase camera', mode: 'drive', side: 'left', position: 'top' },
   { id: 'recenter', key: 'V', label: 'Recenter view', mode: 'drive', side: 'left', position: 'lower-left' },
   { id: 'lights', key: 'L', label: 'Cycle headlights', mode: 'drive', side: 'left', position: 'lower-right' },
@@ -158,6 +161,7 @@ export class TouchControls {
     recenter: false,
     drop: false,
     removeWearable: false,
+    crouch: false,
     lights: false,
     autopilot: false,
     handbrake: false,
@@ -255,6 +259,7 @@ export class TouchControls {
     recenter: boolean;
     drop: boolean;
     removeWearable: boolean;
+    crouch: boolean;
     lights: boolean;
     autopilot: boolean;
     handbrake: boolean;
@@ -270,6 +275,7 @@ export class TouchControls {
       recenter: this.state.recenter,
       drop: this.state.drop,
       removeWearable: this.state.removeWearable,
+      crouch: this.state.crouch,
       lights: this.state.lights,
       autopilot: this.state.autopilot,
       handbrake: this.state.handbrake,
@@ -284,6 +290,7 @@ export class TouchControls {
     this.state.recenter = false;
     this.state.drop = false;
     this.state.removeWearable = false;
+    this.state.crouch = false;
     this.state.lights = false;
     this.state.autopilot = false;
     this.state.handbrake = false;

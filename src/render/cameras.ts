@@ -33,6 +33,8 @@ export interface CameraTarget {
   wheelContact: number;
   /** The seated player's eye in chassis-local metres, the cabin view's mount; see vehicle/cabincamera.ts. */
   cabinOffset: readonly [number, number, number];
+  /** On foot, how far a crouch has lowered the eye below `EYE_HEIGHT`, metres (`Player.interpolatedEyeDrop`); 0 in a car. */
+  eyeDrop: number;
   /**
    * Velocity in the float frame, X and Z, m/s. Zero on foot.
    *
@@ -843,7 +845,7 @@ export class CameraRig {
 
   private desiredFoot(target: CameraTarget, moveMag: number): void {
     const bob = Math.sin(this.bobTime * BOB_FREQ) * BOB_AMP * moveMag;
-    _vA.set(target.x, target.y + EYE_HEIGHT + bob, target.z);
+    _vA.set(target.x, target.y + EYE_HEIGHT - target.eyeDrop + bob, target.z);
     this.lookVector(_vD);
     _vB.copy(_vA).addScaledVector(_vD, LOOK_AHEAD);
   }
@@ -1161,7 +1163,7 @@ export class CameraRig {
     } else {
       this.pitch = 0;
     }
-    this.eye.set(target.x, target.y + EYE_HEIGHT, target.z);
+    this.eye.set(target.x, target.y + EYE_HEIGHT - target.eyeDrop, target.z);
     this.lookAt.copy(this.eye).addScaledVector(_vC, LOOK_AHEAD);
     this.fov = this.baseFov;
     this.surge = 0;

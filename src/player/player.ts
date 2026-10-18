@@ -14,9 +14,11 @@ import { WorldOrigin, type Rebasable, type RebaseShift } from '../world/origin';
  * while a kinematic body + Rapier's character controller gives clean walking,
  * stepping, slope sliding and grounding without ever being pushed by a car.
  *
- * The capsule origin (and `position`) is the capsule centre. `EYE_OFFSET` is the
- * eye height above that centre, `FEET_OFFSET` the distance from the centre down to
- * the feet — the camera and interaction code build on these.
+ * The body origin (and `position`) is the STANDING capsule's centre, crouched or not:
+ * `EYE_OFFSET` is the eye height above that centre, `FEET_OFFSET` the distance from it
+ * down to the feet — the camera and interaction code build on these. A crouch shortens
+ * the collider and slides it down its body (`setCrouchShape`), so the feet, the body
+ * origin and the save never move; only the eye lowers (`interpolatedEyeDrop`).
  */
 
 const WALK_SPEED = 3.4;
@@ -40,6 +42,36 @@ const TERMINAL_VELOCITY = 30;
  * short hop stays cheap while a cross-map jump stays correct.
  */
 const TELEPORT_REHOME_DISTANCE = 150;
+
+/**
+ * The crouch. C toggles it (`InputFrame.toggleCrouch`); the capsule shortens at once,
+ * the eye follows over `CROUCH_SECONDS`, and the player crouch-walks at `CROUCH_SPEED`.
+ */
+const CROUCH_SPEED = 1.5;
+/** Half-height of the crouched capsule's cylinder: 1.1 m tall overall, against 1.9 m standing. */
+const CROUCH_HALF_HEIGHT = 0.2;
+/** How far the collider's centre drops down its body when it shortens, so the feet stay put. */
+const CROUCH_CENTRE_DROP = CAPSULE_HALF_HEIGHT - CROUCH_HALF_HEIGHT;
+/**
+ * How far the eye drops in a full crouch: the camera's standing 1.62 m (render/cameras.ts,
+ * `EYE_HEIGHT`) comes down to a squat's 0.95 m, under the crouched capsule's 1.1 m top.
+ */
+const CROUCH_EYE_DROP = 0.67;
+/** Seconds for the eye to travel the whole way down or up. */
+const CROUCH_SECONDS = 0.25;
+/**
+ * The headroom probe: the space the standing capsule adds above the crouched one, which
+ * must be empty to stand up. It starts 0.6 m above the feet, clear of the ground, a kerb
+ * (`STEP_HEIGHT`) and the steepest slope under its own radius, and stops a centimetre
+ * under the standing head; it is a little narrower than the capsule so the wall it is
+ * crouched against does not count as a ceiling.
+ */
+const HEADROOM_FLOOR = 0.6;
+const HEADROOM_TOP = 2 * (CAPSULE_HALF_HEIGHT + CAPSULE_RADIUS) - 0.01;
+const HEADROOM_RADIUS = CAPSULE_RADIUS - 0.03;
+const HEADROOM_HALF_HEIGHT = (HEADROOM_TOP - HEADROOM_FLOOR) / 2 - HEADROOM_RADIUS;
+/** Probe centre above the body origin (the standing capsule's centre). */
+const HEADROOM_CENTRE_RISE = (HEADROOM_TOP + HEADROOM_FLOOR) / 2 - (CAPSULE_HALF_HEIGHT + CAPSULE_RADIUS);
 
 /**
  * How fast a leaned-on loose body is allowed to get (m/s). A shove is a TARGET
@@ -78,9 +110,9 @@ export const IMMOVABLE = 'immovable';
 export type ShoveOwner = Shoveable | typeof IMMOVABLE | null;
 
 export class Player implements Rebasable {
-  /** Eye height above the capsule centre, metres. */
+  /** Standing eye height above the body origin (the standing capsule's centre), metres. */
   static readonly EYE_OFFSET = 0.7;
-  /** Distance from the capsule centre down to the feet, metres. */
+  /** Distance from the body origin (the standing capsule's centre) down to the feet, metres. */
   static readonly FEET_OFFSET = CAPSULE_HALF_HEIGHT + CAPSULE_RADIUS;
 
   private readonly controller: RAPIER.KinematicCharacterController;
@@ -97,6 +129,14 @@ export class Player implements Rebasable {
   private groundSurfaceFlag = SurfaceType.Asphalt;
   private enabled = true;
   private emitTimer = 0;
+  /** The player asked to be down (C toggles it); standing waits for headroom. */
+  private crouchWanted = false;
+  /** The collider is the short crouched capsule. */
+  private crouchShape = false;
+  /** Eye travel into the crouch, 0 standing .. 1 down; snapshotted per step like the position. */
+  private crouchAmount = 0;
+  private prevCrouch = 0;
+  private curCrouch = 0;
 
   /** Maps a struck body's handle to its owner; null gets a direct impulse. */
   private shoveLookup: (bodyHandle: number) => ShoveOwner = () => null;
@@ -113,6 +153,11 @@ export class Player implements Rebasable {
   private readonly pushCollision = new RAPIER.CharacterCollision();
   private readonly pushImpulse = { x: 0, y: 0, z: 0 };
   private readonly bodyVelScratch = { x: 0, y: 0, z: 0 };
+  // Crouch scratch: the collider's offset down its body, and the headroom probe.
+  private readonly offsetScratch = { x: 0, y: 0, z: 0 };
+  private readonly headroomPos = { x: 0, y: 0, z: 0 };
+  private readonly headroomRot = { x: 0, y: 0, z: 0, w: 1 };
+  private readonly headroomShape = new RAPIER.Capsule(HEADROOM_HALF_HEIGHT, HEADROOM_RADIUS);
   private snapshotPrimed = false;
 
   constructor(
@@ -182,9 +227,10 @@ export class Player implements Rebasable {
   }
 
   /**
-   * Capsule centre, RELATIVE to the floating origin. Use this for anything compared
-   * against a Rapier body or written into the relative scene graph; `absolutePosition`
-   * is the same point in absolute world coordinates.
+   * Body origin — the standing capsule's centre, crouched or not — RELATIVE to the
+   * floating origin. Use this for anything compared against a Rapier body or written
+   * into the relative scene graph; `absolutePosition` is the same point in absolute
+   * world coordinates.
    */
   get position(): { x: number; y: number; z: number } {
     const t = this.body.translation(this.posScratch);
@@ -192,9 +238,9 @@ export class Player implements Rebasable {
   }
 
   /**
-   * Capsule centre in ABSOLUTE world coordinates, for consumers that sample the
-   * world (terrain height, rescue). `position` stays relative so nobody has to
-   * un-rebase a Rapier translation to do a distance check against a body.
+   * Body origin (the standing capsule's centre) in ABSOLUTE world coordinates, for
+   * consumers that sample the world (terrain height, rescue). `position` stays relative
+   * so nobody has to un-rebase a Rapier translation to do a distance check against a body.
    */
   get absolutePosition(): { x: number; y: number; z: number } {
     const t = this.body.translation(this.posScratch);
@@ -202,8 +248,8 @@ export class Player implements Rebasable {
   }
 
   /**
-   * Latches the capsule position after the physics step that moved it. Call once
-   * per fixed step, after `physics.step()`.
+   * Latches the capsule position and the crouch after the physics step that moved
+   * them. Call once per fixed step, after `physics.step()`.
    */
   postStep(): void {
     const t = this.body.translation(this.posScratch);
@@ -211,15 +257,18 @@ export class Player implements Rebasable {
       this.prevStep.x = t.x;
       this.prevStep.y = t.y;
       this.prevStep.z = t.z;
+      this.prevCrouch = this.crouchAmount;
       this.snapshotPrimed = true;
     } else {
       this.prevStep.x = this.curStep.x;
       this.prevStep.y = this.curStep.y;
       this.prevStep.z = this.curStep.z;
+      this.prevCrouch = this.curCrouch;
     }
     this.curStep.x = t.x;
     this.curStep.y = t.y;
     this.curStep.z = t.z;
+    this.curCrouch = this.crouchAmount;
   }
 
   /**
@@ -232,6 +281,23 @@ export class Player implements Rebasable {
     p.y = this.prevStep.y + (this.curStep.y - this.prevStep.y) * alpha;
     p.z = this.prevStep.z + (this.curStep.z - this.prevStep.z) * alpha;
     return p;
+  }
+
+  /**
+   * How far below standing the eye is at render time, metres: 0 standing, 0.67 in a
+   * full crouch, interpolated between the last two fixed steps and eased so the head
+   * settles into the squat rather than stopping dead. The camera's foot mode takes it
+   * off its standing eye height, and interaction picks from the camera's eye, so reach
+   * and aim follow the lowered head.
+   */
+  interpolatedEyeDrop(alpha: number): number {
+    const t = this.prevCrouch + (this.curCrouch - this.prevCrouch) * alpha;
+    return t * t * (3 - 2 * t) * CROUCH_EYE_DROP;
+  }
+
+  /** The collider is the short crouched capsule (the eye may still be on its way down or up). */
+  get crouched(): boolean {
+    return this.crouchShape;
   }
 
   /**
@@ -295,6 +361,8 @@ export class Player implements Rebasable {
     this.enabled = enabled;
     this.body.setEnabled(enabled);
     if (enabled) this.verticalVelocity = 0;
+    // Sitting down in a car ends a crouch; the player steps out standing.
+    else this.standNow();
   }
 
   /**
@@ -328,6 +396,8 @@ export class Player implements Rebasable {
     this.curStep.y = cy;
     this.curStep.z = rz;
     this.snapshotPrimed = true;
+    // The spot was chosen for a standing player (a car exit, a rescue): arrive standing.
+    this.standNow();
     if (!this.road) return;
     if (knownRoadS !== undefined) {
       this.arcS = Math.min(this.road.length, Math.max(0, knownRoadS));
@@ -355,6 +425,52 @@ export class Player implements Rebasable {
     });
   }
 
+  /**
+   * Swaps the collider between the standing and the crouched capsule. The short one
+   * hangs `CROUCH_CENTRE_DROP` down its body, so both share the feet and the body origin
+   * never moves. The collider's world pose is written too: Rapier only re-derives an
+   * attached collider's pose from its offset inside the next step, and the character
+   * controller runs before that step.
+   */
+  private setCrouchShape(crouched: boolean): void {
+    this.crouchShape = crouched;
+    const drop = crouched ? CROUCH_CENTRE_DROP : 0;
+    this.collider.setHalfHeight(crouched ? CROUCH_HALF_HEIGHT : CAPSULE_HALF_HEIGHT);
+    this.offsetScratch.y = -drop;
+    this.collider.setTranslationWrtParent(this.offsetScratch);
+    const t = this.body.translation(this.posScratch);
+    t.y -= drop;
+    this.collider.setTranslation(t);
+  }
+
+  /** Nothing solid in the space the standing capsule adds above the crouched one. */
+  private headroomClear(): boolean {
+    const t = this.body.translation(this.posScratch);
+    this.headroomPos.x = t.x;
+    this.headroomPos.y = t.y + HEADROOM_CENTRE_RISE;
+    this.headroomPos.z = t.z;
+    return (
+      this.physics.world.intersectionWithShape(
+        this.headroomPos,
+        this.headroomRot,
+        this.headroomShape,
+        RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
+        undefined,
+        undefined,
+        this.body,
+      ) === null
+    );
+  }
+
+  /** Up at once, no headroom asked: entering a car and teleports (see their callers). */
+  private standNow(): void {
+    this.crouchWanted = false;
+    if (this.crouchShape) this.setCrouchShape(false);
+    this.crouchAmount = 0;
+    this.prevCrouch = 0;
+    this.curCrouch = 0;
+  }
+
   fixedUpdate(dt: number, input: InputFrame, cameraYaw: number): void {
     if (!this.enabled) return;
 
@@ -363,9 +479,28 @@ export class Player implements Rebasable {
     this.yaw = cameraYaw;
     this.pitch = clamp(this.pitch + input.lookPitch, -1.55, 1.55);
 
-    // Carried mass slows the player; a full pack halves the walk speed.
+    // C toggles the crouch; Space while crouched asks to stand instead of jumping. Going
+    // down is always possible, standing up only with headroom: under a low roof the
+    // player stays down and rises by himself once he has walked out from under it.
+    if (input.toggleCrouch) this.crouchWanted = !this.crouchWanted;
+    let jump = input.jump;
+    if (jump && this.crouchWanted) {
+      this.crouchWanted = false;
+      jump = false;
+    }
+    if (this.crouchWanted !== this.crouchShape && (this.crouchWanted || this.headroomClear())) {
+      this.setCrouchShape(this.crouchWanted);
+    }
+    const crouchStep = dt / CROUCH_SECONDS;
+    this.crouchAmount = this.crouchShape
+      ? Math.min(1, this.crouchAmount + crouchStep)
+      : Math.max(0, this.crouchAmount - crouchStep);
+
+    // Carried mass slows the player; a full pack halves the walk speed. A crouch walks
+    // at its own pace whatever Shift says.
     const speedScale = 1 - this.carryRatio * 0.45;
-    const speed = (input.sprint ? SPRINT_SPEED : WALK_SPEED) * speedScale;
+    const speed =
+      (this.crouchShape ? CROUCH_SPEED : input.sprint ? SPRINT_SPEED : WALK_SPEED) * speedScale;
 
     let moveX = 0;
     let moveZ = 0;
@@ -382,7 +517,7 @@ export class Player implements Rebasable {
       moveZ = (cos * nz + sin * nx) * speed;
     }
 
-    if (input.jump && this.groundedFlag) {
+    if (jump && this.groundedFlag && !this.crouchShape) {
       this.verticalVelocity = JUMP_SPEED;
       this.groundedFlag = false;
     }

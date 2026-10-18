@@ -2102,14 +2102,23 @@ const kitStaticPartsByModel = new Map<string, KitStaticParts>();
 /** The detail groups an open lid shows: what is under the bonnet, behind the boot lid or tailgate, and the cabin beyond. */
 const STATIC_INSIDE_GROUPS: Readonly<Record<string, true>> = { kit_cabin: true, kit_bay: true, kit_boot: true };
 
+/**
+ * Side doors a model's roadside shell hangs beside its lids: the one exception is the
+ * forward-control van, whose bay lies in the cabin under the engine cover and is reached
+ * through its middle side door (player/interaction.ts `wreckDoors`). Every
+ * other shell's doors stay part of the shell.
+ */
+export const STATIC_SHELL_DOORS: Readonly<Record<string, readonly string[]>> = { kit_uaz2206: ['door_rr'] };
+
 /** A kit model's `KitStaticParts`, cut once from its template and kept for the session. */
 function kitStaticParts(t: Template, kit: KitDrawModel): KitStaticParts {
   const cached = kitStaticPartsByModel.get(t.def.id);
   if (cached) return cached;
+  const doors = STATIC_SHELL_DOORS[t.def.id];
   const lidNodes: THREE.Object3D[] = [];
   t.body.traverse((node) => {
     const control = node.userData.kitControl as KitControl | undefined;
-    if (control && node.userData.kitMotion && storageLidSide(control.id)) lidNodes.push(node);
+    if (control && node.userData.kitMotion && (storageLidSide(control.id) || doors?.includes(control.id))) lidNodes.push(node);
   });
   const onLid = new Set<THREE.Object3D>();
   for (const lid of lidNodes) lid.traverse((node) => onLid.add(node));
@@ -2200,9 +2209,9 @@ function hangStaticLids(group: THREE.Group, t: Template, kit: KitDrawModel, part
  * factory track, wheelbase and clearance used by the driven chassis. A kit body is the
  * shut body without its cabin, bay, boot and underbody that mid traffic draws
  * (`CarMidModel`), its glass the tinted mirror, and its wheels one merged mesh: three
- * draws. Nobody opens a wreck's doors; with `lidded` its bonnet and boot lid or tailgate
- * open (`hangStaticLids`), one draw more per lid, and the cabin, bay and boot draw while
- * one is open.
+ * draws. With `lidded` its bonnet and boot lid or tailgate open (`hangStaticLids`), and
+ * the van's side door to its bay (`STATIC_SHELL_DOORS`), one draw more per lid, and the
+ * cabin, bay and boot draw while one is open. No other door of a shell opens.
  */
 function cloneStaticModel(t: Template, appearanceKey = t.def.id, lidded = false): StaticCarInstance {
   const group = new THREE.Group();

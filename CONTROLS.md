@@ -7,6 +7,18 @@ are `BINDABLE_ACTIONS` in `src/core/input.ts` and the authoritative list is that
 array plus `Settings.keyBindings` in `src/game/settings.ts`. Fixed, non-remappable
 controls: `Escape`/`` ` `` pause, `+` fullscreen, `-` the cinema viewport.
 
+## On foot: crouching with C
+
+`C` (the pad's Y, the touch overlay's C on foot) toggles a crouch (`Player`,
+`src/player/player.ts`). The eye comes down from 1.62 m to 0.95 m over a quarter of a
+second, the capsule shortens from 1.9 m to 1.1 m at once with the feet left where they
+are, and the player crouch-walks at 1.5 m/s whatever Shift says. The interaction ray
+starts at the camera's eye, so aim and reach follow the lowered head. `C` again, or
+Space, stands up, but only with headroom: under something lower than a standing head
+the player stays down and rises by himself once he has walked out from under it. A
+crouch ends on getting into a car and on a rescue. In a car `C` is still the camera; the
+two actions share the key by default and can be split in Settings → Controls.
+
 ## Cars: doors with E, getting in and out with F
 
 The kit cars (`src/carkit`) are worked part by part (`src/player/interaction.ts`,
@@ -79,7 +91,7 @@ own layout would otherwise drive the car with its triggers as its steering.
 | A | handbrake (toggle) | jump |
 | B | use held item (`E`) | use held item (`E`) |
 | X | enter/exit car, pick up/mount (`F`) | same |
-| Y | camera: chase ↔ cabin (`C`) | camera mode |
+| Y | camera: chase ↔ cabin (`C`) | crouch / stand up (`C`) |
 | RB / LB | shift up / down (manual or override) | — |
 | D-pad ↑ | recentre camera (`V`) | recentre camera |
 | D-pad ↓ | radio station (`R`) | drop item (`Q`) |
