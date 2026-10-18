@@ -825,6 +825,42 @@ amplified differences; `bench-*.json`, `pick-*.json`).
   1.62–1.74 m from the eye. The 21 other cars identical. *bay.ts, interior.ts
   `engineCover`, builder.ts `bevelBox`, player/interaction.ts; measurements-uaz.md*.
 
+## Daewoo Nexia (2026-10-18)
+
+- **Nexia: its signature is the slight, gentle curves of the head lamps' and tail lamps'
+  lines; the head lamps were flat rectangles blending into the body, the tail lamps one
+  straight orange/red block (owner).** → Every `cornerLamps` point had the same height
+  span, so each unit was a straight band: square inner ends, a level top and foot, and a
+  head-lamp end on the wing as tall as on the face. → The outlines from the drawing's
+  zoomed front and rear views and the photos, with points of their own height spans (no
+  generator change): the head lamp's top one gentle arch (0.705 at the inner end, 0.713
+  mid, the face's shoulder at the corner), its foot sweeping up to the corner (0.615 →
+  0.63, the face's plan rounding drawn in the foot), the indicator round the corner and
+  on along the wing as a dome closing to a point at s 0.40 (the drawn side view); the tail
+  lamps' inner side one convex line from the foot's inner corner leaning out to the level
+  split (0.811) and rounding over into the top (three points, ±0.468 → ±0.497 → ±0.53 →
+  ±0.562), the upper band light over the red. Lamp materials and colours untouched (the
+  owner: the way lamps are drawn stays). A trapezoid grille along the lamps' inner ends
+  (`grille` `slant`) was first dropped: unused by any car so far, its bars were sunk 4 mm
+  into its dark back, and their top and bottom walls ran parallel to the back's own walls
+  4 mm off them (a far-band fight, `exterior.ts` `slantedGrille`). 13 258 → 13 366
+  triangles; the 22 other cars identical. *daewoo.ts `LOOK_NEXIA`; measurements-nexia.md
+  §2, §3*.
+- **Nexia, the owner's follow-up: the grille a trapezoid narrowing to its foot, the head
+  lamps the narrow "squinting" trapezoid with the inner edge along the grille's side.** →
+  The slanted grille's bars stood sunk 4 mm into its back, so a bar near the opening's top
+  or bottom edge had a wall 4 mm from the back's wall and parallel to it. → The bars stand
+  on the back's face instead (from `floor`, not `floor − 0.004`), the back cut under them
+  2 mm deeper so its face lies inside the cut; no car used `slant`, so every other car is
+  identical by geometry hash. The Nexia's grille: opening ±0.245 at the foot to ±0.30 at
+  the top (`slant` −0.055) in a 0.01 black frame, as drawn; the head lamp's inner end
+  leaning along it 13–15 mm off the frame (±0.27 → ±0.325), its top falling to 0.70 at the
+  inner end, so the lamp narrows to an acute inner top corner. Checked headless (throwaway
+  runs): a frameless horizontal and a framed diamond slanted grille also pass
+  `kit-zfight`; a frameless diamond leaves a slit at the opening's side (its bar ends need
+  the frame over them). 13 472 triangles. *exterior.ts `slantedGrille`; daewoo.ts
+  `LOOK_NEXIA`; measurements-nexia.md §8*.
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent

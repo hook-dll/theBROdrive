@@ -124,9 +124,9 @@ The boot lid comes down the tail face between the corner lamps to the bumper's t
 | Item | Reading (px) | x (half), y (m) | Spec |
 |---|---|---|---|
 | Bonnet's front edge / lamps' top | py 230 across | 0.729 | face deck 0.73; lamps under it |
-| Head lamp | x 98–163, py 230–253 | ±0.31–0.613, 0.62–0.729 | `cornerLamps` head ±0.31..0.615, **0.615–0.70** (kept under the face's belt, 0.705) [P: clear] |
-| Indicator | x 73–98, same heights | ±0.613–0.726 (round the corner) | `cornerLamps` blinker from ±0.615 round the corner, back to s 0.30 on the wing [D side x 612; P: amber] |
-| Grille | x 168–297, py 235–255 | ±0.29, 0.705–0.61 | `grille` ±0.29, bumperTop + 0.012 … deck − 0.025, four black horizontal bars [P: slats, the badge not modelled] |
+| Head lamp | x 98–163, py 228–253; the top sagging from py 228 (outer) to 231 (inner); the inner end leaning from x 172 (foot) to 162 (top) | ±0.28–0.613, 0.62–0.734 | `cornerLamps` head from ±0.27 (foot) to ±0.325 (top), along the grille frame's side 13–15 mm off it; foot **0.615 → 0.616 → 0.621** sweeping up outward; top one arch **0.70 → 0.713 → 0.707**, falling to the acute inner top corner (inside the face's outline: 0.705 at the inner end, the shoulder at ±0.615) [P: clear; review 1, §8] |
+| Indicator | x 73–98, same heights; side view a dome on the wing from the face to x 612, its top 0.72 at x 595 | ±0.613–0.726 (round the corner); s to 0.40 | `cornerLamps` blinker from ±0.615 round the corner (0.63–0.70) and along the wing, its top falling and its foot rising to close at s **0.40** (0.704 at s 0.2, 0.69 at 0.3, 0.672 at 0.36, 0.645–0.655 at the end) [D side; P: amber] |
+| Grille | x 168–297, py 235–255; the frame's sides from x 178 at the foot to x 165 at the top | ±0.253 → ±0.312, 0.705–0.61 | `grille` opening ±0.245 at the foot to ±0.30 at the top (`slant` −0.055), bumperTop + 0.012 … deck − 0.025, a 0.01 black `frame`, four black horizontal bars [P: slats in a black surround, the badge not modelled; review 1 follow-up, §8] |
 | Bumper | py 255–332; strip py 262–270 | 0.61–0.192; 0.525–0.56 | moulded 0.24–0.60, strip 0.545 (§1) |
 | Lower openings | outer ovals x 100–148 / 323–373, middle slots x 160–232 / 240–308, py 300–317 | ±0.39–0.61 and ±0.01–0.33, 0.30–0.39 | outer recesses `panel` ±0.37..0.58, the middle pair one `grille` ±0.32 split by a bar, both bumperBottom + 0.085 … 0.145 |
 | Slot under the grille | x 200–268, py 265–275 | ±0.15, 0.53–0.51 | not modelled (black on the dark bumper) |
@@ -139,7 +139,7 @@ The boot lid comes down the tail face between the corner lamps to the bumper's t
 |---|---|---|---|
 | Back light | top py 626 (inner edges), foot py 690 | ±0.47 / ±0.65; 1.354 / 1.05 | `rearHeader` 0.04 |
 | Lid | top corners py 700 at ±0.63; down the lamps' inner edges to its foot py 771.7 at ±0.36 | 1.002; 0.66 | `notch` **0.39**, foot (deck) **0.645** |
-| Lamp units | x 87–172 (outer to inner, at their foot), py 720–768; division py 740 | ±0.367–0.761 (inner edge to ±0.475 at the top), 0.906–0.677; 0.811 | `cornerLamps` (rear), two bands: upper **0.805–0.90** white reversing cell inside, amber indicator outside; lower **0.68–0.805** brake inside, tail outside [P: a light band over red] |
+| Lamp units | x 87–172 (outer to inner, at their foot), py 720–768; division py 740; the inner side x 168 (py 768), 162 (755), 156 (745), 152 (738), 147 (730), 140 (723), 133 (720) | ±0.384–0.769; 0.906–0.677; 0.811; inner side ±0.384 / 0.412 / 0.439 / 0.458 / 0.481 / 0.514 / 0.546 at 0.677 / 0.739 / 0.787 / 0.821 / 0.859 / 0.892 / 0.906 | `cornerLamps` (rear), two bands split level at **0.811**, the inner side the drawn convex line moved 0.016 out (clear of the lid's upright side, ±0.39): lower **0.68–0.811** from ±0.40 (foot) via ±0.428 at 0.739 to ±0.468 at the split, brake inside, tail outside; upper **0.811–0.90** from ±0.468 via ±0.497 at 0.859 and ±0.53 at 0.89 to ±0.562 at the top, reversing inside to ±0.60, indicator outside [P: a light band over red, the rounded inner top corner; review 1, §8] |
 | Bumper | top py 778–782; strip py 790–795; foot py 845 (the exhaust's notch on the right) | 0.63–0.61; 0.573–0.549; 0.30 | moulded 0.30–0.61 (§1) |
 | Plate recess | x 208–292, py 798–830 | ±0.19, 0.48–0.33 | not modelled |
 
@@ -172,12 +172,12 @@ No catalogue carries a Nexia, so the car names its whole running gear (`KitOwnGe
 
 - `tools/fit-models.ts kit_nexia`: box 1.662 × 1.233 × 4.482; `tools/dust-flow.ts --write`, then `tools/dust-flow.ts`: all checks passed; only the `kit_nexia` row changed in `model-fits.json`.
 - `tools/kit-proportions.ts`: all 23 kit bodies within the hard gates; the Nexia's fit row equals the fresh measure (0 mm), factory box, wheelbase, tracks, radius 0.0 %; generated 4.498 × 1.671 × 1.411 (the loader −0.4 / −0.6 / −1.5 %), hubs 4 mm in their arches.
-- `tools/kit-zfight.ts kit_nexia`: PASS (13 258 triangles, 0 visible clusters, 50 shell holes, 0 slits).
+- `tools/kit-zfight.ts kit_nexia`: PASS (13 258 triangles, 0 visible clusters, 50 shell holes, 0 slits; after review 1: 13 472 triangles, 0 in every band, 0 slits).
 - Geometry hashes (README "Proving a refactor", against HEAD 5d6d398 in `/tmp/kitbase`, removed after): all 22 other kit cars identical.
 - `tools/part-mesh-coverage.ts`: 49/49; `tools/cooling.ts`: all ok; `tools/driveline.ts`: all invariants hold.
 - Headless overlays of the built car on the drawing's three views (`/tmp/kitnexia/r/side.png`, `front.png`, `rear.png`): hubs on the drawn hubs, roof, glass, pillars, door lines, bumpers, lamps and the lid on the drawn lines (judged by eye). Not checked in the lab (no browser in this pass).
 
-Triangles: **13 258** (body + trim 5 858, cabin 4 909, of it fine 1 761, bay 639, boot 52, underbody 456, wheels 1 344; 7 202 beyond the detail range).
+Triangles: **13 472** after review 1 (body + trim 6 072, cabin 4 909, of it fine 1 761, bay 639, boot 52, underbody 456, wheels 1 344; 7 416 beyond the detail range); 13 258 in the first draft.
 
 ## 7. Gaps
 
@@ -186,8 +186,15 @@ Triangles: **13 258** (body + trim 5 858, cabin 4 909, of it fine 1 761, bay 639
 - **Overhangs** 915 / 1047 [E], the drawing's 47 mm over 4482 cut from the bumpers in proportion.
 - **A pillar**: slim, the glass close behind it (HISTORY); the car's mirror sail and the front door's small fixed pane are not modelled.
 - **Lid**: upright sides at ±0.39; on the car its sides lean with the lamps' inner edges (±0.367 → ±0.475).
-- **Tail lamps**: two flat bands; the car's reversing lens is a small round-cornered cell in the upper band and a ribbed reflector sits in the lower one.
+- **Tail lamps**: two flat bands with the drawn inner outline (§3); the car's reversing lens is a small round-cornered cell in the upper band and a ribbed reflector sits in the lower one. The curves are polylines of three to four straight pieces.
+- **Head lamps**: the top stays 2–3 cm under the drawn bonnet lip (the face's outline); the inner end and the grille's side are straight lines, as drawn.
 - **Bumpers**: one height all round; on the car the strip and the plastic run a little lower along the flanks. The slot under the grille, the plate recesses and the badge are not modelled; the intakes are black on dark plastic.
 - **Wipers** 0.48 [E] (the car has 500 / 450 mm blades); `screenBottom`, `screenHeader`, `pillar`, `rearBottom`, `rearHeader` as the Samaras [E].
 - **Running gear**: front axle share, engine mass, gearbox mass, red line and idle [E]; no braking ceiling; the 0-100 is drom.ru's (an accepted catalogue-optimistic deviation, §5).
 - **Traffic**: `kit_nexia` is not in `DRIVER_ODDS` (world/traffic.ts), so its drivers draw the default odds (half hurried, half frantic).
+
+## 8. Owner's review 1 (2026-10-18): the lamps' outlines
+
+"Всё прекрасно", but the car's signature is the gentle curves of its head-lamp and tail-lamp lines; the draft had flat rectangles and a straight block. The outlines were re-read on the drawing's front and rear views zoomed ×6 and on the photos "2000 Daewoo Nexia dark blue front", "Daewoo Nexia 1996 on dirtroad", "1997 Daewoo Nexia dark green rear" (§2, §3 rows), and laid as `cornerLamps` points with their own height spans; lamp colours and materials untouched (the owner). Head lamp: an arched top, the foot rising towards the corner, the indicator round the corner and on along the wing as a dome closing at s 0.40. Tail lamps: two bands split level, their inner side one convex line rounding over into the top. Before / after, headless: `/tmp/kitnexia/cmp_drawing.png` (front and rear views over the drawing), `/tmp/kitnexia/zoom_front.png`, `zoom_rear.png`, `/tmp/kitnexia/cmp_photos.png` (3/4 front, front, 3/4 rear, rear, each beside a photo). `tools/kit-zfight.ts kit_nexia` PASS; the other 22 kit cars identical by geometry hash; `tools/kit-proportions.ts` hard gates pass (bounds and the fit row unchanged).
+
+Follow-up (the owner, 2026-10-18): the grille a trapezoid narrowing to its foot and the head lamps the narrow "squinting" trapezoid along it. The generator's slanted grille (`exterior.ts` `slantedGrille`, used by no car before) sank its bars 4 mm into the dark back, so the top and bottom bars' walls ran parallel to the back's walls 4 mm off them (a far-band fight); the bars now stand on the back's face, which is cut under them, and every other kit car is identical by geometry hash. The Nexia: grille opening ±0.245 → ±0.30 (`slant` −0.055) in a 0.01 black frame (§2), head lamp's inner end ±0.27 → ±0.325 along it, its top falling to 0.70 at the inner end. `tools/kit-zfight.ts kit_nexia` PASS in every band (13 472 triangles); `tools/kit-proportions.ts` hard gates pass. Before (c0e38ef) / after / photo: `/tmp/kitnexia/cmp_photos.png` (with a close-up row of the lamps and grille), `cmp_drawing.png`, `zoom_front.png`, `zoom_rear.png`.

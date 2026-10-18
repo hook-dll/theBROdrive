@@ -413,7 +413,7 @@ meshes keep the lamp names, so lamps still work.
 | `panel` | `x: FaceX \| Span<FaceX>`, `y: Span<FaceY>`, `finish`, `proud` | A flat surround: from side to side when `x` is a `FaceX` (black lamp band, the 2108's slotted body-colour panel with `finish: 'paint'`), or one block on each side when `x` is a span (the 2115's fog-lamp housings). |
 | `round` | `role`, `x`, `y: FaceY`, `radius` | A round lamp in a chrome ring (classics). |
 | `lens` | `role`, `x: Span<FaceX>`, `y: Span<FaceY>`, `depth`, `proud`, `slant?` | A lamp lens; one centred on the centre line (`x: { at: { centre: 0 }, half }`) is built once across it (the 2110's lid reflector). `slant: { outer, inner }` moves the top edge's outer/inner ends inboard of the bottom's: a trapezoid (2108 headlamps) or a parallelogram; negative values lean out. A lamp that wraps round the body's corner is a `cornerLamps` unit, not a face lens. |
-| `grille` | `x: FaceX` (half width), `y`, `standOut?`, `frame?: { finish, margin }`, `back`, `bars: { dir, count, finish, margin, width, depth, proud }` | Grille or slot; `standOut` lifts the whole grille out of the face (the 2107's; the 2115's lower intake). |
+| `grille` | `x: FaceX` (half width), `y`, `standOut?`, `slant?`, `frame?: { finish, margin }`, `back`, `bars: { dir, count, finish, margin, width, depth, proud }` | Grille or slot; `standOut` lifts the whole grille out of the face (the 2107's; the 2115's lower intake). `slant` (a number) moves the top edge's ends that far inboard of the bottom's, negative to lean out: a trapezoid grille (the Nexia's, narrowing to its foot, `slant` −0.055), its bars standing on the dark back 5 mm proud of it up to just under the frame's front, `proud`/`depth` aside; `dir: 'diamond'` (two crossed sets) is for a slanted grille only and needs a `frame` over the bar ends. |
 | `cluster` | `x: Span<FaceX>`, `y: Span<FaceY>`, `columns: LampRole[][]` | Tail-lamp cluster straight on the body, its cells tiling the span (no housing; add a `frame` for a chrome surround): columns from the outer edge in, each column's roles top to bottom. |
 | `frame` | `x`, `y`, `width`, `finish`, `proud` | A rectangular outline (chrome surround). |
 
@@ -900,7 +900,7 @@ within `KIT_FINE_M`; "Far" = everything except the four detail groups.
 | GAZ-24 | 13 366 | 6 558 | 4 209 | 1 747 | 401 | 294 | 560 | 1 344 | 7 902 |
 | GAZ-31029 | 11 888 | 5 018 | 4 247 | 1 747 | 421 | 294 | 564 | 1 344 | 6 362 |
 | AZLK-2141 | 12 131 | 5 243 | 4 411 | 1 751 | 617 | 60 | 456 | 1 344 | 6 587 |
-| Nexia | 13 258 | 5 858 | 4 909 | 1 761 | 639 | 52 | 456 | 1 344 | 7 202 |
+| Nexia | 13 472 | 6 072 | 4 909 | 1 761 | 639 | 52 | 456 | 1 344 | 7 416 |
 
 The owner set the budget aside for the 2110 and 2112 (the rounded rear shut line adds side
 rows to every tub column).

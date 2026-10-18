@@ -22,7 +22,13 @@
   `tools/reality.ts kit_nexia` 164 km/h against 163, the turn within 0.5 %, the 0-100
   15.3 s against drom.ru's 12.5 accepted as catalogue-optimistic. 13 258 triangles;
   `tools/kit-zfight.ts` PASS, `tools/kit-proportions.ts` hard gates pass, the 22 earlier
-  kit cars identical by geometry hash. Not yet seen in the lab.
+  kit cars identical by geometry hash. After the owner's first review the lamps carry the
+  car's gentle curves: the head lamp's arched top and rising foot with the indicator
+  closing as a dome on the wing, the tail lamps' inner side one convex line rounding into
+  the top over a level split (`cornerLamps` points with their own heights), and the grille
+  is a trapezoid narrowing to its foot with the head lamps' inner ends leaning along it
+  (`grille` `slant`, whose bars no longer stand sunk in the dark back and fight its walls
+  in the far band; no other car uses it). 13 472 triangles.
 
 - A ROADSIDE UAZ-2206'S MIDDLE SIDE DOOR OPENS, AND ITS BAY IS REACHED THROUGH IT
   (render/carmodel.ts `STATIC_SHELL_DOORS`, `kitStaticParts`; render/staticlids.ts;

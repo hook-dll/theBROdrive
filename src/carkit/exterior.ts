@@ -535,11 +535,12 @@ function buildFaceItem(face: EndFace, item: FaceItem, b: PartBuilder): Footprint
 
 /**
  * A trapezoid grille (`grille` with `slant`: the top's ends that far inboard of the
- * bottom's, the UAZ-2206's): a raised frame round a recessed dark back, and the bars
- * across the opening, horizontal, or two crossed sets at ±45° (`'diamond'`, the mesh). The
- * frame is one slab rooted in the face with its front cut away over the opening, and walls
- * down the opening's edge to the back; the bars end 2 mm inside the frame and stand in the
- * recess, the back's face cut under them, a crossed set's under the other.
+ * bottom's, negative to lean out; the Nexia's): a raised frame round a recessed dark back,
+ * and the bars across the opening, horizontal, or two crossed sets at ±45° (`'diamond'`,
+ * the mesh). The frame is one slab rooted in the face with its front cut away over the
+ * opening, and walls down the opening's edge to the back; the bars end 2 mm inside the
+ * frame and stand on the back's face, which is cut under them, a crossed set's under the
+ * other.
  */
 function slantedGrille(face: EndFace, item: Extract<FaceItem, { kind: 'grille' }>, b: PartBuilder, gw: number, y: number, hy: number, slant: number): Footprint[] {
   const so = item.standOut ?? 0;
@@ -589,10 +590,13 @@ function slantedGrille(face: EndFace, item: Extract<FaceItem, { kind: 'grille' }
       const poly = band(set.dir, c);
       if (poly.length < 3) continue;
       const p = out(poly);
-      // Below the frame's front, which their ends reach under.
-      const [a, top] = [floor - 0.004, Math.min(floor + bars.depth, front - 0.003) - set.depth];
+      // Standing on the back's face (cut under them), up to just below the frame's front,
+      // which their ends reach under. Not sunk into the back: a sunk bar's top and bottom
+      // walls ran parallel to the back's own walls a few millimetres off them, inside it.
+      const [a, top] = [floor, Math.min(floor + bars.depth, front - 0.003) - set.depth];
       extrude(part, slot, p, a, top, face.frontCap);
-      prints.push({ poly: p, z0: a, z1: top });
+      // The cut under it reaches 2 mm behind the back's face, so that face is inside it.
+      prints.push({ poly: p, z0: a - 0.002, z1: top });
     }
     return { part, prints };
   });

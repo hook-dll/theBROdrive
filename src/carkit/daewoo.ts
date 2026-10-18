@@ -191,36 +191,60 @@ export const LOOK_NEXIA: KitLook = {
   // at 0.59, 0.793 at 0.83, 0.818 at 1.22]; on the doors it is the belt itself.
   featureLine: { points: [[0.33, 0.718], [0.6, 0.764], [0.9, 0.795], [1.2, 0.818], [1.44, 0.825]], height: 0.012 },
   cornerLamps: [
-    // Head lamp ±0.31..0.615, the indicator from there to the corner (±0.726 seen from the
-    // front) and back along the wing to s 0.30 [D front, D side x 577–612]; 0.615–0.70, under
-    // the bonnet's lip [D front 0.62–0.729] and clear of the bumper's top (0.60).
+    // Head lamp and indicator as one unit [D front, zoomed: the top under the bonnet's lip,
+    // py 228 at the outer end sagging to 231 at the inner; the foot py 253; the inner end
+    // leaning out to the top, ±0.28 to ±0.325, along the grille's slanted side; the indicator
+    // from ±0.615 (x 97) round the corner. D side: the indicator a dome on the wing, its foot
+    // to s 0.40 (x 612), its top 0.72 at s 0.30 (x 595) curving down to the foot. P "2000
+    // Daewoo Nexia dark blue front", "Daewoo Nexia 1996 on dirtroad": the top line one gentle
+    // arch over the head lamp, rounding down over the indicator into the wing; the foot
+    // sweeping up towards the corner as the face rounds back in plan]. The kit's face is
+    // flat to the corner, so that sweep is drawn in the foot: 0.615 at the inner end, 0.63 at
+    // the corner, 0.645 at the dome's end. The inner end leans out along the trapezoid
+    // grille's side, 13–15 mm off its frame (±0.27 at the foot to ±0.325 at the top), and
+    // the top falls a little towards it (0.70), so the lamp narrows to an acute inner top
+    // corner: the car's "squint". The top kept inside the face's outline (0.705 at the inner
+    // end, the shoulder at the outer) and under the wing's crease; the foot clear of the
+    // bumper's top (0.60).
     {
       points: [
-        { x: 0.31, y: [0.615, 0.7], role: 'head' },
-        { x: 0.615, y: [0.615, 0.7], role: 'blinker' },
-        { y: [0.615, 0.7], role: 'blinker' },
-        { s: 0.3, y: [0.625, 0.715] },
+        { x: [0.27, 0.325], y: [0.615, 0.7], role: 'head' },
+        { x: 0.45, y: [0.616, 0.713], role: 'head' },
+        { x: 0.615, y: [0.621, 0.707], role: 'blinker' },
+        { y: [0.63, 0.7], role: 'blinker' },
+        { s: 0.2, y: [0.634, 0.704], role: 'blinker' },
+        { s: 0.3, y: [0.638, 0.69], role: 'blinker' },
+        { s: 0.36, y: [0.641, 0.672], role: 'blinker' },
+        { s: 0.4, y: [0.645, 0.655] },
       ],
     },
-    // Tail [D rear: the upper band 0.811–0.906, the lower 0.677–0.811; inner edges leaning
-    // from ±0.367 to ±0.475, outer ±0.761; D side: forward on the wing to s 4.21–4.23; P:
-    // amber outside and white inside over red]. Inner edges kept clear of the lid (±0.39).
+    // Tail, two bands split level at 0.811 [D rear, zoomed: top py 720 (0.906), split py 740,
+    // foot py 768 (0.677), outer ±0.769; the inner side one convex line from the foot's inner
+    // corner (±0.384) leaning out up to the split (±0.458) and rounding over into the top
+    // (±0.481 at 0.859, ±0.514 at 0.892, ±0.546 at the top); D side: forward on the wing to s
+    // 4.21–4.23; P "1997 Daewoo Nexia dark green rear": the same rounded inner top corner, a
+    // light band over red]. The inner line moved 0.016 out so its foot clears the lid's
+    // upright side (±0.39); the top kept at the tail's belt (0.90). Upper band: the reversing
+    // lamp inside (the drawn cell ±0.48–0.58), the indicator outside; lower: stop and tail.
     {
       end: 'rear',
       points: [
-        { x: [0.43, 0.47], y: [0.805, 0.9], role: 'reverse' },
-        { x: 0.58, y: [0.805, 0.9], role: 'blinker' },
-        { y: [0.805, 0.9], role: 'blinker' },
-        { s: 4.24, y: [0.805, 0.895] },
+        { x: [0.468, 0.497], y: [0.811, 0.859], role: 'reverse' },
+        { x: 0.53, y: [0.811, 0.89], role: 'reverse' },
+        { x: 0.562, y: [0.811, 0.9], role: 'reverse' },
+        { x: 0.6, y: [0.811, 0.9], role: 'blinker' },
+        { y: [0.811, 0.9], role: 'blinker' },
+        { s: 4.24, y: [0.811, 0.895] },
       ],
     },
     {
       end: 'rear',
       points: [
-        { x: [0.4, 0.43], y: [0.68, 0.805], role: 'brake' },
-        { x: 0.58, y: [0.68, 0.805], role: 'tail' },
-        { y: [0.68, 0.805], role: 'tail' },
-        { s: 4.24, y: [0.69, 0.805] },
+        { x: [0.4, 0.428], y: [0.68, 0.739], role: 'brake' },
+        { x: [0.44, 0.468], y: [0.68, 0.811], role: 'brake' },
+        { x: 0.58, y: [0.68, 0.811], role: 'tail' },
+        { y: [0.68, 0.811], role: 'tail' },
+        { s: 4.24, y: [0.69, 0.811] },
       ],
     },
   ],
@@ -231,12 +255,17 @@ export const LOOK_NEXIA: KitLook = {
     // sides back along the wings to the front arch [D side x 643–650].
     bumper: { kind: 'moulded', drop: 0.095, height: 0.36, moulding: { y: 0.545, height: 0.015, finish: 'chrome' }, wrapTo: 0.53 },
     items: [
-      // Black horizontal slats between the lamps, ±0.29, from the bumper's top to under the
-      // lip (0.705) [D front y 235–255; P].
+      // Black horizontal slats in a black frame between the lamps, a trapezoid narrowing to
+      // its foot, from the bumper's top to under the lip (0.705) [D front y 235–255: the
+      // frame's sides from x 178 (±0.253) at the foot to x 165 (±0.312) at the top; P: the
+      // black surround]: the opening ±0.245 at the foot, ±0.30 at the top, the frame 0.01
+      // round it.
       {
         kind: 'grille',
-        x: { centre: 0.29 },
+        x: { centre: 0.245 },
         y: { from: ['bumperTop', 0.012], to: ['deck', -0.025] },
+        slant: -0.055,
+        frame: { finish: 'black', margin: 0.01 },
         back: true,
         bars: { dir: 'horizontal', count: 4, finish: 'black', margin: 0.008, width: 0.008, depth: 0.01, proud: 0.015 },
       },
