@@ -1599,6 +1599,17 @@
 
 ### Fixed
 
+- NO SPECKLED "DIRT" UNDER THE CLOUDS AT DUSK (render/clouds.ts `blobPoint`,
+  `BASE_SLOT_STEP_M`). Reported from play: a flickering, dirty-looking pattern on every
+  cloud's underside at sunset. It was depth fighting. While the bodies fade at dusk a depth
+  prepass lays down the nearest surface and the part-transparent colour pass blends every
+  fragment at that depth (LessEqual); the flat cuts of a cloud's overlapping lobes all lay in
+  one plane, so where they overlapped each pixel was blended once or twice depending on which
+  triangle rounded nearer. Each lobe's cut now stands 0.1 m over the previous slot's
+  (about 14 depth steps), so the prepass keeps one cut and the colour pass draws only it; a
+  cloud's lobes spread their bases over about a metre, invisible from the ground. Checked in
+  the dev build at 18:03 looking toward the set sun: the speckle is gone.
+
 - THE ROAD HAS NO ROCKS ON IT, AND NOTHING THAT EXISTED ONLY FOR THEM IS LEFT (owner,
   2026-10-18). The one obstacle on the road is a car — stalled, overturned or simply
   standing. Deleted: `world/hazards.ts` (`HazardIndex`, `ReversedHazardIndex`, `RoadHazard`,

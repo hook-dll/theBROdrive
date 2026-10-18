@@ -85,6 +85,8 @@ const RING_FADE_SHARE = 0.8;
 /** The clouds' own depth range, metres from the eye. */
 const DEPTH_NEAR_M = 50;
 const DEPTH_FAR_M = 120_000;
+/** Height each lobe's flat cut stands over the previous slot's, metres; see `blobPoint`. */
+const BASE_SLOT_STEP_M = 0.1;
 /**
  * Scale height of the air's haze, metres: its density falls by e every this far up.
  * Desert haze and dust sit in the boundary layer, so a cloud overhead looks through a
@@ -154,7 +156,14 @@ float lump( vec3 unit ) {
 vec3 blobPoint( vec3 unit ) {
 	vec3 s = unit * ( 1.0 + ${(2 * LUMP).toFixed(2)} * ( lump( unit ) - 0.5 ) ) * vec3( blobA.w, blobB.x, blobB.y );
 	vec3 p = vec3( blobB.z * s.x - blobB.w * s.z, s.y, blobB.w * s.x + blobB.z * s.z ) + blobA.xyz;
-	p.y = max( p.y, 0.0 );
+	// Each lobe's cut a hand's breadth over the last slot's, not all in one plane. While the
+	// bodies fade at dusk the colour pass blends every surface at the prepass's depth
+	// (LessEqual), and the overlapping cuts of a cloud's lobes were all at it: each pixel
+	// there was blended once or twice by which triangle rounded nearer, a speckled "dirt"
+	// under every sunset cloud (owner, 2026-10-18). Ten centimetres a slot is ~14 depth
+	// steps (CLIP_GLSL), so the prepass keeps one cut and the colour pass draws only it;
+	// a metre's spread over a cloud's lobes is invisible from the ground.
+	p.y = max( p.y, ${BASE_SLOT_STEP_M.toFixed(2)} * aSlot );
 	return p * aCloud.w;
 }
 `;
