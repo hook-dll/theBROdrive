@@ -4,6 +4,39 @@
 
 ### Added
 
+- PETROL BY THE LITRE, A MACHINE AT EVERY STOP (`src/world/vending.ts`, `src/world/poi.ts`
+  `machineSpot`, `src/player/interaction.ts` `pumpFuel`).
+  - Petrol is no longer sold in filled cans. A FUEL machine has a nozzle in a grey holster
+    under its coin panel and a PETROL board over it with the price of a litre here
+    (`fuelPricePerLitre`: 1.2 coins × km index, unrounded). Hold F (or LMB) at the nozzle
+    with a petrol can in hand: it pours 1.5 L/s, taking one coin each time the litres the
+    last coin bought run out, and stops when the can is full or the pack has no coin for
+    the next drop. The prompt counts up the litres and coins of the hold (`can 3.0/10.0 L ·
+    +3.0 L for 4 coins`); a press that pours nothing, or a fill that runs out of coins, is
+    refused. What a last coin bought and the can had no room for stays in the machine for
+    the next fill (in memory only). The pump never runs dry; any petrol can of any size is
+    filled up to its capacity, and an oil or water can is refused.
+  - The FUEL window now sells EMPTY petrol cans (5, 10 and 20 L, one coin each × km index)
+    next to oil and water in 5 L bottles; a GOODS machine sells an empty 5 L can among its
+    wares. Oil and water stay bottles, and the window's goods are still finite. A can in
+    the window names its size (`[F] buy 20.0 L petrol can, empty — 1 coin`).
+  - Every stop with a building has one machine (masts have none), its kind from the stop
+    and the seed: a forecourt 85% FUEL, a home 60% FUEL / GOODS, a scrapyard FUEL or PARTS,
+    a wreck FUEL, PARTS or GOODS, a store PARTS, GOODS or FUEL. A roadside machine stands
+    by the front wall toward the end away from the trailer, far enough along that a
+    courier parked in front does not hide it; a desert building's stands by whichever of
+    its four walls faces the road. A desert car field keeps clear of all four walls.
+    Over seeds 1–20, first 500 km: 11.4 machines per 100 km at the roadside and up to
+    8.7 more out in the desert (counted before the landform and neighbour checks), 20.2
+    in all (was about 8.7); 11.0 FUEL, 3.9 PARTS, 5.2 GOODS per 100 km.
+  - A can is drawn by its size: a 20 L can at 0.85 of the old shape, smaller cans by the
+    cube root of their volume. The tray's mouth is 0.3 m tall, so a 20 L can fits in it.
+  - `InputFrame.mountDown`: F held, as `useHeldDown` is for E.
+  - No program links on first sight: the nozzle, hose and price board are kit boxes and a
+    sign board, the shapes `marketProgramAnchor` links at boot (checked on seed 11 over
+    jumps to FUEL, PARTS and GOODS machines at km 7.7, 23.1, 30.8, 36.1, 42.4, 49.6, 53.9
+    and 61.6).
+
 - OPEL VECTRA A kit car (`src/carkit/opel.ts` `BODY_VECTRA_A`, `LOOK_VECTRA_A`;
   `interior.ts` `CABIN_VECTRA_A`; measured in `measurements-vectra.md`). It is the saloon
   2.0i GL with the 1992 facelift's face and tail, built from the-blueprints.com's

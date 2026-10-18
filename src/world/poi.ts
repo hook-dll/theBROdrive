@@ -487,13 +487,10 @@ function addStaticMesh(
 // ---------------------------------------------------------------------------
 
 /**
- * The strip of ground in front of a building, where everything it gives away is left.
+ * The strip of ground around a building where its vending machine stands.
  *
- * None of the buildings can be entered, and loot laid "in the middle of the site" would
- * now be inside a closed shell's collider. So it goes where a person leaves things at a
- * house: by the front, between the wall and the road for a roadside stop. `across` runs
- * -1..1 along the front, `out` is metres beyond the front wall, and the height is the
- * sand itself — the site's plane is fitted under the building, not out here.
+ * None of the buildings can be entered, so a machine stands where a person would put one
+ * at a house: by a wall, on the sand, its back a hand's width off it (`machineSpot`).
  */
 interface Yard {
   readonly site: Site;
@@ -507,14 +504,6 @@ interface Yard {
  * courier's flank stands about 10.4 m from the centreline.
  */
 const YARD_DEPTH_M = 2.4;
-
-function yardPoint(ctx: ChunkContext, poi: Poi, yard: Yard, across: number, out: number): { x: number; y: number; z: number } {
-  const width = Math.min(yard.halfX, 4.5);
-  const o = rotateXZ(across * width, -(yard.halfZ + out), yard.site.yaw);
-  const x = yard.site.x + o.x;
-  const z = yard.site.z + o.z;
-  return { x, y: ctx.terrain.heightAt(x, z, poi.s), z };
-}
 
 /**
  * A trailer left beside the house. Take one, leave one: they are never owned, so this
@@ -684,13 +673,48 @@ function buildStructurePoi(
   // A fuel stop leaves a trailer beside the house: a world object, never owned.
   if (shouldLoot && poi.stock === 'fuel') stockTrailer(ctx, poi, { site, halfX, halfZ }, trailers);
 
-  // A fuel or store stop sells from a machine by its front wall, on the side away from
-  // the trailer, its back a hand's width off the wall and facing out.
+  // Every stop with a building sells from a machine (a mast has none), its back a hand's
+  // width off the wall that faces the road, so it is seen from the asphalt.
   const assortment = vendingAssortment(poi);
   if (assortment) {
-    const spot = yardPoint(ctx, poi, { site, halfX, halfZ }, -0.55, 0.45);
-    buildVendingMachine(ctx, poi, assortment, spot.x, spot.z, yaw, group, bodies, colliders, market, registeredMarket);
+    const spot = machineSpot(ctx, poi, { site, halfX, halfZ });
+    buildVendingMachine(ctx, poi, assortment, spot.x, spot.z, spot.yaw, group, bodies, colliders, market, registeredMarket);
   }
+}
+
+/**
+ * Where a stop's vending machine stands and which way it faces. A roadside building's
+ * front faces the road: the machine stands by it toward the end away from the trailer,
+ * far enough along that a courier parked in front of the middle (`buildCourier`, a car's
+ * half length either side of the stop) does not hide it from the road.
+ * A desert building faces anywhere, so the machine stands by whichever of its four walls
+ * faces the road best, facing out. The trailer stands along the right wall (+X, see
+ * `stockTrailer`) toward the front, so by that wall the machine keeps to the back end.
+ * Every wall's strip is clear of the car field (`salvageKeepOut`).
+ */
+function machineSpot(ctx: ChunkContext, poi: Poi, yard: Yard): { x: number; z: number; yaw: number } {
+  let wall = 0;
+  if (poi.desert) {
+    const road = ctx.road.offsetPoint(poi.s, 0);
+    const toRoadX = road.x - yard.site.x;
+    const toRoadZ = road.z - yard.site.z;
+    let best = -Infinity;
+    for (let k = 0; k < 4; k++) {
+      // The wall's outward normal: its machine's front, local -Z at the turned yaw.
+      const out = rotateXZ(0, -1, yard.site.yaw + (k * Math.PI) / 2);
+      const facing = out.x * toRoadX + out.z * toRoadZ;
+      if (facing > best) {
+        best = facing;
+        wall = k;
+      }
+    }
+  }
+  const yaw = yard.site.yaw + (wall * Math.PI) / 2;
+  const along = wall % 2 === 0 ? yard.halfX : yard.halfZ;
+  const depth = wall % 2 === 0 ? yard.halfZ : yard.halfX;
+  const across = (wall === 3 ? 0.85 : -0.85) * Math.min(along, 4.5);
+  const o = rotateXZ(across, -(depth + 0.45), yaw);
+  return { x: yard.site.x + o.x, z: yard.site.z + o.z, yaw };
 }
 
 /**
@@ -704,7 +728,9 @@ export function salvageKeepOut(poi: Poi, road: Road, instance: VariantInstance):
     x: centre.x,
     z: centre.z,
     yaw: poiYaw(poi, road.sampleAt(poi.s).heading),
-    halfX: instance.halfExtentX,
+    // A desert building's machine may stand by a side wall (`machineSpot`): the strip
+    // runs round all four there.
+    halfX: instance.halfExtentX + (poi.desert ? YARD_DEPTH_M : 0),
     halfZ: instance.halfExtentZ + YARD_DEPTH_M,
   };
 }

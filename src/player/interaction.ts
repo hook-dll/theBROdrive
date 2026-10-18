@@ -65,9 +65,9 @@ import { STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
 import { uprightStickerRoll } from '../render/stickers';
 import { KitRig, type KitControl, type KitPicked } from '../carkit/rig';
 import { KIT_BENCH_NODE } from '../carkit/interior';
-import { coinsHeld, itemPrice, spendCoins } from '../economy/economy';
-import type { MarketField } from '../world/market';
-import { aimVending, vendingTrayPoint, type VendingAim } from '../world/vending';
+import { coinsHeld, fuelPricePerLitre, itemPrice, spendCoins } from '../economy/economy';
+import type { MarketField, VendingMachine } from '../world/market';
+import { aimVending, PUMP_SLOT, vendingTrayPoint, type VendingAim } from '../world/vending';
 
 /** How far the eye ray reaches for picking. */
 const RAY_RANGE = 2.6;
@@ -119,6 +119,8 @@ const BODY_SPONGE_DIRT_RATE = 0.7;
 const BODY_SPONGE_SCRATCH_RATE = 0.12;
 /** Fuel poured per second from a held can. */
 const FUEL_POUR_RATE = 1.2;
+/** Litres a FUEL machine's nozzle pours per second into a held can. */
+const PUMP_RATE = 1.5;
 /**
  * Seconds of held spray for one full coat. Long enough to read as work, short
  * enough that a colour change is one sitting rather than a chore.
@@ -657,6 +659,14 @@ export class Interaction {
   /** Where the eye ray met a vending machine's front, reused in place; see `aimVending`. */
   private readonly vendAim: VendingAim = { distance: 0, slot: -1 };
   /**
+   * The FUEL nozzle's running sale. `credit` is litres already paid for and not yet
+   * poured at `machineId` (a coin buys `1 / price` litres, so the last coin of a fill
+   * leaves change in the machine for the next one); `litres` and `coins` count up over
+   * the current hold for the prompt; `dry` is set once a hold has run out of coins.
+   * In memory only: a reload forgets the change, never more than one coin's worth.
+   */
+  private readonly pump = { machineId: '', credit: 0, litres: 0, coins: 0, dry: false };
+  /**
    * The delivery probe handed to contract kinds, reused in place: the prompt that
    * aims at a courier boot with a contract in hand rebuilds it every tick, and it
    * must not allocate. Valid only for the call that filled it.
@@ -875,6 +885,11 @@ export class Interaction {
     }
 
     if (input.usePrimary) this.usePrimary(dt, resolved);
+    // F or LMB held at a FUEL machine's nozzle fills the can in hand.
+    const aimedAt = resolved.target;
+    if (aimedAt.kind === 'vending' && aimedAt.slot === PUMP_SLOT && (input.mountDown || input.usePrimary)) {
+      this.pumpFuel(dt, aimedAt.machineId, mountPressed || primaryPressed);
+    }
     if (this.spentSponge !== null) {
       // Let go of it: dropped straight down a little ahead of the feet.
       if (this.inventory.held?.id === this.spentSponge) this.drop(eyeX, eyeY, eyeZ, dirX * 0.25, -1, dirZ * 0.25);
@@ -2875,14 +2890,87 @@ export class Interaction {
     const machine = this.market.machine(machineId);
     if (!machine) return null;
     const coins = coinsHeld(this.world.state);
+    if (slot === PUMP_SLOT) return this.pumpPrompt(machine, coins);
     if (slot < 0) return `${machine.title} vending machine — you have ${coins} coin${coins === 1 ? '' : 's'}`;
     const item = machine.stock[slot];
     if (!item) return 'empty';
     if (this.world.state.vendingSold[machine.id]?.includes(slot)) return 'sold out';
     const price = itemPrice(item, machine.km);
+    const cost = `${price} coin${price === 1 ? '' : 's'}`;
+    // A can in the window says its size, and whether anything is in it.
+    const label = item.type === 'fluid_can'
+      ? `${litreText(item.capacity)} ${item.fluid} can${item.litres > 0 ? ` (${litreText(item.litres)})` : ', empty'}`
+      : itemLabel(item);
     return coins >= price
-      ? `[F] buy ${itemLabel(item)} — ${price} coins`
-      : `${itemLabel(item)} — ${price} coins · you have ${coins}`;
+      ? `[F] buy ${label} — ${cost}`
+      : `${label} — ${cost} · you have ${coins}`;
+  }
+
+  /**
+   * The nozzle under the crosshair: the price of a litre here and, with a petrol can in
+   * hand, how full it is and what this hold has poured and cost so far.
+   */
+  private pumpPrompt(machine: VendingMachine, coins: number): string {
+    const head = `petrol ${fuelPricePerLitre(machine.km).toFixed(1)} coins/L`;
+    const can = this.inventory.held;
+    if (can?.type !== 'fluid_can') return `${head} — hold a can to the nozzle (empty cans in the window)`;
+    if (can.fluid !== 'petrol') return `${head} — not into a ${can.fluid} can`;
+    const pump = this.pump;
+    const here = pump.machineId === machine.id;
+    const level = `can ${can.litres.toFixed(1)}/${litreText(can.capacity)}`;
+    const sale = here && pump.litres > 0 ? ` · +${pump.litres.toFixed(1)} L for ${pump.coins} coin${pump.coins === 1 ? '' : 's'}` : '';
+    if (can.litres >= can.capacity - FLUID_FULL_EPSILON) return `${level} full${sale}`;
+    if (coins <= 0 && !(here && pump.credit > FLUID_FULL_EPSILON)) return `${head} — out of coins · ${level}${sale}`;
+    return `[F] hold to fill — ${head} · ${level}${sale} · ${coins} coin${coins === 1 ? '' : 's'}`;
+  }
+
+  /**
+   * One tick of the nozzle held to the can in hand. Coins are taken one at a time as the
+   * litres they buy run out, so the fill stops on the tick the can is full or the pack has
+   * no coin for the next drop; whatever a last coin bought and the can had no room for
+   * stays in the machine as `credit`. A press that pours nothing is refused, and so is the
+   * tick a running fill runs out of coins.
+   */
+  private pumpFuel(dt: number, machineId: string, pressed: boolean): void {
+    const machine = this.market.machine(machineId);
+    const can = this.inventory.held;
+    const pump = this.pump;
+    if (pump.machineId !== machineId) {
+      pump.machineId = machineId;
+      pump.credit = 0;
+      pump.litres = 0;
+      pump.coins = 0;
+    }
+    if (pressed) {
+      pump.litres = 0;
+      pump.coins = 0;
+      pump.dry = false;
+    }
+    if (!machine?.pump || can?.type !== 'fluid_can' || can.fluid !== 'petrol') {
+      if (pressed) this.sound = 'refused';
+      return;
+    }
+    const room = can.capacity - can.litres;
+    if (room <= FLUID_FULL_EPSILON) {
+      if (pressed) this.sound = 'refused';
+      return;
+    }
+    const want = Math.min(PUMP_RATE * dt, room);
+    const litresPerCoin = 1 / fuelPricePerLitre(machine.km);
+    while (pump.credit < want && spendCoins(this.inventory, 1)) {
+      pump.credit += litresPerCoin;
+      pump.coins += 1;
+    }
+    const poured = Math.min(want, pump.credit);
+    if (poured < want && !pump.dry) {
+      pump.dry = true;
+      this.sound = 'refused';
+    }
+    if (poured <= 0) return;
+    can.litres += poured;
+    pump.credit -= poured;
+    pump.litres += poured;
+    this.continuous = 'pour';
   }
 
   /**

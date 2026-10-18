@@ -2168,10 +2168,16 @@ export function createItemMesh(item: Item): THREE.Object3D {
         itemBlueprint(`tool_${item.tool}${spent ? '_spent' : ''}`, (b) => buildToolInto(b, item.tool, spent)).instructions,
       );
     }
-    case 'fluid_can':
-      return buildGroup(
+    case 'fluid_can': {
+      // One jerrycan shape at every size: a 20 L can is drawn at 0.85 of the shape (it
+      // stood too big against a vending machine's tray), smaller cans by the cube root
+      // of their volume, so a 5 L bottle stands two thirds of a 20 L can's height.
+      const can = buildGroup(
         itemBlueprint(`fluid_${item.fluid}`, (b) => buildFluidCanInto(b, item.fluid)).instructions,
       );
+      can.scale.setScalar(0.85 * Math.cbrt(Math.min(1, Math.max(0.1, item.capacity / 20))));
+      return can;
+    }
     case 'spray_can':
       return buildGroup(
         itemBlueprint(`spray_${item.paint.toString(16)}`, (b) => buildSprayCanInto(b, item.paint)).instructions,

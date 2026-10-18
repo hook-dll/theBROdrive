@@ -33,6 +33,8 @@ export interface VendingMachine {
   readonly z: number;
   /** Yaw of its local frame; the front faces local -Z. */
   readonly yaw: number;
+  /** A FUEL machine: it has a nozzle that fills a held petrol can by the litre. */
+  readonly pump: boolean;
   /**
    * The goods it was stocked with, by slot (`row * VENDING_COLUMNS + column`); null is a
    * slot never filled. A sold slot still holds its item here: `vendingSold` decides.

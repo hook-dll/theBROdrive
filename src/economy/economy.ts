@@ -165,6 +165,15 @@ export function itemPrice(item: Item, km: number): number {
   return Math.max(1, Math.round(base * kmIndex(km)));
 }
 
+/**
+ * What a FUEL machine's nozzle at `km` asks for a litre of petrol: the petrol base price
+ * × the km index, unrounded. The nozzle charges whole coins and pours each coin's worth
+ * (`1 / price` litres), so only the coin is rounded, never the litre.
+ */
+export function fuelPricePerLitre(km: number): number {
+  return PRICE_TABLE.fluidPerLitre.petrol * kmIndex(km);
+}
+
 function itemBasePrice(item: Item): number {
   switch (item.type) {
     case 'fluid_can':

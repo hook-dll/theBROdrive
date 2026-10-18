@@ -61,6 +61,8 @@ export interface InputFrame {
   interact: boolean;
   /** Pick up a loose part/item, or fit/remove a part at the aimed slot: tap, consumed once by interaction. */
   mount: boolean;
+  /** The same key while it is held down: a FUEL machine's nozzle pours while it is. */
+  mountDown: boolean;
   /** Toggle or equip the held handheld item: tap, consumed by the item owner. */
   useHeld: boolean;
   /** The same key while it is held down: a hand-aimed kit part (the inside mirror) turns while it is. */
@@ -123,6 +125,7 @@ export function emptyInput(): InputFrame {
     cabinSave: false,
     interact: false,
     mount: false,
+    mountDown: false,
     useHeld: false,
     useHeldDown: false,
     dropItem: false,
@@ -705,6 +708,7 @@ export class InputReader {
     // aimed at, exactly as the key does.
     f.interact = this.anyPressed(this.keys.interact) || taps?.interact === true || this.padPressed(PAD.X);
     f.mount = this.anyPressed(this.keys.mount) || taps?.mount === true || this.padPressed(PAD.X);
+    f.mountDown = this.anyHeld(this.keys.mount) || pad.buttons[PAD.X] === true;
     f.useHeld =
       this.anyPressed(this.keys.useHeld) || taps?.useHeld === true || this.padPressed(PAD.B);
     f.useHeldDown = this.anyHeld(this.keys.useHeld) || pad.buttons[PAD.B] === true;
