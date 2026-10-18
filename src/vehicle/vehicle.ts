@@ -913,6 +913,10 @@ export class Vehicle implements Rebasable {
   /** The side-force curve: the car's own tyre's, or its profile's. */
   private readonly tyre: TyreCurve;
   private readonly measure: CarModelMeasure;
+  /** The chassis box's half extents (x across, y up, z along the body), metres. */
+  get bodyHalfExtents(): readonly [number, number, number] {
+    return this.measure.halfExtents;
+  }
   /** Axle positions, wheel counts and weight distribution; measured once, in `measureAxles`. */
   private readonly axleGeometry: AxleGeometry;
   /** Where fuel, cargo, the engine bay and the seat are; measured once, in `measureLoadAnchors`. */

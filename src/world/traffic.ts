@@ -15,6 +15,7 @@ import {
   roadPaceCeiling,
   type AutopilotMode,
   type LaybyCourse,
+  LAYBY_PASS_CLEARANCE_M,
 } from '../vehicle/autopilot';
 import type { TrafficField, TrafficNeighbour } from '../vehicle/trafficfield';
 import { TRAFFIC_CAPS, type Settings } from '../game/settings';
@@ -695,8 +696,12 @@ const BYPASS_REACH_M = 150;
 const BYPASS_LEAD_M = 25;
 /** Least road for that move; a car standing closer than this backs `BYPASS_BACK_M` first. */
 const BYPASS_MIN_LEAD_M = 6;
-/** Clearance from its flank to the passing car's, metres. */
-const BYPASS_SIDE_MARGIN_M = 0.7;
+/**
+ * Slack over the lay-by line's own clearance (`LAYBY_PASS_CLEARANCE_M`) the line keeps from
+ * its flank, metres: the driver measures the body from its colliders, rounded edges and all,
+ * and a line built on the bare box sat inside that and stopped the car beside it (a van).
+ */
+const BYPASS_SIDE_MARGIN_M = 0.3;
 /** From its faces to the passing car's ends along the road: fully out before, still out after. */
 const BYPASS_END_MARGIN_M = 1.5;
 /** Road over which the line comes back into the lane. */
@@ -720,10 +725,10 @@ const BYPASS_STALL_S = 3;
 const BYPASS_WAIT_GAP_M = 5;
 /** Still below this, m/s, the obstruction is still there. */
 const BYPASS_STILL_MPS = 1.5;
-/** The player's car in the traffic's sums; its body is not measured here. */
+/** The player's car in the traffic's sums (`setPlayerVehicle` measures its body). */
 const PLAYER_BLOCKER = 'player';
-const PLAYER_HALF_LENGTH_M = 2.2;
-const PLAYER_HALF_WIDTH_M = 0.9;
+/** The player's body before `setPlayerVehicle` has measured it: a saloon. */
+const PLAYER_DEFAULT_HALF_EXTENTS = { across: 0.85, along: 2.2 } as const;
 
 interface BypassBlocker {
   id: string;
@@ -841,6 +846,20 @@ interface TrafficCar {
   bypass: Bypass | null;
   /** The blocker it gave up going round (backed `BYPASS_BACK_LIMIT` times); not offered again. */
   bypassGaveUp: string | null;
+}
+
+/** Half the span of a rotated body box along the horizontal unit axis (`ax`, `az`). */
+function roadHalfSpan(
+  q: { x: number; y: number; z: number; w: number },
+  ax: number,
+  az: number,
+  half: readonly [number, number, number],
+): number {
+  return (
+    Math.abs(ax * (1 - 2 * (q.y * q.y + q.z * q.z)) + az * 2 * (q.x * q.z - q.w * q.y)) * half[0] +
+    Math.abs(ax * 2 * (q.x * q.y - q.w * q.z) + az * 2 * (q.y * q.z + q.w * q.x)) * half[1] +
+    Math.abs(ax * 2 * (q.x * q.z + q.w * q.y) + az * (1 - 2 * (q.x * q.x + q.y * q.y))) * half[2]
+  );
 }
 
 const FORWARD_QUEUE_ORDER = (a: TrafficCar, b: TrafficCar): number =>
@@ -989,6 +1008,11 @@ export class RoadTraffic {
   private playerStoppedFor = 0;
   /** This coordination's standing obstructions (`assignBypasses`), pooled. */
   private readonly blockers: BypassBlocker[] = [];
+  /** The car the player drives, or null on foot; its body is measured every step. */
+  private playerVehicle: Vehicle | null = null;
+  /** Its body's half spans along and across the road (yaw included). */
+  private playerHalfLength: number = PLAYER_DEFAULT_HALF_EXTENTS.along;
+  private playerHalfWidth: number = PLAYER_DEFAULT_HALF_EXTENTS.across;
   /**
    * The player's own lateral and whether he is in a car at all, maintained with
    * `playerS` so the traffic field can carry him. A driver's rearward sensing cannot
@@ -1738,7 +1762,7 @@ export class RoadTraffic {
   private assignBypasses(): void {
     let count = 0;
     if (this.playerDriving && this.playerStoppedFor >= BYPASS_STANDING_S) {
-      this.noteBlocker(count++, PLAYER_BLOCKER, this.playerS, this.playerLateral, PLAYER_HALF_LENGTH_M, PLAYER_HALF_WIDTH_M);
+      this.noteBlocker(count++, PLAYER_BLOCKER, this.playerS, this.playerLateral, this.playerHalfLength, this.playerHalfWidth);
     }
     for (const car of this.carList) {
       if (car.stoppedFor < BYPASS_STANDING_S || car.layby || car.bypass || car.rails || car.turnS >= 0) continue;
@@ -1794,8 +1818,8 @@ export class RoadTraffic {
       const ahead = (this.playerS - car.forwardS) * car.direction;
       if (
         ahead > 0 &&
-        ahead < car.roadHalfLength + PLAYER_HALF_LENGTH_M + BYPASS_QUEUE_GAP_M &&
-        Math.abs(this.playerLateral - car.roadLateral) < car.roadHalfWidth + PLAYER_HALF_WIDTH_M
+        ahead < car.roadHalfLength + this.playerHalfLength + BYPASS_QUEUE_GAP_M &&
+        Math.abs(this.playerLateral - car.roadLateral) < car.roadHalfWidth + this.playerHalfWidth
       ) {
         return true;
       }
@@ -1816,8 +1840,8 @@ export class RoadTraffic {
       const behind = (car.forwardS - this.playerS) * car.direction;
       if (
         behind > 0 &&
-        behind < reach + PLAYER_HALF_LENGTH_M &&
-        Math.abs(this.playerLateral - car.roadLateral) < car.roadHalfWidth + PLAYER_HALF_WIDTH_M
+        behind < reach + this.playerHalfLength &&
+        Math.abs(this.playerLateral - car.roadLateral) < car.roadHalfWidth + this.playerHalfWidth
       ) {
         return false;
       }
@@ -1855,7 +1879,10 @@ export class RoadTraffic {
     const side = Math.sign(this.forwardLaneCentreAt(blocker.s, direction, 0)) || direction;
     const ownHalf = car.halfExtents[0];
     const laneAbs = Math.abs(this.forwardLaneCentreAt(blocker.s, direction, lane));
-    const offAbs = Math.max(laneAbs, blocker.lateral * side + blocker.halfAcross + BYPASS_SIDE_MARGIN_M + ownHalf);
+    const offAbs = Math.max(
+      laneAbs,
+      blocker.lateral * side + blocker.halfAcross + LAYBY_PASS_CLEARANCE_M + BYPASS_SIDE_MARGIN_M,
+    );
     if (offAbs + ownHalf > this.road.halfWidthAt(blocker.s) + SHOULDER_WIDTH_M + BYPASS_PAST_STRIP_M) return;
     const fullU = -(car.roadHalfLength + BYPASS_END_MARGIN_M);
     let startU = fullU - BYPASS_LEAD_M;
@@ -2251,6 +2278,15 @@ export class RoadTraffic {
     this.pedestrianZ = z;
   }
 
+  /**
+   * The car the player is driving, so a standing one is gone round with its real body:
+   * a van is a metre longer and 0.15 m wider each side than a saloon, and a line built
+   * for a saloon put the passing car's nose against its flank.
+   */
+  setPlayerVehicle(vehicle: Vehicle | null): void {
+    this.playerVehicle = vehicle;
+  }
+
   /** A seated player is already represented by the driven vehicle's chassis. */
   clearPedestrianObstacle(): void {
     this.pedestrianActive = false;
@@ -2300,6 +2336,13 @@ export class RoadTraffic {
     this.playerDriving = this.sourceWorld.state.player.drivingCarId !== null;
     this.playerS = playerS;
     this.playerStoppedFor = this.playerDriving && Math.abs(this.playerSpeed) < BYPASS_STILL_MPS ? this.playerStoppedFor + dt : 0;
+    if (this.playerVehicle) {
+      const heading = this.road.headingAt(playerS);
+      const q = this.playerVehicle.chassis.rotation();
+      const half = this.playerVehicle.bodyHalfExtents;
+      this.playerHalfWidth = roadHalfSpan(q, Math.cos(heading), -Math.sin(heading), half);
+      this.playerHalfLength = roadHalfSpan(q, Math.sin(heading), Math.cos(heading), half);
+    }
     if (this.pedestrianActive) {
       const dx = this.pedestrianX - this.pedestrianPreviousX;
       const dz = this.pedestrianZ - this.pedestrianPreviousZ;
@@ -2357,19 +2400,8 @@ export class RoadTraffic {
         continue;
       }
       const q = car.vehicle.chassis.rotation();
-      const rightX = Math.cos(heading);
-      const rightZ = -Math.sin(heading);
-      // Project each rotated chassis-box axis onto the road's lateral axis.
-      car.roadHalfWidth =
-        Math.abs(rightX * (1 - 2 * (q.y * q.y + q.z * q.z)) + rightZ * 2 * (q.x * q.z - q.w * q.y)) * half[0] +
-        Math.abs(rightX * 2 * (q.x * q.y - q.w * q.z) + rightZ * 2 * (q.y * q.z + q.w * q.x)) * half[1] +
-        Math.abs(rightX * 2 * (q.x * q.z + q.w * q.y) + rightZ * (1 - 2 * (q.x * q.x + q.y * q.y))) * half[2];
-      const forwardX = Math.sin(heading);
-      const forwardZ = Math.cos(heading);
-      car.roadHalfLength =
-        Math.abs(forwardX * (1 - 2 * (q.y * q.y + q.z * q.z)) + forwardZ * 2 * (q.x * q.z - q.w * q.y)) * half[0] +
-        Math.abs(forwardX * 2 * (q.x * q.y - q.w * q.z) + forwardZ * 2 * (q.y * q.z + q.w * q.x)) * half[1] +
-        Math.abs(forwardX * 2 * (q.x * q.z + q.w * q.y) + forwardZ * (1 - 2 * (q.x * q.x + q.y * q.y))) * half[2];
+      car.roadHalfWidth = roadHalfSpan(q, Math.cos(heading), -Math.sin(heading), half);
+      car.roadHalfLength = roadHalfSpan(q, Math.sin(heading), Math.cos(heading), half);
       car.forwardSpeed =
         velocity.x * Math.sin(heading) + velocity.z * Math.cos(heading);
     }

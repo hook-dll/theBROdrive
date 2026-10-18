@@ -1622,6 +1622,7 @@ async function boot(): Promise<void> {
       traffic.clearPedestrianObstacle();
     }
     playerFieldSeat.forwardS = activeS;
+    traffic.setPlayerVehicle(driving);
     frameProfiler?.begin('traffic');
     traffic.fixedUpdate(dt, activeS, activeLateral, origin.x, origin.z);
     race.fixedUpdate(dt, activeS);

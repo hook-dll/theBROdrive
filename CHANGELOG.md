@@ -1651,6 +1651,18 @@
   near the queue (up to 11.9 m) and 11 contacts, from the driver's own recovery rather than
   the route; queue max 4, no standstill.
 
+- THE QUEUE BEHIND A STANDING VAN NO LONGER STOPS BESIDE IT (world/traffic.ts
+  `setPlayerVehicle`, `roadHalfSpan`; vehicle/autopilot.ts `LAYBY_PASS_CLEARANCE_M`). Reported
+  from play: behind the player's UAZ van half the stream went round and the rest stood still
+  on the shoulder. The route's line was built 1.5 m off the flank of a body taken as a saloon
+  (the player's car was never measured), while the driver counts anything nearer than its
+  own 1.45 m clearance to the collider's flank as on its line: beside the van the head saw it
+  1.4 m inside its bumper and stood, and nothing let it go. Now the player's car is measured
+  every step like any traffic car (yaw included), and the line keeps the driver's own
+  clearance plus 0.3 m. `tools/traffic-blocker.ts --ego kit_uaz2206`, seed 1337, 3 min: before
+  0 cars past against 7 a minute arriving, 24 standing; after 17.0 against 17.3, none standing,
+  body centre at most 1.52 m past the asphalt.
+
 - UAZ-2206: THE ENGINE BAY UNDER THE CABIN COVER, ITS GRID ON IT AND REACHED FROM THE SIDE
   DOOR (carkit bay.ts `BayRoom`, interior.ts `engineCover`; player/interaction.ts
   `cabinLidOpen`). The lifted cover showed a dark block, and the bonnet grid hung 0.36 m

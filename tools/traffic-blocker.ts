@@ -90,7 +90,10 @@ const TRACE_HEAD = args.includes('--trace-head');
  * the first clear point at or past `--start` with that many lanes 400 m either side.
  */
 const LANES = flag('lanes', 1);
-const EGO_MODEL = 'sv_vaz2105r';
+// `--ego kit_uaz2206` stands a van there instead (owner, 2026-10-18: the queue behind his
+// van stood still beside it).
+const EGO_AT = args.indexOf('--ego');
+const EGO_MODEL = EGO_AT >= 0 && args[EGO_AT + 1] ? args[EGO_AT + 1]! : 'sv_vaz2105r';
 const BODY_LENGTH_M = 4.4;
 const STOPPED_KMH = 2;
 const QUEUE_REACH_M = 300;
@@ -517,6 +520,7 @@ function measure(): void {
 let ticks = 0;
 async function tick(): Promise<void> {
   pinDensity();
+  traffic.setPlayerVehicle(ego);
   traffic.fixedUpdate(FIXED_DT, egoS, egoLateral, 0, 0);
   ego.fixedUpdate(FIXED_DT, egoInput);
   physics.step();

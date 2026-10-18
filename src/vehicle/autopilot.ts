@@ -1036,6 +1036,11 @@ const LAYBY_LOOKAHEAD_MAX_M = 24;
 const LAYBY_AIM_STEP_M = 0.5;
 const LAYBY_LOOK_M = 60;
 const LAYBY_LINE_CLEARANCE_M = 0.4;
+/**
+ * Line to a body's flank under which a lay-by line counts that body as on it
+ * (`noteLaybyObstacle`). A line built to pass something stays outside it.
+ */
+export const LAYBY_PASS_CLEARANCE_M = CAR_HALF_WIDTH_M + LAYBY_LINE_CLEARANCE_M;
 const LAYBY_OWN_HALF_LENGTH_M = 2.3;
 const LAYBY_STANDOFF_M = 2.5;
 const LAYBY_DECEL_MPS2 = 2.5;
