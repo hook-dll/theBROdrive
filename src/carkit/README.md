@@ -113,6 +113,7 @@ from the angle he complained about; changes are judged there, not in code.
 | `volgas.ts` | The Volgas: `BODY_GAZ24` / `LOOK_GAZ24` (platform `classic`) and the GAZ-31029 on the 24's doors and greenhouse with its own nose and tail. |
 | `azlk.ts` | The AZLK-2141 Moskvich: `BODY_2141` / `LOOK_2141` (platform `samara`). |
 | `daewoo.ts` | The Daewoo Nexia (N100 saloon) and Espero (KLEJ saloon): `BODY_NEXIA` / `LOOK_NEXIA`, `BODY_ESPERO` / `LOOK_ESPERO` (platform `samara`). |
+| `opel.ts` | The Opel Astra F (five-door hatch): `BODY_ASTRA_F` / `LOOK_ASTRA_F` (platform `samara`). |
 | `measurements-classics.md`, `measurements-estates.md`, `measurements-samara.md`, `measurements-2110.md`, `measurements-niva.md`, `measurements-oka.md`, `measurements-volga.md`, `measurements-2141.md`, `measurements-nexia.md` | Measurement reports: every figure with its drawing or photo, scale and tag. |
 | `builder.ts` | `PartBuilder`: flat triangles per material slot, transform stack, primitives (`box`, `bevelBox`, `extrude`, `cylinderX/Y/Z`, `torusY`, `bridge`, `poly`), vertex colours. |
 | `body.ts` | `BodyFrame` (cross-section, deck and lid lookups) and `buildShell`: tub, greenhouse and roof as one face list, then cut into parts. Shell constants (`SHUT_GAP`, `JAMB_DEPTH`, `DOOR_THICKNESS`, `NOTCH_WALL`, …). |
@@ -373,6 +374,7 @@ cabin: … }`) share everything not overridden. Current families:
 | `BODY_2141` | the-blueprints.com "Moskvich 2141 (1986-2001)" drawing (`azlk.ts`) | AZLK-2141 |
 | `BODY_NEXIA` | 3dcar.ru `daewoo_nexia.jpg` dimensioned four-view (`daewoo.ts`) | Daewoo Nexia |
 | `BODY_ESPERO` | the-blueprints.com dimensioned vector preview `daewoo_espero_1995.jpg` (`daewoo.ts`) | Daewoo Espero |
+| `BODY_ASTRA_F` | the-blueprints.com dimensioned vector preview `2001_opel_astra_f_5-door.jpg` (`opel.ts`) | Opel Astra F |
 
 ### Look (`KitLook`)
 
@@ -387,7 +389,7 @@ cabin: … }`) share everything not overridden. Current families:
 | `mirrors?` | `'left'`: only the driver's door mirror (the base Oka). Absent: both. |
 | `mirrorStalk?` | Door mirrors on an upright stalk (the UAZ-469): the head this much higher than on the short arm at the door's top (centre belt + 0.08) and 3.5 cm further back, on a rod 2 cm off the skin from a bracket under the belt at the door's front edge, an arm out and back into the head's ball. Absent: the short arm. |
 | `sill` | `Finish` of a strip along the sill between the arches, or `null`. |
-| `waist` | `{ y, height, finish }`: a moulding along the flank, broken at the shut lines (each piece riding on its door) and stopping `MOULDING_ARCH_GAP` (30 mm) short of a wheel arch it would run into (the 2115's low door mouldings; the classics' strips sit above their arches and are not cut); or `null`. |
+| `waist` | `{ y, height, finish, span? }`: a moulding along the flank (from `span[0]` to `span[1]` when given, the Opels' strips along the doors only; else nose to tail), broken at the shut lines (each piece riding on its door) and stopping `MOULDING_ARCH_GAP` (30 mm) short of a wheel arch it would run into (the 2115's low door mouldings; the classics' strips sit above their arches and are not cut); or `null`. |
 | `repeater` | `{ s0, s1, y0, y1 }`: the amber side repeater on each front wing, or `null`. |
 | `spoiler?` | `SpoilerLook`: a body-colour wing with the high brake lamp, hung on the boot lid (2115) or the tailgate (2112, standing on its glass between the knee and the roof) so it lifts with it (exterior.ts `buildSpoiler`). Fields: `half` (half span), `plate` (end-plate width), `s0`/`s1` (wing leading/trailing edge, car frame like `repeater`), `top0`/`top1` (its top at each), `thickness`, `foot` (`s` where the end plates meet the lid), `pedestal: { half, s0, s1 }` (under the wing's middle), `lamp: { half, y0, y1 }` (the brake lens on the pedestal's back). The lens is a `lamp_brake` mesh, so it lights with every other brake lamp. Given before `rearLean`, which carries it with the tailgate. |
 | `cornerLamps?` | `CornerLamp[]`: a lamp unit lying flush on the body (4 mm off it) from its inner end on an end face round the corner and along the flank (exterior.ts `buildCornerLamps`, laid on the skin as built, body.ts `skinX`). `end`: `'front'` (default) or `'rear'`. `points`: `{ x }` on the face (half width, or `[bottom, top]` for a leaning edge), `{ s }` on the flank (car frame), or neither for the corner itself; `y: [bottom, top]` there; the stretch after a point is a lens in its `role`'s slot. The lens is flat wherever the skin under it is: along the flank it bends only at the tub's columns (`tubColumns`), and across its height only where the crease or belt runs through it (the tens' front indicator); elsewhere each stretch is one flat piece. Stacked lamps (an indicator over a tail lamp) are separate units. Keep a unit below the end station's belt so it stays on the flat face and side (the shoulder above it is the corner's straight cut). The 2115's and 2110's head lamps and indicators (solid amber) and their tail lamps. |
@@ -473,7 +475,9 @@ tachometer left and two small dials right, end vents, two centre vents over thre
 knobs), `CABIN_ESPERO` (an angular hood over three dials of one size, the tachometer,
 speedometer and a fuel dial with the temperature scale on its face, switch pods either side
 of the hood, two vents over three heater knobs on a black stack, a big glovebox high, a
-four-spoke wheel; its bench 3 cm off the wheel-house covers); the Samaras and the AZLK-2141 use the `samara` platform's layout as is, the 2121
+four-spoke wheel; its bench 3 cm off the wheel-house covers), `CABIN_ASTRA_F` (a rounded
+hood over the tachometer, a big speedometer and two small dials, end vents, a centre vent
+pair with the hazard switch between, the radio over three heater knobs, a four-spoke wheel); the Samaras and the AZLK-2141 use the `samara` platform's layout as is, the 2121
 the `niva` platform's.
 
 ## Scene contract
@@ -720,7 +724,7 @@ Working files (crops, grids, overlays) go in `/tmp/<family>/`; only the report i
   `round`), `bonnet` (and its `nose`, with front `lid` items), `cornerLamps`,
   `featureLine`, moulded `corner` and `wrapTo`, the centre-line lens, the dash's `heater`
   and vent `half`, rear `cornerLamps` (`end`), `frontLean` (and its `full`), moulded
-  `flush`, `screenFoot`, column `drop`, the spoiler on a tailgate, column `finish`.
+  `flush`, `screenFoot`, column `drop`, the spoiler on a tailgate, column `finish`, waist `span`.
 - Register it in `KIT_SPECS` (specs.ts): `vaz2110: { id: 'vaz2110', ...BODY_2110, look:
   LOOK_2110, cabinLayout: CABIN_2110 }` (via `onBody` if the family frame differs).
 
@@ -908,6 +912,7 @@ within `KIT_FINE_M`; "Far" = everything except the four detail groups.
 | AZLK-2141 | 12 131 | 5 243 | 4 411 | 1 751 | 617 | 60 | 456 | 1 344 | 6 587 |
 | Nexia | 13 472 | 6 072 | 4 909 | 1 761 | 639 | 52 | 456 | 1 344 | 7 416 |
 | Espero | 14 389 | – | – | – | – | – | – | 1 344 | – |
+| Astra F | 13 578 | – | – | – | – | – | – | 1 344 | – |
 
 The owner set the budget aside for the 2110 and 2112 (the rounded rear shut line adds side
 rows to every tub column).

@@ -911,7 +911,8 @@ function buildWaist(ctx: KitContext, body: PartBuilder): void {
   const waist = spec.look.waist;
   if (!waist) return;
   const st = spec.stations;
-  buildFlankStrip(ctx, body, { yAt: () => waist.y, height: waist.height, ...finishSlot(waist.finish), out: 0.008, first: st[0]!.s + 0.02, last: st[st.length - 1]!.s - 0.02, name: 'waist' });
+  const [first, last] = waist.span ?? [st[0]!.s + 0.02, st[st.length - 1]!.s - 0.02];
+  buildFlankStrip(ctx, body, { yAt: () => waist.y, height: waist.height, ...finishSlot(waist.finish), out: 0.008, first, last, name: 'waist' });
 }
 
 /** How far a feature line's ridge stands off the side. */

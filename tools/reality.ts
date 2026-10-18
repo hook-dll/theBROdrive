@@ -541,7 +541,16 @@ const TARGETS: Readonly<Record<string, Target>> = {
     // The catalogue's 10.8 s stands with its 185 km/h on the bench as the Nexia's 12.5 s does
     // (+22%): the same optimistic catalogue figure on the same F16 box and 3.944 axle.
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.181 },
+  },  kit_astraf: {
+    wheelbase: 2.517, track: 1.43, radius: 0.288, top: 170, to100: 14.0,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.25, lat: null, hz: 1.3,
+    brake80: null, grossKg: 1495,
+    source: 'Opel Astra F 1.6i (C16NZ) five-door: auto-data.net Opel Astra F 1.6i (75 Hp) (170 km/h, 14.0 s, 10.5 m circle between walls, gross 1495); no braking ceiling found; geometry kit_astraf row',
+    // The C16NZ's 55 kW on 1160 kg: the catalogue's 14.0 s stands with its 170 km/h as the
+    // Nexia's and Espero's do (the same Family I / F13-F16 driveline, +22 % and +18 %).
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.11 },
   },
+
 };
 
 /*
@@ -594,6 +603,7 @@ const FACTORY_ENGINES: Readonly<Record<string, MakerEngine>> = {
   engine_niva_1700: { power: { kw: 58 }, powerRpm: 5200, torque: { nm: 127 }, torqueRpm: 3000, source: 'VAZ-21213, GOST 14846-81; 21213 manual (lada-niva.ru)' },
   engine_daewoo_g15mf: { power: { kw: 55 }, powerRpm: 5400, torque: { nm: 123 }, torqueRpm: [3200, 3400], source: 'Daewoo G15MF; Nexia repair manual table (3ruk.ru, remkomplekt.org)' },
   engine_daewoo_c20le: { power: { kw: 77 }, powerRpm: 5000, torque: { nm: 169 }, torqueRpm: 2800, source: 'Daewoo C20LE; drom.ru catalog/daewoo/espero/70454' },
+  engine_opel_c16nz: { power: { kw: 55 }, powerRpm: 5200, torque: { nm: 125 }, torqueRpm: 2800, source: 'Opel C16NZ; auto-data.net Opel Astra F 1.6i (75 Hp), ultimatespecs' },
   // Not a catalogue engine: the rally 2105's own build, held to the build's figures.
   engine_lada_rally: { power: { ps: 100 }, powerRpm: 6400, torque: { nm: 132 }, torqueRpm: 4200, source: 'pack rally build targets, not factory' },
 };

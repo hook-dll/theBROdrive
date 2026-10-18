@@ -4,6 +4,19 @@
 
 ### Added
 
+- OPEL ASTRA F kit car (`src/carkit/opel.ts` `BODY_ASTRA_F`, `LOOK_ASTRA_F`;
+  `interior.ts` `CABIN_ASTRA_F`; measured in `measurements-astra.md`). It is the five-door
+  hatchback 1.6i GL with the 1994 facelift's face and tail, sold in Russia 1994–1998. It
+  is built from the-blueprints.com's dimensioned vector preview (4050 / 2517 / 1696 /
+  1410) and Commons photos: black slatted grille between rectangular head lamps, dark grey
+  bumpers, black door frames, B pillar and mirror sail, a fixed quarter glass, and a black
+  panel across the tailgate between the corner lamps. Its dash comes from a cockpit
+  panorama. It runs on its own running gear (`GEAR_OPEL_ASTRA_F`): 1010 kg, 175/70 R13,
+  a new `engine_opel_c16nz` (55 kW, 125 Nm) and a new `gearbox_opel_f13_wr` (3.55 …
+  0.71 on 3.94). `tools/reality.ts kit_astraf` gives 170 km/h against 170 and the turn
+  within 0.5 %; the 0-100 of 15.5 s against 14.0 s is accepted as catalogue-optimistic.
+  `kit-zfight` and `kit-proportions` pass. 13 578 triangles. A waist moulding may now
+  run over part of the flank (`KitLook.waist.span`; absent, nose to tail as before).
 - DAEWOO ESPERO kit car (`src/carkit/daewoo.ts` `BODY_ESPERO`, `LOOK_ESPERO`;
   `interior.ts` `CABIN_ESPERO`; measured in `measurements-espero.md`).
   The 2.0 CD saloon of 1995–1999 that drom.ru catalogues for Russia, from the-blueprints.com's

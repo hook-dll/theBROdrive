@@ -864,6 +864,12 @@ const AERO_DAEWOO_NEXIA: AeroSpec = { frontalArea: 1.89, liftFront: 0.09, liftRe
  * (1.388 − 0.15) m × 0.92.
  */
 const AERO_DAEWOO_ESPERO: AeroSpec = { frontalArea: 1.96, liftFront: 0.09, liftRear: 0.21, sideSlope: 1.35, yawSlope: 0.47 };
+/**
+ * Opel Astra F five-door: Cd 0.32 (auto-data.net). The Samara hatches' lift and crosswind
+ * figures (a wedge nose, a hatch lifting the rear) on its own frontal area, 1.688 m ×
+ * (1.41 − 0.135) m × 0.92.
+ */
+const AERO_OPEL_ASTRA_F: AeroSpec = { frontalArea: 1.98, liftFront: 0.08, liftRear: 0.26, sideSlope: 1.25, yawSlope: 0.5 };
 
 
 
@@ -1175,6 +1181,10 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   // clearance, 185/65 R14 (drom.ru catalog/daewoo/espero/70454; the-blueprints.com drawing's
   // dimension lines 4615 / 2620 / 1718 / 1388). src/carkit/measurements-espero.md.
   kit_espero:     { length: 4.615, width: 1.718, height: 1.388, clearance: 0.150, wheelbase: 2.620, frontTrack: 1.426, rearTrack: 1.406, wheelRadius: 0.298, tyreWidth: 0.185 },
+  // The Opel Astra F five-door 1.6i: 4051 × 1688 × 1410, 2517 wheelbase, 1430/1429 tracks,
+  // 135 clearance, 175/70 R13 (auto-data.net "Opel Astra F 1.6i (75 Hp)"; the-blueprints.com
+  // drawing's dimension lines 4050 / 2517 / 1696 / 1410). src/carkit/measurements-astra.md.
+  kit_astraf:     { length: 4.051, width: 1.688, height: 1.41, clearance: 0.135, wheelbase: 2.517, frontTrack: 1.43, rearTrack: 1.429, wheelRadius: 0.288, tyreWidth: 0.175 },
 };
 
 function factoryGeometry(id: string): FactoryGeometry {
@@ -2595,6 +2605,32 @@ const GEAR_DAEWOO_ESPERO: KitOwnGear = {
   aero: AERO_DAEWOO_ESPERO,
 };
 
+/**
+ * Opel Astra F 1.6i GL five-door (C16NZ, the F13 WR five-speed on 3.94): kerb 1010 kg (auto-
+ * data.net prints 990 / 1010, the five-door the heavier [E]), gross 1495, 170 km/h, 0-100 in
+ * 14.0 s, a 10.5 m turning circle between walls, 175/70 R13, a 52 l tank [E: the Astra F's
+ * common figure], power steering, front discs and rear drums, struts and a twist beam (the
+ * Samara's layout and preset). Axle split 0.62 [E]; Cd 0.32 (auto-data), Cd·A set on the
+ * bench to the 170 km/h.
+ */
+const GEAR_OPEL_ASTRA_F: KitOwnGear = {
+  bodyClass: 'car',
+  mass: 1010,
+  tyre: KAMA_217,
+  engineId: 'engine_opel_c16nz',
+  gearboxId: 'gearbox_opel_f13_wr',
+  tankLitres: 52,
+  wheelGrip: KAMA_217_GRIP,
+  brakeDecelG: BRAKES_SERVO_G,
+  suspension: SUSP_SAMARA,
+  steerLock: 0.6,
+  rearDriveBias: 0,
+  handlingProfile: 'road',
+  frontWeightShare: 0.62,
+  dragArea: 0.65,
+  aero: AERO_OPEL_ASTRA_F,
+};
+
 /** A kit car on its catalogue sibling's running gear (`gear` over it where it differs), or on its own. */
 type KitCarRow =
   | readonly [id: string, sibling: string, kit: string, label?: string, gear?: KitRunningGear]
@@ -2646,6 +2682,7 @@ const KIT_CARS: readonly Entry[] = (
     // The foreign cars: no catalogue body to borrow from.
     ['kit_nexia', GEAR_DAEWOO_NEXIA, 'nexia', 'Daewoo Nexia'],
     ['kit_espero', GEAR_DAEWOO_ESPERO, 'espero', 'Daewoo Espero'],
+    ['kit_astraf', GEAR_OPEL_ASTRA_F, 'astraf', 'Opel Astra F'],
   ] satisfies readonly KitCarRow[]
 ).map(([id, source, kit, label, gear]) => {
   const base = kitBase(id, source, kit, label);

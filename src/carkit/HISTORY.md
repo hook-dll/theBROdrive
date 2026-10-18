@@ -923,6 +923,18 @@ amplified differences; `bench-*.json`, `pick-*.json`).
   eye node (`kit_driver_eye`, 1.195 high); `kit-zfight` passes. *interior.ts
   `CABIN_NEXIA`*.
 
+## Opel Astra F (2026-10-18)
+
+- **The rubbing strip fought the front wing and the indicators.** → The waist runs nose to
+  tail in straight 0.3 m pieces. The drawing's plan (the bumper's outline) rounded the
+  wing so hard that the wing bulged 2–3 cm through the strip's chord. The strip also
+  crossed the indicators where they wrap onto the wing. The real strip is on the doors
+  only. → `KitLook.waist.span` (absent: nose to tail, every other car identical), the
+  Astra's strip 1.25–3.2, and the wings above the bumper drawn straighter behind the
+  corner. *spec.ts, exterior.ts `buildWaist`; opel.ts*.
+- **The hatch's tail bands fought from the load space** (as the Oka's): 6 mm of body
+  between them. *opel.ts `LOOK_ASTRA_F.cornerLamps`*.
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent

@@ -1323,9 +1323,52 @@ const FOREIGN_ENGINE_VARIANTS: readonly PartVariant[] = [
       cylinders: 4,
     },
   },
+  {
+    // Opel C16NZ, the Astra F 1.6i's (GM Family I, 79 x 81.5 mm, 1.598 l, SOHC eight valves,
+    // single-point Multec injection, catalyst): 55 kW (75 hp) at 5200 and 125 Nm at 2800
+    // (auto-data.net "Opel Astra F 1.6i (75 Hp)", ultimatespecs; the 1996 X16SZR that
+    // followed it is rated the same, 128 Nm). Red line not printed: [E] 5800, the Nexia's
+    // rule. Mass [E]: the G15MF's iron block, a little larger.
+    id: 'engine_opel_c16nz',
+    kind: 'engine',
+    label: '1.6 Opel C16NZ four',
+    mass: 120,
+    fits: ['car'],
+    engine: {
+      peakPowerKw: 55,
+      powerPeakRpm: 5200,
+      peakTorqueNm: 125,
+      torquePeakRpm: 2800,
+      redlineRpm: 5800,
+      idleRpm: 850,
+      bsfc: 0.3,
+      brakingCoeff: 0.0203,
+      cylinders: 4,
+    },
+  },
 ];
 
 const FOREIGN_GEARBOX_VARIANTS: readonly PartVariant[] = [
+  {
+    // The Astra F 1.6's five-speed, Opel F13 WR (wide ratios): 3.55 / 1.96 / 1.30 / 0.89 /
+    // 0.71, reverse 3.31, on the 3.94 final drive (opel-motor.ru "Коробка передач на Опель
+    // F13", the five-speed table; forum.opel-club.ru "КПП на Астре": C16NZ with F13/5 WR,
+    // final drives 4.18 / 3.94 / 3.74, from mid-1996 fourth and fifth 0.95 / 0.761). Final
+    // drive in the casing: 0.92, as the Samara transaxle. Mass [E: the Nexia box's].
+    id: 'gearbox_opel_f13_wr',
+    kind: 'gearbox',
+    label: 'Opel F13 WR five-speed',
+    mass: 45,
+    fits: ['car'],
+    gearbox: {
+      ratios: [3.55, 1.96, 1.3, 0.89, 0.71],
+      reverse: 3.31,
+      finalDrive: 3.94,
+      shiftTime: 0.36,
+      automatic: false,
+      efficiency: 0.92,
+    },
+  },
   {
     // The Nexia's five-speed (GM/Opel F16 family): 3.545 / 1.952 / 1.276 / 0.892 / 0.707,
     // reverse 3.333, on the G15MF's 3.944 final drive (the repair manual's table,

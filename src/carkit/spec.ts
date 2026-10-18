@@ -350,7 +350,13 @@ export interface KitLook {
    * A strip along the flank at `y`, nose to tail, broken at the shut lines and where it
    * meets a wheel arch; or none.
    */
-  readonly waist: { readonly y: number; readonly height: number; readonly finish: Finish } | null;
+  readonly waist: {
+    readonly y: number;
+    readonly height: number;
+    readonly finish: Finish;
+    /** Where it starts and ends along the car, when not nose to tail (the Opels' strips run along the doors only). */
+    readonly span?: readonly [s0: number, s1: number];
+  } | null;
   /** The amber side repeater on each front wing (s and y ranges), or none. */
   readonly repeater: { readonly s0: number; readonly s1: number; readonly y0: number; readonly y1: number } | null;
   /** A body-colour wing on the boot lid or tailgate with the high brake lamp, or none. */

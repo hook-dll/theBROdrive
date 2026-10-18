@@ -989,6 +989,57 @@ export const CABIN_ESPERO: CabinLayoutOverride = {
   visor: { half: 0.16, depth: 0.1 },
 };
 
+// The Opel Astra F's dash, read off Wikimedia Commons "Opel Astra F cockpit.jpg" (a
+// panorama from the rear seats' middle, 1920 x 599 at the size read). Scale [E]: the wheel's
+// hub (x 567) to the stack's centre line (x 1007), 440 px, is the Samara's seat line 0.36,
+// so 0.82 mm/px at the fascia; the panorama bends the dash's ends, so their places are
+// taken from the stack outwards. Heights as the Nexia's, from the Samara's cluster [E].
+
+/**
+ * Opel Astra F: a moulded dark grey dash; a rounded hood over the tachometer, a big
+ * speedometer and the temperature and fuel dials stacked on the right; slatted vents at the
+ * dash's ends and a pair side by side at the stack's top with the hazard switch between
+ * them; a storage slot, the radio and three heater knobs down the stack; the light switch
+ * on the fascia left of the column; a glovebox before the passenger; a four-spoke wheel
+ * round a wide pad.
+ */
+export const CABIN_ASTRA_F: CabinLayoutOverride = {
+  binnacle: [[0.25, -0.025], [0.29, 0.07], [0.42, 0.09], [0.49, 0.08], [0.5, 0.065], [0.472, 0.06], [0.472, -0.035], [0.4, -0.03]],
+  binnacleHalf: 0.2,
+  clusterFace: { right: 0, up: 0.012, half: [0.165, 0.05], colour: COLOURS.cluster, frame: 'black' },
+  // The tachometer (x 540) left of the big speedometer (x 655), the temperature and fuel
+  // dials stacked at x 755 [P].
+  gauges: [
+    { channel: 'rpm', right: -0.095, up: 0.012, radius: 0.034, full: 7000, ...BIG },
+    { channel: 'speed', right: 0, up: 0.012, radius: 0.045, full: 220, ...BIG },
+    { channel: 'temp', right: 0.095, up: 0.03, radius: 0.016, ...SMALL },
+    { channel: 'fuel', right: 0.095, up: -0.01, radius: 0.016, ...SMALL },
+  ],
+  lamps: { right: 0, up: 0.058, cols: 7, pitch: 0.0145, show: ['turn', 'side', 'beam', 'fuel', 'oil', 'charge', 'brake'] },
+  // End vents x 310–420 and 1520–1625; the centre pair x 875–990 and 1030–1140, each about
+  // 0.09 x 0.05, over the stack [P].
+  vents: [
+    { x: 0.6, dy: -0.06, half: [0.045, 0.028] },
+    { x: -0.6, dy: -0.06, half: [0.045, 0.028] },
+    { x: 0.06, dy: -0.085, half: [0.045, 0.025] },
+    { x: -0.06, dy: -0.085, half: [0.045, 0.025] },
+  ],
+  // The hazard switch between the centre vents [P: red, x 1010].
+  hazard: [0, -0.085],
+  // The radio under the storage slot, the three heater knobs at the stack's foot, 78 px
+  // (0.064) apart [P].
+  radio: [0, -0.2],
+  heater: { dy: -0.27, half: [0.105, 0.03], knobs: [-0.064, 0, 0.064], radius: 0.02 },
+  ashtray: [0, -0.33],
+  stack: { half: 0.11 },
+  // A rotary switch on the fascia left of the column [P x 330, under the end vent].
+  lights: { right: -0.21, dy: -0.11, kind: 'knob' },
+  // x 1220–1610, y 275–400: a wide lid level with the radio [P].
+  glovebox: { x: -0.39, dy: -0.15, half: [0.16, 0.05] },
+  // Four spokes round a wide pad (the airbag's) [P].
+  wheel: { ...LAYOUTS.samara.wheel, spokes: [20, 160, -60, 240] },
+};
+
 // The VAZ-1111 «Ока» of 1988-1996 on the Samara's furniture, read off these sources:
 //  - Wikimedia Commons "Oka-Innenraum.jpg" (CC BY 4.0; an early car, 4288 x 2848): the
 //    dash from the driver's door, cluster, switches, heater sliders, wheel, lever.
