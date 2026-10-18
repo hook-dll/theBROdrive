@@ -42,10 +42,11 @@ import { installAssetShim } from './assetshim';
 import { installDocumentShim } from './domshim';
 import { createCarModel, preloadCarModels } from '../src/render/carmodel';
 import { carPaintGrimeFrame } from '../src/render/materials';
+import { KIT_SPECS } from '../src/carkit/specs';
 import {
-  CAR_MODELS,
   NEUTRAL_DUST_FLOW,
   carModel,
+  hasCarModel,
   modelDustFlow,
   type CarDustFlow,
   type CarModelDef,
@@ -84,7 +85,11 @@ function deriveDustFlow(def: CarModelDef): CarDustFlow {
   };
 }
 
-const kitDefs = CAR_MODELS.filter((def) => def.kit !== undefined);
+/** Every kit car the catalogue resolves: the world's and those in no list (the police UAZ). */
+const kitDefs = Object.keys(KIT_SPECS)
+  .map((kit) => `kit_${kit}`)
+  .filter(hasCarModel)
+  .map(carModel);
 const fits = JSON.parse(readFileSync(FITS_PATH, 'utf8')) as Record<string, Record<string, unknown>>;
 
 if (process.argv.includes('--write')) {
@@ -193,7 +198,7 @@ const flowA = carModel(KIT_A).fit.dustFlow!;
 const flowB = carModel(KIT_B).fit.dustFlow!;
 check(
   'two kit cars with different flows share one paint program',
-  programKeys.size === 1 && programKeys.has('car-body-condition-v3-kit-v2') && KEYS.some((k) => flowA[k] !== flowB[k]),
+  programKeys.size === 1 && programKeys.has('car-body-condition-v3-kit-v3') && KEYS.some((k) => flowA[k] !== flowB[k]),
   [...programKeys].join(' / '),
 );
 

@@ -978,6 +978,29 @@ amplified differences; `bench-*.json`, `pick-*.json`).
 - **The lid's black panel ended 8 mm over the lid's foot and its bottom fought the lid's
   edge.** → It ends 16 mm over it, inside the notch. *opel.ts*.
 
+## Police UAZ-469 (2026-10-18)
+
+- **The police car: the UAZ-469 black with white doors, «МИЛИЦИЯ» on them and a light bar
+  (owner).** → A car's paint is one colour from its material; a white door "in trim"
+  would lose the paint's dust, scratches and stickers; a light bar's lamps must flash with
+  no new program and no material swap. → `KitLook.livery` (police.ts): the doors' skin in
+  a new slot `livery` (paint share 1, its own vertex colour: render/materials.ts
+  `CAR_LAMP_LIVERY`, the kit program key `-kit-v3`, still one program for every kit car;
+  the far mesh draws it at share 0 in its colour); the lettering split into the front
+  doors' skin along its strokes, not laid on it; the bar's two lenses each a dark lens and
+  a lit twin in `lamp_glow` on `beacon_l` / `beacon_r` (`kitMotion` `visible`, the lit one
+  hidden as built, merged into the near mesh all the same, left out of the mid and far
+  bakes: farcars.ts `collectPieces`). `kit_uaz469_police` is resolvable by id and in no
+  catalogue list; its factory height is the 469's plus the bar at the 469's fitted scale.
+  *police.ts, materials.ts, builder.ts, rig.ts, kit.ts, specs.ts; render/materials.ts,
+  render/farcars.ts, render/carmodel.ts; vehicle/carmodels.ts*.
+- **The white doors fought the black body round their shut lines from 25 m** (kit-zfight:
+  the doors' end faces 1–6 mm off the body's jamb flanges, once the two differed in
+  colour). → The whole door mesh was livery, edges included. → Only the faces turned out
+  of the side within 45° (skin, shoulder, the frame's outer face) are livery
+  (`${door}_livery`); the edges keep the car's paint (`${door}_paint`), like the jambs
+  they face. *police.ts `paintDoors`, `SKIN_FACING`*.
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent

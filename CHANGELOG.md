@@ -4,6 +4,19 @@
 
 ### Added
 
+- THE POLICE UAZ-469 (`src/carkit/police.ts`, model `kit_uaz469_police`).
+  - The kit UAZ-469 in the militia's livery: white doors with «МИЛИЦИЯ» in dark blue on
+    the front ones, a light bar across the roof with a dark blue lamp each side. The game
+    gives it its black paint and flashes the lamps on the rig channels `beacon_l` and
+    `beacon_r` (0 dark, 1 lit; a pose, never a new shader program).
+  - The doors are livery paint (a new kit slot `livery`, render/materials.ts
+    `CAR_LAMP_LIVERY`): white whatever the car's colour, but dust, scratches and stickers
+    take them as any paint; the lettering is painted into their skin, so nothing fights.
+    The kit program's key moved to `-kit-v3`: still one program for every kit car.
+  - Resolvable by id (`carModel`, `loadCarModel`, `createCarModel`, `carModelMeasure`),
+    in no list traffic, rivals, lots, the spawn menu or the car lab draw from; a save
+    naming it keeps it; priced as the 469.
+
 - PETROL BY THE LITRE, A MACHINE AT EVERY STOP (`src/world/vending.ts`, `src/world/poi.ts`
   `machineSpot`, `src/player/interaction.ts` `pumpFuel`).
   - Petrol is no longer sold in filled cans. A FUEL machine has a nozzle in a grey holster

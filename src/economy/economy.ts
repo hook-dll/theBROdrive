@@ -142,6 +142,7 @@ export const PRICE_TABLE = {
     kit_vaz2104: 65,
     kit_vaz2111: 75,
     kit_uaz469: 80,
+    kit_uaz469_police: 80,
     kit_vaz2131: 90,
     kit_nexia: 90,
     kit_astraf: 100,

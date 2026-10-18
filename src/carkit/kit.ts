@@ -17,6 +17,7 @@ import { addBuilt, pivotGroup, type KitContext, type KitNode } from './context';
 import { buildExterior } from './exterior';
 import { buildInterior } from './interior';
 import { finishKitSurfaces } from './materials';
+import { buildLivery } from './police';
 import { simplifyFlats } from './simplify';
 import { KIT_SPECS } from './specs';
 import { buildWheel } from './wheels';
@@ -96,6 +97,9 @@ export function buildKitCar(id: string): THREE.Group {
   buildInterior(ctx);
   buildBay(ctx);
   cutShellHoles(root, ctx.holes);
+  // A service livery on the finished skin: its doors repainted, its lettering split into
+  // their skin, its light bar on the roof (police.ts).
+  if (spec.look.livery) buildLivery(ctx, spec.look.livery);
   if (spec.rearLean) leanEnd(root, ctx.holes, frame.z(frame.rearBase), -1, spec.rearLean);
   if (spec.frontLean) leanEnd(root, ctx.holes, frame.z(spec.frontLean.full ?? spec.bonnetFront), 1, spec.frontLean);
   // The finished shape in the fewest faces: flat runs merged, zero-area triangles gone.

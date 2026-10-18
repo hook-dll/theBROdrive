@@ -114,6 +114,7 @@ from the angle he complained about; changes are judged there, not in code.
 | `azlk.ts` | The AZLK-2141 Moskvich: `BODY_2141` / `LOOK_2141` (platform `samara`). |
 | `daewoo.ts` | The Daewoo Nexia (N100 saloon) and Espero (KLEJ saloon): `BODY_NEXIA` / `LOOK_NEXIA`, `BODY_ESPERO` / `LOOK_ESPERO` (platform `samara`). |
 | `opel.ts` | The Opel Astra F (five-door hatch) and Vectra A (saloon): `BODY_ASTRA_F` / `LOOK_ASTRA_F`, `BODY_VECTRA_A` / `LOOK_VECTRA_A` (platform `samara`). |
+| `police.ts` | Service liveries (`KitLook.livery`, `LiveryLook`): `LOOK_UAZ469_POLICE` (the 469 in the militia's colours, `KIT_SPECS.uaz469_police`) and `buildLivery`: the doors' skin in livery paint, the lettering split into the front doors' skin (`GLYPHS`, block capitals), the roof light bar with its beacons. |
 | `measurements-classics.md`, `measurements-estates.md`, `measurements-samara.md`, `measurements-2110.md`, `measurements-niva.md`, `measurements-oka.md`, `measurements-volga.md`, `measurements-2141.md`, `measurements-nexia.md` | Measurement reports: every figure with its drawing or photo, scale and tag. |
 | `builder.ts` | `PartBuilder`: flat triangles per material slot, transform stack, primitives (`box`, `bevelBox`, `extrude`, `cylinderX/Y/Z`, `torusY`, `bridge`, `poly`), vertex colours. |
 | `body.ts` | `BodyFrame` (cross-section, deck and lid lookups) and `buildShell`: tub, greenhouse and roof as one face list, then cut into parts. Shell constants (`SHUT_GAP`, `JAMB_DEPTH`, `DOOR_THICKNESS`, `NOTCH_WALL`, …). |
@@ -135,9 +136,11 @@ Integration outside the folder:
   car on the running gear of a catalogue sibling, or on its own, `KitOwnGear`), `DISTINCT_SOVIET_WHEEL_SETS`, `CAR_MODELS`
   (= `KIT_CARS`: the world's cars and the car lab's); every other pack is only resolvable
   through `carModel(id)` for the running gear and the wheel sets, in no list anything draws.
+  `SERVICE_KIT_CARS` (the police UAZ-469, `kit_uaz469_police`) are kit cars in no list
+  either: resolvable by id for the game that spawns them; a save naming one keeps it.
 - `save/save.ts` `worldModelId`: a saved `sv_*`/`sa_*`/`gt_*` id loads as `kit_<same car>`
   (`sv_vaz2105r` as `kit_vaz2105`), one with no kit twin as `DEFAULT_CAR_MODEL_ID`
-  (`kit_vaz2101`).
+  (`kit_vaz2101`); a resolvable `kit_*` id in no list (`kit_uaz469_police`) as itself.
 - `vehicle/vehicle.ts`: every `Vehicle` of a kit model owns a `KitRig` (`vehicle.kit`),
   built with its visuals (lenses left to `VehicleLamps`) and handed over on `rebuild`.
   Each rendered frame `driveKit` writes the driving channels (`steer`, `throttle`, `brake`,
@@ -176,6 +179,10 @@ Integration outside the folder:
   see-through. On opaque glass this changes nothing. The kit material's patch
   (`patchKitBodyShader`), `carLensGlows`, `setCarLensGrime`, the drop panes' clip
   (`makeCarGrimeMaterial` `panes`, `setCarGlassPaneDrop`) and `kitCastDepthMaterial`.
+  Livery paint (`CAR_LAMP_LIVERY`) is paint in its own vertex colour.
+- `render/farcars.ts`: the far mesh draws livery paint at paint share 0 in its colour;
+  `collectPieces` with `whole` (the near merge) also takes a node hidden as built that the
+  rig shows (`kitMotion` `visible`: a beacon's lit lens), which the mid and far bakes skip.
 - `player/interaction.ts`, `car-lab.ts`, `app/devtools.ts` `stickerSheet`: their raycasters
   enable `KIT_PICK_LAYER`, so they meet the parts, never the merged meshes.
 - `car-lab.ts`: the kit cars in a grid, hover and click, the "КАБИНА" panel, LOD by
@@ -395,6 +402,7 @@ cabin: … }`) share everything not overridden. Current families:
 | `spoiler?` | `SpoilerLook`: a body-colour wing with the high brake lamp, hung on the boot lid (2115) or the tailgate (2112, standing on its glass between the knee and the roof) so it lifts with it (exterior.ts `buildSpoiler`). Fields: `half` (half span), `plate` (end-plate width), `s0`/`s1` (wing leading/trailing edge, car frame like `repeater`), `top0`/`top1` (its top at each), `thickness`, `foot` (`s` where the end plates meet the lid), `pedestal: { half, s0, s1 }` (under the wing's middle), `lamp: { half, y0, y1 }` (the brake lens on the pedestal's back). The lens is a `lamp_brake` mesh, so it lights with every other brake lamp. Given before `rearLean`, which carries it with the tailgate. |
 | `cornerLamps?` | `CornerLamp[]`: a lamp unit lying flush on the body (4 mm off it) from its inner end on an end face round the corner and along the flank (exterior.ts `buildCornerLamps`, laid on the skin as built, body.ts `skinX`). `end`: `'front'` (default) or `'rear'`. `points`: `{ x }` on the face (half width, or `[bottom, top]` for a leaning edge), `{ s }` on the flank (car frame), or neither for the corner itself; `y: [bottom, top]` there; the stretch after a point is a lens in its `role`'s slot. The lens is flat wherever the skin under it is: along the flank it bends only at the tub's columns (`tubColumns`), and across its height only where the crease or belt runs through it (the tens' front indicator); elsewhere each stretch is one flat piece. Stacked lamps (an indicator over a tail lamp) are separate units. Keep a unit below the end station's belt so it stays on the flat face and side (the shoulder above it is the corner's straight cut). The 2115's and 2110's head lamps and indicators (solid amber) and their tail lamps. |
 | `featureLine?` | `{ points: [s, y][], height }`: a pressed line along each flank, a 5 mm painted ridge through the points, broken at the shut lines and riding on the doors like the waist. The 2110's line under the windows. |
+| `livery?` | `LiveryLook` (police.ts `buildLivery`, run on the finished skin after the shell's holes): `doors` (the colour of every door's skin: the faces turned out of the side within 45°, in slot `livery`; the edges keep the car's paint, as the jambs they face), `lettering: { text, colour, s, y, height }` (block capitals split into both front doors' skin, centred at `s`, baseline `y`, reading front to back on the left and back to front on the right), `lightBar: { s, half, dark, lit }` (a black housing rooted in the roof at `s`, ±`half` across, a lens each side `dark`, its lit twin `lit` on the beacon channels). The police UAZ-469. Absent: none. |
 
 **`FaceLook`** — `{ bumper, items, lid? }`. `items` are drawn in order (later ones stand on
 earlier ones: a lamp on its surround). `lid` items are placed on the end face like `items`
@@ -500,12 +508,17 @@ the `niva` platform's.
   | never switched | `rear_passive` |
 - Paint: slot `paint` (`userData.kitSlot`, a paint share of 1 in `CAR_SURFACE_ATTRIBUTE`).
   Only it takes colour, dust, scratches, the sticker highlight and stickers; every other
-  slot keeps its own colour and finish in its vertices.
+  slot keeps its own colour and finish in its vertices. Slot `livery` (lamp role
+  `CAR_LAMP_LIVERY`, police.ts) is paint in its own vertex colour: the paint's finish,
+  dust, scratches, highlight and stickers, never the car's colour.
 - Lit faces: slot `lamp_glow`, drawn unlit in its vertex colour (lamp role `CAR_LAMP_UNLIT`). A warning lamp's,
   a dial's face and ticks, a needle's and the courtesy lamp's dark face and lit face swap
   places on a pair of `pos` motions on the same channel: the dark one slides back by
   `GLOW_TRAVEL` (a needle `NEEDLE_TRAVEL`) as the lit one slides out into its place, so
   lighting one is a pose, not a material change, and the two never lie in one plane.
+  A police car's beacons (police.ts) swap their dark lens and its lit twin, the same box,
+  on a pair of `visible` motions instead (`amount` −1 on the dark one, +1 on the lit one,
+  which is hidden as built): only one is ever drawn, so they may share the plane.
 - Nothing lies on a hidden face. An item on the body skin (a lamp, grille, badge, bumper,
   repeater) is rooted 7 mm into it (`FACE_ROOT`) with no back face, and the shell is cut
   under it (`KitHole`, `cutShellHoles`; outlines on `root.userData.kitHoles`). Items on one
@@ -546,7 +559,9 @@ the `niva` platform's.
 
 ## Controls and channels (`rig.ts`)
 
-A node that moves carries `userData.kitMotion = { channel, kind: 'rot'|'pos', axis, amount, stops? }`.
+A node that moves carries `userData.kitMotion = { channel, kind: 'rot'|'pos'|'sink'|'visible', axis, amount, stops? }`.
+A `visible` node does not move: it shows while its channel is over 0.5 with a positive
+`amount`, while it is at most 0.5 with a negative one.
 The motion is applied from the built pose: angle or offset = `amount × channel value`, along
 an axis in the parent's frame. A needle's `stops` [min, max] are its pins: the value is
 clamped to them and the built pose is at `min`.
@@ -566,6 +581,7 @@ does not move (a door's fixed `quarter_*` pane) is not a control.
 | Wipers and radio | `wipers` 0/1/2 → `wiper_sweep`; `radio` 0/1/2 (off, preset 1, preset 2; in the game it follows the car's radio) → `radio_tune` (a fixed needle position each) |
 | Body | `door_*`, `bonnet`, `boot`, `tailgate`, `flap`, `window_*`, `vent_*` |
 | Cabin | `glovebox`, `ashtray`, `visor_l/r`, `seat_*`, `seatback_*`, `headrest_*`, `mirror_yaw`/`mirror_pitch` (inside mirror, radians off its built aim, ±0.2; an `aim` control), `mirror_l_yaw`/`mirror_l_pitch` and `mirror_r_*` (door mirror heads, ±0.25; `aim` controls `mirror_l`/`mirror_r`, offered in the game to a front seat only, through the door glass) |
+| Service (police.ts) | `beacon_l`, `beacon_r` 0/1: the light bar's left (+x) and right lamps lit; switched at once (`INSTANT`), flashed by the game; on any other car they drive nothing |
 
 In the lab the rig lights the lamps from the channels: low/high beam and tail lamps from
 `lights`, brake lamps from `brake`, reversing lamps from `gear < 0`, indicators from
@@ -728,7 +744,8 @@ Working files (crops, grids, overlays) go in `/tmp/<family>/`; only the report i
   `round`), `bonnet` (and its `nose`, with front `lid` items), `cornerLamps`,
   `featureLine`, moulded `corner` and `wrapTo`, the centre-line lens, the dash's `heater`
   and vent `half`, rear `cornerLamps` (`end`), `frontLean` (and its `full`), moulded
-  `flush`, `screenFoot`, column `drop`, the spoiler on a tailgate, column `finish`, waist `span`.
+  `flush`, `screenFoot`, column `drop`, the spoiler on a tailgate, column `finish`, waist `span`,
+  `livery`.
 - Register it in `KIT_SPECS` (specs.ts): `vaz2110: { id: 'vaz2110', ...BODY_2110, look:
   LOOK_2110, cabinLayout: CABIN_2110 }` (via `onBody` if the family frame differs).
 
@@ -918,6 +935,8 @@ within `KIT_FINE_M`; "Far" = everything except the four detail groups.
 | Espero | 14 389 | – | – | – | – | – | – | 1 344 | – |
 | Astra F | 13 578 | – | – | – | – | – | – | 1 344 | – |
 | Vectra A | 13 509 | – | – | – | – | – | – | 1 344 | – |
+| UAZ-469 | 11 152 | 4 860 | 3 810 | 1 507 | 418 | 32 | 688 | 1 344 | 6 204 |
+| UAZ-469 police | 11 501 | 5 209 | 3 810 | 1 507 | 418 | 32 | 688 | 1 344 | 6 553 |
 
 The owner set the budget aside for the 2110 and 2112 (the rounded rear shut line adds side
 rows to every tub column).

@@ -840,9 +840,10 @@ function buildUnderbody(frame: BodyFrame, b: PartBuilder, eb: PartBuilder, class
   const w = spec.wheels;
   const cowl = frame.cowl;
 
-  // The UAZ bodies have their own closed sill/arch envelope; the generic floor rails
-  // otherwise show as a black shelf outside the front wheel arch.
-  if (spec.id !== 'uaz469' && spec.id !== 'uaz2206') {
+  // The UAZ bodies (the 469, its police twin, the 2206) have their own closed sill/arch
+  // envelope; the generic floor rails otherwise show as a black shelf outside the front
+  // wheel arch.
+  if (!spec.id.startsWith('uaz')) {
     b.color(COLOURS.underseal);
     const railEnd = w.rear - 0.85;
     for (const side of [1, -1]) {
@@ -909,7 +910,7 @@ function classicChassis(frame: BodyFrame, b: PartBuilder, eb: PartBuilder, route
   const C = clearance(frame);
   const niva = spec.platform === 'niva' || spec.platform === 'van';
 
-  if (spec.id !== 'uaz469' && spec.id !== 'uaz2206') {
+  if (!spec.id.startsWith('uaz')) {
     // Generic classic front linkage is not part of the UAZ visual underbody.
     const cs = w.front - CROSSMEMBER_AHEAD;
     const cf = floorY(frame, cs);

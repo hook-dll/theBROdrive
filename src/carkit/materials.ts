@@ -10,12 +10,13 @@
  *
  * Per vertex:
  *  - `color`: the slot's colour, or, on a slot that takes vertex colours (trim, the lit
- *    faces), the colour it was built in;
- *  - `CAR_SURFACE_ATTRIBUTE`: paint share (only paint takes the car's colour, dirt,
- *    scratches and stickers), roughness, metalness and lamp role (a lens lit by its role,
- *    `CAR_LAMP_INERT` for one nothing switches, `CAR_LAMP_UNLIT` for a lit face drawn in its
- *    own colour at any hour: a cluster's warning lamp is lit by sliding it out from behind
- *    its dark lens, interior.ts, so lighting one is a pose and links no program).
+ *    faces, livery paint), the colour it was built in;
+ *  - `CAR_SURFACE_ATTRIBUTE`: paint share (only paint and livery paint take the car's
+ *    dirt, scratches and stickers, and only paint its colour), roughness, metalness and
+ *    lamp role (a lens lit by its role, `CAR_LAMP_INERT` for one nothing switches,
+ *    `CAR_LAMP_UNLIT` for a lit face drawn in its own colour at any hour: a cluster's
+ *    warning lamp is lit by sliding it out from behind its dark lens, interior.ts, so
+ *    lighting one is a pose and links no program; `CAR_LAMP_LIVERY` for livery paint).
  *
  * Names are the contract with render/carmodel.ts. `kit-body` passes its paint-slot rule,
  * so every car gets its own copy of the one material (its paint, `kit` variant of
@@ -28,7 +29,7 @@
 
 import * as THREE from 'three';
 import { MATERIALS_CONFIG } from '../config';
-import { CAR_LAMP_INERT, CAR_LAMP_UNLIT, CAR_SURFACE_ATTRIBUTE, CAR_SURFACE_FINISH } from '../render/materials';
+import { CAR_LAMP_INERT, CAR_LAMP_LIVERY, CAR_LAMP_UNLIT, CAR_SURFACE_ATTRIBUTE, CAR_SURFACE_FINISH } from '../render/materials';
 import type { KitSlot } from './builder';
 
 /** What one slot is: its colour and finish, and what kind of surface. */
@@ -57,6 +58,9 @@ const finish = (color: number, roughness: number, metalness: number, lamp = 0, v
  */
 export const KIT_SLOT_FINISH: Readonly<Record<Exclude<KitSlot, 'glass'>, KitSlotFinish>> = {
   paint: finish(0xffffff, MATERIALS_CONFIG.paintRoughness, MATERIALS_CONFIG.paintMetalness),
+  // The paint in the colour each vertex was built in (a police car's white doors and their
+  // lettering, police.ts): the paint's finish and wear, never the car's colour.
+  livery: finish(0xffffff, MATERIALS_CONFIG.paintRoughness, MATERIALS_CONFIG.paintMetalness, CAR_LAMP_LIVERY, true),
   trim: finish(0xffffff, 0.75, 0, 0, true),
   chrome: finish(CAR_SURFACE_FINISH.chrome.color, CAR_SURFACE_FINISH.chrome.roughness, CAR_SURFACE_FINISH.chrome.metalness),
   tyre: finish(CAR_SURFACE_FINISH.rubber.color, CAR_SURFACE_FINISH.rubber.roughness, CAR_SURFACE_FINISH.rubber.metalness),
@@ -123,7 +127,7 @@ export function finishKitSurfaces(root: THREE.Object3D): void {
     }
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     const surface = new Uint8Array(count * 4);
-    const bytes = [slot === 'paint' ? 255 : 0, Math.round(look.roughness * 255), Math.round(look.metalness * 255), look.lamp];
+    const bytes = [slot === 'paint' || slot === 'livery' ? 255 : 0, Math.round(look.roughness * 255), Math.round(look.metalness * 255), look.lamp];
     for (let i = 0; i < count; i++) surface.set(bytes, i * 4);
     geometry.setAttribute(CAR_SURFACE_ATTRIBUTE, new THREE.BufferAttribute(surface, 4, true));
     mesh.material = kitBodyMaterial();

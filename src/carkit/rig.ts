@@ -28,12 +28,14 @@ export interface KitMotion {
   readonly channel: string;
   /**
    * `rot` turns about `axis`, `pos` slides along it. `sink` is a drop pane winding down
-   * into its door. `visible` gates an indicator face without moving it.
+   * into its door. `visible` gates a face without moving it: shown while the channel is
+   * over 0.5 with a positive `amount`, while it is at most 0.5 with a negative one (a
+   * beacon's dark lens and its lit face, carkit/police.ts, one hidden as built).
    */
   readonly kind: 'rot' | 'pos' | 'sink' | 'visible';
   /** Axis in the node's parent frame. */
   readonly axis: readonly [number, number, number];
-  /** Radians or metres per unit of channel value; for `sink`, a share of the height. */
+  /** Radians or metres per unit of channel value; for `sink`, a share of the height; for `visible`, its sign. */
   readonly amount: number;
   /**
    * Channel values the part stops at, as a needle at its pins: the value is clamped to
@@ -71,10 +73,11 @@ export interface KitPicked {
  * Channels that follow their target at once (driving inputs, read out by gauges). The
  * speedometer and tachometer are here as the HUD's dials are: they are fed in km/h and
  * rpm, and an ease of a few units a second left them minutes behind the car. A warning
- * lamp (`tell_*`) and the courtesy lamp light as they are switched; the inside mirror
- * (`mirror_*`) turns under the hand.
+ * lamp (`tell_*`), the courtesy lamp and a police car's beacons (`beacon_l`/`beacon_r`,
+ * flashed by the game) light as they are switched; the inside mirror (`mirror_*`) turns
+ * under the hand.
  */
-const INSTANT = /^(steer|throttle|brake|clutch|handbrake|gear_fb|gear_lr|wiper_sweep|speed|rpm|dome|panel|mirror_\w+|tell_\w+)$/;
+const INSTANT = /^(steer|throttle|brake|clutch|handbrake|gear_fb|gear_lr|wiper_sweep|speed|rpm|dome|panel|beacon_[lr]|mirror_\w+|tell_\w+)$/;
 /** Ease rate per channel prefix, units per second. */
 const RATE: readonly [RegExp, number][] = [
   [/^door_|^boot|^tailgate|^bonnet/, 1.6],
@@ -524,7 +527,7 @@ export class KitRig {
         for (const pane of d.panes) pane.pose(d.motion.amount * v);
         if (v === 0) for (const child of d.node.children) if (!this.isPane(d, child)) child.scale.setScalar(1);
       } else if (d.motion.kind === 'visible') {
-        d.node.visible = v > 0.5;
+        d.node.visible = d.motion.amount < 0 ? v <= 0.5 : v > 0.5;
       } else {
         d.node.position.copy(d.restPosition).addScaledVector(d.axis, d.motion.amount * v);
       }

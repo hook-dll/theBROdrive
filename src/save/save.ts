@@ -754,12 +754,13 @@ const RETIRED_MODEL_IDS: Readonly<Record<string, string>> = {
  * `gt_vaz2110`, `sa_azlk2141`, …) loads on the kit body of the same car (`kit_vaz2101`,
  * `kit_azlk2141`, …), and one with no kit twin (the UAZs, the GAZ-21, …) on the default.
  * The carforge Oka (`cf_vaz1111`, and the retired `sa_oka` through it) loads on
- * `kit_vaz1111`, the carforge Volga (`cf_gaz31029`) on `kit_gaz31029`.
+ * `kit_vaz1111`, the carforge Volga (`cf_gaz31029`) on `kit_gaz31029`. A kit car in no
+ * list (the police UAZ-469, `kit_uaz469_police`) loads as itself.
  */
 function worldModelId(saved: unknown): string {
   if (typeof saved !== 'string') return DEFAULT_CAR_MODEL_ID;
   const id = RETIRED_MODEL_IDS[saved] ?? saved;
-  if (CAR_MODELS.some((model) => model.id === id)) return id;
+  if (CAR_MODELS.some((model) => model.id === id) || (id.startsWith('kit_') && hasCarModel(id))) return id;
   const twin = `kit_${id.slice(id.indexOf('_') + 1)}`;
   return CAR_MODELS.some((model) => model.id === twin) ? twin : DEFAULT_CAR_MODEL_ID;
 }
