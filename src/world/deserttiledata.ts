@@ -7,6 +7,7 @@ import type { RoadDistance } from './roaddistance';
 import { CORRIDOR_OUTER, type Terrain } from './terrain';
 import { terminusWeight } from './terminus';
 import { laybyAsphaltCover, laybyNear } from './layby';
+import { mesaFieldOf } from './mesas';
 
 
 /** Side length of one absolute, deterministic desert tile. */
@@ -22,6 +23,11 @@ const PROP_TAG = 0x44535254;
 /** How far the drawn ground sits under the road's asphalt at its edge, metres. */
 const UNDER_ROAD_M = 0.1;
 const MAX_TILE_PROPS = 5;
+/**
+ * Clear ground kept between a tile prop and a mesa's footprint, metres: wider than the
+ * largest prop's own radius, so nothing stands with its branches in the rock.
+ */
+const MESA_PROP_CLEARANCE_M = 8;
 
 /**
  * The non-rendering inputs to an absolute tile build. The worker creates equivalent
@@ -364,6 +370,8 @@ export function generateDesertTileData(
     // Roadside scatter owns the corridor. Once this tile is definitely far away, do
     // not ask the whole-road grid at all.
     if (!farFromRoad && context.roadDistance.distAt(worldX, worldZ, DIST_LATTICE) < 65) continue;
+    // Nor inside a mesa (world/mesas.ts): it is solid rock there, collided and drawn.
+    if (mesaFieldOf(context.road, context.terrain).blocks(worldX, worldZ, MESA_PROP_CLEARANCE_M)) continue;
     propSurfaces[i] = context.terrain.openSurfaceAt(worldX, worldZ);
   }
 

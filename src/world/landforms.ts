@@ -180,6 +180,14 @@ export function newLandformSample(): LandformSample {
   return { lift: 0, flatten: 0 };
 }
 
+/** A landform's footprint for placement: see `RoadsideLandforms.footprintAt`. */
+export interface LandformFootprint {
+  readonly xs: Float64Array;
+  readonly zs: Float64Array;
+  /** Lateral from the polyline past which the landform is exactly zero, metres. */
+  readonly reach: number;
+}
+
 interface Landform {
   readonly shape: LandformShape;
   /** +1 left of travel, -1 right, 0 both sides. */
@@ -275,6 +283,22 @@ export class RoadsideLandforms {
       if (lateral > EDGE_M - margin && lateral < landform.shape.reach + margin) return true;
     }
     return false;
+  }
+
+  /**
+   * The landform whose slot holds arclength `s`, as its footprint: the centreline
+   * polyline it is shaped from and the lateral reach past which it is zero, or null when
+   * that slot has none. For placement that must stay off a landform's WHOLE footprint
+   * (`world/mesas.ts`): every point a landform moves lies within `reach` of this
+   * polyline, on whichever side, so clearing the polyline by `reach` clears the shape.
+   * A polyline lies inside its own slot, so a caller holding every arclength of road
+   * that passes near a spot finds every landform that could reach it.
+   */
+  footprintAt(s: number): LandformFootprint | null {
+    if (s < FIRST_LANDFORM_S) return null;
+    const landform = this.slot(Math.floor((s - FIRST_LANDFORM_S) / SLOT_M));
+    if (landform === null) return null;
+    return { xs: landform.xs, zs: landform.zs, reach: landform.shape.reach };
   }
 
   /**

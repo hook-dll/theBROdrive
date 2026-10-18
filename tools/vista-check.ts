@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { DESERT_TILE_SIZE } from '../src/world/deserttiledata';
 import { VistaMesh } from '../src/render/vista';
+import { MESA_TOP_HEIGHT, mesaFieldOf } from '../src/world/mesas';
 import { WorldOrigin } from '../src/world/origin';
 import { Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
@@ -22,6 +23,12 @@ const SNAP = 250;
 const REPORTED_MESA_SEED = 2225416641;
 const SKY_BINS = 160;
 const MIN_MESA_CLEARANCE = (2 * Math.PI) / 180;
+/**
+ * One rendered frame, seconds. The disc refreshes at most every `GROUND_REFRESH_S`
+ * (render/vista.ts), so a step taken with zero frame time inside one sample cell is
+ * deliberately not followed; every interpolation step below is one real frame.
+ */
+const FRAME_S = 1 / 60;
 
 function invariant(condition: boolean, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -52,7 +59,7 @@ function maximumPositionDelta(a: Float32Array, b: Float32Array): number {
 }
 
 type MesaCandidateState = {
-  readonly key: string;
+  readonly key: number;
   readonly firstVertex: number;
   readonly vertexCount: number;
   readonly centreX: number;
@@ -64,9 +71,8 @@ type VistaAnimationState = {
   mesaGroundY: [Float32Array, Float32Array, Float32Array, Float32Array] | null;
   mesaHeightOffset: Float32Array | null;
   mesaCentreXZ: Float32Array | null;
+  mesaExactY: Float32Array | null;
   mesaCandidates: MesaCandidateState[];
-  dissolvingMesas: Map<string, number>;
-  retiredMesas: Set<string>;
   interpolationX: number;
   interpolationZ: number;
 };
@@ -224,7 +230,7 @@ const continuityVista = new VistaMesh(
   new WorldOrigin(),
 );
 continuityVista.setViewDistance(25_000);
-continuityVista.update(50, 60, 0, 0);
+continuityVista.update(50, 60, 0, FRAME_S);
 const continuityMeshes = continuityScene.children.filter(
   (child): child is THREE.Mesh => child instanceof THREE.Mesh,
 );
@@ -235,9 +241,9 @@ invariant(
 const continuityGround = continuityMeshes[0]!;
 const continuityMesas = continuityMeshes[1]!;
 const groundStart = worldPositionSnapshot(continuityGround);
-continuityVista.update(125, 60, 0, 0);
+continuityVista.update(125, 60, 0, FRAME_S);
 const groundMidpoint = worldPositionSnapshot(continuityGround);
-continuityVista.update(200, 60, 0, 0);
+continuityVista.update(200, 60, 0, FRAME_S);
 const groundEnd = worldPositionSnapshot(continuityGround);
 const continuityPositions = continuityGround.geometry.getAttribute('position');
 invariant(
@@ -263,9 +269,9 @@ invariant(
   `spatial vista interpolation deviates ${midpointError.toFixed(3)} m at midpoint`,
 );
 
-continuityVista.update(100, 60, 0, 0);
+continuityVista.update(100, 60, 0, FRAME_S);
 const groundBeforeStep = worldPositionSnapshot(continuityGround);
-continuityVista.update(101, 60, 0, 0);
+continuityVista.update(101, 60, 0, FRAME_S);
 const groundAfterStep = worldPositionSnapshot(continuityGround);
 const oneMetreHeightChange = maximumHeightDelta(
   continuityGround,
@@ -274,17 +280,17 @@ const oneMetreHeightChange = maximumHeightDelta(
   ROAD_REACH,
 );
 invariant(oneMetreHeightChange > 0.001, 'one metre of travel leaves the horizon stationary');
-continuityVista.update(100, 60, 0, 0);
+continuityVista.update(100, 60, 0, FRAME_S);
 const reverseError = maximumPositionDelta(
   groundBeforeStep,
   worldPositionSnapshot(continuityGround),
 );
 invariant(reverseError < 0.001, `reversing one metre leaves ${reverseError.toFixed(4)} m of drift`);
 
-continuityVista.update(249.999, 60, 0, 0);
+continuityVista.update(249.999, 60, 0, FRAME_S);
 const groundBeforeBoundary = worldPositionSnapshot(continuityGround);
 let previousCandidates = mesaCandidateTops(continuityVista, continuityMesas);
-continuityVista.update(250.001, 60, 0, 0);
+continuityVista.update(250.001, 60, 0, FRAME_S);
 const boundaryJump = maximumPositionDelta(
   groundBeforeBoundary,
   worldPositionSnapshot(continuityGround),
@@ -308,7 +314,7 @@ function checkResidentTransition(currentCandidates: Map<string, number>): number
 
 const afterBoundaryCandidates = mesaCandidateTops(continuityVista, continuityMesas);
 let residentTransitions = checkResidentTransition(afterBoundaryCandidates);
-continuityVista.update(249.999, 60, 0, 0);
+continuityVista.update(249.999, 60, 0, FRAME_S);
 const boundaryReverseError = maximumPositionDelta(
   groundBeforeBoundary,
   worldPositionSnapshot(continuityGround),
@@ -317,10 +323,10 @@ invariant(
   boundaryReverseError < 0.001,
   `reversing across a cell edge leaves ${boundaryReverseError.toFixed(4)} m of drift`,
 );
-continuityVista.update(250.001, 60, 0, 0);
+continuityVista.update(250.001, 60, 0, FRAME_S);
 previousCandidates = mesaCandidateTops(continuityVista, continuityMesas);
 for (let crossing = 1; crossing <= 20; crossing++) {
-  continuityVista.update(250.001 + crossing * SNAP, 60, 0, 0);
+  continuityVista.update(250.001 + crossing * SNAP, 60, 0, FRAME_S);
   const currentCandidates = mesaCandidateTops(continuityVista, continuityMesas);
   residentTransitions += checkResidentTransition(currentCandidates);
   previousCandidates = currentCandidates;
@@ -389,15 +395,14 @@ for (let i = 0; i < mesaPositions.count && groundedSamples < 32; i++) {
   const hit = downward.intersectObject(mesaMeshes[0]!, false)[0];
   if (!hit) continue;
   groundedSamples++;
-  worstContactError = Math.max(
-    worstContactError,
-    Math.abs(mesaPositions.getY(i) - hit.point.y + 3),
-  );
+  // Never above the rendered ground less the skirt's drop; up close it may be lower,
+  // held under the exact ground too (`MESA_FOOTING_FULL` in render/vista.ts).
+  worstContactError = Math.max(worstContactError, mesaPositions.getY(i) - hit.point.y + 3);
 }
 invariant(groundedSamples >= 16, `only ${groundedSamples} mesa skirt contacts could be sampled`);
 invariant(
   worstContactError < 0.05,
-  `mesa skirt floats ${worstContactError.toFixed(2)} m from rendered ground`,
+  `mesa skirt floats ${worstContactError.toFixed(2)} m above rendered ground`,
 );
 
 const skyline = new Float64Array(SKY_BINS);
@@ -502,102 +507,82 @@ console.log(
 );
 mesaVista.dispose();
 
-// Once the camera reaches 500 m from a mesa's actual footprint, it dissolves on its
-// own clock. Retreating cannot reverse it, and revisiting cannot rebuild it.
+// Mesas no longer dissolve: placement keeps them off the road (world/mesas.ts), so one
+// the camera drives right up to stays standing at full height, held under the exact
+// ground there, and is still there after a retreat and a return.
 const approachScene = new THREE.Scene();
-const approachVista = new VistaMesh(
-  approachScene,
-  new Terrain(REPORTED_MESA_SEED, mesaRoad),
-  mesaRoad,
-  new WorldOrigin(),
-);
+const approachTerrain = new Terrain(REPORTED_MESA_SEED, mesaRoad);
+const approachVista = new VistaMesh(approachScene, approachTerrain, mesaRoad, new WorldOrigin());
 approachVista.setViewDistance(25_000);
-approachVista.update(0, 0, 0, 0);
+approachVista.update(0, 0, 0, FRAME_S);
 const approachState = approachVista as unknown as VistaAnimationState;
 const targetMesa = approachState.mesaCandidates.find((candidate) => {
   const distance = Math.hypot(candidate.centreX, candidate.centreZ);
-  return distance > candidate.radius + 1_000 && distance < 12_000;
+  return distance > candidate.radius + 1_500 && distance < 12_000;
 });
 invariant(targetMesa !== undefined, 'mesa approach check found no suitable candidate');
-const targetDistance = Math.hypot(targetMesa.centreX, targetMesa.centreZ);
-const triggerDistance = targetMesa.radius + 499;
-const triggerX =
-  targetMesa.centreX - (targetMesa.centreX / targetDistance) * triggerDistance;
-const triggerZ =
-  targetMesa.centreZ - (targetMesa.centreZ / targetDistance) * triggerDistance;
-approachVista.update(triggerX, triggerZ, 0, 0);
-invariant(
-  approachState.dissolvingMesas.has(targetMesa.key),
-  'mesa did not begin dissolving 499 m from its footprint',
-);
-// THE DISSOLVE'S OWN LENGTH, MEASURED. The fade is stepped in fixed increments and the
-// time it takes to pass half, and to finish, are both read off the animation rather than
-// off the constant that feeds it, so this pins the duration a player actually sees and
-// does not care how `update` chooses to advance its clock.
-const dissolveStepS = 0.5;
-let elapsedS = 0;
-let halfwayS: number | null = null;
-let retiredS: number | null = null;
-let halfwayAlpha = 1;
-for (let step = 0; step < 200 && retiredS === null; step++) {
-  approachVista.update(triggerX, triggerZ, 0, dissolveStepS);
-  elapsedS += dissolveStepS;
-  // A retired mesa stays in `mesaCandidates` — the dissolve branch skips it there — so
-  // retirement is read from the retired set rather than from the candidate list.
-  if (approachState.retiredMesas.has(targetMesa.key)) {
-    retiredS = elapsedS;
-    break;
-  }
-  const candidateNow = approachState.mesaCandidates.find(
-    (candidate) => candidate.key === targetMesa.key,
-  );
-  invariant(candidateNow !== undefined, 'dissolving mesa left residency unexpectedly');
-  const meshesNow = approachScene.children.filter(
-    (child): child is THREE.Mesh => child instanceof THREE.Mesh,
-  )[1];
-  invariant(meshesNow !== undefined, 'mesa approach check has no mesa mesh');
-  const colorsNow = meshesNow.geometry.getAttribute('color');
-  invariant(
-    colorsNow instanceof THREE.BufferAttribute && colorsNow.itemSize === 4,
-    'mesa dissolve has no vertex alpha',
-  );
-  const alpha = colorsNow.getW(candidateNow.firstVertex);
-  if (halfwayS === null && alpha <= 0.5) {
-    halfwayS = elapsedS;
-    halfwayAlpha = alpha;
-  }
-}
-invariant(halfwayS !== null, 'mesa dissolve never passed half');
-invariant(retiredS !== null, 'mesa dissolve never finished');
-// 18 seconds, to the resolution of the step: half at nine, gone at eighteen. An 18 s
-// dissolve is over in the first 40 per cent of the kilometre a car covers approaching
-// the clearance, which is what makes it read as an event rather than a long fade.
-invariant(
-  Math.abs(halfwayS - 9) <= dissolveStepS && Math.abs(retiredS - 18) <= dissolveStepS,
-  `mesa dissolve ran ${halfwayS}s to half and ${retiredS}s to gone, expected 9 and 18`,
-);
 const approachMesas = approachScene.children.filter(
   (child): child is THREE.Mesh => child instanceof THREE.Mesh,
 )[1];
 invariant(approachMesas !== undefined, 'mesa approach check has no mesa mesh');
-approachVista.update(0, 0, 0, 0.1);
-invariant(
-  approachState.retiredMesas.has(targetMesa.key) &&
-    !approachState.dissolvingMesas.has(targetMesa.key),
-  'retreat restored or paused a dissolving mesa',
-);
-approachVista.update(triggerX, triggerZ, 0, 0);
-invariant(
-  !approachState.mesaCandidates.some((candidate) => candidate.key === targetMesa.key),
-  'retired mesa was rebuilt when its location was revisited',
-);
 const approachMaterial = approachMesas.material;
 invariant(
-  !Array.isArray(approachMaterial) && approachMaterial.alphaHash,
-  'mesa dissolve does not use hashed transparency',
+  !Array.isArray(approachMaterial) && !approachMaterial.alphaHash && !approachMaterial.transparent,
+  'mesa material still carries the dissolve transparency',
+);
+/** The target's plateau and rise as drawn, or null when it is not resident. */
+function targetStanding(): { top: number; rise: number; footed: number } | null {
+  const candidate = approachState.mesaCandidates.find((c) => c.key === targetMesa!.key);
+  if (!candidate) return null;
+  const position = approachMesas!.geometry.getAttribute('position');
+  invariant(position instanceof THREE.BufferAttribute, 'mesa approach has no positions');
+  let low = Infinity;
+  let high = -Infinity;
+  let footed = 0;
+  for (let i = candidate.firstVertex; i < candidate.firstVertex + candidate.vertexCount; i++) {
+    low = Math.min(low, position.getY(i));
+    high = Math.max(high, position.getY(i));
+    if (Number.isFinite(approachState.mesaExactY![i]!)) footed++;
+  }
+  return { top: high, rise: high - low, footed };
+}
+const farStanding = targetStanding();
+invariant(farStanding !== null && farStanding.footed === 0, 'distant mesa missing or footed');
+// The world origin is zero here, so the candidate's centre is its absolute centre.
+const targetSite = mesaFieldOf(mesaRoad, approachTerrain)
+  .sitesNear(targetMesa.centreX, targetMesa.centreZ, 0, [])
+  .find((site) => site.key === targetMesa.key);
+invariant(targetSite !== undefined, 'mesa approach target is not a MesaField site');
+const targetFooting = mesaFieldOf(mesaRoad, approachTerrain).footing(targetSite);
+const exactTop = targetFooting.centreGroundY + targetSite.height * MESA_TOP_HEIGHT;
+const targetDistance = Math.hypot(targetMesa.centreX, targetMesa.centreZ);
+// Fifty metres outside the footprint, at the foot of the wall.
+const nearDistance = targetMesa.radius + 50;
+const nearX = targetMesa.centreX - (targetMesa.centreX / targetDistance) * nearDistance;
+const nearZ = targetMesa.centreZ - (targetMesa.centreZ / targetDistance) * nearDistance;
+approachVista.update(nearX, nearZ, 0, FRAME_S);
+const nearStanding = targetStanding();
+invariant(nearStanding !== null, 'mesa left the vista when the camera reached its foot');
+const plateauError = Math.abs(nearStanding.top - exactTop);
+invariant(
+  nearStanding.footed > 0 && plateauError < 0.05 && approachMesas.visible,
+  `mesa at its foot: plateau ${plateauError.toFixed(2)} m off the exact ground, ${nearStanding.footed} footed vertices`,
+);
+invariant(
+  nearStanding.rise >= targetSite.height * MESA_TOP_HEIGHT,
+  `mesa at its foot rises only ${nearStanding.rise.toFixed(0)} m of ${targetSite.height.toFixed(0)}`,
+);
+approachVista.update(0, 0, 0, FRAME_S);
+approachVista.update(nearX, nearZ, 0, FRAME_S);
+const revisit = targetStanding();
+invariant(
+  revisit !== null && Math.abs(revisit.rise - nearStanding.rise) < 0.01,
+  'mesa changed after a retreat and a return',
 );
 console.log(
-  `mesa dissolve: triggered at 499 m clearance, half at ${halfwayS}s (alpha ` +
-    `${halfwayAlpha.toFixed(2)}), gone at ${retiredS}s, retreat and revisit kept it retired`,
+  `mesa approach: plateau ${nearStanding.top.toFixed(1)} m at 50 m from its footprint, ` +
+    `${plateauError.toFixed(3)} m from the exact ground's, rise ${nearStanding.rise.toFixed(0)} m ` +
+    `(${farStanding.rise.toFixed(0)} m from afar on the vista's ground), ${nearStanding.footed} vertices ` +
+    `on exact ground, unchanged after retreat and return`,
 );
 approachVista.dispose();

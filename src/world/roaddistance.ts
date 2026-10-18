@@ -143,6 +143,43 @@ export class RoadDistance {
     return lattice.owner.get(key(ix, iz)) ?? 0;
   }
 
+  /**
+   * Every coarse spine sample within `radius` of a point, over the WHOLE road: writes
+   * their indices (arclength `index * COARSE_SPACING`) into `out` from 0 and returns
+   * how many. `out` is the caller's and is reused, so a query allocates nothing once it
+   * has grown to the largest answer.
+   *
+   * For placement that must clear every pass of the road rather than find the nearest
+   * one. What it can promise is the coarse table's own: any point of the road lies
+   * within `COARSE_SPACING / 2` of arclength — so of straight-line distance — of some
+   * sample, so a caller asking for everything within `d` of a shape asks this for
+   * `d + COARSE_SPACING / 2` and refines the spans it gets back.
+   */
+  coarseNear(x: number, z: number, radius: number, out: number[]): number {
+    this.ensureCoarse();
+    const size = this.cellSize;
+    const r2 = radius * radius;
+    const ix0 = Math.max(0, Math.floor((x - radius) / size) - this.cellMinX);
+    const ix1 = Math.min(this.cellsX - 1, Math.floor((x + radius) / size) - this.cellMinX);
+    const iz0 = Math.max(0, Math.floor((z - radius) / size) - this.cellMinZ);
+    const iz1 = Math.min(this.cellsZ - 1, Math.floor((z + radius) / size) - this.cellMinZ);
+    let count = 0;
+    for (let iz = iz0; iz <= iz1; iz++) {
+      const rowBase = iz * this.cellsX;
+      for (let ix = ix0; ix <= ix1; ix++) {
+        const c = rowBase + ix;
+        const to = this.cellStart[c + 1]!;
+        for (let i = this.cellStart[c]!; i < to; i++) {
+          const k = this.cellItems[i]!;
+          const dx = this.coarseX[k]! - x;
+          const dz = this.coarseZ[k]! - z;
+          if (dx * dx + dz * dz <= r2) out[count++] = k;
+        }
+      }
+    }
+    return count;
+  }
+
   private lattice(spacing: number): Lattice {
     let lattice = this.lattices.get(spacing);
     if (!lattice) {

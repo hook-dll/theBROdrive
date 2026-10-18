@@ -19,6 +19,7 @@ import { SurfaceType } from '../../core/surfaces';
 import { ROAD_HALF_WIDTH } from '../road';
 import { storyKeepsClear } from '../../story/site';
 import { laybyKeepsClear } from '../layby';
+import { mesaFieldOf } from '../mesas';
 import type { ChunkContext, ChunkContent, ChunkProvider } from '../chunks';
 
 import {
@@ -97,6 +98,11 @@ const MAX_LAT = 560;
  */
 const ROCK_DENSITY = 0.045;
 const CACTUS_DENSITY = 0.009;
+/**
+ * Clear ground between a scattered prop or plant and a mesa's footprint, metres: the
+ * largest boulder's radius with room, so nothing stands half inside the rock wall.
+ */
+const MESA_SCATTER_CLEARANCE_M = 6;
 const ROCK_COLLIDER_MIN = 0.55; // pebbles under this radius (m) get no collider
 /**
  * Ground cover (dry tufts, shrubs, rosettes), a decoration stream of its own:
@@ -314,6 +320,7 @@ export class ScatterProvider implements ChunkProvider {
     const cellSEnd = Math.floor(ctx.sEnd / CELL_S);
     const cellLMax = Math.ceil(MAX_LAT / CELL_L) + 1;
     let occupancyCells = 0;
+    const mesas = mesaFieldOf(ctx.road, ctx.terrain);
 
     for (let cs = cellSStart; cs <= cellSEnd; cs++) {
       const centreS = (cs + 0.5) * CELL_S;
@@ -353,6 +360,8 @@ export class ScatterProvider implements ChunkProvider {
           if (roll >= ROCK_DENSITY * fade) break cell;
 
           const p = ctx.road.offsetPoint(s, lateral);
+          // Not inside a mesa's footprint (world/mesas.ts): that ground is rock wall.
+          if (mesas.blocks(p.x, p.z, MESA_SCATTER_CLEARANCE_M)) break cell;
           // From the FRAME, not by projection: this cell was generated from (s, lateral),
           // so `surfaceAt`'s road search would spend 5 us rediscovering what the loop
           // counter already knows.
@@ -429,6 +438,7 @@ export class ScatterProvider implements ChunkProvider {
         if (storyKeepsClear(s, lateral)) return;
         if (laybyKeepsClear(seed, s, lateral, ctx.road.halfWidthAt(s), LAYBY_CLEAR_M)) return;
         const p = ctx.road.offsetPoint(s, lateral);
+        if (mesas.blocks(p.x, p.z, MESA_SCATTER_CLEARANCE_M)) return;
         if (ctx.terrain.surfaceFromFrame(p.x, p.z, lateral, s) === SurfaceType.Rock) return;
         const form = pickDesertForm(covers, formRoll);
         const scale = form.minScale + scaleRoll * (form.maxScale - form.minScale);

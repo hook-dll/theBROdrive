@@ -82,6 +82,7 @@ const DOME_BEAM_GROUP = BEAM_GROUPS.length;
 import { ContactPatchField } from './render/contactpatches';
 import { ChunkStreamer } from './world/chunks';
 import { DesertTileStreamer } from './world/deserttiles';
+import { MesaColliders } from './world/mesacolliders';
 import {
   STATE_GROUND_PROBE_DOWN_M,
   STATE_GROUND_PROBE_UP_M,
@@ -576,6 +577,8 @@ async function boot(): Promise<void> {
     debris,
     worldWork,
   );
+  // The mesas near the player are solid (world/mesacolliders.ts).
+  const mesaColliders = new MesaColliders(physics, road, terrain, origin);
 
   // Scratches for the impact test in the fixed step: never allocated per tick.
   const impactForward = new THREE.Vector3();
@@ -2159,6 +2162,7 @@ async function boot(): Promise<void> {
       desert.update(desertX, desertZ, desertLateral, frameId);
       streamer.update(activeS, frameId, desertLateral);
     }
+    mesaColliders.update(desertX, desertZ);
     frameProfiler?.end('streaming');
     frameProfiler?.begin('agents');
     birds.update(dt, activeS, eye.x, eye.y, eye.z);

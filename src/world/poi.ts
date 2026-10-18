@@ -36,6 +36,7 @@ import {
 } from './props/airdancer';
 import { halfWidthAt } from './roadprofile';
 import { BASIN_OUTER_M, lakeSites, type LakeSite } from './lakes';
+import { mesaFieldOf } from './mesas';
 import type { RoadDistance } from './roaddistance';
 import type { Terrain } from './terrain';
 import type { VariantInstance } from './poivariantbuild';
@@ -273,6 +274,23 @@ export function desertPoiClearOfRoad(poi: Poi, road: Road, roadDistance: RoadDis
 function desertPoiClearOfLandforms(poi: Poi, road: Road, terrain: Terrain): boolean {
   const point = road.offsetPoint(poi.s, poi.lateral);
   return !terrain.landforms.covers(point.x, point.z, poi.s, radiusStructure(poi.structure));
+}
+
+/**
+ * Clear ground between a desert building's corner radius and a mesa's footprint,
+ * metres. More than the building: its yard (the parked car, a spare trailer, the lot)
+ * spreads tens of metres round it, and none of that belongs inside the rock either.
+ */
+const DESERT_MESA_CLEARANCE_M = 40;
+
+/** Whether a desert POI's yard stays out of every mesa (`world/mesas.ts`). */
+function desertPoiClearOfMesas(poi: Poi, road: Road, terrain: Terrain): boolean {
+  const point = road.offsetPoint(poi.s, poi.lateral);
+  return !mesaFieldOf(road, terrain).blocks(
+    point.x,
+    point.z,
+    radiusStructure(poi.structure) + DESERT_MESA_CLEARANCE_M,
+  );
 }
 
 /**
@@ -1238,6 +1256,7 @@ export class PoiProvider implements ChunkProvider {
       (poi) =>
         desertPoiClearOfRoad(poi, ctx.road, this.roadDistance) &&
         desertPoiClearOfLandforms(poi, ctx.road, ctx.terrain) &&
+        desertPoiClearOfMesas(poi, ctx.road, ctx.terrain) &&
         desertPoiClearOfNeighbours(poi, ctx.world.seed, spacing, ctx.road),
     );
 
