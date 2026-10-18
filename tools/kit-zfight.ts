@@ -41,12 +41,14 @@
 
 import * as THREE from 'three';
 import { installAssetShim } from './assetshim';
-import { PartBuilder, cutUnder, type KitSlot, type Outline, type Vec3 } from '../src/carkit/builder';
+import type { Outline, Vec3 } from '../src/carkit/builder';
 import { buildKitCar } from '../src/carkit/kit';
 import { KIT_SPECS } from '../src/carkit/specs';
 import { KitRig, KIT_DETAIL_M, kitGlassOpacity } from '../src/carkit/rig';
 import { KIT_SLOT_FINISH } from '../src/carkit/materials';
+import { installProvenance, intern, RayGrid, sites } from './kitlib';
 
+installProvenance();
 installAssetShim();
 
 // ---------------------------------------------------------------- tolerances
@@ -56,7 +58,6 @@ const FAR_GAP = 0.006; // m: 2-6 mm = far-view risk
 const PAIR_MIN_AREA = 2e-6; // m² (0.02 cm²): smallest pair overlap accumulated into a cluster
 const CLUSTER_MIN_AREA = 1e-4; // m² (1 cm²): smallest cluster reported
 const PAIR_CELL = 0.1; // m, pair hash cell
-const RAY_CELL = 0.04; // m, occlusion grid cell
 const DEPTH_NEAR = 0.08; // CAMERA_NEAR, core/renderer.ts; 24-bit depth (UnsignedIntType DepthTexture)
 /**
  * Two surfaces `gap` apart fight once their window depths fall within ~2 steps of a
@@ -85,85 +86,6 @@ const pxPerM = (d: number): number => SCREEN_H / (2 * d * Math.tan(FOV_Y / 2));
  * further is another car's, and the exterior viewpoints stand for that.
  */
 const CABIN_TAU = (2 * 3 * 3) / (0.02 * 2 ** 24);
-
-// ---------------------------------------------------------------- provenance patch
-const sites: string[] = [];
-const siteIndex = new Map<string, number>();
-function intern(s: string): number {
-  let i = siteIndex.get(s);
-  if (i === undefined) {
-    i = sites.length;
-    sites.push(s);
-    siteIndex.set(s, i);
-  }
-  return i;
-}
-(Error as unknown as { stackTraceLimit: number }).stackTraceLimit = 14;
-const FRAME = /\/src\/carkit\/([a-z]+\.ts):(\d+):\d+/;
-function callSite(): number {
-  const stack = new Error().stack ?? '';
-  const out: string[] = [];
-  for (const line of stack.split('\n')) {
-    const m = FRAME.exec(line);
-    if (!m || m[1] === 'builder.ts') continue;
-    out.push(`${m[1]}:${m[2]}`);
-    if (out.length === 2) break;
-  }
-  return intern(out.join(' < ') || '?');
-}
-/** PartBuilder's private slot buffers plus the provenance this script hangs on it (runtime patch). */
-interface BuilderInternals {
-  slots: Map<KitSlot, { positions: number[]; colors: number[] }>;
-  prov?: Map<KitSlot, number[]>;
-}
-const origTri = PartBuilder.prototype.tri;
-const origBuild = PartBuilder.prototype.build;
-PartBuilder.prototype.tri = function (this: PartBuilder, slot: KitSlot, a: Vec3, b: Vec3, c: Vec3) {
-  // Private fields are read at run time; this script only observes them.
-  const self = this as unknown as BuilderInternals;
-  const before = self.slots.get(slot)?.positions.length ?? 0;
-  origTri.call(this, slot, a, b, c);
-  const after = self.slots.get(slot)?.positions.length ?? 0;
-  if (after > before) {
-    self.prov ??= new Map();
-    let list = self.prov.get(slot);
-    if (!list) self.prov.set(slot, (list = []));
-    list.push(callSite());
-  }
-  return this;
-};
-PartBuilder.prototype.build = function (this: PartBuilder) {
-  const self = this as unknown as BuilderInternals;
-  const out = origBuild.call(this);
-  for (const [slot, g] of out) g.userData.prov = self.prov?.get(slot) ?? [];
-  return out;
-};
-// A cut keeps each piece's emitter; an append brings the other builder's along.
-PartBuilder.prototype.cut = function (this: PartBuilder, outlines: readonly Outline[]) {
-  const self = this as unknown as BuilderInternals;
-  if (outlines.length === 0) return this;
-  for (const [slot, buffer] of self.slots) {
-    const r = cutUnder(buffer.positions, buffer.colors, outlines);
-    const prov = self.prov?.get(slot) ?? [];
-    self.slots.set(slot, { positions: r.positions, colors: r.colors });
-    self.prov ??= new Map();
-    self.prov.set(slot, r.from.map((i) => prov[i]!));
-  }
-  return this;
-};
-const origAppend = PartBuilder.prototype.append;
-PartBuilder.prototype.append = function (this: PartBuilder, other: PartBuilder) {
-  const self = this as unknown as BuilderInternals;
-  const them = other as unknown as BuilderInternals;
-  // Provenance first: append takes the slots' lengths as they stand.
-  for (const [slot, buffer] of them.slots) {
-    const mine = self.slots.get(slot)?.positions.length ?? 0;
-    self.prov ??= new Map();
-    const list = self.prov.get(slot) ?? new Array(mine / 9).fill(intern('?'));
-    self.prov.set(slot, list.concat(them.prov?.get(slot) ?? new Array(buffer.positions.length / 9).fill(intern('?'))));
-  }
-  return origAppend.call(this, other);
-};
 
 // ---------------------------------------------------------------- triangle soup
 interface MeshInfo {
@@ -475,116 +397,6 @@ function findPairs(s: Soup, keep?: (a: number, b: number) => boolean): PairHit[]
     }
   }
   return hits;
-}
-
-// ---------------------------------------------------------------- occlusion grid
-class RayGrid {
-  readonly min: [number, number, number];
-  readonly dims: [number, number, number];
-  readonly start: Int32Array;
-  readonly items: Int32Array;
-  readonly stamp: Int32Array;
-  private ray = 0;
-  constructor(readonly s: Soup, occluder: (t: number) => boolean) {
-    let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
-    for (let i = 0; i < s.n * 3; i++) {
-      const x = s.v[i * 3], y = s.v[i * 3 + 1], z = s.v[i * 3 + 2];
-      x0 = Math.min(x0, x); y0 = Math.min(y0, y); z0 = Math.min(z0, z);
-      x1 = Math.max(x1, x); y1 = Math.max(y1, y); z1 = Math.max(z1, z);
-    }
-    this.min = [x0 - 0.01, y0 - 0.01, z0 - 0.01];
-    this.dims = [Math.ceil((x1 - x0 + 0.02) / RAY_CELL), Math.ceil((y1 - y0 + 0.02) / RAY_CELL), Math.ceil((z1 - z0 + 0.02) / RAY_CELL)];
-    const [X, Y, Z] = this.dims;
-    const counts = new Int32Array(X * Y * Z + 1);
-    const ranges: number[][] = [];
-    const span = (t: number) => {
-      let a0 = Infinity, b0 = Infinity, c0 = Infinity, a1 = -Infinity, b1 = -Infinity, c1 = -Infinity;
-      for (let j = 0; j < 3; j++) {
-        const x = s.v[t * 9 + j * 3], y = s.v[t * 9 + j * 3 + 1], z = s.v[t * 9 + j * 3 + 2];
-        a0 = Math.min(a0, x); b0 = Math.min(b0, y); c0 = Math.min(c0, z);
-        a1 = Math.max(a1, x); b1 = Math.max(b1, y); c1 = Math.max(c1, z);
-      }
-      const f = (val: number, ax: 0 | 1 | 2) => Math.max(0, Math.min(this.dims[ax] - 1, Math.floor((val - this.min[ax]) / RAY_CELL)));
-      return [f(a0, 0), f(a1, 0), f(b0, 1), f(b1, 1), f(c0, 2), f(c1, 2)];
-    };
-    for (let t = 0; t < s.n; t++) {
-      if (!occluder(t) || s.area[t] < 1e-10) { ranges.push([]); continue; }
-      const r = span(t);
-      ranges.push(r);
-      for (let i = r[0]!; i <= r[1]!; i++) for (let j = r[2]!; j <= r[3]!; j++) for (let k = r[4]!; k <= r[5]!; k++) counts[(i * Y + j) * Z + k]++;
-    }
-    this.start = new Int32Array(X * Y * Z + 1);
-    for (let c = 0; c < X * Y * Z; c++) this.start[c + 1] = this.start[c]! + counts[c]!;
-    this.items = new Int32Array(this.start[X * Y * Z]!);
-    const fill = this.start.slice(0, X * Y * Z);
-    for (let t = 0; t < s.n; t++) {
-      const r = ranges[t]!;
-      if (r.length === 0) continue;
-      for (let i = r[0]!; i <= r[1]!; i++) for (let j = r[2]!; j <= r[3]!; j++) for (let k = r[4]!; k <= r[5]!; k++) this.items[fill[(i * Y + j) * Z + k]!++] = t;
-    }
-    this.stamp = new Int32Array(s.n);
-  }
-
-  private hitTri(t: number, o: number[], d: number[], tmax: number): boolean {
-    const v = this.s.v, b = t * 9;
-    const e1x = v[b + 3] - v[b], e1y = v[b + 4] - v[b + 1], e1z = v[b + 5] - v[b + 2];
-    const e2x = v[b + 6] - v[b], e2y = v[b + 7] - v[b + 1], e2z = v[b + 8] - v[b + 2];
-    const px = d[1]! * e2z - d[2]! * e2y, py = d[2]! * e2x - d[0]! * e2z, pz = d[0]! * e2y - d[1]! * e2x;
-    const det = e1x * px + e1y * py + e1z * pz;
-    if (Math.abs(det) < 1e-14) return false;
-    const inv = 1 / det;
-    const tx = o[0]! - v[b], ty = o[1]! - v[b + 1], tz = o[2]! - v[b + 2];
-    const u = (tx * px + ty * py + tz * pz) * inv;
-    if (u < 0 || u > 1) return false;
-    const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x;
-    const w = (d[0]! * qx + d[1]! * qy + d[2]! * qz) * inv;
-    if (w < 0 || u + w > 1) return false;
-    const tt = (e2x * qx + e2y * qy + e2z * qz) * inv;
-    return tt > 1e-6 && tt < tmax;
-  }
-
-  /** True if the segment o→p is blocked by an occluder other than `skipA`/`skipB`. */
-  blocked(o: number[], p: number[], skipA: number, skipB: number): boolean {
-    const dx = p[0]! - o[0]!, dy = p[1]! - o[1]!, dz = p[2]! - o[2]!;
-    const len = Math.hypot(dx, dy, dz);
-    const d = [dx / len, dy / len, dz / len];
-    // Clip to the grid box.
-    let t0 = 0, t1 = len;
-    for (let ax = 0; ax < 3; ax++) {
-      const lo = this.min[ax]!, hi = lo + this.dims[ax]! * RAY_CELL;
-      if (Math.abs(d[ax]!) < 1e-12) { if (o[ax]! < lo || o[ax]! > hi) return false; continue; }
-      let a = (lo - o[ax]!) / d[ax]!, b = (hi - o[ax]!) / d[ax]!;
-      if (a > b) [a, b] = [b, a];
-      t0 = Math.max(t0, a); t1 = Math.min(t1, b);
-      if (t0 > t1) return false;
-    }
-    const stamp = ++this.ray;
-    const [X, Y, Z] = this.dims;
-    const pos = [o[0]! + d[0]! * t0, o[1]! + d[1]! * t0, o[2]! + d[2]! * t0];
-    const cell = [0, 1, 2].map((ax) => Math.max(0, Math.min(this.dims[ax]! - 1, Math.floor((pos[ax]! - this.min[ax]!) / RAY_CELL))));
-    const step = d.map((x) => (x > 0 ? 1 : x < 0 ? -1 : 0));
-    const tMaxA = [0, 1, 2].map((ax) => {
-      if (step[ax] === 0) return Infinity;
-      const edge = this.min[ax]! + (cell[ax]! + (step[ax]! > 0 ? 1 : 0)) * RAY_CELL;
-      return t0 + (edge - pos[ax]!) / d[ax]!;
-    });
-    const tDelta = d.map((x) => (x === 0 ? Infinity : RAY_CELL / Math.abs(x)));
-    const tmax = len - 1e-4;
-    for (;;) {
-      const c = (cell[0]! * Y + cell[1]!) * Z + cell[2]!;
-      for (let q = this.start[c]!; q < this.start[c + 1]!; q++) {
-        const t = this.items[q]!;
-        if (t === skipA || t === skipB || this.stamp[t] === stamp) continue;
-        this.stamp[t] = stamp;
-        if (this.hitTri(t, o, d, tmax)) return true;
-      }
-      let ax = tMaxA[0]! < tMaxA[1]! ? (tMaxA[0]! < tMaxA[2]! ? 0 : 2) : tMaxA[1]! < tMaxA[2]! ? 1 : 2;
-      if (tMaxA[ax]! > t1) return false;
-      cell[ax] = cell[ax]! + step[ax]!;
-      if (cell[ax]! < 0 || cell[ax]! >= this.dims[ax]!) return false;
-      tMaxA[ax] = tMaxA[ax]! + tDelta[ax]!;
-    }
-  }
 }
 
 /** Which viewpoints see the pair's overlap (either sample), from the right side of the plane. */
