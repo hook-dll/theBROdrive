@@ -262,6 +262,8 @@ function buildEngine(b: MeshBuilder, v: PartVariant): void {
     case 'engine_lada_rally':
     case 'engine_niva_1600': return buildInline(b, spec, 1.0);
     case 'engine_niva_1700': return buildInline(b, spec, 1.02);
+    // The Nexia's 1.5, the 2111's size.
+    case 'engine_daewoo_g15mf': return buildInline(b, spec, 0.96);
     // The Volga 2.4: a tall, long-stroke four, so a taller block than the 1.6. The UAZ's
     // UMZ-4178 and the GAZ-31029's ZMZ-402 are the same block.
     case 'engine_zmz_21':
@@ -383,6 +385,8 @@ function buildGearbox(b: MeshBuilder, v: PartVariant): void {
     case 'gearbox_samara_5_tall': scale = 1.08; manual = true; fins = true; break;
     // The Oka's transaxle: the Samara layout at a smaller scale, final drive included.
     case 'gearbox_oka_4': scale = 0.86; manual = true; fins = true; break;
+    // The Opel F16 transaxle, final drive included: the Samara's layout.
+    case 'gearbox_opel_f16_nexia': scale = 1.05; manual = true; fins = true; break;
     case 'gearbox_niva_4': scale = 1.2; manual = true; fins = false; break;
     case 'gearbox_niva_5': scale = 1.26; manual = true; fins = false; break;
     case 'gearbox_auto3': scale = 1.2; manual = false; fins = true; break;

@@ -3,6 +3,25 @@
 ## Unreleased
 
 ### Added
+- THE FIRST FOREIGN KIT CAR: DAEWOO NEXIA (`src/carkit/daewoo.ts` `BODY_NEXIA`,
+  `LOOK_NEXIA`; `interior.ts` `CABIN_NEXIA`; measured in `measurements-nexia.md`). The
+  early base N100 saloon (1995–2002, the G15MF 1.5 and the five-speed) from 3dcar.ru's
+  dimensioned four-view (4.851 mm/px from the drawn hubs) and Commons photos: a low face
+  of flush head lamps with the amber indicators wrapping round the corners and a black
+  slatted grille, dark grey bumpers with a bright strip in line with the doors', a slim A
+  pillar, a small quarter glass and a wide C pillar under a long back light, a boot lid
+  down between corner tail lamps; its own dash (a rounded hood over the speedometer with
+  the tachometer left and two small dials right, end vents, two centre vents over three
+  heater knobs). It is the first kit car with no catalogue sibling: a `KIT_CARS` row may
+  now name its whole running gear (`vehicle/carmodels.ts` `KitOwnGear`, `kitBase`), and
+  the parts registry gains the foreign cars' driveline (`parts/registry.ts`
+  `FOREIGN_ENGINE_VARIANTS`, `FOREIGN_GEARBOX_VARIANTS`: `engine_daewoo_g15mf`, 55 kW,
+  123 Nm; `gearbox_opel_f16_nexia`, 3.545 … 0.707 on 3.944), which the Espero, Astra F and
+  Vectra A will reuse. From the Nexia repair manual: 969 kg, 50 l, 175/70 R13, 4.9 m;
+  `tools/reality.ts kit_nexia` 164 km/h against 163, the turn within 0.5 %, the 0-100
+  15.3 s against drom.ru's 12.5 accepted as catalogue-optimistic. 13 258 triangles;
+  `tools/kit-zfight.ts` PASS, `tools/kit-proportions.ts` hard gates pass, the 22 earlier
+  kit cars identical by geometry hash. Not yet seen in the lab.
 
 - A ROADSIDE UAZ-2206'S MIDDLE SIDE DOOR OPENS, AND ITS BAY IS REACHED THROUGH IT
   (render/carmodel.ts `STATIC_SHELL_DOORS`, `kitStaticParts`; render/staticlids.ts;

@@ -523,6 +523,16 @@ const TARGETS: Readonly<Record<string, Target>> = {
     source: 'as sa_azlk2141: AO moskvich-2141 (2141-01, VAZ-2106-70 engine; brake, gross); AP azlk/2141-moskvich/1-2-tekhnicheskie-dannye-i-kharakteristiki-avtomobilejj-moskvich.html; geometry kit_azlk2141 row',
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.109 },
   },
+  // The foreign kit cars, on their own running gear (no catalogue sibling).
+  kit_nexia: {
+    wheelbase: 2.52, track: 1.4, radius: 0.288, top: 163, to100: 12.5,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 4.9, lat: null, hz: 1.3,
+    brake80: null, grossKg: 1404,
+    source: 'Daewoo Nexia 1.5 GL (G15MF): Nexia repair manual table 3ruk.ru/vehicles/jado/tezeab/lla and remkomplekt.org/daewoo-nexia/tehnicheskie-harakteristiki.html (163 km/h, 4.9 m, gross 1404); 0-100 drom.ru catalog/daewoo/nexia/161911 (it prints 175 km/h); no braking ceiling found; geometry kit_nexia row',
+    // 55 kW on 1119 kg is the 21099's power to weight (51.5 kW, 1120 kg: 13.5 s printed,
+    // +23% on the bench); the 12.5 s stands beside drom.ru's 175 km/h, not the manual's 163.
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.221 },
+  },
 };
 
 /*
@@ -573,6 +583,7 @@ const FACTORY_ENGINES: Readonly<Record<string, MakerEngine>> = {
   engine_vaz_1111: { power: { kw: 21.5 }, powerRpm: 5600, torque: { nm: 44.1 }, torqueRpm: 3400, source: 'VAZ-1111; AO 1998 AvtoVAZ catalogue' },
   engine_niva_1600: { power: { kw: 53.7 }, powerRpm: 5400, torque: { kgfm: 11.6 }, torqueRpm: 3400, source: 'VAZ-2121; AO VAZ-2121 catalogue' },
   engine_niva_1700: { power: { kw: 58 }, powerRpm: 5200, torque: { nm: 127 }, torqueRpm: 3000, source: 'VAZ-21213, GOST 14846-81; 21213 manual (lada-niva.ru)' },
+  engine_daewoo_g15mf: { power: { kw: 55 }, powerRpm: 5400, torque: { nm: 123 }, torqueRpm: [3200, 3400], source: 'Daewoo G15MF; Nexia repair manual table (3ruk.ru, remkomplekt.org)' },
   // Not a catalogue engine: the rally 2105's own build, held to the build's figures.
   engine_lada_rally: { power: { ps: 100 }, powerRpm: 6400, torque: { nm: 132 }, torqueRpm: 4200, source: 'pack rally build targets, not factory' },
 };

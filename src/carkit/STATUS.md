@@ -54,7 +54,9 @@ to the kit tyre. The kit's five generated wheel styles were removed at the owner
    2026-10-16 (awaiting the owner's review); the GAZ-21 is not wanted.
 4. **Trucks**, starting with the **ZIL-130**. The ZIL-150 is postponed (owner, 2026-10-18).
 5. **Foreign cars of the 1990s** (owner's list, 2026-10-18; order within it not set yet):
-   see "Foreign cars: the owner's list" below.
+   see "Foreign cars: the owner's list" below. First batch, the GM cars on Opel running
+   gear: the **Daewoo Nexia** drafted 2026-10-18, and with it the foreign running-gear
+   path; the Espero, Astra F and Vectra A next.
 
 Off the roadmap: the **AZLK-2141** (Moskvich) drafted 2026-10-16 on the pack's `sa_azlk2141`
 running gear (awaiting the owner's review).
@@ -100,6 +102,7 @@ Triangle counts in README.
 | GAZ-24 | `BODY_GAZ24` + `LOOK_GAZ24` (volgas.ts), platform `classic` | 3dcar.ru `gaz_24.jpg` factory four-view (5.10 mm/px from the drawn wheelbase; dimension lines 4735 / 2800 / 756 / 1490 / 1800 / 1476 / 1420); Commons photos (`measurements-volga.md` §1, §3) | draft, review 1 worked in (greenhouse with quarter light, post and fixed pane; arched roof `roofDrop`, `railBend`; crowned nose, boot slope; blade `wrap` 0.33 / 0.43); review 2 (2026-10-16 evening): slim A pillar, the quarter light close behind it (`measurements-volga.md` §3.5); awaiting the owner's review | running gear `sv_gaz24`'s; the classic platform's VAZ dash and seats; C-pillar louvre, plates, the bonnet's raised centre (15 mm) not modelled; wiper length [E]; rear fangs from the early photos; window corners chamfered, not round; the quarter light runs down the pillar to the belt (four-sided, its foot 0.19 ahead of the drawn rounded corner) |
 | GAZ-31029 | `BODY_GAZ31029` + `LOOK_GAZ31029` (volgas.ts): the 24's middle stations + 0.14, its own greenhouse columns, nose and tail | the-blueprints.com GAZ-31029 drawing (5.761 mm/px, heights × 1.028 to the 24's roof); `gaz_3102.jpg` cross-check; Commons photos (`measurements-volga.md` §2, §3) | draft, review 1 worked in (single front pane, raked rear glass, arched roof, rounded tail corners, blade `wrap` 0.415 / 0.25); review 2 (2026-10-16 evening): slim A pillar, the front glass close behind it (§3.5); awaiting the owner's review | running gear `cf_gaz31029`'s; flap side the drawing's (left), unchecked; fog lamps, plates, badge not modelled; the classic platform's dash; the front glass's foot 0.12 ahead of the drawn one |
 | AZLK-2141 | `BODY_2141` + `LOOK_2141` (azlk.ts), platform `samara` (its layout as is) | the-blueprints.com "Moskvich 2141 (1986-2001)" drawing (5.714 mm/px from the drawn hubs x 180.5 / 632, ground y 331; dimension lines 4350 / 2580 / 1400; drawn tips 64 mm short, put on the bumpers); factory figures drom.ru / wiki.zr.ru / njcar.ru; Commons photos (`measurements-2141.md`) | draft, review 1 worked in (2026-10-16: slim A pillar with the door's glass close behind it; both bumpers' tops under the lamps), awaiting the owner's review | running gear `sa_azlk2141`'s (the 2141-01, VAZ 1.6); door frames, B and C pillars painted (black on the car); the front door's glass runs down the pillar (on the car its foot stands behind the mirror's black sail); the reversing cell full height (the lower half on the car); the bumpers one height all round (lower along the flanks on the car); fuel flap on the right rear wing [E: no right-side photo found]; plates, bumper intakes, the doors' rubbing line, the quarter's black triangle not modelled; traffic odds the default (half hurried, half frantic: not in `DRIVER_ODDS`) |
+| Daewoo Nexia | `BODY_NEXIA` + `LOOK_NEXIA` (daewoo.ts), platform `samara`, `CABIN_NEXIA` | 3dcar.ru `daewoo_nexia.jpg` dimensioned four-view (4.851 mm/px from the drawn hubs x 717.5 / 1237; heights hung from the hubs, the drawn ground 53 mm high for its small tyres; drawn tips 47 mm over 4482, cut from the bumpers); factory figures the Nexia repair manual (3ruk.ru, remkomplekt.org) and drom.ru; Commons photos (`measurements-nexia.md`) | draft 2026-10-18 (checked on headless overlays on the drawing only), awaiting the lab and the owner's review | the first car on its own running gear (`GEAR_DAEWOO_NEXIA: KitOwnGear`, `engine_daewoo_g15mf`, `gearbox_opel_f16_nexia`); early base GL only (grey bumpers, no lid garnish); the lid's sides upright (±0.39; the lamps' inner edges lean); tail lamps two flat bands; mirror sail, front quarter post, plates, badge, grille slot not modelled; overhangs [E]; the dash's heights hung from the Samara's cluster; traffic odds the default (not in `DRIVER_ODDS`) |
 
 **2115 details — done** (commit 8620a22):
 late-face head lamps and indicators (since the third review a `cornerLamps` unit, flush and wrapping round the corner; since the fourth the tail lamps too, and the Samaras' face rakes back, `frontLean`), the slot under the bonnet
@@ -213,8 +216,15 @@ Vitara.
 
 What every one of them needs, whatever the body: no catalogue has a foreign sibling
 (`KIT_CARS` rides on `sv_*`/`sa_*`/`cf_*` running gear), so each needs its own running
-gear row (engine, gearbox, mass, tyres, aero) and probably new engine/gearbox variants in
-the parts registry; a drawing (four-view) and measurements file per car, as for the VAZes.
+gear and probably new engine/gearbox variants in the parts registry; a drawing (four-view)
+and measurements file per car, as for the VAZes. The path exists since the Nexia
+(2026-10-18): a `KIT_CARS` row names a `KitOwnGear` instead of a sibling id (every field a
+catalogue entry drives on: mass, tyre, engine, gearbox, tank, grip, brakes, springs, lock,
+drive bias, handling profile, front share, Cd·A, aero), and the engines and gearboxes go
+in `parts/registry.ts` `FOREIGN_ENGINE_VARIANTS` / `FOREIGN_GEARBOX_VARIANTS`, each with a
+`render/partmesh.ts` case and a `tools/reality.ts` `FACTORY_ENGINES` row. A GM sibling on
+the same unit names the same variant; one with other ratios or another axle gets its own
+gearbox entry. `DRIVER_ODDS` (world/traffic.ts) has no row for them yet: the default odds.
 
 Estimated effort by what the generator already has (one lofted tub, moulded body-colour
 bumpers, corner lamps, `rearKnee` hatches, `rearLean` estates, spare on the rear door,
@@ -334,6 +344,7 @@ marked [E] and says where it comes from. Running gear lives in `vehicle/carmodel
 | **2115** | **2115 1.5i** | **985** | **`engine_vaz_2111` 57.2 kW/5400, 115.7 Nm/3000** | **Samara box, 3.706** (`gearbox_samara_5_tall`) | 165/70 R13 | 43 | 0.60 [E] | servo | 0.589 | 0.84 | Samara, saloon |
 | **2110** | **21102** | **1020** | **`engine_vaz_2111`** | **Samara box, 3.706** | 175/70 R13 | 43 | 0.62 [E] | servo | 0.604 | **0.67** | Samara, `AERO_VAZ_2110` |
 | **2112** | **21122** | **1020** | **`engine_vaz_2111`** | **Samara box, 3.706** | 175/70 R13 | 43 | 0.62 [E] | servo | 0.604 | **0.67** | Samara, `AERO_VAZ_2110` |
+| Nexia (2026-10-18) | Nexia 1.5 GL (G15MF) | 969 | `engine_daewoo_g15mf` 55 kW/5400, 123 Nm/3200–3400 | `gearbox_opel_f16_nexia` 3.545/1.952/1.276/0.892/0.707, 3.944 | 175/70 R13 | 50 | 0.62 [E] | servo | 0.656 | 0.74 | Samara, `AERO_DAEWOO_NEXIA` |
 
 Bold: changed in this audit. Before it, the 2110, 2112 and 2115 drove the 21099 entire:
 970 kg, the 1.5 carburettor, the 3.94 axle and the 21099's shape.
@@ -361,6 +372,7 @@ known deviation held within 3 points), turn ±3%, wheelbase/track/radius ±0.5%.
 | 2115 | 985 | 2.460 | 1.400 / 1.370 | 158 / 160 | 13.2 / 15.4 ~ | 38 / 33.2 | 5.2 / 3.88 / 3.91 |
 | 2110 | 1020 | 2.492 | 1.400 / 1.370 | 167 / 171 | 14 / 15.5 ~ | 38 / 33.2 | 5.2 / 3.86 / 3.84 |
 | 2112 | 1020 | 2.492 | 1.400 / 1.370 | 167 / 171 | 14 / 15.5 ~ | 38 / 33.3 | 5.2 / 3.86 / 3.84 |
+| Nexia (2026-10-18) | 969 | 2.520 | 1.400 / 1.406 | 163 / 164 | 12.5 / 15.3 ~ | – / – (none found) | 4.9 / 3.50 / 3.52 |
 
 Loaded wheelbase, front track and rolling radius equal the factory figures on all 13
 (0.0%). Threshold 100-0 against a road test: 2110 54.6 m against Za Rulem's 55.0 m for a

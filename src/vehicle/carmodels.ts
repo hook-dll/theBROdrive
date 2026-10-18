@@ -851,6 +851,13 @@ const AERO_VAZ_2110: AeroSpec = { frontalArea: 2.05, liftFront: 0.08, liftRear: 
  * so the Niva's shape figures on its own 1.785 m × (2.02 − 0.22) m × 0.85 frontal area.
  */
 const AERO_UAZ_3151: AeroSpec = { frontalArea: 2.75, liftFront: 0.2, liftRear: 0.1, sideSlope: 1.8, yawSlope: 0.33 };
+/**
+ * Daewoo Nexia: the Opel Kadett E's notchback with its own nose and tail, Cd 0.35 by
+ * automobile-catalog's estimate (no maker's figure found). The 21099's lift and crosswind
+ * figures (a nose over a short notched boot) on its own frontal area, 1.662 m ×
+ * (1.393 − 0.16) m × 0.92.
+ */
+const AERO_DAEWOO_NEXIA: AeroSpec = { frontalArea: 1.89, liftFront: 0.09, liftRear: 0.21, sideSlope: 1.35, yawSlope: 0.47 };
 
 
 
@@ -1153,6 +1160,11 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   // 0.372 rolling radius and 0.225 width are the running-gear sibling's tyre
   // (sa_uaz330364). src/carkit/measurements-uaz.md §1, §3.1.
   kit_uaz2206:    { length: 4.380, width: 1.940, height: 2.101, clearance: 0.220, wheelbase: 2.300, frontTrack: 1.445, rearTrack: 1.445, wheelRadius: 0.372, tyreWidth: 0.225, frontOverhang: 0.993 },
+  // The Daewoo Nexia N100 saloon: 4482 × 1662 × 1393, 2520 wheelbase, 1400/1406 tracks,
+  // 175/70 R13 (drom.ru catalogue, Nexia 1.5 MT SOHC GL; 3dcar.ru drawing: 2520, 1400,
+  // 1406, 1663); 160 clearance (the Nexia repair manual, 3ruk.ru; drom.ru prints 158).
+  // src/carkit/measurements-nexia.md.
+  kit_nexia:      { length: 4.482, width: 1.662, height: 1.393, clearance: 0.160, wheelbase: 2.520, frontTrack: 1.400, rearTrack: 1.406, wheelRadius: 0.288, tyreWidth: 0.175 },
 };
 
 function factoryGeometry(id: string): FactoryGeometry {
@@ -2510,10 +2522,62 @@ const GEAR_UAZ_2206: KitRunningGear = {
 };
 
 /**
+ * The running gear of a kit car no catalogue body carries (the foreign cars): every field a
+ * catalogue entry drives on, its own, with nothing inherited from a sibling.
+ */
+type KitOwnGear = KitRunningGear &
+  Required<Pick<Entry, 'bodyClass' | 'rearDriveBias' | 'suspension' | 'handlingProfile'>> &
+  Pick<Entry, 'rearBrakeValve' | 'antiRoll' | 'rollCentre' | 'frontDiff' | 'rearDiff'>;
+
+/**
+ * Daewoo Nexia 1.5 GL (G15MF, five-speed), per its repair manual's table (3ruk.ru/vehicles/
+ * jado/tezeab/lla, remkomplekt.org/daewoo-nexia/tehnicheskie-harakteristiki.html): kerb 969
+ * kg, gross 1404, 163 km/h, a 4.9 m turning radius, the F16 box on the 3.944 axle, 175/70
+ * R13, a 50 l tank (drom.ru's catalogue page agrees; its prose says 60), vacuum servo,
+ * front discs and rear drums. MacPherson struts and a twist beam: the Samara's layout and
+ * preset. Tyre the road one; lock set on the 4.9 m radius. No axle split is printed: the
+ * transverse front-drive 0.62 [E]. Cd·A from the manual's 163 km/h on the bench (no
+ * maker's Cd; automobile-catalog estimates 0.35 on about 1.9 m², 0.67). The rear brakes'
+ * pressure regulators are fixed limiters whose figures no source prints: none modelled.
+ */
+const GEAR_DAEWOO_NEXIA: KitOwnGear = {
+  bodyClass: 'car',
+  mass: 969,
+  tyre: KAMA_217,
+  engineId: 'engine_daewoo_g15mf',
+  gearboxId: 'gearbox_opel_f16_nexia',
+  tankLitres: 50,
+  wheelGrip: KAMA_217_GRIP,
+  brakeDecelG: BRAKES_SERVO_G,
+  suspension: SUSP_SAMARA,
+  steerLock: 0.656,
+  rearDriveBias: 0,
+  handlingProfile: 'road',
+  frontWeightShare: 0.62,
+  dragArea: 0.74,
+  aero: AERO_DAEWOO_NEXIA,
+};
+
+/** A kit car on its catalogue sibling's running gear (`gear` over it where it differs), or on its own. */
+type KitCarRow =
+  | readonly [id: string, sibling: string, kit: string, label?: string, gear?: KitRunningGear]
+  | readonly [id: string, own: KitOwnGear, kit: string, label: string, gear?: undefined];
+
+/** The catalogue entry a kit car's row starts from: its sibling's, or one made of its own running gear. */
+function kitBase(id: string, source: string | KitOwnGear, kit: string, label: string | undefined): Entry {
+  if (typeof source !== 'string') return { ...source, id, label: label ?? id, dir: KIT, glb: kit };
+  const base = ENTRIES.find((e) => e.id === source);
+  if (!base) throw new Error(`Kit car "${id}" names a missing sibling "${source}"`);
+  return base;
+}
+
+/**
  * Kit bodies (src/carkit), the game's cars. Each takes the running gear of the catalogue
  * body it is modelled on (the same engine, gearbox, springs and masses: a pack body, or
- * for the Oka the carforge one, whose running gear is its factory manual's), and a car
- * no body exists for takes a label and its own running gear over the nearest sibling's.
+ * for the Oka the carforge one, whose running gear is its factory manual's), a car no
+ * body exists for takes a label and its own running gear over the nearest sibling's, and
+ * a car with no sibling at all (the foreign cars) names its whole running gear instead
+ * (`KitOwnGear`).
  */
 const KIT_CARS: readonly Entry[] = (
   [
@@ -2542,10 +2606,11 @@ const KIT_CARS: readonly Entry[] = (
     ['kit_uaz469', 'cf_uaz31512', 'uaz469', 'UAZ-469'],
     // The 2206 bus on the 330364 flatbed's chassis, its own mass and tanks.
     ['kit_uaz2206', 'sa_uaz330364', 'uaz2206', 'UAZ-2206', GEAR_UAZ_2206],
-  ] satisfies readonly (readonly [id: string, sibling: string, kit: string, label?: string, gear?: KitRunningGear])[]
-).map(([id, sibling, kit, label, gear]) => {
-  const base = ENTRIES.find((e) => e.id === sibling);
-  if (!base) throw new Error(`Kit car "${id}" names a missing sibling "${sibling}"`);
+    // The foreign cars: no catalogue body to borrow from.
+    ['kit_nexia', GEAR_DAEWOO_NEXIA, 'nexia', 'Daewoo Nexia'],
+  ] satisfies readonly KitCarRow[]
+).map(([id, source, kit, label, gear]) => {
+  const base = kitBase(id, source, kit, label);
   return {
     ...base,
     ...gear,

@@ -112,7 +112,8 @@ from the angle he complained about; changes are judged there, not in code.
 | `oka.ts` | The VAZ-1111: `BODY_1111` / `LOOK_1111` (platform `samara`). |
 | `volgas.ts` | The Volgas: `BODY_GAZ24` / `LOOK_GAZ24` (platform `classic`) and the GAZ-31029 on the 24's doors and greenhouse with its own nose and tail. |
 | `azlk.ts` | The AZLK-2141 Moskvich: `BODY_2141` / `LOOK_2141` (platform `samara`). |
-| `measurements-classics.md`, `measurements-estates.md`, `measurements-samara.md`, `measurements-2110.md`, `measurements-niva.md`, `measurements-oka.md`, `measurements-volga.md`, `measurements-2141.md` | Measurement reports: every figure with its drawing or photo, scale and tag. |
+| `daewoo.ts` | The Daewoo Nexia (N100 saloon): `BODY_NEXIA` / `LOOK_NEXIA` (platform `samara`). |
+| `measurements-classics.md`, `measurements-estates.md`, `measurements-samara.md`, `measurements-2110.md`, `measurements-niva.md`, `measurements-oka.md`, `measurements-volga.md`, `measurements-2141.md`, `measurements-nexia.md` | Measurement reports: every figure with its drawing or photo, scale and tag. |
 | `builder.ts` | `PartBuilder`: flat triangles per material slot, transform stack, primitives (`box`, `bevelBox`, `extrude`, `cylinderX/Y/Z`, `torusY`, `bridge`, `poly`), vertex colours. |
 | `body.ts` | `BodyFrame` (cross-section, deck and lid lookups) and `buildShell`: tub, greenhouse and roof as one face list, then cut into parts. Shell constants (`SHUT_GAP`, `JAMB_DEPTH`, `DOOR_THICKNESS`, `NOTCH_WALL`, …). |
 | `exterior.ts` | End faces (`FaceLook.items` / `.lid`), bumpers swept round the corners, sill strip, flank strips (waist moulding, feature line: `buildFlankStrip`), repeaters, flank lamps, mirrors, handles, wipers, filler neck. |
@@ -130,7 +131,7 @@ Integration outside the folder:
 
 - `vehicle/carmodels.ts`: `CarModelDef.kit` (build from a spec instead of reading `file`),
   `CarModelDef.clearGlass`, `FACTORY_GEOMETRY` rows `kit_*`, the `KIT_CARS` list (each kit
-  car on the running gear of an `sv_*` sibling), `DISTINCT_SOVIET_WHEEL_SETS`, `CAR_MODELS`
+  car on the running gear of a catalogue sibling, or on its own, `KitOwnGear`), `DISTINCT_SOVIET_WHEEL_SETS`, `CAR_MODELS`
   (= `KIT_CARS`: the world's cars and the car lab's); every other pack is only resolvable
   through `carModel(id)` for the running gear and the wheel sets, in no list anything draws.
 - `save/save.ts` `worldModelId`: a saved `sv_*`/`sa_*`/`gt_*` id loads as `kit_<same car>`
@@ -367,6 +368,7 @@ cabin: … }`) share everything not overridden. Current families:
 | `BODY_1111` | 3dcar.ru `vaz_1111_oka.jpg` (`oka.ts`) | 1111 |
 | `BODY_GAZ24` | 3dcar.ru `gaz_24.jpg` factory four-view (`volgas.ts`) | GAZ-24; GAZ-31029 (`BODY_GAZ31029`: the 24's columns and middle stations moved back 0.14, its own nose and tail from the-blueprints.com drawing) |
 | `BODY_2141` | the-blueprints.com "Moskvich 2141 (1986-2001)" drawing (`azlk.ts`) | AZLK-2141 |
+| `BODY_NEXIA` | 3dcar.ru `daewoo_nexia.jpg` dimensioned four-view (`daewoo.ts`) | Daewoo Nexia |
 
 ### Look (`KitLook`)
 
@@ -462,8 +464,10 @@ at the cowl. Existing dashes: `CABIN_2101` (ribbon speedometer), `CABIN_2103` (f
 wood), `CABIN_2105` (own pod), `CABIN_2107` (one-piece "euro" panel), `CABIN_2110` (tall
 face, hood over swapped big dials, two big centre vents, heater panel, radio low in the
 stack), `CABIN_1111` (ribbon speedometer in a small hood), `CABIN_2131` (the 2121's with
-the bench further back); the Samaras and the AZLK-2141 use the `samara` platform's layout
-as is, the 2121 the `niva` platform's.
+the bench further back), `CABIN_NEXIA` (a rounded hood over a central speedometer, the
+tachometer left and two small dials right, end vents, two centre vents over three heater
+knobs); the Samaras and the AZLK-2141 use the `samara` platform's layout as is, the 2121
+the `niva` platform's.
 
 ## Scene contract
 
@@ -722,6 +726,15 @@ Working files (crops, grids, overlays) go in `/tmp/<family>/`; only the report i
   pack has no 2110/2112/2115 body; the precedent (2115) is the closest sibling
   (`sv_vaz21099`) plus a label. Niva-family siblings (`sv_niva`, `sv_niva_long`) keep their
   off-road wheels automatically.
+- A car no catalogue carries (the foreign cars) names its whole running gear instead of a
+  sibling: `['kit_nexia', GEAR_DAEWOO_NEXIA, 'nexia', 'Daewoo Nexia']`, a `KitOwnGear`
+  (mass, tyre, engine, gearbox, tank, grip, brakes, springs, lock, drive bias, handling
+  profile, front share, Cd·A, aero; optional valve, bars, roll centres, diffs) with every
+  figure's source. Its engine and gearbox go in `parts/registry.ts`
+  (`FOREIGN_ENGINE_VARIANTS`, `FOREIGN_GEARBOX_VARIANTS`), each with a case in
+  `render/partmesh.ts` and the engine's maker figures in `tools/reality.ts`
+  `FACTORY_ENGINES`; add the car's factory targets to `TARGETS` there. `DRIVER_ODDS`
+  (world/traffic.ts) gives a model with no row the default odds.
 
 ### 5. Fit row
 
@@ -886,6 +899,7 @@ within `KIT_FINE_M`; "Far" = everything except the four detail groups.
 | GAZ-24 | 13 366 | 6 558 | 4 209 | 1 747 | 401 | 294 | 560 | 1 344 | 7 902 |
 | GAZ-31029 | 11 888 | 5 018 | 4 247 | 1 747 | 421 | 294 | 564 | 1 344 | 6 362 |
 | AZLK-2141 | 12 131 | 5 243 | 4 411 | 1 751 | 617 | 60 | 456 | 1 344 | 6 587 |
+| Nexia | 13 258 | 5 858 | 4 909 | 1 761 | 639 | 52 | 456 | 1 344 | 7 202 |
 
 The owner set the budget aside for the 2110 and 2112 (the rounded rear shut line adds side
 rows to every tub column).

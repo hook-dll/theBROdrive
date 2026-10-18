@@ -1264,6 +1264,67 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
   },
 ];
 
+/*
+ * ---- the foreign kit cars' own driveline ----
+ *
+ * The foreign kit cars (src/carkit: Daewoo, Opel, ...) have no catalogue body to borrow a
+ * driveline from, so their engines and gearboxes are here, each one exact factory version
+ * with its source, as the Soviet units above are. The GM cars of the 1990s share GM
+ * Family I/II engines and Opel F13/F16/F18 transaxles: a sibling with the same unit
+ * names this entry, one with other ratios or another final drive gets its own.
+ */
+const FOREIGN_ENGINE_VARIANTS: readonly PartVariant[] = [
+  {
+    // UzDaewoo/Daewoo G15MF, the Nexia's base 1.5 (GM Family I, 76.5 x 81.5 mm, 1.498 l,
+    // SOHC eight valves, multipoint injection): 55 kW (75 hp) at 5400 and 123 Nm at
+    // 3200-3400 (the Nexia repair manual's table, remkomplekt.org/daewoo-nexia/
+    // tehnicheskie-harakteristiki.html and 3ruk.ru/vehicles/jado/tezeab/lla; drom.ru
+    // prints the torque at 3200). No source gives its red line: the rated speed plus the
+    // usual 7%, 5800 (the cluster photographed, "Daewoo Nexia Tacho" on Commons, reds from
+    // 6500 but is a DOHC car's). No bare-engine mass is printed: the VAZ-2111's, an iron
+    // 1.5 four of the same size [E].
+    id: 'engine_daewoo_g15mf',
+    kind: 'engine',
+    label: '1.5 Daewoo G15MF four',
+    mass: 118,
+    fits: ['car'],
+    engine: {
+      peakPowerKw: 55,
+      powerPeakRpm: 5400,
+      peakTorqueNm: 123,
+      torquePeakRpm: 3300,
+      redlineRpm: 5800,
+      idleRpm: 850,
+      bsfc: 0.3,
+      brakingCoeff: 0.0203,
+      cylinders: 4,
+    },
+  },
+];
+
+const FOREIGN_GEARBOX_VARIANTS: readonly PartVariant[] = [
+  {
+    // The Nexia's five-speed (GM/Opel F16 family): 3.545 / 1.952 / 1.276 / 0.892 / 0.707,
+    // reverse 3.333, on the G15MF's 3.944 final drive (the repair manual's table,
+    // 3ruk.ru/vehicles/jado/tezeab/lla: 3.944 with the G15MF, 4.176 with the A15MF;
+    // remkomplekt.org prints the same ratios with 4.19 / 3.94 unassigned). Front drive,
+    // final drive in the casing: 0.92, as the Samara transaxle. Mass [E: the Samara's].
+    id: 'gearbox_opel_f16_nexia',
+    kind: 'gearbox',
+    label: 'Opel F16 five-speed (Nexia)',
+    mass: 45,
+    fits: ['car'],
+    gearbox: {
+      ratios: [3.545, 1.952, 1.276, 0.892, 0.707],
+      reverse: 3.333,
+      finalDrive: 3.944,
+      shiftTime: 0.36,
+      automatic: false,
+      efficiency: 0.92,
+    },
+  },
+];
+
 /**
  * The radiator. One core for every engine: what decides how well an engine is cooled
  * is how much water is in it (`waterCoolingEffect` in vehicle/cooling.ts), not which
@@ -1289,6 +1350,8 @@ export const ALL_VARIANTS: readonly PartVariant[] = [
   ...LADA_VARIANTS,
   ...SOVIET_ENGINE_VARIANTS,
   ...SOVIET_GEARBOX_VARIANTS,
+  ...FOREIGN_ENGINE_VARIANTS,
+  ...FOREIGN_GEARBOX_VARIANTS,
 ];
 
 const VARIANTS_BY_ID = new Map(ALL_VARIANTS.map((v) => [v.id, v]));
