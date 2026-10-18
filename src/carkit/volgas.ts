@@ -43,12 +43,16 @@ export const BODY_GAZ24: KitBody = {
     // The cowl: the screen's foot [D: x 775, y 120].
     { s: 1.357, sill: 0.262, crease: 0.8, belt: 0.955, deck: 1.07, wSill: 0.875, wCrease: 0.9, wBelt: 0.885 },
     { s: 2.4, sill: 0.262, crease: 0.8, belt: 0.96, deck: 1.0, wSill: 0.875, wCrease: 0.9, wBelt: 0.885 },
-    // The back light's foot [D: x 1232, y 130]; the boot falls quickly behind it, then
-    // gently [D side view, its top line: 1.015 at s 3.75, 0.995 at 3.8, 0.984 at 3.9, 0.979
-    // at 4.0, 0.964 at 4.1].
-    { s: 3.688, sill: 0.262, crease: 0.8, belt: 0.955, deck: 1.04, wSill: 0.875, wCrease: 0.9, wBelt: 0.885 },
-    { s: 3.8, sill: 0.273, crease: 0.797, belt: 0.954, deck: 0.997, wSill: 0.874, wCrease: 0.899, wBelt: 0.884 },
-    { s: 4.086, sill: 0.3, crease: 0.79, belt: 0.95, deck: 0.972, wSill: 0.87, wCrease: 0.895, wBelt: 0.88 },
+    // Under the back light's foot [D: x 1232, y 130; its line meets the deck at 3.725]. The
+    // boot's centre line runs on from under the glass as one convex curve through the drawn
+    // top line from s 3.9 (0.984 at 3.9, 0.979 at 4.0, 0.964 at 4.1 [D side view]); the
+    // drawn top line's steep fall from 1.04 to 0.995 over 3.69–3.8 is the C pillar's foot
+    // running down onto the wings, not the lid (P "GAZ Volga M-24 1970-1977 Rear": the lid
+    // smooth and gently falling from the window's frame). A deck that fell with it left a
+    // valley folding 11–17° across the lid at s 3.8 (kit-surface).
+    { s: 3.725, sill: 0.262, crease: 0.8, belt: 0.955, deck: 1.005, wSill: 0.875, wCrease: 0.9, wBelt: 0.885 },
+    { s: 3.8, sill: 0.273, crease: 0.797, belt: 0.954, deck: 0.996, wSill: 0.874, wCrease: 0.899, wBelt: 0.884 },
+    { s: 4.086, sill: 0.3, crease: 0.79, belt: 0.95, deck: 0.966, wSill: 0.87, wCrease: 0.895, wBelt: 0.88 },
     // The boot lid's trailing edge [D: x 1400, y 161], then the tail face [D: x 1418].
     { s: 4.55, sill: 0.4, crease: 0.78, belt: 0.89, deck: 0.89, wSill: 0.845, wCrease: 0.87, wBelt: 0.86 },
     { s: 4.637, sill: 0.42, crease: 0.77, belt: 0.865, deck: 0.865, wSill: 0.83, wCrease: 0.855, wBelt: 0.845 },
@@ -91,7 +95,9 @@ export const BODY_GAZ24: KitBody = {
       // (x 1080); below the belt the edge runs forward to the sill ahead of the arch [D:
       // upright to y 212, to x 1118 at the door's bottom].
       { s: 3.203, top: 2.94, upper: 'body', foot: { y: 0.62, s: 3.107 } },
-      // The C pillar to the back light's foot; the roof's rear end [D: x 1160].
+      // The C pillar to the back light's foot; the roof's rear end [D: x 1160]. Kept at the
+      // drawn 3.688: moved with the deck's station to 3.725 it put the far mesh's sill 5 mm
+      // off the chrome sill strip (kit-zfight).
       { s: 3.688, top: 3.32 },
     ],
     // Gutter y 58 [D], roof 1.51 [D: dimension 1490 at the drawing's 5.07 mm/px]; the roof

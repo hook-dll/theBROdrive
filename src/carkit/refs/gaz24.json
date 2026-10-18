@@ -17,7 +17,7 @@
     "screenFoot": { "v": [1.357, 1.091], "src": "D side cowl (775, 120), measurements-volga.md §1.1" },
     "screenTop": { "v": [1.75, 1.459], "tol": 0.03, "src": "D side roof's front (852, 46-50), measurements-volga.md §1.1" },
     "backLightTop": { "v": [3.336, 1.387], "src": "D side roof scan: back light's top 1.387 at 3.336, measurements-volga.md §3.2" },
-    "backLightFoot": { "v": [3.688, 1.04], "src": "D side (1232, 130), measurements-volga.md §1.1" },
+    "backLightFoot": { "v": [3.688, 1.04], "src": "D side (1232, 130), measurements-volga.md §1.1", "accepted": { "v": [3.637, 1.04], "why": "the boot lid one convex curve from under the glass (deck 1.005 at 3.725, volgas.ts): the drawn top line falling 1.04 → 0.995 over 3.69–3.8 folded the lid in 11–17° (kit-surface); the glass line meets it 5 cm ahead (P GAZ Volga M-24 1970-1977 Rear: the lid smooth from the window frame)" } },
     "beltY": { "v": 1.0, "src": "D side window sill y 138, measurements-volga.md §1.1" },
     "railY": { "v": 1.36, "src": "D side window tops y 65-70 (1.37-1.35), measurements-volga.md §1.1" },
     "doorFront": { "v": [1.459, 2.326], "src": "D side front door edges x 795 / 965, measurements-volga.md §1.1" },

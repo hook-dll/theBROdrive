@@ -19,7 +19,7 @@
     "doorFront": { "v": [1.46, 2.437], "src": "D side front shut line x 826-833 (1.44-1.478), B pillar shut line 2.433-2.44 (§1)", "tol": 0.04 },
     "doorRear": { "v": [2.437, 3.355], "src": "D side B pillar shut line 2.433-2.44, rear frame and shut line 3.35-3.36 (§1)" },
     "doorBottomY": { "v": 0.303, "src": "D side door bottom py 322 (§1)" },
-    "roofHalfWidth": { "v": 0.52, "src": "D front view the roof's edge +-0.52 at 1.396 (§1.2)" },
+    "roofHalfWidth": { "v": 0.56, "src": "D front view the A pillar's outer line ±0.56 at the rail 1.348 (§1.2); the roof's edge over the rail's chamfer is ±0.52 at 1.396" },
     "beltHalfWidth": { "v": 0.766, "src": "D front view +-0.766 at 0.87, the belt (§1.2)" }
   },
   "dash": {

@@ -310,7 +310,11 @@ export const BODY_2115: KitBody = {
   stations: [
     { s: 0.0, sill: 0.36, crease: 0.6, belt: 0.775, deck: 0.79, wSill: 0.77, wCrease: 0.78, wBelt: 0.77 },
     { s: 0.17, sill: 0.33, crease: 0.6, belt: 0.8, deck: 0.815, wSill: 0.785, wCrease: 0.8, wBelt: 0.785 },
-    { s: 0.5, sill: 0.285, crease: 0.6, belt: 0.83, deck: 0.85, wSill: 0.795, wCrease: 0.815, wBelt: 0.79 },
+    // wBelt 0.796 (was 0.79): the wing's top in plan one convex curve from the lamps to the
+    // cowl (0.785 → 0.796 → 0.81; 0.79 bent it the other way), and the face's lean over the
+    // shoulder near even, 4.3° → 4.7° → 3.2° at the corner, here and the cowl (it went
+    // 4.3° → 6.2° → 3.2°, in and out: kit-surface).
+    { s: 0.5, sill: 0.285, crease: 0.6, belt: 0.83, deck: 0.85, wSill: 0.795, wCrease: 0.815, wBelt: 0.796 },
     ...SALOON_FRONT.filter((st) => st.s >= COWL.s),
     ...SALOON_BOOT,
     { s: 4.105, sill: 0.3, crease: 0.63, belt: 0.915, deck: 0.94, wSill: 0.775, wCrease: 0.8, wBelt: 0.785 },

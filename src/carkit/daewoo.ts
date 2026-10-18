@@ -363,11 +363,13 @@ export const BODY_ESPERO: KitBody = {
     // 4.18, ±0.769 at 4.32, ±0.705 at 4.47].
     { s: 4.3, sill: 0.31, crease: 0.665, belt: 0.955, deck: 0.978, wSill: 0.755, wCrease: 0.775, wBelt: 0.735 },
     { s: 4.5, sill: 0.33, crease: 0.665, belt: 0.925, deck: 0.944, wSill: 0.69, wCrease: 0.71, wBelt: 0.675 },
-    // The tail face: the lid comes down between the corner lamps (topped at 0.925) to the
-    // bumper's band [P "1996 Daewoo Espero orange red rear"], cut at ±0.49 (lamp review: on
-    // the near-square "Maroon Daewoo Espero-003-rear" the corner unit is 0.265 of the lid's
-    // band, 200 / 755 px; ±0.52 gave 0.18).
-    { s: 4.55, sill: 0.33, crease: 0.665, belt: 0.925, deck: 0.64, notch: 0.49, wSill: 0.665, wCrease: 0.685, wBelt: 0.655 },
+    // The tail face: the lid comes down between the corner lamps (topped at 0.925: `belt`
+    // 0.91 + the shoulder's 0.015 rise; at belt 0.925 the corners stood at 0.94, level with
+    // the boot's edge at 4.5, and the lid's top folded in 7–8° across s 4.5, kit-surface) to
+    // the bumper's band [P "1996 Daewoo Espero orange red rear"], cut at ±0.49 (lamp review:
+    // on the near-square "Maroon Daewoo Espero-003-rear" the corner unit is 0.265 of the
+    // lid's band, 200 / 755 px; ±0.52 gave 0.18).
+    { s: 4.55, sill: 0.33, crease: 0.665, belt: 0.91, deck: 0.64, notch: 0.49, wSill: 0.665, wCrease: 0.685, wBelt: 0.655 },
   ],
   shoulder: { inset: 0.04, rise: 0.015 },
   cabin: {
@@ -561,7 +563,7 @@ export const LOOK_ESPERO: KitLook = {
       { kind: 'lens', role: 'reverse', x: { from: { centre: 0.5 }, to: { centre: 0.6 } }, y: { from: ['bumperBottom', 0.04], to: ['bumperBottom', 0.075] }, depth: 0.008, proud: 0.057 },
     ],
     // The red band across the lid between the corner lamps, in line with them (lamp review)
-    // [P maroon rear, rear 20071227, h, orange red]: full height (0.67–0.82, `belt` 0.925
+    // [P maroon rear, rear 20071227, h, orange red]: full height (0.67–0.82, `belt` 0.91
     // here) at its ends, from the lid's cut in to ±0.27 (the step at 45–55 % of its half [P]); between those only its red top down
     // to the corner lamps' split (0.725), the lid's dark strip under it; review 2: the ends'
     // inner edge a slant running down and out (±0.27 at the split to ±0.33 at the foot),
@@ -573,8 +575,8 @@ export const LOOK_ESPERO: KitLook = {
     // as a bulge beside the flush corner lamps; it lies nearly flush now (4 mm, its lower
     // lens 2 mm), in the corner lamps' style.
     lid: [
-      { kind: 'lens', role: 'inert', x: { at: { centre: 0 }, half: 0.483 }, y: { from: ['belt', -0.2], to: ['belt', -0.105] }, depth: 0.008, proud: 0.004 },
-      { kind: 'lens', role: 'inert', x: { from: { centre: 0.33 }, to: { centre: 0.483 } }, y: { from: ['belt', -0.255], to: ['belt', -0.195] }, depth: 0.008, proud: 0.002, slant: { outer: 0, inner: 0.06 } },
+      { kind: 'lens', role: 'inert', x: { at: { centre: 0 }, half: 0.483 }, y: { from: ['belt', -0.185], to: ['belt', -0.09] }, depth: 0.008, proud: 0.004 },
+      { kind: 'lens', role: 'inert', x: { from: { centre: 0.33 }, to: { centre: 0.483 } }, y: { from: ['belt', -0.24], to: ['belt', -0.18] }, depth: 0.008, proud: 0.002, slant: { outer: 0, inner: 0.06 } },
     ],
   },
 };

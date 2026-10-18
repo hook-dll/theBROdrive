@@ -46,12 +46,16 @@
     },
     "overhangRear": {
       "v": 1.057,
-      "src": "D dimension 1057 (both drawings)"
+      "src": "D dimension 1057 (both drawings)",
+      "accepted": {
+        "v": 1.089,
+        "why": "the hubs as drawn on vaz_2107_1982.jpg (635 / 3048, the arches and doors drawn round them), not its dimension line (655 / 2424 / 1057): 4136 − 3048 = 1088 (measurements-classics.md, A discrepancy inside the 2107 drawing); the loader lays the factory 2424 over the drawn axles (kit-proportions: under 8 mm a hub)"
+      }
     },
     "screenFoot": {
       "v": [
         0.985,
-        1.0
+        1
       ],
       "src": "D centre-line screen base s 985, 1000 high (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px))"
     },
@@ -105,10 +109,10 @@
         ],
         [
           2.7,
-          2.71
+          2.729
         ]
       ],
-      "src": "D front glass edge 1.46 at y 1.3 to 2.062; rear drop to the channel; quarter closes at the frame's top corner ~2.71 (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px))"
+      "src": "D front glass edge 1.46 at y 1.3 to 2.062; rear drop to the channel; the fixed quarter closes at its rear edge 2.729 at the rail (the 2104 rear door, which is this one: measurements-estates.md §2.1 table, L1 2933 / 2729 at r4 0.905 / rail 1.375) (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px))"
     },
     "beltY": {
       "v": 0.955,

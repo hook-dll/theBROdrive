@@ -494,7 +494,9 @@ function buildFaceItem(face: EndFace, item: FaceItem, b: PartBuilder): Footprint
           ? [-gw + bars.margin + t * 2 * (gw - bars.margin) - w, y - ey, -gw + bars.margin + t * 2 * (gw - bars.margin) + w, y + ey]
           : [-ex, y - hy + bars.margin + t * 2 * (hy - bars.margin) - w, ex, y - hy + bars.margin + t * 2 * (hy - bars.margin) + w]
         ).map((v, k) => (k % 2 === 0 ? (Math.abs(Math.abs(v) - gw) < 0.004 ? Math.sign(v) * ex : v) : Math.abs(Math.abs(v - y) - hy) < 0.004 ? y + Math.sign(v - y) * ey : v));
-        bar.boxFrom(slot, [x0!, y0!, face.out(b0)], [x1!, y1!, face.out(b1)]);
+        // Over a back, the bar's own back face lies hidden in it, seen from nowhere: not
+        // built (on the 2107's long thin bars those were 14 sliver triangles).
+        bar.boxFrom(slot, [x0!, y0!, face.out(b0)], [x1!, y1!, face.out(b1)], item.back ? face.noBack : 0b111111);
         const print = { poly: rect(x0!, y0!, x1!, y1!), z0: b0, z1: b1 };
         back.cut([face.volume(print)]).append(bar);
         prints.push(print);

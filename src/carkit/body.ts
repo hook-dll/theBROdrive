@@ -63,6 +63,13 @@ export const SHELL_COLOURS = {
 /** `canvas`: a soft top's (`CabinSpec.softTop`), unpainted trim in its colour. */
 type Mat = 'paint' | 'glass' | 'dark' | 'canvas';
 
+/**
+ * A deck quad whose fourth corner stands this far off the other three's plane is split on
+ * a diagonal chosen here (`DECK_FOLD`, else the higher one: an outward fold). Narrow
+ * strips (a flat bonnet's roll-down to its skirt, 7 cm wide) fold by degrees at a few
+ * millimetres of twist.
+ */
+const DECK_TWIST = 0.0005;
 interface Face {
   v: number[];
   owner: string;
@@ -477,6 +484,20 @@ function centroid(points: readonly Vec3[]): Vec3 {
  * The corner at `corner` of the path prev → corner → next, rounded with radius r: points
  * along the arc from the first straight to the second; just the corner when r is 0.
  */
+/**
+ * A quad's corners reordered so the builder's fan (from the first corner) folds it outward
+ * (on the side its winding faces): a face bent out of its plane, by a shut line's gap
+ * placing its corners or by twisted rows, would otherwise fold on the diagonal its
+ * winding happens to start at, in on one side of the car and out on the other (the
+ * UAZ-469's tailgate top, kit-surface). Other polygons as they are.
+ */
+function outwardQuad(p: Vec3[]): Vec3[] {
+  if (p.length !== 4) return p;
+  const n = cross(sub(p[1]!, p[0]!), sub(p[2]!, p[0]!));
+  // p3 under the plane of 0-1-2: the 0-2 fold is a ridge.
+  return dot(n, sub(p[3]!, p[0]!)) <= 0 ? p : [p[1]!, p[2]!, p[3]!, p[0]!];
+}
+
 function fillet(prev: readonly [number, number], corner: readonly [number, number], next: readonly [number, number], r: number): [number, number][] {
   if (r <= 0) return [[corner[0], corner[1]]];
   const unit = (a: readonly [number, number], b: readonly [number, number]): [number, number] => {
@@ -760,9 +781,19 @@ export function buildShell(frame: BodyFrame): ShellResult {
           return Math.abs(m[1] - frame.deckY(frame.zNose - m[2], m[0]));
         };
         const twist = Math.abs(dot(norm(cross(sub(q[1]!, q[0]!), sub(q[2]!, q[0]!))), sub(q[3]!, q[0]!)));
-        if (twist > DECK_FOLD && miss(q[1]!, q[3]!) + DECK_FOLD < miss(q[0]!, q[2]!)) {
-          shell.face([q[0]!, q[1]!, q[3]!], owner, 'paint');
-          shell.face([q[1]!, q[2]!, q[3]!], owner, 'paint');
+        if (twist > DECK_TWIST) {
+          // The diagonal nearer the deck; where neither is, the one standing higher, so the
+          // quad folds outward (a convex deck). Left to the fan, the two sides folded it on
+          // mirrored diagonals: one side in, a dent (the UAZ-469's bonnet skirt, kit-surface).
+          const [m13, m02] = [miss(q[1]!, q[3]!), miss(q[0]!, q[2]!)];
+          const on13 = m13 + DECK_FOLD < m02 || (m02 + DECK_FOLD >= m13 && lerp3(q[1]!, q[3]!, 0.5)[1] > lerp3(q[0]!, q[2]!, 0.5)[1]);
+          if (on13) {
+            shell.face([q[0]!, q[1]!, q[3]!], owner, 'paint');
+            shell.face([q[1]!, q[2]!, q[3]!], owner, 'paint');
+          } else {
+            shell.face([q[0]!, q[1]!, q[2]!], owner, 'paint');
+            shell.face([q[0]!, q[2]!, q[3]!], owner, 'paint');
+          }
         } else {
           shell.face(q, owner, 'paint');
         }
@@ -952,7 +983,8 @@ export function buildShell(frame: BodyFrame): ShellResult {
       const corner = column.cornerDrop ?? 0;
       const t: Vec3 = P(side * cabin.railHalf, cabin.rail - (column.drop ?? corner) - frame.roofDrop(column.top), column.top);
       const last = i === cabin.columns.length - 1;
-      let k = along(b, t, b[1] + cabin.glassBottom);
+      // `glassRise` lifts the glass's foot on this column: the frame under it is the mirror's sail.
+      let k = along(b, t, b[1] + cabin.glassBottom + (column.glassRise ?? 0));
       let q = along(b, t, t[1] - cabin.glassTop - (column.glassDrop ?? 0));
       if (last && cabin.rearKnee) {
         // The rear corner folds where the tailgate does, so the D pillar lies flush with
@@ -1217,7 +1249,10 @@ function cutShell(frame: BodyFrame, shell: Shell): ShellResult {
   for (const f of faces) {
     const glassFace = f.mat === 'glass';
     if (glassFace) glassFaceOwners.add(f.owner);
-    const pts = f.v.map((v) => placed(f.owner, v, glassFace));
+    // Lids only: on the flanks a refolded quad stood off the trim laid on it (the GAZ-24's
+    // chrome sill strip, kit-zfight).
+    const placedPts = f.v.map((v) => placed(f.owner, v, glassFace));
+    const pts = /^(bonnet|boot|tailgate)/.test(f.owner) ? outwardQuad(placedPts) : placedPts;
     const b = builderOf(f.owner);
     if (f.mat === 'dark') b.color(SHELL_COLOURS.wheelWell).poly('trim', pts);
     else if (f.mat === 'canvas') b.color(frame.spec.cabin.softTop!.colour).poly('trim', pts);

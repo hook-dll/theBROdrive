@@ -115,21 +115,27 @@ export const BODY_2104: KitBody = {
     { s: 2.975, sill: 0.26, crease: 0.765, belt: 0.884, deck: 0.92, wSill: 0.77, wCrease: 0.81, wBelt: 0.775 },
     // over the rear arch's back: crease 0.751 [D]
     { s: 3.38, sill: 0.262, crease: 0.75, belt: 0.882, deck: 0.92, wSill: 0.77, wCrease: 0.81, wBelt: 0.775 },
-    // behind the arch: body bottom 0.34 [D]; crease 0.730 [D]; plan width ~99 % [D top]
-    { s: 3.8, sill: 0.34, crease: 0.73, belt: 0.875, deck: 0.92, wSill: 0.77, wCrease: 0.805, wBelt: 0.775 },
+    // behind the arch: body bottom 0.34 [D]; crease 0.730 [D]; plan width ~99 % [D top];
+    // wBelt 0.765 (1 cm in): the side's lean over the crease even into the lower tail corner
+    // (14.9° → 15.4° → 15.9°; at 0.775 it went in and out, 11.7° here, kit-surface).
+    { s: 3.8, sill: 0.34, crease: 0.73, belt: 0.875, deck: 0.92, wSill: 0.77, wCrease: 0.805, wBelt: 0.765 },
     // rearBase: deck = tailgate bottom 0.52 on the centre line [P][D]; crease 0.705 [D];
-    // tail sill hidden by the bumper [E]; widths [D top, corners E as 2105]
-    { s: 3.995, sill: 0.33, crease: 0.705, belt: 0.87, deck: 0.52, wSill: 0.76, wCrease: 0.795, wBelt: 0.765, flat: 1 },
+    // tail sill hidden by the bumper [E]; widths [D top, corners E as 2105]. The corners'
+    // top (belt + the shoulder's rise) 0.845, just over the lamps (0.842): the drawn side
+    // outline runs down the glass to the knee (3.80, 0.85) with nothing behind it there
+    // [D] (§2.1); at belt 0.87 the corners stood 0.06 over the knee, 0.07 behind it.
+    { s: 3.995, sill: 0.33, crease: 0.705, belt: 0.81, deck: 0.52, wSill: 0.76, wCrease: 0.795, wBelt: 0.765, flat: 1 },
     // tail face [D 3.993–3.997 at the lower panel]
-    { s: 4.005, sill: 0.33, crease: 0.7, belt: 0.87, deck: 0.52, wSill: 0.755, wCrease: 0.79, wBelt: 0.76, flat: 1 },
+    { s: 4.005, sill: 0.33, crease: 0.7, belt: 0.81, deck: 0.52, wSill: 0.755, wCrease: 0.79, wBelt: 0.76, flat: 1 },
   ],
-  shoulder: { inset: 0.03, rise: 0.02 }, // BODY_05
+  shoulder: { inset: 0.03, rise: 0.035 }, // BODY_05
   cabin: {
     columns: [
       { s: 1.0, top: 1.41, upper: 'body' }, // BODY_05 from here to 2.975
       { s: 1.035, top: 1.445, upper: 'door1', lower: 'body' },
-      { s: 1.06, top: 1.47, upper: 'door1', glass: 'drop', lower: 'body' },
-      { s: 1.17, top: 1.58, upper: 'door1', glass: 'drop' },
+      { s: 1.06, top: 1.47, upper: 'door1', finish: 'black', lower: 'body' },
+      { s: 1.17, top: 1.495, upper: 'door1', finish: 'black' },
+      { s: 1.19, top: 1.5, upper: 'door1', glass: 'drop' },
       { s: 2.055, top: 2.062, upper: 'door1' },
       { s: 2.075, top: 2.08, upper: 'body', lower: 'door1' },
       { s: 2.09, top: 2.095, upper: 'body', lower: 'door2' },
@@ -151,7 +157,7 @@ export const BODY_2104: KitBody = {
     crown: 0.048, // BODY_05
     railInset: 0.05, // BODY_05
     railRise: 0.025, // BODY_05
-    glassBottom: 0.05, // BODY_05
+    glassBottom: 0.035, // BODY_05
     glassTop: 0.04, // BODY_05
     screenBottom: 0.025, // BODY_05
     screenHeader: 0.045, // BODY_05
@@ -159,19 +165,25 @@ export const BODY_2104: KitBody = {
     rearBottom: 0.025, // unused with a knee
     // tailgate glass top 1.30–1.33 (rear view) against rail + crown 1.423 [D]
     rearHeader: 0.11,
-    // fold at the lip under the glass [D]; the glass itself ends at 0.89–0.93 [D rear][P]
-    // Upright over the sill, flush with the lamp corners (see the 2102).
-    rearKnee: { s: 3.99, y: 0.85 },
+    // The fold at the lip under the glass, drawn at (3.80–3.835, 0.84–0.86) [D] (§2.1): the
+    // knee at 3.912 before the lean below (0.31 × 0.36 = 0.112 forward at 0.85); the glass
+    // itself ends at 0.89–0.93 [D rear][P]. The lower panel and the lamp corners stand
+    // back from it, as the drawn lip does (3.91 at 0.783).
+    rearKnee: { s: 3.912, y: 0.85 },
     pillar: 0.07, // BODY_05
   },
   wheels: { front: 0.635, rear: 3.048, radius: 0.288, width: 0.165, frontHalfTrack: 0.6825, rearHalfTrack: 0.6605, arch: 1.15 }, // BODY_05
   doorBottom: 0.365, // BODY_05
   bonnetFront: 0.06, // BODY_05 (2105 face)
+  bonnet: { inset: 0.07, rear: 0.9 }, // BODY_05: the drawn rear edge, the scuttle behind it
   // no bootEnd: the rear ring is a tailgate hinged at the roof
   // REAL FLAP IS ON THE LEFT [P p04_side_l]
   flap: { s0: 3.51, s1: 3.69, y0: 0.745, y1: 0.85, side: 'left' },
-  // The back leans as one plane over the bumper, lamps and all [P: rear 3/4 photos].
-  rearLean: { base: 0.49, lean: 0.25, blend: 0.3 },
+  // The back leans as one plane over the bumper, lamps and all [P: rear 3/4 photos]: 0.31
+  // m per m, the drawn lamp side's line (3.91 / 0.783 → 3.993 / 0.513, ~17°) [D] (§2.1),
+  // faded in from the roof's end (3.40) so the glass is one straight line from 3.42 at
+  // 1.364 to the knee (3.80, 0.85) [D] (a 0.3 blend left its top 5 cm back).
+  rearLean: { base: 0.49, lean: 0.31, blend: 0.6 },
 };
 
 /** VAZ-2104's back: vertical corner lamps, the 21043's plastic rear bumper. */

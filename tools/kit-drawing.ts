@@ -21,7 +21,7 @@
  *   doorFront, doorRear         the door's skin cut 5 cm under the belt: [s0, s1];
  *   doorBottomY                 the front door's lowest point;
  *   mirror                      the left door mirror's glass centre [s, y];
- *   roofHalfWidth               half the car's width 3 cm under its top;
+ *   roofHalfWidth               the car's half width at the rail's height (the roof's edge);
  *   beltHalfWidth               the skin's half width 5 cm under the belt at the front door;
  *   moulding                    the front door's waist strip [y0, y1];
  *   bonnet, bootLid             the lid's skin on the centre line [s0, s1].
@@ -236,9 +236,11 @@ function measureBody(car: KitCar, s: Soup, grid: RayGrid, refs: Record<string, R
   const first = doorS0 < doorS1 ? pane((doorS0 + doorS1) / 2) : undefined;
   if (first) {
     // The belt and the rail at the middle of the front door's glass, not of the door: a
-    // door's frame runs up the A pillar.
+    // door's frame runs up the A pillar. Its longest run: a vent wing or a quarter light
+    // ahead of the drop glass (the Niva's, the GAZ-24's) stands under the raked pillar.
     const belt = runs(first[0] + 0.03, first[0] + 0.03);
-    const glassRun = belt.find((r) => r[1]! > doorS0 && r[0]! < doorS1 && r[1]! - r[0]! > 0.2);
+    const inDoor = belt.filter((r) => r[1]! > doorS0 && r[0]! < doorS1 && r[1]! - r[0]! > 0.2);
+    const glassRun = inDoor.reduce<number[] | undefined>((a, r) => (a === undefined || r[1]! - r[0]! > a[1]! - a[0]! ? r : a), undefined);
     const mid = glassRun ? (glassRun[0]! + glassRun[1]!) / 2 : (doorS0 + doorS1) / 2;
     const [foot, top] = pane(mid) ?? first;
     out.beltY = r3(foot);
@@ -275,7 +277,9 @@ function measureBody(car: KitCar, s: Soup, grid: RayGrid, refs: Record<string, R
     const c = glass.reduce<V3>((a, p) => [a[0] + p[0] / glass.length, a[1] + p[1] / glass.length, a[2] + p[2] / glass.length], [0, 0, 0]);
     out.mirror = [r3(car.s(c[2])), r3(c[1])];
   }
-  const roof = slice(s, shell, 1, h - 0.03);
+  // The roof's edge as the drawings' front and top views give it: the gutter, at the rail's
+  // height (3 cm under the top was inside every crowned roof: ±0.38–0.45 against ±0.52–0.70).
+  const roof = slice(s, shell, 1, car.spec.cabin.rail);
   if (roof.length > 0) out.roofHalfWidth = r3(Math.max(...roof.flat().map((p) => Math.abs(p[0]))));
   for (const [key, owner] of [['bonnet', 'bonnet'], ['bootLid', 'boot']] as const) {
     const segs = slice(s, (t) => info(t).owner === owner && info(t).slot === 'paint' && !info(t).hidden, 0, 0.0005);

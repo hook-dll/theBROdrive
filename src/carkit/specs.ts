@@ -153,19 +153,30 @@ const BODY_05: KitBody = {
     { s: 0.9, sill: 0.265, crease: 0.766, belt: 0.878, deck: 0.968, wSill: 0.77, wCrease: 0.81, wBelt: 0.775 },
     { s: 1.0, sill: 0.268, crease: 0.766, belt: 0.88, deck: 1.0, wSill: 0.77, wCrease: 0.81, wBelt: 0.775 },
     { s: 2.1, sill: 0.258, crease: 0.767, belt: 0.885, deck: 0.92, wSill: 0.77, wCrease: 0.81, wBelt: 0.775 },
-    { s: 3.33, sill: 0.262, crease: 0.735, belt: 0.874, deck: 0.935, wSill: 0.77, wCrease: 0.81, wBelt: 0.775 },
+    // wBelt 0.771, not 0.775: the crease drops 32 mm here [D] and at 0.775 the side's lean
+    // under the belt went 16.5° → 14.1° → 15.7° (in and out, kit-surface); now 16.5° →
+    // 15.7° → 15.7°. 4 mm is under the top view's reading (1.637 mm/px).
+    { s: 3.33, sill: 0.262, crease: 0.735, belt: 0.874, deck: 0.935, wSill: 0.77, wCrease: 0.81, wBelt: 0.771 },
     { s: 3.9, sill: 0.37, crease: 0.708, belt: 0.815, deck: 0.854, wSill: 0.77, wCrease: 0.805, wBelt: 0.775 },
     { s: 4.075, sill: 0.4, crease: 0.7, belt: 0.76, deck: 0.795, wSill: 0.75, wCrease: 0.785, wBelt: 0.76 },
   ],
-  shoulder: { inset: 0.03, rise: 0.02 },
+  // The shoulder turns in to the greenhouse's foot over 3.5 cm: front view ±0.773 at 0.90,
+  // ±0.731–0.736 at 0.925–0.95 [D] (a 2 cm rise put its edge at 0.905, ±0.745 there); the
+  // glass's foot stays at the drawn window sill 0.955 (`glassBottom` 0.035 over the edge).
+  shoulder: { inset: 0.03, rise: 0.035 },
   cabin: {
     columns: [
-      // A slim A pillar, as on the 124: the door's frame runs up it, its glass raked
-      // behind it; below the belt the wing reaches back to the door's drawn front at 1.17.
+      // A slim A pillar, as on the 124: the door's frame runs up it; below the belt the
+      // wing reaches back to the door's drawn front at 1.17. Behind the frame the black
+      // mirror sail [D][P: "black triangular mirror sail", measurements-classics.md §3],
+      // then the glass from its drawn front edge, 1.225 at 1.0, 1.30 at 1.1, 1.46 at 1.3
+      // [D]: the line (1.19, belt) → (1.50, rail). Painted, that wedge was the wide pillar
+      // the owner saw (c86627d); glass from the frame put the pane 0.12 ahead of the drawn.
       { s: 1.0, top: 1.41, upper: 'body' },
       { s: 1.035, top: 1.445, upper: 'door1', lower: 'body' },
-      { s: 1.06, top: 1.47, upper: 'door1', glass: 'drop', lower: 'body' },
-      { s: 1.17, top: 1.58, upper: 'door1', glass: 'drop' },
+      { s: 1.06, top: 1.47, upper: 'door1', finish: 'black', lower: 'body' },
+      { s: 1.17, top: 1.495, upper: 'door1', finish: 'black' },
+      { s: 1.19, top: 1.5, upper: 'door1', glass: 'drop' },
       { s: 2.055, top: 2.062, upper: 'door1' },
       { s: 2.075, top: 2.08, upper: 'body', lower: 'door1' },
       { s: 2.09, top: 2.095, upper: 'body', lower: 'door2' },
@@ -182,7 +193,7 @@ const BODY_05: KitBody = {
     crown: 0.048,
     railInset: 0.05,
     railRise: 0.025,
-    glassBottom: 0.05,
+    glassBottom: 0.035,
     glassTop: 0.04,
     screenBottom: 0.025,
     screenHeader: 0.045,
@@ -202,6 +213,11 @@ const BODY_05: KitBody = {
   },
   doorBottom: 0.365,
   bonnetFront: 0.06,
+  // The bonnet's rear edge is drawn at s 0.9 (deck 0.968), ahead of the screen's foot at
+  // the cowl (1.0, 1000 high): the scuttle with its intake grille between rises to the
+  // glass. Cut at the pillar row as before (`inset` = `cabin.pillar`); a bonnet run on to
+  // the cowl folded in along s 0.9 (kit-surface: 9–14°).
+  bonnet: { inset: 0.07, rear: 0.9 },
   bootEnd: 4.06,
   flap: { s0: 3.19, s1: 3.31, y0: 0.69, y1: 0.81 },
 };
@@ -406,6 +422,10 @@ const LOOK_2105: KitLook = {
   sill: 'black',
   waist: null,
   repeater: { s0: 0.19, s1: 0.26, y0: 0.69, y1: 0.72 },
+  // On the black sail, drawn at s 1.235–1.33 [D, measurements-classics.md §3; P]: both
+  // heads seen whole through the side glass from the driver's eye (kit-mirrors 100 / 100;
+  // the default 1.115 hid the right one's front half behind the sail).
+  mirrorS: 1.28,
   front: {
     bumper: { kind: 'blade', finish: 'alloy', lift: 0.0475, height: 0.129, depth: 0.045, lower: { finish: 'black', share: 0.3 }, strip: null, ends: 'black', overriders: null },
     items: [
@@ -451,6 +471,8 @@ const LOOK_2107: KitLook = {
   sill: null,
   waist: null,
   repeater: { s0: 0.19, s1: 0.26, y0: 0.69, y1: 0.745 },
+  // On the black sail, as the 2105's [D] (in the 2107's frame +0.012).
+  mirrorS: 1.292,
   front: {
     bumper: { kind: 'blade', finish: 'chrome', lift: 0.06, height: 0.13, depth: 0.05, lower: { finish: 'black', share: 0.62 }, strip: null, ends: 'black', overriders: null },
     items: [

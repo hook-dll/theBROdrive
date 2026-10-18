@@ -32,7 +32,7 @@
     "screenFoot": {
       "v": [
         0.985,
-        1.0
+        1
       ],
       "src": "D centre-line screen base s 985, 1000 high (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px))"
     },
@@ -73,11 +73,11 @@
           2.933
         ],
         [
-          3.077,
-          3.63
+          3.011,
+          3.573
         ]
       ],
-      "src": "D 05 shell's front door and rear door (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px)); fixed pane rear edge 2933, quarter glass 3077 -> 3.63 [D 3604 / P 3640] (measurements-estates.md §2.1)"
+      "src": "D 05 shell's front door and rear door (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px)); fixed pane rear edge 2933, quarter glass 3077 -> 3.63 [D 3604 / P 3640] (measurements-estates.md §2.1); the quarter glass where the check reads it (its run over the band from the glass foot to 8 cm above): the drawn front edge L4 through (3.077, 0.905) and (2.837, 1.375) at 1.035 is 3.011, the rear edge (3.604, 0.905) → (3.317, 1.375) at the foot 0.955 is 3.573"
     },
     "sideGlassRail": {
       "v": [
@@ -94,11 +94,11 @@
           2.729
         ],
         [
-          2.837,
-          3.33
+          2.852,
+          3.366
         ]
       ],
-      "src": "D 05 shell's front door (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px)); at the rail: channel 2697, fixed pane 2729, quarter 2837 -> 3317/3.33 (measurements-estates.md §2.1)"
+      "src": "D 05 shell's front door (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px)); at the rail: channel 2697, fixed pane 2729, quarter 2837 -> 3317/3.33 (measurements-estates.md §2.1); the quarter glass where the check reads it (its run over the band 4 cm under the glass top to 1 cm over): on the same drawn edges, the front 2.852 at 1.345, the rear 3.366 at 1.295"
     },
     "beltY": {
       "v": 0.955,

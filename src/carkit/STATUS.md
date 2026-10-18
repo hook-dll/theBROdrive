@@ -272,37 +272,41 @@ listed, not judged). Dash: the built cabin against the refs' interior photos.
 | 2101 | pass | pass | pass | L100 R100 | 0 | 11 231 | 10/10 | 5/5 |
 | 2102 | pass | pass | pass | L100 R100 | 0 | 11 217 | 11/11 | DASH UNVERIFIED (2101's dash, no 2102 photo) |
 | 2103 | pass | pass | pass | L100 R100 | 0 | 11 818 | 10/11: waist strip 0.706–0.732 vs drawn 0.74–0.765 | 4/5: no clock (photo has one) |
-| 2104 | pass | pass | pass | L100 R100 | 4: bonnet folds in 9–14° at s 0.90–0.98 (BODY_05 nose stations 0.90/1.00) | 11 545 | 7/12: glass runs (front glass edge 1.15 vs 1.225, quarter), back light 3.47/3.93 vs 3.42/3.80, belt half width 0.744 vs 0.773 | DASH UNVERIFIED (2105's) |
-| 2105 | pass | pass | pass | L100 R100 | 5: the same bonnet folds; crease–belt lean 16.5→14.1→15.7° at s 3.33 | 11 773 | 12/16: glass runs, belt half width | 2/2 |
+| 2104 | pass | pass | pass | L100 R100 | 0 | 11 545 | 12/12 (sail ahead of the door glass, knee and lean to the drawing) | DASH UNVERIFIED (2105's) |
+| 2105 | pass | pass | pass | L100 R100 | 0 | 11 773 | 16/16 | 2/2 |
 | 2106 | pass | pass | pass | L100 R100 | 0 | 12 270 | 10/11: waist strip 0.726–0.752 vs 0.76–0.786 | 2/6: classic default dash (4 dials vs 5, no clock, no stack) |
-| 2107 | pass | pass | ✗ 0-100 +8.4 % (pre-existing, untouched here) | L100 R100 | 5: as the 2105 | 12 454 (exterior chrome 31 % slivers) | 11/15: glass runs, overhang rear 1.089 vs 1.057, belt half width | 4/4 |
+| 2107 | pass | pass | ✗ 0-100 +8.4 % (pre-existing, untouched here) | L100 R100 | 0 | 12 454 (exterior chrome 31 % slivers) | 15/15 (overhang rear 1.089 accepted: drawn hubs) | 4/4 |
 | 2108 / 2109 | pass | pass | pass | L100 R96 | 0 | 10 303 / 11 468 | 10/11: screen foot 1.13 vs drawn 1.08 at 0.92 | DASH UNVERIFIED (platform default) |
 | 21099 | pass | pass | pass | L100 R96 | 0 | 11 881 | 10/10 | DASH UNVERIFIED |
-| 2115 | pass | pass | pass | L100 R96 | 1: crease–belt lean 4.3→6.2→3.2° at s 0.55 | 12 226 | 6/6 | DASH UNVERIFIED |
+| 2115 | pass | pass | pass | L100 R96 | 0 | 12 226 | 6/6 | DASH UNVERIFIED |
 | 2110 / 2112 / 2111 | pass | pass | pass | L100 R99 | 0 | 14 642 / 14 666 / 14 366 (over budget, set aside by the owner) | 11/17, 10/12, 10/14: screen foot 1.22 vs 1.154, glass runs at the rail | 4/5 each |
-| 2121 / 2131 | pass | pass | pass | ✗ L17 R100: the left glass hidden by the door's trim (frame) | 3: the plan turns −24° at s 0.28 between −4.4° and −2.7° | 11 854 / 12 976 | 10/14, 11/15: rail 1.31 vs 1.449, screen foot | 5/5 |
+| 2121 / 2131 | pass | pass | pass | ✗ L17 R100: the left glass hidden by the door's trim (frame) | 0 | 11 854 / 12 976 | 12/14, 13/15: screen foot, belt half width (roof and rail: the check fixed) | 5/5 |
 | 1111 | pass | pass | pass | L100 (one mirror) | 0 | 10 597 | 14/15 | 4/5 |
-| GAZ-24 | pass | pass | pass | ✗ L59 R82: door trim on the left | 5: boot centre line 16° / −5° at s 3.80 / 4.09 and its folds | 13 288 | 8/12: screen foot, rail, roof half width | 6/6 |
+| GAZ-24 | pass | pass | pass | ✗ L59 R82: door trim on the left | 0 | 13 288 | 9/12: screen foot, rail, front door (back-light foot accepted) | 6/6 |
 | GAZ-31029 | pass | pass | pass | L100 R88 | 0 | 12 127 | 6/8: back light foot, boot lid | 6/6 |
-| AZLK-2141 | pass | pass | pass | L100 R100 | 0 | 12 133 | 13/16: mirror s 1.50 vs 1.705, front glass edge, roof half width | 3/5: Samara dash (3 spokes vs 2) |
-| UAZ-469 (+ police) | pass | pass | no target | L100 R100 | 3: sill s-bend at 1.06/1.28, bonnet and tailgate folds | 11 152 / 11 501 | 9/9 | 7/7 |
-| UAZ-2206 | pass | pass | no target | L100 R94 | 1: lean at s 0.30 | 10 979 | 6/11 | 1/3 |
-| Nexia | pass | pass | pass | L100 R96 | 1: boot fold 8° at s 4.33 | 13 475 | 8/10 | 6/6 |
-| Espero | pass | pass | pass | L100 R100 | 3: boot folds 7–8° at s 4.47 (the wing break at s 0.30 and the lean fixed 2026-10-19) | 14 486 | 9/9 (B-pillar shut line at the drawn 2.50) | 8/8 |
+| AZLK-2141 | pass | pass | pass | L100 R100 | 0 | 12 133 | 14/16: front glass edge, mirror s | 3/5: Samara dash (3 spokes vs 2) |
+| UAZ-469 (+ police) | pass | pass | no target | L100 R100 | 0 | 11 152 / 11 501 | 9/9 | 7/7 |
+| UAZ-2206 | pass | pass | no target | L100 R94 | 0 | 10 979 | 6/11 | 1/3 |
+| Nexia | pass | pass | pass | L100 R96 | 0 | 13 475 | 9/10: belt half width | 6/6 |
+| Espero | pass | pass | pass | L100 R100 | 0 | 14 486 | 9/9 (B-pillar shut line at the drawn 2.50) | 8/8 |
 | Astra F | pass | pass | pass | L100 R100 | 0 | 13 971 | 13/13 | 6/6 |
-| Vectra A | pass | pass | pass | L100 R100 | 0 (nose lean fixed 2026-10-19) | 13 866 | 12/12 (door bottom 0.255 accepted: the silencer) | 4/4 |
+| Vectra A | pass | pass | pass | L100 R100 | 0 | 13 866 | 12/12 (door bottom 0.255 accepted: the silencer) | 4/4 |
 
-Still open: the Espero's boot folds at s 4.47; the 2104/05/07 bonnet nose (stations
-0.90/1.00); the Niva's plan at s 0.28 and its left mirror; the GAZ-24's left mirror and
-boot. Mirrors, measured with kit-mirrors (`mirrorS` swept):
-- **2121/2131:** the line to the left head passes through the vent wing's rear post (1.685–1.705)
-  at x 0.65. Forward of the default 1.316 it never reaches 60 % (1.24: 55 %). At 1.51–1.53 the
-  left glass is 68–80 % seen with the right one 90–100 %. But the side photo
-  (`build/carshape/_refs/photos/niva/side.jpg`, a later car with no vent wing) has the mirror
-  at the door's front corner, so 1.5 is unsourced. Needs a 1982 photo of the mirror's place,
-  or the post thinner.
-- **GAZ-24:** the default s 1.508 gives L59 R82. At 1.43–1.44 both are 70–84 %, but no
-  mirror reading in measurements-volga.md backs that (`refs/gaz24.json` gaps).
+Dents and drawing round (2026-10-19): kit-surface passes on all 27 (05 bonnet ends at the drawn 0.90, the scuttle behind it; 05 belt width at s 3.33; 2104 tail lean; 2115 wing belt; Niva corner plan through ±0.786 with a station at 0.4; GAZ-24 boot one convex curve; UAZ-469 sill tucked from the wing; deck and lid quads folded outward (body.ts); 2206 nose lean; Espero tail corners at 0.925; 2107 grille bars without hidden back faces). Drawing: roofHalfWidth is now read at the rail (it was 3 cm under a crowned top); the front door's glass run is its longest (vent wings, quarter lights); Nexia/AZLK roof refs corrected to the A pillar line at the rail; 05 shoulder rise 0.035 (front view ±0.773 at 0.90), a black sail ahead of the door glass (mirrorS on it). Still out of tolerance: 2103/2106 waist strip (the ref is read in the vaz_2103/2106.jpg frames, ~7 % taller than BODY_124: re-register it), 2108 bonnet lip, 2109 front door, the tens' screen foot, mirror, glass at the rail and boot, the Niva's screen foot and belt width, the Oka's belt width, the GAZ-24's screen foot, rail and door, the GAZ-31029's door and boot lid, the AZLK's front glass edge and mirror, the UAZ-2206's screen and glass runs, the Nexia's belt width. The 2107's 0-100 was not looked at.
+
+Mirrors (kit-check
+2026-10-19, every car passes):
+- **2121/2131:** L84 R85 → after the frame-depth change L84 R100. A chrome head on a rod from
+  the door's skin (`mirrorStalk` 0, `mirrorS` 1.50), its foot read at s 1.47–1.49 on three
+  photos of 1982/1983/1990 cars with the vent wing (Commons, measurements-niva.md §1.5); both
+  doors carry one from the start (5koleso.ru).
+- **GAZ-24:** L64, one mirror (`mirrors: 'left'`: the factory four-view and owners, serial
+  sedans had no right one). At the sourced place (mount hole 175.5 mm behind the door's edge,
+  s 1.635; the drawing's head 1.61–1.72, 0.04 out, 0.12 over the belt: `mirrorStalk` 0.04,
+  new `mirrorReach` 0.04) it shows through the quarter light. It was hidden by the post
+  because every door's window frame stood as deep as its card (7.5 cm); the frame above the
+  belt is now `DOOR_FRAME_DEPTH` 3 cm (body.ts, every car; the card's top closes the step).
+  measurements-volga.md §1.4.
 
 Sliver-heavy meshes (10–31 %, listed by kit-surface) are mostly exterior trim strips and
 moulded bumpers.

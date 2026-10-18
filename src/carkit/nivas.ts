@@ -41,7 +41,12 @@ export const BODY_2121: KitBody = {
     { s: 0.2, sill: 0.43, crease: 0.865, belt: 0.945, deck: 0.985, wSill: 0.75, wCrease: 0.76, wBelt: 0.75 },
     // Wing's top (the bonnet's shut line) and the bonnet's centre [D side lines 0.951 / 0.993
     // at s 0.25, 0.993 / 1.033 at s 0.61, 1.004 / 1.044 from s 0.9].
-    { s: 0.28, sill: 0.42, crease: 0.87, belt: 0.96, deck: 1.0, wSill: 0.79, wCrease: 0.8, wBelt: 0.79 },
+    // The corner in plan one curve onto the flank through the drawn ±0.786 at s 0.27 [D top]
+    // (0.79 here; it was 0.80, and the side turned 24° at this one station between 4.4° and
+    // 2.7°: kit-surface) and a station at 0.4 at ±0.808, nearly the flank's 0.815 [D top,
+    // front]: the rows turn 12° / 6.5° / 2° at s 0.28 / 0.4 / 0.6; its heights on the line.
+    { s: 0.28, sill: 0.42, crease: 0.87, belt: 0.96, deck: 1.0, wSill: 0.78, wCrease: 0.79, wBelt: 0.78 },
+    { s: 0.4, sill: 0.4125, crease: 0.87, belt: 0.9724, deck: 1.0124, wSill: 0.79, wCrease: 0.808, wBelt: 0.798 },
     { s: 0.6, sill: 0.4, crease: 0.87, belt: 0.993, deck: 1.033, wSill: 0.795, wCrease: 0.815, wBelt: 0.805 },
     // Cowl. Flank 0.808–0.815 from 0.6 to 1.0 high [D front, top views], the crease the
     // upper of two pressed lines (0.879 / 0.839) [D side]; sill 0.258 [D side y 451].

@@ -47,9 +47,13 @@ export const BODY_UAZ469: KitBody = {
     // rear edge, level across to the pillar line and rolling down to its skirts there [P]:
     // the deck at 0.26 on the straight line from 1.15 to 1.25.
     { s: 0.148, sill: 0.58, crease: 0.85, belt: 1.04, deck: 1.15, wSill: 0.8, wCrease: 0.83, wBelt: 0.8, flat: 1 },
-    { s: 0.26, sill: 0.55, crease: 0.86, belt: 1.04, deck: 1.1622, wSill: 0.885, wCrease: 0.893, wBelt: 0.885, flat: 1 },
+    // The sill tucked to the cabin's ±0.86 (below) from the wing's front corner on: tucking
+    // it between the bonnet's rear edge and the cowl turned the sill's plan in and out by
+    // 6.6° (kit-surface); the side's lean under the crease now grows evenly from the nose
+    // (7.3° → 6.1° → 4.6° → 4.3°).
+    { s: 0.26, sill: 0.55, crease: 0.86, belt: 1.04, deck: 1.1622, wSill: 0.86, wCrease: 0.893, wBelt: 0.885, flat: 1 },
     // The bonnet's rear edge [D side x 280], its centre 1.25 [D side y 188].
-    { s: 1.064, sill: 0.45, crease: 0.86, belt: 1.04, deck: 1.25, wSill: 0.885, wCrease: 0.893, wBelt: 0.885, flat: 1 },
+    { s: 1.064, sill: 0.45, crease: 0.86, belt: 1.04, deck: 1.25, wSill: 0.86, wCrease: 0.893, wBelt: 0.885, flat: 1 },
     // Cowl: the windscreen's foot (1.28, 1.27) [D side x 330, y 184]; the body's side 1785
     // over all [F; D front 1.786]; the doors' top 1.2 [D side y 200] = belt + shoulder. The
     // sides tuck in 3 cm to the sill [E: D front, the doors' foot behind the tyres]: a flank
@@ -262,7 +266,10 @@ export const BODY_UAZ2206: KitBody = {
     { s: 0.05, sill: 0.57, crease: 0.95, belt: 1.16, deck: 1.22, wSill: 0.7, wCrease: 0.76, wBelt: 0.7 },
     // The nose's top curving back: (0.154, 1.331), (0.223, 1.369) [D side].
     { s: 0.15, sill: 0.56, crease: 1.0, belt: 1.3, deck: 1.34, wSill: 0.86, wCrease: 0.92, wBelt: 0.87 },
-    { s: 0.3, sill: 0.55, crease: 1.05, belt: 1.32, deck: 1.38, wSill: 0.92, wCrease: 0.957, wBelt: 0.93 },
+    // wBelt 0.922 (was 0.93): the face's lean over the crease eases from the nose to the
+    // flank, 9.5° → 7.4° → 7.2°; at 0.93 it went 9.5° → 5.7° → 7.2°, in and out (kit-surface).
+    // The belt's half width here is not read off the drawing [E].
+    { s: 0.3, sill: 0.55, crease: 1.05, belt: 1.32, deck: 1.38, wSill: 0.92, wCrease: 0.957, wBelt: 0.922 },
     // Ahead of the front arch: the front door's bottom on the 0.55 band, its step 0.588 [D].
     { s: 0.62, sill: 0.55, crease: 1.05, belt: 1.32, deck: 1.38, wSill: 0.92, wCrease: 0.964, wBelt: 0.93 },
     // Behind the arch, the body's side down to 0.42 [P]; widest ±0.964 [D front].

@@ -25,7 +25,7 @@
     "doorRear": { "v": [2.41, 3.23], "tol": 0.04, "src": "D side B shut line x 443, rear shut line x 584-588.6 (3.217-3.242), measurements-2141.md §1 (P1 3.25)" },
     "doorBottomY": { "v": 0.324, "tol": 0.03, "src": "D side y 274 (P1 0.30), measurements-2141.md §1" },
     "mirror": { "v": [1.705, 1.008], "src": "D side x 309-331, y 143-166, measurements-2141.md §1" },
-    "roofHalfWidth": { "v": 0.56, "src": "D front the roof's edge ±0.56, measurements-2141.md §1.2" },
+    "roofHalfWidth": { "v": 0.59, "src": "D front the A pillar's outer line ±0.578-0.59 at the rail 1.325-1.363, D rear the D pillar's ±0.589 at 1.349 (measurements-2141.md §1.2); the roof's edge over the rail's chamfer is ±0.56" },
     "beltHalfWidth": { "v": 0.836, "src": "D front ±0.836 at 0.89, measurements-2141.md §1.2" }
   },
   "dash": {
