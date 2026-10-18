@@ -1494,6 +1494,15 @@ export const KIT_REAR_EYE_NODE = 'kit_rear_eye';
  */
 export const KIT_BENCH_NODE = 'kit_bench';
 /**
+ * The fixed dash fittings that have no node of their own, as built, for the checks that
+ * hold a cabin to its car's photos (tools/kit-drawing.ts): `root.userData.kitDash`. Each
+ * at its centre in the car frame. Gauges, the wheel and the glovebox are nodes already.
+ */
+export interface KitDashItem {
+  readonly kind: 'vent' | 'eyeball' | 'stack' | 'console' | 'clock' | 'heater';
+  readonly at: Vec3;
+}
+/**
  * Name of the courtesy lamp's group (its lens, the `dome` switch), in the car frame and
  * unturned: the Vehicle hangs the cabin's light from it (`Vehicle.syncDomeLight`).
  */
@@ -1811,6 +1820,8 @@ class Cabin {
   private readonly lowerEnd: number;
   /** Steering column's x. */
   private readonly x0: number;
+  /** `root.userData.kitDash`: the fittings below, where they were built. */
+  private readonly dashItems: KitDashItem[] = [];
 
   constructor(ctx: KitContext) {
     this.ctx = ctx;
@@ -1860,6 +1871,7 @@ class Cabin {
     this.rearEye();
     addBuilt(this.group, this.fixed, ORIGIN, 'cabin', true);
     this.ctx.root.add(this.group);
+    this.ctx.root.userData.kitDash = this.dashItems;
     this.doors();
   }
 
@@ -2330,6 +2342,7 @@ class Cabin {
       this.prismX(b, 'trim', [-L.stack.half, L.stack.half], () => [
         [back, foot], [this.fasciaS(foot), foot], [this.fasciaS(floor), floor], [back, this.tunnelTop(back) - 0.005],
       ]);
+      this.dashItems.push({ kind: 'stack', at: this.P(0, (foot + floor) / 2, this.fasciaS((foot + floor) / 2)) });
     }
     if (L.wood) {
       const [y0, y1] = L.wood;
@@ -2417,6 +2430,7 @@ class Cabin {
       inlay(c, 'trim', ray((150 * Math.PI) / 180, -0.1, 0.5, 0.0015));
       inlay(c, 'trim', ray((30 * Math.PI) / 180, -0.1, 0.8, 0.0012));
       c.pop();
+      this.dashItems.push({ kind: 'clock', at: this.clusterAt(right, up).at(0, 0, 0) });
     }
     this.glovebox();
     this.radio();
@@ -2425,6 +2439,7 @@ class Cabin {
     for (const v of L.vents ?? []) {
       for (const x of v.x === undefined ? [half - 0.07, -(half - 0.07)] : [v.x]) {
         const m = this.fascia(x, belt + v.dy);
+        this.dashItems.push({ kind: 'vent', at: m.at(0, 0, 0) });
         const [hx, hy] = v.half ?? [0.035, 0.024];
         b.push(m.matrix).color(COLOURS.black);
         inlay(b, 'trim', rectCorners(0, 0, hx, hy, 0));
@@ -2439,6 +2454,7 @@ class Cabin {
       const r = L.eyeballs.radius;
       for (const [x, dy] of L.eyeballs.at) {
         b.push(this.fascia(x, belt + dy).matrix).color(COLOURS.black);
+        this.dashItems.push({ kind: 'eyeball', at: this.fascia(x, belt + dy).at(0, 0, 0) });
         b.cylinderZ('chrome', [0, 0, 0.005], r, 0.005, 10, false);
         b.cylinderZ('trim', [0, 0, 0.007], r * 0.72, 0.007, 8);
         b.pop();
@@ -2457,6 +2473,7 @@ class Cabin {
     if (L.heater) {
       const { dy, half: [hx, hy], knobs, radius } = L.heater;
       b.push(this.fascia(0, belt + dy).matrix).color(COLOURS.black);
+      this.dashItems.push({ kind: 'heater', at: this.fascia(0, belt + dy).at(0, 0, 0) });
       inlay(b, 'trim', rectCorners(0, 0, hx, hy, 0));
       b.pop();
       for (const x of knobs) {
@@ -2785,6 +2802,7 @@ class Cabin {
       const y1 = this.floorY + height;
       b.color(shade(this.spec.look.dash, 1.05));
       pad(b, 'trim', this.P(0, (this.floorY + y1) / 2, cowl + (ds0 + ds1) / 2), [0.1, (y1 - this.floorY) / 2, (ds1 - ds0) / 2], 0.02);
+      this.dashItems.push({ kind: 'console', at: this.P(0, y1, cowl + (ds0 + ds1) / 2) });
     }
     const gs = cowl + L.gear.ds;
     const base = L.console ? this.floorY + L.console.height : this.tunnelTop(gs);

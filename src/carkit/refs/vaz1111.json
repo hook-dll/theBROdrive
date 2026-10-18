@@ -1,0 +1,201 @@
+{
+  "car": "vaz1111",
+  "measurements": "measurements-oka.md",
+  "sources": {
+    "DO": {
+      "what": "3dcar.ru vaz_1111_oka.jpg, 2200x1500, dimensioned four-view; side 2.696 mm/px from the 3200 dimension, front/rear 2.70 (measurements-oka.md §0)",
+      "url": "https://3dcar.ru/media/blueprints/full/vaz/vaz_1111_oka.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz_1111_oka.jpg"
+    },
+    "F": {
+      "what": "catalog-vaz.ru/cars/vaz-1111-oka, avto-russia.ru, auto.ru"
+    },
+    "PI": {
+      "what": "Commons 'Oka-Innenraum.jpg', CC BY 4.0, an early car, 4288x2848, dash from the driver's door (interior.ts CABIN_1111)",
+      "image": "build/carshape/_refs/bp/img/vaz1111_int_Oka-Innenraum.jpg"
+    }
+  },
+  "body": {
+    "length": {
+      "v": 3.2,
+      "src": "F catalog-vaz.ru, avto-russia.ru, auto.ru (measurements-oka.md §0); DO dimension 3200"
+    },
+    "width": {
+      "v": 1.42,
+      "src": "F catalog-vaz.ru, avto-russia.ru, auto.ru (measurements-oka.md §0)"
+    },
+    "height": {
+      "v": 1.4,
+      "src": "F catalog-vaz.ru, avto-russia.ru, auto.ru (measurements-oka.md §0); DO roof 1.329–1.365, dimension 1350",
+      "tol": 0.06
+    },
+    "wheelbase": {
+      "v": 2.18,
+      "src": "F catalog-vaz.ru, avto-russia.ru, auto.ru (measurements-oka.md §0); DO hubs read 2189"
+    },
+    "overhangFront": {
+      "v": 0.542,
+      "src": "DO side: hub x 1100.5, the 544 dimension reads 542 (measurements-oka.md §1)"
+    },
+    "overhangRear": {
+      "v": 0.469,
+      "src": "DO side: rear hub 2.731 to the tip 3.200 (measurements-oka.md §1)"
+    },
+    "screenFoot": {
+      "v": [
+        0.891,
+        0.89
+      ],
+      "src": "DO side: screen foot (1230, 288) (measurements-oka.md §1)"
+    },
+    "screenTop": {
+      "v": [
+        1.363,
+        1.302
+      ],
+      "src": "DO side: roof's front (1405, 135) (measurements-oka.md §1)"
+    },
+    "backLightTop": {
+      "v": [
+        2.855,
+        1.29
+      ],
+      "src": "DO side: roof's rear (1959, 139.5) (measurements-oka.md §1)"
+    },
+    "backLightFoot": {
+      "v": [
+        3.11,
+        0.865
+      ],
+      "src": "DO rear view glass foot 0.865 on the side's line at s 3.11 (measurements-oka.md §1)"
+    },
+    "sideGlassBelt": {
+      "v": [
+        [
+          1.08,
+          2.064
+        ],
+        [
+          2.16,
+          2.873
+        ]
+      ],
+      "src": "DO side: door drop glass 1.08–2.064, quarter glass from its frame 2.13–2.16 to its foot 2.873 (measurements-oka.md §1)"
+    },
+    "sideGlassRail": {
+      "v": [
+        [
+          1.417,
+          2.064
+        ],
+        [
+          2.16,
+          2.738
+        ]
+      ],
+      "src": "DO side: door glass 1.417 at the top to 2.064 (upright), quarter 2.16 to its top corner 2.738 (measurements-oka.md §1)"
+    },
+    "beltY": {
+      "v": 0.838,
+      "src": "DO side: window sill 0.833 / 0.846 at s 1.35 / 2.10 (measurements-oka.md §1)"
+    },
+    "railY": {
+      "v": 1.235,
+      "src": "DO side: door glass top y 160 (measurements-oka.md §1)"
+    },
+    "doorFront": {
+      "v": [
+        0.972,
+        2.104
+      ],
+      "src": "DO side: door 0.972–2.104 below the belt (measurements-oka.md §1)"
+    },
+    "doorBottomY": {
+      "v": 0.275,
+      "src": "DO side: door bottom y 512–520 → 0.286–0.264 (measurements-oka.md §1)"
+    },
+    "beltHalfWidth": {
+      "v": 0.669,
+      "src": "DO front view: glass foot ±0.669 at 0.877 (measurements-oka.md §1.2)"
+    },
+    "bonnet": {
+      "v": [
+        0.136,
+        0.891
+      ],
+      "src": "DO side: bonnet's lip 0.136 to the screen's foot 0.891 (clamshell, measurements-oka.md §1)",
+      "tol": 0.04
+    }
+  },
+  "dash": {
+    "photo": {
+      "src": "PI",
+      "view": "driver"
+    },
+    "clusterAt": {
+      "v": "wheel",
+      "src": "PI shallow box hood over a long window behind the wheel (interior.ts CABIN_1111)"
+    },
+    "wheelSpokes": {
+      "v": 2,
+      "src": "PI two-spoke wheel, one up-left, one down (interior.ts CABIN_1111)"
+    },
+    "glovebox": {
+      "v": "none",
+      "src": "PI an open shelf before the passenger, no lid (interior.ts CABIN_1111)"
+    },
+    "console": {
+      "v": false,
+      "src": "PI no console (interior.ts CABIN_1111)"
+    },
+    "vents": {
+      "v": 2,
+      "src": "PI round vents 0.06 either side of the centre line (interior.ts CABIN_1111)"
+    }
+  },
+  "gaps": [
+    "dash gauges/dialRows: speedometer scale and fuel dial seen; the right end of the window (temperature) is behind the rim in every photo [E]",
+    "dash wheelDiameter: 0.36 is [P/E] on an estimated photo scale",
+    "dash clock, stack: not described",
+    "mirror, roofHalfWidth (only the rail ±0.493), moulding: not measured",
+    "height: factory 1400 vs drawn 1.329–1.365, tol widened"
+  ],
+  "overlay": {
+    "side": {
+      "src": "DO",
+      "image": "build/carshape/_refs/bp/img/vaz_1111_oka.jpg",
+      "crop": [
+        880,
+        100,
+        2105,
+        630
+      ],
+      "s": [
+        899.5,
+        0.002696
+      ],
+      "y": [
+        618,
+        0.002696
+      ]
+    },
+    "front": {
+      "src": "DO",
+      "image": "build/carshape/_refs/bp/img/vaz_1111_oka.jpg",
+      "crop": [
+        130,
+        100,
+        665,
+        630
+      ],
+      "x": [
+        397.5,
+        0.0027
+      ],
+      "y": [
+        620,
+        0.0027
+      ]
+    }
+  }
+}

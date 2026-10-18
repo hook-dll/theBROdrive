@@ -1,0 +1,49 @@
+{
+  "car": "vectraa",
+  "measurements": "measurements-vectra.md",
+  "sources": {
+    "D": { "what": "the-blueprints.com vector 9730 'Opel Vectra A (1989)' watermarked preview, 1280x905 (dimension lines 4430 / 2600 / 1700 / 1400)", "url": "https://www.the-blueprints.com/modules/vectordrawings/preview-wm/1990_opel_vectra_a.jpg", "image": "build/carshape/_refs/bp/img/opel_vectra_a.jpg" },
+    "F": { "what": "auto-data.net 'Opel Vectra A (facelift 1992) 2.0i (115 Hp)'; vehiclesizes.com, encycarpedia (Review 2)" },
+    "P1": { "what": "Wikimedia Commons 'File:Opel Vectra taxi dashboard (GT 8445 R) (14961906968).jpg', from behind the driver's seat, 1920x1440", "url": "https://commons.wikimedia.org/wiki/File:Opel_Vectra_taxi_dashboard_(GT_8445_R)_(14961906968).jpg", "image": "build/carshape/_refs/bp/img/opel_vectra_a_taxi_dashboard.jpg" }
+  },
+  "body": {
+    "length": { "v": 4.432, "src": "F auto-data 4432 (measurements-vectra.md §1); D dimension line 4430" },
+    "width": { "v": 1.706, "src": "F auto-data 1706 (§1); D 1700" },
+    "height": { "v": 1.4, "src": "F auto-data 1400; D 1400 (§1)" },
+    "wheelbase": { "v": 2.6, "src": "F auto-data; D 2600 (§1)" },
+    "screenFoot": { "v": [1.222, 0.937], "src": "D side cowl (290, 168) (§2)" },
+    "screenTop": { "v": [1.863, 1.36], "src": "D side A pillar top (400, 96) (§2)" },
+    "backLightTop": { "v": [3.11, 1.394], "src": "D side back light top line from s 3.11 at 1.394 (§2)" },
+    "backLightFoot": { "v": [3.88, 1.04], "src": "D side back light foot s 3.88, 1.04 (§2)" },
+    "sideGlassBelt": { "v": [[1.61, 2.33], [2.47, 2.94], [3.03, 3.22]], "src": "D side: front glass 1.61 at the belt to 2.33, rear glass from 2.47 (Review 2); rear door glass to x 585 = 2.94, quarter glass x 600-635 = 3.03-3.22 (§2)" },
+    "beltY": { "v": 0.89, "src": "D side glass foot 0.89 at s 1.7-2.15 (§2)" },
+    "railY": { "v": 1.309, "src": "D side glass top y 104-105 = 1.306-1.312 (§2)" },
+    "doorFront": { "v": [1.29, 2.34], "src": "D side, Review 2 door lengths at the belt: front 1.29-2.34" },
+    "doorRear": { "v": [2.34, 3.3], "src": "D side, Review 2 door lengths at the belt: rear 2.34-3.30 (the frame round the quarter glass)" },
+    "doorBottomY": { "v": 0.205, "src": "D side sill and door bottoms y 293 (§2)" },
+    "beltHalfWidth": { "v": 0.79, "src": "D front view: the glass's foot +-0.79 at 0.89 (§2)" }
+  },
+  "dash": {
+    "photo": { "src": "P1", "view": "driver" },
+    "gauges": { "v": 4, "src": "P1 tachometer, big speedometer, temperature and fuel dials stacked on the right (§5)" },
+    "clusterAt": { "v": "wheel", "src": "P1 the angular hood behind the wheel (§5)" },
+    "wheelSpokes": { "v": 3, "src": "P1 three spokes, left, right and down, round a small pad (§5)" },
+    "stack": { "v": true, "src": "P1 heater panel, radio and a cubby down the stack (§5)" }
+  },
+  "gaps": [
+    "overhangFront / overhangRear: only [E] 850 / 982 (§1)",
+    "sideGlassRail: no rail-level pane ends read (only the rear door frame 3.05 at the rail, Review 2)",
+    "mirror: drawn s 1.48-1.66 (Review 2) but no height read",
+    "roofHalfWidth: only the rail +-0.594 at 1.31 / +-0.565 at 1.36 read, not the roof's top",
+    "moulding: rubbing strip one line, drawn 0.39 against the photos' 0.42 (§2), no bottom/top",
+    "bonnet / bootLid: no plan view on the drawing",
+    "dash vents: the passenger's end of the fascia is out of the photo (§5), so the count is not sourced",
+    "dash dialRows: temperature and fuel stacked beside the two big dials; no row count written",
+    "dash glovebox: not in the photo (§5)",
+    "dash clock, console, wheelDiameter: not read off the photo",
+    "overlay.front: only the across scale (5.82 mm/px, centre x 1056) is written; no up registration for the front view (the 5.83 mm/px, ground y 748 is the rear view's)"
+  ],
+  "overlay": {
+    "side": { "src": "D", "image": "build/carshape/_refs/bp/img/opel_vectra_a.jpg", "crop": [70, 80, 850, 335], "s": [80, 0.005821], "y": [328, 0.005858] }
+  }
+}

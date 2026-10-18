@@ -1,0 +1,48 @@
+{
+  "car": "nexia",
+  "measurements": "measurements-nexia.md",
+  "sources": {
+    "D": { "what": "3dcar.ru Daewoo Nexia four-view, 1500x1100 (dimension lines 4474 / 2520 / 1663 / 1362 / 1400 / 1406)", "url": "https://3dcar.ru/media/blueprints/full/daewoo/daewoo_nexia.jpg", "image": "build/carshape/_refs/bp/img/daewoo_nexia.jpg" },
+    "F": { "what": "drom.ru catalogue, Nexia 1.5 MT SOHC GL; Nexia repair manual (3ruk.ru)", "url": "https://www.drom.ru/catalog/daewoo/nexia/161911/" },
+    "P1": { "what": "Wikimedia Commons 'File:Daewoo Nexia interior.jpg' (CC BY-SA 3.0, 1920x1440), the dash from the driver's seat", "url": "https://commons.wikimedia.org/wiki/File:Daewoo_Nexia_interior.jpg", "image": "build/carshape/_refs/photos/nexia/Daewoo_Nexia_interior.jpg" },
+    "P2": { "what": "Wikimedia Commons 'File:Daewoo Nexia Tacho.jpg' (CC BY-SA 3.0), the cluster square on", "url": "https://commons.wikimedia.org/wiki/File:Daewoo_Nexia_Tacho.jpg", "image": "build/carshape/_refs/photos/nexia/Daewoo_Nexia_Tacho.jpg" }
+  },
+  "body": {
+    "length": { "v": 4.482, "src": "F drom.ru (measurements-nexia.md §0)" },
+    "width": { "v": 1.662, "src": "F drom.ru (§0)" },
+    "height": { "v": 1.393, "src": "F drom.ru (§0)" },
+    "wheelbase": { "v": 2.52, "src": "F drom.ru; D dimension 2520 (§0)" },
+    "screenTop": { "v": [1.948, 1.355], "src": "D side screen / A pillar outer line meets the roof at (1.948, 1.355) (§1)" },
+    "backLightFoot": { "v": [3.95, 1.03], "src": "D side back light foot drawn at 3.95, 1.03 on the centre line (§1 Back light; note under the table)" },
+    "beltY": { "v": 0.875, "src": "D side window sill py 204 at x 950 (§1)" },
+    "railY": { "v": 1.317, "src": "D side glass top py 113 (§1)" },
+    "doorFront": { "v": [1.46, 2.437], "src": "D side front shut line x 826-833 (1.44-1.478), B pillar shut line 2.433-2.44 (§1)", "tol": 0.04 },
+    "doorRear": { "v": [2.437, 3.355], "src": "D side B pillar shut line 2.433-2.44, rear frame and shut line 3.35-3.36 (§1)" },
+    "doorBottomY": { "v": 0.303, "src": "D side door bottom py 322 (§1)" },
+    "roofHalfWidth": { "v": 0.52, "src": "D front view the roof's edge +-0.52 at 1.396 (§1.2)" },
+    "beltHalfWidth": { "v": 0.766, "src": "D front view +-0.766 at 0.87, the belt (§1.2)" }
+  },
+  "dash": {
+    "photo": { "src": "P1", "view": "driver" },
+    "gauges": { "v": 4, "src": "P1, P2 tachometer, speedometer on the column, temperature and fuel dials stacked on the right (§4)" },
+    "clusterAt": { "v": "wheel", "src": "P1 rounded hood over the cluster behind the wheel (§4)" },
+    "wheelSpokes": { "v": 2, "src": "P1 a wide pad on two spokes at four and eight o'clock (§4)" },
+    "glovebox": { "v": "passenger", "src": "P1 the glovebox low before the passenger (§4)" },
+    "stack": { "v": true, "src": "P1 vents, heater knobs and radio down the centre stack (§4)" },
+    "vents": { "v": 4, "src": "P1 a slatted vent at each end and two side by side at the top of the stack (§4)" }
+  },
+  "gaps": [
+    "overhangFront / overhangRear: only [E] 915 / 1047 (§0)",
+    "screenFoot: the drawing's cowl point is not read in the side view (only the front view's 0.943 and the spec's 1.315)",
+    "backLightTop: the drawn back light's top at the rail is not read (3.33 is the spec column)",
+    "sideGlassBelt / sideGlassRail: the front glass's front edge lies behind the sail and front quarter post (§1), not read; the panes' ends are only partly drawn readings",
+    "mirror: not read on the drawing",
+    "moulding: door strip read as one line py 273 = 0.54, no bottom/top",
+    "bonnet / bootLid: no plan edge readings",
+    "dash dialRows, clock, console, wheelDiameter: not written in the sources"
+  ],
+  "overlay": {
+    "side": { "src": "D", "image": "build/carshape/_refs/bp/img/daewoo_nexia.jpg", "crop": [515, 80, 1468, 390], "s": [528.879, 0.004851], "y": [384.4, 0.004851] },
+    "front": { "src": "D", "image": "build/carshape/_refs/bp/img/daewoo_nexia.jpg", "crop": [20, 75, 450, 385], "x": [234, 0.00452], "y": [383.13, 0.004762] }
+  }
+}

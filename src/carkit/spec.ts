@@ -49,6 +49,12 @@ export interface TubStation {
    * along this line instead of the pillar row; between stations it moves linearly.
    */
   readonly notch?: number;
+  /**
+   * An intended break in the side's plan at this station (a corner drawn on the real car:
+   * where a nose's rounding meets a straight flank, say), with its source in a comment.
+   * Changes no geometry: tools/kit-surface.ts does not flag the turn here as a dent.
+   */
+  readonly corner?: true;
 }
 
 /** Who owns one strip of the greenhouse side, between a column and the next. */

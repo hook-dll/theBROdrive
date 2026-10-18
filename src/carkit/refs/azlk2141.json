@@ -1,0 +1,50 @@
+{
+  "car": "azlk2141",
+  "measurements": "measurements-2141.md",
+  "sources": {
+    "D": { "what": "the-blueprints.com watermarked preview 'Moskvich 2141 (1986-2001)' vector 23721, 1280×905, dimension lines 4350 / 2580 / 1690 / 1400", "url": "https://www.the-blueprints.com/modules/vectordrawings/preview-wm/1990_moskvich_2141.jpg", "image": "build/carshape/_refs/bp/img/azlk2141_tbp_1990.jpg" },
+    "F": { "what": "drom.ru catalog/moskvitch/2141/201007; ru.wikipedia Москвич-2141; njcar.ru dimensions/moskvich/2141" },
+    "P1": { "what": "Commons 'Moskwitsch 2141 (side).jpg', CC BY-SA 4.0 (2.243 mm/px by the hubs), measurements-2141.md §0-§1" },
+    "P2": { "what": "Commons 'Салон Москвич-2141.jpg', CC BY-SA 4.0, the dash from the driver's door side", "url": "https://commons.wikimedia.org/wiki/File:%D0%A1%D0%B0%D0%BB%D0%BE%D0%BD_%D0%9C%D0%BE%D1%81%D0%BA%D0%B2%D0%B8%D1%87-2141.jpg", "image": "build/carshape/_refs/bp/img/azlk2141_salon.jpg" }
+  },
+  "body": {
+    "length": { "v": 4.35, "src": "F drom.ru, ru.wikipedia; D dimension 4350" },
+    "width": { "v": 1.69, "src": "F drom.ru; D dimension 1690 (spans the mirrors on the drawing)" },
+    "height": { "v": 1.4, "src": "F drom.ru; D dimension 1400" },
+    "wheelbase": { "v": 2.58, "src": "F drom.ru; D dimension 2580" },
+    "overhangFront": { "v": 0.91, "src": "F drom.ru 910" },
+    "overhangRear": { "v": 0.86, "src": "F drom.ru 860" },
+    "screenFoot": { "v": [1.336, 0.96], "src": "D side A pillar outer line (255, 163), measurements-2141.md §1" },
+    "screenTop": { "v": [1.85, 1.325], "src": "D side A pillar line at the rail 1.325 (line (255,163) → (352,92)), measurements-2141.md §1" },
+    "backLightTop": { "v": [3.496, 1.249], "tol": 0.05, "src": "D rear glass top y 527.5 (1.249) on the side tailgate line (3.25, 1.377) at 0.52 m per m, measurements-2141.md §1, §3" },
+    "backLightFoot": { "v": [4.22, 0.913], "src": "D rear y 586.25 on the side tailgate line, measurements-2141.md §1" },
+    "sideGlassBelt": { "v": [[1.634, 2.385], [2.499, 3.176], [3.245, 3.8]], "src": "P1 front glass's front edge 1.634 at the belt; D side front glass end x 438.6, rear glass x 458.6 → (577, 164), quarter 3.245 → (686, 167), measurements-2141.md §1" },
+    "beltY": { "v": 0.944, "src": "D side glass foot y 165.7, measurements-2141.md §1" },
+    "railY": { "v": 1.29, "src": "D side glass top y 105, measurements-2141.md §1" },
+    "doorFront": { "v": [1.387, 2.41], "src": "D side shut lines x 263-264 / 443, measurements-2141.md §1 (P1 1.394)" },
+    "doorRear": { "v": [2.41, 3.23], "tol": 0.04, "src": "D side B shut line x 443, rear shut line x 584-588.6 (3.217-3.242), measurements-2141.md §1 (P1 3.25)" },
+    "doorBottomY": { "v": 0.324, "tol": 0.03, "src": "D side y 274 (P1 0.30), measurements-2141.md §1" },
+    "mirror": { "v": [1.705, 1.008], "src": "D side x 309-331, y 143-166, measurements-2141.md §1" },
+    "roofHalfWidth": { "v": 0.56, "src": "D front the roof's edge ±0.56, measurements-2141.md §1.2" },
+    "beltHalfWidth": { "v": 0.836, "src": "D front ±0.836 at 0.89, measurements-2141.md §1.2" }
+  },
+  "dash": {
+    "photo": { "src": "P2", "view": "driver" },
+    "gauges": { "v": 4, "src": "P2 (read here): tachometer, speedometer, and two quarter dials at the cluster's right end (fuel, temperature)" },
+    "clusterAt": { "v": "wheel", "src": "P2 hooded binnacle behind the wheel" },
+    "wheelSpokes": { "v": 2, "src": "P2 two spokes across the pad" },
+    "glovebox": { "v": "passenger", "src": "P2 lid on the passenger's side of the fascia" },
+    "stack": { "v": true, "src": "P2 heater controls and radio down to the tunnel; measurements-2141.md §0 (centre stack)" }
+  },
+  "gaps": [
+    "The kit's dash is the samara platform's (no CABIN_ override); these dash values are read off P2 for the real car",
+    "dialRows, clock, console, vents, wheelDiameter: not read (vent count ambiguous between face vents and side demisters on P2)",
+    "sideGlassRail: the quarter glass's top end is not read",
+    "bonnet, bootLid, moulding: not read",
+    "the drawn tips are 64 mm short of 4350; the s registration hangs on the hubs with drom.ru's 910 front overhang"
+  ],
+  "overlay": {
+    "side": { "src": "D", "image": "build/carshape/_refs/bp/img/azlk2141_tbp_1990.jpg", "crop": [15, 75, 790, 340], "s": [21.242, 0.005714], "y": [331, 0.005714] },
+    "front": { "src": "D", "image": "build/carshape/_refs/bp/img/azlk2141_tbp_1990.jpg", "crop": [890, 75, 1225, 340], "x": [1056.25, 0.005714], "y": [331, 0.005714] }
+  }
+}

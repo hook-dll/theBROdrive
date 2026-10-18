@@ -1,0 +1,50 @@
+{
+  "car": "espero",
+  "measurements": "measurements-espero.md",
+  "sources": {
+    "D": { "what": "the-blueprints.com vector 5466 'Daewoo Espero' watermarked preview, 1280x905 (dimension lines 4615 / 2620 / 1718 / 1388)", "url": "https://www.the-blueprints.com/modules/vectordrawings/preview-wm/daewoo_espero_1995.jpg", "image": "build/carshape/_refs/bp/img/daewoo_espero_1995.jpg" },
+    "F": { "what": "drom.ru catalog/daewoo/espero/70454 (2.0 MT CD)", "url": "https://www.drom.ru/catalog/daewoo/espero/70454/" },
+    "P1": { "what": "SelfBase.de interior database, Daewoo Espero 1995-1997, 'instrument panel front' (500x332, from the car's centre line)", "url": "https://en.selfbase.de/automobile_interior_database/daewoo_espero_sid1800501101", "image": "build/carshape/_refs/bp/img/espero_int_selfbase_front.jpg" },
+    "P2": { "what": "SelfBase.de interior database, Daewoo Espero 1995-1997, 'instrument panel side' (500x380, from the passenger's door)", "url": "https://en.selfbase.de/automobile_interior_database/daewoo_espero_sid1800501101", "image": "build/carshape/_refs/bp/img/espero_int_selfbase_side.jpg" },
+    "P3": { "what": "drive2.ru/l/506952651926143865, an Espero 2.0 owner's cluster with its glass off", "url": "https://www.drive2.ru/l/506952651926143865/", "image": "build/carshape/_refs/bp/img/espero_int_drive2_cluster.jpg" }
+  },
+  "body": {
+    "length": { "v": 4.615, "src": "F drom.ru; D dimension line 4615 (measurements-espero.md §1)" },
+    "width": { "v": 1.718, "src": "F drom.ru; D dimension line 1718 (§1)" },
+    "height": { "v": 1.388, "src": "F drom.ru; D dimension line 1388 (§1)" },
+    "wheelbase": { "v": 2.62, "src": "F drom.ru; D dimension line 2620 (§1)" },
+    "screenFoot": { "v": [1.267, 0.91], "src": "D side cowl (246, 167): s 1.267, 0.905-0.914 (§2)" },
+    "screenTop": { "v": [2.03, 1.322], "src": "D side A pillar to the rail (377, 91) (§2)" },
+    "backLightTop": { "v": [3.342, 1.322], "src": "D side back light top (603, 91): s 3.342 at the rail, y (332-91)x0.005486 (§2)" },
+    "backLightFoot": { "v": [4.04, 1.004], "src": "D side back light foot (723, 149) (§2)" },
+    "doorFront": { "v": [1.447, 2.5], "src": "D side front shut line x 277, B pillar shut line x 458 (§2; Review 2 door lengths at the belt)" },
+    "doorRear": { "v": [2.5, 3.36], "src": "D side, Review 2 'Door lengths at the belt' rear 2.50-3.36 (§6)" },
+    "doorBottomY": { "v": 0.285, "src": "D side door bottoms y 280 (§2)" },
+    "beltHalfWidth": { "v": 0.791, "src": "D front view +-0.791 at 0.905, the shoulder at the belt (§2)" }
+  },
+  "dash": {
+    "photo": { "src": "P1", "view": "centre" },
+    "gauges": { "v": 3, "src": "P1 three round dials of one size; P3 tachometer, speedometer, then one round dial carrying the fuel scale over the temperature needle (§5 Dash)" },
+    "dialRows": { "v": [3], "src": "P1 the three dials side by side (§5 Dash)" },
+    "clusterAt": { "v": "wheel", "src": "P1 cluster in the hood behind the wheel" },
+    "wheelSpokes": { "v": 4, "src": "P1 four spokes round a wide pad (§5 Dash)" },
+    "glovebox": { "v": "passenger", "src": "P1, P2 a big lid high before the passenger, x 318-430, y 103-133 (§5 Dash)" },
+    "stack": { "v": true, "src": "P1 black centre stack, 76 px wide, vents / heater / radio / ashtray down it (§5 Dash)" },
+    "console": { "v": true, "src": "P1 a console with an armrest on the tunnel between the seats (seen on the photo)" },
+    "vents": { "v": 2, "src": "P1 two slatted vents side by side at the stack's top; the end vents are in the doors' tops, not the fascia (§5 Dash)" }
+  },
+  "gaps": [
+    "overhangFront / overhangRear: only [E] 935 / 1060 (§1)",
+    "sideGlassBelt / sideGlassRail: the drawing preview greys over the fixed quarter glass (§3), so its extent is not read; front glass at the belt kinked over the sail (Review 2), quarter glass from photos without figures",
+    "beltY: the drawn belt (0.905 at s 1.78) is lower on the photos by an unmeasured amount (§2/§3 'lowered 0.04' is the spec's change)",
+    "mirror: drawn s 1.78-1.90 on the sail but no height read (Review 2)",
+    "roofHalfWidth: only the rail +-0.544 is read, not the roof's top",
+    "moulding: rubbing strip read as one line y 0.488, no bottom/top",
+    "bonnet / bootLid: no top-view edge readings",
+    "dash clock, wheelDiameter: not legible / not measured on the photos"
+  ],
+  "overlay": {
+    "side": { "src": "D", "image": "build/carshape/_refs/bp/img/daewoo_espero_1995.jpg", "crop": [20, 70, 830, 340], "s": [28, 0.005812], "y": [332, 0.005486] },
+    "front": { "src": "D", "image": "build/carshape/_refs/bp/img/daewoo_espero_1995.jpg", "crop": [895, 60, 1212, 340], "x": [1053.5, 0.00567], "y": [332, 0.005486] }
+  }
+}

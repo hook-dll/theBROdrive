@@ -1,0 +1,47 @@
+{
+  "car": "vaz2121",
+  "measurements": "measurements-niva.md",
+  "sources": {
+    "D": { "what": "3dcar.ru factory four-view of the VAZ-2121, undimensioned, 1800×1200 (measurements-niva.md §0)", "image": "build/carshape/_refs/bp/img/niva.jpg" },
+    "F": { "what": "infocar.ua price_niva-2121_id316; ru.wikipedia ВАЗ-2121; niva-faq.msk.ru factory data sheet" },
+    "P1": { "what": "Commons 'File:VAZ-2121 (first generation) \"Niva\" (interior view).jpg', public domain (named in measurements-niva.md §6)", "url": "https://commons.wikimedia.org/wiki/File:VAZ-2121_(first_generation)_%22Niva%22_(interior_view).jpg", "image": "build/carshape/_refs/bp/img/niva_VAZ-2121_interior_view.jpg" },
+    "ZR": { "what": "Za Rulyom retrotest of a 1983 VAZ-2121, https://www.zr.ru/content/articles/906566-k-yubileyu-nivy-retro-test-vaz/ (photos read for measurement, not local)" }
+  },
+  "body": {
+    "length": { "v": 3.72, "src": "F infocar.ua 3720 (drawing 3733, ru.wikipedia 3740), measurements-niva.md §0" },
+    "width": { "v": 1.68, "src": "F infocar.ua, ru.wikipedia" },
+    "height": { "v": 1.64, "src": "F infocar.ua, ru.wikipedia (drawing stands 3.7 % low: 1.580)" },
+    "wheelbase": { "v": 2.2, "src": "F infocar.ua, ru.wikipedia" },
+    "overhangFront": { "v": 0.688, "src": "D side front hub x 880.5, measurements-niva.md §1" },
+    "overhangRear": { "v": 0.845, "src": "D side rear hub x 1486.3 (2.888) to rear tip x 1719 (3.733), measurements-niva.md §1" },
+    "screenFoot": { "v": [1.152, 1.01], "src": "D side A pillar at the belt (1008, 244), measurements-niva.md §1" },
+    "screenTop": { "v": [1.583, 1.496], "src": "D side A pillar at the rail (1127, 110), measurements-niva.md §1" },
+    "backLightTop": { "v": [3.326, 1.434], "src": "D rear glass top 1.434 on the D side tailgate line (3.30, 1.478) lean 0.586, measurements-niva.md §1, §1.1" },
+    "backLightFoot": { "v": [3.555, 1.044], "src": "D rear glass foot 1.044 on the side tailgate line, measurements-niva.md §1.3" },
+    "sideGlassBelt": { "v": [[1.322, 1.685], [1.705, 2.255], [2.353, 3.17]], "tol": 0.05, "src": "D side: vent wing front edge (1065, 220) followed to the glass foot (vent front end coarse, hence tol), post 1.685-1.705, drop glass to 2.255, fixed glass 2.353-3.17, measurements-niva.md §1, §1.4" },
+    "beltY": { "v": 1.044, "src": "D side window sill y 232-237 (1.053-1.035), measurements-niva.md §1" },
+    "railY": { "v": 1.449, "src": "D side glass top y 123, measurements-niva.md §1" },
+    "doorFront": { "v": [1.322, 2.317], "src": "D side shut lines x 1055 / 1329 below the belt, measurements-niva.md §1, §1.4 (P p10 0.99 m)" },
+    "doorBottomY": { "v": 0.428, "src": "D side y 403-405, measurements-niva.md §1" },
+    "roofHalfWidth": { "v": 0.641, "src": "D top roof line y 700 (front view ±0.626-0.655), measurements-niva.md §1.1" },
+    "beltHalfWidth": { "v": 0.8, "src": "D front ±0.80 at the belt (1.02-1.06), measurements-niva.md §1.1" }
+  },
+  "dash": {
+    "photo": { "src": "P1", "view": "driver" },
+    "gauges": { "v": 5, "src": "ZR cluster: tachometer, speedometer, fuel, oil pressure, temperature (2106 instruments), measurements-niva.md §6" },
+    "clusterAt": { "v": "wheel", "src": "ZR cluster square through the wheel; P1" },
+    "wheelSpokes": { "v": 2, "src": "ZR: two spokes nearly level (P1's wheel is aftermarket), interior.ts LAYOUTS.niva" },
+    "glovebox": { "v": "passenger", "src": "P1; ZR text: lid opens upwards" },
+    "stack": { "v": true, "src": "P Commons 'Interior 1980.jpg' console under the dash's middle, interior.ts LAYOUTS.niva; P1" }
+  },
+  "gaps": [
+    "dialRows: the five dials are not in clean rows (fuel over oil left, two big, temp right)",
+    "clock, vents, console, wheelDiameter: no source states them (two round dash-top vents only named as 'not modelled')",
+    "bonnet, mirror: no reading in measurements-niva.md",
+    "sideGlassRail: not read"
+  ],
+  "overlay": {
+    "side": { "src": "D", "image": "build/carshape/_refs/bp/img/niva.jpg", "crop": [680, 75, 1730, 530], "s": [691, 0.003632], "y": [522, 0.003632] },
+    "front": { "src": "D", "image": "build/carshape/_refs/bp/img/niva.jpg", "crop": [120, 60, 605, 530], "x": [361.5, 0.003632], "y": [522.5, 0.003632] }
+  }
+}

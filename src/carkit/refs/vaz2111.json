@@ -1,0 +1,199 @@
+{
+  "car": "vaz2111",
+  "measurements": "measurements-2110.md",
+  "sources": {
+    "D11": {
+      "what": "3dcar.ru vaz_2111.jpg, 1700x1000; side 4.185 mm/px from the drawn wheelbase, ground y 416, s = (x − 600) × 4.185 mm (measurements-2110.md §9)",
+      "url": "https://3dcar.ru/media/blueprints/full/vaz/vaz_2111.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz_2111.jpg"
+    },
+    "D10": {
+      "what": "3dcar.ru vaz_2110.jpg, 1700x1000, four views; side 4.092 mm/px from the drawn wheelbase, ground y 408 (measurements-2110.md §0)",
+      "url": "https://3dcar.ru/media/blueprints/full/vaz/vaz_2110.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz_2110.jpg"
+    },
+    "F": {
+      "what": "vaz.ru/v2111.htm"
+    },
+    "PD2": {
+      "what": "Commons '2005Lada111Interior.JPG' (Qashqai 2009, CC BY-SA 3.0 / GFDL): a 2005 Lada 111 dash (measurements-2110.md §4)",
+      "image": "build/carshape/_refs/bp/img/vaz2111_int_2005Lada111.jpg"
+    },
+    "PD": {
+      "what": "Commons 'Sporty Lada - Flickr - SergeyRod (3).jpg' (Sergey Rodovnichenko 2004, CC BY-SA 2.0): a Lada 112 Cup car's stock dash from behind the driver's seat; the main source of CABIN_2110 (measurements-2110.md §4). Local copy 1200x900 (the readings are on the 1600x1200 rendition)",
+      "image": "build/carshape/_refs/bp/img/vaz2110_int_SergeyRod3.jpg"
+    }
+  },
+  "body": {
+    "length": {
+      "v": 4.285,
+      "src": "F vaz.ru/v2111.htm: 4285 × 1680 × 1480 (over the roof rails), wheelbase 2492 (measurements-2110.md §9); D11 tips 600/1624 → 4285"
+    },
+    "width": {
+      "v": 1.68,
+      "src": "F vaz.ru/v2111.htm: 4285 × 1680 × 1480 (over the roof rails), wheelbase 2492 (measurements-2110.md §9)"
+    },
+    "height": {
+      "v": 1.43,
+      "src": "D11 roof without rails 1.43 (the factory 1480 is over the rails, measurements-2110.md §9)"
+    },
+    "wheelbase": {
+      "v": 2.492,
+      "src": "F vaz.ru/v2111.htm: 4285 × 1680 × 1480 (over the roof rails), wheelbase 2492 (measurements-2110.md §9)"
+    },
+    "overhangFront": {
+      "v": 0.829,
+      "src": "D11 front overhang 829 (measurements-2110.md §9)"
+    },
+    "overhangRear": {
+      "v": 0.964,
+      "src": "D11 rear hub x 1393.5 to the tip x 1624 at 4.185 mm/px"
+    },
+    "screenFoot": {
+      "v": [
+        1.154,
+        0.994
+      ],
+      "src": "D10 2110 drawing (the 2111's nose and doors are the 2110's, ds 0, measurements-2110.md §9)"
+    },
+    "screenTop": {
+      "v": [
+        1.768,
+        1.338
+      ],
+      "src": "D10 2110 drawing (shared nose, measurements-2110.md §9)"
+    },
+    "beltY": {
+      "v": 0.942,
+      "src": "D10 2110 drawing (shared doors)"
+    },
+    "doorFront": {
+      "v": [
+        1.273,
+        2.308
+      ],
+      "src": "D11 side: front shut line x 905 (1.273), B shut line x 1150–1153 (measurements-2110.md §9.1)"
+    },
+    "doorRear": {
+      "v": [
+        2.308,
+        3.252
+      ],
+      "src": "D11 side: B shut line x 1151.5, rear edge upright at x 1377 (measurements-2110.md §9.1)"
+    },
+    "doorBottomY": {
+      "v": 0.305,
+      "src": "D11 side: doors' bottom y 343 → 0.305 (measurements-2110.md §9.1)"
+    },
+    "sideGlassBelt": {
+      "v": [
+        [
+          1.385,
+          2.269
+        ],
+        [
+          2.398,
+          3.193
+        ],
+        [
+          3.277,
+          3.913
+        ]
+      ],
+      "src": "D10 front door glass and the rear glass's front edge (shared doors); D11 rear door glass rear edge 3.193, quarter glass 3.277–3.913 at the belt (measurements-2110.md §9)"
+    },
+    "sideGlassRail": {
+      "v": [
+        [
+          1.89,
+          2.324
+        ],
+        [
+          2.439,
+          3.097
+        ],
+        [
+          3.151,
+          3.779
+        ]
+      ],
+      "src": "D10 front glass 1.89–2.324, rear glass front 2.439 (shared doors); D11 rear glass 3.097, quarter 3.151–3.779 at the rail (measurements-2110.md §9)"
+    },
+    "backLightTop": {
+      "v": [
+        3.976,
+        1.41
+      ],
+      "src": "D11 side: roof's rear end, outline corner x 1550, y 80 (measurements-2110.md §9)"
+    },
+    "backLightFoot": {
+      "v": [
+        4.135,
+        1.042
+      ],
+      "src": "D11 side: tailgate glass foot at y 167, x 1588 (measurements-2110.md §9)"
+    },
+    "mirror": {
+      "v": [
+        1.517,
+        0.985
+      ],
+      "src": "D10 2110 drawing mirror (shared doors)"
+    }
+  },
+  "dash": {
+    "photo": {
+      "src": "PD2",
+      "view": "driver"
+    },
+    "clusterAt": {
+      "v": "wheel",
+      "src": "PD hood over the cluster behind the wheel (measurements-2110.md §4)"
+    },
+    "clock": {
+      "v": true,
+      "src": "PD2 a clock panel (measurements-2110.md §4)"
+    },
+    "wheelSpokes": {
+      "v": 2,
+      "src": "PD pad frame meets the rim 41.5° over / 59° under (measurements-2110.md §4: two spokes)"
+    },
+    "glovebox": {
+      "v": "passenger",
+      "src": "PD glovebox lid from x 1400 outwards (measurements-2110.md §4)"
+    },
+    "stack": {
+      "v": true,
+      "src": "PD stack x 1000–1275 down to the tunnel (measurements-2110.md §4)"
+    }
+  },
+  "gaps": [
+    "height: factory 1480 is over roof rails; the drawn roof 1.43 is used",
+    "railY: not read on the 2111 drawing",
+    "overlay.front: only the rear view's centre/half width given, no height registration for the front",
+    "dash gauges/dialRows: tacho, speedo and the right small dial seen; the left small dial is hidden in both photos (placed by symmetry, interior.ts CABIN_2110)",
+    "dash vents: the centre pair and the driver's end vent seen; the passenger's end vent not shown",
+    "dash wheelDiameter: unmeasured (the Samara's size, measurements-2110.md §7)",
+    "dash console: not described"
+  ],
+  "overlay": {
+    "side": {
+      "src": "D11",
+      "image": "build/carshape/_refs/bp/img/vaz_2111.jpg",
+      "crop": [
+        580,
+        50,
+        1645,
+        428
+      ],
+      "s": [
+        600,
+        0.004185
+      ],
+      "y": [
+        416,
+        0.004185
+      ]
+    }
+  }
+}

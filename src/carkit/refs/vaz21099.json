@@ -1,0 +1,117 @@
+{
+  "car": "vaz21099",
+  "measurements": "measurements-samara.md",
+  "sources": {
+    "D99": {
+      "what": "3dcar.ru vaz_21099.jpg, 1700x1000; side 4.036 mm/px from the drawn wheelbase, heights 4.095 mm/px by the 2108's belt and sill (measurements-samara.md §0)",
+      "url": "https://3dcar.ru/media/blueprints/full/vaz/vaz_21099.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz_21099.jpg"
+    },
+    "D08": {
+      "what": "3dcar.ru drawing vaz2108.jpg, 1800x1100, side 3.826 mm/px (samaras.ts BODY_2108 comment; measurements-samara.md §6 registration)",
+      "image": "build/carshape/_refs/bp/img/vaz2108.jpg"
+    },
+    "F": {
+      "what": "carmodels.ts sv_vaz21099 row"
+    }
+  },
+  "body": {
+    "length": {
+      "v": 4.205,
+      "src": "F measurements-samara.md §0 sv_vaz21099 row: 4205 × 1650 × 1402, wheelbase 2460; D99 tips give 4189 (−0.4 %)"
+    },
+    "width": {
+      "v": 1.65,
+      "src": "F measurements-samara.md §0 sv_vaz21099 row: 4205 × 1650 × 1402, wheelbase 2460"
+    },
+    "height": {
+      "v": 1.402,
+      "src": "F measurements-samara.md §0 sv_vaz21099 row: 4205 × 1650 × 1402, wheelbase 2460; D99 roof 1.402 by its belt/sill scale"
+    },
+    "wheelbase": {
+      "v": 2.46,
+      "src": "F measurements-samara.md §0 sv_vaz21099 row: 4205 × 1650 × 1402, wheelbase 2460; D99 hubs 756.5/1366"
+    },
+    "overhangFront": {
+      "v": 0.773,
+      "src": "D99 tips/hubs: overhang 773 (measurements-samara.md §0)"
+    },
+    "overhangRear": {
+      "v": 0.957,
+      "src": "D99 tips/hubs: overhang 957 (measurements-samara.md §0)"
+    },
+    "screenFoot": {
+      "v": [
+        1.08,
+        0.92
+      ],
+      "src": "D08 2108 drawing (shared front, measurements-samara.md §4 item 15)"
+    },
+    "screenTop": {
+      "v": [
+        1.76,
+        1.335
+      ],
+      "src": "D08 2108 drawing (shared greenhouse front; measurements-samara.md §5: D99's greenhouse ~60 mm higher)",
+      "tol": 0.07
+    },
+    "backLightFoot": {
+      "v": [
+        3.574,
+        0.993
+      ],
+      "src": "D99 side: back light's foot x 1445–1450, y 172 → 3.564–3.584, 0.993 (measurements-samara.md §2)",
+      "tol": 0.03
+    },
+    "beltY": {
+      "v": 0.911,
+      "src": "D99 window-sill line y 192 → 0.911 (the height registration, measurements-samara.md §0)"
+    },
+    "doorBottomY": {
+      "v": 0.302,
+      "src": "D08 2108 drawing (shared doors' bottom, samaras.ts BODY_2108 comment)"
+    },
+    "doorFront": {
+      "v": [
+        1.251,
+        2.24
+      ],
+      "src": "D99 side: front edge 1251, shut line at the belt 2240 (measurements-samara.md §1)"
+    },
+    "doorRear": {
+      "v": [
+        2.24,
+        3.12
+      ],
+      "src": "D99 side: shut line 2240, rear shut line at the belt 3120 (measurements-samara.md §1)"
+    }
+  },
+  "dashNote": "Platform default Samara dash (interior.ts LAYOUTS.samara, cabinLayout only sets the visor): written without a photo of the car's dashboard; no interior photo of the 2108/2109/21099/2115 is named in measurements-samara.md or interior.ts.",
+  "gaps": [
+    "sideGlassBelt/sideGlassRail: front door glass's front edge not read (rear 2.191, rear door glass 2.313–3.015, quarter 3.168–3.414 at the belt; heads 2.833 / 2.902–2.993)",
+    "backLightTop: only the roof's rear end at the rail (s 3.14), no height given",
+    "bootLid: the lid's front edge on the centre line is not given (top 3.786 / 0.993 …, rear 4.11–4.14)",
+    "railY, mirror, half widths: not measured (tail plan only)",
+    "overlay.front: only a rear view registration (4.25 mm/px) is written"
+  ],
+  "overlay": {
+    "side": {
+      "src": "D99",
+      "image": "build/carshape/_refs/bp/img/vaz_21099.jpg",
+      "crop": [
+        545,
+        60,
+        1625,
+        425
+      ],
+      "s": [
+        562.0,
+        0.004036
+      ],
+      "y": [
+        414.46,
+        0.004095
+      ]
+    }
+  }
+}

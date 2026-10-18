@@ -1,0 +1,43 @@
+{
+  "car": "uaz2206",
+  "measurements": "measurements-uaz.md",
+  "sources": {
+    "D": { "what": "UAZ-2206 factory four-view, operating manual РЭ 05808600.059-96, via getoutlines.com blueprints/car/uaz/uaz-2206-2005.gif (PNG conversion), 1826×1209", "image": "build/carshape/_refs/bp/img/uaz452_dwg-2206-manual.png" },
+    "F": { "what": "ru.wikipedia УАЗ-452 infobox; carexpert.ru models/uaz/2206/tech/uaz2206v29.htm" },
+    "P1": { "what": "Commons 'UAZ-452 Medical (EMS) 2006 G1.jpg', CC BY-SA 3.0, near-orthographic right side, 2.653 mm/px", "image": "build/carshape/_refs/bp/img/uaz452_photo-side-right-ems-G1.jpg" },
+    "P2": { "what": "Commons 'Uljanowski Awtomobilny Sawod 452 (steering wheel).jpg', CC BY-SA 4.0, Fiver, der Hellseher", "image": "build/carshape/_refs/bp/img/uaz452_photo-dash-steering.jpg" }
+  },
+  "body": {
+    "length": { "v": 4.38, "src": "D 993 + 2300 + 1087 to the rear bumper (P1 4.354), measurements-uaz.md §1, §3.1" },
+    "width": { "v": 1.94, "src": "D 1940; F ru.wikipedia, carexpert.ru" },
+    "height": { "v": 2.101, "src": "D 2101 over the roof vent hatch; F carexpert.ru 2100 (roof centre 2.07-2.09)" },
+    "wheelbase": { "v": 2.3, "src": "D 2300*; F all sources" },
+    "overhangFront": { "v": 0.993, "src": "D 993* dimension" },
+    "overhangRear": { "v": 1.087, "src": "D 1087* dimension (P1 1.061), measurements-uaz.md §3.1" },
+    "screenFoot": { "v": [0.256, 1.436], "src": "D side screen's foot on the centre line, measurements-uaz.md §3.4" },
+    "screenTop": { "v": [0.689, 1.88], "tol": 0.04, "src": "D side A pillar outer line's top (0.689, 1.88) [P door edge 0.68 at the roof]; centre-line top (0.466, 1.856), measurements-uaz.md §3.4" },
+    "sideGlassBelt": { "v": [[0.526, 1.21], [1.364, 1.807], [1.935, 2.439], [2.439, 2.736], [2.877, 3.474], [3.474, 3.757]], "src": "D/P right side: front door glass front edge 0.526 at the belt [D], rear 1.21 [P]; panel window; side door slider split 2.439; saloon slider split 3.474 [P]; rear corner blank on the photographed 2206s, measurements-uaz.md §3.5" },
+    "beltY": { "v": 1.32, "src": "P1 1.319, D 1.313, measurements-uaz.md §3.2" },
+    "railY": { "v": 1.835, "src": "P1 side glass top 1.83-1.84, measurements-uaz.md §3.2" },
+    "doorFront": { "v": [0.415, 1.29], "src": "P door's front edge 0.415 at the belt, rear edge 1.29 [P 1.290; D 1.30-1.32], measurements-uaz.md §3.4-3.5" },
+    "doorBottomY": { "v": 0.449, "src": "P1 door bottoms 0.449, measurements-uaz.md §3.2" },
+    "beltHalfWidth": { "v": 0.918, "src": "D front view ±0.913-0.923 at 1.31-1.38, measurements-uaz.md §3.3" }
+  },
+  "dash": {
+    "photo": { "src": "P2", "view": "driver" },
+    "gauges": { "v": 4, "src": "P2 speedometer and oil, fuel, temperature dials, measurements-uaz.md §3.8" },
+    "clusterAt": { "v": "wheel", "src": "P2 dials before the driver, the panel's inner end at the column, measurements-uaz.md §3.8" },
+    "wheelSpokes": { "v": 3, "src": "P2 (read here): three spokes" }
+  },
+  "gaps": [
+    "The drawing's rear end is 100 mm short (measurements-uaz.md §2): aft of the rear axle the side overlay does not hold; the photo P1 is the reference there",
+    "doorRear: the 2206 has a right side door (1.874-2.805) and two rear leaves, no second hinged side door; not given",
+    "backLightTop/Foot: the rear leaves' glass 1.45-1.77 has no s reading",
+    "sideGlassRail, mirror, roofHalfWidth, bonnet: not read",
+    "dialRows, clock, glovebox, stack, console, vents, wheelDiameter: P2 shows only the driver's end; sizes [E] in §3.8"
+  ],
+  "overlay": {
+    "side": { "src": "D", "image": "build/carshape/_refs/bp/img/uaz452_dwg-2206-manual.png", "crop": [130, 20, 1090, 480], "s": [142, 0.004656], "y": [469, 0.00477] },
+    "front": { "src": "D", "image": "build/carshape/_refs/bp/img/uaz452_dwg-2206-manual.png", "crop": [1290, 20, 1745, 480], "x": [1517, 0.00477], "y": [469, 0.00477] }
+  }
+}

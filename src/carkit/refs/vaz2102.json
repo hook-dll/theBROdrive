@@ -1,0 +1,125 @@
+{
+  "car": "vaz2102",
+  "measurements": "measurements-estates.md",
+  "sources": {
+    "D": {
+      "what": "3dcar.ru 'vaz_2102.jpg' 1100x700: side 6.589 mm/px from 4059 (measurements-estates.md §0)",
+      "url": "https://3dcar.ru/media/blueprints/full/vaz/vaz_2102.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz_2102.jpg"
+    },
+    "D1": {
+      "what": "3dcar.ru 'vaz_2101.jpg' (the 2101 front and doors, BODY_124 comment in specs.ts)",
+      "url": "https://3dcar.ru/media/blueprints/full/vaz/vaz_2101.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz_2101.jpg"
+    },
+    "F": {
+      "what": "passport 4059 x 1611 x 1458 (measurements-estates.md §3.8)"
+    }
+  },
+  "body": {
+    "length": {
+      "v": 4.059,
+      "src": "D dimension 4059 (vaz_2102.jpg); F passport"
+    },
+    "width": {
+      "v": 1.611,
+      "src": "D top-view dimension 1611 (vaz_2102.jpg); F passport"
+    },
+    "height": {
+      "v": 1.458,
+      "src": "F passport 1458 (measurements-estates.md §3.8; drawing 1400 laden)"
+    },
+    "wheelbase": {
+      "v": 2.424,
+      "src": "D dimension 2424 (vaz_2102.jpg)"
+    },
+    "overhangFront": {
+      "v": 0.603,
+      "src": "D dimension 603 (vaz_2102.jpg)"
+    },
+    "overhangRear": {
+      "v": 1.032,
+      "src": "D dimension 1032 (vaz_2102.jpg)"
+    },
+    "screenFoot": {
+      "v": [
+        1.16,
+        0.884
+      ],
+      "src": "D cowl s 1160, bonnet 884 there (specs.ts BODY_124 comment (2101 drawing, 4.703 mm/px))"
+    },
+    "beltY": {
+      "v": 0.865,
+      "src": "D side glass foot 865 (specs.ts BODY_124 comment (2101 drawing, 4.703 mm/px))"
+    },
+    "railY": {
+      "v": 1.237,
+      "src": "D side glass top 1237 (specs.ts BODY_124 comment (2101 drawing, 4.703 mm/px))"
+    },
+    "doorFront": {
+      "v": [
+        1.171,
+        2.079
+      ],
+      "src": "D front door 1171 to 2079 (specs.ts BODY_124 comment (2101 drawing, 4.703 mm/px))"
+    },
+    "doorRear": {
+      "v": [
+        2.121,
+        2.972
+      ],
+      "src": "D B pillar 2121 (specs.ts BODY_124 comment (2101 drawing, 4.703 mm/px)); rear door shut line below the belt 3.017 in BODY_124's frame -0.045 [P p02_side_r 3.020, measurements-estates.md §1.1]"
+    },
+    "doorBottomY": {
+      "v": 0.287,
+      "src": "D door bottoms 287 (specs.ts BODY_124 comment (2101 drawing, 4.703 mm/px))"
+    },
+    "backLightTop": {
+      "v": [
+        3.551,
+        1.181
+      ],
+      "src": "D tailgate glass outline top 3.596 / 1193 raw (measurements-estates.md §1.1), s -0.045 to this frame, height by the §0 belt-rail map 843->0.859, 1295->1.275"
+    },
+    "backLightFoot": {
+      "v": [
+        3.795,
+        0.86
+      ],
+      "src": "D knee 3.84 / 0.86 (measurements-estates.md §1.1 rearKnee), s -0.045 to this frame; the glass itself ends ~50 mm higher [P]",
+      "tol": 0.05
+    }
+  },
+  "dashNote": "No photo of a 2102 dashboard is named in the sources; the kit borrows CABIN_2101 (specs.ts KIT_SPECS), and that the 2102 shares the 2101's dash is not sourced.",
+  "gaps": [
+    "sideGlassBelt, sideGlassRail: no pane extents written as [D]/[P] for the 124 shell (the vent/drop columns in specs.ts carry no tag)",
+    "mirror: only a front-view position is measured, none in profile",
+    "roofHalfWidth, beltHalfWidth: no front-view widths measured for the 124 shell",
+    "bonnet, bootLid: lid edges not measured (bonnetFront/bootEnd in specs.ts are untagged)",
+    "screenTop: the 2101 front's roof-front height is not given",
+    "sideGlassBelt/Rail: rear panes are measured (rear drop 2.19, channel 2.70/2.725, fixed to 2.987, quarter 3.083 -> 3.70 in BODY_124's frame) but the front door's vent/drop extents are not, so the list would be incomplete",
+    "moulding: none on the 2102 (measurements-estates.md §1.3)",
+    "overlay.front: no front-view registration written for vaz_2102.jpg (only the rear view)",
+    "height: passport/dimension value; the kit shells stand lower before the loader's fit (specs.ts header, STATUS.md 'Height')"
+  ],
+  "overlay": {
+    "side": {
+      "src": "D",
+      "image": "build/carshape/_refs/bp/img/vaz_2102.jpg",
+      "crop": [
+        400,
+        40,
+        1025,
+        262
+      ],
+      "s": [
+        403.1,
+        0.006589
+      ],
+      "y": [
+        257,
+        0.006589
+      ]
+    }
+  }
+}

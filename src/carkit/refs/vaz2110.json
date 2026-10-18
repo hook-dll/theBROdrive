@@ -1,0 +1,229 @@
+{
+  "car": "vaz2110",
+  "measurements": "measurements-2110.md",
+  "sources": {
+    "D10": {
+      "what": "3dcar.ru vaz_2110.jpg, 1700x1000, four views; side 4.092 mm/px from the drawn wheelbase, ground y 408 (measurements-2110.md §0)",
+      "url": "https://3dcar.ru/media/blueprints/full/vaz/vaz_2110.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz_2110.jpg"
+    },
+    "F": {
+      "what": "infocar.ua, whobycar.com, cartechnic.ru/vaz/vaz_2110, uncle-vova.com"
+    },
+    "PD": {
+      "what": "Commons 'Sporty Lada - Flickr - SergeyRod (3).jpg' (Sergey Rodovnichenko 2004, CC BY-SA 2.0): a Lada 112 Cup car's stock dash from behind the driver's seat; the main source of CABIN_2110 (measurements-2110.md §4). Local copy 1200x900 (the readings are on the 1600x1200 rendition)",
+      "image": "build/carshape/_refs/bp/img/vaz2110_int_SergeyRod3.jpg"
+    },
+    "PD2": {
+      "what": "Commons '2005Lada111Interior.JPG' (Qashqai 2009, CC BY-SA 3.0 / GFDL): a 2005 Lada 111 dash (measurements-2110.md §4)",
+      "image": "build/carshape/_refs/bp/img/vaz2111_int_2005Lada111.jpg"
+    },
+    "Pr2": {
+      "what": "Commons '2004 Lada 21102 silver rear.jpg', CC0 (r2)"
+    }
+  },
+  "body": {
+    "length": {
+      "v": 4.265,
+      "src": "F infocar.ua, whobycar.com, cartechnic.ru, uncle-vova.com (measurements-2110.md §0); D10 tips 4268"
+    },
+    "width": {
+      "v": 1.68,
+      "src": "F infocar.ua, whobycar.com, cartechnic.ru, uncle-vova.com (measurements-2110.md §0)"
+    },
+    "height": {
+      "v": 1.42,
+      "src": "F infocar.ua, whobycar.com, cartechnic.ru, uncle-vova.com (measurements-2110.md §0); D10 roof 1.424"
+    },
+    "wheelbase": {
+      "v": 2.492,
+      "src": "F infocar.ua, whobycar.com, cartechnic.ru, uncle-vova.com (measurements-2110.md §0); D10 hubs"
+    },
+    "overhangFront": {
+      "v": 0.825,
+      "src": "D10 front hub x 819.5 → 0.825 (measurements-2110.md §1)"
+    },
+    "overhangRear": {
+      "v": 0.951,
+      "src": "D10 rear hub 3.317 to the tip 4.268 (measurements-2110.md §1)"
+    },
+    "screenFoot": {
+      "v": [
+        1.154,
+        0.994
+      ],
+      "src": "D10 side: screen's foot on the centre line (1154 px) (measurements-2110.md §6 owner's round)"
+    },
+    "screenTop": {
+      "v": [
+        1.768,
+        1.338
+      ],
+      "src": "D10 side: A pillar top (1050, 81) → 1.768, rounding into the roof at 1.338 (measurements-2110.md §1, §6)"
+    },
+    "beltY": {
+      "v": 0.942,
+      "src": "D10 side: window sill 0.941 / 0.943 at s 1.36 / 1.97 (measurements-2110.md §1)"
+    },
+    "doorFront": {
+      "v": [
+        1.32,
+        2.33
+      ],
+      "src": "D10 side: front shut line 1.32 at the belt, B shut line 2.33 (measurements-2110.md §1)"
+    },
+    "doorBottomY": {
+      "v": 0.299,
+      "src": "D10 side: door bottom y 335 → 0.299 (measurements-2110.md §1)"
+    },
+    "mirror": {
+      "v": [
+        1.517,
+        0.985
+      ],
+      "src": "D10 side: mirror x 975–1003, y 152–183 → 1.46–1.575, 0.92–1.05, centre (measurements-2110.md §1)"
+    },
+    "railY": {
+      "v": 1.346,
+      "src": "D10 side: window tops y 79 → 1.346 (measurements-2110.md §1)"
+    },
+    "doorRear": {
+      "v": [
+        2.33,
+        3.249
+      ],
+      "src": "D10 side: B shut line 2.33, rear door's frame rear edge 3.249 at the belt (measurements-2110.md §1)"
+    },
+    "sideGlassBelt": {
+      "v": [
+        [
+          1.385,
+          2.269
+        ],
+        [
+          2.398,
+          3.205
+        ],
+        [
+          3.27,
+          3.456
+        ]
+      ],
+      "src": "D10 side: front door glass 1.385–2.269, rear door glass 2.398–3.205; the body's quarter glass from P r2 (frame ~2 %, glass 64 %) on the drawing's lines 3.27–3.456 (measurements-2110.md §1, §1.3)"
+    },
+    "sideGlassRail": {
+      "v": [
+        [
+          1.89,
+          2.324
+        ],
+        [
+          2.439,
+          2.959
+        ],
+        [
+          3.015,
+          3.041
+        ]
+      ],
+      "src": "D10 side: front glass top 1.89 at the A pillar's chamfer (§6), rear 2.324; rear glass 2.439–2.959; quarter glass 3.015–3.041 (§1.3, from P r2)"
+    },
+    "backLightFoot": {
+      "v": [
+        3.691,
+        1.031
+      ],
+      "src": "D10 side: back light's foot on the centre line (1520, 156) (measurements-2110.md §1)"
+    },
+    "bootLid": {
+      "v": [
+        3.73,
+        4.18
+      ],
+      "src": "D10 side: boot top from (1530, 158) to the corner (1640, 175) (measurements-2110.md §1); side view, not top",
+      "tol": 0.04
+    },
+    "beltHalfWidth": {
+      "v": 0.73,
+      "src": "D10 top view: side glass foot ±0.73 along the cabin (measurements-2110.md §1.1)"
+    },
+    "roofHalfWidth": {
+      "v": 0.52,
+      "src": "D10 top view: roof lines ±0.50 / ±0.54 (measurements-2110.md §1.1)",
+      "tol": 0.03
+    }
+  },
+  "dash": {
+    "photo": {
+      "src": "PD",
+      "view": "driver"
+    },
+    "clusterAt": {
+      "v": "wheel",
+      "src": "PD hood over the cluster behind the wheel (measurements-2110.md §4)"
+    },
+    "clock": {
+      "v": true,
+      "src": "PD2 a clock panel (measurements-2110.md §4)"
+    },
+    "wheelSpokes": {
+      "v": 2,
+      "src": "PD pad frame meets the rim 41.5° over / 59° under (measurements-2110.md §4: two spokes)"
+    },
+    "glovebox": {
+      "v": "passenger",
+      "src": "PD glovebox lid from x 1400 outwards (measurements-2110.md §4)"
+    },
+    "stack": {
+      "v": true,
+      "src": "PD stack x 1000–1275 down to the tunnel (measurements-2110.md §4)"
+    }
+  },
+  "gaps": [
+    "backLightTop: the roof's profile is given only as outline heights (1.387 at 3.1, 1.371 at 3.15, §9.1); no drawn top point of the glass on the centre line",
+    "bonnet: whole-top bonnet, its front edge on the nose (lip 0.115) and rear at the cowl less a scuttle are spec choices, not a drawn centre-line edge",
+    "moulding: base early car has none (§7)",
+    "dash gauges/dialRows: tacho, speedo and the right small dial seen; the left small dial is hidden in both photos (placed by symmetry, interior.ts CABIN_2110)",
+    "dash vents: the centre pair and the driver's end vent seen; the passenger's end vent not shown",
+    "dash wheelDiameter: unmeasured (the Samara's size, measurements-2110.md §7)",
+    "dash console: not described"
+  ],
+  "overlay": {
+    "side": {
+      "src": "D10",
+      "image": "build/carshape/_refs/bp/img/vaz_2110.jpg",
+      "crop": [
+        600,
+        45,
+        1680,
+        420
+      ],
+      "s": [
+        618,
+        0.004092
+      ],
+      "y": [
+        408,
+        0.004092
+      ]
+    },
+    "front": {
+      "src": "D10",
+      "image": "build/carshape/_refs/bp/img/vaz_2110.jpg",
+      "crop": [
+        70,
+        40,
+        510,
+        420
+      ],
+      "x": [
+        290,
+        0.004092
+      ],
+      "y": [
+        408,
+        0.004092
+      ]
+    }
+  }
+}

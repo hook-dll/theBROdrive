@@ -1,0 +1,41 @@
+{
+  "car": "gaz31029",
+  "measurements": "measurements-volga.md",
+  "sources": {
+    "D": { "what": "the-blueprints.com watermarked preview of its GAZ-31029 vector drawing, 1280×906, dimension lines 4885 / 2800 / 1820 / 1476", "image": "build/carshape/_refs/bp/img/gaz31029_bp-31029-vector-full.jpg" },
+    "F": { "what": "drivernotes.net, auto-data.net, matador.tech, ru.wikipedia: 4885 × 1800 × 1476, 2800 (measurements-volga.md §0)" },
+    "P1": { "what": "Commons '31029-int-2.jpg', public domain, DL24, 1152×768 from behind the driver's seat", "image": "build/carshape/_refs/bp/img/gaz31029_31029-int-2.jpg" }
+  },
+  "body": {
+    "length": { "v": 4.885, "src": "F ru.wikipedia, auto-data.net; D dimension 4885" },
+    "width": { "v": 1.8, "src": "F ru.wikipedia (drawing's 1820 is over the mirrors)" },
+    "height": { "v": 1.476, "src": "F ru.wikipedia; D dimension 1476" },
+    "wheelbase": { "v": 2.8, "src": "F; D dimension 2800" },
+    "screenFoot": { "v": [1.447, 1.066], "tol": 0.04, "src": "D side cowl (253, 150), measurements-volga.md §2.1-2.2 (s 1.447 as read there)" },
+    "backLightTop": { "v": [3.461, 1.368], "tol": 0.04, "src": "D side roof's rear end x 606.7 (3.461), top line 1.368 at 3.48, measurements-volga.md §2.1, §3.2" },
+    "backLightFoot": { "v": [3.922, 0.967], "src": "D side (686.7, 166.7), measurements-volga.md §2.3" },
+    "beltY": { "v": 1.036, "src": "D side glass's front edge foot (310, 155), measurements-volga.md §3.1" },
+    "railY": { "v": 1.37, "src": "D side window tops 1.36-1.38, measurements-volga.md §3.1" },
+    "doorFront": { "v": [1.59, 2.5], "src": "D side front door front edge x 282, B pillar x 440, measurements-volga.md §2.1" },
+    "bootLid": { "v": [4.42, 4.728], "tol": 0.05, "src": "D side boot (773, 166.7) to the lid's trailing edge (826.7, 173.3), measurements-volga.md §2.3 (front edge is the deck point, not a shut line)" }
+  },
+  "dash": {
+    "photo": { "src": "P1", "view": "driver" },
+    "gauges": { "v": 2, "src": "P1 combined gauge (left) and speedometer, measurements-volga.md §4.4" },
+    "dialRows": { "v": [2], "src": "P1 both dials centred at one height with the clock between, measurements-volga.md §4.4" },
+    "clusterAt": { "v": "wheel", "src": "P1 column at x 465 under the cluster, measurements-volga.md §4.2" },
+    "clock": { "v": true, "src": "P1 small dial between them, measurements-volga.md §4.4" },
+    "glovebox": { "v": "passenger", "src": "P1 wood lid right of the radio, measurements-volga.md §4.4" },
+    "stack": { "v": true, "src": "P1 console x 660-830 down to the tunnel, measurements-volga.md §4.4" }
+  },
+  "gaps": [
+    "overhangFront/Rear: 0.896 front is the drawn 879 plus an [E] split of the drawing's 40 mm shortfall; no factory overhang found",
+    "screenTop: not read for the 31029 (the 24's greenhouse moved 0.14)",
+    "sideGlassBelt / sideGlassRail, doorRear (only 3.36 rear shut line), doorBottomY, mirror, bonnet: not fully read",
+    "vents: the passenger end vent is by symmetry [E]; wheelSpokes: a pad wheel, not counted; wheelDiameter 400-410 owners' [E]"
+  ],
+  "overlay": {
+    "side": { "src": "D", "image": "build/carshape/_refs/bp/img/gaz31029_bp-31029-vector-full.jpg", "crop": [0, 60, 860, 340], "s": [5.971, 0.005761], "y": [330, 0.005922] },
+    "front": { "src": "D", "image": "build/carshape/_refs/bp/img/gaz31029_bp-31029-vector-full.jpg", "crop": [890, 60, 1220, 340], "x": [1055, 0.005761], "y": [332.5, 0.005922] }
+  }
+}

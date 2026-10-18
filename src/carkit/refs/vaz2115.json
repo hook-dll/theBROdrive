@@ -1,0 +1,94 @@
+{
+  "car": "vaz2115",
+  "measurements": "measurements-samara.md",
+  "sources": {
+    "P19": {
+      "what": "Commons '2005 Lada 21150 purple side.jpg', CC0; hubs 371/1456 → 2.267 mm/px on the side plane, ground y 665 (measurements-samara.md §0)",
+      "image": "build/carshape/_refs/bp/img/vaz2115_p19_purple_side.jpg"
+    },
+    "D99": {
+      "what": "3dcar.ru vaz_21099.jpg (no 2115 drawing exists, measurements-samara.md §0)",
+      "image": "build/carshape/_refs/bp/img/vaz_21099.jpg"
+    },
+    "F": {
+      "what": "vaz.ru/v2115.htm, drom.ru, autoiwc.ru"
+    }
+  },
+  "body": {
+    "length": {
+      "v": 4.33,
+      "src": "F vaz.ru/v2115.htm, drom.ru catalogue, autoiwc.ru (measurements-samara.md §0)"
+    },
+    "width": {
+      "v": 1.65,
+      "src": "F vaz.ru/v2115.htm, drom.ru catalogue, autoiwc.ru (measurements-samara.md §0)"
+    },
+    "height": {
+      "v": 1.402,
+      "src": "F vaz.ru/v2115.htm, drom.ru catalogue, autoiwc.ru (measurements-samara.md §0): 1402 autoiwc.ru, vaz.ru prints 1415",
+      "tol": 0.015
+    },
+    "wheelbase": {
+      "v": 2.46,
+      "src": "F vaz.ru/v2115.htm, drom.ru catalogue, autoiwc.ru (measurements-samara.md §0)"
+    },
+    "overhangFront": {
+      "v": 0.848,
+      "src": "P p19 2.267 mm/px, depth-corrected (measurements-samara.md §3.1; ±20 mm, §5)",
+      "tol": 0.025
+    },
+    "overhangRear": {
+      "v": 1.022,
+      "src": "F length 4330 − wheelbase 2460 − P p19 front 0.848 (measurements-samara.md §3.1)",
+      "tol": 0.025
+    },
+    "doorFront": {
+      "v": [
+        1.296,
+        2.285
+      ],
+      "src": "D99 21099 drawing doors (the 2115 is the 21099's body, 0.045 back, measurements-samara.md intro): 1.251 / 2.24 + 0.045"
+    },
+    "doorRear": {
+      "v": [
+        2.285,
+        3.165
+      ],
+      "src": "D99 21099 drawing doors + 0.045 (measurements-samara.md intro, §1)"
+    },
+    "moulding": {
+      "v": [
+        0.435,
+        0.542
+      ],
+      "src": "P p19 front door grey band 0.435 / 0.542 (measurements-samara.md §3.6)"
+    }
+  },
+  "dashNote": "Platform default Samara dash (interior.ts LAYOUTS.samara, cabinLayout only sets the visor): written without a photo of the car's dashboard; no interior photo of the 2108/2109/21099/2115 is named in measurements-samara.md or interior.ts.",
+  "gaps": [
+    "no drawing (vaz_2115.jpg is a 404, measurements-samara.md §0): greenhouse, glass, screen and belt are not measured on a 2115 source",
+    "backLightFoot: p19 gives s 3.616 at the side only, no height",
+    "bootLid: lid's leading edge not given (trailing edge 4.154 / 0.932 at the corner)",
+    "overlay.side is a photo (perspective; bumper tips ~0.8 m off the scale plane, §3.1); no front registration"
+  ],
+  "overlay": {
+    "side": {
+      "src": "P19",
+      "image": "build/carshape/_refs/bp/img/vaz2115_p19_purple_side.jpg",
+      "crop": [
+        20,
+        0,
+        1900,
+        697
+      ],
+      "s": [
+        4.74,
+        0.002267
+      ],
+      "y": [
+        665,
+        0.002267
+      ]
+    }
+  }
+}

@@ -1,0 +1,163 @@
+{
+  "car": "vaz2112",
+  "measurements": "measurements-2110.md",
+  "sources": {
+    "D12": {
+      "what": "3dcar.ru vaz_2112.jpg, 1700x1000; side 3.98 mm/px from the drawn wheelbase, hubs 815/1441, ground y 410; s registered by the front hub on the 2110's 0.825 (checks: x 1540 → 3.71, x 1433 → 3.285, measurements-2110.md §8)",
+      "url": "https://3dcar.ru/media/blueprints/full/vaz/vaz_2112.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz_2112.jpg"
+    },
+    "D10": {
+      "what": "3dcar.ru vaz_2110.jpg, 1700x1000, four views; side 4.092 mm/px from the drawn wheelbase, ground y 408 (measurements-2110.md §0)",
+      "url": "https://3dcar.ru/media/blueprints/full/vaz/vaz_2110.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz_2110.jpg"
+    },
+    "F": {
+      "what": "autoopt.ru encyclopedia VAZ-2112"
+    },
+    "PD": {
+      "what": "Commons 'Sporty Lada - Flickr - SergeyRod (3).jpg' (Sergey Rodovnichenko 2004, CC BY-SA 2.0): a Lada 112 Cup car's stock dash from behind the driver's seat; the main source of CABIN_2110 (measurements-2110.md §4). Local copy 1200x900 (the readings are on the 1600x1200 rendition)",
+      "image": "build/carshape/_refs/bp/img/vaz2110_int_SergeyRod3.jpg"
+    },
+    "PD2": {
+      "what": "Commons '2005Lada111Interior.JPG' (Qashqai 2009, CC BY-SA 3.0 / GFDL): a 2005 Lada 111 dash (measurements-2110.md §4)",
+      "image": "build/carshape/_refs/bp/img/vaz2111_int_2005Lada111.jpg"
+    }
+  },
+  "body": {
+    "length": {
+      "v": 4.17,
+      "src": "F autoopt.ru encyclopedia VAZ-2112: 4170 × 1676 × 1430, base 2490 (measurements-2110.md §8)"
+    },
+    "width": {
+      "v": 1.676,
+      "src": "F autoopt.ru encyclopedia VAZ-2112: 4170 × 1676 × 1430, base 2490 (measurements-2110.md §8)"
+    },
+    "height": {
+      "v": 1.43,
+      "src": "F autoopt.ru encyclopedia VAZ-2112: 4170 × 1676 × 1430, base 2490 (measurements-2110.md §8)"
+    },
+    "wheelbase": {
+      "v": 2.49,
+      "src": "F autoopt.ru encyclopedia VAZ-2112: 4170 × 1676 × 1430, base 2490 (measurements-2110.md §8)"
+    },
+    "overhangFront": {
+      "v": 0.825,
+      "src": "D12 nose lies on the 2110 drawing's on the wheels (measurements-2110.md §8); D10 0.825"
+    },
+    "overhangRear": {
+      "v": 0.855,
+      "src": "F length 4170 − wheelbase 2490 − D front overhang 0.825"
+    },
+    "screenFoot": {
+      "v": [
+        1.154,
+        0.994
+      ],
+      "src": "D10 2110 drawing (the 2112's nose and doors lie on it, measurements-2110.md §8); side: screen's foot on the centre line (1154 px) (measurements-2110.md §6 owner's round)"
+    },
+    "screenTop": {
+      "v": [
+        1.768,
+        1.338
+      ],
+      "src": "D10 2110 drawing (the 2112's nose and doors lie on it, measurements-2110.md §8); side: A pillar top (1050, 81) → 1.768, rounding into the roof at 1.338 (measurements-2110.md §1, §6)"
+    },
+    "beltY": {
+      "v": 0.942,
+      "src": "D10 2110 drawing (the 2112's nose and doors lie on it, measurements-2110.md §8); side: window sill 0.941 / 0.943 at s 1.36 / 1.97 (measurements-2110.md §1)"
+    },
+    "doorFront": {
+      "v": [
+        1.32,
+        2.33
+      ],
+      "src": "D10 2110 drawing (the 2112's nose and doors lie on it, measurements-2110.md §8); side: front shut line 1.32 at the belt, B shut line 2.33 (measurements-2110.md §1)"
+    },
+    "doorBottomY": {
+      "v": 0.299,
+      "src": "D10 2110 drawing (the 2112's nose and doors lie on it, measurements-2110.md §8); side: door bottom y 335 → 0.299 (measurements-2110.md §1)"
+    },
+    "mirror": {
+      "v": [
+        1.517,
+        0.985
+      ],
+      "src": "D10 2110 drawing (the 2112's nose and doors lie on it, measurements-2110.md §8); side: mirror x 975–1003, y 152–183 → 1.46–1.575, 0.92–1.05, centre (measurements-2110.md §1)"
+    },
+    "railY": {
+      "v": 1.346,
+      "src": "D10 window tops (shared doors, measurements-2110.md §8)"
+    },
+    "doorRear": {
+      "v": [
+        2.33,
+        3.249
+      ],
+      "src": "D10 rear door (the 2112's body to the rear door is the 2110's, measurements-2110.md §8)"
+    },
+    "backLightTop": {
+      "v": [
+        3.285,
+        1.333
+      ],
+      "src": "D12 side: roof's rear end x 1433, 1.333 on the outline (measurements-2110.md §8)"
+    }
+  },
+  "dash": {
+    "photo": {
+      "src": "PD",
+      "view": "driver"
+    },
+    "clusterAt": {
+      "v": "wheel",
+      "src": "PD hood over the cluster behind the wheel (measurements-2110.md §4)"
+    },
+    "clock": {
+      "v": true,
+      "src": "PD2 a clock panel (measurements-2110.md §4)"
+    },
+    "wheelSpokes": {
+      "v": 2,
+      "src": "PD pad frame meets the rim 41.5° over / 59° under (measurements-2110.md §4: two spokes)"
+    },
+    "glovebox": {
+      "v": "passenger",
+      "src": "PD glovebox lid from x 1400 outwards (measurements-2110.md §4)"
+    },
+    "stack": {
+      "v": true,
+      "src": "PD stack x 1000–1275 down to the tunnel (measurements-2110.md §4)"
+    }
+  },
+  "gaps": [
+    "backLightFoot: the knee 'over the lamps' has no drawn number (rearKnee 4.095 / 1.0 is the spec)",
+    "sideGlassBelt/Rail: only the quarter glass's rear corner on the belt (3.71) is read on the 2112",
+    "overhangRear: from F length and wheelbase, the drawn rear tip not read",
+    "overlay.front: no 2112 front registration",
+    "dash gauges/dialRows: tacho, speedo and the right small dial seen; the left small dial is hidden in both photos (placed by symmetry, interior.ts CABIN_2110)",
+    "dash vents: the centre pair and the driver's end vent seen; the passenger's end vent not shown",
+    "dash wheelDiameter: unmeasured (the Samara's size, measurements-2110.md §7)",
+    "dash console: not described"
+  ],
+  "overlay": {
+    "side": {
+      "src": "D12",
+      "image": "build/carshape/_refs/bp/img/vaz_2112.jpg",
+      "crop": [
+        590,
+        45,
+        1675,
+        422
+      ],
+      "s": [
+        607.71,
+        0.00398
+      ],
+      "y": [
+        410,
+        0.00398
+      ]
+    }
+  }
+}

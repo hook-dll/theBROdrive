@@ -1,0 +1,164 @@
+{
+  "car": "vaz2104",
+  "measurements": "measurements-estates.md",
+  "sources": {
+    "D": {
+      "what": "3dcar.ru 'vaz_2104.jpg' 1700x1000, undimensioned; side 4.090 mm/px, hubs x 780 / 1370 registered on 0.635 / 3.048 (measurements-estates.md §0)",
+      "url": "https://3dcar.ru/media/blueprints/full/vaz/vaz_2104.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz_2104.jpg"
+    },
+    "D1": {
+      "what": "3dcar.ru 'vaz_2107_1982.jpg' (olegoft) 4200x2800: side 1.6684 mm/px from 4136 over x 1383->3862, front 1.679 mm/px from track 1365 (measurements-classics.md §0)",
+      "url": "https://3dcar.ru/media/blueprints/full/vaz/vaz_2107_1982.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz_2107_1982.jpg"
+    },
+    "F": {
+      "what": "passport 4115 x 1620 x 1443 (measurements-estates.md §3.8)"
+    }
+  },
+  "body": {
+    "length": {
+      "v": 4.115,
+      "src": "F passport 4115 (measurements-estates.md §3.8; drawn tip 4.124)"
+    },
+    "width": {
+      "v": 1.62,
+      "src": "F passport 1620"
+    },
+    "height": {
+      "v": 1.443,
+      "src": "F passport 1443"
+    },
+    "screenFoot": {
+      "v": [
+        0.985,
+        1.0
+      ],
+      "src": "D centre-line screen base s 985, 1000 high (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px))"
+    },
+    "screenTop": {
+      "v": [
+        1.41,
+        1.4
+      ],
+      "src": "D roof front s 1410, 1400 high (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px))"
+    },
+    "backLightTop": {
+      "v": [
+        3.42,
+        1.364
+      ],
+      "src": "D tailgate glass outline top 3.42 / 1.364 (measurements-estates.md §2.1)"
+    },
+    "backLightFoot": {
+      "v": [
+        3.8,
+        0.85
+      ],
+      "src": "D knee 3.80-3.835 / 0.84-0.86 (measurements-estates.md §2.1); the glass ends at 0.89-0.93 on the centre line",
+      "tol": 0.05
+    },
+    "sideGlassBelt": {
+      "v": [
+        [
+          1.225,
+          2.055
+        ],
+        [
+          2.127,
+          2.679
+        ],
+        [
+          2.698,
+          2.933
+        ],
+        [
+          3.077,
+          3.63
+        ]
+      ],
+      "src": "D 05 shell's front door and rear door (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px)); fixed pane rear edge 2933, quarter glass 3077 -> 3.63 [D 3604 / P 3640] (measurements-estates.md §2.1)"
+    },
+    "sideGlassRail": {
+      "v": [
+        [
+          1.46,
+          2.062
+        ],
+        [
+          2.127,
+          2.68
+        ],
+        [
+          2.7,
+          2.729
+        ],
+        [
+          2.837,
+          3.33
+        ]
+      ],
+      "src": "D 05 shell's front door (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px)); at the rail: channel 2697, fixed pane 2729, quarter 2837 -> 3317/3.33 (measurements-estates.md §2.1)"
+    },
+    "beltY": {
+      "v": 0.955,
+      "src": "D window sill 955 (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px))"
+    },
+    "railY": {
+      "v": 1.335,
+      "src": "D glass top 1335 (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px))"
+    },
+    "doorFront": {
+      "v": [
+        1.165,
+        2.09
+      ],
+      "src": "D front door 1165 to 2090 under the belt (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px))"
+    },
+    "doorRear": {
+      "v": [
+        2.09,
+        2.959
+      ],
+      "src": "D B pillar 2090, rear door rear shut line 2959 at the belt (measurements-estates.md §0/§2.1)"
+    },
+    "doorBottomY": {
+      "v": 0.365,
+      "src": "D doors end at 365 (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px))"
+    },
+    "beltHalfWidth": {
+      "v": 0.773,
+      "src": "D front view 773 at y 900 (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px) §1.1; 2104 front is the 2105's)"
+    }
+  },
+  "dashNote": "No photo of a 2104 dashboard is named in the sources; the kit borrows CABIN_2105 (specs.ts KIT_SPECS), and the 2104 sharing it is not sourced.",
+  "gaps": [
+    "wheelbase, overhangs: vaz_2104.jpg is undimensioned and registered on the 05 shell's own hubs; no 2104 passport axle figures in the sources",
+    "mirror: front view only (x 730-850, y 955-1055); its profile s is not measured",
+    "roofHalfWidth: front view gives 620 at the gutter 1375 only, not the roof top",
+    "bootLid: the lid's front edge is not measured (rear edge 4.06 [D])",
+    "moulding: none (measurements-estates.md §2.3)",
+    "overlay.front: vaz_2104.jpg has a registration for its rear view only",
+    "height: passport/dimension value; the kit shells stand lower before the loader's fit (specs.ts header, STATUS.md 'Height')"
+  ],
+  "overlay": {
+    "side": {
+      "src": "D",
+      "image": "build/carshape/_refs/bp/img/vaz_2104.jpg",
+      "crop": [
+        605,
+        75,
+        1630,
+        445
+      ],
+      "s": [
+        624.74,
+        0.00409
+      ],
+      "y": [
+        437.5,
+        0.00409
+      ]
+    }
+  }
+}

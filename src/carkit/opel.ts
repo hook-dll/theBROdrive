@@ -63,8 +63,10 @@ export const BODY_ASTRA_F: KitBody = {
     { s: 3.215, sill: 0.23, crease: 0.6, belt: 0.945, deck: 0.965, wSill: 0.82, wCrease: 0.836, wBelt: 0.795 },
     { s: 3.653, sill: 0.27, crease: 0.6, belt: 0.975, deck: 0.995, wSill: 0.82, wCrease: 0.834, wBelt: 0.79 },
     // The D pillar's foot: the belt turns down here to the tailgate's foot at the corners'
-    // top (as BODY_1111's); the tail rounding in [D plan ±0.83 at 3.85, ±0.79 at 3.92].
-    { s: 3.9, sill: 0.31, crease: 0.61, belt: 0.97, deck: 0.99, wSill: 0.8, wCrease: 0.815, wBelt: 0.77 },
+    // top (as BODY_1111's); the tail rounding in [D plan ±0.83 at 3.85, ±0.79 at 3.92]. The
+    // belt on one line from 3.653 to the corner (0.776; at 0.77 it narrowed, ran level and
+    // turned in again: an in-and-out kit-surface flags).
+    { s: 3.9, sill: 0.31, crease: 0.61, belt: 0.97, deck: 0.99, wSill: 0.8, wCrease: 0.815, wBelt: 0.776 },
     // rearBase: the corner lamps' top (0.905) [D side y 177, rear view 0.927 at its own
     // scale], the corners ±0.79 [D rear: the lamps' outer edge ±0.794].
     { s: 3.985, sill: 0.33, crease: 0.62, belt: 0.905, deck: 0.915, wSill: 0.785, wCrease: 0.795, wBelt: 0.77 },

@@ -1,0 +1,117 @@
+{
+  "car": "vaz2108",
+  "measurements": "measurements-samara.md",
+  "sources": {
+    "D08": {
+      "what": "3dcar.ru drawing vaz2108.jpg, 1800x1100, side 3.826 mm/px (samaras.ts BODY_2108 comment; measurements-samara.md §6 registration)",
+      "image": "build/carshape/_refs/bp/img/vaz2108.jpg"
+    },
+    "F": {
+      "what": "carmodels.ts sv_vaz2108 factory row, wiki.zr.ru"
+    }
+  },
+  "body": {
+    "length": {
+      "v": 4.006,
+      "src": "F carmodels.ts sv_vaz2108 row (wiki.zr.ru Технические_характеристики_автомобилей2108); D08 tips 622/1669 → 0/4.006"
+    },
+    "width": {
+      "v": 1.65,
+      "src": "F carmodels.ts sv_vaz2108 row (wiki.zr.ru Технические_характеристики_автомобилей2108)"
+    },
+    "height": {
+      "v": 1.402,
+      "src": "F carmodels.ts sv_vaz2108 row (wiki.zr.ru Технические_характеристики_автомобилей2108) (the drawing's roof is 1.335, measurements-samara.md §5)"
+    },
+    "wheelbase": {
+      "v": 2.46,
+      "src": "F carmodels.ts sv_vaz2108 row (wiki.zr.ru Технические_характеристики_автомобилей2108)"
+    },
+    "overhangFront": {
+      "v": 0.785,
+      "src": "D08 side: overhang 785 (samaras.ts BODY_2108 comment; front hub x 829.3, measurements-samara.md §6)"
+    },
+    "overhangRear": {
+      "v": 0.761,
+      "src": "D08 side: overhang 761 (samaras.ts BODY_2108 comment)"
+    },
+    "screenFoot": {
+      "v": [
+        1.08,
+        0.92
+      ],
+      "src": "D08 side: screen's centre line comes up from the bonnet (0.92) at s 1.08 (measurements-samara.md §4 item 15; samaras.ts screenFoot comment)"
+    },
+    "screenTop": {
+      "v": [
+        1.76,
+        1.335
+      ],
+      "src": "D08 side: roof's front at s 1760, roof 1335 (samaras.ts BODY_2108 comment)"
+    },
+    "beltY": {
+      "v": 0.911,
+      "src": "D08 side: belt 911 (samaras.ts BODY_2108 comment)"
+    },
+    "doorBottomY": {
+      "v": 0.302,
+      "src": "D08 side: door bottom 302 (samaras.ts BODY_2108 comment)"
+    },
+    "backLightTop": {
+      "v": [
+        3.19,
+        1.335
+      ],
+      "src": "D08 side: roof 1335 to s 3190 (tailgate hinge) (samaras.ts BODY_2108 comment)"
+    },
+    "backLightFoot": {
+      "v": [
+        3.93,
+        0.884
+      ],
+      "src": "D08 side: tailgate glass down to its knee at s 3930, 884 high (samaras.ts BODY_2108 comment)"
+    },
+    "doorFront": {
+      "v": [
+        1.278,
+        2.552
+      ],
+      "src": "D08 side: door 1278 to 2552 (samaras.ts BODY_2108 comment)"
+    },
+    "bonnet": {
+      "v": [
+        0.164,
+        1.08
+      ],
+      "src": "D08 side: bonnet's lip at s 164 (samaras.ts frontLean comment); rear edge with the screen's foot at 1.08 (measurements-samara.md §4 item 15)",
+      "tol": 0.04
+    }
+  },
+  "dashNote": "Platform default Samara dash (interior.ts LAYOUTS.samara, cabinLayout only sets the visor): written without a photo of the car's dashboard; no interior photo of the 2108/2109/21099/2115 is named in measurements-samara.md or interior.ts.",
+  "gaps": [
+    "sideGlassBelt/sideGlassRail: the door glass's front edge at the belt is not given (only its rear 2.46 and the quarter 2.605–3.57 foot / 3.12 head)",
+    "railY, mirror, moulding, roofHalfWidth, beltHalfWidth: not read off the drawing in any source (top-view widths are of the crease, §6)",
+    "overlay.front: no front-view registration written (only side and top, measurements-samara.md §6)",
+    "no measurements file of its own: values from the BODY_2108 comment in samaras.ts and measurements-samara.md §4/§6"
+  ],
+  "overlay": {
+    "side": {
+      "src": "D08",
+      "image": "build/carshape/_refs/bp/img/vaz2108.jpg",
+      "crop": [
+        600,
+        60,
+        1690,
+        445
+      ],
+      "s": [
+        623.8,
+        0.003826
+      ],
+      "y": [
+        431,
+        0.003826
+      ]
+    }
+  }
+}

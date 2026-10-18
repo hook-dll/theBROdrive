@@ -1,0 +1,45 @@
+{
+  "car": "vaz2131",
+  "measurements": "measurements-niva.md",
+  "sources": {
+    "D": { "what": "3dcar.ru VAZ-2121 four-view (the shared front, door and tail), measurements-niva.md §0", "image": "build/carshape/_refs/bp/img/niva.jpg" },
+    "F": { "what": "vaz.ru v2131 (search snippet): 4220 × 1680 × 1640, wheelbase 2700; measurements-niva.md §5" },
+    "P1": { "what": "Commons '2017 Lada 4X4 Urban 213100 brown side.jpg', CC0 (positions ±4 cm, heights ±3 cm), measurements-niva.md §5" },
+    "P2": { "what": "Commons 'File:VAZ-2121 (first generation) \"Niva\" (interior view).jpg', public domain: the 2121 dash, which the 2131 shares (CABIN_2131 changes only the bench)", "url": "https://commons.wikimedia.org/wiki/File:VAZ-2121_(first_generation)_%22Niva%22_(interior_view).jpg", "image": "build/carshape/_refs/bp/img/niva_VAZ-2121_interior_view.jpg" },
+    "ZR": { "what": "Za Rulyom retrotest of a 1983 VAZ-2121 (the shared dash), https://www.zr.ru/content/articles/906566-k-yubileyu-nivy-retro-test-vaz/" }
+  },
+  "body": {
+    "length": { "v": 4.22, "src": "F vaz.ru 4220 (autoopt.ru, catalog-vaz.ru 4240), measurements-niva.md §5" },
+    "width": { "v": 1.68, "src": "F vaz.ru" },
+    "height": { "v": 1.64, "src": "F vaz.ru" },
+    "wheelbase": { "v": 2.7, "src": "F vaz.ru" },
+    "overhangFront": { "v": 0.688, "src": "D the 2121's front hub (car grew by its wheelbase only), measurements-niva.md §1, §5" },
+    "overhangRear": { "v": 0.845, "src": "D the 2121's rear overhang (2.888 → 3.733), measurements-niva.md §1, §5" },
+    "screenFoot": { "v": [1.152, 1.01], "src": "D the 2121's A pillar at the belt, measurements-niva.md §1, §5" },
+    "screenTop": { "v": [1.583, 1.496], "src": "D the 2121's A pillar at the rail, measurements-niva.md §1, §5" },
+    "backLightTop": { "v": [3.826, 1.434], "src": "D the 2121's (3.326, 1.434) + 0.5, measurements-niva.md §5 (tail the 2121's + 0.5)" },
+    "backLightFoot": { "v": [4.055, 1.044], "src": "D the 2121's knee (3.555, 1.044) + 0.5, measurements-niva.md §5" },
+    "sideGlassBelt": { "v": [[1.322, 1.685], [1.705, 2.255], [2.37, 3.13], [3.21, 3.69]], "tol": 0.05, "src": "D the 2121's front door (vent, drop glass); P1 rear door glass 2.37-3.13, quarter 3.21-3.69 (±4 cm), measurements-niva.md §1, §5" },
+    "beltY": { "v": 1.044, "src": "D the 2121's window sill (front door shared), measurements-niva.md §1" },
+    "railY": { "v": 1.449, "src": "D the 2121's glass top, measurements-niva.md §1" },
+    "doorFront": { "v": [1.322, 2.317], "src": "D the 2121's front door (kolesa.ru: same doors), measurements-niva.md §5" },
+    "doorRear": { "v": [2.317, 3.2], "tol": 0.04, "src": "P1 rear door front edge 2.31/2.33, rear edge upright at 3.20, measurements-niva.md §5" },
+    "doorBottomY": { "v": 0.428, "src": "D the 2121's, measurements-niva.md §1" },
+    "roofHalfWidth": { "v": 0.641, "src": "D the 2121's roof line, measurements-niva.md §1.1" },
+    "beltHalfWidth": { "v": 0.8, "src": "D the 2121's front view at the belt, measurements-niva.md §1.1" }
+  },
+  "dash": {
+    "photo": { "src": "P2", "view": "driver" },
+    "gauges": { "v": 5, "src": "ZR the 2121's cluster (tachometer, speedometer, fuel, oil, temperature), measurements-niva.md §6" },
+    "clusterAt": { "v": "wheel", "src": "ZR; P2" },
+    "wheelSpokes": { "v": 2, "src": "ZR two spokes nearly level, interior.ts LAYOUTS.niva" },
+    "glovebox": { "v": "passenger", "src": "P2; ZR" },
+    "stack": { "v": true, "src": "P Commons 'Interior 1980.jpg', interior.ts LAYOUTS.niva; P2" }
+  },
+  "gaps": [
+    "No 2131 drawing exists (measurements-niva.md §5); everything but the rear door, quarter glass and dims is the 2121's",
+    "dialRows, clock, vents, console, wheelDiameter: not sourced",
+    "sideGlassRail, bonnet, mirror: not read",
+    "overlay: no drawing of the 2131"
+  ]
+}

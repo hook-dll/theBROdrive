@@ -1,0 +1,47 @@
+{
+  "car": "gaz24",
+  "measurements": "measurements-volga.md",
+  "sources": {
+    "D": { "what": "3dcar.ru factory four-view of the GAZ-24 with dimension lines, JPEG 1500×900", "url": "https://3dcar.ru/media/blueprints/full/gaz/gaz_24.jpg", "image": "build/carshape/_refs/bp/img/gaz_24.jpg" },
+    "F": { "what": "the dimension lines on gaz_24.jpg (factory drawing): 4735 × 1800 × 1490, 2800, front overhang 756" },
+    "P1": { "what": "Commons 'GAZ-24 (1st generation) \"Volga\" (interior).jpg', public domain, the dash square from the back seat", "image": "build/carshape/_refs/bp/img/gaz24_GAZ-24_1st_generation_Volga_interior_.jpg" },
+    "P2": { "what": "Commons 'GAZ 24 Volga interior.jpg', CC BY-SA 4.0, User:CLI, the cluster panel close", "image": "build/carshape/_refs/bp/img/gaz24_GAZ_24_Volga_interior.jpg" }
+  },
+  "body": {
+    "length": { "v": 4.735, "src": "F dimension line 4735 (measurements-volga.md §0)" },
+    "width": { "v": 1.8, "src": "F dimension line 1800 (with mouldings; body ±0.885 at the doors)" },
+    "height": { "v": 1.49, "src": "F dimension line 1490" },
+    "wheelbase": { "v": 2.8, "src": "F dimension line 2800" },
+    "overhangFront": { "v": 0.756, "src": "F dimension line 756" },
+    "overhangRear": { "v": 1.179, "src": "F 4735 − 756 − 2800" },
+    "screenFoot": { "v": [1.357, 1.091], "src": "D side cowl (775, 120), measurements-volga.md §1.1" },
+    "screenTop": { "v": [1.75, 1.459], "tol": 0.03, "src": "D side roof's front (852, 46-50), measurements-volga.md §1.1" },
+    "backLightTop": { "v": [3.336, 1.387], "src": "D side roof scan: back light's top 1.387 at 3.336, measurements-volga.md §3.2" },
+    "backLightFoot": { "v": [3.688, 1.04], "src": "D side (1232, 130), measurements-volga.md §1.1" },
+    "beltY": { "v": 1.0, "src": "D side window sill y 138, measurements-volga.md §1.1" },
+    "railY": { "v": 1.36, "src": "D side window tops y 65-70 (1.37-1.35), measurements-volga.md §1.1" },
+    "doorFront": { "v": [1.459, 2.326], "src": "D side front door edges x 795 / 965, measurements-volga.md §1.1" },
+    "doorBottomY": { "v": 0.295, "tol": 0.03, "src": "D side door bottoms y 280-272 (0.275-0.316), measurements-volga.md §1.1" },
+    "roofHalfWidth": { "v": 0.7, "src": "D front view roof ±0.70 at the rail, measurements-volga.md §1.1" }
+  },
+  "dash": {
+    "photo": { "src": "P1", "view": "wide" },
+    "gauges": { "v": 5, "src": "P1/P2 ribbon speedometer + ammeter, fuel, temperature, oil windows, measurements-volga.md §4.3" },
+    "clusterAt": { "v": "wheel", "src": "P1 panel 0.41 off the centre line before the column, measurements-volga.md §4.2-4.3" },
+    "clock": { "v": true, "src": "P1/P2 clock at the panel's right end, measurements-volga.md §4.3" },
+    "wheelSpokes": { "v": 2, "src": "P1 two spokes nearly level, measurements-volga.md §4.3" },
+    "glovebox": { "v": "passenger", "src": "P1 lid x 1174-1710, measurements-volga.md §4.3" },
+    "vents": { "v": 2, "src": "P1 round end vents x 146 / 1763, measurements-volga.md §4.3" }
+  },
+  "gaps": [
+    "sideGlassBelt / sideGlassRail: the front door's drop pane is not read at the belt (quarter light 1.62-1.928, rear 2.454-2.938 and fixed 2.974-3.175 only)",
+    "doorRear: the rear door's front shut line is not given (B pillar columns 2.362/2.40/2.428, rear shut line 3.203)",
+    "bonnet, bootLid, mirror, beltHalfWidth, moulding: not read",
+    "dialRows: ribbon plus windows, not rows of dials",
+    "stack, console: not stated; wheelDiameter 0.42 is an owners' figure [E]",
+    "overlay.front: heights hung on the bumper and roof (5.06 mm/px) with no pixel origin written down"
+  ],
+  "overlay": {
+    "side": { "src": "D", "image": "build/carshape/_refs/bp/img/gaz_24.jpg", "crop": [500, 25, 1445, 340], "s": [508.863, 0.0051], "y": [334, 0.0051] }
+  }
+}

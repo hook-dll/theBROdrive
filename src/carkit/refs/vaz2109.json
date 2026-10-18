@@ -1,0 +1,124 @@
+{
+  "car": "vaz2109",
+  "measurements": "measurements-samara.md",
+  "sources": {
+    "D08": {
+      "what": "3dcar.ru drawing vaz2108.jpg, 1800x1100, side 3.826 mm/px (samaras.ts BODY_2108 comment; measurements-samara.md §6 registration)",
+      "image": "build/carshape/_refs/bp/img/vaz2108.jpg"
+    },
+    "D09": {
+      "what": "3dcar.ru vaz_2109.jpg, 2400x1300, undimensioned; side 2.7313 mm/px least squares onto BODY_2108 (measurements-samara.md §0); heights on the belt 0.911 at y 250, isotropic (§6)",
+      "url": "https://3dcar.ru/media/blueprints/full/vaz/vaz_2109.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz_2109.jpg"
+    },
+    "P1": {
+      "what": "Commons 'Lada Samara 2109 in Kraków (5).jpg', CC BY 3.0 (p1, not saved locally)"
+    },
+    "F": {
+      "what": "carmodels.ts sv_vaz2109 row"
+    }
+  },
+  "body": {
+    "length": {
+      "v": 4.006,
+      "src": "F measurements-samara.md §0 sv_vaz2109 row: 4006 × 1650 × 1402, wheelbase 2460"
+    },
+    "width": {
+      "v": 1.65,
+      "src": "F measurements-samara.md §0 sv_vaz2109 row: 4006 × 1650 × 1402, wheelbase 2460"
+    },
+    "height": {
+      "v": 1.402,
+      "src": "F measurements-samara.md §0 sv_vaz2109 row: 4006 × 1650 × 1402, wheelbase 2460"
+    },
+    "wheelbase": {
+      "v": 2.46,
+      "src": "F measurements-samara.md §0 sv_vaz2109 row: 4006 × 1650 × 1402, wheelbase 2460"
+    },
+    "overhangFront": {
+      "v": 0.785,
+      "src": "D08 2108 drawing (shared front stamping, measurements-samara.md intro; samaras.ts BODY_2108)"
+    },
+    "overhangRear": {
+      "v": 0.761,
+      "src": "D08 2108 drawing (shared tailgate and tail, measurements-samara.md intro)"
+    },
+    "screenFoot": {
+      "v": [
+        1.08,
+        0.92
+      ],
+      "src": "D08 side: screen's centre line comes up from the bonnet (0.92) at s 1.08 (measurements-samara.md §4 item 15; samaras.ts screenFoot comment)"
+    },
+    "screenTop": {
+      "v": [
+        1.76,
+        1.335
+      ],
+      "src": "D08 side: roof's front at s 1760, roof 1335 (samaras.ts BODY_2108 comment)"
+    },
+    "beltY": {
+      "v": 0.911,
+      "src": "D08 side: belt 911 (samaras.ts BODY_2108 comment)"
+    },
+    "doorBottomY": {
+      "v": 0.302,
+      "src": "D08 side: door bottom 302 (samaras.ts BODY_2108 comment)"
+    },
+    "backLightTop": {
+      "v": [
+        3.19,
+        1.335
+      ],
+      "src": "D08 2108 drawing, shared tailgate (samaras.ts BODY_2109 comment: 'the tailgate are the 2108's')"
+    },
+    "backLightFoot": {
+      "v": [
+        3.93,
+        0.884
+      ],
+      "src": "D08 2108 drawing, shared tailgate (knee 3930 / 884)"
+    },
+    "doorFront": {
+      "v": [
+        1.239,
+        2.23
+      ],
+      "src": "P p1 'Lada Samara 2109 in Kraków (5).jpg' at 2.10 mm/px: front edge 1239, B shut line 2230 (measurements-samara.md §1)"
+    },
+    "doorRear": {
+      "v": [
+        2.23,
+        3.129
+      ],
+      "src": "P p1: B shut line 2230, rear shut line at the belt 3129 (measurements-samara.md §1)"
+    }
+  },
+  "dashNote": "Platform default Samara dash (interior.ts LAYOUTS.samara, cabinLayout only sets the visor): written without a photo of the car's dashboard; no interior photo of the 2108/2109/21099/2115 is named in measurements-samara.md or interior.ts.",
+  "gaps": [
+    "sideGlassBelt/sideGlassRail: the 2109 drawing's door lines stand ~0.1 m off the photo (§1, §5); the photo p1 gives only shut lines and the quarter light's front (3.116 / 2.893), no glass ends",
+    "doorFront's front edge: photo 1.239 vs the kept 2108 1.278 (§5)",
+    "railY, mirror, half widths: not measured",
+    "overlay.front: none written; overlay.side uses D09's §6 isotropic height registration, whose door lines are ~0.1 m behind the real car (§0)"
+  ],
+  "overlay": {
+    "side": {
+      "src": "D09",
+      "image": "build/carshape/_refs/bp/img/vaz_2109.jpg",
+      "crop": [
+        845,
+        70,
+        2360,
+        600
+      ],
+      "s": [
+        858.89,
+        0.0027313
+      ],
+      "y": [
+        583.54,
+        0.0027313
+      ]
+    }
+  }
+}

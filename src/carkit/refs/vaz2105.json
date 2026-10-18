@@ -1,0 +1,211 @@
+{
+  "car": "vaz2105",
+  "measurements": "measurements-classics.md",
+  "sources": {
+    "D": {
+      "what": "3dcar.ru 'vaz_2107_1982.jpg' (olegoft) 4200x2800: side 1.6684 mm/px from 4136 over x 1383->3862, front 1.679 mm/px from track 1365 (measurements-classics.md §0)",
+      "url": "https://3dcar.ru/media/blueprints/full/vaz/vaz_2107_1982.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz_2107_1982.jpg"
+    },
+    "D2": {
+      "what": "3dcar.ru 'vaz_2105.jpg' (Lindemann) 1500x1000, no dimensions: front 4.576 mm/px from the 1620 width (measurements-classics.md §0)",
+      "url": "https://3dcar.ru/media/blueprints/full/vaz/vaz_2105.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz_2105.jpg"
+    },
+    "F": {
+      "what": "passport length 4130 (measurements-classics.md §0/§1)"
+    },
+    "P": {
+      "what": "avtozam.com 'SHHitok-priborov-VAZ-2105.jpg' 2105 cluster illustration (measurements-classics.md §0; licence unchecked, reference only)",
+      "url": "https://avtozam.com/wp-content/uploads/2017/04/SHHitok-priborov-VAZ-2105.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz2105_SHHitok-priborov-VAZ-2105.jpg"
+    }
+  },
+  "body": {
+    "length": {
+      "v": 4.13,
+      "src": "F passport 4130; D dimension 4136 (vaz_2107_1982.jpg)"
+    },
+    "width": {
+      "v": 1.62,
+      "src": "D top-view dimension 1620 (vaz_2107_1982.jpg)"
+    },
+    "height": {
+      "v": 1.446,
+      "src": "D height dimension 1446* (vaz_2107_1982.jpg); drawn roof 1448 (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px))"
+    },
+    "wheelbase": {
+      "v": 2.424,
+      "src": "D dimension 2424 (vaz_2107_1982.jpg); hubs as drawn 635 / 3048 = 2413 (measurements-classics.md §0)"
+    },
+    "overhangFront": {
+      "v": 0.655,
+      "src": "D dimension 655 (vaz_2107_1982.jpg); hub as drawn 0.635 (measurements-classics.md §0)"
+    },
+    "overhangRear": {
+      "v": 1.057,
+      "src": "D dimension 1057 (vaz_2107_1982.jpg)"
+    },
+    "screenFoot": {
+      "v": [
+        0.985,
+        1.0
+      ],
+      "src": "D centre-line screen base s 985, 1000 high (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px))"
+    },
+    "screenTop": {
+      "v": [
+        1.41,
+        1.4
+      ],
+      "src": "D roof front s 1410, 1400 high (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px))"
+    },
+    "backLightTop": {
+      "v": [
+        2.95,
+        1.4
+      ],
+      "src": "D roof rear 2.94-2.96 at 1.40 (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px))"
+    },
+    "backLightFoot": {
+      "v": [
+        3.33,
+        0.935
+      ],
+      "src": "D back light base 3.31-3.33 at deck 0.935-0.946 (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px))"
+    },
+    "sideGlassBelt": {
+      "v": [
+        [
+          1.225,
+          2.055
+        ],
+        [
+          2.127,
+          2.679
+        ],
+        [
+          2.698,
+          2.94
+        ]
+      ],
+      "src": "D front glass 1.225 (y 1.0) to 2.055; rear drop 2.127 to the channel 2.679; fixed quarter 2.698 to the frame 2.94 at the belt (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px))"
+    },
+    "sideGlassRail": {
+      "v": [
+        [
+          1.46,
+          2.062
+        ],
+        [
+          2.127,
+          2.68
+        ],
+        [
+          2.7,
+          2.71
+        ]
+      ],
+      "src": "D front glass edge 1.46 at y 1.3 to 2.062; rear drop to the channel; quarter closes at the frame's top corner ~2.71 (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px))"
+    },
+    "beltY": {
+      "v": 0.955,
+      "src": "D window sill 955 (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px))"
+    },
+    "railY": {
+      "v": 1.335,
+      "src": "D glass top 1335 (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px))"
+    },
+    "doorFront": {
+      "v": [
+        1.165,
+        2.09
+      ],
+      "src": "D front door 1165 to 2090 under the belt (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px))"
+    },
+    "doorRear": {
+      "v": [
+        2.09,
+        2.955
+      ],
+      "src": "D rear door 2090 to 2955 (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px))"
+    },
+    "doorBottomY": {
+      "v": 0.365,
+      "src": "D doors end at 365 (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px))"
+    },
+    "beltHalfWidth": {
+      "v": 0.773,
+      "src": "D front view 773 at y 900, under the greenhouse 731-736 at 925-950 (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px) §1.1)"
+    },
+    "bonnet": {
+      "v": [
+        0.06,
+        0.9
+      ],
+      "src": "D flat bonnet to the face top at s 0.052-0.062 (vaz_2105.jpg) and its rear edge at s 0.9 (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px))"
+    }
+  },
+  "dash": {
+    "photo": {
+      "src": "P",
+      "view": "driver"
+    },
+    "gauges": {
+      "v": 3,
+      "src": "P combined temp+fuel dial, speedometer, small voltmeter (measurements-classics.md §4)"
+    },
+    "clusterAt": {
+      "v": "wheel",
+      "src": "P rectangular cluster pod (measurements-classics.md §4)"
+    }
+  },
+  "gaps": [
+    "mirror: front view only (x 730-850, y 955-1055); its profile s is not measured",
+    "roofHalfWidth: front view gives 620 at the gutter 1375 only, not the roof top",
+    "bootLid: the lid's front edge is not measured (rear edge 4.06 [D])",
+    "moulding: none on the 05 shell (measurements-classics.md §3)",
+    "dash dialRows: the voltmeter sits low between the two big dials, not a clean row",
+    "dash wheelSpokes/clock/glovebox/stack/vents: no 2105 wheel or full-dash photo (measurements-classics.md §4/§5)",
+    "overlay.side uses vaz_2107_1982.jpg, the drawing the 2105 body is measured on (measurements-classics.md §0)",
+    "height: passport/dimension value; the kit shells stand lower before the loader's fit (specs.ts header, STATUS.md 'Height')"
+  ],
+  "overlay": {
+    "side": {
+      "src": "D",
+      "image": "build/carshape/_refs/bp/img/vaz_2107_1982.jpg",
+      "crop": [
+        1370,
+        200,
+        3890,
+        1100
+      ],
+      "s": [
+        1383,
+        0.0016684
+      ],
+      "y": [
+        1067,
+        0.0016684
+      ]
+    },
+    "front": {
+      "src": "D2",
+      "image": "build/carshape/_refs/bp/img/vaz_2105.jpg",
+      "crop": [
+        80,
+        90,
+        445,
+        395
+      ],
+      "x": [
+        259,
+        0.004576
+      ],
+      "y": [
+        392,
+        0.004576
+      ]
+    }
+  }
+}

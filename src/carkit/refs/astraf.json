@@ -1,0 +1,49 @@
+{
+  "car": "astraf",
+  "measurements": "measurements-astra.md",
+  "sources": {
+    "D": { "what": "the-blueprints.com vector 9603 'Opel Astra F 5-Door (1991)' watermarked preview, 1280x905 (dimension lines 4050 / 2517 / 1696 / 1410)", "url": "https://www.the-blueprints.com/modules/vectordrawings/preview-wm/2001_opel_astra_f_5-door.jpg", "image": "build/carshape/_refs/bp/img/opel_astra_f.jpg" },
+    "F": { "what": "auto-data.net 'Opel Astra F 1.6i (75 Hp)'; avto-russia.ru, cararac.com, ultimatespecs" },
+    "P1": { "what": "Wikimedia Commons 'File:Opel Astra F cockpit.jpg', panorama from between the rear seats, 1920x599", "url": "https://commons.wikimedia.org/wiki/File:Opel_Astra_F_cockpit.jpg", "image": "build/carshape/_refs/bp/img/opel_astra_f_cockpit.jpg" }
+  },
+  "body": {
+    "length": { "v": 4.051, "src": "F auto-data 4051; D dimension line 4050 (measurements-astra.md §1, Review 2)" },
+    "width": { "v": 1.688, "src": "F auto-data 1688 (§1)" },
+    "height": { "v": 1.41, "src": "F auto-data; D 1410 (§1)" },
+    "wheelbase": { "v": 2.517, "src": "F auto-data, avto-russia; D 2517 (§1)" },
+    "screenFoot": { "v": [1.13, 0.93], "src": "D side cowl (297, 172) (§2)" },
+    "screenTop": { "v": [1.79, 1.342], "src": "D side A pillar to the rail (410, 102) (§2)" },
+    "backLightTop": { "v": [3.48, 1.354], "src": "D side the roof's end x 700 (s 3.48, 1.354), the tailgate glass's top (§2)" },
+    "backLightFoot": { "v": [3.96, 1.02], "src": "D side tailgate glass down to (785, 157): knee s 3.96, 1.02 (§2)" },
+    "sideGlassBelt": { "v": [[1.52, 2.255], [2.383, 3.1], [3.228, 3.653]], "src": "D side: front glass from 1.52 at the belt (Review 2 drawing column) to x 490 = 2.255; rear glass from x 512 = 2.383 to x 635 = 3.10; quarter glass foot 3.228-3.653 (§2)" },
+    "beltY": { "v": 0.917, "src": "D side glass foot 0.912 at s 1.5, 0.924 at 1.96 (§2), at the front door's middle s 1.77" },
+    "railY": { "v": 1.325, "src": "D side glass top y 105 (§2)" },
+    "doorFront": { "v": [1.264, 2.284], "src": "D side front shut line x 320, B pillar shut line x 495 (§2; Review 2 front 1.26-2.28)" },
+    "doorRear": { "v": [2.284, 3.215], "src": "D side, Review 2 door lengths at the belt: rear 2.28-3.215" },
+    "doorBottomY": { "v": 0.253, "src": "D side door bottoms y 287 (§2)" },
+    "beltHalfWidth": { "v": 0.794, "src": "D front view: the glass's foot +-0.794 at 0.93 (§2)" },
+    "moulding": { "v": [0.55, 0.58], "src": "D side rubbing strip y 232-237 (§2)" }
+  },
+  "dash": {
+    "photo": { "src": "P1", "view": "wide" },
+    "gauges": { "v": 4, "src": "P1 tachometer, big speedometer, temperature and fuel dials stacked on the right (§5)" },
+    "clusterAt": { "v": "wheel", "src": "P1 rounded hood behind the wheel (§5)" },
+    "wheelSpokes": { "v": 4, "src": "P1 four spokes round a wide pad, the airbag's (§5)" },
+    "glovebox": { "v": "passenger", "src": "P1 a wide lid before the passenger, x 1220-1610, y 275-400 (§5; interior.ts CABIN_ASTRA_F)" },
+    "stack": { "v": true, "src": "P1 storage slot, radio and three heater knobs down the stack (§5)" },
+    "vents": { "v": 4, "src": "P1 slatted vents at both ends (x 310-420, 1520-1625) and a pair at the stack's top (x 875-990, 1030-1140) (interior.ts CABIN_ASTRA_F)" }
+  },
+  "gaps": [
+    "overhangFront / overhangRear: only [E] 797 / 736 (§1)",
+    "sideGlassRail: the quarter glass is a triangle (apex 3.147 at 1.254), no rail-level run defined; other rail ends not all read",
+    "mirror: drawn s 1.41-1.57 (§2) but no height read",
+    "roofHalfWidth: only the rail +-0.567 at 1.354 read, not the roof's top",
+    "bonnet / bootLid: no plan edge readings (hatchback, no boot lid)",
+    "dash dialRows: temperature and fuel stacked beside the two big dials; no row count written",
+    "dash clock, console, wheelDiameter: not read off the photo (panorama)",
+    "overlay.front: only the across scale (5.97 mm/px, centre x 1055) is written; no up registration for the front view (ground y 747.5, 5.95 mm/px is the rear view's)"
+  ],
+  "overlay": {
+    "side": { "src": "D", "image": "build/carshape/_refs/bp/img/opel_astra_f.jpg", "crop": [95, 80, 806, 335], "s": [103, 0.005827], "y": [330, 0.005887] }
+  }
+}

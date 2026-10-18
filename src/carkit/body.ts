@@ -116,7 +116,7 @@ export class BodyFrame {
 
   station(s: number): TubStation {
     const st = this.spec.stations;
-    const pick = (key: Exclude<keyof TubStation, 'flat' | 'notch'>): number => table(st.map((x) => [x.s, x[key]] as const), s);
+    const pick = (key: Exclude<keyof TubStation, 'flat' | 'notch' | 'corner'>): number => table(st.map((x) => [x.s, x[key]] as const), s);
     return {
       s,
       sill: pick('sill'),

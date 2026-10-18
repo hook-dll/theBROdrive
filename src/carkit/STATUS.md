@@ -260,6 +260,44 @@ bumpers, corner lamps, `rearKnee` hatches, `rearLean` estates, spare on the rear
 Suggested start: one easy car to set up the foreign running-gear path (Nexia or Astra F),
 then the off-road family starting with the Pajero II (it needs every new piece once).
 
+## Check results (`npm run kit-check`, 2026-10-19)
+
+Every car through all eight checks (README "6. Check"); evidence in `build/kitcheck/`.
+Mirrors: share of each glass seen from the cabin camera's eye. Dents: kit-surface findings
+that fail. Drawing: built values within tolerance of `refs/<car>.json` (the overall box is
+listed, not judged). Dash: the built cabin against the refs' interior photos.
+
+| Car | zfight | proportions | reality | mirrors seen | dents | tris | drawing | dash |
+|---|---|---|---|---|---|---|---|---|
+| 2101 | pass | pass | pass | L100 R100 | 0 | 11 231 | 10/10 | 5/5 |
+| 2102 | pass | pass | pass | L100 R100 | 0 | 11 217 | 11/11 | DASH UNVERIFIED (2101's dash, no 2102 photo) |
+| 2103 | pass | pass | pass | L100 R100 | 0 | 11 818 | 10/11: waist strip 0.706–0.732 vs drawn 0.74–0.765 | 4/5: no clock (photo has one) |
+| 2104 | pass | pass | pass | L100 R100 | 4: bonnet folds in 9–14° at s 0.90–0.98 (BODY_05 nose stations 0.90/1.00) | 11 545 | 7/12: glass runs (front glass edge 1.15 vs 1.225, quarter), back light 3.47/3.93 vs 3.42/3.80, belt half width 0.744 vs 0.773 | DASH UNVERIFIED (2105's) |
+| 2105 | pass | pass | pass | L100 R100 | 5: the same bonnet folds; crease–belt lean 16.5→14.1→15.7° at s 3.33 | 11 773 | 12/16: glass runs, belt half width | 2/2 |
+| 2106 | pass | pass | pass | L100 R100 | 0 | 12 270 | 10/11: waist strip 0.726–0.752 vs 0.76–0.786 | 2/6: classic default dash (4 dials vs 5, no clock, no stack) |
+| 2107 | pass | pass | ✗ 0-100 +8.4 % (pre-existing, untouched here) | L100 R100 | 5: as the 2105 | 12 454 (exterior chrome 31 % slivers) | 11/15: glass runs, overhang rear 1.089 vs 1.057, belt half width | 4/4 |
+| 2108 / 2109 | pass | pass | pass | L100 R96 | 0 | 10 303 / 11 468 | 10/11: screen foot 1.13 vs drawn 1.08 at 0.92 | DASH UNVERIFIED (platform default) |
+| 21099 | pass | pass | pass | L100 R96 | 0 | 11 881 | 10/10 | DASH UNVERIFIED |
+| 2115 | pass | pass | pass | L100 R96 | 1: crease–belt lean 4.3→6.2→3.2° at s 0.55 | 12 226 | 6/6 | DASH UNVERIFIED |
+| 2110 / 2112 / 2111 | pass | pass | pass | L100 R99 | 0 | 14 642 / 14 666 / 14 366 (over budget, set aside by the owner) | 11/17, 10/12, 10/14: screen foot 1.22 vs 1.154, glass runs at the rail | 4/5 each |
+| 2121 / 2131 | pass | pass | pass | ✗ L17 R100: the left glass hidden by the door's trim (frame) | 3: the plan turns −24° at s 0.28 between −4.4° and −2.7° | 11 854 / 12 976 | 10/14, 11/15: rail 1.31 vs 1.449, screen foot | 5/5 |
+| 1111 | pass | pass | pass | L100 (one mirror) | 0 | 10 597 | 14/15 | 4/5 |
+| GAZ-24 | pass | pass | pass | ✗ L59 R82: door trim on the left | 5: boot centre line 16° / −5° at s 3.80 / 4.09 and its folds | 13 288 | 8/12: screen foot, rail, roof half width | 6/6 |
+| GAZ-31029 | pass | pass | pass | L100 R88 | 0 | 12 127 | 6/8: back light foot, boot lid | 6/6 |
+| AZLK-2141 | pass | pass | pass | L100 R100 | 0 | 12 133 | 13/16: mirror s 1.50 vs 1.705, front glass edge, roof half width | 3/5: Samara dash (3 spokes vs 2) |
+| UAZ-469 (+ police) | pass | pass | no target | L100 R100 | 3: sill s-bend at 1.06/1.28, bonnet and tailgate folds | 11 152 / 11 501 | 9/9 | 7/7 |
+| UAZ-2206 | pass | pass | no target | L100 R94 | 1: lean at s 0.30 | 10 979 | 6/11 | 1/3 |
+| Nexia | pass | pass | pass | L100 R96 | 1: boot fold 8° at s 4.33 | 13 475 | 8/10 | 6/6 |
+| Espero | pass | pass | pass | L100 R100 | 6: wing plan −18° at s 0.30 (sill, crease), lean 14.6→11.8→14.4° at s 0.60, boot folds 7–8° at s 4.47 | 14 374 | 7/9: B-pillar shut line 2.557 vs drawn 2.50 (front and rear doors) | 8/8 |
+| Astra F | pass | pass | pass | L100 R100 | 0 | 13 971 | 13/13 | 6/6 |
+| Vectra A | pass | pass | pass | L100 R100 | 1: crease–belt lean 8.1→6.9→9.5° at s 0.17 | 13 868 | 11/12: door bottom 0.255 vs drawn 0.205 (kept up for the silencer, measurements-vectra §6) | 4/4 |
+
+Not yet fixed (owner review needed, each a body change): the Espero's front-wing station
+s 0.30 (the Astra's old fault, the same shape) and its B-pillar shut line; the Vectra's
+nose lean; the 2104/05/07 bonnet nose (stations 0.90/1.00); the Niva's s 0.28 and its left
+mirror; the GAZ-24's left mirror and boot. Sliver-heavy meshes (10–31 %, listed by
+kit-surface) are mostly exterior trim strips and moulded bumpers.
+
 ## Known gaps
 
 **Global**

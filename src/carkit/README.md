@@ -116,6 +116,7 @@ from the angle he complained about; changes are judged there, not in code.
 | `opel.ts` | The Opel Astra F (five-door hatch) and Vectra A (saloon): `BODY_ASTRA_F` / `LOOK_ASTRA_F`, `BODY_VECTRA_A` / `LOOK_VECTRA_A` (platform `samara`). |
 | `police.ts` | Service liveries (`KitLook.livery`, `LiveryLook`): `LOOK_UAZ469_POLICE` (the 469 in the militia's colours, `KIT_SPECS.uaz469_police`) and `buildLivery`: the doors' skin in livery paint, the lettering split into the front doors' skin (`GLYPHS`, block capitals), the roof light bar with its beacons. |
 | `measurements-classics.md`, `measurements-estates.md`, `measurements-samara.md`, `measurements-2110.md`, `measurements-niva.md`, `measurements-oka.md`, `measurements-volga.md`, `measurements-2141.md`, `measurements-nexia.md` | Measurement reports: every figure with its drawing or photo, scale and tag. |
+| `refs/<car>.json` | The real car's numbers, machine-readable, each with its source: body positions from the drawing and photos, the dash from interior photos, the drawing's pixel registration for the overlays ([Reference files](#reference-files-refscarjson)). `tools/kit-drawing.ts` holds the built car to them. |
 | `builder.ts` | `PartBuilder`: flat triangles per material slot, transform stack, primitives (`box`, `bevelBox`, `extrude`, `cylinderX/Y/Z`, `torusY`, `bridge`, `poly`), vertex colours. |
 | `body.ts` | `BodyFrame` (cross-section, deck and lid lookups) and `buildShell`: tub, greenhouse and roof as one face list, then cut into parts. Shell constants (`SHUT_GAP`, `JAMB_DEPTH`, `DOOR_THICKNESS`, `NOTCH_WALL`, …). |
 | `exterior.ts` | End faces (`FaceLook.items` / `.lid`), bumpers swept round the corners, sill strip, flank strips (waist moulding, feature line: `buildFlankStrip`), repeaters, flank lamps, mirrors, handles, wipers, filler neck. |
@@ -263,7 +264,7 @@ author.
 |---|---|
 | `length` | Bumper tip to bumper tip, as built (the loader then fits it to `FACTORY_GEOMETRY`). |
 | `platform` | `'classic'`, `'samara'` or `'niva'`: picks the interior layout (`LAYOUTS` in interior.ts) and the engine bay / underbody in bay.ts. `'niva'` is the classic's bay, floor and furniture with permanent four-wheel drive under it (bay.ts `nivaTransfer`: transfer box rising into the tunnel, front propshaft, front differential, driveshafts), the lowest parts at its 220 mm clearance, and its own dash (`LAYOUTS.niva`). |
-| `stations` | `TubStation[]`, nose to tail; the first is the front face, the last the tail face. |
+| `stations` | `TubStation[]`, nose to tail; the first is the front face, the last the tail face. A station's `corner: true` marks an intended break in the side's plan there (a corner on the real car, its source in a comment): it changes no geometry, and `tools/kit-surface.ts` does not flag the turn as a dent. |
 | `cabin` | `CabinSpec`: the greenhouse. |
 | `wheels` | `WheelSpec`: axles, tyre, tracks, arches. |
 | `shoulder` | `{ inset, rise }`: the belt turns in by `inset` and up by `rise` to the deck's edge. |
@@ -544,6 +545,11 @@ the `niva` platform's.
   `car-glass-clear`; every car draws its own copy, drop panes clipped at the door's top.
 - Steering wheel: node `steering_wheel`, its origin on the column axis, local +Y along the
   column towards the driver. The game turns it by `rotation.y`.
+- Dash fittings with no node of their own: `root.userData.kitDash` (`KitDashItem[]`,
+  interior.ts): each vent, eyeball vent, the heater panel, clock, centre stack and console
+  where it was built. Gauges are the `panel_dim_<channel>` groups, the glovebox the
+  `glovebox` node, the wheel `steering_wheel`. `tools/kit-drawing.ts` reads these to hold
+  the cabin to the car's interior photos.
 - Mirrors: meshes named `mirrors`, which keeps them out of the measured body width. The
   interior mirror and both door mirrors are turned to the driver's eye (`driverEyeAt`,
   `mirrorFrame`): he sees straight back through the back light's middle and along each
@@ -795,8 +801,32 @@ re-run `dust-flow.ts --write` whenever a kit car's `aero` or factory clearance c
 ### 6. Check
 
 A new or changed spec is accepted only when its fit row (step 5), its triangle row
-([Budget](#budget-and-current-figures)) and a passing z-fight run (item 5 below) are all in
-place. The z-fight run is not optional and is not judged by eye.
+([Budget](#budget-and-current-figures)), its reference file (`refs/<car>.json`, see
+[Reference files](#reference-files-refscarjson)) and a passing **`npm run kit-check -- <car>`**
+are all in place. Neither is optional and neither is judged by eye. `kit-check`
+(tools/kit-check.ts, about 80 s for all 27 cars) runs, one after another under `nice`:
+
+| Check | Tool | Gate (exit 1) |
+|---|---|---|
+| zfight | `kit-zfight.ts` | any visible z-fight cluster in any band, any shell slit |
+| proportions | `kit-proportions.ts` | the fit row against the fresh measure and the factory; a hub moved over 10 mm in its arch |
+| reality | `reality.ts` | the running gear against the factory targets (cars with a `TARGETS` entry) |
+| mirrors | `kit-mirrors.ts` | from the cabin camera's eye (`kit_driver_eye`, what `cabinEye` and vehicle/cabincamera.ts use; not the lab's `look()`), rays to 160 points on each door mirror's glass past every opaque face: under 60 % seen; the driver's mirror over 55° off the axis (outside the straight-ahead 85° view), the far one over 70°; either outside −30°..+10° of the eye's level |
+| surface: dents | `kit-surface.ts` | the loft's rows turning much harder at one station than at its neighbours (`uneven`), in and out at two stations under 0.5 m apart (`s-bend`), the side's lean in and out (`lean`), the same on the deck's centre line; folds of over 5° inward on the up-facing skin of a lid or the roof. The rows themselves, shut lines, arch lips and the ends' turns are the intended lines and never flagged; a corner drawn on the real car is marked `corner: true` on its station with the source |
+| surface: complexity | `kit-surface.ts` | over 15 000 triangles; a mesh over 30 % slivers; a part of over 200 triangles at over 4 per cm² of its size. Listed (not failing): over 13 000, panels over 10 % slivers or tiny triangles, stations on the line through their neighbours, denser small parts, up-facing skin wound inward |
+| drawing | `kit-drawing.ts` | a body value measured on the BUILT car outside its tolerance of `refs/<car>.json`; no refs file is UNVERIFIED (reported) |
+| dash | `kit-drawing.ts` | the built cabin (gauges and rows, cluster place, clock, vents, stack, console, glovebox, wheel spokes and size) against the refs' dash block from interior photos; none is DASH UNVERIFIED (reported) |
+
+It prints one pass/fail row per car; every finding names where (owner, s, height) and
+what to simplify or fix. Evidence goes to `build/kitcheck/` (gitignored): each tool's log
+and JSON, and per car `mirror-left.png` / `mirror-right.png` / `mirrors-ahead.png` (the
+mirrors from the seat, glass magenta), `surface-<n>.png` (a crop at each dent, ringed),
+`drawing-side.png` / `drawing-front.png` (the drawing, the model traced at the drawing's
+own scale, the drawing with the model's outline in red) and `cabin-vs-photo.png` (the
+cabin from the driver's eye beside the reference interior photo). **Look at the overlays
+and the cabin sheet** before sending the owner screenshots: they are the drawing and
+photo check of step 2. Record the car's row in `STATUS.md` "Check results"; a check that
+cannot pass is fixed, not loosened, or listed there with its numbers and the owner's word.
 
 1. `nice -n 10 npx tsc --noEmit -p .`
 2. Lab (your Vite on 5199, one tab), the car checked against its photos:
@@ -824,8 +854,30 @@ place. The z-fight run is not optional and is not judged by eye.
    surface (`inlay`); a millimetre or two of air only moves the fight further out. A slit
    names the hole's owner and a point in it: the item over it leaves a gap, usually two
    flush walls cut away together.
-6. Docs: README (new spec fields, families table, budget row), `STATUS.md` (car row),
+6. All checks: `npm run kit-check -- <car>` (or every car without ids) passes, the overlays
+   and cabin sheet in `build/kitcheck/<car>/` looked at; the row in `STATUS.md` "Check
+   results" updated.
+7. Docs: README (new spec fields, families table, budget row), `STATUS.md` (car row),
    `HISTORY.md` (fixes), `CHANGELOG.md` (an `### Added` entry).
+
+### Reference files (`refs/<car>.json`)
+
+One per car, written in step 2 from the measurements file: the REAL car's numbers (drawing
+[D], photo [P], factory [F]; never the spec's, never an [E] estimate), each `{ "v", "src",
+"tol"? }`, plus `sources` (each with its local `image` under the gitignored
+`build/carshape/_refs/bp/img/`), `gaps` (what could not be sourced, and why) and `overlay`
+(the drawing's side/front view: `image`, `crop`, and the pixel→metre registration from the
+measurements file's scale table: `s = (px − s[0])·s[1]`, `x = (px − x[0])·x[1]`, `y = (y[0] −
+py)·y[1]`). Body keys: `length`, `width`, `height` (listed against kit-proportions' 3 %
+stretch, not judged), `wheelbase`, `overhangFront/Rear`, `screenFoot`, `screenTop`,
+`backLightTop`, `backLightFoot` (profile corners `[s, y]`, judged across the measured edge),
+`beltY`, `railY` (the visible side glass's foot and top at the front door), `sideGlassBelt`,
+`sideGlassRail` (every pane's run along the car), `doorFront`, `doorRear` (shut lines 10 cm
+under the belt), `doorBottomY`, `mirror` `[s, y]`, `roofHalfWidth`, `beltHalfWidth`,
+`moulding` `[y0, y1]`, `bonnet`, `bootLid`. Dash keys (from a photo of THIS car's dash,
+`photo: { src, view }`): `gauges`, `dialRows`, `clusterAt`, `clock`, `wheelSpokes`,
+`wheelDiameter`, `glovebox`, `stack`, `console`, `vents`; a dash borrowed or written without
+a photo gets `dashNote` instead and reports DASH UNVERIFIED.
 
 ### Writing a spec without z-fighting
 

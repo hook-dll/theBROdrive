@@ -1,0 +1,43 @@
+{
+  "car": "uaz469",
+  "measurements": "measurements-uaz.md",
+  "sources": {
+    "D": { "what": "UAZ-3151 factory four-view (the 469's body, hard top) with dimension lines, 2000×1400; side view crop at (780, 60) of the sheet", "image": "build/carshape/_refs/bp/img/uaz2.jpg" },
+    "F": { "what": "UAZ manual RE 05808600.072-2000 (4025 / 1785 / 2020 hard top / 2380); ru.wikipedia УАЗ-469 infobox (4025 × 1805 × 2015 canvas, 2380)" },
+    "P1": { "what": "Flickr 'UAZ-early-interior-floor-pedals.jpg', CC BY 2.0, the dash from behind the seats", "image": "build/carshape/_refs/bp/img/uaz469_pedals.jpg" }
+  },
+  "body": {
+    "length": { "v": 4.025, "src": "F manual, ru.wikipedia (over the spare); drawn spare's back 4.076, measurements-uaz.md §1, §1.2" },
+    "width": { "v": 1.785, "src": "F manual; D 1785 dimension (ru.wikipedia 1805)" },
+    "height": { "v": 2.015, "src": "F ru.wikipedia canvas top (hard top 2020)" },
+    "wheelbase": { "v": 2.38, "src": "F manual; D 2380* dimension" },
+    "overhangFront": { "v": 0.68, "src": "D 680* dimension; side hub x 192, measurements-uaz.md §1.2" },
+    "screenFoot": { "v": [1.28, 1.27], "src": "D side (330, 184), measurements-uaz.md §1.2" },
+    "beltY": { "v": 1.2, "src": "D side doors' top y 200, measurements-uaz.md §1.2" },
+    "doorFront": { "v": [1.347, 2.11], "src": "D side hinge line x 345, B shut line x 520 at the belt, measurements-uaz.md §1.2" },
+    "doorRear": { "v": [2.11, 2.894], "src": "D side B shut line x 520, rear edge (700, 195) at the belt, measurements-uaz.md §1.2" },
+    "doorBottomY": { "v": 0.44, "src": "D side y 374, measurements-uaz.md §1.2" },
+    "mirror": { "v": [1.44, 1.345], "src": "D side head x 355-378, y 143-190, measurements-uaz.md §1.2" },
+    "bonnet": { "v": [0.148, 1.064], "tol": 0.04, "src": "D side face x 70 (the lip over it, y 205) to the bonnet's rear edge x 280, measurements-uaz.md §1.2" }
+  },
+  "dash": {
+    "photo": { "src": "P1", "view": "centre" },
+    "gauges": { "v": 5, "src": "P1 speedometer right of the column + ammeter, oil, temperature, fuel in a chrome-framed panel, measurements-uaz.md §1.6" },
+    "dialRows": { "v": [5], "src": "P1 all five in one row (speedometer x 620, panel x 755-1030 at y 395)" },
+    "clusterAt": { "v": "centre", "src": "P1 four-dial panel in the dash's middle, 0.39 right of the column, measurements-uaz.md §1.6" },
+    "clock": { "v": false, "src": "P1 no clock" },
+    "wheelSpokes": { "v": 3, "src": "P1 three thin spokes, measurements-uaz.md §1.6" },
+    "glovebox": { "v": "passenger", "src": "P1 small lid right of the panel x 1130-1200, measurements-uaz.md §1.6" },
+    "stack": { "v": false, "src": "P1 flat steel dash, no panel down to the tunnel" }
+  },
+  "gaps": [
+    "overhangRear: the 965* dimension is to the tow hitch, not the body",
+    "screenTop, railY, sideGlassBelt/Rail: the drawn hard top's greenhouse conflicts (§1.2 vs the re-read in §1.8: glass 1.31-1.745, frames 1.80) and the canvas car differs",
+    "roofHalfWidth, beltHalfWidth: front view heights do not register cleanly",
+    "console, vents: not stated; wheelDiameter 0.42 hangs on an [E] seatX scale",
+    "overlay.front: 4.33 mm/px and centre x 237 in the crop at (140, 60) are given, but its ground y 586 does not agree with the sheet's ground y 535 (§1.3), so no height registration"
+  ],
+  "overlay": {
+    "side": { "src": "D", "image": "build/carshape/_refs/bp/img/uaz2.jpg", "crop": [800, 80, 1780, 545], "s": [816, 0.004359], "y": [535, 0.004359] }
+  }
+}

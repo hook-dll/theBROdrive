@@ -1,0 +1,170 @@
+{
+  "car": "vaz2103",
+  "measurements": "measurements-classics.md",
+  "sources": {
+    "D": {
+      "what": "3dcar.ru 'vaz_2103.jpg' 2200x1400: side 3.449 mm/px from 4116, front 3.527 mm/px from track 1365 (measurements-classics.md §0)",
+      "url": "https://3dcar.ru/media/blueprints/full/vaz/vaz_2103.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz_2103.jpg"
+    },
+    "D1": {
+      "what": "3dcar.ru 'vaz_2101.jpg': the shared 124 shell's doors and glass (specs.ts BODY_124 comment)",
+      "url": "https://3dcar.ru/media/blueprints/full/vaz/vaz_2101.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz_2101.jpg"
+    },
+    "P": {
+      "what": "Commons 'File:VAZ-2103-interior.jpg' (i_2103 in measurements-classics.md §0)",
+      "url": "https://commons.wikimedia.org/wiki/File:VAZ-2103-interior.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz2103_i_VAZ-2103-interior.jpg"
+    }
+  },
+  "body": {
+    "length": {
+      "v": 4.116,
+      "src": "D dimension 4116 (vaz_2103.jpg)"
+    },
+    "width": {
+      "v": 1.611,
+      "src": "D top-view dimension 1611 (vaz_2103.jpg)"
+    },
+    "height": {
+      "v": 1.446,
+      "src": "D height dimension 1446* (vaz_2103.jpg; 1388 also drawn)"
+    },
+    "wheelbase": {
+      "v": 2.424,
+      "src": "D dimension 2424 (vaz_2103.jpg)"
+    },
+    "overhangFront": {
+      "v": 0.628,
+      "src": "D dimension 628 (vaz_2103.jpg)"
+    },
+    "overhangRear": {
+      "v": 1.064,
+      "src": "D dimension 1064 (vaz_2103.jpg)"
+    },
+    "screenFoot": {
+      "v": [
+        1.185,
+        0.884
+      ],
+      "src": "D cowl s 1160, bonnet 884 there (specs.ts BODY_124 comment (2101 drawing, 4.703 mm/px)) +0.025: the 2103's front overhang 628 against the 2101's 603 (vaz_2103.jpg dimensions; README BODY_124 table)"
+    },
+    "beltY": {
+      "v": 0.865,
+      "src": "D side glass foot 865 (specs.ts BODY_124 comment (2101 drawing, 4.703 mm/px))"
+    },
+    "railY": {
+      "v": 1.237,
+      "src": "D side glass top 1237 (specs.ts BODY_124 comment (2101 drawing, 4.703 mm/px))"
+    },
+    "doorFront": {
+      "v": [
+        1.196,
+        2.104
+      ],
+      "src": "D front door 1171 to 2079 (specs.ts BODY_124 comment (2101 drawing, 4.703 mm/px)) +0.025: the 2103's front overhang 628 against the 2101's 603 (vaz_2103.jpg dimensions; README BODY_124 table)"
+    },
+    "doorRear": {
+      "v": [
+        2.146,
+        2.997
+      ],
+      "src": "D B pillar to 2121, rear door to 2972 (specs.ts BODY_124 comment (2101 drawing, 4.703 mm/px)) +0.025: the 2103's front overhang 628 against the 2101's 603 (vaz_2103.jpg dimensions; README BODY_124 table)"
+    },
+    "doorBottomY": {
+      "v": 0.287,
+      "src": "D door bottoms 287 (specs.ts BODY_124 comment (2101 drawing, 4.703 mm/px))"
+    },
+    "backLightFoot": {
+      "v": [
+        3.279,
+        0.842
+      ],
+      "src": "D back light foot at the boot s 3254, 842 high (specs.ts BODY_124 comment (2101 drawing, 4.703 mm/px)) +0.025: the 2103's front overhang 628 against the 2101's 603 (vaz_2103.jpg dimensions; README BODY_124 table)"
+    },
+    "moulding": {
+      "v": [
+        0.74,
+        0.765
+      ],
+      "src": "D/P chrome waist strip y 740..765 (measurements-classics.md §3)"
+    }
+  },
+  "dash": {
+    "photo": {
+      "src": "P",
+      "view": "driver"
+    },
+    "gauges": {
+      "v": 5,
+      "src": "P fuel, water temp, oil pressure, tachometer, speedometer (measurements-classics.md §4)"
+    },
+    "dialRows": {
+      "v": [
+        5
+      ],
+      "src": "P all dials in one row (measurements-classics.md §4)"
+    },
+    "clusterAt": {
+      "v": "wheel",
+      "src": "P wood panel behind the wheel"
+    },
+    "clock": {
+      "v": true,
+      "src": "P 'clock elsewhere on the panel' (measurements-classics.md §4)"
+    },
+    "wheelSpokes": {
+      "v": 2,
+      "src": "P 2 spokes (measurements-classics.md §4, r_3)"
+    }
+  },
+  "gaps": [
+    "screenTop, backLightTop: the BODY_124 comment gives the roof's front (s 1416) and rear (s 2996) only along s, no heights",
+    "sideGlassBelt, sideGlassRail: no pane extents written as [D]/[P] for the 124 shell (the vent/drop columns in specs.ts carry no tag)",
+    "mirror: only a front-view position is measured, none in profile",
+    "roofHalfWidth, beltHalfWidth: no front-view widths measured for the 124 shell",
+    "bonnet, bootLid: lid edges not measured (bonnetFront/bootEnd in specs.ts are untagged)",
+    "body below the belt and glass: no 2103 side readings; the 124 shell values from the 2101 drawing are shifted +0.025: the 2103's front overhang 628 against the 2101's 603 (vaz_2103.jpg dimensions; README BODY_124 table)",
+    "dash glovebox/stack/console/vents/wheelDiameter: not visible or not measured in i_2103",
+    "height: passport/dimension value; the kit shells stand lower before the loader's fit (specs.ts header, STATUS.md 'Height')"
+  ],
+  "overlay": {
+    "side": {
+      "src": "D",
+      "image": "build/carshape/_refs/bp/img/vaz_2103.jpg",
+      "crop": [
+        770,
+        110,
+        1975,
+        545
+      ],
+      "s": [
+        779.5,
+        0.003449
+      ],
+      "y": [
+        538,
+        0.003449
+      ]
+    },
+    "front": {
+      "src": "D",
+      "image": "build/carshape/_refs/bp/img/vaz_2103.jpg",
+      "crop": [
+        125,
+        110,
+        605,
+        545
+      ],
+      "x": [
+        366.5,
+        0.003527
+      ],
+      "y": [
+        534,
+        0.003527
+      ]
+    }
+  }
+}

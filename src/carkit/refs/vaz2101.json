@@ -1,0 +1,144 @@
+{
+  "car": "vaz2101",
+  "measurements": "measurements-classics.md",
+  "sources": {
+    "D": {
+      "what": "3dcar.ru 'vaz_2101.jpg' 1500x900 (identical to vaz2101.jpg): side 4.703 mm/px from 4073, front 4.786 mm/px from track 1345 (measurements-classics.md §0)",
+      "url": "https://3dcar.ru/media/blueprints/full/vaz/vaz_2101.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz_2101.jpg"
+    },
+    "P": {
+      "what": "Commons 'File:Lada-2101 interior.jpg' (i_2101 in measurements-classics.md §0)",
+      "url": "https://commons.wikimedia.org/wiki/File:Lada-2101_interior.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz2101_i_Lada-2101_interior.jpg"
+    },
+    "F": {
+      "what": "passport heights quoted in specs.ts header (1440 for the 2101)"
+    }
+  },
+  "body": {
+    "length": {
+      "v": 4.073,
+      "src": "D dimension 4073 (vaz_2101.jpg)"
+    },
+    "width": {
+      "v": 1.611,
+      "src": "D top-view dimension 1611 (vaz_2101.jpg)"
+    },
+    "height": {
+      "v": 1.44,
+      "src": "F passport 1440 (specs.ts header; drawing dimension 1382, drawn roof 1337)"
+    },
+    "wheelbase": {
+      "v": 2.424,
+      "src": "D dimension 2424 (vaz_2101.jpg; BODY_124 comment)"
+    },
+    "overhangFront": {
+      "v": 0.603,
+      "src": "D dimension 603 (vaz_2101.jpg; BODY_124 comment)"
+    },
+    "overhangRear": {
+      "v": 1.046,
+      "src": "D dimension 1046 (vaz_2101.jpg; BODY_124 comment)"
+    },
+    "screenFoot": {
+      "v": [
+        1.16,
+        0.884
+      ],
+      "src": "D cowl s 1160, bonnet 884 there (specs.ts BODY_124 comment (2101 drawing, 4.703 mm/px))"
+    },
+    "beltY": {
+      "v": 0.865,
+      "src": "D side glass foot 865 (specs.ts BODY_124 comment (2101 drawing, 4.703 mm/px))"
+    },
+    "railY": {
+      "v": 1.237,
+      "src": "D side glass top 1237 (specs.ts BODY_124 comment (2101 drawing, 4.703 mm/px))"
+    },
+    "doorFront": {
+      "v": [
+        1.171,
+        2.079
+      ],
+      "src": "D front door 1171 to 2079 (specs.ts BODY_124 comment (2101 drawing, 4.703 mm/px))"
+    },
+    "doorRear": {
+      "v": [
+        2.121,
+        2.972
+      ],
+      "src": "D B pillar to 2121, rear door to 2972 (specs.ts BODY_124 comment (2101 drawing, 4.703 mm/px))"
+    },
+    "doorBottomY": {
+      "v": 0.287,
+      "src": "D door bottoms 287 (specs.ts BODY_124 comment (2101 drawing, 4.703 mm/px))"
+    },
+    "backLightFoot": {
+      "v": [
+        3.254,
+        0.842
+      ],
+      "src": "D back light foot at the boot s 3254, 842 high (specs.ts BODY_124 comment (2101 drawing, 4.703 mm/px))"
+    }
+  },
+  "dash": {
+    "photo": {
+      "src": "P",
+      "view": "driver"
+    },
+    "gauges": {
+      "v": 3,
+      "src": "P ribbon speedometer 0-180 with fuel and temp dials at its ends (measurements-classics.md §4)"
+    },
+    "dialRows": {
+      "v": [
+        3
+      ],
+      "src": "P all in the one window (measurements-classics.md §4)"
+    },
+    "clusterAt": {
+      "v": "wheel",
+      "src": "P hooded binnacle behind the wheel"
+    },
+    "wheelSpokes": {
+      "v": 2,
+      "src": "P 2 spokes (measurements-classics.md §4)"
+    },
+    "vents": {
+      "v": 2,
+      "src": "P two round eyeball vents right of the binnacle (measurements-classics.md §4)"
+    }
+  },
+  "gaps": [
+    "overlay.side: measurements-classics.md §0 gives the 2101 side scale and ground row (336) but no bumper-tip pixel",
+    "screenTop, backLightTop: the BODY_124 comment gives the roof's front (s 1416) and rear (s 2996) only along s, no heights",
+    "sideGlassBelt, sideGlassRail: no pane extents written as [D]/[P] for the 124 shell (the vent/drop columns in specs.ts carry no tag)",
+    "mirror: only a front-view position is measured, none in profile",
+    "roofHalfWidth, beltHalfWidth: no front-view widths measured for the 124 shell",
+    "bonnet, bootLid: lid edges not measured (bonnetFront/bootEnd in specs.ts are untagged)",
+    "moulding: the 2101 has none (measurements-classics.md §3)",
+    "dash clock/glovebox/stack/console/wheelDiameter: not visible or not measured in i_2101",
+    "height: passport/dimension value; the kit shells stand lower before the loader's fit (specs.ts header, STATUS.md 'Height')"
+  ],
+  "overlay": {
+    "front": {
+      "src": "D",
+      "image": "build/carshape/_refs/bp/img/vaz_2101.jpg",
+      "crop": [
+        80,
+        40,
+        420,
+        345
+      ],
+      "x": [
+        251.5,
+        0.004786
+      ],
+      "y": [
+        335,
+        0.004786
+      ]
+    }
+  }
+}
