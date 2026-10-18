@@ -145,6 +145,7 @@ export const PRICE_TABLE = {
     kit_vaz2131: 90,
     kit_nexia: 90,
     kit_astraf: 100,
+    kit_vectraa: 105,
     kit_espero: 110,
     kit_uaz2206: 120,
   } as Readonly<Record<string, number>>,
