@@ -910,6 +910,10 @@ export const CABIN_NEXIA: CabinLayoutOverride = {
   glovebox: { x: -0.4, dy: -0.18, half: [0.16, 0.05] },
   // A wide pad on two spokes at four and eight o'clock [P]; the Samara's size.
   wheel: { ...LAYOUTS.samara.wheel, spokes: [-35, 215] },
+  // Owner (2026-10-18): the stock 0.15-deep visors, lowered, hid the road. A third of the
+  // screen's visible height (from its foot strip at 0.973 to under its header at 1.288:
+  // 0.315) deep, 0.105 [E: no Nexia visor measured]; the stock width.
+  visor: { half: 0.16, depth: 0.105 },
 };
 
 // The Daewoo Espero's dash (owner's review 1, 2026-10-18: its own, not the Nexia's), read

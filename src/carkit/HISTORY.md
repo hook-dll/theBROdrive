@@ -917,6 +917,11 @@ amplified differences; `bench-*.json`, `pick-*.json`).
   its screen's visible height. Checked raised and lowered from the driver's eye in the lab;
   `kit-zfight` passes. The Nexia keeps the stock size (screen 0.315 visible, so a third
   would be 0.105); reported, not changed. *interior.ts `Layout.visor`, `CABIN_ESPERO`*.
+- **Nexia sun visors (owner, after the Espero's): the same.** → The stock 0.15 visor,
+  lowered, came down past the horizon from the driver's eye. → `CABIN_NEXIA` `visor` 0.105
+  deep, a third of its screen's visible 0.315. Checked raised and lowered from the driver's
+  eye node (`kit_driver_eye`, 1.195 high); `kit-zfight` passes. *interior.ts
+  `CABIN_NEXIA`*.
 
 ## Failed approaches (do not retry)
 
