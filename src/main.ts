@@ -2279,9 +2279,10 @@ async function boot(): Promise<void> {
     // its own, so it needs no interpolation and is placed after the cars moved.
     carTowField.syncVisuals();
     debris.syncVisuals();
-    // Roadside shells' lids the player opened or shut ease on the rendered frame, as a
-    // driven car's do.
+    // Roadside shells' lids and couriers' boot lids the player opened or shut ease on the
+    // rendered frame, as a driven car's do.
     wreckTrunks.syncVisuals(frameDt);
+    couriers.syncVisuals(frameDt);
     // The camera has moved for this frame: the ground cover's pages take their range,
     // and in the Clean style the pages whose every tuft is under a few pixels go too.
     streamer.syncLod(

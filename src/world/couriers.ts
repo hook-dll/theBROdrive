@@ -1,6 +1,7 @@
 import { GAMEPLAY_CONFIG } from '../config';
 import { hash, hash01 } from '../core/rng';
 import type { Item } from '../items/items';
+import type { StaticCarLids } from '../render/staticlids';
 
 /** One courier every 9 km, jittered and snapped to a guaranteed POI slot. */
 const COURIER_PERIOD_M = 9_000;
@@ -126,27 +127,51 @@ export function nextCourierIndex(
 }
 
 
-/** Live registrations follow streamed physics chunks; save data owns edited contents. */
+/**
+ * Live registrations follow streamed physics chunks; save data owns edited contents.
+ * A courier's boot lid (render/staticlids.ts) joins it once its model is drawn, and shuts
+ * again when the chunk is rebuilt: only the contents persist.
+ */
 export class CourierField {
   private readonly trunks = new Map<string, CourierTrunk>();
+  private readonly lidsById = new Map<string, StaticCarLids>();
 
   register(trunk: CourierTrunk): void {
     this.trunks.set(trunk.id, trunk);
   }
 
+  /** The boot lid of a registered courier's model, which may arrive after the courier itself. */
+  attachLids(id: string, lids: StaticCarLids): void {
+    if (this.trunks.has(id)) this.lidsById.set(id, lids);
+  }
+
   forget(ids: readonly string[]): void {
-    for (const id of ids) this.trunks.delete(id);
+    for (const id of ids) {
+      this.trunks.delete(id);
+      this.lidsById.delete(id);
+    }
   }
 
   get(id: string): CourierTrunk | null {
     return this.trunks.get(id) ?? null;
   }
 
+  /** A courier's boot lid, or null before its model is drawn. */
+  lids(id: string): StaticCarLids | null {
+    return this.lidsById.get(id) ?? null;
+  }
+
   values(): IterableIterator<CourierTrunk> {
     return this.trunks.values();
   }
 
+  /** Eases every registered courier's boot lid, once a rendered frame. */
+  syncVisuals(dt: number): void {
+    for (const lids of this.lidsById.values()) lids.update(dt);
+  }
+
   dispose(): void {
     this.trunks.clear();
+    this.lidsById.clear();
   }
 }

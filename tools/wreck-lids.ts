@@ -15,7 +15,11 @@
  *    keeps the grid F opens;
  *  - the van's shell alone hangs its middle side door (`STATIC_SHELL_DOORS`): shut, its
  *    bay under the engine cover is not reached; E opens it with the cover, and every bay
- *    cell is picked and taken through the opening by the real `Interaction`.
+ *    cell is picked and taken through the opening by the real `Interaction`;
+ *  - a courier's car hangs its boot lid or tailgate alone on the driven car's hinge, the
+ *    rest of the shell its bonnet and doors: shut, its boot offers nothing and F does
+ *    nothing; E opens the lid and the grid with it, every cell is picked and taken, E
+ *    shuts lid and grid; its bonnet and doors take no E and open nothing.
  *
  *   bun tools/wreck-lids.ts
  *
@@ -28,7 +32,7 @@ import { installDocumentShim } from './domshim';
 import { CAR_MODELS } from '../src/vehicle/carmodels';
 import { carModelMeasure, createCarModel, createCourierCarModel, createStaticCarModel, loadCarModel, STATIC_SHELL_DOORS, type StaticCarModel } from '../src/render/carmodel';
 import { KitRig } from '../src/carkit/rig';
-import { STORAGE_LID_CHANNELS, storageCellBox, storageGridCentreLocal, storageLidSide, type StorageSide } from '../src/vehicle/trunk';
+import { STORAGE_LID_CHANNELS, storageCellBox, storageCellCount, storageGridCentreLocal, storageLidSide, type StorageSide } from '../src/vehicle/trunk';
 import { BONNET_SLOT_COUNT } from '../src/vehicle/bonnet';
 import { emptyInput, type InputFrame } from '../src/core/input';
 import { GameWorld, newWorldState } from '../src/game/state';
@@ -58,16 +62,22 @@ function triangles(root: THREE.Object3D, keep: (mesh: THREE.Mesh) => boolean): n
   return count;
 }
 
-const isPaint = (mesh: THREE.Mesh): boolean => (mesh.material as THREE.Material).name !== 'car-glass-clear' && mesh.name !== 'wheels' && !mesh.name.includes('shadow');
+const isPaint = (mesh: THREE.Mesh): boolean => {
+  const name = (mesh.material as THREE.Material).name;
+  return name !== 'car-glass-clear' && name !== 'car-shadow-hull' && mesh.name !== 'wheels' && !mesh.name.includes('shadow');
+};
 const isPane = (mesh: THREE.Mesh): boolean => (mesh.material as THREE.Material).name === 'car-glass-clear';
 
 const kitIds = CAR_MODELS.filter((def) => def.kit).map((def) => def.id);
 for (const id of kitIds) await loadCarModel(id);
+/** As world/poi.ts `COURIER_MODELS` picks them. */
+const courierIds = CAR_MODELS.filter((def) => def.paintStyle !== undefined).map((def) => def.id);
 
 console.log('--- shells: lids, triangles, hinges ---');
 for (const id of kitIds) {
   const shell = createStaticCarModel(id, `check:${id}`);
-  const driving = createCarModel(id).body;
+  const drivenModel = createCarModel(id);
+  const driving = drivenModel.body;
   const drivenLids = new Map<string, THREE.Object3D>();
   driving.traverse((node) => {
     const control = node.userData.kitControl as { id: string } | undefined;
@@ -78,13 +88,14 @@ for (const id of kitIds) {
   check(`${id}: lids match the driven car`, ids.join(',') === [...drivenLids.keys()].sort().join(','), ids.join(',') || '(none)');
 
   // Shell plus lids are the mid shell, cut and nothing lost or doubled.
-  const mid = createCourierCarModel(id, `check:${id}`);
+  const midPaint = drivenModel.mid!.paint.geometry.getAttribute('position').count / 3;
+  const midPanes = (drivenModel.mid!.glass?.geometry.getAttribute('position').count ?? 0) / 3;
   const paint = triangles(shell.model, isPaint);
   const panes = triangles(shell.model, isPane);
   check(
     `${id}: shell + lids = mid shell`,
-    paint === triangles(mid, isPaint) && panes === triangles(mid, isPane),
-    `paint ${paint}/${triangles(mid, isPaint)} panes ${panes}/${triangles(mid, isPane)}`,
+    paint === midPaint && panes === midPanes,
+    `paint ${paint}/${midPaint} panes ${panes}/${midPanes}`,
   );
 
   // Each lid stands where the driven car's does, shut and open.
@@ -112,9 +123,55 @@ for (const id of kitIds) {
     lids.update(5);
     check(`${id}: shut again, the inside is hidden`, !inside.visible && pivot.quaternion.angleTo(drivenLids.get(channel)!.quaternion) < 1e-6, '');
   }
+
+  // The courier's: its boot lid or tailgate alone, on the same hinges, and the shell
+  // round it (bonnet and doors included) the rest of the mid shell.
+  if (courierIds.includes(id)) {
+    const courier = createCourierCarModel(id, `check:${id}`);
+    const boot = [...drivenLids.keys()].filter((channel) => storageLidSide(channel) === 'trunk').sort();
+    const courierLids = courier.lids ? courier.lids.controls.map((control) => control.id).sort() : [];
+    check(`${id}: courier hangs only its boot lid`, boot.length > 0 && courierLids.join(',') === boot.join(','), courierLids.join(',') || '(none)');
+    const courierPaint = triangles(courier.model, isPaint);
+    const courierPanes = triangles(courier.model, isPane);
+    check(
+      `${id}: courier shell + boot lid = mid shell`,
+      courierPaint === midPaint && courierPanes === midPanes,
+      `paint ${courierPaint}/${midPaint} panes ${courierPanes}/${midPanes}`,
+    );
+    courier.model.updateMatrixWorld(true);
+    let off = 0;
+    for (const pivot of courier.lids?.pivots ?? []) {
+      const ours = new THREE.Box3().setFromObject(pivot, true);
+      const theirs = new THREE.Box3().setFromObject(drivenLids.get(pivot.name)!, true);
+      off = Math.max(off, ours.min.distanceTo(theirs.min), ours.max.distanceTo(theirs.max));
+    }
+    check(`${id}: courier boot lid on the driven car's hinge`, off < 0.01, `${(off * 1000).toFixed(1)} mm`);
+  }
 }
 
 console.log('--- interaction: the grid answers to the lid ---');
+
+/** A fresh `Interaction` over these shells and couriers, with nothing else in the world. */
+function interactionFor(wrecks: WreckTrunkField, couriers: CourierField, world: GameWorld, inventory: Inventory): Interaction {
+  const none = {} as never;
+  return new Interaction(
+    { raycast: () => null } as never,
+    world,
+    inventory,
+    none,
+    none,
+    wrecks,
+    couriers,
+    () => null,
+    { vehicle: () => null, position: () => null, nearest: () => 0 },
+    none,
+    () => {},
+    () => {},
+    new WorldOrigin(),
+    { has: () => false } as never,
+    () => 0,
+  );
+}
 
 /** One shell at the origin, upright, registered as a wreck and seen by a fresh `Interaction`. */
 function stage(id: string, withLids = true): { shell: StaticCarModel; interaction: Interaction; wrecks: WreckTrunkField; world: GameWorld; inventory: Inventory } {
@@ -126,24 +183,7 @@ function stage(id: string, withLids = true): { shell: StaticCarModel; interactio
   shell.model.updateMatrixWorld(true);
   const world = new GameWorld(newWorldState(1337));
   const inventory = new Inventory();
-  const none = {} as never;
-  const interaction = new Interaction(
-    { raycast: () => null } as never,
-    world,
-    inventory,
-    none,
-    none,
-    wrecks,
-    new CourierField(),
-    () => null,
-    { vehicle: () => null, position: () => null, nearest: () => 0 },
-    none,
-    () => {},
-    () => {},
-    new WorldOrigin(),
-    { has: () => false } as never,
-    () => 0,
-  );
+  const interaction = interactionFor(wrecks, new CourierField(), world, inventory);
   return { shell, interaction, wrecks, world, inventory };
 }
 
@@ -324,6 +364,147 @@ for (const [id, side] of [['kit_vaz2106', 'bonnet'], ['kit_vaz2106', 'trunk'], [
 {
   const shells = kitIds.filter((id) => createStaticCarModel(id, `doors:${id}`).lids?.controls.some((control) => control.id.startsWith('door_')));
   check('only the van shell opens a side door', shells.join(',') === 'kit_uaz2206', shells.join(',') || '(none)');
+}
+
+console.log('--- courier: E works the boot lid, the grid follows it ---');
+
+/** One courier at the origin, upright, its boot full, seen by a fresh `Interaction`. */
+function stageCourier(id: string): { courier: StaticCarModel; couriers: CourierField; interaction: Interaction; world: GameWorld; inventory: Inventory } {
+  const courier = createCourierCarModel(id, 'courier:0');
+  const couriers = new CourierField();
+  couriers.register({
+    id: 'courier:0',
+    index: 0,
+    modelId: id,
+    x: 0,
+    y: 0,
+    z: 0,
+    qx: 0,
+    qy: 0,
+    qz: 0,
+    qw: 1,
+    halfExtents: carModelMeasure(id).halfExtents,
+    defaultStorage: Array.from({ length: storageCellCount('trunk') }, (_, cell) => ({ type: 'bubble_gum' as const, id: `parcel:${cell}`, charges: 3 })),
+  });
+  couriers.attachLids('courier:0', courier.lids!);
+  courier.model.updateMatrixWorld(true);
+  const world = new GameWorld(newWorldState(1337));
+  const inventory = new Inventory();
+  return { courier, couriers, interaction: interactionFor(new WreckTrunkField(), couriers, world, inventory), world, inventory };
+}
+
+for (const id of ['kit_vaz2106', 'kit_vaz2108', 'kit_vaz2102', 'kit_uaz2206']) {
+  const { courier, couriers, interaction, world, inventory } = stageCourier(id);
+  const settleCourier = (): void => {
+    couriers.syncVisuals(5);
+    courier.model.updateMatrixWorld(true);
+  };
+  const lids = courier.lids!;
+  const leaves = lids.pivots.map((pivot) => pivot.name);
+  const shutPoses = lids.pivots.map((pivot) => pivot.quaternion.clone());
+  const { eye, at } = standAt(id, 'trunk');
+  const stored = (): number => (world.state.courierStorage['courier:0'] ?? []).filter((item) => item !== null).length;
+
+  // Shut: nothing offered at the boot, and F, aimed at a full cell or at the lid, does nothing.
+  let result = tick(interaction, eye, at);
+  check(`${id} courier: shut, no grid and no [F]`, result.prompt === null && result.boot === null, `${result.prompt ?? '(no prompt)'} · grid ${result.boot?.side ?? 'none'}`);
+  const cellCentre = new THREE.Vector3();
+  storageCellBox(1, carModelMeasure(id), 'trunk', cellCentre, new THREE.Vector3());
+  const cellEye = cellCentre.clone().add(new THREE.Vector3(0, 0.1, -1));
+  tick(interaction, cellEye, cellCentre);
+  tick(interaction, cellEye, cellCentre, { mount: true });
+  result = tick(interaction, cellEye, cellCentre);
+  const shutLid = lidAim(courier, leaves[0]!);
+  tick(interaction, shutLid.eye, shutLid.at);
+  tick(interaction, shutLid.eye, shutLid.at, { mount: true });
+  const afterLidF = tick(interaction, shutLid.eye, shutLid.at);
+  check(
+    `${id} courier: F at the shut lid does nothing`,
+    !isOpen(courier, 'trunk') && result.boot === null && afterLidF.boot === null && inventory.all.length === 0 && world.state.courierStorage['courier:0'] === undefined,
+    `lid ${isOpen(courier, 'trunk')} · grid ${result.boot?.side ?? afterLidF.boot?.side ?? 'none'} · ${inventory.all.length} carried`,
+  );
+
+  // E on the shut lid (every leaf of a split one) opens it, and the grid with it.
+  for (const leaf of leaves) {
+    const aim = lidAim(courier, leaf);
+    result = tick(interaction, aim.eye, aim.at);
+    check(`${id} courier ${leaf}: the shut lid takes E`, result.actionable && interaction.claimsUseHeld, `actionable ${result.actionable}`);
+    tick(interaction, aim.eye, aim.at, { useHeld: true });
+  }
+  result = tick(interaction, eye, at);
+  check(
+    `${id} courier: E opens the lid and the grid`,
+    isOpen(courier, 'trunk') && result.boot?.owner === 'courier' && result.boot.side === 'trunk',
+    `lid ${isOpen(courier, 'trunk')} · grid ${result.boot?.owner ?? 'none'} ${result.boot?.side ?? ''}`,
+  );
+  settleCourier();
+  const swing = Math.min(...lids.pivots.map((pivot, i) => pivot.quaternion.angleTo(shutPoses[i]!)));
+  check(`${id} courier: the lid swings and shows the boot`, courier.model.getObjectByName('inside')!.visible && swing > 0.5, `${THREE.MathUtils.radToDeg(swing).toFixed(0)}°`);
+
+  // Every cell is picked and taken through the open lid (the pack emptied between takes).
+  const picked: string[] = [];
+  let taken = 0;
+  for (let cell = 0; cell < storageCellCount('trunk'); cell++) {
+    const centre = new THREE.Vector3();
+    storageCellBox(cell, carModelMeasure(id), 'trunk', centre, new THREE.Vector3());
+    const from = centre.clone().add(new THREE.Vector3(0, 0.1, -1));
+    result = tick(interaction, from, centre);
+    picked.push(`${cell}:${result.boot?.selectedCell ?? null}`);
+    tick(interaction, from, centre, { mount: true });
+    for (const item of [...inventory.all]) if (inventory.remove(item.id)) taken++;
+  }
+  check(
+    `${id} courier: every cell picked and taken`,
+    picked.every((entry, cell) => entry === `${cell}:${cell}`) && taken === storageCellCount('trunk') && stored() === 0,
+    `${picked.join(' ')} · ${taken} taken · ${stored()} left`,
+  );
+
+  // E on the open lid shuts it, and the grid goes.
+  for (const leaf of leaves) {
+    const aim = lidAim(courier, leaf);
+    tick(interaction, aim.eye, aim.at);
+    tick(interaction, aim.eye, aim.at, { useHeld: true });
+  }
+  result = tick(interaction, eye, at);
+  check(`${id} courier: E shuts the lid and the grid goes`, !isOpen(courier, 'trunk') && result.boot === null, `lid ${isOpen(courier, 'trunk')} · grid ${result.boot?.side ?? 'none'}`);
+  settleCourier();
+  check(`${id} courier: shut, the boot is hidden`, !courier.model.getObjectByName('inside')!.visible, '');
+
+  // The bonnet (or engine cover) and every side door, aimed where the driven car's stand:
+  // no prompt, nothing claims E, and E moves nothing and opens no grid.
+  const driven = createCarModel(id).body;
+  driven.updateMatrixWorld(true);
+  const panels: { readonly node: THREE.Object3D; readonly id: string }[] = [];
+  driven.traverse((node) => {
+    const control = node.userData.kitControl as { id: string } | undefined;
+    if (control && node.userData.kitMotion && (storageLidSide(control.id) === 'bonnet' || control.id.startsWith('door_'))) panels.push({ node, id: control.id });
+  });
+  const refused: string[] = [];
+  for (const { node, id: control } of panels) {
+    const middle = new THREE.Box3().setFromObject(node, true).getCenter(new THREE.Vector3());
+    const from = storageLidSide(control) === 'bonnet' ? middle.clone().add(new THREE.Vector3(0, 1, 0)) : middle.clone().add(new THREE.Vector3(Math.sign(middle.x) || 1, 0, 0));
+    const aimed = tick(interaction, from, middle);
+    tick(interaction, from, middle, { useHeld: true });
+    tick(interaction, from, middle, { mount: true });
+    const after = tick(interaction, from, middle);
+    const still = lids.controls.every((c) => lids.rig.get(c.id) === 0);
+    if (aimed.prompt !== null || aimed.actionable || !still || after.boot !== null) refused.push(`${control}!`);
+    else refused.push(control);
+  }
+  check(
+    `${id} courier: bonnet and doors not workable`,
+    panels.length > 0 && refused.every((entry) => !entry.endsWith('!')) && lids.controls.every((c) => storageLidSide(c.id) === 'trunk'),
+    refused.join(','),
+  );
+}
+{
+  const missing = courierIds.filter((id) => !createCourierCarModel(id, `boot:${id}`).lids?.has('trunk'));
+  check('every courier model has a boot lid to open', missing.length === 0, missing.join(',') || `${courierIds.length} models`);
+  const skinned: string[] = [];
+  createCourierCarModel('kit_vaz2106', 'programs').model.traverse((node) => {
+    if ((node as THREE.SkinnedMesh).isSkinnedMesh) skinned.push(`${node.name}${node.visible ? '' : ' (hidden)'}`);
+  });
+  check('courier: inside is the one skinned mesh, hidden while shut', skinned.join(',') === 'inside (hidden)', skinned.join(','));
 }
 
 // Program variants: the lids are the shell's mesh kind in its material; the inside is

@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+
 - THE FIRST FOREIGN KIT CAR: DAEWOO NEXIA (`src/carkit/daewoo.ts` `BODY_NEXIA`,
   `LOOK_NEXIA`; `interior.ts` `CABIN_NEXIA`; measured in `measurements-nexia.md`). The
   early base N100 saloon (1995–2002, the G15MF 1.5 and the five-speed) from 3dcar.ru's
@@ -1012,6 +1013,18 @@
     leaving the pad.
 
 ### Changed
+
+- THE COURIER'S BOOT OPENS ON ITS LID (world/couriers.ts, render/carmodel.ts
+  `createCourierCarModel`, player/interaction.ts). The quest-giver's trunk grid used to
+  open on F straight through the shut boot lid. The courier's car now hangs its boot lid
+  or tailgate (both leaves of the UAZ-2206's) on the driven car's hinge, as a roadside
+  shell's are (`StaticCarLids`, the `'boot'` lid set of `kitStaticParts`), and E opens it:
+  the lid swings, the boot shows under it and the grid opens with it; E again shuts the
+  lid and the grid goes. F takes and stows in the open cells as before, and at the shut lid
+  does nothing. Its bonnet and doors stay part of the shell: no prompt, E does nothing. A
+  contract is delivered into the open boot. One draw more per courier, programs anchored
+  with the wreck's. `bun tools/wreck-lids.ts` checks the hinge, the cut, E, F and every
+  cell on four bodies.
 
 - TWO CLOUD DECKS, EACH ON ITS OWN WIND (render/cloudfield.ts, render/clouds.ts,
   render/cloudshadow.ts). Over the cumulus now stands an altocumulus deck: flat rafts

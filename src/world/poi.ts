@@ -1091,10 +1091,40 @@ function buildCourier(
     ctx.originX,
     ctx.originZ,
   );
+  const collider = addStaticCollider(
+    ctx,
+    new THREE.BoxGeometry(half[0] * 2, half[1] * 2, half[2] * 2),
+    matrix,
+    SurfaceType.Rock,
+    bodies,
+    colliders,
+  );
+  if (collider) {
+    const rotation = new THREE.Quaternion().setFromRotationMatrix(matrix);
+    courierField.register({
+      id,
+      index: stop.index,
+      modelId: def.id,
+      x: point.x,
+      y: originY,
+      z: point.z,
+      qx: rotation.x,
+      qy: rotation.y,
+      qz: rotation.z,
+      qw: rotation.w,
+      halfExtents: half,
+      defaultStorage: courierDefaultStorage(ctx.world.seed, stop.index),
+    });
+    registeredCouriers.push(id);
+  }
+
+  // After the registration, so the boot lid joins a registered courier.
   const addModel = (): void => {
-    const model = createCourierCarModel(def.id, id);
-    setFromMatrix(model, matrix);
-    group.add(model);
+    const courier = createCourierCarModel(def.id, id);
+    setFromMatrix(courier.model, matrix);
+    group.add(courier.model);
+    // Only a registered courier is within the player's reach; its boot lid is eased there.
+    if (courier.lids) courierField.attachLids(id, courier.lids);
   };
   if (isCarModelLoaded(def.id)) {
     addModel();
@@ -1112,32 +1142,7 @@ function buildCourier(
       },
     );
   }
-
-  const collider = addStaticCollider(
-    ctx,
-    new THREE.BoxGeometry(half[0] * 2, half[1] * 2, half[2] * 2),
-    matrix,
-    SurfaceType.Rock,
-    bodies,
-    colliders,
-  );
   if (!collider) return;
-  const rotation = new THREE.Quaternion().setFromRotationMatrix(matrix);
-  courierField.register({
-    id,
-    index: stop.index,
-    modelId: def.id,
-    x: point.x,
-    y: originY,
-    z: point.z,
-    qx: rotation.x,
-    qy: rotation.y,
-    qz: rotation.z,
-    qw: rotation.w,
-    halfExtents: half,
-    defaultStorage: courierDefaultStorage(ctx.world.seed, stop.index),
-  });
-  registeredCouriers.push(id);
 
   // The air dancer advertising the stop. It stands on the POI side of the car, a
   // couple of metres off its flank so it is visible from the lane and never in it,
