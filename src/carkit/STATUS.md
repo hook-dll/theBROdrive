@@ -288,15 +288,24 @@ listed, not judged). Dash: the built cabin against the refs' interior photos.
 | UAZ-469 (+ police) | pass | pass | no target | L100 R100 | 3: sill s-bend at 1.06/1.28, bonnet and tailgate folds | 11 152 / 11 501 | 9/9 | 7/7 |
 | UAZ-2206 | pass | pass | no target | L100 R94 | 1: lean at s 0.30 | 10 979 | 6/11 | 1/3 |
 | Nexia | pass | pass | pass | L100 R96 | 1: boot fold 8° at s 4.33 | 13 475 | 8/10 | 6/6 |
-| Espero | pass | pass | pass | L100 R100 | 6: wing plan −18° at s 0.30 (sill, crease), lean 14.6→11.8→14.4° at s 0.60, boot folds 7–8° at s 4.47 | 14 374 | 7/9: B-pillar shut line 2.557 vs drawn 2.50 (front and rear doors) | 8/8 |
+| Espero | pass | pass | pass | L100 R100 | 3: boot folds 7–8° at s 4.47 (the wing break at s 0.30 and the lean fixed 2026-10-19) | 14 486 | 9/9 (B-pillar shut line at the drawn 2.50) | 8/8 |
 | Astra F | pass | pass | pass | L100 R100 | 0 | 13 971 | 13/13 | 6/6 |
-| Vectra A | pass | pass | pass | L100 R100 | 1: crease–belt lean 8.1→6.9→9.5° at s 0.17 | 13 868 | 11/12: door bottom 0.255 vs drawn 0.205 (kept up for the silencer, measurements-vectra §6) | 4/4 |
+| Vectra A | pass | pass | pass | L100 R100 | 0 (nose lean fixed 2026-10-19) | 13 866 | 12/12 (door bottom 0.255 accepted: the silencer) | 4/4 |
 
-Not yet fixed (owner review needed, each a body change): the Espero's front-wing station
-s 0.30 (the Astra's old fault, the same shape) and its B-pillar shut line; the Vectra's
-nose lean; the 2104/05/07 bonnet nose (stations 0.90/1.00); the Niva's s 0.28 and its left
-mirror; the GAZ-24's left mirror and boot. Sliver-heavy meshes (10–31 %, listed by
-kit-surface) are mostly exterior trim strips and moulded bumpers.
+Still open: the Espero's boot folds at s 4.47; the 2104/05/07 bonnet nose (stations
+0.90/1.00); the Niva's plan at s 0.28 and its left mirror; the GAZ-24's left mirror and
+boot. Mirrors, measured with kit-mirrors (`mirrorS` swept):
+- **2121/2131:** the line to the left head passes through the vent wing's rear post (1.685–1.705)
+  at x 0.65. Forward of the default 1.316 it never reaches 60 % (1.24: 55 %). At 1.51–1.53 the
+  left glass is 68–80 % seen with the right one 90–100 %. But the side photo
+  (`build/carshape/_refs/photos/niva/side.jpg`, a later car with no vent wing) has the mirror
+  at the door's front corner, so 1.5 is unsourced. Needs a 1982 photo of the mirror's place,
+  or the post thinner.
+- **GAZ-24:** the default s 1.508 gives L59 R82. At 1.43–1.44 both are 70–84 %, but no
+  mirror reading in measurements-volga.md backs that (`refs/gaz24.json` gaps).
+
+Sliver-heavy meshes (10–31 %, listed by kit-surface) are mostly exterior trim strips and
+moulded bumpers.
 
 ## Known gaps
 
