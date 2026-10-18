@@ -896,6 +896,19 @@ amplified differences; `bench-*.json`, `pick-*.json`).
   `BODY_ESPERO`, `LOOK_ESPERO`; interior.ts `CABIN_ESPERO`; spec.ts / body.ts
   `CabinColumn.finish`; measurements-espero.md §5*.
 
+- **Espero lamp review 2 (captain on the maroon photos): the head lamps too thin, the
+  indicator a separate block; the lid band a "staple" with tabs; amber only part of the
+  corner units; the wrap too long.** → The head lamp's height had been held to the drawn
+  side view's 0.088, though every photo shows the lens filling the band from the bumper's
+  black top to the bonnet's edge. The lid band's lower end lenses had upright inner ends,
+  set apart from the corner units. → The head lamp is now 0.582–0.70: its foot one level
+  line on the bumper, its inner end slanted from ±0.20 to ±0.27, and the indicator the
+  outer 22 % at the same height, square at the corner. At the tail, the lid band's ends
+  have a slanted inner edge (`lens` `slant.inner` 0.06) and reach ±0.483; the corner units
+  are amber over their whole width and wrap to s 4.47 / 4.44. Lab shots from the maroon
+  photos' angles; `kit-zfight`, `kit-proportions`, `reality` pass. *daewoo.ts
+  `LOOK_ESPERO`; measurements-espero.md §5*.
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent

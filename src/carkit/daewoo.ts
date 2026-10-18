@@ -467,19 +467,20 @@ export const LOOK_ESPERO: KitLook = {
   cornerLamps: [
     // Head lamp and indicator as one flush unit (lamp review, 2026-10-18) [P "Daewoo Espero
     // front 20071227", "Maroon Daewoo Espero-002-front", "1994-1995 Daewoo Espero 2000i
-    // Sedan 04", beige front, dark green front]: the top nearly level (0.69 inside to 0.708
-    // at the corner, 8 % of the unit's height), the foot rising 0.008 inwards, and the
-    // inner end one slanted edge from a pointed tip low on the bumper's top (±0.215) up and
-    // out to the top's inner corner (±0.27): the "slanted" look. The amber indicator is the
-    // outer 30 % of the unit's length in a front view (from ±0.55), its split leaning out to
-    // the top, round the corner onto the wing.
+    // Sedan 04", beige front, dark green front]. Review 2 (captain on the maroon photo): the
+    // lens fills the whole band between the bumper's black top (0.576) and the bonnet's
+    // edge (the face's belt, 0.705): its foot one straight line 6 mm over the bumper, its
+    // top along the bonnet's shut line. The inner end one slanted edge from the foot at
+    // ±0.2 up and out to ±0.27, along the badge panel's side; the amber indicator the outer
+    // 22 % of the same unit (from ±0.56), the same height, its end square at the corner
+    // with only a short return onto the wing.
     {
       points: [
-        { x: [0.215, 0.27], y: [0.626, 0.69], role: 'head' },
-        { x: 0.4, y: [0.622, 0.696], role: 'head' },
-        { x: [0.545, 0.56], y: [0.619, 0.702], role: 'blinker' },
-        { y: [0.617, 0.708], role: 'blinker' },
-        { s: 0.17, y: [0.628, 0.7] },
+        { x: [0.2, 0.27], y: [0.582, 0.695], role: 'head' },
+        { x: 0.4, y: [0.582, 0.698], role: 'head' },
+        { x: [0.56, 0.56], y: [0.582, 0.701], role: 'blinker' },
+        { y: [0.582, 0.703], role: 'blinker' },
+        { s: 0.1, y: [0.585, 0.7] },
       ],
     },
     // Tail (lamp review) [P "Maroon Daewoo Espero-003-rear" (near square: the lid's band
@@ -488,23 +489,24 @@ export const LOOK_ESPERO: KitLook = {
     // of painted face over it (the badges' strip) and its foot 0.03 over the lid's: 0.67–
     // 0.82. The corner units red over amber, split at 0.725 (64 / 36 %), their inner edge
     // upright along the lid's cut (±0.49); round the corner onto the wing, the foot further
-    // forward than the top [P h, orange red; D plan: red to s 4.39 at the top].
+    // forward than the top [P h, orange red; D plan: red to s 4.39 at the top]. Review 2
+    // (captain): the amber the unit's whole width under the red, and only a short return
+    // onto the wing (to s 4.47 at the top, 4.44 at the foot).
     {
       end: 'rear',
       points: [
         { x: [0.5, 0.5], y: [0.725, 0.82], role: 'brake' },
         { x: 0.6, y: [0.725, 0.82], role: 'tail' },
         { y: [0.725, 0.82], role: 'tail' },
-        { s: 4.42, y: [0.73, 0.815] },
+        { s: 4.47, y: [0.73, 0.815] },
       ],
     },
     {
       end: 'rear',
       points: [
-        { x: [0.5, 0.5], y: [0.67, 0.725], role: 'tail' },
-        { x: 0.6, y: [0.67, 0.725], role: 'blinker' },
+        { x: [0.5, 0.5], y: [0.67, 0.725], role: 'blinker' },
         { y: [0.67, 0.725], role: 'blinker' },
-        { s: 4.37, y: [0.675, 0.725] },
+        { s: 4.44, y: [0.675, 0.725] },
       ],
     },
   ],
@@ -538,13 +540,16 @@ export const LOOK_ESPERO: KitLook = {
     // The red band across the lid between the corner lamps, in line with them (lamp review)
     // [P maroon rear, rear 20071227, h, orange red]: full height (0.67–0.82, `belt` 0.925
     // here) at its ends, from the lid's cut in to ±0.27 (the step at 45–55 % of its half [P]); between those only its red top down
-    // to the corner lamps' split (0.725), the lid's dark strip under it. The red top across
+    // to the corner lamps' split (0.725), the lid's dark strip under it; review 2: the ends'
+    // inner edge a slant running down and out (±0.27 at the split to ±0.33 at the foot),
+    // the band out to ±0.483, 7 mm from the lid's cut, so lid end and corner unit read as one
+    // deeper outer unit, not a staple. The red top across
     // the lid, and under each end a lower lens 4 mm further back whose top runs 5 mm in
     // behind it (a lens's corners are chamfered: two lenses meeting edge to edge left
     // notches between them).
     lid: [
-      { kind: 'lens', role: 'inert', x: { at: { centre: 0 }, half: 0.475 }, y: { from: ['belt', -0.2], to: ['belt', -0.105] }, depth: 0.008, proud: 0.01 },
-      { kind: 'lens', role: 'inert', x: { from: { centre: 0.27 }, to: { centre: 0.475 } }, y: { from: ['belt', -0.255], to: ['belt', -0.195] }, depth: 0.008, proud: 0.006 },
+      { kind: 'lens', role: 'inert', x: { at: { centre: 0 }, half: 0.483 }, y: { from: ['belt', -0.2], to: ['belt', -0.105] }, depth: 0.008, proud: 0.01 },
+      { kind: 'lens', role: 'inert', x: { from: { centre: 0.33 }, to: { centre: 0.483 } }, y: { from: ['belt', -0.255], to: ['belt', -0.195] }, depth: 0.008, proud: 0.006, slant: { outer: 0, inner: 0.06 } },
     ],
   },
 };

@@ -190,10 +190,23 @@ wrap only.
 | Lid cut | ±0.52 | corner unit 200 px against the lid band's 755 (0.265); ±0.52 gave 0.18 | `notch` ±0.49, corner units from ±0.50 |
 | Wrap onto the wing | top to s 4.36, foot to 4.38 (the top further forward) | the foot reaches further forward than the top; plan red to s 4.39 at the top | top to 4.42, foot to 4.37 |
 
+Review 2 (the captain on the maroon photos, 2026-10-18), shapes only:
+
+| Lamp | Review 1 | Photo | Now |
+|---|---|---|---|
+| Head, height | 0.617–0.708, about 60 % of the band between the bumper's black top and the bonnet's edge | the lens fills that band: its foot on the bumper's top line, its top along the bonnet's shut line | 0.582 (6 mm over the bumper's 0.576) to 0.695–0.703 under the face's belt (0.705) |
+| Head, foot | rising 0.009 inwards | one straight line | level 0.582 |
+| Head, inner end | (±0.215, 0.626) → (±0.27, 0.69) | slanted along the badge panel's side, nearly touching it | (±0.20, 0.582) → (±0.27, 0.695) |
+| Indicator | from ±0.545 / 0.56, wrapping to s 0.17 | outer ~22 % of the same unit, same height, end square at the corner | from ±0.56 at the unit's height, a short return to s 0.10 |
+| Lid band's ends | upright inner end at ±0.27 (a "staple" with tabs) | inner lower edge a slant running down and out | slant ±0.27 at the split to ±0.33 at the foot; band out to ±0.483 |
+| Corner units' amber | outer part only (inner cell red) | the whole unit's width under the red | full width |
+| Wrap onto the wing | to s 4.42 / 4.37 | a little | to s 4.47 at the top, 4.44 at the foot |
+
 Shape differences that remain:
 
 - The lid band's ends are amber below on the car; here they are the band's red `inert` lens
-  (no colour change was wanted).
+  (no colour change was wanted). The lid's cut shows as a 7 mm gap between band and corner
+  unit (a shut line on the car).
 - The dark strip under the band's middle is painted.
 - The head lamp's outline is a polyline, and the inner tip is a corner, not a curve.
 
