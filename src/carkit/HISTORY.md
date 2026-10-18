@@ -909,6 +909,15 @@ amplified differences; `bench-*.json`, `pick-*.json`).
   photos' angles; `kit-zfight`, `kit-proportions`, `reality` pass. *daewoo.ts
   `LOOK_ESPERO`; measurements-espero.md §5*.
 
+- **Espero sun visors (owner): far too big, lowered they cover everything.** → Every kit
+  car's visor was one size, 0.32 × 0.15. Under the Espero's low, raked roof (the screen's
+  visible height 0.29 from its foot strip to its header) a lowered visor hung down to the
+  horizon from the driver's eye. → A layout field `visor: { half, depth }` (absent: the
+  stock 0.16 / 0.15, so every other car is unchanged); the Espero's 0.10 deep, a third of
+  its screen's visible height. Checked raised and lowered from the driver's eye in the lab;
+  `kit-zfight` passes. The Nexia keeps the stock size (screen 0.315 visible, so a third
+  would be 0.105); reported, not changed. *interior.ts `Layout.visor`, `CABIN_ESPERO`*.
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent

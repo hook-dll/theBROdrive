@@ -350,6 +350,11 @@ interface Layout {
   readonly headliner: number;
   /** The cabin floor over the sill's underside under the front seats; default `FLOOR_RISE` (the van's stands high). */
   readonly floorRise?: number;
+  /**
+   * The sun visors' size: half width across and depth from the hinge (the length that hangs
+   * down when lowered). Absent: 0.16 x 0.15, every car before the Espero's.
+   */
+  readonly visor?: { readonly half: number; readonly depth: number };
   /** A padded engine cover on the centre line between the front seats (the van's): ds range, half width, height over the floor; in the dash's colour. */
   readonly engineCover?: { readonly ds0: number; readonly ds1: number; readonly half: number; readonly height: number };
 }
@@ -973,6 +978,11 @@ export const CABIN_ESPERO: CabinLayoutOverride = {
   // The bench's base 3 cm off the wheel-house covers instead of 2.2: its side met the
   // quarter trim 2 mm away in the Espero's body (kit-zfight).
   bench: { from: 'hip', offset: 0.78, clear: 0.03 },
+  // Owner's review (2026-10-18): the stock 0.15-deep visors, lowered under the Espero's low,
+  // raked roof, hung to the horizon and hid the road. A third of the screen's visible height
+  // (from its foot strip at 0.944 to under its header at 1.236: 0.29) deep, 0.10 [E: no
+  // Espero visor photographed]; the stock width, 0.32 a side.
+  visor: { half: 0.16, depth: 0.1 },
 };
 
 // The VAZ-1111 «Ока» of 1988-1996 on the Samara's furniture, read off these sources:
@@ -2057,7 +2067,8 @@ class Cabin {
       fineDetail(this.hinge(this.group, ORIGIN, name, at, { channel: name, kind: 'rot', axis: [1, 0, 0], amount: -1.35 }, { id: name, label: `Козырёк ${WHERE[name.slice(-1)]}` }, (v) => {
         v.color(shade(this.lay.headliner, 0.92));
         v.pushAt(at);
-        pad(v, 'trim', [0, -0.008, -0.08], [0.16, 0.008, 0.075], 0.006);
+        const { half, depth } = this.lay.visor ?? { half: 0.16, depth: 0.15 };
+        pad(v, 'trim', [0, -0.008, -0.005 - depth / 2], [half, 0.008, depth / 2], 0.006);
         v.pop();
       }));
     }

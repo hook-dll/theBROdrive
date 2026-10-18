@@ -15,7 +15,9 @@
   `engine_daewoo_c20le` (77 kW, 169 Nm) and the Nexia's F16 box on the same 3.944 axle.
   `tools/reality.ts kit_espero` gives 185 km/h against 185 and the turn within 1.4 %; the
   0-100 of 12.8 s against 10.8 s is accepted as catalogue-optimistic.
-  `kit-zfight` and `kit-proportions` pass. 14 389 triangles. After the owner's first
+  `kit-zfight` and `kit-proportions` pass. 14 389 triangles. Its sun visors are 0.10 deep,
+  a third of its low screen's visible height (a new optional `Layout.visor`; the stock
+  0.15 hung to the horizon when lowered). After the owner's first
   review it has its own dash, from SelfBase.de's instrument-panel photos and an owner's
   cluster photo on drive2.ru. The dash has an angular hood over three dials of one size
   (tachometer, speedometer, and a fuel dial with the temperature scale on it) with switch
