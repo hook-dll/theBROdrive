@@ -1599,6 +1599,11 @@
 
 ### Fixed
 
+- ESPERO: THE TAIL-LAMP BAND ON THE BOOT LID LIES FLUSH, LIKE THE CORNER LAMPS (carkit
+  daewoo.ts `LOOK_ESPERO.rear.lid`). Owner: it read as a bulge beside the flush lamps on the
+  wings. Its lenses stood 10 mm (and 6 mm) out of the lid; now 4 mm and 2 mm. `kit-zfight`
+  passes for the Espero.
+
 - NO SPECKLED "DIRT" UNDER THE CLOUDS AT DUSK (render/clouds.ts `blobPoint`,
   `BASE_SLOT_STEP_M`). Reported from play: a flickering, dirty-looking pattern on every
   cloud's underside at sunset. It was depth fighting. While the bodies fade at dusk a depth

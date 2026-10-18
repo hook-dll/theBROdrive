@@ -546,10 +546,12 @@ export const LOOK_ESPERO: KitLook = {
     // deeper outer unit, not a staple. The red top across
     // the lid, and under each end a lower lens 4 mm further back whose top runs 5 mm in
     // behind it (a lens's corners are chamfered: two lenses meeting edge to edge left
-    // notches between them).
+    // notches between them). Owner, 2026-10-18: the band stood 10 mm out of the lid and read
+    // as a bulge beside the flush corner lamps; it lies nearly flush now (4 mm, its lower
+    // lens 2 mm), in the corner lamps' style.
     lid: [
-      { kind: 'lens', role: 'inert', x: { at: { centre: 0 }, half: 0.483 }, y: { from: ['belt', -0.2], to: ['belt', -0.105] }, depth: 0.008, proud: 0.01 },
-      { kind: 'lens', role: 'inert', x: { from: { centre: 0.33 }, to: { centre: 0.483 } }, y: { from: ['belt', -0.255], to: ['belt', -0.195] }, depth: 0.008, proud: 0.006, slant: { outer: 0, inner: 0.06 } },
+      { kind: 'lens', role: 'inert', x: { at: { centre: 0 }, half: 0.483 }, y: { from: ['belt', -0.2], to: ['belt', -0.105] }, depth: 0.008, proud: 0.004 },
+      { kind: 'lens', role: 'inert', x: { from: { centre: 0.33 }, to: { centre: 0.483 } }, y: { from: ['belt', -0.255], to: ['belt', -0.195] }, depth: 0.008, proud: 0.002, slant: { outer: 0, inner: 0.06 } },
     ],
   },
 };
