@@ -319,23 +319,31 @@ export const BODY_VECTRA_A: KitBody = {
       { s: 1.222, top: 1.863, upper: 'body' },
       { s: 1.26, top: 1.9, upper: 'door1', lower: 'body', finish: 'black' },
       // The front door's shut line below the belt [D side x 298]; the mirror's sail from it to
-      // the glass's front edge (1.62 at the belt [D side: the glass's foot from x 370]).
+      // the glass's front edge [D side: the glass's foot from x 370, 1.61]. Owner's review 2
+      // (2026-10-18): the edge from 1.55 (1.66 at 1.0), so the driver's lines to both mirror
+      // heads (`mirrorS` 1.60) cross the side glass.
       { s: 1.29, top: 1.925, upper: 'door1', finish: 'black' },
-      { s: 1.62, top: 1.95, upper: 'door1', glass: 'drop', finish: 'black' },
-      // The B pillar, black [D side x 480–505: the front glass ends 2.33, the rear glass
-      // starts 2.48; the shut line x 487].
-      { s: 2.33, top: 2.37, upper: 'door1', finish: 'black' },
-      { s: 2.385, top: 2.42, upper: 'body', lower: 'door1', finish: 'black' },
-      { s: 2.4, top: 2.435, upper: 'body', lower: 'door2', finish: 'black' },
+      { s: 1.55, top: 1.95, upper: 'door1', glass: 'drop', finish: 'black' },
+      // The B pillar, black (owner's review 2, 2026-10-18, re-read on the drawing by pixel
+      // rows) [D side: the front glass ends 2.33, the pillar's lines 2.37 / 2.43 above the
+      // belt, the shut line between the doors one line at 2.34 (0.75) to 2.358 (0.33), the
+      // rear glass from 2.47].
+      { s: 2.33, top: 2.36, upper: 'door1', finish: 'black' },
+      { s: 2.345, top: 2.375, upper: 'body', lower: 'door2', finish: 'black' },
       { s: 2.44, top: 2.47, upper: 'door2', finish: 'black' },
-      { s: 2.48, top: 2.5, upper: 'door2', glass: 'drop', finish: 'black' },
-      // The rear glass's rear edge leaning forward to the top [D side 2.94 at the belt]; the
-      // black post behind it to the shut line, which runs down and forward round the rear arch.
-      { s: 2.94, top: 2.9, upper: 'door2', finish: 'black' },
-      { s: 3.03, top: 2.98, upper: 'body', finish: 'black', foot: { y: 0.66, s: 2.93, round: [0.12, 0.03] } },
-      // A small fixed quarter glass in the C pillar [D side x 600–635, its foot 0.93].
-      { s: 3.045, top: 2.995, upper: 'body', glass: 'fixed', finish: 'black' },
-      { s: 3.22, top: 3.02, upper: 'body' },
+      { s: 2.47, top: 2.5, upper: 'door2', glass: 'drop', finish: 'black' },
+      // The rear door carries the small fixed quarter glass behind its post (review 2: it
+      // was in the body and the door ended at 3.03, 0.27 short) [D side: the post 2.95 at
+      // 1.03 to 2.99 at the rail; the frame's rear edge 3.26 at 0.96 leaning forward to 3.05
+      // at the rail; P "1995 Opel Vectra 1.8i GLS", the white GLS side]. The shut line under
+      // it [D side: 3.30 from the belt to 0.80, then slanting forward, 3.21 at 0.656, 3.13
+      // at 0.516, 3.07 at 0.375, 3.04 at the doors' bottom], kept 2–3 cm ahead of the rear
+      // arch (3.11 at 0.42, rearArch 1.22).
+      { s: 2.95, top: 2.98, upper: 'door2', finish: 'black' },
+      { s: 2.99, top: 3.02, upper: 'door2', glass: 'fixed', finish: 'black' },
+      { s: 3.25, top: 3.04, upper: 'door2', finish: 'black' },
+      { s: 3.29, top: 3.07, upper: 'body', foot: { y: 0.8, s: 2.98, round: [0.1, 0.03] } },
+      // The C pillar, painted, to the back light's foot.
       // rearBase; the roof's rear end at the rail 3.12 [D side: 1.394 at s 3.11].
       { s: 3.88, top: 3.12 },
     ],
@@ -395,9 +403,14 @@ export const LOOK_VECTRA_A: KitLook = {
   headrests: true,
   brightwork: 'black',
   sill: null,
+  // On the sail at the glass's front foot (owner's review 2: at the default 1.34 the
+  // driver's lines to the heads, eye s 2.28, met the sail) [D side: the head x 335–366,
+  // s 1.48–1.66]; the right one's line crosses the glass 4 cm behind its edge.
+  mirrorS: 1.6,
   // The black rubbing strip on the doors and the front wing behind the arch [D side y 262:
-  // 0.39; P "Opel Vectra front 20080102": about the bumpers' top band's height, a little lower].
-  waist: { y: 0.42, height: 0.035, finish: 'black', span: [1.25, 3.02] },
+  // 0.39; P "Opel Vectra front 20080102": about the bumpers' top band's height, a little
+  // lower; the white GLS side: arch to arch, each piece ending at its panel's seam].
+  waist: { y: 0.42, height: 0.035, finish: 'black', span: [1.2, 3.3] },
   repeater: null,
   cornerLamps: [
     // Head lamp and indicator as one unit, 0.605–0.736 [D front: the lamps ±0.33–0.70; P

@@ -163,3 +163,29 @@ line (x 1065) is the Samara's 0.36 seat line, 1.04 mm/px.
   end vent are not in the photo.
 - Overhangs, clearance, axle split, red line, engine and gearbox masses are estimates.
 - Triangles: 13 509.
+
+## Review 2 (owner, 2026-10-18): door lengths, pillars, mouldings, mirrors
+
+Re-read on the-blueprints.com vector 9730 preview (`1990_opel_vectra_a.jpg`, the scales in
+opel.ts), pixel rows by script, against the Commons GLS side photos ("1995 Opel Vectra 1.8i
+GLS", the white GLS). Factory figures cross-checked: vehiclesizes.com and encycarpedia
+(4432 / 1706 / 1400, wheelbase 2600). No free dimensioned drawing with door outlines was
+found (Outlines' 1988 sheet is paid).
+
+| Feature | Drawing | Model before | Model now |
+|---|---|---|---|
+| A pillar, at the belt → rail | 1.222 → 1.863 | same | unchanged |
+| Front door shut line | x 298: 1.29 (1.28 at 0.66) | 1.29 | unchanged |
+| Front glass front edge | 1.61 at the belt | 1.62 | 1.55 |
+| Mirror head | x 335–366: s 1.48–1.66 | 1.34: **hidden behind the sail** | `mirrorS` 1.60, seen in the cabin view |
+| B pillar above the belt | front glass ends 2.33, pillar lines 2.37 / 2.43, rear glass from 2.47 | 2.33–2.48 | 2.33–2.47 |
+| Shut line between the doors | one line, 2.34 at 0.75 to 2.358 at 0.33 | 2.385 / 2.40 | 2.345 |
+| Rear door's rear edge | the frame **includes** the small quarter glass: 3.26 at 0.96 leaning to 3.05 at the rail; shut line 3.30 down to 0.80, then forward (3.21 at 0.66, 3.13 at 0.52, 3.07 at 0.38) to 3.04 | 3.03 at the belt, the quarter glass in the body: **0.27 short** | 3.29 at the belt, `foot` y 0.80 → 2.98, the quarter glass on the door (`quarter_*`) |
+| Door lengths at the belt | front 1.29–2.34 (1.05), rear 2.34–3.30 (0.96) | 1.10 / 0.63 | 1.055 / 0.945 |
+| C pillar | 3.30 → back light foot 3.88 | 3.045 → 3.88 | 3.29 → 3.88 |
+| Rubbing strip | y 262: 0.39 (photos 0.42), wing behind the arch to the rear wing in front of the arch | 1.25–3.02 | 1.20–3.30, a piece per panel |
+
+The narrow rear door was the 1989 preview read with the quarter glass as body (the post at
+2.95 taken as the door's end). On the drawing and the GLS photos the door's frame runs
+round the quarter glass to the C pillar.
+
