@@ -8,9 +8,10 @@
  * only what all of them share: the kind ids, the progress record that is saved ON
  * the item, and the delivery-time world view the kinds read.
  *
- * NOTHING IS SCORED ON THE WAY. A contract does not watch impacts, drops, tips or
- * scratches: carry it to a later courier and it pays. The only thing remembered on
- * the item is whether it has left its source courier (`progress.started`), which the
+ * NOTHING IS SCORED ON THE WAY but the fragile radio's condition: knocks to the car
+ * it rides in and drops to the ground wear it down, and the delivery pays that share
+ * of its coins (economy/economy.ts `deliveryPay`). The other thing remembered on the
+ * item is whether it has left its source courier (`progress.started`), which the
  * rival race reads.
  *
  * `kind` ids are saved: never rename one.
@@ -48,6 +49,11 @@ export type ContractPlace = 'courier' | 'hand' | 'car' | 'loose';
 export interface ContractProgress {
   /** Set the first time the cargo leaves its source courier. */
   started: boolean;
+  /**
+   * A fragile radio's condition, 1 (as signed out) down to 0; the delivery's quality.
+   * Absent on every other kind and on a radio not yet knocked.
+   */
+  condition?: number;
 }
 
 /** A fresh, unstarted contract. */

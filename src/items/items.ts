@@ -365,8 +365,12 @@ export function itemLabel(item: Item): string {
       return 'postcard from home';
     case 'coin':
       return item.value === 1 ? 'coin' : `coin · ${item.value}`;
-    case 'contract_cargo':
-      return `${contractTier(item)}: ${item.cargoName}`;
+    case 'contract_cargo': {
+      // A knocked radio says how much of its pay it still carries.
+      const condition = item.progress?.condition;
+      const worn = condition !== undefined && condition < 1 ? ` · ${Math.round(condition * 100)}%` : '';
+      return `${contractTier(item)}: ${item.cargoName}${worn}`;
+    }
     case 'sticker_envelope':
       // The name is on the envelope; the picture is seen when it is tried on.
       return `sticker envelope · ${stickerDef(item.stickerKind).label}`;
@@ -501,7 +505,9 @@ export class Inventory {
    * picked up when your hands are otherwise empty, however heavy it is. Engines run
    * 118-402 kg against a 95 kg limit, so without this you could never carry an engine
    * to the car and the game would be unfinishable. Hauling one is deliberately
-   * miserable instead — `carriedMass` saturates the movement penalty.
+   * miserable instead — `carriedMass` saturates the movement penalty. The coin purse
+   * does not count as something in your hands: money is always carried, and a heavy
+   * crate or an engine must still be liftable with it.
    *
    * A coin joining a pack that already holds one merges into it (see `CoinItem`),
    * so it never needs a free slot.
@@ -518,8 +524,10 @@ export class Inventory {
     }
     if (this.items.length >= INVENTORY_ITEM_LIMIT) return false;
     const mass = itemMass(item);
-    const soleHeavyHaul = this.items.length === 0 && mass > this.massLimit;
-    if (!soleHeavyHaul && this.carriedMass + mass > this.massLimit) return false;
+    const handsEmpty = this.items.every((held) => held.type === 'coin');
+    // A coin weighs grams: it goes into any pack with a free slot, however loaded.
+    const exempt = item.type === 'coin' || (handsEmpty && mass > this.massLimit);
+    if (!exempt && this.carriedMass + mass > this.massLimit) return false;
     this.items.push(item);
     this.listener?.();
     return true;
@@ -533,6 +541,21 @@ export class Inventory {
     if (this.selected >= this.items.length) this.selected = Math.max(0, this.items.length - 1);
     this.listener?.();
     return removed ?? null;
+  }
+
+  /**
+   * Takes `n` coins off the pile in the pack. False, and nothing taken, when the pack
+   * holds fewer; a pile spent to nothing leaves the pack.
+   */
+  spendCoins(n: number): boolean {
+    if (n <= 0) return true;
+    const index = this.items.findIndex((held) => held.type === 'coin');
+    const pile = this.items[index];
+    if (pile?.type !== 'coin' || pile.value < n) return false;
+    if (pile.value === n) return this.remove(pile.id) !== null;
+    this.items[index] = { ...pile, value: pile.value - n };
+    this.listener?.();
+    return true;
   }
 
   find(id: string): Item | null {

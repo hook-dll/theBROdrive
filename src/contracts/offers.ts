@@ -17,10 +17,9 @@
  */
 
 import { hash, hash01 } from '../core/rng';
-import { isHaulKind, makeSponge, type ContractCargoItem, type Item } from '../items/items';
+import { isHaulKind, type ContractCargoItem, type Item } from '../items/items';
 import { stickerKindForSeed } from '../items/stickercatalog';
-import { courierId } from '../world/couriers';
-import { TRUNK_CELL_COUNT, TRUNK_COLUMNS } from '../vehicle/trunk';
+import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
 import { CONTRACT_KINDS } from './registry';
 import { defaultProgress, type ContractKindDef } from './types';
 
@@ -28,8 +27,6 @@ import { defaultProgress, type ContractKindDef } from './types';
 const OFFER_DOMAIN = 0x4f464631; // 'OFF1'
 const KIND_DOMAIN = 0x4f464b31; // 'OFK1'
 const NAME_DOMAIN = 0x4f464e31; // 'OFN1'
-/** Share of couriers with a sponge in the boot as well as the gum. */
-const COURIER_SPONGE_CHANCE = 0.35;
 
 /**
  * Total offer weight, summed on the first draw rather than at module load.
@@ -48,6 +45,9 @@ function totalWeight(haul: boolean): number {
 }
 
 function pickKind(seed: number, courierIndex: number, slot: number, haul: boolean): ContractKindDef {
+  // The first courier's easy run is always a parcel: the drive's first job needs no
+  // licence (economy/economy.ts `licenceFor`) and starts the parcel count.
+  if (courierIndex === 0 && slot === 0) return CONTRACT_KINDS[0]!;
   let roll = hash01(seed, KIND_DOMAIN, courierIndex, slot) * totalWeight(haul);
   let last: ContractKindDef | null = null;
   for (const def of CONTRACT_KINDS) {
@@ -88,10 +88,10 @@ export function generateContractOffer(
 }
 
 /**
- * What an untouched courier keeps in its boot: four offers on the top row, a pack of
- * gum on the bottom row, and now and then a sponge beside it. `CourierField`'s
- * `defaultStorage` is this; `WorldState.courierStorage` owns a full override after
- * the first edit, so nothing here runs twice.
+ * What an untouched courier keeps in its boot: the four offers on the top row and
+ * nothing else (the gum and sponge it used to give away are sold at vending machines
+ * now). `CourierField`'s `defaultStorage` is this; `WorldState.courierStorage` owns a
+ * full override after the first edit, so nothing here runs twice.
  */
 export function courierDefaultStorage(
   seed: number,
@@ -100,18 +100,6 @@ export function courierDefaultStorage(
   const cells: (Item | null)[] = new Array(TRUNK_CELL_COUNT).fill(null);
   for (let slot = 0; slot < 4; slot++) {
     cells[slot] = generateContractOffer(seed, index, slot);
-  }
-  const bottom = TRUNK_CELL_COUNT - TRUNK_COLUMNS;
-  const gumCell = bottom + Math.floor(hash01(seed, OFFER_DOMAIN, index, 10) * TRUNK_COLUMNS);
-  cells[gumCell] = {
-    type: 'bubble_gum',
-    id: `${courierId(index)}:gum`,
-    charges: 3 + Math.floor(hash01(seed, OFFER_DOMAIN, index, 11) * 3),
-  };
-  if (hash01(seed, OFFER_DOMAIN, index, 12) < COURIER_SPONGE_CHANCE) {
-    const shift = 1 + Math.floor(hash01(seed, OFFER_DOMAIN, index, 13) * (TRUNK_COLUMNS - 1));
-    const spongeCell = bottom + ((gumCell - bottom + shift) % TRUNK_COLUMNS);
-    cells[spongeCell] = makeSponge(`${courierId(index)}:sponge`, hash01(seed, OFFER_DOMAIN, index, 14));
   }
   return cells;
 }

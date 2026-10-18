@@ -29,7 +29,7 @@ import {
 import { faceRoadYaw } from '../world/poi';
 import { CAR_PAINTS } from '../vehicle/carpaint';
 import { CAMERA_FRAME_LIMIT, makeSponge, type Item } from '../items/items';
-import { CAR_MODELS, modelEngine } from '../vehicle/carmodels';
+import { carModel, modelEngine } from '../vehicle/carmodels';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
 import { bonnetWaterCapacity, createBonnetStorage } from '../vehicle/bonnet';
 import { oilCapacity } from '../parts/registry';
@@ -349,10 +349,17 @@ export function storyKeepsClear(s: number, lateral: number): boolean {
 // Starting car
 // ---------------------------------------------------------------------------
 
+/** The car every new drive starts in. */
+const START_CAR_MODEL_ID = 'kit_vaz1111';
+
+/** Coins in the pack at the start: a litre or two of petrol, nothing more. */
+export const START_COINS = 5;
+
 /**
- * Builds the starter car: the same deterministic seed-based catalogue pick, fuel,
- * fluids and bonnet the old homestead had, now parked on the verge in front of the
- * story house instead of in a garage the world no longer builds.
+ * Builds the starter car: the VAZ-1111 Oka, the cheapest car on the road, every
+ * drive alike (economy plan: the first car is earned up from here). Its fuel, fluids
+ * and bonnet wear stay seed-random, it is parked on the verge in front of the story
+ * house, and its papers are the player's.
  *
  * It takes the game's own `road`/`terrain` rather than constructing a second pair
  * (which meant a synchronous spine build while the loading cover was up).
@@ -360,10 +367,11 @@ export function storyKeepsClear(s: number, lateral: number): boolean {
 export function createStartingCar(world: GameWorld, road: Road, terrain: Terrain): CarState {
   const geometry = siteGeometry(world.seed, road, terrain);
 
-  const def = pick(CAR_MODELS, world.seed, 0x3f0);
+  const def = carModel(START_CAR_MODEL_ID);
   const engine = modelEngine(def);
 
-  const fuelLitres = Math.min(4 + hash01(world.seed, 0x3f1) * 6, def.tankLitres);
+  // Enough for the first courier and a little over; the next litre is bought.
+  const fuelLitres = Math.min(8 + hash01(world.seed, 0x3f1) * 4, def.tankLitres);
   const bonnet = createBonnetStorage('car:start', def.engineId, 0.15 + hash01(world.seed, 0x3f4) * 0.2);
   const waterLitres = bonnetWaterCapacity(bonnet) * (0.45 + hash01(world.seed, 0x3f2) * 0.3);
   const oilLitres = oilCapacity(engine) * (0.4 + hash01(world.seed, 0x3f3) * 0.35);
@@ -380,6 +388,7 @@ export function createStartingCar(world: GameWorld, road: Road, terrain: Terrain
   return {
     id: 'car:start',
     modelId: def.id,
+    papers: true,
     stickers: [],
     headlightMode: 'off',
     taillightsOn: false,
@@ -411,60 +420,33 @@ export function createStartingCar(world: GameWorld, road: Road, terrain: Terrain
 /**
  * The pool the yard draws from, by index. Kept as an index rather than a maker
  * array so the roll is a plain integer and every id stays derived from `seed`.
+ *
+ * Keepsakes only: what is used up on the road (cans, gum, medicine, spray, the
+ * sponge) is bought at a vending machine, never found (economy plan).
  */
-const HOME_ITEM_POOL = 12;
+const HOME_ITEM_POOL = 6;
 
 /** One starting item from the pool, with its deterministic `home_item` id. */
 function homeItem(world: GameWorld, slot: number, choice: number): Item {
   const id = world.generatedPartId('home_item', 0, slot);
-  const roll = (tag: number): number => hash01(world.seed, 0x9a1 + tag, slot);
   switch (choice) {
     case 0:
-      return {
-        type: 'fluid_can',
-        id,
-        fluid: 'petrol',
-        capacity: 20,
-        litres: Math.round((6 + roll(1) * 12) * 10) / 10,
-      };
-    case 1:
-      return {
-        type: 'fluid_can',
-        id,
-        fluid: 'water',
-        capacity: 5,
-        litres: Math.round((2 + roll(2) * 3) * 10) / 10,
-      };
-    case 2:
       return { type: 'camera', id, framesRemaining: CAMERA_FRAME_LIMIT };
-    case 3:
+    case 1:
       return { type: 'pocket_watch', id };
-    case 4:
+    case 2:
       return { type: 'football', id };
-    case 5:
-      return { type: 'medicine', id };
-    case 6:
+    case 3:
       return { type: 'binoculars', id };
-    case 7:
+    case 4:
       return { type: 'torchlight', id };
-    case 8:
-      return { type: 'sun_shades', id, tint: pick(['green', 'yellow', 'red'] as const, world.seed, 0x9b1, slot) };
-    case 9:
-      return {
-        type: 'spray_can',
-        id,
-        paint: pick(CAR_PAINTS, world.seed, 0x9b2, slot).hex,
-        charge: 0.45 + roll(3) * 0.55,
-      };
-    case 10:
-      return { type: 'bubble_gum', id, charges: 2 + Math.floor(roll(4) * 4) };
     default:
-      return makeSponge(id, roll(6));
+      return { type: 'sun_shades', id, tint: pick(['green', 'yellow', 'red'] as const, world.seed, 0x9b1, slot) };
   }
 }
 
 /**
- * Scatters a seeded handful of finds around the story house: 4-6 distinct items
+ * Scatters a seeded handful of keepsakes around the story house: 2-4 distinct items
  * from the pool, laid on the yard between the front wall and the asphalt, ground
  * height plus a small clearance. This runs only for a new world, so the stable
  * `home_item` ids can never restock something the player has already taken.
@@ -478,7 +460,7 @@ export function spawnStartingItems(
   const geometry = siteGeometry(world.seed, road, terrain);
   const { frontLat, halfX } = geometry;
 
-  const count = 4 + Math.floor(hash01(world.seed, STORY_TAG, 2) * 3);
+  const count = 2 + Math.floor(hash01(world.seed, STORY_TAG, 2) * 3);
   const chosen: number[] = [];
   for (let probe = 0; chosen.length < count && probe < 64; probe++) {
     const choice = Math.floor(hash01(world.seed, STORY_TAG, 0x100 + probe) * HOME_ITEM_POOL) % HOME_ITEM_POOL;
