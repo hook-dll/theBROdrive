@@ -313,7 +313,10 @@ export const BODY_VECTRA_A: KitBody = {
     // 0.72 at s 0.116, 0.791 at 0.233, 0.826 at 0.349, 0.849 at 0.466, 0.861 at 0.582, 0.885
     // at 0.699, 0.902 at 0.815, 0.92 at 0.931, 0.931 at 1.048, 0.937 at the cowl].
     { s: 0.06, sill: 0.3, crease: 0.6, belt: 0.74, deck: 0.75, wSill: 0.68, wCrease: 0.7, wBelt: 0.68 },
-    { s: 0.17, sill: 0.3, crease: 0.61, belt: 0.775, deck: 0.795, wSill: 0.77, wCrease: 0.79, wBelt: 0.77 },
+    // The flank's lean in over the crease (wCrease − wBelt over its rise) grows evenly from
+    // the face to the cowl: 0.143, 0.155, 0.167, 0.185, 0.226 per metre (at 0.17 it was
+    // 0.121, so the wing's facets turned in and out there: kit-surface `lean`).
+    { s: 0.17, sill: 0.3, crease: 0.61, belt: 0.775, deck: 0.795, wSill: 0.77, wCrease: 0.79, wBelt: 0.764 },
     { s: 0.35, sill: 0.29, crease: 0.62, belt: 0.8, deck: 0.826, wSill: 0.81, wCrease: 0.83, wBelt: 0.8 },
     { s: 0.6, sill: 0.28, crease: 0.63, belt: 0.835, deck: 0.862, wSill: 0.83, wCrease: 0.848, wBelt: 0.81 },
     // The cowl [D side (290, 168)]; the flank ±0.853 [F 1706], the shoulder ±0.80 under the

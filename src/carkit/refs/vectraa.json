@@ -20,7 +20,7 @@
     "railY": { "v": 1.309, "src": "D side glass top y 104-105 = 1.306-1.312 (§2)" },
     "doorFront": { "v": [1.29, 2.34], "src": "D side, Review 2 door lengths at the belt: front 1.29-2.34" },
     "doorRear": { "v": [2.34, 3.3], "src": "D side, Review 2 door lengths at the belt: rear 2.34-3.30 (the frame round the quarter glass)" },
-    "doorBottomY": { "v": 0.205, "src": "D side sill and door bottoms y 293 (§2)" },
+    "doorBottomY": { "v": 0.205, "src": "D side sill and door bottoms y 293 (§2)", "accepted": { "v": 0.255, "why": "the sill and the doors' bottom kept above the drawn 0.205: there the shell's floor met the silencer between the arches (kit-zfight; measurements-vectra.md §6); owner's decision 2026-10-19" } },
     "beltHalfWidth": { "v": 0.79, "src": "D front view: the glass's foot +-0.79 at 0.89 (§2)" }
   },
   "dash": {
