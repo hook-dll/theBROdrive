@@ -26,11 +26,18 @@ import { hashUnit2, hashUnit3, mulberry32 } from '../core/rng';
  * a street of long rafts and a clear one nothing: no lattice survives because nothing
  * sits on one.
  *
+ * THE DECKS. The cumulus stand on the low deck, on their district's condensation level;
+ * over them an altocumulus deck of flat, thin rafts 4.3-5.5 km up, with its own
+ * districts, so a stretch clear low down is often patched high up and the sky between
+ * the horizon and the zenith has something in it. Each deck has its own wind, stronger
+ * and veered aloft (`cloudDeckWind`): the decks slide across each other, which is the
+ * motion the eye reads first. The low deck's wind is the field's own pan (`cloudPan`);
+ * a higher deck's clouds stand `cloudDeckShift` from where they were built.
+ *
  * THE WEATHER. Every candidate has a rank; a cell shows the candidates whose rank is
  * under its cover (`cloudCover`), and a storm raises the cover, so more clouds appear,
  * growing from nothing (`cloudGrow`) rather than popping in, and the ones already there
- * swell. Fair weather never changes the cover, so a fair sky is static apart from the
- * wind.
+ * swell. Fair weather never changes the cover, so a fair sky changes only with the wind.
  */
 
 // ---------------------------------------------------------------------------
@@ -55,10 +62,20 @@ export const CLOUD_COMPACT_BIG = 4;
 export const CLOUD_COMPACT_SMALL = 6;
 /** Floats per blob in `CloudSet.blobs`: centre xyz, radii xyz, cos and sin of its yaw. */
 export const BLOB_FLOATS = 8;
-/** Drift speed, m/s: a gentle breeze aloft, the clouds and their shadows together. */
-export const CLOUD_DRIFT_MPS = 6;
-/** Highest point any cloud reaches above the datum, metres. */
-export const CLOUD_CEILING_M = 5_800;
+/** The decks (`CloudSet.deck`): the low cumulus, and the altocumulus over them. */
+export const CloudDeck = { Low: 0, Mid: 1 } as const;
+export const CLOUD_DECKS = 2;
+/**
+ * Each deck's wind, m/s, and its veer from the low deck's direction, radians. A 6 m/s
+ * breeze moved a cloud three kilometres out a tenth of a degree a second, which reads
+ * as painted on; aloft the wind is twice the low deck's and turned, so the decks shear.
+ */
+const DECK_WIND_MPS = [9, 18] as const;
+const DECK_VEER_RAD = [0, 0.55] as const;
+/** The low deck's drift speed, m/s: the clouds and their shadows together. */
+export const CLOUD_DRIFT_MPS = DECK_WIND_MPS[0];
+/** Highest point any cloud reaches above the datum, metres (a swollen altocumulus). */
+export const CLOUD_CEILING_M = 6_200;
 /** Lowest cloud base, metres. */
 export const CLOUD_FLOOR_M = 950;
 
@@ -69,36 +86,40 @@ export const CLOUD_FLOOR_M = 950;
  */
 const CANDIDATES = 2;
 /**
- * Fair-weather clouds per cell at a district cover of one. Set so the ground under a
- * cloud averages 10-15% (tools/sky-variety.ts measures it). The owner read the sky of
- * half-kilometre puffs in groups as confetti and its short tall ones as towers: clouds
- * are now rare and big (1.4 to 6 km along the wind, over a kilometre across, the biggest
- * only under a high base: `LENGTH_PER_BASE`), and the cover comes from cloud size, not
- * count.
+ * Fair-weather clouds per cell at a district cover of one, per deck. The low deck's is
+ * set so the ground under a cloud averages 10-15% (tools/sky-variety.ts measures it).
+ * The owner read the sky of half-kilometre puffs in groups as confetti and its short
+ * tall ones as towers: clouds are rare and big (1.4 to 6 km along the wind, over a
+ * kilometre across, the biggest only under a high base: `LENGTH_PER_BASE`), and the
+ * cover comes from cloud size, not count. The altocumulus deck adds about as much again,
+ * thin, in its own districts.
  */
-const CLOUDS_PER_CELL = 0.05;
+const CLOUDS_PER_CELL = [0.05, 0.07] as const;
 /** Ranks a storm adds to every cell, clear districts included, on top of swelling the fair share. */
 const STORM_EXTRA = 0.6;
 /** How far over a rank the cover must go before a cloud is full size. */
 const GROW_SPAN = 0.5;
 
 /**
- * Mean fair-weather clouds in a cell of district cover `cover`. Square in the cover: with
- * clouds this rare a cell holds one at most unless the district is crowded, and a
- * crowded one holds a short street of two, so the sky still clumps (clear stretches,
- * then a few long rafts together) instead of sprinkling one raft per cell.
+ * Mean fair-weather clouds in a cell of district cover `cover` on `deck`. Square in the
+ * cover: with clouds this rare a cell holds one at most unless the district is crowded,
+ * and a crowded one holds a short street of two, so the sky still clumps (clear
+ * stretches, then a few long rafts together) instead of sprinkling one raft per cell.
  */
-function fairShare(cover: number): number {
-  return CLOUDS_PER_CELL * cover * cover;
+function fairShare(cover: number, deck: number): number {
+  return CLOUDS_PER_CELL[deck as 0 | 1] * cover * cover;
 }
 
 /**
- * The kinds (`CloudSet.kind`): humilis (flat rafts 1.4-3 km long, about a fifth as
- * tall), mediocris (2.8-6 km, a quarter as tall) and congestus (rare, in cloudy
- * districts only: a mediocris body with one broad heap on its crown, a third as tall as
- * long, never a column).
+ * The kinds (`CloudSet.kind`): on the low deck humilis (flat rafts 1.4-3 km long, about
+ * a fifth as tall), mediocris (2.8-6 km, a quarter as tall) and congestus (rare, in
+ * cloudy districts only: a mediocris body with one broad heap on its crown, a third as
+ * tall as long, never a column); on the high deck altocumulus (1.5-4 km, a tenth or less
+ * as thick).
  */
-export const CloudKind = { Humilis: 0, Mediocris: 1, Congestus: 2 } as const;
+export const CloudKind = { Humilis: 0, Mediocris: 1, Congestus: 2, Altocumulus: 3 } as const;
+/** How much of the sun each kind stops: thin rafts less, towers all of it, the high thin deck half. */
+const CLOUD_KIND_OPACITY: readonly number[] = [0.8, 0.95, 1, 0.5];
 
 /** Hash domains, distinct from every other system's. */
 const TAG_WIND = 0x43534831; // 'CSH1' (the wind the shadows have always had)
@@ -107,6 +128,10 @@ const TAG_DISTRICT_FINE = 0x434c4432;
 const TAG_BASE = 0x434c4433;
 const TAG_CELL = 0x434c4434;
 const TAG_SHAPE = 0x434c4435;
+const TAG_DISTRICT_MID = 0x434c4436;
+const TAG_DISTRICT_MID_FINE = 0x434c4437;
+const TAG_BASE_MID = 0x434c4438;
+const TAG_CELL_MID = 0x434c4439;
 
 // ---------------------------------------------------------------------------
 // The set
@@ -129,6 +154,8 @@ export interface CloudSet {
   readonly cover: Float32Array;
   readonly rank: Float32Array;
   readonly kind: Uint8Array;
+  /** `CloudDeck`: which wind carries it (`cloudDeckShift`). */
+  readonly deck: Uint8Array;
   /** How much of the sun the cloud stops, 0..1: thin rafts less, towers all of it. */
   readonly opacity: Float32Array;
   /** Brightness, 0.9..1: no two clouds quite the same white. */
@@ -177,12 +204,13 @@ function periodicNoise(x: number, z: number, cells: number, seed: number, tag: n
 }
 
 /**
- * The district's cloudiness, 0 (clear) to about 2.6, at a field position. Two octaves of
- * periodic noise, 7.7 and 3.8 km, pushed through a threshold: the low third of districts
- * hold nothing, the top few are crowded.
+ * The district's cloudiness on `deck`, 0 (clear) to about 2.6, at a field position. Two
+ * octaves of periodic noise, 7.7 and 3.8 km, pushed through a threshold: the low third
+ * of districts hold nothing, the top few are crowded. The decks' districts are their own.
  */
-export function districtCover(seed: number, x: number, z: number): number {
-  const v = 0.65 * periodicNoise(x, z, 8, seed, TAG_DISTRICT) + 0.35 * periodicNoise(x, z, 16, seed, TAG_DISTRICT_FINE);
+export function districtCover(seed: number, x: number, z: number, deck: number = CloudDeck.Low): number {
+  const [coarse, fine] = deck === CloudDeck.Low ? [TAG_DISTRICT, TAG_DISTRICT_FINE] : [TAG_DISTRICT_MID, TAG_DISTRICT_MID_FINE];
+  const v = 0.65 * periodicNoise(x, z, 8, seed, coarse) + 0.35 * periodicNoise(x, z, 16, seed, fine);
   const t = Math.max(0, (v - 0.33) / 0.34);
   return 2.6 * t ** 1.4;
 }
@@ -193,21 +221,46 @@ export function districtCover(seed: number, x: number, z: number): number {
  * storm adds grow in from nothing, while it builds.
  */
 export function cloudGrow(set: CloudSet, i: number, storm: number): number {
-  const fair = fairShare(set.cover[i]!);
+  const fair = fairShare(set.cover[i]!, set.deck[i]!);
   const rank = set.rank[i]!;
   const cover = fair * (1 + 1.5 * storm) + STORM_EXTRA * storm;
   const grow = rank < fair ? 1 : Math.min(1, Math.max(0, (cover - rank) / GROW_SPAN));
   return grow * (1 + 0.35 * storm);
 }
 
-/** Wind at cloud height: direction from the seed, speed fixed. Metres per second. */
+/** Wind on `deck`: direction from the seed, veered aloft; speed fixed. Metres per second. */
+export function cloudDeckWind(seed: number, deck: number, out: { x: number; z: number }): void {
+  const d = deck as 0 | 1;
+  const angle = hashUnit2(seed, TAG_WIND) * Math.PI * 2 + DECK_VEER_RAD[d];
+  out.x = Math.cos(angle) * DECK_WIND_MPS[d];
+  out.z = Math.sin(angle) * DECK_WIND_MPS[d];
+}
+
+/** Wind on the low deck, which carries the field (`cloudPan`). Metres per second. */
 export function cloudWind(seed: number, out: { x: number; z: number }): void {
-  const angle = hashUnit2(seed, TAG_WIND) * Math.PI * 2;
-  out.x = Math.cos(angle) * CLOUD_DRIFT_MPS;
-  out.z = Math.sin(angle) * CLOUD_DRIFT_MPS;
+  cloudDeckWind(seed, CloudDeck.Low, out);
 }
 
 const windScratch = { x: 0, z: 0 };
+const deckScratch = { x: 0, z: 0 };
+
+/**
+ * How far each deck's clouds have drifted against the low deck's after `elapsed` seconds,
+ * metres in [0, CLOUD_PERIOD_M): a deck-`d` cloud built at field `(x, z)` stands at field
+ * `(x + out[2d], z + out[2d + 1])`. The low deck's is zero by definition.
+ */
+export function cloudDeckShift(seed: number, elapsed: number, out: Float64Array): Float64Array {
+  cloudDeckWind(seed, CloudDeck.Low, windScratch);
+  for (let d = 0; d < CLOUD_DECKS; d++) {
+    cloudDeckWind(seed, d, deckScratch);
+    out[2 * d] = wrap((deckScratch.x - windScratch.x) * elapsed, CLOUD_PERIOD_M);
+    out[2 * d + 1] = wrap((deckScratch.z - windScratch.z) * elapsed, CLOUD_PERIOD_M);
+  }
+  return out;
+}
+
+/** No drift: the field as built. */
+export const CLOUD_NO_SHIFT: Float64Array = new Float64Array(2 * CLOUD_DECKS);
 
 /**
  * The origin, drifted and reduced into one period: the field position of the scene's own
@@ -456,6 +509,7 @@ function buildCloudSet(seed: number): CloudSet {
   const covers: number[] = [];
   const ranks: number[] = [];
   const kinds: number[] = [];
+  const decks: number[] = [];
   const opacities: number[] = [];
   const tints: number[] = [];
   const compacts: number[] = [];
@@ -464,15 +518,14 @@ function buildCloudSet(seed: number): CloudSet {
   const cellStart = new Int32Array(cells * cells + 1);
   let maxReach = 0;
   const builder: Builder = { big: [], small: [], rand: Math.random };
-  // Every cloud's long axis lies along the drift (`cloudWind`), give or take.
+  // Every cloud's long axis lies along its deck's drift (`cloudDeckWind`), give or take.
   const windAngle = hashUnit2(seed, TAG_WIND) * Math.PI * 2;
-  const windX = Math.cos(windAngle);
-  const windZ = Math.sin(windAngle);
+  const midWindAngle = windAngle + DECK_VEER_RAD[CloudDeck.Mid];
 
   /** Turns the built cloud to `yaw` and appends it, at unwrapped (x, z) in cell (ox, oz). */
   const emit = (
     x: number, z: number, ox: number, oz: number, base: number, yaw: number,
-    kind: number, cover: number, rank: number, tint: number,
+    kind: number, deck: number, cover: number, rank: number, tint: number,
   ): void => {
     const cy = Math.cos(yaw);
     const sy = Math.sin(yaw);
@@ -507,7 +560,8 @@ function buildCloudSet(seed: number): CloudSet {
     covers.push(cover);
     ranks.push(rank);
     kinds.push(kind);
-    opacities.push(kind === CloudKind.Humilis ? 0.8 : kind === CloudKind.Mediocris ? 0.95 : 1);
+    decks.push(deck);
+    opacities.push(CLOUD_KIND_OPACITY[kind]!);
     tints.push(tint);
     compacts.push(
       builder.big.length <= CLOUD_COMPACT_BIG * BLOB_FLOATS && builder.small.length <= CLOUD_COMPACT_SMALL * BLOB_FLOATS ? 1 : 0,
@@ -522,7 +576,7 @@ function buildCloudSet(seed: number): CloudSet {
       const oz = cz * CLOUD_CELL_M;
       const cover = districtCover(seed, ox + CLOUD_CELL_M / 2, oz + CLOUD_CELL_M / 2);
       // The storm's ceiling for this cell (`cloudGrow` at storm 1).
-      const most = fairShare(cover) * 2.5 + STORM_EXTRA;
+      const most = fairShare(cover, CloudDeck.Low) * 2.5 + STORM_EXTRA;
       const cellRand = mulberry32((hashUnit3(seed ^ TAG_CELL, cx, cz) * 4294967296) >>> 0);
       const groupX = ox + cellRand() * CLOUD_CELL_M;
       const groupZ = oz + cellRand() * CLOUD_CELL_M;
@@ -539,8 +593,8 @@ function buildCloudSet(seed: number): CloudSet {
         // apart along it to read as a line of long rafts, not a clump of puffs.
         const along = Math.cos(a) * d * 2;
         const across = Math.sin(a) * d * 0.5;
-        const x = grouped ? groupX + along * windX - across * windZ : ox + ux * CLOUD_CELL_M;
-        const z = grouped ? groupZ + along * windZ + across * windX : oz + uz * CLOUD_CELL_M;
+        const x = grouped ? groupX + along * Math.cos(windAngle) - across * Math.sin(windAngle) : ox + ux * CLOUD_CELL_M;
+        const z = grouped ? groupZ + along * Math.sin(windAngle) + across * Math.cos(windAngle) : oz + uz * CLOUD_CELL_M;
 
         const r = mulberry32(shapeSeed);
         builder.rand = r;
@@ -577,7 +631,41 @@ function buildCloudSet(seed: number): CloudSet {
         }
         const base = condensation + (r() - 0.5) * 60;
         const yaw = windAngle + (r() - 0.5) * 0.5;
-        emit(x, z, ox, oz, base, yaw, kind, cover, rank, 0.92 + 0.08 * r());
+        emit(x, z, ox, oz, base, yaw, kind, CloudDeck.Low, cover, rank, 0.92 + 0.08 * r());
+      }
+
+      // THE ALTOCUMULUS DECK, in its own districts and on its own wind: flat rafts 1.5-4 km
+      // along that wind, a tenth or less as thick, crusted with small lobes; strung in
+      // streets like the cumulus. One level for the district, 4.3-5.5 km up.
+      const midCover = districtCover(seed, ox + CLOUD_CELL_M / 2, oz + CLOUD_CELL_M / 2, CloudDeck.Mid);
+      const midMost = fairShare(midCover, CloudDeck.Mid) * 2.5 + STORM_EXTRA;
+      const midRand = mulberry32((hashUnit3(seed ^ TAG_CELL_MID, cx, cz) * 4294967296) >>> 0);
+      const midGroupX = ox + midRand() * CLOUD_CELL_M;
+      const midGroupZ = oz + midRand() * CLOUD_CELL_M;
+      for (let k = 0; k < CANDIDATES; k++) {
+        const rank = k + midRand();
+        const grouped = midRand() < 0.5;
+        const a = midRand() * Math.PI * 2;
+        const d = Math.sqrt(midRand()) * 1800;
+        const ux = midRand();
+        const uz = midRand();
+        const shapeSeed = (hashUnit3(seed ^ TAG_CELL_MID, cell, CANDIDATES + k) * 4294967296) >>> 0;
+        if (rank >= midMost) continue;
+        const along = Math.cos(a) * d * 2;
+        const across = Math.sin(a) * d * 0.5;
+        const x = grouped ? midGroupX + along * Math.cos(midWindAngle) - across * Math.sin(midWindAngle) : ox + ux * CLOUD_CELL_M;
+        const z = grouped ? midGroupZ + along * Math.sin(midWindAngle) + across * Math.cos(midWindAngle) : oz + uz * CLOUD_CELL_M;
+        const r = mulberry32(shapeSeed);
+        builder.rand = r;
+        builder.big.length = 0;
+        builder.small.length = 0;
+        const length = 1500 + 2500 * r() ** 1.3;
+        const height = length * (0.07 + 0.03 * r());
+        buildBody(builder, length, length / (1.4 + 0.4 * r()), height, 3, 1);
+        addLobes(builder, height, CLOUD_COMPACT_SMALL);
+        const base = 4300 + 1200 * periodicNoise(x, z, 6, seed, TAG_BASE_MID) + (r() - 0.5) * 80;
+        const yaw = midWindAngle + (r() - 0.5) * 0.5;
+        emit(x, z, ox, oz, base, yaw, CloudKind.Altocumulus, CloudDeck.Mid, midCover, rank, 0.95 + 0.05 * r());
       }
     }
   }
@@ -594,6 +682,7 @@ function buildCloudSet(seed: number): CloudSet {
     cover: Float32Array.from(covers),
     rank: Float32Array.from(ranks),
     kind: Uint8Array.from(kinds),
+    deck: Uint8Array.from(decks),
     opacity: Float32Array.from(opacities),
     tint: Float32Array.from(tints),
     compact: Uint8Array.from(compacts),
@@ -662,41 +751,48 @@ function rayHitsCloud(
 /**
  * How much of the sun the clouds stop along the ray from field point `(fx, fy, fz)`
  * toward it: the most opaque cloud the ray passes through, 0 if none. Exactly what the
- * shadow map's coverage pass rasterises (render/clouds.ts), before its blur.
+ * shadow map's coverage pass rasterises (render/clouds.ts), before its blur. `shift` is
+ * where the decks have drifted (`cloudDeckShift`; `CLOUD_NO_SHIFT` for the field as built).
  */
 export function cloudCoverAlong(
   set: CloudSet,
   storm: number,
+  shift: Float64Array,
   fx: number,
   fy: number,
   fz: number,
   sx: number,
   sz: number,
 ): number {
-  const lowX = fx + sx * (CLOUD_FLOOR_M - fy);
-  const lowZ = fz + sz * (CLOUD_FLOOR_M - fy);
-  const highX = fx + sx * (CLOUD_CEILING_M - fy);
-  const highZ = fz + sz * (CLOUD_CEILING_M - fy);
   const margin = set.maxReach * (1 + 0.35 * storm);
-  const x0 = Math.floor((Math.min(lowX, highX) - margin) / CLOUD_CELL_M);
-  const x1 = Math.floor((Math.max(lowX, highX) + margin) / CLOUD_CELL_M);
-  const z0 = Math.floor((Math.min(lowZ, highZ) - margin) / CLOUD_CELL_M);
-  const z1 = Math.floor((Math.max(lowZ, highZ) + margin) / CLOUD_CELL_M);
   const cells = CLOUD_PERIOD_CELLS;
   let best = 0;
-  for (let cz = z0; cz <= z1; cz++) {
-    for (let cx = x0; cx <= x1; cx++) {
-      const cell = wrap(cz, cells) * cells + wrap(cx, cells);
-      for (let i = set.cellStart[cell]!; i < set.cellStart[cell + 1]!; i++) {
-        if (set.opacity[i]! <= best) continue;
-        const grow = cloudGrow(set, i, storm);
-        if (grow <= 0) continue;
-        // The copy of the cloud nearest the ray's middle.
-        const midX = (lowX + highX) / 2;
-        const midZ = (lowZ + highZ) / 2;
-        const ax = midX + wrapDelta(set.x[i]!, midX);
-        const az = midZ + wrapDelta(set.z[i]!, midZ);
-        if (rayHitsCloud(set, i, grow, ax, az, fx, fy, fz, sx, sz)) best = set.opacity[i]!;
+  for (let deck = 0; deck < CLOUD_DECKS; deck++) {
+    // The ground point in the frame this deck's clouds were built in.
+    const px = fx - shift[2 * deck]!;
+    const pz = fz - shift[2 * deck + 1]!;
+    const lowX = px + sx * (CLOUD_FLOOR_M - fy);
+    const lowZ = pz + sz * (CLOUD_FLOOR_M - fy);
+    const highX = px + sx * (CLOUD_CEILING_M - fy);
+    const highZ = pz + sz * (CLOUD_CEILING_M - fy);
+    const midX = (lowX + highX) / 2;
+    const midZ = (lowZ + highZ) / 2;
+    const x0 = Math.floor((Math.min(lowX, highX) - margin) / CLOUD_CELL_M);
+    const x1 = Math.floor((Math.max(lowX, highX) + margin) / CLOUD_CELL_M);
+    const z0 = Math.floor((Math.min(lowZ, highZ) - margin) / CLOUD_CELL_M);
+    const z1 = Math.floor((Math.max(lowZ, highZ) + margin) / CLOUD_CELL_M);
+    for (let cz = z0; cz <= z1; cz++) {
+      for (let cx = x0; cx <= x1; cx++) {
+        const cell = wrap(cz, cells) * cells + wrap(cx, cells);
+        for (let i = set.cellStart[cell]!; i < set.cellStart[cell + 1]!; i++) {
+          if (set.deck[i] !== deck || set.opacity[i]! <= best) continue;
+          const grow = cloudGrow(set, i, storm);
+          if (grow <= 0) continue;
+          // The copy of the cloud nearest the ray's middle.
+          const ax = midX + wrapDelta(set.x[i]!, midX);
+          const az = midZ + wrapDelta(set.z[i]!, midZ);
+          if (rayHitsCloud(set, i, grow, ax, az, px, fy, pz, sx, sz)) best = set.opacity[i]!;
+        }
       }
     }
   }
@@ -730,6 +826,7 @@ export const CLOUD_SHADE_SIGMA_M = 52;
 export function cloudShadeAlong(
   set: CloudSet,
   storm: number,
+  shift: Float64Array,
   fx: number,
   fy: number,
   fz: number,
@@ -737,6 +834,6 @@ export function cloudShadeAlong(
   sz: number,
 ): number {
   let shade = 0;
-  for (const tap of SHADE_TAPS) shade += tap.w * cloudCoverAlong(set, storm, fx + tap.x, fy, fz + tap.z, sx, sz);
+  for (const tap of SHADE_TAPS) shade += tap.w * cloudCoverAlong(set, storm, shift, fx + tap.x, fy, fz + tap.z, sx, sz);
   return shade;
 }

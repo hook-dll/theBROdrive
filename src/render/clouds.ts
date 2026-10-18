@@ -5,10 +5,8 @@ import { airDusk, airFog, airSky, airSun } from './airfog';
 import { cleanStyle } from './cleanstyle';
 import {
   BLOB_FLOATS,
-  CLOUD_CELL_M,
   CLOUD_CEILING_M,
   CLOUD_FLOOR_M,
-  CLOUD_PERIOD_CELLS,
   CLOUD_SHADE_SIGMA_M,
   CLOUD_BIG_SLOTS,
   CLOUD_COMPACT_BIG,
@@ -19,7 +17,7 @@ import {
   wrapDelta,
   type CloudSet,
 } from './cloudfield';
-import { cloudPanUniform, cloudShadowLive, setCloudShadowMap } from './cloudshadow';
+import { cloudDeckShiftLive, cloudPanUniform, cloudShadowLive, setCloudShadowMap } from './cloudshadow';
 import { SCENE_EXPOSURE } from './displaytransform';
 
 /**
@@ -30,7 +28,8 @@ import { SCENE_EXPOSURE } from './displaytransform';
  * each one body of up to six big lobes (detail-2 icospheres, 320 faces) with up to twelve
  * small ones sunk into its upper surface (detail 1, 80 faces), squashed into its blobs'
  * ellipsoids and cut flat at its base (render/cloudfield.ts has the shape). Two instanced
- * draws do all of them: a compact mesh (four big lobes, six small) for the humilis, a full
+ * draws do all of them: a compact mesh (four big lobes, six small) for the humilis and the
+ * high deck's altocumulus, a full
  * one for the rest. The blobs themselves live in a float texture (`blobTexture`, one row
  * of texels per 96 clouds), so every cloud in
  * the sky is its own shape while the GPU sees two draws; a vertex fetches its blob,
@@ -74,7 +73,7 @@ import { SCENE_EXPOSURE } from './displaytransform';
 /** Clouds per row of the blob texture, and texels per cloud: a header and two a blob. */
 const CLOUDS_PER_ROW = 96;
 const CLOUD_TEXELS = 1 + 2 * CLOUD_SLOTS;
-/** Instances a list can hold; a seed has at most 1800 clouds in all (two candidates a cell). */
+/** Instances a list can hold; a seed has at most 3600 clouds in all (two candidates a cell a deck). */
 const LIST_CAPACITY = 16384;
 /**
  * How far out clouds are drawn, metres. A cloud at the floor's height 26 km out stands two
@@ -718,30 +717,24 @@ export class CloudLayer {
     const eyeX = eye.x + pan.x;
     const eyeZ = eye.z + pan.y;
     const storm = weather.cloud;
-    const cells = CLOUD_PERIOD_CELLS;
-    const margin = set.maxReach * (1 + 0.35 * storm);
+    const shift = cloudDeckShiftLive;
     for (const mesh of [...this.skyMeshes, ...this.prepassMeshes, ...this.coverageMeshes]) mesh.position.set(eye.x, 0, eye.z);
 
-    // The sky: every cloud whose nearest edge is inside the ring.
+    // The sky: every cloud whose nearest edge is inside the ring, each where its deck's
+    // wind has carried it. The whole list (a few thousand candidates at most) rather than a
+    // search by cell: the ring reaches over most of the period anyway, and each deck stands
+    // somewhere else in it.
     this.smallSky.count = 0;
     this.bigSky.count = 0;
     if (this.root.visible) {
-      const reach = this.ringRadius + margin;
-      const x0 = Math.floor((eyeX - reach) / CLOUD_CELL_M);
-      const z0 = Math.floor((eyeZ - reach) / CLOUD_CELL_M);
-      const span = Math.min(cells, Math.floor((eyeX + reach) / CLOUD_CELL_M) - x0 + 1);
-      for (let cz = z0; cz < z0 + span; cz++) {
-        for (let cx = x0; cx < x0 + span; cx++) {
-          const cell = (cz - cells * Math.floor(cz / cells)) * cells + (cx - cells * Math.floor(cx / cells));
-          for (let i = set.cellStart[cell]!; i < set.cellStart[cell + 1]!; i++) {
-            const grow = cloudGrow(set, i, storm);
-            if (grow <= 0) continue;
-            const dx = wrapDelta(set.x[i]!, eyeX);
-            const dz = wrapDelta(set.z[i]!, eyeZ);
-            if (Math.hypot(dx, dz) - set.reach[i]! * grow > this.ringRadius) continue;
-            pushCloud(set.compact[i] === 1 ? this.smallSky : this.bigSky, dx, dz, i, grow);
-          }
-        }
+      for (let i = 0; i < set.count; i++) {
+        const grow = cloudGrow(set, i, storm);
+        if (grow <= 0) continue;
+        const deck = set.deck[i]!;
+        const dx = wrapDelta(set.x[i]! + shift[2 * deck]!, eyeX);
+        const dz = wrapDelta(set.z[i]! + shift[2 * deck + 1]!, eyeZ);
+        if (Math.hypot(dx, dz) - set.reach[i]! * grow > this.ringRadius) continue;
+        pushCloud(set.compact[i] === 1 ? this.smallSky : this.bigSky, dx, dz, i, grow);
       }
     }
     commitList(this.smallSky);
@@ -765,25 +758,17 @@ export class CloudLayer {
       const highZ = mapZ + slope.y * CLOUD_CEILING_M;
       const midX = (lowX + highX) / 2;
       const midZ = (lowZ + highZ) / 2;
-      const x0 = Math.floor((Math.min(lowX, highX) - half - margin) / CLOUD_CELL_M);
-      const x1 = Math.min(x0 + cells - 1, Math.floor((Math.max(lowX, highX) + half + margin) / CLOUD_CELL_M));
-      const z0 = Math.floor((Math.min(lowZ, highZ) - half - margin) / CLOUD_CELL_M);
-      const z1 = Math.min(z0 + cells - 1, Math.floor((Math.max(lowZ, highZ) + half + margin) / CLOUD_CELL_M));
-      for (let cz = z0; cz <= z1; cz++) {
-        for (let cx = x0; cx <= x1; cx++) {
-          const cell = (cz - cells * Math.floor(cz / cells)) * cells + (cx - cells * Math.floor(cx / cells));
-          for (let i = set.cellStart[cell]!; i < set.cellStart[cell + 1]!; i++) {
-            const grow = cloudGrow(set, i, storm);
-            if (grow <= 0) continue;
-            // The copy nearest the middle of the strip, as an offset from the eye.
-            const x = midX + wrapDelta(set.x[i]!, midX);
-            const z = midZ + wrapDelta(set.z[i]!, midZ);
-            const lift = set.base[i]! + set.top[i]! * grow * 0.5;
-            const pad = half + set.reach[i]! * grow + set.top[i]! * grow * 0.5 * Math.max(Math.abs(slope.x), Math.abs(slope.y));
-            if (Math.abs(x - lift * slope.x - mapX) > pad || Math.abs(z - lift * slope.y - mapZ) > pad) continue;
-            pushCloud(set.compact[i] === 1 ? this.smallShadow : this.bigShadow, x - eyeX, z - eyeZ, i, grow);
-          }
-        }
+      for (let i = 0; i < set.count; i++) {
+        const grow = cloudGrow(set, i, storm);
+        if (grow <= 0) continue;
+        const deck = set.deck[i]!;
+        // The copy nearest the middle of the strip, as an offset from the eye.
+        const x = midX + wrapDelta(set.x[i]! + shift[2 * deck]!, midX);
+        const z = midZ + wrapDelta(set.z[i]! + shift[2 * deck + 1]!, midZ);
+        const lift = set.base[i]! + set.top[i]! * grow * 0.5;
+        const pad = half + set.reach[i]! * grow + set.top[i]! * grow * 0.5 * Math.max(Math.abs(slope.x), Math.abs(slope.y));
+        if (Math.abs(x - lift * slope.x - mapX) > pad || Math.abs(z - lift * slope.y - mapZ) > pad) continue;
+        pushCloud(set.compact[i] === 1 ? this.smallShadow : this.bigShadow, x - eyeX, z - eyeZ, i, grow);
       }
       // The map's centre in scene metres, where the ground and the pass both read it.
       const centreX = mapX - pan.x;

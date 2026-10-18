@@ -169,17 +169,19 @@ export class PartBuilder {
 
   /**
    * Box with its top and bottom edges chamfered by `bevel`: an eight-sided section
-   * extruded along Z. Reads as moulded rather than stacked. `caps` as `extrude`'s.
+   * extruded along Z. Reads as moulded rather than stacked. `caps` as `extrude`'s;
+   * `closed = false` leaves out the bottom face: a box standing on another part.
    */
-  bevelBox(slot: KitSlot, centre: Vec3, half: Vec3, bevel: number, caps: Caps = true): this {
+  bevelBox(slot: KitSlot, centre: Vec3, half: Vec3, bevel: number, caps: Caps = true, closed = true): this {
     const [cx, cy, cz] = centre;
     const [hx, hy, hz] = half;
     const b = Math.min(bevel, hx * 0.9, hy * 0.9);
+    // The bottom face is the section's closing edge (last point to first).
     const section: [number, number][] = [
       [hx - b, -hy], [hx, -hy + b], [hx, hy - b], [hx - b, hy],
       [-hx + b, hy], [-hx, hy - b], [-hx, -hy + b], [-hx + b, -hy],
     ];
-    return this.extrude(slot, section, cz - hz, cz + hz, cx, cy, caps);
+    return this.extrude(slot, section, cz - hz, cz + hz, cx, cy, caps, closed);
   }
 
   /**

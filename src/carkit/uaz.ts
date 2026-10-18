@@ -118,7 +118,10 @@ export const BODY_UAZ469: KitBody = {
     glassTop: 0.045,
     screenBottom: 0.04, // [E as the Niva]
     screenHeader: 0.05,
-    wiperBlade: 0.33, // [E]
+    // The old 469's top-mounted wipers: spindles in the header, 280 mm blades (СЛ236Е-5205100,
+    // СЛ236Е-5205900), parked along the header and out of the driver's view.
+    wiperBlade: 0.28,
+    wiperMount: 'top',
     // The canvas back's window: its middle from 1.5 to the roof less 0.12 [P "UAZ 469
     // (1970) … pic3"].
     rearBottom: 0.3,
@@ -163,7 +166,8 @@ export const BODY_UAZ469: KitBody = {
 export const LOOK_UAZ469: KitLook = {
   label: 'UAZ-469',
   upholstery: 0x3d2f27, // brown vinyl [P "UAZ-early-interior-floor-pedals"]
-  dash: 0x4c5233, // painted steel, olive [P]
+  dash: 0x4c5233, // painted steel, olive [P]: now only its knobs' shade
+  dashPainted: true, // in the body's colour (owner, 2026-10-18)
   headrests: false, // [P]
   brightwork: 'chrome', // handles [P "UAZ-469 (side)"]
   // The door mirrors on upright stalks from a bracket at the door's front edge under the
@@ -367,7 +371,8 @@ export const BODY_UAZ2206: KitBody = {
 export const LOOK_UAZ2206: KitLook = {
   label: 'UAZ-2206',
   upholstery: 0x2a2a28, // black vinyl [P "… 452 (steering wheel)"]
-  dash: 0x5e5d3c, // painted steel, olive [P]
+  dash: 0x5e5d3c, // painted steel, olive [P]: now only its knobs' shade
+  dashPainted: true, // in the body's colour (owner, 2026-10-18)
   headrests: false, // [P]
   brightwork: 'black', // handles, mirrors [P]
   // Outside handles at 1.242: the front doors' at s 1.19-1.25, the side door's at

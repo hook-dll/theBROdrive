@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { WebGLProgramParametersWithUniforms } from 'three';
 import { hashUnit2 } from '../core/rng';
 import { weather } from '../world/weather';
-import { cloudFieldOf, cloudPan, cloudSet, cloudShadeAlong } from './cloudfield';
+import { CLOUD_DECKS, cloudDeckShift, cloudFieldOf, cloudPan, cloudSet, cloudShadeAlong } from './cloudfield';
 
 /**
  * CLOUD SHADOWS ON THE GROUND: the shadows of the sky's own clouds (render/clouds.ts),
@@ -224,6 +224,12 @@ const uniforms = {
 export const cloudPanUniform = { value: new THREE.Vector2() };
 
 /**
+ * Where each deck's clouds have drifted against the low deck's this frame
+ * (`cloudDeckShift`), written with the pan: the cloud layer places the higher decks by it.
+ */
+export const cloudDeckShiftLive = new Float64Array(2 * CLOUD_DECKS);
+
+/**
  * Lowest sun the shift follows. Below it the shadow would come from a cloud ten or more
  * kilometres off, out where the sky has faded its clouds into the horizon; the shadows
  * themselves are fading out with the day by then (`CLOUD_DAY_LOW`).
@@ -320,6 +326,7 @@ export function advanceCloudShadows(
   elapsed += dt;
   cloudPan(seed, elapsed, originX, originZ, pan);
   cloudPanUniform.value.set(pan.x, pan.z);
+  cloudDeckShift(seed, elapsed, cloudDeckShiftLive);
   // Which wet-patch layout this seed gets, in sixteenths so the f32 uniform holds it exactly.
   uniforms.uWetSalt.value = Math.round(hashUnit2(seed, TAG_SALT) * 512 * 16) / 16;
   // Weather on the shade: a building storm puts deeper shade on the ground; once the
@@ -360,6 +367,7 @@ export function cloudShadowFrame(): {
 }
 
 const fieldScratch = { x: 0, z: 0 };
+const shiftScratch = new Float64Array(2 * CLOUD_DECKS);
 
 /**
  * The shade at an ABSOLUTE world point at height `y`, 0 (full sun) to 1, for the sun
@@ -377,5 +385,5 @@ export function cloudShadowShadeAt(
   storm: number,
 ): number {
   cloudFieldOf(seed, x, z, elapsedS, fieldScratch);
-  return cloudShadeAlong(cloudSet(seed), storm, fieldScratch.x, y, fieldScratch.z, slopeX, slopeZ);
+  return cloudShadeAlong(cloudSet(seed), storm, cloudDeckShift(seed, elapsedS, shiftScratch), fieldScratch.x, y, fieldScratch.z, slopeX, slopeZ);
 }

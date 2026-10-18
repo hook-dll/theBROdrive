@@ -794,6 +794,36 @@ amplified differences; `bench-*.json`, `pick-*.json`).
   behind the glass, stowed 1.74-1.756 (30° over the eye, clear of the glass); lowered to
   1.60, its edge 18.5° over the eye, shading the glass's top 14 cm (the sun from 18.5° to
   27°). *uaz.ts, interior.ts `headliner`, spec.ts; measurements-uaz.md §1.3, §1.7, §1.8*.
+- **UAZ-469, UAZ-2206: the dash should be the body's colour (owner, 2026-10-18).** → It was
+  trim in a fixed olive (`KitLook.dash`). → `KitLook.dashPainted`: the dash's body, the
+  instrument plate and the glovebox lid go in the paint slot in white (`Cabin.dashSurface`),
+  so they take the car's paint and wear; knobs and ashtray keep the olive shade. *spec.ts,
+  interior.ts `dash`, `glovebox`, uaz.ts*.
+- **UAZ-469: the wipers park half way up and cover the view (owner, 2026-10-18).** → The
+  screen is 0.41 tall over the spindle: with a 0.33 blade the longest arm that fits upright
+  is 0.23, its blade's inner end 6.5 cm from the spindle, and it cannot lie flatter than 18°
+  and stay on the glass. The old 469 has its wipers in the frame's header (motor СЛ236Е,
+  "верхнее расположение"; blades 280 mm, СЛ236Е-5205900). → `CabinSpec.wiperMount: 'top'`:
+  the bottom pair turned half round in the screen's plane (spindles mirrored across, arms
+  hanging from the header, parked to the right, sweeping down), blade 0.28: 0.255 arms
+  parked 12° under the header, sweeping 100°. The other cars' wipers are unchanged.
+  *spec.ts, exterior.ts `buildWipers`, uaz.ts*.
+- **UAZ-2206: under the lifted engine cover a dark box, and the bonnet grid strongly
+  offset (owner, 2026-10-18).** → The cover hid a schematic block (`Cabin.engineCover`),
+  and the four cells (`buildVanServiceCells`) were hand-placed at s 1.12–2.35, ±0.8, on
+  the shell's floor: 0.36 m ahead of the cover, out under the seats and 0.28 m under the
+  cabin floor. The cover also overlapped the seats' backs and the handbrake's base, and,
+  hinged at its front top edge, swept its front wall through the room and its back
+  through the roof. → `BayRoom`: `buildEngineBay` lays out the classic's bay in a room, a
+  car's under its bonnet (`bonnetRoom`, the shell's walls round it) or the van's under the
+  cover (`coverRoom`, interior.ts `engineCoverRoom`: no walls, battery and bottles
+  standing on the floor with no bottom faces), with the same four cells on its contents.
+  The cover is a hollow pad with no bottom, from s 1.60, hinged along the car at the foot
+  of its left wall and lifting its right edge 43° towards the side door. A compartment
+  under it (`cabinLidOpen`) is reached through an open side door, `BOOT_RANGE` counted
+  from the opening (`kitOpenDoorDistance`): from the door the air filter's cell was
+  1.62–1.74 m from the eye. The 21 other cars identical. *bay.ts, interior.ts
+  `engineCover`, builder.ts `bevelBox`, player/interaction.ts; measurements-uaz.md*.
 
 ## Failed approaches (do not retry)
 

@@ -310,6 +310,15 @@ function lidOpen(rig: KitRig | null, side: StorageSide): boolean | null {
 }
 
 /**
+ * Whether a compartment's lid is open and is a cabin part reached through a side door
+ * (`KIT_DOOR_REACH_PART`: the van's engine cover), not one of the shell's lids.
+ */
+function cabinLidOpen(rig: KitRig, side: StorageSide): boolean {
+  for (const channel of STORAGE_LID_CHANNELS[side]) if (KIT_DOOR_REACH_PART.test(channel) && rig.get(channel) > LID_OPEN) return true;
+  return false;
+}
+
+/**
  * Where a resolved reservoir actually lives, and therefore which delta a pour
  * writes. A fitted container's level belongs to the CAR; a detached one carries it
  * on the part; a can carries its own.
@@ -428,8 +437,9 @@ const KIT_VEHICLE_CHANNELS: Readonly<Record<string, true>> = {
 const KIT_SHELL_PART = /^(door_|bonnet$|boot$|tailgate(_[lr])?$|flap$)/;
 /**
  * Cabin parts also worked on foot, when the eye ray reaches them through an open side
- * door (`kitOpenDoorInRay`): the van's engine cover between the front seats, which is
- * lifted from the cab's door as from the seat.
+ * door (`kitOpenDoorDistance`): the van's engine cover behind the front seats, which is
+ * lifted from the side door as from the seat. The bay under it is reached through that
+ * door too (`cabinLidOpen`).
  */
 const KIT_DOOR_REACH_PART = /^engine_cover$/;
 
@@ -1287,8 +1297,9 @@ export class Interaction {
   }
 
   /**
-   * Resolves the same chassis-local cells the renderer draws. A narrowly padded box
-   * round the whole grid reveals it before a precise cell is under the crosshair.
+   * Resolves the same chassis-local cells the renderer draws, within `reach` of the eye.
+   * A narrowly padded box round the whole grid reveals it before a precise cell is under
+   * the crosshair.
    */
   private pickStorage(
     eyeX: number,
@@ -1301,20 +1312,21 @@ export class Interaction {
     quaternion: THREE.Quaternion,
     shape: StorageGridShape,
     side: StorageSide,
+    reach: number,
   ): boolean {
     this.trunkInverse.copy(quaternion).invert();
     this.trunkEye.set(eyeX - position.x, eyeY - position.y, eyeZ - position.z).applyQuaternion(this.trunkInverse);
     this.trunkDirection.set(dirX, dirY, dirZ).applyQuaternion(this.trunkInverse);
     if (
       intersectStorageGrid(this.trunkEye, this.trunkDirection, shape, side, this.trunkRayHit) &&
-      this.trunkRayHit.distance <= BOOT_RANGE
+      this.trunkRayHit.distance <= reach
     ) {
       this.trunkPickedCell = this.trunkRayHit.cell;
       this.trunkPickedDistance = this.trunkRayHit.distance;
       return true;
     }
     const distance = storageRevealDistance(this.trunkEye, this.trunkDirection, shape, side, BOOT_REVEAL_MARGIN);
-    if (distance > BOOT_RANGE) return false;
+    if (distance > reach) return false;
     this.trunkPickedCell = null;
     this.trunkPickedDistance = distance;
     return true;
@@ -1425,11 +1437,16 @@ export class Interaction {
       // Rear and front use the same deliberate close-range interaction. The nearer
       // grid wins, so a long bus cannot expose both ends at once. A kit car's grid is
       // there only under its open lid (`followLids`): a shut one is reached by opening it.
+      // A compartment under a cabin lid (`cabinLidOpen`: the van's engine cover) is
+      // reached into through an open side door: `BOOT_RANGE` then counts from where the
+      // eye ray goes in through the door's opening, as the arm does.
       const rig = vehicle.kit;
       let inCompartment = false;
       for (const side of ['trunk', 'bonnet'] as const) {
         if (lidOpen(rig, side) === false) continue;
-        if (this.pickStorage(eyeX, eyeY, eyeZ, dx, dy, dz, t, this.qScratch, vehicle.modelMeasure, side)) {
+        const door = rig && cabinLidOpen(rig, side) ? this.kitOpenDoorDistance(rig, vehicle, eyeX, eyeY, eyeZ, dx, dy, dz) : Infinity;
+        const reach = BOOT_RANGE + (door < Infinity ? door : 0);
+        if (this.pickStorage(eyeX, eyeY, eyeZ, dx, dy, dz, t, this.qScratch, vehicle.modelMeasure, side, reach)) {
           inCompartment = true;
           keep(this.trunkPickedDistance, {
             kind: 'storage',
@@ -1495,7 +1512,7 @@ export class Interaction {
       const shape = carModelMeasure(wreck.modelId);
       for (const side of ['trunk', 'bonnet'] as const) {
         if (!lids.has(side)) continue;
-        if (this.pickStorage(eyeX, eyeY, eyeZ, dx, dy, dz, this.trunkPosition, this.trunkQuaternion, shape, side)) {
+        if (this.pickStorage(eyeX, eyeY, eyeZ, dx, dy, dz, this.trunkPosition, this.trunkQuaternion, shape, side, BOOT_RANGE)) {
           keep(this.trunkPickedDistance, {
             kind: 'storage',
             owner: 'wreck',
@@ -1535,6 +1552,7 @@ export class Interaction {
           this.trunkQuaternion,
           courier,
           'trunk',
+          BOOT_RANGE,
         )
       ) {
         keep(this.trunkPickedDistance, {
@@ -1560,8 +1578,8 @@ export class Interaction {
       if (own || aim.distance <= bestDist) {
         kitPart = aim.distance <= RAY_RANGE ? aim.part : null;
         // Getting in: the first thing the ray meets is a seat, not behind glass, and the
-        // ray reaches it through an open side door's opening (`kitOpenDoorInRay`).
-        if (aim.seat && !aim.throughGlass && this.kitOpenDoorInRay(rig, vehicle, eyeX, eyeY, eyeZ, dx, dy, dz)) {
+        // ray reaches it through an open side door's opening (`kitOpenDoorDistance`).
+        if (aim.seat && !aim.throughGlass && this.kitOpenDoorDistance(rig, vehicle, eyeX, eyeY, eyeZ, dx, dy, dz) < Infinity) {
           kitSeat = aim.seat;
         }
       } else {
@@ -1766,7 +1784,7 @@ export class Interaction {
         && (seated
           ? !KIT_LID_PART.test(picked.control.id)
           : KIT_SHELL_PART.test(picked.control.id)
-            || (KIT_DOOR_REACH_PART.test(picked.control.id) && vehicle.kit !== null && this.kitOpenDoorInRay(vehicle.kit, vehicle, eyeX, eyeY, eyeZ, dx, dy, dz)))
+            || (KIT_DOOR_REACH_PART.test(picked.control.id) && vehicle.kit !== null && this.kitOpenDoorDistance(vehicle.kit, vehicle, eyeX, eyeY, eyeZ, dx, dy, dz) < Infinity))
       ) {
         aim.part = picked;
       }
@@ -1849,7 +1867,7 @@ export class Interaction {
   /**
    * The side door the player stands at: the one whose shut outline is nearest the eye,
    * when it is on the player's side of the car. Null for a car without doors found.
-   * Only the "shut" prompt asks; getting in is `kitOpenDoorInRay`.
+   * Only the "shut" prompt asks; getting in is `kitOpenDoorDistance`.
    */
   private kitEntryDoor(rig: KitRig, vehicle: Vehicle, eyeX: number, eyeY: number, eyeZ: number): KitDoor | null {
     const doors = this.kitDoors(rig, vehicle);
@@ -1870,11 +1888,12 @@ export class Interaction {
   }
 
   /**
-   * Does the eye ray enter the car through an open side door on the player's side?
+   * How far along the eye ray it enters the car through an open side door on the
+   * player's side (0 with the eye already in the opening), or Infinity when it does not.
    * Any of them, front or rear: the rear bench of a two-door car is reached through a
    * front door, a front seat across the car through the near one.
    */
-  private kitOpenDoorInRay(
+  private kitOpenDoorDistance(
     rig: KitRig,
     vehicle: Vehicle,
     eyeX: number,
@@ -1883,25 +1902,27 @@ export class Interaction {
     dx: number,
     dy: number,
     dz: number,
-  ): boolean {
+  ): number {
     const doors = this.kitDoors(rig, vehicle);
     const frame = doors[0]?.node.parent;
-    if (!frame) return false;
+    if (!frame) return Infinity;
     const left = frame.worldToLocal(this.kitEye.set(eyeX, eyeY, eyeZ)).x > 0;
+    let nearest = Infinity;
     for (const door of doors) {
       if (door.left !== left || rig.get(door.id) <= 0.5) continue;
-      if (this.throughOpening(door, eyeX, eyeY, eyeZ, dx, dy, dz)) return true;
+      nearest = Math.min(nearest, this.throughOpening(door, eyeX, eyeY, eyeZ, dx, dy, dz));
     }
-    return false;
+    return nearest;
   }
 
   /**
-   * Does the eye ray pass through `door`'s opening? Where the ray crosses the plane of
-   * the shut door's outer skin (car frame), the crossing must fall inside the shut
-   * door's outline, give or take `KIT_OPENING_SLACK`. With the rest of the entry rule in
-   * `resolve` (the first opaque thing hit is a seat, not through glass), that is
-   * "looking at a seat through this open door": a look through the windscreen, over the
-   * roof or from the nose does not count.
+   * Where the eye ray passes through `door`'s opening: its distance along the ray, or
+   * Infinity when it misses. Where the ray crosses the plane of the shut door's outer
+   * skin (car frame), the crossing must fall inside the shut door's outline, give or take
+   * `KIT_OPENING_SLACK`. With the rest of the entry rule in `resolve` (the first opaque
+   * thing hit is a seat, not through glass), that is "looking at a seat through this
+   * open door": a look through the windscreen, over the roof or from the nose does not
+   * count.
    */
   private throughOpening(
     door: KitDoor,
@@ -1911,7 +1932,7 @@ export class Interaction {
     dx: number,
     dy: number,
     dz: number,
-  ): boolean {
+  ): number {
     const frame = door.node.parent!;
     const o = frame.worldToLocal(this.kitEye.set(eyeX, eyeY, eyeZ));
     const ahead = frame.worldToLocal(this.kitAhead.set(eyeX + dx, eyeY + dy, eyeZ + dz)).sub(o);
@@ -1919,14 +1940,15 @@ export class Interaction {
     const skin = door.left ? box.max.x : box.min.x;
     let s = 0;
     if (door.left ? o.x > skin : o.x < skin) {
-      if (Math.abs(ahead.x) < 1e-6) return false;
+      if (Math.abs(ahead.x) < 1e-6) return Infinity;
       s = (skin - o.x) / ahead.x;
-      if (s <= 0) return false;
+      if (s <= 0) return Infinity;
     }
     const y = o.y + ahead.y * s;
     const z = o.z + ahead.z * s;
-    return y >= box.min.y - KIT_OPENING_SLACK && y <= box.max.y + KIT_OPENING_SLACK
+    const inside = y >= box.min.y - KIT_OPENING_SLACK && y <= box.max.y + KIT_OPENING_SLACK
       && z >= box.min.z - KIT_OPENING_SLACK && z <= box.max.z + KIT_OPENING_SLACK;
+    return inside ? s : Infinity;
   }
 
   /**

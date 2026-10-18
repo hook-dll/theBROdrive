@@ -172,6 +172,15 @@ the frame's header bar: pivot (±0.34, 1.756, s 1.526), 5 cm behind the glass, s
 of the 21 other kit cars identical; the 469's bounds unchanged, 11 309 → 11 260
 triangles; `tools/kit-zfight.ts` PASS on all 22.
 
+The wipers and the dash (2026-10-18, the owner: the wipers park half way up the glass and
+cover the view; the dash in the body's colour). The old 469's wipers stand in the frame's
+header (motor СЛ236Е-5205100, "верхнее расположение"; blades 280 mm, СЛ236Е-5205900):
+`CabinSpec.wiperMount: 'top'`, `wiperBlade: 0.28`; the 0.255 arms park 12° under the
+header (were 0.23 at 18° over the foot) and sweep 100° down. `KitLook.dashPainted` draws
+the dash, its instrument plate and the glovebox lid in the paint slot (the 2206 too).
+Proof: geometry hashes of the 20 other kit cars and the 2206 identical against HEAD
+cdcdd0e (the dash moves slot, not geometry); `tools/kit-zfight.ts` PASS on both UAZes.
+
 ### 1.8 Gaps
 
 - Heights: built roof 1.93, fitted to the 2015 passport: the car grows 4 % in height; the
@@ -220,9 +229,37 @@ Where the build departs from §5–§6 below:
   arch's 0.728, no wheel boxes inside (`frontHumps` dropped; the rear covers are skipped on
   the van, under the floor). Seats, bench and cover stand 10 mm into the floor
   (`Cabin.standY`): the floor shows through the saloon glass and feet in its plane fought.
-- The engine cover is a control (`engine_cover`, hinged at its front top edge) over a
-  schematic block; the gearbox starts at the cover's rear end (`BayRoute.gearFrom`), the
-  transfer box behind it, not at the cowl.
+- The engine cover is a control (`engine_cover`): a hollow pad with no bottom at s
+  1.60–2.85, ±0.62, 0.46 over the floor, hinged along the car at the foot of its left wall
+  and lifting its right edge 0.75 rad (43°) towards the side door. Under it stands the
+  classic's engine bay (bay.ts `coverRoom`, interior.ts `engineCoverRoom`, below); the
+  gearbox starts at the cover's rear end (`BayRoute.gearFrom`), the transfer box behind
+  it, not at the cowl.
+- The engine bay under the cover (owner, 2026-10-18: "a dark box", the bonnet grid
+  "strongly offset"). The room is s 1.68–2.77, ±0.497, from the cabin floor 0.751 to
+  1.166, inside the cover's walls, its top's taper and its end walls' bottom chamfers (the
+  lid turns about an axis along the car, so nothing of it within the room's length may
+  reach in). `buildEngineBay` lays the classic's bay out in it without the shell's walls:
+  slam panel, posts and lower member at s 1.68–1.76, the battery (s 1.82–2.015, right),
+  the washer bottle (left) and the expansion tank (s 2.39–2.57, right) standing on the
+  floor, the booster and master cylinder at the rear (s 2.535–2.765, left), and the four
+  cells: radiator s 1.745–1.885 ±0.29, engine s 1.955–2.495 x −0.269–0.213, air filter s
+  2.075–2.375 x 0.224–0.344, turbine s 2.58–2.76 x −0.419–−0.28, floors 0.753 (the
+  radiator's 0.822), tops 1.17 (chassis frame: kit − (0, 1.1545, 0)). They were at s
+  1.12–2.35, ±0.8, on the shell's floor 0.471: 0.28 m under the cabin floor and 0.36 m
+  ahead of the cover. The cover moved from s 1.48 to 1.60: it overlapped the seats' backs
+  (to 1.501) and the handbrake's base (to 1.58). Hinged at its front top edge it swept its
+  front wall through the bay and its back through the roof (2.43 up); now it never
+  crosses the bay or the cabin over its travel and its right edge tops out at 1.83.
+- From the side door (right, s 1.874–2.805) the cells are picked through the opening:
+  interaction.ts `cabinLidOpen` counts `BOOT_RANGE` from where the eye ray goes in through
+  an open side door (`kitOpenDoorDistance`), for a compartment under the engine cover
+  only. Eye against the chassis box (x −1.32), 1.60–1.70 over the ground, s 1.95–2.75: the
+  air filter's cell is 1.62–1.74 from the eye (out of the 1.6 reach) and 1.24–1.35 from
+  the opening; all four picked everywhere, and the sight lines to their outlines pass
+  under the lifted cover. Proof: geometry hashes and cell anchors of the 21 other kit cars
+  identical against HEAD cdcdd0e with the uncommitted wipers/dash work; the 2206 10 757 →
+  10 979 triangles, bounds unchanged; `tools/kit-zfight.ts uaz2206` PASS.
 - The lowest tail cell is the reversing lamp (drawn: a reflector); the clusters stop at
   ±0.855 inside the tail face (drawn ±0.895). The roof-corner marker stands in as the
   repeater on the B post under the belt [E].
@@ -671,13 +708,11 @@ the right side is side −1 (x < 0).
 
 **6.5 bay.ts on the van.** `buildBay` branches on `frame.spec.platform === 'van'`:
 
-1. No `buildEngineBay` (there is nothing ahead of the cowl to open).
-2. A `van` engine side: the block (the classic's box shapes, reused) under the cover,
-   between the seats at the cover's ds range, in `kit_bay`. It returns the `BayRoute`:
-   the down-pipe under the cover, the crank at the floor.
-3. Bonnet cells: none in the draft. carmodel.ts takes all four or none, and with none the
-   car behaves like the `sa_uaz330364` pack body. Later, cells under the cover would make
-   it the engine's service hatch, if the owner wants the bonnet grid there.
+1. No bay ahead of the cowl (there is nothing there to open). Built since: the classic's
+   bay in the room under the cabin's engine cover (`coverRoom`, 2026-10-18, above).
+2. A `van` route (`vanRoute`): the down-pipe under the cover, the crank at the floor.
+3. Bonnet cells: none in the draft. Built since: the four cells under the cover, picked
+   from the side door (2026-10-18, above).
 4. No boot: skip `buildHatchBoot`, since the floor is the cabin's.
 5. Underbody: the `classicChassis` with `nivaTransfer` (live axles front and rear,
    transfer box, front propshaft). `clearance(frame)` returns 0.22 for `'van'` [D 220].

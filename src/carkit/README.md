@@ -117,7 +117,7 @@ from the angle he complained about; changes are judged there, not in code.
 | `body.ts` | `BodyFrame` (cross-section, deck and lid lookups) and `buildShell`: tub, greenhouse and roof as one face list, then cut into parts. Shell constants (`SHUT_GAP`, `JAMB_DEPTH`, `DOOR_THICKNESS`, `NOTCH_WALL`, …). |
 | `exterior.ts` | End faces (`FaceLook.items` / `.lid`), bumpers swept round the corners, sill strip, flank strips (waist moulding, feature line: `buildFlankStrip`), repeaters, flank lamps, mirrors, handles, wipers, filler neck. |
 | `interior.ts` | Trim, dashboard, gauges, wheel, pedals, levers, seats, door cards. Per-platform layout table `LAYOUTS`, per-car overrides `CABIN_2101/2103/2105/2107/2110`. |
-| `bay.ts` | Engine bay (`kit_bay`), boot (`kit_boot`), underbody (`kit_under`); the exhaust (`exhaust_trim` on the root, outside the detail groups: drawn at every distance, baked into the mid and far meshes). |
+| `bay.ts` | Engine bay (`kit_bay`), boot (`kit_boot`), underbody (`kit_under`); the exhaust (`exhaust_trim` on the root, outside the detail groups: drawn at every distance, baked into the mid and far meshes). The bay is laid out in a `BayRoom`: under the bonnet (`bonnetRoom`, the shell's walls round it), or on a van in the cabin under the engine cover (`coverRoom`, interior.ts `engineCoverRoom`), with the same four bonnet cells. |
 | `wheels.ts` | The kit's own placeholder wheel (tyre on a plain steel disc): sets where the wheels stand and their size. |
 | `simplify.ts` | `simplifyFlats`: the finished car's flat runs merged into the fewest, fattest triangles and zero-area ones dropped (step 9 of [How the body is built](#how-the-body-is-built)). |
 | `materials.ts` | The one kit material (`kitBodyMaterial`) and the glass; `KIT_SLOT_FINISH`, each slot's colour, finish and lamp role; `finishKitSurfaces`, which writes a built mesh's slot into its vertices ([Draw calls](#draw-calls-one-car-three-draws)). |
@@ -292,6 +292,7 @@ author.
 | `screenBottom`, `screenHeader` | Windscreen base strip above the cowl, header below the rail. |
 | `screenFoot?` | How far ahead of the cowl the windscreen's foot stands on the centre line, fading to nothing at the corners (1 − frac²): a screen curved in plan, more raked in profile; the bonnet ends that far forward (`BodyFrame.bonnetRear`), the scuttle between. The Samaras 0.15, the tens 0.156 (drawings). |
 | `wiperBlade` | Windscreen wiper blade length (parts catalogues: the classics 0.33, the Samaras 0.51, the tens 0.50). The arms, their park and sweep are fitted to the glass (`buildWipers`): the longest arm that parks within 20°, else the one parking lowest within 45° (the tens' screen, curved in plan). |
+| `wiperMount?` | `'top'`: the spindles in the screen frame's header, the arms hanging down and parked to the right along it, sweeping down (the old UAZ-469). Absent: under the screen's foot. |
 | `rearBottom`, `rearHeader` | Same for the back light. |
 | `rearKnee?` | `{ s, y }` on the centre line where a hatch's tailgate folds: glass above, painted panel below. Absent: the back light runs straight to its base. |
 | `pillar` | Pillar strip width at the windscreen and back-light edges. |
@@ -372,6 +373,7 @@ cabin: … }`) share everything not overridden. Current families:
 |---|---|
 | `label` | Display label (`'VAZ-2108'`). |
 | `upholstery`, `dash` | Interior vinyl and dash colours (hex). |
+| `dashPainted?` | A painted steel dash (both UAZes): its body, instrument plate and glovebox lid in the paint slot, so they take the car's colour and wear; `dash` then only shades the knobs. |
 | `headrests` | Head restraints on the front seats. |
 | `front`, `rear` | `FaceLook`: one end of the car. |
 | `brightwork` | `Finish` of door handles and mirrors. |

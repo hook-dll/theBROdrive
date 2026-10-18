@@ -8,9 +8,9 @@
  * saloon boot's right side; the exhaust, the driveline and the suspension underneath.
  *
  * The engine, its turbine, the radiator and the air filter are the bonnet's service
- * cells (vehicle/bonnet.ts), drawn by the grid from what the car carries.  On a
- * forward-control van those same cells sit under the cabin engine cover; every kit
- * still exposes the same four `KIT_BONNET_CELL_NODE` anchors to the renderer.
+ * cells (vehicle/bonnet.ts), drawn by the grid from what the car carries. A
+ * forward-control van has the same bay with the same four `KIT_BONNET_CELL_NODE` cells in
+ * its cabin, under the engine cover (`BayRoom`, interior.ts `engineCoverRoom`).
  * The Niva is the classic underneath with its four-wheel drive added: a transfer box
  * behind the gearbox, a front propshaft to a front differential and driveshafts.
  * Everything is placed off the frame (axles, cowl, deck, sills), so another body on the
@@ -31,7 +31,7 @@ import * as THREE from 'three';
 import { LINING_DEPTH, type BodyFrame } from './body';
 import { PartBuilder, type KitSlot, type Vec3 } from './builder';
 import { addBuilt, type KitContext } from './context';
-import { engineCoverEnd, loadSpaceStart } from './interior';
+import { engineCoverEnd, engineCoverRoom, loadSpaceStart } from './interior';
 
 /** Ground clearance of the lowest part under the car: the factory figure the body was fitted to. */
 const CLEARANCE = 0.17;
@@ -93,22 +93,15 @@ export function buildBay(ctx: KitContext): void {
   const { frame } = ctx;
   // The Niva's and the van's engine and cabin floor are the classic's.
   const classic = frame.spec.platform !== 'samara';
-  // A forward-control van has no exterior bonnet: its service bay is the large cabin
-  // opening under `engine_cover`.  Keep the same four typed cells so the state and
-  // renderer do not need a second storage layout.
+  // A forward-control van has no bonnet: its engine bay is the classic's, laid out in the
+  // cabin under the engine cover (`coverRoom`), with the same four cells. Its route under
+  // the floor is its own (`vanRoute`).
   const van = frame.spec.platform === 'van';
 
   const b = new PartBuilder();
-  let route: BayRoute;
-  if (van) {
-    route = vanRoute(frame);
-    const cells = buildVanServiceCells(frame);
-    for (const kind of CELL_KINDS) ctx.root.add(cellMarker(frame, kind, cells[kind]));
-  } else {
-    const bayLayout = buildEngineBay(frame, b, classic);
-    route = bayLayout.route;
-    for (const kind of CELL_KINDS) ctx.root.add(cellMarker(frame, kind, bayLayout.cells[kind]));
-  }
+  const bayLayout = buildEngineBay(frame, b, van ? coverRoom(frame) : bonnetRoom(frame), classic);
+  const route = van ? vanRoute(frame) : bayLayout.route;
+  for (const kind of CELL_KINDS) ctx.root.add(cellMarker(frame, kind, bayLayout.cells[kind]));
   addBuilt(bay, b, [0, 0, 0], 'bay', true);
 
   const lb = new PartBuilder();
@@ -189,13 +182,18 @@ function boxS(b: PartBuilder, frame: BodyFrame, slot: KitSlot, min: Vec3, max: V
   b.boxFrom(slot, [min[0], min[1], frame.z(min[2])], [max[0], max[1], frame.z(max[2])], faces);
 }
 
-/** Chamfered box from corner to corner given as (x, y, s), its section across the car. */
-function bevelS(b: PartBuilder, frame: BodyFrame, slot: KitSlot, min: Vec3, max: Vec3, bevel: number): void {
+/**
+ * Chamfered box from corner to corner given as (x, y, s), its section across the car;
+ * `closed = false` leaves out its bottom face, for one standing on the floor.
+ */
+function bevelS(b: PartBuilder, frame: BodyFrame, slot: KitSlot, min: Vec3, max: Vec3, bevel: number, closed = true): void {
   b.bevelBox(
     slot,
     [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, frame.z((min[2] + max[2]) / 2)],
     [(max[0] - min[0]) / 2, (max[1] - min[1]) / 2, (max[2] - min[2]) / 2],
     bevel,
+    true,
+    closed,
   );
 }
 
@@ -281,19 +279,29 @@ function bulkhead(b: PartBuilder, frame: BodyFrame, s: number, inner: number, sh
   }
 }
 
-/** A plastic reservoir with its cap, standing on y0 (car frame, s along the car). */
-function reservoir(b: PartBuilder, frame: BodyFrame, x0: number, x1: number, s0: number, s1: number, y0: number, y1: number, cap: number): void {
+/**
+ * A plastic reservoir with its cap, standing on y0 (car frame, s along the car); with no
+ * bottom face when `standing` on the floor, as the posts do, so it shares no plane with it.
+ */
+function reservoir(b: PartBuilder, frame: BodyFrame, x0: number, x1: number, s0: number, s1: number, y0: number, y1: number, cap: number, standing = false): void {
   b.color(COLOURS.plastic);
-  bevelS(b, frame, 'trim', [x0, y0, s0], [x1, y1, s1], 0.02);
+  bevelS(b, frame, 'trim', [x0, y0, s0], [x1, y1, s1], 0.02, !standing);
   const x = (x0 + x1) / 2;
   const s = (s0 + s1) / 2;
   b.color(cap);
   boxS(b, frame, 'trim', [x - 0.022, y1, s - 0.022], [x + 0.022, y1 + 0.022, s + 0.022], UPPER_FACES);
 }
 
-/** A battery on a bracket from the inner wing at x0..x1 (x0 nearer the wing). */
-function battery(b: PartBuilder, frame: BodyFrame, side: number, inner: number, s0: number, s1: number, top: number): void {
-  const h = 0.19;
+/** A battery's case under its top, and the tray it sits in under that. */
+const BATTERY_HEIGHT = 0.19;
+const BATTERY_TRAY = 0.025;
+
+/**
+ * A battery on a bracket from the inner wing at x0..x1 (x0 nearer the wing), or with
+ * its tray `standing` on the floor, the tray then without a bottom face.
+ */
+function battery(b: PartBuilder, frame: BodyFrame, side: number, inner: number, s0: number, s1: number, top: number, standing = false): void {
+  const h = BATTERY_HEIGHT;
   const x0 = side * (inner - 0.01);
   const x1 = side * (inner - 0.19);
   const [lo, hi] = x0 < x1 ? [x0, x1] : [x1, x0];
@@ -301,8 +309,8 @@ function battery(b: PartBuilder, frame: BodyFrame, side: number, inner: number, 
   bevelS(b, frame, 'trim', [lo, top - h, s0], [hi, top - 0.012, s1], 0.012);
   b.color(COLOURS.black);
   boxS(b, frame, 'trim', [lo + 0.008, top - 0.014, s0 + 0.008], [hi - 0.008, top, s1 - 0.008], UPPER_FACES);
-  // Tray bracket into the wing.
-  boxS(b, frame, 'trim', [lo, top - h - 0.025, s0 + 0.02], [hi, top - h, s1 - 0.02]);
+  // Tray bracket into the wing, or tray on the floor.
+  boxS(b, frame, 'trim', [lo, top - h - BATTERY_TRAY, s0 + 0.02], [hi, top - h, s1 - 0.02], standing ? UPPER_FACES : undefined);
   for (const [dx, colour] of [[-0.05, COLOURS.terminal], [0.05, COLOURS.black]] as const) {
     const x = (lo + hi) / 2 + dx * side;
     b.color(colour);
@@ -360,14 +368,80 @@ interface BayRoute {
 }
 
 /**
- * The van's route: its engine under the cover between the front seats, over the front
- * axle, the gearbox from its back (the cover's rear end) hanging under the floor with the
- * transfer box behind it, the down-pipe from under the engine's rear end, right of centre.
+ * The van's route: its engine under the cabin's cover behind the front seats, the gearbox
+ * from its back (the cover's rear end) hanging under the floor with the transfer box
+ * behind it, the down-pipe from under the engine's rear end, right of centre.
  */
 function vanRoute(frame: BodyFrame): BayRoute {
   const gearFrom = engineCoverEnd(frame);
   const sOut = gearFrom - 0.1;
   return { outlet: at(frame, -0.12, floorY(frame, sOut) - DOWNPIPE_DROP, sOut), crankY: floorY(frame, gearFrom) + 0.025, engineX: 0, gearFrom };
+}
+
+/**
+ * The room an engine bay is laid out in (`buildEngineBay`). A car's is under its bonnet
+ * (`bonnetRoom`): the shell's inner wings with their rails, the firewall, the scuttle and
+ * the towers are drawn round it, and the battery and the reservoirs hang from the wings
+ * up under the lid. A forward-control van's is in the cabin under its engine cover
+ * (`coverRoom`): the same bay without the shell's walls, the battery and the reservoirs
+ * standing on the cabin floor.
+ */
+interface BayRoom {
+  /** The radiator support's place along the car, and the firewall's behind the engine. */
+  readonly support: number;
+  readonly cowl: number;
+  /** The front axle: the towers over it, the battery in front of them. */
+  readonly axle: number;
+  /** Half width inside its walls. */
+  readonly inner: number;
+  /** Whether the shell's walls are drawn and the battery and reservoirs hang from them. */
+  readonly wings: boolean;
+  /** The floor at s. */
+  floor(s: number): number;
+  /** Highest a part may reach over s0..s1 out to half width `x`. */
+  ceiling(s0: number, s1: number, x: number): number;
+}
+
+/** A car's bay under its bonnet, from the radiator support to the cowl. */
+function bonnetRoom(frame: BodyFrame): BayRoom {
+  const w = frame.spec.wheels;
+  return {
+    support: frame.spec.bonnetFront + SUPPORT_BACK,
+    cowl: frame.cowl,
+    axle: w.front,
+    inner: frame.wellX(w.front) - WELL_GAP,
+    wings: true,
+    floor: (s) => floorY(frame, s),
+    ceiling: (s0, s1, x) => ceiling(frame, s0, s1, x),
+  };
+}
+
+/** The radiator support's slam panel reaches this far ahead of the support. */
+const SLAM_AHEAD = 0.06;
+/**
+ * The classic's front axle behind its radiator support (the 2106's 0.648 behind 0.27):
+ * where a room with no towers (`coverRoom`) puts the battery, in front of where they stood.
+ */
+const AXLE_BEHIND_SUPPORT = 0.38;
+
+/**
+ * The van's bay in the room under its cabin engine cover (interior.ts `engineCoverRoom`):
+ * the slam panel at the cover's front, the firewall at its rear, from the cabin floor up
+ * under the cover's top.
+ */
+function coverRoom(frame: BodyFrame): BayRoom {
+  const r = engineCoverRoom(frame);
+  if (!r) throw new Error(`Kit car "${frame.spec.id}" is a van without an engine cover`);
+  const support = r.s0 + SLAM_AHEAD;
+  return {
+    support,
+    cowl: r.s1,
+    axle: support + AXLE_BEHIND_SUPPORT,
+    inner: r.half,
+    wings: false,
+    floor: () => r.floor,
+    ceiling: () => r.top,
+  };
 }
 
 interface BayLayout {
@@ -377,28 +451,34 @@ interface BayLayout {
 
 /** The fixed parts of the bay that the engines' cells keep clear of. */
 interface BayFixtures {
+  readonly room: BayRoom;
   readonly inner: number;
   readonly support: number;
   readonly radiator: Cell;
   /** The master cylinder's front end and the booster's inboard edge, left of the firewall. */
   readonly boosterS: number;
   readonly boosterX: number;
-  /** Underside of the scuttle's plenum at the cowl. */
+  /** Underside of the scuttle's plenum at the cowl; Infinity with none. */
   readonly scuttleFloor: number;
 }
 
-/**
- * Highest point of the shell's floor over s0..s1, a hair up: a cell's floor is flat and
- * the shell's slopes, so standing on the highest point it never dips through it.
- */
-function cellFloor(frame: BodyFrame, s0: number, s1: number): number {
+/** Highest point of the room's floor over s0..s1: where a part standing on it has its foot. */
+function floorUnder(frame: BodyFrame, room: BayRoom, s0: number, s1: number): number {
   let y = -Infinity;
-  for (const s of stationsBetween(frame, s0, s1)) y = Math.max(y, floorY(frame, s));
-  return y + PLANE_GAP;
+  for (const s of stationsBetween(frame, s0, s1)) y = Math.max(y, room.floor(s));
+  return y;
 }
 
-/** A cell over x0..x1, s0..s1 from `floor`, by default up to the closed lid. */
-function cell(frame: BodyFrame, x0: number, x1: number, s0: number, s1: number, floor: number, top = ceiling(frame, s0, s1, Math.max(Math.abs(x0), Math.abs(x1)))): Cell {
+/**
+ * A cell's floor over s0..s1: the room's highest, a hair up. A cell's floor is flat and
+ * the shell's slopes, so standing on the highest point it never dips through it.
+ */
+function cellFloor(frame: BodyFrame, room: BayRoom, s0: number, s1: number): number {
+  return floorUnder(frame, room, s0, s1) + PLANE_GAP;
+}
+
+/** A cell over x0..x1, s0..s1 from `floor`, by default up to the room's ceiling. */
+function cell(room: BayRoom, x0: number, x1: number, s0: number, s1: number, floor: number, top = room.ceiling(s0, s1, Math.max(Math.abs(x0), Math.abs(x1)))): Cell {
   return { x0, x1, s0, s1, floor, top };
 }
 
@@ -409,43 +489,33 @@ function cellMarker(frame: BodyFrame, kind: CellKind, c: Cell): THREE.Object3D {
   node.scale.set(c.x1 - c.x0, c.top - c.floor, c.s1 - c.s0);
   return node;
 }
-/** Service cells under the UAZ-2206's large cabin engine cover. */
-function buildVanServiceCells(frame: BodyFrame): Readonly<Record<CellKind, Cell>> {
-  const floor = cellFloor(frame, 1.08, 2.45);
-  const top = floor + 0.4;
-  return {
-    engine: cell(frame, -0.4, 0.4, 1.12, 1.85, floor, top),
-    turbine: cell(frame, 0.41, 0.8, 1.12, 1.62, floor, top),
-    radiator: cell(frame, -0.8, -0.41, 1.12, 1.62, floor, top),
-    air_filter: cell(frame, 0.41, 0.8, 1.65, 2.35, floor, top),
-  };
-}
 
-function buildEngineBay(frame: BodyFrame, b: PartBuilder, classic: boolean): BayLayout {
-  const spec = frame.spec;
-  const w = spec.wheels;
-  const inner = frame.wellX(w.front) - WELL_GAP;
+function buildEngineBay(frame: BodyFrame, b: PartBuilder, room: BayRoom, classic: boolean): BayLayout {
+  const w = frame.spec.wheels;
+  const { inner, support, cowl } = room;
   const shelf = w.radius * (1 + frame.archFactor(w.front)) + WELL_GAP;
-  const support = spec.bonnetFront + SUPPORT_BACK;
-  const cowl = frame.cowl;
 
   // ---- inner wings with the chassis rails along their feet, firewall, scuttle ----
-  const ss = stationsBetween(frame, support - 0.04, cowl);
-  for (const side of [1, -1]) loft(b, 'paint', frame, ss, side, (s) => wingWall(frame, s, inner, shelf, floorY(frame, s), true));
-  bulkhead(b, frame, cowl, inner, shelf, floorY(frame, cowl));
+  if (room.wings) {
+    const ss = stationsBetween(frame, support - 0.04, cowl);
+    for (const side of [1, -1]) loft(b, 'paint', frame, ss, side, (s) => wingWall(frame, s, inner, shelf, floorY(frame, s), true));
+    bulkhead(b, frame, cowl, inner, shelf, floorY(frame, cowl));
+  }
   // Scuttle: the plenum under the screen's foot, a black grille on top. It stands against
   // the bulkhead at the cowl with no back face of its own, so the two share no plane.
-  const scuttleTop = ceiling(frame, cowl - 0.1, cowl, frame.lidX(cowl));
-  const scuttle: Pt[] = [[cowl, scuttleTop], [cowl - 0.1, scuttleTop - 0.005], [cowl - 0.1, scuttleTop - 0.05], [cowl, scuttleTop - 0.09]];
+  const scuttleTop = room.ceiling(cowl - 0.1, cowl, frame.lidX(cowl));
   b.color(COLOURS.black);
-  across(b, frame, 'trim', scuttle, -frame.lidX(cowl), frame.lidX(cowl), false);
+  if (room.wings) {
+    const scuttle: Pt[] = [[cowl, scuttleTop], [cowl - 0.1, scuttleTop - 0.005], [cowl - 0.1, scuttleTop - 0.05], [cowl, scuttleTop - 0.09]];
+    across(b, frame, 'trim', scuttle, -frame.lidX(cowl), frame.lidX(cowl), false);
+  }
 
   // ---- radiator support: slam panel, posts and lower member framing the radiator ----
   const radHalf = 0.29;
-  const fl = floorY(frame, support);
-  const slamTop = ceiling(frame, support - 0.06, support + 0.02, inner);
-  across(b, frame, 'paint', [[support - 0.06, slamTop - 0.012], [support - 0.06, slamTop], [support + 0.02, slamTop], [support + 0.02, slamTop - 0.05], [support - 0.03, slamTop - 0.05]], -inner, inner);
-  // Posts and lower member stand on the shell's underbody: no bottom faces in its plane.
+  const fl = room.floor(support);
+  const slamTop = room.ceiling(support - SLAM_AHEAD, support + 0.02, inner);
+  across(b, frame, 'paint', [[support - SLAM_AHEAD, slamTop - 0.012], [support - SLAM_AHEAD, slamTop], [support + 0.02, slamTop], [support + 0.02, slamTop - 0.05], [support - 0.03, slamTop - 0.05]], -inner, inner);
+  // Posts and lower member stand on the floor: no bottom faces in its plane.
   for (const side of [1, -1]) {
     const [x0, x1] = side > 0 ? [radHalf + 0.01, inner] : [-inner, -radHalf - 0.01];
     boxS(b, frame, 'paint', [x0, fl, support - 0.03], [x1, slamTop - 0.05, support], UPPER_FACES);
@@ -456,33 +526,35 @@ function buildEngineBay(frame: BodyFrame, b: PartBuilder, classic: boolean): Bay
   // the slam panel's lip, as the core stood.
   const rs0 = support + 0.005;
   const rs1 = rs0 + RADIATOR_CELL_DEPTH;
-  const radiator = cell(frame, -radHalf, radHalf, rs0, rs1, Math.max(memberTop, cellFloor(frame, rs0, rs1)), Math.min(slamTop - 0.05 - CELL_GAP, ceiling(frame, rs0, rs1, radHalf)));
+  const radiator = cell(room, -radHalf, radHalf, rs0, rs1, Math.max(memberTop, cellFloor(frame, room, rs0, rs1)), Math.min(slamTop - 0.05 - CELL_GAP, room.ceiling(rs0, rs1, radHalf)));
 
   // ---- towers over the front axle ----
-  const towerX = inner - TOWER_IN;
-  const towerTop = classic ? shelf + 0.05 : ceiling(frame, w.front - TOWER_R, w.front + TOWER_R, towerX + TOWER_R) - 0.06;
-  for (const side of [1, -1]) {
-    const fl0 = floorY(frame, w.front);
-    const x = side * towerX;
-    b.cylinderY('paint', [x, (fl0 + towerTop) / 2, frame.z(w.front)], TOWER_R, (towerTop - fl0) / 2, 8, false);
-    const ring = (r: number, y: number, n: number): Vec3[] =>
-      Array.from({ length: n }, (_, i): Vec3 => at(frame, x + Math.cos((i / n) * Math.PI * 2) * r, y, w.front + Math.sin((i / n) * Math.PI * 2) * r));
-    b.poly('paint', ring(TOWER_R, towerTop, 8));
-    b.color(COLOURS.black).poly('trim', ring(0.045, towerTop + 0.004, 6));
+  if (room.wings) {
+    const towerX = inner - TOWER_IN;
+    const towerTop = classic ? shelf + 0.05 : ceiling(frame, w.front - TOWER_R, w.front + TOWER_R, towerX + TOWER_R) - 0.06;
+    for (const side of [1, -1]) {
+      const fl0 = floorY(frame, w.front);
+      const x = side * towerX;
+      b.cylinderY('paint', [x, (fl0 + towerTop) / 2, frame.z(w.front)], TOWER_R, (towerTop - fl0) / 2, 8, false);
+      const ring = (r: number, y: number, n: number): Vec3[] =>
+        Array.from({ length: n }, (_, i): Vec3 => at(frame, x + Math.cos((i / n) * Math.PI * 2) * r, y, w.front + Math.sin((i / n) * Math.PI * 2) * r));
+      b.poly('paint', ring(TOWER_R, towerTop, 8));
+      b.color(COLOURS.black).poly('trim', ring(0.045, towerTop + 0.004, 6));
+    }
   }
 
   // ---- brake booster and master cylinder on the driver's (left) side of the firewall ----
   // Under the brake pedal (interior.ts: column x 0.36-0.37, brake 0.01 inboard of it).
   const boosterX = 0.36;
   const boosterR = 0.1;
-  const boosterY = Math.min(scuttleTop - 0.22, floorY(frame, cowl) + 0.36);
+  const boosterY = Math.min(scuttleTop - 0.22, room.floor(cowl) + 0.36);
   const masterS = cowl - 0.16;
   const masterHalf = 0.075;
   b.color(COLOURS.black).cylinderZ('trim', [boosterX, boosterY, frame.z(cowl - 0.045)], boosterR, 0.04, 10);
   b.color(COLOURS.alloy).cylinderZ('trim', [boosterX, boosterY, frame.z(masterS)], 0.03, masterHalf, 6);
   reservoir(b, frame, boosterX - 0.04, boosterX + 0.04, cowl - 0.22, cowl - 0.12, boosterY + 0.03, boosterY + 0.1, COLOURS.black);
 
-  const bay: BayFixtures = { inner, support, radiator, boosterS: masterS - masterHalf, boosterX: boosterX - boosterR, scuttleFloor: scuttleTop - 0.09 };
+  const bay: BayFixtures = { room, inner, support, radiator, boosterS: masterS - masterHalf, boosterX: boosterX - boosterR, scuttleFloor: room.wings ? scuttleTop - 0.09 : Infinity };
   const { route, cells } = classic ? classicEngine(frame, b, bay) : samaraEngine(frame, b, bay);
   return { route, cells: { ...cells, radiator } };
 }
@@ -498,12 +570,12 @@ interface EngineSide {
  * under the tunnel; the battery on the right in front of the tower, the expansion tank
  * on the right behind it, the washer bottle on the left. The turbine's cell is in the
  * right rear corner by the exhaust manifold's outlet, the air filter's on the left
- * beside where the carburettor stood.
+ * beside where the carburettor stood. In a room without wings (the van's) the battery
+ * and the two bottles stand on its floor.
  */
 function classicEngine(frame: BodyFrame, b: PartBuilder, bay: BayFixtures): EngineSide {
-  const w = frame.spec.wheels;
-  const cowl = frame.cowl;
-  const { inner, support } = bay;
+  const { room, inner, support } = bay;
+  const cowl = room.cowl;
   // The block's length and half width; its fan and pulleys stood between its timing
   // end and the radiator.
   const L = 0.54;
@@ -515,34 +587,39 @@ function classicEngine(frame: BodyFrame, b: PartBuilder, bay: BayFixtures): Engi
   // The crank sits just above the floor at the firewall, so the gearbox and the
   // propshaft behind it hang half below the floor, as they do in the tunnel.
   const crankY = floorY(frame, cowl) + 0.025;
+  // A part hung from the inner wing over s0..s1 has its top `under` the lid; in a room
+  // without wings it stands `height` tall on the floor, with no bottom face in its plane.
+  const standing = !room.wings;
+  const topAt = (s0: number, s1: number, under: number, height: number): number =>
+    standing ? floorUnder(frame, room, s0, s1) + height : room.ceiling(s0, s1, inner) - under;
 
   // Battery in front of the right tower, expansion tank behind it, washer bottle left.
-  const batteryEnd = w.front - TOWER_R - 0.03;
+  const batteryEnd = room.axle - TOWER_R - 0.03;
   const batteryStart = Math.max(support + 0.08, batteryEnd - 0.25);
-  battery(b, frame, -1, inner, batteryStart, batteryEnd, ceiling(frame, batteryStart, batteryEnd, inner) - 0.02);
+  battery(b, frame, -1, inner, batteryStart, batteryEnd, topAt(batteryStart, batteryEnd, 0.02, BATTERY_HEIGHT + BATTERY_TRAY), standing);
   const tankStart = cowl - 0.38;
   const tankEnd = cowl - 0.2;
-  const tankTop = ceiling(frame, tankStart, tankEnd, inner) - 0.03;
-  reservoir(b, frame, -inner + 0.01, -inner + 0.13, tankStart, tankEnd, tankTop - 0.15, tankTop, COLOURS.black);
-  const washerTop = ceiling(frame, support + 0.08, support + 0.24, inner) - 0.03;
-  reservoir(b, frame, inner - 0.14, inner - 0.01, support + 0.08, support + 0.24, washerTop - 0.17, washerTop, COLOURS.capBlue);
+  const tankTop = topAt(tankStart, tankEnd, 0.03, 0.15);
+  reservoir(b, frame, -inner + 0.01, -inner + 0.13, tankStart, tankEnd, tankTop - 0.15, tankTop, COLOURS.black, standing);
+  const washerTop = topAt(support + 0.08, support + 0.24, 0.03, 0.17);
+  reservoir(b, frame, inner - 0.14, inner - 0.01, support + 0.08, support + 0.24, washerTop - 0.17, washerTop, COLOURS.capBlue, standing);
 
   // The engine's cell: the block with the alternator and the exhaust and intake
   // manifolds on its right, the distributor on its left.
-  const engine = cell(frame, engineX - 1.8 * half, engineX + 1.2 * half, sFront, sBack, cellFloor(frame, sFront, sBack));
+  const engine = cell(room, engineX - 1.8 * half, engineX + 1.2 * half, sFront, sBack, cellFloor(frame, room, sFront, sBack));
   // The turbine's: behind the expansion tank, by where the manifold's outlet was, inboard
   // of the rail and under the scuttle's plenum, which reaches over it at the firewall.
   const ts0 = tankEnd + CELL_GAP;
   const ts1 = cowl - CELL_GAP;
   const tx0 = -(inner - RAIL_W - CELL_GAP);
-  const turbine = cell(frame, tx0, engine.x0 - CELL_GAP, ts0, ts1, cellFloor(frame, ts0, ts1), Math.min(bay.scuttleFloor - CELL_GAP, ceiling(frame, ts0, ts1, -tx0)));
+  const turbine = cell(room, tx0, engine.x0 - CELL_GAP, ts0, ts1, cellFloor(frame, room, ts0, ts1), Math.min(bay.scuttleFloor - CELL_GAP, room.ceiling(ts0, ts1, -tx0)));
   // The air filter's: beside the carburettor's place, inboard of the tower and the washer
   // bottle, between the radiator's cell and the master cylinder.
   const as0Min = bay.radiator.s1 + CELL_GAP;
   const as1Max = bay.boosterS - CELL_GAP;
   const as0 = Math.max(as0Min, Math.min(sMid - AIR_FILTER_CELL_LENGTH / 2, as1Max - AIR_FILTER_CELL_LENGTH));
   const as1 = Math.min(as1Max, as0 + AIR_FILTER_CELL_LENGTH);
-  const airFilter = cell(frame, engine.x1 + CELL_GAP, inner - TOWER_IN - TOWER_R - CELL_GAP, as0, as1, cellFloor(frame, as0, as1));
+  const airFilter = cell(room, engine.x1 + CELL_GAP, inner - TOWER_IN - TOWER_R - CELL_GAP, as0, as1, cellFloor(frame, room, as0, as1));
 
   // The exhaust starts under the floor below where the manifold's outlet was, at the
   // engine's rear on its right.
@@ -560,7 +637,7 @@ function classicEngine(frame: BodyFrame, b: PartBuilder, bay: BayFixtures): Engi
 function samaraEngine(frame: BodyFrame, b: PartBuilder, bay: BayFixtures): EngineSide {
   const w = frame.spec.wheels;
   const cowl = frame.cowl;
-  const { inner, support } = bay;
+  const { room, inner, support } = bay;
   // The block's length along the crank and half width across it, and its place.
   const L = 0.39;
   const half = 0.14;
@@ -613,15 +690,15 @@ function samaraEngine(frame: BodyFrame, b: PartBuilder, bay: BayFixtures): Engin
   // driveshaft and its inner boot cross under it above the floor; the cell's floor clears them.
   const es0 = sMid - 1.45 * half;
   const es1 = sMid + 2 * half;
-  const engineFloor = Math.max(cellFloor(frame, es0, es1), y + bootR + PLANE_GAP);
-  const engine = cell(frame, Math.max(engineX - L / 2 - 0.06, -(inner - 0.15 - CELL_GAP)), xb - PLANE_GAP, es0, es1, engineFloor);
+  const engineFloor = Math.max(cellFloor(frame, room, es0, es1), y + bootR + PLANE_GAP);
+  const engine = cell(room, Math.max(engineX - L / 2 - 0.06, -(inner - 0.15 - CELL_GAP)), xb - PLANE_GAP, es0, es1, engineFloor);
   // The turbine's: behind it along the manifold, up to the firewall under the scuttle.
   const ts0 = es1 + CELL_GAP;
   const ts1 = cowl - CELL_GAP;
   const tx0 = engineX - L / 2;
-  const turbine = cell(frame, tx0, engine.x1, ts0, ts1, cellFloor(frame, ts0, ts1), Math.min(bay.scuttleFloor - CELL_GAP, ceiling(frame, ts0, ts1, -tx0)));
+  const turbine = cell(room, tx0, engine.x1, ts0, ts1, cellFloor(frame, room, ts0, ts1), Math.min(bay.scuttleFloor - CELL_GAP, ceiling(frame, ts0, ts1, -tx0)));
   // The air filter's: on the gearbox's case, inboard of the battery.
-  const airFilter = cell(frame, xb + 0.07 + CELL_GAP, inner - 0.19 - CELL_GAP, gearS0, gearS1, gearTop + PLANE_GAP);
+  const airFilter = cell(room, xb + 0.07 + CELL_GAP, inner - 0.19 - CELL_GAP, gearS0, gearS1, gearTop + PLANE_GAP);
 
   // The exhaust starts under the floor below where the manifold's outlet was, behind
   // the engine near its gearbox end.

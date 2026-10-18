@@ -156,6 +156,12 @@ export interface CabinSpec {
   readonly screenTop?: number;
   /** Windscreen wiper blade length (the parts catalogues: the classics 330 mm, the Samaras 510 mm, the tens 500 mm). */
   readonly wiperBlade: number;
+  /**
+   * Where the wiper spindles stand: `top` in the screen frame's header, the arms hanging
+   * down and parked along the header (the old UAZ-469's, motor СЛ236Е "верхнее
+   * расположение"). Absent: under the screen's foot.
+   */
+  readonly wiperMount?: 'top';
   /** Back light: base strip above the deck and header below the rail. */
   readonly rearBottom: number;
   readonly rearHeader: number;
@@ -296,7 +302,13 @@ export interface KitLook {
   readonly label: string;
   /** Interior vinyl colour. */
   readonly upholstery: number;
+  /** The dash's colour; on a `dashPainted` car only its knobs and louvres are shaded from it. */
   readonly dash: number;
+  /**
+   * A painted steel dash: its body, the instrument plate and the glovebox lid are drawn in
+   * the paint slot (interior.ts `dashSurface`), so they take the car's own colour and wear.
+   */
+  readonly dashPainted?: boolean;
   /** Headrests on the front seats. */
   readonly headrests: boolean;
   readonly front: FaceLook;

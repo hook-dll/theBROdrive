@@ -45,11 +45,16 @@ import { applyComicShading, applyGroundSpotlightNormals } from '../src/render/co
 import {
   BLOB_FLOATS,
   CLOUD_BIG_SLOTS,
+  CLOUD_DECKS,
   CLOUD_DRIFT_MPS,
+  CLOUD_NO_SHIFT,
   CLOUD_PERIOD_M,
   CLOUD_SLOTS,
+  CloudDeck,
   CloudKind,
   cloudCoverAlong,
+  cloudDeckShift,
+  cloudDeckWind,
   cloudGrow,
   cloudPan,
   cloudSet,
@@ -93,7 +98,7 @@ function verticalCover(set: CloudSet, storm: number, n: number, offset: number):
   for (let k = 0; k < n; k++) {
     const x = wrap(k * 7919.7 + offset);
     const z = wrap(k * 104_729.3 - offset);
-    if (cloudCoverAlong(set, storm, x, 0, z, 0, 0) > 0) hit++;
+    if (cloudCoverAlong(set, storm, CLOUD_NO_SHIFT, x, 0, z, 0, 0) > 0) hit++;
   }
   return hit / n;
 }
@@ -167,14 +172,14 @@ console.log('clouds');
       let lo = Infinity;
       let hi = -Infinity;
       for (let i = set.cellStart[cell]!; i < set.cellStart[cell + 1]!; i++) {
-        if (cloudGrow(set, i, 0) < 1) continue;
+        if (set.deck[i] !== CloudDeck.Low || cloudGrow(set, i, 0) < 1) continue;
         lo = Math.min(lo, set.base[i]!);
         hi = Math.max(hi, set.base[i]!);
       }
       if (hi > lo) spreads.push(hi - lo);
     }
     for (let i = 0; i < set.count; i++) {
-      if (cloudGrow(set, i, 0) < 1) continue;
+      if (set.deck[i] !== CloudDeck.Low || cloudGrow(set, i, 0) < 1) continue;
       fair++;
       const kind = set.kind[i]!;
       kinds[kind]!++;
@@ -216,7 +221,7 @@ console.log('clouds');
   lengths.sort((a, b) => a - b);
   spreads.sort((a, b) => a - b);
   console.log(
-    `    ${fair} full-grown fair-weather clouds over ${SEEDS.length} skies: ` +
+    `    ${fair} full-grown fair-weather cumulus over ${SEEDS.length} skies: ` +
       `${kinds[CloudKind.Humilis]} humilis, ${kinds[CloudKind.Mediocris]} mediocris, ` +
       `${kinds[CloudKind.Congestus]} congestus`,
   );
@@ -272,7 +277,7 @@ console.log('clouds');
   for (const seed of SEEDS) {
     const set = cloudSet(seed);
     for (let i = 0; i < set.count; i++) {
-      if (cloudGrow(set, i, 0) < 1) continue;
+      if (set.deck[i] !== CloudDeck.Low || cloudGrow(set, i, 0) < 1) continue;
       const o0 = i * CLOUD_SLOTS * BLOB_FLOATS;
       let along = 0;
       for (let j = 0; j < CLOUD_SLOTS; j++) {
@@ -347,6 +352,73 @@ console.log('clouds');
   );
 }
 
+// -- the decks: a second level, on its own wind ----------------------------------------
+
+{
+  let mids = 0;
+  let lowTop = 0;
+  let midBase = Infinity;
+  let midBaseHigh = 0;
+  let thickest = 0;
+  let shortest = Infinity;
+  for (const seed of SEEDS) {
+    const set = cloudSet(seed);
+    for (let i = 0; i < set.count; i++) {
+      if (cloudGrow(set, i, 0) < 1) continue;
+      if (set.deck[i] === CloudDeck.Low) {
+        lowTop = Math.max(lowTop, set.base[i]! + set.top[i]!);
+        continue;
+      }
+      mids++;
+      midBase = Math.min(midBase, set.base[i]!);
+      midBaseHigh = Math.max(midBaseHigh, set.base[i]!);
+      thickest = Math.max(thickest, set.top[i]! / (2 * set.reach[i]!));
+      shortest = Math.min(shortest, 2 * set.reach[i]!);
+    }
+  }
+  check(
+    'an altocumulus deck stands over the cumulus',
+    mids > 0 && midBase > 4000 && midBaseHigh < 5700,
+    `${mids} altocumulus over ${SEEDS.length} skies, bases ${midBase.toFixed(0)}..${midBaseHigh.toFixed(0)} m; cumulus tops to ${lowTop.toFixed(0)} m`,
+  );
+  check(
+    'the altocumulus are thin rafts, not crumbs',
+    thickest < 0.12 && shortest > 1000,
+    `thickest ${thickest.toFixed(2)} of its span, shortest ${shortest.toFixed(0)} m across`,
+  );
+
+  // Seen from one place, the two decks slide across each other.
+  const low = { x: 0, z: 0 };
+  const mid = { x: 0, z: 0 };
+  cloudDeckWind(42, CloudDeck.Low, low);
+  cloudDeckWind(42, CloudDeck.Mid, mid);
+  const shear = Math.hypot(mid.x - low.x, mid.z - low.z);
+  const veer = (Math.acos((low.x * mid.x + low.z * mid.z) / (Math.hypot(low.x, low.z) * Math.hypot(mid.x, mid.z))) * 180) / Math.PI;
+  check(
+    'the decks shear: the high one faster and veered',
+    Math.hypot(mid.x, mid.z) > Math.hypot(low.x, low.z) * 1.5 && veer > 20 && shear > 8,
+    `low ${Math.hypot(low.x, low.z).toFixed(0)} m/s, high ${Math.hypot(mid.x, mid.z).toFixed(0)} m/s veered ${veer.toFixed(0)} deg, ${shear.toFixed(1)} m/s between them`,
+  );
+
+  // The sky straight overhead, by deck: a driver looking up sees something there.
+  let lowOver = 0;
+  let anyOver = 0;
+  const N = 20_000;
+  for (const seed of SEEDS) {
+    const set = cloudSet(seed);
+    for (let k = 0; k < N; k++) {
+      const x = wrap(k * 7919.7 + seed * 131);
+      const z = wrap(k * 104_729.3 - seed * 131);
+      const cover = cloudCoverAlong(set, 0, CLOUD_NO_SHIFT, x, 0, z, 0, 0);
+      if (cover > 0) anyOver++;
+      if (cover >= 0.8) lowOver++;
+    }
+  }
+  console.log(
+    `    overhead: a cumulus ${((lowOver / (N * SEEDS.length)) * 100).toFixed(1)}%, any cloud ${((anyOver / (N * SEEDS.length)) * 100).toFixed(1)}% of the time`,
+  );
+}
+
 // -- cover, and how uneven it is ------------------------------------------------------
 
 {
@@ -357,7 +429,9 @@ console.log('clouds');
     console.log(`    seed ${String(seed).padStart(4)}   sky over a cloud ${(cover * 100).toFixed(1)}%`);
   }
   const cover = sum / SEEDS.length;
-  check('a sparse fair-weather sky', cover > 0.1 && cover < 0.2, `${(cover * 100).toFixed(1)}% of the ground has a cloud overhead`);
+  // Two decks: the cumulus alone keep to 10-15% (the overhead line above), the high deck
+  // about doubles what is over a driver's head without closing the sky.
+  check('a sparse fair-weather sky', cover > 0.18 && cover < 0.32, `${(cover * 100).toFixed(1)}% of the ground has a cloud overhead, both decks`);
 
   // Over 3 km stretches of sky (about what one look up takes in) the cover has to range.
   const WINDOW_M = 3000;
@@ -373,7 +447,7 @@ console.log('clouds');
           for (let i = 0; i < PER_SIDE; i++) {
             const x = wrap(wx * WINDOW_M * 2.3 + i * STEP_M + seed * 1111);
             const z = wrap(wz * WINDOW_M * 2.3 + j * STEP_M - seed * 777);
-            if (cloudCoverAlong(set, 0, x, 0, z, 0, 0) > 0) inside++;
+            if (cloudCoverAlong(set, 0, CLOUD_NO_SHIFT, x, 0, z, 0, 0) > 0) inside++;
           }
         }
         covers.push(inside / (PER_SIDE * PER_SIDE));
@@ -432,10 +506,10 @@ console.log('clouds');
         const gx = wrap(cx - height * sun.x);
         const gz = wrap(cz - height * sun.z);
         tested++;
-        if (cloudCoverAlong(set, 0, gx, 0, gz, sun.x, sun.z) >= set.opacity[i]!) shaded++;
+        if (cloudCoverAlong(set, 0, CLOUD_NO_SHIFT, gx, 0, gz, sun.x, sun.z) >= set.opacity[i]!) shaded++;
         if (set.reach[i]! > 250) {
           deep++;
-          if (cloudShadeAlong(set, 0, gx, 0, gz, sun.x, sun.z) > IN_SHADOW * set.opacity[i]!) soft++;
+          if (cloudShadeAlong(set, 0, CLOUD_NO_SHIFT, gx, 0, gz, sun.x, sun.z) > IN_SHADOW * set.opacity[i]!) soft++;
         }
       }
     }
@@ -465,7 +539,7 @@ console.log('clouds');
       for (let d = 0; d < 20_000; d += 5) {
         const x = wrap(d * 0.8 + line * 3011 + seed * 97);
         const z = wrap(d * 0.6 - line * 1999);
-        const shade = cloudShadeAlong(set, 0, x, 0, z, SUNS[0]!.x, SUNS[0]!.z);
+        const shade = cloudShadeAlong(set, 0, CLOUD_NO_SHIFT, x, 0, z, SUNS[0]!.x, SUNS[0]!.z);
         samples++;
         if (shade > IN_SHADOW * 0.6) groundShaded++;
         if (shade < 0.02) run = [];
@@ -572,6 +646,7 @@ console.log('clouds');
 
 {
   const pan = { x: 0, z: 0 };
+  const shift = new Float64Array(2 * CLOUD_DECKS);
   let disagree = 0;
   let worst = 0;
   const set = cloudSet(42);
@@ -586,7 +661,7 @@ console.log('clouds');
     const absolute = cloudShadowShadeAt(42, originX + relX, 20, originZ + relZ, t, 0.3, -0.2, 0);
     // The shader's path: the scene-relative point plus the reduced pan.
     cloudPan(42, t, originX, originZ, pan);
-    const shaderSide = cloudShadeAlong(set, 0, wrap(relX + pan.x), 20, wrap(relZ + pan.z), 0.3, -0.2);
+    const shaderSide = cloudShadeAlong(set, 0, cloudDeckShift(42, t, shift), wrap(relX + pan.x), 20, wrap(relZ + pan.z), 0.3, -0.2);
     const diff = Math.abs(absolute - shaderSide);
     if (diff > 1e-6) disagree++;
     worst = Math.max(worst, diff);

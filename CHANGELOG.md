@@ -973,6 +973,21 @@
 
 ### Changed
 
+- TWO CLOUD DECKS, EACH ON ITS OWN WIND (render/cloudfield.ts, render/clouds.ts,
+  render/cloudshadow.ts). Over the cumulus now stands an altocumulus deck: flat rafts
+  1.5-4 km long, a tenth as thick, 4.3-5.5 km up, in districts of their own and casting
+  half a shadow. The low deck's wind is 9 m/s (was 6), the high deck's 18 m/s veered 32°,
+  so the decks slide across each other (`cloudDeckWind`, `cloudDeckShift`). A cloud is
+  overhead 24.5% of the time (the cumulus alone 12.2%, as before), so looking up from the
+  road meets sky with something in it rather than only the band near the horizon. The
+  layer places each deck by its own drift; the shadow map and its CPU twin
+  (`cloudCoverAlong`, `cloudShadeAlong`, which now take the decks' shift) follow both.
+  Same draws, same programs. `bun tools/sky-variety.ts` checks the deck's height,
+  thinness, the shear and the overhead share.
+- UAZ-469 AND UAZ-2206: THE DASH IN THE BODY'S COLOUR (carkit `KitLook.dashPainted`).
+  The dash, its instrument plate and the glovebox lid are drawn in the paint slot, so they
+  take the car's paint, dust and scratches; the knobs keep the old olive shade.
+
 - CLOUDS FROM BELOW (render/cloudfield.ts, render/clouds.ts). Every big lobe used to be
   centred at or under the base, so the flat cut was each lobe's widest section: from
   under a cloud the whole outline was one flat face with one normal and one blue-grey
@@ -1502,6 +1517,23 @@
     handed in, placed 2nd and 3rd.
 
 ### Fixed
+
+- UAZ-2206: THE ENGINE BAY UNDER THE CABIN COVER, ITS GRID ON IT AND REACHED FROM THE SIDE
+  DOOR (carkit bay.ts `BayRoom`, interior.ts `engineCover`; player/interaction.ts
+  `cabinLidOpen`). The lifted cover showed a dark block, and the bonnet grid hung 0.36 m
+  ahead of it, out under the seats and 0.28 m under the cabin floor. Under the cover now
+  stands the bay an ordinary kit car has under its bonnet (radiator support, battery,
+  bottles, brake booster, and the engine, radiator, turbine and air filter cells drawn by
+  the grid), the four cells on it. The cover is a hollow pad behind the seats and the
+  handbrake that lifts sideways towards the side door; through that open door the grid
+  is reached from the doorway, so all four cells are picked standing at it. No other
+  car moved (geometry hashes).
+
+- UAZ-469: THE WIPERS NO LONGER PARK ACROSS THE VIEW (carkit `CabinSpec.wiperMount`). On
+  its 0.41 m-tall screen a foot-mounted 0.33 m blade could not lie flatter than 18° and
+  stood in the driver's sight line. The old 469's wipers hang from the frame's header
+  (motor СЛ236Е, 280 mm blades): now so, parked 12° under the header and sweeping 100° down.
+  No other car's wipers moved (geometry hashes).
 
 - A ROADSIDE WRECK'S BONNET AND BOOT OPEN, AND ITS GRIDS ARE REACHED ONLY THROUGH THEM
   (render/carmodel.ts `kitStaticParts`, `hangStaticLids`; render/staticlids.ts

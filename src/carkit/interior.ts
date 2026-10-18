@@ -55,6 +55,26 @@ const VAN_TRIM_CLEAR = 0.06;
 const VAN_FLOOR_CLEAR = 0.03;
 /** The van's furniture stands this far into its floor (`Cabin.standY`). */
 const VAN_FOOT_SINK = 0.01;
+/**
+ * The van's engine cover (`Layout.engineCover`): its pad's chamfer and the taper of its
+ * top, and how far it lifts. It is hinged along the car at the foot of its left wall, away
+ * from the side door on the right, so it opens like a clamshell towards that door: lifted
+ * `COVER_LIFT` its right edge stands 1.55-1.83 m up, under the headliner, and the sight
+ * lines from a player's eye at the door down into the bay pass under it; its left wall
+ * swings out clear of the left side's lining.
+ */
+const COVER_CHAMFER = 0.05;
+const COVER_TAPER = 0.85;
+const COVER_LIFT = 0.75;
+/**
+ * The room under the shut cover (`engineCoverRoom`) keeps this far inside its side walls
+ * at their narrowest (the top's taper), and this far inside the bottom chamfers of its
+ * end walls: the lid turns about an axis along the car, so whatever of it stands within
+ * the room's length sweeps its section, and those chamfers reach `COVER_CHAMFER` in.
+ */
+const COVER_ROOM_GAP = 0.03;
+/** ...and this far under its top: the top's chamfer and a hair, as under a bonnet (bay.ts `LID_ROOM`). */
+const COVER_ROOM_TOP = 0.045;
 const ORIGIN: Vec3 = [0, 0, 0];
 
 const COLOURS = {
@@ -577,9 +597,11 @@ const LAYOUTS: Readonly<Record<KitCarSpec['platform'], Layout>> = {
     toeTop: 0.12,
     toeRun: 0.2,
     tunnel: { heights: [0, 0, 0], base: [0.2, 0.2], top: [0.17, 0.17] },
-    // The engine is under a removable cabin cover behind the front seats.  The gear and
-    // transfer levers stay between the seats, in front of the service opening.
-    engineCover: { ds0: 1.08, ds1: 2.45, half: 0.62, height: 0.46 },
+    // The engine is under a removable cabin cover behind the front seats, beside the side
+    // door (s 1.874-2.805).  The gear and transfer levers and the handbrake stay between
+    // the seats, in front of it: it starts 2 cm behind the handbrake's base (to s 1.58)
+    // and 10 cm behind the seats' backs (1.501), both of which it overlapped at 1.08.
+    engineCover: { ds0: 1.2, ds1: 2.45, half: 0.62, height: 0.46 },
     gear: { ds: 0.88, height: 0.45, lean: -0.05 },
     transfer: {
       ds: 0.94,
@@ -1258,6 +1280,26 @@ export function engineCoverEnd(frame: BodyFrame): number {
   return frame.cowl + (layoutOf(frame).engineCover?.ds1 ?? 0);
 }
 
+/**
+ * The room inside a van's shut engine cover (`Layout.engineCover`), where bay.ts lays out
+ * its engine bay: along the car from `s0` to `s1`, `half` either side of the centre line
+ * and from the cabin floor up to `top`; `COVER_ROOM_GAP` inside the pad's walls and its
+ * end walls' bottom chamfers, and `COVER_ROOM_TOP` under its top. Null without a cover.
+ */
+export function engineCoverRoom(frame: BodyFrame): { readonly s0: number; readonly s1: number; readonly half: number; readonly floor: number; readonly top: number } | null {
+  const c = layoutOf(frame).engineCover;
+  if (!c) return null;
+  const floor = cabinFloor(frame);
+  const end = COVER_CHAMFER + COVER_ROOM_GAP;
+  return {
+    s0: frame.cowl + c.ds0 + end,
+    s1: frame.cowl + c.ds1 - end,
+    half: c.half * COVER_TAPER - COVER_ROOM_GAP,
+    floor,
+    top: floor + c.height - COVER_ROOM_TOP,
+  };
+}
+
 /** The cabin's floor pan: the shell's flat underbody plus `floorRise` (`FLOOR_RISE`). */
 function cabinFloor(frame: BodyFrame): number {
   return frame.station(frame.cowl + 0.5).sill + (layoutOf(frame).floorRise ?? FLOOR_RISE);
@@ -1318,8 +1360,9 @@ function shade(hex: number, k: number): number {
 /**
  * Box with all twelve edges chamfered by `c`, in the builder's current frame; the +Y
  * face's X half width is scaled by `taper`. Reads as a moulded cushion, not a slab.
+ * `bottom = false` leaves the −Y face out: a hollow cover over what stands under it.
  */
-function pad(b: PartBuilder, slot: KitSlot, centre: Vec3, half: Vec3, c: number, taper = 1): void {
+function pad(b: PartBuilder, slot: KitSlot, centre: Vec3, half: Vec3, c: number, taper = 1, bottom = true): void {
   const [cx, cy, cz] = centre;
   const [hx, hy, hz] = half;
   // A corner's three points, each flush with one face (`axis`) and chamfered back on the other two.
@@ -1333,7 +1376,7 @@ function pad(b: PartBuilder, slot: KitSlot, centre: Vec3, half: Vec3, c: number,
   };
   for (const s of [-1, 1]) {
     b.quad(slot, pt(s, -1, -1, 0), pt(s, 1, -1, 0), pt(s, 1, 1, 0), pt(s, -1, 1, 0));
-    b.quad(slot, pt(-1, s, -1, 1), pt(1, s, -1, 1), pt(1, s, 1, 1), pt(-1, s, 1, 1));
+    if (s > 0 || bottom) b.quad(slot, pt(-1, s, -1, 1), pt(1, s, -1, 1), pt(1, s, 1, 1), pt(-1, s, 1, 1));
     b.quad(slot, pt(-1, -1, s, 2), pt(1, -1, s, 2), pt(1, 1, s, 2), pt(-1, 1, s, 2));
   }
   for (const a of [-1, 1]) {
@@ -1747,9 +1790,13 @@ class Cabin {
   }
 
   /**
-   * The van's padded engine cover on the centre line between the front seats
-   * (`Layout.engineCover`), hinged at its front top edge and lifting at the back, over the
-   * engine's block (its rocker cover and air filter on it) standing on the floor.
+   * The van's padded engine cover on the centre line behind the front seats
+   * (`Layout.engineCover`): a hollow pad with no bottom over the engine bay that bay.ts
+   * lays out in the room under it (`engineCoverRoom`). Hinged along the car at the foot of
+   * its left wall, it lifts its right edge `COVER_LIFT` towards the side door: nothing of
+   * it sweeps through the bay (the front and rear walls turn in their own planes, the left
+   * wall swings outwards, the top away from what is under it), and from the door the bay
+   * is seen under its raised edge.
    */
   private engineCover(): void {
     const c = this.lay.engineCover;
@@ -1758,18 +1805,10 @@ class Cabin {
     const y1 = this.floorY + c.height;
     const s0 = cowl + c.ds0;
     const s1 = cowl + c.ds1;
-    const b = this.fixed;
-    // The block 3 cm inside the cover all round.
-    const top = y1 - 0.06;
-    b.color(COLOURS.metal);
-    b.box('trim', this.P(0, (this.standY + top - 0.05) / 2, (s0 + s1) / 2), [c.half - 0.06, (top - 0.05 - this.standY) / 2, (s1 - s0) / 2 - 0.04]);
-    b.color(COLOURS.black);
-    b.box('trim', this.P(0, top - 0.025, (s0 + s1) / 2 + 0.03), [0.05, 0.025, (s1 - s0) / 2 - 0.1]);
-    b.cylinderY('trim', this.P(0, top - 0.02, s1 - 0.12), 0.08, 0.02, 10);
-    const at = this.P(0, y1, s0);
-    this.hinge(this.group, ORIGIN, 'engine_cover', at, { channel: 'engine_cover', kind: 'rot', axis: [1, 0, 0], amount: 1.1 }, { id: 'engine_cover', label: 'Кожух двигателя' }, (h) => {
+    const at = this.P(c.half, this.standY, (s0 + s1) / 2);
+    this.hinge(this.group, ORIGIN, 'engine_cover', at, { channel: 'engine_cover', kind: 'rot', axis: [0, 0, 1], amount: -COVER_LIFT }, { id: 'engine_cover', label: 'Кожух двигателя' }, (h) => {
       h.color(shade(this.spec.look.dash, 0.9));
-      pad(h, 'trim', this.P(0, (this.standY + y1) / 2, (s0 + s1) / 2), [c.half, (y1 - this.standY) / 2, (s1 - s0) / 2], 0.05, 0.85);
+      pad(h, 'trim', this.P(0, (this.standY + y1) / 2, (s0 + s1) / 2), [c.half, (y1 - this.standY) / 2, (s1 - s0) / 2], COVER_CHAMFER, COVER_TAPER, false);
     });
   }
 
@@ -1958,6 +1997,19 @@ class Cabin {
     fillX(b, slot, rings[rings.length - 1]!);
   }
 
+  /**
+   * Inks `b` for a dash surface and returns its slot: the paint slot in white on a painted
+   * steel dash (`KitLook.dashPainted`), so it takes the car's colour; `colour` in trim otherwise.
+   */
+  private dashSurface(b: PartBuilder, colour: number): KitSlot {
+    if (this.spec.look.dashPainted) {
+      b.color(0xffffff);
+      return 'paint';
+    }
+    b.color(colour);
+    return 'trim';
+  }
+
   private dash(): void {
     const L = this.lay;
     const f = this.frame;
@@ -1973,14 +2025,14 @@ class Cabin {
     for (const ds of [0.012, depth / 2, depth]) {
       half = Math.min(half, this.glassX(cowl + ds, top) - 0.085, f.sideX(cowl + ds, belt - 0.15) - 0.085);
     }
-    b.color(look.dash);
+    const slot = this.dashSurface(b, look.dash);
     const loft = new Map((L.dashLoft ?? [-1, -0.55, 0, 0.55, 1].map((k) => [k, L.dash] as const)).map(([k, section]) => [k * half, section]));
-    this.prismX(b, 'trim', [...loft.keys()], (x) => [
+    this.prismX(b, slot, [...loft.keys()], (x) => [
       [cowl + 0.012, f.deckY(cowl + 0.012, x) - 0.012],
       ...loft.get(x)!.map(([ds, dy]): P2 => [cowl + ds, belt + dy]),
     ]);
     const bx = this.x0 - (L.binnacleRight ?? 0);
-    this.prismX(b, 'trim', [bx - L.binnacleHalf, bx + L.binnacleHalf], () => L.binnacle.map(([ds, dy]): P2 => [cowl + ds, belt + dy]));
+    this.prismX(b, slot, [bx - L.binnacleHalf, bx + L.binnacleHalf], () => L.binnacle.map(([ds, dy]): P2 => [cowl + ds, belt + dy]));
     if (L.stack) {
       // Down the fascia's line from its foot to the tunnel; the back corners hide in
       // the dash and the toe board.
@@ -2257,8 +2309,12 @@ class Cabin {
     this.fixed.pop();
     const at = m.at(0, -hy, 0.007);
     fineDetail(this.hinge(this.group, ORIGIN, 'glovebox', at, { channel: 'glovebox', kind: 'rot', axis: [1, 0, 0], amount: -1.2 }, { id: 'glovebox', label: 'Бардачок' }, (b) => {
-      b.push(m.matrix).color(this.lay.glovebox.colour ?? shade(this.spec.look.dash, 1.15));
-      pad(b, 'trim', [0, 0, 0.007], [hx, hy, 0.007], 0.005);
+      b.push(m.matrix);
+      const colour = this.lay.glovebox.colour;
+      let slot: KitSlot = 'trim';
+      if (colour === undefined) slot = this.dashSurface(b, shade(this.spec.look.dash, 1.15));
+      else b.color(colour);
+      pad(b, slot, [0, 0, 0.007], [hx, hy, 0.007], 0.005);
       b.color(COLOURS.black).box('chrome', [0, hy - 0.018, 0.016], [0.03, 0.006, 0.003]);
       b.pop();
     }));

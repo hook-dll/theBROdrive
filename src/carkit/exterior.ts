@@ -1219,10 +1219,12 @@ function buildRearLeafHardware(ctx: KitContext): void {
 /**
  * Wiper spindles across the car (+x is the left): the driver's just left of centre, the
  * passenger's towards the right corner. Both arms park lying to the left, the classic
- * Zhiguli's and the Samara's tandem on a left-hand-drive car.
+ * Zhiguli's and the Samara's tandem on a left-hand-drive car. A top mount
+ * (`CabinSpec.wiperMount`) is the same pair turned half round in the screen's plane: its
+ * spindles mirrored across, the arms hanging down and parked to the right.
  */
 const WIPER_PIVOTS = [0.06, -0.34];
-/** The spindles stand this far below the glass's bottom edge, in the screen's frame strip. */
+/** The spindles stand this far past the glass's edge (below its foot, or above its top), in the screen's frame strip. */
 const WIPER_PIVOT_BELOW = 0.015;
 /** The most an arm sweeps from its park, about 100°, the Zhiguli's and the Samara's; and the least, 90°. */
 const WIPER_SWEEP = 1.75;
@@ -1236,7 +1238,7 @@ const WIPER_SWEEP_MIN = Math.PI / 2;
 const WIPER_PARKS = [(20 * Math.PI) / 180, (45 * Math.PI) / 180];
 /** The blade keeps this far inside the pane's sides and top: the pillars and header stand proud. */
 const WIPER_EDGE = 0.015;
-/** And this far above its bottom edge: half the blade's width and a little. */
+/** And this far inside its edge on the spindles' side: half the blade's width and a little. */
 const WIPER_FOOT = 0.006;
 /** The blade's rubber edge clears the glass by this much where it rests: 6 mm avoids z-fighting. */
 const WIPER_GAP = 0.006;
@@ -1246,7 +1248,8 @@ const WIPER_STEP = Math.PI / 90;
 
 /**
  * Two wiper arms parked along the screen's foot, both lying to the left, sweeping up on
- * `wiper_sweep`. Each arm is the longest whose blade, upright, stays on the pane and
+ * `wiper_sweep` (or, top-mounted, along its header lying to the right and sweeping down).
+ * Each arm is the longest whose blade, square across the screen, stays on the pane and
  * that parks low and still sweeps 90-100° between the pillars. The screen is faceted
  * and curved, so each arm turns about its own axis: the one that keeps the glass under
  * every point of its blade the most level over its sweep (one plane normal for both
@@ -1266,9 +1269,14 @@ function buildWipers(ctx: KitContext): void {
   const base = new THREE.Vector3(0, frame.deckY(foot, 0), frame.z(foot));
   const screenTop = frame.screenTopS(0);
   const head = new THREE.Vector3(0, cabin.rail + cabin.crown - frame.roofDrop(screenTop), frame.z(screenTop));
-  const up = head.sub(base).normalize();
+  const up = head.clone().sub(base).normalize();
   const across = new THREE.Vector3(1, 0, 0);
   const screenNormal = new THREE.Vector3().crossVectors(across, up).normalize();
+  const fromHeader = cabin.wiperMount === 'top';
+  /** From the spindles' edge of the glass into it: up from the foot, down from the header. */
+  const inward = up.clone().multiplyScalar(fromHeader ? -1 : 1);
+  /** The way an arm lies parked: to the left, or to the right hanging from the header. */
+  const parkWay = across.clone().multiplyScalar(fromHeader ? -1 : 1);
   const ray = new THREE.Raycaster();
   ray.far = 0.6;
   const origin = new THREE.Vector3();
@@ -1282,26 +1290,28 @@ function buildWipers(ctx: KitContext): void {
   const q = new THREE.Vector3();
   const m = new THREE.Vector3();
   const onPane = (point: THREE.Vector3, n: THREE.Vector3): boolean =>
-    !!under(pane, m.copy(point).addScaledVector(up, WIPER_EDGE), n)
-    && !!under(pane, m.copy(point).addScaledVector(up, -WIPER_FOOT), n)
+    !!under(pane, m.copy(point).addScaledVector(inward, WIPER_EDGE), n)
+    && !!under(pane, m.copy(point).addScaledVector(inward, -WIPER_FOOT), n)
     && !!under(pane, m.copy(point).addScaledVector(across, WIPER_EDGE), n)
     && !!under(pane, m.copy(point).addScaledVector(across, -WIPER_EDGE), n);
 
-  for (const [i, px] of WIPER_PIVOTS.entries()) {
-    // The glass's bottom edge above the spindle.
-    const start = new THREE.Vector3(px, base.y, base.z).addScaledVector(up, -0.1);
+  for (const [i, pivotX] of WIPER_PIVOTS.entries()) {
+    const px = fromHeader ? -pivotX : pivotX;
+    // The glass's edge over (under) the spindle, searched from outside the pane inward.
+    const from = fromHeader ? new THREE.Vector3(px, head.y, head.z) : new THREE.Vector3(px, base.y, base.z);
+    const start = from.addScaledVector(inward, -0.1);
     let edge: THREE.Vector3 | undefined;
-    for (let t = 0; t < 0.4 && !edge; t += 0.002) edge = under(pane, q.copy(start).addScaledVector(up, t), screenNormal)?.point;
-    if (!edge) throw new Error(`Kit car "${spec.id}": no windscreen above wiper ${i}`);
-    const at = edge.addScaledVector(up, -WIPER_PIVOT_BELOW);
+    for (let t = 0; t < 0.4 && !edge; t += 0.002) edge = under(pane, q.copy(start).addScaledVector(inward, t), screenNormal)?.point;
+    if (!edge) throw new Error(`Kit car "${spec.id}": no windscreen at wiper ${i}'s spindle`);
+    const at = edge.addScaledVector(inward, -WIPER_PIVOT_BELOW);
 
-    // The arm's plane: `n` its axis, `park` lying to the left, `rise` up the glass.
+    // The arm's plane: `n` its axis, `park` lying along the edge, `rise` into the glass.
     const n = new THREE.Vector3();
     const park = new THREE.Vector3();
     const rise = new THREE.Vector3();
     const turnAbout = (axis: THREE.Vector3): void => {
       n.copy(axis).normalize();
-      park.copy(across).addScaledVector(n, -n.x).normalize();
+      park.copy(parkWay).addScaledVector(n, -n.dot(parkWay)).normalize();
       rise.crossVectors(n, park);
     };
     const point = (phi: number, r: number, out: THREE.Vector3): THREE.Vector3 =>
