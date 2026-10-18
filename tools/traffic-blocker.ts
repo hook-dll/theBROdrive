@@ -9,7 +9,7 @@
  * sees him exactly as it does in play — put down on its own lane centre and held there on
  * the brake and the handbrake for the whole run. No autopilot drives it.
  *
- * The stream is pinned at its ceiling: `trafficDensity` 'high' (48 cars) and the density
+ * The stream is pinned at its ceiling: `trafficDensity` 'high' (40 cars) and the density
  * draw, which otherwise re-rolls between 35% and 100% of the cap every minute or so,
  * held at 100% from the private side.
  *

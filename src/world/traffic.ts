@@ -64,8 +64,8 @@ import type { RoadConditionBuffer } from './gradient';
  * 36-72 s, and the retained FRACTION is held between re-rolls, so a changed cap (the
  * menu, the console) keeps the stream's present mood.
  *
- * 0.35 (owner, 2026-10-15), after a fifth, 0.35, a half and 0.7. With the caps doubled
- * to 48/24/12/6 the quiet end of 0.35 is still a road with cars on it (17 of 48 on
+ * 0.35 (owner, 2026-10-15), after a fifth, 0.35, a half and 0.7. With the caps at
+ * 40/20/12/6 the quiet end of 0.35 is still a road with cars on it (14 of 40 on
  * High), and the swing between quiet and busy is what makes a drive change.
  */
 export const DENSITY_FLOOR = 0.35;
