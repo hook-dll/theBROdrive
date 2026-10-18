@@ -109,6 +109,20 @@ export interface RoadCharacter {
   /** Amplitude of the slow route wander, radians. */
   readonly deviation: number;
   /**
+   * THE SWELLS this road is driven over (`roadswells.ts`): the chance a 950 m slot
+   * holds one, its climb's height (metres) and length (metres), and the length of the
+   * crest's vertical curve. The descent is 2.4-4 times the climb, so a rise is short
+   * and its fall long. Every swell is then lowered or dropped until the weakest car
+   * loses at most `CLIMB_LOSS_KMH` over it, so these are what is ASKED for, not what
+   * every swell gets. A short crest curve is a blind brow; a long one a highway's.
+   */
+  readonly swellChance: number;
+  readonly swellRiseMin: number;
+  readonly swellRiseMax: number;
+  readonly swellClimbMin: number;
+  readonly swellClimbMax: number;
+  readonly swellCrestM: number;
+  /**
    * How much superelevation this road was built with, as a share of the design
    * figure. A maintained highway is fully banked; a desert pan road is nearly flat
    * whatever its corners ask for, and that is a real difference to drive.
@@ -162,7 +176,7 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     designSpeedKmh: 110,
     // A kink every 1.4 km (4 km, then 2.2): still the straightest road, but the owner
     // drove 2.2 as "no corners at all" (2026-10-10).
-    cornerSpacing: 1_400,
+    cornerSpacing: 1_000,
     // A lone kink or a dog-leg, kilometres apart. Never a crest coupling: a pan road
     // runs straight over whatever the ground does.
     phraseMin: 1,
@@ -170,12 +184,20 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     linkMin: 300,
     linkMax: 900,
     crestChance: 0,
-    radiusMin: 600,
+    radiusMin: 450,
     radiusMax: 1_400,
     headingMin: 0.1,
     headingMax: 0.28,
     deviation: 0.25,
-    bankShare: 0.2,
+    // Half the design banking: a pan's kinks are fast, and 0.2 left them flat.
+    bankShare: 0.5,
+    // Low, long-crested swells a long way apart: the pan still runs to the horizon.
+    swellChance: 0.6,
+    swellRiseMin: 4,
+    swellRiseMax: 8,
+    swellClimbMin: 160,
+    swellClimbMax: 260,
+    swellCrestM: 140,
   },
   {
     // Open highway: long fast sweepers, the pace a catalogue saloon is happiest at.
@@ -183,7 +205,7 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     weight: 0.22,
     designSpeedKmh: 110,
     // 1.3 km, from 2.2: at 2.2 a highway district read as a straight with two arcs.
-    cornerSpacing: 1_300,
+    cornerSpacing: 950,
     // One to three sweepers a few hundred metres apart, then kilometres of breather.
     // A surveyed highway rarely hides a bend behind a brow, so the coupling is rare.
     phraseMin: 1,
@@ -191,12 +213,19 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     linkMin: 150,
     linkMax: 500,
     crestChance: 0.35,
-    radiusMin: 320,
-    radiusMax: 800,
+    radiusMin: 260,
+    radiusMax: 900,
     headingMin: 0.18,
     headingMax: 0.45,
     deviation: 0.55,
     bankShare: 1,
+    // Surveyed: gentler pitches and a long crest curve, so a brow rarely hides much.
+    swellChance: 0.85,
+    swellRiseMin: 5,
+    swellRiseMax: 11,
+    swellClimbMin: 200,
+    swellClimbMax: 320,
+    swellCrestM: 120,
   },
   {
     // Rolling country: the old default, kept because it is a good road — a corner a
@@ -207,7 +236,7 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     // 750 m, from 1.1 km: one corner a kilometre at 15-30 degrees was driven as
     // "almost no corners". The heading budget is spent on angle, not cadence, so this
     // is free of the no-crossing bound.
-    cornerSpacing: 750,
+    cornerSpacing: 560,
     // Mixed: a pair or a trio a short straight apart, then a breather of about a
     // kilometre and a half. Country road over country ground, so every phrase looks
     // for a brow to start behind.
@@ -216,12 +245,19 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     linkMin: 40,
     linkMax: 220,
     crestChance: 1,
-    radiusMin: 140,
-    radiusMax: 320,
+    radiusMin: 130,
+    radiusMax: 420,
     headingMin: 0.22,
     headingMax: 0.52,
     deviation: 0.93,
     bankShare: 0.75,
+    // The swells' home: nearly every slot, the tallest of them, blind brows.
+    swellChance: 0.95,
+    swellRiseMin: 7,
+    swellRiseMax: 15,
+    swellClimbMin: 130,
+    swellClimbMax: 260,
+    swellCrestM: 70,
   },
   {
     // Switchbacks: mountain road. The tightest, most relentless district, and the
@@ -262,6 +298,13 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     headingMax: 0.85,
     deviation: 0.45,
     bankShare: 0.9,
+    // The hairpins are the event here; a swell where the road runs straight enough.
+    swellChance: 0.8,
+    swellRiseMin: 5,
+    swellRiseMax: 10,
+    swellClimbMin: 120,
+    swellClimbMax: 220,
+    swellCrestM: 60,
   },
   {
     // Esses: a rhythm rather than a sequence of events — alternating medium corners
@@ -278,13 +321,19 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     // One size up from the switchbacks and with less angle: a 200 m radius through
     // 0.8 rad winds on over about 300 m, so 500 m per corner is a continuous rhythm
     // rather than a sequence of events.
-    cornerSpacing: 500,
-    radiusMin: 150,
-    radiusMax: 260,
+    cornerSpacing: 440,
+    radiusMin: 140,
+    radiusMax: 300,
     headingMin: 0.35,
     headingMax: 0.6,
     deviation: 0.7,
     bankShare: 0.85,
+    swellChance: 0.95,
+    swellRiseMin: 6,
+    swellRiseMax: 13,
+    swellClimbMin: 120,
+    swellClimbMax: 240,
+    swellCrestM: 60,
   },
   {
     // Derelict: a road that was never surveyed, only bulldozed. Sharp kinks joined by
@@ -293,7 +342,7 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     weight: 0.08,
     designSpeedKmh: 60,
     // 1 km, from 1.6: same reasoning as the rolling road above.
-    cornerSpacing: 1_000,
+    cornerSpacing: 750,
     // Irregular on purpose: anything from a lone kink to four corners, joined by
     // anything from a car length to half a kilometre. Bulldozed along the ground, so
     // it goes over brows and turns where it lands.
@@ -303,11 +352,18 @@ export const CHARACTERS: readonly RoadCharacter[] = [
     linkMax: 600,
     crestChance: 1,
     radiusMin: 80,
-    radiusMax: 180,
+    radiusMax: 200,
     headingMin: 0.4,
     headingMax: 0.8,
     deviation: 0.6,
     bankShare: 0,
+    // Bulldozed over whatever was there: short sharp humps, the shortest crest curves.
+    swellChance: 0.95,
+    swellRiseMin: 6,
+    swellRiseMax: 14,
+    swellClimbMin: 110,
+    swellClimbMax: 220,
+    swellCrestM: 50,
   },
 ];
 

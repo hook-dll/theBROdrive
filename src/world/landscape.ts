@@ -103,9 +103,9 @@ function band(seed: number, x: number, z: number): number {
  * altitude at almost no cost in steepness.
  *
  * TEMPO, and why the two long bands do not have it. `RELIEF_SCALE` multiplies every
- * amplitude AND every wavelength, and that is what buys the world its +-1255 m of
- * range — of which +-1050 m lives in the 225 km and 50 km bands. Those two are the
- * mountains, the basins and the far horizon, and nothing here touches them.
+ * amplitude AND every wavelength, and that is what buys the world its +-550 m of
+ * range — of which +-520 m lives in the 225 km and 50 km bands. Those two are the
+ * basins and divides under the mountains and the far horizon.
  *
  * The problem is the OTHER two. Stretched fivefold, every climb a driver meets lasts
  * kilometres, so the road has exactly one pace: measured, the grade changes sign
@@ -114,12 +114,12 @@ function band(seed: number, x: number, z: number): number {
  * SHORT alternative and a regional tempo field crossfades between them:
  *
  *   band    long tempo             short tempo          slope long/short
- *   hills   +-175 m / 12.5 km      +-60 m / 6 km         4.20% / 3.00%
- *   rolls   +- 30 m /  2.1 km      +- 8 m / 250 m        4.29% / 9.60%
+ *   hills   +- 25 m / 12.5 km      +-25 m / 6 km         0.60% / 1.25%
+ *   rolls   +-  5 m /  2.1 km      +- 3 m / 250 m        0.71% / 3.60%
  *
  * A pair contributes `(1 - w) * long + w * short` with ONE shared `w`, so the two
  * tempos never mix their worst cases and the field's bound is the worse of the two
- * endpoints — 11.5% at the long end, 15.6% at the short one.
+ * endpoints.
  *
  * STEEP IS ONLY ALLOWED SHORT (owner, 2026-10-10). A long pitch is fine when it is
  * gentle; a long STEEP one is a slow crawl in a weak car and no fun at all. The felt
@@ -128,8 +128,17 @@ function band(seed: number, x: number, z: number): number {
  * kilometre of hills. At these amplitudes (1000 km, seeds 1337 and 90210): |grade|
  * p50 2.2%, p90 6.0-6.4%, p99 9.4-9.9%, max 13.9%; a run at 10% or more lasts at most
  * 160 m, a 500 m stretch averaging 6% or more comes up two or three times per 100 km,
- * and the steepest 2 km average is 7.3%. The short-tempo rolls keep their brief 9.6%
- * ramps because a crest you feel is the point of them.
+ * and the steepest 2 km average is 7.3%.
+ *
+ * AND THEN THE DRAGS HAD TO GO TOO (owner, 2026-10-19). Gentle and long is still
+ * long: on seeds 42 and 1337 the first 20 km held 0.15 crests per km and one climb of
+ * 5.3 km, and over 300 km climbs ran to 10-14 km — a road the owner drove as a flat
+ * plateau. The felt bands above are now a fraction of that (hills +-175 / +-60 m, rolls
+ * +-30 / +-8 m before), the long bands +-400 / +-120 m (from +-700 / +-350), and what
+ * a driver feels is the road's own SWELLS (`roadswells.ts`): short rises, long
+ * descents, crests that hide what is beyond, laid where the road is and budgeted
+ * against the weakest car. These bands only tilt the country under them; a descent
+ * steeper than their drag is what makes a swell read as a hill at all.
  *
  * LATTICE SPACING IS NOT FEATURE LENGTH, and this is the whole reason the numbers
  * look small. Value noise with +-1 lattice values gives neighbouring cells the same
@@ -169,24 +178,24 @@ interface Band {
 
 const BANDS: readonly Band[] = [
   /** Continental: broad altitude changes, almost no slope. */
-  { amplitude: 140 * RELIEF_SCALE, wavelength: 45_000 * RELIEF_SCALE, hilliness: false, home: false },
+  { amplitude: 80 * RELIEF_SCALE, wavelength: 45_000 * RELIEF_SCALE, hilliness: false, home: false },
   /** Regional: basins and divides, several minutes of driving across. */
-  { amplitude: 70 * RELIEF_SCALE, wavelength: 10_000 * RELIEF_SCALE, hilliness: false, home: false },
+  { amplitude: 24 * RELIEF_SCALE, wavelength: 10_000 * RELIEF_SCALE, hilliness: false, home: false },
   /** Hills: a climb or descent that lasts long enough to choose a gear. */
   {
-    amplitude: 35 * RELIEF_SCALE,
+    amplitude: 5 * RELIEF_SCALE,
     wavelength: 2500 * RELIEF_SCALE,
     hilliness: true,
     home: true,
-    short: { amplitude: 60, wavelength: 6000 },
+    short: { amplitude: 25, wavelength: 6000 },
   },
   /** Rolls: the crest-and-dip rhythm under the bonnet. */
   {
-    amplitude: 6 * RELIEF_SCALE,
+    amplitude: 1 * RELIEF_SCALE,
     wavelength: 420 * RELIEF_SCALE,
     hilliness: false,
     home: true,
-    short: { amplitude: 8, wavelength: 250 },
+    short: { amplitude: 3, wavelength: 250 },
   },
 ];
 
@@ -250,8 +259,9 @@ function sumOverBands(tempo: number, per: (b: Band, tempo: number) => number): n
 }
 
 /**
- * The steepest this field can be, as a fraction: the worst tempo's band sum plus the
- * homestead ramp's own contribution.
+ * The steepest the BANDS can be, as a fraction: the worst tempo's band sum plus the
+ * homestead ramp's own contribution. The road's swells come on top and carry their own
+ * bound (`SWELL_MAX_SLOPE` in roadswells.ts).
  */
 export const MAX_SLOPE =
   Math.max(sumOverBands(0, slopeAtTempo), sumOverBands(1, slopeAtTempo)) +
@@ -264,7 +274,7 @@ export const MAX_RELIEF = Math.max(sumOverBands(0, reliefAtTempo), sumOverBands(
  * How far BELOW THE GROUND a body has to be to count as having escaped the world.
  *
  * An ABSOLUTE altitude cannot express this. The field's half-range is `MAX_RELIEF`
- * (+-1255 m), so whole basins — over a hundred kilometres of road at a time on
+ * (+-550 m), so whole basins — over a hundred kilometres of road at a time on
  * ordinary seeds — sit below any fixed line drawn for the purpose. A car driving down
  * into one then satisfies the test on solid asphalt, is "rescued" onto the road, and
  * satisfies it again on the next step, for good.
@@ -339,6 +349,15 @@ function smoothstep01(t: number): number {
   return c * c * (3 - 2 * c);
 }
 
+/**
+ * Relief laid onto the field from outside it: the road's swells (`roadswells.ts`), a
+ * pure function of position like everything here. Kept as an interface so this file
+ * stays road-agnostic and the heading's crest probes can keep reading the bare field.
+ */
+export interface LandscapeOverlay {
+  heightAt(x: number, z: number): number;
+}
+
 export class Landscape {
   /** One hash tag per band tempo, plus hilliness, tempo and the mountains. */
   private readonly tags: readonly number[];
@@ -348,6 +367,7 @@ export class Landscape {
   private readonly mountainTags: readonly number[];
   /** Field value at the origin, subtracted so the homestead sits at y = 0. */
   private readonly datum: number;
+  private overlay: LandscapeOverlay | null = null;
 
   constructor(seed: number) {
     const base = seed >>> 0;
@@ -360,7 +380,16 @@ export class Landscape {
     this.tempoTag = base ^ 0x27d4eb2f;
     this.mountainTags = MOUNTAIN_BANDS.map((_, i) => (base ^ 0x2545f491) + i * 0x85ebca6b);
     this.datum = 0;
-    this.datum = this.heightAt(0, 0);
+    this.datum = this.baseHeightAt(0, 0);
+  }
+
+  /**
+   * Lays `overlay` onto the field. `Road` does it once, at construction, with its own
+   * swells; nothing reads a height before then. The overlay must be zero at the
+   * homestead, which the swells keep clear of.
+   */
+  setOverlay(overlay: LandscapeOverlay): void {
+    this.overlay = overlay;
   }
 
   /**
@@ -414,6 +443,16 @@ export class Landscape {
 
   /** Ground elevation at a world position, metres, relative to the homestead. */
   heightAt(x: number, z: number): number {
+    const base = this.baseHeightAt(x, z);
+    return this.overlay ? base + this.overlay.heightAt(x, z) : base;
+  }
+
+  /**
+   * The bands alone, without the overlay: what the road's swells are laid onto and
+   * budgeted over, and what the heading's crest probes read (they shape the spine the
+   * swells are placed from, so they cannot see the swells).
+   */
+  baseHeightAt(x: number, z: number): number {
     let hilliness = -1;
     let tempo = -1;
     let home = -1;

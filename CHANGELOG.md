@@ -1217,6 +1217,64 @@
 
 ### Changed
 
+- THE ROAD ROLLS AGAIN: SHORT RISES, LONG DESCENTS, CRESTS YOU CANNOT SEE OVER
+  (`world/roadswells.ts`, new; `world/landscape.ts`, `world/roadcharacter.ts`,
+  `world/road.ts`). The felt landscape bands made climbs of 4-14 km that the owner drove
+  as a flat plateau. They are now lower: hills ±175/±60 m → ±25/±25 m, rolls ±30/±8 m →
+  ±5/±3 m, and the long altitude bands ±700/±350 m → ±400/±120 m. What a driver feels
+  now are the road's own SWELLS. A swell is a ridge laid across the road from the spine:
+  a climb of 110-450 m, a crest curve, then a descent 2.4-4 times longer. It is 90-200 m
+  wide at full height and fades out over 320-480 m either side, so the desert rises with
+  the road and the road does not sit on a dyke. Each swell sits inside its own 950 m slot.
+  It is added to `Landscape.heightAt` as a position-pure overlay
+  (`LandscapeOverlay`, `baseHeightAt` for the bare bands), so the road, the terrain, the
+  tiles, the vista and every worker read the same field, and net elevation cannot drift.
+  The district sets the chance, height, climb length and crest length
+  (`RoadCharacter.swell*`). A swell is paired with a corner in its slot where one fits:
+  a bend over a blind brow, a bend on the rise, or a bend out of the dip.
+  - THE CLIMB BUDGET IS A SPEED. Every swell is driven before it is built, by `WEAK_CAR`:
+    the VAZ-1111 Oka, 710 kg with its driver, 16 kW at the wheels (the least its torque
+    curve and gearing give from 60 to 90 km/h). It starts at 90 km/h on gravel's rolling
+    resistance, with the bands underneath. A swell is lowered until the car loses at most
+    11 km/h (`CLIMB_LOSS_KMH`), or it is dropped. A swell is also dropped if the road
+    through it would be steeper than 13%. Where the bands are already lifting, the descent
+    is made to fall 1.2% steeper than the lift, so it still reads as a descent.
+  - A swell is dropped if the road doubles back across it. If another pass of the road
+    is within reach, the swell is narrowed or dropped. `RoadHeading`'s crest probes read
+    the bare bands.
+  - MORE CORNERS. `cornerSpacing` changes: pan 1400 → 1000 m, highway 1300 → 950, rolling
+    750 → 560, esses 500 → 440, derelict 1000 → 750. Radius ranges are wider: pan 450-1400,
+    highway 260-900, rolling 130-420, esses 140-300, derelict 80-200. The pan's banking share
+    goes 0.2 → 0.5. `SPINE_FORMAT` is now 11.
+  - Measured by `tools/road-rhythm.ts` (new), over km 0-300 on seeds 1, 7, 42, 1337 and
+    90210, before → after:
+    - Corners per km: 1.27-1.55 → 1.53-1.73. Median radius 187-218 → 198-252 m; p10
+      125-137 → 126-138 m.
+    - Grade |p50| 1.8-2.4% → 1.3-1.6%, p90 5.6-6.8% → 4.3-4.8%, max 11.9-12.8% → 11.8-12.7%.
+    - Crests per km: 0.65-0.83 → 0.94-0.99. Blind crests per km: 0.50-0.75 → 0.81-0.90.
+      Crests with a corner within 150 m: 35-54% → 52-63%.
+    - Mean climb 585-802 m → 339-494 m. Mean descent 565-815 m → 550-707 m.
+    - Longest climb 8.6-14.6 km (up to 512 m tall) → 2.5-4.3 km (at most 63 m, at ≤1.5%).
+    - The Oka's worst loss anywhere: 9.2-10.9 km/h → 7.1-10.5 km/h.
+    - Net change over 300 km: -836…+1312 m → -625…+719 m.
+    - Banking stays at a cap of 8%, now on 15-18% of the road (was 14-16%).
+  - `tools/road-rhythm.ts` fails if the worst loss is over 15 km/h. It also fails if
+    `WEAK_CAR` is ever stronger than the catalogue's weakest car really is.
+  - A cold 10 km road block now takes 2.6-2.9 ms to build, up from 1.2. The whole-road
+    index the swells use (8 ms) is built when the spine arrives.
+- MESAS ARE BACK BESIDE THE ROAD, AND THEY STAY (`world/mesas.ts`, `world/mesacolliders.ts`,
+  `render/vista.ts`).
+  - One seed-pure module now places the mesas, and the vista, the colliders, the scatter
+    and the check tool all read it.
+  - A site is rejected if its footprint comes within 220 m (`MESA_ROAD_CLEARANCE_M`) of
+    any pass of the road. It is also rejected within 40 m of a roadside landform or lake
+    basin. A rejected cell tries up to three other spots inside itself.
+  - The vista's dissolve is deleted outright. Within 720 m a mesa stands on the exact
+    ground, and it becomes a static Rock trimesh within 1.5 km.
+  - Scatter, ground cover, tile props and desert buildings are kept out of mesa footprints.
+  - `tools/mesa-clearance.ts` (new) checks 9 seeds × 250 km on the final road. It finds 0
+    intrusions; the old placement had 131, with 91 across the road. It also finds 9.6
+    mesas per 100 km within 1 km of the road, and a nearest clearance of 227 m.
 - Kit cars: the driver's eye is lowered, by at most 3.5 cm, until the windscreen's header
   stands 10° over level (`driverEyeAt`). On the low roofs the header had stood at eye level
   and hidden the sky. The classics gain 5.5→8°, the Samaras 7.25→10.5°, the 2110s

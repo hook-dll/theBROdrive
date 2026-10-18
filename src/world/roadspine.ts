@@ -46,8 +46,9 @@ export const COARSE_SPACING = 200;
  * 9: a 4 km home district instead of 30, and a rarer, less straight pan road.
  * 10: corners closer together on pan/highway/rolling/derelict; the first district
  *     after the homestead is rolling or esses.
+ * 11: closer corners and wider radius ranges on every kind but switchbacks.
  */
-export const SPINE_FORMAT = 10;
+export const SPINE_FORMAT = 11;
 
 export interface RoadSpine {
   /** Road length the tables were built for, metres. */

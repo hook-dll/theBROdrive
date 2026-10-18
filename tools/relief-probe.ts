@@ -28,6 +28,7 @@
 import { MAX_RELIEF, MAX_SLOPE } from '../src/world/landscape';
 import { MIN_CORNER_RADIUS, Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
+import { SWELL_MAX_SLOPE, SWELL_RISE_MAX } from '../src/world/roadswells';
 
 /** Lateral sampling step for the slope scan, metres. Fine enough to catch a step. */
 const STEP = 5;
@@ -39,8 +40,8 @@ const SCAN_LATERAL = 600;
 const FLOOR_LATERAL = 400;
 
 console.log(
-  `budget: landscape slope <= ${(MAX_SLOPE * 100).toFixed(1)}%, ` +
-    `landscape relief +-${MAX_RELIEF.toFixed(0)} m, min corner radius ${MIN_CORNER_RADIUS.toFixed(0)} m`,
+  `budget: landscape slope <= ${(MAX_SLOPE * 100).toFixed(1)}% bands + ${(SWELL_MAX_SLOPE * 100).toFixed(1)}% per road swell, ` +
+    `landscape relief +-${MAX_RELIEF.toFixed(0)} m + ${SWELL_RISE_MAX} m, min corner radius ${MIN_CORNER_RADIUS.toFixed(0)} m`,
 );
 
 for (const seed of [1, 2, 7, 42, 1337, 90210]) {

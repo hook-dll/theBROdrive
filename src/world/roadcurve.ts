@@ -831,12 +831,14 @@ export class RoadHeading {
     const heights = this.probe;
     let px = x;
     let pz = z;
-    heights[0] = this.landscape.heightAt(px, pz);
+    // The bare bands: the swells are laid FROM this spine (roadswells.ts), and pair
+    // themselves with its corners, so the probe that shapes the spine cannot see them.
+    heights[0] = this.landscape.baseHeightAt(px, pz);
     for (let j = 1; j <= samples; j++) {
       const h = this.compose(s + (j - 0.5) * CREST_PROBE_STEP, from);
       px += Math.sin(h) * CREST_PROBE_STEP;
       pz += Math.cos(h) * CREST_PROBE_STEP;
-      heights[j] = this.landscape.heightAt(px, pz);
+      heights[j] = this.landscape.baseHeightAt(px, pz);
     }
     let best = -1;
     let bestFall = 0;

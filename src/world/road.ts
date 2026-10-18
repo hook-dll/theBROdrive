@@ -1,6 +1,7 @@
 import { Landscape } from './landscape';
 import { roadConditionAt, type RoadConditionBuffer } from './gradient';
 import { MIN_CORNER_RADIUS, NODE_SPACING, RoadHeading, stepNode, type NodeState } from './roadcurve';
+import { RoadSwells } from './roadswells';
 import {
   buildSpine,
   CHECKPOINT_NODES,
@@ -22,8 +23,10 @@ import { curveWidening, halfWidthAt, lanesPerSideAt, laneOffsetFor, LANE_WIDTH }
  *    projection is strictly increasing and it cannot self-intersect
  *  - route-scale noise supplies broad sweepers; seeded turn sequences guarantee
  *    real corners, in phrases of linked corners with breathers between them
- *  - the road's grade is whatever the landscape does along its tangent; there is
- *    no grade noise and no elevation state that could drift
+ *  - the road's grade is whatever the landscape does along its tangent, and the
+ *    landscape carries the road's own swells (`roadswells.ts`): short rises and long
+ *    descents laid across the road from the spine, each a bounded bump that starts
+ *    and ends on the bands, so there is still no elevation state that could drift
  *  - the road has a real end at `length`, reached only after a very long drive
  *  - generation is pure: same seed, same road, on any machine
  *
@@ -195,6 +198,8 @@ export class Road {
 
   /** The elevation field the road lies on. Public: the terrain reads the same one. */
   readonly landscape: Landscape;
+  /** The road's swells, laid onto `landscape`; see roadswells.ts. Public for tools. */
+  readonly swells: RoadSwells;
 
   private readonly headingField: RoadHeading;
   private readonly lastNode: number;
@@ -227,16 +232,27 @@ export class Road {
     // The heading's crest scouts replay from the spine's checkpoints, so a decision
     // deep in the road costs one interval rather than a walk from the house.
     this.headingField = new RoadHeading(this.seed, () => this.spine);
+    // The swells are laid from the spine and read back through the landscape, so the
+    // road, the terrain, the tiles and the vista all see them in one field. Their own
+    // budget drives over the bare bands.
+    this.swells = new RoadSwells(this.seed, this, this.headingField, (x, z) =>
+      this.landscape.baseHeightAt(x, z),
+    );
+    this.landscape.setOverlay(this.swells);
     this.lastNode = Math.floor(this.length / NODE_SPACING);
     if (spine && spine.length !== this.length) {
       throw new Error(`Road spine is for a ${spine.length} m road, not ${this.length} m`);
     }
     this.spineTables = spine ?? null;
+    if (spine) this.swells.prepare();
   }
 
   /** The checkpoint and coarse tables, built on demand if none was injected. */
   get spine(): RoadSpine {
-    this.spineTables ??= buildSpine(this.seed, this.length);
+    if (!this.spineTables) {
+      this.spineTables = buildSpine(this.seed, this.length);
+      this.swells.prepare();
+    }
     return this.spineTables;
   }
   /** Surface, decay and sand cover at arclength `s`, without allocating a sample. */
