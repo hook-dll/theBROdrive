@@ -1643,6 +1643,7 @@ async function boot(): Promise<void> {
       lateral: activeLateral,
       carId: drivingId,
       speedKmh: driving?.speedKmh ?? 0,
+      halfLength: driving?.bodyHalfExtents[2] ?? 0,
     });
     if (race.progress(activeS, raceProgress)) {
       hud.setRouteProgress('race', raceProgress.player, raceProgress.rivals, 0);

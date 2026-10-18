@@ -256,7 +256,9 @@ const PLAYER_IMPACT_SLACK_M = 0.5;
  * scuffs; it follows at `POLICE_HEADWAY_S`; handed back, it drives at the released cap.
  */
 const POLICE_POST_ANGLE_RAD = (25 * Math.PI) / 180;
-const POLICE_DIRT_SHARE = 0.35;
+// Sand-coloured dust over near-black paint reads olive in daylight: a police car is kept
+// close to clean (0.35 of a traffic car's film read as a dark green UAZ in the smoke run).
+const POLICE_DIRT_SHARE = 0.08;
 const POLICE_HEADWAY_S = 0.9;
 const POLICE_RELEASED_CAP_MPS = 95 / 3.6;
 /** The light bar's rig channels (carkit police livery), 0 dark and 1 lit, and their rate. */
@@ -628,6 +630,8 @@ export interface PolicePose {
   direction: 1 | -1;
   /** Still on its post (parked, or pulling out of it). */
   posted: boolean;
+  /** Its body's half span along the road, metres. */
+  halfLength: number;
 }
 
 /** What a police car is doing for the police (world/police.ts); see `TrafficCar.police`. */
@@ -1920,6 +1924,9 @@ export class RoadTraffic {
 
   /** Something standing just in front of this car, overlapping it across the road: a queue. */
   private standingQueued(car: TrafficCar): boolean {
+    // A police car pulled over behind the player stands there on purpose: it is one more
+    // thing to go round, not a queue behind him.
+    if (car.police?.stop) return false;
     for (const other of this.carList) {
       if (other === car || other.vehicle.speedKmh * (1 / 3.6) > BYPASS_STILL_MPS) continue;
       const ahead = (other.forwardS - car.forwardS) * car.direction;
@@ -3445,6 +3452,7 @@ export class RoadTraffic {
     out.speed = car.forwardSpeed * car.direction;
     out.direction = car.direction;
     out.posted = car.layby !== null;
+    out.halfLength = car.roadHalfLength;
     return true;
   }
 

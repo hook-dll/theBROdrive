@@ -23,7 +23,7 @@
  * THE CHASE. Light bar and siren, the frantic driver's engine under a ceiling above the
  * player's own speed (`CATCH_UP_MPS`) until it is close, then matched to his and held
  * `FOLLOW_M` behind, never passing him (`RoadTraffic.policeChase`). When he stops it
- * pulls over `STAND_GAP_M` behind him on his line (`policeStopBehind`), on the shoulder
+ * pulls over `STAND_GAP_M` behind him, bumper to bumper, on his line (`policeStopBehind`): on the shoulder
  * if he stopped on it, and once both stand: [F] hands over the papers (`handOver`).
  *
  * THE STOP. Speeding is fined by how far over the limit, a collision flatly, a car whose
@@ -102,11 +102,12 @@ const CHASE_MIN_MPS = 80 / 3.6;
 const CHASE_MAX_MPS = 170 / 3.6;
 /**
  * Closer than this it matches his speed, easing toward `FOLLOW_M` behind him at
- * `FOLLOW_GAIN` m/s of closing per metre of gap: 12 m/s at the edge of the tail, so the
- * catch-up hands over without a step, and slow enough to stop closing in time.
+ * `FOLLOW_GAIN` m/s of closing per metre of gap. Far enough back that a player braking
+ * hard to a stop from 100 km/h does not have it on his bumper: at 25 m it came to a
+ * stand 0-4 m behind him (in-game smoke, seed 11), and a car cannot back up into place.
  */
-const TAIL_M = 70;
-const FOLLOW_M = 25;
+const TAIL_M = 90;
+const FOLLOW_M = 40;
 const FOLLOW_GAIN = 0.35;
 /**
  * Closer than this it does not pass him (`RoadTraffic.policeChase` `tailing`). Farther
@@ -119,7 +120,21 @@ const PLAYER_STOPPED_KMH = 4;
 const PLAYER_STOPPED_S = 1.5;
 /** A stopped player this near ahead is pulled over behind; the car stands this far behind. */
 const STOP_REACH_M = 250;
+/**
+ * Between the bumpers: the stand is this plus both cars' half lengths behind him, plus
+ * the 2-3 m the car rolls past its hold line coming down from a chase (measured in
+ * tools/police-bench.ts, seeds 42, 7, 1337: 7.0-8.3 m without it).
+ */
 const STAND_GAP_M = 10;
+const STAND_OVERSHOOT_M = 2.5;
+/** It is in its place within this of its gap, metres; it stops trying after this long, seconds. */
+const PLACE_SLACK_M = 2.5;
+const PLACE_TIMEOUT_S = 25;
+/**
+ * The flight clock (`FLEE_TIME_S`) runs only while he keeps his pace: a drop of this
+ * much below the fastest he went since it last restarted is slowing down, and restarts it.
+ */
+const SLOWING_KMH = 12;
 /** The police car standing (m/s) this long behind a stopped player: the stop begins. */
 const POLICE_STANDING_MPS = 0.5;
 const STANDING_SETTLE_S = 1;
@@ -192,6 +207,8 @@ export interface PoliceView {
   /** The car he drives, or null on foot. */
   readonly carId: string | null;
   readonly speedKmh: number;
+  /** His car's half length along the road, metres (0 on foot). */
+  readonly halfLength: number;
 }
 
 /** Why a chase began. */
@@ -231,6 +248,8 @@ interface Chase {
   phase: ChasePhase;
   /** Seconds the lights have been behind him while he has not stopped. */
   ignoredFor: number;
+  /** Fastest he went since the flight clock last restarted, km/h; see `SLOWING_KMH`. */
+  paceKmh: number;
   playerStillFor: number;
   standingFor: number;
   /** Seconds at the stop waiting for the papers; see `ASK_TIMEOUT_S`. */
@@ -253,7 +272,7 @@ export class PolicePatrol {
   private postsFrom = Infinity;
   private postsTo = -Infinity;
   private chase: Chase | null = null;
-  private readonly pose: PolicePose = { s: 0, lateral: 0, speed: 0, direction: 1, posted: true };
+  private readonly pose: PolicePose = { s: 0, lateral: 0, speed: 0, direction: 1, posted: true, halfLength: 0 };
   private serial = 0;
   private chases = 0;
   private clock = 0;
@@ -562,6 +581,7 @@ export class PolicePatrol {
       giveUpAfterM: GIVE_UP_MIN_M + hash01(seed, CHASE_SALT, post.key, chaseKey, 1) * GIVE_UP_SPAN_M,
       phase: 'pulling-out',
       ignoredFor: 0,
+      paceKmh: 0,
       playerStillFor: 0,
       standingFor: 0,
       waitedFor: 0,
@@ -607,11 +627,19 @@ export class PolicePatrol {
         if (chase.playerStillFor > PLAYER_STOPPED_S && gap > -STAND_GAP_M && gap < STOP_REACH_M) {
           chase.phase = 'stopping';
           chase.standingFor = 0;
+          chase.waitedFor = 0;
           chase.stoodS = view.s;
           this.runChase(chase, 0, view);
           return;
         }
-        if (gap < LIGHTS_SEEN_M) chase.ignoredFor += dt;
+        // The lights are behind him and he is not slowing: the flight clock runs.
+        chase.paceKmh = Math.max(chase.paceKmh, playerKmh);
+        if (playerKmh < chase.paceKmh - SLOWING_KMH) {
+          chase.ignoredFor = 0;
+          chase.paceKmh = playerKmh;
+        } else if (gap < LIGHTS_SEEN_M) {
+          chase.ignoredFor += dt;
+        }
         if (!fled && (chase.ignoredFor > FLEE_TIME_S || gap > FLEE_GAP_M || gap < -FLEE_BEHIND_M)) this.flee(chase);
         const playerMps = Math.max(0, playerKmh / 3.6);
         const cap = gap > TAIL_M
@@ -625,8 +653,23 @@ export class PolicePatrol {
           chase.phase = 'chasing';
           return;
         }
-        this.host.policeStopBehind(chase.carId, view.s - direction * STAND_GAP_M, view.lateral);
-        chase.standingFor = pose.speed < POLICE_STANDING_MPS && chase.playerStillFor > 0 ? chase.standingFor + dt : 0;
+        // Bumper to bumper: its stand is the gap plus both half lengths behind him.
+        this.host.policeStopBehind(
+          chase.carId,
+          view.s - direction * (STAND_GAP_M + STAND_OVERSHOOT_M + view.halfLength + pose.halfLength),
+          view.lateral,
+        );
+        // Standing where it means to: at its gap, or after `PLACE_TIMEOUT_S` of trying (a
+        // car behind it it cannot back into). Backing up to it is slow, so "still" alone
+        // was met while it reversed.
+        chase.waitedFor += dt;
+        {
+          const bumper = gap - view.halfLength - pose.halfLength;
+          const placed = bumper >= STAND_GAP_M - PLACE_SLACK_M || chase.waitedFor > PLACE_TIMEOUT_S;
+          chase.standingFor = placed && Math.abs(pose.speed) < POLICE_STANDING_MPS && chase.playerStillFor > 0
+            ? chase.standingFor + dt
+            : 0;
+        }
         if (chase.standingFor > STANDING_SETTLE_S) {
           chase.phase = 'stopped';
           chase.waitedFor = 0;
@@ -682,7 +725,7 @@ export class PolicePatrol {
     switch (chase.phase) {
       case 'pulling-out':
       case 'chasing':
-        return Number.isNaN(chase.fledAtS) ? 'POLICE — pull over and stop' : 'POLICE — in pursuit';
+        return Number.isNaN(chase.fledAtS) ? 'POLICE — pull over onto the shoulder and stop' : 'POLICE — in pursuit';
       case 'stopping':
         return 'POLICE — stay where you are';
       case 'stopped':
@@ -706,7 +749,9 @@ export class PolicePatrol {
       fine += FINE_SPEEDING_BASE + Math.ceil((speeding - SPEED_LIMIT_KMH) / FINE_SPEEDING_STEP_KMH);
       items.push(`speeding ${Math.round(speeding)} km/h`);
     }
-    if (chase.grounds.wanted || !Number.isNaN(chase.fledAtS)) {
+    // A flight he is stopped for at last is fined only when it escalated (he is wanted):
+    // one who stops, however late, answers for what he was stopped for.
+    if (chase.grounds.wanted) {
       fine += FINE_EVADING;
       items.push('fleeing the police');
     }

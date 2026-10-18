@@ -120,7 +120,7 @@ const police = new PolicePatrol(world, road, traffic, inventory, (text) => {
 
 let playerS = 2_500;
 let speed = 0;
-const pose: PolicePose = { s: 0, lateral: 0, speed: 0, direction: 1, posted: true };
+const pose: PolicePose = { s: 0, lateral: 0, speed: 0, direction: 1, posted: true, halfLength: 0 };
 let clock = 0;
 
 const condition = { surface: SurfaceType.Asphalt, decay: 0, sandCover: 0, markings: 0 };
@@ -152,7 +152,7 @@ function step(target: number): void {
   clock += FIXED_DT;
   const lateral = -road.halfWidthAt(playerS) + 1.45;
   traffic.fixedUpdate(FIXED_DT, playerS, lateral, 0, 0);
-  police.fixedUpdate(FIXED_DT, { s: playerS, lateral, carId: PLAYER_CAR, speedKmh: speed * 3.6 });
+  police.fixedUpdate(FIXED_DT, { s: playerS, lateral, carId: PLAYER_CAR, speedKmh: speed * 3.6, halfLength: 1.6 });
   physics.step();
   traffic.postStep();
 }
@@ -192,8 +192,9 @@ const stopAt = playerS;
 const stopped = await runUntil(0, () => phase() === 'stopped', 90);
 const chaseCar = police.snapshot().chase?.carId ?? '';
 const posed = traffic.policePose(chaseCar, pose);
-const gap = playerS - pose.s;
-check('it pulls over and stands behind him', stopped && posed && gap > 4 && gap < 20, `phase ${phase()}, gap ${gap.toFixed(1)} m, slowed from s ${stopAt.toFixed(0)}`);
+// Bumper to bumper: the marker's half length is the one the view hands the police (1.6).
+const bumperGap = playerS - pose.s - 1.6 - pose.halfLength;
+check('it stands 10 m behind him, bumper to bumper', stopped && posed && bumperGap > 7 && bumperGap < 13, `phase ${phase()}, bumper gap ${bumperGap.toFixed(1)} m, slowed from s ${stopAt.toFixed(0)}`);
 check('it stands on his line', posed && Math.abs(pose.lateral - (-road.halfWidthAt(playerS) + 1.45)) < 1.2, `lateral ${pose.lateral.toFixed(2)}`);
 const coinsBefore = coinsHeld(world.state);
 const result = police.handOver();
