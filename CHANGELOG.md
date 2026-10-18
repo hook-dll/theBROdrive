@@ -1031,7 +1031,6 @@
   contract is delivered into the open boot. One draw more per courier, programs anchored
   with the wreck's. `bun tools/wreck-lids.ts` checks the hinge, the cut, E, F and every
   cell on four bodies.
-
 - TWO CLOUD DECKS, EACH ON ITS OWN WIND (render/cloudfield.ts, render/clouds.ts,
   render/cloudshadow.ts). Over the cumulus now stands an altocumulus deck: flat rafts
   1.5-4 km long, a tenth as thick, 4.3-5.5 km up, in districts of their own and casting
@@ -1576,6 +1575,69 @@
     handed in, placed 2nd and 3rd.
 
 ### Fixed
+
+- THE ROAD HAS NO ROCKS ON IT, AND NOTHING THAT EXISTED ONLY FOR THEM IS LEFT (owner,
+  2026-10-18). The one obstacle on the road is a car — stalled, overturned or simply
+  standing. Deleted: `world/hazards.ts` (`HazardIndex`, `ReversedHazardIndex`, `RoadHazard`,
+  `HazardField`), the road-hazard stream in `ScatterProvider` (it was switched off already)
+  and its `hazards` argument; `Autopilot`'s hazard field and everything fed from it — the
+  prop scan, prop obstacles in the corridor, the crossing's clear-of-props proof, the
+  racing line's prop horizon, the verge-pass prop check, the prop-aware recovery side and
+  line, the one-second contact wedge; in the planner (vehicle/corridor.ts) the
+  movable/immovable distinction, `feasible` (it is `admissible` now), `stopRoom`, the
+  `LEFT_PASS_COST` "pass scenery on the right" price and the rock branch of the standing
+  escape; in `RoadTraffic` the hazard argument, bottleneck turns (`assignBottleneckTurns`,
+  `headWait`, `holdS`), the rails' prop survey and the spawn prop check. `setHoldDistance`
+  stays for lay-bys. Benches lost their rock scenarios (`autopilot-bench`, `traffic-bench`,
+  `corridor-bench`, `scatter-census`).
+- A CAR STANDING IN THE LANE IS GONE ROUND ON THE DRIVER'S OWN SHOULDER (vehicle/autopilot.ts
+  `planStandingBypass`, vehicle/corridor.ts `standingBypass`). Reported from play at the top
+  traffic setting: a monstrous jam behind a stopped car that nobody went round.
+  `tools/traffic-blocker.ts` (the player's car held still on the real road, 48 cars,
+  density pinned) shows the head of the queue swapping between the opposing lane and the
+  sand, rolling up to the bumper with its body still in the lane, and the stall rule
+  reversing it two metres at a time. Now a driver that finds a car standing in its lane
+  with nothing in front of it latches a line on its own shoulder just past that car's flank
+  (no further than the graded strip), opens it early enough to finish the move short of
+  the car (its shift at 0.09 m per metre plus a second of travel), never crosses the crown
+  for it, approaches so it can stop 6 m short until clear, and passes at 25 km/h. One that
+  stopped close behind anyway pulls out at walking pace — on lock to 30° off the road,
+  then straight — or, with no room ahead for that, backs up no more than 0.5 m at a time
+  with its rear clear; neither runs the stall rule. The deadlock grant no longer counts a
+  queue behind the player as facing the oncoming queue beyond him. The move's speed round
+  a standing car is priced on the line's real rate cap (`CorridorRequest.lineRate`).
+
+  Measured on `tools/traffic-blocker.ts`, 3 × 5 min, before → after: seed 1337 6.3 → 7.1
+  cars past a minute against 8.7 arriving, standing queue 4.9 → 4.2, head in recovery 27% →
+  14%, reverses per car past 8.9 → 4.9 at 2.3 → 1.8 m each, contacts 12.7 → 8.7; seed 7
+  8.3 → 6.3 past against 8.9 arriving, queue 2.6 → 4.6, recovery 24% → 13%, contacts 1.7 →
+  5. NOT YET WHAT WAS ASKED FOR: the queue still grows, cars still leave the strip (body
+  centre up to 15 m past the asphalt, the head off-road 14-36% of the time), and the
+  two-lanes-a-side stretch got worse (11 → 7.6 past a minute).
+
+- A CAR STANDING IN THE LANE IS GONE ROUND ON A ROUTE THE TRAFFIC BUILDS, LIKE A LAY-BY'S
+  (world/traffic.ts `Bypass`, `assignBypasses`, `serviceBypass`; vehicle/autopilot.ts
+  `LaybyCourse.backTo`, activity `bypass`). Owner's design, 2026-10-18. Anywhere on the road:
+  a traffic car still for 3 s on the carriageway with nothing standing just in front of it
+  (else it is queueing), a wreck, or the player's car. Every car of a direction whose lane it
+  meets, from 150 m back, gets its own line: lead-in over 25 m, along its own shoulder beside
+  the car with 0.7 m between flanks and 1.5 m past each end, back into the lane over 20 m.
+  It drives it as a lay-by line (`driveLayby`: pursuit, stop behind anything on the line),
+  braking to 25 km/h for the move. A car across the road is gone round by each direction on
+  its own side. One standing closer than 6 m short of the move backs 0.5 m straight first;
+  stood 3 s on the route with nothing ahead of it on the line, it backs another 0.5 m (at
+  most four times, each with 1 m clear behind), then gives that car up. The route is handed
+  back once the car is in its lane again past the rejoin. No route if the line would take
+  the body more than 1 m past the graded strip. `status.bypassing` counts the cars on one.
+
+  `tools/traffic-blocker.ts`, 48 cars, the player's car held in its lane: seed 1337, 5 min,
+  16.8 cars past a minute against 16.6 arriving, standing queue mean 0.0 (max 2), longest
+  head standstill 0 s, every one on the shoulder, body centre at most 1.35 m past the asphalt
+  (strip 2.5 m); seed 7 12.8 past against 13.4 arriving, queue max 1, no contacts; two lanes a
+  side 13.8 against 13.4. Was, with the driver's own bypass: 7.1 against 8.7, queue 4.9,
+  centre up to 15 m off the asphalt. One 3-minute repeat of seed 1337 still showed 13 reverses
+  near the queue (up to 11.9 m) and 11 contacts, from the driver's own recovery rather than
+  the route; queue max 4, no standstill.
 
 - UAZ-2206: THE ENGINE BAY UNDER THE CABIN COVER, ITS GRID ON IT AND REACHED FROM THE SIDE
   DOOR (carkit bay.ts `BayRoom`, interior.ts `engineCover`; player/interaction.ts

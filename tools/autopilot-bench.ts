@@ -1,8 +1,8 @@
 /**
  * Deterministic real-autopilot road-driving harness.
  *
- * This defends the fixed-step contract between Autopilot, Road, Vehicle and hazards:
- * a controller that merely writes plausible inputs, but cannot keep a real car on a
+ * This defends the fixed-step contract between Autopilot, Road and Vehicle: a
+ * controller that merely writes plausible inputs, but cannot keep a real car on a
  * curved road, make progress, respect an obstacle, or release human controls fails.
  * The collider is a procedural strip sampled from the real Road and its real surface
  * field, rather than a flat plane: that keeps the car on the same grade and curve the
@@ -23,7 +23,6 @@ import { benchCarState } from './benchcar';
 import { Autopilot, AUTOPILOT_MODES, type AutopilotMode } from '../src/vehicle/autopilot';
 import { carModel } from '../src/vehicle/carmodels';
 import { Vehicle } from '../src/vehicle/vehicle';
-import { HazardIndex, type RoadHazard } from '../src/world/hazards';
 import { WorldOrigin } from '../src/world/origin';
 import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
 import { roadSurfaceY, SurfaceField } from '../src/world/roadsurface';
@@ -55,12 +54,9 @@ const START_S = 1_000;
 const ROUTE_METRES = 3_600;
 const ROAD_STEP = 1;
 /**
- * Ordinary passing still uses the 1.2 m verge. Indexed props may use four metres of
- * graded shoulder, matching `STATIC_AVOID_VERGE_M`; the collider extends past that
- * envelope so the outer wheels remain supported.
+ * How far past the asphalt the collider ribbon has to support the outer wheels: the
+ * graded shoulder a pass on the right or a road return may use.
  */
-const PASSING_VERGE = 1.2;
-const PASSING_EDGE = ROAD_HALF_WIDTH + PASSING_VERGE;
 const STATIC_AVOID_EDGE = ROAD_HALF_WIDTH + 4;
 const PLANNED_CLEARANCE_M = 1.05 + 0.4;
 /**
@@ -112,7 +108,7 @@ function addRoadCollider(physics: PhysicsWorld, road: Road, from: number, to: nu
       const s = Math.min(chunkTo, chunkFrom + row * ROAD_STEP);
       for (let side = 0; side < 2; side++) {
         // The ribbon reaches PAST the asphalt on purpose. The autopilot is allowed a
-        // wheel on the verge to squeeze past a boulder (PASSING_VERGE_M in
+        // wheel on the verge to squeeze past a stopped car (PASSING_VERGE_M in
         // autopilot.ts), and in the game the desert collider is flush with the asphalt
         // edge; a bench ribbon that stopped at the paint dropped every excursion into
         // the void and reported it as an autopilot that could not hold a line.
@@ -135,12 +131,11 @@ function addRoadCollider(physics: PhysicsWorld, road: Road, from: number, to: nu
   }
 }
 
-interface Rig { physics: PhysicsWorld; vehicle: Vehicle; road: Road; hazards: HazardIndex; autopilot: Autopilot; input: InputFrame; }
+interface Rig { physics: PhysicsWorld; vehicle: Vehicle; road: Road; autopilot: Autopilot; input: InputFrame; }
 
 async function makeRig(
   startS = START_S,
   routeMetres = ROUTE_METRES,
-  hazards?: HazardIndex,
   modelId = MODEL_ID,
 ): Promise<Rig> {
   const road = new Road(42);
@@ -152,8 +147,7 @@ async function makeRig(
   const state = carState(road, startS, 0, modelId);
   world.state.cars[state.id] = state;
   const vehicle = new Vehicle(physics, world, state, scene, origin);
-  const hazardIndex = hazards ?? new HazardIndex();
-  const autopilot = new Autopilot(road, hazardIndex, physics);
+  const autopilot = new Autopilot(road, physics);
   const input = emptyInput();
   // LAND FIRST, THEN PIN.
   //
@@ -177,7 +171,7 @@ async function makeRig(
     vehicle.fixedUpdate(FIXED_DT, input); physics.step(); vehicle.postStep();
   }
   input.handbrake = false;
-  return { physics, vehicle, road, hazards: hazardIndex, autopilot, input };
+  return { physics, vehicle, road, autopilot, input };
 }
 
 function step(rig: Rig): void {
@@ -220,7 +214,7 @@ function calm(rig: Rig): void {
 }
 
 async function measureMode(mode: AutopilotMode, modelId = MODEL_ID, crosswind = 0): Promise<DriveMetrics> {
-  const rig = await makeRig(START_S, ROUTE_METRES, undefined, modelId);
+  const rig = await makeRig(START_S, ROUTE_METRES, modelId);
   if (crosswind !== 0) {
     updateWeather(rig.road.seed, 0, FIXED_DT, 0, 0);
     forceWeather('haboob', HABOOB_HOLD, 1e6);
@@ -356,7 +350,7 @@ async function checkCrosswind(): Promise<void> {
  * is the race rivals' mode, so the ghosts' shelter has a live counterpart.
  */
 async function checkShelter(): Promise<void> {
-  const rig = await makeRig(START_S, ROUTE_METRES, undefined, MODEL_ID);
+  const rig = await makeRig(START_S, ROUTE_METRES, MODEL_ID);
   updateWeather(rig.road.seed, 0, FIXED_DT, 0, 0);
   forceWeather('haboob', HABOOB_HOLD, 1e6);
   rig.autopilot.setMode('hurried');
@@ -443,29 +437,6 @@ async function measureLooseSurface(mode: AutopilotMode): Promise<LooseSurfaceMet
 }
 
 /**
- * One hazard per run, deliberately.
- *
- * Both in the same run cannot work: a car that correctly refuses to pass a blocked
- * road never reaches the second hazard, so the breakable check would only ever be
- * measuring the first one's success.
- */
-function addHazardCollider(rig: Rig, hazard: RoadHazard): () => void {
-  const point = rig.road.offsetPoint(hazard.s, hazard.lateral);
-  const body = rig.physics.world.createRigidBody(
-    rig.physics.rapier.RigidBodyDesc.fixed().setTranslation(
-      point.x,
-      point.y + 1,
-      point.z,
-    ),
-  );
-  rig.physics.world.createCollider(
-    rig.physics.rapier.ColliderDesc.cylinder(1, hazard.radius).setFriction(0.9),
-    body,
-  );
-  return () => rig.physics.removeBody(body);
-}
-
-/**
  * First arclength at or after `from` whose whole drive stays one lane each way.
  *
  * Scenarios about a narrow road have to say so: the widening lattice draws a passing
@@ -486,283 +457,9 @@ function narrowStart(road: Road, from: number, routeMetres: number): number {
   return from;
 }
 
-async function driveHazard(
-  hazard: RoadHazard,
-  seconds: number,
-  startS = START_S,
-): Promise<{
-  minDistance: number;
-  speedAtClosest: number;
-  commandedAtClosest: number;
-  closestLateral: number;
-  minSpeedNear: number;
-  approachGap: number;
-  approachSpeed: number;
-  /** Fastest and slowest the car went within 15 m of the hazard's edge. */
-  chargeSpeed: number;
-  restSpeed: number;
-  passed: boolean;
-  rejoined: boolean;
-  recoveryStarts: number;
-  thirdRecoveryAt: number;
-  rig: Rig;
-  worstLateral: number;
-  chunk: string;
-  removeCollider: () => void;
-}> {
-  const hazards = new HazardIndex();
-  const chunk = 'autopilot-bench-hazards';
-  hazards.add(chunk, hazard);
-  const rig = await makeRig(startS, ROUTE_METRES, hazards);
-  rig.autopilot.setEngaged(true);
-  const removeCollider = addHazardCollider(rig, hazard);
-  let minDistance = Infinity;
-  let speedAtClosest = 0;
-  let commandedAtClosest = 0;
-  let closestLateral = 0;
-  let minSpeedNear = Infinity;
-  let approachGap = Infinity;
-  let approachSpeed = 0;
-  let chargeSpeed = 0;
-  let restSpeed = Infinity;
-  let worstLateral = 0;
-  let passed = false;
-  let rejoined = false;
-  let recoveryStarts = 0;
-  let thirdRecoveryAt = Infinity;
-  let wasRecovering = false;
-  // The projection hint MUST be carried. `project` searches locally around it, so a
-  // fixed hint saturates a couple of hundred metres out and every distance measured
-  // against a hazard further along the route silently freezes.
-  let hint = startS;
-  for (let i = 0; i < Math.ceil(seconds / FIXED_DT); i++) {
-    step(rig);
-    const pos = rig.vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 });
-    const p = rig.road.project(pos.x, pos.z, hint);
-    hint = p.s;
-    const v = speed(rig.vehicle);
-    const recovering = rig.autopilot.activity === 'recover';
-    if (recovering && !wasRecovering) {
-      recoveryStarts++;
-      if (recoveryStarts === 3) thirdRecoveryAt = i * FIXED_DT;
-    }
-    wasRecovering = recovering;
-    worstLateral = Math.max(worstLateral, Math.abs(p.lateral));
-    // Clearance is only meaningful ALONGSIDE the hazard: a Euclidean (s, lateral)
-    // distance measured from 200 m back reports the approach, not the pass.
-    if (Math.abs(p.s - hazard.s) < 3) {
-      const clearance = Math.abs(p.lateral - hazard.lateral);
-      if (clearance < minDistance) {
-        minDistance = clearance;
-        speedAtClosest = v;
-        commandedAtClosest = rig.autopilot.commandedLine;
-        closestLateral = p.lateral;
-      }
-    }
-    if (Math.abs(p.s - hazard.s) < 8) minSpeedNear = Math.min(minSpeedNear, v);
-    // Never got alongside it: record how close the approach came, so a car that
-    // stopped short reports its stopping distance rather than an empty Infinity.
-    if (!passed && p.s < hazard.s) {
-      approachGap = Math.min(approachGap, hazard.s - p.s);
-      approachSpeed = v;
-      // Both measured from the hazard's EDGE, not its centre: a 6 m boulder's
-      // braking envelope is still 7 m/s twenty metres from the middle of it.
-      if (hazard.s - p.s < hazard.radius + 15) {
-        chargeSpeed = Math.max(chargeSpeed, v);
-        restSpeed = Math.min(restSpeed, v);
-      }
-    }
-    if (p.s > hazard.s + 15) passed = true;
-    // Back in ITS LANE, whatever the road is doing there: the lane centre is now a
-    // road property (see world/roadprofile.ts), not a constant on the driving mode.
-    if (
-      passed &&
-      p.s > hazard.s + 60 &&
-      Math.abs(p.lateral - rig.road.laneCentreAt(p.s, 0)) < 0.35
-    ) {
-      rejoined = true;
-      break;
-    }
-  }
-  return {
-    minDistance,
-    speedAtClosest,
-    commandedAtClosest,
-    closestLateral,
-    minSpeedNear,
-    approachGap,
-    approachSpeed,
-    chargeSpeed,
-    restSpeed,
-    passed,
-    rejoined,
-    recoveryStarts,
-    thirdRecoveryAt,
-    rig,
-    worstLateral,
-    chunk,
-    removeCollider,
-  };
-}
-
-async function checkHazards(): Promise<void> {
-  // The same seeded road every scenario here drives, asked only about its geometry.
-  const hazardRoad = new Road(42);
-  // AND A NARROW ONE, BECAUSE EVERY SCENARIO BELOW IS ABOUT THE DRIVER'S OWN LANE.
-  //
-  // These props sit on or beside the crown, which is the driver's lane on a two-lane
-  // road and is nothing to do with it on a four-lane one: with the widening lattice
-  // over this arclength the car drove past a crown boulder 4.3 m away at full cruise,
-  // correctly, and the checks read that as a driver that had stopped avoiding things.
-  // The trunk scenario already had to learn this; it is the same fix and the same call.
-  const hazardStartS = narrowStart(hazardRoad, START_S, ROUTE_METRES);
-  // A rock the width of the lane's centre: pass on the right, then settle back onto
-  // the normal lane only after the rear bumper is clear.
-  const rock = await driveHazard(
-    { s: hazardStartS + 300, lateral: 0, radius: 1.2, breakable: false },
-    100,
-    hazardStartS,
-  );
-  check(
-    'non-breakable hazard is passed on the right',
-    rock.passed &&
-      rock.rejoined &&
-      rock.closestLateral <= -(1.2 + PLANNED_CLEARANCE_M) + 0.2 &&
-      rock.minDistance >= 1.2,
-    `passed/rejoined=${rock.passed}/${rock.rejoined}, body lateral ${rock.closestLateral.toFixed(2)} m, clearance ${rock.minDistance.toFixed(2)} m at ${rock.speedAtClosest.toFixed(2)} m/s`,
-  );
-  check(
-    'static avoidance stays inside its graded shoulder',
-    rock.worstLateral <= STATIC_AVOID_EDGE,
-    `worst |lateral| ${rock.worstLateral.toFixed(2)} m against a ${STATIC_AVOID_EDGE.toFixed(2)} m edge`,
-  );
-  // A MOUND IN THE LANE MUST NOT PARK THE CAR.
-  //
-  // Reported from play: the player's car on autopilot, a pile of dirt in its own lane,
-  // endless attempts to get round and no progress at all while ambient traffic went
-  // past. A metre of pile 1.3 m off the crown leaves NO line inside the asphalt that
-  // clears it, so the car eases out onto the shoulder to creep by - and once it was
-  // there, stopped, the planner judged every candidate line by a swept band that starts
-  // at the body's own lateral. The pile already overlapped that, so every line was
-  // impossible, the corridor was infeasible, the speed law held the car at zero, and
-  // zero speed is what kept the pile there. It stood beside it for the rest of the
-  // session.
-  const mound = await driveHazard(
-    { s: hazardStartS + 300, lateral: -1.3, radius: 1.0, breakable: false },
-    90,
-    hazardStartS,
-  );
-  check(
-    'a mound in the lane never parks the car',
-    mound.passed && mound.rejoined,
-    `passed/rejoined=${mound.passed}/${mound.rejoined}, closest ${mound.minDistance.toFixed(2)} m at ${mound.speedAtClosest.toFixed(2)} m/s, worst |lateral| ${mound.worstLateral.toFixed(2)} m`,
-  );
-  // THE TRUNK SCENARIO NEEDS A NARROW ROAD, SO IT ASKS FOR ONE.
-  //
-  // Its whole premise is that no right-hand line on the asphalt clears the trunk. That
-  // was written when the carriageway was 2.9 m everywhere the bench drove; the widening
-  // lattice then put a passing window over this arclength, the road became 5.8 m wide,
-  // and the driver correctly went round on the right — on asphalt, keeping the
-  // pass-immovable-things-on-the-right convention — which the check scored as driving
-  // into the sand. The scenario had stopped describing its own road, so it now starts
-  // at the first stretch that is narrow for the whole drive and places the trunk
-  // against that road's real edge.
-  const trunkEdge = hazardRoad.halfWidthAt(hazardStartS + 300);
-  const trunkLateral = -(trunkEdge - 0.6);
-  const trunk = await driveHazard(
-    { s: hazardStartS + 300, lateral: trunkLateral, radius: 1.6, breakable: false },
-    120,
-    hazardStartS,
-  );
-  // A TRUNK AGAINST THE RIGHT VERGE IS PASSED ON THE LEFT, and that reverses what this
-  // check used to demand.
-  //
-  // Immovable things are passed on the right by convention, so two opposing streams go
-  // round the same one and still clear each other. A trunk lying at -2.3 m with a 1.6 m
-  // radius leaves no right-hand line on the asphalt at all: the old price sent the car
-  // 5.1 m out, deep into the sand, to keep the convention. Reported from play as a car
-  // that went for the verge past a pile of rubble, bogged there, and never got by, with
-  // a completely empty opposing lane beside it. The convention is worth keeping while
-  // both options are road; it is not worth a bogging. What is checked now is that the
-  // car gets past, keeps the trunk's radius of clearance, and does it without leaving
-  // the asphalt for the sand.
-  check(
-    'right-edge trunk is passed on the road, not in the sand',
-    trunk.passed &&
-      trunk.rejoined &&
-      trunk.closestLateral > trunkLateral &&
-      trunk.minDistance >= 1.6 &&
-      trunk.worstLateral <= trunkEdge + PASSING_VERGE,
-    `passed/rejoined=${trunk.passed}/${trunk.rejoined}, body lateral ${trunk.closestLateral.toFixed(2)} m, clearance ${trunk.minDistance.toFixed(2)} m at ${trunk.speedAtClosest.toFixed(2)} m/s, worst |lateral| ${trunk.worstLateral.toFixed(2)} m`,
-  );
-  const wall = await driveHazard(
-    { s: hazardStartS + 300, lateral: 0, radius: 6, breakable: false },
-    45,
-    hazardStartS,
-  );
-  // Two attempts inside 45 s, not three: the approach is slower now that braking is
-  // measured to the boulder's near edge rather than its centre, so each cycle takes
-  // longer. Not charging it is the part that matters.
-  check(
-    'blocked autopilot keeps retrying without charging',
-    wall.recoveryStarts >= 2 && wall.chargeSpeed < 8,
-    `${wall.recoveryStarts} recoveries, fastest approach ${wall.chargeSpeed.toFixed(2)} m/s`,
-  );
-  // Breakability belongs to impact physics, never to the driving decision. This
-  // collider cannot disappear, so passing it proves the autopilot did not rely on
-  // charging the dirt pile hard enough to break it.
-  const pile = await driveHazard(
-    { s: hazardStartS + 300, lateral: 0, radius: 1.2, breakable: true },
-    100,
-    hazardStartS,
-  );
-  check(
-    'breakable dirt pile is treated as solid and driven around',
-    pile.passed &&
-      pile.rejoined &&
-      pile.closestLateral < 0 &&
-      pile.minDistance >= 1.2 + 1,
-    `passed/rejoined=${pile.passed}/${pile.rejoined}, clearance ${pile.minDistance.toFixed(2)} m at ${pile.speedAtClosest.toFixed(2)} m/s`,
-  );
-  // RELEASING THE ROAD IS MEASURED ON A DRIVER THAT STILL HAS ONE.
-  //
-  // This used to reuse the 45 s wall rig above, which by then has spent two escape
-  // attempts and is sitting off the asphalt, immobile, with its corridor already
-  // clear — so the 0.2 m it then covered was a fact about the sand it was bogged in,
-  // not about the hazard index. A shorter run leaves the car stopped on the road in
-  // front of the boulder, with it still in the corridor and no escape attempt having
-  // taken the body off the asphalt yet: that is the state a release has to undo.
-  const release = await driveHazard(
-    { s: hazardStartS + 300, lateral: 0, radius: 6, breakable: false },
-    20,
-    hazardStartS,
-  );
-  const blockedBefore = release.rig.autopilot.laneBlockDistance;
-  release.rig.hazards.forget(release.chunk);
-  release.removeCollider();
-  const beforeForget = release.rig.vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 });
-  const startX = beforeForget.x;
-  const startZ = beforeForget.z;
-  let covered = 0;
-  for (let i = 0; i < Math.ceil(20 / FIXED_DT); i++) {
-    step(release.rig);
-    const p = release.rig.vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 });
-    covered = Math.max(covered, Math.hypot(p.x - startX, p.z - startZ));
-  }
-  check(
-    'forget removes hazards and the car drives away',
-    blockedBefore < Infinity &&
-      release.rig.autopilot.laneBlockDistance === Infinity &&
-      covered > 3,
-    `blocked at ${blockedBefore.toFixed(1)} m before, ${
-      release.rig.autopilot.laneBlockDistance === Infinity ? 'clear' : 'still blocked'
-    } after, ${covered.toFixed(1)} m covered`,
-  );
-}
-
 function checkHandover(): void {
   const road = new Road(42);
-  const autopilot = new Autopilot(road, new HazardIndex());
+  const autopilot = new Autopilot(road);
   const input = { ...emptyInput(), throttle: 0.37, brake: 0.19, reverse: true, steer: -0.42, handbrake: true, shift: 1 };
   const before = JSON.stringify(input);
   autopilot.drive(FIXED_DT, {} as Vehicle, input, 0, 0);
@@ -822,7 +519,7 @@ async function checkWedgedOffRoad(): Promise<void> {
   const state = carState(road, START_S, lateral);
   world.state.cars[state.id] = state;
   const vehicle = new Vehicle(physics, world, state, new THREE.Scene(), new WorldOrigin());
-  const autopilot = new Autopilot(road, new HazardIndex(), physics);
+  const autopilot = new Autopilot(road, physics);
   const input = emptyInput();
   // The pole: fixed, slim, and four metres up the same off-road line.
   const pole = road.offsetPoint(START_S + 4.2, lateral);
@@ -911,7 +608,7 @@ async function checkPassingSafety(): Promise<void> {
     rig.vehicle.chassis.setLinvel({ x: 0, y: 0, z: 20 }, true);
   };
   placeEgo();
-  const emergency = new Autopilot(flat, new HazardIndex(), rig.physics);
+  const emergency = new Autopilot(flat, rig.physics);
   emergency.setMode('hurried');
   emergency.setSpeedCap(20);
   emergency.setEngaged(true);
@@ -935,7 +632,7 @@ async function checkPassingSafety(): Promise<void> {
   lead.setTranslation({ x: -1.45, y: 1, z: 1032.3 }, true);
   lead.setLinvel({ x: 0, y: 0, z: 16 }, true);
   placeEgo();
-  const passing = new Autopilot(flat, new HazardIndex(), rig.physics);
+  const passing = new Autopilot(flat, rig.physics);
   passing.setMode('hurried');
   passing.setSpeedCap(20);
   passing.setEngaged(true);
@@ -967,7 +664,7 @@ async function checkPassingSafety(): Promise<void> {
   lead.setTranslation({ x: -1.45, y: 1, z: 1027.3 }, true);
   lead.setLinvel({ x: 0, y: 0, z: 10 }, true);
   const rear = body(-4.35, 970, 35);
-  const merging = new Autopilot(wide, new HazardIndex(), rig.physics);
+  const merging = new Autopilot(wide, rig.physics);
   merging.setMode('frantic');
   merging.setSpeedCap(30);
   merging.setTrafficField({
@@ -996,7 +693,7 @@ async function checkPassingSafety(): Promise<void> {
 
 /**
  * OVERTAKING A SLOWER CAR WITH THE OPPOSING LANE EMPTY, with a second real car on
- * the road rather than a hazard: the only scenario in which the driver's own line
+ * the road: the only scenario in which the driver's own line
  * leaves its lane while a moving body stays in it, and every fault this defends
  * against came from measuring that body against the moving line. Seen in play
  * before this check existed: the car went to the centre of the road, flashed both
@@ -1013,7 +710,6 @@ async function checkOvertake(): Promise<void> {
   const world = new GameWorld(newWorldState(42));
   const scene = new THREE.Scene();
   const origin = new WorldOrigin();
-  const hazards = new HazardIndex();
   const lane = -ROAD_HALF_WIDTH / 2;
   const chaserState = { ...carState(road, startS, lane), id: 'overtake-chaser' };
   const leadState = { ...carState(road, startS + leadAhead, lane), id: 'overtake-lead' };
@@ -1021,8 +717,8 @@ async function checkOvertake(): Promise<void> {
   world.state.cars[leadState.id] = leadState;
   const chaser = new Vehicle(physics, world, chaserState, scene, origin);
   const lead = new Vehicle(physics, world, leadState, scene, origin);
-  const chaserPilot = new Autopilot(road, hazards, physics);
-  const leadPilot = new Autopilot(road, hazards, physics);
+  const chaserPilot = new Autopilot(road, physics);
+  const leadPilot = new Autopilot(road, physics);
   const chaserInput = emptyInput();
   const leadInput = emptyInput();
   chaserInput.handbrake = true;
@@ -1132,7 +828,6 @@ async function checkShoulderPass(): Promise<void> {
   const world = new GameWorld(newWorldState(42));
   const scene = new THREE.Scene();
   const origin = new WorldOrigin();
-  const hazards = new HazardIndex();
   const lane = -ROAD_HALF_WIDTH / 2;
   const chaserState = { ...carState(road, startS, lane), id: 'shoulder-chaser' };
   const leadState = { ...carState(road, startS + leadAhead, lane), id: 'shoulder-lead' };
@@ -1140,8 +835,8 @@ async function checkShoulderPass(): Promise<void> {
   world.state.cars[leadState.id] = leadState;
   const chaser = new Vehicle(physics, world, chaserState, scene, origin);
   const lead = new Vehicle(physics, world, leadState, scene, origin);
-  const chaserPilot = new Autopilot(road, hazards, physics);
-  const leadPilot = new Autopilot(road, hazards, physics);
+  const chaserPilot = new Autopilot(road, physics);
+  const leadPilot = new Autopilot(road, physics);
   const chaserInput = emptyInput();
   const leadInput = emptyInput();
   chaserInput.handbrake = true;
@@ -1269,7 +964,6 @@ async function checkLanePass(): Promise<void> {
   const world = new GameWorld(newWorldState(42));
   const scene = new THREE.Scene();
   const origin = new WorldOrigin();
-  const hazards = new HazardIndex();
   const inner = road.laneCentreAt(wideS, 0);
   const outer = road.laneCentreAt(wideS, 1);
   const chaserState = { ...carState(road, wideS, outer), id: 'lane-chaser' };
@@ -1278,8 +972,8 @@ async function checkLanePass(): Promise<void> {
   world.state.cars[leadState.id] = leadState;
   const chaser = new Vehicle(physics, world, chaserState, scene, origin);
   const lead = new Vehicle(physics, world, leadState, scene, origin);
-  const chaserPilot = new Autopilot(road, hazards, physics);
-  const leadPilot = new Autopilot(road, hazards, physics);
+  const chaserPilot = new Autopilot(road, physics);
+  const leadPilot = new Autopilot(road, physics);
   const chaserInput = emptyInput();
   const leadInput = emptyInput();
   chaserInput.handbrake = true;
@@ -1373,7 +1067,6 @@ async function checkSideBySide(): Promise<void> {
   const world = new GameWorld(newWorldState(42));
   const scene = new THREE.Scene();
   const origin = new WorldOrigin();
-  const hazards = new HazardIndex();
   const inner = road.laneCentreAt(wideS, 0);
   const outer = road.laneCentreAt(wideS, 1);
   const chaserState = { ...carState(road, wideS, outer), id: 'side-chaser' };
@@ -1385,9 +1078,9 @@ async function checkSideBySide(): Promise<void> {
   const lead = new Vehicle(physics, world, leadState, scene, origin);
   const neighbour = new Vehicle(physics, world, neighbourState, scene, origin);
   const pilots = [
-    new Autopilot(road, hazards, physics),
-    new Autopilot(road, hazards, physics),
-    new Autopilot(road, hazards, physics),
+    new Autopilot(road, physics),
+    new Autopilot(road, physics),
+    new Autopilot(road, physics),
   ] as const;
   const inputs = [emptyInput(), emptyInput(), emptyInput()] as const;
   const cars = [chaser, lead, neighbour] as const;
@@ -1457,234 +1150,6 @@ async function checkSideBySide(): Promise<void> {
       : 'never level',
   );
   for (const car of cars) car.dispose();
-  physics.world.free();
-}
-
-/**
- * BOXED IN, WITH A ROCK AHEAD.
- *
- * The other half of knowing what is beside you: a driver that may not steer into an
- * occupied lane must SLOW for the thing in its own lane instead of going through it.
- * Reported from play on a four-lane stretch — a car in a full stream met an indexed
- * prop and hit it.
- */
-async function checkBoxedInHazard(): Promise<void> {
-  const seconds = 60;
-  const road = new Road(42);
-  let wideS = -1;
-  for (let s = 5_000; s < 400_000 && wideS < 0; s += 50) {
-    if (road.lanesPerSideAt(s) === 2 && road.lanesPerSideAt(s + 900) === 2) wideS = s + 100;
-  }
-  if (wideS < 0) throw new Error('no widened stretch on this seed');
-  const inner = road.laneCentreAt(wideS, 0);
-  const outer = road.laneCentreAt(wideS, 1);
-  const hazard: RoadHazard = { s: wideS + 140, lateral: inner, radius: 1.2, breakable: false };
-  const hazards = new HazardIndex();
-  hazards.add('autopilot-bench-boxed', hazard);
-
-  const physics = await PhysicsWorld.create();
-  addRoadCollider(physics, road, wideS - 60, wideS + 1_200);
-  const world = new GameWorld(newWorldState(42));
-  const scene = new THREE.Scene();
-  const origin = new WorldOrigin();
-  const rockPoint = road.offsetPoint(hazard.s, hazard.lateral);
-  const rockBody = physics.world.createRigidBody(
-    physics.rapier.RigidBodyDesc.fixed().setTranslation(rockPoint.x, rockPoint.y + 1, rockPoint.z),
-  );
-  physics.world.createCollider(
-    physics.rapier.ColliderDesc.cylinder(1, hazard.radius).setFriction(0.9),
-    rockBody,
-  );
-
-  const driverState = { ...carState(road, wideS, inner), id: 'boxed-driver' };
-  const neighbourState = { ...carState(road, wideS + 1, outer), id: 'boxed-neighbour' };
-  world.state.cars[driverState.id] = driverState;
-  world.state.cars[neighbourState.id] = neighbourState;
-  const driver = new Vehicle(physics, world, driverState, scene, origin);
-  const neighbour = new Vehicle(physics, world, neighbourState, scene, origin);
-  const driverPilot = new Autopilot(road, hazards, physics);
-  const neighbourPilot = new Autopilot(road, new HazardIndex(), physics);
-  const driverInput = emptyInput();
-  const neighbourInput = emptyInput();
-  driverInput.handbrake = true;
-  neighbourInput.handbrake = true;
-  for (let i = 0; i < 180; i++) {
-    driver.fixedUpdate(FIXED_DT, driverInput);
-    neighbour.fixedUpdate(FIXED_DT, neighbourInput);
-    physics.step();
-    driver.postStep();
-    neighbour.postStep();
-  }
-  driverInput.handbrake = false;
-  neighbourInput.handbrake = false;
-  driverPilot.setMode('sleeper');
-  neighbourPilot.setMode('sleeper');
-  driverPilot.setEngaged(true);
-  neighbourPilot.setEngaged(true);
-
-  let minRockDistance = Infinity;
-  let impacts = 0;
-  let passedRock = false;
-  let minNeighbourDistance = Infinity;
-  let impactReport = '';
-  const position = new THREE.Vector3();
-  for (let i = 0; i < Math.ceil(seconds / FIXED_DT); i++) {
-    driverPilot.drive(FIXED_DT, driver, driverInput, 0, 0);
-    neighbourPilot.drive(FIXED_DT, neighbour, neighbourInput, 0, 0);
-    driver.fixedUpdate(FIXED_DT, driverInput);
-    neighbour.fixedUpdate(FIXED_DT, neighbourInput);
-    physics.step();
-    driver.postStep();
-    neighbour.postStep();
-    const impact = driver.lastImpact;
-    const neighbourPosition = new THREE.Vector3();
-    driver.absoluteTranslation(position);
-    neighbour.absoluteTranslation(neighbourPosition);
-    const toNeighbour = position.distanceTo(neighbourPosition);
-    minNeighbourDistance = Math.min(minNeighbourDistance, toNeighbour);
-    if (impact && impact.severityMps > 1.2) {
-      impacts++;
-      if (impactReport === '') {
-        const p = road.project(position.x, position.z);
-        impactReport = `at ${(i * FIXED_DT).toFixed(1)} s, ${impact.severityMps.toFixed(2)} m/s, speed ${
-          speed(driver).toFixed(2)
-        } m/s, lateral ${p.lateral.toFixed(2)} m, ${(hazard.s - p.s).toFixed(1)} m short`;
-      }
-    }
-    minRockDistance = Math.min(
-      minRockDistance,
-      Math.hypot(position.x - rockPoint.x, position.z - rockPoint.z),
-    );
-    if (road.project(position.x, position.z).s > hazard.s + 12) passedRock = true;
-  }
-  check(
-    'a boxed-in driver slows for the rock instead of hitting it',
-    impacts === 0 && minRockDistance >= hazard.radius + 0.9,
-    `${impacts} impact(s) [${impactReport}], closest ${minRockDistance.toFixed(2)} m to a ${hazard.radius} m rock, neighbour ${minNeighbourDistance.toFixed(2)} m`,
-  );
-  check(
-    'and gets past it once the next lane frees up',
-    passedRock,
-    passedRock ? 'cleared the rock' : 'never got past',
-  );
-  driver.dispose();
-  neighbour.dispose();
-  physics.world.free();
-}
-
-/**
- * WEDGED ON THE ASPHALT, not on the verge.
- *
- * `checkWedgedOffRoad` covers a car leaning on a pole out in the sand. Reported from
- * play on a four-lane stretch: a car met an indexed prop in its own lane, hit it,
- * and then sat against it without ever trying to get out while the queue behind it
- * worked around the pair.
- */
-async function checkWedgedOnRoad(): Promise<void> {
-  const road = new Road(42);
-  let wideS = -1;
-  for (let s = 5_000; s < 400_000 && wideS < 0; s += 50) {
-    if (road.lanesPerSideAt(s) === 2 && road.lanesPerSideAt(s + 900) === 2) wideS = s + 100;
-  }
-  if (wideS < 0) throw new Error('no widened stretch on this seed');
-  const lane = road.laneCentreAt(wideS, 0);
-  const hazard: RoadHazard = { s: wideS + 8, lateral: lane, radius: 1.2, breakable: false };
-  const hazards = new HazardIndex();
-  hazards.add('autopilot-bench-wedge', hazard);
-
-  const physics = await PhysicsWorld.create();
-  addRoadCollider(physics, road, wideS - 60, wideS + 600);
-  const world = new GameWorld(newWorldState(42));
-  const state = { ...carState(road, wideS, lane), id: 'wedge-on-road' };
-  world.state.cars[state.id] = state;
-  const vehicle = new Vehicle(physics, world, state, new THREE.Scene(), new WorldOrigin());
-  const autopilot = new Autopilot(road, hazards, physics);
-  const input = emptyInput();
-  const point = road.offsetPoint(hazard.s, hazard.lateral);
-  const body = physics.world.createRigidBody(
-    physics.rapier.RigidBodyDesc.fixed().setTranslation(point.x, point.y + 1, point.z),
-  );
-  physics.world.createCollider(
-    physics.rapier.ColliderDesc.cylinder(1, hazard.radius).setFriction(0.9),
-    body,
-  );
-
-  input.brake = 1;
-  for (let i = 0; i < 180; i++) {
-    vehicle.fixedUpdate(FIXED_DT, input); physics.step(); vehicle.postStep();
-  }
-  input.brake = 0;
-  // Drive into it the way a distracted car would, then hand over.
-  for (let i = 0; i < 180; i++) {
-    input.throttle = 0.45;
-    vehicle.fixedUpdate(FIXED_DT, input); physics.step(); vehicle.postStep();
-  }
-  input.throttle = 0;
-  const start = vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 });
-  autopilot.setMode('sleeper');
-  autopilot.setEngaged(true);
-  let escaped = 0;
-  let escapeSeconds = Infinity;
-  let recoveryStartedAt = Infinity;
-  let reverseSteer = 0;
-  let pulloutSteer = 0;
-  let furthestS = -Infinity;
-  let recoveryStarts = 0;
-  let wasRecovering = false;
-  const recoveryTrace: string[] = [];
-  let lastRecoveryState = '';
-  for (let i = 0; i < Math.ceil(30 / FIXED_DT); i++) {
-    autopilot.drive(FIXED_DT, vehicle, input, 0, 0);
-    const recovering = autopilot.activity === 'recover';
-    if (recovering && !wasRecovering) recoveryStarts++;
-    wasRecovering = recovering;
-    if (recovering && recoveryStartedAt === Infinity) recoveryStartedAt = i * FIXED_DT;
-    if (recovering && input.reverse && Math.abs(input.steer) > 0.5) {
-      reverseSteer = input.steer;
-    }
-    if (
-      recovering &&
-      !input.reverse &&
-      input.throttle > 0 &&
-      Math.abs(input.steer) > 0.5
-    ) {
-      pulloutSteer = input.steer;
-    }
-    vehicle.fixedUpdate(FIXED_DT, input); physics.step(); vehicle.postStep();
-    const p = vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 });
-    const roadPosition = road.project(p.x, p.z);
-    const recoveryState = `${autopilot.activity}:${input.reverse ? 'R' : 'F'}`;
-    if (recoveryState !== lastRecoveryState) {
-      recoveryTrace.push(
-        `${(i * FIXED_DT).toFixed(1)}s ${recoveryState} s=${roadPosition.s.toFixed(1)} lat=${roadPosition.lateral.toFixed(1)} v=${speed(vehicle).toFixed(1)}`,
-      );
-      lastRecoveryState = recoveryState;
-    }
-    furthestS = Math.max(furthestS, roadPosition.s);
-    const moved = Math.hypot(p.x - start.x, p.z - start.z);
-    escaped = Math.max(escaped, moved);
-    if (moved >= 8 && escapeSeconds === Infinity) escapeSeconds = i * FIXED_DT;
-  }
-  check(
-    'a wedged car recognises the obstruction promptly',
-    recoveryStartedAt <= 2.5,
-    `recovery started at ${recoveryStartedAt.toFixed(1)} s`,
-  );
-  check(
-    'recovery reverses and pulls forward on opposite steering locks',
-    Math.abs(reverseSteer) >= 0.8 &&
-      Math.abs(pulloutSteer) >= 0.8 &&
-      Math.sign(reverseSteer) === -Math.sign(pulloutSteer),
-    `reverse steer ${reverseSteer.toFixed(2)}, forward steer ${pulloutSteer.toFixed(2)}`,
-  );
-  check(
-    'a car wedged against a prop on the road gets itself out',
-    recoveryStarts === 1 && furthestS >= hazard.s + 20,
-    `${escaped.toFixed(1)} m covered after ${recoveryStarts} recovery attempt(s), furthest s ${(furthestS - hazard.s).toFixed(1)} m past obstacle, 8 m reached at ${
-      Number.isFinite(escapeSeconds) ? escapeSeconds.toFixed(1) + ' s' : 'never'
-    }; engine=${vehicle.engineRunning}, input=${input.throttle.toFixed(2)}/${input.brake.toFixed(2)}; ${recoveryTrace.join(' -> ')}`,
-  );
-  vehicle.dispose();
   physics.world.free();
 }
 
@@ -1760,7 +1225,6 @@ async function run(): Promise<void> {
   }
   if (typeof process !== 'undefined' && process.argv.includes('--traffic-behavior')) {
     await checkOvertake();
-    await checkHazards();
     await checkPedestrianObstacle();
     if (failures && typeof process !== 'undefined') process.exitCode = 1;
     return;
@@ -1842,9 +1306,6 @@ async function run(): Promise<void> {
   await checkShoulderPass();
   await checkLanePass();
   await checkSideBySide();
-  await checkBoxedInHazard();
-  await checkWedgedOnRoad();
-  await checkHazards();
   await checkPedestrianObstacle();
   if (failures && typeof process !== 'undefined') process.exitCode = 1;
 }

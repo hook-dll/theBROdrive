@@ -7,7 +7,6 @@ import { makeFlatMaterial } from './render/materials';
 import { preloadCarModels } from './render/carmodel';
 import { Autopilot, AUTOPILOT_MODES, type AutopilotMode } from './vehicle/autopilot';
 import { Vehicle } from './vehicle/vehicle';
-import { HazardIndex } from './world/hazards';
 import { WorldOrigin } from './world/origin';
 import {
   CIRCUIT_HALF_WIDTH,
@@ -191,7 +190,7 @@ export async function bootPlayground(): Promise<void> {
   world.state.cars[state.id] = state;
   const origin = new WorldOrigin();
   const vehicle = new Vehicle(physics, world, state, scene, origin);
-  const autopilot = new Autopilot(road, new HazardIndex(), physics);
+  const autopilot = new Autopilot(road, physics);
   const input: InputFrame = emptyInput();
   autopilot.setEngaged(true);
   const traffic = new PlaygroundTraffic(

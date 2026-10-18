@@ -5,7 +5,6 @@ import type { GameWorld } from '../game/state';
 import { Autopilot, type AutopilotMode } from '../vehicle/autopilot';
 import { Vehicle } from '../vehicle/vehicle';
 import { laneOffsetFor, NARROW_HALF_WIDTH } from '../world/roadprofile';
-import { HazardIndex } from '../world/hazards';
 import type { WorldOrigin } from '../world/origin';
 import { createServiceableCarState } from '../game/spawn';
 import { PLAYGROUND_ORIGIN_X, PLAYGROUND_ORIGIN_Z, type PlaygroundCircuit } from './circuit';
@@ -109,9 +108,6 @@ export class PlaygroundTraffic {
       PLAYGROUND_ORIGIN_X,
       PLAYGROUND_ORIGIN_Z,
     );
-    // The hazard index is shared and empty: the playground has no indexed props, so
-    // traffic must discover the ego car the same way the ego car discovers it.
-    const hazards = new HazardIndex();
     this.slots.forEach((slot, index) => {
       // NEGATIVE: positive lateral is left of travel, and the slots drive on the right.
       const lane = -laneOffsetFor(NARROW_HALF_WIDTH, 0);
@@ -122,7 +118,7 @@ export class PlaygroundTraffic {
       const state = createServiceableCarState(id, modelId, at.x, at.y, at.z, at.heading);
       world.state.cars[id] = state;
       const vehicle = new Vehicle(this.physics, world, state, scene, origin);
-      const autopilot = new Autopilot(slot.oncoming ? reversed : forward, hazards, this.physics);
+      const autopilot = new Autopilot(slot.oncoming ? reversed : forward, this.physics);
       autopilot.setMode(slot.mode);
       autopilot.setSpeedCap(TRAFFIC_SPEED_CAP_MPS);
       autopilot.setEngaged(true);

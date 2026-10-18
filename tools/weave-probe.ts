@@ -16,7 +16,6 @@ import { benchCarState } from './benchcar';
 import { Autopilot, type AutopilotMode } from '../src/vehicle/autopilot';
 import { carModel } from '../src/vehicle/carmodels';
 import { Vehicle } from '../src/vehicle/vehicle';
-import { HazardIndex } from '../src/world/hazards';
 import { WorldOrigin } from '../src/world/origin';
 import { Road } from '../src/world/road';
 import { roadSurfaceY, SurfaceField } from '../src/world/roadsurface';
@@ -81,7 +80,7 @@ async function makeRig(modelId: string, road: Road, startS: number, lateral: num
   });
   world.state.cars[state.id] = state;
   const vehicle = new Vehicle(physics, world, state, scene, origin);
-  const autopilot = new Autopilot(road, new HazardIndex(), physics);
+  const autopilot = new Autopilot(road, physics);
   const input = emptyInput();
   input.brake = 1;
   for (let i = 0; i < 120; i++) {

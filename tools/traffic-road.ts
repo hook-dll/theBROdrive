@@ -50,7 +50,6 @@ import { benchCarState } from './benchcar';
 import { Autopilot, roadPaceCeiling, type AutopilotMode } from '../src/vehicle/autopilot';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { installAssetShim } from './assetshim';
-import { HazardIndex } from '../src/world/hazards';
 import type { RoadConditionBuffer } from '../src/world/gradient';
 import { WorldOrigin } from '../src/world/origin';
 import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
@@ -250,12 +249,11 @@ const lastS = START_S + REACH_M;
 // centimetres ABOVE where the strip goes: measured by ray, every wheel past the paint
 // stood on sand, so every verge pass and detour was driven on ground the game does not
 // have there.
-const hazards = new HazardIndex();
 /** Colliders of the scatter props: what a bumper against scenery is touching. */
 const propColliders = new Set<number>();
 const roadDistance = new RoadDistance(road);
 const roadProvider = new RoadMeshProvider(SEED, roadDistance);
-const scatter = new ScatterProvider(undefined, hazards);
+const scatter = new ScatterProvider();
 const scene = new THREE.Scene();
 const origin = new WorldOrigin();
 // No worker: every tile is built on the bench's own thread, synchronously, by `prime`.
@@ -313,31 +311,8 @@ settle();
 await preloadCarModels();
 await loadCarModel(EGO_MODEL);
 
-/**
- * WHERE THE EGO CAR STARTS, and why it is not simply `START_S`.
- *
- * The stream validates every spawn against the hazard index before it puts a body
- * down; the bench used to drop its own car on a fixed arclength and hope. On seed
- * 545124 that arclength has a scatter prop on it: the ego spawned inside a rock, never
- * moved for the whole four minutes, and the run then scored the traffic that piled up
- * around a permanently stopped player as thirty contacts and a jam. A degenerate start
- * is not a measurement.
- */
-function clearStart(): number {
-  const HAZARD_GAP_M = 20;
-  for (let s = START_S; s < START_S + 2_000; s += 10) {
-    let blocked = false;
-    hazards.forEachAhead(s - HAZARD_GAP_M, HAZARD_GAP_M * 2, (hazard) => {
-      if (Math.abs(hazard.lateral) - hazard.radius < road.halfWidthAt(hazard.s) + 2) blocked = true;
-    });
-    if (!blocked) return s;
-  }
-  return START_S;
-}
-const EGO_START_S = clearStart();
-if (EGO_START_S !== START_S) {
-  console.log(`  ego starts at s ${EGO_START_S} — ${EGO_START_S - START_S} m past the first clear point`);
-}
+/** Where the ego car starts: nothing is placed on the carriageway, so `START_S` is clear. */
+const EGO_START_S = START_S;
 
 const egoPoint = road.offsetPoint(EGO_START_S, road.laneCentreAt(EGO_START_S, 0));
 const egoHeading = road.sampleAt(EGO_START_S).heading;
@@ -386,7 +361,7 @@ if (egoPose) {
 
 world.state.cars[egoCarState.id] = egoCarState;
 const ego = new Vehicle(physics, world, egoCarState, scene, origin);
-const egoAutopilot = new Autopilot(road, hazards, physics);
+const egoAutopilot = new Autopilot(road, physics);
 world.state.player.drivingCarId = egoCarState.id;
 const egoInput: InputFrame = emptyInput();
 // Land before anything is measured, on the brake: three seconds of suspension settle
@@ -412,7 +387,6 @@ const traffic = new RoadTraffic(
   scene,
   origin,
   road,
-  hazards,
   loadCarModel,
   (x: number, z: number, radius: number) => {
     const dx = x - egoPosition.x;
@@ -986,7 +960,6 @@ function sampleCar(
         passingEnabled: boolean;
         yieldingFor: number;
         planLine: number;
-        hazardDistance: number;
         corridorBlockDistance: number;
         lastOncomingGap: number;
         lastRearClear: boolean;
@@ -1000,7 +973,6 @@ function sampleCar(
         `, line ${(inner.planLine ?? 0).toFixed(1)}` +
         `, ${inner.corridorFeasible ? 'corridor ok' : 'no corridor'}` +
         `, block ${metres(inner.corridorBlockDistance)}` +
-        `, hazard ${metres(inner.hazardDistance)}` +
         `, ${inner.passingEnabled ? 'crossing allowed' : 'crossing barred'}` +
         `, yielded ${(inner.yieldingFor ?? 0).toFixed(0)} s` +
         `, may cross ${inner.lastMayCross ?? '?'}` +
@@ -1033,7 +1005,6 @@ function sampleCar(
       targetSpeedValue: number;
       oncomingGap: number;
       oncomingFieldGap: number;
-      hazardDistance: number;
     };
     log.push(
       `s${(s - START_S).toFixed(0)} lat${localLateral.toFixed(1)} v${speedKmh.toFixed(0)}` +
@@ -1047,7 +1018,6 @@ function sampleCar(
         `[${inner.oncomingGap === Infinity ? '-' : inner.oncomingGap.toFixed(0)}` +
         `/${inner.oncomingFieldGap === Infinity ? '-' : inner.oncomingFieldGap.toFixed(0)}]` +
         `${inner.lastMayCross ? '' : ' nox'}` +
-        ` hz${inner.hazardDistance === Infinity ? '-' : inner.hazardDistance.toFixed(1)}` +
         `${inner.corridorFeasible ? '' : ' NOWAY'}`,
     );
     if (EGO_LOG && id === 'ego' && egoLogTicks++ % 30 === 0) {
@@ -1103,7 +1073,7 @@ function sampleCar(
   const face = track.ejected ? null : touchesProp(vehicle);
   track.speedRing[track.speedRingAt++ % track.speedRing.length] = speedKmh;
   if (face && !track.onProp) {
-    const inner = autopilot as unknown as { hazardDistance: number; corridorFeasible: boolean };
+    const inner = autopilot as unknown as { corridorFeasible: boolean };
     // The speed at the touch is what is left after the brakes; what it arrived with
     // is the fastest of the second before.
     const arrived = Math.max(...track.speedRing);
@@ -1113,8 +1083,7 @@ function sampleCar(
       arrivedKmh: arrived,
       line:
         `${id} (${style}, dir ${direction > 0 ? '+' : '-'}) ${face} ${activity}, arrived at ${arrived.toFixed(1)} km/h, ` +
-        `lateral ${localLateral.toFixed(1)} m, s ${(s - START_S).toFixed(0)}, ` +
-        `hazard ${inner.hazardDistance === Infinity ? '-' : `${inner.hazardDistance.toFixed(2)} m`}` +
+        `lateral ${localLateral.toFixed(1)} m, s ${(s - START_S).toFixed(0)}` +
         `${inner.corridorFeasible ? '' : ', no corridor'}`,
       before: log && log.length ? log.slice(-240).filter((_, i) => i % 15 === 0).join(' | ') : '',
     });

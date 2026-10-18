@@ -26,7 +26,6 @@ import { carModelMeasure, carSpawnYAboveGround, preloadCarModels } from '../src/
 import { benchCarState } from './benchcar';
 import { Autopilot } from '../src/vehicle/autopilot';
 import { Vehicle } from '../src/vehicle/vehicle';
-import { HazardIndex } from '../src/world/hazards';
 import { WorldOrigin } from '../src/world/origin';
 import { Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
@@ -222,7 +221,7 @@ const turn = new TurnaroundRoad(road, (x, z) => terrain.heightAt(x, z, 0));
   });
   world.state.cars['turner'] = state;
   const vehicle = new Vehicle(physics, world, state, new THREE.Scene(), new WorldOrigin());
-  const autopilot = new Autopilot(turn, new HazardIndex(), physics);
+  const autopilot = new Autopilot(turn, physics);
   autopilot.setMode('sleeper');
   autopilot.setEngaged(true);
   const input = emptyInput();

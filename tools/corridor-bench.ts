@@ -1,10 +1,10 @@
 /**
  * Scenario table for the corridor planner.
  *
- * The planner is a pure function, so the interesting cases — a stone in the lane
- * with oncoming traffic close, the same stone with the road clear, a trunk on the
- * verge, a wall across everything — are a table rather than a ten-minute drive
- * with twenty cars and a hope. Run with `bun tools/corridor-bench.ts`.
+ * The planner is a pure function, so the interesting cases — a slow car with oncoming
+ * traffic close, the same car with the road clear, a car standing in the lane, a
+ * closed band beside it — are a table rather than a ten-minute drive with twenty
+ * cars and a hope. Run with `bun tools/corridor-bench.ts`.
  */
 
 import { evaluateCorridorLine, planCorridor, type CorridorObstacle, type CorridorRequest } from '../src/vehicle/corridor';
@@ -39,14 +39,14 @@ function request(overrides: Partial<CorridorRequest> = {}): CorridorRequest {
     oncomingLaneCost: 26,
     oncomingGap: Number.POSITIVE_INFINITY,
     oncomingSpeed: 20,
-    stopRoom: 45,
     crossingRearClear: true,
     obstacles: [],
     ...overrides,
   };
 }
 
-function prop(s: number, lateral: number, halfWidth: number): CorridorObstacle {
+/** A car standing still in the road (stalled, overturned, parked across it). */
+function standing(s: number, lateral: number, halfWidth: number): CorridorObstacle {
   return { s, lateral, halfWidth, speed: 0 };
 }
 function car(s: number, lateral: number, speed: number): CorridorObstacle {
@@ -56,26 +56,12 @@ function car(s: number, lateral: number, speed: number): CorridorObstacle {
 console.log('corridor planner: scenario table');
 
 const clear = planCorridor(request());
-check('clear road holds the lane', Math.abs(clear.line - LANE) < 0.01 && clear.feasible, `line ${clear.line.toFixed(2)}`);
-
-const stone = planCorridor(request({ obstacles: [prop(120, -1.2, 0.9)] }));
-check(
-  'a stone in the lane is gone round, not braked for',
-  Math.abs(stone.line - (-1.2)) > 1.9 && stone.feasible,
-  `line ${stone.line.toFixed(2)}, block ${stone.blockDistance}`,
-);
-
-const pylon = planCorridor(request({ obstacles: [prop(120, -6.5, 1.2)] }));
-check(
-  'a pylon off the asphalt changes nothing',
-  Math.abs(pylon.line - LANE) < 0.01,
-  `line ${pylon.line.toFixed(2)}`,
-);
+check('clear road holds the lane', Math.abs(clear.line - LANE) < 0.01 && clear.admissible, `line ${clear.line.toFixed(2)}`);
 
 const slowLead = planCorridor(request({ obstacles: [car(60, LANE, 14)] }));
 check(
   'a slow car with a clear road is overtaken',
-  slowLead.usesOncomingLane && slowLead.feasible,
+  slowLead.usesOncomingLane && slowLead.admissible,
   `line ${slowLead.line.toFixed(2)}`,
 );
 
@@ -86,7 +72,7 @@ check(
 const tuckedIn = planCorridor(request({ obstacles: [car(28, LANE, 16)], speed: 17 }));
 check(
   'a car already on the leader\u2019s tail still overtakes',
-  tuckedIn.usesOncomingLane && tuckedIn.feasible,
+  tuckedIn.usesOncomingLane && tuckedIn.admissible,
   `line ${tuckedIn.line.toFixed(2)}`,
 );
 
@@ -122,64 +108,11 @@ check(
   `line ${wreck.line.toFixed(2)}`,
 );
 
-
-const near = planCorridor({ ...request({ obstacles: [prop(2, -2.3, 2.0)] }), speed: 4 });
-check(
-  'a trunk too close to swerve round is a block, not a line',
-  near.blockDistance === 2 && !near.feasible,
-  `line ${near.line.toFixed(2)}, block ${near.blockDistance}`,
-);
-
-const wall = planCorridor({ ...request({ obstacles: [prop(30, 0, 6)] }), stopRoom: 40 });
-check(
-  'a wall across the road is not feasible',
-  !wall.feasible && wall.blockDistance === 30,
-  `line ${wall.line.toFixed(2)}, feasible=${wall.feasible}`,
-);
-
 const hysteresis = planCorridor(request({ previousLine: LANE - 0.2 }));
 check(
   'the lane is not abandoned for a fifth of a metre',
   Math.abs(hysteresis.line - LANE) < 0.3,
   `line ${hysteresis.line.toFixed(2)}`,
-);
-
-// Hard permission cannot lose to feasibility, even when an old caller still assigns
-// Infinity as the crossing preference. Every own-side line here contains the wall.
-const crownRequest = request({
-  ownLateral: -2,
-  previousLine: -2,
-  laneOffset: -2,
-  speed: 0,
-  halfWidth: 1,
-  asphaltLimit: 5,
-  edgeLimit: 4,
-  stopRoom: 20,
-  obstacles: [prop(10, -2, 2)],
-  oncomingLaneCost: Number.POSITIVE_INFINITY,
-  mayCrossCrown: false,
-});
-const forbiddenCrossing = planCorridor(crownRequest);
-const permittedCrossing = planCorridor({ ...crownRequest, mayCrossCrown: true });
-check(
-  'a forbidden crossing cannot beat a blocked permitted line',
-  forbiddenCrossing.admissible && !forbiddenCrossing.feasible
-    && !forbiddenCrossing.usesOncomingLane && forbiddenCrossing.blockDistance === 10
-    && permittedCrossing.admissible && permittedCrossing.feasible && permittedCrossing.usesOncomingLane,
-  `forbidden ${forbiddenCrossing.line}, feasible=${forbiddenCrossing.feasible}; permitted ${permittedCrossing.line}`,
-);
-
-const infinitePreference = planCorridor({
-  ...crownRequest,
-  mayCrossCrown: true,
-  lineAllowed: (line) => line >= 1,
-  obstacles: [prop(10, 4, 0.5)],
-});
-check(
-  'an infinite-price feasible candidate is not overwritten by a blocked one',
-  infinitePreference.admissible && infinitePreference.feasible
-    && infinitePreference.line <= 2.5 && infinitePreference.blockDistance === Number.POSITIVE_INFINITY,
-  `line ${infinitePreference.line}, feasible=${infinitePreference.feasible}, block ${infinitePreference.blockDistance}`,
 );
 
 // The predicate describes the whole transition: the unsafe adjacent band also bars
@@ -193,17 +126,16 @@ const bandRequest = request({
   halfWidth: 1,
   asphaltLimit: 8,
   edgeLimit: 7,
-  stopRoom: 30,
+  obstacles: [standing(20, -1, 3)],
   mayCrossCrown: false,
-  obstacles: [prop(20, -1, 3)],
 });
 const freeBand = planCorridor(bandRequest);
 const closedBandRequest = { ...bandRequest, lineAllowed: (line: number) => line >= -3 };
 const closedBand = planCorridor(closedBandRequest);
 check(
   'a closed adjacent band cannot be bypassed through the lattice or farther lane',
-  freeBand.feasible && freeBand.line <= -5
-    && closedBand.admissible && !closedBand.feasible && closedBand.line >= -3
+  freeBand.admissible && freeBand.line <= -5
+    && closedBand.admissible && closedBand.line >= -3
     && !evaluateCorridorLine(closedBandRequest, -4.25).admissible
     && !evaluateCorridorLine(closedBandRequest, -6).admissible,
   `open ${freeBand.line}; closed ${closedBand.line}, block ${closedBand.blockDistance}`,
@@ -211,7 +143,7 @@ check(
 const nowhere = planCorridor({ ...bandRequest, lineAllowed: () => false });
 check(
   'a search with no permitted candidate reports the occupied line, not a clear route',
-  !nowhere.admissible && !nowhere.feasible
+  !nowhere.admissible
     && nowhere.line === bandRequest.ownLateral && nowhere.blockDistance === 20,
   `line ${nowhere.line}, admissible=${nowhere.admissible}, block ${nowhere.blockDistance}`,
 );
@@ -224,37 +156,26 @@ const heldRequest = request({
   halfWidth: 1,
   asphaltLimit: 8,
   edgeLimit: 7,
-  stopRoom: 40,
   mayCrossCrown: false,
-  obstacles: [prop(25, -4, 0.5)],
+  obstacles: [standing(25, -4, 0.5)],
 });
 const freeProposal = planCorridor(heldRequest);
 const held = evaluateCorridorLine(heldRequest, -4);
-const occupiedByTraffic = evaluateCorridorLine({
-  ...heldRequest,
-  obstacles: [{ ...prop(25, -4, 0.5), movable: true }],
-}, -4);
 check(
   'a held line keeps its own obstacle metrics when the new proposal is free',
-  freeProposal.admissible && freeProposal.feasible && freeProposal.blockDistance === Number.POSITIVE_INFINITY
-    && held.admissible && !held.feasible && held.line === -4 && held.blockDistance === 25 && held.blockSpeed === 0,
+  freeProposal.admissible && freeProposal.blockDistance === Number.POSITIVE_INFINITY
+    && held.admissible && held.line === -4 && held.blockDistance === 25 && held.blockSpeed === 0,
   `proposal ${freeProposal.line}, block ${freeProposal.blockDistance}; held block ${held.blockDistance}`,
-);
-check(
-  'an occupied traffic corridor is admissible and feasible, unlike a static block',
-  occupiedByTraffic.admissible && occupiedByTraffic.feasible
-    && occupiedByTraffic.blockDistance === 25 && occupiedByTraffic.blockSpeed === 0,
-  `admissible=${occupiedByTraffic.admissible}, feasible=${occupiedByTraffic.feasible}, block ${occupiedByTraffic.blockDistance}`,
 );
 const sweptHeld = evaluateCorridorLine({
   ...heldRequest,
   ownLateral: -2,
   speed: 20,
-  obstacles: [prop(5, -2, 0.5)],
+  obstacles: [standing(5, -2, 0.5)],
 }, -6);
 check(
   'fixed-line evaluation checks the swept transition, not only its clear destination',
-  sweptHeld.admissible && !sweptHeld.feasible && sweptHeld.blockDistance === 5,
+  sweptHeld.admissible && sweptHeld.blockDistance === 5,
   `line ${sweptHeld.line}, block ${sweptHeld.blockDistance}`,
 );
 const crossingRequest = request({
@@ -270,13 +191,13 @@ const crossing = evaluateCorridorLine(crossingRequest, 2);
 const refused = evaluateCorridorLine({ ...crossingRequest, oncomingGap: 100 }, 2);
 check(
   'crossing timing uses the slowest own-lane body, while headway uses the nearest',
-  crossing.admissible && crossing.feasible && crossing.usesOncomingLane
+  crossing.admissible && crossing.usesOncomingLane
     && crossing.laneBlockDistance === 30 && crossing.laneBlockSpeed === 20,
   `admissible=${crossing.admissible}, leader ${crossing.laneBlockDistance} m at ${crossing.laneBlockSpeed} m/s`,
 );
 check(
   'fixed-line evaluation rejects a crossing without enough oncoming room',
-  !refused.admissible && !refused.feasible && refused.crossingRefused && refused.waitingForOncoming,
+  !refused.admissible && refused.crossingRefused && refused.waitingForOncoming,
   `admissible=${refused.admissible}, refused=${refused.crossingRefused}`,
 );
 
@@ -291,7 +212,7 @@ const manoeuvreRequest = request({
   lineAccel: 2,
   asphaltLimit: 10,
   edgeLimit: 9,
-  obstacles: [prop(20, -2, 1)],
+  obstacles: [standing(20, -2, 1)],
 });
 const shortMove = evaluateCorridorLine(manoeuvreRequest, 1);
 const wideMove = evaluateCorridorLine(manoeuvreRequest, 7);
@@ -311,7 +232,7 @@ const squeezeCrossingRequest = {
   ...manoeuvreRequest,
   speed: 5,
   lineAccel: 0.6,
-  obstacles: [prop(120, -2, 1)],
+  obstacles: [standing(120, -2, 1)],
   oncomingGap: 235,
 };
 const pendingCrossing = evaluateCorridorLine(squeezeCrossingRequest, 7);
@@ -321,7 +242,7 @@ check(
   !pendingCrossing.admissible && pendingCrossing.crossingRefused
     && pendingCrossing.manoeuvreSpeed < squeezeCrossingRequest.crossingSpeed
     && pendingCrossing.blockDistance === Number.POSITIVE_INFINITY
-    && clearCrossing.admissible && clearCrossing.feasible && !clearCrossing.crossingRefused
+    && clearCrossing.admissible && !clearCrossing.crossingRefused
     && clearCrossing.manoeuvreSpeed === Number.POSITIVE_INFINITY,
   `pending ${pendingCrossing.manoeuvreSpeed} m/s, refused=${pendingCrossing.crossingRefused}; clear admissible=${clearCrossing.admissible}`,
 );
@@ -338,7 +259,6 @@ const abeamLeader: CorridorObstacle = {
   speed: 16,
   abeam: true,
   level: true,
-  movable: true,
 };
 const withdrawnBeside = planCorridor(request({
   ownLateral: ACROSS,
@@ -363,7 +283,7 @@ check(
 // kickdown sum, at a crossing speed the car does not have, would call 250 m of
 // oncoming room plenty; the measured one needs 250 m plus a second of closing.
 const measuredBase = {
-  obstacles: [{ ...car(20, LANE, 16), movable: true }],
+  obstacles: [car(20, LANE, 16)],
   crossingSpeed: 76,
   desiredSpeed: 55,
   oncomingSpeed: 20,

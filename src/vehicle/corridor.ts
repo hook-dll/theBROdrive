@@ -62,19 +62,6 @@ export interface CorridorObstacle {
    */
   readonly level?: boolean;
   /**
-   * CAN THIS THING GO AWAY BY ITSELF?
-   *
-   * A rock cannot; a car can, and usually will. The difference decides whether a
-   * corridor with it inside is impassable or merely occupied — and conflating the two
-   * is how a queue became a pile of reversing cars: every driver behind a stopped head
-   * found no feasible corridor, concluded it was wedged, and started a two-point turn
-   * in the middle of the road. Measured at a single blocked lane: eight per cent of all
-   * car-time spent in recovery, and the longest stop of the run a hundred seconds.
-   *
-   * Defaults to immovable, so anything a caller forgets to mark is treated as scenery.
-   */
-  readonly movable?: boolean;
-  /**
    * ONLY MEANINGFUL TOGETHER WITH `abeam`: this body's own reference point is behind
    * this driver's, rather than ahead of it or level with it.
    *
@@ -152,7 +139,7 @@ export interface CorridorRequest {
    *
    * The caller grants the whole road for what genuinely needs it — a driver entitled
    * to pass, one whose own lane is blocked by something stopped, one already
-   * mid-manoeuvre, one with no feasible corridor — and otherwise grants its own lane
+   * mid-manoeuvre, one with no admissible corridor — and otherwise grants its own lane
    * and wherever the body already is, so a car away from its lane can always hold
    * position or come home, and never go further out.
    */
@@ -194,8 +181,40 @@ export interface CorridorRequest {
   readonly oncomingGap: number;
   /** Assumed speed of an unseen car coming the other way. */
   readonly oncomingSpeed: number;
-  /** Slowest speed at which a pending lateral move may be driven. */
+  /** Slowest speed at which a pending lateral move may be driven; see the standing-car pair below. */
   readonly manoeuvreFloorSpeed: number;
+  /**
+   * THE LINE THE CAR STEERS TO IS RATE-LIMITED AS WELL AS ACCELERATION-LIMITED, and the
+   * cap is what decides a move made at walking pace: `perMetre` metres of line per metre
+   * travelled, never slower than `atRest` m/s (the autopilot's `LINE_SHIFT_PER_METRE` and
+   * `LINE_SLEW_AT_REST_MPS`). Without it a 2.5 m move at 2.5 m/s round a car standing in
+   * the lane was planned as 2 s and five metres of road against the steering's real 5 s
+   * and twelve: measured on tools/traffic-blocker.ts as every driver behind a stopped
+   * player rolling up to his bumper with its body still in the lane, stopped by the nose
+   * scan, reversing and trying again. It prices the move's SPEED round a standing car
+   * (`manoeuvreSpeed`), not whether a line is reachable: see the swept test. Absent, the
+   * move is the two arcs alone.
+   */
+  readonly lineRate?: { readonly perMetre: number; readonly atRest: number };
+  /**
+   * Round a CAR standing in the lane (not moving), the move has to be finished
+   * this far short of it, and the approach is floored at `stillManoeuvreFloorSpeed`
+   * rather than `manoeuvreFloorSpeed`: a fixed 3.5 m/s floor was a promise to arrive at
+   * its bumper before the line could get out of its way. Default 0 and
+   * `manoeuvreFloorSpeed`.
+   */
+  readonly stillManoeuvreStandoff?: number;
+  readonly stillManoeuvreFloorSpeed?: number;
+  /**
+   * A CAR STANDING IN THIS DRIVER'S LANE IS GONE ROUND ON ITS OWN SHOULDER, never across
+   * the crown: `line` just clears its flank (the body on the graded strip, no further),
+   * and `open` once the driver is near enough to start the move. Lines past the asphalt
+   * on this side further out than `line` — and, until it opens, further out than the
+   * body already is — are inadmissible; the shoulder up to it is priced as a granted
+   * verge (`SHOULDER_PASS_SOONER_COST_PER_M`). A car across the road is gone round by
+   * each stream on its own side. Set by the autopilot (`planStandingBypass`).
+   */
+  readonly standingBypass?: { readonly line: number; readonly open: boolean };
   /**
    * Speed the driver will really make while it is out in the opposing lane with a
    * CLEAR line — its cruise plus whatever kickdown it spends on a pass.
@@ -234,8 +253,6 @@ export interface CorridorRequest {
    * overtaking is a rear-end, and the corridor search has no rearward obstacles.
    */
   readonly crossingRearClear: boolean;
-  /** Road the car needs to stop from here; a hard block inside it is not feasible. */
-  readonly stopRoom: number;
   readonly obstacles: readonly CorridorObstacle[];
 }
 
@@ -244,8 +261,6 @@ export interface CorridorPlan {
   readonly line: number;
   /** The chosen line passed every hard permission and geometry gate. */
   readonly admissible: boolean;
-  /** The line is admissible and has nothing immovable inside stopping range. */
-  readonly feasible: boolean;
   /**
    * No corridor was found, and the reason is a car coming the other way rather than
    * anything this driver can do about it. A driver in this state is yielding, not
@@ -296,18 +311,12 @@ const MANOEUVRE_SHIFT_MIN_M = 0.4;
 /** Cost per metre of deviation from the driver's own lane. */
 const LANE_COST_PER_M = 1;
 /**
- * Cost per metre of body past the asphalt edge. Deliberately steep, and steep enough to
- * beat `LEFT_PASS_COST` after about a metre of it.
- *
- * Reported from play, and the reason for the number: a low pile of rubble in the
- * driver's own lane with a COMPLETELY EMPTY opposing lane beside it. Going round on the
- * right means leaving the asphalt, and two metres of sand used to be priced below the
- * convention that immovable things are passed on the right - so the car went into the
- * sand, bogged there, and never got past. The convention is worth keeping while both
- * options are road; it is not worth a bogging.
+ * Cost per metre of body past the asphalt edge. Deliberately steep: two metres of
+ * sand priced below the road was a car that went into the sand, bogged there, and
+ * never got past.
  */
 const SHOULDER_COST_PER_M = 26;
-/** Something immovable in the corridor, scaled by how soon it arrives. */
+/** A line priced as a wall: an abandoned crossing, taken only while nothing else is. */
 const BLOCK_COST = 600;
 /** Cost per m/s of speed a slower car in the corridor would cost us. */
 const SLOW_COST_PER_MPS = 6;
@@ -317,14 +326,8 @@ const SWITCH_COST = 3;
 const CLEAR_M = 30;
 /**
  * The same, for something STOPPED, and it is a third of the figure for a moving car
- * on purpose.
- *
- * Overtaking traffic needs room to pull back in front of the car it has passed. A log
- * needs the log's own length and this car's, and nothing else: measured on the real
- * road, charging the 30 m overtake margin to a standing obstruction turned a 61 m
- * window into a 211 m one, which a stream with 150 m between cars never offers. A
- * cautious driver stood at a rock for the entire six-minute run with a clear line to
- * take and the whole road queueing behind it.
+ * on purpose: overtaking traffic needs room to pull back in front of the car it has
+ * passed, a stopped car needs its own length and this car's and nothing else.
  */
 const STILL_CLEAR_M = 10;
 /** Slowest closing speed an overtake is planned at, so the sums stay finite. */
@@ -345,8 +348,8 @@ const PASS_ENTRY_MARGIN = 1.3;
  *
  * Without this the planner will happily undertake a car doing 50 km/h by putting
  * two wheels on the sand, because the sand is cheaper than losing the pace. A
- * wreck, a stone or the head of a stopped queue is a different matter, and this
- * is the line between them.
+ * stalled or overturned car, or the head of a stopped queue, is a different matter,
+ * and this is the line between them.
  */
 const SHOULDER_BYPASS_MAX_SPEED = 2;
 /**
@@ -361,32 +364,32 @@ const SHOULDER_BYPASS_MAX_SPEED = 2;
 const SHOULDER_PASS_COST_PER_M = 8;
 const SHOULDER_PASS_SOONER_COST_PER_M = 2;
 /**
- * Cost of going round an immovable thing on its LEFT rather than its right.
- *
- * Passing obstacles on the right is what lets two opposing streams go round the
- * same wreck and still clear each other — it is a convention, not geometry, so it
- * lives here as a price rather than as a hard rule: high enough that the right is
- * taken whenever it exists, low enough that a thing lying against the right verge
- * is passed on the left instead of stopping the car.
- */
-const LEFT_PASS_COST = 34;
-/**
- * The escape hatch in `sweptOverlap`, and both halves of it are deliberately tiny.
- *
- * Wider, it is not an escape but a licence: at 4 m/s and three metres of reach the
- * planner committed to lines the body could not reach and the bench caught it clipping
- * a rock it had been asked to creep past. Walking pace with the thing already at the
- * bumper is the only arrangement where stopping has nothing left to offer.
+ * The escape hatch in `sweptOverlap`, and both halves of it are deliberately tiny:
+ * walking pace with the thing already at the bumper is the only arrangement where
+ * stopping has nothing left to offer.
  */
 const STANDING_SPEED_MPS = 1.5;
 const STANDING_REACH_M = 2;
+/** Fixed-point steps solving the move's speed against its own speed-dependent duration. */
+const MANOEUVRE_SPEED_ITERATIONS = 4;
+
 /**
- * How deep into a still obstacle's band the body may already be and still turn out of
- * it from rest: the planner's own avoidance inflation and a little — a graze, not a
- * wall. Plus what full lock buys over the remaining road, on this turning radius.
+ * Seconds the commanded line takes to move `shift` metres: two constant-acceleration
+ * arcs at `accel`, unless that would need the line to move faster than its rate cap at
+ * this speed, in which case it accelerates to the cap, holds it and brakes from it.
  */
-const STANDING_SHIFT_M = 0.6;
-const STANDING_TURN_RADIUS_M = 5.5;
+function lineMoveSeconds(
+  shift: number,
+  accel: number,
+  speed: number,
+  lineRate: CorridorRequest['lineRate'],
+): number {
+  const arcs = 2 * Math.sqrt(shift / accel);
+  if (!lineRate) return arcs;
+  const rate = Math.max(lineRate.perMetre * speed, lineRate.atRest);
+  if (shift <= (rate * rate) / accel) return arcs;
+  return shift / rate + rate / accel;
+}
 
 function overlaps(
   obstacle: CorridorObstacle,
@@ -421,42 +424,21 @@ function sweptOverlap(
   speed: number,
 ): boolean {
   // A STOPPED CAR CANNOT SWEEP INTO ANYTHING, and judging it as if it could is a trap
-  // it never gets out of. The swept band runs from where the body IS, so a still thing
-  // that already overlaps this lateral - a pile the car has crept up to and stopped at -
-  // poisons every candidate line, including the ones that would clear it. The corridor
-  // is then infeasible at zero speed, the car is held at zero speed because the corridor
-  // is infeasible, and it stands beside the pile for good. Reported from play exactly
-  // that way: the player's car stuck at a mound in its own lane while ambient traffic
-  // went round it.
+  // it never gets out of. The swept band runs from where the body IS, so a still car
+  // that already overlaps this lateral — one this car has crept up to and stopped
+  // behind — poisons every candidate line, including the ones that would clear it.
   //
   // Below walking pace, against something that is not moving either, only the
   // destination matters: the wheels are turned before the car rolls, and there is no
-  // closing speed left to run out of.
-  //
-  // …AS LONG AS TURNED WHEELS CAN ACTUALLY TAKE THE BODY OUT OF IT. From a standstill
-  // `s` metres short of the thing, full lock moves the nose sideways by about
-  // `s² / 2R` before it gets there; a pile the body only grazes (the planner's own
-  // inflation, `STANDING_SHIFT_M`) is driven off, a fat boulder square in front is
-  // not. Granting the escape for that one told a car with its bumper on a rock that
-  // the line beside it was feasible: it stood on the throttle into the rock, the stall
-  // rule's gentle first rung backed it a metre and a half — still inside the reach —
-  // and it did it again until the ladder ran out. Refused, the corridor is infeasible,
-  // the car is held, and the recovery ladder backs it far enough to turn.
+  // closing speed left to run out of. A body at the bumper still cuts the pedal
+  // (`bodyScanGap` in the autopilot).
   if (
     speed <= STANDING_SPEED_MPS &&
     obstacle.speed <= SHOULDER_BYPASS_MAX_SPEED &&
     obstacle.s <= STANDING_REACH_M &&
     overlaps(obstacle, from, halfWidth)
   ) {
-    // Cars are left to the old answer: a dynamic body at the bumper already cuts the
-    // pedal (`bodyScanGap` in the autopilot), and a stopped car is "occupied", not a
-    // wall, so refusing the escape there would only park a queue behind it.
-    const penetration = obstacle.halfWidth + halfWidth - Math.abs(obstacle.lateral - from);
-    const s = Math.max(0, obstacle.s);
-    if (obstacle.movable || penetration <= STANDING_SHIFT_M + (s * s) / (2 * STANDING_TURN_RADIUS_M)) {
-      return overlaps(obstacle, to, halfWidth);
-    }
-    return true;
+    return overlaps(obstacle, to, halfWidth);
   }
   const closingShare =
     speed > 0.1 ? Math.min(1, Math.max(0, (speed - obstacle.speed) / speed)) : 1;
@@ -503,11 +485,14 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
     oncomingGap,
     oncomingSpeed,
     manoeuvreFloorSpeed,
+    lineRate,
+    stillManoeuvreStandoff = 0,
+    stillManoeuvreFloorSpeed = manoeuvreFloorSpeed,
+    standingBypass,
     crossingSpeed,
     laneCentres = [laneOffset],
     lateralFreedom = Number.POSITIVE_INFINITY,
     oncomingBoundary = 0,
-    stopRoom,
     crossingRearClear,
     obstacles,
     mayCrossCrown,
@@ -534,14 +519,12 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
    */
   const alreadyAcross = (ownLateral - oncomingBoundary) * ownSide < -halfWidth * 0.5;
   let bestAbandoned = false;
-  let bestFeasible = false;
   let bestAdmissible = false;
   // What blocks the driver's OWN lane, once, for every candidate to reason about:
   // it is the thing a detour or an overtake exists to get past, and whether it is
   // moving decides which of the two is even allowed.
   let laneBlockDistance = Number.POSITIVE_INFINITY;
   let laneBlockSpeed = 0;
-  let laneBlockLateral = laneOffset;
   // The slowest own-lane body is not necessarily the nearest one.
   let leaderSpeed = crossingSpeed;
   for (const obstacle of obstacles) {
@@ -551,7 +534,6 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
     if (obstacle.s >= laneBlockDistance) continue;
     laneBlockDistance = obstacle.s;
     laneBlockSpeed = obstacle.speed;
-    laneBlockLateral = obstacle.lateral;
   }
   const laneBlockIsStill = laneBlockSpeed <= SHOULDER_BYPASS_MAX_SPEED;
   /**
@@ -612,13 +594,17 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
     // Road covered while the line is being moved there, from the manoeuvre's own arc.
     // A car that is barely moving covers almost none of it, which is what the old
     // slope needed a standstill special case for.
+    //
+    // THE ARCS ALONE, NOT THE LINE'S RATE CAP (`lineRate`), and on purpose: this asks
+    // whether the line is reachable at all, and round something still it is, because
+    // `manoeuvreSpeed` below slows the car until the capped move fits. Priced on the cap
+    // at the present speed, a car rolling up to a stopped one found every way round too
+    // late, held its lane and chose a line only once standing at the bumper — measured
+    // on tools/traffic-blocker.ts as the very stall the cap was brought in to end.
     const transitionDistance =
       speed * 2 * Math.sqrt(shift / Math.max(lineAccel, 1e-3));
     let blockDistance = Number.POSITIVE_INFINITY;
     let blockSpeed = 0;
-    let hardBlockDistance = Number.POSITIVE_INFINITY;
-    /** The same, counting only what cannot drive away. See `CorridorObstacle.movable`. */
-    let wallDistance = Number.POSITIVE_INFINITY;
     let manoeuvreRoom = Number.POSITIVE_INFINITY;
     let manoeuvrePastSpeed = 0;
     for (const obstacle of obstacles) {
@@ -628,7 +614,7 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
       // Holding the present gap or widening it stays available whatever is beside
       // the body, so a driver pinned between two cars still has lines to choose
       // from; only closing on one is refused. Treating it as an ordinary obstacle
-      // instead would make every line infeasible the moment a neighbour drew level
+      // instead would make every line inadmissible the moment a neighbour drew level
       // and stop the car dead in the middle of the carriageway.
       //
       // Judging the CANDIDATE alone is not enough, and the hole it left was the
@@ -694,45 +680,56 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
         manoeuvrePastSpeed = Math.max(0, obstacle.speed);
       }
       if (obstacle.s < 0 || obstacle.s > horizon) continue;
-      if (!sweptOverlap(obstacle, ownLateral, line, halfWidth, transitionDistance, speed)) {
+      // ON AN OPEN SHOULDER BYPASS, A STANDING CAR IS ONLY IN THE WAY OF A LINE THAT ENDS
+      // IN IT. The swept band at the present speed is the wrong test there: the move is
+      // priced at the speed it will be driven (`manoeuvreSpeed`, which ends it short of
+      // the car), and at the approach speed the band covered the car, so the lane was
+      // kept and braked in until the bumper — then the line was too late from anywhere.
+      const bypassingIt =
+        standingBypass?.open === true &&
+        obstacle.speed <= SHOULDER_BYPASS_MAX_SPEED &&
+        (line - oncomingBoundary) * ownSide > 0 &&
+        Math.abs(line) + halfWidth > asphaltLimit;
+      if (
+        bypassingIt
+          ? !overlaps(obstacle, line, halfWidth)
+          : !sweptOverlap(obstacle, ownLateral, line, halfWidth, transitionDistance, speed)
+      ) {
         continue;
       }
       if (obstacle.s < blockDistance) {
         blockDistance = obstacle.s;
         blockSpeed = obstacle.speed;
       }
-      // ANYTHING THAT IS NOT MOVING AWAY FROM US HAS TO BE DEALT WITH — BUT ONLY
-      // SCENERY HAS TO BE GONE ROUND.
-      //
-      // `BLOCK_COST` is documented as the price of something IMMOVABLE, and until
-      // here it was charged to anything merely slower than desired, movable or not.
-      // That is right for the FRESH decision to overtake — it is the whole reason a
-      // slow leader with an empty opposing lane gets crossed rather than followed —
-      // and wrong for the return from one already under way: a driver aborting a
-      // pass is choosing to go back to following the very car it was passing, which
-      // this same price then read as "still practically a wall", worth exactly as
-      // much escaping as the real, closing oncoming car the driver was aborting
-      // FOR. Measured in play: a car that had barely started a pass, saw the
-      // oncoming lane taken, and could not price its own lane as home either —
-      // both directions "blocked" by the same number, so the cheapest line was
-      // neither, straddling the crown between two real cars for good. A body that
-      // can drive away by itself is followed, not routed round, and the ordinary
-      // speed plan already prices following it — see `SLOW_COST_PER_MPS` below.
-      if (obstacle.speed >= desiredSpeed - MIN_ADVANTAGE_MPS) continue;
-      if (!obstacle.movable && obstacle.s < hardBlockDistance) hardBlockDistance = obstacle.s;
-      if (!obstacle.movable && obstacle.s < wallDistance) wallDistance = obstacle.s;
     }
     // Invert the same two lateral-acceleration arcs used by the swept test. The
-    // obstacle's speed matters: room is closing distance, not distance past a rock.
-    const manoeuvreSpeed = manoeuvreRoom < Number.POSITIVE_INFINITY
-      ? Math.max(
-          manoeuvreFloorSpeed,
-          Math.min(
-            manoeuvreCeilingSpeed,
-            manoeuvrePastSpeed + 0.5 * manoeuvreRoom * Math.sqrt(lineAccel / shift),
-          ),
-        )
-      : Number.POSITIVE_INFINITY;
+    // obstacle's speed matters: room is closing distance, not distance past it.
+    //
+    // ROUND A CAR STANDING IN THE LANE, THE MOVE IS PRICED ON THE LINE'S RATE CAP TOO
+    // (`lineRate`), IT ENDS SHORT OF THE CAR, and the approach is floored at a crawl
+    // rather than at the moving-traffic figure. The duration depends on the speed through
+    // the cap, so it is solved by fixed point from the arcs-only answer, which is an upper
+    // bound and only ever comes down.
+    const standingCar = manoeuvrePastSpeed <= SHOULDER_BYPASS_MAX_SPEED;
+    let manoeuvreSpeed = Number.POSITIVE_INFINITY;
+    if (manoeuvreRoom < Number.POSITIVE_INFINITY) {
+      const room = Math.max(0, manoeuvreRoom - (standingCar ? stillManoeuvreStandoff : 0));
+      const accel = Math.max(lineAccel, 1e-3);
+      let solved = manoeuvrePastSpeed + room / (2 * Math.sqrt(shift / accel));
+      for (let k = 0; standingCar && lineRate && k < MANOEUVRE_SPEED_ITERATIONS; k++) {
+        solved = manoeuvrePastSpeed + room / lineMoveSeconds(shift, accel, solved, lineRate);
+      }
+      manoeuvreSpeed = Math.max(
+        standingCar ? stillManoeuvreFloorSpeed : manoeuvreFloorSpeed,
+        Math.min(manoeuvreCeilingSpeed, solved),
+      );
+    }
+    // Never across the crown for a car standing in the lane: see `standingBypass`. A body
+    // already out there is let home as from any other crossing.
+    if (crossesCentre && standingBypass !== undefined && !alreadyAcross) {
+      admissible = false;
+      if (!captureRejected) return;
+    }
     if (crossesCentre) {
       // Room for a car coming the other way is not a preference. The manoeuvre
       // lasts as long as it takes to get past whatever is in our own lane, and an
@@ -747,8 +744,10 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
       // A pending move is driven at THIS candidate's executable speed. Once the
       // current band already clears the obstacle there is no lateral deadline and
       // the pass uses its full allowance. No previous line's cap enters this search.
+      // The gate keeps timing the crossing at no less than the moving-traffic floor: the
+      // still approach's crawl is the stretch before the body is out, not the crossing.
       const passSpeed = Number.isFinite(manoeuvreSpeed)
-        ? manoeuvreSpeed
+        ? Math.max(manoeuvreSpeed, manoeuvreFloorSpeed)
         : Math.max(speed, crossingSpeed);
       const manoeuvreSeconds =
         leaderSpeed > SHOULDER_BYPASS_MAX_SPEED
@@ -819,7 +818,7 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
       const noSlot = measuredOvertake && !Number.isFinite(roomNeeded);
       if (!alreadyAcross && !firstToTheGap && (noSlot || oncomingGap < entryRoom)) {
         crossingRefused = true;
-        if (wallDistance === Number.POSITIVE_INFINITY) waitingForOncoming = true;
+        waitingForOncoming = true;
         admissible = false;
         if (!captureRejected) return;
       }
@@ -848,7 +847,7 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
       // and the answer to a follower is to finish the pass and get back in.
       if (!crossingRearClear && !alreadyAcross) {
         crossingRefused = true;
-        if (wallDistance === Number.POSITIVE_INFINITY) waitingForOncoming = true;
+        waitingForOncoming = true;
         admissible = false;
         if (!captureRejected) return;
       }
@@ -864,49 +863,54 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
       shoulderPassOverhang > 0 &&
       (line - oncomingBoundary) * ownSide > 0 &&
       bodyEdge - asphaltLimit <= shoulderPassOverhang;
-    if (leavesAsphalt && !laneBlockIsStill && !shoulderPass) admissible = false;
+    // …BUT A BODY ALREADY OUT THERE MAY ALWAYS HOLD ITS LINE OR COME IN. A car that has
+    // just gone round a standing one is on the shoulder beside moving traffic; refusing
+    // it every line there left nothing admissible, the stall rule read that as a wedge,
+    // and the escape put it in the desert (tools/traffic-blocker.ts: 30% of the queue
+    // head's time with no admissible line, cars level with the ego 6 m past the paint).
+    const holdingOnShoulder =
+      (line - oncomingBoundary) * ownSide > 0 && Math.abs(line) <= Math.abs(ownLateral) + 1e-6;
+    if (leavesAsphalt && !laneBlockIsStill && !shoulderPass && !holdingOnShoulder) admissible = false;
+    // ROUND A STANDING CAR ON THIS SIDE'S SHOULDER: out to the line that clears it and no
+    // further, priced as a short paved-road-side move, and not before the driver is near
+    // enough to start it — until then it may hold the line it is on, not go further out.
+    const bypassShoulder =
+      standingBypass !== undefined && leavesAsphalt && (line - oncomingBoundary) * ownSide > 0;
+    if (
+      bypassShoulder &&
+      Math.abs(line) > Math.abs(ownLateral) + 1e-6 &&
+      (!standingBypass.open || Math.abs(line) > Math.abs(standingBypass.line) + 1e-6)
+    ) {
+      admissible = false;
+    }
     if (!admissible && !captureRejected) return;
     let cost = Number.POSITIVE_INFINITY;
     if (admissible) {
       cost =
         Math.abs(line - laneOffset) * LANE_COST_PER_M +
         Math.max(0, bodyEdge - asphaltLimit) *
-          (shoulderPass
-            ? shoulderPassSooner ? SHOULDER_PASS_SOONER_COST_PER_M : SHOULDER_PASS_COST_PER_M
+          (shoulderPass || bypassShoulder
+            ? shoulderPassSooner || bypassShoulder ? SHOULDER_PASS_SOONER_COST_PER_M : SHOULDER_PASS_COST_PER_M
             : SHOULDER_COST_PER_M) +
         (crossesCentre ? oncomingLaneCost : 0);
-      // Immovable things are passed on the right, so that two opposing streams go
-      // round the same one and still clear each other.
-      if (laneBlockDistance < Number.POSITIVE_INFINITY && laneBlockIsStill && line > laneBlockLateral) {
-        cost += LEFT_PASS_COST;
-      }
-      if (hardBlockDistance < Number.POSITIVE_INFINITY) {
-        cost += BLOCK_COST * nearness(hardBlockDistance);
-      } else if (blockDistance < Number.POSITIVE_INFINITY) {
+      if (blockDistance < Number.POSITIVE_INFINITY) {
         cost +=
           Math.max(0, desiredSpeed - blockSpeed) * SLOW_COST_PER_MPS * nearness(blockDistance);
       }
       if (abandoned) cost += BLOCK_COST;
       if (Math.abs(line - previousLine) > LINE_STEP_M) cost += SWITCH_COST;
     }
-    // FEASIBLE MEANS "NOTHING IMMOVABLE IN IT WITHIN STOPPING DISTANCE".
-    //
-    // A car in the corridor is a reason to slow down, never a reason to conclude the
+    // A CAR IN THE CORRIDOR IS A REASON TO SLOW DOWN, never a reason to conclude the
     // road has no way through: the driver in front is going somewhere, and the queue
-    // behind it is traffic behaving correctly. Only scenery closes a corridor.
-    const feasible = admissible && wallDistance > stopRoom;
-    // A feasible corridor always beats an infeasible one, however cheap.
-    const better =
-      !bestAdmissible ||
-      (feasible && !bestFeasible) ||
-      (feasible === bestFeasible && cost < bestCost);
+    // behind it is traffic behaving correctly. An admissible line always beats an
+    // inadmissible one, however cheap.
+    const better = !bestAdmissible || (admissible && cost < bestCost);
     if (!better) return;
     bestLine = line;
     bestCost = cost;
     bestBlockDistance = blockDistance;
     bestBlockSpeed = blockSpeed;
     bestManoeuvreSpeed = manoeuvreSpeed;
-    bestFeasible = feasible;
     bestAdmissible = admissible;
     bestAbandoned = abandoned;
   };
@@ -927,15 +931,13 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
       // as a clear route just because its default line had no samples.
       evaluate(ownLateral, true);
       bestAdmissible = false;
-      bestFeasible = false;
     }
   }
 
   return {
     line: bestLine,
     admissible: bestAdmissible,
-    feasible: bestFeasible,
-    waitingForOncoming: waitingForOncoming && !bestFeasible,
+    waitingForOncoming: waitingForOncoming && !bestAdmissible,
     crossingRefused,
     crossingAbandoned: bestAbandoned && bestAdmissible,
     blockDistance: bestBlockDistance,

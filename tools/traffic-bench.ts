@@ -6,7 +6,6 @@ import { carModelMeasure, loadCarModel } from '../src/render/carmodel';
 import { CAR_MODELS } from '../src/vehicle/carmodels';
 import type { Autopilot } from '../src/vehicle/autopilot';
 import type { Vehicle } from '../src/vehicle/vehicle';
-import { HazardIndex, type RoadHazard } from '../src/world/hazards';
 import {
   laybyCourierLateral,
   laybyLevel,
@@ -174,7 +173,6 @@ const traffic = new RoadTraffic(
   new THREE.Scene(),
   new WorldOrigin(),
   road,
-  new HazardIndex(),
   loadCarModel,
   () => true,
 );
@@ -384,7 +382,6 @@ check(
     new THREE.Scene(),
     new WorldOrigin(),
     road,
-    new HazardIndex(),
     loadCarModel,
     () => true,
   );
@@ -420,7 +417,7 @@ check(
   fieldWorld.state.player.drivingCarId = 'field-bench-player';
   const fieldTraffic = new RoadTraffic(
     physics, fieldWorld, new THREE.Scene(), new WorldOrigin(), road,
-    new HazardIndex(), loadCarModel, () => false,
+    loadCarModel, () => false,
   );
   const owner: { forwardS: number; direction: 1 | -1 } = { forwardS: PLAYER_S, direction: 1 };
   const field = fieldTraffic.fieldFor(owner, 'field-bench-observer');
@@ -452,7 +449,7 @@ check(
 {
   const coordinator = new RoadTraffic(
     physics, new GameWorld(newWorldState(SEED)), new THREE.Scene(), new WorldOrigin(),
-    road, new HazardIndex(), loadCarModel, () => false,
+    road, loadCarModel, () => false,
   );
   type QueueCar = {
     forwardS: number;
@@ -489,7 +486,7 @@ check(
 {
   const coordinator = new RoadTraffic(
     physics, new GameWorld(newWorldState(SEED)), new THREE.Scene(), new WorldOrigin(),
-    road, new HazardIndex(), loadCarModel, () => false,
+    road, loadCarModel, () => false,
   );
   const s = findUniformS(road, 1);
   const follower = {
@@ -542,7 +539,6 @@ check(
     new THREE.Scene(),
     new WorldOrigin(),
     road,
-    new HazardIndex(),
     loadCarModel,
     () => true,
   );
@@ -569,76 +565,6 @@ check(
   rotating.dispose();
 }
 
-// A PROP IN THE ROAD MUST NOT STOP THE WORLD.
-//
-// Reported from play: a rock in one lane, a queue behind it, an opposing queue that
-// had drawn level with its head, and nothing moving for five minutes. Both streams
-// are stopped, so nobody's own sensors call it anything but "traffic ahead" — the
-// coordinator has to see the standoff and hand one head right of way.
-{
-  const blockS = PLAYER_S + 260;
-  const blockedHazards = new HazardIndex();
-  const rock: RoadHazard = { s: blockS, lateral: -1.45, radius: 1.2, breakable: false };
-  blockedHazards.add('traffic-bench-block', rock);
-  const rockPoint = road.offsetPoint(rock.s, rock.lateral);
-  const rockBody = physics.world.createRigidBody(
-    physics.rapier.RigidBodyDesc.fixed().setTranslation(rockPoint.x, rockPoint.y + 1, rockPoint.z),
-  );
-  physics.world.createCollider(
-    physics.rapier.ColliderDesc.cylinder(1, rock.radius).setFriction(0.9),
-    rockBody,
-  );
-  const blocked = new RoadTraffic(
-    physics,
-    new GameWorld(newWorldState(SEED)),
-    new THREE.Scene(),
-    new WorldOrigin(),
-    road,
-    blockedHazards,
-    loadCarModel,
-    () => true,
-  );
-  const stopped = new Map<string, number>();
-  let worstStop = 0;
-  let passedTheRock = 0;
-  const before = new Set<string>();
-  for (let step = 0; step < Math.ceil(150 / FIXED_DT); step++) {
-    blocked.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0, 0);
-    physics.step();
-    blocked.postStep();
-    const live = new Set<string>();
-    blocked.forEachVehicle((id, vehicle) => {
-      live.add(id);
-      const held = vehicle.speedKmh < 2 ? (stopped.get(id) ?? 0) + FIXED_DT : 0;
-      stopped.set(id, held);
-      // Settle time and the first seconds of a spawn are not a standoff.
-      if (step * FIXED_DT > 8) worstStop = Math.max(worstStop, held);
-      const position = vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 });
-      const s = road.project(position.x, position.z, blockS).s;
-      if (s < blockS - 20) before.add(id);
-      else if (s > blockS + 20 && before.has(id)) {
-        before.delete(id);
-        passedTheRock++;
-      }
-    });
-    for (const id of stopped.keys()) if (!live.has(id)) stopped.delete(id);
-    if (step % 12 === 0) await Bun.sleep(0);
-  }
-  check(
-    'a rock in the road never deadlocks both streams',
-    worstStop < 22,
-    `longest continuous stop ${worstStop.toFixed(1)} s of 150 s (nothing may stand for 22)`,
-  );
-  check(
-    'and traffic keeps getting past it',
-    // Two in two and a half minutes is not much, and a lane with a rock in it is not
-    // much of a lane: what this defends is that the number is not zero.
-    passedTheRock >= 2,
-    `${passedTheRock} cars went from before the rock to past it`,
-  );
-  blocked.dispose();
-  physics.world.removeRigidBody(rockBody);
-}
 // THE ROAD'S END TURNS CARS ROUND INSTEAD OF EATING THEM.
 //
 // Oncoming traffic used to drive to s = 0, sit against the clamp its reversed road view
@@ -684,7 +610,6 @@ check(
     new THREE.Scene(),
     new WorldOrigin(),
     road,
-    new HazardIndex(),
     loadCarModel,
     () => true,
   );
@@ -750,7 +675,6 @@ check(
     new THREE.Scene(),
     new WorldOrigin(),
     road,
-    new HazardIndex(),
     loadCarModel,
     () => true,
   );
@@ -844,7 +768,6 @@ check(
       new THREE.Scene(),
       new WorldOrigin(),
       road,
-      new HazardIndex(),
       loadCarModel,
       () => true,
     );

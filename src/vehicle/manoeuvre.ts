@@ -86,6 +86,8 @@ export type SpeedLimitSource =
   | 'verge'
   | 'inadmissible'
   | 'hold-line'
+  | 'standing-bypass'
+  | 'pull-out'
   | 'shelter'
   | 'offroad'
   | 'turned-away'

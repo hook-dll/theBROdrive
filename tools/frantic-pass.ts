@@ -3,7 +3,7 @@
  *
  * Two situations the stream bench meets too rarely to measure, built on purpose on the
  * REAL road: the game's road mesh with its graded shoulder strip (`LooseShoulder`), the
- * game's desert beside it, the real scatter props and their hazard index, real
+ * game's desert beside it, the real scatter props, real
  * `Vehicle` bodies under real `Autopilot`s, every driver deciding at the stream's own
  * control rate (`TRAFFIC_CONTROL_HZ`, 12 Hz) under 60 Hz physics, and a traffic field
  * in the coordinator's own frame (`RoadTraffic.fieldFor`).
@@ -41,7 +41,6 @@ import type { TrafficField, TrafficNeighbour } from '../src/vehicle/trafficfield
 import { Vehicle } from '../src/vehicle/vehicle';
 import { type ChunkContext } from '../src/world/chunks';
 import { DesertTileStreamer, DESERT_TILE_SIZE } from '../src/world/deserttiles';
-import { HazardIndex, ReversedHazardIndex } from '../src/world/hazards';
 import { WorldOrigin } from '../src/world/origin';
 import { InstanceBatches } from '../src/world/props/instancebatch';
 import { ScatterProvider } from '../src/world/props/scatter';
@@ -101,12 +100,10 @@ const terrain = new Terrain(SEED, road);
 const physics = await PhysicsWorld.create();
 const surface = new SurfaceField(SEED);
 const world = new GameWorld(newWorldState(SEED));
-const hazards = new HazardIndex();
 const reverseRoad = new ReversedRoad(road);
-const reverseHazards = new ReversedHazardIndex(hazards, road.length);
 const roadDistance = new RoadDistance(road);
 const roadProvider = new RoadMeshProvider(SEED, roadDistance);
-const scatter = new ScatterProvider(undefined, hazards);
+const scatter = new ScatterProvider();
 const scene = new THREE.Scene();
 const origin = new WorldOrigin();
 const desert = new DesertTileStreamer(SEED, road, terrain, roadDistance, physics, scene, origin, undefined, new WorldWorkScheduler(3), () => null);
@@ -147,8 +144,8 @@ function buildRoad(from: number, to: number): void {
 }
 
 /**
- * A long straight on one lane each way whose right-hand verge is a graded strip with
- * nothing standing on it: the place a verge pass is meant to be possible at all.
+ * A long straight on one lane each way whose right-hand verge is a graded strip: the
+ * place a verge pass is meant to be possible at all.
  */
 function findStretch(): number {
   const condition = { surface: SurfaceType.Asphalt, decay: 0, sandCover: 0, markings: 1 };
@@ -161,13 +158,7 @@ function findStretch(): number {
     }
     if (!fits) continue;
     buildRoad(s - 400, s + STRETCH_M + 400);
-    let propOnVerge = false;
-    hazards.forEachAhead(s, STRETCH_M, (hazard) => {
-      const edge = road.halfWidthAt(hazard.s);
-      if (hazard.lateral < 0 && -hazard.lateral - hazard.radius < edge + 3) propOnVerge = true;
-    });
-    if (!propOnVerge) return s;
-    s += 500;
+    return s;
   }
   throw new Error(`no clear straight on seed ${SEED}`);
 }
@@ -261,7 +252,7 @@ function placeCar(
   }
   world.state.cars[id] = state;
   const vehicle = new Vehicle(physics, world, state, scene, origin);
-  const autopilot = new Autopilot(direction === 1 ? road : reverseRoad, direction === 1 ? hazards : reverseHazards, physics);
+  const autopilot = new Autopilot(direction === 1 ? road : reverseRoad, physics);
   autopilot.setPassingEnabled(true);
   autopilot.setMode(mode);
   autopilot.setSpeedCap(cap);

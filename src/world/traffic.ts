@@ -22,7 +22,6 @@ import type { Item } from '../items/items';
 import { CAR_MODELS } from '../vehicle/carmodels';
 import { variantsOfKind, variant, type BodyClass } from '../parts/registry';
 import { Vehicle } from '../vehicle/vehicle';
-import { ReversedHazardIndex, type HazardField, type RoadHazard } from './hazards';
 import type { WorldOrigin } from './origin';
 import {
   laybyCourierLateral,
@@ -32,7 +31,7 @@ import {
   laybysBetween,
   type Layby,
 } from './layby';
-import { laneHalfWidthFor } from './roadprofile';
+import { laneHalfWidthFor, SHOULDER_WIDTH_M } from './roadprofile';
 import type { DriveRoad } from './road';
 import { ReversedRoad } from './reversedroad';
 import { TurnaroundRoad, TURNAROUND_ENTRY_S } from './turnaround';
@@ -177,7 +176,6 @@ const PLATOON_MAX_CHAIN = 4;
 const PLATOON_MIN_GAP_M = 15;
 /** Braking a rival put down behind a slower car is allowed to need, m/s²: a firm, ordinary stop. */
 const RIVAL_SPAWN_BRAKE_MPS2 = 3;
-const SPAWN_HAZARD_GAP_M = 18;
 /** Never materialize an opposing car inside a pass that was clear when committed. */
 const PASSING_SPAWN_EXCLUSION_M = 300;
 const TRAFFIC_HALF_WIDTH_M = 1.1;
@@ -256,22 +254,6 @@ const IMPACT_MPS = 1.8;
  * or settling on a wheel it lost does not stand like that.
  */
 const CRASH_FULL_DETAIL_S = 5;
-/** A car standing below this, m/s, with its plan wanting this far across, is blocked. */
-const BOTTLENECK_STILL_MPS = 1;
-const BOTTLENECK_ACROSS_M = 0.8;
-/** Seconds blocked at the head before the road gives it a turn. */
-const BOTTLENECK_WAIT_S = 4;
-/** Length of the narrowing a turn clears, metres past where the car stood. */
-const BOTTLENECK_ZONE_M = 40;
-/** Held cars in its own direction stop this far behind where it stood. */
-const BOTTLENECK_BEHIND_M = 8;
-/** Cars within this of the needed line are in its way; how far ahead holds reach. */
-const BOTTLENECK_LANE_M = 2.6;
-const BOTTLENECK_REACH_M = 200;
-/** Braking a held car is asked for; nearer than that it goes through first. */
-const BOTTLENECK_DECEL_MPS2 = 3;
-/** A turn not used in this long is given up. */
-const BOTTLENECK_TURN_MAX_S = 20;
 const CLOCK_SYNC_S = 1;
 const END_MARGIN_M = 80;
 const TRAFFIC_ID_PREFIX = 'traffic:';
@@ -361,8 +343,6 @@ const RAILS_PASS_HOLDOFF_S = 12;
 const RAILS_UPRIGHT_MIN = 0.97;
 /** Furthest from its lane's centre a car may be to be put on rails, metres. */
 const RAILS_LANE_TOLERANCE_M = 0.6;
-/** Clearance a prop needs from a car's flank to be passed by on rails, metres. */
-const RAILS_HAZARD_MARGIN_M = 0.4;
 /**
  * Car-following on rails: the Intelligent Driver Model, with the driver's own
  * headway. Gentle numbers on purpose; it only has to look like traffic from afar.
@@ -705,6 +685,82 @@ interface LaybyVisit {
   readonly course: LaybyCourse;
 }
 
+/** A traffic car or the player's standing this long in a lane is something to go round, seconds. */
+const BYPASS_STANDING_S = 3;
+/** Something standing within this in front of it: it is queueing, not the obstruction, metres. */
+const BYPASS_QUEUE_GAP_M = 8;
+/** Cars coming up to it from this far behind its face get the route. */
+const BYPASS_REACH_M = 150;
+/** Road over which the line moves out to the shoulder. */
+const BYPASS_LEAD_M = 25;
+/** Least road for that move; a car standing closer than this backs `BYPASS_BACK_M` first. */
+const BYPASS_MIN_LEAD_M = 6;
+/** Clearance from its flank to the passing car's, metres. */
+const BYPASS_SIDE_MARGIN_M = 0.7;
+/** From its faces to the passing car's ends along the road: fully out before, still out after. */
+const BYPASS_END_MARGIN_M = 1.5;
+/** Road over which the line comes back into the lane. */
+const BYPASS_REJOIN_M = 20;
+/** Back in its lane within this, past the rejoin, the route is handed back; or this much road further on regardless. */
+const BYPASS_HOME_TOLERANCE_M = 0.5;
+const BYPASS_HOME_EXTRA_M = 30;
+/** Past the graded strip's outer edge the line may take the passing body this far, or there is no route. */
+const BYPASS_PAST_STRIP_M = 1;
+/** Speed beside it, and the braking down to that from the lane's. */
+const BYPASS_MPS = 25 / 3.6;
+const BYPASS_APPROACH_DECEL_MPS2 = 1.5;
+/** One reverse before the line, metres; at most `LIMIT` of them, each with this much clear behind. */
+const BYPASS_BACK_M = 0.5;
+const BYPASS_BACK_LIMIT = 4;
+const BYPASS_REAR_CLEAR_M = 1;
+const BYPASS_BACK_TIMEOUT_S = 4;
+/** Standing on the route this long with nothing on the line in front: back once more. */
+const BYPASS_STALL_S = 3;
+/** Nearer than this on the line, it is waiting for whoever is ahead, not stalled. */
+const BYPASS_WAIT_GAP_M = 5;
+/** Still below this, m/s, the obstruction is still there. */
+const BYPASS_STILL_MPS = 1.5;
+/** The player's car in the traffic's sums; its body is not measured here. */
+const PLAYER_BLOCKER = 'player';
+const PLAYER_HALF_LENGTH_M = 2.2;
+const PLAYER_HALF_WIDTH_M = 0.9;
+
+interface BypassBlocker {
+  id: string;
+  s: number;
+  lateral: number;
+  halfAlong: number;
+  halfAcross: number;
+}
+
+/**
+ * GOING ROUND SOMETHING STANDING IN THE LANE, on a line the coordinator builds and the
+ * driver only follows, exactly as it follows a lay-by (`Autopilot.setLaybyCourse`):
+ * lead-in from its lane, along its own shoulder past the obstruction with a margin, back
+ * into the lane. Every car of that direction coming up to it gets its own copy; one
+ * stopped close behind it backs `BYPASS_BACK_M` first. Arclengths are measured from the
+ * obstruction's face toward this direction (`u`, positive past it).
+ */
+interface Bypass {
+  /** Id of the standing car, or `PLAYER_BLOCKER`. */
+  readonly blocker: string;
+  readonly direction: TrafficDirection;
+  /** Forward arclength of the face it comes up to. */
+  readonly faceS: number;
+  /** The lane it leaves and comes back to, counted from the crown. */
+  readonly lane: number;
+  /** Forward-frame lateral of the line beside the obstruction. */
+  readonly off: number;
+  /** The move starts here, is complete at `fullU`, held to `endU`, back by `endU + BYPASS_REJOIN_M`. */
+  startU: number;
+  readonly fullU: number;
+  readonly endU: number;
+  backs: number;
+  stalledFor: number;
+  backingFor: number;
+  readonly course: LaybyCourse;
+}
+
 interface TrafficCar {
   readonly id: string;
   /**
@@ -725,6 +781,8 @@ interface TrafficCar {
   roadLateral: number;
   /** Current body projection across the road, including yaw/roll. */
   roadHalfWidth: number;
+  /** Current body projection along the road, including yaw/roll. */
+  roadHalfLength: number;
   readonly halfExtents: readonly [number, number, number];
   readonly bodyRadius: number;
   /**
@@ -771,14 +829,6 @@ interface TrafficCar {
   rival: boolean;
   /** A rival's hand-in at a lay-by; see `RivalHandIn`. */
   handIn: RivalHandIn;
-  /**
-   * Seconds this car has stood at the head of a bottleneck: stopped, and either wanting
-   * across (its plan's line is off its own) or held so someone else can go. The turn
-   * goes to the longest wait; see `assignBottleneckTurns`.
-   */
-  headWait: number;
-  /** Arclength of the line it is held at, or null; see `assignBottleneckTurns`. */
-  holdS: number | null;
   /** The stop this car is making, or null on the road; see `LaybyVisit`. */
   layby: LaybyVisit | null;
   /** The last lay-by (`Layby.poiIndex`) this car rolled for, so it decides once. */
@@ -787,6 +837,10 @@ interface TrafficCar {
   readonly laybyKey: number;
   /** Held under its own pace for somebody crossing to a lay-by; see `assignCrossYields`. */
   crossYield: boolean;
+  /** The route round a standing car this car is on, or null; see `Bypass`. */
+  bypass: Bypass | null;
+  /** The blocker it gave up going round (backed `BYPASS_BACK_LIMIT` times); not offered again. */
+  bypassGaveUp: string | null;
 }
 
 const FORWARD_QUEUE_ORDER = (a: TrafficCar, b: TrafficCar): number =>
@@ -882,6 +936,8 @@ export interface TrafficStatus {
   /** Stops made (cars that reached their place) and finished (back in the lane), all time. */
   readonly laybyStops: number;
   readonly laybyRejoins: number;
+  /** Live cars on a route round a standing car (`Bypass`). */
+  readonly bypassing: number;
 }
 
 /**
@@ -895,15 +951,8 @@ export interface TrafficStatus {
 export class RoadTraffic {
   private readonly trafficWorld: GameWorld;
   private readonly reverseRoad: ReversedRoad;
-  private readonly reverseHazards: ReversedHazardIndex;
-  /**
-   * The line round the bulb at the road's start, and an empty hazard field to drive it
-   * with. Hazards are indexed by the world road's arclength and there is nothing on the
-   * paving to index anyway (`world/deserttiledata.ts` keeps tile props off it), so a
-   * turning car sees other cars by proximity and nothing else.
-   */
+  /** The line round the bulb at the road's start; a turning car sees other cars by proximity. */
   private readonly turnaround: TurnaroundRoad;
-  private readonly noHazards: HazardField = { forEachAhead: () => {} };
   private readonly random: () => number;
   private readonly carList: TrafficCar[] = [];
   /** Reused coordinator scratch; allocating and sorting two fresh arrays at 60 Hz caused GC churn. */
@@ -936,6 +985,10 @@ export class RoadTraffic {
    */
   private playerSpeed = 0;
   private playerStepTravel = 0;
+  /** Seconds the player's car has stood still; see BYPASS_STANDING_S. */
+  private playerStoppedFor = 0;
+  /** This coordination's standing obstructions (`assignBypasses`), pooled. */
+  private readonly blockers: BypassBlocker[] = [];
   /**
    * The player's own lateral and whether he is in a car at all, maintained with
    * `playerS` so the traffic field can carry him. A driver's rearward sensing cannot
@@ -997,10 +1050,6 @@ export class RoadTraffic {
   private readonly railProbeCentre = { x: 0, y: 0, z: 0 };
   private readonly railProbeRotation = { x: 0, y: 0, z: 0, w: 1 };
   private railProbeHit = false;
-  /** One survey's prop test, held in fields so the hazard walk allocates nothing. */
-  private railHazardLateral = 0;
-  private railHazardHalfWidth = 0;
-  private railHazardHit = false;
 
   constructor(
     private readonly physics: PhysicsWorld,
@@ -1008,14 +1057,12 @@ export class RoadTraffic {
     private readonly scene: THREE.Scene,
     private readonly origin: WorldOrigin,
     private readonly road: DriveRoad,
-    private readonly hazards: HazardField,
     private readonly prepareModel: (modelId: string) => Promise<void>,
     private readonly isSpawnClear: (x: number, z: number, radius: number) => boolean,
   ) {
     this.trafficWorld = new GameWorld(newWorldState(sourceWorld.seed));
     this.reverseRoad = new ReversedRoad(road);
     this.turnaround = new TurnaroundRoad(road);
-    this.reverseHazards = new ReversedHazardIndex(hazards, road.length);
     this.random = mulberry32(sourceWorld.seed ^ 0x74726166);
     this.syncSettings();
     this.redrawDesiredCount();
@@ -1039,6 +1086,7 @@ export class RoadTraffic {
     let onRails = 0;
     let laybyVisits = 0;
     let laybyParked = 0;
+    let bypassing = 0;
     for (const car of this.carList) {
       if (car.direction === 1) {
         sameDirection++;
@@ -1060,6 +1108,7 @@ export class RoadTraffic {
         Math.abs(car.forwardS - this.playerS),
       );
       if (car.rails) onRails++;
+      if (car.bypass) bypassing++;
       if (car.layby) {
         laybyVisits++;
         if (car.layby.phase === 'parked') laybyParked++;
@@ -1091,6 +1140,7 @@ export class RoadTraffic {
       laybyParked,
       laybyStops: this.laybyStopCount,
       laybyRejoins: this.laybyRejoinCount,
+      bypassing,
     };
   }
 
@@ -1231,8 +1281,14 @@ export class RoadTraffic {
 
       // Nobody between them. With an overlapped pair the span is zero, so the test
       // degenerates to "no third car in the same place", which is the right answer.
+      //
+      // THE PLAYER COUNTS. His car is not one of the stream's, and a queue standing
+      // behind it read as facing the oncoming cars beyond it with nothing between them:
+      // the head was granted the escape and reversed out of a queue that was only
+      // waiting to go round him (tools/traffic-blocker.ts).
       const span = Math.max(opposingGap, 0);
-      let headsMeet = true;
+      const playerAhead = this.playerS - candidate.forwardS;
+      let headsMeet = !(this.playerDriving && playerAhead > 0 && playerAhead < span);
       for (const other of this.carList) {
         if (other === candidate || other === opposing || other.layby) continue;
         const ahead =
@@ -1246,79 +1302,6 @@ export class RoadTraffic {
       }
       if (headsMeet) candidate.autopilot.setDeadlockPermission(true);
     }
-  }
-
-  /**
-   * TAKING TURNS AT A BOTTLENECK. A stone in one lane leaves the cars behind it needing
-   * the lane beside — the next lane over, or the oncoming one on a two-lane road — and
-   * that lane, on a busy road, never has a gap: measured at 100.48 km (seed 1337), the
-   * blocked side waited a median 47 s and up to three and a half minutes, while drivers
-   * that tried their luck wedged themselves against the stone.
-   *
-   * So the road takes turns, the way people do at a narrowing. The car that has stood
-   * at the head longest gets the turn: everything heading for the room it needs is held
-   * at a line — behind it in the same direction, before the far end of the narrowing
-   * coming the other way — except what is already too close to stop comfortably, which
-   * goes through first. The turn lasts until it has gone `BOTTLENECK_ZONE_M` past where
-   * it stood. A held car accumulates its own wait, so when the turn ends the other side
-   * is the longest-waiting and gets the next one: the turns alternate.
-   */
-  private readonly bottleneckTurns = new Map<string, { startS: number; age: number }>();
-  private assignBottleneckTurns(dt: number): void {
-    for (const car of this.carList) {
-      const wantsAcross = Math.abs(this.plannedRoadLine(car) - car.roadLateral) > BOTTLENECK_ACROSS_M;
-      const standing =
-        !car.rails && !car.layby && car.settleFor <= 0 && Math.abs(car.forwardSpeed) < BOTTLENECK_STILL_MPS;
-      car.headWait = standing && (wantsAcross || car.holdS !== null) ? car.headWait + dt : 0;
-      car.holdS = null;
-    }
-    // Turns in progress keep their holds until the car is through, or gives up.
-    for (const [id, turn] of this.bottleneckTurns) {
-      const car = this.carList.find((c) => c.id === id);
-      turn.age += dt;
-      if (!car || turn.age > BOTTLENECK_TURN_MAX_S || (car.forwardS - turn.startS) * car.direction > BOTTLENECK_ZONE_M) {
-        this.bottleneckTurns.delete(id);
-      }
-    }
-    for (const car of this.carList) {
-      if (car.headWait < BOTTLENECK_WAIT_S || this.bottleneckTurns.has(car.id)) continue;
-      let taken = false;
-      for (const turn of this.bottleneckTurns.values()) {
-        if (Math.abs(turn.startS - car.forwardS) < BOTTLENECK_ZONE_M * 2) taken = true;
-      }
-      if (taken) continue;
-      // The longest wait in this neighbourhood takes it; the others are held by it.
-      let longest = true;
-      for (const other of this.carList) {
-        if (other !== car && other.headWait > car.headWait && Math.abs(other.forwardS - car.forwardS) < BOTTLENECK_ZONE_M * 2) {
-          longest = false;
-          break;
-        }
-      }
-      if (longest) this.bottleneckTurns.set(car.id, { startS: car.forwardS, age: 0 });
-    }
-    for (const [id, turn] of this.bottleneckTurns) {
-      const owner = this.carList.find((c) => c.id === id);
-      if (!owner) continue;
-      const line = this.plannedRoadLine(owner);
-      for (const car of this.carList) {
-        if (car === owner || car.rails || car.layby) continue;
-        if (Math.abs(car.roadLateral - line) > BOTTLENECK_LANE_M) continue;
-        const stopS = car.direction === owner.direction
-          ? turn.startS - owner.direction * BOTTLENECK_BEHIND_M
-          : turn.startS + owner.direction * BOTTLENECK_ZONE_M;
-        const distance = (stopS - car.forwardS) * car.direction;
-        if (distance < 0 || distance > BOTTLENECK_REACH_M) continue;
-        const speed = Math.max(0, car.forwardSpeed * car.direction);
-        if (car.headWait === 0 && distance < (speed * speed) / (2 * BOTTLENECK_DECEL_MPS2) + 2) continue;
-        if (car.holdS === null || (car.holdS - car.forwardS) * car.direction > distance) car.holdS = stopS;
-      }
-    }
-  }
-
-  /** The line a car's plan wants, in the road frame (drivers plan in their own). */
-  private plannedRoadLine(car: TrafficCar): number {
-    return car.direction > 0 ? car.autopilot.plannedLine : -car.autopilot.plannedLine;
   }
 
   /**
@@ -1442,7 +1425,7 @@ export class RoadTraffic {
   private assignLaybyStops(): void {
     if (this.laybys.length === 0) return;
     for (const car of this.carList) {
-      if (car.layby || car.rails || car.rival || car.turnS >= 0 || car.settleFor > 0) continue;
+      if (car.layby || car.bypass || car.rails || car.rival || car.turnS >= 0 || car.settleFor > 0) continue;
       if (car.style === 'frantic') continue;
       for (const layby of this.laybys) {
         if (layby.poiIndex === car.laybyRolled || layby.side !== -car.direction) continue;
@@ -1743,6 +1726,250 @@ export class RoadTraffic {
       return;
     }
     car.autopilot.setHoldDistance(holdU === Infinity ? Infinity : holdU - u);
+  }
+
+  /**
+   * Hands every car coming up to something standing in its lane a route round it on its
+   * own shoulder (`Bypass`). Standing: a traffic car still for `BYPASS_STANDING_S` on the
+   * carriageway with nothing standing just in front of it (else it is only queueing), or
+   * the player's car. A car across the road is gone round by each direction on its own
+   * side: each direction's cars test it against their own lanes.
+   */
+  private assignBypasses(): void {
+    let count = 0;
+    if (this.playerDriving && this.playerStoppedFor >= BYPASS_STANDING_S) {
+      this.noteBlocker(count++, PLAYER_BLOCKER, this.playerS, this.playerLateral, PLAYER_HALF_LENGTH_M, PLAYER_HALF_WIDTH_M);
+    }
+    for (const car of this.carList) {
+      if (car.stoppedFor < BYPASS_STANDING_S || car.layby || car.bypass || car.rails || car.turnS >= 0) continue;
+      if (car.settleFor > 0 || car.crossYield || car.autopilot.sheltering) continue;
+      if (Math.abs(car.roadLateral) - car.roadHalfWidth > this.road.halfWidthAt(car.forwardS)) continue;
+      if (this.standingQueued(car)) continue;
+      this.noteBlocker(count++, car.id, car.forwardS, car.roadLateral, car.roadHalfLength, car.roadHalfWidth);
+    }
+    if (count === 0) return;
+    for (const car of this.carList) {
+      if (car.bypass || car.layby || car.rails || car.turnS >= 0 || car.settleFor > 0) continue;
+      const fullU = -(car.roadHalfLength + BYPASS_END_MARGIN_M);
+      let best: BypassBlocker | null = null;
+      let bestU = -Infinity;
+      for (let i = 0; i < count; i++) {
+        const blocker = this.blockers[i]!;
+        if (blocker.id === car.id || blocker.id === car.bypassGaveUp) continue;
+        const u = (car.forwardS - (blocker.s - car.direction * blocker.halfAlong)) * car.direction;
+        if (u < -BYPASS_REACH_M || u > fullU || u <= bestU) continue;
+        const lane = this.nearestLane(car);
+        const laneCentre = this.forwardLaneCentreAt(blocker.s, car.direction, lane);
+        if (Math.abs(laneCentre - blocker.lateral) >= blocker.halfAcross + car.halfExtents[0] + BYPASS_SIDE_MARGIN_M) continue;
+        best = blocker;
+        bestU = u;
+      }
+      if (best) this.startBypass(car, best, bestU);
+    }
+  }
+
+  private noteBlocker(index: number, id: string, s: number, lateral: number, halfAlong: number, halfAcross: number): void {
+    let blocker = this.blockers[index];
+    if (!blocker) {
+      blocker = { id, s, lateral, halfAlong, halfAcross };
+      this.blockers.push(blocker);
+      return;
+    }
+    blocker.id = id;
+    blocker.s = s;
+    blocker.lateral = lateral;
+    blocker.halfAlong = halfAlong;
+    blocker.halfAcross = halfAcross;
+  }
+
+  /** Something standing just in front of this car, overlapping it across the road: a queue. */
+  private standingQueued(car: TrafficCar): boolean {
+    for (const other of this.carList) {
+      if (other === car || other.vehicle.speedKmh * (1 / 3.6) > BYPASS_STILL_MPS) continue;
+      const ahead = (other.forwardS - car.forwardS) * car.direction;
+      if (ahead <= 0 || ahead > car.roadHalfLength + other.roadHalfLength + BYPASS_QUEUE_GAP_M) continue;
+      if (Math.abs(other.roadLateral - car.roadLateral) < car.roadHalfWidth + other.roadHalfWidth) return true;
+    }
+    if (this.playerDriving && Math.abs(this.playerSpeed) < BYPASS_STILL_MPS) {
+      const ahead = (this.playerS - car.forwardS) * car.direction;
+      if (
+        ahead > 0 &&
+        ahead < car.roadHalfLength + PLAYER_HALF_LENGTH_M + BYPASS_QUEUE_GAP_M &&
+        Math.abs(this.playerLateral - car.roadLateral) < car.roadHalfWidth + PLAYER_HALF_WIDTH_M
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Nothing within `back` plus `BYPASS_REAR_CLEAR_M` behind this car's tail, across its width. */
+  private rearClear(car: TrafficCar, back: number): boolean {
+    const reach = car.roadHalfLength + back + BYPASS_REAR_CLEAR_M;
+    for (const other of this.carList) {
+      if (other === car) continue;
+      const behind = (car.forwardS - other.forwardS) * car.direction;
+      if (behind <= 0 || behind > reach + other.roadHalfLength) continue;
+      if (Math.abs(other.roadLateral - car.roadLateral) < car.roadHalfWidth + other.roadHalfWidth) return false;
+    }
+    if (this.playerDriving) {
+      const behind = (car.forwardS - this.playerS) * car.direction;
+      if (
+        behind > 0 &&
+        behind < reach + PLAYER_HALF_LENGTH_M &&
+        Math.abs(this.playerLateral - car.roadLateral) < car.roadHalfWidth + PLAYER_HALF_WIDTH_M
+      ) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private nearestLane(car: TrafficCar): number {
+    let best = 0;
+    let bestError = Infinity;
+    for (let lane = 0; lane < this.road.lanesPerSideAt(car.forwardS); lane++) {
+      const error = Math.abs(this.forwardLaneCentreAt(car.forwardS, car.direction, lane) - car.roadLateral);
+      if (error < bestError) {
+        bestError = error;
+        best = lane;
+      }
+    }
+    return best;
+  }
+
+  /** This car's arclength in its own driver's frame (`ReversedRoad` runs it backwards). */
+  private ownS(car: TrafficCar): number {
+    return car.direction === 1 ? car.forwardS : this.road.length - car.forwardS;
+  }
+
+  /**
+   * The route for one car, `u` metres from the obstruction's face: the line out to beside
+   * its shoulder-side flank, from `BYPASS_LEAD_M` before it — or from where the car is, if
+   * it is already nearer — and, standing closer than `BYPASS_MIN_LEAD_M`, a reverse first.
+   */
+  private startBypass(car: TrafficCar, blocker: BypassBlocker, u: number): void {
+    const direction = car.direction;
+    const lane = this.nearestLane(car);
+    // Which side of the crown this direction drives on, in the forward frame.
+    const side = Math.sign(this.forwardLaneCentreAt(blocker.s, direction, 0)) || direction;
+    const ownHalf = car.halfExtents[0];
+    const laneAbs = Math.abs(this.forwardLaneCentreAt(blocker.s, direction, lane));
+    const offAbs = Math.max(laneAbs, blocker.lateral * side + blocker.halfAcross + BYPASS_SIDE_MARGIN_M + ownHalf);
+    if (offAbs + ownHalf > this.road.halfWidthAt(blocker.s) + SHOULDER_WIDTH_M + BYPASS_PAST_STRIP_M) return;
+    const fullU = -(car.roadHalfLength + BYPASS_END_MARGIN_M);
+    let startU = fullU - BYPASS_LEAD_M;
+    let backTo: number | undefined;
+    if (u > startU) {
+      startU = u;
+      if (fullU - u < BYPASS_MIN_LEAD_M && car.vehicle.speedKmh < STUCK_SPEED_KMH && this.rearClear(car, BYPASS_BACK_M)) {
+        startU = u - BYPASS_BACK_M;
+        backTo = this.ownS(car) - BYPASS_BACK_M;
+      }
+    }
+    const road = this.road;
+    const bypass: Bypass = {
+      blocker: blocker.id,
+      direction,
+      faceS: blocker.s - direction * blocker.halfAlong,
+      lane,
+      off: offAbs * side,
+      startU,
+      fullU,
+      endU: 2 * blocker.halfAlong + car.roadHalfLength + BYPASS_END_MARGIN_M,
+      backs: backTo === undefined ? 0 : 1,
+      stalledFor: 0,
+      backingFor: 0,
+      course: {
+        lineAt: (ownS) =>
+          direction === 1 ? this.bypassLine(bypass, ownS) : -this.bypassLine(bypass, road.length - ownS),
+        speed: BYPASS_MPS,
+        // Its own shoulder is the driver's right, as a lay-by on its own side.
+        indicator: 'right',
+        lookahead: Infinity,
+        backTo,
+        activity: 'bypass',
+      },
+    };
+    car.bypass = bypass;
+    car.autopilot.setLaybyCourse(bypass.course);
+  }
+
+  /** The route's line at forward arclength `s`, forward frame. */
+  private bypassLine(bypass: Bypass, s: number): number {
+    const u = (s - bypass.faceS) * bypass.direction;
+    const lane = this.forwardLaneCentreAt(
+      s,
+      bypass.direction,
+      Math.min(bypass.lane, this.road.lanesPerSideAt(s) - 1),
+    );
+    let t: number;
+    if (u <= bypass.startU) t = 0;
+    else if (u < bypass.fullU) t = (u - bypass.startU) / (bypass.fullU - bypass.startU);
+    else if (u <= bypass.endU) t = 1;
+    else t = Math.max(0, 1 - (u - bypass.endU) / BYPASS_REJOIN_M);
+    return lane + (bypass.off - lane) * t * t * (3 - 2 * t);
+  }
+
+  /** Whether the obstruction a route goes round is still there and still standing. */
+  private blockerStanding(id: string): boolean {
+    if (id === PLAYER_BLOCKER) return this.playerDriving && Math.abs(this.playerSpeed) < BYPASS_STILL_MPS;
+    for (const car of this.carList) {
+      if (car.id === id) return car.vehicle.speedKmh * (1 / 3.6) < BYPASS_STILL_MPS;
+    }
+    return false;
+  }
+
+  /**
+   * Moves one route along: the reverse leg to its end, the speed (the lane's, braking down
+   * to `BYPASS_MPS` by the start of the move), one more short reverse when it stands with
+   * nothing in front of it on the line, and the hand-back to the road once it is back in
+   * the lane past the obstruction — or the obstruction has gone.
+   */
+  private serviceBypass(car: TrafficCar, dt: number): void {
+    const bypass = car.bypass!;
+    const course = bypass.course;
+    const u = (car.forwardS - bypass.faceS) * bypass.direction;
+    // Done once back in its lane past the obstruction: handed back on the shoulder or half
+    // across, the driver's own logic took the cars round it for obstacles and stalled.
+    const past = u - bypass.endU - BYPASS_REJOIN_M;
+    const home = this.forwardLaneCentreAt(car.forwardS, bypass.direction, Math.min(bypass.lane, this.road.lanesPerSideAt(car.forwardS) - 1));
+    const done = past > BYPASS_HOME_EXTRA_M || (past > 0 && Math.abs(car.roadLateral - home) < BYPASS_HOME_TOLERANCE_M);
+    if (car.direction !== bypass.direction || done || !this.blockerStanding(bypass.blocker)) {
+      this.endBypass(car);
+      return;
+    }
+    if (course.backTo !== undefined) {
+      bypass.backingFor += dt;
+      if (this.ownS(car) <= course.backTo + 0.05 || bypass.backingFor > BYPASS_BACK_TIMEOUT_S) {
+        course.backTo = undefined;
+        bypass.backingFor = 0;
+      }
+      return;
+    }
+    const toMove = bypass.fullU - BYPASS_LEAD_M - u;
+    course.speed = Math.min(
+      car.speedCap,
+      Math.sqrt(BYPASS_MPS * BYPASS_MPS + 2 * BYPASS_APPROACH_DECEL_MPS2 * Math.max(0, toMove)),
+    );
+    const free = car.autopilot.obstacleGap > BYPASS_WAIT_GAP_M;
+    bypass.stalledFor =
+      free && u < bypass.endU && car.vehicle.speedKmh < STUCK_SPEED_KMH ? bypass.stalledFor + dt : 0;
+    if (bypass.stalledFor <= BYPASS_STALL_S) return;
+    bypass.stalledFor = 0;
+    if (bypass.backs < BYPASS_BACK_LIMIT && this.rearClear(car, BYPASS_BACK_M)) {
+      bypass.backs++;
+      bypass.startU = Math.min(bypass.startU, u - BYPASS_BACK_M);
+      course.backTo = this.ownS(car) - BYPASS_BACK_M;
+    } else {
+      car.bypassGaveUp = bypass.blocker;
+      this.endBypass(car);
+    }
+  }
+
+  private endBypass(car: TrafficCar): void {
+    car.bypass = null;
+    car.autopilot.setLaybyCourse(null);
   }
 
   private endLayby(car: TrafficCar): void {
@@ -2072,6 +2299,7 @@ export class RoadTraffic {
     this.playerStepTravel = Math.abs(advance) < 50 ? Math.abs(advance) : 0;
     this.playerDriving = this.sourceWorld.state.player.drivingCarId !== null;
     this.playerS = playerS;
+    this.playerStoppedFor = this.playerDriving && Math.abs(this.playerSpeed) < BYPASS_STILL_MPS ? this.playerStoppedFor + dt : 0;
     if (this.pedestrianActive) {
       const dx = this.pedestrianX - this.pedestrianPreviousX;
       const dz = this.pedestrianZ - this.pedestrianPreviousZ;
@@ -2136,6 +2364,12 @@ export class RoadTraffic {
         Math.abs(rightX * (1 - 2 * (q.y * q.y + q.z * q.z)) + rightZ * 2 * (q.x * q.z - q.w * q.y)) * half[0] +
         Math.abs(rightX * 2 * (q.x * q.y - q.w * q.z) + rightZ * 2 * (q.y * q.z + q.w * q.x)) * half[1] +
         Math.abs(rightX * 2 * (q.x * q.z + q.w * q.y) + rightZ * (1 - 2 * (q.x * q.x + q.y * q.y))) * half[2];
+      const forwardX = Math.sin(heading);
+      const forwardZ = Math.cos(heading);
+      car.roadHalfLength =
+        Math.abs(forwardX * (1 - 2 * (q.y * q.y + q.z * q.z)) + forwardZ * 2 * (q.x * q.z - q.w * q.y)) * half[0] +
+        Math.abs(forwardX * 2 * (q.x * q.y - q.w * q.z) + forwardZ * 2 * (q.y * q.z + q.w * q.x)) * half[1] +
+        Math.abs(forwardX * 2 * (q.x * q.z + q.w * q.y) + forwardZ * (1 - 2 * (q.x * q.x + q.y * q.y))) * half[2];
       car.forwardSpeed =
         velocity.x * Math.sin(heading) + velocity.z * Math.cos(heading);
     }
@@ -2161,10 +2395,10 @@ export class RoadTraffic {
       this.assignDeadlockPermissions();
       this.assignReverseRoom();
       this.assignPassPermissions();
-      this.assignBottleneckTurns(COORDINATION_INTERVAL_S);
       this.refreshLaybys();
       this.assignLaybyStops();
       this.assignCrossYields();
+      this.assignBypasses();
     }
     for (let i = this.carList.length - 1; i >= 0; i--) {
       const car = this.carList[i]!;
@@ -2182,11 +2416,7 @@ export class RoadTraffic {
         car.autopilot.setOncomingGap(this.nearestOncomingDistance(car.forwardS, car.direction, car.id));
       }
       if (car.layby) this.serviceLayby(car, dt, coordinate);
-      else {
-        car.autopilot.setHoldDistance(
-          car.holdS === null ? Infinity : (car.holdS - car.forwardS) * car.direction,
-        );
-      }
+      else if (car.bypass) this.serviceBypass(car, dt);
       car.lifetimeTimer -= dt;
       // A CAR THAT HAS BEEN STANDING STILL FOR HALF A MINUTE IS NOT TRAFFIC.
       //
@@ -2310,7 +2540,7 @@ export class RoadTraffic {
       if (car.direction !== -1 || car.forwardS > TURNAROUND_ENTRY_S) return;
       car.turnS = 0;
       car.autopilot.setPassingEnabled(false);
-      car.autopilot.retarget(this.turnaround, this.noHazards);
+      car.autopilot.retarget(this.turnaround);
       car.autopilot.setEngaged(true);
       return;
     }
@@ -2321,7 +2551,7 @@ export class RoadTraffic {
     car.direction = 1;
     car.lane = this.pickSpawnLane(car.forwardS, car.style);
     car.spawnS = car.forwardS;
-    car.autopilot.retarget(this.road, this.hazards);
+    car.autopilot.retarget(this.road);
     car.autopilot.setEngaged(true);
   }
 
@@ -2331,8 +2561,8 @@ export class RoadTraffic {
    * again every step. False, with nothing changed, when it stays driven.
    */
   private putOnRails(car: TrafficCar, playerS: number): boolean {
-    // A car on a lay-by stop is following a line the rails do not have.
-    if (car.settleFor > 0 || car.turnS >= 0 || car.railsHoldoff > 0 || car.layby) return false;
+    // A car on a lay-by stop or a route round a standing car follows a line the rails do not have.
+    if (car.settleFor > 0 || car.turnS >= 0 || car.railsHoldoff > 0 || car.layby || car.bypass) return false;
     // A driver that wants past the car in front is about to do something.
     if (car.autopilot.passUrge) return false;
     if (Math.abs(car.forwardS - playerS) < RAILS_SLEEP_M) return false;
@@ -2485,8 +2715,8 @@ export class RoadTraffic {
 
   /**
    * Nothing ahead of a car at (s, lateral) that only a driver can deal with: the lane
-   * it holds goes on, the road's ends are not near, no indexed prop is in the lane and
-   * no body that is not on rails itself stands in it.
+   * it holds goes on, the road's ends are not near and no body that is not on rails
+   * itself stands in it.
    */
   private railsRoadClear(
     car: TrafficCar,
@@ -2506,19 +2736,8 @@ export class RoadTraffic {
     ) {
       return false;
     }
-    this.railHazardLateral = lateral;
-    this.railHazardHalfWidth = car.halfExtents[0] + RAILS_HAZARD_MARGIN_M;
-    this.railHazardHit = false;
-    this.hazards.forEachAhead(from, reach, this.visitRailHazard);
-    if (this.railHazardHit) return false;
     return !this.foreignBodyAhead(car, s, lateral, reach);
   }
-
-  private readonly visitRailHazard = (hazard: RoadHazard): void => {
-    if (Math.abs(hazard.lateral - this.railHazardLateral) < hazard.radius + this.railHazardHalfWidth) {
-      this.railHazardHit = true;
-    }
-  };
 
   /**
    * Any dynamic body in the lane over the next `reach` metres that is not itself on
@@ -2857,7 +3076,6 @@ export class RoadTraffic {
     );
     const autopilot = new Autopilot(
       request.direction === 1 ? this.road : this.reverseRoad,
-      request.direction === 1 ? this.hazards : this.reverseHazards,
       this.physics,
     );
     // LIT FROM THE FIRST FRAME IT IS VISIBLE. Ambient cars run on dipped beam always,
@@ -2880,6 +3098,7 @@ export class RoadTraffic {
       headwayS: request.headwayS,
       roadLateral: forwardLateral,
       roadHalfWidth: measure.halfExtents[0],
+      roadHalfLength: measure.halfExtents[2],
       halfExtents: measure.halfExtents,
       bodyRadius,
       forwardSpeed: 0,
@@ -2913,12 +3132,12 @@ export class RoadTraffic {
       fullDetailFor: 0,
       rival: false,
       handIn: 'none',
-      headWait: 0,
-      holdS: null,
       layby: parked,
       laybyRolled: parked ? parked.layby.poiIndex : -1,
       laybyKey,
       crossYield: false,
+      bypass: null,
+      bypassGaveUp: null,
     };
     if (parked) this.laybySeeded = parked.layby.poiIndex;
     // The field reads the record's live arclength and direction, so it keeps working
@@ -3172,17 +3391,6 @@ export class RoadTraffic {
     if (laneHalfWidth < TRAFFIC_HALF_WIDTH_M) return false;
     if (!this.roadGapClear(s, direction, lane, halfWidth, halfLength, platoonLeaderId, rivalSpeed)) return false;
     const lateral = this.forwardLaneCentreAt(s, direction, lane);
-    let clear = true;
-    this.hazards.forEachAhead(
-      Math.max(0, s - SPAWN_HAZARD_GAP_M),
-      SPAWN_HAZARD_GAP_M * 2,
-      (hazard) => {
-        if (Math.abs(hazard.lateral - lateral) <= hazard.radius + TRAFFIC_HALF_WIDTH_M) {
-          clear = false;
-        }
-      },
-    );
-    if (!clear) return false;
     const point = this.road.offsetPoint(s, lateral, this.spawnPoint);
     return this.hasSpawnGround(point.x, point.y, point.z);
   }

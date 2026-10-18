@@ -26,7 +26,6 @@ import { carModelMeasure, carSpawnYAboveGround, preloadCarModels } from '../src/
 import { benchCarState } from './benchcar';
 import { Autopilot } from '../src/vehicle/autopilot';
 import { Vehicle } from '../src/vehicle/vehicle';
-import { HazardIndex } from '../src/world/hazards';
 import { WorldOrigin } from '../src/world/origin';
 import { Road } from '../src/world/road';
 import { roadSurfaceY, SurfaceField } from '../src/world/roadsurface';
@@ -146,7 +145,7 @@ async function runSeed(seed: number): Promise<void> {
     physics.step();
     const heading = road.sampleAt(egoS).heading;
     ego.chassis.setLinvel({ x: Math.sin(heading) * EGO_MPS, y: 0, z: Math.cos(heading) * EGO_MPS }, true);
-    const autopilot = new Autopilot(road, new HazardIndex(), physics);
+    const autopilot = new Autopilot(road, physics);
     autopilot.setMode('frantic');
     autopilot.setEngaged(true);
     autopilot.drive(FIXED_DT, ego, input, 0, 0);

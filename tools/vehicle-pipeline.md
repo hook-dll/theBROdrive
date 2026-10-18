@@ -885,7 +885,7 @@ bun tools/playground-lap.ts [laps]
 
 - `surface-feel` ведёт реальный representative Vehicle по настоящим road/desert colliders;
 - `ride-bench`, `desert-washboard`, `desert-ride` измеряют сами поверхности и нужны, чтобы не лечить car tuning изменением мира;
-- autopilot bench защищает Road/Vehicle/hazard contract;
+- autopilot bench защищает Road/Vehicle contract;
 - playground lap измеряет качество езды на повторяемом кольце.
 
 Эти стенды hard-coded на representative car там, где `MODEL_ID` находится в source. Их результаты защищают общую систему, не заменяют per-model run.

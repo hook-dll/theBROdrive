@@ -15,13 +15,16 @@
  *
  * WHAT IS MEASURED is what the player would watch in his mirror:
  *   - same-direction cars that got past him (behind -> ahead by more than a body), per
- *     minute, and oncoming cars that drove past his position;
+ *     minute, against the cars that ARRIVED (crossed 150 m behind him) per minute, which
+ *     side they went by on and how far past the asphalt their body centre went; oncoming
+ *     cars that drove past his position;
  *   - the queue: same-direction cars within 300 m behind him standing (< 2 km/h), mean
  *     and max, and the longest the head of it stood;
+ *   - every reverse by a same-direction car within 60 m behind him: how many, how far
+ *     each went, per car that got past;
  *   - the HEAD of the queue (nearest same-direction car within 40 m behind), second by
  *     second: rails or driven, activity, manoeuvre, what it senses ahead, what its
- *     planner wants, whether it wants to pass and which gate refused it, whether the
- *     coordinator let it cross and whether it ever got a bottleneck turn;
+ *     planner wants, and which gate refused a crossing;
  *   - cars the stream recycled while stuck, and contacts involving the ego or the queue.
  *
  * Usage:
@@ -41,7 +44,6 @@ import { benchCarState } from './benchcar';
 import type { Autopilot } from '../src/vehicle/autopilot';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { installAssetShim } from './assetshim';
-import { HazardIndex } from '../src/world/hazards';
 import { WorldOrigin } from '../src/world/origin';
 import { Road } from '../src/world/road';
 import { RoadMeshProvider } from '../src/world/roadmesh';
@@ -120,17 +122,16 @@ function laneStart(from: number): number {
 }
 const SEARCH_S = laneStart(START_S);
 
-const hazards = new HazardIndex();
 const roadDistance = new RoadDistance(road);
 const roadProvider = new RoadMeshProvider(SEED, roadDistance);
-const scatter = new ScatterProvider(undefined, hazards);
+const scatter = new ScatterProvider();
 const scene = new THREE.Scene();
 const origin = new WorldOrigin();
 const desert = new DesertTileStreamer(SEED, road, terrain, roadDistance, physics, scene, origin, undefined, new WorldWorkScheduler(3), () => null);
 {
-  // The ego stands within 2 km of SEARCH_S (`clearStart`); the stream lives TRAFFIC_REACH_M round it.
+  // The stream lives TRAFFIC_REACH_M round the ego.
   const first = Math.floor((SEARCH_S - TRAFFIC_REACH_M - 200) / CHUNK_LENGTH);
-  const last = Math.ceil((SEARCH_S + 2_000 + TRAFFIC_REACH_M + 200) / CHUNK_LENGTH);
+  const last = Math.ceil((SEARCH_S + TRAFFIC_REACH_M + 200) / CHUNK_LENGTH);
   for (let index = first; index <= last; index++) {
     const sStart = index * CHUNK_LENGTH;
     const context: ChunkContext = {
@@ -154,23 +155,8 @@ const desert = new DesertTileStreamer(SEED, road, terrain, roadDistance, physics
   }
 }
 
-/**
- * A stand with no prop on the carriageway within 20 m either side, as traffic-road picks
- * it, and still `LANES` lanes per side for 300 m either way.
- */
-function clearStart(): number {
-  const HAZARD_GAP_M = 20;
-  for (let s = SEARCH_S; s < SEARCH_S + 2_000; s += 10) {
-    if (road.lanesPerSideAt(s - 300) !== LANES || road.lanesPerSideAt(s + 300) !== LANES) continue;
-    let blocked = false;
-    hazards.forEachAhead(s - HAZARD_GAP_M, HAZARD_GAP_M * 2, (hazard) => {
-      if (Math.abs(hazard.lateral) - hazard.radius < road.halfWidthAt(hazard.s) + 2) blocked = true;
-    });
-    if (!blocked) return s;
-  }
-  return SEARCH_S;
-}
-const EGO_START_S = clearStart();
+/** The stand: the first point at or past `--start` with `LANES` lanes a side 400 m each way. */
+const EGO_START_S = SEARCH_S;
 const EGO_LANE_LATERAL = road.laneCentreAt(EGO_START_S, 0);
 {
   const start = road.sampleAt(EGO_START_S);
@@ -228,7 +214,7 @@ console.log(
 );
 
 // ---------------------------------------------------------------- the stream
-const traffic = new RoadTraffic(physics, world, scene, origin, road, hazards, loadCarModel, (x, z, radius) => {
+const traffic = new RoadTraffic(physics, world, scene, origin, road, loadCarModel, (x, z, radius) => {
   const dx = x - egoPosition.x;
   const dz = z - egoPosition.z;
   return dx * dx + dz * dz > radius * radius;
@@ -245,9 +231,6 @@ interface StreamCar {
   forwardSpeed: number;
   settleFor: number;
   stoppedFor: number;
-  headWait: number;
-  holdS: number | null;
-  turnS: number;
   layby: unknown;
   vehicle: Vehicle;
   autopilot: Autopilot;
@@ -257,7 +240,6 @@ interface TrafficPrivate {
   carList: StreamCar[];
   densityFraction: number;
   densityTimer: number;
-  bottleneckTurns: Map<string, { startS: number; age: number }>;
   removeAt(index: number): void;
 }
 const inner = traffic as unknown as TrafficPrivate;
@@ -299,28 +281,28 @@ const recycleNotes: string[] = [];
 // ---------------------------------------------------------------- measurement
 interface Private {
   passUrgeValue: boolean;
-  passShopping: boolean;
   lastMayCross: boolean;
   passSecondsValue: number;
   lastCrossingRefused: boolean;
   lastRearClear: boolean;
   corridorFeasible: boolean;
   passingEnabled: boolean;
-  yieldingFor: number;
   planLine: number;
   corridorBlockDistance: number;
-  corridorBlockSpeed: number;
-  corridorLaneBlockDistance: number;
   corridorLaneBlockSpeed: number;
   lastOncomingGap: number;
-  holdDistance: number;
-  deadlockPermission: boolean;
-  homeLaneValue: number;
   /** Nose ray gap to a dynamic body (`axisScan`); under MUST_STOP_GAP_M the pedal is vetoed. */
   bodyScanGap: number;
   /** The stall timer that starts recovery, and the recovery in progress. */
   stoppedFor: number;
   recoveryPhase: string;
+  bypassLine: number;
+  bypassOpen: boolean;
+  bypassGap: number;
+  pullOutForward: boolean;
+  nudgeBackLeft: number;
+  nudgeSteps: number;
+  nudgeWaitFor: number;
 }
 function reason(p: Private): string {
   if (!p.passUrgeValue) return 'no urge';
@@ -342,15 +324,33 @@ function bucket(value: number, edges: number[], unit: string): string {
   return `>= ${edges[edges.length - 1]} ${unit}`;
 }
 const m = (v: number): string => (Number.isFinite(v) ? v.toFixed(1) : '-');
+/** A car crossing this far behind the ego, going his way, has arrived at the queue. */
+const ARRIVAL_LINE_M = 150;
+/** Reverses are counted within this far behind the ego. */
+const REVERSE_REACH_M = 60;
+/** Backing at more than this along the road is a reverse; at less than the second it has ended. */
+const REVERSING_MPS = 0.15;
+const REVERSE_ENDED_MPS = 0.05;
+/** How far either side of the ego the furthest-out body is looked for. */
+const NEAR_EGO_M = 40;
 let measuredSeconds = 0;
 /** Same-direction order against the ego; `levelLateral` is where the body was while level with it. */
 const order = new Map<string, { rel: number; side: number; levelLateral: number; level: boolean }>();
 const oncomingOrder = new Map<string, number>();
+const arrivalOrder = new Map<string, number>();
+let arrivals = 0;
 const passesByMinute: number[] = [];
 let sameDirPasses = 0;
 let oncomingPasses = 0;
 const passNotes: string[] = [];
 const passVia = new Map<string, number>();
+/** Per pass: the body centre past the asphalt edge while level, and the body's outer edge past it. */
+const passOut: number[] = [];
+const passEdgeOut: number[] = [];
+let nearMaxOut = 0;
+/** Metres each reverse covered, and the one under way per car. */
+const reverseEvents: number[] = [];
+const reversing = new Map<string, number>();
 let queueSum = 0;
 let queueMax = 0;
 let queueSamples = 0;
@@ -361,8 +361,6 @@ let longestHeadWait = 0;
 let longestHeadWaitId = '';
 let headSeconds = 0;
 const headsSeen = new Set<string>();
-const turnsEver = new Set<string>();
-const turnNotes: string[] = [];
 let egoImpacts = 0;
 let queueImpacts = 0;
 const impactNotes: string[] = [];
@@ -370,10 +368,6 @@ let egoMaxDrift = 0;
 let egoMaxSpeedKmh = 0;
 let traceTicks = 0;
 let liveSum = 0;
-/** The head's planned side of the ego, and how often it swapped oncoming lane <-> verge. */
-let headPlanId = '';
-let headPlanSide = '';
-let headPlanFlips = 0;
 
 function measure(): void {
   measuredSeconds += FIXED_DT;
@@ -385,15 +379,6 @@ function measure(): void {
     egoImpacts++;
     if (impactNotes.length < 12) impactNotes.push(`ego hit at ${measuredSeconds.toFixed(1)} s, ${ego.lastImpact.severityMps.toFixed(1)} m/s`);
   }
-  for (const [id] of inner.bottleneckTurns) {
-    if (!turnsEver.has(id)) {
-      turnsEver.add(id);
-      const car = cars.find((c) => c.id === id);
-      if (car && turnNotes.length < 12) {
-        turnNotes.push(`${id} dir ${car.direction > 0 ? '+' : '-'} at ${(car.forwardS - egoS).toFixed(0)} m from ego, t ${measuredSeconds.toFixed(0)} s`);
-      }
-    }
-  }
 
   let queue = 0;
   let head: StreamCar | null = null;
@@ -401,6 +386,10 @@ function measure(): void {
     if (car.settleFor > 0) continue;
     const rel = car.forwardS - egoS;
     if (car.direction === 1) {
+      // Arrived: crossed the arrival line going forward, across a continuous change.
+      const before = arrivalOrder.get(car.id);
+      if (before !== undefined && before < -ARRIVAL_LINE_M && rel >= -ARRIVAL_LINE_M && rel - before < CONTINUITY_M) arrivals++;
+      arrivalOrder.set(car.id, rel);
       // Behind -> ahead by more than a body, across a continuous change.
       const side = rel > BODY_LENGTH_M ? 1 : rel < -BODY_LENGTH_M ? -1 : 0;
       const previous = order.get(car.id);
@@ -411,8 +400,10 @@ function measure(): void {
           // Where the body was while level with the ego: which way round it went.
           const level = previous.levelLateral;
           const halfWidth = road.halfWidthAt(egoS);
-          const via = level > 0 ? 'oncoming lane' : level < -halfWidth ? 'verge / sand (right)' : 'own side, squeezed past';
+          const via = level > 0 ? 'oncoming lane' : level < -halfWidth ? 'shoulder (right)' : 'own side, on the asphalt';
           passVia.set(via, (passVia.get(via) ?? 0) + 1);
+          passOut.push(Math.max(0, Math.abs(level) - halfWidth));
+          passEdgeOut.push(Math.max(0, Math.abs(level) + car.vehicle.modelMeasure.halfExtents[0] - halfWidth));
           if (passNotes.length < 12) {
             passNotes.push(`${car.id} (${car.style}) at t ${measuredSeconds.toFixed(0)} s, level at lateral ${level.toFixed(1)} (${via}), now ${car.autopilot.activity}`);
           }
@@ -425,6 +416,20 @@ function measure(): void {
           previous.levelLateral = car.roadLateral;
         }
         previous.level = true;
+      }
+      if (Math.abs(rel) < NEAR_EGO_M) {
+        nearMaxOut = Math.max(nearMaxOut, Math.abs(car.roadLateral) - road.halfWidthAt(car.forwardS));
+      }
+      // A reverse: backing along the road, from the moment it starts to the moment it stops.
+      const along = car.forwardSpeed * car.direction;
+      const backed = reversing.get(car.id);
+      if (rel < 2 && rel > -REVERSE_REACH_M && along < -REVERSING_MPS) {
+        reversing.set(car.id, (backed ?? 0) - along * FIXED_DT);
+      } else if (backed !== undefined && along >= -REVERSE_ENDED_MPS) {
+        reverseEvents.push(backed);
+        reversing.delete(car.id);
+      } else if (backed !== undefined) {
+        reversing.set(car.id, backed - along * FIXED_DT);
       }
       if (rel < 0 && rel > -QUEUE_REACH_M && car.vehicle.speedKmh < STOPPED_KMH) queue++;
       if (rel < -1 && rel > -HEAD_REACH_M && (!head || rel > head.forwardS - egoS)) head = car;
@@ -483,68 +488,28 @@ function measure(): void {
   count('binding speed limit', String(ap.bindingSpeedLimit));
   const sensed = ap.obstacleGap;
   count('obstacleGap (lane probes clamp at 4 m)', bucket(sensed, [4.01, 8, 20, 60], 'm'));
-  count('obstacleSpeed', Number.isFinite(sensed) ? bucket(ap.obstacleSpeed * 3.6, [1, 5, 20], 'km/h') : 'none');
   count('laneBlockDistance', bucket(ap.laneBlockDistance, [4.01, 8, 20, 60], 'm'));
-  count('laneBlockSpeed (private corridorLaneBlockSpeed)', bucket(p.corridorLaneBlockSpeed * 3.6, [1, 5, 20], 'km/h'));
   count('reason (followReason)', reason(p));
-  count('passUrge', String(p.passUrgeValue));
-  count('passShopping', String(p.passShopping));
-  count('mayCross', String(p.lastMayCross));
-  count('rearClear', String(p.lastRearClear));
-  count('crossingRefused (oncoming)', String(p.lastCrossingRefused));
-  count('passingEnabled (coordinator)', String(p.passingEnabled));
   count('corridorFeasible', String(p.corridorFeasible));
-  count('corridorBlock', bucket(p.corridorBlockDistance, [5, 10, 20, 60], 'm'));
-  const lineOff = Math.abs(p.planLine - laneCentre);
-  count('planLine vs own lane', lineOff > 0.8 ? 'wants across (> 0.8 m)' : lineOff > 0.25 ? 'nudged (0.25-0.8 m)' : 'own lane');
-  // Head drives the road's own sense, so its frame is the road's: + is toward the crown.
   const halfWidth = road.halfWidthAt(car.forwardS);
-  const side = p.planLine > 0.5 ? 'oncoming lane (left)' : p.planLine < -(halfWidth - 0.9) ? 'verge (right)' : 'own side of crown';
+  const side = p.planLine > 0.5 ? 'oncoming lane (left)' : p.planLine < -(halfWidth - 0.9) ? 'shoulder (right)' : 'own side of crown';
   count('planLine side', side);
-  // Every gate on a fresh crossing open at once (coordinator, crown permission, rear, room):
-  // the oncoming lane was a line the planner could have taken this step.
-  const gatesOpen = p.passingEnabled && p.lastMayCross && p.lastRearClear && !p.lastCrossingRefused;
-  count('oncoming lane admissible (all gates open)', String(gatesOpen));
-  count(`planLine side | gates ${gatesOpen ? 'open' : 'shut'}`, side);
-  if (car.id === headPlanId && side !== headPlanSide && side !== 'own side of crown' && headPlanSide !== 'own side of crown') {
-    headPlanFlips++;
-  }
-  if (car.id !== headPlanId || side !== 'own side of crown') {
-    headPlanId = car.id;
-    headPlanSide = side;
-  }
   count('commandedLine vs own lane', Math.abs(ap.commandedLine - laneCentre) > 0.8 ? 'across' : 'own lane');
-  if (inner.bottleneckTurns.has(car.id)) {
-    let oncomingHeld = 0;
-    let oncomingNear = 0;
-    for (const other of cars) {
-      if (other.direction !== -1) continue;
-      const ahead = other.forwardS - egoS;
-      if (ahead < -20 || ahead > 250) continue;
-      oncomingNear++;
-      if (other.holdS !== null) oncomingHeld++;
-    }
-    count('turn owner: planLine side', side);
-    count('turn owner: oncoming cars (-20..250 m) held', oncomingNear === 0 ? 'none near' : oncomingHeld === 0 ? 'none held' : 'some held');
-  }
-  count('headWait (coordinator)', bucket(car.headWait, [0.01, 4], 's'));
-  count('holdS', car.holdS === null ? 'none' : 'held');
-  count('bottleneck turn', inner.bottleneckTurns.has(car.id) ? 'HAS TURN' : turnsEver.has(car.id) ? 'had one' : 'never');
-  count('deadlockPermission', String(p.deadlockPermission));
-  count('yieldingFor', bucket(p.yieldingFor, [0.01, 5, 20], 's'));
   count('oncoming gap', bucket(p.lastOncomingGap, [50, 100, 200, 400], 'm'));
+  count('shoulder bypass', Number.isNaN(p.bypassLine) ? 'none' : p.bypassOpen ? 'open' : 'latched, not yet open');
+  count('pulling out from behind', p.nudgeBackLeft > 0 ? 'nudging back' : p.pullOutForward ? 'forward' : p.nudgeWaitFor > 0 ? 'waiting for room' : 'no');
   if (TRACE_HEAD && ++traceTicks % Math.round(0.5 / FIXED_DT) === 0) {
     console.log(
       `  t ${measuredSeconds.toFixed(1).padStart(5)} ${car.id.padEnd(12)} ${car.style.padEnd(8)} ${car.rails ? 'rails ' : 'driven'} ` +
         `rel ${rel.toFixed(1)} lat ${car.roadLateral.toFixed(2)} v ${car.vehicle.speedKmh.toFixed(0)} ` +
         `${ap.activity}/${ap.manoeuvre} obs ${m(sensed)}@${(ap.obstacleSpeed * 3.6).toFixed(0)} ` +
         `laneBlk ${m(ap.laneBlockDistance)}@${(p.corridorLaneBlockSpeed * 3.6).toFixed(0)} ` +
-        `urge ${p.passUrgeValue ? 1 : 0} shop ${p.passShopping ? 1 : 0} may ${p.lastMayCross ? 1 : 0} rear ${p.lastRearClear ? 1 : 0} ` +
-        `ref ${p.lastCrossingRefused ? 1 : 0} pe ${p.passingEnabled ? 1 : 0} feas ${p.corridorFeasible ? 1 : 0} ` +
+        `may ${p.lastMayCross ? 1 : 0} rear ${p.lastRearClear ? 1 : 0} ref ${p.lastCrossingRefused ? 1 : 0} ` +
+        `pe ${p.passingEnabled ? 1 : 0} feas ${p.corridorFeasible ? 1 : 0} ` +
         `blk ${m(p.corridorBlockDistance)} plan ${p.planLine.toFixed(2)} lane ${laneCentre.toFixed(2)} cmd ${ap.commandedLine.toFixed(2)} ` +
-        `hw ${car.headWait.toFixed(1)} hold ${car.holdS === null ? '-' : (car.holdS - car.forwardS).toFixed(0)} ` +
-        `turn ${inner.bottleneckTurns.has(car.id) ? 1 : 0} yield ${p.yieldingFor.toFixed(0)} onc ${m(p.lastOncomingGap)} ` +
-        `scan ${m(p.bodyScanGap)} lim ${ap.bindingSpeedLimit} stall ${p.stoppedFor.toFixed(1)} rec ${p.recoveryPhase}`,
+        `onc ${m(p.lastOncomingGap)} scan ${m(p.bodyScanGap)} lim ${ap.bindingSpeedLimit} stall ${p.stoppedFor.toFixed(1)} rec ${p.recoveryPhase} ` +
+        `byp ${Number.isNaN(p.bypassLine) ? '-' : p.bypassLine.toFixed(2)}${p.bypassOpen ? '+' : ''} gap ${m(p.bypassGap)} ` +
+        `po ${p.pullOutForward ? 1 : 0} nudge ${p.nudgeBackLeft.toFixed(2)}/${p.nudgeSteps} wait ${p.nudgeWaitFor.toFixed(1)}`,
     );
   }
 }
@@ -577,22 +542,31 @@ measuring = false;
 
 // ---------------------------------------------------------------- findings
 const minutes = measuredSeconds / 60;
+const mean = (values: number[]): number => values.reduce((a, b) => a + b, 0) / Math.max(values.length, 1);
 console.log('');
 console.log(`measured ${measuredSeconds.toFixed(0)} s in ${((Date.now() - wallStart) / 1000).toFixed(0)} s wall; mean live ${(liveSum / queueSamples).toFixed(1)} cars`);
 console.log(`ego: drift ${egoMaxDrift.toFixed(3)} m from its settled pose, top speed ${egoMaxSpeedKmh.toFixed(2)} km/h, final lateral ${egoLateral.toFixed(2)}`);
 console.log('');
+console.log(`arrived (crossed ${ARRIVAL_LINE_M} m behind the ego, same direction): ${arrivals} (${(arrivals / minutes).toFixed(2)}/min)`);
 console.log(`got past the ego (same direction): ${sameDirPasses} (${(sameDirPasses / minutes).toFixed(2)}/min); per minute ${Array.from({ length: Math.ceil(minutes) }, (_, i) => passesByMinute[i] ?? 0).join(' ')}`);
 for (const note of passNotes) console.log(`    ${note}`);
 console.log(`  went by on: ${[...passVia.entries()].map(([k, v]) => `${k} ${v}`).join(', ')}`);
+console.log(
+  `  body centre past the asphalt edge while level with the ego: mean ${mean(passOut).toFixed(2)} m, max ${Math.max(0, ...passOut).toFixed(2)} m; ` +
+    `body edge max ${Math.max(0, ...passEdgeOut).toFixed(2)} m`,
+);
+console.log(`  furthest any same-direction body centre went past the asphalt within ${NEAR_EGO_M} m of the ego: ${nearMaxOut.toFixed(2)} m`);
 console.log(`oncoming cars past the ego's position: ${oncomingPasses} (${(oncomingPasses / minutes).toFixed(2)}/min)`);
 console.log(
   `queue (same direction, standing, within ${QUEUE_REACH_M} m behind): mean ${(queueSum / queueSamples).toFixed(1)}, max ${queueMax}; ` +
     `per minute mean/max ${queueByMinute.map((q) => `${(q.sum / q.n).toFixed(1)}/${q.max}`).join(' ')}`,
 );
 console.log(`longest queue-head standstill: ${longestHeadWait.toFixed(1)} s (${longestHeadWaitId}); distinct heads ${headsSeen.size}; head present ${headSeconds.toFixed(0)} s`);
-console.log(`head's planned side swapped oncoming lane <-> verge ${headPlanFlips} times (${(headPlanFlips / Math.max(headSeconds / 60, 1e-9)).toFixed(1)} per head-minute)`);
-console.log(`bottleneck turns ever assigned (any car): ${turnsEver.size}`);
-for (const note of turnNotes) console.log(`    ${note}`);
+console.log(
+  `reverses (same direction, within ${REVERSE_REACH_M} m behind): ${reverseEvents.length} events, ` +
+    `${(reverseEvents.length / Math.max(sameDirPasses, 1)).toFixed(2)} per car past; distance per event mean ${mean(reverseEvents).toFixed(2)} m, ` +
+    `max ${Math.max(0, ...reverseEvents).toFixed(2)} m, over 1 m ${reverseEvents.filter((d) => d > 1).length}`,
+);
 console.log(`removed cars: ${removedTotal}; of them stuck recycles (stood > 18 s): ${recycledStuck}, behind the ego same direction: ${recycledStuckBehind}`);
 for (const note of recycleNotes) console.log(`    ${note}`);
 console.log(`contacts: ego ${egoImpacts}, queue (within ${QUEUE_REACH_M} m behind) ${queueImpacts}`);

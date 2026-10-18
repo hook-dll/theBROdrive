@@ -1,8 +1,8 @@
 /**
  * The playground circuit, and what the autopilot does on it.
  *
- * `tools/autopilot-bench.ts` defends the CONTRACT between Autopilot, Road, Vehicle
- * and hazards on a stretch of the real road: it answers "is this still wired up".
+ * `tools/autopilot-bench.ts` defends the CONTRACT between Autopilot, Road and Vehicle
+ * on a stretch of the real road: it answers "is this still wired up".
  * This answers a different question — "how well does it drive" — and it does that on
  * a closed lap, so the same hairpin, crest and chicane come round again every ninety
  * seconds and a change can be compared against the lap before it.
@@ -23,7 +23,6 @@ import { GameWorld, newWorldState } from '../src/game/state';
 import { preloadCarModels } from '../src/render/carmodel';
 import { Autopilot, AUTOPILOT_MODES, type AutopilotMode } from '../src/vehicle/autopilot';
 import { Vehicle } from '../src/vehicle/vehicle';
-import { HazardIndex } from '../src/world/hazards';
 import { WorldOrigin } from '../src/world/origin';
 import {
   CIRCUIT_HALF_WIDTH,
@@ -182,8 +181,8 @@ interface RigOptions {
   /**
    * A STATIC obstacle nobody told the autopilot about, on the lane at this
    * arclength. This is what a crash leaves a car pressed against: the corridor rays
-   * only report dynamic bodies, and there is no `HazardIndex` on this circuit, so the
-   * car has no sensing of it whatsoever and must get out on the stall detector alone.
+   * only report dynamic bodies, so the car has no sensing of it whatsoever and must
+   * get out on the stall detector alone.
    */
   readonly boulderS?: number;
   /** Coordinator grant for the chosen head of an opposing queue. */
@@ -204,7 +203,6 @@ async function makeRig(options: RigOptions): Promise<Rig> {
     slots,
     boulderS,
   } = options;
-  const hazards = new HazardIndex();
   const physics = await PhysicsWorld.create();
   addCircuitCollider(physics, road, circuit);
   const world = new GameWorld(newWorldState(SEED));
@@ -234,7 +232,7 @@ async function makeRig(options: RigOptions): Promise<Rig> {
   const scene = new THREE.Scene();
   const origin = new WorldOrigin();
   const vehicle = new Vehicle(physics, world, state, scene, origin);
-  const autopilot = new Autopilot(road, hazards, physics);
+  const autopilot = new Autopilot(road, physics);
   autopilot.setMode(mode);
   const input = emptyInput();
   const others =

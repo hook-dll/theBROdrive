@@ -107,7 +107,6 @@ import { SidetrackProvider, sidetrackProgramAnchor } from './world/sidetrack';
 import { updateWeather, weather, windAt } from './world/weather';
 import { Road, ROAD_LENGTH } from './world/road';
 import { WorldOrigin } from './world/origin';
-import { HazardIndex } from './world/hazards';
 import { PLAYER_FIELD_ID, RoadTraffic } from './world/traffic';
 import { Autopilot } from './vehicle/autopilot';
 import { advanceCloudShadows } from './render/cloudshadow';
@@ -478,7 +477,7 @@ async function boot(): Promise<void> {
   // in one pooled mesh instead of creating scene objects along the route.
   const tyreTracks = new SandTyreTracks(renderer.scene, origin);
   // Tumbleweeds share the spray ring so a hit can become dust without a second particle
-  // budget. Their own cap is four fixed instances; they never enter road hazards.
+  // budget. Their own cap is four fixed instances.
   const tumbleweeds = new TumbleweedField(renderer.scene, road, terrain, world.seed, origin, wheelSpray);
   // Tufts, shrubs and rosettes burst into the same spray ring; no Rapier colliders.
   const groundCover = new GroundCoverField(wheelSpray, origin);
@@ -533,7 +532,6 @@ async function boot(): Promise<void> {
   // Built before the streamer because `ScatterProvider` hands it every breakable prop
   // it makes, and asks it which ones are already down.
   const debris = new DebrisField(physics, world, renderer.scene, origin);
-  const hazards = new HazardIndex();
   const vista = new VistaMesh(renderer.scene, terrain, road, origin);
   // One deck for both mirage systems, so vessels and tableaus take turns on the road.
   const mirageSchedule = new MirageSchedule(world.seed, road.length);
@@ -620,10 +618,7 @@ async function boot(): Promise<void> {
   const startSite = new StartSiteProvider(boardable);
   streamer.register(startSite);
   streamer.register(new TerminusPadProvider());
-  // Hazards are indexed in the ROAD FRAME as the scatter provider builds them, which
-  // is what lets the autopilot know a dirt pile from a rock without a physics query:
-  // the generator already knew, and this is the only place that knowledge survives.
-  streamer.register(new ScatterProvider(debris, hazards, groundCover));
+  streamer.register(new ScatterProvider(debris, groundCover));
   streamer.register(new PoleProvider(roadDistance));
   // The verge furniture the director schedules: reflector posts, and the graded
   // tracks that leave the road for the desert. Both sit outside the asphalt edge at
@@ -841,7 +836,6 @@ async function boot(): Promise<void> {
     renderer.scene,
     origin,
     road,
-    hazards,
     loadCarModel,
     (x, z, radius) => {
       const radiusSquared = radius * radius;
@@ -1280,7 +1274,7 @@ async function boot(): Promise<void> {
 
   // Synthesises ordinary InputFrame commands, so every fuel, gearbox, tyre and
   // steering rule the human drives under applies to it unchanged.
-  const autopilot = new Autopilot(road, hazards, physics);
+  const autopilot = new Autopilot(road, physics);
   /**
    * WHERE THE PLAYER IS, FOR THE RULES THAT ARBITRATE AROUND HIM.
    *

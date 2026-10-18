@@ -1,6 +1,6 @@
 /**
- * Roadside props, the scatter half: sparse desert scatter (cacti + rocks) and the
- * occasional hazards on the driving surface.
+ * Roadside props, the scatter half: sparse desert scatter (cacti + rocks). Nothing is
+ * ever placed on the driving surface.
  *
  * Every prop is a pure function of the integer seed via stateless hashing, so a
  * chunk builds identically whether it is generated in order or revisited later.
@@ -16,7 +16,6 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { hash01 } from '../../core/rng';
 import { SurfaceType } from '../../core/surfaces';
-import { HazardIndex } from '../hazards';
 import { ROAD_HALF_WIDTH } from '../road';
 import { storyKeepsClear } from '../../story/site';
 import { laybyKeepsClear } from '../layby';
@@ -28,7 +27,6 @@ import {
   propPieces,
   rockForms,
   sandForms,
-  scrubForm,
   type BreakableSink,
   type PropForm,
 } from './forms';
@@ -58,24 +56,6 @@ let _hullPoints = new Float32Array(0);
 // follows the road rather than a world-aligned lattice and the road never cuts
 // through a cell.
 const TAG_SCATTER = 0x5ca17e2;
-const TAG_ROAD_PILE = 0x6a5a41;
-const TAG_ROAD_ROCK = 0x6a5a52;
-/** Each independent stream varies every consecutive gap inside this exact range. */
-const ROAD_HAZARD_GAP_MIN = 1800;
-const ROAD_HAZARD_GAP_MAX = 4200;
-/**
- * Two complementary gaps fill one cycle. If the first is `d`, the second is
- * `min + max - d`, so both stay in range while any chunk can locate them directly.
- */
-const ROAD_HAZARD_CYCLE = ROAD_HAZARD_GAP_MIN + ROAD_HAZARD_GAP_MAX;
-/** Keep the story start and the player's first few bends clear. */
-const ROAD_HAZARD_START = 600;
-/**
- * EXPERIMENT (owner, 2026-10-09): no rocks or scrub on the carriageway; a stuck or
- * overturned traffic car is the only dynamic road obstruction.
- */
-const ROAD_HAZARDS_SPAWN = false;
-const ROAD_HAZARD_EDGE_CLEARANCE = 0.15;
 const CELL_S = 6; // metres between candidate cells along the road
 const CELL_L = 6; // metres between candidate cells laterally
 /**
@@ -215,11 +195,6 @@ interface ScatterPlacement {
   ry: number;
   rz: number;
   scale: number;
-  /** Road-frame coordinates for an asphalt obstacle; zero for ordinary scatter. */
-  roadS: number;
-  roadLateral: number;
-  /** True only for the deterministic obstacle streams placed on asphalt. */
-  roadHazard: boolean;
   radius: number;
   /** Filled in by the instancing pass, so a break can blank the right instance. */
   mesh: THREE.InstancedMesh | null;
@@ -308,7 +283,6 @@ export class ScatterProvider implements ChunkProvider {
    */
   constructor(
     private readonly breakables?: BreakableSink,
-    private readonly hazards?: HazardIndex,
     private readonly groundCover?: GroundCoverField,
   ) {
     const forms = [...sandForms(), ...rockForms()];
@@ -328,7 +302,6 @@ export class ScatterProvider implements ChunkProvider {
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
     const slots: BatchSlot[] = [];
-    const hazardChunkKey = `scatter:${ctx.chunkIndex}`;
     const placements: ScatterPlacement[] = [];
     const registered: number[] = [];
     let coverHandle: GroundCoverHandle | null = null;
@@ -427,11 +400,8 @@ export class ScatterProvider implements ChunkProvider {
             ry,
             rz,
             scale,
-            roadS: 0,
-            roadLateral: 0,
             radius,
             mesh: null,
-            roadHazard: false,
             instance: 0,
             groundY,
           });
@@ -447,78 +417,7 @@ export class ScatterProvider implements ChunkProvider {
       }
     }
 
-    // Dirt piles, fallen trunks and solid rocks have independent deterministic
-    // streams. Complementary gaps keep hazards irregular without walking every
-    // previous placement to locate an arbitrary streamed chunk.
-    for (let kind = 0; ROAD_HAZARDS_SPAWN && kind < 2; kind++) {
-      const tag = kind === 0 ? TAG_ROAD_PILE : TAG_ROAD_ROCK;
-      const streamStart =
-        ROAD_HAZARD_START + hash01(seed, tag, 0x51a47) * ROAD_HAZARD_GAP_MAX;
-      const cycleStart = Math.max(0, Math.floor((ctx.sStart - streamStart) / ROAD_HAZARD_CYCLE) - 1);
-      const cycleEnd = Math.floor((ctx.sEnd - streamStart) / ROAD_HAZARD_CYCLE) + 1;
-
-      for (let cycle = cycleStart; cycle <= cycleEnd; cycle++) {
-        const firstGap =
-          ROAD_HAZARD_GAP_MIN +
-          hash01(seed, tag, cycle, 0) * (ROAD_HAZARD_GAP_MAX - ROAD_HAZARD_GAP_MIN);
-        for (let ordinal = 0; ordinal < 2; ordinal++) {
-          const s = streamStart + cycle * ROAD_HAZARD_CYCLE + (ordinal === 0 ? 0 : firstGap);
-          if (s < ctx.sStart || s >= ctx.sEnd) continue;
-          const candidate = cycle * 2 + ordinal;
-          let form: PropForm;
-
-          if (kind === 0) {
-            // Road piles are low scrub and nothing else. A fallen trunk is desert
-            // scenery now — it is still in `sandForms()` — and never spawns on the
-            // carriageway: a log across a lane is the one piece of litter a driver
-            // cannot read in time at speed.
-            form = scrubForm();
-          } else {
-            const rocks = rockForms();
-            form = rocks[Math.floor(hash01(seed, tag, candidate, 1) * rocks.length)]!;
-          }
-
-          const scaleRoll = hash01(seed, tag, candidate, 2);
-          const scale = kind === 0 ? 0.9 + scaleRoll * 0.6 : 0.65 + scaleRoll * 0.7;
-          const radius = form.baseRadius * scale;
-          // Across whatever asphalt there is here: a widened stretch gets its holes
-          // and rubble over both lanes, not only over the inner one.
-          const asphaltHalf = ctx.road.halfWidthAt(s);
-          const lateralReach = Math.max(0, asphaltHalf - radius - ROAD_HAZARD_EDGE_CLEARANCE);
-          const lateral = (hash01(seed, tag, candidate, 3) * 2 - 1) * lateralReach;
-          const p = ctx.road.offsetPoint(s, lateral);
-          const ry = hash01(seed, tag, candidate, 4) * Math.PI * 2;
-          const rx = form.rotate3d ? hash01(seed, tag, candidate, 5) * Math.PI * 2 : 0;
-          const rz = form.rotate3d ? hash01(seed, tag, candidate, 6) * Math.PI * 2 : 0;
-          // Even/odd negative ids keep the two streams disjoint from each other and
-          // from every positive desert-cell id.
-          const id = -1 - candidate * 2 - kind;
-          if (propPieces(form.id) && this.breakables?.isBroken(id)) continue;
-          const groundY = ctx.terrain.heightFromFrame(p.x, p.z, lateral, s);
-          placements.push({
-            form,
-            id,
-            x: p.x,
-            y: groundY - radius * form.sink,
-            z: p.z,
-            rx,
-            ry,
-            rz,
-            scale,
-            roadS: s,
-            roadLateral: lateral,
-            radius,
-            roadHazard: true,
-            mesh: null,
-            instance: 0,
-            groundY,
-          });
-        }
-      }
-      yield;
-    }
-
-    // Ground cover: never in `placements` (no collider, no hazard, no debris pieces),
+    // Ground cover: never in `placements` (no collider, no debris pieces),
     // so the physics pass below never walks it. The car bursts it through
     // `GroundCoverField` instead.
     const cover: ScatterPlacement[] = [];
@@ -545,10 +444,7 @@ export class ScatterProvider implements ChunkProvider {
           ry: yaw,
           rz: 0,
           scale,
-          roadS: 0,
-          roadLateral: 0,
           radius,
-          roadHazard: false,
           mesh: null,
           instance: 0,
           groundY,
@@ -661,11 +557,9 @@ export class ScatterProvider implements ChunkProvider {
       yield;
     }
 
-    // A contact shadow under everything standing in the desert. Not the road's rocks
-    // and piles: those lie on asphalt, above the terrain height recorded for them.
+    // A contact shadow under everything standing in the desert.
     const spots: ContactShadowSpot[] = [];
     for (const pl of placements) {
-      if (pl.roadHazard) continue;
       spots.push({ x: pl.x - ox, groundY: pl.groundY, z: pl.z - oz, radius: pl.radius, height: pl.form.height * pl.scale });
     }
     // Shrubs too; a grass tuft or a rosette is too thin to shade the sand under it.
@@ -705,8 +599,6 @@ export class ScatterProvider implements ChunkProvider {
     if (ctx.hasPhysics) {
       for (const pl of placements) {
         const form = pl.form;
-        let hazardRadius = 0;
-        let breakable = false;
         if (form.collider !== 'none' && !(form.collider === 'hull' && pl.radius < ROCK_COLLIDER_MIN)) {
           if (form.collider === 'hull') {
             addStatic(
@@ -720,10 +612,6 @@ export class ScatterProvider implements ChunkProvider {
               SurfaceType.Rock,
               eulerRotation(pl.rx, pl.ry, pl.rz),
             );
-            // The hull is constructed from these vertices, so its scaled bounding sphere
-            // is a conservative radius of the collision shape, not a placement guess.
-            form.geometry.computeBoundingSphere();
-            hazardRadius = (form.geometry.boundingSphere?.radius ?? 0) * pl.scale;
           } else if (form.collider === 'box') {
             if (!form.colliderHalf) throw new Error(`Box collider extents missing for ${form.id}`);
             const [hx, hy, hz] = form.colliderHalf;
@@ -738,7 +626,6 @@ export class ScatterProvider implements ChunkProvider {
               SurfaceType.Rock,
               yawRotation(pl.ry),
             );
-            hazardRadius = Math.hypot(hx, hz) * pl.scale;
           } else {
             const halfHeight = form.height * pl.scale * 0.42;
             const rad = form.baseRadius * pl.scale * 0.8;
@@ -752,9 +639,7 @@ export class ScatterProvider implements ChunkProvider {
               RAPIER.ColliderDesc.capsule(halfHeight, rad),
               SurfaceType.Rock,
             );
-            hazardRadius = rad;
             const pieces = propPieces(form.id);
-            breakable = pieces !== null;
             if (pieces && this.breakables && pl.mesh) {
               registered.push(pl.id);
               this.breakables.register({
@@ -774,14 +659,6 @@ export class ScatterProvider implements ChunkProvider {
             }
           }
         }
-        if (pl.roadHazard && hazardRadius > 0) {
-          this.hazards?.add(hazardChunkKey, {
-            s: pl.roadS,
-            lateral: pl.roadLateral,
-            radius: hazardRadius,
-            breakable,
-          });
-        }
         yield;
       }
     }
@@ -797,7 +674,6 @@ export class ScatterProvider implements ChunkProvider {
       dispose: () => {
         if (registered.length > 0) this.breakables?.forget(registered);
         this.groundCover?.forget(coverHandle);
-        this.hazards?.forget(hazardChunkKey);
         for (const slot of slots) ctx.batches.release(slot);
       },
     };
@@ -806,7 +682,6 @@ export class ScatterProvider implements ChunkProvider {
       for (const body of bodies) ctx.physics.removeBody(body);
       if (registered.length > 0) this.breakables?.forget(registered);
       this.groundCover?.forget(coverHandle);
-      this.hazards?.forget(hazardChunkKey);
       for (const slot of slots) ctx.batches.release(slot);
       group.clear();
     }
