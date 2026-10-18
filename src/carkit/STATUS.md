@@ -52,7 +52,9 @@ to the kit tyre. The kit's five generated wheel styles were removed at the owner
    2111 estate added 2026-10-16 (draft, awaiting the owner's review).
 3. **GAZ and UAZ-469**, then the **UAZ «буханка»** (UAZ-452). GAZ-24 and GAZ-31029 drafted
    2026-10-16 (awaiting the owner's review); the GAZ-21 is not wanted.
-4. **Trucks**, starting with the **ZIL-130**.
+4. **Trucks**, starting with the **ZIL-130**. The ZIL-150 is postponed (owner, 2026-10-18).
+5. **Foreign cars of the 1990s** (owner's list, 2026-10-18; order within it not set yet):
+   see "Foreign cars: the owner's list" below.
 
 Off the roadmap: the **AZLK-2141** (Moskvich) drafted 2026-10-16 on the pack's `sa_azlk2141`
 running gear (awaiting the owner's review).
@@ -198,6 +200,47 @@ slot (as on the 2115).
   ladder frame, a load bed, **dual rear wheels**, **3+ axles** for later trucks, and **new
   truck physics** (the vehicle model is car-only today). Much of `body.ts` (one lofted tub)
   does not apply.
+
+## Foreign cars: the owner's list (2026-10-18)
+
+Škoda Felicia; Volkswagen Passat B3; Jeep Grand Cherokee ZJ; Toyota Corolla (8th gen.,
+E110); Daewoo Espero; Renault 19 Europa; Daewoo Nexia I; Mazda Xedos 6; Fiat Brava; SEAT
+Córdoba; Volkswagen Golf III; Opel Astra F; Opel Vectra A; Audi 80 B3/B4; Ford Escort;
+Ford Sierra; Mercedes-Benz W124; BMW E34; Toyota Carina E; Nissan Primera P10/P11;
+Mitsubishi Galant; Mitsubishi Pajero II; Toyota Land Cruiser 80; Nissan Patrol Y60;
+Toyota RAV4; Honda CR-V; Kia Sportage; Land Rover Discovery I; Opel Frontera A; Suzuki
+Vitara.
+
+What every one of them needs, whatever the body: no catalogue has a foreign sibling
+(`KIT_CARS` rides on `sv_*`/`sa_*`/`cf_*` running gear), so each needs its own running
+gear row (engine, gearbox, mass, tyres, aero) and probably new engine/gearbox variants in
+the parts registry; a drawing (four-view) and measurements file per car, as for the VAZes.
+
+Estimated effort by what the generator already has (one lofted tub, moulded body-colour
+bumpers, corner lamps, `rearKnee` hatches, `rearLean` estates, spare on the rear door,
+`screenFoot`/`screenTop` curved glass, flush integrated bumpers):
+
+- **Easy (data only, like the 2110 family):** square-edged saloons and hatches of the late
+  80s – early 90s: Daewoo Nexia I and Espero, Opel Astra F and Vectra A, Audi 80 B3/B4, VW
+  Passat B3 and Golf III, Ford Escort (Mk5/6), Ford Sierra, Renault 19, Škoda Felicia,
+  SEAT Córdoba, Mitsubishi Galant, Mercedes W124, BMW E34. Faces are lamp lenses, grilles
+  and panels the item list already draws; the W124's grille shell and the E34's kidneys
+  plus quad lamps are a `grille` with a frame and `round` lamps. Possibly a small field for
+  a grille standing proud as a shell.
+- **Medium (rounder bodies; the loft has to carry stronger plan and profile curves, the
+  tens' generator work shows the way):** Toyota Corolla E110, Carina E, Nissan Primera
+  P10/P11, Mazda Xedos 6, Fiat Brava (its tail lamps are a narrow wrap-around strip).
+- **Off-roaders, a family of their own (body-on-frame, built like the Niva and the 469,
+  but needing new pieces):** Pajero II, Land Cruiser 80, Patrol Y60, Discovery I, Frontera
+  A, Vitara, Grand Cherokee ZJ, and the soft-roaders RAV4, CR-V, Sportage. New elements:
+  wheel-arch flares (fender extensions) standing proud of the flank, side steps, roof rails,
+  a spare on a side-hinged rear door with a cover (partly there on the 469), the Discovery's
+  stepped roof with its alpine windows, two-tone bodies (a lower band in another colour), and
+  large wheels/tyres on the running gear side. Once flares, steps and rails exist, the rest
+  of the family is data.
+
+Suggested start: one easy car to set up the foreign running-gear path (Nexia or Astra F),
+then the off-road family starting with the Pajero II (it needs every new piece once).
 
 ## Known gaps
 
