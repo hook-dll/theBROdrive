@@ -70,6 +70,11 @@ interface Ref {
   readonly v: Value;
   readonly src: string;
   readonly tol?: number;
+  /**
+   * An intended deviation from the real car, with its reason (as reality.ts' known
+   * deviations): the built car is held to `v` here instead, and the row is listed.
+   */
+  readonly accepted?: { readonly v: Value; readonly why: string };
 }
 interface Registration {
   readonly src: string;
@@ -387,10 +392,11 @@ const STRETCH = 0.03;
 function compare(key: string, ref: Ref, got: Value | undefined, slope?: Value): Row {
   const info = OVERALL.has(key);
   const tol = info && typeof ref.v === 'number' ? Math.abs(ref.v) * STRETCH : ref.tol ?? TOL[key] ?? 0;
-  const row: Row = { key, ref: ref.v, got, ok: false, tol: r3(tol), src: ref.src, info };
+  const target = ref.accepted?.v ?? ref.v;
+  const row: Row = { key, ref: target, got, ok: false, tol: r3(tol), src: ref.accepted ? `accepted, real ${show(ref.v)}: ${ref.accepted.why}` : ref.src, info };
   if (got === undefined) return row;
   const flat = (v: Value): (number | string | boolean)[] => (Array.isArray(v) ? (v as (number | number[])[]).flat() : [v]);
-  const a = flat(ref.v), b = flat(got);
+  const a = flat(target), b = flat(got);
   if (a.length !== b.length) return row;
   if (typeof slope === 'number' && typeof a[0] === 'number' && typeof b[0] === 'number') {
     row.ok = Math.abs(a[0] - b[0]) / Math.hypot(1, slope) <= tol + 1e-9;
