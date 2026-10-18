@@ -98,6 +98,12 @@ export interface CabinColumn {
    * alone). Absent: both sides.
    */
   readonly only?: 'left' | 'right';
+  /**
+   * `'black'`: the strip above the belt is black trim instead of paint, up to the rail:
+   * the frame round its glass, a blacked-out pillar, the mirror's sail (the Espero's).
+   * The rail's chamfer onto the roof stays painted. Absent: painted.
+   */
+  readonly finish?: 'black';
 }
 
 export interface CabinSpec {

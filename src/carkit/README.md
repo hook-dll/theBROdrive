@@ -306,7 +306,9 @@ belt, `top` where it meets the rail (`top ≠ s` = raked pillar). The rest descr
 (`'body'`, `'door1'` = front door, `'door2'` = rear door; `lower` defaults to `upper`, and
 below the belt a door may overlap a pillar), `glass` is `'none'`, `'drop'` (wind-down, `window_*`), `'vent'` (quarter light,
 `vent_*`) or `'fixed'` (a fixed pane: in the body if `upper: 'body'`, else it rides with the
-door as `quarter_*`). `foot?: { y, s, round? }` rakes the shut line on this column below
+door as `quarter_*`). `finish?: 'black'` makes the strip's paint above the belt black
+trim up to the rail (the frame round its glass, a blacked-out pillar, the mirror's sail; the
+rail's chamfer stays painted: the Espero's frames, B pillar and sail). `foot?: { y, s, round? }` rakes the shut line on this column below
 the belt: upright down to `y`, then straight to `s` at the doors' bottom (the 2110's rear
 door, whose edge runs forward to the sill in front of the arch); `round: [upper, lower]` are
 the radii of its two turns (`BodyFrame.shutLine`; a point of the line within 5 mm of the
@@ -468,8 +470,10 @@ face, hood over swapped big dials, two big centre vents, heater panel, radio low
 stack), `CABIN_1111` (ribbon speedometer in a small hood), `CABIN_2131` (the 2121's with
 the bench further back), `CABIN_NEXIA` (a rounded hood over a central speedometer, the
 tachometer left and two small dials right, end vents, two centre vents over three heater
-knobs), `CABIN_ESPERO` (the Nexia's, its light rocker lower and its bench 3 cm off the
-wheel-house covers); the Samaras and the AZLK-2141 use the `samara` platform's layout as is, the 2121
+knobs), `CABIN_ESPERO` (an angular hood over three dials of one size, the tachometer,
+speedometer and a fuel dial with the temperature scale on its face, switch pods either side
+of the hood, two vents over three heater knobs on a black stack, a big glovebox high, a
+four-spoke wheel; its bench 3 cm off the wheel-house covers); the Samaras and the AZLK-2141 use the `samara` platform's layout as is, the 2121
 the `niva` platform's.
 
 ## Scene contract
@@ -716,7 +720,7 @@ Working files (crops, grids, overlays) go in `/tmp/<family>/`; only the report i
   `round`), `bonnet` (and its `nose`, with front `lid` items), `cornerLamps`,
   `featureLine`, moulded `corner` and `wrapTo`, the centre-line lens, the dash's `heater`
   and vent `half`, rear `cornerLamps` (`end`), `frontLean` (and its `full`), moulded
-  `flush`, `screenFoot`, column `drop`, the spoiler on a tailgate.
+  `flush`, `screenFoot`, column `drop`, the spoiler on a tailgate, column `finish`.
 - Register it in `KIT_SPECS` (specs.ts): `vaz2110: { id: 'vaz2110', ...BODY_2110, look:
   LOOK_2110, cabinLayout: CABIN_2110 }` (via `onBody` if the family frame differs).
 
@@ -903,7 +907,7 @@ within `KIT_FINE_M`; "Far" = everything except the four detail groups.
 | GAZ-31029 | 11 888 | 5 018 | 4 247 | 1 747 | 421 | 294 | 564 | 1 344 | 6 362 |
 | AZLK-2141 | 12 131 | 5 243 | 4 411 | 1 751 | 617 | 60 | 456 | 1 344 | 6 587 |
 | Nexia | 13 472 | 6 072 | 4 909 | 1 761 | 639 | 52 | 456 | 1 344 | 7 416 |
-| Espero | 14 397 | – | – | – | – | – | – | 1 344 | – |
+| Espero | 14 389 | – | – | – | – | – | – | 1 344 | – |
 
 The owner set the budget aside for the 2110 and 2112 (the rounded rear shut line adds side
 rows to every tub column).

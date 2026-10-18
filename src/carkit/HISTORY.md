@@ -869,6 +869,33 @@ amplified differences; `bench-*.json`, `pick-*.json`).
   Lab shots front, 3/4, side and close; `kit-zfight` kit_nexia passes; fit and proportions
   unchanged. *daewoo.ts `LOOK_NEXIA.cornerLamps`*.
 
+## Daewoo Espero (2026-10-18)
+
+- **Espero review 1 (owner): its own dash instead of the Nexia's; the pillars and mirror
+  sail black as on the car; the lamps checked against the photos and drawing much more
+  precisely, shape only.** → The draft reused `CABIN_NEXIA` (no Espero interior on
+  Commons). The kit had no black finish for a greenhouse strip, so every frame was paint.
+  The lamps had been set from two 3/4 photos by eye: the head lamp a wedge whose top fell
+  0.05 to a short upright inner end; the tail lamps 0.785–0.925, 0.1 too high, with a thin
+  lid strip; the wrap's top further forward than its foot. → The dash is read off
+  SelfBase.de's instrument-panel photos and an owner's cluster photo (drive2.ru):
+  `CABIN_ESPERO`, three equal dials, switch pods, the black stack, a high glovebox, four
+  spokes. Its first binnacle face stood 2 mm ahead of the cluster's plane and fought it
+  (`kit-zfight`); it now stands in the plane (0.472). `CabinColumn.finish: 'black'`
+  (body.ts: the strip's faces above the belt as dark trim, the rail's chamfer painted) is
+  set on the Espero's door frames, B pillar, rear post, quarter-glass frame and sail. The
+  lamps were measured on eight photos, one of them near square (1.38 mm/px across the lid
+  band), with ratios of vertical spans for the heights. Front: a slanted inner edge from a
+  pointed tip, a nearly level top, and the split leaning out. Rear: one band 0.67–0.82 with
+  a red/amber split at 0.725. The lid band is a red top across the lid plus, under each end,
+  a lens set 4 mm back and running behind it: two lenses meeting edge to edge left notches,
+  because a lens's corners are chamfered. The lid cut is ±0.49, and the foot wraps further
+  forward than the top. The fog and reversing lamps' faces were brought back inside the
+  bumpers: at 0.075 proud they stood 25 / 18 mm out and lengthened the native body, so the
+  loader moved the hubs 12 mm in their arches (`kit-proportions` gate). *daewoo.ts
+  `BODY_ESPERO`, `LOOK_ESPERO`; interior.ts `CABIN_ESPERO`; spec.ts / body.ts
+  `CabinColumn.finish`; measurements-espero.md §5*.
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent

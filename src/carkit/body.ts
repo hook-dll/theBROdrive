@@ -994,6 +994,8 @@ export function buildShell(frame: BodyFrame): ShellResult {
       // Owner and glass of the band pair; `band` 0..3 is b-k, k-q, q-t, t-u.
       let upper = 'body';
       let glass: string | null = null;
+      // The strip's paint above the belt as black trim (`CabinColumn.finish`).
+      let black = false;
       if (a.kind === 'front' && b.kind === 'front') {
         glass = 'body';
       } else if (a.kind === 'rear' || b.kind === 'rear') {
@@ -1011,6 +1013,7 @@ export function buildShell(frame: BodyFrame): ShellResult {
         if (kind === 'fixed') glass = upper === 'body' ? 'body' : upper.replace('door', 'quarter');
         else if (kind === 'drop') glass = upper === 'body' ? 'body' : upper.replace('door', 'window');
         else if (kind === 'vent') glass = upper === 'body' ? 'body' : upper.replace('door', 'vent');
+        black = column.finish === 'black';
       }
       const bands: [Vec3, Vec3, Vec3, Vec3, number][] = [
         [a.b, b.b, b.k, a.k, 0],
@@ -1037,7 +1040,7 @@ export function buildShell(frame: BodyFrame): ShellResult {
       // `from` (the windscreen's frame and the pillars ahead of it stay painted).
       const soft = cabin.softTop;
       const top: Mat = soft ? 'canvas' : 'paint';
-      const strip: Mat = soft && (upper === 'body' || upper.startsWith('tailgate')) && frame.zNose - (a.b[2] + b.b[2]) / 2 > soft.from ? 'canvas' : 'paint';
+      const strip: Mat = black ? 'dark' : soft && (upper === 'body' || upper.startsWith('tailgate')) && frame.zNose - (a.b[2] + b.b[2]) / 2 > soft.from ? 'canvas' : 'paint';
       // The back light as a framed pane each side (`rearPanes`): the strip below the
       // tailgate's top is cut along the pane's outline (a rounded rectangle, convex), glass
       // inside it, the tailgate's paint round it; above the top, the body's. Every piece is

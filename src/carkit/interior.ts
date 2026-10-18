@@ -907,16 +907,71 @@ export const CABIN_NEXIA: CabinLayoutOverride = {
   wheel: { ...LAYOUTS.samara.wheel, spokes: [-35, 215] },
 };
 
+// The Daewoo Espero's dash (owner's review 1, 2026-10-18: its own, not the Nexia's), read
+// off these sources:
+//  - SelfBase.de interior database, Espero 1995-1997 (en.selfbase.de/automobile_interior_
+//    database/daewoo_espero_sid1800501101): "instrument panel front" (500 x 332, taken
+//    from the car's centre line behind the seats) and "instrument panel side" (500 x 380,
+//    from the passenger's door), and "door panel front" (the vent in the door).
+//  - drive2.ru/l/506952651926143865 (an Espero 2.0 owner's cluster, its glass off): the
+//    tachometer (0-7 numbered, red from 6000) left of the speedometer (numbered to 220,
+//    the scale running on), the same size; on its right a round dial with the fuel scale
+//    over its top and a second needle under it (the temperature).
+// Scale on the front photo: the wheel's hub (x 146) to the stack's centre line (x 260),
+// 114 px, is the driver's seat line 0.36 off the centre (the Samara's), so 3.2 mm/px at
+// the fascia [E: one scale across and up, perspective ignored]; heights hang from the
+// cluster's centre (y 62), 0.012 over the belt as the Nexia's.
+
 /**
- * Daewoo Espero: the Nexia's dash [E: no Espero dash measured yet] in the wider body. The
- * light rocker 3 cm lower (at the Samara's height its back met the wider dash's face,
- * kit-zfight),
- * and the bench's base 3 cm off the wheel-house covers instead of 2.2 (its side met the
- * quarter trim 2 mm away).
+ * Daewoo Espero: a moulded grey dash with a long, low, angular hood over three round
+ * dials of one size (the tachometer, the speedometer, then the fuel dial with the
+ * temperature scale under it on the same face), a pod of switches either side of the hood
+ * (the lights on the driver's right); a black centre stack with two slatted vents side by
+ * side over the heater's three knobs, the radio and the ashtray under them; a big
+ * glovebox high before the passenger; a four-spoke wheel with a wide pad. The face vents at
+ * the ends are in the doors' tops [P door panel], not modelled.
  */
 export const CABIN_ESPERO: CabinLayoutOverride = {
-  ...CABIN_NEXIA,
-  lights: { right: -0.2, dy: -0.13, kind: 'rocker' },
+  // An angular hood, flat on top, its face a little taller than the Nexia's rounded one
+  // to take the pods' switches [P side]; the face in the cluster's plane (0.472).
+  binnacle: [[0.25, -0.035], [0.285, 0.075], [0.43, 0.088], [0.49, 0.08], [0.495, 0.07], [0.472, 0.066], [0.472, -0.045], [0.4, -0.04]],
+  binnacleHalf: 0.215,
+  // Three dials of one size side by side, about 25 px (0.08) apart [P front], the speedometer
+  // on the column [P drive2: the tachometer on its left].
+  clusterFace: { right: 0, up: 0.012, half: [0.14, 0.05], colour: COLOURS.cluster, frame: 'black' },
+  gauges: [
+    { channel: 'rpm', right: -0.088, up: 0.012, radius: 0.04, full: 8000, ...BIG },
+    { channel: 'speed', right: 0, up: 0.012, radius: 0.04, full: 240, ...BIG },
+    { channel: 'fuel', right: 0.088, up: 0.012, radius: 0.04, full: 1, sweep: 140 * (Math.PI / 180), rest: 160 * (Math.PI / 180), ticks: 3 },
+    { channel: 'temp', right: 0.088, up: 0.012, radius: 0.04, full: 1, sweep: -140 * (Math.PI / 180), rest: 200 * (Math.PI / 180), ticks: 3, bare: true },
+  ],
+  // The telltales over the dials' gaps [P drive2: a square lens over the tachometer's and
+  // speedometer's meeting]; the rest of the set not legible, the Samara's in one row.
+  lamps: { right: 0, up: 0.057, cols: 7, pitch: 0.0145, show: ['turn', 'side', 'beam', 'fuel', 'oil', 'charge', 'brake'] },
+  // The pods either side of the hood [P front: three switches stacked on the right pod, x
+  // 205-215 (+0.18); knobs on the left one]: two switches a side fit the hood's face.
+  lights: { right: 0.18, dy: 0.036, kind: 'rocker', on: 'cluster' },
+  rockers: { on: 'cluster', at: [[0.18, -0.019], [-0.18, 0.036], [-0.18, -0.019]] },
+  // The centre pair at the stack's top, each 26 x 12 px [P front, x 247 / 274, y 103].
+  vents: [
+    { x: 0.048, dy: -0.11, half: [0.04, 0.02] },
+    { x: -0.048, dy: -0.11, half: [0.04, 0.02] },
+  ],
+  // Three knobs 0.06 apart in a dark panel under the vents [P front y 127].
+  heater: { dy: -0.19, half: [0.11, 0.03], knobs: [-0.06, 0, 0.06], radius: 0.019 },
+  // The stack 76 px wide [P front].
+  stack: { half: 0.122 },
+  // The radio slot and the ashtray under it [P front y 150 / 172].
+  radio: [0, -0.255],
+  ashtray: [0, -0.315],
+  // Not legible on the photos [E]: on the fascia between the column and the stack.
+  hazard: [0.17, -0.11],
+  // A big lid high on the passenger's side, x 318-430, y 103-133 [P front, side].
+  glovebox: { x: -0.37, dy: -0.135, half: [0.17, 0.06] },
+  // Four spokes round a wide pad (the airbag's on the photographed car) [P front].
+  wheel: { ...LAYOUTS.samara.wheel, radius: 0.19, spokes: [20, 160, -60, 240] },
+  // The bench's base 3 cm off the wheel-house covers instead of 2.2: its side met the
+  // quarter trim 2 mm away in the Espero's body (kit-zfight).
   bench: { from: 'hip', offset: 0.78, clear: 0.03 },
 };
 

@@ -356,39 +356,45 @@ export const BODY_ESPERO: KitBody = {
     { s: 4.3, sill: 0.31, crease: 0.665, belt: 0.955, deck: 0.978, wSill: 0.755, wCrease: 0.775, wBelt: 0.735 },
     { s: 4.5, sill: 0.33, crease: 0.665, belt: 0.925, deck: 0.944, wSill: 0.69, wCrease: 0.71, wBelt: 0.675 },
     // The tail face: the lid comes down between the corner lamps (topped at 0.925) to the
-    // bumper's band [P "1996 Daewoo Espero orange red rear"], cut at ±0.52.
-    { s: 4.55, sill: 0.33, crease: 0.665, belt: 0.925, deck: 0.64, notch: 0.52, wSill: 0.665, wCrease: 0.685, wBelt: 0.655 },
+    // bumper's band [P "1996 Daewoo Espero orange red rear"], cut at ±0.49 (lamp review: on
+    // the near-square "Maroon Daewoo Espero-003-rear" the corner unit is 0.265 of the lid's
+    // band, 200 / 755 px; ±0.52 gave 0.18).
+    { s: 4.55, sill: 0.33, crease: 0.665, belt: 0.925, deck: 0.64, notch: 0.49, wSill: 0.665, wCrease: 0.685, wBelt: 0.655 },
   ],
   shoulder: { inset: 0.04, rise: 0.015 },
   cabin: {
+    // Owner's review 1 (2026-10-18): the door frames, the B pillar, the post between the
+    // rear door's glass and the quarter glass, the quarter glass's frame and the mirror's
+    // sail black, as on the car [P "Daewoo Espero beige front", "Daewoo Espero h"]; the A
+    // pillar and the wide C pillar painted.
     columns: [
       // The screen's outer line from the cowl (1.267, 0.914) to the rail at 2.03 [D side
       // (246, 167) to (377, 91)].
       { s: 1.267, top: 2.03, upper: 'body' },
       // A slim A pillar with the door's frame and glass close behind it, parallel [P
       // "Daewoo Espero beige front": the mirror in the glass's front corner].
-      { s: 1.3, top: 2.063, upper: 'door1', lower: 'body' },
+      { s: 1.3, top: 2.063, upper: 'door1', lower: 'body', finish: 'black' },
       // The front door's shut line below the belt [D side x 277]; the door's frame forms a
       // sail under the mirror, the glass's front edge rising steeply from 1.55 at the belt
       // to the frame [P "1999 Daewoo Espero dark green front": the mirror on a black
-      // triangle at the glass's front foot; painted here].
-      { s: 1.447, top: 2.09, upper: 'door1' },
-      { s: 1.55, top: 2.11, upper: 'door1', glass: 'drop' },
+      // triangle at the glass's front foot].
+      { s: 1.447, top: 2.09, upper: 'door1', finish: 'black' },
+      { s: 1.55, top: 2.11, upper: 'door1', glass: 'drop', finish: 'black' },
       // The B pillar, upright [D side x 466–482 at the belt and the rail; the shut line x 458].
-      { s: 2.51, top: 2.52, upper: 'door1' },
-      { s: 2.545, top: 2.555, upper: 'body', lower: 'door1' },
-      { s: 2.56, top: 2.57, upper: 'body', lower: 'door2' },
-      { s: 2.6, top: 2.61, upper: 'door2' },
-      { s: 2.635, top: 2.645, upper: 'door2', glass: 'drop' },
+      { s: 2.51, top: 2.52, upper: 'door1', finish: 'black' },
+      { s: 2.545, top: 2.555, upper: 'body', lower: 'door1', finish: 'black' },
+      { s: 2.56, top: 2.57, upper: 'body', lower: 'door2', finish: 'black' },
+      { s: 2.6, top: 2.61, upper: 'door2', finish: 'black' },
+      { s: 2.635, top: 2.645, upper: 'door2', glass: 'drop', finish: 'black' },
       // The rear glass's rear edge leaning forward to the top [D side: 3.354 at the belt,
       // 3.295 at the rail]; the frame behind it, the door's shut line running down and
       // forward round the rear arch to the doors' bottom [D side x 587 at the arch].
-      { s: 3.33, top: 3.27, upper: 'door2' },
-      { s: 3.36, top: 3.3, upper: 'body', foot: { y: 0.72, s: 3.15, round: [0.15, 0.03] } },
+      { s: 3.33, top: 3.27, upper: 'door2', finish: 'black' },
+      { s: 3.36, top: 3.3, upper: 'body', finish: 'black', foot: { y: 0.72, s: 3.15, round: [0.15, 0.03] } },
       // The fixed quarter glass in the body behind the rear door [P "Daewoo Espero h"; the
       // drawing's preview greys it], its rear edge the slim C pillar's front, then the C
       // pillar to the back light [D side: its top at the rail at 3.342].
-      { s: 3.375, top: 3.31, upper: 'body', glass: 'fixed' },
+      { s: 3.375, top: 3.31, upper: 'body', glass: 'fixed', finish: 'black' },
       { s: 3.76, top: 3.325, upper: 'body' },
       { s: 4.04, top: 3.342 },
     ],
@@ -447,8 +453,8 @@ export const BODY_ESPERO: KitBody = {
  */
 export const LOOK_ESPERO: KitLook = {
   label: 'Daewoo Espero',
-  upholstery: 0x5a5d63, // grey velour [E]
-  dash: 0x2a2b2e, // dark grey plastic [E as the Nexia]
+  upholstery: 0x6a6c70, // grey cloth [P SelfBase "door panel front": #77787a in its bright light]
+  dash: 0x6e7175, // mid-grey plastic, the stack black [P SelfBase "instrument panel front", "side"]
   headrests: true,
   brightwork: 'black', // [P]
   sill: null,
@@ -459,37 +465,46 @@ export const LOOK_ESPERO: KitLook = {
   // The pressed line along the flank [D side y 212: 0.658].
   featureLine: { points: [[0.6, 0.64], [1.3, 0.652], [2.5, 0.658], [3.5, 0.662], [4.3, 0.665]], height: 0.012 },
   cornerLamps: [
-    // Head lamp and indicator as one flush unit [D side 0.614–0.702; P beige front, dark
-    // green front: the "slanted" lamps, the top falling towards the badge panel so the
-    // unit narrows to a short inner end (0.033 against 0.085 at the corner) over a level
-    // foot; the amber at its outer end wrapping round the corner onto the wing].
+    // Head lamp and indicator as one flush unit (lamp review, 2026-10-18) [P "Daewoo Espero
+    // front 20071227", "Maroon Daewoo Espero-002-front", "1994-1995 Daewoo Espero 2000i
+    // Sedan 04", beige front, dark green front]: the top nearly level (0.69 inside to 0.708
+    // at the corner, 8 % of the unit's height), the foot rising 0.008 inwards, and the
+    // inner end one slanted edge from a pointed tip low on the bumper's top (±0.215) up and
+    // out to the top's inner corner (±0.27): the "slanted" look. The amber indicator is the
+    // outer 30 % of the unit's length in a front view (from ±0.55), its split leaning out to
+    // the top, round the corner onto the wing.
     {
       points: [
-        { x: [0.22, 0.235], y: [0.622, 0.655], role: 'head' },
-        { x: 0.4, y: [0.618, 0.684], role: 'head' },
-        { x: 0.53, y: [0.617, 0.7], role: 'blinker' },
-        { y: [0.62, 0.705], role: 'blinker' },
-        { s: 0.17, y: [0.63, 0.7] },
+        { x: [0.215, 0.27], y: [0.626, 0.69], role: 'head' },
+        { x: 0.4, y: [0.622, 0.696], role: 'head' },
+        { x: [0.545, 0.56], y: [0.619, 0.702], role: 'blinker' },
+        { y: [0.617, 0.708], role: 'blinker' },
+        { s: 0.17, y: [0.628, 0.7] },
       ],
     },
-    // Tail [P orange red rear: red over the corner, the lower band amber at the outer end;
-    // D side: wrapping forward onto the wing], from the lid's edge (±0.52) to the corner.
+    // Tail (lamp review) [P "Maroon Daewoo Espero-003-rear" (near square: the lid's band
+    // 755 px over its 1.04 m, 1.38 mm/px), "Daewoo Espero rear 20071227", "Daewoo Espero h",
+    // "1996 Daewoo Espero orange red rear"]: one band across the whole tail, 0.15 tall, 0.10
+    // of painted face over it (the badges' strip) and its foot 0.03 over the lid's: 0.67–
+    // 0.82. The corner units red over amber, split at 0.725 (64 / 36 %), their inner edge
+    // upright along the lid's cut (±0.49); round the corner onto the wing, the foot further
+    // forward than the top [P h, orange red; D plan: red to s 4.39 at the top].
     {
       end: 'rear',
       points: [
-        { x: [0.53, 0.53], y: [0.845, 0.925], role: 'brake' },
-        { x: 0.6, y: [0.845, 0.925], role: 'tail' },
-        { y: [0.845, 0.925], role: 'tail' },
-        { s: 4.36, y: [0.85, 0.925] },
+        { x: [0.5, 0.5], y: [0.725, 0.82], role: 'brake' },
+        { x: 0.6, y: [0.725, 0.82], role: 'tail' },
+        { y: [0.725, 0.82], role: 'tail' },
+        { s: 4.42, y: [0.73, 0.815] },
       ],
     },
     {
       end: 'rear',
       points: [
-        { x: [0.53, 0.53], y: [0.785, 0.845], role: 'tail' },
-        { x: 0.6, y: [0.785, 0.845], role: 'blinker' },
-        { y: [0.785, 0.845], role: 'blinker' },
-        { s: 4.38, y: [0.79, 0.845] },
+        { x: [0.5, 0.5], y: [0.67, 0.725], role: 'tail' },
+        { x: 0.6, y: [0.67, 0.725], role: 'blinker' },
+        { y: [0.67, 0.725], role: 'blinker' },
+        { s: 4.37, y: [0.675, 0.725] },
       ],
     },
   ],
@@ -499,8 +514,9 @@ export const LOOK_ESPERO: KitLook = {
     bumper: { kind: 'moulded', drop: 0.105, height: 0.346, finish: 'paint', moulding: { y: 0.525, height: 0.09, finish: 'black' }, corner: 0.2, wrapTo: 0.55 },
     items: [
       // The fog lamps at the ends of the lower band, the black slot between them [P].
-      // Clear glass, unlit (no fog-lamp channel): a grey panel, not a red `inert` lens.
-      { kind: 'panel', x: { from: { centre: 0.36 }, to: { centre: 0.5 } }, y: { from: ['bumperBottom', 0.05], to: ['bumperBottom', 0.1] }, finish: 'grey', proud: 0.075 },
+      // Clear glass, unlit (no fog-lamp channel): a grey panel, not a red `inert` lens; its
+      // face 2 mm inside the bumper's (0.075 stood 25 mm proud of it and lengthened the car).
+      { kind: 'panel', x: { from: { centre: 0.36 }, to: { centre: 0.5 } }, y: { from: ['bumperBottom', 0.05], to: ['bumperBottom', 0.1] }, finish: 'grey', proud: 0.05 },
       {
         kind: 'grille',
         x: { centre: 0.3 },
@@ -517,9 +533,18 @@ export const LOOK_ESPERO: KitLook = {
     bumper: { kind: 'moulded', drop: 0.052, height: 0.29, finish: 'paint', moulding: { y: 0.56, height: 0.07, finish: 'black' }, wrapTo: 3.95 },
     items: [
       // The small reversing lamps in the bumper's lower corners [P orange red rear].
-      { kind: 'lens', role: 'reverse', x: { from: { centre: 0.5 }, to: { centre: 0.6 } }, y: { from: ['bumperBottom', 0.04], to: ['bumperBottom', 0.075] }, depth: 0.008, proud: 0.075 },
+      { kind: 'lens', role: 'reverse', x: { from: { centre: 0.5 }, to: { centre: 0.6 } }, y: { from: ['bumperBottom', 0.04], to: ['bumperBottom', 0.075] }, depth: 0.008, proud: 0.057 },
     ],
-    // The red reflector band across the lid between the corner lamps [P].
-    lid: [{ kind: 'lens', role: 'inert', x: { at: { centre: 0 }, half: 0.505 }, y: { from: ['belt', -0.08], to: ['belt', -0.006] }, depth: 0.008, proud: 0.01 }],
+    // The red band across the lid between the corner lamps, in line with them (lamp review)
+    // [P maroon rear, rear 20071227, h, orange red]: full height (0.67–0.82, `belt` 0.925
+    // here) at its ends, from the lid's cut in to ±0.27 (the step at 45–55 % of its half [P]); between those only its red top down
+    // to the corner lamps' split (0.725), the lid's dark strip under it. The red top across
+    // the lid, and under each end a lower lens 4 mm further back whose top runs 5 mm in
+    // behind it (a lens's corners are chamfered: two lenses meeting edge to edge left
+    // notches between them).
+    lid: [
+      { kind: 'lens', role: 'inert', x: { at: { centre: 0 }, half: 0.475 }, y: { from: ['belt', -0.2], to: ['belt', -0.105] }, depth: 0.008, proud: 0.01 },
+      { kind: 'lens', role: 'inert', x: { from: { centre: 0.27 }, to: { centre: 0.475 } }, y: { from: ['belt', -0.255], to: ['belt', -0.195] }, depth: 0.008, proud: 0.006 },
+    ],
   },
 };

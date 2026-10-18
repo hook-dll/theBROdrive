@@ -2,7 +2,7 @@
 
 The Espero shares no stampings with another kit car, so it gets its own spec: `BODY_ESPERO` /
 `LOOK_ESPERO` in `daewoo.ts`, `platform: 'samara'` (transverse engine in front, front drive,
-struts and a twist beam), and dash `CABIN_ESPERO` in interior.ts, which is the Nexia's [E].
+struts and a twist beam), and dash `CABIN_ESPERO` in interior.ts, its own since review 1 (§5).
 The car built is the **2.0 CD (KLEJ, 09.1995–12.1999)**. drom.ru catalogues this version for
 Russia (C20LE, five-speed manual), and it is the Espero most often seen in the CIS: drom.ru
 sells far more 2.0 cars than 1.5 or 1.8 ones, and the owners' threads on drive2.ru are
@@ -130,17 +130,83 @@ Bench (`tools/reality.ts kit_espero`): top 185 against 185, 0–100 12.8 s again
 catalogue's 10.8 (+18%, accepted as `CATALOGUE_OPTIMISTIC`, as the Nexia's +22% on the same
 box and axle), turn 3.83 against 3.78 (+1.4%), geometry 0.0%.
 
+## 5. Review 1 (owner, 2026-10-18): own dash, black frames, lamp shapes
+
+### Dash (`CABIN_ESPERO`, interior.ts)
+
+No Espero interior is on Commons. Sources:
+
+- SelfBase.de interior database, Espero 1995–1997
+  (`en.selfbase.de/automobile_interior_database/daewoo_espero_sid1800501101`): "instrument
+  panel front" (500 × 332, taken from the car's centre line), "instrument panel side"
+  (500 × 380, from the passenger's door) and "door panel front".
+- drive2.ru/l/506952651926143865, an Espero 2.0 owner's post with the cluster's glass off:
+  the tachometer (numbered 0–7, red from 6000) sits left of the speedometer (numbered to
+  220, the scale running on), both the same size. To their right is a round dial with the
+  fuel scale over its top and a second needle under it (the temperature).
+
+Scale on the front photo [E]: the wheel's hub (x 146) to the stack's centre line (x 260) is
+114 px for the Samara's 0.36 seat line, so 3.2 mm/px, used across and up with perspective
+ignored. Heights hang from the cluster's centre (y 62), 0.012 over the belt as on the Nexia.
+
+| Feature | Photo | Spec |
+|---|---|---|
+| Dials | three of one size about 25 px (0.08) apart, the speedometer on the column | tachometer −0.088, speedometer 0 (full 240), fuel +0.088 with the temperature scale `bare` on its face; radius 0.04 |
+| Hood | long, low, angular, a pod either side with switches (three stacked on the right pod) | `binnacle` flat-topped, half 0.215, its face in the cluster's plane (0.472); the lights rocker and one more on the right pod (+0.18), two on the left |
+| Centre stack | black, 76 px wide; two slatted vents side by side (each 26 × 12 px at y 103), three heater knobs (y 127), the radio (y 150), the ashtray (y 172) | `stack` half 0.122; vents ±0.048 at −0.11, half 0.04 × 0.02; heater −0.19; radio −0.255; ashtray −0.315 |
+| Glovebox | big, high before the passenger, x 318–430, y 103–133 | x −0.37, dy −0.135, half 0.17 × 0.06 |
+| Wheel | four spokes round a wide pad | spokes 20 / 160 / −60 / 240°, radius 0.19 |
+| End vents | in the doors' tops, not the dash | not modelled |
+| Hazard switch | not legible | on the fascia between the column and the stack [E] |
+| Colours | mid-grey dash, grey cloth (`#77787a` in the photo's bright light) | `dash` 0x6e7175, `upholstery` 0x6a6c70 |
+
+### Black frames and the mirror sail
+
+On the photos ("beige front", "dark green front", "h") the door frames, the B pillar, the
+post between the rear door's glass and the quarter glass, the quarter glass's frame and
+the mirror's sail are black. The A pillar and the wide C pillar are body colour. The new
+`CabinColumn.finish: 'black'` (body.ts: the strip's faces above the belt in the dark trim
+colour, the rail's chamfer still painted) is set on the columns 1.30–3.375. No other car
+sets it, so their strips are unchanged; all 24 kit bodies pass `kit-proportions`.
+
+### Lamp shapes (lamp review, shapes only; materials and colours unchanged)
+
+Photos compared: front "Daewoo Espero front 20071227", "Maroon Daewoo Espero-002-front",
+"1994-1995 Daewoo Espero 2000i Sedan (12-08-2017) 04", beige front, dark green front; rear
+"Maroon Daewoo Espero-003-rear" (near square), "Daewoo Espero rear 20071227", "Daewoo
+Espero h", "1996 Daewoo Espero orange red rear". The drawing's lamps are coarse (its front
+has a grille and its lid a plate recess, another market's car) and are used for the plan
+wrap only.
+
+| Lamp | Before | Photos | After |
+|---|---|---|---|
+| Head, inner end | upright edge at ±0.22–0.235, 0.033 tall | a pointed tip low on the bumper's top; the inner edge slants up and out to the top's inner corner | edge from (±0.215, 0.626) to (±0.27, 0.69) |
+| Head, top | falling 0.05 from the corner (0.705) to the inner end (0.655): a wedge | nearly level, 7 of 90 px (8 %) lower inside | 0.708 at the corner → 0.69 at the inner corner |
+| Head, foot | level 0.617–0.622 | rising 9 px (≈0.008) inwards | 0.617 → 0.626 |
+| Head / indicator split | upright at ±0.53 | at 70 % of the unit's projected length, leaning out to the top (17 px) | ±0.545 at the foot, ±0.56 at the top |
+| Tail band height | corner units 0.785–0.925; lid band 0.845–0.919 | one band 0.15 tall with 0.10 of painted face over it (the badges' strip); maroon rear: 110 px at 1.38 mm/px; ratios from three photos | 0.67–0.82 |
+| Corner unit split | 0.845 (upper 0.08 / lower 0.06) | red over amber, 64 / 36 % | 0.725 |
+| Lid band shape | one 0.074 strip at the top | full height at its ends from the lid's cut to about ±0.27, only the red top (to the corner units' split) between, the lid's dark strip under it | top lens ±0.475 × 0.725–0.82; under each end a lens 0.67–0.73 from ±0.27, 4 mm further back, running behind the top one |
+| Lid cut | ±0.52 | corner unit 200 px against the lid band's 755 (0.265); ±0.52 gave 0.18 | `notch` ±0.49, corner units from ±0.50 |
+| Wrap onto the wing | top to s 4.36, foot to 4.38 (the top further forward) | the foot reaches further forward than the top; plan red to s 4.39 at the top | top to 4.42, foot to 4.37 |
+
+Shape differences that remain:
+
+- The lid band's ends are amber below on the car; here they are the band's red `inert` lens
+  (no colour change was wanted).
+- The dark strip under the band's middle is painted.
+- The head lamp's outline is a polyline, and the inner tip is a corner, not a curve.
+
 ## Gaps
 
-- The dash is the Nexia's. No Espero dash was measured (a long low dash with the cluster in
-  a wide hood).
-- The mirror sail is painted (black on the car). The C pillar's black trim and the plates
-  are not modelled. The grey stripe through the lid's reflector band and the badges are
-  not modelled.
+- The dash's heights come from one photo scale with perspective ignored [E]. The door-top
+  face vents and the stack's wood trim are not modelled.
+- Plates and badges are not modelled (the owner: not needed).
 - The fog lamps are grey panels with no light (no fog-lamp channel). There is one
   reversing lamp at each bumper corner (on the car one is a rear fog lamp).
 - Overhangs, the axle split and the Cd are estimates. The flap is on the right [E: not seen
   on the left-side views].
 - The roof's front: the drawn centre line falls 0.06 to the screen's top. `roofDrop` takes
   0.025 of it and the crown the rest, as on the Nexia.
-- Triangles 14 397, over the ≈ 13k budget, like the tens and the Nexia.
+- Triangles 14 389, over the ≈ 13k budget, like the tens and the Nexia (accepted by the
+  owner).

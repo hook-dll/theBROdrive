@@ -5,7 +5,7 @@
 ### Added
 
 - DAEWOO ESPERO kit car (`src/carkit/daewoo.ts` `BODY_ESPERO`, `LOOK_ESPERO`;
-  `interior.ts` `CABIN_ESPERO`, the Nexia's dash; measured in `measurements-espero.md`).
+  `interior.ts` `CABIN_ESPERO`; measured in `measurements-espero.md`).
   The 2.0 CD saloon of 1995–1999 that drom.ru catalogues for Russia, from the-blueprints.com's
   dimensioned vector preview (4615 / 2620 / 1718 / 1388) and Commons photos. It has slanted
   flush head lamps with the indicator at their outer ends, a plain panel between them,
@@ -15,7 +15,18 @@
   `engine_daewoo_c20le` (77 kW, 169 Nm) and the Nexia's F16 box on the same 3.944 axle.
   `tools/reality.ts kit_espero` gives 185 km/h against 185 and the turn within 1.4 %; the
   0-100 of 12.8 s against 10.8 s is accepted as catalogue-optimistic.
-  `kit-zfight` and `kit-proportions` pass. 14 397 triangles.
+  `kit-zfight` and `kit-proportions` pass. 14 389 triangles. After the owner's first
+  review it has its own dash, from SelfBase.de's instrument-panel photos and an owner's
+  cluster photo on drive2.ru. The dash has an angular hood over three dials of one size
+  (tachometer, speedometer, and a fuel dial with the temperature scale on it) with switch
+  pods either side, and two vents over three heater knobs on a black stack. The door
+  frames, B pillar, quarter-glass frame and mirror sail are black: a new
+  `CabinColumn.finish: 'black'` paints a greenhouse strip as black trim, and no other car
+  sets it. The lamps' outlines are now measured on eight photos. The head lamps have a
+  slanted inner end from a pointed tip and a nearly level top. At the tail, one band
+  0.67–0.82 runs across the whole car: corner units red over amber, and a lid band that is
+  full height at its ends and only its top in the middle. The lid's cut moved in to
+  ±0.49 to match.
 - THE FIRST FOREIGN KIT CAR: DAEWOO NEXIA (`src/carkit/daewoo.ts` `BODY_NEXIA`,
   `LOOK_NEXIA`; `interior.ts` `CABIN_NEXIA`; measured in `measurements-nexia.md`). The
   early base N100 saloon (1995–2002, the G15MF 1.5 and the five-speed) from 3dcar.ru's
