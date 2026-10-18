@@ -1053,6 +1053,60 @@ export const CABIN_ASTRA_F: CabinLayoutOverride = {
   visor: { half: 0.16, depth: 0.108 },
 };
 
+// The Opel Vectra A's dash, read off Wikimedia Commons "Opel Vectra taxi dashboard (GT 8445
+// R) (14961906968).jpg" (from behind the driver's seat, 1920 x 1440 at the size read).
+// Scale [E]: the wheel's hub (x 718 at 1333 px wide) to the stack's centre line (x 1065),
+// 347 px, is the Samara's 0.36 seat line, so 1.04 mm/px at the fascia. Heights hang from
+// the Samara's cluster [E].
+
+/**
+ * Opel Vectra A: a black moulded dash; an angular hood over the tachometer, a big
+ * speedometer and the temperature and fuel dials stacked on the right; a slatted vent at the
+ * dash's driver's end over a rotary light switch and two switches; two vents side by side
+ * at the stack's top with the hazard switch between them, the heater's panel under them,
+ * the radio and a cubby below; a three-spoke wheel round a small pad.
+ */
+export const CABIN_VECTRA_A: CabinLayoutOverride = {
+  binnacle: [[0.25, -0.03], [0.285, 0.07], [0.43, 0.085], [0.49, 0.078], [0.495, 0.068], [0.472, 0.064], [0.472, -0.04], [0.4, -0.035]],
+  binnacleHalf: 0.21,
+  clusterFace: { right: 0, up: 0.012, half: [0.165, 0.05], colour: COLOURS.cluster, frame: 'black' },
+  // The tachometer (x 580) and the big speedometer (x 680) side by side, the temperature and
+  // fuel dials stacked at x 790 [P].
+  gauges: [
+    { channel: 'rpm', right: -0.1, up: 0.012, radius: 0.036, full: 7000, ...BIG },
+    { channel: 'speed', right: 0, up: 0.012, radius: 0.044, full: 220, ...BIG },
+    { channel: 'temp', right: 0.095, up: 0.028, radius: 0.016, ...SMALL },
+    { channel: 'fuel', right: 0.095, up: -0.008, radius: 0.016, ...SMALL },
+  ],
+  lamps: { right: 0, up: 0.058, cols: 7, pitch: 0.0145, show: ['turn', 'side', 'beam', 'fuel', 'oil', 'charge', 'brake'] },
+  // The driver's end vent x 295-445 [P]; the passenger's [E: its mirror]; the centre pair
+  // x 955-1185 at the stack's top, the hazard switch between them.
+  vents: [
+    { x: 0.6, dy: -0.05, half: [0.05, 0.022] },
+    { x: -0.6, dy: -0.05, half: [0.05, 0.022] },
+    { x: 0.065, dy: -0.08, half: [0.05, 0.022] },
+    { x: -0.065, dy: -0.08, half: [0.05, 0.022] },
+  ],
+  hazard: [0, -0.08],
+  // A rotary light switch and two switches on a panel left of the column, under the end
+  // vent [P x 320-445].
+  lights: { right: -0.25, dy: -0.13, kind: 'knob' },
+  rockers: { on: 'fascia', at: [[0.53, -0.13], [0.49, -0.13]] },
+  // The heater's panel (x 950-1100, y 480-560), the radio (y 580-640) and a cubby at the
+  // stack's foot [P].
+  heater: { dy: -0.17, half: [0.11, 0.028], knobs: [-0.06, 0, 0.06], radius: 0.014 },
+  radio: [0, -0.25],
+  ashtray: [0, -0.32],
+  stack: { half: 0.12 },
+  // Not in the photo [E]: the Astra's.
+  glovebox: { x: -0.39, dy: -0.15, half: [0.16, 0.05] },
+  // Three spokes, left, right and down, round a small pad [P].
+  wheel: { ...LAYOUTS.samara.wheel, radius: 0.19, spokes: [-15, 195, 270] },
+  // The bench's base 3 cm off the wheel-house covers (2 mm from the quarter trim at 2.2 cm).
+  bench: { from: 'hip', offset: 0.78, clear: 0.03 },  // Lowered, the visor ends at the driver's eye height (the stock 0.15 hung 5.2 cm under it).
+  visor: { half: 0.16, depth: 0.092 },
+};
+
 // The VAZ-1111 «Ока» of 1988-1996 on the Samara's furniture, read off these sources:
 //  - Wikimedia Commons "Oka-Innenraum.jpg" (CC BY 4.0; an early car, 4288 x 2848): the
 //    dash from the driver's door, cluster, switches, heater sliders, wheel, lever.

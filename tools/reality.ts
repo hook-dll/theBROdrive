@@ -549,7 +549,16 @@ const TARGETS: Readonly<Record<string, Target>> = {
     // The C16NZ's 55 kW on 1160 kg: the catalogue's 14.0 s stands with its 170 km/h as the
     // Nexia's and Espero's do (the same Family I / F13-F16 driveline, +22 % and +18 %).
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.11 },
+  },  kit_vectraa: {
+    wheelbase: 2.6, track: 1.437, radius: 0.295, top: 198, to100: 10.5,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 6.0, lat: null, hz: 1.3,
+    brake80: null, grossKg: 1645,
+    source: 'Opel Vectra A 2.0i (C20NE) saloon: auto-data.net Opel Vectra A 2.0i (115 Hp) (198 km/h, 10.5 s, gross 1645); autodata1 12 m circle between walls; no braking ceiling found; geometry kit_vectraa row',
+    // 85 kW on 1280 kg on the bench: the catalogue's 10.5 s stands as the GM cars' do on
+    // this bench (Nexia +22 %, Espero +18 %, Astra +10.5 %).
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.16 },
   },
+
 
 };
 
@@ -604,6 +613,7 @@ const FACTORY_ENGINES: Readonly<Record<string, MakerEngine>> = {
   engine_daewoo_g15mf: { power: { kw: 55 }, powerRpm: 5400, torque: { nm: 123 }, torqueRpm: [3200, 3400], source: 'Daewoo G15MF; Nexia repair manual table (3ruk.ru, remkomplekt.org)' },
   engine_daewoo_c20le: { power: { kw: 77 }, powerRpm: 5000, torque: { nm: 169 }, torqueRpm: 2800, source: 'Daewoo C20LE; drom.ru catalog/daewoo/espero/70454' },
   engine_opel_c16nz: { power: { kw: 55 }, powerRpm: 5200, torque: { nm: 125 }, torqueRpm: 2800, source: 'Opel C16NZ; auto-data.net Opel Astra F 1.6i (75 Hp), ultimatespecs' },
+  engine_opel_c20ne: { power: { kw: 85 }, powerRpm: 5200, torque: { nm: 170 }, torqueRpm: 2600, source: 'Opel C20NE; auto-data.net Opel Vectra A (facelift 1992) 2.0i (115 Hp)' },
   // Not a catalogue engine: the rally 2105's own build, held to the build's figures.
   engine_lada_rally: { power: { ps: 100 }, powerRpm: 6400, torque: { nm: 132 }, torqueRpm: 4200, source: 'pack rally build targets, not factory' },
 };

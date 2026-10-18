@@ -246,3 +246,240 @@ export const LOOK_ASTRA_F: KitLook = {
     lid: [{ kind: 'panel', x: { centre: 0.54 }, y: { from: ['belt', -0.175], to: ['belt', -0.003] }, finish: 'black', proud: 0.006 }],
   },
 };
+
+/**
+ * The Opel Vectra A saloon (J89), facelift of 09.1992–1995; the car built is the 2.0i GL
+ * (C20NE, the F16 five-speed on 3.55): the facelift's face (wide head lamps either side of a
+ * black slatted grille narrowing to its foot, the clear indicator at their outer ends), body-
+ * colour bumpers with a black band along their top, a black rubbing strip along the flanks,
+ * black door frames, B pillar and mirror sail, corner tail lamps with a black panel across
+ * the boot lid between them. Numbers and sources in measurements-vectra.md.
+ *
+ * Measured on the-blueprints.com's dimensioned vector preview `1990_opel_vectra_a.jpg`
+ * (drawing 9730, "Opel Vectra A (1989)", 1280 × 905; dimension lines 4430 / 2600 / 1700 /
+ * 1400), side view facing left: lengths 5.821 mm/px from the drawn tips (x 80 / 841),
+ * `s = (x − 80) × 0.005821`; heights 5.858 mm/px from the 1400 line (y 89–328), `y = (328 −
+ * py) × 0.005858`. The drawn hubs (x 225 / 673.5) stand 2611 apart against the factory 2600:
+ * the wheels are put on the factory wheelbase centred on the drawn pair. Front and rear
+ * views 5.82 mm/px across (the body ±146 px for 1700). The drawing is of the 1989 car: the
+ * face and tail are the facelift's from Commons photos.
+ */
+
+/**
+ * Opel Vectra A saloon: overhangs 0.85 / 0.98 over a 2600 wheelbase [E: the drawn hubs
+ * centred on the factory base]. The face at s 0.06 (lamps 0.61–0.705 under the bonnet's lip
+ * 0.72); the bonnet rising to 0.937 at the cowl (s 1.222); the A pillar to the rail (1.31)
+ * at 1.863; roof 1.41 from 2.27 to 2.9, falling into a long back light from 3.12 to its
+ * foot at 3.88 (1.04); the boot level at 1.03 to 4.34 and the lid down the tail face
+ * between the corner lamps. Sill 0.205, door bottoms 0.25, belt 0.875 at the cowl rising to
+ * 0.92 under the quarter glass.
+ */
+export const BODY_VECTRA_A: KitBody = {
+  length: 4.432, // [F auto-data 4432; the drawing's 4430]
+  platform: 'samara',
+  stations: [
+    // The face [D side x 90–110: the lamps 0.62–0.72, the lip 0.72 at s 0.116; D front: the
+    // lamps out to ±0.70 at the face, the body ±0.85]. The facelift's lamps are taller than
+    // the 1989 drawing's [P "Opel Vectra A (front)": 85 px over a 735 px span of ±0.70, 0.16;
+    // "Opel Vectra front 20080102": 0.13 against the wheel], so the lip at 0.75. The bonnet's centre line [D side:
+    // 0.72 at s 0.116, 0.791 at 0.233, 0.826 at 0.349, 0.849 at 0.466, 0.861 at 0.582, 0.885
+    // at 0.699, 0.902 at 0.815, 0.92 at 0.931, 0.931 at 1.048, 0.937 at the cowl].
+    { s: 0.06, sill: 0.3, crease: 0.6, belt: 0.74, deck: 0.75, wSill: 0.68, wCrease: 0.7, wBelt: 0.68 },
+    { s: 0.17, sill: 0.3, crease: 0.61, belt: 0.775, deck: 0.795, wSill: 0.77, wCrease: 0.79, wBelt: 0.77 },
+    { s: 0.35, sill: 0.29, crease: 0.62, belt: 0.8, deck: 0.826, wSill: 0.81, wCrease: 0.83, wBelt: 0.8 },
+    { s: 0.6, sill: 0.28, crease: 0.63, belt: 0.835, deck: 0.862, wSill: 0.83, wCrease: 0.848, wBelt: 0.81 },
+    // The cowl [D side (290, 168)]; the flank ±0.853 [F 1706], the shoulder ±0.80 under the
+    // glass's foot (±0.79 at 0.89 [D front]).
+    { s: 1.222, sill: 0.22, crease: 0.64, belt: 0.875, deck: 0.937, wSill: 0.83, wCrease: 0.853, wBelt: 0.8 },
+    // The belt under the side glass rising to the tail [D side: the glass's foot 0.89 at s
+    // 1.7–2.15, 0.908 at 2.5, 0.92 at 2.8, 0.931 at 3.03]; sill 0.22 (the drawn 0.205 met the
+    // exhaust under the floor, kit-zfight) [D side y 293].
+    { s: 2.4, sill: 0.22, crease: 0.64, belt: 0.885, deck: 0.905, wSill: 0.83, wCrease: 0.853, wBelt: 0.8 },
+    { s: 3.03, sill: 0.225, crease: 0.64, belt: 0.915, deck: 0.935, wSill: 0.83, wCrease: 0.853, wBelt: 0.8 },
+    // rearBase: the back light's foot, 1.04 [D side: the top line 1.049 at s 3.9, the deck
+    // 1.03 behind it]; the corners rounding in [D rear ±0.79 at 0.886, ±0.82 at 0.84]. The
+    // sill kept at 0.25 to here: at 0.30 the shell's foot met the silencer (kit-zfight, as
+    // the Espero's).
+    { s: 3.88, sill: 0.25, crease: 0.64, belt: 0.995, deck: 1.04, wSill: 0.81, wCrease: 0.83, wBelt: 0.78 },
+    { s: 4.25, sill: 0.33, crease: 0.64, belt: 0.99, deck: 1.03, wSill: 0.79, wCrease: 0.81, wBelt: 0.765 },
+    { s: 4.34, sill: 0.33, crease: 0.64, belt: 0.975, deck: 1.015, wSill: 0.775, wCrease: 0.795, wBelt: 0.755 },
+    // The tail face [D side x 838]: the lid comes down between the corner lamps (inner edges
+    // ±0.545 [D rear]) to the bumper's top, cut at ±0.53; the lamps topped at 0.865 (the
+    // drawing's 0.845; the photos' lamps are 0.22–0.25 tall, the drawing's 0.19).
+    { s: 4.4, sill: 0.33, crease: 0.64, belt: 0.87, deck: 0.64, notch: 0.53, wSill: 0.76, wCrease: 0.775, wBelt: 0.745 },
+  ],
+  shoulder: { inset: 0.04, rise: 0.015 },
+  cabin: {
+    // The door frames, the B pillar, the post behind the rear door's glass and the mirror's
+    // sail black [P "Opel Vectra front 20080102", "Opel Vectra A (front)", "(rear)"]; the A
+    // and C pillars painted.
+    columns: [
+      // The screen's outer line from the cowl (1.222, 0.937) to the rail (1.863, 1.31) [D side
+      // (290, 168) → (400, 96)].
+      { s: 1.222, top: 1.863, upper: 'body' },
+      { s: 1.26, top: 1.9, upper: 'door1', lower: 'body', finish: 'black' },
+      // The front door's shut line below the belt [D side x 298]; the mirror's sail from it to
+      // the glass's front edge (1.62 at the belt [D side: the glass's foot from x 370]).
+      { s: 1.29, top: 1.925, upper: 'door1', finish: 'black' },
+      { s: 1.62, top: 1.95, upper: 'door1', glass: 'drop', finish: 'black' },
+      // The B pillar, black [D side x 480–505: the front glass ends 2.33, the rear glass
+      // starts 2.48; the shut line x 487].
+      { s: 2.33, top: 2.37, upper: 'door1', finish: 'black' },
+      { s: 2.385, top: 2.42, upper: 'body', lower: 'door1', finish: 'black' },
+      { s: 2.4, top: 2.435, upper: 'body', lower: 'door2', finish: 'black' },
+      { s: 2.44, top: 2.47, upper: 'door2', finish: 'black' },
+      { s: 2.48, top: 2.5, upper: 'door2', glass: 'drop', finish: 'black' },
+      // The rear glass's rear edge leaning forward to the top [D side 2.94 at the belt]; the
+      // black post behind it to the shut line, which runs down and forward round the rear arch.
+      { s: 2.94, top: 2.9, upper: 'door2', finish: 'black' },
+      { s: 3.03, top: 2.98, upper: 'body', finish: 'black', foot: { y: 0.66, s: 2.93, round: [0.12, 0.03] } },
+      // A small fixed quarter glass in the C pillar [D side x 600–635, its foot 0.93].
+      { s: 3.045, top: 2.995, upper: 'body', glass: 'fixed', finish: 'black' },
+      { s: 3.22, top: 3.02, upper: 'body' },
+      // rearBase; the roof's rear end at the rail 3.12 [D side: 1.394 at s 3.11].
+      { s: 3.88, top: 3.12 },
+    ],
+    rail: 1.31, // the side glass's top 1.306–1.312 [D side]
+    railHalf: 0.57, // [D front ±0.594 at 1.31, ±0.565 at 1.36]
+    crown: 0.08, // roof 1.41 [F 1400 + D 1.412] = rail + rise + crown
+    railInset: 0.04,
+    railRise: 0.02,
+    // The roof rounding up from the screen [D side: 1.371 at s 1.92, 1.394 at 2.07, 1.40 at
+    // 2.15, 1.412 from 2.27 to 2.68, 1.40 at 3.0, 1.394 at 3.11].
+    roofDrop: [[1.863, 0.025], [2.0, 0.012], [2.2, 0.003], [2.3, 0], [2.9, 0], [3.0, 0.006], [3.12, 0.015]],
+    glassBottom: 0.01,
+    glassTop: 0.02,
+    screenBottom: 0.03, // [E]
+    screenHeader: 0.045, // [E]
+    wiperBlade: 0.5, // [E]
+    rearBottom: 0.025, // [E]
+    rearHeader: 0.045, // [E]
+    pillar: 0.07, // [E]
+  },
+  wheels: {
+    front: 0.85, // [E: the drawn hubs 0.844 / 3.455 at the length scale, centred on 2600]
+    rear: 3.45, // wheelbase 2600 [F]
+    radius: 0.295, // 195/60 R14 [F auto-data]
+    width: 0.195, // [F]
+    frontHalfTrack: 0.7185, // 1437 [F auto-data]
+    rearHalfTrack: 0.716, // 1432 [F]
+    // Front: the liner's top 0.674, 0.379 over the hub [D side x 220].
+    arch: 1.28,
+    // Rear: its top 0.656, 0.361 over the hub [D side x 670].
+    rearArch: 1.22,
+    rearArchRise: 1.1,
+  },
+  doorBottom: 0.25, // [D side]
+  bonnetFront: 0.06,
+  // The bonnet covers the whole top, its side shut lines along the wings' top [P "Opel Vectra
+  // front 20080102"].
+  bonnet: { inset: 0.01 },
+  // [E: on the right rear wing, as the Astra's; not seen on the left-side photos]
+  flap: { s0: 3.62, s1: 3.74, y0: 0.76, y1: 0.86, side: 'right' },
+  bootEnd: 4.4,
+};
+
+/**
+ * The facelift Vectra A 2.0i GL [P "Opel Vectra A (front)", "Opel Vectra A (rear)", "Opel
+ * Vectra front 20080102", "Opel Vectra rear 20080102", "Opel Vectra I front / rear
+ * 20080328"]: wide head lamps with a small clear indicator at their outer ends, a black slatted
+ * grille between them narrowing to its foot; body-colour bumpers with a black band along their
+ * top, an intake and fog lamps low in the front one; a black rubbing strip along the flanks;
+ * corner tail lamps (a red band, the reversing lamp and the indicator, the stop and tail
+ * lamp below) with a black panel across the lid between them; black handles and mirrors.
+ */
+export const LOOK_VECTRA_A: KitLook = {
+  label: 'Opel Vectra A',
+  upholstery: 0x3c3e44, // dark grey cloth [P "Opel Vectra taxi dashboard"]
+  dash: 0x2a2c30, // black-grey plastic [P]
+  headrests: true,
+  brightwork: 'black',
+  sill: null,
+  // The black rubbing strip on the doors and the front wing behind the arch [D side y 262:
+  // 0.39; P "Opel Vectra front 20080102": about the bumpers' top band's height, a little lower].
+  waist: { y: 0.42, height: 0.035, finish: 'black', span: [1.25, 3.02] },
+  repeater: null,
+  cornerLamps: [
+    // Head lamp and indicator as one unit, 0.605–0.736 [D front: the lamps ±0.33–0.70; P
+    // "Opel Vectra A (front)": the lens fills the band from the bumper's top to the bonnet's
+    // lip, its inner end along the grille's slanted side, the clear indicator its outer
+    // sixth, round the corner a little].
+    {
+      points: [
+        { x: [0.312, 0.342], y: [0.605, 0.733], role: 'head' },
+        { x: 0.6, y: [0.605, 0.736], role: 'blinker' },
+        { y: [0.608, 0.736], role: 'blinker' },
+        { s: 0.15, y: [0.618, 0.73] },
+      ],
+    },
+    // Tail: three bands, 0.648–0.865 [D rear ±0.545–0.742, 0.659–0.845; D side round the corner to s 4.28;
+    // P "Opel Vectra A (rear)": a red band at the top, then the reversing lamp inside and the
+    // amber indicator outside, the stop and tail lamp below, about 1 : 1 : 2]. 6 mm of body
+    // between the bands.
+    {
+      end: 'rear',
+      points: [
+        { x: [0.545, 0.545], y: [0.818, 0.865], role: 'tail' },
+        { y: [0.818, 0.865], role: 'tail' },
+        { s: 4.3, y: [0.82, 0.86] },
+      ],
+    },
+    {
+      end: 'rear',
+      points: [
+        { x: [0.545, 0.545], y: [0.764, 0.812], role: 'reverse' },
+        { x: 0.62, y: [0.764, 0.812], role: 'blinker' },
+        { y: [0.764, 0.812], role: 'blinker' },
+        { s: 4.29, y: [0.767, 0.812] },
+      ],
+    },
+    {
+      end: 'rear',
+      points: [
+        { x: [0.545, 0.545], y: [0.648, 0.758], role: 'brake' },
+        { x: 0.62, y: [0.648, 0.758], role: 'tail' },
+        { y: [0.648, 0.758], role: 'tail' },
+        { s: 4.28, y: [0.656, 0.758] },
+      ],
+    },
+  ],
+  front: {
+    // Body colour 0.17–0.60 [D front 0.17–0.515 on the 1989 car; P: the facelift's top up to
+    // the lamps' foot], a black band along its top [P]; its sides back along the wings to the
+    // front arch.
+    bumper: { kind: 'moulded', drop: 0.165, height: 0.43, finish: 'paint', moulding: { y: 0.56, height: 0.07, finish: 'black' }, corner: 0.2, wrapTo: 0.47 },
+    items: [
+      // The grille between the lamps: black slats narrowing to its foot, from the bumper's top
+      // to under the bonnet's lip [P; D front ±0.32 at the top].
+      {
+        kind: 'grille',
+        x: { centre: 0.29 },
+        y: { from: ['bumperTop', 0.012], to: ['deck', -0.02] },
+        slant: -0.03,
+        // No frame: its inner walls fought the slats' ends under the leaning face (kit-zfight).
+        back: true,
+        bars: { dir: 'horizontal', count: 4, finish: 'black', margin: 0.008, width: 0.008, depth: 0.01, proud: 0.015 },
+      },
+      // The intake low in the bumper [D front ±0.43, 0.20–0.26; P].
+      {
+        kind: 'grille',
+        x: { centre: 0.43 },
+        y: { from: ['bumperBottom', 0.04], to: ['bumperBottom', 0.1] },
+        standOut: 0.024,
+        back: true,
+        bars: { dir: 'vertical', count: 3, finish: 'black', margin: 0, width: 0.015, depth: 0.01, proud: 0.005 },
+      },
+      // The fog lamps at the bumper's outer ends [D front ±0.52–0.64; P]: unlit grey panels.
+      { kind: 'panel', x: { from: { centre: 0.5 }, to: { centre: 0.62 } }, y: { from: ['bumperBottom', 0.045], to: ['bumperBottom', 0.095] }, finish: 'grey', proud: 0.05 },
+    ],
+  },
+  rear: {
+    // Body colour 0.28–0.63 [D rear], a black band along its top [P]; its sides forward along
+    // the wings to the rear arch (3.81).
+    bumper: { kind: 'moulded', drop: 0.055, height: 0.35, finish: 'paint', moulding: { y: 0.59, height: 0.07, finish: 'black' }, wrapTo: 3.85 },
+    items: [],
+    // The black panel across the lid between the lamps, their height, the plate in it [P
+    // "Opel Vectra A (rear)"].
+    lid: [{ kind: 'panel', x: { centre: 0.5 }, y: { from: ['belt', -0.214], to: ['belt', -0.006] }, finish: 'black', proud: 0.006 }],
+  },
+};

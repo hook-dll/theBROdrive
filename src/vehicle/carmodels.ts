@@ -870,6 +870,12 @@ const AERO_DAEWOO_ESPERO: AeroSpec = { frontalArea: 1.96, liftFront: 0.09, liftR
  * (1.41 − 0.135) m × 0.92.
  */
 const AERO_OPEL_ASTRA_F: AeroSpec = { frontalArea: 1.98, liftFront: 0.08, liftRear: 0.26, sideSlope: 1.25, yawSlope: 0.5 };
+/**
+ * Opel Vectra A saloon: Cd 0.29 (Opel's figure for the saloon, the class's lowest in 1988).
+ * The Nexia's lift and crosswind figures (a nose over a notched boot) on its own frontal
+ * area, 1.706 m × (1.40 − 0.15) m × 0.92.
+ */
+const AERO_OPEL_VECTRA_A: AeroSpec = { frontalArea: 1.96, liftFront: 0.09, liftRear: 0.21, sideSlope: 1.35, yawSlope: 0.47 };
 
 
 
@@ -1185,6 +1191,11 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   // 135 clearance, 175/70 R13 (auto-data.net "Opel Astra F 1.6i (75 Hp)"; the-blueprints.com
   // drawing's dimension lines 4050 / 2517 / 1696 / 1410). src/carkit/measurements-astra.md.
   kit_astraf:     { length: 4.051, width: 1.688, height: 1.41, clearance: 0.135, wheelbase: 2.517, frontTrack: 1.43, rearTrack: 1.429, wheelRadius: 0.288, tyreWidth: 0.175 },
+  // The Opel Vectra A saloon 2.0i (facelift): 4432 × 1706 × 1400, 2600 wheelbase, 1437/1432
+  // tracks, 150 clearance [E], 195/60 R14 (auto-data.net "Opel Vectra A (facelift 1992) 2.0i
+  // (115 Hp)"; the-blueprints.com drawing's 4430 / 2600 / 1700 / 1400).
+  // src/carkit/measurements-vectra.md.
+  kit_vectraa:    { length: 4.432, width: 1.706, height: 1.4, clearance: 0.15, wheelbase: 2.6, frontTrack: 1.437, rearTrack: 1.432, wheelRadius: 0.295, tyreWidth: 0.195 },
 };
 
 function factoryGeometry(id: string): FactoryGeometry {
@@ -2631,6 +2642,32 @@ const GEAR_OPEL_ASTRA_F: KitOwnGear = {
   aero: AERO_OPEL_ASTRA_F,
 };
 
+/**
+ * Opel Vectra A 2.0i GL saloon (C20NE, the F16 WR five-speed on 3.55): kerb 1130 kg, gross
+ * 1645 (auto-data.net), 198 km/h and 0-100 in 10.5 s (the 2.0i's catalogue figures; auto-
+ * data prints 210 km/h for the facelift, the 16V's figure [E]), a 12 m turning circle
+ * between walls (autodata1), 195/60 R14, a 61 l tank, power steering, ventilated front discs
+ * and rear drums, struts and a twist beam (the Samara's layout and preset). Axle split 0.62
+ * [E]; Cd 0.29, Cd·A set on the bench to the 198 km/h.
+ */
+const GEAR_OPEL_VECTRA_A: KitOwnGear = {
+  bodyClass: 'car',
+  mass: 1130,
+  tyre: KAMA_217,
+  engineId: 'engine_opel_c20ne',
+  gearboxId: 'gearbox_opel_f16_wr_355',
+  tankLitres: 61,
+  wheelGrip: KAMA_217_GRIP,
+  brakeDecelG: BRAKES_SERVO_G,
+  suspension: SUSP_SAMARA,
+  steerLock: 0.525,
+  rearDriveBias: 0,
+  handlingProfile: 'road',
+  frontWeightShare: 0.62,
+  dragArea: 0.62,
+  aero: AERO_OPEL_VECTRA_A,
+};
+
 /** A kit car on its catalogue sibling's running gear (`gear` over it where it differs), or on its own. */
 type KitCarRow =
   | readonly [id: string, sibling: string, kit: string, label?: string, gear?: KitRunningGear]
@@ -2683,6 +2720,7 @@ const KIT_CARS: readonly Entry[] = (
     ['kit_nexia', GEAR_DAEWOO_NEXIA, 'nexia', 'Daewoo Nexia'],
     ['kit_espero', GEAR_DAEWOO_ESPERO, 'espero', 'Daewoo Espero'],
     ['kit_astraf', GEAR_OPEL_ASTRA_F, 'astraf', 'Opel Astra F'],
+    ['kit_vectraa', GEAR_OPEL_VECTRA_A, 'vectraa', 'Opel Vectra A'],
   ] satisfies readonly KitCarRow[]
 ).map(([id, source, kit, label, gear]) => {
   const base = kitBase(id, source, kit, label);

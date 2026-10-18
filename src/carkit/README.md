@@ -113,7 +113,7 @@ from the angle he complained about; changes are judged there, not in code.
 | `volgas.ts` | The Volgas: `BODY_GAZ24` / `LOOK_GAZ24` (platform `classic`) and the GAZ-31029 on the 24's doors and greenhouse with its own nose and tail. |
 | `azlk.ts` | The AZLK-2141 Moskvich: `BODY_2141` / `LOOK_2141` (platform `samara`). |
 | `daewoo.ts` | The Daewoo Nexia (N100 saloon) and Espero (KLEJ saloon): `BODY_NEXIA` / `LOOK_NEXIA`, `BODY_ESPERO` / `LOOK_ESPERO` (platform `samara`). |
-| `opel.ts` | The Opel Astra F (five-door hatch): `BODY_ASTRA_F` / `LOOK_ASTRA_F` (platform `samara`). |
+| `opel.ts` | The Opel Astra F (five-door hatch) and Vectra A (saloon): `BODY_ASTRA_F` / `LOOK_ASTRA_F`, `BODY_VECTRA_A` / `LOOK_VECTRA_A` (platform `samara`). |
 | `measurements-classics.md`, `measurements-estates.md`, `measurements-samara.md`, `measurements-2110.md`, `measurements-niva.md`, `measurements-oka.md`, `measurements-volga.md`, `measurements-2141.md`, `measurements-nexia.md` | Measurement reports: every figure with its drawing or photo, scale and tag. |
 | `builder.ts` | `PartBuilder`: flat triangles per material slot, transform stack, primitives (`box`, `bevelBox`, `extrude`, `cylinderX/Y/Z`, `torusY`, `bridge`, `poly`), vertex colours. |
 | `body.ts` | `BodyFrame` (cross-section, deck and lid lookups) and `buildShell`: tub, greenhouse and roof as one face list, then cut into parts. Shell constants (`SHUT_GAP`, `JAMB_DEPTH`, `DOOR_THICKNESS`, `NOTCH_WALL`, …). |
@@ -375,6 +375,7 @@ cabin: … }`) share everything not overridden. Current families:
 | `BODY_NEXIA` | 3dcar.ru `daewoo_nexia.jpg` dimensioned four-view (`daewoo.ts`) | Daewoo Nexia |
 | `BODY_ESPERO` | the-blueprints.com dimensioned vector preview `daewoo_espero_1995.jpg` (`daewoo.ts`) | Daewoo Espero |
 | `BODY_ASTRA_F` | the-blueprints.com dimensioned vector preview `2001_opel_astra_f_5-door.jpg` (`opel.ts`) | Opel Astra F |
+| `BODY_VECTRA_A` | the-blueprints.com dimensioned vector preview `1990_opel_vectra_a.jpg` (`opel.ts`) | Opel Vectra A |
 
 ### Look (`KitLook`)
 
@@ -477,7 +478,10 @@ speedometer and a fuel dial with the temperature scale on its face, switch pods 
 of the hood, two vents over three heater knobs on a black stack, a big glovebox high, a
 four-spoke wheel; its bench 3 cm off the wheel-house covers), `CABIN_ASTRA_F` (a rounded
 hood over the tachometer, a big speedometer and two small dials, end vents, a centre vent
-pair with the hazard switch between, the radio over three heater knobs, a four-spoke wheel); the Samaras and the AZLK-2141 use the `samara` platform's layout as is, the 2121
+pair with the hazard switch between, the radio over three heater knobs, a four-spoke wheel),
+`CABIN_VECTRA_A` (an angular hood over the tachometer, a big speedometer and two small dials,
+the driver's end vent over a rotary light switch, a centre vent pair with the hazard switch
+between, a three-spoke wheel); the Samaras and the AZLK-2141 use the `samara` platform's layout as is, the 2121
 the `niva` platform's.
 
 ## Scene contract
@@ -913,6 +917,7 @@ within `KIT_FINE_M`; "Far" = everything except the four detail groups.
 | Nexia | 13 472 | 6 072 | 4 909 | 1 761 | 639 | 52 | 456 | 1 344 | 7 416 |
 | Espero | 14 389 | – | – | – | – | – | – | 1 344 | – |
 | Astra F | 13 578 | – | – | – | – | – | – | 1 344 | – |
+| Vectra A | 13 509 | – | – | – | – | – | – | 1 344 | – |
 
 The owner set the budget aside for the 2110 and 2112 (the rounded rear shut line adds side
 rows to every tub column).

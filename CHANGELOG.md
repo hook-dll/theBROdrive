@@ -4,6 +4,19 @@
 
 ### Added
 
+- OPEL VECTRA A kit car (`src/carkit/opel.ts` `BODY_VECTRA_A`, `LOOK_VECTRA_A`;
+  `interior.ts` `CABIN_VECTRA_A`; measured in `measurements-vectra.md`). It is the saloon
+  2.0i GL with the 1992 facelift's face and tail, built from the-blueprints.com's
+  dimensioned vector preview (4430 / 2600 / 1700 / 1400) and Commons photos. It has wide
+  head lamps with a small clear indicator either side of a black slatted grille,
+  body-colour bumpers with black bands, black door frames, B pillar and mirror sail, a
+  small quarter glass, and corner tail lamps (three bands) with a black panel across the
+  lid. Its dash comes from a photo. It runs on its own running gear
+  (`GEAR_OPEL_VECTRA_A`): 1130 kg, 195/60 R14, a new `engine_opel_c20ne` (85 kW, 170 Nm)
+  and a new `gearbox_opel_f16_wr_355` (the Nexia's F16 gears on 3.55).
+  `tools/reality.ts kit_vectraa` gives 200 km/h against 198 and the turn within 1.1 %;
+  the 0-100 of 12.2 s against 10.5 s is accepted as catalogue-optimistic. `kit-zfight`
+  and `kit-proportions` pass. 13 509 triangles.
 - OPEL ASTRA F kit car (`src/carkit/opel.ts` `BODY_ASTRA_F`, `LOOK_ASTRA_F`;
   `interior.ts` `CABIN_ASTRA_F`; measured in `measurements-astra.md`). It is the five-door
   hatchback 1.6i GL with the 1994 facelift's face and tail, sold in Russia 1994–1998. It

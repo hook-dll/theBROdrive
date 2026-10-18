@@ -969,6 +969,15 @@ amplified differences; `bench-*.json`, `pick-*.json`).
 - **The hatch's tail bands fought from the load space** (as the Oka's): 6 mm of body
   between them. *opel.ts `LOOK_ASTRA_F.cornerLamps`*.
 
+## Opel Vectra A (2026-10-18)
+
+- **A slanted grille under a leaning face fought at a distance** (its slats 5 mm over its
+  back; with a frame, the frame's inner walls against the slats' ends). → `frontLean`
+  tilts the grille's planes; the Nexia's, on an upright face, passes. → The Vectra's face
+  stands upright and its grille is frameless. *opel.ts `BODY_VECTRA_A`, `LOOK_VECTRA_A`*.
+- **The lid's black panel ended 8 mm over the lid's foot and its bottom fought the lid's
+  edge.** → It ends 16 mm over it, inside the notch. *opel.ts*.
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent

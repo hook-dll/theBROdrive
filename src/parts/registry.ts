@@ -1346,9 +1346,53 @@ const FOREIGN_ENGINE_VARIANTS: readonly PartVariant[] = [
       cylinders: 4,
     },
   },
+  {
+    // Opel C20NE, the Vectra A 2.0i's (GM Family II, 86 x 86 mm, 1.998 l, SOHC eight valves,
+    // Motronic multipoint injection, catalyst): 85 kW (115 hp) at 5200 and 170 Nm at 2600
+    // (auto-data.net "Opel Vectra A (facelift 1992) 2.0i (115 Hp)"). The Espero's C20LE is
+    // the same block on another tune (77 kW, 169 Nm), so a separate entry. Red line [E]
+    // 6000 (rated + 15 %, the Family II's usual cut); mass [E]: the C20LE's.
+    id: 'engine_opel_c20ne',
+    kind: 'engine',
+    label: '2.0 Opel C20NE four',
+    mass: 135,
+    fits: ['car'],
+    engine: {
+      peakPowerKw: 85,
+      powerPeakRpm: 5200,
+      peakTorqueNm: 170,
+      torquePeakRpm: 2600,
+      redlineRpm: 6000,
+      idleRpm: 850,
+      bsfc: 0.3,
+      brakingCoeff: 0.0203,
+      cylinders: 4,
+    },
+  },
 ];
 
 const FOREIGN_GEARBOX_VARIANTS: readonly PartVariant[] = [
+  {
+    // The Vectra A 2.0's five-speed, Opel F16 WR (wide ratios): the Nexia box's gears (3.545 /
+    // 1.952 / 1.276 / 0.892 / 0.707, R 3.333; cavweb's table via MIG Web prints them rounded,
+    // 3.55 / 1.95 / 1.28 / 0.89 / 0.71) on the 3.55 final drive (vectra-club.ru "Вопросик по
+    // КПП F18": "МКПП F16 на всех, ГП 2-3,55"; forum.opel-club.ru "КПП на Астре": C20NE with
+    // the F16/5 WR, 3.55 or 3.72). The same unit as `gearbox_opel_f16_nexia` with another
+    // axle, so its own entry. Mass [E: the Nexia box's].
+    id: 'gearbox_opel_f16_wr_355',
+    kind: 'gearbox',
+    label: 'Opel F16 WR five-speed (3.55)',
+    mass: 45,
+    fits: ['car'],
+    gearbox: {
+      ratios: [3.545, 1.952, 1.276, 0.892, 0.707],
+      reverse: 3.333,
+      finalDrive: 3.55,
+      shiftTime: 0.36,
+      automatic: false,
+      efficiency: 0.92,
+    },
+  },
   {
     // The Astra F 1.6's five-speed, Opel F13 WR (wide ratios): 3.55 / 1.96 / 1.30 / 0.89 /
     // 0.71, reverse 3.31, on the 3.94 final drive (opel-motor.ru "Коробка передач на Опель
