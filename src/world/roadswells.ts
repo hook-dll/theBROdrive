@@ -249,9 +249,21 @@ export class RoadSwells {
     apex: 0,
     exit: 0,
   }));
-  /** Replayed road through a slot and its surroundings: x, z per node. */
-  private xs = new Float64Array(0);
-  private zs = new Float64Array(0);
+  /**
+   * The road under the slot being built, one entry per node from `windowFirst`: x and
+   * z. Either a replay into `ownX`/`ownZ`, or the arrays a road
+   * block just walked (`adoptBlock`), which hold the same doubles.
+   */
+  private xs: Float64Array = new Float64Array(0);
+  private zs: Float64Array = new Float64Array(0);
+  private windowFirst = 0;
+  private ownX = new Float64Array(0);
+  private ownZ = new Float64Array(0);
+  /** A road block lent by `adoptBlock` for the duration of the call, or null. */
+  private lentFirst = 0;
+  private lentCount = 0;
+  private lentX: Float64Array | null = null;
+  private lentZ: Float64Array | null = null;
   /** The bands' height under the road at every second node of the budget's drive. */
   private bases = new Float64Array(0);
 
@@ -273,9 +285,22 @@ export class RoadSwells {
     this.distance.coarseNear(0, 0, 0, this.near);
   }
 
+  private lastCellX = Number.NaN;
+  private lastCellZ = Number.NaN;
+  private lastList: readonly Swell[] = [];
+
   /** Height the swells add at a world position, metres. */
   heightAt(x: number, z: number): number {
-    const list = this.cellList(Math.floor(x / QUERY_CELL_M), Math.floor(z / QUERY_CELL_M));
+    const cx = Math.floor(x / QUERY_CELL_M);
+    const cz = Math.floor(z / QUERY_CELL_M);
+    // Queries come in runs along the road or across a tile, so the last cell answers
+    // most of them without a map lookup on a key too large to be a small integer.
+    if (cx !== this.lastCellX || cz !== this.lastCellZ) {
+      this.lastList = this.cellList(cx, cz);
+      this.lastCellX = cx;
+      this.lastCellZ = cz;
+    }
+    const list = this.lastList;
     let h = 0;
     for (let i = 0; i < list.length; i++) h += swellHeight(list[i]!, x, z);
     return h;
@@ -326,16 +351,76 @@ export class RoadSwells {
   }
 
   /**
+   * Builds every swell whose road window lies inside a block of nodes the road has
+   * just walked, from that walk: `xs`/`zs` hold nodes `first`..`first + count - 1`
+   * (positions), exactly the doubles a replay makes.
+   * `Road` calls it before it reads the block's heights, so a road block pays for its
+   * own swells without walking the road a second time; only the slots straddling its
+   * ends are replayed, and the next block finds them cached.
+   */
+  adoptBlock(first: number, xs: Float64Array, zs: Float64Array, count: number): void {
+    this.lentFirst = first;
+    this.lentCount = count;
+    this.lentX = xs;
+    this.lentZ = zs;
+    const from = Math.ceil(((first + 1) * NODE_SPACING + LEAD_M) / SLOT_M);
+    const to = Math.floor(((first + count - 2) * NODE_SPACING - NEAR_M) / SLOT_M) - 1;
+    for (let slot = from; slot <= to; slot++) this.swellOf(slot);
+    this.lentX = this.lentZ = null;
+  }
+
+  /**
+   * Points `xs`/`zs` at the road over node indices [first, last]: the lent block
+   * when it covers them, otherwise a replay from the nearest coarse sample.
+   */
+  private window(first: number, last: number): void {
+    const lent = this.lentX;
+    if (lent && first >= this.lentFirst && last < this.lentFirst + this.lentCount) {
+      const offset = first - this.lentFirst;
+      this.xs = lent.subarray(offset);
+      this.zs = this.lentZ!.subarray(offset);
+      this.windowFirst = first;
+      return;
+    }
+    const count = last - first + 1;
+    if (this.ownX.length < count) {
+      this.ownX = new Float64Array(count);
+      this.ownZ = new Float64Array(count);
+    }
+    const spine = this.road.spine;
+    const stride = COARSE_SPACING / NODE_SPACING;
+    const k = Math.floor(first / stride);
+    const node = this.node;
+    node.x = spine.coarseX[k]!;
+    node.z = spine.coarseZ[k]!;
+    for (let i = k * stride; i < first; i++) stepNode(node, this.heading, i);
+    for (let i = first; i <= last; i++) {
+      this.ownX[i - first] = node.x;
+      this.ownZ[i - first] = node.z;
+      stepNode(node, this.heading, i);
+    }
+    this.xs = this.ownX;
+    this.zs = this.ownZ;
+    this.windowFirst = first;
+  }
+
+  /**
    * The corners whose apex lies in [from, to], in order, written to `corners`; returns
-   * how many (at most `MAX_SLOT_CORNERS`).
+   * how many (at most `MAX_SLOT_CORNERS`). Curvature is the turn between the window's
+   * two chords either side of a node, so a lent block and a replay agree to the bit
+   * and a replay need not evaluate the heading field per node.
    */
   private findCorners(from: number, to: number): number {
     let inside = false;
     let peak = 0;
     let count = 0;
     let c = this.corners[0]!;
+    const base = this.windowFirst;
     for (let s = from - CORNER_REACH_M; s <= to + CORNER_REACH_M; s += CORNER_PROBE_M) {
-      const k = Math.abs(this.heading.curvatureAt(s));
+      const i = Math.round(s / NODE_SPACING) - base;
+      const before = Math.atan2(this.xs[i]! - this.xs[i - 1]!, this.zs[i]! - this.zs[i - 1]!);
+      const after = Math.atan2(this.xs[i + 1]! - this.xs[i]!, this.zs[i + 1]! - this.zs[i]!);
+      const k = Math.abs(after - before) / NODE_SPACING;
       if (k >= CORNER_CURVATURE) {
         if (!inside) {
           inside = true;
@@ -358,27 +443,6 @@ export class RoadSwells {
     return count;
   }
 
-  /** Replays the centreline over node indices [first, last] into `xs`/`zs`. */
-  private replay(first: number, last: number): void {
-    const count = last - first + 1;
-    if (this.xs.length < count) {
-      this.xs = new Float64Array(count);
-      this.zs = new Float64Array(count);
-    }
-    const spine = this.road.spine;
-    const stride = COARSE_SPACING / NODE_SPACING;
-    const k = Math.floor(first / stride);
-    const node = this.node;
-    node.x = spine.coarseX[k]!;
-    node.z = spine.coarseZ[k]!;
-    for (let i = k * stride; i < first; i++) stepNode(node, this.heading, i);
-    for (let i = first; i <= last; i++) {
-      this.xs[i - first] = node.x;
-      this.zs[i - first] = node.z;
-      stepNode(node, this.heading, i);
-    }
-  }
-
   private build(slot: number): Swell | null {
     const slotStart = slot * SLOT_M;
     const slotEnd = slotStart + SLOT_M;
@@ -398,6 +462,13 @@ export class RoadSwells {
     // Room first: a long climb in a short slot gives up descent, never its climb.
     descent = Math.min(descent, hi - lo - climb);
     if (descent < climb * 1.5) return null;
+
+    // The road under the whole slot, from the budget's lead-in to `NEAR_M` past it:
+    // every node anything below reads lies inside this window.
+    const first = Math.floor((slotStart - LEAD_M) / NODE_SPACING) - 1;
+    const last = Math.ceil((slotEnd + NEAR_M) / NODE_SPACING) + 1;
+    if (last * NODE_SPACING > this.road.length) return null;
+    this.window(first, last);
 
     // Paired with a corner of the slot when one fits: the corners are tried from a
     // rolled start, each as the rolled kind of pairing, and a swell that has to give up
@@ -432,11 +503,6 @@ export class RoadSwells {
     const crestIn = crest * 0.5;
     const crestOut = crest * 0.5;
 
-    // Replay the road from the lead-in to `NEAR_M` past the swell.
-    const first = Math.max(0, Math.floor((crestS - climb - Math.max(LEAD_M, NEAR_M)) / NODE_SPACING));
-    const last = Math.ceil((crestS + descent + NEAR_M) / NODE_SPACING);
-    if (last * NODE_SPACING > this.road.length) return null;
-    this.replay(first, last);
     const ix = Math.round(crestS / NODE_SPACING) - first;
     const x = this.xs[ix]!;
     const z = this.zs[ix]!;
@@ -444,6 +510,7 @@ export class RoadSwells {
     const startNode = Math.floor((crestS - climb) / NODE_SPACING) - first;
     const endNode = Math.ceil((crestS + descent) / NODE_SPACING) - first;
     const nearStart = Math.max(0, Math.floor((crestS - climb - NEAR_M) / NODE_SPACING) - first);
+    const nearEnd = Math.ceil((crestS + descent + NEAR_M) / NODE_SPACING) - first;
 
     // The ridge lies square to the road's CHORD across it, not to its tangent at the
     // crest: through a corner the chord is the one axis the whole span runs along, so
@@ -456,7 +523,7 @@ export class RoadSwells {
     const ax = cx / chord;
     const az = cz / chord;
     let previousU = -Infinity;
-    for (let i = nearStart; i <= last - first; i++) {
+    for (let i = nearStart; i <= nearEnd; i++) {
       const u = (this.xs[i]! - x) * ax + (this.zs[i]! - z) * az;
       if (u < previousU + NODE_SPACING * 0.3) return null;
       previousU = u;

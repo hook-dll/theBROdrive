@@ -1260,8 +1260,17 @@
     - Banking stays at a cap of 8%, now on 15-18% of the road (was 14-16%).
   - `tools/road-rhythm.ts` fails if the worst loss is over 15 km/h. It also fails if
     `WEAK_CAR` is ever stronger than the catalogue's weakest car really is.
-  - A cold 10 km road block now takes 2.6-2.9 ms to build, up from 1.2. The whole-road
-    index the swells use (8 ms) is built when the spine arrives.
+  - A cold 10 km road block now takes 2.2-2.4 ms to build, up from 1.2. A block builds
+    the swells under it from its own walk (`RoadSwells.adoptBlock`), and only replays
+    the slots that straddle its ends. Heights read the last query cell without a map
+    lookup. The whole-road index the swells use (8 ms) is built when the spine arrives.
+  - THE POLICE FLIGHT CLOCK on rolling road (`world/police.ts`). The clock now counts
+    while the police car is within 300 m of the player (`LIGHTS_SEEN_M`, was 150 m).
+    On seed 42 a pursuer slowing at every blind crest had sat 150-310 m behind a
+    110 km/h runner for three minutes, and the clock never started. Braking for a bend
+    pauses the clock instead of restarting it: `paceKmh` eases down by 1 km/h each
+    second, and only dropping under half that pace restarts it.
+    `tools/police-bench.ts` passes on seeds 42, 7 and 1337.
 - MESAS ARE BACK BESIDE THE ROAD, AND THEY STAY (`world/mesas.ts`, `world/mesacolliders.ts`,
   `render/vista.ts`).
   - One seed-pure module now places the mesas, and the vista, the colliders, the scatter

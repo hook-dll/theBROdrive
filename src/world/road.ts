@@ -357,13 +357,18 @@ export class Road {
     victim.xs[0] = node.x;
     victim.zs[0] = node.z;
     victim.headings[0] = this.headingField.at(first * NODE_SPACING);
-    victim.ys[0] = this.landscape.heightAt(node.x, node.z);
     for (let k = 1; k <= CHECKPOINT_NODES; k++) {
       stepNode(node, this.headingField, first + k - 1);
       victim.xs[k] = node.x;
       victim.zs[k] = node.z;
       victim.headings[k] = this.headingField.at((first + k) * NODE_SPACING);
-      victim.ys[k] = this.landscape.heightAt(node.x, node.z);
+    }
+    // The swells under this block are built from the walk just made, before the
+    // heights below ask for them; see `RoadSwells.adoptBlock`.
+    victim.index = -1;
+    this.swells.adoptBlock(first, victim.xs, victim.zs, CHECKPOINT_NODES + 1);
+    for (let k = 0; k <= CHECKPOINT_NODES; k++) {
+      victim.ys[k] = this.landscape.heightAt(victim.xs[k]!, victim.zs[k]!);
     }
 
     victim.index = index;

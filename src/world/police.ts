@@ -131,10 +131,21 @@ const STAND_OVERSHOOT_M = 2.5;
 const PLACE_SLACK_M = 2.5;
 const PLACE_TIMEOUT_S = 25;
 /**
- * The flight clock (`FLEE_TIME_S`) runs only while he keeps his pace: a drop of this
- * much below the fastest he went since it last restarted is slowing down, and restarts it.
+ * The flight clock (`FLEE_TIME_S`) runs only while he keeps his pace. His pace is the
+ * fastest he has gone lately: it follows him up at once and eases down by
+ * `PACE_EASE_KMH_S`, so a slower stretch he holds becomes his new pace.
+ *
+ * Dropping `SLOWING_KMH` below that pace PAUSES the clock. Dropping under
+ * `PULLING_OVER_SHARE` of it RESTARTS the clock, because that is a man pulling over.
+ *
+ * It used to restart on any 12 km/h drop below the fastest since the last restart. A
+ * player braking for a bend or a crest then never ran 35 s. On the rolling road
+ * (seed 42, police-bench) a 104 km/h runner was never a flight: the chase sat between
+ * 150 and 400 m behind him for three minutes, the clock restarting at every corner.
  */
 const SLOWING_KMH = 12;
+const PACE_EASE_KMH_S = 1;
+const PULLING_OVER_SHARE = 0.5;
 /** The police car standing (m/s) this long behind a stopped player: the stop begins. */
 const POLICE_STANDING_MPS = 0.5;
 const STANDING_SETTLE_S = 1;
@@ -145,10 +156,13 @@ const EVADE_M = 25;
 const EVADE_KMH = 20;
 /**
  * Ignoring the lights this long — counted while the car is within `LIGHTS_SEEN_M` of
- * him, where he cannot miss them — or getting this far ahead of it, is a flight.
+ * him, where he cannot miss the bar and the siren — or getting this far ahead of it, is
+ * a flight. 300 m, from 150: on the rolling road a pursuer slows at every blind crest,
+ * and a 110 km/h runner kept it 150-310 m back for three minutes without the clock
+ * ever starting (seed 42, police-bench), so he was never a fugitive.
  */
 const FLEE_TIME_S = 35;
-const LIGHTS_SEEN_M = 150;
+const LIGHTS_SEEN_M = 300;
 const FLEE_GAP_M = 400;
 /** Behind the car by this much (he turned round): a flight too. */
 const FLEE_BEHIND_M = 40;
@@ -248,7 +262,7 @@ interface Chase {
   phase: ChasePhase;
   /** Seconds the lights have been behind him while he has not stopped. */
   ignoredFor: number;
-  /** Fastest he went since the flight clock last restarted, km/h; see `SLOWING_KMH`. */
+  /** His pace, km/h: the fastest he went lately; see `SLOWING_KMH`. */
   paceKmh: number;
   playerStillFor: number;
   standingFor: number;
@@ -632,12 +646,13 @@ export class PolicePatrol {
           this.runChase(chase, 0, view);
           return;
         }
-        // The lights are behind him and he is not slowing: the flight clock runs.
-        chase.paceKmh = Math.max(chase.paceKmh, playerKmh);
-        if (playerKmh < chase.paceKmh - SLOWING_KMH) {
+        // The lights are behind him and he keeps his pace: the flight clock runs. A
+        // bend or a crest pauses it; pulling over restarts it.
+        chase.paceKmh = Math.max(playerKmh, chase.paceKmh - PACE_EASE_KMH_S * dt);
+        if (playerKmh < chase.paceKmh * PULLING_OVER_SHARE) {
           chase.ignoredFor = 0;
           chase.paceKmh = playerKmh;
-        } else if (gap < LIGHTS_SEEN_M) {
+        } else if (playerKmh >= chase.paceKmh - SLOWING_KMH && gap < LIGHTS_SEEN_M) {
           chase.ignoredFor += dt;
         }
         if (!fled && (chase.ignoredFor > FLEE_TIME_S || gap > FLEE_GAP_M || gap < -FLEE_BEHIND_M)) this.flee(chase);
