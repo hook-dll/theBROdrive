@@ -1063,6 +1063,9 @@
   and hidden the sky. The classics gain 5.5→8°, the Samaras 7.25→10.5°, the 2110s
   8→10.5°, the GAZs to 10–10.5°, the Espero 8.25→10.75°. Road visibility over the bonnet
   stays within 7–11 m ahead.
+- Kit cars' sun visors are sized per car so that, lowered, they end at the driver's eye
+  height. Classics 0.13, 2104/05/07 0.128, Samaras 0.134, 2110s 0.137, Oka 0.119, Espero
+  0.078, Astra F 0.108; the stock 0.15 elsewhere.
 - THE COURIER'S BOOT OPENS ON ITS LID (world/couriers.ts, render/carmodel.ts
   `createCourierCarModel`, player/interaction.ts). The quest-giver's trunk grid used to
   open on F straight through the shut boot lid. The courier's car now hangs its boot lid

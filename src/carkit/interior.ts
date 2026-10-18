@@ -651,6 +651,8 @@ export const CABIN_2101: CabinLayoutOverride = {
   eyeballs: { radius: 0.026, at: [[0.115, -0.014], [0.045, -0.014]] },
   radio: [0, -0.08],
   wheel: { ...LAYOUTS.classic.wheel, rim: 0.012 },
+  // Lowered, the visor ends at the driver's eye height (the stock 0.15 hung 1.4 cm below it, 2026-10-18).
+  visor: { half: 0.16, depth: 0.13 },
 };
 
 /**
@@ -672,6 +674,8 @@ export const CABIN_2103: CabinLayoutOverride = {
   lights: { right: -0.18, dy: -0.05, kind: 'rocker' },
   rockers: { on: 'fascia', at: [[LAYOUTS.classic.seatX + 0.12, -0.05], [LAYOUTS.classic.seatX + 0.06, -0.05]] },
   wheel: { ...LAYOUTS.classic.wheel, rim: 0.012 },
+  // Lowered, the visor ends at the driver's eye height (the stock 0.15 hung 1.4 cm below it, 2026-10-18).
+  visor: { half: 0.16, depth: 0.13 },
 };
 
 /**
@@ -702,6 +706,8 @@ export const CABIN_2105: CabinLayoutOverride = {
   lights: { right: -0.163, dy: 0.0885, kind: 'rocker', on: 'cluster' },
   rockers: { on: 'cluster', at: [[-0.163, 0.0335], [0.163, 0.0885], [0.163, 0.0335]] },
   wheel: { ...LAYOUTS.classic.wheel, hub: 'pad' },
+  // Lowered, the visor ends at the driver's eye height (the stock 0.15 hung 1.6 cm below it, 2026-10-18).
+  visor: { half: 0.16, depth: 0.128 },
 };
 
 /**
@@ -740,6 +746,8 @@ export const CABIN_2107: CabinLayoutOverride = {
   radio: [0, -0.26],
   ashtray: [0, -0.33],
   wheel: { ...LAYOUTS.classic.wheel, hub: 'pad' },
+  // Lowered, the visor ends at the driver's eye height (the stock 0.15 hung 1.6 cm below it, 2026-10-18).
+  visor: { half: 0.16, depth: 0.128 },
 };
 
 // The VAZ-2110 on the Samara platform, read off two Wikimedia Commons photos (no
@@ -855,6 +863,8 @@ export const CABIN_2110: CabinLayoutOverride = {
   // on a door seen at a slant, so a little further back than drawn: 0.30 / -0.12 and
   // 0.22 / -0.35.
   frontDoor: { handle: [0.3, -0.12], crank: [0.22, -0.35] },
+  // Lowered, the visor ends at the driver's eye height (the stock 0.15 hung 0.8 cm below it, 2026-10-18).
+  visor: { half: 0.16, depth: 0.137 },
 };
 
 // The Daewoo Nexia N100 on the Samara's furniture (a moulded dash, struts and a
@@ -986,7 +996,8 @@ export const CABIN_ESPERO: CabinLayoutOverride = {
   // raked roof, hung to the horizon and hid the road. A third of the screen's visible height
   // (from its foot strip at 0.944 to under its header at 1.236: 0.29) deep, 0.10 [E: no
   // Espero visor photographed]; the stock width, 0.32 a side.
-  visor: { half: 0.16, depth: 0.1 },
+  // From the lowered eye (2026-10-18) the 0.10 visor still hung 1.6 cm under eye height.
+  visor: { half: 0.16, depth: 0.078 },
 };
 
 // The Opel Astra F's dash, read off Wikimedia Commons "Opel Astra F cockpit.jpg" (a
@@ -1038,6 +1049,8 @@ export const CABIN_ASTRA_F: CabinLayoutOverride = {
   glovebox: { x: -0.39, dy: -0.15, half: [0.16, 0.05] },
   // Four spokes round a wide pad (the airbag's) [P].
   wheel: { ...LAYOUTS.samara.wheel, spokes: [20, 160, -60, 240] },
+  // Lowered, the visor ends at the driver's eye height (the stock 0.15 hung 3.6 cm below it, 2026-10-18).
+  visor: { half: 0.16, depth: 0.108 },
 };
 
 // The VAZ-1111 «Ока» of 1988-1996 on the Samara's furniture, read off these sources:
@@ -1105,6 +1118,8 @@ export const CABIN_1111: CabinLayoutOverride = {
   // Rim 0.36 across with a thick tube (22 px on 458 in the photo's thumbnail) [P/E].
   wheel: { ...LAYOUTS.samara.wheel, ds: 0.56, radius: 0.18, rim: 0.016, spokes: [34, 270] },
   gear: { ds: 0.62, height: 0.24, lean: 0.04 },
+  // Lowered, the visor ends at the driver's eye height (the stock 0.15 hung 2.5 cm below it, 2026-10-18).
+  visor: { half: 0.16, depth: 0.119 },
 };
 
 // The Volgas on the classic's furniture, read off Wikimedia Commons photos (readings in

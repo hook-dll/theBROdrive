@@ -480,6 +480,13 @@ const LOOK_2107: KitLook = {
   },
 };
 
+/**
+ * Sun visors sized so that, lowered, they end at the driver's eye height (2026-10-18): the
+ * 2106's (the 2101's layout as is) and the Samaras' (the platform's layout as is).
+ */
+const VISOR_CLASSIC = { half: 0.16, depth: 0.13 } as const;
+const VISOR_SAMARA = { half: 0.16, depth: 0.134 } as const;
+
 export const KIT_SPECS: Readonly<Record<string, KitCarSpec>> = {
   vaz2101: { id: 'vaz2101', ...onBody(BODY_124, -0.045, 4.073), look: LOOK_2101, cabinLayout: CABIN_2101 },
   // The estates' rear bench stands where the saloons' does, not off their longer tail.
@@ -497,13 +504,14 @@ export const KIT_SPECS: Readonly<Record<string, KitCarSpec>> = {
     cabinLayout: { ...CABIN_2105, bench: { from: 'rearBase', offset: -1.115 } },
   },
   vaz2105: { id: 'vaz2105', ...BODY_05, look: LOOK_2105, cabinLayout: CABIN_2105 },
-  vaz2106: { id: 'vaz2106', ...BODY_124, look: LOOK_2106 },
+  // Lowered, the visors end at the driver's eye height (the stock 0.15 hung under it, 2026-10-18).
+  vaz2106: { id: 'vaz2106', ...BODY_124, look: LOOK_2106, cabinLayout: { visor: VISOR_CLASSIC } },
   vaz2107: { id: 'vaz2107', ...onBody(BODY_05, 0.012, 4.145), look: LOOK_2107, cabinLayout: CABIN_2107 },
-  vaz2108: { id: 'vaz2108', ...BODY_2108, look: LOOK_2108 },
-  vaz2109: { id: 'vaz2109', ...BODY_2109, look: LOOK_2109 },
-  vaz21099: { id: 'vaz21099', ...BODY_21099, look: LOOK_21099 },
+  vaz2108: { id: 'vaz2108', ...BODY_2108, look: LOOK_2108, cabinLayout: { visor: VISOR_SAMARA } },
+  vaz2109: { id: 'vaz2109', ...BODY_2109, look: LOOK_2109, cabinLayout: { visor: VISOR_SAMARA } },
+  vaz21099: { id: 'vaz21099', ...BODY_21099, look: LOOK_21099, cabinLayout: { visor: VISOR_SAMARA } },
   // The 2115's longer front bumper moves the 21099-frame body 45 mm back from its tip.
-  vaz2115: { id: 'vaz2115', ...onBody(BODY_2115, 0.045, 4.33), look: LOOK_2115 },
+  vaz2115: { id: 'vaz2115', ...onBody(BODY_2115, 0.045, 4.33), look: LOOK_2115, cabinLayout: { visor: VISOR_SAMARA } },
   vaz2110: { id: 'vaz2110', ...BODY_2110, look: LOOK_2110, cabinLayout: CABIN_2110 },
   vaz2112: { id: 'vaz2112', ...BODY_2112, look: LOOK_2112, cabinLayout: CABIN_2110 },
   vaz2111: { id: 'vaz2111', ...BODY_2111, look: LOOK_2111, cabinLayout: CABIN_2110 },

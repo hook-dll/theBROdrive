@@ -949,6 +949,14 @@ amplified differences; `bench-*.json`, `pick-*.json`).
   cars (the mirrors are turned to the eye). *interior.ts `driverEyeAt`, `HEADER_OVER_EYE`,
   `EYE_LOWER_MAX`*.
 
+- **The lowered visors still hung below the driver's eye height** on the classics, Samaras,
+  2110s, Oka, Espero and Astra (0.8–3.6 cm under it, from the new eye). → Each gets a
+  `visor.depth` so its lowered bottom edge ends 5–6 mm over the eye's height, the width
+  kept: 2101/02/03/06 0.13, 2104/05/07 0.128, Samaras 0.134, 2110s 0.137, Oka 0.119,
+  Espero 0.078 (was 0.10), Astra 0.108. The rest already ended over it (Nexia +1.4 cm,
+  GAZs +1.1/+1.6, 2141 +1.1, Nivas +8, UAZes +11/+13) and are unchanged. `kit-zfight`
+  passes. *interior.ts `CABIN_*` `visor`; specs.ts `VISOR_CLASSIC`, `VISOR_SAMARA`*.
+
 ## Opel Astra F (2026-10-18)
 
 - **The rubbing strip fought the front wing and the indicators.** → The waist runs nose to
