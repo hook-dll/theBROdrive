@@ -212,7 +212,7 @@ Córdoba; Volkswagen Golf III; Opel Astra F; Opel Vectra A; Audi 80 B3/B4; Ford 
 Ford Sierra; Mercedes-Benz W124; BMW E34; Toyota Carina E; Nissan Primera P10/P11;
 Mitsubishi Galant; Mitsubishi Pajero II; Toyota Land Cruiser 80; Nissan Patrol Y60;
 Toyota RAV4; Honda CR-V; Kia Sportage; Land Rover Discovery I; Opel Frontera A; Suzuki
-Vitara.
+Vitara; Saab 9000; Volvo 440 (both added 2026-10-18).
 
 What every one of them needs, whatever the body: no catalogue has a foreign sibling
 (`KIT_CARS` rides on `sv_*`/`sa_*`/`cf_*` running gear), so each needs its own running
@@ -233,7 +233,8 @@ bumpers, corner lamps, `rearKnee` hatches, `rearLean` estates, spare on the rear
 - **Easy (data only, like the 2110 family):** square-edged saloons and hatches of the late
   80s – early 90s: Daewoo Nexia I and Espero, Opel Astra F and Vectra A, Audi 80 B3/B4, VW
   Passat B3 and Golf III, Ford Escort (Mk5/6), Ford Sierra, Renault 19, Škoda Felicia,
-  SEAT Córdoba, Mitsubishi Galant, Mercedes W124, BMW E34. Faces are lamp lenses, grilles
+  SEAT Córdoba, Mitsubishi Galant, Mercedes W124, BMW E34, Saab 9000 (five-door hatch,
+  `rearKnee`), Volvo 440 (wedge hatch, `rearKnee`). Faces are lamp lenses, grilles
   and panels the item list already draws; the W124's grille shell and the E34's kidneys
   plus quad lamps are a `grille` with a frame and `round` lamps. Possibly a small field for
   a grille standing proud as a shell.
