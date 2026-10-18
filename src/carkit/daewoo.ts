@@ -334,10 +334,18 @@ export const BODY_ESPERO: KitBody = {
     // `frontLean`. The bonnet's centre line [D side: 0.763 at s 0.19, 0.795 at 0.30, 0.823
     // at 0.42, 0.85 at 0.535, 0.872 at 0.65, 0.883 at 0.77, 0.905 at 0.94, 0.914 from 1.0].
     { s: 0.05, sill: 0.3, crease: 0.59, belt: 0.705, deck: 0.72, wSill: 0.62, wCrease: 0.64, wBelt: 0.6 },
-    // [D plan ±0.705 at s 0.167, ±0.775 at 0.286, ±0.83 at 0.6]
-    { s: 0.17, sill: 0.29, crease: 0.6, belt: 0.745, deck: 0.762, wSill: 0.69, wCrease: 0.71, wBelt: 0.67 },
-    { s: 0.3, sill: 0.285, crease: 0.61, belt: 0.775, deck: 0.797, wSill: 0.755, wCrease: 0.778, wBelt: 0.735 },
-    { s: 0.6, sill: 0.275, crease: 0.625, belt: 0.83, deck: 0.862, wSill: 0.8, wCrease: 0.828, wBelt: 0.785 },
+    // [D plan ±0.705 at s 0.167, ±0.775 at 0.286, ±0.83 at 0.6] Kit-check (2026-10-19): the
+    // plan's slope fell 0.52 → 0.17 per metre at s 0.30 (the crease turning −18° there
+    // between −3° and −7°, the Astra F's old dent), and the flank's lean in over the crease
+    // went 0.28, 0.26, 0.21, 0.26 per metre station by station. Now one curve through the
+    // drawn plan, wCrease = 0.859 − 0.219 (1 − (s − 0.05) / 1.217)⁴ (0.714 at 0.17, 0.772
+    // at 0.3, 0.839 at 0.6; D 0.705, 0.775 at 0.286, 0.83), a station added at 0.45 on it,
+    // the belt leaning in 0.257 per metre of rise everywhere (the cowl's) and the sill
+    // 0.059 per metre of its drop.
+    { s: 0.17, sill: 0.29, crease: 0.6, belt: 0.745, deck: 0.762, wSill: 0.696, wCrease: 0.714, wBelt: 0.677 },
+    { s: 0.3, sill: 0.285, crease: 0.61, belt: 0.775, deck: 0.797, wSill: 0.753, wCrease: 0.772, wBelt: 0.73 },
+    { s: 0.45, sill: 0.28, crease: 0.6175, belt: 0.8025, deck: 0.834, wSill: 0.7945, wCrease: 0.8145, wBelt: 0.767 },
+    { s: 0.6, sill: 0.275, crease: 0.625, belt: 0.83, deck: 0.862, wSill: 0.818, wCrease: 0.839, wBelt: 0.786 },
     // The cowl [D side (246, 167)]; the flank ±0.859 from here [D plan, front view], the
     // shoulder ±0.79 at the belt [D front y 166].
     { s: 1.267, sill: 0.245, crease: 0.65, belt: 0.88, deck: 0.914, wSill: 0.835, wCrease: 0.859, wBelt: 0.8 },
@@ -387,9 +395,14 @@ export const BODY_ESPERO: KitBody = {
       // the right, further off, 9 cm; in-game cabin view).
       { s: 1.447, top: 2.09, upper: 'door1', finish: 'black' },
       { s: 1.62, top: 2.11, upper: 'door1', glass: 'drop', finish: 'black' },
-      // The B pillar, upright [D side x 466–482 at the belt and the rail; the shut line x 458].
-      { s: 2.51, top: 2.52, upper: 'door1', finish: 'black' },
-      { s: 2.545, top: 2.555, upper: 'body', lower: 'door1', finish: 'black' },
+      // The B pillar, upright [D side x 466–482 at the belt and the rail: s 2.546–2.64].
+      // Kit-check (2026-10-19): the front door's shut line under the belt is drawn at x 458,
+      // s 2.50, ahead of the pillar (Review 2: front door 1.447–2.50, rear 2.50–3.36); it
+      // stood at 2.545–2.56. The rear door now reaches forward under the front door's frame
+      // to 2.50: the shut line steps at the belt, as drawn.
+      { s: 2.5, top: 2.51, upper: 'door1', lower: 'door2', glass: 'drop', finish: 'black' },
+      { s: 2.51, top: 2.52, upper: 'door1', lower: 'door2', finish: 'black' },
+      { s: 2.545, top: 2.555, upper: 'body', lower: 'door2', finish: 'black' },
       { s: 2.56, top: 2.57, upper: 'body', lower: 'door2', finish: 'black' },
       { s: 2.6, top: 2.61, upper: 'door2', finish: 'black' },
       { s: 2.635, top: 2.645, upper: 'door2', glass: 'drop', finish: 'black' },
