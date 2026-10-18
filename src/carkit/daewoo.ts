@@ -206,16 +206,19 @@ export const LOOK_NEXIA: KitLook = {
     // corner: the car's "squint". The top kept inside the face's outline (0.705 at the inner
     // end, the shoulder at the outer) and under the wing's crease; the foot clear of the
     // bumper's top (0.60).
+    // Owner's review 2 (2026-10-18, photo of the real car's lamp): the indicator is a short
+    // amber end of the same lens (from ±0.56), wrapping only to s 0.215 and rounding down
+    // there, not a long dome along the wing to 0.40; it is the unit's tallest part, the top
+    // rising gradually to it from the head lamp's inner corner.
     {
       points: [
-        { x: [0.27, 0.325], y: [0.615, 0.7], role: 'head' },
-        { x: 0.45, y: [0.616, 0.713], role: 'head' },
-        { x: 0.615, y: [0.621, 0.707], role: 'blinker' },
-        { y: [0.63, 0.7], role: 'blinker' },
-        { s: 0.2, y: [0.634, 0.704], role: 'blinker' },
-        { s: 0.3, y: [0.638, 0.69], role: 'blinker' },
-        { s: 0.36, y: [0.641, 0.672], role: 'blinker' },
-        { s: 0.4, y: [0.645, 0.655] },
+        { x: [0.27, 0.325], y: [0.615, 0.688], role: 'head' },
+        { x: 0.45, y: [0.616, 0.699], role: 'head' },
+        { x: 0.56, y: [0.619, 0.707], role: 'blinker' },
+        { y: [0.626, 0.714], role: 'blinker' },
+        { s: 0.15, y: [0.63, 0.72], role: 'blinker' },
+        { s: 0.19, y: [0.636, 0.714], role: 'blinker' },
+        { s: 0.215, y: [0.652, 0.692] },
       ],
     },
     // Tail, two bands split level at 0.811 [D rear, zoomed: top py 720 (0.906), split py 740,

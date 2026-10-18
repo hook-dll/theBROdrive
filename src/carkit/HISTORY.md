@@ -860,6 +860,14 @@ amplified differences; `bench-*.json`, `pick-*.json`).
   `kit-zfight`; a frameless diamond leaves a slit at the opening's side (its bar ends need
   the frame over them). 13 472 triangles. *exterior.ts `slantedGrille`; daewoo.ts
   `LOOK_NEXIA`; measurements-nexia.md §8*.
+- **Nexia review 2 (owner, with a photo of the real lamp): "only the SHAPE of the front
+  lamps"; the indicator is the tallest part, the lamp rising gradually to it from its
+  inner corner.** → The amber indicator ran as a long pointed dome along the wing to s
+  0.40 and the head lamp's top peaked in its middle. → The indicator is a short end of the
+  same lens from ±0.56, round the corner to s 0.215, rounding down there; the top rises
+  evenly from 0.688 at the inner corner to 0.72 over the indicator, the foot unchanged.
+  Lab shots front, 3/4, side and close; `kit-zfight` kit_nexia passes; fit and proportions
+  unchanged. *daewoo.ts `LOOK_NEXIA.cornerLamps`*.
 
 ## Failed approaches (do not retry)
 
