@@ -1,0 +1,146 @@
+# Daewoo Espero: measurements
+
+The Espero shares no stampings with another kit car, so it gets its own spec: `BODY_ESPERO` /
+`LOOK_ESPERO` in `daewoo.ts`, `platform: 'samara'` (transverse engine in front, front drive,
+struts and a twist beam), and dash `CABIN_ESPERO` in interior.ts, which is the Nexia's [E].
+The car built is the **2.0 CD (KLEJ, 09.1995–12.1999)**. drom.ru catalogues this version for
+Russia (C20LE, five-speed manual), and it is the Espero most often seen in the CIS: drom.ru
+sells far more 2.0 cars than 1.5 or 1.8 ones, and the owners' threads on drive2.ru are
+mostly about the 2.0. The 1.5 16V (90 hp) and the 1.8 (95 hp) are not modelled.
+
+Its running gear is its own (`GEAR_DAEWOO_ESPERO: KitOwnGear` in vehicle/carmodels.ts, §4),
+like the Nexia's.
+
+Tags: **[D]** drawing, **[P]** photo, **[F]** factory/catalogue, **[E]** estimate.
+
+## 1. Factory figures
+
+| Figure | Value | Source |
+|---|---|---|
+| L × W × H | **4615 × 1718 × 1388** | drom.ru catalog/daewoo/espero/70454 (2.0 MT CD); carfolio and carsguide give the same length; the drawing's dimension lines are 4615 / 1718 / 1388 |
+| Wheelbase | **2620** | drom.ru; drawing |
+| Tracks | **1426 / 1406** | drom.ru and carfolio. Other sources print 1426/1423 (auto-data), 1427/1410 (avto-russia) and 1420/1405 (carexpert) |
+| Clearance | **150** | drom.ru |
+| Tyres | **185/65 R14** (0.298 m free radius) | drom.ru |
+| Overhangs | not found | the drawn hubs centred on the factory wheelbase give **935 / 1060** [E] |
+| Kerb / gross mass | **1128 / 1630 kg** | drom.ru and carfolio (1128). auto-data and avto-russia print 1130, ru.wikipedia 1108, carexpert 1195 |
+| Top speed, 0–100 | **185 km/h, 10.8 s** | drom.ru and carfolio. A drive2 review prints 10.0 s; auto-data gives 12.8 s for the automatic |
+| Turning radius | **5.2 m** | drom.ru |
+| Tank | **50 l** | drom.ru |
+| Engine | **C20LE**, 1998 cm³, 86 × 86, SOHC 8v, MPI: **77 kW (105 hp) at 5000, 169 Nm at 2800** | drom.ru. Another catalogue text prints 164 Nm at 3000 |
+| Gearbox | five-speed F16, the Nexia's ratios on the **3.944** axle | drive2.ru/l/5036075, an owners' thread: "on the 2.0 Espero as on the 8-valve Nexia, 3.941; every other Espero and the 16-valve Nexia 4.188"; a box marked "W 3.94" is "identical to the Espero's". vnx.su's Espero manual names the F-16 five-speed. No ratio table was found in a manual, and automobile-catalog is behind 403 |
+| Steering, brakes | power steering; ventilated front discs, rear drums; vacuum servo | drom.ru |
+| Cd | not found | Cd·A was set on the bench to the 185 km/h (§4) |
+
+`FACTORY_GEOMETRY.kit_espero` = 4.615 × 1.718 × 1.388, clearance 0.150, wheelbase 2.620,
+tracks 1.426 / 1.406, wheel radius 0.298, tyre 0.185.
+
+## 2. Drawing
+
+the-blueprints.com, vector drawing 5466, "Daewoo Espero": the watermarked preview
+`https://www.the-blueprints.com/modules/vectordrawings/preview-wm/daewoo_espero_1995.jpg`
+(1280 × 905). The side view faces left (it shows the car's left side), with the front view
+top right, the plan bottom left and the rear view bottom right. Its dimension lines are
+4615, 2620, 1718 and 1388. The raster blueprints 212 and 26741 on the same site
+(`daewoo-espero.gif`, 1000 × 528, undimensioned line art) were used only to cross-check.
+The working crops are in `/tmp/espero/` and are not kept.
+
+Scales (pixel columns and rows read by script, dark/grey threshold < 170):
+
+| View | Basis | Scale |
+|---|---|---|
+| Side, along | the drawn tips x 28 / 822 = 4615 | **5.812 mm/px**, `s = (x − 28) × 0.005812` |
+| Side, up | the tyres' foot y 332 to the roof y 79 = 1388 | **5.486 mm/px**, `y = (332 − py) × 0.005486` |
+| Front / rear, across | the body's drawn width 902–1205 = 1718 (the drawn 1718 arrows span only 924–1183) | 5.67 mm/px, centre x 1053.5 |
+| Plan | tips x 42 / 817, width 474–780 | 5.955 along, 5.614 across |
+
+The drawing is not orthographically exact. Its hubs (the tyre chords' centres x 186.5 /
+643.25) stand 2655 apart at the length scale, against the factory 2620, and at the hub
+scale (5.736) the roof would be 1451 high. Lengths and heights are therefore scaled
+separately to the factory figures, and the wheels sit on the factory wheelbase, centred on
+the drawn pair (**front 0.935, rear 3.555**) [E].
+
+Readings (side view; `s` from the front tip, heights over the ground):
+
+| Feature | Drawn | Value | Spec |
+|---|---|---|---|
+| Bonnet centre line | y 197 / 190 / 184 / 179 / 175 / 172 / 169 / 166 at x 50 … 200 | 0.741 at s 0.13, 0.779 at 0.24, 0.812 at 0.36, 0.839 at 0.48, 0.861 at 0.59, 0.878 at 0.71, 0.894 at 0.83, 0.911 at 1.0 | stations' `deck` |
+| Cowl | (246, 167) | s 1.267, 0.905–0.914 | station 1.267 |
+| A pillar to the rail | (377, 91) | s 2.03, 1.322 | first column `top` 2.03 |
+| Roof | y 79 at x 490 | 1.388 at s 2.69 [F] | `rail` 1.306 + `railRise` 0.02 + `crown` 0.062 |
+| Back light | (603, 91) → (723, 149) | top s 3.342 at the rail; foot s 4.04, 1.004 | rearBase station 4.04, last column `top` 3.342 |
+| Boot | y 151 / 155 / 160 at x 750 / 780 / 800 | 0.993 at 4.20, 0.971 at 4.37, 0.944 at 4.49 | stations 4.3, 4.5 |
+| Head lamps | y 204–220 at the face | 0.614–0.702 | `cornerLamps` |
+| Front bumper | y 227–290 | 0.23–0.576 | moulded, `drop` 0.105, `height` 0.346 |
+| Rear bumper | y 222–275 | 0.313–0.603 | moulded, `drop` 0.052, `height` 0.29 |
+| Tail lamps | x 773–805, y 159–217 | s 4.33–4.52, 0.63–0.95 (the wrap onto the wing) | `cornerLamps` rear |
+| Sill | y 288 | 0.24 | `sill` 0.24 |
+| Door bottoms | y 280 | 0.285 | `doorBottom` |
+| Front door | shut line x 277 | s 1.447 | column 1.447 |
+| B pillar | x 466–482 at belt and rail; shut line x 458 | s 2.50–2.64 | columns 2.51–2.635 |
+| Rear door glass, rear edge | belt x 605, rail x 595 | 3.354 / 3.295 | columns 3.33 / 3.36 |
+| Belt (glass foot) | (335, 167) → (603, 154) | 0.905 at s 1.78 → 0.977 at 3.34 | lowered 0.04 on the photos (§3) |
+| Front arch | x 122–254, top y 220 | ±0.384 at the hub's height, 0.316 over it | `arch` 1.24 |
+| Rear arch | x 584–713, top y 217 | ±0.375, 0.333 over the hub | `rearArch` 1.26, `rearArchRise` 1.12 |
+| Feature line | y 212 | 0.658 | `featureLine` |
+| Rubbing strip | y 243 | 0.488 | `waist` 0.49 |
+
+Front view half widths: ±0.544 at y 94 (the rail, `railHalf` 0.55), ±0.672 at 1.14, ±0.791
+at 0.905 (the shoulder at the belt, `wBelt` 0.80), ±0.836 at 0.81, and ±0.859 from 0.71 down
+(`wCrease`). Rear view: ±0.547 at 1.35, ±0.697 at 1.09, ±0.811 at 0.92, ±0.859 from 0.82 down.
+Plan: ±0.371 at s 0.018, ±0.47 at 0.036, ±0.545 at 0.054, ±0.615 at 0.089, ±0.705 at 0.167,
+±0.775 at 0.286, ±0.808 at 0.464, ±0.834 at 0.643, ±0.859 from 1.2; at the tail ±0.839 at
+3.80, ±0.814 at 4.04, ±0.792 at 4.18, ±0.769 at 4.32, ±0.705 at 4.47, ±0.648 at 4.51, ±0.528
+at 4.56.
+
+## 3. Photos (Wikimedia Commons)
+
+- "Daewoo Espero beige front": a flush head lamp with the amber third at its outer end. A
+  plain body-colour panel with the badge between the lamps (no grille). A body-colour
+  bumper with a broad black band over its upper part, which holds the plate, and a black
+  slot and two clear fog lamps low down.
+- "1999 Daewoo Espero dark green front": the head lamps are slanted. The top falls towards
+  the badge, so each unit narrows to a short inner end (`cornerLamps`: 0.033 tall inside
+  against 0.085 at the corner, the foot level). The mirror sits on a black sail at the
+  front glass's foot, and an amber repeater stands on the wing behind the front arch.
+- "1996 Daewoo Espero orange red rear", "Daewoo Espero h": corner tail lamps, red over a
+  lower band that is amber at the outer end. A red reflector band runs across the lid
+  between them. Body-colour rear bumper with a black band along its top. Small lamps sit
+  in the bumper's lower corners. A **fixed quarter glass** sits behind the rear door,
+  which the drawing's preview greys over. The side glass is deeper against the doors than
+  the preview draws it (the belt lowered 0.04).
+
+## 4. Running gear (`GEAR_DAEWOO_ESPERO`)
+
+| Field | Value | Source |
+|---|---|---|
+| `mass` | 1128 | drom.ru, carfolio |
+| `engineId` | `engine_daewoo_c20le` (new): 77 kW at 5000, 169 Nm at 2800, red line 5800 [E: the Nexia's rule], 135 kg [E] | parts/registry.ts `FOREIGN_ENGINE_VARIANTS`. partmesh `buildInline` 1.05. reality.ts `FACTORY_ENGINES` |
+| `gearboxId` | `gearbox_opel_f16_nexia` (reused): 3.545 / 1.952 / 1.276 / 0.892 / 0.707, 3.944 | §1 gearbox |
+| `tyre`, `wheelGrip` | `KAMA_217`, 0.53 (every road car's) | |
+| `tankLitres` | 50 | drom.ru |
+| `brakeDecelG` | servo | drom.ru |
+| `suspension` | `SUSP_SAMARA` | struts and twist beam (drom.ru) |
+| `steerLock` | 0.634: 3.83 m on the bench against the 3.78 the 5.2 m radius gives | reality.ts |
+| `frontWeightShare` | 0.62 [E, as the Nexia] | |
+| `dragArea` | 0.72: 185 km/h on the bench (Cd ≈ 0.37 on 1.96 m², estimate) | reality.ts |
+| `aero` | `AERO_DAEWOO_ESPERO`, frontal area 1.96: 1.718 × (1.388 − 0.15) × 0.92; lift and crosswind as the Nexia | |
+
+Bench (`tools/reality.ts kit_espero`): top 185 against 185, 0–100 12.8 s against the
+catalogue's 10.8 (+18%, accepted as `CATALOGUE_OPTIMISTIC`, as the Nexia's +22% on the same
+box and axle), turn 3.83 against 3.78 (+1.4%), geometry 0.0%.
+
+## Gaps
+
+- The dash is the Nexia's. No Espero dash was measured (a long low dash with the cluster in
+  a wide hood).
+- The mirror sail is painted (black on the car). The C pillar's black trim and the plates
+  are not modelled. The grey stripe through the lid's reflector band and the badges are
+  not modelled.
+- The fog lamps are grey panels with no light (no fog-lamp channel). There is one
+  reversing lamp at each bumper corner (on the car one is a rear fog lamp).
+- Overhangs, the axle split and the Cd are estimates. The flap is on the right [E: not seen
+  on the left-side views].
+- The roof's front: the drawn centre line falls 0.06 to the screen's top. `roofDrop` takes
+  0.025 of it and the crown the rest, as on the Nexia.
+- Triangles 14 397, over the ≈ 13k budget, like the tens and the Nexia.

@@ -907,6 +907,19 @@ export const CABIN_NEXIA: CabinLayoutOverride = {
   wheel: { ...LAYOUTS.samara.wheel, spokes: [-35, 215] },
 };
 
+/**
+ * Daewoo Espero: the Nexia's dash [E: no Espero dash measured yet] in the wider body. The
+ * light rocker 3 cm lower (at the Samara's height its back met the wider dash's face,
+ * kit-zfight),
+ * and the bench's base 3 cm off the wheel-house covers instead of 2.2 (its side met the
+ * quarter trim 2 mm away).
+ */
+export const CABIN_ESPERO: CabinLayoutOverride = {
+  ...CABIN_NEXIA,
+  lights: { right: -0.2, dy: -0.13, kind: 'rocker' },
+  bench: { from: 'hip', offset: 0.78, clear: 0.03 },
+};
+
 // The VAZ-1111 «Ока» of 1988-1996 on the Samara's furniture, read off these sources:
 //  - Wikimedia Commons "Oka-Innenraum.jpg" (CC BY 4.0; an early car, 4288 x 2848): the
 //    dash from the driver's door, cluster, switches, heater sliders, wheel, lever.

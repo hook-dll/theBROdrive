@@ -19,9 +19,9 @@
  */
 
 import { BODY_2141, LOOK_2141 } from './azlk';
-import { BODY_NEXIA, LOOK_NEXIA } from './daewoo';
+import { BODY_ESPERO, BODY_NEXIA, LOOK_ESPERO, LOOK_NEXIA } from './daewoo';
 import { BODY_2102, BODY_2104, REAR_2102, REAR_2104 } from './estates';
-import { CABIN_1111, CABIN_2101, CABIN_2103, CABIN_2105, CABIN_2107, CABIN_2110, CABIN_2131, CABIN_GAZ24, CABIN_GAZ31029, CABIN_NEXIA, CABIN_UAZ2206, CABIN_UAZ469 } from './interior';
+import { CABIN_1111, CABIN_2101, CABIN_2103, CABIN_2105, CABIN_2107, CABIN_2110, CABIN_2131, CABIN_GAZ24, CABIN_GAZ31029, CABIN_ESPERO, CABIN_NEXIA, CABIN_UAZ2206, CABIN_UAZ469 } from './interior';
 import { BODY_1111, LOOK_1111 } from './oka';
 import { BODY_2108, BODY_2109, BODY_21099, BODY_2115, LOOK_2108, LOOK_2109, LOOK_21099, LOOK_2115 } from './samaras';
 import type { KitCarSpec, KitLook } from './spec';
@@ -515,4 +515,5 @@ export const KIT_SPECS: Readonly<Record<string, KitCarSpec>> = {
   uaz469: { id: 'uaz469', ...BODY_UAZ469, look: LOOK_UAZ469, cabinLayout: CABIN_UAZ469 },
   uaz2206: { id: 'uaz2206', ...BODY_UAZ2206, look: LOOK_UAZ2206, cabinLayout: CABIN_UAZ2206 },
   nexia: { id: 'nexia', ...BODY_NEXIA, look: LOOK_NEXIA, cabinLayout: CABIN_NEXIA },
+  espero: { id: 'espero', ...BODY_ESPERO, look: LOOK_ESPERO, cabinLayout: CABIN_ESPERO },
 };

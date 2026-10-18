@@ -533,6 +533,15 @@ const TARGETS: Readonly<Record<string, Target>> = {
     // +23% on the bench); the 12.5 s stands beside drom.ru's 175 km/h, not the manual's 163.
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.221 },
   },
+  kit_espero: {
+    wheelbase: 2.62, track: 1.426, radius: 0.298, top: 185, to100: 10.8,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.2, lat: null, hz: 1.3,
+    brake80: null, grossKg: 1630,
+    source: 'Daewoo Espero 2.0 MT CD (C20LE): drom.ru catalog/daewoo/espero/70454 (185 km/h, 10.8 s, 5.2 m, gross 1630); no braking ceiling found; geometry kit_espero row',
+    // The catalogue's 10.8 s stands with its 185 km/h on the bench as the Nexia's 12.5 s does
+    // (+22%): the same optimistic catalogue figure on the same F16 box and 3.944 axle.
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.181 },
+  },
 };
 
 /*
@@ -584,6 +593,7 @@ const FACTORY_ENGINES: Readonly<Record<string, MakerEngine>> = {
   engine_niva_1600: { power: { kw: 53.7 }, powerRpm: 5400, torque: { kgfm: 11.6 }, torqueRpm: 3400, source: 'VAZ-2121; AO VAZ-2121 catalogue' },
   engine_niva_1700: { power: { kw: 58 }, powerRpm: 5200, torque: { nm: 127 }, torqueRpm: 3000, source: 'VAZ-21213, GOST 14846-81; 21213 manual (lada-niva.ru)' },
   engine_daewoo_g15mf: { power: { kw: 55 }, powerRpm: 5400, torque: { nm: 123 }, torqueRpm: [3200, 3400], source: 'Daewoo G15MF; Nexia repair manual table (3ruk.ru, remkomplekt.org)' },
+  engine_daewoo_c20le: { power: { kw: 77 }, powerRpm: 5000, torque: { nm: 169 }, torqueRpm: 2800, source: 'Daewoo C20LE; drom.ru catalog/daewoo/espero/70454' },
   // Not a catalogue engine: the rally 2105's own build, held to the build's figures.
   engine_lada_rally: { power: { ps: 100 }, powerRpm: 6400, torque: { nm: 132 }, torqueRpm: 4200, source: 'pack rally build targets, not factory' },
 };

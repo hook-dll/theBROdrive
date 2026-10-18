@@ -4,6 +4,18 @@
 
 ### Added
 
+- DAEWOO ESPERO kit car (`src/carkit/daewoo.ts` `BODY_ESPERO`, `LOOK_ESPERO`;
+  `interior.ts` `CABIN_ESPERO`, the Nexia's dash; measured in `measurements-espero.md`).
+  The 2.0 CD saloon of 1995–1999 that drom.ru catalogues for Russia, from the-blueprints.com's
+  dimensioned vector preview (4615 / 2620 / 1718 / 1388) and Commons photos. It has slanted
+  flush head lamps with the indicator at their outer ends, a plain panel between them,
+  body-colour bumpers with black bands, a black rubbing strip, a quarter glass behind the
+  rear door, and a red reflector band across the lid between the corner lamps. It runs on
+  its own running gear (`GEAR_DAEWOO_ESPERO`): 1128 kg, 185/65 R14, a new
+  `engine_daewoo_c20le` (77 kW, 169 Nm) and the Nexia's F16 box on the same 3.944 axle.
+  `tools/reality.ts kit_espero` gives 185 km/h against 185 and the turn within 1.4 %; the
+  0-100 of 12.8 s against 10.8 s is accepted as catalogue-optimistic.
+  `kit-zfight` and `kit-proportions` pass. 14 397 triangles.
 - THE FIRST FOREIGN KIT CAR: DAEWOO NEXIA (`src/carkit/daewoo.ts` `BODY_NEXIA`,
   `LOOK_NEXIA`; `interior.ts` `CABIN_NEXIA`; measured in `measurements-nexia.md`). The
   early base N100 saloon (1995–2002, the G15MF 1.5 and the five-speed) from 3dcar.ru's

@@ -858,6 +858,12 @@ const AERO_UAZ_3151: AeroSpec = { frontalArea: 2.75, liftFront: 0.2, liftRear: 0
  * (1.393 − 0.16) m × 0.92.
  */
 const AERO_DAEWOO_NEXIA: AeroSpec = { frontalArea: 1.89, liftFront: 0.09, liftRear: 0.21, sideSlope: 1.35, yawSlope: 0.47 };
+/**
+ * Daewoo Espero: Bertone's wedge saloon, no maker's Cd found. The Nexia's lift and
+ * crosswind figures (a nose over a notched boot) on its own frontal area, 1.718 m ×
+ * (1.388 − 0.15) m × 0.92.
+ */
+const AERO_DAEWOO_ESPERO: AeroSpec = { frontalArea: 1.96, liftFront: 0.09, liftRear: 0.21, sideSlope: 1.35, yawSlope: 0.47 };
 
 
 
@@ -1165,6 +1171,10 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   // 1406, 1663); 160 clearance (the Nexia repair manual, 3ruk.ru; drom.ru prints 158).
   // src/carkit/measurements-nexia.md.
   kit_nexia:      { length: 4.482, width: 1.662, height: 1.393, clearance: 0.160, wheelbase: 2.520, frontTrack: 1.400, rearTrack: 1.406, wheelRadius: 0.288, tyreWidth: 0.175 },
+  // The Daewoo Espero 2.0 CD: 4615 × 1718 × 1388, 2620 wheelbase, 1426/1406 tracks, 150
+  // clearance, 185/65 R14 (drom.ru catalog/daewoo/espero/70454; the-blueprints.com drawing's
+  // dimension lines 4615 / 2620 / 1718 / 1388). src/carkit/measurements-espero.md.
+  kit_espero:     { length: 4.615, width: 1.718, height: 1.388, clearance: 0.150, wheelbase: 2.620, frontTrack: 1.426, rearTrack: 1.406, wheelRadius: 0.298, tyreWidth: 0.185 },
 };
 
 function factoryGeometry(id: string): FactoryGeometry {
@@ -2558,6 +2568,33 @@ const GEAR_DAEWOO_NEXIA: KitOwnGear = {
   aero: AERO_DAEWOO_NEXIA,
 };
 
+/**
+ * Daewoo Espero 2.0 CD (C20LE, five-speed), the Russian-market version drom.ru catalogues
+ * (catalog/daewoo/espero/70454): kerb 1128 kg (carfolio agrees), gross 1630, 185 km/h,
+ * 0-100 in 10.8 s, a 5.2 m turning radius, 185/65 R14, a 50 l tank, power steering, front
+ * ventilated discs and rear drums, struts and a twist beam (the Samara's layout and preset).
+ * The gearbox the Nexia's F16 on the same 3.944 axle (owners: drive2.ru/l/5036075, "on the
+ * 2.0 Espero as on the 8-valve Nexia, 3.941"; the other Esperos 4.188). Axle split 0.62
+ * [E]; no maker's Cd found: Cd·A set on the bench to the 185 km/h.
+ */
+const GEAR_DAEWOO_ESPERO: KitOwnGear = {
+  bodyClass: 'car',
+  mass: 1128,
+  tyre: KAMA_217,
+  engineId: 'engine_daewoo_c20le',
+  gearboxId: 'gearbox_opel_f16_nexia',
+  tankLitres: 50,
+  wheelGrip: KAMA_217_GRIP,
+  brakeDecelG: BRAKES_SERVO_G,
+  suspension: SUSP_SAMARA,
+  steerLock: 0.634,
+  rearDriveBias: 0,
+  handlingProfile: 'road',
+  frontWeightShare: 0.62,
+  dragArea: 0.72,
+  aero: AERO_DAEWOO_ESPERO,
+};
+
 /** A kit car on its catalogue sibling's running gear (`gear` over it where it differs), or on its own. */
 type KitCarRow =
   | readonly [id: string, sibling: string, kit: string, label?: string, gear?: KitRunningGear]
@@ -2608,6 +2645,7 @@ const KIT_CARS: readonly Entry[] = (
     ['kit_uaz2206', 'sa_uaz330364', 'uaz2206', 'UAZ-2206', GEAR_UAZ_2206],
     // The foreign cars: no catalogue body to borrow from.
     ['kit_nexia', GEAR_DAEWOO_NEXIA, 'nexia', 'Daewoo Nexia'],
+    ['kit_espero', GEAR_DAEWOO_ESPERO, 'espero', 'Daewoo Espero'],
   ] satisfies readonly KitCarRow[]
 ).map(([id, source, kit, label, gear]) => {
   const base = kitBase(id, source, kit, label);

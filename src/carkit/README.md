@@ -112,7 +112,7 @@ from the angle he complained about; changes are judged there, not in code.
 | `oka.ts` | The VAZ-1111: `BODY_1111` / `LOOK_1111` (platform `samara`). |
 | `volgas.ts` | The Volgas: `BODY_GAZ24` / `LOOK_GAZ24` (platform `classic`) and the GAZ-31029 on the 24's doors and greenhouse with its own nose and tail. |
 | `azlk.ts` | The AZLK-2141 Moskvich: `BODY_2141` / `LOOK_2141` (platform `samara`). |
-| `daewoo.ts` | The Daewoo Nexia (N100 saloon): `BODY_NEXIA` / `LOOK_NEXIA` (platform `samara`). |
+| `daewoo.ts` | The Daewoo Nexia (N100 saloon) and Espero (KLEJ saloon): `BODY_NEXIA` / `LOOK_NEXIA`, `BODY_ESPERO` / `LOOK_ESPERO` (platform `samara`). |
 | `measurements-classics.md`, `measurements-estates.md`, `measurements-samara.md`, `measurements-2110.md`, `measurements-niva.md`, `measurements-oka.md`, `measurements-volga.md`, `measurements-2141.md`, `measurements-nexia.md` | Measurement reports: every figure with its drawing or photo, scale and tag. |
 | `builder.ts` | `PartBuilder`: flat triangles per material slot, transform stack, primitives (`box`, `bevelBox`, `extrude`, `cylinderX/Y/Z`, `torusY`, `bridge`, `poly`), vertex colours. |
 | `body.ts` | `BodyFrame` (cross-section, deck and lid lookups) and `buildShell`: tub, greenhouse and roof as one face list, then cut into parts. Shell constants (`SHUT_GAP`, `JAMB_DEPTH`, `DOOR_THICKNESS`, `NOTCH_WALL`, …). |
@@ -370,6 +370,7 @@ cabin: … }`) share everything not overridden. Current families:
 | `BODY_GAZ24` | 3dcar.ru `gaz_24.jpg` factory four-view (`volgas.ts`) | GAZ-24; GAZ-31029 (`BODY_GAZ31029`: the 24's columns and middle stations moved back 0.14, its own nose and tail from the-blueprints.com drawing) |
 | `BODY_2141` | the-blueprints.com "Moskvich 2141 (1986-2001)" drawing (`azlk.ts`) | AZLK-2141 |
 | `BODY_NEXIA` | 3dcar.ru `daewoo_nexia.jpg` dimensioned four-view (`daewoo.ts`) | Daewoo Nexia |
+| `BODY_ESPERO` | the-blueprints.com dimensioned vector preview `daewoo_espero_1995.jpg` (`daewoo.ts`) | Daewoo Espero |
 
 ### Look (`KitLook`)
 
@@ -467,7 +468,8 @@ face, hood over swapped big dials, two big centre vents, heater panel, radio low
 stack), `CABIN_1111` (ribbon speedometer in a small hood), `CABIN_2131` (the 2121's with
 the bench further back), `CABIN_NEXIA` (a rounded hood over a central speedometer, the
 tachometer left and two small dials right, end vents, two centre vents over three heater
-knobs); the Samaras and the AZLK-2141 use the `samara` platform's layout as is, the 2121
+knobs), `CABIN_ESPERO` (the Nexia's, its light rocker lower and its bench 3 cm off the
+wheel-house covers); the Samaras and the AZLK-2141 use the `samara` platform's layout as is, the 2121
 the `niva` platform's.
 
 ## Scene contract
@@ -901,6 +903,7 @@ within `KIT_FINE_M`; "Far" = everything except the four detail groups.
 | GAZ-31029 | 11 888 | 5 018 | 4 247 | 1 747 | 421 | 294 | 564 | 1 344 | 6 362 |
 | AZLK-2141 | 12 131 | 5 243 | 4 411 | 1 751 | 617 | 60 | 456 | 1 344 | 6 587 |
 | Nexia | 13 472 | 6 072 | 4 909 | 1 761 | 639 | 52 | 456 | 1 344 | 7 416 |
+| Espero | 14 397 | – | – | – | – | – | – | 1 344 | – |
 
 The owner set the budget aside for the 2110 and 2112 (the rounded rear shut line adds side
 rows to every tub column).

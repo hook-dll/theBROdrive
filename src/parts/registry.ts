@@ -1300,6 +1300,29 @@ const FOREIGN_ENGINE_VARIANTS: readonly PartVariant[] = [
       cylinders: 4,
     },
   },
+  {
+    // Daewoo C20LE, the Espero 2.0's (GM Family II, 86 x 86 mm, 1.998 l, SOHC eight valves,
+    // multipoint injection): 77 kW (105 hp) at 5000 and 169 Nm at 2800 (drom.ru catalog/
+    // daewoo/espero/70454). Red line not printed: [E] 5800, the Nexia's rule (rated + 7%)
+    // rounded up to the Family II's usual cut. Mass [E]: an iron 2.0 four, the Volga's
+    // aluminium 2.4 less its size.
+    id: 'engine_daewoo_c20le',
+    kind: 'engine',
+    label: '2.0 Daewoo C20LE four',
+    mass: 135,
+    fits: ['car'],
+    engine: {
+      peakPowerKw: 77,
+      powerPeakRpm: 5000,
+      peakTorqueNm: 169,
+      torquePeakRpm: 2800,
+      redlineRpm: 5800,
+      idleRpm: 850,
+      bsfc: 0.3,
+      brakingCoeff: 0.0203,
+      cylinders: 4,
+    },
+  },
 ];
 
 const FOREIGN_GEARBOX_VARIANTS: readonly PartVariant[] = [

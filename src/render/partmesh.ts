@@ -264,6 +264,8 @@ function buildEngine(b: MeshBuilder, v: PartVariant): void {
     case 'engine_niva_1700': return buildInline(b, spec, 1.02);
     // The Nexia's 1.5, the 2111's size.
     case 'engine_daewoo_g15mf': return buildInline(b, spec, 0.96);
+    // The Espero's 2.0 Family II: a bigger block than the 1.5.
+    case 'engine_daewoo_c20le': return buildInline(b, spec, 1.05);
     // The Volga 2.4: a tall, long-stroke four, so a taller block than the 1.6. The UAZ's
     // UMZ-4178 and the GAZ-31029's ZMZ-402 are the same block.
     case 'engine_zmz_21':
