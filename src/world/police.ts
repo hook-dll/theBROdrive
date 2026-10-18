@@ -92,8 +92,12 @@ const SPAWN_MAX_AHEAD_M = TRAFFIC_REACH_M - 40;
 const DEV_SPAWN_MIN_AHEAD_M = 20;
 const SPAWN_RETRY_S = 0.5;
 
-/** The chase's ceiling: this much over the player's speed until close, within these bounds. */
-const CATCH_UP_MPS = 10;
+/**
+ * The chase's ceiling: this much over the player's speed until close, within these
+ * bounds. The road's surface and bends take a share of any ceiling (`surfacePaceFactor`),
+ * so the margin is wide: at 10 m/s a player at 100 km/h held a 140 m lead for minutes.
+ */
+const CATCH_UP_MPS = 16;
 const CHASE_MIN_MPS = 80 / 3.6;
 const CHASE_MAX_MPS = 170 / 3.6;
 /**
@@ -103,9 +107,13 @@ const CHASE_MAX_MPS = 170 / 3.6;
  */
 const TAIL_M = 70;
 const FOLLOW_M = 25;
-const FOLLOW_GAIN = 0.25;
-/** Closer than this it does not pass him (`RoadTraffic.policeChase` `tailing`). */
-const TAILING_M = 160;
+const FOLLOW_GAIN = 0.35;
+/**
+ * Closer than this it does not pass him (`RoadTraffic.policeChase` `tailing`). Farther
+ * back it still passes whatever is between them: at 160 m it sat behind an ambient car
+ * the whole chase (tools/police-bench.ts).
+ */
+const TAILING_M = 60;
 /** Below this, for this long, the player has stopped. */
 const PLAYER_STOPPED_KMH = 4;
 const PLAYER_STOPPED_S = 1.5;
@@ -120,8 +128,12 @@ const ASK_TIMEOUT_S = 45;
 /** A stopped player who gets this far from where he stood, or this fast, has driven off. */
 const EVADE_M = 25;
 const EVADE_KMH = 20;
-/** Ignoring the lights this long, or this far ahead of the car, is a flight. */
+/**
+ * Ignoring the lights this long — counted while the car is within `LIGHTS_SEEN_M` of
+ * him, where he cannot miss them — or getting this far ahead of it, is a flight.
+ */
 const FLEE_TIME_S = 35;
+const LIGHTS_SEEN_M = 150;
 const FLEE_GAP_M = 400;
 /** Behind the car by this much (he turned round): a flight too. */
 const FLEE_BEHIND_M = 40;
@@ -599,7 +611,7 @@ export class PolicePatrol {
           this.runChase(chase, 0, view);
           return;
         }
-        chase.ignoredFor += dt;
+        if (gap < LIGHTS_SEEN_M) chase.ignoredFor += dt;
         if (!fled && (chase.ignoredFor > FLEE_TIME_S || gap > FLEE_GAP_M || gap < -FLEE_BEHIND_M)) this.flee(chase);
         const playerMps = Math.max(0, playerKmh / 3.6);
         const cap = gap > TAIL_M

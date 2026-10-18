@@ -270,6 +270,14 @@ const POLICE_STOP_MPS = 30;
 /** And back into its lane after: over this much road, at this speed. */
 const POLICE_REJOIN_M = 30;
 const POLICE_REJOIN_MPS = 8;
+/** Pulling off its post after somebody: from its place up the slip at this, m/s². */
+const POLICE_EXIT_ACCEL_MPS2 = 4;
+/**
+ * Its driver spends this much more of the tyres in bends than a frantic one
+ * (`Autopilot.setGripShare`): the UAZ is high and soft, and at the frantic share a player
+ * at 100 km/h through bends drew away from it (tools/police-bench.ts).
+ */
+const POLICE_GRIP_SHARE = 1.25;
 /** An impact this hard, m/s, counts in `TrafficStatus.impacts` and shows the car in full. */
 const IMPACT_MPS = 1.8;
 /**
@@ -1802,11 +1810,14 @@ export class RoadTraffic {
       }
       const landedU = turnOut ? turnOut.endU : visit.length;
       course.indicator = u < landedU ? (turnOut ? 'right' : 'left') : 'off';
+      // A police car sent after somebody goes from its place, and hard.
+      const exitAccel = car.police ? POLICE_EXIT_ACCEL_MPS2 : LAYBY_EXIT_ACCEL_MPS2;
+      const exitFromU = car.police ? visit.parkU : visit.padEndU;
       course.speed = Math.min(
         car.autopilot.cruisePace,
         turnOut
-          ? Math.sqrt(LAYBY_TURN_MPS * LAYBY_TURN_MPS + 2 * LAYBY_EXIT_ACCEL_MPS2 * Math.max(0, u - turnOut.endU))
-          : Math.sqrt(LAYBY_PAD_MPS * LAYBY_PAD_MPS + 2 * LAYBY_EXIT_ACCEL_MPS2 * Math.max(0, u - visit.padEndU)),
+          ? Math.sqrt(LAYBY_TURN_MPS * LAYBY_TURN_MPS + 2 * exitAccel * Math.max(0, u - turnOut.endU))
+          : Math.sqrt(LAYBY_PAD_MPS * LAYBY_PAD_MPS + 2 * exitAccel * Math.max(0, u - exitFromU)),
       );
       if (!visit.merging) {
         if (coordinate && this.laybyMergeClear(car, visit)) visit.merging = true;
@@ -3412,6 +3423,7 @@ export class RoadTraffic {
         if (!record) return false;
         record.rival = true;
         record.police = { post, tailing: false, lights: false, flash: 0, stop: null, released: false };
+        record.autopilot.setGripShare(POLICE_GRIP_SHARE);
         // It stands until it is sent (`policePullOut`), and nobody else stops at its post.
         record.layby!.parkFor = Infinity;
         this.reservePolicePost(post, true);
@@ -3614,6 +3626,7 @@ export class RoadTraffic {
     car.police = null;
     car.rival = false;
     car.autopilot.setMode('hurried');
+    car.autopilot.setGripShare(1);
     car.autopilot.setSpeedCap(car.speedCap);
   }
 

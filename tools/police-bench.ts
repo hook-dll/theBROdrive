@@ -1,16 +1,22 @@
 /**
  * THE POLICE, HEADLESS (src/world/police.ts on the real RoadTraffic and physics).
  *
- * The player is a marker driven along his lane at a scripted speed: the traffic field
- * carries him, so the police car follows him as it would the real car, but nothing
- * physical stands where he is (the stop's stand is the police's own hold line). Three
- * runs, each from a dev post on the shoulder 300 m ahead:
+ * The player is a marker driven along his lane at a scripted speed, slowed only by the
+ * surface and the bends as a hurried driver would be: the traffic field carries him, so
+ * the police car follows him as it would the real car, but nothing physical stands where
+ * he is (the stop's stand is the police's own hold line). Three runs, each from a dev
+ * post on the shoulder ahead:
  *
- *  1. Past it at 108 km/h, then a stop: the car pulls out, catches him, stops behind him;
- *     the papers are handed over and the speeding fine leaves the pack; he drives off and
- *     the car goes back to the stream.
- *  2. Past it at 126 km/h and on, the flight rolled to give up: it does, a few km on.
+ *  1. Past it over the limit, then a stop: the car pulls out, catches him, stops behind
+ *     him; the papers are handed over and the speeding fine leaves the pack; he drives off
+ *     and the car goes back to the stream.
+ *  2. Past it at 100+ km/h and on through the bends: it catches him and tails him; he
+ *     ignores the lights, the flight is rolled to give up, and it does, a few km on.
  *  3. The same, rolled to escalate: the heat rises to 1.
+ *
+ * The flights run on an empty road (`RoadTraffic.cap` 0): the marker has no body and
+ * goes through traffic, while the police car has to pass it, so with a stream the chase
+ * measured the traffic, not the police.
  *
  * `nice -n 15 bun tools/police-bench.ts [seed]`
  */
@@ -22,7 +28,7 @@ import { GameWorld, newWorldState } from '../src/game/state';
 import { coinsHeld } from '../src/economy/economy';
 import { Inventory } from '../src/items/items';
 import { loadCarModel } from '../src/render/carmodel';
-import { roadPaceCeiling } from '../src/vehicle/autopilot';
+import { surfacePaceFactor } from '../src/vehicle/autopilot';
 import { WorldOrigin } from '../src/world/origin';
 import { POLICE_MODEL_ID, PolicePatrol } from '../src/world/police';
 import { Road } from '../src/world/road';
@@ -56,7 +62,7 @@ const ROAD_STEP = 2;
 const RIBBON_HALF_WIDTH = WIDE_HALF_WIDTH + 3;
 const PLAYER_CAR = 'bench:player';
 /** The flights' pace: over the limit, within the police UAZ's reach. */
-const FLEE_MPS = 28;
+const FLEE_MPS = 32;
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
@@ -118,12 +124,21 @@ const pose: PolicePose = { s: 0, lateral: 0, speed: 0, direction: 1, posted: tru
 let clock = 0;
 
 const condition = { surface: SurfaceType.Asphalt, decay: 0, sandCover: 0, markings: 0 };
-/** What a hurried driver takes the road here at, looking 150 m ahead: the marker drives no faster. */
-function roadPace(s: number): number {
+/** A hurried driver's cornering budget, m/s² (autopilot `MODES.hurried.lateralAccel`). */
+const MARKER_LATERAL_MPS2 = 4.7;
+/**
+ * What the marker takes the road at when it wants `target`, looking 150 m ahead: that
+ * on this surface (a hurried driver's share of it) and the bends on a hurried driver's
+ * budget — a player at 100+ km/h through them, not a car on rails.
+ */
+function roadPace(s: number, target: number): number {
   let pace = Infinity;
   for (let d = 0; d <= 150; d += 25) {
     road.conditionAt(s + d, condition);
-    const ceiling = roadPaceCeiling('hurried', condition, road.curvatureAt(s + d));
+    const ceiling = Math.min(
+      target * surfacePaceFactor('hurried', condition),
+      Math.sqrt(MARKER_LATERAL_MPS2 / Math.max(Math.abs(road.curvatureAt(s + d)), 1e-4)),
+    );
     pace = Math.min(pace, Math.sqrt(ceiling * ceiling + 2 * 2.5 * d));
   }
   return pace;
@@ -131,7 +146,7 @@ function roadPace(s: number): number {
 
 /** One step: the player's marker moves on at `target` m/s (road permitting, changed at 4 m/s²), then traffic, police, physics. */
 function step(target: number): void {
-  speed += Math.max(-4 * FIXED_DT, Math.min(4 * FIXED_DT, Math.min(target, roadPace(playerS)) - speed));
+  speed += Math.max(-4 * FIXED_DT, Math.min(4 * FIXED_DT, Math.min(target, roadPace(playerS, target)) - speed));
   playerS += speed * FIXED_DT;
   world.state.playedSeconds += FIXED_DT;
   clock += FIXED_DT;
@@ -191,6 +206,7 @@ check('he drives off and the car goes back to the stream', released, `phase ${ph
 // 2. A flight that gives up.
 console.log(`2. past a post at ${(FLEE_MPS * 3.6).toFixed(0)} km/h and on: the police give up`);
 police.devFlight(true);
+traffic.cap = 0;
 playerS += 1500;
 await runUntil(FLEE_MPS, () => false, 1);
 const post2 = police.devPost('shoulder', 400);
@@ -198,21 +214,29 @@ await runUntil(FLEE_MPS, () => police.snapshot().posts.some((p) => p.key === pos
 const chased2 = await runUntil(FLEE_MPS, () => phase() !== null, 40);
 check('a second chase starts', chased2, `phase ${phase()} at s ${playerS.toFixed(0)}`);
 let closest = Infinity;
-let tailGap = Infinity;
 const tailCar = police.snapshot().chase?.carId ?? '';
 let leftPostAt = Infinity;
+const chaseFromS = playerS;
+const chaseFromClock = clock;
+/** Its closest once it has had ten seconds on the road to come up behind him. */
+const watchTail = (): void => {
+  if (!traffic.policePose(tailCar, pose)) return;
+  if (!pose.posted && leftPostAt === Infinity) leftPostAt = clock;
+  if (clock > leftPostAt + 10) closest = Math.min(closest, playerS - pose.s);
+};
 const fled = await runUntil(FLEE_MPS, () => {
-  if (traffic.policePose(tailCar, pose)) {
-    if (!pose.posted && leftPostAt === Infinity) leftPostAt = clock;
-    // Its closest once it has had ten seconds on the road to come up behind him.
-    if (clock > leftPostAt + 10) closest = Math.min(closest, playerS - pose.s);
-    tailGap = playerS - pose.s;
-  }
+  watchTail();
   return police.snapshot().chase?.fled === true || phase() === null;
-}, 90);
-check('it catches him up and tails him', closest > 12 && tailGap < 45, `closest ${closest.toFixed(1)} m, at the flight ${tailGap.toFixed(1)} m`);
+}, 120);
 check('ignoring the lights is a flight', fled, `phase ${phase()} at s ${playerS.toFixed(0)}`);
-const over2 = await runUntil(FLEE_MPS, () => phase() === null, 300);
+const over2 = await runUntil(FLEE_MPS, () => {
+  watchTail();
+  return phase() === null;
+}, 300);
+const fleeKmh = ((playerS - chaseFromS) / (clock - chaseFromClock)) * 3.6;
+check('he runs at 100+ km/h through the bends', fleeKmh >= 100, `${fleeKmh.toFixed(0)} km/h average over the chase`);
+// Within its tailing reach (police.ts `TAILING_M`), and never into him.
+check('it catches him up and tails him', closest > 12 && closest < 60, `closest ${closest.toFixed(1)} m`);
 check('the chase ends', over2, `phase ${phase()} at s ${playerS.toFixed(0)}`);
 check('they gave up', toasts.some((t) => t.includes('gave up')), toasts.slice(-2).join(' | '));
 check('a give-up adds no heat', world.state.player.police.heat === 0, `heat ${world.state.player.police.heat}`);
@@ -227,7 +251,7 @@ const live3 = await runUntil(FLEE_MPS, () => police.snapshot().posts.some((p) =>
 check('a third post is manned', live3, `${police.snapshot().posts.map((p) => `${p.key}:${p.state}@${p.s.toFixed(0)}`).join(' ')}, player s ${playerS.toFixed(0)}`);
 const chased3 = await runUntil(FLEE_MPS, () => phase() !== null, 40);
 check('a third chase starts', chased3, `phase ${phase()}`);
-await runUntil(FLEE_MPS, () => police.snapshot().chase?.fled === true || phase() === null, 90);
+await runUntil(FLEE_MPS, () => police.snapshot().chase?.fled === true || phase() === null, 180);
 check('the flight escalates: wanted level 1', world.state.player.police.heat === 1, `heat ${world.state.player.police.heat}, until ${world.state.player.police.heatUntil.toFixed(0)}`);
 
 console.log(failures === 0 ? 'all checks passed' : `${failures} check(s) failed`);

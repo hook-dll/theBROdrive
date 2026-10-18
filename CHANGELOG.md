@@ -4,6 +4,46 @@
 
 ### Added
 
+- THE POLICE: POSTS, RADAR, CHASE, STOP, FINES (`src/world/police.ts`, `RoadTraffic`
+  `spawnPolice`…`releasePolice`, `src/audio/sirenvoice.ts`).
+  - The speed limit is 90 km/h everywhere. Police stand at posts placed from the seed: on
+    30 % of the roadside lay-bys (angled on the pad, nose to the road) and on a shoulder
+    pull-off in 40 % of 3 km slots on straight road clear of lay-bys (`shoulderPullOff`
+    in `world/layby.ts`, a lay-by shape the stop machinery drives but nothing builds).
+    A post faces the way the player travels, on that side. Its car, the black-and-white
+    UAZ-469, is put down parked in the stream's unseen band (500–760 m ahead) and leaves
+    at the support edge like a rival; nothing of it is saved.
+  - The radar reads the player's speed within 150 m of a posted car in its direction.
+    Once he is past it pulls out after him for: speeding (> 90 km/h), a collision with a
+    traffic car in the last 5 minutes (`RoadTraffic.playerImpacts`, a traffic car's own
+    impact with his car in reach), any wanted level, or a 12 % document check.
+  - The chase: light bar flashing (rig channels, drawn in full meanwhile) and a siren. Off
+    its post at 4 m/s², on the frantic engine, its ceiling 16 m/s over the player's speed
+    (≤ 170 km/h) until 70 m behind, then matched to his and eased to 25 m; within 60 m it
+    neither passes nor goes round him, and its driver spends 1.25× a frantic driver's
+    share of the tyres in bends (`Autopilot.setGripShare`, police only). Measured in
+    `tools/police-bench.ts` on seeds 42, 7 and 1337: a player at 104–105 km/h average
+    through the bends is caught to 26–34 m.
+  - When he stops it pulls over 10 m behind him on his line (on the shoulder if he is), a
+    lay-by course of its own, and the prompt asks `[F] hand over your papers` (F goes to
+    the officer before anything else; after 45 s he checks unasked). Fines in coins:
+    speeding 2 + 1 per 10 km/h over, a collision 6, a car whose papers are not his 6,
+    each contract cargo item not on the waybill (in the pack, or past the body's contract
+    slots in the boot) 4, a flight 5; all × (1 + wanted level). The coins leave the pack
+    at once; behind the wheel that is no save trigger, so the exit saves it. A stop paid
+    in full clears the wanted level; an unpaid rest adds one. The car waits for him to
+    drive off first, then rejoins the stream.
+  - A flight (driving off from the stop, 35 s of ignoring the lights within 150 m, or a
+    400 m lead) meets the chase's own roll, taken when it began: give up after 1.5–4 km,
+    or escalate — one wanted level (up to 3) for 20 minutes of play, raising the share of
+    manned posts (lay-bys 30/50/70/90 %, shoulders 40/60/80/100 %), stopping him at every
+    post and multiplying the next fine — and keep after him for 6 km or until lost.
+  - `PlayerState.police` (`heat`, `heatUntil`) is saved through the `police_heat` delta,
+    not a save trigger; older saves load with none. Dev: `__bro.police.devPost`,
+    `devChase`, `devFlight`, `devHeat`, `snapshot`. `tools/autosave.ts` checks the heat
+    rides with the exit and that old saves load; `tools/police-bench.ts` runs post →
+    chase → stop → fine, a give-up flight and an escalating one.
+
 - THE POLICE UAZ-469 (`src/carkit/police.ts`, model `kit_uaz469_police`).
   - The kit UAZ-469 in the militia's livery: white doors with «МИЛИЦИЯ» in dark blue on
     the front ones, a light bar across the roof with a dark blue lamp each side. The game
