@@ -1058,6 +1058,11 @@
 
 ### Changed
 
+- Kit cars: the driver's eye is lowered, by at most 3.5 cm, until the windscreen's header
+  stands 10° over level (`driverEyeAt`). On the low roofs the header had stood at eye level
+  and hidden the sky. The classics gain 5.5→8°, the Samaras 7.25→10.5°, the 2110s
+  8→10.5°, the GAZs to 10–10.5°, the Espero 8.25→10.75°. Road visibility over the bonnet
+  stays within 7–11 m ahead.
 - THE COURIER'S BOOT OPENS ON ITS LID (world/couriers.ts, render/carmodel.ts
   `createCourierCarModel`, player/interaction.ts). The quest-giver's trunk grid used to
   open on F straight through the shut boot lid. The courier's car now hangs its boot lid

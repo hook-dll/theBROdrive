@@ -1437,6 +1437,18 @@ const SEATED_EYE = 0.74;
 const EYE_BEHIND_HIP = 0.1;
 /** Least room between the eye and the headliner over it. */
 const EYE_HEADROOM = 0.13;
+/**
+ * The least angle over level, from the driver's eye, of the windscreen header's lower
+ * edge (the lining's front edge over the glass). Under the low roofs (Espero, Nexia) the
+ * eye kept under the headliner sat at the header's own height: the lining filled
+ * everything above the horizon and a lowered visor hung in the driver's face (owner,
+ * 2026-10-18). There the eye is lowered just far enough to see this much sky, by at most
+ * `EYE_LOWER_MAX` (the classics would need 8 cm, and lose the road to 41 m ahead over their
+ * binnacle); elsewhere it stays where it was, and seats, floor and roof stay as built.
+ */
+const HEADER_OVER_EYE = (10 * Math.PI) / 180;
+/** The most the eye is lowered for it: below that the dash and bonnet hide the road ahead. */
+const EYE_LOWER_MAX = 0.035;
 
 export function buildInterior(ctx: KitContext): void {
   new Cabin(ctx).build();
@@ -1507,8 +1519,26 @@ function headlinerUnder(frame: BodyFrame, x: number, s: number): number {
 export function driverEyeAt(frame: BodyFrame): Vec3 {
   const lay = layoutOf(frame);
   const s = frame.cowl + lay.hip + EYE_BEHIND_HIP;
-  const y = Math.min(cabinFloor(frame) + lay.cushion + SEATED_EYE, headlinerUnder(frame, lay.seatX, s) - EYE_HEADROOM);
+  const seated = Math.min(cabinFloor(frame) + lay.cushion + SEATED_EYE, headlinerUnder(frame, lay.seatX, s) - EYE_HEADROOM);
+  const [hs, hy] = screenHeaderEdge(frame, lay.seatX);
+  const y = Math.max(seated - EYE_LOWER_MAX, Math.min(seated, hy - Math.tan(HEADER_OVER_EYE) * (s - hs)));
   return [lay.seatX, y, frame.z(s)];
+}
+
+/**
+ * The windscreen header's lower edge straight ahead of half width x, (s, y): where the
+ * glass's visible top (`screenHeader` under its top) meets the screen's line, with the
+ * lining's depth under it.
+ */
+function screenHeaderEdge(frame: BodyFrame, x: number): P2 {
+  const cab = frame.spec.cabin;
+  const frac = Math.min(1, Math.abs(x) / cab.railHalf);
+  const st = frame.screenTopS(frac);
+  const yt = cab.rail + frame.crownAt(frac) - frame.roofDrop(st);
+  const sf = frame.screenFoot(frac);
+  const yb = frame.deckY(sf, frac * frame.section(frame.cowl).r4[0]);
+  const y = yt - cab.screenHeader;
+  return [sf + ((st - sf) * (y - yb)) / (yt - yb), y - LINING_DEPTH];
 }
 
 // ---- small geometry ----

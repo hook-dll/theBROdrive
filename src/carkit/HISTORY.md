@@ -923,6 +923,32 @@ amplified differences; `bench-*.json`, `pick-*.json`).
   eye node (`kit_driver_eye`, 1.195 high); `kit-zfight` passes. *interior.ts
   `CABIN_NEXIA`*.
 
+## Driver's eye (2026-10-18)
+
+- **From the driver's eye the low cars showed no sky: the windscreen's header stood at eye
+  level (owner, with the visors).** → The eye was set by the seat (cushion + 0.74) and
+  held 0.13 under the headliner; it never looked at the screen. On the classics the header
+  stood 5.5° over level, the 2104/05/07 6.25°, the Samaras 7.25°, the GAZs 7.25–7.5°, the
+  2110s 8°, the Espero 8.25°. → `driverEyeAt` lowers the eye until the header's lower
+  edge (`screenHeaderEdge`: the glass's visible top under `screenHeader`, the lining's
+  depth under that) stands 10° over level, by at most 3.5 cm (`EYE_LOWER_MAX`). Each cm
+  lowered hides more road over the binnacle: the classics needed 8 cm for 10°, which hid
+  the road to 41 m ahead (7 m before). The rear eye, seats, floor and roof are unchanged.
+  The ray check (eye node, rays straight ahead) gives old/new up-angle and nearest road
+  visible:
+  - 2101/02/03: 5.5→8°, 7.1→10.7 m
+  - 2106: 5.5→8°, 7.3→11.2 m
+  - 2104/05/07: 6.25→9°, 6.5→6.8 m
+  - Samaras: 7.25→10.5°, 6.8→8.9 m
+  - 2110s: 8→10.5°, 6.1→7.7 m
+  - GAZ-24: 7.5→10.5°, 9.6→10.8 m
+  - 31029: 7.25→10°, 8→8.5 m
+  - Espero: 8.25→10.75°, 6.1→6.4 m
+  - The rest already over 10°, unchanged.
+  No eye inside a mesh; the nearest headrest is 0.126 m (2106). `kit-zfight` passes on all
+  cars (the mirrors are turned to the eye). *interior.ts `driverEyeAt`, `HEADER_OVER_EYE`,
+  `EYE_LOWER_MAX`*.
+
 ## Opel Astra F (2026-10-18)
 
 - **The rubbing strip fought the front wing and the indicators.** → The waist runs nose to
