@@ -210,6 +210,36 @@ Shape differences that remain:
 - The dark strip under the band's middle is painted.
 - The head lamp's outline is a polyline, and the inner tip is a corner, not a curve.
 
+## 6. Review 2 (owner, 2026-10-18): mouldings, A pillar, mirrors
+
+Re-read on the same drawing (the-blueprints.com vector 5466 preview, pixel rows by script,
+the scales of §2) and the Commons photos of §3/§5. No other dimensioned Espero drawing is
+free: the-blueprints raster 212 (undimensioned) and the paid Outlines sheet are all there is,
+and wikipedia, auto-data, cararac and carsguide confirm 4615 / 2620 / 1718 / 1388 only.
+
+| Feature | Drawing | Model before | Model now |
+|---|---|---|---|
+| A pillar, at the belt → rail | s 1.267 (cowl) → 2.03, about 70 mm across in side view (x 300–312 at y 150) | 1.267 → 2.03, pillar 0.07 | unchanged |
+| Front door shut line | x 277: s 1.447 | 1.447 | unchanged |
+| Front glass front edge | kinked: up the sail to (1.84, 1.11), the sail's foot along the belt to 1.79 | 1.55 at the belt | 1.62 at the belt, one straight edge (1.74 at 1.0, 1.85 at 1.11) |
+| Mirror head | s 1.78–1.90 on the sail | 1.38 (8 cm behind the A-pillar column): **hidden from the driver behind the sail** | `mirrorS` 1.74, both seen through the side glass from the in-game cabin camera |
+| B pillar | 2.50–2.64, the shut line x 458 (2.50) | 2.51–2.635, shut line 2.545 / 2.56 | unchanged |
+| Rear glass rear edge | 3.354 belt / 3.295 rail | 3.33 / 3.27 | unchanged |
+| Rear door shut line | upright to about 0.72, then forward round the arch to the sill | `foot` y 0.72 → 3.15 | unchanged |
+| Door lengths at the belt | front 1.447–2.50 (1.05), rear 2.50–3.36 (0.86) | 1.10 / 0.80 | unchanged |
+| Rubbing strip | y 243: 0.488, door to door, a piece on each panel | 0.49; pieces cut at the doors' bounding boxes | 0.49; cut at every shut line, owned by the panel under it |
+| Plan/front: rail, belt, flank half widths | ±0.544 / ±0.791 / ±0.859 | 0.55 / 0.80 / 0.859 | unchanged |
+
+The moulding fault: `buildFlankStrip` split the strip at each door node's bounding box, and
+the front door's box reaches forward to the A pillar's foot over the wing, the rear door's
+back to its frame's top (3.33) above the raked shut line (3.2 at the strip's height). So
+the front door took a length of the wing's strip and the rear door a length of the C
+pillar's. Each piece now takes the owner of the skin it lies on (`BodyFrame.flankOwner`,
+the owners `buildShell` gives the side faces) and ends 5 mm short of the panel's seam,
+following a raked line at its slant. Tumblehome and glasshouse narrowing match the front
+and rear views and are unchanged. The A pillar matches the drawing; it hid the mirrors
+only because the mirrors stood 35 cm too far forward.
+
 ## Gaps
 
 - The dash's heights come from one photo scale with perspective ignored [E]. The door-top

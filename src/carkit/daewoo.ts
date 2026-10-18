@@ -375,11 +375,18 @@ export const BODY_ESPERO: KitBody = {
       // "Daewoo Espero beige front": the mirror in the glass's front corner].
       { s: 1.3, top: 2.063, upper: 'door1', lower: 'body', finish: 'black' },
       // The front door's shut line below the belt [D side x 277]; the door's frame forms a
-      // sail under the mirror, the glass's front edge rising steeply from 1.55 at the belt
-      // to the frame [P "1999 Daewoo Espero dark green front": the mirror on a black
-      // triangle at the glass's front foot].
+      // black sail under the mirror [P "1999 Daewoo Espero dark green front": the mirror on
+      // a black triangle at the glass's front foot]. Owner's review 2 (2026-10-18): the
+      // mirrors stood at s 1.39, ahead of the glass, and the driver's line to them (eye s
+      // 2.33, 1.18 high) met the sail 4 cm ahead of the glass's edge: hidden. On the drawing
+      // the sail runs along the belt to s 1.79 (x 337) and its apex is at (1.84, 1.11), the
+      // mirror's head s 1.78–1.90 [D side, apillar crop]: the glass's edge is kinked, steep
+      // up the sail, then along the pillar. One straight edge here, from 1.62 at the belt
+      // (1.74 at 1.0, 1.85 at 1.11) to the frame, the mirror (`mirrorS` 1.74) at its front
+      // foot: the lines to both heads cross the side glass (the left 21 cm behind its edge,
+      // the right, further off, 9 cm; in-game cabin view).
       { s: 1.447, top: 2.09, upper: 'door1', finish: 'black' },
-      { s: 1.55, top: 2.11, upper: 'door1', glass: 'drop', finish: 'black' },
+      { s: 1.62, top: 2.11, upper: 'door1', glass: 'drop', finish: 'black' },
       // The B pillar, upright [D side x 466–482 at the belt and the rail; the shut line x 458].
       { s: 2.51, top: 2.52, upper: 'door1', finish: 'black' },
       { s: 2.545, top: 2.555, upper: 'body', lower: 'door1', finish: 'black' },
@@ -458,6 +465,9 @@ export const LOOK_ESPERO: KitLook = {
   headrests: true,
   brightwork: 'black', // [P]
   sill: null,
+  // On the sail at the glass's front foot (owner's review 2: see the columns) [D side: the
+  // head s 1.78–1.90 against the glass from 1.79; here the glass from 1.62].
+  mirrorS: 1.74,
   // The black rubbing strip along both doors [D side y 243: 0.488; P beige front, h].
   waist: { y: 0.49, height: 0.035, finish: 'black' },
   // Amber, on the wing behind the front arch [P dark green front].

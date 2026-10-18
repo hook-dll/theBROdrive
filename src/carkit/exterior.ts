@@ -847,20 +847,16 @@ interface FlankStrip {
 
 /**
  * A strip along each flank from `first` to `last`, following the side's plan, broken
- * where it crosses a door's shut lines so each door carries its own piece and swings with
- * it, and stopping short of a wheel arch it would run into (the 2115's door mouldings run
- * low, past the arches' tops).
+ * where it crosses a door's shut line so each piece belongs to the panel under it (the
+ * skin's owner at the strip's height, `BodyFrame.flankOwner`) and ends at that panel's
+ * seam (a raked shut line's end follows the line's slant), and stopping short of a wheel
+ * arch it would run into (the 2115's door mouldings run low, past the arches' tops).
  */
 function buildFlankStrip(ctx: KitContext, body: PartBuilder, strip: FlankStrip): void {
-  const { frame, nodes, root } = ctx;
+  const { frame, nodes } = ctx;
   const spec = frame.spec;
   const { slot, color, first, last, out } = strip;
-  root.updateMatrixWorld(true);
-  // Each door's s range at rest: the car frame's z is `zNose - s`.
-  const doors = [...nodes].filter(([owner]) => owner.startsWith('door_')).map(([owner, door]) => {
-    const box = new THREE.Box3().setFromObject(door.node);
-    return { owner, door, side: owner.endsWith('l') ? 1 : -1, s0: frame.zNose - box.max.z, s1: frame.zNose - box.min.z };
-  });
+  const doors = [...nodes].filter(([owner]) => owner.startsWith('door_'));
   // The s ranges where an arch, grown by the gap, reaches up to the strip's bottom edge.
   const w = spec.wheels;
   const arches = [w.front, w.rear].flatMap((axle) => {
@@ -870,36 +866,62 @@ function buildFlankStrip(ctx: KitContext, body: PartBuilder, strip: FlankStrip):
     const d = lift > 0 ? Math.sqrt(reach * reach - lift * lift) : reach;
     return [[axle - d, axle + d] as const];
   });
+  // A cut: s at height y (a raked shut line slants; every other cut is upright).
+  type Cut = (y: number) => number;
+  const fixed = (s: number): Cut => () => s;
+  const columns = spec.cabin.columns;
+  const seams: Cut[] = columns.map((c) => (c.foot ? (y: number) => frame.shutS(c, y) : fixed(c.s)));
   const builders = new Map<string, PartBuilder>();
+  const h = strip.height / 2;
   for (const side of [1, -1]) {
-    const mine = doors.filter((d) => d.side === side);
-    const cuts = [first, last, ...mine.flatMap((d) => [d.s0, d.s1]), ...arches.flat()].filter((s) => s >= first && s <= last).sort((a, b) => a - b);
+    const at = (cut: Cut, s: number): number => cut(strip.yAt(s));
+    const cuts = [fixed(first), fixed(last), ...seams, ...arches.flat().map(fixed)]
+      .filter((cut) => {
+        const s = at(cut, (first + last) / 2);
+        return s >= first && s <= last;
+      })
+      .sort((p, q) => at(p, first) - at(q, first));
+    // Pieces between neighbouring cuts, merged where the owner does not change.
+    const runs: { a: Cut; c: Cut; key: string }[] = [];
     for (let i = 0; i + 1 < cuts.length; i++) {
-      const a = cuts[i]! + MOULDING_GAP;
-      const c = cuts[i + 1]! - MOULDING_GAP;
-      if (c - a < 0.02) continue;
-      const mid = (a + c) / 2;
-      if (arches.some(([s0, s1]) => mid > s0 && mid < s1)) continue;
-      const door = mine.find((d) => mid > d.s0 && mid < d.s1);
-      const key = door?.owner ?? 'body';
+      const s0 = at(cuts[i]!, first);
+      const s1 = at(cuts[i + 1]!, first);
+      if (s1 - s0 < 1e-6) continue;
+      const mid = (s0 + s1) / 2;
+      const key = arches.some(([a0, a1]) => mid > a0 && mid < a1) ? 'arch' : frame.flankOwner(mid, strip.yAt(mid), side);
+      const prev = runs[runs.length - 1];
+      if (prev && prev.key === key && key !== 'arch') prev.c = cuts[i + 1]!;
+      else runs.push({ a: cuts[i]!, c: cuts[i + 1]!, key });
+    }
+    for (const { a: cutA, c: cutC, key } of runs) {
+      if (key === 'arch') continue;
+      const yOf = (s: number, dy: number): number => strip.yAt(s) + dy;
+      const sA = (dy: number): number => cutA(yOf(at(cutA, first), dy)) + MOULDING_GAP;
+      const sC = (dy: number): number => cutC(yOf(at(cutC, first), dy)) - MOULDING_GAP;
+      if (Math.min(sC(-h), sC(h)) - Math.max(sA(-h), sA(h)) < 0.02) continue;
       let b = builders.get(key);
       if (!b) builders.set(key, (b = key === 'body' ? body : new PartBuilder()));
       b.color(color);
-      const pieces = Math.max(1, Math.ceil((c - a) / MOULDING_RUN));
-      const point = (s: number, dy: number, o: number): Vec3 => [side * (frame.sideX(s, strip.yAt(s) + dy) + o), strip.yAt(s) + dy, frame.z(s)];
-      const h = strip.height / 2;
+      const point = (s: number, dy: number, o: number): Vec3 => [side * (frame.sideX(s, yOf(s, dy)) + o), yOf(s, dy), frame.z(s)];
+      // Each edge runs from its own end to end (the ends slant with a raked seam).
+      const along = (dy: number, t: number): number => sA(dy) + (sC(dy) - sA(dy)) * t;
+      const pieces = Math.max(1, Math.ceil((sC(0) - sA(0)) / MOULDING_RUN));
       for (let k = 0; k < pieces; k++) {
-        const s0 = a + ((c - a) * k) / pieces;
-        const s1 = a + ((c - a) * (k + 1)) / pieces;
-        b.quad(slot, point(s0, -h, out), point(s1, -h, out), point(s1, h, out), point(s0, h, out));
-        b.quad(slot, point(s0, h, out), point(s1, h, out), point(s1, h, 0), point(s0, h, 0));
-        b.quad(slot, point(s0, -h, 0), point(s1, -h, 0), point(s1, -h, out), point(s0, -h, out));
+        const t0 = k / pieces;
+        const t1 = (k + 1) / pieces;
+        const lo0 = along(-h, t0);
+        const lo1 = along(-h, t1);
+        const hi0 = along(h, t0);
+        const hi1 = along(h, t1);
+        b.quad(slot, point(lo0, -h, out), point(lo1, -h, out), point(hi1, h, out), point(hi0, h, out));
+        b.quad(slot, point(hi0, h, out), point(hi1, h, out), point(hi1, h, 0), point(hi0, h, 0));
+        b.quad(slot, point(lo0, -h, 0), point(lo1, -h, 0), point(lo1, -h, out), point(lo0, -h, out));
       }
-      b.quad(slot, point(a, -h, 0), point(a, -h, out), point(a, h, out), point(a, h, 0));
-      b.quad(slot, point(c, -h, out), point(c, -h, 0), point(c, h, 0), point(c, h, out));
+      b.quad(slot, point(sA(-h), -h, 0), point(sA(-h), -h, out), point(sA(h), h, out), point(sA(h), h, 0));
+      b.quad(slot, point(sC(-h), -h, out), point(sC(-h), -h, 0), point(sC(h), h, 0), point(sC(h), h, out));
     }
   }
-  for (const { owner, door } of doors) {
+  for (const [owner, door] of doors) {
     const b = builders.get(owner);
     if (b) addBuilt(door.node, b, door.pivot, `${owner}_${strip.name}`);
   }
@@ -1104,7 +1126,7 @@ function buildDoorHardware(ctx: KitContext): void {
     // stalk (`mirrorStalk`) the head stands that much higher and 3.5 cm further back: a
     // bracket on the skin under the belt at the door's front edge, a rod 2 cm off the skin
     // up to the head's centre, an arm out and back from its top into the head's ball.
-    const ms = spec.cabin.columns[1]!.s + 0.08;
+    const ms = spec.look.mirrorS ?? spec.cabin.columns[1]!.s + 0.08;
     const belt = frame.station(ms).belt;
     const my = belt + 0.06;
     const mx = frame.sideX(ms, belt);

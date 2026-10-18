@@ -369,6 +369,35 @@ export class BodyFrame {
     }
     return -1;
   }
+
+  /**
+   * The part that owns the flank's skin at (s, y) below the belt on one side: a door node
+   * name (`door_fl` …) or `'body'`, as `buildShell` cuts it (the strips' `lower` owners,
+   * a raked shut line's `foot` dividing its band). Pieces laid on the skin (mouldings,
+   * feature lines) take their owner from here, so they end at the door's real seam.
+   */
+  flankOwner(s: number, y: number, side: number): string {
+    if (y < this.spec.doorBottom) return 'body';
+    const cols = this.spec.cabin.columns;
+    let owner: CabinOwner = 'body';
+    const strip = this.cabinStrip(s);
+    if (strip >= 0) owner = stripOwner(cols[strip]!, 'lower', side);
+    for (const [index, c] of cols.entries()) {
+      if (!c.foot) continue;
+      const line = this.shutLine(c);
+      if (y > line[1]![1] + 1e-9 || s >= c.s || s <= line[line.length - 1]![0]) continue;
+      if (s >= this.shutS(c, y)) owner = stripOwner(c, 'lower', side);
+      else if (index > 0) owner = stripOwner(cols[index - 1]!, 'lower', side);
+    }
+    return owner === 'body' ? 'body' : doorName(owner, side);
+  }
+
+  /** s of a column's raked shut line (`CabinColumn.foot`) at height y; the column's s above its upper turn. */
+  shutS(column: CabinColumn, y: number): number {
+    if (!column.foot) return column.s;
+    const line = this.shutLine(column);
+    return table(line.map(([s, ly]) => [ly, s] as const).reverse(), y);
+  }
 }
 
 /** Owner name of a cabin strip's door on one side. */

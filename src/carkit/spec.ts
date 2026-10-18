@@ -331,6 +331,12 @@ export interface KitLook {
    */
   readonly mirrorStalk?: number;
   /**
+   * Centre s of the door mirrors' heads, when measured: on a black sail at the side
+   * glass's front foot (the Espero, the Opels), so the driver sees them through the glass.
+   * Absent: 8 cm behind the front door frame's first column.
+   */
+  readonly mirrorS?: number;
+  /**
    * Where the outside door handles stand, when measured: the centre s of the front doors'
    * and of the rear (side) doors' handle, their height and half length along the car.
    * Absent: 0.13 ahead of each door's rear edge, under the belt.
