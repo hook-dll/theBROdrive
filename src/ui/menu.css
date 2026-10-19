@@ -285,6 +285,153 @@
   display: none;
 }
 
+/* ------------------------------------------------------------------ *
+ *  The room (ui/room.ts): the title screen as the boy's bedroom.     *
+ *  One 16:9 picture fitted into the screen, its things laid over it *
+ *  as buttons in the same frame; a panel opens over it, dimmed.      *
+ * ------------------------------------------------------------------ */
+
+.menu-title-screen.is-room::before,
+.menu-title-screen.is-room::after {
+  display: none;
+}
+
+.menu-title-screen .menu-sheet[hidden] {
+  display: none;
+}
+
+/* The name sits small in the room's upper left, on the wall above the bed. */
+.menu-title-screen.is-room .menu-hero {
+  top: clamp(16px, 4vh, 48px);
+  left: clamp(16px, 3vw, 48px);
+  transform: scale(0.6);
+  transform-origin: top left;
+}
+
+.menu-room {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0e0b10;
+  transition: filter 0.25s var(--m-ease);
+}
+
+.menu-room-frame {
+  position: relative;
+  width: min(100vw, 177.78vh);
+  aspect-ratio: 16 / 9;
+}
+
+.menu-room-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.menu-room-spot {
+  position: absolute;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  cursor: pointer;
+  transition: border-color 0.15s var(--m-ease), box-shadow 0.15s var(--m-ease), background 0.15s var(--m-ease);
+}
+
+.menu-room-spot:hover:not(:disabled),
+.menu-room-spot:focus-visible {
+  outline: none;
+  border-color: rgba(236, 122, 61, 0.85);
+  background: rgba(236, 122, 61, 0.08);
+  box-shadow: 0 0 28px rgba(236, 122, 61, 0.35);
+}
+
+.menu-room-spot:disabled {
+  cursor: default;
+}
+
+.menu-room-caption {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(16px, 5vh, 56px);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  max-width: min(720px, 90vw);
+  padding: 10px 20px;
+  border-radius: var(--m-radius);
+  background: rgba(10, 8, 5, 0.66);
+  text-align: center;
+  pointer-events: none;
+}
+
+.menu-room-caption:empty {
+  display: none;
+}
+
+.menu-room-caption-label {
+  font-family: var(--menu-font-cond);
+  font-weight: 700;
+  font-size: var(--m-size-lg);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.menu-room-caption-detail {
+  font-size: var(--m-size-sm);
+  color: var(--m-ink-2);
+}
+
+/* A panel open: the room stays, dimmed, and its things rest. */
+.menu-title-screen.is-away .menu-room {
+  filter: brightness(0.5) saturate(0.8);
+}
+
+.menu-title-screen.is-away .menu-room-spot,
+.menu-title-screen.is-away .menu-room-caption {
+  display: none;
+}
+
+.menu-shelf {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.menu-shelf-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  border: 1px solid var(--m-line);
+  border-radius: var(--m-radius);
+  color: var(--m-ink-3);
+}
+
+.menu-shelf-row.is-done {
+  border-color: var(--m-line-2);
+  color: var(--m-ink);
+}
+
+.menu-shelf-title {
+  font-family: var(--menu-font-cond);
+  font-weight: 600;
+  font-size: var(--m-size-md);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.menu-shelf-detail {
+  font-size: var(--m-size-sm);
+  color: var(--m-ink-2);
+}
+
 @keyframes menu-sheet-in {
   from {
     opacity: 0;

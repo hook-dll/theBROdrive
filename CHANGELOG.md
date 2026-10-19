@@ -73,6 +73,11 @@
   «Handle with care» now carries a real table lamp with a milk-glass shade, and a sixth
   dream, «A bear for a birthday», a teddy bear in a Moskvich-2141 in a light wind,
   Clatter to Dimwell. Flat materials only: no new shader programs.
+- The title screen is the boy's room at night (`src/ui/room.ts`): one SVG picture with
+  its things as buttons. The bed sleeps straight into the next dream (Enter on launch),
+  the map on the desk lists the dreams, the keys the saved drives, the window starts
+  the free drive, the shelf holds a toy car per dream dreamt, the toolbox is settings.
+  Arrows, pad and Esc walk it like the old menu; panels open over the dimmed room.
 
 - Door mirrors on short arms (owner): an arm now runs from the foot on the door's skin
   (2 cm under the belt) into the head's centre, so no head hangs in the air; the UAZ-2206's

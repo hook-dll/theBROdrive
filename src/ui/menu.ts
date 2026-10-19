@@ -60,7 +60,8 @@ import { ALL_VARIANTS } from '../parts/registry';
 import { CAMERA_FRAME_LIMIT, type FluidKind, type ShadeTint } from '../items/items';
 import { STICKERS, type StickerKind } from '../items/stickercatalog';
 import { DREAMS } from '../dreams/dream';
-import { dreamOpen, loadDreamProgress } from '../dreams/progress';
+import { dreamOpen, loadDreamProgress, type DreamProgress } from '../dreams/progress';
+import { buildRoom, type Room } from './room';
 
 /** The Compute rows' buttons, lightest first; see `ComputeLevel`. */
 const COMPUTE_LEVELS: readonly { level: ComputeLevel; label: string }[] = [
@@ -2212,26 +2213,30 @@ export class MainMenu {
    */
   show(backend: SaveBackend): Promise<TitleChoice> {
     const { promise, resolve } = Promise.withResolvers<TitleChoice>();
-    const overlay = el('div', 'menu menu-title-screen');
+    const overlay = el('div', 'menu menu-title-screen is-room');
     const hero = el('div', 'menu-hero');
     hero.appendChild(wordmark());
     const sheet = el('div', 'menu-sheet');
+    /** The room (ui/room.ts), drawn behind every view; its things answer only on the front. */
+    let room: Room | null = null;
     overlay.append(hero, sheet);
 
     let listings: SaveListing[] = [];
     let listFailed = false;
-    let view: 'front' | 'saves' | 'settings' = 'front';
+    let view: 'front' | 'dreams' | 'shelf' | 'saves' | 'settings' = 'front';
     /** The settings screen while `view` is `settings`; see `openSettings`. */
     let settingsScreen: SettingsScreen | null = null;
     let errorLine: HTMLElement | null = null;
     let settled = false;
     let detachPad: (() => void) | null = null;
 
-    /** Back from the list or the settings lands on the row that opened it, not on Continue. */
-    const backToFront = (from: 'saves' | 'settings'): void => {
+    /** The thing in the room each panel opens from, which back lands on. */
+    const SPOT_OF_VIEW = { dreams: 'map', shelf: 'shelf', saves: 'keys', settings: 'toolbox' } as const;
+    /** Back from a panel lands on the thing in the room that opened it. */
+    const backToFront = (from: 'dreams' | 'shelf' | 'saves' | 'settings'): void => {
       view = 'front';
       render();
-      sheet.querySelector<HTMLButtonElement>(`[data-key="${from}"]`)?.focus();
+      overlay.querySelector<HTMLButtonElement>(`.menu-room-spot[data-key="${SPOT_OF_VIEW[from]}"]`)?.focus();
     };
 
     const showError = (message: string): void => {
@@ -2245,7 +2250,15 @@ export class MainMenu {
         backToFront(view);
         return;
       }
-      if (view !== 'settings') walkRows(sheet, ev);
+      if (view === 'front' && room) {
+        // The room is a picture: left and right walk it as up and down do.
+        if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') {
+          ev.preventDefault();
+          moveFocus(room.element, ev.key === 'ArrowLeft' ? -1 : 1, 0);
+          return;
+        }
+        walkRows(room.element, ev);
+      } else if (view !== 'settings') walkRows(sheet, ev);
     };
 
     const finish = (choice: TitleChoice): void => {
@@ -2332,13 +2345,55 @@ export class MainMenu {
       return card;
     };
 
-    const renderFront = (): void => {
-      const nav = el('nav', 'menu-actions');
-      const latest = listings[0];
-      // Dreams lead: they are the game. The free drive below is the open road without one.
-      // Each opens once the one before it is done; a done one carries its best night.
+    /** The first open dream not dreamt yet, else the last open one: what the bed dreams. */
+    const nextDream = (progress: DreamProgress): (typeof DREAMS)[number] | null => {
+      const open = DREAMS.filter((dream) => dreamOpen(dream.id, progress));
+      return open.find((dream) => progress[dream.id] === undefined) ?? open[open.length - 1] ?? null;
+    };
+
+    /** The room: the bed, the map, the keys, the window, the shelf, the toolbox (ui/room.ts). */
+    const renderRoom = (): void => {
+      room?.element.remove();
       const progress = loadDreamProgress();
-      let firstOpen: HTMLButtonElement | null = null;
+      const latest = listings[0];
+      const next = nextDream(progress);
+      const dreamt = DREAMS.filter((dream) => progress[dream.id] !== undefined).length;
+      room = buildRoom(
+        progress,
+        {
+          bed: next
+            ? { label: 'Sleep', detail: `«${next.title}» — ${next.brief}`, disabled: false }
+            : { label: 'Sleep', detail: 'No dream tonight', disabled: true },
+          map: { label: 'Dreams', detail: `${dreamt} of ${DREAMS.length} dreamt — pick one`, disabled: false },
+          keys: latest
+            ? {
+                label: 'Your drives',
+                detail: `${latest.drive?.carLabel ?? latest.meta.name} · ${formatKm(latest.drive?.km ?? latest.meta.km)} km · saved ${formatSavedDay(latest.meta.savedAt).toLowerCase()}`,
+                disabled: false,
+              }
+            : { label: 'Your drives', detail: 'No drive saved yet', disabled: true },
+          window: { label: 'Free drive', detail: 'The endless road: how far can you get?', disabled: false },
+          shelf: { label: 'Shelf', detail: dreamt === 1 ? 'One toy car: one dream dreamt' : `${dreamt} toy cars: one for every dream dreamt`, disabled: false },
+          toolbox: { label: 'Settings', detail: 'Graphics, controls and sound', disabled: false },
+        },
+        (spot) => {
+          if (spot === 'bed' && next) finish({ kind: 'dream', dreamId: next.id });
+          else if (spot === 'window') finish({ kind: 'new' });
+          else {
+            view = spot === 'map' ? 'dreams' : spot === 'keys' ? 'saves' : spot === 'shelf' ? 'shelf' : 'settings';
+            render();
+          }
+        },
+      );
+      overlay.insertBefore(room.element, hero);
+    };
+
+    /** Every dream, in order: each opens once the one before it is done; a done one carries its best night. */
+    const renderDreams = (): void => {
+      const { head } = screenHead('Dreams', () => backToFront('dreams'));
+      const nav = el('nav', 'menu-actions');
+      const progress = loadDreamProgress();
+      const next = nextDream(progress);
       for (const [index, dream] of DREAMS.entries()) {
         const best = progress[dream.id];
         const open = dreamOpen(dream.id, progress);
@@ -2348,45 +2403,35 @@ export class MainMenu {
             ? `✓ best ${formatDreamTime(best.seconds)} · ride ${Math.round(best.comfort * 100)}%` +
               (dream.cargoName !== null ? ` · ${dream.cargoName} ${Math.round(best.parcel * 100)}%` : '')
             : dream.brief;
-        // The first open dream not yet done is the one the title offers first.
-        const next = open && !best && firstOpen === null;
-        const row = actionButton(open ? dream.title : `${dream.title} — locked`, detail, next && latest === undefined);
+        const row = actionButton(open ? dream.title : `${dream.title} — locked`, detail, dream === next);
         row.disabled = !open;
-        if (next) firstOpen = row;
         row.addEventListener('click', () => finish({ kind: 'dream', dreamId: dream.id }));
         nav.appendChild(row);
       }
-      if (latest) {
-        const car = latest.drive?.carLabel ?? latest.meta.name;
-        const km = formatKm(latest.drive?.km ?? latest.meta.km);
-        const saved = formatSavedDay(latest.meta.savedAt).toLowerCase();
-        const resume = actionButton('Continue', `${car} · ${km} km · saved ${saved}`, true);
-        resume.addEventListener('click', () => load(latest, resume));
-        nav.appendChild(resume);
+      sheet.append(head, nav);
+    };
+
+    /** The shelf: a toy car for every dream dreamt, with that dream's best night. */
+    const renderShelf = (): void => {
+      const { head } = screenHead('Shelf', () => backToFront('shelf'));
+      const list = el('div', 'menu-shelf');
+      const progress = loadDreamProgress();
+      for (const dream of DREAMS) {
+        const best = progress[dream.id];
+        const row = el('div', best ? 'menu-shelf-row is-done' : 'menu-shelf-row');
+        row.append(
+          text(best ? dream.title : 'An empty place', 'menu-shelf-title'),
+          text(
+            best
+              ? `${best.times === 1 ? 'Dreamt once' : `Dreamt ${best.times} times`} · best ${formatDreamTime(best.seconds)} · ride ${Math.round(best.comfort * 100)}%` +
+                  (dream.cargoName !== null ? ` · ${dream.cargoName} ${Math.round(best.parcel * 100)}%` : '')
+              : 'for a dream not dreamt yet',
+            'menu-shelf-detail',
+          ),
+        );
+        list.appendChild(row);
       }
-      const fresh = actionButton('Free drive', 'The endless road: how far can you get?', false);
-      fresh.addEventListener('click', () => finish({ kind: 'new' }));
-      nav.appendChild(fresh);
-      if (latest) {
-        const count = listings.length === 1 ? '1 drive' : `${listings.length} drives`;
-        const all = actionButton('Saved drives', count, false);
-        all.dataset.key = 'saves';
-        all.addEventListener('click', () => {
-          view = 'saves';
-          render();
-        });
-        nav.appendChild(all);
-      }
-      // The same settings screen as the pause, before the drive. Very Low is built into
-      // the world at load, so this is where it is picked without a reload.
-      const settingsBtn = actionButton('Settings', null, false);
-      settingsBtn.dataset.key = 'settings';
-      settingsBtn.addEventListener('click', () => {
-        view = 'settings';
-        render();
-      });
-      nav.appendChild(settingsBtn);
-      sheet.appendChild(nav);
+      sheet.append(head, list);
     };
 
     /**
@@ -2427,14 +2472,22 @@ export class MainMenu {
     const render = (): void => {
       sheet.textContent = '';
       settingsScreen = null;
-      sheet.classList.toggle('is-list', view === 'saves');
+      sheet.classList.toggle('is-list', view === 'saves' || view === 'dreams' || view === 'shelf');
       sheet.classList.toggle('is-settings', view === 'settings');
+      sheet.hidden = view === 'front';
       overlay.classList.toggle('is-settings', view === 'settings');
+      overlay.classList.toggle('is-away', view !== 'front');
+      renderRoom();
+      if (view === 'front') {
+        room?.focusFirst();
+        return;
+      }
       if (view === 'settings') {
         renderSettings();
         return;
       }
-      if (view === 'front') renderFront();
+      if (view === 'dreams') renderDreams();
+      else if (view === 'shelf') renderShelf();
       else renderSaves();
       errorLine = el('div', 'menu-error');
       errorLine.setAttribute('role', 'alert');
@@ -2448,13 +2501,14 @@ export class MainMenu {
     void refresh().then(() => {
       this.root.appendChild(overlay);
       this.loading.classList.add('is-hidden');
-      sheet.querySelector<HTMLButtonElement>('[data-nav]')?.focus();
+      if (view === 'front') room?.focusFirst();
+      else sheet.querySelector<HTMLButtonElement>('[data-nav]')?.focus();
       window.addEventListener('keydown', onKey);
       // The title screen is a menu like any other: a pad moves focus, A activates and
-      // B backs out of the saved drives or the settings. Start does nothing here — there
-      // is no drive to pause.
+      // B backs out of a panel to the room. Start does nothing here — there is no drive
+      // to pause.
       detachPad = attachPadNavigation(
-        sheet,
+        overlay,
         () => {
           if (view !== 'front') backToFront(view);
         },
