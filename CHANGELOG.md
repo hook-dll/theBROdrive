@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Opel Astra F / Vectra A (owner): no black triangle at the A pillar (the mirror's sail in
+  body colour); the front bumper's foot at the sill line, not under the body; a narrow dark
+  strip between the tail lamps instead of the full-height black panel (`src/carkit/opel.ts`).
+
 ### Added
 
 - Samaras, Oka and Nexia to their drawings without `corner` exemptions (`src/carkit/samaras.ts`,

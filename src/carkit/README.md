@@ -37,6 +37,10 @@ Soviet scale models: clean, plainly cut panels, never dented, creased or chewed.
   don't spend passes on it, don't add geometry to win it.
 - Work on the defects the owner names. Don't widen the task into drawing-tolerance
   polishing.
+- *A pillars are always thin* (no real car has wide front pillars: they block the view).
+  The door glass starts right behind the pillar; no black or painted sail, triangle or
+  wedge between them, whatever a drawing's mirror line or a check suggests. Mirrors sit
+  on the door at the glass's front foot.
 
 **Workflow: screenshots first, docs at acceptance.** As soon as a shape is visible in the
 lab, send the owner (through the main agent) draft screenshots from his angles, before

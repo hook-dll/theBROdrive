@@ -83,13 +83,12 @@ export const BODY_ASTRA_F: KitBody = {
       // The screen's outer line from the cowl (1.13, 0.93) to the rail (1.79, 1.342) [D side
       // (297, 172) → (410, 102)].
       { s: 1.13, top: 1.79, upper: 'body' },
+      // The door's frame, then its glass right behind the thin A pillar: no sail between
+      // them (owner, 2026-10-19: the black triangle widening down is not wanted).
       { s: 1.165, top: 1.825, upper: 'door1', lower: 'body', finish: 'black' },
-      // The front door's shut line below the belt [D side x 320]; the mirror's sail from it
-      // to the glass's front edge [D side: the mirror x 345–372, the glass 1.52 at the belt].
-      // Owner's review 2 (2026-10-18): the glass's edge from 1.47 (1.565 at 1.0), so the
-      // driver's lines to both mirror heads (`mirrorS` 1.53) cross the side glass.
-      { s: 1.264, top: 1.86, upper: 'door1', finish: 'black' },
-      { s: 1.47, top: 1.88, upper: 'door1', glass: 'drop', finish: 'black' },
+      { s: 1.2, top: 1.84, upper: 'door1', lower: 'body', glass: 'drop', finish: 'black' },
+      // The front door's shut line below the belt [D side x 320].
+      { s: 1.264, top: 1.86, upper: 'door1', glass: 'drop', finish: 'black' },
       // The B pillar, black [D side x 490–520: the front glass ends 2.255 at the belt, 2.342
       // at the rail; the shut line 2.284; the rear glass from 2.383 / 2.43].
       { s: 2.255, top: 2.34, upper: 'door1', finish: 'black' },
@@ -237,16 +236,19 @@ export const LOOK_ASTRA_F: KitLook = {
     // at its ends (0.075–0.146, about ±0.50–0.62 averaged over the near and far sides). Now
     // laid on the curved face itself (`inlays`), in the face's upright part (from 0.08 over
     // the foot), the rib a dark band above them.
+    // Owner (2026-10-19): the bumper hung under the body. Its foot now at the sill's line
+    // (0.22 between the arches): drop 0.145 → 0.115, height 0.335 (at 0.315 its top left a
+    // slit under the grille, kit-zfight).
     bumper: {
       kind: 'moulded',
-      drop: 0.145,
-      height: 0.345,
+      drop: 0.115,
+      height: 0.335,
       corner: 0.2,
       wrapTo: 0.45,
       moulding: { y: 0.35, height: 0.012, finish: 'rubber' },
       inlays: [
-        { x: [0, 0.475], y: [0.085, 0.14], finish: 'black' },
-        { x: [0.49, 0.6], y: [0.085, 0.145], finish: 'grey' },
+        { x: [0, 0.475], y: [0.055, 0.11], finish: 'black' },
+        { x: [0.49, 0.6], y: [0.055, 0.115], finish: 'grey' },
       ],
     },
     items: [
@@ -269,9 +271,9 @@ export const LOOK_ASTRA_F: KitLook = {
     // arch (3.65).
     bumper: { kind: 'moulded', drop: 0.085, height: 0.32, wrapTo: 3.68 },
     items: [],
-    // The black panel across the tailgate between the lamps, their height, the plate in its
-    // lower part [P "Opel Astra F 20090424 rear"].
-    lid: [{ kind: 'panel', x: { centre: 0.54 }, y: { from: ['belt', -0.175], to: ['belt', -0.003] }, finish: 'black', proud: 0.006 }],
+    // A narrow dark strip across the tailgate between the lamps (owner, 2026-10-19: the
+    // full-height black panel read as a hole) [P "Opel Astra F 20090424 rear"].
+    lid: [{ kind: 'panel', x: { centre: 0.54 }, y: { from: ['belt', -0.105], to: ['belt', -0.075] }, finish: 'black', proud: 0.006 }],
   },
 };
 
@@ -348,13 +350,12 @@ export const BODY_VECTRA_A: KitBody = {
       // The screen's outer line from the cowl (1.222, 0.937) to the rail (1.863, 1.31) [D side
       // (290, 168) → (400, 96)].
       { s: 1.222, top: 1.863, upper: 'body' },
+      // The door's frame, then its glass right behind the thin A pillar: no sail between
+      // them (owner, 2026-10-19: the black triangle widening down is not wanted).
       { s: 1.26, top: 1.9, upper: 'door1', lower: 'body', finish: 'black' },
-      // The front door's shut line below the belt [D side x 298]; the mirror's sail from it to
-      // the glass's front edge [D side: the glass's foot from x 370, 1.61]. Owner's review 2
-      // (2026-10-18): the edge from 1.55 (1.66 at 1.0), so the driver's lines to both mirror
-      // heads (`mirrorS` 1.60) cross the side glass.
-      { s: 1.29, top: 1.925, upper: 'door1', finish: 'black' },
-      { s: 1.55, top: 1.95, upper: 'door1', glass: 'drop', finish: 'black' },
+      { s: 1.275, top: 1.905, upper: 'door1', lower: 'body', glass: 'drop', finish: 'black' },
+      // The front door's shut line below the belt [D side x 298].
+      { s: 1.29, top: 1.925, upper: 'door1', glass: 'drop', finish: 'black' },
       // The B pillar, black (owner's review 2, 2026-10-18, re-read on the drawing by pixel
       // rows) [D side: the front glass ends 2.33, the pillar's lines 2.37 / 2.43 above the
       // belt, the shut line between the doors one line at 2.34 (0.75) to 2.358 (0.33), the
@@ -491,7 +492,8 @@ export const LOOK_VECTRA_A: KitLook = {
     // Body colour 0.17–0.60 [D front 0.17–0.515 on the 1989 car; P: the facelift's top up to
     // the lamps' foot], a black band along its top [P]; its sides back along the wings to the
     // front arch.
-    bumper: { kind: 'moulded', drop: 0.165, height: 0.43, finish: 'paint', moulding: { y: 0.56, height: 0.07, finish: 'black' }, corner: 0.2, wrapTo: 0.47 },
+    // Owner (2026-10-19): its foot at the sill's line, not under the body; the top kept.
+    bumper: { kind: 'moulded', drop: 0.115, height: 0.38, finish: 'paint', moulding: { y: 0.56, height: 0.07, finish: 'black' }, corner: 0.2, wrapTo: 0.47 },
     items: [
       // The grille between the lamps: black slats narrowing to its foot, from the bumper's top
       // to under the bonnet's lip [P; D front ±0.32 at the top].
@@ -522,8 +524,8 @@ export const LOOK_VECTRA_A: KitLook = {
     // the wings to the rear arch (3.81).
     bumper: { kind: 'moulded', drop: 0.055, height: 0.35, finish: 'paint', moulding: { y: 0.59, height: 0.07, finish: 'black' }, wrapTo: 3.85 },
     items: [],
-    // The black panel across the lid between the lamps, their height, the plate in it [P
-    // "Opel Vectra A (rear)"].
-    lid: [{ kind: 'panel', x: { centre: 0.5 }, y: { from: ['belt', -0.214], to: ['belt', -0.006] }, finish: 'black', proud: 0.006 }],
+    // A narrow dark strip across the lid between the lamps (owner, 2026-10-19: the
+    // full-height black panel read as a hole) [P "Opel Vectra A (rear)"].
+    lid: [{ kind: 'panel', x: { centre: 0.5 }, y: { from: ['belt', -0.125], to: ['belt', -0.095] }, finish: 'black', proud: 0.006 }],
   },
 };
