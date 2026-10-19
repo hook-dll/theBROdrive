@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Door mirrors on short arms (owner): an arm now runs from the foot on the door's skin
+  (2 cm under the belt) into the head's centre, so no head hangs in the air; the UAZ-2206's
+  mirrors, whose foot met no skin at all, sit on the door (`src/carkit/exterior.ts`).
+
 - Opel Astra F / Vectra A (owner): no black triangle at the A pillar (the mirror's sail in
   body colour); the front bumper's foot at the sill line, not under the body; a narrow dark
   strip between the tail lamps instead of the full-height black panel (`src/carkit/opel.ts`).

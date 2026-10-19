@@ -1187,11 +1187,22 @@ function buildDoorHardware(ctx: KitContext): void {
     if (stalk === undefined) {
       // The short arm must start on the actual body surface. `frame.sideX(ms, belt)` is
       // the belt edge, but the shoulder turns in above it; using that point left some
-      // mirrors visibly floating on tapered doors. Probe the skin where the foot is
-      // mounted, then let the base enter the body by 12.5 mm.
-      const mountY = belt + 0.02;
+      // mirrors visibly floating on tapered doors. Probe the side skin 2 cm under the belt
+      // (above it the shoulder turns in, and on the UAZ-2206 the foot met nothing), let the
+      // base enter the body by 12.5 mm, and run the arm from the base into the head's
+      // centre so the head never hangs apart from its foot (owner, 2026-10-19).
+      const mountY = belt - 0.02;
       const mountX = skinX(frame, ms, mountY);
       m.box(finish.slot, [side * (mountX + 0.0125), mountY, hz], [0.025, 0.014, 0.018]);
+      const foot = new THREE.Vector3(side * (mountX + 0.02), mountY, hz);
+      const arm = new THREE.Vector3(hx, hy, hz).sub(foot);
+      const length = arm.length();
+      const along = arm.clone().normalize();
+      const across = new THREE.Vector3(0, 0, 1);
+      const normal = across.clone().cross(along).normalize();
+      m.push(new THREE.Matrix4().makeBasis(along, normal, across).setPosition(foot.x + arm.x / 2, foot.y + arm.y / 2, foot.z));
+      m.box(finish.slot, [0, 0, 0], [length / 2, 0.009, 0.012]);
+      m.pop();
     } else {
       // The upright bracket likewise begins on the side skin, not on the belt's
       // extrapolated edge. It is sunk into the panel so the stalk cannot float.
